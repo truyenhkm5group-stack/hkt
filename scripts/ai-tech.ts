@@ -26,6 +26,7 @@
  */
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, statSync, writeFileSync } from "node:fs";
+import { hostname } from "node:os";
 import path from "node:path";
 
 /* ═════════════ 1 · TỪ VỰNG ═════════════ */
@@ -178,7 +179,28 @@ export type Config = {
   cleanupGraceMinutes: number;
   hotspots: Hotspot[];
   riskFloor: RiskFloor[];
+  /**
+   * Nhánh giữ SỔ ĐĂNG KÝ xuyên sứ mệnh (mục 13). Bắt buộc dạng `ai-control/<tên>`: đó là ref DUY NHẤT
+   * công cụ được đẩy lên, nên cấu hình không thể trỏ nó vào `main` hay một nhánh mã.
+   */
+  controlBranch: string;
+  /** Sứ mệnh RUNNING im lặng quá chừng này giờ ⇒ bảng điều khiển báo "nhịp tim cũ". */
+  staleHeartbeatHours: number;
+  /** Thời hạn mặc định của một khoá (Integration Lead, Tech Lead) — hết hạn mà không gia hạn là nhả. */
+  leaseMinutes: number;
+  /** `GET` công khai trả `{ ok, commit, platform.migrations }` của bản đang chạy. Rỗng = không hậu kiểm được. */
+  healthUrl: string;
+  /** Đường dẫn công khai phải trả 2xx/3xx sau deploy (đọc tương đối với gốc của `healthUrl`). */
+  verifyEndpoints: string[];
+  /** Tệp nằm trọn trong các mẫu này mà không chạm sàn nào ⇒ LOW; ngoài ra mặc định MEDIUM. */
+  lowRiskPaths: string[];
+  /** Ai được gộp một PR theo rủi ro của nó (mục 13 · hàng đợi gộp). */
+  mergePolicy: Record<Risk, MergePolicy>;
 };
+
+/** AUTO = Integration Lead gộp khi cổng xanh · LEAD_REVIEW = cần một lượt review độc lập ghi vào PR · OWNER = chủ shop duyệt. */
+export const MERGE_POLICIES = ["AUTO", "LEAD_REVIEW", "OWNER"] as const;
+export type MergePolicy = (typeof MERGE_POLICIES)[number];
 
 export const DEFAULT_CONFIG: Config = {
   maxImplementationWorkers: 4,
@@ -191,7 +213,17 @@ export const DEFAULT_CONFIG: Config = {
   cleanupGraceMinutes: 30,
   hotspots: [],
   riskFloor: [],
+  controlBranch: "ai-control/registry",
+  staleHeartbeatHours: 24,
+  leaseMinutes: 60,
+  healthUrl: "",
+  verifyEndpoints: [],
+  lowRiskPaths: [],
+  mergePolicy: { LOW: "AUTO", MEDIUM: "AUTO", HIGH: "LEAD_REVIEW", CRITICAL: "OWNER" },
 };
+
+/** Nhánh điều khiển hợp lệ — công cụ CHỈ đẩy lên đúng loại ref này (mục 13). */
+export const CONTROL_BRANCH_RE = /^ai-control\/[a-z0-9][a-z0-9-]{0,40}$/;
 
 /** Phiếu giao việc — nằm trong thư mục quản trị git của cây (không bao giờ bị `git add` nhầm). */
 export type Manifest = {
@@ -289,10 +321,10 @@ export function riskFloorFor(owns: readonly string[], cfg: Config): { risk: Risk
 
 export function parseConfig(raw: unknown): { config: Config; errors: string[] } {
   const errors: string[] = [];
-  const c: Config = { ...DEFAULT_CONFIG, hotspots: [], riskFloor: [] };
+  const c: Config = { ...DEFAULT_CONFIG, hotspots: [], riskFloor: [], verifyEndpoints: [], lowRiskPaths: [], mergePolicy: { ...DEFAULT_CONFIG.mergePolicy } };
   if (raw === undefined) return { config: c, errors };
   if (!isObj(raw)) return { config: c, errors: ["config: phải là một object JSON"] };
-  const num = (k: "maxImplementationWorkers" | "activeWithinHours" | "staleAfterDays" | "cleanupGraceMinutes", min: number, max: number) => {
+  const num = (k: "maxImplementationWorkers" | "activeWithinHours" | "staleAfterDays" | "cleanupGraceMinutes" | "staleHeartbeatHours" | "leaseMinutes", min: number, max: number) => {
     if (raw[k] === undefined) return;
     const v = raw[k];
     if (typeof v !== "number" || !Number.isInteger(v) || v < min || v > max) errors.push(`config.${k}: số nguyên ${min}–${max}`);
@@ -302,6 +334,35 @@ export function parseConfig(raw: unknown): { config: Config; errors: string[] } 
   num("activeWithinHours", 1, 24 * 14);
   num("staleAfterDays", 1, 365);
   num("cleanupGraceMinutes", 0, 24 * 60);
+  num("staleHeartbeatHours", 1, 24 * 30);
+  num("leaseMinutes", 5, 24 * 60);
+  if (raw.controlBranch !== undefined) {
+    if (typeof raw.controlBranch !== "string" || !CONTROL_BRANCH_RE.test(raw.controlBranch))
+      errors.push("config.controlBranch: phải dạng ai-control/<tên> — đó là ref duy nhất công cụ được đẩy lên");
+    else c.controlBranch = raw.controlBranch;
+  }
+  if (raw.healthUrl !== undefined) {
+    if (typeof raw.healthUrl !== "string" || (raw.healthUrl !== "" && !/^https:\/\/[A-Za-z0-9.-]+(?::\d+)?\/[^\s]*$/.test(raw.healthUrl)))
+      errors.push("config.healthUrl: URL https đầy đủ (hoặc rỗng)");
+    else c.healthUrl = raw.healthUrl;
+  }
+  if (raw.verifyEndpoints !== undefined) {
+    if (!strArr(raw.verifyEndpoints) || raw.verifyEndpoints.some((p) => !/^\/[A-Za-z0-9/_.-]*$/.test(p))) errors.push("config.verifyEndpoints: mảng đường dẫn bắt đầu bằng /");
+    else c.verifyEndpoints = raw.verifyEndpoints;
+  }
+  if (raw.lowRiskPaths !== undefined) {
+    const v = strArr(raw.lowRiskPaths) ? raw.lowRiskPaths.map(normalizePattern) : null;
+    if (!v || v.some((x) => x === null)) errors.push("config.lowRiskPaths: mảng mẫu đường dẫn tương đối");
+    else c.lowRiskPaths = v as string[];
+  }
+  if (raw.mergePolicy !== undefined) {
+    const v = raw.mergePolicy;
+    if (!isObj(v) || Object.entries(v).some(([k, p]) => !RISKS.includes(k as Risk) || !MERGE_POLICIES.includes(p as MergePolicy)))
+      errors.push(`config.mergePolicy: { ${RISKS.join("|")}: ${MERGE_POLICIES.join("|")} }`);
+    else for (const [k, p] of Object.entries(v)) c.mergePolicy[k as Risk] = p as MergePolicy;
+    // Chính sách chỉ được NỚI ở bậc thấp: CRITICAL luôn cần chủ shop (AGENTS.md mục 0 · mục 7).
+    if (c.mergePolicy.CRITICAL !== "OWNER") errors.push("config.mergePolicy.CRITICAL: phải là OWNER — luật nghiệp vụ không được thương lượng");
+  }
   for (const k of ["remote", "integrationRef"] as const) {
     if (raw[k] === undefined) continue;
     if (!isStr(raw[k]) || !REF_RE.test(raw[k] as string)) errors.push(`config.${k}: tên ref không hợp lệ`);
@@ -1282,7 +1343,7 @@ export function parseGithubRemote(url: string): { owner: string; repo: string } 
 
 export type GithubPr = { number: number; state: string; merged: boolean; draft: boolean; url: string };
 export type GithubFacts = { pr: GithubPr | null; checks: { name: string; status: string; conclusion: string | null }[]; error?: string };
-type FetchLike = (url: string, init: { headers: Record<string, string>; signal?: AbortSignal }) => Promise<{ ok: boolean; status: number; json: () => Promise<unknown> }>;
+type FetchLike = (url: string, init: { headers: Record<string, string>; signal?: AbortSignal; redirect?: "manual" | "follow" }) => Promise<{ ok: boolean; status: number; json: () => Promise<unknown> }>;
 
 /**
  * Hỏi GitHub về PR + check của một nhánh. Kho PUBLIC nên đọc được KHÔNG cần token (60 lượt/giờ);
@@ -1320,13 +1381,945 @@ export async function githubFacts(
   }
 }
 
-/* ═════════════ 12 · LỆNH ═════════════ */
+/* ═════════════ 12 · MẶT PHẲNG ĐIỀU KHIỂN XUYÊN SỨ MỆNH — HÀM THUẦN ═════════════
+ *
+ * `docs/ai-tech-room/delivery-v2.md`. Mục 1–11 điều phối việc TRONG một sứ mệnh; tệp sứ mệnh nằm
+ * trên nhánh Lead của chính nó, nên sứ mệnh A không thấy B. Mục này thêm MỘT sổ dùng chung — nhánh
+ * `ai-control/registry` trên remote — để mọi phiên (máy này, máy khác, phiên trên mây) cùng trả lời:
+ * ai đang giữ vùng nào · số migration nào đã có người lấy · ai đang cầm quyền gộp/deploy.
+ *
+ * Luật 1 vẫn đứng: sổ là LỜI KHAI, git/GitHub là SỰ THẬT. `reconcileEntry` suy trạng thái thật của
+ * từng dòng mỗi lần đọc; sổ nói RUNNING mà nhánh đã vào `main` thì bảng in trạng thái thật kèm "lệch".
+ */
 
-type Args = { _: string[]; flags: Set<string> };
+export const MISSION_STATES = [
+  "BACKLOG",
+  "PLANNING",
+  "READY",
+  "RUNNING",
+  "BLOCKED",
+  "PR_READY",
+  "INTEGRATING",
+  "DEPLOYING",
+  "VERIFYING",
+  "DONE",
+  "FAILED",
+  "CANCELLED",
+] as const;
+export type MissionState = (typeof MISSION_STATES)[number];
+/** Đã KHÉP ⇒ nhả phạm vi + giữ chỗ migration. FAILED vẫn giữ: nó còn việc phải làm. */
+export const CLOSED_STATES: ReadonlySet<MissionState> = new Set(["DONE", "CANCELLED"]);
+
+/** EXISTS → dùng lại · PARTIAL → mở rộng · IN_PROGRESS → phối hợp/chờ · MISSING → dựng mới. */
+export const INTAKE_VERDICTS = ["EXISTS", "PARTIAL", "IN_PROGRESS", "MISSING"] as const;
+export type IntakeVerdict = (typeof INTAKE_VERDICTS)[number];
+
+/** Danh sách ĐÓNG: một khoá lạ là lỗi gõ, không phải một vai mới (cùng tinh thần AGENTS.md mục 30). */
+export const LEASE_NAMES = ["integration-lead", "tech-lead"] as const;
+export type LeaseName = (typeof LEASE_NAMES)[number];
+
+export type RegistryEntry = {
+  schema: 1;
+  mission_id: string;
+  title: string;
+  business_goal: string;
+  status: MissionState;
+  priority: Priority;
+  risk: Risk;
+  /** Phiên chịu trách nhiệm sứ mệnh (Tech Lead / Lead của sứ mệnh). */
+  owner: string;
+  /** Phiên / subagent đang làm (nếu khác owner). */
+  worker: string | null;
+  worktree: string | null;
+  branch: string | null;
+  base_sha: string | null;
+  domains: string[];
+  /** Phạm vi GHI dự kiến — cùng cú pháp `owns` (mục 3). */
+  owned_paths: string[];
+  dependencies: string[];
+  blocked_by: string[];
+  related_prs: number[];
+  /** Số hiệu migration đã giữ chỗ (4 chữ số). */
+  migration_reservations: string[];
+  created_at: string;
+  updated_at: string;
+  last_heartbeat: string;
+  definition_of_done: string[];
+  /** Tệp sứ mệnh chi tiết (DAG việc) nếu sứ mệnh dùng AI Tech Room. */
+  mission_file?: string;
+  intake?: { verdict: IntakeVerdict; evidence: string[] };
+  /** Quyết định cần chủ shop — chỉ chín loại `OWNER_ESCALATIONS`. */
+  needs_owner?: { category: (typeof OWNER_ESCALATIONS)[number]; action: string };
+  evidence?: { merged?: string; deploy?: string; verify?: string; done?: string };
+};
+
+export type Lease = {
+  name: LeaseName;
+  holder: string;
+  purpose: string;
+  acquired_at: string;
+  heartbeat_at: string;
+  expires_at: string;
+  /** Tăng mỗi lần đổi chủ — người đọc biết khoá đã qua tay ai khác từ lần trước mình nhìn. */
+  generation: number;
+};
+
+export type ControlEvent = { at: string; kind: string; actor: string; mission?: string; detail: string };
+
+const ISO_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/;
+const MIG_NO_RE = /^\d{4}$/;
+const ACTOR_RE = /^[A-Za-z0-9._:@/-]{1,100}$/;
+
+export function validateEntry(raw: unknown): { entry: RegistryEntry | null; errors: string[] } {
+  const errors: string[] = [];
+  if (!isObj(raw)) return { entry: null, errors: ["dòng sổ: phải là object"] };
+  const e = (m: string) => errors.push(m);
+  if (raw.schema !== 1) e("schema: phải là 1");
+  if (!isStr(raw.mission_id) || !SLUG_RE.test(raw.mission_id)) e(`mission_id: phải khớp ${SLUG_RE}`);
+  if (!isStr(raw.title)) e("title: bắt buộc");
+  if (!MISSION_STATES.includes(raw.status as MissionState)) e(`status: ${MISSION_STATES.join("|")}`);
+  if (!PRIORITIES.includes(raw.priority as Priority)) e(`priority: ${PRIORITIES.join("|")}`);
+  if (!RISKS.includes(raw.risk as Risk)) e(`risk: ${RISKS.join("|")}`);
+  if (!isStr(raw.owner) || !ACTOR_RE.test(raw.owner)) e("owner: nhãn phiên (chữ, số, . _ : @ / -)");
+  for (const k of ["created_at", "updated_at", "last_heartbeat"] as const) if (!isStr(raw[k]) || !ISO_RE.test(raw[k] as string)) e(`${k}: thời điểm ISO UTC`);
+  for (const k of ["domains", "owned_paths", "dependencies", "blocked_by", "migration_reservations", "definition_of_done"] as const)
+    if (raw[k] !== undefined && !strArr(raw[k])) e(`${k}: mảng chuỗi`);
+  const owned = (strArr(raw.owned_paths) ? raw.owned_paths : []).map((p) => {
+    const n = normalizePattern(p);
+    if (n === null) e(`owned_paths: mẫu "${p}" không hợp lệ`);
+    return n ?? p;
+  });
+  const deps = strArr(raw.dependencies) ? raw.dependencies : [];
+  for (const d of deps) if (!SLUG_RE.test(d)) e(`dependencies: "${d}" không phải mã sứ mệnh`);
+  const migs = strArr(raw.migration_reservations) ? raw.migration_reservations : [];
+  for (const m of migs) if (!MIG_NO_RE.test(m)) e(`migration_reservations: "${m}" phải là 4 chữ số`);
+  const prs = Array.isArray(raw.related_prs) ? raw.related_prs : [];
+  if (raw.related_prs !== undefined && (!Array.isArray(raw.related_prs) || prs.some((n) => typeof n !== "number" || !Number.isInteger(n) || n <= 0)))
+    e("related_prs: mảng số PR");
+  if (raw.branch !== undefined && raw.branch !== null && (!isStr(raw.branch) || !REF_RE.test(raw.branch) || gitRefLooksUnsafe(raw.branch))) e("branch: tên nhánh không hợp lệ");
+  if (raw.base_sha !== undefined && raw.base_sha !== null && (!isStr(raw.base_sha) || !SHA_RE.test(raw.base_sha))) e("base_sha: SHA 40 ký tự");
+  let intake: RegistryEntry["intake"];
+  if (raw.intake !== undefined) {
+    const i = raw.intake;
+    if (!isObj(i) || !INTAKE_VERDICTS.includes(i.verdict as IntakeVerdict) || !strArr(i.evidence)) e(`intake: { verdict: ${INTAKE_VERDICTS.join("|")}, evidence: [] }`);
+    else intake = { verdict: i.verdict as IntakeVerdict, evidence: i.evidence };
+  }
+  let needsOwner: RegistryEntry["needs_owner"];
+  if (raw.needs_owner !== undefined) {
+    const n = raw.needs_owner;
+    if (!isObj(n) || !OWNER_ESCALATIONS.includes(n.category as (typeof OWNER_ESCALATIONS)[number]) || !isStr(n.action))
+      e(`needs_owner: { category: ${OWNER_ESCALATIONS.join("|")}, action }`);
+    else needsOwner = { category: n.category as (typeof OWNER_ESCALATIONS)[number], action: n.action };
+  }
+  let evidence: RegistryEntry["evidence"];
+  if (raw.evidence !== undefined) {
+    const v = raw.evidence;
+    if (!isObj(v) || Object.entries(v).some(([k, x]) => !["merged", "deploy", "verify", "done"].includes(k) || typeof x !== "string")) e("evidence: { merged?, deploy?, verify?, done? } là chuỗi");
+    else evidence = v as RegistryEntry["evidence"];
+  }
+  if (errors.length) return { entry: null, errors };
+  return {
+    entry: {
+      schema: 1,
+      mission_id: raw.mission_id as string,
+      title: raw.title as string,
+      business_goal: isStr(raw.business_goal) ? raw.business_goal : "",
+      status: raw.status as MissionState,
+      priority: raw.priority as Priority,
+      risk: raw.risk as Risk,
+      owner: raw.owner as string,
+      worker: isStr(raw.worker) ? raw.worker : null,
+      worktree: isStr(raw.worktree) ? raw.worktree : null,
+      branch: isStr(raw.branch) ? raw.branch : null,
+      base_sha: isStr(raw.base_sha) ? raw.base_sha : null,
+      domains: strArr(raw.domains) ? raw.domains : [],
+      owned_paths: owned,
+      dependencies: deps,
+      blocked_by: strArr(raw.blocked_by) ? raw.blocked_by : [],
+      related_prs: prs as number[],
+      migration_reservations: migs,
+      created_at: raw.created_at as string,
+      updated_at: raw.updated_at as string,
+      last_heartbeat: raw.last_heartbeat as string,
+      definition_of_done: strArr(raw.definition_of_done) ? raw.definition_of_done : [],
+      mission_file: isStr(raw.mission_file) ? raw.mission_file : undefined,
+      intake,
+      needs_owner: needsOwner,
+      evidence,
+    },
+    errors,
+  };
+}
+
+/** Nhánh trong sổ đi vào tham số git ⇒ chặn mọi thứ git có thể đọc thành cờ hay một ref đặc biệt. */
+function gitRefLooksUnsafe(b: string): boolean {
+  return b.startsWith("-") || b === "HEAD" || b.includes("..") || b.endsWith(".lock") || b.includes("@{");
+}
+
+const riskMax = (xs: readonly Risk[]): Risk => xs.reduce<Risk>((a, b) => (riskRank(b) > riskRank(a) ? b : a), "LOW");
+
+/** Dòng sổ dựng TỪ tệp sứ mệnh (khi sứ mệnh dùng AI Tech Room) — không khai tay lần thứ hai. */
+export function entryFromMission(m: Mission, base: Partial<RegistryEntry> & { owner: string }, now: string): RegistryEntry {
+  const owned = [...new Set(m.tasks.filter((t) => t.decision?.state !== "CANCELLED").flatMap((t) => t.owns))].sort();
+  const pr = [...new Set(m.tasks.map((t) => t.pr).filter((x): x is number => typeof x === "number"))];
+  const prio = m.tasks.map((t) => t.priority).sort()[0] ?? "P2";
+  return {
+    schema: 1,
+    mission_id: m.id,
+    title: m.title,
+    business_goal: m.goal,
+    status: base.status ?? "RUNNING",
+    priority: base.priority ?? prio,
+    risk: base.risk ?? riskMax(m.tasks.map((t) => t.risk)),
+    owner: base.owner,
+    worker: base.worker ?? null,
+    worktree: base.worktree ?? null,
+    branch: base.branch ?? null,
+    base_sha: base.base_sha ?? null,
+    domains: base.domains ?? [],
+    owned_paths: base.owned_paths && base.owned_paths.length ? base.owned_paths : owned,
+    dependencies: base.dependencies ?? [],
+    blocked_by: base.blocked_by ?? [],
+    related_prs: [...new Set([...(base.related_prs ?? []), ...pr])],
+    migration_reservations: base.migration_reservations ?? [],
+    created_at: base.created_at ?? now,
+    updated_at: now,
+    last_heartbeat: now,
+    definition_of_done: base.definition_of_done && base.definition_of_done.length ? base.definition_of_done : [m.goal],
+    mission_file: `.ai/missions/${m.id}.json`,
+    intake: base.intake,
+    needs_owner: base.needs_owner,
+    evidence: base.evidence,
+  };
+}
+
+/**
+ * Phạm vi dự kiến của một nhánh KHÔNG khai báo (sứ mệnh ngoài AI Tech Room): thư mục chứa từng tệp
+ * nhánh đã đổi. Đây là SỰ THẬT của nhánh, nên nó không bao giờ báo thiếu so với cái nhánh đã chạm.
+ */
+export function inferOwnedPaths(files: readonly string[]): string[] {
+  const out = new Set<string>();
+  for (const f of files) {
+    const dir = f.includes("/") ? `${f.slice(0, f.lastIndexOf("/"))}/` : f;
+    out.add(dir === "tests/" ? f : dir); // tests/ là một thư mục phẳng mọi việc cùng dùng — giữ tệp, không giữ cả thư mục
+  }
+  // Bỏ thư mục con đã nằm trong thư mục cha cũng có mặt.
+  const all = [...out].sort();
+  return all.filter((p) => !all.some((q) => q !== p && q.endsWith("/") && p.startsWith(q)));
+}
+
+export type Overlap = { mission: string; paths: string[]; hotspots: string[] };
+
+/**
+ * Sứ mệnh `me` chồng lên sứ mệnh ĐANG MỞ nào. Hai sứ mệnh đã có thứ tự (một bên phụ thuộc bên kia)
+ * không tính là chồng: bên sau chờ bên trước vào `main`.
+ */
+export function missionOverlaps(me: Pick<RegistryEntry, "mission_id" | "owned_paths" | "dependencies">, others: readonly RegistryEntry[], cfg: Config): Overlap[] {
+  return others
+    .filter((o) => o.mission_id !== me.mission_id && !CLOSED_STATES.has(o.status) && !me.dependencies.includes(o.mission_id) && !o.dependencies.includes(me.mission_id))
+    .map((o) => ({
+      mission: o.mission_id,
+      paths: scopeConflicts(me.owned_paths, o.owned_paths, cfg),
+      hotspots: serialHotspotClash(me.owned_paths, o.owned_paths, cfg).map((h) => h.path),
+    }))
+    .filter((x) => x.paths.length > 0 || x.hotspots.length > 0);
+}
+
+export type ClaimDecision = { ok: boolean; refusals: string[]; warnings: string[] };
+
+/**
+ * Được đăng ký / cập nhật sứ mệnh này không. Từ chối khi: chồng phạm vi hoặc cùng điểm nóng SERIAL
+ * với sứ mệnh đang mở (trừ khi tuần tự hoá bằng `dependencies` hoặc khai CÁCH TÍCH HỢP), intake nói
+ * việc đã có / đang có người làm, phụ thuộc không tồn tại / thành vòng, hoặc giữ trùng số migration.
+ */
+export function claimDecision(me: RegistryEntry, others: readonly RegistryEntry[], cfg: Config, opts: { acceptOverlap?: string } = {}): ClaimDecision {
+  const refusals: string[] = [];
+  const warnings: string[] = [];
+  const accept = (opts.acceptOverlap ?? "").trim();
+  const byId = new Map(others.map((o) => [o.mission_id, o]));
+  for (const d of me.dependencies) if (d === me.mission_id) refusals.push("DEPENDENCY: tự phụ thuộc chính mình");
+  else if (!byId.has(d)) refusals.push(`DEPENDENCY: "${d}" không có trong sổ`);
+  const graph = [...others.filter((o) => o.mission_id !== me.mission_id), me].map((o) => ({ id: o.mission_id, dependsOn: o.dependencies }));
+  const cycle = findCycle(graph);
+  if (cycle) refusals.push(`DEPENDENCY: thành vòng ${cycle.join(" → ")}`);
+  if (!CLOSED_STATES.has(me.status)) {
+    for (const o of missionOverlaps(me, others, cfg)) {
+      const what = [o.paths.length ? `phạm vi ${o.paths.slice(0, 6).join(", ")}` : "", o.hotspots.length ? `điểm nóng SERIAL ${o.hotspots.join(", ")}` : ""].filter(Boolean).join(" · ");
+      if (accept) warnings.push(`OVERLAP_ACCEPTED với ${o.mission}: ${what} — cách tích hợp: ${accept}`);
+      else refusals.push(`OVERLAP với ${o.mission}: ${what} ⇒ tuần tự hoá (--after=${o.mission}) hoặc khai cách tích hợp (--accept-overlap="…")`);
+    }
+    if (me.intake && (me.intake.verdict === "EXISTS" || me.intake.verdict === "IN_PROGRESS")) {
+      const msg = `DUPLICATE: intake kết luận ${me.intake.verdict} (${me.intake.evidence.slice(0, 3).join("; ")}) ⇒ ${me.intake.verdict === "EXISTS" ? "dùng lại cái đã có" : "phối hợp với việc đang chạy"}`;
+      if (accept) warnings.push(`${msg} — vẫn đăng ký vì: ${accept}`);
+      else refusals.push(msg);
+    }
+    const mine = new Set(me.migration_reservations);
+    for (const o of others) {
+      if (o.mission_id === me.mission_id || CLOSED_STATES.has(o.status)) continue;
+      const clash = o.migration_reservations.filter((n) => mine.has(n));
+      if (clash.length) refusals.push(`MIGRATION: ${clash.join(", ")} đã do ${o.mission_id} giữ chỗ — lấy số mới bằng \`migration reserve\``);
+    }
+  }
+  return { ok: refusals.length === 0, refusals, warnings };
+}
+
+export type EntryFacts = {
+  /** null = dòng sổ không khai nhánh. */
+  branch: { local: boolean; remote: boolean; tip: string | null } | null;
+  merged: MergeEvidence | null;
+  pr: { number: number; state: string; merged: boolean; gates: string | null } | null;
+  /** Commit đưa việc vào `main` đã nằm trong bản production chưa. null = không đo được. */
+  inProduction: boolean | null;
+  /** Tệp nhánh thật sự đã đổi so với `main` — null = không đo được. */
+  touched: string[] | null;
+  /** Phụ thuộc còn mở (chưa DONE/CANCELLED, chưa vào main). */
+  openDependencies: string[];
+};
+
+/**
+ * Trạng thái THẬT của một dòng sổ — git/GitHub thắng lời khai (luật 1). `drift` liệt kê từng chỗ sổ
+ * nói khác sự thật; bảng điều khiển in chúng thay vì lặng lẽ sửa sổ.
+ */
+export function reconcileEntry(e: RegistryEntry, f: EntryFacts, cfg: Config, nowMs: number): { effective: MissionState; drift: string[] } {
+  const drift: string[] = [];
+  const hbAge = (nowMs - Date.parse(e.last_heartbeat)) / 3_600_000;
+  const declared = e.status;
+  if (f.touched && f.touched.length) {
+    const outside = f.touched.filter((x) => !e.owned_paths.some((p) => fileInPattern(x, p)));
+    if (outside.length) drift.push(`nhánh chạm ${outside.length} tệp NGOÀI phạm vi khai: ${outside.slice(0, 5).join(", ")}${outside.length > 5 ? " …" : ""}`);
+  }
+  if (declared === "CANCELLED") return { effective: "CANCELLED", drift };
+  if (declared === "DONE") {
+    if (!e.evidence?.done && !e.evidence?.verify) drift.push("DONE mà không có bằng chứng (evidence.done / evidence.verify)");
+    return { effective: "DONE", drift };
+  }
+  if (["RUNNING", "PLANNING", "INTEGRATING", "DEPLOYING", "VERIFYING"].includes(declared) && hbAge > cfg.staleHeartbeatHours)
+    drift.push(`nhịp tim cũ ${Math.round(hbAge)} giờ (ngưỡng ${cfg.staleHeartbeatHours}) — phiên giữ sứ mệnh có thể đã chết`);
+  const merged = (f.merged !== null && f.merged !== "EMPTY") || Boolean(f.pr?.merged);
+  if (merged) {
+    if (f.inProduction === true) {
+      if (declared !== "VERIFYING") drift.push("đã vào main VÀ đã lên production — chạy `verify` rồi `close --status=DONE`");
+      return { effective: "VERIFYING", drift };
+    }
+    if (!["INTEGRATING", "DEPLOYING"].includes(declared)) drift.push(`đã vào main (${f.merged ?? "PR đã merge"}) nhưng sổ ghi ${declared}${f.inProduction === false ? " — chưa deploy" : ""}`);
+    return { effective: declared === "DEPLOYING" ? "DEPLOYING" : "INTEGRATING", drift };
+  }
+  if (f.pr && f.pr.state === "open") {
+    if (f.pr.gates === "failure") return { effective: "FAILED", drift: [...drift, `PR #${f.pr.number}: gates ĐỎ`] };
+    if (f.pr.gates === "success") return { effective: "PR_READY", drift };
+  }
+  if (e.branch && f.branch && !f.branch.local && !f.branch.remote && !["BACKLOG", "PLANNING", "READY", "BLOCKED"].includes(declared)) {
+    drift.push(`nhánh ${e.branch} không còn ở máy này lẫn trên remote — ORPHANED, phải đối chiếu tay`);
+    return { effective: "BLOCKED", drift };
+  }
+  if (f.openDependencies.length && ["READY", "RUNNING", "PLANNING"].includes(declared)) {
+    if (declared !== "READY" && declared !== "PLANNING") drift.push(`đang ${declared} trong khi phụ thuộc ${f.openDependencies.join(", ")} chưa vào main`);
+    return { effective: "BACKLOG", drift };
+  }
+  return { effective: declared, drift };
+}
+
+/* ── Khoá có hạn (lease) ── */
+
+export type LeaseOp = "acquire" | "renew" | "release";
+export type LeaseDecision = { ok: boolean; next: Lease | null; reason: string; takeoverFrom?: Lease };
+
+/**
+ * MỘT chủ tại một thời điểm, KHÔNG khoá chết: khoá có hạn, và hết hạn mà không ai gia hạn là coi như
+ * nhả (phiên giữ nó đã chết). Cùng `holder` gọi lại = cùng một Lead đang phục hồi sau sập ⇒ nhận lại
+ * ngay. Hàm thuần — phép so-và-ghi nguyên tử nằm ở lớp ghi (đẩy fast-forward, mục dưới).
+ */
+export function leaseDecision(cur: Lease | null, op: LeaseOp, me: { name: LeaseName; holder: string; purpose: string }, nowMs: number, ttlMs: number): LeaseDecision {
+  const now = new Date(nowMs).toISOString();
+  const live = cur !== null && Date.parse(cur.expires_at) > nowMs;
+  const mine = cur !== null && cur.holder === me.holder;
+  const fresh = (gen: number): Lease => ({
+    name: me.name,
+    holder: me.holder,
+    purpose: me.purpose,
+    acquired_at: now,
+    heartbeat_at: now,
+    expires_at: new Date(nowMs + ttlMs).toISOString(),
+    generation: gen,
+  });
+  if (op === "release") {
+    if (!cur) return { ok: true, next: null, reason: "khoá vốn đang trống" };
+    if (!mine) return { ok: false, next: cur, reason: `khoá thuộc ${cur.holder} — chỉ chủ của nó nhả được (hoặc chờ hết hạn ${cur.expires_at})` };
+    return { ok: true, next: null, reason: "đã nhả" };
+  }
+  if (op === "renew") {
+    if (!cur || !mine) return { ok: false, next: cur, reason: cur ? `khoá thuộc ${cur.holder}, không phải của bạn` : "không có khoá để gia hạn — acquire trước" };
+    return { ok: true, next: { ...cur, purpose: me.purpose || cur.purpose, heartbeat_at: now, expires_at: new Date(nowMs + ttlMs).toISOString() }, reason: "đã gia hạn" };
+  }
+  if (!cur) return { ok: true, next: fresh(1), reason: "khoá trống — đã lấy" };
+  if (mine) return { ok: true, next: { ...cur, purpose: me.purpose || cur.purpose, heartbeat_at: now, expires_at: new Date(nowMs + ttlMs).toISOString() }, reason: "đã là chủ — gia hạn (phục hồi sau sập)" };
+  if (live) return { ok: false, next: cur, reason: `đang thuộc ${cur.holder} (${cur.purpose}) tới ${cur.expires_at}` };
+  return { ok: true, next: fresh(cur.generation + 1), reason: `khoá của ${cur.holder} đã hết hạn từ ${cur.expires_at} — tiếp quản`, takeoverFrom: cur };
+}
+
+/* ── Số hiệu migration ── */
+
+export function migrationNumberOf(file: string): string | null {
+  const m = /(?:^|\/)(\d{4})_[^/]+\.sql$/.exec(file.replace(/\\/g, "/"));
+  return m ? m[1] : null;
+}
+
+/** Số kế tiếp AN TOÀN = lớn hơn mọi số trên main, trên mọi nhánh đang mở, và mọi số đã giữ chỗ. */
+export function nextMigrationNumber(x: { main: readonly string[]; branches: readonly string[]; reserved: readonly string[] }): string {
+  const nums = [...x.main, ...x.branches].map(migrationNumberOf).filter((n): n is string => n !== null).concat(x.reserved.filter((n) => MIG_NO_RE.test(n))).map(Number);
+  return String(Math.max(-1, ...nums) + 1).padStart(4, "0");
+}
+
+export type PrMigrationInput = {
+  pr: number;
+  createdAt: string;
+  /** Tệp migration PR này THÊM (đường dẫn `drizzle/NNNN_*.sql`). */
+  added: readonly string[];
+  /** Tệp migration đang có trên main. */
+  main: readonly string[];
+  others: readonly { pr: number; createdAt: string; added: readonly string[] }[];
+  reservations: readonly { mission: string; number: string; at: string }[];
+  /** Sứ mệnh mà PR này thuộc về (giữ chỗ của chính nó không tính là va). */
+  ownMission: string | null;
+};
+
+/**
+ * Va số migration của MỘT PR — đúng ca #598/#599 cùng lấy 0219. Bên ĐẾN SAU (PR tạo sau / giữ chỗ
+ * sau) là bên phải đánh số lại, nên chỉ bên đó đỏ; bên kia nhận cảnh báo.
+ */
+export function checkPrMigrations(x: PrMigrationInput): { problems: string[]; warnings: string[] } {
+  const problems: string[] = [];
+  const warnings: string[] = [];
+  const mainByNo = new Map<string, string>();
+  for (const f of x.main) {
+    const n = migrationNumberOf(f);
+    if (n) mainByNo.set(n, f.split("/").pop() ?? f);
+  }
+  const maxMain = Math.max(-1, ...[...mainByNo.keys()].map(Number));
+  const fix = "chạy `npm run migration:renumber -- --apply` trong cây của PR (so với origin/main), rồi `npm run ai -- migration reserve`";
+  for (const f of x.added) {
+    const n = migrationNumberOf(f);
+    if (!n) continue;
+    const base = f.split("/").pop() ?? f;
+    const onMain = mainByNo.get(n);
+    if (onMain && onMain !== base) problems.push(`${base}: số ${n} đã thuộc ${onMain} trên main ⇒ ${fix}`);
+    else if (!onMain && Number(n) <= maxMain) problems.push(`${base}: số ${n} không lớn hơn số cuối trên main (${String(maxMain).padStart(4, "0")}) — drizzle bỏ qua migration lùi số ⇒ ${fix}`);
+    for (const o of x.others) {
+      const same = o.added.filter((g) => migrationNumberOf(g) === n && (g.split("/").pop() ?? g) !== base);
+      if (!same.length) continue;
+      if (Date.parse(o.createdAt) < Date.parse(x.createdAt)) problems.push(`${base}: PR #${o.pr} (mở trước) cũng thêm số ${n} (${same.join(", ")}) ⇒ ${fix}`);
+      else warnings.push(`${base}: PR #${o.pr} (mở sau) cũng thêm số ${n} — bên đó phải đánh số lại`);
+    }
+    for (const r of x.reservations) {
+      if (r.number !== n || r.mission === x.ownMission) continue;
+      if (Date.parse(r.at) <= Date.parse(x.createdAt)) problems.push(`${base}: số ${n} đã được sứ mệnh ${r.mission} giữ chỗ từ ${r.at} ⇒ ${fix}`);
+      else warnings.push(`${base}: sứ mệnh ${r.mission} giữ chỗ số ${n} sau khi PR mở — bên đó phải lấy số khác`);
+    }
+  }
+  return { problems, warnings };
+}
+
+/* ── Rủi ro, chính sách gộp ── */
+
+/** Câu lệnh migration phá dữ liệu: không đảo ngược được bằng một lượt deploy lại. */
+export function isDestructiveSql(sql: string): boolean {
+  const s = sql.replace(/--.*$/gm, "").replace(/\/\*[\s\S]*?\*\//g, "");
+  return /\bDROP\s+(TABLE|COLUMN|SCHEMA)\b|\bTRUNCATE\b|\bDELETE\s+FROM\b|\bALTER\s+TABLE\b[^;]*\bDROP\b(?!\s+(DEFAULT|NOT\s+NULL|CONSTRAINT|INDEX))/i.test(s);
+}
+
+/**
+ * Rủi ro của một thay đổi theo TỆP nó chạm: sàn theo đường dẫn (`riskFloor`) nâng; tệp nằm trọn
+ * trong `lowRiskPaths` mà không chạm sàn nào ⇒ LOW; còn lại MEDIUM (logic nghiệp vụ, API, tích hợp).
+ * Migration phá dữ liệu ⇒ CRITICAL bất kể đường dẫn. Chính sách mở rộng bằng `.ai/config.json`.
+ */
+export function classifyRisk(files: readonly string[], cfg: Config, opts: { destructiveMigration?: boolean } = {}): { risk: Risk; reasons: string[] } {
+  if (!files.length) return { risk: "LOW", reasons: ["không đổi tệp nào"] };
+  const floor = riskFloorFor(files, cfg);
+  const allLow = files.every((f) => cfg.lowRiskPaths.some((p) => fileInPattern(f, p)));
+  let risk: Risk = riskRank(floor.risk) > riskRank(allLow ? "LOW" : "MEDIUM") ? floor.risk : allLow ? "LOW" : "MEDIUM";
+  const reasons = [...floor.reasons];
+  if (!floor.reasons.length) reasons.push(allLow ? "chỉ chạm vùng rủi ro thấp (lowRiskPaths)" : "chạm logic / API / tích hợp ngoài vùng rủi ro thấp ⇒ MEDIUM");
+  if (opts.destructiveMigration) {
+    risk = "CRITICAL";
+    reasons.push("migration PHÁ dữ liệu (DROP / TRUNCATE / DELETE) — không đảo ngược được bằng deploy lại");
+  }
+  return { risk, reasons };
+}
+
+export const mergePolicyFor = (risk: Risk, cfg: Config): MergePolicy => cfg.mergePolicy[risk];
+
+/* ── Hàng đợi gộp ── */
+
+export type QueueItem = {
+  pr: number;
+  title: string;
+  branch: string;
+  draft: boolean;
+  risk: Risk;
+  gates: "success" | "failure" | "pending" | "missing";
+  /** `mergeable_state` của GitHub: clean · unstable · blocked · behind · dirty · unknown … */
+  mergeable: string;
+  /** PR phụ thuộc CÒN MỞ (đã lọc PR đã đóng / đã gộp). */
+  deps: number[];
+  files: string[];
+  migrationProblems: string[];
+  createdAt: string;
+  /** Đã có lượt review độc lập (dòng "Review độc lập: ĐẠT" trong thân PR, do Lead ghi sau khi reviewer báo ĐẠT). */
+  reviewed: boolean;
+};
+
+export const QUEUE_VERDICTS = [
+  "MERGE_NOW",
+  "MERGE_ISOLATED",
+  "WAIT_SERIAL",
+  "WAIT_DEPENDENCY",
+  "WAIT_GATES",
+  "NEEDS_REVIEW",
+  "NEEDS_OWNER",
+  "FIX_GATES",
+  "FIX_CONFLICT",
+  "MIGRATION_COLLISION",
+  "DRAFT",
+] as const;
+export type QueueVerdict = (typeof QUEUE_VERDICTS)[number];
+export type QueueRow = { item: QueueItem; verdict: QueueVerdict; why: string; policy: MergePolicy };
+
+/**
+ * PR xanh KHÔNG có nghĩa là gộp ngay. Thứ tự: phụ thuộc trước · rủi ro thấp gom thành MỘT LÔ (một
+ * deploy) · HIGH/CRITICAL đi RIÊNG (gộp → deploy → hậu kiểm rồi mới tới việc sau) · hai PR chạm cùng
+ * tệp / cùng điểm nóng SERIAL không cùng lô (ruleset `strict` đang tắt — gộp cả hai mà không cập nhật
+ * nhánh là chỗ xung đột ngữ nghĩa lọt qua).
+ */
+export function orderQueue(items: readonly QueueItem[], cfg: Config): QueueRow[] {
+  const open = new Set(items.map((i) => i.pr));
+  const rows: QueueRow[] = [];
+  const candidates: QueueItem[] = [];
+  for (const it of items) {
+    const policy = mergePolicyFor(it.risk, cfg);
+    const row = (verdict: QueueVerdict, why: string) => rows.push({ item: it, verdict, why, policy });
+    const waitDeps = it.deps.filter((d) => open.has(d));
+    if (it.draft) row("DRAFT", "PR nháp");
+    else if (waitDeps.length) row("WAIT_DEPENDENCY", `chờ ${waitDeps.map((d) => `#${d}`).join(", ")} vào main trước`);
+    else if (it.mergeable === "dirty") row("FIX_CONFLICT", "xung đột với main — cập nhật nhánh trong cây của nó, giải có chủ đích");
+    else if (it.migrationProblems.length) row("MIGRATION_COLLISION", it.migrationProblems[0]);
+    else if (it.gates === "failure") row("FIX_GATES", "gates / gates ĐỎ — worker sửa, không gộp");
+    else if (it.gates !== "success") row("WAIT_GATES", it.gates === "pending" ? "gates đang chạy" : "chưa có lượt gates cho đầu nhánh");
+    else if (policy === "OWNER") row("NEEDS_OWNER", `rủi ro ${it.risk} — chính sách gộp đòi chủ shop duyệt`);
+    else if (policy === "LEAD_REVIEW" && !it.reviewed) row("NEEDS_REVIEW", `rủi ro ${it.risk} — cần một lượt ai-tech-reviewer, rồi ghi "Review độc lập: ĐẠT" vào thân PR`);
+    else candidates.push(it);
+  }
+  // Lô gộp: rủi ro thấp trước, cũ trước. HIGH/CRITICAL chỉ đi khi lô đang trống, và đi một mình.
+  candidates.sort((a, b) => riskRank(a.risk) - riskRank(b.risk) || Date.parse(a.createdAt) - Date.parse(b.createdAt) || a.pr - b.pr);
+  const batch: QueueItem[] = [];
+  let isolated: QueueItem | null = null;
+  for (const it of candidates) {
+    const policy = mergePolicyFor(it.risk, cfg);
+    const row = (verdict: QueueVerdict, why: string) => rows.push({ item: it, verdict, why, policy });
+    const high = riskRank(it.risk) >= riskRank("HIGH");
+    if (isolated) {
+      row("WAIT_SERIAL", `#${isolated.pr} (${isolated.risk}) đang đi riêng — gộp sau khi nó đã deploy + hậu kiểm`);
+      continue;
+    }
+    const clash = batch.find((b) => b.files.some((f) => it.files.includes(f)) || serialHotspotClash(b.files, it.files, cfg).length > 0);
+    if (clash) {
+      row("WAIT_SERIAL", `chạm cùng tệp / điểm nóng với #${clash.pr} trong lô — gộp sau, cập nhật nhánh rồi để gates chạy lại`);
+      continue;
+    }
+    if (high) {
+      if (batch.length) row("WAIT_SERIAL", `rủi ro ${it.risk} đi riêng — chờ lô hiện tại (${batch.map((b) => `#${b.pr}`).join(", ")}) deploy xong`);
+      else {
+        isolated = it;
+        row("MERGE_ISOLATED", `rủi ro ${it.risk}: gộp MỘT MÌNH → deploy → verify, rồi mới tới PR khác`);
+      }
+      continue;
+    }
+    batch.push(it);
+    row("MERGE_NOW", batch.length === 1 ? "đầu lô — gộp" : `cùng lô với ${batch.slice(0, -1).map((b) => `#${b.pr}`).join(", ")} — một lần deploy cho cả lô`);
+  }
+  const rank = (v: QueueVerdict) => QUEUE_VERDICTS.indexOf(v);
+  return rows.sort((a, b) => rank(a.verdict) - rank(b.verdict) || Date.parse(a.item.createdAt) - Date.parse(b.item.createdAt) || a.item.pr - b.item.pr);
+}
+
+/** Phụ thuộc khai trong thân PR: dòng "Phụ thuộc: #12, #15" hoặc "Depends-on: #12". */
+export function parsePrDependencies(body: string): number[] {
+  const out = new Set<number>();
+  for (const line of body.split(/\r?\n/)) {
+    const m = /^\s*(?:[-*]\s*)?(?:Phụ thuộc|Phu thuoc|Depends[- ]on)\s*:\s*(.+)$/i.exec(line);
+    if (!m) continue;
+    for (const n of m[1].matchAll(/#(\d+)/g)) out.add(Number(n[1]));
+  }
+  return [...out].sort((a, b) => a - b);
+}
+
+/* ── Kế hoạch deploy · hậu kiểm ── */
+
+export type DeployInput = {
+  productionSha: string | null;
+  mainSha: string;
+  undeployed: { sha: string; subject: string; risk: Risk; migrations: string[] }[];
+  mainGates: "success" | "failure" | "pending" | "missing";
+  /** Lượt `deploy-vps.yml` đang chạy / đang chờ. */
+  deployActive: { id: number; sha: string; status: string }[];
+  leaseHolder: string | null;
+  me: string;
+};
+export type DeployPlan = { action: "NOTHING" | "UNKNOWN_PRODUCTION" | "WAIT_DEPLOY" | "FIX_MAIN" | "NEED_LEASE" | "DEPLOY"; why: string; sha?: string; notes: string[] };
+
+/**
+ * MỘT lượt deploy cho cả lô đã vào `main`, MỘT chủ deploy tại một thời điểm. Không deploy chồng (lượt
+ * đang chạy đã phủ hoặc sẽ phủ), không deploy khi `main` đỏ, không deploy khi không cầm khoá
+ * Integration Lead. Hàm thuần — dispatch là một bước tường minh của Lead, không phải tác dụng phụ.
+ */
+export function planDeploy(x: DeployInput): DeployPlan {
+  const notes: string[] = [];
+  if (x.productionSha === null) return { action: "UNKNOWN_PRODUCTION", why: "không đọc được SHA đang chạy (/api/health) — không biết lô gồm những gì", notes };
+  if (x.productionSha === x.mainSha || x.undeployed.length === 0) return { action: "NOTHING", why: `production đã ở ${x.mainSha.slice(0, 8)}`, notes };
+  if (x.deployActive.length) {
+    const covers = x.deployActive.some((d) => d.sha === x.mainSha);
+    return { action: "WAIT_DEPLOY", why: covers ? `lượt deploy ${x.deployActive.map((d) => d.id).join(", ")} đang chạy ĐÚNG ngọn main — chỉ chờ nó` : `lượt deploy ${x.deployActive.map((d) => d.id).join(", ")} đang chạy — chờ xong rồi xét lại (khoá vòng đời trên VPS cũng sẽ bắt lượt mới chờ)`, notes };
+  }
+  if (x.mainGates === "failure") return { action: "FIX_MAIN", why: "gates trên ngọn main ĐỎ — sửa main trước, không đưa bản đỏ lên production", notes };
+  if (x.leaseHolder !== x.me) return { action: "NEED_LEASE", why: x.leaseHolder ? `khoá integration-lead đang thuộc ${x.leaseHolder}` : "chưa cầm khoá integration-lead — `npm run ai -- lease acquire integration-lead`", notes };
+  const high = x.undeployed.filter((c) => riskRank(c.risk) >= riskRank("HIGH"));
+  const migs = x.undeployed.flatMap((c) => c.migrations);
+  notes.push(`lô ${x.undeployed.length} commit · ${high.length} commit rủi ro ≥ HIGH · ${migs.length} migration${migs.length ? ` (${migs.join(", ")})` : ""}`);
+  if (high.length > 1) notes.push(`! ${high.length} thay đổi rủi ro cao trong cùng một lô — lần sau gộp chúng riêng (hàng đợi đánh MERGE_ISOLATED)`);
+  if (x.mainGates !== "success") notes.push("gates của ngọn main chưa xong — deploy sẽ CHỜ đúng lượt đó rồi dùng lại (job bang_chung), không chạy trùng");
+  return { action: "DEPLOY", why: `đưa ${x.mainSha.slice(0, 8)} lên (production đang ${x.productionSha.slice(0, 8)})`, sha: x.mainSha, notes };
+}
+
+export type VerifyInput = {
+  expectedSha: string;
+  health: { ok?: unknown; commit?: unknown; platform?: { migrations?: unknown } } | null;
+  healthError?: string;
+  expectedMigrations: number | null;
+  deployRun: { conclusion: string | null; status: string; url: string } | null;
+  endpoints: { path: string; status: number | null }[];
+};
+
+/** Hậu kiểm production. Workflow deploy xanh KHÔNG phải DONE: phải đo được bản đang chạy là bản mong đợi. */
+export function verifyVerdict(x: VerifyInput): { pass: boolean; checks: { ok: boolean; label: string }[] } {
+  const checks: { ok: boolean; label: string }[] = [];
+  const h = x.health;
+  checks.push({ ok: h !== null && h.ok === true, label: h ? `health ok=${String(h.ok)}` : `health không đọc được (${x.healthError ?? "?"})` });
+  const commit = h && typeof h.commit === "string" ? h.commit : "";
+  checks.push({ ok: commit.length >= 7 && x.expectedSha.startsWith(commit), label: `bản đang chạy ${commit || "?"} ${commit && x.expectedSha.startsWith(commit) ? "=" : "≠"} ${x.expectedSha.slice(0, 12)}` });
+  const mig = h && isObj(h.platform) && typeof h.platform.migrations === "number" ? h.platform.migrations : null;
+  if (x.expectedMigrations !== null)
+    checks.push({ ok: mig === x.expectedMigrations, label: `migration đã áp ${mig ?? "?"} / sổ của SHA ${x.expectedMigrations}` });
+  checks.push({
+    ok: x.deployRun !== null && x.deployRun.status === "completed" && x.deployRun.conclusion === "success",
+    label: x.deployRun ? `lượt deploy của SHA: ${x.deployRun.status}/${x.deployRun.conclusion ?? "—"} (gồm smoke trên VPS) ${x.deployRun.url}` : "không tìm thấy lượt deploy nào của SHA này",
+  });
+  for (const e of x.endpoints) checks.push({ ok: e.status !== null && e.status >= 200 && e.status < 400, label: `GET ${e.path} → ${e.status ?? "lỗi mạng"}` });
+  return { pass: checks.every((c) => c.ok), checks };
+}
+
+/* ── Chống trùng việc ── */
+
+export type IntakeSignals = {
+  keywords: string[];
+  /** Tệp trên main chứa TẤT CẢ từ khoá. */
+  mainFiles: string[];
+  active: { kind: "MISSION" | "PR" | "BRANCH"; id: string; title: string; matched: string[]; pathOverlap: string[] }[];
+};
+
+/** Bỏ dấu + chữ thường — so khớp "Báo cáo" với "bao cao" trong tên nhánh. */
+export function foldText(s: string): string {
+  return s.normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/đ/g, "d").replace(/Đ/g, "D").toLowerCase();
+}
+
+/**
+ * Gợi ý phân loại yêu cầu. Máy KHÔNG hiểu nghĩa — nó chỉ nói chỗ nào trông giống: việc ĐANG CHẠY chạm
+ * cùng vùng / cùng chủ đề là tín hiệu mạnh (IN_PROGRESS); tệp trên main mang mọi từ khoá là tín hiệu
+ * "đã có ít nhất một phần" (PARTIAL — Lead đọc rồi nâng thành EXISTS nếu đúng là đủ). Không tín hiệu
+ * nào ⇒ MISSING. Lead ghi phán quyết CUỐI vào sổ (`claim --intake=…`).
+ */
+export function intakeVerdict(s: IntakeSignals): { verdict: IntakeVerdict; why: string[] } {
+  const why: string[] = [];
+  const need = Math.max(1, Math.ceil(s.keywords.length / 2));
+  const hot = s.active.filter((a) => a.pathOverlap.length > 0 || a.matched.length >= need);
+  for (const a of hot) why.push(`${a.kind} ${a.id} «${a.title}»${a.matched.length ? ` · khớp ${a.matched.join(", ")}` : ""}${a.pathOverlap.length ? ` · chồng ${a.pathOverlap.slice(0, 4).join(", ")}` : ""}`);
+  if (hot.length) return { verdict: "IN_PROGRESS", why };
+  if (s.mainFiles.length) return { verdict: "PARTIAL", why: [`${s.mainFiles.length} tệp trên main mang đủ từ khoá: ${s.mainFiles.slice(0, 6).join(", ")} — đọc trước khi dựng`] };
+  return { verdict: "MISSING", why: ["không thấy việc đang chạy lẫn mã trên main mang đủ từ khoá"] };
+}
+
+/* ═════════════ 12b · SỔ ĐĂNG KÝ TRÊN NHÁNH ĐIỀU KHIỂN — ĐỌC / GHI KHÔNG CHẠM CÂY NÀO ═════════════
+ *
+ * Nhánh `ai-control/registry` là một cây PHẲNG: `mission.<id>.json` · `lease.<tên>.json` ·
+ * `events.ndjson`. Ghi bằng lệnh cấp thấp (`hash-object` → `mktree` → `commit-tree`) nên không đụng
+ * chỉ mục hay cây làm việc nào; rồi ĐẨY KHÔNG ÉP. Đẩy không ép CHÍNH LÀ phép so-và-ghi: hai phiên
+ * cùng đọc một đỉnh rồi cùng ghi ⇒ GitHub nhận một, từ chối bên kia (non-fast-forward) ⇒ bên kia đọc
+ * lại và quyết lại trên sự thật mới. Khoá Integration Lead đúng nghĩa "một chủ" nhờ đó, không cần
+ * máy chủ thứ hai.
+ */
+
+export class ControlConflict extends Error {}
+
+export type ControlState = {
+  tip: string | null;
+  entries: RegistryEntry[];
+  invalid: { file: string; errors: string[] }[];
+  leases: Lease[];
+  events: ControlEvent[];
+  /** tên tệp → SHA blob (để ghi lại cây không đổi những gì không sửa). */
+  blobs: Map<string, string>;
+  /** Đọc remote được không — false thì mọi lệnh ghi phải dừng (đọc bản cũ ở máy này để BÁO thì được). */
+  fetched: boolean;
+  fetchError?: string;
+};
+
+const MAX_EVENTS = 3000;
+const controlRemoteRef = (ctx: RepoCtx) => `refs/remotes/${ctx.config.remote}/${ctx.config.controlBranch}`;
+
+function gitIn(cwd: string, args: readonly string[], input: string): GitResult {
+  const r = spawnSync("git", ["-c", "core.quotepath=off", ...args], { cwd, input, encoding: "utf8", maxBuffer: 64 * 1024 * 1024, windowsHide: true });
+  if (r.error) throw new Error(`không chạy được git (${r.error.message})`);
+  return { code: r.status ?? 1, out: (r.stdout ?? "").replace(/\s+$/, ""), err: (r.stderr ?? "").trim() };
+}
+
+/** Kéo nhánh điều khiển về. Nhánh chưa có trên remote = sổ trống (không phải lỗi). */
+export function fetchControl(ctx: RepoCtx): { ok: boolean; err?: string } {
+  const r = gitRun(ctx.top, ["fetch", "--quiet", ctx.config.remote, `refs/heads/${ctx.config.controlBranch}:${controlRemoteRef(ctx)}`]);
+  if (r.code === 0) return { ok: true };
+  if (/couldn't find remote ref|không tìm thấy/i.test(r.err)) {
+    // Remote không còn nhánh ⇒ bản sao cũ ở máy này không còn là sự thật.
+    gitRun(ctx.top, ["update-ref", "-d", controlRemoteRef(ctx)]);
+    return { ok: true };
+  }
+  return { ok: false, err: r.err || `mã ${r.code}` };
+}
+
+export function readControl(ctx: RepoCtx, opts: { fetch: boolean }): ControlState {
+  let fetched = true;
+  let fetchError: string | undefined;
+  if (opts.fetch) {
+    const f = fetchControl(ctx);
+    fetched = f.ok;
+    fetchError = f.err;
+  }
+  const tip = gitTry(ctx.top, ["rev-parse", "--verify", "--quiet", `${controlRemoteRef(ctx)}^{commit}`]);
+  const st: ControlState = { tip, entries: [], invalid: [], leases: [], events: [], blobs: new Map(), fetched: opts.fetch ? fetched : false, fetchError };
+  if (!tip) return st;
+  for (const line of lines(gitTry(ctx.top, ["ls-tree", tip]))) {
+    const m = /^(\d+) blob ([0-9a-f]{40})\t(.+)$/.exec(line);
+    if (m) st.blobs.set(m[3], m[2]);
+  }
+  const blob = (sha: string) => gitTry(ctx.top, ["cat-file", "blob", sha]) ?? "";
+  for (const [name, sha] of st.blobs) {
+    if (name.startsWith("mission.") && name.endsWith(".json")) {
+      try {
+        const v = validateEntry(JSON.parse(blob(sha)));
+        if (v.entry && `mission.${v.entry.mission_id}.json` === name) st.entries.push(v.entry);
+        else st.invalid.push({ file: name, errors: v.errors.length ? v.errors : ["tên tệp không khớp mission_id"] });
+      } catch (e) {
+        st.invalid.push({ file: name, errors: [`JSON hỏng: ${(e as Error).message}`] });
+      }
+    } else if (name.startsWith("lease.") && name.endsWith(".json")) {
+      try {
+        const l = JSON.parse(blob(sha)) as Lease;
+        if (isObj(l) && LEASE_NAMES.includes(l.name) && `lease.${l.name}.json` === name && isStr(l.holder) && isStr(l.expires_at)) st.leases.push(l);
+        else st.invalid.push({ file: name, errors: ["khoá hỏng"] });
+      } catch (e) {
+        st.invalid.push({ file: name, errors: [`JSON hỏng: ${(e as Error).message}`] });
+      }
+    } else if (name === "events.ndjson") {
+      for (const l of blob(sha).split(/\r?\n/)) {
+        if (!l.trim()) continue;
+        try {
+          const ev = JSON.parse(l) as ControlEvent;
+          if (isObj(ev) && isStr(ev.kind)) st.events.push(ev);
+        } catch {
+          /* một dòng nhật ký hỏng không làm hỏng cả sổ */
+        }
+      }
+    }
+  }
+  st.entries.sort((a, b) => a.mission_id.localeCompare(b.mission_id));
+  return st;
+}
+
+export type ControlChange = { put: Record<string, string>; del?: string[]; events?: Omit<ControlEvent, "at" | "actor">[]; message: string };
+
+const CONTROL_README = `# Sổ điều phối kỹ thuật (ai-control/registry)
+
+Nhánh này KHÔNG chứa mã. Nó là sổ đăng ký dùng chung của mọi phiên Claude Code làm việc trên kho:
+sứ mệnh nào đang giữ vùng nào, số migration nào đã có người lấy, ai đang cầm khoá gộp/deploy.
+
+Ghi bằng \`npm run ai -- claim | heartbeat | close | lease | migration reserve\` — không sửa tay.
+Đặc tả: docs/ai-tech-room/delivery-v2.md. Sổ là LỜI KHAI; git/GitHub là SỰ THẬT (\`npm run ai -- board\`).
+`;
+
+/**
+ * Ghi MỘT commit lên nhánh điều khiển rồi đẩy KHÔNG ÉP. Đỉnh remote đã đổi ⇒ `ControlConflict`
+ * (người gọi đọc lại và quyết lại). Đây là chỗ DUY NHẤT công cụ đẩy lên remote.
+ */
+export function writeControl(ctx: RepoCtx, parent: ControlState, change: ControlChange, actor: string): string {
+  const branch = ctx.config.controlBranch;
+  if (!CONTROL_BRANCH_RE.test(branch)) throw new Error(`nhánh điều khiển "${branch}" không hợp lệ — từ chối đẩy`);
+  const blobs = new Map(parent.blobs);
+  const put = (name: string, body: string) => {
+    if (!/^[A-Za-z0-9._-]+$/.test(name)) throw new Error(`tên tệp sổ "${name}" không hợp lệ`);
+    const h = gitIn(ctx.top, ["hash-object", "-w", "--stdin"], body);
+    if (h.code !== 0) throw new Error(`hash-object: ${h.err}`);
+    blobs.set(name, h.out.trim());
+  };
+  if (!blobs.has("README.md")) put("README.md", CONTROL_README);
+  for (const [name, body] of Object.entries(change.put)) put(name, body);
+  for (const name of change.del ?? []) blobs.delete(name);
+  if (change.events?.length) {
+    const now = new Date().toISOString();
+    const old = parent.events.map((e) => JSON.stringify(e));
+    const add = change.events.map((e) => JSON.stringify({ at: now, actor, ...e }));
+    put("events.ndjson", `${[...old, ...add].slice(-MAX_EVENTS).join("\n")}\n`);
+  }
+  const mk = gitIn(ctx.top, ["mktree"], [...blobs].map(([name, sha]) => `100644 blob ${sha}\t${name}`).join("\n") + "\n");
+  if (mk.code !== 0) throw new Error(`mktree: ${mk.err}`);
+  const commit = git(ctx.top, [
+    "-c",
+    "user.name=ai-control",
+    "-c",
+    "user.email=ai-control@users.noreply.github.com",
+    "commit-tree",
+    mk.out.trim(),
+    ...(parent.tip ? ["-p", parent.tip] : []),
+    "-m",
+    `${change.message}\n\nactor: ${actor}`,
+  ]);
+  pushControlCommit(ctx, commit);
+  gitRun(ctx.top, ["update-ref", controlRemoteRef(ctx), commit]);
+  return commit;
+}
+
+/** Đẩy ĐÚNG một commit lên ĐÚNG nhánh điều khiển — không ép, không refspec `+`, không nhánh nào khác. */
+function pushControlCommit(ctx: RepoCtx, commit: string): void {
+  if (!SHA_RE.test(commit) || !CONTROL_BRANCH_RE.test(ctx.config.controlBranch)) throw new Error("từ chối đẩy: commit / nhánh điều khiển không hợp lệ");
+  const r = gitRun(ctx.top, ["push", "--quiet", "--porcelain", ctx.config.remote, `${commit}:refs/heads/${ctx.config.controlBranch}`]);
+  if (r.code === 0) return;
+  const msg = `${r.out}\n${r.err}`;
+  if (/rejected|non-fast-forward|fetch first|stale info|failed to update ref|cannot lock ref/i.test(msg)) throw new ControlConflict(`sổ đã đổi trên remote trong lúc ghi (${r.err.split("\n")[0]})`);
+  throw new Error(`không đẩy được sổ điều khiển: ${r.err || r.out}`);
+}
+
+/**
+ * Đọc–quyết–ghi với thử lại: mỗi vòng đọc ĐỈNH MỚI NHẤT rồi mới quyết, nên quyết định luôn đứng trên
+ * sự thật vừa thấy. `decide` trả `change: null` ⇒ không ghi gì (vd khoá đang thuộc người khác).
+ */
+export function mutateControl<T>(ctx: RepoCtx, actor: string, decide: (st: ControlState) => { change: ControlChange | null; result: T }, attempts = 4): T {
+  let last: Error | null = null;
+  for (let i = 0; i < attempts; i++) {
+    const st = readControl(ctx, { fetch: true });
+    if (!st.fetched) throw new Error(`không đọc được sổ trên remote (${st.fetchError ?? "?"}) — không ghi trên một bản có thể đã cũ`);
+    const d = decide(st);
+    if (!d.change) return d.result;
+    try {
+      writeControl(ctx, st, d.change, actor);
+      return d.result;
+    } catch (e) {
+      if (!(e instanceof ControlConflict)) throw e;
+      last = e;
+    }
+  }
+  throw new Error(`sổ bị ghi tranh liên tục (${attempts} lần) — thử lại sau. ${last?.message ?? ""}`);
+}
+
+/**
+ * Nhãn của phiên — ổn định qua các lệnh trong cùng một phiên (mỗi lệnh là một tiến trình riêng):
+ * máy + tên cây đang đứng. Phiên mới mở lại trong CÙNG cây sau sập = cùng nhãn = nhận lại khoá của
+ * chính nó ngay. `AI_LEAD_ID` ghi đè khi một phiên cần nhãn riêng.
+ */
+export function controlActor(ctx: RepoCtx): string {
+  const env = (process.env.AI_LEAD_ID ?? "").trim();
+  if (env && ACTOR_RE.test(env)) return env;
+  const host = hostname().replace(/[^A-Za-z0-9.-]/g, "-").slice(0, 40) || "may";
+  return `${host}:${path.basename(ctx.top).replace(/[^A-Za-z0-9._-]/g, "-")}`;
+}
+
+/** Đỉnh GitHub dùng chung cho các lệnh mặt phẳng điều khiển (đọc công khai; token chỉ từ env, không in). */
+type GhGet = (p: string) => Promise<unknown>;
+function githubClient(ctx: RepoCtx, fetchImpl: FetchLike = fetch as unknown as FetchLike): { repo: { owner: string; repo: string }; get: GhGet } | null {
+  const repo = parseGithubRemote(gitTry(ctx.top, ["remote", "get-url", ctx.config.remote]) ?? "");
+  if (!repo) return null;
+  const token = (process.env.GH_TOKEN || process.env.GITHUB_TOKEN || "").trim() || null;
+  const headers: Record<string, string> = { Accept: "application/vnd.github+json", "User-Agent": "ai-tech-room" };
+  if (token) headers.Authorization = `Bearer ${token}`;
+  const get: GhGet = async (p) => {
+    const url = p.startsWith("https://") ? p : `https://api.github.com/repos/${repo.owner}/${repo.repo}${p}`;
+    const r = await fetchImpl(url, { headers, signal: AbortSignal.timeout(15000) });
+    if (!r.ok) throw new Error(`GitHub ${r.status} ${p.split("?")[0]}`);
+    return r.json();
+  };
+  return { repo, get };
+}
+
+const arr = (v: unknown): Record<string, unknown>[] => (Array.isArray(v) ? v.filter(isObj) : []);
+
+/** Trạng thái `gates / gates` của một SHA: success · failure · pending · missing. */
+async function gatesOf(get: GhGet, sha: string): Promise<"success" | "failure" | "pending" | "missing"> {
+  const c = (await get(`/commits/${sha}/check-runs?per_page=100`)) as { check_runs?: unknown };
+  const g = arr(c.check_runs).filter((x) => x.name === "gates / gates");
+  if (!g.length) return "missing";
+  if (g.some((x) => x.status !== "completed")) return "pending";
+  return g.some((x) => x.conclusion === "success") ? "success" : "failure";
+}
+
+type OpenPr = { number: number; title: string; branch: string; sha: string; draft: boolean; createdAt: string; body: string };
+async function openPrs(get: GhGet): Promise<OpenPr[]> {
+  return arr(await get("/pulls?state=open&per_page=100")).map((p) => ({
+    number: Number(p.number),
+    title: String(p.title ?? ""),
+    branch: isObj(p.head) ? String(p.head.ref ?? "") : "",
+    sha: isObj(p.head) ? String(p.head.sha ?? "") : "",
+    draft: Boolean(p.draft),
+    createdAt: String(p.created_at ?? ""),
+    body: String(p.body ?? ""),
+  }));
+}
+async function prFiles(get: GhGet, n: number): Promise<{ name: string; status: string }[]> {
+  const out: { name: string; status: string }[] = [];
+  for (let page = 1; page <= 3; page++) {
+    const xs = arr(await get(`/pulls/${n}/files?per_page=100&page=${page}`));
+    out.push(...xs.map((f) => ({ name: String(f.filename), status: String(f.status) })));
+    if (xs.length < 100) break;
+  }
+  return out;
+}
+
+/** SHA đang chạy trên production theo `healthUrl` (null = không đọc được). */
+async function productionHealth(ctx: RepoCtx, fetchImpl: FetchLike = fetch as unknown as FetchLike): Promise<{ health: VerifyInput["health"]; sha: string | null; error?: string }> {
+  if (!ctx.config.healthUrl) return { health: null, sha: null, error: "chưa khai healthUrl trong .ai/config.json" };
+  try {
+    const r = await fetchImpl(ctx.config.healthUrl, { headers: { Accept: "application/json", "User-Agent": "ai-tech-room" }, signal: AbortSignal.timeout(15000) });
+    const h = (await r.json()) as VerifyInput["health"];
+    const short = h && typeof h.commit === "string" && /^[0-9a-f]{7,40}$/.test(h.commit) ? h.commit : null;
+    const full = short ? gitTry(ctx.top, ["rev-parse", "--verify", "--quiet", `${short}^{commit}`]) : null;
+    return { health: h, sha: full };
+  } catch (e) {
+    return { health: null, sha: null, error: (e as Error).message };
+  }
+}
+
+/** Commit trên `ref` đã mang việc của nhánh vào (để hỏi "nó đã lên production chưa"). */
+function landedCommit(ctx: RepoCtx, tip: string, ref: string, ev: MergeEvidence | null, pr: number | null): string | null {
+  if (ev === "ANCESTOR") return tip;
+  if (pr) {
+    const hit = gitTry(ctx.top, ["log", "-n", "1", "--format=%H", "--fixed-strings", `--grep=(#${pr})`, ref]);
+    if (hit) return hit;
+  }
+  return null;
+}
+
+/* ═════════════ 13 · LỆNH ═════════════ */
+
+type Args = { _: string[]; flags: Set<string>; values: Map<string, string> };
+/** `--cờ` là boolean; `--khoá=giá trị` là tham số có giá trị (mặt phẳng điều khiển, mục 13). */
 function parseArgs(argv: readonly string[]): Args {
-  const a: Args = { _: [], flags: new Set() };
+  const a: Args = { _: [], flags: new Set(), values: new Map() };
   for (const x of argv) {
-    if (x.startsWith("--")) a.flags.add(x.slice(2));
+    const kv = /^--([a-z][a-z0-9-]*)=([\s\S]*)$/.exec(x);
+    if (kv) a.values.set(kv[1], kv[2]);
+    else if (x.startsWith("--")) a.flags.add(x.slice(2));
     else a._.push(x);
   }
   return a;
@@ -1859,6 +2852,766 @@ function cmdNew(ctx: RepoCtx, id: string | undefined, title: string[]): number {
   return 0;
 }
 
+/* ── Lệnh của mặt phẳng điều khiển (mục 12) ── */
+
+const csv = (v: string | undefined): string[] =>
+  (v ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+const vnTime = (ms: number) => new Date(ms).toLocaleString("vi-VN", { timeZone: "Asia/Ho_Chi_Minh", hour12: false });
+const ageText = (iso: string, nowMs: number) => {
+  const h = (nowMs - Date.parse(iso)) / 3_600_000;
+  if (!Number.isFinite(h)) return "?";
+  return h < 1 ? `${Math.max(0, Math.round(h * 60))}′` : h < 48 ? `${h.toFixed(1)}h` : `${Math.round(h / 24)} ngày`;
+};
+const median = (xs: readonly number[]): number | null => quantile(xs, 0.5);
+export function quantile(xs: readonly number[], p: number): number | null {
+  if (!xs.length) return null;
+  const s = [...xs].sort((a, b) => a - b);
+  const k = (s.length - 1) * p;
+  const f = Math.floor(k);
+  const c = Math.min(f + 1, s.length - 1);
+  return s[f] + (s[c] - s[f]) * (k - f);
+}
+
+const mustMission = (id: string | undefined): string => {
+  if (!id || !SLUG_RE.test(id)) throw new UsageError(`mã sứ mệnh phải khớp ${SLUG_RE}`);
+  return id;
+};
+const entryFile = (id: string) => `mission.${id}.json`;
+const entryJson = (e: RegistryEntry) => `${JSON.stringify(e, null, 2)}\n`;
+
+async function entryFacts(
+  ctx: RepoCtx,
+  e: RegistryEntry,
+  all: readonly RegistryEntry[],
+  o: { get: GhGet | null; prs: readonly OpenPr[]; prodSha: string | null; ref: string },
+): Promise<EntryFacts> {
+  const facts: EntryFacts = { branch: null, merged: null, pr: null, inProduction: null, touched: null, openDependencies: [] };
+  facts.openDependencies = e.dependencies.filter((d) => {
+    const x = all.find((y) => y.mission_id === d);
+    return !x || !CLOSED_STATES.has(x.status);
+  });
+  const lastPr = e.related_prs.length ? e.related_prs[e.related_prs.length - 1] : null;
+  if (e.branch && REF_RE.test(e.branch) && !gitRefLooksUnsafe(e.branch)) {
+    const local = gitTry(ctx.top, ["rev-parse", "--verify", "--quiet", `refs/heads/${e.branch}`]);
+    const remote = gitTry(ctx.top, ["rev-parse", "--verify", "--quiet", `refs/remotes/${ctx.config.remote}/${e.branch}`]);
+    const tip = local ?? remote;
+    facts.branch = { local: local !== null, remote: remote !== null, tip };
+    if (tip) {
+      facts.merged = mergeEvidence(ctx.top, tip, o.ref, { pr: lastPr ?? undefined, baseSha: e.base_sha ?? undefined });
+      if (facts.merged === null) {
+        const mb = gitTry(ctx.top, ["merge-base", tip, o.ref]);
+        facts.touched = mb ? lines(gitTry(ctx.top, ["diff", "--name-only", "--no-renames", mb, tip])) : null;
+      }
+      if (facts.merged && facts.merged !== "EMPTY" && o.prodSha) {
+        const lc = landedCommit(ctx, tip, o.ref, facts.merged, lastPr);
+        facts.inProduction = lc ? gitRun(ctx.top, ["merge-base", "--is-ancestor", lc, o.prodSha]).code === 0 : null;
+      }
+    }
+    const p = o.prs.find((x) => x.branch === e.branch);
+    if (p && o.get) facts.pr = { number: p.number, state: "open", merged: false, gates: await gatesOf(o.get, p.sha).catch(() => null) };
+  }
+  if (!facts.pr && lastPr && o.get && (facts.merged === null || facts.merged === "EMPTY")) {
+    try {
+      const p = (await o.get(`/pulls/${lastPr}`)) as Record<string, unknown>;
+      facts.pr = { number: lastPr, state: String(p.state), merged: Boolean(p.merged_at), gates: null };
+      if (facts.pr.merged && o.prodSha) {
+        const lc = gitTry(ctx.top, ["log", "-n", "1", "--format=%H", "--fixed-strings", `--grep=(#${lastPr})`, o.ref]);
+        facts.inProduction = lc ? gitRun(ctx.top, ["merge-base", "--is-ancestor", lc, o.prodSha]).code === 0 : null;
+      }
+    } catch {
+      /* GitHub không trả lời — để null, không đoán */
+    }
+  }
+  return facts;
+}
+
+async function cmdBoard(ctx: RepoCtx, flags: Set<string>): Promise<number> {
+  const nowMs = Date.now();
+  const offline = flags.has("offline");
+  if (!offline) gitRun(ctx.top, ["fetch", "--quiet", ctx.config.remote]);
+  const st = readControl(ctx, { fetch: !offline });
+  const ref = ctx.config.integrationRef;
+  const mainSha = gitTry(ctx.top, ["rev-parse", "--verify", "--quiet", `${ref}^{commit}`]);
+  const gh = flags.has("github") ? githubClient(ctx) : null;
+  const prod = offline ? { health: null, sha: null, error: "--offline" } : await productionHealth(ctx);
+  let prs: OpenPr[] = [];
+  let ghError = "";
+  if (gh)
+    try {
+      prs = await openPrs(gh.get);
+    } catch (e) {
+      ghError = (e as Error).message;
+    }
+  const rows: { e: RegistryEntry; effective: MissionState; drift: string[] }[] = [];
+  for (const e of st.entries) {
+    const f = await entryFacts(ctx, e, st.entries, { get: gh?.get ?? null, prs, prodSha: prod.sha, ref });
+    const r = reconcileEntry(e, f, ctx.config, nowMs);
+    rows.push({ e, ...r });
+  }
+  const leases = LEASE_NAMES.map((n) => {
+    const l = st.leases.find((x) => x.name === n) ?? null;
+    return { name: n, lease: l, live: l !== null && Date.parse(l.expires_at) > nowMs };
+  });
+  const known = new Set(st.entries.flatMap((e) => [e.branch ?? "", ...e.related_prs.map(String)]));
+  const strays = prs.filter((p) => !known.has(p.branch) && !known.has(String(p.number)));
+  const undeployed = prod.sha && mainSha && prod.sha !== mainSha ? countRange(ctx.top, [`${prod.sha}..${mainSha}`]) : 0;
+  const owner = rows.filter((r) => r.e.needs_owner && !CLOSED_STATES.has(r.effective));
+  if (flags.has("json")) {
+    out(
+      JSON.stringify(
+        {
+          at: new Date(nowMs).toISOString(),
+          main: mainSha,
+          production: prod.sha,
+          undeployedCommits: undeployed,
+          registryTip: st.tip,
+          registryReadable: st.fetched || offline,
+          missions: rows.map((r) => ({ id: r.e.mission_id, declared: r.e.status, effective: r.effective, drift: r.drift, priority: r.e.priority, risk: r.e.risk, branch: r.e.branch, owner: r.e.owner })),
+          leases: leases.map((l) => ({ name: l.name, holder: l.live ? l.lease?.holder : null, expires: l.live ? l.lease?.expires_at : null })),
+          strayPrs: strays.map((p) => p.number),
+          needsOwner: owner.map((r) => ({ mission: r.e.mission_id, ...r.e.needs_owner })),
+          invalid: st.invalid,
+        },
+        null,
+        2,
+      ),
+    );
+    return 0;
+  }
+  out(`BẢNG ĐIỀU KHIỂN · ${vnTime(nowMs)} (giờ VN)`);
+  if (!st.fetched && !offline) out(`  ! không đọc được sổ trên remote (${st.fetchError ?? "?"}) — đang in bản ở máy này, có thể cũ`);
+  const prodTxt = prod.sha ? (prod.sha === mainSha ? `production ${short(prod.sha)} ✓ khớp main` : `production ${short(prod.sha)} — main đi trước ${undeployed} commit CHƯA DEPLOY`) : `production ? (${prod.error ?? "không đọc được"})`;
+  out(`  main ${short(mainSha)} · ${prodTxt}`);
+  const count = new Map<MissionState, number>();
+  for (const r of rows) count.set(r.effective, (count.get(r.effective) ?? 0) + 1);
+  const always: MissionState[] = ["RUNNING", "READY", "PR_READY", "BLOCKED", "DEPLOYING", "FAILED", "DONE"];
+  out(`  ${MISSION_STATES.filter((s) => always.includes(s) || count.get(s)).map((s) => `${s} ${count.get(s) ?? 0}`).join(" · ")}`);
+  const order = (s: MissionState) => (CLOSED_STATES.has(s) ? 100 : 0) + MISSION_STATES.indexOf(s);
+  out("");
+  for (const r of rows.sort((a, b) => order(a.effective) - order(b.effective) || PRIORITIES.indexOf(a.e.priority) - PRIORITIES.indexOf(b.e.priority))) {
+    if (CLOSED_STATES.has(r.effective) && !flags.has("all")) continue;
+    const lag = r.effective !== r.e.status ? ` (sổ: ${r.e.status})` : "";
+    out(`  ${pad(r.effective, 11)} ${r.e.priority} ${pad(r.e.risk, 8)} ${pad(r.e.mission_id, 26)} ${r.e.branch ?? "—"} · nhịp ${ageText(r.e.last_heartbeat, nowMs)} · ${r.e.title.slice(0, 60)}${lag}`);
+    for (const d of r.drift) out(`      ⚠ ${d}`);
+  }
+  const closed = rows.filter((r) => CLOSED_STATES.has(r.effective)).length;
+  if (closed && !flags.has("all")) out(`  (+${closed} sứ mệnh đã khép — --all để xem)`);
+  if (!rows.length) out("  sổ chưa có sứ mệnh nào — `npm run ai -- claim <mã>` để đăng ký");
+  if (gh) {
+    out(`\nPR ĐANG MỞ: ${prs.length}${ghError ? ` (GitHub: ${ghError})` : ""}${strays.length ? ` · ${strays.length} PR chưa thuộc sứ mệnh nào trong sổ: ${strays.map((p) => `#${p.number} ${p.branch}`).join(", ")}` : ""}`);
+  }
+  out(`\nKHOÁ: ${leases.map((l) => (l.live && l.lease ? `${l.name} — ${l.lease.holder} (${l.lease.purpose || "không ghi mục đích"}) còn ${Math.round((Date.parse(l.lease.expires_at) - nowMs) / 60000)}′` : `${l.name} — trống`)).join(" · ")}`);
+  out(`\nCẦN CHỦ SHOP (${owner.length})`);
+  out(owner.length ? owner.map((r) => `  [${r.e.needs_owner?.category}] ${r.e.mission_id}: ${r.e.needs_owner?.action}`).join("\n") : "  không có");
+  if (st.invalid.length) out(`\n! ${st.invalid.length} tệp sổ hỏng: ${st.invalid.map((i) => `${i.file} (${i.errors[0]})`).join("; ")}`);
+  return 0;
+}
+
+const STOP = new Set(["nhung", "trong", "theo", "them", "duoc", "cung", "nhieu", "phai", "nhap", "lam", "cho", "cac", "mot", "voi"]);
+
+async function cmdIntake(ctx: RepoCtx, words: string[], flags: Set<string>, values: Map<string, string>): Promise<number> {
+  const text = words.join(" ").trim();
+  if (!text) throw new UsageError('thiếu yêu cầu: intake "<yêu cầu>" --kw=từ,khoá');
+  let kws = csv(values.get("kw"));
+  if (!kws.length) {
+    kws = foldText(text)
+      .split(/[^a-z0-9]+/)
+      .filter((w) => w.length >= 4 && !STOP.has(w))
+      .slice(0, 6);
+    out(`! không có --kw — tự tách từ khoá: ${kws.join(", ") || "(không)"} (Lead nên khai --kw cho chính xác)`);
+  }
+  const paths = csv(values.get("paths")).map(normalizePattern).filter((p): p is string => p !== null);
+  if (!flags.has("offline")) gitRun(ctx.top, ["fetch", "--quiet", ctx.config.remote]);
+  const ref = ctx.config.integrationRef;
+  const folded = kws.map(foldText);
+  const tree = lines(gitTry(ctx.top, ["ls-tree", "-r", "--name-only", ref]));
+  // Mỗi từ khoá một tập tệp (nội dung HOẶC đường dẫn chứa nó); tệp "mang đủ từ khoá" = giao của mọi tập.
+  const hits: Set<string>[] = kws.map((k) => {
+    const hit = new Set(
+      lines(gitTry(ctx.top, ["grep", "-l", "-i", "-F", "-e", k, ref, "--", ".", ":(exclude)docs/release-*", ":(exclude)package-lock.json", ":(exclude)drizzle/meta/*"])).map((l) => l.slice(l.indexOf(":") + 1)),
+    );
+    for (const f of tree) if (foldText(f).includes(foldText(k))) hit.add(f);
+    return hit;
+  });
+  const mainFiles = hits.length ? [...hits[0]].filter((f) => hits.every((h) => h.has(f))) : [];
+  const st = readControl(ctx, { fetch: !flags.has("offline") });
+  const active: IntakeSignals["active"] = [];
+  const match = (s: string) => kws.filter((_, i) => foldText(s).includes(folded[i]));
+  for (const e of st.entries) {
+    if (CLOSED_STATES.has(e.status)) continue;
+    const m = match(`${e.mission_id} ${e.title} ${e.business_goal} ${e.domains.join(" ")}`);
+    const ov = paths.length ? scopeConflicts(paths, e.owned_paths, ctx.config) : [];
+    if (m.length || ov.length) active.push({ kind: "MISSION", id: e.mission_id, title: e.title, matched: m, pathOverlap: ov });
+  }
+  const gh = flags.has("github") ? githubClient(ctx) : null;
+  const prBranches = new Set<string>();
+  if (gh) {
+    try {
+      const prs = await openPrs(gh.get);
+      for (const p of prs) prBranches.add(p.branch);
+      for (const p of prs.slice(0, 40)) {
+        const m = match(`${p.branch} ${p.title}`);
+        let ov: string[] = [];
+        if (paths.length) ov = scopeConflicts(paths, (await prFiles(gh.get, p.number)).map((f) => f.name), ctx.config);
+        if (m.length || ov.length) active.push({ kind: "PR", id: `#${p.number}`, title: p.title, matched: m, pathOverlap: ov });
+      }
+    } catch (e) {
+      out(`! GitHub: ${(e as Error).message} — bỏ qua PR đang mở`);
+    }
+  }
+  const since = Date.now() / 1000 - 7 * 86400;
+  for (const line of lines(gitTry(ctx.top, ["for-each-ref", "--sort=-committerdate", "--count=300", "--format=%(refname:short)%09%(committerdate:unix)%09%(subject)", `refs/remotes/${ctx.config.remote}`]))) {
+    const [name, ts, subject] = line.split("\t");
+    if (!name || Number(ts) < since) continue;
+    const short_ = name.replace(new RegExp(`^${ctx.config.remote}/`), "");
+    if (short_ === "HEAD" || short_ === ref.replace(new RegExp(`^${ctx.config.remote}/`), "") || short_.startsWith("ai-control/")) continue;
+    if (prBranches.has(short_)) continue; // đã xét qua PR của nhánh này
+    const m = match(`${short_} ${subject ?? ""}`);
+    if (m.length < Math.max(1, Math.ceil(kws.length / 2))) continue;
+    if (gitRun(ctx.top, ["merge-base", "--is-ancestor", name, ref]).code === 0) continue;
+    active.push({ kind: "BRANCH", id: short_, title: subject ?? "", matched: m, pathOverlap: [] });
+  }
+  const signals: IntakeSignals = { keywords: kws, mainFiles: mainFiles.sort(), active };
+  const v = intakeVerdict(signals);
+  out(`YÊU CẦU: ${text}`);
+  out(`  từ khoá: ${kws.join(", ")}${paths.length ? ` · phạm vi dự kiến: ${paths.join(", ")}` : ""}`);
+  out(`  GỢI Ý: ${v.verdict} — ${{ EXISTS: "dùng lại", PARTIAL: "mở rộng cái đã có", IN_PROGRESS: "phối hợp / chờ việc đang chạy", MISSING: "dựng mới" }[v.verdict]}`);
+  for (const w of v.why) out(`    · ${w}`);
+  if (signals.mainFiles.length) out(`  tệp trên main mang đủ từ khoá (${signals.mainFiles.length}): ${signals.mainFiles.slice(0, 12).join(", ")}${signals.mainFiles.length > 12 ? " …" : ""}`);
+  out(`  ⇒ Lead đọc chứng cứ, rồi ghi phán quyết cuối: npm run ai -- claim <mã> --intake=${v.verdict} …`);
+  if (flags.has("record")) {
+    mutateControl(ctx, controlActor(ctx), () => ({
+      change: {
+        put: {},
+        events: [{ kind: v.verdict === "IN_PROGRESS" || v.verdict === "EXISTS" ? "DUPLICATE_PREVENTED" : `INTAKE_${v.verdict}`, detail: `${text.slice(0, 160)} · ${v.why[0] ?? ""}`.slice(0, 400) }],
+        message: `intake: ${v.verdict}`,
+      },
+      result: null,
+    }));
+    out("  ✓ đã ghi vào nhật ký sổ");
+  }
+  return 0;
+}
+
+function applyEntryFlags(base: Partial<RegistryEntry> & { owner: string }, values: Map<string, string>, flags: Set<string>): void {
+  const v = (k: string) => values.get(k);
+  if (v("title") !== undefined) base.title = v("title");
+  if (v("goal") !== undefined) base.business_goal = v("goal");
+  if (v("status") !== undefined) base.status = v("status") as MissionState;
+  if (v("priority") !== undefined) base.priority = v("priority") as Priority;
+  if (v("risk") !== undefined) base.risk = v("risk") as Risk;
+  if (v("branch") !== undefined) base.branch = v("branch") || null;
+  if (v("worktree") !== undefined) base.worktree = v("worktree") || null;
+  if (v("worker") !== undefined) base.worker = v("worker") || null;
+  if (v("domains") !== undefined) base.domains = csv(v("domains"));
+  if (v("paths") !== undefined) base.owned_paths = csv(v("paths"));
+  if (v("after") !== undefined) base.dependencies = [...new Set([...(base.dependencies ?? []), ...csv(v("after"))])];
+  if (v("prs") !== undefined) base.related_prs = [...new Set([...(base.related_prs ?? []), ...csv(v("prs")).map(Number)])];
+  if (v("dod") !== undefined) base.definition_of_done = v("dod")?.split("|").map((s) => s.trim()).filter(Boolean);
+  if (v("blocked-by") !== undefined) base.blocked_by = csv(v("blocked-by"));
+  if (v("intake") !== undefined) base.intake = { verdict: v("intake") as IntakeVerdict, evidence: csv(v("intake-evidence")) };
+  if (v("needs-owner") !== undefined) {
+    const m = /^([A-Z_]+):\s*([\s\S]+)$/.exec(v("needs-owner") ?? "");
+    base.needs_owner = m ? { category: m[1] as (typeof OWNER_ESCALATIONS)[number], action: m[2] } : undefined;
+  }
+  if (flags.has("clear-owner")) base.needs_owner = undefined;
+}
+
+async function cmdClaim(ctx: RepoCtx, idIn: string | undefined, flags: Set<string>, values: Map<string, string>): Promise<number> {
+  const id = mustMission(idIn);
+  const actor = controlActor(ctx);
+  const local = existsSync(path.join(missionsDir(ctx), `${id}.json`)) ? requireMission(ctx, id).mission : null;
+  const here = gitTry(ctx.top, ["rev-parse", "--abbrev-ref", "HEAD"]);
+  const decide = (st: ControlState) => {
+    const now = new Date().toISOString();
+    const prev = st.entries.find((e) => e.mission_id === id) ?? null;
+    const base: Partial<RegistryEntry> & { owner: string } = { ...(prev ?? {}), owner: values.get("owner") ?? prev?.owner ?? actor };
+    if (local && base.branch === undefined && here && here !== "HEAD") {
+      base.branch = here;
+      base.worktree = ctx.top;
+    }
+    applyEntryFlags(base, values, flags);
+    // Sứ mệnh có tệp DAG: phạm vi luôn DẪN XUẤT từ `owns` của các việc (không khai tay lần hai), trừ khi --paths ghi đè.
+    if (local && values.get("paths") === undefined) base.owned_paths = undefined;
+    const tip = base.branch && REF_RE.test(base.branch) && !gitRefLooksUnsafe(base.branch)
+      ? (gitTry(ctx.top, ["rev-parse", "--verify", "--quiet", `refs/heads/${base.branch}`]) ?? gitTry(ctx.top, ["rev-parse", "--verify", "--quiet", `refs/remotes/${ctx.config.remote}/${base.branch}`]))
+      : null;
+    const mb = tip ? gitTry(ctx.top, ["merge-base", tip, ctx.config.integrationRef]) : null;
+    if (!base.base_sha && mb) base.base_sha = mb;
+    if ((!base.owned_paths || !base.owned_paths.length) && !local && tip && mb) base.owned_paths = inferOwnedPaths(lines(gitTry(ctx.top, ["diff", "--name-only", "--no-renames", mb, tip])));
+    const raw: RegistryEntry = local
+      ? entryFromMission(local, base, now)
+      : {
+          schema: 1,
+          mission_id: id,
+          title: base.title ?? "",
+          business_goal: base.business_goal ?? "",
+          status: base.status ?? "PLANNING",
+          priority: base.priority ?? "P2",
+          risk: base.risk ?? "MEDIUM",
+          owner: base.owner,
+          worker: base.worker ?? null,
+          worktree: base.worktree ?? null,
+          branch: base.branch ?? null,
+          base_sha: base.base_sha ?? null,
+          domains: base.domains ?? [],
+          owned_paths: base.owned_paths ?? [],
+          dependencies: base.dependencies ?? [],
+          blocked_by: base.blocked_by ?? [],
+          related_prs: base.related_prs ?? [],
+          migration_reservations: base.migration_reservations ?? [],
+          created_at: prev?.created_at ?? now,
+          updated_at: now,
+          last_heartbeat: now,
+          definition_of_done: base.definition_of_done ?? [],
+          mission_file: base.mission_file,
+          intake: base.intake,
+          needs_owner: base.needs_owner,
+          evidence: base.evidence,
+        };
+    // Rủi ro không bao giờ thấp hơn sàn của phạm vi khai (cùng luật với việc trong sứ mệnh).
+    const floor = riskFloorFor(raw.owned_paths, ctx.config);
+    if (riskRank(floor.risk) > riskRank(raw.risk)) raw.risk = floor.risk;
+    const v = validateEntry(raw);
+    if (!v.entry) return { change: null, result: { ok: false, lines: v.errors.map((x) => `lỗi: ${x}`), entry: raw } };
+    if (!v.entry.title) return { change: null, result: { ok: false, lines: ["lỗi: sứ mệnh mới cần --title=…"], entry: raw } };
+    const d = claimDecision(v.entry, st.entries.filter((e) => e.mission_id !== id), ctx.config, { acceptOverlap: values.get("accept-overlap") });
+    if (!d.ok) {
+      return {
+        change: flags.has("dry-run")
+          ? null
+          : { put: {}, events: d.refusals.map((r) => ({ kind: r.startsWith("DUPLICATE") ? "DUPLICATE_PREVENTED" : r.startsWith("OVERLAP") ? "OVERLAP_DETECTED" : "CLAIM_REFUSED", mission: id, detail: r.slice(0, 400) })), message: `từ chối đăng ký ${id}` },
+        result: { ok: false, lines: d.refusals.map((x) => `✗ ${x}`), entry: v.entry },
+      };
+    }
+    const evs: Omit<ControlEvent, "at" | "actor">[] = [{ kind: prev ? (prev.status !== v.entry.status ? "STATUS" : "UPDATE") : "CLAIM", mission: id, detail: `${prev ? `${prev.status} → ` : ""}${v.entry.status} · ${v.entry.owned_paths.length} mẫu phạm vi · ${v.entry.risk}` }];
+    for (const w of d.warnings) evs.push({ kind: "OVERLAP_ACCEPTED", mission: id, detail: w.slice(0, 400) });
+    return {
+      change: flags.has("dry-run") ? null : { put: { [entryFile(id)]: entryJson(v.entry) }, events: evs, message: `${prev ? "cập nhật" : "đăng ký"} sứ mệnh ${id}` },
+      result: { ok: true, lines: d.warnings.map((w) => `! ${w}`), entry: v.entry },
+    };
+  };
+  const r = flags.has("dry-run") ? decide(readControl(ctx, { fetch: !flags.has("offline") })).result : mutateControl(ctx, actor, decide);
+  out(`${flags.has("dry-run") ? "[CHẠY THỬ] " : ""}${r.ok ? "✓" : "✗"} ${id} — ${r.entry.status} · ${r.entry.priority} · ${r.entry.risk} · nhánh ${r.entry.branch ?? "—"}`);
+  out(`  phạm vi: ${r.entry.owned_paths.join(", ") || "(chưa khai)"}`);
+  if (r.entry.dependencies.length) out(`  sau: ${r.entry.dependencies.join(", ")}`);
+  for (const l of r.lines) out(`  ${l}`);
+  return r.ok ? 0 : 1;
+}
+
+function cmdHeartbeat(ctx: RepoCtx, idIn: string | undefined, values: Map<string, string>): number {
+  const id = mustMission(idIn);
+  const status = values.get("status");
+  if (status !== undefined && !MISSION_STATES.includes(status as MissionState)) throw new UsageError(`--status: ${MISSION_STATES.join("|")}`);
+  const r = mutateControl(ctx, controlActor(ctx), (st) => {
+    const e = st.entries.find((x) => x.mission_id === id);
+    if (!e) return { change: null, result: `✗ ${id} chưa có trong sổ — claim trước` };
+    const now = new Date().toISOString();
+    const next: RegistryEntry = { ...e, last_heartbeat: now, updated_at: now, status: (status as MissionState) ?? e.status, worker: values.get("worker") ?? e.worker };
+    if (status === "DONE") return { change: null, result: "✗ DONE đi qua `close` (đòi bằng chứng), không qua heartbeat" };
+    return {
+      change: { put: { [entryFile(id)]: entryJson(next) }, events: next.status !== e.status ? [{ kind: "STATUS", mission: id, detail: `${e.status} → ${next.status}` }] : [], message: `nhịp tim ${id}` },
+      result: `✓ ${id} — nhịp tim ${now}${next.status !== e.status ? ` · ${e.status} → ${next.status}` : ""}`,
+    };
+  });
+  out(r);
+  return r.startsWith("✓") ? 0 : 1;
+}
+
+function cmdClose(ctx: RepoCtx, idIn: string | undefined, flags: Set<string>, values: Map<string, string>): number {
+  const id = mustMission(idIn);
+  const status = values.get("status");
+  if (status !== "DONE" && status !== "CANCELLED") throw new UsageError("--status=DONE|CANCELLED");
+  const evidence = (values.get("evidence") ?? "").trim();
+  if (!evidence) throw new UsageError("--evidence=… bắt buộc: PR, SHA, kết quả verify — hoặc lý do huỷ");
+  gitRun(ctx.top, ["fetch", "--quiet", ctx.config.remote]);
+  const r = mutateControl(ctx, controlActor(ctx), (st) => {
+    const e = st.entries.find((x) => x.mission_id === id);
+    if (!e) return { change: null, result: { ok: false, msg: `${id} chưa có trong sổ` } };
+    if (status === "DONE") {
+      const tip = e.branch ? (gitTry(ctx.top, ["rev-parse", "--verify", "--quiet", `refs/remotes/${ctx.config.remote}/${e.branch}`]) ?? gitTry(ctx.top, ["rev-parse", "--verify", "--quiet", `refs/heads/${e.branch}`])) : null;
+      const lastPr = e.related_prs.length ? e.related_prs[e.related_prs.length - 1] : undefined;
+      const ev = tip ? mergeEvidence(ctx.top, tip, ctx.config.integrationRef, { pr: lastPr, baseSha: e.base_sha ?? undefined }) : null;
+      const prLanded = lastPr ? gitTry(ctx.top, ["log", "-n", "1", "--format=%H", "--fixed-strings", `--grep=(#${lastPr})`, ctx.config.integrationRef]) : null;
+      if (e.branch && !(ev && ev !== "EMPTY") && !prLanded)
+        return { change: null, result: { ok: false, msg: `chưa có bằng chứng ${e.branch} đã vào ${ctx.config.integrationRef} — DONE chỉ sau khi vào main` } };
+      if (!e.evidence?.verify?.startsWith("PASS") && !flags.has("no-runtime"))
+        return { change: null, result: { ok: false, msg: "chưa có hậu kiểm production ĐẠT (`verify --record`) — hoặc khai --no-runtime nếu sứ mệnh không đổi mã chạy trên VPS" } };
+    }
+    const now = new Date().toISOString();
+    const next: RegistryEntry = { ...e, status: status as MissionState, updated_at: now, last_heartbeat: now, needs_owner: undefined, evidence: { ...(e.evidence ?? {}), done: `${flags.has("no-runtime") ? "không đổi mã chạy · " : ""}${evidence}` } };
+    return {
+      change: { put: { [entryFile(id)]: entryJson(next) }, events: [{ kind: status === "DONE" ? "DONE" : "CANCELLED", mission: id, detail: evidence.slice(0, 400) }], message: `khép sứ mệnh ${id}: ${status}` },
+      result: { ok: true, msg: `${id} → ${status}; phạm vi (${e.owned_paths.length} mẫu) và giữ chỗ migration (${e.migration_reservations.join(", ") || "không"}) đã nhả` },
+    };
+  });
+  out(`${r.ok ? "✓" : "✗"} ${r.msg}`);
+  if (r.ok) out("  dọn cây (nếu có): npm run ai -- cleanup <cây> (chạy thử) — không bao giờ dọn cây bẩn / có commit chưa đẩy");
+  return r.ok ? 0 : 1;
+}
+
+function cmdLease(ctx: RepoCtx, op: string | undefined, nameIn: string | undefined, values: Map<string, string>): number {
+  const nowMs = Date.now();
+  if (op === "status" || op === undefined) {
+    const st = readControl(ctx, { fetch: true });
+    for (const n of LEASE_NAMES) {
+      const l = st.leases.find((x) => x.name === n);
+      const live = l && Date.parse(l.expires_at) > nowMs;
+      out(`${pad(n, 18)} ${l ? `${l.holder} · ${l.purpose || "—"} · ${live ? `còn ${Math.round((Date.parse(l.expires_at) - nowMs) / 60000)}′` : `HẾT HẠN từ ${l.expires_at} (ai cũng tiếp quản được)`} · đời ${l.generation}` : "trống"}`);
+    }
+    return 0;
+  }
+  if (op !== "acquire" && op !== "renew" && op !== "release") throw new UsageError("lease acquire|renew|release|status <tên>");
+  const name = (nameIn ?? "integration-lead") as LeaseName;
+  if (!LEASE_NAMES.includes(name)) throw new UsageError(`khoá: ${LEASE_NAMES.join("|")}`);
+  const ttlMin = values.get("ttl") !== undefined ? Number(values.get("ttl")) : ctx.config.leaseMinutes;
+  if (!Number.isInteger(ttlMin) || ttlMin < 1 || ttlMin > 24 * 60) throw new UsageError("--ttl=<phút> (1–1440)");
+  const actor = controlActor(ctx);
+  const r = mutateControl(ctx, actor, (st) => {
+    const cur = st.leases.find((x) => x.name === name) ?? null;
+    const d = leaseDecision(cur, op, { name, holder: actor, purpose: values.get("purpose") ?? "" }, Date.now(), ttlMin * 60_000);
+    if (!d.ok) return { change: null, result: d };
+    const file = `lease.${name}.json`;
+    const evs: Omit<ControlEvent, "at" | "actor">[] = [];
+    if (op !== "renew" && !(op === "acquire" && cur?.holder === actor && d.next?.generation === cur?.generation))
+      evs.push({ kind: d.takeoverFrom ? "LEASE_TAKEOVER" : op === "acquire" ? "LEASE_ACQUIRED" : "LEASE_RELEASED", detail: `${name}${d.takeoverFrom ? ` từ ${d.takeoverFrom.holder} (hết hạn ${d.takeoverFrom.expires_at})` : ""}` });
+    return {
+      change: d.next ? { put: { [file]: `${JSON.stringify(d.next, null, 2)}\n` }, events: evs, message: `khoá ${name}: ${op}` } : { put: {}, del: [file], events: evs, message: `khoá ${name}: nhả` },
+      result: d,
+    };
+  });
+  out(`${r.ok ? "✓" : "✗"} ${name}: ${r.reason}${r.ok && r.next ? ` · hết hạn ${r.next.expires_at}` : ""}`);
+  return r.ok ? 0 : 1;
+}
+
+function addedMigrations(ctx: RepoCtx, tip: string, ref: string): string[] {
+  const mb = gitTry(ctx.top, ["merge-base", tip, ref]);
+  if (!mb) return [];
+  return lines(gitTry(ctx.top, ["diff", "--name-only", "--diff-filter=A", "--no-renames", mb, tip, "--", "drizzle/"])).filter((f) => migrationNumberOf(f) !== null);
+}
+
+async function cmdMigration(ctx: RepoCtx, op: string | undefined, flags: Set<string>, values: Map<string, string>): Promise<number> {
+  const ref = ctx.config.integrationRef;
+  if (!flags.has("offline")) gitRun(ctx.top, ["fetch", "--quiet", ctx.config.remote]);
+  const mainMigs = lines(gitTry(ctx.top, ["ls-tree", "--name-only", ref, "drizzle/"])).filter((f) => migrationNumberOf(f) !== null);
+  const gh = flags.has("github") ? githubClient(ctx) : null;
+  const prMigs: { pr: number; createdAt: string; added: string[]; branch: string }[] = [];
+  if (gh) {
+    for (const p of (await openPrs(gh.get)).slice(0, 60)) {
+      const added = (await prFiles(gh.get, p.number)).filter((f) => f.status === "added" && migrationNumberOf(f.name) !== null).map((f) => f.name);
+      prMigs.push({ pr: p.number, createdAt: p.createdAt, added, branch: p.branch });
+    }
+  }
+  if (op === "next" || op === "reserve") {
+    const branchMigs = addedMigrations(ctx, "HEAD", ref);
+    if (op === "next") {
+      const st = readControl(ctx, { fetch: !flags.has("offline") });
+      const reserved = st.entries.filter((e) => !CLOSED_STATES.has(e.status)).flatMap((e) => e.migration_reservations);
+      out(nextMigrationNumber({ main: mainMigs, branches: [...branchMigs, ...prMigs.flatMap((p) => p.added)], reserved }));
+      return 0;
+    }
+    const id = mustMission(values.get("mission"));
+    const r = mutateControl(ctx, controlActor(ctx), (st) => {
+      const e = st.entries.find((x) => x.mission_id === id);
+      if (!e || CLOSED_STATES.has(e.status)) return { change: null, result: `✗ ${id} không có trong sổ hoặc đã khép — claim trước` };
+      const reserved = st.entries.filter((x) => !CLOSED_STATES.has(x.status)).flatMap((x) => x.migration_reservations);
+      const n = nextMigrationNumber({ main: mainMigs, branches: [...branchMigs, ...prMigs.flatMap((p) => p.added)], reserved });
+      const next: RegistryEntry = { ...e, migration_reservations: [...e.migration_reservations, n], updated_at: new Date().toISOString() };
+      return { change: { put: { [entryFile(id)]: entryJson(next) }, events: [{ kind: "MIGRATION_RESERVED", mission: id, detail: n }], message: `giữ chỗ migration ${n} cho ${id}` }, result: `✓ ${n} — đã giữ chỗ cho ${id}` };
+    });
+    out(r);
+    out("  đặt tên tệp drizzle/<số>_<tên>.sql; lúc tích hợp vẫn chạy `npm run migration:renumber` nếu main đã đi tiếp (giữ chỗ chỉ chống hai phiên cùng lấy một số)");
+    return r.startsWith("✓") ? 0 : 1;
+  }
+  if (op !== "check") throw new UsageError("migration next | reserve --mission=<mã> | check [--pr=<số>] [--github]");
+  const st = readControl(ctx, { fetch: !flags.has("offline") });
+  if (!st.fetched && !flags.has("offline")) out(`! không đọc được sổ giữ chỗ (${st.fetchError ?? "?"}) — chỉ so với main và PR`);
+  const reservations = st.entries
+    .filter((e) => !CLOSED_STATES.has(e.status))
+    .flatMap((e) => e.migration_reservations.map((n) => ({ mission: e.mission_id, number: n, at: st.events.find((ev) => ev.kind === "MIGRATION_RESERVED" && ev.mission === e.mission_id && ev.detail === n)?.at ?? e.created_at })));
+  const prNo = values.get("pr") !== undefined ? Number(values.get("pr")) : null;
+  let me: { pr: number; createdAt: string; added: string[]; branch: string };
+  if (prNo !== null) {
+    const hit = prMigs.find((p) => p.pr === prNo);
+    if (!hit) throw new Error(`PR #${prNo} không có trong danh sách PR đang mở (cần --github)`);
+    me = hit;
+  } else {
+    const branch = gitTry(ctx.top, ["rev-parse", "--abbrev-ref", "HEAD"]) ?? "HEAD";
+    me = { pr: 0, createdAt: new Date().toISOString(), added: addedMigrations(ctx, "HEAD", ref), branch };
+  }
+  const own = st.entries.find((e) => e.branch === me.branch || (prNo !== null && e.related_prs.includes(prNo)))?.mission_id ?? null;
+  const res = checkPrMigrations({ pr: me.pr, createdAt: me.createdAt, added: me.added, main: mainMigs, others: prMigs.filter((p) => p.pr !== me.pr), reservations, ownMission: own });
+  out(`MIGRATION ${prNo !== null ? `PR #${prNo}` : me.branch}: thêm ${me.added.map((f) => f.split("/").pop()).join(", ") || "(không)"} · main tới ${mainMigs.map(migrationNumberOf).sort().pop() ?? "—"}${own ? ` · sứ mệnh ${own}` : ""}`);
+  for (const p of res.problems) out(`  ✗ ${p}`);
+  for (const w of res.warnings) out(`  ! ${w}`);
+  if (!res.problems.length) out("  ✓ không va số với main, PR mở trước, hay giữ chỗ của sứ mệnh khác");
+  return res.problems.length ? 1 : 0;
+}
+
+async function cmdQueue(ctx: RepoCtx, flags: Set<string>): Promise<number> {
+  const gh = githubClient(ctx);
+  if (!gh) throw new Error("remote không phải GitHub — hàng đợi gộp cần GitHub");
+  gitRun(ctx.top, ["fetch", "--quiet", ctx.config.remote]);
+  const mainMigs = lines(gitTry(ctx.top, ["ls-tree", "--name-only", ctx.config.integrationRef, "drizzle/"])).filter((f) => migrationNumberOf(f) !== null);
+  const st = readControl(ctx, { fetch: true });
+  const prs = (await openPrs(gh.get)).slice(0, 40);
+  const detail = new Map<number, { files: { name: string; status: string }[]; mergeable: string; gates: QueueItem["gates"] }>();
+  for (const p of prs) {
+    const files = await prFiles(gh.get, p.number);
+    const one = (await gh.get(`/pulls/${p.number}`)) as Record<string, unknown>;
+    const gates = await gatesOf(gh.get, p.sha).catch(() => "missing" as const);
+    detail.set(p.number, { files, mergeable: String(one.mergeable_state ?? "unknown"), gates });
+  }
+  const added = (n: number) => (detail.get(n)?.files ?? []).filter((f) => f.status === "added" && migrationNumberOf(f.name) !== null).map((f) => f.name);
+  const reservations = st.entries.filter((e) => !CLOSED_STATES.has(e.status)).flatMap((e) => e.migration_reservations.map((n) => ({ mission: e.mission_id, number: n, at: e.created_at })));
+  const items: QueueItem[] = [];
+  for (const p of prs) {
+    const d = detail.get(p.number);
+    if (!d) continue;
+    const names = d.files.map((f) => f.name);
+    let destructive = false;
+    for (const f of added(p.number)) {
+      try {
+        const c = (await gh.get(`/contents/${f}?ref=${p.sha}`)) as { content?: string };
+        if (c.content && isDestructiveSql(Buffer.from(c.content, "base64").toString("utf8"))) destructive = true;
+      } catch {
+        /* không đọc được nội dung — đánh giá theo đường dẫn */
+      }
+    }
+    const entry = st.entries.find((e) => e.branch === p.branch || e.related_prs.includes(p.number));
+    const regDeps = (entry?.dependencies ?? []).flatMap((dep) => {
+      const de = st.entries.find((x) => x.mission_id === dep);
+      return prs.filter((q) => q.branch === de?.branch || de?.related_prs.includes(q.number)).map((q) => q.number);
+    });
+    const mig = checkPrMigrations({ pr: p.number, createdAt: p.createdAt, added: added(p.number), main: mainMigs, others: prs.filter((q) => q.number !== p.number).map((q) => ({ pr: q.number, createdAt: q.createdAt, added: added(q.number) })), reservations, ownMission: entry?.mission_id ?? null });
+    items.push({
+      pr: p.number,
+      title: p.title,
+      branch: p.branch,
+      draft: p.draft,
+      risk: classifyRisk(names, ctx.config, { destructiveMigration: destructive }).risk,
+      gates: d.gates,
+      mergeable: d.mergeable,
+      deps: [...new Set([...parsePrDependencies(p.body), ...regDeps])].filter((n) => n !== p.number),
+      files: names,
+      migrationProblems: mig.problems,
+      createdAt: p.createdAt,
+      reviewed: /Review độc lập:\s*ĐẠT/i.test(p.body),
+    });
+  }
+  const rows = orderQueue(items, ctx.config);
+  if (flags.has("json")) {
+    out(JSON.stringify(rows.map((r) => ({ pr: r.item.pr, verdict: r.verdict, why: r.why, risk: r.item.risk, policy: r.policy, gates: r.item.gates, mergeable: r.item.mergeable, branch: r.item.branch })), null, 2));
+    return 0;
+  }
+  out(`HÀNG ĐỢI GỘP · ${rows.length} PR đang mở`);
+  for (const r of rows) out(`  ${pad(r.verdict, 19)} #${pad(String(r.item.pr), 5)} ${pad(r.item.risk, 8)} ${pad(r.item.gates, 8)} ${pad(r.item.mergeable, 9)} ${r.item.title.slice(0, 60)}\n      ${r.why}`);
+  const now = rows.filter((r) => r.verdict === "MERGE_NOW").map((r) => `#${r.item.pr}`);
+  const iso = rows.find((r) => r.verdict === "MERGE_ISOLATED");
+  out("");
+  if (now.length) out(`VIỆC CỦA INTEGRATION LEAD (cầm khoá integration-lead): gộp ${now.join(", ")} (squash, kèm sha đầu nhánh, chỉ khi mergeable_state=clean) → \`npm run ai -- deploy-plan\` → MỘT lượt deploy cho cả lô → \`verify\``);
+  else if (iso) out(`VIỆC CỦA INTEGRATION LEAD: gộp #${iso.item.pr} MỘT MÌNH → deploy → verify, rồi chạy lại \`queue\``);
+  else out("không có PR nào sẵn sàng gộp lúc này.");
+  return 0;
+}
+
+async function cmdDeployPlan(ctx: RepoCtx, flags: Set<string>): Promise<number> {
+  gitRun(ctx.top, ["fetch", "--quiet", ctx.config.remote]);
+  const ref = ctx.config.integrationRef;
+  const mainSha = git(ctx.top, ["rev-parse", "--verify", `${ref}^{commit}`]);
+  const prod = await productionHealth(ctx);
+  const undeployed: DeployInput["undeployed"] = [];
+  if (prod.sha) {
+    for (const line of lines(gitTry(ctx.top, ["log", "--first-parent", "--format=%H%x09%s", `${prod.sha}..${mainSha}`]))) {
+      const [sha, ...subj] = line.split("\t");
+      if (!SHA_RE.test(sha)) continue;
+      const files = lines(gitTry(ctx.top, ["diff-tree", "--no-commit-id", "--name-only", "-r", "-m", "--first-parent", sha]));
+      const migs = lines(gitTry(ctx.top, ["diff-tree", "--no-commit-id", "--name-only", "--diff-filter=A", "-r", "-m", "--first-parent", sha, "--", "drizzle/"])).filter((f) => migrationNumberOf(f) !== null);
+      const destructive = migs.some((f) => isDestructiveSql(gitTry(ctx.top, ["show", `${sha}:${f}`]) ?? ""));
+      undeployed.push({ sha, subject: subj.join("\t"), risk: classifyRisk(files, ctx.config, { destructiveMigration: destructive }).risk, migrations: migs.map((f) => f.split("/").pop() ?? f) });
+    }
+  }
+  const gh = githubClient(ctx);
+  let mainGates: DeployInput["mainGates"] = "missing";
+  const deployActive: DeployInput["deployActive"] = [];
+  if (gh) {
+    mainGates = await gatesOf(gh.get, mainSha).catch(() => "missing" as const);
+    for (const s of ["in_progress", "queued", "waiting"]) {
+      const runs = (await gh.get(`/actions/workflows/deploy-vps.yml/runs?status=${s}&per_page=20`).catch(() => ({}))) as { workflow_runs?: unknown };
+      for (const r of arr(runs.workflow_runs)) deployActive.push({ id: Number(r.id), sha: String(r.head_sha), status: String(r.status) });
+    }
+  }
+  const st = readControl(ctx, { fetch: true });
+  const lease = st.leases.find((l) => l.name === "integration-lead" && Date.parse(l.expires_at) > Date.now()) ?? null;
+  const plan = planDeploy({ productionSha: prod.sha, mainSha, undeployed, mainGates, deployActive, leaseHolder: lease?.holder ?? null, me: controlActor(ctx) });
+  if (flags.has("json")) {
+    out(JSON.stringify({ ...plan, production: prod.sha, main: mainSha, undeployed }, null, 2));
+    return 0;
+  }
+  out(`KẾ HOẠCH DEPLOY · main ${short(mainSha)} · production ${short(prod.sha)}${prod.error ? ` (${prod.error})` : ""}`);
+  for (const c of undeployed) out(`  ${short(c.sha)} ${pad(c.risk, 8)} ${c.subject.slice(0, 90)}${c.migrations.length ? ` · migration ${c.migrations.join(", ")}` : ""}`);
+  out(`\n  ⇒ ${plan.action}: ${plan.why}`);
+  for (const n of plan.notes) out(`     ${n}`);
+  if (plan.action === "DEPLOY") {
+    out(`\n  Lệnh (MỘT lượt, bám run id > BEFORE): dispatch workflow "Deploy ERP to VPS" (deploy-vps.yml) trên ref main`);
+    out(`  Sau đó: npm run ai -- verify --sha=${plan.sha} [--record --mission=<mã>]`);
+  }
+  return 0;
+}
+
+async function cmdVerify(ctx: RepoCtx, flags: Set<string>, values: Map<string, string>): Promise<number> {
+  gitRun(ctx.top, ["fetch", "--quiet", ctx.config.remote]);
+  const want = values.get("sha") ?? ctx.config.integrationRef;
+  if (!REF_RE.test(want)) throw new UsageError("--sha=<SHA>");
+  const sha = git(ctx.top, ["rev-parse", "--verify", `${want}^{commit}`]);
+  const prod = await productionHealth(ctx);
+  let expectedMigrations: number | null = null;
+  try {
+    const j = JSON.parse(gitTry(ctx.top, ["show", `${sha}:drizzle/meta/_journal.json`]) ?? "null") as { entries?: unknown[] } | null;
+    expectedMigrations = j && Array.isArray(j.entries) ? j.entries.length : null;
+  } catch {
+    expectedMigrations = null;
+  }
+  const gh = githubClient(ctx);
+  let deployRun: VerifyInput["deployRun"] = null;
+  if (gh) {
+    const runs = (await gh.get(`/actions/workflows/deploy-vps.yml/runs?head_sha=${sha}&per_page=10`).catch(() => ({}))) as { workflow_runs?: unknown };
+    const rs = arr(runs.workflow_runs);
+    const best = rs.find((r) => r.conclusion === "success") ?? rs[0];
+    if (best) deployRun = { conclusion: best.conclusion === null ? null : String(best.conclusion), status: String(best.status), url: String(best.html_url) };
+  }
+  const endpoints: VerifyInput["endpoints"] = [];
+  if (ctx.config.healthUrl) {
+    const origin = new URL(ctx.config.healthUrl).origin;
+    for (const p of ctx.config.verifyEndpoints) {
+      try {
+        const r = await (fetch as unknown as FetchLike)(`${origin}${p}`, { headers: { "User-Agent": "ai-tech-room" }, signal: AbortSignal.timeout(15000), redirect: "manual" });
+        endpoints.push({ path: p, status: r.status });
+      } catch {
+        endpoints.push({ path: p, status: null });
+      }
+    }
+  }
+  const v = verifyVerdict({ expectedSha: sha, health: prod.health, healthError: prod.error, expectedMigrations, deployRun, endpoints });
+  out(`HẬU KIỂM PRODUCTION · mong đợi ${short(sha)}`);
+  for (const c of v.checks) out(`  ${c.ok ? "✓" : "✗"} ${c.label}`);
+  out(`  ⇒ ${v.pass ? "ĐẠT" : "KHÔNG ĐẠT — INCIDENT: không tuyên bố xong. Không có rollback tự động (migration chỉ đi tới); sửa tiến bằng PR mới, hoặc báo chủ shop nếu production hỏng"}`);
+  if (flags.has("record")) {
+    const id = mustMission(values.get("mission"));
+    const stamp = `${v.pass ? "PASS" : "FAIL"} ${sha.slice(0, 12)} ${new Date().toISOString()}`;
+    const msg = mutateControl(ctx, controlActor(ctx), (st) => {
+      const e = st.entries.find((x) => x.mission_id === id);
+      if (!e) return { change: null, result: `✗ ${id} chưa có trong sổ` };
+      const next: RegistryEntry = { ...e, updated_at: new Date().toISOString(), status: v.pass ? (CLOSED_STATES.has(e.status) ? e.status : "VERIFYING") : "FAILED", evidence: { ...(e.evidence ?? {}), verify: stamp, deploy: deployRun?.url ?? e.evidence?.deploy } };
+      return { change: { put: { [entryFile(id)]: entryJson(next) }, events: [{ kind: v.pass ? "VERIFY_PASS" : "VERIFY_FAIL", mission: id, detail: stamp }], message: `hậu kiểm ${id}: ${v.pass ? "ĐẠT" : "KHÔNG ĐẠT"}` }, result: `✓ đã ghi ${stamp} vào ${id}` };
+    });
+    out(`  ${msg}`);
+  }
+  return v.pass ? 0 : 1;
+}
+
+async function cmdMetrics(ctx: RepoCtx, flags: Set<string>, values: Map<string, string>): Promise<number> {
+  const gh = githubClient(ctx);
+  if (!gh) throw new Error("remote không phải GitHub");
+  const days = Number(values.get("days") ?? 14);
+  if (!Number.isInteger(days) || days < 1 || days > 90) throw new UsageError("--days=1..90");
+  gitRun(ctx.top, ["fetch", "--quiet", ctx.config.remote]);
+  const sinceMs = Date.now() - days * 86_400_000;
+  const since = new Date(sinceMs).toISOString().slice(0, 10);
+  const runs = async (wf: string, extra: string) => {
+    const outRuns: Record<string, unknown>[] = [];
+    for (let page = 1; page <= 5; page++) {
+      const r = (await gh.get(`/actions/workflows/${wf}/runs?per_page=100&page=${page}&created=%3E%3D${since}${extra}`)) as { workflow_runs?: unknown };
+      const xs = arr(r.workflow_runs);
+      outRuns.push(...xs);
+      if (xs.length < 100) break;
+    }
+    return outRuns;
+  };
+  const mins = (a: unknown, b: unknown) => (Date.parse(String(b)) - Date.parse(String(a))) / 60000;
+  const ci = await runs("ci.yml", "&event=pull_request");
+  const dep = await runs("deploy-vps.yml", "");
+  const done = (xs: Record<string, unknown>[]) => xs.filter((r) => r.status === "completed");
+  const rate = (xs: Record<string, unknown>[]) => {
+    const s = xs.filter((r) => r.conclusion === "success").length;
+    const f = xs.filter((r) => r.conclusion === "failure").length;
+    return s + f >= 5 ? f / (s + f) : null;
+  };
+  const ciDur = done(ci).filter((r) => r.conclusion === "success").map((r) => mins(r.run_started_at, r.updated_at));
+  const depOk = done(dep).filter((r) => r.conclusion === "success");
+  const depDur = depOk.map((r) => mins(r.run_started_at, r.updated_at));
+  const merged: Record<string, unknown>[] = [];
+  for (let page = 1; page <= 4; page++) {
+    const xs = arr(await gh.get(`/pulls?state=closed&sort=updated&direction=desc&per_page=100&page=${page}`));
+    merged.push(...xs.filter((p) => p.merged_at && Date.parse(String(p.merged_at)) >= sinceMs));
+    if (xs.length < 100 || xs.every((p) => Date.parse(String(p.updated_at)) < sinceMs)) break;
+  }
+  const lead = merged.map((p) => mins(p.created_at, p.merged_at));
+  const coding: number[] = [];
+  for (const p of merged.slice(0, 40)) {
+    const cs = arr(await gh.get(`/pulls/${p.number}/commits?per_page=100`).catch(() => []));
+    const first = cs.map((c) => (isObj(c.commit) && isObj(c.commit.author) ? Date.parse(String(c.commit.author.date)) : NaN)).filter(Number.isFinite).sort((a, b) => a - b)[0];
+    if (first) coding.push(Math.max(0, (Date.parse(String(p.created_at)) - first) / 60000));
+  }
+  const deploysByTime = depOk.map((r) => ({ at: Date.parse(String(r.created_at)), end: Date.parse(String(r.updated_at)), sha: String(r.head_sha) })).sort((a, b) => a.at - b.at);
+  const toDeploy: number[] = [];
+  for (const p of merged) {
+    const m = String(p.merge_commit_sha ?? "");
+    const at = Date.parse(String(p.merged_at));
+    if (!SHA_RE.test(m)) continue;
+    const d = deploysByTime.find((x) => x.at >= at && gitRun(ctx.top, ["merge-base", "--is-ancestor", m, x.sha]).code === 0);
+    if (d) toDeploy.push((d.end - at) / 60000);
+  }
+  const reverts = merged.filter((p) => /^(revert|hoàn tác|gỡ lại)/i.test(String(p.title))).length;
+  const st = readControl(ctx, { fetch: true });
+  const evIn = (k: string) => st.events.filter((e) => e.kind === k && Date.parse(e.at) >= sinceMs).length;
+  const fmt = (v: number | null, unit = "′") => (v === null ? "—" : `${v.toFixed(1)}${unit}`);
+  const pct = (v: number | null) => (v === null ? "—" : `${(v * 100).toFixed(1)}%`);
+  const stat = (xs: number[]) => ({ n: xs.length, median: xs.length >= 3 ? median(xs) : null, p95: xs.length >= 3 ? quantile(xs, 0.95) : null });
+  const res = {
+    windowDays: days,
+    since,
+    codingMinutes: stat(coding),
+    leadTimeMinutes: stat(lead),
+    ciWallMinutes: stat(ciDur),
+    ciFailureRate: rate(done(ci)),
+    ciCancelled: done(ci).filter((r) => r.conclusion === "cancelled").length,
+    mergeToDeployMinutes: stat(toDeploy),
+    deployMinutes: stat(depDur),
+    deployFailureRate: rate(done(dep)),
+    mergedPrs: merged.length,
+    revertRate: merged.length >= 5 ? reverts / merged.length : null,
+    duplicatePrevented: evIn("DUPLICATE_PREVENTED"),
+    overlapDetected: evIn("OVERLAP_DETECTED"),
+    workerUtilization: null as number | null,
+  };
+  if (flags.has("json")) {
+    out(JSON.stringify(res, null, 2));
+    return 0;
+  }
+  out(`ĐO LUỒNG GIAO HÀNG · ${days} ngày từ ${since} (giờ GitHub, phút)`);
+  const row = (label: string, s: { n: number; median: number | null; p95: number | null }) => out(`  ${pad(label, 34)} median ${pad(fmt(s.median), 8)} p95 ${pad(fmt(s.p95), 8)} n=${s.n}`);
+  row("viết mã (commit đầu → mở PR)", res.codingMinutes);
+  row("lead time (mở PR → gộp)", res.leadTimeMinutes);
+  row("CI của PR (thời gian tường)", res.ciWallMinutes);
+  row("chờ deploy (gộp → lên production)", res.mergeToDeployMinutes);
+  row("một lượt deploy", res.deployMinutes);
+  out(`  tỷ lệ CI đỏ ${pct(res.ciFailureRate)} · CI bị huỷ ${res.ciCancelled} · deploy đỏ ${pct(res.deployFailureRate)} · revert ${pct(res.revertRate)} (${merged.length} PR đã gộp)`);
+  out(`  sổ điều phối: chặn trùng việc ${res.duplicatePrevented} · phát hiện chồng phạm vi ${res.overlapDetected} · độ bận worker: chưa đo được (subagent không để lại mốc trên GitHub)`);
+  const parts: [string, number | null][] = [
+    ["viết mã", res.codingMinutes.median],
+    ["CI", res.ciWallMinutes.median],
+    ["chờ deploy", res.mergeToDeployMinutes.median],
+    ["deploy", res.deployMinutes.median],
+  ];
+  const worst = parts.filter((p): p is [string, number] => p[1] !== null).sort((a, b) => b[1] - a[1])[0];
+  if (worst) out(`  ⇒ nút thắt lớn nhất (theo median): ${worst[0]} ${worst[1].toFixed(1)}′`);
+  return 0;
+}
+
 const HELP = `AI Tech Room — docs/ai-tech-room/README.md
 
   npm run ai -- status [sứ-mệnh…] [--github] [--json]   trạng thái SUY RA từ git + việc chủ shop cần làm
@@ -1876,6 +3629,25 @@ const HELP = `AI Tech Room — docs/ai-tech-room/README.md
   npm run ai -- lead <sứ-mệnh> [tiêu đề] [--dry-run]     ĐIỂM VÀO: dựng cây Lead ../wt-<sứ-mệnh> từ origin/main vừa fetch
                                                          (checkout cũ: git show origin/main:scripts/ai-tech.ts > <tạm>/ai-tech.ts && node <tạm>/ai-tech.ts lead …
                                                           — tệp PHẢI tên ai-tech.ts, tên khác thì lệnh không chạy)
+
+MẶT PHẲNG ĐIỀU KHIỂN XUYÊN SỨ MỆNH — docs/ai-tech-room/delivery-v2.md (sổ trên nhánh ai-control/registry)
+  npm run ai -- board [--github] [--all] [--json]        BẢNG CHO CHỦ SHOP: mọi sứ mệnh (sổ đối chiếu git/GitHub) · khoá · cần chủ shop
+  npm run ai -- intake "<yêu cầu>" --kw=a,b [--paths=…] [--github] [--record]
+                                                         CHỐNG TRÙNG: main đã có? sứ mệnh / PR / nhánh nào đang làm? ⇒ EXISTS·PARTIAL·IN_PROGRESS·MISSING
+  npm run ai -- claim <mã> [--title=… --branch=… --paths=a,b --after=<mã> --intake=… --status=… --dry-run]
+                                                         đăng ký / cập nhật sứ mệnh; TỪ CHỐI khi chồng phạm vi / điểm nóng với sứ mệnh đang mở
+  npm run ai -- heartbeat <mã> [--status=…]              nhịp tim (phiên còn sống) + đổi trạng thái
+  npm run ai -- close <mã> --status=DONE|CANCELLED --evidence=… [--no-runtime]
+                                                         khép + nhả phạm vi / giữ chỗ; DONE đòi bằng chứng đã vào main + verify ĐẠT
+  npm run ai -- lease acquire|renew|release|status [integration-lead|tech-lead] [--ttl=phút] [--purpose=…]
+                                                         MỘT chủ gộp/deploy tại một thời điểm; hết hạn là nhả (phục hồi được khi phiên chết)
+  npm run ai -- migration next | reserve --mission=<mã> | check [--pr=<số>] [--github]
+                                                         giữ chỗ số migration xuyên phiên; check đỏ khi va số với main / PR mở trước / giữ chỗ
+  npm run ai -- queue [--json]                           HÀNG ĐỢI GỘP: phụ thuộc · cổng · xung đột · rủi ro ⇒ gộp lô nào, việc nào đi riêng
+  npm run ai -- deploy-plan [--json]                     MỘT lượt deploy cho cả lô — có được deploy bây giờ không, vì sao
+  npm run ai -- verify [--sha=…] [--record --mission=<mã>]
+                                                         hậu kiểm production: SHA · migration · lượt deploy + smoke · endpoint công khai
+  npm run ai -- metrics [--days=14] [--json]             lead time · CI · chờ deploy · deploy · tỷ lệ đỏ / revert · trùng việc đã chặn
 `;
 
 export async function main(argv: readonly string[], cwd: string): Promise<number> {
@@ -1912,6 +3684,28 @@ export async function main(argv: readonly string[], cwd: string): Promise<number
       return cmdLead(ctx, rest[0], rest.slice(1), a.flags);
     case "new":
       return cmdNew(ctx, rest[0], rest.slice(1));
+    case "board":
+      return cmdBoard(ctx, a.flags);
+    case "intake":
+      return cmdIntake(ctx, rest, a.flags, a.values);
+    case "claim":
+      return cmdClaim(ctx, rest[0], a.flags, a.values);
+    case "heartbeat":
+      return cmdHeartbeat(ctx, rest[0], a.values);
+    case "close":
+      return cmdClose(ctx, rest[0], a.flags, a.values);
+    case "lease":
+      return cmdLease(ctx, rest[0], rest[1], a.values);
+    case "migration":
+      return cmdMigration(ctx, rest[0], a.flags, a.values);
+    case "queue":
+      return cmdQueue(ctx, a.flags);
+    case "deploy-plan":
+      return cmdDeployPlan(ctx, a.flags);
+    case "verify":
+      return cmdVerify(ctx, a.flags, a.values);
+    case "metrics":
+      return cmdMetrics(ctx, a.flags, a.values);
     default:
       throw new UsageError(`lệnh lạ: ${cmd}`);
   }

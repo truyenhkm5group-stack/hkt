@@ -171,6 +171,7 @@ import { testMigrationJournal } from "./migration-journal.test";
 import { testMigrationUpgradePath } from "./migration-upgrade-path.test";
 import { testMigrationNumberUnique, testMigrationAppendOnly, testRepoIntegrity } from "./repo-integrity.test";
 import { testAiTechRoom } from "./ai-tech-room.test";
+import { testDeliveryV2 } from "./delivery-v2.test";
 import { testChatbotDeployShape, testChatbotImportGuards, testChatbotNoSecretsInRepo } from "./chatbot.test";
 import { testChatbotAdBots } from "./chatbot-ad-bots.test";
 import { testChatbotVoice } from "./chatbot-voice.test";
@@ -2587,6 +2588,8 @@ async function main() {
   testRepoIntegrity();
   // AI Tech Room: điều phối worktree / DAG / dọn an toàn — kho git TẠM, không chạm cây thật (docs/ai-tech-room/README.md).
   await testAiTechRoom();
+  // Điều phối V2: cổng song song · deploy dùng lại bằng chứng cổng · sổ xuyên sứ mệnh · khoá Integration Lead · giữ chỗ migration (docs/ai-tech-room/delivery-v2.md).
+  await testDeliveryV2();
   // Nền tảng đa tổ chức: máy quét cô lập mức tiến trình (thuần, không CSDL) — cạnh các bài quét mã nguồn khác.
   testPlatformIsolationStatic();
   // Hồi quy 27/09: script trên GitHub Actions (không CSDL) vẫn phân giải được tổ chức nhà.

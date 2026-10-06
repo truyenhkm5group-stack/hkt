@@ -13,6 +13,11 @@ một tệp TypeScript không phụ thuộc gói nào, vài tệp JSON, và git.
 > **Không bắt buộc.** Một nhánh thường + một PR thường vẫn là cách đúng cho việc nhỏ. AI Tech Room
 > chỉ dùng khi sứ mệnh đủ lớn để cần tách việc (mục 3).
 
+> **Từ 06/10/2026 — Điều phối V2** (`delivery-v2.md`): chủ shop giao MỌI việc qua một cửa, skill `/lead`
+> (Tech Lead). Phần dưới đây điều phối việc TRONG một sứ mệnh; V2 thêm sổ chung XUYÊN sứ mệnh (nhánh
+> `ai-control/registry`: chống trùng việc, phạm vi, giữ chỗ migration, khoá Integration Lead), hàng đợi
+> gộp, deploy theo lô, hậu kiểm production, đo lường — và cổng CI song song.
+
 ---
 
 ## Giao một sứ mệnh — chủ shop đọc mục này

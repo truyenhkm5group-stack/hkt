@@ -4,10 +4,31 @@
 # và được gọi lại từ:
 #
 #   · `ci.yml`         — mỗi pull request, để `main` có cái gì đó để bắt buộc;
-#   · `deploy-vps.yml` — trước khi đụng máy chủ.
+#   · `deploy-vps.yml` — trước khi đụng máy chủ (trừ khi chính SHA ấy đã có một lượt cổng XANH
+#                        trên `main` — xem job `bang_chung` của deploy-vps.yml).
 #
 # VÌ SAO KHÔNG CHÉP SANG HAI TỆP: hai bộ cổng cùng tên sẽ trôi xa nhau, và cái trôi chậm hơn là
 # cái người ta tin. Ngày `npm test` thêm một bài mới, chỉ một bên chạy nó — mà không ai thấy.
+#
+# ═══════════ BỐN NHÁNH SONG SONG, MỘT CHECK BẮT BUỘC ═══════════
+#
+# TRƯỚC (đo 06/10/2026 trên 30 lượt CI xanh gần nhất — `docs/ai-tech-room/delivery-v2.md`): MỘT job
+# chạy NỐI ĐUÔI typecheck 1,6′ + lint 0,8′ + bộ kiểm thử 14,9′ + bộ kiểm thử lần hai 15,0′ + build
+# 4,3′ ⇒ job median 37,3′, p95 39,5′ — và deploy chạy lại y nguyên 37′ đó trước khi chạm máy chủ.
+# Không bước nào cần đầu ra của bước nào: chúng chỉ xếp hàng vì nằm chung một job.
+#
+# SAU: bốn job chạy CÙNG LÚC trên bốn máy riêng, đường găng = một lượt kiểm thử (~15′ + cài đặt).
+# Không bài kiểm nào bị bỏ, không bước nào bị nới: cùng bốn lệnh, cùng hai chế độ xác thực.
+#
+# VÌ SAO KHÔNG `matrix`: ruleset của `main` bắt buộc ĐÚNG một check tên `gates / gates`. Matrix biến
+# tên thành `gates / gates (x)` và check bắt buộc không bao giờ xuất hiện. Ở đây tên `gates` thuộc về
+# job GOM đứng đầu tệp; bốn job làm việc mang tên riêng (`gates / tinh` …) và KHÔNG bắt buộc từng cái
+# — job gom bắt buộc thay cho cả bốn.
+#
+# VÌ SAO JOB GOM LUÔN CHẠY (`if: always()`): job phụ thuộc bị BỎ QUA khi một job cần nó đỏ, và GitHub
+# coi một check bắt buộc ở trạng thái "skipped" là ĐẠT. Thiếu `always()` thì đúng lúc một nhánh đỏ,
+# check bắt buộc lại xanh. Job gom vì thế luôn chạy và tự đỏ nếu BẤT KỲ nhánh nào không phải
+# `success` (kể cả `cancelled` / `skipped`). `tests/delivery-v2.test.ts` khoá điều đó.
 name: Cổng chất lượng
 
 on:
@@ -21,7 +42,8 @@ on:
       sha:
         # BẢN ĐƯỢC KIỂM PHẢI LÀ BẢN ĐƯỢC TRIỂN KHAI — và câu đó chỉ đáng tin khi ĐO ĐƯỢC.
         # Đây là SHA mà bản checkout của cổng THẬT SỰ đứng trên, đọc bằng `git rev-parse` sau khi
-        # checkout xong, chứ không phải tham số đầu vào chép lại. `release` so nó với SHA của ảnh
+        # checkout xong, chứ không phải tham số đầu vào chép lại. Bốn nhánh checkout RIÊNG, nên job
+        # gom đòi cả bốn SHA trùng nhau rồi mới đưa ra một SHA. `release` so nó với SHA của ảnh
         # Docker và dừng nếu lệch: một lời khẳng định trong chú thích không chặn được gì.
         description: "SHA mà cổng thật sự đã kiểm (đọc từ bản checkout, không chép lại đầu vào)."
         value: ${{ jobs.gates.outputs.sha }}
@@ -29,13 +51,50 @@ on:
 permissions:
   contents: read
 
+# ═══ JOB GOM ĐỨNG ĐẦU — TÊN `gates` LÀ KHOÁ CỦA `main`, ĐỪNG ĐỔI ═══
 jobs:
   gates:
+    needs: [tinh, kiem_thu, kiem_thu_token, dung_ban]
+    if: ${{ always() }}
     runs-on: ubuntu-latest
-    # 45 phút (04/10/2026): bộ kiểm thử chạy HAI lần (~11–12 phút mỗi lần) + typecheck + lint + build đã chạm 30 phút — đo
-    # lượt 37173602589: mọi bước XANH, bước cuối xong ở 30:00 ⇒ cả lượt bị HUỶ; lượt deploy 2bbab7ea / 772deb67 huỷ y hệt.
-    # Trần 30 làm KHÔNG bản nào lên được production dù không có bài kiểm nào đỏ.
-    timeout-minutes: 45
+    timeout-minutes: 5
+    outputs:
+      sha: ${{ steps.gom.outputs.sha }}
+    steps:
+      - name: Gom bốn nhánh cổng — đỏ nếu BẤT KỲ nhánh nào không xanh, và bốn SHA phải trùng
+        id: gom
+        env:
+          KQ_TINH: ${{ needs.tinh.result }}
+          KQ_KIEM_THU: ${{ needs.kiem_thu.result }}
+          KQ_KIEM_THU_TOKEN: ${{ needs.kiem_thu_token.result }}
+          KQ_DUNG_BAN: ${{ needs.dung_ban.result }}
+          SHA_TINH: ${{ needs.tinh.outputs.sha }}
+          SHA_KIEM_THU: ${{ needs.kiem_thu.outputs.sha }}
+          SHA_KIEM_THU_TOKEN: ${{ needs.kiem_thu_token.outputs.sha }}
+          SHA_DUNG_BAN: ${{ needs.dung_ban.outputs.sha }}
+        run: |
+          set -euo pipefail
+          hong=0
+          for cap in "toàn vẹn · kiểu · chuẩn mã=$KQ_TINH" "kiểm thử=$KQ_KIEM_THU" "kiểm thử có token=$KQ_KIEM_THU_TOKEN" "dựng bản=$KQ_DUNG_BAN"; do
+            echo "  ${cap%%=*}: ${cap#*=}"
+            if [ "${cap#*=}" != "success" ]; then hong=1; fi
+          done
+          if [ "$hong" != "0" ]; then
+            echo "::error::Cổng ĐỎ — ít nhất một nhánh không xanh (cancelled / skipped cũng là đỏ: một nhánh không chạy không chứng minh được gì)."
+            exit 1
+          fi
+          if [ -z "$SHA_TINH" ] || [ "$SHA_TINH" != "$SHA_KIEM_THU" ] || [ "$SHA_TINH" != "$SHA_KIEM_THU_TOKEN" ] || [ "$SHA_TINH" != "$SHA_DUNG_BAN" ]; then
+            echo "::error::Bốn nhánh cổng đứng trên các SHA khác nhau ($SHA_TINH · $SHA_KIEM_THU · $SHA_KIEM_THU_TOKEN · $SHA_DUNG_BAN) — DỪNG."
+            exit 1
+          fi
+          echo "sha=$SHA_TINH" >> "$GITHUB_OUTPUT"
+          echo "✓ Cả bốn nhánh xanh trên $SHA_TINH"
+
+  # ═══ NHÁNH 1 · TOÀN VẸN KHO + KIỂU DỮ LIỆU + CHUẨN MÃ NGUỒN (~3′) ═══
+  tinh:
+    name: Toàn vẹn · kiểu · chuẩn mã
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
     outputs:
       sha: ${{ steps.ghim.outputs.sha }}
     steps:
@@ -67,39 +126,97 @@ jobs:
         run: npx tsc --noEmit
       - name: Kiểm tra chuẩn mã nguồn
         run: npx eslint --max-warnings=0
+
+  # ═══ NHÁNH 2 · BỘ KIỂM THỬ, CHẾ ĐỘ ẨN DANH (~15′ — đường găng) ═══
+  kiem_thu:
+    name: Kiểm thử (ẩn danh)
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    outputs:
+      sha: ${{ steps.ghim.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+          fetch-depth: 2
+      - name: Đọc SHA thật của bản đang kiểm
+        id: ghim
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Cài phụ thuộc
+        run: npm ci
       # GUARDRAIL NGHIỆP VỤ: contract test khoá luật "đơn giao thành công / đơn hoàn"
       # (docs/business-rules/ORDER_OUTCOME.md). Đây là điều kiện CHẶN, không phải cảnh báo.
       - name: Kiểm thử (gồm contract test luật nghiệp vụ)
         run: npm test
-      # ═══════════ LƯỢT THỨ HAI: CÓ TOKEN — VÀ TOKEN ẤY LÀ TOKEN GIẢ ═══════════
-      #
-      # ─── VÌ SAO CẦN LƯỢT NÀY ───
-      #
-      # `githubConfig()` đọc `ERP_GITHUB_TOKEN | GITHUB_TOKEN | GH_TOKEN` rồi chọn `auth` =
-      # `TOKEN` hay `PUBLIC`, và NHÁNH ẤY ĐỔI HÀNH VI THẬT: trần request mỗi lượt đồng bộ là 12
-      # khi có token, 3 khi ẩn danh (`prDetailBudget`). Lượt `npm test` ở trên KHÔNG có token nào
-      # trong `env:`, nên nhánh TOKEN chưa từng được chạy ở CI.
-      #
-      # ĐÃ TRẢ GIÁ CHO ĐIỀU NÀY (20/09/2026): một khẳng định so với hằng số 12 trong khi fixture
-      # được dựng từ `prDetailBudget(...)` — xanh trên máy có token, ĐỎ ở CI. Bài kiểm đo CÁI MÁY
-      # chứ không đo mã nguồn (AGENTS.md mục 65).
-      #
-      # ─── VÌ SAO KHÔNG DÙNG `matrix` ───
-      #
-      # Ruleset của `main` bắt buộc đúng một check tên `gates / gates`. Biến job này thành matrix
-      # làm tên check thành `gates / gates (che-do)`, check bắt buộc KHÔNG BAO GIỜ xuất hiện nữa,
-      # và MỌI pull request bị chặn vĩnh viễn. Hai chế độ vì thế là hai BƯỚC trong cùng một job.
-      # `tests/ops-concurrency.test.ts::testTenCheckBatBuoc` khoá tên check ấy.
-      #
-      # ─── TOKEN PHẢI GIẢ, VÀ PHẢI NHÌN LÀ BIẾT GIẢ ───
-      #
-      # Kho này PUBLIC. Bộ kiểm thử không gọi mạng thật (adapter GitHub bị tiêm `fetch` giả), nên
-      # thứ duy nhất cần là một chuỗi KHÁC RỖNG để `auth` rẽ sang nhánh TOKEN. Đưa token thật vào
-      # đây là đổi một lớp kiểm lấy một lượt rò rỉ.
+
+  # ═══ NHÁNH 3 · BỘ KIỂM THỬ, NHÁNH CÓ TOKEN (~15′ — chạy CÙNG LÚC với nhánh 2) ═══
+  #
+  # ─── VÌ SAO CẦN LƯỢT NÀY ───
+  #
+  # `githubConfig()` đọc `ERP_GITHUB_TOKEN | GITHUB_TOKEN | GH_TOKEN` rồi chọn `auth` =
+  # `TOKEN` hay `PUBLIC`, và NHÁNH ẤY ĐỔI HÀNH VI THẬT: trần request mỗi lượt đồng bộ là 12
+  # khi có token, 3 khi ẩn danh (`prDetailBudget`). Lượt ẩn danh ở nhánh 2 KHÔNG có token nào
+  # trong `env:`, nên nhánh TOKEN phải được chạy riêng ở đây.
+  #
+  # ĐÃ TRẢ GIÁ CHO ĐIỀU NÀY (20/09/2026): một khẳng định so với hằng số 12 trong khi fixture
+  # được dựng từ `prDetailBudget(...)` — xanh trên máy có token, ĐỎ ở CI. Bài kiểm đo CÁI MÁY
+  # chứ không đo mã nguồn (AGENTS.md mục 65).
+  #
+  # ─── TOKEN PHẢI GIẢ, VÀ PHẢI NHÌN LÀ BIẾT GIẢ ───
+  #
+  # Kho này PUBLIC. Bộ kiểm thử không gọi mạng thật (adapter GitHub bị tiêm `fetch` giả), nên
+  # thứ duy nhất cần là một chuỗi KHÁC RỖNG để `auth` rẽ sang nhánh TOKEN. Đưa token thật vào
+  # đây là đổi một lớp kiểm lấy một lượt rò rỉ.
+  kiem_thu_token:
+    name: Kiểm thử (có token giả)
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    outputs:
+      sha: ${{ steps.ghim.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+          fetch-depth: 2
+      - name: Đọc SHA thật của bản đang kiểm
+        id: ghim
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Cài phụ thuộc
+        run: npm ci
       - name: Kiểm thử lần hai — nhánh CÓ TOKEN (token GIẢ, kho public không cần token thật)
         env:
           GITHUB_TOKEN: "ghp_TOKEN_GIA_KHONG_CO_THAT_chi_de_re_nhanh_auth_000"
         run: npm test
-      # Bản dựng production bắt lỗi ranh giới client/server mà `tsc` không thấy.
+
+  # ═══ NHÁNH 4 · BẢN DỰNG PRODUCTION (~4′) ═══
+  # Bắt lỗi ranh giới client/server mà `tsc` không thấy.
+  dung_ban:
+    name: Dựng bản production
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    outputs:
+      sha: ${{ steps.ghim.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+          fetch-depth: 2
+      - name: Đọc SHA thật của bản đang kiểm
+        id: ghim
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Cài phụ thuộc
+        run: npm ci
       - name: Dựng bản production
         run: npm run build
