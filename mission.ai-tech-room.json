@@ -1,0 +1,43 @@
+{
+  "schema": 1,
+  "mission_id": "ai-tech-room",
+  "title": "AI Tech Room — nền điều phối nhiều worker cho kho này",
+  "business_goal": "Một Lead mới vào kho chạy được sứ mệnh nhiều worker (chia việc, song song, tích hợp, dọn) mà chủ shop chỉ phải làm những việc cần một con người.",
+  "status": "RUNNING",
+  "priority": "P0",
+  "risk": "HIGH",
+  "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "worker": null,
+  "worktree": null,
+  "branch": null,
+  "base_sha": null,
+  "domains": [],
+  "owned_paths": [
+    ".ai/config.json",
+    ".ai/missions/ai-tech-room.json",
+    ".claude/agents/ai-tech-reviewer.md",
+    ".claude/agents/ai-tech-worker.md",
+    ".claude/skills/mission/",
+    "AGENTS.md",
+    "CLAUDE.md",
+    "docs/ai-tech-room/",
+    "package.json",
+    "scripts/ai-tech.ts",
+    "tests/ai-tech-room.test.ts",
+    "tests/sync-fixtures.test.ts"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [
+    592,
+    594
+  ],
+  "migration_reservations": [],
+  "created_at": "2026-10-06T05:09:57.485Z",
+  "updated_at": "2026-10-06T05:09:57.485Z",
+  "last_heartbeat": "2026-10-06T05:09:57.485Z",
+  "definition_of_done": [
+    "Một Lead mới vào kho chạy được sứ mệnh nhiều worker (chia việc, song song, tích hợp, dọn) mà chủ shop chỉ phải làm những việc cần một con người."
+  ],
+  "mission_file": ".ai/missions/ai-tech-room.json"
+}
