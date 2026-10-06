@@ -40,7 +40,7 @@
  * PARTIAL mỗi 10 phút) · `landing-sheet` (mỗi phút; tổ chức chưa khai sheet thì hỏng mỗi phút) ·
  * mọi job kéo dữ liệu từ nhà cung cấp ngoài.
  */
-export const FANOUT_JOBS = Object.freeze(["dashboard-warm", "outcome-materialize", "work-recurrence", "work-snapshot", "data-check", "workflows", "sales-followup", "messaging-retry", "ads-spend-org", "wholesale-leads", "creative-publish-org", "shipping-route"]);
+export const FANOUT_JOBS = Object.freeze(["dashboard-warm", "outcome-materialize", "work-recurrence", "work-snapshot", "data-check", "workflows", "sales-followup", "sales-health", "messaging-retry", "ads-spend-org", "wholesale-leads", "creative-publish-org", "shipping-route"]);
 
 /**
  * Tầng tự động hoá (G-SCHED) — tập con của `FANOUT_JOBS`. `sales-followup` (follow-up chatbot fanpage — chủ shop yêu cầu
@@ -52,10 +52,11 @@ export const FANOUT_JOBS = Object.freeze(["dashboard-warm", "outcome-materialize
  * họ; không có chiến dịch / lead chờ ⇒ một câu đọc.
  * `creative-publish-org` (đăng tiếp camp «Đăng camp» của tổ chức khách — chủ nền tảng chốt 04/10/2026 «tự động 100% như
  * nhà») ghi Graph bằng token «meta-ads-org» của CHÍNH tổ chức khi tổ chức đã bật công tắc đăng; không lô nào mở ⇒ một câu đọc.
+ * `sales-health` (giám sát AI bán hàng — sau sự cố P0 06/10/2026) đọc CSDL của CHÍNH tổ chức + sổ AI nền tảng lọc đúng mã tổ chức.
  * `shipping-route` (tuyến giao tự động — chủ shop chốt 06/10/2026) tạo vận đơn ở hãng bằng kết nối hãng CỦA CHÍNH tổ chức khi
  * tổ chức bật «Tự tạo vận đơn»; công tắc tắt (mặc định) / không đơn nào chờ ⇒ một câu đọc.
  */
-export const AUTOMATION_FANOUT_JOBS = Object.freeze(["workflows", "work-recurrence", "sales-followup", "messaging-retry", "ads-spend-org", "wholesale-leads", "creative-publish-org", "shipping-route"]);
+export const AUTOMATION_FANOUT_JOBS = Object.freeze(["workflows", "work-recurrence", "sales-followup", "sales-health", "messaging-retry", "ads-spend-org", "wholesale-leads", "creative-publish-org", "shipping-route"]);
 
 /**
  * Job CHỈ chạy qua fan-out — bộ lập lịch KHÔNG gọi lượt của nhà cho chúng (luật của nhà chạy ké `alerts`; nhà TẮT module
@@ -63,7 +64,7 @@ export const AUTOMATION_FANOUT_JOBS = Object.freeze(["workflows", "work-recurren
  * khách sỉ — 0197; camp của nhà đăng tiếp qua `creative-loop`; nhà đồng bộ đơn Pancake nên không có đơn tạo tay nào để xếp
  * tuyến giao).
  */
-export const FANOUT_ONLY_JOBS = Object.freeze(["workflows", "sales-followup", "ads-spend-org", "wholesale-leads", "creative-publish-org", "shipping-route"]);
+export const FANOUT_ONLY_JOBS = Object.freeze(["workflows", "sales-followup", "sales-health", "ads-spend-org", "wholesale-leads", "creative-publish-org", "shipping-route"]);
 
 /**
  * Nhịp GÕ của job `workflows` (phút) — BẰNG `WORKFLOW_CADENCE_MIN_MINUTES` của `lib/constants/workflow-cadence.ts`

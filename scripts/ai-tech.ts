@@ -1758,7 +1758,9 @@ export function reconcileEntry(e: RegistryEntry, f: EntryFacts, cfg: Config, now
     const tipNow = f.branch?.tip ?? null;
     if (tipNow && tipNow !== e.handoff.sha && (f.merged === null || f.merged === "EMPTY"))
       drift.push(`nhánh đi tiếp sau bàn giao (bàn giao ${e.handoff.sha.slice(0, 8)}, nay ${tipNow.slice(0, 8)}) — worker chạy lại handoff`);
-    if (!f.pr && (f.merged === null || f.merged === "EMPTY")) drift.push(`đã bàn giao, CHƯA có PR — Integration Lead: \`pr-open ${e.mission_id}\``);
+    // Bảng chạy KHÔNG có --github thì `f.pr` luôn null — sổ đã ghi PR (`related_prs`, do pr-open) là đủ để KHÔNG báo thiếu
+    // (06/10/2026: PR #606 vừa mở mà bảng vẫn bảo Lead «pr-open» lần nữa).
+    if (!f.pr && !e.related_prs.length && (f.merged === null || f.merged === "EMPTY")) drift.push(`đã bàn giao, CHƯA có PR — Integration Lead: \`pr-open ${e.mission_id}\``);
   }
   if (declared === "CANCELLED") return { effective: "CANCELLED", drift };
   if (declared === "DONE") {

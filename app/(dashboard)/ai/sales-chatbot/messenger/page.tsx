@@ -4,12 +4,15 @@ import { SectionCard } from "@/components/ui-bits";
 import { can, requirePermission } from "@/lib/auth/session";
 import { env } from "@/lib/env";
 import { loadPendingPages, messengerRedirectUris } from "@/lib/integrations/messenger/connect";
-import { messengerVerifyToken } from "@/lib/integrations/messenger/graph";
+import { DISCOVERY_REASONS, MESSENGER_REQUIRED_PERMISSIONS, WEBHOOK_STATES, messengerVerifyToken, type DiscoveryDiagnostic, type DiscoveryReason, type PageWebhookCheck, type WebhookState } from "@/lib/integrations/messenger/graph";
+import { DISCOVERY_GUIDE, GUIDE_ACTOR_LABEL, PERMISSION_STATUS_LABEL, WEBHOOK_GUIDE, appRoleText, permissionTable, webhookRow, type Guide } from "@/lib/integrations/messenger/permission-guide";
+import { getSettingJson } from "@/lib/settings";
 import { platformOperatorDenial } from "@/lib/platform-ui/module-toggle";
 import { messengerView } from "@/lib/sales-chatbot/messenger";
 import { loadPageOverrides } from "@/lib/sales-chatbot/page-config";
 import { SALES_CHATBOT_MANAGE } from "@/lib/sales-chatbot/settings";
 import { DisconnectButton, PageManager, PagePicker } from "./messenger-panel";
+import { WebhookCheckPanel } from "./webhook-check";
 
 export const metadata = { title: "Messenger trực tiếp" };
 
@@ -18,20 +21,95 @@ const ERROR_TEXT: Record<string, string> = {
   app: "Nền tảng chưa cấu hình app Facebook — báo người vận hành.",
   huy: "Bạn đã huỷ ở bước cấp quyền của Facebook.",
   state: "Phiên kết nối hết hạn hoặc không khớp — bấm «Kết nối Facebook Page» lại.",
-  khongpage: "Tài khoản Facebook này không quản lý page nào có quyền nhắn tin. Đăng nhập đúng tài khoản quản trị page.",
+  khongpage: "Chưa nối được page nào — xem «Chẩn đoán lần kết nối gần nhất» bên dưới.",
 };
 
+type StoredDiagnostic = Partial<DiscoveryDiagnostic> & { at?: string; by?: string };
+type StoredWebhookCheck = { at?: string; pages?: (PageWebhookCheck & { name?: string })[] };
+
+const isReason = (x: string): x is DiscoveryReason => (DISCOVERY_REASONS as readonly string[]).includes(x);
+const isWebhookState = (x: unknown): x is WebhookState => typeof x === "string" && (WEBHOOK_STATES as readonly string[]).includes(x);
+const strs = (x: unknown): string[] => (Array.isArray(x) ? x.filter((v): v is string => typeof v === "string") : []);
+const fmtAt = (iso: string | undefined | null) => (iso ? new Date(iso).toLocaleString("vi-VN", { timeZone: "Asia/Ho_Chi_Minh", day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }) : "—");
+
+/** Hướng xử lý của MỘT lý do: ai làm + các bước. */
+function GuideBlock({ guide }: { guide: Guide }) {
+  return (
+    <div className="space-y-1 text-sm">
+      <p className="font-medium">{GUIDE_ACTOR_LABEL[guide.actor]}:</p>
+      <ol className="list-decimal space-y-0.5 pl-5 text-muted-foreground">
+        {guide.steps.map((st) => (
+          <li key={st}>{st}</li>
+        ))}
+      </ol>
+    </div>
+  );
+}
+
 /**
- * Lý do CỤ THỂ khi OAuth xong mà không nối được page (graph.ts `diagnosePageDiscovery`) — mỗi lý do một việc phải làm. `{ct}` là
- * phần chi tiết máy chủ đọc được từ Meta (tên quyền / tên page / quyền trên page), không có token.
+ * Chẩn đoán lần kết nối gần nhất (`messenger.lastConnectDiagnostic`, callback ghi): DANH SÁCH quyền đã cấp / bị bỏ chọn / còn
+ * thiếu, vai trò của người bấm trong app, số page Meta trả — kèm hướng xử lý của lý do. Không token nào được lưu ở đây.
  */
-const DISCOVERY_TEXT: Record<string, string> = {
-  PERMISSION_DECLINED: "Ở hộp thoại Facebook, quyền {ct} đã bị bỏ chọn. Bấm «Kết nối Facebook Page» lại — Facebook sẽ hỏi lại; giữ nguyên MỌI quyền và tích đủ các page cần nối.",
-  PERMISSION_NOT_GRANTED: "Facebook không cấp quyền {ct} cho app (hộp thoại không hề hỏi quyền này). Thường do app Meta còn ở chế độ Development mà tài khoản này không có vai trò trong app, hoặc quyền chưa được duyệt Advanced Access — báo người vận hành kiểm tra app ở Meta Developer → App Review.",
-  NO_PAGES: "Facebook trả về 0 page cho tài khoản này dù đã cấp quyền xem page ({ct}). Tài khoản chưa có quyền với page nào — vào Meta Business Suite → Cài đặt → Trang, thêm tài khoản này với quyền Toàn quyền hoặc Nhắn tin, rồi kết nối lại.",
-  NO_PAGE_TOKEN: "Facebook thấy {ct} nhưng không cấp cho app quyền trên page nào — thường do ở bước «Chọn trang» chưa tích page, hoặc page chỉ thuộc Business Portfolio mà tài khoản không có quyền trực tiếp. Bấm kết nối lại và tích đủ page.",
-  NO_MESSAGING_TASK: "Tài khoản có page nhưng không có quyền Nhắn tin trên page nào: {ct}. Cần quyền Nhắn tin (Messages) hoặc Toàn quyền trên page.",
-};
+function DiagnosticCard({ d, reason }: { d: StoredDiagnostic; reason: DiscoveryReason | null }) {
+  const granted = d.granted === null || d.granted === undefined ? null : strs(d.granted);
+  const declined = strs(d.declined);
+  const missing = strs(d.missing);
+  const table = permissionTable({ granted, declined }, MESSENGER_REQUIRED_PERMISSIONS);
+  const role = appRoleText(d.appRole ?? null);
+  const list = (xs: string[]) => (xs.length ? xs.join(", ") : "—");
+  return (
+    <SectionCard title="Chẩn đoán lần kết nối gần nhất" description={`Lúc ${fmtAt(d.at)} — đọc từ Facebook ngay sau hộp thoại cấp quyền.`}>
+      <div className="space-y-3 text-sm" data-testid="messenger-diagnostic" data-reason={reason ?? "OK"}>
+        {reason ? <p className="font-semibold text-rose-700 dark:text-rose-300">{DISCOVERY_GUIDE[reason].title}</p> : <p className="text-emerald-700 dark:text-emerald-400">Đủ quyền, có page nhắn tin được.</p>}
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-xs">
+            <thead className="text-muted-foreground">
+              <tr>
+                <th className="py-1 pr-2 font-medium">Quyền bắt buộc</th>
+                <th className="py-1 pr-2 font-medium">Trạng thái</th>
+                <th className="py-1 font-medium">Vì sao cần</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y">
+              {table.map((r) => (
+                <tr key={r.permission} data-testid="messenger-permission-row" data-status={r.status}>
+                  <td className="py-1 pr-2 font-mono">{r.permission}</td>
+                  <td className={r.status === "GRANTED" ? "py-1 pr-2 text-emerald-700 dark:text-emerald-400" : r.status === "UNKNOWN" ? "py-1 pr-2 text-muted-foreground" : "py-1 pr-2 font-medium text-destructive"}>{PERMISSION_STATUS_LABEL[r.status]}</td>
+                  <td className="py-1 text-muted-foreground">{r.why}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <dl className="grid gap-1 text-xs sm:grid-cols-[12rem_1fr]">
+          <dt className="text-muted-foreground">Quyền Facebook đã cấp</dt>
+          <dd className="break-words font-mono" data-testid="messenger-granted">
+            {granted === null ? "không đọc được" : list(granted)}
+          </dd>
+          <dt className="text-muted-foreground">Quyền bị bỏ chọn</dt>
+          <dd className="break-words font-mono" data-testid="messenger-declined">
+            {list(declined)}
+          </dd>
+          <dt className="text-muted-foreground">Quyền bắt buộc còn thiếu</dt>
+          <dd className="break-words font-mono" data-testid="messenger-missing">
+            {list(missing)}
+          </dd>
+          {role ? (
+            <>
+              <dt className="text-muted-foreground">Vai trò trong app Meta</dt>
+              <dd>{role}</dd>
+            </>
+          ) : null}
+          <dt className="text-muted-foreground">Page Facebook trả về</dt>
+          <dd>
+            {d.accountsSeen ?? 0} page{d.viaBusiness ? ` (${d.viaBusiness} qua Business Portfolio)` : ""} · nhắn tin được: {d.eligible ?? 0}
+          </dd>
+        </dl>
+        {reason ? <GuideBlock guide={DISCOVERY_GUIDE[reason]} /> : null}
+      </div>
+    </SectionCard>
+  );
+}
 
 /**
  * MESSENGER TRỰC TIẾP (0207 · lib/sales-chatbot/messenger.ts) — nối fanpage với bot KHÔNG cần Pancake: một nút cấp quyền của
@@ -48,20 +126,41 @@ export default async function MessengerSettingsPage({ searchParams }: { searchPa
   const pending = manage && user.organization && one("chon") ? await loadPendingPages(user.organization.code, user.id) : null;
   const operator = platformOperatorDenial(user) === null;
   const lydo = one("lydo");
+  const reasonQ = isReason(lydo) ? lydo : null;
+  const ct = one("ct").slice(0, 300);
   const error = one("loi")
     ? one("loi") === "fb"
       ? one("msg") || "Facebook từ chối."
-      : one("loi") === "khongpage" && DISCOVERY_TEXT[lydo]
-        ? DISCOVERY_TEXT[lydo].replace("{ct}", one("ct").slice(0, 300) || "—")
+      : one("loi") === "khongpage" && reasonQ
+        ? `${DISCOVERY_GUIDE[reasonQ].title}${ct ? ` — ${ct}` : ""}. Xem hướng xử lý bên dưới.`
         : (ERROR_TEXT[one("loi")] ?? "Kết nối chưa xong.")
     : null;
+  // Chẩn đoán đã lưu (callback ghi) là nguồn của DANH SÁCH quyền; lý do trên query string thắng cho dòng tiêu đề nếu có.
+  const stored = manage ? await getSettingJson<StoredDiagnostic | null>("messenger.lastConnectDiagnostic", null) : null;
+  const storedReason = stored && typeof stored.reason === "string" && isReason(stored.reason) ? stored.reason : null;
+  const diagReason = reasonQ ?? storedReason;
+  const showDiag = Boolean(stored && (diagReason || one("loi") === "khongpage"));
+  const webhookParam = one("webhook");
+  const webhookQ = isWebhookState(webhookParam) && webhookParam !== "OK" ? webhookParam : null;
+  const whStored = manage ? await getSettingJson<StoredWebhookCheck | null>("messenger.lastWebhookCheck", null) : null;
   const activePages = view.pages.filter((p) => p.status === "ACTIVE");
   const connected = activePages.length > 0;
+  const activeIds = new Set(activePages.filter((p) => p.kind === "PAGE").map((p) => p.id));
+  const whRows = (Array.isArray(whStored?.pages) ? whStored.pages : [])
+    .filter((c) => c && typeof c.pageId === "string" && activeIds.has(c.pageId) && isWebhookState(c.state))
+    .map((c) => webhookRow({ pageId: c.pageId, state: c.state, missingFields: strs(c.missingFields), token: c.token ?? { state: "UNKNOWN", expiresAt: null, why: null }, detail: typeof c.detail === "string" ? c.detail : null }, typeof c.name === "string" ? c.name : c.pageId));
   return (
     <div className="space-y-5">
       <PageHeader eyebrow="AI · Chatbot bán hàng" title="Messenger trực tiếp" description="Bot trả lời tin nhắn fanpage và Instagram — không cần Pancake" />
       {error ? <p className="rounded-md bg-rose-50 px-3 py-2 text-sm text-rose-800 dark:bg-rose-950/60 dark:text-rose-200">{error}</p> : null}
       {one("ok") ? <p className="rounded-md bg-emerald-50 px-3 py-2 text-sm text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-200">Đã nối page — nhắn thử một tin vào page để thấy bot trả lời.</p> : null}
+      {webhookQ ? (
+        <div className="space-y-1 rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:bg-amber-950/60 dark:text-amber-200" data-testid="messenger-webhook-warning">
+          <p className="font-medium">Page đã lưu nhưng chưa nhận tin được: {WEBHOOK_GUIDE[webhookQ].title.toLowerCase()}.</p>
+          <GuideBlock guide={WEBHOOK_GUIDE[webhookQ]} />
+        </div>
+      ) : null}
+      {showDiag && stored ? <DiagnosticCard d={stored} reason={diagReason} /> : reasonQ ? <GuideBlock guide={DISCOVERY_GUIDE[reasonQ]} /> : null}
 
       {view.mutedByPancake ? (
         <p className="rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:bg-amber-950/60 dark:text-amber-200" data-testid="messenger-muted-by-pancake">
@@ -89,6 +188,12 @@ export default async function MessengerSettingsPage({ searchParams }: { searchPa
         )}
         {pending && pending.length ? <PagePicker pages={pending.map((p) => ({ id: p.id, name: p.name }))} connected={activePages.map((p) => p.id)} /> : null}
       </SectionCard>
+
+      {connected && manage ? (
+        <SectionCard title="Webhook theo page" description="Page đã lưu trong ERP chưa chắc đang gửi tin về: Meta có thể gỡ đăng ký sau đó. «Kiểm tra lại» chỉ đọc ở Facebook, không đổi gì.">
+          <WebhookCheckPanel initial={whRows} initialAt={whRows.length ? (whStored?.at ?? null) : null} manage={manage} actorLabel={GUIDE_ACTOR_LABEL} />
+        </SectionCard>
+      ) : null}
 
       <SectionCard title="Lưu ý">
         <ul className="list-disc space-y-1 pl-5 text-sm text-muted-foreground">

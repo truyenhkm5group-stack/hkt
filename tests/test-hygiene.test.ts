@@ -154,6 +154,8 @@ const DOC_MOI_TRUONG_DA_KHAI: Record<string, string> = {
     "ĐẶT PLATFORM_SECRETS_KEY = giá trị BỊA để lưu token BỊA của kết nối «pancake-fanpage» trong tổ chức thử và để lượt nhập lịch sử đọc lại nó (cùng cách sales-inbox); fetch là bản giả đóng vai Pancake. Đó là ĐẦU VÀO của phép kiểm, trả lại nguyên trạng trong finally; kết luận không phụ thuộc máy có khoá thật hay không.",
   "tests/sales-order-sync.test.ts":
     "ĐẶT PLATFORM_SECRETS_KEY = giá trị BỊA để lưu bí mật của kết nối «Fanpage qua Pancake» trong tổ chức thử — đó là ĐẦU VÀO của phép kiểm (cùng cách self-service-journey), trả lại nguyên trạng trong finally; kết luận không phụ thuộc máy có khoá thật hay không.",
+  "tests/ai-sales-retry.test.ts":
+    "ĐẶT PLATFORM_SECRETS_KEY = giá trị BỊA để lưu token BỊA của kết nối «pancake-fanpage» trong tổ chức thử (cùng cách sales-order-sync); fetch là bản giả đóng vai Pancake, provider AI là bản giả. Đó là ĐẦU VÀO của phép kiểm, trả lại nguyên trạng trong finally; kết luận không phụ thuộc máy có khoá thật hay không.",
   "tests/launch-gates.test.ts":
     "CHÉP process.env (để tiến trình bash con còn PATH) rồi ĐẶT PLATFORM_SECRETS_KEY = giá trị BỊA sinh lúc chạy cho khối ghi .env được trích từ install-vps.sh — đầu vào của tình huống; không đọc giá trị sẵn có nào của máy, kết luận không rẽ nhánh theo môi trường.",
   "tests/messenger.test.ts":

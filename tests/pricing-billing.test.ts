@@ -302,7 +302,7 @@ export async function testPricingBilling() {
 
     // ── Migration: tổ chức có sẵn lúc 0222 chạy ⇒ «giữ từ trước». Chạy lại đúng câu của migration (idempotent).
     assert.equal((await readOrgPricingRow(C, { fresh: true })).grandfathered, false, "tổ chức tạo SAU 0222 không tự được giữ từ trước");
-    const mig = readFileSync(path.join(process.cwd(), "drizzle/0222_pricing_billing_foundation.sql"), "utf8");
+    const mig = readFileSync(path.join(process.cwd(), "drizzle/0223_pricing_billing_foundation.sql"), "utf8");
     const grandfather = mig.split("--> statement-breakpoint").map((s) => s.trim()).find((s) => s.startsWith('INSERT INTO "platform_org_pricing"'));
     assert.ok(grandfather, "migration 0222 phải có câu ghi giữ từ trước");
     await pdb.execute(sql.raw(grandfather));

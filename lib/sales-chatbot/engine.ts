@@ -24,6 +24,9 @@ import { ByokAnthropicProvider, ByokGeminiProvider, ByokOpenAiProvider } from "@
 import { platformChatAi } from "@/lib/ai-builder/provider";
 import { aiKillSwitchDenial } from "@/lib/ai-usage/control";
 import { recordAiUsage } from "@/lib/ai-usage/ledger";
+import type { AiUsageFeature } from "@/lib/ai-usage/types";
+import { MODEL_UNAVAILABLE_RE } from "@/lib/constants/ai-incidents";
+import { FailoverProvider, notifyPrimaryFailover, settingsHealthStore } from "@/lib/sales-chatbot/provider-failover";
 import { checkAiQuota } from "@/lib/ai-usage/quota";
 import { AI_PROFILE_SETTING_KEY } from "@/lib/blueprints/types";
 import { listChannelPages, openActiveConnection } from "@/lib/connectors/service";
@@ -34,7 +37,7 @@ import { canUseModule } from "@/lib/platform/capabilities";
 import { notifySalesChatAiDown, notifySalesChatHandoff, notifySalesChatModelFallback } from "@/lib/sales-chatbot/alerts";
 import { currentOrganization } from "@/lib/platform/context";
 import { findOrganization } from "@/lib/platform/organizations";
-import { isMessagingChannel, isPublicChannel, parseSalesChatbotConfig, SALES_CHATBOT_LIMITS, SALES_THINKING_BUDGET, salesBotBillingSource, salesBotError, SALES_CHATBOT_SETTING_KEY, SALES_TONE_LABEL, withinBusinessHours, type ChatChannel, type ChatView, type SalesChatbotConfig } from "@/lib/sales-chatbot/config";
+import { isMessagingChannel, isPublicChannel, parseSalesChatbotConfig, SALES_CHATBOT_LIMITS, SALES_THINKING_BUDGET, effectiveFallback, salesBotBillingSource, salesBotError, SALES_CHATBOT_SETTING_KEY, SALES_TONE_LABEL, withinBusinessHours, type ChatChannel, type ChatView, type SalesChatbotConfig } from "@/lib/sales-chatbot/config";
 import { parsePlaybookState, PLAYBOOK_LIMITS, PLAYBOOK_SETTING_KEY } from "@/lib/sales-chatbot/playbook-shared";
 import { LESSONS_SETTING_KEY, lessonsPrompt, parseLessonsState } from "@/lib/sales-chatbot/lessons-shared";
 import { levelPromptFor } from "@/lib/sales-chatbot/levels";
@@ -395,8 +398,8 @@ let providerOverride: ((cfg: SalesChatbotConfig) => AiProvider | null) | null = 
  * Nhà cung cấp AI của chatbot (AI dùng chung của nền tảng HOẶC khoá BYOK của tổ chức; bài kiểm thay được) — dùng chung cho
  * «Học từ hội thoại cũ» và nhắc khách. `source` = nguồn trả tiền để ghi sổ AI / kiểm hạn mức đúng chỗ.
  */
-export async function salesChatProvider(): Promise<{ ok: true; provider: AiProvider; source: "PLATFORM" | "BYOK" } | { ok: false; error: string }> {
-  return providerFor(await loadSalesChatbotConfig());
+export async function salesChatProvider(usage?: Partial<FailoverUsage>): Promise<{ ok: true; provider: AiProvider; source: "PLATFORM" | "BYOK" } | { ok: false; error: string }> {
+  return providerFor(await loadSalesChatbotConfig(), { feature: usage?.feature ?? "sales_chatbot", actorId: usage?.actorId ?? null, ref: usage?.ref ?? null });
 }
 
 /** Sổ tay ĐÃ XUẤT BẢN (`lib/sales-chatbot/playbook.ts`) — '' khi chưa có. Đọc thẳng settings, không import vòng. */
@@ -422,18 +425,19 @@ export async function describeCustomerImages(urls: readonly string[], opts: { co
     const org = await currentOrganization();
     if (await aiKillSwitchDenial(org.code)) return fallback;
     if (!(await checkAiQuota(org.code, salesBotBillingSource(cfg.connectorKey))).ok) return fallback;
-    const prov = await providerFor(cfg);
+    const prov = await providerFor(cfg, { feature: "sales_chatbot", actorId: opts.actorId ?? null, ref: opts.conversationId ?? null });
     if (!prov.ok) return fallback;
     const images = (await Promise.all(list.map((u) => fetchCustomerImage(u, opts.fetch)))).filter((x): x is AiImage => x !== null);
     if (!images.length) return fallback;
-    const base = { orgCode: org.code, feature: "sales_chatbot" as const, source: prov.source, provider: prov.provider.name, actorId: opts.actorId ?? null, ref: opts.conversationId ?? null };
+    // Nguồn trả tiền + nhà cung cấp đọc SAU lời gọi (khoá dự phòng có thể vừa đỡ lượt này — provider-failover.ts).
+    const base = () => ({ orgCode: org.code, feature: "sales_chatbot" as const, source: prov.source, provider: prov.provider.name, actorId: opts.actorId ?? null, ref: opts.conversationId ?? null });
     try {
       const { text, res } = await describeImages(prov.provider, images);
       const model = res.model || prov.provider.model;
-      await recordAiUsage({ ...base, model, requests: 1, inputTokens: res.usage.inputTokens + res.usage.cacheReadTokens + res.usage.cacheWriteTokens, outputTokens: res.usage.outputTokens, costUsd: estimateCostUsd(model, res.usage), status: "OK" }).catch(() => undefined);
+      await recordAiUsage({ ...base(), model, requests: 1, inputTokens: res.usage.inputTokens + res.usage.cacheReadTokens + res.usage.cacheWriteTokens, outputTokens: res.usage.outputTokens, costUsd: estimateCostUsd(model, res.usage), status: "OK" }).catch(() => undefined);
       return imageLine(urls.length, text || null);
     } catch {
-      await recordAiUsage({ ...base, model: prov.provider.model, requests: 1, inputTokens: null, outputTokens: null, costUsd: null, status: "ERROR" }).catch(() => undefined);
+      await recordAiUsage({ ...base(), model: prov.provider.model, requests: 1, inputTokens: null, outputTokens: null, costUsd: null, status: "ERROR" }).catch(() => undefined);
       return fallback;
     }
   } catch {
@@ -446,23 +450,29 @@ export function setSalesChatProviderForTests(fn: ((cfg: SalesChatbotConfig) => A
   providerOverride = fn;
 }
 
-async function providerFor(cfg: SalesChatbotConfig): Promise<{ ok: true; provider: AiProvider; source: "PLATFORM" | "BYOK" } | { ok: false; error: string }> {
-  const source = salesBotBillingSource(cfg.connectorKey);
+type ProviderPick = { ok: true; provider: AiProvider; source: "PLATFORM" | "BYOK" } | { ok: false; error: string };
+
+/** Ngữ cảnh ghi sổ AI cho lời gọi hỏng của khoá chính khi lượt đã chuyển sang khoá dự phòng (provider-failover.ts). */
+export type FailoverUsage = { feature: AiUsageFeature; actorId: string | null; ref: string | null };
+
+/** MỘT khoá AI (chính hoặc dự phòng) ⇒ provider. Bài kiểm thay được qua `providerOverride` (nhận cấu hình mang khoá đó). */
+async function resolveConnector(cfg: SalesChatbotConfig, key: SalesChatbotConfig["connectorKey"], modelName: string): Promise<ProviderPick> {
+  const source = salesBotBillingSource(key);
   if (providerOverride) {
-    const p = providerOverride(cfg);
+    const p = providerOverride(key === cfg.connectorKey && modelName === cfg.model ? cfg : { ...cfg, connectorKey: key, model: modelName });
     return p ? { ok: true, provider: p, source } : { ok: false, error: "Không có AI (kiểm thử)." };
   }
-  if (cfg.connectorKey === "platform") {
+  if (key === "platform") {
     const org = await currentOrganization();
     const plat = await platformChatAi(org.code);
     return plat.ok ? { ok: true, provider: plat.provider, source } : { ok: false, error: plat.reason };
   }
-  const conn = await openActiveConnection(cfg.connectorKey);
-  if (!conn.ok) return { ok: false, error: `Chưa dùng được khoá AI «${cfg.connectorKey}»: ${conn.reason}` };
+  const conn = await openActiveConnection(key);
+  if (!conn.ok) return { ok: false, error: `Chưa dùng được khoá AI «${key}»: ${conn.reason}` };
   const apiKey = conn.secrets.apiKey ?? "";
   if (!apiKey) return { ok: false, error: "Kết nối AI thiếu khoá." };
-  const model = cfg.model || conn.settings.model || null;
-  const make = (m: string | null): AiProvider => (cfg.connectorKey === "anthropic-byok" ? new ByokAnthropicProvider({ apiKey, model: m }) : cfg.connectorKey === "gemini-byok" ? new ByokGeminiProvider({ apiKey, model: m }) : new ByokOpenAiProvider({ apiKey, model: m }));
+  const model = modelName || conn.settings.model || null;
+  const make = (m: string | null): AiProvider => (key === "anthropic-byok" ? new ByokAnthropicProvider({ apiKey, model: m }) : key === "gemini-byok" ? new ByokGeminiProvider({ apiKey, model: m }) : new ByokOpenAiProvider({ apiKey, model: m }));
   const provider = make(model);
   if (!model) return { ok: true, provider, source };
   const fallback = make(null);
@@ -471,11 +481,54 @@ async function providerFor(cfg: SalesChatbotConfig): Promise<{ ok: true; provide
 }
 
 /**
+ * KHOÁ CHÍNH → KHOÁ DỰ PHÒNG (06/10/2026 — lib/sales-chatbot/provider-failover.ts). Không có khoá dự phòng có hiệu lực
+ * (`effectiveFallback`) ⇒ trả đúng provider của khoá chính, KHÔNG bọc gì: hành vi y như trước. Có ⇒ `FailoverProvider` chuyển
+ * ở mức MỘT lời gọi model (trước khi có chữ nào tới khách), ngắt mạch theo (tổ chức, khoá); `source` / `provider.name` đọc
+ * SAU lời gọi là của nhà cung cấp vừa phục vụ, nên sổ AI và kiểm credit đi đúng nơi trả tiền.
+ */
+async function providerFor(cfg: SalesChatbotConfig, usage: FailoverUsage = { feature: "sales_chatbot", actorId: null, ref: null }, primaryBlocked?: string): Promise<ProviderPick> {
+  const primary: ProviderPick = primaryBlocked ? { ok: false, error: primaryBlocked } : await resolveConnector(cfg, cfg.connectorKey, cfg.model);
+  const fb = effectiveFallback(cfg);
+  if (!fb) return primary;
+  const org = await currentOrganization();
+  let opened: Promise<ProviderPick> | null = null;
+  const openFallback = () => (opened ??= resolveConnector(cfg, fb.connectorKey, fb.model));
+  const fp = new FailoverProvider({
+    orgCode: org.code,
+    primary: primary.ok ? { key: cfg.connectorKey, source: primary.source, provider: primary.provider } : null,
+    primaryError: primary.ok ? undefined : primary.error,
+    secondaryKey: fb.connectorKey,
+    resolveSecondary: async () => {
+      const r = await openFallback();
+      return r.ok ? { ok: true, candidate: { key: fb.connectorKey, source: r.source, provider: r.provider } } : { ok: false, error: r.error };
+    },
+    longOpenMs: cfg.failoverOpenMinutes * 60_000,
+    store: settingsHealthStore(org.code),
+    onAttemptFailed: async (a) => {
+      await recordAiUsage({ orgCode: org.code, feature: usage.feature, source: a.source, provider: a.name, model: a.model, requests: 1, inputTokens: null, outputTokens: null, costUsd: null, status: "ERROR", actorId: usage.actorId, ref: usage.ref }).catch(() => undefined);
+    },
+    onPrimaryNeedsHuman: (a) => notifyPrimaryFailover(a.key, a.kind, fb.connectorKey, new Date()).catch(() => undefined),
+  });
+  if (!primary.ok) {
+    // Khoá chính không mở được (kết nối tắt · gói hết AI dùng chung) ⇒ thử mở khoá dự phòng NGAY: không mở được thì giữ
+    // nguyên câu lỗi của khoá chính như trước.
+    if (!(await openFallback()).ok) return primary;
+  }
+  return {
+    ok: true,
+    provider: fp,
+    get source() {
+      return fp.source;
+    },
+  };
+}
+
+/**
  * Lỗi «model không có / không còn cho khoá này» (HTTP 404, `model_not_found`, «no longer available»…) — KHÔNG phải lỗi
- * tạm thời: gọi lại bằng đúng model đó vẫn hỏng. HÀM THUẦN.
+ * tạm thời: gọi lại bằng đúng model đó vẫn hỏng. HÀM THUẦN. Mẫu dùng chung với bộ phân loại chuyển provider.
  */
 export function isModelUnavailableError(message: string): boolean {
-  return /HTTP 404\b|model[_ ]not[_ ]found|no longer available|is not found for api version|models\/[a-z0-9.-]+ is not found|(?:model|models)\b[^\n]{0,80}\b(?:does not exist|not found|not supported|unknown)/i.test(message);
+  return MODEL_UNAVAILABLE_RE.test(message);
 }
 
 /** Model bị nhà cung cấp từ chối gần đây ⇒ đi thẳng model mặc định, khỏi tốn một lời gọi hỏng mỗi tin (tối đa 1 giờ). */
@@ -680,11 +733,13 @@ async function chatTurnCore(conversationId: string, rawText: string, opts: { cha
     if (killed) return blocked("DISABLED", "AI đang bị người vận hành nền tảng tạm tắt cho tổ chức này — liên hệ người vận hành", `AI đang tắt: ${killed}`);
     const billing = salesBotBillingSource(cfg.connectorKey);
     const quota = await checkAiQuota(org.code, billing);
-    if (!quota.ok) {
-      await recordAiUsage({ orgCode: org.code, feature: "sales_chatbot", source: billing, provider: null, model: null, requests: 0, inputTokens: null, outputTokens: null, costUsd: null, status: "BLOCKED_QUOTA", actorId: opts.actorId ?? null, ref: conv.id }).catch(() => undefined);
-      return blocked("QUOTA", "Tổ chức đã dùng hết hạn mức AI của gói dịch vụ — nâng gói hoặc chờ kỳ sau", quota.error);
-    }
-    const prov = await providerFor(cfg);
+    // Hạn mức của nguồn trả tiền của khoá CHÍNH đã hết (vd AI dùng chung hết credit gói) mà khoá dự phòng trả tiền ở NGUỒN
+    // KHÁC còn hạn mức ⇒ lượt này đi thẳng khoá dự phòng (provider-failover.ts). Dòng BLOCKED_QUOTA của khoá chính vẫn ghi.
+    const fbQuota = effectiveFallback(cfg);
+    const fbSource = fbQuota ? salesBotBillingSource(fbQuota.connectorKey) : null;
+    if (!quota.ok) await recordAiUsage({ orgCode: org.code, feature: "sales_chatbot", source: billing, provider: null, model: null, requests: 0, inputTokens: null, outputTokens: null, costUsd: null, status: "BLOCKED_QUOTA", actorId: opts.actorId ?? null, ref: conv.id }).catch(() => undefined);
+    if (!quota.ok && !(fbSource && fbSource !== billing && (await checkAiQuota(org.code, fbSource)).ok)) return blocked("QUOTA", "Tổ chức đã dùng hết hạn mức AI của gói dịch vụ — nâng gói hoặc chờ kỳ sau", quota.error);
+    const prov = await providerFor(cfg, { feature: "sales_chatbot", actorId: opts.actorId ?? null, ref: conv.id }, quota.ok ? undefined : quota.error);
     if (!prov.ok) return blocked("CONNECTION", "Kết nối AI của shop chưa dùng được — mở Cài đặt → Kết nối, kiểm tra lại khoá AI", prov.error);
     // AI ĐỌC HIỂU (0183): một lời gọi NHỎ chỉ chọn mã câu mẫu — chọn được ⇒ trả lời bằng câu mẫu, khỏi lượt chatbot đầy đủ.
     // Lỗi ở bước này không chặn khách: đi tiếp đường chatbot đầy đủ (nó tự xử lý lỗi nhà cung cấp).
@@ -720,24 +775,40 @@ async function chatTurnCore(conversationId: string, rawText: string, opts: { cha
     let calls = 0;
     let inTok = 0;
     let outTok = 0;
-    let cost: number | null = 0;
-    let model = prov.provider.model;
     let status: "OK" | "ERROR" = "OK";
     let lastError: string | null = null;
     let leaks = 0;
     // Lượt này đã có câu nào TỚI KHÁCH chưa (chữ còn lại sau bộ lọc, câu mẫu, câu báo của máy chủ) — xem «KHÔNG ĐỂ KHÁCH IM».
     let spoke = false;
+    // SỔ AI THEO NHÀ CUNG CẤP THẬT (provider-failover.ts): vòng công cụ có thể đổi khoá giữa chừng (khoá chính hỏng ở vòng 3)
+    // ⇒ mỗi đoạn liền một nhà cung cấp là MỘT dòng, để tiền không ghi nhầm nguồn trả (BYOK ≠ credit gói). Không đổi khoá ⇒
+    // đúng một dòng như trước.
+    type Segment = { name: string; source: "PLATFORM" | "BYOK"; model: string; calls: number; inTok: number; outTok: number; cost: number | null };
+    const newSegment = (): Segment => ({ name: prov.provider.name, source: prov.source, model: prov.provider.model, calls: 0, inTok: 0, outTok: 0, cost: 0 });
+    let seg = newSegment();
+    const recordSegment = (s: Segment, st: "OK" | "ERROR") => recordAiUsage({ orgCode: org.code, feature: "sales_chatbot", source: s.source, provider: s.name, model: s.model, requests: s.calls, inputTokens: s.inTok, outputTokens: s.outTok, costUsd: s.calls ? s.cost : null, status: st, actorId: opts.actorId ?? null, ref: conv.id }).catch(() => undefined);
     try {
       for (let round = 0; round < SALES_CHATBOT_LIMITS.toolRounds; round++) {
         // Mức suy nghĩ theo cấu hình (Kỹ = suy luận vừa, Nhanh = thấp) — ngân sách đủ rộng để phần suy luận không ăn hết câu
         // trả lời (01/10/2026: suy luận ăn chung `max_output_tokens`).
+        // KHÔNG GỬI TRÙNG: `complete` trả về ĐÚNG MỘT kết quả (khoá chính hoặc khoá dự phòng) — chữ chỉ được ghi / gửi SAU dòng
+        // này, nên chuyển khoá không bao giờ sinh câu thứ hai cho khách.
         const res = await prov.provider.complete({ system, messages: history, tools, ...SALES_THINKING_BUDGET[cfg.thinking] });
+        if (seg.calls && (seg.name !== prov.provider.name || seg.source !== prov.source)) {
+          await recordSegment(seg, "OK");
+          seg = newSegment();
+        }
+        seg.name = prov.provider.name;
+        seg.source = prov.source;
         calls += 1;
         inTok += res.usage.inputTokens + res.usage.cacheReadTokens + res.usage.cacheWriteTokens;
         outTok += res.usage.outputTokens;
-        model = res.model || model;
         const c = estimateCostUsd(res.model || prov.provider.model, res.usage);
-        cost = cost === null || c === null ? null : cost + c;
+        seg.calls += 1;
+        seg.inTok += res.usage.inputTokens + res.usage.cacheReadTokens + res.usage.cacheWriteTokens;
+        seg.outTok += res.usage.outputTokens;
+        seg.model = res.model || prov.provider.model;
+        seg.cost = seg.cost === null || c === null ? null : seg.cost + c;
         const raw = res.content.length ? res.content : [{ type: "text" as const, text: EMPTY_REPLY_TEXT }];
         // Messenger không hiển thị markdown — «*Họ tên, SĐT…*» tới khách nguyên dấu sao (03/10/2026, «Dương Bích Phượng»).
         // CHỮ GỬI KHÁCH QUA BỘ LỌC SUY LUẬN (03/10/2026, «Phuoc Ha»): model viết lẩm bẩm vào câu trả lời — tên công cụ, «Khách
@@ -817,7 +888,13 @@ async function chatTurnCore(conversationId: string, rawText: string, opts: { cha
         lastError = lastError ?? "Lượt không có câu nào gửi khách — đã gửi câu dự phòng";
       }
     }
-    await recordAiUsage({ orgCode: org.code, feature: "sales_chatbot", source: prov.source, provider: prov.provider.name, model, requests: calls, inputTokens: inTok, outputTokens: outTok, costUsd: calls ? cost : null, status, actorId: opts.actorId ?? null, ref: conv.id }).catch(() => undefined);
+    // Lời gọi hỏng cuối cùng nằm ở khoá KHÁC đoạn vừa phục vụ (đổi khoá giữa lượt rồi cả hai cùng hỏng) ⇒ đoạn cũ một dòng,
+    // lời gọi hỏng một dòng riêng 0 lời gọi thành công — đúng hình của lượt hỏng ngay vòng đầu.
+    if (seg.calls && (seg.name !== prov.provider.name || seg.source !== prov.source)) {
+      await recordSegment(seg, status);
+      seg = newSegment();
+    }
+    await recordSegment({ ...seg, name: prov.provider.name, source: prov.source }, status);
     await bump({
       state: state as Record<string, unknown>,
       turns: conv.turns + 1,

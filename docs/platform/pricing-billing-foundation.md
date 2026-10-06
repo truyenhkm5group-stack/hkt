@@ -1,6 +1,6 @@
 # Nền móng giá & thu phí — gói cấu hình được, đồng hồ đo, sổ chi phí AI, Margin Guard, entitlement
 
-> Migration `0222_pricing_billing_foundation`. Mở rộng `0169` (gói) · `0176` (sổ AI) · `0187` / `0192` / `0194` (thu phí,
+> Migration `0223_pricing_billing_foundation`. Mở rộng `0169` (gói) · `0176` (sổ AI) · `0187` / `0192` / `0194` (thu phí,
 > bảng giá) · `0203` / `0204` (sổ kinh tế SaaS). Kiểm thử: `tests/pricing-billing.test.ts`. Đọc kèm `billing.md`, `pricing.md`.
 
 ## 0. Đã có · mở rộng · mới

@@ -18,6 +18,12 @@ import { deliverMessage } from "@/lib/messaging/service";
 import { isMessagingConnector, ORDER_NOTIFY_RULE_KEYS, type MessagingConnectorKey } from "@/lib/messaging/types";
 import { listRules } from "@/lib/workflow/rules";
 import { parseSalesChatbotConfig, SALES_CHATBOT_SETTING_KEY } from "@/lib/sales-chatbot/config";
+import { loadAlertConfig } from "@/lib/alerts/config";
+import { sendLark } from "@/lib/alerts/lark";
+import { sendTelegram } from "@/lib/alerts/telegram";
+import { currentOrganization, withOrganization } from "@/lib/platform/context";
+import { getHomeOrganization } from "@/lib/platform/organizations";
+import { STATUS_DOT, STATUS_LABEL, type HealthAlertDecision, type SalesHealth, type SalesHealthSnapshot } from "@/lib/sales-chatbot/health-shared";
 
 /** Cấu hình bot — đọc thẳng settings (engine import tệp này, không import ngược). */
 async function handoffNotifiesGroup(): Promise<boolean> {
@@ -150,4 +156,64 @@ export async function notifySalesChatAiDown(key: string, label: string, now: Dat
   } catch {
     // Nhóm chat là đường phụ — chuông ERP ở trên đã ghi.
   }
+}
+
+/** Trang cockpit của AI bán hàng — đích của mọi tin giám sát. */
+export const SALES_COCKPIT_HREF = "/ai/sales-chatbot/cockpit";
+
+/**
+ * Nhóm của ĐƠN VỊ VẬN HÀNH NỀN TẢNG (VNX) — kênh cảnh báo của tổ chức NHÀ (Lark nhóm quản lý, rồi Telegram). Chỉ nhận MÃ
+ * tổ chức + trạng thái + câu kiểm (số đếm, lớp lỗi) — KHÔNG tên khách, SĐT, nội dung tin (luật ISO-05 của `loadAlertConfig`:
+ * dữ liệu của tổ chức khách không bao giờ chảy vào nhóm của VNX). Không ném.
+ */
+async function notifyPlatformOperator(title: string, lines: string[]): Promise<void> {
+  const send = async () => {
+    const cfg = await loadAlertConfig();
+    if (cfg.larkManagerWebhookUrl) await sendLark(cfg.larkManagerWebhookUrl, cfg.larkManagerSecret, title, lines.map((text) => [{ text }]));
+    else if (cfg.larkWebhookUrl) await sendLark(cfg.larkWebhookUrl, cfg.larkSecret, title, lines.map((text) => [{ text }]));
+    else if (cfg.telegramBotToken && cfg.telegramChatId) {
+      const esc = (x: string) => x.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+      await sendTelegram(cfg.telegramBotToken, cfg.telegramChatId, [`<b>${esc(title)}</b>`, ...lines.map(esc)].join("\n"));
+    }
+  };
+  try {
+    const org = await currentOrganization();
+    if (org.isHome) await send();
+    else await withOrganization((await getHomeOrganization()).code, send);
+  } catch {
+    // Đường phụ — chuông của tổ chức đã ghi.
+  }
+}
+
+/**
+ * GIÁM SÁT AI BÁN HÀNG (job `sales-health`): sự cố MỚI · nhắc khi còn ĐỎ · hồi phục. Chống trùng ở CSDL bằng khoá của quyết
+ * định (`decideHealthAlert` đã gắn khung giờ) — và tin RA NGOÀI (nhóm shop · nhóm VNX) chỉ đi khi dòng `notifications` theo
+ * khoá đó được ghi MỚI: job chạy 5 phút/lần, không có cổng này thì mỗi lượt là một tin Lark.
+ */
+export async function notifySalesHealth(p: { decision: Exclude<HealthAlertDecision, { kind: "NONE" }>; health: SalesHealth; snapshot: SalesHealthSnapshot; now: Date }): Promise<void> {
+  const { decision, health, snapshot, now } = p;
+  const recovered = decision.kind === "RECOVERED";
+  const title = recovered ? "🟢 AI bán hàng đã hoạt động lại" : `${STATUS_DOT[health.status]} AI bán hàng: ${STATUS_LABEL[health.status]}`;
+  const bad = health.checks.filter((c) => c.level === "CRITICAL" || c.level === "WARNING");
+  const lines = recovered
+    ? [`Mọi kiểm đã về bình thường. Câu bot cuối: ${snapshot.lastAiReplyAt ? new Date(snapshot.lastAiReplyAt).toLocaleString("vi-VN", { timeZone: "Asia/Ho_Chi_Minh" }) : "—"}.`]
+    : bad.map((c) => `${c.level === "CRITICAL" ? "🔴" : "🟡"} ${c.title}: ${c.detail}${c.fix ? ` ⇒ ${c.fix}` : ""}`);
+  const body = lines.join("\n");
+  const db = await getDb();
+  const inserted = await db
+    .insert(schema.notifications)
+    .values({ kind: "SYSTEM", severity: recovered ? "info" : health.status === "RED" ? "critical" : "warning", title, body: body.slice(0, 2000), href: SALES_COCKPIT_HREF, entityType: "SALES_CHAT", entityId: "health", dedupeKey: decision.dedupe, occurredAt: now })
+    .onConflictDoNothing({ target: schema.notifications.dedupeKey })
+    .returning({ id: schema.notifications.id });
+  if (!inserted.length) return;
+  const users = await activeUserIdsWhoCan("ai_sales:manage");
+  await sendInboxMessages(users.map((userId) => ({ userId, kind: "SALES_CHAT_AI_DOWN", title, body: body.slice(0, 2000), href: SALES_COCKPIT_HREF, dedupeKey: `${decision.dedupe}:${userId}` })), db);
+  try {
+    const group = await operationsGroupChannel();
+    if (group) await deliverMessage({ connectorKey: group.connectorKey, destination: group.destination, title, body: `${title}\n${body}`.slice(0, 3500), dedupeKey: `${decision.dedupe}:group`, event: "sales_chat.health", subject: { type: "SALES_CHAT", id: "health" } });
+  } catch {
+    // Nhóm chat là đường phụ — chuông ERP ở trên đã ghi.
+  }
+  const org = await currentOrganization();
+  await notifyPlatformOperator(`${title} — tổ chức ${org.code}`, recovered ? lines : bad.map((c) => `${c.level === "CRITICAL" ? "🔴" : "🟡"} ${c.title}: ${c.detail}`));
 }
