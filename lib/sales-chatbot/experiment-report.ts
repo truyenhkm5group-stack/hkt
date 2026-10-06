@@ -1,4 +1,4 @@
-import { and, desc, eq, gte, ne, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, ne, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { dauNgayVN } from "@/lib/ai/budget";
 import { can, type SessionUser } from "@/lib/auth/session";
@@ -9,6 +9,8 @@ import { ORDER_OUTCOME, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
 import type { ChatView } from "@/lib/sales-chatbot/config";
 import { conversationView } from "@/lib/sales-chatbot/engine";
 import { armStats, type ArmRaw, type ArmStats, type DrillFilter } from "@/lib/sales-chatbot/experiment-shared";
+import { BOT_CONFIRMED, HUMAN_TOUCHED } from "@/lib/sales-chatbot/events-sql";
+import { loadLostReasons } from "@/lib/sales-chatbot/lost-reasons";
 import { loadModeConfig } from "@/lib/sales-chatbot/operating-mode";
 import { loadOrderSyncConfig } from "@/lib/sales-chatbot/order-sync";
 
@@ -98,11 +100,11 @@ export async function listDrillConversations(user: SessionUser, f: DrillFilter, 
   const e = schema.salesConversationEvents;
   const c = schema.salesChatConversations;
   const since = new Date(dauNgayVN(now).getTime() - (f.days - 1) * 86_400_000);
-  const human = sql`bool_or(${e.type} in ('handoff.requested','human.took_over'))`;
+  const human = sql`bool_or(${HUMAN_TOUCHED})`;
   const conds = [sql`bool_or(${e.type} = 'message.received')`];
   if (f.cohort === "AI_ONLY") conds.push(sql`not ${human}`);
   if (f.cohort === "AI_THEN_HUMAN") conds.push(human);
-  if (f.confirmed) conds.push(sql`bool_or(${e.type} = 'order.confirmed')`);
+  if (f.confirmed) conds.push(sql`bool_or(${BOT_CONFIRMED})`);
   if (f.reason) conds.push(sql`bool_or(${e.type} in ('handoff.requested','human.took_over') and coalesce(${e.reasonCode}, 'OTHER') = ${f.reason})`);
   const ids = db
     .select({ id: e.conversationId })
@@ -111,10 +113,13 @@ export async function listDrillConversations(user: SessionUser, f: DrillFilter, 
     .groupBy(e.conversationId)
     .having(and(...conds));
   const LIMIT = 200;
+  // Lý do không mua là phân loại LÚC ĐỌC (không có cột) ⇒ lấy đúng tập hội thoại của bảng «Vì sao khách không mua».
+  const lostIds = f.lost ? ((await loadLostReasons({ days: f.days, now, pageId: f.page ?? null })).idsByReason[f.lost] ?? []) : null;
+  if (lostIds && lostIds.length === 0) return { ok: true, rows: [], truncated: false };
   const rows = await db
     .select({ id: c.id, channel: c.channel, status: c.status, turns: c.turns, stage: sql<string | null>`${c.state}->>'stage'`, handoffReason: c.handoffReason, orderId: c.orderId, updatedAt: c.updatedAt, arm: sql<string | null>`${c.state}->'experiment'->>'arm'` })
     .from(c)
-    .where(and(sql`${c.id} in ${ids}`, ...(f.arm ? [sql`${c.state}->'experiment'->>'arm' = ${f.arm}`] : [])))
+    .where(and(sql`${c.id} in ${ids}`, ...(f.arm ? [sql`${c.state}->'experiment'->>'arm' = ${f.arm}`] : []), ...(lostIds ? [inArray(c.id, lostIds)] : []), ...(f.page ? [eq(c.pageId, f.page)] : [])))
     .orderBy(desc(c.updatedAt))
     .limit(LIMIT + 1);
   return { ok: true, truncated: rows.length > LIMIT, rows: rows.slice(0, LIMIT).map((r) => ({ ...r, updatedAt: r.updatedAt.toISOString() })) };

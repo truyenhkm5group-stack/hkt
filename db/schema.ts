@@ -9690,6 +9690,44 @@ export const orgConnections = pgTable(
   ],
 );
 
+// ═══ NHIỀU PAGE DƯỚI MỘT KẾT NỐI (0220 · docs/messaging-providers.md §7) ═══
+//
+// `org_connections` giữ MỘT hàng mỗi loại kết nối (UNIQUE connector_key) ⇒ Messenger trực tiếp từng chỉ giữ được một page: nối
+// page B ghi đè page A. Bảng con này là các TÀI KHOẢN KÊNH (Facebook page · Instagram gắn với page) dưới một kết nối — mỗi page
+// một hàng, token mã hoá RIÊNG (AAD gắn tổ chức + kết nối + page, nên token của page này không giải được ở hàng page khác),
+// trạng thái người chọn (`status`), bật / tắt AI theo page, và sức khoẻ MÁY ghi (mốc tin gần nhất, lỗi gần nhất). Lỗi của page A
+// không đụng page B. Chỉ đọc / ghi qua lib/connectors/service.ts (cùng luật với org_connections). Tổ chức nối từ trước không có
+// hàng nào ⇒ đọc như cũ từ hàng kết nối đơn — không backfill.
+export const orgChannelPages = pgTable(
+  "org_channel_pages",
+  {
+    id: id(),
+    orgCode: text("org_code").notNull(),
+    connectorKey: text("connector_key").notNull(),
+    pageId: text("page_id").notNull(),
+    kind: text("kind").notNull().default("PAGE"),
+    /** Instagram: page Facebook mà tài khoản gắn vào. */
+    parentPageId: text("parent_page_id"),
+    name: text("name").notNull().default(""),
+    status: text("status").notNull().default("ACTIVE"),
+    aiEnabled: boolean("ai_enabled").notNull().default(true),
+    secretsEnc: bytea("secrets_enc"),
+    secretsKeyId: text("secrets_key_id"),
+    lastEventAt: ts("last_event_at"),
+    lastError: text("last_error"),
+    lastErrorAt: ts("last_error_at"),
+    connectedByUserId: text("connected_by_user_id"),
+    connectedByName: text("connected_by_name"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex("org_channel_pages_key").on(t.connectorKey, t.pageId),
+    check("org_channel_pages_status_check", sql`${t.status} in ('ACTIVE','DISABLED')`),
+    check("org_channel_pages_kind_check", sql`${t.kind} in ('PAGE','INSTAGRAM')`),
+  ],
+);
+
 // ═══ PHASE 7 — BLUEPRINT + MẪU NGÀNH (docs/platform/phase-7-contracts.md mục 3) ═══
 //
 // Sổ cài đặt của gói metadata trong CSDL tổ chức. `blueprint_items` giữ hai băm của phép so ba chiều X4: băm của mục
@@ -10271,6 +10309,35 @@ export const salesReplayPoints = pgTable(
     createdAt: createdAt(),
   },
   (t) => [index("sales_replay_points_run_idx").on(t.runId), check("sales_replay_points_speaker_check", sql`${t.historicalSpeaker} IN ('BOT','SHOP','NONE')`)],
+);
+
+/**
+ * QUYẾT ĐỊNH RÀ LỖI AI (0219 · lib/sales-chatbot/quality.ts) — lớp GHI CHÚ của người lên một phát hiện TÍNH LÚC ĐỌC
+ * (`quality-shared.ts::scanConversation`). Không có dòng = «chờ rà»; phát hiện không lưu ở đâu cả (phép chiếu, AGENTS §19).
+ * Khoá tự nhiên (hội thoại, seq, loại): rà lại một phát hiện là SỬA dòng ấy, không đẻ dòng thứ hai. Người rà mang `users.id`
+ * + tên do máy chủ đọc (AGENTS §34).
+ */
+export const salesAiReviews = pgTable(
+  "sales_ai_reviews",
+  {
+    id: id(),
+    conversationId: text("conversation_id")
+      .notNull()
+      .references(() => salesChatConversations.id, { onDelete: "cascade" }),
+    messageSeq: integer("message_seq").notNull(),
+    kind: text("kind").notNull(),
+    status: text("status").notNull(),
+    note: text("note"),
+    reviewerUserId: text("reviewer_user_id"),
+    reviewerName: text("reviewer_name"),
+    reviewedAt: ts("reviewed_at").notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    uniqueIndex("sales_ai_reviews_key").on(t.conversationId, t.messageSeq, t.kind),
+    check("sales_ai_reviews_kind_check", sql`${t.kind} IN ('PRICE_UNGROUNDED','TOOL_ERROR','REPEATED_QUESTION')`),
+    check("sales_ai_reviews_status_check", sql`${t.status} IN ('CONFIRMED','DISMISSED')`),
+  ],
 );
 
 /**

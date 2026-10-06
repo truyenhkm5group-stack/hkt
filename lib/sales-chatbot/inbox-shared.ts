@@ -31,6 +31,9 @@ export const INBOX_CHANNEL_LABEL: Record<InboxChannel, string> = { FANPAGE: "Fac
 export type InboxRow = {
   id: string;
   channel: string;
+  /** Page / tài khoản kênh của hội thoại — hội thoại LUÔN giữ page nó tới từ đó. */
+  pageId: string | null;
+  pageName: string | null;
   status: string;
   handoffReason: string | null;
   customerName: string;

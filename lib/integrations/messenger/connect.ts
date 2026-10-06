@@ -3,6 +3,7 @@ import { EncryptJWT, jwtDecrypt } from "jose";
 import { env } from "@/lib/env";
 import type { ConnectablePage } from "@/lib/integrations/messenger/graph";
 import { brandAppOrigin } from "@/lib/platform/site-host";
+import { getSettingJson, setSettingJson } from "@/lib/settings";
 
 /**
  * Luồng «Kết nối Facebook Page» (docs/platform/messenger.md):
@@ -20,7 +21,7 @@ export const MESSENGER_CONNECT_TTL_SEC = 10 * 60;
 export const MESSENGER_CONNECT_PATH = "/api/connect/messenger";
 export const MESSENGER_SETTINGS_PATH = "/ai/sales-chatbot/messenger";
 /** Trần số page giữ trong cookie (cookie ~4 KB). Người quản lý nhiều page hơn ⇒ chọn trong 12 page đầu. */
-export const MESSENGER_PAGES_MAX = 12;
+export const MESSENGER_PAGES_MAX = 100;
 
 /**
  * Đường quay về của hộp thoại Facebook — theo GỐC PHẦN MỀM của lượt đang chạy (`appOriginForHost`, lib/auth/oauth.ts).
@@ -64,4 +65,24 @@ export async function openPendingPages(token: string | undefined | null, org: st
   } catch {
     return null;
   }
+}
+
+/**
+ * DANH SÁCH PAGE CHỜ CHỌN lưu ở MÁY CHỦ (CSDL tổ chức, khoá theo người), không ở cookie: mỗi page mang token ~200 ký tự nên
+ * cookie 4 KB chỉ chứa được chừng 12 page — shop quản 20–100 page bị cắt im lặng. Nội dung vẫn là bản niêm phong JWE ở trên
+ * (mã hoá + hết hạn 10 phút + gắn tổ chức + người), nên đọc thẳng bảng settings cũng không lấy được token.
+ */
+const pendingKey = (uid: string) => `messenger.pendingPages.${uid}`;
+
+export async function storePendingPages(org: string, uid: string, pages: readonly ConnectablePage[]): Promise<void> {
+  await setSettingJson(pendingKey(uid), { sealed: await sealPendingPages(org, uid, pages) });
+}
+
+export async function loadPendingPages(org: string, uid: string): Promise<ConnectablePage[] | null> {
+  const v = await getSettingJson<{ sealed?: unknown } | null>(pendingKey(uid), null);
+  return openPendingPages(typeof v?.sealed === "string" ? v.sealed : null, org, uid);
+}
+
+export async function clearPendingPages(uid: string): Promise<void> {
+  await setSettingJson(pendingKey(uid), {});
 }

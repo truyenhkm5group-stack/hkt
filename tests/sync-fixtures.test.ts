@@ -477,6 +477,11 @@ import { testSalesExperimentReport } from "./sales-experiment-report.test";
 import { testCommerceAgent } from "./commerce-agent.test";
 import { testZaloOa } from "./zalo-oa.test";
 import { testSalesEvents } from "./sales-events.test";
+import { testOrderAttribution } from "./order-attribution.test";
+import { testLostReasons } from "./lost-reasons.test";
+import { testAiQuality } from "./ai-quality.test";
+import { testPancakePoll } from "./pancake-poll.test";
+import { testPageConfig } from "./page-config.test";
 import { testMetaAdsOrgSync } from "./meta-ads-org.test";
 import { testMetaAdsOrgWinners } from "./meta-ads-org-winners.test";
 import { testMetaAdsOrgPublish } from "./meta-ads-org-publish.test";
@@ -501,6 +506,7 @@ import { testSalesVision } from "./sales-vision.test";
 import { testChatWidget } from "./chat-widget.test";
 import { testWebProductImport } from "./web-product-import.test";
 import { testMessenger } from "./messenger.test";
+import { testMessengerMultiPage } from "./messenger-multipage.test";
 import { testPush } from "./push.test";
 import { testUserInvites } from "./user-invites.test";
 import { testPasswordReset } from "./password-reset.test";
@@ -2735,6 +2741,11 @@ async function main() {
   await testCommerceAgent();
   await testZaloOa();
   await testSalesEvents();
+  await testOrderAttribution();
+  await testLostReasons();
+  await testAiQuality();
+  testPancakePoll();
+  testPageConfig();
   await testMetaAdsOrgSync();
   // Sổ mẩu + mẫu thắng làm nguồn ảnh của tổ chức khách: tổ chức THẬT `ma-hslc-thang` (tự cấp, tự dọn).
   await testMetaAdsOrgWinners();
@@ -2761,6 +2772,7 @@ async function main() {
   testChatWidget();
   await testWebProductImport();
   await testMessenger();
+  await testMessengerMultiPage();
   await testPush();
   // Mời người dùng qua liên kết (gap «Invite User»): tổ chức THẬT `ui-a` / `ui-b` / `ui-t` (tự cấp, tự dọn) + nhà — vai trò
   // hệ thống + tuỳ chỉnh ⇒ tài khoản đúng tổ chức, phiên đúng claim; dùng lại / hết hạn / thu hồi / chép chéo ⇒ một câu chung;

@@ -11,6 +11,7 @@
  *  · nhánh NGƯỜI chỉ có đơn khi «AI ghi đơn hộ nhân viên» (order-sync) BẬT — tắt ⇒ đơn nhánh người là CHƯA ĐO, không phải 0
  *    (nếu không, AI thắng giả). Luôn in độ phủ: bao nhiêu hội thoại nhánh người có đường ghi đơn.
  */
+import { LOST_REASONS, type LostReason } from "@/lib/sales-chatbot/lost-reasons-shared";
 import { AI_SALES_MIN_SAMPLE, rateOrNull } from "@/lib/sales-chatbot/performance-shared";
 
 export type ArmRaw = { conversations: number; orders: number; ordersValueVnd: number; settled: number; delivered: number; deliveredRevenueVnd: number };
@@ -68,7 +69,7 @@ export type DrillCohort = (typeof DRILL_COHORTS)[number];
 export const DRILL_ARMS = ["AI", "HUMAN"] as const;
 export type DrillArm = (typeof DRILL_ARMS)[number];
 
-export type DrillFilter = { days: number; cohort: DrillCohort | null; reason: string | null; arm: DrillArm | null; confirmed: boolean };
+export type DrillFilter = { days: number; cohort: DrillCohort | null; reason: string | null; arm: DrillArm | null; confirmed: boolean; /** Lý do không mua (`lost-reasons-shared.ts`). */ lost?: LostReason | null; /** Một page (chiều lọc của shop nhiều page). */ page?: string | null };
 
 export const DRILL_PERIODS = [7, 30, 90] as const;
 
@@ -79,7 +80,9 @@ export function parseDrillFilter(sp: Record<string, string | string[] | undefine
   const cohort = (DRILL_COHORTS as readonly string[]).includes(one("cohort") ?? "") ? (one("cohort") as DrillCohort) : null;
   const arm = (DRILL_ARMS as readonly string[]).includes(one("arm") ?? "") ? (one("arm") as DrillArm) : null;
   const reason = one("reason");
-  return { days, cohort, arm, reason: reason && /^[A-Z_]{2,40}$/.test(reason) ? reason : null, confirmed: one("confirmed") === "1" };
+  const lost = (LOST_REASONS as readonly string[]).includes(one("lost") ?? "") ? (one("lost") as LostReason) : null;
+  const pg = one("pg");
+  return { days, cohort, arm, reason: reason && /^[A-Z_]{2,40}$/.test(reason) ? reason : null, confirmed: one("confirmed") === "1", lost, page: pg && /^[A-Za-z0-9_:.-]{1,80}$/.test(pg) ? pg : null };
 }
 
 export function drillHref(f: Partial<DrillFilter>): string {
@@ -89,6 +92,8 @@ export function drillHref(f: Partial<DrillFilter>): string {
   if (f.reason) q.set("reason", f.reason);
   if (f.arm) q.set("arm", f.arm);
   if (f.confirmed) q.set("confirmed", "1");
+  if (f.lost) q.set("lost", f.lost);
+  if (f.page) q.set("pg", f.page);
   const s = q.toString();
   return `/ai/sales-chatbot/conversations${s ? `?${s}` : ""}`;
 }

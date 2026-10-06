@@ -197,6 +197,7 @@ export function testNavigationCoverage() {
     "/ai/sales-chatbot/conversations/[id]": "xem lại MỘT hội thoại, mở từ danh sách drill-down",
     "/ai/sales-chatbot/copilot": "vào từ thẻ «Chế độ vận hành» trên trang Chatbot bán hàng — số đo của Copilot và thử nghiệm AI vs Người, chỉ có nghĩa khi đang chạy một trong hai chế độ ấy",
     "/ai/sales-chatbot/replay": "vào từ nút «Phát lại hội thoại cũ» ngay trên trang Chatbot bán hàng — báo cáo sẵn sàng trước khi bật tự động, không phải việc hằng ngày",
+    "/ai/sales-chatbot/quality": "nút «Rà lỗi AI» ở đầu màn Hiệu quả AI bán hàng (/ai/sales-chatbot/performance) và mục «lỗi giá đã xác nhận» của bảng sẵn sàng trên /ai/sales-chatbot — công cụ của màn Hiệu quả, không phải module riêng",
     "/wholesale/settings": "tab «Cấu hình & chi phí API» trên thanh tab của Săn khách sỉ (chỉ người có wholesale:config) — không phải việc hằng ngày nên không chiếm một mục menu",
     "/wholesale/mobile/queue": "màn con của «Gọi khách sỉ (điện thoại)» — mở bằng các ô số và nút lớn trên màn Hôm nay (/wholesale/mobile)",
     "/wholesale/mobile/next": "không có giao diện — chuyển thẳng tới khách nên gọi tiếp theo; mở bằng nút «BẮT ĐẦU GỌI» / «Lưu & gọi khách tiếp theo»",

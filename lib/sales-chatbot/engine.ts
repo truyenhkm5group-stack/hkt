@@ -26,7 +26,9 @@ import { aiKillSwitchDenial } from "@/lib/ai-usage/control";
 import { recordAiUsage } from "@/lib/ai-usage/ledger";
 import { checkAiQuota } from "@/lib/ai-usage/quota";
 import { AI_PROFILE_SETTING_KEY } from "@/lib/blueprints/types";
-import { openActiveConnection } from "@/lib/connectors/service";
+import { listChannelPages, openActiveConnection } from "@/lib/connectors/service";
+import { MESSENGER_DIRECT_KEY } from "@/lib/sales-chatbot/channel-ownership";
+import { configForPage, PAGE_OVERRIDES_SETTING_KEY, parsePageOverrides } from "@/lib/sales-chatbot/page-config-shared";
 import { manualOrderShortCode } from "@/lib/constants/manual-orders";
 import { canUseModule } from "@/lib/platform/capabilities";
 import { notifySalesChatAiDown, notifySalesChatHandoff, notifySalesChatModelFallback } from "@/lib/sales-chatbot/alerts";
@@ -63,6 +65,19 @@ export async function readJsonSetting(key: string): Promise<unknown> {
 
 export async function loadSalesChatbotConfig(): Promise<SalesChatbotConfig> {
   return parseSalesChatbotConfig(await readJsonSetting(SALES_CHATBOT_SETTING_KEY));
+}
+
+/**
+ * Cấu hình cho hội thoại của MỘT page: cấu hình tổ chức + phần đè của page (page-config-shared.ts). Không page / chưa ai khai
+ * phần đè ⇒ đúng `loadSalesChatbotConfig()` — hành vi cũ, không một truy vấn thêm nào ngoài một lượt đọc settings.
+ */
+export async function loadSalesChatbotConfigFor(pageId: string | null | undefined): Promise<SalesChatbotConfig> {
+  const base = await loadSalesChatbotConfig();
+  if (!pageId) return base;
+  const overrides = parsePageOverrides(await readJsonSetting(PAGE_OVERRIDES_SETTING_KEY));
+  if (!Object.keys(overrides).length) return base;
+  const parent = overrides[pageId] ? null : ((await listChannelPages(MESSENGER_DIRECT_KEY)).find((p) => p.pageId === pageId)?.parentPageId ?? null);
+  return configForPage(base, overrides, pageId, parent);
 }
 
 async function businessProfile(): Promise<string> {
@@ -571,7 +586,8 @@ async function chatTurnCore(conversationId: string, rawText: string, opts: { cha
   if (!(await canUseModule("ai_sales"))) return { ok: false, error: "Module AI bán hàng chưa bật cho tổ chức này." };
   const conv = await loadConversation(conversationId);
   if (!conv || conv.channel !== opts.channel || (isPublicChannel(opts.channel) && conv.visitorKey !== (opts.visitorKey ?? null))) return { ok: false, error: "Không có hội thoại này." };
-  const cfg = await loadSalesChatbotConfig();
+  // Page của hội thoại có phần đè riêng (tên bot · giọng · lời chào · giờ · chỉ dẫn · ship) ⇒ dùng cấu hình đã gộp.
+  const cfg = await loadSalesChatbotConfigFor(conv.pageId);
   if (isPublicChannel(opts.channel) && !cfg.enabled) return { ok: false, error: "Shop chưa mở chat." };
   const now = opts.now ?? new Date();
   const msgs = await loadMessages(conv.id);

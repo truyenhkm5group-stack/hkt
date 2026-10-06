@@ -1,14 +1,15 @@
 import Link from "next/link";
-import { cookies } from "next/headers";
 import { PageHeader } from "@/components/page-header";
 import { SectionCard } from "@/components/ui-bits";
 import { can, requirePermission } from "@/lib/auth/session";
 import { env } from "@/lib/env";
-import { MESSENGER_PAGES_COOKIE, messengerRedirectUris, openPendingPages } from "@/lib/integrations/messenger/connect";
+import { loadPendingPages, messengerRedirectUris } from "@/lib/integrations/messenger/connect";
 import { messengerVerifyToken } from "@/lib/integrations/messenger/graph";
 import { platformOperatorDenial } from "@/lib/platform-ui/module-toggle";
 import { messengerView } from "@/lib/sales-chatbot/messenger";
-import { DisconnectButton, PagePicker } from "./messenger-panel";
+import { loadPageOverrides } from "@/lib/sales-chatbot/page-config";
+import { SALES_CHATBOT_MANAGE } from "@/lib/sales-chatbot/settings";
+import { DisconnectButton, PageManager, PagePicker } from "./messenger-panel";
 
 export const metadata = { title: "Messenger trực tiếp" };
 
@@ -30,62 +31,52 @@ export default async function MessengerSettingsPage({ searchParams }: { searchPa
   const one = (k: string) => (typeof sp[k] === "string" ? (sp[k] as string) : "");
   const manage = can(user, "settings:manage");
   const view = await messengerView();
-  const pending = manage && user.organization && one("chon") ? await openPendingPages((await cookies()).get(MESSENGER_PAGES_COOKIE)?.value, user.organization.code, user.id) : null;
+  const canConfig = can(user, SALES_CHATBOT_MANAGE);
+  const overrides = canConfig ? await loadPageOverrides() : {};
+  const pending = manage && user.organization && one("chon") ? await loadPendingPages(user.organization.code, user.id) : null;
   const operator = platformOperatorDenial(user) === null;
   const error = one("loi") ? (one("loi") === "fb" ? one("msg") || "Facebook từ chối." : (ERROR_TEXT[one("loi")] ?? "Kết nối chưa xong.")) : null;
-  const connected = view.status === "ACTIVE" && view.page;
+  const activePages = view.pages.filter((p) => p.status === "ACTIVE");
+  const connected = activePages.length > 0;
   return (
     <div className="space-y-5">
       <PageHeader eyebrow="AI · Chatbot bán hàng" title="Messenger trực tiếp" description="Bot trả lời tin nhắn fanpage và Instagram — không cần Pancake" />
       {error ? <p className="rounded-md bg-rose-50 px-3 py-2 text-sm text-rose-800 dark:bg-rose-950/60 dark:text-rose-200">{error}</p> : null}
       {one("ok") ? <p className="rounded-md bg-emerald-50 px-3 py-2 text-sm text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-200">Đã nối page — nhắn thử một tin vào page để thấy bot trả lời.</p> : null}
 
-      <SectionCard title="Page đang nối">
+      {view.mutedByPancake ? (
+        <p className="rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:bg-amber-950/60 dark:text-amber-200" data-testid="messenger-muted-by-pancake">
+          Page này cũng đang nhận tin qua Pancake. Mỗi page chỉ nhận tin qua MỘT đường để khách không nhận hai câu trả lời — nên bot đang trả lời qua Pancake, đường Messenger trực tiếp tạm nhường. Muốn dùng đường trực tiếp: gỡ «Fanpage qua Pancake» ở Cài đặt → Kết nối.
+        </p>
+      ) : null}
+      <SectionCard title={connected ? `Page đang nối (${activePages.filter((p) => p.kind === "PAGE").length})` : "Page đang nối"} description="Một lần đăng nhập Facebook nối được nhiều page; mỗi page bật / tạm dừng AI riêng, lỗi của page này không làm dừng page khác.">
         {!view.appReady ? (
           <p className="text-sm text-muted-foreground">Nền tảng chưa cấu hình app Facebook (FACEBOOK_LOGIN_APP_ID / SECRET) — người vận hành cần khai trước.</p>
-        ) : connected ? (
-          <div className="flex flex-wrap items-center justify-between gap-3" data-testid="messenger-connected">
-            <p className="text-sm">
-              <span className="font-semibold">{view.page!.name}</span> <span className="text-xs text-muted-foreground">(Page ID {view.page!.id})</span> — bot nhận và trả lời tin nhắn qua Messenger.
-              {view.instagram ? (
-                <span className="mt-1 block" data-testid="messenger-instagram">
-                  Instagram <span className="font-semibold">@{view.instagram.username || view.instagram.id}</span> — bot trả lời cả tin nhắn Instagram (DM).
-                </span>
-              ) : (
-                <span className="mt-1 block text-xs text-muted-foreground">Page chưa gắn tài khoản Instagram doanh nghiệp — gắn trong Meta Business Suite rồi bấm «Đổi page» để nối cả Instagram.</span>
-              )}
-            </p>
-            {manage ? (
-              <div className="flex items-center gap-2">
-                <a href="/api/connect/messenger/start" className="text-sm text-primary underline underline-offset-2">
-                  Đổi page
-                </a>
-                <DisconnectButton />
-              </div>
-            ) : null}
-          </div>
-        ) : manage ? (
-          <div className="space-y-3">
-            <p className="text-sm text-muted-foreground">
-              Đăng nhập Facebook bằng tài khoản QUẢN TRỊ page, cho phép quyền nhắn tin, chọn page. Token page được mã hoá trong ERP; có thể gỡ bất cứ lúc nào.
-            </p>
-            <a href="/api/connect/messenger/start" className="inline-flex h-9 items-center rounded-md bg-[#1877F2] px-4 text-sm font-semibold text-white hover:opacity-90" data-testid="messenger-connect">
-              Kết nối Facebook Page
-            </a>
-            {view.status && view.status !== "ACTIVE" && view.page ? <p className="text-xs text-amber-700 dark:text-amber-400">Page {view.page.name} đã lưu nhưng chưa bật — bấm kết nối lại.</p> : null}
-          </div>
         ) : (
-          <p className="text-sm text-muted-foreground">Cần quản trị cửa hàng (quyền Cài đặt) kết nối.</p>
+          <div className="space-y-3">
+            {view.pages.length ? <PageManager pages={view.pages} manage={manage} canConfig={canConfig} overrides={overrides} /> : null}
+            {manage ? (
+              <div className="flex flex-wrap items-center gap-3">
+                <a href="/api/connect/messenger/start" className="inline-flex h-9 items-center rounded-md bg-[#1877F2] px-4 text-sm font-semibold text-white hover:opacity-90" data-testid="messenger-connect">
+                  {connected ? "Thêm / nối lại page" : "Kết nối Facebook Page"}
+                </a>
+                {connected ? <DisconnectButton /> : null}
+                <span className="text-xs text-muted-foreground">Đăng nhập Facebook bằng tài khoản QUẢN TRỊ page, cho phép quyền nhắn tin, chọn các page. Token page được mã hoá trong ERP; gỡ được bất cứ lúc nào.</span>
+              </div>
+            ) : connected ? null : (
+              <p className="text-sm text-muted-foreground">Cần quản trị cửa hàng (quyền Cài đặt) kết nối.</p>
+            )}
+          </div>
         )}
-        {pending && pending.length ? <PagePicker pages={pending.map((p) => ({ id: p.id, name: p.name }))} /> : null}
+        {pending && pending.length ? <PagePicker pages={pending.map((p) => ({ id: p.id, name: p.name }))} connected={activePages.map((p) => p.id)} /> : null}
       </SectionCard>
 
       <SectionCard title="Lưu ý">
         <ul className="list-disc space-y-1 pl-5 text-sm text-muted-foreground">
           <li>Bot dùng chung cấu hình, sản phẩm, câu mẫu, follow-up của <Link href="/ai/sales-chatbot" className="text-primary underline">Chatbot bán hàng</Link>.</li>
           <li>Nhân viên trả lời trong Hộp thư Meta Business Suite ⇒ bot tự nhường 30 phút cho hội thoại đó.</li>
-          <li>Không dùng cùng lúc với «Fanpage qua Pancake» cho CÙNG một page — khách sẽ nhận hai câu trả lời.</li>
-          <li>Khách bình luận dưới bài viết ⇒ bot trả lời bằng TIN RIÊNG (không công khai). Page nối trước 05/10/2026: bấm «Đổi page» một lần để bật.</li>
+          <li>Mỗi page chỉ nhận tin qua MỘT đường: page đang chạy qua «Fanpage qua Pancake» không nối thêm ở đây được (và ngược lại) — để khách không nhận hai câu trả lời.</li>
+          <li>Khách bình luận dưới bài viết ⇒ bot trả lời bằng TIN RIÊNG (không công khai). Page nối trước 05/10/2026: bấm «Thêm / nối lại page» một lần để bật.</li>
         </ul>
       </SectionCard>
 

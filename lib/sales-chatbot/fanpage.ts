@@ -35,6 +35,8 @@ import { chunkText } from "@/lib/messaging/providers";
 import { AI_DOWN_HANDOFF_REASON, appendContextMessages, chatTurn, conversationView, describeCustomerImages, loadSalesChatbotConfig, openConversation } from "@/lib/sales-chatbot/engine";
 import { readQuickReplyImage, rememberPancakeContent } from "@/lib/sales-chatbot/quick-replies";
 import { recordConversationEvent } from "@/lib/sales-chatbot/events";
+import { loadPollState, savePollState } from "@/lib/sales-chatbot/pancake-poll";
+import { afterPoll, pollDecision, type PancakePollState } from "@/lib/sales-chatbot/pancake-poll-shared";
 import { nextFollowupAt } from "@/lib/sales-chatbot/followup-shared";
 import { fetchPancakeThreadProfile, threadProfileStale } from "@/lib/sales-chatbot/returning";
 import { loadFollowupSettings } from "@/lib/sales-chatbot/followup-settings";
@@ -1133,31 +1135,55 @@ export async function catchUpFanpage(deps: FanpageDeps = {}): Promise<CatchUpRes
   const pageId = (conn.settings.pageId ?? "").trim();
   const token = (conn.secrets.pageAccessToken ?? "").trim();
   if (!pageId || !token) return { ...out, detail: ["kết nối fanpage thiếu page / token"] };
+  // Chế độ API (không cần webhook — webhook của Pancake tốn 2 slot thuê bao): mốc đồng bộ + ngân sách + lùi khi lỗi theo
+  // `pancake-poll-shared.ts`. Mốc lưu trong CSDL tổ chức ⇒ sống qua khởi động lại.
+  const nowMs0 = now().getTime();
+  const state = await loadPollState(pageId);
+  const decision = pollDecision(state, nowMs0);
+  if (!decision.run) return { ...out, detail: [decision.reason] };
   const q = `page_access_token=${encodeURIComponent(token)}`;
+  let rateLimited = false;
   const get = async (url: string): Promise<Record<string, unknown> | null> => {
     try {
       const res = await fetchImpl(url, { method: "GET", redirect: "manual", signal: AbortSignal.timeout(15_000) });
+      if (res.status === 429) rateLimited = true;
       const body = (await res.json().catch(() => null)) as Record<string, unknown> | null;
       return res.ok && body && body.success !== false ? body : null;
     } catch {
       return null;
     }
   };
+  const save = async (next: PancakePollState) => {
+    // Webhook có thể vừa ghi mốc của nó trong lúc lượt này chạy ⇒ giữ mốc mới hơn, không ghi đè bằng bản cũ.
+    const fresh = await loadPollState(pageId);
+    await savePollState({ ...next, lastWebhookAt: Math.max(next.lastWebhookAt ?? 0, fresh.lastWebhookAt ?? 0) || null }).catch(() => undefined);
+  };
   const list = await get(`${PANCAKE_PAGES_API}/v2/pages/${encodeURIComponent(pageId)}/conversations?${q}&type=INBOX&order_by=updated_at`);
   const convs = (Array.isArray(list?.conversations) ? list.conversations : []) as Record<string, unknown>[];
-  if (!list) return { ...out, detail: [scrubSecrets("Pancake không trả danh sách hội thoại", [token])] };
+  if (!list) {
+    const error = scrubSecrets("Pancake không trả danh sách hội thoại", [token]);
+    await save(afterPoll(state, { ok: false, rateLimited, error }, nowMs0));
+    return { ...out, detail: [rateLimited ? `${error} (429 — lùi lại)` : error] };
+  }
   const nowMs = now().getTime();
+  const listed = convs.slice(0, CATCH_UP_LIMITS.conversations);
+  const updatedOf = (c: Record<string, unknown>) => pancakeMs(c.updated_at);
+  // Hội thoại cập nhật SAU mốc (trừ chồng lấn), mà người nói cuối KHÔNG phải page (hoặc chỉ là ghi chú tự động của Pancake).
+  // Cũ trước, mới sau: hết ngân sách thì phần còn lại là phần MỚI, mốc dừng trước nó ⇒ lượt sau đọc tiếp, không bỏ đói ai.
+  const candidates = listed
+    .filter((c) => {
+      const at = updatedOf(c);
+      if (at === null || at < decision.windowStartMs) return false;
+      const lastBy = str((c.last_sent_by as { id?: unknown } | undefined)?.id);
+      return lastBy !== pageId || PANCAKE_AUTO_NOTE_RE.test(stripHtml(str(c.snippet)));
+    })
+    .sort((a, b) => (updatedOf(a) ?? 0) - (updatedOf(b) ?? 0));
   const maxAgeMs = CATCH_UP_LIMITS.maxAgeMinutes * 60_000;
-  const candidates = convs.slice(0, CATCH_UP_LIMITS.conversations).filter((c) => {
-    const at = pancakeMs(c.updated_at);
-    if (at === null || nowMs - at > maxAgeMs) return false;
-    const lastBy = str((c.last_sent_by as { id?: unknown } | undefined)?.id);
-    return lastBy !== pageId || PANCAKE_AUTO_NOTE_RE.test(stripHtml(str(c.snippet)));
-  });
   out.scanned = convs.length;
   const db = await getDb();
   const t = schema.salesChatInbound;
-  for (const c of candidates.slice(0, CATCH_UP_LIMITS.threadsPerRun)) {
+  const batch = candidates.slice(0, decision.threadBudget);
+  for (const c of batch) {
     const threadId = str(c.id);
     if (!threadId) continue;
     const body = await get(`${PANCAKE_PAGES_API}/v1/pages/${encodeURIComponent(pageId)}/conversations/${encodeURIComponent(threadId)}/messages?${q}`);
@@ -1191,6 +1217,15 @@ export async function catchUpFanpage(deps: FanpageDeps = {}): Promise<CatchUpRes
     out.replies += r.replies;
     out.detail.push(`${threadId.slice(-6)}: ${waiting.length} tin chờ · trả lời ${r.replies}${r.skipped ? ` · ${r.skipped}` : ""}${r.error ? ` · lỗi ${r.error.slice(0, 80)}` : ""}`);
   }
+  const rest = candidates.slice(decision.threadBudget);
+  const seen = listed.map(updatedOf).filter((x): x is number => x !== null);
+  const doneAt = now().getTime();
+  await save(
+    rateLimited
+      ? afterPoll(state, { ok: false, rateLimited: true, error: "Pancake giới hạn tốc độ khi đọc tin của hội thoại" }, doneAt)
+      : afterPoll(state, { ok: true, listed: listed.length, maxUpdatedMs: seen.length ? Math.max(...seen) : null, oldestUnprocessedMs: rest.length ? updatedOf(rest[0]) : null, allNewerThanWindow: seen.length > 0 && seen.every((x) => x >= decision.windowStartMs) }, doneAt),
+  );
+  out.detail.unshift(`chế độ ${decision.mode === "API" ? "API (không webhook)" : "lưới an toàn (webhook đang chạy)"} · ${candidates.length} hội thoại chờ · đọc ${batch.length}${rest.length ? ` · ${rest.length} để lượt sau` : ""}`);
   return out;
 }
 

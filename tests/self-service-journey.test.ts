@@ -57,12 +57,14 @@ import { cancelManualOrderCore, createManualOrderCore, materialChanges, updateMa
 import { createProductCore } from "@/lib/records/product-create";
 import { foldVi, queryKeywords, searchCatalog, stockFor, type CatalogItem } from "@/lib/sales-chatbot/catalog";
 import { DEFAULT_SALES_CHATBOT_CONFIG, SALES_BOT_ERROR_LABEL, SALES_CHATBOT_SETTING_KEY, salesBotError, withinBusinessHours, parseSalesChatbotConfig } from "@/lib/sales-chatbot/config";
-import { setSettingJson } from "@/lib/settings";
+import { getSettingJson, setSettingJson } from "@/lib/settings";
 import { notifySalesChatHandoff } from "@/lib/sales-chatbot/alerts";
 import { AI_DOWN_HANDOFF_REASON, isModelUnavailableError, loadSalesChatbotConfig, withModelFallback, chatTurn, conversationView, customerFacingText, customerNamePrompt, plainForMessenger, historyForModel, listConversations, messageTimeTag, nowPromptLine, openConversation, recentShopTexts, resumeConversationToAi, setSalesChatProviderForTests, systemPrompt, visitorKeyOf } from "@/lib/sales-chatbot/engine";
 import { saveSalesChatbotConfig } from "@/lib/sales-chatbot/settings";
 import { reorderDigestText, sendReorderDigest, type DigestRow } from "@/lib/reorder/digest";
 import { newOrderAlertText, sendNewOrderAlerts } from "@/lib/sales-chatbot/new-order-alert";
+import { loadPollState, markPancakeWebhook, PANCAKE_POLL_SETTING_KEY, savePollState } from "@/lib/sales-chatbot/pancake-poll";
+import { EMPTY_POLL_STATE } from "@/lib/sales-chatbot/pancake-poll-shared";
 import { catchUpFanpage, fanpageInboundCounts, fanpageVisitorKey, normalizeThreadMessages, unansweredCustomerMessages, pancakeCreatedAfterVerdict, pageAnsweredVerdict, postContextPrompt, postTextFromPancake, FIRST_CONTACT_WAIT_MS, FOLLOWUP_WAIT_MS, parsePancakeWebhook, processFanpageThread, processFanpageThreadDebounced, receiveFanpageEvent } from "@/lib/sales-chatbot/fanpage";
 import { loadChatCostReport } from "@/lib/sales-chatbot/cost-report";
 import { learnLessons, loadLessons, rollbackLessons, saveLessons, setLessonsEnabled } from "@/lib/sales-chatbot/lessons";
@@ -1654,6 +1656,26 @@ async function testJourney() {
       assert.ok(postsTo("t-cu2") === 0 && postsTo("t-cu3") === 0 && postsTo("t-cu4") === 0, "đã có người trả lời / quá mới / quá cũ ⇒ không đụng");
       const cuAgain = await catchUpFanpage({ fetch: cuFetch.fetch });
       assert.ok(cuAgain.queued === 0 && cuAgain.reopened === 0 && cuAgain.threads === 0, `quét lần hai không trả lời lại: ${JSON.stringify(cuAgain)}`);
+      // ═══ PANCAKE QUA API — KHÔNG CẦN WEBHOOK (webhook Pancake tốn 2 slot thuê bao; pancake-poll-shared.ts) ═══
+      // Mốc đồng bộ lưu trong CSDL tổ chức ⇒ «khởi động lại» (đọc lại từ CSDL) vẫn có; không mang bí mật nào.
+      const ps = await loadPollState(PAGE);
+      assert.ok(ps.cursorMs !== null && ps.lastOkAt !== null && ps.failures === 0 && ps.lastWebhookAt === null, JSON.stringify(ps));
+      assert.ok(!JSON.stringify(await getSettingJson(PANCAKE_POLL_SETTING_KEY, null)).includes("page_access_token"), "trạng thái đồng bộ không chứa token");
+      assert.match(cu.detail[0] ?? "", /chế độ API/, "chưa từng có webhook ⇒ chế độ API");
+      // Cùng một tin tới qua WEBHOOK sau khi API đã nhận ⇒ một dòng duy nhất, không câu trả lời thứ hai.
+      assert.equal((await receiveFanpageEvent(ev("cu1-q", "Giá bao nhiêu vậy?", { id: "cust-cu1", name: "Nguyen Hiền" }, "t-cu1"))).reason, "Tin trùng — đã nhận trước đó");
+      assert.equal((await db.select().from(schema.salesChatInbound).where(eq(schema.salesChatInbound.messageId, "cu1-q"))).length, 1);
+      // Webhook có tin ⇒ lượt sau ở chế độ lưới an toàn.
+      await markPancakeWebhook(PAGE);
+      assert.match((await catchUpFanpage({ fetch: cuFetch.fetch })).detail[0] ?? "", /lưới an toàn/);
+      // Pancake trả 429 ⇒ ghi lỗi + lùi; trong lúc lùi KHÔNG một lời gọi nào tới Pancake.
+      const r429 = await catchUpFanpage({ fetch: (async () => new Response(JSON.stringify({ success: false, message: "rate limited" }), { status: 429 })) as typeof fetch });
+      const ps429 = await loadPollState(PAGE);
+      assert.ok(r429.queued === 0 && ps429.failures === 1 && ps429.nextAllowedAt !== null && /429/.test(ps429.lastError ?? ""), JSON.stringify(ps429));
+      const pollCallsBefore = cuFetch.calls.length;
+      assert.match((await catchUpFanpage({ fetch: cuFetch.fetch })).detail[0] ?? "", /đang lùi/);
+      assert.equal(cuFetch.calls.length, pollCallsBefore, "đang lùi ⇒ không gọi Pancake");
+      await savePollState({ ...EMPTY_POLL_STATE, pageId: PAGE });
       // SAU KHI CHỐT ĐƠN (03/10/2026 · «Đỗ Là»: bot hứa đổi lịch / đổi địa chỉ của đơn đã chốt). Trong 3 ngày ⇒ nhân viên xử lý,
       // bot không trả lời; quá 3 ngày ⇒ lượt mua MỚI, đơn cũ sang pastOrders (báo cáo vẫn đếm).
       const po = await openConversation("TEST");

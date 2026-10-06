@@ -2,7 +2,7 @@ import Link from "next/link";
 import { PageHeader } from "@/components/page-header";
 import { requirePermission } from "@/lib/auth/session";
 import { formatTimeAgo, formatVND } from "@/lib/format";
-import { assignableUsers, inboxAssignees, listInbox, loadInboxThread } from "@/lib/sales-chatbot/inbox";
+import { assignableUsers, inboxAssignees, inboxPages, listInbox, loadInboxThread } from "@/lib/sales-chatbot/inbox";
 import { listLabels } from "@/lib/sales-chatbot/inbox-labels";
 import { INBOX_CHANNEL_LABEL, INBOX_CHANNELS, INBOX_FILTER_LABEL, INBOX_FILTERS, INBOX_LIST_MAX, INBOX_PERIOD_LABEL, INBOX_PERIODS, type InboxChannel, type InboxFilter, type InboxPeriod, type InboxRow } from "@/lib/sales-chatbot/inbox-shared";
 import { organizationLevelPack } from "@/lib/sales-chatbot/levels";
@@ -32,7 +32,7 @@ function waitLabel(min: number): string {
   return `chờ ${Math.round(min / 1440)} ngày`;
 }
 
-function ListItem({ r, href, active }: { r: InboxRow; href: string; active: boolean }) {
+function ListItem({ r, href, active, showPage }: { r: InboxRow; href: string; active: boolean; showPage: boolean }) {
   const wait = waitMinutes(r.waitingSince);
   return (
     <Link
@@ -55,8 +55,13 @@ function ListItem({ r, href, active }: { r: InboxRow; href: string; active: bool
           </p>
           {r.unread ? <span className="size-2.5 shrink-0 rounded-full bg-primary" aria-label="Chưa đọc" /> : null}
         </div>
-        {wait !== null || r.status === "HANDOFF" || r.assigneeName || r.hasOrder || r.labels.length || r.level || r.customerPhone ? (
+        {wait !== null || r.status === "HANDOFF" || r.assigneeName || r.hasOrder || r.labels.length || r.level || r.customerPhone || (showPage && r.pageName) ? (
           <div className="mt-1 flex flex-wrap items-center gap-1 text-[11px]">
+            {showPage && r.pageName ? (
+              <span className="max-w-[10rem] truncate rounded border px-1.5 text-muted-foreground" data-page-chip>
+                {r.pageName}
+              </span>
+            ) : null}
             {wait !== null ? (
               <span className={cn("rounded px-1.5 font-medium", wait >= WAIT_URGENT_MIN ? "bg-red-600 text-white" : "bg-amber-100 text-amber-900 dark:bg-amber-950/60 dark:text-amber-200")}>{waitLabel(wait)}</span>
             ) : null}
@@ -103,9 +108,12 @@ export default async function SalesInboxPage({ searchParams }: { searchParams: P
   const from = day("tu");
   const to = day("den");
   const limit = Math.min(INBOX_LIST_MAX, Math.max(100, Number(one("n")) || 100));
+  // NHIỀU PAGE: một hộp thư chung cho mọi page; chọn một page là LỌC trên cùng hội thoại, không phải một hộp thư thứ hai.
+  const pages = await inboxPages();
+  const page = pages.some((p) => p.id === one("pg")) ? one("pg") : null;
   // Mở hội thoại TRƯỚC (đánh dấu đã đọc) rồi mới đọc danh sách — không thì hội thoại đang mở vẫn hiện «chưa đọc».
   const thread = selected ? await loadInboxThread(user, selected) : null;
-  const [list, users, assignees, pack] = await Promise.all([listInbox(user, { filter, channel, q, label, phone, level, assignee, period, from, to, limit }), assignableUsers(user), inboxAssignees(user), organizationLevelPack()]);
+  const [list, users, assignees, pack] = await Promise.all([listInbox(user, { filter, channel, q, label, page, phone, level, assignee, period, from, to, limit }), assignableUsers(user), inboxAssignees(user), organizationLevelPack()]);
   const levels = levelsForPack(pack);
   const advanced = Boolean(channel || label || assignee || period || phone === "NONE");
   const href = (patch: Record<string, string | null>) => {
@@ -114,6 +122,7 @@ export default async function SalesInboxPage({ searchParams }: { searchParams: P
       f: filter === "ALL" ? null : filter,
       ch: channel,
       lb: label,
+      pg: page,
       q: q || null,
       sdt: phone === "HAS" ? "co" : phone === "NONE" ? "khong" : null,
       lv: level,
@@ -202,6 +211,16 @@ export default async function SalesInboxPage({ searchParams }: { searchParams: P
                 {phone === "HAS" ? <input type="hidden" name="sdt" value="co" /> : null}
                 <div className="flex gap-1">
                   <input name="q" defaultValue={q} placeholder="Tìm tên / SĐT…" className="h-8 min-w-0 flex-1 rounded-md border border-foreground/20 bg-background px-2 text-[13px]" aria-label="Tìm khách" />
+                  {pages.length > 1 ? (
+                    <select name="pg" defaultValue={page ?? ""} className="h-8 w-[104px] rounded-md border bg-background px-1 text-[12px]" aria-label="Page" data-testid="inbox-page-filter">
+                      <option value="">Mọi page</option>
+                      {pages.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.name}
+                        </option>
+                      ))}
+                    </select>
+                  ) : null}
                   <button type="submit" className="h-8 rounded-md bg-foreground px-3 text-[12px] font-medium text-background hover:opacity-90">
                     Lọc
                   </button>
@@ -264,7 +283,7 @@ export default async function SalesInboxPage({ searchParams }: { searchParams: P
               {list.rows.length === 0 ? <li className="p-6 text-center text-sm text-muted-foreground">Không có hội thoại nào ở bộ lọc này.</li> : null}
               {list.rows.map((r) => (
                 <li key={r.id}>
-                  <ListItem r={r} href={href({ c: r.id })} active={r.id === selected} />
+                  <ListItem r={r} href={href({ c: r.id })} active={r.id === selected} showPage={pages.length > 1 && !page} />
                 </li>
               ))}
               {list.rows.length >= limit && limit < INBOX_LIST_MAX ? (
