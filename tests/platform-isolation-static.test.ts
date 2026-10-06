@@ -485,7 +485,7 @@ const ROUTE_CONG_KHAI: Record<string, { lyDo: string; cong: RegExp | null }> = {
   "app/api/tech/agent-run/route.ts": { lyDo: "Máy chạy agent nộp kết quả — khoá riêng AGENT_INGEST_SECRET hoặc CRON_SECRET, có trần lượt gọi.", cong: /\bsecretEquals\(/ },
   "app/api/tech/worker/[op]/route.ts": {
     lyDo: "Worker headless của Phòng Tech AI (docs/tech-control-plane/README.md mục 4) — không phiên; khoá RIÊNG từng worker (CSDL nhà giữ băm). Rơi về tổ chức NHÀ là ĐÚNG ý đồ: mặt phẳng điều khiển Tech chỉ có ở tổ chức nhà, worker chỉ chạm việc mình đang giữ lease.",
-    cong: /authenticateTechWorker\(/,
+    cong: /\bauthenticateTechWorker\(/,
   },
   "app/api/tech/agent-task/route.ts": { lyDo: "Máy chạy agent đọc việc được giao — cùng khoá với cửa ghi, có trần lượt gọi.", cong: /\bsecretEquals\(/ },
   "app/api/video-scale/public/[id]/route.ts": { lyDo: "URL tệp video Meta tải về để đăng Reel — không có phiên; mỗi URL mang chữ ký HMAC có hạn, sai / hết hạn ⇒ 404.", cong: /\bverifyAssetSignature\(/ },
