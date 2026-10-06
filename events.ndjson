@@ -26,3 +26,4 @@
 {"at":"2026-10-06T08:21:43.152Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DONE","mission":"hotfix-messenger-discovery","detail":"PR #603 gộp d9498d07; production 6eb072652a62 verify ĐẠT; log production [messenger-connect] org=hslc-hmt-shop reason=PERMISSION_NOT_GRANTED granted=public_profile — chẩn đoán chạy đúng; kết nối page còn chờ quyền Meta (ngoài mã)"}
 {"at":"2026-10-06T08:22:34.013Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"CLAIM","mission":"meta-messenger-access","detail":"BLOCKED · 1 mẫu phạm vi · HIGH"}
 {"at":"2026-10-06T09:41:01.620Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#605 @ a41e4af459c2 · Review độc lập b217f7c2..a41e4af4: 4 mục chặn đã sửa đúng; miễn trừ bài canh đúng một dòng"}
+{"at":"2026-10-06T09:41:28.973Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","detail":"#605 @ a41e4af459c2 → 0ca4ed97a851 (MERGE_ISOLATED · HIGH · gates success)"}
