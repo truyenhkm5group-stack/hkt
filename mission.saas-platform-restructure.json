@@ -37,7 +37,9 @@
     "pricing-billing-foundation"
   ],
   "blocked_by": [],
-  "related_prs": [],
+  "related_prs": [
+    615
+  ],
   "migration_reservations": [
     "0224"
   ],
@@ -45,7 +47,7 @@
     "0224": "2026-10-06T13:26:29.899Z"
   },
   "created_at": "2026-10-06T13:25:25.486Z",
-  "updated_at": "2026-10-06T15:49:12.018Z",
+  "updated_at": "2026-10-06T15:49:22.908Z",
   "last_heartbeat": "2026-10-06T15:49:12.018Z",
   "definition_of_done": [],
   "intake": {
