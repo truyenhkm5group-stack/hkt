@@ -1,0 +1,29 @@
+{
+  "schema": 1,
+  "mission_id": "saas-f-legacy-cleanup",
+  "title": "Phase F: dọn di sản sau khi chuyển nguồn sự thật chứng minh an toàn (container bot cũ, nhánh /chatbot cũ, đặc cách còn sót)",
+  "business_goal": "",
+  "status": "BLOCKED",
+  "priority": "P3",
+  "risk": "HIGH",
+  "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "worker": null,
+  "worktree": null,
+  "branch": null,
+  "base_sha": null,
+  "domains": [],
+  "owned_paths": [
+    "chatbot/"
+  ],
+  "dependencies": [
+    "saas-a-vnx-runtime",
+    "saas-b-internal-special-cases"
+  ],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-06T17:03:45.575Z",
+  "updated_at": "2026-10-06T17:03:45.575Z",
+  "last_heartbeat": "2026-10-06T17:03:45.575Z",
+  "definition_of_done": []
+}
