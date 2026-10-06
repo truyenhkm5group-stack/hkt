@@ -1019,6 +1019,9 @@ export async function processFanpageThread(pageId: string, threadId: string, dep
     }
     const replies = turn.view.messages.slice(before).filter((m) => m.role === "assistant" && m.text.trim());
     let sendError: string | null = null;
+    // Đồng hồ khách AI (0226): đếm câu DO MODEL SINH đã gửi THÀNH CÔNG ở CHÍNH lượt này (không theo bộ đếm cộng dồn các vòng,
+    // không tính câu mẫu đi kèm lượt model — `turn.media.afterText`).
+    let aiSent = 0;
     let yielded: string | null = null;
     // BÌNH LUẬN: một tin RIÊNG trả lời bình luận MỚI NHẤT của lượt (gộp mọi câu trả lời) — không bao giờ công khai.
     const lastComment = [...claimed].reverse().find((r) => r.kind === "COMMENT" && r.postId && r.fromId);
@@ -1091,6 +1094,7 @@ export async function processFanpageThread(pageId: string, threadId: string, dep
         break;
       }
       out.replies += 1;
+      if (turn.aiGenerated && r.text !== turn.media?.afterText) aiSent += 1;
       // Ghi mã tin bot vừa gửi: Pancake đẩy lại chính tin này qua webhook — gặp lại là tin của bot, không phải nhân viên.
       if (sent.ids.length) {
         await db
@@ -1107,7 +1111,7 @@ export async function processFanpageThread(pageId: string, threadId: string, dep
     // Gửi hỏng ⇒ DEAD-LETTER (khách chưa nhận đủ câu trả lời — việc của người). KHÔNG tự gửi lại: lời gọi gửi có thể đã tới nơi.
     if (sendError) await deadLetter(db, ids, claim, `${DEAD_SEND_NOTE_PREFIX}${sendError}`, sendError, now());
     else await finish("DONE", yielded);
-    if (!sendError && out.replies > 0 && turn.aiGenerated && replies.length) await noteAiCustomerReply(conv.id, now());
+    if (aiSent > 0) await noteAiCustomerReply(conv.id, now());
     if (!sendError && out.replies > 0) await markWaitingForCustomer(conv.id, now());
     if (yielded) out.skipped = yielded;
     out.processed += ids.length;

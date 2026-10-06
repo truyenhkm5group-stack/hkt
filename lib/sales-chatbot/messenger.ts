@@ -665,6 +665,9 @@ export async function processMessengerThread(pageId: string, psid: string, deps:
       continue;
     }
     let sendError: string | null = null;
+    // Đồng hồ khách AI (0226): đếm câu DO MODEL SINH đã gửi THÀNH CÔNG ở CHÍNH lượt này (không theo bộ đếm cộng dồn các vòng,
+    // không tính câu mẫu đi kèm lượt model — `turn.media.afterText`).
+    let aiSent = 0;
     let yielded: string | null = null;
     let mediaDone = false;
     // Ảnh của câu trả lời mẫu: gửi NGAY SAU chữ của chính câu mẫu đó (như đường Pancake); không khớp ⇒ sau toàn bộ phần chữ.
@@ -696,6 +699,7 @@ export async function processMessengerThread(pageId: string, psid: string, deps:
         break;
       }
       out.replies += 1;
+      if (turn.aiGenerated && r.text !== turn.media?.afterText) aiSent += 1;
       if (!mediaDone && turn.media?.afterText && r.text === turn.media.afterText) {
         await sendMedia();
         if (sendError || yielded) break;
@@ -705,7 +709,7 @@ export async function processMessengerThread(pageId: string, psid: string, deps:
     // Gửi hỏng ⇒ DEAD-LETTER, KHÔNG tự gửi lại (lời gọi gửi có thể đã tới nơi).
     if (sendError) await deadLetter(db, ids, claim, `${DEAD_SEND_NOTE_PREFIX}${sendError}`, sendError, now());
     else await finish("DONE", yielded);
-    if (!sendError && out.replies > 0 && turn.aiGenerated && replies.length) await noteAiCustomerReply(conv.id, now());
+    if (aiSent > 0) await noteAiCustomerReply(conv.id, now());
     if (!sendError && out.replies > 0) await markWaitingForCustomer(conv.id, now());
     if (yielded) out.skipped = yielded;
     out.processed += ids.length;

@@ -125,8 +125,9 @@ export async function loadCommercialSnapshot(opts: { periodMonth?: string; now?:
     loadPriceBook(),
     pdb
       .select({ orgCode: schema.platformPricePins.orgCode, versionKey: schema.platformPricePins.versionKey })
-      .from(schema.platformPricePins)
-      .catch(() => [] as { orgCode: string; versionKey: string }[]),
+      // Lỗi đọc ghim ⇒ NÉM (không lập / không chốt bảng kê): ghim rỗng sẽ tính mọi workspace theo bảng giá hiện hành và chốt
+      // vĩnh viễn giá mới cho khách giá cũ.
+      .from(schema.platformPricePins),
   ]);
   const pinBy = new Map(pins.map((p) => [p.orgCode, p.versionKey]));
   // Khách AI (đồng hồ thu chính) kèm độ phủ, cho mọi workspace — đọc sổ dùng chung ở mặt phẳng điều khiển.

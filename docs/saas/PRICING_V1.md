@@ -164,3 +164,10 @@ gói đích thấp hơn số dùng AI thật.
   đó (`setOrgAddons`) hoặc chuyển phiên bản trước.
 - **Chốt kỳ**: bảng kê chốt ghi `priceVersionKey` của từng workspace vào ảnh chụp. Giới hạn: ghim không có lịch sử theo thời
   gian — chốt một kỳ cũ dùng ghim HIỆN TẠI; chốt ngay đầu tháng sau (như giới hạn v1 của COST_BILLING §4).
+- **Soát lần 2**: bảng kê nháp / chốt kỳ đọc ghim KHÔNG nuốt lỗi — lỗi ⇒ không lập, `finalizeStatement` từ chối (không bao giờ
+  chốt FINAL trên ghim rỗng). Trần AI: lỗi đọc ghim tạm thời ⇒ dùng kết quả đọc được gần nhất, chưa có thì KHÔNG chặn (mềm,
+  đếm `priceReadWarningCount`) — không rơi về `platform_plans` thô. Khách AI đếm theo câu DO MODEL SINH đã gửi thành công ở
+  CHÍNH lượt (không theo bộ đếm cộng dồn các vòng).
+- **Đếm thiếu có chủ ý (thận trọng)**: tin nhắn lại (follow-up) do AI soạn (`lib/sales-chatbot/followup.ts`) chưa ghi khách AI;
+  kênh Zalo OA và chat web cũng chưa. **Fanpage thêm 99.000 ₫** hôm nay chỉ tính qua dòng phần vượt của bảng kê — khách chưa tự
+  mua thêm fanpage ở màn thanh toán được.

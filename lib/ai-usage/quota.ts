@@ -41,7 +41,7 @@ export async function resolveAiLimits(orgCode: string): Promise<ResolvedAiLimits
   if (org.isHome) return { orgCode, isHome: true, planKey: planKeyOf(org), planName: "Nội bộ", limits: HOME_AI_LIMITS, undeclared: false, override: {}, fellBack: false };
   const key = planKeyOf(org);
   // Gói AI của bảng giá có phiên bản (0226): không trần cứng, credit = ngân sách mềm — dẫn xuất từ phiên bản đã ghim.
-  const versioned = await orgAiLimits(orgCode, key).catch(() => null);
+  const versioned = await orgAiLimits(orgCode, key);
   const plans = await listPlans();
   if (versioned) return { orgCode, isHome: false, planKey: key, planName: plans.find((p) => p.key === key)?.name ?? key, limits: applyAiOverride(versioned, override), undeclared: false, override, fellBack: false };
   const hit = plans.find((p) => p.key === key);

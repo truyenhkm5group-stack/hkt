@@ -64,13 +64,15 @@ async function adminOf(): Promise<SessionUser> {
 }
 
 async function run() {
-  const st = { calls: 0 };
+  const st = { calls: 0, takeoverThread: null as string | null };
   const provider: AiProvider = {
     name: "fake",
     model: "claude-sonnet-5",
     schemaDialect: "anthropic",
     async complete(): Promise<AiResponse> {
       st.calls += 1;
+      // Nhân viên nhảy vào ĐÚNG lúc model đang soạn ⇒ bot phải nhường (không gửi câu đã soạn).
+      if (st.takeoverThread) await (await getDb()).update(schema.salesChatConversations).set({ lastStaffAt: new Date(Date.now() + 60_000) }).where(eq(schema.salesChatConversations.threadId, st.takeoverThread));
       return { content: [{ type: "text", text: "Dạ chả cá thu bên em 280k/kg ạ, anh/chị lấy mấy ký ạ?" }], stopReason: "end_turn", usage: { inputTokens: 50, outputTokens: 10, cacheReadTokens: 0, cacheWriteTokens: 0 }, model: "claude-sonnet-5", latencyMs: 1 };
     },
   };
@@ -83,6 +85,7 @@ async function run() {
     await db.insert(schema.salesChatQuickReplies).values({ title: "Giờ mở cửa", triggers: ["mở cửa mấy giờ", "giờ mở cửa"], answer: "Dạ shop mở cửa từ 8h đến 22h hằng ngày ạ.", active: true });
     const posts: string[] = [];
     let sendFails = false;
+    let injectAfterSend: (() => Promise<unknown>) | null = null;
     const pancakeFetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       let body: unknown = { success: true };
@@ -92,6 +95,9 @@ async function run() {
         else {
           posts.push(String(init.body));
           body = { success: true, id: `m-bot-${posts.length}` };
+          const inject = injectAfterSend;
+          injectAfterSend = null;
+          if (inject) await inject();
         }
       }
       return new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
@@ -120,6 +126,18 @@ async function run() {
     const r3 = await processFanpageThread(PAGE, "a-t1", { fetch: pancakeFetch, now: later(120) });
     assert.ok(r3.replies >= 1 && !r3.error, JSON.stringify(r3));
     assert.equal(await count(), 1, "cùng khách trả lời tiếp trong kỳ ⇒ vẫn 1");
+
+    // 2b · Cùng MỘT lượt xử lý: vòng 1 gửi CÂU MẪU, vòng 2 model soạn nhưng NHƯỜNG nhân viên ⇒ không câu AI nào tới khách.
+    const postsBefore = posts.length;
+    const callsBeforeY = st.calls;
+    injectAfterSend = () => receiveFanpageEvent(ev("y-m2", "Chả cá thu bao nhiêu em?", "y-t1"));
+    st.takeoverThread = "y-t1";
+    assert.ok((await receiveFanpageEvent(ev("y-m1", "shop mở cửa mấy giờ", "y-t1"))).queued);
+    const ry = await processFanpageThread(PAGE, "y-t1", { fetch: pancakeFetch, now: later(31) });
+    st.takeoverThread = null;
+    assert.ok(st.calls > callsBeforeY, `vòng 2 có gọi model (${JSON.stringify(ry)})`);
+    assert.equal(posts.length, postsBefore + 1, "chỉ câu mẫu tới khách; câu model bị giữ lại");
+    assert.equal(await count(), 1, "câu mẫu + câu AI bị nhường ⇒ không thêm khách AI");
 
     // 3 · Gửi HỎNG ⇒ khách chưa nhận câu AI nào ⇒ không đếm.
     sendFails = true;

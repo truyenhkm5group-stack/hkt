@@ -134,9 +134,35 @@ export async function catalogPlans(now: Date = new Date()): Promise<{ version: P
  * mềm dẫn xuất từ giá tháng + ngưỡng biên nguy cấp. `null` ⇒ giữ trần cũ của `platform_plans` (legacy, gói cũ, INBOX).
  */
 export async function orgAiLimits(orgCode: string, planKey: string, now: Date = new Date()): Promise<AiLimits | null> {
-  const [v, margin] = await Promise.all([orgPriceVersion(orgCode, now), readMarginConfig()]);
-  const versionPrices = v.version ? v.book.prices.filter((p) => p.versionKey === v.version!.key) : [];
-  return catalogAiLimits({ hit: priceOf(v.book, v.version?.key, planKey), versionKind: v.version?.kind ?? null, versionPrices, criticalBelowPct: margin.criticalBelowPct, usdToVnd: env.facebook.usdToVnd });
+  const memo = `${orgCode}|${planKey}`;
+  try {
+    const [v, margin] = await Promise.all([orgPriceVersion(orgCode, now), readMarginConfig()]);
+    const versionPrices = v.version ? v.book.prices.filter((p) => p.versionKey === v.version!.key) : [];
+    const limits = catalogAiLimits({ hit: priceOf(v.book, v.version?.key, planKey), versionKind: v.version?.kind ?? null, versionPrices, criticalBelowPct: margin.criticalBelowPct, usdToVnd: env.facebook.usdToVnd });
+    aiLimitsLastGood.set(memo, limits);
+    return limits;
+  } catch (e) {
+    // Lỗi ĐỌC sổ giá / ghim (tạm thời): KHÔNG rơi về `platform_plans` thô (Scale có credit 0 ở đó ⇒ bot bị chặn vì một lần
+    // đọc lỗi). Dùng kết quả đọc được gần nhất; chưa từng đọc được ⇒ KHÔNG CHẶN (mềm), đếm cảnh báo.
+    priceReadWarnings.n += 1;
+    priceReadWarnings.last = e instanceof Error ? e.message.slice(0, 160) : String(e).slice(0, 160);
+    return aiLimitsLastGood.has(memo) ? (aiLimitsLastGood.get(memo) ?? null) : AI_LIMITS_UNREADABLE;
+  }
+}
+
+/** Trần AI khi chưa đọc được phiên bản giá: không chặn gì (mềm). Chỉ dùng cho lỗi đọc tạm thời — không bao giờ là cấu hình. */
+export const AI_LIMITS_UNREADABLE: AiLimits = { requestsPerDay: null, requestsPerMonth: null, costUsdPerMonth: { soft: null, hard: null }, platformCreditUsdPerMonth: 0, softOnly: true };
+const aiLimitsLastGood = new Map<string, AiLimits | null>();
+const priceReadWarnings = { n: 0, last: null as string | null };
+
+/** Số lần đọc sổ giá lỗi ở đường trần AI (không chứa dữ liệu khách). */
+export function priceReadWarningCount(): { n: number; last: string | null } {
+  return { ...priceReadWarnings };
+}
+
+/** Bài kiểm: quên kết quả trần AI đọc được gần nhất. */
+export function resetAiLimitsMemoForTests() {
+  aiLimitsLastGood.clear();
 }
 
 export async function readMarginConfig(): Promise<MarginConfig> {
@@ -153,6 +179,7 @@ export async function readMarginConfig(): Promise<MarginConfig> {
  * Mốc đồng hồ khách AI bắt đầu ghi: ghi đè tay ở `platform.pricing.ai-customer-meter-live-at` nếu có; không thì `created_at`
  * của phiên bản CATALOG ĐẦU TIÊN — dòng V1 do 0226 ghi lúc migrate, cùng lần deploy với mã ghi đồng hồ. `null` = chưa bật.
  */
+// Lỗi đọc ⇒ `null` = đồng hồ CHƯA ĐO ⇒ phần vượt khách AI `null` (phía an toàn: không thu), không bao giờ "đo trọn kỳ".
 export async function readAiCustomerMeterLiveAt(): Promise<Date | null> {
   try {
     const pdb = await getPlatformDb();
@@ -286,19 +313,6 @@ function rowOverage(p: PlanPrice): Record<string, unknown> {
   if (o.aiCustomerBlockVnd !== null) out.aiCustomerBlockVnd = o.aiCustomerBlockVnd;
   if (o.extraFanpageVnd !== null) out.extraFanpageVnd = o.extraFanpageVnd;
   if (o.extraUserVnd !== null) out.extraUserVnd = o.extraUserVnd;
-  return out;
-}
-
-/** Ghim hiện có theo phiên bản — cho màn người vận hành (bao nhiêu tổ chức còn ở giá cũ). */
-export async function pinsByVersion(): Promise<Map<string, string[]>> {
-  const out = new Map<string, string[]>();
-  try {
-    const pdb = await getPlatformDb();
-    const rows = await pdb.select({ orgCode: schema.platformPricePins.orgCode, versionKey: schema.platformPricePins.versionKey }).from(schema.platformPricePins);
-    for (const r of rows) out.set(r.versionKey, [...(out.get(r.versionKey) ?? []), r.orgCode]);
-  } catch {
-    // Bảng chưa có ⇒ không ghim nào.
-  }
   return out;
 }
 

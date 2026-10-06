@@ -39,7 +39,9 @@ import { loadCustomerPlan } from "@/lib/pricing/customer";
 import { hasFeature, invalidatePricing, resolveOrgPricing } from "@/lib/pricing/entitlements";
 import { aiLimitCheck, planInternalFit, previousPeriodMonth } from "@/lib/pricing/internal-fit";
 import { usagePeriodOf } from "@/lib/pricing/meter";
-import { AI_CUSTOMER_METER_LIVE_KEY, invalidatePriceBook, loadPriceBook, pinOrgPriceVersion, plansForOrg, readAiCustomerMeterLiveAt } from "@/lib/pricing/price-book";
+import { finalizeStatement } from "@/lib/saas/billing";
+import { accountOfWorkspace } from "@/lib/saas/accounts";
+import { AI_CUSTOMER_METER_LIVE_KEY, resetAiLimitsMemoForTests, invalidatePriceBook, loadPriceBook, pinOrgPriceVersion, plansForOrg, readAiCustomerMeterLiveAt } from "@/lib/pricing/price-book";
 import { buildValueKpis, VALUE_KPI_KEYS, VALUE_KPI_SPEC } from "@/lib/pricing/value-kpis";
 import {
   aiCustomerBlocks,
@@ -532,6 +534,21 @@ export async function testPricingV1() {
     const legAi = await checkAiQuota(LEG, "PLATFORM", { now: new Date(), notify: false });
     assert.equal(legAi.ok, false, "legacy giữ trần cũ y nguyên");
     assert.equal((await resolveAiLimits(LEG))?.limits.softOnly, undefined);
+    // Lỗi ĐỌC ghim tạm thời: tổ chức V1 Scale KHÔNG rơi về platform_plans thô (credit 0 ⇒ chặn bot) — dùng lần đọc tốt gần nhất,
+    // chưa có thì không chặn.
+    await setOrgPlan(B, "scale");
+    await resolveAiLimits(B);
+    await pdb.execute(sql.raw("ALTER TABLE platform_price_pins RENAME TO platform_price_pins_tam"));
+    invalidatePriceBook();
+    try {
+      assert.equal((await resolveAiLimits(B))?.limits.softOnly, true, "lỗi đọc ⇒ trần AI đọc được gần nhất");
+      assert.ok((await checkAiQuota(B, "PLATFORM", { now: new Date(), notify: false })).ok, "Scale V1: lỗi đọc ghim không chặn bot");
+      resetAiLimitsMemoForTests();
+      assert.ok((await checkAiQuota(B, "PLATFORM", { now: new Date(), notify: false })).ok, "chưa từng đọc được ⇒ không chặn (mềm)");
+    } finally {
+      await pdb.execute(sql.raw("ALTER TABLE platform_price_pins_tam RENAME TO platform_price_pins"));
+      invalidatePriceBook();
+    }
     await setOrgPlan(B, null);
 
     // ── 6. ĐỒNG HỒ KHÁCH AI — hàm ghi của điểm gửi (đường gửi thật: tests/ai-customer-send.test.ts).
@@ -638,6 +655,25 @@ export async function testPricingV1() {
     assert.equal(extA.workspaces[0].pricing.overage?.lines.find((l) => l.key === "aiCustomers")?.amountVnd, 118_000, "khách ngoài: cùng phép tính");
     const legWs = snap.customers.find((c) => c.workspaces.some((w) => w.code === LEG))!.workspaces[0];
     assert.deepEqual([legWs.pricing.versionKey, legWs.pricing.overage], ["legacy", null], "giá cũ không có phần vượt theo khách AI");
+    // Lỗi đọc ghim ⇒ không lập / không chốt bảng kê (FINAL bất biến) — không bao giờ chốt khách legacy theo giá V1.
+    const legAcct = await accountOfWorkspace(LEG);
+    assert.ok(legAcct);
+    await pdb.execute(sql.raw("ALTER TABLE platform_price_pins RENAME TO platform_price_pins_tam"));
+    invalidatePriceBook();
+    try {
+      await assert.rejects(() => loadCommercialSnapshot({ now }), "bảng kê nháp không dựng trên ghim rỗng");
+      const fin = await finalizeStatement(legAcct!.code, prevPeriod, { actor: null, email: null, reason: "chốt khi CSDL chập", source: "TEST", now });
+      assert.ok("error" in fin, JSON.stringify(fin));
+    } finally {
+      await pdb.execute(sql.raw("ALTER TABLE platform_price_pins_tam RENAME TO platform_price_pins"));
+      invalidatePriceBook();
+    }
+    assert.equal((await pdb.select().from(schema.platformBillingStatements).where(eq(schema.platformBillingStatements.accountId, legAcct!.id))).length, 0, "không dòng FINAL nào cho tổ chức legacy");
+    const finOk = await finalizeStatement(legAcct!.code, prevPeriod, { actor: null, email: null, reason: "chốt kỳ trước khi đọc được", source: "TEST", now });
+    assert.ok("ok" in finOk, JSON.stringify(finOk));
+    const finRow = (await pdb.select().from(schema.platformBillingStatements).where(eq(schema.platformBillingStatements.accountId, legAcct!.id)))[0];
+    const finWs = (finRow?.snapshot as { workspaces?: { code: string; priceVersionKey: string | null }[] }).workspaces?.find((w) => w.code === LEG);
+    assert.equal(finWs?.priceVersionKey, "legacy", "bảng kê chốt ghi đúng phiên bản giá legacy");
     assert.equal(legWs.usage.find((u) => u.metric === "ai_customers")?.value, 0, "LEG không có AI bán hàng nào chạy ⇒ 0 thật");
   } finally {
     await cleanup(saved);
