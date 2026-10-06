@@ -3,7 +3,7 @@
   "mission_id": "saas-platform-restructure",
   "title": "SaaS Control Plane: tài khoản · sản phẩm (ERP, Chốt Đơn) · thuê bao theo sản phẩm · entitlement · sổ usage/chi phí · chargeback nội bộ · VNXCommerce là khách nội bộ · Operator Console",
   "business_goal": "",
-  "status": "PLANNING",
+  "status": "RUNNING",
   "priority": "P2",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-saas-platform",
@@ -18,11 +18,20 @@
     "db/schema.ts",
     "db/migrate.ts",
     "drizzle/",
-    "app/(dashboard)/platform/customers/",
-    "app/(dashboard)/platform/products/",
+    "app/(dashboard)/platform/",
+    "app/(dashboard)/chatbot/page.tsx",
+    "app/(dashboard)/settings/plan/page.tsx",
     "components/saas/",
+    "components/app-sidebar.tsx",
+    "lib/actions/saas.ts",
+    "lib/platform/provision.ts",
+    "lib/platform/audit.ts",
+    "lib/blueprints/restore-drill.ts",
+    "lib/constants/department-modules.ts",
+    "scripts/smoke.ts",
     "tests/saas-platform.test.ts",
-    "lib/constants/saas-products.ts"
+    "tests/sync-fixtures.test.ts",
+    "tests/platform-isolation-static.test.ts"
   ],
   "dependencies": [
     "pricing-billing-foundation"
@@ -36,8 +45,8 @@
     "0224": "2026-10-06T13:26:29.899Z"
   },
   "created_at": "2026-10-06T13:25:25.486Z",
-  "updated_at": "2026-10-06T13:26:29.899Z",
-  "last_heartbeat": "2026-10-06T13:25:25.486Z",
+  "updated_at": "2026-10-06T14:02:16.613Z",
+  "last_heartbeat": "2026-10-06T14:02:16.613Z",
   "definition_of_done": [],
   "intake": {
     "verdict": "PARTIAL",
