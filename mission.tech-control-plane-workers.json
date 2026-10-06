@@ -3,7 +3,7 @@
   "mission_id": "tech-control-plane-workers",
   "title": "/tech Pha 2–6: worker headless + hàng đợi lease, đường giao hàng PR/CI/deploy/hậu kiểm, chính sách R0–R4, ngân sách, watchdog, buồng lái, định tuyến model",
   "business_goal": "Worker headless nhận việc R0/R1 từ /tech qua hàng đợi PostgreSQL (FOR UPDATE SKIP LOCKED, lease có fencing, nhịp tim, thu hồi khi chết), adapter Claude Code subscription/API tách ranh giới thanh toán",
-  "status": "RUNNING",
+  "status": "PR_READY",
   "priority": "P1",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:hkt-tech-control-plane",
@@ -58,11 +58,26 @@
     "0229": "2026-10-06T18:16:40.966Z"
   },
   "created_at": "2026-10-06T18:16:09.859Z",
-  "updated_at": "2026-10-06T19:23:55.724Z",
-  "last_heartbeat": "2026-10-06T19:23:55.724Z",
+  "updated_at": "2026-10-06T20:14:23.819Z",
+  "last_heartbeat": "2026-10-06T20:14:23.819Z",
   "definition_of_done": [],
   "intake": {
     "verdict": "PARTIAL",
     "evidence": []
+  },
+  "handoff": {
+    "branch": "feat/tech-control-plane-policy",
+    "sha": "2c9ba494117e80f80b02cad8c63a0c51f6f400e3",
+    "at": "2026-10-06T20:14:23.819Z",
+    "actor": "DESKTOP-56TH98Y:hkt-tech-control-plane",
+    "title": "Mặt phẳng điều khiển /tech Pha 2–6: worker headless, đường giao hàng, chính sách R0–R4, ngân sách, buồng lái, định tuyến model",
+    "summary": "Gộp SAU PR Pha 1 (feat/company-ai-tech-control-plane). Migration 0226, 0227. Review độc lập 5 lượt, PASS @ 2c9ba494. Dogfood đầu-cuối cục bộ đạt (TECH-1 → ai/worker/TECH-1-a1).",
+    "tests": [
+      "npm run typecheck: sạch @2c9ba494 (checkout sạch)",
+      "npm run lint: sạch",
+      "npm test: TẤT CẢ KIỂM THỬ ĐẠT (LC_ALL=C; locale mặc định Git Bash làm backup.test đổi thứ tự sort — không liên quan, nhánh không chạm backup)",
+      "npm run build: đạt (heap 8 GB)",
+      "review độc lập: PASS @ 2c9ba494"
+    ]
   }
 }
