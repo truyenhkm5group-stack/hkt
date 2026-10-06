@@ -3389,10 +3389,18 @@ function cmdClose(ctx: RepoCtx, idIn: string | undefined, flags: Set<string>, va
         return { change: null, result: { ok: false, msg: `chưa có bằng chứng ${e.branch ?? `PR #${lastPr}`} đã vào ${ctx.config.integrationRef} — DONE chỉ sau khi vào main` } };
       const landed = (tip && branchLanded ? landedCommit(ctx, tip, ctx.config.integrationRef, ev, lastPr ?? null) : null) ?? prLanded;
       const landedFiles = landed ? lines(gitTry(ctx.top, ["diff-tree", "--no-commit-id", "--name-only", "-r", "-m", "--first-parent", landed])) : [];
-      if (!branchLanded && landed && !landedFiles.some((f) => e.owned_paths.some((p) => fileInPattern(f, p))))
-        return { change: null, result: { ok: false, msg: `PR #${lastPr} không chạm tệp nào trong phạm vi khai của ${id} — một số PR tự khai không chứng minh được sứ mệnh này đã vào main` } };
-      // Danh sách tệp KHÔNG chạy trên VPS đọc từ nhánh tích hợp, không từ cây đang đứng (sửa cục bộ không nới được).
-      let nonRuntime = ctx.config.nonRuntimePaths;
+      // Bằng chứng dựa trên SỐ PR (đường chỉ-có-PR, hoặc PR_SUBJECT của nhánh): số PR là tự khai, nên commit gộp
+      // phải chạm đúng thứ sứ mệnh làm — tệp của commit RIÊNG của nhánh nếu có, không thì phạm vi khai.
+      if (landed && (!branchLanded || ev === "PR_SUBJECT")) {
+        const own = tip ? (ownCommits(ctx.top, tip, ctx.config.integrationRef, e.base_sha ?? undefined) ?? []) : [];
+        const ownFiles = new Set(own.flatMap((c) => lines(gitTry(ctx.top, ["diff-tree", "--no-commit-id", "--name-only", "-r", c]))));
+        const hit = ownFiles.size ? landedFiles.some((f) => ownFiles.has(f)) : landedFiles.some((f) => e.owned_paths.some((p) => fileInPattern(f, p)));
+        if (!hit)
+          return { change: null, result: { ok: false, msg: `PR #${lastPr} không chạm tệp nào ${ownFiles.size ? "mà nhánh của" : "trong phạm vi khai của"} ${id} đã đổi — một số PR tự khai không chứng minh được sứ mệnh này đã vào main` } };
+      }
+      // Danh sách tệp KHÔNG chạy trên VPS đọc từ nhánh tích hợp, không từ cây đang đứng (sửa cục bộ không nới được);
+      // không đọc được ⇒ mặc định của CÔNG CỤ, không bao giờ cấu hình cục bộ.
+      let nonRuntime = DEFAULT_CONFIG.nonRuntimePaths;
       try {
         const onRef = gitTry(ctx.top, ["show", `${ctx.config.integrationRef}:.ai/config.json`]);
         if (onRef) {

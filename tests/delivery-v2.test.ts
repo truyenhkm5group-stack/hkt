@@ -645,6 +645,19 @@ async function testVongDoi() {
     assert.equal(than.code, 1, "'(#88)' nằm trong THÂN commit không phải dấu gộp");
     assert.match(than.text, /chưa có bằng chứng/);
 
+    // Đường CÓ NHÁNH cũng không mượn được số PR: nhánh còn commit riêng chưa gộp + khai --prs=77 (của m-y).
+    g(B, "fetch", "-q", "origin");
+    g(B, "checkout", "-q", "-b", "claude/m-v", "origin/main");
+    put(path.join(B, "src", "v", "a.ts"), "export const v = 1;\n");
+    g(B, "add", "-A");
+    g(B, "commit", "-q", "-m", "việc V (chưa gộp)");
+    g(B, "push", "-q", "origin", "claude/m-v");
+    assert.equal((await ai(B, "claim", "m-v", "--title=V", "--branch=claude/m-v", "--paths=src/v/", "--prs=77")).code, 0);
+    datVerifyCho("m-v", g(A, "rev-parse", "main"));
+    const muonNhanh = await ai(B, "close", "m-v", "--status=DONE", "--evidence=#77");
+    assert.equal(muonNhanh.code, 1, "có nhánh + số PR mượn (PR_SUBJECT) ⇒ commit gộp không chạm tệp nhánh đã đổi ⇒ từ chối");
+    assert.match(muonNhanh.text, /không chạm tệp nào mà nhánh của m-v đã đổi/);
+
     // ── Bằng chứng CONTENT (squash không ghi số PR) trên đường runtime ⇒ không chỉ ra được commit ⇒ từ chối ──
     g(B, "fetch", "-q", "origin");
     g(B, "checkout", "-q", "-b", "claude/m-w", "origin/main");
