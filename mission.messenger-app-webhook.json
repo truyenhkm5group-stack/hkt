@@ -29,18 +29,18 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-06T12:35:49.000Z",
-  "updated_at": "2026-10-06T12:36:06.271Z",
-  "last_heartbeat": "2026-10-06T12:35:55.278Z",
+  "updated_at": "2026-10-06T12:44:47.181Z",
+  "last_heartbeat": "2026-10-06T12:44:47.181Z",
   "definition_of_done": [],
   "handoff": {
     "branch": "feat/messenger-app-webhook",
-    "sha": "340e19c69e6b47aa072214c7b85a81c506799c98",
-    "at": "2026-10-06T12:35:55.278Z",
+    "sha": "f4a76b7c80c5ca6be8c84bb1dbc9bb59cd4d5f23",
+    "at": "2026-10-06T12:44:47.181Z",
     "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
     "title": "Webhook nhận gói của app Meta Messenger riêng (cấu hình thử)",
     "summary": "",
     "tests": [
-      "messenger-webhook-secrets + messenger-discovery ĐẠT; tsc + eslint --max-warnings=0 sạch"
+      "ghép main (#607): tsc sạch; review độc lập PASS ở 340e19c6"
     ]
   }
 }
