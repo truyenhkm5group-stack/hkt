@@ -520,6 +520,7 @@ import { testSalesAiDownAlert } from "./sales-ai-down-alert.test";
 import { testAiSalesHealth } from "./ai-sales-health.test";
 import { testAiSalesRetry } from "./ai-sales-retry.test";
 import { testAiProviderFailover } from "./ai-provider-failover.test";
+import { testAiSalesRecovery } from "./ai-sales-recovery.test";
 import { testMessengerMultiPage } from "./messenger-multipage.test";
 import { testPush } from "./push.test";
 import { testUserInvites } from "./user-invites.test";
@@ -2818,6 +2819,8 @@ async function main() {
   // Khoá AI chính → khoá dự phòng → người (sự cố 06/10/2026): phân loại · ngắt mạch · không gửi trùng — tổ chức THẬT
   // `fo-ai-failover`, provider giả.
   await testAiProviderFailover();
+  // Cứu hội thoại bị bỏ sót trong sự cố AI — chỉ đọc, bốn lớp, không gửi gì.
+  await testAiSalesRecovery();
   await testMessengerMultiPage();
   await testPush();
   // Mời người dùng qua liên kết (gap «Invite User»): tổ chức THẬT `ui-a` / `ui-b` / `ui-t` (tự cấp, tự dọn) + nhà — vai trò
