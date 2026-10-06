@@ -119,3 +119,4 @@
 {"at":"2026-10-06T14:55:44.146Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#614 @ a5d0c1c5a313 · Review độc lập PASS ở 135b2149 (cùng app ở mọi chỗ gọi, login không đổi, echo, config_id); a5d0c1c5 chỉ sửa nhãn /platform + chú thích install — gates xanh"}
 {"at":"2026-10-06T14:57:42.417Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"messenger-app-switch","detail":"#614 @ a5d0c1c5a313 → 6a62afbbf630 (MERGE_ISOLATED · HIGH · gates success)"}
 {"at":"2026-10-06T14:58:07.933Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DEPLOY_DISPATCHED","detail":"6a62afbbf630 · run 37483380845 https://github.com/truyenhkm5group-stack/hkt/actions/runs/37483380845"}
+{"at":"2026-10-06T15:10:30.662Z","actor":"DESKTOP-56TH98Y:wt-saas-platform","kind":"HANDOFF","mission":"saas-platform-restructure","detail":"feat/saas-platform-restructure @ ad4ff9901adf · 5 lệnh kiểm thử"}

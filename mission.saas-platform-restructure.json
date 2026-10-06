@@ -3,7 +3,7 @@
   "mission_id": "saas-platform-restructure",
   "title": "SaaS Control Plane: tài khoản · sản phẩm (ERP, Chốt Đơn) · thuê bao theo sản phẩm · entitlement · sổ usage/chi phí · chargeback nội bộ · VNXCommerce là khách nội bộ · Operator Console",
   "business_goal": "",
-  "status": "RUNNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-saas-platform",
@@ -45,11 +45,26 @@
     "0224": "2026-10-06T13:26:29.899Z"
   },
   "created_at": "2026-10-06T13:25:25.486Z",
-  "updated_at": "2026-10-06T14:02:16.613Z",
-  "last_heartbeat": "2026-10-06T14:02:16.613Z",
+  "updated_at": "2026-10-06T15:10:30.624Z",
+  "last_heartbeat": "2026-10-06T15:10:30.624Z",
   "definition_of_done": [],
   "intake": {
     "verdict": "PARTIAL",
     "evidence": []
+  },
+  "handoff": {
+    "branch": "feat/saas-platform-restructure",
+    "sha": "ad4ff9901adfc2f41f6ec17a908e326de1975046",
+    "at": "2026-10-06T15:10:30.624Z",
+    "actor": "DESKTOP-56TH98Y:wt-saas-platform",
+    "title": "SaaS Control Plane: tài khoản · thuê bao theo sản phẩm (ERP, Chốt Đơn) · sổ dùng/chi phí · bảng kê hoá đơn/chargeback · job cấp phát · Operator Console",
+    "summary": "SaaS Control Plane (0224): platform_accounts (INTERNAL/EXTERNAL · chargeback/hoá đơn) → workspace → platform_product_subscriptions (ERP · Chốt Đơn); danh mục Product→Capability→Feature; entitlement hiệu lực; sổ dùng chung idempotent; sổ chi phí có căn cứ phân bổ; bộ máy bảng kê thuần + chốt kỳ bất biến; job cấp phát idempotent + chạy lại; SDK v1; /platform/customers, /platform/products, «Sản phẩm của tôi», /chatbot thành cửa vào Chốt Đơn. Backfill: VNXCommerce INTERNAL với ERP + Chốt Đơn; mỗi workspace khách một tài khoản (không gộp theo tên). PHỤ THUỘC #612 — gộp SAU #612 (nhánh chứa các commit của #612; sau squash của #612 cần rebase --onto). Rủi ro HIGH: migration + lib/platform/provision.ts (bước 6 chạy cho mọi workspace mới).",
+    "tests": [
+      "npm run typecheck: sạch",
+      "npm run lint: sạch (toàn kho)",
+      "npm test (Git Bash): TẤT CẢ KIỂM THỬ ĐẠT — 715 nhóm, gồm tests/saas-platform.test.ts",
+      "npm run build: đạt trên cây sạch theo SHA ad4ff990",
+      "kiểm đột biến: 4/4 bị bắt (bỏ vế runtime cũ SQL · chargeback theo hạn trả · console bỏ kiểm người vận hành · phân bổ bỏ workspace nhà)"
+    ]
   }
 }
