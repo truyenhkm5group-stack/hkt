@@ -21,7 +21,7 @@ import { ORGANIZATION_CODE_PATTERN } from "@/lib/platform/types";
 import { accountOfWorkspace, createAccount, findAccountByCode, findAccountById, insertSubscription, liveSubscriptions, setSubscriptionState, type SaasSource } from "@/lib/saas/accounts";
 import { PRODUCTS, SHARED_COMMERCE_CORE, modulesToProvision, productDef, type ProductDef } from "@/lib/saas/catalog";
 import { readPlans } from "@/lib/saas/customers";
-import { ACCOUNT_TYPES, BILLING_MODES, type AccountType, type BillingMode } from "@/lib/saas/policy";
+import { ACCOUNT_TYPES, BILLING_MODES, cancelByJobAllowed, type AccountType, type BillingMode } from "@/lib/saas/policy";
 
 export type ProvisioningKind = "CREATE_CUSTOMER" | "SUBSCRIBE_PRODUCT" | "CANCEL_SUBSCRIPTION";
 export type JobStatus = "PENDING" | "RUNNING" | "SUCCEEDED" | "FAILED";
@@ -84,6 +84,23 @@ export async function validateRequest(req: ProvisioningRequest, catalog: readonl
     return null;
   }
   if (req.reason.trim().length < 5) return "Huỷ thuê bao cần lý do (ít nhất 5 ký tự).";
+  return cancelGuard(req.subscriptionId);
+}
+
+/**
+ * KHÔNG HUỶ THUÊ BAO CỦA WORKSPACE NHÀ / TÀI KHOẢN NỘI BỘ (review tích hợp 06/10/2026): huỷ ERP của VNXCommerce tắt ~26 module
+ * độc quyền (Pancake, Viettel Post, tài chính, giao vận…) ở `vnx` — một cú bấm làm sập ERP đang vận hành thật, và
+ * `setOrganizationModule` không có ngoại lệ nhà. Thu hồi quyền dùng là việc của khách NGOÀI; nội bộ đổi bằng thao tác module có chủ đích.
+ * Kiểm ở bước nhận yêu cầu VÀ lại ở bước chạy job (job xếp từ trước bản vá vẫn bị chặn).
+ */
+async function cancelGuard(subscriptionId: string): Promise<string | null> {
+  const pdb = await getPlatformDb();
+  const sub = await pdb.query.platformProductSubscriptions.findFirst({ where: eq(schema.platformProductSubscriptions.id, subscriptionId) });
+  if (!sub) return null; // bước chạy báo «Không có thuê bao này» như cũ
+  const org = await findOrganization(sub.orgCode);
+  if (org?.isHome) return "Không huỷ thuê bao của workspace nhà — huỷ sẽ tắt module đang vận hành của chính nền tảng.";
+  const account = sub.accountId ? await findAccountById(sub.accountId) : null;
+  if (account && !cancelByJobAllowed(account.accountType as AccountType)) return "Không huỷ thuê bao của tài khoản nội bộ bằng job cấp phát — đổi module có chủ đích ở trang module.";
   return null;
 }
 
@@ -163,6 +180,12 @@ function fail(step: StepFn, key: string, message: string): never {
 }
 
 async function runCreateCustomer(req: CreateCustomerRequest, ctx: Ctx, step: StepFn, knownAccountId: string | null, catalog: readonly ProductDef[]): Promise<{ accountId: string; orgCode: string }> {
+  // 0. «Tạo khách» chỉ cho workspace MỚI (review tích hợp 06/10/2026): mã của một workspace đã có ⇒ lượt chạy sẽ tạo thêm một
+  //    quản trị ADMIN trong CSDL của khách đó và trả liên kết kích hoạt. Ngoại lệ duy nhất: lượt CHẠY LẠI của chính job này
+  //    (job đã ghi tài khoản ở lượt trước — workspace có thể do chính lượt trước tạo rồi hỏng ở bước sau). Kiểm TRƯỚC khi tạo tài
+  //    khoản để lượt bị từ chối không để lại tài khoản mồ côi.
+  const existingBefore = await findOrganization(req.workspace.code);
+  if (existingBefore && !knownAccountId) fail(step, "WORKSPACE", `Workspace "${existingBefore.code}" đã có — «Tạo khách» chỉ dùng cho workspace mới; thuê thêm sản phẩm bằng «Thuê sản phẩm».`);
   // 1. Tài khoản — lượt chạy lại dùng lại tài khoản lượt trước đã tạo (ghi trên job), không tạo tài khoản thứ hai.
   let account = knownAccountId ? await findAccountById(knownAccountId) : null;
   if (!account && req.account?.code) account = await findAccountByCode(req.account.code);
@@ -244,6 +267,8 @@ async function runCancel(req: CancelRequest, ctx: Ctx, step: StepFn, catalog: re
   const pdb = await getPlatformDb();
   const sub = await pdb.query.platformProductSubscriptions.findFirst({ where: eq(schema.platformProductSubscriptions.id, req.subscriptionId) });
   if (!sub) fail(step, "SUBSCRIPTION", "Không có thuê bao này.");
+  const guard = await cancelGuard(sub.id);
+  if (guard) fail(step, "SUBSCRIPTION", guard);
   if (!sub.endedAt) await setSubscriptionState(sub.id, { state: "CANCELED" }, { actor: ctx.actor, source: ctx.source, reason: req.reason });
   step("SUBSCRIPTION", sub.endedAt ? "SKIPPED" : "DONE", sub.endedAt ? "đã huỷ từ trước" : "CANCELED");
   const product = productDef(sub.productKey, catalog);

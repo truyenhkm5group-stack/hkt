@@ -74,6 +74,14 @@ export function marginApplicable(mode: BillingMode): boolean {
 }
 
 /** Tài khoản loại này có được GỢI Ý gộp theo tên không — chỉ khách ngoài (khách nội bộ do người vận hành tự quản). */
+/**
+ * Job cấp phát có được HUỶ thuê bao (thu hồi module độc quyền) của tài khoản loại này không. Nội bộ thì KHÔNG: huỷ ERP của
+ * VNXCommerce tắt module đang vận hành của chính nền tảng (review tích hợp 06/10/2026) — đổi có chủ đích ở trang module.
+ */
+export function cancelByJobAllowed(type: AccountType): boolean {
+  return type !== "INTERNAL";
+}
+
 export function mergeSuggestible(type: AccountType): boolean {
   return type === "EXTERNAL";
 }

@@ -219,6 +219,11 @@ async function testMigration(home: { code: string }) {
   assert.equal(acct.billingMode, "INTERNAL_CHARGEBACK");
   const subs = (await liveSubscriptions(home.code)).map((s) => s.productKey).sort();
   assert.deepEqual(subs, ["chotdon", "erp"], "VNXCommerce thuê ERP + Chốt Đơn như khách");
+  // Huỷ thuê bao của workspace NHÀ bị từ chối trước khi có job — không cú bấm nào tắt được module đang vận hành của nền tảng.
+  const homeErp = (await liveSubscriptions(home.code)).find((s) => s.productKey === "erp")!;
+  const refused = await requestProvisioning({ kind: "CANCEL_SUBSCRIPTION", subscriptionId: homeErp.id, reason: "Thử huỷ ERP của nhà" }, { actor: null, email: null, source: "TEST", idempotencyKey: "sp-home-cancel" });
+  assert.ok("error" in refused && /workspace nhà/.test(refused.error), JSON.stringify(refused));
+  assert.ok((await liveSubscriptions(home.code)).some((s) => s.productKey === "erp"), "thuê bao ERP của nhà còn nguyên");
   assert.deepEqual((await productsInUse(home.code)).sort(), subs, "TS và backfill SQL đồng ý cho workspace nhà");
 
   // Parity SQL ↔ TS trên các bộ module khác nhau. Bộ module ĐÓNG dưới phụ thuộc như mọi dữ liệu thật (mọi lượt ghi module đi
@@ -283,6 +288,12 @@ async function testCustomer03(op: SessionUser) {
   // Gửi lại cùng khoá ⇒ cùng job, không chạy lại.
   const again = await createCustomerAsOperator(op, { account: { code: "sp-customer03", name: "Customer 03", accountType: "EXTERNAL" }, workspace: { code: C3, name: "Customer 03 Shop", planKey: "starter", brand: "chotdon" }, products: ["chotdon"], admin: { email: "owner@c3.local", name: "Chủ C3" }, idempotencyKey: "sp-c3-create", reason: "Bấm hai lần" });
   assert.ok("ok" in again && again.jobId === r.jobId);
+  // «Tạo khách» bằng KHOÁ MỚI trên workspace đã có ⇒ từ chối: không tạo quản trị thứ hai trong CSDL của khách, không tài khoản mồ côi.
+  const accountsBefore = (await pdb.select({ id: schema.platformAccounts.id }).from(schema.platformAccounts)).length;
+  const hijack = await createCustomerAsOperator(op, { account: { code: "sp-customer03", name: "Customer 03", accountType: "EXTERNAL" }, workspace: { code: C3, name: "Customer 03 Shop", planKey: "starter", brand: "chotdon" }, products: ["chotdon"], admin: { email: "la@c3.local", name: "Người lạ" }, idempotencyKey: "sp-c3-create-2", reason: "Tạo lại trên workspace đã có" });
+  assert.ok(!("ok" in hijack) || hijack.status !== "SUCCEEDED", JSON.stringify(hijack));
+  assert.equal(await withOrganization(C3, async () => (await getDb()).query.users.findFirst({ where: eq(schema.users.email, "la@c3.local") })), undefined, "không quản trị mới nào trong CSDL khách");
+  assert.equal((await pdb.select({ id: schema.platformAccounts.id }).from(schema.platformAccounts)).length, accountsBefore, "không tài khoản mồ côi");
   assert.equal((await pdb.query.platformProvisioningJobs.findFirst({ where: eq(schema.platformProvisioningJobs.id, r.jobId) }))!.attempts, 1);
 
   // Entitlement: thuê bao cho dùng ∧ module bật ∧ tính năng theo gói Khởi đầu (không có cross_sell).

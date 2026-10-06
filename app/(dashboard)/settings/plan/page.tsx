@@ -34,7 +34,8 @@ export default async function PlanPage() {
   // Hạn mức THƯƠNG MẠI tháng này (0222): đơn vị dễ hiểu, không token / chi phí — cùng mã tổ chức của PHIÊN.
   const customer = usage.isHome ? null : await loadCustomerPlan(usage.orgCode);
   // Sản phẩm đã thuê (0224): workspace lấy từ PHIÊN; khách nội bộ và khách ngoài cùng một khung.
-  const products = await loadMyProducts(user);
+  // Khung mới (0224) không được làm sập trang gói của mọi tổ chức (kể cả nhà) khi sổ thương mại lỗi — lỗi ⇒ ẩn khung.
+  const products = await loadMyProducts(user).catch((e: unknown) => ({ error: e instanceof Error ? e.message : String(e) }));
   return (
     <div className="space-y-5">
       <PageHeader
