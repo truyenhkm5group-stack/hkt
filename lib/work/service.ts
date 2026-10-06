@@ -62,7 +62,8 @@ export async function ensureOverlay(db: Db, key: string, actor: WorkActor, depar
       departmentId: deptId,
       businessEntity: WORK_SOURCE_SPEC[source].businessEntity,
       creationSource: "AUTO",
-      createdBy: actor.id,
+      // Máy làm mang `id: ""` (lib/work/assign.ts) ⇒ NULL = MÁY (AGENTS.md mục 34), không phải chuỗi rỗng vi phạm khoá ngoại.
+      createdBy: actor.id || null,
     })
     .onConflictDoNothing();
   const row = await db.query.workItems.findFirst({
