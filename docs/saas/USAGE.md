@@ -14,7 +14,7 @@
 - Đọc chỉ số kinh doanh sâu (hội thoại phân biệt cả kỳ, fanpage đang chạy) cho hạn mức: `readPeriodUsage` (#612).
 - Hỏng một nguồn ⇒ chỉ số của nguồn đó `null` + lý do.
 
-## Khách AI — đồng hồ thu chính (0225 · `PRICING_V1.md` §II.2)
+## Khách AI — đồng hồ thu chính (0226 · `PRICING_V1.md` §II.2)
 
 - `chotdon.ai_customers` (`EVENT_LEDGER`, `emitterLive: true`) ghi tại điểm gửi thành công của `lib/sales-chatbot`
   (`markWaitingForCustomer` → `lib/pricing/ai-customer.ts::noteAiCustomerReply`). Khoá `ai_customer:<YYYY-MM>:<kênh>:<page>:<khách>`

@@ -57,7 +57,7 @@ export async function captureSaasSnapshot(now: Date = new Date()): Promise<Snaps
   const orgs = await listOrganizations();
   const pdb = await getPlatformDb();
   const subs = new Map((await pdb.select().from(schema.platformSubscriptions)).map((s) => [s.orgCode, { billingEnabled: s.billingEnabled, paidThrough: s.paidThrough ?? null, graceDays: s.graceDays, addons: s.addons }]));
-  // Giá của MỖI tổ chức theo phiên bản giá đã ghim (0225) — MRR là số khách thật trả, không phải giá niêm yết hôm nay.
+  // Giá của MỖI tổ chức theo phiên bản giá đã ghim (0226) — MRR là số khách thật trả, không phải giá niêm yết hôm nay.
   const live = orgs.filter((o) => o.status !== "SETUP_FAILED");
   const rows: (SaasDailyRow & { mrrNote: string | null })[] = [];
   for (const o of live) rows.push(snapshotRow(o, await plansForOrg(o.code, now), subs.get(o.code), day));

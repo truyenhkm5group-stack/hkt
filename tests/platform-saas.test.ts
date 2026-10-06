@@ -260,9 +260,9 @@ export async function testPlatformSaas() {
   for (const code of ORGS) await provisionOrganization({ code, name: `Tổ chức ${code}`, modules: ["customers"], admin: { email: `admin@${code}.local`, name: `QT ${code}`, password: "Saas@12345678" }, source: "TEST", actor: null });
   try {
     // A trả tiền gói Khởi đầu, hạn rất xa; B dùng thử (gói không giá). A là khách CÓ TỪ TRƯỚC bảng giá V1 ⇒ ghim giá legacy
-    // (0225: thuê bao hiện có giữ đúng giá đang thu — MRR đọc theo phiên bản đã ghim).
+    // (0226: thuê bao hiện có giữ đúng giá đang thu — MRR đọc theo phiên bản đã ghim).
     await setPlan(A, "starter");
-    await pinOrgPriceVersion(A, "legacy", { source: "TEST", reason: "khách có từ trước 0225", email: null });
+    await pinOrgPriceVersion(A, "legacy", { source: "TEST", reason: "khách có từ trước 0226", email: null });
     await pdb.insert(schema.platformSubscriptions).values([
       { orgCode: A, billingEnabled: true, paidThrough: "2099-12-31", graceDays: 7 },
       { orgCode: B, billingEnabled: true, paidThrough: "2099-12-31", graceDays: 7 },

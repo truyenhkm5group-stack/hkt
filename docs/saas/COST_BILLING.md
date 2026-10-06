@@ -38,7 +38,7 @@ bao lúc chốt (không lịch sử thay đổi trong kỳ) — chốt ngay đ�
 Thu tiền khách ngoài vẫn đi đường 0187 (`platform_invoices`, VietQR, khớp sổ ngân hàng nhà, `BillingProvider` #612).
 Bảng kê không tạo lệnh thu thứ hai. Thu tiền phần vượt cần chủ nền tảng chốt đơn giá + kỳ thu (`PLAN.md`).
 
-## 5. Giá theo phiên bản + phần vượt khách AI (0225 · `PRICING_V1.md`)
+## 5. Giá theo phiên bản + phần vượt khách AI (0226 · `PRICING_V1.md`)
 
 - Dòng gói / mua thêm của bảng kê đọc giá theo PHIÊN BẢN đã ghim của workspace (`lib/pricing/price-book.ts`) — khách nội bộ và
   khách ngoài cùng một phép tính; khách có từ trước ghim `legacy` (giá đang thu, không đổi).

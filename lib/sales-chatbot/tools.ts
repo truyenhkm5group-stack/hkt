@@ -28,6 +28,7 @@ import { priceBooksFor } from "@/lib/queries/price-lists";
 import { createCustomerAsAgent, normalizeCustomerPhone } from "@/lib/records/customer-create";
 import { activeAppointmentRanges, createAppointmentAsAgent } from "@/lib/records/appointments";
 import { createOrderAsAgent, updateOrderAsAgent, type AgentOrderOptions, type OrderAgent } from "@/lib/records/order-create";
+import { chatOrderAdId } from "@/lib/sales-chatbot/ad-referral";
 import { agentUnitPrice } from "@/lib/commerce/pricing";
 import { notifySalesChatBooking, notifySalesChatHandoff } from "@/lib/sales-chatbot/alerts";
 import { freeShipVerdict, variantWeightGrams, type ShipVerdict } from "@/lib/sales-chatbot/shipping";
@@ -564,7 +565,10 @@ export async function executeTool(name: string, rawInput: unknown, ctx: ToolCont
       const draft = { ...(ctx.turn !== undefined ? { shownTurn: ctx.turn } : {}), ...(firstShown !== undefined ? { firstShownTurn: firstShown } : {}), orderId: existing?.orderId ?? null, lines, unitPrices: Object.fromEntries(priced.lines.map((l) => [l.variantId, l.unitPrice])), recipient, note: v.data.delivery_note ?? existing?.note ?? "", simulated };
       if (!simulated) {
         const payload = orderInput(state, draft, priced, "NEW", ctx.config, ctx.channel);
-        const r = draft.orderId ? await updateOrderAsAgent(ctx.agent, draft.orderId, payload, agentOrderOpts(ctx, state, false)) : await createOrderAsAgent(ctx.agent, payload, agentOrderOpts(ctx, state, true));
+        // Đơn MỚI mang mã quảng cáo đã dẫn khách vào hội thoại (trong cửa sổ quy kết — máy chủ quyết); sửa đơn KHÔNG đổi nó.
+        const r = draft.orderId
+          ? await updateOrderAsAgent(ctx.agent, draft.orderId, payload, agentOrderOpts(ctx, state, false))
+          : await createOrderAsAgent(ctx.agent, payload, { ...agentOrderOpts(ctx, state, true), adId: await chatOrderAdId(ctx.conversationId, now) });
         if (!r.ok) return err("Đơn nháp: lỗi", failureText(r), state);
         draft.orderId = r.id;
       }

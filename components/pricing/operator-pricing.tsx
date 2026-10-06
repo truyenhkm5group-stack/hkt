@@ -220,7 +220,7 @@ export function GuardConfigForm({ current }: { current: GuardConfig }) {
   );
 }
 
-/** Dải biên lãi gộp CHIẾU của nền tảng (0225): đích · cảnh báo · nguy cấp. */
+/** Dải biên lãi gộp CHIẾU của nền tảng (0226): đích · cảnh báo · nguy cấp. */
 export function MarginConfigForm({ current }: { current: MarginConfig }) {
   const [v, setV] = useState({ ...current });
   const num = (k: keyof MarginConfig) => (e: React.ChangeEvent<HTMLInputElement>) => setV((s) => ({ ...s, [k]: Number(e.target.value) }));
@@ -253,7 +253,7 @@ export function MarginConfigForm({ current }: { current: MarginConfig }) {
   );
 }
 
-/** Chuyển MỘT tổ chức sang một phiên bản giá (0225) — giá cũ giữ cho tới khi người vận hành chuyển. */
+/** Chuyển MỘT tổ chức sang một phiên bản giá (0226) — giá cũ giữ cho tới khi người vận hành chuyển. */
 export function PriceVersionPinForm({ orgCode, orgName, current }: { orgCode: string; orgName: string; current: string | null }) {
   const [key, setKey] = useState(current ?? "");
   return (

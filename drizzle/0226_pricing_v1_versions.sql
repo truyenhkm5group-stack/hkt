@@ -1,4 +1,4 @@
--- 0225 · BẢNG GIÁ CÓ PHIÊN BẢN + GIÁ V1 CHỐT ĐƠN TỰ ĐỘNG (docs/saas/PRICING_V1.md) — MỞ RỘNG 0187 · 0192 · 0194 · 0223 · 0224.
+-- 0226 · BẢNG GIÁ CÓ PHIÊN BẢN + GIÁ V1 CHỐT ĐƠN TỰ ĐỘNG (docs/saas/PRICING_V1.md) — MỞ RỘNG 0187 · 0192 · 0194 · 0223 · 0224.
 --
 --  · `platform_price_versions`: một PHIÊN BẢN bảng giá. `LEGACY_SNAPSHOT` = ảnh chụp giá ĐANG THU lúc migration này chạy (chỉ
 --    tới được bằng ghim, không bao giờ là "giá hiện hành"); `CATALOG` = bảng giá niêm yết, hiệu lực từ `effective_from`. Giá
@@ -10,7 +10,7 @@
 --    đang trả không đổi sau deploy.
 --  · `platform_price_pins`: tổ chức đang ở phiên bản nào. MỌI tổ chức có từ trước migration này ⇒ ghim `legacy`. Tổ chức
 --    không có ghim (tạo sau) ⇒ theo phiên bản CATALOG đang hiệu lực, và được ghim khi hoá đơn đầu tiên được trả.
---  · `platform_invoices.price_version_key`: hoá đơn tính theo phiên bản nào (NULL = trước 0225 = legacy).
+--  · `platform_invoices.price_version_key`: hoá đơn tính theo phiên bản nào (NULL = trước 0226 = legacy).
 --  · Gói MỚI trong `platform_plans`: `inbox` (KHÔNG có AI bán hàng) và `scale` — chỉ là DANH TÍNH gói + hạn mức kỹ thuật
 --    (`checkEntitlement`); giá của chúng nằm ở phiên bản. Credit AI nền tảng của hai gói mới = 0 (credit là quyết định của chủ
 --    nền tảng, 0194 — chưa khai cho gói mới ⇒ AI chạy bằng khoá của tổ chức). Gói cũ (basic · pro · standard · internal…) GIỮ NGUYÊN.
@@ -69,14 +69,14 @@ CREATE TABLE IF NOT EXISTS "platform_price_pins" (
   "reason" text,
   "pinned_by_email" text,
   "pinned_at" timestamp with time zone DEFAULT now() NOT NULL,
-  CONSTRAINT "platform_price_pins_source_check" CHECK ("source" IN ('MIGRATION_0225','INVOICE_PAID','OPERATOR','TEST'))
+  CONSTRAINT "platform_price_pins_source_check" CHECK ("source" IN ('MIGRATION_0226','INVOICE_PAID','OPERATOR','TEST'))
 );--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "platform_price_pins_version_idx" ON "platform_price_pins" ("version_key");--> statement-breakpoint
 ALTER TABLE "platform_invoices" ADD COLUMN IF NOT EXISTS "price_version_key" text;--> statement-breakpoint
 
 -- ── Phiên bản LEGACY: chụp ĐÚNG giá đang thu hôm nay từ `platform_plans` (mọi gói, kể cả gói không bán). ──
 INSERT INTO "platform_price_versions" ("key", "label", "kind", "effective_from", "tax_mode", "note")
-VALUES ('legacy', 'Giá cũ (trước V1 · chụp lúc 0225)', 'LEGACY_SNAPSHOT', NULL, 'UNDECLARED', '0225: ảnh chụp platform_plans lúc migration — thuê bao có từ trước giữ nguyên số tiền đang trả')
+VALUES ('legacy', 'Giá cũ (trước V1 · chụp lúc 0226)', 'LEGACY_SNAPSHOT', NULL, 'UNDECLARED', '0226: ảnh chụp platform_plans lúc migration — thuê bao có từ trước giữ nguyên số tiền đang trả')
 ON CONFLICT ("key") DO NOTHING;--> statement-breakpoint
 INSERT INTO "platform_plan_prices" ("version_key", "plan_key", "name", "description", "position", "listed", "highlight", "contact_sales", "monthly_vnd", "yearly_vnd", "yearly_free_months", "price_from_vnd", "trial_days", "included", "overage", "features", "addon_prices", "limits", "commercial")
 SELECT 'legacy', p."key", p."name", p."description", p."position", false,
@@ -138,6 +138,6 @@ ON CONFLICT ("version_key", "plan_key") DO NOTHING;--> statement-breakpoint
 
 -- ── Ghim MỌI tổ chức có từ trước vào `legacy` (kể cả nhà — gán nhà vào gói thường là việc tay, có chạy thử). ──
 INSERT INTO "platform_price_pins" ("org_code", "version_key", "source", "reason")
-SELECT o."code", 'legacy', 'MIGRATION_0225', '0225: tổ chức có từ trước bảng giá V1 — giữ nguyên giá đang thu'
+SELECT o."code", 'legacy', 'MIGRATION_0226', '0226: tổ chức có từ trước bảng giá V1 — giữ nguyên giá đang thu'
 FROM "platform_organizations" o
 ON CONFLICT ("org_code") DO NOTHING;

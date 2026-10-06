@@ -9,7 +9,7 @@
  *  · `pinOrgPriceVersion` — ghim (hoá đơn được trả / người vận hành chuyển). `publishCatalogVersion` — sửa giá = THÊM phiên
  *    bản mới chép từ phiên bản hiện hành; dòng cũ không bao giờ bị sửa.
  *
- * Bảng chưa có (máy chưa migrate 0225) ⇒ sổ rỗng ⇒ mọi gói "không bán" ở đường mới, nói ra — không đoán giá.
+ * Bảng chưa có (máy chưa migrate 0226) ⇒ sổ rỗng ⇒ mọi gói "không bán" ở đường mới, nói ra — không đoán giá.
  */
 import { eq, sql } from "drizzle-orm";
 import { getPlatformDb, schema } from "@/db";
@@ -142,7 +142,7 @@ export async function readMarginConfig(): Promise<MarginConfig> {
 
 /**
  * Mốc đồng hồ khách AI bắt đầu ghi: ghi đè tay ở `platform.pricing.ai-customer-meter-live-at` nếu có; không thì `created_at`
- * của phiên bản CATALOG ĐẦU TIÊN — dòng V1 do 0225 ghi lúc migrate, cùng lần deploy với mã ghi đồng hồ. `null` = chưa bật.
+ * của phiên bản CATALOG ĐẦU TIÊN — dòng V1 do 0226 ghi lúc migrate, cùng lần deploy với mã ghi đồng hồ. `null` = chưa bật.
  */
 export async function readAiCustomerMeterLiveAt(): Promise<Date | null> {
   try {

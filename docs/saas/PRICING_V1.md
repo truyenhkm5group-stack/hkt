@@ -1,7 +1,7 @@
 # Bảng giá V1 Chốt Đơn Tự Động — bản ghi quyết định (07/10/2026)
 
 > Quyết định kinh doanh CHÍNH THỨC của chủ shop ngày **07/10/2026**, chép NGUYÊN VĂN dưới đây (phần I). Phần II ghi cách kỹ
-> thuật thực hiện nó (migration `0225_pricing_v1_versions`, sứ mệnh `saas-d-pricing-overage`). Đổi giá về sau = THÊM một phiên
+> thuật thực hiện nó (migration `0226_pricing_v1_versions`, sứ mệnh `saas-d-pricing-overage`). Đổi giá về sau = THÊM một phiên
 > bản giá mới trong CSDL, không sửa phần I và không sửa dòng giá cũ.
 
 ## I. Nguyên văn quyết định
@@ -69,10 +69,10 @@ cùng khách đếm một lần mỗi kỳ · hội thoại lặp không sinh ph
 
 | Bảng | Vai trò |
 |---|---|
-| `platform_price_versions` | Một phiên bản: `LEGACY_SNAPSHOT` (ảnh chụp giá đang thu lúc 0225, chỉ tới bằng ghim) hoặc `CATALOG` (bảng giá niêm yết, hiệu lực từ `effective_from`). Ngưỡng cảnh báo (`alert_thresholds`), chế độ thuế (`tax_mode`). |
+| `platform_price_versions` | Một phiên bản: `LEGACY_SNAPSHOT` (ảnh chụp giá đang thu lúc 0226, chỉ tới bằng ghim) hoặc `CATALOG` (bảng giá niêm yết, hiệu lực từ `effective_from`). Ngưỡng cảnh báo (`alert_thresholds`), chế độ thuế (`tax_mode`). |
 | `platform_plan_prices` | Giá của một gói trong một phiên bản: giá tháng, **giá năm tường minh**, «từ …» của gói hợp đồng, số ngày dùng thử, hạn mức gồm (`included`: khách AI · fanpage · người dùng · fair-use hội thoại / trả lời AI · đơn), luật vượt (`overage`: khối khách AI + đơn giá · fanpage / người dùng thêm), tính năng, giá mua thêm cũ (0192). |
 | `platform_price_pins` | Tổ chức đang ở phiên bản nào. Không có dòng ⇒ bảng giá CATALOG đang hiệu lực; trả hoá đơn gia hạn ⇒ ghim vào phiên bản của hoá đơn (cùng giao dịch). |
-| `platform_invoices.price_version_key` | Hoá đơn tính theo phiên bản nào (NULL = trước 0225 = legacy). |
+| `platform_invoices.price_version_key` | Hoá đơn tính theo phiên bản nào (NULL = trước 0226 = legacy). |
 
 - **V1** = `v1-2026-10`, hiệu lực 07/10/2026 00:00 giờ VN, gieo đúng số phần I cho `trial · inbox · starter · growth · scale ·
   enterprise`. Gói `inbox`, `scale` thêm vào `platform_plans` (danh tính + hạn mức kỹ thuật cho `checkEntitlement`); giá chỉ ở
@@ -91,7 +91,7 @@ cùng khách đếm một lần mỗi kỳ · hội thoại lặp không sinh ph
     INBOX không có `ai_sales` ⇒ AI bán hàng tắt bằng entitlement, trần AI kỹ thuật giữ dòng `platform_plans`. Ghi đè AI tay
     của người vận hành (chính sách lạm dụng / bất thường chi phí) vẫn áp như cũ.
 - **Legacy** = `legacy`: chép NGUYÊN `platform_plans` lúc migration chạy (mọi khoá gói, kể cả `standard`, `basic`, `pro`,
-  `internal`, giá, tặng tháng, mua thêm, limits, commercial). MỌI tổ chức có từ trước 0225 được ghim `legacy` ⇒ số tiền khách
+  `internal`, giá, tặng tháng, mua thêm, limits, commercial). MỌI tổ chức có từ trước 0226 được ghim `legacy` ⇒ số tiền khách
   hiện tại trả KHÔNG ĐỔI (bài kiểm so báo giá 1/3/6/12 tháng trước / sau). Phiên bản legacy chỉ thay GIÁ; hạn mức kỹ thuật và
   phần thương mại của gói cũ vẫn là dòng `platform_plans` người vận hành đang sửa.
 - **Resolver duy nhất**: `lib/pricing/price-book.ts` (`plansForOrg`, `catalogPlans`, `orgPriceVersion`) + hàm thuần
@@ -117,7 +117,7 @@ cùng khách đếm một lần mỗi kỳ · hội thoại lặp không sinh ph
 - **Kỳ** = tháng lịch giờ VN — trùng kỳ hạn mức và credit AI. Nền móng chưa có kỳ thu theo ngày gia hạn của từng thuê bao, nên
   đồng hồ không chạy theo `paid_through` (hoá đơn gia hạn vẫn theo kỳ trả tiền của nó).
 - **Độ phủ** (`aiCustomerCoverage`): workspace chỉ chạy runtime cũ `chatbot/` (bot nhà, container riêng) ⇒ `null` + «chưa đo»,
-  KHÔNG 0; đồng hồ bật giữa kỳ (mốc = `created_at` của phiên bản V1 do 0225 ghi; ghi đè được ở
+  KHÔNG 0; đồng hồ bật giữa kỳ (mốc = `created_at` của phiên bản V1 do 0226 ghi; ghi đè được ở
   `platform.pricing.ai-customer-meter-live-at`) ⇒ cận dưới, phần vượt `null`.
 - Chưa đo: kênh Zalo OA và chat web công khai không đi qua `markWaitingForCustomer`.
 

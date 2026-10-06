@@ -5,7 +5,7 @@
  *
  * Không đọc CSDL, không đọc đồng hồ: cùng đầu vào ⇒ cùng kết quả. Đọc / ghi bảng nằm ở `lib/pricing/price-book.ts`.
  *
- *  · PHIÊN BẢN (`platform_price_versions`): `LEGACY_SNAPSHOT` = ảnh chụp giá đang thu lúc 0225, chỉ tới được bằng GHIM;
+ *  · PHIÊN BẢN (`platform_price_versions`): `LEGACY_SNAPSHOT` = ảnh chụp giá đang thu lúc 0226, chỉ tới được bằng GHIM;
  *    `CATALOG` = bảng giá niêm yết, hiệu lực từ `effective_from`. Tổ chức không có ghim ⇒ phiên bản CATALOG mới nhất ĐÃ hiệu
  *    lực. Giá tương lai đổi = THÊM phiên bản — dòng cũ không bao giờ bị sửa, nên tính lại một kỳ cũ ra đúng số cũ.
  *  · Gói không có trong phiên bản của tổ chức (gói cũ basic · pro… mà một tổ chức vẫn đang dùng) ⇒ đọc dòng LEGACY của gói

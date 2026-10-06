@@ -173,7 +173,7 @@ export async function setPricingGuard(user: SessionUser, raw: { config?: unknown
   return { ok: true, message: `Đã lưu ngưỡng ${applied.noticePct}% · ${applied.warnPct}% · ${applied.limitPct}%. Trần cứng của nền tảng: ${applied.hardLimitsEnabled ? "BẬT" : "tắt"}.` };
 }
 
-// ─────────────────────────── Dải biên lãi gộp (0225) ───────────────────────────
+// ─────────────────────────── Dải biên lãi gộp (0226) ───────────────────────────
 
 /** Đích / cảnh báo / nguy cấp của biên lãi gộp CHIẾU. Bộ không đúng thứ tự (nguy cấp < cảnh báo ≤ đích thấp ≤ đích cao) bị từ chối. */
 export async function setPricingMargin(user: SessionUser, raw: { config?: unknown; reason?: unknown }): Promise<PricingResult> {
@@ -263,10 +263,10 @@ export type TenantGuardRow = {
   aiCredit: { level: QuotaLevel; pct: number | null; note: string | null };
   worst: QuotaLevel;
   spike: SpikeVerdict;
-  routing: RoutingSuggestion | null;
+  routing: (RoutingSuggestion & { scope: "PLATFORM" | "BYOK" }) | null;
   readings: MeterReadings;
   errors: string[];
-  /** Bảng giá có phiên bản (0225): phiên bản đã ghim, khách AI (đồng hồ thu chính) + mức cảnh báo 80/100/120/150, phần vượt
+  /** Bảng giá có phiên bản (0226): phiên bản đã ghim, khách AI (đồng hồ thu chính) + mức cảnh báo 80/100/120/150, phần vượt
    * ước tính, fair-use, biên CHIẾU (doanh thu gói + vượt − AI chiếu) và dải biên (đích · cảnh báo · nguy cấp). */
   priceVersionKey: string | null;
   aiCustomers: AiCustomerReading | null;
@@ -346,10 +346,10 @@ export async function loadPricingEconomics(user: SessionUser, now: Date = new Da
   const dayExpr = sql<string>`to_char((${a.at} at time zone 'UTC') + interval '7 hours', 'YYYY-MM-DD')`;
   const [byModel, byDay] = await Promise.all([
     pdb
-      .select({ orgCode: a.orgCode, model: a.model, input: sql<number>`coalesce(sum(${a.inputTokens}), 0)::float8`, output: sql<number>`coalesce(sum(${a.outputTokens}), 0)::float8`, unpricedInput: sql<number>`coalesce(sum(${a.inputTokens}) filter (where ${a.costUsd} is null), 0)::float8`, unpricedOutput: sql<number>`coalesce(sum(${a.outputTokens}) filter (where ${a.costUsd} is null), 0)::float8` })
+      .select({ orgCode: a.orgCode, model: a.model, source: a.billingSource, input: sql<number>`coalesce(sum(${a.inputTokens}), 0)::float8`, output: sql<number>`coalesce(sum(${a.outputTokens}), 0)::float8`, unpricedInput: sql<number>`coalesce(sum(${a.inputTokens}) filter (where ${a.costUsd} is null), 0)::float8`, unpricedOutput: sql<number>`coalesce(sum(${a.outputTokens}) filter (where ${a.costUsd} is null), 0)::float8` })
       .from(a)
       .where(and(gte(a.at, period.from), lt(a.at, now), ne(a.status, "BLOCKED_QUOTA")))
-      .groupBy(a.orgCode, a.model),
+      .groupBy(a.orgCode, a.model, a.billingSource),
     pdb
       .select({ orgCode: a.orgCode, day: dayExpr, cost: sql<number>`coalesce(sum(${a.costUsd}), 0)::float8` })
       .from(a)
@@ -392,7 +392,7 @@ export async function loadPricingEconomics(user: SessionUser, now: Date = new Da
     const costByDay = new Map(byDay.filter((d) => d.orgCode === o.code).map((d) => [d.day, Number(d.cost)]));
     const spike = detectCostSpike(histDays.map((d) => costByDay.get(d) ?? 0), costByDay.get(today) ?? 0, guard);
     const top = [...models].sort((x, y) => y.input + y.output - (x.input + x.output))[0];
-    // Bảng giá có phiên bản (0225): phần vượt + biên CHIẾU. Phần vượt cần số người dùng — chỉ đọc khi phiên bản có luật vượt.
+    // Bảng giá có phiên bản (0226): phần vượt + biên CHIẾU. Phần vượt cần số người dùng — chỉ đọc khi phiên bản có luật vượt.
     const price = pricing.plan?.planPrice ?? null;
     const version = await orgPriceVersion(o.code, now);
     const acRead = aiCustomers.get(o.code) ?? null;
@@ -405,7 +405,10 @@ export async function loadPricingEconomics(user: SessionUser, now: Date = new Da
     }
     const projectedRevenue = mrrVnd === null || !overage || overage.totalVnd === null ? null : mrrVnd + overage.totalVnd;
     const projectedMarginPct = projectedRevenue && projected !== null ? ((projectedRevenue - projected) / projectedRevenue) * 100 : null;
-    const routing = top?.model ? suggestCheaperModel({ model: top.model, inputTokens: top.input, outputTokens: top.output, prices: unit.byModel, priceKeyOf: (m) => priceKeyFor(m, unit.byModel), minSavingsPct: guard.routingMinSavingsPct }) : null;
+    const suggested = top?.model ? suggestCheaperModel({ model: top.model, inputTokens: top.input, outputTokens: top.output, prices: unit.byModel, priceKeyOf: (m) => priceKeyFor(m, unit.byModel), minSavingsPct: guard.routingMinSavingsPct }) : null;
+    // Model của AI DÙNG CHUNG (nguồn PLATFORM) do người vận hành đổi ở Platform AI Model Control — một chỗ cho cả nền tảng;
+    // model của khoá riêng (BYOK) là cấu hình của chính tổ chức.
+    const routing = suggested ? { ...suggested, scope: top.source === "PLATFORM" ? ("PLATFORM" as const) : ("BYOK" as const) } : null;
     tenants.push({
       code: o.code,
       name: o.name,

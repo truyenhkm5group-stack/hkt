@@ -231,7 +231,7 @@ function invoiceView(r: InvoiceRow, plans: readonly PlanRow[]): InvoiceView {
   };
 }
 
-/** Giá gói THEO PHIÊN BẢN (0225) ⇒ hình dạng báo giá. Giá năm tường minh của phiên bản đi kèm (`yearlyPriceVnd`). */
+/** Giá gói THEO PHIÊN BẢN (0226) ⇒ hình dạng báo giá. Giá năm tường minh của phiên bản đi kèm (`yearlyPriceVnd`). */
 function pricedOfVersion(p: PlanPrice | null): PricedPlan | null {
   return p ? { key: p.planKey, name: p.name, priceVnd: p.monthlyVnd, yearlyFreeMonths: p.yearlyFreeMonths, yearlyPriceVnd: p.yearlyVnd } : null;
 }
@@ -243,7 +243,7 @@ function newTransferCode(): string {
 }
 
 /**
- * Báo giá (không ghi gì) — để màn hình hiện số tiền trước khi khách bấm tạo mã. GIÁ THEO PHIÊN BẢN (0225): gia hạn đúng gói
+ * Báo giá (không ghi gì) — để màn hình hiện số tiền trước khi khách bấm tạo mã. GIÁ THEO PHIÊN BẢN (0226): gia hạn đúng gói
  * đang dùng ⇒ phiên bản đã ghim (khách hiện tại không đổi số tiền); đổi gói / mua lần đầu ⇒ bảng giá đang niêm yết.
  * `priceVersionKey` = phiên bản của giá gói đích — hoá đơn mang nó, trả xong thì tổ chức được ghim vào đó.
  */
@@ -323,7 +323,7 @@ type InvoiceDraft = {
   vat: boolean;
   /** Vế sau của lý do huỷ hoá đơn đang mở: «Khách tạo mã mới (<vế này>)». */
   voidNote: string;
-  /** Phiên bản giá tính ra số tiền (0225) — trả xong hoá đơn GIA HẠN thì tổ chức được ghim vào đây. */
+  /** Phiên bản giá tính ra số tiền (0226) — trả xong hoá đơn GIA HẠN thì tổ chức được ghim vào đây. */
   priceVersionKey: string | null;
 };
 
@@ -396,7 +396,7 @@ async function openInvoice(user: SessionUser, orgCode: string, d: InvoiceDraft, 
 export async function previewAddon(orgCode: string, raw: { kind?: unknown; blocks?: unknown }, now: Date = new Date()): Promise<AddonQuote | { error: string }> {
   const org = await findOrganization(orgCode);
   if (!org || org.isHome) return { error: "Tổ chức nhà không trả phí thuê bao." };
-  // Đơn giá mua thêm theo PHIÊN BẢN đã ghim của tổ chức (0225) — đổi giá ở phiên bản mới không đổi giá khách đang trả.
+  // Đơn giá mua thêm theo PHIÊN BẢN đã ghim của tổ chức (0226) — đổi giá ở phiên bản mới không đổi giá khách đang trả.
   const plans = await plansForOrg(org.code, now);
   const plan = plans.find((p) => p.key === planKeyOf(org));
   if (!plan) return { error: "Không đọc được gói hiện tại của tổ chức." };
@@ -506,7 +506,7 @@ async function applyInvoicePaid(tx: Tx, invoice: InvoiceRow, paid: { amountVnd: 
   const orgs = schema.platformOrganizations;
   const [beforeOrg] = await tx.select({ plan: orgs.plan }).from(orgs).where(eq(orgs.code, invoice.orgCode)).limit(1);
   await tx.update(orgs).set({ plan: invoice.planKey, updatedAt: now }).where(and(eq(orgs.code, invoice.orgCode), eq(orgs.isHome, false)));
-  // Ghim phiên bản giá của hoá đơn (0225) TRONG CÙNG giao dịch: kỳ đã trả và giá của nó là một việc. Hoá đơn trước 0225
+  // Ghim phiên bản giá của hoá đơn (0226) TRONG CÙNG giao dịch: kỳ đã trả và giá của nó là một việc. Hoá đơn trước 0226
   // (không mang phiên bản) ⇒ không đổi ghim.
   const pin = invoice.priceVersionKey ? await pinOrgPriceVersion(invoice.orgCode, invoice.priceVersionKey, { source: "INVOICE_PAID", reason: `Hoá đơn ${invoice.transferCode}`, email: paid.byEmail, tx }) : null;
   await auditTx(tx, {
@@ -716,7 +716,7 @@ export async function setPlanPrice(user: SessionUser, raw: { planKey?: unknown; 
   if (planKey === HOME_PLAN_KEY) return { error: "Gói nội bộ không bán." };
   const price = raw.priceVnd === null || raw.priceVnd === "" ? null : Number(raw.priceVnd);
   if (price !== null && (!Number.isInteger(price) || price < PLAN_PRICE_MIN_VND || price > PLAN_PRICE_MAX_VND)) return { error: `Giá một tháng là số nguyên ${vnd(PLAN_PRICE_MIN_VND)} – ${vnd(PLAN_PRICE_MAX_VND)}, hoặc để trống = không bán.` };
-  // Sửa giá = PHÁT HÀNH phiên bản giá mới (0225) chép từ bảng giá hiện hành — không sửa dòng cũ. Tổ chức đã ghim phiên bản
+  // Sửa giá = PHÁT HÀNH phiên bản giá mới (0226) chép từ bảng giá hiện hành — không sửa dòng cũ. Tổ chức đã ghim phiên bản
   // cũ giữ giá cũ; mua mới / đổi gói đi giá mới.
   const { plans } = await catalogPlans();
   const plan = plans.find((p) => p.key === planKey)?.planPrice ?? null;
@@ -751,7 +751,7 @@ export async function setPlanAddonPrices(user: SessionUser, raw: { planKey?: unk
     if (!Number.isInteger(n) || n < ADDON_PRICE_MIN_VND || n > ADDON_PRICE_MAX_VND) return { error: `${ENTITLEMENT_SPEC[k].label}: đơn giá là số nguyên ${vnd(ADDON_PRICE_MIN_VND)} – ${vnd(ADDON_PRICE_MAX_VND)} cho mỗi bước / tháng, hoặc để trống = không bán.` };
     next[k] = n;
   }
-  // Như giá gói: đơn giá mua thêm mới = phiên bản giá mới (0225). Thuê bao đã ghim giữ đơn giá của phiên bản họ đang ở.
+  // Như giá gói: đơn giá mua thêm mới = phiên bản giá mới (0226). Thuê bao đã ghim giữ đơn giá của phiên bản họ đang ở.
   const { plans } = await catalogPlans();
   const plan = plans.find((p) => p.key === planKey)?.planPrice ?? null;
   if (!plan) return { error: `Gói «${planKey}» không có trong bảng giá hiện hành — đơn giá mua thêm của gói cũ giữ nguyên cho thuê bao đang dùng.` };
@@ -894,7 +894,7 @@ function ownedAddons(units: AddonUnits): OwnedAddon[] {
 export async function loadTenantBilling(orgCode: string, now: Date = new Date()): Promise<TenantBilling | null> {
   const org = await findOrganization(orgCode);
   if (!org || org.isHome) return null;
-  // Giá theo PHIÊN BẢN (0225): gói đang dùng theo phiên bản đã ghim; gói mua mới theo bảng giá đang niêm yết.
+  // Giá theo PHIÊN BẢN (0226): gói đang dùng theo phiên bản đã ghim; gói mua mới theo bảng giá đang niêm yết.
   const [plans, terms, receiver, catalog] = await Promise.all([plansForOrg(org.code, now), readSubscriptionTerms(org.code, { fresh: true }), getBillingReceiver(), catalogPlans(now)]);
   const today = vnDate(now);
   const pdb = await getPlatformDb();
@@ -979,7 +979,7 @@ export async function loadPlatformBilling(user: SessionUser, now: Date = new Dat
   const rows: OrgBillingRow[] = [];
   for (const o of orgs) {
     if (o.isHome || o.status === "SETUP_FAILED" || o.status === "ARCHIVED") continue;
-    // Giá của tổ chức theo phiên bản đã ghim (0225) — MRR là số khách THẬT trả, không phải giá niêm yết hôm nay.
+    // Giá của tổ chức theo phiên bản đã ghim (0226) — MRR là số khách THẬT trả, không phải giá niêm yết hôm nay.
     const plan = (await plansForOrg(o.code, now)).find((p) => p.key === planKeyOf(o));
     const standing = billingStanding(subs.get(o.code) ?? null, today);
     const units = addonsByOrg.get(o.code) ?? {};

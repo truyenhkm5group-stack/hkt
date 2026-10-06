@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { inArray } from "drizzle-orm";
 import { schema, type Db } from "@/db";
 import { clearMemo } from "@/lib/cache";
 import { adsAttributionCoverage, adsAttributionCoverageByDay, coverageVerdict } from "@/lib/queries/ads-attribution-coverage";
@@ -96,6 +97,39 @@ export async function testAdsAttributionCoverage(db: Db) {
   const sauKhiThemDonHuy = await adsAttributionCoverage(new Date(Date.now() - 86_400_000), new Date(Date.now() + 86_400_000));
   assert.deepEqual(sauKhiThemDonHuy, cov, "thêm một đơn HUỶ không được làm đổi một con số nào — phạm vi phải khớp với bảng quyết định");
 
+  /*
+    ─── ④ ĐƠN DO ERP GHI: "KHÔNG DẤU VẾT" LÀ CHƯA BIẾT, VÀ PHẢI ĐẾM ĐƯỢC ───
+
+    Đường ghi đơn của ERP (đơn tay · bot bán hàng · ghi đơn từ hội thoại) không lưu `page_id`/`post_id`/`ad_id`, nên
+    tổ chức chỉ có đơn ERP thấy «0/0 đơn» và «0 đơn chốt» ở mọi chiến dịch. Bài kiểm khoá hai điều:
+      · đơn `erp-…` không dấu vết được đếm vào TẬP CON riêng (kèm doanh số) để màn hình nói ra được;
+      · TẬP CON KHÔNG đổi bất cứ con số nào đang có — mẫu số, độ phủ, bốn nhóm giữ nguyên ý nghĩa.
+    Đơn Pancake không dấu vết (cov-o4) KHÔNG thuộc tập con; đơn ERP CÓ fanpage cũng không (nó đã có dấu vết).
+  */
+  assert.ok(cov.notFromAdsErpRecorded <= cov.notFromAds, "tập con không được lớn hơn nhóm chứa nó");
+  await db
+    .insert(schema.orders)
+    .values([
+      { id: "erp-cov-o8-bot", stage: "CONFIRMED", status: 1, insertedAt: new Date(), totalPriceAfterDiscount: 230_000 },
+      { id: "erp-cov-o9-page", stage: "CONFIRMED", status: 1, insertedAt: new Date(), totalPriceAfterDiscount: 999_000, pageId: "111" },
+    ])
+    .onConflictDoNothing();
+  clearMemo();
+  const sauDonErp = await adsAttributionCoverage(new Date(Date.now() - 86_400_000), new Date(Date.now() + 86_400_000));
+  assert.equal(sauDonErp.notFromAdsErpRecorded, cov.notFromAdsErpRecorded + 1, "đơn ERP không dấu vết phải vào tập con; đơn ERP có fanpage thì KHÔNG");
+  assert.equal(sauDonErp.notFromAdsErpRecordedRevenue, cov.notFromAdsErpRecordedRevenue + 230_000, "doanh số của tập con chỉ cộng đơn ERP không dấu vết");
+  assert.equal(sauDonErp.notFromAds, cov.notFromAds + 1, "đơn ERP không dấu vết vẫn đứng NGOÀI mẫu số như trước — không đổi mẫu số của ai");
+  assert.equal(sauDonErp.lostFacebook, cov.lostFacebook + 1, "đơn ERP có fanpage là MẤT DẤU như mọi đơn có fanpage");
+  assert.equal(sauDonErp.uniqueDeterministic, cov.uniqueDeterministic, "không đơn nào được quy kết thêm — đếm riêng không phải là đoán quy kết");
+  assert.equal(
+    sauDonErp.uniqueDeterministic + sauDonErp.ambiguous + sauDonErp.lostFacebook + sauDonErp.notFromAds,
+    sauDonErp.total,
+    "tập con không phải nhóm thứ năm: bốn nhóm vẫn cộng đúng tổng",
+  );
+  // TỰ DỌN: đơn `erp-…` lọt sang bài sau sẽ đổi tổng đơn tay mà bài ấy đếm.
+  await db.delete(schema.orders).where(inArray(schema.orders.id, ["erp-cov-o8-bot", "erp-cov-o9-page"]));
+  clearMemo();
+
   // Dưới ngưỡng thì mọi khuyến nghị phải là CHƯA ĐỦ DỮ LIỆU, không phải một con số trông chắc chắn.
   const threshold = ADS_ANOMALY_RULES.minAttributionToJudgeProfit;
   assert.equal(coverageVerdict(49.2, threshold), "DATA_INSUFFICIENT", "49% không đủ để kết luận SCALE/CUT");
@@ -112,6 +146,6 @@ export async function testAdsAttributionCoverage(db: Db) {
   }
 
   console.log(
-    `✓ Độ phủ quy kết: ${cov.uniqueDeterministic}/${cov.attributable} trên đơn CÓ DẤU VẾT FACEBOOK (${cov.coveragePct}%) · ${cov.ambiguous} nhập nhằng · ${cov.lostFacebook} mất dấu · ${cov.notFromAds} ngoài quảng cáo (ngoài mẫu số) · đơn huỷ không lọt vào · chưa-đo-được ⇒ CHƯA ĐỦ DỮ LIỆU`,
+    `✓ Độ phủ quy kết: ${cov.uniqueDeterministic}/${cov.attributable} trên đơn CÓ DẤU VẾT FACEBOOK (${cov.coveragePct}%) · ${cov.ambiguous} nhập nhằng · ${cov.lostFacebook} mất dấu · ${cov.notFromAds} ngoài quảng cáo (ngoài mẫu số) · đơn ERP không dấu vết đếm riêng là CHƯA BIẾT · đơn huỷ không lọt vào · chưa-đo-được ⇒ CHƯA ĐỦ DỮ LIỆU`,
   );
 }

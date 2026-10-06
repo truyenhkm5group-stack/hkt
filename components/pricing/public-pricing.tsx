@@ -9,7 +9,7 @@ import type { PublicPricingPlan } from "@/lib/queries/public-pricing";
 
 /**
  * BẢNG GIÁ CÔNG KHAI — mobile-first: thẻ xếp dọc trên điện thoại, lưới trên màn rộng; công tắc Tháng / Năm. Mọi số đọc từ
- * BẢNG GIÁ ĐANG NIÊM YẾT (phiên bản giá, 0225) qua `getPublicPricing()` — thành phần này không gõ số nào. Ô chưa khai không in.
+ * BẢNG GIÁ ĐANG NIÊM YẾT (phiên bản giá, 0226) qua `getPublicPricing()` — thành phần này không gõ số nào. Ô chưa khai không in.
  * Đồng hồ thu chính là KHÁCH AI; hội thoại / trả lời AI là fair-use (không tính thêm); đơn không giới hạn, không tính phí.
  */
 

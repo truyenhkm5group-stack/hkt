@@ -238,7 +238,7 @@ export function billingWriteDenied(input: { isHome: boolean; standing: BillingSt
 
 // ─────────────────────────── Báo giá gia hạn ───────────────────────────
 
-/** `yearlyPriceVnd` = giá 12 tháng TƯỜNG MINH của phiên bản giá (0225); vắng / `null` ⇒ giá tháng × (12 − tặng tháng). */
+/** `yearlyPriceVnd` = giá 12 tháng TƯỜNG MINH của phiên bản giá (0226); vắng / `null` ⇒ giá tháng × (12 − tặng tháng). */
 export type PricedPlan = { key: string; name: string; priceVnd: number | null; yearlyFreeMonths?: number; yearlyPriceVnd?: number | null };
 
 export type RenewalKind = "START" | "RENEW" | "UPGRADE" | "DOWNGRADE";

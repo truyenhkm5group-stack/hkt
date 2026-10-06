@@ -46,6 +46,8 @@ import { noteAiCustomerReply } from "@/lib/pricing/ai-customer";
 import { loadFollowupSettings } from "@/lib/sales-chatbot/followup-settings";
 import type { ChatState } from "@/lib/sales-chatbot/tools";
 import { pancakeImageUrls } from "@/lib/sales-chatbot/vision";
+import { adReferralFromPancake, isPancakePageSide, type AdReferral } from "@/lib/sales-chatbot/ad-referral-shared";
+import { recordConversationAd } from "@/lib/sales-chatbot/ad-referral";
 
 export const FANPAGE_CONNECTOR = "pancake-fanpage";
 /** Nhân viên thật vừa trả lời trên fanpage ⇒ bot im lặng chừng này phút cho hội thoại đó. */
@@ -235,6 +237,8 @@ export type FanpageEvent = {
   comment: { postId: string; fromId: string } | null;
   /** Ảnh KHÁCH gửi trong tin (0195 · `pancakeImageUrls`) — tin phía page luôn rỗng. */
   imageUrls: string[];
+  /** 0225: quảng cáo dẫn KHÁCH vào hội thoại (`adReferralFromPancake`) — tin phía page / thiếu trường ⇒ không có. */
+  adReferral?: AdReferral | null;
 };
 
 const str = (v: unknown) => (typeof v === "string" ? v : typeof v === "number" ? String(v) : "");
@@ -263,7 +267,7 @@ export function parsePancakeWebhook(payload: unknown): FanpageEvent | null {
   const threadId = str(conv?.id);
   if (!pageId || !messageId || !threadId || msg?.is_removed === true) return null;
   const from = (msg?.from ?? {}) as { id?: unknown; name?: unknown; uid?: unknown; admin_id?: unknown; ai_generated?: unknown; is_automated?: unknown };
-  const fromPage = str(from.id) === pageId || Boolean(from.admin_id) || Boolean(from.uid);
+  const fromPage = isPancakePageSide(from, pageId);
   const humanStaff = fromPage && Boolean(from.uid || from.admin_id) && !from.ai_generated && !from.is_automated;
   const type = str(msg?.type || conv?.type || "INBOX").toUpperCase();
   const text = stripHtml(str(msg?.original_message) || str(msg?.message)).slice(0, TEXT_MAX);
@@ -275,7 +279,8 @@ export function parsePancakeWebhook(payload: unknown): FanpageEvent | null {
   const comment = !inbox && type === "COMMENT" ? { postId, fromId: str(from.id) } : null;
   const imageUrls = fromPage ? [] : pancakeImageUrls(msg);
   const automated = fromPage && Boolean(from.ai_generated || from.is_automated);
-  return { pageId, threadId, messageId, text, customerName: fromPage ? "" : customerName, fromPage, humanStaff, automated, inbox, comment, imageUrls };
+  const adReferral = fromPage ? null : adReferralFromPancake(payload);
+  return { pageId, threadId, messageId, text, customerName: fromPage ? "" : customerName, fromPage, humanStaff, automated, inbox, comment, imageUrls, adReferral };
 }
 
 /** Khoá hội thoại fanpage (cột `visitor_key`, UNIQUE cho kênh FANPAGE): băm (page, hội thoại Pancake). */
@@ -427,6 +432,8 @@ export async function receiveFanpageEvent(ev: FanpageEvent, now: Date = new Date
       .where(and(eq(c.channel, "FANPAGE"), eq(c.visitorKey, fanpageVisitorKey(ev.pageId, ev.threadId))));
     return { queued: false, reason: "Nhân viên đang trả lời — bot nhường" };
   }
+  // 0225: quảng cáo dẫn khách vào hội thoại — đường PHỤ, không làm hỏng lượt nhận (xem `noteCustomerAd`).
+  if (ev.adReferral) await noteCustomerAd(ev.pageId, ev.threadId, ev.adReferral, now);
   if (!ev.inbox && !ev.comment) return { queued: false, reason: "Không phải tin nhắn / bình luận" };
   if (ev.comment && !ev.comment.fromId) return { queued: false, reason: "Bình luận thiếu người gửi — không nhắn riêng được" };
   // ẢNH (0195): tin nhắn có ảnh ⇒ vào hàng chờ như tin chữ, bot đọc ảnh lúc trả lời (`describeCustomerImages`). Bình luận
@@ -520,6 +527,20 @@ export async function noteCustomerArrived(pageId: string, threadId: string, at: 
   }
 }
 
+/**
+ * Gói tin của KHÁCH mang mã quảng cáo ⇒ ghi lên hội thoại (mở hội thoại nếu chưa có — cùng `conversationFor` với hộp thư). Dùng
+ * chung cho Pancake và Messenger trực tiếp (cùng khoá hội thoại). Đường PHỤ: lỗi ở đây chỉ ghi nhật ký, lượt nhận tin đi tiếp —
+ * mất một mã quảng cáo là mất một quy kết, mất một tin khách là mất một đơn.
+ */
+export async function noteCustomerAd(pageId: string, threadId: string, ref: AdReferral, at: Date): Promise<void> {
+  try {
+    const conv = await conversationFor(pageId, threadId);
+    if (conv) await recordConversationAd(conv.id, ref, at);
+  } catch (error) {
+    console.error(`[quảng cáo hội thoại] không ghi được mã quảng cáo ${ref.adId} cho ${pageId}/${threadId}: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
 /** Dòng «page đã trả lời» cho tin ẢNH của nhân viên — chữ «[Ảnh]» để lịch sử của bot biết shop đã gửi ảnh. */
 export const STAFF_IMAGE_MARK = "[Ảnh]";
 
@@ -608,7 +629,7 @@ export async function conversationFor(pageId: string, threadId: string): Promise
  * hay đang cần người xử lý (khi đó chỉ ghi mốc tin cuối của bot). `threadId` = hộp thư mới khi trả lời bình luận.
  */
 export async function markWaitingForCustomer(conversationId: string, now: Date, threadId?: string): Promise<void> {
-  // Đồng hồ khách AI (0225): chỉ được gọi SAU khi câu trả lời AI đã gửi thành công; không ném, lỗi ghi sổ không chặn việc gửi.
+  // Đồng hồ khách AI (0226): chỉ được gọi SAU khi câu trả lời AI đã gửi thành công; không ném, lỗi ghi sổ không chặn việc gửi.
   await noteAiCustomerReply(conversationId, now);
   const db = await getDb();
   const c = schema.salesChatConversations;

@@ -106,7 +106,7 @@ export function testPublicSiteSource() {
   const list = mw.slice(mw.indexOf("const PUBLIC_PREFIXES"), mw.indexOf("]", mw.indexOf("const PUBLIC_PREFIXES")));
   assert.ok(list.includes("SITE_PAGE_PATH"), "trang giới thiệu phải xem trước được trên host ERP khi chưa đăng nhập");
 
-  // Trang công khai chỉ đọc gói cước (bảng giá đang niêm yết — sổ giá có phiên bản, 0225) + chế độ đăng ký: không import truy
+  // Trang công khai chỉ đọc gói cước (bảng giá đang niêm yết — sổ giá có phiên bản, 0226) + chế độ đăng ký: không import truy
   // vấn dữ liệu khách nào.
   const q = readFileSync("lib/queries/public-site.ts", "utf8");
   const imports = [...q.matchAll(/from "([^"]+)"/g)].map((m) => m[1]).sort();

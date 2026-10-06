@@ -82,7 +82,7 @@ export async function readGuardConfig(opts: { fresh?: boolean } = {}): Promise<G
 export type OrgPricing = {
   orgCode: string;
   isHome: boolean;
-  /** Giá / phần thương mại theo PHIÊN BẢN giá của tổ chức (0225, `lib/pricing/price-book.ts`). */
+  /** Giá / phần thương mại theo PHIÊN BẢN giá của tổ chức (0226, `lib/pricing/price-book.ts`). */
   plan: { key: string; name: string; priceVnd: number | null; yearlyFreeMonths: number; limits: unknown; commercial: PlanCommercial; priceVersionKey: string | null; planPrice: PlanPrice | null } | null;
   /** Gói khai trên tổ chức không có trong bảng ⇒ đang áp gói Dùng thử. */
   fellBack: boolean;
@@ -93,7 +93,7 @@ export type OrgPricing = {
 
 export async function resolveOrgPricing(org: Pick<Organization, "code" | "isHome" | "plan">): Promise<OrgPricing> {
   const row = org.isHome ? NO_ROW : await readOrgPricingRow(org.code);
-  // Gói "như hoá đơn của tổ chức đọc" — giá + phần thương mại theo phiên bản đã ghim (0225).
+  // Gói "như hoá đơn của tổ chức đọc" — giá + phần thương mại theo phiên bản đã ghim (0226).
   const plans = await plansForOrg(org.code);
   const key = planKeyOf(org);
   const hit = plans.find((p) => p.key === key);

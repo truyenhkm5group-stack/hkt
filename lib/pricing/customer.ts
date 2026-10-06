@@ -21,7 +21,7 @@ import { estimateBill, fairUseVerdict, usageAlert, type BillEstimate, type FairU
 
 export type CustomerQuotaRow = QuotaVerdict & { line: string };
 
-/** Một ô "đã dùng / gồm" của bảng giá có phiên bản (0225). `used = null` = chưa đo · `included = null` = không giới hạn. */
+/** Một ô "đã dùng / gồm" của bảng giá có phiên bản (0226). `used = null` = chưa đo · `included = null` = không giới hạn. */
 export type CustomerMeterRow = { used: number | null; included: number | null | undefined; alert: UsageAlert };
 
 /**
@@ -55,7 +55,7 @@ export type CustomerPlanView = {
   features: FeatureDecision[];
   /** Câu lỗi khi một nguồn đếm hỏng — số của nguồn đó in «—». */
   errors: string[];
-  /** Bảng giá có phiên bản (0225). `null` = tổ chức chưa có dòng giá ở phiên bản nào (máy chưa migrate 0225). */
+  /** Bảng giá có phiên bản (0226). `null` = tổ chức chưa có dòng giá ở phiên bản nào (máy chưa migrate 0226). */
   meter: CustomerBillingMeter | null;
 };
 

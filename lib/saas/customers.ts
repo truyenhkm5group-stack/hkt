@@ -29,7 +29,7 @@ export type PlanInfo = PlanRef & { addonPrices: unknown; productKeys: string[] |
 
 export type SubscriptionView = SubscriptionRow & { status: EffectiveSubscriptionStatus; planName: string; planSource: "WORKSPACE" | "OWN" };
 
-/** Giá của workspace theo phiên bản giá ĐÃ GHIM (0225) + phần vượt / fair-use của kỳ. */
+/** Giá của workspace theo phiên bản giá ĐÃ GHIM (0226) + phần vượt / fair-use của kỳ. */
 export type WorkspacePricing = {
   versionKey: string | null;
   versionLabel: string | null;
@@ -77,7 +77,7 @@ export type CustomerView = {
 export type CommercialSnapshot = { periodMonth: string; customers: CustomerView[]; orphanWorkspaces: WorkspaceRow[]; plans: PlanInfo[]; usdToVnd: number };
 
 /**
- * Gói cho màn người vận hành, giá theo BẢNG GIÁ ĐANG NIÊM YẾT (0225) — gói không còn trong bảng giá hiện hành hiện giá
+ * Gói cho màn người vận hành, giá theo BẢNG GIÁ ĐANG NIÊM YẾT (0226) — gói không còn trong bảng giá hiện hành hiện giá
  * legacy của nó. Giá RIÊNG của từng workspace (theo phiên bản đã ghim) nằm ở `WorkspaceView.pricing`.
  */
 export async function readPlans(now: Date = new Date()): Promise<PlanInfo[]> {
@@ -96,7 +96,7 @@ function planRef(plans: readonly PlanInfo[], key: string): PlanRef {
   return p ? { key: p.key, name: p.name, priceVnd: p.priceVnd } : { key, name: `${key} (không có trong bảng gói)`, priceVnd: null };
 }
 
-/** Gói theo PHIÊN BẢN GIÁ của workspace (0225): tên + giá tháng của phiên bản đã ghim; gói cũ theo dòng legacy. */
+/** Gói theo PHIÊN BẢN GIÁ của workspace (0226): tên + giá tháng của phiên bản đã ghim; gói cũ theo dòng legacy. */
 function versionedPlanRef(book: PriceBook, versionKey: string | null, plans: readonly PlanInfo[], key: string): { ref: PlanRef; price: PlanPrice | null } {
   const hit = priceOf(book, versionKey, key);
   if (!hit) return { ref: { ...planRef(plans, key), priceVnd: null }, price: null };
@@ -206,7 +206,7 @@ export async function loadCommercialSnapshot(opts: { periodMonth?: string; now?:
       return {
         orgCode: w.code,
         name: w.name,
-        // Giá gói + mua thêm theo PHIÊN BẢN đã ghim (0225) — khách nội bộ và khách ngoài cùng một phép tính.
+        // Giá gói + mua thêm theo PHIÊN BẢN đã ghim (0226) — khách nội bộ và khách ngoài cùng một phép tính.
         plan: wsPlan.ref,
         addon: addonMonthlyVnd(parseAddonUnits(t?.addons), parseAddonPrices(wsPlan.price?.addonPrices)),
         subscriptions: w.subscriptions.map((s) => ({ productKey: s.productKey, ownPlan: s.planKey ? versionedPlanRef(book, vk, plans, s.planKey).ref : null, status: s.status })),

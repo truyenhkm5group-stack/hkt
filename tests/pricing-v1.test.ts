@@ -1,5 +1,5 @@
 /**
- * BẢNG GIÁ V1 CHỐT ĐƠN TỰ ĐỘNG (0225 · docs/saas/PRICING_V1.md) — bảng giá có phiên bản, đồng hồ khách AI, phần vượt, cảnh báo,
+ * BẢNG GIÁ V1 CHỐT ĐƠN TỰ ĐỘNG (0226 · docs/saas/PRICING_V1.md) — bảng giá có phiên bản, đồng hồ khách AI, phần vượt, cảnh báo,
  * khách nội bộ cùng bộ máy, giá legacy không đổi.
  *
  *  1. THUẦN — phần vượt theo khối ở cả ba gói (biên 1.500 / 1.501 / 1.600 / 1.601), đơn KHÔNG sinh phí, fair-use không bao giờ
@@ -379,7 +379,7 @@ export async function testPricingV1() {
     for (const p of plans) {
       const legacy = book.prices.find((x) => x.versionKey === "legacy" && x.planKey === p.key);
       if (!legacy) {
-        assert.ok(["inbox", "scale"].includes(p.key), `gói ${p.key} có từ trước 0225 phải có dòng legacy`);
+        assert.ok(["inbox", "scale"].includes(p.key), `gói ${p.key} có từ trước 0226 phải có dòng legacy`);
         continue;
       }
       assert.deepEqual([legacy.monthlyVnd, legacy.yearlyFreeMonths, JSON.stringify(legacy.addonPrices)], [p.priceVnd !== null && p.priceVnd > 0 ? p.priceVnd : null, p.yearlyFreeMonths, JSON.stringify(p.addonPrices)], `legacy ${p.key} chép đúng giá đang thu`);
@@ -387,12 +387,12 @@ export async function testPricingV1() {
     assert.ok(!book.prices.some((x) => x.versionKey === V1 && ["basic", "pro", "internal", "standard"].includes(x.planKey)), "gói cũ không niêm yết ở V1");
     if (savedMeter === undefined) {
       const live = await readAiCustomerMeterLiveAt();
-      assert.ok(live && live.getTime() <= Date.now(), "mốc đồng hồ khách AI = lúc 0225 ghi phiên bản V1 (không cần dòng cài đặt)");
+      assert.ok(live && live.getTime() <= Date.now(), "mốc đồng hồ khách AI = lúc 0226 ghi phiên bản V1 (không cần dòng cài đặt)");
     }
 
     // ── 2. Ghim legacy cho tổ chức có từ trước: đúng câu của migration (idempotent); tổ chức tạo sau KHÔNG bị ghim.
     const pinsBefore = new Set((await pdb.select({ o: schema.platformPricePins.orgCode }).from(schema.platformPricePins)).map((r) => r.o));
-    const mig = readFileSync(path.join(process.cwd(), "drizzle/0225_pricing_v1_versions.sql"), "utf8");
+    const mig = readFileSync(path.join(process.cwd(), "drizzle/0226_pricing_v1_versions.sql"), "utf8");
     const pinSql = mig.split("--> statement-breakpoint").map((s) => s.trim()).find((s) => s.includes('INSERT INTO "platform_price_pins"'));
     assert.ok(pinSql, "migration phải có câu ghim legacy");
     await pdb.execute(sql.raw(pinSql!.replace(/^--.*$/gm, "")));
@@ -414,7 +414,7 @@ export async function testPricingV1() {
       const before = quoteRenewal({ terms: { billingEnabled: true, paidThrough: addDays(today, 20), graceDays: 7 }, currentPlan: oldEngine, target: oldEngine, months, today, targetAddonMonthlyVnd: 0, currentAddonMonthlyVnd: 0 });
       assert.ok(!("error" in after) && !("error" in before), JSON.stringify({ after, before }));
       if (!("error" in after) && !("error" in before)) {
-        assert.deepEqual([after.listAmountVnd, after.amountVnd, after.periodStart, after.periodEnd, after.kind], [before.listAmountVnd, before.amountVnd, before.periodStart, before.periodEnd, before.kind], `legacy ${months} tháng: số tiền không đổi sau 0225`);
+        assert.deepEqual([after.listAmountVnd, after.amountVnd, after.periodStart, after.periodEnd, after.kind], [before.listAmountVnd, before.amountVnd, before.periodStart, before.periodEnd, before.kind], `legacy ${months} tháng: số tiền không đổi sau 0226`);
         assert.equal(after.priceVersionKey, "legacy");
       }
     }
@@ -621,6 +621,6 @@ export async function testPricingV1() {
     await cleanup(saved);
   }
   console.log(
-    "✓ Giá V1 (0225): phiên bản giá — V1 gieo đúng 6 gói, legacy chép đúng platform_plans, hoá đơn legacy 1/3/6/12 tháng trước = sau, sửa giá = phiên bản mới (ghim V1 / legacy không đổi, chưa ghim theo giá mới, dòng cũ bất biến); đồng hồ khách AI ở điểm gửi thành công — trả lời lặp / nhiều hội thoại / 5 lần thử lại đồng thời = 1 dòng, hai trang = hai khách, THỬ không đếm, lỗi sổ không làm hỏng việc gửi, A không chặn / đếm cho B; vượt theo khối 1.500→0 · 1.501→1 · 1.600→1 · 1.601→2 ở Starter / Growth / Scale; đơn và fair-use không sinh phí; 80/100/120/150 không tắt bot; INBOX không ai_sales; nội bộ chạy thử → gán gói nhỏ nhất → chargeback cùng phép tính",
+    "✓ Giá V1 (0226): phiên bản giá — V1 gieo đúng 6 gói, legacy chép đúng platform_plans, hoá đơn legacy 1/3/6/12 tháng trước = sau, sửa giá = phiên bản mới (ghim V1 / legacy không đổi, chưa ghim theo giá mới, dòng cũ bất biến); đồng hồ khách AI ở điểm gửi thành công — trả lời lặp / nhiều hội thoại / 5 lần thử lại đồng thời = 1 dòng, hai trang = hai khách, THỬ không đếm, lỗi sổ không làm hỏng việc gửi, A không chặn / đếm cho B; vượt theo khối 1.500→0 · 1.501→1 · 1.600→1 · 1.601→2 ở Starter / Growth / Scale; đơn và fair-use không sinh phí; 80/100/120/150 không tắt bot; INBOX không ai_sales; nội bộ chạy thử → gán gói nhỏ nhất → chargeback cùng phép tính",
   );
 }

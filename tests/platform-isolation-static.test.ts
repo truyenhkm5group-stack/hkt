@@ -274,6 +274,8 @@ const GOI_MANG_KHONG_CREDENTIAL: Record<string, string> = {
   "lib/creative/import.ts": "Tải ảnh từ một URL công khai (http/https) — không gắn khoá nào vào request.",
   "lib/ai-builder/providers.ts":
     "Provider AI BYOK của AI Builder (Phase 8): khoá là `apiKey` TƯỜNG MINH do lib/connectors/service.ts giải mã từ org_connections của CHÍNH tổ chức đang chạy; `authToken` / `organization` / `project` đặt null và `baseURL` là hằng, nên không biến môi trường nào của tổ chức nhà lọt vào. Đường của tổ chức nhà đi qua `getAiProvider` (lib/ai/provider.ts — đã gọi assertHomeCredentials). Nhánh AI do NỀN TẢNG trả tiền (mặc định tắt) cũng dựng provider này với khoá TƯỜNG MINH `PLATFORM_AI_API_KEY` (lib/ai-usage/platform-ai.ts — từ chối khi trùng khoá của nhà), không bao giờ `ANTHROPIC_API_KEY`.",
+  "lib/ai-usage/platform-model-probe.ts":
+    "Kiểm tra khả dụng model của AI DÙNG CHUNG (06/10/2026, docs/platform/ai-model-control.md): khoá là `apiKey` TƯỜNG MINH lấy từ `platformAiConfig()` — tức `PLATFORM_AI_API_KEY` của NỀN TẢNG, bị từ chối khi trùng mọi khoá của nhà (ANTHROPIC_* · OPENAI_API_KEY · GEMINI_API_KEY); tệp không đọc biến môi trường nào. Đích hằng generativelanguage.googleapis.com, khoá chỉ trong tiêu đề x-goog-api-key, không theo chuyển hướng, một lời gọi 1 chữ, câu lỗi đã che khoá.",
   "lib/messaging/providers.ts":
     "Gửi tin nhóm (0180) bằng bí mật của CHÍNH tổ chức ngữ cảnh qua `openActiveConnection` (AAD gắn tổ chức) — không đọc biến môi trường nào; chỉ hai loại đích cố định (webhook Custom Bot của Lark · api.telegram.org), không theo chuyển hướng; hộp thử không gọi mạng.",
   "lib/integrations/zalo/oa.ts":
@@ -643,7 +645,7 @@ export function testServerActionQuaCongPhien(): number {
 const ACTION_NHAN_MA_TO_CHUC: Record<string, { lyDo: string; loai: "VAN_HANH" | "CONG_KHAI" }> = {
   "lib/actions/billing.ts::setOrgBillingAction": { loai: "VAN_HANH", lyDo: "Người vận hành bật / tắt / sửa ngày trả tới + ân hạn thu phí của MỘT tổ chức (/platform/org/<mã>) — requirePermission(platform:operate), lõi setOrgBilling hỏi platformOperatorDenial trước mọi lượt đọc, bắt buộc lý do, nhật ký nền tảng." },
   "lib/actions/oauth.ts::pickSocialOrgAction": { loai: "CONG_KHAI", lyDo: "Chọn cửa hàng sau đăng nhập Google / Facebook (CHƯA có phiên): mã tổ chức gửi lên chỉ được chấp nhận khi nằm trong danh sách của cookie KÝ do máy chủ ghi ở bước callback (sau khi đổi code lấy hồ sơ ở nhà cung cấp); completeProviderLogin kiểm tài khoản + trạng thái trong withOrganization." },
-  "lib/actions/pricing.ts::setOrgPriceVersionAction": { loai: "VAN_HANH", lyDo: "Người vận hành chuyển MỘT tổ chức sang một phiên bản giá (/platform/saas, 0225) — requirePermission(platform:operate), lõi setOrgPriceVersion hỏi platformOperatorDenial trước mọi lượt đọc, bắt buộc lý do, nhật ký nền tảng PRICE_VERSION_PIN." },
+  "lib/actions/pricing.ts::setOrgPriceVersionAction": { loai: "VAN_HANH", lyDo: "Người vận hành chuyển MỘT tổ chức sang một phiên bản giá (/platform/saas, 0226) — requirePermission(platform:operate), lõi setOrgPriceVersion hỏi platformOperatorDenial trước mọi lượt đọc, bắt buộc lý do, nhật ký nền tảng PRICE_VERSION_PIN." },
   "lib/actions/pricing.ts::setOrgPricingAction": { loai: "VAN_HANH", lyDo: "Người vận hành ghi đè tính năng / hạn mức / mức áp của MỘT tổ chức (/platform/saas, 0222) — requirePermission(platform:operate), lõi setOrgPricing hỏi platformOperatorDenial trước mọi lượt đọc, bắt buộc lý do, nhật ký nền tảng ORG_PRICING_SET." },
   "lib/actions/billing.ts::setOrgAddonsAction": { loai: "VAN_HANH", lyDo: "Người vận hành sửa phần MUA THÊM hạn mức của MỘT tổ chức (/platform/org/<mã>, 0192) — requirePermission(platform:operate), lõi setOrgAddons hỏi platformOperatorDenial + parseOperatorTarget trước mọi lượt đọc, bắt buộc lý do, nhật ký nền tảng ORG_ADDONS_SET." },
   "lib/actions/platform-modules.ts::toggleModuleForOrgAction": { loai: "VAN_HANH", lyDo: "Người vận hành nền tảng bật/tắt module của tổ chức khác từ /platform — requirePermission(platform:operate) + platformOperatorDenial (chỉ tổ chức nhà), ghi nhật ký nền tảng kèm lý do." },
@@ -734,6 +736,11 @@ const LOI_VAN_HANH: Record<string, string> = {
   "lib/platform/support.ts::listOrgSupportSummaries": "Tóm tắt mọi tổ chức ở /platform: mở CSDL từng tổ chức để đếm người dùng.",
   "lib/ai-usage/control.ts::setPlatformAiEnabled": "Công tắc AI toàn nền tảng.",
   "lib/ai-usage/control.ts::setOrgAiControl": "Công tắc AI + ghi đè hạn mức AI của một tổ chức.",
+  // Platform AI Model Control (06/10/2026) — model của AI DÙNG CHUNG cho mọi tổ chức khách; sổ AI nguồn PLATFORM toàn nền tảng.
+  "lib/ai-usage/platform-ai-admin.ts::loadPlatformAiControl": "Khung Platform AI Model Control: sổ AI nguồn PLATFORM của MỌI tổ chức (30 ngày theo model) + chính sách + lượt kiểm khả dụng + nhật ký.",
+  "lib/ai-usage/platform-ai-admin.ts::probePlatformAiModelAsOperator": "Kiểm khả dụng một model bằng khoá nền tảng — lưu kết quả, nhật ký PLATFORM_AI_MODEL_PROBE.",
+  "lib/ai-usage/platform-ai-admin.ts::setPlatformAiPolicy": "Chạy thử / áp dụng model AI dùng chung cho cả nền tảng — bắt buộc lý do + lượt kiểm AVAILABLE trong 24 giờ, nhật ký PLATFORM_AI_POLICY_SET.",
+  "lib/ai-usage/platform-ai-admin.ts::rollbackPlatformAiPolicy": "Hoàn tác chính sách model AI dùng chung — bắt buộc lý do, nhật ký PLATFORM_AI_POLICY_ROLLBACK.",
   "lib/ai-usage/view.ts::loadOperatorOrgAi": "Sổ AI theo ngày của MỘT tổ chức bất kỳ (màn người vận hành).",
   "lib/ai-usage/view.ts::loadPlatformAiSummary": "Top tổ chức theo chi phí AI toàn nền tảng.",
   "lib/platform/secrets-self-test.ts::runSecretsSelfTest": "Tự kiểm khoá bí mật của nền tảng (cổng mở bán A) — ghi nhật ký nền tảng.",
@@ -762,7 +769,7 @@ const LOI_VAN_HANH: Record<string, string> = {
   "lib/pricing/admin.ts::setOrgPricing": "Ghi đè tính năng / hạn mức / mức áp / cờ giữ từ trước của MỘT tổ chức — bắt buộc lý do, nhật ký ORG_PRICING_SET.",
   "lib/pricing/admin.ts::setPricingGuard": "Ngưỡng Margin Guard + công tắc trần cứng của cả nền tảng — bắt buộc lý do, nhật ký PRICING_GUARD_SET.",
   "lib/pricing/admin.ts::setPricingMargin": "Dải biên lãi gộp chiếu (đích · cảnh báo · nguy cấp) của nền tảng — bắt buộc lý do, nhật ký nền tảng.",
-  "lib/pricing/price-book.ts::setOrgPriceVersion": "Chuyển MỘT tổ chức sang một phiên bản giá (0225) — bắt buộc lý do, nhật ký PRICE_VERSION_PIN.",
+  "lib/pricing/price-book.ts::setOrgPriceVersion": "Chuyển MỘT tổ chức sang một phiên bản giá (0226) — bắt buộc lý do, nhật ký PRICE_VERSION_PIN.",
   "lib/pricing/admin.ts::setAiUnitPrices": "Bảng giá đơn vị AI ghi đè (ƯỚC TÍNH) — bắt buộc lý do, nhật ký AI_UNIT_PRICES_SET.",
   "lib/pricing/admin.ts::loadPricingAdmin": "Cấu hình gói + ghi đè của MỌI tổ chức (màn người vận hành).",
   "lib/pricing/admin.ts::loadPricingEconomics": "Kinh tế đơn vị + Margin Guard của MỌI tổ chức: sổ AI toàn nền tảng + đếm số dùng trong CSDL từng tổ chức khách (lib/platform/usage-meter.ts).",
