@@ -34,3 +34,4 @@
 {"at":"2026-10-06T10:00:05.910Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"UPDATE","mission":"ai-sales-reliability","detail":"RUNNING → RUNNING · 14 mẫu phạm vi · HIGH"}
 {"at":"2026-10-06T10:00:10.707Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"CLAIM","mission":"messenger-permission-diag","detail":"RUNNING · 5 mẫu phạm vi · MEDIUM"}
 {"at":"2026-10-06T10:00:10.707Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"OVERLAP_ACCEPTED","mission":"messenger-permission-diag","detail":"OVERLAP_ACCEPTED với meta-messenger-access: phạm vi lib/integrations/messenger/ ↔ lib/integrations/messenger/graph.ts — cách tích hợp: meta-messenger-access chỉ theo dõi việc chờ Meta; mã nằm ở sứ mệnh này"}
+{"at":"2026-10-06T10:00:15.827Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"CLAIM","mission":"ai-provider-failover","detail":"RUNNING · 8 mẫu phạm vi · HIGH"}

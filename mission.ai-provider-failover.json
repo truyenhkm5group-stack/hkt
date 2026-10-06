@@ -1,0 +1,33 @@
+{
+  "schema": 1,
+  "mission_id": "ai-provider-failover",
+  "title": "AI Sales failover: primary → secondary → người, circuit breaker, cấu hình theo tenant, kill switch",
+  "business_goal": "",
+  "status": "RUNNING",
+  "priority": "P0",
+  "risk": "HIGH",
+  "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "worker": null,
+  "worktree": null,
+  "branch": "feat/ai-provider-failover",
+  "base_sha": null,
+  "domains": [],
+  "owned_paths": [
+    "lib/sales-chatbot/engine.ts",
+    "lib/sales-chatbot/provider-failover.ts",
+    "lib/sales-chatbot/config.ts",
+    "lib/ai-builder/providers.ts",
+    "lib/ai-builder/provider.ts",
+    "lib/constants/ai-incidents.ts",
+    "app/(dashboard)/ai/sales-chatbot/settings/",
+    "tests/ai-provider-failover.test.ts"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-06T10:00:15.751Z",
+  "updated_at": "2026-10-06T10:00:15.751Z",
+  "last_heartbeat": "2026-10-06T10:00:15.751Z",
+  "definition_of_done": []
+}
