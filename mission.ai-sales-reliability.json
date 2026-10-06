@@ -43,14 +43,10 @@
   "related_prs": [
     607
   ],
-  "migration_reservations": [
-    "0223"
-  ],
-  "migration_reserved_at": {
-    "0223": "2026-10-06T10:33:52.474Z"
-  },
+  "migration_reservations": [],
+  "migration_reserved_at": {},
   "created_at": "2026-10-06T09:51:01.832Z",
-  "updated_at": "2026-10-06T11:36:52.462Z",
+  "updated_at": "2026-10-06T11:43:04.266Z",
   "last_heartbeat": "2026-10-06T11:36:52.462Z",
   "definition_of_done": [],
   "handoff": {
