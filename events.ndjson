@@ -42,3 +42,4 @@
 {"at":"2026-10-06T10:15:58.486Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DONE","mission":"tech-lead-delivery-v2","detail":"PR #601 (169ab24d) + #605 (0ca4ed97) gộp; deploy run 37444778809 thành công; verify ĐẠT trên production 0ca4ed97; pancake handoff #602 đi trọn đường mới"}
 {"at":"2026-10-06T10:27:01.335Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"CLAIM","mission":"deploy-reuse-wait","detail":"RUNNING · 2 mẫu phạm vi · HIGH"}
 {"at":"2026-10-06T10:29:43.549Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"deploy-reuse-wait","detail":"fix/deploy-reuse-wait @ d670af2b3a5e · 1 lệnh kiểm thử"}
+{"at":"2026-10-06T10:30:26.373Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"deploy-reuse-wait","detail":"#606 cho fix/deploy-reuse-wait @ d670af2b3a5e"}
