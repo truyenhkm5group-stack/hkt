@@ -104,3 +104,4 @@
 {"at":"2026-10-06T13:12:21.413Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"ai-sales-recovery","detail":"feat/ai-sales-recovery-2 @ 4f931e140e38 · 1 lệnh kiểm thử"}
 {"at":"2026-10-06T13:12:31.764Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"ai-sales-recovery","detail":"#613 cho feat/ai-sales-recovery-2 @ 4f931e140e38"}
 {"at":"2026-10-06T13:25:25.565Z","actor":"DESKTOP-56TH98Y:wt-saas-platform","kind":"CLAIM","mission":"saas-platform-restructure","detail":"PLANNING · 10 mẫu phạm vi · HIGH"}
+{"at":"2026-10-06T13:26:29.926Z","actor":"DESKTOP-56TH98Y:wt-saas-platform","kind":"MIGRATION_RESERVED","mission":"saas-platform-restructure","detail":"0224"}
