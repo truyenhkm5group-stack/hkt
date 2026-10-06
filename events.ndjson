@@ -10,3 +10,4 @@
 {"at":"2026-10-06T05:55:46.727Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"LEASE_ACQUIRED","detail":"integration-lead"}
 {"at":"2026-10-06T06:07:52.977Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#601 @ 7457ac4d3d53 · 4 lượt ai-tech-reviewer (bối cảnh mới); lượt cuối ĐẠT trên 7457ac4d — mọi phát hiện CHẶN/CAO/TB đã sửa kèm bài kiểm"}
 {"at":"2026-10-06T06:28:08.304Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-handoff","kind":"HANDOFF","mission":"pancake-replacement","detail":"feat/pancake-replacement @ 299be073bdb0 · 2 lệnh kiểm thử"}
+{"at":"2026-10-06T06:28:39.323Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"pancake-replacement","detail":"#602 cho feat/pancake-replacement @ 299be073bdb0"}
