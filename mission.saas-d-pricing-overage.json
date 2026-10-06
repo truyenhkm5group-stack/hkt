@@ -56,18 +56,18 @@
     "0228": "2026-10-06T17:57:33.593Z"
   },
   "created_at": "2026-10-06T17:03:33.744Z",
-  "updated_at": "2026-10-06T22:38:05.451Z",
-  "last_heartbeat": "2026-10-06T22:38:05.451Z",
+  "updated_at": "2026-10-06T23:05:17.776Z",
+  "last_heartbeat": "2026-10-06T23:05:17.776Z",
   "definition_of_done": [],
   "handoff": {
     "branch": "feat/saas-d-pricing-v1",
-    "sha": "d568b3cbda527236858262e06b13d88def04bce9",
-    "at": "2026-10-06T22:38:05.451Z",
+    "sha": "c2960bff54447dcbf8475ec0640e5aeab8735079",
+    "at": "2026-10-06T23:05:17.776Z",
     "actor": "DESKTOP-56TH98Y:wt-saas-d",
     "title": "Phase D: giá + thu phần vượt (chờ chủ shop chốt đơn giá + kỳ thu)",
     "summary": "",
     "tests": [
-      "typecheck · lint · npm test TẤT CẢ KIỂM THỬ ĐẠT (722 ✓) · build xanh · đột biến đỏ: thêm lại catch đọc ghim ở bảng kê, guard khách AI cũ (out.replies cộng dồn), trần AI rơi về hàng gói thô. Migration 0226 chờ #622 để renumber 0228"
+      "typecheck · lint · npm test TẤT CẢ KIỂM THỬ ĐẠT (722 ✓) · đột biến đỏ: đếm khách AI theo cờ lượt / theo afterText, bỏ mã tổ chức khỏi khoá đệm trần AI. Migration 0226 chờ #622 để renumber 0228"
     ]
   }
 }
