@@ -7999,7 +7999,7 @@ export const techTasks = pgTable(
     completedAt: ts("completed_at"),
     blockedReason: text("blocked_reason").notNull().default(""),
 
-    /* ───── Mặt phẳng điều khiển công ty (0225, docs/tech-control-plane/README.md) ───── */
+    /* ───── Mặt phẳng điều khiển công ty (0226, docs/tech-control-plane/README.md) ───── */
     /** Sứ mệnh chứa việc này. `NULL` = việc lẻ (sự cố, việc tay) — vẫn hợp lệ. */
     missionId: text("mission_id").references((): AnyPgColumn => techMissions.id, { onDelete: "set null" }),
     /** Dự án kỹ thuật. `NULL` = chưa khai — KHÔNG ngầm hiểu là ERP. */
@@ -8483,7 +8483,7 @@ export const techIncidents = pgTable(
   ],
 );
 
-/* ═══════════ MẶT PHẲNG ĐIỀU KHIỂN CÔNG TY (0225) — docs/tech-control-plane/README.md ═══════════
+/* ═══════════ MẶT PHẲNG ĐIỀU KHIỂN CÔNG TY (0226) — docs/tech-control-plane/README.md ═══════════
 
    Bốn bảng, cộng thêm vào nền `/tech` đang chạy:
      tech_projects  — dự án KỸ THUẬT của công ty (ERP · ChotDonTuDong · HSLC · SaaS …), không phải khách thuê.
@@ -10437,6 +10437,16 @@ export const salesChatConversations = pgTable(
      */
     historyUntil: ts("history_until"),
     historyImportedAt: ts("history_imported_at"),
+    /**
+     * 0225 · QUẢNG CÁO DẪN KHÁCH VÀO HỘI THOẠI (lib/sales-chatbot/ad-referral-shared.ts): mã mẩu quảng cáo Meta đọc từ gói tin
+     * của KHÁCH (Pancake: `ad_clicks` / `ads` / `ad_id` · Messenger: `referral` có `source = ADS`), mốc khách bấm (thiếu ⇒ mốc
+     * tin), và nguồn. Chỉ ghi khi mã MỚI khác mã đang lưu. Đơn bot / ghi đơn từ hội thoại đọc ba cột này để ghi `orders.ad_id`
+     * nếu mốc nằm trong cửa sổ quy kết (`lib/constants/chat-ad-attribution.ts`). NULL = chưa thấy mã nào, không phải "không
+     * đến từ quảng cáo".
+     */
+    adId: text("ad_id"),
+    adSeenAt: ts("ad_seen_at"),
+    adSource: text("ad_source"),
     /** Giỏ nháp của khung THỬ (không ghi đơn thật) + mốc tóm tắt đã đọc cho khách — lib/sales-chatbot/engine.ts. */
     state: jsonb("state").$type<Record<string, unknown>>().notNull().default({}),
     createdBy: text("created_by"),
@@ -10456,6 +10466,7 @@ export const salesChatConversations = pgTable(
     check("sales_chat_conversations_level_check", sql`${t.customerLevel} IS NULL OR ${t.customerLevel} IN ('ORDERED','UPSELL_REPLY','FULL_INFO_ORDER','FULL_INFO_NO_ITEM','PHONE_ONLY','ADDRESS_ONLY','PICKED_ITEM','MEASUREMENTS','NEW_MESSAGE','DECLINED')`),
     index("sales_chat_conversations_level_idx").on(t.customerLevel).where(sql`${t.customerLevel} is not null`),
     index("sales_chat_conversations_phone_idx").on(t.customerPhone).where(sql`${t.customerPhone} is not null`),
+    check("sales_chat_conversations_ad_source_check", sql`${t.adSource} IS NULL OR ${t.adSource} IN ('PANCAKE','MESSENGER')`),
   ],
 );
 

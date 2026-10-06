@@ -80,7 +80,7 @@ export function testTechLifecycle() {
   assert.deepEqual(chet, [], `trạng thái không bao giờ tới được từ NEW: ${chet.join(", ")}`);
 
   // ───────── 1.2 Chỉ DONE và CANCELLED là trạng thái kết thúc ─────────
-  // CANCELLED (0225, docs/tech-control-plane/README.md) là quyết định "không làm nữa" của NGƯỜI — kết thúc
+  // CANCELLED (0226, docs/tech-control-plane/README.md) là quyết định "không làm nữa" của NGƯỜI — kết thúc
   // như DONE nhưng không phải xong. FAILED / ROLLED_BACK / NEEDS_OWNER vẫn mở.
   assert.deepEqual(TECH_TASK_TERMINAL, ["DONE", "CANCELLED"], "chỉ 'Xong' và 'Đã huỷ' mới là trạng thái kết thúc");
   assert.ok(!TECH_TASK_OPEN.includes("DONE"), "DONE không nằm trong nhóm 'còn mở'");

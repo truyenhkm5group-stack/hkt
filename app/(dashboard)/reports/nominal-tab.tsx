@@ -34,7 +34,7 @@ import {
 } from "@/lib/queries/profit-nominal";
 import { getNominalDaily, NO_DAY, type NominalCell, type NominalDaily } from "@/lib/queries/marketer-daily-nominal";
 import type { Period } from "@/lib/search-params";
-import { DEFAULT_PROFIT_ASSUMPTIONS, PROFIT_ASSUMPTIONS_KEY } from "@/lib/constants/profit";
+import { DEFAULT_PROFIT_ASSUMPTIONS, FALLBACK_SHIP_FEE_DELIVERED, PROFIT_ASSUMPTIONS_KEY } from "@/lib/constants/profit";
 import { currentOrganization } from "@/lib/platform/context";
 import { settingDeclared } from "@/lib/settings";
 import { NewProductRates } from "@/app/(dashboard)/reports/new-product-rates";
@@ -354,7 +354,7 @@ export async function NominalTab({
     <div className="space-y-5">
       {sampleAssumptions ? (
         <div role="status" data-sample-assumptions className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
-          ⚠ Giả định lợi nhuận đang là <b>SỐ MẪU</b> của nền tảng (tỷ lệ hoàn {DEFAULT_PROFIT_ASSUMPTIONS.defaultReturnRate}%, phí ship {DEFAULT_PROFIT_ASSUMPTIONS.shipFeeDelivered.toLocaleString("vi-VN")} ₫ / đơn, chi phí cố định {DEFAULT_PROFIT_ASSUMPTIONS.fixedCostMonthly.toLocaleString("vi-VN")} ₫ / tháng…), chưa phải số của shop. Lợi nhuận ước tính bên dưới chỉ đúng khi shop khai số thật ở khung «Giả định» cuối tab này.
+          ⚠ Giả định lợi nhuận đang là <b>SỐ MẪU</b> của nền tảng (tỷ lệ hoàn {DEFAULT_PROFIT_ASSUMPTIONS.defaultReturnRate}%, phí ship {(DEFAULT_PROFIT_ASSUMPTIONS.shipFeeDelivered ?? FALLBACK_SHIP_FEE_DELIVERED).toLocaleString("vi-VN")} ₫ / đơn, chi phí cố định {DEFAULT_PROFIT_ASSUMPTIONS.fixedCostMonthly.toLocaleString("vi-VN")} ₫ / tháng…), chưa phải số của shop. Lợi nhuận ước tính bên dưới chỉ đúng khi shop khai số thật ở khung «Giả định» cuối tab này.
         </div>
       ) : null}
       {/*

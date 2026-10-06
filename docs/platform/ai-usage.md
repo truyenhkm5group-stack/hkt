@@ -21,8 +21,9 @@ Nhánh PLATFORM chỉ mở khi ĐỦ BA:
 
 1. `PLATFORM_AI_ENABLED=1` **và** `PLATFORM_AI_API_KEY` khác rỗng (`lib/ai-usage/platform-ai.ts`). Khoá trùng
    `ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN` / `OPENAI_API_KEY` của nhà ⇒ TỪ CHỐI (hoá đơn của VNX không gánh khách).
-   Model (`PLATFORM_AI_MODEL`, trống = `claude-opus-5`) phải có trong bảng giá — không định giá được thì không trừ được
-   credit ⇒ từ chối.
+   Model (`PLATFORM_AI_MODEL`, trống = `gemini-3.5-flash-lite` với provider gemini) phải có trong bảng giá — không định giá
+   được thì không trừ được credit ⇒ từ chối. Model thực chạy có thể bị Platform AI Policy đè (chạy thử / áp dụng / hoàn
+   tác, có cổng kiểm khả dụng) — xem `ai-model-control.md`.
 2. Gói của tổ chức có `limits.ai.platformCreditUsdPerMonth > 0` (hoặc ghi đè theo tổ chức).
 3. Còn credit tháng này (`checkAiQuota(orgCode, "PLATFORM")`).
 

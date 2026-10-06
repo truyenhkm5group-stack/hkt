@@ -5,13 +5,15 @@ import { guardSecondApproval } from "@/lib/actions/approvals";
 import { withApprovalExecution } from "@/lib/approvals/execution";
 import { z } from "zod";
 import { audit } from "@/lib/audit";
+import { clearMemo } from "@/lib/cache";
 import { can, requireUser } from "@/lib/auth/session";
 import { DEFAULT_PROFIT_ASSUMPTIONS, PROFIT_ASSUMPTIONS_KEY, type ProfitAssumptions } from "@/lib/constants/profit";
 import { getSettingJson, setSettingJson } from "@/lib/settings";
 
 const schema = z.object({
-  shipFeeDelivered: z.number().int().min(0).max(1_000_000),
-  shipFeeReturned: z.number().int().min(0).max(1_000_000),
+  // `null` = để trống ⇒ tự tính; 0 là 0 ₫ thật (xem `shipFeeExplicitZero`).
+  shipFeeDelivered: z.number().int().min(0).max(1_000_000).nullable(),
+  shipFeeReturned: z.number().int().min(0).max(1_000_000).nullable(),
   packingFeePerOrder: z.number().int().min(0).max(1_000_000).default(5_000),
   opsStaffPerOrder: z.number().int().min(0).max(1_000_000).default(2_000),
   opsStaffPerRescued: z.number().int().min(0).max(1_000_000).default(10_000),
@@ -73,8 +75,14 @@ export async function saveProfitAssumptions(input: unknown): Promise<{ ok: true 
       if (cong.mode === "NEEDS_APPROVAL") return { error: `Việc này cần người thứ hai duyệt (${cong.reason}). Đã gửi yêu cầu — xem ở trang Cần xử lý.` };
       if (cong.mode === "BLOCKED_NO_APPROVER") return { error: `Việc này cần người thứ hai duyệt (${cong.reason}), nhưng chưa có ai khác đủ tư cách duyệt.` };
     }
-    await setSettingJson(PROFIT_ASSUMPTIONS_KEY, parsed.data);
-    await audit({ userId: user.id, userEmail: user.email, action: "SETTINGS_UPDATE", entity: "SETTINGS", entityId: PROFIT_ASSUMPTIONS_KEY, detail: { before, after: parsed.data } });
+    // Lưu từ biểu mẫu này thì ô trống đã là `null`, nên số 0 từ đây là 0 thật.
+    const after: ProfitAssumptions = { ...parsed.data, shipFeeExplicitZero: true };
+    await setSettingJson(PROFIT_ASSUMPTIONS_KEY, after);
+    await audit({ userId: user.id, userEmail: user.email, action: "SETTINGS_UPDATE", entity: "SETTINGS", entityId: PROFIT_ASSUMPTIONS_KEY, detail: { before, after } });
+    // Báo cáo lợi nhuận nhớ đệm 120 giây theo kỳ, không theo giả định: chỉ `revalidatePath` thì trang
+    // dựng lại đúng con số CŨ và người vừa bấm Lưu tưởng giả định không áp dụng (cùng lý do với
+    // `lib/actions/estimated-cost.ts`).
+    clearMemo();
     revalidatePath("/reports");
     return { ok: true };
   });
