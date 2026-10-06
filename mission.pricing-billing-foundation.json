@@ -3,7 +3,7 @@
   "mission_id": "pricing-billing-foundation",
   "title": "Pricing & Billing Foundation: gói cấu hình được, đo usage, sổ chi phí AI, chặn lỗ, entitlement",
   "business_goal": "",
-  "status": "PLANNING",
+  "status": "RUNNING",
   "priority": "P1",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-pricing-billing",
@@ -17,10 +17,14 @@
     "lib/billing",
     "lib/ai-usage/ledger.ts",
     "lib/ai-usage/types.ts",
+    "lib/ai/provider.ts",
     "lib/entitlements",
     "lib/platform/saas-metrics.ts",
     "lib/platform/saas-ledger.ts",
     "lib/platform/saas-cockpit.ts",
+    "lib/platform/usage-meter.ts",
+    "lib/platform/audit.ts",
+    "lib/queries/public-site.ts",
     "lib/actions/pricing.ts",
     "db/schema.ts",
     "drizzle",
@@ -36,6 +40,7 @@
     "tests/pricing-billing.test.ts",
     "tests/sync-fixtures.test.ts",
     "tests/migration-upgrade-path.test.ts",
+    "tests/platform-isolation-static.test.ts",
     "docs/platform"
   ],
   "dependencies": [],
@@ -48,7 +53,7 @@
     "0222": "2026-10-06T10:04:37.525Z"
   },
   "created_at": "2026-10-06T10:04:31.315Z",
-  "updated_at": "2026-10-06T10:04:37.525Z",
-  "last_heartbeat": "2026-10-06T10:04:31.315Z",
+  "updated_at": "2026-10-06T10:32:43.350Z",
+  "last_heartbeat": "2026-10-06T10:32:43.350Z",
   "definition_of_done": []
 }
