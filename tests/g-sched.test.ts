@@ -121,7 +121,7 @@ async function kiemLich(fan: FanOut) {
   // bằng kết nối «meta-ads-org» của chính tổ chức (không cần credential của nhà — khẳng định ngay dưới vẫn kiểm điều đó).
   // `wholesale-leads` thêm 04/10/2026 (0197): chiến dịch săn khách sỉ của tổ chức khách chạy nền bằng khoá Google của chính họ.
   // `shipping-route` thêm 06/10/2026 (POS tự chủ P7): tuyến giao tự động tạo vận đơn bằng kết nối hãng của chính tổ chức.
-  assert.deepEqual([...fan.AUTOMATION_FANOUT_JOBS].sort(), ["ads-spend-org", "creative-publish-org", "messaging-retry", "sales-followup", "shipping-route", "wholesale-leads", "work-recurrence", "workflows"], "tầng tự động hoá: luật + việc định kỳ + follow-up chatbot + gửi lại tin nhóm + chi tiêu quảng cáo của tổ chức + săn khách sỉ + đăng tiếp camp của tổ chức + tuyến giao tự động");
+  assert.deepEqual([...fan.AUTOMATION_FANOUT_JOBS].sort(), ["ads-spend-org", "creative-publish-org", "messaging-retry", "sales-followup", "sales-health", "shipping-route", "wholesale-leads", "work-recurrence", "workflows"], "tầng tự động hoá: luật + việc định kỳ + follow-up chatbot + giám sát AI bán hàng + gửi lại tin nhóm + chi tiêu quảng cáo của tổ chức + săn khách sỉ + đăng tiếp camp của tổ chức + tuyến giao tự động");
   for (const j of fan.AUTOMATION_FANOUT_JOBS) {
     assert.ok(fan.FANOUT_JOBS.includes(j), `${j} phải khai fanOut`);
     assert.ok(!HOME_CREDENTIAL_JOBS[j], `${j} không được cần credential của nhà`);
@@ -130,7 +130,7 @@ async function kiemLich(fan: FanOut) {
   // `wholesale-leads` CHỈ fan-out: nhà tắt module Săn khách sỉ (homeOptIn, 0197).
   // `creative-publish-org` CHỈ fan-out (04/10/2026): camp «Đăng camp» của nhà đăng tiếp qua `creative-loop`.
   // `shipping-route` CHỈ fan-out (06/10/2026): nhà đồng bộ đơn Pancake, không có đơn tạo tay để xếp tuyến.
-  assert.deepEqual([...fan.FANOUT_ONLY_JOBS], [WORKFLOWS_JOB, "sales-followup", "ads-spend-org", "wholesale-leads", "creative-publish-org", "shipping-route"]);
+  assert.deepEqual([...fan.FANOUT_ONLY_JOBS], [WORKFLOWS_JOB, "sales-followup", "sales-health", "ads-spend-org", "wholesale-leads", "creative-publish-org", "shipping-route"]);
 
   const lich = doc("scripts/scheduler.mjs");
   const jobsLich = [...new Set([...lich.matchAll(/\{\s*job:\s*"([a-z0-9-]+)"/g)].map((m) => m[1]))];
