@@ -225,7 +225,7 @@ export class OrderBot {
     if (!shopNoi) return chan;
     let sys;
     try {
-      sys = this.bot.buildSystemPrompt(pageId, { customerName: "Khách", type: "INBOX", saleActive: this.bot.saleActiveIn(pageId, messages) });
+      sys = this.bot.buildSystemPrompt(pageId, { customerName: "Khách", type: "INBOX", saleActive: this.bot.saleActiveIn(pageId, messages) }) + this.bot.quotedPriceBlock(pageId, messages);
     } catch {
       return chan;
     }
