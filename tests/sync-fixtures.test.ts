@@ -512,6 +512,7 @@ import { testConversationTrace } from "./conversation-trace.test";
 import { testMessengerHealth } from "./messenger-health.test";
 import { testConnectorsLegacy } from "./connectors-legacy.test";
 import { testNativeOrderSync } from "./native-order-sync.test";
+import { testMessengerLifecycle } from "./messenger-lifecycle.test";
 import { testMessengerMultiPage } from "./messenger-multipage.test";
 import { testPush } from "./push.test";
 import { testUserInvites } from "./user-invites.test";
@@ -2792,6 +2793,9 @@ async function main() {
   // Shop CHỈ nối Facebook trực tiếp: ghi đơn từ hội thoại đọc sổ tin ERP (không Pancake) + trọn đường nhận → bot → nhân viên →
   // đơn → ghi đơn với 0 lời gọi pages.fm — tổ chức THẬT `chi-facebook`.
   await testNativeOrderSync();
+  // Vòng đời page Meta + lịch sử hội thoại trực tiếp: phân trang /me/accounts, gỡ page ⇒ gỡ đăng ký webhook, nhập 20 tin gần nhất
+  // mỗi hội thoại qua Conversations API — tổ chức THẬT `vong-doi-page`.
+  await testMessengerLifecycle();
   await testMessengerMultiPage();
   await testPush();
   // Mời người dùng qua liên kết (gap «Invite User»): tổ chức THẬT `ui-a` / `ui-b` / `ui-t` (tự cấp, tự dọn) + nhà — vai trò

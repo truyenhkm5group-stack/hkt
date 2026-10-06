@@ -11,6 +11,7 @@ import { chatTurn, conversationView, openConversation, resumeConversationToAi } 
 import { bindOrganization } from "@/lib/platform/background";
 import { recordConversationEvent } from "@/lib/sales-chatbot/events";
 import { cancelInboxHistory, driveInboxHistory, startInboxHistory } from "@/lib/sales-chatbot/history";
+import { runMessengerHistory, startMessengerHistory } from "@/lib/sales-chatbot/messenger-history";
 import { checkLearnNow, learnLessons, rollbackLessons, saveLessons, setLessonsEnabled } from "@/lib/sales-chatbot/lessons";
 import { publishPlaybook, rollbackPlaybook, runPlaybookLearning, savePlaybookDraft, startPlaybookLearning, unpublishPlaybook } from "@/lib/sales-chatbot/playbook";
 import { saveSalesChatbotConfig, SALES_CHATBOT_MANAGE } from "@/lib/sales-chatbot/settings";
@@ -137,6 +138,16 @@ export async function startInboxHistoryAction(input: unknown): Promise<PlaybookR
   const r = await startInboxHistory(user, input);
   if ("error" in r) return r;
   after(await bindOrganization(() => driveInboxHistory({ trigger: "MANUAL", actor: user.email })));
+  revalidatePath("/ai/sales-chatbot");
+  return r;
+}
+
+/** Nhập hội thoại gần đây của page nối THẲNG Meta (lib/sales-chatbot/messenger-history.ts) — lượt đọc Graph chạy SAU phản hồi. */
+export async function startMessengerHistoryAction(): Promise<PlaybookResult> {
+  const user = await requireUser();
+  const r = await startMessengerHistory(user);
+  if ("error" in r) return r;
+  after(await bindOrganization(() => runMessengerHistory({ trigger: "MANUAL", actor: user.email })));
   revalidatePath("/ai/sales-chatbot");
   return r;
 }

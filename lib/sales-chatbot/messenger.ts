@@ -4,7 +4,7 @@ import { getDb, getPlatformDb, schema } from "@/db";
 import type { SessionUser } from "@/lib/auth/session";
 import { adoptLegacyChannelPages, disableChannelPages, listChannelPages, messagingConnectionSummaries, noteChannelPageHealth, openActiveConnection, openChannelPageToken, saveConnection, setChannelPagesState, setConnectionStatus, testOrgConnection, upsertChannelPage } from "@/lib/connectors/service";
 import type { TesterDeps } from "@/lib/connectors/testers";
-import { instagramAccountOf, messengerApp, postMessage, sendMessengerImage, sendMessengerText, sendPrivateReply, subscribePage, MESSENGER_TEXT_MAX, type ConnectablePage, type MessengerEvent } from "@/lib/integrations/messenger/graph";
+import { instagramAccountOf, messengerApp, postMessage, sendMessengerImage, sendMessengerText, sendPrivateReply, subscribePage, unsubscribePage, MESSENGER_TEXT_MAX, type ConnectablePage, type MessengerEvent } from "@/lib/integrations/messenger/graph";
 import { chunkText } from "@/lib/messaging/providers";
 import { canUseModule } from "@/lib/platform/capabilities";
 import { AI_DOWN_HANDOFF_REASON, chatTurn, conversationView, describeCustomerImages } from "@/lib/sales-chatbot/engine";
@@ -93,7 +93,7 @@ export async function messengerOwnedPageIds(): Promise<string[]> {
 }
 
 /** Token gửi tin của ĐÚNG page. Hàng page có ⇒ token của hàng (page tắt ⇒ không gửi); chưa có hàng ⇒ hàng kết nối đơn cũ. */
-async function messengerTokenFor(pageId: string): Promise<{ ok: true; token: string } | { ok: false; error: string }> {
+export async function messengerTokenFor(pageId: string): Promise<{ ok: true; token: string } | { ok: false; error: string }> {
   const own = await openChannelPageToken(MESSENGER_CONNECTOR, pageId);
   if (own.ok) return own;
   if (own.known) return { ok: false, error: `Kết nối Messenger chưa bật / khác page (${own.reason})` };
@@ -223,7 +223,24 @@ export async function connectMessengerPage(user: SessionUser, page: ConnectableP
  * Gỡ. `pageId` có ⇒ gỡ ĐÚNG page đó (+ Instagram gắn với nó): hàng page về DISABLED, chỉ mục webhook của page ấy mất — các
  * page khác chạy tiếp. Không `pageId` ⇒ gỡ cả kết nối như trước. Token đã lưu giữ nguyên (mã hoá).
  */
-export async function disconnectMessengerPage(user: SessionUser, pageId?: string): Promise<MessengerConnectResult> {
+/**
+ * Gỡ đăng ký webhook ở Meta cho các PAGE (Instagram đi theo page cha) TRƯỚC khi gỡ phía ERP — lúc token còn đọc được. Hỏng (token đã
+ * bị thu hồi…) KHÔNG chặn việc gỡ: chỉ mục mất ⇒ tin Meta còn gửi tới vẫn bị webhook bỏ qua, không rơi về tổ chức nào. Trả câu ghi
+ * chú cho người bấm (`""` khi gỡ được hết).
+ */
+async function unsubscribeMetaPages(pageIds: readonly string[], fetchImpl: typeof fetch = fetch): Promise<string> {
+  const app = messengerApp();
+  if (!app) return "";
+  const failed: string[] = [];
+  for (const id of pageIds) {
+    const tk = await messengerTokenFor(id);
+    const r = tk.ok ? await unsubscribePage(app, id, tk.token, fetchImpl) : { ok: false as const };
+    if (!r.ok) failed.push(id);
+  }
+  return failed.length ? ` Chưa gỡ được đăng ký webhook ở Facebook cho ${failed.length} page (token không còn dùng được) — tin của page đó vẫn bị bỏ qua.` : "";
+}
+
+export async function disconnectMessengerPage(user: SessionUser, pageId?: string, deps: { fetch?: typeof fetch } = {}): Promise<MessengerConnectResult> {
   const orgCode = user.organization?.code;
   if (!orgCode) return { error: "Phiên không mang tổ chức." };
   const pdb = await getPlatformDb();
@@ -233,16 +250,18 @@ export async function disconnectMessengerPage(user: SessionUser, pageId?: string
     const target = view.pages.find((p) => p.id === pageId && p.kind === "PAGE");
     if (!target) return { error: "Không có page này trong các page đã nối." };
     const group = view.pages.filter((p) => p.id === pageId || p.parentPageId === pageId);
+    const note = await unsubscribeMetaPages([pageId], deps.fetch);
     const off = await disableChannelPages(user, MESSENGER_CONNECTOR, group.map((p) => ({ pageId: p.id, kind: p.kind, parentPageId: p.parentPageId, name: p.name })));
     if ("error" in off) return off;
     await pdb.delete(idx).where(and(eq(idx.orgCode, orgCode), inArray(idx.pageId, group.map((p) => p.id))));
-    return { ok: true, message: `Đã gỡ page «${target.name || target.id}» — các page khác vẫn chạy.` };
+    return { ok: true, message: `Đã gỡ page «${target.name || target.id}» — các page khác vẫn chạy.${note}` };
   }
+  const note = await unsubscribeMetaPages(view.pages.filter((p) => p.kind === "PAGE").map((p) => p.id), deps.fetch);
   const off = await setConnectionStatus(user, MESSENGER_CONNECTOR, "DISABLED");
   if ("error" in off) return { error: off.error };
   if (view.pages.length) await disableChannelPages(user, MESSENGER_CONNECTOR, view.pages.map((p) => ({ pageId: p.id, kind: p.kind, parentPageId: p.parentPageId, name: p.name })));
   await pdb.delete(idx).where(eq(idx.orgCode, orgCode));
-  return { ok: true, message: "Đã gỡ Messenger trực tiếp — bot không nhận tin từ page qua đường này nữa." };
+  return { ok: true, message: `Đã gỡ Messenger trực tiếp — bot không nhận tin từ page qua đường này nữa.${note}` };
 }
 
 /** Bật / tắt AI cho NHIỀU page một lượt (thao tác hàng loạt; quyền kiểm ở lõi kết nối). Page đã gỡ không bật lại được ở đây. */

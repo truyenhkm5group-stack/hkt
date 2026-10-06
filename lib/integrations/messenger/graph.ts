@@ -27,6 +27,8 @@ export const MESSENGER_FIELDS = ["messages", "messaging_postbacks", "message_ech
 const TIMEOUT_MS = 15_000;
 /** Messenger nhận tối đa 2.000 ký tự một tin. */
 export const MESSENGER_TEXT_MAX = 2000;
+/** Trần số trang `/me/accounts` (100 page / trang) đọc mỗi lần nối — 500 page; khớp `MESSENGER_PAGES_MAX` của bộ chọn page. */
+export const ACCOUNT_PAGES_MAX_REQUESTS = 5;
 
 export function graphBase(): string {
   const v = /^v\d+\.\d+$/.test(env.facebook.apiVersion) ? env.facebook.apiVersion : "v21.0";
@@ -98,14 +100,22 @@ export async function pagesFromCode(app: MessengerApp, code: string, redirectUri
   const long = await graph(fetchImpl, `${base}/oauth/access_token?${new URLSearchParams({ grant_type: "fb_exchange_token", client_id: app.appId, client_secret: app.appSecret, fb_exchange_token: shortToken })}`, { method: "GET" }, [...hide, shortToken]);
   const userToken = long.ok && typeof long.body.access_token === "string" ? long.body.access_token : shortToken;
   const hideAll = [...hide, shortToken, userToken];
-  const acc = await graph(
-    fetchImpl,
-    `${base}/me/accounts?${new URLSearchParams({ fields: "id,name,access_token,tasks", limit: "100", access_token: userToken, appsecret_proof: appSecretProof(userToken, app.appSecret) })}`,
-    { method: "GET" },
-    hideAll,
-  );
-  if (!acc.ok) return { error: acc.error };
-  const data = Array.isArray(acc.body.data) ? (acc.body.data as Record<string, unknown>[]) : [];
+  // Phân trang bằng con trỏ `after` (không theo URL `next` — URL đó chứa token). Shop quản > 100 page trước đây chỉ thấy 100 page đầu.
+  const data: Record<string, unknown>[] = [];
+  let after: string | null = null;
+  for (let i = 0; i < ACCOUNT_PAGES_MAX_REQUESTS; i++) {
+    const q = new URLSearchParams({ fields: "id,name,access_token,tasks", limit: "100", access_token: userToken, appsecret_proof: appSecretProof(userToken, app.appSecret) });
+    if (after) q.set("after", after);
+    const acc = await graph(fetchImpl, `${base}/me/accounts?${q}`, { method: "GET" }, hideAll);
+    if (!acc.ok) {
+      if (!data.length) return { error: acc.error };
+      break;
+    }
+    data.push(...(Array.isArray(acc.body.data) ? (acc.body.data as Record<string, unknown>[]) : []));
+    const paging = (acc.body.paging ?? {}) as { cursors?: { after?: unknown }; next?: unknown };
+    after = typeof paging.cursors?.after === "string" && paging.next ? paging.cursors.after : null;
+    if (!after) break;
+  }
   const pages = data
     .map((p) => ({
       id: typeof p.id === "string" ? p.id : "",
@@ -127,6 +137,18 @@ export async function subscribePage(app: MessengerApp, pageId: string, pageToken
   );
   if (!r.ok) return { ok: false, error: r.error };
   return r.body.success === true ? { ok: true } : { ok: false, error: "Facebook không xác nhận đăng ký webhook cho page." };
+}
+
+/**
+ * GỠ đăng ký webhook của app nền tảng khỏi page (`DELETE /{page}/subscribed_apps`) — gọi khi shop gỡ page khỏi ERP, để Meta thôi gửi
+ * tin của page tới nền tảng (trước đây chỉ xoá chỉ mục: Meta vẫn gửi, webhook bỏ qua «page lạ» mãi mãi). Token đã hỏng ⇒ không gỡ được,
+ * nơi gọi vẫn gỡ phía ERP (chỉ mục mất ⇒ tin tới vẫn bị bỏ qua, không rơi về tổ chức nào).
+ */
+export async function unsubscribePage(app: MessengerApp, pageId: string, pageToken: string, fetchImpl: Fetch = fetch): Promise<{ ok: true } | { ok: false; error: string; kind: GraphErrorKind }> {
+  if (!/^\d{5,30}$/.test(pageId)) return { ok: false, error: "Mã page không hợp lệ", kind: "OTHER" };
+  const r = await graph(fetchImpl, `${graphBase()}/${encodeURIComponent(pageId)}/subscribed_apps?${new URLSearchParams({ access_token: pageToken, appsecret_proof: appSecretProof(pageToken, app.appSecret) })}`, { method: "DELETE" }, [pageToken, app.appSecret]);
+  if (!r.ok) return { ok: false, error: r.error, kind: r.kind };
+  return r.body.success === true ? { ok: true } : { ok: false, error: "Facebook không xác nhận gỡ đăng ký webhook.", kind: "OTHER" };
 }
 
 /** Kiểm tra kết nối: page token đọc được ĐÚNG page đã khai (chỉ đọc). */
@@ -299,4 +321,35 @@ export function parseMessengerWebhook(payload: unknown): MessengerEvent[] {
     }
   }
   return out.filter((e) => /^\d{5,30}$/.test(e.pageId) && /^\d{5,30}$/.test(e.psid));
+}
+
+// ─────────────────────────── Hội thoại cũ của page (Conversations API) ───────────────────────────
+
+/** Trường đọc mỗi hội thoại: người tham gia (PSID / IGSID của khách), mốc cập nhật, tối đa N tin GẦN NHẤT kèm ảnh. */
+function conversationFields(messages: number): string {
+  return `participants,updated_time,messages.limit(${Math.max(1, Math.min(20, messages))}){id,message,from,created_time,attachments{image_data{url},mime_type}}`;
+}
+
+/**
+ * MỘT trang danh sách hội thoại của page (`GET /{page}/conversations?platform=…`, mới cập nhật → cũ) — Meta chỉ cho đọc 20 tin GẦN
+ * NHẤT mỗi hội thoại; hội thoại «Tin nhắn chờ» không hoạt động 30 ngày không trả về. Instagram đọc qua PAGE CHA với
+ * `platform=instagram`. Phân trang bằng con trỏ `after` (không theo URL `next` Meta trả — URL chứa token và không phải hằng số
+ * của ta). Quyền: `pages_messaging` + `pages_manage_metadata` + `pages_read_engagement` (Instagram: `instagram_manage_messages`).
+ */
+export async function pageConversations(
+  app: MessengerApp,
+  pageToken: string,
+  pageId: string,
+  opts: { platform: "messenger" | "instagram"; after: string | null; limit: number; messages: number },
+  fetchImpl: Fetch = fetch,
+): Promise<{ ok: true; items: Record<string, unknown>[]; after: string | null } | { ok: false; error: string; kind: GraphErrorKind }> {
+  if (!/^\d{5,30}$/.test(pageId)) return { ok: false, error: "Mã page không hợp lệ", kind: "OTHER" };
+  const q = new URLSearchParams({ platform: opts.platform, fields: conversationFields(opts.messages), limit: String(Math.max(1, Math.min(50, opts.limit))), access_token: pageToken, appsecret_proof: appSecretProof(pageToken, app.appSecret) });
+  if (opts.after) q.set("after", opts.after);
+  const r = await graph(fetchImpl, `${graphBase()}/${encodeURIComponent(pageId)}/conversations?${q}`, { method: "GET" }, [pageToken, app.appSecret]);
+  if (!r.ok) return { ok: false, error: r.error, kind: r.kind };
+  const data = Array.isArray(r.body.data) ? (r.body.data as Record<string, unknown>[]) : [];
+  const paging = (r.body.paging ?? {}) as { cursors?: { after?: unknown }; next?: unknown };
+  const after = typeof paging.cursors?.after === "string" && paging.next ? paging.cursors.after : null;
+  return { ok: true, items: data, after };
 }

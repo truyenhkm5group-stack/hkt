@@ -21,6 +21,8 @@ import { listConversations, loadSalesChatbotConfig } from "@/lib/sales-chatbot/e
 import { SALES_CHATBOT_MANAGE } from "@/lib/sales-chatbot/settings";
 import { ChatbotConfigForm } from "./config-form";
 import { InboxHistoryPanel } from "./history-panel";
+import { MessengerHistoryPanel } from "./messenger-history-panel";
+import { loadMessengerHistoryView } from "@/lib/sales-chatbot/messenger-history";
 import { PlaybookPanel } from "./playbook-panel";
 import { LessonsPanel } from "./lessons-panel";
 import { LevelScriptsPanel } from "./level-scripts-panel";
@@ -69,6 +71,8 @@ export default async function SalesChatbotPage() {
   const orderSync = fanpage ? await orderSyncView() : null;
   // Đồng bộ lịch sử hộp thư — chỉ khi tổ chức có khối Fanpage (qua Pancake) và người xem quản lý được chatbot.
   const inboxHistory = fanpage ? await loadInboxHistoryView(user) : null;
+  // Hội thoại gần đây của page nối THẲNG Meta — chỉ khi có page trực tiếp và người xem quản lý được chatbot.
+  const messengerHistory = await loadMessengerHistoryView(user);
   const modeConfig = fanpage ? await loadModeConfig() : null;
   // «AI dùng chung của nền tảng» (0193) không phải một kết nối của tổ chức: sẵn sàng = nền tảng bật + gói có credit + còn credit.
   const platformAi = user.organization?.code ? await platformChatAi(user.organization.code) : { ok: false as const, reason: "Không xác định được tổ chức." };
@@ -207,6 +211,7 @@ export default async function SalesChatbotPage() {
             </SectionCard>
           ) : null}
           {inboxHistory ? <InboxHistoryPanel run={inboxHistory.run} fanpageReady={inboxHistory.fanpageReady} /> : null}
+          {messengerHistory ? <MessengerHistoryPanel run={messengerHistory.run} pages={messengerHistory.pages} /> : null}
           {costReport ? <ChatCostPanel report={costReport} /> : null}
           {followup ? <FollowupPanel settings={followup} waiting={waitingCount} manage={manage} /> : null}
           {lessons ? <LessonsPanel key={`${lessons.version}-${lessons.updatedAt ?? ""}`} state={lessons} /> : null}

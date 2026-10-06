@@ -20,8 +20,8 @@ export const MESSENGER_PAGES_COOKIE = "erp_msg_pages";
 export const MESSENGER_CONNECT_TTL_SEC = 10 * 60;
 export const MESSENGER_CONNECT_PATH = "/api/connect/messenger";
 export const MESSENGER_SETTINGS_PATH = "/ai/sales-chatbot/messenger";
-/** Trần số page giữ trong cookie (cookie ~4 KB). Người quản lý nhiều page hơn ⇒ chọn trong 12 page đầu. */
-export const MESSENGER_PAGES_MAX = 100;
+/** Trần số page CHỜ CHỌN sau một lần đăng nhập Facebook (bản niêm phong lưu ở máy chủ) — khớp 5 trang `/me/accounts` × 100. */
+export const MESSENGER_PAGES_MAX = 500;
 
 /**
  * Đường quay về của hộp thoại Facebook — theo GỐC PHẦN MỀM của lượt đang chạy (`appOriginForHost`, lib/auth/oauth.ts).

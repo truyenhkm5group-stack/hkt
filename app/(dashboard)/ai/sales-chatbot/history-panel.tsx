@@ -81,7 +81,7 @@ export function InboxHistoryPanel({ run, fanpageReady }: { run: HistoryRun; fanp
             <li>Tin mới hơn {HISTORY_LIMITS.freshMinutes} phút không nhập — đó là việc của bot / webhook.</li>
             <li>Tiến độ lưu ở máy chủ sau mỗi lời gọi: máy khởi động lại thì tự đọc tiếp từ chỗ dừng (trong vòng 5 phút).</li>
             <li>SĐT khách Pancake đã ghi nhận được lưu cùng hội thoại để lọc «có SĐT».</li>
-            <li>Chỉ kênh Facebook qua Pancake. Messenger nối trực tiếp và Zalo OA chưa nhập được lịch sử.</li>
+            <li>Chỉ kênh Facebook qua Pancake. Page nối trực tiếp với Facebook nhập ở khung «Hội thoại gần đây từ Facebook / Instagram»; Zalo OA chưa nhập được lịch sử.</li>
           </ul>
         </details>
       </div>
