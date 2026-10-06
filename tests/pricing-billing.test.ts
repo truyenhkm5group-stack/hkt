@@ -470,6 +470,6 @@ export async function testPricingBilling() {
     await cleanup(saved);
   }
   console.log(
-    "✓ Giá & thu phí (0222): gói cấu hình được + Doanh nghiệp «Liên hệ»; tính năng theo gói / ghi đè / giữ từ trước (migration giữ đủ tính năng cho tổ chức có sẵn, mức áp mềm); nâng · hạ đổi tính năng + hạn mức; ngưỡng 50/80/100, hạn mức mềm không bao giờ chặn, trần cứng cần đủ bốn điều kiện + grace; vượt tính phí / mời nâng gói; đồng hồ đo đúng kỳ, đầu tháng đếm lại; sự kiện trùng / AI thử lại không tính hai lần, 20 ghi đồng thời đủ 20, A không chạm B; dùng thử hết hạn chỉ khoá ghi, không xoá tính năng; khách không thấy token / chi phí; bất thường cần ≥ 5 ngày; đề xuất model cùng họ, không tự đổi; không mã nào so tên gói",
+    "✓ Giá & thu phí (0223): gói cấu hình được + Doanh nghiệp «Liên hệ»; tính năng theo gói / ghi đè / giữ từ trước (migration giữ đủ tính năng cho tổ chức có sẵn, mức áp mềm); nâng · hạ đổi tính năng + hạn mức; ngưỡng 50/80/100, hạn mức mềm không bao giờ chặn, trần cứng cần đủ bốn điều kiện + grace; vượt tính phí / mời nâng gói; đồng hồ đo đúng kỳ, đầu tháng đếm lại; sự kiện trùng / AI thử lại không tính hai lần, 20 ghi đồng thời đủ 20, A không chạm B; dùng thử hết hạn chỉ khoá ghi, không xoá tính năng; khách không thấy token / chi phí; bất thường cần ≥ 5 ngày; đề xuất model cùng họ, không tự đổi; không mã nào so tên gói",
   );
 }
