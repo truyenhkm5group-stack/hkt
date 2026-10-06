@@ -1,6 +1,7 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { env } from "@/lib/env";
 import { classifyGraphError, GRAPH_ERROR_HINT, type GraphErrorKind } from "@/lib/integrations/messenger/graph-errors";
+import { adReferralFromMessenger, type AdReferral } from "@/lib/sales-chatbot/ad-referral-shared";
 
 /**
  * ═══════════ MESSENGER TRỰC TIẾP — GỌI GRAPH API CỦA META (docs/platform/messenger.md) ═══════════
@@ -538,6 +539,13 @@ export type MessengerEvent = {
   at: Date | null;
   /** Bình luận dưới bài viết của page (trường `feed`): trả lời bằng TIN RIÊNG, không bao giờ công khai. `psid` = người bình luận. */
   comment?: { commentId: string; postId: string };
+  /** 0225: quảng cáo dẫn KHÁCH vào hội thoại (`referral` có `source = ADS`) — tiếng vọng / không có ⇒ `null`. */
+  adReferral?: AdReferral | null;
+  /**
+   * Sự kiện CHỈ mang quảng cáo (messaging_referrals: khách cũ bấm quảng cáo mở lại hội thoại, hoặc tin không chữ kèm referral) —
+   * KHÔNG phải tin nhắn: đường nhận chỉ ghi mã lên hội thoại, không vào hàng chờ của bot.
+   */
+  referralOnly?: boolean;
 };
 
 const s = (v: unknown) => (typeof v === "string" ? v : typeof v === "number" ? String(v) : "");
@@ -560,6 +568,8 @@ export function parseMessengerWebhook(payload: unknown): MessengerEvent[] {
       const at = typeof m.timestamp === "number" ? new Date(m.timestamp) : null;
       const msg = m.message as Record<string, unknown> | undefined;
       const postback = m.postback as Record<string, unknown> | undefined;
+      const adReferral = adReferralFromMessenger(m);
+      const referralOnly = () => out.push({ platform, pageId, psid: sender, mid: `referral:${sender}:${s(m.timestamp)}`, text: "", imageUrls: [], isEcho: false, appId: null, at, adReferral, referralOnly: true });
       if (msg) {
         const mid = s(msg.mid);
         if (!mid || msg.is_deleted === true) continue;
@@ -574,12 +584,20 @@ export function parseMessengerWebhook(payload: unknown): MessengerEvent[] {
               .filter(Boolean)
               .slice(0, 3);
         const text = s(msg.text).slice(0, 2000);
-        if (!text && !imageUrls.length && !isEcho) continue;
-        out.push({ platform, pageId, psid: isEcho ? recipient : sender, mid, text, imageUrls, isEcho, appId: msg.app_id === undefined || msg.app_id === null ? null : s(msg.app_id), at });
+        if (!text && !imageUrls.length && !isEcho) {
+          // Tin không chữ (👍 / nhãn dán) vẫn có thể là tin ĐẦU từ quảng cáo — giữ mã quảng cáo, không thành tin cho bot.
+          if (adReferral) referralOnly();
+          continue;
+        }
+        out.push({ platform, pageId, psid: isEcho ? recipient : sender, mid, text, imageUrls, isEcho, appId: msg.app_id === undefined || msg.app_id === null ? null : s(msg.app_id), at, adReferral: isEcho ? null : adReferral });
       } else if (postback) {
         const title = s(postback.title) || s(postback.payload);
         const mid = s(postback.mid) || `postback:${sender}:${s(m.timestamp)}`;
-        if (title) out.push({ platform, pageId, psid: sender, mid, text: title.slice(0, 2000), imageUrls: [], isEcho: false, appId: null, at });
+        if (title) out.push({ platform, pageId, psid: sender, mid, text: title.slice(0, 2000), imageUrls: [], isEcho: false, appId: null, at, adReferral });
+        else if (adReferral) referralOnly();
+      } else if (adReferral) {
+        // messaging_referrals: sự kiện `referral` đứng riêng — một bản ghi quảng cáo, không phải tin nhắn.
+        referralOnly();
       }
     }
   }
