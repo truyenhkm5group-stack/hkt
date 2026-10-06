@@ -144,11 +144,11 @@ export default async function PlatformPage({ searchParams }: { searchParams: Pro
           <dt className="text-muted-foreground">Trường đăng ký (page)</dt>
           <dd className="text-xs">{MESSENGER_FIELDS.join(" · ")}</dd>
           <dt className="text-muted-foreground">Secret app đăng nhập</dt>
-          <dd className="text-xs">{env.oauth.facebookAppSecret ? "Đã khai (đang dùng cho nối page + gửi tin)" : "Chưa khai"}</dd>
+          <dd className="text-xs">{env.oauth.facebookAppSecret ? (messengerApp()?.source === "LOGIN_APP" ? "Đã khai (đang dùng cho nối page + gửi tin)" : "Đã khai (đăng nhập bằng Facebook + nhận chữ ký webhook)") : "Chưa khai"}</dd>
           <dt className="text-muted-foreground">App Messenger riêng</dt>
           <dd className="text-xs">
             {env.oauth.facebookMessengerAppId ? `App ID ${env.oauth.facebookMessengerAppId}` : "Chưa khai App ID"} ·{" "}
-            {env.oauth.facebookMessengerAppSecret ? "secret đã khai — webhook nhận gói ký bằng app này" : "secret chưa khai — gói của app này sẽ bị 401"}
+            {env.oauth.facebookMessengerAppSecret ? messengerApp()?.source === "MESSENGER_APP" ? "secret đã khai — đang dùng cho nối page, gửi tin, nhận webhook" : "secret đã khai — webhook nhận gói ký bằng app này" : "secret chưa khai — gói của app này sẽ bị 401"}
           </dd>
           <dt className="text-muted-foreground">Chữ ký được chấp nhận</dt>
           <dd className="text-xs">{messengerWebhookSecrets().length} app secret</dd>
