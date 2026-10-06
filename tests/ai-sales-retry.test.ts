@@ -174,6 +174,19 @@ async function testRealOrg() {
       assert.equal(posts.length, postsBefore, "không gửi câu thứ hai cho khách");
       assert.equal((await rowOf("r-m2")).status, "DONE");
 
+      // 4b · REVIEW #607: lượt chết đã trả lời M1, khách gửi M2 rồi lượt sau giành CHUNG M1 + M2 ⇒ M1 chốt không gọi AI, M2
+      //      VẪN được trả lời (trước bản sửa: M2 bị đánh dấu «đã trả lời» và khách không bao giờ nhận câu nào).
+      const t2 = Date.now() - 10 * 60_000;
+      await db.insert(t).values({ pageId: PAGE, threadId: "r-t6", messageId: "r-m7", text: "Có giao Hải Phòng không?", status: "PENDING", claimId: "luot-chet-2", claimedAt: new Date(t2 + 60_000), createdAt: new Date(t2) });
+      await db.insert(t).values({ pageId: PAGE, threadId: "r-t6", messageId: "bot-out:da-gui-2", text: "dạ có ạ", status: "DONE", processedAt: new Date(t2 + 90_000), note: "BOT_SENT", createdAt: new Date(t2 + 90_000) });
+      await db.insert(t).values({ pageId: PAGE, threadId: "r-t6", messageId: "r-m8", text: "Vậy lấy chị 1 ký", status: "PENDING", createdAt: new Date(t2 + 170_000) });
+      const postsB = posts.length;
+      const r3b = await processFanpageThread(PAGE, "r-t6", { fetch: pancakeFetch, catchUp: true });
+      assert.equal((await rowOf("r-m7")).note, ALREADY_REPLIED_NOTE, "M1 (lượt chết đã trả lời) chốt không gọi AI");
+      assert.equal((await rowOf("r-m8")).status, "DONE", JSON.stringify(r3b));
+      assert.notEqual((await rowOf("r-m8")).note, ALREADY_REPLIED_NOTE, "M2 KHÔNG bị nuốt");
+      assert.equal(posts.length, postsB + 1, "M2 được trả lời đúng MỘT câu");
+
       // 5 · KHÁCH NHẮN TRONG LÚC BOT SOẠN CÂU TRƯỚC: câu bot (trả lời tin trước) tới SAU tin mới — tin mới KHÔNG bị nuốt.
       const t1 = Date.now() - 2 * 60_000;
       await db.insert(t).values({ pageId: PAGE, threadId: "r-t1", messageId: "r-m3", text: "Cho chị 2 ký nhé", status: "PENDING", createdAt: new Date(t1) });

@@ -51,15 +51,29 @@ export function requeueDecision(row: RequeueRow, now: Date, providerRecoveredAt:
 
 type Db = Awaited<ReturnType<typeof getDb>>;
 
-/** Hội thoại đã có câu bot gửi tại / sau mốc `newest` (tin khách mới nhất của lượt) — không trả lời lại. */
-export async function alreadyRepliedAfter(db: Db, pageId: string, threadId: string, newest: Date): Promise<boolean> {
+/**
+ * Trong các tin VỪA GIÀNH, những tin nào ĐÃ được trả lời bởi một lượt đã chết: tin thuộc lượt giành QUÁ HẠN (`staleRows`) và
+ * có trước câu bot cuối cùng gửi SAU mốc lượt đó giành. Chỉ những tin này được chốt mà không gọi AI; tin MỚI khách gửi sau đó
+ * (cùng bị giành trong lượt này — review #607: deploy giết tiến trình sau khi trả lời M1, khách gửi M2) vẫn được xử lý.
+ */
+export async function alreadyRepliedRows(
+  db: Db,
+  pageId: string,
+  threadId: string,
+  staleRows: readonly { id: string; claimedAt: Date | null }[],
+  claimed: readonly { id: string; createdAt: Date }[],
+): Promise<string[]> {
+  const since = Math.min(...staleRows.map((r) => r.claimedAt?.getTime() ?? Number.POSITIVE_INFINITY));
+  if (!Number.isFinite(since)) return [];
   const t = schema.salesChatInbound;
   const [r] = await db
-    .select({ id: t.id })
+    .select({ at: sql<Date | string | null>`max(${t.createdAt})` })
     .from(t)
-    .where(and(eq(t.pageId, pageId), eq(t.threadId, threadId), eq(t.note, "BOT_SENT"), gte(t.createdAt, newest)))
-    .limit(1);
-  return Boolean(r);
+    .where(and(eq(t.pageId, pageId), eq(t.threadId, threadId), eq(t.note, "BOT_SENT"), gte(t.createdAt, new Date(since))));
+  if (!r?.at) return [];
+  const botAt = new Date(r.at).getTime();
+  const stale = new Set(staleRows.map((x) => x.id));
+  return claimed.filter((c) => stale.has(c.id) && c.createdAt.getTime() <= botAt).map((c) => c.id);
 }
 
 /** Chuyển các tin của lượt (đúng mã giành) sang DEAD: tăng số lượt, hẹn mốc lùi dần, ghi câu lỗi. */

@@ -9,6 +9,7 @@ import { invalidateOrganizations } from "@/lib/platform/organizations";
 import { provisionOrganization } from "@/lib/platform/provision";
 import { DEFAULT_SALES_CHATBOT_CONFIG, SALES_CHATBOT_SETTING_KEY } from "@/lib/sales-chatbot/config";
 import { AI_DOWN_HANDOFF_REASON } from "@/lib/sales-chatbot/engine";
+import { DEAD_AI_DOWN_NOTE } from "@/lib/sales-chatbot/inbound-retry";
 import { readSalesHealthSnapshot, runSalesHealthCheck, salesHealthDrilldown, vnDayStart } from "@/lib/sales-chatbot/health";
 import { decideHealthAlert, evaluateSalesHealth, type SalesHealthSnapshot } from "@/lib/sales-chatbot/health-shared";
 import { setSettingJson } from "@/lib/settings";
@@ -171,13 +172,13 @@ async function testRealOrg() {
     let n = 0;
     const cust = (thread: string, min: number, status: string, note: string | null = null) => ({ pageId: P, threadId: thread, messageId: `m-${++n}`, text: `tin ${n}`, customerName: `Khách ${thread}`, status, note, createdAt: ago(min), processedAt: status === "PENDING" ? null : ago(min) });
     const bot = (thread: string, min: number) => ({ pageId: P, threadId: thread, messageId: `bot-out:${++n}`, text: "dạ", status: "DONE", note: "BOT_SENT", createdAt: ago(min), processedAt: ago(min) });
-    // Hội thoại khoẻ hôm qua (độ trễ đo được) + sự cố: 4 hội thoại trong 20 phút qua, tin chốt DONE, KHÔNG câu bot nào.
+    // Hội thoại khoẻ (độ trễ đo được) + sự cố: 3 hội thoại AI hỏng (dead-letter) trong 20 phút qua, KHÔNG câu bot nào.
     await db.insert(t).values([
       cust("ok-1", 120, "DONE"), bot("ok-1", 119.7),
       cust("ok-2", 100, "DONE"), bot("ok-2", 99.5),
-      cust("down-1", 20, "DONE", "Chuyển nhân viên — bot không nhắn gì, chờ người trả lời"),
-      cust("down-2", 15, "DONE", "Chuyển nhân viên — bot không nhắn gì, chờ người trả lời"),
-      cust("down-3", 10, "DONE", "Chuyển nhân viên — bot không nhắn gì, chờ người trả lời"),
+      cust("down-1", 20, "DEAD", DEAD_AI_DOWN_NOTE),
+      cust("down-2", 15, "DEAD", DEAD_AI_DOWN_NOTE),
+      cust("down-3", 10, "DEAD", DEAD_AI_DOWN_NOTE),
       cust("send-1", 8, "DONE", "lỗi gửi — Pancake không nhận tin: conversation_id not found"),
       cust("wait-1", 12, "PENDING"),
       // Tin PENDING quá cửa sổ tự xử lý (bị bỏ sót) — đếm riêng, không làm tuổi hàng chờ.

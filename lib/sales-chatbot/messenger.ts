@@ -8,7 +8,7 @@ import { instagramAccountOf, messengerApp, postMessage, sendMessengerImage, send
 import { chunkText } from "@/lib/messaging/providers";
 import { canUseModule } from "@/lib/platform/capabilities";
 import { AI_DOWN_HANDOFF_REASON, chatTurn, conversationView, describeCustomerImages } from "@/lib/sales-chatbot/engine";
-import { ALREADY_REPLIED_NOTE, alreadyRepliedAfter, DEAD_AI_DOWN_NOTE, DEAD_SEND_NOTE_PREFIX, deadLetter, dueForClaim, releaseWithBackoff } from "@/lib/sales-chatbot/inbound-retry";
+import { ALREADY_REPLIED_NOTE, alreadyRepliedRows, DEAD_AI_DOWN_NOTE, DEAD_SEND_NOTE_PREFIX, deadLetter, dueForClaim, releaseWithBackoff } from "@/lib/sales-chatbot/inbound-retry";
 import { recordConversationEvent } from "@/lib/sales-chatbot/events";
 import { dualConnectedPages, loadTransportFacts, PANCAKE_OWNS_PAGE_REASON, transportOwnerOf } from "@/lib/sales-chatbot/channel-ownership";
 import {
@@ -498,8 +498,8 @@ export async function processMessengerThread(pageId: string, psid: string, deps:
     const claim = randomUUID();
     const staleBefore = new Date(now().getTime() - CLAIM_STALE_MS);
     // Lượt giành QUÁ HẠN của một tiến trình đã chết — để biết lượt đó đã kịp gửi chưa (inbound-retry.ts).
-    const [staleClaim] = await db
-      .select({ at: sql<Date | null>`min(${t.claimedAt})` })
+    const staleRows = await db
+      .select({ id: t.id, claimedAt: t.claimedAt })
       .from(t)
       .where(and(eq(t.pageId, pageId), eq(t.threadId, psid), eq(t.status, "PENDING"), isNotNull(t.claimId), lt(t.claimedAt, staleBefore)));
     const claimed = await db
@@ -508,14 +508,17 @@ export async function processMessengerThread(pageId: string, psid: string, deps:
       .where(and(eq(t.pageId, pageId), eq(t.threadId, psid), eq(t.status, "PENDING"), or(isNull(t.claimId), lt(t.claimedAt, staleBefore)), dueForClaim(now())))
       .returning({ id: t.id, text: t.text, createdAt: t.createdAt, imageUrls: t.imageUrls, kind: t.kind, postId: t.postId, messageId: t.messageId });
     if (!claimed.length) break;
-    const ids = claimed.map((r) => r.id);
-    // KHÔNG TRẢ LỜI TRÙNG: lượt quá hạn đã kịp gửi câu bot sau mốc nó giành ⇒ chốt, không gọi AI, không gửi lại.
-    if (staleClaim?.at && (await alreadyRepliedAfter(db, pageId, psid, new Date(staleClaim.at)))) {
-      await db.update(t).set({ status: "DONE", processedAt: now(), note: ALREADY_REPLIED_NOTE }).where(and(inArray(t.id, ids), eq(t.claimId, claim)));
-      out.processed += ids.length;
+    // KHÔNG TRẢ LỜI TRÙNG: chỉ CHÍNH các tin của lượt quá hạn đã kịp được trả lời mới chốt; tin mới cùng lượt vẫn xử lý.
+    const repliedIds = staleRows.length ? await alreadyRepliedRows(db, pageId, psid, staleRows, claimed) : [];
+    if (repliedIds.length) {
+      await db.update(t).set({ status: "DONE", processedAt: now(), note: ALREADY_REPLIED_NOTE }).where(and(inArray(t.id, repliedIds), eq(t.claimId, claim)));
+      out.processed += repliedIds.length;
       out.skipped = ALREADY_REPLIED_NOTE;
-      continue;
+      if (repliedIds.length === claimed.length) continue;
+      const done = new Set(repliedIds);
+      for (let i = claimed.length - 1; i >= 0; i--) if (done.has(claimed[i].id)) claimed.splice(i, 1);
     }
+    const ids = claimed.map((r) => r.id);
     const finish = (status: "DONE" | "SKIPPED" | "PENDING", note: string | null) =>
       db
         .update(t)

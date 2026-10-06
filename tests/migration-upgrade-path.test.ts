@@ -169,6 +169,7 @@ const MOI = [
   "0219_sales_ai_reviews",
   "0220_org_channel_pages",
   "0221_sales_inbox_history",
+  "0222_sales_inbound_retry",
 ] as const;
 
 /*

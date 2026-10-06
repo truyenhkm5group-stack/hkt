@@ -162,7 +162,8 @@ export function evaluateSalesHealth(s: SalesHealthSnapshot, slo: AiSalesSlo): Sa
     else if (age >= slo.followupStaleMinutes)
       checks.push({ key: "SAFETY_NET", level: "WARNING", title: "Job quét lại & ghi đơn", detail: `Lượt cuối cách đây ${fmtMin(age)} (lịch 5 phút) — tin rơi không được quét lại, đơn từ hội thoại không được ghi.`, fix: "Kiểm bộ lập lịch (Hệ thống → Đồng bộ)." });
     else if (s.followup.lastStatus && s.followup.lastStatus !== "SUCCESS" && s.followup.lastStatus !== "PARTIAL")
-      checks.push({ key: "SAFETY_NET", level: "WARNING", title: "Job quét lại & ghi đơn", detail: `Lượt cuối ${s.followup.lastStatus}: ${(s.followup.lastError ?? "").slice(0, 160)}` });
+      // Không chép câu lỗi gốc vào `detail`: câu này đi cả vào nhóm VNX (chỉ được số đếm + nhãn). Câu gốc xem ở Hệ thống → Đồng bộ.
+      checks.push({ key: "SAFETY_NET", level: "WARNING", title: "Job quét lại & ghi đơn", detail: `Lượt cuối của job sales-followup: ${s.followup.lastStatus}.`, fix: "Xem câu lỗi ở Hệ thống → Đồng bộ (job sales-followup)." });
     else checks.push({ key: "SAFETY_NET", level: "OK", title: "Job quét lại & ghi đơn", detail: `Lượt cuối cách đây ${fmtMin(age)}.` });
   }
 

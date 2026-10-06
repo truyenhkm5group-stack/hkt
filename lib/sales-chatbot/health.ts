@@ -26,7 +26,7 @@ import { loadModeConfig } from "@/lib/sales-chatbot/operating-mode";
 import { loadOrderSyncConfig } from "@/lib/sales-chatbot/order-sync";
 import { PANCAKE_POLL_SETTING_KEY } from "@/lib/sales-chatbot/pancake-poll";
 import { notifySalesHealth } from "@/lib/sales-chatbot/alerts";
-import { DEAD_SEND_NOTE_PREFIX } from "@/lib/sales-chatbot/inbound-retry";
+import { DEAD_AI_DOWN_NOTE, DEAD_SEND_NOTE_PREFIX } from "@/lib/sales-chatbot/inbound-retry";
 import { rowsOf } from "@/lib/sql-rows";
 
 export const SALES_HEALTH_STATE_KEY = "ai.salesHealth.state";
@@ -84,7 +84,7 @@ export async function readSalesHealthSnapshot(now: Date = new Date(), slo?: AiSa
         count(*) filter (where status = 'DEAD' and created_at >= ${new Date(now.getTime() - 86_400_000)}) as dead_24h,
         max(created_at) as last_customer,
         count(*) filter (where created_at >= ${new Date(now.getTime() - 3_600_000)}) as last_hour,
-        count(distinct thread_id) filter (where status in ('DONE', 'DEAD') and created_at >= ${silentFrom}) as silent_threads
+        count(distinct thread_id) filter (where created_at >= ${silentFrom} and ((status = 'DONE' and note is null) or (status = 'DEAD' and note = ${DEAD_AI_DOWN_NOTE}))) as silent_threads
       from sales_chat_inbound
       where ${CUSTOMER_ROW} and created_at >= ${new Date(now.getTime() - 14 * 86_400_000)}
     `),
@@ -121,17 +121,28 @@ export async function readSalesHealthSnapshot(now: Date = new Date(), slo?: AiSa
     `),
   );
   // NỀN: số tin khách của ĐÚNG khung giờ này (giờ VN) ở 14 ngày trước, trung vị — một ngày bão tin không kéo nền lên (luật 52).
+  // Ngày KHÔNG có tin nào ở khung giờ này vẫn là một ngày (n = 0): bỏ chúng thì trung vị của giờ đêm bị đội lên và mọi đêm yên
+  // bình báo «webhook im» (review #607). Chỉ đếm ngày từ khi tổ chức có tin khách đầu tiên — tổ chức mới dưới 5 ngày là CHƯA BIẾT.
   const [base] = rowsOf<Record<string, unknown>>(
     await db.execute(sql`
-      with theo_ngay as (
-        select date_trunc('day', created_at at time zone 'Asia/Ho_Chi_Minh') as ngay, count(*)::int as n
-        from sales_chat_inbound
+      with gio as (select (${now}::timestamptz at time zone 'Asia/Ho_Chi_Minh') as vn),
+      ngay as (
+        select gs::date as d from gio, generate_series(date_trunc('day', gio.vn) - interval '14 days', date_trunc('day', gio.vn) - interval '1 day', interval '1 day') as gs
+      ),
+      dau as (
+        select min(created_at at time zone 'Asia/Ho_Chi_Minh') as m from sales_chat_inbound where ${CUSTOMER_ROW} and created_at >= ${new Date(now.getTime() - 15 * 86_400_000)}
+      ),
+      dem as (
+        select (created_at at time zone 'Asia/Ho_Chi_Minh')::date as d, count(*)::int as n
+        from sales_chat_inbound, gio
         where ${CUSTOMER_ROW}
-          and created_at >= ${new Date(now.getTime() - 14 * 86_400_000)} and created_at < date_trunc('hour', ${now}::timestamptz)
-          and extract(hour from (created_at at time zone 'Asia/Ho_Chi_Minh')) = extract(hour from (${now}::timestamptz at time zone 'Asia/Ho_Chi_Minh'))
+          and created_at >= ${new Date(now.getTime() - 15 * 86_400_000)}
+          and extract(hour from (created_at at time zone 'Asia/Ho_Chi_Minh')) = extract(hour from gio.vn)
         group by 1
       )
-      select percentile_cont(0.5) within group (order by n) as median, count(*)::int as ngay from theo_ngay
+      select percentile_cont(0.5) within group (order by coalesce(dem.n, 0)) as median, count(*)::int as ngay
+      from ngay left join dem on dem.d = ngay.d, dau
+      where dau.m is not null and ngay.d >= dau.m::date
     `),
   );
   const [conv] = rowsOf<Record<string, unknown>>(
@@ -145,7 +156,7 @@ export async function readSalesHealthSnapshot(now: Date = new Date(), slo?: AiSa
   const [lastDown] = rowsOf<Record<string, unknown>>(
     await db.execute(sql`
       select last_error from sales_chat_conversations
-      where handoff_reason = ${AI_DOWN_HANDOFF_REASON} and last_error is not null
+      where handoff_reason = ${AI_DOWN_HANDOFF_REASON} and last_error is not null and updated_at >= ${new Date(now.getTime() - 60 * 60_000)}
       order by updated_at desc limit 1
     `),
   );
