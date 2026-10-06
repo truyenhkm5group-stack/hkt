@@ -3,7 +3,7 @@
   "mission_id": "migration-release",
   "title": "Nhả số migration giữ chỗ (Delivery Controller)",
   "business_goal": "",
-  "status": "INTEGRATING",
+  "status": "DONE",
   "priority": "P0",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -23,11 +23,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-06T11:43:44.434Z",
-  "updated_at": "2026-10-06T17:17:01.746Z",
-  "last_heartbeat": "2026-10-06T12:26:31.002Z",
+  "updated_at": "2026-10-06T17:18:26.887Z",
+  "last_heartbeat": "2026-10-06T17:18:26.887Z",
   "definition_of_done": [],
   "evidence": {
-    "merged": "#609 → 047f457fab2bd64d3a81811d161c4063b57e19f4"
+    "merged": "#609 → 047f457fab2bd64d3a81811d161c4063b57e19f4",
+    "done": "không đổi mã chạy · PR #609 gộp 047f457f; chỉ scripts/ai-tech.ts + tests (công cụ điều phối, không chạy trên VPS); lệnh đã dùng thật 06/10 để gỡ chặn #607"
   },
   "handoff": {
     "branch": "fix/migration-release",
