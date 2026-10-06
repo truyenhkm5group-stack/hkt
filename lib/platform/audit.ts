@@ -58,7 +58,12 @@ export type PlatformAuditAction = "MODULE_ENABLE" | "MODULE_DISABLE" | "FEATURE_
   | "COST_ENTRY_ADD"
   | "COST_ENTRY_VOID"
   | "STATEMENT_FINALIZE"
-  | "PROVISIONING_RUN";
+  | "PROVISIONING_RUN"
+  // Platform AI Model Control (06/10/2026, lib/ai-usage/platform-ai-admin.ts): kiểm khả dụng một model bằng khoá nền tảng,
+  // đặt chính sách model của AI dùng chung (chạy thử canary · áp dụng), hoàn tác về bản trước.
+  | "PLATFORM_AI_MODEL_PROBE"
+  | "PLATFORM_AI_POLICY_SET"
+  | "PLATFORM_AI_POLICY_ROLLBACK";
 export type PlatformAuditSource = "UI" | "SCRIPT" | "MIGRATION" | "TEST";
 export type PlatformActor = { orgCode: string; userId: string; email: string } | null;
 

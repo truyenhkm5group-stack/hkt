@@ -539,6 +539,7 @@ import { testAiSalesIsolation } from "./ai-sales-isolation.test";
 import { testPageQueryBudget } from "./page-query-budget.test";
 import { testApprovalsCore } from "./approvals-core.test";
 import { testAiUsage } from "./ai-usage.test";
+import { testPlatformAiModel } from "./platform-ai-model.test";
 import { testOrgExport } from "./org-export.test";
 import { testRestoreDrillConfig } from "./restore-drill-config.test";
 import { testRestoreDrillPg } from "./restore-drill-pg.test";
@@ -2837,6 +2838,9 @@ async function main() {
   // Sổ dùng AI + hạn mức AI theo gói + công tắc AI: hai tổ chức THẬT `au-a` / `au-b` (tự cấp, tự dọn), provider GIẢ —
   // một dòng / lượt đúng nguồn, BLOCKED_QUOTA không gọi model, A không trừ B, BYOK không trừ credit nền tảng, không rơi về khoá nhà.
   await testAiUsage();
+  // Platform AI Model Control (06/10/2026): model AI dùng chung đổi qua chính sách có cổng (kiểm khả dụng → chạy thử → áp dụng
+  // → hoàn tác), model mới hỏng ⇒ cùng lượt đi model dự phòng, sổ AI ghi đúng model thật.
+  await testPlatformAiModel();
   // Vận hành khách pilot: vòng đời (checklist tính từ dữ liệu thật, ghi đè có lý do), trang sức khoẻ (không dữ liệu
   // nghiệp vụ, mỗi lượt xem có vết), công tắc khẩn (đình chỉ · tạm dừng luật · tắt kết nối) — hai tổ chức THẬT `pop-a`
   // (tạo hộ qua /start) / `pop-b` (tự cấp, tự dọn).
