@@ -3,7 +3,7 @@
   "mission_id": "saas-b-internal-special-cases",
   "title": "Phase B: gỡ nhánh isHome thương mại — nhà đọc gói internal qua cùng đường khách ngoài, bài kiểm so trước/sau",
   "business_goal": "",
-  "status": "RUNNING",
+  "status": "PR_READY",
   "priority": "P1",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -44,7 +44,24 @@
     "0227": "2026-10-06T17:10:33.541Z"
   },
   "created_at": "2026-10-06T17:03:21.073Z",
-  "updated_at": "2026-10-06T18:04:04.054Z",
-  "last_heartbeat": "2026-10-06T18:04:04.054Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-06T18:48:38.501Z",
+  "last_heartbeat": "2026-10-06T18:48:38.501Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "feat/saas-b-internal",
+    "sha": "2020eb214fbe6ae74b5cb74c66cee70bd5912897",
+    "at": "2026-10-06T18:48:38.501Z",
+    "actor": "DESKTOP-56TH98Y:wt-saas-b",
+    "title": "Phase B: gỡ nhánh isHome thương mại — nhà đọc gói internal qua cùng đường khách ngoài, bài kiểm so trước/sau",
+    "summary": "Nhà đi cùng resolver với khách (planKeyOf→effectivePlanRow→resolvePlan/resolveOrgPricing→ghi đè→giữ từ trước); gỡ isHome thương mại; migration 0225 (giữ chỗ 0227, cần renumber) chỉ ghi cột plan của nhà khi trống; giữ isHome AI/billing/operator",
+    "tests": [
+      "npm run typecheck: sạch",
+      "npm run lint: sạch",
+      "npx eslint --max-warnings=0 (14 tệp sửa): sạch",
+      "npm test (sau commit): TẤT CẢ KIỂM THỬ ĐẠT",
+      "npm run build: đạt",
+      "tests/saas-internal-plan.test.ts: bài so trước/sau 64 quyết định khớp (đã chạy nguyên văn trên mã cũ 0b5ec24f: xanh) + 5 đột biến dữ liệu trong bài",
+      "đột biến mã thủ công: 6/6 đỏ"
+    ]
+  }
 }
