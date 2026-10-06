@@ -3,7 +3,7 @@
   "mission_id": "saas-handoff-doc",
   "title": "Tài liệu bàn giao Phase A–F",
   "business_goal": "",
-  "status": "INTEGRATING",
+  "status": "DONE",
   "priority": "P2",
   "risk": "LOW",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -22,11 +22,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-06T17:08:01.631Z",
-  "updated_at": "2026-10-06T17:38:46.603Z",
-  "last_heartbeat": "2026-10-06T17:08:12.068Z",
+  "updated_at": "2026-10-06T17:39:26.972Z",
+  "last_heartbeat": "2026-10-06T17:39:26.972Z",
   "definition_of_done": [],
   "evidence": {
-    "merged": "#616 → e8b63791241f587d29982fdeda6fb3fff71a7745"
+    "merged": "#616 → e8b63791241f587d29982fdeda6fb3fff71a7745",
+    "done": "không đổi mã chạy · PR #616 gộp e8b63791; chỉ docs/saas/HANDOFF.md"
   },
   "handoff": {
     "branch": "docs/saas-handoff",

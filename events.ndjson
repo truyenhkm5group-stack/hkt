@@ -165,3 +165,4 @@
 {"at":"2026-10-06T17:18:26.941Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DONE","mission":"migration-release","detail":"PR #609 gộp 047f457f; chỉ scripts/ai-tech.ts + tests (công cụ điều phối, không chạy trên VPS); lệnh đã dùng thật 06/10 để gỡ chặn #607"}
 {"at":"2026-10-06T17:28:23.489Z","actor":"DESKTOP-56TH98Y:hkt-tech-control-plane","kind":"LEASE_RESUMED","detail":"tech-lead bằng mã đã lưu cạnh cây"}
 {"at":"2026-10-06T17:38:46.671Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"saas-handoff-doc","detail":"#616 @ 19a5f0b9fec0 → e8b63791241f (MERGE_NOW · LOW · gates success)"}
+{"at":"2026-10-06T17:39:27.024Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DONE","mission":"saas-handoff-doc","detail":"PR #616 gộp e8b63791; chỉ docs/saas/HANDOFF.md"}
