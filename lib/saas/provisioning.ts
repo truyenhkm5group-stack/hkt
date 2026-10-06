@@ -155,7 +155,12 @@ async function runJob(job: JobRow, ctx: Ctx): Promise<JobRow> {
   let orgCode = job.orgCode;
   let error: string | null = null;
   try {
-    if (req.kind === "CREATE_CUSTOMER") ({ accountId, orgCode } = await runCreateCustomer(req, ctx, step, accountId, catalog));
+    // Lượt CHẠY LẠI của chính job = lượt trước đã đi QUA bước ACCOUNT (bước 0 «workspace đã có» chạy trước ACCOUNT, nên lượt nào
+    // đã tới ACCOUNT thì lúc đó workspace chưa có ⇒ job này là bên tạo). KHÔNG dùng accountId: người vận hành chọn tài khoản có sẵn
+    // thì accountId đã ghi ngay lượt đầu (review tích hợp 06/10/2026).
+    const priorSteps = Array.isArray(job.steps) ? (job.steps as { key?: unknown }[]) : [];
+    const isRerun = job.attempts > 0 && priorSteps.some((s) => s?.key === "ACCOUNT");
+    if (req.kind === "CREATE_CUSTOMER") ({ accountId, orgCode } = await runCreateCustomer(req, ctx, step, accountId, catalog, isRerun));
     else if (req.kind === "SUBSCRIBE_PRODUCT") accountId = await runSubscribe(req, ctx, step, catalog);
     else ({ accountId, orgCode } = await runCancel(req, ctx, step, catalog));
   } catch (e) {
@@ -179,13 +184,13 @@ function fail(step: StepFn, key: string, message: string): never {
   throw new StepFailure(message);
 }
 
-async function runCreateCustomer(req: CreateCustomerRequest, ctx: Ctx, step: StepFn, knownAccountId: string | null, catalog: readonly ProductDef[]): Promise<{ accountId: string; orgCode: string }> {
+async function runCreateCustomer(req: CreateCustomerRequest, ctx: Ctx, step: StepFn, knownAccountId: string | null, catalog: readonly ProductDef[], isRerun: boolean): Promise<{ accountId: string; orgCode: string }> {
   // 0. «Tạo khách» chỉ cho workspace MỚI (review tích hợp 06/10/2026): mã của một workspace đã có ⇒ lượt chạy sẽ tạo thêm một
   //    quản trị ADMIN trong CSDL của khách đó và trả liên kết kích hoạt. Ngoại lệ duy nhất: lượt CHẠY LẠI của chính job này
   //    (job đã ghi tài khoản ở lượt trước — workspace có thể do chính lượt trước tạo rồi hỏng ở bước sau). Kiểm TRƯỚC khi tạo tài
   //    khoản để lượt bị từ chối không để lại tài khoản mồ côi.
   const existingBefore = await findOrganization(req.workspace.code);
-  if (existingBefore && !knownAccountId) fail(step, "WORKSPACE", `Workspace "${existingBefore.code}" đã có — «Tạo khách» chỉ dùng cho workspace mới; thuê thêm sản phẩm bằng «Thuê sản phẩm».`);
+  if (existingBefore && !isRerun) fail(step, "WORKSPACE", `Workspace "${existingBefore.code}" đã có — «Tạo khách» chỉ dùng cho workspace mới; thuê thêm sản phẩm bằng «Thuê sản phẩm».`);
   // 1. Tài khoản — lượt chạy lại dùng lại tài khoản lượt trước đã tạo (ghi trên job), không tạo tài khoản thứ hai.
   let account = knownAccountId ? await findAccountById(knownAccountId) : null;
   if (!account && req.account?.code) account = await findAccountByCode(req.account.code);

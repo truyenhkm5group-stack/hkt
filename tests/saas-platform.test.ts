@@ -294,6 +294,11 @@ async function testCustomer03(op: SessionUser) {
   assert.ok(!("ok" in hijack) || hijack.status !== "SUCCEEDED", JSON.stringify(hijack));
   assert.equal(await withOrganization(C3, async () => (await getDb()).query.users.findFirst({ where: eq(schema.users.email, "la@c3.local") })), undefined, "không quản trị mới nào trong CSDL khách");
   assert.equal((await pdb.select({ id: schema.platformAccounts.id }).from(schema.platformAccounts)).length, accountsBefore, "không tài khoản mồ côi");
+  // …và cả nhánh CHỌN TÀI KHOẢN CÓ SẴN (accountId ghi ngay lượt đầu — review tích hợp: điều kiện cũ dựa vào accountId không chặn nhánh này).
+  const ownAcct = await accountOfWorkspace(C3);
+  const hijack2 = await createCustomerAsOperator(op, { accountId: ownAcct!.id, workspace: { code: C3, name: "Customer 03 Shop", planKey: "starter", brand: "chotdon" }, products: ["chotdon"], admin: { email: "la2@c3.local", name: "Người lạ 2" }, idempotencyKey: "sp-c3-create-3", reason: "Chọn tài khoản có sẵn của chính khách" });
+  assert.ok(!("ok" in hijack2) || hijack2.status !== "SUCCEEDED", JSON.stringify(hijack2));
+  assert.equal(await withOrganization(C3, async () => (await getDb()).query.users.findFirst({ where: eq(schema.users.email, "la2@c3.local") })), undefined, "chọn tài khoản có sẵn cũng không tạo được quản trị trong CSDL khách");
   assert.equal((await pdb.query.platformProvisioningJobs.findFirst({ where: eq(schema.platformProvisioningJobs.id, r.jobId) }))!.attempts, 1);
 
   // Entitlement: thuê bao cho dùng ∧ module bật ∧ tính năng theo gói Khởi đầu (không có cross_sell).
