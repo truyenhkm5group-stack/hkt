@@ -59,3 +59,4 @@
 {"at":"2026-10-06T11:33:12.526Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"messenger-permission-diag","detail":"#608 cho feat/messenger-permission-diag @ 31cd39f69f6f"}
 {"at":"2026-10-06T11:36:52.494Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"ai-sales-reliability","detail":"feat/ai-sales-retry @ ce56a3959fb6 · 1 lệnh kiểm thử"}
 {"at":"2026-10-06T11:42:46.622Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"OVERLAP_DETECTED","mission":"migration-release","detail":"OVERLAP với deploy-reuse-wait: phạm vi tests/delivery-v2.test.ts ⇒ tuần tự hoá (--after=deploy-reuse-wait) hoặc khai cách tích hợp (--accept-overlap=\"…\")"}
+{"at":"2026-10-06T11:42:55.428Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MIGRATION_RELEASED","mission":"pricing-billing-foundation","detail":"0222 — PR #607 (P0 AI Sales reliability) dùng 0222 và gộp trước; billing đánh số lại khi bàn giao (đã báo worker)"}
