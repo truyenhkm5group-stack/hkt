@@ -779,6 +779,8 @@ Chủ shop giao MỌI việc phát triển qua MỘT cửa: skill `/lead` (Tech 
   HIGH đi riêng — HIGH chỉ gộp khi sổ có `review <PR> --sha=<đầu nhánh>` ĐẠT cho đúng SHA hiện tại) và
   `deploy-plan` (một lượt cho cả lô, không chồng, không khi main đỏ). Khoá hết hạn = nhả; tiếp quản để lại
   dấu vết.
+- **Worker xong việc thì `handoff`, không cần quyền GitHub API.** Đẩy nhánh rồi `npm run ai -- handoff <id> --tests=…`;
+  mở PR / gộp / deploy là việc của Delivery Controller (`pr-open` · `merge` · `deploy`, đều đòi khoá integration-lead).
 - **DONE chỉ sau hậu kiểm production.** Workflow deploy xanh chưa phải DONE: `verify --record` phải ĐẠT (SHA ·
   số migration · lượt deploy + smoke · endpoint), rồi `close --status=DONE` (hoặc `--no-runtime` khi không
   đổi mã chạy trên VPS). KHÔNG ĐẠT ⇒ INCIDENT, sửa tiến, không rollback tự động (migration chỉ đi tới).

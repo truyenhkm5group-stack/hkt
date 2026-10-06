@@ -9,6 +9,12 @@ import {
   ControlConflict,
   DEFAULT_CONFIG,
   checkPrMigrations,
+  handoffDecision,
+  isOwnPr,
+  scrubModelNames,
+  mergeGate,
+  prOpenDecision,
+  renderHandoffPrBody,
   claimDecision,
   classifyRisk,
   inferOwnedPaths,
@@ -35,6 +41,7 @@ import {
   type Config,
   type EntryFacts,
   type Lease,
+  type Handoff,
   type QueueItem,
   type RegistryEntry,
 } from "../scripts/ai-tech";
@@ -411,6 +418,10 @@ function testDeployVaHauKiem() {
   assert.equal(verifyVerdict(good).pass, true);
   assert.equal(verifyVerdict({ ...good, health: { ...good.health, commit: "999999999999" } }).pass, false, "bản đang chạy khác bản mong đợi ⇒ KHÔNG ĐẠT, dù deploy xanh");
   assert.equal(verifyVerdict({ ...good, health: { ...good.health, platform: { migrations: 221 } } }).pass, false, "thiếu một migration ⇒ KHÔNG ĐẠT");
+  assert.equal(verifyVerdict({ ...good, health: { ...good.health, platform: { migrations: 223 } } }).pass, false, "chưa khai độ lệch nền ⇒ đòi BẰNG sổ (dư một dòng không chứng minh migration cuối đã áp)");
+  assert.equal(verifyVerdict({ ...good, migrationOffset: 1, health: { ...good.health, platform: { migrations: 223 } } }).pass, true, "khai độ lệch nền 1 (production 06/10: 222 dòng / 221 mục) ⇒ 223 = 222 + 1 ĐẠT");
+  assert.equal(verifyVerdict({ ...good, migrationOffset: 1, health: { ...good.health, platform: { migrations: 222 } } }).pass, false, "review 06/10: phần dư che đúng MỘT migration thiếu — so chính xác thì lộ ra");
+  assert.equal(verifyVerdict({ ...good, health: { ...good.health, platform: {} } }).pass, false, "không đọc được số migration ⇒ không ĐẠT");
   assert.equal(verifyVerdict({ ...good, deployRun: null }).pass, false);
   assert.equal(verifyVerdict({ ...good, deployRun: { conclusion: "failure", status: "completed", url: "u" } }).pass, false);
   assert.equal(verifyVerdict({ ...good, endpoints: [{ path: "/login", status: 502 }] }).pass, false);
@@ -426,6 +437,47 @@ function testChongTrung() {
   assert.equal(validateEntry({ ...entry("v"), branch: "--all" }).entry, null, "nhánh trong sổ không được đọc thành cờ git");
   assert.equal(validateEntry({ ...entry("v"), migration_reservations: ["219"] }).entry, null);
   assert.ok(validateEntry(entry("v")).entry);
+}
+
+/* ═════════════ 3b · BÀN GIAO: WORKER KHÔNG CẦN QUYỀN GITHUB API ═════════════ */
+
+function testBanGiao() {
+  const S = "a".repeat(40);
+  const S2 = "b".repeat(40);
+  const base = { branch: "feat/x", remoteTip: S, localTip: S, dirty: 0, tests: ["npm test: TẤT CẢ KIỂM THỬ ĐẠT"] };
+  assert.ok(handoffDecision(base).ok, "đã đẩy + sạch + có kiểm thử ⇒ bàn giao được");
+  assert.match(handoffDecision({ ...base, remoteTip: null }).refusals.join(), /chưa có trên remote/);
+  assert.match(handoffDecision({ ...base, localTip: S2 }).refusals.join(), /CHƯA lên remote/);
+  assert.match(handoffDecision({ ...base, dirty: 3 }).refusals.join(), /3 thay đổi chưa commit/);
+  assert.match(handoffDecision({ ...base, tests: [] }).refusals.join(), /--tests=… bắt buộc/);
+  assert.ok(handoffDecision({ ...base, dirty: null, localTip: null }).ok, "Lead ghi hộ từ cây khác (không đọc được cây worker) vẫn được, miễn nhánh đã đẩy");
+
+  const h: Handoff = { branch: "feat/x", sha: S, at: iso(0), actor: "may:wt-x", title: "Việc X", summary: "làm X", tests: ["npm test: ĐẠT"] };
+  assert.equal(prOpenDecision({ handoff: undefined, remoteTip: S, existingPr: null, merged: false }).action, "REFUSE");
+  assert.equal(prOpenDecision({ handoff: h, remoteTip: S, existingPr: null, merged: false }).action, "OPEN");
+  assert.equal(prOpenDecision({ handoff: h, remoteTip: S, existingPr: 7, merged: false }).action, "LINK", "PR đã có ⇒ chỉ nối, không mở PR thứ hai");
+  const di = prOpenDecision({ handoff: h, remoteTip: S2, existingPr: null, merged: false });
+  assert.ok(di.action === "REFUSE" && /đi tiếp sau bàn giao/.test(di.why), "nhánh đi tiếp sau bàn giao ⇒ không mở PR cho mã chưa ai khai đã kiểm");
+  assert.equal(prOpenDecision({ handoff: h, remoteTip: S, existingPr: null, merged: true }).action, "REFUSE");
+  const body = renderHandoffPrBody({ mission_id: "x", business_goal: "G", definition_of_done: ["D"], risk: "MEDIUM" }, h);
+  assert.ok(body.includes(S) && body.includes("may:wt-x") && body.includes("npm test: ĐẠT") && body.includes("gates / gates"), "thân PR mang SHA, người bàn giao, kiểm thử đã chạy");
+  assert.ok(!/claude|opus|sonnet|gpt/i.test(body), "thân PR không mang tên model AI (AGENTS.md 6.6)");
+
+  const rows = orderQueue([qi(1), qi(2, { gates: "pending" }), qi(3, { risk: "HIGH", files: ["lib/auth/a.ts"] }), qi(4, { mergeable: "unstable", files: ["docs/q.md"] })], CFG);
+  assert.ok(mergeGate(rows, 1, qi(1).sha).ok, "MERGE_NOW ở đúng SHA + clean ⇒ gộp được");
+  assert.match(mergeGate(rows, 1, S2).why, /khác đầu nhánh/, "SHA khác lượt xét ⇒ không gộp");
+  assert.match(mergeGate(rows, 2, qi(2).sha).why, /WAIT_GATES/);
+  assert.match(mergeGate(rows, 3, qi(3).sha).why, /NEEDS_REVIEW/, "HIGH chưa review ⇒ Delivery Controller cũng không gộp được");
+  assert.match(mergeGate(rows, 4, qi(4).sha).why, /chưa phải clean/);
+  assert.match(mergeGate(rows, 99, S).why, /không có trong hàng đợi/);
+  const sauBanGiao = orderQueue([qi(5, { handoffSha: S })], CFG);
+  assert.match(mergeGate(sauBanGiao, 5, qi(5).sha).why, /đi tiếp sau bàn giao/, "PR ở SHA khác SHA đã bàn giao ⇒ không gộp mã chưa ai khai đã kiểm");
+  assert.ok(mergeGate(orderQueue([qi(6, { handoffSha: qi(6).sha })], CFG), 6, qi(6).sha).ok, "đúng SHA đã bàn giao ⇒ gộp được");
+  const own = { head: { repo: { full_name: "o/r" }, ref: "feat/x" }, base: { ref: "main" } };
+  assert.ok(isOwnPr(own, "o/r", "main"));
+  assert.ok(!isOwnPr({ ...own, head: { repo: { full_name: "ke-la/r" }, ref: "feat/x" } }, "o/r", "main"), "PR từ fork trùng tên nhánh không được nhận là PR của sứ mệnh");
+  assert.ok(!isOwnPr({ ...own, base: { ref: "release" } }, "o/r", "main"), "PR nhắm base khác nhánh tích hợp không vào hàng đợi");
+  assert.equal(scrubModelNames("Việc X\nCo-Authored-By: Claude Opus 5.5 <x@y>\nLàm bởi claude code"), "Việc X\nLàm bởi AI");
 }
 
 /* ═════════════ 4 · VÒNG ĐỜI THẬT: HAI PHIÊN, MỘT SỔ, MỘT REMOTE TẠM ═════════════ */
@@ -685,7 +737,39 @@ async function testVongDoi() {
     assert.match(nc.text, /nâng cấp: gắn mã phiên mới/, nc.text);
     assert.equal((await ai(A, "lease", "acquire", "tech-lead")).code, 1, "sau nâng cấp, lượt thứ hai không mã (= phiên khác cùng cây) bị từ chối");
 
+    // ── BÀN GIAO: worker chỉ có git push ⇒ PR_READY trong sổ; Lead thấy "chưa có PR" ──
+    g(B, "fetch", "-q", "origin");
+    g(B, "checkout", "-q", "-b", "feat/m-h", "origin/main");
+    put(path.join(B, "src", "h", "a.ts"), "export const h = 1;\n");
+    g(B, "add", "-A");
+    g(B, "commit", "-q", "-m", "việc H");
+    assert.equal((await ai(B, "claim", "m-h", "--title=H", "--branch=feat/m-h", "--paths=src/h/", "--status=RUNNING")).code, 0);
+    const chuaDay = await ai(B, "handoff", "m-h", "--tests=npm test: ĐẠT");
+    assert.equal(chuaDay.code, 1, "chưa đẩy nhánh ⇒ chưa bàn giao được");
+    assert.match(chuaDay.text, /chưa có trên remote/);
+    g(B, "push", "-q", "origin", "feat/m-h");
+    assert.match((await ai(B, "handoff", "m-h")).text, /--tests=… bắt buộc/, "bàn giao phải khai kiểm thử đã chạy");
+    put(path.join(B, "src", "h", "nhap.ts"), "nháp\n");
+    assert.match((await ai(B, "handoff", "m-h", "--tests=npm test: ĐẠT")).text, /1 thay đổi chưa commit/, "cây bẩn ⇒ chưa bàn giao");
+    rmSync(path.join(B, "src", "h", "nhap.ts"));
+    const bg = await ai(B, "handoff", "m-h", "--tests=npm test: ĐẠT|tests/h.test.ts: ĐẠT", "--summary=H xong");
+    assert.equal(bg.code, 0, bg.text);
+    const eh = readControl(ctxA, { fetch: true }).entries.find((x) => x.mission_id === "m-h");
+    assert.equal(eh?.status, "PR_READY");
+    assert.equal(eh?.handoff?.sha, g(B, "rev-parse", "feat/m-h"), "bản bàn giao ghi ĐÚNG SHA đã đẩy");
+    assert.deepEqual(eh?.handoff?.tests, ["npm test: ĐẠT", "tests/h.test.ts: ĐẠT"]);
+    const bdh = await ai(A, "board");
+    assert.match(bdh.text, /PR_READY .* m-h/);
+    assert.match(bdh.text, /đã bàn giao, CHƯA có PR — Integration Lead: `pr-open m-h`/, "Lead thấy ngay việc của mình");
+    put(path.join(B, "src", "h", "b.ts"), "export const b = 2;\n");
+    g(B, "add", "-A");
+    g(B, "commit", "-q", "-m", "sửa thêm sau bàn giao");
+    g(B, "push", "-q", "origin", "feat/m-h");
+    assert.match((await ai(A, "board")).text, /nhánh đi tiếp sau bàn giao/, "worker đẩy thêm sau bàn giao ⇒ bảng báo, pr-open sẽ từ chối");
+    assert.notEqual((await ai(A, "pr-open", "m-h")).code, 0, "phiên không cầm khoá integration-lead không mở được PR");
+
     const kinds = readControl(ctxA, { fetch: true }).events.map((e) => e.kind);
+    assert.ok(kinds.includes("HANDOFF"), "nhật ký phải có HANDOFF");
     for (const k of ["LEASE_RESUMED", "LEASE_UPGRADED"]) assert.ok(kinds.includes(k), `nhật ký phải có ${k}`);
     assert.ok(!readControl(ctxA, { fetch: true }).events.some((e) => e.kind === "LEASE_UPGRADED" && e.detail.startsWith("integration-lead")), "tiếp quản khoá cũ ĐÃ hết hạn là TAKEOVER, không phải UPGRADED");
     for (const k of ["CLAIM", "OVERLAP_DETECTED", "DUPLICATE_PREVENTED", "LEASE_ACQUIRED", "LEASE_TAKEOVER", "MIGRATION_RESERVED", "DONE", "OVERLAP_ACCEPTED"]) assert.ok(kinds.includes(k), `nhật ký sổ phải có ${k} (để đo được trùng việc đã chặn, khoá đổi tay…)`);
@@ -695,6 +779,25 @@ async function testVongDoi() {
 }
 
 /* ═════════════ 5 · MÃ NGUỒN: CHỈ MỘT CHỖ ĐẨY, VÀ CHỈ LÊN NHÁNH ĐIỀU KHIỂN ═════════════ */
+
+/* Đường GHI GitHub (mở PR · gộp · deploy) chỉ ở ba lệnh của Delivery Controller, và mỗi lệnh hỏi khoá TRƯỚC khi ghi. */
+function testChiDeliveryControllerGhiGithub() {
+  const src = doc("scripts/ai-tech.ts").replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
+  const calls = [...src.matchAll(/gh\.write\(/g)].map((m) => m.index ?? 0);
+  assert.ok(calls.length >= 3, "phải thấy các lời gọi ghi GitHub — biểu thức quét hỏng nếu không");
+  const fns = ["cmdPrOpen", "cmdMerge", "cmdDeploy"].map((n) => {
+    const i = src.indexOf(`async function ${n}(`);
+    const j = src.indexOf("\nasync function ", i + 10);
+    return { n, i, j: j < 0 ? src.length : j };
+  });
+  for (const c of calls) assert.ok(fns.some((f) => c > f.i && c < f.j), "gh.write chỉ được gọi trong cmdPrOpen / cmdMerge / cmdDeploy");
+  for (const f of fns) {
+    const body = src.slice(f.i, f.j);
+    assert.ok(body.indexOf("requireIntegrationLead(") > 0 && body.indexOf("requireIntegrationLead(") < body.indexOf("gh.write("), `${f.n}: phải hỏi khoá integration-lead TRƯỚC khi ghi GitHub`);
+  }
+  const handoff = src.slice(src.indexOf("function cmdHandoff("), src.indexOf("async function cmdPrOpen("));
+  assert.ok(!handoff.includes("githubClient") && !handoff.includes("gh."), "handoff của worker không chạm GitHub API — chỉ git");
+}
 
 function testChiMotChoDay() {
   const src = doc("scripts/ai-tech.ts").replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
@@ -718,6 +821,8 @@ export async function testDeliveryV2() {
   testDeployVaHauKiem();
   testChongTrung();
   testChiMotChoDay();
+  testBanGiao();
+  testChiDeliveryControllerGhiGithub();
   await testVongDoi();
   console.log("✓ Điều phối V2: cổng song song đỏ đúng chỗ · deploy chỉ với cổng/bằng chứng của đúng SHA · sổ xuyên phiên · khoá một chủ có hạn · giữ chỗ migration · hàng đợi gộp · hậu kiểm");
 }

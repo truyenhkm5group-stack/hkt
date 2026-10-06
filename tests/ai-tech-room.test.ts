@@ -417,7 +417,10 @@ function testSourceGuards() {
   // Đẩy lên remote: ĐÚNG một chỗ, chỉ lên nhánh điều khiển ai-control/… (sổ xuyên sứ mệnh) — refspec
   // và tên nhánh được khoá ở tests/delivery-v2.test.ts. Nhánh MÃ thì công cụ vẫn không bao giờ đẩy.
   assert.equal(src.split('"push"').length - 1, 1, "công cụ chỉ đẩy ở đúng một chỗ (sổ điều khiển)");
-  assert.ok(!/"stash"|"reset"|"clean"/.test(src), "không stash / reset / clean");
+  // Miễn trừ ĐÚNG MỘT dòng: hằng `mergeable_state` của GitHub (chữ API, không phải lệnh git). Thêm lần thứ hai là đỏ.
+  const exempt = 'const GITHUB_MERGEABLE_CLEAN = "clean";';
+  assert.ok(src.split(exempt).length - 1 <= 1, "hằng mergeable_state chỉ khai một lần");
+  assert.ok(!/"stash"|"reset"|"clean"/.test(src.replace(exempt, "")), "không stash / reset / clean");
   assert.ok(src.includes('"--no-optional-locks"'), "đọc trạng thái cây khác không được làm mới index của họ");
   // Nhánh chỉ bị xoá TRONG cmdCleanup, SAU lời gọi cleanupDecision, và bằng so-và-xoá theo SHA đã đo.
   const body = src.slice(src.indexOf("function cmdCleanup("), src.indexOf("function markCleaned("));

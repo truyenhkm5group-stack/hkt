@@ -137,6 +137,24 @@ Không đổi (README mục 7–8, `.claude/agents/ai-tech-worker.md`): đúng m
 `owns`, không PR / gộp / deploy / sửa `.ai/` hay sổ chung. `ready` của Lead + `gates / gates` là lá chắn
 thật; luật trong prompt worker chỉ là lớp thứ hai.
 
+## 7b. Bàn giao của worker — worker KHÔNG cần quyền GitHub API
+
+Failure mode thật (06/10/2026): nhánh `feat/pancake-replacement` code/test/push xong (794/794 PASS) nhưng phiên worker không
+có credential GitHub nên không ai mở PR. Kiến trúc không được giả định mọi worker giữ quyền đặc quyền:
+
+- **Worker** (chỉ cần `git push`, thứ nó vốn có): `npm run ai -- handoff <sứ-mệnh> --tests="lệnh: kết quả|…" [--summary=…]`
+  — công cụ kiểm nhánh ĐÃ lên remote, không còn commit cục bộ chưa đẩy, cây sạch, có khai kiểm thử; ghi bản bàn giao (nhánh ·
+  SHA · kiểm thử · tóm tắt · ai bàn giao) vào sổ, trạng thái `PR_READY`. `board` hiện "đã bàn giao, CHƯA có PR"; `queue` hiện
+  `NEEDS_PR`.
+- **Delivery Controller** (MỘT phiên cầm khoá `integration-lead` + `GH_TOKEN` của cơ chế được ủy quyền):
+  `pr-open <sứ-mệnh>` (chỉ cho ĐÚNG SHA đã bàn giao — nhánh đi tiếp sau bàn giao ⇒ từ chối, worker bàn giao lại) →
+  `merge <PR> --sha=<SHA queue in>` (chỉ khi hàng đợi xếp MERGE_NOW / MERGE_ISOLATED ở đúng SHA đó, `clean`) →
+  `deploy` (chỉ khi `deploy-plan` nói DEPLOY; bám đúng run của SHA, không dispatch lại) → `verify --record` → `close`.
+  Ba lệnh ghi GitHub hỏi khoá TRƯỚC khi ghi (`tests/delivery-v2.test.ts` quét mã nguồn).
+
+Ca chứng minh thật: `pancake-replacement` → handoff (06/10 13:3x) → PR #602 mở bởi `pr-open` → gates 17,3′ → `merge` →
+`321f7e6d`, cùng lô deploy với #601 + #603.
+
 ## 8. Integration Lead — khoá có hạn
 
 `lease acquire integration-lead --purpose=…` · `renew` · `release` · `status`. Hai tên khoá, danh sách

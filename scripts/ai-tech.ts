@@ -195,6 +195,12 @@ export type Config = {
   verifyEndpoints: string[];
   /** Tệp nằm trọn trong các mẫu này mà không chạm sàn nào ⇒ LOW; ngoài ra mặc định MEDIUM. */
   lowRiskPaths: string[];
+  /**
+   * Số dòng `drizzle.__drizzle_migrations` DƯ so với sổ `_journal.json` trên production (lịch sử đánh số lại) — đo rồi khai.
+   * `null` = chưa khai ⇒ hậu kiểm đòi BẰNG đúng sổ. Dùng `≥` thay cho khai báo này là để một migration thiếu lọt qua đúng
+   * bằng cỡ phần dư (review 06/10/2026).
+   */
+  migrationRowOffset: number | null;
   /** Ai được gộp một PR theo rủi ro của nó (mục 13 · hàng đợi gộp). */
   mergePolicy: Record<Risk, MergePolicy>;
   /** Tệp KHÔNG chạy trên VPS — `close --no-runtime` chỉ được nhận khi mọi tệp sứ mệnh chạm đều nằm ở đây. */
@@ -222,6 +228,7 @@ export const DEFAULT_CONFIG: Config = {
   healthUrl: "",
   verifyEndpoints: [],
   lowRiskPaths: [],
+  migrationRowOffset: null,
   mergePolicy: { LOW: "AUTO", MEDIUM: "AUTO", HIGH: "LEAD_REVIEW", CRITICAL: "OWNER" },
   // `.github/` CỐ Ý không nằm đây: đổi đường deploy thì phải deploy thật một lượt và hậu kiểm nó.
   nonRuntimePaths: ["docs/", "tests/", ".ai/", ".claude/", "AGENTS.md", "CLAUDE.md", "README.md", "scripts/ai-tech.ts"],
@@ -359,6 +366,11 @@ export function parseConfig(raw: unknown): { config: Config; errors: string[] } 
     const v = strArr(raw.lowRiskPaths) ? raw.lowRiskPaths.map(normalizePattern) : null;
     if (!v || v.some((x) => x === null)) errors.push("config.lowRiskPaths: mảng mẫu đường dẫn tương đối");
     else c.lowRiskPaths = v as string[];
+  }
+  if (raw.migrationRowOffset !== undefined) {
+    const v = raw.migrationRowOffset;
+    if (v !== null && (typeof v !== "number" || !Number.isInteger(v) || v < 0 || v > 1000)) errors.push("config.migrationRowOffset: số nguyên 0–1000 hoặc null");
+    else c.migrationRowOffset = v;
   }
   if (raw.nonRuntimePaths !== undefined) {
     const v = strArr(raw.nonRuntimePaths) ? raw.nonRuntimePaths.map(normalizePattern) : null;
@@ -1353,7 +1365,7 @@ export function parseGithubRemote(url: string): { owner: string; repo: string } 
 
 export type GithubPr = { number: number; state: string; merged: boolean; draft: boolean; url: string };
 export type GithubFacts = { pr: GithubPr | null; checks: { name: string; status: string; conclusion: string | null }[]; error?: string };
-type FetchLike = (url: string, init: { headers: Record<string, string>; signal?: AbortSignal; redirect?: "manual" | "follow" }) => Promise<{ ok: boolean; status: number; json: () => Promise<unknown> }>;
+type FetchLike = (url: string, init: { headers: Record<string, string>; signal?: AbortSignal; redirect?: "manual" | "follow"; method?: string; body?: string }) => Promise<{ ok: boolean; status: number; json: () => Promise<unknown> }>;
 
 /**
  * Hỏi GitHub về PR + check của một nhánh. Kho PUBLIC nên đọc được KHÔNG cần token (60 lượt/giờ);
@@ -1463,7 +1475,16 @@ export type RegistryEntry = {
   /** Quyết định cần chủ shop — chỉ chín loại `OWNER_ESCALATIONS`. */
   needs_owner?: { category: (typeof OWNER_ESCALATIONS)[number]; action: string };
   evidence?: { merged?: string; deploy?: string; verify?: string; done?: string };
+  /** Bản bàn giao của worker (`handoff`): đủ để Integration Lead mở PR mà worker KHÔNG cần quyền GitHub API. */
+  handoff?: Handoff;
 };
+
+/**
+ * Worker xong việc chỉ cần `git push` (quyền nó vốn có) rồi `handoff`. Mở PR · cổng · gộp · deploy là việc của
+ * MỘT Integration Lead / Delivery Controller có cơ chế được ủy quyền — không bắt mọi phiên worker giữ
+ * credential GitHub đặc quyền (failure mode thật 06/10/2026: nhánh thay Pancake xong, đẩy xong, không ai mở PR).
+ */
+export type Handoff = { branch: string; sha: string; at: string; actor: string; title: string; summary: string; tests: string[] };
 
 export type Lease = {
   name: LeaseName;
@@ -1535,6 +1556,13 @@ export function validateEntry(raw: unknown): { entry: RegistryEntry | null; erro
     if (!isObj(r) || Object.entries(r).some(([k, v]) => !MIG_NO_RE.test(k) || typeof v !== "string" || !ISO_RE.test(v))) e("migration_reserved_at: { \"NNNN\": thời điểm ISO }");
     else reservedAt = r as Record<string, string>;
   }
+  let handoff: Handoff | undefined;
+  if (raw.handoff !== undefined) {
+    const h = raw.handoff;
+    if (!isObj(h) || !isStr(h.branch) || !REF_RE.test(h.branch) || gitRefLooksUnsafe(h.branch) || !SHA_RE.test(String(h.sha)) || !isStr(h.at) || !isStr(h.actor) || !isStr(h.title) || typeof h.summary !== "string" || !strArr(h.tests))
+      e("handoff: { branch, sha (40), at, actor, title, summary, tests[] }");
+    else handoff = { branch: h.branch, sha: String(h.sha), at: h.at, actor: h.actor, title: h.title, summary: h.summary, tests: h.tests };
+  }
   let evidence: RegistryEntry["evidence"];
   if (raw.evidence !== undefined) {
     const v = raw.evidence;
@@ -1571,6 +1599,7 @@ export function validateEntry(raw: unknown): { entry: RegistryEntry | null; erro
       intake,
       needs_owner: needsOwner,
       evidence,
+      handoff,
     },
     errors,
   };
@@ -1616,6 +1645,7 @@ export function entryFromMission(m: Mission, base: Partial<RegistryEntry> & { ow
     intake: base.intake,
     needs_owner: base.needs_owner,
     evidence: base.evidence,
+    handoff: base.handoff,
   };
 }
 
@@ -1723,6 +1753,12 @@ export function reconcileEntry(e: RegistryEntry, f: EntryFacts, cfg: Config, now
   if (f.touched && f.touched.length) {
     const outside = f.touched.filter((x) => !e.owned_paths.some((p) => fileInPattern(x, p)));
     if (outside.length) drift.push(`nhánh chạm ${outside.length} tệp NGOÀI phạm vi khai: ${outside.slice(0, 5).join(", ")}${outside.length > 5 ? " …" : ""}`);
+  }
+  if (e.handoff && !CLOSED_STATES.has(declared)) {
+    const tipNow = f.branch?.tip ?? null;
+    if (tipNow && tipNow !== e.handoff.sha && (f.merged === null || f.merged === "EMPTY"))
+      drift.push(`nhánh đi tiếp sau bàn giao (bàn giao ${e.handoff.sha.slice(0, 8)}, nay ${tipNow.slice(0, 8)}) — worker chạy lại handoff`);
+    if (!f.pr && (f.merged === null || f.merged === "EMPTY")) drift.push(`đã bàn giao, CHƯA có PR — Integration Lead: \`pr-open ${e.mission_id}\``);
   }
   if (declared === "CANCELLED") return { effective: "CANCELLED", drift };
   if (declared === "DONE") {
@@ -1940,6 +1976,8 @@ export type QueueItem = {
   files: string[];
   /** Đầu nhánh lúc xét — gộp phải kèm ĐÚNG SHA này. */
   sha: string;
+  /** SHA đã BÀN GIAO trong sổ (nếu nhánh đi qua `handoff`) — gộp chỉ khi bằng `sha`; `null` = không đi qua bàn giao. */
+  handoffSha?: string | null;
   migrationProblems: string[];
   createdAt: string;
   /** Có dấu review ĐẠT trong SỔ cho đúng `sha` này (`review <PR> --sha=… --verdict=PASS`, chỉ phiên cầm khoá Lead ghi được). */
@@ -2029,6 +2067,79 @@ export function parsePrDependencies(body: string): number[] {
   return [...out].sort((a, b) => a - b);
 }
 
+/* ── Bàn giao của worker → Delivery Controller ── */
+
+/** Worker được bàn giao chưa: nhánh ĐÃ lên remote, không còn commit cục bộ chưa đẩy, cây sạch, có khai kiểm thử. */
+export function handoffDecision(x: { branch: string; remoteTip: string | null; localTip: string | null; dirty: number | null; tests: readonly string[] }): { ok: boolean; refusals: string[] } {
+  const r: string[] = [];
+  if (!x.remoteTip) r.push(`nhánh ${x.branch} chưa có trên remote — \`git push -u origin ${x.branch}\` trước khi bàn giao`);
+  if (x.remoteTip && x.localTip && x.localTip !== x.remoteTip) r.push(`commit cục bộ CHƯA lên remote (cục bộ ${x.localTip.slice(0, 8)}, remote ${x.remoteTip.slice(0, 8)}) — đẩy trước khi bàn giao`);
+  if (x.dirty !== null && x.dirty !== 0) r.push(x.dirty < 0 ? "không đọc được trạng thái cây" : `cây còn ${x.dirty} thay đổi chưa commit`);
+  if (!x.tests.length) r.push("--tests=… bắt buộc: lệnh kiểm thử đã chạy + kết quả (worker chứng minh, Lead không đoán)");
+  return { ok: r.length === 0, refusals: r };
+}
+
+/**
+ * Integration Lead mở PR từ một bản bàn giao. Chỉ mở cho ĐÚNG SHA đã bàn giao: nhánh đi tiếp sau bàn giao là mã
+ * chưa ai khai đã kiểm — từ chối, worker bàn giao lại. PR đã có thì chỉ nối số PR vào sổ.
+ */
+export function prOpenDecision(x: { handoff: Handoff | undefined; remoteTip: string | null; existingPr: number | null; merged: boolean }): { action: "OPEN" | "LINK" | "REFUSE"; why: string } {
+  if (!x.handoff) return { action: "REFUSE", why: "chưa có bản bàn giao — worker chạy `handoff <sứ-mệnh> --tests=…` sau khi đẩy nhánh" };
+  if (x.merged) return { action: "REFUSE", why: "nhánh đã vào main — không mở PR" };
+  if (!x.remoteTip) return { action: "REFUSE", why: `nhánh ${x.handoff.branch} không còn trên remote` };
+  if (x.remoteTip !== x.handoff.sha) return { action: "REFUSE", why: `nhánh đã đi tiếp sau bàn giao (bàn giao ${x.handoff.sha.slice(0, 8)}, remote ${x.remoteTip.slice(0, 8)}) — worker bàn giao lại; không mở PR cho mã chưa ai khai đã kiểm` };
+  if (x.existingPr !== null) return { action: "LINK", why: `PR #${x.existingPr} đã có cho nhánh này — chỉ nối vào sổ` };
+  return { action: "OPEN", why: `mở PR cho ${x.handoff.branch} @ ${x.handoff.sha.slice(0, 8)}` };
+}
+
+/** `mergeable_state` của GitHub (PR gộp được ngay) — chữ của API, KHÔNG phải lệnh `git clean`; công cụ không bao giờ chạy lệnh đó. */
+const GITHUB_MERGEABLE_CLEAN = "clean";
+
+/** Delivery Controller chỉ gộp PR mà hàng đợi xếp MERGE_NOW / MERGE_ISOLATED, ở ĐÚNG SHA hàng đợi đã xét, và `clean`. */
+export function mergeGate(rows: readonly QueueRow[], pr: number, sha: string): { ok: boolean; why: string } {
+  const r = rows.find((x) => x.item.pr === pr);
+  if (!r) return { ok: false, why: `PR #${pr} không có trong hàng đợi (đã đóng / đã gộp?)` };
+  if (r.verdict !== "MERGE_NOW" && r.verdict !== "MERGE_ISOLATED") return { ok: false, why: `hàng đợi xếp ${r.verdict}: ${r.why}` };
+  if (r.item.sha !== sha) return { ok: false, why: `--sha ${sha.slice(0, 8)} khác đầu nhánh hàng đợi vừa xét (${r.item.sha.slice(0, 8)}) — chạy lại queue` };
+  if (r.item.mergeable !== GITHUB_MERGEABLE_CLEAN) return { ok: false, why: `mergeable_state = ${r.item.mergeable}, chưa phải clean` };
+  if (r.item.handoffSha && r.item.handoffSha !== r.item.sha)
+    return { ok: false, why: `nhánh đã đi tiếp sau bàn giao (bàn giao ${r.item.handoffSha.slice(0, 8)}, PR ${r.item.sha.slice(0, 8)}) — mã chưa ai khai đã kiểm; worker bàn giao lại` };
+  return { ok: true, why: `${r.verdict} · ${r.item.risk} · gates ${r.item.gates}` };
+}
+
+/** Thân PR dựng từ bản bàn giao — người đọc PR thấy worker đã khai gì, ai bàn giao, ở SHA nào. */
+/** Gỡ tên model AI khỏi chữ worker khai (AGENTS.md 6.6) — dòng «Co-authored-by» bỏ hẳn, tên model thay bằng «AI». HÀM THUẦN. */
+export function scrubModelNames(s: string): string {
+  return s
+    .split("\n")
+    .filter((l) => !/^\s*co-authored-by:/i.test(l))
+    .join("\n")
+    .replace(/\b(claude(?:[ -]code)?|anthropic|opus|sonnet|haiku)\b(?:[ -]?\d+(?:\.\d+)?)?/gi, "AI");
+}
+
+export function renderHandoffPrBody(e: Pick<RegistryEntry, "mission_id" | "business_goal" | "definition_of_done" | "risk">, hIn: Handoff): string {
+  const h: Handoff = { ...hIn, title: scrubModelNames(hIn.title), summary: scrubModelNames(hIn.summary), tests: hIn.tests.map(scrubModelNames) };
+  const list = (xs: readonly string[]) => (xs.length ? xs.map((x) => `- ${x}`).join("\n") : "- (không khai)");
+  return [
+    `## Bàn giao của worker — sứ mệnh \`${e.mission_id}\``,
+    "",
+    e.business_goal ? `**Mục tiêu:** ${e.business_goal}` : "",
+    "",
+    h.summary || "(worker không ghi tóm tắt)",
+    "",
+    "## Kiểm thử worker đã chạy",
+    list(h.tests),
+    "",
+    "## Định nghĩa xong",
+    list(e.definition_of_done),
+    "",
+    `Bàn giao: \`${h.branch}\` @ \`${h.sha}\` bởi \`${h.actor}\` lúc ${h.at}. Rủi ro khai trong sổ: ${e.risk}.`,
+    "PR do Integration Lead mở (`npm run ai -- pr-open`) — worker không cần quyền GitHub API. Cổng bắt buộc: `gates / gates`.",
+  ]
+    .filter((x, i, a) => !(x === "" && a[i - 1] === ""))
+    .join("\n");
+}
+
 /* ── Kế hoạch deploy · hậu kiểm ── */
 
 export type DeployInput = {
@@ -2071,6 +2182,8 @@ export type VerifyInput = {
   health: { ok?: unknown; commit?: unknown; platform?: { migrations?: unknown } } | null;
   healthError?: string;
   expectedMigrations: number | null;
+  /** Độ lệch nền đã đo (`migrationRowOffset`) — `null` ⇒ đòi bằng đúng sổ. */
+  migrationOffset?: number | null;
   deployRun: { conclusion: string | null; status: string; url: string } | null;
   endpoints: { path: string; status: number | null }[];
 };
@@ -2083,8 +2196,13 @@ export function verifyVerdict(x: VerifyInput): { pass: boolean; checks: { ok: bo
   const commit = h && typeof h.commit === "string" ? h.commit : "";
   checks.push({ ok: commit.length >= 7 && x.expectedSha.startsWith(commit), label: `bản đang chạy ${commit || "?"} ${commit && x.expectedSha.startsWith(commit) ? "=" : "≠"} ${x.expectedSha.slice(0, 12)}` });
   const mig = h && isObj(h.platform) && typeof h.platform.migrations === "number" ? h.platform.migrations : null;
-  if (x.expectedMigrations !== null)
-    checks.push({ ok: mig === x.expectedMigrations, label: `migration đã áp ${mig ?? "?"} / sổ của SHA ${x.expectedMigrations}` });
+  // `/api/health` đếm DÒNG của `drizzle.__drizzle_migrations` — bảng này dài hơn sổ `_journal.json` được (đo production 06/10/2026:
+  // 222 dòng / 221 mục, dư do lịch sử đánh số lại). Điều phải chứng minh là KHÔNG THIẾU migration nào: đã áp ≥ sổ, không phải bằng.
+  if (x.expectedMigrations !== null) {
+    const off = x.migrationOffset ?? 0;
+    const want = x.expectedMigrations + off;
+    checks.push({ ok: mig !== null && mig === want, label: `migration đã áp ${mig ?? "?"} = sổ của SHA ${x.expectedMigrations}${off ? ` + ${off} dòng lịch sử đã đo` : ""}${mig !== null && mig !== want ? ` — LỆCH ${mig - want > 0 ? "+" : ""}${mig - want}` : ""}` });
+  }
   checks.push({
     ok: x.deployRun !== null && x.deployRun.status === "completed" && x.deployRun.conclusion === "success",
     label: x.deployRun ? `lượt deploy của SHA: ${x.deployRun.status}/${x.deployRun.conclusion ?? "—"} (gồm smoke trên VPS) ${x.deployRun.url}` : "không tìm thấy lượt deploy nào của SHA này",
@@ -2349,19 +2467,31 @@ export function controlActor(ctx: RepoCtx): string {
 
 /** Đỉnh GitHub dùng chung cho các lệnh mặt phẳng điều khiển (đọc công khai; token chỉ từ env, không in). */
 type GhGet = (p: string) => Promise<unknown>;
-function githubClient(ctx: RepoCtx, fetchImpl: FetchLike = fetch as unknown as FetchLike): { repo: { owner: string; repo: string }; get: GhGet } | null {
+type GhWrite = (method: "POST" | "PUT", p: string, body: Record<string, unknown>) => Promise<unknown>;
+function githubClient(ctx: RepoCtx, fetchImpl: FetchLike = fetch as unknown as FetchLike): { repo: { owner: string; repo: string }; get: GhGet; write: GhWrite } | null {
   const repo = parseGithubRemote(gitTry(ctx.top, ["remote", "get-url", ctx.config.remote]) ?? "");
   if (!repo) return null;
   const token = (process.env.GH_TOKEN || process.env.GITHUB_TOKEN || "").trim() || null;
   const headers: Record<string, string> = { Accept: "application/vnd.github+json", "User-Agent": "ai-tech-room" };
   if (token) headers.Authorization = `Bearer ${token}`;
+  ownPrFilter = { repoFull: `${repo.owner}/${repo.repo}`, base: ctx.config.integrationRef.replace(new RegExp(`^${ctx.config.remote}/`), "") };
   const get: GhGet = async (p) => {
     const url = p.startsWith("https://") ? p : `https://api.github.com/repos/${repo.owner}/${repo.repo}${p}`;
     const r = await fetchImpl(url, { headers, signal: AbortSignal.timeout(15000) });
     if (!r.ok) throw new Error(`GitHub ${r.status} ${p.split("?")[0]}`);
     return r.json();
   };
-  return { repo, get };
+  // Đường GHI chỉ Delivery Controller dùng (`pr-open` · `merge` · `deploy`, sau requireIntegrationLead). Token chỉ đọc
+  // từ môi trường của CHÍNH phiên ấy, không bao giờ in. Worker không có token thì không cần: nó dừng ở `handoff`.
+  const write: GhWrite = async (method, p, body) => {
+    if (!token) throw new Error("Delivery Controller cần GH_TOKEN trong môi trường của phiên (cơ chế được ủy quyền) — worker KHÔNG cần, worker dừng ở `handoff`");
+    const r = await fetchImpl(`https://api.github.com/repos/${repo.owner}/${repo.repo}${p}`, { headers: { ...headers, "Content-Type": "application/json" }, method, body: JSON.stringify(body), signal: AbortSignal.timeout(30000) });
+    if (r.status === 204) return null;
+    const j = (await r.json().catch(() => ({}))) as Record<string, unknown>;
+    if (!r.ok) throw new Error(`GitHub ${r.status} ${method} ${p}: ${String(j.message ?? "")}`.slice(0, 300));
+    return j;
+  };
+  return { repo, get, write };
 }
 
 const arr = (v: unknown): Record<string, unknown>[] => (Array.isArray(v) ? v.filter(isObj) : []);
@@ -2379,6 +2509,14 @@ async function gatesOf(get: GhGet, sha: string): Promise<"success" | "failure" |
 }
 
 type OpenPr = { number: number; title: string; branch: string; sha: string; draft: boolean; createdAt: string; body: string };
+/** PR có phải của CHÍNH kho này, nhắm ĐÚNG nhánh tích hợp không — kho PUBLIC: fork mở được PR trùng tên nhánh. HÀM THUẦN. */
+export function isOwnPr(p: { head?: unknown; base?: unknown }, repoFull: string, baseBranch: string): boolean {
+  const head = isObj(p.head) ? p.head : null;
+  const base = isObj(p.base) ? p.base : null;
+  const headRepo = head && isObj(head.repo) ? String(head.repo.full_name ?? "") : "";
+  return headRepo.toLowerCase() === repoFull.toLowerCase() && String(base?.ref ?? "") === baseBranch;
+}
+let ownPrFilter: { repoFull: string; base: string } | null = null;
 const toOpenPr = (p: Record<string, unknown>): OpenPr => ({
   number: Number(p.number),
   title: String(p.title ?? ""),
@@ -2392,7 +2530,8 @@ async function openPrs(get: GhGet): Promise<OpenPr[]> {
   const all: OpenPr[] = [];
   for (let page = 1; page <= 10; page++) {
     const xs = arr(await get(`/pulls?state=open&per_page=100&page=${page}`));
-    all.push(...xs.map(toOpenPr));
+    const f = ownPrFilter;
+    all.push(...xs.filter((p) => !f || isOwnPr(p, f.repoFull, f.base)).map(toOpenPr));
     if (xs.length < 100) break;
   }
   return all;
@@ -3316,6 +3455,7 @@ async function cmdClaim(ctx: RepoCtx, idIn: string | undefined, flags: Set<strin
           intake: base.intake,
           needs_owner: base.needs_owner,
           evidence: base.evidence,
+          handoff: base.handoff,
         };
     // Rủi ro không bao giờ thấp hơn sàn của phạm vi khai (cùng luật với việc trong sứ mệnh).
     const floor = riskFloorFor(touchedForFloor ?? raw.owned_paths, ctx.config);
@@ -3623,7 +3763,7 @@ async function cmdMigration(ctx: RepoCtx, op: string | undefined, flags: Set<str
   return res.problems.length ? 1 : 0;
 }
 
-async function cmdQueue(ctx: RepoCtx, flags: Set<string>): Promise<number> {
+async function buildQueue(ctx: RepoCtx): Promise<{ rows: QueueRow[]; st: ControlState; prs: OpenPr[] }> {
   const gh = githubClient(ctx);
   if (!gh) throw new Error("remote không phải GitHub — hàng đợi gộp cần GitHub");
   gitRun(ctx.top, ["fetch", "--quiet", ctx.config.remote]);
@@ -3673,14 +3813,22 @@ async function cmdQueue(ctx: RepoCtx, flags: Set<string>): Promise<number> {
       migrationProblems: mig.problems,
       createdAt: p.createdAt,
       reviewed: reviewedAt(st.reviews, p.number, p.sha),
+      handoffSha: entry?.handoff && entry.handoff.branch === p.branch ? entry.handoff.sha : null,
     });
   }
-  const rows = orderQueue(items, ctx.config);
+  return { rows: orderQueue(items, ctx.config), st, prs };
+}
+
+async function cmdQueue(ctx: RepoCtx, flags: Set<string>): Promise<number> {
+  const { rows, st, prs } = await buildQueue(ctx);
+  // Chỉ bàn giao CÒN chờ: PR_READY (gộp xong `merge` chuyển INTEGRATING — PR đã gộp thì không còn trong danh sách PR mở, nên lọc theo PR mở thôi là báo nhầm NEEDS_PR).
+  const choPr = st.entries.filter((e) => e.handoff && e.status === "PR_READY" && !prs.some((p) => p.branch === e.handoff?.branch));
   if (flags.has("json")) {
     out(JSON.stringify(rows.map((r) => ({ pr: r.item.pr, sha: r.item.sha, verdict: r.verdict, why: r.why, risk: r.item.risk, policy: r.policy, gates: r.item.gates, mergeable: r.item.mergeable, branch: r.item.branch })), null, 2));
     return 0;
   }
-  out(`HÀNG ĐỢI GỘP · ${rows.length} PR đang mở`);
+  out(`HÀNG ĐỢI GỘP · ${rows.length} PR đang mở${choPr.length ? ` · ${choPr.length} bàn giao chờ mở PR` : ""}`);
+  for (const e of choPr) out(`  ${pad("NEEDS_PR", 19)} ${pad(e.mission_id, 26)} ${e.handoff?.branch} @ ${e.handoff?.sha.slice(0, 8)} — bàn giao bởi ${e.handoff?.actor}\n      Integration Lead: npm run ai -- pr-open ${e.mission_id} --token=…`);
   for (const r of rows) out(`  ${pad(r.verdict, 19)} #${pad(String(r.item.pr), 5)} ${pad(r.item.risk, 8)} ${pad(r.item.gates, 8)} ${pad(r.item.mergeable, 9)} ${r.item.title.slice(0, 60)}\n      ${r.why} · sha ${r.item.sha}`);
   const now = rows.filter((r) => r.verdict === "MERGE_NOW").map((r) => `#${r.item.pr}`);
   const iso = rows.find((r) => r.verdict === "MERGE_ISOLATED");
@@ -3691,7 +3839,7 @@ async function cmdQueue(ctx: RepoCtx, flags: Set<string>): Promise<number> {
   return 0;
 }
 
-async function cmdDeployPlan(ctx: RepoCtx, flags: Set<string>, values: Map<string, string>): Promise<number> {
+async function buildDeployPlan(ctx: RepoCtx, flags: Set<string>, values: Map<string, string>): Promise<{ plan: DeployPlan; prod: { sha: string | null; error?: string }; mainSha: string; undeployed: DeployInput["undeployed"] }> {
   gitRun(ctx.top, ["fetch", "--quiet", ctx.config.remote]);
   const ref = ctx.config.integrationRef;
   const mainSha = git(ctx.top, ["rev-parse", "--verify", `${ref}^{commit}`]);
@@ -3732,7 +3880,11 @@ async function cmdDeployPlan(ctx: RepoCtx, flags: Set<string>, values: Map<strin
           : lease.holder === me
             ? `${lease.holder} (một phiên khác cùng cây — trình mã bằng --token=… / --resume)`
             : lease.holder;
-  const plan = planDeploy({ productionSha: prod.sha, mainSha, undeployed, mainGates, deployActive, leaseHolder: holder, me });
+  return { plan: planDeploy({ productionSha: prod.sha, mainSha, undeployed, mainGates, deployActive, leaseHolder: holder, me }), prod, mainSha, undeployed };
+}
+
+async function cmdDeployPlan(ctx: RepoCtx, flags: Set<string>, values: Map<string, string>): Promise<number> {
+  const { plan, prod, mainSha, undeployed } = await buildDeployPlan(ctx, flags, values);
   if (flags.has("json")) {
     out(JSON.stringify({ ...plan, production: prod.sha, main: mainSha, undeployed }, null, 2));
     return 0;
@@ -3742,9 +3894,162 @@ async function cmdDeployPlan(ctx: RepoCtx, flags: Set<string>, values: Map<strin
   out(`\n  ⇒ ${plan.action}: ${plan.why}`);
   for (const n of plan.notes) out(`     ${n}`);
   if (plan.action === "DEPLOY") {
-    out(`\n  Lệnh (MỘT lượt, bám run id > BEFORE): dispatch workflow "Deploy ERP to VPS" (deploy-vps.yml) trên ref main`);
+    out(`\n  Lệnh (MỘT lượt): npm run ai -- deploy --token=…   (hoặc dispatch "Deploy ERP to VPS" trên ref main, bám run id > BEFORE)`);
     out(`  Sau đó: npm run ai -- verify --sha=${plan.sha} [--record --mission=<mã>]`);
   }
+  return 0;
+}
+
+/** Cổng chung của MỌI lệnh ghi GitHub: đang cầm khoá integration-lead còn hạn, khoá có mã, đúng nhãn + đúng mã. */
+function requireIntegrationLead(ctx: RepoCtx, st: ControlState, flags: Set<string>, values: Map<string, string>): string {
+  const me = controlActor(ctx);
+  const l = st.leases.find((x) => x.name === "integration-lead" && Date.parse(x.expires_at) > Date.now()) ?? null;
+  const t = presentedLeaseToken(ctx, "integration-lead", values, flags);
+  if (!l || l.token_hash === undefined || !leaseIsMine(l, me, t ? sha256(t) : null))
+    throw new Error(`chỉ Delivery Controller — phiên cầm khoá integration-lead (đúng mã phiên) — được mở PR / gộp / deploy${l ? ` (khoá đang thuộc ${l.holder})` : " (khoá đang trống: lease acquire integration-lead)"}`);
+  return me;
+}
+
+/**
+ * WORKER: bàn giao sau khi đã đẩy nhánh. Chỉ cần quyền `git push` (thứ worker vốn có để đẩy nhánh) — KHÔNG cần
+ * token GitHub API. Ghi bản bàn giao vào sổ, trạng thái PR_READY; Integration Lead lo phần còn lại.
+ */
+function cmdHandoff(ctx: RepoCtx, idIn: string | undefined, values: Map<string, string>): number {
+  const id = mustMission(idIn);
+  const here = gitTry(ctx.top, ["rev-parse", "--abbrev-ref", "HEAD"]);
+  gitRun(ctx.top, ["fetch", "--quiet", ctx.config.remote]);
+  const r = mutateControl(ctx, controlActor(ctx), (st) => {
+    const e = st.entries.find((x) => x.mission_id === id);
+    if (!e) return { change: null, result: { ok: false, lines: [`${id} chưa có trong sổ — \`claim ${id} --title=… --branch=…\` trước (hoặc nhờ Tech Lead đăng ký)`] } };
+    if (CLOSED_STATES.has(e.status)) return { change: null, result: { ok: false, lines: [`${id} đã khép (${e.status})`] } };
+    const branch = values.get("branch") ?? e.branch ?? (here && here !== "HEAD" ? here : "");
+    if (!branch || !REF_RE.test(branch) || gitRefLooksUnsafe(branch)) return { change: null, result: { ok: false, lines: ["không xác định được nhánh — --branch=<nhánh>"] } };
+    const remoteTip = gitTry(ctx.top, ["rev-parse", "--verify", "--quiet", `refs/remotes/${ctx.config.remote}/${branch}`]);
+    const localTip = gitTry(ctx.top, ["rev-parse", "--verify", "--quiet", `refs/heads/${branch}`]);
+    // Cây sạch: cây đang đứng nếu nó ở đúng nhánh; không thì cây khai trong sổ (đọc --no-optional-locks, không ghi gì).
+    const tree = here === branch ? ctx.top : e.worktree && existsSync(e.worktree) ? e.worktree : null;
+    const dirty = tree ? dirtyCount(tree).n : null;
+    const tests = (values.get("tests") ?? "").split("|").map((s) => s.trim()).filter(Boolean);
+    const d = handoffDecision({ branch, remoteTip, localTip, dirty, tests });
+    if (!d.ok) return { change: null, result: { ok: false, lines: d.refusals.map((x) => `✗ ${x}`) } };
+    const now = new Date().toISOString();
+    const handoff: Handoff = { branch, sha: remoteTip as string, at: now, actor: controlActor(ctx), title: values.get("title") ?? e.title, summary: (values.get("summary") ?? "").slice(0, 4000), tests };
+    const next: RegistryEntry = { ...e, branch, status: "PR_READY", handoff, updated_at: now, last_heartbeat: now };
+    return {
+      change: { put: { [entryFile(id)]: entryJson(next) }, events: [{ kind: "HANDOFF", mission: id, detail: `${branch} @ ${handoff.sha.slice(0, 12)} · ${tests.length} lệnh kiểm thử` }], message: `bàn giao ${id}` },
+      result: { ok: true, lines: [`✓ ${id} → PR_READY · ${branch} @ ${handoff.sha.slice(0, 12)}${dirty === null ? " · (không đọc được cây để kiểm sạch — dựa vào nhánh đã đẩy)" : ""}`, "  Worker xong. Mở PR · cổng · gộp · deploy là việc của Integration Lead (`queue` sẽ hiện NEEDS_PR)."] },
+    };
+  });
+  for (const l of r.lines) out(l);
+  return r.ok ? 0 : 1;
+}
+
+/** DELIVERY CONTROLLER: mở PR từ bản bàn giao (đúng SHA đã bàn giao), nối số PR vào sổ. */
+async function cmdPrOpen(ctx: RepoCtx, idIn: string | undefined, flags: Set<string>, values: Map<string, string>): Promise<number> {
+  const id = mustMission(idIn);
+  const gh = githubClient(ctx);
+  if (!gh) throw new Error("remote không phải GitHub");
+  gitRun(ctx.top, ["fetch", "--quiet", ctx.config.remote]);
+  const st = readControl(ctx, { fetch: true });
+  const actor = requireIntegrationLead(ctx, st, flags, values);
+  const e = st.entries.find((x) => x.mission_id === id);
+  if (!e) throw new Error(`${id} chưa có trong sổ`);
+  const h = e.handoff;
+  const remoteTip = h ? gitTry(ctx.top, ["rev-parse", "--verify", "--quiet", `refs/remotes/${ctx.config.remote}/${h.branch}`]) : null;
+  const prs = await openPrs(gh.get);
+  const existing = h ? (prs.find((p) => p.branch === h.branch)?.number ?? null) : null;
+  const merged = h && remoteTip ? (() => { const m = mergeEvidence(ctx.top, remoteTip, ctx.config.integrationRef, { baseSha: e.base_sha ?? undefined }); return m !== null && m !== "EMPTY"; })() : false;
+  const d = prOpenDecision({ handoff: h, remoteTip, existingPr: existing, merged });
+  if (d.action === "REFUSE") {
+    out(`✗ ${d.why}`);
+    return 1;
+  }
+  let pr = existing;
+  if (d.action === "OPEN" && h) {
+    const base = ctx.config.integrationRef.replace(new RegExp(`^${ctx.config.remote}/`), "");
+    const res = (await gh.write("POST", "/pulls", { title: scrubModelNames(h.title), head: h.branch, base, body: renderHandoffPrBody(e, h) })) as Record<string, unknown>;
+    pr = Number(res.number);
+    if (!Number.isInteger(pr) || pr <= 0) throw new Error("GitHub không trả số PR hợp lệ");
+    const headSha = isObj(res.head) ? String(res.head.sha ?? "") : "";
+    if (headSha && headSha !== h.sha) out(`! PR #${pr} mở ở ${headSha.slice(0, 8)}, KHÁC SHA đã bàn giao ${h.sha.slice(0, 8)} (worker đẩy thêm giữa chừng) — merge sẽ từ chối tới khi bàn giao lại`);
+  }
+  mutateControl(ctx, actor, (s2) => {
+    const cur = s2.entries.find((x) => x.mission_id === id);
+    if (!cur || pr === null) return { change: null, result: null };
+    const next: RegistryEntry = { ...cur, related_prs: [...new Set([...cur.related_prs, pr])], updated_at: new Date().toISOString() };
+    return { change: { put: { [entryFile(id)]: entryJson(next) }, events: [{ kind: d.action === "OPEN" ? "PR_OPENED" : "PR_LINKED", mission: id, detail: `#${pr} cho ${h?.branch} @ ${h?.sha.slice(0, 12)}` }], message: `PR #${pr} cho ${id}` }, result: null };
+  });
+  out(`✓ ${d.action === "OPEN" ? "đã mở" : "đã nối"} PR #${pr} cho ${id} (${d.why}) — chờ gates / gates, rồi \`queue\` → \`merge\``);
+  return 0;
+}
+
+/** DELIVERY CONTROLLER: gộp đúng một PR mà hàng đợi cho phép, ở đúng SHA đã xét (squash, kèm sha). */
+async function cmdMerge(ctx: RepoCtx, prIn: string | undefined, flags: Set<string>, values: Map<string, string>): Promise<number> {
+  const pr = Number(prIn);
+  const sha = values.get("sha") ?? "";
+  if (!Number.isInteger(pr) || pr <= 0 || !SHA_RE.test(sha)) throw new UsageError("merge <PR> --sha=<SHA đầy đủ mà queue in ra> --token=…");
+  const gh = githubClient(ctx);
+  if (!gh) throw new Error("remote không phải GitHub");
+  const { rows, st } = await buildQueue(ctx);
+  const actor = requireIntegrationLead(ctx, st, flags, values);
+  const g = mergeGate(rows, pr, sha);
+  if (!g.ok) {
+    out(`✗ không gộp #${pr}: ${g.why}`);
+    return 1;
+  }
+  const row = rows.find((x) => x.item.pr === pr) as QueueRow;
+  // `commit_message` TƯỜNG MINH: để trống thì GitHub ghép thân từ mọi commit của nhánh — kéo theo dòng «Co-authored-by» mang tên
+  // model AI (AGENTS.md 6.6 cấm) mà công cụ tự chèn ở phiên worker.
+  const res = (await gh.write("PUT", `/pulls/${pr}/merge`, { merge_method: "squash", sha, commit_title: `${row.item.title} (#${pr})`, commit_message: `Gộp bởi Delivery Controller (npm run ai -- merge) ở ${sha} — ${g.why}.` })) as Record<string, unknown>;
+  const mergedSha = String(res.sha ?? "");
+  if (!SHA_RE.test(mergedSha)) out(`! GitHub không trả SHA commit gộp hợp lệ — kiểm trang PR #${pr}`);
+  mutateControl(ctx, actor, (s2) => {
+    const e = s2.entries.find((x) => x.branch === row.item.branch || x.related_prs.includes(pr));
+    const put: Record<string, string> = {};
+    if (e && !CLOSED_STATES.has(e.status)) put[entryFile(e.mission_id)] = entryJson({ ...e, status: "INTEGRATING", related_prs: [...new Set([...e.related_prs, pr])], evidence: { ...(e.evidence ?? {}), merged: `#${pr} → ${mergedSha}` }, updated_at: new Date().toISOString() });
+    return { change: { put, events: [{ kind: "MERGED", mission: e?.mission_id, detail: `#${pr} @ ${sha.slice(0, 12)} → ${mergedSha.slice(0, 12)} (${g.why})` }], message: `gộp #${pr}` }, result: null };
+  });
+  out(`✓ đã gộp #${pr} → ${mergedSha.slice(0, 12)} (${g.why}) — tiếp: \`deploy-plan\` (một lượt cho cả lô)`);
+  return 0;
+}
+
+/** DELIVERY CONTROLLER: MỘT lượt deploy cho cả lô — chỉ khi deploy-plan nói DEPLOY; trả đúng run của mình. */
+async function cmdDeploy(ctx: RepoCtx, flags: Set<string>, values: Map<string, string>): Promise<number> {
+  const gh = githubClient(ctx);
+  if (!gh) throw new Error("remote không phải GitHub");
+  const st = readControl(ctx, { fetch: true });
+  const actor = requireIntegrationLead(ctx, st, flags, values);
+  const { plan } = await buildDeployPlan(ctx, flags, values);
+  if (plan.action !== "DEPLOY" || !plan.sha) {
+    out(`✗ không deploy: ${plan.action} — ${plan.why}`);
+    return 1;
+  }
+  // Main có thể nhích giữa lúc lập kế hoạch và lúc dispatch (người gộp tay) — dispatch theo TÊN nhánh sẽ chạy một SHA kế hoạch
+  // không xét. Hỏi lại remote ngay trước khi bấm.
+  const branch = ctx.config.integrationRef.replace(new RegExp(`^${ctx.config.remote}/`), "");
+  const tipNow = (gitTry(ctx.top, ["ls-remote", ctx.config.remote, `refs/heads/${branch}`]) ?? "").split(/\s+/)[0] ?? "";
+  if (tipNow !== plan.sha) {
+    out(`✗ không deploy: ngọn ${branch} trên remote là ${tipNow.slice(0, 8) || "?"}, khác SHA của kế hoạch ${plan.sha.slice(0, 8)} — chạy lại deploy-plan`);
+    return 1;
+  }
+  const before = arr(((await gh.get("/actions/workflows/deploy-vps.yml/runs?per_page=1")) as { workflow_runs?: unknown }).workflow_runs)[0];
+  const beforeId = before && Number.isFinite(Number(before.id)) ? Number(before.id) : 0;
+  await gh.write("POST", "/actions/workflows/deploy-vps.yml/dispatches", { ref: ctx.config.integrationRef.replace(new RegExp(`^${ctx.config.remote}/`), "") });
+  let run: Record<string, unknown> | undefined;
+  for (let i = 0; i < 18 && !run; i++) {
+    await new Promise((res) => setTimeout(res, 5000));
+    const rs = arr(((await gh.get("/actions/workflows/deploy-vps.yml/runs?per_page=10&event=workflow_dispatch")) as { workflow_runs?: unknown }).workflow_runs);
+    // id lớn hơn BEFORE KHÔNG đủ (phiên khác có thể dispatch cùng lúc) — phải đúng SHA của kế hoạch.
+    run = rs.filter((r) => Number(r.id) > beforeId && r.head_sha === plan.sha).sort((a, b) => Number(a.id) - Number(b.id))[0];
+    if (!run) {
+      const other = rs.filter((r) => Number(r.id) > beforeId).sort((a, b) => Number(a.id) - Number(b.id))[0];
+      if (other && i >= 6) out(`! thấy run ${String(other.id)} mới nhưng ở SHA ${String(other.head_sha).slice(0, 8)} — không phải SHA của kế hoạch`);
+    }
+  }
+  const tag = run ? `run ${String(run.id)} ${String(run.html_url)}` : "chưa thấy run của SHA này sau 90 giây — KHÔNG dispatch lại; tra Actions";
+  mutateControl(ctx, actor, () => ({ change: { put: {}, events: [{ kind: "DEPLOY_DISPATCHED", detail: `${plan.sha?.slice(0, 12)} · ${tag}` }], message: `deploy ${plan.sha?.slice(0, 12)}` }, result: null }));
+  out(`✓ đã dispatch MỘT lượt deploy ${plan.sha.slice(0, 12)} · ${tag}`);
+  out(`  xong thì: npm run ai -- verify --sha=${plan.sha} --record --mission=<mã>`);
   return 0;
 }
 
@@ -3781,7 +4086,7 @@ async function cmdVerify(ctx: RepoCtx, flags: Set<string>, values: Map<string, s
       }
     }
   }
-  const v = verifyVerdict({ expectedSha: sha, health: prod.health, healthError: prod.error, expectedMigrations, deployRun, endpoints });
+  const v = verifyVerdict({ expectedSha: sha, health: prod.health, healthError: prod.error, expectedMigrations, migrationOffset: ctx.config.migrationRowOffset, deployRun, endpoints });
   out(`HẬU KIỂM PRODUCTION · mong đợi ${short(sha)}`);
   for (const c of v.checks) out(`  ${c.ok ? "✓" : "✗"} ${c.label}`);
   out(`  ⇒ ${v.pass ? "ĐẠT" : "KHÔNG ĐẠT — INCIDENT: không tuyên bố xong. Không có rollback tự động (migration chỉ đi tới); sửa tiến bằng PR mới, hoặc báo chủ shop nếu production hỏng"}`);
@@ -3937,6 +4242,14 @@ MẶT PHẲNG ĐIỀU KHIỂN XUYÊN SỨ MỆNH — docs/ai-tech-room/delivery-
   npm run ai -- verify [--sha=…] [--record --mission=<mã>]
                                                          hậu kiểm production: SHA · migration · lượt deploy + smoke · endpoint công khai
   npm run ai -- metrics [--days=14] [--json]             lead time · CI · chờ deploy · deploy · tỷ lệ đỏ / revert · trùng việc đã chặn
+
+BÀN GIAO — worker KHÔNG cần quyền GitHub API; chỉ Delivery Controller (khoá integration-lead + GH_TOKEN) ghi GitHub
+  npm run ai -- handoff <mã> --tests="lệnh: kết quả|…" [--summary=… --title=… --branch=…]
+                                                         WORKER: nhánh đã đẩy + cây sạch ⇒ PR_READY trong sổ (chỉ cần git push)
+  npm run ai -- pr-open <mã> --token=…                   mở PR từ bản bàn giao — ĐÚNG SHA đã bàn giao, không thì từ chối
+  npm run ai -- merge <PR> --sha=<SHA queue in> --token=…
+                                                         gộp (squash) CHỈ khi hàng đợi xếp MERGE_NOW / MERGE_ISOLATED ở đúng SHA đó
+  npm run ai -- deploy --token=…                         MỘT lượt deploy, CHỈ khi deploy-plan nói DEPLOY; trả đúng run của SHA
 `;
 
 export async function main(argv: readonly string[], cwd: string, opts: { actor?: string } = {}): Promise<number> {
@@ -3991,6 +4304,14 @@ export async function main(argv: readonly string[], cwd: string, opts: { actor?:
       return cmdQueue(ctx, a.flags);
     case "review":
       return cmdReview(ctx, rest[0], a.flags, a.values);
+    case "handoff":
+      return cmdHandoff(ctx, rest[0], a.values);
+    case "pr-open":
+      return cmdPrOpen(ctx, rest[0], a.flags, a.values);
+    case "merge":
+      return cmdMerge(ctx, rest[0], a.flags, a.values);
+    case "deploy":
+      return cmdDeploy(ctx, a.flags, a.values);
     case "deploy-plan":
       return cmdDeployPlan(ctx, a.flags, a.values);
     case "verify":

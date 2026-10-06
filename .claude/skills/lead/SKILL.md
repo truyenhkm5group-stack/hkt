@@ -59,15 +59,17 @@ nhánh; sửa hết phát hiện, rồi ghi dấu vào sổ: `review <PR> --sha=
 (chỉ phiên cầm khoá tech-lead / integration-lead ghi được PASS — worker không tự chấm mình).
 Hàng đợi chỉ nhận dấu khớp SHA hiện tại của PR — đẩy thêm commit là phải review lại.
 
+Worker (hoặc phiên khác) xong mà không có quyền GitHub API ⇒ nó chạy `handoff <sứ-mệnh> --tests=…`; `queue` hiện NEEDS_PR
+⇒ bạn (Delivery Controller) chạy `pr-open <sứ-mệnh> --token=…`. Không bao giờ bắt worker đi tìm credential.
+
 ## 4. Gộp và deploy — chỉ khi đang cầm khoá Integration Lead
 
 ```
 node "<scratchpad>/ai-tech.ts" lease acquire integration-lead --purpose="gộp + deploy lô <…>"
 node "<scratchpad>/ai-tech.ts" queue            # MERGE_NOW (một lô) · MERGE_ISOLATED (HIGH đi riêng) · chờ gì, vì sao
-… gộp đúng các PR MERGE_NOW (squash, kèm `sha` = ĐÚNG SHA `queue` in ra — đầu nhánh đổi thì GitHub từ chối;
-  chỉ khi mergeable_state=clean, gates xanh) …
+node "<scratchpad>/ai-tech.ts" merge <PR> --sha=<SHA queue in> --token=<mã phiên>   # chỉ gộp được MERGE_NOW / MERGE_ISOLATED
 node "<scratchpad>/ai-tech.ts" deploy-plan --token=<mã phiên>   # DEPLOY / WAIT_DEPLOY / FIX_MAIN / NEED_LEASE
-… DEPLOY ⇒ dispatch "Deploy ERP to VPS" trên main MỘT lần, bám run id > BEFORE (không dispatch chồng) …
+node "<scratchpad>/ai-tech.ts" deploy --token=<mã phiên>        # MỘT lượt, chỉ khi deploy-plan nói DEPLOY
 node "<scratchpad>/ai-tech.ts" verify --sha=<sha> --record --mission=<sứ-mệnh>
 node "<scratchpad>/ai-tech.ts" close <sứ-mệnh> --status=DONE --evidence="PR #… · deploy … · verify ĐẠT"
 node "<scratchpad>/ai-tech.ts" lease release integration-lead --token=<mã phiên>
