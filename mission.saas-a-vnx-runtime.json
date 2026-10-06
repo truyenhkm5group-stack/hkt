@@ -33,21 +33,23 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-06T17:03:14.603Z",
-  "updated_at": "2026-10-06T18:51:45.875Z",
-  "last_heartbeat": "2026-10-06T18:50:03.935Z",
+  "updated_at": "2026-10-06T20:48:09.650Z",
+  "last_heartbeat": "2026-10-06T20:48:09.650Z",
   "definition_of_done": [],
   "handoff": {
     "branch": "feat/saas-a-vnx-runtime",
-    "sha": "cf9c9808dcf4605374eb433da8b815c9646cc7f6",
-    "at": "2026-10-06T18:50:03.935Z",
+    "sha": "4b6e3191e4786d36380a74222986f94061e10f46",
+    "at": "2026-10-06T20:48:09.650Z",
     "actor": "DESKTOP-56TH98Y:wt-saas-a",
     "title": "Phase A: chuyển runtime chatbot VNX sang Chốt Đơn — gỡ 4 chặn kỹ thuật (ai_sales nhà vẫn TẮT), rồi bóng từng page",
-    "summary": "Gỡ chặn 2/3/4 Phase 8b theo công tắc ai_sales của nhà (đang TẮT ⇒ production không đổi); chặn 1 PancakePosSink để PR riêng; không build vì chỉ thêm import type vào tệp client-safe",
+    "summary": "",
     "tests": [
+      "gộp origin/main (5d702442): xung đột engine.ts gỡ giữ cả Platform AI Policy #618 và nhánh HOME",
       "npm run typecheck: sạch",
-      "npm run lint: sạch (eslint --max-warnings=0 trên 10 tệp đã sửa: 0)",
-      "npm test: TẤT CẢ KIỂM THỬ ĐẠT (lượt 2; lượt 1 đỏ ở backup.test testToChucChayThat do fork bash hết tài nguyên Windows, chạy riêng đạt)",
-      "đột biến: bỏ đòi dòng ai_sales tường minh ⇒ đỏ; bỏ nhánh HOME ⇒ đỏ"
+      "npm run lint: sạch; eslint --max-warnings=0 tệp sửa: 0",
+      "npm test: TẤT CẢ KIỂM THỬ ĐẠT (sau commit, chạy một mình)",
+      "saas-vnx-runtime + g-sched + platform-ai-model + ai-provider-failover: đạt",
+      "đột biến M2 bỏ nhánh HOME ⇒ đỏ; bỏ cổng job tường minh ⇒ đỏ"
     ]
   }
 }
