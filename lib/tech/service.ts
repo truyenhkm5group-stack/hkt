@@ -4,6 +4,8 @@ import { getDb, schema } from "@/db";
 import {
   canTransitionTechIncident,
   canTransitionTechTask,
+  isTechOwnerEscalation,
+  OWNER_ACTION_MIN_CHARS,
   TECH_AGENT_TEMPLATES,
   TECH_TASK_STATUS_LABEL,
   techDeployBlockers,
@@ -15,6 +17,7 @@ import {
   type TechIncidentSeverity,
   type TechIncidentStatus,
   type TechModule,
+  type TechOwnerEscalation,
   type TechPriority,
   TECH_RISKS,
   type TechRisk,
@@ -157,6 +160,10 @@ export type CreateTechTaskInput = {
    * `lib/constants/tech-risk.ts`. Bỏ trống ⇒ dùng mức máy xếp.
    */
   riskOverride?: { risk: TechRisk; reason: string } | null;
+  /** Sứ mệnh chứa việc (`tech_missions.id`). Sứ mệnh đã kết thúc ⇒ từ chối. */
+  missionId?: string | null;
+  /** Dự án (`tech_projects.id`). Bỏ trống mà có sứ mệnh ⇒ lấy dự án của sứ mệnh. */
+  projectId?: string | null;
 };
 
 export async function createTechTask(input: CreateTechTaskInput, actor: TechActor): Promise<TechResult<{ id: string; code: string; risk: TechRisk }>> {
@@ -172,6 +179,19 @@ export async function createTechTask(input: CreateTechTaskInput, actor: TechActo
   const risk = dat?.risk ?? mayXep.risk;
   const approvalRequired = risk === "R2";
   const db = await getDb();
+
+  let missionId: string | null = input.missionId || null;
+  let projectId: string | null = input.projectId || null;
+  if (missionId) {
+    const mission = await db.query.techMissions.findFirst({
+      where: eq(schema.techMissions.id, missionId),
+      columns: { id: true, status: true, projectId: true },
+    });
+    if (!mission) return { error: "Không tìm thấy sứ mệnh này." };
+    if (mission.status === "DONE" || mission.status === "CANCELLED") return { error: "Sứ mệnh đã kết thúc — mở sứ mệnh mới thay vì thêm việc vào sứ mệnh đã đóng." };
+    missionId = mission.id;
+    projectId = projectId ?? mission.projectId;
+  }
 
   for (let lan = 0; lan < 3; lan += 1) {
     const code = await nextCode(db, "TECH");
@@ -197,6 +217,8 @@ export async function createTechTask(input: CreateTechTaskInput, actor: TechActo
           parentTaskId: input.parentTaskId || null,
           dependsOn: input.dependsOn ?? [],
           agentId: input.agentId || null,
+          missionId,
+          projectId,
           approvalRequired,
           approvalStatus: approvalRequired ? "PENDING" : "NOT_REQUIRED",
           createdByKind: actor.kind,
@@ -238,7 +260,15 @@ export async function createTechTask(input: CreateTechTaskInput, actor: TechActo
  *  4. `DEPLOYING` phải qua cổng phê duyệt; `DONE` phải có bằng chứng.
  */
 export async function setTechTaskStatus(
-  input: { taskId: string; to: TechTaskStatus; note?: string },
+  input: {
+    taskId: string;
+    to: TechTaskStatus;
+    note?: string;
+    /** Bắt buộc khi `to = NEEDS_OWNER`: một trong chín lý do (`TECH_OWNER_ESCALATIONS`). */
+    ownerEscalation?: TechOwnerEscalation | null;
+    /** Bắt buộc khi `to = NEEDS_OWNER`: ĐÚNG việc chủ shop phải làm. */
+    ownerAction?: string | null;
+  },
   actor: TechActor,
 ): Promise<TechResult<{ status: TechTaskStatus; skipped?: true }>> {
   const db = await getDb();
@@ -246,6 +276,7 @@ export async function setTechTaskStatus(
   if (!task) return { error: "Không tìm thấy việc này." };
   const from = task.status as TechTaskStatus;
   const note = input.note?.trim() ?? "";
+  const ownerAction = input.ownerAction?.trim() ?? "";
 
   if (from === input.to) return { ok: true, status: from, skipped: true };
 
@@ -254,6 +285,29 @@ export async function setTechTaskStatus(
   }
   if (input.to === "BLOCKED" && note.length < 5) {
     return { error: "Báo bị chặn thì phải nói bị chặn bởi cái gì — chặn mà không nói vì sao thì không ai gỡ được." };
+  }
+  /*
+    CẦN CHỦ SHOP: vào được từ mọi phía (người, máy, agent — worker headless gặp OAuth / quyền / quyết định
+    không hoàn tác thì PHẢI dừng ở đây thay vì chờ mãi hay tắt bảo mật), nhưng phải nói ĐÚNG một lý do
+    trong chín và ĐÚNG việc chủ shop phải làm. RA thì chỉ NGƯỜI: một agent tự gỡ "chờ chủ shop" của chính
+    nó là tự trả lời thay chủ shop.
+  */
+  if (input.to === "NEEDS_OWNER") {
+    if (!isTechOwnerEscalation(input.ownerEscalation)) {
+      return { error: "Gọi chủ shop thì phải chọn đúng một trong chín lý do (duyệt · khoá · thanh toán · đăng nhập ngoài · quyết định không hoàn tác · sự cố production · sự cố an ninh · luật mâu thuẫn · trạng thái lạ rủi ro cao)." };
+    }
+    if (ownerAction.length < OWNER_ACTION_MIN_CHARS) {
+      return { error: "Phải viết rõ chủ shop cần làm ĐÚNG việc gì (bấm ở đâu, cấp quyền gì) — đủ để làm theo mà không phải hỏi lại." };
+    }
+  }
+  if (from === "NEEDS_OWNER") {
+    if (actor.kind !== "HUMAN") return { error: "Chỉ NGƯỜI gỡ được trạng thái “Cần chủ shop” — máy và agent không trả lời thay chủ shop." };
+    if (note.length < 5) return { error: "Gỡ “Cần chủ shop” thì ghi lại chủ shop đã quyết / đã làm gì." };
+  }
+  /* HUỶ là quyết định của người, và phải nói vì sao — một việc biến mất khỏi hàng đợi không lời giải thích là việc bị giấu. */
+  if (input.to === "CANCELLED") {
+    if (actor.kind !== "HUMAN") return { error: "Chỉ NGƯỜI huỷ được việc — máy và agent không tự bỏ việc được giao." };
+    if (note.length < 10) return { error: "Huỷ việc thì phải nói vì sao (ít nhất một câu)." };
   }
   /*
     CỔNG PHÊ DUYỆT CHẶN Ở CẢ HAI BƯỚC, KHÔNG CHỈ Ở LƯỢT DEPLOY.
@@ -296,10 +350,25 @@ export async function setTechTaskStatus(
       // `BUILDING` thì mọi phép đo thời gian làm việc đều ngắn đi một cách có hệ thống.
       startedAt: task.startedAt ?? (input.to === "BUILDING" ? now : null),
       completedAt: input.to === "DONE" ? (task.completedAt ?? now) : null,
+      // Hai ô chỉ có nghĩa khi đang chờ chủ shop; rời trạng thái đó thì xoá — câu hướng dẫn cũ còn nằm lại
+      // sẽ hiện ra ở lần gọi chủ shop SAU như thể là việc mới (nhật ký vẫn giữ nguyên câu cũ).
+      ownerEscalation: input.to === "NEEDS_OWNER" ? (input.ownerEscalation as string) : "",
+      ownerAction: input.to === "NEEDS_OWNER" ? ownerAction : "",
     })
     .where(eq(schema.techTasks.id, input.taskId));
 
-  await ghiSuKien(db, { taskId: input.taskId, kind: "STATUS", note, previousValue: from, nextValue: input.to }, actor);
+  await ghiSuKien(
+    db,
+    {
+      taskId: input.taskId,
+      kind: "STATUS",
+      note: input.to === "NEEDS_OWNER" && !note ? ownerAction : note,
+      previousValue: from,
+      nextValue: input.to,
+      payload: input.to === "NEEDS_OWNER" ? { ownerEscalation: input.ownerEscalation, ownerAction } : undefined,
+    },
+    actor,
+  );
   return { ok: true, status: input.to };
 }
 

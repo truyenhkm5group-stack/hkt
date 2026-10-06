@@ -144,6 +144,7 @@ export async function getTechTask(id: string) {
     where: eq(schema.techTasks.id, id),
     with: {
       agent: true,
+      mission: { columns: { id: true, code: true, title: true, status: true } },
       parent: { columns: { id: true, code: true, title: true, status: true } },
       children: { columns: { id: true, code: true, title: true, status: true, priority: true }, orderBy: [asc(schema.techTasks.createdAt)] },
     },

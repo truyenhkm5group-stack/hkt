@@ -778,7 +778,11 @@ const TECH_TO_WORK_STATUS: Record<string, WorkStatus> = {
   BLOCKED: "BLOCKED",
   FAILED: "BLOCKED",
   ROLLED_BACK: "BLOCKED",
+  // Chờ chủ shop: đứng im cho tới khi có người làm — cùng nhóm "bị chặn" của hàng đợi chung.
+  NEEDS_OWNER: "BLOCKED",
   DONE: "DONE",
+  // Huỷ là KẾT THÚC: không hiện lại như việc mới (phép chiếu cũ chỉ loại DONE).
+  CANCELLED: "DONE",
 };
 
 /**
@@ -794,7 +798,7 @@ export async function adaptTechTasks(now: Date, includeClosed = false): Promise<
   const db = await getDb();
   const t = schema.techTasks;
   const rows = await db.query.techTasks.findMany({
-    where: includeClosed ? undefined : sql`${t.status} <> 'DONE'`,
+    where: includeClosed ? undefined : sql`${t.status} NOT IN ('DONE','CANCELLED')`,
     orderBy: [sql`case ${t.priority} when 'P0' then 0 when 'P1' then 1 when 'P2' then 2 else 3 end`],
     limit: 300,
     with: { agent: { columns: { key: true, name: true } } },

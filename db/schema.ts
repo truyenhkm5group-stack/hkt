@@ -7770,18 +7770,35 @@ export const techTasks = pgTable(
     startedAt: ts("started_at"),
     completedAt: ts("completed_at"),
     blockedReason: text("blocked_reason").notNull().default(""),
+
+    /* ───── Mặt phẳng điều khiển công ty (0225, docs/tech-control-plane/README.md) ───── */
+    /** Sứ mệnh chứa việc này. `NULL` = việc lẻ (sự cố, việc tay) — vẫn hợp lệ. */
+    missionId: text("mission_id").references((): AnyPgColumn => techMissions.id, { onDelete: "set null" }),
+    /** Dự án kỹ thuật. `NULL` = chưa khai — KHÔNG ngầm hiểu là ERP. */
+    projectId: text("project_id").references((): AnyPgColumn => techProjects.id, { onDelete: "set null" }),
+    /** Khi `NEEDS_OWNER`: một trong chín lý do (`TECH_OWNER_ESCALATIONS`). Rời trạng thái đó thì xoá về rỗng. */
+    ownerEscalation: text("owner_escalation").notNull().default(""),
+    /** Khi `NEEDS_OWNER`: ĐÚNG việc chủ shop phải làm, đủ để làm theo mà không phải hỏi lại. */
+    ownerAction: text("owner_action").notNull().default(""),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
   (t) => [
     uniqueIndex("tech_tasks_code_uq").on(t.code),
+    index("tech_tasks_mission_idx").on(t.missionId),
+    index("tech_tasks_project_idx").on(t.projectId),
     index("tech_tasks_status_idx").on(t.status, t.priority),
     index("tech_tasks_created_idx").on(t.createdAt),
     index("tech_tasks_agent_idx").on(t.agentId),
     index("tech_tasks_module_idx").on(t.module),
     check(
       "tech_tasks_status_check",
-      sql`${t.status} IN ('NEW','TRIAGED','SPEC_READY','BUILDING','REVIEW','QA','READY_TO_DEPLOY','DEPLOYING','OBSERVING','DONE','BLOCKED','FAILED','ROLLED_BACK')`,
+      sql`${t.status} IN ('NEW','TRIAGED','SPEC_READY','BUILDING','REVIEW','QA','READY_TO_DEPLOY','DEPLOYING','OBSERVING','DONE','BLOCKED','FAILED','ROLLED_BACK','NEEDS_OWNER','CANCELLED')`,
+    ),
+    /* Chờ chủ shop mà không nói chờ vì sao và phải làm gì thì việc nằm đó mãi — cùng tinh thần `blocked_reason`. */
+    check(
+      "tech_tasks_needs_owner_check",
+      sql`${t.status} <> 'NEEDS_OWNER' OR (${t.ownerEscalation} IN ('APPROVAL_REQUIRED','CREDENTIAL_REQUIRED','PAYMENT_REQUIRED','EXTERNAL_AUTH_REQUIRED','IRREVERSIBLE_BUSINESS_DECISION','PRODUCTION_INCIDENT','SECURITY_INCIDENT','POLICY_CONFLICT','UNKNOWN_HIGH_RISK_STATE') AND length(btrim(${t.ownerAction})) >= 10)`,
     ),
     check("tech_tasks_priority_check", sql`${t.priority} IN ('P0','P1','P2','P3')`),
     check("tech_tasks_risk_check", sql`${t.risk} IN ('R0','R1','R2')`),
@@ -8238,8 +8255,173 @@ export const techIncidents = pgTable(
   ],
 );
 
+/* ═══════════ MẶT PHẲNG ĐIỀU KHIỂN CÔNG TY (0225) — docs/tech-control-plane/README.md ═══════════
+
+   Bốn bảng, cộng thêm vào nền `/tech` đang chạy:
+     tech_projects  — dự án KỸ THUẬT của công ty (ERP · ChotDonTuDong · HSLC · SaaS …), không phải khách thuê.
+     tech_goals     — mục tiêu chủ shop đặt. Lưu QUYẾT ĐỊNH; tiến độ suy ra từ sứ mệnh / việc.
+     tech_missions  — một nhóm việc giao được. Lưu QUYẾT ĐỊNH; trạng thái thi hành suy ra từ việc.
+     tech_events    — luồng sự kiện của mặt phẳng điều khiển (append-only) cho thứ CHƯA có nhật ký riêng.
+   Trạng thái thi hành ("đang chạy", "chờ chủ shop") KHÔNG có cột: `deriveMissionExecution` tính lúc đọc. */
+
+export const techProjects = pgTable(
+  "tech_projects",
+  {
+    id: id(),
+    /** Khoá ổn định (`erp`, `chotdon`…) — `TECH_PROJECT_KEY_PATTERN`. Đổi khoá là đổi tên nhánh và đường dẫn. */
+    key: text("key").notNull(),
+    name: text("name").notNull(),
+    description: text("description").notNull().default(""),
+    /** Kho mã (`owner/repo`). Rỗng = cùng kho với ERP. */
+    repo: text("repo").notNull().default(""),
+    active: boolean("active").notNull().default(true),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex("tech_projects_key_uq").on(t.key),
+    check("tech_projects_key_check", sql`${t.key} ~ '^[a-z][a-z0-9-]{1,31}$'`),
+  ],
+);
+
+export const techGoals = pgTable(
+  "tech_goals",
+  {
+    id: id(),
+    /** `GOAL-3` — mã đọc được trên điện thoại; `id` vẫn là khoá. */
+    code: text("code").notNull(),
+    projectId: text("project_id").references(() => techProjects.id, { onDelete: "set null" }),
+    title: text("title").notNull(),
+    /** Câu mục tiêu đầy đủ của chủ shop — giữ nguyên lời. */
+    description: text("description").notNull().default(""),
+    /** Đạt được nghĩa là gì, đo bằng gì. Rỗng = CHƯA KHAI, màn hình nói ra. */
+    successCriteria: text("success_criteria").notNull().default(""),
+    /** `TECH_GOAL_STATUSES`. Chỉ lưu QUYẾT ĐỊNH của người. */
+    status: text("status").notNull().default("DRAFT"),
+    priority: text("priority").notNull().default("P2"),
+    /** Câu chốt khi ACHIEVED / ABANDONED. */
+    outcomeNote: text("outcome_note").notNull().default(""),
+    createdByKind: text("created_by_kind").notNull().default("HUMAN"),
+    createdById: text("created_by_id").references(() => users.id, { onDelete: "set null" }),
+    createdByName: text("created_by_name").notNull().default(""),
+    activatedAt: ts("activated_at"),
+    closedAt: ts("closed_at"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex("tech_goals_code_uq").on(t.code),
+    index("tech_goals_status_idx").on(t.status, t.priority),
+    index("tech_goals_project_idx").on(t.projectId),
+    check("tech_goals_status_check", sql`${t.status} IN ('DRAFT','ACTIVE','PAUSED','ACHIEVED','ABANDONED')`),
+    check("tech_goals_priority_check", sql`${t.priority} IN ('P0','P1','P2','P3')`),
+    check("tech_goals_actor_kind_check", sql`${t.createdByKind} IN ('HUMAN','SYSTEM','AI_AGENT')`),
+    /* Đóng mục tiêu mà không nói kết quả thì lần sau không ai biết lần này đã học được gì. */
+    check(
+      "tech_goals_closed_check",
+      sql`${t.status} NOT IN ('ACHIEVED','ABANDONED') OR (${t.closedAt} IS NOT NULL AND length(btrim(${t.outcomeNote})) >= 10)`,
+    ),
+  ],
+);
+
+export const techMissions = pgTable(
+  "tech_missions",
+  {
+    id: id(),
+    /** `MIS-7`. */
+    code: text("code").notNull(),
+    /** `NULL` = sứ mệnh lẻ (sửa sự cố, việc kỹ thuật không thuộc mục tiêu nào) — hợp lệ. */
+    goalId: text("goal_id").references(() => techGoals.id, { onDelete: "set null" }),
+    projectId: text("project_id").references(() => techProjects.id, { onDelete: "set null" }),
+    title: text("title").notNull(),
+    objective: text("objective").notNull().default(""),
+    /** Xong nghĩa là gì — kiểm được. */
+    definitionOfDone: text("definition_of_done").notNull().default(""),
+    /** `TECH_MISSION_STATUSES`. Chỉ lưu QUYẾT ĐỊNH; thi hành suy ra từ việc. */
+    status: text("status").notNull().default("PLANNING"),
+    priority: text("priority").notNull().default("P2"),
+    /** Mã sứ mệnh tương ứng trên sổ AI Tech Room (`ai-control/registry`, `scripts/ai-tech.ts`). Rỗng = chưa nối. */
+    registryId: text("registry_id").notNull().default(""),
+    outcomeNote: text("outcome_note").notNull().default(""),
+    createdByKind: text("created_by_kind").notNull().default("HUMAN"),
+    createdById: text("created_by_id").references(() => users.id, { onDelete: "set null" }),
+    createdByName: text("created_by_name").notNull().default(""),
+    activatedAt: ts("activated_at"),
+    closedAt: ts("closed_at"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex("tech_missions_code_uq").on(t.code),
+    uniqueIndex("tech_missions_registry_uq").on(t.registryId).where(sql`${t.registryId} <> ''`),
+    index("tech_missions_goal_idx").on(t.goalId),
+    index("tech_missions_status_idx").on(t.status, t.priority),
+    check("tech_missions_status_check", sql`${t.status} IN ('PLANNING','ACTIVE','PAUSED','DONE','CANCELLED')`),
+    check("tech_missions_priority_check", sql`${t.priority} IN ('P0','P1','P2','P3')`),
+    check("tech_missions_actor_kind_check", sql`${t.createdByKind} IN ('HUMAN','SYSTEM','AI_AGENT')`),
+    check(
+      "tech_missions_closed_check",
+      sql`${t.status} NOT IN ('DONE','CANCELLED') OR (${t.closedAt} IS NOT NULL AND length(btrim(${t.outcomeNote})) >= 10)`,
+    ),
+  ],
+);
+
+/**
+ * LUỒNG SỰ KIỆN CỦA MẶT PHẲNG ĐIỀU KHIỂN — CHỈ THÊM. Tên khai ở `TECH_EVENT_NAMES`.
+ * Việc có nhật ký riêng (`tech_task_events`) nên sự kiện của VIỆC không chép sang đây; cột `task_id` chỉ để
+ * nối một sự kiện của thứ khác (worker nhận việc, CI đỏ) về việc nó nói tới.
+ */
+export const techEvents = pgTable(
+  "tech_events",
+  {
+    id: id(),
+    name: text("name").notNull(),
+    /** `TECH_EVENT_SUBJECTS`. */
+    subjectType: text("subject_type").notNull(),
+    subjectId: text("subject_id").notNull(),
+    taskId: text("task_id").references(() => techTasks.id, { onDelete: "set null" }),
+    missionId: text("mission_id").references(() => techMissions.id, { onDelete: "set null" }),
+    goalId: text("goal_id").references(() => techGoals.id, { onDelete: "set null" }),
+    payload: jsonb("payload").$type<Record<string, unknown>>().notNull().default({}),
+    actorKind: text("actor_kind").notNull(),
+    actorId: text("actor_id").references(() => users.id, { onDelete: "set null" }),
+    actorName: text("actor_name").notNull().default(""),
+    /** Gửi lại cùng khoá (job chạy lại, bấm hai lần) không đẻ dòng thứ hai. */
+    dedupeKey: text("dedupe_key"),
+    occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("tech_events_dedupe_uq").on(t.dedupeKey),
+    index("tech_events_subject_idx").on(t.subjectType, t.subjectId, t.occurredAt),
+    index("tech_events_occurred_idx").on(t.occurredAt),
+    index("tech_events_mission_idx").on(t.missionId, t.occurredAt),
+    check("tech_events_name_check", sql`${t.name} ~ '^[a-z_]+(\\.[a-z_]+)+$'`),
+    check("tech_events_subject_check", sql`${t.subjectType} IN ('GOAL','MISSION','TASK','WORKER','RUN','DEPLOYMENT','INCIDENT')`),
+    check("tech_events_actor_kind_check", sql`${t.actorKind} IN ('HUMAN','SYSTEM','AI_AGENT')`),
+    check("tech_events_human_link_check", sql`${t.actorKind} = 'HUMAN' OR ${t.actorId} IS NULL`),
+  ],
+);
+
+export const techProjectsRelations = relations(techProjects, ({ many }) => ({
+  goals: many(techGoals),
+  missions: many(techMissions),
+}));
+
+export const techGoalsRelations = relations(techGoals, ({ one, many }) => ({
+  project: one(techProjects, { fields: [techGoals.projectId], references: [techProjects.id] }),
+  missions: many(techMissions),
+}));
+
+export const techMissionsRelations = relations(techMissions, ({ one, many }) => ({
+  goal: one(techGoals, { fields: [techMissions.goalId], references: [techGoals.id] }),
+  project: one(techProjects, { fields: [techMissions.projectId], references: [techProjects.id] }),
+  tasks: many(techTasks),
+}));
+
 export const techTasksRelations = relations(techTasks, ({ one, many }) => ({
   agent: one(techAgents, { fields: [techTasks.agentId], references: [techAgents.id] }),
+  mission: one(techMissions, { fields: [techTasks.missionId], references: [techMissions.id] }),
+  project: one(techProjects, { fields: [techTasks.projectId], references: [techProjects.id] }),
   parent: one(techTasks, { fields: [techTasks.parentTaskId], references: [techTasks.id], relationName: "techTaskParent" }),
   children: many(techTasks, { relationName: "techTaskParent" }),
   events: many(techTaskEvents),
@@ -8279,6 +8461,10 @@ export type TechTaskEventRow = typeof techTaskEvents.$inferSelect;
 export type TechAgentRunRow = typeof techAgentRuns.$inferSelect;
 export type TechDeploymentRow = typeof techDeployments.$inferSelect;
 export type TechIncidentRow = typeof techIncidents.$inferSelect;
+export type TechProjectRow = typeof techProjects.$inferSelect;
+export type TechGoalRow = typeof techGoals.$inferSelect;
+export type TechMissionRow = typeof techMissions.$inferSelect;
+export type TechEventRow = typeof techEvents.$inferSelect;
 
 // ═══ Company OS · Agent A · sổ mẫu, vòng đời, sự kiện ═══
 //

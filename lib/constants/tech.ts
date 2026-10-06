@@ -39,6 +39,8 @@ export const TECH_TASK_STATUSES = [
   "BLOCKED",
   "FAILED",
   "ROLLED_BACK",
+  "NEEDS_OWNER",
+  "CANCELLED",
 ] as const;
 export type TechTaskStatus = (typeof TECH_TASK_STATUSES)[number];
 
@@ -56,6 +58,8 @@ export const TECH_TASK_STATUS_LABEL: Record<TechTaskStatus, string> = {
   BLOCKED: "Bị chặn",
   FAILED: "Thất bại",
   ROLLED_BACK: "Đã quay lui",
+  NEEDS_OWNER: "Cần chủ shop",
+  CANCELLED: "Đã huỷ",
 };
 
 export const TECH_TASK_STATUS_HINT: Record<TechTaskStatus, string> = {
@@ -72,6 +76,8 @@ export const TECH_TASK_STATUS_HINT: Record<TechTaskStatus, string> = {
   BLOCKED: "Đang chờ một thứ bên ngoài: quyết định của chủ shop, dữ liệu, hoặc một việc khác",
   FAILED: "Làm nhưng không ra kết quả — phải nói rõ vì sao, không được đóng im lặng",
   ROLLED_BACK: "Đã lên production rồi phải quay lui",
+  NEEDS_OWNER: "Máy / agent dừng lại vì cần ĐÚNG MỘT việc của chủ shop (duyệt, cấp quyền, đăng nhập, quyết định không hoàn tác) — ô hướng dẫn nói rõ việc đó",
+  CANCELLED: "Người quyết định không làm nữa — kết thúc, nhánh và lịch sử giữ nguyên",
 };
 
 export const TECH_TASK_STATUS_TONE: Record<TechTaskStatus, string> = {
@@ -88,6 +94,8 @@ export const TECH_TASK_STATUS_TONE: Record<TechTaskStatus, string> = {
   BLOCKED: "bg-orange-50 text-orange-700 dark:bg-orange-950/60 dark:text-orange-300",
   FAILED: "bg-rose-100 text-rose-800 dark:bg-rose-950/60 dark:text-rose-300",
   ROLLED_BACK: "bg-rose-100 text-rose-800 dark:bg-rose-950/60 dark:text-rose-300",
+  NEEDS_OWNER: "bg-fuchsia-100 text-fuchsia-800 dark:bg-fuchsia-950/60 dark:text-fuchsia-300",
+  CANCELLED: "bg-zinc-100 text-zinc-500 line-through dark:bg-zinc-800 dark:text-zinc-400",
 };
 
 /**
@@ -102,29 +110,76 @@ export const TECH_TASK_STATUS_TONE: Record<TechTaskStatus, string> = {
  * cùng lý do AGENTS.md mục 59 không cho một sự cố cũ sinh ra một đợt care mới.
  */
 export const TECH_TASK_TRANSITIONS: Record<TechTaskStatus, TechTaskStatus[]> = {
-  NEW: ["TRIAGED", "BLOCKED"],
-  TRIAGED: ["SPEC_READY", "BUILDING", "BLOCKED"],
-  SPEC_READY: ["BUILDING", "TRIAGED", "BLOCKED"],
-  BUILDING: ["REVIEW", "BLOCKED", "FAILED"],
-  REVIEW: ["QA", "BUILDING", "BLOCKED", "FAILED"],
-  QA: ["READY_TO_DEPLOY", "BUILDING", "BLOCKED", "FAILED"],
-  READY_TO_DEPLOY: ["DEPLOYING", "QA", "BLOCKED"],
-  DEPLOYING: ["OBSERVING", "FAILED", "ROLLED_BACK"],
-  OBSERVING: ["DONE", "FAILED", "ROLLED_BACK"],
+  NEW: ["TRIAGED", "BLOCKED", "NEEDS_OWNER", "CANCELLED"],
+  TRIAGED: ["SPEC_READY", "BUILDING", "BLOCKED", "NEEDS_OWNER", "CANCELLED"],
+  SPEC_READY: ["BUILDING", "TRIAGED", "BLOCKED", "NEEDS_OWNER", "CANCELLED"],
+  BUILDING: ["REVIEW", "BLOCKED", "FAILED", "NEEDS_OWNER", "CANCELLED"],
+  REVIEW: ["QA", "BUILDING", "BLOCKED", "FAILED", "NEEDS_OWNER", "CANCELLED"],
+  QA: ["READY_TO_DEPLOY", "BUILDING", "BLOCKED", "FAILED", "NEEDS_OWNER", "CANCELLED"],
+  READY_TO_DEPLOY: ["DEPLOYING", "QA", "BLOCKED", "NEEDS_OWNER", "CANCELLED"],
+  // Đang deploy / đang quan sát: mã đã (hoặc sắp) nằm trên production. Huỷ lúc này là nói dối —
+  // thứ đã lên không biến mất vì một cú bấm; lối ra là FAILED / ROLLED_BACK.
+  DEPLOYING: ["OBSERVING", "FAILED", "ROLLED_BACK", "NEEDS_OWNER"],
+  OBSERVING: ["DONE", "FAILED", "ROLLED_BACK", "NEEDS_OWNER"],
   DONE: [],
-  BLOCKED: ["TRIAGED", "SPEC_READY", "BUILDING", "REVIEW", "QA", "READY_TO_DEPLOY", "FAILED"],
-  FAILED: ["TRIAGED", "BUILDING"],
-  ROLLED_BACK: ["TRIAGED", "BUILDING"],
+  BLOCKED: ["TRIAGED", "SPEC_READY", "BUILDING", "REVIEW", "QA", "READY_TO_DEPLOY", "FAILED", "NEEDS_OWNER", "CANCELLED"],
+  FAILED: ["TRIAGED", "BUILDING", "NEEDS_OWNER", "CANCELLED"],
+  ROLLED_BACK: ["TRIAGED", "BUILDING", "NEEDS_OWNER", "CANCELLED"],
+  // Chủ shop gỡ xong ⇒ việc quay về đúng khâu nó đang đứng (người chọn), hoặc kết thúc. KHÔNG có
+  // đường từ đây sang khâu deploy — cổng duyệt deploy vẫn đứng nguyên ở chỗ của nó.
+  NEEDS_OWNER: ["TRIAGED", "SPEC_READY", "BUILDING", "REVIEW", "QA", "BLOCKED", "FAILED", "CANCELLED"],
+  CANCELLED: [],
 };
 
-/** Trạng thái KẾT THÚC: không còn nước đi nào. Chỉ `DONE`. */
+/**
+ * Trạng thái KẾT THÚC: không còn nước đi nào — `DONE` và `CANCELLED`. Việc đã đóng mà cần làm lại
+ * thì mở việc MỚI trỏ về việc cũ; mở lại làm mất dòng thời gian của lần đầu.
+ */
 export const TECH_TASK_TERMINAL: TechTaskStatus[] = TECH_TASK_STATUSES.filter((s) => TECH_TASK_TRANSITIONS[s].length === 0);
 
 /**
  * Việc còn nằm trên bàn. `FAILED` và `ROLLED_BACK` VẪN MỞ — một việc thất bại là việc chưa xong,
- * và đếm nó là "đã đóng" đúng bằng cách giấu nó khỏi mọi bảng tổng hợp.
+ * và đếm nó là "đã đóng" đúng bằng cách giấu nó khỏi mọi bảng tổng hợp. `NEEDS_OWNER` cũng mở:
+ * nó đang chờ đúng một người.
  */
-export const TECH_TASK_OPEN: TechTaskStatus[] = TECH_TASK_STATUSES.filter((s) => s !== "DONE");
+export const TECH_TASK_OPEN: TechTaskStatus[] = TECH_TASK_STATUSES.filter((s) => !TECH_TASK_TERMINAL.includes(s));
+
+/**
+ * Chín lý do DUY NHẤT để máy dừng lại gọi chủ shop — cùng danh sách `OWNER_ESCALATIONS` của AI Tech
+ * Room (`scripts/ai-tech.ts`, docs/ai-tech-room/README.md mục 14). Một danh sách đóng: "cần chủ shop
+ * xem" không phải một lý do, nó là một cách đẩy việc khó sang người khác.
+ */
+export const TECH_OWNER_ESCALATIONS = [
+  "APPROVAL_REQUIRED",
+  "CREDENTIAL_REQUIRED",
+  "PAYMENT_REQUIRED",
+  "EXTERNAL_AUTH_REQUIRED",
+  "IRREVERSIBLE_BUSINESS_DECISION",
+  "PRODUCTION_INCIDENT",
+  "SECURITY_INCIDENT",
+  "POLICY_CONFLICT",
+  "UNKNOWN_HIGH_RISK_STATE",
+] as const;
+export type TechOwnerEscalation = (typeof TECH_OWNER_ESCALATIONS)[number];
+
+export const TECH_OWNER_ESCALATION_LABEL: Record<TechOwnerEscalation, string> = {
+  APPROVAL_REQUIRED: "Cần chủ shop duyệt",
+  CREDENTIAL_REQUIRED: "Cần cấp khoá / mật khẩu",
+  PAYMENT_REQUIRED: "Cần thanh toán / nạp tiền",
+  EXTERNAL_AUTH_REQUIRED: "Cần đăng nhập / cấp quyền ở dịch vụ ngoài",
+  IRREVERSIBLE_BUSINESS_DECISION: "Quyết định kinh doanh không hoàn tác được",
+  PRODUCTION_INCIDENT: "Sự cố production",
+  SECURITY_INCIDENT: "Sự cố an ninh",
+  POLICY_CONFLICT: "Hai luật mâu thuẫn nhau",
+  UNKNOWN_HIGH_RISK_STATE: "Trạng thái lạ, rủi ro cao",
+};
+
+export function isTechOwnerEscalation(value: unknown): value is TechOwnerEscalation {
+  return typeof value === "string" && (TECH_OWNER_ESCALATIONS as readonly string[]).includes(value);
+}
+
+/** Câu hướng dẫn cho chủ shop phải đủ dài để làm theo được mà không phải hỏi lại. Cùng số với CHECK ở CSDL. */
+export const OWNER_ACTION_MIN_CHARS = 10;
 
 /** Đang có người / agent đụng vào (để đếm "việc đang chạy"). */
 export const TECH_TASK_ACTIVE: TechTaskStatus[] = ["BUILDING", "REVIEW", "QA", "DEPLOYING", "OBSERVING"];
@@ -765,6 +820,7 @@ export const TECH_EVENT_KINDS = [
   "DEPLOY",
   "INCIDENT",
   "VERIFY",
+  "MISSION",
 ] as const;
 export type TechEventKind = (typeof TECH_EVENT_KINDS)[number];
 
@@ -782,6 +838,7 @@ export const TECH_EVENT_KIND_LABEL: Record<TechEventKind, string> = {
   DEPLOY: "Deploy",
   INCIDENT: "Sự cố",
   VERIFY: "Xác minh trên production",
+  MISSION: "Gắn / gỡ sứ mệnh",
 };
 
 /* ═════════════════════ CỘT SẮP XẾP ĐƯỢC ═════════════════════ */

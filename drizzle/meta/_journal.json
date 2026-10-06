@@ -1562,6 +1562,13 @@
       "when": 1791346283417,
       "tag": "0223_pricing_billing_foundation",
       "breakpoints": true
+    },
+    {
+      "idx": 224,
+      "version": "7",
+      "when": 1791346284417,
+      "tag": "0224_tech_control_plane_goals",
+      "breakpoints": true
     }
   ]
 }
