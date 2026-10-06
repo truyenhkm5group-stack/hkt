@@ -1,0 +1,33 @@
+{
+  "schema": 1,
+  "mission_id": "messenger-app-webhook",
+  "title": "Webhook nhận gói của app Meta Messenger riêng (cấu hình thử)",
+  "business_goal": "",
+  "status": "RUNNING",
+  "priority": "P0",
+  "risk": "HIGH",
+  "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "worker": null,
+  "worktree": null,
+  "branch": "feat/messenger-app-webhook",
+  "base_sha": "1d84fb13708ce823884ea52a6a42307f87b9984b",
+  "domains": [],
+  "owned_paths": [
+    "lib/env.ts",
+    "lib/integrations/messenger/graph.ts",
+    "app/api/webhooks/messenger/route.ts",
+    "app/(dashboard)/platform/page.tsx",
+    "scripts/install-vps.sh",
+    ".github/workflows/deploy-vps.yml",
+    "tests/messenger-webhook-secrets.test.ts",
+    "tests/sync-fixtures.test.ts"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-06T12:35:49.000Z",
+  "updated_at": "2026-10-06T12:35:49.000Z",
+  "last_heartbeat": "2026-10-06T12:35:49.000Z",
+  "definition_of_done": []
+}
