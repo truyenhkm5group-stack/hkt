@@ -55,7 +55,8 @@ thì chờ khoá hết hạn. Không bao giờ tin trí nhớ của cuộc trò 
 
 Worker (subagent `ai-tech-worker`, mỗi worker một cây) KHÔNG mở PR, KHÔNG gộp, KHÔNG deploy, KHÔNG
 sửa `.ai/` hay sổ điều khiển. Rủi ro ≥ HIGH ⇒ một lượt `ai-tech-reviewer` (bối cảnh mới) trên ĐÚNG đầu
-nhánh; sửa hết phát hiện, rồi ghi dấu vào sổ: `review <PR> --sha=<đầu nhánh đã review> --verdict=PASS`.
+nhánh; sửa hết phát hiện, rồi ghi dấu vào sổ: `review <PR> --sha=<đầu nhánh đã review> --verdict=PASS --token=<mã phiên>`
+(chỉ phiên cầm khoá tech-lead / integration-lead ghi được PASS — worker không tự chấm mình).
 Hàng đợi chỉ nhận dấu khớp SHA hiện tại của PR — đẩy thêm commit là phải review lại.
 
 ## 4. Gộp và deploy — chỉ khi đang cầm khoá Integration Lead
@@ -63,7 +64,8 @@ Hàng đợi chỉ nhận dấu khớp SHA hiện tại của PR — đẩy thê
 ```
 node "<scratchpad>/ai-tech.ts" lease acquire integration-lead --purpose="gộp + deploy lô <…>"
 node "<scratchpad>/ai-tech.ts" queue            # MERGE_NOW (một lô) · MERGE_ISOLATED (HIGH đi riêng) · chờ gì, vì sao
-… gộp đúng các PR MERGE_NOW (squash, kèm sha đầu nhánh, chỉ khi mergeable_state=clean, gates xanh) …
+… gộp đúng các PR MERGE_NOW (squash, kèm `sha` = ĐÚNG SHA `queue` in ra — đầu nhánh đổi thì GitHub từ chối;
+  chỉ khi mergeable_state=clean, gates xanh) …
 node "<scratchpad>/ai-tech.ts" deploy-plan --token=<mã phiên>   # DEPLOY / WAIT_DEPLOY / FIX_MAIN / NEED_LEASE
 … DEPLOY ⇒ dispatch "Deploy ERP to VPS" trên main MỘT lần, bám run id > BEFORE (không dispatch chồng) …
 node "<scratchpad>/ai-tech.ts" verify --sha=<sha> --record --mission=<sứ-mệnh>

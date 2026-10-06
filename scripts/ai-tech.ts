@@ -197,6 +197,8 @@ export type Config = {
   lowRiskPaths: string[];
   /** Ai được gộp một PR theo rủi ro của nó (mục 13 · hàng đợi gộp). */
   mergePolicy: Record<Risk, MergePolicy>;
+  /** Tệp KHÔNG chạy trên VPS — `close --no-runtime` chỉ được nhận khi mọi tệp sứ mệnh chạm đều nằm ở đây. */
+  nonRuntimePaths: string[];
 };
 
 /** AUTO = Integration Lead gộp khi cổng xanh · LEAD_REVIEW = cần một lượt review độc lập ghi vào PR · OWNER = chủ shop duyệt. */
@@ -221,6 +223,8 @@ export const DEFAULT_CONFIG: Config = {
   verifyEndpoints: [],
   lowRiskPaths: [],
   mergePolicy: { LOW: "AUTO", MEDIUM: "AUTO", HIGH: "LEAD_REVIEW", CRITICAL: "OWNER" },
+  // `.github/` CỐ Ý không nằm đây: đổi đường deploy thì phải deploy thật một lượt và hậu kiểm nó.
+  nonRuntimePaths: ["docs/", "tests/", ".ai/", ".claude/", "AGENTS.md", "CLAUDE.md", "README.md", "scripts/ai-tech.ts"],
 };
 
 /** Nhánh điều khiển hợp lệ — công cụ CHỈ đẩy lên đúng loại ref này (mục 13). */
@@ -322,7 +326,7 @@ export function riskFloorFor(owns: readonly string[], cfg: Config): { risk: Risk
 
 export function parseConfig(raw: unknown): { config: Config; errors: string[] } {
   const errors: string[] = [];
-  const c: Config = { ...DEFAULT_CONFIG, hotspots: [], riskFloor: [], verifyEndpoints: [], lowRiskPaths: [], mergePolicy: { ...DEFAULT_CONFIG.mergePolicy } };
+  const c: Config = { ...DEFAULT_CONFIG, hotspots: [], riskFloor: [], verifyEndpoints: [], lowRiskPaths: [], mergePolicy: { ...DEFAULT_CONFIG.mergePolicy }, nonRuntimePaths: [...DEFAULT_CONFIG.nonRuntimePaths] };
   if (raw === undefined) return { config: c, errors };
   if (!isObj(raw)) return { config: c, errors: ["config: phải là một object JSON"] };
   const num = (k: "maxImplementationWorkers" | "activeWithinHours" | "staleAfterDays" | "cleanupGraceMinutes" | "staleHeartbeatHours" | "leaseMinutes", min: number, max: number) => {
@@ -355,6 +359,11 @@ export function parseConfig(raw: unknown): { config: Config; errors: string[] } 
     const v = strArr(raw.lowRiskPaths) ? raw.lowRiskPaths.map(normalizePattern) : null;
     if (!v || v.some((x) => x === null)) errors.push("config.lowRiskPaths: mảng mẫu đường dẫn tương đối");
     else c.lowRiskPaths = v as string[];
+  }
+  if (raw.nonRuntimePaths !== undefined) {
+    const v = strArr(raw.nonRuntimePaths) ? raw.nonRuntimePaths.map(normalizePattern) : null;
+    if (!v || v.some((x) => x === null)) errors.push("config.nonRuntimePaths: mảng mẫu đường dẫn tương đối");
+    else c.nonRuntimePaths = v as string[];
   }
   if (raw.mergePolicy !== undefined) {
     const v = raw.mergePolicy;
@@ -1798,7 +1807,7 @@ export function leaseDecision(cur: Lease | null, op: LeaseOp, me: LeaseClaimant,
   });
   const other = (c: Lease) =>
     sameLabel
-      ? `cùng nhãn ${c.holder} nhưng KHÔNG đúng mã phiên — một phiên khác trong cùng cây đang giữ, hoặc bạn sau sập (trình mã bằng --resume / --token=…, hoặc chờ hết hạn ${c.expires_at})`
+      ? `cùng nhãn ${c.holder} nhưng KHÔNG đúng mã phiên — một phiên khác trong cùng cây đang giữ (dừng lại), hoặc chính bạn sau sập: CHỈ khi chắc phiên cũ đã chết mới dùng --resume / --token=…; không thì chờ hết hạn ${c.expires_at}`
       : `thuộc ${c.holder} (${c.purpose || "không ghi mục đích"}) tới ${c.expires_at}`;
   if (op === "release") {
     if (!cur) return { ok: true, next: null, reason: "khoá vốn đang trống" };
@@ -1807,10 +1816,11 @@ export function leaseDecision(cur: Lease | null, op: LeaseOp, me: LeaseClaimant,
   }
   if (op === "renew") {
     if (!cur || !mine) return { ok: false, next: cur, reason: cur ? `khoá ${other(cur)}` : "không có khoá để gia hạn — acquire trước" };
-    return { ok: true, next: { ...cur, purpose: me.purpose || cur.purpose, heartbeat_at: now, expires_at: new Date(nowMs + ttlMs).toISOString() }, reason: "đã gia hạn" };
+    return { ok: true, next: { ...cur, purpose: me.purpose || cur.purpose, heartbeat_at: now, expires_at: new Date(nowMs + ttlMs).toISOString(), token_hash: cur.token_hash ?? me.freshTokenHash }, reason: cur.token_hash ? "đã gia hạn" : "đã gia hạn + nâng cấp khoá cũ: gắn mã phiên" };
   }
   if (!cur) return { ok: true, next: fresh(1), reason: "khoá trống — đã lấy" };
-  if (mine) return { ok: true, next: { ...cur, purpose: me.purpose || cur.purpose, heartbeat_at: now, expires_at: new Date(nowMs + ttlMs).toISOString() }, reason: "đã là chủ (đúng mã phiên) — gia hạn" };
+  // Khoá cũ chưa có mã: lần đầu người trùng nhãn chạm vào thì GẮN mã — từ đó phiên thứ hai cùng cây bị từ chối.
+  if (mine) return { ok: true, next: { ...cur, purpose: me.purpose || cur.purpose, heartbeat_at: now, expires_at: new Date(nowMs + ttlMs).toISOString(), token_hash: cur.token_hash ?? me.freshTokenHash }, reason: cur.token_hash ? "đã là chủ (đúng mã phiên) — gia hạn" : "khoá cũ chưa có mã — nâng cấp: gắn mã phiên mới" };
   if (live) return { ok: false, next: cur, reason: `đang ${other(cur)}` };
   return { ok: true, next: fresh(cur.generation + 1), reason: `khoá của ${cur.holder} đã hết hạn từ ${cur.expires_at} — tiếp quản`, takeoverFrom: cur };
 }
@@ -1890,7 +1900,7 @@ export function checkPrMigrations(x: PrMigrationInput): { problems: string[]; wa
 /** Câu lệnh migration phá dữ liệu: không đảo ngược được bằng một lượt deploy lại. */
 export function isDestructiveSql(sql: string): boolean {
   const s = sql.replace(/--.*$/gm, "").replace(/\/\*[\s\S]*?\*\//g, "");
-  return /\bDROP\s+(TABLE|COLUMN|SCHEMA|TYPE|VIEW|MATERIALIZED\s+VIEW)\b|\bTRUNCATE\b|\bDELETE\s+FROM\b|\bUPDATE\s+[A-Za-z_"][\w".]*\s+SET\b|\bALTER\s+COLUMN\s+\S+\s+(SET\s+DATA\s+)?TYPE\b|\bALTER\s+TABLE\b[^;]*\bDROP\b(?!\s+(DEFAULT|NOT\s+NULL|CONSTRAINT|INDEX))/i.test(s);
+  return /\bDROP\s+(TABLE|COLUMN|SCHEMA|TYPE|VIEW|MATERIALIZED\s+VIEW)\b|\bTRUNCATE\b|\bDELETE\s+FROM\b|\bUPDATE\s+(ONLY\s+)?[A-Za-z_"][\w".]*(\s+(AS\s+)?[A-Za-z_]\w*)?\s+SET\b|\bALTER\s+COLUMN\s+("[^"]+"|\S+)\s+(SET\s+DATA\s+)?TYPE\b|\bALTER\s+TABLE\b[^;]*\bDROP\b(?!\s+(DEFAULT|NOT\s+NULL|CONSTRAINT|INDEX))/i.test(s);
 }
 
 /**
@@ -1928,9 +1938,11 @@ export type QueueItem = {
   /** PR phụ thuộc CÒN MỞ (đã lọc PR đã đóng / đã gộp). */
   deps: number[];
   files: string[];
+  /** Đầu nhánh lúc xét — gộp phải kèm ĐÚNG SHA này. */
+  sha: string;
   migrationProblems: string[];
   createdAt: string;
-  /** Đã có lượt review độc lập (dòng "Review độc lập: ĐẠT" trong thân PR, do Lead ghi sau khi reviewer báo ĐẠT). */
+  /** Có dấu review ĐẠT trong SỔ cho đúng `sha` này (`review <PR> --sha=… --verdict=PASS`, chỉ phiên cầm khoá Lead ghi được). */
   reviewed: boolean;
 };
 
@@ -1971,7 +1983,7 @@ export function orderQueue(items: readonly QueueItem[], cfg: Config): QueueRow[]
     else if (it.gates === "failure") row("FIX_GATES", "gates / gates ĐỎ — worker sửa, không gộp");
     else if (it.gates !== "success") row("WAIT_GATES", it.gates === "pending" ? "gates đang chạy" : "chưa có lượt gates cho đầu nhánh");
     else if (policy === "OWNER") row("NEEDS_OWNER", `rủi ro ${it.risk} — chính sách gộp đòi chủ shop duyệt`);
-    else if (policy === "LEAD_REVIEW" && !it.reviewed) row("NEEDS_REVIEW", `rủi ro ${it.risk} — cần một lượt ai-tech-reviewer, rồi ghi "Review độc lập: ĐẠT" vào thân PR`);
+    else if (policy === "LEAD_REVIEW" && !it.reviewed) row("NEEDS_REVIEW", `rủi ro ${it.risk} — cần một lượt ai-tech-reviewer trên đúng đầu nhánh, rồi \`review ${it.pr} --sha=${it.sha} --verdict=PASS --token=…\``);
     else candidates.push(it);
   }
   // Lô gộp: rủi ro thấp trước, cũ trước. HIGH/CRITICAL chỉ đi khi lô đang trống, và đi một mình.
@@ -2287,7 +2299,8 @@ function pushControlCommit(ctx: RepoCtx, commit: string): void {
   const r = gitRun(ctx.top, ["push", "--quiet", "--porcelain", ctx.config.remote, `${commit}:refs/heads/${ctx.config.controlBranch}`]);
   if (r.code === 0) return;
   const msg = `${r.out}\n${r.err}`;
-  if (!/remote rejected/i.test(msg) && /\[rejected\]|non-fast-forward|fetch first|stale info|cannot lock ref/i.test(msg)) throw new ControlConflict(`sổ đã đổi trên remote trong lúc ghi (${r.err.split("\n")[0]})`);
+  const tranh = /\[rejected\]|non-fast-forward|fetch first|stale info/i.test(msg) || /cannot lock ref|incorrect old value|failed to update ref/i.test(msg);
+  if (tranh && !/repository rule|protected branch|permission|denied/i.test(msg)) throw new ControlConflict(`sổ đã đổi trên remote trong lúc ghi (${r.err.split("\n")[0]})`);
   throw new Error(`không đẩy được sổ điều khiển: ${r.err || r.out}`);
 }
 
@@ -3351,14 +3364,32 @@ function cmdClose(ctx: RepoCtx, idIn: string | undefined, flags: Set<string>, va
       const lastPr = e.related_prs.length ? e.related_prs[e.related_prs.length - 1] : undefined;
       const ev = tip ? mergeEvidence(ctx.top, tip, ctx.config.integrationRef, { pr: lastPr, baseSha: e.base_sha ?? undefined }) : null;
       const prLanded = lastPr ? gitTry(ctx.top, ["log", "-n", "1", "--format=%H", "--fixed-strings", `--grep=(#${lastPr})`, ctx.config.integrationRef]) : null;
-      if (e.branch && !(ev && ev !== "EMPTY") && !prLanded)
-        return { change: null, result: { ok: false, msg: `chưa có bằng chứng ${e.branch} đã vào ${ctx.config.integrationRef} — DONE chỉ sau khi vào main` } };
-      if (!flags.has("no-runtime")) {
+      const branchLanded = ev !== null && ev !== "EMPTY";
+      // Mọi nhánh lỗi rơi về phía HẸP (AGENTS.md mục 31): không chứng minh được thì KHÔNG DONE.
+      if (!e.branch && !e.related_prs.length)
+        return { change: null, result: { ok: false, msg: "dòng sổ không có nhánh lẫn PR — DONE không chứng minh được; khai --branch / --prs, hoặc khép CANCELLED kèm lý do" } };
+      if (!branchLanded && !prLanded)
+        return { change: null, result: { ok: false, msg: `chưa có bằng chứng ${e.branch ?? `PR #${lastPr}`} đã vào ${ctx.config.integrationRef} — DONE chỉ sau khi vào main` } };
+      const landed = (tip && branchLanded ? landedCommit(ctx, tip, ctx.config.integrationRef, ev, lastPr ?? null) : null) ?? prLanded;
+      if (flags.has("no-runtime")) {
+        // `--no-runtime` là một KHẲNG ĐỊNH về tệp — đối chiếu với tệp thật sứ mệnh đã chạm, không tin chữ.
+        const files =
+          tip && branchLanded && e.base_sha
+            ? lines(gitTry(ctx.top, ["diff", "--name-only", "--no-renames", e.base_sha, tip]))
+            : landed
+              ? lines(gitTry(ctx.top, ["diff-tree", "--no-commit-id", "--name-only", "-r", "-m", "--first-parent", landed]))
+              : null;
+        if (!files || !files.length) return { change: null, result: { ok: false, msg: "không xác định được tệp sứ mệnh đã đổi — --no-runtime không kiểm được; dùng verify --record" } };
+        const runtime = files.filter((f) => !ctx.config.nonRuntimePaths.some((p) => fileInPattern(f, p)));
+        if (runtime.length)
+          return { change: null, result: { ok: false, msg: `--no-runtime nhưng sứ mệnh chạm ${runtime.length} tệp chạy trên VPS (${runtime.slice(0, 5).join(", ")}) — deploy rồi verify --record` } };
+      } else {
         const vm = /^PASS ([0-9a-f]{40}) /.exec(e.evidence?.verify ?? "");
         if (!vm) return { change: null, result: { ok: false, msg: "chưa có hậu kiểm production ĐẠT (`verify --record`) — hoặc khai --no-runtime nếu sứ mệnh không đổi mã chạy trên VPS" } };
+        if (!landed)
+          return { change: null, result: { ok: false, msg: "không chỉ ra được commit đưa sứ mệnh vào main (bằng chứng CONTENT, không số PR) — khai --prs=<PR đã gộp> để đối chiếu với bản đã verify" } };
         // Bản đã hậu kiểm phải CHỨA commit đưa sứ mệnh vào main — verify một bản cũ hơn không chứng minh gì.
-        const landed = (tip ? landedCommit(ctx, tip, ctx.config.integrationRef, ev, lastPr ?? null) : null) ?? prLanded;
-        if (landed && gitRun(ctx.top, ["merge-base", "--is-ancestor", landed, vm[1]]).code !== 0)
+        if (gitRun(ctx.top, ["merge-base", "--is-ancestor", landed, vm[1]]).code !== 0)
           return { change: null, result: { ok: false, msg: `bản đã hậu kiểm ${vm[1].slice(0, 12)} CHƯA chứa commit đưa sứ mệnh vào main (${landed.slice(0, 12)}) — deploy rồi verify lại` } };
       }
     }
@@ -3402,6 +3433,9 @@ function cmdLease(ctx: RepoCtx, op: string | undefined, nameIn: string | undefin
     const evs: Omit<ControlEvent, "at" | "actor">[] = [];
     if (op !== "renew" && !(op === "acquire" && cur !== null && d.next?.generation === cur.generation))
       evs.push({ kind: d.takeoverFrom ? "LEASE_TAKEOVER" : op === "acquire" ? "LEASE_ACQUIRED" : "LEASE_RELEASED", detail: `${name}${d.takeoverFrom ? ` từ ${d.takeoverFrom.holder} (hết hạn ${d.takeoverFrom.expires_at})` : ""}` });
+    // Nhận lại bằng --resume và nâng cấp khoá cũ đều phải để lại vết: cả hai là chỗ hai phiên có thể cùng thành chủ.
+    if (flags.has("resume") && cur !== null && d.next?.generation === cur.generation) evs.push({ kind: "LEASE_RESUMED", detail: `${name} bằng mã đã lưu cạnh cây` });
+    if (cur !== null && cur.token_hash === undefined && d.next?.token_hash) evs.push({ kind: "LEASE_UPGRADED", detail: `${name}: khoá cũ được gắn mã phiên` });
     return {
       change: d.next ? { put: { [file]: `${JSON.stringify(d.next, null, 2)}\n` }, events: evs, message: `khoá ${name}: ${op}` } : { put: {}, del: [file], events: evs, message: `khoá ${name}: nhả` },
       result: d,
@@ -3452,7 +3486,7 @@ function presentedLeaseToken(ctx: RepoCtx, name: LeaseName, values: Map<string, 
  * Ghi dấu review độc lập cho một PR, gắn SHA đầu nhánh ĐÃ được đọc. `queue` chỉ nhận dấu khớp đúng SHA
  * hiện tại của PR — đẩy thêm commit sau review là phải review lại.
  */
-function cmdReview(ctx: RepoCtx, prIn: string | undefined, values: Map<string, string>): number {
+function cmdReview(ctx: RepoCtx, prIn: string | undefined, flags: Set<string>, values: Map<string, string>): number {
   const pr = Number(prIn);
   if (!Number.isInteger(pr) || pr <= 0) throw new UsageError("review <số PR> --sha=<SHA đầu nhánh đã review> --verdict=PASS|FAIL [--note=…]");
   const sha = values.get("sha") ?? "";
@@ -3461,12 +3495,28 @@ function cmdReview(ctx: RepoCtx, prIn: string | undefined, values: Map<string, s
   if (verdict !== "PASS" && verdict !== "FAIL") throw new UsageError("--verdict=PASS|FAIL");
   const actor = controlActor(ctx);
   const rec: ReviewRecord = { pr, sha, verdict, actor, at: new Date().toISOString(), note: (values.get("note") ?? "").slice(0, 400) };
-  mutateControl(ctx, actor, () => ({
-    change: { put: { [`review.${pr}.json`]: `${JSON.stringify(rec, null, 2)}\n` }, events: [{ kind: verdict === "PASS" ? "REVIEW_PASS" : "REVIEW_FAIL", detail: `#${pr} @ ${sha.slice(0, 12)}${rec.note ? ` · ${rec.note}` : ""}` }], message: `review #${pr}: ${verdict}` },
-    result: null,
-  }));
-  out(`✓ #${pr} @ ${sha.slice(0, 12)}: ${verdict} — hàng đợi chỉ nhận dấu này khi đầu nhánh PR vẫn là đúng SHA ấy`);
-  return 0;
+  // PASS mở cửa gộp cho PR rủi ro HIGH ⇒ chỉ phiên đang cầm khoá Lead (tech-lead / integration-lead, đúng
+  // mã phiên) được ghi — worker không tự chấm mình. FAIL thì ai cũng ghi được: nó chỉ đóng cửa.
+  const hashes = (["tech-lead", "integration-lead"] as const).map((n) => {
+    const t = presentedLeaseToken(ctx, n, values, flags);
+    return { n, h: t ? sha256(t) : null };
+  });
+  const r = mutateControl(ctx, actor, (st) => {
+    if (verdict === "PASS") {
+      const nowMs = Date.now();
+      const ok = hashes.some(({ n, h }) => {
+        const l = st.leases.find((x) => x.name === n && Date.parse(x.expires_at) > nowMs) ?? null;
+        return l !== null && l.token_hash !== undefined && leaseIsMine(l, actor, h);
+      });
+      if (!ok) return { change: null, result: "✗ PASS chỉ ghi được bởi phiên đang cầm khoá tech-lead / integration-lead (trình --token=<mã phiên> hoặc --resume) — worker không tự chấm mình" };
+    }
+    return {
+      change: { put: { [`review.${pr}.json`]: `${JSON.stringify(rec, null, 2)}\n` }, events: [{ kind: verdict === "PASS" ? "REVIEW_PASS" : "REVIEW_FAIL", detail: `#${pr} @ ${sha.slice(0, 12)}${rec.note ? ` · ${rec.note}` : ""}` }], message: `review #${pr}: ${verdict}` },
+      result: `✓ #${pr} @ ${sha.slice(0, 12)}: ${verdict} — hàng đợi chỉ nhận dấu này khi đầu nhánh PR vẫn là đúng SHA ấy`,
+    };
+  });
+  out(r);
+  return r.startsWith("✓") ? 0 : 1;
 }
 
 function addedMigrations(ctx: RepoCtx, tip: string, ref: string): string[] {
@@ -3542,7 +3592,7 @@ async function cmdQueue(ctx: RepoCtx, flags: Set<string>): Promise<number> {
   gitRun(ctx.top, ["fetch", "--quiet", ctx.config.remote]);
   const mainMigs = lines(gitTry(ctx.top, ["ls-tree", "--name-only", ctx.config.integrationRef, "drizzle/"])).filter((f) => migrationNumberOf(f) !== null);
   const st = readControl(ctx, { fetch: true });
-  const prs = (await openPrs(gh.get)).slice(0, 40);
+  const prs = await openPrs(gh.get);
   const detail = new Map<number, { files: { name: string; status: string }[]; mergeable: string; gates: QueueItem["gates"] }>();
   for (const p of prs) {
     const files = await prFiles(gh.get, p.number);
@@ -3582,6 +3632,7 @@ async function cmdQueue(ctx: RepoCtx, flags: Set<string>): Promise<number> {
       mergeable: d.mergeable,
       deps: [...new Set([...parsePrDependencies(p.body), ...regDeps])].filter((n) => n !== p.number),
       files: names,
+      sha: p.sha,
       migrationProblems: mig.problems,
       createdAt: p.createdAt,
       reviewed: reviewedAt(st.reviews, p.number, p.sha),
@@ -3589,15 +3640,15 @@ async function cmdQueue(ctx: RepoCtx, flags: Set<string>): Promise<number> {
   }
   const rows = orderQueue(items, ctx.config);
   if (flags.has("json")) {
-    out(JSON.stringify(rows.map((r) => ({ pr: r.item.pr, verdict: r.verdict, why: r.why, risk: r.item.risk, policy: r.policy, gates: r.item.gates, mergeable: r.item.mergeable, branch: r.item.branch })), null, 2));
+    out(JSON.stringify(rows.map((r) => ({ pr: r.item.pr, sha: r.item.sha, verdict: r.verdict, why: r.why, risk: r.item.risk, policy: r.policy, gates: r.item.gates, mergeable: r.item.mergeable, branch: r.item.branch })), null, 2));
     return 0;
   }
   out(`HÀNG ĐỢI GỘP · ${rows.length} PR đang mở`);
-  for (const r of rows) out(`  ${pad(r.verdict, 19)} #${pad(String(r.item.pr), 5)} ${pad(r.item.risk, 8)} ${pad(r.item.gates, 8)} ${pad(r.item.mergeable, 9)} ${r.item.title.slice(0, 60)}\n      ${r.why}`);
+  for (const r of rows) out(`  ${pad(r.verdict, 19)} #${pad(String(r.item.pr), 5)} ${pad(r.item.risk, 8)} ${pad(r.item.gates, 8)} ${pad(r.item.mergeable, 9)} ${r.item.title.slice(0, 60)}\n      ${r.why} · sha ${r.item.sha}`);
   const now = rows.filter((r) => r.verdict === "MERGE_NOW").map((r) => `#${r.item.pr}`);
   const iso = rows.find((r) => r.verdict === "MERGE_ISOLATED");
   out("");
-  if (now.length) out(`VIỆC CỦA INTEGRATION LEAD (cầm khoá integration-lead): gộp ${now.join(", ")} (squash, kèm sha đầu nhánh, chỉ khi mergeable_state=clean) → \`npm run ai -- deploy-plan\` → MỘT lượt deploy cho cả lô → \`verify\``);
+  if (now.length) out(`VIỆC CỦA INTEGRATION LEAD (cầm khoá integration-lead): gộp ${now.join(", ")} (squash, kèm \`sha\` = ĐÚNG SHA in ở trên — GitHub từ chối nếu đầu nhánh đã đổi; chỉ khi mergeable_state=clean) → \`npm run ai -- deploy-plan\` → MỘT lượt deploy cho cả lô → \`verify\``);
   else if (iso) out(`VIỆC CỦA INTEGRATION LEAD: gộp #${iso.item.pr} MỘT MÌNH → deploy → verify, rồi chạy lại \`queue\``);
   else out("không có PR nào sẵn sàng gộp lúc này.");
   return 0;
@@ -3893,7 +3944,7 @@ export async function main(argv: readonly string[], cwd: string, opts: { actor?:
     case "queue":
       return cmdQueue(ctx, a.flags);
     case "review":
-      return cmdReview(ctx, rest[0], a.values);
+      return cmdReview(ctx, rest[0], a.flags, a.values);
     case "deploy-plan":
       return cmdDeployPlan(ctx, a.flags, a.values);
     case "verify":

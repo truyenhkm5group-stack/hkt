@@ -244,6 +244,13 @@ function testKhoa() {
   assert.ok(!leaseDecision(held, "renew", { ...me, holder: "may:wt-b" }, now, ttl).ok, "không gia hạn hộ");
   assert.equal(leaseDecision(held, "release", { ...me, tokenHash: H1 }, now, ttl).next, null, "chủ (đúng mã) nhả ⇒ khoá trống");
   assert.ok(!leaseDecision(null, "renew", me, now, ttl).ok, "không có gì để gia hạn");
+  // Khoá CŨ (trước khi có mã phiên — sổ thật từng có): người trùng nhãn chạm vào thì NÂNG CẤP, gắn mã mới;
+  // từ đó phiên thứ hai cùng cây bị từ chối. Trước bản vá nó được gia hạn mãi ở dạng cũ (review lần hai).
+  const cu: Lease = { name: "integration-lead", holder: "may:wt-a", purpose: "", acquired_at: iso(-5), heartbeat_at: iso(-5), expires_at: iso(30), generation: 3 };
+  const nang = leaseDecision(cu, "acquire", me, now, ttl);
+  assert.ok(nang.ok && nang.next?.token_hash === H1 && nang.next.generation === 3, "khoá cũ ⇒ gắn mã phiên khi chủ (trùng nhãn) lấy lại");
+  assert.ok(!leaseDecision(nang.next, "acquire", { ...me, freshTokenHash: H2 }, now, ttl).ok, "sau nâng cấp, phiên thứ hai cùng cây (không mã) bị từ chối");
+  assert.equal(leaseDecision(cu, "renew", me, now, ttl).next?.token_hash, H1, "gia hạn khoá cũ cũng nâng cấp");
 }
 
 function testChongPhamVi() {
@@ -328,7 +335,7 @@ function testRuiRo() {
   assert.equal(classifyRisk(["drizzle/0300_x.sql"], CFG, { destructiveMigration: true }).risk, "CRITICAL", "migration phá dữ liệu ⇒ CRITICAL");
   assert.ok(isDestructiveSql("ALTER TABLE orders DROP COLUMN note;"));
   assert.ok(isDestructiveSql("DROP TABLE x;") && isDestructiveSql("delete from orders where 1=1") && isDestructiveSql("TRUNCATE t"));
-  for (const x of ["DROP TYPE order_stage;", "DROP VIEW v;", "DROP MATERIALIZED VIEW mv;", "ALTER TABLE t ALTER COLUMN c TYPE int;", "ALTER TABLE t ALTER COLUMN c SET DATA TYPE text;", 'UPDATE "orders" SET status = 1;'])
+  for (const x of ["DROP TYPE order_stage;", "DROP VIEW v;", "DROP MATERIALIZED VIEW mv;", "ALTER TABLE t ALTER COLUMN c TYPE int;", "ALTER TABLE t ALTER COLUMN c SET DATA TYPE text;", 'UPDATE "orders" SET status = 1;', "UPDATE ONLY orders SET a = 1;", "UPDATE orders AS o SET a = 1;", 'ALTER TABLE t ALTER COLUMN "ten cot" TYPE int;'])
     assert.ok(isDestructiveSql(x), `phải nhận ra câu phá / đổi dữ liệu: ${x}`);
   assert.ok(!isDestructiveSql("ALTER TABLE t ALTER COLUMN c DROP DEFAULT; ALTER TABLE t DROP CONSTRAINT k; CREATE TABLE IF NOT EXISTS z (id int); -- DROP TABLE trong chú thích"), "bỏ ràng buộc / mặc định / chú thích không phải phá dữ liệu");
   // Chính sách không nới được ở bậc CRITICAL, và nhánh điều khiển không trỏ được vào main.
@@ -340,7 +347,7 @@ function testRuiRo() {
 }
 
 function qi(pr: number, over: Partial<QueueItem> = {}): QueueItem {
-  return { pr, title: `PR ${pr}`, branch: `claude/p${pr}`, draft: false, risk: "LOW", gates: "success", mergeable: "clean", deps: [], files: [`docs/p${pr}.md`], migrationProblems: [], createdAt: iso(-1000 + pr), reviewed: false, ...over };
+  return { pr, title: `PR ${pr}`, branch: `claude/p${pr}`, sha: String(pr).padStart(40, "0"), draft: false, risk: "LOW", gates: "success", mergeable: "clean", deps: [], files: [`docs/p${pr}.md`], migrationProblems: [], createdAt: iso(-1000 + pr), reviewed: false, ...over };
 }
 
 function testHangDoi() {
@@ -525,7 +532,10 @@ async function testVongDoi() {
 
     // ── Dấu review độc lập: trong SỔ, gắn đúng SHA đầu nhánh ──
     const shaReview = "c".repeat(40);
-    assert.equal((await ai(A, "review", "42", `--sha=${shaReview}`, "--verdict=PASS", "--note=ai-tech-reviewer ĐẠT")).code, 0);
+    const tuCham = await ai(A, "review", "42", `--sha=${shaReview}`, "--verdict=PASS");
+    assert.equal(tuCham.code, 1, "phiên KHÔNG cầm khoá Lead (vd worker tự chấm mình) không ghi được PASS");
+    assert.match(tuCham.text, /worker không tự chấm mình/);
+    assert.equal((await ai(B, "review", "42", `--sha=${shaReview}`, "--verdict=PASS", "--resume", "--note=ai-tech-reviewer ĐẠT")).code, 0, "phiên cầm integration-lead (đúng mã) ghi được PASS");
     const rv = readControl(openRepo(B), { fetch: true }).reviews;
     assert.ok(reviewedAt(rv, 42, shaReview), "dấu review đọc được từ phiên khác");
     assert.ok(!reviewedAt(rv, 42, "d".repeat(40)), "đầu nhánh đổi (commit mới sau review) ⇒ dấu MẤT hiệu lực");
@@ -575,6 +585,14 @@ async function testVongDoi() {
     assert.match(bd.text, /INTEGRATING .* m-a/, bd.text);
     assert.match(bd.text, /đã vào main/);
     assert.ok(!/BACKLOG .* m-b/.test(bd.text), "phụ thuộc đã VÀO MAIN là xong cho bên chờ — không phải đợi một dòng sổ");
+    const khongRuntime = await ai(A, "close", "m-a", "--status=DONE", "--evidence=gộp A", "--no-runtime");
+    assert.equal(khongRuntime.code, 1, "--no-runtime là khẳng định về TỆP — nhánh chạm src/a/y.ts (chạy trên VPS) ⇒ từ chối");
+    assert.match(khongRuntime.text, /tệp chạy trên VPS \(src\/a\/y\.ts\)/);
+    assert.equal((await ai(A, "claim", "m-x", "--title=X", "--paths=src/x/")).code, 0);
+    const traiTay = await ai(A, "close", "m-x", "--status=DONE", "--evidence=tin tôi đi", "--no-runtime");
+    assert.equal(traiTay.code, 1, "không nhánh lẫn PR ⇒ DONE không chứng minh được");
+    assert.match(traiTay.text, /không có nhánh lẫn PR/);
+    assert.equal((await ai(A, "close", "m-x", "--status=CANCELLED", "--evidence=thử nghiệm của bài kiểm")).code, 0);
     const close1 = await ai(A, "close", "m-a", "--status=DONE", "--evidence=gộp A");
     assert.equal(close1.code, 1, "DONE khi chưa hậu kiểm production ⇒ từ chối");
     assert.match(close1.text, /verify --record/);

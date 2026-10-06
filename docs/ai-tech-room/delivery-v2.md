@@ -225,8 +225,9 @@ vụ, contract test.
 
 `mergePolicy`: LOW/MEDIUM ⇒ `AUTO` (Integration Lead gộp khi cổng xanh) · HIGH ⇒ `LEAD_REVIEW` (một lượt
 `ai-tech-reviewer` bối cảnh mới, ĐẠT thì ghi dấu vào SỔ: `review <PR> --sha=<đầu nhánh> --verdict=PASS`
-— gắn SHA, commit mới ⇒ mất hiệu lực; dòng chữ trong thân PR thì ai mở được PR cũng viết được, nên
-không còn được tính) · CRITICAL ⇒ `OWNER`
+— gắn SHA, commit mới ⇒ mất hiệu lực, chỉ phiên cầm khoá tech-lead / integration-lead ghi được PASS;
+dòng chữ trong thân PR thì ai mở được PR cũng viết được, nên không còn được tính) · CRITICAL ⇒ `OWNER`.
+Gộp luôn kèm `sha` mà `queue` in ra — đầu nhánh đổi sau lượt xét thì GitHub từ chối lệnh gộp
 (chủ shop duyệt) — cấu hình **không** nới được bậc CRITICAL. Ruleset `main` giữ nguyên: bắt buộc PR +
 `gates / gates`, không ai né. Harness của phiên chặn bước gộp / dispatch ⇒ đưa chủ shop đúng một nút /
 một lệnh `!`, không lách.
@@ -258,8 +259,11 @@ xếp hàng bằng `flock` trên VPS. Lượt mới phủ lượt cũ đang ch�
 ĐẠT khi: `/api/health` `ok` · commit đang chạy = SHA mong đợi · số migration đã áp = số mục trong sổ
 `_journal.json` của SHA đó · lượt `deploy-vps.yml` của SHA kết thúc `success` (gồm smoke đăng nhập +
 các trang trên VPS — `scripts/smoke.ts`) · mọi endpoint công khai trong `verifyEndpoints` trả 2xx/3xx.
-`--record --mission=<id>` ghi `PASS|FAIL <sha> <lúc>` vào sổ; `close --status=DONE` đòi `PASS` (hoặc
-`--no-runtime` khi sứ mệnh không đổi mã chạy trên VPS).
+`--record --mission=<id>` ghi `PASS|FAIL <sha> <lúc>` vào sổ; `close --status=DONE` đòi: dòng sổ có nhánh
+hoặc PR, bằng chứng đã vào main, chỉ ra được commit đưa việc vào main, và `PASS` trên một bản CHỨA commit
+đó — hoặc `--no-runtime`, chỉ được nhận khi MỌI tệp sứ mệnh chạm nằm trong `nonRuntimePaths` (tài liệu,
+test, `.ai/`, `.claude/`, công cụ điều phối; `.github/` cố ý không nằm đó — đổi đường deploy thì phải
+deploy thật và hậu kiểm).
 
 KHÔNG ĐẠT ⇒ INCIDENT, không tuyên bố xong. **Không rollback tự động**: migration của kho chỉ đi tới
 (`drizzle` không có đường lùi), deploy lại SHA cũ trên một CSDL đã nâng lược đồ không an toàn hơn sửa
