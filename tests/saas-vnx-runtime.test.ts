@@ -31,7 +31,7 @@ import { provisionOrganization } from "@/lib/platform/provision";
 import { HOME_SALES_URL_SECRET_PROVIDERS, resolveUrlSecretOrganization, WEBHOOK_BINDINGS, webhookUrlToken, type WebhookProvider } from "@/lib/platform/webhooks";
 import { salesBotBillingSource } from "@/lib/sales-chatbot/config";
 import { salesChatProvider, setSalesChatProviderForTests } from "@/lib/sales-chatbot/engine";
-import { JOB_DEFINITIONS } from "@/lib/sync/jobs";
+import { JOB_DEFINITIONS, runJob } from "@/lib/sync/jobs";
 
 const goc = path.resolve(__dirname, "..");
 const KHACH = "vr-khach";
@@ -155,6 +155,14 @@ async function kiemBaChan(fan: FanOut) {
     await datAiSalesNha(home.id, null);
     assert.equal(await homeSalesRuntimeEnabled(home), false, "nhà không có dòng ai_sales tường minh ⇒ không mở webhook");
     for (const p of HOME_SALES_URL_SECRET_PROVIDERS) assert.equal(await resolveUrlSecretOrganization(p, tokenNha(p), KEY), null, `không dòng tường minh: ${p} của nhà vẫn 401`);
+    // Job runtime ở nhà đi CÙNG cổng với webhook: canUseModule nói "bật" (module_default ENABLED) nhưng chưa có dòng tường minh
+    // ⇒ runJob vẫn bỏ qua MODULE_DISABLED, trước khi chạm bất kỳ thứ gì.
+    assert.equal(await canUseModule("ai_sales", home.code), true, "đối chứng: thiếu dòng thì canUseModule của nhà nói bật");
+    for (const job of ["sales-followup", "sales-health"]) {
+      const r = (await runJob(job, { trigger: "CRON", actor: "vr-test", org: home.code })) as { skipped?: string; detail?: string };
+      assert.equal(r.skipped, "MODULE_DISABLED", `${job}: nhà chưa bật tường minh ⇒ bỏ qua`);
+      assert.match(r.detail ?? "", /chưa bật tường minh/);
+    }
     await datAiSalesNha(home.id, false);
     await kiemKhachKhongDoi("nhà tắt");
 

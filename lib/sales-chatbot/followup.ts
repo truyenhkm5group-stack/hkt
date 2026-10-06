@@ -135,7 +135,7 @@ export async function runSalesFollowups(deps: FanpageDeps = {}): Promise<Followu
       await putBack("AI đang bị tạm tắt");
       continue;
     }
-    if (!(await checkAiQuota(org.code, salesBotBillingSource(cfg.connectorKey))).ok) {
+    if (!(await checkAiQuota(org.code, salesBotBillingSource(cfg.connectorKey, { home: org.isHome }))).ok) {
       await putBack("hết hạn mức AI");
       continue;
     }
