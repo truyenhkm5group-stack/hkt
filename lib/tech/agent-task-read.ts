@@ -2,6 +2,7 @@ import { eq } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { canDispatchTask } from "@/lib/constants/agent-dispatch";
 import { writeGlobsForRole } from "@/lib/constants/agent-scopes";
+import { loadTaskPlan } from "@/lib/tech/control-plane";
 
 /**
  * ═══════════ NẤC 3B · CỬA ĐỌC HẸP — AGENT NHẬN ĐƯỢC ĐÚNG VIỆC ĐƯỢC GIAO ═══════════
@@ -78,6 +79,7 @@ export async function readAgentTask(taskCode: string): Promise<AgentTaskResult> 
       approvalRequired: true,
       approvalStatus: true,
       agentId: true,
+      missionId: true,
     },
   });
   /*
@@ -105,6 +107,8 @@ export async function readAgentTask(taskCode: string): Promise<AgentTaskResult> 
     */
     agentAllowedRisks: agent ? agent.allowedRisks : null,
     agentWriteGlobs: agent ? writeGlobsForRole(agent.role) : null,
+    // Lượt chạy xếp hàng TRƯỚC khi chủ shop dừng / huỷ sứ mệnh thì tới đây sẽ bị từ chối — cùng luật nút giao.
+    plan: await loadTaskPlan(task.missionId),
   });
   if (!v.ok) return { error: v.reason, code: "NOT_DISPATCHABLE" };
   if (agent && !agent.enabled) return { error: `Vai “${agent.key}” đang TẮT trong sổ agent.`, code: "NOT_DISPATCHABLE" };

@@ -3,6 +3,7 @@ import { getDb, schema } from "@/db";
 import { writeGlobsForRole } from "@/lib/constants/agent-scopes";
 import { DISPATCH_AUDIT_ACTION, canDispatchTask, checkDispatchQuota, type DispatchVerdict, type QuotaVerdict } from "@/lib/constants/agent-dispatch";
 import { dispatchAgentRun, dispatchConfig } from "@/lib/integrations/github/dispatch";
+import { loadTaskPlan } from "@/lib/tech/control-plane";
 import { recordTechTaskEvent, setTechTaskStatus, type TechActor } from "@/lib/tech/service";
 import { checkRerun } from "@/lib/constants/agent-rerun";
 import { TECH_TASK_TRANSITIONS, type TechTaskStatus } from "@/lib/constants/tech";
@@ -85,19 +86,6 @@ export async function dispatchTaskToAgent(input: {
   });
   if (!task) return { ok: false, code: "UNKNOWN_TASK", reason: `Không có việc \`${input.taskCode}\`.` };
 
-  /*
-    SỨ MỆNH / MỤC TIÊU KHÔNG CHẠY ⇒ KHÔNG GIAO (docs/tech-control-plane/README.md mục 3). Bỏ mục tiêu, huỷ hay
-    tạm dừng sứ mệnh là quyết định của chủ shop; giao việc của nó cho agent sau đó là tiêu tiền cho thứ đã bỏ.
-    Việc lẻ (không thuộc sứ mệnh nào) không bị cổng này chạm tới.
-  */
-  if (task.missionId) {
-    const m = await db.query.techMissions.findFirst({ where: eq(schema.techMissions.id, task.missionId), columns: { code: true, status: true, goalId: true } });
-    if (m && m.status !== "ACTIVE") return { ok: false, code: "TASK", reason: `Sứ mệnh ${m.code} đang ở ${m.status} — chỉ sứ mệnh đang chạy mới giao việc cho agent.` };
-    if (m?.goalId) {
-      const g = await db.query.techGoals.findFirst({ where: eq(schema.techGoals.id, m.goalId), columns: { code: true, status: true } });
-      if (g && g.status !== "ACTIVE") return { ok: false, code: "TASK", reason: `Mục tiêu ${g.code} đang ở ${g.status} — bật lại mục tiêu trước khi giao việc của nó.` };
-    }
-  }
   /* "Cần chủ shop" chỉ NGƯỜI gỡ, kèm câu đã quyết gì — nút giao sửa không phải đường tắt qua cổng đó. */
   if (task.status === "NEEDS_OWNER") {
     return { ok: false, code: "TASK", reason: `Việc ${task.code} đang chờ chủ shop — gỡ “Cần chủ shop” (ghi lại đã quyết gì) rồi mới giao lại.` };
@@ -141,6 +129,8 @@ export async function dispatchTaskToAgent(input: {
     */
     agentAllowedRisks: agent ? agent.allowedRisks : null,
     agentWriteGlobs: agent ? writeGlobsForRole(agent.role) : null,
+    // Sứ mệnh / mục tiêu không chạy ⇒ không giao (cùng luật cửa đọc của runner — `loadTaskPlan`).
+    plan: await loadTaskPlan(task.missionId),
   });
   if (!vTask.ok) return { ok: false, code: "TASK", reason: vTask.reason };
   /*
