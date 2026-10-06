@@ -27,3 +27,4 @@
 {"at":"2026-10-06T08:22:34.013Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"CLAIM","mission":"meta-messenger-access","detail":"BLOCKED · 1 mẫu phạm vi · HIGH"}
 {"at":"2026-10-06T09:41:01.620Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#605 @ a41e4af459c2 · Review độc lập b217f7c2..a41e4af4: 4 mục chặn đã sửa đúng; miễn trừ bài canh đúng một dòng"}
 {"at":"2026-10-06T09:41:28.973Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","detail":"#605 @ a41e4af459c2 → 0ca4ed97a851 (MERGE_ISOLATED · HIGH · gates success)"}
+{"at":"2026-10-06T09:42:17.668Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DEPLOY_DISPATCHED","detail":"0ca4ed97a851 · run 37444778809 https://github.com/truyenhkm5group-stack/hkt/actions/runs/37444778809"}
