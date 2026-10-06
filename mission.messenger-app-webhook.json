@@ -3,7 +3,7 @@
   "mission_id": "messenger-app-webhook",
   "title": "Webhook nhận gói của app Meta Messenger riêng (cấu hình thử)",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P0",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -29,9 +29,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-06T12:35:49.000Z",
-  "updated_at": "2026-10-06T12:44:47.181Z",
+  "updated_at": "2026-10-06T13:08:43.497Z",
   "last_heartbeat": "2026-10-06T12:44:47.181Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#611 → 51db3e4269cdfb5793fb4c79cf05bdf91bf9b0c6"
+  },
   "handoff": {
     "branch": "feat/messenger-app-webhook",
     "sha": "f4a76b7c80c5ca6be8c84bb1dbc9bb59cd4d5f23",
