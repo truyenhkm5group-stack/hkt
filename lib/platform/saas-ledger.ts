@@ -103,6 +103,26 @@ export async function readOrgUsage(db: Db, from: Date, to: Date): Promise<OrgUsa
   return { conversationsStarted: n("started"), customerMessages: n("customer"), botMessages: n("bot"), aiActiveConversations: n("active"), aiOrders: n("ai_orders") };
 }
 
+/**
+ * Fanpage đang hoạt động: dòng `org_channel_pages` ACTIVE · PAGE. Không có dòng nào mà tổ chức vẫn có kết nối kênh đang bật
+ * (nối trước 0220 bằng một hàng kết nối đơn) ⇒ `null` — chưa đếm được, KHÔNG phải 0 fanpage.
+ */
+export async function readFanpagesActive(db: Db): Promise<number | null> {
+  const [r] = rowsOf<{ pages: number; legacy: number }>(
+    await db.execute(sql`
+      select
+        (select count(*) from org_channel_pages where status = 'ACTIVE' and kind = 'PAGE')::int as pages,
+        (select count(*) from org_connections where status = 'ACTIVE' and connector_key in (${sql.join(
+          CHANNEL_CONNECTOR_KEYS.map((k) => sql`${k}`),
+          sql`, `,
+        )}))::int as legacy
+    `),
+  );
+  const pages = Number(r?.pages ?? 0);
+  if (pages > 0) return pages;
+  return Number(r?.legacy ?? 0) > 0 ? null : 0;
+}
+
 /** [đầu ngày, đầu ngày hôm sau) của ngày `YYYY-MM-DD` giờ Việt Nam, ở UTC. */
 function vnDayRange(day: string): { from: Date; to: Date } {
   const from = new Date(`${day}T00:00:00+07:00`);
@@ -119,11 +139,14 @@ async function captureUsage(orgs: Organization[], now: Date, errors: string[]): 
     if (org.status !== "ACTIVE") continue;
     try {
       const db = await getDbFor(org);
+      // Fanpage đang hoạt động là số TỨC THỜI (0222): chỉ ghi vào dòng HÔM NAY; dòng hôm qua giữ số đã chụp hôm qua.
+      // Đọc hỏng ⇒ NULL (chưa đo), không làm hỏng các số đếm khác của tổ chức.
+      const fanpagesActive = await readFanpagesActive(db).catch(() => null);
       // Hôm qua + hôm nay — tin tới muộn của hôm qua vẫn vào; ngày cũ hơn không bao giờ được tính lại.
       for (const day of [yesterday, today]) {
         const { from, to } = vnDayRange(day);
         const usage = await readOrgUsage(db, from, to);
-        const values = { day, orgCode: org.code, ...usage, capturedAt: now };
+        const values = { day, orgCode: org.code, ...usage, capturedAt: now, ...(day === today ? { fanpagesActive } : {}) };
         await pdb.insert(u).values(values).onConflictDoUpdate({ target: [u.day, u.orgCode], set: { ...values } });
         written += 1;
       }

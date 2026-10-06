@@ -41,7 +41,13 @@ export type PlatformAuditAction = "MODULE_ENABLE" | "MODULE_DISABLE" | "FEATURE_
   // Người vận hành tạo liên kết đặt lại mật khẩu cho tài khoản của tổ chức khách (0191, lib/users/password-reset.ts).
   | "PASSWORD_RESET_LINK"
   // Chủ nền tảng khai chi phí hạ tầng / hỗ trợ khách theo tháng (0203, lib/platform/saas-ledger.ts) — mẫu số biên lợi nhuận.
-  | "PLATFORM_COSTS_SET";
+  | "PLATFORM_COSTS_SET"
+  // Nền móng giá & thu phí (0222, lib/pricing/admin.ts): sửa phần thương mại của gói (tên · hạn mức tháng · tính năng ·
+  // chính sách vượt), ghi đè giá / tính năng / mức áp của một tổ chức, ngưỡng Margin Guard, bảng giá đơn vị AI ghi đè.
+  | "PLAN_COMMERCIAL_SET"
+  | "ORG_PRICING_SET"
+  | "PRICING_GUARD_SET"
+  | "AI_UNIT_PRICES_SET";
 export type PlatformAuditSource = "UI" | "SCRIPT" | "MIGRATION" | "TEST";
 export type PlatformActor = { orgCode: string; userId: string; email: string } | null;
 

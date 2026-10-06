@@ -49,6 +49,7 @@ import { ENTITLEMENT_SPEC } from "@/lib/entitlements/kinds";
 import { VN_BANK_BY_BIN, bankNameOf } from "@/lib/constants/vn-banks";
 import { HOME_PLAN_KEY, listPlans, planKeyOf, type PlanRow } from "@/lib/entitlements/check";
 import { buildVietQrPayload, toTransferText } from "@/lib/payroll/vietqr";
+import { parseCommercial, type PlanCommercial } from "@/lib/pricing/catalog";
 import type { PlatformActor, PlatformAuditAction } from "@/lib/platform/audit";
 import { KILL_SWITCH_REASON_MIN, parseOperatorTarget } from "@/lib/platform/kill-switches";
 import { findOrganization, getHomeOrganization, invalidateOrganizations, listOrganizations } from "@/lib/platform/organizations";
@@ -914,7 +915,8 @@ export type OrgBillingRow = { code: string; name: string; status: string; planKe
 export type PlatformBilling = {
   today: string;
   receiver: BillingReceiverView | null;
-  plans: { key: string; name: string; priceVnd: number | null; position: number; addonPrices: AddonPrices; yearlyFreeMonths: number }[];
+  /** `commercial` = phần thương mại đã đọc (0222, `lib/pricing/catalog.ts`) — khung sửa gói ở /platform. */
+  plans: { key: string; name: string; description: string | null; priceVnd: number | null; position: number; addonPrices: AddonPrices; yearlyFreeMonths: number; commercial: PlanCommercial }[];
   orgs: OrgBillingRow[];
   /**
    * Doanh thu định kỳ hằng tháng: tổng giá THÁNG (gói + phần mua thêm) ở các tổ chức đang thu phí và chưa bị khoá. Tổ chức
@@ -977,7 +979,7 @@ export async function loadPlatformBilling(user: SessionUser, now: Date = new Dat
   return {
     today,
     receiver,
-    plans: plans.filter((p) => p.key !== HOME_PLAN_KEY).map((p) => ({ key: p.key, name: p.name, priceVnd: p.priceVnd, position: p.position, addonPrices: parseAddonPrices(p.addonPrices), yearlyFreeMonths: p.yearlyFreeMonths })),
+    plans: plans.filter((p) => p.key !== HOME_PLAN_KEY).map((p) => ({ key: p.key, name: p.name, description: p.description, priceVnd: p.priceVnd, position: p.position, addonPrices: parseAddonPrices(p.addonPrices), yearlyFreeMonths: p.yearlyFreeMonths, commercial: parseCommercial(p.commercial) })),
     orgs: rows,
     mrrVnd: mrr,
     addonUnpriced,

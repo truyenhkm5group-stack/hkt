@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { BillingReceiverForm, PlanAddonPricesForm, PlanPriceForm, ReconcileBillingButton, ResolvePaymentForm, VatIssuedForm } from "@/components/billing/operator-billing";
 import { SectionCard } from "@/components/ui-bits";
+import { PlanCommercialForm } from "@/components/pricing/operator-pricing";
+import { OVERAGE_POLICY_LABEL, type PlanCommercial } from "@/lib/pricing/catalog";
 import { addonStepLabel, isAddonKind } from "@/lib/billing/addons";
 import { ENTITLEMENT_SPEC } from "@/lib/entitlements/kinds";
 import { BILLING_STANDING_LABEL, PAYMENT_OUTCOME_LABEL, type BillingStandingKind } from "@/lib/billing/rules";
@@ -16,6 +18,14 @@ const TONE: Record<BillingStandingKind, string> = {
   OVERDUE: "text-rose-700 dark:text-rose-400",
   LOCKED: "font-semibold text-rose-700 dark:text-rose-400",
 };
+
+/** Một dòng tóm tắt phần thương mại của gói — «chưa khai» khi gói chưa có (0222). */
+function commercialSummary(c: PlanCommercial): string {
+  const q = c.quotas.aiConversations;
+  const conv = q === undefined ? "hội thoại AI chưa khai" : q === null ? "hội thoại AI không giới hạn" : `${q.toLocaleString("vi-VN")} hội thoại AI/tháng`;
+  const feats = c.features === null ? "tính năng chưa khai" : `${c.features.length} tính năng`;
+  return `${conv} · ${feats} · ${OVERAGE_POLICY_LABEL[c.overage.policy].toLowerCase()}${c.publicListed ? " · hiện ở /pricing" : ""}`;
+}
 
 /** Khung THU PHÍ THUÊ BAO của `/platform` — dữ liệu từ `loadPlatformBilling` (đã hỏi người vận hành). */
 export function PlatformBillingSection({ data }: { data: PlatformBilling }) {
@@ -59,6 +69,14 @@ export function PlatformBillingSection({ data }: { data: PlatformBilling }) {
                           .join(" · ")}
                   </p>
                   <PlanAddonPricesForm plan={p} />
+                  <details className="rounded-md border border-hairline px-3 py-2" data-plan-commercial={p.key}>
+                    <summary className="cursor-pointer text-xs font-medium">
+                      Hạn mức tháng · tính năng · khi vượt ({commercialSummary(p.commercial)})
+                    </summary>
+                    <div className="pt-2">
+                      <PlanCommercialForm plan={p} />
+                    </div>
+                  </details>
                 </div>
               </div>
             ))}

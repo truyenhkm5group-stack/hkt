@@ -1,5 +1,8 @@
 # Thu phí thuê bao — Vertical SaaS Factory · bước 1
 
+> **Nền móng giá (0222):** gói cấu hình được (hạn mức tháng, tính năng, chính sách vượt), đồng hồ đo, Margin Guard, entitlement,
+> `/pricing` công khai, giao diện `BillingProvider` — xem `pricing-billing-foundation.md`.
+>
 > Migration `0187_platform_billing`. Mã: `lib/billing/rules.ts` (luật thuần) · `lib/billing/standing.ts` (đọc tình trạng,
 > có đệm) · `lib/billing/service.ts` (đường ghi duy nhất) · `lib/actions/billing.ts`. Kiểm thử: `tests/platform-billing.test.ts`.
 

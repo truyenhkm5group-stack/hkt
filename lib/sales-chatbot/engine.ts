@@ -504,7 +504,9 @@ async function providerFor(cfg: SalesChatbotConfig, usage: FailoverUsage = { fea
     },
     longOpenMs: cfg.failoverOpenMinutes * 60_000,
     store: settingsHealthStore(org.code),
-    onAttemptFailed: (a) => recordAiUsage({ orgCode: org.code, feature: usage.feature, source: a.source, provider: a.name, model: a.model, requests: 1, inputTokens: null, outputTokens: null, costUsd: null, status: "ERROR", actorId: usage.actorId, ref: usage.ref }).catch(() => undefined),
+    onAttemptFailed: async (a) => {
+      await recordAiUsage({ orgCode: org.code, feature: usage.feature, source: a.source, provider: a.name, model: a.model, requests: 1, inputTokens: null, outputTokens: null, costUsd: null, status: "ERROR", actorId: usage.actorId, ref: usage.ref }).catch(() => undefined);
+    },
     onPrimaryNeedsHuman: (a) => notifyPrimaryFailover(a.key, a.kind, fb.connectorKey, new Date()).catch(() => undefined),
   });
   if (!primary.ok) {

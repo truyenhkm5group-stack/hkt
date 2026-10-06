@@ -83,6 +83,7 @@ export const CONTROL_PLANE_TABLES = [
   "platform_tenant_usage_daily",
   "platform_messenger_pages",
   "platform_phone_otps",
+  "platform_org_pricing",
 ] as const;
 export type ControlPlaneTable = (typeof CONTROL_PLANE_TABLES)[number];
 
