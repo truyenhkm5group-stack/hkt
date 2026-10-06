@@ -1,5 +1,6 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { env } from "@/lib/env";
+import { classifyGraphError, GRAPH_ERROR_HINT, type GraphErrorKind } from "@/lib/integrations/messenger/graph-errors";
 
 /**
  * ═══════════ MESSENGER TRỰC TIẾP — GỌI GRAPH API CỦA META (docs/platform/messenger.md) ═══════════
@@ -26,6 +27,8 @@ export const MESSENGER_FIELDS = ["messages", "messaging_postbacks", "message_ech
 const TIMEOUT_MS = 15_000;
 /** Messenger nhận tối đa 2.000 ký tự một tin. */
 export const MESSENGER_TEXT_MAX = 2000;
+/** Trần số trang `/me/accounts` (100 page / trang) đọc mỗi lần nối — 500 page; khớp `MESSENGER_PAGES_MAX` của bộ chọn page. */
+export const ACCOUNT_PAGES_MAX_REQUESTS = 5;
 
 export function graphBase(): string {
   const v = /^v\d+\.\d+$/.test(env.facebook.apiVersion) ? env.facebook.apiVersion : "v21.0";
@@ -54,17 +57,23 @@ function scrub(s: string, secrets: readonly string[]): string {
 type Fetch = typeof fetch;
 type GraphError = { error?: { message?: string; code?: number; error_subcode?: number; type?: string } };
 
-async function graph(fetchImpl: Fetch, url: string, init: RequestInit, hide: readonly string[]): Promise<{ ok: true; body: Record<string, unknown> } | { ok: false; error: string; code: number | null }> {
+/** Lỗi của MỘT lời gọi Graph: câu (đã che bí mật, kèm việc phải làm) + LOẠI (graph-errors.ts) để nơi gọi biết kết nối có hỏng không. */
+export type GraphFailure = { ok: false; error: string; code: number | null; kind: GraphErrorKind };
+
+async function graph(fetchImpl: Fetch, url: string, init: RequestInit, hide: readonly string[]): Promise<{ ok: true; body: Record<string, unknown> } | GraphFailure> {
   try {
     const res = await fetchImpl(url, { ...init, redirect: "manual", signal: AbortSignal.timeout(TIMEOUT_MS) });
     const body = ((await res.json().catch(() => null)) ?? {}) as Record<string, unknown> & GraphError;
     if (!res.ok || body.error) {
       const msg = body.error?.message ?? `HTTP ${res.status}`;
-      return { ok: false, error: scrub(`Facebook từ chối: ${msg}`, hide), code: typeof body.error?.code === "number" ? body.error.code : null };
+      const code = typeof body.error?.code === "number" ? body.error.code : null;
+      const kind = classifyGraphError(code, typeof body.error?.error_subcode === "number" ? body.error.error_subcode : null);
+      const hint = GRAPH_ERROR_HINT[kind];
+      return { ok: false, error: scrub(`Facebook từ chối: ${msg}${hint ? ` — ${hint}` : ""}`, hide), code, kind };
     }
     return { ok: true, body };
   } catch (e) {
-    return { ok: false, error: scrub(`Không gọi được Facebook: ${e instanceof Error ? e.message : String(e)}`, hide), code: null };
+    return { ok: false, error: scrub(`Không gọi được Facebook: ${e instanceof Error ? e.message : String(e)}`, hide), code: null, kind: "OTHER" };
   }
 }
 
@@ -91,14 +100,22 @@ export async function pagesFromCode(app: MessengerApp, code: string, redirectUri
   const long = await graph(fetchImpl, `${base}/oauth/access_token?${new URLSearchParams({ grant_type: "fb_exchange_token", client_id: app.appId, client_secret: app.appSecret, fb_exchange_token: shortToken })}`, { method: "GET" }, [...hide, shortToken]);
   const userToken = long.ok && typeof long.body.access_token === "string" ? long.body.access_token : shortToken;
   const hideAll = [...hide, shortToken, userToken];
-  const acc = await graph(
-    fetchImpl,
-    `${base}/me/accounts?${new URLSearchParams({ fields: "id,name,access_token,tasks", limit: "100", access_token: userToken, appsecret_proof: appSecretProof(userToken, app.appSecret) })}`,
-    { method: "GET" },
-    hideAll,
-  );
-  if (!acc.ok) return { error: acc.error };
-  const data = Array.isArray(acc.body.data) ? (acc.body.data as Record<string, unknown>[]) : [];
+  // Phân trang bằng con trỏ `after` (không theo URL `next` — URL đó chứa token). Shop quản > 100 page trước đây chỉ thấy 100 page đầu.
+  const data: Record<string, unknown>[] = [];
+  let after: string | null = null;
+  for (let i = 0; i < ACCOUNT_PAGES_MAX_REQUESTS; i++) {
+    const q = new URLSearchParams({ fields: "id,name,access_token,tasks", limit: "100", access_token: userToken, appsecret_proof: appSecretProof(userToken, app.appSecret) });
+    if (after) q.set("after", after);
+    const acc = await graph(fetchImpl, `${base}/me/accounts?${q}`, { method: "GET" }, hideAll);
+    if (!acc.ok) {
+      if (!data.length) return { error: acc.error };
+      break;
+    }
+    data.push(...(Array.isArray(acc.body.data) ? (acc.body.data as Record<string, unknown>[]) : []));
+    const paging = (acc.body.paging ?? {}) as { cursors?: { after?: unknown }; next?: unknown };
+    after = typeof paging.cursors?.after === "string" && paging.next ? paging.cursors.after : null;
+    if (!after) break;
+  }
   const pages = data
     .map((p) => ({
       id: typeof p.id === "string" ? p.id : "",
@@ -120,6 +137,18 @@ export async function subscribePage(app: MessengerApp, pageId: string, pageToken
   );
   if (!r.ok) return { ok: false, error: r.error };
   return r.body.success === true ? { ok: true } : { ok: false, error: "Facebook không xác nhận đăng ký webhook cho page." };
+}
+
+/**
+ * GỠ đăng ký webhook của app nền tảng khỏi page (`DELETE /{page}/subscribed_apps`) — gọi khi shop gỡ page khỏi ERP, để Meta thôi gửi
+ * tin của page tới nền tảng (trước đây chỉ xoá chỉ mục: Meta vẫn gửi, webhook bỏ qua «page lạ» mãi mãi). Token đã hỏng ⇒ không gỡ được,
+ * nơi gọi vẫn gỡ phía ERP (chỉ mục mất ⇒ tin tới vẫn bị bỏ qua, không rơi về tổ chức nào).
+ */
+export async function unsubscribePage(app: MessengerApp, pageId: string, pageToken: string, fetchImpl: Fetch = fetch): Promise<{ ok: true } | { ok: false; error: string; kind: GraphErrorKind }> {
+  if (!/^\d{5,30}$/.test(pageId)) return { ok: false, error: "Mã page không hợp lệ", kind: "OTHER" };
+  const r = await graph(fetchImpl, `${graphBase()}/${encodeURIComponent(pageId)}/subscribed_apps?${new URLSearchParams({ access_token: pageToken, appsecret_proof: appSecretProof(pageToken, app.appSecret) })}`, { method: "DELETE" }, [pageToken, app.appSecret]);
+  if (!r.ok) return { ok: false, error: r.error, kind: r.kind };
+  return r.body.success === true ? { ok: true } : { ok: false, error: "Facebook không xác nhận gỡ đăng ký webhook.", kind: "OTHER" };
 }
 
 /** Kiểm tra kết nối: page token đọc được ĐÚNG page đã khai (chỉ đọc). */
@@ -148,14 +177,14 @@ export async function instagramAccountOf(app: MessengerApp, pageId: string, page
  * Gửi MỘT tin chữ cho khách (Send API, `messaging_type: RESPONSE` — trả lời trong khung 24 giờ kể từ tin cuối của khách).
  * Chữ dài hơn 2.000 ký tự ⇒ nơi gọi chia trước (`chunkText`).
  */
-export async function sendMessengerText(app: MessengerApp, pageToken: string, psid: string, text: string, fetchImpl: Fetch = fetch): Promise<{ ok: true; id: string | null } | { ok: false; error: string }> {
+export async function sendMessengerText(app: MessengerApp, pageToken: string, psid: string, text: string, fetchImpl: Fetch = fetch): Promise<{ ok: true; id: string | null } | { ok: false; error: string; kind: GraphErrorKind }> {
   const r = await graph(
     fetchImpl,
     `${graphBase()}/me/messages?${new URLSearchParams({ access_token: pageToken, appsecret_proof: appSecretProof(pageToken, app.appSecret) })}`,
     { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ recipient: { id: psid }, messaging_type: "RESPONSE", message: { text: text.slice(0, MESSENGER_TEXT_MAX) } }) },
     [pageToken, app.appSecret],
   );
-  if (!r.ok) return { ok: false, error: r.error };
+  if (!r.ok) return { ok: false, error: r.error, kind: r.kind };
   return { ok: true, id: typeof r.body.message_id === "string" ? r.body.message_id : null };
 }
 
@@ -163,14 +192,14 @@ export async function sendMessengerText(app: MessengerApp, pageToken: string, ps
  * Gửi MỘT ảnh cho khách qua Send API — tải TỆP lên cùng lời gọi (`filedata`, multipart), không cần URL công khai của ảnh.
  * Cùng khung 24 giờ / `RESPONSE` với tin chữ. Trả mã tin Meta để tiếng vọng nhận ra là tin của chính page.
  */
-export async function sendMessengerImage(app: MessengerApp, pageToken: string, psid: string, image: { data: Uint8Array; contentType: string }, fetchImpl: Fetch = fetch): Promise<{ ok: true; id: string | null } | { ok: false; error: string }> {
+export async function sendMessengerImage(app: MessengerApp, pageToken: string, psid: string, image: { data: Uint8Array; contentType: string }, fetchImpl: Fetch = fetch): Promise<{ ok: true; id: string | null } | { ok: false; error: string; kind: GraphErrorKind }> {
   const form = new FormData();
   form.append("recipient", JSON.stringify({ id: psid }));
   form.append("messaging_type", "RESPONSE");
   form.append("message", JSON.stringify({ attachment: { type: "image", payload: { is_reusable: false } } }));
   form.append("filedata", new Blob([new Uint8Array(image.data)], { type: image.contentType }), `anh.${image.contentType.split("/")[1] ?? "jpg"}`);
   const r = await graph(fetchImpl, `${graphBase()}/me/messages?${new URLSearchParams({ access_token: pageToken, appsecret_proof: appSecretProof(pageToken, app.appSecret) })}`, { method: "POST", body: form }, [pageToken, app.appSecret]);
-  if (!r.ok) return { ok: false, error: r.error };
+  if (!r.ok) return { ok: false, error: r.error, kind: r.kind };
   return { ok: true, id: typeof r.body.message_id === "string" ? r.body.message_id : null };
 }
 
@@ -178,14 +207,14 @@ export async function sendMessengerImage(app: MessengerApp, pageToken: string, p
  * TIN RIÊNG trả lời MỘT bình luận (Private Replies): người nhận là `comment_id`, mở hộp thư Messenger với người bình luận.
  * Meta chỉ cho MỘT tin riêng mỗi bình luận, trong 7 ngày.
  */
-export async function sendPrivateReply(app: MessengerApp, pageToken: string, commentId: string, text: string, fetchImpl: Fetch = fetch): Promise<{ ok: true; id: string | null; recipientId: string | null } | { ok: false; error: string }> {
+export async function sendPrivateReply(app: MessengerApp, pageToken: string, commentId: string, text: string, fetchImpl: Fetch = fetch): Promise<{ ok: true; id: string | null; recipientId: string | null } | { ok: false; error: string; kind: GraphErrorKind }> {
   const r = await graph(
     fetchImpl,
     `${graphBase()}/me/messages?${new URLSearchParams({ access_token: pageToken, appsecret_proof: appSecretProof(pageToken, app.appSecret) })}`,
     { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ recipient: { comment_id: commentId }, message: { text: text.slice(0, MESSENGER_TEXT_MAX) } }) },
     [pageToken, app.appSecret],
   );
-  if (!r.ok) return { ok: false, error: r.error };
+  if (!r.ok) return { ok: false, error: r.error, kind: r.kind };
   return { ok: true, id: typeof r.body.message_id === "string" ? r.body.message_id : null, recipientId: typeof r.body.recipient_id === "string" ? r.body.recipient_id : null };
 }
 
@@ -292,4 +321,35 @@ export function parseMessengerWebhook(payload: unknown): MessengerEvent[] {
     }
   }
   return out.filter((e) => /^\d{5,30}$/.test(e.pageId) && /^\d{5,30}$/.test(e.psid));
+}
+
+// ─────────────────────────── Hội thoại cũ của page (Conversations API) ───────────────────────────
+
+/** Trường đọc mỗi hội thoại: người tham gia (PSID / IGSID của khách), mốc cập nhật, tối đa N tin GẦN NHẤT kèm ảnh. */
+function conversationFields(messages: number): string {
+  return `participants,updated_time,messages.limit(${Math.max(1, Math.min(20, messages))}){id,message,from,created_time,attachments{image_data{url},mime_type}}`;
+}
+
+/**
+ * MỘT trang danh sách hội thoại của page (`GET /{page}/conversations?platform=…`, mới cập nhật → cũ) — Meta chỉ cho đọc 20 tin GẦN
+ * NHẤT mỗi hội thoại; hội thoại «Tin nhắn chờ» không hoạt động 30 ngày không trả về. Instagram đọc qua PAGE CHA với
+ * `platform=instagram`. Phân trang bằng con trỏ `after` (không theo URL `next` Meta trả — URL chứa token và không phải hằng số
+ * của ta). Quyền: `pages_messaging` + `pages_manage_metadata` + `pages_read_engagement` (Instagram: `instagram_manage_messages`).
+ */
+export async function pageConversations(
+  app: MessengerApp,
+  pageToken: string,
+  pageId: string,
+  opts: { platform: "messenger" | "instagram"; after: string | null; limit: number; messages: number },
+  fetchImpl: Fetch = fetch,
+): Promise<{ ok: true; items: Record<string, unknown>[]; after: string | null } | { ok: false; error: string; kind: GraphErrorKind }> {
+  if (!/^\d{5,30}$/.test(pageId)) return { ok: false, error: "Mã page không hợp lệ", kind: "OTHER" };
+  const q = new URLSearchParams({ platform: opts.platform, fields: conversationFields(opts.messages), limit: String(Math.max(1, Math.min(50, opts.limit))), access_token: pageToken, appsecret_proof: appSecretProof(pageToken, app.appSecret) });
+  if (opts.after) q.set("after", opts.after);
+  const r = await graph(fetchImpl, `${graphBase()}/${encodeURIComponent(pageId)}/conversations?${q}`, { method: "GET" }, [pageToken, app.appSecret]);
+  if (!r.ok) return { ok: false, error: r.error, kind: r.kind };
+  const data = Array.isArray(r.body.data) ? (r.body.data as Record<string, unknown>[]) : [];
+  const paging = (r.body.paging ?? {}) as { cursors?: { after?: unknown }; next?: unknown };
+  const after = typeof paging.cursors?.after === "string" && paging.next ? paging.cursors.after : null;
+  return { ok: true, items: data, after };
 }

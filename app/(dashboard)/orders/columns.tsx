@@ -85,13 +85,12 @@ export const orderColumns: ColumnDef<OrderListRow, unknown>[] = [
     cell: ({ row }) => (
       <div className="flex flex-wrap items-center gap-1.5">
         <SourceBadge source={row.original.source} />
-        {/* Hội thoại Pancake của đơn — đơn đồng bộ mang sẵn mã hội thoại; đơn bot / ghi từ hội thoại tra ngược (orderChatThreads). */}
+        {/* Hội thoại của đơn (chatLinkOf): trong Hộp thư ERP khi tổ chức có hộp thư; không thì Pancake (đơn đồng bộ mang sẵn mã). */}
         {row.original.chatUrl ? (
           <a
             href={row.original.chatUrl}
-            target="_blank"
-            rel="noreferrer"
-            title="Mở hội thoại của khách trên Pancake"
+            {...(row.original.chatInternal ? {} : { target: "_blank", rel: "noreferrer" })}
+            title={row.original.chatInternal ? "Mở hội thoại của khách trong Hộp thư ERP" : "Mở hội thoại của khách trên Pancake"}
             className="inline-flex items-center gap-0.5 rounded border px-1.5 py-0.5 text-[10.5px] font-medium text-muted-foreground hover:bg-muted hover:text-primary"
           >
             Chat <ExternalLink className="size-2.5" />

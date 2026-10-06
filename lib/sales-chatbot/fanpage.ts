@@ -22,6 +22,8 @@
  */
 import { draftCopilotSuggestion, loadModeConfig, pinArm } from "@/lib/sales-chatbot/operating-mode";
 import { readPinnedArm, replyGate } from "@/lib/sales-chatbot/operating-mode-shared";
+import { applyConversationControl, controlOf, controlSkipNote } from "@/lib/sales-chatbot/conversation-control-shared";
+import { botMaySend, captureSendSnapshot } from "@/lib/sales-chatbot/conversation-control";
 import { createHash, randomUUID } from "node:crypto";
 import { and, asc, desc, eq, gte, inArray, isNull, like, lt, ne, or, sql, type SQL } from "drizzle-orm";
 import { getDb, schema } from "@/db";
@@ -892,10 +894,12 @@ export async function processFanpageThread(pageId: string, threadId: string, dep
     // CHẾ ĐỘ VẬN HÀNH (lib/sales-chatbot/operating-mode-shared.ts): quan sát · copilot · thử nghiệm AI vs người · tự động — MỘT
     // cổng cho mọi kênh có người trả lời song song. Đặt SAU khi chép lời page vào lịch sử (đường nền của người vẫn đủ) và
     // TRƯỚC mọi lời gọi tốn tiền (hồ sơ khách cũ, đọc ảnh, AI). Mặc định TỰ ĐỘNG — shop chưa đổi chế độ không thấy gì khác.
-    const gate = replyGate(await loadModeConfig(), fanpageVisitorKey(pageId, threadId), readPinnedArm(conv.state));
+    // Chế độ của HỘI THOẠI (Tiếp quản / AI gợi ý — conversation-control-shared.ts) chỉ THU HẸP cổng của tổ chức.
+    const control = controlOf(conv.state);
+    const gate = applyConversationControl(replyGate(await loadModeConfig(), fanpageVisitorKey(pageId, threadId), readPinnedArm(conv.state)), control);
     await pinArm(conv.id, gate, now());
     if (gate.mode === "OBSERVE") {
-      const note = gate.arm ? OBSERVE_HUMAN_ARM_NOTE : OBSERVE_NOTE;
+      const note = controlSkipNote(control) ?? (gate.arm ? OBSERVE_HUMAN_ARM_NOTE : OBSERVE_NOTE);
       await finish("SKIPPED", note);
       out.processed += ids.length;
       out.skipped = note;
@@ -946,6 +950,8 @@ export async function processFanpageThread(pageId: string, threadId: string, dep
       continue;
     }
     const customerName = [...claimed].reverse().find((r) => r.customerName?.trim())?.customerName ?? null;
+    // Ảnh chụp ĐẦU LƯỢT: người gửi tin / tiếp quản trong lúc AI đang soạn ⇒ bot không gửi câu đã soạn (`botMaySend`).
+    const sendGuard = await captureSendSnapshot(conv.id);
     const turn = await chatTurn(conv.id, text, { channel: "FANPAGE", visitorKey: fanpageVisitorKey(pageId, threadId), now: now(), customerName, ...(context ? { context } : {}) });
     if (!turn.ok) {
       // Lượt khác đang trả lời cùng hội thoại ⇒ nhả tin để lượt sau gom; lý do khác (bot tắt…) ⇒ bỏ qua có ghi chú.
@@ -967,9 +973,17 @@ export async function processFanpageThread(pageId: string, threadId: string, dep
     }
     const replies = turn.view.messages.slice(before).filter((m) => m.role === "assistant" && m.text.trim());
     let sendError: string | null = null;
+    let yielded: string | null = null;
     // BÌNH LUẬN: một tin RIÊNG trả lời bình luận MỚI NHẤT của lượt (gộp mọi câu trả lời) — không bao giờ công khai.
     const lastComment = [...claimed].reverse().find((r) => r.kind === "COMMENT" && r.postId && r.fromId);
     if (lastComment) {
+      const may = await botMaySend(conv.id, sendGuard);
+      if (!may.ok) {
+        await finish("DONE", may.reason);
+        out.processed += ids.length;
+        out.skipped = may.reason;
+        continue;
+      }
       const pr = await deliverCommentReply(
         { pageId, threadId, token, commentId: lastComment.messageId, postId: lastComment.postId!, fromId: lastComment.fromId!, text: replies.map((r) => r.text).join("\n\n"), imageIds: turn.media?.imageIds ?? [], conversationId: conv.id },
         deps,
@@ -994,6 +1008,11 @@ export async function processFanpageThread(pageId: string, threadId: string, dep
       mediaDone = true;
       const media = turn.media?.imageIds ?? [];
       if (!media.length) return;
+      const may = await botMaySend(conv.id, sendGuard);
+      if (!may.ok) {
+        yielded = may.reason;
+        return;
+      }
       const up = await contentIdsFor(pageId, token, media, deps.fetch ?? fetch, now());
       if (up.ids.length) {
         await db.insert(t).values({ pageId, threadId, messageId: `bot-out:${randomUUID()}`, text: "", status: "DONE", processedAt: now(), note: "BOT_SENT" }).onConflictDoNothing({ target: t.messageId });
@@ -1004,6 +1023,13 @@ export async function processFanpageThread(pageId: string, threadId: string, dep
       if (!sendError && up.errors.length) sendError = up.errors[0];
     };
     for (const r of replies) {
+      // Người vừa trả lời / tiếp quản trong lúc bot soạn ⇒ dừng, KHÔNG gửi phần còn lại (kể cả ảnh).
+      const may = await botMaySend(conv.id, sendGuard);
+      if (!may.ok) {
+        yielded = may.reason;
+        mediaDone = true;
+        break;
+      }
       // Ghi TRƯỚC khi gửi từng đoạn (đúng cách chia của sendInbox): tiếng vọng có thể tới trước khi lời gọi gửi trả mã tin.
       await db
         .insert(t)
@@ -1024,12 +1050,13 @@ export async function processFanpageThread(pageId: string, threadId: string, dep
       }
       if (!mediaDone && turn.media?.afterText && r.text === turn.media.afterText) {
         await sendMedia();
-        if (sendError) break;
+        if (sendError || yielded) break;
       }
     }
-    if (!sendError && !mediaDone) await sendMedia();
-    await finish("DONE", sendError);
+    if (!sendError && !yielded && !mediaDone) await sendMedia();
+    await finish("DONE", sendError ?? yielded);
     if (!sendError && out.replies > 0) await markWaitingForCustomer(conv.id, now());
+    if (yielded) out.skipped = yielded;
     out.processed += ids.length;
     if (sendError) {
       out.error = sendError;

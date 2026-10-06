@@ -38,6 +38,10 @@ import { loadOrderAttribution } from "@/lib/sales-chatbot/attribution";
 import { loadQualityQueue, reviewQualityFindingCore } from "@/lib/sales-chatbot/quality";
 import { listReplayRuns, loadReplayRun } from "@/lib/sales-chatbot/replay";
 import { rowsOf } from "@/lib/sql-rows";
+import { setConversationControlCore } from "@/lib/sales-chatbot/conversation-control";
+import { listInbox } from "@/lib/sales-chatbot/inbox";
+import { customerConversations } from "@/lib/queries/customer-conversations";
+import { orderChatThreads } from "@/lib/queries/orders";
 
 const A = "asi-a";
 const B = "asi-b";
@@ -87,7 +91,10 @@ async function seed(org: string): Promise<Seeded> {
     await db.insert(schema.salesReplayPoints).values({ runId: run.id, sourceConversationId: fan.id, sourceChannel: "FANPAGE", sourceSeq: 1, customerText: `Cho em giá sỉ ${MARK}`, historicalSpeaker: "SHOP", aiReply: `Dạ ${MARK}` });
     // Quy kết từng đơn (docs/revenue-attribution.md): mỗi tổ chức một đơn bot chốt với số tiền RIÊNG — kẻ tấn công đọc thấy số
     // của nạn nhân là rò.
-    await db.insert(schema.orders).values({ id: `erp-asi-${org}`, stage: "CONFIRMED", status: 1, billFullName: `Khách ${MARK}`, totalPrice: orderValueOf(org), totalPriceAfterDiscount: orderValueOf(org), insertedAt: new Date(), origin: "AI_AGENT", salesConversationId: fan.id });
+    // Khách của hội thoại (Customer 360 — khối «Hội thoại» của hồ sơ khách đọc theo khoá cứng này).
+    await db.insert(schema.customers).values({ id: `erp-kh-asi-${org}`, name: `Khách ${MARK}` });
+    await db.update(c).set({ customerId: `erp-kh-asi-${org}` }).where(eq(c.id, fan.id));
+    await db.insert(schema.orders).values({ id: `erp-asi-${org}`, stage: "CONFIRMED", status: 1, billFullName: `Khách ${MARK}`, totalPrice: orderValueOf(org), totalPriceAfterDiscount: orderValueOf(org), insertedAt: new Date(), origin: "AI_AGENT", salesConversationId: fan.id, customerId: `erp-kh-asi-${org}` });
     await recordConversationEvent(fan.id, { type: "order.confirmed", actorKind: "CUSTOMER", occurredAt: new Date(), orderId: `erp-asi-${org}`, amountVnd: orderValueOf(org), key: `asi-confirm-${org}` });
     const [sg] = await db.insert(schema.salesCopilotSuggestions).values({ conversationId: fan.id, pageId: `${org}-page`, threadId: `${org}-thread`, customerText: `Cho em giá sỉ ${MARK}`, suggestion: `Dạ ${MARK}` }).returning({ id: schema.salesCopilotSuggestions.id });
     return { admin, fanpageConv: fan.id, testConv: test.id, quickReply: qr.id, image: imgRow.id, replayRun: run.id, suggestion: sg.id };
@@ -181,6 +188,25 @@ async function attack(attacker: string, admin: SessionUser, victimCode: string, 
     const queue = await loadQualityQueue(admin, { days: 30 });
     results.push(queue);
     if ("ok" in queue && queue.value.items.some((i) => i.conversationId === victim.fanpageConv)) refused.push("hàng đợi rà lẫn hội thoại của tổ chức khác");
+    // Bề mặt của lệnh «Thay Pancake»: chế độ AI ↔ người theo hội thoại · hồ sơ khách → hội thoại · đơn → hội thoại · hộp thư lọc
+    // «AI / người». Id của nạn nhân trong ngữ cảnh kẻ tấn công: đổi chế độ phải bị từ chối, ba phép đọc phải rỗng.
+    for (const mode of ["HUMAN", "AUTO", "COPILOT"] as const) {
+      const ctl = await setConversationControlCore({ ...admin, permissions: ["ai_sales:view", "ai_sales:reply", "ai_sales:manage"] }, victim.fanpageConv, mode, `đè ${mode}`);
+      results.push(ctl);
+      if (ctl.ok) refused.push(`đổi chế độ AI ↔ người (${mode}) của hội thoại tổ chức khác`);
+    }
+    const victimOrg = victim.admin.organization?.code ?? "";
+    const chats = await customerConversations(`erp-kh-asi-${victimOrg}`);
+    results.push(chats);
+    if (chats.length) refused.push("hồ sơ khách đọc được hội thoại của tổ chức khác");
+    const threads = await orderChatThreads([`erp-asi-${victimOrg}`]);
+    results.push([...threads.entries()]);
+    if (threads.size) refused.push("đơn của tổ chức khác tra ra hội thoại");
+    for (const handler of ["AI", "HUMAN", null] as const) {
+      const inbox = await listInbox({ ...admin, permissions: ["ai_sales:view"] }, { handler, limit: 500 });
+      results.push(inbox);
+      if (inbox.ok && inbox.rows.some((r) => r.id === victim.fanpageConv)) refused.push(`hộp thư (lọc ${handler ?? "mọi"}) lẫn hội thoại của tổ chức khác`);
+    }
     const convs = await listConversations(200);
     const qrs = await listQuickReplies();
     results.push(convs, qrs);
@@ -216,8 +242,11 @@ export async function testAiSalesIsolation() {
       assert.ok(await readQuickReplyImage(b.image), "B đọc được ảnh của chính mình");
       assert.ok("ok" in (await setQuickReplyActive(b.admin, b.quickReply, true)), "B bật được câu mẫu của chính mình");
       assert.equal(await resumeConversationToAi(b.fanpageConv), true, "B trả được hội thoại của chính mình về AI");
+      assert.equal((await customerConversations(`erp-kh-asi-${B}`)).length, 1, "hồ sơ khách của B thấy hội thoại của chính nó");
+      assert.equal((await orderChatThreads([`erp-asi-${B}`])).get(`erp-asi-${B}`)?.conversationId, b.fanpageConv, "đơn của B tra ra hội thoại của chính nó");
+      assert.ok((await setConversationControlCore({ ...b.admin, permissions: ["ai_sales:view", "ai_sales:reply"] }, b.fanpageConv, "HUMAN")).ok, "B tiếp quản được hội thoại của chính mình");
     });
-    console.log("  ✓ AI bán hàng cô lập tổ chức: 18 đòn × 2 chiều bị từ chối (gồm sổ sự kiện, phát lại, Copilot, màn Hiệu quả, quy kết đơn, rà lỗi AI), CSDL nạn nhân trước = sau, 0 dòng sổ AI, 0 chữ rò rỉ");
+    console.log("  ✓ AI bán hàng cô lập tổ chức: 26 đòn × 2 chiều bị từ chối (gồm sổ sự kiện, phát lại, Copilot, màn Hiệu quả, quy kết đơn, rà lỗi AI, chế độ AI ↔ người, hồ sơ khách → hội thoại, đơn → hội thoại, hộp thư lọc AI / người), CSDL nạn nhân trước = sau, 0 dòng sổ AI, 0 chữ rò rỉ");
   } finally {
     await cleanup();
   }

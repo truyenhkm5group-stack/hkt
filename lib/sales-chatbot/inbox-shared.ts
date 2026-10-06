@@ -3,6 +3,7 @@
  *
  * Tệp THUẦN (không CSDL): trang hộp thư (client) chỉ được `import` từ đây; lõi đọc / ghi ở `lib/sales-chatbot/inbox.ts`.
  */
+import type { ControlStamp } from "@/lib/sales-chatbot/conversation-control-shared";
 
 import type { CustomerLevel } from "@/lib/sales-chatbot/levels-shared";
 
@@ -16,6 +17,14 @@ export const INBOX_FILTER_LABEL: Record<InboxFilter, string> = {
   MINE: "Của tôi",
   UNASSIGNED: "Chưa ai nhận",
 };
+
+/**
+ * Ai đang trả lời khách (conversation-control-shared.ts): AI = bot đang tự trả lời (không nhường, không ghi đè); HUMAN = đang
+ * nhường cho người · Tiếp quản · AI gợi ý (người gửi). Hai nhóm phủ kín, không giao nhau.
+ */
+export const INBOX_HANDLERS = ["AI", "HUMAN"] as const;
+export type InboxHandler = (typeof INBOX_HANDLERS)[number];
+export const INBOX_HANDLER_LABEL: Record<InboxHandler, string> = { AI: "AI đang trả lời", HUMAN: "Người đang xử lý" };
 
 /** Lọc theo mốc TIN cuối của hội thoại (giờ Việt Nam). `CUSTOM` = khoảng ngày người chọn. */
 export const INBOX_PERIODS = ["TODAY", "YESTERDAY", "7D", "30D", "CUSTOM"] as const;
@@ -108,6 +117,8 @@ export type InboxThread = {
   status: string;
   handoffReason: string | null;
   botYields: boolean;
+  /** Chế độ AI của RIÊNG hội thoại (Tiếp quản / AI gợi ý); `null` = theo chế độ của tổ chức (conversation-control-shared.ts). */
+  control: ControlStamp | null;
   customer: { id: string | null; name: string; phone: string | null; address: string | null; province: string | null };
   assigneeUserId: string | null;
   assigneeName: string | null;

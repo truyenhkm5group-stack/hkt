@@ -508,6 +508,12 @@ import { testSalesVision } from "./sales-vision.test";
 import { testChatWidget } from "./chat-widget.test";
 import { testWebProductImport } from "./web-product-import.test";
 import { testMessenger } from "./messenger.test";
+import { testConversationControl } from "./conversation-control.test";
+import { testConversationTrace } from "./conversation-trace.test";
+import { testMessengerHealth } from "./messenger-health.test";
+import { testConnectorsLegacy } from "./connectors-legacy.test";
+import { testNativeOrderSync } from "./native-order-sync.test";
+import { testMessengerLifecycle } from "./messenger-lifecycle.test";
 import { testMessengerMultiPage } from "./messenger-multipage.test";
 import { testPush } from "./push.test";
 import { testUserInvites } from "./user-invites.test";
@@ -2778,6 +2784,21 @@ async function main() {
   testChatWidget();
   await testWebProductImport();
   await testMessenger();
+  // AI ↔ người trên từng hội thoại (Tiếp quản / AI gợi ý / Trả lại AI) + cổng gửi chống trả lời đôi — tổ chức THẬT
+  // `kiem-soat-hoi-thoai`, Messenger trực tiếp qua Graph giả.
+  await testConversationControl();
+  // Đơn ↔ hội thoại ↔ khách: link hội thoại của đơn mở Hộp thư ERP (mọi kênh); hồ sơ khách chỉ thấy hội thoại nối bằng
+  // khoá cứng — tổ chức THẬT `truy-vet-hoi-thoai`.
+  await testConversationTrace();
+  // Messenger trực tiếp — token hỏng (Graph 190) ⇒ kết nối về Nháp + báo người một lần; lỗi ngoài 24 giờ không đụng kết nối.
+  await testMessengerHealth();
+  testConnectorsLegacy();
+  // Shop CHỈ nối Facebook trực tiếp: ghi đơn từ hội thoại đọc sổ tin ERP (không Pancake) + trọn đường nhận → bot → nhân viên →
+  // đơn → ghi đơn với 0 lời gọi pages.fm — tổ chức THẬT `chi-facebook`.
+  await testNativeOrderSync();
+  // Vòng đời page Meta + lịch sử hội thoại trực tiếp: phân trang /me/accounts, gỡ page ⇒ gỡ đăng ký webhook, nhập 20 tin gần nhất
+  // mỗi hội thoại qua Conversations API — tổ chức THẬT `vong-doi-page`.
+  await testMessengerLifecycle();
   await testMessengerMultiPage();
   await testPush();
   // Mời người dùng qua liên kết (gap «Invite User»): tổ chức THẬT `ui-a` / `ui-b` / `ui-t` (tự cấp, tự dọn) + nhà — vai trò

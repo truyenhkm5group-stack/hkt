@@ -29,7 +29,8 @@
  * mà không có vòng nào trong tiến trình này ⇒ chạy tiếp đúng chỗ dừng. Trần tốc độ: `HISTORY_LIMITS`. Mỗi lượt (≤ 2 phút) một
  * dòng `sync_runs` (`sales-inbox-history`).
  *
- * KÊNH KHÁC: Messenger trực tiếp và Zalo OA CHƯA nhập lịch sử — xem docs/productization/MIGRATION_PLAN.md (M8 · Nhập lịch sử).
+ * KÊNH KHÁC: page nối THẲNG Meta (Messenger / Instagram) nhập qua `messenger-history.ts` (Conversations API, 20 tin gần nhất mỗi
+ * hội thoại — giới hạn của Meta), dùng chung `writeThreadPage` / `finishThread` ở đây. Zalo OA CHƯA nhập lịch sử.
  */
 import { and, asc, count, eq, gt, gte, isNotNull, isNull, like, lt, lte, or, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
@@ -229,7 +230,7 @@ async function ensureConversation(pageId: string, threadId: string, activityAt: 
 }
 
 /** Ghi MỘT trang tin đã lập kế hoạch của một luồng + đẩy mốc của hội thoại. Idempotent: khoá `message_id`. */
-async function writeThreadPage(pageId: string, threadId: string, planned: readonly PlannedHistoryMessage[], now: Date): Promise<PageWrite> {
+export async function writeThreadPage(pageId: string, threadId: string, planned: readonly PlannedHistoryMessage[], now: Date): Promise<PageWrite> {
   const out: PageWrite = { inserted: 0, customer: 0, page: 0, duplicates: 0, created: false };
   if (!planned.length) return out;
   const db = await getDb();
@@ -296,7 +297,7 @@ async function writeThreadPage(pageId: string, threadId: string, planned: readon
 }
 
 /** Đọc xong một luồng ⇒ đóng dấu «đã nhập» + SĐT Pancake ghi nhận (`state.pancakePhones`) + ảnh đại diện (nếu có). */
-async function finishThread(pageId: string, thread: PendingThread, phones: readonly string[], now: Date): Promise<void> {
+export async function finishThread(pageId: string, thread: PendingThread, phones: readonly string[], now: Date): Promise<void> {
   const db = await getDb();
   const c = schema.salesChatConversations;
   const [row] = await db.select({ id: c.id, state: c.state }).from(c).where(and(eq(c.channel, "FANPAGE"), eq(c.visitorKey, fanpageVisitorKey(pageId, thread.id)))).limit(1);

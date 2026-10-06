@@ -3,11 +3,14 @@ import { ConnectorGroupTable } from "@/components/connectors/connector-group-tab
 import { OrgCarrierPanel } from "@/components/connectors/org-carrier-panel";
 import { OrgGhnPanel } from "@/components/connectors/org-ghn-panel";
 import { OrgGhtkPanel } from "@/components/connectors/org-ghtk-panel";
-import { OrgPosPanel } from "@/components/connectors/org-pos-panel";
+import { LegacyConnections } from "@/components/connectors/legacy-connections";
 import { EmptyState, SectionCard } from "@/components/ui-bits";
 import { requirePermission } from "@/lib/auth/session";
 import { CONNECTIONS_PERMISSION, loadConnectionsView } from "@/lib/connectors/service";
+import { splitLegacyConnectors } from "@/lib/connectors/legacy";
 import { getBrandCopy } from "@/lib/branding/service";
+import { moduleOn } from "@/lib/platform-ui/module-visibility";
+import Link from "next/link";
 
 export const metadata = { title: "Kết nối theo tổ chức" };
 
@@ -36,6 +39,9 @@ export default async function ConnectionsPage() {
   const total = view.groups.reduce((n, g) => n + g.rows.length, 0);
   const configurable = view.groups.flatMap((g) => g.rows).filter((r) => r.mode === "CONFIGURABLE");
   const active = configurable.filter((r) => r.connection?.status === "ACTIVE").length;
+  // Tổ chức khách: Pancake là kết nối CŨ / CHUYỂN ĐỔI (lib/connectors/legacy.ts) — rời bảng chính về mục cuối trang.
+  const split = splitLegacyConnectors(view);
+  const directFacebook = !view.organization.isHome && moduleOn(user, "ai_sales");
 
   return (
     <div className="space-y-5">
@@ -60,19 +66,26 @@ export default async function ConnectionsPage() {
           Khoá mã hoá bí mật kết nối của máy chủ: sẵn sàng · mã khoá <span className="font-mono">{view.secretsReady.keyIdShort}</span> (không phải khoá — chỉ để biết khoá có đổi hay không).
         </p>
       )}
-      {!view.organization.isHome ? <OrgPosPanel orgCode={view.organization.code} /> : null}
-      {!view.organization.isHome ? <OrgCarrierPanel orgCode={view.organization.code} /> : null}
-      {!view.organization.isHome ? <OrgGhnPanel orgCode={view.organization.code} /> : null}
-      {!view.organization.isHome ? <OrgGhtkPanel orgCode={view.organization.code} /> : null}
-      {view.groups.length === 0 ? (
+      {directFacebook ? (
+        <SectionCard title="Facebook · Instagram — nối thẳng, không cần phần mềm chat trung gian" description="Cách khuyên dùng cho shop bán qua Facebook: chủ page bấm Kết nối Facebook, chọn page — tin khách về Hộp thư ERP, bot AI trả lời, nhân viên tiếp quản ngay trong ERP.">
+          <Link href="/ai/sales-chatbot/messenger" className="text-sm font-semibold text-primary hover:underline" data-testid="connections-direct-facebook">
+            Mở Kết nối Facebook →
+          </Link>
+        </SectionCard>
+      ) : null}
+      {view.organization.isHome ? null : <OrgCarrierPanel orgCode={view.organization.code} />}
+      {view.organization.isHome ? null : <OrgGhnPanel orgCode={view.organization.code} />}
+      {view.organization.isHome ? null : <OrgGhtkPanel orgCode={view.organization.code} />}
+      {split.groups.length === 0 ? (
         <EmptyState title="Chưa có connector nào trong sổ" description="Sổ connector của mã nguồn rỗng — không nên xảy ra; báo đội kỹ thuật." />
       ) : (
-        view.groups.map((g) => (
+        split.groups.map((g) => (
           <SectionCard key={g.kind} title={g.label} description={`${g.rows.length} connector`} padded={false} contentClassName="overflow-x-auto p-0">
             <ConnectorGroupTable rows={g.rows} secretsReady={view.secretsReady.ok} />
           </SectionCard>
         ))
       )}
+      {view.organization.isHome ? null : <LegacyConnections orgCode={view.organization.code} rows={split.legacy} open={split.legacyInUse} secretsReady={view.secretsReady.ok} />}
     </div>
   );
 }

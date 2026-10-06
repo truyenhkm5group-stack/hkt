@@ -13,6 +13,7 @@ import { zaloWindow, ZALO_IMAGE_MAX_BYTES } from "@/lib/integrations/zalo/oa";
 import { ORDER_OUTCOME } from "@/lib/queries/return-rate";
 import { appendContextMessages, resumeConversationToAi, SHOP_SAID } from "@/lib/sales-chatbot/engine";
 import { recordConversationEvent } from "@/lib/sales-chatbot/events";
+import { readConversationControl } from "@/lib/sales-chatbot/conversation-control-shared";
 import { HISTORY_CREATED_BY } from "@/lib/sales-chatbot/history-shared";
 import { labelsFor, listLabels, notesFor } from "@/lib/sales-chatbot/inbox-labels";
 import { PAGE_REPLY, STAFF_OUT_PREFIX, STAFF_REASON, type FanpageDeps } from "@/lib/sales-chatbot/fanpage";
@@ -21,6 +22,7 @@ import {
   INBOX_CHANNEL_LABEL,
   INBOX_CHANNELS,
   INBOX_FILTERS,
+  INBOX_HANDLERS,
   INBOX_LIST_MAX,
   INBOX_OUTCOME_LABEL,
   INBOX_PERIODS,
@@ -125,6 +127,7 @@ const listZ = z.object({
   from: dayZ,
   to: dayZ,
   limit: z.number().int().min(50).max(INBOX_LIST_MAX).catch(100),
+  handler: z.enum(INBOX_HANDLERS).nullable().catch(null),
 });
 
 export type InboxPageOption = { id: string; name: string };
@@ -209,6 +212,10 @@ export async function listInbox(user: SessionUser, rawQuery: unknown, now: Date 
   }
   if (q.phone === "HAS") base.push(HAS_PHONE);
   if (q.phone === "NONE") base.push(sql`not ${HAS_PHONE}`);
+  // Ai đang trả lời (INBOX_HANDLERS): người = nhường / Tiếp quản / AI gợi ý; AI = phần còn lại.
+  const byHuman = sql`(${c.status} = 'HANDOFF' or coalesce(${c.state}->'control'->>'mode', 'AUTO') in ('HUMAN', 'COPILOT'))`;
+  if (q.handler === "HUMAN") base.push(byHuman);
+  if (q.handler === "AI") base.push(sql`not ${byHuman}`);
   if (q.assignee === "none") base.push(isNull(c.assigneeUserId));
   else if (q.assignee) base.push(eq(c.assigneeUserId, q.assignee));
   const range = inboxPeriodRange(q, now);
@@ -502,6 +509,7 @@ export async function loadInboxThread(user: SessionUser, conversationId: unknown
       status: conv.status,
       handoffReason: conv.handoffReason,
       botYields: conv.status === "HANDOFF",
+      control: readConversationControl(conv.state),
       customer: cust
         ? { id: cust.id, name: cust.name, phone: cust.phone, address: cust.address, province: cust.province }
         : { id: null, name: st.customer?.name || channelName || "Khách", phone: st.customer?.phone ?? null, address: st.customer?.address ?? null, province: null },

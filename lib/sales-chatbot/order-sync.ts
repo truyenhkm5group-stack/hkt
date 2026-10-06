@@ -6,8 +6,9 @@
  *  1. CHỌN hội thoại: có tin của khách trong `lookbackHours` giờ qua (webhook ghi `sales_chat_inbound` dù bot bật hay tắt),
  *     đã YÊN `quietMinutes` phút, có tin mới hơn lần đọc trước (`state.orderSync.checkedUntil`), và do NGƯỜI phụ trách:
  *     bot đang tắt, hoặc hội thoại ở «Cần người xử lý». Bot đang bật và đang trả lời ⇒ đơn là việc của bot, không ghi hai lần.
- *  2. ĐỌC lại hội thoại từ Pancake (đủ tin của khách lẫn nhân viên) + nhận ra khách cũ (`findReturningCustomer` — SĐT Pancake
- *     đã ghi nhận, mã Facebook, khách của đơn trước trong chính hội thoại này).
+ *  2. ĐỌC lại hội thoại theo đường nhắn tin của page (`OrderSyncSource`): page Pancake ⇒ API Pancake; page nối THẲNG Meta ⇒ sổ
+ *     tin `sales_chat_inbound` của ERP (không gọi Pancake) — đủ tin của khách lẫn nhân viên — + nhận ra khách cũ
+ *     (`findReturningCustomer` — SĐT đã ghi nhận, mã Facebook khi có, khách của đơn trước trong chính hội thoại này).
  *  3. MỐC CẮT = muộn nhất trong: lúc bật công tắc · đơn đã ghi từ hội thoại này · đơn bot đã chốt · đơn gần nhất của khách
  *     trong ERP (kể cả đơn nhân viên tự tạo tay). Chỉ lời chốt SAU mốc này mới thành đơn — tin cũ không bao giờ đẻ đơn lần hai.
  *  4. AI của shop chỉ ĐỌC và trả JSON (đơn mới / khách sửa đơn đã ghi / chưa có gì). MÁY CHỦ kiểm (`decideOrderSync`): mã mẫu
@@ -19,7 +20,7 @@
  *
  * Không ném — lỗi của một hội thoại ghi vào nhật ký của hội thoại đó, lượt đi tiếp.
  */
-import { and, desc, eq, gte, isNull, like, ne, sql } from "drizzle-orm";
+import { and, desc, eq, gte, isNull, like, lt, ne, sql } from "drizzle-orm";
 import { z } from "zod";
 import { getDb, schema } from "@/db";
 import { estimateCostUsd, type AiBlock } from "@/lib/ai/provider";
@@ -42,7 +43,9 @@ import { operationsGroupChannel, orderNotifyRuleLive } from "@/lib/sales-chatbot
 import { placeGapLine } from "@/lib/sales-chatbot/new-order-alert";
 import { sellableCatalog, type CatalogItem } from "@/lib/sales-chatbot/catalog";
 import { loadSalesChatbotConfig, readJsonSetting, salesChatProvider } from "@/lib/sales-chatbot/engine";
-import { conversationFor, FANPAGE_CONNECTOR, PAGE_REPLY, sendFanpageText } from "@/lib/sales-chatbot/fanpage";
+import { controlOf } from "@/lib/sales-chatbot/conversation-control-shared";
+import { conversationFor, FANPAGE_CONNECTOR, PAGE_REPLY, sendFanpageText, STAFF_OUT_PREFIX } from "@/lib/sales-chatbot/fanpage";
+import { messengerOwnedPageIds, messengerPageAiOn, sendMessengerPageText } from "@/lib/sales-chatbot/messenger";
 import {
   ORDER_SYNC_CHANNEL,
   ORDER_SYNC_LIMITS,
@@ -54,7 +57,7 @@ import {
   type OrderSyncOutcome,
   type OrderSyncThreadState,
 } from "@/lib/sales-chatbot/order-sync-shared";
-import { fetchPancakeThreadProfile, findReturningCustomer, normalizeVnPhone, type PriorMessage, type ReturningCustomer } from "@/lib/sales-chatbot/returning";
+import { fetchPancakeThreadProfile, findReturningCustomer, normalizeVnPhone, RETURNING_LIMITS, type PancakeThreadProfile, type PriorMessage, type ReturningCustomer, type ThreadReadLimits } from "@/lib/sales-chatbot/returning";
 import { SALES_CHATBOT_MANAGE } from "@/lib/sales-chatbot/settings";
 import { foldVi } from "@/lib/sales-chatbot/text";
 import { linkAgentOrder, recordConversationEvent } from "@/lib/sales-chatbot/events";
@@ -367,8 +370,90 @@ async function notifyOrderChange(convId: string, text: string, dedupe: string, n
 }
 
 /**
- * MỘT lượt ghi đơn cho tổ chức ngữ cảnh. Công tắc tắt / không có kết nối fanpage / module tắt ⇒ không làm gì. Không ném.
- * `fetch` / `now` cho bài kiểm (luật 65 — không gọi mạng thật).
+ * NGUỒN TIN của MỘT page (gap analysis N1): ghi đơn từ hội thoại đọc lại hội thoại và (khi khách đặt lại) nhắn xác nhận — hai việc
+ * đó đi theo ĐƯỜNG NHẮN TIN của page, mọi luật còn lại (chọn hội thoại, mốc cắt, AI đọc, máy kiểm, lên đơn, chống trùng) là MỘT.
+ *  · PANCAKE   — page nối qua «Fanpage qua Pancake»: đọc tin qua API Pancake, gửi qua Pancake (như trước).
+ *  · MESSENGER — page nối THẲNG Meta: đọc tin từ CHÍNH sổ `sales_chat_inbound` (webhook đã ghi đủ tin khách + tin page / bot / nhân
+ *    viên) — KHÔNG gọi Pancake, không gọi Meta để đọc; gửi bằng Send API của token page. Trước bản này shop chỉ nối Facebook trực
+ *    tiếp không được ghi đơn tự động: job dừng ngay ở «kết nối fanpage chưa bật».
+ * Một page chỉ thuộc một đường (channel-ownership.ts) — page Pancake không bao giờ được xét lại như page Messenger.
+ */
+export type OrderSyncSource = {
+  kind: "PANCAKE" | "MESSENGER";
+  pageId: string;
+  readProfile: (threadId: string, before: Date) => Promise<PancakeThreadProfile | null>;
+  sendText: (threadId: string, text: string) => Promise<{ ok: true } | { ok: false; error: string }>;
+  /** AI được trả lời trên page này không (tắt AI theo page ⇒ người phụ trách mọi hội thoại của page). */
+  aiOn: () => Promise<boolean>;
+};
+
+const READ_LIMITS = { priorMessages: ORDER_SYNC_LIMITS.messages, priorChars: ORDER_SYNC_LIMITS.messageChars, pages: 3 } as const;
+
+async function orderSyncSources(fetchImpl: typeof fetch, now: Date): Promise<OrderSyncSource[]> {
+  const out: OrderSyncSource[] = [];
+  const conn = await openActiveConnection(FANPAGE_CONNECTOR);
+  const pancakePage = conn.ok ? (conn.settings.pageId ?? "").trim() : "";
+  const pancakeToken = conn.ok ? (conn.secrets.pageAccessToken ?? "").trim() : "";
+  if (pancakePage && pancakeToken) {
+    out.push({
+      kind: "PANCAKE",
+      pageId: pancakePage,
+      readProfile: (threadId, before) => fetchPancakeThreadProfile(pancakePage, threadId, pancakeToken, before, fetchImpl, now, READ_LIMITS),
+      sendText: (threadId, text) => sendFanpageText(pancakePage, threadId, text, { fetch: fetchImpl, now: () => now }),
+      aiOn: async () => true,
+    });
+  }
+  for (const pageId of await messengerOwnedPageIds()) {
+    if (pageId === pancakePage) continue;
+    out.push({
+      kind: "MESSENGER",
+      pageId,
+      readProfile: (threadId, before) => inboundThreadProfile(pageId, threadId, before, now, READ_LIMITS),
+      sendText: (threadId, text) => sendMessengerPageText(pageId, threadId, text, { fetch: fetchImpl, now: () => now }),
+      aiOn: () => messengerPageAiOn(pageId),
+    });
+  }
+  return out;
+}
+
+/**
+ * Hồ sơ hội thoại Messenger TRỰC TIẾP dựng từ sổ tin của ERP (`sales_chat_inbound`) — cùng hình với hồ sơ đọc từ Pancake để mọi
+ * bước sau dùng chung. Tin khách = dòng không phải tin page / bot; tin shop = `PAGE_REPLY` (nhân viên / tự động) + `BOT_SENT`.
+ * SĐT «đã ghi nhận» = SĐT có trong TIN CỦA KHÁCH của hội thoại (Pancake tự ghi nhận; ở đây đọc thẳng từ tin). Không có mã Facebook
+ * toàn cục (PSID chỉ có nghĩa trong page) ⇒ `fbIds` rỗng — nhận diện khách cũ đi bằng hội thoại / SĐT, thận trọng như cũ.
+ */
+export async function inboundThreadProfile(pageId: string, threadId: string, before: Date, now: Date, limits: ThreadReadLimits): Promise<PancakeThreadProfile> {
+  const db = await getDb();
+  const t = schema.salesChatInbound;
+  const rows = await db
+    .select({ id: t.messageId, text: t.text, note: t.note, at: t.createdAt })
+    .from(t)
+    .where(and(eq(t.pageId, pageId), eq(t.threadId, threadId), lt(t.createdAt, before)))
+    .orderBy(desc(t.createdAt))
+    .limit(limits.priorMessages * 2);
+  const prior: PriorMessage[] = [];
+  for (const r of [...rows].reverse()) {
+    const text = (r.text ?? "").trim();
+    if (!text) continue;
+    const from = r.note === PAGE_REPLY || r.note === "BOT_SENT" ? "shop" : "customer";
+    const last = prior[prior.length - 1];
+    const realId = r.id.startsWith("bot-out:") || r.id.startsWith(STAFF_OUT_PREFIX) ? null : r.id;
+    // Một tin của shop có thể có hai dòng (dòng ghi sẵn trước khi gửi + mã tin Meta trả về) ⇒ gộp bản trùng liền nhau, giữ MÃ TIN
+    // THẬT bất kể dòng nào tới trước (hai dòng cùng mốc thì thứ tự đọc ra không chắc chắn).
+    if (last && last.from === from && last.text === text.slice(0, limits.priorChars) && Math.abs(new Date(last.at).getTime() - r.at.getTime()) < 120_000) {
+      if (!last.id && realId) last.id = realId;
+      continue;
+    }
+    prior.push({ from, text: text.slice(0, limits.priorChars), at: r.at.toISOString(), ...(realId ? { id: realId } : {}) });
+  }
+  const kept = prior.slice(-limits.priorMessages);
+  const phones = [...new Set(kept.filter((m) => m.from === "customer").flatMap((m) => phonesInText(m.text)))].slice(0, RETURNING_LIMITS.phones);
+  return { fetchedAt: now.toISOString(), phones, fbIds: [], prior: kept };
+}
+
+/**
+ * MỘT lượt ghi đơn cho tổ chức ngữ cảnh — mọi page của mọi đường nhắn tin (`orderSyncSources`). Công tắc tắt / chưa nối kênh nào /
+ * module tắt ⇒ không làm gì. Không ném. `fetch` / `now` cho bài kiểm (luật 65 — không gọi mạng thật).
  */
 export async function runFanpageOrderSync(deps: { fetch?: typeof fetch; now?: () => Date; threadId?: string } = {}): Promise<OrderSyncRunResult> {
   const out: OrderSyncRunResult = { checked: 0, created: 0, changes: 0, skipped: 0, errors: 0, detail: [] };
@@ -377,11 +462,22 @@ export async function runFanpageOrderSync(deps: { fetch?: typeof fetch; now?: ()
     if (!(await canUseModule("ai_sales"))) return { ...out, detail: ["module AI bán hàng tắt"] };
     const cfg = await loadOrderSyncConfig();
     if (!cfg.enabled) return { ...out, detail: ["ghi đơn từ hội thoại đang tắt"] };
-    const conn = await openActiveConnection(FANPAGE_CONNECTOR);
-    if (!conn.ok) return { ...out, detail: ["kết nối fanpage chưa bật"] };
-    const pageId = (conn.settings.pageId ?? "").trim();
-    const token = (conn.secrets.pageAccessToken ?? "").trim();
-    if (!pageId || !token) return { ...out, detail: ["kết nối fanpage thiếu page / token"] };
+    const sources = await orderSyncSources(deps.fetch ?? fetch, now);
+    if (!sources.length) return { ...out, detail: ["chưa nối kênh nhắn tin nào (Facebook trực tiếp / Pancake)"] };
+    for (const src of sources) {
+      if (out.checked >= ORDER_SYNC_LIMITS.threadsPerRun) break;
+      await runPageOrderSync(src, cfg, out, now, deps);
+    }
+    return out;
+  } catch (e) {
+    return { ...out, errors: out.errors + 1, detail: [...out.detail, `lỗi: ${(e instanceof Error ? e.message : String(e)).slice(0, 160)}`] };
+  }
+}
+
+/** Ghi đơn cho MỘT page — thân của lượt trước đây (một page Pancake), giờ chạy cho từng nguồn. Ghi kết quả vào `out`. */
+async function runPageOrderSync(src: OrderSyncSource, cfg: OrderSyncConfig, out: OrderSyncRunResult, now: Date, deps: { threadId?: string }): Promise<void> {
+  const pageId = src.pageId;
+  {
     const db = await getDb();
     const t = schema.salesChatInbound;
     const since = new Date(Math.max(now.getTime() - ORDER_SYNC_LIMITS.lookbackHours * 3_600_000, cfg.enabledAt ? new Date(cfg.enabledAt).getTime() : now.getTime()));
@@ -406,7 +502,10 @@ export async function runFanpageOrderSync(deps: { fetch?: typeof fetch; now?: ()
       )
       .orderBy(desc(lastAt))
       .limit(ORDER_SYNC_LIMITS.candidates);
-    if (!candidates.length) return { ...out, detail: ["không hội thoại nào mới yên"] };
+    if (!candidates.length) {
+      if (!out.detail.includes("không hội thoại nào mới yên")) out.detail.push("không hội thoại nào mới yên");
+      return;
+    }
     const botCfg = await loadSalesChatbotConfig();
     let catalog: CatalogItem[] | null = null;
     const shop = (await findOrganization((await currentOrganization()).code))?.name ?? "shop";
@@ -430,7 +529,9 @@ export async function runFanpageOrderSync(deps: { fetch?: typeof fetch; now?: ()
       // «nhân viên đang trả lời», hội thoại không về HANDOFF; hoặc bot đã tự nhận lại sau 30 phút): người có thể đã chốt đơn mà
       // bot không biết ⇒ vẫn đọc hội thoại. Chủ shop 05/10/2026: «không bị miss đơn». Chống trùng giữ nguyên (mốc cắt + đơn gần
       // đây của khách + khoá lần mua).
-      if (botCfg.enabled && conv.status !== "HANDOFF") {
+      // «Bot phụ trách» chỉ khi bot thật sự được gửi trên hội thoại này: page tắt AI (0220) hoặc hội thoại ở chế độ AI gợi ý / người
+      // (conversation-control-shared.ts) ⇒ NGƯỜI trả lời ⇒ máy ghi đơn đọc hội thoại.
+      if (botCfg.enabled && conv.status !== "HANDOFF" && controlOf(conv.state) === "AUTO" && (await src.aiOn())) {
         const [human] = await db
           .select({ id: t.id })
           .from(t)
@@ -444,7 +545,7 @@ export async function runFanpageOrderSync(deps: { fetch?: typeof fetch; now?: ()
       out.checked += 1;
       try {
         catalog ??= await sellableCatalog([]);
-        const r = await syncThread({ conv, prev, pageId, threadId: cand.threadId, token, cfg, botCfg, catalog, shop, customerName: cand.customerName, now, fetchImpl: deps.fetch ?? fetch });
+        const r = await syncThread({ conv, prev, src, threadId: cand.threadId, cfg, botCfg, catalog, shop, customerName: cand.customerName, now });
         if (r.retry) {
           out.errors += 1;
           out.detail.push(r.result);
@@ -463,9 +564,6 @@ export async function runFanpageOrderSync(deps: { fetch?: typeof fetch; now?: ()
         await log("ERROR", msg).catch(() => undefined);
       }
     }
-    return out;
-  } catch (e) {
-    return { ...out, errors: out.errors + 1, detail: [...out.detail, `lỗi: ${(e instanceof Error ? e.message : String(e)).slice(0, 160)}`] };
   }
 }
 
@@ -474,22 +572,20 @@ type ThreadResult = { outcome: OrderSyncOutcome; result: string; extra?: Partial
 async function syncThread(a: {
   conv: ConvRow;
   prev: OrderSyncThreadState | undefined;
-  pageId: string;
+  src: OrderSyncSource;
   threadId: string;
-  token: string;
   cfg: OrderSyncConfig;
   botCfg: Awaited<ReturnType<typeof loadSalesChatbotConfig>>;
   catalog: CatalogItem[];
   shop: string;
   customerName: string | null;
   now: Date;
-  fetchImpl: typeof fetch;
 }): Promise<ThreadResult> {
   const { conv, prev, now } = a;
   const db = await getDb();
   const o = schema.orders;
-  const profile = await fetchPancakeThreadProfile(a.pageId, a.threadId, a.token, new Date(now.getTime() + 60_000), a.fetchImpl, now, { priorMessages: ORDER_SYNC_LIMITS.messages, priorChars: ORDER_SYNC_LIMITS.messageChars, pages: 3 });
-  // Không đọc được Pancake ⇒ KHÔNG ghi nhật ký (lượt sau đọc lại) — chưa đọc thì chưa biết có đơn hay không.
+  const profile = await a.src.readProfile(a.threadId, new Date(now.getTime() + 60_000));
+  // Không đọc được hội thoại (Pancake hỏng) ⇒ KHÔNG ghi nhật ký (lượt sau đọc lại) — chưa đọc thì chưa biết có đơn hay không.
   if (!profile) return { retry: true, result: "không đọc được tin nhắn từ Pancake" };
   const messages = numberMessages(profile.prior);
   const st = conv.state;
@@ -591,7 +687,7 @@ async function syncThread(a: {
   // Khách cũ đặt lại theo thông tin lần trước (chủ shop HSLC 05/10/2026: «xác nhận thông tin đơn hàng lại cho khách và tính là
   // chốt đơn mới đã xác nhận») ⇒ máy nhắn lại khách đúng món · tiền · địa chỉ · SĐT sẽ giao, để khách thấy và sửa nếu đã đổi.
   const reorder = decision.phoneFrom === "PREVIOUS" || decision.addressFrom === "PREVIOUS";
-  const told = reorder ? await sendFanpageText(a.pageId, a.threadId, reorderConfirmText({ lines: priced.lines, total, shippingFee: priced.shippingFee, address: saved?.full || [decision.recipient.address, decision.recipient.province].filter(Boolean).join(", "), phone: decision.recipient.phone }), { fetch: a.fetchImpl, now: () => now }).catch(() => ({ ok: false as const, error: "lỗi gửi" })) : null;
+  const told = reorder ? await a.src.sendText(a.threadId, reorderConfirmText({ lines: priced.lines, total, shippingFee: priced.shippingFee, address: saved?.full || [decision.recipient.address, decision.recipient.province].filter(Boolean).join(", "), phone: decision.recipient.phone })).catch(() => ({ ok: false as const, error: "lỗi gửi" })) : null;
   const fromPrevious = reorder ? `${[decision.phoneFrom === "PREVIOUS" ? "SĐT" : "", decision.addressFrom === "PREVIOUS" ? "Địa chỉ" : ""].filter(Boolean).join(" + ")} theo đơn trước — ${told?.ok ? "đã nhắn xác nhận lại cho khách" : "CHƯA nhắn được cho khách, xác nhận với khách"}` : "";
   const groupText = orderGroupText({
     header: confirmed ? "🧾 ĐƠN MỚI — nhân viên chốt trên fanpage (đã tính đơn)" : "🧾 ĐƠN MỚI — nhân viên chốt trên fanpage (máy ghi, cần kiểm)",
@@ -625,7 +721,8 @@ async function syncThread(a: {
 export type OrderSyncView = {
   config: OrderSyncConfig;
   botEnabled: boolean;
-  fanpageActive: boolean;
+  /** Có kênh nhắn tin nào để đọc (Facebook trực tiếp hoặc Pancake) — `orderSyncSources`. */
+  channelActive: boolean;
   createdLast7Days: number;
   recent: { conversationId: string; at: string; outcome: OrderSyncOutcome; result: string; orderId: string | null }[];
 };
@@ -647,7 +744,7 @@ export async function orderSyncView(now: Date = new Date()): Promise<OrderSyncVi
   return {
     config,
     botEnabled: bot.enabled,
-    fanpageActive: conn.ok,
+    channelActive: conn.ok || (await messengerOwnedPageIds()).length > 0,
     createdLast7Days: Number(n?.n ?? 0),
     recent: rows
       .filter((r) => r.sync?.lastRunAt && r.sync.lastOutcome !== "BOT")

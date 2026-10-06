@@ -4,7 +4,7 @@ import { getDb, getPlatformDb, schema } from "@/db";
 import type { SessionUser } from "@/lib/auth/session";
 import { adoptLegacyChannelPages, disableChannelPages, listChannelPages, messagingConnectionSummaries, noteChannelPageHealth, openActiveConnection, openChannelPageToken, saveConnection, setChannelPagesState, setConnectionStatus, testOrgConnection, upsertChannelPage } from "@/lib/connectors/service";
 import type { TesterDeps } from "@/lib/connectors/testers";
-import { instagramAccountOf, messengerApp, postMessage, sendMessengerImage, sendMessengerText, sendPrivateReply, subscribePage, MESSENGER_TEXT_MAX, type ConnectablePage, type MessengerEvent } from "@/lib/integrations/messenger/graph";
+import { instagramAccountOf, messengerApp, postMessage, sendMessengerImage, sendMessengerText, sendPrivateReply, subscribePage, unsubscribePage, MESSENGER_TEXT_MAX, type ConnectablePage, type MessengerEvent } from "@/lib/integrations/messenger/graph";
 import { chunkText } from "@/lib/messaging/providers";
 import { canUseModule } from "@/lib/platform/capabilities";
 import { AI_DOWN_HANDOFF_REASON, chatTurn, conversationView, describeCustomerImages } from "@/lib/sales-chatbot/engine";
@@ -50,6 +50,9 @@ import {
 import { draftCopilotSuggestion, loadModeConfig, pinArm } from "@/lib/sales-chatbot/operating-mode";
 import { readQuickReplyImage } from "@/lib/sales-chatbot/quick-replies";
 import { readPinnedArm, replyGate } from "@/lib/sales-chatbot/operating-mode-shared";
+import { applyConversationControl, controlOf, controlSkipNote } from "@/lib/sales-chatbot/conversation-control-shared";
+import { botMaySend, captureSendSnapshot } from "@/lib/sales-chatbot/conversation-control";
+import { noteMessengerGraphFailure } from "@/lib/sales-chatbot/messenger-health";
 
 /**
  * ═══════════ MESSENGER TRỰC TIẾP — BOT FANPAGE KHÔNG CẦN PANCAKE (0207 · docs/platform/messenger.md) ═══════════
@@ -80,7 +83,7 @@ function ownedIds(settings: Record<string, string>): string[] {
  * NHIỀU PAGE (0220 · org_channel_pages): mỗi page đã nối một hàng, token riêng. Tổ chức nối từ TRƯỚC bản này chưa có hàng nào
  * ⇒ page của hàng kết nối đơn (page + Instagram gắn với nó) vẫn được coi là đã nối — không backfill, không đổi hành vi.
  */
-async function messengerOwnedPageIds(): Promise<string[]> {
+export async function messengerOwnedPageIds(): Promise<string[]> {
   const rows = await listChannelPages(MESSENGER_CONNECTOR);
   const active = rows.filter((r) => r.status === "ACTIVE").map((r) => r.pageId);
   const known = new Set(rows.map((r) => r.pageId));
@@ -90,7 +93,7 @@ async function messengerOwnedPageIds(): Promise<string[]> {
 }
 
 /** Token gửi tin của ĐÚNG page. Hàng page có ⇒ token của hàng (page tắt ⇒ không gửi); chưa có hàng ⇒ hàng kết nối đơn cũ. */
-async function messengerTokenFor(pageId: string): Promise<{ ok: true; token: string } | { ok: false; error: string }> {
+export async function messengerTokenFor(pageId: string): Promise<{ ok: true; token: string } | { ok: false; error: string }> {
   const own = await openChannelPageToken(MESSENGER_CONNECTOR, pageId);
   if (own.ok) return own;
   if (own.known) return { ok: false, error: `Kết nối Messenger chưa bật / khác page (${own.reason})` };
@@ -101,7 +104,7 @@ async function messengerTokenFor(pageId: string): Promise<{ ok: true; token: str
 }
 
 /** AI có được trả lời trên page này không (bật / tắt AI theo page). Page cũ chưa có hàng ⇒ bật như trước. */
-async function messengerPageAiOn(pageId: string): Promise<boolean> {
+export async function messengerPageAiOn(pageId: string): Promise<boolean> {
   const row = (await listChannelPages(MESSENGER_CONNECTOR)).find((r) => r.pageId === pageId);
   return row ? row.aiEnabled : true;
 }
@@ -220,7 +223,24 @@ export async function connectMessengerPage(user: SessionUser, page: ConnectableP
  * Gỡ. `pageId` có ⇒ gỡ ĐÚNG page đó (+ Instagram gắn với nó): hàng page về DISABLED, chỉ mục webhook của page ấy mất — các
  * page khác chạy tiếp. Không `pageId` ⇒ gỡ cả kết nối như trước. Token đã lưu giữ nguyên (mã hoá).
  */
-export async function disconnectMessengerPage(user: SessionUser, pageId?: string): Promise<MessengerConnectResult> {
+/**
+ * Gỡ đăng ký webhook ở Meta cho các PAGE (Instagram đi theo page cha) TRƯỚC khi gỡ phía ERP — lúc token còn đọc được. Hỏng (token đã
+ * bị thu hồi…) KHÔNG chặn việc gỡ: chỉ mục mất ⇒ tin Meta còn gửi tới vẫn bị webhook bỏ qua, không rơi về tổ chức nào. Trả câu ghi
+ * chú cho người bấm (`""` khi gỡ được hết).
+ */
+async function unsubscribeMetaPages(pageIds: readonly string[], fetchImpl: typeof fetch = fetch): Promise<string> {
+  const app = messengerApp();
+  if (!app) return "";
+  const failed: string[] = [];
+  for (const id of pageIds) {
+    const tk = await messengerTokenFor(id);
+    const r = tk.ok ? await unsubscribePage(app, id, tk.token, fetchImpl) : { ok: false as const };
+    if (!r.ok) failed.push(id);
+  }
+  return failed.length ? ` Chưa gỡ được đăng ký webhook ở Facebook cho ${failed.length} page (token không còn dùng được) — tin của page đó vẫn bị bỏ qua.` : "";
+}
+
+export async function disconnectMessengerPage(user: SessionUser, pageId?: string, deps: { fetch?: typeof fetch } = {}): Promise<MessengerConnectResult> {
   const orgCode = user.organization?.code;
   if (!orgCode) return { error: "Phiên không mang tổ chức." };
   const pdb = await getPlatformDb();
@@ -230,16 +250,18 @@ export async function disconnectMessengerPage(user: SessionUser, pageId?: string
     const target = view.pages.find((p) => p.id === pageId && p.kind === "PAGE");
     if (!target) return { error: "Không có page này trong các page đã nối." };
     const group = view.pages.filter((p) => p.id === pageId || p.parentPageId === pageId);
+    const note = await unsubscribeMetaPages([pageId], deps.fetch);
     const off = await disableChannelPages(user, MESSENGER_CONNECTOR, group.map((p) => ({ pageId: p.id, kind: p.kind, parentPageId: p.parentPageId, name: p.name })));
     if ("error" in off) return off;
     await pdb.delete(idx).where(and(eq(idx.orgCode, orgCode), inArray(idx.pageId, group.map((p) => p.id))));
-    return { ok: true, message: `Đã gỡ page «${target.name || target.id}» — các page khác vẫn chạy.` };
+    return { ok: true, message: `Đã gỡ page «${target.name || target.id}» — các page khác vẫn chạy.${note}` };
   }
+  const note = await unsubscribeMetaPages(view.pages.filter((p) => p.kind === "PAGE").map((p) => p.id), deps.fetch);
   const off = await setConnectionStatus(user, MESSENGER_CONNECTOR, "DISABLED");
   if ("error" in off) return { error: off.error };
   if (view.pages.length) await disableChannelPages(user, MESSENGER_CONNECTOR, view.pages.map((p) => ({ pageId: p.id, kind: p.kind, parentPageId: p.parentPageId, name: p.name })));
   await pdb.delete(idx).where(eq(idx.orgCode, orgCode));
-  return { ok: true, message: "Đã gỡ Messenger trực tiếp — bot không nhận tin từ page qua đường này nữa." };
+  return { ok: true, message: `Đã gỡ Messenger trực tiếp — bot không nhận tin từ page qua đường này nữa.${note}` };
 }
 
 /** Bật / tắt AI cho NHIỀU page một lượt (thao tác hàng loạt; quyền kiểm ở lõi kết nối). Page đã gỡ không bật lại được ở đây. */
@@ -352,6 +374,7 @@ export async function sendMessengerPageText(pageId: string, psid: string, text: 
       await db.insert(t).values({ pageId, threadId: psid, messageId: rowId, text: normalizeEcho(part), status: "DONE", processedAt: now(), note: PAGE_REPLY }).onConflictDoNothing({ target: t.messageId });
       const sent = await sendMessengerText(app, token, psid, part, deps.fetch ?? fetch);
       if (!sent.ok) {
+        await noteMessengerGraphFailure(sent, pageId);
         await db.delete(t).where(eq(t.messageId, rowId));
         await noteChannelPageHealth(MESSENGER_CONNECTOR, pageId, { ok: false, error: `Gửi tin: ${sent.error}` }, now());
         return { ok: false, error: i > 0 ? `${sent.error} (đã gửi ${i}/${parts.length} đoạn)` : sent.error };
@@ -360,7 +383,9 @@ export async function sendMessengerPageText(pageId: string, psid: string, text: 
     }
     const sent = await sendMessengerText(app, token, psid, part, deps.fetch ?? fetch);
     if (!sent.ok) {
-      // Sức khoẻ THEO PAGE: lỗi gửi của page này hiện ở đúng page, không làm dừng page khác.
+      // Token hỏng / mất quyền ⇒ báo người (messenger-health.ts — theo page khi page có token riêng). Sức khoẻ THEO PAGE: lỗi
+      // gửi của page này hiện ở đúng page, không làm dừng page khác.
+      await noteMessengerGraphFailure(sent, pageId);
       await noteChannelPageHealth(MESSENGER_CONNECTOR, pageId, { ok: false, error: `Gửi tin: ${sent.error}` }, now());
       return { ok: false, error: sent.error };
     }
@@ -387,6 +412,7 @@ export async function sendMessengerPageImages(pageId: string, psid: string, imag
   for (const [i, img] of images.entries()) {
     const sent = await sendMessengerImage(app, token, psid, img, deps.fetch ?? fetch);
     if (!sent.ok) {
+      await noteMessengerGraphFailure(sent, pageId);
       if (i === 0) await db.delete(t).where(eq(t.messageId, rowId));
       return { ok: false, error: i > 0 ? `${sent.error} (đã gửi ${i}/${images.length} ảnh)` : sent.error };
     }
@@ -420,7 +446,7 @@ export async function sendBotImages(pageId: string, psid: string, imageIds: read
     const img = await readQuickReplyImage(id);
     if (!img) continue;
     const r = await sendMessengerImage(app, token, psid, { data: new Uint8Array(img.data), contentType: img.contentType }, deps.fetch ?? fetch);
-    if (!r.ok) return { ok: false, error: r.error };
+    if (!r.ok) return (await noteMessengerGraphFailure(r, pageId), { ok: false, error: r.error });
     sent += 1;
     await db.insert(t).values({ pageId, threadId: psid, messageId: r.id ?? `bot-out:${randomUUID()}`, text: "", status: "DONE", processedAt: now(), note: "BOT_SENT" }).onConflictDoNothing({ target: t.messageId });
   }
@@ -515,10 +541,12 @@ export async function processMessengerThread(pageId: string, psid: string, deps:
     await mirrorFanpageContext(conv.id, pageId, psid, new Date(Math.min(...claimed.map((r) => r.createdAt.getTime()))));
     // CHẾ ĐỘ VẬN HÀNH (operating-mode-shared.ts): CÙNG cổng với đường Pancake — quan sát · copilot · thử nghiệm · tự động. Đặt
     // TRƯỚC mọi lời gọi tốn tiền (đọc ảnh, AI). Mặc định TỰ ĐỘNG.
-    const gate = replyGate(await loadModeConfig(), fanpageKey(pageId, psid), readPinnedArm(conv.state));
+    // Chế độ của HỘI THOẠI (Tiếp quản / AI gợi ý) chỉ THU HẸP cổng của tổ chức.
+    const control = controlOf(conv.state);
+    const gate = applyConversationControl(replyGate(await loadModeConfig(), fanpageKey(pageId, psid), readPinnedArm(conv.state)), control);
     await pinArm(conv.id, gate, now());
     if (gate.mode === "OBSERVE") {
-      const note = gate.arm ? OBSERVE_HUMAN_ARM_NOTE : OBSERVE_NOTE;
+      const note = controlSkipNote(control) ?? (gate.arm ? OBSERVE_HUMAN_ARM_NOTE : OBSERVE_NOTE);
       await finish("SKIPPED", note);
       out.processed += ids.length;
       out.skipped = note;
@@ -559,6 +587,8 @@ export async function processMessengerThread(pageId: string, psid: string, deps:
       out.skipped = COPILOT_NOTE;
       continue;
     }
+    // Ảnh chụp ĐẦU LƯỢT: người gửi tin / tiếp quản trong lúc AI đang soạn ⇒ bot không gửi câu đã soạn.
+    const sendGuard = await captureSendSnapshot(conv.id);
     const turn = await chatTurn(conv.id, text, { channel: "FANPAGE", visitorKey: fanpageKey(pageId, psid), now: now(), customerName: null, ...(context ? { context } : {}) });
     if (!turn.ok) {
       const busy = /Đang trả lời câu trước/.test(turn.error);
@@ -575,12 +605,20 @@ export async function processMessengerThread(pageId: string, psid: string, deps:
       continue;
     }
     const replies = turn.view.messages.slice(before).filter((m) => m.role === "assistant" && m.text.trim());
+    const mayFirst = await botMaySend(conv.id, sendGuard);
+    if (!mayFirst.ok) {
+      await finish("DONE", mayFirst.reason);
+      out.processed += ids.length;
+      out.skipped = mayFirst.reason;
+      continue;
+    }
     if (commentRow) {
       // MỘT tin riêng gộp mọi câu trả lời (Meta chỉ cho một tin riêng mỗi bình luận). Ảnh câu mẫu không đi kèm được tin riêng.
       const replyText = replies.map((r) => r.text).join("\n\n").trim();
       const app = messengerApp();
       const commentId = commentRow.messageId.replace(/^comment:/, "");
       const pr = replyText && app ? await sendPrivateReply(app, token, commentId, replyText, deps.fetch ?? fetch) : null;
+      if (pr && !pr.ok) await noteMessengerGraphFailure(pr, pageId);
       if (pr?.ok) {
         out.replies += 1;
         if (pr.id) await db.insert(t).values({ pageId, threadId: psid, messageId: pr.id, text: replyText.slice(0, TEXT_MAX), status: "DONE", processedAt: now(), note: "BOT_SENT" }).onConflictDoNothing({ target: t.messageId });
@@ -594,16 +632,31 @@ export async function processMessengerThread(pageId: string, psid: string, deps:
       continue;
     }
     let sendError: string | null = null;
+    let yielded: string | null = null;
     let mediaDone = false;
     // Ảnh của câu trả lời mẫu: gửi NGAY SAU chữ của chính câu mẫu đó (như đường Pancake); không khớp ⇒ sau toàn bộ phần chữ.
     const sendMedia = async () => {
       mediaDone = true;
       const ids = turn.media?.imageIds ?? [];
       if (!ids.length) return;
+      const may = await botMaySend(conv.id, sendGuard);
+      if (!may.ok) {
+        yielded = may.reason;
+        return;
+      }
       const r = await sendBotImages(pageId, psid, ids, deps);
       if (!r.ok) sendError = r.error;
     };
-    for (const r of replies) {
+    for (const [i, r] of replies.entries()) {
+      // Câu đầu đã được hỏi ở trên; từ câu thứ hai hỏi lại — người có thể vừa trả lời giữa hai câu.
+      if (i > 0) {
+        const may = await botMaySend(conv.id, sendGuard);
+        if (!may.ok) {
+          yielded = may.reason;
+          mediaDone = true;
+          break;
+        }
+      }
       const sent = await sendMessengerPageText(pageId, psid, r.text, deps);
       if (!sent.ok) {
         sendError = sent.error;
@@ -612,12 +665,13 @@ export async function processMessengerThread(pageId: string, psid: string, deps:
       out.replies += 1;
       if (!mediaDone && turn.media?.afterText && r.text === turn.media.afterText) {
         await sendMedia();
-        if (sendError) break;
+        if (sendError || yielded) break;
       }
     }
-    if (!sendError && !mediaDone) await sendMedia();
-    await finish("DONE", sendError);
+    if (!sendError && !yielded && !mediaDone) await sendMedia();
+    await finish("DONE", sendError ?? yielded);
     if (!sendError && out.replies > 0) await markWaitingForCustomer(conv.id, now());
+    if (yielded) out.skipped = yielded;
     out.processed += ids.length;
     if (sendError) {
       out.error = sendError;

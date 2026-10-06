@@ -89,6 +89,8 @@ export const HANDOFF_REASON_CODES = [
   "TOOL_ROUNDS",
   "TOOL_REQUIRES_HUMAN",
   "STAFF_REPLIED",
+  /** Nhân viên bấm «Tiếp quản» trong hộp thư — bot im tới khi người trả lại (conversation-control-shared.ts). */
+  "STAFF_TOOK_OVER",
   "OTHER",
 ] as const;
 export type HandoffReasonCode = (typeof HANDOFF_REASON_CODES)[number];
@@ -107,6 +109,7 @@ export const HANDOFF_REASON_LABEL: Record<HandoffReasonCode, string> = {
   TOOL_ROUNDS: "Quá số vòng công cụ",
   TOOL_REQUIRES_HUMAN: "Công cụ thấy bất thường",
   STAFF_REPLIED: "Nhân viên đang trả lời",
+  STAFF_TOOK_OVER: "Nhân viên tiếp quản",
   OTHER: "Khác",
 };
 
@@ -131,6 +134,7 @@ export function classifyHandoffReason(reason: string | null | undefined): Handof
   if (r.startsWith("qua so vong cong cu")) return "TOOL_ROUNDS";
   if (r.startsWith("khach nhan sau khi da chot")) return "AFTER_ORDER";
   if (r.startsWith("nhan vien dang tra loi")) return "STAFF_REPLIED";
+  if (r.startsWith("nhan vien tiep quan")) return "STAFF_TOOK_OVER";
   if (r.startsWith("can nguoi xu ly")) return "TOOL_REQUIRES_HUMAN";
   if (r.startsWith("khach si")) return "WHOLESALE";
   if (r.startsWith("ngoai chinh sach")) return "OUT_OF_POLICY";

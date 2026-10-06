@@ -41,7 +41,7 @@ export function OrderSyncPanel({ view, manage }: { view: OrderSyncView; manage: 
             Ghi đơn nhân viên chốt trên fanpage vào ERP — <b>không phụ thuộc</b> bật / tắt chatbot
           </span>
         </label>
-        {on && !view.fanpageActive ? <p className="text-xs text-amber-700 dark:text-amber-400">Kết nối «Fanpage qua Pancake» chưa bật — chưa có tin nào để đọc.</p> : null}
+        {on && !view.channelActive ? <p className="text-xs text-amber-700 dark:text-amber-400">Chưa nối kênh nhắn tin nào (Facebook trực tiếp hoặc Pancake) — chưa có tin nào để đọc.</p> : null}
         {view.recent.length ? (
           <ul className="divide-y text-xs" data-testid="order-sync-recent">
             {view.recent.map((r) => (

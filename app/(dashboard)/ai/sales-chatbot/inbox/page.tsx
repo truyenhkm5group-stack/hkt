@@ -4,7 +4,7 @@ import { requirePermission } from "@/lib/auth/session";
 import { formatTimeAgo, formatVND } from "@/lib/format";
 import { assignableUsers, inboxAssignees, inboxPages, listInbox, loadInboxThread } from "@/lib/sales-chatbot/inbox";
 import { listLabels } from "@/lib/sales-chatbot/inbox-labels";
-import { INBOX_CHANNEL_LABEL, INBOX_CHANNELS, INBOX_FILTER_LABEL, INBOX_FILTERS, INBOX_LIST_MAX, INBOX_PERIOD_LABEL, INBOX_PERIODS, type InboxChannel, type InboxFilter, type InboxPeriod, type InboxRow } from "@/lib/sales-chatbot/inbox-shared";
+import { INBOX_CHANNEL_LABEL, INBOX_CHANNELS, INBOX_FILTER_LABEL, INBOX_FILTERS, INBOX_HANDLER_LABEL, INBOX_LIST_MAX, INBOX_PERIOD_LABEL, INBOX_PERIODS, type InboxChannel, type InboxFilter, type InboxHandler, type InboxPeriod, type InboxRow } from "@/lib/sales-chatbot/inbox-shared";
 import { organizationLevelPack } from "@/lib/sales-chatbot/levels";
 import { CUSTOMER_LEVEL_CLASS, CUSTOMER_LEVEL_LABEL, CUSTOMER_LEVELS, levelsForPack, type CustomerLevel } from "@/lib/sales-chatbot/levels-shared";
 import { cn } from "@/lib/utils";
@@ -108,14 +108,15 @@ export default async function SalesInboxPage({ searchParams }: { searchParams: P
   const from = day("tu");
   const to = day("den");
   const limit = Math.min(INBOX_LIST_MAX, Math.max(100, Number(one("n")) || 100));
+  const handler: InboxHandler | null = one("xl") === "ai" ? "AI" : one("xl") === "nguoi" ? "HUMAN" : null;
   // NHIỀU PAGE: một hộp thư chung cho mọi page; chọn một page là LỌC trên cùng hội thoại, không phải một hộp thư thứ hai.
   const pages = await inboxPages();
   const page = pages.some((p) => p.id === one("pg")) ? one("pg") : null;
   // Mở hội thoại TRƯỚC (đánh dấu đã đọc) rồi mới đọc danh sách — không thì hội thoại đang mở vẫn hiện «chưa đọc».
   const thread = selected ? await loadInboxThread(user, selected) : null;
-  const [list, users, assignees, pack] = await Promise.all([listInbox(user, { filter, channel, q, label, page, phone, level, assignee, period, from, to, limit }), assignableUsers(user), inboxAssignees(user), organizationLevelPack()]);
+  const [list, users, assignees, pack] = await Promise.all([listInbox(user, { filter, channel, q, label, page, phone, level, assignee, period, from, to, limit, handler }), assignableUsers(user), inboxAssignees(user), organizationLevelPack()]);
   const levels = levelsForPack(pack);
-  const advanced = Boolean(channel || label || assignee || period || phone === "NONE");
+  const advanced = Boolean(channel || label || assignee || period || phone === "NONE" || handler);
   const href = (patch: Record<string, string | null>) => {
     const p = new URLSearchParams();
     const cur: Record<string, string | null> = {
@@ -131,6 +132,7 @@ export default async function SalesInboxPage({ searchParams }: { searchParams: P
       tu: from,
       den: to,
       n: limit > 100 ? String(limit) : null,
+      xl: handler === "AI" ? "ai" : handler === "HUMAN" ? "nguoi" : null,
       c: selected || null,
       ...patch,
     };
@@ -257,6 +259,11 @@ export default async function SalesInboxPage({ searchParams }: { searchParams: P
                       <option value="">Có / không SĐT</option>
                       <option value="co">Có SĐT</option>
                       <option value="khong">Chưa có SĐT</option>
+                    </select>
+                    <select name="xl" defaultValue={handler === "AI" ? "ai" : handler === "HUMAN" ? "nguoi" : ""} className="h-8 rounded-md border bg-background px-1" aria-label="Ai đang trả lời" data-filter="handler">
+                      <option value="">AI hay người</option>
+                      <option value="ai">{INBOX_HANDLER_LABEL.AI}</option>
+                      <option value="nguoi">{INBOX_HANDLER_LABEL.HUMAN}</option>
                     </select>
                     <select name="tg" defaultValue={period ?? ""} className="h-8 rounded-md border bg-background px-1" aria-label="Thời gian tin cuối">
                       <option value="">Mọi thời gian</option>

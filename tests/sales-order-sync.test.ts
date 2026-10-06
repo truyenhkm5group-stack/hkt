@@ -291,12 +291,13 @@ export async function testSalesOrderSync() {
         const o2 = orders2.find((o) => o.id !== o1.id)!;
         assert.deepEqual([o2.stage, o2.shipPhone, o2.shipAddress, o2.customerId, o2.totalPriceAfterDiscount], ["NEW", "0912345678", "12 Hàng Bạc, Hoàn Kiếm, Hà Nội", o1.customerId, 400_000], "SĐT + địa chỉ + khách theo đơn trước");
         assert.ok(o2.note.includes("lấy từ ĐƠN TRƯỚC") && o2.note.includes("Mã tin fanpage: m8"), o2.note);
-        const [conv] = await db.select({ state: schema.salesChatConversations.state }).from(schema.salesChatConversations).where(eq(schema.salesChatConversations.threadId, "t-1"));
+        const [conv] = await db.select({ id: schema.salesChatConversations.id, state: schema.salesChatConversations.state }).from(schema.salesChatConversations).where(eq(schema.salesChatConversations.threadId, "t-1"));
         const log = (conv.state as ChatState).orderSync as OrderSyncThreadState;
         assert.deepEqual([log.orders.length, log.lastOutcome, log.customer?.phone], [2, "CREATED", "0912345678"]);
         // Nút «Chat» trên danh sách đơn: cả hai đơn tra ngược ra đúng hội thoại Pancake; đơn lạ không ra gì.
         const threadsOf = await orderChatThreads([o1.id, o2.id, "erp-khong-co"]);
-        assert.deepEqual([threadsOf.get(o1.id), threadsOf.get(o2.id), threadsOf.has("erp-khong-co")], [{ pageId: PAGE, threadId: "t-1" }, { pageId: PAGE, threadId: "t-1" }, false]);
+        const pick = (x: { pageId: string | null; threadId: string | null; conversationId: string; channel: string } | undefined) => x && { pageId: x.pageId, threadId: x.threadId, conversationId: x.conversationId, channel: x.channel };
+        assert.deepEqual([pick(threadsOf.get(o1.id)), pick(threadsOf.get(o2.id)), threadsOf.has("erp-khong-co")], [{ pageId: PAGE, threadId: "t-1", conversationId: conv.id, channel: "FANPAGE" }, { pageId: PAGE, threadId: "t-1", conversationId: conv.id, channel: "FANPAGE" }, false]);
 
         // ── Bot BẬT và đang trả lời ⇒ đơn là việc của bot, job không ghi ──
         await setSettingJson(SALES_CHATBOT_SETTING_KEY, { ...DEFAULT_SALES_CHATBOT_CONFIG, connectorKey: "anthropic-byok", enabled: true, shippingFee: 30_000 });

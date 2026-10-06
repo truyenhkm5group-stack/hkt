@@ -8,6 +8,7 @@ import { manualPaymentStates } from "@/lib/queries/order-payments";
 import type { OrderStage } from "@/db/schema";
 import { ORDER_STAGE_LABEL, ORDER_STAGE_ORDER, pancakeConversationUrl } from "@/lib/constants/pancake";
 import { isManualOrderId } from "@/lib/constants/manual-orders";
+import { canUseModule } from "@/lib/platform/capabilities";
 import type { ListParams } from "@/lib/search-params";
 import { loadAlertConfig } from "@/lib/alerts/config";
 import { assessCustomerRisk } from "@/lib/alerts/risk";
@@ -135,7 +136,7 @@ export async function listOrders(params: ListParams) {
     các đơn tay CỦA TRANG; trang không có đơn tay (tổ chức nhà) ⇒ không chạy câu nào. Đơn khác ⇒ `null` (không áp dụng).
   */
   const payStates = await manualPaymentStates(rowsRaw);
-  const chats = await orderChatThreads(rowsRaw.filter((r) => isManualOrderId(r.id)).map((r) => r.id));
+  const [chats, inboxOn] = await Promise.all([orderChatThreads(rowsRaw.filter((r) => isManualOrderId(r.id)).map((r) => r.id)), salesInboxEnabled()]);
   const rows = rowsRaw.map((r) => {
     const c = r.customer;
     const risk = c ? assessCustomerRisk({ succeed: c.succeedOrderCount ?? 0, returned: c.returnedOrderCount ?? 0, isBlock: Boolean(c.isBlock) }, riskCfg) : null;
@@ -145,8 +146,8 @@ export async function listOrders(params: ListParams) {
       Cột tiền của trang này đi qua `PRIMARY_ATTEMPT` ở tầng SQL; `vanDonDaiDien` là bản TypeScript
       của đúng luật ấy. Để mỗi cột tự chọn lần gửi là mở đường cho dòng nói hai điều khác nhau.
     */
-    const chat = chats.get(r.id);
-    return { ...r, shipment: vanDonDaiDien(r.attempts), risk: risk?.risky ? { severity: risk.severity, reasons: risk.reasons } : null, payment: payStates.get(r.id) ?? null, chatUrl: chat ? pancakeConversationUrl(chat.pageId, chat.threadId) : pancakeConversationUrl(r.pageId, r.conversationId) };
+    const chat = chatLinkOf(chats.get(r.id), inboxOn, { pageId: r.pageId, conversationId: r.conversationId });
+    return { ...r, shipment: vanDonDaiDien(r.attempts), risk: risk?.risky ? { severity: risk.severity, reasons: risk.reasons } : null, payment: payStates.get(r.id) ?? null, chatUrl: chat?.href ?? null, chatInternal: chat?.internal ?? false };
   });
 
   return { rows, total: Number(total), pageCount: Math.max(1, Math.ceil(Number(total) / params.pageSize)) };
@@ -160,30 +161,62 @@ export type OrderListRow = Awaited<ReturnType<typeof listOrders>>["rows"][number
  * nháp / đã chốt hiện tại, đơn của các lượt mua trước (`state.pastOrders`) và đơn ghi từ hội thoại (`state.orderSync.orders`).
  * Một câu cho cả trang; không đơn tay ⇒ không chạy câu nào.
  */
-export async function orderChatThreads(orderIds: readonly string[]): Promise<Map<string, { pageId: string; threadId: string }>> {
-  const out = new Map<string, { pageId: string; threadId: string }>();
+export type OrderChatThread = { conversationId: string; channel: string; pageId: string | null; threadId: string | null };
+
+export async function orderChatThreads(orderIds: readonly string[]): Promise<Map<string, OrderChatThread>> {
+  const out = new Map<string, OrderChatThread>();
   if (!orderIds.length) return out;
   const db = await getDb();
   const c = schema.salesChatConversations;
+  const o = schema.orders;
   const ids = sql`array[${sql.join(orderIds.map((id) => sql`${id}`), sql`, `)}]::text[]`;
+  // Khoá CỨNG trước: `orders.sales_conversation_id` (đơn bot chốt / nhân viên tạo trong khung chat — mọi kênh, cả Messenger
+  // trực tiếp, Zalo, chat web). Tra ngược trong `state` của hội thoại là đường cũ cho đơn ghi trước khi có cột đó.
+  const direct = await db.select({ orderId: o.id, conversationId: o.salesConversationId }).from(o).where(and(inArray(o.id, [...orderIds]), sql`${o.salesConversationId} is not null`));
+  const directConv = new Map(direct.map((d) => [d.conversationId as string, d.orderId]));
   const has = (path: string) => sql`exists (select 1 from jsonb_array_elements(coalesce(${c.state}->${sql.raw(path)}, '[]'::jsonb)) e where e->>'orderId' = any(${ids}))`;
+  const legacy = and(
+    eq(c.channel, "FANPAGE"),
+    sql`${c.pageId} is not null and ${c.threadId} is not null`,
+    sql`(${c.orderId} = any(${ids}) or ${c.draftOrderId} = any(${ids}) or ${c.state}->'confirmed'->>'orderId' = any(${ids}) or ${has("'pastOrders'")} or ${has("'orderSync'->'orders'")})`,
+  );
   const rows = await db
-    .select({ pageId: c.pageId, threadId: c.threadId, orderId: c.orderId, draftOrderId: c.draftOrderId, state: c.state })
+    .select({ id: c.id, channel: c.channel, pageId: c.pageId, threadId: c.threadId, orderId: c.orderId, draftOrderId: c.draftOrderId, state: c.state })
     .from(c)
-    .where(
-      and(
-        eq(c.channel, "FANPAGE"),
-        sql`${c.pageId} is not null and ${c.threadId} is not null`,
-        sql`(${c.orderId} = any(${ids}) or ${c.draftOrderId} = any(${ids}) or ${c.state}->'confirmed'->>'orderId' = any(${ids}) or ${has("'pastOrders'")} or ${has("'orderSync'->'orders'")})`,
-      ),
-    );
+    .where(and(sql`${c.channel} <> 'TEST'`, directConv.size ? or(inArray(c.id, [...directConv.keys()]), legacy) : legacy));
   const wanted = new Set(orderIds);
+  const put = (orderId: string, r: (typeof rows)[number]) => {
+    if (!out.has(orderId)) out.set(orderId, { conversationId: r.id, channel: r.channel, pageId: r.pageId, threadId: r.threadId });
+  };
   for (const r of rows) {
+    const d = directConv.get(r.id);
+    if (d) put(d, r);
+  }
+  for (const r of rows) {
+    if (r.channel !== "FANPAGE" || !r.pageId || !r.threadId) continue;
     const st = (r.state ?? {}) as { confirmed?: { orderId?: string | null }; pastOrders?: { orderId?: string | null }[]; orderSync?: { orders?: { orderId?: string }[] } };
-    const linked = [r.orderId, r.draftOrderId, st.confirmed?.orderId, ...(st.pastOrders ?? []).map((p) => p.orderId), ...(st.orderSync?.orders ?? []).map((o) => o.orderId)];
-    for (const id of linked) if (id && wanted.has(id) && !out.has(id)) out.set(id, { pageId: r.pageId!, threadId: r.threadId! });
+    const linked = [r.orderId, r.draftOrderId, st.confirmed?.orderId, ...(st.pastOrders ?? []).map((p) => p.orderId), ...(st.orderSync?.orders ?? []).map((x) => x.orderId)];
+    for (const id of linked) if (id && wanted.has(id)) put(id, r);
   }
   return out;
+}
+
+export type ChatLink = { href: string; internal: boolean };
+
+/**
+ * Lối mở hội thoại của MỘT đơn — một chỗ cho danh sách lẫn chi tiết đơn. Tổ chức có Hộp thư khách (module AI bán hàng) ⇒ mở
+ * hội thoại NGAY TRONG ERP (đúng cho mọi kênh — link `pancake.vn` sai hẳn với hội thoại Messenger trực tiếp vì mã luồng là
+ * PSID của Meta). Không có hộp thư ⇒ link Pancake như trước. Đơn đồng bộ từ Pancake giữ link Pancake mang sẵn trên đơn.
+ */
+export function chatLinkOf(chat: OrderChatThread | undefined, inboxOn: boolean, pancake: { pageId: string | null; conversationId: string | null }): ChatLink | null {
+  if (chat && inboxOn) return { href: `/ai/sales-chatbot/inbox?c=${encodeURIComponent(chat.conversationId)}`, internal: true };
+  const url = chat ? (chat.channel === "FANPAGE" ? pancakeConversationUrl(chat.pageId, chat.threadId) : null) : pancakeConversationUrl(pancake.pageId, pancake.conversationId);
+  return url ? { href: url, internal: false } : null;
+}
+
+/** Tổ chức đang ngữ cảnh có Hộp thư khách không (module AI bán hàng). */
+export async function salesInboxEnabled(): Promise<boolean> {
+  return canUseModule("ai_sales");
 }
 
 /** Số đơn theo giai đoạn / nguồn / ĐVVC trong kỳ (cho bộ lọc) */
