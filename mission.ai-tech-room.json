@@ -3,7 +3,7 @@
   "mission_id": "ai-tech-room",
   "title": "AI Tech Room — nền điều phối nhiều worker cho kho này",
   "business_goal": "Một Lead mới vào kho chạy được sứ mệnh nhiều worker (chia việc, song song, tích hợp, dọn) mà chủ shop chỉ phải làm những việc cần một con người.",
-  "status": "RUNNING",
+  "status": "DONE",
   "priority": "P0",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -34,10 +34,13 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-06T05:09:57.485Z",
-  "updated_at": "2026-10-06T05:09:57.485Z",
-  "last_heartbeat": "2026-10-06T05:09:57.485Z",
+  "updated_at": "2026-10-06T05:10:04.000Z",
+  "last_heartbeat": "2026-10-06T05:10:04.000Z",
   "definition_of_done": [
     "Một Lead mới vào kho chạy được sứ mệnh nhiều worker (chia việc, song song, tích hợp, dọn) mà chủ shop chỉ phải làm những việc cần một con người."
   ],
-  "mission_file": ".ai/missions/ai-tech-room.json"
+  "mission_file": ".ai/missions/ai-tech-room.json",
+  "evidence": {
+    "done": "không đổi mã chạy · PR #592 + #594 đã vào main; việc dọn cây cũ: chủ shop dặn 06/10 CHƯA dọn"
+  }
 }
