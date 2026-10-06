@@ -515,6 +515,7 @@ import { testConnectorsLegacy } from "./connectors-legacy.test";
 import { testNativeOrderSync } from "./native-order-sync.test";
 import { testMessengerLifecycle } from "./messenger-lifecycle.test";
 import { testMessengerDiscovery } from "./messenger-discovery.test";
+import { testMessengerWebhookSecrets } from "./messenger-webhook-secrets.test";
 import { testSalesAiDownAlert } from "./sales-ai-down-alert.test";
 import { testAiSalesHealth } from "./ai-sales-health.test";
 import { testAiSalesRetry } from "./ai-sales-retry.test";
@@ -2806,6 +2807,8 @@ async function main() {
   await testMessengerLifecycle();
   // Khám phá page Facebook: tách 6 lý do «không có page» (sự cố 06/10/2026) — Graph giả, không mạng.
   await testMessengerDiscovery();
+  // App Meta riêng cho Messenger (cấu hình thử): bắt tay GET + chữ ký của hai app + đường đưa secret lên máy chủ.
+  await testMessengerWebhookSecrets();
   testSalesAiDownAlert();
   // Giám sát AI bán hàng (sau sự cố P0 06/10/2026): sự cố hết tiền phải ĐỎ đúng nguyên nhân, báo một lần mỗi khung.
   await testAiSalesHealth();

@@ -70,6 +70,17 @@ export const env = {
     get facebookAppSecret() {
       return read("FACEBOOK_LOGIN_APP_SECRET");
     },
+    /**
+     * App Meta RIÊNG cho Messenger / Instagram trực tiếp («ChotDonTuDong Messenger», 06/10/2026) — đang CẤU HÌNH THỬ, chưa thay
+     * app đăng nhập. Hôm nay chỉ dùng để XÁC THỰC CHỮ KÝ webhook (chấp nhận chữ ký của app đăng nhập HOẶC app này) để sự kiện thử
+     * của app mới không bị 401; nối page / gửi tin vẫn đi app đăng nhập cho tới khi chủ nền tảng quyết định chuyển.
+     */
+    get facebookMessengerAppId() {
+      return read("FACEBOOK_MESSENGER_APP_ID");
+    },
+    get facebookMessengerAppSecret() {
+      return read("FACEBOOK_MESSENGER_APP_SECRET");
+    },
   },
   pancake: {
     get apiKey() {
