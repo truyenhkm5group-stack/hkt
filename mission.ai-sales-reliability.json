@@ -50,18 +50,18 @@
     "0223": "2026-10-06T10:33:52.474Z"
   },
   "created_at": "2026-10-06T09:51:01.832Z",
-  "updated_at": "2026-10-06T11:32:33.190Z",
-  "last_heartbeat": "2026-10-06T11:32:33.190Z",
+  "updated_at": "2026-10-06T11:36:52.462Z",
+  "last_heartbeat": "2026-10-06T11:36:52.462Z",
   "definition_of_done": [],
   "handoff": {
     "branch": "feat/ai-sales-retry",
-    "sha": "3aff875e563d36180084c9dcba0f4f973d300e5a",
-    "at": "2026-10-06T11:32:33.190Z",
+    "sha": "ce56a3959fb64a228af76fec9a26efc13cfcc917",
+    "at": "2026-10-06T11:36:52.462Z",
     "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
     "title": "AI Sales production-grade: giám sát sống/chết, SLO, failover provider, DLQ, cockpit, quyền Messenger, hồ sơ App Review, cứu hội thoại sót",
     "summary": "",
     "tests": [
-      "health + retry (đường fanpage thật, gồm M1+M2) ĐẠT; đột biến chống trùng 3 hướng đều đỏ; migration-upgrade-path + journal ĐẠT; typecheck sạch"
+      "health + retry ĐẠT; eslint --max-warnings=0 sạch; review độc lập PASS (3aff875e) + sửa lint"
     ]
   }
 }
