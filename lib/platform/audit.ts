@@ -47,13 +47,26 @@ export type PlatformAuditAction = "MODULE_ENABLE" | "MODULE_DISABLE" | "FEATURE_
   | "PLAN_COMMERCIAL_SET"
   | "ORG_PRICING_SET"
   | "PRICING_GUARD_SET"
-  | "AI_UNIT_PRICES_SET";
+  | "AI_UNIT_PRICES_SET"
+  // SaaS Control Plane (0224, lib/saas/*): tài khoản khách, gắn workspace vào tài khoản, thuê bao sản phẩm (thuê · tạm dừng ·
+  // tiếp tục · huỷ · hẹn đổi gói), sổ chi phí ngoài AI, chốt bảng kê kỳ, job cấp phát (chạy / chạy lại).
+  | "ACCOUNT_CREATE"
+  | "ACCOUNT_UPDATE"
+  | "WORKSPACE_ACCOUNT_SET"
+  | "PRODUCT_SUBSCRIBE"
+  | "PRODUCT_SUBSCRIPTION_SET"
+  | "COST_ENTRY_ADD"
+  | "COST_ENTRY_VOID"
+  | "STATEMENT_FINALIZE"
+  | "PROVISIONING_RUN";
 export type PlatformAuditSource = "UI" | "SCRIPT" | "MIGRATION" | "TEST";
 export type PlatformActor = { orgCode: string; userId: string; email: string } | null;
 
 export async function platformAudit(entry: {
   action: PlatformAuditAction;
   targetOrgCode: string;
+  /** Thao tác ở cấp tài khoản (0224). */
+  targetAccountId?: string | null;
   subject: string;
   before?: unknown;
   after?: unknown;
@@ -67,6 +80,7 @@ export async function platformAudit(entry: {
     actorUserId: entry.actor?.userId ?? null,
     actorEmail: entry.actor?.email ?? null,
     targetOrgCode: entry.targetOrgCode,
+    targetAccountId: entry.targetAccountId ?? null,
     action: entry.action,
     subject: entry.subject,
     before: entry.before === undefined ? null : entry.before,

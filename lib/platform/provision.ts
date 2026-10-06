@@ -2,9 +2,11 @@ import { eq, sql } from "drizzle-orm";
 import { getDbFor, getPlatformDb, isPglite, organizationDatabaseName, schema } from "@/db";
 import { hashPassword } from "@/lib/auth/password";
 import { platformAudit, type PlatformActor, type PlatformAuditSource } from "@/lib/platform/audit";
+import { invalidateCapabilities } from "@/lib/platform/capabilities";
 import { withOrganization } from "@/lib/platform/context";
 import { findOrganization, invalidateOrganizations } from "@/lib/platform/organizations";
 import { ORGANIZATION_CODE_PATTERN, type Organization } from "@/lib/platform/types";
+import { ensureAccountForWorkspace, openSubscriptionsForProductsInUse } from "@/lib/saas/accounts";
 
 /**
  * ═══════════ CẤP MỘT TỔ CHỨC MỚI ═══════════
@@ -21,6 +23,9 @@ import { ORGANIZATION_CODE_PATTERN, type Organization } from "@/lib/platform/typ
  *     MINH `enabled = true` — không dựa vào mặc định.
  *  5. Tài khoản quản trị đầu tiên trong CSDL của CHÍNH tổ chức đó (tư cách thành viên = tài khoản
  *     trong CSDL tổ chức, target-architecture P5).
+ *  6. Hồ sơ thương mại (0224, docs/saas/README.md): workspace gắn vào TÀI KHOẢN khách (`accountId` hoặc một tài khoản mới
+ *     mang tên workspace) và mở thuê bao cho sản phẩm mà module vừa bật thuộc về. Mọi đường tạo workspace (tự đăng ký,
+ *     người vận hành, job cấp phát) đều đi qua đây nên không workspace nào thiếu tài khoản.
  *
  * Không nhận chuỗi kết nối: CSDL dẫn xuất từ mã tổ chức (`organizationDatabaseUrl`). Không bao giờ
  * cấp tổ chức "nhà" — tổ chức nhà duy nhất do migration 0152 tạo.
@@ -32,6 +37,8 @@ export type ProvisionInput = {
   plan?: string | null;
   /** Thương hiệu nơi khách tự đăng ký (0215). Chỉ ghi khi CHÈN dòng mới — cấp lại / chạy lại không đổi. */
   brand?: "vnx" | "chotdon" | null;
+  /** Tài khoản khách sở hữu workspace (0224). Bỏ trống ⇒ tạo một tài khoản khách ngoài mang tên workspace. */
+  accountId?: string | null;
   /** Module bật ngay khi cấp. Người gọi đảm bảo tập này đóng dưới phụ thuộc (sổ module kiểm). */
   modules: string[];
   admin?: { email: string; name: string; password: string };
@@ -99,5 +106,11 @@ export async function provisionOrganization(input: ProvisionInput): Promise<Prov
       return true;
     });
   }
+
+  // 6. Hồ sơ thương mại — idempotent: đã gắn tài khoản / đã có thuê bao sống ⇒ không đổi gì.
+  invalidateCapabilities(org.code);
+  const saasSource = input.source === "TEST" ? "TEST" : "PROVISIONING";
+  await ensureAccountForWorkspace(org.code, { accountId: input.accountId ?? null, source: saasSource, actor: input.actor });
+  await openSubscriptionsForProductsInUse(org.code, { actor: input.actor, source: saasSource, reason: "Mở cùng lượt cấp workspace" });
   return { organization: org, created, adminCreated };
 }
