@@ -2162,5 +2162,30 @@ console.log("OK 18: doi chieu dia chi don POS -> bat don chon nham xa, bo qua tr
   console.log("OK 50: don xa kho (gia POS 749K, ban 299K) tu xac nhan khi tong la gia shop da bao va co trong bang gia page; tong la thi van chan");
 }
 
+// ---- 51: gia shop DA BAO khach trong hoi thoai (xa 249K) thang gia cu trong huong dan (chu shop 06/10/2026)
+{
+  const shop = (t) => ({ from: { id: "PAGE1" }, message: t });
+  const khach = (t) => ({ from: { id: "KHACH" }, message: t });
+  const deal = shop("DEAL siêu hời hôm nay dành riêng cho chị iu đây ạ ❤️\n\n🔥 GIẢM GIÁ CHỈ CÒN 249.000Đ/ĐẦM\nGiá cũ 749.000Đ – giảm gần 50%, số lượng còn rất ít.");
+  const hoi = [shop("🔥 GIÁ XẢ CHỈ 299.000Đ/ĐẦM\nGiá cũ 749."), khach("giá bao nhiêu"), deal, khach("cao 1m55 50kg")];
+  assert.equal(bot.quotedUnitPrice("PAGE1", hoi), 249000, "lay gia MOI NHAT shop bao, khong lay gia cu 749K");
+  assert.equal(bot.quotedUnitPrice("PAGE1", [shop("chị ơi 299k/đầm nha")]), 299000);
+  assert.equal(bot.quotedUnitPrice("PAGE1", [khach("249.000Đ/ĐẦM được không")]), null, "gia khach noi khong tinh");
+  assert.match(bot.quotedPriceBlock("PAGE1", hoi), /249\.000đ\/đầm/);
+  const chot249 = "Dạ em chốt đơn cho chị:\n• Đầm Q002 Đen L x 1\n• Tổng: 249.000đ + 25.000đ ship = 274.000đ";
+  assert.ok(bot.summaryUsesPrice(chot249, 249000));
+  assert.ok(!bot.summaryUsesPrice(chot249.replace(/249/g, "299").replace("274", "324"), 249000), "chot 299K khi da bao 249K -> sai");
+  assert.ok(bot.summaryUsesPrice("• Tổng: 498.000đ (miễn ship)", 249000), "2 dam");
+  // Chot chan gia: 249K + ship hop le khi prompt co khoi gia da bao
+  assert.deepEqual(bot.findDisallowedPrices(chot249, "Q002 GIÁ XẢ 299.000đ, phí ship 25.000đ" + bot.quotedPriceBlock("PAGE1", hoi)), []);
+  // Bot len don: don 274K (POS 749K) khong bi chan "giam > 30%" vi shop da bao 249K
+  const prevProducts = catalog.products;
+  catalog.setProducts([{ id: "p2", code: "Q002", name: "Đầm Q002", note: "", attributes: {}, price: { min: 749000, max: 749000 }, images: [], variations: [{ id: "x", sku: "x", fields: {}, price: 749000, stock: 1, available: true, images: [] }] }]);
+  const chot = shop(chot249);
+  assert.deepEqual(bot.orderBot.dropSanctionedDiscount(["giảm giá 475.000đ vượt 30% tiền hàng"], { agreed: 274000 }, "PAGE1", [...hoi, chot]), []);
+  catalog.setProducts(prevProducts);
+  console.log("OK 51: gia shop da bao khach (xa 249K) dung cho ban chot, chot chan gia va tu xac nhan; gia khach tu noi khong tinh");
+}
+
 console.log("\nTAT CA TEST PASS");
 process.exit(0);

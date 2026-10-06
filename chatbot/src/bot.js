@@ -94,6 +94,23 @@ export function looksLikeBareAddress(text) {
   return TINH_THANH.some((x) => n.includes(` ${x} `));
 }
 
+/** Moi so tien (>= 10.000d) trong mot doan chu: "249.000đ", "249000", "249k". */
+export function amountsIn(t) {
+  const out = new Set();
+  const re = /(?<![A-Za-z0-9])(\d{1,3}(?:[.,]\d{3})+|\d{4,8})(?![A-Za-z0-9])|(?<![A-Za-z0-9])(\d{2,3})\s*[kK](?![A-Za-z0-9])/g;
+  let m;
+  while ((m = re.exec(String(t || "")))) {
+    if (m[1]) {
+      const n = Number(m[1].replace(/[.,]/g, ""));
+      if (n >= 10000 && n < 100000000) out.add(n);
+    } else if (m[2]) out.add(Number(m[2]) * 1000);
+  }
+  return out;
+}
+
+// "249.000Đ/ĐẦM", "299k/đầm", "giá 249.000đ / chiếc": gia MOT san pham shop bao trong tin
+const GIA_MOI_SP = /(\d{2,3}(?:[.,]\d{3})|\d{2,3}\s*[kK])\s*(?:đ|Đ|vnđ|VNĐ|vnd|VND)?\s*\/\s*(?:đầm|ĐẦM|Đầm|cái|chiếc|bộ|sp|sản phẩm|váy|áo)/i;
+
 export function isOrderSummaryReply(reply, handoff) {
   const text = String(reply || "");
   if (!/chốt đơn|lên đơn|đơn hàng của chị|đơn của chị/i.test(text)) return false;
@@ -752,6 +769,31 @@ export class Bot {
    * NHU NGUOI BAN THAT: ghi nho don dang chot (mau, size, SDT, dia chi) va chi ra MOT viec tiep theo can lam.
    * Nguoi ban khong hoi lai thu da biet, khong hoi hai thu mot luc khi khach dang tra loi tung cai.
    */
+  /**
+   * Gia MOT san pham ma SHOP da bao cho chinh khach nay (tin moi nhat co dang "249.000Đ/ĐẦM"), hoac null.
+   * Chu shop 06/10/2026: mau dang xa 249K (tin "GIẢM GIÁ CHỈ CÒN 249.000Đ/ĐẦM" gui tu Pancake) — bot phai chot dung
+   * gia nay du huong dan page con ghi gia xa cu. Tin cua shop deu da qua chot chan gia (bot) hoac do nguoi / mau tin
+   * Pancake gui, nen gia trong do la gia shop da cam ket voi khach.
+   */
+  quotedUnitPrice(pageId, messages) {
+    for (const m of [...(messages || [])].reverse()) {
+      if (!this.isFromPage(m, pageId)) continue;
+      const g = String(this.messageText(m) || "").match(GIA_MOI_SP);
+      if (!g) continue;
+      const n = /k$/i.test(g[1].trim()) ? Number(g[1].replace(/\D/g, "")) * 1000 : Number(g[1].replace(/\D/g, ""));
+      if (n >= 50000 && n < 10000000) return n;
+    }
+    return null;
+  }
+
+  /** Khoi prompt: gia shop da bao khach nay — uu tien hon bang gia trong huong dan, va la gia hop le cho chot chan gia. */
+  quotedPriceBlock(pageId, messages) {
+    const g = this.quotedUnitPrice(pageId, messages);
+    if (!g) return "";
+    const v = g.toLocaleString("vi-VN");
+    return `\n\n## GIÁ SHOP ĐÃ BÁO KHÁCH NÀY\n- Trong hội thoại shop đã báo ${v}đ/đầm. Mọi báo giá và bản chốt đơn dùng ĐÚNG giá ${v}đ/đầm (ưu tiên hơn giá trong hướng dẫn), tổng = ${v}đ × số lượng (+ phí ship nếu có).`;
+  }
+
   orderProgressPrompt(pageId, messages) {
     const f = this.customerFacts(pageId, messages);
     const dong = [
@@ -882,6 +924,13 @@ ${dong.join("\n")}
     else dong.splice(i, 0, `• Mẫu: ${ten}`);
     log.info(`[${pageId}] Ban chot don khong ghi ma mau -> dung ${ma}`);
     return dong.join("\n");
+  }
+
+  /** Ban chot co dung gia mot san pham `gia` khong: co mot so tien = gia x (1..5) (+ 0 / 20K / 25K / 30K ship). */
+  summaryUsesPrice(reply, gia) {
+    const so = amountsIn(reply);
+    for (let n = 1; n <= 5; n++) for (const ship of [0, 20000, 25000, 30000]) if (so.has(gia * n + ship)) return true;
+    return false;
   }
 
   keepFreeShipPromise(reply, pageId, messages) {
@@ -1791,6 +1840,7 @@ ${Xung} lấy màu nào để em lên đơn cho mình ạ?`;
     // Don da chot cung kem muc nay: no noi "đơn đã đủ, đừng hỏi thêm, đọc ngữ cảnh tin ngắn" (truoc day bo qua -> AI
     // khong biet don da du, hoc theo lich su ma hoi "Em lên đơn…?" mai — Bui Phuong Vy 02/10/2026)
     systemPrompt += this.orderProgressPrompt(pageId, messages);
+    systemPrompt += this.quotedPriceBlock(pageId, messages);
     if (this.orderClosedIn(pageId, messages)) {
       systemPrompt += `
 
@@ -1890,6 +1940,16 @@ ${Xung} lấy màu nào để em lên đơn cho mình ạ?`;
           ? `Dạ giá này là ưu đãi tốt nhất bên em rồi ạ, em không có quyền giảm thêm. Để em chuyển nhân viên hỗ trợ ${xung} ngay nhé ❤️ [[HANDOFF]]`
           : `Dạ em xin phép kiểm tra lại giá chính xác cho ${xung} rồi báo ${xung} ngay nhé ❤️ [[HANDOFF]]`;
       }
+    }
+    // Ban chot don phai dung gia shop DA BAO khach (vd 249K xa kho) — bang gia cu trong huong dan van "hop le" voi chot
+    // chan gia nen chot chan khong bat duoc 299K. Sai -> viet lai MOT lan; van sai thi giu nguyen (khong chan cung).
+    const giaBao = this.quotedUnitPrice(pageId, messages);
+    if (giaBao && isOrderSummaryReply(reply, false) && !this.summaryUsesPrice(reply, giaBao)) {
+      const v = giaBao.toLocaleString("vi-VN");
+      log.warn(`[${pageId}] ${conversationId}: ban chot don khong theo gia da bao khach ${v}d -> viet lai`);
+      store.bumpStat(pageId, "quotedPriceGuard");
+      const r3 = await generateReply(systemPrompt + `\n\n## CẢNH BÁO TỪ HỆ THỐNG\nShop ĐÃ báo khách này giá ${v}đ/đầm. Bản chốt đơn vừa rồi dùng giá khác. Viết lại bản chốt đơn với đúng ${v}đ/đầm × số lượng (+ phí ship nếu có), giữ nguyên các dòng khác.`, history, { model: eff.model, temperature: 0.2 }).catch(() => null);
+      if (r3?.text && this.summaryUsesPrice(r3.text, giaBao) && !this.findDisallowedPrices(r3.text, systemPrompt).length) reply = r3.text;
     }
     // Chan bot NEU NHAM MA MAU (vd page chu luc Q002 ma bot chot "Dam Q004")
     let maLa = this.wrongModelInReply(reply, pageId, messages, maNhanDien);
