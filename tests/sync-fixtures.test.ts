@@ -516,6 +516,7 @@ import { testNativeOrderSync } from "./native-order-sync.test";
 import { testMessengerLifecycle } from "./messenger-lifecycle.test";
 import { testMessengerDiscovery } from "./messenger-discovery.test";
 import { testSalesAiDownAlert } from "./sales-ai-down-alert.test";
+import { testAiProviderFailover } from "./ai-provider-failover.test";
 import { testMessengerMultiPage } from "./messenger-multipage.test";
 import { testPush } from "./push.test";
 import { testUserInvites } from "./user-invites.test";
@@ -2804,6 +2805,9 @@ async function main() {
   // Khám phá page Facebook: tách 6 lý do «không có page» (sự cố 06/10/2026) — Graph giả, không mạng.
   await testMessengerDiscovery();
   testSalesAiDownAlert();
+  // Khoá AI chính → khoá dự phòng → người (sự cố 06/10/2026): phân loại · ngắt mạch · không gửi trùng — tổ chức THẬT
+  // `fo-ai-failover`, provider giả.
+  await testAiProviderFailover();
   await testMessengerMultiPage();
   await testPush();
   // Mời người dùng qua liên kết (gap «Invite User»): tổ chức THẬT `ui-a` / `ui-b` / `ui-t` (tự cấp, tự dọn) + nhà — vai trò
