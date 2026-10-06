@@ -52,6 +52,9 @@ Pancake: kết nối RIÊNG «Fanpage qua Pancake» — chỉ cho shop đang dù
 | Tạo đơn trong lúc chat | «+ Tạo đơn cho khách này» — đơn gắn hội thoại, ghi là đơn của người, bấm hai lần không ra hai đơn |
 | Xem khách đã nói chuyện ở đâu | Hồ sơ khách → khối «Hội thoại» (chỉ nối bằng khoá cứng) |
 | Từ đơn mở lại hội thoại | Chi tiết đơn → «Hội thoại của đơn» |
+| Nhân viên chat tay, khách gửi SĐT + địa chỉ | Máy «Ghi đơn từ hội thoại» tự lên đơn «Mới» — cả page nối thẳng Facebook (đọc sổ tin của ERP, không Pancake); bật ở Chatbot bán hàng |
+| Đưa hội thoại cũ của page vào hộp thư | Chatbot bán hàng → «Hội thoại gần đây từ Facebook / Instagram» → Nhập (20 tin gần nhất mỗi hội thoại — giới hạn của Meta) |
+| Gỡ một page | Messenger → gỡ page: ERP gỡ đăng ký webhook ở Meta rồi mới gỡ phía ERP; page khác vẫn chạy |
 | Hiệu quả AI vs người | `/ai/sales-chatbot/performance` |
 
 ## 4. Kiểm soát AI ↔ người
@@ -68,9 +71,11 @@ Pancake: kết nối RIÊNG «Fanpage qua Pancake» — chỉ cho shop đang dù
 
 ## 5. Token và nối lại
 
-- Triệu chứng: chuông đỏ «Messenger trực tiếp cần nối lại»; trang Messenger báo kết nối ở Nháp kèm câu lỗi của Meta.
-- Nguyên nhân: Meta trả 190 / 102 (token hết hiệu lực) hoặc 200–299 / 10 (mất quyền). Máy đã tự chuyển kết nối về Nháp
-  (`ORG_CONNECTION_AUTO_DRAFT` trong nhật ký) — bot và hộp thư ngừng gửi qua Messenger để không đốt lượt AI vô ích.
+- Triệu chứng: chuông đỏ «Page … cần nối lại» (page có token riêng — nối từ 0220) hoặc «Messenger trực tiếp cần nối lại» (page cũ
+  dùng token của hàng kết nối đơn); trang Messenger hiện lỗi gần nhất của page.
+- Nguyên nhân: Meta trả 190 / 102 (token hết hiệu lực) hoặc 200–299 / 10 (mất quyền). Page có token riêng: chỉ PAGE ĐÓ hỏng, các page
+  khác vẫn chạy, trạng thái page KHÔNG bị máy đổi (trạng thái là lựa chọn của người). Page cũ: máy chuyển kết nối về Nháp
+  (`ORG_CONNECTION_AUTO_DRAFT` trong nhật ký) để không đốt lượt AI vô ích.
 - Sửa: chủ page (vẫn là quản trị page) vào Chatbot bán hàng → Messenger → **Đổi page** → đăng nhập Facebook → chọn lại page.
   Lượt nối kiểm tra token rồi bật lại.
 - KHÔNG làm: bật lại kết nối bằng tay khi chưa nối lại — lần gửi kế tiếp sẽ lại hỏng.
@@ -98,8 +103,8 @@ Truy vấn production chỉ đọc qua ops `db-query` (kết quả mã hoá — 
 4. Chatbot bán hàng → Messenger → Kết nối Facebook → chọn page.
 5. Nhắn thử từ tài khoản tester → tin vào hộp thư; bot trả lời; «Tiếp quản» chạy.
 6. Tắt trả lời tự động của Pancake nếu còn (tránh khách nhận hai câu).
-7. Lịch sử hội thoại Pancake cũ: nhập qua «Đồng bộ lịch sử» (nhánh `claude/hop-thu-lich-su`, khi vào main). Lịch sử Messenger
-   trực tiếp trước ngày nối: Meta chỉ trả 20 tin gần nhất mỗi hội thoại — chưa làm.
+7. Lịch sử hội thoại Pancake cũ: «Đồng bộ lịch sử hộp thư» (#599). Sau khi nối Facebook trực tiếp: «Hội thoại gần đây từ Facebook /
+   Instagram» (Meta chỉ trả 20 tin gần nhất mỗi hội thoại). Hai đường cùng khoá mã tin ⇒ không nhân đôi.
 8. Pancake POS (đồng bộ đơn) là kết nối khác, không liên quan nhắn tin — giữ hay bỏ tuỳ shop.
 
 ## 8. Triển khai và quay lui

@@ -1,7 +1,7 @@
 # Thay Pancake cho social commerce — báo cáo đợt P0
 
-> Nhánh `feat/pancake-replacement` (cây `wt-pancake-replacement`), 06/10/2026. Trạng thái: **mã xong + kiểm thử xanh trên
-> nhánh; CHƯA PR / CHƯA merge / CHƯA deploy** — xem §9. Kế hoạch sống: `docs/pancake-replacement-gap-analysis.md`.
+> Nhánh `feat/pancake-replacement` (cây `wt-pancake-replacement`), 06/10/2026 — đợt 1 (trước #598 / #599) + đợt 2 (sau khi hai
+> dependency vào main). Trạng thái: **mã xong + kiểm thử xanh trên nhánh; CHƯA PR / CHƯA merge / CHƯA deploy** — xem §9. Kế hoạch sống: `docs/pancake-replacement-gap-analysis.md`.
 
 ## 1. Đã làm (mã mới)
 
@@ -14,7 +14,11 @@
 | 5 | Trang Kết nối của tổ chức khách: «Facebook · Instagram nối thẳng» lên đầu; Pancake về «Kết nối cũ / chuyển đổi» | `484d5f56`, `6ea0fb80` |
 | 6 | Webhook Messenger để lại log có cấu trúc khi chữ ký sai / page lạ / gói trùng / lượt nền hỏng | `7407e557` |
 | 7 | Hộp thư lọc «AI đang trả lời / Người đang xử lý» | `949692c1` |
-| — | Tài liệu: gap analysis · Meta production readiness · runbook · báo cáo này | `5b62ee8e`, `9be180e3` |
+| 8 | (sau #598 / #599) Gộp main; báo token hỏng theo ĐÚNG page có token riêng — page khác chạy tiếp, trạng thái page do người chọn | `a8156fa2` |
+| 9 | Lát A — shop chỉ nối Facebook trực tiếp được máy ghi đơn từ hội thoại (đọc sổ tin ERP, không Pancake); bài kiểm trọn đường nhận → bot → nhân viên → đơn → ghi đơn với 0 lời gọi pages.fm | `66617dc4` |
+| 10 | Lát B — lịch sử hội thoại Messenger / Instagram trực tiếp (20 tin gần nhất / hội thoại) qua đường ghi của #599; `/me/accounts` phân trang tới 500 page; gỡ page ⇒ `DELETE subscribed_apps` | `f1e0218f` |
+| 11 | Lát C — 8 đòn mới × 2 chiều trong bộ tấn công chéo tổ chức cho các bề mặt mới; khai đường gọi mạng | `59ec07a4` |
+| — | Tài liệu: gap analysis · Meta production readiness · runbook · báo cáo này | `5b62ee8e`, `9be180e3`, các commit tài liệu sau |
 
 ## 2. Dùng lại (không dựng lại)
 
@@ -35,12 +39,12 @@ ghi chú, nhận / giao), `replyGate` + bốn chế độ tổ chức, `chatTurn
 
 | Việc của lệnh | Ở đâu |
 |---|---|
-| Nhiều page một tổ chức, token riêng từng page, bật / tắt AI theo page | `wt-master-mission` P12 (chưa PR) |
-| Hộp thư chung + lọc theo page, chỉ số theo page | `wt-master-mission` P13 |
-| Onboarding «bạn trả lời tin bằng gì» không bắt buộc Pancake | `wt-master-mission` P9 |
-| Quy kết từng đơn AI_ONLY / AI_ASSISTED / HUMAN_ONLY, AOV, follow-up thu hồi | `wt-master-mission` P1–P5 |
-| Hộp thư lọc SĐT / level / thời gian / nhân viên, «Xem thêm», lịch sử giao / hoàn | #595 — đã vào main, đã gộp |
-| Nhập lịch sử hội thoại Pancake | `claude/hop-thu-lich-su` (chưa PR) |
+| Nhiều page một tổ chức, token riêng từng page, bật / tắt AI theo page | #598 (`wt-master-mission`) — đã vào main, đã gộp, DÙNG LẠI |
+| Hộp thư chung + lọc theo page, chỉ số theo page | #598 — dùng lại |
+| Onboarding «bạn trả lời tin bằng gì» không bắt buộc Pancake | #598 — dùng lại |
+| Quy kết từng đơn AI_ONLY / AI_ASSISTED / HUMAN_ONLY, AOV, follow-up thu hồi | #598 — dùng lại |
+| Hộp thư lọc SĐT / level / thời gian / nhân viên, «Xem thêm», lịch sử giao / hoàn | #595 — dùng lại |
+| Nhập lịch sử hội thoại Pancake | #599 — dùng lại; đường ghi của nó dùng chung cho lịch sử Messenger trực tiếp |
 
 ## 5. Migration
 
@@ -49,8 +53,11 @@ Không có. Chế độ hội thoại nằm trong `sales_chat_conversations.stat
 
 ## 6. Kiểm thử
 
-- `npm run typecheck` sạch · `npm run lint` sạch · `npm run build` đạt · `npm test` **«TẤT CẢ KIỂM THỬ ĐẠT»** (782 dòng ✓, trên
-  nhánh đã gộp main `c32de14c`; 10 mục «CHƯA ĐO ĐƯỢC trên win32» có từ trước — CI Linux đo).
+- `npm run typecheck` sạch · `npm run lint` sạch · `npm run build` đạt · `npm test` **«TẤT CẢ KIỂM THỬ ĐẠT»** (794 dòng ✓, nhánh
+  đã gộp main `419fe3be` gồm #598 + #599; sau đó gộp thêm #600 — chỉ chạm `chatbot/`; 10 mục «CHƯA ĐO ĐƯỢC trên win32» có từ trước
+  — CI Linux đo).
+- Bài kiểm mới đợt 2: `tests/native-order-sync.test.ts` (đột biến bỏ nguồn Messenger ⇒ đỏ), `tests/messenger-lifecycle.test.ts`
+  (bắt được một regex mất dấu gạch chéo ngược trước khi vào kho), 8 đòn mới trong `tests/ai-sales-isolation.test.ts`.
 - Bài kiểm mới: `tests/conversation-control.test.ts` (thuần + tổ chức thật qua Messenger trực tiếp, Graph giả: race giữa lượt
   AI, tiếp quản bền, Copilot hội thoại, trả lại AI, hai người cùng bấm, quyền, bộ lọc AI / người), `tests/conversation-trace.test.ts`
   (khoá cứng, kênh thử, trùng tên không lọt hồ sơ), `tests/messenger-health.test.ts` (phân loại lỗi Graph, 190 ⇒ Nháp + báo một
@@ -68,10 +75,10 @@ Không có. Chế độ hội thoại nằm trong `sales_chat_conversations.stat
 
 - Câu bot đã soạn mà KHÔNG gửi (người vừa tiếp quản) vẫn nằm trong lịch sử của bot — cùng tiền lệ với câu gửi hỏng.
 - Đơn chat / AI không ghi `orders.page_id` (quyết định của chủ shop — §9); truy về page qua hội thoại.
-- Vòng đời token ghi theo MỘT kết nối Messenger; ghi theo từng page khi P12 vào main. Ngắt kết nối chưa gỡ đăng ký webhook ở Meta.
-- Chưa nhập hội thoại cũ của Messenger trực tiếp (Meta chỉ trả 20 tin gần nhất / hội thoại) — làm sau `hop-thu-lich-su`.
+- Lịch sử Messenger trực tiếp: tối đa 20 tin gần nhất mỗi hội thoại, 200 hội thoại / page — giới hạn của Meta / trần của lượt nhập.
+- Page có token riêng bị thu hồi: máy BÁO, không tự tắt page (trạng thái page do người chọn) — bot vẫn thử gửi tới khi người nối
+  lại hoặc tắt page.
 - Tin nhân viên ngoài 24 giờ (thẻ `HUMAN_AGENT`) chưa làm — cần App Review.
-- Hàng lọc danh sách hộp thư ở 390 px còn tràn ngang — P13 của `wt-master-mission` sửa.
 
 ## 9. Việc chặn bên ngoài (owner phải làm)
 
@@ -81,12 +88,10 @@ Không có. Chế độ hội thoại nằm trong `sales_chat_conversations.stat
 | App Review + Business Verification cho app Meta | Thủ tục của Meta (`meta-production-readiness.md` §3) |
 | Đặt `FACEBOOK_API_VERSION` ≥ `v24.0` trên VPS | Biến môi trường production; `v21.0` hết hạn 21/01/2027 |
 | Có ghi `orders.page_id` cho đơn chat / AI không | Đổi quy kết fanpage → marketer / hoa hồng (AGENTS luật 9, 16) |
-| Merge `wt-master-mission` và `hop-thu-lich-su` | Hai nhánh của phiên khác — nhiều page / lọc page / onboarding / lịch sử nằm ở đó |
 
 ## 10. P1 đề xuất (theo thứ tự)
 
-1. Sau khi `wt-master-mission` vào main: vòng đời token + sức khoẻ theo TỪNG page, gỡ đăng ký webhook khi gỡ page, phân trang
-   `/me/accounts` (> 100 page).
-2. Sau `hop-thu-lich-su`: nhập 20 tin gần nhất mỗi hội thoại Messenger trực tiếp khi nối page.
-3. Khi có duyệt Human Agent: thẻ `HUMAN_AGENT` CHỈ cho tin nhân viên trong hộp thư, 7 ngày.
-4. Màn hình sức khoẻ Messenger (tin cuối theo page, lỗi gửi gần nhất) đọc từ dữ liệu sẵn có.
+1. Khi có duyệt Human Agent: thẻ `HUMAN_AGENT` CHỈ cho tin nhân viên trong hộp thư, 7 ngày.
+2. Tự nhập hội thoại gần đây ngay sau khi nối page (hôm nay là nút bấm).
+3. Page có token riêng hỏng liên tục: đề nghị người tắt page / tạm dừng AI page đó (không tự đổi trạng thái).
+4. Zalo OA: nhập lịch sử + ghi đơn từ hội thoại theo cùng khuôn nguồn tin.

@@ -18,7 +18,9 @@ Phân loại: **READY** · **NEEDS CONFIG** · **NEEDS APP REVIEW** · **NEEDS O
 | Quyền nhắn tin với khách KHÔNG có vai trò trong app | **NEEDS APP REVIEW** | Advanced Access + Business Verification |
 | Gửi tin ngoài 24 giờ (nhân viên trả lời muộn) | **NEEDS APP REVIEW** + mã | Thẻ `HUMAN_AGENT` (7 ngày, chỉ tin NGƯỜI soạn) — mã hiện chỉ gửi `RESPONSE`; xem §4 |
 | Trả lời bình luận CÔNG KHAI | **NOT SUPPORTED** (cố ý) | Chỉ tin riêng (Private Replies, một tin / bình luận / 7 ngày) — quyết định sản phẩm, không phải giới hạn Meta |
-| Nhập hội thoại cũ của page | **READY phía Meta, mã chưa có** | Conversations API trả tối đa **20 tin gần nhất** mỗi hội thoại; hội thoại trong «Tin nhắn chờ» không hoạt động 30 ngày không trả về |
+| Nhập hội thoại cũ của page | **READY** (cần Advanced Access) | `messenger-history.ts`: Conversations API, tối đa **20 tin gần nhất** mỗi hội thoại (giới hạn Meta), 200 hội thoại / page; «Tin nhắn chờ» không hoạt động 30 ngày không trả về |
+| Shop quản > 100 page | **READY** | `/me/accounts` phân trang bằng con trỏ `after`, tối đa 500 page |
+| Gỡ page | **READY** | `DELETE /{page}/subscribed_apps` trước khi gỡ phía ERP |
 
 ## 2. Quyền xin lúc nối page (`MESSENGER_SCOPES`)
 
@@ -67,8 +69,8 @@ video nộp duyệt.
 - Token người dùng đổi sang **dài hạn** lúc nối và KHÔNG lưu; page token lấy từ token dài hạn (không tự hết hạn theo thời gian,
   nhưng mất hiệu lực khi người cấp đổi mật khẩu, gỡ quyền app, mất vai trò quản trị page, hoặc Meta thu hồi).
 - Page token lưu mã hoá AES-256-GCM, AAD gắn tổ chức + kết nối (`lib/connectors/secrets.ts`).
-- **Khoảng trống:** lỗi `190` (token hỏng / bị thu hồi) khi gửi hiện chưa được nhận ra để chuyển kết nối sang «cần nối lại» và
-  báo người — xem `docs/pancake-replacement-gap-analysis.md` slice 3. Cách khắc phục tay hôm nay: trang Messenger → «Đổi page».
+- Lỗi `190` / mất quyền khi gửi được nhận ra (`graph-errors.ts`): page có token riêng ⇒ báo đúng page (page khác chạy tiếp); page
+  cũ dùng token kết nối đơn ⇒ kết nối về Nháp + báo. Lỗi ngoài 24 giờ / khách chặn / chạm trần KHÔNG đụng kết nối. Sửa: nối lại page.
 
 ## 6. Kiểm tra trước khi bật cho khách thật
 
