@@ -19,10 +19,12 @@
     "saas-platform-restructure"
   ],
   "blocked_by": [],
-  "related_prs": [],
+  "related_prs": [
+    617
+  ],
   "migration_reservations": [],
   "created_at": "2026-10-06T17:03:28.190Z",
-  "updated_at": "2026-10-06T17:14:34.985Z",
+  "updated_at": "2026-10-06T17:16:06.231Z",
   "last_heartbeat": "2026-10-06T17:14:34.985Z",
   "definition_of_done": [],
   "handoff": {
