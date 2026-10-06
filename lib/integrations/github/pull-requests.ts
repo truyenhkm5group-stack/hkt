@@ -23,6 +23,7 @@ import {
 } from "@/lib/integrations/github/client";
 import { markGithubRead } from "@/lib/integrations/github/read-marker";
 import { runSyncJob, type SyncTrigger } from "@/lib/sync/runner";
+import { onPullRequestChanged } from "@/lib/tech/delivery";
 import { recordTechTaskEvent } from "@/lib/tech/service";
 
 /**
@@ -243,6 +244,7 @@ export async function syncGithubPullRequests(opts: { limit?: number; budget?: nu
       mergeState: true,
       updatedAt: true,
       status: true,
+      missionId: true,
     },
   });
 
@@ -317,6 +319,16 @@ export async function syncGithubPullRequests(opts: { limit?: number; budget?: nu
         continue;
       }
       out.updated += 1;
+      // Sự kiện PR / CI + phản ứng tất định (CI đỏ ⇒ việc sửa có trần) — lỗi ở đây không được làm hỏng phép chiếu.
+      try {
+        await onPullRequestChanged(
+          { id: t.id, code: t.code, missionId: t.missionId ?? null },
+          { prNumber: t.prNumber, prState: t.prState, ciState: t.ciState, headSha: t.headSha },
+          { prNumber: chieu.prNumber, prState: chieu.prState, ciState: chieu.ciState, headSha: chieu.headSha },
+        );
+      } catch (e) {
+        console.error("[github-pr-sync] phản ứng sự kiện", t.code, e instanceof Error ? e.message : e);
+      }
       /*
         NHẬT KÝ CHỈ GHI KHI CÓ ĐỔI, và ghi cả bốn chiều trong MỘT dòng.
 

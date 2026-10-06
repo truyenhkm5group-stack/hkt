@@ -14,6 +14,7 @@ import {
   claimBlockers,
   decideCompletion,
   taskBranchName,
+  WORKER_BRANCH_PATTERN,
   workerLiveness,
   type ClaimCandidate,
 } from "@/lib/constants/tech-worker";
@@ -100,8 +101,9 @@ export function testTechWorkerPure() {
   assert.deepEqual(claimBlockers({ ...base, missionStatus: null, goalStatus: null }, w, now), [], "việc lẻ không thuộc sứ mệnh vẫn chạy được");
 
   // Tên nhánh tất định theo mã việc + lần thử.
-  assert.equal(taskBranchName("TECH-12", 2), "tech/TECH-12-a2");
-  assert.equal(taskBranchName("TECH-12; rm -rf /", 1), "tech/TECH-12rm-rf-a1", "không ký tự lạ nào lọt vào tên nhánh");
+  assert.equal(taskBranchName("TECH-12", 2), "ai/worker/TECH-12-a2");
+  assert.equal(taskBranchName("TECH-12; rm -rf /", 1), "ai/worker/TECH-12rm-rf-a1", "không ký tự lạ nào lọt vào tên nhánh");
+  assert.match(taskBranchName("TECH-12", 2), WORKER_BRANCH_PATTERN);
 
   // Ranh giới thanh toán.
   const cha = { PATH: "/bin", HOME: "/h", ANTHROPIC_API_KEY: "sk-ant-THAT", ANTHROPIC_AUTH_TOKEN: "x", DATABASE_URL: "postgres://prod", TECH_WORKER_TOKEN: "tw_x.y", GITHUB_TOKEN: "ghp" };
@@ -135,7 +137,8 @@ export function testTechWorkerPure() {
   const iAuth = route.indexOf('authenticateTechWorker(req.headers.get("authorization"))');
   assert.ok(iAuth > 0 && route.indexOf("status: 401") > iAuth, "route worker phải xác thực khoá riêng và trả 401 khi sai");
   assert.ok(iAuth < route.indexOf("req.json()"), "xác thực phải đứng TRƯỚC lượt đọc thân gói");
-  assert.ok(!/CRON_SECRET|cronSecret/.test(route), "cửa worker không nhận khoá lập lịch chung");
+  const maRoute = route.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
+  assert.ok(!/CRON_SECRET|cronSecret|agentIngestSecret/.test(maRoute), "cửa worker không nhận khoá lập lịch / khoá chung");
 
   // Migration: CHECK provider / concurrency khớp hằng số.
   const mig = readFileSync(path.join(goc, "drizzle/0226_tech_workers.sql"), "utf8");
@@ -199,7 +202,7 @@ export async function testTechWorkerDb() {
     const c1 = got[0]!;
     assert.equal(c1.taskId, t1);
     assert.equal(c1.leaseGeneration, 1);
-    assert.equal(c1.branch, `tech/${c1.code}-a1`);
+    assert.equal(c1.branch, `ai/worker/${c1.code}-a1`);
     const giu = c1 === ca.task ? await worker(A.id) : await worker(B.id);
     const kia = giu.id === A.id ? await worker(B.id) : await worker(A.id);
     // Bản TS nói đúng điều SQL làm, trên CÙNG dữ liệu.

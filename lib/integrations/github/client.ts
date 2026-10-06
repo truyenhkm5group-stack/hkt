@@ -362,6 +362,8 @@ export type GithubPull = {
   /** `true` · `false` · `null` = GitHub còn đang tính. Ba giá trị, không phải hai. */
   mergeable: boolean | null;
   updatedAt: Date | null;
+  /** Commit gộp vào nhánh đích — CHỈ khi PR đã gộp. PR chưa gộp mang commit THỬ của GitHub, không dùng ⇒ rỗng. */
+  mergeCommitSha: string;
 };
 
 type RawPull = {
@@ -376,6 +378,7 @@ type RawPull = {
   updated_at?: string | null;
   head?: { ref?: string; sha?: string } | null;
   base?: { ref?: string; sha?: string } | null;
+  merge_commit_sha?: string | null;
 };
 
 function toPull(p: RawPull): GithubPull {
@@ -393,7 +396,18 @@ function toPull(p: RawPull): GithubPull {
     htmlUrl: p.html_url,
     mergeable: p.mergeable === undefined ? null : p.mergeable,
     updatedAt: p.updated_at ? new Date(p.updated_at) : null,
+    mergeCommitSha: (p.merged === true || Boolean(p.merged_at)) && p.merge_commit_sha ? p.merge_commit_sha : "",
   };
+}
+
+/**
+ * Commit `head` có CHỨA commit `base` không — GitHub `compare/base...head`: `ahead` / `identical` ⇒ chứa.
+ * Dùng để nối một lượt deploy (commit đang chạy) với PR đã gộp (commit gộp), bằng chứng git chứ không bằng giờ.
+ */
+export async function commitContains(head: string, base: string): Promise<boolean> {
+  if (!/^[0-9a-f]{7,40}$/i.test(head) || !/^[0-9a-f]{7,40}$/i.test(base)) return false;
+  const data = await get<{ status?: string }>(`/compare/${base}...${head}`);
+  return data.status === "ahead" || data.status === "identical";
 }
 
 /**

@@ -11,11 +11,13 @@ import {
   decideCompletion,
   leaseExpiry,
   taskBranchName,
+  WORKER_BRANCH_PATTERN,
   type TechExecutionProvider,
   type TechRunOutcome,
 } from "@/lib/constants/tech-worker";
 import { rowsOf } from "@/lib/sql-rows";
 import { recordTechEvent } from "@/lib/tech/control-plane";
+import { requestWorkerPullRequest } from "@/lib/tech/delivery";
 import { recordTechTaskEvent, setTechTaskStatus, type TechActor, type TechResult } from "@/lib/tech/service";
 
 /**
@@ -197,6 +199,11 @@ export type ClaimedTask = {
   leaseGeneration: number;
   leaseExpiresAt: string;
   branch: string;
+  /**
+   * `true` ⇒ làm TRÊN nhánh đã có (việc sửa CI đỏ: nhánh của PR đang mở) — worker checkout `origin/<branch>` và đẩy
+   * tiếp lên chính nhánh đó (PR tự cập nhật). `false` ⇒ nhánh mới tất định theo mã việc + lần thử.
+   */
+  existingBranch: boolean;
   mission: { code: string; title: string; definitionOfDone: string } | null;
 };
 
@@ -262,8 +269,9 @@ export async function claimNextTechTask(worker: TechWorkerRow, now = new Date())
     with: { mission: { columns: { code: true, title: true, definitionOfDone: true } } },
   });
   if (!task) return { task: null, reason: "QUEUE_EMPTY" };
-  const branch = taskBranchName(task.code, task.attempts);
   const capability = taskCapability(task);
+  const tiepNhanh = capability === "ci-debug" && WORKER_BRANCH_PATTERN.test(task.branch);
+  const branch = tiepNhanh ? task.branch : taskBranchName(task.code, task.attempts);
   const [run] = await db
     .insert(schema.techAgentRuns)
     .values({
@@ -298,6 +306,7 @@ export async function claimNextTechTask(worker: TechWorkerRow, now = new Date())
       leaseGeneration: task.leaseGeneration,
       leaseExpiresAt: expires.toISOString(),
       branch,
+      existingBranch: tiepNhanh,
       mission: task.mission ? { code: task.mission.code, title: task.mission.title, definitionOfDone: task.mission.definitionOfDone } : null,
     },
   };
@@ -499,6 +508,17 @@ export async function completeTechWorkerRun(worker: TechWorkerRow, input: Comple
       );
       if ("error" in r) return r;
       status = d.taskTo;
+    }
+  }
+  /*
+    THÀNH CÔNG + nhánh worker + việc chưa có PR + không phải việc sửa CI (nhánh đó đã có PR) ⇒ máy chủ yêu cầu cầu
+    nối mở PR bằng danh tính bot. Lỗi ở đây KHÔNG làm hỏng lượt kết thúc — thành sự kiện `pr.request_failed`.
+  */
+  if (input.outcome === "SUCCEEDED" && status === "REVIEW" && input.branch && !task.prNumber && task.capability !== "ci-debug") {
+    try {
+      await requestWorkerPullRequest({ id: task.id, code: task.code, title: task.title, missionId: task.missionId }, input.branch, input.summary ?? "");
+    } catch (e) {
+      console.error("[tech-worker] yêu cầu mở PR", task.code, e instanceof Error ? e.message : e);
     }
   }
   await recordTechEvent(

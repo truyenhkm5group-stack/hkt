@@ -218,13 +218,18 @@ export function decideCompletion(outcome: TechRunOutcome, attempts: number, maxA
 /* ═════════════════════ NHÁNH & CÂY LÀM VIỆC ═════════════════════ */
 
 /**
- * Tên nhánh / thư mục TẤT ĐỊNH theo mã việc và lần thử: `tech/TECH-12-a2`. Đọc tên nhánh là biết việc nào,
+ * Tên nhánh / thư mục TẤT ĐỊNH theo mã việc và lần thử: `ai/worker/TECH-12-a2`. Đọc tên nhánh là biết việc nào,
  * lần thử thứ mấy; thử lại không bao giờ đè lên nhánh của lần trước (bằng chứng của lần trước giữ nguyên).
+ * Tiền tố `ai/` là điều kiện của cầu nối mở PR bằng danh tính bot (`AGENT_BRANCH_PREFIXES`, agent-open-pr.yml).
  */
+export const WORKER_BRANCH_PREFIX = "ai/worker/";
 export function taskBranchName(taskCode: string, attempt: number): string {
   const code = taskCode.replace(/[^A-Za-z0-9-]/g, "").slice(0, 40);
-  return `tech/${code}-a${Math.max(1, Math.trunc(attempt))}`;
+  return `${WORKER_BRANCH_PREFIX}${code}-a${Math.max(1, Math.trunc(attempt))}`;
 }
+
+/** Nhánh do worker hàng đợi tạo — hình dạng đóng, vì nó đi thẳng vào lệnh `git` và ô inputs công khai. */
+export const WORKER_BRANCH_PATTERN = /^ai\/worker\/[A-Za-z0-9-]{1,40}-a[0-9]{1,2}$/;
 
 export function taskWorktreeDirName(taskCode: string, attempt: number): string {
   return `wt-tech-${taskCode.toLowerCase().replace(/[^a-z0-9-]/g, "")}-a${Math.max(1, Math.trunc(attempt))}`;

@@ -52,6 +52,8 @@ type Claimed = {
   maxAttempts: number;
   leaseGeneration: number;
   branch: string;
+  /** Việc sửa CI: làm tiếp trên nhánh của PR đang mở thay vì mở nhánh mới. */
+  existingBranch: boolean;
   mission: { code: string; title: string; definitionOfDone: string } | null;
 };
 
@@ -119,7 +121,14 @@ async function execute(adapter: ExecutionAdapter, provider: TechExecutionProvide
         git(cfg.repo, "worktree", "prune");
       }
     }
-    git(cfg.repo, "worktree", "add", "--no-track", "-b", t.branch, dir, "origin/main");
+    if (t.existingBranch) {
+      // Sửa CI đỏ: lấy ĐÚNG đỉnh nhánh của PR trên remote; đẩy lên lại cùng nhánh (fast-forward) ⇒ PR tự cập nhật.
+      git(cfg.repo, "fetch", "origin", t.branch, "--quiet");
+      baseCommit = git(cfg.repo, "rev-parse", `origin/${t.branch}`);
+      git(cfg.repo, "worktree", "add", "--no-track", "-B", t.branch, dir, `origin/${t.branch}`);
+    } else {
+      git(cfg.repo, "worktree", "add", "--no-track", "-b", t.branch, dir, "origin/main");
+    }
     push("info", `Cây ${dir} · nhánh ${t.branch} · base ${baseCommit.slice(0, 12)}`);
     await api("start", { runId: t.runId, leaseGeneration: t.leaseGeneration, baseCommit, worktree: dir });
 

@@ -308,6 +308,19 @@ export const TECH_EVENT_NAMES = [
   "run.failed",
   "run.lease_expired",
   "mission.task_detached",
+  // Pha 3 — đường giao hàng (lib/tech/delivery.ts)
+  "pr.requested",
+  "pr.request_failed",
+  "pr.opened",
+  "pr.merged",
+  "pr.closed",
+  "ci.passed",
+  "ci.failed",
+  "ci.fix_requested",
+  "ci.retry_exhausted",
+  "deploy.reached",
+  "verification.passed",
+  "verification.failed",
 ] as const;
 export type TechEventName = (typeof TECH_EVENT_NAMES)[number];
 
@@ -331,4 +344,16 @@ export const TECH_EVENT_LABEL: Record<TechEventName, string> = {
   "run.failed": "Lượt chạy thất bại",
   "run.lease_expired": "Lease hết hạn — việc về hàng đợi",
   "mission.task_detached": "Việc rời sứ mệnh",
+  "pr.requested": "Đã yêu cầu mở PR (bot)",
+  "pr.request_failed": "Chưa mở được PR",
+  "pr.opened": "PR đã mở",
+  "pr.merged": "PR đã gộp",
+  "pr.closed": "PR đã đóng (không gộp)",
+  "ci.passed": "Cổng CI xanh",
+  "ci.failed": "Cổng CI đỏ",
+  "ci.fix_requested": "Mở việc sửa CI",
+  "ci.retry_exhausted": "Hết lượt sửa CI tự động",
+  "deploy.reached": "Đã lên production (deploy đã đối chiếu)",
+  "verification.passed": "Hậu kiểm production ĐẠT",
+  "verification.failed": "Hậu kiểm: có sự cố nặng",
 };

@@ -257,3 +257,22 @@ chủ shop duyệt được; máy chủ ERP sẽ dispatch thay worker (worker kh
 - Bỏ mục tiêu / huỷ sứ mệnh không đổi trạng thái các VIỆC bên dưới (việc vẫn hiện, người huỷ từng việc nếu muốn), nhưng
   cổng giao việc cho agent (`dispatch-service`) và hàng đợi worker (Pha 2) đều từ chối việc của sứ mệnh / mục tiêu
   không chạy.
+
+## 10. Pha 3 — đường giao hàng: PR → CI → gộp → deploy → hậu kiểm (đã dựng)
+
+Luật thuần: `lib/constants/tech-delivery.ts`. Đọc/ghi + GitHub: `lib/tech/delivery.ts`. Không thêm lịch chạy: móc vào
+`github-pr-sync` (sự kiện PR/CI) và `task-advance-watch` (nối deploy + hậu kiểm), cả hai đã có lịch 15′.
+
+| Bước | Ai quyết | Chứng cứ |
+|---|---|---|
+| Worker đẩy nhánh `ai/worker/<MÃ>-a<n>` · lượt THÀNH CÔNG | máy chủ dispatch **`agent-open-pr.yml`** (cầu nối bot đã có, chạy trên `main`) | PR mang tên `erp-agent-vnx[bot]` ⇒ chủ shop duyệt được |
+| PR / CI đổi | `github-pr-sync` ghi `pr.opened` · `ci.passed` · `ci.failed` · `pr.merged` · `pr.closed` (khoá chống trùng gắn PR + SHA) | phép chiếu PR đã có |
+| CI đỏ trên PR worker | mở MỘT việc con `ci-debug` trên CHÍNH nhánh đó (worker sửa, đẩy lên, PR tự cập nhật); tối đa `CI_FIX_MAX = 2`, hết ⇒ việc gốc `FAILED` | `ci.fix_requested` · `ci.retry_exhausted` |
+| Gộp | NGƯỜI duyệt PR + Delivery Controller gộp theo `queue` (không đổi) | `REVIEW → QA` (task-advance, đã có) |
+| Lên production | lượt deploy do người / Delivery Controller dispatch (không đổi) | máy chỉ GHI LẠI: deploy THÀNH CÔNG + ĐÃ ĐỐI CHIẾU mà commit đang chạy **chứa** commit gộp (GitHub `compare`, không đoán theo giờ) ⇒ `QA → READY_TO_DEPLOY → DEPLOYING → OBSERVING`; R2 chưa duyệt đứng yên |
+| Hậu kiểm | ≥ 30′ quan sát, 0 sự cố SEV0/SEV1 mở sau mốc deploy ⇒ ghi bằng chứng xác minh rồi `DONE`; có sự cố nặng ⇒ `NEEDS_OWNER` (PRODUCTION_INCIDENT) | `verification.passed` · `verification.failed` |
+
+Thay đổi so với Nấc 4 cũ ("máy không bao giờ tự đặt READY_TO_DEPLOY / DONE"): luật đó vẫn đúng cho
+`task-advance` (đẩy theo PR). Đường giao hàng là đường KHÁC: nó không quyết deploy, chỉ ghi lại một lượt deploy ĐÃ
+xảy ra và đã đối chiếu commit; `DONE` chỉ sau khi bằng chứng xác minh được ghi (cùng cổng `setTechTaskStatus`).
+Việc vào OBSERVING bằng tay (không có sự kiện `deploy.reached`) máy KHÔNG đụng.
