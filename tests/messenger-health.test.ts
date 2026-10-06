@@ -26,7 +26,7 @@ const APP_ID = "777000555666";
 const APP_SECRET = "app-secret-health-test-0123456789abc";
 const PAGE = "3049586172";
 const PAGE_TOKEN = "EAAGpagetoken_health_0123456789abcdef";
-const ENV_KEYS = ["FACEBOOK_LOGIN_APP_ID", "FACEBOOK_LOGIN_APP_SECRET", "PLATFORM_SECRETS_KEY"] as const;
+const ENV_KEYS = ["FACEBOOK_LOGIN_APP_ID", "FACEBOOK_LOGIN_APP_SECRET", "FACEBOOK_MESSENGER_APP_ID", "FACEBOOK_MESSENGER_APP_SECRET", "PLATFORM_SECRETS_KEY"] as const;
 
 function testPure() {
   assert.equal(classifyGraphError(190, 460), "TOKEN", "đổi mật khẩu");
@@ -158,6 +158,9 @@ export async function testMessengerHealth() {
   const saved = Object.fromEntries(ENV_KEYS.map((k) => [k, process.env[k]]));
   process.env.FACEBOOK_LOGIN_APP_ID = APP_ID;
   process.env.FACEBOOK_LOGIN_APP_SECRET = APP_SECRET;
+  // Kênh Messenger ưu tiên app Messenger riêng khi đủ cặp — bài này đo đường của app đăng nhập, nên gỡ cặp kia (khôi phục ở finally).
+  delete process.env.FACEBOOK_MESSENGER_APP_ID;
+  delete process.env.FACEBOOK_MESSENGER_APP_SECRET;
   process.env.PLATFORM_SECRETS_KEY = "khoa-kiem-thu-suc-khoe-0123456789abcdefghijklmnopqrstuvwxyz";
   try {
     await cleanup();

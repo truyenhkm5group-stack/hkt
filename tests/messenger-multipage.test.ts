@@ -35,7 +35,7 @@ const APP_SECRET = "app-secret-messenger-multi-0123456789";
 const PAGES = { A: "2000000001", B: "2000000002", C: "2000000003" } as const;
 const TOKENS: Record<string, string> = { [PAGES.A]: "EAAGtokenA_multipage_0123456789abcdef", [PAGES.B]: "EAAGtokenB_multipage_0123456789abcdef", [PAGES.C]: "EAAGtokenC_multipage_0123456789abcdef" };
 const IG_A = "17841400000000077";
-const ENV_KEYS = ["FACEBOOK_LOGIN_APP_ID", "FACEBOOK_LOGIN_APP_SECRET", "PLATFORM_SECRETS_KEY"] as const;
+const ENV_KEYS = ["FACEBOOK_LOGIN_APP_ID", "FACEBOOK_LOGIN_APP_SECRET", "FACEBOOK_MESSENGER_APP_ID", "FACEBOOK_MESSENGER_APP_SECRET", "PLATFORM_SECRETS_KEY"] as const;
 
 type Call = { url: string; init?: RequestInit };
 
@@ -94,6 +94,9 @@ export async function testMessengerMultiPage() {
   const saved = Object.fromEntries(ENV_KEYS.map((k) => [k, process.env[k]]));
   process.env.FACEBOOK_LOGIN_APP_ID = APP_ID;
   process.env.FACEBOOK_LOGIN_APP_SECRET = APP_SECRET;
+  // Kênh Messenger ưu tiên app Messenger riêng khi đủ cặp — bài này đo đường của app đăng nhập, nên gỡ cặp kia (khôi phục ở finally).
+  delete process.env.FACEBOOK_MESSENGER_APP_ID;
+  delete process.env.FACEBOOK_MESSENGER_APP_SECRET;
   process.env.PLATFORM_SECRETS_KEY = "khoa-kiem-thu-nhieu-page-0123456789abcdefghijklmnopqrstuvwxyz";
   setSalesChatProviderForTests(() => fakeBot());
   try {

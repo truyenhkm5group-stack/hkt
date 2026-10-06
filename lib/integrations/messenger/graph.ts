@@ -37,11 +37,31 @@ export function graphBase(): string {
 
 export type MessengerApp = { appId: string; appSecret: string };
 
-/** App Facebook của nền tảng — thiếu một trong hai ⇒ `null` (kênh Messenger chưa mở). */
-export function messengerApp(): MessengerApp | null {
-  const appId = env.oauth.facebookAppId;
-  const appSecret = env.oauth.facebookAppSecret;
-  return appId && appSecret ? { appId, appSecret } : null;
+export type MessengerAppSource = "MESSENGER_APP" | "LOGIN_APP";
+
+/**
+ * App Meta mà kênh Messenger / Instagram trực tiếp dùng (HÀM THUẦN): app RIÊNG «ChotDonTuDong Messenger» khi đã khai ĐỦ cặp
+ * App ID + secret (06/10/2026), không thì app đăng nhập như trước. Mọi bước của kênh — hộp thoại xin quyền, đổi mã, token page,
+ * `appsecret_proof`, đăng ký webhook, Send API — đi CÙNG một app: token page do app nào cấp thì phải ký bằng secret của app đó.
+ * Thiếu một nửa cặp của app Messenger ⇒ coi như chưa khai (không trộn ID app này với secret app kia).
+ */
+export function messengerAppFrom(login: { id: string; secret: string }, messenger: { id: string; secret: string }): (MessengerApp & { source: MessengerAppSource }) | null {
+  if (messenger.id.trim() && messenger.secret.trim()) return { appId: messenger.id.trim(), appSecret: messenger.secret.trim(), source: "MESSENGER_APP" };
+  if (login.id.trim() && login.secret.trim()) return { appId: login.id.trim(), appSecret: login.secret.trim(), source: "LOGIN_APP" };
+  return null;
+}
+
+/** App Facebook của kênh Messenger — thiếu ⇒ `null` (kênh Messenger chưa mở). */
+export function messengerApp(): (MessengerApp & { source: MessengerAppSource }) | null {
+  return messengerAppFrom({ id: env.oauth.facebookAppId, secret: env.oauth.facebookAppSecret }, { id: env.oauth.facebookMessengerAppId, secret: env.oauth.facebookMessengerAppSecret });
+}
+
+/**
+ * Mã app được coi là «chính bot» khi đọc tiếng vọng (`message_echoes`): app Messenger + app đăng nhập. Trong lúc chuyển app,
+ * tin bot gửi qua app nào cũng là tin của bot — không có nó thì bot tưởng câu của chính mình là nhân viên và tự nhường.
+ */
+export function messengerBotAppIds(): string[] {
+  return [...new Set([env.oauth.facebookMessengerAppId, env.oauth.facebookAppId].map((s) => (s ?? "").trim()).filter(Boolean))];
 }
 
 export function appSecretProof(token: string, appSecret: string): string {
@@ -79,10 +99,13 @@ async function graph(fetchImpl: Fetch, url: string, init: RequestInit, hide: rea
 
 // ─────────────────────────── Kết nối page (OAuth của chủ page) ───────────────────────────
 
-export function messengerConnectUrl(app: MessengerApp, redirectUri: string, state: string): string {
+export function messengerConnectUrl(app: MessengerApp, redirectUri: string, state: string, configId: string = ""): string {
   // `auth_type=rerequest`: tài khoản TỪNG bỏ chọn quyền page (hoặc từng đăng nhập app này chỉ để Đăng nhập bằng Facebook) thì Facebook
   // chỉ hiện «Bạn từng đăng nhập… Tiếp tục?» và KHÔNG hỏi lại — sự cố 06/10/2026: OAuth xong mà 0 page. Có cờ này Facebook hỏi lại.
-  const q = new URLSearchParams({ client_id: app.appId, redirect_uri: redirectUri, response_type: "code", scope: MESSENGER_SCOPES.join(","), state, auth_type: "rerequest" });
+  // App kiểu Doanh nghiệp («Facebook Login for Business») cấp quyền theo CẤU HÌNH, không theo `scope` ⇒ có Configuration ID thì
+  // gửi `config_id` (+ `override_default_response_type` để vẫn nhận mã đổi token phía máy chủ) thay cho `scope`.
+  const base = { client_id: app.appId, redirect_uri: redirectUri, response_type: "code", state, auth_type: "rerequest" };
+  const q = new URLSearchParams(configId.trim() ? { ...base, config_id: configId.trim(), override_default_response_type: "true" } : { ...base, scope: MESSENGER_SCOPES.join(",") });
   return `https://www.facebook.com/${graphBase().split("/").pop()}/dialog/oauth?${q}`;
 }
 

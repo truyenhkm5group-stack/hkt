@@ -4,6 +4,7 @@ import { appOriginForHost, signOAuthToken } from "@/lib/auth/oauth";
 import { apiGuard } from "@/lib/auth/api-guard";
 import { can } from "@/lib/auth/session";
 import { sessionCookieSecure } from "@/lib/constants/session";
+import { env } from "@/lib/env";
 import { MESSENGER_CONNECT_PATH, MESSENGER_CONNECT_TTL_SEC, MESSENGER_SETTINGS_PATH, MESSENGER_STATE_COOKIE, messengerRedirectUri } from "@/lib/integrations/messenger/connect";
 import { messengerApp, messengerConnectUrl } from "@/lib/integrations/messenger/graph";
 
@@ -26,7 +27,7 @@ export async function GET(req: NextRequest) {
   if (!app) return back("loi=app");
   const state = randomBytes(24).toString("base64url");
   const token = await signOAuthToken("erp-messenger-connect", { state, org: user.organization.code, uid: user.id }, MESSENGER_CONNECT_TTL_SEC);
-  const res = NextResponse.redirect(messengerConnectUrl(app, messengerRedirectUri(origin), state));
+  const res = NextResponse.redirect(messengerConnectUrl(app, messengerRedirectUri(origin), state, env.oauth.facebookMessengerLoginConfigId));
   res.cookies.set(MESSENGER_STATE_COOKIE, token, { httpOnly: true, sameSite: "lax", secure: sessionCookieSecure(process.env.NODE_ENV, origin), path: MESSENGER_CONNECT_PATH, maxAge: MESSENGER_CONNECT_TTL_SEC });
   return res;
 }
