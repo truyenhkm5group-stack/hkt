@@ -123,3 +123,4 @@
 {"at":"2026-10-06T15:19:36.931Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"pricing-billing-foundation","detail":"feat/pricing-billing-foundation @ c6d24708d32b · 1 lệnh kiểm thử"}
 {"at":"2026-10-06T15:36:31.359Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"VERIFY_PASS","mission":"messenger-app-switch","detail":"PASS 6a62afbbf6308c38c7eec35d4788649f67fc4c01 2026-10-06T15:36:29.387Z"}
 {"at":"2026-10-06T15:36:38.145Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DONE","mission":"messenger-app-switch","detail":"PR #614 gộp 6a62afbb; deploy 37483380845 thành công; verify ĐẠT"}
+{"at":"2026-10-06T15:43:49.659Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DEPLOY_DISPATCHED","detail":"5529f717e87a · run 37489937226 https://github.com/truyenhkm5group-stack/hkt/actions/runs/37489937226"}
