@@ -1,10 +1,10 @@
 {
   "name": "integration-lead",
   "holder": "DESKTOP-56TH98Y:wt-tech-lead-v2",
-  "purpose": "gộp #601 + deploy đường mới",
+  "purpose": "giao AI Sales reliability + sửa deploy",
   "acquired_at": "2026-10-06T05:55:46.697Z",
-  "heartbeat_at": "2026-10-06T08:20:36.833Z",
-  "expires_at": "2026-10-06T10:20:36.833Z",
+  "heartbeat_at": "2026-10-06T10:30:12.343Z",
+  "expires_at": "2026-10-06T14:30:12.343Z",
   "generation": 1,
   "token_hash": "fa4fd240d30f992e35a5797bf344e6d62ac745c746a5d258579f1abfba181c4f"
 }
