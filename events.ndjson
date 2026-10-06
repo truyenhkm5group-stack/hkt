@@ -196,3 +196,4 @@
 {"at":"2026-10-06T19:37:48.870Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#622 @ 798c4cff345f · review độc lập PASS @2020eb21 + 2 lỗi đã sửa @798c4cff (nhà cột trống ⇒ internal, chỉ khi trống; billingLockApplies chung cho cổng khoá + khung QR, hành vi khoá = !isHome như cũ); đọc delta bởi Lead"}
 {"at":"2026-10-06T20:14:23.848Z","actor":"DESKTOP-56TH98Y:hkt-tech-control-plane","kind":"HANDOFF","mission":"tech-control-plane-workers","detail":"feat/tech-control-plane-policy @ 2c9ba494117e · 5 lệnh kiểm thử"}
 {"at":"2026-10-06T20:15:23.782Z","actor":"DESKTOP-56TH98Y:hkt-tech-control-plane","kind":"HANDOFF","mission":"tech-control-plane-workers","detail":"feat/tech-control-plane-policy @ e24783985933 · 6 lệnh kiểm thử"}
+{"at":"2026-10-06T20:15:36.774Z","actor":"DESKTOP-56TH98Y:hkt-tech-control-plane","kind":"LEASE_RELEASED","detail":"tech-lead"}
