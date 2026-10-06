@@ -16,6 +16,8 @@ import {
   type TechRunOutcome,
 } from "@/lib/constants/tech-worker";
 import { rowsOf } from "@/lib/sql-rows";
+import { BUDGET_DEFAULTS, apiSpendAllowed } from "@/lib/constants/tech-policy";
+import { apiSpend, effectiveBudget, runningWorkerRuns } from "@/lib/tech/budget";
 import { recordTechEvent } from "@/lib/tech/control-plane";
 import { requestWorkerPullRequest } from "@/lib/tech/delivery";
 import { recordTechTaskEvent, setTechTaskStatus, type TechActor, type TechResult } from "@/lib/tech/service";
@@ -204,6 +206,8 @@ export type ClaimedTask = {
    * tiếp lên chính nhánh đó (PR tự cập nhật). `false` ⇒ nhánh mới tất định theo mã việc + lần thử.
    */
   existingBranch: boolean;
+  /** Trần thời gian một lượt (ngân sách `maxRunMinutes`, mặc định 45′) — worker dừng agent khi quá. */
+  timeoutMinutes: number;
   mission: { code: string; title: string; definitionOfDone: string } | null;
 };
 
@@ -223,6 +227,17 @@ export async function claimNextTechTask(worker: TechWorkerRow, now = new Date())
 
   const caps = (worker.capabilities as string[]).filter((c) => TECH_AUTONOMOUS_CAPABILITIES.includes(c as never));
   if (!caps.length) return { task: null, reason: "NO_CAPABILITY" };
+
+  /* ───── NGÂN SÁCH TẦNG CÔNG TY (lib/tech/budget.ts) — kiểm TRƯỚC khi giữ việc ───── */
+  const cty = await effectiveBudget(null);
+  if ((await runningWorkerRuns()) >= (cty.maxConcurrentRuns ?? BUDGET_DEFAULTS.maxConcurrentRuns)) return { task: null, reason: "COMPANY_AT_CAPACITY" };
+  if (worker.provider === "ANTHROPIC_API") {
+    // Worker trả tiền API: CHƯA KHAI trần ngày ⇒ không chạy; vượt trần ⇒ không chạy. Không bao giờ rơi sang gói khác.
+    const chiCty = await apiSpend({ now });
+    const ok = apiSpendAllowed(cty, chiCty.todayUsd, chiCty.totalUsd);
+    if (!ok.ok) return { task: null, reason: `API_BUDGET_${ok.reason}` };
+  }
+  const tranLan = cty.maxAttempts ?? 10;
   const expires = leaseExpiry(now);
   const t = schema.techTasks;
   const capSql = capabilitySql();
@@ -243,11 +258,12 @@ export async function claimNextTechTask(worker: TechWorkerRow, now = new Date())
       LEFT JOIN tech_goals g ON g.id = m.goal_id
       WHERE c.status = 'SPEC_READY'
         AND c.risk IN (${risks})
+        AND c.policy_level IN ('R0', 'R1')
         AND c.approval_status NOT IN ('PENDING', 'REJECTED')
         AND (c.mission_id IS NULL OR m.status = 'ACTIVE')
         AND (m.goal_id IS NULL OR g.status = 'ACTIVE')
         AND (c.lease_worker_id IS NULL OR c.lease_expires_at <= ${now})
-        AND c.attempts < c.max_attempts
+        AND c.attempts < LEAST(c.max_attempts, ${tranLan})
         AND (c.next_attempt_at IS NULL OR c.next_attempt_at <= ${now})
         AND ${capSql} IN (${capList})
         AND NOT EXISTS (
@@ -269,6 +285,19 @@ export async function claimNextTechTask(worker: TechWorkerRow, now = new Date())
     with: { mission: { columns: { code: true, title: true, definitionOfDone: true } } },
   });
   if (!task) return { task: null, reason: "QUEUE_EMPTY" };
+  const ngan = await effectiveBudget(task.missionId);
+  /*
+    Trần tiền API của SỨ MỆNH (và mục tiêu / dự án) chỉ biết được khi đã biết việc ⇒ kiểm SAU khi giữ, và vượt thì
+    THẢ NGAY lease vừa giữ (lần thử không bị tính — `attempts` trả lại), việc nằm nguyên hàng đợi.
+  */
+  if (worker.provider === "ANTHROPIC_API") {
+    const chi = await apiSpend({ missionId: task.missionId, now });
+    const ok = apiSpendAllowed(ngan, chi.todayUsd, chi.totalUsd);
+    if (!ok.ok) {
+      await db.update(t).set({ leaseWorkerId: null, leaseExpiresAt: null, attempts: sql`greatest(${t.attempts} - 1, 0)` }).where(and(eq(t.id, task.id), eq(t.leaseGeneration, task.leaseGeneration)));
+      return { task: null, reason: `API_BUDGET_${ok.reason}` };
+    }
+  }
   const capability = taskCapability(task);
   const tiepNhanh = capability === "ci-debug" && WORKER_BRANCH_PATTERN.test(task.branch);
   const branch = tiepNhanh ? task.branch : taskBranchName(task.code, task.attempts);
@@ -307,6 +336,7 @@ export async function claimNextTechTask(worker: TechWorkerRow, now = new Date())
       leaseExpiresAt: expires.toISOString(),
       branch,
       existingBranch: tiepNhanh,
+      timeoutMinutes: ngan.maxRunMinutes ?? BUDGET_DEFAULTS.maxRunMinutes,
       mission: task.mission ? { code: task.mission.code, title: task.mission.title, definitionOfDone: task.mission.definitionOfDone } : null,
     },
   };

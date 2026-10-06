@@ -81,6 +81,7 @@ export function testTechWorkerPure() {
     maxAttempts: 3,
     nextAttemptAt: null,
     capability: "write-docs",
+    policyLevel: "R0",
   };
   const w = { capabilities: ["write-docs"] };
   assert.deepEqual(claimBlockers(base, w, now), []);
@@ -95,6 +96,8 @@ export function testTechWorkerPure() {
     [{ attempts: 3 }, "ATTEMPTS_EXHAUSTED"],
     [{ nextAttemptAt: new Date(now.getTime() + 60_000) }, "BACKOFF"],
     [{ capability: "implement-feature" }, "CAPABILITY"],
+    [{ policyLevel: null }, "POLICY"],
+    [{ policyLevel: "R4" }, "POLICY"],
   ];
   for (const [doi, mong] of thu) assert.deepEqual(claimBlockers({ ...base, ...doi }, w, now), [mong], `${mong} phải chặn`);
   assert.deepEqual(claimBlockers({ ...base, leaseWorkerId: "x", leaseExpiresAt: new Date(now.getTime() - 1) }, w, now), [], "lease hết hạn không còn chặn");
@@ -211,7 +214,7 @@ export async function testTechWorkerDb() {
       const t = (await db.query.techTasks.findFirst({ where: eq(schema.techTasks.id, id), with: { mission: { columns: { status: true, goalId: true } } } }))!;
       const deps = (t.dependsOn as string[]).length ? (await db.select({ s: schema.techTasks.status }).from(schema.techTasks).where(inArray(schema.techTasks.id, t.dependsOn as string[]))).filter((x) => x.s !== "DONE").length : 0;
       const bl = claimBlockers(
-        { status: t.status as never, risk: t.risk as never, approvalStatus: t.approvalStatus, openDependencies: deps, missionStatus: t.mission?.status ?? null, goalStatus: "ACTIVE", leaseWorkerId: t.leaseWorkerId, leaseExpiresAt: t.leaseExpiresAt, attempts: t.attempts, maxAttempts: t.maxAttempts, nextAttemptAt: t.nextAttemptAt, capability: taskCapability(t) },
+        { status: t.status as never, risk: t.risk as never, approvalStatus: t.approvalStatus, openDependencies: deps, missionStatus: t.mission?.status ?? null, goalStatus: "ACTIVE", leaseWorkerId: t.leaseWorkerId, leaseExpiresAt: t.leaseExpiresAt, attempts: t.attempts, maxAttempts: t.maxAttempts, nextAttemptAt: t.nextAttemptAt, capability: taskCapability(t), policyLevel: t.policyLevel },
         { capabilities: ["write-docs"] },
         nowCheck,
       );

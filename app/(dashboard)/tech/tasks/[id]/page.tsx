@@ -8,6 +8,8 @@ import { TechTaskActions } from "@/app/(dashboard)/tech/tasks/[id]/task-actions"
 import { RequestFix } from "@/app/(dashboard)/tech/tasks/[id]/request-fix";
 import { RunVerdict } from "@/app/(dashboard)/tech/tasks/[id]/run-verdict";
 import { TaskMissionPicker } from "@/app/(dashboard)/tech/tasks/[id]/mission-picker";
+import { PolicyReclassify } from "@/app/(dashboard)/tech/budget-form";
+import { TECH_POLICY_LABEL, type TechPolicyLevel } from "@/lib/constants/tech-policy";
 import { listOpenTechMissionOptions } from "@/lib/queries/tech-control-plane";
 import { PageHeader } from "@/components/page-header";
 import { DescriptionList, EmptyState, SectionCard } from "@/components/ui-bits";
@@ -96,6 +98,12 @@ export default async function TechTaskDetailPage({ params }: { params: Promise<{
             Sứ mệnh {task.mission.code} · {task.mission.title}
           </Link>
         ) : null}
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2 text-xs">
+        <span className="font-semibold">{task.policyLevel ? TECH_POLICY_LABEL[task.policyLevel as TechPolicyLevel] : "Chưa xếp chính sách — máy không tự làm việc này"}</span>
+        {task.policyReasons.length ? <span className="text-muted-foreground">· {task.policyReasons.join(" · ")}</span> : null}
+        {canManage ? <PolicyReclassify taskId={task.id} /> : null}
       </div>
 
       {task.status === "NEEDS_OWNER" ? (

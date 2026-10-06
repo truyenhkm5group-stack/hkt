@@ -8023,6 +8023,12 @@ export const techTasks = pgTable(
     /** Lùi dần: chưa tới mốc này thì không worker nào nhận lại. */
     nextAttemptAt: ts("next_attempt_at"),
     lastError: text("last_error").notNull().default(""),
+    /**
+     * Mức chính sách R0–R4 (0227, `classifyTechPolicy`) — tính lúc GHI (tạo việc, đè rủi ro). `NULL` = CHƯA XẾP ⇒
+     * không bao giờ tự động (đóng khi thiếu); dòng cũ không backfill, người bấm "Xếp lại chính sách".
+     */
+    policyLevel: text("policy_level"),
+    policyReasons: jsonb("policy_reasons").$type<string[]>().notNull().default([]),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
@@ -8034,6 +8040,7 @@ export const techTasks = pgTable(
     index("tech_tasks_lease_idx").on(t.leaseExpiresAt).where(sql`${t.leaseWorkerId} IS NOT NULL`),
     check("tech_tasks_lease_pair_check", sql`(${t.leaseWorkerId} IS NULL) = (${t.leaseExpiresAt} IS NULL)`),
     check("tech_tasks_attempts_check", sql`${t.attempts} >= 0 AND ${t.maxAttempts} BETWEEN 1 AND 10 AND ${t.leaseGeneration} >= 0`),
+    check("tech_tasks_policy_check", sql`${t.policyLevel} IS NULL OR ${t.policyLevel} IN ('R0','R1','R2','R3','R4')`),
     index("tech_tasks_status_idx").on(t.status, t.priority),
     index("tech_tasks_created_idx").on(t.createdAt),
     index("tech_tasks_agent_idx").on(t.agentId),
@@ -8654,7 +8661,7 @@ export const techEvents = pgTable(
     index("tech_events_occurred_idx").on(t.occurredAt),
     index("tech_events_mission_idx").on(t.missionId, t.occurredAt),
     check("tech_events_name_check", sql`${t.name} ~ '^[a-z_]+(\\.[a-z_]+)+$'`),
-    check("tech_events_subject_check", sql`${t.subjectType} IN ('GOAL','MISSION','TASK','WORKER','RUN','DEPLOYMENT','INCIDENT')`),
+    check("tech_events_subject_check", sql`${t.subjectType} IN ('GOAL','MISSION','TASK','WORKER','RUN','DEPLOYMENT','INCIDENT','BUDGET')`),
     check("tech_events_actor_kind_check", sql`${t.actorKind} IN ('HUMAN','SYSTEM','AI_AGENT')`),
     check("tech_events_human_link_check", sql`${t.actorKind} = 'HUMAN' OR ${t.actorId} IS NULL`),
     check("tech_events_agent_link_check", sql`${t.actorKind} = 'AI_AGENT' OR ${t.actorAgentId} IS NULL`),
@@ -8711,6 +8718,39 @@ export const techRunLogs = pgTable(
     uniqueIndex("tech_run_logs_run_seq_uq").on(t.runId, t.seq),
     check("tech_run_logs_level_check", sql`${t.level} IN ('info','warn','error')`),
     check("tech_run_logs_line_check", sql`length(${t.line}) <= 2000`),
+  ],
+);
+
+/**
+ * NGÂN SÁCH THEO PHẠM VI (0227). Một dòng mỗi (phạm vi, id); ô `NULL` = CHƯA KHAI. Tầng hẹp đè tầng rộng TỪNG Ô
+ * (`resolveBudget`). Tiền API CHƯA KHAI trần ngày ⇒ worker API không chạy (đóng khi thiếu).
+ */
+export const techBudgets = pgTable(
+  "tech_budgets",
+  {
+    id: id(),
+    /** `TECH_BUDGET_SCOPES`: COMPANY · PROJECT · GOAL · MISSION. */
+    scopeKind: text("scope_kind").notNull(),
+    /** Rỗng cho COMPANY. */
+    scopeId: text("scope_id").notNull().default(""),
+    apiUsdDaily: doublePrecision("api_usd_daily"),
+    apiUsdTotal: doublePrecision("api_usd_total"),
+    maxRunMinutes: integer("max_run_minutes"),
+    maxAttempts: integer("max_attempts"),
+    maxConcurrentRuns: integer("max_concurrent_runs"),
+    note: text("note").notNull().default(""),
+    updatedById: text("updated_by_id").references(() => users.id, { onDelete: "set null" }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex("tech_budgets_scope_uq").on(t.scopeKind, t.scopeId),
+    check("tech_budgets_scope_check", sql`${t.scopeKind} IN ('COMPANY','PROJECT','GOAL','MISSION')`),
+    check("tech_budgets_company_check", sql`(${t.scopeKind} = 'COMPANY') = (${t.scopeId} = '')`),
+    check(
+      "tech_budgets_values_check",
+      sql`(${t.apiUsdDaily} IS NULL OR ${t.apiUsdDaily} >= 0) AND (${t.apiUsdTotal} IS NULL OR ${t.apiUsdTotal} >= 0) AND (${t.maxRunMinutes} IS NULL OR ${t.maxRunMinutes} BETWEEN 5 AND 240) AND (${t.maxAttempts} IS NULL OR ${t.maxAttempts} BETWEEN 1 AND 10) AND (${t.maxConcurrentRuns} IS NULL OR ${t.maxConcurrentRuns} BETWEEN 1 AND 16)`,
+    ),
   ],
 );
 
@@ -8786,6 +8826,7 @@ export type TechMissionRow = typeof techMissions.$inferSelect;
 export type TechEventRow = typeof techEvents.$inferSelect;
 export type TechWorkerDbRow = typeof techWorkers.$inferSelect;
 export type TechRunLogRow = typeof techRunLogs.$inferSelect;
+export type TechBudgetRow = typeof techBudgets.$inferSelect;
 
 export const techRunLogsRelations = relations(techRunLogs, ({ one }) => ({
   run: one(techAgentRuns, { fields: [techRunLogs.runId], references: [techAgentRuns.id] }),

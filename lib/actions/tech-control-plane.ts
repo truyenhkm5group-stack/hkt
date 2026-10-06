@@ -7,7 +7,9 @@ import { can, requireUser } from "@/lib/auth/session";
 import { TECH_PRIORITIES } from "@/lib/constants/tech";
 import { TECH_GOAL_STATUSES, TECH_MISSION_STATUSES } from "@/lib/constants/tech-control-plane";
 import { attachTechTaskToMission, createTechGoal, createTechMission, seedTechProjects, setTechGoalStatus, setTechMissionStatus } from "@/lib/tech/control-plane";
-import type { TechActor, TechResult } from "@/lib/tech/service";
+import { reclassifyTechTaskPolicy, type TechActor, type TechResult } from "@/lib/tech/service";
+import { TECH_BUDGET_SCOPES } from "@/lib/constants/tech-policy";
+import { setTechBudget } from "@/lib/tech/budget";
 import { TECH_QUEUE_PROVIDERS, type TechExecutionProvider } from "@/lib/constants/tech-worker";
 import { reapExpiredTechLeases, registerTechWorker, setTechWorkerEnabled } from "@/lib/tech/worker-service";
 
@@ -202,4 +204,44 @@ export async function reapTechLeasesAction(): Promise<TechResult<{ reaped: numbe
   lamMoi();
   revalidatePath("/tech/workers");
   return { ok: true, reaped: r.reaped };
+}
+
+/* ═════════════════════ CHÍNH SÁCH & NGÂN SÁCH (Pha 4) ═════════════════════ */
+
+const soHoacNull = z.number().finite().nullable().optional();
+const budgetSchema = z.object({
+  scopeKind: z.enum(TECH_BUDGET_SCOPES),
+  scopeId: z.string().trim().max(60).nullish(),
+  apiUsdDaily: soHoacNull,
+  apiUsdTotal: soHoacNull,
+  maxRunMinutes: z.number().int().nullable().optional(),
+  maxAttempts: z.number().int().nullable().optional(),
+  maxConcurrentRuns: z.number().int().nullable().optional(),
+  note: z.string().trim().max(500).optional(),
+});
+
+/** Đặt trần một phạm vi. Ô bỏ trống = CHƯA KHAI (tiền API chưa khai ⇒ worker API không chạy). */
+export async function setTechBudgetAction(input: unknown): Promise<TechResult> {
+  const user = await nguoiQuanTri();
+  if (!user) return { error: KHONG_QUYEN };
+  const p = parse(budgetSchema, input);
+  if ("error" in p) return p;
+  const res = await setTechBudget(p.data, actorOf(user));
+  if ("error" in res) return res;
+  await audit({ userId: user.id, userEmail: user.email, action: "TECH_BUDGET_SET", entity: "TECH_BUDGET", entityId: `${p.data.scopeKind}:${p.data.scopeId ?? ""}`, after: p.data, reason: p.data.note });
+  revalidatePath("/tech/workers");
+  lamMoi({ missionId: p.data.scopeKind === "MISSION" ? p.data.scopeId : null, goalId: p.data.scopeKind === "GOAL" ? p.data.scopeId : null });
+  return { ok: true };
+}
+
+export async function reclassifyTechTaskPolicyAction(input: unknown): Promise<TechResult<{ level: string }>> {
+  const user = await nguoiQuanTri();
+  if (!user) return { error: KHONG_QUYEN };
+  const p = parse(z.object({ taskId: z.string().min(1) }), input);
+  if ("error" in p) return p;
+  const res = await reclassifyTechTaskPolicy(p.data, actorOf(user));
+  if ("error" in res) return res;
+  await audit({ userId: user.id, userEmail: user.email, action: "TECH_TASK_POLICY", entity: "TECH_TASK", entityId: p.data.taskId, after: { policyLevel: res.level } });
+  lamMoi({ taskId: p.data.taskId });
+  return res;
 }

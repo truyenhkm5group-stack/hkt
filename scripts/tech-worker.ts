@@ -54,6 +54,7 @@ type Claimed = {
   branch: string;
   /** Việc sửa CI: làm tiếp trên nhánh của PR đang mở thay vì mở nhánh mới. */
   existingBranch: boolean;
+  timeoutMinutes: number;
   mission: { code: string; title: string; definitionOfDone: string } | null;
 };
 
@@ -150,7 +151,8 @@ async function execute(adapter: ExecutionAdapter, provider: TechExecutionProvide
     const res = await adapter.run({
       prompt: buildAgentPrompt(t),
       cwd: dir,
-      timeoutMs: cfg.timeoutMin * 60_000,
+      // Trần do máy chủ cấp (ngân sách); biến môi trường chỉ được HẠ thêm, không nới.
+      timeoutMs: Math.min(cfg.timeoutMin, t.timeoutMinutes || cfg.timeoutMin) * 60_000,
       allowedTools: toolAllowlist(),
       maxTurns: 80,
       onLog: push,

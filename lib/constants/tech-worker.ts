@@ -125,7 +125,8 @@ export type ClaimBlocker =
   | "LEASED"
   | "ATTEMPTS_EXHAUSTED"
   | "BACKOFF"
-  | "CAPABILITY";
+  | "CAPABILITY"
+  | "POLICY";
 
 export const CLAIM_BLOCKER_LABEL: Record<ClaimBlocker, string> = {
   STATUS: "Việc chưa ở “Đã có đặc tả” — chưa sẵn sàng cho worker",
@@ -138,6 +139,7 @@ export const CLAIM_BLOCKER_LABEL: Record<ClaimBlocker, string> = {
   ATTEMPTS_EXHAUSTED: "Đã hết số lần thử",
   BACKOFF: "Đang đợi lùi dần trước lần thử kế tiếp",
   CAPABILITY: "Worker không có năng lực việc này cần",
+  POLICY: "Chính sách R2–R4 hoặc chưa xếp chính sách — máy không tự làm",
 };
 
 export type ClaimCandidate = {
@@ -153,6 +155,8 @@ export type ClaimCandidate = {
   maxAttempts: number;
   nextAttemptAt: Date | null;
   capability: string;
+  /** `tech_tasks.policy_level`. `null` = CHƯA XẾP ⇒ không tự động (đóng khi thiếu). */
+  policyLevel: string | null;
 };
 
 /**
@@ -174,6 +178,7 @@ export function claimBlockers(t: ClaimCandidate, worker: { capabilities: readonl
   if (t.attempts >= t.maxAttempts) out.push("ATTEMPTS_EXHAUSTED");
   if (t.nextAttemptAt && t.nextAttemptAt.getTime() > now.getTime()) out.push("BACKOFF");
   if (!worker.capabilities.includes(t.capability)) out.push("CAPABILITY");
+  if (t.policyLevel !== "R0" && t.policyLevel !== "R1") out.push("POLICY");
   return out;
 }
 

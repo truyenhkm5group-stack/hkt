@@ -276,3 +276,26 @@ Thay đổi so với Nấc 4 cũ ("máy không bao giờ tự đặt READY_TO_DE
 `task-advance` (đẩy theo PR). Đường giao hàng là đường KHÁC: nó không quyết deploy, chỉ ghi lại một lượt deploy ĐÃ
 xảy ra và đã đối chiếu commit; `DONE` chỉ sau khi bằng chứng xác minh được ghi (cùng cổng `setTechTaskStatus`).
 Việc vào OBSERVING bằng tay (không có sự kiện `deploy.reached`) máy KHÔNG đụng.
+
+## 11. Pha 4 — chính sách R0–R4 · ngân sách · watchdog (đã dựng)
+
+- **Chính sách** (`lib/constants/tech-policy.ts::classifyTechPolicy`): dẫn xuất từ máy xếp rủi ro + loại việc + từ khoá
+  nguy hiểm; chỉ NÂNG, mọi lần nâng có lý do. Lưu `tech_tasks.policy_level` lúc GHI (tạo việc, đè rủi ro, nút
+  "Xếp lại chính sách"). `NULL` (việc trước 0227) = không tự động — đóng khi thiếu, không backfill ngầm. Worker chỉ
+  nhận R0/R1 (SQL + `claimBlockers` cùng luật); R3/R4 bật cổng duyệt người; R4 = luật SECRETS · ACCESS · DATA_FIX ·
+  SCHEDULER, loại SECURITY / DATA_FIX, hoặc nhắc xoá dữ liệu / DNS / thanh toán / lách cổng / mật khẩu / OAuth.
+- **Ngân sách** (`tech_budgets`, `lib/tech/budget.ts`): công ty → dự án → mục tiêu → sứ mệnh, tầng hẹp đè TỪNG Ô; ô
+  trống = chưa khai. Tiền API chưa khai trần ngày ⇒ worker API không chạy; chạm trần ngày / tổng ⇒ dừng; trần
+  đồng thời cấp công ty; trần phút / lượt gửi xuống worker (biến môi trường chỉ được hạ thêm). Tiền API đếm từ sổ
+  lượt chạy (`billing = API`); ước tính của gói thuê bao in riêng, KHÔNG cộng vào tiền API.
+- **Watchdog** (`lib/tech/watchdog.ts`, trong `task-advance-watch` — không thêm lịch): thu hồi lease hết hạn, ghi
+  `worker.lost` khi worker giữ việc mà mất nhịp tim, `budget.warning` (≥ 80%) / `budget.exceeded` (chạm trần) —
+  mỗi sự việc MỘT dòng (khoá chống trùng). Vòng thử vô hạn không tồn tại: `max_attempts` · `CI_FIX_MAX` · trần tiền.
+
+## 12. Pha 5 — buồng lái trên `/tech` (đã dựng)
+
+`lib/queries/tech-cockpit.ts` + `app/(dashboard)/tech/cockpit.tsx`, đứng đầu trang `/tech`, lưới 2 cột trên điện thoại:
+Cần bạn · Đang chạy (worker sống) · Đang chờ (sẵn sàng / tồn đọng) · Đường giao hàng · Bị chặn · Thất bại · Pull
+request (CI đỏ · xanh chờ duyệt) · Chi API hôm nay (trần, tháng). Dưới đó: mỗi lượt đang chạy với việc · năng lực ·
+worker · provider · model · thời gian chạy · nhịp tim · bước · % · PR/nhánh · 5 dòng nhật ký cuối. Tab mới:
+Cần chủ shop · Mục tiêu · Sứ mệnh · Worker (ngân sách công ty ở trang Worker, ngân sách sứ mệnh ở trang sứ mệnh).

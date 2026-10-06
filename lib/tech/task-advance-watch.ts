@@ -4,6 +4,7 @@ import { shouldAdvanceTask, type TaskPrState } from "@/lib/constants/task-advanc
 import { type TechTaskStatus } from "@/lib/constants/tech";
 import { runSyncJob, type SyncTrigger } from "@/lib/sync/runner";
 import { runDeliveryWatch } from "@/lib/tech/delivery";
+import { runTechWatchdog } from "@/lib/tech/watchdog";
 import { setTechTaskStatus } from "@/lib/tech/service";
 
 /**
@@ -130,6 +131,10 @@ export async function runTaskAdvanceWatch(opts: { trigger: SyncTrigger; actor: s
     const g = await runDeliveryWatch();
     ctx.log(`Giao hàng: xét ${g.deploy.considered} việc đã gộp, ${g.deploy.advanced} đã lên production; hậu kiểm ${g.verify.considered} việc: ${g.verify.passed} ĐẠT, ${g.verify.incident} có sự cố, ${g.verify.waiting} đang quan sát.`);
     if (g.deploy.errors) ctx.summary.warning = `${ctx.summary.warning ? `${ctx.summary.warning} · ` : ""}${g.deploy.errors} việc không đối chiếu được với GitHub`;
-    return { ...r, giaoHang: g };
+    // WATCHDOG (docs mục 11): thu hồi lease hết hạn · worker mất nhịp tim · chi API chạm trần — cùng job, không thêm lịch.
+    const w = await runTechWatchdog().catch(() => null);
+    if (w) ctx.log(`Watchdog: thả ${w.reaped} việc lease hết hạn · ${w.lostWorkers} worker mất liên lạc · chi API ${w.apiAlert ?? "chưa khai trần"}.`);
+    if (w?.apiAlert === "EXCEEDED") ctx.summary.warning = `${ctx.summary.warning ? `${ctx.summary.warning} · ` : ""}chi API chạm trần ngày — worker API đã dừng`;
+    return { ...r, giaoHang: g, watchdog: w };
   });
 }

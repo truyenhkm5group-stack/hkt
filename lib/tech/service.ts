@@ -26,6 +26,7 @@ import {
   type TechTaskType,
 } from "@/lib/constants/tech";
 import { classifyTechRisk } from "@/lib/constants/tech-risk";
+import { classifyTechPolicy, policyRequiresApproval } from "@/lib/constants/tech-policy";
 
 /**
  * ═══════════ DỊCH VỤ CỦA PHÒNG TECH — MỘT ĐƯỜNG GHI DUY NHẤT ═══════════
@@ -177,7 +178,9 @@ export async function createTechTask(input: CreateTechTaskInput, actor: TechActo
   }
 
   const risk = dat?.risk ?? mayXep.risk;
-  const approvalRequired = risk === "R2";
+  // Chính sách R0–R4 (`lib/constants/tech-policy.ts`): R3/R4 cũng phải có người duyệt — cùng cổng `approval_required`.
+  const chinhSach = classifyTechPolicy({ risk, riskRules: dat ? [] : mayXep.rules, taskType: input.taskType, title, description: input.description });
+  const approvalRequired = risk === "R2" || policyRequiresApproval(chinhSach.level);
   const db = await getDb();
 
   let missionId: string | null = input.missionId || null;
@@ -221,6 +224,8 @@ export async function createTechTask(input: CreateTechTaskInput, actor: TechActo
           projectId,
           approvalRequired,
           approvalStatus: approvalRequired ? "PENDING" : "NOT_REQUIRED",
+          policyLevel: chinhSach.level,
+          policyReasons: chinhSach.reasons,
           createdByKind: actor.kind,
           createdById: actor.kind === "HUMAN" ? (actor.id ?? null) : null,
           createdByName: actor.name,
@@ -414,10 +419,14 @@ export async function overrideTechTaskRisk(input: { taskId: string; risk: TechRi
   if (!task) return { error: "Không tìm thấy việc này." };
   if (task.risk === input.risk) return { ok: true };
 
-  const canDuyet = input.risk === "R2";
+  // Luật khớp của máy bị bỏ khi người đè, nhưng loại việc / từ khoá nguy hiểm vẫn đẩy chính sách lên (chỉ NÂNG).
+  const chinhSach = classifyTechPolicy({ risk: input.risk, riskRules: [], taskType: task.taskType, title: task.title, description: task.description });
+  const canDuyet = input.risk === "R2" || policyRequiresApproval(chinhSach.level);
   await db
     .update(schema.techTasks)
     .set({
+      policyLevel: chinhSach.level,
+      policyReasons: chinhSach.reasons,
       risk: input.risk,
       riskRules: [],
       riskOverriddenBy: actor.id ?? null,
@@ -1007,4 +1016,23 @@ export async function lastRunOfAgent(agentId: string) {
     orderBy: [desc(schema.techAgentRuns.startedAt)],
   });
   return row ?? null;
+}
+
+/**
+ * XẾP LẠI CHÍNH SÁCH cho việc chưa có mức (việc trước 0227) hoặc khi người muốn máy xếp lại. Chỉ NÂNG cổng duyệt:
+ * mức mới cần duyệt mà việc chưa cần ⇒ bật `PENDING`; không bao giờ tự gỡ một yêu cầu duyệt đang có.
+ */
+export async function reclassifyTechTaskPolicy(input: { taskId: string }, actor: TechActor): Promise<TechResult<{ level: string }>> {
+  if (actor.kind !== "HUMAN") return { error: "Chỉ NGƯỜI bấm xếp lại chính sách." };
+  const db = await getDb();
+  const task = await db.query.techTasks.findFirst({ where: eq(schema.techTasks.id, input.taskId) });
+  if (!task) return { error: "Không tìm thấy việc này." };
+  const v = classifyTechPolicy({ risk: task.risk as TechRisk, riskRules: task.riskRules, taskType: task.taskType, title: task.title, description: task.description });
+  const batDuyet = policyRequiresApproval(v.level) && !task.approvalRequired;
+  await db
+    .update(schema.techTasks)
+    .set({ policyLevel: v.level, policyReasons: v.reasons, ...(batDuyet ? { approvalRequired: true, approvalStatus: "PENDING" } : {}) })
+    .where(eq(schema.techTasks.id, task.id));
+  await ghiSuKien(db, { taskId: task.id, kind: "RISK", note: `Chính sách ${v.level}: ${v.reasons.join(" · ")}`, previousValue: task.policyLevel ?? "", nextValue: v.level, payload: { policy: v, approvalTurnedOn: batDuyet } }, actor);
+  return { ok: true, level: v.level };
 }

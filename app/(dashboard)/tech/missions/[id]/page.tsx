@@ -13,6 +13,8 @@ import { TECH_OWNER_ESCALATION_LABEL, type TechOwnerEscalation, type TechPriorit
 import type { TechMissionStatus } from "@/lib/constants/tech-control-plane";
 import { formatDateTime, formatTimeAgo } from "@/lib/format";
 import { getTechMission } from "@/lib/queries/tech-control-plane";
+import { BudgetForm } from "@/app/(dashboard)/tech/budget-form";
+import { getBudgetRow } from "@/lib/tech/budget";
 
 export const metadata = { title: "Sứ mệnh · Phòng Tech AI" };
 
@@ -20,7 +22,7 @@ export default async function TechMissionPage({ params }: { params: Promise<{ id
   const { id } = await params;
   const user = await requirePermission("tech:view");
   const canManage = can(user, "tech:manage");
-  const data = await getTechMission(id);
+  const [data, nganSuMenh] = await Promise.all([getTechMission(id), getBudgetRow("MISSION", id)]);
   if (!data) notFound();
   const { mission, tasks, execution, events } = data;
   const open = mission.status !== "DONE" && mission.status !== "CANCELLED";
@@ -96,6 +98,11 @@ export default async function TechMissionPage({ params }: { params: Promise<{ id
           {canManage ? (
             <SectionCard title="Quyết định">
               <PlanStatusControls kind="mission" id={mission.id} status={mission.status as TechMissionStatus} />
+            </SectionCard>
+          ) : null}
+          {canManage ? (
+            <SectionCard title="Ngân sách sứ mệnh" description="Ô trống = theo tầng rộng hơn (mục tiêu · dự án · công ty).">
+              <BudgetForm scopeKind="MISSION" scopeId={mission.id} current={nganSuMenh} fields={["apiUsdDaily", "apiUsdTotal", "maxRunMinutes", "maxAttempts"]} />
             </SectionCard>
           ) : null}
           <SectionCard title="Nội dung">

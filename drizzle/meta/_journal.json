@@ -1583,6 +1583,13 @@
       "when": 1791350061000,
       "tag": "0226_tech_workers",
       "breakpoints": true
+    },
+    {
+      "idx": 227,
+      "version": "7",
+      "when": 1791350062000,
+      "tag": "0227_tech_policy_budget",
+      "breakpoints": true
     }
   ]
 }

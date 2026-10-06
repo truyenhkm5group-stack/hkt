@@ -9,6 +9,8 @@ import { TECH_EXECUTION_PROVIDER_LABEL, TECH_PROVIDER_BILLING, WORKER_LIVENESS_L
 import { env } from "@/lib/env";
 import { formatDateTime, formatTimeAgo } from "@/lib/format";
 import { listTechWorkers, recentWorkerRuns } from "@/lib/queries/tech-control-plane";
+import { BudgetForm } from "@/app/(dashboard)/tech/budget-form";
+import { getBudgetRow } from "@/lib/tech/budget";
 import { cn } from "@/lib/utils";
 
 export const metadata = { title: "Worker · Phòng Tech AI" };
@@ -32,7 +34,7 @@ function tien(meta: unknown): string {
 export default async function TechWorkersPage() {
   const user = await requirePermission("tech:view");
   const canManage = can(user, "tech:manage");
-  const [workers, runs] = await Promise.all([listTechWorkers(), recentWorkerRuns(20, 30)]);
+  const [workers, runs, nganCty] = await Promise.all([listTechWorkers(), recentWorkerRuns(20, 30), getBudgetRow("COMPANY", "")]);
 
   return (
     <div className="space-y-5">
@@ -104,6 +106,17 @@ export default async function TechWorkersPage() {
           ))}
         </div>
       )}
+
+      <SectionCard
+        title="Ngân sách & giới hạn — cấp công ty"
+        description="Ô trống = chưa khai. Tiền API chưa khai trần ngày ⇒ worker API KHÔNG chạy. Sứ mệnh có thể khai trần riêng (đè từng ô)."
+      >
+        {canManage ? (
+          <BudgetForm scopeKind="COMPANY" current={nganCty} />
+        ) : (
+          <p className="text-sm text-muted-foreground">Trần chi API / ngày: {nganCty?.apiUsdDaily ?? "chưa khai"}</p>
+        )}
+      </SectionCard>
 
       <SectionCard title="Lượt chạy gần đây" description="20 lượt cuối của worker hàng đợi · 30 dòng nhật ký cuối mỗi lượt">
         {runs.length === 0 ? (
