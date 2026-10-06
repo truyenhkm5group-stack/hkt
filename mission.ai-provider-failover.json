@@ -3,7 +3,7 @@
   "mission_id": "ai-provider-failover",
   "title": "AI Sales failover: primary → secondary → người, circuit breaker, cấu hình theo tenant, kill switch",
   "business_goal": "",
-  "status": "RUNNING",
+  "status": "PR_READY",
   "priority": "P0",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -27,7 +27,22 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-06T10:00:15.751Z",
-  "updated_at": "2026-10-06T10:00:15.751Z",
-  "last_heartbeat": "2026-10-06T10:00:15.751Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-06T10:57:00.122Z",
+  "last_heartbeat": "2026-10-06T10:57:00.122Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "feat/ai-provider-failover",
+    "sha": "1cb67f3fec48f1ea308216c1c3487e9a182f4806",
+    "at": "2026-10-06T10:57:00.122Z",
+    "actor": "DESKTOP-56TH98Y:wt-ai-failover",
+    "title": "AI Sales failover: primary → secondary → người, circuit breaker, cấu hình theo tenant, kill switch",
+    "summary": "Khoá AI chính → khoá dự phòng → người cho chatbot bán hàng. FailoverProvider chuyển ở mức một lời gọi model (không gửi trùng), chỉ lớp lỗi nhà cung cấp (CREDIT/AUTH/MODEL_UNAVAILABLE/RATE_LIMIT/SERVER_ERROR/TIMEOUT); ngắt mạch theo (tổ chức, khoá) lưu settings ai.salesChatbot.providerHealth, nửa mở tự quay về; cấu hình fallbackConnectorKey/fallbackModel/failoverEnabled/failoverOpenMinutes, mặc định không dự phòng = hành vi cũ. Sổ AI: dòng ERROR cho khoá chính hỏng + provider '<tên>+failover' cho lượt khoá dự phòng trả lời. Không migration.",
+    "tests": [
+      "npm run typecheck: sạch",
+      "npm run lint: sạch",
+      "npm test (sau commit): TẤT CẢ KIỂM THỬ ĐẠT, 708 dòng ✓",
+      "npm run build: đạt",
+      "đột biến: chuyển cả lỗi 400 ⇒ đỏ; bỏ qua mạch mở ⇒ đỏ"
+    ]
+  }
 }
