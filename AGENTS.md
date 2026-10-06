@@ -775,7 +775,8 @@ Chủ shop giao MỌI việc phát triển qua MỘT cửa: skill `/lead` (Tech 
 - **Sổ chung (nhánh `ai-control/registry`) là trạng thái điều phối bền; git/GitHub thắng sổ.** Không sửa tay
   nhánh đó; `board` in mọi chỗ sổ nói khác git — tin git, rồi cập nhật sổ.
 - **Worker không tự gộp, không tự deploy.** Chỉ phiên cầm khoá `integration-lead` (`npm run ai -- lease acquire
-  integration-lead`) được gộp PR và dispatch deploy, theo `queue` (lô rủi ro thấp · HIGH đi riêng) và
+  integration-lead`, trình mã phiên bằng `--token`) được gộp PR và dispatch deploy, theo `queue` (lô rủi ro thấp ·
+  HIGH đi riêng — HIGH chỉ gộp khi sổ có `review <PR> --sha=<đầu nhánh>` ĐẠT cho đúng SHA hiện tại) và
   `deploy-plan` (một lượt cho cả lô, không chồng, không khi main đỏ). Khoá hết hạn = nhả; tiếp quản để lại
   dấu vết.
 - **DONE chỉ sau hậu kiểm production.** Workflow deploy xanh chưa phải DONE: `verify --record` phải ĐẠT (SHA ·

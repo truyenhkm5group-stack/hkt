@@ -105,6 +105,8 @@ export function testHangRaoTuyetDoi() {
     "tests/department-map.test.ts",
     "tests/test-hygiene.test.ts",
     "tests/agent-scopes.test.ts",
+    /* Bài khoá đường giao hàng (AGENTS.md mục 10.1) — agent sửa được nó là tự mở đường deploy không qua cổng. */
+    "tests/delivery-v2.test.ts",
     /* Sàn của bánh cóc đăng ký bài kiểm — agent hạ được sàn thì bánh cóc không còn là bánh cóc. */
     "lib/constants/agent-test-registry.ts",
     /* Sổ chứng từ số đo production — xem `testVungSoDoChiDocDuoc` ngay dưới. */

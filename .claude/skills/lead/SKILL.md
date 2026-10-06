@@ -16,9 +16,12 @@ node "<scratchpad>/ai-tech.ts" board --github                            # SỰ 
 node "<scratchpad>/ai-tech.ts" lease acquire tech-lead --purpose="Tech Lead"
 ```
 
-Khoá `tech-lead` đang thuộc phiên khác còn hạn ⇒ phiên kia đang là Tech Lead: chỉ đọc và báo chủ
-shop, không ghi sổ, không gộp, không deploy. Khoá của chính cây này (cùng nhãn máy:cây) ⇒ bạn đang
-phục hồi — nhận lại và làm tiếp từ `board`. Không bao giờ tin trí nhớ của cuộc trò chuyện hơn `board`.
+Lấy khoá in ra một **mã phiên** — giữ nó trong cuộc trò chuyện và trình bằng `--token=…` cho mọi
+`renew` / `release` / `deploy-plan`. Khoá đang thuộc phiên khác còn hạn ⇒ phiên kia đang là Tech Lead:
+chỉ đọc và báo chủ shop, không ghi sổ, không gộp, không deploy. Bị từ chối vì "cùng nhãn nhưng KHÔNG
+đúng mã phiên" ⇒ hoặc một phiên khác đang đứng trong CÙNG cây (dừng — AGENTS.md mục 9), hoặc chính
+bạn sau sập: khi CHẮC phiên cũ đã chết, `lease acquire … --resume` (đọc mã đã lưu cạnh cây), không
+thì chờ khoá hết hạn. Không bao giờ tin trí nhớ của cuộc trò chuyện hơn `board`.
 
 ## 1. Hiểu lệnh của chủ shop → thao tác (không bắt chủ shop nói bằng thuật ngữ)
 
@@ -51,8 +54,9 @@ phục hồi — nhận lại và làm tiếp từ `board`. Không bao giờ tin
 ## 3. Worker
 
 Worker (subagent `ai-tech-worker`, mỗi worker một cây) KHÔNG mở PR, KHÔNG gộp, KHÔNG deploy, KHÔNG
-sửa `.ai/` hay sổ điều khiển. Rủi ro ≥ HIGH ⇒ một lượt `ai-tech-reviewer` (bối cảnh mới); ĐẠT thì ghi
-dòng `Review độc lập: ĐẠT` vào thân PR — hàng đợi gộp đọc dòng đó.
+sửa `.ai/` hay sổ điều khiển. Rủi ro ≥ HIGH ⇒ một lượt `ai-tech-reviewer` (bối cảnh mới) trên ĐÚNG đầu
+nhánh; sửa hết phát hiện, rồi ghi dấu vào sổ: `review <PR> --sha=<đầu nhánh đã review> --verdict=PASS`.
+Hàng đợi chỉ nhận dấu khớp SHA hiện tại của PR — đẩy thêm commit là phải review lại.
 
 ## 4. Gộp và deploy — chỉ khi đang cầm khoá Integration Lead
 
@@ -60,11 +64,11 @@ dòng `Review độc lập: ĐẠT` vào thân PR — hàng đợi gộp đọc 
 node "<scratchpad>/ai-tech.ts" lease acquire integration-lead --purpose="gộp + deploy lô <…>"
 node "<scratchpad>/ai-tech.ts" queue            # MERGE_NOW (một lô) · MERGE_ISOLATED (HIGH đi riêng) · chờ gì, vì sao
 … gộp đúng các PR MERGE_NOW (squash, kèm sha đầu nhánh, chỉ khi mergeable_state=clean, gates xanh) …
-node "<scratchpad>/ai-tech.ts" deploy-plan      # DEPLOY / WAIT_DEPLOY / FIX_MAIN / NEED_LEASE — làm đúng thứ nó nói
+node "<scratchpad>/ai-tech.ts" deploy-plan --token=<mã phiên>   # DEPLOY / WAIT_DEPLOY / FIX_MAIN / NEED_LEASE
 … DEPLOY ⇒ dispatch "Deploy ERP to VPS" trên main MỘT lần, bám run id > BEFORE (không dispatch chồng) …
 node "<scratchpad>/ai-tech.ts" verify --sha=<sha> --record --mission=<sứ-mệnh>
 node "<scratchpad>/ai-tech.ts" close <sứ-mệnh> --status=DONE --evidence="PR #… · deploy … · verify ĐẠT"
-node "<scratchpad>/ai-tech.ts" lease release integration-lead
+node "<scratchpad>/ai-tech.ts" lease release integration-lead --token=<mã phiên>
 ```
 
 - Lượt deploy KHÔNG chạy lại cổng nếu lượt CI của đúng SHA trên `main` đã xanh (job `bang_chung`);

@@ -26,6 +26,7 @@ import {
   planDeploy,
   readControl,
   realDir,
+  reviewedAt,
   reconcileEntry,
   validateEntry,
   verifyVerdict,
@@ -176,6 +177,8 @@ function testDeployDungLaiBangChung() {
   for (const dk of ['.head_sha == $sha', '.event == "push"', '.head_branch == "main"', '.path == ".github/workflows/ci.yml"', '.status == "completed"', '.conclusion == "success"'])
     assert.ok(filter.includes(dk), `bằng chứng phải lọc ${dk}`);
   assert.match(bc, /if \[ "\$REF" != "refs\/heads\/main" \]/, "deploy không từ main ⇒ không dùng lại bằng chứng của main");
+  assert.ok(bc.includes('echo "sha=$ok_sha"') && !bc.includes('echo "sha=$SHA"'), "SHA xuất ra đọc từ chính lượt CI được chọn (.head_sha), không chép lại đầu vào");
+  assert.match(bc, /if \[ -n "\$ok" \] && \[ "\$ok_sha" = "\$SHA" \]; then/, "và phải trùng SHA đang triển khai mới được dùng lại");
   assert.match(d, /GATES_SHA: \$\{\{ needs\.gates\.result == 'success' && needs\.gates\.outputs\.sha \|\| needs\.bang_chung\.outputs\.sha \}\}/, "bước ba SHA so SHA của cổng vừa chạy, hoặc của bằng chứng");
 
   const ci = doc(".github/workflows/ci.yml");
@@ -220,19 +223,26 @@ function entry(id: string, over: Partial<RegistryEntry> = {}): RegistryEntry {
 
 function testKhoa() {
   const ttl = 60 * 60_000;
-  const me = { name: "integration-lead" as const, holder: "may:wt-a", purpose: "gộp lô" };
+  const H1 = "1".repeat(64);
+  const H2 = "2".repeat(64);
+  const me = { name: "integration-lead" as const, holder: "may:wt-a", purpose: "gộp lô", tokenHash: null, freshTokenHash: H1 };
   const a = leaseDecision(null, "acquire", me, now, ttl);
-  assert.ok(a.ok && a.next?.holder === "may:wt-a" && a.next.generation === 1, "khoá trống ⇒ lấy được");
+  assert.ok(a.ok && a.next?.holder === "may:wt-a" && a.next.generation === 1 && a.next.token_hash === H1, "khoá trống ⇒ lấy được, gắn mã phiên mới");
   const held = a.next as Lease;
-  const b = leaseDecision(held, "acquire", { ...me, holder: "may:wt-b" }, now + 60_000, ttl);
+  const b = leaseDecision(held, "acquire", { ...me, holder: "may:wt-b", freshTokenHash: H2 }, now + 60_000, ttl);
   assert.ok(!b.ok && /may:wt-a/.test(b.reason), "đang có chủ còn hạn ⇒ người khác bị từ chối, và biết ai giữ");
-  const reenter = leaseDecision(held, "acquire", me, now + 30 * 60_000, ttl);
-  assert.ok(reenter.ok && reenter.next?.generation === 1 && Date.parse(reenter.next.expires_at) > Date.parse(held.expires_at), "cùng chủ gọi lại (phục hồi sau sập) ⇒ nhận lại + gia hạn, không đổi đời");
-  const take = leaseDecision(held, "acquire", { ...me, holder: "may:wt-b" }, now + ttl + 1000, ttl);
-  assert.ok(take.ok && take.takeoverFrom?.holder === "may:wt-a" && take.next?.generation === 2, "hết hạn ⇒ tiếp quản được, ghi rõ tiếp quản từ ai, đời tăng");
+  // Review 06/10/2026: hai phiên mở trong CÙNG một cây có cùng nhãn máy:cây — nhãn không phải danh tính.
+  const cungCay = leaseDecision(held, "acquire", { ...me, freshTokenHash: H2 }, now + 60_000, ttl);
+  assert.ok(!cungCay.ok && /KHÔNG đúng mã phiên/.test(cungCay.reason), "cùng nhãn mà không trình mã phiên ⇒ bị từ chối như người lạ");
+  assert.ok(!leaseDecision(held, "acquire", { ...me, tokenHash: H2 }, now, ttl).ok, "trình SAI mã ⇒ bị từ chối");
+  const reenter = leaseDecision(held, "acquire", { ...me, tokenHash: H1 }, now + 30 * 60_000, ttl);
+  assert.ok(reenter.ok && reenter.next?.generation === 1 && reenter.next.token_hash === H1 && Date.parse(reenter.next.expires_at) > Date.parse(held.expires_at), "đúng mã (phục hồi sau sập) ⇒ nhận lại + gia hạn, không đổi đời, không đổi mã");
+  const take = leaseDecision(held, "acquire", { ...me, holder: "may:wt-b", freshTokenHash: H2 }, now + ttl + 1000, ttl);
+  assert.ok(take.ok && take.takeoverFrom?.holder === "may:wt-a" && take.next?.generation === 2 && take.next.token_hash === H2, "hết hạn ⇒ tiếp quản được, ghi rõ tiếp quản từ ai, đời tăng, mã mới");
   assert.ok(!leaseDecision(held, "release", { ...me, holder: "may:wt-b" }, now, ttl).ok, "không nhả hộ khoá người khác");
+  assert.ok(!leaseDecision(held, "release", me, now, ttl).ok, "cùng cây mà không có mã cũng không nhả được");
   assert.ok(!leaseDecision(held, "renew", { ...me, holder: "may:wt-b" }, now, ttl).ok, "không gia hạn hộ");
-  assert.equal(leaseDecision(held, "release", me, now, ttl).next, null, "chủ nhả ⇒ khoá trống");
+  assert.equal(leaseDecision(held, "release", { ...me, tokenHash: H1 }, now, ttl).next, null, "chủ (đúng mã) nhả ⇒ khoá trống");
   assert.ok(!leaseDecision(null, "renew", me, now, ttl).ok, "không có gì để gia hạn");
 }
 
@@ -299,6 +309,11 @@ function testMigration() {
   assert.match(truoc.warnings.join(), /PR #599 \(mở sau\)/);
   assert.match(checkPrMigrations({ pr: 1, createdAt: iso(0), added: ["drizzle/0217_y.sql"], main: main_, others: [], reservations: [], ownMission: null }).problems.join(), /không lớn hơn số cuối trên main/, "lùi số ⇒ drizzle bỏ qua vĩnh viễn ⇒ đỏ");
   assert.match(checkPrMigrations({ pr: 1, createdAt: iso(0), added: ["drizzle/0218_khac.sql"], main: main_, others: [], reservations: [], ownMission: null }).problems.join(), /đã thuộc 0218_x\.sql trên main/);
+  const hoa = iso(-300);
+  const hoa598 = checkPrMigrations({ pr: 598, createdAt: hoa, added: ["drizzle/0219_a.sql"], main: main_, others: [{ pr: 599, createdAt: hoa, added: ["drizzle/0219_b.sql"] }], reservations: [], ownMission: null });
+  const hoa599 = checkPrMigrations({ pr: 599, createdAt: hoa, added: ["drizzle/0219_b.sql"], main: main_, others: [{ pr: 598, createdAt: hoa, added: ["drizzle/0219_a.sql"] }], reservations: [], ownMission: null });
+  assert.ok(hoa598.problems.length === 0 && hoa599.problems.length === 1, "hoà mốc mở ⇒ số PR nhỏ hơn là bên trước; ĐÚNG MỘT bên đỏ");
+  assert.equal(checkPrMigrations({ pr: 9, createdAt: "không-phải-ngày", added: ["drizzle/0219_a.sql"], main: main_, others: [{ pr: 8, createdAt: iso(0), added: ["drizzle/0219_b.sql"] }], reservations: [], ownMission: null }).problems.length, 1, "mốc không đọc được ⇒ coi là va (đóng cửa khi không chắc)");
   const giu = [{ mission: "khac", number: "0219", at: iso(-500) }];
   assert.match(checkPrMigrations({ ...p598, main: main_, others: [], reservations: giu, ownMission: null }).problems.join(), /giữ chỗ/, "số đã có sứ mệnh khác giữ chỗ trước ⇒ đỏ");
   assert.deepEqual(checkPrMigrations({ ...p598, main: main_, others: [], reservations: giu, ownMission: "khac" }).problems, [], "giữ chỗ của CHÍNH sứ mệnh mình không tính");
@@ -313,6 +328,8 @@ function testRuiRo() {
   assert.equal(classifyRisk(["drizzle/0300_x.sql"], CFG, { destructiveMigration: true }).risk, "CRITICAL", "migration phá dữ liệu ⇒ CRITICAL");
   assert.ok(isDestructiveSql("ALTER TABLE orders DROP COLUMN note;"));
   assert.ok(isDestructiveSql("DROP TABLE x;") && isDestructiveSql("delete from orders where 1=1") && isDestructiveSql("TRUNCATE t"));
+  for (const x of ["DROP TYPE order_stage;", "DROP VIEW v;", "DROP MATERIALIZED VIEW mv;", "ALTER TABLE t ALTER COLUMN c TYPE int;", "ALTER TABLE t ALTER COLUMN c SET DATA TYPE text;", 'UPDATE "orders" SET status = 1;'])
+    assert.ok(isDestructiveSql(x), `phải nhận ra câu phá / đổi dữ liệu: ${x}`);
   assert.ok(!isDestructiveSql("ALTER TABLE t ALTER COLUMN c DROP DEFAULT; ALTER TABLE t DROP CONSTRAINT k; CREATE TABLE IF NOT EXISTS z (id int); -- DROP TABLE trong chú thích"), "bỏ ràng buộc / mặc định / chú thích không phải phá dữ liệu");
   // Chính sách không nới được ở bậc CRITICAL, và nhánh điều khiển không trỏ được vào main.
   assert.match(parseConfig({ mergePolicy: { CRITICAL: "AUTO" } }).errors.join(), /CRITICAL: phải là OWNER/);
@@ -413,7 +430,7 @@ async function ai(cwd: string, ...args: string[]): Promise<{ code: number; text:
     return true;
   }) as typeof process.stdout.write;
   try {
-    return { code: await main(args, cwd), text };
+    return { code: await main(args, cwd, { actor: `may:${path.basename(cwd)}` }), text };
   } catch (e) {
     return { code: 1, text: `${text}${(e as Error).message}` };
   } finally {
@@ -464,14 +481,25 @@ async function testVongDoi() {
     const lach = await ai(B, "claim", "m-c", "--status=DONE");
     assert.notEqual(lach.code, 0, "claim --status=DONE là cửa lách bằng chứng của close");
     assert.match(lach.text, /DONE đi qua `close/);
+    assert.notEqual((await ai(B, "claim", "m-c", "--status=CANCELLED")).code, 0, "huỷ không bằng chứng qua claim ⇒ từ chối (huỷ là nhả phạm vi)");
+    assert.notEqual((await ai(B, "heartbeat", "m-c", "--status=CANCELLED")).code, 0, "…và qua heartbeat cũng vậy");
 
-    // ── Khoá: một chủ, nhận lại khi phục hồi, người khác bị từ chối ──
-    assert.equal((await ai(A, "lease", "acquire", "integration-lead", "--purpose=gộp lô")).code, 0);
+    // ── Khoá: một chủ = nhãn + MÃ PHIÊN; cùng cây mà không có mã là người lạ; phục hồi bằng --resume ──
+    const la = await ai(A, "lease", "acquire", "integration-lead", "--purpose=gộp lô");
+    assert.equal(la.code, 0, la.text);
+    const ma = /mã phiên: ([0-9a-f]{32})/.exec(la.text)?.[1];
+    assert.ok(ma, "lấy khoá phải cấp mã phiên");
     const lb = await ai(B, "lease", "acquire", "integration-lead");
     assert.equal(lb.code, 1);
     assert.match(lb.text, /phien-a/, "bên thua biết ai đang giữ");
-    assert.equal((await ai(A, "lease", "acquire", "integration-lead")).code, 0, "cùng phiên gọi lại sau sập ⇒ nhận lại ngay");
+    const cungCay = await ai(A, "lease", "acquire", "integration-lead");
+    assert.equal(cungCay.code, 1, "phiên THỨ HAI trong cùng cây (cùng nhãn máy:cây, không có mã) ⇒ bị từ chối — review 06/10/2026");
+    assert.match(cungCay.text, /KHÔNG đúng mã phiên/);
+    assert.equal((await ai(A, "lease", "renew", "integration-lead", `--token=${ma}`)).code, 0, "chủ trình đúng mã ⇒ gia hạn");
+    assert.equal((await ai(A, "lease", "acquire", "integration-lead", "--resume")).code, 0, "phục hồi sau sập trong cùng cây: --resume đọc mã đã lưu");
     assert.equal((await ai(B, "lease", "release", "integration-lead")).code, 1, "không nhả hộ");
+    const mo = readControl(openRepo(A), { fetch: true }).leases.find((l) => l.name === "integration-lead");
+    assert.ok(mo?.token_hash && !JSON.stringify(mo).includes(ma), "sổ (kho PUBLIC) chỉ giữ BĂM của mã phiên");
 
     // ── Phiên giữ khoá CHẾT: khoá hết hạn ⇒ phiên khác tiếp quản, nhật ký ghi rõ ──
     const ctxB = openRepo(B);
@@ -494,6 +522,15 @@ async function testVongDoi() {
     assert.throws(() => writeControl(ctxA, cu, { put: { "mission.m-a.json": "{}" }, message: "ghi đè mù" }, "a"), ControlConflict, "đỉnh đã đổi ⇒ bị từ chối, không ghi đè");
     const sau = readControl(ctxA, { fetch: true });
     assert.ok(sau.entries.find((e) => e.mission_id === "m-a")?.title === "Sứ mệnh A", "dòng của A còn nguyên — lượt ghi mù không lọt");
+
+    // ── Dấu review độc lập: trong SỔ, gắn đúng SHA đầu nhánh ──
+    const shaReview = "c".repeat(40);
+    assert.equal((await ai(A, "review", "42", `--sha=${shaReview}`, "--verdict=PASS", "--note=ai-tech-reviewer ĐẠT")).code, 0);
+    const rv = readControl(openRepo(B), { fetch: true }).reviews;
+    assert.ok(reviewedAt(rv, 42, shaReview), "dấu review đọc được từ phiên khác");
+    assert.ok(!reviewedAt(rv, 42, "d".repeat(40)), "đầu nhánh đổi (commit mới sau review) ⇒ dấu MẤT hiệu lực");
+    assert.ok(!reviewedAt(rv, 43, shaReview), "dấu của PR này không dùng được cho PR khác");
+    assert.notEqual((await ai(A, "review", "42", "--sha=abc", "--verdict=PASS")).code, 0, "SHA phải đủ 40 ký tự");
 
     // ── Giữ chỗ migration xuyên phiên ──
     const ra = await ai(A, "migration", "reserve", "--mission=m-a");
@@ -541,7 +578,18 @@ async function testVongDoi() {
     const close1 = await ai(A, "close", "m-a", "--status=DONE", "--evidence=gộp A");
     assert.equal(close1.code, 1, "DONE khi chưa hậu kiểm production ⇒ từ chối");
     assert.match(close1.text, /verify --record/);
-    assert.equal((await ai(A, "close", "m-a", "--status=DONE", "--evidence=gộp A", "--no-runtime")).code, 0);
+    const datVerify = (sha: string) =>
+      mutateControl(openRepo(A), "kiem-thu:verify", (st) => {
+        const e = st.entries.find((x) => x.mission_id === "m-a") as RegistryEntry;
+        return { change: { put: { "mission.m-a.json": `${JSON.stringify({ ...e, evidence: { ...(e.evidence ?? {}), verify: `PASS ${sha} ${iso(0)}` } }, null, 2)}\n` }, message: "mô phỏng verify --record" }, result: null };
+      });
+    datVerify(g(A, "rev-parse", "main~1"));
+    const close2 = await ai(A, "close", "m-a", "--status=DONE", "--evidence=gộp A");
+    assert.equal(close2.code, 1, "verify ĐẠT trên một bản CŨ (chưa chứa việc của sứ mệnh) không chứng minh gì");
+    assert.match(close2.text, /CHƯA chứa commit đưa sứ mệnh vào main/);
+    datVerify(g(A, "rev-parse", "main"));
+    const close3 = await ai(A, "close", "m-a", "--status=DONE", "--evidence=gộp A · verify ĐẠT");
+    assert.equal(close3.code, 0, close3.text);
     const bd2 = await ai(B, "board");
     assert.ok(!/BACKLOG .* m-b/.test(bd2.text), "phụ thuộc đã khép ⇒ m-b hết phải chờ");
     // Đã khép ⇒ phạm vi nhả: một sứ mệnh mới giữ src/a/ được ngay.

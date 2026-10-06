@@ -104,12 +104,15 @@ jobs:
             if ! body="$(curl -fsS --max-time 20 -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" "$URL")"; then
               echo "Không hỏi được GitHub — chạy cổng (đường lùi an toàn)."; exit 0
             fi
-            ok="$(printf '%s' "$body" | jq -r --arg sha "$SHA" '[.workflow_runs[] | select(.head_sha == $sha and .event == "push" and .head_branch == "main" and .path == ".github/workflows/ci.yml" and .status == "completed" and .conclusion == "success")] | first | .html_url // empty' 2>/dev/null)" || ok=""
-            if [ -n "$ok" ]; then
-              echo "✓ Dùng lại lượt cổng xanh của $SHA: $ok"
+            ok="$(printf '%s' "$body" | jq -r --arg sha "$SHA" '[.workflow_runs[] | select(.head_sha == $sha and .event == "push" and .head_branch == "main" and .path == ".github/workflows/ci.yml" and .status == "completed" and .conclusion == "success")] | first | if . == null then empty else "\(.html_url) \(.head_sha)" end' 2>/dev/null)" || ok=""
+            # SHA xuất ra là `.head_sha` ĐỌC TỪ chính lượt CI được chọn — đo, không chép lại đầu vào.
+            ok_url="${ok% *}"
+            ok_sha="${ok##* }"
+            if [ -n "$ok" ] && [ "$ok_sha" = "$SHA" ]; then
+              echo "✓ Dùng lại lượt cổng xanh của $ok_sha: $ok_url"
               echo "reuse=true" >> "$GITHUB_OUTPUT"
-              echo "sha=$SHA" >> "$GITHUB_OUTPUT"
-              echo "run_url=$ok" >> "$GITHUB_OUTPUT"
+              echo "sha=$ok_sha" >> "$GITHUB_OUTPUT"
+              echo "run_url=$ok_url" >> "$GITHUB_OUTPUT"
               exit 0
             fi
             dang="$(printf '%s' "$body" | jq -r --arg sha "$SHA" '[.workflow_runs[] | select(.head_sha == $sha and .event == "push" and .head_branch == "main" and .path == ".github/workflows/ci.yml" and .status != "completed")] | length' 2>/dev/null)" || dang=0

@@ -43,6 +43,7 @@
     { "path": "deploy/", "risk": "HIGH", "reason": "hạ tầng production" },
     { "path": "lib/platform/", "risk": "HIGH", "reason": "cô lập tổ chức · bí mật kết nối theo tổ chức (SaaS nhiều tổ chức)" },
     { "path": "db/index.ts", "risk": "HIGH", "reason": "getDb() — đường DUY NHẤT tới CSDL theo tổ chức (cô lập dữ liệu)" },
-    { "path": ".ai/config.json", "risk": "HIGH", "reason": "chính sách điều phối (sàn rủi ro · chính sách gộp · điểm nóng) — đổi nó là đổi luật cho mọi sứ mệnh" }
+    { "path": ".ai/config.json", "risk": "HIGH", "reason": "chính sách điều phối (sàn rủi ro · chính sách gộp · điểm nóng) — đổi nó là đổi luật cho mọi sứ mệnh" },
+    { "path": "scripts/ai-tech.ts", "risk": "HIGH", "reason": "bộ máy THỰC THI chính sách gộp / phân loại rủi ro / khoá — sửa mã là đổi chính sách mà không qua review" }
   ]
 }

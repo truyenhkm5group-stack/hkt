@@ -145,8 +145,15 @@ thật; luật trong prompt worker chỉ là lớp thứ hai.
 - MỘT chủ còn hạn tại một thời điểm; người khác bị từ chối và được biết ai giữ, giữ tới khi nào.
 - **Hết hạn (mặc định 60′) mà không gia hạn = coi như nhả** — phiên giữ nó đã chết. Người sau tiếp
   quản và nhật ký ghi `LEASE_TAKEOVER` (từ ai, hết hạn lúc nào); đời khoá (`generation`) tăng.
-- Nhãn phiên = `máy:tên-cây` (ổn định qua mọi lệnh của một phiên). Phiên mới mở lại trong CÙNG cây sau
-  sập = cùng nhãn ⇒ nhận lại khoá ngay, không phải đợi hết hạn. `AI_LEAD_ID` ghi đè khi cần.
+- Chủ = nhãn `máy:tên-cây` **VÀ mã phiên** (32 ký tự hex, cấp lúc lấy khoá; sổ chỉ giữ băm sha256 vì kho
+  PUBLIC). Nhãn không đủ: review độc lập 06/10/2026 chứng minh hai phiên mở trong CÙNG một cây đều thành
+  "chủ", cùng gộp, cùng deploy. Nay cùng nhãn mà không trình đúng mã ⇒ bị từ chối như người lạ.
+  `renew` / `release` / `deploy-plan` nhận `--token=…`; phiên phục hồi sau sập trong cùng cây dùng
+  `--resume` (đọc mã đã lưu trong thư mục quản trị git của cây) — chỉ khi chắc phiên cũ đã chết, vì
+  tệp ấy mọi phiên trong cây đều đọc được. `AI_LEAD_ID` ghi đè nhãn khi cần.
+- **Khoá TƯ VẤN, không có fencing.** Không gì chặn một phiên đã quá hạn khoá mà vẫn đang gộp / dispatch;
+  hạn tính theo đồng hồ từng máy. Vì vậy `deploy-plan` đọc lại khoá ngay trước khi nói DEPLOY, gia hạn
+  (`renew`) trước mỗi bước dài, và lớp chặn thật của production vẫn là `flock` trên VPS (dưới).
 - Khoá của GitHub vẫn ở dưới: deploy giữ `flock` ĐỘC QUYỀN `/var/lock/erp-lifecycle.lock` trên VPS
   (`deploy-vps.yml`). Khoá sổ chặn hai NGƯỜI cùng quyết; `flock` chặn hai LƯỢT cùng chạm máy chủ.
 
@@ -217,7 +224,9 @@ CI/deploy, lương, thu phí, sổ kho, chính sách điều phối. CRITICAL: `
 vụ, contract test.
 
 `mergePolicy`: LOW/MEDIUM ⇒ `AUTO` (Integration Lead gộp khi cổng xanh) · HIGH ⇒ `LEAD_REVIEW` (một lượt
-`ai-tech-reviewer` bối cảnh mới, ĐẠT thì ghi `Review độc lập: ĐẠT` vào thân PR) · CRITICAL ⇒ `OWNER`
+`ai-tech-reviewer` bối cảnh mới, ĐẠT thì ghi dấu vào SỔ: `review <PR> --sha=<đầu nhánh> --verdict=PASS`
+— gắn SHA, commit mới ⇒ mất hiệu lực; dòng chữ trong thân PR thì ai mở được PR cũng viết được, nên
+không còn được tính) · CRITICAL ⇒ `OWNER`
 (chủ shop duyệt) — cấu hình **không** nới được bậc CRITICAL. Ruleset `main` giữ nguyên: bắt buộc PR +
 `gates / gates`, không ai né. Harness của phiên chặn bước gộp / dispatch ⇒ đưa chủ shop đúng một nút /
 một lệnh `!`, không lách.
@@ -285,8 +294,9 @@ không bao giờ lên bảng này.
 2. `git fetch origin` · `git show origin/main:scripts/ai-tech.ts > <tạm>/ai-tech.ts` (checkout có thể cũ).
 3. `node <tạm>/ai-tech.ts board --github` — sổ đọc lại từ REMOTE (bài kiểm xoá bản sao cục bộ rồi
    chứng minh đọc lại đủ). Lệch giữa sổ và git được in ra; tin git.
-4. `lease acquire tech-lead` — cùng cây với phiên chết ⇒ nhận lại ngay; cây khác ⇒ chờ khoá cũ hết hạn
-   (≤ 60′) hoặc phiên kia vẫn sống và đang là Tech Lead.
+4. `lease acquire tech-lead` — bị từ chối "cùng nhãn nhưng KHÔNG đúng mã phiên" và CHẮC phiên cũ (cùng
+   cây) đã chết ⇒ `--resume`; cây khác ⇒ chờ khoá cũ hết hạn (≤ 60′) hoặc phiên kia vẫn sống và đang
+   là Tech Lead.
 5. Mỗi sứ mệnh RUNNING có tệp DAG: vào cây Lead của nó, `npm run ai -- status <id> --github` rồi theo
    README mục 13 (giao lại phiếu cho worker mới nếu worker cũ chết).
 6. Khoá `integration-lead` của phiên chết: hết hạn thì `lease acquire` tiếp quản (nhật ký ghi
@@ -313,6 +323,8 @@ GitHub) — in "—", không đoán.
 | `intake` khớp chữ, không hiểu nghĩa | gợi ý sai cả hai chiều | Lead đọc chứng cứ và ghi phán quyết; máy không được tự kết luận EXISTS |
 | Đồng hồ hai máy lệch nhau | khoá hết hạn sớm/muộn vài giây–phút | thời hạn 60′ lớn hơn nhiều độ lệch thường gặp; tiếp quản luôn để dấu vết |
 | `board` chỉ thấy sứ mệnh ĐÃ đăng ký | phiên không dùng V2 vô hình với sổ | `board --github` in PR không thuộc sứ mệnh nào; `intake` quét cả nhánh remote |
-| Dòng `Review độc lập: ĐẠT` là lời khai của Lead | không chứng minh bằng mật mã | lá chắn thật vẫn là `gates / gates` + ruleset; review là lớp thứ hai |
+| Dấu review trong sổ là lời khai của phiên có quyền đẩy vào kho | không chứng minh bằng mật mã | gắn SHA + actor, chỉ ai đẩy được vào kho mới ghi được (không như thân PR); lá chắn thật vẫn là `gates / gates` + ruleset |
+| Khoá tư vấn, không fencing (mục 8) | phiên quá hạn vẫn hành động được | `renew` trước bước dài; `flock` trên VPS chặn hai lượt chạm máy chủ |
+| Bài kiểm chạy kịch bản gom bằng `bash` | trên Windows cần Git Bash trên PATH (WSL `bash` không ghi được `C:/…`) | CI (Linux) luôn có bash; trên máy này `npm test` chạy bằng Git Bash |
 | `bang_chung` dùng lại cổng của lượt push vào main | PR gộp với `strict` tắt: SHA trên main là commit MỚI mà CI của PR chưa từng kiểm | đúng vì vậy bằng chứng phải là lượt CI của CHÍNH SHA trên main, không phải của PR |
 | `queue` / `metrics` gọi API nhiều | chậm, ăn hạn mức | chạy khi cần; đặt `GH_TOKEN` |

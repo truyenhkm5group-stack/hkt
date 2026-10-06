@@ -25,6 +25,7 @@
  *    không phải lệnh.
  */
 import { spawnSync } from "node:child_process";
+import { createHash, randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import { hostname } from "node:os";
 import path from "node:path";
@@ -1163,7 +1164,7 @@ export function localSecretsOf(worktree: string): string[] {
 
 /* ═════════════ 9 · NGỮ CẢNH KHO ═════════════ */
 
-export type RepoCtx = { cwd: string; top: string; mainWorktree: string; worktreeParent: string; config: Config; configErrors: string[] };
+export type RepoCtx = { cwd: string; top: string; mainWorktree: string; worktreeParent: string; config: Config; configErrors: string[]; /** Nhãn phiên tiêm từ ngoài (bài kiểm) — thắng AI_LEAD_ID và máy:cây. */ actor?: string };
 
 export function openRepo(cwd: string): RepoCtx {
   const top = git(cwd, ["rev-parse", "--show-toplevel"]);
@@ -1441,6 +1442,8 @@ export type RegistryEntry = {
   related_prs: number[];
   /** Số hiệu migration đã giữ chỗ (4 chữ số). */
   migration_reservations: string[];
+  /** Lúc giữ chỗ từng số — MỘT nguồn cho cả `migration check` (CI) lẫn `queue` (review 06/10/2026). */
+  migration_reserved_at?: Record<string, string>;
   created_at: string;
   updated_at: string;
   last_heartbeat: string;
@@ -1462,6 +1465,12 @@ export type Lease = {
   expires_at: string;
   /** Tăng mỗi lần đổi chủ — người đọc biết khoá đã qua tay ai khác từ lần trước mình nhìn. */
   generation: number;
+  /**
+   * sha256 của MÃ PHIÊN cấp lúc lấy khoá. Nhãn `máy:cây` không phân biệt được hai phiên mở trong CÙNG
+   * một cây (review 06/10/2026: cả hai đều thành "chủ", cùng gộp, cùng deploy) — mã phiên thì có. Sổ
+   * nằm trong kho PUBLIC nên chỉ lưu băm; mã này phân định phiên hợp tác, không phải bí mật bảo mật.
+   */
+  token_hash?: string;
 };
 
 export type ControlEvent = { at: string; kind: string; actor: string; mission?: string; detail: string };
@@ -1511,6 +1520,12 @@ export function validateEntry(raw: unknown): { entry: RegistryEntry | null; erro
       e(`needs_owner: { category: ${OWNER_ESCALATIONS.join("|")}, action }`);
     else needsOwner = { category: n.category as (typeof OWNER_ESCALATIONS)[number], action: n.action };
   }
+  let reservedAt: Record<string, string> | undefined;
+  if (raw.migration_reserved_at !== undefined) {
+    const r = raw.migration_reserved_at;
+    if (!isObj(r) || Object.entries(r).some(([k, v]) => !MIG_NO_RE.test(k) || typeof v !== "string" || !ISO_RE.test(v))) e("migration_reserved_at: { \"NNNN\": thời điểm ISO }");
+    else reservedAt = r as Record<string, string>;
+  }
   let evidence: RegistryEntry["evidence"];
   if (raw.evidence !== undefined) {
     const v = raw.evidence;
@@ -1538,6 +1553,7 @@ export function validateEntry(raw: unknown): { entry: RegistryEntry | null; erro
       blocked_by: strArr(raw.blocked_by) ? raw.blocked_by : [],
       related_prs: prs as number[],
       migration_reservations: migs,
+      migration_reserved_at: reservedAt,
       created_at: raw.created_at as string,
       updated_at: raw.updated_at as string,
       last_heartbeat: raw.last_heartbeat as string,
@@ -1582,6 +1598,7 @@ export function entryFromMission(m: Mission, base: Partial<RegistryEntry> & { ow
     blocked_by: base.blocked_by ?? [],
     related_prs: [...new Set([...(base.related_prs ?? []), ...pr])],
     migration_reservations: base.migration_reservations ?? [],
+    migration_reserved_at: base.migration_reserved_at,
     created_at: base.created_at ?? now,
     updated_at: now,
     last_heartbeat: now,
@@ -1603,8 +1620,16 @@ export function inferOwnedPaths(files: readonly string[]): string[] {
   const out = new Set<string>();
   for (const f of files) {
     const parts = f.split("/");
+    // Thư mục route động của Next (`[id]`, `[token]`) không đi được vào cú pháp mẫu (chỉ `*` / `?`):
+    // cắt tại đoạn ĐẦU TIÊN có ký tự đặc biệt và giữ thư mục cha — báo thừa, đúng chiều an toàn.
+    const bad = parts.findIndex((p) => /[[\]{}!]/.test(p));
+    if (bad >= 0) {
+      out.add(bad === 0 ? "" : `${parts.slice(0, bad).join("/")}/`);
+      continue;
+    }
     out.add(parts.length <= 2 ? f : `${parts.slice(0, -1).join("/")}/`);
   }
+  out.delete("");
   // Bỏ thư mục con đã nằm trong thư mục cha cũng có mặt.
   const all = [...out].sort();
   return all.filter((p) => !all.some((q) => q !== p && q.endsWith("/") && p.startsWith(q)));
@@ -1721,20 +1746,46 @@ export function reconcileEntry(e: RegistryEntry, f: EntryFacts, cfg: Config, now
   return { effective: declared, drift };
 }
 
+/** Giữ chỗ migration của các sứ mệnh đang mở, kèm mốc giữ — MỘT hàm cho mọi đường đọc. */
+export function openReservations(entries: readonly RegistryEntry[]): { mission: string; number: string; at: string }[] {
+  return entries
+    .filter((e) => !CLOSED_STATES.has(e.status))
+    .flatMap((e) => e.migration_reservations.map((n) => ({ mission: e.mission_id, number: n, at: e.migration_reserved_at?.[n] ?? e.created_at })));
+}
+
 /* ── Khoá có hạn (lease) ── */
 
 export type LeaseOp = "acquire" | "renew" | "release";
 export type LeaseDecision = { ok: boolean; next: Lease | null; reason: string; takeoverFrom?: Lease };
 
+export type LeaseClaimant = {
+  name: LeaseName;
+  holder: string;
+  purpose: string;
+  /** Băm của mã phiên người gọi TRÌNH RA (`--token` / `--resume`) — null = không trình mã nào. */
+  tokenHash: string | null;
+  /** Băm của mã phiên MỚI sẽ cấp nếu khoá đổi chủ (người gọi sinh, hàm này không sinh ngẫu nhiên). */
+  freshTokenHash: string;
+};
+
+/** Khoá này có phải của người gọi không: đúng nhãn VÀ đúng mã phiên. Khoá cũ chưa có mã: chỉ so nhãn. */
+export function leaseIsMine(cur: Lease | null, holder: string, tokenHash: string | null): boolean {
+  if (!cur || cur.holder !== holder) return false;
+  return cur.token_hash === undefined || (tokenHash !== null && cur.token_hash === tokenHash);
+}
+
 /**
  * MỘT chủ tại một thời điểm, KHÔNG khoá chết: khoá có hạn, và hết hạn mà không ai gia hạn là coi như
- * nhả (phiên giữ nó đã chết). Cùng `holder` gọi lại = cùng một Lead đang phục hồi sau sập ⇒ nhận lại
- * ngay. Hàm thuần — phép so-và-ghi nguyên tử nằm ở lớp ghi (đẩy fast-forward, mục dưới).
+ * nhả (phiên giữ nó đã chết). Chủ = đúng nhãn `máy:cây` VÀ đúng mã phiên cấp lúc lấy; cùng nhãn mà
+ * không có mã là một phiên KHÁC trong cùng cây (AGENTS.md mục 9 cấm, nhưng khoá không được tin điều đó)
+ * ⇒ bị từ chối như người lạ. Phiên phục hồi sau sập trình lại mã (`--resume`) hoặc chờ hết hạn.
+ * Hàm thuần — phép so-và-ghi nguyên tử nằm ở lớp ghi (đẩy fast-forward, mục dưới).
  */
-export function leaseDecision(cur: Lease | null, op: LeaseOp, me: { name: LeaseName; holder: string; purpose: string }, nowMs: number, ttlMs: number): LeaseDecision {
+export function leaseDecision(cur: Lease | null, op: LeaseOp, me: LeaseClaimant, nowMs: number, ttlMs: number): LeaseDecision {
   const now = new Date(nowMs).toISOString();
   const live = cur !== null && Date.parse(cur.expires_at) > nowMs;
-  const mine = cur !== null && cur.holder === me.holder;
+  const mine = leaseIsMine(cur, me.holder, me.tokenHash);
+  const sameLabel = cur !== null && cur.holder === me.holder && !mine;
   const fresh = (gen: number): Lease => ({
     name: me.name,
     holder: me.holder,
@@ -1743,19 +1794,24 @@ export function leaseDecision(cur: Lease | null, op: LeaseOp, me: { name: LeaseN
     heartbeat_at: now,
     expires_at: new Date(nowMs + ttlMs).toISOString(),
     generation: gen,
+    token_hash: me.freshTokenHash,
   });
+  const other = (c: Lease) =>
+    sameLabel
+      ? `cùng nhãn ${c.holder} nhưng KHÔNG đúng mã phiên — một phiên khác trong cùng cây đang giữ, hoặc bạn sau sập (trình mã bằng --resume / --token=…, hoặc chờ hết hạn ${c.expires_at})`
+      : `thuộc ${c.holder} (${c.purpose || "không ghi mục đích"}) tới ${c.expires_at}`;
   if (op === "release") {
     if (!cur) return { ok: true, next: null, reason: "khoá vốn đang trống" };
-    if (!mine) return { ok: false, next: cur, reason: `khoá thuộc ${cur.holder} — chỉ chủ của nó nhả được (hoặc chờ hết hạn ${cur.expires_at})` };
+    if (!mine) return { ok: false, next: cur, reason: `khoá ${other(cur)} — chỉ chủ của nó nhả được` };
     return { ok: true, next: null, reason: "đã nhả" };
   }
   if (op === "renew") {
-    if (!cur || !mine) return { ok: false, next: cur, reason: cur ? `khoá thuộc ${cur.holder}, không phải của bạn` : "không có khoá để gia hạn — acquire trước" };
+    if (!cur || !mine) return { ok: false, next: cur, reason: cur ? `khoá ${other(cur)}` : "không có khoá để gia hạn — acquire trước" };
     return { ok: true, next: { ...cur, purpose: me.purpose || cur.purpose, heartbeat_at: now, expires_at: new Date(nowMs + ttlMs).toISOString() }, reason: "đã gia hạn" };
   }
   if (!cur) return { ok: true, next: fresh(1), reason: "khoá trống — đã lấy" };
-  if (mine) return { ok: true, next: { ...cur, purpose: me.purpose || cur.purpose, heartbeat_at: now, expires_at: new Date(nowMs + ttlMs).toISOString() }, reason: "đã là chủ — gia hạn (phục hồi sau sập)" };
-  if (live) return { ok: false, next: cur, reason: `đang thuộc ${cur.holder} (${cur.purpose}) tới ${cur.expires_at}` };
+  if (mine) return { ok: true, next: { ...cur, purpose: me.purpose || cur.purpose, heartbeat_at: now, expires_at: new Date(nowMs + ttlMs).toISOString() }, reason: "đã là chủ (đúng mã phiên) — gia hạn" };
+  if (live) return { ok: false, next: cur, reason: `đang ${other(cur)}` };
   return { ok: true, next: fresh(cur.generation + 1), reason: `khoá của ${cur.holder} đã hết hạn từ ${cur.expires_at} — tiếp quản`, takeoverFrom: cur };
 }
 
@@ -1789,6 +1845,14 @@ export type PrMigrationInput = {
  * Va số migration của MỘT PR — đúng ca #598/#599 cùng lấy 0219. Bên ĐẾN SAU (PR tạo sau / giữ chỗ
  * sau) là bên phải đánh số lại, nên chỉ bên đó đỏ; bên kia nhận cảnh báo.
  */
+/** `a` mở TRƯỚC `b`? Hoà mốc ⇒ số PR nhỏ hơn là trước; mốc không đọc được ⇒ coi như trước (bên kia đỏ — đóng cửa khi không chắc). */
+function openedBefore(aAt: string, aPr: number, bAt: string, bPr: number): boolean {
+  const a = Date.parse(aAt);
+  const b = Date.parse(bAt);
+  if (!Number.isFinite(a) || !Number.isFinite(b)) return true;
+  return a < b || (a === b && aPr < bPr);
+}
+
 export function checkPrMigrations(x: PrMigrationInput): { problems: string[]; warnings: string[] } {
   const problems: string[] = [];
   const warnings: string[] = [];
@@ -1809,12 +1873,12 @@ export function checkPrMigrations(x: PrMigrationInput): { problems: string[]; wa
     for (const o of x.others) {
       const same = o.added.filter((g) => migrationNumberOf(g) === n && (g.split("/").pop() ?? g) !== base);
       if (!same.length) continue;
-      if (Date.parse(o.createdAt) < Date.parse(x.createdAt)) problems.push(`${base}: PR #${o.pr} (mở trước) cũng thêm số ${n} (${same.join(", ")}) ⇒ ${fix}`);
+      if (openedBefore(o.createdAt, o.pr, x.createdAt, x.pr)) problems.push(`${base}: PR #${o.pr} (mở trước) cũng thêm số ${n} (${same.join(", ")}) ⇒ ${fix}`);
       else warnings.push(`${base}: PR #${o.pr} (mở sau) cũng thêm số ${n} — bên đó phải đánh số lại`);
     }
     for (const r of x.reservations) {
       if (r.number !== n || r.mission === x.ownMission) continue;
-      if (Date.parse(r.at) <= Date.parse(x.createdAt)) problems.push(`${base}: số ${n} đã được sứ mệnh ${r.mission} giữ chỗ từ ${r.at} ⇒ ${fix}`);
+      if (!(Date.parse(r.at) > Date.parse(x.createdAt))) problems.push(`${base}: số ${n} đã được sứ mệnh ${r.mission} giữ chỗ từ ${r.at} ⇒ ${fix}`);
       else warnings.push(`${base}: sứ mệnh ${r.mission} giữ chỗ số ${n} sau khi PR mở — bên đó phải lấy số khác`);
     }
   }
@@ -1826,7 +1890,7 @@ export function checkPrMigrations(x: PrMigrationInput): { problems: string[]; wa
 /** Câu lệnh migration phá dữ liệu: không đảo ngược được bằng một lượt deploy lại. */
 export function isDestructiveSql(sql: string): boolean {
   const s = sql.replace(/--.*$/gm, "").replace(/\/\*[\s\S]*?\*\//g, "");
-  return /\bDROP\s+(TABLE|COLUMN|SCHEMA)\b|\bTRUNCATE\b|\bDELETE\s+FROM\b|\bALTER\s+TABLE\b[^;]*\bDROP\b(?!\s+(DEFAULT|NOT\s+NULL|CONSTRAINT|INDEX))/i.test(s);
+  return /\bDROP\s+(TABLE|COLUMN|SCHEMA|TYPE|VIEW|MATERIALIZED\s+VIEW)\b|\bTRUNCATE\b|\bDELETE\s+FROM\b|\bUPDATE\s+[A-Za-z_"][\w".]*\s+SET\b|\bALTER\s+COLUMN\s+\S+\s+(SET\s+DATA\s+)?TYPE\b|\bALTER\s+TABLE\b[^;]*\bDROP\b(?!\s+(DEFAULT|NOT\s+NULL|CONSTRAINT|INDEX))/i.test(s);
 }
 
 /**
@@ -2059,6 +2123,19 @@ export function intakeVerdict(s: IntakeSignals): { verdict: IntakeVerdict; why: 
 
 export class ControlConflict extends Error {}
 
+/**
+ * Dấu "đã review độc lập" của một PR rủi ro HIGH. Nằm trong SỔ (ghi bằng so-và-ghi, có actor) chứ không
+ * trong thân PR — dòng chữ trong thân PR thì ai mở được PR cũng viết được, và nó sống sót qua commit mới
+ * (review 06/10/2026). Gắn `sha`: đầu nhánh đổi là dấu mất hiệu lực.
+ */
+export type ReviewRecord = { pr: number; sha: string; verdict: "PASS" | "FAIL"; actor: string; at: string; note: string };
+
+/** PR có dấu review ĐẠT cho ĐÚNG đầu nhánh hiện tại không. Dấu mới nhất của PR quyết định (FAIL sau PASS là FAIL). */
+export function reviewedAt(reviews: readonly ReviewRecord[], pr: number, headSha: string): boolean {
+  const mine = reviews.filter((r) => r.pr === pr && r.sha === headSha).sort((a, b) => Date.parse(b.at) - Date.parse(a.at));
+  return mine.length > 0 && mine[0].verdict === "PASS";
+}
+
 export type ControlState = {
   tip: string | null;
   entries: RegistryEntry[];
@@ -2067,6 +2144,8 @@ export type ControlState = {
   events: ControlEvent[];
   /** tên tệp → SHA blob (để ghi lại cây không đổi những gì không sửa). */
   blobs: Map<string, string>;
+  /** Dấu review độc lập theo PR — gắn đúng SHA đầu nhánh lúc review (`review.<pr>.json`). */
+  reviews: ReviewRecord[];
   /** Đọc remote được không — false thì mọi lệnh ghi phải dừng (đọc bản cũ ở máy này để BÁO thì được). */
   fetched: boolean;
   fetchError?: string;
@@ -2102,7 +2181,7 @@ export function readControl(ctx: RepoCtx, opts: { fetch: boolean }): ControlStat
     fetchError = f.err;
   }
   const tip = gitTry(ctx.top, ["rev-parse", "--verify", "--quiet", `${controlRemoteRef(ctx)}^{commit}`]);
-  const st: ControlState = { tip, entries: [], invalid: [], leases: [], events: [], blobs: new Map(), fetched: opts.fetch ? fetched : false, fetchError };
+  const st: ControlState = { tip, entries: [], invalid: [], leases: [], events: [], blobs: new Map(), reviews: [], fetched: opts.fetch ? fetched : false, fetchError };
   if (!tip) return st;
   for (const line of lines(gitTry(ctx.top, ["ls-tree", tip]))) {
     const m = /^(\d+) blob ([0-9a-f]{40})\t(.+)$/.exec(line);
@@ -2123,6 +2202,14 @@ export function readControl(ctx: RepoCtx, opts: { fetch: boolean }): ControlStat
         const l = JSON.parse(blob(sha)) as Lease;
         if (isObj(l) && LEASE_NAMES.includes(l.name) && `lease.${l.name}.json` === name && isStr(l.holder) && isStr(l.expires_at)) st.leases.push(l);
         else st.invalid.push({ file: name, errors: ["khoá hỏng"] });
+      } catch (e) {
+        st.invalid.push({ file: name, errors: [`JSON hỏng: ${(e as Error).message}`] });
+      }
+    } else if (/^review\.\d+\.json$/.test(name)) {
+      try {
+        const r = JSON.parse(blob(sha)) as ReviewRecord;
+        if (isObj(r) && `review.${r.pr}.json` === name && SHA_RE.test(String(r.sha)) && (r.verdict === "PASS" || r.verdict === "FAIL")) st.reviews.push(r);
+        else st.invalid.push({ file: name, errors: ["dấu review hỏng"] });
       } catch (e) {
         st.invalid.push({ file: name, errors: [`JSON hỏng: ${(e as Error).message}`] });
       }
@@ -2200,7 +2287,7 @@ function pushControlCommit(ctx: RepoCtx, commit: string): void {
   const r = gitRun(ctx.top, ["push", "--quiet", "--porcelain", ctx.config.remote, `${commit}:refs/heads/${ctx.config.controlBranch}`]);
   if (r.code === 0) return;
   const msg = `${r.out}\n${r.err}`;
-  if (/rejected|non-fast-forward|fetch first|stale info|failed to update ref|cannot lock ref/i.test(msg)) throw new ControlConflict(`sổ đã đổi trên remote trong lúc ghi (${r.err.split("\n")[0]})`);
+  if (!/remote rejected/i.test(msg) && /\[rejected\]|non-fast-forward|fetch first|stale info|cannot lock ref/i.test(msg)) throw new ControlConflict(`sổ đã đổi trên remote trong lúc ghi (${r.err.split("\n")[0]})`);
   throw new Error(`không đẩy được sổ điều khiển: ${r.err || r.out}`);
 }
 
@@ -2232,6 +2319,7 @@ export function mutateControl<T>(ctx: RepoCtx, actor: string, decide: (st: Contr
  * chính nó ngay. `AI_LEAD_ID` ghi đè khi một phiên cần nhãn riêng.
  */
 export function controlActor(ctx: RepoCtx): string {
+  if (ctx.actor && ACTOR_RE.test(ctx.actor)) return ctx.actor;
   const env = (process.env.AI_LEAD_ID ?? "").trim();
   if (env && ACTOR_RE.test(env)) return env;
   const host = hostname().replace(/[^A-Za-z0-9.-]/g, "-").slice(0, 40) || "may";
@@ -2262,21 +2350,31 @@ async function gatesOf(get: GhGet, sha: string): Promise<"success" | "failure" |
   const c = (await get(`/commits/${sha}/check-runs?per_page=100`)) as { check_runs?: unknown };
   const g = arr(c.check_runs).filter((x) => x.name === "gates / gates");
   if (!g.length) return "missing";
+  // Lượt MỚI NHẤT quyết định: một lượt chạy lại đỏ sau lượt xanh cũ là đỏ.
+  const t = (x: Record<string, unknown>) => Date.parse(String(x.completed_at ?? x.started_at ?? "")) || 0;
+  const latest = [...g].sort((a, b) => t(b) - t(a))[0];
   if (g.some((x) => x.status !== "completed")) return "pending";
-  return g.some((x) => x.conclusion === "success") ? "success" : "failure";
+  return latest.conclusion === "success" ? "success" : "failure";
 }
 
 type OpenPr = { number: number; title: string; branch: string; sha: string; draft: boolean; createdAt: string; body: string };
+const toOpenPr = (p: Record<string, unknown>): OpenPr => ({
+  number: Number(p.number),
+  title: String(p.title ?? ""),
+  branch: isObj(p.head) ? String(p.head.ref ?? "") : "",
+  sha: isObj(p.head) ? String(p.head.sha ?? "") : "",
+  draft: Boolean(p.draft),
+  createdAt: String(p.created_at ?? ""),
+  body: String(p.body ?? ""),
+});
 async function openPrs(get: GhGet): Promise<OpenPr[]> {
-  return arr(await get("/pulls?state=open&per_page=100")).map((p) => ({
-    number: Number(p.number),
-    title: String(p.title ?? ""),
-    branch: isObj(p.head) ? String(p.head.ref ?? "") : "",
-    sha: isObj(p.head) ? String(p.head.sha ?? "") : "",
-    draft: Boolean(p.draft),
-    createdAt: String(p.created_at ?? ""),
-    body: String(p.body ?? ""),
-  }));
+  const all: OpenPr[] = [];
+  for (let page = 1; page <= 10; page++) {
+    const xs = arr(await get(`/pulls?state=open&per_page=100&page=${page}`));
+    all.push(...xs.map(toOpenPr));
+    if (xs.length < 100) break;
+  }
+  return all;
 }
 async function prFiles(get: GhGet, n: number): Promise<{ name: string; status: string }[]> {
   const out: { name: string; status: string }[] = [];
@@ -3129,7 +3227,8 @@ function applyEntryFlags(base: Partial<RegistryEntry> & { owner: string }, value
 async function cmdClaim(ctx: RepoCtx, idIn: string | undefined, flags: Set<string>, values: Map<string, string>): Promise<number> {
   const id = mustMission(idIn);
   // DONE chỉ đi qua `close` — nơi đòi bằng chứng đã vào main + hậu kiểm. `claim --status=DONE` là cửa lách.
-  if (values.get("status") === "DONE") throw new UsageError("DONE đi qua `close <mã> --status=DONE --evidence=…` (đòi bằng chứng), không qua claim");
+  if (CLOSED_STATES.has(values.get("status") as MissionState))
+    throw new UsageError(`${values.get("status")} đi qua \`close <mã> --status=${values.get("status")} --evidence=…\` (đòi bằng chứng), không qua claim — khép là nhả phạm vi và giữ chỗ migration`);
   const actor = controlActor(ctx);
   const local = existsSync(path.join(missionsDir(ctx), `${id}.json`)) ? requireMission(ctx, id).mission : null;
   const here = gitTry(ctx.top, ["rev-parse", "--abbrev-ref", "HEAD"]);
@@ -3149,7 +3248,14 @@ async function cmdClaim(ctx: RepoCtx, idIn: string | undefined, flags: Set<strin
       : null;
     const mb = tip ? gitTry(ctx.top, ["merge-base", tip, ctx.config.integrationRef]) : null;
     if (!base.base_sha && mb) base.base_sha = mb;
-    if ((!base.owned_paths || !base.owned_paths.length) && !local && tip && mb) base.owned_paths = inferOwnedPaths(lines(gitTry(ctx.top, ["diff", "--name-only", "--no-renames", mb, tip])));
+    // Sứ mệnh ngoài AI Tech Room không khai --paths: phạm vi SUY từ chính nhánh (lần đầu, hoặc --infer-paths
+    // khi nhánh đã lớn thêm). Sàn rủi ro khi đó tính trên TỆP nhánh thật sự chạm, không trên thư mục suy ra
+    // (thư mục `lib/queries/` chồng sàn CRITICAL của `return-rate.ts` dù nhánh không đụng tệp đó).
+    let touchedForFloor: string[] | null = null;
+    if (!local && values.get("paths") === undefined && tip && mb && (!base.owned_paths || !base.owned_paths.length || flags.has("infer-paths"))) {
+      touchedForFloor = lines(gitTry(ctx.top, ["diff", "--name-only", "--no-renames", mb, tip]));
+      base.owned_paths = inferOwnedPaths(touchedForFloor);
+    }
     const raw: RegistryEntry = local
       ? entryFromMission(local, base, now)
       : {
@@ -3171,6 +3277,7 @@ async function cmdClaim(ctx: RepoCtx, idIn: string | undefined, flags: Set<strin
           blocked_by: base.blocked_by ?? [],
           related_prs: base.related_prs ?? [],
           migration_reservations: base.migration_reservations ?? [],
+          migration_reserved_at: base.migration_reserved_at,
           created_at: prev?.created_at ?? now,
           updated_at: now,
           last_heartbeat: now,
@@ -3181,7 +3288,7 @@ async function cmdClaim(ctx: RepoCtx, idIn: string | undefined, flags: Set<strin
           evidence: base.evidence,
         };
     // Rủi ro không bao giờ thấp hơn sàn của phạm vi khai (cùng luật với việc trong sứ mệnh).
-    const floor = riskFloorFor(raw.owned_paths, ctx.config);
+    const floor = riskFloorFor(touchedForFloor ?? raw.owned_paths, ctx.config);
     if (riskRank(floor.risk) > riskRank(raw.risk)) raw.risk = floor.risk;
     const v = validateEntry(raw);
     if (!v.entry) return { change: null, result: { ok: false, lines: v.errors.map((x) => `lỗi: ${x}`), entry: raw } };
@@ -3219,7 +3326,7 @@ function cmdHeartbeat(ctx: RepoCtx, idIn: string | undefined, values: Map<string
     if (!e) return { change: null, result: `✗ ${id} chưa có trong sổ — claim trước` };
     const now = new Date().toISOString();
     const next: RegistryEntry = { ...e, last_heartbeat: now, updated_at: now, status: (status as MissionState) ?? e.status, worker: values.get("worker") ?? e.worker };
-    if (status === "DONE") return { change: null, result: "✗ DONE đi qua `close` (đòi bằng chứng), không qua heartbeat" };
+    if (CLOSED_STATES.has(status as MissionState)) return { change: null, result: `✗ ${status} đi qua \`close\` (đòi bằng chứng), không qua heartbeat` };
     return {
       change: { put: { [entryFile(id)]: entryJson(next) }, events: next.status !== e.status ? [{ kind: "STATUS", mission: id, detail: `${e.status} → ${next.status}` }] : [], message: `nhịp tim ${id}` },
       result: `✓ ${id} — nhịp tim ${now}${next.status !== e.status ? ` · ${e.status} → ${next.status}` : ""}`,
@@ -3246,8 +3353,14 @@ function cmdClose(ctx: RepoCtx, idIn: string | undefined, flags: Set<string>, va
       const prLanded = lastPr ? gitTry(ctx.top, ["log", "-n", "1", "--format=%H", "--fixed-strings", `--grep=(#${lastPr})`, ctx.config.integrationRef]) : null;
       if (e.branch && !(ev && ev !== "EMPTY") && !prLanded)
         return { change: null, result: { ok: false, msg: `chưa có bằng chứng ${e.branch} đã vào ${ctx.config.integrationRef} — DONE chỉ sau khi vào main` } };
-      if (!e.evidence?.verify?.startsWith("PASS") && !flags.has("no-runtime"))
-        return { change: null, result: { ok: false, msg: "chưa có hậu kiểm production ĐẠT (`verify --record`) — hoặc khai --no-runtime nếu sứ mệnh không đổi mã chạy trên VPS" } };
+      if (!flags.has("no-runtime")) {
+        const vm = /^PASS ([0-9a-f]{40}) /.exec(e.evidence?.verify ?? "");
+        if (!vm) return { change: null, result: { ok: false, msg: "chưa có hậu kiểm production ĐẠT (`verify --record`) — hoặc khai --no-runtime nếu sứ mệnh không đổi mã chạy trên VPS" } };
+        // Bản đã hậu kiểm phải CHỨA commit đưa sứ mệnh vào main — verify một bản cũ hơn không chứng minh gì.
+        const landed = (tip ? landedCommit(ctx, tip, ctx.config.integrationRef, ev, lastPr ?? null) : null) ?? prLanded;
+        if (landed && gitRun(ctx.top, ["merge-base", "--is-ancestor", landed, vm[1]]).code !== 0)
+          return { change: null, result: { ok: false, msg: `bản đã hậu kiểm ${vm[1].slice(0, 12)} CHƯA chứa commit đưa sứ mệnh vào main (${landed.slice(0, 12)}) — deploy rồi verify lại` } };
+      }
     }
     const now = new Date().toISOString();
     const next: RegistryEntry = { ...e, status: status as MissionState, updated_at: now, last_heartbeat: now, needs_owner: undefined, evidence: { ...(e.evidence ?? {}), done: `${flags.has("no-runtime") ? "không đổi mã chạy · " : ""}${evidence}` } };
@@ -3261,7 +3374,7 @@ function cmdClose(ctx: RepoCtx, idIn: string | undefined, flags: Set<string>, va
   return r.ok ? 0 : 1;
 }
 
-function cmdLease(ctx: RepoCtx, op: string | undefined, nameIn: string | undefined, values: Map<string, string>): number {
+function cmdLease(ctx: RepoCtx, op: string | undefined, nameIn: string | undefined, flags: Set<string>, values: Map<string, string>): number {
   const nowMs = Date.now();
   if (op === "status" || op === undefined) {
     const st = readControl(ctx, { fetch: true });
@@ -3278,13 +3391,16 @@ function cmdLease(ctx: RepoCtx, op: string | undefined, nameIn: string | undefin
   const ttlMin = values.get("ttl") !== undefined ? Number(values.get("ttl")) : ctx.config.leaseMinutes;
   if (!Number.isInteger(ttlMin) || ttlMin < 1 || ttlMin > 24 * 60) throw new UsageError("--ttl=<phút> (1–1440)");
   const actor = controlActor(ctx);
+  const presented = presentedLeaseToken(ctx, name, values, flags);
+  const freshToken = randomBytes(16).toString("hex");
+  const freshHash = sha256(freshToken);
   const r = mutateControl(ctx, actor, (st) => {
     const cur = st.leases.find((x) => x.name === name) ?? null;
-    const d = leaseDecision(cur, op, { name, holder: actor, purpose: values.get("purpose") ?? "" }, Date.now(), ttlMin * 60_000);
+    const d = leaseDecision(cur, op, { name, holder: actor, purpose: values.get("purpose") ?? "", tokenHash: presented ? sha256(presented) : null, freshTokenHash: freshHash }, Date.now(), ttlMin * 60_000);
     if (!d.ok) return { change: null, result: d };
     const file = `lease.${name}.json`;
     const evs: Omit<ControlEvent, "at" | "actor">[] = [];
-    if (op !== "renew" && !(op === "acquire" && cur?.holder === actor && d.next?.generation === cur?.generation))
+    if (op !== "renew" && !(op === "acquire" && cur !== null && d.next?.generation === cur.generation))
       evs.push({ kind: d.takeoverFrom ? "LEASE_TAKEOVER" : op === "acquire" ? "LEASE_ACQUIRED" : "LEASE_RELEASED", detail: `${name}${d.takeoverFrom ? ` từ ${d.takeoverFrom.holder} (hết hạn ${d.takeoverFrom.expires_at})` : ""}` });
     return {
       change: d.next ? { put: { [file]: `${JSON.stringify(d.next, null, 2)}\n` }, events: evs, message: `khoá ${name}: ${op}` } : { put: {}, del: [file], events: evs, message: `khoá ${name}: nhả` },
@@ -3292,7 +3408,65 @@ function cmdLease(ctx: RepoCtx, op: string | undefined, nameIn: string | undefin
     };
   });
   out(`${r.ok ? "✓" : "✗"} ${name}: ${r.reason}${r.ok && r.next ? ` · hết hạn ${r.next.expires_at}` : ""}`);
+  if (r.ok && r.next?.token_hash === freshHash) {
+    // Mã phiên MỚI: in cho phiên giữ nó, và lưu cạnh cây (thư mục quản trị git) cho lượt `--resume` sau sập.
+    saveLeaseToken(ctx, name, freshToken);
+    out(`  mã phiên: ${freshToken} — dùng --token=${freshToken} (hoặc --resume trong cùng cây) cho renew / release / deploy-plan`);
+  }
+  if (r.ok && r.next === null) saveLeaseToken(ctx, name, null);
   return r.ok ? 0 : 1;
+}
+
+const sha256 = (s: string) => createHash("sha256").update(s).digest("hex");
+const leaseTokenFile = (ctx: RepoCtx, name: LeaseName) => {
+  const admin = adminDirOf(ctx.top);
+  return admin ? path.join(admin, `ai-control-${name}.token`) : null;
+};
+function saveLeaseToken(ctx: RepoCtx, name: LeaseName, token: string | null): void {
+  const f = leaseTokenFile(ctx, name);
+  if (!f) return;
+  try {
+    writeFileSync(f, token ? `${token}\n` : "");
+  } catch {
+    /* không lưu được thì phiên vẫn còn mã trong tay — chỉ mất đường --resume */
+  }
+}
+/**
+ * Mã phiên người gọi trình ra: `--token=…` tường minh, hoặc `--resume` đọc mã đã lưu cạnh cây. KHÔNG tự
+ * đọc tệp khi không có `--resume`: tự đọc thì mọi phiên trong cùng cây lại thành một chủ — đúng lỗi phải chặn.
+ */
+function presentedLeaseToken(ctx: RepoCtx, name: LeaseName, values: Map<string, string>, flags: Set<string>): string | null {
+  const t = values.get("token");
+  if (t !== undefined) return /^[0-9a-f]{32}$/.test(t) ? t : (() => { throw new UsageError("--token=<32 ký tự hex in ra lúc lấy khoá>"); })();
+  if (!flags.has("resume")) return null;
+  const f = leaseTokenFile(ctx, name);
+  try {
+    const v = f ? readFileSync(f, "utf8").trim() : "";
+    return /^[0-9a-f]{32}$/.test(v) ? v : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Ghi dấu review độc lập cho một PR, gắn SHA đầu nhánh ĐÃ được đọc. `queue` chỉ nhận dấu khớp đúng SHA
+ * hiện tại của PR — đẩy thêm commit sau review là phải review lại.
+ */
+function cmdReview(ctx: RepoCtx, prIn: string | undefined, values: Map<string, string>): number {
+  const pr = Number(prIn);
+  if (!Number.isInteger(pr) || pr <= 0) throw new UsageError("review <số PR> --sha=<SHA đầu nhánh đã review> --verdict=PASS|FAIL [--note=…]");
+  const sha = values.get("sha") ?? "";
+  if (!SHA_RE.test(sha)) throw new UsageError("--sha=<SHA đầy đủ 40 ký tự của đầu nhánh lúc review>");
+  const verdict = values.get("verdict");
+  if (verdict !== "PASS" && verdict !== "FAIL") throw new UsageError("--verdict=PASS|FAIL");
+  const actor = controlActor(ctx);
+  const rec: ReviewRecord = { pr, sha, verdict, actor, at: new Date().toISOString(), note: (values.get("note") ?? "").slice(0, 400) };
+  mutateControl(ctx, actor, () => ({
+    change: { put: { [`review.${pr}.json`]: `${JSON.stringify(rec, null, 2)}\n` }, events: [{ kind: verdict === "PASS" ? "REVIEW_PASS" : "REVIEW_FAIL", detail: `#${pr} @ ${sha.slice(0, 12)}${rec.note ? ` · ${rec.note}` : ""}` }], message: `review #${pr}: ${verdict}` },
+    result: null,
+  }));
+  out(`✓ #${pr} @ ${sha.slice(0, 12)}: ${verdict} — hàng đợi chỉ nhận dấu này khi đầu nhánh PR vẫn là đúng SHA ấy`);
+  return 0;
 }
 
 function addedMigrations(ctx: RepoCtx, tip: string, ref: string): string[] {
@@ -3308,7 +3482,11 @@ async function cmdMigration(ctx: RepoCtx, op: string | undefined, flags: Set<str
   const gh = flags.has("github") ? githubClient(ctx) : null;
   const prMigs: { pr: number; createdAt: string; added: string[]; branch: string }[] = [];
   if (gh) {
-    for (const p of (await openPrs(gh.get)).slice(0, 60)) {
+    const prs = await openPrs(gh.get);
+    const want = values.get("pr") !== undefined ? Number(values.get("pr")) : null;
+    // PR đang kiểm lấy riêng: nó phải có mặt kể cả khi danh sách PR mở dài.
+    if (want !== null && !prs.some((p) => p.number === want)) prs.push(toOpenPr((await gh.get(`/pulls/${want}`)) as Record<string, unknown>));
+    for (const p of prs) {
       const added = (await prFiles(gh.get, p.number)).filter((f) => f.status === "added" && migrationNumberOf(f.name) !== null).map((f) => f.name);
       prMigs.push({ pr: p.number, createdAt: p.createdAt, added, branch: p.branch });
     }
@@ -3327,7 +3505,8 @@ async function cmdMigration(ctx: RepoCtx, op: string | undefined, flags: Set<str
       if (!e || CLOSED_STATES.has(e.status)) return { change: null, result: `✗ ${id} không có trong sổ hoặc đã khép — claim trước` };
       const reserved = st.entries.filter((x) => !CLOSED_STATES.has(x.status)).flatMap((x) => x.migration_reservations);
       const n = nextMigrationNumber({ main: mainMigs, branches: [...branchMigs, ...prMigs.flatMap((p) => p.added)], reserved });
-      const next: RegistryEntry = { ...e, migration_reservations: [...e.migration_reservations, n], updated_at: new Date().toISOString() };
+      const at = new Date().toISOString();
+      const next: RegistryEntry = { ...e, migration_reservations: [...e.migration_reservations, n], migration_reserved_at: { ...(e.migration_reserved_at ?? {}), [n]: at }, updated_at: at };
       return { change: { put: { [entryFile(id)]: entryJson(next) }, events: [{ kind: "MIGRATION_RESERVED", mission: id, detail: n }], message: `giữ chỗ migration ${n} cho ${id}` }, result: `✓ ${n} — đã giữ chỗ cho ${id}` };
     });
     out(r);
@@ -3337,9 +3516,7 @@ async function cmdMigration(ctx: RepoCtx, op: string | undefined, flags: Set<str
   if (op !== "check") throw new UsageError("migration next | reserve --mission=<mã> | check [--pr=<số>] [--github]");
   const st = readControl(ctx, { fetch: !flags.has("offline") });
   if (!st.fetched && !flags.has("offline")) out(`! không đọc được sổ giữ chỗ (${st.fetchError ?? "?"}) — chỉ so với main và PR`);
-  const reservations = st.entries
-    .filter((e) => !CLOSED_STATES.has(e.status))
-    .flatMap((e) => e.migration_reservations.map((n) => ({ mission: e.mission_id, number: n, at: st.events.find((ev) => ev.kind === "MIGRATION_RESERVED" && ev.mission === e.mission_id && ev.detail === n)?.at ?? e.created_at })));
+  const reservations = openReservations(st.entries);
   const prNo = values.get("pr") !== undefined ? Number(values.get("pr")) : null;
   let me: { pr: number; createdAt: string; added: string[]; branch: string };
   if (prNo !== null) {
@@ -3374,7 +3551,7 @@ async function cmdQueue(ctx: RepoCtx, flags: Set<string>): Promise<number> {
     detail.set(p.number, { files, mergeable: String(one.mergeable_state ?? "unknown"), gates });
   }
   const added = (n: number) => (detail.get(n)?.files ?? []).filter((f) => f.status === "added" && migrationNumberOf(f.name) !== null).map((f) => f.name);
-  const reservations = st.entries.filter((e) => !CLOSED_STATES.has(e.status)).flatMap((e) => e.migration_reservations.map((n) => ({ mission: e.mission_id, number: n, at: e.created_at })));
+  const reservations = openReservations(st.entries);
   const items: QueueItem[] = [];
   for (const p of prs) {
     const d = detail.get(p.number);
@@ -3407,7 +3584,7 @@ async function cmdQueue(ctx: RepoCtx, flags: Set<string>): Promise<number> {
       files: names,
       migrationProblems: mig.problems,
       createdAt: p.createdAt,
-      reviewed: /Review độc lập:\s*ĐẠT/i.test(p.body),
+      reviewed: reviewedAt(st.reviews, p.number, p.sha),
     });
   }
   const rows = orderQueue(items, ctx.config);
@@ -3426,7 +3603,7 @@ async function cmdQueue(ctx: RepoCtx, flags: Set<string>): Promise<number> {
   return 0;
 }
 
-async function cmdDeployPlan(ctx: RepoCtx, flags: Set<string>): Promise<number> {
+async function cmdDeployPlan(ctx: RepoCtx, flags: Set<string>, values: Map<string, string>): Promise<number> {
   gitRun(ctx.top, ["fetch", "--quiet", ctx.config.remote]);
   const ref = ctx.config.integrationRef;
   const mainSha = git(ctx.top, ["rev-parse", "--verify", `${ref}^{commit}`]);
@@ -3454,7 +3631,11 @@ async function cmdDeployPlan(ctx: RepoCtx, flags: Set<string>): Promise<number> 
   }
   const st = readControl(ctx, { fetch: true });
   const lease = st.leases.find((l) => l.name === "integration-lead" && Date.parse(l.expires_at) > Date.now()) ?? null;
-  const plan = planDeploy({ productionSha: prod.sha, mainSha, undeployed, mainGates, deployActive, leaseHolder: lease?.holder ?? null, me: controlActor(ctx) });
+  const me = controlActor(ctx);
+  const presented = presentedLeaseToken(ctx, "integration-lead", values, flags);
+  // Đang cầm khoá = đúng nhãn VÀ đúng mã phiên. Cùng nhãn mà sai / thiếu mã là phiên KHÁC trong cùng cây.
+  const holder = lease === null ? null : leaseIsMine(lease, me, presented ? sha256(presented) : null) ? me : lease.holder === me ? `${lease.holder} (một phiên khác cùng cây — trình mã bằng --token=… / --resume)` : lease.holder;
+  const plan = planDeploy({ productionSha: prod.sha, mainSha, undeployed, mainGates, deployActive, leaseHolder: holder, me });
   if (flags.has("json")) {
     out(JSON.stringify({ ...plan, production: prod.sha, main: mainSha, undeployed }, null, 2));
     return 0;
@@ -3509,7 +3690,7 @@ async function cmdVerify(ctx: RepoCtx, flags: Set<string>, values: Map<string, s
   out(`  ⇒ ${v.pass ? "ĐẠT" : "KHÔNG ĐẠT — INCIDENT: không tuyên bố xong. Không có rollback tự động (migration chỉ đi tới); sửa tiến bằng PR mới, hoặc báo chủ shop nếu production hỏng"}`);
   if (flags.has("record")) {
     const id = mustMission(values.get("mission"));
-    const stamp = `${v.pass ? "PASS" : "FAIL"} ${sha.slice(0, 12)} ${new Date().toISOString()}`;
+    const stamp = `${v.pass ? "PASS" : "FAIL"} ${sha} ${new Date().toISOString()}`;
     const msg = mutateControl(ctx, controlActor(ctx), (st) => {
       const e = st.entries.find((x) => x.mission_id === id);
       if (!e) return { change: null, result: `✗ ${id} chưa có trong sổ` };
@@ -3647,25 +3828,28 @@ MẶT PHẲNG ĐIỀU KHIỂN XUYÊN SỨ MỆNH — docs/ai-tech-room/delivery-
   npm run ai -- heartbeat <mã> [--status=…]              nhịp tim (phiên còn sống) + đổi trạng thái
   npm run ai -- close <mã> --status=DONE|CANCELLED --evidence=… [--no-runtime]
                                                          khép + nhả phạm vi / giữ chỗ; DONE đòi bằng chứng đã vào main + verify ĐẠT
-  npm run ai -- lease acquire|renew|release|status [integration-lead|tech-lead] [--ttl=phút] [--purpose=…]
-                                                         MỘT chủ gộp/deploy tại một thời điểm; hết hạn là nhả (phục hồi được khi phiên chết)
+  npm run ai -- lease acquire|renew|release|status [integration-lead|tech-lead] [--ttl=phút] [--purpose=…] [--token=…|--resume]
+                                                         MỘT chủ gộp/deploy tại một thời điểm (nhãn máy:cây + MÃ PHIÊN); hết hạn là nhả
   npm run ai -- migration next | reserve --mission=<mã> | check [--pr=<số>] [--github]
                                                          giữ chỗ số migration xuyên phiên; check đỏ khi va số với main / PR mở trước / giữ chỗ
   npm run ai -- queue [--json]                           HÀNG ĐỢI GỘP: phụ thuộc · cổng · xung đột · rủi ro ⇒ gộp lô nào, việc nào đi riêng
-  npm run ai -- deploy-plan [--json]                     MỘT lượt deploy cho cả lô — có được deploy bây giờ không, vì sao
+  npm run ai -- review <PR> --sha=<đầu nhánh> --verdict=PASS|FAIL [--note=…]
+                                                         dấu review độc lập (PR rủi ro HIGH) — trong sổ, gắn SHA; commit mới ⇒ mất hiệu lực
+  npm run ai -- deploy-plan [--token=…|--resume] [--json]
+                                                         MỘT lượt deploy cho cả lô — có được deploy bây giờ không, vì sao
   npm run ai -- verify [--sha=…] [--record --mission=<mã>]
                                                          hậu kiểm production: SHA · migration · lượt deploy + smoke · endpoint công khai
   npm run ai -- metrics [--days=14] [--json]             lead time · CI · chờ deploy · deploy · tỷ lệ đỏ / revert · trùng việc đã chặn
 `;
 
-export async function main(argv: readonly string[], cwd: string): Promise<number> {
+export async function main(argv: readonly string[], cwd: string, opts: { actor?: string } = {}): Promise<number> {
   const a = parseArgs(argv);
   const [cmd, ...rest] = a._;
   if (!cmd || cmd === "help" || a.flags.has("help")) {
     out(HELP);
     return cmd ? 0 : 2;
   }
-  const ctx = openRepo(cwd);
+  const ctx: RepoCtx = { ...openRepo(cwd), actor: opts.actor };
   if (ctx.configErrors.length && cmd !== "validate") throw new Error(`.ai/config.json lỗi:\n  ${ctx.configErrors.join("\n  ")}`);
   switch (cmd) {
     case "status":
@@ -3703,13 +3887,15 @@ export async function main(argv: readonly string[], cwd: string): Promise<number
     case "close":
       return cmdClose(ctx, rest[0], a.flags, a.values);
     case "lease":
-      return cmdLease(ctx, rest[0], rest[1], a.values);
+      return cmdLease(ctx, rest[0], rest[1], a.flags, a.values);
     case "migration":
       return cmdMigration(ctx, rest[0], a.flags, a.values);
     case "queue":
       return cmdQueue(ctx, a.flags);
+    case "review":
+      return cmdReview(ctx, rest[0], a.values);
     case "deploy-plan":
-      return cmdDeployPlan(ctx, a.flags);
+      return cmdDeployPlan(ctx, a.flags, a.values);
     case "verify":
       return cmdVerify(ctx, a.flags, a.values);
     case "metrics":
