@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import {
   CLOSED_STATES,
+  classifyPushError,
   ControlConflict,
   DEFAULT_CONFIG,
   checkPrMigrations,
@@ -343,6 +344,12 @@ function testRuiRo() {
   assert.match(parseConfig({ controlBranch: "main" }).errors.join(), /ai-control\//);
   assert.match(parseConfig({ controlBranch: "claude/x" }).errors.join(), /ai-control\//);
   assert.deepEqual(parseConfig({ controlBranch: "ai-control/registry", mergePolicy: { HIGH: "AUTO" } }).errors, []);
+  assert.equal(classifyPushError("! [rejected]        abc -> ai-control/registry (fetch first)"), "CONFLICT");
+  assert.equal(classifyPushError("! [rejected]        abc -> ai-control/registry (non-fast-forward)"), "CONFLICT");
+  assert.equal(classifyPushError("! [remote rejected] abc -> ai-control/registry (cannot lock ref 'refs/heads/ai-control/registry': is at 1 but expected 2)"), "CONFLICT");
+  assert.equal(classifyPushError("! [remote rejected] abc -> ai-control/registry (push declined due to repository rule violations)\nGH013: Repository rule violations found"), "ERROR", "ruleset ⇒ lỗi thật, không thử lại như ghi tranh");
+  assert.equal(classifyPushError("remote: Permission to x/y.git denied to bot.\nfatal: unable to access"), "ERROR");
+  assert.equal(classifyPushError("fatal: unable to access 'https://github.com/x/y.git/': Could not resolve host"), "ERROR", "mất mạng ⇒ lỗi, không phải ghi tranh");
   assert.deepEqual(parsePrDependencies("Mục tiêu\nPhụ thuộc: #12, #15\n- Depends-on: #3\nkhông phải #99"), [3, 12, 15]);
 }
 
@@ -613,7 +620,61 @@ async function testVongDoi() {
     // Đã khép ⇒ phạm vi nhả: một sứ mệnh mới giữ src/a/ được ngay.
     assert.equal((await ai(B, "claim", "m-d", "--title=D", "--paths=src/a/")).code, 1, "m-b còn mở và giữ src/a/x.ts ⇒ chồng");
     assert.equal((await ai(B, "claim", "m-d", "--title=D", "--paths=src/a/", "--accept-overlap=m-d chỉ thêm tệp mới, không sửa x.ts")).code, 0);
+    // ── DONE qua đường CHỈ CÓ PR: commit gộp phải mang "(#N)" ở TIÊU ĐỀ và chạm phạm vi khai ──
+    put(path.join(A, "src", "y", "a.ts"), "export const y = 1;\n");
+    g(A, "add", "-A");
+    g(A, "commit", "-q", "-m", "Việc Y (#77)");
+    put(path.join(A, "docs", "ghi-chu.md"), "x\n");
+    g(A, "add", "-A");
+    g(A, "commit", "-q", "-m", "Ghi chú", "-m", "nhắc tới (#88) trong thân, không phải dấu gộp");
+    g(A, "push", "-q", "origin", "main");
+    assert.equal((await ai(A, "claim", "m-y", "--title=Y", "--paths=src/y/", "--prs=77")).code, 0);
+    assert.equal((await ai(A, "claim", "m-z", "--title=Z", "--paths=src/z/", "--prs=77")).code, 0);
+    assert.equal((await ai(A, "claim", "m-t", "--title=T", "--paths=docs/", "--prs=88")).code, 0);
+    const datVerifyCho = (id: string, sha: string) =>
+      mutateControl(openRepo(A), "kiem-thu:verify", (st) => {
+        const e = st.entries.find((x) => x.mission_id === id) as RegistryEntry;
+        return { change: { put: { [`mission.${id}.json`]: `${JSON.stringify({ ...e, evidence: { ...(e.evidence ?? {}), verify: `PASS ${sha} ${iso(0)}` } }, null, 2)}\n` }, message: "mô phỏng verify --record" }, result: null };
+      });
+    for (const id of ["m-y", "m-z", "m-t"]) datVerifyCho(id, g(A, "rev-parse", "main"));
+    assert.equal((await ai(A, "close", "m-y", "--status=DONE", "--evidence=#77")).code, 0, "PR gộp (tiêu đề '(#77)') chạm đúng phạm vi + verify phủ ⇒ DONE");
+    const lac = await ai(A, "close", "m-z", "--status=DONE", "--evidence=#77");
+    assert.equal(lac.code, 1, "mượn số một PR không chạm phạm vi của mình ⇒ không chứng minh được");
+    assert.match(lac.text, /không chạm tệp nào trong phạm vi khai/);
+    const than = await ai(A, "close", "m-t", "--status=DONE", "--evidence=#88");
+    assert.equal(than.code, 1, "'(#88)' nằm trong THÂN commit không phải dấu gộp");
+    assert.match(than.text, /chưa có bằng chứng/);
+
+    // ── Bằng chứng CONTENT (squash không ghi số PR) trên đường runtime ⇒ không chỉ ra được commit ⇒ từ chối ──
+    g(B, "fetch", "-q", "origin");
+    g(B, "checkout", "-q", "-b", "claude/m-w", "origin/main");
+    put(path.join(B, "src", "w", "a.ts"), "export const w = 1;\n");
+    g(B, "add", "-A");
+    g(B, "commit", "-q", "-m", "việc W");
+    g(B, "push", "-q", "origin", "claude/m-w");
+    assert.equal((await ai(B, "claim", "m-w", "--title=W", "--branch=claude/m-w", "--paths=src/w/")).code, 0);
+    g(A, "fetch", "-q", "origin");
+    g(A, "checkout", "-q", "main");
+    g(A, "merge", "-q", "--squash", "origin/claude/m-w");
+    g(A, "commit", "-q", "-m", "gộp W kiểu squash, không số PR");
+    g(A, "push", "-q", "origin", "main");
+    datVerifyCho("m-w", g(A, "rev-parse", "main"));
+    const content = await ai(A, "close", "m-w", "--status=DONE", "--evidence=squash");
+    assert.equal(content.code, 1, content.text);
+    assert.match(content.text, /không chỉ ra được commit đưa sứ mệnh vào main/);
+
+    // ── Khoá cũ (chưa có mã) được nâng cấp khi chủ chạm vào — và để lại vết ──
+    mutateControl(openRepo(A), "kiem-thu:khoa-cu", () => ({
+      change: { put: { "lease.tech-lead.json": `${JSON.stringify({ name: "tech-lead", holder: "may:phien-a", purpose: "", acquired_at: iso(-5), heartbeat_at: iso(-5), expires_at: iso(30), generation: 1 })}\n` }, message: "khoá cũ chưa có mã" },
+      result: null,
+    }));
+    const nc = await ai(A, "lease", "acquire", "tech-lead");
+    assert.match(nc.text, /nâng cấp: gắn mã phiên mới/, nc.text);
+    assert.equal((await ai(A, "lease", "acquire", "tech-lead")).code, 1, "sau nâng cấp, lượt thứ hai không mã (= phiên khác cùng cây) bị từ chối");
+
     const kinds = readControl(ctxA, { fetch: true }).events.map((e) => e.kind);
+    for (const k of ["LEASE_RESUMED", "LEASE_UPGRADED"]) assert.ok(kinds.includes(k), `nhật ký phải có ${k}`);
+    assert.ok(!readControl(ctxA, { fetch: true }).events.some((e) => e.kind === "LEASE_UPGRADED" && e.detail.startsWith("integration-lead")), "tiếp quản khoá cũ ĐÃ hết hạn là TAKEOVER, không phải UPGRADED");
     for (const k of ["CLAIM", "OVERLAP_DETECTED", "DUPLICATE_PREVENTED", "LEASE_ACQUIRED", "LEASE_TAKEOVER", "MIGRATION_RESERVED", "DONE", "OVERLAP_ACCEPTED"]) assert.ok(kinds.includes(k), `nhật ký sổ phải có ${k} (để đo được trùng việc đã chặn, khoá đổi tay…)`);
   } finally {
     rmSync(tmp, { recursive: true, force: true });

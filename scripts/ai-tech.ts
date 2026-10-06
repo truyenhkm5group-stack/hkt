@@ -2293,14 +2293,22 @@ export function writeControl(ctx: RepoCtx, parent: ControlState, change: Control
   return commit;
 }
 
+/**
+ * Lỗi đẩy là GHI TRANH (đọc lại rồi thử lại) hay LỖI (dừng): đỉnh remote đã đổi / khoá ref bận là tranh;
+ * ruleset, nhánh bảo vệ, quyền là lỗi — thử lại 4 lần cũng không qua, và báo "ghi tranh" là chẩn đoán sai.
+ */
+export function classifyPushError(msg: string): "CONFLICT" | "ERROR" {
+  if (/repository rule|protected branch|permission|denied|GH0\d\d/i.test(msg)) return "ERROR";
+  return /\[rejected\]|non-fast-forward|fetch first|stale info|cannot lock ref|incorrect old value|failed to update ref/i.test(msg) ? "CONFLICT" : "ERROR";
+}
+
 /** Đẩy ĐÚNG một commit lên ĐÚNG nhánh điều khiển — không ép, không refspec `+`, không nhánh nào khác. */
 function pushControlCommit(ctx: RepoCtx, commit: string): void {
   if (!SHA_RE.test(commit) || !CONTROL_BRANCH_RE.test(ctx.config.controlBranch)) throw new Error("từ chối đẩy: commit / nhánh điều khiển không hợp lệ");
   const r = gitRun(ctx.top, ["push", "--quiet", "--porcelain", ctx.config.remote, `${commit}:refs/heads/${ctx.config.controlBranch}`]);
   if (r.code === 0) return;
   const msg = `${r.out}\n${r.err}`;
-  const tranh = /\[rejected\]|non-fast-forward|fetch first|stale info/i.test(msg) || /cannot lock ref|incorrect old value|failed to update ref/i.test(msg);
-  if (tranh && !/repository rule|protected branch|permission|denied/i.test(msg)) throw new ControlConflict(`sổ đã đổi trên remote trong lúc ghi (${r.err.split("\n")[0]})`);
+  if (classifyPushError(msg) === "CONFLICT") throw new ControlConflict(`sổ đã đổi trên remote trong lúc ghi (${r.err.split("\n")[0]})`);
   throw new Error(`không đẩy được sổ điều khiển: ${r.err || r.out}`);
 }
 
@@ -2414,10 +2422,19 @@ async function productionHealth(ctx: RepoCtx, fetchImpl: FetchLike = fetch as un
 }
 
 /** Commit trên `ref` đã mang việc của nhánh vào (để hỏi "nó đã lên production chưa"). */
+/** Commit squash-merge của PR #pr trên `ref`: TIÊU ĐỀ kết thúc bằng "(#pr)" — cùng luật với `mergeEvidence`. */
+export function prLandedCommit(ctx: RepoCtx, pr: number, ref: string): string | null {
+  for (const line of lines(gitTry(ctx.top, ["log", "-n", "2000", "--format=%H%x09%s", "--fixed-strings", `--grep=(#${pr})`, ref]))) {
+    const tab = line.indexOf("\t");
+    if (tab > 0 && line.slice(tab + 1).trimEnd().endsWith(`(#${pr})`)) return line.slice(0, tab);
+  }
+  return null;
+}
+
 function landedCommit(ctx: RepoCtx, tip: string, ref: string, ev: MergeEvidence | null, pr: number | null): string | null {
   if (ev === "ANCESTOR") return tip;
   if (pr) {
-    const hit = gitTry(ctx.top, ["log", "-n", "1", "--format=%H", "--fixed-strings", `--grep=(#${pr})`, ref]);
+    const hit = prLandedCommit(ctx, pr, ref);
     if (hit) return hit;
   }
   return null;
@@ -3031,7 +3048,7 @@ async function entryFacts(
       const p = (await o.get(`/pulls/${lastPr}`)) as Record<string, unknown>;
       facts.pr = { number: lastPr, state: String(p.state), merged: Boolean(p.merged_at), gates: null };
       if (facts.pr.merged && o.prodSha) {
-        const lc = gitTry(ctx.top, ["log", "-n", "1", "--format=%H", "--fixed-strings", `--grep=(#${lastPr})`, o.ref]);
+        const lc = prLandedCommit(ctx, lastPr, o.ref);
         facts.inProduction = lc ? gitRun(ctx.top, ["merge-base", "--is-ancestor", lc, o.prodSha]).code === 0 : null;
       }
     } catch {
@@ -3363,7 +3380,7 @@ function cmdClose(ctx: RepoCtx, idIn: string | undefined, flags: Set<string>, va
       const tip = e.branch ? (gitTry(ctx.top, ["rev-parse", "--verify", "--quiet", `refs/remotes/${ctx.config.remote}/${e.branch}`]) ?? gitTry(ctx.top, ["rev-parse", "--verify", "--quiet", `refs/heads/${e.branch}`])) : null;
       const lastPr = e.related_prs.length ? e.related_prs[e.related_prs.length - 1] : undefined;
       const ev = tip ? mergeEvidence(ctx.top, tip, ctx.config.integrationRef, { pr: lastPr, baseSha: e.base_sha ?? undefined }) : null;
-      const prLanded = lastPr ? gitTry(ctx.top, ["log", "-n", "1", "--format=%H", "--fixed-strings", `--grep=(#${lastPr})`, ctx.config.integrationRef]) : null;
+      const prLanded = lastPr ? prLandedCommit(ctx, lastPr, ctx.config.integrationRef) : null;
       const branchLanded = ev !== null && ev !== "EMPTY";
       // Mọi nhánh lỗi rơi về phía HẸP (AGENTS.md mục 31): không chứng minh được thì KHÔNG DONE.
       if (!e.branch && !e.related_prs.length)
@@ -3371,16 +3388,28 @@ function cmdClose(ctx: RepoCtx, idIn: string | undefined, flags: Set<string>, va
       if (!branchLanded && !prLanded)
         return { change: null, result: { ok: false, msg: `chưa có bằng chứng ${e.branch ?? `PR #${lastPr}`} đã vào ${ctx.config.integrationRef} — DONE chỉ sau khi vào main` } };
       const landed = (tip && branchLanded ? landedCommit(ctx, tip, ctx.config.integrationRef, ev, lastPr ?? null) : null) ?? prLanded;
+      const landedFiles = landed ? lines(gitTry(ctx.top, ["diff-tree", "--no-commit-id", "--name-only", "-r", "-m", "--first-parent", landed])) : [];
+      if (!branchLanded && landed && !landedFiles.some((f) => e.owned_paths.some((p) => fileInPattern(f, p))))
+        return { change: null, result: { ok: false, msg: `PR #${lastPr} không chạm tệp nào trong phạm vi khai của ${id} — một số PR tự khai không chứng minh được sứ mệnh này đã vào main` } };
+      // Danh sách tệp KHÔNG chạy trên VPS đọc từ nhánh tích hợp, không từ cây đang đứng (sửa cục bộ không nới được).
+      let nonRuntime = ctx.config.nonRuntimePaths;
+      try {
+        const onRef = gitTry(ctx.top, ["show", `${ctx.config.integrationRef}:.ai/config.json`]);
+        if (onRef) {
+          const pc = parseConfig(JSON.parse(onRef));
+          if (!pc.errors.length) nonRuntime = pc.config.nonRuntimePaths;
+        }
+      } catch {
+        /* cấu hình trên nhánh tích hợp hỏng — dùng mặc định của công cụ */
+      }
       if (flags.has("no-runtime")) {
         // `--no-runtime` là một KHẲNG ĐỊNH về tệp — đối chiếu với tệp thật sứ mệnh đã chạm, không tin chữ.
-        const files =
-          tip && branchLanded && e.base_sha
-            ? lines(gitTry(ctx.top, ["diff", "--name-only", "--no-renames", e.base_sha, tip]))
-            : landed
-              ? lines(gitTry(ctx.top, ["diff-tree", "--no-commit-id", "--name-only", "-r", "-m", "--first-parent", landed]))
-              : null;
-        if (!files || !files.length) return { change: null, result: { ok: false, msg: "không xác định được tệp sứ mệnh đã đổi — --no-runtime không kiểm được; dùng verify --record" } };
-        const runtime = files.filter((f) => !ctx.config.nonRuntimePaths.some((p) => fileInPattern(f, p)));
+        // Tệp của các commit RIÊNG của nhánh (bỏ commit gộp main vào nhánh — `diff-tree` không -m không in gì cho
+        // commit gộp), hoặc của commit squash trên main khi chỉ có PR.
+        const own = tip && branchLanded ? ownCommits(ctx.top, tip, ctx.config.integrationRef, e.base_sha ?? undefined) : null;
+        const files = own && own.length ? [...new Set(own.flatMap((c) => lines(gitTry(ctx.top, ["diff-tree", "--no-commit-id", "--name-only", "-r", c]))))] : landedFiles;
+        if (!files.length) return { change: null, result: { ok: false, msg: "không xác định được tệp sứ mệnh đã đổi — --no-runtime không kiểm được; dùng verify --record" } };
+        const runtime = files.filter((f) => !nonRuntime.some((p) => fileInPattern(f, p)));
         if (runtime.length)
           return { change: null, result: { ok: false, msg: `--no-runtime nhưng sứ mệnh chạm ${runtime.length} tệp chạy trên VPS (${runtime.slice(0, 5).join(", ")}) — deploy rồi verify --record` } };
       } else {
@@ -3434,8 +3463,8 @@ function cmdLease(ctx: RepoCtx, op: string | undefined, nameIn: string | undefin
     if (op !== "renew" && !(op === "acquire" && cur !== null && d.next?.generation === cur.generation))
       evs.push({ kind: d.takeoverFrom ? "LEASE_TAKEOVER" : op === "acquire" ? "LEASE_ACQUIRED" : "LEASE_RELEASED", detail: `${name}${d.takeoverFrom ? ` từ ${d.takeoverFrom.holder} (hết hạn ${d.takeoverFrom.expires_at})` : ""}` });
     // Nhận lại bằng --resume và nâng cấp khoá cũ đều phải để lại vết: cả hai là chỗ hai phiên có thể cùng thành chủ.
-    if (flags.has("resume") && cur !== null && d.next?.generation === cur.generation) evs.push({ kind: "LEASE_RESUMED", detail: `${name} bằng mã đã lưu cạnh cây` });
-    if (cur !== null && cur.token_hash === undefined && d.next?.token_hash) evs.push({ kind: "LEASE_UPGRADED", detail: `${name}: khoá cũ được gắn mã phiên` });
+    if (op === "acquire" && flags.has("resume") && presented !== null && cur !== null && d.next?.generation === cur.generation) evs.push({ kind: "LEASE_RESUMED", detail: `${name} bằng mã đã lưu cạnh cây` });
+    if (!d.takeoverFrom && cur !== null && cur.token_hash === undefined && d.next?.token_hash) evs.push({ kind: "LEASE_UPGRADED", detail: `${name}: khoá cũ được gắn mã phiên` });
     return {
       change: d.next ? { put: { [file]: `${JSON.stringify(d.next, null, 2)}\n` }, events: evs, message: `khoá ${name}: ${op}` } : { put: {}, del: [file], events: evs, message: `khoá ${name}: nhả` },
       result: d,
@@ -3685,7 +3714,16 @@ async function cmdDeployPlan(ctx: RepoCtx, flags: Set<string>, values: Map<strin
   const me = controlActor(ctx);
   const presented = presentedLeaseToken(ctx, "integration-lead", values, flags);
   // Đang cầm khoá = đúng nhãn VÀ đúng mã phiên. Cùng nhãn mà sai / thiếu mã là phiên KHÁC trong cùng cây.
-  const holder = lease === null ? null : leaseIsMine(lease, me, presented ? sha256(presented) : null) ? me : lease.holder === me ? `${lease.holder} (một phiên khác cùng cây — trình mã bằng --token=… / --resume)` : lease.holder;
+  const holder =
+    lease === null
+      ? null
+      : lease.token_hash === undefined
+        ? `${lease.holder} (khoá cũ chưa có mã phiên — \`lease renew integration-lead\` để nâng cấp rồi chạy lại)`
+        : leaseIsMine(lease, me, presented ? sha256(presented) : null)
+          ? me
+          : lease.holder === me
+            ? `${lease.holder} (một phiên khác cùng cây — trình mã bằng --token=… / --resume)`
+            : lease.holder;
   const plan = planDeploy({ productionSha: prod.sha, mainSha, undeployed, mainGates, deployActive, leaseHolder: holder, me });
   if (flags.has("json")) {
     out(JSON.stringify({ ...plan, production: prod.sha, main: mainSha, undeployed }, null, 2));
