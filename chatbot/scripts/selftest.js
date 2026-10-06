@@ -2204,5 +2204,31 @@ console.log("OK 18: doi chieu dia chi don POS -> bat don chon nham xa, bo qua tr
   console.log("OK 51: gia shop da bao khach (xa 249K) dung cho ban chot, chot chan gia va tu xac nhan; gia khach tu noi khong tinh");
 }
 
+// ---- 52: quet lai page mot lan — muc DA ghi don nhap nhung chua xac nhan (don con "Mới") cung duoc kiem lai
+{
+  const ob = bot.orderBot;
+  const giu = store.state.orderBot;
+  const now = Date.now();
+  store.state.orderBot = {
+    a: { pageId: "PX", status: "REVIEW", firstSeen: now - 3 * 86400e3 },
+    b: { pageId: "PX", status: "DONE", orderId: 1, firstSeen: now - 2 * 86400e3 },
+    c: { pageId: "PX", status: "DONE", orderId: 2, confirmedAt: now, firstSeen: now - 86400e3 },
+    d: { pageId: "PX", status: "DISMISSED", firstSeen: now },
+    e: { pageId: "PY", status: "REVIEW", firstSeen: now },
+    f: { pageId: "PX", status: "REVIEW", firstSeen: now - 9 * 86400e3 },
+  };
+  ob._save = () => {};
+  assert.equal(ob.requeuePage("PX", 168), 1, "mac dinh: chi muc chua co don");
+  ob.items.a.status = "REVIEW";
+  assert.equal(ob.requeuePage("PX", 168, { unconfirmed: true }), 2, "quet lai: them don nhap chua xac nhan");
+  assert.equal(ob.items.b.status, "PENDING");
+  assert.equal(ob.items.c.status, "DONE", "da xac nhan -> khong dung");
+  assert.equal(ob.items.d.status, "DISMISSED", "nhan vien bo qua -> khong dung");
+  assert.equal(ob.items.f.status, "REVIEW", "ngoai 7 ngay -> khong dung");
+  store.state.orderBot = giu;
+  delete ob._save;
+  console.log("OK 52: quet lai page kiem lai ca don nhap chua xac nhan, khong dung don da xac nhan / da bo qua / ngoai ky");
+}
+
 console.log("\nTAT CA TEST PASS");
 process.exit(0);

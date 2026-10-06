@@ -25,6 +25,10 @@ const SWEEP_MS = 5 * 60 * 1000;
 // Mau chu luc chu shop chot cho tung page — ap MOT lan khi khoi dong neu page chua khai (sua lai trong cai dat page van
 // duoc, khong bi de lai). Chu shop 02/10/2026: "mặc định page này chạy Q005" (Linh Tây Luxury CS1).
 const PAGE_DEFAULT_PRODUCT_SEED = [{ page: "linh tay luxury cs1", code: "Q005" }];
+// Quet lai MOT lan cac hoi thoai co SDT 15 ngay qua cua page (chu shop 06/10/2026: "check cac don tren page nay don moi dien dung dia
+// chi san pham roi xac nhan"): hoi thoai trong `hours` gio qua chua xac nhan duoc kiem lai ngay -> dien don nhap, du dieu
+// kien thi tu xac nhan, thieu (vd khach chi ghi ten cua hang, khong co xa/huyen/tinh) thi sang "can duyet" kem ly do.
+const PAGE_RESCAN_ONCE = [{ id: "cs1-2026-10-06", page: "linh tay luxury cs1", hours: 15 * 24, max: 500 }];
 const khongDau = (s) => String(s || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/đ/g, "d").replace(/\s+/g, " ").trim();
 
 // Doi phien ban -> danh sach theo doi cu bi bo mot lan khi khoi dong (resetIfNeeded)
@@ -304,6 +308,7 @@ export class OrderBot {
       log.warn(`[orderbot] dat mau chu luc loi: ${e.message}`);
     }
     if (!settings.orderBot().enabled || this.sweeping) return;
+    this.rescanPagesOnce().catch((e) => log.warn(`[orderbot] quet lai page loi: ${e.message}`));
     this.sweeping = true;
     try {
       await this._sweep();
@@ -535,13 +540,13 @@ export class OrderBot {
     return true;
   }
 
-  async seed(hours = 24, max = 300) {
+  async seed(hours = 24, max = 300, onlyPageId = null) {
     const cutoff = Date.now() - hours * 3600e3;
     let n = 0;
     for (const [pid, client] of this.bot.clients) {
-      if (!this.enabledFor(pid)) continue;
+      if (!this.enabledFor(pid) || (onlyPageId && String(pid) !== String(onlyPageId))) continue;
       let last;
-      for (let trang = 0; trang < 20 && n < max; trang++) {
+      for (let trang = 0; trang < 40 && n < max; trang++) {
         const data = await client.getConversations({ type: "INBOX", order_by: "updated_at", last_conversation_id: last });
         const list = data.conversations || [];
         if (!list.length) break;
@@ -599,16 +604,45 @@ export class OrderBot {
    * Doi mau chu luc cua page -> cac hoi thoai 24 gio qua dang cho / can duyet (chua len don) duoc kiem lai NGAY voi bo
    * dem moi: ly do treo thuong chinh la "khong ro mau".
    */
-  requeuePage(pageId, hours = 24) {
+  requeuePage(pageId, hours = 24, { unconfirmed = false } = {}) {
     const moc = Date.now() - hours * 3600e3;
     let n = 0;
     for (const it of Object.values(this.items)) {
-      if (it.pageId !== String(pageId) || !["PENDING", "REVIEW"].includes(it.status) || it.orderId || (it.firstSeen || 0) < moc) continue;
+      if (it.pageId !== String(pageId) || (it.firstSeen || 0) < moc) continue;
+      // unconfirmed: ca muc DA ghi don nhap nhung chua tu xac nhan duoc (don con "Mới") cung kiem lai
+      const cho = ["PENDING", "REVIEW"].includes(it.status) && !it.orderId;
+      const chuaXacNhan = unconfirmed && ["PENDING", "REVIEW", "DONE"].includes(it.status) && !it.confirmedAt;
+      if (!cho && !chuaXacNhan) continue;
       Object.assign(it, { status: "PENDING", rounds: 0, nextCheckAt: Date.now(), reviewAt: undefined });
       n++;
     }
     if (n) this._save();
     return n;
+  }
+
+  /** Quet lai MOT lan theo PAGE_RESCAN_ONCE (moi muc mot lan, ghi dau truoc khi chay de khoi dong lai khong quet hai lan). */
+  async rescanPagesOnce() {
+    if (this.rescanningPages) return 0;
+    const daQuet = (store.state.pageRescans ||= {});
+    let tong = 0;
+    this.rescanningPages = true;
+    try {
+      for (const [pid, ten] of this.bot.pageNames) {
+        const cacTen = [ten, this.bot.pancakeNames?.get(pid)].map(khongDau);
+        for (const r of PAGE_RESCAN_ONCE) {
+          if (daQuet[r.id] || !cacTen.includes(r.page)) continue;
+          daQuet[r.id] = Date.now();
+          this._save();
+          const moi = await this.seed(r.hours, r.max || 300, pid);
+          const lai = this.requeuePage(pid, r.hours, { unconfirmed: true });
+          log.info(`[orderbot] quet lai page ${ten}: gieo ${moi} hoi thoai, kiem lai ${lai} muc chua xac nhan`);
+          tong += lai;
+        }
+      }
+    } finally {
+      this.rescanningPages = false;
+    }
+    return tong;
   }
 
   start() {
