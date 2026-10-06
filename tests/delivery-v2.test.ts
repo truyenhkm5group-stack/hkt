@@ -298,6 +298,10 @@ function testDoiChieu() {
   const f = (over: Partial<EntryFacts> = {}): EntryFacts => ({ branch: { local: true, remote: true, tip: "a".repeat(40) }, merged: null, pr: null, inProduction: null, touched: [], openDependencies: [], ...over });
   const e = entry("e", { branch: "claude/e" });
   assert.equal(reconcileEntry(e, f(), CFG, now).effective, "RUNNING");
+  const hf = { branch: "claude/e", sha: "a".repeat(40), at: new Date(now).toISOString(), actor: "x", title: "t", summary: "", tests: [] };
+  const thieuPr = (over: Partial<RegistryEntry>) => reconcileEntry(entry("e", { branch: "claude/e", status: "PR_READY", handoff: hf, ...over }), f(), CFG, now).drift.some((d) => /CHƯA có PR/.test(d));
+  assert.ok(thieuPr({}), "bàn giao xong, không PR nào (GitHub lẫn sổ) ⇒ nhắc Lead pr-open");
+  assert.ok(!thieuPr({ related_prs: [606] }), "sổ đã ghi PR mà bảng không hỏi GitHub ⇒ KHÔNG báo thiếu PR (06/10/2026, #606)");
   const m = reconcileEntry(e, f({ merged: "PR_SUBJECT", inProduction: false }), CFG, now);
   assert.equal(m.effective, "INTEGRATING", "sổ nói RUNNING mà git nói đã vào ⇒ git thắng");
   assert.match(m.drift.join(), /đã vào main/);

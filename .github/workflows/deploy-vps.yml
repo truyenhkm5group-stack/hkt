@@ -64,7 +64,8 @@ jobs:
   #
   #   · có                       ⇒ dùng lại (job `gates` dưới đây BỎ QUA), SHA lấy từ chính lượt ấy;
   #   · đang chạy / đang chờ     ⇒ CHỜ nó (tối đa ~28′) thay vì dựng một lượt trùng song song;
-  #   · không có / đỏ / bị huỷ   ⇒ tự chạy `gates.yml` như trước — hành vi cũ là đường lùi.
+  #   · đỏ / bị huỷ              ⇒ tự chạy `gates.yml` ngay — hành vi cũ là đường lùi;
+  #   · không thấy lượt nào      ⇒ hỏi lại mỗi 30 giây (~1,5′ nếu chưa từng thấy CI chạy, ~4,5′ nếu đã thấy) rồi mới chạy cổng.
   #
   # VÌ SAO HỎI "LƯỢT CHẠY WORKFLOW" CHỨ KHÔNG HỎI "CHECK RUN": một check run tên `gates / gates` thì
   # job nào có quyền `checks: write` cũng TẠO ĐƯỢC trên bất kỳ SHA nào. Còn `path`, `event`,
@@ -133,7 +134,7 @@ jobs:
               # (vừa gộp), hoặc danh sách của GitHub thiếu một nhịp. Đo 06/10/2026 (deploy 37444778809): lượt CI của
               # 0ca4ed97 ĐANG CHẠY từ 09:41 tới 09:59, nhưng lúc 09:51 một lần hỏi không thấy nó ⇒ bản cũ bỏ cuộc ngay,
               # chạy cổng lần hai (+18 phút) cho đúng SHA vừa xanh 8 phút sau. Nên chỉ ĐỎ / HUỶ thấy được mới là lý do
-              # chạy cổng ngay; vắng mặt thì hỏi lại — 4 lần (2 phút) nếu chưa từng thấy CI chạy, 10 lần nếu đã thấy.
+              # chạy cổng ngay; vắng mặt thì hỏi lại — tối đa 4 lần hỏi (~1,5 phút) nếu chưa từng thấy CI chạy, 10 lần (~4,5 phút) nếu đã thấy.
               vang=$((vang + 1))
               tran=4
               [ "$thay" = 1 ] && tran=10
