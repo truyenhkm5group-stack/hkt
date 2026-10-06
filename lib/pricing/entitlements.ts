@@ -22,7 +22,7 @@ import { applyQuotaOverrides, parseCommercial, planQuotas, QUOTA_KEYS, type Plan
 import { featureGranted, FEATURE_KEYS, parseFeatureOverrides, type FeatureDecision, type FeatureKey } from "@/lib/pricing/features";
 import { DEFAULT_GUARD_CONFIG, evaluateQuota, parseGuardConfig, type Enforcement, type GuardConfig, type QuotaVerdict } from "@/lib/pricing/guard";
 import { usagePeriodOf, type MeterKey, type MeterReadings } from "@/lib/pricing/meter";
-import { invalidatePriceBook, plansForOrg } from "@/lib/pricing/price-book";
+import { invalidatePriceBook, plansForOrgSafe } from "@/lib/pricing/price-book";
 import type { PlanPrice } from "@/lib/pricing/versions";
 
 export const PRICING_GUARD_KEY = "platform.pricing.guard";
@@ -94,7 +94,7 @@ export type OrgPricing = {
 export async function resolveOrgPricing(org: Pick<Organization, "code" | "isHome" | "plan">): Promise<OrgPricing> {
   const row = org.isHome ? NO_ROW : await readOrgPricingRow(org.code);
   // Gói "như hoá đơn của tổ chức đọc" — giá + phần thương mại theo phiên bản đã ghim (0226).
-  const plans = await plansForOrg(org.code);
+  const plans = await plansForOrgSafe(org.code);
   const key = planKeyOf(org);
   const hit = plans.find((p) => p.key === key);
   const p = hit ?? plans.find((x) => x.key === DEFAULT_PLAN_KEY) ?? null;

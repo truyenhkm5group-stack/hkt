@@ -9,7 +9,10 @@
  *  · `pinOrgPriceVersion` — ghim (hoá đơn được trả / người vận hành chuyển). `publishCatalogVersion` — sửa giá = THÊM phiên
  *    bản mới chép từ phiên bản hiện hành; dòng cũ không bao giờ bị sửa.
  *
- * Bảng chưa có (máy chưa migrate 0226) ⇒ sổ rỗng ⇒ mọi gói "không bán" ở đường mới, nói ra — không đoán giá.
+ * LỖI ĐỌC sổ giá / ghim ⇒ NÉM (không đệm): đường tiền (báo giá, hoá đơn, MRR, bảng kê) từ chối «thử lại», KHÔNG BAO GIỜ
+ * rơi về bảng giá hiện hành — một lần CSDL chập mà báo giá V1 cho khách đang ghim giá cũ thì hoá đơn ấy ghim họ VĨNH VIỄN vào
+ * giá mới. Chỉ tổ chức đọc ghim THÀNH CÔNG mà không có dòng mới là tổ chức theo bảng giá hiện hành. Đường không phải tiền
+ * (entitlement, trần người dùng) dùng `plansForOrgSafe`: lỗi ⇒ `platform_plans` thô (= giá / hạn mức cũ, phía hẹp).
  */
 import { eq, sql } from "drizzle-orm";
 import { getPlatformDb, schema } from "@/db";
@@ -57,30 +60,24 @@ export function invalidatePriceBook(orgCode?: string) {
 export async function loadPriceBook(opts: { fresh?: boolean } = {}): Promise<PriceBook> {
   const hit = holder.__erpPriceBook;
   if (!opts.fresh && hit && Date.now() - hit.at < TTL_MS) return hit.book;
-  let book: PriceBook = { versions: [], prices: [] };
-  try {
-    const pdb = await getPlatformDb();
-    const [versions, prices] = await Promise.all([pdb.select().from(schema.platformPriceVersions), pdb.select().from(schema.platformPlanPrices)]);
-    book = { versions: versions.map(parsePriceVersion), prices: prices.map(parsePlanPrice) };
-  } catch {
-    book = { versions: [], prices: [] };
-  }
+  // Lỗi ⇒ ném, KHÔNG đệm: sổ rỗng giả sẽ làm mọi gói "không bán" và MRR thành 0 (luật 42).
+  const pdb = await getPlatformDb();
+  const [versions, prices] = await Promise.all([pdb.select().from(schema.platformPriceVersions), pdb.select().from(schema.platformPlanPrices)]);
+  const book: PriceBook = { versions: versions.map(parsePriceVersion), prices: prices.map(parsePlanPrice) };
   holder.__erpPriceBook = { at: Date.now(), book };
   return book;
 }
 
-/** Khoá phiên bản đã ghim của tổ chức; `null` = chưa ghim (đi theo bảng giá hiện hành). */
+/**
+ * Khoá phiên bản đã ghim của tổ chức; `null` = đọc THÀNH CÔNG và KHÔNG có dòng ghim (tổ chức mới — theo bảng giá hiện hành).
+ * Lỗi đọc ⇒ NÉM, không đệm: "không đọc được" không bao giờ được hiểu thành "chưa ghim".
+ */
 export async function readPricePin(orgCode: string, opts: { fresh?: boolean } = {}): Promise<string | null> {
   const hit = pinCache.get(orgCode);
   if (!opts.fresh && hit && Date.now() - hit.at < TTL_MS) return hit.key;
-  let key: string | null = null;
-  try {
-    const pdb = await getPlatformDb();
-    const [row] = await pdb.select({ key: schema.platformPricePins.versionKey }).from(schema.platformPricePins).where(eq(schema.platformPricePins.orgCode, orgCode)).limit(1);
-    key = row?.key ?? null;
-  } catch {
-    key = null;
-  }
+  const pdb = await getPlatformDb();
+  const [row] = await pdb.select({ key: schema.platformPricePins.versionKey }).from(schema.platformPricePins).where(eq(schema.platformPricePins.orgCode, orgCode)).limit(1);
+  const key = row?.key ?? null;
   pinCache.set(orgCode, { at: Date.now(), key });
   return key;
 }
@@ -100,6 +97,18 @@ function overlayAll(plans: readonly PlanRow[], book: PriceBook, version: PriceVe
 export async function plansForOrg(orgCode: string, now: Date = new Date()): Promise<PricedPlanRow<PlanRow>[]> {
   const [plans, v] = await Promise.all([listPlans(), orgPriceVersion(orgCode, now)]);
   return overlayAll(plans, v.book, v.version);
+}
+
+/**
+ * Như `plansForOrg` cho đường KHÔNG phải tiền (entitlement, trần người dùng): lỗi đọc sổ giá ⇒ `platform_plans` thô — giá và
+ * hạn mức cũ (phía hẹp), không phải bảng giá hiện hành, và không ai ghim gì từ kết quả này.
+ */
+export async function plansForOrgSafe(orgCode: string, now: Date = new Date()): Promise<PricedPlanRow<PlanRow>[]> {
+  try {
+    return await plansForOrg(orgCode, now);
+  } catch {
+    return (await listPlans()).map((p) => ({ ...p, yearlyPriceVnd: null, priceFromVnd: null, priceVersionKey: null, priceSource: "NONE" as const, planPrice: null }));
+  }
 }
 
 /**

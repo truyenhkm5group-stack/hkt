@@ -1,3 +1,4 @@
+import { noteAiCustomerReply } from "@/lib/pricing/ai-customer";
 import { randomUUID } from "node:crypto";
 import { and, eq, gte, inArray, isNotNull, isNull, lt, or, sql } from "drizzle-orm";
 import { getDb, getPlatformDb, schema } from "@/db";
@@ -651,6 +652,7 @@ export async function processMessengerThread(pageId: string, psid: string, deps:
       if (pr && !pr.ok) await noteMessengerGraphFailure(pr, pageId);
       if (pr?.ok) {
         out.replies += 1;
+        if (turn.aiGenerated) await noteAiCustomerReply(conv.id, now());
         if (pr.id) await db.insert(t).values({ pageId, threadId: psid, messageId: pr.id, text: replyText.slice(0, TEXT_MAX), status: "DONE", processedAt: now(), note: "BOT_SENT" }).onConflictDoNothing({ target: t.messageId });
       }
       if (pr && !pr.ok) await deadLetter(db, ids, claim, `${DEAD_SEND_NOTE_PREFIX}${pr.error}`, pr.error, now());
@@ -703,6 +705,7 @@ export async function processMessengerThread(pageId: string, psid: string, deps:
     // Gửi hỏng ⇒ DEAD-LETTER, KHÔNG tự gửi lại (lời gọi gửi có thể đã tới nơi).
     if (sendError) await deadLetter(db, ids, claim, `${DEAD_SEND_NOTE_PREFIX}${sendError}`, sendError, now());
     else await finish("DONE", yielded);
+    if (!sendError && out.replies > 0 && turn.aiGenerated && replies.length) await noteAiCustomerReply(conv.id, now());
     if (!sendError && out.replies > 0) await markWaitingForCustomer(conv.id, now());
     if (yielded) out.skipped = yielded;
     out.processed += ids.length;

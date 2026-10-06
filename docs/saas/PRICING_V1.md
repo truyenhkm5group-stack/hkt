@@ -145,3 +145,22 @@ gói đích thấp hơn số dùng AI thật.
 `lib/pricing/value-kpis.ts`: đơn AI góp công / AI tạo / AI tự chốt, doanh thu nhờ AI (theo `ORDER_OUTCOME`), GMV nhờ AI (giá trị
 đơn lúc tạo), tỷ lệ chốt, tỷ lệ nhận upsell — đọc lại đường đo đã có. `cross_sell_rate` = `UNAVAILABLE` (sổ sự kiện chưa có
 `cross_sell.*`).
+
+### 6. An toàn tiền & giới hạn (review 07/10/2026)
+
+- **Lỗi đọc ghim / sổ giá ⇒ NÉM, không đệm**: báo giá gia hạn / mua thêm trả «thử lại», ảnh chụp MRR BỎ dòng tổ chức đó trong
+  ngày (không ghi 0). Không bao giờ rơi về bảng giá hiện hành — hoá đơn mang phiên bản mới sẽ ghim khách cũ vào giá mới. Chỉ
+  tổ chức đọc ghim THÀNH CÔNG mà không có dòng mới theo bảng giá hiện hành. Ghim trỏ phiên bản không còn ⇒ legacy + cảnh báo.
+  Entitlement / trần người dùng dùng `plansForOrgSafe` (lỗi ⇒ `platform_plans` thô, phía hẹp).
+- **Chỉ câu do MODEL sinh mới là khách AI**: engine trả `aiGenerated` (có chữ do model viết, sau bộ lọc); câu mẫu theo từ khoá /
+  AI chọn câu mẫu, câu hệ thống, chuyển người, nhân viên ⇒ không đếm. Ghi tại `fanpage.ts` (nhắn + bình luận) và `messenger.ts`
+  (nhắn + tin riêng bình luận) SAU khi gửi thành công (`!sendError && out.replies > 0`). Bài kiểm chạy đường gửi thật:
+  `tests/ai-customer-send.test.ts`.
+- **Gói giá 0 (dùng thử)** giữ trần tiền CỨNG = ngân sách dẫn xuất (chưa trả tiền; chính sách chi phí riêng, đăng ký mở tự do).
+  Gói trả phí không trần cứng. Tỷ giá thiếu ⇒ ngân sách `null`, không chặn.
+- **Mua thêm người dùng ở V1** = đơn giá «người dùng thêm» của chính phiên bản (49.000 ₫ / người / tháng, migration dẫn xuất
+  `addon_prices.users` từ cột `overage`). Fanpage thêm không phải hạng mục mua thêm 0192 — chỉ là phần vượt. Tổ chức legacy có
+  hạng mục mua thêm khác (trang, dung lượng…) đổi lên gói V1 bị báo «gói đích không bán phần đang có» — người vận hành gỡ phần
+  đó (`setOrgAddons`) hoặc chuyển phiên bản trước.
+- **Chốt kỳ**: bảng kê chốt ghi `priceVersionKey` của từng workspace vào ảnh chụp. Giới hạn: ghim không có lịch sử theo thời
+  gian — chốt một kỳ cũ dùng ghim HIỆN TẠI; chốt ngay đầu tháng sau (như giới hạn v1 của COST_BILLING §4).

@@ -12,8 +12,11 @@
 --    không có ghim (tạo sau) ⇒ theo phiên bản CATALOG đang hiệu lực, và được ghim khi hoá đơn đầu tiên được trả.
 --  · `platform_invoices.price_version_key`: hoá đơn tính theo phiên bản nào (NULL = trước 0226 = legacy).
 --  · Gói MỚI trong `platform_plans`: `inbox` (KHÔNG có AI bán hàng) và `scale` — chỉ là DANH TÍNH gói + hạn mức kỹ thuật
---    (`checkEntitlement`); giá của chúng nằm ở phiên bản. Credit AI nền tảng của hai gói mới = 0 (credit là quyết định của chủ
---    nền tảng, 0194 — chưa khai cho gói mới ⇒ AI chạy bằng khoá của tổ chức). Gói cũ (basic · pro · standard · internal…) GIỮ NGUYÊN.
+--    (`checkEntitlement`); giá của chúng nằm ở phiên bản. `limits.ai` của hai dòng này chỉ là trần
+--    kỹ thuật cho tổ chức ghim legacy / gói cũ. Tổ chức theo bảng giá V1 KHÔNG đọc trần AI ở đây: `resolveAiLimits` dẫn xuất
+--    từ phiên bản (`catalogAiLimits`) — gói trả phí không trần cứng, credit = ngân sách mềm = giá tháng × (1 − biên nguy cấp)
+--    ÷ tỷ giá (vd Scale ≈ 46,9 USD ở 25.500 ₫/USD); gói giá 0 (dùng thử) giữ trần tiền cứng = ngân sách đó. Gói cũ (basic · pro ·
+--    standard · internal…) GIỮ NGUYÊN.
 --  · Mốc đồng hồ khách AI bắt đầu ghi = `created_at` của phiên bản CATALOG đầu tiên (dòng V1 do chính migration này ghi,
 --    cùng lần deploy với mã ghi đồng hồ) — kỳ bắt đầu trước mốc này là kỳ đo CHƯA TRỌN (cận dưới, không tính phần vượt).
 --    Không gieo dòng `platform_settings` nào (ghi đè tay vẫn được ở `platform.pricing.ai-customer-meter-live-at`).
@@ -135,6 +138,10 @@ INSERT INTO "platform_plan_prices" ("version_key", "plan_key", "name", "descript
    '["ai_sales","multi_page_inbox","ai_order_creation","upsell","cross_sell","follow_up","human_handoff","analytics","advanced_analytics","custom_ai_training","api","webhook","multi_user"]'::jsonb, '{}'::jsonb, '{"users":null}'::jsonb,
    '{"publicListed":true,"contactSales":true,"quotas":{"fanpages":null,"aiConversations":null,"aiMessages":null,"orders":null},"features":["ai_sales","multi_page_inbox","ai_order_creation","upsell","cross_sell","follow_up","human_handoff","analytics","advanced_analytics","custom_ai_training","api","webhook","multi_user"],"overage":{"policy":"SOFT_ONLY","unitPricesVnd":{},"graceAllowancePct":0},"limitModes":{}}'::jsonb)
 ON CONFLICT ("version_key", "plan_key") DO NOTHING;--> statement-breakpoint
+-- Đơn giá MUA THÊM người dùng (0192, bước 1 người / tháng) của gói V1 = đơn giá «người dùng thêm» của CHÍNH phiên bản — dẫn xuất
+-- từ cột `overage`, không gõ số lần hai. Fanpage thêm không phải hạng mục mua thêm của 0192 (khoá `pages` là trang tuỳ biến).
+UPDATE "platform_plan_prices" SET "addon_prices" = jsonb_build_object('users', ("overage" ->> 'extraUserVnd')::bigint)
+WHERE "version_key" = 'v1-2026-10' AND "overage" ? 'extraUserVnd' AND "addon_prices" = '{}'::jsonb;--> statement-breakpoint
 
 -- ── Ghim MỌI tổ chức có từ trước vào `legacy` (kể cả nhà — gán nhà vào gói thường là việc tay, có chạy thử). ──
 INSERT INTO "platform_price_pins" ("org_code", "version_key", "source", "reason")

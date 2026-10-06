@@ -162,7 +162,8 @@ export function evaluateAiQuota(source: AiBillingSource, limits: AiLimits, usage
   const no = (reason: AiQuotaBlockReason, error: string): AiQuotaVerdict => ({ ok: false, reason, error, ...base });
   let hard = limits.costUsdPerMonth.hard;
   if (source === "PLATFORM") {
-    if (!(limits.platformCreditUsdPerMonth > 0)) return no("NO_PLATFORM_CREDIT", "Gói của tổ chức không có credit AI của nền tảng — khai khoá AI của tổ chức ở /settings/connections.");
+    // Ngân sách mềm chưa tính được (tỷ giá thiếu) ⇒ chỉ báo, không chặn.
+    if (!(limits.platformCreditUsdPerMonth > 0) && !limits.softOnly) return no("NO_PLATFORM_CREDIT", "Gói của tổ chức không có credit AI của nền tảng — khai khoá AI của tổ chức ở /settings/connections.");
     // Ngân sách mềm (softOnly) không bao giờ thành trần cứng — chỉ cảnh báo ở nhánh `soft` bên dưới.
     if (!limits.softOnly) hard = hard === null ? limits.platformCreditUsdPerMonth : Math.min(hard, limits.platformCreditUsdPerMonth);
   }

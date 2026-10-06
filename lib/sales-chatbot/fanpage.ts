@@ -629,8 +629,6 @@ export async function conversationFor(pageId: string, threadId: string): Promise
  * hay đang cần người xử lý (khi đó chỉ ghi mốc tin cuối của bot). `threadId` = hộp thư mới khi trả lời bình luận.
  */
 export async function markWaitingForCustomer(conversationId: string, now: Date, threadId?: string): Promise<void> {
-  // Đồng hồ khách AI (0226): chỉ được gọi SAU khi câu trả lời AI đã gửi thành công; không ném, lỗi ghi sổ không chặn việc gửi.
-  await noteAiCustomerReply(conversationId, now);
   const db = await getDb();
   const c = schema.salesChatConversations;
   const [row] = await db.select({ status: c.status, state: c.state }).from(c).where(eq(c.id, conversationId)).limit(1);
@@ -1038,6 +1036,8 @@ export async function processFanpageThread(pageId: string, threadId: string, dep
       );
       if (pr.kind === "SENT") {
         out.replies += 1;
+        // Đồng hồ khách AI (0226): chỉ câu do MODEL sinh, chỉ sau khi gửi thành công; lỗi ghi sổ không chặn việc gửi.
+        if (turn.aiGenerated) await noteAiCustomerReply(conv.id, now());
         if (pr.inboxId) await markWaitingForCustomer(conv.id, now(), pr.inboxId);
       }
       // Gửi hỏng ⇒ DEAD (không tự gửi lại — lượt gửi có thể đã tới nơi); đã gửi / đã có ⇒ như cũ.
@@ -1107,6 +1107,7 @@ export async function processFanpageThread(pageId: string, threadId: string, dep
     // Gửi hỏng ⇒ DEAD-LETTER (khách chưa nhận đủ câu trả lời — việc của người). KHÔNG tự gửi lại: lời gọi gửi có thể đã tới nơi.
     if (sendError) await deadLetter(db, ids, claim, `${DEAD_SEND_NOTE_PREFIX}${sendError}`, sendError, now());
     else await finish("DONE", yielded);
+    if (!sendError && out.replies > 0 && turn.aiGenerated && replies.length) await noteAiCustomerReply(conv.id, now());
     if (!sendError && out.replies > 0) await markWaitingForCustomer(conv.id, now());
     if (yielded) out.skipped = yielded;
     out.processed += ids.length;

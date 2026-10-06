@@ -1,5 +1,5 @@
 /*
-  ops `pricing-internal-fit` — KHÁCH NỘI BỘ VÀO GÓI THƯỜNG NHỎ NHẤT VỪA SỐ DÙNG THẬT (docs/saas/PRICING_V1.md §9).
+  `scripts/pricing-internal-fit.ts` (chạy tay: `npx tsx scripts/pricing-internal-fit.ts …`; CHƯA nối vào ops-vps.yml) — KHÁCH NỘI BỘ VÀO GÓI THƯỜNG NHỎ NHẤT VỪA SỐ DÙNG THẬT (docs/saas/PRICING_V1.md §9).
 
   MẶC ĐỊNH CHẠY THỬ: đo số dùng THẬT của kỳ đã qua (khách AI đo trọn kỳ · fanpage · người dùng) của workspace nhà (hoặc
   `--org=<mã>`), chọn gói rẻ nhất có số gồm phủ số dùng (`smallestFittingPlan`), in bảng kê chargeback ước tính bằng CÙNG

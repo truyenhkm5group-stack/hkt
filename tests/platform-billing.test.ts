@@ -432,7 +432,9 @@ export async function testPlatformBilling() {
     // ── 5 · MUA THÊM giữa kỳ (A đang trả gói Khởi đầu, còn hạn ~3 tháng). 0194 gieo đơn giá — gỡ hết trước để kiểm nhánh
     // «chưa khai giá ⇒ không bán».
     assert.ok("ok" in (await setPlanAddonPrices(op, { planKey: "starter", prices: {}, reason: "Gỡ đơn giá để kiểm thử" })));
-    assert.ok("error" in (await previewAddon(A, { kind: "users", blocks: 2 })), "gói chưa khai giá mua thêm ⇒ không bán");
+    const v1Users = await previewAddon(A, { kind: "users", blocks: 2 });
+    assert.ok(isAddonQuote(v1Users) && v1Users.monthlyVnd === 2 * 49_000, `A ghim V1: người dùng thêm 49.000 / tháng — dẫn xuất từ đơn giá vượt của phiên bản (${JSON.stringify(v1Users)})`);
+    assert.ok("error" in (await previewAddon(A, { kind: "storageMb", blocks: 1 })), "hạng mục phiên bản chưa khai giá mua thêm ⇒ không bán");
     for (const u of outsiders) assert.ok("error" in (await setPlanAddonPrices(u, { planKey: "starter", prices: { users: 30_000 }, reason: "mở bán thêm" })));
     assert.ok("error" in (await setPlanAddonPrices(op, { planKey: "starter", prices: { users: 500 }, reason: "giá vô lý" })));
     assert.ok("error" in (await setPlanAddonPrices(op, { planKey: "starter", prices: { aiDraftsPerDay: 10_000 }, reason: "hạng mục không bán" })));
@@ -440,7 +442,8 @@ export async function testPlatformBilling() {
     assert.ok("ok" in (await setPlanAddonPrices(op, { planKey: "starter", prices: { users: 30_000, storageMb: 20_000, pages: null }, reason: "Mở bán thêm cho gói Khởi đầu" })));
     const cat1 = await catalogPlans();
     assert.deepEqual(parseAddonPrices(cat1.plans.find((p) => p.key === "starter")?.addonPrices), { users: 30_000, storageMb: 20_000 }, "đơn giá mới nằm ở PHIÊN BẢN giá mới");
-    assert.ok("error" in (await previewAddon(A, { kind: "users", blocks: 2 })), "A đã ghim phiên bản lúc trả tiền ⇒ đơn giá mới chưa áp cho A");
+    const stillV1 = await previewAddon(A, { kind: "users", blocks: 2 });
+    assert.ok(isAddonQuote(stillV1) && stillV1.monthlyVnd === 2 * 49_000, "A đã ghim phiên bản lúc trả tiền ⇒ đơn giá mới (30.000) chưa áp cho A");
     for (const u of outsiders) assert.ok("error" in (await setOrgPriceVersion(u, { orgCode: A, versionKey: cat1.version!.key, reason: "chuyển giá" })));
     assert.ok("ok" in (await setOrgPriceVersion(op, { orgCode: A, versionKey: cat1.version!.key, reason: "Khách đồng ý bảng giá có mua thêm" })));
 

@@ -60,14 +60,21 @@ export async function captureSaasSnapshot(now: Date = new Date()): Promise<Snaps
   // Giá của MỖI tổ chức theo phiên bản giá đã ghim (0226) — MRR là số khách thật trả, không phải giá niêm yết hôm nay.
   const live = orgs.filter((o) => o.status !== "SETUP_FAILED");
   const rows: (SaasDailyRow & { mrrNote: string | null })[] = [];
-  for (const o of live) rows.push(snapshotRow(o, await plansForOrg(o.code, now), subs.get(o.code), day));
+  const errors: string[] = [];
+  for (const o of live) {
+    // Không đọc được sổ giá / ghim ⇒ BỎ dòng của tổ chức này hôm nay (lượt sau chụp lại) — ghi 0 / "không trả tiền" là bịa (luật 42).
+    const plans = await plansForOrg(o.code, now).catch((e: unknown) => {
+      errors.push(`${o.code}: không đọc được bảng giá — bỏ qua ảnh chụp MRR hôm nay (${e instanceof Error ? e.message.slice(0, 120) : String(e).slice(0, 120)})`);
+      return null;
+    });
+    if (plans) rows.push(snapshotRow(o, plans, subs.get(o.code), day));
+  }
   const t = schema.platformSaasDaily;
   for (const r of rows) {
     const values = { day: r.day, orgCode: r.orgCode, orgStatus: r.orgStatus, isHome: r.isHome, planKey: r.planKey, billingEnabled: r.billingEnabled, standing: r.standing, paying: r.paying, mrrVnd: r.mrrVnd, mrrNote: r.mrrNote, capturedAt: now };
     // Khoá (day, org): chỉ có thể trùng với dòng CỦA HÔM NAY — ảnh chụp cuối ngày thắng. Ngày cũ không bao giờ được ghi.
     await pdb.insert(t).values(values).onConflictDoUpdate({ target: [t.day, t.orgCode], set: { ...values } });
   }
-  const errors: string[] = [];
   const milestonesAdded = await scanMilestones(orgs, errors);
   const usageRows = await captureUsage(orgs, now, errors);
   return { day, orgs: rows.length, mrrVnd: rows.reduce((s, r) => s + (r.mrrVnd ?? 0), 0), milestonesAdded, usageRows, errors };

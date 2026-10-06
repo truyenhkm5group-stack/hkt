@@ -212,7 +212,9 @@ export function resolveOrgVersion(book: PriceBook, pinKey: string | null | undef
   if (pinKey) {
     const v = book.versions.find((x) => x.key === pinKey);
     if (v) return { version: v, pinned: true, note: null };
-    return { version: currentCatalogVersion(book, now), pinned: false, note: `Ghim trỏ tới phiên bản «${pinKey}» không còn trong sổ — đang đọc bảng giá hiện hành.` };
+    // Ghim trỏ tới phiên bản không còn ⇒ GIÁ CŨ (legacy), không bao giờ bảng giá hiện hành — đổi giá khách là quyết định của
+    // người, không phải hệ quả của một dòng mất.
+    return { version: book.versions.find((x) => x.key === LEGACY_VERSION_KEY) ?? null, pinned: true, note: `Ghim trỏ tới phiên bản «${pinKey}» không còn trong sổ — đang đọc giá cũ (legacy), người vận hành cần chuyển phiên bản.` };
   }
   return { version: currentCatalogVersion(book, now), pinned: false, note: null };
 }
@@ -549,6 +551,10 @@ export function aiCustomerCoverage(input: { aiSalesOn: boolean; legacyChatbotOn:
  * không có giá tháng (dùng thử) lấy giá tháng rẻ nhất của gói AI tự mua trong CÙNG phiên bản; gói hợp đồng lấy giá «từ …».
  * `null` = không áp (phiên bản legacy, gói cũ đọc dòng legacy, gói không có `ai_sales` như INBOX — AI bán hàng của INBOX tắt
  * bằng entitlement, không bằng trần) ⇒ nơi gọi giữ trần cũ của `platform_plans`. HÀM THUẦN.
+ *
+ * NGOẠI LỆ — gói GIÁ 0 (dùng thử, không giá tháng, không phải hợp đồng): chưa trả tiền nên luật «không tắt bot khi vượt hạn mức»
+ * không áp; chính sách chi phí / lạm dụng của tổ chức chưa trả tiền là RIÊNG (quyết định 07/10/2026 §5) và đăng ký production mở
+ * tự do ⇒ GIỮ trần tiền CỨNG = chính ngân sách dẫn xuất ở trên. Tỷ giá thiếu / ≤ 0 ⇒ ngân sách `null` (không chặn, chỉ báo).
  */
 export function catalogAiLimits(input: { hit: PlanPriceHit | null; versionKind: PriceVersionKind | null; versionPrices: readonly PlanPrice[]; criticalBelowPct: number; usdToVnd: number }): AiLimits | null {
   const { hit } = input;
@@ -557,6 +563,8 @@ export function catalogAiLimits(input: { hit: PlanPriceHit | null; versionKind: 
   const cheapest = input.versionPrices.filter((p) => isSellable(p) && (p.features ?? []).includes("ai_sales")).reduce<number | null>((m, p) => (m === null || (p.monthlyVnd ?? 0) < m ? p.monthlyVnd : m), null);
   const base = hit.price.monthlyVnd ?? hit.price.priceFromVnd ?? cheapest;
   const share = Math.max(0, 1 - input.criticalBelowPct / 100);
-  const budget = base !== null && input.usdToVnd > 0 ? Math.round(((base * share) / input.usdToVnd) * 100) / 100 : 0;
-  return { requestsPerDay: null, requestsPerMonth: null, costUsdPerMonth: { soft: budget > 0 ? budget : null, hard: null }, platformCreditUsdPerMonth: budget, softOnly: true };
+  const budget = base !== null && Number.isFinite(input.usdToVnd) && input.usdToVnd > 0 ? Math.round(((base * share) / input.usdToVnd) * 100) / 100 : null;
+  const unpaid = hit.price.monthlyVnd === null && !hit.price.contactSales;
+  if (unpaid && budget !== null && budget > 0) return { requestsPerDay: null, requestsPerMonth: null, costUsdPerMonth: { soft: budget, hard: budget }, platformCreditUsdPerMonth: budget };
+  return { requestsPerDay: null, requestsPerMonth: null, costUsdPerMonth: { soft: budget !== null && budget > 0 ? budget : null, hard: null }, platformCreditUsdPerMonth: budget ?? 0, softOnly: true };
 }

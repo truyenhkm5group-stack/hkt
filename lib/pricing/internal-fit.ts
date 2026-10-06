@@ -7,8 +7,9 @@
  *
  * `apply: true` (người vận hành, có lý do) ghi `platform_organizations.plan` của workspace (cột mà `planKeyOf` đọc — sứ mệnh
  * saas-b đưa workspace nhà về đọc đúng cột này) + ghim phiên bản giá hiện hành, nhật ký `ORG_PLAN_SET`. Không tạo hoá đơn.
- * Từ chối gán khi trần AI KỸ THUẬT của gói đích (`platform_plans.limits.ai`, lượt / tháng · trần tiền) thấp hơn số dùng AI thật
- * của kỳ đo — đổi gói không được là cách lặng lẽ chặn AI đang chạy.
+ * Từ chối gán khi trần AI KỸ THUẬT mà runtime SẼ áp cho gói đích (CÙNG đường `resolveAiLimits`: `catalogAiLimits` của phiên
+ * bản, không có thì `platform_plans.limits.ai`) thấp hơn số dùng AI thật của kỳ đo — đổi gói không được lặng lẽ chặn AI.
+ * Chạy tay: `npx tsx scripts/pricing-internal-fit.ts` (CHƯA nối vào ops-vps.yml).
  */
 import { and, eq, gte, isNull, lt, ne, sql } from "drizzle-orm";
 import { getDbFor, getPlatformDb, schema } from "@/db";
@@ -19,8 +20,9 @@ import { findOrganization, getHomeOrganization, invalidateOrganizations } from "
 import { readFanpagesActive } from "@/lib/platform/saas-ledger";
 import { readAiCustomerUsage } from "@/lib/pricing/ai-customer";
 import { invalidatePricing } from "@/lib/pricing/entitlements";
-import { loadPriceBook, pinOrgPriceVersion } from "@/lib/pricing/price-book";
-import { computeOverage, currentCatalogVersion, smallestFittingPlan, type FitResult, type MeterCoverage, type OverageResult } from "@/lib/pricing/versions";
+import { env } from "@/lib/env";
+import { loadPriceBook, pinOrgPriceVersion, readMarginConfig } from "@/lib/pricing/price-book";
+import { catalogAiLimits, computeOverage, currentCatalogVersion, smallestFittingPlan, type FitResult, type MeterCoverage, type OverageResult } from "@/lib/pricing/versions";
 import { periodRange } from "@/lib/saas/ledger";
 
 export type AiLimitCheck = { requests: number; costUsd: number; limits: AiLimits | null; wouldExceed: boolean; note: string | null };
@@ -95,7 +97,9 @@ export async function planInternalFit(opts: { orgCode?: string; periodMonth?: st
       .from(a)
       .where(and(eq(a.orgCode, org.code), gte(a.at, range.from), lt(a.at, range.to), ne(a.status, "BLOCKED_QUOTA"), ne(a.billingSource, "BYOK")));
     const planRow = (await listPlans()).find((p) => p.key === fit.plan!.planKey);
-    aiLimits = aiLimitCheck({ requests: Number(ai?.requests ?? 0), costUsd: Number(ai?.cost ?? 0) }, planRow ? parseAiLimits(planRow.limits).limits : null);
+    const margin = await readMarginConfig();
+    const runtime = catalogAiLimits({ hit: { price: fit.plan, source: "VERSION" }, versionKind: catalog?.kind ?? null, versionPrices: prices, criticalBelowPct: margin.criticalBelowPct, usdToVnd: env.facebook.usdToVnd });
+    aiLimits = aiLimitCheck({ requests: Number(ai?.requests ?? 0), costUsd: Number(ai?.cost ?? 0) }, runtime ?? (planRow ? parseAiLimits(planRow.limits).limits : null));
   }
   const chargeback = fit.plan
     ? (() => {

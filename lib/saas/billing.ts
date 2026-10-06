@@ -38,7 +38,7 @@ export async function finalizeStatement(accountCode: string, periodMonth: string
       status: "FINAL",
       totalKnownVnd: st.totalKnownVnd,
       unknownLines: st.unknownLines,
-      snapshot: { lines: st.lines, revenueKnownVnd: st.revenueKnownVnd, costKnownVnd: st.costKnownVnd, economics: view.economics, workspaces: view.workspaces.map((w) => ({ code: w.code, planKey: w.planKey, subscriptions: w.subscriptions.map((s) => ({ productKey: s.productKey, status: s.status, planKey: s.planKey })) })), usdToVnd: snap.usdToVnd },
+      snapshot: { lines: st.lines, revenueKnownVnd: st.revenueKnownVnd, costKnownVnd: st.costKnownVnd, economics: view.economics, workspaces: view.workspaces.map((w) => ({ code: w.code, planKey: w.planKey, priceVersionKey: w.pricing.versionKey, priceVersionPinned: w.pricing.pinned, subscriptions: w.subscriptions.map((s) => ({ productKey: s.productKey, status: s.status, planKey: s.planKey })) })), usdToVnd: snap.usdToVnd },
       engineVersion: st.engineVersion,
       finalizedByEmail: ctx.email,
     })

@@ -536,6 +536,7 @@ import { testPlatformBilling } from "./platform-billing.test";
 import { testPricingBilling } from "./pricing-billing.test";
 import { testSaasPlatform } from "./saas-platform.test";
 import { testPricingV1 } from "./pricing-v1.test";
+import { testAiCustomerSend } from "./ai-customer-send.test";
 import { testPlatformSaas } from "./platform-saas.test";
 import { testTenantAttack } from "./tenant-attack.test";
 import { testAiSalesIsolation } from "./ai-sales-isolation.test";
@@ -2857,6 +2858,7 @@ async function main() {
   await testPricingBilling();
   await testSaasPlatform();
   await testPricingV1();
+  await testAiCustomerSend();
   // Sổ kinh tế SaaS + Owner Cockpit (0203): hai tổ chức THẬT `saas-a` / `saas-b`, tự cấp, tự dọn.
   await testPlatformSaas();
   await testPlatformUi();

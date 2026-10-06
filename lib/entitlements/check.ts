@@ -61,7 +61,7 @@ export async function resolvePlan(org: Pick<Organization, "isHome" | "plan"> & {
   const key = planKeyOf(org);
   // Số người dùng gồm của gói theo PHIÊN BẢN giá đã ghim (0226 — bảng giá V1: 2 · 3 · 5 · 10 · 25); phiên bản legacy giữ
   // nguyên `platform_plans.limits`. Nhập động: lib/pricing/price-book đọc `listPlans` của chính tệp này.
-  const plans = org.code && !org.isHome ? await (await import("@/lib/pricing/price-book")).plansForOrg(org.code).catch(() => listPlans()) : await listPlans();
+  const plans = org.code && !org.isHome ? await (await import("@/lib/pricing/price-book")).plansForOrgSafe(org.code) : await listPlans();
   const hit = plans.find((p) => p.key === key);
   if (org.isHome) {
     // Nhà không bao giờ bị giới hạn, kể cả khi dòng `internal` bị sửa tay.

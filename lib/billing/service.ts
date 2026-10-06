@@ -231,6 +231,8 @@ function invoiceView(r: InvoiceRow, plans: readonly PlanRow[]): InvoiceView {
   };
 }
 
+const PRICE_READ_ERROR = "Không đọc được bảng giá của tổ chức lúc này — thử lại sau ít phút (chưa tạo mã thanh toán nào).";
+
 /** Giá gói THEO PHIÊN BẢN (0226) ⇒ hình dạng báo giá. Giá năm tường minh của phiên bản đi kèm (`yearlyPriceVnd`). */
 function pricedOfVersion(p: PlanPrice | null): PricedPlan | null {
   return p ? { key: p.planKey, name: p.name, priceVnd: p.monthlyVnd, yearlyFreeMonths: p.yearlyFreeMonths, yearlyPriceVnd: p.yearlyVnd } : null;
@@ -251,7 +253,10 @@ export async function previewRenewal(orgCode: string, planKey: string, months: n
   const org = await findOrganization(orgCode);
   if (!org || org.isHome) return { error: "Tổ chức nhà không trả phí thuê bao." };
   if (planKey === HOME_PLAN_KEY) return { error: "Không có gói này." };
-  const [book, pinKey] = await Promise.all([loadPriceBook(), readPricePin(org.code)]);
+  // Lỗi đọc sổ giá / ghim ⇒ TỪ CHỐI báo giá (không bao giờ rơi về bảng giá hiện hành — hoá đơn ấy sẽ ghim khách cũ vào giá mới).
+  const read = await Promise.all([loadPriceBook(), readPricePin(org.code)]).catch(() => null);
+  if (!read) return { error: PRICE_READ_ERROR };
+  const [book, pinKey] = read;
   const pricing = renewalPricing({ book, pinKey, now, currentPlanKey: planKeyOf(org), targetPlanKey: planKey });
   if ("error" in pricing) return pricing;
   const [terms, units] = await Promise.all([readSubscriptionTerms(org.code, { fresh: true }), readSubscriptionAddons(org.code, { fresh: true })]);
@@ -397,7 +402,8 @@ export async function previewAddon(orgCode: string, raw: { kind?: unknown; block
   const org = await findOrganization(orgCode);
   if (!org || org.isHome) return { error: "Tổ chức nhà không trả phí thuê bao." };
   // Đơn giá mua thêm theo PHIÊN BẢN đã ghim của tổ chức (0226) — đổi giá ở phiên bản mới không đổi giá khách đang trả.
-  const plans = await plansForOrg(org.code, now);
+  const plans = await plansForOrg(org.code, now).catch(() => null);
+  if (!plans) return { error: PRICE_READ_ERROR };
   const plan = plans.find((p) => p.key === planKeyOf(org));
   if (!plan) return { error: "Không đọc được gói hiện tại của tổ chức." };
   const terms = await readSubscriptionTerms(org.code, { fresh: true });
@@ -413,7 +419,8 @@ export async function createAddonInvoice(user: SessionUser, raw: { kind?: unknow
   if ("error" in q) return q;
   const current = await findOrganization(org.code);
   if (!current) return { error: "Không đọc được tổ chức." };
-  const version = await orgPriceVersion(org.code, now);
+  const version = await orgPriceVersion(org.code, now).catch(() => null);
+  if (!version) return { error: PRICE_READ_ERROR };
   return openInvoice(
     user,
     org.code,

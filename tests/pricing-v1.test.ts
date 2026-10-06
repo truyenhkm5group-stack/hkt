@@ -9,7 +9,7 @@
  *     đi giá hiện hành.
  *  2. VÒNG THẬT (PGlite) — migration gieo V1 đúng số + legacy chép ĐÚNG `platform_plans`; hoá đơn legacy trước / sau bằng nhau;
  *     phát hành phiên bản mới không đổi giá tổ chức đã ghim, lịch sử tái lập được; INBOX không có `ai_sales`; đồng hồ khách AI ở
- *     ĐÚNG điểm gửi (`markWaitingForCustomer`) — trả lời lặp / nhiều hội thoại / thử lại đồng thời = một dòng, TEST không đếm,
+ *     điểm gửi (`noteAiCustomerReply`; đường gửi THẬT đo ở tests/ai-customer-send.test.ts) — trả lời lặp / nhiều hội thoại / thử lại đồng thời = một dòng, TEST không đếm,
  *     lỗi ghi sổ không làm hỏng việc gửi, tổ chức A không chặn / đếm cho B; hoá đơn ước tính của khách; khách nội bộ: chạy thử
  *     → gán gói thường nhỏ nhất → bảng kê chargeback dùng cùng phép tính phần vượt.
  *
@@ -33,6 +33,7 @@ import { invalidateCapabilities } from "@/lib/platform/capabilities";
 import { withOrganization } from "@/lib/platform/context";
 import { getHomeOrganization, invalidateOrganizations } from "@/lib/platform/organizations";
 import { provisionOrganization } from "@/lib/platform/provision";
+import { captureSaasSnapshot } from "@/lib/platform/saas-ledger";
 import { aiCustomerMeterErrors, noteAiCustomerReply, readAiCustomerCounts, readAiCustomerUsage, recordAiCustomer, resetAiCustomerSeenForTests } from "@/lib/pricing/ai-customer";
 import { loadCustomerPlan } from "@/lib/pricing/customer";
 import { hasFeature, invalidatePricing, resolveOrgPricing } from "@/lib/pricing/entitlements";
@@ -58,6 +59,7 @@ import {
   parseUsageAlerts,
   priceOf,
   renewalPricing,
+  resolveOrgVersion,
   smallestFittingPlan,
   usageAlert,
   type BillableUsage,
@@ -67,7 +69,6 @@ import {
 } from "@/lib/pricing/versions";
 import { loadCommercialSnapshot } from "@/lib/saas/customers";
 import { updateAccount } from "@/lib/saas/accounts";
-import { markWaitingForCustomer } from "@/lib/sales-chatbot/fanpage";
 
 const V1 = "v1-2026-10";
 const A = "pv1-a";
@@ -96,6 +97,7 @@ const V1_PRICES: PlanPrice[] = [TRIAL, INBOX, STARTER, GROWTH, SCALE, ENTERPRISE
 const usg = (over: Partial<BillableUsage>): BillableUsage => ({ aiCustomers: 0, aiCustomersCoverage: "MEASURED", fanpages: 1, users: 1, aiConversations: 0, aiReplies: 0, ...over });
 
 function testPure() {
+  const big0 = () => ({ requestsToday: 99_999, requestsMonth: 999_999, costUsdMonth: 9_999, unknownCostMonth: 0 });
   // ── Khối khách AI: biên 1.500 → 0 · 1.501 → 1 · 1.600 → 1 · 1.601 → 2, cho cả ba gói (theo số gồm của từng gói).
   for (const [p, inc, unit] of [
     [STARTER, 1500, 59_000],
@@ -196,6 +198,9 @@ function testPure() {
   assert.equal(currentCatalogVersion(book, now)?.key, V1, "phiên bản tương lai chưa hiệu lực");
   assert.equal(currentCatalogVersion(book, new Date("2099-02-01T00:00:00Z"))?.key, "v2-future");
   assert.equal(priceOf(book, V1, "pro")?.source, "LEGACY_FALLBACK", "gói cũ không có ở V1 ⇒ giữ giá legacy cho thuê bao đang dùng");
+  const lost = resolveOrgVersion(book, "phien-ban-da-mat", now);
+  assert.deepEqual([lost.version?.key, lost.pinned], ["legacy", true], "ghim trỏ phiên bản mất ⇒ giá cũ + cảnh báo, không bao giờ V1");
+  assert.equal(resolveOrgVersion(book, null, now).version?.key, V1, "chỉ tổ chức KHÔNG có ghim mới theo bảng giá hiện hành");
   const renewLegacy = renewalPricing({ book, pinKey: "legacy", now, currentPlanKey: "starter", targetPlanKey: "starter" });
   assert.ok(!("error" in renewLegacy) && renewLegacy.target.monthlyVnd === 499_000 && renewLegacy.targetVersionKey === "legacy", "gia hạn đúng gói ⇒ giá ghim (khách hiện tại không đổi số tiền)");
   const switchV1 = renewalPricing({ book, pinKey: "legacy", now, currentPlanKey: "starter", targetPlanKey: "growth" });
@@ -231,7 +236,12 @@ function testPure() {
   const vPrices = V1_PRICES;
   const ai = catalogAiLimits({ hit: { price: GROWTH, source: "VERSION" }, versionKind: "CATALOG", versionPrices: vPrices, criticalBelowPct: 60, usdToVnd: 25_000 });
   assert.deepEqual(ai, { requestsPerDay: null, requestsPerMonth: null, costUsdPerMonth: { soft: 23.84, hard: null }, platformCreditUsdPerMonth: 23.84, softOnly: true }, "Growth: 1.490.000 × 40% ÷ 25.000");
-  assert.equal(catalogAiLimits({ hit: { price: TRIAL, source: "VERSION" }, versionKind: "CATALOG", versionPrices: vPrices, criticalBelowPct: 60, usdToVnd: 25_000 })?.platformCreditUsdPerMonth, 12.64, "dùng thử: giá gói AI rẻ nhất (Starter)");
+  const trialAi = catalogAiLimits({ hit: { price: TRIAL, source: "VERSION" }, versionKind: "CATALOG", versionPrices: vPrices, criticalBelowPct: 60, usdToVnd: 25_000 });
+  assert.deepEqual(trialAi, { requestsPerDay: null, requestsPerMonth: null, costUsdPerMonth: { soft: 12.64, hard: 12.64 }, platformCreditUsdPerMonth: 12.64 }, "dùng thử (chưa trả tiền): ngân sách theo gói AI rẻ nhất, GIỮ trần tiền cứng");
+  assert.equal(evaluateAiQuota("PLATFORM", trialAi!, { requestsToday: 1, requestsMonth: 1, costUsdMonth: 12.7, unknownCostMonth: 0 }).ok, false, "dùng thử vượt ngân sách ⇒ dừng (chính sách chi phí của tổ chức chưa trả tiền)");
+  const noRate = catalogAiLimits({ hit: { price: GROWTH, source: "VERSION" }, versionKind: "CATALOG", versionPrices: vPrices, criticalBelowPct: 60, usdToVnd: 0 });
+  assert.deepEqual([noRate?.costUsdPerMonth.soft, noRate?.costUsdPerMonth.hard, noRate?.softOnly], [null, null, true], "tỷ giá thiếu ⇒ ngân sách chưa biết");
+  assert.equal(evaluateAiQuota("PLATFORM", noRate!, big0()).ok, true, "ngân sách chưa biết ⇒ không chặn (không thành NO_PLATFORM_CREDIT)");
   assert.equal(catalogAiLimits({ hit: { price: ENTERPRISE, source: "VERSION" }, versionKind: "CATALOG", versionPrices: vPrices, criticalBelowPct: 60, usdToVnd: 25_000 })?.platformCreditUsdPerMonth, 95.84, "hợp đồng: giá «từ …»");
   assert.equal(catalogAiLimits({ hit: { price: INBOX, source: "VERSION" }, versionKind: "CATALOG", versionPrices: vPrices, criticalBelowPct: 60, usdToVnd: 25_000 }), null, "INBOX: AI bán hàng tắt bằng entitlement, không bằng trần");
   assert.equal(catalogAiLimits({ hit: { price: STARTER, source: "VERSION" }, versionKind: "LEGACY_SNAPSHOT", versionPrices: vPrices, criticalBelowPct: 60, usdToVnd: 25_000 }), null, "legacy giữ trần cũ");
@@ -251,11 +261,6 @@ function testPure() {
 
 function testSource() {
   const goc = path.resolve(__dirname, "..");
-  const fp = readFileSync(path.join(goc, "lib/sales-chatbot/fanpage.ts"), "utf8");
-  const body = fp.slice(fp.indexOf("export async function markWaitingForCustomer"), fp.indexOf("export async function sendFanpageText"));
-  assert.ok(/await noteAiCustomerReply\(conversationId, now\);/.test(body), "đồng hồ khách AI ghi ở điểm gửi thành công (markWaitingForCustomer)");
-  const calls = [...fp.matchAll(/markWaitingForCustomer\(/g)].length + [...readFileSync(path.join(goc, "lib/sales-chatbot/messenger.ts"), "utf8").matchAll(/markWaitingForCustomer\(/g)].length;
-  assert.ok(calls >= 4, "markWaitingForCustomer vẫn là điểm chung của fanpage nhắn · bình luận · Messenger");
   const ac = readFileSync(path.join(goc, "lib/pricing/ai-customer.ts"), "utf8");
   const note = ac.slice(ac.indexOf("export async function noteAiCustomerReply"), ac.indexOf("/** Số khách AI ĐÃ GHI"));
   assert.ok(/try \{[\s\S]*\} catch/.test(note), "lỗi ghi sổ bị nuốt — không làm hỏng việc gửi");
@@ -274,6 +279,9 @@ async function cleanup(saved: { meterLive: unknown }) {
   const pdb = await getPlatformDb();
   await pdb.delete(schema.platformUsageEvents).where(inArray(schema.platformUsageEvents.orgCode, [...ORGS]));
   await pdb.delete(schema.platformAiUsage).where(inArray(schema.platformAiUsage.orgCode, [...ORGS]));
+  await pdb.delete(schema.platformSaasDaily).where(inArray(schema.platformSaasDaily.orgCode, [...ORGS]));
+  await pdb.delete(schema.platformTenantUsageDaily).where(inArray(schema.platformTenantUsageDaily.orgCode, [...ORGS]));
+  await pdb.delete(schema.platformOrgMilestones).where(inArray(schema.platformOrgMilestones.orgCode, [...ORGS]));
   await pdb.delete(schema.platformPricePins).where(inArray(schema.platformPricePins.orgCode, [...ORGS]));
   const extra = await pdb.select({ key: schema.platformPriceVersions.key }).from(schema.platformPriceVersions).where(like(schema.platformPriceVersions.key, "cat-%"));
   if (extra.length) {
@@ -425,6 +433,22 @@ export async function testPricingV1() {
     assert.ok(legView?.offers.some((o) => o.key === "growth" && o.priceVnd === 1_490_000), "gói khác hiện giá V1");
     const legSwitch = await previewRenewal(LEG, "growth", 1, now);
     assert.ok(!("error" in legSwitch) && legSwitch.priceVersionKey === V1, "đổi gói ⇒ giá V1");
+    // Lỗi ĐỌC ghim (CSDL chập) ⇒ từ chối báo giá / bỏ ảnh chụp MRR — KHÔNG BAO GIỜ rơi về V1 (hoá đơn ấy sẽ ghim khách cũ vào V1).
+    await pdb.execute(sql.raw("ALTER TABLE platform_price_pins RENAME TO platform_price_pins_tam"));
+    invalidatePriceBook();
+    try {
+      const blip = await previewRenewal(LEG, "starter", 1, now);
+      assert.ok("error" in blip, `lỗi đọc ghim ⇒ không báo giá (nhận ${JSON.stringify(blip).slice(0, 120)})`);
+      const blipV1 = await previewRenewal(LEG, "growth", 1, now);
+      assert.ok("error" in blipV1, "kể cả đổi gói — không đoán khách là tổ chức mới");
+      const snapBlip = await captureSaasSnapshot(now);
+      assert.ok(snapBlip.errors.some((e) => e.startsWith(`${LEG}:`)), "ảnh chụp MRR bỏ dòng tổ chức không đọc được giá (không ghi 0)");
+      assert.equal(await hasFeature("ai_sales", { orgCode: A }), true, "đường entitlement vẫn chạy (đọc phía hẹp)");
+    } finally {
+      await pdb.execute(sql.raw("ALTER TABLE platform_price_pins_tam RENAME TO platform_price_pins"));
+      invalidatePriceBook();
+    }
+    assert.equal((await pdb.select().from(schema.platformSaasDaily).where(and(eq(schema.platformSaasDaily.orgCode, LEG), eq(schema.platformSaasDaily.day, today)))).length, 0, "không dòng MRR bịa cho LEG");
 
     // ── 4. Phiên bản mới (người vận hành sửa giá) KHÔNG đổi giá tổ chức đã ghim; lịch sử tái lập được.
     await setOrgPlan(A, "starter");
@@ -510,7 +534,7 @@ export async function testPricingV1() {
     assert.equal((await resolveAiLimits(LEG))?.limits.softOnly, undefined);
     await setOrgPlan(B, null);
 
-    // ── 6. ĐỒNG HỒ KHÁCH AI ở đúng điểm gửi (markWaitingForCustomer).
+    // ── 6. ĐỒNG HỒ KHÁCH AI — hàm ghi của điểm gửi (đường gửi thật: tests/ai-customer-send.test.ts).
     resetAiCustomerSeenForTests();
     const period = usagePeriodOf(now);
     const convIds = await withOrganization(A, async () => {
@@ -520,10 +544,10 @@ export async function testPricingV1() {
       return { c1: await ins("FANPAGE", "p1", "vk-1"), c2: await ins("FANPAGE", "p2", "vk-2"), test: await ins("TEST", "p1", "vk-test"), msg: await ins("WEB", "p1", "vk-3") };
     });
     await withOrganization(A, async () => {
-      for (let i = 0; i < 3; i++) await markWaitingForCustomer(convIds.c1, now);
-      await markWaitingForCustomer(convIds.c2, now);
-      await markWaitingForCustomer(convIds.test, now);
-      await markWaitingForCustomer(convIds.msg, now);
+      for (let i = 0; i < 3; i++) await noteAiCustomerReply(convIds.c1, now);
+      await noteAiCustomerReply(convIds.c2, now);
+      await noteAiCustomerReply(convIds.test, now);
+      await noteAiCustomerReply(convIds.msg, now);
       await noteAiCustomerReply("khong-co-hoi-thoai", now);
     });
     const countA = async () => (await readAiCustomerCounts([A], period.from, new Date(now.getTime() + 1))).get(A) ?? 0;
@@ -546,19 +570,17 @@ export async function testPricingV1() {
     const prevAt = new Date(period.from.getTime() - 3_600_000);
     assert.equal((await recordAiCustomer({ orgCode: A, channel: "FANPAGE", pageId: "p1", customerKey: "vk-1", at: prevAt })).recorded, true, "cùng khách, kỳ trước = một khách AI của kỳ trước");
     assert.equal(await countA(), 4);
-    // Lỗi ghi sổ KHÔNG làm hỏng việc gửi: sổ dùng ném ⇒ markWaitingForCustomer vẫn chạy xong và đặt hội thoại chờ khách.
+    // Lỗi ghi sổ KHÔNG ném (không làm hỏng việc gửi): sổ dùng ném ⇒ hàm ghi nuốt + đếm.
     await pdb.execute(sql.raw(`CREATE OR REPLACE FUNCTION pv1_fail_usage_fn() RETURNS trigger AS $$ BEGIN RAISE EXCEPTION 'sổ dùng hỏng (bài kiểm)'; END $$ LANGUAGE plpgsql`));
     await pdb.execute(sql.raw(`CREATE TRIGGER pv1_fail_usage BEFORE INSERT ON platform_usage_events FOR EACH ROW WHEN (NEW.org_code = '${A}') EXECUTE FUNCTION pv1_fail_usage_fn()`));
     resetAiCustomerSeenForTests();
     const errBefore = aiCustomerMeterErrors().n;
-    const c5 = await withOrganization(A, async () => {
+    await withOrganization(A, async () => {
       const db = await getDb();
       const c = schema.salesChatConversations;
       const id = (await db.insert(c).values({ channel: "FANPAGE", pageId: "p1", threadId: "t-vk-5", visitorKey: "vk-5" }).returning({ id: c.id }))[0].id;
-      await markWaitingForCustomer(id, now);
-      return (await db.select({ lastBotAt: c.lastBotAt }).from(c).where(eq(c.id, id)))[0];
+      await noteAiCustomerReply(id, now);
     });
-    assert.ok(c5?.lastBotAt, "việc gửi (đặt mốc bot) vẫn xong dù sổ dùng hỏng");
     assert.equal(aiCustomerMeterErrors().n, errBefore + 1, "lỗi được đếm, không ném");
     await pdb.execute(sql.raw("DROP TRIGGER IF EXISTS pv1_fail_usage ON platform_usage_events"));
 
