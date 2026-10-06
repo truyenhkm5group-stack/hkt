@@ -761,6 +761,8 @@ const LOI_VAN_HANH: Record<string, string> = {
   "lib/pricing/admin.ts::setPlanCommercial": "Sửa tên / hạn mức tháng / tính năng / chính sách vượt của một gói — bắt buộc lý do, nhật ký PLAN_COMMERCIAL_SET.",
   "lib/pricing/admin.ts::setOrgPricing": "Ghi đè tính năng / hạn mức / mức áp / cờ giữ từ trước của MỘT tổ chức — bắt buộc lý do, nhật ký ORG_PRICING_SET.",
   "lib/pricing/admin.ts::setPricingGuard": "Ngưỡng Margin Guard + công tắc trần cứng của cả nền tảng — bắt buộc lý do, nhật ký PRICING_GUARD_SET.",
+  "lib/pricing/admin.ts::setPricingMargin": "Dải biên lãi gộp chiếu (đích · cảnh báo · nguy cấp) của nền tảng — bắt buộc lý do, nhật ký nền tảng.",
+  "lib/pricing/price-book.ts::setOrgPriceVersion": "Chuyển MỘT tổ chức sang một phiên bản giá (0225) — bắt buộc lý do, nhật ký PRICE_VERSION_PIN.",
   "lib/pricing/admin.ts::setAiUnitPrices": "Bảng giá đơn vị AI ghi đè (ƯỚC TÍNH) — bắt buộc lý do, nhật ký AI_UNIT_PRICES_SET.",
   "lib/pricing/admin.ts::loadPricingAdmin": "Cấu hình gói + ghi đè của MỌI tổ chức (màn người vận hành).",
   "lib/pricing/admin.ts::loadPricingEconomics": "Kinh tế đơn vị + Margin Guard của MỌI tổ chức: sổ AI toàn nền tảng + đếm số dùng trong CSDL từng tổ chức khách (lib/platform/usage-meter.ts).",
