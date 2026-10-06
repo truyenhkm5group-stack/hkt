@@ -4,7 +4,7 @@ import { apiGuard } from "@/lib/auth/api-guard";
 import { can } from "@/lib/auth/session";
 import { sessionCookieSecure } from "@/lib/constants/session";
 import { MESSENGER_CONNECT_PATH, MESSENGER_SETTINGS_PATH, MESSENGER_STATE_COOKIE, messengerRedirectUri, storePendingPages } from "@/lib/integrations/messenger/connect";
-import { discoveryLogLine, messengerApp, pagesFromCode, type DiscoveryDiagnostic } from "@/lib/integrations/messenger/graph";
+import { checkPageWebhook, discoveryLogLine, isPermissionReason, messengerApp, pagesFromCode, type DiscoveryDiagnostic } from "@/lib/integrations/messenger/graph";
 import { setSettingJson } from "@/lib/settings";
 import { connectMessengerPage } from "@/lib/sales-chatbot/messenger";
 
@@ -42,12 +42,16 @@ export async function GET(req: NextRequest) {
   console.info(discoveryLogLine(user.organization.code, got.diagnostic));
   await setSettingJson("messenger.lastConnectDiagnostic", { at: new Date().toISOString(), by: user.id, ...got.diagnostic }).catch(() => undefined);
   const pages = got.pages.filter((p) => p.canMessage);
-  // Chặn theo QUYỀN trước (page hiện đủ mà thiếu pages_messaging thì gửi tin vẫn hỏng), rồi mới tới «không có page».
-  if (got.diagnostic.reason && (got.diagnostic.reason.startsWith("PERMISSION_") || !pages.length)) return back(`loi=khongpage&lydo=${got.diagnostic.reason}&ct=${encodeURIComponent(diagnosticDetail(got.diagnostic))}`);
+  // Chặn theo QUYỀN / TOKEN trước (page hiện đủ mà thiếu pages_messaging thì gửi tin vẫn hỏng), rồi mới tới «không có page».
+  if (got.diagnostic.reason && (isPermissionReason(got.diagnostic.reason) || !pages.length)) return back(`loi=khongpage&lydo=${got.diagnostic.reason}&ct=${encodeURIComponent(diagnosticDetail(got.diagnostic))}`);
   if (!pages.length) return back("loi=khongpage");
   if (pages.length === 1) {
     const r = await connectMessengerPage(user, pages[0]);
-    return "error" in r ? back(`loi=fb&msg=${encodeURIComponent(r.error.slice(0, 200))}`) : back("ok=1");
+    if ("error" in r) return back(`loi=fb&msg=${encodeURIComponent(r.error.slice(0, 200))}`);
+    // Lưu xong ⇒ ĐỌC lại ở Meta xem page có thật sự gửi tin về app không (chỉ đọc, không đăng ký lại). Vết không token.
+    const check = await checkPageWebhook(app, pages[0].id, pages[0].token);
+    await setSettingJson("messenger.lastWebhookCheck", { at: new Date().toISOString(), by: user.id, pages: [{ ...check, name: pages[0].name }] }).catch(() => undefined);
+    return back(check.state === "OK" || check.state === "UNKNOWN" ? "ok=1" : `ok=1&webhook=${check.state}`);
   }
   // Nhiều page ⇒ cho chọn (nhiều page một lượt). Danh sách + token lưu niêm phong ở máy chủ, không ở cookie (trần 4 KB).
   await storePendingPages(user.organization.code, user.id, pages);
@@ -56,7 +60,8 @@ export async function GET(req: NextRequest) {
 
 /** Phần cụ thể của lý do (tên quyền / tên page / quyền đang có trên page) — ngắn, không token. */
 function diagnosticDetail(d: DiscoveryDiagnostic): string {
-  if (d.reason === "PERMISSION_DECLINED" || d.reason === "PERMISSION_NOT_GRANTED") return d.missing.join(", ");
+  if (d.reason?.startsWith("PERMISSION_")) return d.missing.join(", ");
+  if (d.reason === "TOKEN_EXPIRED") return d.userToken?.why ?? "";
   if (d.reason === "NO_PAGE_TOKEN") return `${d.accountsSeen} page${d.viaBusiness ? ` (${d.viaBusiness} qua Business Portfolio)` : ""}: ${d.withoutToken.slice(0, 3).join(", ")}`;
   if (d.reason === "NO_MESSAGING_TASK") return d.withoutMessaging.slice(0, 3).map((p) => `${p.name} (${p.tasks.join("/") || "không quyền"})`).join(", ");
   return d.granted ? `quyền đã cấp: ${d.granted.join(", ") || "không"}` : "";
