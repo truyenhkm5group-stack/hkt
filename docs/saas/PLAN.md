@@ -16,7 +16,7 @@ KHÔNG cần nó. Nên đợt 1 dựng toàn bộ lớp thương mại trên mô
 | 0 | Audit repo, worktree, PR, mã SaaS / chatbot / auth / billing | **XONG** (README §2, OWNERSHIP §2) |
 | 1 | Mô hình chuẩn: Account → Workspace → Product Subscription | **XONG** — 0224 |
 | 2 | Control plane lõi (tài khoản, thuê bao, nhật ký cấp tài khoản) | **XONG** |
-| 3 | Danh tính hợp nhất (User toàn nền tảng + Membership + chuyển workspace trong phiên) | CHƯA — sứ mệnh riêng, rủi ro xác thực cao; giữ bất biến SECURITY §3 |
+| 3 | Danh tính hợp nhất (User toàn nền tảng + Membership + chuyển workspace trong phiên) | CHƯA — sứ mệnh riêng, rủi ro xác thực cao; giữ bất biến SECURITY §3. **Thiết kế: [IDENTITY.md](IDENTITY.md)** |
 | 4 | Danh mục Product → Capability → Feature + entitlement hiệu lực | **XONG** (catalog + #612) |
 | 5 | Thuê bao + nền đo dùng (sổ chung idempotent, một chỉ số một nguồn) | **XONG** |
 | 6 | Sổ chi phí + bộ máy giá → bảng kê (hoá đơn / chargeback) | **XONG** — thu tiền phần vượt chờ chủ nền tảng chốt đơn giá |
