@@ -160,7 +160,7 @@ export default async function MessengerSettingsPage({ searchParams }: { searchPa
           <GuideBlock guide={WEBHOOK_GUIDE[webhookQ]} />
         </div>
       ) : null}
-      {showDiag && stored ? <DiagnosticCard d={stored} reason={diagReason} /> : null}
+      {showDiag && stored ? <DiagnosticCard d={stored} reason={diagReason} /> : reasonQ ? <GuideBlock guide={DISCOVERY_GUIDE[reasonQ]} /> : null}
 
       {view.mutedByPancake ? (
         <p className="rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:bg-amber-950/60 dark:text-amber-200" data-testid="messenger-muted-by-pancake">
