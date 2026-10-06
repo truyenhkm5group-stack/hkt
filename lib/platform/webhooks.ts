@@ -3,6 +3,7 @@ import { eq } from "drizzle-orm";
 import { getPlatformDb, schema } from "@/db";
 import { secretsKeyState, type SecretsKeyState } from "@/lib/connectors/secrets";
 import { findOrganization, getHomeOrganization } from "@/lib/platform/organizations";
+import { homeSalesRuntimeEnabled } from "@/lib/platform/home-sales-runtime";
 
 /**
  * ═══════════ WEBHOOK THUỘC TỔ CHỨC NÀO — KHAI, KHÔNG NGẦM ĐỊNH ═══════════
@@ -42,6 +43,14 @@ export const WEBHOOK_BINDINGS: Readonly<Record<WebhookProvider, WebhookBinding>>
   GHN_ORG: { mode: "URL_SECRET", reason: "Trạng thái vận đơn GHN của MỘT tổ chức khách (kết nối «ghn-carrier»): gói GHN chỉ mang ShopID của hãng, nên token trong đường dẫn mang mã tổ chức + chữ ký HMAC riêng của tổ chức đó." },
   GHTK_ORG: { mode: "URL_SECRET", reason: "Trạng thái vận đơn GHTK của MỘT tổ chức khách (kết nối «ghtk-carrier»): gói GHTK không mang mã khách của ERP, nên token trong đường dẫn mang mã tổ chức + chữ ký HMAC riêng của tổ chức đó." },
 };
+
+/**
+ * URL_SECRET mà tổ chức NHÀ được nhận — KHI VÀ CHỈ KHI nhà chạy runtime Chốt Đơn (module `ai_sales` của nhà bật tường minh,
+ * `lib/platform/home-sales-runtime.ts`; Phase 8b · docs/saas/OWNERSHIP.md §4 chặn 2). Chỉ hai kênh tin nhắn của bot bán hàng;
+ * vận đơn / đơn POS theo token vẫn là cửa của tổ chức KHÁCH (nhà có đường môi trường riêng của nó). `ai_sales` của nhà
+ * đang TẮT ⇒ token của nhà vẫn ra `null` (401) như trước.
+ */
+export const HOME_SALES_URL_SECRET_PROVIDERS: readonly WebhookProvider[] = Object.freeze(["PANCAKE_FANPAGE", "ZALO_OA"]);
 
 /** Token trong đường dẫn không khớp tổ chức nào (URL_SECRET) — route trả 401, KHÔNG rơi về nhà. */
 export class WebhookAuthError extends Error {}
@@ -92,7 +101,8 @@ export function webhookUrlToken(provider: WebhookProvider, orgCode: string, stat
 
 /**
  * Token trong đường dẫn ⇒ mã tổ chức, hoặc `null` (⇒ 401). So chữ ký bằng `timingSafeEqual`; nhận cả chữ ký của khoá CŨ
- * (`PLATFORM_SECRETS_KEY_PREVIOUS`) trong lúc xoay khoá. Tổ chức nhà, tổ chức không có hoặc không hoạt động ⇒ `null`.
+ * (`PLATFORM_SECRETS_KEY_PREVIOUS`) trong lúc xoay khoá. Tổ chức không có hoặc không hoạt động ⇒ `null`. Tổ chức nhà ⇒ `null`,
+ * trừ kênh trong `HOME_SALES_URL_SECRET_PROVIDERS` khi nhà đã bật runtime Chốt Đơn.
  */
 export async function resolveUrlSecretOrganization(provider: WebhookProvider, token: string, state: SecretsKeyState = secretsKeyState()): Promise<string | null> {
   if (!state.ok || WEBHOOK_BINDINGS[provider]?.mode !== "URL_SECRET") return null;
@@ -108,7 +118,8 @@ export async function resolveUrlSecretOrganization(provider: WebhookProvider, to
   });
   if (!ok) return null;
   const org = await findOrganization(orgCode);
-  if (!org || org.isHome || org.status !== "ACTIVE") return null;
+  if (!org || org.status !== "ACTIVE") return null;
+  if (org.isHome) return HOME_SALES_URL_SECRET_PROVIDERS.includes(provider) && (await homeSalesRuntimeEnabled(org)) ? org.code : null;
   return org.code;
 }
 

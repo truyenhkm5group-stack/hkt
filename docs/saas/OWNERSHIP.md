@@ -47,5 +47,18 @@ duyệt mỗi page. Bốn chặn kỹ thuật đã đo, phải gỡ trước:
 3. **Lịch job**: `sales-followup`, `sales-health` chỉ chạy qua fan-out, mà fan-out bỏ workspace nhà.
 4. **Nguồn trả tiền AI**: `salesChatProvider` chỉ có PLATFORM / BYOK; khoá `.env` của nhà chưa là một lựa chọn.
 
+**Tình trạng (07/10/2026, nhánh `feat/saas-a-vnx-runtime`):** chặn 2–4 đã gỡ, cùng MỘT công tắc là module `ai_sales` của nhà
+(đang TẮT ⇒ production không đổi; `tests/saas-vnx-runtime.test.ts` khoá ba ca nhà tắt · nhà bật · khách):
+
+- Chặn 2 — `resolveUrlSecretOrganization` nhận nhà cho `PANCAKE_FANPAGE` · `ZALO_OA` (`HOME_SALES_URL_SECRET_PROVIDERS`) KHI VÀ
+  CHỈ KHI `homeSalesRuntimeEnabled()` (`lib/platform/home-sales-runtime.ts`: dòng `ai_sales` bật TƯỜNG MINH + đủ phụ thuộc).
+  Vận đơn / POS theo token vẫn đóng với nhà.
+- Chặn 3 — `sales-followup` · `sales-health` rời `FANOUT_ONLY_JOBS`: bộ lập lịch gõ lượt nhà, `runJob` bỏ qua `MODULE_DISABLED`
+  (không ghi `sync_runs`) cho tới ngày bật.
+- Chặn 4 — `platform` ở nhà = khoá `.env` của nhà qua `getAiProvider` (cùng bộ chọn với AI Builder), sổ AI ghi `HOME`
+  (`salesBotBillingSource(key, { home })`). Tổ chức khách không có lựa chọn nào trỏ tới khoá của nhà.
+- Chặn 1 — CHƯA: `PancakePosSink` là PR riêng. Trong lúc chờ, bot Chốt Đơn ở nhà bị `manualOrderOrgGate()` từ chối tạo đơn
+  (đúng: không sinh bản thứ hai của một lần mua).
+
 Khi bốn chặn gỡ xong: bật `ai_sales` cho workspace nhà ở chế độ bóng trên MỘT page → so hội thoại vàng → chủ shop duyệt →
 chuyển page → lặp → tắt container. Thuê bao Chốt Đơn của VNX không đổi qua cả quá trình (chỉ runtime đổi).

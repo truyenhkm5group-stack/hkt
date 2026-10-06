@@ -38,6 +38,7 @@ import { eq } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import type { AiMessage, AiProvider, AiRequest, AiResponse } from "@/lib/ai/provider";
 import type { AiSchemaDialect } from "@/lib/ai/schema-dialect";
+import type { AiBillingSource } from "@/lib/ai-usage/types";
 import { activeUserIdsWhoCan } from "@/lib/auth/session";
 import { AI_FAILOVER_CLASSES, AI_FAILURE_CLASSES, classifyAiFailure, type AiFailureClass } from "@/lib/constants/ai-incidents";
 import { sendInboxMessages } from "@/lib/inbox/send";
@@ -278,7 +279,8 @@ export async function loadProviderHealth(): Promise<ProviderHealthState> {
 
 // ─────────────────────────── provider bọc ───────────────────────────
 
-export type BillingSource = "PLATFORM" | "BYOK";
+/** Nguồn trả tiền của một khoá — cùng tập với sổ AI (`HOME` chỉ ở tổ chức nhà, Phase 8b). */
+export type BillingSource = AiBillingSource;
 export type FailoverCandidate = { key: string; source: BillingSource; provider: AiProvider };
 export type ServedBy = { key: string; name: string; model: string; source: BillingSource; failover: boolean };
 export type FailedAttempt = { key: string; name: string; model: string; source: BillingSource; kind: AiFailureClass; message: string };

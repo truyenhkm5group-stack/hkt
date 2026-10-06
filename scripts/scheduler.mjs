@@ -76,14 +76,15 @@ const JOBS = [
   */
   { job: "workflows", every: WORKFLOW_FANOUT_TICK_MINUTES, offset: 2.5 },
   /*
-    FOLLOW-UP CHATBOT FANPAGE (0185 — chủ shop yêu cầu 01/10/2026) — CHỈ FAN-OUT tự động hoá, mỗi 5 phút. Không có lượt
-    của nhà (nhà tắt module AI bán hàng). Mốc follow-up tính bằng giờ nên 5 phút là đủ mịn; hội thoại không tới mốc thì
-    lượt chạy chỉ đọc một câu truy vấn.
+    FOLLOW-UP CHATBOT FANPAGE (0185 — chủ shop yêu cầu 01/10/2026) — mỗi 5 phút: fan-out tự động hoá cho tổ chức khách + lượt
+    của nhà (Phase 8b — nhà đang TẮT module AI bán hàng nên lượt đó bỏ qua `MODULE_DISABLED`, không ghi gì). Mốc follow-up
+    tính bằng giờ nên 5 phút là đủ mịn; hội thoại không tới mốc thì lượt chạy chỉ đọc một câu truy vấn.
   */
   { job: "sales-followup", every: 5, offset: 4 },
   /*
-    GIÁM SÁT AI BÁN HÀNG (sau sự cố P0 06/10/2026) — CHỈ FAN-OUT tự động hoá, mỗi 5 phút, lệch pha 2 phút so với follow-up để hai
-    lượt không chồng nhau. Nhà TẮT module AI bán hàng nên không có lượt của nhà. Chỉ đọc + báo khi trạng thái xấu đi.
+    GIÁM SÁT AI BÁN HÀNG (sau sự cố P0 06/10/2026) — mỗi 5 phút, lệch pha 2 phút so với follow-up để hai lượt không chồng nhau:
+    fan-out tự động hoá + lượt của nhà (Phase 8b — nhà TẮT module AI bán hàng ⇒ `MODULE_DISABLED`). Chỉ đọc + báo khi trạng
+    thái xấu đi.
   */
   { job: "sales-health", every: 5, offset: 2 },
   /*
