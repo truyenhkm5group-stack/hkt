@@ -330,3 +330,10 @@ lọt ra sau khi nộp kết quả, model mặc định là loại mạnh nhất
 Hạn chế đã biết (Pha 8): Claude Code đọc được tệp NGOÀI cây làm việc (lượt dogfood đọc mã worker ở cây khác vì
 `origin/main` chưa có nó). Cô lập GHI đã giữ (diff đúng 1 tệp trong cây), cô lập ĐỌC cần chạy worker dưới tài khoản
 hệ điều hành / container riêng chỉ thấy bản clone của worker.
+
+Credential Git: cổng (`npm ci` / typecheck / lint / test chạy mã của nhánh) đã bị cắt khỏi cấu hình Git HỆ THỐNG và
+TOÀN CỤC (`GIT_CONFIG_NOSYSTEM`, `GIT_CONFIG_GLOBAL` trỏ tệp tạm, tắt lời nhắc, HOME tạm) nên không gọi được Git
+Credential Manager của máy. Nhưng chính worker vẫn phải `git push`, nên tài khoản chạy worker giữ MỘT credential. Khi
+chạy production: tài khoản hệ điều hành RIÊNG cho worker, credential là fine-grained token chỉ cho ĐÚNG kho này, chỉ
+`contents: write` (token không giới hạn được theo nhánh — ruleset `main` hiện có chặn đẩy thẳng; muốn chặn mọi nhánh
+ngoài `ai/worker/*` thì thêm ruleset), KHÔNG dùng tài khoản GitHub cá nhân của chủ shop.
