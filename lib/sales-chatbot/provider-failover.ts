@@ -20,15 +20,23 @@
  *  4. SỨC KHOẺ LƯU Ở `settings['ai.salesChatbot.providerHealth']` của CHÍNH tổ chức — không migration. Chỉ GHI khi trạng thái
  *     mạch đổi (mở / đóng / số lỗi liên tiếp / lớp lỗi) hoặc mốc thành công cũ quá `heartbeatMs` — KHÔNG ghi mỗi lượt.
  *
+ *  5. LỊCH SỬ PHẢI ĐỌC ĐƯỢC Ở NHÀ CUNG CẤP KHÁC. Engine phát lại 40 tin gần nhất gồm cả khối công cụ cũ; Gemini đặt id
+ *     dạng `g0_xxx|<thoughtSignature base64>` mà Anthropic từ chối (400, id phải khớp `^[A-Za-z0-9_-]+$`) — lỗi đó là
+ *     INVALID_REQUEST nên KHÔNG chuyển, và khoá dự phòng chết đúng lúc cần. Nên trước mỗi lời gọi tới nhà cung cấp
+ *     KHÔNG phải Gemini, id lạ được đổi thành id an toàn ỔN ĐỊNH (`portableToolId` — băm, cặp tool_use ↔ tool_result đổi
+ *     CÙNG một id, chữ ký riêng của Gemini rơi đi). Chiều ngược (quay lại Gemini giữa lượt với khối công cụ do nhà khác
+ *     sinh, thiếu chữ ký) không được phép xảy ra: lượt đã chuyển sang khoá dự phòng thì DÍNH khoá đó tới hết lượt.
+ *
  * Không có khoá dự phòng (mặc định) ⇒ engine không bọc gì cả: hành vi y hệt trước ngày 06/10/2026.
  *
  * Sổ AI (`platform_ai_usage`): lượt khoá chính hỏng rồi chuyển ⇒ MỘT dòng `ERROR` của khoá chính (requests 1, token NULL —
  * chưa biết, không phải 0); lượt do khoá dự phòng trả lời ghi `provider = <tên thật>+failover` (`FAILOVER_LABEL_SUFFIX`) —
  * cột `ref` giữ nguyên id hội thoại vì báo cáo chi phí theo hội thoại nhóm theo nó.
  */
+import { createHash } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { getDb, schema } from "@/db";
-import type { AiProvider, AiRequest, AiResponse } from "@/lib/ai/provider";
+import type { AiMessage, AiProvider, AiRequest, AiResponse } from "@/lib/ai/provider";
 import type { AiSchemaDialect } from "@/lib/ai/schema-dialect";
 import { activeUserIdsWhoCan } from "@/lib/auth/session";
 import { AI_FAILOVER_CLASSES, AI_FAILURE_CLASSES, classifyAiFailure, type AiFailureClass } from "@/lib/constants/ai-incidents";
@@ -163,6 +171,47 @@ export function planAttempts(input: { primary: ProviderHealthEntry | undefined |
   return plan;
 }
 
+// ─────────────────────────── lịch sử mang sang nhà cung cấp khác ───────────────────────────
+
+/** Id công cụ mọi nhà cung cấp nhận (Anthropic: `^[a-zA-Z0-9_-]+$`; OpenAI `call_id` giữ cùng tập để khỏi phải đoán). */
+export const PORTABLE_TOOL_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
+
+/** Id lạ ⇒ id an toàn ỔN ĐỊNH (cùng id vào ⇒ cùng id ra, nên cặp tool_use ↔ tool_result vẫn khớp). HÀM THUẦN. */
+export function portableToolId(id: string): string {
+  return PORTABLE_TOOL_ID_RE.test(id) ? id : `t_${createHash("sha256").update(id).digest("hex").slice(0, 32)}`;
+}
+
+/** Lịch sử với mọi id công cụ đã đổi sang dạng an toàn — không đổi gì thì trả lại đúng mảng cũ. HÀM THUẦN. */
+export function portableHistory(messages: readonly AiMessage[]): AiMessage[] {
+  let changed = false;
+  const out = messages.map((m) => {
+    let touched = false;
+    const content = m.content.map((b) => {
+      if (b.type === "tool_use" && !PORTABLE_TOOL_ID_RE.test(b.id)) {
+        touched = true;
+        return { ...b, id: portableToolId(b.id) };
+      }
+      if (b.type === "tool_result" && !PORTABLE_TOOL_ID_RE.test(b.toolUseId)) {
+        touched = true;
+        return { ...b, toolUseId: portableToolId(b.toolUseId) };
+      }
+      return b;
+    });
+    if (!touched) return m;
+    changed = true;
+    return { ...m, content };
+  });
+  return changed ? out : (messages as AiMessage[]);
+}
+
+/**
+ * Provider Gemini (BYOK `gemini-byok` · nền tảng `gemini-platform`) đọc lại chữ ký nằm trong id của CHÍNH nó — không được
+ * đổi id khi gửi cho nó. Mọi provider khác nhận lịch sử đã đổi id.
+ */
+export function speaksGeminiToolIds(provider: Pick<AiProvider, "name">): boolean {
+  return /^gemini/.test(provider.name);
+}
+
 // ─────────────────────────── kho sức khoẻ (settings của tổ chức) ───────────────────────────
 
 export type ProviderHealthStore = {
@@ -264,6 +313,8 @@ export class FailoverProvider implements AiProvider {
   private last: ServedBy;
   private secondary: FailoverCandidate | null | undefined;
   private secondaryError: string | null = null;
+  /** Lượt đã được khoá dự phòng phục vụ ⇒ DÍNH khoá dự phòng tới hết các vòng công cụ còn lại (luật 5 ở đầu tệp). */
+  private stuck = false;
 
   constructor(private readonly deps: FailoverDeps) {
     const p = deps.primary;
@@ -324,7 +375,7 @@ export class FailoverProvider implements AiProvider {
     // Sức khoẻ tra theo KHOÁ KẾT NỐI nên đọc được trước khi mở khoá dự phòng.
     const secondaryKey = this.deps.secondaryKey;
     const plan = planAttempts({
-      primary: p ? state[p.key] : null,
+      primary: p && !this.stuck ? state[p.key] : null,
       secondary: state[secondaryKey],
       nowMs: now(),
       probing: { PRIMARY: this.probing(p?.key, now()), SECONDARY: this.probing(secondaryKey, now()) },
@@ -337,8 +388,9 @@ export class FailoverProvider implements AiProvider {
       const probe = plan.probe.includes(slot);
       if (probe) probes.set(this.probeKey(cand.key), now());
       try {
-        const res = await cand.provider.complete(req);
+        const res = await cand.provider.complete(speaksGeminiToolIds(cand.provider) ? req : { ...req, messages: portableHistory(req.messages) });
         await this.record(cand.key, { ok: true }, state);
+        if (slot === "SECONDARY") this.stuck = true;
         return res;
       } catch (error) {
         const message = messageOf(error);

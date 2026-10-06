@@ -24,6 +24,7 @@ import { ByokAnthropicProvider, ByokGeminiProvider, ByokOpenAiProvider } from "@
 import { platformChatAi } from "@/lib/ai-builder/provider";
 import { aiKillSwitchDenial } from "@/lib/ai-usage/control";
 import { recordAiUsage } from "@/lib/ai-usage/ledger";
+import type { AiUsageFeature } from "@/lib/ai-usage/types";
 import { MODEL_UNAVAILABLE_RE } from "@/lib/constants/ai-incidents";
 import { FailoverProvider, notifyPrimaryFailover, settingsHealthStore } from "@/lib/sales-chatbot/provider-failover";
 import { checkAiQuota } from "@/lib/ai-usage/quota";
@@ -397,8 +398,8 @@ let providerOverride: ((cfg: SalesChatbotConfig) => AiProvider | null) | null = 
  * Nhà cung cấp AI của chatbot (AI dùng chung của nền tảng HOẶC khoá BYOK của tổ chức; bài kiểm thay được) — dùng chung cho
  * «Học từ hội thoại cũ» và nhắc khách. `source` = nguồn trả tiền để ghi sổ AI / kiểm hạn mức đúng chỗ.
  */
-export async function salesChatProvider(): Promise<{ ok: true; provider: AiProvider; source: "PLATFORM" | "BYOK" } | { ok: false; error: string }> {
-  return providerFor(await loadSalesChatbotConfig());
+export async function salesChatProvider(usage?: Partial<FailoverUsage>): Promise<{ ok: true; provider: AiProvider; source: "PLATFORM" | "BYOK" } | { ok: false; error: string }> {
+  return providerFor(await loadSalesChatbotConfig(), { feature: usage?.feature ?? "sales_chatbot", actorId: usage?.actorId ?? null, ref: usage?.ref ?? null });
 }
 
 /** Sổ tay ĐÃ XUẤT BẢN (`lib/sales-chatbot/playbook.ts`) — '' khi chưa có. Đọc thẳng settings, không import vòng. */
@@ -452,7 +453,7 @@ export function setSalesChatProviderForTests(fn: ((cfg: SalesChatbotConfig) => A
 type ProviderPick = { ok: true; provider: AiProvider; source: "PLATFORM" | "BYOK" } | { ok: false; error: string };
 
 /** Ngữ cảnh ghi sổ AI cho lời gọi hỏng của khoá chính khi lượt đã chuyển sang khoá dự phòng (provider-failover.ts). */
-type FailoverUsage = { feature: "sales_chatbot"; actorId: string | null; ref: string | null };
+export type FailoverUsage = { feature: AiUsageFeature; actorId: string | null; ref: string | null };
 
 /** MỘT khoá AI (chính hoặc dự phòng) ⇒ provider. Bài kiểm thay được qua `providerOverride` (nhận cấu hình mang khoá đó). */
 async function resolveConnector(cfg: SalesChatbotConfig, key: SalesChatbotConfig["connectorKey"], modelName: string): Promise<ProviderPick> {
@@ -485,8 +486,8 @@ async function resolveConnector(cfg: SalesChatbotConfig, key: SalesChatbotConfig
  * ở mức MỘT lời gọi model (trước khi có chữ nào tới khách), ngắt mạch theo (tổ chức, khoá); `source` / `provider.name` đọc
  * SAU lời gọi là của nhà cung cấp vừa phục vụ, nên sổ AI và kiểm credit đi đúng nơi trả tiền.
  */
-async function providerFor(cfg: SalesChatbotConfig, usage: FailoverUsage = { feature: "sales_chatbot", actorId: null, ref: null }): Promise<ProviderPick> {
-  const primary = await resolveConnector(cfg, cfg.connectorKey, cfg.model);
+async function providerFor(cfg: SalesChatbotConfig, usage: FailoverUsage = { feature: "sales_chatbot", actorId: null, ref: null }, primaryBlocked?: string): Promise<ProviderPick> {
+  const primary: ProviderPick = primaryBlocked ? { ok: false, error: primaryBlocked } : await resolveConnector(cfg, cfg.connectorKey, cfg.model);
   const fb = effectiveFallback(cfg);
   if (!fb) return primary;
   const org = await currentOrganization();
@@ -730,11 +731,13 @@ async function chatTurnCore(conversationId: string, rawText: string, opts: { cha
     if (killed) return blocked("DISABLED", "AI đang bị người vận hành nền tảng tạm tắt cho tổ chức này — liên hệ người vận hành", `AI đang tắt: ${killed}`);
     const billing = salesBotBillingSource(cfg.connectorKey);
     const quota = await checkAiQuota(org.code, billing);
-    if (!quota.ok) {
-      await recordAiUsage({ orgCode: org.code, feature: "sales_chatbot", source: billing, provider: null, model: null, requests: 0, inputTokens: null, outputTokens: null, costUsd: null, status: "BLOCKED_QUOTA", actorId: opts.actorId ?? null, ref: conv.id }).catch(() => undefined);
-      return blocked("QUOTA", "Tổ chức đã dùng hết hạn mức AI của gói dịch vụ — nâng gói hoặc chờ kỳ sau", quota.error);
-    }
-    const prov = await providerFor(cfg, { feature: "sales_chatbot", actorId: opts.actorId ?? null, ref: conv.id });
+    // Hạn mức của nguồn trả tiền của khoá CHÍNH đã hết (vd AI dùng chung hết credit gói) mà khoá dự phòng trả tiền ở NGUỒN
+    // KHÁC còn hạn mức ⇒ lượt này đi thẳng khoá dự phòng (provider-failover.ts). Dòng BLOCKED_QUOTA của khoá chính vẫn ghi.
+    const fbQuota = effectiveFallback(cfg);
+    const fbSource = fbQuota ? salesBotBillingSource(fbQuota.connectorKey) : null;
+    if (!quota.ok) await recordAiUsage({ orgCode: org.code, feature: "sales_chatbot", source: billing, provider: null, model: null, requests: 0, inputTokens: null, outputTokens: null, costUsd: null, status: "BLOCKED_QUOTA", actorId: opts.actorId ?? null, ref: conv.id }).catch(() => undefined);
+    if (!quota.ok && !(fbSource && fbSource !== billing && (await checkAiQuota(org.code, fbSource)).ok)) return blocked("QUOTA", "Tổ chức đã dùng hết hạn mức AI của gói dịch vụ — nâng gói hoặc chờ kỳ sau", quota.error);
+    const prov = await providerFor(cfg, { feature: "sales_chatbot", actorId: opts.actorId ?? null, ref: conv.id }, quota.ok ? undefined : quota.error);
     if (!prov.ok) return blocked("CONNECTION", "Kết nối AI của shop chưa dùng được — mở Cài đặt → Kết nối, kiểm tra lại khoá AI", prov.error);
     // AI ĐỌC HIỂU (0183): một lời gọi NHỎ chỉ chọn mã câu mẫu — chọn được ⇒ trả lời bằng câu mẫu, khỏi lượt chatbot đầy đủ.
     // Lỗi ở bước này không chặn khách: đi tiếp đường chatbot đầy đủ (nó tự xử lý lỗi nhà cung cấp).

@@ -20,7 +20,7 @@ import assert from "node:assert/strict";
 import { rmSync } from "node:fs";
 import { and, eq } from "drizzle-orm";
 import { getDb, getPlatformDb, organizationDatabaseUrl, schema } from "@/db";
-import type { AiProvider, AiRequest, AiResponse } from "@/lib/ai/provider";
+import type { AiBlock, AiMessage, AiProvider, AiRequest, AiResponse } from "@/lib/ai/provider";
 import { classifyAiError, classifyAiFailure } from "@/lib/constants/ai-incidents";
 import { invalidateCapabilities } from "@/lib/platform/capabilities";
 import { withOrganization } from "@/lib/platform/context";
@@ -37,9 +37,13 @@ import {
   nextHealth,
   parseProviderHealth,
   planAttempts,
+  PORTABLE_TOOL_ID_RE,
+  portableHistory,
+  portableToolId,
   PROVIDER_HEALTH_SETTING_KEY,
   resetProviderHealthCacheForTests,
   shouldPersistHealth,
+  speaksGeminiToolIds,
   type FailedAttempt,
   type FailoverCandidate,
   type ProviderHealthEntry,
@@ -60,6 +64,8 @@ function testClassify() {
   assert.equal(classifyAiFailure("Gemini trả lỗi HTTP 500: Internal error encountered."), "SERVER_ERROR");
   assert.equal(classifyAiFailure('500 {"type":"error","error":{"type":"api_error","message":"Internal server error"}}'), "SERVER_ERROR");
   assert.equal(classifyAiFailure("fetch failed"), "SERVER_ERROR", "mất kết nối tới nhà cung cấp");
+  assert.equal(classifyAiFailure("408 Request Timeout"), "TIMEOUT", "408 là hết giờ, không phải câu hỏi sai");
+  assert.equal(classifyAiFailure("Gemini trả lỗi HTTP 408: "), "TIMEOUT");
   assert.equal(classifyAiFailure("Connection error."), "SERVER_ERROR");
   assert.equal(classifyAiFailure("Gemini trả lỗi HTTP 404: models/gemini-2.5-flash-lite is no longer available to new users"), "MODEL_UNAVAILABLE");
   assert.equal(classifyAiFailure("400 invalid_request_error: messages.1.content: text content blocks must be non-empty"), "INVALID_REQUEST", "câu hỏi sai hình ⇒ KHÔNG chuyển");
@@ -138,6 +144,52 @@ function testConfig() {
   assert.equal(effectiveFallback({ ...cfg, failoverEnabled: false }), null, "công tắc tắt chuyển dự phòng theo tổ chức");
   assert.equal(effectiveFallback({ ...cfg, fallbackConnectorKey: "gemini-byok" }), null, "trùng khoá chính ⇒ không có dự phòng");
   assert.equal(effectiveFallback(parsed), null);
+}
+
+// ─────────────────────────── id công cụ mang sang nhà cung cấp khác ───────────────────────────
+
+/** Id THẬT dạng Gemini: `g<i>_<ngẫu nhiên>|<thoughtSignature base64>` (lib/ai-builder/providers.ts). */
+const GEMINI_ID = "g0_abc12345|AbC+/xyz==";
+const ANTHROPIC_ID_RE = /^[a-zA-Z0-9_-]+$/;
+
+/** Làm như Anthropic: id công cụ sai mẫu ⇒ 400 invalid_request_error; tool_result phải trỏ tới tool_use đã có. */
+function strictToolIds(messages: readonly AiMessage[]): Error | null {
+  const seen = new Set<string>();
+  for (const [i, m] of messages.entries())
+    for (const b of m.content) {
+      if (b.type === "tool_use") {
+        if (!ANTHROPIC_ID_RE.test(b.id)) return new Error(`400 {"type":"error","error":{"type":"invalid_request_error","message":"messages.${i}.content.0.tool_use.id: String should match pattern '^[a-zA-Z0-9_-]+$'"}}`);
+        seen.add(b.id);
+      } else if (b.type === "tool_result" && !seen.has(b.toolUseId)) return new Error(`400 invalid_request_error: messages.${i}: unexpected tool_use_id found in tool_result blocks: ${b.toolUseId}`);
+    }
+  return null;
+}
+
+const toolTurn = (id: string): AiMessage[] => [
+  { role: "user", content: [{ type: "text", text: "Chả mực bao nhiêu?" }] },
+  { role: "assistant", content: [{ type: "tool_use", id, name: "search_products", input: { query: "chả mực" } }] },
+  { role: "user", content: [{ type: "tool_result", toolUseId: id, content: "{\"items\":[]}" }] },
+];
+
+function testPortableIds() {
+  const safe = portableToolId(GEMINI_ID);
+  assert.ok(PORTABLE_TOOL_ID_RE.test(safe) && ANTHROPIC_ID_RE.test(safe), `id Gemini ⇒ id Anthropic / OpenAI nhận được: ${safe}`);
+  assert.ok(!safe.includes("AbC"), "chữ ký riêng của Gemini không đi sang nhà khác");
+  assert.equal(portableToolId(GEMINI_ID), safe, "ỔN ĐỊNH: cùng id vào ⇒ cùng id ra");
+  assert.notEqual(portableToolId("g1_abc12345|AbC+/xyz=="), safe);
+  assert.equal(portableToolId("toolu_01AbC-x_9"), "toolu_01AbC-x_9", "id đã an toàn giữ nguyên");
+  assert.equal(portableToolId("call_abc123"), "call_abc123");
+  const hist = toolTurn(GEMINI_ID);
+  const out = portableHistory(hist);
+  assert.equal(strictToolIds(out), null, "lịch sử đã đổi id qua được bộ kiểm khắt khe kiểu Anthropic");
+  const use = out[1].content[0] as Extract<AiBlock, { type: "tool_use" }>;
+  const result = out[2].content[0] as Extract<AiBlock, { type: "tool_result" }>;
+  assert.ok(use.id === safe && result.toolUseId === safe, "cặp tool_use ↔ tool_result đổi CÙNG một id");
+  assert.ok(strictToolIds(hist) !== null, "chưa đổi id ⇒ Anthropic từ chối (đúng lỗi chặn của bản trước)");
+  assert.equal((hist[1].content[0] as Extract<AiBlock, { type: "tool_use" }>).id, GEMINI_ID, "không sửa mảng gốc");
+  const clean = toolTurn("toolu_01");
+  assert.equal(portableHistory(clean), clean, "không có gì để đổi ⇒ trả lại đúng mảng cũ");
+  assert.ok(speaksGeminiToolIds({ name: "gemini-byok" }) && speaksGeminiToolIds({ name: "gemini-platform" }) && !speaksGeminiToolIds({ name: "anthropic-byok" }) && !speaksGeminiToolIds({ name: "openai-byok" }));
 }
 
 // ─────────────────────────── provider bọc với provider giả ───────────────────────────
@@ -287,6 +339,43 @@ async function testWrapper() {
   assert.ok(err && primary.calls === pCalls && secondary.calls === sCalls, `cả hai mạch mở ⇒ 0 lời gọi: ${err}`);
   assert.equal(salesBotError(err)?.kind, "CREDIT", "câu lỗi khi mọi mạch mở vẫn xếp đúng lớp của khoá chính ⇒ báo chủ shop");
 
+  // ⑥b LỖI CHẶN CỦA BẢN TRƯỚC: lịch sử mang id Gemini (`g0_…|chữ ký`) đi sang khoá dự phòng dạng Anthropic.
+  resetProviderHealthCacheForTests();
+  store.state = {};
+  const seenByPrimary: AiMessage[][] = [];
+  const geminiPrimary = fake("gemini-byok", (rq) => {
+    seenByPrimary.push(rq.messages);
+    return new Error(GOOGLE_CREDIT);
+  });
+  const strictSecondary = fake("anthropic-byok", (rq) => strictToolIds(rq.messages) ?? answer("Dạ em đây ạ.", "claude-x"));
+  const crossVendor = make({ primary: { key: "gemini-byok", source: "BYOK", provider: geminiPrimary }, resolveSecondary: async () => ({ ok: true, candidate: { key: "anthropic-byok", source: "BYOK", provider: strictSecondary } }), secondaryKey: "anthropic-byok" });
+  const req2: AiRequest = { system: "s", messages: [...toolTurn(GEMINI_ID), { role: "assistant", content: [{ type: "text", text: "Dạ chưa có ạ." }] }, { role: "user", content: [{ type: "text", text: "Cho chị 2 gói" }] }], tools: [] };
+  assert.equal((await crossVendor.complete(req2)).model, "claude-x", "lịch sử có id Gemini ⇒ khoá dự phòng dạng Anthropic VẪN trả lời (trước: 400 ⇒ chuyển người)");
+  assert.equal((seenByPrimary[0][1].content[0] as Extract<AiBlock, { type: "tool_use" }>).id, GEMINI_ID, "Gemini nhận NGUYÊN id + chữ ký của chính nó");
+
+  // ⑥c Lượt nhiều vòng công cụ: vòng 1 khoá chính (Gemini) gọi công cụ, vòng 2 khoá chính hỏng ⇒ khoá dự phòng đỡ với
+  // id Gemini của CHÍNH lượt này; vòng 3 khoá chính đã khoẻ nhưng lượt DÍNH khoá dự phòng (không quay lại Gemini với khối
+  // công cụ thiếu chữ ký giữa lượt).
+  resetProviderHealthCacheForTests();
+  store.state = {};
+  let round = 0;
+  const midPrimary = fake("gemini-byok", () => {
+    round += 1;
+    if (round === 1) return { ...answer("", "gemini-x"), content: [{ type: "tool_use", id: GEMINI_ID, name: "search_products", input: { query: "chả mực" } }], stopReason: "tool_use" };
+    if (round === 2) return new Error("Gemini trả lỗi HTTP 503: Service Unavailable");
+    return answer("Gemini quay lại giữa lượt", "gemini-x");
+  });
+  const midSecondary = fake("anthropic-byok", (rq) => strictToolIds(rq.messages) ?? answer("Dạ em lên đơn nhé.", "claude-x"));
+  const mid = make({ primary: { key: "gemini-byok", source: "BYOK", provider: midPrimary }, resolveSecondary: async () => ({ ok: true, candidate: { key: "anthropic-byok", source: "BYOK", provider: midSecondary } }), secondaryKey: "anthropic-byok" });
+  const history: AiMessage[] = [{ role: "user", content: [{ type: "text", text: "Chả mực bao nhiêu?" }] }];
+  const r1 = await mid.complete({ system: "s", messages: history, tools: [] });
+  history.push({ role: "assistant", content: r1.content }, { role: "user", content: [{ type: "tool_result", toolUseId: GEMINI_ID, content: "{}" }] });
+  const r2 = await mid.complete({ system: "s", messages: history, tools: [] });
+  assert.equal(r2.model, "claude-x", "giữa lượt: khoá dự phòng nhận lịch sử có id Gemini của chính lượt này");
+  history.push({ role: "assistant", content: r2.content }, { role: "user", content: [{ type: "text", text: "ok" }] });
+  const r3 = await mid.complete({ system: "s", messages: history, tools: [] });
+  assert.ok(r3.model === "claude-x" && midPrimary.calls === 2 && midSecondary.calls === 2, `lượt đã chuyển ⇒ DÍNH khoá dự phòng tới hết lượt: ${JSON.stringify({ p: midPrimary.calls, s: midSecondary.calls })}`);
+
   // ⑦ Khoá dự phòng không mở được ⇒ ném NGUYÊN lỗi của khoá chính (câu lỗi thật, lớp lỗi thật).
   resetProviderHealthCacheForTests();
   store.state = {};
@@ -327,27 +416,36 @@ async function testEngine() {
   const calls = { primary: 0, secondary: 0 };
   let primaryFails: Error | null = new Error(GOOGLE_CREDIT);
   let secondaryFails: Error | null = null;
+  // Khoá chính gọi công cụ ở vòng đầu mỗi lượt (id THẬT dạng Gemini); `primaryFailsOnToolResult` ⇒ hỏng ở vòng 2.
+  let primaryTool = false;
+  let primaryFailsOnToolResult: Error | null = null;
   const BACKUP_TEXT = "Dạ chả mực 400.000đ một gói ạ.";
   const byKey = (cfg: SalesChatbotConfig): AiProvider | null => {
     if (cfg.connectorKey === "gemini-byok")
       return {
-        name: "fake-gemini",
+        name: "gemini-byok",
         model: "gemini-fake",
         schemaDialect: "openai",
-        async complete() {
+        async complete(rq: AiRequest) {
           calls.primary += 1;
           if (primaryFails) throw primaryFails;
+          const last = rq.messages[rq.messages.length - 1];
+          const afterTool = last?.content.some((b) => b.type === "tool_result");
+          if (afterTool && primaryFailsOnToolResult) throw primaryFailsOnToolResult;
+          if (primaryTool && !afterTool) return { ...answer("", "gemini-fake"), content: [{ type: "tool_use", id: `g0_${calls.primary}abc|AbC+/xyz==`, name: "search_products", input: { query: "chả mực" } }], stopReason: "tool_use" };
           return answer("Dạ khoá chính trả lời ạ.", "gemini-fake");
         },
       };
     if (cfg.connectorKey === "anthropic-byok")
       return {
-        name: "fake-anthropic",
+        name: "anthropic-byok",
         model: "claude-fake",
         schemaDialect: "anthropic",
-        async complete() {
+        async complete(rq: AiRequest) {
           calls.secondary += 1;
           if (secondaryFails) throw secondaryFails;
+          const bad = strictToolIds(rq.messages);
+          if (bad) throw bad;
           return answer(BACKUP_TEXT, "claude-fake");
         },
       };
@@ -391,8 +489,8 @@ async function testEngine() {
       const rows = (await usage()).filter((u) => u.ref === fo.conv.id);
       const err = rows.find((u) => u.status === "ERROR");
       const ok = rows.find((u) => u.status === "OK");
-      assert.ok(err && err.provider === "fake-gemini" && err.requests === 1 && err.inputTokens === null && err.costUsd === null, `lời gọi hỏng của khoá chính vẫn vào sổ (token NULL = chưa biết): ${JSON.stringify(rows)}`);
-      assert.ok(ok && ok.provider === `fake-anthropic${FAILOVER_LABEL_SUFFIX}` && ok.model === "claude-fake" && ok.requests === 1 && ok.inputTokens === 10 && ok.billingSource === "BYOK", `lượt trả lời ghi nhà cung cấp thật + dấu failover: ${JSON.stringify(ok)}`);
+      assert.ok(err && err.provider === "gemini-byok" && err.requests === 1 && err.inputTokens === null && err.costUsd === null, `lời gọi hỏng của khoá chính vẫn vào sổ (token NULL = chưa biết): ${JSON.stringify(rows)}`);
+      assert.ok(ok && ok.provider === `anthropic-byok${FAILOVER_LABEL_SUFFIX}` && ok.model === "claude-fake" && ok.requests === 1 && ok.inputTokens === 10 && ok.billingSource === "BYOK", `lượt trả lời ghi nhà cung cấp thật + dấu failover: ${JSON.stringify(ok)}`);
       assert.equal(rows.length, 2);
       const [h] = await db.select().from(schema.settings).where(eq(schema.settings.key, PROVIDER_HEALTH_SETTING_KEY));
       const health = parseProviderHealth(JSON.parse(h.value));
@@ -408,7 +506,7 @@ async function testEngine() {
       const down = await turn("down", "Còn hàng không?");
       assert.ok(down.conv.status === "HANDOFF" && down.botTexts.length === 0, JSON.stringify({ s: down.conv.status, t: down.botTexts }));
       const downRows = (await usage()).filter((u) => u.ref === down.conv.id);
-      assert.ok(downRows.length === 1 && downRows[0].status === "ERROR" && downRows[0].provider === `fake-anthropic${FAILOVER_LABEL_SUFFIX}`, `khoá chính đang ngắt ⇒ chỉ một lời gọi hỏng (khoá dự phòng): ${JSON.stringify(downRows)}`);
+      assert.ok(downRows.length === 1 && downRows[0].status === "ERROR" && downRows[0].provider === `anthropic-byok${FAILOVER_LABEL_SUFFIX}`, `khoá chính đang ngắt ⇒ chỉ một lời gọi hỏng (khoá dự phòng): ${JSON.stringify(downRows)}`);
 
       // ⑤ Công tắc tắt chuyển dự phòng ⇒ hành vi cũ dù đã chọn khoá dự phòng.
       secondaryFails = null;
@@ -421,6 +519,47 @@ async function testEngine() {
       assert.deepEqual(healthy.botTexts, ["Dạ khoá chính trả lời ạ."]);
       const hRows = await db.select().from(schema.salesChatConversations).where(and(eq(schema.salesChatConversations.id, healthy.conv.id)));
       assert.equal(hRows.length, 1);
+
+      // ⑥ ĐÚNG CẤU HÌNH SỰ CỐ P0 (khoá chính Gemini, hội thoại đã có lượt gọi công cụ): lượt 1 khoá chính khoẻ, gọi công cụ —
+      // lịch sử lưu id Gemini `g0_…|chữ ký`. Lượt 2 khoá chính hết credit ⇒ khoá dự phòng dạng Anthropic (khắt khe về id)
+      // phải trả lời, không 400 rồi chuyển người.
+      const resetHealth = async () => {
+        await db.delete(schema.settings).where(eq(schema.settings.key, PROVIDER_HEALTH_SETTING_KEY));
+        resetProviderHealthCacheForTests();
+      };
+      await resetHealth();
+      await setCfg({ fallbackConnectorKey: "anthropic-byok" });
+      primaryFails = null;
+      primaryTool = true;
+      const vk = visitorKeyOf("fo-p0-history-0123456789abcdef");
+      const w = await openConversation("WEB", { visitorKey: vk });
+      const t1 = await chatTurn(w.id, "Chả mực bao nhiêu?", { channel: "WEB", visitorKey: vk });
+      assert.ok(t1.ok, t1.ok ? "" : t1.error);
+      const stored = await db.select().from(schema.salesChatMessages).where(eq(schema.salesChatMessages.conversationId, w.id));
+      assert.ok(stored.some((m) => JSON.stringify(m.content).includes("|AbC+/xyz==")), "lịch sử thật mang id Gemini có chữ ký");
+      const saidBefore = t1.view.messages.filter((m) => m.role === "assistant" && m.text).length;
+      primaryFails = new Error(GOOGLE_CREDIT);
+      const s0 = calls.secondary;
+      const t2 = await chatTurn(w.id, "Cho chị 2 gói", { channel: "WEB", visitorKey: vk });
+      assert.ok(t2.ok, t2.ok ? "" : t2.error);
+      const [c2] = await db.select().from(schema.salesChatConversations).where(eq(schema.salesChatConversations.id, w.id));
+      const newSaid = t2.view.messages.filter((m) => m.role === "assistant" && m.text).slice(saidBefore).map((m) => m.text);
+      assert.ok(c2.status !== "HANDOFF" && calls.secondary === s0 + 1, `khoá dự phòng nhận lịch sử có id Gemini và trả lời: ${JSON.stringify({ s: c2.status, e: c2.lastError })}`);
+      assert.deepEqual(newSaid, [BACKUP_TEXT], "đúng MỘT câu mới, của khoá dự phòng");
+
+      // ⑦ Hỏng GIỮA LƯỢT: vòng 1 khoá chính gọi công cụ, vòng 2 khoá chính hết credit ⇒ khoá dự phòng đỡ với id Gemini của
+      // chính lượt này; khách nhận đúng một câu.
+      await resetHealth();
+      primaryFails = null;
+      primaryFailsOnToolResult = new Error(GOOGLE_CREDIT);
+      const midTurn = await turn("mid", "Chả mực bao nhiêu?");
+      assert.ok(midTurn.conv.status !== "HANDOFF", `hỏng giữa lượt vẫn được khoá dự phòng đỡ: ${JSON.stringify({ s: midTurn.conv.status, e: midTurn.conv.lastError })}`);
+      assert.deepEqual(midTurn.botTexts, [BACKUP_TEXT]);
+      const midRows = (await usage()).filter((u) => u.ref === midTurn.conv.id);
+      assert.ok(
+        midRows.some((u) => u.status === "OK" && u.provider === "gemini-byok" && u.requests === 1) && midRows.some((u) => u.status === "ERROR" && u.provider === "gemini-byok") && midRows.some((u) => u.status === "OK" && u.provider === `anthropic-byok${FAILOVER_LABEL_SUFFIX}`),
+        `đổi khoá giữa lượt ⇒ mỗi đoạn một dòng sổ AI: ${JSON.stringify(midRows.map((u) => [u.provider, u.status, u.requests]))}`,
+      );
     });
   } finally {
     setSalesChatProviderForTests(null);
@@ -433,6 +572,7 @@ export async function testAiProviderFailover() {
   testClassify();
   testCircuit();
   testConfig();
+  testPortableIds();
   await testWrapper();
   await testEngine();
   console.log("✓ Khoá AI dự phòng: credit / hết giờ / 5xx ⇒ chuyển, 400 ⇒ không · ngắt mạch theo (tổ chức, khoá), nửa mở tự quay về · khách nhận ĐÚNG MỘT câu · cả hai hỏng ⇒ chuyển người · không cấu hình ⇒ hành vi cũ");

@@ -105,7 +105,7 @@ export function classifyAiFailure(message: string | null | undefined): AiFailure
   const raw = message ?? "";
   const s = raw.toLowerCase();
   if (MODEL_UNAVAILABLE_RE.test(raw)) return "MODEL_UNAVAILABLE";
-  if (/timed? ?out|timeout|aborted due to timeout|etimedout|deadline exceeded|\b504\b/.test(s)) return "TIMEOUT";
+  if (/timed? ?out|timeout|aborted due to timeout|etimedout|deadline exceeded|request timeout|http 408|^\s*408|\b504\b/.test(s)) return "TIMEOUT";
   if (/^\s*5\d\d\b|http 5\d\d\b|status(?: code)?:? 5\d\d\b|internal server error|internal error|service unavailable|bad gateway|server_error|api_error|fetch failed|econnreset|econnrefused|enotfound|eai_again|socket hang up|connection error|network error|other side closed/.test(s)) return "SERVER_ERROR";
   if (/^\s*4\d\d\b|http 4\d\d\b|invalid_request|invalid argument|bad request|validation|safety|content policy|refus/.test(s)) return "INVALID_REQUEST";
   return "OTHER";

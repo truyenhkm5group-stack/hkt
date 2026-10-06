@@ -79,9 +79,10 @@ export default async function SalesChatbotPage() {
   // «AI dùng chung của nền tảng» (0193) không phải một kết nối của tổ chức: sẵn sàng = nền tảng bật + gói có credit + còn credit.
   const platformAi = user.organization?.code ? await platformChatAi(user.organization.code) : { ok: false as const, reason: "Không xác định được tổ chức." };
   const aiConnections = SALES_BOT_CONNECTORS.map((k) => {
-    if (k === "platform") return { key: k, ready: platformAi.ok, configured: platformAi.ok, reason: platformAi.ok ? null : platformAi.reason };
+    // `vendor` = nhà cung cấp AI thật sau khoá (AI dùng chung: theo khoá nền tảng) — để form cảnh báo khoá dự phòng CÙNG nhà.
+    if (k === "platform") return { key: k, ready: platformAi.ok, configured: platformAi.ok, reason: platformAi.ok ? null : platformAi.reason, vendor: platformAi.ok ? platformAi.provider.name.split("-")[0] : null };
     const row = connections.find((c) => c.connectorKey === k);
-    return { key: k, ready: Boolean(row && row.status === "ACTIVE" && row.lastTestOk === true), configured: Boolean(row), reason: null };
+    return { key: k, ready: Boolean(row && row.status === "ACTIVE" && row.lastTestOk === true), configured: Boolean(row), reason: null, vendor: k.split("-")[0] };
   });
   const publicUrl = pub.state === "PUBLISHED" && pub.url ? `${pub.url}/chat` : null;
   // Sẵn sàng tự trả lời (P8): chỉ đếm số thật; THÔNG TIN, không chặn đổi chế độ.

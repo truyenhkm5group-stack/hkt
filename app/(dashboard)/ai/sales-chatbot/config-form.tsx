@@ -31,7 +31,7 @@ export function ChatbotConfigForm({
 }: {
   config: SalesChatbotConfig;
   fields: { key: string; label: string }[];
-  connections: { key: SalesBotConnector; ready: boolean; configured: boolean; reason?: string | null }[];
+  connections: { key: SalesBotConnector; ready: boolean; configured: boolean; reason?: string | null; vendor?: string | null }[];
   /** Module Lịch hẹn đang bật — chỉ khi đó mới có khung «Đặt lịch qua chat». */
   appointmentsOn?: boolean;
   /** Sức khoẻ khoá AI chính / dự phòng (mạch ngắt, lần trả lời được / lỗi gần nhất). */
@@ -50,6 +50,8 @@ export function ChatbotConfigForm({
   const num = (raw: string, fallback: number) => (/^\d+$/.test(raw.trim()) ? Number(raw.trim()) : fallback);
   const conn = connections.find((x) => x.key === c.connectorKey);
   const fallbackConn = c.fallbackConnectorKey ? connections.find((x) => x.key === c.fallbackConnectorKey) : undefined;
+  // Sự cố 06/10/2026: khoá của shop và khoá nền tảng cùng là Gemini, cùng tài khoản Google ⇒ hết tiền CÙNG LÚC.
+  const sameVendor = Boolean(fallbackConn?.vendor && conn?.vendor && fallbackConn.vendor === conn.vendor);
   // Mốc «bây giờ» của lần dựng trang (useState: một lần, không đổi giữa các lần vẽ lại) — đủ để nói khoá nào đang tạm ngắt.
   const [renderedAt] = useState(() => Date.now());
   const healthRows = health.filter((h) => h.key === c.connectorKey || h.key === c.fallbackConnectorKey).map((h) => ({ ...h, open: h.openUntil !== null && Date.parse(h.openUntil) > renderedAt }));
@@ -152,6 +154,11 @@ export function ChatbotConfigForm({
           <label className="flex items-center gap-2 text-sm">
             <input type="checkbox" checked={c.failoverEnabled} disabled={!c.fallbackConnectorKey} onChange={(e) => set("failoverEnabled", e.target.checked)} /> Tự chuyển sang khoá dự phòng
           </label>
+          {sameVendor ? (
+            <p className="text-xs text-amber-700 dark:text-amber-400" data-testid="chatbot-failover-same-vendor">
+              Khoá dự phòng cùng nhà cung cấp «{conn?.vendor}» với khoá chính — nếu hai khoá chung một tài khoản thì hết tiền / bị khoá CÙNG LÚC và dự phòng không cứu được (sự cố 06/10/2026). Nên chọn nhà cung cấp khác.
+            </p>
+          ) : null}
           {fallbackConn && !fallbackConn.ready ? <p className="text-xs text-destructive">Khoá dự phòng chưa sẵn sàng — lúc cần chuyển mà nó chưa dùng được thì khách vẫn được chuyển cho nhân viên như khi không có dự phòng.</p> : null}
           <p className="text-xs text-muted-foreground">
             Chỉ chuyển khi lỗi nằm ở NHÀ CUNG CẤP (hết tiền, khoá bị từ chối, quá tải, lỗi máy chủ, quá giờ chờ) và TRƯỚC khi có chữ nào gửi khách — khách không bao giờ nhận hai câu trả lời. Khoá dự phòng trả tiền ở chính nó{c.fallbackConnectorKey === "platform" ? " (AI dùng chung vẫn trừ credit gói và dừng khi hết credit)" : ""}. Khoá chính khoẻ lại ⇒ bot tự quay về. Cả hai cùng hỏng ⇒ chuyển nhân viên như cũ.
