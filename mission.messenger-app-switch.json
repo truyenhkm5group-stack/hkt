@@ -35,18 +35,18 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-06T14:32:10.109Z",
-  "updated_at": "2026-10-06T14:33:02.183Z",
-  "last_heartbeat": "2026-10-06T14:32:17.259Z",
+  "updated_at": "2026-10-06T14:37:06.460Z",
+  "last_heartbeat": "2026-10-06T14:37:06.460Z",
   "definition_of_done": [],
   "handoff": {
     "branch": "feat/messenger-app-switch",
-    "sha": "135b21497c01220e8f012070a03cd80f782667ab",
-    "at": "2026-10-06T14:32:17.259Z",
+    "sha": "a5d0c1c5a313062354056829fec88910a88724a2",
+    "at": "2026-10-06T14:37:06.460Z",
     "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
     "title": "Nối page từ ERP đi bằng app Meta Messenger riêng",
     "summary": "",
     "tests": [
-      "9 bài Messenger (6 cũ + 3 mới) ĐẠT; tsc + eslint --max-warnings=0 sạch"
+      "9 bài Messenger ĐẠT; review độc lập PASS 135b2149 + sửa nhãn"
     ]
   }
 }
