@@ -1,0 +1,30 @@
+{
+  "schema": 1,
+  "mission_id": "saas-d-pricing-overage",
+  "title": "Phase D: giá + thu phần vượt (chờ chủ shop chốt đơn giá + kỳ thu)",
+  "business_goal": "",
+  "status": "BLOCKED",
+  "priority": "P2",
+  "risk": "CRITICAL",
+  "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "worker": null,
+  "worktree": null,
+  "branch": null,
+  "base_sha": null,
+  "domains": [],
+  "owned_paths": [
+    "lib/pricing/guard.ts"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-06T17:03:33.744Z",
+  "updated_at": "2026-10-06T17:03:33.744Z",
+  "last_heartbeat": "2026-10-06T17:03:33.744Z",
+  "definition_of_done": [],
+  "needs_owner": {
+    "category": "IRREVERSIBLE_BUSINESS_DECISION",
+    "action": "chốt bảng giá kinh doanh: giá tháng/năm từng gói, hạn mức (hội thoại AI · tin AI · đơn · fanpage), đơn giá phần vượt và kỳ thu — kỹ thuật sẽ gieo vào platform_plans.commercial, không tự đặt số (luật 38)"
+  }
+}

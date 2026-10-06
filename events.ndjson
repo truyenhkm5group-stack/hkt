@@ -146,3 +146,4 @@
 {"at":"2026-10-06T17:03:14.654Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"CLAIM","mission":"saas-a-vnx-runtime","detail":"READY · 5 mẫu phạm vi · HIGH"}
 {"at":"2026-10-06T17:03:21.120Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"CLAIM","mission":"saas-b-internal-special-cases","detail":"READY · 3 mẫu phạm vi · HIGH"}
 {"at":"2026-10-06T17:03:28.224Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"CLAIM","mission":"saas-c-shared-identity","detail":"READY · 1 mẫu phạm vi · CRITICAL"}
+{"at":"2026-10-06T17:03:33.777Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"CLAIM","mission":"saas-d-pricing-overage","detail":"BLOCKED · 1 mẫu phạm vi · CRITICAL"}
