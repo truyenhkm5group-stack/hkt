@@ -26,6 +26,38 @@ Messenger**, **truy vết page trên đơn**, **Customer 360 không thấy hội
 | `ai-tech-room` (PR #592) | Mở | Công cụ điều phối agent | Không liên quan sản phẩm |
 | Lưu ý migration | `wt-master-mission` và `hop-thu-lich-su` cùng dùng số **0216** | — | Lệnh này cố tránh migration mới; nếu cần thì đánh số sau cùng bằng `npm run migration:renumber` |
 
+### 1.1 Theo dõi dependency — chủ shop chốt 06/10/2026: TẠM DỪNG mọi việc có thể trùng
+
+Không tạo thêm domain / schema / hộp thư mới, không thêm phụ thuộc vào Pancake, cho tới khi CẢ HAI vào `origin/main`. Trong lúc
+chờ chỉ audit chỉ-đọc và cập nhật tệp này. Khi cả hai đã vào: fetch → gộp main mới nhất vào `feat/pancake-replacement` →
+audit lại TOÀN BỘ P0 (EXISTS ⇒ REUSE/SKIP · PARTIAL ⇒ EXTEND · MISSING ⇒ BUILD) → tiếp tục lệnh.
+
+| Dependency | Đo lúc 06/10/2026 (main `95d07577`) | Dấu hiệu đã vào main (đo theo NỘI DUNG — merge squash không giữ tên nhánh) |
+|---|---|---|
+| D1 · `wt-master-mission` (nhiều page · hộp thư lọc page · onboarding không Pancake · quy kết đơn) | Chưa PR. Nhánh đi trước main 18 commit, sau main 8; cây làm việc của phiên đó có 89 thay đổi chưa commit (đang gộp main) | `origin/main` có `lib/sales-chatbot/channel-ownership.ts` + `lib/sales-chatbot/page-config-shared.ts` + bảng `org_channel_pages` trong `db/schema.ts` |
+| D2 · `claude/hop-thu-lich-su` (lịch sử hội thoại Pancake) — chỉ khi đạt gates | Chưa PR. Phiên đó đã rebase lên main mới nhất ở nhánh local `claude/hop-thu-lich-su-moi` (đi trước origin 9 commit, chưa push) | `origin/main` có `lib/sales-chatbot/history-shared.ts` + `lib/sales-chatbot/history.ts` |
+
+### 1.2 Audit chỉ-đọc trong lúc chờ (06/10/2026)
+
+- **Tiêu chí 29 «Pancake không tham gia runtime»** với shop CHỈ nối Facebook trực tiếp — đọc mã:
+  - Nhận tin (webhook Meta) · lượt bot (`processMessengerThread`) · nhân viên gửi (`sendBotText` thử Pancake trước nhưng không có
+    kết nối Pancake thì `sendFanpageText` trả «chưa bật» TRƯỚC mọi lời gọi mạng) · follow-up · tạo đơn trong chat: KHÔNG gọi
+    Pancake. Chưa có bài kiểm chứng minh bằng số lời gọi mạng = 0 — ghi vào việc kế tiếp.
+  - **Ghi đơn từ hội thoại** (`lib/sales-chatbot/order-sync.ts::runFanpageOrderSync`) **CHỈ chạy với kết nối Pancake**: không có
+    `pancake-fanpage` ⇒ dừng ngay («kết nối fanpage chưa bật»), và nó đọc lại hội thoại qua API Pancake. Shop chỉ nối Facebook
+    trực tiếp mà nhân viên chat tay (bot tắt / Quan sát / Tiếp quản) ⇒ KHÔNG được ghi đơn tự động — trong khi ERP đã có ĐỦ tin
+    của khách lẫn tiếng vọng của page trong `sales_chat_inbound`. → **PARTIAL (chỉ Pancake)**.
+  - Các nhánh khác từng chạm `order-sync.ts` đều đã merge (#585 · #588 · #590…); `hop-thu-lich-su` chỉ sửa 4 dòng (loại tin lịch
+    sử khỏi ứng viên). Không phiên nào đang mở rộng job này sang Messenger trực tiếp.
+
+### 1.3 NEXT MISSING GAP (không trùng D1 / D2) — làm SAU khi D1 + D2 vào main
+
+| # | Gap | Trạng thái | Vì sao không trùng | Phạm vi được phép |
+|---|---|---|---|---|
+| N1 | Ghi đơn từ hội thoại cho Messenger trực tiếp: đọc tin từ `sales_chat_inbound` (không qua Pancake), CÙNG luật chốt / chống trùng / sổ `state.orderSync` của job hiện có | PARTIAL ⇒ EXTEND | D1 không chạm `order-sync.ts`; D2 chỉ lọc tin lịch sử | Mở rộng job sẵn có — không domain / schema / hộp thư mới, không thêm lời gọi Pancake |
+| N2 | Bài kiểm «Pancake không tham gia runtime»: tổ chức chỉ nối Facebook trực tiếp chạy trọn nhận tin → bot → nhân viên → tạo đơn với `fetch` giả ĐẾM host — 0 lời gọi `pages.fm` | MISSING (chỉ kiểm thử) | Chỉ thêm bài kiểm | Bài kiểm mới |
+| N3 | Phủ cô lập tổ chức cho các lõi mới của nhánh (`setConversationControlCore`, `customerConversations`, `orderChatThreads`, `markConnectionBrokenBySystem`) trong bộ tấn công chéo tổ chức | MISSING (chỉ kiểm thử) | Chỉ thêm bài kiểm (D1 cũng sửa `ai-sales-isolation.test.ts` ⇒ làm sau D1 để khỏi xung đột) | Bài kiểm |
+
 ## 2. Ma trận
 
 Trạng thái: **EXISTS** · **PARTIAL** · **MISSING** · **IN_PROGRESS_ELSEWHERE** · **BLOCKED_EXTERNAL**.
@@ -51,6 +83,7 @@ Trạng thái: **EXISTS** · **PARTIAL** · **MISSING** · **IN_PROGRESS_ELSEWHE
 | Upsell / cross-sell + đo | EXISTS | Mẫu câu upsell do shop chọn; đo bán chéo đã giao (`ORDER_OUTCOME`) | `basket.ts`, `performance*.ts` | — | — | — | REUSE |
 | Customer 360 | PARTIAL | `/customers/[id]`: đơn, giao thành công, hoàn, chi tiêu, AOV, địa chỉ, `fb_id` | `app/(dashboard)/customers/[id]/page.tsx` | — | `sales_chat_conversations.customer_id` | Hồ sơ khách **không thấy hội thoại** (kênh, page, lần cuối, AI / người); không có bảng danh tính mạng xã hội (cố ý — nhận diện thận trọng ba mức `returning.ts`) | BUILD (slice 6) |
 | Đơn từ hội thoại | EXISTS | Người: `chat:<hội thoại>:<requestKey>`; AI: `sales-chat:<hội thoại>:<lượt>` + khoá advisory; `orders.sales_conversation_id`, `origin` | `lib/records/chat-order.ts`, `tools.ts`, `order-create.ts` | — | — | `orders.page_id` có cột nhưng đơn chat / AI **không ghi** ⇒ không truy về page | BUILD (slice 6) |
+| Ghi đơn từ hội thoại (nhân viên chat tay, khách gửi SĐT + địa chỉ ⇒ máy lên đơn) | PARTIAL | Chỉ với kết nối «Fanpage qua Pancake»; đọc lại hội thoại qua API Pancake | `lib/sales-chatbot/order-sync.ts` | — (D2 sửa 4 dòng) | Luật chốt, chống trùng, sổ `state.orderSync` | Shop chỉ nối Facebook trực tiếp không được ghi đơn tự động | EXTEND sau D1 + D2 (N1, mục 1.3) |
 | Analytics AI vs người, doanh thu đã giao | EXISTS | 16 chỉ số đo được, cohort AI_ONLY / AI_THEN_HUMAN, thử nghiệm ngẫu nhiên | `performance*.ts`, `experiment-*.ts` | `wt-master-mission` P1–P5 (quy kết từng đơn, AOV, theo page) | — | — | REUSE / chờ |
 | Onboarding không Pancake | IN_PROGRESS_ELSEWHERE | `main`: «Vào việc ngay» chỉ có Pancake; Messenger trực tiếp nằm ở `/ai/sales-chatbot` | `components/onboarding/go-live-card.tsx` | `wt-master-mission` P9 | — | — | Chờ P9 |
 | Pancake về vị trí legacy / chuyển đổi | MISSING | Pancake hiện như kết nối hạng nhất («Fanpage qua Pancake», «Pancake POS của tổ chức» đứng đầu trang Kết nối); không chỗ nào ghi «legacy» | `lib/connectors/registry.ts`, `app/(dashboard)/settings/connections/page.tsx` | (P9 chỉ đổi ô onboarding) | — | Khách mới vẫn thấy Pancake trước; không có hướng dẫn chuyển đổi Pancake → Messenger trực tiếp | BUILD (slice 7) |
