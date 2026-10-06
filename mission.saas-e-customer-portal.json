@@ -1,0 +1,29 @@
+{
+  "schema": 1,
+  "mission_id": "saas-e-customer-portal",
+  "title": "Phase E: cổng khách tự phục vụ — tự đổi gói theo sản phẩm, API key, tên miền theo sản phẩm",
+  "business_goal": "",
+  "status": "READY",
+  "priority": "P2",
+  "risk": "MEDIUM",
+  "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "worker": null,
+  "worktree": null,
+  "branch": null,
+  "base_sha": null,
+  "domains": [],
+  "owned_paths": [
+    "lib/saas/portal.ts",
+    "components/saas/my-products.tsx"
+  ],
+  "dependencies": [
+    "saas-platform-restructure"
+  ],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-06T17:03:39.408Z",
+  "updated_at": "2026-10-06T17:03:39.408Z",
+  "last_heartbeat": "2026-10-06T17:03:39.408Z",
+  "definition_of_done": []
+}
