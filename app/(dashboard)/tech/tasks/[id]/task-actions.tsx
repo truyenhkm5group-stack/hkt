@@ -106,6 +106,7 @@ export function TechTaskActions({ taskId, taskCode, dispatchReason, status, prio
     const canLyDo = to === "BLOCKED" || to === "CANCELLED" || to === "NEEDS_OWNER" || status === "NEEDS_OWNER" || (to === "DONE" && !verified);
     if (canLyDo) {
       setLyDo("");
+      setViecChuShop("");
       setHoiLyDo(to);
       return;
     }

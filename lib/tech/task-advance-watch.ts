@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, isNotNull, ne } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, notInArray } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { shouldAdvanceTask, type TaskPrState } from "@/lib/constants/task-advance";
 import { type TechTaskStatus } from "@/lib/constants/tech";
@@ -48,7 +48,7 @@ export async function advanceTasksFromGithub(): Promise<TaskAdvanceResult> {
     là CHƯA BIẾT, không phải "không có PR". Đẩy trạng thái dựa trên chưa-biết là đoán.
   */
   const viec = await db.query.techTasks.findMany({
-    where: and(isNotNull(schema.techTasks.prSyncedAt), ne(schema.techTasks.status, "DONE")),
+    where: and(isNotNull(schema.techTasks.prSyncedAt), notInArray(schema.techTasks.status, ["DONE", "CANCELLED"])),
     columns: { id: true, code: true, status: true, prNumber: true, prState: true, ciState: true, reviewState: true, mergeState: true },
     limit: 500,
   });

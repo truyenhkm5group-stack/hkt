@@ -1,4 +1,4 @@
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { eq, inArray, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import type { TechPriority, TechTaskStatus } from "@/lib/constants/tech";
 import {
@@ -8,6 +8,7 @@ import {
   TECH_EVENT_NAMES,
   TECH_GOAL_STATUS_LABEL,
   TECH_MISSION_STATUS_LABEL,
+  TECH_SEED_PROJECTS,
   type TechEventName,
   type TechEventSubject,
   type TechGoalStatus,
@@ -68,6 +69,7 @@ export async function recordTechEvent(db: DbLike, input: TechEventInput, actor: 
       payload: input.payload ?? {},
       actorKind: actor.kind,
       actorId: actor.kind === "HUMAN" ? (actor.id ?? null) : null,
+      actorAgentId: actor.kind === "AI_AGENT" ? (actor.agentId ?? null) : null,
       actorName: actor.name,
       dedupeKey: input.dedupeKey ?? null,
     })
@@ -110,6 +112,24 @@ async function resolveProjectId(db: DbLike, projectKeyOrId: string | null | unde
   if (!row) return { error: "Không tìm thấy dự án này." };
   if (!row.active) return { error: "Dự án đã ngừng — bật lại dự án trước khi thêm mục tiêu / sứ mệnh." };
   return row.id;
+}
+
+/* ═════════════════════ DỰ ÁN ═════════════════════ */
+
+/**
+ * Gieo bốn dự án mặc định (`TECH_SEED_PROJECTS`) — chỉ NGƯỜI bấm, cùng tiền lệ "Khởi tạo sổ agent": migration
+ * chạy trên CSDL của MỌI tổ chức, còn danh sách dự án kỹ thuật là của tổ chức nhà. Bấm lại không nhân đôi, không
+ * đè dòng người đã sửa.
+ */
+export async function seedTechProjects(actor: TechActor): Promise<TechResult<{ created: number }>> {
+  if (actor.kind !== "HUMAN") return { error: "Chỉ NGƯỜI khởi tạo được danh sách dự án." };
+  const db = await getDb();
+  const rows = await db
+    .insert(schema.techProjects)
+    .values(TECH_SEED_PROJECTS.map((p) => ({ key: p.key, name: p.name, description: p.description })))
+    .onConflictDoNothing({ target: schema.techProjects.key })
+    .returning({ id: schema.techProjects.id });
+  return { ok: true, created: rows.length };
 }
 
 /* ═════════════════════ GOAL ═════════════════════ */
@@ -186,7 +206,7 @@ export async function setTechGoalStatus(
     return { error: `Không đi thẳng từ “${TECH_GOAL_STATUS_LABEL[from]}” sang “${TECH_GOAL_STATUS_LABEL[input.to]}” được.` };
   }
   const closing = input.to === "ACHIEVED" || input.to === "ABANDONED";
-  if (closing && note.length < 10) return { error: "Đóng mục tiêu thì ghi lại kết quả / lý do (ít nhất một câu) — lần sau còn đọc được đã học được gì." };
+  if (closing && [...note].length < 10) return { error: "Đóng mục tiêu thì ghi lại kết quả / lý do (ít nhất một câu) — lần sau còn đọc được đã học được gì." };
 
   const missions = await db.query.techMissions.findMany({
     where: eq(schema.techMissions.goalId, goal.id),
@@ -315,7 +335,7 @@ export async function setTechMissionStatus(
     return { error: `Không đi thẳng từ “${TECH_MISSION_STATUS_LABEL[from]}” sang “${TECH_MISSION_STATUS_LABEL[input.to]}” được.` };
   }
   const closing = input.to === "DONE" || input.to === "CANCELLED";
-  if (closing && note.length < 10) return { error: "Đóng sứ mệnh thì ghi lại kết quả / lý do (ít nhất một câu)." };
+  if (closing && [...note].length < 10) return { error: "Đóng sứ mệnh thì ghi lại kết quả / lý do (ít nhất một câu)." };
 
   if (input.to === "ACTIVE" && mission.goalId) {
     const goal = await db.query.techGoals.findFirst({ where: eq(schema.techGoals.id, mission.goalId), columns: { code: true, status: true } });
@@ -357,7 +377,7 @@ export async function setTechMissionStatus(
 export async function attachTechTaskToMission(
   input: { taskId: string; missionId: string | null },
   actor: TechActor,
-): Promise<TechResult<{ skipped?: true }>> {
+): Promise<TechResult<{ skipped?: true; previousMissionId?: string | null }>> {
   const db = await getDb();
   const task = await db.query.techTasks.findFirst({
     where: eq(schema.techTasks.id, input.taskId),
@@ -367,32 +387,40 @@ export async function attachTechTaskToMission(
   if ((task.missionId ?? null) === (input.missionId ?? null)) return { ok: true, skipped: true };
   if (task.status === "DONE" || task.status === "CANCELLED") return { error: "Việc đã kết thúc — không đổi sứ mệnh của nó nữa." };
 
+  const cols = { id: true, code: true, status: true, goalId: true, projectId: true } as const;
   let mission: { id: string; code: string; status: string; goalId: string | null; projectId: string | null } | undefined;
   if (input.missionId) {
-    mission = await db.query.techMissions.findFirst({
-      where: eq(schema.techMissions.id, input.missionId),
-      columns: { id: true, code: true, status: true, goalId: true, projectId: true },
-    });
+    mission = await db.query.techMissions.findFirst({ where: eq(schema.techMissions.id, input.missionId), columns: cols });
     if (!mission) return { error: "Không tìm thấy sứ mệnh này." };
     if (mission.status === "DONE" || mission.status === "CANCELLED") return { error: "Sứ mệnh đã kết thúc — không thêm việc vào." };
   }
+  const cu = task.missionId ? await db.query.techMissions.findFirst({ where: eq(schema.techMissions.id, task.missionId), columns: cols }) : undefined;
 
   await db.transaction(async (tx) => {
+    // Dự án đi theo sứ mệnh mới (chuyển sang sứ mệnh của dự án khác thì việc đổi dự án theo); gỡ ra thì giữ dự án cũ.
     await tx
       .update(schema.techTasks)
-      .set({ missionId: mission?.id ?? null, projectId: task.projectId ?? mission?.projectId ?? null })
-      .where(and(eq(schema.techTasks.id, task.id)));
+      .set({ missionId: mission?.id ?? null, projectId: mission?.projectId ?? task.projectId ?? null })
+      .where(eq(schema.techTasks.id, task.id));
     if (mission) {
       await recordTechEvent(
         tx,
-        { name: "mission.task_attached", subjectType: "MISSION", subjectId: mission.id, missionId: mission.id, goalId: mission.goalId, taskId: task.id, payload: { taskCode: task.code, previousMissionId: task.missionId } },
+        { name: "mission.task_attached", subjectType: "MISSION", subjectId: mission.id, missionId: mission.id, goalId: mission.goalId, taskId: task.id, payload: { taskCode: task.code, previousMission: cu?.code ?? null } },
+        actor,
+      );
+    }
+    // Sứ mệnh CŨ cũng phải thấy việc rời đi — không thì dòng thời gian của nó có việc vào mà không có việc ra.
+    if (cu) {
+      await recordTechEvent(
+        tx,
+        { name: "mission.task_detached", subjectType: "MISSION", subjectId: cu.id, missionId: cu.id, goalId: cu.goalId, taskId: task.id, payload: { taskCode: task.code, nextMission: mission?.code ?? null } },
         actor,
       );
     }
   });
   await recordTechTaskEvent(
-    { taskId: task.id, kind: "MISSION", previousValue: task.missionId ?? "", nextValue: mission?.code ?? "", note: mission ? `Vào sứ mệnh ${mission.code}` : "Gỡ khỏi sứ mệnh" },
+    { taskId: task.id, kind: "MISSION", previousValue: cu?.code ?? "", nextValue: mission?.code ?? "", note: mission ? `Vào sứ mệnh ${mission.code}` : `Gỡ khỏi sứ mệnh ${cu?.code ?? ""}`.trim() },
     actor,
   );
-  return { ok: true };
+  return { ok: true, previousMissionId: task.missionId };
 }

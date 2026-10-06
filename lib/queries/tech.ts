@@ -56,7 +56,7 @@ export function techTaskWhere(params: ListParams) {
     if (coChuaGiao) ve.push(sql`${t.agentId} is null`);
     if (ve.length) conds.push(ve.length === 1 ? ve[0] : or(...ve));
   }
-  /* `mo=1`: chỉ việc còn trên bàn. `DONE` là trạng thái kết thúc duy nhất. */
+  /* `mo=1`: chỉ việc còn trên bàn — trừ hai trạng thái kết thúc `DONE` · `CANCELLED` (`TECH_TASK_OPEN`). */
   if (params.filters.open?.includes("1")) conds.push(inArray(t.status, [...TECH_TASK_OPEN]));
   if (params.filters.approval?.length) conds.push(inArray(t.approvalStatus, params.filters.approval));
   const term = params.q.trim();
@@ -202,12 +202,14 @@ export async function techOverviewCounts() {
   const [[task], [agent], [run], [deploy], [incident]] = await Promise.all([
     db
       .select({
-        open: sql<number>`count(*) filter (where ${t.status} <> 'DONE')`,
-        p0: sql<number>`count(*) filter (where ${t.status} <> 'DONE' and ${t.priority} = 'P0')`,
-        p1: sql<number>`count(*) filter (where ${t.status} <> 'DONE' and ${t.priority} = 'P1')`,
+        // "Mở" = KHÔNG ở trạng thái kết thúc (DONE · CANCELLED) — cùng tập `TECH_TASK_OPEN` mà bộ lọc `open=1` dùng,
+        // để con số trên thẻ bằng đúng số dòng của danh sách nó mở ra.
+        open: sql<number>`count(*) filter (where ${t.status} not in ('DONE','CANCELLED'))`,
+        p0: sql<number>`count(*) filter (where ${t.status} not in ('DONE','CANCELLED') and ${t.priority} = 'P0')`,
+        p1: sql<number>`count(*) filter (where ${t.status} not in ('DONE','CANCELLED') and ${t.priority} = 'P1')`,
         blocked: sql<number>`count(*) filter (where ${t.status} = 'BLOCKED')`,
         failed: sql<number>`count(*) filter (where ${t.status} in ('FAILED','ROLLED_BACK'))`,
-        waitingApproval: sql<number>`count(*) filter (where ${t.approvalStatus} = 'PENDING')`,
+        waitingApproval: sql<number>`count(*) filter (where ${t.approvalStatus} = 'PENDING' and ${t.status} not in ('DONE','CANCELLED'))`,
         active: sql<number>`count(*) filter (where ${t.status} in ('BUILDING','REVIEW','QA','DEPLOYING','OBSERVING'))`,
         total: sql<number>`count(*)`,
       })

@@ -36,6 +36,7 @@ const EXEC_TONE: Record<MissionExecutionState, string> = {
   READY: "bg-sky-50 text-sky-700 dark:bg-sky-950/60 dark:text-sky-300",
   BACKLOG: "bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300",
   COMPLETE: "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300",
+  ALL_CANCELLED: "bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400",
 };
 
 export function ExecutionBadge({ state }: { state: MissionExecutionState }) {

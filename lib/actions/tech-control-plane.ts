@@ -6,7 +6,7 @@ import { audit } from "@/lib/audit";
 import { can, requireUser } from "@/lib/auth/session";
 import { TECH_PRIORITIES } from "@/lib/constants/tech";
 import { TECH_GOAL_STATUSES, TECH_MISSION_STATUSES } from "@/lib/constants/tech-control-plane";
-import { attachTechTaskToMission, createTechGoal, createTechMission, setTechGoalStatus, setTechMissionStatus } from "@/lib/tech/control-plane";
+import { attachTechTaskToMission, createTechGoal, createTechMission, seedTechProjects, setTechGoalStatus, setTechMissionStatus } from "@/lib/tech/control-plane";
 import type { TechActor, TechResult } from "@/lib/tech/service";
 
 /**
@@ -41,6 +41,16 @@ function lamMoi(ids: { goalId?: string | null; missionId?: string | null; taskId
   if (ids.goalId) revalidatePath(`/tech/goals/${ids.goalId}`);
   if (ids.missionId) revalidatePath(`/tech/missions/${ids.missionId}`);
   if (ids.taskId) revalidatePath(`/tech/tasks/${ids.taskId}`);
+}
+
+export async function seedTechProjectsAction(): Promise<TechResult<{ created: number }>> {
+  const user = await nguoiQuanTri();
+  if (!user) return { error: KHONG_QUYEN };
+  const res = await seedTechProjects(actorOf(user));
+  if ("error" in res) return res;
+  if (res.created) await audit({ userId: user.id, userEmail: user.email, action: "TECH_PROJECTS_SEEDED", entity: "TECH_PROJECT", after: { created: res.created } });
+  lamMoi();
+  return res;
 }
 
 const goalSchema = z.object({
@@ -139,5 +149,6 @@ export async function attachTechTaskToMissionAction(input: unknown): Promise<Tec
     await audit({ userId: user.id, userEmail: user.email, action: "TECH_TASK_MISSION", entity: "TECH_TASK", entityId: p.data.taskId, after: { missionId: p.data.missionId } });
   }
   lamMoi({ missionId: p.data.missionId, taskId: p.data.taskId });
+  if (res.previousMissionId) revalidatePath(`/tech/missions/${res.previousMissionId}`);
   return { ok: true };
 }
