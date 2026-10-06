@@ -130,6 +130,13 @@ export function testTechWorkerPure() {
   assert.equal(parseAgentResult('{"outcome":"DEPLOYED"}').outcome, null, "kết cục ngoài danh sách đóng bị bỏ");
   assert.equal(parseAgentResult('{"outcome":"NEEDS_OWNER","ownerAction":"cấp quyền"}').ownerAction, "cấp quyền");
 
+  // Cửa worker tự xác thực TRƯỚC mọi việc khác (nó được miễn khoá phiên ở middleware và access-control).
+  const route = readFileSync(path.join(goc, "app/api/tech/worker/[op]/route.ts"), "utf8");
+  const iAuth = route.indexOf('authenticateTechWorker(req.headers.get("authorization"))');
+  assert.ok(iAuth > 0 && route.indexOf("status: 401") > iAuth, "route worker phải xác thực khoá riêng và trả 401 khi sai");
+  assert.ok(iAuth < route.indexOf("req.json()"), "xác thực phải đứng TRƯỚC lượt đọc thân gói");
+  assert.ok(!/CRON_SECRET|cronSecret/.test(route), "cửa worker không nhận khoá lập lịch chung");
+
   // Migration: CHECK provider / concurrency khớp hằng số.
   const mig = readFileSync(path.join(goc, "drizzle/0226_tech_workers.sql"), "utf8");
   assert.match(mig, /"max_concurrency" BETWEEN 1 AND 4/);

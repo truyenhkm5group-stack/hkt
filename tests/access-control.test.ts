@@ -73,6 +73,10 @@ const CO_Y_CONG_KHAI: Record<string, string> = {
   // Phase 10 · thương hiệu: logo hiện trên thanh đầu cho MỌI người của tổ chức, nên khoá quyền nào ở đây cũng làm vỡ
   // thanh đầu của người ít quyền nhất. Không nhận id / mã tổ chức: chỉ trả logo của CHÍNH tổ chức trong phiên.
   "app/api/branding/logo/route.ts": "chỉ cần phiên: logo của CHÍNH tổ chức trong phiên (thanh đầu của mọi người), không nhận id hay mã tổ chức",
+  // Pha 2 mặt phẳng điều khiển (docs/tech-control-plane/README.md mục 4): worker headless ở máy khác KHÔNG có phiên —
+  // tự xác thực bằng khoá RIÊNG từng worker (`authenticateTechWorker`, CSDL chỉ giữ băm, thời gian hằng), chỉ chạm
+  // việc / lượt chạy của CHÍNH worker đó (fencing `lease_generation`); hình dạng khoá ở tests/tech-worker.test.ts.
+  "app/api/tech/worker/[op]/route.ts": "worker headless tự xác thực bằng khoá riêng (Bearer tw_…, CSDL giữ băm); chỉ chạm việc mình đang giữ lease, fencing bằng lease_generation",
   "app/api/tech/agent-task/route.ts": "gọi bằng x-cron-secret từ GitHub Actions; chỉ GET một việc theo mã, chỉ việc được phép giao, hình dạng khoá ở tests/agent-task-read.test.ts",
   // 0180 · Caddy on-demand TLS hỏi trước khi xin chứng chỉ cho `<slug>.<miền gốc>`: KHÔNG có phiên (Caddy gọi), chỉ trả
   // "ok"/"no" cho đúng tổ chức ĐÃ XUẤT BẢN — không đọc / trả dữ liệu nghiệp vụ nào (tests/self-service-journey.test.ts).
