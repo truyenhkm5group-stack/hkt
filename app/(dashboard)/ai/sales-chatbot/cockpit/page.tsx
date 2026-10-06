@@ -30,6 +30,7 @@ export default async function SalesCockpitPage() {
     { label: "Đơn AI tạo cuối", value: formatTimeAgo(snap.lastAiOrderAt), hint: formatDateTime(snap.lastAiOrderAt) },
     { label: "Đang chờ / đang thử lại", value: `${formatNumber(snap.queue.pending)} / ${formatNumber(snap.queue.retrying)}` },
     { label: "Tin chờ lâu nhất", value: snap.queue.oldestPendingAt ? formatTimeAgo(snap.queue.oldestPendingAt) : "không có", hint: `SLO: cảnh báo ${slo.backlogWarnMinutes} phút · nguy cấp ${slo.backlogCriticalMinutes} phút` },
+    { label: "Dead-letter 24 giờ", value: snap.queue.deadLetter === null ? "—" : formatNumber(snap.queue.deadLetter), hint: "tin bot không trả lời được: AI hỏng · gửi hỏng · hết lượt thử" },
     { label: "Lỗi 24 giờ", value: formatNumber(snap.errors24h), hint: `gửi lỗi ${snap.queue.failedSend24h} · hội thoại AI hỏng ${snap.queue.failedAiDown24h} · tin bị bỏ sót ${snap.queue.abandoned24h}` },
     { label: "Độ trễ P50 / P95", value: `${sec(snap.latency.p50Seconds)} / ${sec(snap.latency.p95Seconds)}`, hint: `${snap.latency.sample} lượt đo trong 24 giờ · SLO ${slo.replyTargetSeconds} giây` },
     { label: "Hội thoại AI hôm nay", value: formatNumber(snap.today.conversationsAi) },

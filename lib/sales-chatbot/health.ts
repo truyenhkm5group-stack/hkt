@@ -26,6 +26,7 @@ import { loadModeConfig } from "@/lib/sales-chatbot/operating-mode";
 import { loadOrderSyncConfig } from "@/lib/sales-chatbot/order-sync";
 import { PANCAKE_POLL_SETTING_KEY } from "@/lib/sales-chatbot/pancake-poll";
 import { notifySalesHealth } from "@/lib/sales-chatbot/alerts";
+import { DEAD_SEND_NOTE_PREFIX } from "@/lib/sales-chatbot/inbound-retry";
 import { rowsOf } from "@/lib/sql-rows";
 
 export const SALES_HEALTH_STATE_KEY = "ai.salesHealth.state";
@@ -79,10 +80,11 @@ export async function readSalesHealthSnapshot(now: Date = new Date(), slo?: AiSa
         count(*) filter (where status = 'PENDING' and created_at >= ${eligibleFrom} and claim_id is not null) as retrying,
         min(created_at) filter (where status = 'PENDING' and created_at >= ${eligibleFrom}) as oldest,
         count(*) filter (where status = 'PENDING' and created_at < ${eligibleFrom} and created_at >= ${new Date(now.getTime() - 86_400_000)}) as abandoned,
-        count(*) filter (where status = 'DONE' and created_at >= ${new Date(now.getTime() - 86_400_000)} and note ~* ${SEND_ERROR_NOTE_RE}) as failed_send,
+        count(*) filter (where created_at >= ${new Date(now.getTime() - 86_400_000)} and ((status = 'DONE' and note ~* ${SEND_ERROR_NOTE_RE}) or (status = 'DEAD' and note like ${`${DEAD_SEND_NOTE_PREFIX}%`}))) as failed_send,
+        count(*) filter (where status = 'DEAD' and created_at >= ${new Date(now.getTime() - 86_400_000)}) as dead_24h,
         max(created_at) as last_customer,
         count(*) filter (where created_at >= ${new Date(now.getTime() - 3_600_000)}) as last_hour,
-        count(distinct thread_id) filter (where status = 'DONE' and created_at >= ${silentFrom}) as silent_threads
+        count(distinct thread_id) filter (where status in ('DONE', 'DEAD') and created_at >= ${silentFrom}) as silent_threads
       from sales_chat_inbound
       where ${CUSTOMER_ROW} and created_at >= ${new Date(now.getTime() - 14 * 86_400_000)}
     `),
@@ -189,7 +191,7 @@ export async function readSalesHealthSnapshot(now: Date = new Date(), slo?: AiSa
     lastCustomerMessageAt: iso(q?.last_customer),
     lastAiReplyAt: iso(bot?.last_bot),
     lastAiOrderAt: iso(ord?.last_ai),
-    queue: { pending: num(q?.pending), retrying: num(q?.retrying), oldestPendingAt: iso(q?.oldest), failedAiDown24h: aiDown, failedSend24h: failedSend, abandoned24h: num(q?.abandoned), deadLetter: null },
+    queue: { pending: num(q?.pending), retrying: num(q?.retrying), oldestPendingAt: iso(q?.oldest), failedAiDown24h: aiDown, failedSend24h: failedSend, abandoned24h: num(q?.abandoned), deadLetter: num(q?.dead_24h) },
     silent: { customerHandled: num(q?.silent_threads), botSent: num(bot?.bot_window), windowMinutes: s.silentWindowMinutes },
     latency: { p50Seconds: numOrNull(lat?.p50), p95Seconds: numOrNull(lat?.p95), sample: num(lat?.sample), unanswered: num(lat?.unanswered) },
     provider: {
@@ -222,13 +224,13 @@ export async function salesHealthDrilldown(now: Date = new Date(), limit = 30): 
       left join sales_chat_conversations c on c.page_id = i.page_id and c.thread_id = i.thread_id
       where ${sql.raw(`coalesce(i.note, '') not in ('BOT_SENT', 'PAGE_REPLY') and i.message_id not like 'bot-out:%' and i.message_id not like 'staff-out:%' and i.imported_at is null`)}
         and i.created_at >= ${new Date(now.getTime() - 86_400_000)}
-        and (i.status = 'PENDING' or (i.status = 'DONE' and i.note ~* ${SEND_ERROR_NOTE_RE}) or (c.handoff_reason = ${AI_DOWN_HANDOFF_REASON} and i.status = 'DONE'))
+        and (i.status in ('PENDING', 'DEAD') or (i.status = 'DONE' and i.note ~* ${SEND_ERROR_NOTE_RE}) or (c.handoff_reason = ${AI_DOWN_HANDOFF_REASON} and i.status = 'DONE'))
       order by i.created_at desc
       limit ${limit}
     `),
   );
   return rows.map((r) => ({
-    kind: r.status === "PENDING" ? "PENDING" : r.handoff_reason === AI_DOWN_HANDOFF_REASON ? "AI_DOWN" : "SEND_FAILED",
+    kind: r.status === "PENDING" ? "PENDING" : r.status === "DEAD" ? (String(r.note ?? "").startsWith(DEAD_SEND_NOTE_PREFIX) ? "SEND_FAILED" : "AI_DOWN") : r.handoff_reason === AI_DOWN_HANDOFF_REASON ? "AI_DOWN" : "SEND_FAILED",
     at: iso(r.created_at) ?? "",
     pageId: String(r.page_id ?? ""),
     threadId: String(r.thread_id ?? ""),

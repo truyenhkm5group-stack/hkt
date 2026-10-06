@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { and, eq, gte, inArray, isNull, lt, or, sql } from "drizzle-orm";
+import { and, eq, gte, inArray, isNotNull, isNull, lt, or, sql } from "drizzle-orm";
 import { getDb, getPlatformDb, schema } from "@/db";
 import type { SessionUser } from "@/lib/auth/session";
 import { adoptLegacyChannelPages, disableChannelPages, listChannelPages, messagingConnectionSummaries, noteChannelPageHealth, openActiveConnection, openChannelPageToken, saveConnection, setChannelPagesState, setConnectionStatus, testOrgConnection, upsertChannelPage } from "@/lib/connectors/service";
@@ -8,6 +8,7 @@ import { instagramAccountOf, messengerApp, postMessage, sendMessengerImage, send
 import { chunkText } from "@/lib/messaging/providers";
 import { canUseModule } from "@/lib/platform/capabilities";
 import { AI_DOWN_HANDOFF_REASON, chatTurn, conversationView, describeCustomerImages } from "@/lib/sales-chatbot/engine";
+import { ALREADY_REPLIED_NOTE, alreadyRepliedAfter, DEAD_AI_DOWN_NOTE, DEAD_SEND_NOTE_PREFIX, deadLetter, dueForClaim, releaseWithBackoff } from "@/lib/sales-chatbot/inbound-retry";
 import { recordConversationEvent } from "@/lib/sales-chatbot/events";
 import { dualConnectedPages, loadTransportFacts, PANCAKE_OWNS_PAGE_REASON, transportOwnerOf } from "@/lib/sales-chatbot/channel-ownership";
 import {
@@ -495,13 +496,26 @@ export async function processMessengerThread(pageId: string, psid: string, deps:
     };
     if (!deps.catchUp && new Date(pend.newest).getTime() > now().getTime() - (firstContact ? FIRST_CONTACT_WAIT_MS : FOLLOWUP_WAIT_MS) && !(await pageRepliedSince())) return { ...out, skipped: WAITING };
     const claim = randomUUID();
+    const staleBefore = new Date(now().getTime() - CLAIM_STALE_MS);
+    // Lượt giành QUÁ HẠN của một tiến trình đã chết — để biết lượt đó đã kịp gửi chưa (inbound-retry.ts).
+    const [staleClaim] = await db
+      .select({ at: sql<Date | null>`min(${t.claimedAt})` })
+      .from(t)
+      .where(and(eq(t.pageId, pageId), eq(t.threadId, psid), eq(t.status, "PENDING"), isNotNull(t.claimId), lt(t.claimedAt, staleBefore)));
     const claimed = await db
       .update(t)
       .set({ claimId: claim, claimedAt: now() })
-      .where(and(eq(t.pageId, pageId), eq(t.threadId, psid), eq(t.status, "PENDING"), or(isNull(t.claimId), lt(t.claimedAt, new Date(now().getTime() - CLAIM_STALE_MS)))))
+      .where(and(eq(t.pageId, pageId), eq(t.threadId, psid), eq(t.status, "PENDING"), or(isNull(t.claimId), lt(t.claimedAt, staleBefore)), dueForClaim(now())))
       .returning({ id: t.id, text: t.text, createdAt: t.createdAt, imageUrls: t.imageUrls, kind: t.kind, postId: t.postId, messageId: t.messageId });
     if (!claimed.length) break;
     const ids = claimed.map((r) => r.id);
+    // KHÔNG TRẢ LỜI TRÙNG: lượt quá hạn đã kịp gửi câu bot sau mốc nó giành ⇒ chốt, không gọi AI, không gửi lại.
+    if (staleClaim?.at && (await alreadyRepliedAfter(db, pageId, psid, new Date(staleClaim.at)))) {
+      await db.update(t).set({ status: "DONE", processedAt: now(), note: ALREADY_REPLIED_NOTE }).where(and(inArray(t.id, ids), eq(t.claimId, claim)));
+      out.processed += ids.length;
+      out.skipped = ALREADY_REPLIED_NOTE;
+      continue;
+    }
     const finish = (status: "DONE" | "SKIPPED" | "PENDING", note: string | null) =>
       db
         .update(t)
@@ -516,7 +530,8 @@ export async function processMessengerThread(pageId: string, psid: string, deps:
     }
     const conv = await conversationFor(pageId, psid);
     if (!conv) {
-      await finish("PENDING", "Không mở được hội thoại");
+      // Lỗi tạm: nhả tin, lùi dần; hết lượt ⇒ DEAD (inbound-retry.ts).
+      await releaseWithBackoff(db, ids, claim, "Không mở được hội thoại", now());
       return { ...out, error: "Không mở được hội thoại" };
     }
     {
@@ -599,7 +614,11 @@ export async function processMessengerThread(pageId: string, psid: string, deps:
       continue;
     }
     if (turn.view.status === "HANDOFF") {
-      await finish("DONE", "Chuyển nhân viên — bot không nhắn gì, chờ người trả lời");
+      // AI HỎNG ⇒ DEAD-LETTER (thử lại khi provider hồi phục); chuyển người có chủ đích ⇒ DONE như cũ.
+      const cvh = schema.salesChatConversations;
+      const [hc] = await db.select({ reason: cvh.handoffReason, error: cvh.lastError }).from(cvh).where(eq(cvh.id, conv.id)).limit(1);
+      if (hc?.reason === AI_DOWN_HANDOFF_REASON) await deadLetter(db, ids, claim, DEAD_AI_DOWN_NOTE, hc.error, now());
+      else await finish("DONE", "Chuyển nhân viên — bot không nhắn gì, chờ người trả lời");
       out.processed += ids.length;
       out.skipped = "Chuyển nhân viên — bot im lặng";
       continue;
@@ -623,7 +642,8 @@ export async function processMessengerThread(pageId: string, psid: string, deps:
         out.replies += 1;
         if (pr.id) await db.insert(t).values({ pageId, threadId: psid, messageId: pr.id, text: replyText.slice(0, TEXT_MAX), status: "DONE", processedAt: now(), note: "BOT_SENT" }).onConflictDoNothing({ target: t.messageId });
       }
-      await finish("DONE", pr && !pr.ok ? pr.error : replyText ? null : "Bot không có câu trả lời");
+      if (pr && !pr.ok) await deadLetter(db, ids, claim, `${DEAD_SEND_NOTE_PREFIX}${pr.error}`, pr.error, now());
+      else await finish("DONE", replyText ? null : "Bot không có câu trả lời");
       out.processed += ids.length;
       if (pr && !pr.ok) {
         out.error = pr.error;
@@ -669,7 +689,9 @@ export async function processMessengerThread(pageId: string, psid: string, deps:
       }
     }
     if (!sendError && !yielded && !mediaDone) await sendMedia();
-    await finish("DONE", sendError ?? yielded);
+    // Gửi hỏng ⇒ DEAD-LETTER, KHÔNG tự gửi lại (lời gọi gửi có thể đã tới nơi).
+    if (sendError) await deadLetter(db, ids, claim, `${DEAD_SEND_NOTE_PREFIX}${sendError}`, sendError, now());
+    else await finish("DONE", yielded);
     if (!sendError && out.replies > 0) await markWaitingForCustomer(conv.id, now());
     if (yielded) out.skipped = yielded;
     out.processed += ids.length;

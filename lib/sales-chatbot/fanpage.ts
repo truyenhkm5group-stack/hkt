@@ -25,7 +25,7 @@ import { readPinnedArm, replyGate } from "@/lib/sales-chatbot/operating-mode-sha
 import { applyConversationControl, controlOf, controlSkipNote } from "@/lib/sales-chatbot/conversation-control-shared";
 import { botMaySend, captureSendSnapshot } from "@/lib/sales-chatbot/conversation-control";
 import { createHash, randomUUID } from "node:crypto";
-import { and, asc, desc, eq, gte, inArray, isNull, like, lt, ne, or, sql, type SQL } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, isNotNull, isNull, like, lt, ne, or, sql, type SQL } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { messagingConnectionSummaries, openActiveConnection } from "@/lib/connectors/service";
 import { env } from "@/lib/env";
@@ -35,6 +35,7 @@ import { describeNetworkFailure, isNetworkFailure } from "@/lib/connectors/net-e
 import { PANCAKE_PAGES_API, scrubSecrets } from "@/lib/connectors/testers";
 import { chunkText } from "@/lib/messaging/providers";
 import { AI_DOWN_HANDOFF_REASON, appendContextMessages, chatTurn, conversationView, describeCustomerImages, loadSalesChatbotConfig, openConversation } from "@/lib/sales-chatbot/engine";
+import { ALREADY_REPLIED_NOTE, alreadyRepliedAfter, DEAD_AI_DOWN_NOTE, DEAD_SEND_NOTE_PREFIX, deadLetter, dueForClaim, releaseWithBackoff } from "@/lib/sales-chatbot/inbound-retry";
 import { readQuickReplyImage, rememberPancakeContent } from "@/lib/sales-chatbot/quick-replies";
 import { recordConversationEvent } from "@/lib/sales-chatbot/events";
 import { loadPollState, savePollState } from "@/lib/sales-chatbot/pancake-poll";
@@ -827,13 +828,27 @@ export async function processFanpageThread(pageId: string, threadId: string, dep
     if (!deps.catchUp && new Date(pend.newest).getTime() > now().getTime() - (firstContact ? FIRST_CONTACT_WAIT_MS : FOLLOWUP_WAIT_MS) && !(await pageRepliedSince())) return { ...out, skipped: WAITING };
     const claim = randomUUID();
     const staleBefore = new Date(now().getTime() - CLAIM_STALE_MS);
+    // Lượt giành QUÁ HẠN của một tiến trình đã chết (mốc giành sớm nhất) — để biết lượt đó đã kịp gửi chưa (inbound-retry.ts).
+    const [staleClaim] = await db
+      .select({ at: sql<Date | null>`min(${t.claimedAt})` })
+      .from(t)
+      .where(and(eq(t.pageId, pageId), eq(t.threadId, threadId), eq(t.status, "PENDING"), isNotNull(t.claimId), lt(t.claimedAt, staleBefore)));
     const claimed = await db
       .update(t)
       .set({ claimId: claim, claimedAt: now() })
-      .where(and(eq(t.pageId, pageId), eq(t.threadId, threadId), eq(t.status, "PENDING"), or(isNull(t.claimId), lt(t.claimedAt, staleBefore))))
+      .where(and(eq(t.pageId, pageId), eq(t.threadId, threadId), eq(t.status, "PENDING"), or(isNull(t.claimId), lt(t.claimedAt, staleBefore)), dueForClaim(now())))
       .returning({ id: t.id, text: t.text, createdAt: t.createdAt, messageId: t.messageId, kind: t.kind, postId: t.postId, fromId: t.fromId, customerName: t.customerName, imageUrls: t.imageUrls });
     if (!claimed.length) break;
     const ids = claimed.map((r) => r.id);
+    // KHÔNG TRẢ LỜI TRÙNG: lượt trước giành các tin này rồi chết; nó đã kịp gửi câu bot (sau mốc nó giành) ⇒ tin đã được trả
+    // lời — chốt, không gọi AI, không gửi lại. CHỈ xét khi có lượt quá hạn: so với mốc tin khách thì nuốt mất tin khách gửi
+    // trong lúc bot đang soạn câu trước.
+    if (staleClaim?.at && (await alreadyRepliedAfter(db, pageId, threadId, new Date(staleClaim.at)))) {
+      await db.update(t).set({ status: "DONE", processedAt: now(), note: ALREADY_REPLIED_NOTE }).where(and(inArray(t.id, ids), eq(t.claimId, claim)));
+      out.processed += ids.length;
+      out.skipped = ALREADY_REPLIED_NOTE;
+      continue;
+    }
     // Khách vừa nhắn ⇒ hết im lặng: dừng lịch follow-up, ghi mốc tin cuối của khách (khung 24 giờ của Facebook tính từ đây).
     const lastCustomerAt = new Date(Math.max(...claimed.map((r) => r.createdAt.getTime())));
     {
@@ -858,7 +873,8 @@ export async function processFanpageThread(pageId: string, threadId: string, dep
     }
     const conv = await conversationFor(pageId, threadId);
     if (!conv) {
-      await finish("PENDING", "Không mở được hội thoại");
+      // Lỗi tạm: nhả tin, lùi dần 2 · 4 · 8 phút; hết lượt ⇒ DEAD (inbound-retry.ts) — không nằm PENDING mãi.
+      await releaseWithBackoff(db, ids, claim, "Không mở được hội thoại", now());
       return { ...out, error: "Không mở được hội thoại" };
     }
     // Hội thoại vừa mở ở tin đầu ⇒ ghi mốc tin cuối của khách (khung 24 giờ của Facebook cho follow-up).
@@ -966,7 +982,12 @@ export async function processFanpageThread(pageId: string, threadId: string, dep
     // cho tới khi người vào đọc và trả lời). Áp cho MỌI đường chuyển: AI gọi handoff · AI hỏng · hội thoại quá dài. Nhân
     // viên vẫn nhận thông báo trong ERP (`notifySalesChatHandoff`).
     if (turn.view.status === "HANDOFF") {
-      await finish("DONE", "Chuyển nhân viên — bot không nhắn gì, chờ người trả lời");
+      // AI HỎNG (khác bot CỐ Ý chuyển người) ⇒ DEAD-LETTER: tin này bot không trả lời được — việc của người, và được thử lại
+      // khi provider hồi phục (requeueAiDownDeadLetters, job sales-followup). Chuyển người có chủ đích ⇒ DONE như cũ.
+      const cvh = schema.salesChatConversations;
+      const [hc] = await db.select({ reason: cvh.handoffReason, error: cvh.lastError }).from(cvh).where(eq(cvh.id, conv.id)).limit(1);
+      if (hc?.reason === AI_DOWN_HANDOFF_REASON) await deadLetter(db, ids, claim, DEAD_AI_DOWN_NOTE, hc.error, now());
+      else await finish("DONE", "Chuyển nhân viên — bot không nhắn gì, chờ người trả lời");
       out.processed += ids.length;
       out.skipped = "Chuyển nhân viên — bot im lặng";
       continue;
@@ -992,7 +1013,9 @@ export async function processFanpageThread(pageId: string, threadId: string, dep
         out.replies += 1;
         if (pr.inboxId) await markWaitingForCustomer(conv.id, now(), pr.inboxId);
       }
-      await finish(pr.kind === "ALREADY" ? "SKIPPED" : "DONE", pr.kind === "SENT" ? pr.warning : pr.reason);
+      // Gửi hỏng ⇒ DEAD (không tự gửi lại — lượt gửi có thể đã tới nơi); đã gửi / đã có ⇒ như cũ.
+      if (pr.kind === "FAILED") await deadLetter(db, ids, claim, `${DEAD_SEND_NOTE_PREFIX}${pr.reason}`, pr.reason, now());
+      else await finish(pr.kind === "ALREADY" ? "SKIPPED" : "DONE", pr.kind === "SENT" ? pr.warning : pr.reason);
       out.processed += ids.length;
       if (pr.kind === "FAILED") {
         out.error = pr.reason;
@@ -1054,7 +1077,9 @@ export async function processFanpageThread(pageId: string, threadId: string, dep
       }
     }
     if (!sendError && !yielded && !mediaDone) await sendMedia();
-    await finish("DONE", sendError ?? yielded);
+    // Gửi hỏng ⇒ DEAD-LETTER (khách chưa nhận đủ câu trả lời — việc của người). KHÔNG tự gửi lại: lời gọi gửi có thể đã tới nơi.
+    if (sendError) await deadLetter(db, ids, claim, `${DEAD_SEND_NOTE_PREFIX}${sendError}`, sendError, now());
+    else await finish("DONE", yielded);
     if (!sendError && out.replies > 0) await markWaitingForCustomer(conv.id, now());
     if (yielded) out.skipped = yielded;
     out.processed += ids.length;
@@ -1259,7 +1284,7 @@ export async function catchUpFanpage(deps: FanpageDeps = {}): Promise<CatchUpRes
   return out;
 }
 
-export type FanpageInboundCounts = { pending: number; done: number; skipped: number; skippedReasons: { reason: string; count: number }[] };
+export type FanpageInboundCounts = { pending: number; done: number; skipped: number; dead: number; skippedReasons: { reason: string; count: number }[] };
 
 /**
  * Số tin fanpage theo trạng thái + ba LÝ DO bỏ qua nhiều nhất (màn hình Chatbot bán hàng). Chủ shop không đọc được CSDL —
@@ -1280,7 +1305,7 @@ export async function fanpageInboundCounts(): Promise<FanpageInboundCounts> {
     .groupBy(t.note)
     .orderBy(sql`count(*) desc`)
     .limit(3);
-  return { pending: of("PENDING"), done: of("DONE"), skipped: of("SKIPPED"), skippedReasons: reasons.map((r) => ({ reason: r.reason?.trim() || "Không ghi lý do", count: Number(r.n) })) };
+  return { pending: of("PENDING"), done: of("DONE"), skipped: of("SKIPPED"), dead: of("DEAD"), skippedReasons: reasons.map((r) => ({ reason: r.reason?.trim() || "Không ghi lý do", count: Number(r.n) })) };
 }
 
 export type FanpageSetupView = {

@@ -20,7 +20,7 @@ import type { AiSalesSlo } from "@/lib/constants/ai-sales-slo";
 
 export type HealthLevel = "OK" | "WARNING" | "CRITICAL" | "UNKNOWN";
 export type SalesHealthStatus = "GREEN" | "YELLOW" | "RED" | "UNKNOWN" | "OFF";
-export type HealthCheckKey = "BACKLOG" | "ABANDONED" | "BOT_SILENT" | "PROVIDER" | "WEBHOOK" | "LATENCY" | "SAFETY_NET" | "ORDER_SYNC";
+export type HealthCheckKey = "BACKLOG" | "ABANDONED" | "DEAD_LETTER" | "BOT_SILENT" | "PROVIDER" | "WEBHOOK" | "LATENCY" | "SAFETY_NET" | "ORDER_SYNC";
 
 export type HealthCheck = { key: HealthCheckKey; level: HealthLevel; title: string; detail: string; fix?: string };
 
@@ -108,6 +108,8 @@ export function evaluateSalesHealth(s: SalesHealthSnapshot, slo: AiSalesSlo): Sa
     else if (age >= slo.backlogWarnMinutes)
       checks.push({ key: "BACKLOG", level: "WARNING", title: "Hàng chờ", detail: `${s.queue.pending} tin khách đang chờ, tin cũ nhất ${fmtMin(age)} (SLO ${slo.backlogWarnMinutes} phút).` });
     else checks.push({ key: "BACKLOG", level: "OK", title: "Hàng chờ", detail: `${s.queue.pending} tin đang chờ, cũ nhất ${fmtMin(age)}.` });
+    if (s.queue.deadLetter)
+      checks.push({ key: "DEAD_LETTER", level: "WARNING", title: "Tin bot không trả lời được", detail: `${s.queue.deadLetter} tin khách trong 24 giờ ở hàng dead-letter (AI hỏng / gửi hỏng / hết lượt thử).`, fix: "Nhân viên trả lời các tin này (bảng «Tin lỗi / đang chờ»). Tin AI hỏng còn trong 30 phút được máy thử lại khi provider hồi phục." });
     if (s.queue.abandoned24h > 0)
       checks.push({ key: "ABANDONED", level: "WARNING", title: "Tin bị bỏ sót", detail: `${s.queue.abandoned24h} tin khách trong 24 giờ nằm chờ quá ${PENDING_ELIGIBLE_MINUTES} phút — bot sẽ KHÔNG tự trả lời nữa.`, fix: "Nhân viên trả lời các tin này (bảng «Tin lỗi / đang chờ»)." });
   }
