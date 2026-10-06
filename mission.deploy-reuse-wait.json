@@ -3,7 +3,7 @@
   "mission_id": "deploy-reuse-wait",
   "title": "Deploy dùng lại CI: không bỏ cuộc vì một lần GitHub trả danh sách rỗng",
   "business_goal": "",
-  "status": "RUNNING",
+  "status": "PR_READY",
   "priority": "P1",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -21,7 +21,18 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-06T10:27:01.170Z",
-  "updated_at": "2026-10-06T10:27:01.170Z",
-  "last_heartbeat": "2026-10-06T10:27:01.170Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-06T10:29:43.482Z",
+  "last_heartbeat": "2026-10-06T10:29:43.482Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "fix/deploy-reuse-wait",
+    "sha": "d670af2b3a5efacd27459a8a172d6be549d634a3",
+    "at": "2026-10-06T10:29:43.482Z",
+    "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+    "title": "Deploy dùng lại CI: không bỏ cuộc vì một lần GitHub trả danh sách rỗng",
+    "summary": "",
+    "tests": [
+      "delivery-v2 ĐẠT · ops-concurrency ĐẠT · bash -n OK; CI chạy npm test đầy đủ"
+    ]
+  }
 }
