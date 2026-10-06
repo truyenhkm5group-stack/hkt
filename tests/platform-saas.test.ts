@@ -25,6 +25,7 @@ import { invalidateCapabilities } from "@/lib/platform/capabilities";
 import { withOrganization } from "@/lib/platform/context";
 import { getHomeOrganization, invalidateOrganizations } from "@/lib/platform/organizations";
 import { provisionOrganization } from "@/lib/platform/provision";
+import { invalidatePriceBook, pinOrgPriceVersion } from "@/lib/pricing/price-book";
 import { loadOwnerCockpit } from "@/lib/platform/saas-cockpit";
 import { captureSaasSnapshot, PLATFORM_COSTS_KEY, readCostDeclaration, readMilestones, readSaasDaily, setPlatformCostDeclaration } from "@/lib/platform/saas-ledger";
 import {
@@ -223,6 +224,8 @@ async function cleanup() {
   await pdb.delete(schema.platformTenantUsageDaily).where(inArray(schema.platformTenantUsageDaily.orgCode, [...ORGS]));
   await pdb.delete(schema.platformOrgMilestones).where(inArray(schema.platformOrgMilestones.orgCode, [...ORGS]));
   await pdb.delete(schema.platformSubscriptions).where(inArray(schema.platformSubscriptions.orgCode, [...ORGS]));
+  await pdb.delete(schema.platformPricePins).where(inArray(schema.platformPricePins.orgCode, [...ORGS]));
+  invalidatePriceBook();
   for (const code of ORGS) {
     const org = await pdb.query.platformOrganizations.findFirst({ where: eq(schema.platformOrganizations.code, code) });
     if (org) {
@@ -256,8 +259,10 @@ export async function testPlatformSaas() {
 
   for (const code of ORGS) await provisionOrganization({ code, name: `Tổ chức ${code}`, modules: ["customers"], admin: { email: `admin@${code}.local`, name: `QT ${code}`, password: "Saas@12345678" }, source: "TEST", actor: null });
   try {
-    // A trả tiền gói Khởi đầu, hạn rất xa; B dùng thử (gói không giá).
+    // A trả tiền gói Khởi đầu, hạn rất xa; B dùng thử (gói không giá). A là khách CÓ TỪ TRƯỚC bảng giá V1 ⇒ ghim giá legacy
+    // (0225: thuê bao hiện có giữ đúng giá đang thu — MRR đọc theo phiên bản đã ghim).
     await setPlan(A, "starter");
+    await pinOrgPriceVersion(A, "legacy", { source: "TEST", reason: "khách có từ trước 0225", email: null });
     await pdb.insert(schema.platformSubscriptions).values([
       { orgCode: A, billingEnabled: true, paidThrough: "2099-12-31", graceDays: 7 },
       { orgCode: B, billingEnabled: true, paidThrough: "2099-12-31", graceDays: 7 },
