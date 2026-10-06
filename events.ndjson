@@ -197,3 +197,4 @@
 {"at":"2026-10-06T20:14:23.848Z","actor":"DESKTOP-56TH98Y:hkt-tech-control-plane","kind":"HANDOFF","mission":"tech-control-plane-workers","detail":"feat/tech-control-plane-policy @ 2c9ba494117e · 5 lệnh kiểm thử"}
 {"at":"2026-10-06T20:15:23.782Z","actor":"DESKTOP-56TH98Y:hkt-tech-control-plane","kind":"HANDOFF","mission":"tech-control-plane-workers","detail":"feat/tech-control-plane-policy @ e24783985933 · 6 lệnh kiểm thử"}
 {"at":"2026-10-06T20:15:36.774Z","actor":"DESKTOP-56TH98Y:hkt-tech-control-plane","kind":"LEASE_RELEASED","detail":"tech-lead"}
+{"at":"2026-10-06T20:18:34.075Z","actor":"DESKTOP-56TH98Y:wt-saas-d","kind":"HANDOFF","mission":"saas-d-pricing-overage","detail":"feat/saas-d-pricing-v1 @ a3d5fc0c7df8 · 1 lệnh kiểm thử"}

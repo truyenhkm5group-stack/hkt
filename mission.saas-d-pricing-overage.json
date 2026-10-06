@@ -3,7 +3,7 @@
   "mission_id": "saas-d-pricing-overage",
   "title": "Phase D: giá + thu phần vượt (chờ chủ shop chốt đơn giá + kỳ thu)",
   "business_goal": "Phase D: bảng giá ChotDonTuDong V1 (chủ shop chốt 07/10/2026) — gói có phiên bản + ngày hiệu lực, đồng hồ AI_CUSTOMER, phần vượt, fair-use, cảnh báo 80/100/120/150, biên lãi nội bộ, KPI đơn, nhà dùng gói thường + chargeback",
-  "status": "RUNNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "CRITICAL",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -56,7 +56,18 @@
     "0228": "2026-10-06T17:57:33.593Z"
   },
   "created_at": "2026-10-06T17:03:33.744Z",
-  "updated_at": "2026-10-06T18:00:02.110Z",
-  "last_heartbeat": "2026-10-06T18:00:02.110Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-06T20:18:34.048Z",
+  "last_heartbeat": "2026-10-06T20:18:34.048Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "feat/saas-d-pricing-v1",
+    "sha": "a3d5fc0c7df8186462a5f690fd7c0ecd029bae97",
+    "at": "2026-10-06T20:18:34.048Z",
+    "actor": "DESKTOP-56TH98Y:wt-saas-d",
+    "title": "Phase D: giá + thu phần vượt (chờ chủ shop chốt đơn giá + kỳ thu)",
+    "summary": "",
+    "tests": [
+      "typecheck sạch · npm run lint sạch · npm test TẤT CẢ KIỂM THỬ ĐẠT (719 dòng ✓, tests/pricing-v1.test.ts mới) · npm run build xanh · đột biến 4/4 đỏ (dedupe khoá khách AI, làm tròn khối ceil→floor, bỏ ghim trong renewalPricing, bỏ ghim trong price-book)"
+    ]
+  }
 }
