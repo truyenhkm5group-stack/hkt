@@ -1,8 +1,8 @@
 {
   "pr": 623,
-  "sha": "b89df886f45d1be52fd1a599a9285db892c6c6a8",
+  "sha": "a10f4055ddd10024443fbc392e14e62f01473470",
   "verdict": "PASS",
   "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
-  "at": "2026-10-06T18:58:43.173Z",
-  "note": "review độc lập: quyền 6 action đủ chuỗi, 4 lỗi review trước đã sửa, migration 0225 idempotent; 4 điểm không chặn (huỷ việc đã MERGED/DEPLOY, gỡ việc khỏi sứ mệnh PAUSED, chú thích gieo sai, phụ thuộc việc huỷ)"
+  "at": "2026-10-06T20:43:00.532Z",
+  "note": "PASS @b89df886 (review độc lập) + delta tích hợp: gộp main, 0225→0226 bằng migration:renumber, MOI giữ cả hai dòng; gates xanh"
 }
