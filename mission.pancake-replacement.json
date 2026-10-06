@@ -3,7 +3,7 @@
   "mission_id": "pancake-replacement",
   "title": "Thay Pancake bằng Meta/Facebook gốc",
   "business_goal": "",
-  "status": "RUNNING",
+  "status": "PR_READY",
   "priority": "P1",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-pancake-replacement",
@@ -51,7 +51,19 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-06T05:09:53.560Z",
-  "updated_at": "2026-10-06T05:09:53.560Z",
-  "last_heartbeat": "2026-10-06T05:09:53.560Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-06T06:28:08.277Z",
+  "last_heartbeat": "2026-10-06T06:28:08.277Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "feat/pancake-replacement",
+    "sha": "299be073bdb0a7686e1dc8e646278e12f7573f25",
+    "at": "2026-10-06T06:28:08.277Z",
+    "actor": "DESKTOP-56TH98Y:wt-tech-lead-handoff",
+    "title": "Thay Pancake bằng Meta/Facebook gốc: ghi đơn từ hội thoại, lịch sử Messenger, phân trang page, gỡ webhook, lỗi Graph rõ nghĩa",
+    "summary": "Thay Pancake bằng kênh Meta/Facebook gốc: ghi đơn từ hội thoại không cần Pancake, lịch sử Messenger trực tiếp, phân trang page >100, gỡ đăng ký webhook khi gỡ page, phân loại lỗi Graph theo loại, token hỏng theo page, bộ tấn công chéo tổ chức phủ bề mặt mới. Worker đã code/test/push; phiên worker không có quyền GitHub API nên Integration Lead tiếp quản giao hàng.",
+    "tests": [
+      "npm test (worker, 299be073): 794/794 PASS",
+      "merge-tree với origin/main: không xung đột (Integration Lead đo lại 06/10)"
+    ]
+  }
 }
