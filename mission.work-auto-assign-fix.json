@@ -3,7 +3,7 @@
   "mission_id": "work-auto-assign-fix",
   "title": "Phân việc tự động hỏng vì created_by rỗng",
   "business_goal": "",
-  "status": "RUNNING",
+  "status": "PR_READY",
   "priority": "P1",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -21,7 +21,18 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-06T21:44:03.754Z",
-  "updated_at": "2026-10-06T21:44:03.754Z",
-  "last_heartbeat": "2026-10-06T21:44:03.754Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-06T21:44:10.437Z",
+  "last_heartbeat": "2026-10-06T21:44:10.437Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "fix/work-auto-assign-machine-actor",
+    "sha": "ef3d1e2ae4b3841f0f163da3829249bc3b73da14",
+    "at": "2026-10-06T21:44:10.437Z",
+    "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+    "title": "Phân việc tự động hỏng vì created_by rỗng",
+    "summary": "",
+    "tests": [
+      "bài (f) care-auto-assign: đỏ trên mã cũ (FK created_by ''), xanh sau sửa; typecheck + eslint sạch; npm test đầy đủ để CI chạy"
+    ]
+  }
 }

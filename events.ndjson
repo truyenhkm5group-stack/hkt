@@ -213,3 +213,4 @@
 {"at":"2026-10-06T21:32:53.412Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DONE","mission":"tech-control-plane","detail":"PR #623 gộp bdf1f129 (0225→0226 lúc tích hợp); deploy run 37531822071 → 657fb732; hậu kiểm ĐẠT (migration 227, smoke)"}
 {"at":"2026-10-06T21:32:58.620Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"STATUS","mission":"saas-a-vnx-runtime","detail":"VERIFYING → READY · 10 mẫu phạm vi · HIGH"}
 {"at":"2026-10-06T21:44:03.839Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"CLAIM","mission":"work-auto-assign-fix","detail":"RUNNING · 2 mẫu phạm vi · MEDIUM"}
+{"at":"2026-10-06T21:44:10.465Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"work-auto-assign-fix","detail":"fix/work-auto-assign-machine-actor @ ef3d1e2ae4b3 · 1 lệnh kiểm thử"}
