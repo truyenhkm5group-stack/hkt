@@ -3,7 +3,7 @@
   "mission_id": "deploy-reuse-wait",
   "title": "Deploy dùng lại CI: không bỏ cuộc vì một lần GitHub trả danh sách rỗng",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P1",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -23,9 +23,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-06T10:27:01.170Z",
-  "updated_at": "2026-10-06T10:48:22.006Z",
+  "updated_at": "2026-10-06T11:02:20.921Z",
   "last_heartbeat": "2026-10-06T10:48:22.006Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#606 → 35c3ce71755263a3eef09d93a8610928f495baea"
+  },
   "handoff": {
     "branch": "fix/deploy-reuse-wait",
     "sha": "f2bc257e03da66e055f55feaffb3c8cb01a7172e",

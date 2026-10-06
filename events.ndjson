@@ -49,3 +49,4 @@
 {"at":"2026-10-06T10:48:22.053Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"deploy-reuse-wait","detail":"fix/deploy-reuse-wait @ f2bc257e03da · 1 lệnh kiểm thử"}
 {"at":"2026-10-06T10:57:00.174Z","actor":"DESKTOP-56TH98Y:wt-ai-failover","kind":"HANDOFF","mission":"ai-provider-failover","detail":"feat/ai-provider-failover @ 1cb67f3fec48 · 5 lệnh kiểm thử"}
 {"at":"2026-10-06T11:01:59.470Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#606 @ f2bc257e03da · Review độc lập d670af2b PASS (giả lập curl/jq/đồng hồ); delta f2bc: chú thích + sửa cảnh báo bảng có bài kiểm — Lead soát"}
+{"at":"2026-10-06T11:02:20.959Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"deploy-reuse-wait","detail":"#606 @ f2bc257e03da → 35c3ce717552 (MERGE_ISOLATED · HIGH · gates success)"}
