@@ -9,7 +9,7 @@ import { Label } from "@/components/ui/label";
 import { clearDeliveryRateOverride, setDeliveryRateOverride } from "@/lib/actions/delivery-rate-override";
 import { saveProfitAssumptions } from "@/lib/actions/report-settings";
 import { parseDeliveryRateOverride, OVERRIDE_MODE_LABEL } from "@/lib/constants/delivery-rate";
-import type { ProfitAssumptions } from "@/lib/constants/profit";
+import { manualShipFee, type ProfitAssumptions } from "@/lib/constants/profit";
 
 type Props = {
   assumptions: ProfitAssumptions & {
@@ -26,8 +26,9 @@ type Props = {
 export function AssumptionsForm({ assumptions, canWrite }: Props) {
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState({
-    shipFeeDelivered: String(assumptions.shipFeeDelivered || ""),
-    shipFeeReturned: String(assumptions.shipFeeReturned || ""),
+    // Ô trống = tự tính; số đặt tay (kể cả 0) hiện đúng con số đó.
+    shipFeeDelivered: String(manualShipFee(assumptions, "shipFeeDelivered") ?? ""),
+    shipFeeReturned: String(manualShipFee(assumptions, "shipFeeReturned") ?? ""),
     packingFeePerOrder: String(assumptions.packingFeePerOrder ?? 5000),
     opsStaffPerOrder: String(assumptions.opsStaffPerOrder ?? 2000),
     opsStaffPerRescued: String(assumptions.opsStaffPerRescued ?? 10000),
@@ -40,31 +41,56 @@ export function AssumptionsForm({ assumptions, canWrite }: Props) {
     inventoryRiskPercent: String(assumptions.inventoryRiskPercent ?? 10),
     taxPercent: String(assumptions.taxPercent ?? 1.5),
     otherCostPercentOfAds: String(assumptions.otherCostPercentOfAds ?? 1.1),
-    failedToReturnPercent: String(assumptions.failedToReturnPercent ?? 0),
   });
   const [pending, startTransition] = useTransition();
-  const num = (v: string, fallback = 0) =>
-    v.trim() === "" ? fallback : Number(v);
+  /** Ô cước: trống ⇒ `null` (tự tính), còn lại là số đặt tay — 0 là 0 ₫. */
+  const shipFee = (v: string) => (v.trim() === "" ? null : Math.round(Number(v)));
+  /*
+    Các ô còn lại KHÔNG có chế độ tự tính. Bản trước lặng lẽ thay ô trống bằng một số mặc định
+    (đóng hàng 5.000 ₫, cố định 5.000.000 ₫…) — xoá ô để "không tính" lại ra một khoản chi. Nay ô
+    trống bị chặn và nói ra tên ô; muốn không tính thì gõ 0.
+  */
+  const REQUIRED: Array<[keyof typeof form, string]> = [
+    ["packingFeePerOrder", "Đóng hàng / đơn gửi"],
+    ["opsStaffPerOrder", "NV vận đơn / đơn xử lý"],
+    ["opsStaffPerRescued", "NV vận đơn / đơn cứu được GTC"],
+    ["rescueRatePercent", "Tỷ lệ đơn cứu được"],
+    ["fixedCostMonthly", "Chi phí cố định / tháng"],
+    ["defaultDeliveryRate", "Tỷ lệ giao thành công MỤC TIÊU"],
+    ["returnRateWindowDays", "Cửa sổ lịch sử"],
+    ["minFinishedOrders", "Đơn kết thúc tối thiểu"],
+    ["rateMatureMinFinished", "Đơn kết thúc để máy tự đo"],
+    ["inventoryRiskPercent", "Rủi ro tồn kho"],
+    ["taxPercent", "Dự trù thuế"],
+    ["otherCostPercentOfAds", "Chi phí khác"],
+  ];
+  const num = (v: string) => Number(v);
 
-  const submit = () =>
+  const submit = () => {
+    const trong = REQUIRED.filter(([k]) => form[k].trim() === "" || !Number.isFinite(Number(form[k])));
+    if (trong.length) {
+      toast.error(`Ô ${trong.map(([, nhan]) => `«${nhan}»`).join(", ")} đang trống — điền số (gõ 0 nếu không tính).`);
+      return;
+    }
     startTransition(async () => {
       const result = await saveProfitAssumptions({
-        shipFeeDelivered: Math.round(num(form.shipFeeDelivered)),
-        shipFeeReturned: Math.round(num(form.shipFeeReturned)),
-        packingFeePerOrder: Math.round(num(form.packingFeePerOrder, 5000)),
-        opsStaffPerOrder: Math.round(num(form.opsStaffPerOrder, 2000)),
-        opsStaffPerRescued: Math.round(num(form.opsStaffPerRescued, 10000)),
-        rescueRatePercent: num(form.rescueRatePercent, 10),
-        fixedCostMonthly: Math.round(num(form.fixedCostMonthly, 5000000)),
-        defaultReturnRate: Math.min(100, Math.max(0, 100 - num(form.defaultDeliveryRate, 70))),
-        returnRateWindowDays: Math.round(num(form.returnRateWindowDays, 90)),
-        minFinishedOrders: Math.round(num(form.minFinishedOrders, 10)),
-        rateMatureMinFinished: Math.round(num(form.rateMatureMinFinished, 10)),
+        shipFeeDelivered: shipFee(form.shipFeeDelivered),
+        shipFeeReturned: shipFee(form.shipFeeReturned),
+        packingFeePerOrder: Math.round(num(form.packingFeePerOrder)),
+        opsStaffPerOrder: Math.round(num(form.opsStaffPerOrder)),
+        opsStaffPerRescued: Math.round(num(form.opsStaffPerRescued)),
+        rescueRatePercent: num(form.rescueRatePercent),
+        fixedCostMonthly: Math.round(num(form.fixedCostMonthly)),
+        defaultReturnRate: Math.min(100, Math.max(0, 100 - num(form.defaultDeliveryRate))),
+        returnRateWindowDays: Math.round(num(form.returnRateWindowDays)),
+        minFinishedOrders: Math.round(num(form.minFinishedOrders)),
+        rateMatureMinFinished: Math.round(num(form.rateMatureMinFinished)),
         overrides: assumptions.overrides,
-        inventoryRiskPercent: num(form.inventoryRiskPercent, 10),
-        taxPercent: num(form.taxPercent, 1.5),
-        otherCostPercentOfAds: num(form.otherCostPercentOfAds, 1.1),
-        failedToReturnPercent: num(form.failedToReturnPercent, 0),
+        inventoryRiskPercent: num(form.inventoryRiskPercent),
+        taxPercent: num(form.taxPercent),
+        otherCostPercentOfAds: num(form.otherCostPercentOfAds),
+        // Không có phép tính nào đọc ô này (mô hình tự học — xem dòng tóm tắt): gửi lại nguyên giá trị đã lưu.
+        failedToReturnPercent: assumptions.failedToReturnPercent ?? 0,
       });
       if ("error" in result) toast.error(result.error);
       else {
@@ -72,6 +98,7 @@ export function AssumptionsForm({ assumptions, canWrite }: Props) {
         setOpen(false);
       }
     });
+  };
 
   return (
     <div className="rounded-xl border bg-card p-4 text-[13px] shadow-xs">
@@ -82,6 +109,9 @@ export function AssumptionsForm({ assumptions, canWrite }: Props) {
           <b className="numeric">
             {assumptions.shipFeeDeliveredUsed.toLocaleString("vi-VN")} ₫
           </b>
+          <span className="text-muted-foreground">
+            {manualShipFee(assumptions, "shipFeeDelivered") !== null ? " (đặt tay)" : " (tự tính)"}
+          </span>
         </span>
         <span title={`Cước gửi + phí hoàn về. Pancake / webhook Viettel Post không đẩy phí hoàn (${assumptions.returnFeeSample ?? 0} đơn hoàn 90 ngày có ghi phí hoàn), nên khi để trống ERP lấy phí hoàn về = cước gửi.`}>
           Cước đơn hoàn (đi + về){" "}
@@ -91,7 +121,7 @@ export function AssumptionsForm({ assumptions, canWrite }: Props) {
           <span className="text-muted-foreground">
             {" "}
             (
-            {assumptions.shipFeeSource === "setting"
+            {manualShipFee(assumptions, "shipFeeReturned") !== null
               ? "đặt tay"
               : assumptions.shipFeeSource === "data"
                 ? "bình quân 90 ngày"
@@ -135,9 +165,8 @@ export function AssumptionsForm({ assumptions, canWrite }: Props) {
           Chi phí khác <b className="numeric">{assumptions.otherCostPercentOfAds ?? 1.1}%</b>
           <span className="text-muted-foreground"> CPQC (phí thẻ ngoại tệ)</span>
         </span>
-        <span>
-          Đơn chờ phát lại thành hoàn{" "}
-          <b className="numeric">{assumptions.failedToReturnPercent ? `${assumptions.failedToReturnPercent}%` : "tự học"}</b>
+        <span title="Xác suất đơn chờ phát lại / chờ xử lý thành hoàn do mô hình học từ trạng thái Viettel Post của chính shop (lib/queries/projected-delivery.ts). Không có ô đặt tay cho con số này.">
+          Đơn chờ phát lại thành hoàn <b>máy tự học</b>
         </span>
         {canWrite ? (
           <Button
@@ -160,7 +189,7 @@ export function AssumptionsForm({ assumptions, canWrite }: Props) {
               inputMode="numeric"
               min={0}
               step={1000}
-              placeholder={`Tự tính: ${assumptions.shipFeeDeliveredUsed.toLocaleString("vi-VN")}`}
+              placeholder="Để trống = tự tính"
               value={form.shipFeeDelivered}
               onChange={(e) =>
                 setForm({ ...form, shipFeeDelivered: e.target.value })
@@ -174,7 +203,7 @@ export function AssumptionsForm({ assumptions, canWrite }: Props) {
               inputMode="numeric"
               min={0}
               step={1000}
-              placeholder={`Tự tính: ${assumptions.shipFeeReturnedUsed.toLocaleString("vi-VN")}`}
+              placeholder="Để trống = tự tính"
               value={form.shipFeeReturned}
               onChange={(e) =>
                 setForm({ ...form, shipFeeReturned: e.target.value })
@@ -280,19 +309,16 @@ export function AssumptionsForm({ assumptions, canWrite }: Props) {
             <Label>Chi phí khác (% CPQC, phí thẻ ngoại tệ)</Label>
             <Input type="number" min={0} max={50} step={0.1} value={form.otherCostPercentOfAds} onChange={(e) => setForm({ ...form, otherCostPercentOfAds: e.target.value })} />
           </div>
-          <div className="space-y-1">
-            <Label>Đơn chờ xử lý / phát lại thành hoàn (%) · 0 = tự học</Label>
-            <Input type="number" min={0} max={100} step={1} value={form.failedToReturnPercent} onChange={(e) => setForm({ ...form, failedToReturnPercent: e.target.value })} />
-          </div>
           <div className="sm:col-span-6 flex items-center justify-between gap-3">
             <p className="text-xs text-muted-foreground">
-              Cước gửi tính cho MỌI đơn gửi đi; đơn hoàn tốn thêm phí hoàn về (để trống
-              = cước gửi + phí hoàn bình quân nếu có dữ liệu, không thì gấp đôi cước gửi).
+              Cước gửi tính cho MỌI đơn gửi đi; đơn hoàn tốn thêm phí hoàn về. Hai ô cước để
+              trống = tự tính (cước gửi bình quân 90 ngày; đơn hoàn = cước gửi + phí hoàn bình
+              quân nếu có dữ liệu, không thì gấp đôi cước gửi) — gõ 0 là 0 ₫, không tính cước.
               Đóng hàng và nhân viên vận đơn tính theo số đơn đã xác nhận gửi đi; đơn
               &ldquo;cứu được&rdquo; (phát không thành rồi giao thành công) ước theo % số đơn gửi. Chi phí
               cố định quy đổi theo số ngày của kỳ — nếu đã nhập tiền văn phòng / điện nước
-              vào bảng Chi phí thì đặt 0 để khỏi tính hai lần. Rủi ro tồn kho: % tổng giá
-              trị hàng nhập trong kỳ.
+              vào bảng Chi phí thì đặt 0 để khỏi tính hai lần. Rủi ro tồn kho: % giá trị lô
+              hàng, ghi dần theo hàng bán ra.
             </p>
             <Button type="button" size="sm" onClick={submit} disabled={pending}>
               {pending ? (
