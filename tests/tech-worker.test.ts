@@ -140,7 +140,10 @@ export function testTechWorkerPure() {
   // Cửa worker tự xác thực TRƯỚC mọi việc khác (nó được miễn khoá phiên ở middleware và access-control).
   const route = readFileSync(path.join(goc, "app/api/tech/worker/[op]/route.ts"), "utf8");
   const iAuth = route.indexOf("authenticateTechWorker(auth)");
-  assert.ok(route.indexOf("quaTran(`tho:${idTho}`)") > 0 && route.indexOf("quaTran(`tho:${idTho}`)") < iAuth, "trần lượt gọi đứng TRƯỚC lượt tra CSDL xác thực");
+  const iXem = route.indexOf("quaTran(nganSai, false)");
+  assert.ok(iXem > 0 && iXem < iAuth, "trần lượt gọi (theo IP, chỉ XEM) đứng TRƯỚC lượt tra CSDL xác thực");
+  assert.ok(route.indexOf("quaTran(nganSai);") > iAuth, "chỉ lượt xác thực HỎNG mới tăng ngăn theo IP — khoá sai từ máy khác không làm worker thật bị 429");
+  assert.ok(route.indexOf("quaTran(`ok:${worker.id}`)") > iAuth, "ngăn của khoá đã xác thực đứng SAU xác thực");
   assert.ok(iAuth > 0 && route.indexOf("status: 401") > iAuth, "route worker phải xác thực khoá riêng và trả 401 khi sai");
   assert.ok(iAuth < route.indexOf("req.json()"), "xác thực phải đứng TRƯỚC lượt đọc thân gói");
   const maRoute = route.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");

@@ -333,7 +333,10 @@ hệ điều hành / container riêng chỉ thấy bản clone của worker.
 
 Credential Git: cổng (`npm ci` / typecheck / lint / test chạy mã của nhánh) đã bị cắt khỏi cấu hình Git HỆ THỐNG và
 TOÀN CỤC (`GIT_CONFIG_NOSYSTEM`, `GIT_CONFIG_GLOBAL` trỏ tệp tạm, tắt lời nhắc, HOME tạm) nên không gọi được Git
-Credential Manager của máy. Nhưng chính worker vẫn phải `git push`, nên tài khoản chạy worker giữ MỘT credential. Khi
-chạy production: tài khoản hệ điều hành RIÊNG cho worker, credential là fine-grained token chỉ cho ĐÚNG kho này, chỉ
+Credential Manager QUA cấu hình Git (đo 07/10/2026 trên máy dev: `credential.helper=manager` của
+`C:/Program Files/Git/etc/gitconfig` không còn thấy dưới env của cổng). Mã chạy dưới CÙNG người dùng hệ điều hành vẫn
+gọi THẲNG được tệp chạy của GCM, và chính worker vẫn phải `git push`, nên tài khoản chạy worker giữ MỘT credential —
+vì vậy BẮT BUỘC khi chạy production: tài khoản hệ điều hành RIÊNG cho worker (Credential Manager của nó chỉ có
+credential dưới đây), không nhúng token vào URL remote của bản clone, credential là fine-grained token chỉ cho ĐÚNG kho này, chỉ
 `contents: write` (token không giới hạn được theo nhánh — ruleset `main` hiện có chặn đẩy thẳng; muốn chặn mọi nhánh
 ngoài `ai/worker/*` thì thêm ruleset), KHÔNG dùng tài khoản GitHub cá nhân của chủ shop.

@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { z } from "zod";
+import { clientIpFrom } from "@/lib/auth/client-ip";
 import { TECH_GATE_RESULTS, TECH_OWNER_ESCALATIONS } from "@/lib/constants/tech";
 import { TECH_LEASE, TECH_RUN_OUTCOMES } from "@/lib/constants/tech-worker";
 import {
@@ -80,30 +81,38 @@ const FENCE_ERRORS = new Set(["RUN_NOT_YOURS", "RUN_CLOSED", "STALE_LEASE", "BRA
  * Trần lượt gọi theo worker (review 07/10, mục 18): 120 lượt / phút là gấp ~30 lần nhịp bình thường (nhịp tim 30″ +
  * xin việc 60″). Trong bộ nhớ tiến trình — đủ cho một máy chủ ERP; vượt trần ⇒ 429, không chạm CSDL thêm.
  */
+const TRAN_PHUT = 120;
 const LUOT = new Map<string, { phut: number; n: number }>();
-function quaTran(id: string): boolean {
+/**
+ * Đếm (hoặc chỉ XEM khi `tang = false`) một ngăn trong phút hiện tại; trả `true` khi ngăn đã vượt trần. Ngăn chỉ sinh
+ * ra từ IP (lượt xác thực HỎNG) và id worker ĐÃ xác thực — không còn từ chuỗi do người gọi tự khai, nên bảng không phình
+ * theo id ngẫu nhiên; vẫn dọn phút cũ cho chắc (review 07/10, mục B).
+ */
+function quaTran(id: string, tang = true): boolean {
   const phut = Math.floor(Date.now() / 60_000);
-  // Dọn mục của phút cũ và đặt trần kích thước — chuỗi id ngẫu nhiên không làm phình bộ nhớ (review 07/10, mục B).
   if (LUOT.size > 1000) for (const [k, v] of LUOT) if (v.phut !== phut) LUOT.delete(k);
-  if (LUOT.size > 5000) LUOT.clear();
   const c = LUOT.get(id);
   if (!c || c.phut !== phut) {
-    LUOT.set(id, { phut, n: 1 });
+    if (tang) LUOT.set(id, { phut, n: 1 });
     return false;
   }
-  c.n += 1;
-  return c.n > 120;
+  if (tang) c.n += 1;
+  return c.n > TRAN_PHUT;
 }
 
 export async function POST(req: NextRequest, ctx: { params: Promise<{ op: string }> }) {
   const { op } = await ctx.params;
-  // Trần TRƯỚC khi tra CSDL: khoá theo id ghi trong header (đã khớp hình dạng) — khoá sai cũng bị giới hạn.
+  // Trần TRƯỚC khi tra CSDL, theo IP do Caddy ghi (`clientIpFrom`) và CHỈ đếm lượt xác thực HỎNG: người biết id của
+  // một worker gửi khoá sai từ máy khác không làm worker thật bị 429 (review 07/10, mục B).
   const auth = req.headers.get("authorization");
-  const idTho = /^Bearer\s+tw_([A-Za-z0-9-]{8,64})\./.exec(auth?.trim() ?? "")?.[1] ?? "khong-hop-le";
-  if (quaTran(`tho:${idTho}`)) return NextResponse.json({ error: "rate_limited" }, { status: 429 });
+  const nganSai = `sai:${clientIpFrom(req.headers.get("x-forwarded-for"))}`;
+  if (quaTran(nganSai, false)) return NextResponse.json({ error: "rate_limited" }, { status: 429 });
   const worker = await authenticateTechWorker(auth);
-  if (!worker) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  // Ngăn RIÊNG của khoá đã xác thực: người biết id của một worker không làm nó bị 429 bằng khoá sai.
+  if (!worker) {
+    quaTran(nganSai);
+    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  }
+  // Ngăn của khoá ĐÃ xác thực — chỉ chính worker đó chạm tới được.
   if (quaTran(`ok:${worker.id}`)) return NextResponse.json({ error: "rate_limited" }, { status: 429 });
 
   let body: unknown = {};
