@@ -1,0 +1,28 @@
+{
+  "schema": 1,
+  "mission_id": "saas-c-shared-identity",
+  "title": "Phase C: danh tính toàn nền tảng + membership nhiều workspace (rủi ro xác thực cao — thiết kế + bất biến SECURITY §3 trước khi code)",
+  "business_goal": "",
+  "status": "READY",
+  "priority": "P2",
+  "risk": "CRITICAL",
+  "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "worker": null,
+  "worktree": null,
+  "branch": null,
+  "base_sha": null,
+  "domains": [],
+  "owned_paths": [
+    "docs/saas/IDENTITY.md"
+  ],
+  "dependencies": [
+    "saas-platform-restructure"
+  ],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-06T17:03:28.190Z",
+  "updated_at": "2026-10-06T17:03:28.190Z",
+  "last_heartbeat": "2026-10-06T17:03:28.190Z",
+  "definition_of_done": []
+}
