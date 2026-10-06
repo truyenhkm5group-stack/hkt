@@ -40,8 +40,8 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-06T05:09:32.469Z",
-  "updated_at": "2026-10-06T05:09:32.469Z",
-  "last_heartbeat": "2026-10-06T05:09:32.469Z",
+  "updated_at": "2026-10-06T06:03:33.280Z",
+  "last_heartbeat": "2026-10-06T06:03:33.280Z",
   "definition_of_done": [
     "Chủ shop giao mọi việc qua một cửa (/lead); sổ chung chặn trùng việc, chồng phạm vi, va số migration, hai người cùng gộp/deploy; cổng PR và deploy nhanh hơn mà không bỏ bài kiểm nào — đo trước/sau."
   ],
