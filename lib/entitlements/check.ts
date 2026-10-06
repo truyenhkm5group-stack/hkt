@@ -5,7 +5,7 @@
  * biến (`createRecord`), bản nháp AI (`createDraft`). Vượt ⇒ `{ ok: false, error }` — LỖI NGHIỆP VỤ, không ném: điểm gọi trả thẳng câu đó cho người bấm.
  *
  *  · KHÔNG có nhánh "tổ chức nhà" (Phase 14 · docs/saas/ENTITLEMENTS.md): nhà mang gói được GÁN cho nó bằng DỮ LIỆU (cột
- *    `platform_organizations.plan`; 0225 ghi đúng gói mã cũ tự gán — `internal`) và đi ĐÚNG đường của khách. Gán gói khác
+ *    `platform_organizations.plan`; 0227 ghi đúng gói mã cũ tự gán — `internal`) và đi ĐÚNG đường của khách. Gán gói khác
  *    cho nhà = ghi cột đó (đường ghi có chạy thử là việc của phase D), không cần sửa tệp này. Cột trống ⇒ xem `planKeyOf`.
  *  · Đếm THẬT từ CSDL tổ chức (không bộ đếm riêng dễ lệch). Đệm 60 giây qua `memo` (khoá tự mang tổ chức) — NHƯNG khi
  *    số đệm đã tới 80% trần thì đếm lại tươi, VÀ mỗi lượt cho qua thì QUÊN số đệm (`forgetMemo`): lượt cho qua là lời
@@ -40,11 +40,11 @@ export type EntitlementVerdict =
   | { ok: false; kind: EntitlementKind; planKey: string; planName: string; used: number; limit: number; error: string };
 
 /**
- * Gói danh nghĩa của một workspace = cột `plan` — gói đã gán LUÔN thắng, với mọi workspace kể cả nhà (0225 ghi `internal`
+ * Gói danh nghĩa của một workspace = cột `plan` — gói đã gán LUÔN thắng, với mọi workspace kể cả nhà (0227 ghi `internal`
  * vào cột của nhà). Cột TRỐNG ⇒ `trial`, TRỪ workspace nhà ⇒ `internal`.
  *
  * Nhánh nhà ấy là nhánh AN TOÀN VỀ KHẢ DỤNG, không phải nhánh thương mại (docs/saas/ENTITLEMENTS.md «Nhánh GIỮ»): app khởi
- * động gọi `ensureMigrated()` KHÔNG đợi, nên trong lượt deploy mang 0225 có request tới trước khi cột được ghi; và nếu một
+ * động gọi `ensureMigrated()` KHÔNG đợi, nên trong lượt deploy mang 0227 có request tới trước khi cột được ghi; và nếu một
  * migration khác cùng lô lỗi thì drizzle hoàn cả lô. Rơi về `trial` lúc đó là khoá ERP đang vận hành của chính nền tảng
  * (3 người dùng · 5 trang · 50 MB). Nó chỉ chạy khi cột trống — phase D gán gói V1 cho nhà vẫn chỉ là ghi cột.
  */

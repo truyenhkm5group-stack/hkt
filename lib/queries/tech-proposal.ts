@@ -128,7 +128,8 @@ export async function listTechProposals(limit = 20): Promise<ProposalRow[]> {
 export async function ctoPlannableTasks(limit = 30) {
   const db = await getDb();
   const rows = await db.query.techTasks.findMany({
-    where: (t, { ne: khac }) => khac(t.status, "DONE"),
+    // Việc đã kết thúc (xong hoặc chủ shop đã huỷ) không cần lập kế hoạch — gọi model cho nó là đốt tiền.
+    where: (t, { notInArray: ngoai }) => ngoai(t.status, ["DONE", "CANCELLED"]),
     orderBy: [desc(schema.techTasks.createdAt)],
     limit,
   });

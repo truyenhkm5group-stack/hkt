@@ -11,11 +11,11 @@
 -- hôm nay org-plan.ts và đường khớp tiền gia hạn còn chặn đổi gói của nhà).
 -- Không workspace khách nào bị đụng; không trần cứng nào được bật. Mọi câu chạy lại được.
 INSERT INTO "platform_audit_log" ("id", "target_org_code", "action", "subject", "before", "after", "reason", "source")
-SELECT 'audit-0225-home-plan-internal', o."code", 'ORG_PLAN_SET', 'plan', jsonb_build_object('plan', o."plan"), '{"plan":"internal"}'::jsonb,
+SELECT 'audit-0227-home-plan-internal', o."code", 'ORG_PLAN_SET', 'plan', jsonb_build_object('plan', o."plan"), '{"plan":"internal"}'::jsonb,
        'Phase 14: gói của workspace nhà ghi thành dữ liệu (trước đó mã tự gán internal) — hành vi không đổi.', 'MIGRATION'
 FROM "platform_organizations" o
 WHERE o."is_home" = true AND (o."plan" IS NULL OR btrim(o."plan") = '')
-  AND NOT EXISTS (SELECT 1 FROM "platform_audit_log" WHERE "id" = 'audit-0225-home-plan-internal');
+  AND NOT EXISTS (SELECT 1 FROM "platform_audit_log" WHERE "id" = 'audit-0227-home-plan-internal');
 --> statement-breakpoint
 UPDATE "platform_organizations" SET "plan" = 'internal', "updated_at" = now()
 WHERE "is_home" = true AND ("plan" IS NULL OR btrim("plan") = '');

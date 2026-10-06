@@ -119,7 +119,14 @@ export function PricingEconomicsSection({ data, unitPrices }: { data: PricingEco
                       <div className={cn(r.spike.state === "SPIKE" ? "font-semibold text-rose-700 dark:text-rose-400" : "text-muted-foreground")}>{r.spike.state === "SPIKE" ? r.spike.message : r.spike.state === "UNKNOWN" ? "Chưa đủ lịch sử để so" : "Chi phí hôm nay bình thường"}</div>
                       {r.routing ? (
                         <div className="mt-0.5">
-                          {r.routing.from} → {r.routing.to}: rẻ hơn ~{Math.round(r.routing.savingsPct)}% <span className="text-muted-foreground">(ĐỀ XUẤT, không tự đổi)</span>
+                          {r.routing.from} → {r.routing.to}: rẻ hơn ~{Math.round(r.routing.savingsPct)}%{" "}
+                          {r.routing.scope === "PLATFORM" ? (
+                            <a href="#platform-ai-model" className="font-medium underline underline-offset-2" data-routing-scope="PLATFORM">
+                              → Platform AI Model Control
+                            </a>
+                          ) : (
+                            <span className="text-muted-foreground" data-routing-scope="BYOK">(khoá AI riêng của tổ chức — chủ shop tự đổi ô Model)</span>
+                          )}
                         </div>
                       ) : null}
                     </td>

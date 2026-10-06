@@ -39,6 +39,7 @@ import { currentOrganization } from "@/lib/platform/context";
 import { findOrganization } from "@/lib/platform/organizations";
 import { createCustomerAsAgent } from "@/lib/records/customer-create";
 import { createOrderAsAgent } from "@/lib/records/order-create";
+import { chatOrderAdId } from "@/lib/sales-chatbot/ad-referral";
 import { operationsGroupChannel, orderNotifyRuleLive } from "@/lib/sales-chatbot/alerts";
 import { placeGapLine } from "@/lib/sales-chatbot/new-order-alert";
 import { sellableCatalog, type CatalogItem } from "@/lib/sales-chatbot/catalog";
@@ -669,7 +670,7 @@ async function syncThread(a: {
     note: notes.join("\n").slice(0, 2000),
     channel: ORDER_SYNC_CHANNEL,
     recipient: decision.recipient,
-  }, { pricing: a.botCfg.wholesalePricing ? "PRICE_BOOK" : "RETAIL", idempotencyKey: `order-sync:${conv.id}:${ag.id || ag.at}` });
+  }, { pricing: a.botCfg.wholesalePricing ? "PRICE_BOOK" : "RETAIL", idempotencyKey: `order-sync:${conv.id}:${ag.id || ag.at}`, adId: await chatOrderAdId(conv.id, now) });
   if (!created.ok) return { outcome: "SKIPPED", result: `Không ghi được đơn: ${"errors" in created ? created.errors.map((e) => e.message).join(" · ") : "lỗi"}` };
   const code = `#${manualOrderShortCode(created.id)}`;
   // Tổ chức bật «đơn đủ thông tin = đã xác nhận» ⇒ lõi ghi đơn đã ghi thẳng «Đã xác nhận».

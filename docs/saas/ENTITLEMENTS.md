@@ -23,7 +23,7 @@ trong mã; `billing_mode` vẫn `INTERNAL_CHARGEBACK`.
 **Đường resolver nhà đang đi** (giống hệt mọi khách — gán gói khác cho nhà KHÔNG cần sửa mã ở đây):
 
 1. `lib/entitlements/check.ts::planKeyOf(org)` = cột `platform_organizations.plan` — gói đã gán LUÔN thắng. Cột trống ⇒
-   `trial`, riêng nhà ⇒ `internal` (nhánh khả dụng, xem bảng GIỮ). 0225 ghi cột của nhà = `internal` — đúng gói mã cũ tự
+   `trial`, riêng nhà ⇒ `internal` (nhánh khả dụng, xem bảng GIỮ). 0227 ghi cột của nhà = `internal` — đúng gói mã cũ tự
    gán — và chỉ ghi khi cột còn trống.
 2. `effectivePlanRow(plans, key)` — dòng `platform_plans` của khoá đó; vắng ⇒ `trial` + `fellBack` (không khoá nào riêng).
 3. Hạn mức kỹ thuật: `resolvePlan` → `checkEntitlement` / `getPlanUsage`.
@@ -51,10 +51,10 @@ cho «Tổ chức nhà»; dòng mô tả gói in «không thu phí, không giớ
 
 | Ở đâu | Vì sao giữ |
 |---|---|
-| `lib/entitlements/check.ts::planKeyOf` — cột gói TRỐNG ở nhà ⇒ `internal` | AN TOÀN KHẢ DỤNG: `instrumentation.node.ts` gọi `ensureMigrated()` không đợi, nên trong lượt deploy mang 0225 có request tới trước khi cột được ghi; nếu migration khác cùng lô lỗi, drizzle hoàn cả lô. Rơi về `trial` lúc đó là khoá ERP đang vận hành của nền tảng (3 người dùng · 5 trang · 50 MB). Chỉ chạy khi cột trống — gói đã gán luôn thắng. Bài kiểm: nhà với cột trống ra đúng 64 quyết định cũ. |
+| `lib/entitlements/check.ts::planKeyOf` — cột gói TRỐNG ở nhà ⇒ `internal` | AN TOÀN KHẢ DỤNG: `instrumentation.node.ts` gọi `ensureMigrated()` không đợi, nên trong lượt deploy mang 0227 có request tới trước khi cột được ghi; nếu migration khác cùng lô lỗi, drizzle hoàn cả lô. Rơi về `trial` lúc đó là khoá ERP đang vận hành của nền tảng (3 người dùng · 5 trang · 50 MB). Chỉ chạy khi cột trống — gói đã gán luôn thắng. Bài kiểm: nhà với cột trống ra đúng 64 quyết định cũ. |
 | `lib/saas/policy.ts::billingLockApplies` (dùng ở `lib/auth/session.ts` VÀ `lib/pricing/customer.ts`) | AN TOÀN / thu phí: nền tảng không thu phí chính nó nên nhà không bị khoá thanh toán. Một vị từ cho cả khoá lẫn khung gia hạn — hai chỗ không thể nói hai điều khác nhau. Không đọc `billing_mode` (khoá đọc thuê bao). |
 | `lib/ai-usage/quota.ts:40,84` (`resolveAiLimits`, `checkAiQuota`) + `ai.limits.isHome` ở `/settings/plan` | AN TOÀN credential: đi cùng nguồn AI `HOME` (khoá AI của nhà chỉ dành cho nhà, dòng 85). Đưa nhà qua `evaluateAiQuota` với gói hiện tại (`platformCreditUsdPerMonth = 0`) sẽ chặn AI của nhà. Gỡ cần tách «ai được dùng khoá nhà» khỏi «hạn mức AI» — phase D. |
-| `lib/platform/org-plan.ts:31`, `lib/billing/service.ts:245–865` | Ngoài phạm vi (phase D sở hữu `lib/billing/**`): chặn đổi gói / thu phí / mua thêm cho nhà — là cái GIỮ cột gói của nhà ổn định sau 0225. |
+| `lib/platform/org-plan.ts:31`, `lib/billing/service.ts:245–865` | Ngoài phạm vi (phase D sở hữu `lib/billing/**`): chặn đổi gói / thu phí / mua thêm cho nhà — là cái GIỮ cột gói của nhà ổn định sau 0227. |
 | `lib/pricing/admin.ts:95,200,322` | Màn người vận hành: không ghi đè cho nhà; danh sách khách / kinh tế bỏ nhà. Không đổi quyết định nào của nhà. |
 | `lib/billing/service.ts:949,956`, `lib/pricing/economics.ts:88` | KPI SaaS: MRR / chuyển đổi dùng thử không tính trung tâm chi phí nội bộ. |
 | Credential nhà, kênh cảnh báo ISO-05, `platform:operate`, cô lập tổ chức (`getDb`), module mặc định của nhà, webhook | NỀN TẢNG / AN TOÀN — không thuộc Phase 14. |

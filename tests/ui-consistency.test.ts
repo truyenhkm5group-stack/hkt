@@ -250,6 +250,10 @@ export function testNavigationCoverage() {
     "/tech/agents": "tab 'Sổ agent' của /tech",
     "/tech/deployments": "tab 'Deploy' của /tech",
     "/tech/incidents": "tab 'Sự cố' của /tech",
+    // Mặt phẳng điều khiển công ty (docs/tech-control-plane/README.md): ba tab nữa của CÙNG mục sidebar `/tech`.
+    "/tech/needs-owner": "tab 'Cần chủ shop' của /tech — và thẻ 'Cần chủ shop' trên trang tổng quan /tech",
+    "/tech/goals": "tab 'Mục tiêu' của /tech",
+    "/tech/missions": "tab 'Sứ mệnh' của /tech",
     // Company OS · Agent C: form mở topic — vào từ nút 'Mở topic' trên /production, trên bàn sản xuất của
     // một mẫu (/production/models/[id]) và từ trang 360 của mẫu (`?model=<id>`, nút do Agent A2 đặt).
     "/production/topics/new": "đường CŨ, nay chỉ chuyển sang /marketing/topics/new (giữ ?model=) — các lối vào cũ vẫn trỏ tới",

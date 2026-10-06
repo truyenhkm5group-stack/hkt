@@ -3,7 +3,7 @@
  *
  * Trước bản này, workspace nhà được "miễn" ở năm chỗ thương mại bằng `if (org.isHome)`: `planKeyOf`, `resolvePlan`,
  * `checkEntitlement`, `featureGranted` (nhánh HOME), `resolveOrgPricing` / `checkUsageQuota`, và trang `/settings/plan`.
- * Nay nhà đọc gói được GÁN cho nó qua ĐÚNG đường của khách: cột `platform_organizations.plan` (0225 ghi thành dữ liệu
+ * Nay nhà đọc gói được GÁN cho nó qua ĐÚNG đường của khách: cột `platform_organizations.plan` (0227 ghi thành dữ liệu
  * đúng gói mã cũ tự gán — `internal`) → `platform_plans` → ghi đè `platform_org_pricing` → giữ từ trước. Không có gói ẩn
  * vô hạn nào trong mã (quyết định giá V1, 07/10/2026): gán gói khác cho nhà = ghi cột đó, resolver không phải sửa (bài so
  * này thì đổi theo — đó là thay đổi hành vi có chủ đích). Cột TRỐNG ở nhà ⇒ `internal` (nhánh khả dụng, xem `planKeyOf`).
@@ -42,7 +42,7 @@ import { accountOfWorkspace, updateAccount } from "@/lib/saas/accounts";
 import { loadMyProducts } from "@/lib/saas/portal";
 import { billingLockApplies } from "@/lib/saas/policy";
 
-const MIGRATION = "drizzle/0225_internal_plan_binding.sql";
+const MIGRATION = "drizzle/0227_internal_plan_binding.sql";
 const DELTAS = [1, 1_000_000] as const;
 const USAGE_QUOTAS = ["aiConversations", "aiMessages", "orders", "fanpages"] as const;
 
@@ -112,7 +112,7 @@ function diffs(want: Decisions, got: Decisions): string[] {
   return out;
 }
 
-/** Câu lệnh của migration 0225, chạy lại được (idempotent) — bài kiểm chạy lại đúng văn bản đã vào kho. */
+/** Câu lệnh của migration 0227, chạy lại được (idempotent) — bài kiểm chạy lại đúng văn bản đã vào kho. */
 function migrationStatements(): string[] {
   const src = readFileSync(path.join(process.cwd(), MIGRATION), "utf8");
   return src
@@ -212,7 +212,7 @@ export async function testSaasInternalPlan() {
 
   const pdb = await getPlatformDb();
   const home = await getHomeOrganization();
-  assert.equal(home.plan, HOME_PLAN_KEY, "0225: workspace nhà được gắn gói internal bằng DỮ LIỆU (cột plan), không bằng nhánh mã");
+  assert.equal(home.plan, HOME_PLAN_KEY, "0227: workspace nhà được gắn gói internal bằng DỮ LIỆU (cột plan), không bằng nhánh mã");
   const internalRow = await pdb.query.platformPlans.findFirst({ where: eq(schema.platformPlans.key, HOME_PLAN_KEY) });
   assert.ok(internalRow, "gói internal phải có trong sổ gói");
   const saved = { plan: home.plan };
@@ -237,24 +237,24 @@ export async function testSaasInternalPlan() {
     assert.ok(!("error" in mine), "cổng khách đọc được sản phẩm của nhà");
     for (const p of mine.products) for (const f of p.features) assert.equal(f.effective, p.grantsUse, `${p.key}.${f.key}: nhà có mọi tính năng mà thuê bao cho dùng`);
 
-    // ── 2. TRƯỚC 0225 (cột gói của nhà trống — lượt deploy chưa migrate xong, hoặc lô migration bị hoàn): nhánh khả dụng
+    // ── 2. TRƯỚC 0227 (cột gói của nhà trống — lượt deploy chưa migrate xong, hoặc lô migration bị hoàn): nhánh khả dụng
     //       của `planKeyOf` cho đúng 64 quyết định cũ, KHÔNG rơi về trial.
     await pdb.update(schema.platformOrganizations).set({ plan: null }).where(eq(schema.platformOrganizations.code, home.code));
-    assert.deepEqual(diffs(legacy, await currentHomeDecisions(home.code)), [], "nhà với cột gói trống (trước 0225) giữ nguyên mọi quyết định cũ");
+    assert.deepEqual(diffs(legacy, await currentHomeDecisions(home.code)), [], "nhà với cột gói trống (trước 0227) giữ nguyên mọi quyết định cũ");
     await pdb.update(schema.platformOrganizations).set({ plan: "  " }).where(eq(schema.platformOrganizations.code, home.code));
     invalidateOrganizations();
     assert.equal(planKeyOf(await getHomeOrganization()), HOME_PLAN_KEY, "cột chỉ có khoảng trắng = trống");
     // Migration chạy lại được (idempotent), chỉ ghi khi cột gói của nhà còn TRỐNG, không đụng workspace khách nào.
     await pdb.update(schema.platformOrganizations).set({ plan: null }).where(eq(schema.platformOrganizations.code, home.code));
     for (let i = 0; i < 2; i++) for (const s of migrationStatements()) await pdb.execute(sql.raw(s));
-    assert.deepEqual(diffs(legacy, await currentHomeDecisions(home.code)), [], "chạy lại 0225 (hai lần) trên cột trống đưa nhà về đúng hành vi cũ");
+    assert.deepEqual(diffs(legacy, await currentHomeDecisions(home.code)), [], "chạy lại 0227 (hai lần) trên cột trống đưa nhà về đúng hành vi cũ");
     await pdb.update(schema.platformOrganizations).set({ plan: "basic" }).where(eq(schema.platformOrganizations.code, home.code));
     for (const s of migrationStatements()) await pdb.execute(sql.raw(s));
     const kept = await pdb.query.platformOrganizations.findFirst({ where: eq(schema.platformOrganizations.code, home.code) });
-    assert.equal(kept?.plan, "basic", "0225 không đè gói đã được gán cho nhà (vd phase D gán gói V1 trước khi 0225 chạy)");
+    assert.equal(kept?.plan, "basic", "0227 không đè gói đã được gán cho nhà (vd phase D gán gói V1 trước khi 0227 chạy)");
     await restore();
     const others = await pdb.select({ code: schema.platformOrganizations.code, plan: schema.platformOrganizations.plan }).from(schema.platformOrganizations).where(eq(schema.platformOrganizations.isHome, false));
-    assert.ok(others.every((o) => o.plan !== HOME_PLAN_KEY), "0225 không gắn gói internal cho workspace khách nào");
+    assert.ok(others.every((o) => o.plan !== HOME_PLAN_KEY), "0227 không gắn gói internal cho workspace khách nào");
 
     // ── 3. ĐỘT BIẾN — nhà nay phụ thuộc dữ liệu, nên phá dữ liệu phải làm bài so đỏ.
     const mutate = async (label: string, fn: () => Promise<void>, expect: RegExp) => {
@@ -282,5 +282,5 @@ export async function testSaasInternalPlan() {
     await restore();
   }
   await testChargebackCustomerNotStranded();
-  console.log("✓ Phase 14 · nhà đi đường thương mại của khách: bài so trước/sau khớp từng ô (tính năng · hạn mức · hạn mức tháng · gói · trang gói) · 0225 idempotent, không đè gói đã gán · năm đột biến dữ liệu bị bắt · gói vắng ⇒ nhà lùi trial như khách · cột gói trống (trước 0225) không khoá nhà · khách trong tài khoản chargeback bị khoá vẫn có khung gia hạn");
+  console.log("✓ Phase 14 · nhà đi đường thương mại của khách: bài so trước/sau khớp từng ô (tính năng · hạn mức · hạn mức tháng · gói · trang gói) · 0227 idempotent, không đè gói đã gán · năm đột biến dữ liệu bị bắt · gói vắng ⇒ nhà lùi trial như khách · cột gói trống (trước 0227) không khoá nhà · khách trong tài khoản chargeback bị khoá vẫn có khung gia hạn");
 }

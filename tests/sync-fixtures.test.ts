@@ -68,6 +68,7 @@ import { testFinanceTruth } from "./finance-truth.test";
 import { testFinanceInvariants } from "./finance-invariants.test";
 import { testWorkOs } from "./work-os.test";
 import { testTechControlPlaneDb, testTechHealthParsing, testTechLifecycle, testTechPermissions, testTechRiskEngine } from "./tech-control-plane.test";
+import { testTechControlPlaneGoalsDb, testTechControlPlaneVocabulary } from "./tech-control-plane-goals.test";
 import { testAgentRunner, testAgentSandbox, testGithubDeploymentSync, testPhase2aBarriers, testPhase2aSourceGuards, testTechWorkProjection } from "./tech-phase2a.test";
 import { cleanupPrProjectionFixtures, testGithubPrSync, testPrPureMappers, testSyncIncidentPure, testSyncIncidentWatch } from "./tech-pr-projection.test";
 import { cleanupAgentIngestFixtures, testAgentIngestDb, testAgentIngestPure, testAgentIngestSourceGuards } from "./agent-run-ingest.test";
@@ -252,6 +253,7 @@ import { testAdsRoas } from "./ads-roas.test";
 import { testMarketingDaily } from "./marketing-daily.test";
 import { testMarketerDailyNominal } from "./marketer-daily-nominal.test";
 import { testProfitTarget } from "./profit-target.test";
+import { testProfitShipFee } from "./profit-ship-fee.test";
 import { testAdsDecision } from "./ads-decision.test";
 import { testAdsIntraday } from "./ads-intraday.test";
 import { testMarketingDecisionLedger } from "./marketing-decision-ledger.test";
@@ -479,6 +481,7 @@ import { testSalesExperimentReport } from "./sales-experiment-report.test";
 import { testCommerceAgent } from "./commerce-agent.test";
 import { testZaloOa } from "./zalo-oa.test";
 import { testSalesEvents } from "./sales-events.test";
+import { testChatAdAttribution } from "./chat-ad-attribution.test";
 import { testOrderAttribution } from "./order-attribution.test";
 import { testLostReasons } from "./lost-reasons.test";
 import { testAiQuality } from "./ai-quality.test";
@@ -540,6 +543,7 @@ import { testAiSalesIsolation } from "./ai-sales-isolation.test";
 import { testPageQueryBudget } from "./page-query-budget.test";
 import { testApprovalsCore } from "./approvals-core.test";
 import { testAiUsage } from "./ai-usage.test";
+import { testPlatformAiModel } from "./platform-ai-model.test";
 import { testOrgExport } from "./org-export.test";
 import { testRestoreDrillConfig } from "./restore-drill-config.test";
 import { testRestoreDrillPg } from "./restore-drill-pg.test";
@@ -1924,6 +1928,7 @@ async function main() {
   await testMarketingDaily();
   await testMarketerDailyNominal();
   await testProfitTarget();
+  await testProfitShipFee();
   await testAdsDecision(db);
   testAdsIntraday();
   await testMarketingDecisionLedger();
@@ -2402,6 +2407,7 @@ async function main() {
     tất cả nằm trong các bảng `tech_*` nên không đụng tới con số của bài nào phía trên.
   */
   await testTechControlPlaneDb();
+  await testTechControlPlaneGoalsDb();
   /*
     PHASE 2A. Chạy ngay sau mặt phẳng điều khiển và tự dọn bằng tiền tố `p2a-`. Ba khối đầu đụng
     CSDL; khối runner còn dựng KHO GIT TẠM và chạy tiến trình con thật (`npm run typecheck` trong
@@ -2599,6 +2605,7 @@ async function main() {
   testAdsMappingGuards();
   testAdsIngestGuardsProductFk();
   testTechRiskEngine();
+  testTechControlPlaneVocabulary();
   testTechPermissions();
   testTechHealthParsing();
   testRepoIntegrity();
@@ -2763,6 +2770,8 @@ async function main() {
   await testCommerceAgent();
   await testZaloOa();
   await testSalesEvents();
+  // Quảng cáo dẫn khách vào hội thoại ⇒ đơn bot mang ad_id (0225) — tổ chức THẬT `chat-ad-attr`, tự dọn.
+  await testChatAdAttribution();
   await testOrderAttribution();
   await testLostReasons();
   await testAiQuality();
@@ -2838,6 +2847,9 @@ async function main() {
   // Sổ dùng AI + hạn mức AI theo gói + công tắc AI: hai tổ chức THẬT `au-a` / `au-b` (tự cấp, tự dọn), provider GIẢ —
   // một dòng / lượt đúng nguồn, BLOCKED_QUOTA không gọi model, A không trừ B, BYOK không trừ credit nền tảng, không rơi về khoá nhà.
   await testAiUsage();
+  // Platform AI Model Control (06/10/2026): model AI dùng chung đổi qua chính sách có cổng (kiểm khả dụng → chạy thử → áp dụng
+  // → hoàn tác), model mới hỏng ⇒ cùng lượt đi model dự phòng, sổ AI ghi đúng model thật.
+  await testPlatformAiModel();
   // Vận hành khách pilot: vòng đời (checklist tính từ dữ liệu thật, ghi đè có lý do), trang sức khoẻ (không dữ liệu
   // nghiệp vụ, mỗi lượt xem có vết), công tắc khẩn (đình chỉ · tạm dừng luật · tắt kết nối) — hai tổ chức THẬT `pop-a`
   // (tạo hộ qua /start) / `pop-b` (tự cấp, tự dọn).

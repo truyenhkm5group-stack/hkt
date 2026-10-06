@@ -170,11 +170,17 @@ export type DispatchTask = {
   agentAllowedRisks: readonly string[] | null;
   /** Phạm vi ghi của VAI agent được gán (`writeGlobsForRole`). `null` = chưa gán ai. */
   agentWriteGlobs: readonly string[] | null;
+  /**
+   * Sứ mệnh / mục tiêu chứa việc (docs/tech-control-plane/README.md mục 3). `null` = việc lẻ, không thuộc sứ
+   * mệnh nào. Bỏ mục tiêu / huỷ hay dừng sứ mệnh là quyết định của chủ shop — giao việc của nó sau đó là tiêu
+   * tiền cho thứ đã bỏ. Hai cửa (nút giao việc, cửa đọc của runner) truyền CÙNG giá trị đọc bằng `loadTaskPlan`.
+   */
+  plan?: { missionCode: string; missionStatus: string; goalCode: string | null; goalStatus: string | null } | null;
 };
 
 export type DispatchVerdict =
   | { ok: true }
-  | { ok: false; code: "RISK" | "STATUS" | "APPROVAL" | "NO_AGENT" | "AGENT_RISK" | "SCOPE"; reason: string };
+  | { ok: false; code: "RISK" | "STATUS" | "APPROVAL" | "NO_AGENT" | "AGENT_RISK" | "SCOPE" | "PLAN"; reason: string };
 
 /**
  * Việc này giao cho agent được không — HÀM THUẦN, không đọc CSDL.
@@ -226,6 +232,12 @@ export function canDispatchTask(task: DispatchTask): DispatchVerdict {
 
   if (!DISPATCHABLE_STATUSES.includes(task.status as TechTaskStatus)) {
     return { ok: false, code: "STATUS", reason: `Việc ${task.code} đang ở ${task.status}; chỉ giao được khi ${DISPATCHABLE_STATUSES.join(" · ")}. Việc chưa phân loại thì chưa ai hiểu nó là gì.` };
+  }
+  if (task.plan && task.plan.missionStatus !== "ACTIVE") {
+    return { ok: false, code: "PLAN", reason: `Sứ mệnh ${task.plan.missionCode} đang ở ${task.plan.missionStatus} — chỉ sứ mệnh đang chạy mới giao việc cho agent.` };
+  }
+  if (task.plan?.goalCode && task.plan.goalStatus !== "ACTIVE") {
+    return { ok: false, code: "PLAN", reason: `Mục tiêu ${task.plan.goalCode} đang ở ${task.plan.goalStatus} — bật lại mục tiêu trước khi giao việc của nó.` };
   }
   /*
     PHÊ DUYỆT CỦA NGƯỜI LÀ CỔNG CỨNG.

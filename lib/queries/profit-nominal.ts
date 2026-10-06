@@ -3,7 +3,7 @@ import { chayKhongJit, getDb, schema } from "@/db";
 import { adsRatio, adsRatios, type AdsRatios } from "@/lib/constants/profit";
 import { CONFIRMED_STAGES } from "@/lib/queries/expenses";
 import { memo, periodKey } from "@/lib/cache";
-import { DEFAULT_PROFIT_ASSUMPTIONS, FALLBACK_SHIP_FEE_DELIVERED, fixedCostForPeriod, opsCosts, periodMonths, PROFIT_ASSUMPTIONS_KEY, rescuedFromRate, type ProfitAssumptions } from "@/lib/constants/profit";
+import { DEFAULT_PROFIT_ASSUMPTIONS, fixedCostForPeriod, manualShipFee, opsCosts, periodMonths, PROFIT_ASSUMPTIONS_KEY, rescuedFromRate, resolveShipFees, type ProfitAssumptions, type ShipFeeSource } from "@/lib/constants/profit";
 import { ORDER_OUTCOME_FAST, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
 import { LINE_UNIT_COST } from "@/lib/queries/cogs";
 import { LINE_MARKETER_PRICE } from "@/lib/queries/marketer-price";
@@ -73,7 +73,7 @@ function periodCond(from: Date | null, to: Date | null, basis: TimeBasis = "ORDE
 export type ResolvedAssumptions = ProfitAssumptions & {
   shipFeeDeliveredUsed: number;
   shipFeeReturnedUsed: number;
-  shipFeeSource: "setting" | "data" | "fallback";
+  shipFeeSource: ShipFeeSource;
   /** Phí hoàn về bình quân đọc được từ dữ liệu (đơn hoàn có return_fee > 0), 0 = chưa có dữ liệu */
   returnFeeFromData: number;
   /** Số đơn hoàn 90 ngày có ghi phí hoàn về */
@@ -120,25 +120,21 @@ function shipFeeFromData() {
  */
 export async function resolveAssumptions(): Promise<ResolvedAssumptions> {
   const saved = await getSettingJson<ProfitAssumptions>(PROFIT_ASSUMPTIONS_KEY, DEFAULT_PROFIT_ASSUMPTIONS);
-  let shipFeeDeliveredUsed = Math.max(0, Number(saved.shipFeeDelivered) || 0);
-  let shipFeeReturnedUsed = Math.max(0, Number(saved.shipFeeReturned) || 0);
-  let shipFeeSource: ResolvedAssumptions["shipFeeSource"] = "setting";
+  const manual = { delivered: manualShipFee(saved, "shipFeeDelivered"), returned: manualShipFee(saved, "shipFeeReturned") };
   let returnFeeFromData = 0;
   let returnFeeSample = 0;
-  if (!shipFeeDeliveredUsed || !shipFeeReturnedUsed) {
+  let deliveredFromData = 0;
+  // Hai ô đều đặt tay thì không cần câu 90 ngày (5 giây khi đệm nguội).
+  if (manual.delivered === null || manual.returned === null) {
     const row = await shipFeeFromData();
-    const d = Math.round(Number(row?.delivered ?? 0));
+    deliveredFromData = Math.round(Number(row?.delivered ?? 0));
     returnFeeFromData = Math.round(Number(row?.returnFee ?? 0));
     returnFeeSample = Number(row?.returnFeeSample ?? 0);
-    if (!shipFeeDeliveredUsed) {
-      shipFeeDeliveredUsed = d || FALLBACK_SHIP_FEE_DELIVERED;
-      shipFeeSource = d ? "data" : "fallback";
-    }
-    if (!shipFeeReturnedUsed) {
-      shipFeeReturnedUsed = shipFeeDeliveredUsed + (returnFeeFromData || shipFeeDeliveredUsed);
-      if (shipFeeSource === "setting") shipFeeSource = returnFeeFromData ? "data" : "fallback";
-    }
   }
+  const fees = resolveShipFees(manual, { delivered: deliveredFromData, returnFee: returnFeeFromData });
+  const shipFeeDeliveredUsed = fees.delivered;
+  const shipFeeReturnedUsed = fees.returned;
+  const shipFeeSource = fees.source;
   return { ...saved, shipFeeDeliveredUsed, shipFeeReturnedUsed, shipFeeSource, returnFeeFromData, returnFeeSample };
 }
 
