@@ -23,18 +23,18 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-06T10:27:01.170Z",
-  "updated_at": "2026-10-06T10:30:26.333Z",
-  "last_heartbeat": "2026-10-06T10:29:43.482Z",
+  "updated_at": "2026-10-06T10:48:22.006Z",
+  "last_heartbeat": "2026-10-06T10:48:22.006Z",
   "definition_of_done": [],
   "handoff": {
     "branch": "fix/deploy-reuse-wait",
-    "sha": "d670af2b3a5efacd27459a8a172d6be549d634a3",
-    "at": "2026-10-06T10:29:43.482Z",
+    "sha": "f2bc257e03da66e055f55feaffb3c8cb01a7172e",
+    "at": "2026-10-06T10:48:22.006Z",
     "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
     "title": "Deploy dùng lại CI: không bỏ cuộc vì một lần GitHub trả danh sách rỗng",
     "summary": "",
     "tests": [
-      "delivery-v2 ĐẠT · ops-concurrency ĐẠT · bash -n OK; CI chạy npm test đầy đủ"
+      "delivery-v2 ĐẠT · ai-tech-room ĐẠT · ops-concurrency ĐẠT · review độc lập PASS (giả lập curl/jq/đồng hồ, mọi kịch bản dừng đúng)"
     ]
   }
 }
