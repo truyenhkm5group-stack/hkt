@@ -2092,13 +2092,16 @@ export function prOpenDecision(x: { handoff: Handoff | undefined; remoteTip: str
   return { action: "OPEN", why: `mở PR cho ${x.handoff.branch} @ ${x.handoff.sha.slice(0, 8)}` };
 }
 
+/** `mergeable_state` của GitHub (PR gộp được ngay) — chữ của API, KHÔNG phải lệnh `git clean`; công cụ không bao giờ chạy lệnh đó. */
+const GITHUB_MERGEABLE_CLEAN = "clean";
+
 /** Delivery Controller chỉ gộp PR mà hàng đợi xếp MERGE_NOW / MERGE_ISOLATED, ở ĐÚNG SHA hàng đợi đã xét, và `clean`. */
 export function mergeGate(rows: readonly QueueRow[], pr: number, sha: string): { ok: boolean; why: string } {
   const r = rows.find((x) => x.item.pr === pr);
   if (!r) return { ok: false, why: `PR #${pr} không có trong hàng đợi (đã đóng / đã gộp?)` };
   if (r.verdict !== "MERGE_NOW" && r.verdict !== "MERGE_ISOLATED") return { ok: false, why: `hàng đợi xếp ${r.verdict}: ${r.why}` };
   if (r.item.sha !== sha) return { ok: false, why: `--sha ${sha.slice(0, 8)} khác đầu nhánh hàng đợi vừa xét (${r.item.sha.slice(0, 8)}) — chạy lại queue` };
-  if (r.item.mergeable !== "clean") return { ok: false, why: `mergeable_state = ${r.item.mergeable}, chưa phải clean` };
+  if (r.item.mergeable !== GITHUB_MERGEABLE_CLEAN) return { ok: false, why: `mergeable_state = ${r.item.mergeable}, chưa phải clean` };
   if (r.item.handoffSha && r.item.handoffSha !== r.item.sha)
     return { ok: false, why: `nhánh đã đi tiếp sau bàn giao (bàn giao ${r.item.handoffSha.slice(0, 8)}, PR ${r.item.sha.slice(0, 8)}) — mã chưa ai khai đã kiểm; worker bàn giao lại` };
   return { ok: true, why: `${r.verdict} · ${r.item.risk} · gates ${r.item.gates}` };
