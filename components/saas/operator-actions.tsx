@@ -308,7 +308,7 @@ export function FinalizeStatementButton({ accountCode, periodMonth }: { accountC
 }
 
 export function CreateCustomerForm({ plans, products, accounts }: { plans: { key: string; name: string; priceVnd: number | null }[]; products: { key: string; name: string }[]; accounts: { id: string; code: string; name: string }[] }) {
-  const [f, setF] = useState({ accountId: "", accountName: "", accountCode: "", accountType: "EXTERNAL", workspaceCode: "", workspaceName: "", planKey: plans.find((p) => p.key === "trial")?.key ?? plans[0]?.key ?? "", brand: "", adminEmail: "", adminName: "" });
+  const [f, setF] = useState({ accountId: "", accountName: "", accountCode: "", accountType: "EXTERNAL", workspaceCode: "", workspaceName: "", planKey: plans[0]?.key ?? "", brand: "", adminEmail: "", adminName: "" });
   const [chosen, setChosen] = useState<string[]>(products.slice(-1).map((p) => p.key));
   const [result, setResult] = useState<{ link: string | null; message: string } | null>(null);
   const idem = useMemo(() => key("create"), []);

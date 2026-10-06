@@ -58,8 +58,6 @@ async function cleanup() {
   await pdb.delete(schema.platformUsageEvents).where(inArray(schema.platformUsageEvents.orgCode, [...ORGS]));
   await pdb.delete(schema.platformCostEntries).where(like(schema.platformCostEntries.description, "sp-test%"));
   await pdb.delete(schema.platformProvisioningJobs).where(like(schema.platformProvisioningJobs.idempotencyKey, "sp-%"));
-  const accts = await pdb.select({ id: schema.platformAccounts.id }).from(schema.platformAccounts).where(like(schema.platformAccounts.code, `${PREFIX}%`));
-  if (accts.length) await pdb.delete(schema.platformBillingStatements).where(inArray(schema.platformBillingStatements.accountId, accts.map((a) => a.id)));
   for (const code of ORGS) {
     const org = await pdb.query.platformOrganizations.findFirst({ where: eq(schema.platformOrganizations.code, code) });
     if (org) {
@@ -70,7 +68,15 @@ async function cleanup() {
     }
     rmSync(organizationDatabaseUrl({ code, isHome: false }).replace(/^pglite:\/\//, ""), { recursive: true, force: true });
   }
-  if (accts.length) await pdb.delete(schema.platformAccounts).where(inArray(schema.platformAccounts.id, accts.map((a) => a.id)));
+  // Tài khoản thử: chỉ xoá cái KHÔNG còn workspace nào trỏ tới (workspace của bài kiểm khác có thể mang mã bắt đầu bằng sp-).
+  const accts = (await pdb.select({ id: schema.platformAccounts.id }).from(schema.platformAccounts).where(like(schema.platformAccounts.code, `${PREFIX}%`))).map((a) => a.id);
+  const used = accts.length ? new Set((await pdb.select({ id: schema.platformOrganizations.accountId }).from(schema.platformOrganizations).where(inArray(schema.platformOrganizations.accountId, accts))).map((r) => r.id)) : new Set<string | null>();
+  const free = accts.filter((id) => !used.has(id));
+  if (free.length) {
+    await pdb.delete(schema.platformBillingStatements).where(inArray(schema.platformBillingStatements.accountId, free));
+    await pdb.delete(schema.platformProductSubscriptions).where(inArray(schema.platformProductSubscriptions.accountId, free));
+    await pdb.delete(schema.platformAccounts).where(inArray(schema.platformAccounts.id, free));
+  }
   await pdb.delete(schema.platformAuditLog).where(inArray(schema.platformAuditLog.targetOrgCode, [...ORGS]));
   invalidateOrganizations();
   invalidateCapabilities();
