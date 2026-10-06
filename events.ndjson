@@ -216,3 +216,4 @@
 {"at":"2026-10-06T21:44:10.465Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"work-auto-assign-fix","detail":"fix/work-auto-assign-machine-actor @ ef3d1e2ae4b3 · 1 lệnh kiểm thử"}
 {"at":"2026-10-06T21:44:21.307Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"work-auto-assign-fix","detail":"#624 cho fix/work-auto-assign-machine-actor @ ef3d1e2ae4b3"}
 {"at":"2026-10-06T22:01:22.699Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"work-auto-assign-fix","detail":"#624 @ ef3d1e2ae4b3 → 1fa25c33442e (MERGE_NOW · MEDIUM · gates success)"}
+{"at":"2026-10-06T22:02:03.297Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DEPLOY_DISPATCHED","detail":"1fa25c33442e · run 37537935961 https://github.com/truyenhkm5group-stack/hkt/actions/runs/37537935961"}
