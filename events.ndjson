@@ -71,3 +71,4 @@
 {"at":"2026-10-06T11:56:20.594Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"ai-provider-failover","detail":"#610 cho feat/ai-provider-failover @ 8c1c115e798e"}
 {"at":"2026-10-06T11:57:12.638Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DEPLOY_DISPATCHED","detail":"208c824520f0 · run 37459821433 https://github.com/truyenhkm5group-stack/hkt/actions/runs/37459821433"}
 {"at":"2026-10-06T11:59:39.615Z","actor":"DESKTOP-56TH98Y:wt-pricing-billing","kind":"HANDOFF","mission":"pricing-billing-foundation","detail":"feat/pricing-billing-foundation @ 62dd4eb641e1 · 5 lệnh kiểm thử"}
+{"at":"2026-10-06T12:17:17.878Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"VERIFY_PASS","mission":"messenger-permission-diag","detail":"PASS 208c824520f0d2c6326f5264ed9377b2135e90d8 2026-10-06T12:17:16.142Z"}
