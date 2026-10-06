@@ -194,17 +194,29 @@ toán, chi lớn, thao tác không hoàn tác, tắt bảo vệ, lách CI / bran
 |---|---|---|
 | 0 | Kiểm kê (tài liệu này) | XONG |
 | 1 | Project · Goal · Mission · NEEDS_OWNER · CANCELLED · vòng đời chuẩn · sự kiện + audit · trang Goals/Missions | XONG trên nhánh `feat/company-ai-tech-control-plane` (migration 0225) |
-| 2 | Worker · lease · heartbeat · cửa worker · adapter thi hành · sổ năng lực tối thiểu · trang Worker | XONG trên nhánh `feat/tech-control-plane-workers` (migration 0226) — mục 8 |
-| 3 | Worktree theo mã việc · PR/CI/deploy chảy về · webhook GitHub · nối (B) | |
-| 4 | Rủi ro R0–R4 · ngân sách · watchdog | |
-| 5 | Cockpit mobile trên `/tech` | |
-| 6 | Sổ năng lực · skill nội bộ · định tuyến vai/model | |
-| 7 | Dogfood R0/R1 đầu-cuối | |
-| 8 | Gia cố, thử sập/phục hồi | |
+| 2 | Worker · lease · heartbeat · cửa worker · adapter thi hành · sổ năng lực tối thiểu · trang Worker | XONG (migration 0226) — mục 8 |
+| 3 | Nhánh / cây theo mã việc · PR qua cầu nối bot · CI đỏ ⇒ việc sửa · nối deploy · hậu kiểm | XONG — mục 10 |
+| 4 | Chính sách R0–R4 · ngân sách · watchdog | XONG (migration 0227) — mục 11 |
+| 5 | Buồng lái mobile trên `/tech` | XONG — mục 12 |
+| 6 | Sổ năng lực · định tuyến model | XONG — mục 13 |
+| 7 | Dogfood R0/R1 đầu-cuối | XONG CỤC BỘ (07/10/2026) — mục 14; chưa chạy trên production |
+| 8 | Gia cố, thử sập/phục hồi | MỘT PHẦN: sập worker / lease hết hạn / fencing / nộp muộn đã khoá bằng bài kiểm; cô lập ĐỌC và credential cần tài khoản hệ điều hành riêng (mục 14) |
 
-Chưa được nói "vận hành tự động sẵn sàng" cho tới khi đủ 16 điểm trong đặc tả của chủ shop (tạo goal/task từ
-`/tech` · worker headless · heartbeat · lease · worktree · log về `/tech` · phục hồi khi worker sập · retry ·
-PR · CI · deploy · verify · chính sách · ngân sách · NEEDS_OWNER · audit).
+Pha 2–6 nằm trên nhánh `feat/tech-control-plane-policy`, gộp SAU nhánh Pha 1. Review độc lập 5 lượt, PASS @ `2c9ba494`.
+
+Chưa được nói "vận hành tự động sẵn sàng" cho tới khi đủ 16 điểm trong đặc tả của chủ shop. Tình trạng 07/10/2026:
+
+| Điểm | Mã | Đã chạy thật trên production |
+|---|---|---|
+| Tạo goal / task từ `/tech` | có | chưa (chưa gộp) |
+| Worker headless · heartbeat · lease · worktree | có | chưa — dogfood cục bộ đạt |
+| Log về `/tech` | có | chưa — dogfood cục bộ đạt (38 dòng) |
+| Phục hồi khi worker sập · retry | có, khoá bằng bài kiểm | chưa |
+| PR | có (cầu nối bot `agent-open-pr.yml`) | chưa — dogfood cục bộ không có cấu hình GitHub |
+| CI · deploy · verify | có | chưa |
+| Chính sách · ngân sách · NEEDS_OWNER · audit | có | chưa |
+
+Kết luận: MÃ đủ cả 16 điểm, nhưng chưa điểm nào CHẠY trên production — chưa được tuyên bố sẵn sàng.
 
 ## 7. Kế hoạch quay lui
 
