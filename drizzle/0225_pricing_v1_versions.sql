@@ -12,9 +12,11 @@
 --    không có ghim (tạo sau) ⇒ theo phiên bản CATALOG đang hiệu lực, và được ghim khi hoá đơn đầu tiên được trả.
 --  · `platform_invoices.price_version_key`: hoá đơn tính theo phiên bản nào (NULL = trước 0225 = legacy).
 --  · Gói MỚI trong `platform_plans`: `inbox` (KHÔNG có AI bán hàng) và `scale` — chỉ là DANH TÍNH gói + hạn mức kỹ thuật
---    (`checkEntitlement`); giá của chúng nằm ở phiên bản. Gói cũ (basic · pro · standard · internal…) GIỮ NGUYÊN.
---  · `platform.pricing.ai-customer-meter-live-at`: mốc đồng hồ khách AI bắt đầu ghi — kỳ bắt đầu trước mốc này là kỳ đo
---    CHƯA TRỌN (cận dưới, không tính phần vượt).
+--    (`checkEntitlement`); giá của chúng nằm ở phiên bản. Credit AI nền tảng của hai gói mới = 0 (credit là quyết định của chủ
+--    nền tảng, 0194 — chưa khai cho gói mới ⇒ AI chạy bằng khoá của tổ chức). Gói cũ (basic · pro · standard · internal…) GIỮ NGUYÊN.
+--  · Mốc đồng hồ khách AI bắt đầu ghi = `created_at` của phiên bản CATALOG đầu tiên (dòng V1 do chính migration này ghi,
+--    cùng lần deploy với mã ghi đồng hồ) — kỳ bắt đầu trước mốc này là kỳ đo CHƯA TRỌN (cận dưới, không tính phần vượt).
+--    Không gieo dòng `platform_settings` nào (ghi đè tay vẫn được ở `platform.pricing.ai-customer-meter-live-at`).
 --  · Không bật trần cứng nào, không đổi `grandfathered`, không gán gói cho tổ chức nhà (việc của người vận hành — đường chạy
 --    thử `scripts/ops/pricing-internal-fit.ts`). Thuế: `tax_mode = 'UNDECLARED'` — không giả định VAT.
 --  · Mặt phẳng điều khiển: chỉ thật ở CSDL NHÀ (xoá ở CSDL tổ chức — db/migrate.ts). Viết tay, idempotent.
@@ -99,7 +101,7 @@ ON CONFLICT ("version_key", "plan_key") DO NOTHING;--> statement-breakpoint
 INSERT INTO "platform_plans" ("key", "name", "description", "limits", "position", "price_vnd", "yearly_free_months", "commercial") VALUES
   ('inbox', 'Inbox', 'Hộp thư hợp nhất cho fanpage — nhân viên trả lời tay, chưa có AI bán hàng.', '{"users":3,"pages":5,"objects":2,"records":2000,"workflows":5,"aiDraftsPerDay":10,"storageMb":512,"ai":{"requestsPerDay":20,"requestsPerMonth":300,"costUsdPerMonth":{"soft":15,"hard":30},"platformCreditUsdPerMonth":0}}'::jsonb, 11, NULL, 2,
    '{"publicListed":false,"contactSales":false,"quotas":{"fanpages":3,"aiConversations":0,"aiMessages":0,"orders":null},"features":["multi_page_inbox","human_handoff","analytics","multi_user"],"overage":{"policy":"SOFT_ONLY","unitPricesVnd":{},"graceAllowancePct":0},"limitModes":{}}'::jsonb),
-  ('scale', 'Scale', 'Chuỗi / nhiều fanpage: 30 fanpage, 7.500 khách AI mỗi tháng.', '{"users":25,"pages":100,"objects":40,"records":150000,"workflows":100,"aiDraftsPerDay":150,"storageMb":20480,"ai":{"requestsPerDay":300,"requestsPerMonth":6000,"costUsdPerMonth":{"soft":300,"hard":600},"platformCreditUsdPerMonth":15}}'::jsonb, 36, NULL, 2,
+  ('scale', 'Scale', 'Chuỗi / nhiều fanpage: 30 fanpage, 7.500 khách AI mỗi tháng.', '{"users":25,"pages":100,"objects":40,"records":150000,"workflows":100,"aiDraftsPerDay":150,"storageMb":20480,"ai":{"requestsPerDay":300,"requestsPerMonth":6000,"costUsdPerMonth":{"soft":300,"hard":600},"platformCreditUsdPerMonth":0}}'::jsonb, 36, NULL, 2,
    '{"publicListed":false,"contactSales":false,"quotas":{"fanpages":30,"aiConversations":30000,"aiMessages":200000,"orders":null},"features":["ai_sales","multi_page_inbox","ai_order_creation","upsell","cross_sell","follow_up","human_handoff","analytics","advanced_analytics","custom_ai_training","api","webhook","multi_user"],"overage":{"policy":"SOFT_ONLY","unitPricesVnd":{},"graceAllowancePct":0},"limitModes":{}}'::jsonb)
 ON CONFLICT ("key") DO NOTHING;--> statement-breakpoint
 
@@ -138,8 +140,4 @@ ON CONFLICT ("version_key", "plan_key") DO NOTHING;--> statement-breakpoint
 INSERT INTO "platform_price_pins" ("org_code", "version_key", "source", "reason")
 SELECT o."code", 'legacy', 'MIGRATION_0225', '0225: tổ chức có từ trước bảng giá V1 — giữ nguyên giá đang thu'
 FROM "platform_organizations" o
-ON CONFLICT ("org_code") DO NOTHING;--> statement-breakpoint
-
-INSERT INTO "platform_settings" ("key", "value", "updated_by")
-VALUES ('platform.pricing.ai-customer-meter-live-at', jsonb_build_object('at', to_char(now() at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')), 'migration:0225')
-ON CONFLICT ("key") DO NOTHING;
+ON CONFLICT ("org_code") DO NOTHING;

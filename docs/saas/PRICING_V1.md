@@ -78,7 +78,9 @@ cùng khách đếm một lần mỗi kỳ · hội thoại lặp không sinh ph
   enterprise`. Gói `inbox`, `scale` thêm vào `platform_plans` (danh tính + hạn mức kỹ thuật cho `checkEntitlement`); giá chỉ ở
   phiên bản. Tính năng theo gói là đề xuất kỹ thuật (quyết định chỉ chốt «INBOX không có AI Sales»): Inbox = hộp thư · chuyển
   người · báo cáo · nhiều người dùng; Starter thêm AI bán hàng, tạo đơn, upsell, nhắn lại; Growth thêm cross-sell, báo cáo nâng
-  cao, dạy AI, webhook; Scale / Enterprise thêm API.
+  cao, dạy AI, webhook; Scale / Enterprise thêm API. Credit AI nền tảng (0194) của gói mới `inbox` / `scale` = 0 — chủ nền
+  tảng chưa khai; gói `starter` / `growth` / `trial` dùng chung dòng `platform_plans` nên giữ credit + trần AI kỹ thuật cũ
+  (Starter 500 lượt / tháng · Growth 2.000) — CHƯA định cỡ lại cho 1.500 / 3.000 khách AI.
 - **Legacy** = `legacy`: chép NGUYÊN `platform_plans` lúc migration chạy (mọi khoá gói, kể cả `standard`, `basic`, `pro`,
   `internal`, giá, tặng tháng, mua thêm, limits, commercial). MỌI tổ chức có từ trước 0225 được ghim `legacy` ⇒ số tiền khách
   hiện tại trả KHÔNG ĐỔI (bài kiểm so báo giá 1/3/6/12 tháng trước / sau). Phiên bản legacy chỉ thay GIÁ; hạn mức kỹ thuật và
@@ -106,7 +108,8 @@ cùng khách đếm một lần mỗi kỳ · hội thoại lặp không sinh ph
 - **Kỳ** = tháng lịch giờ VN — trùng kỳ hạn mức và credit AI. Nền móng chưa có kỳ thu theo ngày gia hạn của từng thuê bao, nên
   đồng hồ không chạy theo `paid_through` (hoá đơn gia hạn vẫn theo kỳ trả tiền của nó).
 - **Độ phủ** (`aiCustomerCoverage`): workspace chỉ chạy runtime cũ `chatbot/` (bot nhà, container riêng) ⇒ `null` + «chưa đo»,
-  KHÔNG 0; đồng hồ bật giữa kỳ (mốc `platform.pricing.ai-customer-meter-live-at` do 0225 đặt) ⇒ cận dưới, phần vượt `null`.
+  KHÔNG 0; đồng hồ bật giữa kỳ (mốc = `created_at` của phiên bản V1 do 0225 ghi; ghi đè được ở
+  `platform.pricing.ai-customer-meter-live-at`) ⇒ cận dưới, phần vượt `null`.
 - Chưa đo: kênh Zalo OA và chat web công khai không đi qua `markWaitingForCustomer`.
 
 ### 3. Phần vượt, fair-use, cảnh báo

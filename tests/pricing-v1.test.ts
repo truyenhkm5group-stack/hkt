@@ -34,7 +34,7 @@ import { loadCustomerPlan } from "@/lib/pricing/customer";
 import { hasFeature, invalidatePricing, resolveOrgPricing } from "@/lib/pricing/entitlements";
 import { aiLimitCheck, planInternalFit, previousPeriodMonth } from "@/lib/pricing/internal-fit";
 import { usagePeriodOf } from "@/lib/pricing/meter";
-import { AI_CUSTOMER_METER_LIVE_KEY, invalidatePriceBook, loadPriceBook, pinOrgPriceVersion, plansForOrg } from "@/lib/pricing/price-book";
+import { AI_CUSTOMER_METER_LIVE_KEY, invalidatePriceBook, loadPriceBook, pinOrgPriceVersion, plansForOrg, readAiCustomerMeterLiveAt } from "@/lib/pricing/price-book";
 import { buildValueKpis, VALUE_KPI_KEYS, VALUE_KPI_SPEC } from "@/lib/pricing/value-kpis";
 import {
   aiCustomerBlocks,
@@ -365,6 +365,10 @@ export async function testPricingV1() {
       assert.deepEqual([legacy.monthlyVnd, legacy.yearlyFreeMonths, JSON.stringify(legacy.addonPrices)], [p.priceVnd !== null && p.priceVnd > 0 ? p.priceVnd : null, p.yearlyFreeMonths, JSON.stringify(p.addonPrices)], `legacy ${p.key} chép đúng giá đang thu`);
     }
     assert.ok(!book.prices.some((x) => x.versionKey === V1 && ["basic", "pro", "internal", "standard"].includes(x.planKey)), "gói cũ không niêm yết ở V1");
+    if (savedMeter === undefined) {
+      const live = await readAiCustomerMeterLiveAt();
+      assert.ok(live && live.getTime() <= Date.now(), "mốc đồng hồ khách AI = lúc 0225 ghi phiên bản V1 (không cần dòng cài đặt)");
+    }
 
     // ── 2. Ghim legacy cho tổ chức có từ trước: đúng câu của migration (idempotent); tổ chức tạo sau KHÔNG bị ghim.
     const pinsBefore = new Set((await pdb.select({ o: schema.platformPricePins.orgCode }).from(schema.platformPricePins)).map((r) => r.o));

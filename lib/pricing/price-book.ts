@@ -11,7 +11,7 @@
  *
  * Bảng chưa có (máy chưa migrate 0225) ⇒ sổ rỗng ⇒ mọi gói "không bán" ở đường mới, nói ra — không đoán giá.
  */
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { getPlatformDb, schema } from "@/db";
 import type { SessionUser } from "@/lib/auth/session";
 import { listPlans, type PlanRow } from "@/lib/entitlements/check";
@@ -127,14 +127,20 @@ export async function readMarginConfig(): Promise<MarginConfig> {
   }
 }
 
-/** Mốc đồng hồ khách AI bắt đầu ghi (0225 đặt lúc migrate). `null` = chưa bật / không đọc được. */
+/**
+ * Mốc đồng hồ khách AI bắt đầu ghi: ghi đè tay ở `platform.pricing.ai-customer-meter-live-at` nếu có; không thì `created_at`
+ * của phiên bản CATALOG ĐẦU TIÊN — dòng V1 do 0225 ghi lúc migrate, cùng lần deploy với mã ghi đồng hồ. `null` = chưa bật.
+ */
 export async function readAiCustomerMeterLiveAt(): Promise<Date | null> {
   try {
     const pdb = await getPlatformDb();
     const r = await pdb.query.platformSettings.findFirst({ where: eq(schema.platformSettings.key, AI_CUSTOMER_METER_LIVE_KEY) });
     const at = r?.value && typeof r.value === "object" ? (r.value as { at?: unknown }).at : null;
     const d = typeof at === "string" ? new Date(at) : null;
-    return d && Number.isFinite(d.getTime()) ? d : null;
+    if (d && Number.isFinite(d.getTime())) return d;
+    const [first] = await pdb.select({ at: sql<Date | string | null>`min(${schema.platformPriceVersions.createdAt})` }).from(schema.platformPriceVersions).where(eq(schema.platformPriceVersions.kind, "CATALOG"));
+    const f = first?.at ? new Date(first.at) : null;
+    return f && Number.isFinite(f.getTime()) ? f : null;
   } catch {
     return null;
   }
