@@ -47,8 +47,8 @@
     "0224": "2026-10-06T13:26:29.899Z"
   },
   "created_at": "2026-10-06T13:25:25.486Z",
-  "updated_at": "2026-10-06T15:49:22.908Z",
-  "last_heartbeat": "2026-10-06T15:49:12.018Z",
+  "updated_at": "2026-10-06T15:54:35.166Z",
+  "last_heartbeat": "2026-10-06T15:54:35.166Z",
   "definition_of_done": [],
   "intake": {
     "verdict": "PARTIAL",
@@ -56,13 +56,13 @@
   },
   "handoff": {
     "branch": "integ/saas-platform",
-    "sha": "73c5b4a0cd52c696c39ec7bd75b5040ceee5aafb",
-    "at": "2026-10-06T15:49:12.018Z",
+    "sha": "196a36e8b2dfe11045c45977bff0592ca459730d",
+    "at": "2026-10-06T15:54:35.166Z",
     "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
     "title": "SaaS Control Plane: tài khoản · sản phẩm (ERP, Chốt Đơn) · thuê bao theo sản phẩm · entitlement · sổ usage/chi phí · chargeback nội bộ · VNXCommerce là khách nội bộ · Operator Console",
     "summary": "",
     "tests": [
-      "ghép main sau #612: tsc sạch; migration-journal (224) + upgrade-path (86→224) + restore-drill + pricing + saas-platform + messenger ĐẠT; review độc lập: BLOCK huỷ thuê bao nhà ⇒ sửa c90097bb"
+      "saas-platform ĐẠT (thêm nhánh chọn tài khoản có sẵn; đột biến đỏ); tsc + eslint sạch; review độc lập: (1)(3) PASS, (2) sửa theo đề xuất"
     ]
   }
 }
