@@ -52,3 +52,4 @@
 {"at":"2026-10-06T11:02:20.959Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"deploy-reuse-wait","detail":"#606 @ f2bc257e03da → 35c3ce717552 (MERGE_ISOLATED · HIGH · gates success)"}
 {"at":"2026-10-06T11:15:15.903Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"UPDATE","mission":"ai-sales-reliability","detail":"RUNNING → RUNNING · 24 mẫu phạm vi · HIGH"}
 {"at":"2026-10-06T11:15:15.903Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"OVERLAP_ACCEPTED","mission":"ai-sales-reliability","detail":"OVERLAP_ACCEPTED với pricing-billing-foundation: phạm vi db/schema.ts, drizzle/ ↔ drizzle · điểm nóng SERIAL drizzle/, db/schema.ts — cách tích hợp: bộ theo dõi Meta không có mã; sync-fixtures chỉ nối thêm dòng đăng ký"}
+{"at":"2026-10-06T11:15:23.413Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"ai-sales-reliability","detail":"feat/ai-sales-retry @ 7d467d5626e0 · 1 lệnh kiểm thử"}
