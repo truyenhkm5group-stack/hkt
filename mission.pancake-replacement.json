@@ -3,7 +3,7 @@
   "mission_id": "pancake-replacement",
   "title": "Thay Pancake bằng Meta/Facebook gốc",
   "business_goal": "",
-  "status": "INTEGRATING",
+  "status": "VERIFYING",
   "priority": "P1",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-pancake-replacement",
@@ -53,11 +53,13 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-06T05:09:53.560Z",
-  "updated_at": "2026-10-06T06:47:29.776Z",
+  "updated_at": "2026-10-06T08:20:54.773Z",
   "last_heartbeat": "2026-10-06T06:28:08.277Z",
   "definition_of_done": [],
   "evidence": {
-    "merged": "#602 → 321f7e6d0db4d826c00309078e8f4bc42bbf77fe"
+    "merged": "#602 → 321f7e6d0db4d826c00309078e8f4bc42bbf77fe",
+    "verify": "PASS 6eb072652a6220f6d61d8ec36d31f51f376e4edf 2026-10-06T08:20:53.428Z",
+    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/37431030954"
   },
   "handoff": {
     "branch": "feat/pancake-replacement",
