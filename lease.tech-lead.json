@@ -3,7 +3,8 @@
   "holder": "DESKTOP-56TH98Y:wt-tech-lead-v2",
   "purpose": "Tech Lead — sứ mệnh tech-lead-delivery-v2",
   "acquired_at": "2026-10-06T05:10:22.581Z",
-  "heartbeat_at": "2026-10-06T05:10:22.581Z",
-  "expires_at": "2026-10-06T06:10:22.581Z",
-  "generation": 1
+  "heartbeat_at": "2026-10-06T05:36:48.943Z",
+  "expires_at": "2026-10-06T06:36:48.943Z",
+  "generation": 1,
+  "token_hash": "b57bcdc71d4e5860787a5fa43f723e4fc3489a2e782e87bad0084ccc359f4fba"
 }
