@@ -8,6 +8,8 @@ import { logCallAction, logCallInitiatedAction } from "@/lib/actions/wholesale";
 import { CALL_OUTCOME_ICON, CALL_OUTCOME_LABEL, callOutcomeEffect, MOBILE_CALL_OUTCOMES, QUICK_NOTE_CHIPS, type CallOutcome, type LeadStatus } from "@/lib/wholesale/constants";
 import { cn } from "@/lib/utils";
 import { FOLLOW_OPTIONS, followIso, suggestedFollow, type FollowKey } from "@/lib/wholesale/followup";
+import type { ZaloDraft } from "@/lib/wholesale/leads";
+import { ZaloPanel } from "@/app/(dashboard)/wholesale/zalo-panel";
 
 export type MobileLeadInfo = {
   id: string;
@@ -46,7 +48,7 @@ function writePending(v: { id: string; at: number } | null) {
  * tự coi là đã nói chuyện. Quay lại ERP ⇒ bảng kết quả tự bật; chọn một nút lớn ⇒ ghi chú nhanh + hẹn gọi lại gợi ý sẵn ⇒
  * Lưu ⇒ sang khách tiếp theo. Trạng thái lead do máy chủ suy ra (`callOutcomeEffect`), người bán không phải chọn.
  */
-export function MobileCall({ lead, nextHref, canWork }: { lead: MobileLeadInfo; nextHref: string; canWork: boolean }) {
+export function MobileCall({ lead, nextHref, canWork, zalo }: { lead: MobileLeadInfo; nextHref: string; canWork: boolean; zalo: ZaloDraft | null }) {
   const router = useRouter();
   const [sheet, setSheet] = useState(false);
   const [outcome, setOutcome] = useState<CallOutcome | null>(null);
@@ -54,6 +56,7 @@ export function MobileCall({ lead, nextHref, canWork }: { lead: MobileLeadInfo; 
   const [follow, setFollow] = useState<FollowKey>("none");
   const [custom, setCustom] = useState("");
   const [saving, setSaving] = useState(false);
+  const [channel, setChannel] = useState<"PHONE_CALL" | "ZALO">("PHONE_CALL");
 
   useEffect(() => {
     const check = () => {
@@ -77,7 +80,7 @@ export function MobileCall({ lead, nextHref, canWork }: { lead: MobileLeadInfo; 
   const save = async () => {
     if (!outcome || saving) return;
     setSaving(true);
-    const r = await logCallAction(lead.id, { outcome, note, nextFollowupAt: followIso(follow, custom) });
+    const r = await logCallAction(lead.id, { outcome, note, nextFollowupAt: followIso(follow, custom), channel });
     if ("error" in r) {
       setSaving(false);
       toast.error(r.error);
@@ -92,6 +95,10 @@ export function MobileCall({ lead, nextHref, canWork }: { lead: MobileLeadInfo; 
 
   return (
     <div className="space-y-3">
+      {/* Nhắn Zalo TRƯỚC (chủ shop 06/10/2026): đã gửi ⇒ sang khách kế tiếp; không có Zalo ⇒ ở lại gọi điện. */}
+      {canWork && zalo && (zalo.link || zalo.zaloStatus === "NOT_FOUND") ? (
+        <ZaloPanel leadId={lead.id} initial={zalo} big onResult={(r) => (r === "NOT_FOUND" ? router.refresh() : router.push(nextHref))} />
+      ) : null}
       {lead.doNotContact ? (
         <p className="rounded-xl bg-rose-50 p-3 text-sm text-rose-900 dark:bg-rose-950 dark:text-rose-200">Khách ở danh sách KHÔNG LIÊN HỆ — không gọi.</p>
       ) : lead.phoneE164 ? (
@@ -149,7 +156,14 @@ export function MobileCall({ lead, nextHref, canWork }: { lead: MobileLeadInfo; 
         <div className="fixed inset-0 z-50 flex items-end bg-black/40" onClick={() => !saving && setSheet(false)}>
           <div className="max-h-[90vh] w-full overflow-y-auto rounded-t-2xl bg-background px-4 pt-4 shadow-xl" onClick={(e) => e.stopPropagation()} role="dialog" aria-label="Kết quả cuộc gọi">
             <div className="mx-auto mb-3 h-1.5 w-10 rounded-full bg-muted" />
-            <div className="mb-3 text-center text-lg font-bold">Kết quả cuộc gọi?</div>
+            <div className="mb-2 text-center text-lg font-bold">Kết quả cuộc gọi?</div>
+            <div className="mb-3 flex justify-center gap-1.5 text-sm">
+              {(["PHONE_CALL", "ZALO"] as const).map((c) => (
+                <button key={c} type="button" onClick={() => setChannel(c)} className={cn("rounded-full border px-3 py-1.5", channel === c ? "border-primary bg-primary text-primary-foreground" : "bg-card")}>
+                  {c === "ZALO" ? "💬 Khách trả lời Zalo" : "📞 Gọi điện"}
+                </button>
+              ))}
+            </div>
             <div className="grid grid-cols-2 gap-2">
               {MOBILE_CALL_OUTCOMES.map((o) => (
                 <button key={o} type="button" onClick={() => choose(o)} className={cn("flex min-h-14 items-center gap-2 rounded-xl border px-3 text-left text-sm font-semibold", outcome === o ? "border-primary bg-primary/10 ring-2 ring-primary" : "bg-card active:bg-muted")}>

@@ -22,7 +22,8 @@ function NumberField({ label, value, onChange, step }: { label: string; value: n
   );
 }
 
-export function ConfigForm({ initial, provinces }: { initial: LeadHunterConfig; provinces: { key: string; label: string }[] }) {
+export function ConfigForm({ initial, provinces, productImages }: { initial: LeadHunterConfig; provinces: { key: string; label: string }[]; productImages: { name: string; url: string }[] }) {
+  const [imageUrl, setImageUrl] = useState("");
   const router = useRouter();
   const [pending, start] = useTransition();
   const [c, setC] = useState<LeadHunterConfig>(initial);
@@ -324,6 +325,73 @@ export function ConfigForm({ initial, provinces }: { initial: LeadHunterConfig; 
           Kịch bản tư vấn qua điện thoại
           <Textarea rows={4} value={c.outreach.callScript} onChange={(e) => setOut("callScript", e.target.value)} />
         </label>
+      </fieldset>
+
+      <fieldset className="space-y-2">
+        <legend className="text-sm font-semibold">Kịch bản nhắn Zalo chào sỉ (nhắn Zalo trước, gọi sau)</legend>
+        <label className={lbl}>
+          Tin nhắn — mỗi dòng một đoạn; dòng nào rỗng sau khi điền biến thì tự bỏ. Biến: {"{{ten_doanh_nghiep}} {{ten_nv}} {{ten_shop}} {{san_pham}} {{nhom_khach}} {{loai_hinh}} {{khu_vuc}} {{loi_ich}} {{gui_anh}} {{khuyen_mai}} {{giao_hang}} {{moq}}"}
+          <Textarea rows={7} value={c.outreach.zaloTemplate} onChange={(e) => setOut("zaloTemplate", e.target.value)} />
+        </label>
+        <p className="text-xs text-muted-foreground">
+          {"{{ten_nv}}"} = tên gọi của nhân viên đang nhắn · {"{{gui_anh}}"} = câu «em gửi vài hình…» chỉ khi đã chọn ảnh · {"{{loi_ich}}"} = một câu theo nhóm khách (quán ăn: thêm món nhắm; cửa hàng: bán lẻ lại; mẹ &amp; bé: nấu cho bé). Không ghi giá — gửi bảng giá khi khách hỏi.
+        </p>
+        <div className="space-y-1.5">
+          <div className={lbl}>Ảnh gửi kèm ({c.outreach.zaloImages.length}/10) — nhân viên chia sẻ sang Zalo bằng nút chia sẻ của điện thoại</div>
+          {c.outreach.zaloImages.length ? (
+            <div className="flex flex-wrap gap-2">
+              {c.outreach.zaloImages.map((u, i) => (
+                <div key={u} className="relative">
+                  {/* eslint-disable-next-line @next/next/no-img-element -- ảnh ngoài miền, chỉ xem trước */}
+                  <img src={u} alt={`Ảnh ${i + 1}`} className="h-20 w-20 rounded-md border object-cover" />
+                  <button type="button" onClick={() => setOut("zaloImages", c.outreach.zaloImages.filter((x) => x !== u))} className="absolute -right-1.5 -top-1.5 rounded-full border bg-background px-1.5 text-xs" aria-label="Bỏ ảnh">
+                    ✕
+                  </button>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-xs text-muted-foreground">Chưa chọn ảnh nào — tin Zalo gửi chữ thôi.</p>
+          )}
+          <div className="flex gap-2">
+            <Input placeholder="Dán link ảnh https://…" value={imageUrl} onChange={(e) => setImageUrl(e.target.value)} />
+            <Button
+              type="button"
+              variant="outline"
+              disabled={!/^https:\/\/\S+$/.test(imageUrl.trim()) || c.outreach.zaloImages.length >= 10}
+              onClick={() => {
+                const u = imageUrl.trim();
+                if (!c.outreach.zaloImages.includes(u)) setOut("zaloImages", [...c.outreach.zaloImages, u]);
+                setImageUrl("");
+              }}
+            >
+              Thêm
+            </Button>
+          </div>
+          {productImages.length ? (
+            <details className="text-sm">
+              <summary className="cursor-pointer text-muted-foreground">Chọn từ ảnh sản phẩm ({productImages.length})</summary>
+              <div className="mt-2 grid grid-cols-4 gap-2 sm:grid-cols-8">
+                {productImages.map((p) => {
+                  const on = c.outreach.zaloImages.includes(p.url);
+                  return (
+                    <button
+                      key={p.url}
+                      type="button"
+                      title={p.name}
+                      disabled={!on && c.outreach.zaloImages.length >= 10}
+                      onClick={() => setOut("zaloImages", on ? c.outreach.zaloImages.filter((x) => x !== p.url) : [...c.outreach.zaloImages, p.url])}
+                      className={on ? "rounded-md ring-2 ring-primary" : "rounded-md opacity-90 hover:opacity-100 disabled:opacity-40"}
+                    >
+                      {/* eslint-disable-next-line @next/next/no-img-element -- ảnh sản phẩm từ kho ảnh ngoài */}
+                      <img src={p.url} alt={p.name} className="aspect-square w-full rounded-md border object-cover" />
+                    </button>
+                  );
+                })}
+              </div>
+            </details>
+          ) : null}
+        </div>
       </fieldset>
 
       <Button disabled={pending} onClick={save}>

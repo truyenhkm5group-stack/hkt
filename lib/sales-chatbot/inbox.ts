@@ -1,6 +1,8 @@
-import { and, asc, desc, eq, inArray, isNull, ne, or, sql, type SQL } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, isNull, ne, or, sql, type SQL } from "drizzle-orm";
 import { z } from "zod";
 import { getDb, schema } from "@/db";
+import { listChannelPages } from "@/lib/connectors/service";
+import { MESSENGER_DIRECT_KEY } from "@/lib/sales-chatbot/channel-ownership";
 import type { AiBlock } from "@/lib/ai/provider";
 import { audit } from "@/lib/audit";
 import { publish } from "@/lib/realtime/bus";
@@ -12,6 +14,7 @@ import { ORDER_OUTCOME } from "@/lib/queries/return-rate";
 import { appendContextMessages, resumeConversationToAi, SHOP_SAID } from "@/lib/sales-chatbot/engine";
 import { recordConversationEvent } from "@/lib/sales-chatbot/events";
 import { readConversationControl } from "@/lib/sales-chatbot/conversation-control-shared";
+import { HISTORY_CREATED_BY } from "@/lib/sales-chatbot/history-shared";
 import { labelsFor, listLabels, notesFor } from "@/lib/sales-chatbot/inbox-labels";
 import { PAGE_REPLY, STAFF_OUT_PREFIX, STAFF_REASON, type FanpageDeps } from "@/lib/sales-chatbot/fanpage";
 import { MESSAGING_WINDOW_MS } from "@/lib/sales-chatbot/followup-shared";
@@ -85,16 +88,23 @@ export const WEB_STAFF_REASON = "Nhân viên đang trả lời trên chat web";
 export type InboxResult<T extends object = object> = ({ ok: true } & T) | { ok: false; error: string };
 
 const C = "sales_chat_conversations";
-/** Tin khách CHƯA ai trả lời: mới hơn tin bot, tin nhân viên ERP, và mọi tin phía page ngoài ERP. Tên cột viết TƯỜNG MINH (câu con tương quan). */
+/**
+ * Tin khách CHƯA ai trả lời: mới hơn tin bot, tin nhân viên ERP, và mọi tin phía page ngoài ERP. Tên cột viết TƯỜNG MINH (câu con tương quan).
+ * Tin khách NHẬP TỪ LỊCH SỬ (`history_until`, lib/sales-chatbot/history.ts) không phải việc chờ — chỉ tin SỐNG tới sau mốc đó mới là.
+ */
 const NEEDS_REPLY = sql<boolean>`("${sql.raw(C)}"."last_customer_at" is not null
+  and "${sql.raw(C)}"."last_customer_at" > coalesce("${sql.raw(C)}"."history_until", 'epoch'::timestamptz)
   and "${sql.raw(C)}"."last_customer_at" > coalesce("${sql.raw(C)}"."last_bot_at", 'epoch'::timestamptz)
   and "${sql.raw(C)}"."last_customer_at" > coalesce("${sql.raw(C)}"."last_staff_at", 'epoch'::timestamptz)
   and not exists (select 1 from "sales_chat_inbound" i where i.page_id = "${sql.raw(C)}"."page_id" and i.thread_id = "${sql.raw(C)}"."thread_id"
     and i.note = ${PAGE_REPLY} and i.created_at > "${sql.raw(C)}"."last_customer_at"))`;
 /** Chưa đọc: tin khách mới hơn lần cuối một NHÂN VIÊN mở hội thoại trong hộp thư. */
 const UNREAD = sql<boolean>`("${sql.raw(C)}"."last_customer_at" is not null and "${sql.raw(C)}"."last_customer_at" > coalesce("${sql.raw(C)}"."staff_seen_at", 'epoch'::timestamptz))`;
-/** Mốc TIN cuối (khách · bot · nhân viên ERP), không phải `updated_at` — mở / gắn nhãn / nhận hội thoại không được đẩy nó lên đầu. */
-const ACTIVITY = sql<Date>`greatest(coalesce("${sql.raw(C)}"."last_customer_at", 'epoch'::timestamptz), coalesce("${sql.raw(C)}"."last_bot_at", 'epoch'::timestamptz), coalesce("${sql.raw(C)}"."last_staff_at", 'epoch'::timestamptz), "${sql.raw(C)}"."created_at")`;
+/**
+ * Mốc TIN cuối (khách · bot · nhân viên ERP · tin nhập từ lịch sử), không phải `updated_at` — mở / gắn nhãn / nhận hội thoại không được
+ * đẩy nó lên đầu. Hội thoại do LƯỢT NHẬP LỊCH SỬ tạo không lấy giờ nhập làm mốc (không nhảy lên đầu như tin mới).
+ */
+const ACTIVITY = sql<Date>`greatest(coalesce("${sql.raw(C)}"."last_customer_at", 'epoch'::timestamptz), coalesce("${sql.raw(C)}"."last_bot_at", 'epoch'::timestamptz), coalesce("${sql.raw(C)}"."last_staff_at", 'epoch'::timestamptz), coalesce("${sql.raw(C)}"."history_until", 'epoch'::timestamptz), case when "${sql.raw(C)}"."created_by" = ${HISTORY_CREATED_BY} then 'epoch'::timestamptz else "${sql.raw(C)}"."created_at" end)`;
 const HAS_ORDER = sql<boolean>`("${sql.raw(C)}"."order_id" is not null or "${sql.raw(C)}"."draft_order_id" is not null or exists (select 1 from "orders" o where o.sales_conversation_id = "${sql.raw(C)}"."id"))`;
 const INBOUND_NAME = sql<string | null>`(select i.customer_name from "sales_chat_inbound" i where i.page_id = "${sql.raw(C)}"."page_id" and i.thread_id = "${sql.raw(C)}"."thread_id" and i.customer_name is not null and i.customer_name <> '' order by i.created_at desc limit 1)`;
 
@@ -107,6 +117,8 @@ const listZ = z.object({
   label: z.string().trim().min(1).max(100).nullable().catch(null),
   channel: z.enum(INBOX_CHANNELS).nullable().catch(null),
   q: z.string().trim().max(80).catch(""),
+  /** MỘT page / tài khoản kênh (`sales_chat_conversations.page_id`); `null` = mọi page (hộp thư chung). */
+  page: z.string().trim().regex(/^[A-Za-z0-9_:.-]{1,80}$/).nullable().catch(null),
   phone: z.enum(["HAS", "NONE"]).nullable().catch(null),
   level: z.enum(CUSTOMER_LEVELS).nullable().catch(null),
   /** Người phụ trách: mã tài khoản, hoặc «none» = chưa ai cầm. */
@@ -117,6 +129,26 @@ const listZ = z.object({
   limit: z.number().int().min(50).max(INBOX_LIST_MAX).catch(100),
   handler: z.enum(INBOX_HANDLERS).nullable().catch(null),
 });
+
+export type InboxPageOption = { id: string; name: string };
+
+/**
+ * Các page / tài khoản kênh của hộp thư — để LỌC và để in tên page trên từng hội thoại. Tên đọc từ page đã nối thẳng
+ * (`org_channel_pages`); page Pancake / Zalo / page cũ chưa có tên ⇒ nhãn theo kênh kèm mã. Chỉ page có hội thoại hoặc đang nối.
+ */
+export async function inboxPages(): Promise<InboxPageOption[]> {
+  const db = await getDb();
+  const c = schema.salesChatConversations;
+  const used = await db.selectDistinct({ pageId: c.pageId, channel: c.channel }).from(c).where(and(ne(c.channel, "TEST"), isNotNull(c.pageId)));
+  const named = new Map((await listChannelPages(MESSENGER_DIRECT_KEY)).map((p) => [p.pageId, p.kind === "INSTAGRAM" ? p.name : p.name || p.pageId]));
+  const out = new Map<string, string>();
+  for (const [id, name] of named) out.set(id, name);
+  for (const r of used) {
+    if (!r.pageId || out.has(r.pageId)) continue;
+    out.set(r.pageId, r.channel === "ZALO" ? "Zalo OA" : r.pageId.startsWith("comment:") ? `Bình luận ${r.pageId.slice(8, 20)}` : `Fanpage ${r.pageId}`);
+  }
+  return [...out].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name, "vi"));
+}
 
 /** Ngày giờ Việt Nam ⇒ mốc UTC đầu ngày. */
 const vnDayStart = (day: string) => new Date(Date.parse(`${day}T00:00:00Z`) - 7 * 3_600_000);
@@ -172,6 +204,7 @@ export async function listInbox(user: SessionUser, rawQuery: unknown, now: Date 
   const u = schema.users;
   const base: SQL[] = [ne(c.channel, "TEST")];
   if (q.channel) base.push(eq(c.channel, q.channel));
+  if (q.page) base.push(eq(c.pageId, q.page));
   if (q.label) base.push(sql`exists (select 1 from "sales_chat_conversation_labels" cl where cl.conversation_id = "${sql.raw(C)}"."id" and cl.label_id = ${q.label})`);
   if (q.q) {
     const like = `%${q.q.replace(/[%_\\]/g, (m) => `\\${m}`)}%`;
@@ -278,6 +311,7 @@ export async function listInbox(user: SessionUser, rawQuery: unknown, now: Date 
   }
 
   const labels = await labelsFor(rows.map((r) => r.id));
+  const pageNames = new Map((await inboxPages()).map((p) => [p.id, p.name]));
   return {
     ok: true,
     counts,
@@ -287,6 +321,8 @@ export async function listInbox(user: SessionUser, rawQuery: unknown, now: Date 
     rows: rows.map((r) => ({
       id: r.id,
       channel: r.channel,
+      pageId: r.pageId,
+      pageName: r.pageId ? (pageNames.get(r.pageId) ?? null) : null,
       status: r.status,
       handoffReason: r.handoffReason,
       customerName: r.customerName || r.stateName || r.inboundName || "Khách",
@@ -468,7 +504,8 @@ export async function loadInboxThread(user: SessionUser, conversationId: unknown
     thread: {
       id: conv.id,
       channel: conv.channel,
-      channelLabel: INBOX_CHANNEL_LABEL[conv.channel as InboxChannel] ?? conv.channel,
+      // Hội thoại LUÔN mang page nó tới từ đó — shop nhiều page phải thấy ngay đang trả lời ở page nào.
+      channelLabel: [INBOX_CHANNEL_LABEL[conv.channel as InboxChannel] ?? conv.channel, conv.pageId ? (await inboxPages()).find((p) => p.id === conv.pageId)?.name : null].filter(Boolean).join(" · "),
       status: conv.status,
       handoffReason: conv.handoffReason,
       botYields: conv.status === "HANDOFF",

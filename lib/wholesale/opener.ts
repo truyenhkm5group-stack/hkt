@@ -69,6 +69,54 @@ export function openerLooksInvented(text: string, factsText: string): string | n
   return null;
 }
 
+/**
+ * Một câu «lợi ích» theo NHÓM KHÁCH — cách diễn đạt, không phải dữ kiện về doanh nghiệp (không khen, không đoán quy mô).
+ * Quán ăn / nhậu dùng hàng làm món; cửa hàng bán lại; mẹ & bé nấu cho bé.
+ */
+const SEGMENT_PITCH: Partial<Record<LeadSegment, string>> = {
+  SPECIALTY_STORE: "bổ sung thêm mặt hàng đóng gói sẵn lên kệ, khách mua làm quà tiện",
+  GROCERY: "nhập thêm về bán lẻ cho khách quanh khu",
+  FROZEN_FOOD_STORE: "nhập thêm về bán lẻ cho khách",
+  SUPERMARKET: "nhập thêm về bán lẻ cho khách",
+  MOM_BABY: "nhập thêm cho các mẹ mua về nấu cho bé",
+  SEAFOOD_RESTAURANT: "thêm món nhắm, món ăn kèm chế biến nhanh cho quán",
+  PUB_BEER: "thêm món nhắm chế biến nhanh cho quán",
+  EATERY: "thêm món ăn kèm chế biến nhanh cho quán",
+  HOTPOT: "thêm đồ nhúng lẩu chế biến sẵn cho quán",
+  BBQ: "thêm món nướng, món nhắm chế biến nhanh cho quán",
+  RESTAURANT: "thêm món chế biến nhanh cho thực đơn",
+};
+
+/** Biến của kịch bản Zalo = biến lời chào + tên nhân viên (tên gọi = chữ cuối) + câu lợi ích theo nhóm khách. */
+export function zaloVariables(cfg: LeadHunterConfig, f: OpenerFacts, staffName: string): Record<string, string> {
+  const base = openerVariables(cfg, f);
+  const given = staffName.trim().split(/\s+/).filter(Boolean).at(-1) ?? "";
+  return {
+    ...base,
+    ten_nv: given || "em",
+    ho_ten_nv: staffName.trim(),
+    loi_ich: SEGMENT_PITCH[f.segment] ?? "tham khảo thêm nguồn hàng",
+    // Chỉ nói «em gửi hình» khi shop ĐÃ chọn ảnh kèm — không hứa thứ nhân viên không có trong tay.
+    gui_anh: cfg.outreach.zaloImages.length ? "Em gửi anh/chị vài hình sản phẩm tham khảo ạ. " : "",
+  };
+}
+
+/** Tin Zalo đã cá nhân hoá. Dòng rỗng sau khi điền biến bị bỏ — kịch bản không lòi ra dòng trống / «{{khuyen_mai}}». */
+export function zaloMessage(cfg: LeadHunterConfig, f: OpenerFacts, staffName: string): string {
+  const vars = zaloVariables(cfg, f, staffName);
+  return cfg.outreach.zaloTemplate
+    .split(/\r?\n/)
+    .map((line) => renderTemplate(line, vars))
+    .filter((line) => line.length > 0)
+    .join("\n");
+}
+
+/** Link mở Zalo theo SĐT (dạng nội địa 0xxxxxxxxx). Chỉ số DI ĐỘNG mới có thể có Zalo; số cố định / tổng đài ⇒ `null`. */
+export function zaloPhoneLink(phoneE164: string | null, kind: string | null): string | null {
+  if (!phoneE164 || kind !== "MOBILE" || !/^\+84\d{9}$/.test(phoneE164)) return null;
+  return `https://zalo.me/0${phoneE164.slice(3)}`;
+}
+
 /** Bộ chuyển kênh: V1 mọi kênh là THỦ CÔNG — ERP dựng link mở app / sao chép nội dung, người bấm gửi. */
 export type ChannelAction = { href: string | null; copy: string; hint: string; automatic: false };
 

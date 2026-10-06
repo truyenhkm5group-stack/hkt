@@ -20,14 +20,17 @@ import { REVENUE_RECOGNIZED_ON_DELIVERY } from "@/lib/queries/manual-order-sql";
 import { ORDER_OUTCOME, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
 import { FINISHED_OUTCOMES_SQL, RETURNED_OUTCOMES_SQL } from "@/lib/constants/truth";
 import { HANDOFF_REASON_CODES, HANDOFF_REASON_LABEL, type HandoffReasonCode } from "@/lib/sales-chatbot/events-shared";
+import { BOT_CONFIRMED, HUMAN_TOUCHED, onPage } from "@/lib/sales-chatbot/events-sql";
 import {
   AI_SALES_PERFORMANCE_SETTING_KEY,
   cohortTable,
   estimatedStaffSaving,
   parsePerformanceSettings,
   rateOrNull,
+  salesEconomics,
   AI_SALES_MIN_SAMPLE,
   type AiSalesPerformanceSettings,
+  type SalesEconomics,
   type CohortTable,
 } from "@/lib/sales-chatbot/performance-shared";
 import { setSettingJson } from "@/lib/settings";
@@ -50,6 +53,8 @@ export type AiSalesPerformance = {
   /** `null` ở các ô tiền = không người xem nào có quyền thấy tiền (chỉ `ai_sales:manage`). */
   cost: { sellingVnd: number | null; unknownCost: number; turns: number; orderSyncVnd: number | null; testVnd: number | null; perDeliveredOrderVnd: number | null; perConfirmedOrderVnd: number | null; rateVndPerUsd: number } | null;
   human: (AiSalesPerformanceSettings & { estimatedSavingVnd: number | null }) | null;
+  /** AOV · doanh thu / hội thoại · chi phí AI / hội thoại · doanh thu ÷ chi phí AI (`salesEconomics`). Ô chi phí `null` khi không có quyền thấy tiền. */
+  economics: SalesEconomics;
 };
 
 const num = (v: unknown): number => {
@@ -65,15 +70,15 @@ export async function loadPerformanceSettings(): Promise<AiSalesPerformanceSetti
  * Số hiệu quả của tổ chức NGỮ CẢNH. `withMoney` = người xem có quyền thấy tiền (chi phí AI, tiết kiệm ước tính) — tiền là
  * vùng nhạy cảm như ở bảng «Chi phí AI theo ngày».
  */
-export async function loadAiSalesPerformance(orgCode: string, opts: { days?: number; now?: Date; withMoney: boolean }): Promise<AiSalesPerformance> {
+export async function loadAiSalesPerformance(orgCode: string, opts: { days?: number; now?: Date; withMoney: boolean; /** Một page (chiều lọc); `null` = mọi page. */ pageId?: string | null }): Promise<AiSalesPerformance> {
   const days = Math.min(Math.max(Math.trunc(opts.days ?? 30), 1), 180);
   const now = opts.now ?? new Date();
   const since = new Date(dauNgayVN(now).getTime() - (days - 1) * 86_400_000);
   const db = await getDb();
   const e = schema.salesConversationEvents;
-  const inPeriod = and(gte(e.occurredAt, since), ne(e.channel, "TEST"));
+  const inPeriod = and(gte(e.occurredAt, since), ne(e.channel, "TEST"), onPage(opts.pageId));
 
-  const [first] = await db.select({ at: sql<Date | null>`min(${e.occurredAt})` }).from(e);
+  const [first] = await db.select({ at: sql<Date | null>`min(${e.occurredAt})` }).from(e).where(onPage(opts.pageId));
   const measuredSince = first?.at ? new Date(first.at) : null;
 
   // ── Phễu theo hội thoại (chỉ hội thoại có tin khách trong kỳ) ──
@@ -82,8 +87,10 @@ export async function loadAiSalesPerformance(orgCode: string, opts: { days?: num
       quoted: sql<boolean>`bool_or(${e.type} = 'quote.given')`,
       identified: sql<boolean>`bool_or(${e.type} = 'customer.identified')`,
       drafted: sql<boolean>`bool_or(${e.type} = 'order.drafted' and ${e.actorKind} = 'AI')`,
-      confirmed: sql<boolean>`bool_or(${e.type} = 'order.confirmed')`,
-      human: sql<boolean>`bool_or(${e.type} in ('handoff.requested','human.took_over'))`,
+      // Hai vị ngữ dùng chung (events-sql.ts): đơn NGƯỜI tạo trong khung chat không phải đơn bot chốt, và kéo hội thoại sang
+      // nhóm có người.
+      confirmed: sql<boolean>`bool_or(${BOT_CONFIRMED})`,
+      human: sql<boolean>`bool_or(${HUMAN_TOUCHED})`,
       upsellOffered: sql<boolean>`bool_or(${e.type} = 'upsell.offered')`,
       upsellAccepted: sql<boolean>`bool_or(${e.type} = 'upsell.accepted')`,
     })
@@ -97,8 +104,8 @@ export async function loadAiSalesPerformance(orgCode: string, opts: { days?: num
   // ── Độ phủ của sổ ──
   const c = schema.salesChatConversations;
   const coverageFrom = measuredSince && measuredSince > since ? measuredSince : since;
-  const [active] = await db.select({ n: sql<number>`count(*)::int` }).from(c).where(and(ne(c.channel, "TEST"), sql`${c.turns} > 0`, gte(c.updatedAt, coverageFrom)));
-  const [withEv] = await db.select({ n: sql<number>`count(distinct ${e.conversationId})::int` }).from(e).where(and(ne(e.channel, "TEST"), gte(e.occurredAt, coverageFrom)));
+  const [active] = await db.select({ n: sql<number>`count(*)::int` }).from(c).where(and(ne(c.channel, "TEST"), sql`${c.turns} > 0`, gte(c.updatedAt, coverageFrom), ...(opts.pageId ? [eq(c.pageId, opts.pageId)] : [])));
+  const [withEv] = await db.select({ n: sql<number>`count(distinct ${e.conversationId})::int` }).from(e).where(and(ne(e.channel, "TEST"), gte(e.occurredAt, coverageFrom), onPage(opts.pageId)));
 
   // ── Thời gian trả lời (ngưỡng mẫu áp SAU khi SQL trả về — percentile_cont luôn ra số khi có một dòng, luật 63) ──
   const responseMs = sql`(${e.payload}->>'responseMs')::bigint`;
@@ -138,7 +145,7 @@ export async function loadAiSalesPerformance(orgCode: string, opts: { days?: num
     .where(and(inPeriod, inArray(e.type, ["upsell.offered", "upsell.accepted", "upsell.declined"])));
 
   // ── Đơn bot chốt ⇒ kết cục theo ORDER_OUTCOME ──
-  const confirmedIds = (await db.selectDistinct({ id: e.orderId }).from(e).where(and(inPeriod, eq(e.type, "order.confirmed"), isNotNull(e.orderId)))).map((r) => r.id!).filter(Boolean);
+  const confirmedIds = (await db.selectDistinct({ id: e.orderId }).from(e).where(and(inPeriod, BOT_CONFIRMED, isNotNull(e.orderId)))).map((r) => r.id!).filter(Boolean);
   let orders: AiSalesPerformance["orders"] = { confirmed: 0, confirmedValueVnd: 0, settled: 0, delivered: 0, deliveredRevenueVnd: 0, returned: 0, cancelled: 0, pending: 0, deliveryRate: null };
   if (confirmedIds.length) {
     const o = schema.orders;
@@ -183,6 +190,8 @@ export async function loadAiSalesPerformance(orgCode: string, opts: { days?: num
     const rate = env.facebook.usdToVnd;
     const usage = await aiUsageByRef(orgCode, ["sales_chatbot"], since);
     const testIds = new Set((await db.select({ id: c.id }).from(c).where(eq(c.channel, "TEST"))).map((r) => r.id));
+    // Một page ⇒ chỉ chi phí AI của hội thoại thuộc page đó (sổ AI ghi `ref` = mã hội thoại).
+    const pageConvs = opts.pageId ? new Set((await db.select({ id: c.id }).from(c).where(eq(c.pageId, opts.pageId))).map((r) => r.id)) : null;
     let selling: number | null = null;
     let orderSync: number | null = null;
     let test: number | null = null;
@@ -190,6 +199,7 @@ export async function loadAiSalesPerformance(orgCode: string, opts: { days?: num
     let turns = 0;
     const add = (acc: number | null, usd: number | null) => (usd === null ? acc : (acc ?? 0) + usd * rate);
     for (const u of usage) {
+      if (pageConvs && !(u.ref && pageConvs.has(u.ref.replace(/^order-sync:/, "")))) continue;
       if (u.ref?.startsWith("order-sync:")) orderSync = add(orderSync, u.costUsd);
       else if (u.ref && testIds.has(u.ref)) test = add(test, u.costUsd);
       else {
@@ -231,6 +241,7 @@ export async function loadAiSalesPerformance(orgCode: string, opts: { days?: num
     orderSync: { orders: num(os?.n), valueVnd: num(os?.value) },
     cost,
     human,
+    economics: salesEconomics({ conversations: total, confirmedOrders: orders.confirmed, confirmedValueVnd: orders.confirmedValueVnd, deliveredRevenueVnd: orders.deliveredRevenueVnd, aiCostVnd: cost?.sellingVnd ?? null, unknownCostTurns: cost?.unknownCost ?? 0 }),
   };
 }
 

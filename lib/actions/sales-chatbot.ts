@@ -10,6 +10,7 @@ import { saveFollowupSettings } from "@/lib/sales-chatbot/followup-settings";
 import { chatTurn, conversationView, openConversation, resumeConversationToAi } from "@/lib/sales-chatbot/engine";
 import { bindOrganization } from "@/lib/platform/background";
 import { recordConversationEvent } from "@/lib/sales-chatbot/events";
+import { cancelInboxHistory, driveInboxHistory, startInboxHistory } from "@/lib/sales-chatbot/history";
 import { checkLearnNow, learnLessons, rollbackLessons, saveLessons, setLessonsEnabled } from "@/lib/sales-chatbot/lessons";
 import { publishPlaybook, rollbackPlaybook, runPlaybookLearning, savePlaybookDraft, startPlaybookLearning, unpublishPlaybook } from "@/lib/sales-chatbot/playbook";
 import { saveSalesChatbotConfig, SALES_CHATBOT_MANAGE } from "@/lib/sales-chatbot/settings";
@@ -124,6 +125,25 @@ export async function learnLessonsNowAction(): Promise<PlaybookResult> {
 export async function saveLevelScriptsAction(scripts: unknown): Promise<{ ok: true; message: string } | { error: string }> {
   const user = await requireUser();
   const r = await saveLevelScripts(user, scripts);
+  if ("ok" in r) revalidatePath("/ai/sales-chatbot");
+  return r;
+}
+
+// ─── «Đồng bộ lịch sử hộp thư» (lib/sales-chatbot/history.ts) — vỏ mỏng: phiên → lõi (kiểm module + quyền lần nữa) ───
+
+/** Bắt đầu / chạy tiếp lượt nhập lịch sử; vòng đọc Pancake chạy SAU phản hồi trong đúng ngữ cảnh tổ chức. */
+export async function startInboxHistoryAction(input: unknown): Promise<PlaybookResult> {
+  const user = await requireUser();
+  const r = await startInboxHistory(user, input);
+  if ("error" in r) return r;
+  after(await bindOrganization(() => driveInboxHistory({ trigger: "MANUAL", actor: user.email })));
+  revalidatePath("/ai/sales-chatbot");
+  return r;
+}
+
+export async function cancelInboxHistoryAction(): Promise<PlaybookResult> {
+  const user = await requireUser();
+  const r = await cancelInboxHistory(user);
   if ("ok" in r) revalidatePath("/ai/sales-chatbot");
   return r;
 }

@@ -106,8 +106,10 @@ async function testFlow() {
     const conn = await connectMessengerPage(admin, { id: PAGE, name: "Shop Sức Khoẻ", token: PAGE_TOKEN, canMessage: true }, { fetch: f });
     assert.ok("ok" in conn, JSON.stringify(conn));
     const oc = schema.orgConnections;
+    const cp = schema.orgChannelPages;
     const status = async () => (await db.select({ status: oc.status, msg: oc.lastTestMessage, ok: oc.lastTestOk }).from(oc).where(eq(oc.connectorKey, "facebook-messenger")))[0];
     const bells = async () => db.select().from(schema.notifications).where(eq(schema.notifications.entityId, "facebook-messenger"));
+    const pageBells = async () => db.select().from(schema.notifications).where(eq(schema.notifications.entityId, `facebook-messenger:${PAGE}`));
     const inbox = async () => db.select().from(schema.userMessages).where(eq(schema.userMessages.kind, "CONNECTION_BROKEN"));
 
     // Ngoài 24 giờ ⇒ chỉ tin này hỏng; kết nối vẫn bật, không báo ai.
@@ -115,18 +117,31 @@ async function testFlow() {
     const w = await sendMessengerPageText(PAGE, "psid-1", "Chào chị", { fetch: f });
     assert.ok(!w.ok && w.error.includes("24 giờ"), JSON.stringify(w));
     assert.equal((await status()).status, "ACTIVE");
-    assert.equal((await bells()).length, 0);
+    assert.equal((await bells()).length + (await pageBells()).length, 0);
 
-    // Token bị thu hồi ⇒ cần nối lại.
+    // ── Page có token RIÊNG (nối từ 0220): token hỏng là việc của ĐÚNG page đó — báo page, kết nối chung vẫn bật ──
     mode.send = "TOKEN";
+    const p1 = await sendMessengerPageText(PAGE, "psid-1", "Chào chị", { fetch: f });
+    assert.ok(!p1.ok && p1.error.includes("Đổi page") && !p1.error.includes(PAGE_TOKEN), `câu lỗi nói việc phải làm, không lộ token: ${JSON.stringify(p1)}`);
+    assert.equal((await status()).status, "ACTIVE", "page khác vẫn chạy — không hạ cả kết nối");
+    const pb = await pageBells();
+    assert.ok(pb.length === 1 && pb[0].severity === "critical" && pb[0].title.includes(PAGE) && !pb[0].body.includes(PAGE_TOKEN), JSON.stringify(pb));
+    const [row] = await db.select({ status: cp.status, lastError: cp.lastError }).from(cp).where(eq(cp.pageId, PAGE));
+    assert.ok(row?.status === "ACTIVE" && (row.lastError ?? "").includes("Gửi tin"), `trạng thái page do người chọn; sức khoẻ page ghi lỗi: ${JSON.stringify(row)}`);
+    await sendMessengerPageText(PAGE, "psid-1", "Chào chị", { fetch: f });
+    assert.equal((await pageBells()).length, 1, "cùng page cùng ngày ⇒ không báo lại");
+    assert.equal((await db.select().from(schema.auditLogs).where(eq(schema.auditLogs.action, "ORG_CONNECTION_AUTO_DRAFT"))).length, 0);
+
+    // ── Page CŨ dùng token của hàng kết nối đơn (không có hàng page) ⇒ kết nối về Nháp ──
+    await db.delete(cp).where(eq(cp.pageId, PAGE));
     const t1 = await sendMessengerPageText(PAGE, "psid-1", "Chào chị", { fetch: f });
-    assert.ok(!t1.ok && t1.error.includes("Đổi page") && !t1.error.includes(PAGE_TOKEN), `câu lỗi nói việc phải làm, không lộ token: ${JSON.stringify(t1)}`);
+    assert.ok(!t1.ok && t1.error.includes("Đổi page"), JSON.stringify(t1));
     const s1 = await status();
     assert.ok(s1.status === "DRAFT" && s1.ok === false && (s1.msg ?? "").includes("Đổi page") && !(s1.msg ?? "").includes(PAGE_TOKEN), JSON.stringify(s1));
     const b1 = await bells();
     assert.ok(b1.length === 1 && b1[0].severity === "critical" && b1[0].href === "/ai/sales-chatbot/messenger" && !b1[0].body.includes(PAGE_TOKEN), JSON.stringify(b1));
     const m1 = await inbox();
-    assert.ok(m1.length === 1 && m1[0].userId === u.id, "người cấu hình được kết nối nhận tin hộp thư");
+    assert.ok(m1.length === 2 && m1.every((m) => m.userId === u.id), "người cấu hình được kết nối nhận tin hộp thư (một cho page, một cho kết nối)");
     const aud = await db.select().from(schema.auditLogs).where(and(eq(schema.auditLogs.action, "ORG_CONNECTION_AUTO_DRAFT"), eq(schema.auditLogs.entityId, "facebook-messenger")));
     assert.ok(aud.length === 1 && aud[0].userId === null && aud[0].actorKind === "SYSTEM", JSON.stringify(aud));
 
@@ -154,7 +169,7 @@ export async function testMessengerHealth() {
     }
     await cleanup();
   }
-  console.log("✓ Messenger trực tiếp — token hỏng: lỗi Graph phân sáu loại (ngoài 24 giờ / khách chặn / chạm trần KHÔNG phải mất quyền); 190 ⇒ kết nối về Nháp kèm việc phải làm, MỘT chuông + tin hộp thư cho người cấu hình, nhật ký nhãn máy, không báo lại, token không lọt vào câu lỗi");
+  console.log("✓ Messenger trực tiếp — token hỏng: lỗi Graph phân sáu loại (ngoài 24 giờ / khách chặn / chạm trần KHÔNG phải mất quyền); 190 trên page có token riêng ⇒ báo ĐÚNG page (page khác vẫn chạy, trạng thái page do người chọn), page cũ dùng token kết nối đơn ⇒ kết nối về Nháp; MỘT chuông + tin hộp thư mỗi lần, nhật ký nhãn máy, không báo lại, token không lọt vào câu lỗi");
 }
 
 if (process.argv[1] && /messenger-health\.test\.ts$/.test(process.argv[1])) {

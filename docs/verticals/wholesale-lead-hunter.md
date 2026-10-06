@@ -346,6 +346,37 @@ Ghi chú nhanh có chip một chạm. Micro của bàn phím điện thoại v�
 giao hàng và khuyến mãi khai ở cấu hình. Câu AI chứa số, link hoặc email không có trong dữ kiện bị loại, và hệ thống dùng
 mẫu thay thế. Chi phí AI ghi vào sổ AI của nền tảng (`lead_hunter`), chịu hạn mức của gói.
 
+### 11a. Nhắn Zalo trước, gọi sau (chủ shop 06/10/2026)
+
+Khách mới có SĐT **di động** chưa ai thử Zalo nằm ở chip **«Cần nhắn Zalo»** (màn điện thoại) chứ không ở «Cần gọi».
+Nút «💬 Chép tin & mở Zalo» (hộp «Zalo · Gọi» trên danh sách, và màn một khách trên điện thoại) làm hai việc trong một cú
+bấm:
+
+1. chép tin chào sỉ đã cá nhân hoá vào bộ nhớ tạm;
+2. mở `https://zalo.me/0xxxxxxxxx` — app Zalo trên điện thoại hoặc Zalo PC.
+
+**Giới hạn của Zalo, nói thẳng:**
+
+- Link Zalo không điền sẵn được chữ, nên nhân viên giữ ngón tay ở ô chat → Dán.
+- ERP **không** biết trước số có Zalo hay không (Zalo không mở API tra số). App Zalo tự hiện hồ sơ hoặc báo «không tìm
+  thấy»; nhân viên quay lại bấm một trong ba kết quả `ZALO_RESULTS`.
+- Ảnh gửi bằng nút chia sẻ của điện thoại (`navigator.share` với tệp) → Zalo → chọn cuộc trò chuyện vừa mở. Ảnh phục vụ qua
+  `/api/wholesale/zalo-image/<số thứ tự>`: chỉ ảnh ĐÃ KHAI trong cấu hình, tải qua `fetchPublicUrl`, không phải proxy mở.
+
+| Kết quả | Trạng thái | Hẹn | `zalo_status` | Tính là liên hệ |
+|---|---|---|---|---|
+| Đã gửi tin Zalo | lead giai đoạn đầu ⇒ «Đã liên hệ» | GỌI 9 giờ sáng hôm sau nếu khách im | `FOUND` | có |
+| Đã gửi kết bạn | như trên | như trên | `FOUND` | có |
+| Không có Zalo | giữ nguyên | gọi NGAY (lên hàng «Cần gọi») | `NOT_FOUND` | không |
+
+Khách trả lời qua Zalo ⇒ ghi bằng chính chín kết quả của cuộc gọi, chọn kênh «Khách trả lời qua Zalo» (`channel = 'ZALO'`
+trên dòng `CALL`) — một luật trạng thái cho cả hai kênh. Số cố định / tổng đài không bao giờ có Zalo ⇒ đi thẳng hàng gọi.
+
+**Kịch bản** ở Cấu hình → «Kịch bản nhắn Zalo chào sỉ» (`outreach.zaloTemplate`), mỗi dòng một đoạn, dòng rỗng sau khi điền
+biến bị bỏ. Biến thêm so với lời chào: `{{ten_nv}}` (tên gọi của nhân viên đang nhắn), `{{gui_anh}}` (câu «em gửi vài hình…» CHỈ khi đã chọn ảnh) và `{{loi_ich}}` (một câu theo nhóm
+khách — cách diễn đạt, không phải dữ kiện về doanh nghiệp). Kịch bản mặc định không ghi giá. **Ảnh kèm** (`zaloImages`, tối
+đa 10, https) chọn từ ảnh sản phẩm hoặc dán link.
+
 ## 12. Quyền & phạm vi
 
 | Quyền | Dùng cho | Vai trò mặc định |

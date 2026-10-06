@@ -16,6 +16,7 @@ export const SYNC_JOB_LABEL: Record<string, string> = {
   ads_insights: "Chi tiêu quảng cáo Facebook",
   sepay_reconcile: "Đối chiếu giao dịch ngân hàng qua API SePay",
   "model-registry": "Đồng bộ sổ mẫu",
+  "sales-inbox-history": "Nhập lịch sử hội thoại vào hộp thư",
 };
 
 export function syncJobLabel(job: string) {

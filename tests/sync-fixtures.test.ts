@@ -472,11 +472,17 @@ import { testSalesReplay } from "./sales-replay.test";
 import { testSalesOperatingMode } from "./sales-operating-mode.test";
 import { testSalesInbox } from "./sales-inbox.test";
 import { testInboxAdvanced } from "./inbox-advanced.test";
+import { testSalesInboxHistory } from "./sales-inbox-history.test";
 import { testE2eAiSalesPlatform } from "./e2e-ai-sales-platform.test";
 import { testSalesExperimentReport } from "./sales-experiment-report.test";
 import { testCommerceAgent } from "./commerce-agent.test";
 import { testZaloOa } from "./zalo-oa.test";
 import { testSalesEvents } from "./sales-events.test";
+import { testOrderAttribution } from "./order-attribution.test";
+import { testLostReasons } from "./lost-reasons.test";
+import { testAiQuality } from "./ai-quality.test";
+import { testPancakePoll } from "./pancake-poll.test";
+import { testPageConfig } from "./page-config.test";
 import { testMetaAdsOrgSync } from "./meta-ads-org.test";
 import { testMetaAdsOrgWinners } from "./meta-ads-org-winners.test";
 import { testMetaAdsOrgPublish } from "./meta-ads-org-publish.test";
@@ -505,6 +511,7 @@ import { testConversationControl } from "./conversation-control.test";
 import { testConversationTrace } from "./conversation-trace.test";
 import { testMessengerHealth } from "./messenger-health.test";
 import { testConnectorsLegacy } from "./connectors-legacy.test";
+import { testMessengerMultiPage } from "./messenger-multipage.test";
 import { testPush } from "./push.test";
 import { testUserInvites } from "./user-invites.test";
 import { testPasswordReset } from "./password-reset.test";
@@ -2732,6 +2739,8 @@ async function main() {
   await testSalesInbox();
   // Hộp thư nâng cao: level khách · lọc · lịch sử giao · góp ý cho AI — tổ chức THẬT `hop-thu-nang-cao` (tự cấp, tự dọn).
   await testInboxAdvanced();
+  // Nhập đủ lịch sử hội thoại vào hộp thư (0221): tổ chức THẬT `hop-thu-lich-su`, Pancake giả, tự cấp, tự dọn.
+  await testSalesInboxHistory();
   // E2E trọn vòng: tin khách → AI → đơn → giao → Hiệu quả → mốc kích hoạt → sổ dùng → Owner Cockpit (tổ chức `e2e-shop`).
   await testE2eAiSalesPlatform();
   // AI vs người theo nhánh + drill-down về hội thoại (DoD #9, #15): tổ chức THẬT `xr-shop` / `xr-khac`.
@@ -2739,6 +2748,11 @@ async function main() {
   await testCommerceAgent();
   await testZaloOa();
   await testSalesEvents();
+  await testOrderAttribution();
+  await testLostReasons();
+  await testAiQuality();
+  testPancakePoll();
+  testPageConfig();
   await testMetaAdsOrgSync();
   // Sổ mẩu + mẫu thắng làm nguồn ảnh của tổ chức khách: tổ chức THẬT `ma-hslc-thang` (tự cấp, tự dọn).
   await testMetaAdsOrgWinners();
@@ -2774,6 +2788,7 @@ async function main() {
   // Messenger trực tiếp — token hỏng (Graph 190) ⇒ kết nối về Nháp + báo người một lần; lỗi ngoài 24 giờ không đụng kết nối.
   await testMessengerHealth();
   testConnectorsLegacy();
+  await testMessengerMultiPage();
   await testPush();
   // Mời người dùng qua liên kết (gap «Invite User»): tổ chức THẬT `ui-a` / `ui-b` / `ui-t` (tự cấp, tự dọn) + nhà — vai trò
   // hệ thống + tuỳ chỉnh ⇒ tài khoản đúng tổ chức, phiên đúng claim; dùng lại / hết hạn / thu hồi / chép chéo ⇒ một câu chung;

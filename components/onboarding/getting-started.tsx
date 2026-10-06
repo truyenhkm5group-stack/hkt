@@ -7,6 +7,7 @@ import type { SessionUser } from "@/lib/auth/session";
 import { getGettingStarted } from "@/lib/onboarding/progress";
 import { loadGoLive } from "@/lib/onboarding/go-live";
 import { GoLiveCard } from "@/components/onboarding/go-live-card";
+import { AiSalesToday } from "@/components/onboarding/ai-sales-today";
 import { cn } from "@/lib/utils";
 
 /**
@@ -29,6 +30,8 @@ export async function GettingStartedHome({ user }: { user: SessionUser }) {
           </Link>
         }
       />
+      {/* Câu hỏi đầu tiên của chủ shop dùng AI bán hàng (docs/product-audit.md P5). Tự ẩn khi chưa có số. */}
+      <AiSalesToday user={user} />
       {goLive.show ? (
         <SectionCard title="Vào việc ngay — chatbot trả lời khách trên fanpage" description="Ba bước, mỗi bước một nút. Bot đọc giá, tồn kho từ ERP và lên đơn nháp cho bạn duyệt.">
           <GoLiveCard view={goLive} />

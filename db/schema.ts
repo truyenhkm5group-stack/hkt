@@ -9690,6 +9690,44 @@ export const orgConnections = pgTable(
   ],
 );
 
+// ═══ NHIỀU PAGE DƯỚI MỘT KẾT NỐI (0220 · docs/messaging-providers.md §7) ═══
+//
+// `org_connections` giữ MỘT hàng mỗi loại kết nối (UNIQUE connector_key) ⇒ Messenger trực tiếp từng chỉ giữ được một page: nối
+// page B ghi đè page A. Bảng con này là các TÀI KHOẢN KÊNH (Facebook page · Instagram gắn với page) dưới một kết nối — mỗi page
+// một hàng, token mã hoá RIÊNG (AAD gắn tổ chức + kết nối + page, nên token của page này không giải được ở hàng page khác),
+// trạng thái người chọn (`status`), bật / tắt AI theo page, và sức khoẻ MÁY ghi (mốc tin gần nhất, lỗi gần nhất). Lỗi của page A
+// không đụng page B. Chỉ đọc / ghi qua lib/connectors/service.ts (cùng luật với org_connections). Tổ chức nối từ trước không có
+// hàng nào ⇒ đọc như cũ từ hàng kết nối đơn — không backfill.
+export const orgChannelPages = pgTable(
+  "org_channel_pages",
+  {
+    id: id(),
+    orgCode: text("org_code").notNull(),
+    connectorKey: text("connector_key").notNull(),
+    pageId: text("page_id").notNull(),
+    kind: text("kind").notNull().default("PAGE"),
+    /** Instagram: page Facebook mà tài khoản gắn vào. */
+    parentPageId: text("parent_page_id"),
+    name: text("name").notNull().default(""),
+    status: text("status").notNull().default("ACTIVE"),
+    aiEnabled: boolean("ai_enabled").notNull().default(true),
+    secretsEnc: bytea("secrets_enc"),
+    secretsKeyId: text("secrets_key_id"),
+    lastEventAt: ts("last_event_at"),
+    lastError: text("last_error"),
+    lastErrorAt: ts("last_error_at"),
+    connectedByUserId: text("connected_by_user_id"),
+    connectedByName: text("connected_by_name"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex("org_channel_pages_key").on(t.connectorKey, t.pageId),
+    check("org_channel_pages_status_check", sql`${t.status} in ('ACTIVE','DISABLED')`),
+    check("org_channel_pages_kind_check", sql`${t.kind} in ('PAGE','INSTAGRAM')`),
+  ],
+);
+
 // ═══ PHASE 7 — BLUEPRINT + MẪU NGÀNH (docs/platform/phase-7-contracts.md mục 3) ═══
 //
 // Sổ cài đặt của gói metadata trong CSDL tổ chức. `blueprint_items` giữ hai băm của phép so ba chiều X4: băm của mục
@@ -9926,12 +9964,18 @@ export const salesChatConversations = pgTable(
     /** 0212: lần cuối một NHÂN VIÊN mở hội thoại trong hộp thư — «chưa đọc» = tin khách mới hơn mốc này. */
     staffSeenAt: ts("staff_seen_at"),
     /**
-     * 0216: level khách (`lib/sales-chatbot/levels-shared.ts::CUSTOMER_LEVELS`) + SĐT khách của hội thoại — KẾT QUẢ ĐỌC do job làm
+     * 0217: level khách (`lib/sales-chatbot/levels-shared.ts::CUSTOMER_LEVELS`) + SĐT khách của hội thoại — KẾT QUẢ ĐỌC do job làm
      * mới (`refreshConversationLevels`) để lọc / đếm nhanh; `level_at` = lần tính gần nhất. Không phải nguồn sự thật.
      */
     customerLevel: text("customer_level"),
     customerPhone: text("customer_phone"),
     levelAt: ts("level_at"),
+    /**
+     * 0221 · NHẬP LỊCH SỬ (lib/sales-chatbot/history.ts): mốc tin MỚI NHẤT (mọi phía) đã nhập từ lịch sử kênh — tin khách tới
+     * mốc này là LỊCH SỬ, không phải «chờ trả lời»; và lần cuối lượt nhập đọc XONG hội thoại này.
+     */
+    historyUntil: ts("history_until"),
+    historyImportedAt: ts("history_imported_at"),
     /** Giỏ nháp của khung THỬ (không ghi đơn thật) + mốc tóm tắt đã đọc cho khách — lib/sales-chatbot/engine.ts. */
     state: jsonb("state").$type<Record<string, unknown>>().notNull().default({}),
     createdBy: text("created_by"),
@@ -10151,6 +10195,8 @@ export const salesChatInbound = pgTable(
     fromId: text("from_id"),
     /** Ảnh khách gửi trong tin (0195) — chờ bot đọc. Đọc xong ⇒ mô tả ghép vào `text`, cột về `NULL`. */
     imageUrls: jsonb("image_urls").$type<string[]>(),
+    /** 0216: dòng do LƯỢT NHẬP LỊCH SỬ ghi (lib/sales-chatbot/history.ts) — `NULL` = tin sống (webhook / quét lại). */
+    importedAt: timestamp("imported_at", { withTimezone: true }),
     createdAt: createdAt(),
   },
   (t) => [
@@ -10271,6 +10317,35 @@ export const salesReplayPoints = pgTable(
     createdAt: createdAt(),
   },
   (t) => [index("sales_replay_points_run_idx").on(t.runId), check("sales_replay_points_speaker_check", sql`${t.historicalSpeaker} IN ('BOT','SHOP','NONE')`)],
+);
+
+/**
+ * QUYẾT ĐỊNH RÀ LỖI AI (0219 · lib/sales-chatbot/quality.ts) — lớp GHI CHÚ của người lên một phát hiện TÍNH LÚC ĐỌC
+ * (`quality-shared.ts::scanConversation`). Không có dòng = «chờ rà»; phát hiện không lưu ở đâu cả (phép chiếu, AGENTS §19).
+ * Khoá tự nhiên (hội thoại, seq, loại): rà lại một phát hiện là SỬA dòng ấy, không đẻ dòng thứ hai. Người rà mang `users.id`
+ * + tên do máy chủ đọc (AGENTS §34).
+ */
+export const salesAiReviews = pgTable(
+  "sales_ai_reviews",
+  {
+    id: id(),
+    conversationId: text("conversation_id")
+      .notNull()
+      .references(() => salesChatConversations.id, { onDelete: "cascade" }),
+    messageSeq: integer("message_seq").notNull(),
+    kind: text("kind").notNull(),
+    status: text("status").notNull(),
+    note: text("note"),
+    reviewerUserId: text("reviewer_user_id"),
+    reviewerName: text("reviewer_name"),
+    reviewedAt: ts("reviewed_at").notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    uniqueIndex("sales_ai_reviews_key").on(t.conversationId, t.messageSeq, t.kind),
+    check("sales_ai_reviews_kind_check", sql`${t.kind} IN ('PRICE_UNGROUNDED','TOOL_ERROR','REPEATED_QUESTION')`),
+    check("sales_ai_reviews_status_check", sql`${t.status} IN ('CONFIRMED','DISMISSED')`),
+  ],
 );
 
 /**
@@ -10510,6 +10585,9 @@ export const wholesaleLeads = pgTable(
     email: text("email"),
     facebookUrl: text("facebook_url"),
     zaloUrl: text("zalo_url"),
+    /** Lời khai của nhân viên sau khi mở Zalo theo SĐT: FOUND · NOT_FOUND. NULL = chưa biết (ERP không tự tra được). */
+    zaloStatus: text("zalo_status"),
+    zaloCheckedAt: ts("zalo_checked_at"),
     nameKey: text("name_key"),
     provinceKey: text("province_key"),
     provinceLabel: text("province_label"),
@@ -10574,6 +10652,7 @@ export const wholesaleLeads = pgTable(
     ),
     check("wholesale_leads_enrichment_check", sql`${t.enrichmentStatus} IN ('PENDING_DETAILS','READY','FILTERED','DUPLICATE','FAILED')`),
     check("wholesale_leads_lost_check", sql`${t.contactStatus} <> 'LOST' OR length(btrim(coalesce(${t.lostReason}, ''))) >= 3`),
+    check("wholesale_leads_zalo_status_check", sql`${t.zaloStatus} IS NULL OR ${t.zaloStatus} IN ('FOUND','NOT_FOUND')`),
   ],
 );
 

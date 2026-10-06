@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { audit } from "@/lib/audit";
 import { can, requireUser } from "@/lib/auth/session";
 import { loadPerformanceSettings, savePerformanceSettings } from "@/lib/sales-chatbot/performance";
+import { reviewQualityFindingCore } from "@/lib/sales-chatbot/quality";
 import { SALES_CHATBOT_MANAGE } from "@/lib/sales-chatbot/settings";
 
 /**
@@ -29,4 +30,13 @@ export async function saveHumanCostAction(input: { humanCostPerConversationVnd: 
   });
   revalidatePath("/ai/sales-chatbot/performance");
   return { ok: true, message: value === null ? "Đã gỡ khai báo chi phí người" : "Đã lưu chi phí một hội thoại do người làm" };
+}
+
+/** Rà một phát hiện lỗi AI: «đúng là lỗi» / «không phải lỗi» (+ ghi chú). Lõi kiểm quyền + kiểm phát hiện còn tồn tại. */
+export async function reviewAiFindingAction(input: { conversationId: string; seq: number; kind: string; status: string; note?: string }): Promise<{ ok: true; message: string } | { error: string }> {
+  const user = await requireUser();
+  const r = await reviewQualityFindingCore(user, { conversationId: input?.conversationId, seq: input?.seq, kind: input?.kind, status: input?.status, note: input?.note ?? "" });
+  if ("error" in r) return r;
+  revalidatePath("/ai/sales-chatbot/quality");
+  return { ok: true, message: input.status === "CONFIRMED" ? "Đã ghi: đúng là lỗi" : "Đã ghi: không phải lỗi" };
 }

@@ -3,7 +3,7 @@ import { appOriginForHost, readOAuthToken } from "@/lib/auth/oauth";
 import { apiGuard } from "@/lib/auth/api-guard";
 import { can } from "@/lib/auth/session";
 import { sessionCookieSecure } from "@/lib/constants/session";
-import { MESSENGER_CONNECT_PATH, MESSENGER_CONNECT_TTL_SEC, MESSENGER_PAGES_COOKIE, MESSENGER_SETTINGS_PATH, MESSENGER_STATE_COOKIE, messengerRedirectUri, sealPendingPages } from "@/lib/integrations/messenger/connect";
+import { MESSENGER_CONNECT_PATH, MESSENGER_SETTINGS_PATH, MESSENGER_STATE_COOKIE, messengerRedirectUri, storePendingPages } from "@/lib/integrations/messenger/connect";
 import { messengerApp, pagesFromCode } from "@/lib/integrations/messenger/graph";
 import { connectMessengerPage } from "@/lib/sales-chatbot/messenger";
 
@@ -43,7 +43,7 @@ export async function GET(req: NextRequest) {
     const r = await connectMessengerPage(user, pages[0]);
     return "error" in r ? back(`loi=fb&msg=${encodeURIComponent(r.error.slice(0, 200))}`) : back("ok=1");
   }
-  const res = back("chon=1");
-  res.cookies.set(MESSENGER_PAGES_COOKIE, await sealPendingPages(user.organization.code, user.id, pages), { httpOnly: true, sameSite: "lax", secure, path: "/", maxAge: MESSENGER_CONNECT_TTL_SEC });
-  return res;
+  // Nhiều page ⇒ cho chọn (nhiều page một lượt). Danh sách + token lưu niêm phong ở máy chủ, không ở cookie (trần 4 KB).
+  await storePendingPages(user.organization.code, user.id, pages);
+  return back("chon=1");
 }

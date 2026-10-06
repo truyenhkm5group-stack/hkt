@@ -1520,6 +1520,34 @@
       "when": 1791173361000,
       "tag": "0217_sales_inbox_levels_feedback",
       "breakpoints": true
+    },
+    {
+      "idx": 218,
+      "version": "7",
+      "when": 1791173421000,
+      "tag": "0218_wholesale_zalo_first",
+      "breakpoints": true
+    },
+    {
+      "idx": 219,
+      "version": "7",
+      "when": 1791346101000,
+      "tag": "0219_sales_ai_reviews",
+      "breakpoints": true
+    },
+    {
+      "idx": 220,
+      "version": "7",
+      "when": 1791346161000,
+      "tag": "0220_org_channel_pages",
+      "breakpoints": true
+    },
+    {
+      "idx": 221,
+      "version": "7",
+      "when": 1791346221000,
+      "tag": "0221_sales_inbox_history",
+      "breakpoints": true
     }
   ]
 }

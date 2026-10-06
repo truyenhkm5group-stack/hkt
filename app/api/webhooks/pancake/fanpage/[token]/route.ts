@@ -7,6 +7,7 @@ import { withOrganization } from "@/lib/platform/context";
 import { resolveWebhookOrganization, WebhookAuthError } from "@/lib/platform/webhooks";
 import { parsePancakeWebhook, processFanpageThreadDebounced, receiveFanpageEvent, sweepStaleFanpageThreads } from "@/lib/sales-chatbot/fanpage";
 import { syncFanpageThreadWhenQuiet } from "@/lib/sales-chatbot/order-sync";
+import { markPancakeWebhook } from "@/lib/sales-chatbot/pancake-poll";
 
 export const dynamic = "force-dynamic";
 
@@ -33,6 +34,8 @@ export async function POST(request: NextRequest, context: { params: Promise<{ to
     const r = await receiveFanpageEvent(ev);
     after(
       await bindOrganization(async () => {
+        // Webhook đang chạy ⇒ đường API (pancake-poll-shared.ts) lùi về lưới an toàn. Ghi thưa, không ném.
+        await markPancakeWebhook(ev.pageId);
         if (r.queued) await processFanpageThreadDebounced(ev.pageId, ev.threadId);
         await sweepStaleFanpageThreads();
       }),
