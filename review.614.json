@@ -1,0 +1,8 @@
+{
+  "pr": 614,
+  "sha": "a5d0c1c5a313062354056829fec88910a88724a2",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-06T14:55:42.233Z",
+  "note": "Review độc lập PASS ở 135b2149 (cùng app ở mọi chỗ gọi, login không đổi, echo, config_id); a5d0c1c5 chỉ sửa nhãn /platform + chú thích install — gates xanh"
+}
