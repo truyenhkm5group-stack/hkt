@@ -1,0 +1,30 @@
+{
+  "schema": 1,
+  "mission_id": "saas-b-internal-special-cases",
+  "title": "Phase B: gỡ nhánh isHome thương mại — nhà đọc gói internal qua cùng đường khách ngoài, bài kiểm so trước/sau",
+  "business_goal": "",
+  "status": "READY",
+  "priority": "P1",
+  "risk": "HIGH",
+  "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "worker": null,
+  "worktree": null,
+  "branch": null,
+  "base_sha": null,
+  "domains": [],
+  "owned_paths": [
+    "lib/entitlements/",
+    "lib/pricing/entitlements.ts",
+    "lib/saas/entitlements.ts"
+  ],
+  "dependencies": [
+    "saas-platform-restructure"
+  ],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-06T17:03:21.073Z",
+  "updated_at": "2026-10-06T17:03:21.073Z",
+  "last_heartbeat": "2026-10-06T17:03:21.073Z",
+  "definition_of_done": []
+}
