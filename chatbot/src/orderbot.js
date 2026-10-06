@@ -25,10 +25,10 @@ const SWEEP_MS = 5 * 60 * 1000;
 // Mau chu luc chu shop chot cho tung page — ap MOT lan khi khoi dong neu page chua khai (sua lai trong cai dat page van
 // duoc, khong bi de lai). Chu shop 02/10/2026: "mặc định page này chạy Q005" (Linh Tây Luxury CS1).
 const PAGE_DEFAULT_PRODUCT_SEED = [{ page: "linh tay luxury cs1", code: "Q005" }];
-// Quet lai MOT lan cac hoi thoai co SDT cua page (chu shop 06/10/2026: "check cac don tren page nay don moi dien dung dia
+// Quet lai MOT lan cac hoi thoai co SDT 15 ngay qua cua page (chu shop 06/10/2026: "check cac don tren page nay don moi dien dung dia
 // chi san pham roi xac nhan"): hoi thoai trong `hours` gio qua chua xac nhan duoc kiem lai ngay -> dien don nhap, du dieu
 // kien thi tu xac nhan, thieu (vd khach chi ghi ten cua hang, khong co xa/huyen/tinh) thi sang "can duyet" kem ly do.
-const PAGE_RESCAN_ONCE = [{ id: "cs1-2026-10-06", page: "linh tay luxury cs1", hours: 7 * 24 }];
+const PAGE_RESCAN_ONCE = [{ id: "cs1-2026-10-06", page: "linh tay luxury cs1", hours: 15 * 24, max: 500 }];
 const khongDau = (s) => String(s || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/đ/g, "d").replace(/\s+/g, " ").trim();
 
 // Doi phien ban -> danh sach theo doi cu bi bo mot lan khi khoi dong (resetIfNeeded)
@@ -546,7 +546,7 @@ export class OrderBot {
     for (const [pid, client] of this.bot.clients) {
       if (!this.enabledFor(pid) || (onlyPageId && String(pid) !== String(onlyPageId))) continue;
       let last;
-      for (let trang = 0; trang < 20 && n < max; trang++) {
+      for (let trang = 0; trang < 40 && n < max; trang++) {
         const data = await client.getConversations({ type: "INBOX", order_by: "updated_at", last_conversation_id: last });
         const list = data.conversations || [];
         if (!list.length) break;
@@ -633,7 +633,7 @@ export class OrderBot {
           if (daQuet[r.id] || !cacTen.includes(r.page)) continue;
           daQuet[r.id] = Date.now();
           this._save();
-          const moi = await this.seed(r.hours, 300, pid);
+          const moi = await this.seed(r.hours, r.max || 300, pid);
           const lai = this.requeuePage(pid, r.hours, { unconfirmed: true });
           log.info(`[orderbot] quet lai page ${ten}: gieo ${moi} hoi thoai, kiem lai ${lai} muc chua xac nhan`);
           tong += lai;
