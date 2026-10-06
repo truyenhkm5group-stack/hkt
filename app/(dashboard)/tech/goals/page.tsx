@@ -34,7 +34,14 @@ export default async function TechGoalsPage({ searchParams }: { searchParams: Pr
             có con số nào được ghi tay. Agent chỉ tạo được bản nháp, không tự bật mục tiêu.
           </>
         }
-        actions={canManage ? activeProjects.length ? <GoalForm projects={activeProjects} /> : <SeedProjects /> : null}
+        actions={
+          canManage ? (
+            <div className="flex flex-wrap gap-2">
+              {activeProjects.length ? null : <SeedProjects />}
+              <GoalForm projects={activeProjects} />
+            </div>
+          ) : null
+        }
       />
       <TechNav />
 

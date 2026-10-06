@@ -40,6 +40,7 @@ import {
 } from "@/lib/tech/control-plane";
 import { createTechTask, setTechTaskStatus, type TechActor } from "@/lib/tech/service";
 import { techOverviewCounts } from "@/lib/queries/tech";
+import { canDispatchTask } from "@/lib/constants/agent-dispatch";
 
 /**
  * ═══════════ MẶT PHẲNG ĐIỀU KHIỂN CÔNG TY — GOAL · MISSION · NEEDS_OWNER (0225) ═══════════
@@ -140,6 +141,18 @@ export function testTechControlPlaneVocabulary() {
   const dsAiTech = /export const OWNER_ESCALATIONS = \[([^\]]+)\]/.exec(aiTech);
   assert.ok(dsAiTech, "không đọc được OWNER_ESCALATIONS của scripts/ai-tech.ts");
   assert.deepEqual(dsAiTech![1].split(",").map((x) => x.trim().replace(/"/g, "")).filter(Boolean), [...TECH_OWNER_ESCALATIONS], "hai danh sách lý do gọi chủ shop đã lệch nhau");
+  // Cổng giao việc (nút + cửa đọc của runner) chặn việc của sứ mệnh / mục tiêu không chạy — MỘT hàm thuần.
+  const giao = { code: "TECH-1", risk: "R0", status: "SPEC_READY", approvalRequired: false, approvalStatus: "NOT_REQUIRED", agentKey: "documentation", agentAllowedRisks: ["R0"], agentWriteGlobs: ["docs/**"] };
+  assert.ok(canDispatchTask({ ...giao, plan: null }).ok, "việc lẻ giao được");
+  assert.ok(canDispatchTask({ ...giao, plan: { missionCode: "MIS-1", missionStatus: "ACTIVE", goalCode: "GOAL-1", goalStatus: "ACTIVE" } }).ok);
+  for (const plan of [
+    { missionCode: "MIS-1", missionStatus: "PAUSED", goalCode: null, goalStatus: null },
+    { missionCode: "MIS-1", missionStatus: "CANCELLED", goalCode: null, goalStatus: null },
+    { missionCode: "MIS-1", missionStatus: "ACTIVE", goalCode: "GOAL-1", goalStatus: "ABANDONED" },
+  ]) {
+    const v = canDispatchTask({ ...giao, plan });
+    assert.ok(!v.ok && v.code === "PLAN", `sứ mệnh ${plan.missionStatus} / mục tiêu ${plan.goalStatus} ⇒ không giao`);
+  }
   // Đường vòng huỷ việc đã vào khâu deploy (qua NEEDS_OWNER) bị chặn ở dịch vụ — bảng chuyển vẫn cho NEEDS_OWNER → CANCELLED
   // nên luật nằm ở `setTechTaskStatus`; khối CSDL bên dưới đo nó.
   assert.ok(!/\bUPDATE\s+"tech_tasks"/i.test(MIGRATION), "migration KHÔNG được ghi lại dữ liệu việc cũ");
@@ -279,6 +292,8 @@ export async function testTechControlPlaneGoalsDb() {
     const vong = await setTechTaskStatus({ taskId: t3.id, to: "CANCELLED", note: "Thôi không làm nữa, huỷ cho gọn" }, chuShop);
     assert.ok("error" in vong && vong.error.includes("deploy"), "DEPLOYING → NEEDS_OWNER → CANCELLED là đường vòng huỷ thứ đã lên production — phải chặn");
     assert.ok("ok" in (await setTechTaskStatus({ taskId: t3.id, to: "FAILED", note: "Deploy treo, đánh dấu thất bại" }, chuShop)), "lối ra đúng là FAILED");
+    const vong2 = await setTechTaskStatus({ taskId: t3.id, to: "CANCELLED", note: "Giờ huỷ từ Thất bại cho gọn" }, chuShop);
+    assert.ok("error" in vong2, "đường vòng qua FAILED cũng không huỷ được việc đã từng vào deploy");
 
     // 2.7c Số "còn mở" của tổng quan bằng đúng tập TECH_TASK_OPEN — việc đã huỷ KHÔNG được đếm.
     const dem = await techOverviewCounts();

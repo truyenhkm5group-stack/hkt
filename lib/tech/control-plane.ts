@@ -114,6 +114,25 @@ async function resolveProjectId(db: DbLike, projectKeyOrId: string | null | unde
   return row.id;
 }
 
+/* ═════════════════════ SỨ MỆNH / MỤC TIÊU CỦA MỘT VIỆC ═════════════════════ */
+
+/**
+ * Trạng thái sứ mệnh + mục tiêu chứa việc — đầu vào `plan` của `canDispatchTask`. MỘT chỗ đọc cho mọi cửa giao
+ * việc (nút giao, cửa đọc của runner). `null` = việc lẻ.
+ */
+export async function loadTaskPlan(missionId: string | null | undefined): Promise<{ missionCode: string; missionStatus: string; goalCode: string | null; goalStatus: string | null } | null> {
+  if (!missionId) return null;
+  const db = await getDb();
+  const m = await db.query.techMissions.findFirst({
+    where: eq(schema.techMissions.id, missionId),
+    columns: { code: true, status: true },
+    with: { goal: { columns: { code: true, status: true } } },
+  });
+  // Sứ mệnh mất dấu (đã xoá) ⇒ rơi về phía HẸP: coi như không chạy.
+  if (!m) return { missionCode: "(mất dấu)", missionStatus: "MISSING", goalCode: null, goalStatus: null };
+  return { missionCode: m.code, missionStatus: m.status, goalCode: m.goal?.code ?? null, goalStatus: m.goal?.status ?? null };
+}
+
 /* ═════════════════════ DỰ ÁN ═════════════════════ */
 
 /**

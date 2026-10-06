@@ -310,20 +310,18 @@ export async function setTechTaskStatus(
     if (actor.kind !== "HUMAN") return { error: "Chỉ NGƯỜI huỷ được việc — máy và agent không tự bỏ việc được giao." };
     if (note.length < 10) return { error: "Huỷ việc thì phải nói vì sao (ít nhất một câu)." };
     /*
-      ĐƯỜNG VÒNG: DEPLOYING / OBSERVING không huỷ được (mã đã hoặc sắp nằm trên production), nên đi qua
-      "Cần chủ shop" cũng không được. Đọc khâu mà việc đã RỜI để vào NEEDS_OWNER — lối ra của nó là
-      FAILED / quay lui, không phải "huỷ".
+      VIỆC ĐÃ TỪNG VÀO KHÂU DEPLOY THÌ KHÔNG HUỶ ĐƯỢC — từ BẤT KỲ trạng thái nào. Bảng chuyển chặn đường thẳng
+      (DEPLOYING / OBSERVING ↛ CANCELLED), nhưng đường vòng qua NEEDS_OWNER / FAILED / BLOCKED vẫn mở ở bảng;
+      nên luật đọc NHẬT KÝ: đã có một lượt chuyển vào DEPLOYING là mã có thể đang chạy trên production, và
+      "huỷ" là nói dối. Lối ra đúng: FAILED (việc vẫn mở) hoặc quay lui.
     */
-    if (from === "NEEDS_OWNER") {
-      const [vao] = await db
-        .select({ prev: schema.techTaskEvents.previousValue })
-        .from(schema.techTaskEvents)
-        .where(and(eq(schema.techTaskEvents.taskId, input.taskId), eq(schema.techTaskEvents.kind, "STATUS"), eq(schema.techTaskEvents.nextValue, "NEEDS_OWNER")))
-        .orderBy(desc(schema.techTaskEvents.createdAt))
-        .limit(1);
-      if (vao && (vao.prev === "DEPLOYING" || vao.prev === "OBSERVING")) {
-        return { error: "Việc đã vào khâu deploy trước khi gọi chủ shop — mã có thể đang chạy trên production, không huỷ được. Đánh dấu thất bại / quay lui thay vì huỷ." };
-      }
+    const [daDeploy] = await db
+      .select({ id: schema.techTaskEvents.id })
+      .from(schema.techTaskEvents)
+      .where(and(eq(schema.techTaskEvents.taskId, input.taskId), eq(schema.techTaskEvents.kind, "STATUS"), eq(schema.techTaskEvents.nextValue, "DEPLOYING")))
+      .limit(1);
+    if (daDeploy) {
+      return { error: "Việc đã từng vào khâu deploy — mã có thể đang chạy trên production, không huỷ được. Để ở “Thất bại” (vẫn mở) hoặc quay lui thay vì huỷ." };
     }
   }
   /*
