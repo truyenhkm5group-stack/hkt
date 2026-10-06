@@ -78,3 +78,4 @@
 {"at":"2026-10-06T12:18:12.174Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#610 @ 8c1c115e798e · Review độc lập: BLOCK ở 1cb67f3f (id công cụ Gemini → Anthropic 400) → sửa → PASS ở 8c1c115e (5/5 điểm)"}
 {"at":"2026-10-06T12:18:33.994Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"ai-provider-failover","detail":"#610 @ 8c1c115e798e → 1d84fb13708c (MERGE_NOW · MEDIUM · gates success)"}
 {"at":"2026-10-06T12:19:21.797Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DEPLOY_DISPATCHED","detail":"1d84fb13708c · run 37462403157 https://github.com/truyenhkm5group-stack/hkt/actions/runs/37462403157"}
+{"at":"2026-10-06T12:22:17.608Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"ai-sales-reliability","detail":"feat/ai-sales-retry @ 14df84233d23 · 1 lệnh kiểm thử"}
