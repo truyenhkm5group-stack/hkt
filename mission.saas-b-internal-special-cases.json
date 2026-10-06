@@ -46,23 +46,18 @@
     "0227": "2026-10-06T17:10:33.541Z"
   },
   "created_at": "2026-10-06T17:03:21.073Z",
-  "updated_at": "2026-10-06T19:36:40.526Z",
-  "last_heartbeat": "2026-10-06T19:36:40.526Z",
+  "updated_at": "2026-10-06T21:05:50.685Z",
+  "last_heartbeat": "2026-10-06T21:05:50.685Z",
   "definition_of_done": [],
   "handoff": {
     "branch": "feat/saas-b-internal",
-    "sha": "798c4cff345fa903acfc982d2809e93224d03e82",
-    "at": "2026-10-06T19:36:40.526Z",
-    "actor": "DESKTOP-56TH98Y:wt-saas-b",
+    "sha": "2cd8896a6cf153ce889dd5b27a3bcaaf09e3ff99",
+    "at": "2026-10-06T21:05:50.685Z",
+    "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
     "title": "Phase B: gỡ nhánh isHome thương mại — nhà đọc gói internal qua cùng đường khách ngoài, bài kiểm so trước/sau",
-    "summary": "Sửa review #622: planKeyOf cột trống ở nhà ⇒ internal (an toàn khả dụng); billingLockApplies là vị từ chung cho cổng ghi + khung thanh toán /settings/plan; migration 0225 chưa renumber",
+    "summary": "",
     "tests": [
-      "npm run typecheck: sạch",
-      "npm run lint: sạch",
-      "npx eslint --max-warnings=0 (8 tệp sửa): sạch",
-      "npm test (sau commit, Bash): TẤT CẢ KIỂM THỬ ĐẠT",
-      "tests/saas-internal-plan.test.ts: 64 quyết định khớp cả khi cột plan của nhà NULL (trước 0225); khách trong tài khoản chargeback bị khoá có khung thanh toán + hạn mức tháng",
-      "đột biến: bỏ nhánh cột trống ⇒ đỏ; trang không theo billingLockApplies ⇒ đỏ; khung hạn mức bỏ vế thanh toán ⇒ đỏ"
+      "gates CI xanh trên 2cd8896a; delta = gộp main + 0225→0227 (migration:renumber)"
     ]
   }
 }
