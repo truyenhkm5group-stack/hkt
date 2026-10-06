@@ -18,3 +18,4 @@
 {"at":"2026-10-06T06:45:47.621Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DONE","mission":"master-mission","detail":"#598 squash e0646e4c vào main; production 183e7060 chứa nó; verify ĐẠT"}
 {"at":"2026-10-06T06:45:51.878Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"CLAIM","mission":"hotfix-messenger-discovery","detail":"RUNNING · 6 mẫu phạm vi · MEDIUM"}
 {"at":"2026-10-06T06:47:29.804Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"pancake-replacement","detail":"#602 @ 299be073bdb0 → 321f7e6d0db4 (MERGE_NOW · MEDIUM · gates success)"}
+{"at":"2026-10-06T07:07:34.095Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"hotfix-messenger-discovery","detail":"#603 @ ccaec293f394 → d9498d07f744 (MERGE_NOW · MEDIUM · gates success)"}

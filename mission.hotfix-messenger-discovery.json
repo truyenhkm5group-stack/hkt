@@ -3,7 +3,7 @@
   "mission_id": "hotfix-messenger-discovery",
   "title": "P0: Kết nối Facebook xong mà 0 page + AI hết tiền không ai được báo",
   "business_goal": "Kết nối Facebook nói đúng vì sao không có page, hỏi lại quyền; cảnh báo AI-down tới nhóm vận hành",
-  "status": "RUNNING",
+  "status": "INTEGRATING",
   "priority": "P0",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -24,10 +24,15 @@
     "pancake-replacement"
   ],
   "blocked_by": [],
-  "related_prs": [],
+  "related_prs": [
+    603
+  ],
   "migration_reservations": [],
   "created_at": "2026-10-06T06:45:51.804Z",
-  "updated_at": "2026-10-06T06:45:51.804Z",
+  "updated_at": "2026-10-06T07:07:34.067Z",
   "last_heartbeat": "2026-10-06T06:45:51.804Z",
-  "definition_of_done": []
+  "definition_of_done": [],
+  "evidence": {
+    "merged": "#603 → d9498d07f744ca40a54a24566c98778467b2bcbd"
+  }
 }
