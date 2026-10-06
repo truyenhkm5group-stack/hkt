@@ -130,3 +130,4 @@
 {"at":"2026-10-06T15:54:35.216Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"saas-platform-restructure","detail":"integ/saas-platform @ 196a36e8b2df · 1 lệnh kiểm thử"}
 {"at":"2026-10-06T16:07:49.591Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"VERIFY_PASS","mission":"pricing-billing-foundation","detail":"PASS 5529f717e87ae384747d6bf6a2e40fb904425e93 2026-10-06T16:07:46.873Z"}
 {"at":"2026-10-06T16:07:57.004Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DONE","mission":"pricing-billing-foundation","detail":"PR #612 chủ shop gộp (5529f717); deploy 37489937226 thành công, migration 0223 áp (224 dòng); verify ĐẠT. Tổ chức có sẵn grandfathered SOFT, trần cứng TẮT."}
+{"at":"2026-10-06T16:08:53.774Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"ai-sales-recovery","detail":"#613 @ 4f931e140e38 → a656a820dce7 (MERGE_NOW · MEDIUM · gates success)"}
