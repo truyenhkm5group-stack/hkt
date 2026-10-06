@@ -4901,6 +4901,12 @@ export const platformPlans = pgTable(
      * giảm. Giảm giá là quyết định kinh doanh nên nó là MỘT CỘT đọc được, không phải một phép nhân giấu trong mã (luật 38).
      */
     yearlyFreeMonths: integer("yearly_free_months").notNull().default(0),
+    /**
+     * Phần THƯƠNG MẠI của gói (0222 · docs/platform/pricing-billing-foundation.md): số ngày dùng thử, hiện ở /pricing không,
+     * «Liên hệ», hạn mức theo THÁNG (fanpage · hội thoại AI · tin AI · đơn), tính năng (entitlement), chính sách vượt, mức áp
+     * hạn mức. Đọc DUY NHẤT qua `lib/pricing/catalog.ts::parseCommercial` — ô thiếu = CHƯA KHAI (màn hình nói ra), không đoán.
+     */
+    commercial: jsonb("commercial").$type<Record<string, unknown>>().notNull().default({}),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
@@ -5068,8 +5074,20 @@ export const platformAiUsage = pgTable(
     actorId: text("actor_id"),
     /** Id dòng của miền sinh ra lượt (bản nháp AI, lượt Copilot) — để tra ngược, không mang nội dung. */
     ref: text("ref"),
+    /**
+     * KHOÁ SỰ KIỆN (0222): cùng tổ chức + cùng khoá ⇒ chỉ MỘT dòng. Lượt thử lại của cùng một lời gọi AI mang cùng khoá nên
+     * không bị tính tiền hai lần. `NULL` = nơi gọi chưa truyền khoá (dòng cũ, đường ghi chưa nối) — vẫn ghi như trước.
+     */
+    eventKey: text("event_key"),
+    /** Hội thoại khách sinh ra lượt (0222) — để tính chi phí AI / hội thoại chính xác. `NULL` = chưa biết. */
+    conversationId: text("conversation_id"),
+    /** `TEXT` · `VISION` (đọc ảnh khách gửi) · `IMAGE` (vẽ ảnh) — 0222. `NULL` = nơi gọi chưa khai. */
+    modality: text("modality"),
   },
   (t) => [
+    uniqueIndex("platform_ai_usage_org_event_key").on(t.orgCode, t.eventKey).where(sql`${t.eventKey} IS NOT NULL`),
+    check("platform_ai_usage_modality_check", sql`${t.modality} IS NULL OR ${t.modality} IN ('TEXT','VISION','IMAGE')`),
+    check("platform_ai_usage_event_key_check", sql`${t.eventKey} IS NULL OR length(${t.eventKey}) BETWEEN 1 AND 200`),
     index("platform_ai_usage_org_at_idx").on(t.orgCode, t.at),
     index("platform_ai_usage_at_idx").on(t.at),
     check("platform_ai_usage_source_check", sql`${t.billingSource} in ('BYOK','PLATFORM','HOME')`),
@@ -5306,13 +5324,39 @@ export const platformTenantUsageDaily = pgTable(
     botMessages: integer("bot_messages").notNull().default(0),
     aiActiveConversations: integer("ai_active_conversations").notNull().default(0),
     aiOrders: integer("ai_orders").notNull().default(0),
+    /** Fanpage đang hoạt động LÚC CHỤP (0222, `org_channel_pages` · ACTIVE · PAGE). `NULL` = CHƯA ĐO được — không phải 0. */
+    fanpagesActive: integer("fanpages_active"),
     capturedAt: ts("captured_at").notNull().defaultNow(),
   },
   (t) => [
     primaryKey({ name: "platform_tenant_usage_daily_pkey", columns: [t.day, t.orgCode] }),
     index("platform_tenant_usage_daily_org_day_idx").on(t.orgCode, t.day),
+    check("platform_tenant_usage_daily_fanpages_check", sql`${t.fanpagesActive} IS NULL OR ${t.fanpagesActive} >= 0`),
     check("platform_tenant_usage_daily_nonneg_check", sql`${t.conversationsStarted} >= 0 AND ${t.customerMessages} >= 0 AND ${t.botMessages} >= 0 AND ${t.aiActiveConversations} >= 0 AND ${t.aiOrders} >= 0`),
   ],
+);
+
+/**
+ * GHI ĐÈ GIÁ / TÍNH NĂNG / MỨC ÁP THEO TỔ CHỨC (0222 · lib/pricing/entitlements.ts) — mặt phẳng điều khiển, chỉ thật ở CSDL NHÀ.
+ *  · `grandfathered` — tổ chức có từ trước 0222: giữ ĐỦ tính năng bất kể gói khai gì (không ai mất tính năng vì một deploy).
+ *  · `feature_overrides` `{ <tính năng>: boolean }` · `quota_overrides` `{ <hạn mức>: số | null }` — ô có mặt thì thắng gói.
+ *  · `enforcement` — `OFF` (không nhắc) · `SOFT` (mặc định: nhắc, KHÔNG chặn) · `HARD` (chặn — chỉ khi công tắc trần cứng của
+ *    nền tảng cũng bật). Thiếu dòng = `SOFT`, không grandfathered. Chỉ `lib/pricing/admin.ts` ghi, bắt buộc lý do + nhật ký.
+ */
+export const platformOrgPricing = pgTable(
+  "platform_org_pricing",
+  {
+    orgCode: text("org_code").primaryKey(),
+    grandfathered: boolean("grandfathered").notNull().default(false),
+    featureOverrides: jsonb("feature_overrides").$type<Record<string, unknown>>().notNull().default({}),
+    quotaOverrides: jsonb("quota_overrides").$type<Record<string, unknown>>().notNull().default({}),
+    enforcement: text("enforcement").notNull().default("SOFT"),
+    reason: text("reason"),
+    updatedByEmail: text("updated_by_email"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [check("platform_org_pricing_enforcement_check", sql`${t.enforcement} IN ('OFF','SOFT','HARD')`)],
 );
 
 /** Nhật ký nền tảng: ai đổi module / cờ / tổ chức nào, trước → sau, vì sao. Chỉ THÊM. */

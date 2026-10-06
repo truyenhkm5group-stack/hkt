@@ -43,7 +43,7 @@ export type PublicSiteData = {
 };
 
 /** Gói có kèm credit AI dùng chung không — đọc `limits.ai.platformCreditUsdPerMonth`, thiếu / sai kiểu ⇒ không. */
-function planIncludesAi(raw: unknown): boolean {
+export function planIncludesAi(raw: unknown): boolean {
   if (!raw || typeof raw !== "object") return false;
   const ai = (raw as Record<string, unknown>).ai;
   if (!ai || typeof ai !== "object") return false;

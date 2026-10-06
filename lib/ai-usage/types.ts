@@ -29,6 +29,10 @@ export type AiUsageFeature = (typeof AI_USAGE_FEATURES)[number];
 
 export const AI_USAGE_FEATURE_LABEL: Record<AiUsageFeature, string> = { ai_builder: "AI Builder", copilot: "AI Copilot", sales_chatbot: "Chatbot bán hàng", sales_playbook: "Học từ hội thoại cũ", lead_hunter: "Lời chào khách sỉ", creative_image: "Vẽ ảnh quảng cáo", creative_copy: "Câu chữ quảng cáo" };
 
+/** Loại lượt (0222): chữ · đọc ảnh khách gửi · vẽ ảnh. `NULL` trong sổ = nơi gọi chưa khai. */
+export const AI_USAGE_MODALITIES = ["TEXT", "VISION", "IMAGE"] as const;
+export type AiUsageModality = (typeof AI_USAGE_MODALITIES)[number];
+
 export const AI_USAGE_STATUSES = ["OK", "ERROR", "BLOCKED_QUOTA"] as const;
 export type AiUsageStatus = (typeof AI_USAGE_STATUSES)[number];
 

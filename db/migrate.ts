@@ -93,4 +93,6 @@ export async function migrateOrganizationDb(db: Db, opts: { pool?: Pool }) {
   await db.execute(sql`delete from platform_messenger_pages`);
   // 0214 · mã xác minh SĐT khi đăng ký — mặt phẳng điều khiển, chỉ bản ở CSDL nhà là thật.
   await db.execute(sql`delete from platform_phone_otps`);
+  // 0222 · ghi đè giá / tính năng / mức áp theo tổ chức — mặt phẳng điều khiển, chỉ bản ở CSDL nhà là thật.
+  await db.execute(sql`delete from platform_org_pricing`);
 }
