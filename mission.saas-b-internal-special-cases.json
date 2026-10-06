@@ -36,7 +36,9 @@
     "saas-platform-restructure"
   ],
   "blocked_by": [],
-  "related_prs": [],
+  "related_prs": [
+    622
+  ],
   "migration_reservations": [
     "0227"
   ],
@@ -44,7 +46,7 @@
     "0227": "2026-10-06T17:10:33.541Z"
   },
   "created_at": "2026-10-06T17:03:21.073Z",
-  "updated_at": "2026-10-06T18:48:38.501Z",
+  "updated_at": "2026-10-06T18:51:58.616Z",
   "last_heartbeat": "2026-10-06T18:48:38.501Z",
   "definition_of_done": [],
   "handoff": {
