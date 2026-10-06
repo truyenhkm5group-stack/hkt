@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { after } from "next/server";
 import { MESSENGER_WEBHOOK_MAX_BODY_BYTES } from "@/lib/constants/webhook-limits";
 import { readBodyCapped } from "@/lib/http/body-limit";
-import { messengerApp, messengerVerifyToken, parseMessengerWebhook, verifyMessengerSignature } from "@/lib/integrations/messenger/graph";
+import { messengerVerifyToken, messengerWebhookSecrets, parseMessengerWebhook, verifyMessengerSignatureAny } from "@/lib/integrations/messenger/graph";
 import { bindOrganization } from "@/lib/platform/background";
 import { withOrganization } from "@/lib/platform/context";
 import { resolveWebhookOrganization, WebhookAuthError } from "@/lib/platform/webhooks";
@@ -13,7 +13,7 @@ export const dynamic = "force-dynamic";
 
 /**
  * Webhook MESSENGER TRỰC TIẾP của mọi tổ chức (0207 · lib/sales-chatbot/messenger.ts). Meta chỉ cho khai MỘT URL mỗi app, nên:
- *  1. chữ ký `X-Hub-Signature-256` bằng app secret của nền tảng — sai ⇒ 401, không đọc gì;
+ *  1. chữ ký `X-Hub-Signature-256` bằng app secret của nền tảng (app đăng nhập, và app Messenger riêng nếu đã khai) — sai ⇒ 401;
  *  2. mỗi sự kiện ⇒ tổ chức theo MÃ PAGE (`WEBHOOK_BINDINGS.MESSENGER`, PAGE_INDEX) — page chưa nối ⇒ bỏ qua sự kiện đó, không
  *     bao giờ rơi về tổ chức nhà;
  *  3. ghi tin rồi trả 200 ngay; gọi AI + Send API chạy SAU phản hồi trong đúng ngữ cảnh tổ chức (`bindOrganization`).
@@ -22,14 +22,16 @@ export const dynamic = "force-dynamic";
  * đếm + mã page — không nội dung tin, không token.
  */
 export async function POST(request: NextRequest) {
-  const app = messengerApp();
-  if (!app) return NextResponse.json({ ok: false, error: "Messenger chưa cấu hình" }, { status: 503 });
+  // App đăng nhập (đang chạy) + app Messenger riêng nếu đã khai (đang cấu hình thử) — gói của app nào cũng phải ký đúng secret
+  // của CHÍNH app đó; không khai secret nào ⇒ kênh chưa mở.
+  const secrets = messengerWebhookSecrets();
+  if (!secrets.length) return NextResponse.json({ ok: false, error: "Messenger chưa cấu hình" }, { status: 503 });
   const read = await readBodyCapped(request, MESSENGER_WEBHOOK_MAX_BODY_BYTES);
   if (!read.ok) {
     messengerWebhookLog("messenger_webhook_rejected", { reason: "BODY_TOO_LARGE" });
     return NextResponse.json({ ok: false, error: read.reason }, { status: 413 });
   }
-  if (!verifyMessengerSignature(read.text, request.headers.get("x-hub-signature-256"), app.appSecret)) {
+  if (!verifyMessengerSignatureAny(read.text, request.headers.get("x-hub-signature-256"), secrets)) {
     messengerWebhookLog("messenger_webhook_rejected", { reason: "SIGNATURE" });
     return NextResponse.json({ ok: false, error: "Sai chữ ký" }, { status: 401 });
   }

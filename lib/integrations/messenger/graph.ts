@@ -472,7 +472,29 @@ export function verifyMessengerSignature(raw: Uint8Array | string, header: strin
   return got.length === expected.length && timingSafeEqual(got, expected);
 }
 
-/** Mã xác minh khi khai webhook ở trang quản trị app Meta — DẪN XUẤT từ `AUTH_SECRET`, không phải biến môi trường thứ hai. */
+/**
+ * Các app secret được chấp nhận cho chữ ký webhook (HÀM THUẦN): app đăng nhập (đang chạy) + app Messenger riêng nếu đã khai —
+ * rỗng bị bỏ, trùng bị gộp. Meta ký MỖI gói bằng secret của app đã đăng ký webhook, nên cùng một URL nhận được gói của cả hai
+ * app trong lúc cấu hình thử app mới — gói của app lạ (không secret nào khớp) vẫn 401.
+ */
+export function webhookSecretsFrom(loginSecret: string | null | undefined, messengerSecret: string | null | undefined): string[] {
+  return [...new Set([loginSecret, messengerSecret].map((s) => (s ?? "").trim()).filter(Boolean))];
+}
+
+export function messengerWebhookSecrets(): string[] {
+  return webhookSecretsFrom(env.oauth.facebookAppSecret, env.oauth.facebookMessengerAppSecret);
+}
+
+/** Chữ ký hợp lệ với ÍT NHẤT MỘT secret được chấp nhận. Không secret nào ⇒ luôn sai. */
+export function verifyMessengerSignatureAny(raw: Uint8Array | string, header: string | null | undefined, secrets: readonly string[]): boolean {
+  return secrets.some((s) => verifyMessengerSignature(raw, header, s));
+}
+
+/**
+ * Mã xác minh khi khai webhook ở trang quản trị app Meta — DẪN XUẤT từ `AUTH_SECRET`, không phải biến môi trường thứ hai. Không
+ * gắn với app nào: app Messenger mới khai CÙNG mã này (không cần mã mới — mã chỉ mở bước bắt tay GET; an toàn của gói POST
+ * nằm ở chữ ký app secret).
+ */
 export function messengerVerifyToken(): string {
   return createHmac("sha256", env.authSecret).update("messenger-webhook-verify/v1").digest("base64url").slice(0, 32);
 }

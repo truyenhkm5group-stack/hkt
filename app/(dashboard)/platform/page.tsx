@@ -24,6 +24,8 @@ import { SIGNUP_MODE_LABEL } from "@/lib/onboarding/shared";
 import { phoneOtpSummary, readPhoneOtpSetting, homeZaloConnected } from "@/lib/onboarding/phone-otp";
 import { signupModeState } from "@/lib/onboarding/signup-mode";
 import { platformOperatorDenial } from "@/lib/platform-ui/module-toggle";
+import { env } from "@/lib/env";
+import { MESSENGER_FIELDS, messengerVerifyToken, messengerWebhookSecrets } from "@/lib/integrations/messenger/graph";
 import { PILOT_STAGE_LABEL } from "@/lib/constants/pilot";
 import { listOrgSupportSummaries } from "@/lib/platform/support";
 import { getPlatformHealth, type OrgHealth } from "@/lib/queries/platform-health";
@@ -120,6 +122,37 @@ export default async function PlatformPage({ searchParams }: { searchParams: Pro
           ))}
         </div>
       ) : null}
+
+      {/*
+        WEBHOOK MESSENGER / INSTAGRAM (một URL cho mọi cửa hàng) — chủ nền tảng khai ở app Meta («Messenger from Meta → Cài đặt API
+        Messenger»). Trang khung này nằm ở /platform vì tổ chức nhà TẮT module AI bán hàng (trang /ai/sales-chatbot/messenger không mở
+        được ở nhà). Secret không bao giờ in ra — chỉ «đã khai / chưa khai».
+      */}
+      <SectionCard title="Webhook Messenger / Instagram — khai ở app Meta" description="Một URL và một mã xác minh cho mọi cửa hàng; dùng chung cho app đăng nhập lẫn app Messenger riêng.">
+        <dl className="grid gap-2 px-1 text-sm sm:grid-cols-[13rem_1fr]">
+          <dt className="text-muted-foreground">Callback URL</dt>
+          <dd>
+            <code className="break-all text-xs">{`${env.appUrl}/api/webhooks/messenger`}</code>
+          </dd>
+          <dt className="text-muted-foreground">Verify token</dt>
+          <dd>
+            <code className="break-all text-xs" data-testid="platform-messenger-verify-token">
+              {messengerVerifyToken()}
+            </code>
+          </dd>
+          <dt className="text-muted-foreground">Trường đăng ký (page)</dt>
+          <dd className="text-xs">{MESSENGER_FIELDS.join(" · ")}</dd>
+          <dt className="text-muted-foreground">Secret app đăng nhập</dt>
+          <dd className="text-xs">{env.oauth.facebookAppSecret ? "Đã khai (đang dùng cho nối page + gửi tin)" : "Chưa khai"}</dd>
+          <dt className="text-muted-foreground">App Messenger riêng</dt>
+          <dd className="text-xs">
+            {env.oauth.facebookMessengerAppId ? `App ID ${env.oauth.facebookMessengerAppId}` : "Chưa khai App ID"} ·{" "}
+            {env.oauth.facebookMessengerAppSecret ? "secret đã khai — webhook nhận gói ký bằng app này" : "secret chưa khai — gói của app này sẽ bị 401"}
+          </dd>
+          <dt className="text-muted-foreground">Chữ ký được chấp nhận</dt>
+          <dd className="text-xs">{messengerWebhookSecrets().length} app secret</dd>
+        </dl>
+      </SectionCard>
 
       <SectionCard title="Tổ chức & sức khoẻ" description={health.journalNote ?? "Kết nối · migration · bảng platform_* · cấu hình module"} padded={false}>
         {health.organizations.length === 0 ? (
