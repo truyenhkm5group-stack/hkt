@@ -1865,6 +1865,19 @@ export function leaseDecision(cur: Lease | null, op: LeaseOp, me: LeaseClaimant,
 
 /* ── Số hiệu migration ── */
 
+/**
+ * Nhả MỘT số migration đang giữ chỗ — HÀM THUẦN. Chỉ được nhả số mà sứ mệnh ĐANG giữ; lý do là bắt buộc (vào nhật ký sổ).
+ * Dùng khi việc ưu tiên cao hơn phải gộp trước một số do việc thấp hơn giữ mà chưa có PR (06/10/2026: #607 P0 dùng 0222,
+ * pricing-billing-foundation P1 giữ 0222) — giữ chỗ chống hai phiên cùng lấy một số, không phải quyền ưu tiên vĩnh viễn.
+ */
+export function releaseReservationDecision(e: RegistryEntry | null, n: string, reason: string): { ok: true } | { ok: false; why: string } {
+  if (!/^\d{4}$/.test(n)) return { ok: false, why: `số migration "${n}" phải là 4 chữ số` };
+  if (!reason.trim()) return { ok: false, why: "--reason=… bắt buộc: nhả số của sứ mệnh khác phải để lại lý do trong sổ" };
+  if (!e) return { ok: false, why: "sứ mệnh không có trong sổ" };
+  if (!e.migration_reservations.includes(n)) return { ok: false, why: `${e.mission_id} không giữ số ${n} (đang giữ: ${e.migration_reservations.join(", ") || "không"})` };
+  return { ok: true };
+}
+
 export function migrationNumberOf(file: string): string | null {
   const m = /(?:^|\/)(\d{4})_[^/]+\.sql$/.exec(file.replace(/\\/g, "/"));
   return m ? m[1] : null;
@@ -3742,7 +3755,29 @@ async function cmdMigration(ctx: RepoCtx, op: string | undefined, flags: Set<str
     out("  đặt tên tệp drizzle/<số>_<tên>.sql; lúc tích hợp vẫn chạy `npm run migration:renumber` nếu main đã đi tiếp (giữ chỗ chỉ chống hai phiên cùng lấy một số)");
     return r.startsWith("✓") ? 0 : 1;
   }
-  if (op !== "check") throw new UsageError("migration next | reserve --mission=<mã> | check [--pr=<số>] [--github]");
+  if (op === "release") {
+    // CHỈ Delivery Controller (khoá integration-lead, đúng mã phiên): nhả số của sứ mệnh khác là quyết định thứ tự tích hợp.
+    const id = mustMission(values.get("mission"));
+    const n = values.get("number") ?? "";
+    const reason = values.get("reason") ?? "";
+    requireIntegrationLead(ctx, readControl(ctx, { fetch: !flags.has("offline") }), flags, values);
+    const r = mutateControl(ctx, controlActor(ctx), (st) => {
+      const e = st.entries.find((x) => x.mission_id === id) ?? null;
+      const d = releaseReservationDecision(e, n, reason);
+      if (!d.ok || !e) return { change: null, result: `✗ ${d.ok ? "sứ mệnh không có trong sổ" : d.why}` };
+      const at = new Date().toISOString();
+      const reservedAt = { ...(e.migration_reserved_at ?? {}) };
+      delete reservedAt[n];
+      const next: RegistryEntry = { ...e, migration_reservations: e.migration_reservations.filter((x) => x !== n), migration_reserved_at: reservedAt, updated_at: at };
+      return {
+        change: { put: { [entryFile(id)]: entryJson(next) }, events: [{ kind: "MIGRATION_RELEASED", mission: id, detail: `${n} — ${reason.trim()}` }], message: `nhả giữ chỗ migration ${n} của ${id}` },
+        result: `✓ đã nhả ${n} của ${id} — sứ mệnh đó lấy số mới bằng \`migration reserve\` hoặc \`npm run migration:renumber\` lúc tích hợp`,
+      };
+    });
+    out(r);
+    return r.startsWith("✓") ? 0 : 1;
+  }
+  if (op !== "check") throw new UsageError("migration next | reserve --mission=<mã> | release --mission=<mã> --number=<số> --reason=… --token=… | check [--pr=<số>] [--github]");
   const st = readControl(ctx, { fetch: !flags.has("offline") });
   if (!st.fetched && !flags.has("offline")) out(`! không đọc được sổ giữ chỗ (${st.fetchError ?? "?"}) — chỉ so với main và PR`);
   const reservations = openReservations(st.entries);
@@ -4234,7 +4269,7 @@ MẶT PHẲNG ĐIỀU KHIỂN XUYÊN SỨ MỆNH — docs/ai-tech-room/delivery-
                                                          khép + nhả phạm vi / giữ chỗ; DONE đòi bằng chứng đã vào main + verify ĐẠT
   npm run ai -- lease acquire|renew|release|status [integration-lead|tech-lead] [--ttl=phút] [--purpose=…] [--token=…|--resume]
                                                          MỘT chủ gộp/deploy tại một thời điểm (nhãn máy:cây + MÃ PHIÊN); hết hạn là nhả
-  npm run ai -- migration next | reserve --mission=<mã> | check [--pr=<số>] [--github]
+  npm run ai -- migration next | reserve --mission=<mã> | release --mission=<mã> --number=<số> --reason=… --token=… | check [--pr=<số>] [--github]
                                                          giữ chỗ số migration xuyên phiên; check đỏ khi va số với main / PR mở trước / giữ chỗ
   npm run ai -- queue [--json]                           HÀNG ĐỢI GỘP: phụ thuộc · cổng · xung đột · rủi ro ⇒ gộp lô nào, việc nào đi riêng
   npm run ai -- review <PR> --sha=<đầu nhánh> --verdict=PASS|FAIL [--note=…]

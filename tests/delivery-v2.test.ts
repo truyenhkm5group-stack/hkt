@@ -630,6 +630,18 @@ async function testVongDoi() {
     const chk2 = await ai(B, "migration", "check");
     assert.equal(chk2.code, 0, chk2.text);
 
+    // ── Nhả giữ chỗ: việc ưu tiên cao gộp trước một số do việc thấp hơn giữ (06/10/2026: #607 P0 dùng 0222 do P1 giữ) ──
+    const tuNha = await ai(A, "migration", "release", "--mission=m-a", "--number=0002", "--reason=thu");
+    assert.equal(tuNha.code, 1, "không cầm khoá Lead ⇒ không nhả được số của ai");
+    assert.match(tuNha.text, /Delivery Controller/);
+    assert.notEqual((await ai(B, "migration", "release", "--mission=m-a", "--number=0002", "--resume")).code, 0, "thiếu lý do ⇒ từ chối");
+    assert.notEqual((await ai(B, "migration", "release", "--mission=m-a", "--number=0009", "--resume", "--reason=x")).code, 0, "số sứ mệnh không giữ ⇒ từ chối");
+    const nha = await ai(B, "migration", "release", "--mission=m-a", "--number=0002", "--resume", "--reason=P0 gộp trước");
+    assert.equal(nha.code, 0, nha.text);
+    const sauNha = readControl(openRepo(B), { fetch: true });
+    assert.ok(!sauNha.entries.find((e) => e.mission_id === "m-a")?.migration_reservations.includes("0002"), "số đã nhả không còn trong giữ chỗ");
+    assert.ok(sauNha.events.some((e) => e.kind === "MIGRATION_RELEASED" && /0002 — P0 gộp trước/.test(e.detail)), "nhật ký sổ ghi số + lý do");
+
     // ── Phục hồi: phiên mới không có gì trong bộ nhớ ⇒ đọc lại toàn bộ từ remote ──
     g(B, "update-ref", "-d", "refs/remotes/origin/ai-control/registry");
     const off = await ai(B, "board", "--offline");
