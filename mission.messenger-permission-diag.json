@@ -3,7 +3,7 @@
   "mission_id": "messenger-permission-diag",
   "title": "Kết nối Facebook: phân biệt 7 nguyên nhân, hiện quyền đã cấp/thiếu, hồ sơ kỹ thuật Meta App Review",
   "business_goal": "",
-  "status": "RUNNING",
+  "status": "PR_READY",
   "priority": "P0",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -24,7 +24,22 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-06T10:00:10.623Z",
-  "updated_at": "2026-10-06T10:00:10.623Z",
-  "last_heartbeat": "2026-10-06T10:00:10.623Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-06T11:30:42.002Z",
+  "last_heartbeat": "2026-10-06T11:30:42.002Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "feat/messenger-permission-diag",
+    "sha": "31cd39f69f6fa3485c21962fb93966ffa6ee3451",
+    "at": "2026-10-06T11:30:42.002Z",
+    "actor": "DESKTOP-56TH98Y:wt-messenger-diag",
+    "title": "Kết nối Facebook: phân biệt 7 nguyên nhân, hiện quyền đã cấp/thiếu, hồ sơ kỹ thuật Meta App Review",
+    "summary": "Nối Facebook Page tách 7 lý do (DECLINED · NOT_IN_APP qua /{app}/roles · NEEDS_APP_REVIEW · NO_MESSAGING_TASK · NO_PAGES · webhook subscribed_apps · TOKEN_EXPIRED qua debug_token); trang Messenger hiện danh sách quyền + hướng xử lý + kiểm webhook theo page; docs/meta-app-review/",
+    "tests": [
+      "npm run typecheck: sạch",
+      "npm run lint: sạch",
+      "npm test (2 lượt, sau commit): TẤT CẢ KIỂM THỬ ĐẠT",
+      "npm run build: thành công",
+      "tsx tests/messenger-discovery.test.ts: ĐẠT"
+    ]
+  }
 }
