@@ -3,19 +3,33 @@
   "mission_id": "saas-b-internal-special-cases",
   "title": "Phase B: gỡ nhánh isHome thương mại — nhà đọc gói internal qua cùng đường khách ngoài, bài kiểm so trước/sau",
   "business_goal": "",
-  "status": "READY",
+  "status": "RUNNING",
   "priority": "P1",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
   "worker": null,
   "worktree": null,
-  "branch": null,
-  "base_sha": null,
+  "branch": "feat/saas-b-internal",
+  "base_sha": "0b5ec24f7a92b6ab49ffd64e79b523afc9d78fff",
   "domains": [],
   "owned_paths": [
-    "lib/entitlements/",
+    "lib/entitlements/check.ts",
     "lib/pricing/entitlements.ts",
-    "lib/saas/entitlements.ts"
+    "lib/pricing/features.ts",
+    "lib/pricing/customer.ts",
+    "lib/saas/policy.ts",
+    "lib/platform/organizations.ts",
+    "lib/saas/customers.ts",
+    "app/(dashboard)/platform/page.tsx",
+    "app/(dashboard)/settings/plan/page.tsx",
+    "drizzle/0225_internal_plan_binding.sql",
+    "drizzle/meta/_journal.json",
+    "tests/migration-upgrade-path.test.ts",
+    "tests/saas-internal-plan.test.ts",
+    "tests/sync-fixtures.test.ts",
+    "tests/pricing-billing.test.ts",
+    "docs/saas/ENTITLEMENTS.md",
+    "docs/saas/PLAN.md"
   ],
   "dependencies": [
     "saas-platform-restructure"
@@ -29,7 +43,7 @@
     "0227": "2026-10-06T17:10:33.541Z"
   },
   "created_at": "2026-10-06T17:03:21.073Z",
-  "updated_at": "2026-10-06T17:10:33.541Z",
-  "last_heartbeat": "2026-10-06T17:03:21.073Z",
+  "updated_at": "2026-10-06T17:16:38.155Z",
+  "last_heartbeat": "2026-10-06T17:16:38.155Z",
   "definition_of_done": []
 }
