@@ -82,6 +82,11 @@ const JOBS = [
   */
   { job: "sales-followup", every: 5, offset: 4 },
   /*
+    GIÁM SÁT AI BÁN HÀNG (sau sự cố P0 06/10/2026) — CHỈ FAN-OUT tự động hoá, mỗi 5 phút, lệch pha 2 phút so với follow-up để hai
+    lượt không chồng nhau. Nhà TẮT module AI bán hàng nên không có lượt của nhà. Chỉ đọc + báo khi trạng thái xấu đi.
+  */
+  { job: "sales-health", every: 5, offset: 2 },
+  /*
     GỬI LẠI TIN NHÓM HỎNG VÌ MẠNG (0186 — chủ shop yêu cầu sửa 01/10/2026) — mỗi 2 phút (mốc gửi lại đầu tiên là 2 phút);
     có lượt của nhà và fan-out tự động hoá cho tổ chức khách. Không tin nào chờ ⇒ một câu truy vấn.
   */

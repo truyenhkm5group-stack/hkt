@@ -10197,12 +10197,21 @@ export const salesChatInbound = pgTable(
     imageUrls: jsonb("image_urls").$type<string[]>(),
     /** 0216: dòng do LƯỢT NHẬP LỊCH SỬ ghi (lib/sales-chatbot/history.ts) — `NULL` = tin sống (webhook / quét lại). */
     importedAt: timestamp("imported_at", { withTimezone: true }),
+    /**
+     * 0222 — THỬ LẠI + DEAD-LETTER (sau sự cố P0 06/10/2026, lib/sales-chatbot/inbound-retry.ts): số lượt xử lý đã hỏng, mốc
+     * được thử lại sớm nhất (lùi dần 2 · 4 · 8 phút), câu lỗi cuối. `status = 'DEAD'` = tin khách bot KHÔNG trả lời được (AI
+     * hỏng · gửi hỏng · hết lượt thử) — việc của người, hiện ở cockpit; trước đây chúng bị chốt `DONE` lẫn với tin đã xử lý.
+     */
+    attempts: integer("attempts").notNull().default(0),
+    nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true }),
+    lastError: text("last_error"),
     createdAt: createdAt(),
   },
   (t) => [
     uniqueIndex("sales_chat_inbound_message_key").on(t.messageId),
     index("sales_chat_inbound_thread_idx").on(t.pageId, t.threadId, t.status),
-    check("sales_chat_inbound_status_check", sql`${t.status} IN ('PENDING','DONE','SKIPPED')`),
+    index("sales_chat_inbound_created_idx").on(t.createdAt),
+    check("sales_chat_inbound_status_check", sql`${t.status} IN ('PENDING','DONE','SKIPPED','DEAD')`),
     check("sales_chat_inbound_kind_check", sql`${t.kind} IN ('INBOX','COMMENT')`),
   ],
 );

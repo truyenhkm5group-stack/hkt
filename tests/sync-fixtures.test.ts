@@ -517,6 +517,8 @@ import { testMessengerLifecycle } from "./messenger-lifecycle.test";
 import { testMessengerDiscovery } from "./messenger-discovery.test";
 import { testMessengerWebhookSecrets } from "./messenger-webhook-secrets.test";
 import { testSalesAiDownAlert } from "./sales-ai-down-alert.test";
+import { testAiSalesHealth } from "./ai-sales-health.test";
+import { testAiSalesRetry } from "./ai-sales-retry.test";
 import { testAiProviderFailover } from "./ai-provider-failover.test";
 import { testMessengerMultiPage } from "./messenger-multipage.test";
 import { testPush } from "./push.test";
@@ -2808,6 +2810,10 @@ async function main() {
   // App Meta riêng cho Messenger (cấu hình thử): bắt tay GET + chữ ký của hai app + đường đưa secret lên máy chủ.
   await testMessengerWebhookSecrets();
   testSalesAiDownAlert();
+  // Giám sát AI bán hàng (sau sự cố P0 06/10/2026): sự cố hết tiền phải ĐỎ đúng nguyên nhân, báo một lần mỗi khung.
+  await testAiSalesHealth();
+  // Thử lại có lùi dần + dead-letter + không trả lời trùng (đường fanpage thật, Pancake giả).
+  await testAiSalesRetry();
   // Khoá AI chính → khoá dự phòng → người (sự cố 06/10/2026): phân loại · ngắt mạch · không gửi trùng — tổ chức THẬT
   // `fo-ai-failover`, provider giả.
   await testAiProviderFailover();
