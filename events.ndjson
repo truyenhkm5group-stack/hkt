@@ -206,3 +206,4 @@
 {"at":"2026-10-06T21:05:50.716Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"saas-b-internal-special-cases","detail":"feat/saas-b-internal @ 2cd8896a6cf1 · 1 lệnh kiểm thử"}
 {"at":"2026-10-06T21:06:02.671Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#622 @ 2cd8896a6cf1 · PASS @798c4cff + delta tích hợp: gộp main, 0225→0227, số trần trong tài liệu/SQL/test đổi theo; gates xanh"}
 {"at":"2026-10-06T21:08:38.494Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"saas-a-vnx-runtime","detail":"#621 @ 4b6e3191e478 → 657fb7327a61 (MERGE_ISOLATED · HIGH · gates success)"}
+{"at":"2026-10-06T21:09:29.090Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DEPLOY_DISPATCHED","detail":"657fb7327a61 · run 37531822071 https://github.com/truyenhkm5group-stack/hkt/actions/runs/37531822071"}
