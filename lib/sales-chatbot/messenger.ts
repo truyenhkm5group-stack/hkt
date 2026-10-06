@@ -27,6 +27,7 @@ import {
   MEDIA_ONLY_TEXT,
   normalizeEcho,
   noteCustomerArrived,
+  noteCustomerAd,
   mirrorFanpageContext,
   OBSERVE_HUMAN_ARM_NOTE,
   OBSERVE_NOTE,
@@ -294,6 +295,13 @@ export async function receiveMessengerEvent(ev: MessengerEvent, now: Date = new 
   if (transportOwnerOf(await loadTransportFacts(), ev.pageId) === "PANCAKE") return { queued: false, reason: PANCAKE_OWNS_PAGE_REASON };
   const db = await getDb();
   const t = schema.salesChatInbound;
+  // 0225: quảng cáo dẫn KHÁCH vào hội thoại — ghi lên hội thoại (đường phụ, không làm hỏng lượt nhận). Sự kiện CHỈ mang quảng
+  // cáo (messaging_referrals) dừng ở đây: nó không phải tin nhắn, bot không trả lời nó.
+  if (ev.referralOnly) {
+    if (ev.adReferral) await noteCustomerAd(ev.pageId, ev.psid, ev.adReferral, ev.at ?? now);
+    return { queued: false, reason: "Khách bấm quảng cáo — đã ghi mã quảng cáo lên hội thoại, không phải tin nhắn" };
+  }
+  if (!ev.isEcho && !ev.comment && ev.adReferral) await noteCustomerAd(ev.pageId, ev.psid, ev.adReferral, ev.at ?? now);
   if (ev.isEcho) {
     // Tin nhân viên gửi từ hộp thư ERP đi qua CHÍNH app nền tảng ⇒ phải bắt trước nhánh «mã app = bot», không thì thành tin bot.
     const [staffEcho] = await db.select({ id: t.id }).from(t).where(erpStaffEchoCond(ev.pageId, ev.psid, normalizeEcho(ev.text), now)).limit(1);

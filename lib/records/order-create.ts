@@ -125,6 +125,12 @@ export type AgentOrderOptions = {
    * Chài 04/10/2026: «Hàng sẽ được fill-in liên tục nên cứ chốt đơn mà không cần check tồn kho»). Mặc định kiểm như TD-02.
    */
   allowShortStock?: boolean;
+  /**
+   * 0225 · mã mẩu quảng cáo Meta đã dẫn khách vào hội thoại sinh ra đơn này (`lib/sales-chatbot/ad-referral.ts::chatOrderAdId`,
+   * trong cửa sổ quy kết). CHỈ ghi lúc TẠO (`orders.ad_id`); lượt sửa đơn không đọc trường này. MÁY CHỦ quyết — không bao giờ
+   * nhận từ client hay từ AI.
+   */
+  adId?: string | null;
 };
 
 /** Người hay máy đang ghi — MỘT hình cho ba lượt ghi, để nhật ký / sự kiện / lời khai gốc nói cùng một điều. */
@@ -487,7 +493,7 @@ async function createOrder(w: Writer, rawInput: unknown, agentOpts?: AgentOrderO
         }
       }
       if (agentOpts && !agentOpts.allowShortStock && p.stage === "CONFIRMED") await assertAgentStock(tx, p, []);
-      await tx.insert(schema.orders).values({ id, ...orderColumns(p, w, key ? { agentKey: key } : {}), insertedAt: now, lastUpdateStatusAt: now, syncedAt: now });
+      await tx.insert(schema.orders).values({ id, ...orderColumns(p, w, key ? { agentKey: key } : {}), ...(agentOpts?.adId ? { adId: agentOpts.adId } : {}), insertedAt: now, lastUpdateStatusAt: now, syncedAt: now });
     await tx.insert(schema.orderItems).values(itemRows(id, p));
     await tx.insert(schema.orderStatusHistory).values({ orderId: id, status: MANUAL_ORDER_STATUS_CODE[p.stage], oldStatus: null, editorName: w.name, updatedAt: now });
       if (p.stage === "CONFIRMED") await emitOrderEvent(tx, w, "order.confirmed", id, `order.confirmed:${id}`, { stage: p.stage, wasConfirmed: false, changes: [] });

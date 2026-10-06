@@ -479,6 +479,7 @@ import { testSalesExperimentReport } from "./sales-experiment-report.test";
 import { testCommerceAgent } from "./commerce-agent.test";
 import { testZaloOa } from "./zalo-oa.test";
 import { testSalesEvents } from "./sales-events.test";
+import { testChatAdAttribution } from "./chat-ad-attribution.test";
 import { testOrderAttribution } from "./order-attribution.test";
 import { testLostReasons } from "./lost-reasons.test";
 import { testAiQuality } from "./ai-quality.test";
@@ -2762,6 +2763,8 @@ async function main() {
   await testCommerceAgent();
   await testZaloOa();
   await testSalesEvents();
+  // Quảng cáo dẫn khách vào hội thoại ⇒ đơn bot mang ad_id (0225) — tổ chức THẬT `chat-ad-attr`, tự dọn.
+  await testChatAdAttribution();
   await testOrderAttribution();
   await testLostReasons();
   await testAiQuality();
