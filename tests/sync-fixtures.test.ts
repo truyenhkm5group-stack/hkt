@@ -566,6 +566,7 @@ import { testPlatformNoDb } from "./platform-no-db.test";
 import { testPlatformProcessIsolation } from "./platform-process-isolation.test";
 import { testPlatformJobs } from "./platform-jobs.test";
 import { testGSched } from "./g-sched.test";
+import { testSaasVnxRuntime } from "./saas-vnx-runtime.test";
 
 async function main() {
   await ensureMigrated();
@@ -2857,6 +2858,9 @@ async function main() {
   await testPlatformJobs();
   // G-SCHED: luật tự động của tổ chức khách tự chạy qua fan-out tuần tự (mã `gs-`, tự cấp và tự dọn); nhà giữ nguyên.
   await testGSched();
+  // Phase 8b: nhà chạy được runtime Chốt Đơn KHI bật ai_sales — webhook fanpage/Zalo, lịch job, nguồn AI HOME; nhà tắt ⇒ như
+  // cũ; khách không đổi (mã `vr-`, tự cấp và tự dọn; dòng ai_sales của nhà trả lại nguyên trạng trong finally).
+  await testSaasVnxRuntime();
   // Nền tảng · phiên & RBAC (agent C): claim org, cổng module, platform:operate, đăng nhập theo tổ chức. Tự cấp
   // tổ chức `pr-` (CSDL riêng) và tự dọn; đứng cạnh bài ngữ cảnh vì cùng lý do.
   await testPlatformRbac();

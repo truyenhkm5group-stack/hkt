@@ -130,7 +130,14 @@ async function kiemLich(fan: FanOut) {
   // `wholesale-leads` CHỈ fan-out: nhà tắt module Săn khách sỉ (homeOptIn, 0197).
   // `creative-publish-org` CHỈ fan-out (04/10/2026): camp «Đăng camp» của nhà đăng tiếp qua `creative-loop`.
   // `shipping-route` CHỈ fan-out (06/10/2026): nhà đồng bộ đơn Pancake, không có đơn tạo tay để xếp tuyến.
-  assert.deepEqual([...fan.FANOUT_ONLY_JOBS], [WORKFLOWS_JOB, "sales-followup", "sales-health", "ads-spend-org", "wholesale-leads", "creative-publish-org", "shipping-route"]);
+  // `sales-followup` · `sales-health` RỜI danh sách CHỈ fan-out (Phase 8b, docs/saas/OWNERSHIP.md §4 chặn 3): nhà phải chạy được
+  // runtime Chốt Đơn khi chủ shop bật module AI bán hàng của nhà. Công tắc là MODULE — nhà tắt `ai_sales` ⇒ lượt của nhà bỏ qua
+  // `MODULE_DISABLED`, không ghi `sync_runs` (khối «NHÀ» của phần 4 + 5 kiểm điều đó; nhà BẬT ⇒ tests/saas-vnx-runtime.test.ts).
+  assert.deepEqual([...fan.FANOUT_ONLY_JOBS], [WORKFLOWS_JOB, "ads-spend-org", "wholesale-leads", "creative-publish-org", "shipping-route"]);
+  for (const j of ["sales-followup", "sales-health"]) {
+    assert.equal(fan.callsHome(j), true, `${j}: có lượt của nhà (công tắc là module ai_sales của nhà, không phải lịch)`);
+    assert.equal(fan.fanOutPlan({ job: j, all: false, automation: true }), "AUTOMATION", `${j}: tổ chức khách vẫn chạy qua tầng tự động hoá như trước`);
+  }
 
   const lich = doc("scripts/scheduler.mjs");
   const jobsLich = [...new Set([...lich.matchAll(/\{\s*job:\s*"([a-z0-9-]+)"/g)].map((m) => m[1]))];
@@ -368,6 +375,15 @@ async function kiemToChucThat(fan: FanOut) {
   const nha = (await runJob(WORKFLOWS_JOB, { trigger: "CRON", actor: "gs-test", org: home.code })) as { skipped?: string };
   assert.equal(nha.skipped, "HOME_USES_ALERTS", "job workflows cho nhà ⇒ bỏ qua có lý do");
   assert.equal((await soLuotWorkflows(home)).length, nhaTruoc, "nhà: không dòng sync_runs workflows nào");
+  // Phase 8b: lượt của nhà cho job runtime Chốt Đơn — nhà TẮT `ai_sales` ⇒ bỏ qua MODULE_DISABLED, không một dòng sổ nào.
+  const dbNha = await getDbFor(home);
+  for (const job of ["sales-followup", "sales-health"]) {
+    const truoc = (await dbNha.select().from(schema.syncRuns).where(eq(schema.syncRuns.job, job))).length;
+    const r = (await runJob(job, { trigger: "CRON", actor: "gs-test", org: home.code })) as { skipped?: string; module?: string };
+    assert.equal(r.skipped, "MODULE_DISABLED", `${job} cho nhà đang tắt ai_sales ⇒ bỏ qua`);
+    assert.equal(r.module, "ai_sales");
+    assert.equal((await dbNha.select().from(schema.syncRuns).where(eq(schema.syncRuns.job, job))).length, truoc, `${job}: nhà không ghi sync_runs`);
+  }
 
   // ── KHÁCH: lượt cảnh báo (bấm tay) KHÔNG còn chở luật ──
   const canhBao = await withOrganization(A, () => evaluateAlerts());
