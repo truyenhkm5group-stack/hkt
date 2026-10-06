@@ -3,7 +3,7 @@
   "mission_id": "ai-provider-failover",
   "title": "AI Sales failover: primary → secondary → người, circuit breaker, cấu hình theo tenant, kill switch",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P0",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -29,9 +29,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-06T10:00:15.751Z",
-  "updated_at": "2026-10-06T11:56:20.516Z",
+  "updated_at": "2026-10-06T12:18:33.965Z",
   "last_heartbeat": "2026-10-06T11:54:58.947Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#610 → 1d84fb13708ce823884ea52a6a42307f87b9984b"
+  },
   "handoff": {
     "branch": "feat/ai-provider-failover",
     "sha": "8c1c115e798ec498588b388c9e1a991a5626d7ce",
