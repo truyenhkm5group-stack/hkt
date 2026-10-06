@@ -1,8 +1,8 @@
 {
   "pr": 621,
-  "sha": "cf9c9808dcf4605374eb433da8b815c9646cc7f6",
+  "sha": "4b6e3191e4786d36380a74222986f94061e10f46",
   "verdict": "PASS",
   "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
-  "at": "2026-10-06T18:59:32.961Z",
-  "note": "review độc lập: ai_sales nhà TẮT ⇒ runJob trả MODULE_DISABLED trước run, webhook nhà đóng, cô lập HMAC đạt, 5/5 đột biến đỏ; không chặn: cổng job ≠ cổng webhook khi thiếu dòng, bật ai_sales = bật cả nhà (cần cổng theo page trước khi chạy bóng), followup.ts:138, failover nhánh nhà"
+  "at": "2026-10-06T20:48:46.818Z",
+  "note": "PASS @cf9c9808 (review độc lập) + delta đọc bởi Lead: gỡ va #618 (nhánh HOME trước platform, Policy chỉ cho khoá nền tảng), followup truyền home, runJob nhà đòi ai_sales tường minh (chỉ chặt hơn)"
 }
