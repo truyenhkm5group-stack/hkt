@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { assertBillingBoundary, buildChildEnv, type TechExecutionProvider } from "@/lib/constants/tech-worker";
@@ -86,6 +86,13 @@ class ClaudeCodeAdapter implements ExecutionAdapter {
     const bin = resolveClaudeBin();
     if (!bin) return { ok: false as const, reason: "Không tìm thấy Claude Code CLI (claude.exe) — cài Claude Code hoặc đặt TECH_WORKER_CLAUDE_BIN." };
     if (this.provider === "ANTHROPIC_API" && !this.apiKey) return { ok: false as const, reason: "Worker API thiếu TECH_WORKER_ANTHROPIC_API_KEY — không mượn khoá của máy." };
+    // CLI phải hiểu `--setting-sources` (cờ mới) — bản cũ sẽ hỏng ở bước agent và đốt lần thử.
+    try {
+      const help = execFileSync(bin, ["--help"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 30_000, env: buildChildEnv(this.provider, process.env, this.apiKey) as NodeJS.ProcessEnv });
+      if (!help.includes("--setting-sources")) return { ok: false as const, reason: "Claude Code CLI quá cũ (không có --setting-sources) — cập nhật trước khi chạy worker." };
+    } catch {
+      return { ok: false as const, reason: "Không chạy được `claude --help`." };
+    }
     if (this.provider === "SUBSCRIPTION_CLAUDE_CODE") {
       // Lưới thứ hai cho ranh giới thanh toán: cấu hình người dùng có đường tính tiền API ⇒ báo, không chạy.
       for (const goc of [process.env.USERPROFILE, process.env.HOME].filter(Boolean) as string[]) {

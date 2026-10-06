@@ -17,7 +17,7 @@
  * Không chạy được việc ⇒ báo `BLOCKED` / `NEEDS_OWNER` kèm lý do; không bao giờ chờ một lời nhắc tương tác.
  */
 import { execFileSync, spawn } from "node:child_process";
-import { existsSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { TECH_OWNER_ESCALATIONS, type TechOwnerEscalation } from "@/lib/constants/tech";
@@ -87,9 +87,23 @@ function git(cwd: string, ...a: string[]): string {
  * (AGENTS.md mục 65); không tìm thấy `npm-cli.js` ⇒ báo rõ, không thử `spawn("npm")` (ENOENT trên Windows).
  * Exit code THẬT — model không tự chấm mình.
  */
+/**
+ * `npm-cli.js` thật: `npm_execpath` (khi chạy qua `npm run tech:worker`), cạnh `node.exe` (Windows), hoặc
+ * `<prefix>/lib/node_modules/npm` (Linux / nvm) — review 07/10, mục 5. Không thấy ⇒ `null`, `--check` báo trước khi
+ * nhận việc (không đốt lần thử của việc nào).
+ */
+export function resolveNpmCli(): string | null {
+  const ung = [
+    process.env.npm_execpath && /npm-cli\.js$/.test(process.env.npm_execpath) ? process.env.npm_execpath : null,
+    path.join(path.dirname(process.execPath), "node_modules", "npm", "bin", "npm-cli.js"),
+    path.join(path.dirname(process.execPath), "..", "lib", "node_modules", "npm", "bin", "npm-cli.js"),
+  ].filter(Boolean) as string[];
+  return ung.find((p) => existsSync(p)) ?? null;
+}
+
 function npmAsync(cwd: string, args: string[], env: Record<string, string>, timeoutMs: number): Promise<number | null> {
-  const npmCli = path.join(path.dirname(process.execPath), "node_modules", "npm", "bin", "npm-cli.js");
-  if (!existsSync(npmCli)) return Promise.reject(new Error(`Không tìm thấy npm-cli.js cạnh ${process.execPath}`));
+  const npmCli = resolveNpmCli();
+  if (!npmCli) return Promise.reject(new Error(`Không tìm thấy npm-cli.js (npm_execpath / cạnh ${process.execPath} / lib/node_modules)`));
   return new Promise((resolve) => {
     const child = spawn(process.execPath, [npmCli, ...args], { cwd, env: env as NodeJS.ProcessEnv, stdio: "ignore", shell: false, windowsHide: true });
     const timer = setTimeout(() => child.kill(), timeoutMs);
@@ -125,7 +139,7 @@ async function execute(adapter: ExecutionAdapter, provider: TechExecutionProvide
   active.set(t.runId, a);
   const push = (level: "info" | "warn" | "error", line: string) => a.logs.push({ level, line });
   const root = cfg.root || path.dirname(path.resolve(cfg.repo));
-  const dir = path.join(root, taskWorktreeDirName(t.code, t.attempt));
+  const dir = path.join(root, taskWorktreeDirName(t.code, t.leaseGeneration));
   let baseCommit = "";
   try {
     // 1. Cây riêng từ origin/main VỪA FETCH — không bao giờ từ main cục bộ hay một cây đang bẩn.
@@ -160,6 +174,18 @@ async function execute(adapter: ExecutionAdapter, provider: TechExecutionProvide
       biến nào "quên xoá". Dùng lại `buildChildEnv` của gói thuê bao (không khoá API nào) cho mọi worker.
     */
     const childEnv = buildChildEnv("SUBSCRIPTION_CLAUDE_CODE", process.env, null);
+    /*
+      Cổng chạy mã agent viết: thư mục NHÀ của nó trỏ sang một thư mục tạm, để `~/.git-credentials`, cấu hình GitHub
+      CLI, chứng thực Claude Code của máy không nằm trong tầm đọc (review 07/10, mục 1). Bộ đệm npm vẫn ở
+      LOCALAPPDATA (Windows) nên `npm ci --prefer-offline` không chậm đi. Vận hành: worker nên chạy dưới tài khoản hệ
+      điều hành RIÊNG (docs mục 8).
+    */
+    const nhaTam = path.join(root, `.gate-home-${t.code.toLowerCase().replace(/[^a-z0-9-]/g, "")}`);
+    mkdirSync(nhaTam, { recursive: true });
+    childEnv.HOME = nhaTam;
+    childEnv.USERPROFILE = nhaTam;
+    childEnv.APPDATA = path.join(nhaTam, "AppData");
+    childEnv.XDG_CONFIG_HOME = path.join(nhaTam, ".config");
     if (!(await npmCi(dir, childEnv))) {
       await complete(t, { outcome: "BLOCKED" satisfies TechRunOutcome, error: "npm ci thất bại trong cây làm việc của worker", branch: t.branch });
       return;
@@ -215,7 +241,8 @@ async function execute(adapter: ExecutionAdapter, provider: TechExecutionProvide
 
     // 5. ĐƯỜNG CẤM — kiểm TRƯỚC khi chạy cổng (cổng thực thi mã agent) và trước khi đẩy (CI chạy workflow của nhánh).
     git(dir, "add", "-A");
-    const files = git(dir, "diff", "--cached", "--name-only").split("\n").filter(Boolean);
+    // `--no-renames`: đổi tên `lib/auth/x.ts` → `lib/x.ts` phải lộ CẢ đường cũ (review 07/10, mục 4).
+    const files = git(dir, "diff", "--cached", "--no-renames", "--name-only").split("\n").filter(Boolean);
     const cam = forbiddenTouched(files);
     if (cam.length) {
       await complete(t, { outcome: "BLOCKED", error: `Agent sửa đường cấm (${cam.join(", ")}) — không chạy cổng, không đẩy. Việc này cần người làm hoặc nâng chính sách.`, filesChanged: files, model: res.model, cost, branch: t.branch });
@@ -307,7 +334,8 @@ async function main() {
   const provider = hello.data.worker.provider;
   if (!isTechExecutionProvider(provider)) throw new Error(`Provider lạ: ${provider}`);
   const adapter = createAdapter(provider);
-  const ok = await adapter.check();
+  const npmOk = resolveNpmCli();
+  const ok = npmOk ? await adapter.check() : ({ ok: false, reason: "Không tìm thấy npm-cli.js — cổng / npm ci sẽ không chạy được" } as const);
   log(`worker ${hello.data.worker.key} · ${provider} · ${os.hostname()} · adapter ${ok.ok ? "SẴN SÀNG" : `KHÔNG CHẠY ĐƯỢC: ${ok.reason}`}`);
   if (hello.data.openRuns?.length) log(`còn ${hello.data.openRuns.length} lượt mở từ lần chạy trước — không nhận lại; lease của chúng sẽ hết hạn và việc được thả về hàng đợi.`);
   if (CHECK || !ok.ok) process.exit(ok.ok ? 0 : 3);

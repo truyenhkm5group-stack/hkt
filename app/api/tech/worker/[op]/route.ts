@@ -94,9 +94,12 @@ function quaTran(id: string): boolean {
 
 export async function POST(req: NextRequest, ctx: { params: Promise<{ op: string }> }) {
   const { op } = await ctx.params;
-  const worker = await authenticateTechWorker(req.headers.get("authorization"));
+  // Trần TRƯỚC khi tra CSDL: khoá theo id ghi trong header (đã khớp hình dạng) — khoá sai cũng bị giới hạn.
+  const auth = req.headers.get("authorization");
+  const idTho = /^Bearer\s+tw_([A-Za-z0-9-]{8,64})\./.exec(auth?.trim() ?? "")?.[1] ?? "khong-hop-le";
+  if (quaTran(idTho)) return NextResponse.json({ error: "rate_limited" }, { status: 429 });
+  const worker = await authenticateTechWorker(auth);
   if (!worker) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  if (quaTran(worker.id)) return NextResponse.json({ error: "rate_limited" }, { status: 429 });
 
   let body: unknown = {};
   try {

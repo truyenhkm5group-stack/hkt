@@ -126,7 +126,8 @@ export type ClaimBlocker =
   | "ATTEMPTS_EXHAUSTED"
   | "BACKOFF"
   | "CAPABILITY"
-  | "POLICY";
+  | "POLICY"
+  | "ACTIONS_RUN";
 
 export const CLAIM_BLOCKER_LABEL: Record<ClaimBlocker, string> = {
   STATUS: "Việc chưa ở “Đã có đặc tả” — chưa sẵn sàng cho worker",
@@ -140,6 +141,7 @@ export const CLAIM_BLOCKER_LABEL: Record<ClaimBlocker, string> = {
   BACKOFF: "Đang đợi lùi dần trước lần thử kế tiếp",
   CAPABILITY: "Worker không có năng lực việc này cần",
   POLICY: "Chính sách R2–R4 hoặc chưa xếp chính sách — máy không tự làm",
+  ACTIONS_RUN: "Vừa giao cho agent GitHub Actions (90′) — không chạy song song hai đường",
 };
 
 export type ClaimCandidate = {
@@ -157,6 +159,8 @@ export type ClaimCandidate = {
   capability: string;
   /** `tech_tasks.policy_level`. `null` = CHƯA XẾP ⇒ không tự động (đóng khi thiếu). */
   policyLevel: string | null;
+  /** Có lượt giao GitHub Actions (`agent-run.yml`) trong 90′ — cùng điều kiện câu SQL nhận việc. */
+  recentActionsRun?: boolean;
 };
 
 /**
@@ -165,6 +169,8 @@ export type ClaimCandidate = {
  * phải đo được là chúng không trôi xa nhau — cùng cách AGENTS.md mục 59 làm với care).
  *
  * Việc KHÔNG thuộc sứ mệnh nào ⇒ không xét sứ mệnh / mục tiêu (việc lẻ do người ghi vẫn chạy được).
+ * `maxAttempts` truyền vào là trần HIỆU LỰC (`effectiveMaxAttempts`: việc ∧ ngân sách tầng hẹp nhất) — cùng con số
+ * câu SQL dùng.
  */
 export function claimBlockers(t: ClaimCandidate, worker: { capabilities: readonly string[] }, now: Date): ClaimBlocker[] {
   const out: ClaimBlocker[] = [];
@@ -179,6 +185,7 @@ export function claimBlockers(t: ClaimCandidate, worker: { capabilities: readonl
   if (t.nextAttemptAt && t.nextAttemptAt.getTime() > now.getTime()) out.push("BACKOFF");
   if (!worker.capabilities.includes(t.capability)) out.push("CAPABILITY");
   if (t.policyLevel !== "R0" && t.policyLevel !== "R1") out.push("POLICY");
+  if (t.recentActionsRun) out.push("ACTIONS_RUN");
   return out;
 }
 
@@ -223,7 +230,7 @@ export function decideCompletion(outcome: TechRunOutcome, attempts: number, maxA
 /* ═════════════════════ NHÁNH & CÂY LÀM VIỆC ═════════════════════ */
 
 /**
- * Tên nhánh / thư mục TẤT ĐỊNH theo mã việc và lần thử: `ai/worker/TECH-12-a2`. Đọc tên nhánh là biết việc nào,
+ * Tên nhánh / thư mục TẤT ĐỊNH theo mã việc và LƯỢT NHẬN (`lease_generation`, đơn điệu): `ai/worker/TECH-12-a2`. Đọc tên nhánh là biết việc nào,
  * lần thử thứ mấy; thử lại không bao giờ đè lên nhánh của lần trước (bằng chứng của lần trước giữ nguyên).
  * Tiền tố `ai/` là điều kiện của cầu nối mở PR bằng danh tính bot (`AGENT_BRANCH_PREFIXES`, agent-open-pr.yml).
  */
@@ -234,7 +241,7 @@ export function taskBranchName(taskCode: string, attempt: number): string {
 }
 
 /** Nhánh do worker hàng đợi tạo — hình dạng đóng, vì nó đi thẳng vào lệnh `git` và ô inputs công khai. */
-export const WORKER_BRANCH_PATTERN = /^ai\/worker\/[A-Za-z0-9-]{1,40}-a[0-9]{1,2}$/;
+export const WORKER_BRANCH_PATTERN = /^ai\/worker\/[A-Za-z0-9-]{1,40}-a[0-9]{1,6}$/;
 
 export function taskWorktreeDirName(taskCode: string, attempt: number): string {
   return `wt-tech-${taskCode.toLowerCase().replace(/[^a-z0-9-]/g, "")}-a${Math.max(1, Math.trunc(attempt))}`;

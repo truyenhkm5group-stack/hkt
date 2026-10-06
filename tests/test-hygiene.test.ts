@@ -203,6 +203,8 @@ const DOC_MOI_TRUONG_DA_KHAI: Record<string, string> = {
     "Ép AI_PROVIDER=anthropic để resolveProviderName() có câu trả lời xác định, rồi trả lại nguyên trạng trong finally. Đó là ĐẦU VÀO của bộ canh đang đo (nó hỏi nhà cung cấp nào đang dùng), không phải điều kiện của kết luận.",
   "tests/viec-di-tiep.test.ts":
     "Cùng lý do với agent-dispatch: đặt ERP_GITHUB_DISPATCH_TOKEN / ERP_GITHUB_REPO (khoá BỊA) để cổng cấu hình mở ra, rồi mới đo được thứ bài này thật sự hỏi — lượt dispatch có mang theo MÃ VIỆC không. Trả lại nguyên trạng trong finally, và không khẳng định nào rẽ theo giá trị sẵn có của máy.",
+  "tests/tech-worker.test.ts":
+    "Không đọc môi trường của máy: chữ `process.env` chỉ xuất hiện trong phép QUÉT MÃ NGUỒN scripts/tech-worker.ts (cấm trải `...process.env` xuống cổng — review 07/10) và trong đối số truyền cho `buildChildEnv` một môi trường GIẢ dựng tại chỗ. Kết luận không phụ thuộc máy chạy.",
   "tests/tech-delivery.test.ts":
     "Đặt ERP_GITHUB_REPO / ERP_GITHUB_DISPATCH_TOKEN (giá trị GIẢ) để cửa dispatch cầu nối bot coi là đã cấu hình, `fetch` GitHub cũng giả; trả lại nguyên trạng trong finally. Đó là ĐẦU VÀO của cổng cấu hình, không phải điều kiện của kết luận — bài không rẽ nhánh theo máy.",
   "tests/agent-dispatch.test.ts":

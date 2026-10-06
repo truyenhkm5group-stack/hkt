@@ -4,7 +4,7 @@ import type { TechTaskStatus } from "@/lib/constants/tech";
 import { canonicalTaskState, countOpenDependencies, type CanonicalTaskState } from "@/lib/constants/tech-control-plane";
 import { TECH_PROVIDER_BILLING, leaseIsActive, workerLiveness, type TechExecutionProvider } from "@/lib/constants/tech-worker";
 import { apiSpendAlert } from "@/lib/constants/tech-policy";
-import { apiSpend, effectiveBudget } from "@/lib/tech/budget";
+import { apiSpend, apiSpendSince, effectiveBudget } from "@/lib/tech/budget";
 
 /**
  * ───────────── BUỒNG LÁI CỦA CHỦ SHOP TRÊN /tech (Pha 5) ─────────────
@@ -111,7 +111,7 @@ export async function techCockpit(now = new Date()) {
     lastDeploy: lastDeploy ? { commitSha: lastDeploy.commitSha, verification: lastDeploy.verification, startedAt: lastDeploy.startedAt } : null,
     spend: {
       apiTodayUsd: chi.todayUsd,
-      apiMonthUsd: Number(thang?.api ?? 0),
+      apiMonthUsd: await apiSpendSince(dauThang),
       apiDailyCapUsd: ngan.apiUsdDaily,
       apiAlert: apiSpendAlert(ngan, chi.todayUsd),
       apiRunsMonth: Number(thang?.apiRuns ?? 0),

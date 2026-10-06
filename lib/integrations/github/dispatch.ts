@@ -232,7 +232,7 @@ export const AGENT_OPEN_PR_WORKFLOW = "agent-open-pr.yml";
 
 export async function dispatchAgentOpenPr(input: { head: string; title: string; body: string }): Promise<DispatchResult> {
   const head = input.head.trim();
-  if (!/^ai\/worker\/[A-Za-z0-9-]{1,40}-a[0-9]{1,2}$/.test(head)) {
+  if (!/^ai\/worker\/[A-Za-z0-9-]{1,40}-a[0-9]{1,6}$/.test(head)) {
     return { ok: false, kind: "FORBIDDEN", detail: `“${head}” không phải nhánh worker (ai/worker/<MÃ>-a<n>) — cầu nối chỉ mở PR cho nhánh của worker.` };
   }
   await assertHomeCredentials("github");

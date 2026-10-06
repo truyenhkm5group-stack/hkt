@@ -1,7 +1,7 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { and, asc, count, eq, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
-import { TECH_GATE_RESULTS, type TechGateResult, type TechOwnerEscalation, type TechTaskStatus } from "@/lib/constants/tech";
+import { TECH_GATE_RESULTS, isTechOwnerEscalation, type TechGateResult, type TechOwnerEscalation, type TechTaskStatus } from "@/lib/constants/tech";
 import { CAPABILITY_BY_TASK_TYPE, TECH_AUTONOMOUS_CAPABILITIES, isTechCapability, taskCapability } from "@/lib/constants/tech-capabilities";
 import {
   TECH_AUTONOMOUS_RISKS,
@@ -294,7 +294,12 @@ export async function claimNextTechTask(worker: TechWorkerRow, now = new Date())
         AND (c.mission_id IS NULL OR m.status = 'ACTIVE')
         AND (m.goal_id IS NULL OR g.status = 'ACTIVE')
         AND (c.lease_worker_id IS NULL OR c.lease_expires_at <= ${now})
-        AND c.attempts < LEAST(c.max_attempts, ${tranLan}, coalesce((select bm.max_attempts from tech_budgets bm where bm.scope_kind = 'MISSION' and bm.scope_id = c.mission_id), 10))
+        AND c.attempts < LEAST(c.max_attempts, coalesce(
+          (select b.max_attempts from tech_budgets b where b.scope_kind = 'MISSION' and b.scope_id = c.mission_id and b.max_attempts is not null),
+          (select b.max_attempts from tech_budgets b where b.scope_kind = 'GOAL' and b.scope_id = m.goal_id and b.max_attempts is not null),
+          (select b.max_attempts from tech_budgets b where b.scope_kind = 'PROJECT' and b.scope_id = m.project_id and b.max_attempts is not null),
+          ${tranLan}
+        ))
         AND (c.next_attempt_at IS NULL OR c.next_attempt_at <= ${now})
         AND ${capSql} IN (${capList})
         AND NOT EXISTS (
@@ -340,7 +345,9 @@ export async function claimNextTechTask(worker: TechWorkerRow, now = new Date())
   const capability = taskCapability(task);
   const dinhTuyen = modelForCapability(capability, await getSettingJson<Record<string, unknown>>(MODEL_ROUTING_SETTING, {}));
   const tiepNhanh = capability === "ci-debug" && WORKER_BRANCH_PATTERN.test(task.branch);
-  const branch = tiepNhanh ? task.branch : taskBranchName(task.code, task.attempts);
+  // Hậu tố theo `lease_generation` — đơn điệu, KHÔNG BAO GIỜ reset (review 07/10, mục 6): người mở lại việc làm
+  // `attempts` về 0, nếu đặt tên theo `attempts` thì lượt mới đụng nhánh `-a1` cũ (worktree add / push hỏng).
+  const branch = tiepNhanh ? task.branch : taskBranchName(task.code, task.leaseGeneration);
   const [run] = await db
     .insert(schema.techAgentRuns)
     .values({
@@ -534,7 +541,8 @@ export async function completeTechWorkerRun(worker: TechWorkerRow, input: Comple
     NHẢ LEASE TRƯỚC, có điều kiện đúng generation + đúng worker (review 07/10, mục 7). Lượt thu hồi vừa chạy (đã tăng
     generation) ⇒ 0 dòng ⇒ STALE_LEASE, KHÔNG ghi đè lượt chạy đã đóng.
   */
-  const nha = await db
+  const nha = await db.transaction(async (tx) => {
+   const r = await tx
     .update(schema.techTasks)
     .set({
       leaseWorkerId: null,
@@ -545,9 +553,8 @@ export async function completeTechWorkerRun(worker: TechWorkerRow, input: Comple
     })
     .where(and(eq(schema.techTasks.id, task.id), eq(schema.techTasks.leaseGeneration, input.leaseGeneration), eq(schema.techTasks.leaseWorkerId, worker.id)))
     .returning({ id: schema.techTasks.id });
-  if (!nha.length) return { error: "STALE_LEASE" };
-
-  await db
+   if (!r.length) return false;
+   await tx
     .update(schema.techAgentRuns)
     .set({
       status: d.runStatus,
@@ -575,6 +582,10 @@ export async function completeTechWorkerRun(worker: TechWorkerRow, input: Comple
       },
     })
     .where(and(eq(schema.techAgentRuns.id, run.id), eq(schema.techAgentRuns.status, "RUNNING")));
+   return true;
+  });
+  // Nhả lease + đóng lượt chạy trong MỘT giao dịch (review 07/10, mục 10): sập giữa chừng không để lại lượt RUNNING mồ côi.
+  if (!nha) return { error: "STALE_LEASE" };
 
   const actor = workerActor(worker);
   let status = task.status as TechTaskStatus;
@@ -586,21 +597,29 @@ export async function completeTechWorkerRun(worker: TechWorkerRow, input: Comple
       status = "BUILDING";
     }
     if (status !== d.taskTo) {
+      /*
+        Câu do MÁY dựng, không bao giờ rỗng (review 07/10, mục 2): `""` của agent không được làm phép chuyển bị từ chối
+        sau khi lease đã nhả — việc sẽ kẹt BUILDING không lease mãi. Lý do gọi chủ shop lạ ⇒ trạng thái lạ rủi ro cao;
+        câu hướng dẫn quá ngắn ⇒ câu máy chỉ đường tới nhật ký lượt chạy.
+      */
+      const cau = (input.summary || input.error || `Worker ${worker.key} báo ${input.outcome} (không kèm lý do) — xem nhật ký lượt ${run.id}`).slice(0, 2000);
+      const viec = (input.ownerAction || "").trim();
       const r = await setTechTaskStatus(
         {
           taskId: task.id,
           to: d.taskTo,
-          note:
-            d.taskTo === "SPEC_READY"
-              ? `Lần thử ${task.attempts}/${task.maxAttempts} thất bại — thử lại sau ${d.backoffMinutes} phút`
-              : (input.summary ?? input.error ?? `Worker ${worker.key}: ${input.outcome}`).slice(0, 2000),
-          ownerEscalation: input.ownerEscalation ?? null,
-          ownerAction: input.ownerAction ?? null,
+          note: d.taskTo === "SPEC_READY" ? `Lần thử ${task.attempts} thất bại — thử lại sau ${d.backoffMinutes} phút` : cau.length >= 10 ? cau : `${cau} — xem nhật ký lượt ${run.id}`,
+          ownerEscalation: isTechOwnerEscalation(input.ownerEscalation) ? input.ownerEscalation : "UNKNOWN_HIGH_RISK_STATE",
+          ownerAction: [...viec].length >= 10 ? viec : `Worker ${worker.key} dừng lại cần chủ shop nhưng không nói rõ việc — mở lượt chạy ${run.id} đọc nhật ký rồi quyết. ${viec}`.trim(),
         },
         actor,
       );
-      if ("error" in r) return r;
-      status = d.taskTo;
+      if ("error" in r) {
+        // Lưới cuối: không để việc kẹt — đưa về FAILED (vẫn mở) với câu máy dựng.
+        const f = await setTechTaskStatus({ taskId: task.id, to: "FAILED", note: `Không áp được kết cục ${input.outcome}: ${r.error}` }, actor);
+        if ("error" in f) return r;
+        status = "FAILED";
+      } else status = d.taskTo;
     }
   }
   /*

@@ -46,6 +46,13 @@ export async function apiSpend(opts: { missionId?: string | null; now?: Date } =
   return { todayUsd: Number(ngay?.usd ?? 0), totalUsd: Number(tong?.usd ?? 0) };
 }
 
+/** Tiền API từ một mốc (buồng lái: tháng) — CÙNG phép tính giữ chỗ với cổng chi, không phải con số thứ hai. */
+export async function apiSpendSince(since: Date): Promise<number> {
+  const db = await getDb();
+  const [r] = await db.select({ usd: apiCost }).from(schema.techAgentRuns).where(and(isNotNull(schema.techAgentRuns.workerId), gte(schema.techAgentRuns.startedAt, since)));
+  return Number(r?.usd ?? 0);
+}
+
 /** Số lượt worker đang chạy trên cả công ty — cho trần đồng thời. */
 export async function runningWorkerRuns(): Promise<number> {
   const db = await getDb();

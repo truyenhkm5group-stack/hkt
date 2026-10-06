@@ -99,6 +99,7 @@ export function testTechWorkerPure() {
     [{ capability: "implement-feature" }, "CAPABILITY"],
     [{ policyLevel: null }, "POLICY"],
     [{ policyLevel: "R4" }, "POLICY"],
+    [{ recentActionsRun: true }, "ACTIONS_RUN"],
   ];
   for (const [doi, mong] of thu) assert.deepEqual(claimBlockers({ ...base, ...doi }, w, now), [mong], `${mong} phải chặn`);
   assert.deepEqual(claimBlockers({ ...base, leaseWorkerId: "x", leaseExpiresAt: new Date(now.getTime() - 1) }, w, now), [], "lease hết hạn không còn chặn");
@@ -138,7 +139,8 @@ export function testTechWorkerPure() {
 
   // Cửa worker tự xác thực TRƯỚC mọi việc khác (nó được miễn khoá phiên ở middleware và access-control).
   const route = readFileSync(path.join(goc, "app/api/tech/worker/[op]/route.ts"), "utf8");
-  const iAuth = route.indexOf('authenticateTechWorker(req.headers.get("authorization"))');
+  const iAuth = route.indexOf("authenticateTechWorker(auth)");
+  assert.ok(route.indexOf("quaTran(idTho)") > 0 && route.indexOf("quaTran(idTho)") < iAuth, "trần lượt gọi đứng TRƯỚC lượt tra CSDL xác thực");
   assert.ok(iAuth > 0 && route.indexOf("status: 401") > iAuth, "route worker phải xác thực khoá riêng và trả 401 khi sai");
   assert.ok(iAuth < route.indexOf("req.json()"), "xác thực phải đứng TRƯỚC lượt đọc thân gói");
   const maRoute = route.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
@@ -340,8 +342,22 @@ export async function testTechWorkerDb() {
     assert.ok("ok" in (await setTechTaskStatus({ taskId: tCam.id, to: "SPEC_READY", note: "người mở lại" }, chuShop)));
     assert.equal((await db.query.techTasks.findFirst({ where: eq(schema.techTasks.id, tCam.id) }))?.attempts, 0, "người mở lại ⇒ lần thử đếm lại từ đầu");
     const cCam2 = (await claimNextTechTask(giu)).task!;
+    assert.notEqual(cCam2.branch, cCam.branch, "mở lại việc KHÔNG dùng lại nhánh cũ (hậu tố theo lease_generation, không theo attempts)");
     await startTechWorkerRun(giu, { runId: cCam2.runId, leaseGeneration: cCam2.leaseGeneration });
     assert.ok("error" in (await setTechTaskStatus({ taskId: tCam.id, to: "SPEC_READY" }, chuShop)), "người không trả việc đang làm về hàng đợi");
+
+    // 2.9c Kết cục BLOCKED kèm câu RỖNG không được làm việc kẹt BUILDING không lease (review 07/10, mục 2).
+    const tRong = (await createTechTask({ title: "tw-t việc tài liệu thứ sáu", taskType: "DOCS", module: "TECH", priority: "P0", source: "OWNER", missionId: m.id }, chuShop)) as { id: string };
+    taskIds.push(tRong.id);
+    for (const to of ["TRIAGED", "SPEC_READY"] as const) await setTechTaskStatus({ taskId: tRong.id, to }, chuShop);
+    const kia2 = await worker(kia.id);
+    const cRong = (await claimNextTechTask(kia2)).task!;
+    assert.equal(cRong.taskId, tRong.id);
+    await startTechWorkerRun(kia2, { runId: cRong.runId, leaseGeneration: cRong.leaseGeneration });
+    const rong = await completeTechWorkerRun(kia2, { runId: cRong.runId, leaseGeneration: cRong.leaseGeneration, outcome: "BLOCKED", summary: "" });
+    assert.ok("ok" in rong && rong.taskStatus === "BLOCKED", `câu rỗng vẫn ra BLOCKED bằng câu máy dựng — nhận ${JSON.stringify(rong)}`);
+    const rongNo = await completeTechWorkerRun(kia2, { runId: cRong.runId, leaseGeneration: cRong.leaseGeneration, outcome: "BLOCKED" });
+    assert.ok("error" in rongNo, "nộp lại ⇒ từ chối");
 
     // 2.10 Worker bị tắt ⇒ không nhận việc, KHÔNG nộp được kết quả; mục tiêu tạm dừng ⇒ không việc nào của nó được nhận.
     await setTechWorkerEnabled({ workerId: giu.id, enabled: false, reason: "bảo trì máy" }, chuShop);
