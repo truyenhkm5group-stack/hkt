@@ -3,7 +3,7 @@
   "mission_id": "work-auto-assign-fix",
   "title": "Phân việc tự động hỏng vì created_by rỗng",
   "business_goal": "",
-  "status": "VERIFYING",
+  "status": "DONE",
   "priority": "P1",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -23,13 +23,14 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-06T21:44:03.754Z",
-  "updated_at": "2026-10-06T22:26:11.245Z",
-  "last_heartbeat": "2026-10-06T21:44:10.437Z",
+  "updated_at": "2026-10-06T22:34:18.611Z",
+  "last_heartbeat": "2026-10-06T22:34:18.611Z",
   "definition_of_done": [],
   "evidence": {
     "merged": "#624 → 1fa25c33442e1cf3aefa33b3fbef91346a79d7e3",
     "verify": "PASS 1fa25c33442e1cf3aefa33b3fbef91346a79d7e3 2026-10-06T22:26:09.025Z",
-    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/37537935961"
+    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/37537935961",
+    "done": "PR #624 gộp 1fa25c33; deploy run 37537935961; hậu kiểm ĐẠT; production 22:24Z work-auto-assign SUCCESS lần đầu từ 05/10 (SALES giao 190/190)"
   },
   "handoff": {
     "branch": "fix/work-auto-assign-machine-actor",
