@@ -19,10 +19,6 @@ import {
  * Vỏ Next của SaaS Control Plane (`/platform/customers`, `/platform/products`): đọc phiên → lõi `lib/saas/console.ts` (hỏi
  * lại người vận hành, zod, lý do bắt buộc, nhật ký nền tảng) → làm mới trang. Không logic nào ở đây.
  */
-async function op() {
-  return requirePermission("platform:operate");
-}
-
 function refresh(accountCode?: string | null) {
   revalidatePath("/platform/customers");
   revalidatePath("/platform/products");
@@ -30,61 +26,71 @@ function refresh(accountCode?: string | null) {
 }
 
 export async function createCustomerAction(input: unknown) {
-  const r = await createCustomerAsOperator(await op(), input);
+  const user = await requirePermission("platform:operate");
+  const r = await createCustomerAsOperator(user, input);
   if ("ok" in r) refresh(r.accountCode);
   return r;
 }
 
 export async function subscribeProductAction(input: unknown, accountCode: string) {
-  const r = await subscribeProductAsOperator(await op(), input);
+  const user = await requirePermission("platform:operate");
+  const r = await subscribeProductAsOperator(user, input);
   if ("ok" in r) refresh(accountCode);
   return r;
 }
 
 export async function changeSubscriptionAction(input: unknown, accountCode: string) {
-  const r = await changeSubscriptionAsOperator(await op(), input);
+  const user = await requirePermission("platform:operate");
+  const r = await changeSubscriptionAsOperator(user, input);
   if ("ok" in r) refresh(accountCode);
   return r;
 }
 
 export async function retryProvisioningAction(input: unknown, accountCode: string) {
-  const r = await retryProvisioningAsOperator(await op(), input);
+  const user = await requirePermission("platform:operate");
+  const r = await retryProvisioningAsOperator(user, input);
   refresh(accountCode);
   return r;
 }
 
 export async function updateAccountAction(input: unknown) {
-  const r = await updateAccountAsOperator(await op(), input);
+  const user = await requirePermission("platform:operate");
+  const r = await updateAccountAsOperator(user, input);
   if ("ok" in r) refresh((input as { accountCode?: string })?.accountCode ?? null);
   return r;
 }
 
 export async function moveWorkspaceAction(input: unknown, accountCode: string) {
-  const r = await moveWorkspaceAsOperator(await op(), input);
+  const user = await requirePermission("platform:operate");
+  const r = await moveWorkspaceAsOperator(user, input);
   if ("ok" in r) refresh(accountCode);
   return r;
 }
 
 export async function reconcileSubscriptionsAction(input: unknown, accountCode: string) {
-  const r = await reconcileSubscriptionsAsOperator(await op(), input);
+  const user = await requirePermission("platform:operate");
+  const r = await reconcileSubscriptionsAsOperator(user, input);
   if ("ok" in r) refresh(accountCode);
   return r;
 }
 
 export async function addCostEntryAction(input: unknown, accountCode?: string) {
-  const r = await addCostEntryAsOperator(await op(), input);
+  const user = await requirePermission("platform:operate");
+  const r = await addCostEntryAsOperator(user, input);
   if ("ok" in r) refresh(accountCode);
   return r;
 }
 
 export async function voidCostEntryAction(input: unknown, accountCode?: string) {
-  const r = await voidCostEntryAsOperator(await op(), input);
+  const user = await requirePermission("platform:operate");
+  const r = await voidCostEntryAsOperator(user, input);
   if ("ok" in r) refresh(accountCode);
   return r;
 }
 
 export async function finalizeStatementAction(input: unknown) {
-  const r = await finalizeStatementAsOperator(await op(), input);
+  const user = await requirePermission("platform:operate");
+  const r = await finalizeStatementAsOperator(user, input);
   if ("ok" in r) refresh((input as { accountCode?: string })?.accountCode ?? null);
   return r;
 }
