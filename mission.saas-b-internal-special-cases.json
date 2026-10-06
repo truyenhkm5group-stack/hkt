@@ -46,24 +46,23 @@
     "0227": "2026-10-06T17:10:33.541Z"
   },
   "created_at": "2026-10-06T17:03:21.073Z",
-  "updated_at": "2026-10-06T18:51:58.616Z",
-  "last_heartbeat": "2026-10-06T18:48:38.501Z",
+  "updated_at": "2026-10-06T19:36:40.526Z",
+  "last_heartbeat": "2026-10-06T19:36:40.526Z",
   "definition_of_done": [],
   "handoff": {
     "branch": "feat/saas-b-internal",
-    "sha": "2020eb214fbe6ae74b5cb74c66cee70bd5912897",
-    "at": "2026-10-06T18:48:38.501Z",
+    "sha": "798c4cff345fa903acfc982d2809e93224d03e82",
+    "at": "2026-10-06T19:36:40.526Z",
     "actor": "DESKTOP-56TH98Y:wt-saas-b",
     "title": "Phase B: gỡ nhánh isHome thương mại — nhà đọc gói internal qua cùng đường khách ngoài, bài kiểm so trước/sau",
-    "summary": "Nhà đi cùng resolver với khách (planKeyOf→effectivePlanRow→resolvePlan/resolveOrgPricing→ghi đè→giữ từ trước); gỡ isHome thương mại; migration 0225 (giữ chỗ 0227, cần renumber) chỉ ghi cột plan của nhà khi trống; giữ isHome AI/billing/operator",
+    "summary": "Sửa review #622: planKeyOf cột trống ở nhà ⇒ internal (an toàn khả dụng); billingLockApplies là vị từ chung cho cổng ghi + khung thanh toán /settings/plan; migration 0225 chưa renumber",
     "tests": [
       "npm run typecheck: sạch",
       "npm run lint: sạch",
-      "npx eslint --max-warnings=0 (14 tệp sửa): sạch",
-      "npm test (sau commit): TẤT CẢ KIỂM THỬ ĐẠT",
-      "npm run build: đạt",
-      "tests/saas-internal-plan.test.ts: bài so trước/sau 64 quyết định khớp (đã chạy nguyên văn trên mã cũ 0b5ec24f: xanh) + 5 đột biến dữ liệu trong bài",
-      "đột biến mã thủ công: 6/6 đỏ"
+      "npx eslint --max-warnings=0 (8 tệp sửa): sạch",
+      "npm test (sau commit, Bash): TẤT CẢ KIỂM THỬ ĐẠT",
+      "tests/saas-internal-plan.test.ts: 64 quyết định khớp cả khi cột plan của nhà NULL (trước 0225); khách trong tài khoản chargeback bị khoá có khung thanh toán + hạn mức tháng",
+      "đột biến: bỏ nhánh cột trống ⇒ đỏ; trang không theo billingLockApplies ⇒ đỏ; khung hạn mức bỏ vế thanh toán ⇒ đỏ"
     ]
   }
 }
