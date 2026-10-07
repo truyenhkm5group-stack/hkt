@@ -1,8 +1,8 @@
 {
   "pr": 633,
-  "sha": "4ba38d8d7edf1bb32822505e21d9dcd548165f2a",
+  "sha": "faf750c8fa2416dbd4e93888f494936bcc881c92",
   "verdict": "PASS",
   "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
-  "at": "2026-10-07T09:59:07.699Z",
-  "note": "review độc lập PASS @758eb081 (14 bộ kiểm, không hồi quy HSLC) + 3 mục sửa @4ba38d8d: đệm 60s cấp tổ chức + notify:false + giới hạn sổ AI theo hội thoại; tin page không phải bot ở HANDOFF/TAKEOVER = nhân viên; index 0231 trên platform_ai_usage an toàn ở CSDL tổ chức (bảng giữ, chỉ xoá dòng)"
+  "at": "2026-10-07T11:04:54.587Z",
+  "note": "PASS @4ba38d8d + delta: decideHealthAlert khung nhắc neo prev.since (lỗi có sẵn từ #607, CI đỏ khi bộ kiểm bắt đầu phút 58–59), không đổi kỳ vọng; gộp main 4d30d4ec"
 }
