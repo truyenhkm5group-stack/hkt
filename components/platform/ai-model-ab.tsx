@@ -88,7 +88,7 @@ function Checks({ v }: { v: AbVerdict }) {
 /** Phần token: hiện ra / suy nghĩ / % suy nghĩ / tổng ra mỗi hội thoại, chi phí, độ trễ LỜI GỌI model (sổ AI 0231). */
 function TokenRows({ arms, usdToVnd }: { arms: { label: string; model: string; a: TokenArm; outPerConv: number | null; costPerConvUsd: number | null }[]; usdToVnd: number }) {
   // Sổ chưa có cột suy nghĩ / độ trễ (migration riêng) ⇒ không in một bảng toàn «—».
-  if (arms.every((x) => !x.a.thinkCoverage)) return <p className="text-[11px] text-muted-foreground">Token suy nghĩ / độ trễ lời gọi: chưa đo trên sổ production (cột sổ đi ở migration riêng) — xem benchmark phát lại (ops platform-ai-bench).</p>;
+  if (arms.every((x) => !x.a.thinkCoverage)) return <p className="text-[11px] text-muted-foreground">Token suy nghĩ / độ trễ lời gọi: chưa có lượt nào đo được trong cohort (sổ AI đo từ 0232).</p>;
   const vnd = (v: number | null) => (v === null ? "—" : formatVND(Math.round(v * usdToVnd)));
   const num = (v: number | null) => formatNumber(v === null ? null : Math.round(v));
   return (

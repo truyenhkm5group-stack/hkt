@@ -125,8 +125,8 @@ export type RoutingRow = {
 
 /**
  * Một dòng «theo workload × model» (30 ngày, nguồn PLATFORM). Đơn AI = đơn `AI_ORDER_SYNC` (ghi đơn) / `AI_AGENT` (bot chốt)
- * gắn hội thoại, tính cho model phục vụ NHIỀU lượt nhất của hội thoại đó. Ô suy nghĩ / cache / độ trễ = `null` (CHƯA ĐO) cho tới
- * khi sổ AI có cột của chúng (migration riêng) — không phải 0.
+ * gắn hội thoại, tính cho model phục vụ NHIỀU lượt nhất của hội thoại đó. Ô hiện ra / suy nghĩ / cache / độ trễ chỉ đọc lượt đã
+ * đo đủ (sổ AI 0232); chưa có lượt nào ⇒ `null` (CHƯA ĐO), không phải 0.
  */
 export type RoutingModelRow = {
   workload: PlatformWorkload | "other";
@@ -230,9 +230,9 @@ export async function loadPlatformAiControl(user: SessionUser, now: Date = new D
       .orderBy(desc(schema.platformAuditLog.at))
       .limit(10),
   ]);
-  // PLATFORM AI ROUTING — loại việc suy từ `ref` (ghi đơn = `order-sync:*`) cho tới khi sổ có cột `workload` (migration riêng):
-  // chọn câu mẫu / đọc ảnh tới lúc đó nằm chung dòng Sales Chat.
-  const wlExpr = sql<string>`case when ${a.feature} <> 'sales_chatbot' then 'other' when ${a.ref} like 'order-sync:%' then 'order_sync' else 'sales_chatbot' end`;
+  // PLATFORM AI ROUTING — loại việc: cột `workload` (0232); dòng cũ suy từ `ref` (ghi đơn = `order-sync:*`), chọn câu mẫu / đọc
+  // ảnh của dòng cũ nằm chung Sales Chat.
+  const wlExpr = sql<string>`case when ${a.feature} <> 'sales_chatbot' then 'other' else coalesce(${a.workload}, case when ${a.ref} like 'order-sync:%' then 'order_sync' else 'sales_chatbot' end) end`;
   const [policySet, routingRows] = await Promise.all([
     readPlatformAiPolicies({ fresh: true }),
     pdb
@@ -243,6 +243,8 @@ export async function loadPlatformAiControl(user: SessionUser, now: Date = new D
         okCalls: sql<number>`coalesce(sum(${a.requests}) filter (where ${a.status} = 'OK'), 0)::int`,
         cost: sql<number>`coalesce(sum(${a.costUsd}), 0)::float8`,
         units: sql<number>`count(distinct ${a.ref})::int`,
+        thinkKnown: sql<number>`coalesce(sum(${a.requests}) filter (where ${a.status} = 'OK' and ${a.thinkingTokens} is not null), 0)::int`,
+        thinking: sql<number>`coalesce(sum(${a.thinkingTokens}), 0)::float8`,
       })
       .from(a)
       .where(and(eq(a.billingSource, "PLATFORM"), gte(a.at, from), ne(a.status, "BLOCKED_QUOTA")))
@@ -254,7 +256,7 @@ export async function loadPlatformAiControl(user: SessionUser, now: Date = new D
     const p = eff.policy && eff.policy.enabled ? eff.policy : null;
     const calls = Number(r?.calls ?? 0);
     const ok = Number(r?.okCalls ?? 0);
-    const known = 0;
+    const known = Number(r?.thinkKnown ?? 0);
     const units = Number(r?.units ?? 0);
     const cost = Number(r?.cost ?? 0);
     return {
@@ -266,7 +268,7 @@ export async function loadPlatformAiControl(user: SessionUser, now: Date = new D
       canaryPct: p ? p.canaryPct : null,
       calls,
       errorRate: calls > 0 ? Number(r?.errors ?? 0) / calls : null,
-      thinkingTokens: null,
+      thinkingTokens: known > 0 ? Number(r?.thinking ?? 0) : null,
       thinkCoverage: ok > 0 ? known / ok : null,
       costUsd: cost,
       units,
@@ -328,23 +330,38 @@ async function readRoutingByModel(from: Date, wlExpr: SQL<string>): Promise<{ ro
       input: sql<number>`coalesce(sum(${a.inputTokens}), 0)::float8`,
       output: sql<number>`coalesce(sum(${a.outputTokens}), 0)::float8`,
       cost: sql<number>`coalesce(sum(${a.costUsd}), 0)::float8`,
+      // Chỉ lượt OK đã đo đủ (0232): token ra / suy nghĩ / bộ đệm / độ trễ trên CÙNG tập lượt.
+      knownCalls: sql<number>`coalesce(sum(${a.requests}) filter (where ${a.status} = 'OK' and ${a.thinkingTokens} is not null), 0)::int`,
+      knownInput: sql<number>`coalesce(sum(${a.inputTokens}) filter (where ${a.status} = 'OK' and ${a.thinkingTokens} is not null), 0)::float8`,
+      knownOutput: sql<number>`coalesce(sum(${a.outputTokens}) filter (where ${a.status} = 'OK' and ${a.thinkingTokens} is not null), 0)::float8`,
+      knownThinking: sql<number>`coalesce(sum(${a.thinkingTokens}) filter (where ${a.status} = 'OK'), 0)::float8`,
+      knownCached: sql<number>`coalesce(sum(${a.cachedTokens}) filter (where ${a.status} = 'OK' and ${a.thinkingTokens} is not null), 0)::float8`,
+      latency: sql<number[] | null>`array_agg(${a.latencyMs} / greatest(${a.requests}, 1)) filter (where ${a.status} = 'OK' and ${a.latencyMs} is not null)`,
     })
     .from(a)
     .where(and(eq(a.billingSource, "PLATFORM"), gte(a.at, from), ne(a.status, "BLOCKED_QUOTA")))
     .groupBy(a.orgCode, a.ref, wlExpr, a.model);
-  type Acc = { calls: number; errors: number; input: number; output: number; cost: number; convs: Set<string>; owned: { org: string; conv: string }[] };
+  type Acc = { calls: number; errors: number; input: number; output: number; cost: number; convs: Set<string>; owned: { org: string; conv: string }[]; kConvs: Set<string>; kInput: number; kOutput: number; kThinking: number; kCached: number; lat: number[] };
   const acc = new Map<string, Acc & { wl: string; model: string }>();
   const dominant = new Map<string, { model: string; calls: number }>();
   for (const r of perRef) {
     const model = r.model ?? "(không rõ)";
     const k = `${r.wl}|${model}`;
-    const x = acc.get(k) ?? { wl: r.wl, model, calls: 0, errors: 0, input: 0, output: 0, cost: 0, convs: new Set<string>(), owned: [] };
+    const x = acc.get(k) ?? { wl: r.wl, model, calls: 0, errors: 0, input: 0, output: 0, cost: 0, convs: new Set<string>(), owned: [], kConvs: new Set<string>(), kInput: 0, kOutput: 0, kThinking: 0, kCached: 0, lat: [] };
     x.calls += Number(r.calls);
     x.errors += Number(r.errors);
     x.input += Number(r.input);
     x.output += Number(r.output);
     x.cost += Number(r.cost);
     if (r.ref) x.convs.add(`${r.orgCode}|${r.ref}`);
+    if (Number(r.knownCalls) > 0) {
+      if (r.ref) x.kConvs.add(`${r.orgCode}|${r.ref}`);
+      x.kInput += Number(r.knownInput);
+      x.kOutput += Number(r.knownOutput);
+      x.kThinking += Number(r.knownThinking);
+      x.kCached += Number(r.knownCached);
+    }
+    x.lat.push(...(r.latency ?? []).map(Number).filter((v) => Number.isFinite(v) && v >= 0));
     acc.set(k, x);
     if (r.ref && (r.wl === "order_sync" || r.wl === "sales_chatbot")) {
       const dk = `${r.orgCode}|${r.ref}|${r.wl}`;
@@ -393,10 +410,10 @@ async function readRoutingByModel(from: Date, wlExpr: SQL<string>): Promise<{ ro
         conversations: n,
         inputPerConv: n ? x.input / n : null,
         outputPerConv: n ? x.output / n : null,
-        visiblePerConv: null,
-        thinkingPerConv: null,
-        cachedShare: null,
-        latencyP50Ms: null,
+        visiblePerConv: x.kConvs.size ? (x.kOutput - x.kThinking) / x.kConvs.size : null,
+        thinkingPerConv: x.kConvs.size ? x.kThinking / x.kConvs.size : null,
+        cachedShare: x.kInput > 0 ? x.kCached / x.kInput : null,
+        latencyP50Ms: x.lat.length ? [...x.lat].sort((p, q) => p - q)[Math.floor((x.lat.length - 1) / 2)] : null,
         costUsd: x.cost,
         costPerConvUsd: n ? x.cost / n : null,
         aiOrders,
