@@ -415,3 +415,4 @@
 {"at":"2026-10-07T20:04:41.417Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"CLAIM","mission":"ai-balance-economics","detail":"RUNNING · 13 mẫu phạm vi · HIGH"}
 {"at":"2026-10-07T20:07:33.146Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"UPDATE","mission":"bot-order-status","detail":"RUNNING → RUNNING · 7 mẫu phạm vi · MEDIUM"}
 {"at":"2026-10-07T20:08:03.482Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"bot-order-status","detail":"feat/bot-order-status @ bf2bc554d2cf · 4 lệnh kiểm thử"}
+{"at":"2026-10-07T20:08:44.133Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"bot-order-status","detail":"#645 cho feat/bot-order-status @ bf2bc554d2cf"}
