@@ -3,7 +3,7 @@
   "mission_id": "ai-balance-v1",
   "title": "Số dư AI + nạp QR (SePay, mã ERPNAP) — sổ cái chỉ ghi thêm, màn khách + vận hành, cờ canary",
   "business_goal": "Chủ shop nạp tiền bằng QR, tiền về tự cộng đúng một lần, không ai duyệt tay",
-  "status": "INTEGRATING",
+  "status": "VERIFYING",
   "priority": "P1",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -44,7 +44,7 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-07T18:21:27.081Z",
-  "updated_at": "2026-10-07T21:19:12.174Z",
+  "updated_at": "2026-10-07T23:10:24.812Z",
   "last_heartbeat": "2026-10-07T21:00:02.185Z",
   "definition_of_done": [
     "Nạp 1.000.000đ trên điện thoại bằng QR",
@@ -54,7 +54,9 @@
     "Canary trên workspace thử trước"
   ],
   "evidence": {
-    "merged": "#644 → 12769c21b4d767c3e1547d1c743ed8ffa4dfd087"
+    "merged": "#644 → 12769c21b4d767c3e1547d1c743ed8ffa4dfd087",
+    "verify": "PASS 638091636e303895c81f31b31a81470778029c8a 2026-10-07T23:10:21.353Z",
+    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/37697610332"
   },
   "handoff": {
     "branch": "feat/ai-balance-v1",
