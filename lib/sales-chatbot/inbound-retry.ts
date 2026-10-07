@@ -34,6 +34,12 @@ export const DEAD_AI_DOWN_NOTE = "AI hỏng — bot không trả lời được,
 export const DEAD_SEND_NOTE_PREFIX = "Gửi hỏng — ";
 /** Câu ghi chú khi bỏ qua vì tin đã được trả lời ở lượt trước (tiến trình chết sau khi gửi). */
 export const ALREADY_REPLIED_NOTE = "Đã trả lời ở lượt trước (tiến trình dừng sau khi gửi) — không trả lời lại";
+/** Lượt không mở được hội thoại (lỗi tạm) — nhả tin, lùi dần (`releaseWithBackoff`); hết lượt ⇒ DEAD. */
+export const CONV_OPEN_FAILED_NOTE = "Không mở được hội thoại";
+/** AI CỐ Ý chuyển người (gọi handoff / quá dài) ⇒ bot im trên kênh nhắn tin, chờ người. */
+export const HANDOFF_SILENT_NOTE = "Chuyển nhân viên — bot không nhắn gì, chờ người trả lời";
+/** Lượt AI không sinh câu nào để gửi. */
+export const EMPTY_REPLY_NOTE = "Bot không có câu trả lời";
 
 export type RequeueRow = { attempts: number; createdAt: Date; nextAttemptAt: Date | null };
 
@@ -171,7 +177,7 @@ export async function requeueAiDownDeadLetters(aiDownReason: string, providerRec
       // Mở lại ĐÚNG hội thoại đang ở lý do AI hỏng (điều kiện trong câu ghi — người vừa nhận thì câu này không chạm gì).
       const reopened = await db
         .update(c)
-        .set({ status: "OPEN", handoffReason: null, state: sql`${c.state} - 'handoff'`, updatedAt: now })
+        .set({ status: "OPEN", handoffReason: null, state: sql`${c.state} - 'handoff'`, humanCooldownUntil: null, updatedAt: now })
         .where(and(eq(c.id, r.conv_id), eq(c.status, "HANDOFF"), eq(c.handoffReason, aiDownReason)))
         .returning({ id: c.id });
       if (!reopened.length) {

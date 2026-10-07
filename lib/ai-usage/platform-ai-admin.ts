@@ -12,8 +12,9 @@
  * của AI dùng chung: không action, không ô cấu hình (ô Model của chatbot bị BỎ QUA ở nhánh `platform`, xem engine).
  * Không in khoá: màn hình chỉ biết khoá "có / không"; câu lỗi của nhà cung cấp đã che khoá trước khi lưu.
  */
-import { and, desc, eq, gte, inArray, ne, sql } from "drizzle-orm";
-import { getPlatformDb, schema } from "@/db";
+import { and, desc, eq, gte, inArray, ne, sql, type SQL } from "drizzle-orm";
+import { getDbFor, getPlatformDb, schema } from "@/db";
+import { findOrganization } from "@/lib/platform/organizations";
 import type { SessionUser } from "@/lib/auth/session";
 import { giaCuaModel } from "@/lib/ai/provider";
 import { defaultEnvReader, platformAiConfig, type EnvReader, type PlatformAiProviderName } from "@/lib/ai-usage/platform-ai";
@@ -122,6 +123,31 @@ export type RoutingRow = {
   costPerUnitUsd: number | null;
 };
 
+/**
+ * Một dòng «theo workload × model» (30 ngày, nguồn PLATFORM). Đơn AI = đơn `AI_ORDER_SYNC` (ghi đơn) / `AI_AGENT` (bot chốt)
+ * gắn hội thoại, tính cho model phục vụ NHIỀU lượt nhất của hội thoại đó. Ô suy nghĩ / cache / độ trễ = `null` (CHƯA ĐO) cho tới
+ * khi sổ AI có cột của chúng (migration riêng) — không phải 0.
+ */
+export type RoutingModelRow = {
+  workload: PlatformWorkload | "other";
+  model: string;
+  calls: number;
+  errorRate: number | null;
+  conversations: number;
+  inputPerConv: number | null;
+  outputPerConv: number | null;
+  visiblePerConv: number | null;
+  thinkingPerConv: number | null;
+  cachedShare: number | null;
+  latencyP50Ms: number | null;
+  costUsd: number;
+  costPerConvUsd: number | null;
+  /** `null` = chưa đọc được CSDL tổ chức / loại việc không ra đơn. */
+  aiOrders: number | null;
+  closeRate: number | null;
+  costPerAiOrderUsd: number | null;
+};
+
 export type PlatformAiControlView = {
   key: { ready: boolean; reason: string | null; provider: PlatformAiProviderName | null; baseModel: string | null };
   policy: PlatformAiPolicy | null;
@@ -136,6 +162,9 @@ export type PlatformAiControlView = {
   audit: { at: string; action: string; actorEmail: string | null; reason: string | null; after: unknown }[];
   windowDays: number;
   routing: RoutingRow[];
+  byModel: RoutingModelRow[];
+  /** Tổ chức không đọc được khi đếm đơn AI — đơn của nó nằm ngoài số, không phải 0. */
+  byModelErrors: string[];
 };
 
 async function readProbeRecords(): Promise<Record<string, ProbeRecord>> {
@@ -244,6 +273,7 @@ export async function loadPlatformAiControl(user: SessionUser, now: Date = new D
       costPerUnitUsd: units > 0 ? cost / units : null,
     };
   });
+  const { rows: byModel, errors: byModelErrors } = await readRoutingByModel(from, wlExpr);
   const usage: ModelUsageRow[] = rows.map((r) => ({ model: r.model, requests: Number(r.requests), errors: Number(r.errors), inputTokens: Number(r.inputTokens), outputTokens: Number(r.outputTokens), costUsd: Number(r.costUsd), unpricedRequests: Number(r.unpricedRequests) })).sort((x, y) => y.requests - x.requests);
   const priceOf = (m: string | null): UnitPrice | null => {
     if (!m) return null;
@@ -277,8 +307,105 @@ export async function loadPlatformAiControl(user: SessionUser, now: Date = new D
       audit: audit.map((r) => ({ at: r.at.toISOString(), action: r.action, actorEmail: r.actorEmail, reason: r.reason, after: r.after })),
       windowDays: USAGE_WINDOW_DAYS,
       routing,
+      byModel,
+      byModelErrors,
     },
   };
+}
+
+/** Dựng bảng workload × model: sổ AI (nhà) + đếm đơn AI trong CSDL từng tổ chức (chỉ đếm, không đọc nội dung). */
+async function readRoutingByModel(from: Date, wlExpr: SQL<string>): Promise<{ rows: RoutingModelRow[]; errors: string[] }> {
+  const pdb = await getPlatformDb();
+  const a = schema.platformAiUsage;
+  const perRef = await pdb
+    .select({
+      orgCode: a.orgCode,
+      ref: a.ref,
+      wl: wlExpr,
+      model: a.model,
+      calls: sql<number>`coalesce(sum(${a.requests}), 0)::int`,
+      errors: sql<number>`coalesce(sum(${a.requests}) filter (where ${a.status} = 'ERROR'), 0)::int`,
+      input: sql<number>`coalesce(sum(${a.inputTokens}), 0)::float8`,
+      output: sql<number>`coalesce(sum(${a.outputTokens}), 0)::float8`,
+      cost: sql<number>`coalesce(sum(${a.costUsd}), 0)::float8`,
+    })
+    .from(a)
+    .where(and(eq(a.billingSource, "PLATFORM"), gte(a.at, from), ne(a.status, "BLOCKED_QUOTA")))
+    .groupBy(a.orgCode, a.ref, wlExpr, a.model);
+  type Acc = { calls: number; errors: number; input: number; output: number; cost: number; convs: Set<string>; owned: { org: string; conv: string }[] };
+  const acc = new Map<string, Acc & { wl: string; model: string }>();
+  const dominant = new Map<string, { model: string; calls: number }>();
+  for (const r of perRef) {
+    const model = r.model ?? "(không rõ)";
+    const k = `${r.wl}|${model}`;
+    const x = acc.get(k) ?? { wl: r.wl, model, calls: 0, errors: 0, input: 0, output: 0, cost: 0, convs: new Set<string>(), owned: [] };
+    x.calls += Number(r.calls);
+    x.errors += Number(r.errors);
+    x.input += Number(r.input);
+    x.output += Number(r.output);
+    x.cost += Number(r.cost);
+    if (r.ref) x.convs.add(`${r.orgCode}|${r.ref}`);
+    acc.set(k, x);
+    if (r.ref && (r.wl === "order_sync" || r.wl === "sales_chatbot")) {
+      const dk = `${r.orgCode}|${r.ref}|${r.wl}`;
+      const d = dominant.get(dk);
+      if (!d || Number(r.calls) > d.calls) dominant.set(dk, { model, calls: Number(r.calls) });
+    }
+  }
+  for (const [dk, d] of dominant) {
+    const [org, ref, wl] = dk.split("|");
+    acc.get(`${wl}|${d.model}`)?.owned.push({ org, conv: ref.startsWith("order-sync:") ? ref.slice("order-sync:".length) : ref });
+  }
+  // Đơn AI theo hội thoại, mỗi tổ chức một lượt đọc.
+  const orders = new Map<string, number>();
+  const errors: string[] = [];
+  const byOrg = new Map<string, Set<string>>();
+  for (const x of acc.values()) for (const o of x.owned) byOrg.set(o.org, (byOrg.get(o.org) ?? new Set()).add(o.conv));
+  for (const [orgCode, ids] of byOrg) {
+    try {
+      const org = await findOrganization(orgCode);
+      if (!org) throw new Error("không tìm thấy tổ chức");
+      const db = await getDbFor(org);
+      const o = schema.orders;
+      const rows = await db
+        .select({ conv: o.salesConversationId, n: sql<number>`count(*)::int` })
+        .from(o)
+        .where(and(inArray(o.salesConversationId, [...ids]), inArray(o.origin, ["AI_ORDER_SYNC", "AI_AGENT"]), gte(o.insertedAt, from), ne(o.stage, "DELETED")))
+        .groupBy(o.salesConversationId);
+      for (const r of rows) if (r.conv) orders.set(`${orgCode}|${r.conv}`, Number(r.n));
+    } catch (e) {
+      errors.push(`${orgCode}: ${(e instanceof Error ? e.message : String(e)).slice(0, 120)}`);
+    }
+  }
+  const failedOrgs = new Set(errors.map((e) => e.split(":")[0]));
+  const rows: RoutingModelRow[] = [...acc.values()]
+    .map((x) => {
+      const n = x.convs.size;
+      const ordering = x.wl === "order_sync" || x.wl === "sales_chatbot";
+      const blind = x.owned.some((o) => failedOrgs.has(o.org));
+      const aiOrders = !ordering || blind ? null : x.owned.reduce((t, o) => t + (orders.get(`${o.org}|${o.conv}`) ?? 0), 0);
+      const withOrder = !ordering || blind ? null : x.owned.filter((o) => (orders.get(`${o.org}|${o.conv}`) ?? 0) > 0).length;
+      return {
+        workload: x.wl as RoutingModelRow["workload"],
+        model: x.model,
+        calls: x.calls,
+        errorRate: x.calls > 0 ? x.errors / x.calls : null,
+        conversations: n,
+        inputPerConv: n ? x.input / n : null,
+        outputPerConv: n ? x.output / n : null,
+        visiblePerConv: null,
+        thinkingPerConv: null,
+        cachedShare: null,
+        latencyP50Ms: null,
+        costUsd: x.cost,
+        costPerConvUsd: n ? x.cost / n : null,
+        aiOrders,
+        closeRate: withOrder === null || !x.owned.length ? null : withOrder / x.owned.length,
+        costPerAiOrderUsd: aiOrders ? x.cost / aiOrders : null,
+      };
+    })
+    .sort((p, q) => p.workload.localeCompare(q.workload) || q.calls - p.calls);
+  return { rows, errors };
 }
 
 /**

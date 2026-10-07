@@ -29,15 +29,16 @@ import { ensureZaloAccessToken, usableAccessToken } from "@/lib/integrations/zal
 import { chunkText } from "@/lib/messaging/providers";
 import { publish } from "@/lib/realtime/bus";
 import { webhookUrlToken } from "@/lib/platform/webhooks";
-import { AI_DOWN_HANDOFF_REASON, chatTurn, conversationView, describeCustomerImages, openConversation } from "@/lib/sales-chatbot/engine";
-import { recordConversationEvent } from "@/lib/sales-chatbot/events";
-import { COPILOT_NOTE, erpStaffEchoCond, HUMAN_TAKEOVER_MINUTES, MEDIA_ONLY_NOTE, MEDIA_ONLY_TEXT, normalizeEcho, OBSERVE_HUMAN_ARM_NOTE, OBSERVE_NOTE, PAGE_REPLY, STAFF_IMAGE_MARK, STAFF_OUT_PREFIX, staffOutRowId, type StaffMark } from "@/lib/sales-chatbot/fanpage";
+import { chatTurn, conversationView, describeCustomerImages, openConversation } from "@/lib/sales-chatbot/engine";
+import { COPILOT_NOTE, erpStaffEchoCond, MEDIA_ONLY_NOTE, MEDIA_ONLY_TEXT, normalizeEcho, OBSERVE_HUMAN_ARM_NOTE, OBSERVE_NOTE, PAGE_REPLY, STAFF_IMAGE_MARK, STAFF_OUT_PREFIX, staffOutRowId, type StaffMark } from "@/lib/sales-chatbot/fanpage";
 import { draftCopilotSuggestion, loadModeConfig, pinArm } from "@/lib/sales-chatbot/operating-mode";
 import { readPinnedArm, replyGate } from "@/lib/sales-chatbot/operating-mode-shared";
 import { botSendAllowed, inboundPageGate } from "@/lib/sales-chatbot/page-runtime";
 import { PAGE_NOT_LIVE_SEND_ERROR } from "@/lib/sales-chatbot/page-runtime-shared";
 import { applyConversationControl, controlOf, controlSkipNote } from "@/lib/sales-chatbot/conversation-control-shared";
-import { botMaySend, captureSendSnapshot } from "@/lib/sales-chatbot/conversation-control";
+import { botMaySend, captureSendSnapshot, holdGate, startHumanCooldown } from "@/lib/sales-chatbot/conversation-control";
+import { ZALO_STAFF_REASON as ZALO_STAFF_REASON_TEXT } from "@/lib/sales-chatbot/ai-hold-shared";
+import { CONV_OPEN_FAILED_NOTE, HANDOFF_SILENT_NOTE } from "@/lib/sales-chatbot/inbound-retry";
 
 export const ZALO_CONNECTOR = "zalo-oa";
 /** Đợi khách gõ xong trước khi trả lời (khách hay nhắn nhiều tin ngắn liên tiếp). */
@@ -47,7 +48,7 @@ const GRACE_SLACK_MS = 1_000;
 const CLAIM_STALE_MS = 3 * 60_000;
 const ECHO_WINDOW_MS = 10 * 60_000;
 const TEXT_MAX = ZALO_LIMITS.textMax;
-export const ZALO_STAFF_REASON = "Nhân viên đang trả lời trên Zalo OA";
+export const ZALO_STAFF_REASON = ZALO_STAFF_REASON_TEXT;
 const WAITING = "Đang đợi khách gõ xong";
 const BUSY = "Hội thoại đang được trả lời";
 export const ZALO_OUTSIDE_WINDOW = "Ngoài 48 giờ từ tin cuối của khách — Zalo tính phí tin tư vấn, bot không gửi";
@@ -194,14 +195,9 @@ export async function receiveZaloEvent(ev: ZaloEvent, now: Date = new Date()): P
     if (!echo) return { queued: false, reason: "Tin OA không có chữ — không tính là trả lời" };
     await db.insert(t).values({ pageId, threadId: ev.userId, messageId: inboundId(ev.msgId), text: echo, status: "DONE", processedAt: now, note: PAGE_REPLY }).onConflictDoNothing({ target: t.messageId });
     const c = schema.salesChatConversations;
-    // Sổ sự kiện: ghi «nhân viên nhận» khi hội thoại CHUYỂN sang người — không ghi lại mỗi tin của nhân viên.
-    const [took] = await db.select({ id: c.id, status: c.status }).from(c).where(and(eq(c.channel, "ZALO"), eq(c.visitorKey, zaloVisitorKey(oa.oaId, ev.userId)))).limit(1);
-    if (took && took.status !== "HANDOFF") await recordConversationEvent(took.id, { type: "human.took_over", actorKind: "HUMAN", occurredAt: now, reasonCode: "STAFF_REPLIED", key: `staff:${inboundId(ev.msgId)}` });
-    // Đang CẦN NGƯỜI XỬ LÝ vì lý do khác ⇒ giữ lý do đó (không biến thành «nhân viên đang trả lời» tự hết hạn sau 30 phút).
-    await db
-      .update(c)
-      .set({ status: "HANDOFF", handoffReason: sql`case when ${c.status} = 'HANDOFF' and ${c.handoffReason} is not null and ${c.handoffReason} <> ${ZALO_STAFF_REASON} then ${c.handoffReason} else ${ZALO_STAFF_REASON} end`, updatedAt: now })
-      .where(and(eq(c.channel, "ZALO"), eq(c.visitorKey, zaloVisitorKey(oa.oaId, ev.userId))));
+    // Nhường 30 phút + sự kiện «bắt đầu nhường» — CÙNG đường với fanpage (`startHumanCooldown`); đang CẦN NGƯỜI / TIẾP QUẢN ⇒ giữ.
+    const [took] = await db.select({ id: c.id }).from(c).where(and(eq(c.channel, "ZALO"), eq(c.visitorKey, zaloVisitorKey(oa.oaId, ev.userId)))).limit(1);
+    if (took) await startHumanCooldown(took.id, { reason: ZALO_STAFF_REASON, at: now, actorUserId: null, key: `staff:${inboundId(ev.msgId)}`, via: "ZALO" });
     return { queued: false, reason: "Nhân viên đang trả lời trên Zalo OA — bot nhường" };
   }
   if (!ev.text && !ev.imageUrls.length) {
@@ -225,11 +221,11 @@ export async function receiveZaloEvent(ev: ZaloEvent, now: Date = new Date()): P
   return rows.length ? { queued: true, reason: "Đã nhận", userId: ev.userId } : { queued: false, reason: "Tin trùng — đã nhận trước đó" };
 }
 
-async function zaloConversation(oaId: string, userId: string): Promise<{ id: string; status: string; handoffReason: string | null; updatedAt: Date; lastCustomerAt: Date | null; state: Record<string, unknown> } | null> {
+async function zaloConversation(oaId: string, userId: string): Promise<{ id: string; status: string; handoffReason: string | null; updatedAt: Date; humanCooldownUntil: Date | null; lastCustomerAt: Date | null; state: Record<string, unknown> } | null> {
   const db = await getDb();
   const c = schema.salesChatConversations;
   const key = zaloVisitorKey(oaId, userId);
-  const find = async () => (await db.select({ id: c.id, status: c.status, handoffReason: c.handoffReason, updatedAt: c.updatedAt, lastCustomerAt: c.lastCustomerAt, state: c.state }).from(c).where(and(eq(c.channel, "ZALO"), eq(c.visitorKey, key))).limit(1))[0] ?? null;
+  const find = async () => (await db.select({ id: c.id, status: c.status, handoffReason: c.handoffReason, updatedAt: c.updatedAt, humanCooldownUntil: c.humanCooldownUntil, lastCustomerAt: c.lastCustomerAt, state: c.state }).from(c).where(and(eq(c.channel, "ZALO"), eq(c.visitorKey, key))).limit(1))[0] ?? null;
   const existing = await find();
   if (existing) return existing;
   try {
@@ -297,22 +293,21 @@ export async function processZaloThread(userId: string, deps: ZaloDepsAll = {}):
     }
     const conv = await zaloConversation(oa.oaId, userId);
     if (!conv) {
-      await finish("PENDING", "Không mở được hội thoại");
-      return { ...out, error: "Không mở được hội thoại" };
+      await finish("PENDING", CONV_OPEN_FAILED_NOTE);
+      return { ...out, error: CONV_OPEN_FAILED_NOTE };
     }
     // Khách vừa nhắn ⇒ mốc tin cuối của khách (cửa sổ 48 giờ của Zalo tính từ đây).
     await db.update(cv).set({ lastCustomerAt }).where(and(eq(cv.id, conv.id), or(isNull(cv.lastCustomerAt), lt(cv.lastCustomerAt, lastCustomerAt))));
-    if (conv.status === "HANDOFF") {
-      // Nhân viên trả lời trên OA ⇒ nhường 30 phút rồi bot nhận lại; AI hỏng ⇒ thử lại sau cùng khoảng đó. CẦN NGƯỜI XỬ LÝ vì lý
-      // do khác ⇒ ở nguyên tới khi người bấm «Trả lại cho AI».
-      const retryable = conv.handoffReason === ZALO_STAFF_REASON || conv.handoffReason === AI_DOWN_HANDOFF_REASON;
-      if (!retryable || now().getTime() - conv.updatedAt.getTime() < HUMAN_TAKEOVER_MINUTES * 60_000) {
-        await finish("SKIPPED", conv.handoffReason ?? "Đã chuyển nhân viên");
+    // Nhân viên trả lời trên OA ⇒ nhường 30 phút rồi bot nhận lại; AI hỏng ⇒ thử lại sau cùng khoảng đó; «Tiếp quản» / CẦN NGƯỜI
+    // XỬ LÝ ⇒ ở nguyên tới khi người bấm «Trả lại cho AI» — cùng cổng với fanpage (`holdGate`).
+    {
+      const held = await holdGate(conv, now());
+      if (held) {
+        await finish("SKIPPED", held.skip);
         out.processed += ids.length;
-        out.skipped = conv.handoffReason ?? "Đã chuyển nhân viên";
+        out.skipped = held.skip;
         continue;
       }
-      await db.update(cv).set({ status: "OPEN", handoffReason: null, state: sql`${cv.state} - 'handoff'`, updatedAt: now() }).where(eq(cv.id, conv.id));
     }
     // CHẾ ĐỘ VẬN HÀNH (operating-mode-shared.ts — cùng MỘT cổng với fanpage): quan sát / nhánh NGƯỜI của thử nghiệm ⇒ không
     // gọi AI; copilot ⇒ soạn gợi ý, không gửi (câu thật của nhân viên tới qua tiếng vọng `oa_send_*` và được chấm như fanpage).
@@ -368,7 +363,7 @@ export async function processZaloThread(userId: string, deps: ZaloDepsAll = {}):
     }
     // CHUYỂN NGƯỜI ⇒ bot IM LẶNG trên Zalo (như fanpage): nhân viên nhận thông báo trong ERP và trả lời trong OA Manager.
     if (turn.view.status === "HANDOFF") {
-      await finish("DONE", "Chuyển nhân viên — bot không nhắn gì, chờ người trả lời");
+      await finish("DONE", HANDOFF_SILENT_NOTE);
       out.processed += ids.length;
       out.skipped = "Chuyển nhân viên — bot im lặng";
       continue;

@@ -203,14 +203,20 @@ export type HealthAlertDecision = { kind: "NONE" } | { kind: "ALERT"; reason: "N
 
 /**
  * Báo khi nào — HÀM THUẦN. Báo NGAY khi có kiểm mới xấu đi (khoá chưa có ở lần trước); đang ĐỎ thì nhắc lại mỗi
- * `remindEveryMinutes` (khoá chống trùng theo khung giờ — gọi lại bao nhiêu lần trong khung vẫn là MỘT tin); trở lại XANH
+ * `remindEveryMinutes` tính từ lúc sự cố bắt đầu (khoá chống trùng theo khung — gọi lại bao nhiêu lần trong khung vẫn là MỘT tin); trở lại XANH
  * sau khi từng vàng/đỏ ⇒ MỘT tin "đã hồi phục". Vàng kéo dài không nhắc lại (đã báo một lần là đủ — tránh nhờn).
  */
 export function decideHealthAlert(prev: { status: SalesHealthStatus; bad: string[]; since: string } | null, cur: SalesHealth, now: Date, remindEveryMinutes: number): HealthAlertDecision {
   const bad = badCheckKeys(cur);
   const prevBad = new Set(prev?.bad ?? []);
   const fresh = bad.filter((k) => !prevBad.has(k));
-  const bucket = Math.floor(now.getTime() / (remindEveryMinutes * 60_000));
+  // KHUNG NHẮC tính từ lúc sự cố BẮT ĐẦU (`prev.since`), không theo giờ đồng hồ: khung theo giờ chẵn làm một lượt kiểm ở 09:59
+  // và lượt ở 10:00 thành hai khung — hai tin cách nhau một phút (CI đỏ ở #633 khi bộ kiểm thử bắt đầu lúc 09:58). Thiếu /
+  // hỏng `since` ⇒ lùi về khung theo giờ như trước.
+  const width = remindEveryMinutes * 60_000;
+  const sinceMs = prev ? Date.parse(prev.since) : Number.NaN;
+  const anchored = Number.isFinite(sinceMs) && sinceMs <= now.getTime();
+  const bucket = anchored ? `${prev!.since}+${Math.floor((now.getTime() - sinceMs) / width)}` : String(Math.floor(now.getTime() / width));
   if (fresh.length) return { kind: "ALERT", reason: "NEW_PROBLEM", dedupe: `sales-health:new:${fresh.join(",")}:${bucket}` };
   if (cur.status === "RED") return { kind: "ALERT", reason: "REMINDER", dedupe: `sales-health:remind:${bad.join(",")}:${bucket}` };
   if (cur.status === "GREEN" && prev && (prev.status === "RED" || prev.status === "YELLOW")) return { kind: "RECOVERED", dedupe: `sales-health:ok:${prev.since}` };

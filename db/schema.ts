@@ -5101,6 +5101,8 @@ export const platformAiUsage = pgTable(
     check("platform_ai_usage_modality_check", sql`${t.modality} IS NULL OR ${t.modality} IN ('TEXT','VISION','IMAGE')`),
     check("platform_ai_usage_event_key_check", sql`${t.eventKey} IS NULL OR length(${t.eventKey}) BETWEEN 1 AND 200`),
     index("platform_ai_usage_org_at_idx").on(t.orgCode, t.at),
+    // 0231: sổ AI theo HỘI THOẠI cho dấu vết từng tin khách ở hộp thư (lib/ai-usage/conversation-evidence.ts).
+    index("platform_ai_usage_org_ref_at_idx").on(t.orgCode, t.ref, t.at).where(sql`${t.ref} IS NOT NULL`),
     index("platform_ai_usage_at_idx").on(t.at),
     check("platform_ai_usage_source_check", sql`${t.billingSource} in ('BYOK','PLATFORM','HOME')`),
     check("platform_ai_usage_status_check", sql`${t.status} in ('OK','ERROR','BLOCKED_QUOTA')`),
@@ -10668,6 +10670,12 @@ export const salesChatConversations = pgTable(
     adId: text("ad_id"),
     adSeenAt: ts("ad_seen_at"),
     adSource: text("ad_source"),
+    /**
+     * 0231 · AI NHƯỜNG NGƯỜI (lib/sales-chatbot/ai-hold-shared.ts): mốc AI được trả lời lại sau khi NHÂN VIÊN gửi tay. Ghi ở mọi
+     * đường nhận tin nhân viên, xoá khi «Cho AI tiếp tục ngay» / «Trả lại cho AI» / hết hạn. KHÔNG dùng `updated_at` làm đồng hồ
+     * nhường nữa — mọi lượt ghi đều đẩy cột ấy về «bây giờ». NULL ở dòng cũ = đọc mốc cũ như trước (không backfill).
+     */
+    humanCooldownUntil: ts("human_cooldown_until"),
     /** Giỏ nháp của khung THỬ (không ghi đơn thật) + mốc tóm tắt đã đọc cho khách — lib/sales-chatbot/engine.ts. */
     state: jsonb("state").$type<Record<string, unknown>>().notNull().default({}),
     createdBy: text("created_by"),
