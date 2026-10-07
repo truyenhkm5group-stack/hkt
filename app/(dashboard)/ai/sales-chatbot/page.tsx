@@ -139,12 +139,12 @@ export default async function SalesChatbotPage() {
             </SectionCard>
           ) : null}
           {pageRuntime?.isHome ? (
-            <SectionCard title="Bot Chốt Đơn theo page (workspace nhà)" description="Mặc định mọi page TẮT. Bóng = bot soạn câu để so, không gửi. Chạy thật là quyết định của chủ shop.">
+            <SectionCard id="page-runtime" title="Bot Chốt Đơn theo page (workspace nhà)" description="Mặc định mọi page TẮT. Bóng = bot soạn câu để so, không gửi. Chạy thật là quyết định của chủ shop.">
               <PageRuntimePanel pages={pageRuntime.pages} manage={manage} />
             </SectionCard>
           ) : null}
           {modeConfig ? (
-            <SectionCard title="Chế độ vận hành" description="Quan sát → Copilot → Thử nghiệm AI vs Người → Tự động: đo người trước, rồi mới để AI tự trả lời.">
+            <SectionCard id="operating-mode" title="Chế độ vận hành" description="Quan sát → Copilot → Thử nghiệm AI vs Người → Tự động: đo người trước, rồi mới để AI tự trả lời.">
               <ModePanel config={modeConfig} manage={manage} />
             </SectionCard>
           ) : null}
@@ -227,7 +227,7 @@ export default async function SalesChatbotPage() {
               <ChatbotConfigForm config={ai.config} fields={fields} aiState={ai.aiState} appointmentsOn={moduleOn(user, "appointments")} />
             )
           ) : (
-            <SectionCard title="Cấu hình">
+            <SectionCard id="bot-config" title="Cấu hình">
               <p className="text-sm text-muted-foreground">Bạn xem được hội thoại; cấu hình bot cần quyền «AI bán hàng: cấu hình & xuất bản chatbot».</p>
             </SectionCard>
           )}

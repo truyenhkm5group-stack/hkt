@@ -9,8 +9,7 @@ import { instagramAccountOf, messengerApp, messengerBotAppIds, postMessage, send
 import { chunkText } from "@/lib/messaging/providers";
 import { canUseModule } from "@/lib/platform/capabilities";
 import { AI_DOWN_HANDOFF_REASON, chatTurn, conversationView, describeCustomerImages } from "@/lib/sales-chatbot/engine";
-import { ALREADY_REPLIED_NOTE, alreadyRepliedRows, DEAD_AI_DOWN_NOTE, DEAD_SEND_NOTE_PREFIX, deadLetter, dueForClaim, releaseWithBackoff } from "@/lib/sales-chatbot/inbound-retry";
-import { recordConversationEvent } from "@/lib/sales-chatbot/events";
+import { ALREADY_REPLIED_NOTE, alreadyRepliedRows, CONV_OPEN_FAILED_NOTE, EMPTY_REPLY_NOTE, HANDOFF_SILENT_NOTE, DEAD_AI_DOWN_NOTE, DEAD_SEND_NOTE_PREFIX, deadLetter, dueForClaim, releaseWithBackoff } from "@/lib/sales-chatbot/inbound-retry";
 import { dualConnectedPages, loadTransportFacts, PANCAKE_OWNS_PAGE_REASON, transportOwnerOf } from "@/lib/sales-chatbot/channel-ownership";
 import {
   CLAIM_STALE_MS,
@@ -22,7 +21,6 @@ import {
   FIRST_CONTACT_WAIT_MS,
   FOLLOWUP_WAIT_MS,
   GRACE_SLACK_MS,
-  HUMAN_TAKEOVER_MINUTES,
   markWaitingForCustomer,
   MEDIA_ONLY_NOTE,
   MEDIA_ONLY_TEXT,
@@ -39,7 +37,7 @@ import {
   sendFanpageImages,
   sendFanpageText,
   STAFF_IMAGE_MARK,
-  STAFF_INFER_WINDOW_MS,
+  pageSideIsStaffCond,
   STAFF_OUT_PREFIX,
   STAFF_REASON,
   staffOutRowId,
@@ -54,7 +52,7 @@ import { draftCopilotSuggestion, loadModeConfig, pinArm } from "@/lib/sales-chat
 import { readQuickReplyImage } from "@/lib/sales-chatbot/quick-replies";
 import { readPinnedArm, replyGate } from "@/lib/sales-chatbot/operating-mode-shared";
 import { applyConversationControl, controlOf, controlSkipNote } from "@/lib/sales-chatbot/conversation-control-shared";
-import { botMaySend, captureSendSnapshot } from "@/lib/sales-chatbot/conversation-control";
+import { botMaySend, captureSendSnapshot, holdGate, startHumanCooldown } from "@/lib/sales-chatbot/conversation-control";
 import { noteMessengerGraphFailure } from "@/lib/sales-chatbot/messenger-health";
 import { botSendAllowed, inboundPageGate } from "@/lib/sales-chatbot/page-runtime";
 import { PAGE_NOT_LIVE_SEND_ERROR } from "@/lib/sales-chatbot/page-runtime-shared";
@@ -325,16 +323,12 @@ export async function receiveMessengerEvent(ev: MessengerEvent, now: Date = new 
     const [active] = await db
       .select({ id: c.id, status: c.status })
       .from(c)
-      .where(and(eq(c.channel, "FANPAGE"), eq(c.visitorKey, key), gte(c.lastBotAt, new Date(now.getTime() - STAFF_INFER_WINDOW_MS))))
+      .where(and(eq(c.channel, "FANPAGE"), eq(c.visitorKey, key), pageSideIsStaffCond(now)))
       .limit(1);
     if (!active) return { queued: false, reason: "Trả lời tự động của page — bot không chen" };
-    // Sổ sự kiện: ghi «nhân viên nhận» khi hội thoại CHUYỂN sang người — như đường Pancake (fanpage.ts). Thiếu dòng này thì
-    // hội thoại nhân viên đã cầm trong Hộp thư Meta bị đếm vào nhóm «AI tự làm» ở màn «Hiệu quả».
-    if (active.status !== "HANDOFF") await recordConversationEvent(active.id, { type: "human.took_over", actorKind: "HUMAN", occurredAt: now, reasonCode: "STAFF_REPLIED", key: `staff:${ev.mid}` });
-    await db
-      .update(c)
-      .set({ status: "HANDOFF", handoffReason: sql`case when ${c.status} = 'HANDOFF' and ${c.handoffReason} is not null and ${c.handoffReason} <> ${STAFF_REASON} then ${c.handoffReason} else ${STAFF_REASON} end`, updatedAt: now })
-      .where(and(eq(c.channel, "FANPAGE"), eq(c.visitorKey, key)));
+    // Nhường 30 phút + sự kiện «bắt đầu nhường» — CÙNG đường với Pancake (`startHumanCooldown`). Thiếu sự kiện thì hội thoại nhân
+    // viên đã cầm trong Hộp thư Meta bị đếm vào nhóm «AI tự làm» ở màn «Hiệu quả».
+    await startHumanCooldown(active.id, { reason: STAFF_REASON, at: now, actorUserId: null, key: `staff:${ev.mid}`, via: "MESSENGER" });
     return { queued: false, reason: "Nhân viên đang trả lời — bot nhường" };
   }
   // BÌNH LUẬN dưới bài viết (trường `feed`): một hàng chờ riêng mỗi bình luận (`threadId` = «comment:<mã>») — bot trả lời bằng
@@ -557,8 +551,8 @@ export async function processMessengerThread(pageId: string, psid: string, deps:
     const conv = await conversationFor(pageId, psid);
     if (!conv) {
       // Lỗi tạm: nhả tin, lùi dần; hết lượt ⇒ DEAD (inbound-retry.ts).
-      await releaseWithBackoff(db, ids, claim, "Không mở được hội thoại", now());
-      return { ...out, error: "Không mở được hội thoại" };
+      await releaseWithBackoff(db, ids, claim, CONV_OPEN_FAILED_NOTE, now());
+      return { ...out, error: CONV_OPEN_FAILED_NOTE };
     }
     {
       const cv = schema.salesChatConversations;
@@ -567,17 +561,15 @@ export async function processMessengerThread(pageId: string, psid: string, deps:
         .set({ lastCustomerAt, waitingSince: null, followupsSent: 0, nextFollowupAt: null, status: sql`case when ${cv.status} = 'WAITING' then 'OPEN' else ${cv.status} end` })
         .where(eq(cv.id, conv.id));
     }
-    if (conv.status === "HANDOFF") {
-      const ageMs = now().getTime() - conv.updatedAt.getTime();
-      const retryable = conv.handoffReason === STAFF_REASON || conv.handoffReason === AI_DOWN_HANDOFF_REASON;
-      if (!retryable || ageMs < HUMAN_TAKEOVER_MINUTES * 60_000) {
-        await finish("SKIPPED", conv.handoffReason ?? "Đã chuyển nhân viên");
+    // NHƯỜNG NGƯỜI — cùng cổng với đường Pancake (`holdGate`): đang nhường / tiếp quản ⇒ tin đã lưu, 0 lời gọi AI, 0 tin gửi.
+    {
+      const held = await holdGate(conv, now());
+      if (held) {
+        await finish("SKIPPED", held.skip);
         out.processed += ids.length;
-        out.skipped = conv.handoffReason ?? "Đã chuyển nhân viên";
+        out.skipped = held.skip;
         continue;
       }
-      const cv = schema.salesChatConversations;
-      await db.update(cv).set({ status: "OPEN", handoffReason: null, state: sql`${cv.state} - 'handoff'`, updatedAt: now() }).where(eq(cv.id, conv.id));
     }
     await mirrorFanpageContext(conv.id, pageId, psid, new Date(Math.min(...claimed.map((r) => r.createdAt.getTime()))));
     // CHẾ ĐỘ VẬN HÀNH (operating-mode-shared.ts): CÙNG cổng với đường Pancake — quan sát · copilot · thử nghiệm · tự động. Đặt
@@ -644,7 +636,7 @@ export async function processMessengerThread(pageId: string, psid: string, deps:
       const cvh = schema.salesChatConversations;
       const [hc] = await db.select({ reason: cvh.handoffReason, error: cvh.lastError }).from(cvh).where(eq(cvh.id, conv.id)).limit(1);
       if (hc?.reason === AI_DOWN_HANDOFF_REASON) await deadLetter(db, ids, claim, DEAD_AI_DOWN_NOTE, hc.error, now());
-      else await finish("DONE", "Chuyển nhân viên — bot không nhắn gì, chờ người trả lời");
+      else await finish("DONE", HANDOFF_SILENT_NOTE);
       out.processed += ids.length;
       out.skipped = "Chuyển nhân viên — bot im lặng";
       continue;
@@ -677,7 +669,7 @@ export async function processMessengerThread(pageId: string, psid: string, deps:
         if (pr.id) await db.insert(t).values({ pageId, threadId: psid, messageId: pr.id, text: replyText.slice(0, TEXT_MAX), status: "DONE", processedAt: now(), note: "BOT_SENT" }).onConflictDoNothing({ target: t.messageId });
       }
       if (pr && !pr.ok) await deadLetter(db, ids, claim, `${DEAD_SEND_NOTE_PREFIX}${pr.error}`, pr.error, now());
-      else await finish("DONE", replyText ? null : "Bot không có câu trả lời");
+      else await finish("DONE", replyText ? null : EMPTY_REPLY_NOTE);
       out.processed += ids.length;
       if (pr && !pr.ok) {
         out.error = pr.error;

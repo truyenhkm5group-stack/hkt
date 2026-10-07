@@ -12,6 +12,7 @@ import { STAFF_IMAGE_MAX_BYTES, STAFF_IMAGES_MAX, STAFF_REPLY_MAX, type InboxOrd
 import { cn } from "@/lib/utils";
 import { ChannelAvatar } from "./avatar";
 import { ConversationControlBar } from "./control-bar";
+import { MessageTraceLine } from "./message-trace";
 import { LabelsPanel } from "./labels-panel";
 import { NotesPanel } from "./notes-panel";
 import { CustomerHistoryCard, FeedbackPanel } from "./customer-insight";
@@ -263,8 +264,8 @@ export function InboxThreadView({
           </div>
         </header>
 
-        {/* ── AI hay người trả lời khách (Tiếp quản / AI gợi ý / Trả lại AI) ── */}
-        <ConversationControlBar key={`${thread.control?.mode ?? "AUTO"}:${thread.status}`} conversationId={thread.id} channel={thread.channel} control={thread.control} botYields={thread.botYields} handoffReason={thread.handoffReason} canWork={thread.canWork} />
+        {/* ── AI hay người trả lời khách: AI_ACTIVE · HUMAN_COOLDOWN (đếm ngược, «Cho AI tiếp tục ngay») · HUMAN_TAKEOVER («Trả lại cho AI») ── */}
+        <ConversationControlBar key={`${thread.control?.mode ?? "AUTO"}:${thread.status}:${thread.aiHold.state}:${thread.aiHold.until ?? ""}`} conversationId={thread.id} channel={thread.channel} control={thread.control} hold={thread.aiHold} blocks={thread.aiBlocks} handoffReason={thread.handoffReason} canWork={thread.canWork} />
 
         {/* ── Tin nhắn ── */}
         <div className="relative min-h-0 flex-1">
@@ -308,6 +309,7 @@ export function InboxThreadView({
                   </div>
                   {r.m.status === "SENDING" ? <span className="mt-0.5 px-1 text-[11px] text-muted-foreground">Đang gửi…</span> : null}
                   {r.m.status === "FAILED" ? <span className="mt-0.5 max-w-[78%] px-1 text-right text-[11px] font-medium text-destructive">Gửi hỏng — {r.m.error ?? "thử lại"}</span> : null}
+                  {r.m.trace ? <MessageTraceLine trace={r.m.trace} /> : null}
                 </div>
               ),
             )}

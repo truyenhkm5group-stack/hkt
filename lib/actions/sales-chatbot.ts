@@ -172,7 +172,7 @@ export async function resumeConversationAction(id: string): Promise<{ ok: true; 
   const done = await resumeConversationToAi(String(id ?? ""));
   if (!done) return { error: "Hội thoại không ở trạng thái cần người xử lý." };
   const at = new Date();
-  await recordConversationEvent(String(id), { type: "ai.resumed", actorKind: "HUMAN", actorUserId: user.id, occurredAt: at, key: `resume:${at.toISOString()}` });
+  await recordConversationEvent(String(id), { type: "ai.resumed", actorKind: "HUMAN", actorUserId: user.id, occurredAt: at, reasonCode: "RETURNED", key: `resume:${at.toISOString()}` });
   await audit({ userId: user.id, userEmail: user.email, action: "SALES_CHAT_RESUME_AI", entity: "SALES_CHAT_CONVERSATION", entityId: String(id), reason: "Người xử lý xong — trả hội thoại lại cho AI" });
   revalidatePath("/ai/sales-chatbot");
   return { ok: true, message: "Đã trả hội thoại lại cho AI" };
