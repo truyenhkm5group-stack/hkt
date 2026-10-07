@@ -1,0 +1,8 @@
+{
+  "pr": 627,
+  "sha": "459e6803a5bb319c565aeffc81da7ea4834f191d",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-07T02:24:06.215Z",
+  "note": "review độc lập 4 lượt: B1 (không rơi về V1 trên đường tiền), B2 (chỉ câu model sinh đã gửi), HIGH3 (trial trần cứng), gộp #622 đúng (bài so 64 quyết định nhà xanh), 0228 journal/MOI đúng; không chặn: nhánh isHome lưới an toàn ở orgPriceVersion chưa có bài"
+}
