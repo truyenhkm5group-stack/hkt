@@ -1,0 +1,28 @@
+{
+  "schema": 1,
+  "mission_id": "returning-history-leak",
+  "title": "Chặn lộ lịch sử mua của khách khác qua SĐT gõ tay (bảo mật)",
+  "business_goal": "",
+  "status": "RUNNING",
+  "priority": "P2",
+  "risk": "MEDIUM",
+  "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "worker": null,
+  "worktree": null,
+  "branch": "fix/returning-history-leak",
+  "base_sha": "fd678891a496f2bc47f1179c98f3368a3a433040",
+  "domains": [],
+  "owned_paths": [
+    "lib/sales-chatbot/returning.ts",
+    "lib/sales-chatbot/tools.ts",
+    "tests/self-service-journey.test.ts"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-07T21:17:58.572Z",
+  "updated_at": "2026-10-07T21:17:58.572Z",
+  "last_heartbeat": "2026-10-07T21:17:58.572Z",
+  "definition_of_done": []
+}
