@@ -1,0 +1,31 @@
+{
+  "schema": 1,
+  "mission_id": "conversation-delivered-profit",
+  "title": "Lãi gộp đã giao theo nhãn AI tự bán / AI góp công / Người bán (Master Mission P0.5)",
+  "business_goal": "",
+  "status": "RUNNING",
+  "priority": "P2",
+  "risk": "MEDIUM",
+  "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "worker": null,
+  "worktree": null,
+  "branch": "feat/conversation-delivered-profit",
+  "base_sha": "13b73bf2bd2243fa3fb364c9ae4125e9d72976c5",
+  "domains": [],
+  "owned_paths": [
+    "lib/sales-chatbot/attribution-shared.ts",
+    "lib/sales-chatbot/attribution.ts",
+    "app/(dashboard)/ai/sales-chatbot/performance/page.tsx",
+    "tests/order-attribution.test.ts",
+    "tests/pricing-v1.test.ts",
+    "docs/revenue-attribution.md"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-07T20:20:00.128Z",
+  "updated_at": "2026-10-07T20:20:00.128Z",
+  "last_heartbeat": "2026-10-07T20:20:00.128Z",
+  "definition_of_done": []
+}
