@@ -103,7 +103,7 @@ on:
           - cs-stale            # đối chiếu hàng đợi CSKH với thực tế hiện tại (MẶC ĐỊNH CHẠY THỬ; arg "--apply")
           - sepay-schedule      # bật / tắt lịch đối chiếu SePay định kỳ (arg: số phút, ví dụ "60"; "off" để tắt)
           - ai-check            # kiểm AI production đầy đủ: routing 3 bậc, chat, read tool, case care, write tool có xác nhận (arg "--write" mới ghi note kiểm thử), lỗi mạng/hạn mức, audit — chỉ in meta
-          - platform-ai-model-probe  # khoá AI dùng chung (PLATFORM_AI_API_KEY) gọi được model nào — một lời gọi 1 chữ / model, không in khoá (MẶC ĐỊNH CHỈ ĐỌC; arg: các model, trống = gemini-2.5-flash-lite gemini-3.5-flash-lite; "--apply=<1-100> <model>" chạy thử/áp dụng · "--rollback" hoàn tác — ghi chính sách, có nhật ký)
+          - platform-ai-model-probe  # khoá AI dùng chung (PLATFORM_AI_API_KEY) gọi được model nào — một lời gọi 1 chữ / model, không in khoá (MẶC ĐỊNH CHỈ ĐỌC; arg: các model, trống = gemini-2.5-flash-lite gemini-3.5-flash-lite; "--apply=<1-100> <model>" chạy thử/áp dụng · "--rollback" hoàn tác — ghi chính sách, có nhật ký · "--report" bảng A/B canary vs đối chứng)
       days:
         description: "Số ngày (cho sync-pancake-all / sync-vtp-import)"
         type: string

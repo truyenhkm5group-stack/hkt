@@ -11,6 +11,7 @@ import { platformOperatorDenial } from "@/lib/platform-ui/module-toggle";
 import { PricingEconomicsSection } from "@/components/pricing/economics-section";
 import { PlatformAiModelControlSection } from "@/components/platform/ai-model-control";
 import { loadPlatformAiControl } from "@/lib/ai-usage/platform-ai-admin";
+import { loadPlatformModelAb } from "@/lib/ai-usage/platform-ai-ab";
 import { loadPricingAdmin, loadPricingEconomics } from "@/lib/pricing/admin";
 import { cn } from "@/lib/utils";
 
@@ -160,7 +161,7 @@ export default async function OwnerCockpitPage() {
   const c = r.value;
   // Kinh tế đơn vị + Margin Guard (0222) — đọc SAU cockpit (cockpit đã chụp ảnh MRR hôm nay). Lỗi ⇒ khung nói lỗi, trang vẫn dựng.
   const now = new Date();
-  const [econ, admin, aiModel] = await Promise.all([loadPricingEconomics(user), loadPricingAdmin(user), loadPlatformAiControl(user, now)]);
+  const [econ, admin, aiModel, aiAb] = await Promise.all([loadPricingEconomics(user), loadPricingAdmin(user), loadPlatformAiControl(user, now), loadPlatformModelAb(user, now).catch((e: unknown) => ({ ok: false as const, error: e instanceof Error ? e.message : String(e) }))]);
   const h = c.headline;
   return (
     <div className="space-y-5">
@@ -309,7 +310,7 @@ export default async function OwnerCockpitPage() {
         {c.tenants.length === 0 ? <EmptyState title="Chưa có tổ chức nào" className="m-4" /> : <TenantTable rows={c.tenants} />}
       </SectionCard>
 
-      {aiModel.ok ? <PlatformAiModelControlSection data={aiModel.value} usdToVnd={c.usdToVnd} now={now} /> : <EmptyState title="Chưa đọc được Platform AI Model Control" description={aiModel.error} />}
+      {aiModel.ok ? <PlatformAiModelControlSection data={aiModel.value} usdToVnd={c.usdToVnd} now={now} ab={aiAb.ok ? aiAb.value : null} /> : <EmptyState title="Chưa đọc được Platform AI Model Control" description={aiModel.error} />}
 
       {econ.ok && admin.ok ? (
         <PricingEconomicsSection data={econ.value} unitPrices={admin.value.unitPrices} />

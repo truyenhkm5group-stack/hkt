@@ -24,6 +24,7 @@ import { aiDisabledReason } from "@/lib/ai/router";
 import type { AiBillingSource } from "@/lib/ai-usage/types";
 import { ByokAnthropicProvider, ByokGeminiProvider, ByokOpenAiProvider } from "@/lib/ai-builder/providers";
 import { platformChatAi } from "@/lib/ai-builder/provider";
+import { readConversationPlatformModels } from "@/lib/ai-usage/platform-ai-policy";
 import { aiKillSwitchDenial } from "@/lib/ai-usage/control";
 import { recordAiUsage } from "@/lib/ai-usage/ledger";
 import type { AiUsageFeature } from "@/lib/ai-usage/types";
@@ -477,8 +478,10 @@ async function resolveConnector(cfg: SalesChatbotConfig, key: SalesChatbotConfig
   if (key === "platform") {
     // Platform AI Policy: băm canary theo HỘI THOẠI (một hội thoại không nhảy model giữa hai tin); lượt hỏng của model chính
     // mà model dự phòng đã đỡ vẫn là MỘT dòng ERROR trong sổ AI (token / tiền NULL) — tỷ lệ lỗi của model mới đo được.
+    const ref = usage?.ref ?? null;
     const plat = await platformChatAi(org.code, {
-      routingKey: usage?.ref ?? null,
+      routingKey: ref,
+      priorModels: ref ? () => readConversationPlatformModels(org.code, ref) : undefined,
       onPrimaryFailed: (f) => void recordAiUsage({ orgCode: org.code, feature: usage?.feature ?? "sales_chatbot", source: "PLATFORM", provider: f.name, model: f.model, requests: 1, inputTokens: null, outputTokens: null, costUsd: null, status: "ERROR", actorId: usage?.actorId ?? null, ref: usage?.ref ?? null }).catch(() => undefined),
     });
     return plat.ok ? { ok: true, provider: plat.provider, source } : { ok: false, error: plat.reason };

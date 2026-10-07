@@ -4,6 +4,8 @@ import { CONTROL_STAGE_LABEL, PROBE_FRESH_MS, type ControlStage, type PlatformAi
 import { MODEL_PROBE_LABEL, type ModelProbeVerdict } from "@/lib/ai-usage/platform-model-probe";
 import { formatDateTime, formatNumber, formatPercent, formatVND } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import { PlatformModelAbTable } from "@/components/platform/ai-model-ab";
+import type { ModelAbReport } from "@/lib/ai-usage/platform-ai-ab";
 
 /**
  * PLATFORM AI MODEL CONTROL (06/10/2026 · docs/platform/ai-model-control.md) — model của AI DÙNG CHUNG (khoá nền tảng) cho
@@ -33,7 +35,7 @@ function Tile({ label, value, sub }: { label: string; value: string; sub?: strin
   );
 }
 
-export function PlatformAiModelControlSection({ data, usdToVnd, now }: { data: PlatformAiControlView; usdToVnd: number; now: Date }) {
+export function PlatformAiModelControlSection({ data, usdToVnd, now, ab }: { data: PlatformAiControlView; usdToVnd: number; now: Date; ab: ModelAbReport | null }) {
   const { key, policy, candidate, estimate: e } = data;
   const probe = candidate ? data.probes[candidate] : undefined;
   const probeFresh = probe ? now.getTime() - Date.parse(probe.checkedAt) < PROBE_FRESH_MS : false;
@@ -95,6 +97,8 @@ export function PlatformAiModelControlSection({ data, usdToVnd, now }: { data: P
             </div>
           </div>
         ) : null}
+
+        {ab ? <PlatformModelAbTable report={ab} usdToVnd={usdToVnd} /> : null}
 
         {data.usage.length ? (
           <div className="overflow-x-auto">
