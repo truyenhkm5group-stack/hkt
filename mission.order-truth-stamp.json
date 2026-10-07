@@ -1,0 +1,32 @@
+{
+  "schema": 1,
+  "mission_id": "order-truth-stamp",
+  "title": "Đơn bot chốt mang dấu lời nhắc · cấu hình · model · bản mã; sổ AI ghi đúng mã hội thoại",
+  "business_goal": "",
+  "status": "PLANNING",
+  "priority": "P2",
+  "risk": "MEDIUM",
+  "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "worker": null,
+  "worktree": null,
+  "branch": "feat/order-truth-stamp",
+  "base_sha": "b8eea873752f9f883b9fe448fe9072d80c4713b9",
+  "domains": [],
+  "owned_paths": [
+    "lib/sales-chatbot/prompt-stamp.ts",
+    "lib/sales-chatbot/engine.ts",
+    "lib/sales-chatbot/tools.ts",
+    "lib/sales-chatbot/events-shared.ts",
+    "lib/sales-chatbot/followup.ts",
+    "tests/order-truth-stamp.test.ts",
+    "tests/sales-agent-golden"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-07T22:13:24.041Z",
+  "updated_at": "2026-10-07T22:13:24.041Z",
+  "last_heartbeat": "2026-10-07T22:13:24.041Z",
+  "definition_of_done": []
+}
