@@ -298,7 +298,8 @@ export function onboardingProgress(w: OnboardingInput, now: Date): { steps: { la
   const sub = w.provider === "SUBSCRIPTION_CLAUDE_CODE";
   const live = workerLiveness(w.lastHeartbeatAt, now);
   // Khoá đã bị thu hồi (khoá cũ có thể đã lộ / đã gỡ) và chưa ghi danh lại ⇒ quay về bước 2.
-  const daGhiDanh = !!w.enrolledAt && !w.secretRevokedAt;
+  // Worker chạy tay từ trước bộ cài (đã từng gửi nhịp tim bằng khoá hợp lệ) cũng là đã có khoá — không bắt cài lại.
+  const daGhiDanh = (!!w.enrolledAt || !!w.lastHeartbeatAt) && !w.secretRevokedAt;
   if (w.removedAt) {
     st[1] = "PROBLEM";
     next = "Worker đã gỡ. Muốn dùng lại: bấm «Tải bộ cài» rồi chạy bộ cài trên máy.";

@@ -184,6 +184,8 @@ export function testTechWorkerOnboardingPure() {
   assert.deepEqual(s({ ...base, enrolledAt: now, diagnostics: diagMau(), lastHeartbeatAt: now }), ["DONE", "DONE", "DONE", "DONE"], "nhịp tim mới ⇒ ONLINE");
   assert.deepEqual(s({ ...base, enrolledAt: now, diagnostics: diagMau(), lastHeartbeatAt: new Date(now.getTime() - (TECH_LEASE.staleAfterSeconds + 30) * 1000) }), ["DONE", "DONE", "DONE", "PROBLEM"], "im lặng ⇒ không còn ONLINE");
   assert.deepEqual(s({ ...base, provider: "ANTHROPIC_API", enrolledAt: now, lastHeartbeatAt: now }), ["DONE", "DONE", "DONE", "DONE"], "đường API không có bước đăng nhập Claude");
+  assert.deepEqual(s({ ...base, lastHeartbeatAt: now, diagnostics: diagMau() }), ["DONE", "DONE", "DONE", "DONE"], "worker chạy tay từ trước bộ cài vẫn là đã có khoá");
+  assert.deepEqual(s({ ...base, lastHeartbeatAt: now, secretRevokedAt: now }), ["DONE", "PROBLEM", "TODO", "TODO"], "khoá bị thu hồi thắng nhịp tim cũ");
 
   // 1.9 Chính sách in trên trang là SỰ THẬT của mã: deploy không giao được, trần mặc định R0, R4 không bao giờ nhận được.
   assert.equal(TECH_CAPABILITIES.find((c) => c.key === "deploy-production")?.autonomous, false);

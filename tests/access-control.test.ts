@@ -77,6 +77,10 @@ const CO_Y_CONG_KHAI: Record<string, string> = {
   // tự xác thực bằng khoá RIÊNG từng worker (`authenticateTechWorker`, CSDL chỉ giữ băm, thời gian hằng), chỉ chạm
   // việc / lượt chạy của CHÍNH worker đó (fencing `lease_generation`); hình dạng khoá ở tests/tech-worker.test.ts.
   "app/api/tech/worker/[op]/route.ts": "worker headless tự xác thực bằng khoá riêng (Bearer tw_…, CSDL giữ băm); chỉ chạm việc mình đang giữ lease, fencing bằng lease_generation",
+  // Cài worker một nút (mục 15): bộ cài trên máy chủ shop chưa có khoá worker lẫn phiên — nó mang MÃ GHI DANH dùng MỘT lần,
+  // 30 phút, gắn đúng một worker, do người có `tech:manage` tạo (Server Action có audit). Mã chỉ đọc từ THÂN request, CSDL giữ
+  // băm, mọi thất bại cùng một 401, trần thử theo IP; hình dạng ở tests/tech-worker-onboarding.test.ts.
+  "app/api/tech/worker/enroll/route.ts": "bộ cài đổi MÃ GHI DANH dùng một lần (do người có tech:manage tạo) lấy khoá worker; mã chỉ từ thân request, CSDL giữ băm, mọi thất bại cùng 401",
   "app/api/tech/agent-task/route.ts": "gọi bằng x-cron-secret từ GitHub Actions; chỉ GET một việc theo mã, chỉ việc được phép giao, hình dạng khoá ở tests/agent-task-read.test.ts",
   // 0180 · Caddy on-demand TLS hỏi trước khi xin chứng chỉ cho `<slug>.<miền gốc>`: KHÔNG có phiên (Caddy gọi), chỉ trả
   // "ok"/"no" cho đúng tổ chức ĐÃ XUẤT BẢN — không đọc / trả dữ liệu nghiệp vụ nào (tests/self-service-journey.test.ts).
