@@ -163,3 +163,15 @@ tiền phần suy nghĩ, độ trễ lời gọi p50/p95 kèm độ phủ. `/pla
   thêm, độ dài, tiền / độ trễ.
 - Cấu hình: D35l = production hôm nay (3.5 · low · 4.000) · A35m · B31m · C31l · E31n (3.1 · minimal) · F35n · G31l1k · H31n1k;
   Sales: S35 · S31 (SMART) · F31 · F35 (FAST). Mọi lời gọi bằng khoá nền tảng. Chỉ in số tổng hợp. Mỗi lượt ≤ ~10 phút.
+
+## 10. Kết quả benchmark & cấu hình chốt (07/10/2026)
+
+| Loại việc | Cấu hình chốt | Bằng chứng |
+|---|---|---|
+| Sales Chat | `gemini-3.5-flash-lite` · SMART (medium) | 30 điểm HSLC: đúng giá 93% (3.5 FAST 83%, 3.1 SMART 87%); lượt 40 điểm cùng chiều (95% vs 85%). Rẻ hơn ~40% nhưng giảm đúng giá ⇒ không đổi. |
+| Order Sync | `gemini-3.5-flash-lite` · low (giữ) | 29 ca `qa`: 3.5 low / minimal ra đơn 5/15, trường đúng 5/5; 3.1 low / minimal 0/15 (trả NEW_ORDER nhưng không có món). 3.5 low suy nghĩ 0 token ⇒ minimal không rẻ hơn. Canary 3.1 đã hoàn tác. |
+| Quick Extract | `gemini-3.5-flash-lite` · low (giữ) | 80 tin HSLC: 3.5 low và 3.1 minimal cùng 3/4 ca có nhãn; 3.1 minimal rẻ hơn 17% nhưng chọn thêm 3 câu mẫu chưa kiểm được; 3.1 low đắt gấp 2,8 (suy nghĩ). Lưu lượng PLATFORM = 0 ⇒ tiết kiệm thật ≈ 0. |
+| Vision | theo Sales Chat | chưa benchmark (lưu lượng PLATFORM = 0). |
+
+Vì sao 3.1 đắt hơn: ở mức `low` 3.1-flash-lite vẫn suy nghĩ (~140–200 token / lời gọi ghi đơn, ~120 ở chọn câu mẫu) trong khi
+3.5-flash-lite ở `low` suy nghĩ 0. Giá ra rẻ hơn của 3.1 không bù được token suy nghĩ.

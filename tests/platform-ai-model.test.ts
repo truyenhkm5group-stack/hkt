@@ -289,6 +289,7 @@ async function testOperatorWorkflow() {
     assert.ok(sApplied.ok && sApplied.value.stage === "APPLIED" && sApplied.value.currentModel === M25);
     assert.ok(sApplied.ok && sApplied.value.prices.current?.output === 2.5 && sApplied.value.prices.candidate?.output === 0.4, "so giá: 3.5 → 2.5");
     assert.ok(sApplied.ok && sApplied.value.routing.map((r) => r.workload).join(",") === "sales_chatbot,order_sync,quick_extract,vision,other", "bảng routing đủ bốn loại việc + khác");
+    assert.ok(sApplied.ok && Array.isArray(sApplied.value.byModel) && sApplied.value.byModel.every((r) => r.thinkingPerConv === null && r.latencyP50Ms === null), "chưa có cột đo ⇒ CHƯA ĐO, không phải 0");
     assert.ok(sApplied.ok && sApplied.value.routing.find((r) => r.workload === "order_sync")?.scope === "global" && sApplied.value.routing.find((r) => r.workload === "order_sync")?.canaryPct === 100, "chưa có chính sách riêng ⇒ ghi đơn đi chính sách chung");
     const p2 = await readPlatformAiPolicy({ fresh: true });
     assert.equal(p2?.previous?.canaryPct, 10, "bản trước được giữ để hoàn tác");
@@ -473,6 +474,17 @@ async function testLedger() {
         assert.equal(ab.sync!.control.missedLeadRate, 4 / 12);
         assert.ok(Math.abs((ab.sync!.canary.costPerThreadUsd ?? NaN) - (3000 * 0.25 + 60 * 1.5) / 1e6) < 1e-12);
         assert.ok(Math.abs((ab.sync!.control.costPerOrderUsd ?? NaN) - (12 * (3000 * 0.3 + 60 * 2.5)) / 1e6 / 6) < 1e-12);
+        // Bảng workload × model: đơn AI_ORDER_SYNC gắn hội thoại tính cho model phục vụ hội thoại đó.
+        const op = sessionUser({ id: "pam-op2", email: "op2@pam.local", organization: await getHomeOrganization().then((h) => ({ code: h.code, name: h.name, isHome: true })) });
+        const ctl = await loadPlatformAiControl(op, new Date(), GEMINI_ENV);
+        assert.ok(ctl.ok, "đọc được màn điều khiển");
+        if (ctl.ok) {
+          const s31 = ctl.value.byModel.find((r) => r.workload === "order_sync" && r.model === M31);
+          const s35 = ctl.value.byModel.find((r) => r.workload === "order_sync" && r.model === M35);
+          assert.ok(s31 && s31.conversations === 12 && s31.aiOrders === 8 && s31.closeRate === 8 / 12, JSON.stringify(s31));
+          assert.ok(s35 && s35.aiOrders === 6 && Math.abs((s35.costPerAiOrderUsd ?? NaN) - (12 * (3000 * 0.3 + 60 * 2.5)) / 1e6 / 6) < 1e-12, JSON.stringify(s35));
+          assert.ok(!ctl.value.byModelErrors.some((e) => e.startsWith(`${ORG}:`)), "tổ chức của bài kiểm đọc được (tổ chức đã bị bài khác dọn thì nằm trong danh sách lỗi, không phải 0)");
+        }
         // Sổ chưa có cột suy nghĩ (migration riêng) ⇒ cột token CHƯA ĐO, không phải 0.
         assert.equal(ab.sync!.canary.thinkingPerConv, null);
         assert.equal(ab.sync!.canary.thinkCoverage, 0);
