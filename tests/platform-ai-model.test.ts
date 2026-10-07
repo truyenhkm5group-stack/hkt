@@ -289,7 +289,7 @@ async function testOperatorWorkflow() {
     assert.ok(sApplied.ok && sApplied.value.stage === "APPLIED" && sApplied.value.currentModel === M25);
     assert.ok(sApplied.ok && sApplied.value.prices.current?.output === 2.5 && sApplied.value.prices.candidate?.output === 0.4, "so giá: 3.5 → 2.5");
     assert.ok(sApplied.ok && sApplied.value.routing.map((r) => r.workload).join(",") === "sales_chatbot,order_sync,quick_extract,vision,other", "bảng routing đủ bốn loại việc + khác");
-    assert.ok(sApplied.ok && Array.isArray(sApplied.value.byModel) && sApplied.value.byModel.every((r) => r.thinkingPerConv === null && r.latencyP50Ms === null), "chưa có cột đo ⇒ CHƯA ĐO, không phải 0");
+    assert.ok(sApplied.ok && Array.isArray(sApplied.value.byModel), "bảng workload × model đọc được");
     assert.ok(sApplied.ok && sApplied.value.routing.find((r) => r.workload === "order_sync")?.scope === "global" && sApplied.value.routing.find((r) => r.workload === "order_sync")?.canaryPct === 100, "chưa có chính sách riêng ⇒ ghi đơn đi chính sách chung");
     const p2 = await readPlatformAiPolicy({ fresh: true });
     assert.equal(p2?.previous?.canaryPct, 10, "bản trước được giữ để hoàn tác");
@@ -426,6 +426,7 @@ async function testLedger() {
         for (const [arm, model, nOrders, nLeads] of [["c", M31, 8, 2], ["k", M35, 6, 4]] as const) {
           const id = await mkConv("FANPAGE", null);
           row(`order-sync:${id}`, model, "OK", 3000, 60, model === M31 ? (3000 * 0.25 + 60 * 1.5) / 1e6 : (3000 * 0.3 + 60 * 2.5) / 1e6);
+          Object.assign(ledger[ledger.length - 1], { thinkingTokens: model === M31 ? 50 : 10, cachedTokens: 300, latencyMs: model === M31 ? 1200 : 800, workload: "order_sync" });
           if (i < nOrders) await db.insert(schema.orders).values({ id: `erp-pam-${arm}-${i}`, insertedAt: new Date(), origin: "AI_ORDER_SYNC", salesConversationId: id });
           else if (i < nOrders + nLeads) await db.insert(schema.notifications).values({ kind: "SYSTEM", severity: "info", title: "Lead", body: "Khách để SĐT", entityType: "SALES_CHAT", entityId: id, dedupeKey: `sales-order-sync:lead:${id}:0912`, occurredAt: new Date() });
         }
@@ -482,12 +483,18 @@ async function testLedger() {
           const s31 = ctl.value.byModel.find((r) => r.workload === "order_sync" && r.model === M31);
           const s35 = ctl.value.byModel.find((r) => r.workload === "order_sync" && r.model === M35);
           assert.ok(s31 && s31.conversations === 12 && s31.aiOrders === 8 && s31.closeRate === 8 / 12, JSON.stringify(s31));
+          assert.ok(s31 && s31.thinkingPerConv === 50 && s31.visiblePerConv === 10 && s31.cachedShare === 0.1 && s31.latencyP50Ms === 1200, JSON.stringify(s31));
           assert.ok(s35 && s35.aiOrders === 6 && Math.abs((s35.costPerAiOrderUsd ?? NaN) - (12 * (3000 * 0.3 + 60 * 2.5)) / 1e6 / 6) < 1e-12, JSON.stringify(s35));
           assert.ok(!ctl.value.byModelErrors.some((e) => e.startsWith(`${ORG}:`)), "tổ chức của bài kiểm đọc được (tổ chức đã bị bài khác dọn thì nằm trong danh sách lỗi, không phải 0)");
         }
-        // Sổ chưa có cột suy nghĩ (migration riêng) ⇒ cột token CHƯA ĐO, không phải 0.
-        assert.equal(ab.sync!.canary.thinkingPerConv, null);
-        assert.equal(ab.sync!.canary.thinkCoverage, 0);
+        // Sổ 0232: tách suy nghĩ khỏi token ra hiện ra, độ trễ lời gọi; dòng không có số ⇒ CHƯA ĐO (độ phủ < 100%).
+        assert.equal(ab.sync!.canary.thinkingPerConv, 50);
+        assert.equal(ab.sync!.canary.visibleOutPerConv, 10);
+        assert.equal(ab.sync!.canary.thinkingPct, 50 / 60);
+        assert.equal(ab.sync!.control.thinkingPct, 10 / 60);
+        assert.equal(ab.sync!.canary.callP50Ms, 1200);
+        assert.ok(Math.abs((ab.sync!.canary.thinkingCostPerConvUsd ?? NaN) - (50 * 1.5) / 1e6) < 1e-12);
+        assert.equal(ab.chat!.canary.thinkingPerConv, null, "chat: dòng không có thinking_tokens ⇒ chưa đo, không phải 0");
         assert.equal(ab.sync!.scope, "global");
       }
 
@@ -663,7 +670,7 @@ async function testStickyAndVerdict() {
   const pdb = await getPlatformDb();
   await recordAiUsage({ orgCode: "pam-tel", feature: "sales_chatbot", source: "PLATFORM", provider: "gemini-platform", model: M31, requests: 1, inputTokens: 3000, outputTokens: 900, costUsd: 0.002, status: "OK", actorId: null, ref: "order-sync:x", workload: "order_sync", thinkingTokens: 800, cachedTokens: 0, latencyMs: 1500 });
   const [tel] = await pdb.select().from(schema.platformAiUsage).where(eq(schema.platformAiUsage.orgCode, "pam-tel"));
-  assert.deepEqual([tel.outputTokens, tel.costUsd], [900, 0.002], "token ra / tiền GIỮ nguyên nghĩa (gồm cả suy nghĩ) — ô quan sát không đổi phép tính tiền");
+  assert.deepEqual([tel.outputTokens, tel.thinkingTokens, tel.latencyMs, tel.workload, tel.costUsd], [900, 800, 1500, "order_sync", 0.002], "token ra / tiền GIỮ nguyên nghĩa, suy nghĩ là phần của token ra");
   const captured: string[] = [];
   setAiUsageCaptureForBench((e) => captured.push(e.ref ?? ""));
   try {

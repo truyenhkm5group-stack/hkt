@@ -189,7 +189,7 @@ export function PlatformAiModelControlSection({ data, usdToVnd, now, ab }: { dat
             </table>
           </div>
           <p className="text-[11px] text-muted-foreground">
-            Hiện ra · suy nghĩ · cache · độ trễ: «—» = sổ AI chưa có cột đo (migration riêng, đang chờ số) — số tách suy nghĩ hiện có ở benchmark phát lại (ops platform-ai-bench).
+            Hiện ra · suy nghĩ · cache · độ trễ: chỉ lượt đã đo đủ (sổ AI từ 0232); «—» = chưa có lượt nào đo được — không phải 0.
             {data.byModelErrors.length ? ` Không đếm được đơn của: ${data.byModelErrors.join(" · ")}.` : ""}
           </p>
         </div>
