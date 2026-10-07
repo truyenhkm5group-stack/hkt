@@ -9,7 +9,7 @@ import { instagramAccountOf, messengerApp, messengerBotAppIds, postMessage, send
 import { chunkText } from "@/lib/messaging/providers";
 import { canUseModule } from "@/lib/platform/capabilities";
 import { AI_DOWN_HANDOFF_REASON, chatTurn, conversationView, describeCustomerImages } from "@/lib/sales-chatbot/engine";
-import { ALREADY_REPLIED_NOTE, alreadyRepliedRows, DEAD_AI_DOWN_NOTE, DEAD_SEND_NOTE_PREFIX, deadLetter, dueForClaim, releaseWithBackoff } from "@/lib/sales-chatbot/inbound-retry";
+import { ALREADY_REPLIED_NOTE, alreadyRepliedRows, CONV_OPEN_FAILED_NOTE, EMPTY_REPLY_NOTE, HANDOFF_SILENT_NOTE, DEAD_AI_DOWN_NOTE, DEAD_SEND_NOTE_PREFIX, deadLetter, dueForClaim, releaseWithBackoff } from "@/lib/sales-chatbot/inbound-retry";
 import { dualConnectedPages, loadTransportFacts, PANCAKE_OWNS_PAGE_REASON, transportOwnerOf } from "@/lib/sales-chatbot/channel-ownership";
 import {
   CLAIM_STALE_MS,
@@ -551,8 +551,8 @@ export async function processMessengerThread(pageId: string, psid: string, deps:
     const conv = await conversationFor(pageId, psid);
     if (!conv) {
       // Lỗi tạm: nhả tin, lùi dần; hết lượt ⇒ DEAD (inbound-retry.ts).
-      await releaseWithBackoff(db, ids, claim, "Không mở được hội thoại", now());
-      return { ...out, error: "Không mở được hội thoại" };
+      await releaseWithBackoff(db, ids, claim, CONV_OPEN_FAILED_NOTE, now());
+      return { ...out, error: CONV_OPEN_FAILED_NOTE };
     }
     {
       const cv = schema.salesChatConversations;
@@ -636,7 +636,7 @@ export async function processMessengerThread(pageId: string, psid: string, deps:
       const cvh = schema.salesChatConversations;
       const [hc] = await db.select({ reason: cvh.handoffReason, error: cvh.lastError }).from(cvh).where(eq(cvh.id, conv.id)).limit(1);
       if (hc?.reason === AI_DOWN_HANDOFF_REASON) await deadLetter(db, ids, claim, DEAD_AI_DOWN_NOTE, hc.error, now());
-      else await finish("DONE", "Chuyển nhân viên — bot không nhắn gì, chờ người trả lời");
+      else await finish("DONE", HANDOFF_SILENT_NOTE);
       out.processed += ids.length;
       out.skipped = "Chuyển nhân viên — bot im lặng";
       continue;
@@ -669,7 +669,7 @@ export async function processMessengerThread(pageId: string, psid: string, deps:
         if (pr.id) await db.insert(t).values({ pageId, threadId: psid, messageId: pr.id, text: replyText.slice(0, TEXT_MAX), status: "DONE", processedAt: now(), note: "BOT_SENT" }).onConflictDoNothing({ target: t.messageId });
       }
       if (pr && !pr.ok) await deadLetter(db, ids, claim, `${DEAD_SEND_NOTE_PREFIX}${pr.error}`, pr.error, now());
-      else await finish("DONE", replyText ? null : "Bot không có câu trả lời");
+      else await finish("DONE", replyText ? null : EMPTY_REPLY_NOTE);
       out.processed += ids.length;
       if (pr && !pr.ok) {
         out.error = pr.error;

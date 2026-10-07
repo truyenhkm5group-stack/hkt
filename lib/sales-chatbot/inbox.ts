@@ -14,6 +14,7 @@ import { appendContextMessages, resumeConversationToAi, SHOP_SAID } from "@/lib/
 import { recordConversationEvent } from "@/lib/sales-chatbot/events";
 import { aiHoldOf, aiHoldView, humanResumeReason } from "@/lib/sales-chatbot/ai-hold-shared";
 import { startHumanCooldown } from "@/lib/sales-chatbot/conversation-control";
+import { buildMessageTrace, conversationAiBlocks, loadAiUsageForConversation, transportOfConversation } from "@/lib/sales-chatbot/ai-status";
 import { readConversationControl } from "@/lib/sales-chatbot/conversation-control-shared";
 import { HISTORY_CREATED_BY } from "@/lib/sales-chatbot/history-shared";
 import { labelsFor, listLabels, notesFor } from "@/lib/sales-chatbot/inbox-labels";
@@ -433,11 +434,13 @@ export async function loadInboxThread(user: SessionUser, conversationId: unknown
   if (messaging) {
     const t = schema.salesChatInbound;
     const rows = await db
-      .select({ id: t.id, messageId: t.messageId, text: t.text, note: t.note, imageUrls: t.imageUrls, kind: t.kind, createdAt: t.createdAt })
+      .select({ id: t.id, messageId: t.messageId, text: t.text, note: t.note, imageUrls: t.imageUrls, kind: t.kind, createdAt: t.createdAt, status: t.status, attempts: t.attempts, lastError: t.lastError, claimId: t.claimId, claimedAt: t.claimedAt, processedAt: t.processedAt, nextAttemptAt: t.nextAttemptAt, importedAt: t.importedAt })
       .from(t)
       .where(and(eq(t.pageId, conv.pageId!), eq(t.threadId, conv.threadId!)))
       .orderBy(desc(t.createdAt))
       .limit(TIMELINE_MAX);
+    // DẤU VẾT TỪNG TIN KHÁCH (ai-status.ts): dữ liệu ĐÃ CÓ — dòng tin, sổ AI của hội thoại, mốc các dòng BOT_SENT của thread.
+    const traceEv = { transport: await transportOfConversation(conv), aiUsage: await loadAiUsageForConversation(conv.id), botSentAt: rows.filter((r) => r.note === "BOT_SENT").map((r) => r.createdAt) };
     // Một tin bot có thể có HAI dòng BOT_SENT (dòng ghi sẵn `bot-out:` trước khi gửi + dòng mang mã kênh trả về) — giữ một.
     const botSeen: { text: string; at: number }[] = [];
     for (const r of [...rows].reverse()) {
@@ -455,7 +458,7 @@ export async function loadInboxThread(user: SessionUser, conversationId: unknown
       }
       const images = Array.isArray(r.imageUrls) ? (r.imageUrls as string[]).filter((x) => typeof x === "string") : [];
       if (!r.text.trim() && !images.length) continue;
-      items.push({ key: `i:${r.id}`, at: r.createdAt.toISOString(), side, text: r.kind === "COMMENT" ? `[Bình luận] ${r.text}` : r.text, images, author: side === "PAGE" ? "Phía page (ngoài ERP)" : null });
+      items.push({ key: `i:${r.id}`, at: r.createdAt.toISOString(), side, text: r.kind === "COMMENT" ? `[Bình luận] ${r.text}` : r.text, images, author: side === "PAGE" ? "Phía page (ngoài ERP)" : null, ...(side === "CUSTOMER" && !r.importedAt ? { trace: buildMessageTrace(r, traceEv, now) } : {}) });
     }
   }
   const s = schema.salesChatStaffMessages;
@@ -511,6 +514,8 @@ export async function loadInboxThread(user: SessionUser, conversationId: unknown
       handoffReason: conv.handoffReason,
       botYields: conv.status === "HANDOFF",
       aiHold: aiHoldView(conv, now),
+      // Lý do AI KHÔNG trả lời — hỏi đúng các cổng của đường xử lý (ai-status.ts). Không rỗng ⇒ màn hình không được nói «AI đang trả lời».
+      aiBlocks: await conversationAiBlocks(conv),
       control: readConversationControl(conv.state),
       customer: cust
         ? { id: cust.id, name: cust.name, phone: cust.phone, address: cust.address, province: cust.province }

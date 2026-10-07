@@ -19,14 +19,14 @@
  */
 import assert from "node:assert/strict";
 import { rmSync } from "node:fs";
-import { and, eq } from "drizzle-orm";
+import { and, eq, gte, inArray } from "drizzle-orm";
 import { getDb, getPlatformDb, organizationDatabaseUrl, schema } from "@/db";
 import type { AiProvider, AiRequest, AiResponse } from "@/lib/ai/provider";
 import type { SessionUser } from "@/lib/auth/session";
 import { saveConnection, setConnectionStatus, testOrgConnection } from "@/lib/connectors/service";
 import { getEnabledModules, invalidateCapabilities } from "@/lib/platform/capabilities";
 import { withOrganization } from "@/lib/platform/context";
-import { invalidateOrganizations } from "@/lib/platform/organizations";
+import { getHomeOrganization, invalidateOrganizations } from "@/lib/platform/organizations";
 import { provisionOrganization } from "@/lib/platform/provision";
 import {
   AI_DOWN_HANDOFF_REASON,
@@ -41,11 +41,17 @@ import {
   humanResumeReason,
   ZALO_STAFF_REASON,
 } from "@/lib/sales-chatbot/ai-hold-shared";
+import { aiBlock, controlBarStatus } from "@/lib/sales-chatbot/ai-status-shared";
+import { buildMessageTrace, classifyInboundNote, KNOWN_INBOUND_NOTES } from "@/lib/sales-chatbot/ai-status";
 import { DEFAULT_SALES_CHATBOT_CONFIG, SALES_CHATBOT_SETTING_KEY } from "@/lib/sales-chatbot/config";
-import { readConversationControl, TAKEOVER_REASON } from "@/lib/sales-chatbot/conversation-control-shared";
+import { NEEDS_HUMAN_NOTE, readConversationControl, TAKEOVER_REASON } from "@/lib/sales-chatbot/conversation-control-shared";
 import { setConversationControlCore } from "@/lib/sales-chatbot/conversation-control";
-import { setSalesChatProviderForTests } from "@/lib/sales-chatbot/engine";
-import { HUMAN_TAKEOVER_MINUTES, processFanpageThread, receiveFanpageEvent, STAFF_REASON } from "@/lib/sales-chatbot/fanpage";
+import { setSalesChatProviderForTests, TURN_BOT_OFF_ERROR, TURN_MODULE_OFF_ERROR } from "@/lib/sales-chatbot/engine";
+import { conversationFor, HUMAN_TAKEOVER_MINUTES, processFanpageThread, receiveFanpageEvent, STAFF_REASON } from "@/lib/sales-chatbot/fanpage";
+import { CONV_OPEN_FAILED_NOTE, DEAD_AI_DOWN_NOTE, DEAD_SEND_NOTE_PREFIX } from "@/lib/sales-chatbot/inbound-retry";
+import { OPERATING_MODE_SETTING_KEY } from "@/lib/sales-chatbot/operating-mode-shared";
+import { PAGE_OFF_NOTE, PAGE_RUNTIME_SETTING_KEY, PAGE_SHADOW_BOT_OFF_NOTE, PAGE_SHADOW_NOTE } from "@/lib/sales-chatbot/page-runtime-shared";
+import { setSettingJson } from "@/lib/settings";
 import { loadInboxThread, sendStaffReplyCore } from "@/lib/sales-chatbot/inbox";
 import { connectMessengerPage, processMessengerThread, receiveMessengerEvent } from "@/lib/sales-chatbot/messenger";
 
@@ -60,6 +66,8 @@ const PANCAKE_TOKEN = "pancake_page_token_nhuong_0123456789abc";
 const ENV_KEYS = ["FACEBOOK_LOGIN_APP_ID", "FACEBOOK_LOGIN_APP_SECRET", "FACEBOOK_MESSENGER_APP_ID", "FACEBOOK_MESSENGER_APP_SECRET", "PLATFORM_SECRETS_KEY"] as const;
 const BOT_TEXT = "Dạ size M còn hàng ạ, chị lấy mấy cái ạ?";
 const MIN = 60_000;
+const PAGE_H = "7766554433";
+const HOME_ADMIN = "nhuong-nguoi-nha@test.local";
 
 function testPure() {
   const now = new Date();
@@ -370,6 +378,42 @@ async function testFlow() {
       mark = pancake.calls.length;
       const pP2 = await processFanpageThread(PAGE_P, P2, { fetch: pancake.fetch, now: at(31_000) });
       assert.ok(pP2.replies >= 1 && pancake.sends(mark).length >= 1, `nhân viên trả lời 31 phút trước ⇒ AI trả lời lại (đồng hồ là mốc tường minh, không phải updated_at): ${JSON.stringify(pP2)}`);
+
+      // ═══ DẤU VẾT từng tin khách trên dữ liệu thật của đường xử lý ═══
+      const traceOf = async (convId: string, text: string) => {
+        const r = await loadInboxThread(lan, convId);
+        assert.ok(r.ok, JSON.stringify(r));
+        const it = r.thread.items.find((i) => i.side === "CUSTOMER" && i.text === text);
+        assert.ok(it?.trace, `tin «${text}» có dấu vết: ${JSON.stringify(it)}`);
+        return it.trace;
+      };
+      const trCd = await traceOf(convP1, "Còn không em?");
+      assert.ok(trCd.code === "AI_SKIPPED_HUMAN_COOLDOWN" && trCd.steps[1].stage === "ELIGIBLE" && trCd.steps[1].state === "FAILED" && trCd.outcome === "STOPPED", JSON.stringify(trCd));
+      const trOk = await traceOf(convP1, "Lấy 1kg nhé");
+      assert.ok(trOk.code === null && trOk.outcome === "SENT" && trOk.steps.every((s) => s.state === "DONE") && trOk.steps[6].at, `đi trọn tới «Đã gửi», mốc gửi đọc từ BOT_SENT: ${JSON.stringify(trOk)}`);
+      const trTk = await traceOf(convC, "Lấy sỉ 50 cái giá sao?");
+      assert.equal(trTk.code, "AI_SKIPPED_HUMAN_TAKEOVER", JSON.stringify(trTk));
+
+      // ═══ Tổ chức KHÁCH: bot tắt ⇒ AI_BLOCKED / BOT_DISABLED + dấu vết AI_SKIPPED_DISABLED; bật lại ⇒ AI_ACTIVE ═══
+      const off = JSON.stringify({ ...DEFAULT_SALES_CHATBOT_CONFIG, enabled: false });
+      await db.update(schema.settings).set({ value: off }).where(eq(schema.settings.key, SALES_CHATBOT_SETTING_KEY));
+      const P3 = "p-tat-bot";
+      await receiveFanpageEvent(pev(P3, "p3.1", "Có giao hôm nay không?"));
+      ai0 = aiCalls;
+      mark = pancake.calls.length;
+      const pOff = await processFanpageThread(PAGE_P, P3, { fetch: pancake.fetch, now: at(31_000) });
+      assert.ok(pOff.replies === 0 && aiCalls === ai0 && pancake.sends(mark).length === 0, JSON.stringify(pOff));
+      const convP3 = (await convOf(P3)).id;
+      const tOff = await loadInboxThread(lan, convP3);
+      assert.ok(tOff.ok);
+      assert.deepEqual(tOff.thread.aiBlocks.map((b) => b.code), ["BOT_DISABLED"], JSON.stringify(tOff.thread.aiBlocks));
+      const sOff = controlBarStatus({ hold: tOff.thread.aiHold, blocks: tOff.thread.aiBlocks, mode: "AUTO", handoffReason: null, control: null, lapsed: false, formatAt: (s) => s });
+      assert.ok(sOff.state === "AI_BLOCKED" && !/AI đang (tự )?trả lời/.test(sOff.text), JSON.stringify(sOff));
+      assert.equal((await traceOf(convP3, "Có giao hôm nay không?")).code, "AI_SKIPPED_DISABLED");
+      await db.update(schema.settings).set({ value: cfg }).where(eq(schema.settings.key, SALES_CHATBOT_SETTING_KEY));
+      const tOn = await loadInboxThread(lan, convP3);
+      assert.ok(tOn.ok && tOn.thread.aiBlocks.length === 0, JSON.stringify(tOn.ok && tOn.thread.aiBlocks));
+      assert.equal(controlBarStatus({ hold: tOn.thread.aiHold, blocks: tOn.thread.aiBlocks, mode: "AUTO", handoffReason: null, control: null, lapsed: false, formatAt: (s) => s }).state, "AI_ACTIVE", "tổ chức khách bình thường ⇒ AI_ACTIVE");
     });
 
     // ═══ Cô lập tổ chức: mã hội thoại của tổ chức khác ⇒ không có, không đổi được ═══
@@ -395,8 +439,145 @@ async function testFlow() {
   }
 }
 
+/** Bảng ghi chú → mã + dấu vết (thuần). Mỗi ghi chú đường xử lý ghi vào `sales_chat_inbound.note` đều có mã — không UNKNOWN. */
+function testTracePure() {
+  for (const note of KNOWN_INBOUND_NOTES) {
+    const v = classifyInboundNote(note, { status: "SKIPPED", lastError: null, transport: "MESSENGER" });
+    assert.ok(v && !v.code.startsWith("UNKNOWN"), `ghi chú «${note}» phải có mã: ${JSON.stringify(v)}`);
+  }
+  const k = (note: string, status = "SKIPPED", lastError: string | null = null, transport: "MESSENGER" | "PANCAKE" | "ZALO" = "MESSENGER") => classifyInboundNote(note, { status, lastError, transport })?.code;
+  assert.equal(k(PAGE_OFF_NOTE), "AI_SKIPPED_PAGE_OFF");
+  assert.equal(k(PAGE_SHADOW_NOTE), "AI_SKIPPED_PAGE_SHADOW");
+  assert.equal(k(PAGE_SHADOW_BOT_OFF_NOTE), "AI_SKIPPED_DISABLED");
+  assert.equal(k(TURN_BOT_OFF_ERROR), "AI_SKIPPED_DISABLED");
+  assert.equal(k(TURN_MODULE_OFF_ERROR), "AI_SKIPPED_MODULE_OFF");
+  assert.equal(k(STAFF_REASON), "AI_SKIPPED_HUMAN_COOLDOWN");
+  assert.equal(k(ZALO_STAFF_REASON), "AI_SKIPPED_HUMAN_COOLDOWN");
+  assert.equal(k(TAKEOVER_REASON), "AI_SKIPPED_HUMAN_TAKEOVER");
+  assert.equal(k(`${NEEDS_HUMAN_NOTE}: Khách sỉ — cần báo giá riêng`), "AI_SKIPPED_NEEDS_HUMAN");
+  assert.equal(k(CONV_OPEN_FAILED_NOTE, "DEAD"), "AI_QUEUE_FAILED", "hết lượt thử ⇒ hàng chờ hỏng");
+  assert.equal(k(DEAD_AI_DOWN_NOTE, "DEAD", "Anthropic 401: invalid x-api-key"), "AI_PROVIDER_AUTH_ERROR");
+  assert.equal(k(DEAD_AI_DOWN_NOTE, "DEAD", "429 rate_limit_error: quota exceeded"), "AI_PROVIDER_QUOTA");
+  assert.equal(k(DEAD_AI_DOWN_NOTE, "DEAD", "overloaded_error 529"), "AI_MODEL_ERROR");
+  assert.equal(k(DEAD_AI_DOWN_NOTE, "DEAD", "prompt is too long: 210000 tokens"), "AI_CONTEXT_ERROR");
+  assert.equal(k(`${DEAD_SEND_NOTE_PREFIX}(#10) outside window`, "DEAD", null, "MESSENGER"), "MESSENGER_SEND_FAILED");
+  assert.equal(k(`${DEAD_SEND_NOTE_PREFIX}Pancake 500`, "DEAD", null, "PANCAKE"), "PANCAKE_SEND_FAILED");
+  assert.equal(k("Một ghi chú chưa ai khai"), "UNKNOWN: Một ghi chú chưa ai khai", "ghi chú lạ ⇒ UNKNOWN nguyên văn, không đoán");
+
+  const now = new Date();
+  const ago = (ms: number) => new Date(now.getTime() - ms);
+  const base = { attempts: 0, lastError: null, claimId: null, claimedAt: null, processedAt: null, nextAttemptAt: null, createdAt: ago(5 * MIN) };
+  const ev = { transport: "MESSENGER" as const, aiUsage: [], botSentAt: [] };
+  const off = buildMessageTrace({ ...base, status: "SKIPPED", note: PAGE_OFF_NOTE, claimId: "c", claimedAt: ago(4 * MIN), processedAt: ago(4 * MIN) }, ev, now);
+  assert.equal(off.code, "AI_SKIPPED_PAGE_OFF");
+  assert.deepEqual(off.steps.map((s) => s.state), ["DONE", "FAILED", "NOT_REACHED", "NOT_REACHED", "NOT_REACHED", "NOT_REACHED", "NOT_REACHED"], "dừng ở «Đủ điều kiện AI»");
+  const pending = buildMessageTrace({ ...base, status: "PENDING", note: null }, ev, now);
+  assert.ok(pending.outcome === "IN_PROGRESS" && pending.steps[1].state === "NOT_MEASURED" && pending.steps[2].state === "CURRENT", JSON.stringify(pending));
+  const composing = buildMessageTrace({ ...base, status: "PENDING", note: null, claimId: "c", claimedAt: ago(MIN) }, ev, now);
+  assert.equal(composing.steps[3].state, "CURRENT");
+  const sent = buildMessageTrace({ ...base, status: "DONE", note: null, claimId: "c", claimedAt: ago(4 * MIN), processedAt: ago(3 * MIN) }, { ...ev, aiUsage: [{ at: ago(3.5 * MIN), status: "OK" }], botSentAt: [ago(3.2 * MIN)] }, now);
+  assert.ok(sent.outcome === "SENT" && sent.steps[4].at === ago(3.5 * MIN).toISOString() && sent.steps[6].at === ago(3.2 * MIN).toISOString(), JSON.stringify(sent));
+  const quick = buildMessageTrace({ ...base, status: "DONE", note: null, claimId: "c", claimedAt: ago(4 * MIN), processedAt: ago(3 * MIN) }, ev, now);
+  assert.equal(quick.steps[4].at, null, "không có lượt AI (câu mẫu) ⇒ «Đã soạn» chưa đo, không bịa mốc");
+  const auth = buildMessageTrace({ ...base, status: "DEAD", note: DEAD_AI_DOWN_NOTE, lastError: "401 Unauthorized", claimId: "c", claimedAt: ago(4 * MIN), processedAt: ago(3 * MIN) }, ev, now);
+  assert.ok(auth.code === "AI_PROVIDER_AUTH_ERROR" && auth.steps[3].stage === "COMPOSING" && auth.steps[3].state === "FAILED" && auth.detail === "401 Unauthorized", JSON.stringify(auth));
+  const unk = buildMessageTrace({ ...base, status: "DONE", note: "lạ" }, ev, now);
+  assert.ok(unk.code === "UNKNOWN: lạ" && unk.outcome === "UNKNOWN" && unk.steps.slice(1).every((s) => s.state === "NOT_MEASURED"));
+
+  // Câu hiển thị: còn lý do chặn ⇒ AI_BLOCKED, KHÔNG BAO GIỜ «AI đang (tự) trả lời»; người đang cầm vẫn hiện người, kèm câu phụ.
+  const view = { state: "AI_ACTIVE" as const, cause: null, until: null, serverNow: now.toISOString() };
+  const blocks = [aiBlock("PAGE_OFF", "Page chưa bật"), aiBlock("BOT_DISABLED", "Bot tắt")];
+  const blocked = controlBarStatus({ hold: view, blocks, mode: "AUTO", handoffReason: null, control: null, lapsed: false, formatAt: (s) => s });
+  assert.ok(blocked.state === "AI_BLOCKED" && !/AI đang (tự )?trả lời/.test(blocked.text) && blocked.text.includes("Page chưa bật") && blocked.note?.includes("Bot tắt"), JSON.stringify(blocked));
+  assert.equal(controlBarStatus({ hold: view, blocks: [], mode: "AUTO", handoffReason: null, control: null, lapsed: false, formatAt: (s) => s }).state, "AI_ACTIVE");
+  const cdBlocked = controlBarStatus({ hold: { ...view, state: "HUMAN_COOLDOWN", cause: "STAFF_REPLY", until: new Date(now.getTime() + MIN).toISOString() }, blocks, mode: "AUTO", handoffReason: null, control: null, lapsed: false, formatAt: (s) => s });
+  assert.ok(cdBlocked.state === "HUMAN_COOLDOWN" && cdBlocked.note?.includes("Page chưa bật"), "đang nhường mà page tắt ⇒ nói luôn hết nhường AI vẫn im");
+  assert.ok(!/AI trả lời từ tin khách kế tiếp/.test(controlBarStatus({ hold: { ...view, state: "HUMAN_COOLDOWN", cause: "STAFF_REPLY", until: now.toISOString() }, blocks, mode: "AUTO", handoffReason: null, control: null, lapsed: true, formatAt: (s) => s }).text));
+}
+
+/**
+ * WORKSPACE NHÀ, cổng page chưa bật (sự cố 07/10/2026): tin khách bị bỏ ⇒ hội thoại AI_BLOCKED / PAGE_OFF (không bao giờ «AI đang
+ * tự trả lời»), dấu vết dừng ở «Đủ điều kiện AI» với AI_SKIPPED_PAGE_OFF; ba lớp chặn cùng lúc (page · bot tắt · không nguồn AI)
+ * đều hiện, đúng thứ tự đường xử lý. Chỉ ĐỌC: bài không bật page nào. Dọn sạch CSDL nhà ở cuối.
+ */
+async function testHomeBlocked() {
+  const home = await getHomeOrganization();
+  const pdb = await getPlatformDb();
+  const modWhere = and(eq(schema.platformOrganizationModules.organizationId, home.id), eq(schema.platformOrganizationModules.moduleKey, "ai_sales"));
+  const [mod0] = await pdb.select({ enabled: schema.platformOrganizationModules.enabled }).from(schema.platformOrganizationModules).where(modWhere);
+  const setModule = async (enabled: boolean | null) => {
+    if (enabled === null) await pdb.delete(schema.platformOrganizationModules).where(modWhere);
+    else await pdb.insert(schema.platformOrganizationModules).values({ organizationId: home.id, moduleKey: "ai_sales", enabled, updatedBy: "system:test" }).onConflictDoUpdate({ target: [schema.platformOrganizationModules.organizationId, schema.platformOrganizationModules.moduleKey], set: { enabled, updatedBy: "system:test" } });
+    invalidateCapabilities();
+  };
+  const startedAt = new Date(Date.now() - 1_000);
+  const pancake = fakePancake();
+  setSalesChatProviderForTests(() => fakeBot());
+  await setModule(true);
+  try {
+    await withOrganization(home.code, async () => {
+      const db = await getDb();
+      const st = schema.settings;
+      const KEYS = [SALES_CHATBOT_SETTING_KEY, PAGE_RUNTIME_SETTING_KEY, OPERATING_MODE_SETTING_KEY];
+      const snap = await db.select().from(st).where(inArray(st.key, KEYS));
+      const [connBefore] = await db.select({ id: schema.orgConnections.id }).from(schema.orgConnections).where(eq(schema.orgConnections.connectorKey, "pancake-fanpage"));
+      assert.equal(connBefore, undefined, "CSDL nhà của bộ kiểm thử chưa có kết nối fanpage — bài này dựng rồi gỡ");
+      await db.delete(schema.users).where(eq(schema.users.email, HOME_ADMIN));
+      const [u] = await db.insert(schema.users).values({ email: HOME_ADMIN, name: "Nhường nhà", passwordHash: "khong-dang-nhap", role: "ADMIN" }).returning();
+      const admin = { id: u.id, email: u.email, name: u.name, role: "ADMIN", permissions: [], scope: "ALL", departmentCodes: [], positionId: null, organization: { code: home.code, name: home.name, isHome: true } } as unknown as SessionUser;
+      const c = schema.salesChatConversations;
+      const t = schema.salesChatInbound;
+      try {
+        assert.ok("ok" in (await saveConnection(admin, { connectorKey: "pancake-fanpage", settings: { pageId: PAGE_H }, secrets: { pageAccessToken: PANCAKE_TOKEN } })));
+        assert.ok("ok" in (await testOrgConnection(admin, "pancake-fanpage", { tester: { fetch: pancake.fetch } })));
+        assert.ok("ok" in (await setConnectionStatus(admin, "pancake-fanpage", "ACTIVE")));
+        await db.delete(st).where(inArray(st.key, [PAGE_RUNTIME_SETTING_KEY, OPERATING_MODE_SETTING_KEY]));
+        await setSettingJson(SALES_CHATBOT_SETTING_KEY, { ...DEFAULT_SALES_CHATBOT_CONFIG, enabled: true });
+        const TH = "h-nhuong-1";
+        const conv = await conversationFor(PAGE_H, TH);
+        assert.ok(conv);
+        assert.ok((await receiveFanpageEvent({ pageId: PAGE_H, threadId: TH, messageId: "h.1", text: "Chả cá còn không shop?", customerName: "Khách nhà", fromPage: false, humanStaff: false, inbox: true, comment: null, imageUrls: [] })).queued);
+        const ai0 = aiCalls;
+        const r = await processFanpageThread(PAGE_H, TH, { fetch: pancake.fetch, now: () => new Date(Date.now() + 31_000) });
+        assert.ok(r.skipped === PAGE_OFF_NOTE && aiCalls === ai0 && pancake.sends(0).length === 0, JSON.stringify(r));
+        const th = await loadInboxThread(admin, conv.id);
+        assert.ok(th.ok, JSON.stringify(th));
+        assert.equal(th.thread.aiHold.state, "AI_ACTIVE", "không ai đang cầm — nhưng đó KHÔNG phải «AI đang trả lời»");
+        assert.deepEqual(th.thread.aiBlocks.map((b) => b.code), ["PAGE_OFF"], JSON.stringify(th.thread.aiBlocks));
+        assert.ok(th.thread.aiBlocks[0].fixHref?.includes("#page-runtime"), "nút sửa trỏ tới khối «Bot Chốt Đơn theo page»");
+        const s = controlBarStatus({ hold: th.thread.aiHold, blocks: th.thread.aiBlocks, mode: "AUTO", handoffReason: null, control: null, lapsed: false, formatAt: (x) => x });
+        assert.ok(s.state === "AI_BLOCKED" && !/AI đang (tự )?trả lời/.test(s.text), `nhà, page OFF ⇒ AI_BLOCKED, không bao giờ «AI đang tự trả lời»: ${JSON.stringify(s)}`);
+        const tr = th.thread.items.find((i) => i.side === "CUSTOMER")?.trace;
+        assert.ok(tr && tr.code === "AI_SKIPPED_PAGE_OFF" && tr.steps[1].state === "FAILED" && tr.steps.slice(2).every((x) => x.state === "NOT_REACHED"), `dấu vết dừng ở «Đủ điều kiện AI»: ${JSON.stringify(tr)}`);
+        // Ba lớp của sự cố cùng lúc: page OFF · bot tắt · không nguồn AI nào chạy được — đúng thứ tự đường xử lý.
+        await setSettingJson(SALES_CHATBOT_SETTING_KEY, { ...DEFAULT_SALES_CHATBOT_CONFIG, enabled: false });
+        setSalesChatProviderForTests(() => null);
+        const th3 = await loadInboxThread(admin, conv.id);
+        assert.ok(th3.ok);
+        assert.deepEqual(th3.thread.aiBlocks.map((b) => b.code), ["PAGE_OFF", "BOT_DISABLED", "NO_AI_SOURCE"], JSON.stringify(th3.thread.aiBlocks));
+        // Chỉ đọc: không bật page, không trả lời ngược tin cũ.
+        assert.equal((await db.select({ s: t.status }).from(t).where(eq(t.messageId, "h.1")))[0]?.s, "SKIPPED");
+        assert.equal((await db.select().from(st).where(eq(st.key, PAGE_RUNTIME_SETTING_KEY))).length, 0, "bài không bật page nào");
+      } finally {
+        await db.delete(c).where(eq(c.pageId, PAGE_H));
+        await db.delete(t).where(eq(t.pageId, PAGE_H));
+        await db.delete(schema.orgConnections).where(eq(schema.orgConnections.connectorKey, "pancake-fanpage"));
+        await db.delete(schema.auditLogs).where(and(gte(schema.auditLogs.createdAt, startedAt), eq(schema.auditLogs.userId, u.id)));
+        await db.delete(schema.users).where(eq(schema.users.id, u.id));
+        await db.delete(st).where(inArray(st.key, KEYS));
+        if (snap.length) await db.insert(st).values(snap);
+      }
+    });
+  } finally {
+    setSalesChatProviderForTests(null);
+    await pdb.delete(schema.platformAiUsage).where(and(eq(schema.platformAiUsage.orgCode, home.code), gte(schema.platformAiUsage.at, startedAt)));
+    await setModule(mod0 ? mod0.enabled : null);
+  }
+}
+
 export async function testSalesHumanTakeover() {
   testPure();
+  testTracePure();
   const saved = Object.fromEntries(ENV_KEYS.map((k) => [k, process.env[k]]));
   process.env.FACEBOOK_LOGIN_APP_ID = APP_ID;
   process.env.FACEBOOK_LOGIN_APP_SECRET = APP_SECRET;
@@ -407,6 +588,7 @@ export async function testSalesHumanTakeover() {
     await cleanupOrg(ORG);
     await cleanupOrg(ORG_B);
     await testFlow();
+    await testHomeBlocked();
   } finally {
     for (const k of ENV_KEYS) {
       if (saved[k] === undefined) delete process.env[k];

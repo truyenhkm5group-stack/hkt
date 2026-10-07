@@ -38,6 +38,7 @@ import { PAGE_NOT_LIVE_SEND_ERROR } from "@/lib/sales-chatbot/page-runtime-share
 import { applyConversationControl, controlOf, controlSkipNote } from "@/lib/sales-chatbot/conversation-control-shared";
 import { botMaySend, captureSendSnapshot, holdGate, startHumanCooldown } from "@/lib/sales-chatbot/conversation-control";
 import { ZALO_STAFF_REASON as ZALO_STAFF_REASON_TEXT } from "@/lib/sales-chatbot/ai-hold-shared";
+import { CONV_OPEN_FAILED_NOTE, HANDOFF_SILENT_NOTE } from "@/lib/sales-chatbot/inbound-retry";
 
 export const ZALO_CONNECTOR = "zalo-oa";
 /** Đợi khách gõ xong trước khi trả lời (khách hay nhắn nhiều tin ngắn liên tiếp). */
@@ -292,8 +293,8 @@ export async function processZaloThread(userId: string, deps: ZaloDepsAll = {}):
     }
     const conv = await zaloConversation(oa.oaId, userId);
     if (!conv) {
-      await finish("PENDING", "Không mở được hội thoại");
-      return { ...out, error: "Không mở được hội thoại" };
+      await finish("PENDING", CONV_OPEN_FAILED_NOTE);
+      return { ...out, error: CONV_OPEN_FAILED_NOTE };
     }
     // Khách vừa nhắn ⇒ mốc tin cuối của khách (cửa sổ 48 giờ của Zalo tính từ đây).
     await db.update(cv).set({ lastCustomerAt }).where(and(eq(cv.id, conv.id), or(isNull(cv.lastCustomerAt), lt(cv.lastCustomerAt, lastCustomerAt))));
@@ -362,7 +363,7 @@ export async function processZaloThread(userId: string, deps: ZaloDepsAll = {}):
     }
     // CHUYỂN NGƯỜI ⇒ bot IM LẶNG trên Zalo (như fanpage): nhân viên nhận thông báo trong ERP và trả lời trong OA Manager.
     if (turn.view.status === "HANDOFF") {
-      await finish("DONE", "Chuyển nhân viên — bot không nhắn gì, chờ người trả lời");
+      await finish("DONE", HANDOFF_SILENT_NOTE);
       out.processed += ids.length;
       out.skipped = "Chuyển nhân viên — bot im lặng";
       continue;

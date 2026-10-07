@@ -33,6 +33,12 @@ export const CONTROL_COPILOT_NOTE = "Hội thoại ở chế độ AI gợi ý �
 /** Ghi chú khi bot đã soạn xong mà người vừa trả lời / tiếp quản — câu đã soạn KHÔNG gửi. */
 export const BOT_YIELDED_NOTE = "Người vừa trả lời hoặc tiếp quản trong lúc bot soạn — bot không gửi câu đã soạn";
 
+/**
+ * Ghi chú tin khách bỏ qua vì hội thoại CẦN NGƯỜI XỬ LÝ (AI / công cụ xin người, chat web có nhân viên) — tiền tố cố định, lý do
+ * chuyển người nối sau «: ». Dấu vết từng tin (`ai-status.ts`) đọc tiền tố này, không phải đoán từ câu lý do tự do của model.
+ */
+export const NEEDS_HUMAN_NOTE = "Đã chuyển nhân viên";
+
 export const CONTROL_REASON_MAX = 200;
 
 export type ControlStamp = {

@@ -2,10 +2,12 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Bot, Hand, Loader2, Play, Sparkles, Timer } from "lucide-react";
+import { Ban, Bot, Hand, Loader2, Play, Sparkles, Timer } from "lucide-react";
 import { toast } from "sonner";
 import { setConversationControlAction } from "@/lib/actions/sales-inbox";
-import { AI_HOLD_LABEL, cooldownClock, cooldownRemainingMs, formatCountdown, HUMAN_COOLDOWN_MINUTES, type AiHoldView } from "@/lib/sales-chatbot/ai-hold-shared";
+import Link from "next/link";
+import { cooldownRemainingMs, formatCountdown, type AiHoldView } from "@/lib/sales-chatbot/ai-hold-shared";
+import { controlBarStatus, type AiBlock } from "@/lib/sales-chatbot/ai-status-shared";
 import { CONTROL_REASON_MAX, type ControlStamp, type ConversationControl } from "@/lib/sales-chatbot/conversation-control-shared";
 import { formatDateTime } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -24,6 +26,7 @@ export function ConversationControlBar({
   channel,
   control,
   hold,
+  blocks,
   handoffReason,
   canWork,
 }: {
@@ -31,6 +34,8 @@ export function ConversationControlBar({
   channel: string;
   control: ControlStamp | null;
   hold: AiHoldView;
+  /** Lý do AI KHÔNG trả lời do máy chủ tính bằng đúng các cổng của đường xử lý (ai-status.ts). */
+  blocks: AiBlock[];
   handoffReason: string | null;
   canWork: boolean;
 }) {
@@ -91,19 +96,10 @@ export function ConversationControlBar({
     }
   };
 
-  const status =
-    hold.state === "HUMAN_TAKEOVER"
-      ? hold.cause === "TAKEOVER"
-        ? `${AI_HOLD_LABEL.HUMAN_TAKEOVER} cho tới khi trả lại${control?.byName ? ` · ${control.byName}` : ""}${control?.at ? ` · ${formatDateTime(control.at)}` : ""}${control?.reason ? ` · «${control.reason}»` : ""}`
-        : `Cần người xử lý — ${handoffReason ?? "AI đã chuyển người"}. AI im cho tới khi trả lại.`
-      : hold.state === "HUMAN_COOLDOWN"
-        ? lapsed
-          ? "Hết nhường — AI trả lời từ tin khách kế tiếp."
-          : `${AI_HOLD_LABEL.HUMAN_COOLDOWN}${hold.cause === "AI_DOWN" ? " (AI tạm hỏng, tự thử lại)" : " — nhân viên vừa gửi tay"} · tự trả lời lại lúc ${cooldownClock(hold.until)}`
-        : mode === "COPILOT"
-          ? "AI chỉ soạn gợi ý, không gửi — bạn gửi khách."
-          : `${AI_HOLD_LABEL.AI_ACTIVE}. Bạn gửi tin thì AI nhường ${HUMAN_COOLDOWN_MINUTES} phút; bấm «Tiếp quản» để AI im hẳn.`;
-  const tone = hold.state === "HUMAN_TAKEOVER" ? "rose" : (hold.state === "HUMAN_COOLDOWN" && !lapsed) || mode === "COPILOT" ? "amber" : "violet";
+  // Câu hiển thị dựng bằng MỘT hàm thuần (ai-status-shared.ts): còn lý do chặn ⇒ AI_BLOCKED, không bao giờ «AI đang trả lời».
+  const shown = controlBarStatus({ hold, blocks, mode, handoffReason, control, lapsed, formatAt: formatDateTime });
+  const status = shown.text;
+  const tone = shown.state === "HUMAN_TAKEOVER" || shown.state === "AI_BLOCKED" ? "rose" : (shown.state === "HUMAN_COOLDOWN" && !lapsed) || mode === "COPILOT" ? "amber" : "violet";
 
   const btn = (key: string, target: ConversationControl, icon: React.ReactNode, label: string, onClick: () => void, active = false) => (
     <button
@@ -124,7 +120,7 @@ export function ConversationControlBar({
   );
 
   const buttons: React.ReactNode[] = [];
-  if (hold.state === "AI_ACTIVE") buttons.push(btn("AUTO", "AUTO", <Bot className="size-3.5" />, "AI tự trả lời", () => void apply("AUTO"), mode === "AUTO"));
+  if (hold.state === "AI_ACTIVE") buttons.push(btn("AUTO", "AUTO", <Bot className="size-3.5" />, "AI tự trả lời", () => void apply("AUTO"), mode === "AUTO" && shown.state === "AI_ACTIVE"));
   else if (hold.state === "HUMAN_COOLDOWN") buttons.push(btn("RESUME", "AUTO", <Play className="size-3.5" />, "Cho AI tiếp tục ngay", () => void apply("AUTO")));
   else buttons.push(btn("RETURN", "AUTO", <Bot className="size-3.5" />, "Trả lại cho AI", () => void apply("AUTO")));
   if (channel !== "WEB") buttons.push(btn("COPILOT", "COPILOT", <Sparkles className="size-3.5" />, "AI gợi ý", () => void apply("COPILOT"), mode === "COPILOT" && hold.state !== "HUMAN_TAKEOVER"));
@@ -140,10 +136,11 @@ export function ConversationControlBar({
       )}
       data-testid="conversation-control"
       data-hold-state={hold.state}
+      data-ai-state={shown.state}
     >
       <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5">
         <span className="flex min-w-0 items-start gap-1.5">
-          {hold.state === "HUMAN_COOLDOWN" ? <Timer className="mt-0.5 size-3.5 shrink-0" /> : hold.state === "HUMAN_TAKEOVER" ? <Hand className="mt-0.5 size-3.5 shrink-0" /> : <Bot className="mt-0.5 size-3.5 shrink-0" />}
+          {shown.state === "HUMAN_COOLDOWN" ? <Timer className="mt-0.5 size-3.5 shrink-0" /> : shown.state === "HUMAN_TAKEOVER" ? <Hand className="mt-0.5 size-3.5 shrink-0" /> : shown.state === "AI_BLOCKED" ? <Ban className="mt-0.5 size-3.5 shrink-0" /> : <Bot className="mt-0.5 size-3.5 shrink-0" />}
           <span className="break-words">
             {remaining !== null && !lapsed ? (
               <span className="mr-1.5 inline-block rounded bg-amber-200/70 px-1.5 font-mono font-semibold tabular-nums dark:bg-amber-900/60" data-testid="cooldown-countdown" aria-label="Thời gian AI còn nhường">
@@ -159,6 +156,23 @@ export function ConversationControlBar({
           </div>
         ) : null}
       </div>
+      {shown.note ? <p className="break-words text-[11px] opacity-90" data-testid="ai-block-note">{shown.note}</p> : null}
+      {blocks.length ? (
+        <ul className="flex flex-wrap gap-x-3 gap-y-1 text-[11px]" data-testid="ai-blocks">
+          {blocks.map((b) => (
+            <li key={b.code} data-code={b.code} className="inline-flex items-center gap-1">
+              <code className="rounded bg-background/60 px-1 font-mono">{b.code}</code>
+              {b.fixHref ? (
+                <Link href={b.fixHref} className="font-medium underline underline-offset-2">
+                  {b.fixLabel}
+                </Link>
+              ) : (
+                <span className="opacity-80">liên hệ người vận hành</span>
+              )}
+            </li>
+          ))}
+        </ul>
+      ) : null}
       {asking && mode !== "HUMAN" ? (
         <form
           className="flex flex-wrap items-center gap-1.5"

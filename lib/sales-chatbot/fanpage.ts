@@ -36,7 +36,7 @@ import { describeNetworkFailure, isNetworkFailure } from "@/lib/connectors/net-e
 import { PANCAKE_PAGES_API, scrubSecrets } from "@/lib/connectors/testers";
 import { chunkText } from "@/lib/messaging/providers";
 import { AI_DOWN_HANDOFF_REASON, appendContextMessages, chatTurn, conversationView, describeCustomerImages, loadSalesChatbotConfig, openConversation } from "@/lib/sales-chatbot/engine";
-import { ALREADY_REPLIED_NOTE, alreadyRepliedRows, DEAD_AI_DOWN_NOTE, DEAD_SEND_NOTE_PREFIX, deadLetter, dueForClaim, releaseWithBackoff } from "@/lib/sales-chatbot/inbound-retry";
+import { ALREADY_REPLIED_NOTE, alreadyRepliedRows, CONV_OPEN_FAILED_NOTE, HANDOFF_SILENT_NOTE, DEAD_AI_DOWN_NOTE, DEAD_SEND_NOTE_PREFIX, deadLetter, dueForClaim, releaseWithBackoff } from "@/lib/sales-chatbot/inbound-retry";
 import { readQuickReplyImage, rememberPancakeContent } from "@/lib/sales-chatbot/quick-replies";
 import { loadPollState, savePollState } from "@/lib/sales-chatbot/pancake-poll";
 import { afterPoll, pollDecision, type PancakePollState } from "@/lib/sales-chatbot/pancake-poll-shared";
@@ -925,8 +925,8 @@ export async function processFanpageThread(pageId: string, threadId: string, dep
     const conv = await conversationFor(pageId, threadId);
     if (!conv) {
       // Lỗi tạm: nhả tin, lùi dần 2 · 4 · 8 phút; hết lượt ⇒ DEAD (inbound-retry.ts) — không nằm PENDING mãi.
-      await releaseWithBackoff(db, ids, claim, "Không mở được hội thoại", now());
-      return { ...out, error: "Không mở được hội thoại" };
+      await releaseWithBackoff(db, ids, claim, CONV_OPEN_FAILED_NOTE, now());
+      return { ...out, error: CONV_OPEN_FAILED_NOTE };
     }
     // Hội thoại vừa mở ở tin đầu ⇒ ghi mốc tin cuối của khách (khung 24 giờ của Facebook cho follow-up).
     {
@@ -1034,7 +1034,7 @@ export async function processFanpageThread(pageId: string, threadId: string, dep
       const cvh = schema.salesChatConversations;
       const [hc] = await db.select({ reason: cvh.handoffReason, error: cvh.lastError }).from(cvh).where(eq(cvh.id, conv.id)).limit(1);
       if (hc?.reason === AI_DOWN_HANDOFF_REASON) await deadLetter(db, ids, claim, DEAD_AI_DOWN_NOTE, hc.error, now());
-      else await finish("DONE", "Chuyển nhân viên — bot không nhắn gì, chờ người trả lời");
+      else await finish("DONE", HANDOFF_SILENT_NOTE);
       out.processed += ids.length;
       out.skipped = "Chuyển nhân viên — bot im lặng";
       continue;

@@ -237,7 +237,7 @@ class SeqConflict extends Error {}
 async function appendMessage(conversationId: string, seq: number, role: "user" | "assistant", content: AiBlock[]) {
   const db = await getDb();
   const rows = await db.insert(schema.salesChatMessages).values({ conversationId, seq, role, content }).onConflictDoNothing().returning({ id: schema.salesChatMessages.id });
-  if (rows.length === 0) throw new SeqConflict("Đang trả lời câu trước — đợi một chút rồi gửi lại.");
+  if (rows.length === 0) throw new SeqConflict(TURN_BUSY_ERROR);
 }
 
 /**
@@ -638,6 +638,13 @@ async function notifyProviderFailure(lastError: string | null, now: Date): Promi
 /** Câu gửi khách khi model không trả chữ nào dùng được (rỗng, hoặc bị bộ lọc suy luận chặn hết) — một chữ cho mọi đường. */
 export const EMPTY_REPLY_TEXT = "Dạ, anh/chị nói rõ hơn giúp em nhé.";
 
+/** Câu lỗi của lượt `chatTurn` — đường xử lý tin ghi nguyên vào `sales_chat_inbound.note`; dấu vết từng tin đọc lại đúng chữ này. */
+export const TURN_EMPTY_ERROR = "Tin nhắn trống.";
+export const TURN_MODULE_OFF_ERROR = "Module AI bán hàng chưa bật cho tổ chức này.";
+export const TURN_NO_CONVERSATION_ERROR = "Không có hội thoại này.";
+export const TURN_BOT_OFF_ERROR = "Shop chưa mở chat.";
+export const TURN_BUSY_ERROR = "Đang trả lời câu trước — đợi một chút rồi gửi lại.";
+
 /** Chữ ở ai-hold-shared.ts — hàm quyết định «AI nhường» so đúng chữ này. */
 export const AI_DOWN_HANDOFF_REASON = AI_DOWN_REASON_TEXT;
 
@@ -661,13 +668,13 @@ async function notifyAiDownHandoff(conv: ConvRow, state: ChatState, channel: Cha
 export const chatTurn = withTurnEvents(chatTurnCore);
 async function chatTurnCore(conversationId: string, rawText: string, opts: { channel: ChatChannel; visitorKey?: string | null; actorId?: string | null; now?: Date; context?: string; customerName?: string | null }): Promise<TurnResult> {
   const text = rawText.trim().slice(0, SALES_CHATBOT_LIMITS.messageMax);
-  if (!text) return { ok: false, error: "Tin nhắn trống." };
-  if (!(await canUseModule("ai_sales"))) return { ok: false, error: "Module AI bán hàng chưa bật cho tổ chức này." };
+  if (!text) return { ok: false, error: TURN_EMPTY_ERROR };
+  if (!(await canUseModule("ai_sales"))) return { ok: false, error: TURN_MODULE_OFF_ERROR };
   const conv = await loadConversation(conversationId);
-  if (!conv || conv.channel !== opts.channel || (isPublicChannel(opts.channel) && conv.visitorKey !== (opts.visitorKey ?? null))) return { ok: false, error: "Không có hội thoại này." };
+  if (!conv || conv.channel !== opts.channel || (isPublicChannel(opts.channel) && conv.visitorKey !== (opts.visitorKey ?? null))) return { ok: false, error: TURN_NO_CONVERSATION_ERROR };
   // Page của hội thoại có phần đè riêng (tên bot · giọng · lời chào · giờ · chỉ dẫn · ship) ⇒ dùng cấu hình đã gộp.
   const cfg = await loadSalesChatbotConfigFor(conv.pageId);
-  if (isPublicChannel(opts.channel) && !cfg.enabled) return { ok: false, error: "Shop chưa mở chat." };
+  if (isPublicChannel(opts.channel) && !cfg.enabled) return { ok: false, error: TURN_BOT_OFF_ERROR };
   const now = opts.now ?? new Date();
   const msgs = await loadMessages(conv.id);
   let seq = (msgs[msgs.length - 1]?.seq ?? 0) + 1;
@@ -1028,4 +1035,32 @@ export async function resumeConversationToAi(id: string): Promise<boolean> {
     .where(and(eq(c.id, id), eq(c.status, "HANDOFF")))
     .returning({ id: c.id });
   return Boolean(row);
+}
+
+export type SalesAiReadiness = { ok: true } | { ok: false; code: "KILL_SWITCH" | "QUOTA" | "NO_AI_SOURCE"; reason: string };
+
+/**
+ * NGUỒN AI CỦA BOT CÓ CHẠY ĐƯỢC KHÔNG — ĐÚNG ba bước mà lượt `chatTurnCore` đi trước khi gọi model (công tắc tắt AI của người vận
+ * hành → hạn mức của nguồn trả tiền, có xét khoá dự phòng → chọn khoá: nhà = khoá `.env`, khách = AI dùng chung / BYOK), nhưng
+ * KHÔNG gọi model nào và không ghi sổ AI. Màn hộp thư dùng để nói thật «AI không trả lời được vì …» thay vì «AI đang trả lời».
+ * Một khoá sai (401) chỉ lộ ra khi gọi — phần đó đọc từ CHỨNG CỨ lượt gọi gần nhất (`ai-status.ts`), không đoán ở đây.
+ */
+export async function salesAiReadiness(ref: string | null = null): Promise<SalesAiReadiness> {
+  const cfg = await loadSalesChatbotConfig();
+  const org = await currentOrganization();
+  const killed = await aiKillSwitchDenial(org.code);
+  if (killed) return { ok: false, code: "KILL_SWITCH", reason: killed };
+  const billing = salesBotBillingSource(cfg.connectorKey, { home: org.isHome });
+  const quota = await checkAiQuota(org.code, billing);
+  const fb = effectiveFallback(cfg);
+  const fbSource = fb ? salesBotBillingSource(fb.connectorKey, { home: org.isHome }) : null;
+  if (!quota.ok && !(fbSource && fbSource !== billing && (await checkAiQuota(org.code, fbSource)).ok)) return { ok: false, code: "QUOTA", reason: quota.error };
+  const usage: FailoverUsage = { feature: "sales_chatbot", actorId: null, ref };
+  const primary: ProviderPick = quota.ok ? await resolveConnector(cfg, cfg.connectorKey, cfg.model, usage) : { ok: false, error: quota.error };
+  if (primary.ok) return { ok: true };
+  if (fb) {
+    const second = await resolveConnector(cfg, fb.connectorKey, fb.model, usage);
+    if (second.ok) return { ok: true };
+  }
+  return { ok: false, code: "NO_AI_SOURCE", reason: primary.error };
 }

@@ -15,7 +15,7 @@ import {
 } from "@/lib/sales-chatbot/conversation-control-shared";
 import { recordConversationEvent } from "@/lib/sales-chatbot/events";
 import { aiHoldOf, cooldownUntilFrom, humanResumeReason, type AiHold, type AiHoldInput } from "@/lib/sales-chatbot/ai-hold-shared";
-import { controlOf, controlSkipNote } from "@/lib/sales-chatbot/conversation-control-shared";
+import { controlOf, controlSkipNote, NEEDS_HUMAN_NOTE } from "@/lib/sales-chatbot/conversation-control-shared";
 
 /**
  * ═══════════ ĐỔI CHẾ ĐỘ AI ↔ NGƯỜI CỦA MỘT HỘI THOẠI + CỔNG GỬI CỦA BOT ═══════════
@@ -160,9 +160,19 @@ async function recordCooldownExpired(conversationId: string, hold: AiHold): Prom
  * Tin khách tới TRONG lúc nhường đã được chốt SKIPPED ngay lúc tới — hết nhường / «Cho AI tiếp tục ngay» KHÔNG quay lại trả lời
  * chúng (có thể người đã trả lời câu đó); AI trả lời từ tin khách KẾ TIẾP, và vẫn thấy các tin cũ trong lịch sử của lượt.
  */
+/**
+ * Ghi chú của tin khách bỏ qua vì người đang cầm: nhường ⇒ đúng lý do nhường của kênh; tiếp quản ⇒ lý do tiếp quản; cần người ⇒
+ * `NEEDS_HUMAN_NOTE: <lý do>` (tiền tố cố định để dấu vết đọc được). HÀM THUẦN.
+ */
+export function holdSkipNote(conv: Pick<HoldRow, "handoffReason" | "state">, hold: AiHold): string {
+  if (hold.cause === "NEEDS_HUMAN") return conv.handoffReason ? `${NEEDS_HUMAN_NOTE}: ${conv.handoffReason}`.slice(0, 300) : NEEDS_HUMAN_NOTE;
+  if (hold.cause === "TAKEOVER") return conv.handoffReason === TAKEOVER_REASON ? TAKEOVER_REASON : (controlSkipNote(controlOf(conv.state)) ?? TAKEOVER_REASON);
+  return conv.handoffReason ?? NEEDS_HUMAN_NOTE;
+}
+
 export async function holdGate(conv: HoldRow, now: Date): Promise<{ skip: string } | null> {
   const hold = aiHoldOf(conv, now);
-  if (hold.state !== "AI_ACTIVE") return { skip: conv.handoffReason ?? controlSkipNote(controlOf(conv.state)) ?? "Đã chuyển nhân viên" };
+  if (hold.state !== "AI_ACTIVE") return { skip: holdSkipNote(conv, hold) };
   if (!hold.expired) return null;
   const db = await getDb();
   const c = schema.salesChatConversations;
@@ -171,7 +181,7 @@ export async function holdGate(conv: HoldRow, now: Date): Promise<{ skip: string
     .set({ status: "OPEN", handoffReason: null, state: sql`${c.state} - 'handoff'`, humanCooldownUntil: null, updatedAt: now })
     .where(and(eq(c.id, conv.id), eq(c.status, "HANDOFF"), conv.handoffReason ? eq(c.handoffReason, conv.handoffReason) : isNull(c.handoffReason), or(isNull(c.humanCooldownUntil), lte(c.humanCooldownUntil, now))))
     .returning({ id: c.id });
-  if (!reopened) return { skip: conv.handoffReason ?? "Đã chuyển nhân viên" };
+  if (!reopened) return { skip: conv.handoffReason ?? NEEDS_HUMAN_NOTE };
   await recordCooldownExpired(conv.id, hold);
   publish({ type: "chat", conversationId: conv.id });
   return null;
