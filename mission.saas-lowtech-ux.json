@@ -1,0 +1,35 @@
+{
+  "schema": 1,
+  "mission_id": "saas-lowtech-ux",
+  "title": "UX cho chủ shop ít rành máy: audit + thiết kế (chưa sửa mã tới khi L2 gộp)",
+  "business_goal": "Chủ shop dùng được hộp thư · kênh · AI Sales trên điện thoại không cần hướng dẫn",
+  "status": "BACKLOG",
+  "priority": "P1",
+  "risk": "MEDIUM",
+  "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "worker": null,
+  "worktree": null,
+  "branch": null,
+  "base_sha": null,
+  "domains": [
+    "saas",
+    "ui"
+  ],
+  "owned_paths": [
+    "docs/saas/ux/**"
+  ],
+  "dependencies": [
+    "saas-l2-customer-shell"
+  ],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-07T17:24:09.107Z",
+  "updated_at": "2026-10-07T17:24:09.107Z",
+  "last_heartbeat": "2026-10-07T17:24:09.107Z",
+  "definition_of_done": [
+    "Audit 8 mục vỏ khách ở 390px",
+    "Vấn đề xếp theo tác động",
+    "Thiết kế sửa, chưa đụng mã tới khi L2 vào main"
+  ]
+}
