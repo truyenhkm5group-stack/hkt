@@ -1,4 +1,4 @@
--- 0231 · CÀI WORKER MỘT NÚT + THU HỒI KHOÁ CŨ CỦA `dogfood-1` (docs/tech-control-plane/README.md mục 15).
+-- 0232 · CÀI WORKER MỘT NÚT + THU HỒI KHOÁ CŨ CỦA `dogfood-1` (docs/tech-control-plane/README.md mục 15).
 --
 --  · CỘNG THÊM: bảng `tech_worker_enrollments` (mã ghi danh dùng MỘT lần, hạn ngắn, chỉ lưu băm) và các cột
 --    nullable / có mặc định trên `tech_workers` (mốc xoay / thu hồi / ghi danh / gỡ, báo cáo tự kiểm, lệnh sửa).
@@ -54,7 +54,7 @@ WITH "thu_hoi" AS (
 )
 INSERT INTO "tech_events" ("id", "name", "subject_type", "subject_id", "payload", "actor_kind", "actor_name", "dedupe_key")
 SELECT gen_random_uuid()::text, 'worker.secret_revoked', 'WORKER', "id",
-	jsonb_build_object('key', 'dogfood-1', 'migration', '0231', 'reason', 'Khoá cũ có thể đã lộ — tạo lại bằng bộ cài'),
-	'SYSTEM', 'migration:0231', 'worker.secret_revoked:0231:' || "id"
+	jsonb_build_object('key', 'dogfood-1', 'migration', '0232', 'reason', 'Khoá cũ có thể đã lộ — tạo lại bằng bộ cài'),
+	'SYSTEM', 'migration:0232', 'worker.secret_revoked:0232:' || "id"
 FROM "thu_hoi"
 ON CONFLICT ("dedupe_key") DO NOTHING;

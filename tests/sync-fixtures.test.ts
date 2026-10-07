@@ -516,6 +516,7 @@ import { testChatWidget } from "./chat-widget.test";
 import { testWebProductImport } from "./web-product-import.test";
 import { testMessenger } from "./messenger.test";
 import { testConversationControl } from "./conversation-control.test";
+import { testSalesHumanTakeover } from "./sales-human-takeover.test";
 import { testConversationTrace } from "./conversation-trace.test";
 import { testMessengerHealth } from "./messenger-health.test";
 import { testConnectorsLegacy } from "./connectors-legacy.test";
@@ -2822,6 +2823,9 @@ async function main() {
   // AI ↔ người trên từng hội thoại (Tiếp quản / AI gợi ý / Trả lại AI) + cổng gửi chống trả lời đôi — tổ chức THẬT
   // `kiem-soat-hoi-thoai`, Messenger trực tiếp qua Graph giả.
   await testConversationControl();
+  // AI nhường người: AI_ACTIVE · HUMAN_COOLDOWN (đếm ngược, «Cho AI tiếp tục ngay») · HUMAN_TAKEOVER («Trả lại cho AI») — tổ chức
+  // THẬT `nhuong-nguoi` (+ `nhuong-nguoi-khac` cho cô lập), Messenger trực tiếp + fanpage Pancake giả, đồng hồ nhường tường minh.
+  await testSalesHumanTakeover();
   // Đơn ↔ hội thoại ↔ khách: link hội thoại của đơn mở Hộp thư ERP (mọi kênh); hồ sơ khách chỉ thấy hội thoại nối bằng
   // khoá cứng — tổ chức THẬT `truy-vet-hoi-thoai`.
   await testConversationTrace();

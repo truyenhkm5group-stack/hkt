@@ -45,14 +45,18 @@ export type AiBlock =
 
 export type AiMessage = { role: "user" | "assistant"; content: AiBlock[] };
 
-export type AiUsage = { inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number };
+/**
+ * `thoughtTokens` — PHẦN của `outputTokens` dành cho suy nghĩ (Gemini `thoughtsTokenCount`). Chỉ để QUAN SÁT: `outputTokens` vẫn
+ * là tổng token ra mà nhà cung cấp tính tiền. Thiếu ⇒ nhà cung cấp không tách (CHƯA BIẾT, không phải 0).
+ */
+export type AiUsage = { inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number; thoughtTokens?: number };
 
 /**
  * `reasoning` — mức suy luận cho model CÓ suy luận (OpenAI Responses `reasoning.effort`; nhà cung cấp khác bỏ qua). Thiếu ⇒
  * mặc định của nhà cung cấp. Đo 01/10/2026: suy luận ăn chung ngân sách `max_output_tokens` — đặt ngân sách nhỏ mà suy
  * luận «medium» thì model tiêu hết vào suy nghĩ và trả về RỖNG.
  */
-export type AiRequest = { system: string; messages: AiMessage[]; tools: AiToolDef[]; maxTokens?: number; reasoning?: "low" | "medium" | "high"; images?: AiImage[] };
+export type AiRequest = { system: string; messages: AiMessage[]; tools: AiToolDef[]; maxTokens?: number; reasoning?: "minimal" | "low" | "medium" | "high"; images?: AiImage[] };
 export type { AiImage } from "@/lib/ai/images";
 
 

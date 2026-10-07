@@ -18,13 +18,15 @@
 import { createHash } from "node:crypto";
 import { and, asc, desc, eq, gte, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
+import { AI_DOWN_HANDOFF_REASON as AI_DOWN_REASON_TEXT } from "@/lib/sales-chatbot/ai-hold-shared";
 import type { AiImage } from "@/lib/ai/images";
-import { estimateCostUsd, getAiProvider, type AiBlock, type AiMessage, type AiProvider } from "@/lib/ai/provider";
+import { estimateCostUsd, getAiProvider, type AiBlock, type AiMessage, type AiProvider, type AiUsage } from "@/lib/ai/provider";
 import { aiDisabledReason } from "@/lib/ai/router";
 import type { AiBillingSource } from "@/lib/ai-usage/types";
 import { ByokAnthropicProvider, ByokGeminiProvider, ByokOpenAiProvider } from "@/lib/ai-builder/providers";
 import { platformChatAi } from "@/lib/ai-builder/provider";
 import { readConversationPlatformModels } from "@/lib/ai-usage/platform-ai-policy";
+import type { PlatformWorkload } from "@/lib/ai-usage/types";
 import { aiKillSwitchDenial } from "@/lib/ai-usage/control";
 import { recordAiUsage } from "@/lib/ai-usage/ledger";
 import type { AiUsageFeature } from "@/lib/ai-usage/types";
@@ -236,7 +238,7 @@ class SeqConflict extends Error {}
 async function appendMessage(conversationId: string, seq: number, role: "user" | "assistant", content: AiBlock[]) {
   const db = await getDb();
   const rows = await db.insert(schema.salesChatMessages).values({ conversationId, seq, role, content }).onConflictDoNothing().returning({ id: schema.salesChatMessages.id });
-  if (rows.length === 0) throw new SeqConflict("Đang trả lời câu trước — đợi một chút rồi gửi lại.");
+  if (rows.length === 0) throw new SeqConflict(TURN_BUSY_ERROR);
 }
 
 /**
@@ -402,7 +404,7 @@ let providerOverride: ((cfg: SalesChatbotConfig) => AiProvider | null) | null = 
  * «Học từ hội thoại cũ» và nhắc khách. `source` = nguồn trả tiền để ghi sổ AI / kiểm hạn mức đúng chỗ.
  */
 export async function salesChatProvider(usage?: Partial<FailoverUsage>): Promise<{ ok: true; provider: AiProvider; source: AiBillingSource } | { ok: false; error: string }> {
-  return providerFor(await loadSalesChatbotConfig(), { feature: usage?.feature ?? "sales_chatbot", actorId: usage?.actorId ?? null, ref: usage?.ref ?? null });
+  return providerFor(await loadSalesChatbotConfig(), { feature: usage?.feature ?? "sales_chatbot", actorId: usage?.actorId ?? null, ref: usage?.ref ?? null, ...(usage?.workload ? { workload: usage.workload } : {}) });
 }
 
 /** Sổ tay ĐÃ XUẤT BẢN (`lib/sales-chatbot/playbook.ts`) — '' khi chưa có. Đọc thẳng settings, không import vòng. */
@@ -428,16 +430,16 @@ export async function describeCustomerImages(urls: readonly string[], opts: { co
     const org = await currentOrganization();
     if (await aiKillSwitchDenial(org.code)) return fallback;
     if (!(await checkAiQuota(org.code, salesBotBillingSource(cfg.connectorKey, { home: org.isHome }))).ok) return fallback;
-    const prov = await providerFor(cfg, { feature: "sales_chatbot", actorId: opts.actorId ?? null, ref: opts.conversationId ?? null });
+    const prov = await providerFor(cfg, { feature: "sales_chatbot", actorId: opts.actorId ?? null, ref: opts.conversationId ?? null, workload: "vision" });
     if (!prov.ok) return fallback;
     const images = (await Promise.all(list.map((u) => fetchCustomerImage(u, opts.fetch)))).filter((x): x is AiImage => x !== null);
     if (!images.length) return fallback;
     // Nguồn trả tiền + nhà cung cấp đọc SAU lời gọi (khoá dự phòng có thể vừa đỡ lượt này — provider-failover.ts).
-    const base = () => ({ orgCode: org.code, feature: "sales_chatbot" as const, source: prov.source, provider: prov.provider.name, actorId: opts.actorId ?? null, ref: opts.conversationId ?? null });
+    const base = () => ({ orgCode: org.code, feature: "sales_chatbot" as const, source: prov.source, provider: prov.provider.name, actorId: opts.actorId ?? null, ref: opts.conversationId ?? null, workload: "vision" as const });
     try {
       const { text, res } = await describeImages(prov.provider, images);
       const model = res.model || prov.provider.model;
-      await recordAiUsage({ ...base(), model, requests: 1, inputTokens: res.usage.inputTokens + res.usage.cacheReadTokens + res.usage.cacheWriteTokens, outputTokens: res.usage.outputTokens, costUsd: estimateCostUsd(model, res.usage), status: "OK" }).catch(() => undefined);
+      await recordAiUsage({ ...base(), model, requests: 1, inputTokens: res.usage.inputTokens + res.usage.cacheReadTokens + res.usage.cacheWriteTokens, outputTokens: res.usage.outputTokens, costUsd: estimateCostUsd(model, res.usage), status: "OK", ...usageDetail(res) }).catch(() => undefined);
       return imageLine(urls.length, text || null);
     } catch {
       await recordAiUsage({ ...base(), model: prov.provider.model, requests: 1, inputTokens: null, outputTokens: null, costUsd: null, status: "ERROR" }).catch(() => undefined);
@@ -453,10 +455,27 @@ export function setSalesChatProviderForTests(fn: ((cfg: SalesChatbotConfig) => A
   providerOverride = fn;
 }
 
+let benchMode = false;
+
+/**
+ * CHỈ benchmark phát lại (scripts/platform-ai-bench.ts — tiến trình RIÊNG): mọi lượt đi đúng `provider` này, và KHÔNG bọc khoá
+ * dự phòng của shop — bộ ngắt mạch của khoá dự phòng ghi trạng thái vào cài đặt THẬT của shop và báo chủ shop; một lượt
+ * benchmark hỏng không được mở mạch của bot đang bán hàng. `null` để gỡ.
+ */
+export function setSalesChatBenchProvider(provider: AiProvider | null) {
+  providerOverride = provider ? () => provider : null;
+  benchMode = Boolean(provider);
+}
+
 type ProviderPick = { ok: true; provider: AiProvider; source: AiBillingSource } | { ok: false; error: string };
 
 /** Ngữ cảnh ghi sổ AI cho lời gọi hỏng của khoá chính khi lượt đã chuyển sang khoá dự phòng (provider-failover.ts). */
-export type FailoverUsage = { feature: AiUsageFeature; actorId: string | null; ref: string | null };
+export type FailoverUsage = { feature: AiUsageFeature; actorId: string | null; ref: string | null; /** Loại việc của Platform AI Policy (§8). */ workload?: PlatformWorkload };
+
+/** Phần QUAN SÁT của một lời gọi cho sổ AI (0231) — không đổi token / tiền tính phí. */
+export function usageDetail(res: { usage: AiUsage; latencyMs: number }): { cachedTokens: number; thinkingTokens: number | null; latencyMs: number } {
+  return { cachedTokens: res.usage.cacheReadTokens, thinkingTokens: res.usage.thoughtTokens ?? null, latencyMs: res.latencyMs };
+}
 
 /** MỘT khoá AI (chính hoặc dự phòng) ⇒ provider. Bài kiểm thay được qua `providerOverride` (nhận cấu hình mang khoá đó). */
 async function resolveConnector(cfg: SalesChatbotConfig, key: SalesChatbotConfig["connectorKey"], modelName: string, usage?: FailoverUsage): Promise<ProviderPick> {
@@ -480,9 +499,10 @@ async function resolveConnector(cfg: SalesChatbotConfig, key: SalesChatbotConfig
     // mà model dự phòng đã đỡ vẫn là MỘT dòng ERROR trong sổ AI (token / tiền NULL) — tỷ lệ lỗi của model mới đo được.
     const ref = usage?.ref ?? null;
     const plat = await platformChatAi(org.code, {
+      workload: usage?.workload ?? null,
       routingKey: ref,
       priorModels: ref ? () => readConversationPlatformModels(org.code, ref) : undefined,
-      onPrimaryFailed: (f) => void recordAiUsage({ orgCode: org.code, feature: usage?.feature ?? "sales_chatbot", source: "PLATFORM", provider: f.name, model: f.model, requests: 1, inputTokens: null, outputTokens: null, costUsd: null, status: "ERROR", actorId: usage?.actorId ?? null, ref: usage?.ref ?? null }).catch(() => undefined),
+      onPrimaryFailed: (f) => void recordAiUsage({ orgCode: org.code, feature: usage?.feature ?? "sales_chatbot", source: "PLATFORM", provider: f.name, model: f.model, requests: 1, inputTokens: null, outputTokens: null, costUsd: null, status: "ERROR", actorId: usage?.actorId ?? null, ref: usage?.ref ?? null, workload: usage?.workload ?? null }).catch(() => undefined),
     });
     return plat.ok ? { ok: true, provider: plat.provider, source } : { ok: false, error: plat.reason };
   }
@@ -507,7 +527,7 @@ async function resolveConnector(cfg: SalesChatbotConfig, key: SalesChatbotConfig
  */
 async function providerFor(cfg: SalesChatbotConfig, usage: FailoverUsage = { feature: "sales_chatbot", actorId: null, ref: null }, primaryBlocked?: string): Promise<ProviderPick> {
   const primary: ProviderPick = primaryBlocked ? { ok: false, error: primaryBlocked } : await resolveConnector(cfg, cfg.connectorKey, cfg.model, usage);
-  const fb = effectiveFallback(cfg);
+  const fb = benchMode ? null : effectiveFallback(cfg);
   if (!fb) return primary;
   const org = await currentOrganization();
   let opened: Promise<ProviderPick> | null = null;
@@ -524,7 +544,7 @@ async function providerFor(cfg: SalesChatbotConfig, usage: FailoverUsage = { fea
     longOpenMs: cfg.failoverOpenMinutes * 60_000,
     store: settingsHealthStore(org.code),
     onAttemptFailed: async (a) => {
-      await recordAiUsage({ orgCode: org.code, feature: usage.feature, source: a.source, provider: a.name, model: a.model, requests: 1, inputTokens: null, outputTokens: null, costUsd: null, status: "ERROR", actorId: usage.actorId, ref: usage.ref }).catch(() => undefined);
+      await recordAiUsage({ orgCode: org.code, feature: usage.feature, source: a.source, provider: a.name, model: a.model, requests: 1, inputTokens: null, outputTokens: null, costUsd: null, status: "ERROR", actorId: usage.actorId, ref: usage.ref, workload: usage.workload ?? null }).catch(() => undefined);
     },
     onPrimaryNeedsHuman: (a) => notifyPrimaryFailover(a.key, a.kind, fb.connectorKey, new Date()).catch(() => undefined),
   });
@@ -637,7 +657,15 @@ async function notifyProviderFailure(lastError: string | null, now: Date): Promi
 /** Câu gửi khách khi model không trả chữ nào dùng được (rỗng, hoặc bị bộ lọc suy luận chặn hết) — một chữ cho mọi đường. */
 export const EMPTY_REPLY_TEXT = "Dạ, anh/chị nói rõ hơn giúp em nhé.";
 
-export const AI_DOWN_HANDOFF_REASON = "AI tạm không trả lời được — nhân viên liên hệ lại khách";
+/** Câu lỗi của lượt `chatTurn` — đường xử lý tin ghi nguyên vào `sales_chat_inbound.note`; dấu vết từng tin đọc lại đúng chữ này. */
+export const TURN_EMPTY_ERROR = "Tin nhắn trống.";
+export const TURN_MODULE_OFF_ERROR = "Module AI bán hàng chưa bật cho tổ chức này.";
+export const TURN_NO_CONVERSATION_ERROR = "Không có hội thoại này.";
+export const TURN_BOT_OFF_ERROR = "Shop chưa mở chat.";
+export const TURN_BUSY_ERROR = "Đang trả lời câu trước — đợi một chút rồi gửi lại.";
+
+/** Chữ ở ai-hold-shared.ts — hàm quyết định «AI nhường» so đúng chữ này. */
+export const AI_DOWN_HANDOFF_REASON = AI_DOWN_REASON_TEXT;
 
 function aiDownReply(cfg: SalesChatbotConfig): string {
   return `Xin lỗi, em đang gặp trục trặc. ${cfg.handoff.message}`;
@@ -659,13 +687,13 @@ async function notifyAiDownHandoff(conv: ConvRow, state: ChatState, channel: Cha
 export const chatTurn = withTurnEvents(chatTurnCore);
 async function chatTurnCore(conversationId: string, rawText: string, opts: { channel: ChatChannel; visitorKey?: string | null; actorId?: string | null; now?: Date; context?: string; customerName?: string | null }): Promise<TurnResult> {
   const text = rawText.trim().slice(0, SALES_CHATBOT_LIMITS.messageMax);
-  if (!text) return { ok: false, error: "Tin nhắn trống." };
-  if (!(await canUseModule("ai_sales"))) return { ok: false, error: "Module AI bán hàng chưa bật cho tổ chức này." };
+  if (!text) return { ok: false, error: TURN_EMPTY_ERROR };
+  if (!(await canUseModule("ai_sales"))) return { ok: false, error: TURN_MODULE_OFF_ERROR };
   const conv = await loadConversation(conversationId);
-  if (!conv || conv.channel !== opts.channel || (isPublicChannel(opts.channel) && conv.visitorKey !== (opts.visitorKey ?? null))) return { ok: false, error: "Không có hội thoại này." };
+  if (!conv || conv.channel !== opts.channel || (isPublicChannel(opts.channel) && conv.visitorKey !== (opts.visitorKey ?? null))) return { ok: false, error: TURN_NO_CONVERSATION_ERROR };
   // Page của hội thoại có phần đè riêng (tên bot · giọng · lời chào · giờ · chỉ dẫn · ship) ⇒ dùng cấu hình đã gộp.
   const cfg = await loadSalesChatbotConfigFor(conv.pageId);
-  if (isPublicChannel(opts.channel) && !cfg.enabled) return { ok: false, error: "Shop chưa mở chat." };
+  if (isPublicChannel(opts.channel) && !cfg.enabled) return { ok: false, error: TURN_BOT_OFF_ERROR };
   const now = opts.now ?? new Date();
   const msgs = await loadMessages(conv.id);
   let seq = (msgs[msgs.length - 1]?.seq ?? 0) + 1;
@@ -763,7 +791,7 @@ async function chatTurnCore(conversationId: string, rawText: string, opts: { cha
     const fbSource = fbQuota ? salesBotBillingSource(fbQuota.connectorKey, { home: org.isHome }) : null;
     if (!quota.ok) await recordAiUsage({ orgCode: org.code, feature: "sales_chatbot", source: billing, provider: null, model: null, requests: 0, inputTokens: null, outputTokens: null, costUsd: null, status: "BLOCKED_QUOTA", actorId: opts.actorId ?? null, ref: conv.id }).catch(() => undefined);
     if (!quota.ok && !(fbSource && fbSource !== billing && (await checkAiQuota(org.code, fbSource)).ok)) return blocked("QUOTA", "Tổ chức đã dùng hết hạn mức AI của gói dịch vụ — nâng gói hoặc chờ kỳ sau", quota.error);
-    const prov = await providerFor(cfg, { feature: "sales_chatbot", actorId: opts.actorId ?? null, ref: conv.id }, quota.ok ? undefined : quota.error);
+    const prov = await providerFor(cfg, { feature: "sales_chatbot", actorId: opts.actorId ?? null, ref: conv.id, workload: "sales_chatbot" }, quota.ok ? undefined : quota.error);
     if (!prov.ok) return blocked("CONNECTION", "Kết nối AI của shop chưa dùng được — mở Cài đặt → Kết nối, kiểm tra lại khoá AI", prov.error);
     // AI ĐỌC HIỂU (0183): một lời gọi NHỎ chỉ chọn mã câu mẫu — chọn được ⇒ trả lời bằng câu mẫu, khỏi lượt chatbot đầy đủ.
     // Lỗi ở bước này không chặn khách: đi tiếp đường chatbot đầy đủ (nó tự xử lý lỗi nhà cung cấp).
@@ -771,9 +799,12 @@ async function chatTurnCore(conversationId: string, rawText: string, opts: { cha
     if (quick.kind === "NO_MATCH" && qrSettings.aiMatch) {
       try {
         const lastShop = [...msgs].reverse().find((m) => m.role === "assistant" && textOf(m.content));
-        const { pick, res } = await quickReplyByAi(prov.provider, text, lastShop ? textOf(lastShop.content) : "", quick.candidates, cfg);
+        // AI dùng chung: chọn câu mẫu là loại việc RIÊNG (quick_extract) — chính sách model của nó có thể khác bot trả lời.
+        const qp = cfg.connectorKey === "platform" && quota.ok ? await providerFor(cfg, { feature: "sales_chatbot", actorId: opts.actorId ?? null, ref: conv.id, workload: "quick_extract" }) : null;
+        const quickProv = qp?.ok ? qp : prov;
+        const { pick, res } = await quickReplyByAi(quickProv.provider, text, lastShop ? textOf(lastShop.content) : "", quick.candidates, cfg);
         const inT = res.usage.inputTokens + res.usage.cacheReadTokens + res.usage.cacheWriteTokens;
-        await recordAiUsage({ orgCode: org.code, feature: "sales_chatbot", source: prov.source, provider: prov.provider.name, model: res.model || prov.provider.model, requests: 1, inputTokens: inT, outputTokens: res.usage.outputTokens, costUsd: estimateCostUsd(res.model || prov.provider.model, res.usage), status: "OK", actorId: opts.actorId ?? null, ref: conv.id }).catch(() => undefined);
+        await recordAiUsage({ orgCode: org.code, feature: "sales_chatbot", source: quickProv.source, provider: quickProv.provider.name, model: res.model || quickProv.provider.model, requests: 1, inputTokens: inT, outputTokens: res.usage.outputTokens, costUsd: estimateCostUsd(res.model || quickProv.provider.model, res.usage), status: "OK", actorId: opts.actorId ?? null, ref: conv.id, workload: "quick_extract", ...usageDetail(res) }).catch(() => undefined);
         Object.assign(pre, { calls: 1, inTok: inT, outTok: res.usage.outputTokens });
         if (pick && !repeatsRecent(pick.text, recentSaid)) return sendQuick(pick, pre);
       } catch (error) {
@@ -809,10 +840,11 @@ async function chatTurnCore(conversationId: string, rawText: string, opts: { cha
     // SỔ AI THEO NHÀ CUNG CẤP THẬT (provider-failover.ts): vòng công cụ có thể đổi khoá giữa chừng (khoá chính hỏng ở vòng 3)
     // ⇒ mỗi đoạn liền một nhà cung cấp là MỘT dòng, để tiền không ghi nhầm nguồn trả (BYOK ≠ credit gói). Không đổi khoá ⇒
     // đúng một dòng như trước.
-    type Segment = { name: string; source: AiBillingSource; model: string; calls: number; inTok: number; outTok: number; cost: number | null };
-    const newSegment = (): Segment => ({ name: prov.provider.name, source: prov.source, model: prov.provider.model, calls: 0, inTok: 0, outTok: 0, cost: 0 });
+    // `think` / `cached` / `lat` chỉ để QUAN SÁT (0231): token suy nghĩ ⊂ token ra; `null` khi nhà cung cấp không tách.
+    type Segment = { name: string; source: AiBillingSource; model: string; calls: number; inTok: number; outTok: number; cost: number | null; think: number | null; cached: number; lat: number };
+    const newSegment = (): Segment => ({ name: prov.provider.name, source: prov.source, model: prov.provider.model, calls: 0, inTok: 0, outTok: 0, cost: 0, think: 0, cached: 0, lat: 0 });
     let seg = newSegment();
-    const recordSegment = (s: Segment, st: "OK" | "ERROR") => recordAiUsage({ orgCode: org.code, feature: "sales_chatbot", source: s.source, provider: s.name, model: s.model, requests: s.calls, inputTokens: s.inTok, outputTokens: s.outTok, costUsd: s.calls ? s.cost : null, status: st, actorId: opts.actorId ?? null, ref: conv.id }).catch(() => undefined);
+    const recordSegment = (s: Segment, st: "OK" | "ERROR") => recordAiUsage({ orgCode: org.code, feature: "sales_chatbot", source: s.source, provider: s.name, model: s.model, requests: s.calls, inputTokens: s.inTok, outputTokens: s.outTok, costUsd: s.calls ? s.cost : null, status: st, actorId: opts.actorId ?? null, ref: conv.id, workload: "sales_chatbot", cachedTokens: s.calls ? s.cached : null, thinkingTokens: s.calls ? s.think : null, latencyMs: s.calls ? s.lat : null }).catch(() => undefined);
     try {
       for (let round = 0; round < SALES_CHATBOT_LIMITS.toolRounds; round++) {
         // Mức suy nghĩ theo cấu hình (Kỹ = suy luận vừa, Nhanh = thấp) — ngân sách đủ rộng để phần suy luận không ăn hết câu
@@ -837,6 +869,9 @@ async function chatTurnCore(conversationId: string, rawText: string, opts: { cha
         seg.outTok += res.usage.outputTokens;
         seg.model = res.model || prov.provider.model;
         seg.cost = seg.cost === null || c === null ? null : seg.cost + c;
+        seg.think = seg.think === null || res.usage.thoughtTokens === undefined ? null : seg.think + res.usage.thoughtTokens;
+        seg.cached += res.usage.cacheReadTokens;
+        seg.lat += res.latencyMs;
         const raw = res.content.length ? res.content : [{ type: "text" as const, text: EMPTY_REPLY_TEXT }];
         // Messenger không hiển thị markdown — «*Họ tên, SĐT…*» tới khách nguyên dấu sao (03/10/2026, «Dương Bích Phượng»).
         // CHỮ GỬI KHÁCH QUA BỘ LỌC SUY LUẬN (03/10/2026, «Phuoc Ha»): model viết lẩm bẩm vào câu trả lời — tên công cụ, «Khách
@@ -1022,8 +1057,40 @@ export async function resumeConversationToAi(id: string): Promise<boolean> {
   const [row] = await db
     .update(c)
     // Trả lại cho AI cũng gỡ chế độ «người xử lý» của hội thoại (conversation-control-shared.ts) — nếu không, bot vẫn im.
-    .set({ status: "OPEN", handoffReason: null, state: sql`${c.state} - 'handoff' - 'control'`, updatedAt: new Date() })
+    .set({ status: "OPEN", handoffReason: null, state: sql`${c.state} - 'handoff' - 'control'`, humanCooldownUntil: null, updatedAt: new Date() })
     .where(and(eq(c.id, id), eq(c.status, "HANDOFF")))
     .returning({ id: c.id });
   return Boolean(row);
+}
+
+export type SalesAiReadiness = { ok: true } | { ok: false; code: "KILL_SWITCH" | "QUOTA" | "NO_AI_SOURCE"; reason: string };
+
+/**
+ * NGUỒN AI CỦA BOT CÓ CHẠY ĐƯỢC KHÔNG — ĐÚNG ba bước mà lượt `chatTurnCore` đi trước khi gọi model (công tắc tắt AI của người vận
+ * hành → hạn mức của nguồn trả tiền, có xét khoá dự phòng → chọn khoá: nhà = khoá `.env`, khách = AI dùng chung / BYOK), nhưng
+ * KHÔNG gọi model nào và không ghi sổ AI. Màn hộp thư dùng để nói thật «AI không trả lời được vì …» thay vì «AI đang trả lời».
+ * Một khoá sai (401) chỉ lộ ra khi gọi — phần đó đọc từ CHỨNG CỨ lượt gọi gần nhất (`ai-status.ts`), không đoán ở đây.
+ */
+export async function salesAiReadiness(): Promise<SalesAiReadiness> {
+  const cfg = await loadSalesChatbotConfig();
+  const org = await currentOrganization();
+  const killed = await aiKillSwitchDenial(org.code);
+  if (killed) return { ok: false, code: "KILL_SWITCH", reason: killed };
+  // Đường XEM: không báo ai (`notify: false`), không ghi sổ AI, không ghim nhánh theo hội thoại (ref null). AI dùng chung đã tự
+  // kiểm hạn mức trong `platformChatAi` ⇒ không kiểm lần thứ hai — mỗi lần kiểm là một phép cộng dồn cả tháng sổ AI.
+  const usage: FailoverUsage = { feature: "sales_chatbot", actorId: null, ref: null };
+  const tryKey = async (key: SalesChatbotConfig["connectorKey"], model: string): Promise<{ ok: true } | { ok: false; quota: boolean; error: string }> => {
+    const source = salesBotBillingSource(key, { home: org.isHome });
+    if (source !== "PLATFORM") {
+      const q = await checkAiQuota(org.code, source, { notify: false });
+      if (!q.ok) return { ok: false, quota: true, error: q.error };
+    }
+    const r = await resolveConnector(cfg, key, model, usage);
+    return r.ok ? { ok: true } : { ok: false, quota: false, error: r.error };
+  };
+  const primary = await tryKey(cfg.connectorKey, cfg.model);
+  if (primary.ok) return { ok: true };
+  const fb = effectiveFallback(cfg);
+  if (fb && (await tryKey(fb.connectorKey, fb.model)).ok) return { ok: true };
+  return { ok: false, code: primary.quota ? "QUOTA" : "NO_AI_SOURCE", reason: primary.error };
 }

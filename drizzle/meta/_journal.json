@@ -1616,7 +1616,14 @@
       "idx": 231,
       "version": "7",
       "when": 1791400380000,
-      "tag": "0231_tech_worker_onboarding",
+      "tag": "0231_sales_human_cooldown",
+      "breakpoints": true
+    },
+    {
+      "idx": 232,
+      "version": "7",
+      "when": 1791400440000,
+      "tag": "0232_tech_worker_onboarding",
       "breakpoints": true
     }
   ]

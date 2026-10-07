@@ -16,11 +16,19 @@
  * Phần thuần (parse · băm · định tuyến) không đọc CSDL; `readPlatformAiPolicy` đọc qua bộ đệm 30 giây (đường nóng: mỗi tin
  * khách một lượt đọc), lỗi đọc ⇒ `null` ⇒ `BASE`. Ghi DUY NHẤT qua lõi người vận hành `lib/ai-usage/platform-ai-admin.ts`.
  */
-import { and, eq, gte } from "drizzle-orm";
+import { and, eq, gte, like, or } from "drizzle-orm";
 import { getPlatformDb, schema } from "@/db";
+import type { AiRequest } from "@/lib/ai/provider";
 import { PLATFORM_AI_PROVIDERS, type PlatformAiProviderName } from "@/lib/ai-usage/platform-ai";
+import { PLATFORM_WORKLOADS, type PlatformWorkload } from "@/lib/ai-usage/types";
 
 export const PLATFORM_AI_POLICY_KEY = "platform.ai.policy";
+/** Chính sách RIÊNG của một loại việc (§8). Chưa có / đang tắt ⇒ loại việc đó đi chính sách chung — tương thích ngược. */
+export const platformAiPolicyKey = (workload: PlatformWorkload | null | undefined): string => (workload ? `${PLATFORM_AI_POLICY_KEY}.${workload}` : PLATFORM_AI_POLICY_KEY);
+export const PLATFORM_AI_REASONINGS = ["minimal", "low", "medium", "high"] as const;
+export type PlatformAiReasoning = (typeof PLATFORM_AI_REASONINGS)[number];
+/** Trần token ra hợp lệ của chính sách (gồm cả suy nghĩ). */
+export const POLICY_MAX_OUTPUT = { min: 256, max: 16_000 } as const;
 export const PLATFORM_AI_POLICY_TTL_MS = 30_000;
 const MODEL_RE = /^[a-z0-9][a-z0-9.\-]{1,60}$/;
 
@@ -41,6 +49,12 @@ export type PlatformAiPolicyCore = {
    * CÙNG primary giữ nguyên mốc; đổi primary thì mốc mới. Bản cũ không có ô này ⇒ dùng `effectiveFrom`.
    */
   cohortSince: string;
+  /**
+   * Mức suy nghĩ / trần token ra cho lời gọi của MODEL CHÍNH (nhánh canary) — `null` = giữ nguyên thứ nơi gọi đặt (bot: Kỹ /
+   * Nhanh; ghi đơn: low). Model dự phòng luôn chạy đúng cấu hình của nơi gọi: đó là cấu hình đã chạy ổn.
+   */
+  reasoning: PlatformAiReasoning | null;
+  maxOutputTokens: number | null;
 };
 /** `previous` = bản ngay trước lượt đổi — nút Hoàn tác trả về đúng bản đó (một nấc; nhật ký nền tảng giữ cả lịch sử). */
 export type PlatformAiPolicy = PlatformAiPolicyCore & { previous: PlatformAiPolicyCore | null };
@@ -72,6 +86,8 @@ function parseCore(raw: unknown): PlatformAiPolicyCore | null {
     changedBy: typeof raw.changedBy === "string" ? raw.changedBy : null,
     changedAt,
     cohortSince: isoOrNull(raw.cohortSince) ?? effectiveFrom,
+    reasoning: typeof raw.reasoning === "string" && (PLATFORM_AI_REASONINGS as readonly string[]).includes(raw.reasoning) ? (raw.reasoning as PlatformAiReasoning) : null,
+    maxOutputTokens: typeof raw.maxOutputTokens === "number" && Number.isInteger(raw.maxOutputTokens) && raw.maxOutputTokens >= POLICY_MAX_OUTPUT.min && raw.maxOutputTokens <= POLICY_MAX_OUTPUT.max ? raw.maxOutputTokens : null,
   };
 }
 
@@ -99,7 +115,8 @@ export type PlatformModelArm = "BASE" | "CANARY" | "CONTROL";
 export function livePolicy(policy: PlatformAiPolicy | null, now: Date): PlatformAiPolicy | null {
   return policy && policy.enabled && Date.parse(policy.effectiveFrom) <= now.getTime() ? policy : null;
 }
-export type PlatformModelRoute = { model: string; fallbackModel: string | null; arm: PlatformModelArm; note: string | null };
+/** `overrides` = mức suy nghĩ / trần token của chính sách, CHỈ áp lên lời gọi của model chính ở nhánh canary. */
+export type PlatformModelRoute = { model: string; fallbackModel: string | null; arm: PlatformModelArm; note: string | null; overrides?: Pick<AiRequest, "reasoning" | "maxTokens"> };
 
 /**
  * Lượt AI dùng chung này đi model nào. HÀM THUẦN — đường nóng (`platformChatAi`) và màn người vận hành dùng CHUNG, nên
@@ -114,7 +131,8 @@ export function routePlatformModel(input: { baseModel: string; provider: Platfor
   if (input.now.getTime() < Date.parse(p.effectiveFrom)) return base("Chính sách chưa tới giờ hiệu lực.");
   if (!input.priced(p.primaryModel)) return base(`Model ${p.primaryModel} chưa có trong bảng giá — bỏ qua chính sách.`);
   const fb = p.fallbackModel && input.priced(p.fallbackModel) ? p.fallbackModel : input.baseModel;
-  const canary: PlatformModelRoute = { model: p.primaryModel, fallbackModel: fb === p.primaryModel ? null : fb, arm: "CANARY", note: null };
+  const overrides = { ...(p.reasoning ? { reasoning: p.reasoning } : {}), ...(p.maxOutputTokens ? { maxTokens: p.maxOutputTokens } : {}) };
+  const canary: PlatformModelRoute = { model: p.primaryModel, fallbackModel: fb === p.primaryModel ? null : fb, arm: "CANARY", note: null, ...(Object.keys(overrides).length ? { overrides } : {}) };
   const control: PlatformModelRoute = { model: fb, fallbackModel: null, arm: "CONTROL", note: null };
   // GHIM THEO HỘI THOẠI: hội thoại đã chạy model nào (sổ AI) thì giữ nhánh đó — tăng nấc 10 → 30% không kéo hội thoại đang
   // dở của nhóm đối chứng sang model mới, và hội thoại mở TRƯỚC khi bật canary (chỉ có dòng của model ổn định) không đổi
@@ -125,22 +143,45 @@ export function routePlatformModel(input: { baseModel: string; provider: Platfor
   return canaryBucket(input.routingKey) < p.canaryPct ? canary : control;
 }
 
-const holder = globalThis as typeof globalThis & { __erpPlatformAiPolicy?: { at: number; policy: PlatformAiPolicy | null } };
+export type PlatformAiPolicySet = { global: PlatformAiPolicy | null; workloads: Partial<Record<PlatformWorkload, PlatformAiPolicy>> };
 
-/** Chính sách đang lưu (bộ đệm 30 giây, `fresh` bỏ qua bộ đệm). Lỗi đọc ⇒ `null` ⇒ model của biến môi trường. */
-export async function readPlatformAiPolicy(opts: { fresh?: boolean } = {}): Promise<PlatformAiPolicy | null> {
+/** Chính sách CÓ HIỆU LỰC cho một loại việc: riêng (đang bật) ⇒ riêng; còn lại ⇒ chung. HÀM THUẦN. */
+export function policyForWorkload(set: PlatformAiPolicySet, workload: PlatformWorkload | null | undefined): { policy: PlatformAiPolicy | null; scope: PlatformWorkload | "global" } {
+  const own = workload ? set.workloads[workload] : undefined;
+  return own?.enabled ? { policy: own, scope: workload as PlatformWorkload } : { policy: set.global, scope: "global" };
+}
+
+const holder = globalThis as typeof globalThis & { __erpPlatformAiPolicy?: { at: number; set: PlatformAiPolicySet } };
+
+/** Mọi chính sách (chung + từng loại việc) trong MỘT câu đọc, bộ đệm 30 giây. Lỗi đọc ⇒ rỗng ⇒ model của biến môi trường. */
+export async function readPlatformAiPolicies(opts: { fresh?: boolean } = {}): Promise<PlatformAiPolicySet> {
   const hit = holder.__erpPlatformAiPolicy;
-  if (!opts.fresh && hit && Date.now() - hit.at < PLATFORM_AI_POLICY_TTL_MS) return hit.policy;
-  let policy: PlatformAiPolicy | null = null;
+  if (!opts.fresh && hit && Date.now() - hit.at < PLATFORM_AI_POLICY_TTL_MS) return hit.set;
+  const set: PlatformAiPolicySet = { global: null, workloads: {} };
   try {
     const pdb = await getPlatformDb();
-    const r = await pdb.query.platformSettings.findFirst({ where: eq(schema.platformSettings.key, PLATFORM_AI_POLICY_KEY) });
-    policy = parsePlatformAiPolicy(r?.value);
+    const s = schema.platformSettings;
+    const rows = await pdb.select({ key: s.key, value: s.value }).from(s).where(or(eq(s.key, PLATFORM_AI_POLICY_KEY), like(s.key, `${PLATFORM_AI_POLICY_KEY}.%`)));
+    for (const r of rows) {
+      const p = parsePlatformAiPolicy(r.value);
+      if (!p) continue;
+      if (r.key === PLATFORM_AI_POLICY_KEY) set.global = p;
+      else {
+        const w = r.key.slice(PLATFORM_AI_POLICY_KEY.length + 1);
+        if ((PLATFORM_WORKLOADS as readonly string[]).includes(w)) set.workloads[w as PlatformWorkload] = p;
+      }
+    }
   } catch {
-    policy = null;
+    return { global: null, workloads: {} };
   }
-  holder.__erpPlatformAiPolicy = { at: Date.now(), policy };
-  return policy;
+  holder.__erpPlatformAiPolicy = { at: Date.now(), set };
+  return set;
+}
+
+/** Chính sách của MỘT khoá (chung khi `workload` trống) — đọc lại tươi cho lõi người vận hành. */
+export async function readPlatformAiPolicy(opts: { fresh?: boolean; workload?: PlatformWorkload | null } = {}): Promise<PlatformAiPolicy | null> {
+  const set = await readPlatformAiPolicies(opts);
+  return opts.workload ? (set.workloads[opts.workload] ?? null) : set.global;
 }
 
 /**

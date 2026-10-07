@@ -17,7 +17,8 @@ import { getPlatformDb, schema } from "@/db";
 import type { SessionUser } from "@/lib/auth/session";
 import { giaCuaModel } from "@/lib/ai/provider";
 import { defaultEnvReader, platformAiConfig, type EnvReader, type PlatformAiProviderName } from "@/lib/ai-usage/platform-ai";
-import { invalidatePlatformAiPolicy, PLATFORM_AI_POLICY_KEY, readPlatformAiPolicy, type PlatformAiPolicy, type PlatformAiPolicyCore } from "@/lib/ai-usage/platform-ai-policy";
+import { invalidatePlatformAiPolicy, PLATFORM_AI_REASONINGS, policyForWorkload, readPlatformAiPolicies, platformAiPolicyKey, POLICY_MAX_OUTPUT, readPlatformAiPolicy, type PlatformAiPolicy, type PlatformAiPolicyCore, type PlatformAiReasoning } from "@/lib/ai-usage/platform-ai-policy";
+import { PLATFORM_WORKLOAD_LABEL, PLATFORM_WORKLOADS, type PlatformWorkload } from "@/lib/ai-usage/types";
 import { MODEL_PROBE_VERDICTS, probePlatformModel, type ModelProbeResult, type ModelProbeVerdict } from "@/lib/ai-usage/platform-model-probe";
 import { platformAudit, type PlatformActor } from "@/lib/platform/audit";
 import { KILL_SWITCH_REASON_MIN } from "@/lib/platform/kill-switches";
@@ -103,6 +104,24 @@ export function controlStage(input: { keyReady: boolean; policy: PlatformAiPolic
   return input.probe.verdict === "AVAILABLE" ? "READY" : "PROBE_FAILED";
 }
 
+/** Một dòng bảng PLATFORM AI ROUTING: chính sách CÓ HIỆU LỰC của loại việc + sổ AI 30 ngày của nó. */
+export type RoutingRow = {
+  workload: PlatformWorkload | "other";
+  scope: PlatformWorkload | "global" | null;
+  model: string | null;
+  fallbackModel: string | null;
+  reasoning: string | null;
+  canaryPct: number | null;
+  calls: number;
+  errorRate: number | null;
+  thinkingTokens: number | null;
+  /** lượt OK đã tách được suy nghĩ / mọi lượt OK. */
+  thinkCoverage: number | null;
+  costUsd: number;
+  units: number;
+  costPerUnitUsd: number | null;
+};
+
 export type PlatformAiControlView = {
   key: { ready: boolean; reason: string | null; provider: PlatformAiProviderName | null; baseModel: string | null };
   policy: PlatformAiPolicy | null;
@@ -116,6 +135,7 @@ export type PlatformAiControlView = {
   stage: ControlStage;
   audit: { at: string; action: string; actorEmail: string | null; reason: string | null; after: unknown }[];
   windowDays: number;
+  routing: RoutingRow[];
 };
 
 async function readProbeRecords(): Promise<Record<string, ProbeRecord>> {
@@ -181,6 +201,49 @@ export async function loadPlatformAiControl(user: SessionUser, now: Date = new D
       .orderBy(desc(schema.platformAuditLog.at))
       .limit(10),
   ]);
+  // PLATFORM AI ROUTING — loại việc suy từ `ref` (ghi đơn = `order-sync:*`) cho tới khi sổ có cột `workload` (migration riêng):
+  // chọn câu mẫu / đọc ảnh tới lúc đó nằm chung dòng Sales Chat.
+  const wlExpr = sql<string>`case when ${a.feature} <> 'sales_chatbot' then 'other' when ${a.ref} like 'order-sync:%' then 'order_sync' else 'sales_chatbot' end`;
+  const [policySet, routingRows] = await Promise.all([
+    readPlatformAiPolicies({ fresh: true }),
+    pdb
+      .select({
+        wl: wlExpr,
+        calls: sql<number>`coalesce(sum(${a.requests}), 0)::int`,
+        errors: sql<number>`coalesce(sum(${a.requests}) filter (where ${a.status} = 'ERROR'), 0)::int`,
+        okCalls: sql<number>`coalesce(sum(${a.requests}) filter (where ${a.status} = 'OK'), 0)::int`,
+        cost: sql<number>`coalesce(sum(${a.costUsd}), 0)::float8`,
+        units: sql<number>`count(distinct ${a.ref})::int`,
+      })
+      .from(a)
+      .where(and(eq(a.billingSource, "PLATFORM"), gte(a.at, from), ne(a.status, "BLOCKED_QUOTA")))
+      .groupBy(wlExpr),
+  ]);
+  const routing: RoutingRow[] = ([...PLATFORM_WORKLOADS, "other"] as const).map((w) => {
+    const r = routingRows.find((x) => x.wl === w);
+    const eff = w === "other" ? { policy: policySet.global, scope: "global" as const } : policyForWorkload(policySet, w);
+    const p = eff.policy && eff.policy.enabled ? eff.policy : null;
+    const calls = Number(r?.calls ?? 0);
+    const ok = Number(r?.okCalls ?? 0);
+    const known = 0;
+    const units = Number(r?.units ?? 0);
+    const cost = Number(r?.cost ?? 0);
+    return {
+      workload: w,
+      scope: p ? eff.scope : null,
+      model: p ? p.primaryModel : cfg.ready ? cfg.model : null,
+      fallbackModel: p ? (p.fallbackModel ?? (cfg.ready ? cfg.model : null)) : null,
+      reasoning: p?.reasoning ?? null,
+      canaryPct: p ? p.canaryPct : null,
+      calls,
+      errorRate: calls > 0 ? Number(r?.errors ?? 0) / calls : null,
+      thinkingTokens: null,
+      thinkCoverage: ok > 0 ? known / ok : null,
+      costUsd: cost,
+      units,
+      costPerUnitUsd: units > 0 ? cost / units : null,
+    };
+  });
   const usage: ModelUsageRow[] = rows.map((r) => ({ model: r.model, requests: Number(r.requests), errors: Number(r.errors), inputTokens: Number(r.inputTokens), outputTokens: Number(r.outputTokens), costUsd: Number(r.costUsd), unpricedRequests: Number(r.unpricedRequests) })).sort((x, y) => y.requests - x.requests);
   const priceOf = (m: string | null): UnitPrice | null => {
     if (!m) return null;
@@ -213,6 +276,7 @@ export async function loadPlatformAiControl(user: SessionUser, now: Date = new D
       stage: controlStage({ keyReady: cfg.ready, policy, candidate, probe: candidate ? probes[candidate] : undefined, now }),
       audit: audit.map((r) => ({ at: r.at.toISOString(), action: r.action, actorEmail: r.actorEmail, reason: r.reason, after: r.after })),
       windowDays: USAGE_WINDOW_DAYS,
+      routing,
     },
   };
 }
@@ -252,7 +316,13 @@ export async function setPlatformAiPolicy(user: SessionUser, raw: PolicyInput, d
   return applyPolicy(writerOf(user), raw, deps);
 }
 
-type PolicyInput = { primaryModel?: unknown; fallbackModel?: unknown; canaryPct?: unknown; effectiveFrom?: unknown; reason?: unknown };
+type PolicyInput = { primaryModel?: unknown; fallbackModel?: unknown; canaryPct?: unknown; effectiveFrom?: unknown; reason?: unknown; workload?: unknown; reasoning?: unknown; maxOutputTokens?: unknown };
+
+/** Loại việc của yêu cầu: trống ⇒ chính sách chung; giá trị lạ ⇒ lỗi (không đoán). HÀM THUẦN. */
+export function parseWorkload(raw: unknown): { ok: true; workload: PlatformWorkload | null } | { ok: false; error: string } {
+  if (raw === undefined || raw === null || raw === "" || raw === "global") return { ok: true, workload: null };
+  return typeof raw === "string" && (PLATFORM_WORKLOADS as readonly string[]).includes(raw) ? { ok: true, workload: raw as PlatformWorkload } : { ok: false, error: `Loại việc «${String(raw).slice(0, 40)}» không hợp lệ.` };
+}
 
 async function applyPolicy(w: Writer, raw: PolicyInput, deps: { env?: EnvReader; now?: Date }): Promise<PlatformAiResult> {
   const reason = reasonOf(raw.reason);
@@ -266,22 +336,32 @@ async function applyPolicy(w: Writer, raw: PolicyInput, deps: { env?: EnvReader;
   if (!Number.isInteger(canaryPct) || canaryPct < 1 || canaryPct > 100) return { error: "Tỷ lệ chạy thử phải là số nguyên 1–100 (100 = áp dụng toàn bộ)." };
   if (!giaCuaModel(primaryModel)) return { error: `Model ${primaryModel || "(trống)"} chưa có trong bảng giá — không trừ được credit nền tảng.` };
   if (!giaCuaModel(fallbackModel)) return { error: `Model dự phòng ${fallbackModel} chưa có trong bảng giá.` };
-  if (primaryModel === fallbackModel) return { error: "Model chính và model dự phòng trùng nhau — không có gì để chạy thử." };
+  const wl = parseWorkload(raw.workload);
+  if (!wl.ok) return { error: wl.error };
+  const reasoning = raw.reasoning === undefined || raw.reasoning === null || raw.reasoning === "" ? null : (PLATFORM_AI_REASONINGS as readonly unknown[]).includes(raw.reasoning) ? (raw.reasoning as PlatformAiReasoning) : undefined;
+  if (reasoning === undefined) return { error: "Mức suy nghĩ phải là minimal · low · medium · high (hoặc để trống = giữ của nơi gọi)." };
+  const maxRaw = raw.maxOutputTokens === undefined || raw.maxOutputTokens === null || raw.maxOutputTokens === "" ? null : Number(raw.maxOutputTokens);
+  if (maxRaw !== null && (!Number.isInteger(maxRaw) || maxRaw < POLICY_MAX_OUTPUT.min || maxRaw > POLICY_MAX_OUTPUT.max)) return { error: `Trần token ra phải là số nguyên ${POLICY_MAX_OUTPUT.min}–${POLICY_MAX_OUTPUT.max} (gồm cả suy nghĩ) hoặc để trống.` };
+  // Hai nhánh phải KHÁC model: A/B phân nhánh theo tên model trong sổ AI — cùng model khác mức suy nghĩ thì hai nhánh lẫn vào nhau.
+  if (primaryModel === fallbackModel) return { error: "Model chính và model dự phòng trùng nhau — so mức suy nghĩ của CÙNG model hãy dùng benchmark phát lại (ops platform-ai-bench)." };
   const probes = await readProbeRecords();
   if (!probeIsFreshAvailable(probes[primaryModel], now)) return { error: `Chưa có lượt Kiểm tra khả dụng THÀNH CÔNG cho ${primaryModel} bằng khoá nền tảng trong 24 giờ qua — kiểm trước, không đổi model chưa chứng minh gọi được.` };
   if (fallbackModel !== cfg.model && !probeIsFreshAvailable(probes[fallbackModel], now)) return { error: `Model dự phòng ${fallbackModel} không phải model đang chạy và chưa được kiểm khả dụng trong 24 giờ.` };
   const effectiveFrom = typeof raw.effectiveFrom === "string" && Number.isFinite(Date.parse(raw.effectiveFrom)) ? new Date(raw.effectiveFrom).toISOString() : now.toISOString();
-  const before = await readPlatformAiPolicy({ fresh: true });
-  // Tăng / giảm nấc với CÙNG cặp model ⇒ giữ mốc cohort (phép so A/B cộng dồn); đổi cặp ⇒ cohort mới.
-  const sameCohort = before?.enabled && before.primaryModel === primaryModel && (before.fallbackModel ?? cfg.model) === fallbackModel;
+  const key = platformAiPolicyKey(wl.workload);
+  const before = await readPlatformAiPolicy({ fresh: true, workload: wl.workload });
+  // Tăng / giảm nấc với CÙNG cấu hình (model chính · dự phòng · mức suy nghĩ · trần) ⇒ giữ mốc cohort (A/B cộng dồn); đổi ⇒ mới.
+  const sameCohort = before?.enabled && before.primaryModel === primaryModel && (before.fallbackModel ?? cfg.model) === fallbackModel && before.reasoning === reasoning && before.maxOutputTokens === maxRaw;
   const cohortSince = sameCohort ? before.cohortSince : effectiveFrom;
-  const core: PlatformAiPolicyCore = { enabled: true, provider: cfg.provider, primaryModel, fallbackModel, canaryPct, effectiveFrom, reason, changedBy: w.label, changedAt: now.toISOString(), cohortSince };
+  const core: PlatformAiPolicyCore = { enabled: true, provider: cfg.provider, primaryModel, fallbackModel, canaryPct, effectiveFrom, reason, changedBy: w.label, changedAt: now.toISOString(), cohortSince, reasoning, maxOutputTokens: maxRaw };
   const next: PlatformAiPolicy = { ...core, previous: before ? stripPrevious(before) : null };
-  await putSetting(w, PLATFORM_AI_POLICY_KEY, next);
+  await putSetting(w, key, next);
   const home = await getHomeOrganization();
-  await platformAudit({ action: "PLATFORM_AI_POLICY_SET", targetOrgCode: home.code, subject: PLATFORM_AI_POLICY_KEY, before: before ? stripPrevious(before) : null, after: core, reason, source: w.source, actor: w.actor });
+  await platformAudit({ action: "PLATFORM_AI_POLICY_SET", targetOrgCode: home.code, subject: key, before: before ? stripPrevious(before) : null, after: core, reason, source: w.source, actor: w.actor });
   invalidatePlatformAiPolicy();
-  return { ok: true, message: canaryPct >= 100 ? `Đã ÁP DỤNG ${primaryModel} cho toàn bộ AI dùng chung (dự phòng ${fallbackModel}).` : `Đang CHẠY THỬ ${primaryModel} trên ~${canaryPct}% hội thoại (phần còn lại + dự phòng: ${fallbackModel}).` };
+  const scope = wl.workload ? PLATFORM_WORKLOAD_LABEL[wl.workload] : "toàn bộ AI dùng chung";
+  const conf = `${primaryModel}${reasoning ? ` · suy nghĩ ${reasoning}` : ""}${maxRaw ? ` · trần ${maxRaw} token` : ""}`;
+  return { ok: true, message: canaryPct >= 100 ? `Đã ÁP DỤNG ${conf} cho ${scope} (dự phòng ${fallbackModel}).` : `Đang CHẠY THỬ ${conf} trên ~${canaryPct}% hội thoại của ${scope} (phần còn lại + dự phòng: ${fallbackModel}).` };
 }
 
 function stripPrevious(p: PlatformAiPolicy): PlatformAiPolicyCore {
@@ -291,25 +371,28 @@ function stripPrevious(p: PlatformAiPolicy): PlatformAiPolicyCore {
 }
 
 /** Bước 4 — HOÀN TÁC: về đúng bản trước; không có bản trước ⇒ tắt chính sách (model của biến môi trường). */
-export async function rollbackPlatformAiPolicy(user: SessionUser, raw: { reason?: unknown }, deps: { now?: Date } = {}): Promise<PlatformAiResult> {
+export async function rollbackPlatformAiPolicy(user: SessionUser, raw: { reason?: unknown; workload?: unknown }, deps: { now?: Date } = {}): Promise<PlatformAiResult> {
   const denial = platformOperatorDenial(user);
   if (denial) return { error: denial };
   return rollbackPolicy(writerOf(user), raw, deps);
 }
 
-async function rollbackPolicy(w: Writer, raw: { reason?: unknown }, deps: { now?: Date }): Promise<PlatformAiResult> {
+async function rollbackPolicy(w: Writer, raw: { reason?: unknown; workload?: unknown }, deps: { now?: Date }): Promise<PlatformAiResult> {
   const reason = reasonOf(raw.reason);
   if (typeof reason !== "string") return reason;
+  const wl = parseWorkload(raw.workload);
+  if (!wl.ok) return { error: wl.error };
+  const key = platformAiPolicyKey(wl.workload);
   const now = deps.now ?? new Date();
-  const current = await readPlatformAiPolicy({ fresh: true });
+  const current = await readPlatformAiPolicy({ fresh: true, workload: wl.workload });
   if (!current) return { error: "Chưa có chính sách nào — AI dùng chung đang chạy model của biến môi trường, không có gì để hoàn tác." };
   const restored: PlatformAiPolicyCore = current.previous ? { ...current.previous, changedBy: w.label, changedAt: now.toISOString(), reason } : { ...stripPrevious(current), enabled: false, changedBy: w.label, changedAt: now.toISOString(), reason };
   const next: PlatformAiPolicy = { ...restored, previous: stripPrevious(current) };
-  await putSetting(w, PLATFORM_AI_POLICY_KEY, next);
+  await putSetting(w, key, next);
   const home = await getHomeOrganization();
-  await platformAudit({ action: "PLATFORM_AI_POLICY_ROLLBACK", targetOrgCode: home.code, subject: PLATFORM_AI_POLICY_KEY, before: stripPrevious(current), after: restored, reason, source: w.source, actor: w.actor });
+  await platformAudit({ action: "PLATFORM_AI_POLICY_ROLLBACK", targetOrgCode: home.code, subject: key, before: stripPrevious(current), after: restored, reason, source: w.source, actor: w.actor });
   invalidatePlatformAiPolicy();
-  return { ok: true, message: restored.enabled ? `Đã hoàn tác về bản trước: ${restored.primaryModel} ở ${restored.canaryPct}%.` : "Đã hoàn tác: chính sách TẮT — AI dùng chung chạy lại model của biến môi trường." };
+  return { ok: true, message: restored.enabled ? `Đã hoàn tác về bản trước: ${restored.primaryModel} ở ${restored.canaryPct}%.` : wl.workload ? `Đã hoàn tác: chính sách riêng của ${PLATFORM_WORKLOAD_LABEL[wl.workload]} TẮT — loại việc này đi lại chính sách chung.` : "Đã hoàn tác: chính sách TẮT — AI dùng chung chạy lại model của biến môi trường." };
 }
 
 /**
@@ -317,18 +400,18 @@ async function rollbackPolicy(w: Writer, raw: { reason?: unknown }, deps: { now?
  * lõi với nút trên màn hình, và CHẶT HƠN ở một chỗ: kiểm khả dụng model chính NGAY TRƯỚC khi ghi (không dựa vào lượt kiểm cũ),
  * nên không thể áp dụng một model mà khoá nền tảng vừa không gọi được. Nhật ký nguồn `SCRIPT`, người làm = máy.
  */
-export async function applyPlatformAiPolicyAsScript(raw: { primaryModel: string; canaryPct: number; reason: string }, deps: { fetch?: typeof fetch; env?: EnvReader; now?: Date } = {}): Promise<PlatformAiResult & { verdict?: ModelProbeVerdict }> {
+export async function applyPlatformAiPolicyAsScript(raw: { primaryModel: string; canaryPct: number; reason: string; workload?: PlatformWorkload | null; reasoning?: PlatformAiReasoning | null; maxOutputTokens?: number | null }, deps: { fetch?: typeof fetch; env?: EnvReader; now?: Date } = {}): Promise<PlatformAiResult & { verdict?: ModelProbeVerdict }> {
   const cfg = platformAiConfig(deps.env ?? defaultEnvReader);
   if (!cfg.ready) return { error: `Khoá nền tảng chưa sẵn sàng: ${cfg.reason}` };
   if (!giaCuaModel(raw.primaryModel)) return { error: `Model ${raw.primaryModel} chưa có trong bảng giá.` };
   const r = await probePlatformModel({ apiKey: cfg.apiKey, provider: cfg.provider, model: raw.primaryModel, fetch: deps.fetch });
   await recordProbe(SCRIPT_WRITER, r, deps.now ?? new Date());
   if (r.verdict !== "AVAILABLE") return { error: `KHÔNG ĐỔI: ${raw.primaryModel} ⇒ ${r.verdict}${r.httpStatus !== null ? ` (HTTP ${r.httpStatus})` : ""}.`, verdict: r.verdict };
-  const out = await applyPolicy(SCRIPT_WRITER, { primaryModel: raw.primaryModel, canaryPct: raw.canaryPct, reason: raw.reason }, deps);
+  const out = await applyPolicy(SCRIPT_WRITER, { primaryModel: raw.primaryModel, canaryPct: raw.canaryPct, reason: raw.reason, workload: raw.workload ?? null, reasoning: raw.reasoning ?? null, maxOutputTokens: raw.maxOutputTokens ?? null }, deps);
   return { ...out, verdict: r.verdict };
 }
 
-export async function rollbackPlatformAiPolicyAsScript(raw: { reason: string }, deps: { now?: Date } = {}): Promise<PlatformAiResult> {
+export async function rollbackPlatformAiPolicyAsScript(raw: { reason: string; workload?: PlatformWorkload | null }, deps: { now?: Date } = {}): Promise<PlatformAiResult> {
   return rollbackPolicy(SCRIPT_WRITER, raw, deps);
 }
 

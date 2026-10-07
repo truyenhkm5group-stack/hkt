@@ -4,7 +4,8 @@ import { openActiveConnection } from "@/lib/connectors/service";
 import { currentOrganization } from "@/lib/platform/context";
 import { aiKillSwitchDenial } from "@/lib/ai-usage/control";
 import { defaultEnvReader, platformAiConfig, type EnvReader, type PlatformAiConfig } from "@/lib/ai-usage/platform-ai";
-import { livePolicy, readPlatformAiPolicy, routePlatformModel, type PlatformAiPolicy, type PlatformModelRoute } from "@/lib/ai-usage/platform-ai-policy";
+import { livePolicy, policyForWorkload, readPlatformAiPolicies, routePlatformModel, type PlatformAiPolicy, type PlatformModelRoute } from "@/lib/ai-usage/platform-ai-policy";
+import type { PlatformWorkload } from "@/lib/ai-usage/types";
 import { checkAiQuota, resolveAiLimits } from "@/lib/ai-usage/quota";
 import { withPlatformFallback, type PlatformPrimaryFailure } from "@/lib/ai-builder/platform-fallback";
 import { ByokAnthropicProvider, ByokGeminiProvider, ByokOpenAiProvider, BUILDER_TIMEOUT_MS } from "@/lib/ai-builder/providers";
@@ -102,11 +103,11 @@ async function platformAi(orgCode: string, deps: PlatformAiDeps): Promise<{ ok: 
  * đọc `platform.ai.policy`). `routingKey` = khoá băm canary (hội thoại) — trống ⇒ mã tổ chức. `onPrimaryFailed` = lượt hỏng
  * của model chính khi model dự phòng đã đỡ (bên gọi ghi một dòng `ERROR` vào sổ AI).
  */
-export type PlatformAiDeps = { fetch?: typeof fetch; env?: EnvReader; policy?: PlatformAiPolicy | null; routingKey?: string | null; now?: Date; onPrimaryFailed?: (f: PlatformPrimaryFailure) => void; priorModels?: () => Promise<readonly string[]> };
+export type PlatformAiDeps = { fetch?: typeof fetch; env?: EnvReader; policy?: PlatformAiPolicy | null; routingKey?: string | null; now?: Date; onPrimaryFailed?: (f: PlatformPrimaryFailure) => void; priorModels?: () => Promise<readonly string[]>; workload?: PlatformWorkload | null };
 
 /** Model của lượt này theo Platform AI Policy (`lib/ai-usage/platform-ai-policy.ts`) — không có chính sách ⇒ model của biến môi trường. */
 export async function platformRoute(cfg: Extract<PlatformAiConfig, { ready: true }>, orgCode: string, deps: PlatformAiDeps = {}): Promise<PlatformModelRoute> {
-  const policy = deps.policy !== undefined ? deps.policy : await readPlatformAiPolicy();
+  const policy = deps.policy !== undefined ? deps.policy : policyForWorkload(await readPlatformAiPolicies(), deps.workload).policy;
   const now = deps.now ?? new Date();
   // Chỉ hỏi sổ AI (ghim nhánh theo hội thoại) khi chính sách ĐANG chạy — không chạy thử thì đường nóng không tốn câu nào.
   const prior = livePolicy(policy, now) && deps.priorModels ? await deps.priorModels().catch(() => []) : [];
@@ -122,8 +123,21 @@ export function platformProvider(cfg: Extract<PlatformAiConfig, { ready: true }>
     const opts = { apiKey: cfg.apiKey, model, fetch: fetchImpl, name: `${cfg.provider}-platform` };
     return cfg.provider === "gemini" ? new ByokGeminiProvider(opts) : new ByokAnthropicProvider(opts);
   };
-  const primary = make(route?.model ?? cfg.model);
+  const base = make(route?.model ?? cfg.model);
+  const primary = route?.overrides ? withRequestOverrides(base, route.overrides) : base;
   return route?.fallbackModel ? withPlatformFallback(primary, make(route.fallbackModel), onPrimaryFailed) : primary;
+}
+
+/** Mức suy nghĩ / trần token của chính sách đè lên yêu cầu của nơi gọi — CHỈ cho model chính (§8). */
+export function withRequestOverrides(provider: AiProvider, overrides: NonNullable<PlatformModelRoute["overrides"]>): AiProvider {
+  return {
+    name: provider.name,
+    schemaDialect: provider.schemaDialect,
+    get model() {
+      return provider.model;
+    },
+    complete: (req) => provider.complete({ ...req, ...overrides }),
+  };
 }
 
 /**
