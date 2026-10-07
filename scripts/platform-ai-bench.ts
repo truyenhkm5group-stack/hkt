@@ -12,6 +12,15 @@
         Sales Agent — đường «Phát lại hội thoại cũ»: kênh THỬ, công cụ ghi chỉ MÔ PHỎNG, hội thoại tạm bị xoá; lượt AI KHÔNG
         vào sổ AI thật của shop (bắt riêng để tính tiền của benchmark).
 
+    quick <mã tổ chức> [--cases=80] [--configs=Q35l,Q31n,…]
+        AI chọn câu mẫu (quick_extract) trên tin khách THẬT — nhãn = câu mẫu bộ khớp CHỮ (tất định) chọn; ca khớp chữ không ra
+        thì so với cấu hình đầu tiên (đang chạy). Chỉ đọc.
+
+  PHANH CHI TIÊU (07/10/2026 — lượt benchmark ~2 USD làm cạn tài khoản trả trước Google DÙNG CHUNG với khoá riêng của HSLC,
+  bot thật của shop hỏng ~40 phút): `--max-usd` (mặc định 0,2) là trần CẢ LƯỢT; lỗi hết tiền / khoá / quá tải ⇒ DỪNG mọi lời
+  gọi còn lại. Lỗi trả cho engine bị đổi thành câu trung tính — engine không được báo chủ shop «hết credit» vì một lượt
+  benchmark.
+
   Mọi lời gọi đi bằng KHOÁ NỀN TẢNG (`PLATFORM_AI_API_KEY`) — không tốn tiền khoá riêng của shop. Chỉ in SỐ TỔNG HỢP
   (`[ops:tom-tat]`): không tên, SĐT, địa chỉ, nội dung tin, mã hội thoại. Chạy một lượt ≤ ~10 phút (giữ khoá đọc của VPS
   ngắn); muốn nhiều ca hơn thì chạy nhiều lượt và cộng các số đếm.
@@ -22,7 +31,11 @@ import "dotenv/config";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { ByokGeminiProvider } from "@/lib/ai-builder/providers";
 import { withRequestOverrides } from "@/lib/ai-builder/provider";
-import type { AiRequest } from "@/lib/ai/provider";
+import { estimateCostUsd, type AiProvider, type AiRequest } from "@/lib/ai/provider";
+import { classifyAiFailure } from "@/lib/constants/ai-incidents";
+import { listQuickReplies, quickReplyByAi, quickReplyByKeyword } from "@/lib/sales-chatbot/quick-replies";
+import type { QuickReplyEntry } from "@/lib/sales-chatbot/quick-replies-shared";
+import { loadSalesChatbotConfig } from "@/lib/sales-chatbot/engine";
 import { setAiUsageCaptureForBench } from "@/lib/ai-usage/ledger";
 import { platformAiConfig } from "@/lib/ai-usage/platform-ai";
 import { withOrganization } from "@/lib/platform/context";
@@ -78,6 +91,39 @@ async function pool<T, R>(items: readonly T[], n: number, fn: (x: T) => Promise<
   return out;
 }
 
+/** Ngân sách CHUNG của cả lượt + công tắc dừng. */
+const budget = { capUsd: 0.2, spentUsd: 0, halted: null as string | null };
+
+/**
+ * Bọc provider: hết trần / đã dừng ⇒ không gọi; lỗi hết tiền · khoá · quá tải ⇒ DỪNG cả lượt. Lỗi ném ra là câu TRUNG TÍNH
+ * (không chứa «credit» / «429» / «permission»…) để bộ phân loại lỗi của engine không báo chủ shop.
+ */
+function guarded(p: AiProvider): AiProvider {
+  return {
+    name: p.name,
+    schemaDialect: p.schemaDialect,
+    get model() {
+      return p.model;
+    },
+    async complete(req) {
+      if (budget.halted) throw new Error(`bench da dung: ${budget.halted}`);
+      if (budget.spentUsd >= budget.capUsd) {
+        budget.halted = `cham tran ${budget.capUsd} USD`;
+        throw new Error(`bench da dung: ${budget.halted}`);
+      }
+      try {
+        const res = await p.complete(req);
+        budget.spentUsd += estimateCostUsd(res.model || p.model, res.usage) ?? 0;
+        return res;
+      } catch (e) {
+        const cls = classifyAiFailure(e instanceof Error ? e.message : String(e));
+        if (cls === "CREDIT" || cls === "AUTH" || cls === "RATE_LIMIT") budget.halted = `nha cung cap loi nhom ${cls.toLowerCase()}`;
+        throw new Error(`bench loi nha cung cap (nhom ${cls.toLowerCase()})`);
+      }
+    },
+  };
+}
+
 const pct = (v: number | null) => (v === null ? "—" : `${(v * 100).toFixed(1)}%`);
 const num = (v: number | null, d = 0) => (v === null ? "—" : v.toFixed(d));
 
@@ -91,7 +137,7 @@ async function runSync(orgCode: string, apiKey: string) {
     const byLabel = cases.reduce<Record<string, number>>((m, c) => ({ ...m, [c.label]: (m[c.label] ?? 0) + 1 }), {});
     tomTat(`GHI ĐƠN · ${cases.length} ca (${Object.entries(byLabel).map(([k, v]) => `${k} ${v}`).join(" · ")}) · bỏ: không mã hội thoại ${skipped.noThread} · không tin khách ${skipped.noCustomerMessage} · cấu hình ${configs.map((c) => c.key).join(",")}`);
     for (const cfg of configs) {
-      const provider = new ByokGeminiProvider({ apiKey, model: cfg.model, name: "gemini-bench" });
+      const provider = guarded(new ByokGeminiProvider({ apiKey, model: cfg.model, name: "gemini-bench" }));
       const t0 = Date.now();
       const rows: SyncBenchResult[] = await pool(cases, conc, (c) => runSyncCase(c, cfg, provider, catalog));
       const s = summarizeSyncBench(rows);
@@ -126,7 +172,7 @@ async function runSales(orgCode: string, apiKey: string) {
     const sit = points.flatMap((p) => scoreSalesPoint(p, { ok: true, reply: "", status: null, tools: [], error: null }, grounded).situations).reduce<Record<string, number>>((m, s) => ({ ...m, [s]: (m[s] ?? 0) + 1 }), {});
     tomTat(`SALES · ${sources.length} hội thoại nguồn · ${points.length} điểm · tình huống ${Object.entries(sit).map(([k, v]) => `${k} ${v}`).join(" · ")} · cấu hình ${configs.map((c) => c.key).join(",")}`);
     for (const cfg of configs) {
-      const provider = withRequestOverrides(new ByokGeminiProvider({ apiKey, model: cfg.model, name: "gemini-bench" }), { reasoning: cfg.reasoning, maxTokens: cfg.maxTokens });
+      const provider = guarded(withRequestOverrides(new ByokGeminiProvider({ apiKey, model: cfg.model, name: "gemini-bench" }), { reasoning: cfg.reasoning, maxTokens: cfg.maxTokens }));
       setSalesChatBenchProvider(provider);
       const t0 = Date.now();
       const rows: SalesBenchResult[] = await pool(points, conc, async (pt) => {
@@ -145,10 +191,66 @@ async function runSales(orgCode: string, apiKey: string) {
   setAiUsageCaptureForBench(null);
 }
 
+/** Cấu hình chọn câu mẫu. Q35l = production hôm nay (quickReplyByAi gọi reasoning "low", trần 1.200). */
+const QUICK_CONFIGS: Record<string, { key: string; model: string; reasoning: AiRequest["reasoning"]; maxTokens: number }> = {
+  Q35l: { key: "Q35l", model: M35, reasoning: "low", maxTokens: 1200 },
+  Q35n: { key: "Q35n", model: M35, reasoning: "minimal", maxTokens: 1200 },
+  Q31l: { key: "Q31l", model: M31, reasoning: "low", maxTokens: 1200 },
+  Q31n: { key: "Q31n", model: M31, reasoning: "minimal", maxTokens: 1200 },
+};
+
+async function runQuick(orgCode: string, apiKey: string) {
+  const configs = listFlag("configs", ["Q35l", "Q35n", "Q31n", "Q31l"]).map((k) => QUICK_CONFIGS[k]).filter(Boolean);
+  const conc = Math.min(flag("concurrency", 6), 8);
+  await withOrganization(orgCode, async () => {
+    const cfg = await loadSalesChatbotConfig();
+    const entries = (await listQuickReplies()).filter((q) => q.active && !q.needsEdit).map((q) => ({ id: q.id, title: q.title, triggers: q.triggers, answer: q.answer })).slice(0, 60);
+    const sources = await loadReplaySources(flag("days", 30), new Date(), 2000);
+    const texts = [...new Set(sources.flatMap((c) => c.messages.filter((m) => m.role === "user").map((m) => m.text.trim())).filter((t) => t.length >= 3 && t.length <= 200))];
+    type Case = { text: string; label: string | null; candidates: readonly QuickReplyEntry[] };
+    const keyword: Case[] = [];
+    const open: Case[] = [];
+    const want = Math.min(flag("cases", 80), 300);
+    for (const text of texts) {
+      if (keyword.length + open.length >= want * 3) break;
+      const step = await quickReplyByKeyword(text, { ordering: false, cfg });
+      if (step.kind === "ANSWER") keyword.push({ text, label: step.pick.entry.id, candidates: entries });
+      else if (step.kind === "NO_MATCH") open.push({ text, label: null, candidates: step.candidates });
+    }
+    const cases = [...keyword.slice(0, Math.ceil(want / 2)), ...open.slice(0, want - Math.min(keyword.length, Math.ceil(want / 2)))];
+    tomTat(`CÂU MẪU · ${entries.length} câu mẫu đang bật · ${cases.length} ca (khớp chữ ${cases.filter((c) => c.label).length} · không khớp chữ ${cases.filter((c) => !c.label).length}) · cấu hình ${configs.map((c) => c.key).join(",")}`);
+    let reference: (string | null)[] | null = null;
+    for (const q of configs) {
+      const provider = guarded(withRequestOverrides(new ByokGeminiProvider({ apiKey, model: q.model, name: "gemini-bench" }), { reasoning: q.reasoning, maxTokens: q.maxTokens }));
+      const t0 = Date.now();
+      const rows = await pool(cases, conc, async (c) => {
+        try {
+          const { pick, res } = await quickReplyByAi(provider, c.text, "", c.candidates, cfg);
+          return { pick: pick?.entry.id ?? null, ok: true, inT: res.usage.inputTokens + res.usage.cacheReadTokens, out: res.usage.outputTokens, think: res.usage.thoughtTokens ?? 0, ms: res.latencyMs, usd: estimateCostUsd(res.model || q.model, res.usage) ?? 0 };
+        } catch {
+          return { pick: null, ok: false, inT: 0, out: 0, think: 0, ms: 0, usd: 0 };
+        }
+      });
+      const okRows = rows.filter((r) => r.ok);
+      const kw = cases.map((c, i) => ({ c, r: rows[i] })).filter((x) => x.c.label && x.r.ok);
+      const right = kw.filter((x) => x.r.pick === x.c.label).length;
+      const wrongPick = kw.filter((x) => x.r.pick && x.r.pick !== x.c.label).length;
+      const agree = reference ? cases.map((c, i) => ({ c, r: rows[i], ref: reference![i] })).filter((x) => !x.c.label && x.r.ok) : [];
+      const agreeN = agree.filter((x) => x.r.pick === x.ref).length;
+      const lat = okRows.map((r) => r.ms).sort((a, b) => a - b);
+      const avg = (f: (r: (typeof rows)[number]) => number) => (okRows.length ? okRows.reduce((t, r) => t + f(r), 0) / okRows.length : null);
+      tomTat(`${q.key} ${q.model} ${q.reasoning}: lỗi ${rows.length - okRows.length}/${rows.length} · ĐÚNG câu mẫu khớp chữ ${right}/${kw.length} · chọn SAI câu khác ${wrongPick} · ${reference ? `trùng cấu hình đầu trên ca không khớp chữ ${agreeN}/${agree.length}` : "(cấu hình tham chiếu)"} · chọn NONE ${okRows.filter((r) => !r.pick).length}`);
+      tomTat(`${q.key} token/ca: vào ${num(avg((r) => r.inT))} · ra ${num(avg((r) => r.out))} (suy nghĩ ${num(avg((r) => r.think))}) · USD/ca ${num(avg((r) => r.usd), 7)} · p50/p95 ${num(lat[Math.floor(lat.length / 2)] ?? null)}/${num(lat[Math.floor(lat.length * 0.95)] ?? null)} ms · ${Math.round((Date.now() - t0) / 1000)} s`);
+      reference ??= rows.map((r) => r.pick);
+    }
+  });
+}
+
 async function main() {
   const [mode, orgCode] = ARGV;
-  if (!["sync", "sales"].includes(mode ?? "") || !/^[a-z0-9-]{2,40}$/.test(orgCode ?? "")) {
-    tomTat("arg: sync|sales <mã tổ chức> [--cases=N|--points=N] [--days=N] [--configs=…] [--concurrency=N]");
+  budget.capUsd = Math.min(Number(ARGV.find((a) => a.startsWith("--max-usd="))?.slice(10) ?? 0.2) || 0.2, 1);
+  if (!["sync", "sales", "quick"].includes(mode ?? "") || !/^[a-z0-9-]{2,40}$/.test(orgCode ?? "")) {
+    tomTat("arg: sync|sales|quick <mã tổ chức> [--cases=N|--points=N] [--days=N] [--configs=…] [--concurrency=N] [--max-usd=0.2]");
     process.exit(64);
   }
   const cfg = platformAiConfig();
@@ -157,7 +259,9 @@ async function main() {
     process.exit(2);
   }
   if (mode === "sync") await runSync(orgCode, cfg.apiKey);
+  else if (mode === "quick") await runQuick(orgCode, cfg.apiKey);
   else await runSales(orgCode, cfg.apiKey);
+  tomTat(`NGÂN SÁCH: đã tiêu ~${budget.spentUsd.toFixed(4)} / trần ${budget.capUsd} USD${budget.halted ? ` · DỪNG SỚM: ${budget.halted}` : ""}`);
 }
 
 main().then(
