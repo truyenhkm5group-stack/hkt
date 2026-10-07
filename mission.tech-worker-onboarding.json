@@ -45,18 +45,18 @@
     "0232": "2026-10-07T08:56:46.509Z"
   },
   "created_at": "2026-10-07T06:14:32.231Z",
-  "updated_at": "2026-10-07T08:56:46.509Z",
-  "last_heartbeat": "2026-10-07T08:29:41.991Z",
+  "updated_at": "2026-10-07T09:20:48.715Z",
+  "last_heartbeat": "2026-10-07T09:20:48.715Z",
   "definition_of_done": [],
   "handoff": {
     "branch": "feat/tech-worker-onboarding",
-    "sha": "a1971b9a97ef877e9df1244c5d13da364cd5e98f",
-    "at": "2026-10-07T08:29:41.991Z",
+    "sha": "8298bd3ee1fb41153e2ae3732d795739f97018c7",
+    "at": "2026-10-07T09:20:48.715Z",
     "actor": "DESKTOP-56TH98Y:wt-worker-onboard",
     "title": "Cài worker /tech một nút cho chủ shop không kỹ thuật",
     "summary": "",
     "tests": [
-      "sửa review bảo mật PR #631: typecheck · eslint tệp sửa · npm run lint sạch · npm test sau commit TẤT CẢ KIỂM THỬ ĐẠT · build đạt · git thật trên kho tạm (hook không thấy token, cấu hình nguy hiểm ⇒ từ chối, cây người không bị đụng) · đột biến 10/10 đỏ"
+      "lượt sửa 2 (máy chủ ghi nhánh, bỏ push-credential): typecheck · eslint tệp sửa · npm run lint · npm test sau commit TẤT CẢ KIỂM THỬ ĐẠT · build · đột biến 7/7 đỏ"
     ]
   }
 }
