@@ -1,0 +1,8 @@
+{
+  "pr": 629,
+  "sha": "8d72f5656fbb9f9f80d65e6d96bea978f60fc644",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-07T03:07:52.038Z",
+  "note": "review độc lập 3 lượt PASS @45969ab8 + lượt 4 delta PASS @ca9f96ae (trần IP theo Caddy XFF, mặc định R0 mọi nhánh lỗi, merge sạch); tích hợp 8d72f565 = gộp main + 0229/0230 (Lead tự chạy journal/upgrade-path/tech tests ĐẠT). Không chặn: bộ đếm IP chưa có bài hành vi, bảng IP không xoá khi phình"
+}
