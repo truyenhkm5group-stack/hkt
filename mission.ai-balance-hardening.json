@@ -1,0 +1,33 @@
+{
+  "schema": 1,
+  "mission_id": "ai-balance-hardening",
+  "title": "Số dư AI chặt thêm: sao kê không nạp hộ, tài khoản nhận đọc hỏng không khoá tiền, báo hết số dư không nuốt nhau",
+  "business_goal": "",
+  "status": "PLANNING",
+  "priority": "P2",
+  "risk": "HIGH",
+  "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "worker": null,
+  "worktree": null,
+  "branch": "fix/ai-balance-hardening",
+  "base_sha": "638091636e303895c81f31b31a81470778029c8a",
+  "domains": [],
+  "owned_paths": [
+    "lib/integrations/bank/statement-import.ts",
+    "lib/billing/ai-balance.ts",
+    "lib/billing/ai-usage-charge.ts",
+    "lib/sales-chatbot/ai-status.ts",
+    "lib/sync/jobs.ts",
+    "tests/ai-balance-hardening.test.ts",
+    "tests/ai-balance.test.ts",
+    "tests/bank-ledger.test.ts"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-07T22:50:41.455Z",
+  "updated_at": "2026-10-07T22:50:41.455Z",
+  "last_heartbeat": "2026-10-07T22:50:41.455Z",
+  "definition_of_done": []
+}
