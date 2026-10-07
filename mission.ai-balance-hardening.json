@@ -3,7 +3,7 @@
   "mission_id": "ai-balance-hardening",
   "title": "Số dư AI chặt thêm: sao kê không nạp hộ, tài khoản nhận đọc hỏng không khoá tiền, báo hết số dư không nuốt nhau",
   "business_goal": "",
-  "status": "PLANNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -27,7 +27,20 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-07T22:50:41.455Z",
-  "updated_at": "2026-10-07T22:50:41.455Z",
-  "last_heartbeat": "2026-10-07T22:50:41.455Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-07T22:50:58.178Z",
+  "last_heartbeat": "2026-10-07T22:50:58.178Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "fix/ai-balance-hardening",
+    "sha": "5c2f791641a24434db19e8f98285061b1140517d",
+    "at": "2026-10-07T22:50:58.178Z",
+    "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+    "title": "Số dư AI chặt thêm: sao kê không nạp hộ, tài khoản nhận đọc hỏng không khoá tiền, báo hết số dư không nuốt nhau",
+    "summary": "Review #644: N1 (sao kê không đè mô tả dòng SePay) + LOW (tài khoản nhận đọc hỏng, đối chiếu thu phí chỉ ở nhà + trần, chống trùng «hết» theo mức chặn, gợi ý người bình luận bỏ dòng bot).",
+    "tests": [
+      "typecheck + eslint: sạch",
+      "bank-ledger · ai-balance · ai-balance-usage · ai-balance-hardening: đạt",
+      "kiểm đột biến 6/6 bị bắt, đối chứng đạt"
+    ]
+  }
 }
