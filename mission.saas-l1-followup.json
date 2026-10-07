@@ -1,0 +1,41 @@
+{
+  "schema": 1,
+  "mission_id": "saas-l1-followup",
+  "title": "Khách không ghi/tắt được khoá AI + che nốt chỗ rò (replay, học, ai-builder, USD, go-live)",
+  "business_goal": "Khách không thấy và không đổi được cấu hình AI nội bộ ở bất kỳ màn nào",
+  "status": "READY",
+  "priority": "P0",
+  "risk": "HIGH",
+  "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "worker": null,
+  "worktree": null,
+  "branch": null,
+  "base_sha": null,
+  "domains": [
+    "saas",
+    "security"
+  ],
+  "owned_paths": [
+    "lib/connectors/service.ts",
+    "lib/saas/visibility.ts",
+    "lib/saas/operator-ai.ts",
+    "app/(dashboard)/settings/ai-builder/**",
+    "app/(dashboard)/ai/sales-chatbot/replay/**",
+    "lib/onboarding/go-live.ts",
+    "tests/saas-hide-internal.test.ts"
+  ],
+  "dependencies": [
+    "saas-l1-hide-internal"
+  ],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-07T17:24:03.294Z",
+  "updated_at": "2026-10-07T17:24:03.294Z",
+  "last_heartbeat": "2026-10-07T17:24:03.294Z",
+  "definition_of_done": [
+    "saveConnection/setConnectionStatus/testConnection chặn khoá AI ở workspace khách (máy chủ)",
+    "replay · học · ai-builder · go-live không lộ model/USD/token",
+    "Bài kiểm tấn công tenant xanh"
+  ]
+}
