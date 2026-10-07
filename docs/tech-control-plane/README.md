@@ -250,6 +250,18 @@ npm run tech:worker -- --once            # nhận một việc, làm, thoát
 npm run tech:worker                      # chạy mãi
 ```
 
+**Chế độ dogfood an toàn** (lượt production đầu tiên) — không cần mã mới, chỉ cấu hình:
+
+| Ràng buộc | Cách đặt |
+|---|---|
+| Chỉ R0 | mặc định của trần chính sách (không khai `tech.worker-policy-ceiling`) |
+| Một việc một lúc | đăng ký worker với số lượt song song = 1; ngân sách công ty `maxConcurrentRuns = 1` |
+| Không thử lại vô hạn | `max_attempts` của việc (3) ∧ ngân sách `maxAttempts = 1` cho sứ mệnh dogfood |
+| Không rơi sang tiền API | chỉ đăng ký worker `SUBSCRIPTION_CLAUDE_CODE`; không đặt `TECH_WORKER_ANTHROPIC_API_KEY` |
+| Chỉ việc tài liệu | worker khai đúng một năng lực `write-docs` |
+| Không đụng production | worker không giữ secret production; deploy vẫn do người / Delivery Controller; năng lực deploy / migration `autonomous = false` |
+| Không lách nhánh bảo vệ | PR mở bằng bot `agent-open-pr.yml`, gộp qua `gates / gates` + 1 người duyệt |
+
 Bất biến đã khoá bằng bài kiểm (`tests/tech-worker.test.ts`): hai worker không nhận trùng · phụ thuộc chưa DONE /
 R2 / sứ mệnh hoặc mục tiêu không chạy ⇒ không bao giờ nhận, và bản TypeScript `claimBlockers` nói đúng điều câu SQL
 làm · nhịp tim gia hạn lease, nhật ký có trần · thất bại còn lượt ⇒ về hàng đợi sau lùi dần, hết lượt ⇒ `FAILED` ·
@@ -294,7 +306,8 @@ Việc vào OBSERVING bằng tay (không có sự kiện `deploy.reached`) máy 
 - **Chính sách** (`lib/constants/tech-policy.ts::classifyTechPolicy`): dẫn xuất từ máy xếp rủi ro + loại việc + từ khoá
   nguy hiểm; chỉ NÂNG, mọi lần nâng có lý do. Lưu `tech_tasks.policy_level` lúc GHI (tạo việc, đè rủi ro, nút
   "Xếp lại chính sách"). `NULL` (việc trước 0229) = không tự động — đóng khi thiếu, không backfill ngầm. Worker chỉ
-  nhận R0/R1 (SQL + `claimBlockers` cùng luật); R3/R4 bật cổng duyệt người; R4 = luật SECRETS · ACCESS · DATA_FIX ·
+  nhận tới TRẦN `settings["tech.worker-policy-ceiling"]` — mặc định **chỉ R0** (chế độ dogfood an toàn), chủ shop mở R1
+  bằng `set-setting tech.worker-policy-ceiling {"maxPolicy":"R1"}`, giá trị lạ rơi về R0 (SQL + `claimBlockers` cùng luật); R3/R4 bật cổng duyệt người; R4 = luật SECRETS · ACCESS · DATA_FIX ·
   SCHEDULER, loại SECURITY / DATA_FIX, hoặc nhắc xoá dữ liệu / DNS / thanh toán / lách cổng / mật khẩu / OAuth.
 - **Ngân sách** (`tech_budgets`, `lib/tech/budget.ts`): công ty → dự án → mục tiêu → sứ mệnh, tầng hẹp đè TỪNG Ô; ô
   trống = chưa khai. Tiền API chưa khai trần ngày ⇒ worker API không chạy; chạm trần ngày / tổng ⇒ dừng; trần

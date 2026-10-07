@@ -140,7 +140,7 @@ export const CLAIM_BLOCKER_LABEL: Record<ClaimBlocker, string> = {
   ATTEMPTS_EXHAUSTED: "Đã hết số lần thử",
   BACKOFF: "Đang đợi lùi dần trước lần thử kế tiếp",
   CAPABILITY: "Worker không có năng lực việc này cần",
-  POLICY: "Chính sách R2–R4 hoặc chưa xếp chính sách — máy không tự làm",
+  POLICY: "Chính sách vượt trần worker (mặc định chỉ R0; R1 khi chủ shop mở `tech.worker-policy-ceiling`) hoặc chưa xếp chính sách — máy không tự làm",
   ACTIONS_RUN: "Vừa giao cho agent GitHub Actions (90′) — không chạy song song hai đường",
 };
 
@@ -172,7 +172,27 @@ export type ClaimCandidate = {
  * `maxAttempts` truyền vào là trần HIỆU LỰC (`effectiveMaxAttempts`: việc ∧ ngân sách tầng hẹp nhất) — cùng con số
  * câu SQL dùng.
  */
-export function claimBlockers(t: ClaimCandidate, worker: { capabilities: readonly string[] }, now: Date): ClaimBlocker[] {
+/**
+ * TRẦN CHÍNH SÁCH worker được nhận — `settings["tech.worker-policy-ceiling"] = {"maxPolicy": "R0" | "R1"}`. Mặc định
+ * **R0** (chế độ dogfood an toàn): chưa khai ⇒ máy chỉ nhận việc R0; mở R1 là quyết định của người, ghi bằng
+ * `set-setting`, không cần deploy. Giá trị lạ ⇒ R0 — mọi nhánh lỗi rơi về phía HẸP HƠN.
+ */
+export const WORKER_POLICY_CEILING_SETTING = "tech.worker-policy-ceiling";
+export type WorkerPolicyCeiling = "R0" | "R1";
+export function workerPolicyCeiling(raw: unknown): WorkerPolicyCeiling {
+  const v = raw && typeof raw === "object" ? (raw as { maxPolicy?: unknown }).maxPolicy : undefined;
+  return v === "R1" ? "R1" : "R0";
+}
+/** Các mức chính sách worker được nhận dưới một trần — dùng chung cho câu SQL nhận việc và `claimBlockers`. */
+export function claimablePolicyLevels(ceiling: WorkerPolicyCeiling): string[] {
+  return ceiling === "R1" ? ["R0", "R1"] : ["R0"];
+}
+
+export function claimBlockers(
+  t: ClaimCandidate,
+  worker: { capabilities: readonly string[]; policyCeiling?: WorkerPolicyCeiling },
+  now: Date,
+): ClaimBlocker[] {
   const out: ClaimBlocker[] = [];
   if (t.status !== "SPEC_READY") out.push("STATUS");
   if (t.openDependencies > 0) out.push("DEPENDENCIES");
@@ -184,7 +204,7 @@ export function claimBlockers(t: ClaimCandidate, worker: { capabilities: readonl
   if (t.attempts >= t.maxAttempts) out.push("ATTEMPTS_EXHAUSTED");
   if (t.nextAttemptAt && t.nextAttemptAt.getTime() > now.getTime()) out.push("BACKOFF");
   if (!worker.capabilities.includes(t.capability)) out.push("CAPABILITY");
-  if (t.policyLevel !== "R0" && t.policyLevel !== "R1") out.push("POLICY");
+  if (!t.policyLevel || !claimablePolicyLevels(worker.policyCeiling ?? "R0").includes(t.policyLevel)) out.push("POLICY");
   if (t.recentActionsRun) out.push("ACTIONS_RUN");
   return out;
 }

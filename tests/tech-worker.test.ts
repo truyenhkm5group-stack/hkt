@@ -12,6 +12,9 @@ import {
   backoffMinutes,
   buildChildEnv,
   claimBlockers,
+  claimablePolicyLevels,
+  WORKER_POLICY_CEILING_SETTING,
+  workerPolicyCeiling,
   decideCompletion,
   taskBranchName,
   WORKER_BRANCH_PATTERN,
@@ -19,6 +22,7 @@ import {
   workerLiveness,
   type ClaimCandidate,
 } from "@/lib/constants/tech-worker";
+import { setSettingJson } from "@/lib/settings";
 import { createTechGoal, createTechMission, setTechGoalStatus, setTechMissionStatus } from "@/lib/tech/control-plane";
 import { createTechTask, setTechTaskStatus, type TechActor } from "@/lib/tech/service";
 import {
@@ -102,6 +106,15 @@ export function testTechWorkerPure() {
     [{ recentActionsRun: true }, "ACTIONS_RUN"],
   ];
   for (const [doi, mong] of thu) assert.deepEqual(claimBlockers({ ...base, ...doi }, w, now), [mong], `${mong} phải chặn`);
+  // Trần chính sách: mặc định R0 (dogfood an toàn) — R1 chỉ khi chủ shop mở; giá trị lạ rơi về R0.
+  assert.deepEqual(claimBlockers({ ...base, policyLevel: "R1" }, w, now), ["POLICY"], "chưa khai trần ⇒ R1 KHÔNG được nhận");
+  assert.deepEqual(claimBlockers({ ...base, policyLevel: "R1" }, { ...w, policyCeiling: "R1" }, now), [], "chủ shop mở R1 ⇒ nhận được");
+  assert.deepEqual(claimBlockers({ ...base, policyLevel: "R2" }, { ...w, policyCeiling: "R1" }, now), ["POLICY"], "trần R1 không mở R2");
+  assert.equal(workerPolicyCeiling(undefined), "R0");
+  assert.equal(workerPolicyCeiling({}), "R0");
+  assert.equal(workerPolicyCeiling({ maxPolicy: "R2" }), "R0", "giá trị lạ ⇒ hẹp hơn, không rộng hơn");
+  assert.equal(workerPolicyCeiling({ maxPolicy: "R1" }), "R1");
+  assert.deepEqual(claimablePolicyLevels("R0"), ["R0"]);
   assert.deepEqual(claimBlockers({ ...base, leaseWorkerId: "x", leaseExpiresAt: new Date(now.getTime() - 1) }, w, now), [], "lease hết hạn không còn chặn");
   assert.deepEqual(claimBlockers({ ...base, missionStatus: null, goalStatus: null }, w, now), [], "việc lẻ không thuộc sứ mệnh vẫn chạy được");
 
@@ -363,6 +376,24 @@ export async function testTechWorkerDb() {
     const rongNo = await completeTechWorkerRun(kia2, { runId: cRong.runId, leaseGeneration: cRong.leaseGeneration, outcome: "BLOCKED" });
     assert.ok("error" in rongNo, "nộp lại ⇒ từ chối");
 
+    // 2.9d Trần chính sách (chế độ dogfood an toàn): chưa khai ⇒ việc R1 KHÔNG được nhận; chủ shop mở R1 ⇒ nhận được.
+    const tR1 = await tao("tw-t việc R1", { missionId: m.id, riskOverride: { risk: "R1", reason: "Thử trần chính sách worker" } });
+    assert.equal((await db.query.techTasks.findFirst({ where: eq(schema.techTasks.id, tR1) }))?.policyLevel, "R1");
+    const c = await registerTechWorker({ key: "tw-t-c", name: "Worker C", provider: "SUBSCRIPTION_CLAUDE_CODE", capabilities: ["write-docs"], maxConcurrency: 3 }, chuShop);
+    const C = c as { id: string; token: string };
+    workerIds.push(C.id);
+    const nhanTruoc: string[] = [];
+    for (let i = 0; i < 3; i++) {
+      const r = await claimNextTechTask(await worker(C.id));
+      if (!r.task) break;
+      nhanTruoc.push(r.task.taskId);
+    }
+    assert.ok(!nhanTruoc.includes(tR1), "chưa khai trần ⇒ worker KHÔNG nhận việc R1");
+    await setSettingJson(WORKER_POLICY_CEILING_SETTING, { maxPolicy: "R1" });
+    const moR1 = await claimNextTechTask(await worker(C.id));
+    assert.equal(moR1.task?.taskId, tR1, `chủ shop mở R1 ⇒ nhận được — nhận ${JSON.stringify(moR1)}`);
+    await db.delete(schema.settings).where(eq(schema.settings.key, WORKER_POLICY_CEILING_SETTING));
+
     // 2.10 Worker bị tắt ⇒ không nhận việc, KHÔNG nộp được kết quả; mục tiêu tạm dừng ⇒ không việc nào của nó được nhận.
     await setTechWorkerEnabled({ workerId: giu.id, enabled: false, reason: "bảo trì máy" }, chuShop);
     assert.equal((await claimNextTechTask(await worker(giu.id))).reason, "WORKER_DISABLED");
@@ -376,6 +407,7 @@ export async function testTechWorkerDb() {
 
     console.log("✓ Worker (CSDL): hai worker không nhận trùng · phụ thuộc / R2 / sứ mệnh dừng không bao giờ nhận · TS nói đúng điều SQL làm · lease gia hạn theo nhịp tim, nhật ký có trần · thất bại ⇒ lùi dần · worker chết ⇒ thu hồi, việc về hàng đợi · fencing chặn worker cũ · huỷ giữa chừng ⇒ DỪNG, nộp muộn không đè người · tiền gói thuê bao là ước tính");
   } finally {
+    await db.delete(schema.settings).where(eq(schema.settings.key, WORKER_POLICY_CEILING_SETTING));
     await db.delete(schema.techEvents).where(sql`${schema.techEvents.goalId} in (select id from tech_goals where title like 'tw-t%') or ${schema.techEvents.subjectId} in (select id from tech_workers where key like 'tw-t%') or ${schema.techEvents.taskId} in (select id from tech_tasks where title like 'tw-t%')`);
     await db.delete(schema.techAgentRuns).where(sql`${schema.techAgentRuns.taskId} in (select id from tech_tasks where title like 'tw-t%')`);
     await db.delete(schema.techTaskEvents).where(sql`${schema.techTaskEvents.taskId} in (select id from tech_tasks where title like 'tw-t%')`);

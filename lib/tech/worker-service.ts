@@ -13,6 +13,9 @@ import {
   taskBranchName,
   WORKER_BRANCH_PATTERN,
   forbiddenTouched,
+  WORKER_POLICY_CEILING_SETTING,
+  workerPolicyCeiling,
+  claimablePolicyLevels,
   type TechExecutionProvider,
   type TechRunOutcome,
 } from "@/lib/constants/tech-worker";
@@ -274,6 +277,9 @@ export async function claimNextTechTask(worker: TechWorkerRow, now = new Date())
   const capSql = capabilitySql();
   const risks = sql.join(TECH_AUTONOMOUS_RISKS.map((r) => sql`${r}`), sql`, `);
   const capList = sql.join(caps.map((c) => sql`${c}`), sql`, `);
+  // Trần chính sách (mặc định R0 — chế độ dogfood an toàn); cùng hàm `claimBlockers` dùng.
+  const tranChinhSach = workerPolicyCeiling(await getSettingJson<Record<string, unknown>>(WORKER_POLICY_CEILING_SETTING, {}));
+  const policyList = sql.join(claimablePolicyLevels(tranChinhSach).map((p) => sql`${p}`), sql`, `);
 
   const result = await db.execute(sql`
     UPDATE tech_tasks SET
@@ -289,7 +295,7 @@ export async function claimNextTechTask(worker: TechWorkerRow, now = new Date())
       LEFT JOIN tech_goals g ON g.id = m.goal_id
       WHERE c.status = 'SPEC_READY'
         AND c.risk IN (${risks})
-        AND c.policy_level IN ('R0', 'R1')
+        AND c.policy_level IN (${policyList})
         AND c.approval_status NOT IN ('PENDING', 'REJECTED')
         AND (c.mission_id IS NULL OR m.status = 'ACTIVE')
         AND (m.goal_id IS NULL OR g.status = 'ACTIVE')
