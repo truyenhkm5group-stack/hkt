@@ -37,18 +37,18 @@
     "0233": "2026-10-07T11:34:08.742Z"
   },
   "created_at": "2026-10-07T11:34:01.409Z",
-  "updated_at": "2026-10-07T16:39:58.980Z",
-  "last_heartbeat": "2026-10-07T16:39:58.980Z",
+  "updated_at": "2026-10-07T18:09:57.349Z",
+  "last_heartbeat": "2026-10-07T18:09:57.349Z",
   "definition_of_done": [],
   "handoff": {
     "branch": "feat/saas-l3-inbox",
-    "sha": "4f2a1c0775726cfe0e57f40eba407c2f24de0146",
-    "at": "2026-10-07T16:39:58.980Z",
+    "sha": "f44402a21cd2500ff58a0a1adf57c5eee9c2b44d",
+    "at": "2026-10-07T18:09:57.349Z",
     "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
     "title": "Hộp thư hợp nhất + song song Pancake/Meta Direct",
     "summary": "",
     "tests": [
-      "bản đã review PASS 3f311064 + gộp main (#637 #639 #642): inbox page giữ lọc khách L1 + đường nhận tin L3; migration 0232→0233 (renumber); chạy riêng migration-journal 233 + upgrade-path 86→233 + saas-l3-inbox + messenger + sales-human-takeover + saas-hide-internal ĐẠT; typecheck sạch. Sửa sau review (COPILOT, tin kẹt khi chuyển đường, câu 30 phút) tách việc tiếp theo — ảnh chụp wip/saas-l3"
+      "gates xanh ở f44402a21cd2500ff58a0a1adf57c5eee9c2b44d; sửa sau review 808e2d98: 7/7 đột biến bị bắt; gộp main 48911ba4 (#643)"
     ]
   }
 }
