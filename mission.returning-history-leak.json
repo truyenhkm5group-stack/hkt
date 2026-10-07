@@ -3,7 +3,7 @@
   "mission_id": "returning-history-leak",
   "title": "Chặn lộ lịch sử mua của khách khác qua SĐT gõ tay (bảo mật)",
   "business_goal": "",
-  "status": "VERIFYING",
+  "status": "DONE",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -24,13 +24,14 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-07T21:17:58.572Z",
-  "updated_at": "2026-10-07T23:10:43.791Z",
-  "last_heartbeat": "2026-10-07T22:12:47.172Z",
+  "updated_at": "2026-10-07T23:11:09.509Z",
+  "last_heartbeat": "2026-10-07T23:11:09.509Z",
   "definition_of_done": [],
   "evidence": {
     "merged": "#647 → 638091636e303895c81f31b31a81470778029c8a",
     "verify": "PASS 638091636e303895c81f31b31a81470778029c8a 2026-10-07T23:10:40.382Z",
-    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/37697610332"
+    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/37697610332",
+    "done": "production 638091636e30 · verify ĐẠT · deploy run 37697610332"
   },
   "handoff": {
     "branch": "fix/returning-history-leak",
