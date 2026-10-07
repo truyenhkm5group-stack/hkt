@@ -1,0 +1,33 @@
+{
+  "schema": 1,
+  "mission_id": "ai-cost-opt-v2",
+  "title": "Tối ưu chi phí AI V2: đo nền theo workload trước (không làm lại #618/#626/#630/#632/#634)",
+  "business_goal": "Giảm chi phí mỗi đơn AI chốt thành công mà không giảm chất lượng",
+  "status": "BACKLOG",
+  "priority": "P1",
+  "risk": "MEDIUM",
+  "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "worker": null,
+  "worktree": null,
+  "branch": null,
+  "base_sha": null,
+  "domains": [
+    "ai_sales",
+    "cost"
+  ],
+  "owned_paths": [
+    "docs/ai-cost/**"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-07T17:24:38.002Z",
+  "updated_at": "2026-10-07T17:24:38.002Z",
+  "last_heartbeat": "2026-10-07T17:24:38.002Z",
+  "definition_of_done": [
+    "Bảng nền chi phí theo workload",
+    "Đường nhanh không AI · nén trạng thái · ăn kiêng prompt có số trước/sau",
+    "Bảng Metric/Before/After/Saving"
+  ]
+}
