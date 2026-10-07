@@ -780,7 +780,7 @@ async function orderStatusFor(conversationId: string, state: ChatState, commentT
   const ids = [state.confirmed?.orderId, ...(state.pastOrders ?? []).map((p) => p.orderId)].filter((x): x is string => typeof x === "string" && x.length > 0);
   const scope = [eq(o.salesConversationId, conversationId), ...(ids.length ? [inArray(o.id, ids)] : [])];
   const rows = await db
-    .select({ id: o.id, at: o.insertedAt, stage: o.stage })
+    .select({ id: o.id, at: o.insertedAt, stage: o.stage, displayId: o.displayId })
     .from(o)
     .where(and(or(...scope), ne(o.stage, "DELETED")))
     .orderBy(desc(o.insertedAt), desc(o.id))
@@ -804,7 +804,8 @@ async function orderStatusFor(conversationId: string, state: ChatState, commentT
     const st = customerOrderStatus({ orderStage: r.stage, manual: isManualOrderId(r.id), shipment: s ? { stage: s.stage, carrierEvidence, statusCode: s.statusCode, statusName: s.statusName } : null });
     return {
       row: {
-        order_code: `#${manualOrderShortCode(r.id)}`,
+        // Đơn Pancake: mã HIỂN THỊ (khách thấy trên tin xác nhận / POS), không phải id nội bộ dài (review #645, L2).
+        order_code: isManualOrderId(r.id) || r.displayId === null ? `#${manualOrderShortCode(r.id)}` : `#${r.displayId}`,
         ordered_at: formatVnDate(r.at),
         status: st.text,
         // Nguyên văn của ĐVVC chỉ đi kèm khi câu ĐÚNG là lời khai của ĐVVC.
