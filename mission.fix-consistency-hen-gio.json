@@ -1,0 +1,28 @@
+{
+  "schema": 1,
+  "mission_id": "fix-consistency-hen-gio",
+  "title": "Gỡ bom hẹn giờ bài kiểm nhất quán chi phí (đỏ mọi PR từ 08/10)",
+  "business_goal": "CI xanh trở lại cho mọi PR và main mà không đổi luật phân bổ",
+  "status": "RUNNING",
+  "priority": "P0",
+  "risk": "LOW",
+  "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "worker": null,
+  "worktree": "C:/Users/Admin/Documents/ChatGPT/wt-fix-consistency",
+  "branch": "fix/consistency-prorata-hen-gio",
+  "base_sha": "fbef46ca8b66e26dd3154fd05eb763fe76fdee4d",
+  "domains": [
+    "tests"
+  ],
+  "owned_paths": [
+    "tests/consistency.test.ts"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-07T17:21:37.374Z",
+  "updated_at": "2026-10-07T17:21:37.374Z",
+  "last_heartbeat": "2026-10-07T17:21:37.374Z",
+  "definition_of_done": []
+}
