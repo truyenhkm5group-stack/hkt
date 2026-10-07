@@ -3,7 +3,7 @@
   "mission_id": "fix-consistency-hen-gio",
   "title": "Gỡ bom hẹn giờ bài kiểm nhất quán chi phí (đỏ mọi PR từ 08/10)",
   "business_goal": "CI xanh trở lại cho mọi PR và main mà không đổi luật phân bổ",
-  "status": "INTEGRATING",
+  "status": "VERIFYING",
   "priority": "P0",
   "risk": "LOW",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -24,11 +24,13 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-07T17:21:37.374Z",
-  "updated_at": "2026-10-07T17:44:17.824Z",
+  "updated_at": "2026-10-07T18:31:54.432Z",
   "last_heartbeat": "2026-10-07T17:21:45.401Z",
   "definition_of_done": [],
   "evidence": {
-    "merged": "#643 → 48911ba4a5d9128a4c665466d86d03869c2edbe2"
+    "merged": "#643 → 48911ba4a5d9128a4c665466d86d03869c2edbe2",
+    "verify": "PASS a83f5c09d03438d5453bfcea526f1e38df244d6b 2026-10-07T18:31:51.410Z",
+    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/37664556049"
   },
   "handoff": {
     "branch": "fix/consistency-prorata-hen-gio",
