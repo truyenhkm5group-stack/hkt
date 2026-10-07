@@ -45,18 +45,18 @@
     "0232": "2026-10-07T08:56:46.509Z"
   },
   "created_at": "2026-10-07T06:14:32.231Z",
-  "updated_at": "2026-10-07T09:20:48.715Z",
-  "last_heartbeat": "2026-10-07T09:20:48.715Z",
+  "updated_at": "2026-10-07T09:59:55.517Z",
+  "last_heartbeat": "2026-10-07T09:59:55.517Z",
   "definition_of_done": [],
   "handoff": {
     "branch": "feat/tech-worker-onboarding",
-    "sha": "8298bd3ee1fb41153e2ae3732d795739f97018c7",
-    "at": "2026-10-07T09:20:48.715Z",
+    "sha": "6188134ee9b1c6068bec210e93d9dc0146780262",
+    "at": "2026-10-07T09:59:55.517Z",
     "actor": "DESKTOP-56TH98Y:wt-worker-onboard",
     "title": "Cài worker /tech một nút cho chủ shop không kỹ thuật",
     "summary": "",
     "tests": [
-      "lượt sửa 2 (máy chủ ghi nhánh, bỏ push-credential): typecheck · eslint tệp sửa · npm run lint · npm test sau commit TẤT CẢ KIỂM THỬ ĐẠT · build · đột biến 7/7 đỏ"
+      "lượt sửa 3: chặn tệp chỉ dẫn agent mọi độ sâu + public/ ngoài write-docs · typecheck · eslint · lint · npm test sau commit TẤT CẢ KIỂM THỬ ĐẠT · đột biến 4/4 đỏ"
     ]
   }
 }
