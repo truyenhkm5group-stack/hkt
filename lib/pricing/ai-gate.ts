@@ -25,7 +25,7 @@ import {
   aiEntitlementDecision,
   CUSTOMER_AI_STATE_LABEL,
   customerAiState,
-  trialEndFromLastDay,
+  effectiveTrialEnd,
   type AiEntitlementDecision,
   type AiStopReason,
   type CustomerAiState,
@@ -74,7 +74,7 @@ async function readFacts(orgCode: string, now: Date, fresh: boolean): Promise<Fa
     let trialEndsAt: Date | null = null;
     if (trial) {
       const terms = await readTrialTerms(org.code, { fresh });
-      trialEndsAt = terms.trialEndsAt ?? trialEndFromLastDay(terms.paidThrough);
+      trialEndsAt = effectiveTrialEnd(terms.trialEndsAt, terms.paidThrough);
       const reading = (await readAiCustomerUsage([org.code], usagePeriodOf(now), now)).get(org.code);
       used = reading?.value ?? null;
       coverage = reading?.coverage ?? null;
@@ -181,7 +181,7 @@ export async function loadCustomerEntitlementView(orgCode: string, now: Date = n
   const fanpagesLimit = pricing.quotas.fanpages !== undefined ? pricing.quotas.fanpages : inc?.fanpages;
   const aiSales = featureGranted({ key: "ai_sales", grandfathered: pricing.row.grandfathered, overrides: pricing.row.featureOverrides, planFeatures: pricing.plan?.commercial.features ?? null }).granted;
   const state = customerAiState(gate, { aiSales, botEnabled });
-  const trialEnd = gate.trial ? (trial.trialEndsAt ?? trialEndFromLastDay(trial.paidThrough)) : null;
+  const trialEnd = gate.trial ? effectiveTrialEnd(trial.trialEndsAt, trial.paidThrough) : null;
   return {
     plan: { key: pricing.plan?.key ?? null, name: pricing.plan?.name ?? null, trial: gate.trial },
     aiCustomers: { used: reading?.value ?? null, limit: inc?.aiCustomers, coverage: reading?.coverage ?? null },

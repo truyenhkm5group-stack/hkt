@@ -166,22 +166,26 @@ export const SALES_COCKPIT_HREF = "/ai/sales-chatbot/cockpit";
  * tổ chức + trạng thái + câu kiểm (số đếm, lớp lỗi) — KHÔNG tên khách, SĐT, nội dung tin (luật ISO-05 của `loadAlertConfig`:
  * dữ liệu của tổ chức khách không bao giờ chảy vào nhóm của VNX). Không ném.
  */
-export async function notifyPlatformOperator(title: string, lines: string[]): Promise<void> {
-  const send = async () => {
+export type OperatorNotifyResult = "SENT" | "NO_CHANNEL" | "FAILED";
+export async function notifyPlatformOperator(title: string, lines: string[]): Promise<OperatorNotifyResult> {
+  const send = async (): Promise<OperatorNotifyResult> => {
     const cfg = await loadAlertConfig();
-    if (cfg.larkManagerWebhookUrl) await sendLark(cfg.larkManagerWebhookUrl, cfg.larkManagerSecret, title, lines.map((text) => [{ text }]));
-    else if (cfg.larkWebhookUrl) await sendLark(cfg.larkWebhookUrl, cfg.larkSecret, title, lines.map((text) => [{ text }]));
+    let r: { ok: boolean } | null = null;
+    if (cfg.larkManagerWebhookUrl) r = await sendLark(cfg.larkManagerWebhookUrl, cfg.larkManagerSecret, title, lines.map((text) => [{ text }]));
+    else if (cfg.larkWebhookUrl) r = await sendLark(cfg.larkWebhookUrl, cfg.larkSecret, title, lines.map((text) => [{ text }]));
     else if (cfg.telegramBotToken && cfg.telegramChatId) {
       const esc = (x: string) => x.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-      await sendTelegram(cfg.telegramBotToken, cfg.telegramChatId, [`<b>${esc(title)}</b>`, ...lines.map(esc)].join("\n"));
+      r = await sendTelegram(cfg.telegramBotToken, cfg.telegramChatId, [`<b>${esc(title)}</b>`, ...lines.map(esc)].join("\n"));
     }
+    return r === null ? "NO_CHANNEL" : r.ok ? "SENT" : "FAILED";
   };
   try {
     const org = await currentOrganization();
-    if (org.isHome) await send();
-    else await withOrganization((await getHomeOrganization()).code, send);
+    if (org.isHome) return await send();
+    return await withOrganization((await getHomeOrganization()).code, send);
   } catch {
-    // Đường phụ — chuông của tổ chức đã ghi.
+    // Đường phụ — chuông của tổ chức đã ghi. Nơi cần biết (ngưỡng khách AI) đọc «FAILED» để thử lại lượt sau.
+    return "FAILED";
   }
 }
 

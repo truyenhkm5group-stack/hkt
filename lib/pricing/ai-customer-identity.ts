@@ -9,8 +9,10 @@
  *   aic:<kỳ YYYY-MM>:<page>:<băm(loại:page:mã khách chuẩn)>
  *
  *  · FANPAGE: mã khách chuẩn = PSID khi đọc được TẤT ĐỊNH từ mã hội thoại — Messenger trực tiếp dùng chính PSID làm mã hội thoại;
- *    hội thoại INBOX của Pancake mang dạng `<page>_<PSID>` (khớp ĐÚNG tiền tố page + phần đuôi toàn chữ số). Mọi dạng khác (hội
- *    thoại bình luận `<page>_<bài>_<bình luận>`, mã lạ) ⇒ KHÔNG đoán: khoá theo `visitor_key` của hội thoại (loại THREAD) — có thể
+ *    hội thoại INBOX của Pancake mang dạng `<page>_<PSID>` (khớp ĐÚNG tiền tố page + phần đuôi toàn chữ số). CHỈ hội thoại tin nhắn
+ *    (INBOX) mới được suy PSID: hội thoại BÌNH LUẬN có thể mang mã `<page>_<bài>` trông y hệt `<page>_<PSID>` mà là của CẢ BÀI —
+ *    suy PSID ở đó là gộp mọi người bình luận thành một khách. Bình luận ⇒ khoá theo NGƯỜI bình luận (`from_id`, loại COMMENTER);
+ *    không có ⇒ theo hội thoại. Mọi dạng khác (mã lạ) ⇒ KHÔNG đoán: khoá theo `visitor_key` của hội thoại (loại THREAD) — có thể
  *    đếm dư khi đổi đường, không bao giờ gộp hai người thành một.
  *  · ZALO: mã người dùng Zalo của OA (cột `thread_id`); WEB: `visitor_key` (băm mã khách truy cập của trình duyệt).
  *
@@ -21,8 +23,12 @@
 import { createHash } from "node:crypto";
 import { aiCustomerEventKey } from "@/lib/pricing/versions";
 
-export type AiCustomerConv = { channel: string; pageId: string | null; threadId: string | null; visitorKey: string | null };
-export type AiCustomerIdentityKind = "PSID" | "ZALO" | "WEB" | "THREAD";
+/**
+ * `threadKind` = loại hội thoại của lượt vừa trả lời (`sales_chat_inbound.kind`): thiếu ⇒ hội thoại tin nhắn như trước. `commenterId`
+ * = mã người bình luận (`from_id`) của bình luận được trả lời — chỉ có nghĩa khi `threadKind = "COMMENT"`.
+ */
+export type AiCustomerConv = { channel: string; pageId: string | null; threadId: string | null; visitorKey: string | null; threadKind?: "INBOX" | "COMMENT" | null; commenterId?: string | null };
+export type AiCustomerIdentityKind = "PSID" | "COMMENTER" | "ZALO" | "WEB" | "THREAD";
 export type AiCustomerIdentity = { page: string; kind: AiCustomerIdentityKind; id: string };
 
 const sha = (s: string) => createHash("sha256").update(s).digest("hex");
@@ -43,6 +49,11 @@ export function canonicalAiCustomer(conv: AiCustomerConv): AiCustomerIdentity | 
   const thread = (conv.threadId ?? "").trim();
   const vk = (conv.visitorKey ?? "").trim();
   if (conv.channel === "FANPAGE") {
+    if (conv.threadKind === "COMMENT") {
+      const who = (conv.commenterId ?? "").trim();
+      if (page && who) return { page, kind: "COMMENTER", id: who };
+      return vk ? { page: page || "-", kind: "THREAD", id: vk } : null;
+    }
     if (page && PSID_RE.test(thread)) return { page, kind: "PSID", id: thread };
     if (page && thread.startsWith(`${page}_`) && PSID_RE.test(thread.slice(page.length + 1))) return { page, kind: "PSID", id: thread.slice(page.length + 1) };
     return vk ? { page: page || "-", kind: "THREAD", id: vk } : null;

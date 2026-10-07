@@ -9,8 +9,8 @@
  *    (tháng VN của CHÍNH mốc đo — cùng mốc với kỳ đếm), không theo khung giờ ⇒ lượt kiểm sát ranh giới giờ / chạy chồng không gửi
  *    lần hai, sang tháng mới đếm lại từ đầu;
  *  · KHÁCH = một dòng `notifications` (chuông trong ERP) — chỉ số đếm theo đơn vị khách hiểu, KHÔNG token / USD / model;
- *  · NGƯỜI VẬN HÀNH = kênh vận hành nhà (`notifyPlatformOperator` — mã tổ chức + số đếm, không dữ liệu khách), CHỈ khi dòng
- *    chuông vừa được ghi MỚI (cùng khoá) ⇒ đúng một tin mỗi ngưỡng mỗi kỳ.
+ *  · NGƯỜI VẬN HÀNH = kênh vận hành nhà (`notifyPlatformOperator` — mã tổ chức + số đếm, không dữ liệu khách), sổ riêng
+ *    `OPERATOR_STATE_KEY`: gửi hỏng ⇒ lượt sau thử lại; đã gửi được ⇒ đúng một tin mỗi ngưỡng mỗi kỳ.
  * Số dùng chưa biết ⇒ không báo gì (không kết luận từ «—»). Lỗi không làm hỏng job giám sát.
  */
 import { getDb, schema } from "@/db";
@@ -22,9 +22,14 @@ import { resolveOrgPricing } from "@/lib/pricing/entitlements";
 import { usagePeriodOf } from "@/lib/pricing/meter";
 import { orgPriceVersion } from "@/lib/pricing/price-book";
 import { DEFAULT_USAGE_ALERTS, meterMonthOf } from "@/lib/pricing/versions";
-import { notifyPlatformOperator } from "@/lib/sales-chatbot/alerts";
+import { notifyPlatformOperator, type OperatorNotifyResult } from "@/lib/sales-chatbot/alerts";
+import { getSettingJson, setSettingJson } from "@/lib/settings";
 
-export type UsageAlertRun = { sent: UsageThresholdKey | null; skipped: string | null; used: number | null; included: number | null | undefined };
+/** `sent` = dòng chuông của KHÁCH vừa ghi mới · `operator` = tin người vận hành lượt này (`ALREADY` = đã gửi được trong kỳ). */
+export type UsageAlertRun = { sent: UsageThresholdKey | null; operator: OperatorNotifyResult | "ALREADY" | null; skipped: string | null; used: number | null; included: number | null | undefined };
+export type UsageAlertDeps = { notifyOperator?: (title: string, lines: string[]) => Promise<OperatorNotifyResult> };
+/** Sổ tin người vận hành đã gửi được (cài đặt của CHÍNH tổ chức) — chỉ giữ khoá của kỳ đang đo. */
+export const OPERATOR_STATE_KEY = "pricing.usageAlerts.operatorSent";
 
 const fmt = (n: number) => n.toLocaleString("vi-VN");
 
@@ -43,21 +48,21 @@ export function customerUsageAlertText(input: { key: UsageThresholdKey; used: nu
 }
 
 /** Một lượt kiểm ngưỡng cho tổ chức NGỮ CẢNH lúc `now`. Không ném. */
-export async function runAiCustomerUsageAlerts(now: Date = new Date()): Promise<UsageAlertRun> {
+export async function runAiCustomerUsageAlerts(now: Date = new Date(), deps: UsageAlertDeps = {}): Promise<UsageAlertRun> {
   try {
     const ctxOrg = await currentOrganization();
     const org = await findOrganization(ctxOrg.code);
-    if (!org) return { sent: null, skipped: "không có tổ chức", used: null, included: undefined };
+    if (!org) return { sent: null, operator: null, skipped: "không có tổ chức", used: null, included: undefined };
     const pricing = await resolveOrgPricing(org);
     const price = pricing.plan?.planPrice ?? null;
-    if (!price) return { sent: null, skipped: "gói không có dòng giá theo phiên bản", used: null, included: undefined };
+    if (!price) return { sent: null, operator: null, skipped: "gói không có dòng giá theo phiên bản", used: null, included: undefined };
     const included = price.included.aiCustomers;
     const period = usagePeriodOf(now);
     const [version, usage] = await Promise.all([orgPriceVersion(org.code, now), readAiCustomerUsage([org.code], period, now)]);
     const used = usage.get(org.code)?.value ?? null;
     const hit = highestUsageThreshold(used, included, version.version?.alerts ?? DEFAULT_USAGE_ALERTS);
-    if (!hit || used === null || typeof included !== "number") return { sent: null, skipped: used === null ? "chưa đo được khách AI" : "chưa chạm ngưỡng", used, included };
-    const dedupe = usageAlertDedupeKey(meterMonthOf(now), hit.key);
+    if (!hit || used === null || typeof included !== "number") return { sent: null, operator: null, skipped: used === null ? "chưa đo được khách AI" : "chưa chạm ngưỡng", used, included };
+    const dedupe = usageAlertDedupeKey(org.code, meterMonthOf(now), hit.key);
     const trial = price.trialDays !== null;
     const text = customerUsageAlertText({ key: hit.key, used, included, pct: hit.pct, planName: pricing.plan?.name ?? price.name, periodLabel: period.label, trial, blockSize: price.overage.aiCustomerBlockSize });
     const db = await getDb();
@@ -66,14 +71,24 @@ export async function runAiCustomerUsageAlerts(now: Date = new Date()): Promise<
       .values({ kind: "SYSTEM", severity: text.severity, title: text.title, body: text.body, href: "/settings/plan", entityType: "PLAN_USAGE", entityId: `ai-customers:${hit.key}`, dedupeKey: dedupe, occurredAt: now })
       .onConflictDoNothing({ target: schema.notifications.dedupeKey })
       .returning({ id: schema.notifications.id });
-    if (!inserted.length) return { sent: null, skipped: "ngưỡng này đã báo trong kỳ", used, included };
-    await notifyPlatformOperator(`Khách AI ${hit.thresholdPct}% hạn mức — tổ chức ${org.code}`, [
-      `Gói ${pricing.plan?.key ?? price.planKey} (phiên bản ${price.versionKey})${trial ? " · DÙNG THỬ" : ""}`,
-      `Khách AI kỳ ${period.label}: ${fmt(used)} / ${fmt(included)} (${Math.floor(hit.pct)}%) — ngưỡng ${hit.thresholdPct}%`,
-      hit.key === "review" ? "Cần rà soát chi phí / rủi ro, đề xuất gói riêng." : hit.key === "strong" ? "Đề xuất nâng gói." : hit.key === "limit" ? (trial ? "AI dùng thử đã dừng tự trả lời." : "Bắt đầu tính phần vượt.") : "Cảnh báo sớm.",
-    ]);
-    return { sent: hit.key, skipped: null, used, included };
+    const customerNew = inserted.length > 0;
+    // Tin NGƯỜI VẬN HÀNH có sổ riêng (cài đặt của tổ chức, chỉ giữ khoá của kỳ đang đo): gửi hỏng ⇒ KHÔNG ghi ⇒ lượt sau thử lại
+    // (không mất cảnh báo); gửi được / nền tảng chưa khai kênh ⇒ ghi ⇒ không bao giờ gửi lần hai.
+    const month = meterMonthOf(now);
+    const state = await getSettingJson<{ sent?: unknown }>(OPERATOR_STATE_KEY, {});
+    const sentKeys = Array.isArray(state.sent) ? state.sent.filter((k): k is string => typeof k === "string" && k.includes(`:${month}:`)) : [];
+    let operator: UsageAlertRun["operator"] = "ALREADY";
+    if (!sentKeys.includes(dedupe)) {
+      operator = await (deps.notifyOperator ?? notifyPlatformOperator)(`Khách AI ${hit.thresholdPct}% hạn mức — tổ chức ${org.code}`, [
+        `Gói ${pricing.plan?.key ?? price.planKey} (phiên bản ${price.versionKey})${trial ? " · DÙNG THỬ" : ""}`,
+        `Khách AI kỳ ${period.label}: ${fmt(used)} / ${fmt(included)} (${Math.floor(hit.pct)}%) — ngưỡng ${hit.thresholdPct}%`,
+        hit.key === "review" ? "Cần rà soát chi phí / rủi ro, đề xuất gói riêng." : hit.key === "strong" ? "Đề xuất nâng gói." : hit.key === "limit" ? (trial ? "AI dùng thử đã dừng tự trả lời." : "Bắt đầu tính phần vượt.") : "Cảnh báo sớm.",
+      ]);
+      if (operator !== "FAILED") await setSettingJson(OPERATOR_STATE_KEY, { sent: [...sentKeys, dedupe] });
+    }
+    if (!customerNew && operator === "ALREADY") return { sent: null, operator, skipped: "ngưỡng này đã báo trong kỳ", used, included };
+    return { sent: customerNew ? hit.key : null, operator, skipped: null, used, included };
   } catch (e) {
-    return { sent: null, skipped: `lỗi: ${e instanceof Error ? e.message.slice(0, 160) : String(e).slice(0, 160)}`, used: null, included: undefined };
+    return { sent: null, operator: null, skipped: `lỗi: ${e instanceof Error ? e.message.slice(0, 160) : String(e).slice(0, 160)}`, used: null, included: undefined };
   }
 }

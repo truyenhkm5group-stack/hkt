@@ -626,11 +626,26 @@ export async function setOrgBilling(user: SessionUser, raw: { orgCode?: unknown;
   const subs = schema.platformSubscriptions;
   const [before] = await pdb.select().from(subs).where(eq(subs.orgCode, p.org.code)).limit(1);
   const next = { billingEnabled: enabled, paidThrough, graceDays: graceRaw };
-  if (before && before.billingEnabled === next.billingEnabled && (before.paidThrough ?? null) === next.paidThrough && before.graceDays === next.graceDays) return { ok: true, message: "Không có gì thay đổi." };
+  // MỘT MỐC HẾT DÙNG THỬ (review L5): thuê bao đang mang điều khoản dùng thử (0232) ⇒ «Đã trả tới ngày» chính là ngày cuối dùng thử,
+  // nên `trial_ends_at` đi CÙNG lượt ghi (cùng nhật ký). Không làm vậy thì người vận hành gia hạn dùng thử, thu phí «còn hạn» mà cổng
+  // AI vẫn dừng ở mốc cũ.
+  const trialEndsAt = before?.trialEndsAt && paidThrough ? trialEndFromLastDay(paidThrough) : null;
+  if (trialEndsAt && before?.trialStartedAt && trialEndsAt.getTime() <= before.trialStartedAt.getTime()) return { error: "Hạn dùng thử phải sau ngày bắt đầu dùng thử." };
+  const trialChanged = Boolean(trialEndsAt && before?.trialEndsAt && trialEndsAt.getTime() !== before.trialEndsAt.getTime());
+  if (before && !trialChanged && before.billingEnabled === next.billingEnabled && (before.paidThrough ?? null) === next.paidThrough && before.graceDays === next.graceDays) return { ok: true, message: "Không có gì thay đổi." };
   const now = new Date();
+  const write = { ...next, ...(trialEndsAt ? { trialEndsAt } : {}) };
   await pdb.transaction(async (tx) => {
-    await tx.insert(subs).values({ orgCode: p.org.code, ...next }).onConflictDoUpdate({ target: subs.orgCode, set: { ...next, updatedAt: now } });
-    await auditTx(tx, { action: "BILLING_SET", targetOrgCode: p.org.code, subject: "subscription", before: before ? { billingEnabled: before.billingEnabled, paidThrough: before.paidThrough, graceDays: before.graceDays } : null, after: next, reason: p.reason, actor: p.actor });
+    await tx.insert(subs).values({ orgCode: p.org.code, ...write }).onConflictDoUpdate({ target: subs.orgCode, set: { ...write, updatedAt: now } });
+    await auditTx(tx, {
+      action: "BILLING_SET",
+      targetOrgCode: p.org.code,
+      subject: "subscription",
+      before: before ? { billingEnabled: before.billingEnabled, paidThrough: before.paidThrough, graceDays: before.graceDays, ...(before.trialEndsAt ? { trialEndsAt: before.trialEndsAt.toISOString() } : {}) } : null,
+      after: { ...next, ...(trialEndsAt ? { trialEndsAt: trialEndsAt.toISOString() } : {}) },
+      reason: p.reason,
+      actor: p.actor,
+    });
   });
   invalidateSubscriptions(p.org.code);
   const st = billingStanding(next, vnDate(now));

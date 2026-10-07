@@ -81,6 +81,18 @@ export function trialEndFromLastDay(lastDay: string | null | undefined): Date | 
   return Number.isFinite(at.getTime()) ? at : null;
 }
 
+/**
+ * MỐC HẾT DÙNG THỬ HIỆU LỰC = mốc MUỘN HƠN giữa `trial_ends_at` (0232) và mốc suy từ `paid_through` (ngày cuối dùng thử). Người vận
+ * hành gia hạn qua «Đã trả tới ngày» (`setOrgBilling`) thì hai mốc đi cùng nhau; dữ liệu cũ / lệch không bao giờ kẹt ở mốc sớm hơn —
+ * phía nới, không dừng AI của khách mà người vận hành vừa gia hạn. Không mốc nào ⇒ `null` (chưa biết).
+ */
+export function effectiveTrialEnd(trialEndsAt: Date | null | undefined, paidThrough: string | null | undefined): Date | null {
+  const fromPaid = trialEndFromLastDay(paidThrough);
+  const a = trialEndsAt && Number.isFinite(trialEndsAt.getTime()) ? trialEndsAt : null;
+  if (a && fromPaid) return a.getTime() >= fromPaid.getTime() ? a : fromPaid;
+  return a ?? fromPaid;
+}
+
 // ─────────────────────────── Ngưỡng cảnh báo gửi MỘT lần mỗi kỳ ───────────────────────────
 
 export type UsageThresholdKey = "notify" | "limit" | "strong" | "review";
@@ -104,9 +116,12 @@ export function highestUsageThreshold(used: number | null, included: number | nu
   return null;
 }
 
-/** Khoá chống trùng của MỘT ngưỡng trong MỘT kỳ — neo theo KỲ (tháng VN của chính mốc đo), không theo khung giờ. */
-export function usageAlertDedupeKey(periodMonth: string, key: UsageThresholdKey): string {
-  return `pricing:ai-customers:${periodMonth}:${key}`;
+/**
+ * Khoá chống trùng của MỘT ngưỡng của MỘT tổ chức trong MỘT kỳ — neo theo KỲ (tháng VN của chính mốc đo), không theo khung giờ;
+ * mang mã tổ chức để khoá vẫn đúng nghĩa khi đi ra ngoài CSDL của tổ chức (sổ gửi tin vận hành, nhật ký).
+ */
+export function usageAlertDedupeKey(orgCode: string, periodMonth: string, key: UsageThresholdKey): string {
+  return `pricing:ai-customers:${orgCode}:${periodMonth}:${key}`;
 }
 
 // ─────────────────────────── Trạng thái AI cho màn khách ───────────────────────────

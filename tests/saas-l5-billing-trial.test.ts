@@ -7,16 +7,16 @@ import type { AiProvider, AiResponse } from "@/lib/ai/provider";
 import { resolvePermissions } from "@/lib/auth/permissions";
 import type { SessionUser } from "@/lib/auth/session";
 import { trialPaidThrough, vnDate } from "@/lib/billing/rules";
-import { initWorkspaceBilling } from "@/lib/billing/service";
+import { initWorkspaceBilling, setOrgBilling } from "@/lib/billing/service";
 import { invalidateSubscriptions } from "@/lib/billing/standing";
 import { getEnabledModules, invalidateCapabilities } from "@/lib/platform/capabilities";
 import { withOrganization } from "@/lib/platform/context";
 import { setRequestHostSlugForTests } from "@/lib/platform/host-org";
-import { findOrganization, invalidateOrganizations } from "@/lib/platform/organizations";
+import { findOrganization, getHomeOrganization, invalidateOrganizations } from "@/lib/platform/organizations";
 import { provisionOrganization } from "@/lib/platform/provision";
 import { readAiCustomerCounts, readAiCustomerUsage, recordAiCustomer, resetAiCustomerSeenForTests } from "@/lib/pricing/ai-customer";
 import { aiCustomerKeyOf, aiCustomerKeys, canonicalAiCustomer, fanpageVisitorKeyMirror } from "@/lib/pricing/ai-customer-identity";
-import { AI_STOP_MESSAGE, AI_STOP_NOTE, aiEntitlementDecision, highestUsageThreshold, trialEndFromLastDay, usageAlertDedupeKey } from "@/lib/pricing/ai-entitlement";
+import { AI_STOP_MESSAGE, AI_STOP_NOTE, aiEntitlementDecision, effectiveTrialEnd, highestUsageThreshold, trialEndFromLastDay, usageAlertDedupeKey } from "@/lib/pricing/ai-entitlement";
 import { invalidateAiEntitlement, loadAiEntitlement, loadCustomerEntitlementView } from "@/lib/pricing/ai-gate";
 import { invalidatePricing } from "@/lib/pricing/entitlements";
 import { usagePeriodOf } from "@/lib/pricing/meter";
@@ -83,6 +83,14 @@ function testPure() {
   assert.equal(vnDate(new Date(end.getTime() - 1)), last, "giây cuối của ngày cuối vẫn là ngày cuối (giờ VN)");
   assert.notEqual(vnDate(end), last);
   assert.equal(trialEndFromLastDay("hỏng"), null);
+  // MỘT mốc hết dùng thử: mốc MUỘN HƠN giữa `trial_ends_at` và ngày cuối khai ở «Đã trả tới ngày» (người vận hành gia hạn).
+  const lastLater = trialPaidThrough(vnDate(now), 14);
+  const endLater = trialEndFromLastDay(lastLater)!;
+  assert.equal(effectiveTrialEnd(end, lastLater)?.getTime(), endLater.getTime(), "gia hạn qua «Đã trả tới ngày» ⇒ mốc muộn hơn thắng");
+  assert.equal(effectiveTrialEnd(endLater, last)?.getTime(), endLater.getTime(), "mốc cũ hơn không kéo lùi (phía nới)");
+  assert.equal(effectiveTrialEnd(null, last)?.getTime(), end.getTime(), "dòng cũ chưa có trial_ends_at ⇒ đọc paid_through như trước");
+  assert.equal(effectiveTrialEnd(end, null)?.getTime(), end.getTime());
+  assert.equal(effectiveTrialEnd(null, null), null, "không mốc nào ⇒ chưa biết");
 
   // Ngưỡng theo PHIÊN BẢN (không gõ số): V1 mặc định + một bộ khác.
   const c = DEFAULT_USAGE_ALERTS;
@@ -97,8 +105,9 @@ function testPure() {
   const period = usagePeriodOf(now);
   const a = new Date(period.from.getTime() + 3_600_000 - 1);
   const b = new Date(period.from.getTime() + 3_600_000 + 1);
-  assert.equal(usageAlertDedupeKey(meterMonthOf(a), "notify"), usageAlertDedupeKey(meterMonthOf(b), "notify"), "sát ranh giới giờ ⇒ cùng khoá");
-  assert.notEqual(usageAlertDedupeKey(meterMonthOf(new Date(period.to.getTime() - 1)), "notify"), usageAlertDedupeKey(meterMonthOf(period.to), "notify"), "sang kỳ ⇒ khoá mới");
+  assert.equal(usageAlertDedupeKey("shop-a", meterMonthOf(a), "notify"), usageAlertDedupeKey("shop-a", meterMonthOf(b), "notify"), "sát ranh giới giờ ⇒ cùng khoá");
+  assert.notEqual(usageAlertDedupeKey("shop-a", meterMonthOf(new Date(period.to.getTime() - 1)), "notify"), usageAlertDedupeKey("shop-a", meterMonthOf(period.to), "notify"), "sang kỳ ⇒ khoá mới");
+  assert.notEqual(usageAlertDedupeKey("shop-a", meterMonthOf(a), "notify"), usageAlertDedupeKey("shop-b", meterMonthOf(a), "notify"), "khoá mang mã tổ chức — ngưỡng của tổ chức này không chặn tin của tổ chức kia");
 
   // Câu cho khách: không token / USD / model.
   for (const key of ["notify", "limit", "strong", "review"] as const)
@@ -124,6 +133,15 @@ function testPure() {
   assert.equal(canonicalAiCustomer({ channel: "ZALO", pageId: "zalo:42", threadId: "u-1", visitorKey: "vk" })?.kind, "ZALO");
   assert.equal(canonicalAiCustomer({ channel: "WEB", pageId: null, threadId: null, visitorKey: "vk-web" })?.kind, "WEB");
   assert.equal(canonicalAiCustomer({ channel: "TEST", pageId: page, threadId: psid, visitorKey: "vk" }), null, "khung THỬ không là khách");
+  // BÌNH LUẬN: mã hội thoại `<page>_<bài>` trông y như `<page>_<PSID>` nhưng là của CẢ BÀI ⇒ không suy PSID; khoá theo người bình luận.
+  const postThread = `${page}_778899001122`;
+  const cmt1 = { channel: "FANPAGE", pageId: page, threadId: postThread, visitorKey: fanpageVisitorKey(page, postThread), threadKind: "COMMENT" as const, commenterId: "5550001" };
+  const cmt2 = { ...cmt1, commenterId: "5550002" };
+  assert.equal(canonicalAiCustomer({ ...cmt1, threadKind: null })?.kind, "PSID", "không khai loại ⇒ hành vi cũ của hội thoại tin nhắn");
+  assert.deepEqual(canonicalAiCustomer(cmt1), { page, kind: "COMMENTER", id: "5550001" });
+  assert.notEqual(aiCustomerKeys(month, cmt1)!.key, aiCustomerKeys(month, cmt2)!.key, "hai người bình luận cùng bài ⇒ hai khách");
+  assert.equal(aiCustomerKeys(month, cmt1)!.key, aiCustomerKeys(month, { ...cmt1, threadId: `${page}_998877`, visitorKey: "vk-bai-khac" })!.key, "một người bình luận hai bài ⇒ một khách");
+  assert.equal(canonicalAiCustomer({ ...cmt1, commenterId: null })?.kind, "THREAD", "bình luận thiếu người bình luận ⇒ theo hội thoại, không đoán");
   assert.equal(aiCustomerKeyOf("2026-13", { page, kind: "PSID", id: psid }), null);
   for (const [pg, th] of [[page, psid], ["1", "1_2_3"], ["zalo:9", "u"]]) assert.equal(fanpageVisitorKeyMirror(pg, th), fanpageVisitorKey(pg, th), "bản sao khoá fanpage khớp hàm của kênh");
 }
@@ -148,6 +166,9 @@ function testSource() {
   // Zalo + web ghi đồng hồ ở điểm gửi thành công.
   assert.match(read("lib/sales-chatbot/zalo.ts"), /aiTexts\.has\(r\.text\)[\s\S]{0,200}noteAiCustomerReply\(conv\.id/, "Zalo ghi đồng hồ sau khi gửi trọn câu AI");
   assert.match(read("lib/sales-chatbot/public.ts"), /aiTexts\?\.length[\s\S]{0,80}noteAiCustomerReply/, "web ghi đồng hồ khi trả câu AI");
+  // Hai đường trả lời BÌNH LUẬN báo người bình luận cho đồng hồ — không để khoá suy PSID từ mã hội thoại của cả bài.
+  for (const f of ["lib/sales-chatbot/fanpage.ts", "lib/sales-chatbot/messenger.ts"])
+    assert.match(read(f), /noteAiCustomerReply\(conv\.id, now\(\), \{ threadKind: "COMMENT", commenterId: \w+\.fromId \}\)/, `${f}: đường bình luận báo người bình luận`);
   // Ngưỡng chạy trong lịch SẴN CÓ.
   assert.match(body(read("lib/sync/jobs.ts"), '"sales-health": {'), /runAiCustomerUsageAlerts\(/, "ngưỡng đi cùng job sales-health");
   assert.match(read("lib/saas/provisioning.ts"), /initWorkspaceBilling\(/, "cấp phát người vận hành gọi dịch vụ thu phí");
@@ -300,13 +321,21 @@ async function run() {
     await forgetAiStatus();
     const blocks = await conversationAiBlocks({ id: web.id, channel: "WEB", pageId: null, visitorKey: "vk-web-t", state: {} });
     assert.ok(blocks.some((b) => b.code === "TRIAL_QUOTA_EXHAUSTED" && b.reason === AI_STOP_MESSAGE.TRIAL_QUOTA_EXHAUSTED && b.fixHref === "/settings/plan"), JSON.stringify(blocks));
-    // Ngưỡng 100%: báo ĐÚNG MỘT lần mỗi kỳ, kể cả lượt kiểm ngay sau (sát ranh giới giờ).
-    const n1 = await runAiCustomerUsageAlerts(now);
-    assert.equal(n1.sent, "limit", JSON.stringify(n1));
-    assert.equal((await runAiCustomerUsageAlerts(now)).sent, null, "chạy lại ⇒ không báo lần hai");
-    assert.equal((await runAiCustomerUsageAlerts(new Date(now.getTime() + 3_600_000))).sent, null, "lượt kiểm giờ sau ⇒ không báo lần hai");
+    // Ngưỡng 100%: báo ĐÚNG MỘT lần mỗi kỳ, kể cả lượt kiểm ngay sau (sát ranh giới giờ). Tin NGƯỜI VẬN HÀNH gửi hỏng ⇒ lượt sau
+    // thử lại (không mất cảnh báo); đã gửi được ⇒ không gửi lần hai.
+    const ops: string[] = [];
+    const opFails = { notifyOperator: async () => (ops.push("FAILED"), "FAILED" as const) };
+    const opWorks = { notifyOperator: async () => (ops.push("SENT"), "SENT" as const) };
+    const n1 = await runAiCustomerUsageAlerts(now, opFails);
+    assert.deepEqual([n1.sent, n1.operator], ["limit", "FAILED"], JSON.stringify(n1));
+    const n2 = await runAiCustomerUsageAlerts(now, opWorks);
+    assert.deepEqual([n2.sent, n2.operator], [null, "SENT"], `chuông khách không ghi lại; tin vận hành hỏng lần trước ⇒ thử lại: ${JSON.stringify(n2)}`);
+    const n3 = await runAiCustomerUsageAlerts(new Date(now.getTime() + 3_600_000), opWorks);
+    assert.deepEqual([n3.sent, n3.operator, n3.skipped], [null, "ALREADY", "ngưỡng này đã báo trong kỳ"], `lượt kiểm giờ sau ⇒ không báo lần hai: ${JSON.stringify(n3)}`);
+    assert.deepEqual(ops, ["FAILED", "SENT"], "người vận hành nhận đúng MỘT tin thành công");
     const rows = await (await getDb()).select().from(schema.notifications).where(like(schema.notifications.dedupeKey, "pricing:ai-customers:%"));
     assert.equal(rows.length, 1, "một dòng chuông cho ngưỡng 100% của kỳ");
+    assert.equal(rows[0].dedupeKey, usageAlertDedupeKey(T, meterMonthOf(now), "limit"), "khoá chuông mang mã tổ chức");
     assert.ok(!/token|usd|model/i.test(`${rows[0].title} ${rows[0].body}`));
   });
   // Dấu vết tin của kênh nhắn tin: ghi chú cổng gói ⇒ mã máy đọc được.
@@ -328,7 +357,11 @@ async function run() {
   await pdb.delete(schema.platformUsageEvents).where(eq(schema.platformUsageEvents.orgCode, T));
   invalidateAiEntitlement(T);
   assert.equal((await loadAiEntitlement(T, { fresh: true })).allowed, true, "xoá số dùng ⇒ còn lượt");
-  await pdb.update(schema.platformSubscriptions).set({ trialEndsAt: new Date(now.getTime() - 60_000), trialStartedAt: new Date(now.getTime() - 8 * 86_400_000) }).where(eq(schema.platformSubscriptions.orgCode, T));
+  // Hết hạn THẬT: cả hai mốc (trial_ends_at + ngày cuối ở paid_through) đều đã qua — cổng đọc mốc muộn hơn của hai.
+  await pdb
+    .update(schema.platformSubscriptions)
+    .set({ trialEndsAt: new Date(now.getTime() - 60_000), trialStartedAt: new Date(now.getTime() - 8 * 86_400_000), paidThrough: vnDate(new Date(now.getTime() - 2 * 86_400_000)) })
+    .where(eq(schema.platformSubscriptions.orgCode, T));
   invalidateSubscriptions(T);
   const expired = await loadAiEntitlement(T, { fresh: true });
   assert.deepEqual([expired.allowed, expired.reason], [false, "TRIAL_EXPIRED"]);
@@ -338,6 +371,18 @@ async function run() {
     assert.ok(!r.ok && r.error === AI_STOP_MESSAGE.TRIAL_EXPIRED, JSON.stringify(r));
   });
   assert.equal((await loadCustomerEntitlementView(T, now))?.ai.state, "TRIAL_EXPIRED");
+  // Người vận hành GIA HẠN dùng thử qua «Đã trả tới ngày» ⇒ MỘT mốc hết dùng thử (trial_ends_at đi cùng, có nhật ký) ⇒ AI chạy lại.
+  const home = await getHomeOrganization();
+  const op = { id: "l5-op", email: "op@l5.local", name: "OP", role: "ADMIN", permissions: [], scope: "ALL", departmentCodes: [], positionId: null, organization: { code: home.code, name: home.name, isHome: true } } as SessionUser;
+  const extendTo = trialPaidThrough(vnDate(now), 3);
+  const ext = await setOrgBilling(op, { orgCode: T, enabled: false, paidThrough: extendTo, graceDays: 7, reason: "Gia hạn dùng thử cho khách L5" });
+  assert.ok("ok" in ext, JSON.stringify(ext));
+  assert.equal((await pdb.query.platformSubscriptions.findFirst({ where: eq(schema.platformSubscriptions.orgCode, T) }))?.trialEndsAt?.getTime(), trialEndFromLastDay(extendTo)!.getTime(), "gia hạn ghi CÙNG mốc hết dùng thử");
+  invalidateAiEntitlement(T);
+  const extended = await loadAiEntitlement(T, { fresh: true });
+  assert.deepEqual([extended.allowed, extended.reason], [true, null], `gia hạn ⇒ AI chạy lại: ${JSON.stringify(extended)}`);
+  const audExt = await pdb.select().from(schema.platformAuditLog).where(and(eq(schema.platformAuditLog.targetOrgCode, T), eq(schema.platformAuditLog.action, "BILLING_SET")));
+  assert.ok(audExt.some((a) => JSON.stringify(a).includes(trialEndFromLastDay(extendTo)!.toISOString())), "nhật ký mang mốc hết dùng thử mới");
 
   // ── E · GÓI TRẢ PHÍ vượt 100% ⇒ AI VẪN chạy + phần vượt đúng.
   await pdb.update(schema.platformOrganizations).set({ plan: "growth" }).where(eq(schema.platformOrganizations.code, P));
@@ -401,6 +446,14 @@ async function run() {
   assert.equal((await recordAiCustomer(viaPancake)).recorded, false, "tin tiếp trong kỳ không tăng");
   assert.equal((await recordAiCustomer(viaMessenger)).recorded, false, "đổi sang Messenger giữa tháng ⇒ vẫn một khách");
   assert.equal(await counts(P, now), c0 + 1);
+  // BÌNH LUẬN: hai người cùng bài ⇒ HAI khách (mã hội thoại `<page>_<bài>` không bị đọc thành PSID); cùng người ⇒ không tăng.
+  const cc0 = await counts(P, now);
+  const postThread = `${page}_667788990011`;
+  const viaComment = (who: string) => ({ orgCode: P, channel: "FANPAGE", pageId: page, threadId: postThread, customerKey: fanpageVisitorKey(page, postThread), threadKind: "COMMENT" as const, commenterId: who, at: now });
+  assert.equal((await recordAiCustomer(viaComment("7770001"))).recorded, true);
+  assert.equal((await recordAiCustomer(viaComment("7770002"))).recorded, true, "người bình luận thứ hai cùng bài ⇒ khách mới");
+  assert.equal((await recordAiCustomer(viaComment("7770001"))).recorded, false, "cùng người bình luận lại ⇒ không tăng");
+  assert.equal(await counts(P, now), cc0 + 2);
   // Kỳ chuyển tiếp: khách có dòng KHOÁ CŨ (trước bản này) ⇒ khoá mới là bí danh số lượng 0.
   const psid2 = "543210987654321";
   const oldKey = aiCustomerEventKey({ month: meterMonthOf(now), channel: "FANPAGE", pageId: page, customerKey: fanpageVisitorKey(page, `${page}_${psid2}`) })!;
@@ -447,5 +500,5 @@ export async function testSaasL5BillingTrial() {
     setRequestHostSlugForTests(null);
     await cleanup();
   }
-  console.log("✓ L5 dùng thử / hết lượt: dùng thử hết lượt hoặc hết hạn (cái nào tới trước) ⇒ AI dừng, hộp thư + gửi tay vẫn chạy · trả phí vượt 100% ⇒ AI chạy + phần vượt theo khối · đình chỉ ⇒ dừng · giống HSLC (legacy) không bị chặn · cấp phát ghim V1 + kỳ + mốc dùng thử (job + /start một dịch vụ) · ngưỡng báo một lần mỗi kỳ · khoá đồng hồ theo khách chuẩn (đổi đường = 1, kỳ chuyển tiếp không đếm đôi) · web ghi đồng hồ · màn khách không lộ trường nội bộ");
+  console.log("✓ L5 dùng thử / hết lượt: dùng thử hết lượt hoặc hết hạn (cái nào tới trước) ⇒ AI dừng, hộp thư + gửi tay vẫn chạy · trả phí vượt 100% ⇒ AI chạy + phần vượt theo khối · đình chỉ ⇒ dừng · giống HSLC (legacy) không bị chặn · cấp phát ghim V1 + kỳ + mốc dùng thử (job + /start một dịch vụ) · ngưỡng báo một lần mỗi kỳ · khoá đồng hồ theo khách chuẩn (đổi đường = 1, kỳ chuyển tiếp không đếm đôi, hai người bình luận cùng bài = 2) · gia hạn dùng thử ⇒ một mốc, AI chạy lại · tin vận hành gửi hỏng ⇒ thử lại, khoá mang mã tổ chức · web ghi đồng hồ · màn khách không lộ trường nội bộ");
 }

@@ -50,8 +50,13 @@ export function resetAiCustomerSeenForTests() {
   seen.clear();
 }
 
-/** `customerKey` = `visitor_key` của hội thoại; `threadId` = mã hội thoại / người dùng của kênh (dựng danh tính chuẩn). */
-export type AiCustomerInput = { orgCode: string; channel: string; pageId: string | null; customerKey: string | null; threadId?: string | null; conversationId?: string | null; at: Date };
+/**
+ * `customerKey` = `visitor_key` của hội thoại; `threadId` = mã hội thoại / người dùng của kênh (dựng danh tính chuẩn); `threadKind` +
+ * `commenterId` = lượt vừa trả lời là BÌNH LUẬN của ai (`AiCustomerHint`).
+ */
+export type AiCustomerInput = { orgCode: string; channel: string; pageId: string | null; customerKey: string | null; threadId?: string | null; threadKind?: "INBOX" | "COMMENT" | null; commenterId?: string | null; conversationId?: string | null; at: Date };
+/** Điểm gửi của đường BÌNH LUẬN báo loại hội thoại + người bình luận — để không suy PSID từ mã hội thoại của cả bài. */
+export type AiCustomerHint = { threadKind: "COMMENT"; commenterId: string | null };
 
 type Listener = (orgCode: string) => void;
 const listeners = new Set<Listener>();
@@ -66,7 +71,7 @@ export function onAiCustomerRecorded(fn: Listener): void {
  */
 export async function recordAiCustomer(input: AiCustomerInput): Promise<{ recorded: boolean; key: string | null }> {
   if (TEST_CHANNELS.has(input.channel)) return { recorded: false, key: null };
-  const keys = aiCustomerKeys(meterMonthOf(input.at), { channel: input.channel, pageId: input.pageId, threadId: input.threadId ?? null, visitorKey: input.customerKey });
+  const keys = aiCustomerKeys(meterMonthOf(input.at), { channel: input.channel, pageId: input.pageId, threadId: input.threadId ?? null, visitorKey: input.customerKey, threadKind: input.threadKind ?? null, commenterId: input.commenterId ?? null });
   if (!keys) return { recorded: false, key: null };
   const { key, aliases, identity } = keys;
   const memoKey = `${input.orgCode}|${key}`;
@@ -108,14 +113,14 @@ export async function recordAiCustomer(input: AiCustomerInput): Promise<{ record
  * ĐIỂM GỌI CỦA RUNTIME — sau khi bot đã GỬI THÀNH CÔNG câu trả lời AI của hội thoại `conversationId` (tổ chức ngữ cảnh).
  * Không bao giờ ném, không bao giờ chặn: lỗi đọc / ghi chỉ được đếm.
  */
-export async function noteAiCustomerReply(conversationId: string, at: Date): Promise<void> {
+export async function noteAiCustomerReply(conversationId: string, at: Date, hint?: AiCustomerHint): Promise<void> {
   try {
     const org = await currentOrganization();
     const db = await getDb();
     const c = schema.salesChatConversations;
     const [row] = await db.select({ channel: c.channel, pageId: c.pageId, threadId: c.threadId, visitorKey: c.visitorKey }).from(c).where(eq(c.id, conversationId)).limit(1);
     if (!row) return;
-    await recordAiCustomer({ orgCode: org.code, channel: row.channel, pageId: row.pageId, threadId: row.threadId, customerKey: row.visitorKey, conversationId, at });
+    await recordAiCustomer({ orgCode: org.code, channel: row.channel, pageId: row.pageId, threadId: row.threadId, customerKey: row.visitorKey, threadKind: hint?.threadKind ?? null, commenterId: hint?.commenterId ?? null, conversationId, at });
   } catch (e) {
     const s = holder.__erpAiCustomerErrors!;
     s.n += 1;
