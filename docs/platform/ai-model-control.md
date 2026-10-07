@@ -141,9 +141,7 @@ Chính sách riêng thêm `reasoning` (minimal · low · medium · high) và `ma
 thích ngược). Hai nhánh phải KHÁC model (A/B phân nhánh theo tên model trong sổ AI); so mức suy nghĩ của CÙNG model dùng
 benchmark (§9). Ops: `--apply=10 <model> --workload=order_sync --reasoning=minimal --max-tokens=1024` · `--rollback --workload=order_sync`.
 
-**Quan sát (không đổi tiền) — cột sổ đi ở PR riêng** (nhánh `claude/platform-ai-ledger-telemetry`; số migration 0231 / 0232
-đang do hai sứ mệnh khác giữ chỗ). Nơi gọi đã điền `thinkingTokens` / `cachedTokens` / `latencyMs` / `workload`; tới khi có
-cột, chỉ benchmark (§9) đọc được chúng. Thiết kế cột: `platform_ai_usage` thêm `thinking_tokens` (⊂ `output_tokens`),
+**Quan sát (migration 0232, không đổi tiền).** `platform_ai_usage` thêm `thinking_tokens` (⊂ `output_tokens`),
 `cached_tokens` (⊂ `input_tokens`), `latency_ms`, `workload`. `output_tokens` / `cost_usd` GIỮ NGUYÊN nghĩa — Gemini tính tiền
 token suy nghĩ như token ra. Dòng cũ `NULL` = chưa đo. Bảng A/B có: ra hiện / suy nghĩ / % suy nghĩ / tổng ra mỗi hội thoại,
 tiền phần suy nghĩ, độ trễ lời gọi p50/p95 kèm độ phủ. `/platform/saas` có bảng **PLATFORM AI ROUTING** theo loại việc.

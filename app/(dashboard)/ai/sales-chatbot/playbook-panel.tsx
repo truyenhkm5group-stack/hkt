@@ -57,7 +57,7 @@ export function PlaybookPanel({ state, run, fanpageReady }: { state: PlaybookSta
               ))}
             </select>
           </label>
-          <Button size="sm" disabled={pending || running || !fanpageReady} onClick={() => act(() => startPlaybookLearningAction({ conversations: target, days }))} title={fanpageReady ? "Tốn token trên khoá AI của shop" : "Bật kết nối «Fanpage qua Pancake» trước"}>
+          <Button size="sm" disabled={pending || running || !fanpageReady} onClick={() => act(() => startPlaybookLearningAction({ conversations: target, days }))} title={fanpageReady ? "Mỗi lượt học dùng AI của shop" : "Bật kết nối «Fanpage qua Pancake» trước"}>
             {pending ? <Loader2 className="size-4 animate-spin" /> : null}
             Chạy học
           </Button>
