@@ -249,7 +249,7 @@ async function installationToken(cfg: AgentGithubConfig, now: Date = new Date())
  *     chặn đẩy thẳng, và máy chủ chỉ cấp khi lượt chạy đang giữ đúng nhánh `ai/worker/*` nó đã cấp).
  * Người gọi (lib/tech/worker-onboarding.ts) trả token trong THÂN phản hồi cho đúng worker đã xác thực; không ghi CSDL.
  */
-export async function mintAgentPushToken(input: { branch: string; now?: Date }): Promise<{ token: string; expiresAt: string }> {
+export async function mintAgentPushToken(input: { branch: string; now?: Date }): Promise<{ token: string; expiresAt: string; repo: string }> {
   const cfg = must();
   assertAgentBranch(input.branch);
   const now = input.now ?? new Date();
@@ -262,7 +262,7 @@ export async function mintAgentPushToken(input: { branch: string; now?: Date }):
   if (!res.ok) throw new Error(`Không xin được token đẩy nhánh (HTTP ${res.status})`);
   const json = (await res.json()) as { token?: string; expires_at?: string };
   if (!json.token) throw new Error("GitHub không trả token đẩy nhánh");
-  return { token: json.token, expiresAt: json.expires_at ?? new Date(now.getTime() + 60 * 60_000).toISOString() };
+  return { token: json.token, expiresAt: json.expires_at ?? new Date(now.getTime() + 60 * 60_000).toISOString(), repo: `${cfg.owner}/${cfg.repo}` };
 }
 
 /** Vứt token đang giữ. Gọi khi đổi cấu hình hoặc khi một lượt trả 401. */

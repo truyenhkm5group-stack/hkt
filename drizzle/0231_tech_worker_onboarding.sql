@@ -3,8 +3,9 @@
 --  · CỘNG THÊM: bảng `tech_worker_enrollments` (mã ghi danh dùng MỘT lần, hạn ngắn, chỉ lưu băm) và các cột
 --    nullable / có mặc định trên `tech_workers` (mốc xoay / thu hồi / ghi danh / gỡ, báo cáo tự kiểm, lệnh sửa).
 --  · THU HỒI khoá của `dogfood-1`: khoá đó đã hiện ra màn hình và đi qua đường "dán vào PowerShell" — coi như đã lộ.
---    Điều kiện CHẶT: đúng mã `dogfood-1`, CHƯA TỪNG gửi nhịp tim, CHƯA từng ghi danh bằng bộ cài, tạo TRƯỚC lượt
---    deploy này (`now()` của migration = mốc deploy), và chưa bị thu hồi. Băm mới là băm của một chuỗi NGẪU NHIÊN
+--    Điều kiện CHẶT: đúng mã `dogfood-1`, CHƯA từng ghi danh bằng bộ cài, tạo TRƯỚC lượt deploy này (`now()` của
+--    migration = mốc deploy), và chưa bị thu hồi. KHÔNG xét nhịp tim: khoá đã hiện ra màn hình là lộ, dù đã dùng hay
+--    chưa (review bảo mật PR #631; production đo 07/10 06:08Z: chưa từng nhịp tim, 0 lượt chạy). Băm mới là băm của một chuỗi NGẪU NHIÊN
 --    không ai giữ (thoả CHECK `^[0-9a-f]{64}$`), `secret_revoked_at` chặn xác thực kể cả khi băm khớp. Không xoá dòng.
 --    Chạy lại không đổi gì (`secret_revoked_at IS NULL` + khoá chống trùng của sự kiện). Sau deploy chủ shop bấm
 --    «Tải bộ cài» cho `dogfood-1`: bộ cài đổi mã ⇒ xoay khoá, bật lại worker.
@@ -46,7 +47,6 @@ WITH "thu_hoi" AS (
 		"disabled_reason" = 'Khoá cũ có thể đã lộ — tạo lại bằng bộ cài',
 		"updated_at" = now()
 	WHERE "key" = 'dogfood-1'
-		AND "last_heartbeat_at" IS NULL
 		AND "enrolled_at" IS NULL
 		AND "secret_revoked_at" IS NULL
 		AND "created_at" < now()

@@ -4,6 +4,7 @@ import { getDb, schema } from "@/db";
 import {
   ENROLLMENT_CODE_PATTERN,
   ENROLLMENT_CODE_PREFIX,
+  PUSH_TOKENS_PER_RUN,
   enrollmentExpiry,
   isTechRepairCommand,
   sanitizeWorkerDiagnostics,
@@ -214,7 +215,7 @@ export async function takeWorkerRepair(workerId: string): Promise<TechRepairComm
 
 /* ═════════════════════ TOKEN ĐẨY NHÁNH (D) ═════════════════════ */
 
-export type PushTokenResult = { ok: true; token: string; expiresAt: string } | { error: string; detail?: string };
+export type PushTokenResult = { ok: true; token: string; expiresAt: string; repo: string; branch: string } | { error: string; detail?: string };
 
 /**
  * Cấp token đẩy NGẮN HẠN cho ĐÚNG một lượt chạy đang giữ lease: worker bật, lượt còn mở + đúng generation (fencing), và
@@ -229,6 +230,17 @@ export async function issueWorkerPushToken(worker: TechWorkerRow, fence: { runId
   if (!WORKER_BRANCH_PATTERN.test(f.run.branch)) return { error: "BRANCH_NOT_ALLOWED" };
   const chua = agentGithubDisabledReason();
   if (chua) return { error: "NOT_CONFIGURED", detail: "Máy chủ chưa có danh tính bot erp-agent — không cấp được token đẩy nhánh." };
+  /*
+    TRẦN SỐ TOKEN MỖI LƯỢT (review bảo mật PR #631): giữ chỗ bằng MỘT câu UPDATE có điều kiện trên bộ đếm trong metadata của
+    lượt chạy — hai lời xin chen nhau không vượt trần. Đếm cả lần xin mà GitHub từ chối: trần là trần số lần HỎI.
+  */
+  const giu = await db.execute(sql`
+    UPDATE tech_agent_runs
+    SET metadata = jsonb_set(coalesce(metadata, '{}'::jsonb), '{pushTokensIssued}', to_jsonb(coalesce((metadata->>'pushTokensIssued')::int, 0) + 1))
+    WHERE id = ${f.run.id} AND status = 'RUNNING' AND coalesce((metadata->>'pushTokensIssued')::int, 0) < ${PUSH_TOKENS_PER_RUN}
+    RETURNING id
+  `);
+  if (!rowsOf<{ id: string }>(giu).length) return { error: "PUSH_TOKEN_LIMIT", detail: `Lượt này đã xin đủ ${PUSH_TOKENS_PER_RUN} token đẩy.` };
   try {
     const t = await mintAgentPushToken({ branch: f.run.branch, now });
     await recordTechEvent(
@@ -236,7 +248,7 @@ export async function issueWorkerPushToken(worker: TechWorkerRow, fence: { runId
       { name: "worker.push_token_issued", subjectType: "WORKER", subjectId: worker.id, taskId: f.task.id, payload: { runId: f.run.id, branch: f.run.branch, expiresAt: t.expiresAt } },
       { kind: "SYSTEM", name: `worker:${worker.key}` },
     );
-    return { ok: true, token: t.token, expiresAt: t.expiresAt };
+    return { ok: true, token: t.token, expiresAt: t.expiresAt, repo: t.repo, branch: f.run.branch };
   } catch (e) {
     return { error: "GITHUB_ERROR", detail: e instanceof Error ? e.message.slice(0, 200) : "lỗi" };
   }

@@ -83,6 +83,19 @@ function batchShell(title: string): string {
   ].join("\r\n");
 }
 
+/**
+ * Dừng tiến trình theo tệp PID — CHỈ khi dòng lệnh của tiến trình đó chứa thư mục của CHÍNH worker này. Windows cấp lại
+ * PID cho chương trình khác sau khi tiến trình cũ thoát; dừng mù theo số là có thể giết nhầm chương trình của chủ shop.
+ */
+export const STOP_WORKER_PID_PS = `function Stop-WorkerPid([string]$pf) {
+  $f = Join-Path $Root $pf
+  if (-not (Test-Path $f)) { return }
+  $id = 0
+  try { $id = [int]((Get-Content -Raw -Path $f).Trim()) } catch { return }
+  $p = Get-CimInstance Win32_Process -Filter ('ProcessId=' + $id) -ErrorAction SilentlyContinue
+  if ($p -and $p.CommandLine -and $p.CommandLine.ToLower().Contains($Root.ToLower())) { Stop-Process -Id $id -Force -ErrorAction SilentlyContinue }
+}`;
+
 const API_VARS_PS = `@(${API_BILLING_ENV.map((k) => q(k)).join(", ")})`;
 
 /**
@@ -312,10 +325,8 @@ $LauncherText = @'
 ${launcher}'@
 Set-Content -Path $Launcher -Value $LauncherText -Encoding UTF8
 Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
-foreach ($pf in @('worker.pid', 'node.pid')) {
-  $pidFile = Join-Path $Root $pf
-  if (Test-Path $pidFile) { Stop-Process -Id ([int]((Get-Content -Raw -Path $pidFile).Trim())) -Force -ErrorAction SilentlyContinue }
-}
+${STOP_WORKER_PID_PS}
+foreach ($pf in @('worker.pid', 'node.pid')) { Stop-WorkerPid $pf }
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File $Launcher -Check
 $rc = $LASTEXITCODE
 if ($rc -eq 0) { Say '  Tự kiểm ĐẠT.' }
@@ -362,10 +373,8 @@ $TaskName = 'VNX Tech Worker ' + $WorkerKey
 Write-Host ('Gỡ worker ' + $WorkerKey + ' khỏi máy này...')
 Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
 Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction SilentlyContinue
-foreach ($pf in @('worker.pid', 'node.pid')) {
-  $pidFile = Join-Path $Root $pf
-  if (Test-Path $pidFile) { Stop-Process -Id ([int]((Get-Content -Raw -Path $pidFile).Trim())) -Force -ErrorAction SilentlyContinue }
-}
+${STOP_WORKER_PID_PS}
+foreach ($pf in @('worker.pid', 'node.pid')) { Stop-WorkerPid $pf }
 Start-Sleep -Seconds 2
 if (Test-Path $Root) { Remove-Item -Recurse -Force -Path $Root -ErrorAction SilentlyContinue }
 if (Test-Path $Root) { Write-Host ('Còn sót thư mục ' + $Root + ' (tệp đang mở) — khởi động lại máy rồi chạy lại tệp này.') -ForegroundColor Yellow; exit 1 }

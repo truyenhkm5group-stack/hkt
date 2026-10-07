@@ -50,7 +50,7 @@ nó đang là đường giao hàng đang chạy (`gates`, `deploy-plan`, `verify
 | Bộ lập lịch | `scripts/scheduler.mjs` → `/api/sync/<job>` + `sync_runs` | Đủ cho watchdog, không cần dịch vụ mới |
 | Nhật ký kiểm toán | `audit()` → `audit_logs` | |
 | Luồng sự kiện miền | `emitDomainEvent` → `domain_events` (append-only, dedupe, causation/correlation) | Dùng cho Goal/Mission/Worker — không tạo bảng sự kiện thứ hai |
-| Cổng CI + bảo vệ `main` | `gates.yml` (4 job + `gates / gates`), ruleset 1 duyệt người | KHÔNG nới, KHÔNG lách |
+| Cổng CI + bảo vệ `main` | `gates.yml` (4 job + `gates / gates`), ruleset `main`: PR bắt buộc + `gates / gates`, **0 lượt duyệt** (từ 25/09/2026 — câu "1 duyệt người" cũ đã sai) | KHÔNG nới, KHÔNG lách |
 | Deploy + smoke | `deploy-vps.yml` (dùng lại lượt cổng xanh đúng SHA, `flock` trên VPS, smoke `/api/health`) | |
 | Ngân sách AI theo ngày | `lib/ai/budget.ts` (trần ngày trong `settings`) · `platform_ai_usage` | Nền cho ngân sách API |
 
@@ -254,7 +254,7 @@ bằng cách chạy bộ cài một lần hoặc đổi mã ghi danh qua `POST /
 | Không rơi sang tiền API | chỉ đăng ký worker `SUBSCRIPTION_CLAUDE_CODE`; không đặt `TECH_WORKER_ANTHROPIC_API_KEY` |
 | Chỉ việc tài liệu | worker khai đúng một năng lực `write-docs` |
 | Không đụng production | worker không giữ secret production; deploy vẫn do người / Delivery Controller; năng lực deploy / migration `autonomous = false` |
-| Không lách nhánh bảo vệ | PR mở bằng bot `agent-open-pr.yml`, gộp qua `gates / gates` + 1 người duyệt |
+| Không lách nhánh bảo vệ | PR mở bằng bot `agent-open-pr.yml`, gộp qua `gates / gates` (ruleset hiện 0 lượt duyệt — người gộp là chốt chặn) |
 | CI đỏ trên PR của worker | NGƯỜI sửa tay. Việc `ci-debug` máy tự tạo là loại BUGFIX ⇒ chính sách R1 ⇒ KHÔNG được nhận dưới trần R0; nó nằm SPEC_READY và việc gốc đứng ở REVIEW (không tự FAILED, không chi tiền). Huỷ việc `ci-debug` đó trên `/tech` sau khi sửa tay |
 
 Bất biến đã khoá bằng bài kiểm (`tests/tech-worker.test.ts`): hai worker không nhận trùng · phụ thuộc chưa DONE /
@@ -405,25 +405,44 @@ trần chi API / ngày.
 · phiên bản · ANTHROPIC_API_KEY vắng mặt · cách đẩy nhánh · lỗi gần nhất); máy chủ lọc trường, che chuỗi giống secret
 (`tw_` · `twe_` · `sk-ant-` · `gh*_` · `Bearer` · `*_TOKEN=` · chuỗi dài ≥ 33 ký tự) và giữ ≤ 4 KB. Lệnh sửa là danh sách
 ĐÓNG có CHECK ở CSDL: `RERUN_SELF_CHECK` · `REFRESH_REPO` (fetch + đặt lại bản clone RIÊNG của worker về `origin/main`,
-`npm ci` nếu lockfile đổi, khởi động lại) · `PRUNE_WORKTREES` (gỡ cây `wt-tech-*` không thuộc lượt đang chạy, nhánh giữ
-nguyên) · `RESTART_LOOP`. Giao đúng một lần ở nhịp tim kế; lệnh cần thoát tiến trình hoãn tới khi worker rảnh. Không có
+`npm ci` nếu lockfile đổi, khởi động lại) · `PRUNE_WORKTREES` (chỉ khi có `TECH_WORKER_ROOT`; chỉ cây trong `git worktree
+list` của CHÍNH kho worker, nằm dưới gốc đó, tên `wt-tech-*`, nhánh `ai/worker/*`, không đang chạy, SẠCH và không còn commit
+chưa đẩy; gỡ bằng `git worktree remove` không `--force`, không bao giờ xoá đệ quy — review PR #631: gốc mặc định cũ là thư
+mục cha của kho, nơi có cây của người) · `RESTART_LOOP`. Giao đúng một lần ở nhịp tim kế; lệnh cần thoát tiến trình hoãn tới khi worker rảnh. Không có
 lệnh tuỳ ý, không tham số.
 
 **Đẩy nhánh (git push) không cần chủ shop cấu hình Git.** Sau khi cổng xanh, worker gọi `push-credential`: máy chủ kiểm
-fencing + nhánh `ai/worker/*` đã cấp, rồi xin cho ĐÚNG lượt đó một token cài đặt GitHub App `erp-agent` MỚI (không đệm,
-≤ 60′, `permissions: { contents: write }`, đúng một kho) — `mintAgentPushToken`. Token chỉ nằm trong biến môi trường của
-một tiến trình `git push`; trình trợ giúp credential của máy bị xoá cho lượt đó (`-c credential.helper=` trước), nên
-Git Credential Manager không đưa credential cá nhân ra và không lưu token. Máy chủ chưa có danh tính bot ⇒ worker dừng
-`BLOCKED` kèm câu chỉ đúng việc (ops `apply-agent-env`); dùng credential CỦA MÁY chỉ khi bật tường minh
-`TECH_WORKER_ALLOW_MACHINE_GIT=1`. Không bao giờ hỏi PAT. Giới hạn: token GitHub không giới hạn được theo nhánh — `main`
-được ruleset chặn đẩy thẳng; muốn chặn mọi nhánh ngoài `ai/worker/*` cho App thì thêm ruleset.
+fencing + nhánh `ai/worker/*` đã cấp + trần **3 token / lượt** (bộ đếm trong metadata lượt chạy, giữ chỗ bằng một câu UPDATE
+có điều kiện), rồi xin một token cài đặt GitHub App `erp-agent` MỚI (không đệm, `permissions: { contents: write }`, đúng một
+kho) và trả kèm KHO + NHÁNH đích. Lượt đẩy (`scripts/tech-worker/git-safety.ts::safePush`, review bảo mật PR #631):
+
+- Cổng chạy MÃ AGENT VỪA VIẾT trong cùng cây, nên `.git/config` có thể đã bị sửa. Worker chạy git với
+  `GIT_CONFIG_NOSYSTEM=1` + `GIT_CONFIG_GLOBAL=<tệp rỗng>`, liệt kê cấu hình cục bộ + worktree và **TỪ CHỐI đẩy** nếu có
+  `core.hooksPath` / `askPass` / `sshCommand` / `fsmonitor`, `remote.*.pushurl`, `url.*.insteadOf`, `credential.*`,
+  `http.*` / `https.*` (proxy · header · TLS), `include*`, `protocol.*` (in tên khoá, không in giá trị).
+- Vẫn ép lại bằng `-c`: hook trỏ vào thư mục RỖNG của worker (+ `--no-verify`), xoá mọi helper chung, helper CHỈ gắn
+  `https://github.com`, proxy rỗng, `sslVerify=true`, chỉ giao thức https.
+- Đẩy tới URL TƯỜNG MINH `https://github.com/<kho máy chủ cấp>.git` (không qua remote đã cấu hình), refspec
+  `HEAD:refs/heads/<nhánh máy chủ cấp>`; nhánh trả về phải khớp nhánh của lượt.
+- Token chỉ trong biến môi trường của đúng tiến trình `git push`, và bị THU HỒI ngay sau lượt đẩy
+  (`DELETE /installation/token`, trong `finally` — kể cả khi đẩy hỏng).
+
+Rủi ro còn lại, nói thẳng: token `contents: write` có thể gộp một PR đã qua `gates / gates` (ruleset `main` hiện 0 lượt
+duyệt) hoặc đẩy vào nhánh khác ngoài `main` trong vài giây nó còn sống — token GitHub không giới hạn được theo nhánh. Chặn
+cứng cần ruleset cho App chỉ ghi được `ai/worker/*` (việc cấu hình GitHub, không phải mã). Máy chủ chưa có danh tính bot ⇒
+worker dừng `BLOCKED` kèm câu chỉ đúng việc (ops `apply-agent-env`); credential CỦA MÁY chỉ khi bật tường minh
+`TECH_WORKER_ALLOW_MACHINE_GIT=1` (vẫn kiểm cấu hình cục bộ + tắt hook). Không bao giờ hỏi PAT.
 
 **Thu hồi khoá lộ của `dogfood-1` (0231).** Khoá đó đã hiện ra màn hình qua đường "dán vào PowerShell" cũ — đường này đã
 gỡ (`registerTechWorkerAction`). Migration đặt băm của một chuỗi ngẫu nhiên không ai giữ + `secret_revoked_at` + tắt worker
 + lý do «Khoá cũ có thể đã lộ — tạo lại bằng bộ cài», ghi một sự kiện `worker.secret_revoked`; điều kiện chặt
-(`key = 'dogfood-1'`, chưa từng nhịp tim, chưa từng ghi danh, chưa thu hồi, tạo trước mốc deploy), chạy lại không đổi gì,
+(`key = 'dogfood-1'`, chưa từng ghi danh qua bộ cài, chưa thu hồi, tạo trước mốc deploy — KHÔNG xét nhịp tim: khoá đã hiện
+ra màn hình là lộ dù đã dùng hay chưa), chạy lại không đổi gì,
 không xoá dòng. Sau deploy: chủ shop bấm «Cài worker trên máy Windows này» cho `dogfood-1`.
 
 Chủ shop vẫn phải tự làm: bấm đúp tệp (Windows SmartScreen có thể hỏi «vẫn chạy?» vì tệp tải từ web); đăng nhập Claude
 một lần nếu được hỏi; trả lời có / không cho «tự chạy khi đăng nhập Windows». Máy không có winget thì phải tự cài Git /
-Node LTS (bộ cài nói rõ). Kiểm thử: `tests/tech-worker-onboarding.test.ts` (phân tích tĩnh bộ cài, không cần Windows).
+Node LTS (bộ cài nói rõ). Tắt worker cũng huỷ bộ cài đang chờ (đổi mã sẽ bật lại worker). Bộ cài / tệp gỡ chỉ dừng tiến
+trình theo tệp PID khi dòng lệnh của nó chứa thư mục của chính worker (PID có thể đã được Windows cấp lại). Kiểm thử:
+`tests/tech-worker-onboarding.test.ts` (phân tích tĩnh bộ cài, không cần Windows; git THẬT trên kho tạm cho lượt đẩy và bộ
+dọn cây).

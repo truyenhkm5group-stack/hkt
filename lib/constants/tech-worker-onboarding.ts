@@ -16,7 +16,7 @@
  *     cho bộ cài trong thân phản hồi. Khoá không bao giờ hiện cho người, không vào URL, không vào nhật ký.
  *   · Bộ cài cất khoá bằng DPAPI theo người dùng Windows (xem `lib/tech/worker-installer.ts`).
  */
-import { API_BILLING_ENV, TECH_LEASE, WORKER_BRANCH_PATTERN, workerLiveness, type TechExecutionProvider } from "@/lib/constants/tech-worker";
+import { API_BILLING_ENV, TECH_LEASE, workerLiveness, type TechExecutionProvider } from "@/lib/constants/tech-worker";
 
 /* ═════════════════════ MÃ GHI DANH ═════════════════════ */
 
@@ -110,30 +110,12 @@ export function workerStartupBlockers(provider: TechExecutionProvider, env: Reco
 
 /* ═════════════════════ ĐẨY NHÁNH BẰNG TOKEN NGẮN HẠN ═════════════════════ */
 
-/** Tên biến môi trường mang token đẩy — CHỈ có trong môi trường của đúng một tiến trình `git push`. */
-export const PUSH_TOKEN_ENV = "VNX_PUSH_TOKEN";
-
 /**
- * Tham số `git push` khi đẩy bằng token máy chủ cấp. Token KHÔNG có trong tham số (danh sách tiến trình đọc được tham
- * số), KHÔNG trong URL remote, KHÔNG ghi đĩa: trình trợ giúp credential là một hàm sh đọc biến môi trường. Dòng
- * `credential.helper=` rỗng ĐẦU TIÊN xoá mọi trình trợ giúp của máy (Git Credential Manager) — không thì GCM vừa có
- * thể đưa credential cá nhân của chủ shop ra, vừa LƯU token này lại sau khi đẩy thành công.
+ * Số token đẩy tối đa máy chủ cấp cho MỘT lượt chạy đang giữ lease. Một lượt đẩy đúng một lần; 3 đủ cho lỗi mạng
+ * thoáng qua, không đủ để biến một worker bị chiếm thành máy xin token liên tục. Đẩy an toàn ở
+ * `scripts/tech-worker/git-safety.ts`.
  */
-export function pushGitArgs(branch: string): string[] {
-  if (!WORKER_BRANCH_PATTERN.test(branch)) throw new Error(`Worker chỉ đẩy nhánh ai/worker/* (thấy "${branch}")`);
-  return [
-    "-c",
-    "credential.helper=",
-    "-c",
-    `credential.helper=!f() { echo username=x-access-token; echo "password=$${PUSH_TOKEN_ENV}"; }; f`,
-    "-c",
-    "core.askPass=",
-    "push",
-    "-q",
-    "origin",
-    `${branch}:refs/heads/${branch}`,
-  ];
-}
+export const PUSH_TOKENS_PER_RUN = 3;
 
 /* ═════════════════════ BÁO CÁO TỰ KIỂM (CHẨN ĐOÁN) ═════════════════════ */
 

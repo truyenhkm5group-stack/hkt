@@ -115,6 +115,13 @@ export async function setTechWorkerEnabled(input: { workerId: string; enabled: b
     .where(eq(schema.techWorkers.id, input.workerId))
     .returning({ id: schema.techWorkers.id });
   if (!row) return { error: "Không tìm thấy worker." };
+  // Tắt ⇒ bộ cài đang chờ (mã ghi danh còn hạn) cũng chết: đổi mã sẽ BẬT lại worker, nên để mã sống là để tắt vô nghĩa.
+  if (!input.enabled) {
+    await db
+      .update(schema.techWorkerEnrollments)
+      .set({ revokedAt: new Date() })
+      .where(and(eq(schema.techWorkerEnrollments.workerId, row.id), sql`${schema.techWorkerEnrollments.usedAt} IS NULL AND ${schema.techWorkerEnrollments.revokedAt} IS NULL`));
+  }
   await recordTechEvent(db, { name: input.enabled ? "worker.enabled" : "worker.disabled", subjectType: "WORKER", subjectId: row.id, payload: { reason: input.reason ?? "" } }, actor);
   return { ok: true };
 }

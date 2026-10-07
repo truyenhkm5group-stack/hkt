@@ -22,17 +22,15 @@
  * Không chạy được việc ⇒ báo `BLOCKED` / `NEEDS_OWNER` kèm lý do; không bao giờ chờ một lời nhắc tương tác.
  */
 import { execFileSync, spawn } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { TECH_OWNER_ESCALATIONS, type TechOwnerEscalation } from "@/lib/constants/tech";
 import { API_BILLING_ENV, TECH_LEASE, buildChildEnv, forbiddenTouched, isTechExecutionProvider, taskWorktreeDirName, type TechExecutionProvider, type TechRunOutcome } from "@/lib/constants/tech-worker";
 import {
-  PUSH_TOKEN_ENV,
   WORKER_EXIT,
   isTechRepairCommand,
   parseClaudeAuthStatus,
-  pushGitArgs,
   workerReadiness,
   workerStartupBlockers,
   type ClaudeAuthState,
@@ -41,6 +39,7 @@ import {
 } from "@/lib/constants/tech-worker-onboarding";
 import { buildAgentPrompt, gatesForTask, parseAgentResult, toolAllowlist } from "./tech-worker/brief";
 import { createAdapter, resolveClaudeBin, type ExecutionAdapter } from "./tech-worker/adapters";
+import { pruneWorkerWorktrees, pushConfigViolations, pushSandbox, revokeInstallationToken, safePush } from "./tech-worker/git-safety";
 
 const VERSION = "tech-worker/1";
 const args = new Set(process.argv.slice(2));
@@ -336,27 +335,31 @@ async function execute(adapter: ExecutionAdapter, provider: TechExecutionProvide
 /* ═════════════════════ ĐẨY NHÁNH (docs mục 15) ═════════════════════ */
 
 /**
- * Đẩy nhánh của lượt. Mặc định bằng token NGẮN HẠN máy chủ cấp cho đúng lượt này (bot `erp-agent`, chỉ `contents:
- * write`): token chỉ nằm trong biến môi trường của ĐÚNG một tiến trình `git push`, không trong tham số, không trong URL,
- * không ghi đĩa; mọi trình trợ giúp credential của máy bị tắt cho lượt đẩy đó (`pushGitArgs`). Máy chủ chưa có danh tính
- * bot ⇒ chỉ dùng credential CỦA MÁY khi `TECH_WORKER_ALLOW_MACHINE_GIT=1` được bật tường minh — không thì BLOCKED kèm
- * câu nói rõ ai phải làm gì. Không bao giờ hỏi token cá nhân.
+ * Đẩy nhánh của lượt bằng token NGẮN HẠN máy chủ cấp cho đúng lượt này (bot `erp-agent`, chỉ `contents: write`), qua
+ * `safePush` (scripts/tech-worker/git-safety.ts): không đọc cấu hình hệ thống / toàn cục, TỪ CHỐI khi `.git/config` có
+ * khoá nguy hiểm (mã trong cổng có thể đã cài hook / pushurl / insteadOf / proxy), hook trỏ vào thư mục rỗng, helper chỉ
+ * gắn github.com, URL + nhánh do MÁY CHỦ cấp. Token bị THU HỒI ngay sau lượt đẩy, dù đẩy được hay không.
+ * Máy chủ chưa có danh tính bot ⇒ credential CỦA MÁY chỉ khi `TECH_WORKER_ALLOW_MACHINE_GIT=1` bật tường minh (vẫn kiểm
+ * cấu hình cục bộ + tắt hook) — không thì BLOCKED kèm câu nói rõ ai phải làm gì. Không bao giờ hỏi token cá nhân.
  */
 async function pushBranch(t: Claimed, dir: string): Promise<{ ok: true } | { ok: false; error: string }> {
-  const r = await api<{ ok?: true; token?: string; error?: string; detail?: string }>("push-credential", { runId: t.runId, leaseGeneration: t.leaseGeneration });
+  const r = await api<{ ok?: true; token?: string; repo?: string; branch?: string; error?: string; detail?: string }>("push-credential", { runId: t.runId, leaseGeneration: t.leaseGeneration });
   if (r.status === 200 && r.data.token) {
-    const env: Record<string, string> = { ...buildChildEnv("SUBSCRIPTION_CLAUDE_CODE", process.env, null), GIT_TERMINAL_PROMPT: "0", GCM_INTERACTIVE: "never" };
-    env[PUSH_TOKEN_ENV] = r.data.token;
+    const token = r.data.token;
     try {
-      execFileSync("git", pushGitArgs(t.branch), { cwd: dir, env: env as NodeJS.ProcessEnv, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 5 * 60_000, windowsHide: true });
-      return { ok: true };
-    } catch (e) {
-      const msg = e instanceof Error ? e.message.split("\n").slice(0, 3).join(" ").slice(0, 400) : "lỗi";
-      return { ok: false, error: `git push bằng token bot thất bại: ${msg.split(r.data.token).join("[đã che]")}` };
+      if (r.data.branch !== t.branch) return { ok: false, error: "Máy chủ cấp token cho nhánh khác nhánh của lượt — không đẩy." };
+      if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(r.data.repo ?? "")) return { ok: false, error: "Máy chủ không cho biết kho đích hợp lệ — không đẩy." };
+      return safePush({ dir, branch: t.branch, url: `https://github.com/${r.data.repo}.git`, token, root: workRoot(), baseEnv: buildChildEnv("SUBSCRIPTION_CLAUDE_CODE", process.env, null) });
+    } finally {
+      // Token không sống quá lượt đẩy — thu hồi ngay, kể cả khi đẩy hỏng.
+      if (!(await revokeInstallationToken(token))) log("chưa thu hồi được token đẩy (sẽ tự hết hạn ≤ 60 phút)");
     }
   }
   if (r.data.error === "NOT_CONFIGURED" && cfg.allowMachineGit) {
-    git(dir, "push", "-q", "origin", `${t.branch}:${t.branch}`);
+    const sai = pushConfigViolations(git(dir, "config", "--local", "--list"));
+    if (sai.length) return { ok: false, error: `Cấu hình git cục bộ có khoá nguy hiểm — KHÔNG đẩy: ${sai.join(", ")}` };
+    const { hooksDir } = pushSandbox(workRoot());
+    git(dir, "-c", `core.hooksPath=${hooksDir}`, "push", "--no-verify", "-q", "origin", `HEAD:refs/heads/${t.branch}`);
     return { ok: true };
   }
   if (r.data.error === "NOT_CONFIGURED") {
@@ -440,33 +443,15 @@ function workRoot(): string {
   return cfg.root || path.dirname(path.resolve(cfg.repo));
 }
 
-/** Gỡ cây `wt-tech-*` không thuộc lượt nào đang chạy — nhánh giữ nguyên (bằng chứng). */
-function pruneWorktrees(): number {
-  try {
-    git(cfg.repo, "worktree", "prune");
-  } catch {
-    /* tiếp */
-  }
-  const root = workRoot();
-  if (!existsSync(root)) return 0;
-  const giu = new Set([...active.values()].map((a) => taskWorktreeDirName(a.task.code, a.task.leaseGeneration)));
-  let n = 0;
-  for (const d of readdirSync(root)) {
-    if (!/^wt-tech-[a-z0-9-]+$/.test(d) || giu.has(d)) continue;
-    const full = path.join(root, d);
-    try {
-      git(cfg.repo, "worktree", "remove", "--force", full);
-    } catch {
-      rmSync(full, { recursive: true, force: true });
-    }
-    n += 1;
-  }
-  try {
-    git(cfg.repo, "worktree", "prune");
-  } catch {
-    /* tiếp */
-  }
-  return n;
+/**
+ * Dọn cây cũ — CHỈ khi có `TECH_WORKER_ROOT` (bộ cài đặt; chạy tay thiếu ⇒ không dọn gì, vì gốc mặc định là thư mục cha
+ * của kho, nơi có cây của NGƯỜI). Luật chọn cây + kiểm sạch / đã đẩy ở `pruneWorkerWorktrees` (git-safety.ts).
+ */
+function pruneWorktrees(): { removed: string[]; skipped: string[] } {
+  const activeDirs = [...active.values()].map((a) => path.join(workRoot(), taskWorktreeDirName(a.task.code, a.task.leaseGeneration)));
+  const r = pruneWorkerWorktrees({ repo: cfg.repo, root: cfg.root, activeDirs });
+  if (r.skipped.length) lastError = `dọn cây: bỏ qua ${r.skipped.join(" · ")}`.slice(0, 500);
+  return r;
 }
 
 let ctx: { adapter: ExecutionAdapter; provider: TechExecutionProvider } | null = null;
@@ -486,7 +471,7 @@ async function runRepair(cmd: TechRepairCommand) {
       return;
     case "PRUNE_WORKTREES": {
       const n = pruneWorktrees();
-      log(`đã dọn ${n} cây làm việc cũ`);
+      log(`đã dọn ${n.removed.length} cây làm việc cũ${n.skipped.length ? ` · bỏ qua: ${n.skipped.join(" · ")}` : ""}`);
       diag = await selfCheck(ctx.adapter);
       diagDirty = true;
       return;

@@ -167,7 +167,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ op: string
         const p = z.object(fence).strict().safeParse(body);
         if (!p.success) return NextResponse.json({ error: p.error.issues[0]?.message ?? "bad request" }, { status: 400 });
         const r = await issueWorkerPushToken(worker, p.data);
-        if ("error" in r) return NextResponse.json(r, { status: r.error === "NOT_CONFIGURED" ? 503 : FENCE_ERRORS.has(r.error) ? 409 : 422 });
+        if ("error" in r) return NextResponse.json(r, { status: r.error === "NOT_CONFIGURED" ? 503 : r.error === "PUSH_TOKEN_LIMIT" ? 429 : FENCE_ERRORS.has(r.error) ? 409 : 422 });
         // Token NGẮN HẠN trong thân phản hồi — không ghi nhật ký, không cache.
         return NextResponse.json(r, { headers: { "cache-control": "no-store" } });
       }

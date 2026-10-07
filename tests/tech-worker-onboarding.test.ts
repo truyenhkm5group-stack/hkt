@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { generateKeyPairSync } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { eq, like, sql } from "drizzle-orm";
 import { NextRequest } from "next/server";
@@ -17,8 +19,8 @@ import {
   enrollmentUsable,
   isTechRepairCommand,
   onboardingProgress,
+  PUSH_TOKENS_PER_RUN,
   parseClaudeAuthStatus,
-  pushGitArgs,
   redactSecrets,
   sanitizeWorkerDiagnostics,
   workerReadiness,
@@ -40,7 +42,8 @@ import {
   rotateWorkerSecret,
   takeWorkerRepair,
 } from "@/lib/tech/worker-onboarding";
-import { authenticateTechWorker, claimNextTechTask, registerTechWorker } from "@/lib/tech/worker-service";
+import { authenticateTechWorker, claimNextTechTask, registerTechWorker, setTechWorkerEnabled } from "@/lib/tech/worker-service";
+import { PUSH_URL_PATTERN, buildPushArgs, parseWorktreeList, pruneCandidates, pruneWorkerWorktrees, pushConfigViolations, pushEnv, pushSandbox, safePush } from "../scripts/tech-worker/git-safety";
 
 /**
  * ═══════════ CÀI WORKER MỘT NÚT (docs/tech-control-plane/README.md mục 15) ═══════════
@@ -164,13 +167,50 @@ export function testTechWorkerOnboardingPure() {
     assert.deepEqual([...tap].sort(), [...TECH_REPAIR_COMMANDS].sort(), "CHECK ở CSDL phải đúng bằng danh sách lệnh sửa");
   }
 
-  // 1.7 Đẩy nhánh: token KHÔNG trong tham số; trình trợ giúp của máy bị xoá trước; chỉ nhánh ai/worker/*.
-  const args = pushGitArgs("ai/worker/TECH-12-a2");
-  assert.equal(args[1], "credential.helper=", "dòng ĐẦU phải xoá mọi trình trợ giúp của máy (GCM)");
-  assert.ok(args.some((a) => a.includes("$VNX_PUSH_TOKEN")), "token đọc từ biến môi trường của tiến trình git");
-  assert.ok(!args.some((a) => /ghs_|github_pat_|x-access-token:[^@\s]*@/.test(a)), "không tham số nào mang token / URL có token");
-  assert.equal(args.at(-1), "ai/worker/TECH-12-a2:refs/heads/ai/worker/TECH-12-a2");
-  for (const xau of ["main", "claude/x", "ai/worker/../main", "ai/worker/TECH-1"]) assert.throws(() => pushGitArgs(xau), /ai\/worker/);
+  // 1.7 Đẩy nhánh (review bảo mật PR #631): hook trỏ thư mục rỗng, helper chung bị xoá, helper CHỈ gắn github.com, không
+  // proxy, TLS bật, chỉ https, URL + refspec tường minh, token chỉ ở biến môi trường.
+  const args = buildPushArgs({ branch: "ai/worker/TECH-12-a2", url: "https://github.com/a/b.git", hooksDir: "/tmp/rong" });
+  const cfgs = args.filter((_, i) => args[i - 1] === "-c");
+  assert.ok(cfgs.includes("core.hooksPath=/tmp/rong"), "hook của kho KHÔNG được chạy — trỏ thư mục rỗng của worker");
+  assert.ok(cfgs.indexOf("credential.helper=") >= 0 && cfgs.indexOf("credential.helper=") < cfgs.findIndex((c) => c.startsWith("credential.https://github.com.helper=")), "xoá helper chung TRƯỚC khi khai helper gắn host");
+  assert.ok(!cfgs.some((c) => /^credential\.helper=./.test(c)), "không helper nào không gắn host — không trao token cho mọi URL");
+  for (const c of ["http.proxy=", "https.proxy=", "http.sslVerify=true", "protocol.allow=never", "protocol.https.allow=always", "core.askPass="]) assert.ok(cfgs.includes(c), `thiếu -c ${c}`);
+  assert.ok(!cfgs.includes("protocol.file.allow=always"), "đường thật không mở giao thức file");
+  assert.ok(args.includes("--no-verify"));
+  assert.deepEqual(args.slice(-2), ["https://github.com/a/b.git", "HEAD:refs/heads/ai/worker/TECH-12-a2"], "URL + refspec tường minh, không qua remote đã cấu hình");
+  assert.ok(!args.includes("origin"));
+  assert.ok(!args.some((x) => /ghs_|github_pat_|x-access-token:[^@\s]*@/.test(x)), "không tham số nào mang token");
+  for (const xau of ["main", "claude/x", "ai/worker/../main", "ai/worker/TECH-1"]) assert.throws(() => buildPushArgs({ branch: xau, url: "https://github.com/a/b.git", hooksDir: "/x" }), /ai\/worker/);
+  assert.ok(PUSH_URL_PATTERN.test("https://github.com/truyenhkm5group-stack/hkt.git"));
+  for (const u of ["https://u:p@github.com/a/b.git", "https://evil.example/a/b.git", "http://github.com/a/b.git", "/tmp/repo.git"]) assert.ok(!PUSH_URL_PATTERN.test(u), u);
+  const env = pushEnv({ PATH: "/bin", GIT_ASKPASS: "/x", GIT_SSH_COMMAND: "y" }, "/tmp/rong.gitconfig", "ghs_x");
+  assert.equal(env.GIT_CONFIG_NOSYSTEM, "1");
+  assert.equal(env.GIT_CONFIG_GLOBAL, "/tmp/rong.gitconfig");
+  assert.ok(!("GIT_ASKPASS" in env) && !("GIT_SSH_COMMAND" in env));
+  // Cấu hình cục bộ nguy hiểm ⇒ từ chối; cấu hình bình thường của một kho ⇒ cho qua.
+  const binhThuong = "core.repositoryformatversion=0\ncore.filemode=false\ncore.bare=false\nremote.origin.url=https://github.com/a/b.git\nremote.origin.fetch=+refs/heads/*:refs/remotes/origin/*\nbranch.main.remote=origin\nuser.name=x";
+  assert.deepEqual(pushConfigViolations(binhThuong), []);
+  for (const xau of ["core.hookspath=/evil", "remote.origin.pushurl=https://evil/x.git", "url.https://evil/.insteadof=https://github.com/", "url.x.pushinsteadof=y", "http.proxy=http://evil:8080", "http.https://github.com/.extraheader=AUTHORIZATION: x", "credential.helper=store", "include.path=/tmp/x", "includeif.gitdir:/x.path=/y", "core.sshcommand=x", "protocol.ext.allow=always", "https.proxy=x"]) {
+    assert.equal(pushConfigViolations(`${binhThuong}\n${xau}`).length, 1, `phải từ chối: ${xau}`);
+  }
+  assert.ok(!pushConfigViolations("http.proxy=http://user:pw@evil:8080").join("").includes("pw@"), "chỉ in tên khoá, không in giá trị");
+  // Dọn cây: chỉ cây của worker dưới TECH_WORKER_ROOT, nhánh ai/worker/*; cây của người cạnh kho không bao giờ là ứng viên.
+  const goc = path.resolve("/may/vnx/work");
+  const ds = parseWorktreeList(
+    [
+      `worktree ${path.resolve("/may/vnx/repo")}`, "HEAD abc", "branch refs/heads/main", "",
+      `worktree ${path.resolve("/may/vnx/wt-tech-cp-workers")}`, "HEAD abc", "branch refs/heads/claude/cp-workers", "",
+      `worktree ${path.resolve("/may/vnx/wt-tech-tech-9-a1")}`, "HEAD abc", "branch refs/heads/ai/worker/TECH-9-a1", "",
+      `worktree ${path.join(goc, "wt-tech-lead-v2")}`, "HEAD abc", "branch refs/heads/claude/lead-v2", "",
+      `worktree ${path.join(goc, "wt-tech-tech-1-a1")}`, "HEAD abc", "branch refs/heads/ai/worker/TECH-1-a1", "",
+      `worktree ${path.join(goc, "wt-tech-tech-2-a1")}`, "HEAD abc", "branch refs/heads/ai/worker/TECH-2-a1", "",
+      `worktree ${path.join(goc, "khac")}`, "HEAD abc", "branch refs/heads/ai/worker/TECH-3-a1", "",
+      `worktree ${path.join(goc, "wt-tech-tach")}`, "HEAD abc", "detached", "",
+    ].join("\n"),
+  );
+  assert.equal(ds.length, 8);
+  assert.deepEqual(pruneCandidates(ds, { root: goc, activeDirs: [path.join(goc, "wt-tech-tech-2-a1")] }).map((e) => path.basename(e.path)), ["wt-tech-tech-1-a1"], "chỉ cây worker, dưới gốc, nhánh ai/worker/*, không đang chạy");
+  assert.deepEqual(pruneCandidates(ds, { root: "", activeDirs: [] }), [], "không có TECH_WORKER_ROOT ⇒ không dọn gì");
 
   // 1.8 Bốn bước: hàm của các cột + đồng hồ.
   const base: OnboardingInput = { provider: "SUBSCRIPTION_CLAUDE_CODE", enabled: true, removedAt: null, secretRevokedAt: null, enrolledAt: null, lastHeartbeatAt: null, pendingEnrollment: false, diagnostics: null };
@@ -243,6 +283,13 @@ function testInstallerStatic() {
   assert.doesNotMatch(l, /tw_|twe_/, "trình khởi động không mang bí mật");
   assert.doesNotMatch(l, /^'@/m, "trình khởi động không được kết thúc sớm here-string");
 
+  // Dừng tiến trình theo PID chỉ khi dòng lệnh chứa thư mục của chính worker — PID có thể đã được cấp lại.
+  for (const t of [f, buildWorkerUninstaller({ workerKey: "dogfood-1" })]) {
+    const stops = t.split("Stop-Process").length - 1;
+    assert.equal(stops, 1, "đúng một chỗ Stop-Process, bên trong Stop-WorkerPid");
+    assert.match(t, /CommandLine\.ToLower\(\)\.Contains\(\$Root\.ToLower\(\)\)\) \{ Stop-Process/);
+  }
+
   // Tệp gỡ: xoá tác vụ tự chạy + thư mục (gồm khoá DPAPI), không bí mật.
   const g = buildWorkerUninstaller({ workerKey: "dogfood-1" });
   assert.match(g, /Unregister-ScheduledTask/);
@@ -268,10 +315,20 @@ function testSourceGuards() {
   const iBlock = w.indexOf("workerStartupBlockers(provider, process.env)");
   assert.ok(iBlock > 0 && iBlock < w.indexOf('api<{ task: Claimed | null; reason?: string }>("claim")'), "worker kiểm ranh giới thanh toán TRƯỚC khi xin việc");
   assert.match(w.slice(iBlock, iBlock + 400), /process\.exit\(WORKER_EXIT\.BILLING_BOUNDARY\)/, "có khoá API ⇒ thoát, không chạy tiếp");
-  assert.match(w, /pushGitArgs\(t\.branch\)/, "đẩy nhánh qua tham số an toàn");
-  const dayMay = [...w.matchAll(/git\(dir, "push"/g)];
+  assert.match(w, /safePush\(\{ dir, branch: t\.branch, url: `https:\/\/github\.com\/\$\{r\.data\.repo\}\.git`/, "đẩy qua safePush tới URL máy chủ cấp");
+  const iPush = w.indexOf("async function pushBranch(");
+  const pb = w.slice(iPush, w.indexOf("\n}\n", iPush));
+  assert.match(pb, /finally \{[\s\S]*revokeInstallationToken\(token\)/, "token bị thu hồi trong finally — kể cả khi đẩy hỏng");
+  assert.match(pb, /r\.data\.branch !== t\.branch/, "nhánh máy chủ cấp phải khớp nhánh của lượt");
+  const dayMay = [...w.matchAll(/"push", "--no-verify", "-q", "origin"/g)];
   assert.equal(dayMay.length, 1, "chỉ MỘT chỗ đẩy bằng credential của máy");
-  assert.match(w.slice(Math.max(0, dayMay[0]!.index! - 120), dayMay[0]!.index!), /cfg\.allowMachineGit/, "đẩy bằng credential máy chỉ khi bật TƯỜNG MINH");
+  const truocDayMay = w.slice(Math.max(0, dayMay[0]!.index! - 600), dayMay[0]!.index!);
+  assert.match(truocDayMay, /cfg\.allowMachineGit/, "đẩy bằng credential máy chỉ khi bật TƯỜNG MINH");
+  assert.match(truocDayMay, /pushConfigViolations\(/, "đường credential máy vẫn kiểm cấu hình cục bộ");
+  assert.doesNotMatch(w, /"push", "-q", "origin"/, "không còn lượt đẩy nào đi qua remote mà không tắt hook");
+  assert.match(w, /pruneWorkerWorktrees\(\{ repo: cfg\.repo, root: cfg\.root,/, "dọn cây dùng ĐÚNG TECH_WORKER_ROOT, không gốc mặc định");
+  const gs = code(src("scripts/tech-worker/git-safety.ts"));
+  assert.doesNotMatch(gs, /rmSync|"--force"/, "bộ dọn cây không bao giờ xoá đệ quy / ép gỡ");
 
   const a = src("lib/actions/tech-worker-onboarding.ts");
   const fns = a.split("export async function ").slice(1);
@@ -328,6 +385,12 @@ export async function testTechWorkerOnboardingDb() {
     assert.deepEqual(await redeemWorkerEnrollment(E1.code, {}), { error: "INVALID" }, "mã chỉ dùng MỘT lần");
     const wa = (await db.query.techWorkers.findFirst({ where: eq(schema.techWorkers.id, ra.id) }))!;
     assert.ok(wa.enrolledAt && wa.enabled && !wa.secretRevokedAt && wa.host === "MAY-VAN-PHONG");
+    // `secret_revoked_at` chặn xác thực KỂ CẢ khi băm vẫn khớp; `removed_at` cũng vậy.
+    await db.update(schema.techWorkers).set({ secretRevokedAt: new Date() }).where(eq(schema.techWorkers.id, ra.id));
+    assert.equal(await authenticateTechWorker(`Bearer ${tok1}`), null, "khoá đã thu hồi ⇒ từ chối dù băm khớp");
+    await db.update(schema.techWorkers).set({ secretRevokedAt: null, removedAt: new Date() }).where(eq(schema.techWorkers.id, ra.id));
+    assert.equal(await authenticateTechWorker(`Bearer ${tok1}`), null, "worker đã gỡ ⇒ từ chối dù băm khớp");
+    await db.update(schema.techWorkers).set({ removedAt: null }).where(eq(schema.techWorkers.id, ra.id));
     assert.ok(!JSON.stringify(wa).includes(tok1.split(".")[1]!), "CSDL không giữ khoá thô");
 
     // 2.4 Sai worker: mã mới của A làm chết mã chưa dùng CŨ của A, không đụng mã của B; mã của B cho khoá của B.
@@ -342,6 +405,13 @@ export async function testTechWorkerOnboardingDb() {
     const dua = await Promise.all([redeemWorkerEnrollment(eA3.code, {}), redeemWorkerEnrollment(eA3.code, {})]);
     assert.equal(dua.filter((x) => "ok" in x).length, 1, "đổi mã đồng thời: đúng một lượt thắng");
     const tokA = (dua.find((x) => "ok" in x) as { data: { token: string } }).data.token;
+
+    // 2.4b Tắt worker ⇒ bộ cài đang chờ chết theo (đổi mã sẽ bật lại worker).
+    const eTat = (await createWorkerEnrollment(rb.id, chuShop)) as { code: string };
+    await setTechWorkerEnabled({ workerId: rb.id, enabled: false, reason: "kiểm thử" }, chuShop);
+    assert.deepEqual(await redeemWorkerEnrollment(eTat.code, {}), { error: "INVALID" }, "tắt worker ⇒ mã ghi danh còn hạn bị huỷ");
+    assert.equal((await db.query.techWorkers.findFirst({ where: eq(schema.techWorkers.id, rb.id) }))!.enabled, false, "mã chết thì worker vẫn tắt");
+    await setTechWorkerEnabled({ workerId: rb.id, enabled: true }, chuShop);
 
     // 2.5 Cửa ghi danh: mã trong URL bị lờ (401), mã trong thân ⇒ 200 + no-store; dùng lại ⇒ 401.
     const eR = (await createWorkerEnrollment(rb.id, chuShop)) as { code: string };
@@ -395,6 +465,11 @@ export async function testTechWorkerOnboardingDb() {
     }) as unknown as typeof fetch);
     const cap = await issueWorkerPushToken(wA, fence);
     assert.ok("ok" in cap && cap.token === "ghs_day_ngan_han_1");
+    assert.equal(cap.repo, "truyenhkm5group-stack/hkt", "máy chủ cấp URL kho tường minh");
+    assert.equal(cap.branch, nhan.task!.branch, "máy chủ cấp đúng nhánh của lượt");
+    for (let i = 1; i < PUSH_TOKENS_PER_RUN; i++) assert.ok("ok" in (await issueWorkerPushToken(wA, fence)));
+    const quaTran = await issueWorkerPushToken(wA, fence);
+    assert.ok("error" in quaTran && quaTran.error === "PUSH_TOKEN_LIMIT", `quá ${PUSH_TOKENS_PER_RUN} token mỗi lượt ⇒ từ chối`);
     assert.deepEqual(xin[0], { repositories: ["hkt"], permissions: { contents: "write" } }, "token đẩy: đúng một kho, CHỈ contents:write");
     const ev = await db.select().from(schema.techEvents).where(eq(schema.techEvents.name, "worker.push_token_issued"));
     assert.ok(ev.length >= 1 && !JSON.stringify(ev).includes("ghs_day_ngan_han_1"), "sự kiện không mang token");
@@ -432,6 +507,93 @@ export async function testTechWorkerOnboardingDb() {
     await db.delete(schema.users).where(eq(schema.users.id, `${PREFIX}-user`));
   }
   await testDogfoodRevocation();
+  testWorkerGitSafetyReal();
+}
+
+/**
+ * Git THẬT trên kho tạm (git là công cụ của chính kho này — CI và máy dev đều có): hook do mã trong cổng cài vào kho
+ * KHÔNG thấy token; cấu hình cục bộ nguy hiểm ⇒ từ chối đẩy; dọn cây không đụng cây của người / cây bẩn / chưa đẩy.
+ */
+function testWorkerGitSafetyReal() {
+  const tmp = mkdtempSync(path.join(os.tmpdir(), "two-git-"));
+  const baseEnv = buildChildEnv("SUBSCRIPTION_CLAUDE_CODE", process.env, null);
+  const sachEnv = pushEnv(baseEnv, pushSandbox(tmp).globalConfig, null);
+  const g = (cwd: string, ...a: string[]) => execFileSync("git", ["-c", "user.name=kiem-thu", "-c", "user.email=kiem-thu@example.com", "-c", "init.defaultBranch=main", "-c", "commit.gpgsign=false", ...a], { cwd, env: sachEnv as NodeJS.ProcessEnv, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+  try {
+    const bare = path.join(tmp, "remote.git");
+    const repo = path.join(tmp, "repo");
+    const root = path.join(tmp, "work");
+    mkdirSync(repo);
+    mkdirSync(root);
+    g(tmp, "init", "-q", "--bare", bare);
+    g(repo, "init", "-q");
+    writeFileSync(path.join(repo, "a.txt"), "a\n");
+    g(repo, "add", "a.txt");
+    g(repo, "commit", "-q", "-m", "goc");
+    g(repo, "remote", "add", "origin", bare);
+    const nhanh = "ai/worker/TECH-1-a1";
+    const wt = path.join(root, "wt-tech-tech-1-a1");
+    g(repo, "worktree", "add", "-q", "-b", nhanh, wt);
+    writeFileSync(path.join(wt, "b.txt"), "b\n");
+    g(wt, "add", "b.txt");
+    g(wt, "commit", "-q", "-m", "viec");
+    // Hook pre-push do "mã trong cổng" cài vào kho: ghi ra token nếu thấy.
+    const thay = path.join(tmp, "hook-saw.txt");
+    const hook = path.join(repo, ".git", "hooks", "pre-push");
+    writeFileSync(hook, `#!/bin/sh\necho "HOOK SAW TOKEN=$VNX_PUSH_TOKEN" > "${thay.split(path.sep).join("/")}"\nexit 0\n`);
+    chmodSync(hook, 0o755);
+    const TOKEN = "ghs_FAKE_TOKEN_kiem_thu_0000";
+
+    // (a) Chỉ riêng core.hooksPath (bỏ --no-verify) đã chặn hook — lớp thứ nhất tự đứng được.
+    const sb = pushSandbox(root);
+    const chiHooksPath = buildPushArgs({ branch: nhanh, url: bare, hooksDir: sb.hooksDir, allowFileProtocol: true }).filter((x) => x !== "--no-verify");
+    execFileSync("git", chiHooksPath, { cwd: wt, env: pushEnv(baseEnv, sb.globalConfig, TOKEN) as NodeJS.ProcessEnv, stdio: "ignore" });
+    assert.ok(!existsSync(thay), "hook của kho KHÔNG được chạy trong lượt đẩy (core.hooksPath → thư mục rỗng)");
+
+    // (b) Đường đầy đủ: đẩy được, hook không thấy token.
+    writeFileSync(path.join(wt, "c.txt"), "c\n");
+    g(wt, "add", "c.txt");
+    g(wt, "commit", "-q", "-m", "viec 2");
+    const r = safePush({ dir: wt, branch: nhanh, url: bare, token: TOKEN, root, baseEnv, allowLocalUrl: true });
+    assert.deepEqual(r, { ok: true });
+    assert.equal(g(tmp, `--git-dir=${bare}`, "rev-parse", `refs/heads/${nhanh}`), g(wt, "rev-parse", "HEAD"), "nhánh lên remote đúng commit");
+    assert.ok(!existsSync(thay), "hook KHÔNG thấy token");
+    assert.deepEqual(safePush({ dir: wt, branch: nhanh, url: "https://evil.example/a/b.git", token: TOKEN, root, baseEnv }).ok, false, "URL ngoài github.com bị từ chối");
+
+    // (c) Cấu hình cục bộ nguy hiểm ⇒ từ chối đẩy, không chạy git push.
+    for (const [k, v] of [["core.hooksPath", path.join(tmp, "evil")], ["remote.origin.pushurl", "https://evil.example/x.git"], ["url.https://evil.example/.insteadOf", "https://github.com/"], ["http.proxy", "http://127.0.0.1:9"], ["include.path", path.join(tmp, "x.cfg")]] as const) {
+      g(repo, "config", "--local", k, v);
+      const tu = safePush({ dir: wt, branch: nhanh, url: bare, token: TOKEN, root, baseEnv, allowLocalUrl: true });
+      assert.ok(!tu.ok && tu.error.toLowerCase().includes(k.toLowerCase().split(".").slice(-1)[0]!), `${k} cục bộ ⇒ từ chối đẩy`);
+      assert.ok(!tu.ok && !tu.error.includes(v), "câu lỗi không in giá trị cấu hình");
+      g(repo, "config", "--local", "--unset", k);
+    }
+
+    // (d) Dọn cây: cây người cạnh kho (bẩn), cây worker bẩn, cây worker chưa đẩy ⇒ KHÔNG đụng; cây worker sạch đã đẩy ⇒ gỡ.
+    const nguoi = path.join(tmp, "wt-tech-lead-v2");
+    g(repo, "worktree", "add", "-q", "-b", "claude/lead-v2", nguoi);
+    writeFileSync(path.join(nguoi, "dang-lam.txt"), "việc chưa commit của người\n");
+    const ban = path.join(root, "wt-tech-tech-2-a1");
+    g(repo, "worktree", "add", "-q", "-b", "ai/worker/TECH-2-a1", ban);
+    writeFileSync(path.join(ban, "chua-commit.txt"), "x\n");
+    const chuaDay = path.join(root, "wt-tech-tech-3-a1");
+    g(repo, "worktree", "add", "-q", "-b", "ai/worker/TECH-3-a1", chuaDay);
+    writeFileSync(path.join(chuaDay, "d.txt"), "d\n");
+    g(chuaDay, "add", "d.txt");
+    g(chuaDay, "commit", "-q", "-m", "chua day");
+    assert.deepEqual(pruneWorkerWorktrees({ repo, root: "", activeDirs: [], env: sachEnv }).removed, [], "không có TECH_WORKER_ROOT ⇒ không dọn gì");
+    const don = pruneWorkerWorktrees({ repo, root, activeDirs: [], env: sachEnv });
+    assert.deepEqual(don.removed, ["wt-tech-tech-1-a1"], `chỉ gỡ cây worker sạch đã đẩy — ${JSON.stringify(don)}`);
+    assert.ok(existsSync(path.join(nguoi, "dang-lam.txt")), "cây của NGƯỜI cạnh kho còn nguyên việc chưa commit");
+    assert.ok(existsSync(path.join(ban, "chua-commit.txt")), "cây worker còn thay đổi chưa commit ⇒ giữ nguyên");
+    assert.ok(existsSync(chuaDay), "cây worker còn commit chưa đẩy ⇒ giữ nguyên");
+    assert.equal(don.skipped.length, 2);
+    assert.ok(don.skipped.some((x) => x.startsWith("wt-tech-tech-2-a1: còn thay đổi chưa commit")), `cây bẩn phải bị CHÍNH bộ dọn nhận ra: ${JSON.stringify(don.skipped)}`);
+    assert.ok(don.skipped.some((x) => x.startsWith("wt-tech-tech-3-a1: còn commit chưa đẩy")));
+    assert.ok(!existsSync(wt));
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
 }
 
 /**
@@ -450,23 +612,21 @@ async function testDogfoodRevocation() {
   const hashCu = "0".repeat(64);
   const [w] = await db
     .insert(schema.techWorkers)
-    .values({ key: "dogfood-1", name: "dogfood-1", provider: "SUBSCRIPTION_CLAUDE_CODE", capabilities: ["write-docs"], maxConcurrency: 1, secretHash: hashCu, createdAt: new Date(Date.now() - 3600_000), lastHeartbeatAt: new Date() })
+    .values({ key: "dogfood-1", name: "dogfood-1", provider: "SUBSCRIPTION_CLAUDE_CODE", capabilities: ["write-docs"], maxConcurrency: 1, secretHash: hashCu, createdAt: new Date(Date.now() - 3600_000), enrolledAt: new Date() })
     .returning({ id: schema.techWorkers.id });
   const doc = async () => (await db.query.techWorkers.findFirst({ where: eq(schema.techWorkers.id, w.id) }))!;
   const suKien = async () => (await db.select().from(schema.techEvents).where(eq(schema.techEvents.subjectId, w.id))).filter((e) => e.name === "worker.secret_revoked").length;
   try {
     await db.execute(sql.raw(cau!));
-    assert.equal((await doc()).secretHash, hashCu, "đã từng gửi nhịp tim ⇒ KHÔNG thu hồi");
-    await db.update(schema.techWorkers).set({ lastHeartbeatAt: null, enrolledAt: new Date() }).where(eq(schema.techWorkers.id, w.id));
-    await db.execute(sql.raw(cau!));
-    assert.equal((await doc()).secretHash, hashCu, "đã ghi danh bằng bộ cài ⇒ KHÔNG thu hồi");
+    assert.equal((await doc()).secretHash, hashCu, "đã ghi danh bằng bộ cài (khoá mới) ⇒ KHÔNG thu hồi");
     await db.update(schema.techWorkers).set({ enrolledAt: null, createdAt: new Date(Date.now() + 3600_000) }).where(eq(schema.techWorkers.id, w.id));
     await db.execute(sql.raw(cau!));
     assert.equal((await doc()).secretHash, hashCu, "tạo SAU mốc deploy ⇒ KHÔNG thu hồi");
-    await db.update(schema.techWorkers).set({ createdAt: new Date(Date.now() - 3600_000) }).where(eq(schema.techWorkers.id, w.id));
+    // Đã từng nhịp tim KHÔNG miễn: khoá đã hiện ra màn hình là lộ, dù đã dùng hay chưa.
+    await db.update(schema.techWorkers).set({ createdAt: new Date(Date.now() - 3600_000), lastHeartbeatAt: new Date() }).where(eq(schema.techWorkers.id, w.id));
     await db.execute(sql.raw(cau!));
     const sau = await doc();
-    assert.notEqual(sau.secretHash, hashCu, "đủ điều kiện ⇒ khoá bị thu hồi");
+    assert.notEqual(sau.secretHash, hashCu, "đủ điều kiện (kể cả đã từng nhịp tim) ⇒ khoá bị thu hồi");
     assert.match(sau.secretHash, /^[0-9a-f]{64}$/, "băm mới vẫn thoả CHECK");
     assert.ok(sau.secretRevokedAt && !sau.enabled && /có thể đã lộ/.test(sau.disabledReason));
     assert.equal(await suKien(), 1, "ghi đúng một sự kiện");
