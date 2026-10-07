@@ -285,3 +285,4 @@
 {"at":"2026-10-07T07:33:58.318Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"tech-worker-onboarding","detail":"#631 cho feat/tech-worker-onboarding @ 69d6ee5e8958"}
 {"at":"2026-10-07T08:29:42.018Z","actor":"DESKTOP-56TH98Y:wt-worker-onboard","kind":"HANDOFF","mission":"tech-worker-onboarding","detail":"feat/tech-worker-onboarding @ a1971b9a97ef · 1 lệnh kiểm thử"}
 {"at":"2026-10-07T08:54:44.367Z","actor":"DESKTOP-56TH98Y:wt-takeover","kind":"HANDOFF","mission":"sales-human-takeover","detail":"feat/sales-human-takeover @ 758eb0810199 · 1 lệnh kiểm thử"}
+{"at":"2026-10-07T08:56:24.510Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MIGRATION_RELEASED","mission":"tech-worker-onboarding","detail":"0231 — Hoán đổi thứ tự gộp: sales-human-takeover sẵn sàng trước (PR_READY 758eb081), onboarding còn một vòng sửa bảo mật — onboarding nhận lại 0232"}
