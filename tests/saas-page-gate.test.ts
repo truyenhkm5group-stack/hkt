@@ -33,7 +33,8 @@ import { provisionOrganization } from "@/lib/platform/provision";
 import { sendReorderDigest } from "@/lib/reorder/digest";
 import { DEFAULT_SALES_CHATBOT_CONFIG, SALES_CHATBOT_SETTING_KEY } from "@/lib/sales-chatbot/config";
 import { AI_DOWN_HANDOFF_REASON, setSalesChatProviderForTests } from "@/lib/sales-chatbot/engine";
-import { catchUpFanpage, conversationFor, PAGE_REPLY, parsePancakeWebhook, processFanpageThread, receiveFanpageEvent, sendFanpageText } from "@/lib/sales-chatbot/fanpage";
+import { catchUpFanpage, conversationFor, fanpageBotSendersForTests, PAGE_REPLY, parsePancakeWebhook, processFanpageThread, receiveFanpageEvent, sendFanpageText } from "@/lib/sales-chatbot/fanpage";
+import { sendBotImages } from "@/lib/sales-chatbot/messenger";
 import { runSalesFollowups } from "@/lib/sales-chatbot/followup";
 import { DEAD_AI_DOWN_NOTE, requeueAiDownDeadLetters } from "@/lib/sales-chatbot/inbound-retry";
 import { learnLessons } from "@/lib/sales-chatbot/lessons";
@@ -41,9 +42,9 @@ import { LESSONS_SETTING_KEY } from "@/lib/sales-chatbot/lessons-shared";
 import { sendNewOrderAlerts } from "@/lib/sales-chatbot/new-order-alert";
 import { scoreCopilotSuggestions } from "@/lib/sales-chatbot/operating-mode";
 import { OPERATING_MODE_SETTING_KEY } from "@/lib/sales-chatbot/operating-mode-shared";
-import { runFanpageOrderSync } from "@/lib/sales-chatbot/order-sync";
+import { runFanpageOrderSync, syncFanpageThreadWhenQuiet } from "@/lib/sales-chatbot/order-sync";
 import { ORDER_SYNC_SETTING_KEY } from "@/lib/sales-chatbot/order-sync-shared";
-import { homeRuntimeIdleReason, pageRuntimeView, savePageRuntime } from "@/lib/sales-chatbot/page-runtime";
+import { homeRuntimeIdleReason, pageRuntimeView, savePageRuntime, setPageRuntimeReaderForTests } from "@/lib/sales-chatbot/page-runtime";
 import {
   PAGE_NOT_LIVE_SEND_ERROR,
   PAGE_OFF_NOTE,
@@ -60,6 +61,7 @@ import { setSettingJson } from "@/lib/settings";
 const goc = path.resolve(__dirname, "..");
 const PAGE = "9911223344556";
 const PAGE_TOKEN = "pancake_page_token_pg_gate_0123456789abcdef";
+const PAGE2 = "9911223344557";
 const KHACH = "pg-khach";
 const KHACH_PAGE = "8811223344556";
 const SECRET_KEY = "khoa-kiem-thu-cong-page-0123456789abcdefghijklmnopqrstuvwxyz";
@@ -214,6 +216,16 @@ async function kiemNha() {
       assert.equal(sentTo("pg-off"), 0, "chốt cuối chặn tin bot");
       assert.deepEqual(await sendFanpageText(PAGE, "pg-off", "Dạ em là nhân viên", { fetch: pancake.fetch }, { staffMessageId: "pg-staff-1" }), { ok: true });
       assert.equal(sentTo("pg-off"), 1, "tin nhân viên từ hộp thư ERP không qua cổng");
+      // (e2) gọi THẲNG các hàm gửi nội bộ của đường bot — chốt nằm trong chính chúng, không chỉ ở nơi gọi.
+      const callsDirect = pancake.calls.length;
+      assert.deepEqual(await fanpageBotSendersForTests.sendInbox(PAGE, "pg-off", "Chị ơi", pancake.fetch, "BOT"), { ok: false, error: PAGE_NOT_LIVE_SEND_ERROR });
+      assert.deepEqual(await fanpageBotSendersForTests.sendImages(PAGE, "pg-off", ["c1"], pancake.fetch), { ok: false, error: PAGE_NOT_LIVE_SEND_ERROR, ids: [] });
+      const cr = await fanpageBotSendersForTests.deliverCommentReply({ pageId: PAGE, threadId: "pg-off", commentId: "cmt-1", postId: "post-1", fromId: "cust-1", text: "Dạ em nhắn riêng ạ", imageIds: [], conversationId: "khong-co" }, { fetch: pancake.fetch });
+      assert.deepEqual(cr, { kind: "FAILED", reason: PAGE_NOT_LIVE_SEND_ERROR });
+      assert.deepEqual(await sendBotImages(PAGE, "pg-off", ["anh-1"], { fetch: pancake.fetch }), { ok: false, error: PAGE_NOT_LIVE_SEND_ERROR }, "ảnh bot qua Messenger");
+      assert.equal(pancake.calls.length, callsDirect, "hàm gửi nội bộ ở page OFF: không một lời gọi Pancake (kể cả lời đọc hộp thư)");
+      assert.equal((await fanpageBotSendersForTests.sendInbox(PAGE, "pg-off", "Dạ em là nhân viên", pancake.fetch, "STAFF")).ok, true, "STAFF không qua cổng");
+      assert.equal(sentTo("pg-off"), 2);
       // (f) ghi đơn từ hội thoại (công tắc riêng) ⇒ page không LIVE thì không đọc, không lên đơn
       await setSettingJson(ORDER_SYNC_SETTING_KEY, { enabled: true, enabledAt: new Date(Date.now() - 3_600_000).toISOString() });
       const callsOs = pancake.calls.length;
@@ -231,7 +243,7 @@ async function kiemNha() {
       await findMissedConversations(new Date(Date.now() - 3_600_000), new Date(Date.now() + 3_600_000));
       assert.equal(pancake.sent().length, postsBefore);
       assert.equal(aiCalls, 0, "danh sách rỗng ⇒ 0 lời gọi AI trên mọi đường");
-      assert.equal(pancake.sent().length, 1, "danh sách rỗng ⇒ 0 tin bot (một tin duy nhất là của nhân viên)");
+      assert.equal(pancake.sent().length, 2, "danh sách rỗng ⇒ 0 tin bot (hai tin duy nhất là của nhân viên)");
 
       /* ── Công tắc: quyền + nhật ký + LIVE đòi xác nhận ── */
       assert.ok("error" in (await savePageRuntime(viewer, PAGE, "SHADOW")), "người chỉ xem không đổi được");
@@ -270,6 +282,19 @@ async function kiemNha() {
       assert.ok(await homeRuntimeIdleReason(), "bóng không phải phục vụ khách");
       assert.equal(aiCalls, 1, "bóng: follow-up không gọi AI");
       assert.equal((await pageRuntimeView()).pages.find((p) => p.id === PAGE)?.shadowDrafts7d, 1);
+      // Bóng KHÔNG ghi đơn: cả lượt job lẫn lượt hẹn của webhook — 0 lời gọi Pancake, 0 đơn, 0 tin báo nhóm.
+      const deliveries = async () => Number((await db.select({ n: sql<number>`count(*)::int` }).from(schema.messagingDeliveries))[0].n);
+      const [callsSh, delivSh] = [pancake.calls.length, await deliveries()];
+      const osSh = await runFanpageOrderSync({ fetch: pancake.fetch });
+      assert.equal(osSh.checked, 0, JSON.stringify(osSh));
+      assert.match(osSh.detail.join(" "), /chưa page nào LIVE/, "bóng ⇒ nguồn của page bị bỏ khỏi ghi đơn");
+      const quiet = await syncFanpageThreadWhenQuiet(PAGE, "pg-sh", { fetch: pancake.fetch, sleep: async () => undefined, now: () => new Date(Date.now() + 30 * 60_000) });
+      assert.ok(quiet, "hội thoại đã yên ⇒ lượt hẹn có chạy");
+      assert.equal(quiet.checked, 0, JSON.stringify(quiet));
+      assert.match(quiet.detail.join(" "), /chưa page nào LIVE/);
+      assert.equal(pancake.calls.length, callsSh, "bóng ⇒ ghi đơn không đọc Pancake");
+      assert.equal(await orderCount(), ordersBefore, "bóng ⇒ 0 đơn từ ghi đơn");
+      assert.equal(await deliveries(), delivSh, "bóng ⇒ 0 tin báo nhóm");
 
       /* ── Ca 3 · LIVE ⇒ như khách ── */
       assert.ok("error" in (await savePageRuntime(admin, PAGE, "LIVE")), "LIVE thiếu xác nhận bot cũ ⇒ từ chối");
@@ -282,11 +307,32 @@ async function kiemNha() {
       assert.ok(r4.replies >= 1 && !r4.error, JSON.stringify(r4));
       assert.ok(sentTo("pg-live") >= 1, "LIVE ⇒ bot trả lời");
       assert.deepEqual(await sendFanpageText(PAGE, "pg-live", "Chị ơi", { fetch: pancake.fetch }), { ok: true }, "LIVE ⇒ chốt cuối cho qua");
-      assert.ok("ok" in (await savePageRuntime(admin, PAGE, "OFF")));
-      assert.equal((await pageRuntimeView()).pages.find((p) => p.id === PAGE)?.mode, "OFF", "về OFF");
+      // ĐỌC CẤU HÌNH HỎNG khi page đang LIVE ⇒ hẹp: 0 AI, 0 gửi trên xử lý tin lẫn chốt cuối.
+      setPageRuntimeReaderForTests(() => Promise.reject(new Error("CSDL tạm không đọc được")));
+      try {
+        const aiBefore = aiCalls;
+        assert.ok((await receiveFanpageEvent(ev(PAGE, "pg-e1", "Chả mực bao nhiêu?", "pg-err"))).queued);
+        const re = await processFanpageThread(PAGE, "pg-err", { fetch: pancake.fetch, now: later });
+        assert.equal(re.skipped, PAGE_OFF_NOTE, `đọc lỗi ⇒ OFF — ${JSON.stringify(re)}`);
+        assert.equal(aiCalls, aiBefore, "đọc lỗi ⇒ 0 lời gọi AI");
+        assert.equal(sentTo("pg-err"), 0, "đọc lỗi ⇒ 0 tin");
+        assert.deepEqual(await sendFanpageText(PAGE, "pg-err", "Chị ơi", { fetch: pancake.fetch }), { ok: false, error: PAGE_NOT_LIVE_SEND_ERROR });
+        assert.ok(await homeRuntimeIdleReason(), "đọc lỗi ⇒ việc không gắn page cũng dừng");
+      } finally {
+        setPageRuntimeReaderForTests(null);
+      }
+      // HAI LƯỢT LƯU ĐỒNG THỜI cho hai page: tắt PAGE và bóng PAGE2 — không lượt nào ghi lại bản cũ của page kia.
+      assert.ok(await conversationFor(PAGE2, "pg2-t1"), "page thứ hai có hội thoại ⇒ là page ứng viên");
+      const [offR, shR] = await Promise.all([savePageRuntime(admin, PAGE, "OFF"), savePageRuntime(admin, PAGE2, "SHADOW")]);
+      assert.ok("ok" in offR && "ok" in shR, JSON.stringify([offR, shR]));
+      const afterRace = await pageRuntimeView();
+      assert.equal(afterRace.pages.find((p) => p.id === PAGE)?.mode, "OFF", "page vừa TẮT không bị lượt lưu song song đưa về LIVE");
+      assert.equal(afterRace.pages.find((p) => p.id === PAGE2)?.mode, "SHADOW");
+      assert.ok("ok" in (await savePageRuntime(admin, PAGE2, "OFF")));
     } finally {
       // Dọn CSDL nhà: page thử, kết nối, nhật ký của bài, cài đặt chụp trước.
-      await db.delete(cv).where(eq(cv.pageId, PAGE));
+      setPageRuntimeReaderForTests(null);
+      await db.delete(cv).where(inArray(cv.pageId, [PAGE, PAGE2]));
       await db.delete(t).where(eq(t.pageId, PAGE));
       await db.delete(schema.salesCopilotSuggestions).where(eq(schema.salesCopilotSuggestions.pageId, PAGE));
       await db.delete(schema.orgConnections).where(eq(schema.orgConnections.connectorKey, "pancake-fanpage"));
@@ -369,9 +415,18 @@ function kiemMaNguon() {
     assert.ok(g < b.indexOf(firstSkip), `${file}: cổng đặt TRƯỚC bước bỏ qua vì page / nhân viên đã trả lời (bóng ở nhà phải soạn được dù bot cũ đã trả lời)`);
     assert.ok(g < b.indexOf("chatTurn("), `${file}: cổng đặt trước lượt AI`);
   }
-  // Hai hàm gửi tin BOT có chốt cuối.
-  assert.match(body(src("lib/sales-chatbot/fanpage.ts"), "export async function sendFanpageText("), /if \(!mark && \(await pageRuntimeMode\(pageId\)\) !== "LIVE"\) return \{ ok: false, error: PAGE_NOT_LIVE_SEND_ERROR \};/);
-  assert.match(body(src("lib/sales-chatbot/messenger.ts"), "export async function sendMessengerPageText("), /if \(!mark && \(await pageRuntimeMode\(pageId\)\) !== "LIVE"\) return \{ ok: false, error: PAGE_NOT_LIVE_SEND_ERROR \};/);
+  // Chốt cuối nằm TRONG các hàm gửi của đường bot (một hàm dùng chung `botSendAllowed`, đọc lỗi ⇒ không gửi).
+  const chot = /if \(!mark && !\(await botSendAllowed\(pageId\)\)\) return \{ ok: false, error: PAGE_NOT_LIVE_SEND_ERROR \};/;
+  assert.match(body(src("lib/sales-chatbot/fanpage.ts"), "export async function sendFanpageText("), chot);
+  assert.match(body(src("lib/sales-chatbot/messenger.ts"), "export async function sendMessengerPageText("), chot);
+  for (const fn of ["async function sendInbox(", "async function sendImages("]) assert.match(body(src("lib/sales-chatbot/fanpage.ts"), fn), /if \(who === "BOT" && !\(await botSendAllowed\(pageId\)\)\) return/, `fanpage ${fn}`);
+  const dcr = body(src("lib/sales-chatbot/fanpage.ts"), "async function deliverCommentReply(");
+  assert.ok(dcr.indexOf("await botSendAllowed(pageId)") > 0 && dcr.indexOf("await botSendAllowed(pageId)") < dcr.indexOf("privateReplyInbox("), "deliverCommentReply: chốt trước mọi lời gọi Pancake");
+  assert.match(body(src("lib/sales-chatbot/messenger.ts"), "export async function sendBotImages("), /if \(!\(await botSendAllowed\(pageId\)\)\) return \{ ok: false, error: PAGE_NOT_LIVE_SEND_ERROR \};/);
+  const pm = body(src("lib/sales-chatbot/messenger.ts"), "export async function processMessengerThread(");
+  assert.ok(pm.lastIndexOf("await botSendAllowed(pageId)", pm.indexOf("sendPrivateReply(")) > pm.indexOf("if (commentRow) {"), "Messenger: chốt ngay trước tin riêng trả lời bình luận");
+  const pz = body(src("lib/sales-chatbot/zalo.ts"), "export async function processZaloThread(");
+  assert.ok(pz.indexOf("await botSendAllowed(pageId)") > 0 && pz.indexOf("await botSendAllowed(pageId)") < pz.indexOf("zaloSendText("), "Zalo: chốt trước lời gửi tin bot");
   // Thử lại tin AI hỏng chỉ trả lời qua hai hàm xử lý đã có cổng.
   const retry = src("lib/sales-chatbot/retry-runner.ts");
   assert.deepEqual(

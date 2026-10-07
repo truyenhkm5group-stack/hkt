@@ -7,13 +7,17 @@
  *    ĐÚNG ba hàm xử lý đó nên cùng một cổng;
  *  · follow-up nhắc khách im lặng (`runSalesFollowups`, trước lời gọi AI);
  *  · ghi đơn từ hội thoại + tin xác nhận đặt lại (`runFanpageOrderSync`: nguồn của page không LIVE bị bỏ);
- *  · CHỐT CUỐI ở hai hàm gửi tin bot (`sendFanpageText` / `sendMessengerPageText` khi không mang dấu nhân viên) — đường nào
+ *  · CHỐT CUỐI (`botSendAllowed` — một hàm, đọc lỗi ⇒ không gửi) nằm TRONG mọi hàm gửi của đường bot: fanpage `sendInbox` /
+ *    `sendImages` (khai rõ BOT / STAFF) · `deliverCommentReply` · `sendFanpageText`; Messenger `sendMessengerPageText` ·
+ *    `sendBotImages` · tin riêng trả lời bình luận (`sendPrivateReply`); Zalo trước `zaloSendText` của lượt bot — đường nào
  *    quên hỏi cổng thì vẫn không gửi được;
- *  · việc không gắn page (tin sáng khách đến hạn mua lại · báo nhóm đơn mới · bot tự học) ⇒ `homeRuntimeIdleReason`.
+ *  · việc không gắn page (tin sáng khách đến hạn mua lại · báo nhóm đơn mới · bot tự học) ⇒ `homeRuntimeIdleReason`. Hai việc
+ *    đầu KHÔNG xét `cfg.enabled` (chỉ xét module + luật báo nhóm), nên ở nhà cổng này là thứ duy nhất giữ chúng im khi chưa page
+ *    nào LIVE.
  * Tin NHÂN VIÊN gửi từ hộp thư ERP không đi qua cổng: đó là người bấm gửi, không phải bot.
  * «Cứu hội thoại bỏ sót» (recovery.ts) chỉ ĐỌC — không có đường gửi để chặn.
  */
-import { and, gt, isNotNull, ne, sql } from "drizzle-orm";
+import { and, eq, gt, isNotNull, ne, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { audit } from "@/lib/audit";
 import { can, type SessionUser } from "@/lib/auth/session";
@@ -37,17 +41,23 @@ import {
   type PageRuntimeMode,
 } from "@/lib/sales-chatbot/page-runtime-shared";
 import { SALES_CHATBOT_MANAGE } from "@/lib/sales-chatbot/settings";
-import { setSettingJson } from "@/lib/settings";
 
 /** Khoá kết nối — chép ở đây (không import fanpage.ts / zalo.ts) để hai tệp đó import được tệp này mà không vòng. */
 const PANCAKE_FANPAGE_KEY = "pancake-fanpage";
 const MESSENGER_KEY = "facebook-messenger";
 const ZALO_KEY = "zalo-oa";
 
+/** Chỉ cho bài kiểm: thay lời đọc khoá cài đặt (để dựng ca «đọc lỗi»). `null` ⇒ đọc thật. */
+let readerForTests: (() => Promise<unknown>) | null = null;
+export function setPageRuntimeReaderForTests(fn: (() => Promise<unknown>) | null): void {
+  readerForTests = fn;
+}
+
 export async function loadPageRuntime(): Promise<{ isHome: boolean; map: PageRuntimeMap }> {
   const org = await currentOrganization();
   if (!org.isHome) return { isHome: false, map: {} };
-  return { isHome: true, map: parsePageRuntime(await readJsonSetting(PAGE_RUNTIME_SETTING_KEY)) };
+  const raw = readerForTests ? await readerForTests() : await readJsonSetting(PAGE_RUNTIME_SETTING_KEY);
+  return { isHome: true, map: parsePageRuntime(raw) };
 }
 
 /** Chế độ của `pageId` trong tổ chức NGỮ CẢNH. Lỗi đọc ⇒ OFF (hẹp) — khách cũng vậy: không biết tổ chức nào thì không gửi. */
@@ -58,6 +68,14 @@ export async function pageRuntimeMode(pageId: string | null | undefined): Promis
   } catch {
     return "OFF";
   }
+}
+
+/**
+ * Chốt dùng chung của MỌI hàm gửi tin bot (fanpage · Messenger · Zalo): chỉ page LIVE; đọc lỗi ⇒ `false` (không gửi). Khách
+ * luôn `true` khi đọc được tổ chức.
+ */
+export async function botSendAllowed(pageId: string | null | undefined): Promise<boolean> {
+  return (await pageRuntimeMode(pageId)) === "LIVE";
 }
 
 /** Nhà mà chưa page nào LIVE ⇒ lý do để BỎ một việc không gắn page; còn lại ⇒ `null` (cứ làm). Lỗi đọc ⇒ có lý do (hẹp). */
@@ -174,10 +192,26 @@ export async function savePageRuntime(user: SessionUser, pageId: unknown, mode: 
   if (mode === "LIVE" && opts.acknowledgeLegacyBot !== true) return { error: "Chuyển LIVE cần xác nhận bot cũ (chatbot/) đã thôi trả lời page này — nếu không khách nhận hai câu trả lời." };
   const before = map[pageId] ?? null;
   if ((before?.mode ?? "OFF") === mode) return { ok: true, message: `Page đang ở chế độ «${PAGE_RUNTIME_LABEL[mode]}».` };
-  const next: PageRuntimeMap = { ...map };
-  if (mode === "OFF") delete next[pageId];
-  else next[pageId] = { mode, updatedAt: now.toISOString(), updatedByEmail: user.email };
-  await setSettingJson(PAGE_RUNTIME_SETTING_KEY, next);
+  const entry = mode === "OFF" ? null : { mode, updatedAt: now.toISOString(), updatedByEmail: user.email };
+  // Ghi NGUYÊN TỬ đúng MỘT khoá page ngay trong câu lệnh (jsonb `||` / `-` trên giá trị đang có), không đọc–sửa–ghi cả bảng:
+  // hai lượt lưu đồng thời cho hai page khác nhau không bao giờ ghi lại bản cũ của page kia (vd đưa page vừa TẮT về LIVE mà
+  // không qua xác nhận). Giá trị đang lưu hỏng (không phải JSON) ⇒ báo lỗi, không ghi đè mù.
+  const s = schema.settings;
+  const current = sql`coalesce(nullif(${s.value}, '')::jsonb, '{}'::jsonb)`;
+  try {
+    const db = await getDb();
+    if (entry === null) await db.update(s).set({ value: sql`(${current} - ${pageId}::text)::text`, updatedAt: now }).where(eq(s.key, PAGE_RUNTIME_SETTING_KEY));
+    else {
+      const patch = JSON.stringify({ [pageId]: entry });
+      await db
+        .insert(s)
+        .values({ key: PAGE_RUNTIME_SETTING_KEY, value: patch })
+        .onConflictDoUpdate({ target: s.key, set: { value: sql`(${current} || ${patch}::jsonb)::text`, updatedAt: now } });
+    }
+  } catch {
+    return { error: "Không ghi được danh sách page (giá trị đang lưu hỏng?) — báo người vận hành." };
+  }
+  const next: PageRuntimeMap = { [pageId]: entry ?? { mode: "OFF", updatedAt: null, updatedByEmail: null } };
   await audit({
     userId: user.id,
     userEmail: user.email,

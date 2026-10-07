@@ -34,7 +34,8 @@ import { recordConversationEvent } from "@/lib/sales-chatbot/events";
 import { COPILOT_NOTE, erpStaffEchoCond, HUMAN_TAKEOVER_MINUTES, MEDIA_ONLY_NOTE, MEDIA_ONLY_TEXT, normalizeEcho, OBSERVE_HUMAN_ARM_NOTE, OBSERVE_NOTE, PAGE_REPLY, STAFF_IMAGE_MARK, STAFF_OUT_PREFIX, staffOutRowId, type StaffMark } from "@/lib/sales-chatbot/fanpage";
 import { draftCopilotSuggestion, loadModeConfig, pinArm } from "@/lib/sales-chatbot/operating-mode";
 import { readPinnedArm, replyGate } from "@/lib/sales-chatbot/operating-mode-shared";
-import { inboundPageGate } from "@/lib/sales-chatbot/page-runtime";
+import { botSendAllowed, inboundPageGate } from "@/lib/sales-chatbot/page-runtime";
+import { PAGE_NOT_LIVE_SEND_ERROR } from "@/lib/sales-chatbot/page-runtime-shared";
 import { applyConversationControl, controlOf, controlSkipNote } from "@/lib/sales-chatbot/conversation-control-shared";
 import { botMaySend, captureSendSnapshot } from "@/lib/sales-chatbot/conversation-control";
 
@@ -375,7 +376,10 @@ export async function processZaloThread(userId: string, deps: ZaloDepsAll = {}):
     const replies = turn.view.messages.slice(before).filter((m) => m.role === "assistant" && m.text.trim());
     let sendError: string | null = null;
     let yielded: string | null = null;
-    const token = replies.length ? await zaloAccessToken(deps) : null;
+    // Chốt cổng page (page-runtime.ts) trước lời lấy token / gửi: tin bot chỉ đi khi «page» Zalo LIVE.
+    const allowed = replies.length ? await botSendAllowed(pageId) : true;
+    if (!allowed) sendError = PAGE_NOT_LIVE_SEND_ERROR;
+    const token = replies.length && allowed ? await zaloAccessToken(deps) : null;
     if (token && !token.ok) sendError = token.error;
     for (const r of token?.ok ? replies : []) {
       // Người vừa trả lời / tiếp quản trong lúc bot soạn ⇒ dừng, KHÔNG gửi phần còn lại.
