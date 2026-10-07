@@ -16,7 +16,12 @@ import { findOrganization } from "@/lib/platform/organizations";
  */
 
 export const WORKFLOWS_PAUSED_FLAG = "workflows.paused";
-export const ORG_FLAG_KEYS = [WORKFLOWS_PAUSED_FLAG] as const;
+/**
+ * Số dư AI + nạp QR (0235 · docs/saas/AI_BALANCE_V1.md): mặc định TẮT ⇒ màn khách không hiện, không tạo được phiếu nạp.
+ * Người vận hành bật từng tổ chức (canary) — tiền về mang mã `ERPNAP…` vẫn được cộng kể cả khi cờ đã tắt lại sau đó.
+ */
+export const AI_BALANCE_FLAG = "ai_balance.enabled";
+export const ORG_FLAG_KEYS = [WORKFLOWS_PAUSED_FLAG, AI_BALANCE_FLAG] as const;
 export type OrgFlagKey = (typeof ORG_FLAG_KEYS)[number];
 
 export type OrgFlag = { enabled: boolean; updatedAt: Date; updatedBy: string | null };

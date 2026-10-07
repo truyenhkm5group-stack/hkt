@@ -22,7 +22,8 @@ import { buildStatement, type PlanRef, type Statement, type StatementWorkspace }
 import { getPlanUsage } from "@/lib/entitlements/check";
 import { readAiCustomerUsage, type AiCustomerReading } from "@/lib/pricing/ai-customer";
 import { loadPriceBook } from "@/lib/pricing/price-book";
-import { computeOverage, currentCatalogVersion, fairUseVerdict, priceOf, resolveOrgVersion, yearlyAmountVnd, type FairUseVerdict, type OverageResult, type PlanPrice, type PriceBook } from "@/lib/pricing/versions";
+import { aiBalanceEnabled } from "@/lib/billing/ai-balance";
+import { computeOverage, currentCatalogVersion, fairUseVerdict, overageWithoutAiCustomers, priceOf, resolveOrgVersion, yearlyAmountVnd, type FairUseVerdict, type OverageResult, type PlanPrice, type PriceBook } from "@/lib/pricing/versions";
 import { periodRange } from "@/lib/saas/ledger";
 
 export type PlanInfo = PlanRef & { addonPrices: unknown; productKeys: string[] | null; commercial: unknown };
@@ -174,6 +175,9 @@ export async function loadCommercialSnapshot(opts: { periodMonth?: string; now?:
       const conv = wsUsage.find((u) => u.productKey === "chotdon" && u.metric === "conversations_started")?.value ?? null;
       const replies = wsUsage.find((u) => u.productKey === "chotdon" && u.metric === "bot_messages")?.value ?? null;
       overage = computeOverage(price, { aiCustomers: ac?.value ?? null, aiCustomersCoverage: ac?.coverage ?? "NOT_MEASURED", fanpages, users: usersUsed, aiConversations: conv, aiReplies: replies });
+      // Số dư AI (0235): khách AI vượt phần gồm đã trừ thẳng vào số dư — dòng ấy không vào bảng kê kỳ (bảng kê chốt là bất biến,
+      // thu hai lần ở đây không sửa lại được). Tắt / bật cờ GIỮA tháng: bảng kê theo trạng thái cờ lúc dựng — xem AI_BALANCE_V1 §6.
+      if (await aiBalanceEnabled(w.code).catch(() => false)) overage = overageWithoutAiCustomers(overage);
       fairUse = fairUseVerdict({ aiConversations: conv, aiReplies: replies }, price.included, version.version?.alerts);
     }
     return {

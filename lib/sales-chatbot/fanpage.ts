@@ -1061,7 +1061,9 @@ export async function processFanpageThread(pageId: string, threadId: string, dep
     const customerName = [...claimed].reverse().find((r) => r.customerName?.trim())?.customerName ?? null;
     // Ảnh chụp ĐẦU LƯỢT: người gửi tin / tiếp quản trong lúc AI đang soạn ⇒ bot không gửi câu đã soạn (`botMaySend`).
     const sendGuard = await captureSendSnapshot(conv.id);
-    const turn = await chatTurn(conv.id, text, { channel: "FANPAGE", visitorKey: fanpageVisitorKey(pageId, threadId), now: now(), customerName, ...(context ? { context } : {}) });
+    // Bình luận: khách AI là NGƯỜI bình luận mới nhất của lượt (cùng dòng mà đồng hồ ghi sau khi gửi) — cổng Số dư AI dựng cùng khoá.
+    const commenter = [...claimed].reverse().find((r) => r.kind === "COMMENT" && r.postId && r.fromId);
+    const turn = await chatTurn(conv.id, text, { channel: "FANPAGE", visitorKey: fanpageVisitorKey(pageId, threadId), now: now(), customerName, ...(context ? { context } : {}), ...(commenter ? { aiCustomer: { threadKind: "COMMENT" as const, commenterId: commenter.fromId } } : {}) });
     if (!turn.ok) {
       // Lượt khác đang trả lời cùng hội thoại ⇒ nhả tin để lượt sau gom; lý do khác (bot tắt…) ⇒ bỏ qua có ghi chú.
       const busy = /Đang trả lời câu trước/.test(turn.error);

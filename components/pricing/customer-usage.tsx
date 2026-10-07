@@ -112,11 +112,15 @@ function BillingMeter({ meter }: { meter: CustomerBillingMeter }) {
         <span className="numeric">{est?.totalVnd === null || est === null ? "—" : formatVND(est.totalVnd)}</span>
         {est && est.overage.knownVnd > 0 ? <span className="text-muted-foreground"> (gồm phần vượt {formatVND(est.overage.knownVnd)})</span> : null}
         {est?.note ? <span className="text-muted-foreground"> · {est.note}</span> : null}
+        {meter.aiBalance ? <span className="text-muted-foreground" data-bill-ai-balance> · khách AI vượt phần gói gồm trừ vào Số dư AI, không cộng vào hoá đơn</span> : null}
         {meter.aiCustomers.alert.suggestUpgrade ? <span className="text-amber-700 dark:text-amber-400"> · Dùng vượt nhiều — nâng gói có thể rẻ hơn trả phần vượt.</span> : null}
       </p>
       <p className="text-[11px] text-muted-foreground">
         {meter.versionLabel ? `Bảng giá: ${meter.versionLabel}${meter.pinned ? " (giữ giá đã chốt)" : ""}. ` : ""}
-        {meter.taxNote ?? ""} Dùng quá hạn mức AI vẫn chạy — không bao giờ tự tắt.
+        {meter.taxNote ?? ""}{" "}
+        {meter.aiBalance
+          ? "Khách AI vượt phần gói gồm trừ vào Số dư AI; hết số dư thì khách MỚI chuyển nhân viên, khách đã tính trong tháng vẫn được AI trả lời."
+          : "Dùng quá hạn mức AI vẫn chạy — không bao giờ tự tắt."}
       </p>
     </div>
   );

@@ -431,6 +431,28 @@ export function estimateBill(price: PlanPrice, usage: BillableUsage, opts: { tri
   return { planVnd, overage, totalVnd, note: planVnd === null ? (price.contactSales ? "Theo hợp đồng." : "Gói không niêm yết giá.") : null };
 }
 
+/**
+ * Phần vượt KHÔNG gồm dòng khách AI — dùng khi tổ chức trả phần vượt khách AI bằng SỐ DƯ AI (cờ `ai_balance.enabled`, chủ shop
+ * 08/10/2026): khách AI vượt phần gồm đã bị trừ thẳng vào số dư, để dòng ấy lại trong hoá đơn ước tính / bảng kê kỳ là thu HAI
+ * lần cùng một khách (review độc lập 08/10/2026, H2). Dòng fanpage / người dùng thêm giữ nguyên. Không có dòng khách AI ⇒ trả
+ * nguyên đối tượng cũ.
+ */
+export function overageWithoutAiCustomers(o: OverageResult): OverageResult {
+  const lines = o.lines.filter((l) => l.key !== "aiCustomers");
+  if (lines.length === o.lines.length) return o;
+  const known = lines.filter((l) => l.amountVnd !== null);
+  const knownVnd = known.reduce((a, l) => a + (l.amountVnd ?? 0), 0);
+  const unknownLines = lines.length - known.length;
+  return { ...o, lines, knownVnd, unknownLines, totalVnd: unknownLines ? null : knownVnd, note: o.note };
+}
+
+/** Hoá đơn ước tính của gói TRẢ PHÍ đang trừ phần vượt khách AI qua Số dư AI — xem `overageWithoutAiCustomers`. Không dùng cho dùng thử. */
+export function billWithoutAiCustomerLine(est: BillEstimate): BillEstimate {
+  const overage = overageWithoutAiCustomers(est.overage);
+  if (overage === est.overage) return est;
+  return { ...est, overage, totalVnd: est.planVnd === null || overage.totalVnd === null ? null : est.planVnd + overage.totalVnd };
+}
+
 // ─────────────────────────── Biên lãi chiếu (khung người vận hành) ───────────────────────────
 
 /** Đích 75–85% · cảnh báo < 70% · nguy cấp < 60% — chủ shop chốt 07/10/2026; ghi đè thưa ở `platform.pricing.margin`. */

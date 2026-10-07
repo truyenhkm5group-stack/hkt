@@ -225,6 +225,7 @@ const CUSTOMER_AI_BLOCK: Record<AiBlockCode, { code: AiBlockCode; reason: string
   TRIAL_QUOTA_EXHAUSTED: { code: "TRIAL_QUOTA_EXHAUSTED", reason: "Bạn đã sử dụng hết lượt AI của gói hiện tại.", fix: { href: "/settings/plan", label: "Chọn gói" } },
   TRIAL_EXPIRED: { code: "TRIAL_EXPIRED", reason: "Đã hết thời gian dùng thử — chọn gói để AI tiếp tục trả lời khách.", fix: { href: "/settings/plan", label: "Chọn gói" } },
   WORKSPACE_SUSPENDED: { code: "WORKSPACE_SUSPENDED", reason: "Tài khoản shop đang tạm ngưng — liên hệ đội hỗ trợ.", fix: null },
+  BALANCE_EXHAUSTED: { code: "BALANCE_EXHAUSTED", reason: "Số dư AI đã hết — AI tạm không nhận khách mới. Khách đã được AI chăm trong tháng vẫn được trả lời.", fix: { href: "/settings/ai-balance", label: "Nạp tiền" } },
   KILL_SWITCH: { code: "NO_AI_SOURCE", reason: CUSTOMER_AI_NOT_READY_LABEL, fix: null },
   NO_AI_SOURCE: { code: "NO_AI_SOURCE", reason: CUSTOMER_AI_NOT_READY_LABEL, fix: null },
   AI_PROVIDER_ERROR: { code: "NO_AI_SOURCE", reason: CUSTOMER_AI_INCIDENT_LABEL, fix: null },

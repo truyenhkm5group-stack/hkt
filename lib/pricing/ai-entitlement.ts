@@ -12,7 +12,11 @@
  *  · Dừng AI KHÔNG khoá dữ liệu: hộp thư, gửi tay, đơn hàng vẫn chạy. Câu cho khách (chủ shop) KHÔNG mang token / USD / model.
  */
 
-export const AI_STOP_REASONS = ["WORKSPACE_SUSPENDED", "TRIAL_EXPIRED", "TRIAL_QUOTA_EXHAUSTED"] as const;
+/**
+ * `BALANCE_EXHAUSTED` (Số dư AI · docs/saas/AI_BALANCE_V1.md) KHÔNG do `aiEntitlementDecision` trả về: nó là cổng THEO HỘI THOẠI
+ * (`ai-gate.ts::aiBalanceGate`) — chỉ chặn khách AI MỚI khi số dư đã hết, khách đã tính phí trong tháng vẫn được trả lời.
+ */
+export const AI_STOP_REASONS = ["WORKSPACE_SUSPENDED", "TRIAL_EXPIRED", "TRIAL_QUOTA_EXHAUSTED", "BALANCE_EXHAUSTED"] as const;
 export type AiStopReason = (typeof AI_STOP_REASONS)[number];
 
 /** Câu hiện cho chủ shop (hộp thư · thanh trạng thái · khung thử). Nguyên văn quyết định 07/10/2026 cho câu hết lượt. */
@@ -20,6 +24,7 @@ export const AI_STOP_MESSAGE: Record<AiStopReason, string> = {
   TRIAL_QUOTA_EXHAUSTED: "Bạn đã sử dụng hết lượt AI của gói hiện tại.",
   TRIAL_EXPIRED: "Thời gian dùng thử của bạn đã kết thúc — AI tạm dừng trả lời khách.",
   WORKSPACE_SUSPENDED: "Workspace đang bị tạm dừng — AI không trả lời khách.",
+  BALANCE_EXHAUSTED: "Số dư AI đã hết — AI tạm không nhận khách mới (khách đã được AI chăm trong tháng vẫn được trả lời). Nạp tiền để AI nhận khách mới.",
 };
 
 /** Ghi chú của dòng tin khách khi cổng gói chặn (`sales_chat_inbound.note`) — `ai-status.ts` dịch ngược ra mã dấu vết. */
@@ -27,6 +32,7 @@ export const AI_STOP_NOTE: Record<AiStopReason, string> = {
   TRIAL_QUOTA_EXHAUSTED: `Gói: ${AI_STOP_MESSAGE.TRIAL_QUOTA_EXHAUSTED}`,
   TRIAL_EXPIRED: `Gói: ${AI_STOP_MESSAGE.TRIAL_EXPIRED}`,
   WORKSPACE_SUSPENDED: `Gói: ${AI_STOP_MESSAGE.WORKSPACE_SUSPENDED}`,
+  BALANCE_EXHAUSTED: `Số dư AI: ${AI_STOP_MESSAGE.BALANCE_EXHAUSTED}`,
 };
 
 export type AiEntitlementWarning = "USAGE_UNKNOWN" | "TRIAL_END_UNKNOWN" | "PLAN_UNREADABLE";

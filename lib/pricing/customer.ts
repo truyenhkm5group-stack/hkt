@@ -10,6 +10,7 @@
  *  · khung HẠN MỨC THÁNG hiện khi có khung thanh toán, hoặc khi gói đang gán còn một ô hạn mức có trần (ô `checkUsageQuota`
  *    thật sự so). Nhà mang gói không trần nào ⇒ không khung, như trước; gán cho nhà một gói có trần ⇒ khung tự hiện.
  */
+import { aiBalanceEnabled } from "@/lib/billing/ai-balance";
 import { readSubscriptionTerms } from "@/lib/billing/standing";
 import { billingStanding, vnDate } from "@/lib/billing/rules";
 import { findOrganization } from "@/lib/platform/organizations";
@@ -22,7 +23,7 @@ import { readGuardConfig, resolveOrgPricing, QUOTA_METER, type OrgPricing } from
 import { usagePeriodOf } from "@/lib/pricing/meter";
 import { readAiCustomerUsage } from "@/lib/pricing/ai-customer";
 import { orgPriceVersion } from "@/lib/pricing/price-book";
-import { estimateBill, fairUseVerdict, usageAlert, type BillEstimate, type FairUseVerdict, type MeterCoverage, type UsageAlert } from "@/lib/pricing/versions";
+import { billWithoutAiCustomerLine, estimateBill, fairUseVerdict, usageAlert, type BillEstimate, type FairUseVerdict, type MeterCoverage, type UsageAlert } from "@/lib/pricing/versions";
 import { billingLockApplies } from "@/lib/saas/policy";
 
 export type CustomerQuotaRow = QuotaVerdict & { line: string };
@@ -45,6 +46,8 @@ export type CustomerBillingMeter = {
   estimate: BillEstimate | null;
   /** Gói có AI bán hàng không (gói Inbox không có) — đọc từ entitlement, không so tên gói. */
   aiSales: boolean;
+  /** Khách AI vượt phần gồm trừ vào Số dư AI (cờ `ai_balance.enabled`, gói trả phí) — dòng ấy không nằm trong hoá đơn ước tính. */
+  aiBalance: boolean;
 };
 
 export type CustomerPlanView = {
@@ -112,6 +115,8 @@ export async function loadCustomerPlan(orgCode: string, now: Date = new Date()):
     const fanpagesInc = pricing.quotas.fanpages !== undefined ? pricing.quotas.fanpages : inc.fanpages;
     const fair = fairUseVerdict({ aiConversations: usage.readings.ai_conversations, aiReplies: usage.readings.outgoing_ai_messages }, inc, alerts);
     const trial = price.trialDays !== null;
+    const balanceOn = !trial && (await aiBalanceEnabled(org.code).catch(() => false));
+    const estimate = estimateBill({ ...price, included: { ...inc, users: usersInc, fanpages: fanpagesInc } }, { aiCustomers: aiRead.value, aiCustomersCoverage: aiRead.coverage, fanpages: fanpagesUsed, users: usersUsed, aiConversations: usage.readings.ai_conversations, aiReplies: usage.readings.outgoing_ai_messages }, { trial });
     meter = {
       versionLabel: version.version?.label ?? null,
       pinned: version.pinned,
@@ -120,8 +125,9 @@ export async function loadCustomerPlan(orgCode: string, now: Date = new Date()):
       fanpages: { used: fanpagesUsed, included: fanpagesInc, alert: usageAlert(fanpagesUsed, fanpagesInc, alerts) },
       users: { used: usersUsed, included: usersInc, alert: usageAlert(usersUsed, usersInc, alerts) },
       fairUse: fair,
-      estimate: estimateBill({ ...price, included: { ...inc, users: usersInc, fanpages: fanpagesInc } }, { aiCustomers: aiRead.value, aiCustomersCoverage: aiRead.coverage, fanpages: fanpagesUsed, users: usersUsed, aiConversations: usage.readings.ai_conversations, aiReplies: usage.readings.outgoing_ai_messages }, { trial }),
+      estimate: balanceOn ? billWithoutAiCustomerLine(estimate) : estimate,
       aiSales: features.find((f) => f.key === "ai_sales")?.granted ?? false,
+      aiBalance: balanceOn,
     };
   }
   return {

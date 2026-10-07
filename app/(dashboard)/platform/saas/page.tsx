@@ -178,9 +178,14 @@ export default async function OwnerCockpitPage() {
           </div>
         }
         actions={
-          <Link href="/platform" className="text-sm font-medium text-primary hover:underline">
-            ← Vận hành nền tảng
-          </Link>
+          <div className="flex flex-wrap items-center gap-3">
+            <Link href="/platform/ai-balance" className="text-sm font-medium text-primary hover:underline" data-link-ai-balance>
+              Số dư AI →
+            </Link>
+            <Link href="/platform" className="text-sm font-medium text-primary hover:underline">
+              ← Vận hành nền tảng
+            </Link>
+          </div>
         }
       />
 
