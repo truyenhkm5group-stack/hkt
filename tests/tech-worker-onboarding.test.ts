@@ -160,7 +160,7 @@ export function testTechWorkerOnboardingPure() {
   // 1.6 Lệnh sửa: danh sách ĐÓNG, khớp CHECK ở CSDL (schema + migration) — không hai danh sách lệch nhau.
   assert.ok(!isTechRepairCommand("rm -rf /") && !isTechRepairCommand("RUN_SHELL") && !isTechRepairCommand(""));
   for (const c of TECH_REPAIR_COMMANDS) assert.ok(isTechRepairCommand(c));
-  const mig = src("drizzle/0233_tech_worker_onboarding.sql");
+  const mig = src("drizzle/0235_tech_worker_onboarding.sql");
   const checkMig = /"repair_command" IN \(([^)]*)\)/.exec(mig)?.[1] ?? "";
   const checkSchema = /repairCommand\} IN \(([^)]*)\)/.exec(src("db/schema.ts"))?.[1] ?? "";
   for (const ds of [checkMig, checkSchema]) {
@@ -651,7 +651,7 @@ function testWorkerGitSafetyReal() {
  */
 async function testDogfoodRevocation() {
   const db = await getDb();
-  const cau = src("drizzle/0233_tech_worker_onboarding.sql")
+  const cau = src("drizzle/0235_tech_worker_onboarding.sql")
     .split("--> statement-breakpoint")
     .map((x) => x.trim())
     .find((x) => x.startsWith('WITH "thu_hoi"'));

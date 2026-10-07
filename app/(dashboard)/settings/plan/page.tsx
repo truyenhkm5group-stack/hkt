@@ -4,6 +4,7 @@ import { requirePermission } from "@/lib/auth/session";
 import { AiLimitsTable, AiUsageTotalsTable } from "@/components/ai-usage/ai-usage-tables";
 import { getPlanUsage } from "@/lib/entitlements/check";
 import { loadOrgAiUsage } from "@/lib/ai-usage/view";
+import { customerFacing } from "@/lib/saas/visibility";
 import { cn } from "@/lib/utils";
 import { loadTenantBilling, type TenantBilling } from "@/lib/billing/service";
 import { BILLING_STANDING_LABEL, type BillingStandingKind } from "@/lib/billing/rules";
@@ -28,8 +29,9 @@ function fmt(n: number, kind: string): string {
 export default async function PlanPage() {
   const user = await requirePermission("settings:manage");
   const usage = await getPlanUsage(user.organization?.code);
-  // Mã tổ chức lấy từ PHIÊN (không từ URL): tổ chức chỉ thấy sổ AI của chính mình.
-  const ai = await loadOrgAiUsage(usage.orgCode);
+  // Mã tổ chức lấy từ PHIÊN (không từ URL). Sổ AI (token · tiền USD · trần credit) là số NỘI BỘ: chỉ workspace nhà đọc;
+  // workspace khách ⇒ `null`, máy chủ không đọc sổ AI luôn (lib/saas/visibility.ts — chủ shop 07/10/2026).
+  const ai = customerFacing(user.organization) ? null : await loadOrgAiUsage(usage.orgCode);
   // Khung thanh toán: CÙNG vị từ với khoá thanh toán của cổng ghi (`billingLockApplies`) — bị khoá thì luôn có mã QR để
   // gia hạn. Khung hạn mức tháng: khi có thanh toán hoặc gói còn ô có trần (`planPageFrame`).
   const frame = await loadPlanPageFrame(usage.orgCode);
@@ -84,6 +86,7 @@ export default async function PlanPage() {
           </table>
         </SectionCard>
       )}
+      {ai ? (
       <SectionCard
         title="Dùng AI"
         description={ai.disabledReason ?? "Lượt · token · tiền ƯỚC TÍNH theo bảng giá model (không phải hoá đơn) — hôm nay và tháng này, theo nguồn trả tiền"}
@@ -95,6 +98,7 @@ export default async function PlanPage() {
           {ai.limits && !ai.limits.isHome ? <AiLimitsTable limits={ai.limits.limits} usage={ai.quotaUsage} undeclared={ai.limits.undeclared} /> : <p className="px-5 text-xs text-muted-foreground">{ai.limits ? "Tổ chức nhà — AI không giới hạn theo gói." : "Không đọc được gói — AI Builder sẽ từ chối cho tới khi người vận hành kiểm bảng gói."}</p>}
         </div>
       </SectionCard>
+      ) : null}
     </div>
   );
 }

@@ -44,3 +44,28 @@ export const GRAPH_ERROR_HINT: Record<GraphErrorKind, string> = {
   RATE_LIMIT: "Facebook đang giới hạn số lời gọi — thử lại sau ít phút.",
   OTHER: "",
 };
+
+/**
+ * LOẠI LỖI ĐỌC LẠI TỪ CÂU ĐÃ LƯU — `org_channel_pages.last_error` chỉ giữ CÂU (graph.ts ghép «Facebook từ chối: … — <gợi ý>»),
+ * không giữ mã. Gợi ý ở cuối câu là chữ CỦA CHÍNH tệp này nên nhận lại được loại một cách TẤT ĐỊNH; câu không mang gợi ý nào
+ * ⇒ `null` (CHƯA BIẾT — không đoán là lỗi kết nối, mục 42). HÀM THUẦN.
+ */
+export function graphErrorKindOfText(text: string | null | undefined): GraphErrorKind | null {
+  const s = (text ?? "").trim();
+  if (!s) return null;
+  for (const kind of ["TOKEN", "PERMISSION", "WINDOW", "RECIPIENT", "RATE_LIMIT"] as const) if (s.includes(GRAPH_ERROR_HINT[kind])) return kind;
+  return null;
+}
+
+/**
+ * CÂU CHO KHÁCH của từng loại lỗi — lời thường + MỘT việc phải làm, không thuật ngữ kỹ thuật (màn «Kênh kết nối»,
+ * lib/channels/overview-shared.ts quét chuỗi). Câu gốc của Meta chỉ hiện cho người vận hành nền tảng.
+ */
+export const CUSTOMER_GRAPH_ERROR_TEXT: Record<GraphErrorKind, { title: string; action: string }> = {
+  TOKEN: { title: "Facebook đã ngắt quyền của ERP với Page này", action: "Bấm «Kết nối lại» và đăng nhập bằng tài khoản quản trị Page." },
+  PERMISSION: { title: "ERP không còn quyền nhắn tin thay Page này", action: "Bấm «Kết nối lại» và giữ BẬT mọi quyền Facebook hỏi." },
+  WINDOW: { title: "Khách nhắn đã quá 24 giờ nên Facebook chặn tin trả lời", action: "Không cần làm gì — bot trả lời tiếp khi khách nhắn lại." },
+  RECIPIENT: { title: "Khách đã chặn Page hoặc không nhận tin", action: "Không cần làm gì với kết nối." },
+  RATE_LIMIT: { title: "Facebook đang tạm giới hạn số tin gửi đi", action: "Đợi vài phút — ERP tự gửi lại." },
+  OTHER: { title: "Lần gửi tin gần nhất chưa thành công", action: "Bấm «Kiểm tra lại»; nếu vẫn lỗi, bấm «Kết nối lại»." },
+};

@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { shellAllows } from "@/lib/constants/saas-nav";
 import { ReverseRelationsCard } from "@/components/objects/reverse-relations-card";
 import { cn } from "@/lib/utils";
 import { SHIPMENT_DIRECTION_LABEL } from "@/lib/constants/viettelpost";
@@ -397,7 +398,7 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
           <SectionCard
             title={attempts.length > 1 ? `Vận chuyển & COD · ${attempts.length} lần gửi` : "Vận chuyển & COD"}
             description={s ? `${s.carrier} · cập nhật ${formatDateTime(s.vtpStatusDate ?? s.updatedAt)}` : "Đơn chưa được đẩy sang đơn vị vận chuyển"}
-            actions={s ? <Link href={`/shipments/${s.id}`} className="text-xs font-semibold text-primary hover:underline">Chi tiết vận đơn</Link> : null}
+            actions={s && shellAllows(user, "/shipments") ? <Link href={`/shipments/${s.id}`} className="text-xs font-semibold text-primary hover:underline">Chi tiết vận đơn</Link> : null}
           >
             {attempts.length ? (
               <div className="space-y-5">

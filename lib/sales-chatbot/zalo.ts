@@ -29,6 +29,7 @@ import { ensureZaloAccessToken, usableAccessToken } from "@/lib/integrations/zal
 import { chunkText } from "@/lib/messaging/providers";
 import { publish } from "@/lib/realtime/bus";
 import { webhookUrlToken } from "@/lib/platform/webhooks";
+import { noteAiCustomerReply } from "@/lib/pricing/ai-customer";
 import { chatTurn, conversationView, describeCustomerImages, openConversation } from "@/lib/sales-chatbot/engine";
 import { COPILOT_NOTE, erpStaffEchoCond, MEDIA_ONLY_NOTE, MEDIA_ONLY_TEXT, normalizeEcho, OBSERVE_HUMAN_ARM_NOTE, OBSERVE_NOTE, PAGE_REPLY, STAFF_IMAGE_MARK, STAFF_OUT_PREFIX, staffOutRowId, type StaffMark } from "@/lib/sales-chatbot/fanpage";
 import { draftCopilotSuggestion, loadModeConfig, pinArm } from "@/lib/sales-chatbot/operating-mode";
@@ -371,6 +372,10 @@ export async function processZaloThread(userId: string, deps: ZaloDepsAll = {}):
     const replies = turn.view.messages.slice(before).filter((m) => m.role === "assistant" && m.text.trim());
     let sendError: string | null = null;
     let yielded: string | null = null;
+    // Đồng hồ khách AI (L5): đếm câu DO MODEL SINH (`turn.aiTexts`, đánh dấu tại nguồn) đã gửi TRỌN qua Zalo ở chính lượt này —
+    // cùng điểm với fanpage / Messenger; câu mẫu không bao giờ được đếm, gửi hỏng không đếm.
+    const aiTexts = new Set(turn.aiTexts ?? []);
+    let aiSent = 0;
     // Chốt cổng page (page-runtime.ts) trước lời lấy token / gửi: tin bot chỉ đi khi «page» Zalo LIVE.
     const allowed = replies.length ? await botSendAllowed(pageId) : true;
     if (!allowed) sendError = PAGE_NOT_LIVE_SEND_ERROR;
@@ -395,7 +400,9 @@ export async function processZaloThread(userId: string, deps: ZaloDepsAll = {}):
       }
       if (sendError) break;
       out.replies += 1;
+      if (aiTexts.has(r.text)) aiSent += 1;
     }
+    if (aiSent > 0) await noteAiCustomerReply(conv.id, now());
     const mediaNote = !sendError && (turn.media?.imageIds?.length ?? 0) > 0 ? "Ảnh của câu trả lời mẫu chưa gửi được qua Zalo — chỉ gửi phần chữ" : null;
     await finish("DONE", sendError ?? yielded ?? mediaNote);
     if (yielded) out.skipped = yielded;

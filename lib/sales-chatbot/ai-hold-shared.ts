@@ -21,9 +21,25 @@ import { readConversationControl } from "@/lib/sales-chatbot/conversation-contro
  * `updated_at` (do engine đặt, đường ấy không đổi trong sứ mệnh này).
  */
 
-/** Nhân viên gửi tay ⇒ AI nhường chừng này phút. Ngưỡng CŨ (`HUMAN_TAKEOVER_MINUTES` ở fanpage.ts trỏ về đây), không phải số mới. */
+/**
+ * Nhân viên gửi tay ⇒ AI nhường chừng này phút — MẶC ĐỊNH (ngưỡng cũ; `HUMAN_TAKEOVER_MINUTES` ở fanpage.ts trỏ về đây). Từ sứ mệnh
+ * saas-l3-inbox mỗi workspace KHAI được số phút riêng (`HUMAN_COOLDOWN_SETTING_KEY`, đọc qua MỘT hàm `humanCooldownMinutes()` ở
+ * conversation-control.ts); chưa khai ⇒ đúng số này. Dòng cũ chưa có mốc tường minh (NULL) và nhánh AI hỏng vẫn đọc số này.
+ */
 export const HUMAN_COOLDOWN_MINUTES = 30;
 export const HUMAN_COOLDOWN_MS = HUMAN_COOLDOWN_MINUTES * 60_000;
+/** Ô cài đặt (bảng `settings` của tổ chức) giữ số phút AI tự trả lời lại sau câu tay của nhân viên: `{ "minutes": n }`. */
+export const HUMAN_COOLDOWN_SETTING_KEY = "ai.salesChatbot.humanCooldown";
+/** Trần / sàn chủ shop khai được: 1 phút — 24 giờ (lâu hơn thì là «Tiếp quản», không phải nhường). */
+export const HUMAN_COOLDOWN_MIN_MINUTES = 1;
+export const HUMAN_COOLDOWN_MAX_MINUTES = 24 * 60;
+
+/** Số phút đã khai ⇒ số dùng được; thiếu / sai / ngoài trần ⇒ mặc định `HUMAN_COOLDOWN_MINUTES`. HÀM THUẦN. */
+export function normalizeCooldownMinutes(v: unknown): number {
+  const n = typeof v === "number" ? v : typeof v === "string" && v.trim() ? Number(v) : NaN;
+  if (!Number.isInteger(n) || n < HUMAN_COOLDOWN_MIN_MINUTES || n > HUMAN_COOLDOWN_MAX_MINUTES) return HUMAN_COOLDOWN_MINUTES;
+  return n;
+}
 
 /** Lý do «nhân viên đang trả lời» của từng kênh — các tệp kênh trỏ về đây (một nguồn cho chữ mà hàm quyết định so). */
 export const FANPAGE_STAFF_REASON = "Nhân viên đang trả lời trên fanpage";
@@ -31,7 +47,9 @@ export const ZALO_STAFF_REASON = "Nhân viên đang trả lời trên Zalo OA";
 /** AI hỏng ⇒ chuyển người, tự thử lại sau cùng khoảng nhường (engine.ts trỏ về đây). */
 export const AI_DOWN_HANDOFF_REASON = "AI tạm không trả lời được — nhân viên liên hệ lại khách";
 
-const STAFF_COOLDOWN_REASONS: ReadonlySet<string> = new Set([FANPAGE_STAFF_REASON, ZALO_STAFF_REASON]);
+/** Lý do nhường TỰ HẾT HẠN của nhân viên (mỗi kênh một câu) — hộp thư dựng điều kiện SQL tương đương `aiHoldOf` từ đúng danh sách này. */
+export const STAFF_COOLDOWN_REASON_LIST: readonly string[] = [FANPAGE_STAFF_REASON, ZALO_STAFF_REASON];
+const STAFF_COOLDOWN_REASONS: ReadonlySet<string> = new Set(STAFF_COOLDOWN_REASON_LIST);
 
 export const AI_HOLD_STATES = ["AI_ACTIVE", "HUMAN_COOLDOWN", "HUMAN_TAKEOVER"] as const;
 export type AiHoldState = (typeof AI_HOLD_STATES)[number];
@@ -97,9 +115,9 @@ export function aiHoldOf(conv: AiHoldInput, now: Date): AiHold {
   return { state: "AI_ACTIVE", cause: null, until: null, expired: { cause: cd.cause, at: cd.until } };
 }
 
-/** Mốc hết nhường cho một câu nhân viên gửi lúc `at`. HÀM THUẦN. */
-export function cooldownUntilFrom(at: Date): Date {
-  return new Date(at.getTime() + HUMAN_COOLDOWN_MS);
+/** Mốc hết nhường cho một câu nhân viên gửi lúc `at`, với số phút của workspace (mặc định ngưỡng cũ). HÀM THUẦN. */
+export function cooldownUntilFrom(at: Date, minutes: number = HUMAN_COOLDOWN_MINUTES): Date {
+  return new Date(at.getTime() + normalizeCooldownMinutes(minutes) * 60_000);
 }
 
 /**

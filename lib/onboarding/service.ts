@@ -24,7 +24,7 @@ import { and, eq, sql } from "drizzle-orm";
 import { getDb, getPlatformDb, schema } from "@/db";
 import { audit } from "@/lib/audit";
 import { verifyLogin } from "@/lib/auth/login";
-import { startSelfServiceTrial } from "@/lib/billing/service";
+import { initWorkspaceBilling } from "@/lib/billing/service";
 import { resolvePermissions } from "@/lib/auth/permissions";
 import type { SessionSubject, SessionUser } from "@/lib/auth/session";
 import { PRIVACY_POLICY, TERMS_OF_SERVICE } from "@/lib/constants/company";
@@ -343,14 +343,15 @@ async function runSetup(input: SetupInput, step: { current: SetupStepName }): Pr
   // Hành trình tự phục vụ (0180): tổ chức mới là NHÁP tới khi chủ tổ chức tự bấm Xuất bản ở /setup — ERP của họ chính là
   // bản xem trước. Không đè trạng thái đã có (chạy lại sau hỏng).
   await markOrganizationDraft(input.code);
-  // DÙNG THỬ 14 NGÀY (lib/billing/service.ts::startSelfServiceTrial): chỉ cửa hàng TỰ ĐĂNG KÝ qua cửa mở; khách mời và
-  // tổ chức người vận hành tạo giữ điều khoản do người vận hành đặt. Lỗi ghi sổ thuê bao KHÔNG làm hỏng lượt dựng — tổ
-  // chức chỉ ở «Chưa thu phí» như trước, người vận hành thấy ở /platform.
-  if (input.isNew && input.source === "OPEN") {
+  // THU PHÍ + DÙNG THỬ (lib/billing/service.ts::initWorkspaceBilling — CÙNG dịch vụ với bước BILLING của cấp phát người vận hành):
+  // ghim phiên bản giá hiện hành, chụp số ngày dùng thử của PHIÊN BẢN (V1 = 7 ngày) vào thuê bao. Chỉ cửa hàng TỰ ĐĂNG KÝ qua cửa
+  // mở mới bật thu phí (khoá chỉ xem khi quá hạn). Lỗi ghi sổ thuê bao KHÔNG làm hỏng lượt dựng — tổ chức chỉ ở «Chưa thu phí»
+  // như trước, người vận hành thấy ở /platform.
+  if (input.isNew) {
     try {
-      await startSelfServiceTrial(input.code);
+      await initWorkspaceBilling(input.code, { selfService: input.source === "OPEN", actor, reason: input.source === "OPEN" ? "Cửa hàng tự đăng ký" : "Khách mời / người vận hành dựng qua /start" });
     } catch (error) {
-      console.warn(`[onboarding] chưa bật được dùng thử cho ${input.code}: ${error instanceof Error ? error.message : String(error)}`);
+      console.warn(`[onboarding] chưa khởi tạo được thu phí / dùng thử cho ${input.code}: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
   const prev = await readOnboarding(input.code);

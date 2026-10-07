@@ -1,4 +1,4 @@
--- 0233 · CÀI WORKER MỘT NÚT + THU HỒI KHOÁ CŨ CỦA `dogfood-1` (docs/tech-control-plane/README.md mục 15).
+-- 0235 · CÀI WORKER MỘT NÚT + THU HỒI KHOÁ CŨ CỦA `dogfood-1` (docs/tech-control-plane/README.md mục 15).
 --
 --  · CỘNG THÊM: bảng `tech_worker_enrollments` (mã ghi danh dùng MỘT lần, hạn ngắn, chỉ lưu băm) và các cột
 --    nullable / có mặc định trên `tech_workers` (mốc xoay / thu hồi / ghi danh / gỡ, báo cáo tự kiểm, lệnh sửa).

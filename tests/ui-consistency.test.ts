@@ -15,6 +15,7 @@ import { AREA_LABEL, AREA_TONE, CONFIDENCE_LABEL, type RecommendationArea } from
 import { ADS_ANOMALY_LABEL, type AdsAnomalyKind } from "@/lib/constants/ads-anomaly";
 import { ATTRIBUTION_FIELDS } from "@/lib/constants/sales-funnel";
 import { NAV_MODULES } from "@/lib/constants/department-modules";
+import { SALES_AGENT_NAV } from "@/lib/constants/saas-nav";
 import { orderStageEnum, shipmentStageEnum, codStatusEnum } from "@/db/schema";
 
 /**
@@ -182,7 +183,9 @@ export function testUiConsistency() {
  * thanh menu đang vẽ, không phải một hình chiếu gần đúng của nó.
  */
 export function testNavigationCoverage() {
-  const linked = new Set<string>(NAV_MODULES.map((m) => m.href));
+  // Thanh tám mục của vỏ app Chốt Đơn Tự Động (lib/constants/saas-nav.ts) cũng là một menu: trang chỉ đứng trên thanh đó
+  // (Tổng quan /ai/overview, Cài đặt /settings/shop) có lối vào thật với khách Chốt Đơn.
+  const linked = new Set<string>([...NAV_MODULES.map((m) => m.href), ...SALES_AGENT_NAV.map((m) => m.href)]);
 
   /** Trang CỐ Ý không có trong menu, kèm lý do — thêm vào đây phải nêu được vì sao. */
   const INTENTIONALLY_UNLINKED: Record<string, string> = {
@@ -294,6 +297,8 @@ export function testNavigationCoverage() {
     // 0183 · câu trả lời mẫu là cấu hình CỦA chatbot bán hàng (cùng quyền ai_sales:*), không phải module riêng.
     "/ai/sales-chatbot/quick-replies": "nút 'Câu trả lời mẫu (Q&A)' ở đầu trang /ai/sales-chatbot",
     "/ai/sales-chatbot/messenger": "thẻ 'Messenger trực tiếp (không cần Pancake)' trong trang /ai/sales-chatbot (người có quyền cấu hình)",
+    // Kênh kết nối hợp nhất (lib/channels/overview-shared.ts::CHANNELS_ROUTE): luồng menu (L2) trỏ vào hằng đó; tới lúc ấy
+    // vào từ liên kết cuối trang Messenger trực tiếp và là đích chuyển tiếp của lượt «Kết nối Facebook» bắt đầu từ chính màn này.
   };
 
   const pages = walkPages("app/(dashboard)");

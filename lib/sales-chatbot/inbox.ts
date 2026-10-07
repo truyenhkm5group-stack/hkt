@@ -2,7 +2,7 @@ import { and, asc, desc, eq, inArray, isNotNull, isNull, ne, or, sql, type SQL }
 import { z } from "zod";
 import { getDb, schema } from "@/db";
 import { listChannelPages } from "@/lib/connectors/service";
-import { MESSENGER_DIRECT_KEY } from "@/lib/sales-chatbot/channel-ownership";
+import { loadTransportFacts, MESSENGER_DIRECT_KEY, transportOwnerOf, type TransportFacts } from "@/lib/sales-chatbot/channel-ownership";
 import type { AiBlock } from "@/lib/ai/provider";
 import { audit } from "@/lib/audit";
 import { can, type SessionUser } from "@/lib/auth/session";
@@ -12,8 +12,8 @@ import { zaloWindow, ZALO_IMAGE_MAX_BYTES } from "@/lib/integrations/zalo/oa";
 import { ORDER_OUTCOME } from "@/lib/queries/return-rate";
 import { appendContextMessages, resumeConversationToAi, SHOP_SAID } from "@/lib/sales-chatbot/engine";
 import { recordConversationEvent } from "@/lib/sales-chatbot/events";
-import { aiHoldOf, aiHoldView, humanResumeReason } from "@/lib/sales-chatbot/ai-hold-shared";
-import { startHumanCooldown } from "@/lib/sales-chatbot/conversation-control";
+import { AI_DOWN_HANDOFF_REASON, aiHoldOf, aiHoldView, HUMAN_COOLDOWN_MINUTES, humanResumeReason, STAFF_COOLDOWN_REASON_LIST } from "@/lib/sales-chatbot/ai-hold-shared";
+import { humanCooldownMinutes, startHumanCooldown } from "@/lib/sales-chatbot/conversation-control";
 import { buildMessageTrace, conversationAiBlocks, loadAiUsageForConversation, transportOfConversation } from "@/lib/sales-chatbot/ai-status";
 import { readConversationControl } from "@/lib/sales-chatbot/conversation-control-shared";
 import { HISTORY_CREATED_BY } from "@/lib/sales-chatbot/history-shared";
@@ -28,6 +28,8 @@ import {
   INBOX_LIST_MAX,
   INBOX_OUTCOME_LABEL,
   INBOX_PERIODS,
+  inboxHandlingOf,
+  safeAvatarUrl,
   STAFF_IMAGE_MAX_BYTES,
   STAFF_IMAGE_TYPES,
   STAFF_IMAGES_MAX,
@@ -38,6 +40,7 @@ import {
   type InboxOrder,
   type InboxPeriod,
   type InboxRow,
+  type InboxSource,
   type InboxThread,
   type SendWindow,
   type TimelineItem,
@@ -46,7 +49,7 @@ import {
 
 type StaffImageType = (typeof STAFF_IMAGE_TYPES)[number];
 import { sendBotText, sendPageImages } from "@/lib/sales-chatbot/messenger";
-import { draftCopilotSuggestion } from "@/lib/sales-chatbot/operating-mode";
+import { draftCopilotSuggestion, loadModeConfig } from "@/lib/sales-chatbot/operating-mode";
 import { feedbackFor } from "@/lib/sales-chatbot/inbox-feedback";
 import { CUSTOMER_LEVELS, parseCustomerLevel, type CustomerLevel } from "@/lib/sales-chatbot/levels-shared";
 import type { ChatState } from "@/lib/sales-chatbot/tools";
@@ -109,6 +112,50 @@ const UNREAD = sql<boolean>`("${sql.raw(C)}"."last_customer_at" is not null and 
 const ACTIVITY = sql<Date>`greatest(coalesce("${sql.raw(C)}"."last_customer_at", 'epoch'::timestamptz), coalesce("${sql.raw(C)}"."last_bot_at", 'epoch'::timestamptz), coalesce("${sql.raw(C)}"."last_staff_at", 'epoch'::timestamptz), coalesce("${sql.raw(C)}"."history_until", 'epoch'::timestamptz), case when "${sql.raw(C)}"."created_by" = ${HISTORY_CREATED_BY} then 'epoch'::timestamptz else "${sql.raw(C)}"."created_at" end)`;
 const HAS_ORDER = sql<boolean>`("${sql.raw(C)}"."order_id" is not null or "${sql.raw(C)}"."draft_order_id" is not null or exists (select 1 from "orders" o where o.sales_conversation_id = "${sql.raw(C)}"."id"))`;
 const INBOUND_NAME = sql<string | null>`(select i.customer_name from "sales_chat_inbound" i where i.page_id = "${sql.raw(C)}"."page_id" and i.thread_id = "${sql.raw(C)}"."thread_id" and i.customer_name is not null and i.customer_name <> '' order by i.created_at desc limit 1)`;
+
+/**
+ * NGƯỜI đang xử lý tại `now` — điều kiện SQL TƯƠNG ĐƯƠNG `aiHoldOf(...).state !== "AI_ACTIVE"` (ai-hold-shared.ts), dựng từ ĐÚNG các
+ * hằng của hàm đó (lý do nhường tự hết hạn · AI hỏng · ngưỡng mặc định cho dòng cũ chưa có mốc tường minh). Thẻ lọc «AI / Người đang
+ * xử lý» đọc câu này, huy hiệu trên hàng đọc `aiHoldOf` — bài kiểm so hai bên trên cùng một ma trận dòng (tests/saas-l3-inbox).
+ */
+export function humanHoldSql(now: Date): SQL<boolean> {
+  const reasons = sql.join(
+    STAFF_COOLDOWN_REASON_LIST.map((r) => sql`${r}`),
+    sql`, `,
+  );
+  const fallback = sql`("${sql.raw(C)}"."updated_at" + (${HUMAN_COOLDOWN_MINUTES}::int * interval '1 minute'))`;
+  return sql<boolean>`(coalesce("${sql.raw(C)}"."state"->'control'->>'mode', '') = 'HUMAN' or ("${sql.raw(C)}"."status" = 'HANDOFF' and not (
+    (coalesce("${sql.raw(C)}"."handoff_reason", '') in (${reasons}) and coalesce("${sql.raw(C)}"."human_cooldown_until", ${fallback}) <= ${now})
+    or (coalesce("${sql.raw(C)}"."handoff_reason", '') = ${AI_DOWN_HANDOFF_REASON} and ${fallback} <= ${now}))))`;
+}
+/**
+ * Thẻ «Người đang xử lý» của hộp thư = `humanHoldSql` HOẶC AI gợi ý (hội thoại ở chế độ COPILOT, hoặc cả tổ chức đang ở chế độ
+ * Copilot) — tương đương `inboxHandlingOf(...) !== "AI"`. Quyết định sản phẩm: bot soạn gợi ý, NGƯỜI gửi ⇒ việc của người.
+ */
+export function inboxHumanSql(now: Date, orgCopilot: boolean): SQL<boolean> {
+  if (orgCopilot) return sql<boolean>`true`;
+  return sql<boolean>`(${humanHoldSql(now)} or coalesce("${sql.raw(C)}"."state"->'control'->>'mode', '') = 'COPILOT')`;
+}
+/** Đã chốt: đơn ERP thật của hội thoại (không tính đơn nháp) hoặc level khách «Đã chốt đơn» (job level). */
+const CLOSED = sql<boolean>`("${sql.raw(C)}"."order_id" is not null or coalesce("${sql.raw(C)}"."customer_level", '') = 'ORDERED' or exists (select 1 from "orders" o where o.sales_conversation_id = "${sql.raw(C)}"."id"))`;
+/** SỐ tin khách chưa đọc (trần 100 — hàng in «99+»): tin KHÁCH sống mới hơn lần cuối nhân viên mở hội thoại. */
+const UNREAD_COUNT = sql<number>`(case when "${sql.raw(C)}"."page_id" is not null and "${sql.raw(C)}"."thread_id" is not null
+  then (select count(*)::int from (select 1 from "sales_chat_inbound" i where i.page_id = "${sql.raw(C)}"."page_id" and i.thread_id = "${sql.raw(C)}"."thread_id"
+    and i.kind = 'INBOX' and i.imported_at is null and coalesce(i.note, '') not in ('BOT_SENT', ${PAGE_REPLY})
+    and i.created_at > coalesce("${sql.raw(C)}"."staff_seen_at", 'epoch'::timestamptz) limit 100) x)
+  else (select count(*)::int from (select 1 from "sales_chat_messages" m where m.conversation_id = "${sql.raw(C)}"."id" and m.role = 'user'
+    and m.created_at > coalesce("${sql.raw(C)}"."staff_seen_at", 'epoch'::timestamptz) limit 100) y) end)`;
+/** Đường đã ghi tin khách gần nhất của luồng (0233) — `NULL` ở dòng cũ ⇒ đường canonical hiện tại của page. */
+const THREAD_TRANSPORT = sql<string | null>`(select i.transport from "sales_chat_inbound" i where i.page_id = "${sql.raw(C)}"."page_id" and i.thread_id = "${sql.raw(C)}"."thread_id" and i.transport is not null order by i.created_at desc limit 1)`;
+
+/** Nhãn nguồn của hàng: Zalo · Web · Direct (Meta trực tiếp) · Pancake. HÀM THUẦN. */
+export function inboxSourceOf(r: { channel: string; pageId: string | null; transport: string | null }, facts: TransportFacts | null): InboxSource {
+  if (r.channel === "ZALO") return "ZALO";
+  if (r.channel !== "FANPAGE") return "WEB";
+  if (r.transport === "MESSENGER") return "DIRECT";
+  if (r.transport === "PANCAKE") return "PANCAKE";
+  return r.pageId && facts && transportOwnerOf(facts, r.pageId) === "MESSENGER" ? "DIRECT" : "PANCAKE";
+}
 
 /** Có SĐT: SĐT hội thoại (job level đọc từ tin khách / Pancake) · hồ sơ khách · sổ trạng thái bot. */
 const HAS_PHONE = sql<boolean>`(coalesce("${sql.raw(C)}"."customer_phone", '') <> '' or coalesce("customers"."phone", '') <> '' or coalesce("${sql.raw(C)}"."state"->'customer'->>'phone', '') <> '')`;
@@ -190,6 +237,13 @@ function textOf(blocks: readonly AiBlock[] | null | undefined): string {
     .trim();
 }
 
+/** Ảnh đại diện khách: Meta `profile_pic` (đọc sau lượt trả lời — messenger.ts) rồi ảnh Pancake (lượt nhập lịch sử). */
+function avatarOf(state: unknown): string | null {
+  const st = (state && typeof state === "object" ? state : {}) as Record<string, unknown>;
+  const meta = st.messengerProfile && typeof st.messengerProfile === "object" ? (st.messengerProfile as Record<string, unknown>).pic : null;
+  return safeAvatarUrl(meta) ?? safeAvatarUrl(st.pancakeAvatarUrl);
+}
+
 function inboundSide(note: string | null, messageId: string): TimelineSide {
   if (note === "BOT_SENT") return "BOT";
   if (note === PAGE_REPLY) return messageId.startsWith(STAFF_OUT_PREFIX) ? "STAFF" : "PAGE";
@@ -214,8 +268,9 @@ export async function listInbox(user: SessionUser, rawQuery: unknown, now: Date 
   }
   if (q.phone === "HAS") base.push(HAS_PHONE);
   if (q.phone === "NONE") base.push(sql`not ${HAS_PHONE}`);
-  // Ai đang trả lời (INBOX_HANDLERS): người = nhường / Tiếp quản / AI gợi ý; AI = phần còn lại.
-  const byHuman = sql`(${c.status} = 'HANDOFF' or coalesce(${c.state}->'control'->>'mode', 'AUTO') in ('HUMAN', 'COPILOT'))`;
+  // Ai đang trả lời (INBOX_HANDLERS) — CÙNG điều kiện với huy hiệu trên hàng (`inboxHandlingOf`, một nguồn).
+  const orgCopilot = (await loadModeConfig().catch(() => null))?.mode === "COPILOT";
+  const byHuman = inboxHumanSql(now, orgCopilot);
   if (q.handler === "HUMAN") base.push(byHuman);
   if (q.handler === "AI") base.push(sql`not ${byHuman}`);
   if (q.assignee === "none") base.push(isNull(c.assigneeUserId));
@@ -232,6 +287,10 @@ export async function listInbox(user: SessionUser, rawQuery: unknown, now: Date 
     NEEDS_HUMAN: eq(c.status, "HANDOFF"),
     MINE: eq(c.assigneeUserId, user.id),
     UNASSIGNED: and(isNull(c.assigneeUserId), or(eq(c.status, "HANDOFF"), NEEDS_REPLY)),
+    AI: sql`not ${byHuman}`,
+    HUMAN: byHuman,
+    ORDERED: CLOSED,
+    NOT_ORDERED: sql`not ${CLOSED}`,
   };
   // MỘT câu đếm cho mọi thẻ (trước đây sáu câu cho mỗi lượt làm mới 5 giây).
   const countCols = Object.fromEntries(INBOX_FILTERS.map((f) => [f, byFilter[f] ? sql<number>`count(*) filter (where ${byFilter[f]})::int` : sql<number>`count(*)::int`])) as Record<InboxFilter, SQL<number>>;
@@ -272,6 +331,12 @@ export async function listInbox(user: SessionUser, rawQuery: unknown, now: Date 
       hasOrder: HAS_ORDER,
       level: c.customerLevel,
       convPhone: c.customerPhone,
+      state: c.state,
+      updatedAt: c.updatedAt,
+      humanCooldownUntil: c.humanCooldownUntil,
+      unreadN: UNREAD_COUNT,
+      closed: CLOSED,
+      transport: THREAD_TRANSPORT,
     })
     .from(c)
     .leftJoin(cu, eq(cu.id, c.customerId))
@@ -314,32 +379,42 @@ export async function listInbox(user: SessionUser, rawQuery: unknown, now: Date 
 
   const labels = await labelsFor(rows.map((r) => r.id));
   const pageNames = new Map((await inboxPages()).map((p) => [p.id, p.name]));
+  const facts = rows.some((r) => r.channel === "FANPAGE" && !r.transport) ? await loadTransportFacts().catch(() => null) : null;
   return {
     ok: true,
     counts,
     levelCounts,
     phoneCount: Number(countRow?.phone ?? 0),
     total: counts[q.filter],
-    rows: rows.map((r) => ({
-      id: r.id,
-      channel: r.channel,
-      pageId: r.pageId,
-      pageName: r.pageId ? (pageNames.get(r.pageId) ?? null) : null,
-      status: r.status,
-      handoffReason: r.handoffReason,
-      customerName: r.customerName || r.stateName || r.inboundName || "Khách",
-      customerPhone: r.customerPhone || r.statePhone || r.convPhone || null,
-      preview: (previews.get(r.id)?.text ?? "").slice(0, 140),
-      previewSide: previews.get(r.id)?.side ?? null,
-      lastActivityAt: iso(r.activity) ?? new Date(0).toISOString(),
-      waitingSince: r.needsReply ? iso(r.lastCustomerAt) : null,
-      unread: Boolean(r.unread),
-      assigneeUserId: r.assigneeUserId,
-      assigneeName: r.assigneeName,
-      hasOrder: Boolean(r.hasOrder),
-      labels: labels.get(r.id) ?? [],
-      level: parseCustomerLevel(r.level),
-    })),
+    rows: rows.map((r) => {
+      const hold = aiHoldOf({ status: r.status, handoffReason: r.handoffReason, state: r.state, updatedAt: r.updatedAt, humanCooldownUntil: r.humanCooldownUntil }, now).state;
+      return {
+        id: r.id,
+        channel: r.channel,
+        pageId: r.pageId,
+        pageName: r.pageId ? (pageNames.get(r.pageId) ?? null) : null,
+        status: r.status,
+        handoffReason: r.handoffReason,
+        customerName: r.customerName || r.stateName || r.inboundName || "Khách",
+        customerPhone: r.customerPhone || r.statePhone || r.convPhone || null,
+        preview: (previews.get(r.id)?.text ?? "").slice(0, 140),
+        previewSide: previews.get(r.id)?.side ?? null,
+        lastActivityAt: iso(r.activity) ?? new Date(0).toISOString(),
+        waitingSince: r.needsReply ? iso(r.lastCustomerAt) : null,
+        unread: Boolean(r.unread),
+        unreadCount: r.unread ? Math.max(1, Number(r.unreadN ?? 0)) : 0,
+        avatarUrl: avatarOf(r.state),
+        aiHold: hold,
+        handling: inboxHandlingOf(hold, r.state, orgCopilot),
+        closed: Boolean(r.closed),
+        source: inboxSourceOf(r, facts),
+        assigneeUserId: r.assigneeUserId,
+        assigneeName: r.assigneeName,
+        hasOrder: Boolean(r.hasOrder),
+        labels: labels.get(r.id) ?? [],
+        level: parseCustomerLevel(r.level),
+      };
+    }),
   };
 }
 
@@ -516,6 +591,8 @@ export async function loadInboxThread(user: SessionUser, conversationId: unknown
       handoffReason: conv.handoffReason,
       botYields: conv.status === "HANDOFF",
       aiHold: aiHoldView(conv, now),
+      avatarUrl: avatarOf(conv.state),
+      cooldownMinutes: await humanCooldownMinutes(),
       // Lý do AI KHÔNG trả lời — hỏi đúng các cổng của đường xử lý (ai-status.ts). Không rỗng ⇒ màn hình không được nói «AI đang trả lời».
       aiBlocks: await conversationAiBlocks(conv),
       control: readConversationControl(conv.state),

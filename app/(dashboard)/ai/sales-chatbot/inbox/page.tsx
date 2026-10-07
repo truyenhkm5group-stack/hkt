@@ -1,17 +1,37 @@
 import Link from "next/link";
 import { PageHeader } from "@/components/page-header";
-import { requirePermission } from "@/lib/auth/session";
+import { can, requirePermission } from "@/lib/auth/session";
 import { formatTimeAgo, formatVND } from "@/lib/format";
 import { assignableUsers, inboxAssignees, inboxPages, listInbox, loadInboxThread } from "@/lib/sales-chatbot/inbox";
+import { customerFacing, customerInboxThread } from "@/lib/saas/visibility";
 import { listLabels } from "@/lib/sales-chatbot/inbox-labels";
-import { INBOX_CHANNEL_LABEL, INBOX_CHANNELS, INBOX_FILTER_LABEL, INBOX_FILTERS, INBOX_HANDLER_LABEL, INBOX_LIST_MAX, INBOX_PERIOD_LABEL, INBOX_PERIODS, type InboxChannel, type InboxFilter, type InboxHandler, type InboxPeriod, type InboxRow } from "@/lib/sales-chatbot/inbox-shared";
+import { INBOX_CHANNEL_LABEL, INBOX_CHANNELS, INBOX_FILTER_LABEL, INBOX_FILTERS, INBOX_LIST_MAX, INBOX_PERIOD_LABEL, INBOX_HANDLING_LABEL, INBOX_PERIODS, INBOX_SOURCE_LABEL, unreadBadge, type InboxChannel, type InboxFilter, type InboxHandler, type InboxPeriod, type InboxRow } from "@/lib/sales-chatbot/inbox-shared";
+import { AI_HOLD_LABEL } from "@/lib/sales-chatbot/ai-hold-shared";
+import { listPageRoutes } from "@/lib/sales-chatbot/channel-ownership";
+import { humanCooldownMinutes } from "@/lib/sales-chatbot/conversation-control";
 import { organizationLevelPack } from "@/lib/sales-chatbot/levels";
 import { CUSTOMER_LEVEL_CLASS, CUSTOMER_LEVEL_LABEL, CUSTOMER_LEVELS, levelsForPack, type CustomerLevel } from "@/lib/sales-chatbot/levels-shared";
 import { cn } from "@/lib/utils";
 import { InboxAutoRefresh } from "./auto-refresh";
 import { ChannelAvatar } from "./avatar";
 import { LabelChip } from "./labels-panel";
+import { PageRoutesPanel } from "./page-routes";
 import { InboxThreadView } from "./thread-view";
+import { ShellViewportFit } from "@/components/shell-viewport-fit";
+import { isSalesAgentUser } from "@/lib/constants/saas-nav";
+
+/**
+ * Khung hai cột của hộp thư. Ngoài vỏ: ĐÚNG chiều cao cũ (canh cho thanh menu ERP). Trong vỏ app Chốt Đơn: khung tự đo
+ * (`ShellViewportFit`) — thanh dưới cố định của vỏ + vùng an toàn iPhone làm `100dvh - 13.5rem` đẩy ô soạn tin xuống dưới nó.
+ */
+function InboxFrame({ shell, children }: { shell: boolean; children: React.ReactNode }) {
+  if (!shell) return <div className="grid h-[calc(100dvh-13.5rem)] min-h-[560px] overflow-hidden rounded-xl border border-foreground/15 bg-background lg:grid-cols-[360px_minmax(0,1fr)]">{children}</div>;
+  return (
+    <ShellViewportFit testId="inbox-frame" className="grid overflow-hidden rounded-xl border border-foreground/15 bg-background lg:grid-cols-[360px_minmax(0,1fr)]" fallbackClassName="h-[calc(100dvh-15rem-env(safe-area-inset-bottom))] lg:h-[calc(100dvh-9rem)]">
+      {children}
+    </ShellViewportFit>
+  );
+}
 
 export const metadata = { title: "Hộp thư khách" };
 
@@ -42,7 +62,7 @@ function ListItem({ r, href, active, showPage }: { r: InboxRow; href: string; ac
       data-conversation={r.id}
       data-unread={r.unread ? "1" : "0"}
     >
-      <ChannelAvatar name={r.customerName} channel={r.channel} />
+      <ChannelAvatar name={r.customerName} channel={r.channel} src={r.avatarUrl} />
       <div className="min-w-0 flex-1">
         <div className="flex items-baseline justify-between gap-2">
           <span className={cn("truncate text-[14px] text-foreground", r.unread ? "font-extrabold" : "font-semibold")}>{r.customerName}</span>
@@ -53,32 +73,46 @@ function ListItem({ r, href, active, showPage }: { r: InboxRow; href: string; ac
             {r.previewSide ? SIDE_PREFIX[r.previewSide] : ""}
             {r.preview || "—"}
           </p>
-          {r.unread ? <span className="size-2.5 shrink-0 rounded-full bg-primary" aria-label="Chưa đọc" /> : null}
+          {r.unreadCount > 0 ? (
+            <span className="inline-flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-primary px-1.5 text-[11px] font-bold text-primary-foreground" aria-label={`${r.unreadCount} tin chưa đọc`} data-unread-count={r.unreadCount}>
+              {unreadBadge(r.unreadCount)}
+            </span>
+          ) : null}
         </div>
-        {wait !== null || r.status === "HANDOFF" || r.assigneeName || r.hasOrder || r.labels.length || r.level || r.customerPhone || (showPage && r.pageName) ? (
-          <div className="mt-1 flex flex-wrap items-center gap-1 text-[11px]">
-            {showPage && r.pageName ? (
-              <span className="max-w-[10rem] truncate rounded border px-1.5 text-muted-foreground" data-page-chip>
-                {r.pageName}
-              </span>
-            ) : null}
-            {wait !== null ? (
-              <span className={cn("rounded px-1.5 font-medium", wait >= WAIT_URGENT_MIN ? "bg-red-600 text-white" : "bg-amber-100 text-amber-900 dark:bg-amber-950/60 dark:text-amber-200")}>{waitLabel(wait)}</span>
-            ) : null}
-            {r.level && r.level !== "NEW_MESSAGE" ? <span className={cn("rounded px-1.5 font-medium", CUSTOMER_LEVEL_CLASS[r.level])}>{CUSTOMER_LEVEL_LABEL[r.level]}</span> : null}
-            {r.customerPhone ? (
-              <span className="rounded bg-emerald-600 px-1.5 font-semibold text-white" title={`Có SĐT ${r.customerPhone}`}>
-                SĐT
-              </span>
-            ) : null}
-            {r.status === "HANDOFF" ? <span className="rounded bg-rose-600 px-1.5 font-medium text-white">Cần người</span> : null}
-            {r.assigneeName ? <span className="rounded bg-zinc-200 px-1.5 text-zinc-800 dark:bg-zinc-700 dark:text-zinc-100">{r.assigneeName}</span> : null}
-            {r.hasOrder ? <span className="rounded bg-zinc-200 px-1.5 text-zinc-800 dark:bg-zinc-700 dark:text-zinc-100">có đơn</span> : null}
-            {r.labels.map((l) => (
-              <LabelChip key={l.id} label={l} />
-            ))}
-          </div>
-        ) : null}
+        <div className="mt-1 flex flex-wrap items-center gap-1 text-[11px]">
+          {/* Huy hiệu AI / AI gợi ý / Người — `inboxHandlingOf` (một nguồn với thẻ lọc «AI / Người đang xử lý»). */}
+          <span className={cn("rounded px-1.5 font-semibold", r.handling === "AI" ? "bg-violet-600 text-white" : r.handling === "COPILOT" ? "bg-amber-500 text-white" : "bg-orange-500 text-white")} title={AI_HOLD_LABEL[r.aiHold]} data-handler={r.handling === "AI" ? "AI" : "HUMAN"} data-handling={r.handling}>
+            {INBOX_HANDLING_LABEL[r.handling]}
+          </span>
+          <span className={cn("rounded px-1.5 font-medium", r.closed ? "bg-green-600 text-white dark:bg-green-500 dark:text-black" : "border border-foreground/20 text-foreground/70")} data-closed={r.closed ? "1" : "0"}>
+            {r.closed ? "Đã chốt" : "Chưa chốt"}
+          </span>
+          {r.source === "PANCAKE" || r.source === "DIRECT" ? (
+            <span className="rounded border border-foreground/20 px-1.5 text-foreground/70" data-source={r.source}>
+              {INBOX_SOURCE_LABEL[r.source]}
+            </span>
+          ) : null}
+          {showPage && r.pageName ? (
+            <span className="max-w-[10rem] truncate rounded border px-1.5 text-muted-foreground" data-page-chip>
+              {r.pageName}
+            </span>
+          ) : null}
+          {wait !== null ? (
+            <span className={cn("rounded px-1.5 font-medium", wait >= WAIT_URGENT_MIN ? "bg-red-600 text-white" : "bg-amber-100 text-amber-900 dark:bg-amber-950/60 dark:text-amber-200")}>{waitLabel(wait)}</span>
+          ) : null}
+          {r.level && r.level !== "NEW_MESSAGE" ? <span className={cn("rounded px-1.5 font-medium", CUSTOMER_LEVEL_CLASS[r.level])}>{CUSTOMER_LEVEL_LABEL[r.level]}</span> : null}
+          {r.customerPhone ? (
+            <span className="rounded bg-emerald-600 px-1.5 font-semibold text-white" title={`Có SĐT ${r.customerPhone}`}>
+              SĐT
+            </span>
+          ) : null}
+          {r.status === "HANDOFF" ? <span className="rounded bg-rose-600 px-1.5 font-medium text-white">Cần người</span> : null}
+          {r.assigneeName ? <span className="rounded bg-zinc-200 px-1.5 text-zinc-800 dark:bg-zinc-700 dark:text-zinc-100">{r.assigneeName}</span> : null}
+          {r.hasOrder && !r.closed ? <span className="rounded bg-zinc-200 px-1.5 text-zinc-800 dark:bg-zinc-700 dark:text-zinc-100">đơn nháp</span> : null}
+          {r.labels.map((l) => (
+            <LabelChip key={l.id} label={l} />
+          ))}
+        </div>
       </div>
     </Link>
   );
@@ -92,6 +126,8 @@ function ListItem({ r, href, active, showPage }: { r: InboxRow; href: string; ac
  */
 export default async function SalesInboxPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const user = await requirePermission("ai_sales:view");
+  // Vỏ app Chốt Đơn: khung hộp thư đo theo thanh trên + thanh dưới của vỏ (ô soạn tin không bị thanh dưới che), đầu trang gọn.
+  const shell = isSalesAgentUser(user);
   const sp = await searchParams;
   const one = (k: string) => (typeof sp[k] === "string" ? (sp[k] as string) : "");
   const filter = ((INBOX_FILTERS as readonly string[]).includes(one("f")) ? one("f") : "ALL") as InboxFilter;
@@ -113,10 +149,20 @@ export default async function SalesInboxPage({ searchParams }: { searchParams: P
   const pages = await inboxPages();
   const page = pages.some((p) => p.id === one("pg")) ? one("pg") : null;
   // Mở hội thoại TRƯỚC (đánh dấu đã đọc) rồi mới đọc danh sách — không thì hội thoại đang mở vẫn hiện «chưa đọc».
-  const thread = selected ? await loadInboxThread(user, selected) : null;
-  const [list, users, assignees, pack] = await Promise.all([listInbox(user, { filter, channel, q, label, page, phone, level, assignee, period, from, to, limit, handler }), assignableUsers(user), inboxAssignees(user), organizationLevelPack()]);
+  // Workspace KHÁCH: lý do AI không trả lời + dấu vết từng tin lọc ở MÁY CHỦ trước khi vào props (lib/saas/visibility.ts).
+  const loaded = selected ? await loadInboxThread(user, selected) : null;
+  const thread = loaded && "thread" in loaded && customerFacing(user.organization) ? { ...loaded, thread: customerInboxThread(loaded.thread) } : loaded;
+  const canManage = can(user, "ai_sales:manage");
+  const [list, users, assignees, pack, routes, cooldown] = await Promise.all([
+    listInbox(user, { filter, channel, q, label, page, phone, level, assignee, period, from, to, limit, handler }),
+    assignableUsers(user),
+    inboxAssignees(user),
+    organizationLevelPack(),
+    canManage ? listPageRoutes().catch(() => []) : Promise.resolve([]),
+    humanCooldownMinutes(),
+  ]);
   const levels = levelsForPack(pack);
-  const advanced = Boolean(channel || label || assignee || period || phone === "NONE" || handler);
+  const advanced = Boolean(channel || label || assignee || period || phone === "NONE");
   const href = (patch: Record<string, string | null>) => {
     const p = new URLSearchParams();
     const cur: Record<string, string | null> = {
@@ -146,7 +192,10 @@ export default async function SalesInboxPage({ searchParams }: { searchParams: P
       <PageHeader
         eyebrow="AI"
         title="Hộp thư khách"
-        description="Facebook · Instagram · Zalo OA · chat web — trả lời khách ngay trong ERP. Nhân viên gửi tin thì bot nhường."
+        description={shell ? undefined : `Facebook · Instagram · Zalo OA · chat web — trả lời khách ngay trong ERP. Nhân viên gửi tin thì AI nhường ${cooldown} phút.`}
+        // Vỏ app trên điện thoại, đang mở một hội thoại: nhường cả chiều cao cho hội thoại (đầu hội thoại có nút quay lại) —
+        // 375×667 không đủ chỗ cho đầu trang + đầu hội thoại + ô soạn tin cùng lúc.
+        className={shell && selected ? "hidden lg:flex" : undefined}
         refresh={false}
         actions={
           <div className="flex items-center gap-3">
@@ -160,16 +209,28 @@ export default async function SalesInboxPage({ searchParams }: { searchParams: P
       {"error" in list ? (
         <p className="text-sm text-destructive">{list.error}</p>
       ) : (
-        <div className="grid h-[calc(100dvh-13.5rem)] min-h-[560px] overflow-hidden rounded-xl border border-foreground/15 bg-background lg:grid-cols-[360px_minmax(0,1fr)]">
+        <InboxFrame shell={shell}>
           <aside className={cn("min-h-0 flex-col border-r", selected ? "hidden lg:flex" : "flex")}>
             <div className="space-y-2 border-b bg-muted/30 p-2">
-              <div className="flex flex-wrap gap-1">
+              {pages.length > 1 ? (
+                <div className="flex gap-1 overflow-x-auto pb-0.5" data-testid="inbox-page-chips">
+                  <Link href={href({ pg: null, c: null })} className={cn("shrink-0 whitespace-nowrap rounded-full border px-2.5 py-0.5 text-[12px] font-medium", !page ? "border-foreground bg-foreground text-background" : "bg-background hover:bg-muted")}>
+                    Mọi page
+                  </Link>
+                  {pages.map((p) => (
+                    <Link key={p.id} href={href({ pg: p.id, c: null })} className={cn("max-w-[11rem] shrink-0 truncate whitespace-nowrap rounded-full border px-2.5 py-0.5 text-[12px]", page === p.id ? "border-foreground bg-foreground text-background" : "bg-background hover:bg-muted")} data-page-filter={p.id}>
+                      {p.name}
+                    </Link>
+                  ))}
+                </div>
+              ) : null}
+              <div className="flex gap-1 overflow-x-auto pb-0.5 lg:flex-wrap lg:overflow-visible">
                 {INBOX_FILTERS.map((f) => (
                   <Link
                     key={f}
                     href={href({ f: f === "ALL" ? null : f, c: null })}
                     className={cn(
-                      "rounded-full border px-2.5 py-0.5 text-[12px]",
+                      "shrink-0 whitespace-nowrap rounded-full border px-2.5 py-0.5 text-[12px]",
                       f === filter ? "border-primary bg-primary text-primary-foreground" : "bg-background hover:bg-muted",
                       f !== filter && (f === "UNREAD" || f === "UNANSWERED") && list.counts[f] > 0 && "border-primary/60 font-semibold text-primary",
                     )}
@@ -211,18 +272,9 @@ export default async function SalesInboxPage({ searchParams }: { searchParams: P
                 {filter !== "ALL" ? <input type="hidden" name="f" value={filter} /> : null}
                 {level ? <input type="hidden" name="lv" value={level} /> : null}
                 {phone === "HAS" ? <input type="hidden" name="sdt" value="co" /> : null}
+                {page ? <input type="hidden" name="pg" value={page} /> : null}
                 <div className="flex gap-1">
                   <input name="q" defaultValue={q} placeholder="Tìm tên / SĐT…" className="h-8 min-w-0 flex-1 rounded-md border border-foreground/20 bg-background px-2 text-[13px]" aria-label="Tìm khách" />
-                  {pages.length > 1 ? (
-                    <select name="pg" defaultValue={page ?? ""} className="h-8 w-[104px] rounded-md border bg-background px-1 text-[12px]" aria-label="Page" data-testid="inbox-page-filter">
-                      <option value="">Mọi page</option>
-                      {pages.map((p) => (
-                        <option key={p.id} value={p.id}>
-                          {p.name}
-                        </option>
-                      ))}
-                    </select>
-                  ) : null}
                   <button type="submit" className="h-8 rounded-md bg-foreground px-3 text-[12px] font-medium text-background hover:opacity-90">
                     Lọc
                   </button>
@@ -260,11 +312,6 @@ export default async function SalesInboxPage({ searchParams }: { searchParams: P
                       <option value="co">Có SĐT</option>
                       <option value="khong">Chưa có SĐT</option>
                     </select>
-                    <select name="xl" defaultValue={handler === "AI" ? "ai" : handler === "HUMAN" ? "nguoi" : ""} className="h-8 rounded-md border bg-background px-1" aria-label="Ai đang trả lời" data-filter="handler">
-                      <option value="">AI hay người</option>
-                      <option value="ai">{INBOX_HANDLER_LABEL.AI}</option>
-                      <option value="nguoi">{INBOX_HANDLER_LABEL.HUMAN}</option>
-                    </select>
                     <select name="tg" defaultValue={period ?? ""} className="h-8 rounded-md border bg-background px-1" aria-label="Thời gian tin cuối">
                       <option value="">Mọi thời gian</option>
                       {INBOX_PERIODS.map((t) => (
@@ -285,6 +332,7 @@ export default async function SalesInboxPage({ searchParams }: { searchParams: P
                   ) : null}
                 </details>
               </form>
+              {canManage ? <PageRoutesPanel routes={routes} pageNames={Object.fromEntries(pages.map((p) => [p.id, p.name]))} cooldownMinutes={cooldown} canManage={canManage} /> : null}
             </div>
             <ul className="min-h-0 flex-1 divide-y divide-foreground/10 overflow-y-auto" data-testid="inbox-list">
               {list.rows.length === 0 ? <li className="p-6 text-center text-sm text-muted-foreground">Không có hội thoại nào ở bộ lọc này.</li> : null}
@@ -323,7 +371,7 @@ export default async function SalesInboxPage({ searchParams }: { searchParams: P
               />
             )}
           </section>
-        </div>
+        </InboxFrame>
       )}
     </div>
   );

@@ -797,6 +797,10 @@ const LOI_VAN_HANH: Record<string, string> = {
   "lib/saas/console.ts::addCostEntryAsOperator": "Ghi khoản chi phí ngoài AI có căn cứ phân bổ.",
   "lib/saas/console.ts::voidCostEntryAsOperator": "Huỷ khoản chi phí (giữ dòng, lý do bắt buộc).",
   "lib/saas/console.ts::finalizeStatementAsOperator": "Chốt bảng kê kỳ đã qua của một tài khoản (bất biến).",
+  // «AI của workspace» (07/10/2026, lib/saas/operator-ai.ts) — khách không còn ô cấu hình AI; người vận hành sửa trong CSDL tổ chức đích.
+  "lib/saas/operator-ai.ts::loadOperatorOrgAiConfig": "Đọc động cơ AI của chatbot + trạng thái khoá AI (không gợi ý, không bản mã) trong CSDL của MỘT tổ chức khách.",
+  "lib/saas/operator-ai.ts::saveOrgChatbotEngine": "Đổi nguồn AI / model / dự phòng của chatbot một tổ chức khách — bắt buộc lý do, nhật ký tổ chức + nền tảng AI_ORG_CONTROL_SET.",
+  "lib/saas/operator-ai.ts::operateOrgAiConnection": "Lưu / Kiểm tra / Bật / Tắt khoá AI của một tổ chức khách qua lõi sổ kết nối — bắt buộc lý do, nhật ký tổ chức + nền tảng.",
 };
 
 const DOC_PHIEN = new Set(["requireUser", "requirePermission", "getCurrentUser", "resolveCurrentUser", "getSession"]);

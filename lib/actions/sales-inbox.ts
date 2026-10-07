@@ -3,7 +3,9 @@
 import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/auth/session";
 import { assignConversationCore, claimConversationCore, releaseConversationCore, sendStaffReplyCore, suggestReplyCore } from "@/lib/sales-chatbot/inbox";
-import { setConversationControlCore } from "@/lib/sales-chatbot/conversation-control";
+import { setConversationControlCore, setHumanCooldownMinutesCore } from "@/lib/sales-chatbot/conversation-control";
+import { setPageConnectionModeCore } from "@/lib/sales-chatbot/channel-ownership";
+import type { ConnectionMode } from "@/lib/sales-chatbot/channel-ownership-shared";
 import type { ConversationControl } from "@/lib/sales-chatbot/conversation-control-shared";
 import { submitConversationFeedbackCore } from "@/lib/sales-chatbot/inbox-feedback";
 import { addNoteCore, archiveLabelCore, createLabelCore, deleteNoteCore, setConversationLabelsCore } from "@/lib/sales-chatbot/inbox-labels";
@@ -100,4 +102,16 @@ export async function deleteNoteAction(noteId: string): Promise<Out> {
 export async function submitFeedbackAction(conversationId: string, text: string): Promise<Out<{ message: string; lessons: string[] }>> {
   const user = await requireUser();
   return done(await submitConversationFeedbackCore(user, conversationId, text));
+}
+
+/** Chuyển đường nhận tin canonical của MỘT page (Meta trực tiếp ⇄ Pancake) — thao tác tường minh, lý do vào nhật ký (0233). */
+export async function setPageConnectionModeAction(pageId: string, mode: ConnectionMode, reason: string): Promise<Out<{ changed: boolean; from: ConnectionMode | null }>> {
+  const user = await requireUser();
+  return done(await setPageConnectionModeCore(user, pageId, mode, reason));
+}
+
+/** Số phút AI tự trả lời lại sau câu tay của nhân viên — cấu hình của workspace (mặc định 30). */
+export async function setHumanCooldownMinutesAction(minutes: number): Promise<Out<{ minutes: number; changed: boolean }>> {
+  const user = await requireUser();
+  return done(await setHumanCooldownMinutesCore(user, minutes));
 }

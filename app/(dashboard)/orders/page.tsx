@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { shellAllows } from "@/lib/constants/saas-nav";
 import { Download, Plus, ShieldAlert } from "lucide-react";
 import { erpNativeView, loadAutoConfirmComplete, loadManualDeliveryFee, manualOrderGate } from "@/lib/records/order-create";
 import { ErpNativeButton } from "@/app/(dashboard)/orders/erp-native-button";
@@ -73,11 +74,13 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
               (đơn còn trong kho, xếp theo khả năng hoàn), không phải một module riêng — cùng khuôn với
               "Bổ sung danh sách vận đơn" trên trang Đối soát COD.
             */}
-            <Button asChild variant="outline" size="sm">
-              <Link href="/orders/verify">
-                <ShieldAlert className="size-4" /> Cần xác minh trước khi giao
-              </Link>
-            </Button>
+            {shellAllows(user, "/orders/verify") ? (
+              <Button asChild variant="outline" size="sm">
+                <Link href="/orders/verify">
+                  <ShieldAlert className="size-4" /> Cần xác minh trước khi giao
+                </Link>
+              </Button>
+            ) : null}
             <Button asChild variant="outline" size="sm">
               <a href={`/api/export/orders?${exportQuery}`}>
                 <Download className="size-4" /> Xuất CSV

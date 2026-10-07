@@ -10,51 +10,49 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { SectionCard } from "@/components/ui-bits";
+import { AiEngineFields } from "@/components/ai-usage/ai-engine-fields";
 import { saveSalesChatbotConfigAction } from "@/lib/actions/sales-chatbot";
-import { SALES_BOT_FAILURE_LABEL, SALES_TONE_LABEL, SALES_TONES, SALES_TOOL_LABEL, SALES_TOOLS, type SalesBotConnector, type SalesChatbotConfig, type SalesTool, SALES_THINKING, SALES_THINKING_LABEL } from "@/lib/sales-chatbot/config";
-import type { AiFailureClass } from "@/lib/constants/ai-incidents";
-import { formatDateTime } from "@/lib/format";
+import { SALES_TONE_LABEL, SALES_TONES, SALES_TOOL_LABEL, SALES_TOOLS, type SalesChatbotConfig, type SalesTool } from "@/lib/sales-chatbot/config";
+import { CUSTOMER_AI_STATE_HINT, CUSTOMER_AI_STATE_LABEL, type ChatbotEngineConfig, type CustomerAiState, type CustomerChatbotConfig, type EngineConnectionView, type ProviderHealthView } from "@/lib/saas/visibility";
 
-/** Sức khoẻ MỘT khoá AI (lib/sales-chatbot/provider-failover.ts) — hình dạng thuần để truyền từ trang máy chủ. */
-export type ProviderHealthView = { key: string; lastSuccessAt: string | null; lastFailureAt: string | null; lastErrorClass: AiFailureClass | null; openUntil: string | null };
 
 const DAY_LABEL = ["CN", "T2", "T3", "T4", "T5", "T6", "T7"];
-const CONNECTOR_LABEL: Record<SalesBotConnector, string> = { platform: "AI dùng chung của nền tảng — tính vào gói, không cần khoá riêng", "anthropic-byok": "Anthropic (Claude) — khoá của tổ chức", "openai-byok": "OpenAI — khoá của tổ chức", "gemini-byok": "Google Gemini — khoá của tổ chức (rẻ nhất)" };
 
-/** Form cấu hình chatbot — máy chủ kiểm lại bằng CÙNG lược đồ (`salesChatbotConfigZ`). */
+/**
+ * Form cấu hình chatbot — máy chủ kiểm lại bằng CÙNG lược đồ (`salesChatbotConfigZ`).
+ *
+ * Hai đối tượng xem (lib/saas/visibility.ts): workspace NHÀ nhận `engine` (nguồn AI, model, dự phòng, sức khoẻ khoá) và sửa
+ * được; workspace KHÁCH không nhận các ô đó trong props — chỉ thấy `aiState` (một trong bốn câu), và lượt lưu của khách được
+ * máy chủ giữ nguyên động cơ AI đang lưu.
+ */
 export function ChatbotConfigForm({
   config,
   fields,
-  connections,
+  engine = null,
+  aiState = null,
   appointmentsOn = false,
-  health = [],
 }: {
-  config: SalesChatbotConfig;
+  config: CustomerChatbotConfig;
   fields: { key: string; label: string }[];
-  connections: { key: SalesBotConnector; ready: boolean; configured: boolean; reason?: string | null; vendor?: string | null }[];
+  /** Chỉ workspace nhà. */
+  engine?: { config: ChatbotEngineConfig; connections: EngineConnectionView[]; health: ProviderHealthView[] } | null;
+  /** Chỉ workspace khách. */
+  aiState?: CustomerAiState | null;
   /** Module Lịch hẹn đang bật — chỉ khi đó mới có khung «Đặt lịch qua chat». */
   appointmentsOn?: boolean;
-  /** Sức khoẻ khoá AI chính / dự phòng (mạch ngắt, lần trả lời được / lỗi gần nhất). */
-  health?: ProviderHealthView[];
 }) {
   const router = useRouter();
-  const [c, setC] = useState<SalesChatbotConfig>(config);
+  const [c, setC] = useState<CustomerChatbotConfig>(config);
+  const [engineCfg, setEngineCfg] = useState<ChatbotEngineConfig | null>(engine?.config ?? null);
   const [shipping, setShipping] = useState(config.shippingFee === null ? "" : String(config.shippingFee));
   // Miễn ship: nhập dạng chữ (để trống = không xét ngưỡng đó), đổi sang số lúc lưu.
   const [freeMin, setFreeMin] = useState(config.freeShipping.minSubtotal === null ? "" : String(config.freeShipping.minSubtotal));
   const [freeKg, setFreeKg] = useState(config.freeShipping.minWeightGrams === null ? "" : String(config.freeShipping.minWeightGrams / 1000).replace(".", ","));
   const [freeAreas, setFreeAreas] = useState(config.freeShipping.areas.join("\n"));
   const [pending, start] = useTransition();
-  const set = <K extends keyof SalesChatbotConfig>(k: K, v: SalesChatbotConfig[K]) => setC((s) => ({ ...s, [k]: v }));
+  const set = <K extends keyof CustomerChatbotConfig>(k: K, v: CustomerChatbotConfig[K]) => setC((s) => ({ ...s, [k]: v }));
   const setBooking = (patch: Partial<SalesChatbotConfig["booking"]>) => set("booking", { ...c.booking, ...patch });
   const num = (raw: string, fallback: number) => (/^\d+$/.test(raw.trim()) ? Number(raw.trim()) : fallback);
-  const conn = connections.find((x) => x.key === c.connectorKey);
-  const fallbackConn = c.fallbackConnectorKey ? connections.find((x) => x.key === c.fallbackConnectorKey) : undefined;
-  // Sự cố 06/10/2026: khoá của shop và khoá nền tảng cùng là Gemini, cùng tài khoản Google ⇒ hết tiền CÙNG LÚC.
-  const sameVendor = Boolean(fallbackConn?.vendor && conn?.vendor && fallbackConn.vendor === conn.vendor);
-  // Mốc «bây giờ» của lần dựng trang (useState: một lần, không đổi giữa các lần vẽ lại) — đủ để nói khoá nào đang tạm ngắt.
-  const [renderedAt] = useState(() => Date.now());
-  const healthRows = health.filter((h) => h.key === c.connectorKey || h.key === c.fallbackConnectorKey).map((h) => ({ ...h, open: h.openUntil !== null && Date.parse(h.openUntil) > renderedAt }));
 
   const save = (enabled?: boolean) =>
     start(async () => {
@@ -71,7 +69,8 @@ export function ChatbotConfigForm({
       }
       const areas = [...new Set(freeAreas.split(/[\n,;]/).map((x) => x.trim()).filter(Boolean))];
       const freeShipping = { ...c.freeShipping, minSubtotal, minWeightGrams: kg === null ? null : Math.round(kg * 1000), areas };
-      const r = await saveSalesChatbotConfigAction({ ...c, shippingFee: ship, freeShipping, enabled: enabled ?? c.enabled });
+      // Khách: không gửi ô động cơ AI nào — máy chủ giữ nguyên giá trị đang lưu.
+      const r = await saveSalesChatbotConfigAction({ ...c, ...(engineCfg ?? {}), shippingFee: ship, freeShipping, enabled: enabled ?? c.enabled });
       if ("error" in r) toast.error(r.error);
       else {
         if (enabled !== undefined) set("enabled", enabled);
@@ -101,96 +100,31 @@ export function ChatbotConfigForm({
           <Label htmlFor="cb-name">Tên bot</Label>
           <Input id="cb-name" value={c.botName} maxLength={60} onChange={(e) => set("botName", e.target.value)} />
         </div>
-        <div className="space-y-1.5">
-          <Label htmlFor="cb-conn">Khoá AI (nhà cung cấp)</Label>
-          <select id="cb-conn" className="h-9 w-full rounded-md border bg-background px-2 text-sm" value={c.connectorKey} onChange={(e) => set("connectorKey", e.target.value as SalesBotConnector)}>
-            {connections.map((x) => (
-              <option key={x.key} value={x.key}>
-                {CONNECTOR_LABEL[x.key]} — {x.ready ? (x.key === "platform" ? "dùng được" : "đã bật") : x.key === "platform" ? "chưa dùng được" : x.configured ? "chưa bật" : "chưa khai"}
-              </option>
-            ))}
-          </select>
-          {!conn?.ready ? (
-            <p className="text-xs text-destructive">
-              {c.connectorKey === "platform" ? (
-                conn?.reason ?? "AI dùng chung chưa dùng được."
-              ) : (
-                <>
-                  Khoá này chưa sẵn sàng — khai, Kiểm tra, Bật ở <Link href="/settings/connections" className="underline">Cài đặt → Kết nối</Link>.
-                </>
-              )}
-            </p>
-          ) : null}
-        </div>
-        <div className="space-y-1.5">
-          <Label htmlFor="cb-model">Model (để trống = mặc định)</Label>
-          <Input id="cb-model" value={c.model} maxLength={60} placeholder="vd claude-sonnet-5" onChange={(e) => set("model", e.target.value.trim())} />
-        </div>
-        <fieldset className="space-y-2 rounded-md border p-3 sm:col-span-2" data-testid="chatbot-failover">
-          <legend className="px-1 text-sm font-medium">Khoá AI dự phòng</legend>
-          <div className="grid gap-2 sm:grid-cols-3">
-            <div className="space-y-1">
-              <Label htmlFor="cb-fb-conn" className="text-xs">Khi khoá chính hỏng, chuyển sang</Label>
-              <select id="cb-fb-conn" className="h-9 w-full rounded-md border bg-background px-2 text-sm" value={c.fallbackConnectorKey ?? ""} onChange={(e) => set("fallbackConnectorKey", e.target.value ? (e.target.value as SalesBotConnector) : null)}>
-                <option value="">Không có dự phòng — chuyển thẳng cho nhân viên</option>
-                {connections
-                  .filter((x) => x.key !== c.connectorKey)
-                  .map((x) => (
-                    <option key={x.key} value={x.key}>
-                      {CONNECTOR_LABEL[x.key]} — {x.ready ? (x.key === "platform" ? "dùng được" : "đã bật") : x.key === "platform" ? "chưa dùng được" : x.configured ? "chưa bật" : "chưa khai"}
-                    </option>
-                  ))}
-              </select>
-            </div>
-            <div className="space-y-1">
-              <Label htmlFor="cb-fb-model" className="text-xs">Model dự phòng (để trống = mặc định)</Label>
-              <Input id="cb-fb-model" value={c.fallbackModel} maxLength={60} disabled={!c.fallbackConnectorKey} onChange={(e) => set("fallbackModel", e.target.value.trim())} />
-            </div>
-            <div className="space-y-1">
-              <Label htmlFor="cb-fb-open" className="text-xs">Hết tiền / khoá bị từ chối ⇒ ngắt khoá đó (phút)</Label>
-              <Input id="cb-fb-open" inputMode="numeric" value={String(c.failoverOpenMinutes)} disabled={!c.fallbackConnectorKey} onChange={(e) => set("failoverOpenMinutes", Math.min(1440, Math.max(1, num(e.target.value, c.failoverOpenMinutes))))} />
-            </div>
+        {engine && engineCfg ? (
+          <AiEngineFields
+            value={engineCfg}
+            onChange={(patch) => setEngineCfg((s) => (s ? { ...s, ...patch } : s))}
+            connections={engine.connections}
+            health={engine.health}
+            notReadyHint={
+              <>
+                Khoá này chưa sẵn sàng — khai, Kiểm tra, Bật ở <Link href="/settings/connections" className="underline">Cài đặt → Kết nối</Link>.
+              </>
+            }
+          />
+        ) : aiState ? (
+          <div className="space-y-1.5" data-testid="chatbot-ai-state" data-state={aiState}>
+            <Label>Trạng thái AI</Label>
+            <p className={`text-sm font-semibold ${aiState === "ACTIVE" ? "text-emerald-700 dark:text-emerald-400" : aiState === "PAUSED" ? "text-muted-foreground" : "text-amber-700 dark:text-amber-400"}`}>{CUSTOMER_AI_STATE_LABEL[aiState]}</p>
+            <p className="text-xs text-muted-foreground">{CUSTOMER_AI_STATE_HINT[aiState]}</p>
           </div>
-          <label className="flex items-center gap-2 text-sm">
-            <input type="checkbox" checked={c.failoverEnabled} disabled={!c.fallbackConnectorKey} onChange={(e) => set("failoverEnabled", e.target.checked)} /> Tự chuyển sang khoá dự phòng
-          </label>
-          {sameVendor ? (
-            <p className="text-xs text-amber-700 dark:text-amber-400" data-testid="chatbot-failover-same-vendor">
-              Khoá dự phòng cùng nhà cung cấp «{conn?.vendor}» với khoá chính — nếu hai khoá chung một tài khoản thì hết tiền / bị khoá CÙNG LÚC và dự phòng không cứu được (sự cố 06/10/2026). Nên chọn nhà cung cấp khác.
-            </p>
-          ) : null}
-          {fallbackConn && !fallbackConn.ready ? <p className="text-xs text-destructive">Khoá dự phòng chưa sẵn sàng — lúc cần chuyển mà nó chưa dùng được thì khách vẫn được chuyển cho nhân viên như khi không có dự phòng.</p> : null}
-          <p className="text-xs text-muted-foreground">
-            Chỉ chuyển khi lỗi nằm ở NHÀ CUNG CẤP (hết tiền, khoá bị từ chối, quá tải, lỗi máy chủ, quá giờ chờ) và TRƯỚC khi có chữ nào gửi khách — khách không bao giờ nhận hai câu trả lời. Khoá dự phòng trả tiền ở chính nó{c.fallbackConnectorKey === "platform" ? " (AI dùng chung vẫn trừ credit gói và dừng khi hết credit)" : ""}. Khoá chính khoẻ lại ⇒ bot tự quay về. Cả hai cùng hỏng ⇒ chuyển nhân viên như cũ.
-          </p>
-          {healthRows.length ? (
-            <ul className="space-y-0.5 text-xs" data-testid="chatbot-provider-health">
-              {healthRows.map((h) => (
-                <li key={h.key}>
-                  <span className="font-medium">{h.key === c.connectorKey ? "Khoá chính" : h.key === c.fallbackConnectorKey ? "Khoá dự phòng" : "Khoá"}</span> «{h.key}»: {h.open ? <span className="text-destructive">đang tạm ngắt tới {formatDateTime(h.openUntil)}</span> : "đang dùng được"}
-                  {h.lastSuccessAt ? ` · trả lời được lần gần nhất ${formatDateTime(h.lastSuccessAt)}` : ""}
-                  {h.lastFailureAt ? ` · lỗi gần nhất ${formatDateTime(h.lastFailureAt)}${h.lastErrorClass ? ` (${SALES_BOT_FAILURE_LABEL[h.lastErrorClass]})` : ""}` : ""}
-                </li>
-              ))}
-            </ul>
-          ) : null}
-        </fieldset>
+        ) : null}
         <div className="space-y-1.5">
           <Label htmlFor="cb-tone">Giọng điệu</Label>
           <select id="cb-tone" className="h-9 w-full rounded-md border bg-background px-2 text-sm" value={c.tone} onChange={(e) => set("tone", e.target.value as SalesChatbotConfig["tone"])}>
             {SALES_TONES.map((t) => (
               <option key={t} value={t}>
                 {SALES_TONE_LABEL[t]}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div className="space-y-1.5">
-          <Label htmlFor="cb-thinking">Mức suy nghĩ</Label>
-          <select id="cb-thinking" className="h-9 w-full rounded-md border bg-background px-2 text-sm" value={c.thinking} onChange={(e) => set("thinking", e.target.value as SalesChatbotConfig["thinking"])}>
-            {SALES_THINKING.map((t) => (
-              <option key={t} value={t}>
-                {SALES_THINKING_LABEL[t]}
               </option>
             ))}
           </select>
