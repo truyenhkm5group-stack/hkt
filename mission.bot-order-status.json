@@ -3,7 +3,7 @@
   "mission_id": "bot-order-status",
   "title": "Bot tra trạng thái đơn theo lời khai ĐVVC (Commerce Truth)",
   "business_goal": "Khách hỏi đơn tới đâu thì bot trả lời đúng sự thật vận chuyển, không đoán, không lộ đơn người khác",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P0",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -32,7 +32,7 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-07T19:29:21.995Z",
-  "updated_at": "2026-10-07T22:04:46.954Z",
+  "updated_at": "2026-10-07T22:05:16.183Z",
   "last_heartbeat": "2026-10-07T22:04:46.954Z",
   "definition_of_done": [
     "Chỉ đơn của chính hội thoại",
@@ -40,6 +40,9 @@
     "Hội thoại vàng khớp",
     "Mở PR sau #644 (WIP ≤ 1)"
   ],
+  "evidence": {
+    "merged": "#645 → b8eea873752f9f883b9fe448fe9072d80c4713b9"
+  },
   "handoff": {
     "branch": "feat/bot-order-status",
     "sha": "4bd8d21ba2b2df8ddf20671645719fc091fa1647",
