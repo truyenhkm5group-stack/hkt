@@ -337,7 +337,8 @@ async function execute(adapter: ExecutionAdapter, provider: TechExecutionProvide
 /**
  * Bộ thay đổi đã `git add -A` so với commit gốc của lượt: thêm / sửa ⇒ nội dung base64 + chế độ tệp ĐÃ STAGE; xoá ⇒ cờ xoá.
  * Gửi lên `submit-changes`; máy chủ kiểm đường dẫn / năng lực / chính sách / trần rồi tự tạo commit trên ĐÚNG nhánh nó đã
- * cấp. Worker không gửi tên nhánh, không gửi commit gốc — máy chủ lấy từ lượt chạy.
+ * cấp. Worker không gửi tên nhánh (máy chủ lấy từ lượt chạy); commit gốc máy chủ lấy từ lần báo `start` và bắt GitHub xác
+ * nhận nó nằm trên main / là đỉnh nhánh.
  */
 async function submitChanges(t: Claimed, dir: string, message: string): Promise<{ ok: true; commitSha: string } | { ok: false; error: string }> {
   const raw = git(dir, "diff", "--cached", "--no-renames", "--name-status", "-z", "HEAD");

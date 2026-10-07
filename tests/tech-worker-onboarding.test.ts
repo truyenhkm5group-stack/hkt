@@ -178,6 +178,15 @@ export function testTechWorkerOnboardingPure() {
     assert.ok(submitPathProblem(xau), `phải từ chối đường dẫn: ${xau}`);
     assert.equal(validateSubmission({ files: [md(xau)], message: "m" }, feat).ok, false, `phải từ chối: ${xau}`);
   }
+  // Tệp chỉ dẫn agent ở MỌI độ sâu, không phân biệt hoa thường, cả ghi lẫn xoá (review PR #631, lượt 3).
+  for (const xau of ["lib/queries/CLAUDE.md", "docs/CLAUDE.md", "docs/sub/AGENTS.md", "docs/agents.MD", "docs/Claude.local.md", "docs/.claude/skills/x.md", "docs/.Cursor/rules.md", "x/.codex/a.md", "docs/.github/x.md", "docs/.husky/x.md"]) {
+    assert.ok(submitPathProblem(xau), `phải từ chối tệp chỉ dẫn agent: ${xau}`);
+    assert.equal(validateSubmission({ files: [md(xau)], message: "m" }, docs).ok, false, `ghi ${xau} ⇒ từ chối`);
+    assert.equal(validateSubmission({ files: [{ path: xau, delete: true }], message: "m" }, docs).ok, false, `xoá ${xau} ⇒ từ chối`);
+  }
+  assert.equal(submitPathProblem("docs/claude-huong-dan.md"), null, "chỉ chặn đúng TÊN, không chặn chữ claude trong tên khác");
+  const congKhai = validateSubmission({ files: [md("public/huong-dan.md")], message: "m" }, docs);
+  assert.ok(!congKhai.ok && congKhai.errors.some((e) => e.includes("phạm vi năng lực write-docs")), "public/** (lên web production) ngoài phạm vi write-docs");
   const tsTrongDocs = validateSubmission({ files: [{ path: "lib/x.ts", mode: "100644", contentBase64: b64("x") }], message: "m" }, docs);
   assert.ok(!tsTrongDocs.ok && tsTrongDocs.errors.some((e) => e.includes("phạm vi năng lực write-docs")), "năng lực write-docs gửi tệp .ts ⇒ từ chối");
   assert.ok(!validateSubmission({ files: [{ path: "lib/x.ts", mode: "100644", contentBase64: b64("x") }], message: "m" }, { capability: "implement-feature", policyLevel: "R0" }).ok, "chính sách R0 chỉ tài liệu / kiểm thử");

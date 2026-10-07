@@ -415,11 +415,14 @@ trong cổng (`eslint.config.mjs`, `tests/*.ts`) dưới ĐÚNG tài khoản Win
 và token `contents: write` gộp được PR xanh vào `main`. Cửa `push-credential` đã BỎ HẲN. Đường hiện tại:
 
 - Worker xong cổng ⇒ `POST /api/tech/worker/submit-changes` (khoá worker + đúng lease + `leaseGeneration`): danh sách tệp
-  `{đường dẫn, nội dung base64 | xoá, chế độ}` + thông điệp commit. KHÔNG gửi tên nhánh, KHÔNG gửi commit gốc.
+  `{đường dẫn, nội dung base64 | xoá, chế độ}` + thông điệp commit. KHÔNG gửi tên nhánh. Commit gốc là `base_commit` worker
+  báo lúc `start` — máy chủ KHÔNG tin nó: chốt chặn là GitHub phải xác nhận gốc nằm trên `main` (hoặc là đỉnh nhánh).
 - Máy chủ kiểm (`validateSubmission`, không tin worker): trần 200 tệp / 1 MB mỗi tệp / 5 MB tổng; đường dẫn chuẩn hoá — cấm
   tuyệt đối, `..`, `.`, đoạn rỗng, `\`, `.git`, `AGENT_FORBIDDEN_PATHS` (`.github/`, `drizzle/`, `package.json`, mã worker…),
   script deploy / cài đặt, Dockerfile, `.gitmodules`; chỉ chế độ 100644 / 100755 (symlink 120000, submodule 160000 ⇒ từ
-  chối); PHẠM VI theo năng lực của VIỆC (`write-docs` ⇒ chỉ `docs/**` + `*.md`) và chính sách (R0 ⇒ chỉ tài liệu / kiểm thử).
+  chối); tệp chỉ dẫn agent ở MỌI độ sâu theo tên (`CLAUDE.md`, `CLAUDE.local.md`, `AGENTS.md`, thư mục `.claude` / `.cursor` / `.codex`
+  / `.github` / `.husky`, không phân biệt hoa thường, cả ghi lẫn xoá); PHẠM VI theo năng lực của VIỆC (`write-docs` ⇒ chỉ
+  `docs/**` + `*.md`, trừ `public/**`) và chính sách (R0 ⇒ chỉ tài liệu / kiểm thử).
 - Máy chủ ghi bằng GitHub Git Data API (`commitAgentChanges`): commit gốc → blobs → tree (`base_tree`) → commit (cha = gốc)
   → ref. Nhánh = `ai/worker/<MÃ>-a<n>` lấy từ lượt chạy ở CSDL; gốc = `base_commit` ghi lúc `start`, và GitHub phải xác nhận
   nó nằm trên `main` (nhánh mới) hoặc đúng là đỉnh nhánh (việc sửa CI — cập nhật không force). Token cài đặt riêng của lượt

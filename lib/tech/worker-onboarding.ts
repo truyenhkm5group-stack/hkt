@@ -226,9 +226,10 @@ function submissionHash(baseSha: string, message: string, files: SubmittedFile[]
 
 /**
  * Worker nộp bộ thay đổi của lượt đang giữ lease; MÁY CHỦ kiểm rồi tự ghi nhánh (`commitAgentChanges`). Token GitHub không
- * bao giờ rời máy chủ. Ba điều máy chủ KHÔNG nhận từ worker: tên nhánh (lấy từ lượt chạy — `ai/worker/<MÃ>-a<n>` do máy chủ
- * dựng lúc nhận việc), commit gốc (lấy `base_commit` đã ghi lúc `start`, và GitHub phải xác nhận nó nằm trên main / là đỉnh
- * nhánh), và phạm vi được ghi (năng lực + chính sách của VIỆC ở CSDL).
+ * bao giờ rời máy chủ. Tên nhánh máy chủ KHÔNG nhận từ worker (lấy từ lượt chạy — `ai/worker/<MÃ>-a<n>` do máy chủ dựng
+ * lúc nhận việc). Commit gốc là `base_commit` WORKER báo lúc `start` — không tin nó: chốt chặn là GitHub phải xác nhận nó nằm
+ * trên main (nhánh mới) hoặc đúng là đỉnh nhánh (việc sửa CI), nên gốc lạ không bao giờ thành cha của commit.
+ * Phạm vi được ghi lấy từ năng lực + chính sách của VIỆC ở CSDL.
  */
 export async function submitWorkerChanges(worker: TechWorkerRow, input: { runId: string; leaseGeneration: number; message: string; files: SubmittedFile[] }, now = new Date()): Promise<SubmitResult> {
   if (!worker.enabled) return { error: "WORKER_DISABLED" };

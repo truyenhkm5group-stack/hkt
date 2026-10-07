@@ -38,7 +38,8 @@ export const SUBMIT_EXTRA_FORBIDDEN = [/^scripts\/(install-vps|deploy)[^/]*$/, /
  * Phạm vi ghi theo NĂNG LỰC của việc — máy chủ quyết, không tin worker. Năng lực không khai ⇒ mọi đường không cấm.
  * Chính sách R0 (tài liệu / kiểm thử) ⇒ chỉ tài liệu + kiểm thử, bất kể năng lực.
  */
-const DOCS = (p: string) => p.startsWith("docs/") || p.endsWith(".md");
+// `public/**` bị loại: `public/x.md` được phục vụ thẳng trên web production (review PR #631, lượt 3).
+const DOCS = (p: string) => !p.startsWith("public/") && (p.startsWith("docs/") || p.endsWith(".md"));
 const TESTS = (p: string) => p.startsWith("tests/");
 export const CAPABILITY_WRITE_SCOPE: Record<string, (p: string) => boolean> = {
   "write-docs": DOCS,
@@ -55,10 +56,20 @@ export function submitPathProblem(p: string): string | null {
   const seg = p.split("/");
   if (seg.some((s) => s === "" || s === "." || s === "..")) return "đường dẫn có đoạn rỗng / . / ..";
   if (seg.some((s) => s.toLowerCase() === ".git")) return "đường dẫn chạm .git";
+  // Tệp chỉ dẫn của agent ở MỌI độ sâu (Claude Code / Codex / Cursor đọc chúng như lệnh) — ghi vào là tiêm lời nhắc sống
+  // lâu dài nếu PR được gộp. So THEO TÊN, không phân biệt hoa thường, cho cả ghi lẫn xoá.
+  const ten = seg[seg.length - 1]!.toLowerCase();
+  if (AGENT_INSTRUCTION_FILES.includes(ten)) return "tệp chỉ dẫn của agent";
+  if (seg.slice(0, -1).some((s) => AGENT_CONFIG_DIRS.includes(s.toLowerCase()))) return "thư mục cấu hình agent / hook";
   if (forbiddenTouched([p]).length) return "đường cấm của agent";
   if (SUBMIT_EXTRA_FORBIDDEN.some((re) => re.test(p))) return "đường chạy lúc deploy / cài đặt";
   return null;
 }
+
+/** Tên tệp chỉ dẫn agent — chặn ở MỌI độ sâu (so chữ thường). */
+export const AGENT_INSTRUCTION_FILES = ["claude.md", "claude.local.md", "agents.md"];
+/** Đoạn thư mục cấu hình agent / hook / CI — chặn ở MỌI độ sâu (so chữ thường). */
+export const AGENT_CONFIG_DIRS = [".claude", ".cursor", ".codex", ".github", ".husky"];
 
 export type SubmitCheck = { ok: true; totalBytes: number } | { ok: false; errors: string[] };
 
