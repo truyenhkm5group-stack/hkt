@@ -44,8 +44,8 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-07T18:21:27.081Z",
-  "updated_at": "2026-10-07T19:06:49.028Z",
-  "last_heartbeat": "2026-10-07T19:06:35.403Z",
+  "updated_at": "2026-10-07T20:11:29.355Z",
+  "last_heartbeat": "2026-10-07T20:11:29.355Z",
   "definition_of_done": [
     "Nạp 1.000.000đ trên điện thoại bằng QR",
     "Tiền về cộng đúng một lần, không duyệt tay",
@@ -55,13 +55,16 @@
   ],
   "handoff": {
     "branch": "feat/ai-balance-v1",
-    "sha": "83703b9e9fb9d7f3bbaa83dff7243216cba94e9c",
-    "at": "2026-10-07T19:06:35.403Z",
+    "sha": "1609070caa71ccb4a66a376789c296dc109c6701",
+    "at": "2026-10-07T20:11:29.355Z",
     "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
     "title": "Số dư AI + nạp QR (SePay, mã ERPNAP) — sổ cái chỉ ghi thêm, màn khách + vận hành, cờ canary",
     "summary": "",
     "tests": [
-      "tsc + eslint sạch; ai-balance · ai-balance-usage · L5 · sổ migration · diễn tập khôi phục · điều hướng · toàn vẹn kho đạt sau commit; kiểm đột biến 9/9"
+      "npm test (đủ bộ, Windows): TẤT CẢ KIỂM THỬ ĐẠT 831 bài",
+      "tsc --noEmit: sạch",
+      "npm run lint: sạch",
+      "CI gates 1609070c: tinh · kiem_thu · kiem_thu_token · dung_ban đều success"
     ]
   }
 }
