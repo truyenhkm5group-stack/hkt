@@ -1,0 +1,30 @@
+{
+  "schema": 1,
+  "mission_id": "messenger-oauth-scopes",
+  "title": "Kết nối Facebook Page bị Meta từ chối «Invalid Scopes»",
+  "business_goal": "",
+  "status": "RUNNING",
+  "priority": "P0",
+  "risk": "MEDIUM",
+  "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "worker": null,
+  "worktree": null,
+  "branch": "fix/messenger-oauth-scopes",
+  "base_sha": "64c90acb7de5d14fb428c8ef1e2741c352640fa1",
+  "domains": [],
+  "owned_paths": [
+    "lib/integrations/messenger/graph.ts",
+    "app/(dashboard)/platform/page.tsx",
+    "tests/messenger-webhook-secrets.test.ts",
+    "docs/meta-app-review/01-quyen-va-dieu-kien.md",
+    "docs/meta-app-review/README.md"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-07T02:59:12.642Z",
+  "updated_at": "2026-10-07T02:59:12.642Z",
+  "last_heartbeat": "2026-10-07T02:59:12.642Z",
+  "definition_of_done": []
+}
