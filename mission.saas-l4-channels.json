@@ -3,7 +3,7 @@
   "mission_id": "saas-l4-channels",
   "title": "Kênh kết nối hợp nhất cho khách",
   "business_goal": "",
-  "status": "INTEGRATING",
+  "status": "VERIFYING",
   "priority": "P1",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-saas-l4",
@@ -30,11 +30,13 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-07T10:35:57.696Z",
-  "updated_at": "2026-10-07T16:27:31.620Z",
+  "updated_at": "2026-10-07T17:08:55.122Z",
   "last_heartbeat": "2026-10-07T16:24:47.597Z",
   "definition_of_done": [],
   "evidence": {
-    "merged": "#637 → 48efcfecb80fefc14b6d7b9fc3eb5a688ee2bd7f"
+    "merged": "#637 → 48efcfecb80fefc14b6d7b9fc3eb5a688ee2bd7f",
+    "verify": "PASS fbef46ca8b66e26dd3154fd05eb763fe76fdee4d 2026-10-07T17:08:52.180Z",
+    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/37654798771"
   },
   "handoff": {
     "branch": "feat/saas-l4-channels",
