@@ -42,6 +42,8 @@ import { loadChatCostReport } from "@/lib/sales-chatbot/cost-report";
 import { SALES_STAGE_LABEL, type SalesStage } from "@/lib/sales-chatbot/stages";
 import { loadReadiness } from "@/lib/sales-chatbot/readiness";
 import { READINESS_VERDICT_LABEL } from "@/lib/sales-chatbot/readiness-shared";
+import { PageRuntimePanel } from "./page-runtime-panel";
+import { pageRuntimeView } from "@/lib/sales-chatbot/page-runtime";
 
 export const metadata = { title: "Chatbot bán hàng" };
 
@@ -76,6 +78,8 @@ export default async function SalesChatbotPage() {
   // Hội thoại gần đây của page nối THẲNG Meta — chỉ khi có page trực tiếp và người xem quản lý được chatbot.
   const messengerHistory = await loadMessengerHistoryView(user);
   const modeConfig = fanpage ? await loadModeConfig() : null;
+  // Workspace NHÀ: bot Chốt Đơn chỉ chạm page có trong danh sách (Tắt / Bóng / Chạy thật) — page-runtime.ts. Khách: không có khối này.
+  const pageRuntime = user.organization?.isHome ? await pageRuntimeView().catch(() => null) : null;
   // «AI dùng chung của nền tảng» (0193) không phải một kết nối của tổ chức: sẵn sàng = nền tảng bật + gói có credit + còn credit.
   const platformAi = user.organization?.code ? await platformChatAi(user.organization.code) : { ok: false as const, reason: "Không xác định được tổ chức." };
   const aiConnections = SALES_BOT_CONNECTORS.map((k) => {
@@ -141,6 +145,11 @@ export default async function SalesChatbotPage() {
                   </li>
                 ))}
               </ul>
+            </SectionCard>
+          ) : null}
+          {pageRuntime?.isHome ? (
+            <SectionCard title="Bot Chốt Đơn theo page (workspace nhà)" description="Mặc định mọi page TẮT. Bóng = bot soạn câu để so, không gửi. Chạy thật là quyết định của chủ shop.">
+              <PageRuntimePanel pages={pageRuntime.pages} manage={manage} />
             </SectionCard>
           ) : null}
           {modeConfig ? (

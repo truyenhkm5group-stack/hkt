@@ -60,5 +60,18 @@ duyệt mỗi page. Bốn chặn kỹ thuật đã đo, phải gỡ trước:
 - Chặn 1 — CHƯA: `PancakePosSink` là PR riêng. Trong lúc chờ, bot Chốt Đơn ở nhà bị `manualOrderOrgGate()` từ chối tạo đơn
   (đúng: không sinh bản thứ hai của một lần mua).
 
+**Cổng chạy theo page (07/10/2026, nhánh `feat/saas-a2-page-gate`):** production đo 07/10 — `ai_sales` của nhà ĐANG BẬT, nên
+chỉ còn công tắc bot đứng giữa khách nhà và bot mới. Thêm một cổng theo page (`lib/sales-chatbot/page-runtime*.ts`, khoá
+`ai.salesChatbot.pageRuntime`): ở NHÀ mỗi page là OFF (mặc định, kể cả danh sách rỗng) · SHADOW (soạn câu ở hội thoại bóng,
+lưu vào `sales_copilot_suggestions` để so với câu thật của bot cũ / nhân viên, không gửi) · LIVE (như khách — chủ shop bật ở
+/ai/sales-chatbot, phải xác nhận bot cũ đã thôi trả lời page đó). Cổng nằm ở ba hàm xử lý tin (fanpage · Messenger · Zalo —
+nên phủ cả quét bù, quét lại tin rơi, thử lại tin AI hỏng), follow-up, ghi đơn từ hội thoại, chốt cuối `botSendAllowed` (đọc lỗi
+⇒ không gửi) bên trong MỌI hàm gửi của đường bot (fanpage `sendInbox`/`sendImages`/`deliverCommentReply`, Messenger
+`sendMessengerPageText`/`sendBotImages`/tin riêng bình luận, Zalo `zaloSendText`), và ba việc không gắn page (tin sáng mua lại ·
+báo nhóm đơn mới · tự học: chỉ chạy khi nhà có ít nhất một page LIVE). `sendReorderDigest` và `sendNewOrderAlerts` KHÔNG xét
+`cfg.enabled`, nên ở nhà cổng này là thứ duy nhất giữ chúng im (đo 07/10: 0 tin `reorder-digest` / `order-new` trong 3 ngày).
+Lưu danh sách ghi nguyên tử từng khoá page (jsonb), hai lượt lưu song song không ghi lại bản cũ của nhau. Khách
+không có cổng (mọi page LIVE). `tests/saas-page-gate.test.ts` khoá: rỗng ⇒ 0 tin / 0 AI trên mọi đường; bóng ⇒ lưu, 0 gửi.
+
 Khi bốn chặn gỡ xong: bật `ai_sales` cho workspace nhà ở chế độ bóng trên MỘT page → so hội thoại vàng → chủ shop duyệt →
 chuyển page → lặp → tắt container. Thuê bao Chốt Đơn của VNX không đổi qua cả quá trình (chỉ runtime đổi).

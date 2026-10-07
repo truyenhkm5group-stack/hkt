@@ -20,6 +20,7 @@ import { canUseModule } from "@/lib/platform/capabilities";
 import { currentOrganization } from "@/lib/platform/context";
 import { loadSalesChatbotConfig, readJsonSetting, salesChatProvider } from "@/lib/sales-chatbot/engine";
 import { fanpageVisitorKey, PAGE_REPLY, PANCAKE_AUTO_NOTE_RE } from "@/lib/sales-chatbot/fanpage";
+import { homeRuntimeIdleReason } from "@/lib/sales-chatbot/page-runtime";
 import {
   LESSON_LIMITS,
   LESSONS_SETTING_KEY,
@@ -161,6 +162,9 @@ export async function learnLessons(opts: { now?: Date; force?: boolean; actor?: 
   if (!opts.force) {
     if (!(await canUseModule("ai_sales"))) return none("NOT_DUE", "Module AI bán hàng chưa bật");
     if (!(await loadSalesChatbotConfig()).enabled) return none("NOT_DUE", "Chatbot đang tắt");
+    // Workspace nhà chưa page nào LIVE ⇒ chưa có hội thoại nào của bot mới để học, không tốn tiền AI (page-runtime.ts).
+    const idle = await homeRuntimeIdleReason();
+    if (idle) return none("NOT_DUE", idle);
   }
   const until = new Date(now.getTime() - SETTLE_MS);
   const sinceAt = state.learnedUntil ? Date.parse(state.learnedUntil) : NaN;

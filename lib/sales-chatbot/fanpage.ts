@@ -47,6 +47,8 @@ import type { ChatState } from "@/lib/sales-chatbot/tools";
 import { pancakeImageUrls } from "@/lib/sales-chatbot/vision";
 import { adReferralFromPancake, isPancakePageSide, type AdReferral } from "@/lib/sales-chatbot/ad-referral-shared";
 import { recordConversationAd } from "@/lib/sales-chatbot/ad-referral";
+import { botSendAllowed, inboundPageGate, pageRuntimeMode } from "@/lib/sales-chatbot/page-runtime";
+import { PAGE_NOT_LIVE_SEND_ERROR, PAGE_OFF_NOTE } from "@/lib/sales-chatbot/page-runtime-shared";
 
 export const FANPAGE_CONNECTOR = "pancake-fanpage";
 /** Nhân viên thật vừa trả lời trên fanpage ⇒ bot im lặng chừng này phút cho hội thoại đó. */
@@ -564,7 +566,7 @@ export async function sendFanpageImages(pageId: string, threadId: string, images
   const t = schema.salesChatInbound;
   const rowId = `${STAFF_OUT_PREFIX}${mark.staffMessageId}:img`;
   await db.insert(t).values({ pageId, threadId, messageId: rowId, text: STAFF_IMAGE_MARK, status: "DONE", processedAt: now(), note: PAGE_REPLY }).onConflictDoNothing({ target: t.messageId });
-  const sent = await sendImages(pageId, threadId, token, ids, fetchImpl);
+  const sent = await sendImages(pageId, threadId, token, ids, fetchImpl, "STAFF");
   if (!sent.ok) {
     if (!sent.ids.length) await db.delete(t).where(eq(t.messageId, rowId));
     return { ok: false, error: sent.error };
@@ -572,8 +574,15 @@ export async function sendFanpageImages(pageId: string, threadId: string, images
   return { ok: true };
 }
 
+/**
+ * Ai gửi tin: `BOT` đi qua cổng page của nhà (page-runtime.ts — chỉ page LIVE, đọc lỗi ⇒ không gửi); `STAFF` = người bấm gửi
+ * từ hộp thư ERP, không qua cổng. Hai hàm gửi nội bộ dưới đây bắt nơi gọi KHAI RÕ, không có mặc định.
+ */
+type Sender = "BOT" | "STAFF";
+
 /** Gửi ảnh (đã có mã nội dung) vào hội thoại — mỗi tin tối đa `IMAGES_PER_MESSAGE` ảnh. */
-async function sendImages(pageId: string, threadId: string, token: string, contentIds: readonly string[], fetchImpl: typeof fetch): Promise<{ ok: true; ids: string[] } | { ok: false; error: string; ids: string[] }> {
+async function sendImages(pageId: string, threadId: string, token: string, contentIds: readonly string[], fetchImpl: typeof fetch, who: Sender): Promise<{ ok: true; ids: string[] } | { ok: false; error: string; ids: string[] }> {
+  if (who === "BOT" && !(await botSendAllowed(pageId))) return { ok: false, error: PAGE_NOT_LIVE_SEND_ERROR, ids: [] };
   const ids: string[] = [];
   const url = `${PANCAKE_PAGES_API}/v1/pages/${encodeURIComponent(pageId)}/conversations/${encodeURIComponent(threadId)}/messages?page_access_token=${encodeURIComponent(token)}`;
   try {
@@ -589,7 +598,8 @@ async function sendImages(pageId: string, threadId: string, token: string, conte
   }
 }
 
-async function sendInbox(pageId: string, threadId: string, token: string, text: string, fetchImpl: typeof fetch): Promise<{ ok: true; ids: string[] } | { ok: false; error: string }> {
+async function sendInbox(pageId: string, threadId: string, token: string, text: string, fetchImpl: typeof fetch, who: Sender): Promise<{ ok: true; ids: string[] } | { ok: false; error: string }> {
+  if (who === "BOT" && !(await botSendAllowed(pageId))) return { ok: false, error: PAGE_NOT_LIVE_SEND_ERROR };
   const ids: string[] = [];
   const url = `${PANCAKE_PAGES_API}/v1/pages/${encodeURIComponent(pageId)}/conversations/${encodeURIComponent(threadId)}/messages?page_access_token=${encodeURIComponent(token)}`;
   try {
@@ -652,6 +662,8 @@ export async function markWaitingForCustomer(conversationId: string, now: Date, 
 export async function sendFanpageText(pageId: string, threadId: string, text: string, deps: FanpageDeps = {}, mark?: StaffMark): Promise<{ ok: true } | { ok: false; error: string }> {
   const conn = await openActiveConnection(FANPAGE_CONNECTOR);
   if (!conn.ok || (conn.settings.pageId ?? "").trim() !== pageId) return { ok: false, error: "Kết nối fanpage chưa bật / khác page" };
+  // Chốt cuối của cổng page (page-runtime.ts): tin BOT (follow-up, xác nhận đặt lại) chỉ đi khi page LIVE. Tin nhân viên (`mark`) không qua cổng.
+  if (!mark && !(await botSendAllowed(pageId))) return { ok: false, error: PAGE_NOT_LIVE_SEND_ERROR };
   const token = (conn.secrets.pageAccessToken ?? "").trim();
   const now = deps.now ?? (() => new Date());
   const db = await getDb();
@@ -662,7 +674,7 @@ export async function sendFanpageText(pageId: string, threadId: string, text: st
     .insert(t)
     .values(parts.map((part, i) => ({ pageId, threadId, messageId: preIds[i], text: normalizeEcho(part), status: "DONE", processedAt: now(), note: mark ? PAGE_REPLY : "BOT_SENT" })))
     .onConflictDoNothing({ target: t.messageId });
-  const sent = await sendInbox(pageId, threadId, token, text, deps.fetch ?? fetch);
+  const sent = await sendInbox(pageId, threadId, token, text, deps.fetch ?? fetch, mark ? "STAFF" : "BOT");
   if (!sent.ok) {
     if (mark) await db.delete(t).where(inArray(t.messageId, preIds));
     return { ok: false, error: sent.error };
@@ -672,6 +684,14 @@ export async function sendFanpageText(pageId: string, threadId: string, text: st
   if (sent.ids.length) await db.insert(t).values(sent.ids.map((id) => ({ pageId, threadId, messageId: id, text: text.slice(0, TEXT_MAX), status: "DONE", processedAt: now(), note: "BOT_SENT" }))).onConflictDoNothing({ target: t.messageId });
   return { ok: true };
 }
+
+/** Ba hàm gửi NỘI BỘ của đường bot — chỉ để bài kiểm gọi thẳng (tests/saas-page-gate.test.ts), không dùng ở mã chạy. */
+export const fanpageBotSendersForTests = {
+  sendInbox: (pageId: string, threadId: string, text: string, fetchImpl: typeof fetch, who: Sender) => sendInbox(pageId, threadId, PAGE_TOKEN_FOR_TESTS, text, fetchImpl, who),
+  sendImages: (pageId: string, threadId: string, contentIds: readonly string[], fetchImpl: typeof fetch) => sendImages(pageId, threadId, PAGE_TOKEN_FOR_TESTS, contentIds, fetchImpl, "BOT"),
+  deliverCommentReply: (input: Omit<CommentReplyInput, "token">, deps: FanpageDeps) => deliverCommentReply({ ...input, token: PAGE_TOKEN_FOR_TESTS }, deps),
+};
+const PAGE_TOKEN_FOR_TESTS = "token-bai-kiem";
 
 type CommentReplyInput = { pageId: string; threadId: string; token: string; commentId: string; postId: string; fromId: string; text: string; imageIds: readonly string[]; conversationId: string };
 type CommentReplyResult = { kind: "SENT"; inboxId: string | null; warning: string | null } | { kind: "ALREADY"; reason: string } | { kind: "FAILED"; reason: string };
@@ -702,6 +722,8 @@ async function deliverCommentReply(input: CommentReplyInput, deps: FanpageDeps):
   const fetchImpl = deps.fetch ?? fetch;
   const now = deps.now ?? (() => new Date());
   const { pageId, threadId, token, commentId } = input;
+  // Chốt cổng page TRƯỚC mọi lời gọi Pancake (kể cả lời ĐỌC hộp thư) — tin riêng trả lời bình luận chỉ là tin của bot.
+  if (!(await botSendAllowed(pageId))) return { kind: "FAILED", reason: PAGE_NOT_LIVE_SEND_ERROR };
   const text = input.text.trim().slice(0, TEXT_MAX);
   if (!text) return { kind: "FAILED", reason: "Bot không soạn được câu trả lời cho bình luận" };
   const before = await privateReplyInbox(pageId, threadId, commentId, token, fetchImpl);
@@ -740,7 +762,7 @@ async function deliverCommentReply(input: CommentReplyInput, deps: FanpageDeps):
     const up = await contentIdsFor(pageId, token, input.imageIds, fetchImpl, now());
     if (up.ids.length) {
       await db.insert(t).values({ pageId, threadId: inboxId, messageId: `bot-out:${randomUUID()}`, text: "", status: "DONE", processedAt: now(), note: "BOT_SENT" }).onConflictDoNothing({ target: t.messageId });
-      const sentImgs = await sendImages(pageId, inboxId, token, up.ids, fetchImpl);
+      const sentImgs = await sendImages(pageId, inboxId, token, up.ids, fetchImpl, "BOT");
       if (sentImgs.ids.length) await db.insert(t).values(sentImgs.ids.map((id) => ({ pageId, threadId: inboxId, messageId: id, text: "", status: "DONE", processedAt: now(), note: "BOT_SENT" }))).onConflictDoNothing({ target: t.messageId });
       if (!sentImgs.ok) warning = sentImgs.error;
     }
@@ -888,6 +910,14 @@ export async function processFanpageThread(pageId: string, threadId: string, dep
         .update(t)
         .set(status === "PENDING" ? { claimId: null, claimedAt: null, note } : { status, processedAt: now(), note })
         .where(and(inArray(t.id, ids), eq(t.claimId, claim)));
+    // CỔNG PAGE CỦA NHÀ (page-runtime.ts): OFF ⇒ im; SHADOW ⇒ soạn bóng, không gửi. Khách luôn LIVE ⇒ đi tiếp như cũ.
+    const pageGate = await inboundPageGate({ pageId, threadId, rows: claimed, conversation: () => conversationFor(pageId, threadId), mirror: (id, at) => mirrorFanpageContext(id, pageId, threadId, at) });
+    if (pageGate) {
+      await finish("SKIPPED", pageGate);
+      out.processed += ids.length;
+      out.skipped = pageGate;
+      continue;
+    }
     // Page đã trả lời (Meta tự động / nhân viên) sau tin khách sớm nhất của lượt ⇒ bot không chen.
     if (await pageRepliedSince()) {
       await finish("SKIPPED", PAGE_REPLIED_REASON);
@@ -1063,7 +1093,7 @@ export async function processFanpageThread(pageId: string, threadId: string, dep
       const up = await contentIdsFor(pageId, token, media, deps.fetch ?? fetch, now());
       if (up.ids.length) {
         await db.insert(t).values({ pageId, threadId, messageId: `bot-out:${randomUUID()}`, text: "", status: "DONE", processedAt: now(), note: "BOT_SENT" }).onConflictDoNothing({ target: t.messageId });
-        const sentImgs = await sendImages(pageId, threadId, token, up.ids, deps.fetch ?? fetch);
+        const sentImgs = await sendImages(pageId, threadId, token, up.ids, deps.fetch ?? fetch, "BOT");
         if (sentImgs.ids.length) await db.insert(t).values(sentImgs.ids.map((id) => ({ pageId, threadId, messageId: id, text: "", status: "DONE", processedAt: now(), note: "BOT_SENT" }))).onConflictDoNothing({ target: t.messageId });
         if (!sentImgs.ok) sendError = sentImgs.error;
       }
@@ -1082,7 +1112,7 @@ export async function processFanpageThread(pageId: string, threadId: string, dep
         .insert(t)
         .values(chunkText(r.text, TEXT_MAX).map((part) => ({ pageId, threadId, messageId: `bot-out:${randomUUID()}`, text: normalizeEcho(part), status: "DONE", processedAt: now(), note: "BOT_SENT" })))
         .onConflictDoNothing({ target: t.messageId });
-      const sent = await sendInbox(pageId, threadId, token, r.text, deps.fetch ?? fetch);
+      const sent = await sendInbox(pageId, threadId, token, r.text, deps.fetch ?? fetch, "BOT");
       if (!sent.ok) {
         sendError = sent.error;
         break;
@@ -1214,6 +1244,8 @@ export async function catchUpFanpage(deps: FanpageDeps = {}): Promise<CatchUpRes
   const pageId = (conn.settings.pageId ?? "").trim();
   const token = (conn.secrets.pageAccessToken ?? "").trim();
   if (!pageId || !token) return { ...out, detail: ["kết nối fanpage thiếu page / token"] };
+  // Page của nhà đang OFF ⇒ không đọc Pancake, không nhận / mở lại tin nào (page-runtime.ts).
+  if ((await pageRuntimeMode(pageId)) === "OFF") return { ...out, detail: [PAGE_OFF_NOTE] };
   // Chế độ API (không cần webhook — webhook của Pancake tốn 2 slot thuê bao): mốc đồng bộ + ngân sách + lùi khi lỗi theo
   // `pancake-poll-shared.ts`. Mốc lưu trong CSDL tổ chức ⇒ sống qua khởi động lại.
   const nowMs0 = now().getTime();

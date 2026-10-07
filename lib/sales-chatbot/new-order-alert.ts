@@ -17,6 +17,7 @@ import { formatVND } from "@/lib/format";
 import { deliverMessage } from "@/lib/messaging/service";
 import { operationsGroupChannel } from "@/lib/sales-chatbot/alerts";
 import { loadSalesChatbotConfig } from "@/lib/sales-chatbot/engine";
+import { homeRuntimeIdleReason } from "@/lib/sales-chatbot/page-runtime";
 import { orderGroupText, ORDER_SYNC_CHANNEL } from "@/lib/sales-chatbot/order-sync-shared";
 import { freeShipVerdict, variantWeightGrams, type FreeShippingRule } from "@/lib/sales-chatbot/shipping";
 
@@ -55,6 +56,9 @@ export type NewOrderAlertResult = { candidates: number; sent: number; reason?: s
 
 export async function sendNewOrderAlerts(now: Date = new Date()): Promise<NewOrderAlertResult> {
   try {
+    // Workspace nhà: đơn đến từ Pancake và bot cũ đang lo — chưa page nào LIVE thì runtime mới không báo nhóm (page-runtime.ts).
+    const idle = await homeRuntimeIdleReason();
+    if (idle) return { candidates: 0, sent: 0, reason: idle };
     const group = await operationsGroupChannel();
     if (!group) return { candidates: 0, sent: 0, reason: "chưa cấu hình nhóm báo đơn" };
     const db = await getDb();
