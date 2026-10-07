@@ -389,3 +389,4 @@
 {"at":"2026-10-07T18:21:27.162Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"CLAIM","mission":"ai-balance-v1","detail":"RUNNING · 11 mẫu phạm vi · HIGH"}
 {"at":"2026-10-07T18:30:03.786Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"saas-l3-inbox","detail":"feat/saas-l3-inbox @ 3984011f4a82 · 1 lệnh kiểm thử"}
 {"at":"2026-10-07T18:30:10.290Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#641 @ 3984011f4a82 · Lead: f44402a2 PASS; 3984011f chỉ gộp main (#638) + giải một xung đột mô tả trang hộp thư (giữ cả hai), bài kiểm L3 + vỏ app đạt"}
+{"at":"2026-10-07T18:31:09.048Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"saas-l3-inbox","detail":"#641 @ 3984011f4a82 → 0f42e5d75279 (MERGE_ISOLATED · HIGH · gates success)"}
