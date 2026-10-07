@@ -3,7 +3,7 @@
   "mission_id": "saas-l4-channels",
   "title": "Kênh kết nối hợp nhất cho khách",
   "business_goal": "",
-  "status": "RUNNING",
+  "status": "PR_READY",
   "priority": "P1",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-saas-l4",
@@ -28,7 +28,22 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-07T10:35:57.696Z",
-  "updated_at": "2026-10-07T10:54:55.785Z",
-  "last_heartbeat": "2026-10-07T10:54:55.785Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-07T11:41:33.457Z",
+  "last_heartbeat": "2026-10-07T11:41:33.457Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "feat/saas-l4-channels",
+    "sha": "f6c153f3462bf4f72354ab8ee753719cc5433604",
+    "at": "2026-10-07T11:41:33.457Z",
+    "actor": "DESKTOP-56TH98Y:wt-saas-l4",
+    "title": "Kênh kết nối hợp nhất cho khách",
+    "summary": "Màn /ai/channels (CHANNELS_ROUTE) gộp page Messenger trực tiếp + Pancake + Zalo, sức khoẻ 3 mức, câu khách không từ kỹ thuật; chẩn đoán Configuration ID (thiếu / Meta từ chối / thiếu quyền / thừa quyền) ở /platform, màn kênh, trang Messenger. Không đổi OAuth/callback/webhook.",
+    "tests": [
+      "npm run typecheck: sạch",
+      "npm run lint: sạch",
+      "npm test (sau commit f6c153f3): TẤT CẢ KIỂM THỬ ĐẠT",
+      "npm run build: đạt (/ai/channels 9,67 kB)",
+      "đột biến: 5/5 bị bắt"
+    ]
+  }
 }
