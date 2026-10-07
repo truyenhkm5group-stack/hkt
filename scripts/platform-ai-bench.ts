@@ -98,6 +98,7 @@ async function runSync(orgCode: string, apiKey: string) {
       const f = (x: { ok: number; n: number; rate: number | null }) => `${x.ok}/${x.n}`;
       tomTat(`${cfg.key} ${cfg.model} ${cfg.reasoning} ${cfg.maxTokens}: ${s.cases} ca · lỗi ${s.errors} · JSON hợp lệ ${pct(s.schemaValid)} · quyết định đúng ${pct(s.decisionAccuracy)} · recall ${pct(s.recall)} · FN ${s.falseNegative} · FP ${s.falsePositive} (${Object.entries(s.falsePositiveByLabel).map(([k, v]) => `${k} ${v}`).join(" ")})`);
       tomTat(`${cfg.key} trường (trên ca ra đơn): đơn đúng hết ${pct(s.exactOrderRate)} · SĐT ${f(s.phone)} · địa chỉ ${f(s.address)} · tên ${f(s.name)} · món ${f(s.product)} · mẫu ${f(s.variant)} · SL ${f(s.quantity)}`);
+      tomTat(`${cfg.key} trên ca ORDER — model trả: ${Object.entries(s.replyOnOrder).map(([k, v]) => `${k} ${v}`).join(" · ")} · luật: ${Object.entries(s.decisionOnOrder).map(([k, v]) => `${k} ${v}`).join(" · ")}`);
       tomTat(`${cfg.key} token/ca: vào ${num(s.avgInput)} · ra hiện ${num(s.avgCandidate)} · suy nghĩ ${num(s.avgThinking)} · USD/ca ${num(s.costPerCaseUsd, 6)} · p50/p95 ${num(s.p50Ms)}/${num(s.p95Ms)} ms · ${Math.round((Date.now() - t0) / 1000)} s`);
     }
   });
