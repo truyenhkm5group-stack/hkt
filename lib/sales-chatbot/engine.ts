@@ -728,7 +728,7 @@ async function chatTurnCore(conversationId: string, rawText: string, opts: { cha
     // người vẫn trả lời tay; hội thoại KHÔNG đổi trạng thái (không phải «AI hỏng → chuyển người»). Kênh nhắn tin ⇒ lỗi = ghi chú
     // của dòng tin (`AI_STOP_NOTE`, ai-status.ts dịch ra mã); chat web ⇒ im lặng (khách lạ không đọc lý do nội bộ); khung THỬ ⇒ câu
     // cho chủ shop. Gói trả phí / giá cũ không bao giờ dừng ở đây.
-    const plan = await salesAiPlanGate({ now });
+    const plan = await salesAiPlanGate({ now, conversation: { channel: conv.channel, pageId: conv.pageId, threadId: conv.threadId, visitorKey: conv.visitorKey } });
     if (!plan.ok) {
       if (opts.channel === "WEB") return { ok: true, view: (await conversationView(conv.id))! };
       return { ok: false, error: isMessagingChannel(opts.channel) ? plan.note : plan.message };
