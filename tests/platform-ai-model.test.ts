@@ -16,7 +16,7 @@
  * Không gọi mạng thật (luật 65): `fetch` giả, môi trường giả.
  */
 import assert from "node:assert/strict";
-import { rmSync } from "node:fs";
+import { readFileSync, rmSync } from "node:fs";
 import { and, eq, inArray } from "drizzle-orm";
 import { getDb, getPlatformDb, organizationDatabaseUrl, schema } from "@/db";
 import { estimateCostUsd, giaCuaModel, type AiProvider, type AiRequest, type AiResponse } from "@/lib/ai/provider";
@@ -25,7 +25,7 @@ import { resetPlatformPrimarySkipForTests, withPlatformFallback, type PlatformPr
 import type { SessionUser } from "@/lib/auth/session";
 import { PLATFORM_GEMINI_DEFAULT_MODEL, platformAiConfig } from "@/lib/ai-usage/platform-ai";
 import { applyPlatformAiPolicyAsScript, controlStage, estimateSwitch, loadPlatformAiControl, PLATFORM_AI_PROBES_KEY, probePlatformAiModelAsOperator, probeWithPlatformKey, rollbackPlatformAiPolicy, rollbackPlatformAiPolicyAsScript, SCRIPT_WRITER_LABEL, setPlatformAiPolicy } from "@/lib/ai-usage/platform-ai-admin";
-import { abVerdict, AB_RULES, armStats, quantile, readPlatformModelAbForScript, type AbConversation } from "@/lib/ai-usage/platform-ai-ab";
+import { abVerdict, AB_RULES, armStats, combineVerdicts, quantile, readPlatformModelAbForScript, syncArmStats, syncVerdict, type AbConversation, type SyncConversation } from "@/lib/ai-usage/platform-ai-ab";
 import { canaryBucket, invalidatePlatformAiPolicy, readConversationPlatformModels, parsePlatformAiPolicy, PLATFORM_AI_POLICY_KEY, readPlatformAiPolicy, routePlatformModel, type PlatformAiPolicy } from "@/lib/ai-usage/platform-ai-policy";
 import { classifyProbe, probeRequestBody, redactProbeMessage } from "@/lib/ai-usage/platform-model-probe";
 import { invalidateCapabilities } from "@/lib/platform/capabilities";
@@ -412,6 +412,17 @@ async function testLedger() {
         await db.insert(ev).values([evt(k, "ai.replied", { mode: "AI", responseMs: 2000 }), ...(i < 8 ? [evt(k, "customer.identified", { simulated: false })] : []), ...(i < 6 ? [evt(k, "order.confirmed", { simulated: false })] : []), ...(i >= 10 ? [evt(k, "handoff.requested")] : [])]);
         row(k, M35, "OK", 4000, 100, (4000 * 0.3 + 100 * 2.5) / 1e6);
       }
+      // Ghi đơn từ hội thoại nhân viên (sổ AI `ref = order-sync:<mã>`): canary 8/12 ra đơn, 2 lead lỡ; đối chứng 6/12, 4 lead lỡ.
+      for (let i = 0; i < 12; i++) {
+        for (const [arm, model, nOrders, nLeads] of [["c", M31, 8, 2], ["k", M35, 6, 4]] as const) {
+          const id = await mkConv("FANPAGE", null);
+          row(`order-sync:${id}`, model, "OK", 3000, 60, model === M31 ? (3000 * 0.25 + 60 * 1.5) / 1e6 : (3000 * 0.3 + 60 * 2.5) / 1e6);
+          if (i < nOrders) await db.insert(schema.orders).values({ id: `erp-pam-${arm}-${i}`, insertedAt: new Date(), origin: "AI_ORDER_SYNC", salesConversationId: id });
+          else if (i < nOrders + nLeads) await db.insert(schema.notifications).values({ kind: "SYSTEM", severity: "info", title: "Lead", body: "Khách để SĐT", entityType: "SALES_CHAT", entityId: id, dedupeKey: `sales-order-sync:lead:${id}:0912`, occurredAt: new Date() });
+        }
+      }
+      // Đơn ghi TAY trong hội thoại ghi-đơn (không phải AI_ORDER_SYNC) không tính; ref ngoài hai workload (lessons) bị bỏ.
+      row("lessons", M31, "OK", 500, 50, 0.0001);
       const t = await mkConv("TEST", "0912000001");
       await db.insert(ev).values([evt(t, "order.confirmed", { simulated: true })]);
       row(t, M31, "OK", 1, 1, 0);
@@ -443,7 +454,17 @@ async function testLedger() {
         const canaryCost = 12 * ((4000 * 0.25 + 100 * 1.5) / 1e6) + (4000 * 0.3 + 100 * 2.5) / 1e6;
         assert.ok(Math.abs((ab.canary.costPerConvUsd ?? NaN) - canaryCost / 12) < 1e-12, "chi phí canary gồm cả lượt 3.5 đỡ");
         assert.ok(Math.abs((ab.canary.costPerOrderUsd ?? NaN) - canaryCost / 9) < 1e-12);
-        assert.equal(ab.verdict.decision, "INSUFFICIENT_DATA", "12 < 200 hội thoại và 9 < 50 đơn ⇒ giữ nấc");
+        assert.equal(ab.chatVerdict.decision, "INSUFFICIENT_DATA", "12 < 200 hội thoại và 9 < 50 đơn ⇒ giữ nấc");
+        assert.equal(ab.verdict.decision, "INSUFFICIENT_DATA");
+        assert.equal(ab.sync.canary.threads, 12);
+        assert.equal(ab.sync.control.threads, 12);
+        assert.equal(ab.sync.canary.orders, 8);
+        assert.equal(ab.sync.canary.orderRate, 8 / 12);
+        assert.equal(ab.sync.canary.leadConversion, 8 / 10);
+        assert.equal(ab.sync.control.leadConversion, 6 / 10);
+        assert.equal(ab.sync.control.missedLeadRate, 4 / 12);
+        assert.ok(Math.abs((ab.sync.canary.costPerThreadUsd ?? NaN) - (3000 * 0.25 + 60 * 1.5) / 1e6) < 1e-12);
+        assert.ok(Math.abs((ab.sync.control.costPerOrderUsd ?? NaN) - (12 * (3000 * 0.3 + 60 * 2.5)) / 1e6 / 6) < 1e-12);
       }
 
       // Tăng nấc với CÙNG cặp model ⇒ giữ mốc cohort; đổi cặp ⇒ mốc mới.
@@ -523,6 +544,27 @@ async function testStickyAndVerdict() {
   assert.equal(abVerdict(unpriced, control, ctx).decision, "HOLD", "có lượt chưa định giá ⇒ chi phí là cận dưới ⇒ chưa kết luận");
   assert.equal(armStats(M31, many(9, () => ({}))).closeRate, null, "dưới 10 hội thoại ⇒ tỷ lệ CHƯA ĐỦ, không phải 0");
   assert.equal(AB_RULES.steps.join(","), "10,30,50,100");
+  // 07/10/2026: ghi đơn gọi provider KHÔNG kèm khoá hội thoại ⇒ cả tổ chức băm chung một ô ⇒ canary 10% nhận 0% lưu lượng.
+  // Khoá phải là ĐÚNG chuỗi `ref` mà sổ AI ghi, nếu không ghim nhánh (đọc sổ theo ref) không bao giờ khớp.
+  const sync = readFileSync("lib/sales-chatbot/order-sync.ts", "utf8");
+  assert.match(sync, /salesChatProvider\(\{[^}]*ref: `order-sync:\$\{conv\.id\}`/, "ghi đơn băm canary theo từng hội thoại");
+  assert.ok(sync.includes("ref: `order-sync:${conv.id}` }).catch"), "sổ AI của ghi đơn dùng cùng khoá");
+
+  // Ghi đơn: cùng luật, KPI là ra đơn + lead → đơn.
+  const sconv = (over: Partial<SyncConversation>): SyncConversation => ({ arm: "CANARY", requests: 1, errors: 0, inputTokens: 3000, outputTokens: 60, costUsd: 0.00084, unpriced: false, orders: 0, missedLead: false, ...over });
+  const smany = (n: number, f: (i: number) => Partial<SyncConversation>) => Array.from({ length: n }, (_, i) => sconv(f(i)));
+  const sCtl = syncArmStats(M35, smany(1800, (i) => ({ arm: "CONTROL", costUsd: 0.00105, orders: i % 3 === 0 ? 1 : 0, missedLead: i % 3 === 1 })));
+  const sGood = syncArmStats(M31, smany(200, (i) => ({ orders: i % 3 === 0 ? 1 : 0, missedLead: i % 3 === 1 })));
+  const sv = syncVerdict(sGood, sCtl, ctx);
+  assert.deepEqual([sv.decision, sv.nextPct], ["PROMOTE", 30], JSON.stringify(sv));
+  const sMissed = syncArmStats(M31, smany(200, (i) => ({ orders: i % 4 === 0 ? 1 : 0, missedLead: i % 4 !== 0 })));
+  assert.equal(syncVerdict(sMissed, sCtl, ctx).decision, "ROLLBACK", "lead bị lỡ nhiều hơn ⇒ hoàn tác dù rẻ hơn");
+  // Gộp: workload không lưu lượng không chặn, không tính là đạt; một workload hoàn tác ⇒ hoàn tác.
+  const ins = { decision: "INSUFFICIENT_DATA" as const, nextPct: null, checks: [], reasons: [] };
+  assert.equal(combineVerdicts([{ label: "chat", active: false, verdict: ins }, { label: "sync", active: true, verdict: sv }]).decision, "PROMOTE");
+  assert.equal(combineVerdicts([{ label: "chat", active: true, verdict: ins }, { label: "sync", active: true, verdict: sv }]).decision, "INSUFFICIENT_DATA");
+  assert.equal(combineVerdicts([{ label: "chat", active: true, verdict: pv }, { label: "sync", active: true, verdict: syncVerdict(sMissed, sCtl, ctx) }]).decision, "ROLLBACK");
+  assert.equal(combineVerdicts([{ label: "chat", active: false, verdict: pv }]).decision, "INSUFFICIENT_DATA", "không workload nào có lưu lượng ⇒ không kết luận");
 }
 
 export async function testPlatformAiModel() {
