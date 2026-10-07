@@ -30,22 +30,22 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-07T10:35:57.696Z",
-  "updated_at": "2026-10-07T12:23:39.517Z",
-  "last_heartbeat": "2026-10-07T12:22:47.843Z",
+  "updated_at": "2026-10-07T13:32:15.869Z",
+  "last_heartbeat": "2026-10-07T13:32:15.869Z",
   "definition_of_done": [],
   "handoff": {
     "branch": "feat/saas-l4-channels",
-    "sha": "07d5d69eece0f2cc7b91032c83ecb4433e7a8245",
-    "at": "2026-10-07T12:22:47.843Z",
+    "sha": "a017f76610fd6a4f159780b4d494bb188e90f7fb",
+    "at": "2026-10-07T13:32:15.869Z",
     "actor": "DESKTOP-56TH98Y:wt-saas-l4",
     "title": "Kênh kết nối hợp nhất cho khách",
-    "summary": "Thêm: callback chuyển tiếp lỗi hộp thoại Meta đã lọc (loi=meta&ma&ly; user_denied ⇒ loi=huy như cũ), ánh xạ mã 100 khi đi Configuration ID ⇒ chẩn đoán cấu hình, 191 ⇒ URI chuyển hướng.",
+    "summary": "Sửa review #637: lỗi kết nối giữ Mất kết nối tới khi nối lại; 4201 ⇒ huỷ; toast không lộ câu Graph; cookie chuyển tiếp xoá ngay ở callback.",
     "tests": [
       "npm run typecheck: sạch",
       "npm run lint: sạch",
-      "npm test (sau commit 07d5d69e): TẤT CẢ KIỂM THỬ ĐẠT",
+      "npm test (sau commit a017f766): TẤT CẢ KIỂM THỬ ĐẠT",
       "npm run build: đạt",
-      "đột biến: 7/7 bị bắt"
+      "đột biến (1): 3/3 bị bắt"
     ]
   }
 }
