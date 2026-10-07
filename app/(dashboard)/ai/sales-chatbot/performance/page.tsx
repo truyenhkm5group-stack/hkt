@@ -13,7 +13,7 @@ import { loadExperimentReport } from "@/lib/sales-chatbot/experiment-report";
 import { loadBasketStats } from "@/lib/sales-chatbot/basket";
 import { drillHref } from "@/lib/sales-chatbot/experiment-shared";
 import { loadOrderAttribution } from "@/lib/sales-chatbot/attribution";
-import { ORDER_ATTRIBUTIONS, ORDER_ATTRIBUTION_LABEL } from "@/lib/sales-chatbot/attribution-shared";
+import { grossMarginOf, ORDER_ATTRIBUTIONS, ORDER_ATTRIBUTION_LABEL } from "@/lib/sales-chatbot/attribution-shared";
 import { loadLostReasons } from "@/lib/sales-chatbot/lost-reasons";
 import { inboxPages } from "@/lib/sales-chatbot/inbox";
 
@@ -240,6 +240,7 @@ export default async function AiSalesPerformancePage({ searchParams }: { searchP
               <div className="space-y-1.5 text-xs leading-5">
                 <p>Mỗi đơn chốt trong hội thoại mang ĐÚNG MỘT nhãn. «AI tự bán»: bot chốt, không ai chạm vào trước lúc chốt. «AI góp công»: có người chạm vào và bot đã báo giá / lên nháp / mời mua thêm / lấy được SĐT trước lúc lên đơn. «Người bán»: bot không làm việc bán hàng nào — một câu chào không tính.</p>
                 <p>Ba nhãn không cộng gộp. Đơn ngoài hội thoại (lên tay trên POS) không thuộc bảng này. Doanh thu = đơn GIAO THÀNH CÔNG theo kết cục đơn chung của ERP.</p>
+                <p>Lãi gộp = doanh thu đã giao − giá vốn, cùng đường giá vốn với Báo cáo lợi nhuận (giá vốn đã chốt lúc giao). Đơn chưa có giá vốn KHÔNG cộng vào lãi với giá vốn 0 — đếm riêng. Chưa trừ chi phí AI, cước, quảng cáo.</p>
               </div>
             }
           >
@@ -247,6 +248,19 @@ export default async function AiSalesPerformancePage({ searchParams }: { searchP
               {ORDER_ATTRIBUTIONS.map((k) => (
                 <Stat key={k} label={ORDER_ATTRIBUTION_LABEL[k]} value={formatVND(attr.table[k].deliveredRevenueVnd)} sub={`${formatNumber(attr.table[k].delivered)}/${formatNumber(attr.table[k].orders)} đơn đã giao · đặt ${formatVND(attr.table[k].valueVnd)}`} />
               ))}
+            </div>
+            <div className="mt-2 grid gap-2 sm:grid-cols-3" data-testid="ai-perf-gross-profit">
+              {ORDER_ATTRIBUTIONS.map((k) => {
+                const row = attr.table[k];
+                return (
+                  <Stat
+                    key={k}
+                    label={`lãi gộp đã giao · ${ORDER_ATTRIBUTION_LABEL[k].toLowerCase()}`}
+                    value={row.cogsUnknown > 0 && row.costedRevenueVnd === 0 ? "—" : formatVND(row.grossProfitVnd)}
+                    sub={`biên ${formatPercent(pctOf(grossMarginOf(row)), 0)}${row.cogsUnknown ? ` · ${formatNumber(row.cogsUnknown)} đơn chưa có giá vốn (${formatVND(row.cogsUnknownRevenueVnd)}) không tính` : ""}`}
+                  />
+                );
+              })}
             </div>
             {attr.table.unattributed ? <p className="mt-2 text-xs text-muted-foreground">{formatNumber(attr.table.unattributed)} đơn chưa quy kết được (thiếu sự kiện lên / chốt đơn trong sổ) — không tính là «người bán».</p> : null}
             <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4" data-testid="ai-perf-followup">

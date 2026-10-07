@@ -66,11 +66,51 @@ export function attributeOrder(orderId: string, events: readonly AttributionEven
   return humanTouched(confirm ? confirm.occurredAt : null) ? "AI_ASSISTED" : "AI_ONLY";
 }
 
-export type AttributedOrder = { attribution: OrderAttribution; valueVnd: number; delivered: boolean; deliveredRevenueVnd: number; settled: boolean; cancelled: boolean };
-export type AttributionRow = { orders: number; valueVnd: number; delivered: number; deliveredRevenueVnd: number; settled: number; cancelled: number };
+export type AttributedOrder = {
+  attribution: OrderAttribution;
+  valueVnd: number;
+  delivered: boolean;
+  deliveredRevenueVnd: number;
+  settled: boolean;
+  cancelled: boolean;
+  /**
+   * Giá vốn của đơn ĐÃ ghi nhận doanh thu — đọc qua đường chung của báo cáo lợi nhuận (`orderCogsFast`: giá vốn đã chốt lúc
+   * giao). `null` = CHƯA BIẾT (`deliveredCogs`). Đơn chưa ghi nhận doanh thu: không dùng.
+   */
+  deliveredCogsVnd: number | null;
+};
+export type AttributionRow = {
+  orders: number;
+  valueVnd: number;
+  delivered: number;
+  deliveredRevenueVnd: number;
+  settled: number;
+  cancelled: number;
+  /** Lãi gộp đã giao = doanh thu đã giao − giá vốn, CHỈ trên đơn biết giá vốn. */
+  grossProfitVnd: number;
+  /** Doanh thu đã giao của chính các đơn biết giá vốn — mẫu số của biên gộp. */
+  costedRevenueVnd: number;
+  /** Đơn đã giao CHƯA có giá vốn + doanh thu của chúng — đứng riêng, KHÔNG cộng vào lãi gộp với giá vốn 0. */
+  cogsUnknown: number;
+  cogsUnknownRevenueVnd: number;
+};
 export type AttributionTable = Record<OrderAttribution, AttributionRow> & { unattributed: number };
 
-const emptyRow = (): AttributionRow => ({ orders: 0, valueVnd: 0, delivered: 0, deliveredRevenueVnd: 0, settled: 0, cancelled: 0 });
+const emptyRow = (): AttributionRow => ({ orders: 0, valueVnd: 0, delivered: 0, deliveredRevenueVnd: 0, settled: 0, cancelled: 0, grossProfitVnd: 0, costedRevenueVnd: 0, cogsUnknown: 0, cogsUnknownRevenueVnd: 0 });
+
+/**
+ * Giá vốn của một đơn đã ghi nhận doanh thu. 0 trên đơn có doanh thu nghĩa là CẢ ba nguồn giá vốn đều trống — CHƯA BIẾT,
+ * không phải «hàng không tốn vốn» (cùng nghĩa `IS_MISSING_COGS`, lib/queries/data-quality.ts) ⇒ `null`. HÀM THUẦN.
+ */
+export function deliveredCogs(revenueVnd: number, cogsVnd: number): number | null {
+  if (!(revenueVnd > 0)) return 0;
+  return Number.isFinite(cogsVnd) && cogsVnd > 0 ? cogsVnd : null;
+}
+
+/** Biên gộp của một nhãn — chỉ trên đơn biết giá vốn; chưa đơn nào biết giá vốn ⇒ `null` (không phải 0%). */
+export function grossMarginOf(row: Pick<AttributionRow, "grossProfitVnd" | "costedRevenueVnd">): number | null {
+  return row.costedRevenueVnd > 0 ? row.grossProfitVnd / row.costedRevenueVnd : null;
+}
 
 /** Cộng theo nhãn. Ba nhãn KHÔNG bao giờ gộp thành một ô (AI tự bán ≠ AI có người giúp). HÀM THUẦN. */
 export function attributionTable(orders: readonly AttributedOrder[], unattributed: number): AttributionTable {
@@ -82,6 +122,15 @@ export function attributionTable(orders: readonly AttributedOrder[], unattribute
     if (o.delivered) {
       r.delivered += 1;
       r.deliveredRevenueVnd += o.deliveredRevenueVnd;
+      if (o.deliveredRevenueVnd > 0) {
+        if (o.deliveredCogsVnd === null) {
+          r.cogsUnknown += 1;
+          r.cogsUnknownRevenueVnd += o.deliveredRevenueVnd;
+        } else {
+          r.costedRevenueVnd += o.deliveredRevenueVnd;
+          r.grossProfitVnd += o.deliveredRevenueVnd - o.deliveredCogsVnd;
+        }
+      }
     }
     if (o.settled) r.settled += 1;
     if (o.cancelled) r.cancelled += 1;
