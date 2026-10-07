@@ -3,6 +3,7 @@ import { eq, sql } from "drizzle-orm";
 import type { Db } from "@/db";
 import { schema } from "@/db";
 import { clearMemo } from "@/lib/cache";
+import { allocateExpenseToRange } from "@/lib/constants/cost-allocation";
 import { getCashProfitReport } from "@/lib/queries/profit-cash";
 import { dataQualitySummary } from "@/lib/queries/data-quality";
 import { getDashboardData } from "@/lib/queries/dashboard";
@@ -245,12 +246,15 @@ export async function testConsistency(db: Db) {
   assert.ok(opexTuan < opexThang, "một tuần phải NHỎ HƠN cả tháng — không được cộng nguyên khoản thuê vào tuần");
   // Fixture chuẩn của hợp đồng: thuê 3.000.000đ / 30 ngày, lọc 7 ngày ⇒ MỌI nơi phải ra 700.000đ.
   assert.equal(opexThang, 3_000_000, "cả tháng = trọn khoản thuê");
-  // Prorata theo SỐ NGÀY CHỒNG LẤN — tính từ chính cửa sổ, không ghim cứng theo tháng 9.
-  assert.equal(
-    opexTuan,
-    Math.round((3_000_000 * soNgayTuan) / soNgayThang),
-    `${soNgayTuan}/${soNgayThang} ngày của 3.000.000đ — con số này phải giống nhau ở mọi module`,
-  );
+  // Prorata theo SỐ NGÀY CHỒNG LẤN — tính từ chính cửa sổ, không ghim cứng theo tháng 9. Kỳ vọng dựng từ CHÍNH hàm phân bổ
+  // (luật 65), không gõ lại công thức: bộ máy tính bằng HIỆU HAI LUỸ KẾ (để hai khoảng liền nhau cộng đúng trọn khoản), nên cửa
+  // sổ không bắt đầu từ đầu kỳ có thể lệch `round(3.000.000 × 7/31)` một đồng. Bom hẹn giờ thật (luật 50): tháng 9 có 30 ngày
+  // nên 3.000.000/30 chia hết và công thức gõ lại luôn trúng; sang 08/10/2026 cửa sổ 02–08/10 ra 677.420 (luỹ kế 8 ngày 774.194 −
+  // luỹ kế 1 ngày 96.774), công thức gõ lại ra 677.419 — đỏ mọi PR mà mã nguồn không đổi một dòng.
+  const rentShare = allocateExpenseToRange({ amount: 3_000_000, occurredAt: dauThang, allocationMethod: "PERIOD_PRORATA", periodStart: dauThang, periodEnd: cuoiThang }, tuanTu, tuanDen);
+  assert.equal(opexTuan, rentShare, `${soNgayTuan}/${soNgayThang} ngày của 3.000.000đ — con số này phải giống nhau ở mọi module`);
+  const exactShare = (3_000_000 * soNgayTuan) / soNgayThang;
+  assert.ok(Math.abs(rentShare - exactShare) <= 1, `phân bổ theo số ngày chồng lấn: ${rentShare}đ cách ${exactShare.toFixed(2)}đ quá 1đ làm tròn`);
 
   // BÁO CÁO TỔNG HỢP + BIỂU ĐỒ THEO NGÀY: cộng các cột trong khoảng phải bằng đúng phần phân bổ.
   const [pnlThang, pnlTuan, ngayThang, ngayTuan] = await Promise.all([
