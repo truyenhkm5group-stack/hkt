@@ -126,9 +126,9 @@ const SHELL_PHAN_NHOM: Record<string, { nhom: NhomTuyen; lyDo: string }> = {
     nhom: "INTENTIONALLY_EXCLUDED",
     lyDo: "Tổng quan của vỏ Chốt Đơn thuộc module «AI bán hàng» — cùng lý do với /ai/sales-chatbot/performance: smoke của NHÀ không chứng minh được trang của khách; cổng + số đọc được kiểm ở tests/saas-shell.test.ts trên tổ chức khách thật.",
   },
-  "/ai/sales-chatbot/messenger": {
+  "/ai/channels": {
     nhom: "INTENTIONALLY_EXCLUDED",
-    lyDo: "«Kênh kết nối» của vỏ (Messenger trực tiếp) thuộc module «AI bán hàng» — smoke chạy bằng quản trị của NHÀ; trang được kiểm bằng tests/messenger*.test.ts và E2E của tổ chức khách.",
+    lyDo: "«Kênh kết nối» hợp nhất của vỏ (luồng L4, CHANNELS_ROUTE) thuộc module «AI bán hàng» — smoke chạy bằng quản trị của NHÀ nên không chứng minh được trang của khách; gộp page · sức khoẻ · câu khách · cô lập tổ chức được kiểm bằng tests/channels-overview.test.ts.",
   },
 };
 
