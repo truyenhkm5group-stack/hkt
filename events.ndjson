@@ -434,3 +434,4 @@
 {"at":"2026-10-07T21:18:44.991Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#644 @ dcf9c7853677 · Review độc lập lần 2 (PASS): H1/H2/M1/M2 đã sửa; MEDIUM mới N1 (sao kê ghi đè mô tả dòng SePay) + N2 (bảng kê theo cờ hiện tại) chỉ có tác dụng khi bật cờ — làm ở PR gia cố trước canary; đột biến 14/14; CI gates success"}
 {"at":"2026-10-07T21:19:12.203Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"ai-balance-v1","detail":"#644 @ dcf9c7853677 → 12769c21b4d7 (MERGE_ISOLATED · HIGH · gates success)"}
 {"at":"2026-10-07T21:29:14.970Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"bot-order-status","detail":"feat/bot-order-status @ 2dcc7498b7c5 · 4 lệnh kiểm thử"}
+{"at":"2026-10-07T21:30:44.571Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"ai-balance-economics","detail":"feat/ai-balance-economics @ 8eaa9bb4dd78 · 4 lệnh kiểm thử"}

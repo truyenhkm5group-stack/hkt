@@ -3,7 +3,7 @@
   "mission_id": "ai-balance-economics",
   "title": "Số dư AI: doanh thu · chi phí · biên trên /platform + hoá đơn ước tính không thu hai lần",
   "business_goal": "",
-  "status": "RUNNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -34,7 +34,21 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-07T20:04:41.305Z",
-  "updated_at": "2026-10-07T20:04:41.305Z",
-  "last_heartbeat": "2026-10-07T20:04:41.305Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-07T21:30:44.538Z",
+  "last_heartbeat": "2026-10-07T21:30:44.538Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "feat/ai-balance-economics",
+    "sha": "8eaa9bb4dd78381e3fc05027b2b7b0f96540e172",
+    "at": "2026-10-07T21:30:44.538Z",
+    "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+    "title": "Doanh thu · chi phí · biên của Số dư AI trên /platform/saas — tiền thật từ sổ cái, không đếm hai lần",
+    "summary": "/platform/saas: doanh thu = MRR + tiền thật khách dùng AI qua Số dư (sổ cái), dòng khách AI ước tính được thay, tiền nạp / tặng không vào doanh thu; /platform/ai-balance tách tiền thật + lối sang kinh tế đơn vị.",
+    "tests": [
+      "tests/ai-balance-economics + ai-balance-usage + pricing-billing (PGlite): đạt",
+      "đột biến 6/6 (bản trước dựng lại)",
+      "npm test đủ bộ (bản trước dựng lại): TẤT CẢ KIỂM THỬ ĐẠT",
+      "tsc + eslint: sạch"
+    ]
+  }
 }
