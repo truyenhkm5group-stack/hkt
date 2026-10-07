@@ -659,7 +659,7 @@ export async function processMessengerThread(pageId: string, psid: string, deps:
     for (const r of claimed) {
       const urls = Array.isArray(r.imageUrls) ? r.imageUrls.filter((u): u is string => typeof u === "string") : [];
       if (!urls.length) continue;
-      const line = await describeCustomerImages(urls, { conversationId: conv.id, ...(deps.fetch ? { fetch: deps.fetch } : {}) });
+      const line = await describeCustomerImages(urls, { conversationId: conv.id, ...(deps.fetch ? { fetch: deps.fetch } : {}), ...(r.kind === "COMMENT" ? { aiCustomer: { threadKind: "COMMENT" as const, commenterId: r.fromId ?? null } } : {}) });
       r.text = [r.text, line].filter(Boolean).join("\n").slice(0, TEXT_MAX);
       await db.update(t).set({ text: r.text, imageUrls: null }).where(eq(t.id, r.id));
     }

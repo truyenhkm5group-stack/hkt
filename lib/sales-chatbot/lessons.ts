@@ -29,6 +29,7 @@ import {
   normalizeLessons,
   parseLessonsFromAi,
   parseLessonsState,
+  screenAiLessons,
   type LessonsRun,
   type LessonsState,
   type TranscriptLine,
@@ -205,8 +206,10 @@ export async function learnLessons(opts: { now?: Date; force?: boolean; actor?: 
       await recordAiUsage({ orgCode: org.code, feature: "sales_playbook", source: prov.source, provider: prov.provider.name, model: prov.provider.model, requests: 1, inputTokens: null, outputTokens: null, costUsd: null, status, actorId: actor.id, ref: "lessons" }).catch(() => undefined);
       throw e;
     }
-    const lessons = parseLessonsFromAi(out);
-    if (!lessons) throw new Error("AI không trả về danh sách bài học đọc được");
+    const parsed = parseLessonsFromAi(out);
+    if (!parsed) throw new Error("AI không trả về danh sách bài học đọc được");
+    const screened = screenAiLessons(parsed, state.lessons);
+    const lessons = screened.kept;
     if (!lessons.length && state.lessons.length) throw new Error("AI trả về danh sách rỗng — giữ bài học cũ");
     // Chủ shop sửa bài học trong lúc AI đang đọc ⇒ kết quả dựa trên bản cũ — bỏ, không đè lên tay người.
     state = await loadLessons();
@@ -218,7 +221,7 @@ export async function learnLessons(opts: { now?: Date; force?: boolean; actor?: 
     const before = new Set(state.lessons);
     const added = lessons.filter((l) => !before.has(l)).length;
     const dropped = state.lessons.filter((l) => !lessons.includes(l)).length;
-    const note = `Học từ ${threads} hội thoại: ${lessons.length} bài (mới / sửa ${added} · bỏ ${dropped})`;
+    const note = `Học từ ${threads} hội thoại: ${lessons.length} bài (mới / sửa ${added} · bỏ ${dropped})${screened.dropped ? ` · không áp ${screened.dropped} bài nhắc tới tiền / tài khoản / liên kết (chủ shop tự thêm nếu thật sự cần)` : ""}`;
     await saveRun(
       state,
       { at: now.toISOString(), status: "OK", threads, note },

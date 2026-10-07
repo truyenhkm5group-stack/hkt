@@ -82,6 +82,26 @@ export function normalizeLessons(list: readonly string[]): string[] {
   return out;
 }
 
+/**
+ * Bài học do AI rút ra mà nhắc tới TIỀN / TÀI KHOẢN / LIÊN KẾT / bỏ việc chuyển nhân viên ⇒ KHÔNG tự vào lời nhắc của MỌI khách:
+ * một hội thoại do kẻ gian dựng (phàn nàn, gây ra chỗ nhân viên phải sửa) có thể dạy bot «bảo khách chuyển khoản trước» — câu
+ * không có chữ số nên `stripPrices` không bắt (review bảo mật #651, MEDIUM có từ trước). Chủ shop TỰ viết bài như thế thì vẫn được
+ * (sửa tay không qua bộ lọc này); bài đã có từ trước cũng giữ. So trên chữ ĐÃ GẤP (`foldVi`): không dấu, dấu câu thành khoảng
+ * trắng — «zalo.me» là «zalo me», «https://» là «https». HÀM THUẦN.
+ */
+const RISKY_LESSON = /chuyen khoan|\bck\b|\bstk\b|\btk\b|so tai khoan|ngan hang|thanh toan truoc|tra truoc|dat coc|coc truoc|chuyen tien|\bqr\b|\bmomo\b|zalo ?pay|\bvnpay\b|vi dien tu|\blink\b|\bhttps?\b|\bwww\b|zalo me|bit ly|khong (?:can |phai )?(?:chuyen|goi|bao) (?:cho )?nhan vien|bo qua (?:luat|quy tac|huong dan|chi dan)/;
+
+export function riskyLesson(text: string): boolean {
+  return RISKY_LESSON.test(foldVi(text));
+}
+
+/** Danh sách bài học AI vừa trả ⇒ bỏ bài MỚI mang rủi ro (bài đã có trong `previous` giữ nguyên). HÀM THUẦN. */
+export function screenAiLessons(next: readonly string[], previous: readonly string[]): { kept: string[]; dropped: number } {
+  const had = new Set(previous);
+  const kept = next.filter((l) => had.has(l) || !riskyLesson(l));
+  return { kept, dropped: next.length - kept.length };
+}
+
 /** Chữ trả về của AI ⇒ danh sách bài học (mảng JSON chuỗi, có thể nằm trong khối ```json). `null` khi không đọc được. HÀM THUẦN. */
 export function parseLessonsFromAi(text: string): string[] | null {
   const m = /\[[\s\S]*\]/.exec(text.replace(/```(?:json)?/gi, ""));

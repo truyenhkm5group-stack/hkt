@@ -5,7 +5,8 @@
  * học và rút kinh nghiệm để lần sau không lặp lại và chat tốt hơn». Bot đã TỰ HỌC mỗi 6 giờ (`lessons.ts`); góp ý là đường
  * NHANH và CÓ CHỦ ĐÍCH: nhân viên chỉ ra bot sai ở đâu ⇒ AI của shop đọc góp ý + đoạn chép hội thoại (đã che SĐT / tên / số) ⇒
  * 1–3 bài học «Khi … ⇒ …» ⇒ nhập vào ĐẦU bộ bài học đang dùng (bản trước lùi vào lịch sử, quay lại được ở trang Chatbot).
- * Góp ý luôn được LƯU (kể cả khi AI lỗi — `FAILED`, gửi lại được); bài học không bao giờ mang giá (`normalizeLessons`).
+ * Góp ý luôn được LƯU (kể cả khi AI lỗi — `FAILED`, gửi lại được); bài học không bao giờ mang giá (`normalizeLessons`), và bài
+ * AI rút ra mà nhắc tới tiền / tài khoản / liên kết KHÔNG tự vào bot (`screenAiLessons` — cùng bộ lọc với tự học).
  */
 import { and, asc, desc, eq } from "drizzle-orm";
 import { getDb, schema } from "@/db";
@@ -19,7 +20,7 @@ import { currentOrganization } from "@/lib/platform/context";
 import { publish } from "@/lib/realtime/bus";
 import { salesChatProvider } from "@/lib/sales-chatbot/engine";
 import { PAGE_REPLY } from "@/lib/sales-chatbot/fanpage";
-import { lessonTranscript, LESSON_LIMITS, normalizeLessons, parseLessonsFromAi, type LessonsState, type TranscriptLine } from "@/lib/sales-chatbot/lessons-shared";
+import { lessonTranscript, LESSON_LIMITS, normalizeLessons, parseLessonsFromAi, screenAiLessons, type LessonsState, type TranscriptLine } from "@/lib/sales-chatbot/lessons-shared";
 import { loadLessons } from "@/lib/sales-chatbot/lessons";
 import { setSettingJson } from "@/lib/settings";
 import { LESSONS_SETTING_KEY } from "@/lib/sales-chatbot/lessons-shared";
@@ -115,10 +116,15 @@ export async function submitConversationFeedbackCore(user: SessionUser, conversa
     await recordAiUsage({ orgCode: org.code, feature: "sales_playbook", source: prov.source, provider: prov.provider.name, model: prov.provider.model, requests: 1, inputTokens: null, outputTokens: null, costUsd: null, status: "ERROR", actorId: user.id, ref: `feedback:${id}` }).catch(() => undefined);
     return fail(e instanceof Error ? e.message : String(e));
   }
-  const fresh = parseLessonsFromAi(out);
-  if (!fresh?.length) return fail("AI không trả về bài học đọc được");
+  const parsed = parseLessonsFromAi(out);
+  if (!parsed?.length) return fail("AI không trả về bài học đọc được");
   // Đọc lại ngay trước khi ghi — tự học / chủ shop có thể vừa sửa; bài học MỚI đứng đầu, bản cũ lùi vào lịch sử.
   state = await loadLessons();
+  // Đoạn chép là chữ KHÁCH gõ — một hội thoại dựng sẵn có thể cài «xin khách chuyển khoản trước» qua AI vào bài học (review bảo mật
+  // #651). Bài như thế không tự áp; cần thật thì chủ shop tự viết ở trang Chatbot (sửa tay không qua bộ lọc này).
+  const screened = screenAiLessons(parsed, state.lessons);
+  const fresh = screened.kept;
+  if (!fresh.length) return fail("AI chỉ rút ra bài nhắc tới tiền / tài khoản / liên kết — không tự áp; cần thật thì chủ shop tự viết ở trang Chatbot");
   const lessons = normalizeLessons([...fresh, ...state.lessons]);
   await setSettingJson(LESSONS_SETTING_KEY, {
     ...state,
@@ -132,7 +138,8 @@ export async function submitConversationFeedbackCore(user: SessionUser, conversa
   await db.insert(f).values({ conversationId: id, userId: user.id, userName: user.name ?? user.email, text, lessons: applied, status: "APPLIED", createdAt: now });
   await audit({ userId: user.id, userEmail: user.email, action: "SALES_CHAT_FEEDBACK", entity: "SALES_CHAT", entityId: id, after: { lessons: applied }, reason: text.slice(0, 200) });
   publish({ type: "chat", conversationId: id });
-  return { ok: true, message: state.enabled ? `Bot đã học ${applied.length} bài — dùng từ lượt trả lời kế tiếp.` : `Đã lưu ${applied.length} bài học — bật «Tự học» ở trang Chatbot để bot dùng.`, lessons: applied };
+  const skipped = screened.dropped ? ` Không áp ${screened.dropped} bài nhắc tới tiền / tài khoản / liên kết — cần thật thì chủ shop tự viết ở trang Chatbot.` : "";
+  return { ok: true, message: (state.enabled ? `Bot đã học ${applied.length} bài — dùng từ lượt trả lời kế tiếp.` : `Đã lưu ${applied.length} bài học — bật «Tự học» ở trang Chatbot để bot dùng.`) + skipped, lessons: applied };
 }
 
 /** Góp ý đã gửi cho một hội thoại (mới nhất trước). */

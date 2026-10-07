@@ -25,9 +25,10 @@
  * trả về ở mức `PHONE` (che), không thì lượt SAU lời nhắc in nguyên họ tên + địa chỉ của chủ SĐT.
  * Mọi mức đều chỉ là GỢI Ý: bot nhắc lại để khách xác nhận, đơn chỉ chốt khi khách đồng ý bản tóm tắt có địa chỉ.
  */
-import { and, desc, eq, inArray, isNull, ne, notInArray, or, sql, type SQL } from "drizzle-orm";
+import { and, desc, eq, inArray, ne, or, sql, type SQL } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { PANCAKE_PAGES_API } from "@/lib/connectors/testers";
+import { MANUAL_ORDER_ORIGIN } from "@/lib/constants/manual-orders";
 import { formatDate } from "@/lib/format";
 import { maskAddress, type ChatState } from "@/lib/sales-chatbot/tools";
 
@@ -178,8 +179,11 @@ const HANDLED_STAGES = ["PACKING", "READY_TO_SHIP", "SHIPPED", "DELIVERED", "PAI
  * lời nhắc của CHỦ THẬT và giao nhầm đơn sau về địa chỉ ấy (review bảo mật #647 vòng 4, M-b). Đơn của CHÍNH hội thoại
  * (`ownIds`) không qua lọc này — đó là dữ liệu của chính người đang nhắn.
  */
-function vouchedOrder(o: typeof schema.orders): SQL {
-  return or(isNull(o.origin), notInArray(o.origin, [...MACHINE_ORIGINS]), inArray(o.stage, [...HANDLED_STAGES]))!;
+export function vouchedOrder(o: typeof schema.orders): SQL {
+  // Đơn MÁY = `origin` máy (gắn SAU lượt bởi `linkAgentOrder`) HOẶC đơn lõi ERP do một tác tử tạo (`raw.agent` — ghi NGAY lúc chèn):
+  // lượt nối hỏng để `origin` rỗng thì đơn máy vẫn nhận ra được — không «mở» vì một lỗi (review bảo mật #651, L1).
+  const machine = or(inArray(o.origin, [...MACHINE_ORIGINS]), sql`(${o.raw}->>'origin') = ${MANUAL_ORDER_ORIGIN} and (${o.raw}->>'agent') is not null`)!;
+  return or(sql`not coalesce(${machine}, false)`, inArray(o.stage, [...HANDLED_STAGES]))!;
 }
 
 async function lastOrderWhere(where: SQL): Promise<{ count: number; last: LastOrder | null }> {
@@ -229,7 +233,9 @@ export async function findReturningCustomer(state: ChatState): Promise<Returning
     // thoại này (`state.draft` / `confirmed` / `pastOrders`) — không bao giờ đơn khác của hồ sơ khớp qua SĐT (review bảo mật L1).
     const historyId = state.customer.id && state.customer.verifiedIdentity === true ? state.customer.id : null;
     const ownIds = [state.draft?.orderId, state.confirmed?.orderId, ...(state.pastOrders ?? []).map((p) => p.orderId)].filter((x): x is string => typeof x === "string" && x.length > 0);
-    const scope = historyId ? and(eq(o.customerId, historyId), vouchedOrder(o))! : ownIds.length ? inArray(o.id, ownIds) : null;
+    // Đã xác minh: lịch sử hồ sơ (đơn có người đứng sau) CỘNG đơn của CHÍNH hội thoại (review #651, INFO — khách thật không mất đơn
+    // nháp vừa chốt với bot).
+    const scope = historyId ? and(eq(o.customerId, historyId), ownIds.length ? or(vouchedOrder(o), inArray(o.id, ownIds))! : vouchedOrder(o))! : ownIds.length ? inArray(o.id, ownIds) : null;
     const own = scope ? await lastOrderWhere(scope) : { count: 0, last: null };
     return {
       trust: state.customer.savedAddress === true ? "PHONE" : "THREAD",
@@ -284,8 +290,9 @@ const tail4 = (phone: string) => phone.replace(/\D/g, "").slice(-4);
  * không đủ chỗ cho một đoạn «chỉ dẫn» cài vào hồ sơ (review bảo mật #647 vòng 4, M-b). HÀM THUẦN.
  */
 export function promptDataText(s: string, max: number): string {
-  const one = Array.from(s, (ch) => (ch.charCodeAt(0) < 32 || ch.charCodeAt(0) === 127 ? " " : ch))
-    .join("")
+  // Ký tự điều khiển (C0 · DEL · C1 như NEL U+0085) và ký tự định dạng (zero-width · bidi) ⇒ khoảng trắng (review #651, L3).
+  const one = s
+    .replace(/[\p{Cc}\p{Cf}]/gu, " ")
     .replace(/\s+/g, " ")
     .trim();
   return one.length > max ? `${one.slice(0, max - 1)}…` : one;
