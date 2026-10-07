@@ -438,3 +438,4 @@
 {"at":"2026-10-07T21:30:57.931Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"ai-balance-economics","detail":"#648 cho feat/ai-balance-economics @ 8eaa9bb4dd78"}
 {"at":"2026-10-07T22:04:46.986Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"bot-order-status","detail":"feat/bot-order-status @ 4bd8d21ba2b2 · 6 lệnh kiểm thử"}
 {"at":"2026-10-07T22:05:16.218Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"bot-order-status","detail":"#645 @ 4bd8d21ba2b2 → b8eea873752f (MERGE_NOW · MEDIUM · gates success)"}
+{"at":"2026-10-07T22:12:47.203Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"returning-history-leak","detail":"fix/returning-history-leak @ b1a013ab0fef · 5 lệnh kiểm thử"}
