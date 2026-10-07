@@ -3,7 +3,7 @@
   "mission_id": "saas-l5-billing-trial",
   "title": "Dùng thử + hết lượt dừng AI, kỳ tính tiền, ngưỡng cảnh báo",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P1",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-saas-l5",
@@ -41,9 +41,12 @@
     "0234": "2026-10-07T11:39:51.974Z"
   },
   "created_at": "2026-10-07T11:39:43.015Z",
-  "updated_at": "2026-10-07T19:00:27.027Z",
+  "updated_at": "2026-10-07T19:00:54.482Z",
   "last_heartbeat": "2026-10-07T19:00:27.027Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#640 → 13b73bf2bd2243fa3fb364c9ae4125e9d72976c5"
+  },
   "handoff": {
     "branch": "feat/saas-l5-billing-trial",
     "sha": "ac9233eb7c922c544cd6e467a15959a25aef24c7",
