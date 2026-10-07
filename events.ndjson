@@ -458,3 +458,4 @@
 {"at":"2026-10-07T23:03:23.745Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"ai-balance-hardening","detail":"fix/ai-balance-hardening @ 51848fd3cf3d · 3 lệnh kiểm thử"}
 {"at":"2026-10-07T23:04:14.403Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"order-truth-stamp","detail":"feat/order-truth-stamp @ c79677988d60 · 2 lệnh kiểm thử"}
 {"at":"2026-10-07T23:04:39.741Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"order-truth-stamp","detail":"#649 @ c79677988d60 → b0706eaa236e (MERGE_NOW · MEDIUM · gates success)"}
+{"at":"2026-10-07T23:05:02.517Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#650 @ 51848fd3cf3d · Review độc lập 2 vòng: PASS, không CRITICAL/HIGH/MEDIUM còn mở; LOW: đường thuê bao ERPHD tin dòng MANUAL/IMPORT (có từ trước) để PR sau; đột biến 7/7"}
