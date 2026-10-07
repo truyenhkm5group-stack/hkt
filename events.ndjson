@@ -231,3 +231,4 @@
 {"at":"2026-10-07T00:47:18.803Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#625 @ 38e0ceb98937 · review độc lập PASS @502a252f + delta đọc bởi Lead: chốt botSendAllowed trong hàm gửi bot (STAFF khai rõ, không chặn), khách trả về sớm isHome=false ⇒ LIVE, ghi nguyên tử, 2 đột biến sống đã có bài"}
 {"at":"2026-10-07T01:06:14.182Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"saas-a-vnx-runtime","detail":"#625 @ 38e0ceb98937 → 42952b8c83ca (MERGE_NOW · MEDIUM · gates success)"}
 {"at":"2026-10-07T01:06:54.462Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DEPLOY_DISPATCHED","detail":"42952b8c83ca · run 37555457699 https://github.com/truyenhkm5group-stack/hkt/actions/runs/37555457699"}
+{"at":"2026-10-07T01:32:01.152Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"VERIFY_PASS","mission":"saas-a-vnx-runtime","detail":"PASS 42952b8c83caaf42fa3abda15dfce691e86f9b26 2026-10-07T01:31:58.975Z"}
