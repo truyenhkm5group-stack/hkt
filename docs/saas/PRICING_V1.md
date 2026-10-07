@@ -189,7 +189,7 @@ gói đích thấp hơn số dùng AI thật.
   `describeCustomerImages` · `salesChatProvider` (nhắc khách, học, ghi đơn từ hội thoại, sổ tay). Dừng AI KHÔNG khoá dữ liệu: tin
   khách vẫn ghi, hộp thư và gửi tay vẫn chạy, hội thoại không chuyển «AI hỏng». Kênh web im lặng (khách lạ không đọc lý do nội bộ).
 - **Số ngày dùng thử theo phiên bản giá**, chụp vào thuê bao lúc cấp phát (`platform_subscriptions.trial_days` · `trial_started_at` ·
-  `trial_ends_at`, migration `0232_billing_trial_cycle`); `TRIAL_DAYS = 7` chỉ là mặc định. Dòng cũ không backfill — đọc
+  `trial_ends_at`, migration `0233_billing_trial_cycle`); `TRIAL_DAYS = 7` chỉ là mặc định. Dòng cũ không backfill — đọc
   `paid_through` như trước.
 - **Một dịch vụ cấp phát thu phí** `lib/billing/service.ts::initWorkspaceBilling`, gọi từ bước BILLING của job người vận hành VÀ
   từ `/start`: ghim phiên bản CATALOG hiện hành (nguồn `PROVISIONING`), chèn thuê bao, chụp dùng thử. Chỉ cửa hàng tự đăng ký (và
