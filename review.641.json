@@ -1,8 +1,8 @@
 {
   "pr": 641,
-  "sha": "4f2a1c0775726cfe0e57f40eba407c2f24de0146",
+  "sha": "f44402a21cd2500ff58a0a1adf57c5eee9c2b44d",
   "verdict": "PASS",
   "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
-  "at": "2026-10-07T16:40:02.302Z",
-  "note": "review độc lập PASS @3f311064 (không hồi quy HSLC) + delta tích hợp Lead: gộp main, xung đột inbox/page.tsx giữ cả hai bên, 0232→0233; 5 điểm không chặn để việc tiếp theo"
+  "at": "2026-10-07T18:10:00.405Z",
+  "note": "Lead: review độc lập PASS ở 3f311064; sửa sau review (COPILOT nhóm người · gác tin chờ khi đổi đường · không trả lời đôi · quét lại không bù tin trước mốc · số phút nhường · nhánh đọc hỏng · gỡ đường cuối) có bài kiểm, 7/7 đột biến bị bắt; phần còn lại chỉ là gộp main"
 }
