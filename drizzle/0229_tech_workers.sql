@@ -1,4 +1,4 @@
--- 0228 · WORKER · LEASE · NHỊP TIM · NHẬT KÝ LƯỢT CHẠY (docs/tech-control-plane/README.md mục 4).
+-- 0229 · WORKER · LEASE · NHỊP TIM · NHẬT KÝ LƯỢT CHẠY (docs/tech-control-plane/README.md mục 4).
 --
 --  · CỘNG THÊM: bảng `tech_workers` (danh tính worker, khoá chỉ lưu băm), bảng `tech_run_logs` (nhật ký có trần),
 --    cột lease / lần thử trên `tech_tasks`, cột worker / provider / model / generation trên `tech_agent_runs`.

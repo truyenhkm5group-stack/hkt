@@ -25,7 +25,9 @@ export async function finalizeStatement(accountCode: string, periodMonth: string
   const pdb = await getPlatformDb();
   const had = await pdb.query.platformBillingStatements.findFirst({ where: and(eq(schema.platformBillingStatements.accountId, account.id), eq(schema.platformBillingStatements.periodMonth, periodMonth)) });
   if (had) return { error: "Kỳ này đã chốt — bảng kê đã chốt không sửa được." };
-  const snap = await loadCommercialSnapshot({ periodMonth, now: ctx.now });
+  // Lỗi đọc (vd ghim / sổ giá) ⇒ TỪ CHỐI chốt — bảng kê FINAL bất biến, không bao giờ chốt trên dữ liệu đọc hỏng.
+  const snap = await loadCommercialSnapshot({ periodMonth, now: ctx.now }).catch(() => null);
+  if (!snap) return { error: "Không đọc được dữ liệu thương mại (ghim / bảng giá) lúc này — chưa chốt gì, thử lại sau." };
   const view = snap.customers.find((c) => c.account.id === account.id);
   if (!view) return { error: "Không dựng được bảng kê của tài khoản." };
   const st = view.statement;
@@ -38,7 +40,7 @@ export async function finalizeStatement(accountCode: string, periodMonth: string
       status: "FINAL",
       totalKnownVnd: st.totalKnownVnd,
       unknownLines: st.unknownLines,
-      snapshot: { lines: st.lines, revenueKnownVnd: st.revenueKnownVnd, costKnownVnd: st.costKnownVnd, economics: view.economics, workspaces: view.workspaces.map((w) => ({ code: w.code, planKey: w.planKey, subscriptions: w.subscriptions.map((s) => ({ productKey: s.productKey, status: s.status, planKey: s.planKey })) })), usdToVnd: snap.usdToVnd },
+      snapshot: { lines: st.lines, revenueKnownVnd: st.revenueKnownVnd, costKnownVnd: st.costKnownVnd, economics: view.economics, workspaces: view.workspaces.map((w) => ({ code: w.code, planKey: w.planKey, priceVersionKey: w.pricing.versionKey, priceVersionPinned: w.pricing.pinned, subscriptions: w.subscriptions.map((s) => ({ productKey: s.productKey, status: s.status, planKey: s.planKey })) })), usdToVnd: snap.usdToVnd },
       engineVersion: st.engineVersion,
       finalizedByEmail: ctx.email,
     })

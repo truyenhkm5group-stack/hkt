@@ -194,9 +194,9 @@ toán, chi lớn, thao tác không hoàn tác, tắt bảo vệ, lách CI / bran
 |---|---|---|
 | 0 | Kiểm kê (tài liệu này) | XONG |
 | 1 | Project · Goal · Mission · NEEDS_OWNER · CANCELLED · vòng đời chuẩn · sự kiện + audit · trang Goals/Missions | XONG — đã vào `main` (#623, migration 0226) và đã deploy |
-| 2 | Worker · lease · heartbeat · cửa worker · adapter thi hành · sổ năng lực tối thiểu · trang Worker | XONG (migration 0228) — mục 8 |
+| 2 | Worker · lease · heartbeat · cửa worker · adapter thi hành · sổ năng lực tối thiểu · trang Worker | XONG (migration 0229) — mục 8 |
 | 3 | Nhánh / cây theo mã việc · PR qua cầu nối bot · CI đỏ ⇒ việc sửa · nối deploy · hậu kiểm | XONG — mục 10 |
-| 4 | Chính sách R0–R4 · ngân sách · watchdog | XONG (migration 0229) — mục 11 |
+| 4 | Chính sách R0–R4 · ngân sách · watchdog | XONG (migration 0230) — mục 11 |
 | 5 | Buồng lái mobile trên `/tech` | XONG — mục 12 |
 | 6 | Sổ năng lực · định tuyến model | XONG — mục 13 |
 | 7 | Dogfood R0/R1 đầu-cuối | XONG CỤC BỘ (07/10/2026) — mục 14; chưa chạy trên production |
@@ -306,7 +306,7 @@ Việc vào OBSERVING bằng tay (không có sự kiện `deploy.reached`) máy 
 
 - **Chính sách** (`lib/constants/tech-policy.ts::classifyTechPolicy`): dẫn xuất từ máy xếp rủi ro + loại việc + từ khoá
   nguy hiểm; chỉ NÂNG, mọi lần nâng có lý do. Lưu `tech_tasks.policy_level` lúc GHI (tạo việc, đè rủi ro, nút
-  "Xếp lại chính sách"). `NULL` (việc trước 0229) = không tự động — đóng khi thiếu, không backfill ngầm. Worker chỉ
+  "Xếp lại chính sách"). `NULL` (việc trước 0230) = không tự động — đóng khi thiếu, không backfill ngầm. Worker chỉ
   nhận tới TRẦN `settings["tech.worker-policy-ceiling"]` — mặc định **chỉ R0** (chế độ dogfood an toàn), chủ shop mở R1
   bằng `set-setting tech.worker-policy-ceiling {"maxPolicy":"R1"}`, giá trị lạ rơi về R0 (SQL + `claimBlockers` cùng luật); R3/R4 bật cổng duyệt người; R4 = luật SECRETS · ACCESS · DATA_FIX ·
   SCHEDULER, loại SECURITY / DATA_FIX, hoặc nhắc xoá dữ liệu / DNS / thanh toán / lách cổng / mật khẩu / OAuth.

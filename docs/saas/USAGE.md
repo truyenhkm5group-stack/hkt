@@ -13,3 +13,12 @@
   nay ERP và Chốt Đơn chưa khai chỉ số `EVENT_LEDGER` nào: mọi số dùng của hai sản phẩm đọc từ hai sổ đã có.
 - Đọc chỉ số kinh doanh sâu (hội thoại phân biệt cả kỳ, fanpage đang chạy) cho hạn mức: `readPeriodUsage` (#612).
 - Hỏng một nguồn ⇒ chỉ số của nguồn đó `null` + lý do.
+
+## Khách AI — đồng hồ thu chính (0228 · `PRICING_V1.md` §II.2)
+
+- `chotdon.ai_customers` (`EVENT_LEDGER`, `emitterLive: true`) ghi tại điểm gửi thành công của `lib/sales-chatbot`
+  (`markWaitingForCustomer` → `lib/pricing/ai-customer.ts::noteAiCustomerReply`). Khoá `ai_customer:<YYYY-MM>:<kênh>:<page>:<khách>`
+  ⇒ một khách một kỳ một dòng.
+- Đọc kèm ĐỘ PHỦ (`readAiCustomerUsage`): runtime cũ `chatbot/` ⇒ `null` (chưa đo); đồng hồ bật giữa kỳ ⇒ cận dưới. Sổ dùng chung
+  không còn trả 0 cho workspace chưa đo (`loadCommercialSnapshot` thay số đọc thô bằng số có độ phủ).
+- Hội thoại mới / tin AI gửi không còn `billable` (fair-use).

@@ -62,7 +62,7 @@ export type PlanRow = { key: string; name: string; description: string | null; l
  * (`lib/pricing/entitlements.ts`): có trong sổ ⇒ dòng đó; vắng ⇒ `trial` (`fellBack`, phía hẹp); không cả `trial` ⇒ `null`
  * (nơi gọi từ chối). Không khoá nào được đối xử riêng.
  */
-export function effectivePlanRow(plans: readonly PlanRow[], key: string): { row: PlanRow; fellBack: boolean } | null {
+export function effectivePlanRow<T extends PlanRow>(plans: readonly T[], key: string): { row: T; fellBack: boolean } | null {
   const hit = plans.find((p) => p.key === key);
   if (hit) return { row: hit, fellBack: false };
   const trial = plans.find((p) => p.key === DEFAULT_PLAN_KEY);
@@ -82,7 +82,10 @@ export async function listPlans(): Promise<PlanRow[]> {
 }
 
 export async function resolvePlan(org: Pick<Organization, "isHome" | "plan"> & { code?: string }): Promise<ResolvedPlan | null> {
-  const picked = effectivePlanRow(await listPlans(), planKeyOf(org));
+  // Nguồn hàng gói theo PHIÊN BẢN giá đã ghim (0228 — bảng giá V1: người dùng 2 · 3 · 5 · 10 · 25) cho MỌI tổ chức kể cả nhà
+  // (nhà ghim legacy ⇒ đúng hàng `platform_plans`). Nhập động: lib/pricing/price-book đọc `listPlans` của chính tệp này.
+  const rows = org.code ? await (await import("@/lib/pricing/price-book")).plansForOrgSafe(org.code) : await listPlans();
+  const picked = effectivePlanRow(rows, planKeyOf(org));
   if (!picked) return null;
   const { row, fellBack } = picked;
   const parsed = parseLimits(row.limits);

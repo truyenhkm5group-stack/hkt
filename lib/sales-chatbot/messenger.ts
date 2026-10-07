@@ -1,3 +1,4 @@
+import { noteAiCustomerReply } from "@/lib/pricing/ai-customer";
 import { randomUUID } from "node:crypto";
 import { and, eq, gte, inArray, isNotNull, isNull, lt, or, sql } from "drizzle-orm";
 import { getDb, getPlatformDb, schema } from "@/db";
@@ -672,6 +673,7 @@ export async function processMessengerThread(pageId: string, psid: string, deps:
       if (pr && !pr.ok) await noteMessengerGraphFailure(pr, pageId);
       if (pr?.ok) {
         out.replies += 1;
+        if (replies.some((r) => (turn.aiTexts ?? []).includes(r.text))) await noteAiCustomerReply(conv.id, now());
         if (pr.id) await db.insert(t).values({ pageId, threadId: psid, messageId: pr.id, text: replyText.slice(0, TEXT_MAX), status: "DONE", processedAt: now(), note: "BOT_SENT" }).onConflictDoNothing({ target: t.messageId });
       }
       if (pr && !pr.ok) await deadLetter(db, ids, claim, `${DEAD_SEND_NOTE_PREFIX}${pr.error}`, pr.error, now());
@@ -684,6 +686,10 @@ export async function processMessengerThread(pageId: string, psid: string, deps:
       continue;
     }
     let sendError: string | null = null;
+    // Đồng hồ khách AI (0228): đếm câu DO MODEL SINH (đánh dấu tại nguồn — `turn.aiTexts`) đã gửi THÀNH CÔNG ở CHÍNH lượt
+    // này; câu mẫu (chữ hay kèm ảnh) đi trong lượt model không bao giờ được đếm.
+    let aiSent = 0;
+    const aiTexts = new Set(turn.aiTexts ?? []);
     let yielded: string | null = null;
     let mediaDone = false;
     // Ảnh của câu trả lời mẫu: gửi NGAY SAU chữ của chính câu mẫu đó (như đường Pancake); không khớp ⇒ sau toàn bộ phần chữ.
@@ -715,6 +721,7 @@ export async function processMessengerThread(pageId: string, psid: string, deps:
         break;
       }
       out.replies += 1;
+      if (aiTexts.has(r.text)) aiSent += 1;
       if (!mediaDone && turn.media?.afterText && r.text === turn.media.afterText) {
         await sendMedia();
         if (sendError || yielded) break;
@@ -724,6 +731,7 @@ export async function processMessengerThread(pageId: string, psid: string, deps:
     // Gửi hỏng ⇒ DEAD-LETTER, KHÔNG tự gửi lại (lời gọi gửi có thể đã tới nơi).
     if (sendError) await deadLetter(db, ids, claim, `${DEAD_SEND_NOTE_PREFIX}${sendError}`, sendError, now());
     else await finish("DONE", yielded);
+    if (aiSent > 0) await noteAiCustomerReply(conv.id, now());
     if (!sendError && out.replies > 0) await markWaitingForCustomer(conv.id, now());
     if (yielded) out.skipped = yielded;
     out.processed += ids.length;

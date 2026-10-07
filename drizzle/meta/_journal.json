@@ -1594,15 +1594,22 @@
     {
       "idx": 228,
       "version": "7",
-      "when": 1791350240000,
-      "tag": "0228_tech_workers",
+      "when": 1791400200000,
+      "tag": "0228_pricing_v1_versions",
       "breakpoints": true
     },
     {
       "idx": 229,
       "version": "7",
-      "when": 1791350300000,
-      "tag": "0229_tech_policy_budget",
+      "when": 1791400260000,
+      "tag": "0229_tech_workers",
+      "breakpoints": true
+    },
+    {
+      "idx": 230,
+      "version": "7",
+      "when": 1791400320000,
+      "tag": "0230_tech_policy_budget",
       "breakpoints": true
     }
   ]

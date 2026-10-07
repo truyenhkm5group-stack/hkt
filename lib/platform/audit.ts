@@ -59,6 +59,10 @@ export type PlatformAuditAction = "MODULE_ENABLE" | "MODULE_DISABLE" | "FEATURE_
   | "COST_ENTRY_VOID"
   | "STATEMENT_FINALIZE"
   | "PROVISIONING_RUN"
+  // Bảng giá có phiên bản (0228, lib/pricing/price-book.ts): phát hành một phiên bản giá mới (sửa giá = phiên bản mới, không
+  // sửa dòng cũ) và ghim / chuyển một tổ chức sang một phiên bản giá.
+  | "PRICE_VERSION_PUBLISH"
+  | "PRICE_VERSION_PIN"
   // Platform AI Model Control (06/10/2026, lib/ai-usage/platform-ai-admin.ts): kiểm khả dụng một model bằng khoá nền tảng,
   // đặt chính sách model của AI dùng chung (chạy thử canary · áp dụng), hoàn tác về bản trước.
   | "PLATFORM_AI_MODEL_PROBE"

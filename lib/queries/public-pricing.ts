@@ -1,12 +1,15 @@
-import { listPlans } from "@/lib/entitlements/check";
 import { HOME_PLAN_KEY } from "@/lib/entitlements/kinds";
-import { monthlyOnYearlyVnd, parseCommercial, planQuotas, trialDaysOf, yearlyPriceVnd, type QuotaKey } from "@/lib/pricing/catalog";
+import { parseCommercial, planQuotas, trialDaysOf, type QuotaKey } from "@/lib/pricing/catalog";
 import { FEATURE_KEYS, FEATURE_SPEC, type FeatureKey } from "@/lib/pricing/features";
+import { catalogPlans } from "@/lib/pricing/price-book";
+import { TAX_MODE_LABEL, type Included, type OverageSpec } from "@/lib/pricing/versions";
 import { getPublicSiteData, planIncludesAi, type PublicSiteData } from "@/lib/queries/public-site";
 
 /**
- * DỮ LIỆU CỦA TRANG GIÁ CÔNG KHAI `/pricing` (0222). Cùng giới hạn với trang giới thiệu (`public-site.ts`): chỉ đọc gói cước ở
- * `platform_plans` và chế độ đăng ký — không một dòng dữ liệu khách nào (`tests/pricing-billing.test.ts` khoá danh sách import).
+ * DỮ LIỆU CỦA TRANG GIÁ CÔNG KHAI `/pricing` (0222 · 0228). Cùng giới hạn với trang giới thiệu (`public-site.ts`): chỉ đọc BẢNG
+ * GIÁ ĐANG NIÊM YẾT (phiên bản CATALOG hiện hành) và chế độ đăng ký — không một dòng dữ liệu khách nào
+ * (`tests/pricing-billing.test.ts` khoá danh sách import). Mọi giá / hạn mức / đơn giá vượt đọc từ phiên bản — trang không gõ
+ * lại số nào.
  */
 export type PublicPricingPlan = {
   key: string;
@@ -17,44 +20,56 @@ export type PublicPricingPlan = {
   yearlyPriceVnd: number | null;
   monthlyOnYearlyVnd: number | null;
   yearlyFreeMonths: number;
+  /** Gói hợp đồng: «Từ … ₫ · Liên hệ». */
+  priceFromVnd: number | null;
   trialDays: number | null;
   contactSales: boolean;
   highlight: boolean;
   /** `undefined` = gói chưa khai ô đó (trang không in dòng ấy) · `null` = không giới hạn. */
   quotas: Record<QuotaKey, number | null | undefined>;
+  /** Hạn mức GỒM của phiên bản giá: khách AI (đồng hồ thu chính), fanpage, người dùng, fair-use, đơn. */
+  included: Included;
+  overage: OverageSpec;
   /** Tính năng in được: gói khai VÀ cửa hàng tự đăng ký dùng được hôm nay (`publicClaim`). Gói chưa khai ⇒ rỗng — không hứa. */
   features: FeatureKey[];
   aiIncluded: boolean;
+  hasAiSales: boolean;
 };
 
 /**
- * Gói in ở `/pricing`: người vận hành bật «hiện ở trang giá» (`commercial.publicListed`) và gói có giá, HOẶC «Liên hệ», HOẶC
- * là gói dùng thử. Mọi giá / hạn mức đọc từ `platform_plans` — trang không gõ lại số nào. Đọc lỗi ⇒ rỗng (ẩn bảng giá).
+ * Gói in ở `/pricing`: gói của bảng giá đang niêm yết có `listed`, VÀ (có giá HOẶC «Liên hệ» HOẶC là gói dùng thử). Đọc lỗi
+ * ⇒ rỗng (ẩn bảng giá — không bao giờ in một giá đoán).
  */
-export async function getPublicPricing(): Promise<{ site: PublicSiteData; plans: PublicPricingPlan[] }> {
-  const [site, rows] = await Promise.all([getPublicSiteData(), listPlans().catch(() => [])]);
+export async function getPublicPricing(): Promise<{ site: PublicSiteData; plans: PublicPricingPlan[]; versionLabel: string | null; taxNote: string | null }> {
+  const [site, catalog] = await Promise.all([getPublicSiteData(), catalogPlans().catch(() => ({ version: null, plans: [] }))]);
   const plans: PublicPricingPlan[] = [];
-  for (const r of rows) {
-    if (r.key === HOME_PLAN_KEY) continue;
+  for (const r of catalog.plans) {
+    const price = r.planPrice;
+    if (r.key === HOME_PLAN_KEY || !price || !price.listed) continue;
     const c = parseCommercial(r.commercial);
-    const trialDays = trialDaysOf(r.key);
-    const priced = typeof r.priceVnd === "number" && r.priceVnd > 0;
-    if (!c.publicListed || !(priced || c.contactSales || trialDays)) continue;
+    const trialDays = price.trialDays ?? trialDaysOf(r.key);
+    const priced = typeof r.priceVnd === "number" && r.priceVnd > 0 && !price.contactSales;
+    if (!(priced || price.contactSales || trialDays)) continue;
     plans.push({
       key: r.key,
       name: r.name,
       description: r.description,
       priceVnd: priced ? r.priceVnd : null,
-      yearlyPriceVnd: yearlyPriceVnd(r.priceVnd, r.yearlyFreeMonths),
-      monthlyOnYearlyVnd: monthlyOnYearlyVnd(r.priceVnd, r.yearlyFreeMonths),
+      yearlyPriceVnd: priced ? r.yearlyPriceVnd : null,
+      monthlyOnYearlyVnd: priced && r.yearlyPriceVnd !== null ? Math.floor(r.yearlyPriceVnd / 12) : null,
       yearlyFreeMonths: r.yearlyFreeMonths,
+      priceFromVnd: price.priceFromVnd,
       trialDays,
-      contactSales: c.contactSales,
-      highlight: c.highlight,
+      contactSales: price.contactSales,
+      highlight: price.highlight,
       quotas: planQuotas(r.limits, c),
-      features: (c.features ?? []).filter((k) => FEATURE_SPEC[k].publicClaim).sort((a, b) => FEATURE_KEYS.indexOf(a) - FEATURE_KEYS.indexOf(b)),
+      included: price.included,
+      overage: price.overage,
+      features: (price.features ?? c.features ?? []).filter((k) => FEATURE_SPEC[k].publicClaim).sort((a, b) => FEATURE_KEYS.indexOf(a) - FEATURE_KEYS.indexOf(b)),
       aiIncluded: planIncludesAi(r.limits),
+      hasAiSales: (price.features ?? []).includes("ai_sales"),
     });
   }
-  return { site, plans };
+  const v = catalog.version;
+  return { site, plans, versionLabel: v?.label ?? null, taxNote: v ? (v.taxNote ?? TAX_MODE_LABEL[v.taxMode]) : null };
 }

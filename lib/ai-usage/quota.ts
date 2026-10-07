@@ -16,6 +16,7 @@ import { listPlans, planKeyOf, DEFAULT_PLAN_KEY } from "@/lib/entitlements/check
 import { currentOrganization, withOrganization } from "@/lib/platform/context";
 import { findOrganization } from "@/lib/platform/organizations";
 import { readOrgAiControl } from "@/lib/ai-usage/control";
+import { orgAiLimits } from "@/lib/pricing/price-book";
 import { sourceUsage } from "@/lib/ai-usage/ledger";
 import {
   applyAiOverride,
@@ -39,7 +40,10 @@ export async function resolveAiLimits(orgCode: string): Promise<ResolvedAiLimits
   const override = (await readOrgAiControl(orgCode)).limits;
   if (org.isHome) return { orgCode, isHome: true, planKey: planKeyOf(org), planName: "Nội bộ", limits: HOME_AI_LIMITS, undeclared: false, override: {}, fellBack: false };
   const key = planKeyOf(org);
+  // Gói AI của bảng giá có phiên bản (0228): không trần cứng, credit = ngân sách mềm — dẫn xuất từ phiên bản đã ghim.
+  const versioned = await orgAiLimits(orgCode, key);
   const plans = await listPlans();
+  if (versioned) return { orgCode, isHome: false, planKey: key, planName: plans.find((p) => p.key === key)?.name ?? key, limits: applyAiOverride(versioned, override), undeclared: false, override, fellBack: false };
   const hit = plans.find((p) => p.key === key);
   const row = hit ?? plans.find((p) => p.key === DEFAULT_PLAN_KEY);
   if (!row) return null;

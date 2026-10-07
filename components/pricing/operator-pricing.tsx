@@ -4,7 +4,8 @@ import { useState } from "react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ConfirmWithReason } from "@/components/platform/pilot-ops";
-import { setAiUnitPricesAction, setOrgPricingAction, setPlanCommercialAction, setPricingGuardAction } from "@/lib/actions/pricing";
+import { setAiUnitPricesAction, setOrgPriceVersionAction, setOrgPricingAction, setPlanCommercialAction, setPricingGuardAction, setPricingMarginAction } from "@/lib/actions/pricing";
+import type { MarginConfig } from "@/lib/pricing/versions";
 import { PILOT_REASON_MIN } from "@/lib/constants/pilot";
 import { COMMERCIAL_QUOTA_KEYS, LIMIT_MODES, OVERAGE_POLICIES, OVERAGE_POLICY_LABEL, QUOTA_KEYS, QUOTA_SPEC, type LimitMode, type OveragePolicy, type PlanCommercial } from "@/lib/pricing/catalog";
 import { FEATURE_KEYS, FEATURE_SPEC, type FeatureKey } from "@/lib/pricing/features";
@@ -214,6 +215,60 @@ export function GuardConfigForm({ current }: { current: GuardConfig }) {
         <label className="flex items-center gap-1.5 self-end pb-2">
           <input type="checkbox" checked={v.hardLimitsEnabled} onChange={(e) => setV((s) => ({ ...s, hardLimitsEnabled: e.target.checked }))} /> Bật trần cứng của nền tảng
         </label>
+      </div>
+    </ConfirmWithReason>
+  );
+}
+
+/** Dải biên lãi gộp CHIẾU của nền tảng (0228): đích · cảnh báo · nguy cấp. */
+export function MarginConfigForm({ current }: { current: MarginConfig }) {
+  const [v, setV] = useState({ ...current });
+  const num = (k: keyof MarginConfig) => (e: React.ChangeEvent<HTMLInputElement>) => setV((s) => ({ ...s, [k]: Number(e.target.value) }));
+  return (
+    <ConfirmWithReason
+      id="pricing-margin"
+      label="Lưu dải biên…"
+      title="Đổi dải biên lãi gộp?"
+      consequence="Chỉ đổi cách tô màu / cảnh báo biên ở khung người vận hành — không đổi giá, không đổi hoá đơn của ai."
+      minReason={PILOT_REASON_MIN}
+      placeholder="Chốt dải biên"
+      run={(reason) => setPricingMarginAction({ config: v, reason })}
+    >
+      <div className="grid gap-2 text-xs sm:grid-cols-4">
+        {(
+          [
+            ["targetLowPct", "Đích từ (%)"],
+            ["targetHighPct", "Đích tới (%)"],
+            ["warnBelowPct", "Cảnh báo dưới (%)"],
+            ["criticalBelowPct", "Nguy cấp dưới (%)"],
+          ] as const
+        ).map(([k, label]) => (
+          <div key={k} className="space-y-1">
+            <Label htmlFor={`m-${k}`}>{label}</Label>
+            <Input id={`m-${k}`} type="number" step="any" value={String(v[k])} onChange={num(k)} />
+          </div>
+        ))}
+      </div>
+    </ConfirmWithReason>
+  );
+}
+
+/** Chuyển MỘT tổ chức sang một phiên bản giá (0228) — giá cũ giữ cho tới khi người vận hành chuyển. */
+export function PriceVersionPinForm({ orgCode, orgName, current }: { orgCode: string; orgName: string; current: string | null }) {
+  const [key, setKey] = useState(current ?? "");
+  return (
+    <ConfirmWithReason
+      id={`price-pin-${orgCode}`}
+      label="Đổi phiên bản giá…"
+      title={`Chuyển «${orgName}» sang phiên bản giá khác?`}
+      consequence="Hoá đơn gia hạn kế tiếp và phần vượt tính theo phiên bản mới. Hoá đơn đã trả và kỳ đã chốt không đổi."
+      minReason={PILOT_REASON_MIN}
+      placeholder="Khách đồng ý chuyển sang bảng giá mới"
+      run={(reason) => setOrgPriceVersionAction({ orgCode, versionKey: key.trim(), reason })}
+    >
+      <div className="space-y-1 text-xs">
+        <Label htmlFor={`pin-${orgCode}`}>Khoá phiên bản (vd legacy · v1-2026-10)</Label>
+        <Input id={`pin-${orgCode}`} value={key} onChange={(e) => setKey(e.target.value)} />
       </div>
     </ConfirmWithReason>
   );

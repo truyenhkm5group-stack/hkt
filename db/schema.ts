@@ -5227,6 +5227,8 @@ export const platformInvoices = pgTable(
     vatIssuedAt: ts("vat_issued_at"),
     vatRef: text("vat_ref"),
     vatIssuedByEmail: text("vat_issued_by_email"),
+    /** Phiên bản giá của hoá đơn (0228). `NULL` = hoá đơn trước 0228 = giá legacy. */
+    priceVersionKey: text("price_version_key"),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
@@ -5583,6 +5585,90 @@ export const platformProvisioningJobs = pgTable(
     check("platform_provisioning_jobs_error_check", sql`${t.status} <> 'FAILED' OR ${t.lastError} IS NOT NULL`),
     check("platform_provisioning_jobs_key_check", sql`length(${t.idempotencyKey}) BETWEEN 1 AND 200`),
   ],
+);
+
+// ═══ BẢNG GIÁ CÓ PHIÊN BẢN (0228 · docs/saas/PRICING_V1.md) — giá tương lai đổi = THÊM phiên bản, không sửa dòng cũ ═══
+
+/**
+ * MỘT phiên bản bảng giá. `LEGACY_SNAPSHOT` = ảnh chụp giá đang thu lúc 0228 (chỉ tới bằng ghim); `CATALOG` = bảng giá
+ * niêm yết, hiệu lực từ `effective_from` (phiên bản CATALOG mới nhất đã hiệu lực = giá cho tổ chức chưa ghim). Ngưỡng cảnh
+ * báo dùng (80 · 100 · 120 · 150) đi theo phiên bản; thuế `UNDECLARED` = không giả định VAT.
+ */
+export const platformPriceVersions = pgTable(
+  "platform_price_versions",
+  {
+    key: text("key").primaryKey(),
+    label: text("label").notNull(),
+    kind: text("kind").notNull(),
+    effectiveFrom: ts("effective_from"),
+    taxMode: text("tax_mode").notNull().default("UNDECLARED"),
+    taxNote: text("tax_note"),
+    alertThresholds: jsonb("alert_thresholds").$type<Record<string, unknown>>().notNull().default({}),
+    note: text("note"),
+    createdByEmail: text("created_by_email"),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    check("platform_price_versions_key_check", sql`${t.key} ~ '^[a-z0-9][a-z0-9-]{1,40}$'`),
+    check("platform_price_versions_kind_check", sql`${t.kind} IN ('LEGACY_SNAPSHOT','CATALOG')`),
+    check("platform_price_versions_effective_check", sql`(${t.kind} = 'CATALOG') = (${t.effectiveFrom} IS NOT NULL)`),
+    check("platform_price_versions_tax_check", sql`${t.taxMode} IN ('UNDECLARED','EXCLUSIVE','INCLUSIVE')`),
+  ],
+);
+
+/**
+ * Giá của MỘT gói trong MỘT phiên bản. Đọc DUY NHẤT qua `lib/pricing/versions.ts::parsePlanPrice` — ô thiếu = CHƯA KHAI,
+ * `null` trong `included` = không giới hạn. Dòng LEGACY chép nguyên `platform_plans` lúc 0228.
+ */
+export const platformPlanPrices = pgTable(
+  "platform_plan_prices",
+  {
+    versionKey: text("version_key")
+      .notNull()
+      .references(() => platformPriceVersions.key),
+    planKey: text("plan_key").notNull(),
+    name: text("name").notNull(),
+    description: text("description"),
+    position: integer("position").notNull().default(0),
+    listed: boolean("listed").notNull().default(false),
+    highlight: boolean("highlight").notNull().default(false),
+    contactSales: boolean("contact_sales").notNull().default(false),
+    monthlyVnd: bigint("monthly_vnd", { mode: "number" }),
+    /** Giá trả 12 tháng TƯỜNG MINH. `NULL` = giá tháng × (12 − `yearly_free_months`) như 0194. */
+    yearlyVnd: bigint("yearly_vnd", { mode: "number" }),
+    yearlyFreeMonths: integer("yearly_free_months").notNull().default(0),
+    /** Gói hợp đồng: «Từ … ₫» — không tự mua, không tự tính phần vượt. */
+    priceFromVnd: bigint("price_from_vnd", { mode: "number" }),
+    trialDays: integer("trial_days"),
+    included: jsonb("included").$type<Record<string, unknown>>().notNull().default({}),
+    overage: jsonb("overage").$type<Record<string, unknown>>().notNull().default({}),
+    features: jsonb("features").$type<unknown[]>(),
+    addonPrices: jsonb("addon_prices").$type<Record<string, unknown>>().notNull().default({}),
+    limits: jsonb("limits").$type<Record<string, unknown>>().notNull().default({}),
+    commercial: jsonb("commercial").$type<Record<string, unknown>>().notNull().default({}),
+  },
+  (t) => [
+    primaryKey({ name: "platform_plan_prices_pk", columns: [t.versionKey, t.planKey] }),
+    check("platform_plan_prices_amount_check", sql`(${t.monthlyVnd} IS NULL OR ${t.monthlyVnd} > 0) AND (${t.yearlyVnd} IS NULL OR ${t.yearlyVnd} > 0) AND (${t.priceFromVnd} IS NULL OR ${t.priceFromVnd} > 0)`),
+    check("platform_plan_prices_free_months_check", sql`${t.yearlyFreeMonths} BETWEEN 0 AND 6`),
+    check("platform_plan_prices_trial_check", sql`${t.trialDays} IS NULL OR ${t.trialDays} BETWEEN 1 AND 90`),
+  ],
+);
+
+/** Tổ chức đang ở phiên bản giá nào. Không có dòng ⇒ phiên bản CATALOG đang hiệu lực; hoá đơn đầu tiên được trả thì ghim. */
+export const platformPricePins = pgTable(
+  "platform_price_pins",
+  {
+    orgCode: text("org_code").primaryKey(),
+    versionKey: text("version_key")
+      .notNull()
+      .references(() => platformPriceVersions.key),
+    source: text("source").notNull(),
+    reason: text("reason"),
+    pinnedByEmail: text("pinned_by_email"),
+    pinnedAt: ts("pinned_at").notNull().defaultNow(),
+  },
+  (t) => [index("platform_price_pins_version_idx").on(t.versionKey), check("platform_price_pins_source_check", sql`${t.source} IN ('MIGRATION_0228','INVOICE_PAID','OPERATOR','TEST')`)],
 );
 
 /** Nhật ký nền tảng: ai đổi module / cờ / tổ chức nào, trước → sau, vì sao. Chỉ THÊM. */
@@ -8009,7 +8095,7 @@ export const techTasks = pgTable(
     /** Khi `NEEDS_OWNER`: ĐÚNG việc chủ shop phải làm, đủ để làm theo mà không phải hỏi lại. */
     ownerAction: text("owner_action").notNull().default(""),
 
-    /* ───── Hàng đợi worker (0228, docs/tech-control-plane/README.md mục 4) ───── */
+    /* ───── Hàng đợi worker (0229, docs/tech-control-plane/README.md mục 4) ───── */
     /** Năng lực việc cần (`TECH_CAPABILITIES`). Rỗng = suy theo loại việc (`CAPABILITY_BY_TASK_TYPE`). */
     capability: text("capability").notNull().default(""),
     /** Worker đang giữ lease. `NULL` ⇔ `lease_expires_at NULL` (CHECK) — không ai giữ. */
@@ -8024,7 +8110,7 @@ export const techTasks = pgTable(
     nextAttemptAt: ts("next_attempt_at"),
     lastError: text("last_error").notNull().default(""),
     /**
-     * Mức chính sách R0–R4 (0229, `classifyTechPolicy`) — tính lúc GHI (tạo việc, đè rủi ro). `NULL` = CHƯA XẾP ⇒
+     * Mức chính sách R0–R4 (0230, `classifyTechPolicy`) — tính lúc GHI (tạo việc, đè rủi ro). `NULL` = CHƯA XẾP ⇒
      * không bao giờ tự động (đóng khi thiếu); dòng cũ không backfill, người bấm "Xếp lại chính sách".
      */
     policyLevel: text("policy_level"),
@@ -8200,7 +8286,7 @@ export const techAgentRuns = pgTable(
     reviewNote: text("review_note").notNull().default(""),
     reviewedByUserId: text("reviewed_by_user_id").references(() => users.id, { onDelete: "set null" }),
     reviewedAt: ts("reviewed_at"),
-    /* ───── Lượt chạy của worker hàng đợi (0228) ───── */
+    /* ───── Lượt chạy của worker hàng đợi (0229) ───── */
     /** Worker đã chạy lượt này. `NULL` = lượt cũ (GitHub Actions / chạy tay). */
     workerId: text("worker_id").references((): AnyPgColumn => techWorkers.id, { onDelete: "set null" }),
     /** `TECH_EXECUTION_PROVIDERS`. Rỗng = lượt cũ, chưa khai. */
@@ -8669,7 +8755,7 @@ export const techEvents = pgTable(
 );
 
 /**
- * WORKER — một tiến trình thi hành CÓ DANH TÍNH (0228). Khoá bí mật chỉ lưu BĂM (sha256); "sống / chập chờn /
+ * WORKER — một tiến trình thi hành CÓ DANH TÍNH (0229). Khoá bí mật chỉ lưu BĂM (sha256); "sống / chập chờn /
  * mất" là hàm của `last_heartbeat_at` và đồng hồ (`workerLiveness`), không có cột trạng thái.
  */
 export const techWorkers = pgTable(
@@ -8722,7 +8808,7 @@ export const techRunLogs = pgTable(
 );
 
 /**
- * NGÂN SÁCH THEO PHẠM VI (0229). Một dòng mỗi (phạm vi, id); ô `NULL` = CHƯA KHAI. Tầng hẹp đè tầng rộng TỪNG Ô
+ * NGÂN SÁCH THEO PHẠM VI (0230). Một dòng mỗi (phạm vi, id); ô `NULL` = CHƯA KHAI. Tầng hẹp đè tầng rộng TỪNG Ô
  * (`resolveBudget`). Tiền API CHƯA KHAI trần ngày ⇒ worker API không chạy (đóng khi thiếu).
  */
 export const techBudgets = pgTable(
