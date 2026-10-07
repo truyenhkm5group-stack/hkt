@@ -1,8 +1,8 @@
 {
   "pr": 638,
-  "sha": "0305c8aaf4a231802a508c99bf2c3fe1fd3c7a4c",
+  "sha": "e470cc02bc614c7fe4c630888bb64ee2512c41d3",
   "verdict": "PASS",
   "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
-  "at": "2026-10-07T16:26:01.794Z",
-  "note": "review độc lập PASS @45cddeff (salesAgentShell chỉ hs-thien-nga-test trên production); sửa: shellAllows chung cổng máy chủ, /inventory/receipts cho phiếu nhập/kiểm kê theo sổ kho, câu ngoai-goi, chiều cao hộp thư mobile (Lead đọc delta)"
+  "at": "2026-10-07T16:35:11.008Z",
+  "note": "PASS @0305c8aa + delta tích hợp: gộp main (#637 #639 #642) + SALES_AGENT_CHANNELS_HREF = /ai/channels (khoá bằng CHANNELS_ROUTE); bài liên quan chạy riêng ĐẠT"
 }
