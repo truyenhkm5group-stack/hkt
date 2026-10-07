@@ -2,14 +2,14 @@
   "schema": 1,
   "mission_id": "saas-a-vnx-runtime",
   "title": "Phase A: chuyển runtime chatbot VNX sang Chốt Đơn — gỡ 4 chặn kỹ thuật (ai_sales nhà vẫn TẮT), rồi bóng từng page",
-  "business_goal": "Phase A phần 2: PancakePosSink (bot nhà ghi đơn Pancake: POST nháp/PUT sửa/PUT xác nhận + luật trùng 14 ngày, nối lib/sales-chatbot/tools.ts) + cổng chạy bóng THEO PAGE trước khi bật ai_sales nhà; phần 1 (#621, gỡ chặn 2-3-4) đã lên production 657fb732",
-  "status": "VERIFYING",
+  "business_goal": "Phase A phần 3: PancakePosSink (port chatbot/src/orders.js — trích đơn AI, map variation, chuẩn hoá địa chỉ Pancake, POST nháp/PUT sửa/PUT status:1, trùng 14 ngày; PancakeClient thêm PUT; mở manualOrderOrgGate ở nhà chỉ khi page LIVE + sink đủ). Phần 1 (#621) + phần 2 cổng page (#625) đã lên production 42952b8c",
+  "status": "READY",
   "priority": "P1",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
   "worker": null,
   "worktree": null,
-  "branch": "feat/saas-a2-page-gate",
+  "branch": null,
   "base_sha": "0b5ec24f7a92b6ab49ffd64e79b523afc9d78fff",
   "domains": [],
   "owned_paths": [
@@ -23,7 +23,8 @@
     "tests/saas-page-gate.test.ts"
   ],
   "dependencies": [
-    "saas-platform-restructure"
+    "saas-platform-restructure",
+    "saas-d-pricing-overage"
   ],
   "blocked_by": [],
   "related_prs": [
@@ -32,8 +33,8 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-06T17:03:14.603Z",
-  "updated_at": "2026-10-07T01:32:01.124Z",
-  "last_heartbeat": "2026-10-07T00:46:14.018Z",
+  "updated_at": "2026-10-07T01:32:19.223Z",
+  "last_heartbeat": "2026-10-07T01:32:19.223Z",
   "definition_of_done": [],
   "evidence": {
     "merged": "#625 → 42952b8c83caaf42fa3abda15dfce691e86f9b26",
