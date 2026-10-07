@@ -59,7 +59,8 @@ import {
   type OrderSyncOutcome,
   type OrderSyncThreadState,
 } from "@/lib/sales-chatbot/order-sync-shared";
-import { fetchPancakeThreadProfile, findReturningCustomer, normalizeVnPhone, RETURNING_LIMITS, type PancakeThreadProfile, type PriorMessage, type ReturningCustomer, type ThreadReadLimits } from "@/lib/sales-chatbot/returning";
+import { fetchPancakeThreadProfile, findReturningCustomer, normalizeVnPhone, RETURNING_LIMITS, type PancakeThreadProfile, type PriorMessage, type ReturningCustomer, type ReturningTrust, type ThreadReadLimits } from "@/lib/sales-chatbot/returning";
+import { priceBooksFor } from "@/lib/queries/price-lists";
 import { SALES_CHATBOT_MANAGE } from "@/lib/sales-chatbot/settings";
 import { foldVi } from "@/lib/sales-chatbot/text";
 import { linkAgentOrder, recordConversationEvent } from "@/lib/sales-chatbot/events";
@@ -167,11 +168,31 @@ export type SyncDecision =
   | { kind: "SKIP"; reason: string };
 
 /**
+ * Thông tin LẦN TRƯỚC được dùng để ghi đơn đặt lại — chỉ khi chứng minh được CÙNG NGƯỜI: khớp mã Facebook (FB_ID) hoặc khách tự
+ * khai trong chính hội thoại (THREAD). Mức PHONE (chỉ khớp qua SĐT xuất hiện trong hội thoại — ai cũng gõ được SĐT người khác,
+ * kể cả địa chỉ do máy chủ điền từ hồ sơ chủ SĐT) ⇒ `null`: không thì «giao như lần trước, sđt <SĐT nạn nhân>» lên đơn thật về
+ * địa chỉ nạn nhân và máy nhắn nguyên địa chỉ đó cho người chat (review bảo mật 08/10/2026 — CRITICAL). KHÔNG có lối tắt «hội
+ * thoại từng có đơn mang SĐT đó»: kẻ gian tự lên một đơn nháp ghi SĐT nạn nhân là có (review vòng 3). HÀM THUẦN.
+ */
+function trustedPrevious(r: ReturningCustomer | null): ReturningCustomer | null {
+  return r && r.trust !== "PHONE" ? r : null;
+}
+
+/**
  * Câu trả lời của AI ⇒ quyết định của MÁY CHỦ. Mọi thứ AI nói đều được kiểm lại với hội thoại thật và danh mục thật; thiếu
  * một thứ không suy ra được ⇒ KHÔNG lên đơn (nêu lý do), không đoán. HÀM THUẦN.
  */
-export function decideOrderSync(input: { reply: OrderSyncReply; messages: readonly SyncMessage[]; cutoffMs: number; catalogIds: ReadonlySet<string>; returning: ReturningCustomer | null; knownPhones: readonly string[]; fallbackName: string }): SyncDecision {
-  const { reply, messages, cutoffMs, returning } = input;
+export function decideOrderSync(input: {
+  reply: OrderSyncReply;
+  messages: readonly SyncMessage[];
+  cutoffMs: number;
+  catalogIds: ReadonlySet<string>;
+  returning: ReturningCustomer | null;
+  knownPhones: readonly string[];
+  fallbackName: string;
+}): SyncDecision {
+  const { reply, messages, cutoffMs } = input;
+  const returning = trustedPrevious(input.returning);
   if (reply.kind === "NONE") return { kind: "NONE", reason: reply.summary || "Chưa có đơn mới" };
   if (reply.kind === "CHANGE") return { kind: "CHANGE", summary: reply.summary || "Khách muốn sửa đơn vừa ghi" };
   const pointed = messages.find((m) => m.index === reply.agreement_index);
@@ -212,7 +233,10 @@ export function decideOrderSync(input: { reply: OrderSyncReply; messages: readon
     province = returning.province;
     addressFrom = "PREVIOUS";
   }
-  if (!phone || !address) return { kind: "SKIP", reason: `Thiếu ${[!phone ? "SĐT" : "", !address ? "địa chỉ" : ""].filter(Boolean).join(" + ")} do KHÁCH gửi — khách chưa gửi và shop chưa có đơn trước của khách` };
+  if (!phone || !address) {
+    if (input.returning && !returning) return { kind: "SKIP", reason: "Khách nhắn đặt lại nhưng chỉ khớp hồ sơ qua SĐT — chưa chứng minh là cùng người (không khớp mã Facebook). Nhân viên xác nhận SĐT + địa chỉ với khách rồi lên đơn tay." };
+    return { kind: "SKIP", reason: `Thiếu ${[!phone ? "SĐT" : "", !address ? "địa chỉ" : ""].filter(Boolean).join(" + ")} do KHÁCH gửi — khách chưa gửi và shop chưa có đơn trước của khách` };
+  }
   const customerGaveInfo = phoneFrom === "CHAT" && addressFrom === "CHAT";
   // Đường (2) — đặt lại theo thông tin cũ — phải do CHÍNH tin của khách: AI chỉ vào tin của shop thì không đủ căn cứ.
   if (!customerGaveInfo && pointed.from !== "customer") return { kind: "SKIP", reason: "Khách chưa gửi SĐT + địa chỉ và chưa nhắn đặt lại — tin chốt là của shop" };
@@ -232,11 +256,20 @@ export function decideOrderSync(input: { reply: OrderSyncReply; messages: readon
   };
 }
 
-/** Tin xác nhận lại đơn đặt lại cho khách cũ — món × SL, tiền, địa chỉ + SĐT sẽ giao. HÀM THUẦN. */
-export function reorderConfirmText(o: { lines: readonly { name: string; quantity: number }[]; total: number; shippingFee: number | null; address: string; phone: string }): string {
+/**
+ * Tin xác nhận đơn đặt lại được nêu TỔNG TIỀN không (review bảo mật #647 M-a). Shop bật giá sỉ và hồ sơ khớp SĐT người nhận có
+ * BẢNG GIÁ RIÊNG ⇒ tổng tính theo bảng ấy — chỉ nhắn ra khi danh tính đã XÁC MINH (mã Facebook): mức THREAD là SĐT người chat tự
+ * gõ, có thể là SĐT đại lý của người khác (đơn một dòng × 1 là lộ đơn giá sỉ). Giá của ĐƠN không đổi. HÀM THUẦN.
+ */
+export function reorderTotalVisible(o: { wholesalePricing: boolean; trust: ReturningTrust | null; hasCustomerList: boolean }): boolean {
+  return !o.wholesalePricing || !o.hasCustomerList || o.trust === "FB_ID";
+}
+
+/** Tin xác nhận lại đơn đặt lại cho khách cũ — món × SL, tiền (`null` ⇒ nhân viên báo), địa chỉ + SĐT sẽ giao. HÀM THUẦN. */
+export function reorderConfirmText(o: { lines: readonly { name: string; quantity: number }[]; total: number | null; shippingFee: number | null; address: string; phone: string }): string {
   const items = o.lines.map((l) => `${l.name} × ${l.quantity}`).join(", ");
   return [
-    `Dạ em lên đơn cho mình: ${items} — tổng ${formatVND(o.total)}${o.shippingFee === null ? " + phí ship" : ""}.`,
+    o.total === null ? `Dạ em lên đơn cho mình: ${items} — tổng tiền nhân viên shop báo lại mình ạ.` : `Dạ em lên đơn cho mình: ${items} — tổng ${formatVND(o.total)}${o.shippingFee === null ? " + phí ship" : ""}.`,
     `Giao về: ${o.address} · SĐT ${o.phone}.`,
     "Mình đổi địa chỉ / SĐT thì nhắn em ngay nhé ạ.",
   ].join("\n");
@@ -259,10 +292,12 @@ export function orderSyncPrompt(input: { shop: string; catalog: readonly Catalog
     'Trả về DUY NHẤT một khối JSON: {"kind":"NEW_ORDER"|"CHANGE"|"NONE","items":[{"variant_id":"…","quantity":1}],"recipient_name":"","recipient_phone":"","address":"","use_previous_address":false,"delivery_note":"","agreement_index":null,"summary":"một câu tiếng Việt"}',
   ].join("\n");
   const catalog = input.catalog.slice(0, ORDER_SYNC_LIMITS.catalog).map((c) => `${c.variantId} | ${c.name}${c.variant ? ` (${c.variant})` : ""} | ${c.price === null ? "chưa có giá" : formatVND(c.price)}`);
-  const r = input.returning;
+  const r = trustedPrevious(input.returning);
   const known = r
     ? `KHÁCH CŨ: shop đã có thông tin nhận hàng lần trước — người nhận «${r.name.trim().split(/\s+/).pop() ?? ""}», SĐT đuôi ${r.phone.replace(/\D/g, "").slice(-4)}, khu vực «${[r.address, r.province].filter((x) => x.trim()).join(", ").split(",").slice(-2).join(",").trim()}»${r.lastItems.length ? `; lần trước mua: ${r.lastItems.join("; ")}` : ""}.`
-    : "KHÁCH CŨ: shop chưa có thông tin nhận hàng của khách này.";
+    : input.returning
+      ? "KHÁCH CŨ: SĐT trong hội thoại có trong sổ nhưng CHƯA chứng minh là cùng người — KHÔNG dùng thông tin lần trước (use_previous_address = false)."
+      : "KHÁCH CŨ: shop chưa có thông tin nhận hàng của khách này.";
   const lines = input.messages.map((m) => `[${m.index}] ${new Date(m.at).getTime() > input.cutoffMs ? "MỚI" : "CŨ"} ${formatDateTime(m.at)} ${m.from === "customer" ? "KHÁCH" : "SHOP"}: ${m.text}`);
   const user = [
     "DANH MỤC (variant_id | tên | giá hiện tại):",
@@ -696,7 +731,8 @@ async function syncThread(a: {
   // Khách cũ đặt lại theo thông tin lần trước (chủ shop HSLC 05/10/2026: «xác nhận thông tin đơn hàng lại cho khách và tính là
   // chốt đơn mới đã xác nhận») ⇒ máy nhắn lại khách đúng món · tiền · địa chỉ · SĐT sẽ giao, để khách thấy và sửa nếu đã đổi.
   const reorder = decision.phoneFrom === "PREVIOUS" || decision.addressFrom === "PREVIOUS";
-  const told = reorder ? await a.src.sendText(a.threadId, reorderConfirmText({ lines: priced.lines, total, shippingFee: priced.shippingFee, address: saved?.full || [decision.recipient.address, decision.recipient.province].filter(Boolean).join(", "), phone: decision.recipient.phone })).catch(() => ({ ok: false as const, error: "lỗi gửi" })) : null;
+  const showTotal = reorderTotalVisible({ wholesalePricing: a.botCfg.wholesalePricing, trust: returning?.trust ?? null, hasCustomerList: reorder && a.botCfg.wholesalePricing ? Boolean((await priceBooksFor(cust.id)).customerList) : false });
+  const told = reorder ? await a.src.sendText(a.threadId, reorderConfirmText({ lines: priced.lines, total: showTotal ? total : null, shippingFee: priced.shippingFee, address: saved?.full || [decision.recipient.address, decision.recipient.province].filter(Boolean).join(", "), phone: decision.recipient.phone })).catch(() => ({ ok: false as const, error: "lỗi gửi" })) : null;
   const fromPrevious = reorder ? `${[decision.phoneFrom === "PREVIOUS" ? "SĐT" : "", decision.addressFrom === "PREVIOUS" ? "Địa chỉ" : ""].filter(Boolean).join(" + ")} theo đơn trước — ${told?.ok ? "đã nhắn xác nhận lại cho khách" : "CHƯA nhắn được cho khách, xác nhận với khách"}` : "";
   const groupText = orderGroupText({
     header: confirmed ? "🧾 ĐƠN MỚI — nhân viên chốt trên fanpage (đã tính đơn)" : "🧾 ĐƠN MỚI — nhân viên chốt trên fanpage (máy ghi, cần kiểm)",

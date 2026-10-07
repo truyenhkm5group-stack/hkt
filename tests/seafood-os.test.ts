@@ -94,7 +94,10 @@ export async function testSeafoodOs() {
         assert.ok(!r.isError, r.content);
         return JSON.parse(r.content) as { price: number | null; tiers?: { min_quantity: number; unit_price: number }[] };
       };
-      const known: ChatState = { customer: { id: agent.id, name: "Đại lý Cửa Biển", phone: "0912000111", address: "", province: "", simulated: false } };
+      // Bảng giá RIÊNG chỉ khi danh tính đã XÁC MINH (mã Facebook / hội thoại từng có đơn của hồ sơ) — review bảo mật 08/10/2026:
+      // ai gõ SĐT của đại lý cũng nhận ra hồ sơ đại lý, nên hồ sơ khớp qua SĐT gõ tay chỉ được bảng MẶC ĐỊNH.
+      const known: ChatState = { customer: { id: agent.id, name: "Đại lý Cửa Biển", phone: "0912000111", address: "", province: "", simulated: false, verifiedIdentity: true } };
+      const typedOnly: ChatState = { customer: { ...known.customer!, verifiedIdentity: undefined } };
 
       // TẮT ⇒ giá lẻ, kể cả khách có bảng riêng và số lượng lớn.
       assert.equal((await priceOf(false, known, 50)).price, 200_000);
@@ -107,6 +110,9 @@ export async function testSeafoodOs() {
       const mine = await priceOf(true, known, 25);
       assert.equal(mine.price, 150_000);
       assert.deepEqual(mine.tiers?.map((t) => [t.min_quantity, t.unit_price]), [[1, 160_000], [20, 150_000]]);
+      const spoof = await priceOf(true, typedOnly, 25);
+      assert.equal(spoof.price, 170_000, "khớp hồ sơ đại lý qua SĐT gõ tay ⇒ bảng mặc định, KHÔNG giá riêng của đại lý");
+      assert.deepEqual(spoof.tiers?.map((t) => [t.min_quantity, t.unit_price]), [[10, 170_000]], "không lộ bậc giá riêng");
       // Giỏ hàng tính bằng CÙNG đơn giá.
       const cart = await executeTool("calculate_cart", { items: [{ variant_id: "erp-sf-v", quantity: 25 }] }, ctx(true, known));
       assert.ok(!cart.isError, cart.content);
