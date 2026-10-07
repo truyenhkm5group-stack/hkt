@@ -51,7 +51,9 @@
     "tech-control-plane"
   ],
   "blocked_by": [],
-  "related_prs": [],
+  "related_prs": [
+    629
+  ],
   "migration_reservations": [
     "0229",
     "0230"
@@ -61,7 +63,7 @@
     "0230": "2026-10-07T01:47:14.420Z"
   },
   "created_at": "2026-10-06T18:16:09.859Z",
-  "updated_at": "2026-10-07T03:05:57.942Z",
+  "updated_at": "2026-10-07T03:06:15.700Z",
   "last_heartbeat": "2026-10-07T03:05:57.942Z",
   "definition_of_done": [],
   "intake": {
