@@ -1,0 +1,33 @@
+{
+  "schema": 1,
+  "mission_id": "saas-l4-channels",
+  "title": "Kênh kết nối hợp nhất cho khách",
+  "business_goal": "",
+  "status": "RUNNING",
+  "priority": "P1",
+  "risk": "MEDIUM",
+  "owner": "DESKTOP-56TH98Y:wt-saas-l4",
+  "worker": null,
+  "worktree": null,
+  "branch": "feat/saas-l4-channels",
+  "base_sha": "4d30d4ec56af58afe7e0e20503f89766efc3ba20",
+  "domains": [],
+  "owned_paths": [
+    "app/(dashboard)/ai/channels/",
+    "lib/channels/",
+    "lib/integrations/messenger/permission-guide.ts",
+    "lib/integrations/messenger/graph-errors.ts",
+    "app/(dashboard)/ai/sales-chatbot/messenger/page.tsx",
+    "tests/channels-overview.test.ts",
+    "tests/sync-fixtures.test.ts",
+    "tests/ui-consistency.test.ts"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-07T10:35:57.696Z",
+  "updated_at": "2026-10-07T10:35:57.696Z",
+  "last_heartbeat": "2026-10-07T10:35:57.696Z",
+  "definition_of_done": []
+}
