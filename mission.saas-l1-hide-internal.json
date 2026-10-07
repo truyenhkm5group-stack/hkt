@@ -3,7 +3,7 @@
   "mission_id": "saas-l1-hide-internal",
   "title": "Che dữ liệu AI nội bộ khỏi khách (UI + máy chủ)",
   "business_goal": "",
-  "status": "RUNNING",
+  "status": "PR_READY",
   "priority": "P0",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-saas-l1",
@@ -45,7 +45,18 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-07T10:31:08.855Z",
-  "updated_at": "2026-10-07T11:12:51.993Z",
-  "last_heartbeat": "2026-10-07T11:12:51.993Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-07T12:02:36.510Z",
+  "last_heartbeat": "2026-10-07T12:02:36.510Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "feat/saas-l1-hide-internal",
+    "sha": "dbfdb1c52c907b0ee618403f40023446ecadb9e3",
+    "at": "2026-10-07T12:02:36.510Z",
+    "actor": "DESKTOP-56TH98Y:wt-saas-l1",
+    "title": "Che dữ liệu AI nội bộ khỏi khách (UI + máy chủ)",
+    "summary": "",
+    "tests": [
+      "typecheck sạch; eslint --max-warnings=0 tệp sửa + npm run lint sạch; npm test sau commit: TẤT CẢ KIỂM THỬ ĐẠT (gồm tests/saas-hide-internal.test.ts); npm run build đạt; kiểm đột biến 7/7 bị giết"
+    ]
+  }
 }
