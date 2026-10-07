@@ -4,6 +4,7 @@ import { PageHeader } from "@/components/page-header";
 import { SectionCard } from "@/components/ui-bits";
 import { Button } from "@/components/ui/button";
 import { can, requireUser } from "@/lib/auth/session";
+import { shellAllows } from "@/lib/constants/saas-nav";
 import { moduleDef } from "@/lib/constants/platform-modules";
 import { listActiveAdmins } from "@/lib/queries/platform-modules";
 import { cn } from "@/lib/utils";
@@ -80,7 +81,7 @@ export default async function ModuleDisabledPage({ searchParams }: { searchParam
             </div>
 
             <div className="flex flex-wrap gap-2 pt-1">
-              {canManage ? (
+              {canManage && shellAllows(user, "/settings/modules") ? (
                 <Button asChild size="sm">
                   <Link href="/settings/modules">Mở «Module của tổ chức»</Link>
                 </Button>
