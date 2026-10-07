@@ -3,7 +3,7 @@
   "mission_id": "order-truth-stamp",
   "title": "Đơn bot chốt mang dấu lời nhắc · cấu hình · model · bản mã; sổ AI ghi đúng mã hội thoại",
   "business_goal": "",
-  "status": "PLANNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -26,7 +26,20 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-07T22:13:24.041Z",
-  "updated_at": "2026-10-07T22:13:24.041Z",
-  "last_heartbeat": "2026-10-07T22:13:24.041Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-07T22:13:41.343Z",
+  "last_heartbeat": "2026-10-07T22:13:41.343Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "feat/order-truth-stamp",
+    "sha": "e433706d09de8158720feff7e68d082df53e6edc",
+    "at": "2026-10-07T22:13:41.343Z",
+    "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+    "title": "Đơn bot chốt mang dấu lời nhắc · cấu hình · model · bản mã; sổ AI ghi đúng mã hội thoại",
+    "summary": "Dựng lại trên main sau #645 (gộp xung đột: giữ commentTurn + promptStamp, conversationForGate + FailoverUsage.conversationId). Thêm: mô tả get_order_status khớp hành vi (LOW review #645).",
+    "tests": [
+      "npm run typecheck: sạch",
+      "eslint tệp sửa: sạch",
+      "order-truth-stamp · bot-order-status · golden 12/12 · sales-replay · self-service-journey: đạt"
+    ]
+  }
 }
