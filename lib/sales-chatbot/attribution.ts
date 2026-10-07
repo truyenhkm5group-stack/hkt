@@ -7,15 +7,20 @@
  *
  * Tập đơn = đơn có `order.confirmed` (bất kể ai chốt) trong kỳ, kênh ≠ THỬ. Đơn bot lên nháp mà nhân viên chốt ở trang Đơn
  * hàng (không qua hội thoại) không có `order.confirmed` trong sổ ⇒ NẰM NGOÀI tập (đếm thiếu cho AI, không đếm thừa).
+ *
+ * LÃI GỘP ĐÃ GIAO (Master Mission mục P0.5 «Conversation → Delivered Profit»): giá vốn đọc qua `orderCogsFast` — ĐÚNG đường
+ * của Báo cáo lợi nhuận (giá vốn đã chốt lúc giao, phiếu nhập mới không viết lại kỳ cũ). Đơn giá vốn 0 = CHƯA BIẾT, đứng
+ * riêng (`cogsUnknown`), không cộng vào lãi với giá vốn 0.
  */
 import { and, eq, gte, inArray, isNotNull, ne, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { dauNgayVN } from "@/lib/ai/budget";
 import type { OrderOutcome } from "@/lib/constants/returns";
 import { isFinishedOutcome } from "@/lib/constants/truth";
+import { orderCogsFast } from "@/lib/queries/cogs";
 import { REVENUE_RECOGNIZED_ON_DELIVERY } from "@/lib/queries/manual-order-sql";
 import { ORDER_OUTCOME, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
-import { attributeOrder, attributionTable, followupRecovery, type AttributedOrder, type AttributionEvent, type AttributionTable } from "@/lib/sales-chatbot/attribution-shared";
+import { attributeOrder, attributionTable, deliveredCogs, followupRecovery, type AttributedOrder, type AttributionEvent, type AttributionTable } from "@/lib/sales-chatbot/attribution-shared";
 import { onPage } from "@/lib/sales-chatbot/events-sql";
 import { rateOrNull } from "@/lib/sales-chatbot/performance-shared";
 
@@ -90,7 +95,7 @@ export async function loadOrderAttribution(opts: { days?: number; now?: Date; pa
   const s = schema.shipments;
   const outcomes = await inChunks(orderIds, (part) =>
     db
-      .select({ id: o.id, outcome: ORDER_OUTCOME, value: sql<number>`${o.totalPriceAfterDiscount}`, recognized: sql<boolean>`${REVENUE_RECOGNIZED_ON_DELIVERY}` })
+      .select({ id: o.id, outcome: ORDER_OUTCOME, value: sql<number>`${o.totalPriceAfterDiscount}`, recognized: sql<boolean>`${REVENUE_RECOGNIZED_ON_DELIVERY}`, cogs: orderCogsFast() })
       .from(o)
       .leftJoin(s, and(eq(s.orderId, o.id), PRIMARY_ATTEMPT))
       .where(inArray(o.id, part)),
@@ -115,7 +120,15 @@ export async function loadOrderAttribution(opts: { days?: number; now?: Date; pa
       unattributed += 1;
       continue;
     }
-    attributed.push({ attribution: label, valueVnd: value, delivered, deliveredRevenueVnd, settled: isFinishedOutcome(row.outcome as OrderOutcome), cancelled: row.outcome === "CANCELLED" });
+    attributed.push({
+      attribution: label,
+      valueVnd: value,
+      delivered,
+      deliveredRevenueVnd,
+      settled: isFinishedOutcome(row.outcome as OrderOutcome),
+      cancelled: row.outcome === "CANCELLED",
+      deliveredCogsVnd: deliveredCogs(deliveredRevenueVnd, num(row.cogs)),
+    });
   }
   return { table: attributionTable(attributed, unattributed), followup };
 }

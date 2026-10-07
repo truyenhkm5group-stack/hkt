@@ -7,7 +7,9 @@
  *    công của lượt mua trước không chảy sang lượt mua sau; đơn không có sự kiện ⇒ CHƯA BIẾT, không phải «người bán»;
  *  · follow-up thu hồi = đơn lên SAU tin khách trả lời lời nhắc, cùng lượt mua; khách tự quay lại không qua lời nhắc thì không;
  *  · kinh tế bot: chưa có đơn / mẫu dưới ngưỡng / chi phí 0 hay chưa biết ⇒ `null`, không phải 0;
- *  · trên CSDL tổ chức thật: tổng ba nhãn + chưa quy kết = số đơn của kỳ, doanh thu giao thành công qua ORDER_OUTCOME.
+ *  · trên CSDL tổ chức thật: tổng ba nhãn + chưa quy kết = số đơn của kỳ, doanh thu giao thành công qua ORDER_OUTCOME;
+ *  · LÃI GỘP ĐÃ GIAO theo nhãn: giá vốn qua đường chung của Báo cáo lợi nhuận (`orderCogsFast`); đơn giá vốn 0 = CHƯA BIẾT,
+ *    đứng riêng — không cộng vào lãi với giá vốn 0; chưa đơn nào biết giá vốn ⇒ biên `null`, không phải 0%.
  */
 import assert from "node:assert/strict";
 import { readFileSync, rmSync } from "node:fs";
@@ -22,7 +24,7 @@ import { provisionOrganization } from "@/lib/platform/provision";
 import { MANUAL_ORDER_ORIGIN } from "@/lib/constants/manual-orders";
 import { confirmManualDeliveryCore } from "@/lib/records/order-create";
 import { loadOrderAttribution } from "@/lib/sales-chatbot/attribution";
-import { attributeOrder, attributionTable, followupRecovery, type AttributionEvent } from "@/lib/sales-chatbot/attribution-shared";
+import { attributeOrder, attributionTable, deliveredCogs, followupRecovery, grossMarginOf, type AttributionEvent } from "@/lib/sales-chatbot/attribution-shared";
 import { recordConversationEvent } from "@/lib/sales-chatbot/events";
 import { salesEconomics } from "@/lib/sales-chatbot/performance-shared";
 
@@ -57,16 +59,23 @@ function testPure() {
 
   const t = attributionTable(
     [
-      { attribution: "AI_ONLY", valueVnd: 500_000, delivered: true, deliveredRevenueVnd: 500_000, settled: true, cancelled: false },
-      { attribution: "AI_ONLY", valueVnd: 300_000, delivered: false, deliveredRevenueVnd: 0, settled: true, cancelled: false },
-      { attribution: "HUMAN_ONLY", valueVnd: 200_000, delivered: false, deliveredRevenueVnd: 0, settled: false, cancelled: true },
+      { attribution: "AI_ONLY", valueVnd: 500_000, delivered: true, deliveredRevenueVnd: 500_000, settled: true, cancelled: false, deliveredCogsVnd: 300_000 },
+      { attribution: "AI_ONLY", valueVnd: 300_000, delivered: false, deliveredRevenueVnd: 0, settled: true, cancelled: false, deliveredCogsVnd: 0 },
+      { attribution: "HUMAN_ONLY", valueVnd: 200_000, delivered: false, deliveredRevenueVnd: 0, settled: false, cancelled: true, deliveredCogsVnd: 0 },
+      { attribution: "HUMAN_ONLY", valueVnd: 450_000, delivered: true, deliveredRevenueVnd: 450_000, settled: true, cancelled: false, deliveredCogsVnd: null },
     ],
     2,
   );
-  assert.deepEqual(t.AI_ONLY, { orders: 2, valueVnd: 800_000, delivered: 1, deliveredRevenueVnd: 500_000, settled: 2, cancelled: 0 });
-  assert.deepEqual(t.AI_ASSISTED, { orders: 0, valueVnd: 0, delivered: 0, deliveredRevenueVnd: 0, settled: 0, cancelled: 0 });
+  assert.deepEqual(t.AI_ONLY, { orders: 2, valueVnd: 800_000, delivered: 1, deliveredRevenueVnd: 500_000, settled: 2, cancelled: 0, grossProfitVnd: 200_000, costedRevenueVnd: 500_000, cogsUnknown: 0, cogsUnknownRevenueVnd: 0 });
+  assert.deepEqual(t.AI_ASSISTED, { orders: 0, valueVnd: 0, delivered: 0, deliveredRevenueVnd: 0, settled: 0, cancelled: 0, grossProfitVnd: 0, costedRevenueVnd: 0, cogsUnknown: 0, cogsUnknownRevenueVnd: 0 });
   assert.equal(t.HUMAN_ONLY.cancelled, 1);
   assert.equal(t.unattributed, 2);
+  // Lãi gộp đã giao: đơn chưa biết giá vốn đứng riêng — không cộng vào lãi với giá vốn 0; chưa đơn nào biết giá vốn ⇒ biên trống.
+  assert.deepEqual([t.HUMAN_ONLY.grossProfitVnd, t.HUMAN_ONLY.costedRevenueVnd, t.HUMAN_ONLY.cogsUnknown, t.HUMAN_ONLY.cogsUnknownRevenueVnd], [0, 0, 1, 450_000]);
+  assert.equal(grossMarginOf(t.AI_ONLY), 0.4);
+  assert.equal(grossMarginOf(t.HUMAN_ONLY), null, "chưa đơn nào biết giá vốn ⇒ —, không phải 0%");
+  assert.deepEqual([deliveredCogs(500_000, 300_000), deliveredCogs(500_000, 0), deliveredCogs(500_000, Number.NaN), deliveredCogs(0, 0)], [300_000, null, null, 0], "giá vốn 0 trên đơn có doanh thu = CHƯA BIẾT (cùng nghĩa IS_MISSING_COGS)");
+  assert.equal(grossMarginOf({ grossProfitVnd: -50_000, costedRevenueVnd: 200_000 }), -0.25, "bán lỗ thì biên âm thật, không kẹp về 0");
 
   // Follow-up: nhắc → khách trả lời → đơn ⇒ thu hồi.
   const R = "erp-r1";
@@ -128,6 +137,8 @@ async function testRealOrg() {
     // c1 — bot tự bán, có lời nhắc và khách trả lời trước khi chốt (thu hồi), giao bằng phiếu ký nhận.
     const c1 = await conv();
     await order("erp-qk-ai", 600_000, "AI_AGENT", c1);
+    // Giá vốn Pancake ghi trên dòng hàng (nguồn thứ hai của ORDER_COGS): 2 × 200.000đ.
+    await db.insert(schema.orderItems).values({ id: "erp-qk-ai-1", orderId: "erp-qk-ai", productName: "Chả mực", quantity: 2, unitPrice: 300_000, unitCost: 200_000 });
     await rec(c1, "message.received", "CUSTOMER", 0, "msg:1");
     await rec(c1, "quote.given", "AI", 1, "quote:1");
     await rec(c1, "followup.sent", "AI", 60, "followup:1");
@@ -166,8 +177,16 @@ async function testRealOrg() {
     assert.deepEqual([r1.table.AI_ONLY.delivered, r1.table.AI_ONLY.deliveredRevenueVnd, r1.table.AI_ONLY.settled], [1, 600_000, 1], "giao bằng phiếu ⇒ ORDER_OUTCOME = DELIVERED ⇒ doanh thu AI tự bán");
     assert.deepEqual([r1.followup.recoveredDelivered, r1.followup.recoveredDeliveredRevenueVnd], [1, 600_000]);
     assert.equal(r1.table.AI_ASSISTED.deliveredRevenueVnd + r1.table.HUMAN_ONLY.deliveredRevenueVnd, 0, "đơn chưa giao không có doanh thu");
+    assert.deepEqual([r1.table.AI_ONLY.grossProfitVnd, r1.table.AI_ONLY.costedRevenueVnd, r1.table.AI_ONLY.cogsUnknown], [200_000, 600_000, 0], "lãi gộp AI tự bán = 600.000 − 2 × 200.000 (giá vốn qua đường chung của báo cáo lợi nhuận)");
+
+    // Đơn AI góp công giao xong mà KHÔNG có nguồn giá vốn nào ⇒ chưa biết giá vốn, không cộng 400.000đ lãi giả.
+    const d2 = await confirmManualDeliveryCore(admin, "erp-qk-assist", { signedAt: new Date().toISOString(), receiverName: "Khách" });
+    assert.ok(d2.ok, JSON.stringify(d2));
+    const r2 = await loadOrderAttribution({ days: 7 });
+    const a2 = r2.table.AI_ASSISTED;
+    assert.deepEqual([a2.deliveredRevenueVnd, a2.grossProfitVnd, a2.costedRevenueVnd, a2.cogsUnknown, a2.cogsUnknownRevenueVnd], [400_000, 0, 0, 1, 400_000]);
   });
-  console.log("✓ Quy kết từng đơn · tổ chức thật: ba hội thoại ⇒ AI tự bán / AI góp công / người bán (khung thử loại) · lời nhắc → khách trả lời → đơn ⇒ thu hồi · giao bằng phiếu ⇒ doanh thu AI tự bán và doanh thu thu hồi qua ORDER_OUTCOME");
+  console.log("✓ Quy kết từng đơn · tổ chức thật: ba hội thoại ⇒ AI tự bán / AI góp công / người bán (khung thử loại) · lời nhắc → khách trả lời → đơn ⇒ thu hồi · giao bằng phiếu ⇒ doanh thu AI tự bán và doanh thu thu hồi qua ORDER_OUTCOME · lãi gộp đã giao = doanh thu − giá vốn đường chung, đơn không có giá vốn đứng riêng (không lãi giả)");
 }
 
 export async function testOrderAttribution() {
