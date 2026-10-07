@@ -49,12 +49,16 @@ export const AI_DISABLED_BY_OPERATOR = "AI đang bị tắt bởi người vận
  *  · `costUsdPerMonth.hard` — tới trần ⇒ từ chối TRƯỚC khi gọi model.
  *  · `platformCreditUsdPerMonth` — credit nền tảng / tháng; `0` ⇒ nguồn PLATFORM không bao giờ chạy. Với nguồn PLATFORM,
  *    trần cứng thật = min(`hard`, credit).
+ *  · `softOnly` (0228 · gói AI của bảng giá có phiên bản): credit là NGÂN SÁCH MỀM — vượt chỉ cảnh báo, KHÔNG thành trần cứng
+ *    (quyết định 07/10/2026: không tự tắt AI bán hàng vì dùng nhiều; thu bằng phần vượt khách AI). Ghi đè tay của người vận
+ *    hành (chính sách lạm dụng / bất thường) vẫn áp như cũ.
  */
 export type AiLimits = {
   requestsPerDay: number | null;
   requestsPerMonth: number | null;
   costUsdPerMonth: { soft: number | null; hard: number | null };
   platformCreditUsdPerMonth: number;
+  softOnly?: boolean;
 };
 
 /** Ghi đè THƯA của một tổ chức: ô nào có mặt thì thắng gói; ô vắng = theo gói. */
@@ -128,6 +132,7 @@ export function applyAiOverride(base: AiLimits, o: AiLimitsOverride): AiLimits {
       hard: "costUsdHard" in o ? (o.costUsdHard ?? null) : base.costUsdPerMonth.hard,
     },
     platformCreditUsdPerMonth: o.platformCreditUsdPerMonth ?? base.platformCreditUsdPerMonth,
+    ...(base.softOnly ? { softOnly: true } : {}),
   };
 }
 
@@ -157,8 +162,10 @@ export function evaluateAiQuota(source: AiBillingSource, limits: AiLimits, usage
   const no = (reason: AiQuotaBlockReason, error: string): AiQuotaVerdict => ({ ok: false, reason, error, ...base });
   let hard = limits.costUsdPerMonth.hard;
   if (source === "PLATFORM") {
-    if (!(limits.platformCreditUsdPerMonth > 0)) return no("NO_PLATFORM_CREDIT", "Gói của tổ chức không có credit AI của nền tảng — khai khoá AI của tổ chức ở /settings/connections.");
-    hard = hard === null ? limits.platformCreditUsdPerMonth : Math.min(hard, limits.platformCreditUsdPerMonth);
+    // Ngân sách mềm chưa tính được (tỷ giá thiếu) ⇒ chỉ báo, không chặn.
+    if (!(limits.platformCreditUsdPerMonth > 0) && !limits.softOnly) return no("NO_PLATFORM_CREDIT", "Gói của tổ chức không có credit AI của nền tảng — khai khoá AI của tổ chức ở /settings/connections.");
+    // Ngân sách mềm (softOnly) không bao giờ thành trần cứng — chỉ cảnh báo ở nhánh `soft` bên dưới.
+    if (!limits.softOnly) hard = hard === null ? limits.platformCreditUsdPerMonth : Math.min(hard, limits.platformCreditUsdPerMonth);
   }
   if (limits.requestsPerDay !== null && usage.requestsToday >= limits.requestsPerDay)
     return no("REQUESTS_DAY", `Đã dùng hết ${limits.requestsPerDay.toLocaleString("vi-VN")} lượt AI hôm nay (${AI_BILLING_SOURCE_LABEL[source].toLowerCase()}) — thử lại ngày mai hoặc nhờ người vận hành nâng gói.`);

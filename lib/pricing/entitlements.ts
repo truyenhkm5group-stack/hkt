@@ -15,7 +15,7 @@
  */
 import { eq } from "drizzle-orm";
 import { getPlatformDb, schema } from "@/db";
-import { effectivePlanRow, listPlans, planKeyOf } from "@/lib/entitlements/check";
+import { effectivePlanRow, planKeyOf } from "@/lib/entitlements/check";
 import { recordAiUsage, type AiUsageEntry } from "@/lib/ai-usage/ledger";
 import { currentOrganization } from "@/lib/platform/context";
 import { findOrganization } from "@/lib/platform/organizations";
@@ -25,6 +25,8 @@ import { applyQuotaOverrides, parseCommercial, planQuotas, type PlanCommercial, 
 import { featureGranted, FEATURE_KEYS, parseFeatureOverrides, type FeatureDecision, type FeatureKey } from "@/lib/pricing/features";
 import { DEFAULT_GUARD_CONFIG, evaluateQuota, parseGuardConfig, type Enforcement, type GuardConfig, type QuotaVerdict } from "@/lib/pricing/guard";
 import { usagePeriodOf, type MeterKey, type MeterReadings } from "@/lib/pricing/meter";
+import { invalidatePriceBook, plansForOrgSafe } from "@/lib/pricing/price-book";
+import type { PlanPrice } from "@/lib/pricing/versions";
 
 export const PRICING_GUARD_KEY = "platform.pricing.guard";
 const TTL_MS = 10_000;
@@ -42,6 +44,7 @@ export function invalidatePricing(orgCode?: string) {
   else rowCache.clear();
   holder.__erpPricingGuard = undefined;
   quotaUsageCache.clear();
+  invalidatePriceBook(orgCode);
 }
 
 export async function readOrgPricingRow(orgCode: string, opts: { fresh?: boolean } = {}): Promise<OrgPricingRow> {
@@ -81,7 +84,8 @@ export async function readGuardConfig(opts: { fresh?: boolean } = {}): Promise<G
 
 export type OrgPricing = {
   orgCode: string;
-  plan: { key: string; name: string; priceVnd: number | null; yearlyFreeMonths: number; limits: unknown; commercial: PlanCommercial } | null;
+  /** Giá / phần thương mại theo PHIÊN BẢN giá của tổ chức (0228, `lib/pricing/price-book.ts`). */
+  plan: { key: string; name: string; priceVnd: number | null; yearlyFreeMonths: number; limits: unknown; commercial: PlanCommercial; priceVersionKey: string | null; planPrice: PlanPrice | null } | null;
   /** Gói khai trên tổ chức không có trong bảng ⇒ đang áp gói Dùng thử. */
   fellBack: boolean;
   row: OrgPricingRow;
@@ -91,13 +95,14 @@ export type OrgPricing = {
 
 export async function resolveOrgPricing(org: Pick<Organization, "code" | "isHome" | "plan">): Promise<OrgPricing> {
   const row = await readOrgPricingRow(org.code);
-  const picked = effectivePlanRow(await listPlans(), planKeyOf(org));
+  // Gói "như hoá đơn của tổ chức đọc" — giá + phần thương mại theo phiên bản đã ghim (0228), cùng phép chọn gói hiệu lực.
+  const picked = effectivePlanRow(await plansForOrgSafe(org.code), planKeyOf(org));
   const p = picked?.row ?? null;
   const commercial = parseCommercial(p?.commercial);
   const quotas = applyQuotaOverrides(planQuotas(p?.limits, commercial), row.quotaOverrides);
   return {
     orgCode: org.code,
-    plan: p ? { key: p.key, name: p.name, priceVnd: p.priceVnd, yearlyFreeMonths: p.yearlyFreeMonths, limits: p.limits, commercial } : null,
+    plan: p ? { key: p.key, name: p.name, priceVnd: p.priceVnd, yearlyFreeMonths: p.yearlyFreeMonths, limits: p.limits, commercial, priceVersionKey: p.priceVersionKey, planPrice: p.planPrice } : null,
     fellBack: picked?.fellBack ?? true,
     row,
     quotas,

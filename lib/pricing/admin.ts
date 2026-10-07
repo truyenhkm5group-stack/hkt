@@ -29,6 +29,10 @@ import { marginRisk, projectToPeriodEnd, tenantUnitEconomics, trialConversion, d
 import { periodProgress, usagePeriodOf, type MeterReadings } from "@/lib/pricing/meter";
 import { AI_UNIT_PRICES_KEY, parseUnitPriceOverrides, priceKeyFor, readUnitPriceOverrides, resolveUnitPrices, type UnitPriceRow } from "@/lib/pricing/unit-prices";
 import { parseAiLimits } from "@/lib/ai-usage/types";
+import { getPlanUsage } from "@/lib/entitlements/check";
+import { readAiCustomerUsage, type AiCustomerReading } from "@/lib/pricing/ai-customer";
+import { orgPriceVersion, PRICING_MARGIN_KEY, readMarginConfig } from "@/lib/pricing/price-book";
+import { computeOverage, fairUseVerdict, marginBand, parseMarginConfig, usageAlert, type FairUseVerdict, type MarginBand, type MarginConfig, type OverageResult, type UsageAlert } from "@/lib/pricing/versions";
 
 export type PricingResult = { ok: true; message: string } | { error: string };
 
@@ -169,6 +173,27 @@ export async function setPricingGuard(user: SessionUser, raw: { config?: unknown
   return { ok: true, message: `Đã lưu ngưỡng ${applied.noticePct}% · ${applied.warnPct}% · ${applied.limitPct}%. Trần cứng của nền tảng: ${applied.hardLimitsEnabled ? "BẬT" : "tắt"}.` };
 }
 
+// ─────────────────────────── Dải biên lãi gộp (0228) ───────────────────────────
+
+/** Đích / cảnh báo / nguy cấp của biên lãi gộp CHIẾU. Bộ không đúng thứ tự (nguy cấp < cảnh báo ≤ đích thấp ≤ đích cao) bị từ chối. */
+export async function setPricingMargin(user: SessionUser, raw: { config?: unknown; reason?: unknown }): Promise<PricingResult> {
+  const denial = platformOperatorDenial(user);
+  if (denial) return { error: denial };
+  const reason = reasonOf(raw.reason);
+  if (typeof reason !== "string") return reason;
+  const c = raw.config && typeof raw.config === "object" && !Array.isArray(raw.config) ? (raw.config as Record<string, unknown>) : null;
+  if (!c) return { error: "Thiếu cấu hình biên." };
+  const n = (v: unknown) => (typeof v === "number" ? v : Number(v));
+  const next = { targetLowPct: n(c.targetLowPct), targetHighPct: n(c.targetHighPct), warnBelowPct: n(c.warnBelowPct), criticalBelowPct: n(c.criticalBelowPct) };
+  const parsed = parseMarginConfig(next);
+  if (JSON.stringify(parsed) !== JSON.stringify(next)) return { error: "Bốn mốc phải hợp lệ và đúng thứ tự: nguy cấp < cảnh báo ≤ đích thấp ≤ đích cao (0–100%)." };
+  const before = await readMarginConfig();
+  await putSetting(user, PRICING_MARGIN_KEY, next);
+  const home = await getHomeOrganization();
+  await platformAudit({ action: "PRICING_GUARD_SET", targetOrgCode: home.code, subject: PRICING_MARGIN_KEY, before, after: next, reason, source: "UI", actor: actorOf(user) });
+  return { ok: true, message: `Đã lưu dải biên: đích ${next.targetLowPct}–${next.targetHighPct}% · cảnh báo < ${next.warnBelowPct}% · nguy cấp < ${next.criticalBelowPct}%.` };
+}
+
 // ─────────────────────────── Giá đơn vị AI ghi đè ───────────────────────────
 
 export async function setAiUnitPrices(user: SessionUser, raw: { prices?: unknown; reason?: unknown }): Promise<PricingResult> {
@@ -241,6 +266,17 @@ export type TenantGuardRow = {
   routing: (RoutingSuggestion & { scope: "PLATFORM" | "BYOK" }) | null;
   readings: MeterReadings;
   errors: string[];
+  /** Bảng giá có phiên bản (0228): phiên bản đã ghim, khách AI (đồng hồ thu chính) + mức cảnh báo 80/100/120/150, phần vượt
+   * ước tính, fair-use, biên CHIẾU (doanh thu gói + vượt − AI chiếu) và dải biên (đích · cảnh báo · nguy cấp). */
+  priceVersionKey: string | null;
+  aiCustomers: AiCustomerReading | null;
+  aiCustomerIncluded: number | null | undefined;
+  aiCustomerAlert: UsageAlert | null;
+  overage: OverageResult | null;
+  fairUse: FairUseVerdict | null;
+  projectedRevenueVnd: number | null;
+  projectedMarginPct: number | null;
+  marginBand: MarginBand;
 };
 
 export type PricingEconomics = {
@@ -272,6 +308,10 @@ export type PricingEconomics = {
   trial: TrialConversion;
   costs: PlatformCostDeclaration;
   tenants: TenantGuardRow[];
+  /** Dải biên lãi gộp (đích 75–85 · cảnh báo < 70 · nguy cấp < 60 — `platform.pricing.margin`). */
+  margin: MarginConfig;
+  marginBand: MarginBand;
+  aiCustomersTotal: number | null;
 };
 
 const DAY = 86_400_000;
@@ -287,14 +327,20 @@ export async function loadPricingEconomics(user: SessionUser, now: Date = new Da
   const { elapsedDays, totalDays } = periodProgress(period, now);
   const usdToVnd = env.facebook.usdToVnd;
   const historyFrom = new Date(now.getTime() - 15 * DAY);
-  const [orgs, guard, ai, daily, costs, unit] = await Promise.all([
+  const [orgs, guard, ai, daily, costs, unit, marginCfg] = await Promise.all([
     listOrganizations(),
     readGuardConfig(),
     readAiUsageByOrg(period.from, now),
     readSaasDaily(new Date(now.getTime() - 120 * DAY).toISOString().slice(0, 10)),
     readCostDeclaration(),
     resolveUnitPrices(),
+    readMarginConfig(),
   ]);
+  const aiCustomers = await readAiCustomerUsage(
+    orgs.filter((o) => !o.isHome && o.status === "ACTIVE").map((o) => o.code),
+    period,
+    now,
+  ).catch(() => new Map<string, AiCustomerReading>());
   const pdb = await getPlatformDb();
   const a = schema.platformAiUsage;
   const dayExpr = sql<string>`to_char((${a.at} at time zone 'UTC') + interval '7 hours', 'YYYY-MM-DD')`;
@@ -346,6 +392,19 @@ export async function loadPricingEconomics(user: SessionUser, now: Date = new Da
     const costByDay = new Map(byDay.filter((d) => d.orgCode === o.code).map((d) => [d.day, Number(d.cost)]));
     const spike = detectCostSpike(histDays.map((d) => costByDay.get(d) ?? 0), costByDay.get(today) ?? 0, guard);
     const top = [...models].sort((x, y) => y.input + y.output - (x.input + x.output))[0];
+    // Bảng giá có phiên bản (0228): phần vượt + biên CHIẾU. Phần vượt cần số người dùng — chỉ đọc khi phiên bản có luật vượt.
+    const price = pricing.plan?.planPrice ?? null;
+    const version = await orgPriceVersion(o.code, now);
+    const acRead = aiCustomers.get(o.code) ?? null;
+    let overage: OverageResult | null = null;
+    let fairUse: FairUseVerdict | null = null;
+    if (price) {
+      const usersUsed = price.overage.mode === "BILLED" ? await getPlanUsage(o.code).then((u) => u.rows.find((x) => x.kind === "users")?.used ?? null).catch(() => null) : null;
+      overage = computeOverage(price, { aiCustomers: acRead?.value ?? null, aiCustomersCoverage: acRead?.coverage ?? "NOT_MEASURED", fanpages: usage.readings.fanpages_active, users: usersUsed, aiConversations: usage.readings.ai_conversations, aiReplies: usage.readings.outgoing_ai_messages });
+      fairUse = fairUseVerdict({ aiConversations: usage.readings.ai_conversations, aiReplies: usage.readings.outgoing_ai_messages }, price.included, version.version?.alerts);
+    }
+    const projectedRevenue = mrrVnd === null || !overage || overage.totalVnd === null ? null : mrrVnd + overage.totalVnd;
+    const projectedMarginPct = projectedRevenue && projected !== null ? ((projectedRevenue - projected) / projectedRevenue) * 100 : null;
     const suggested = top?.model ? suggestCheaperModel({ model: top.model, inputTokens: top.input, outputTokens: top.output, prices: unit.byModel, priceKeyOf: (m) => priceKeyFor(m, unit.byModel), minSavingsPct: guard.routingMinSavingsPct }) : null;
     // Model của AI DÙNG CHUNG (nguồn PLATFORM) do người vận hành đổi ở Platform AI Model Control — một chỗ cho cả nền tảng;
     // model của khoá riêng (BYOK) là cấu hình của chính tổ chức.
@@ -371,6 +430,15 @@ export async function loadPricingEconomics(user: SessionUser, now: Date = new Da
       routing,
       readings: usage.readings,
       errors: usage.errors,
+      priceVersionKey: version.version?.key ?? null,
+      aiCustomers: acRead,
+      aiCustomerIncluded: price?.included.aiCustomers,
+      aiCustomerAlert: price ? usageAlert(acRead?.value ?? null, price.included.aiCustomers, version.version?.alerts) : null,
+      overage,
+      fairUse,
+      projectedRevenueVnd: projectedRevenue,
+      projectedMarginPct,
+      marginBand: marginBand(projectedMarginPct, marginCfg),
     });
   }
   const riskRank: Record<MarginRisk, number> = { NEGATIVE: 0, TRIAL_COST: 1, UNKNOWN: 2, OK: 3, NO_COST: 4 };
@@ -417,6 +485,9 @@ export async function loadPricingEconomics(user: SessionUser, now: Date = new Da
       trial: trialConversion(daily),
       costs,
       tenants,
+      margin: marginCfg,
+      marginBand: marginBand(gross === null ? null : (gross / revenue) * 100, marginCfg),
+      aiCustomersTotal: sumKnown(tenants.map((t) => t.aiCustomers?.value ?? null)),
     },
   };
 }

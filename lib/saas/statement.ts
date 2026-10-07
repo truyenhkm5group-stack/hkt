@@ -17,7 +17,8 @@
 import type { AllocatedLine } from "@/lib/saas/allocation";
 import { subscriptionGrantsUse, type BillingMode, type EffectiveSubscriptionStatus } from "@/lib/saas/policy";
 
-export const STATEMENT_ENGINE_VERSION = "saas-statement-v1";
+/** v2 (0228): giá gói theo PHIÊN BẢN đã ghim + phần vượt theo khối khách AI / fanpage / người dùng thêm (`billedOverage`). */
+export const STATEMENT_ENGINE_VERSION = "saas-statement-v2";
 
 export type StatementLineKind = "PLAN" | "PRODUCT_PLAN" | "ADDON" | "OVERAGE" | "AI_COST" | "ALLOCATED_COST" | "DIRECT_COST";
 
@@ -51,6 +52,11 @@ export type StatementWorkspace = {
   addon: { ok: true; vnd: number } | { ok: false };
   subscriptions: readonly { productKey: string; ownPlan: PlanRef | null; status: EffectiveSubscriptionStatus }[];
   overage: readonly { productKey: string; label: string; included: number; used: number | null; unitPriceVnd: number | null }[];
+  /**
+   * Phần vượt ĐÃ TÍNH SẴN bằng `lib/pricing/versions.ts::computeOverage` (khối khách AI · fanpage / người dùng thêm) — một
+   * phép tính cho hoá đơn khách ngoài, bảng kê nội bộ và màn khách. Hội thoại / tin / đơn không bao giờ có dòng ở đây.
+   */
+  billedOverage?: readonly { productKey: string | null; label: string; quantity: number | null; unitPriceVnd: number | null; amountVnd: number | null; note: string | null }[];
   /** Chi phí AI nền tảng trả trong kỳ, theo sản phẩm (VND). `vnd = null` = có lượt chưa định giá được hết. */
   aiCost: readonly { productKey: string | null; vnd: number | null; unpricedCalls: number }[];
   allocated: readonly AllocatedLine[];
@@ -92,6 +98,9 @@ export function buildStatement(input: { billingMode: BillingMode; periodMonth: s
       if (over <= 0) continue;
       lines.push({ kind: "OVERAGE", orgCode: ws.orgCode, productKey: o.productKey, label: o.label, quantity: over, unitPriceVnd: o.unitPriceVnd, amountVnd: o.unitPriceVnd === null ? null : over * o.unitPriceVnd, note: o.unitPriceVnd === null ? "vượt hạn mức — gói chưa khai đơn giá vượt" : null });
     }
+    // Dùng thử không có phần vượt (miễn phí theo điều khoản) — cùng luật với dòng gói.
+    const allTrial = billable.length > 0 && billable.every((s) => s.status === "TRIAL");
+    if (!allTrial) for (const o of ws.billedOverage ?? []) if (o.amountVnd !== 0 || o.quantity === null) lines.push({ kind: "OVERAGE", orgCode: ws.orgCode, productKey: o.productKey, label: o.label, quantity: o.quantity, unitPriceVnd: o.unitPriceVnd, amountVnd: o.amountVnd, note: o.note });
     if (mode === "INTERNAL_CHARGEBACK") {
       for (const a of ws.aiCost) {
         if (a.vnd === null && a.unpricedCalls === 0) continue;

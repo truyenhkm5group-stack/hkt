@@ -4,10 +4,11 @@ import { addonMonthlyVnd, parseAddonPrices, parseAddonUnits } from "@/lib/billin
 import { billingStanding, mrrContribution, vnDate, type BillingStandingKind } from "@/lib/billing/rules";
 import type { SessionUser } from "@/lib/auth/session";
 import { connectionStatusRows } from "@/lib/connectors/service";
-import { listPlans, planKeyOf } from "@/lib/entitlements/check";
+import { planKeyOf, type PlanRow } from "@/lib/entitlements/check";
 import { platformAudit } from "@/lib/platform/audit";
 import { KILL_SWITCH_REASON_MIN } from "@/lib/platform/kill-switches";
 import { getHomeOrganization, listOrganizations } from "@/lib/platform/organizations";
+import { plansForOrg } from "@/lib/pricing/price-book";
 import type { Organization } from "@/lib/platform/types";
 import { platformOperatorDenial } from "@/lib/platform-ui/module-toggle";
 import { ORDER_OUTCOME, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
@@ -39,8 +40,6 @@ import {
 
 export const PLATFORM_COSTS_KEY = "platform.economics.costs";
 
-type PlanRow = Awaited<ReturnType<typeof listPlans>>[number];
-
 function snapshotRow(org: Organization, plans: PlanRow[], sub: { billingEnabled: boolean; paidThrough: string | null; graceDays: number; addons: unknown } | undefined, day: string): SaasDailyRow & { mrrNote: string | null } {
   const planKey = planKeyOf(org);
   const plan = plans.find((p) => p.key === planKey);
@@ -55,17 +54,27 @@ export type SnapshotResult = { day: string; orgs: number; mrrVnd: number; milest
 
 export async function captureSaasSnapshot(now: Date = new Date()): Promise<SnapshotResult> {
   const day = vnDate(now);
-  const [orgs, plans] = await Promise.all([listOrganizations(), listPlans()]);
+  const orgs = await listOrganizations();
   const pdb = await getPlatformDb();
   const subs = new Map((await pdb.select().from(schema.platformSubscriptions)).map((s) => [s.orgCode, { billingEnabled: s.billingEnabled, paidThrough: s.paidThrough ?? null, graceDays: s.graceDays, addons: s.addons }]));
-  const rows = orgs.filter((o) => o.status !== "SETUP_FAILED").map((o) => snapshotRow(o, plans, subs.get(o.code), day));
+  // Giá của MỖI tổ chức theo phiên bản giá đã ghim (0228) — MRR là số khách thật trả, không phải giá niêm yết hôm nay.
+  const live = orgs.filter((o) => o.status !== "SETUP_FAILED");
+  const rows: (SaasDailyRow & { mrrNote: string | null })[] = [];
+  const errors: string[] = [];
+  for (const o of live) {
+    // Không đọc được sổ giá / ghim ⇒ BỎ dòng của tổ chức này hôm nay (lượt sau chụp lại) — ghi 0 / "không trả tiền" là bịa (luật 42).
+    const plans = await plansForOrg(o.code, now).catch((e: unknown) => {
+      errors.push(`${o.code}: không đọc được bảng giá — bỏ qua ảnh chụp MRR hôm nay (${e instanceof Error ? e.message.slice(0, 120) : String(e).slice(0, 120)})`);
+      return null;
+    });
+    if (plans) rows.push(snapshotRow(o, plans, subs.get(o.code), day));
+  }
   const t = schema.platformSaasDaily;
   for (const r of rows) {
     const values = { day: r.day, orgCode: r.orgCode, orgStatus: r.orgStatus, isHome: r.isHome, planKey: r.planKey, billingEnabled: r.billingEnabled, standing: r.standing, paying: r.paying, mrrVnd: r.mrrVnd, mrrNote: r.mrrNote, capturedAt: now };
     // Khoá (day, org): chỉ có thể trùng với dòng CỦA HÔM NAY — ảnh chụp cuối ngày thắng. Ngày cũ không bao giờ được ghi.
     await pdb.insert(t).values(values).onConflictDoUpdate({ target: [t.day, t.orgCode], set: { ...values } });
   }
-  const errors: string[] = [];
   const milestonesAdded = await scanMilestones(orgs, errors);
   const usageRows = await captureUsage(orgs, now, errors);
   return { day, orgs: rows.length, mrrVnd: rows.reduce((s, r) => s + (r.mrrVnd ?? 0), 0), milestonesAdded, usageRows, errors };

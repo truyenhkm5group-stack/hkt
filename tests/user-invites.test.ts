@@ -28,6 +28,7 @@ import { getHomeOrganization, invalidateOrganizations } from "@/lib/platform/org
 import { provisionOrganization } from "@/lib/platform/provision";
 import { createUserCore } from "@/lib/users/create-user";
 import { inviteLinkFor } from "@/lib/users/invite-link";
+import { pinOrgPriceVersion } from "@/lib/pricing/price-book";
 import { createUserInviteSchema, inviteChoiceToInput, USER_INVITE_INVALID, USER_INVITE_THROTTLED, userInviteStatus } from "@/lib/users/invite-shared";
 import { acceptUserInviteCore, createUserInviteCore, generateUserInviteToken, hashUserInviteToken, listUserInvites, lookupUserInvite, revokeUserInviteCore } from "@/lib/users/invites";
 
@@ -40,6 +41,7 @@ const IP = "198.51.100.21";
 async function cleanupOrg(code: string) {
   const pdb = await getPlatformDb();
   const org = await pdb.query.platformOrganizations.findFirst({ where: eq(schema.platformOrganizations.code, code) });
+  await pdb.delete(schema.platformPricePins).where(eq(schema.platformPricePins.orgCode, code));
   if (org) {
     await pdb.delete(schema.platformOrganizationModules).where(eq(schema.platformOrganizationModules.organizationId, org.id));
     await pdb.delete(schema.platformOrganizations).where(eq(schema.platformOrganizations.id, org.id));
@@ -284,6 +286,9 @@ async function testOrgFlow() {
 
 async function testPlanLimit() {
   await provisionOrganization({ code: T, name: "Mời người dùng thử", plan: "trial", modules: [], admin: { email: `admin@${T}.local`, name: "QT T", password: "QuanTriT@12345" }, source: "TEST", actor: null });
+  // Tổ chức dùng thử CÓ TỪ TRƯỚC bảng giá V1 ⇒ ghim giá legacy: trần người dùng của gói trial cũ (3). Bảng giá V1 (trial 2 người)
+  // đo ở tests/pricing-v1.test.ts — bài này đo CƠ CHẾ ghế đã hứa, không đo con số của một phiên bản.
+  await pinOrgPriceVersion(T, "legacy", { source: "TEST", reason: "tổ chức dùng thử có từ trước 0228", email: null });
   const tokens = await withOrganization(T, async () => {
     const db = await getDb();
     const adminRow = await db.query.users.findFirst({ where: eq(schema.users.email, `admin@${T}.local`) });

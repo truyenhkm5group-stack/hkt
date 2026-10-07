@@ -20,7 +20,7 @@ export const dynamic = "force-dynamic";
 export async function generateMetadata(): Promise<Metadata> {
   const brand = await hostBrand();
   const name = brand === "chotdon" ? "Chốt Đơn Tự Động" : "VNXcommerce";
-  return { title: `Bảng giá — ${name}`, description: "AI chốt đơn 24/7 trên fanpage: gói theo số fanpage, hội thoại AI và tính năng. Trả theo tháng hoặc theo năm, dùng thử miễn phí." };
+  return { title: `Bảng giá — ${name}`, description: "AI chốt đơn 24/7 trên fanpage: gói theo số khách AI mỗi tháng, fanpage và người dùng. Đơn không giới hạn. Trả theo tháng hoặc theo năm, dùng thử miễn phí." };
 }
 
 function signupLabel(mode: string | null, trialDays: number | null): string {
@@ -31,7 +31,7 @@ function signupLabel(mode: string | null, trialDays: number | null): string {
 
 export default async function PricingPage() {
   const brand = await hostBrand();
-  const { site, plans } = await getPublicPricing();
+  const { site, plans, taxNote } = await getPublicPricing();
   // Bản Chốt Đơn dẫn vào PHẦN MỀM của chính nó — cùng cách trang giới thiệu chọn gốc; không xác định được thì giữ gốc ERP.
   const origin =
     brand === "chotdon" ? brandAppOrigin("chotdon", { SITE_DOMAIN: process.env.SITE_DOMAIN, CHOTDON_DOMAIN: process.env.CHOTDON_DOMAIN, APP_URL: process.env.APP_URL, CHOTDON_APP_URL: process.env.CHOTDON_APP_URL }) : null;
@@ -56,7 +56,7 @@ export default async function PricingPage() {
         </Link>
         <h1 className="mt-3 text-center text-3xl font-extrabold tracking-tight sm:text-4xl">Bảng giá</h1>
         <p className="mx-auto mt-3 max-w-2xl text-center text-base leading-7 text-muted-foreground">
-          AI chốt đơn 24/7 trên fanpage — trả lời khách, tự tạo đơn, nhắn lại khách lưỡng lự. Chọn gói theo số fanpage và lượng hội thoại; đổi gói bất cứ lúc nào.
+          AI chốt đơn 24/7 trên fanpage — trả lời khách, tự tạo đơn, nhắn lại khách lưỡng lự. Tính theo số KHÁCH được AI trả lời mỗi tháng — một khách nhắn nhiều lần vẫn là một; đơn không giới hạn, không tính phí theo đơn.
         </p>
 
         {plans.length === 0 ? (
@@ -64,13 +64,14 @@ export default async function PricingPage() {
         ) : (
           <div className="mt-8">
             <PublicPricing plans={plans} signupUrl={`${base}/start`} signupLabel={signupLabel(site.signup, trialDays)} upgradeUrl={`${base}/settings/plan`} contactHref={COMPANY.zaloHref} />
+            {taxNote ? <p className="mt-4 text-center text-xs text-muted-foreground">{taxNote}</p> : null}
           </div>
         )}
 
         <section className="mx-auto mt-14 max-w-3xl space-y-4 text-sm leading-6 text-muted-foreground" aria-label="Câu hỏi về giá">
           <div>
             <h2 className="font-semibold text-foreground">Dùng hết hạn mức thì sao?</h2>
-            <p>AI không bị ngắt giữa chừng. Trang «Gói & thanh toán» luôn hiện bạn đã dùng bao nhiêu và cảnh báo khi quá một nửa, khi sắp hết; hết hạn mức thì được mời nâng gói (hoặc tính phần vượt, tuỳ gói). Số đếm lại từ đầu vào ngày 1 mỗi tháng.</p>
+            <p>AI KHÔNG bị ngắt. Trang «Gói & thanh toán» luôn hiện bạn đã dùng bao nhiêu khách AI; tới 80% có cảnh báo, quá 100% thì phần vượt tính theo khối 100 khách AI theo đơn giá của gói, quá nhiều thì được gợi ý nâng gói cho rẻ hơn. Hội thoại và số câu trả lời AI chỉ là mức dùng hợp lý (fair-use) — không tính thêm tiền. Số đếm lại từ đầu vào ngày 1 mỗi tháng.</p>
           </div>
           <div>
             <h2 className="font-semibold text-foreground">Thanh toán thế nào?</h2>

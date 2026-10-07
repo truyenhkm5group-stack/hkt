@@ -90,6 +90,9 @@ export const CONTROL_PLANE_TABLES = [
   "platform_cost_entries",
   "platform_billing_statements",
   "platform_provisioning_jobs",
+  "platform_price_versions",
+  "platform_plan_prices",
+  "platform_price_pins",
 ] as const;
 export type ControlPlaneTable = (typeof CONTROL_PLANE_TABLES)[number];
 

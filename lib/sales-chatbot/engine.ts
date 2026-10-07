@@ -587,7 +587,12 @@ export function withModelFallback(primary: AiProvider, fallback: AiProvider, onF
  * `media` = ảnh của CÂU TRẢ LỜI MẪU vừa gửi (0183) — kênh fanpage gửi qua Pancake ngay sau tin có chữ `afterText` (chữ của
  * chính câu mẫu đó); thiếu ⇒ sau toàn bộ phần chữ.
  */
-export type TurnResult = { ok: true; view: ChatView; media?: { quickReplyId: string; imageIds: string[]; afterText?: string } } | { ok: false; error: string; view?: ChatView | null };
+/**
+ * Đồng hồ khách AI (0228): `aiTexts` = chữ của từng tin DO MODEL SINH trong lượt này, đúng như `view.messages[].text` của tin đó
+ * (đánh dấu TẠI NGUỒN — câu mẫu / ảnh mẫu / câu hệ thống / câu chuyển người không bao giờ nằm ở đây). Kênh gửi đếm một tin là
+ * "câu AI đã gửi" khi chữ của nó nằm trong tập này. `aiGenerated` = tập khác rỗng.
+ */
+export type TurnResult = { ok: true; view: ChatView; media?: { quickReplyId: string; imageIds: string[]; afterText?: string }; aiGenerated?: boolean; aiTexts?: string[] } | { ok: false; error: string; view?: ChatView | null };
 
 async function reply(conv: ConvRow, seq: number, text: string): Promise<void> {
   await appendMessage(conv.id, seq, "assistant", [{ type: "text", text }]);
@@ -799,6 +804,8 @@ async function chatTurnCore(conversationId: string, rawText: string, opts: { cha
     let leaks = 0;
     // Lượt này đã có câu nào TỚI KHÁCH chưa (chữ còn lại sau bộ lọc, câu mẫu, câu báo của máy chủ) — xem «KHÔNG ĐỂ KHÁCH IM».
     let spoke = false;
+    let modelSpoke = false;
+    const aiTexts: string[] = [];
     // SỔ AI THEO NHÀ CUNG CẤP THẬT (provider-failover.ts): vòng công cụ có thể đổi khoá giữa chừng (khoá chính hỏng ở vòng 3)
     // ⇒ mỗi đoạn liền một nhà cung cấp là MỘT dòng, để tiền không ghi nhầm nguồn trả (BYOK ≠ credit gói). Không đổi khoá ⇒
     // đúng một dòng như trước.
@@ -845,10 +852,13 @@ async function chatTurnCore(conversationId: string, rawText: string, opts: { cha
           if (g.text) {
             content.push({ ...b, text: plainForMessenger(g.text) });
             spoke = true;
+            modelSpoke = true;
           }
         }
         history.push({ role: "assistant", content });
         await appendMessage(conv.id, seq++, "assistant", content);
+        const modelText = textOf(content);
+        if (modelText) aiTexts.push(modelText);
         const uses = content.filter((b): b is Extract<AiBlock, { type: "tool_use" }> => b.type === "tool_use");
         if (uses.length === 0) break;
         const results: AiBlock[] = [];
@@ -928,7 +938,7 @@ async function chatTurnCore(conversationId: string, rawText: string, opts: { cha
       ...(state.draft?.orderId ? { draftOrderId: state.draft.orderId } : {}),
       ...(state.confirmed?.orderId ? { orderId: state.confirmed.orderId } : {}),
     });
-    return { ok: true, view: (await conversationView(conv.id))!, ...(deliveredImages.length && deliveredReplyId ? { media: { quickReplyId: deliveredReplyId, imageIds: deliveredImages, ...(deliveredText ? { afterText: deliveredText } : {}) } } : {}) };
+    return { ok: true, view: (await conversationView(conv.id))!, aiGenerated: modelSpoke, aiTexts, ...(deliveredImages.length && deliveredReplyId ? { media: { quickReplyId: deliveredReplyId, imageIds: deliveredImages, ...(deliveredText ? { afterText: deliveredText } : {}) } } : {}) };
   } catch (error) {
     if (error instanceof SeqConflict) return { ok: false, error: error.message, view: await conversationView(conv.id) };
     throw error;

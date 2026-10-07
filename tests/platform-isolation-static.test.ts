@@ -645,6 +645,7 @@ export function testServerActionQuaCongPhien(): number {
 const ACTION_NHAN_MA_TO_CHUC: Record<string, { lyDo: string; loai: "VAN_HANH" | "CONG_KHAI" }> = {
   "lib/actions/billing.ts::setOrgBillingAction": { loai: "VAN_HANH", lyDo: "Người vận hành bật / tắt / sửa ngày trả tới + ân hạn thu phí của MỘT tổ chức (/platform/org/<mã>) — requirePermission(platform:operate), lõi setOrgBilling hỏi platformOperatorDenial trước mọi lượt đọc, bắt buộc lý do, nhật ký nền tảng." },
   "lib/actions/oauth.ts::pickSocialOrgAction": { loai: "CONG_KHAI", lyDo: "Chọn cửa hàng sau đăng nhập Google / Facebook (CHƯA có phiên): mã tổ chức gửi lên chỉ được chấp nhận khi nằm trong danh sách của cookie KÝ do máy chủ ghi ở bước callback (sau khi đổi code lấy hồ sơ ở nhà cung cấp); completeProviderLogin kiểm tài khoản + trạng thái trong withOrganization." },
+  "lib/actions/pricing.ts::setOrgPriceVersionAction": { loai: "VAN_HANH", lyDo: "Người vận hành chuyển MỘT tổ chức sang một phiên bản giá (/platform/saas, 0228) — requirePermission(platform:operate), lõi setOrgPriceVersion hỏi platformOperatorDenial trước mọi lượt đọc, bắt buộc lý do, nhật ký nền tảng PRICE_VERSION_PIN." },
   "lib/actions/pricing.ts::setOrgPricingAction": { loai: "VAN_HANH", lyDo: "Người vận hành ghi đè tính năng / hạn mức / mức áp của MỘT tổ chức (/platform/saas, 0222) — requirePermission(platform:operate), lõi setOrgPricing hỏi platformOperatorDenial trước mọi lượt đọc, bắt buộc lý do, nhật ký nền tảng ORG_PRICING_SET." },
   "lib/actions/billing.ts::setOrgAddonsAction": { loai: "VAN_HANH", lyDo: "Người vận hành sửa phần MUA THÊM hạn mức của MỘT tổ chức (/platform/org/<mã>, 0192) — requirePermission(platform:operate), lõi setOrgAddons hỏi platformOperatorDenial + parseOperatorTarget trước mọi lượt đọc, bắt buộc lý do, nhật ký nền tảng ORG_ADDONS_SET." },
   "lib/actions/platform-modules.ts::toggleModuleForOrgAction": { loai: "VAN_HANH", lyDo: "Người vận hành nền tảng bật/tắt module của tổ chức khác từ /platform — requirePermission(platform:operate) + platformOperatorDenial (chỉ tổ chức nhà), ghi nhật ký nền tảng kèm lý do." },
@@ -768,6 +769,8 @@ const LOI_VAN_HANH: Record<string, string> = {
   "lib/pricing/admin.ts::setPlanCommercial": "Sửa tên / hạn mức tháng / tính năng / chính sách vượt của một gói — bắt buộc lý do, nhật ký PLAN_COMMERCIAL_SET.",
   "lib/pricing/admin.ts::setOrgPricing": "Ghi đè tính năng / hạn mức / mức áp / cờ giữ từ trước của MỘT tổ chức — bắt buộc lý do, nhật ký ORG_PRICING_SET.",
   "lib/pricing/admin.ts::setPricingGuard": "Ngưỡng Margin Guard + công tắc trần cứng của cả nền tảng — bắt buộc lý do, nhật ký PRICING_GUARD_SET.",
+  "lib/pricing/admin.ts::setPricingMargin": "Dải biên lãi gộp chiếu (đích · cảnh báo · nguy cấp) của nền tảng — bắt buộc lý do, nhật ký nền tảng.",
+  "lib/pricing/price-book.ts::setOrgPriceVersion": "Chuyển MỘT tổ chức sang một phiên bản giá (0228) — bắt buộc lý do, nhật ký PRICE_VERSION_PIN.",
   "lib/pricing/admin.ts::setAiUnitPrices": "Bảng giá đơn vị AI ghi đè (ƯỚC TÍNH) — bắt buộc lý do, nhật ký AI_UNIT_PRICES_SET.",
   "lib/pricing/admin.ts::loadPricingAdmin": "Cấu hình gói + ghi đè của MỌI tổ chức (màn người vận hành).",
   "lib/pricing/admin.ts::loadPricingEconomics": "Kinh tế đơn vị + Margin Guard của MỌI tổ chức: sổ AI toàn nền tảng + đếm số dùng trong CSDL từng tổ chức khách (lib/platform/usage-meter.ts).",
