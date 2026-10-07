@@ -32,8 +32,8 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-07T19:29:21.995Z",
-  "updated_at": "2026-10-07T20:08:44.093Z",
-  "last_heartbeat": "2026-10-07T20:08:03.454Z",
+  "updated_at": "2026-10-07T21:00:11.195Z",
+  "last_heartbeat": "2026-10-07T21:00:11.195Z",
   "definition_of_done": [
     "Chỉ đơn của chính hội thoại",
     "Trạng thái = lời khai ĐVVC, không suy từ tiền",
@@ -42,16 +42,16 @@
   ],
   "handoff": {
     "branch": "feat/bot-order-status",
-    "sha": "bf2bc554d2cfdd5753e24302d3123c6644412012",
-    "at": "2026-10-07T20:08:03.454Z",
+    "sha": "3abd8e66649f43b2a11224276526f62ad5115f12",
+    "at": "2026-10-07T21:00:11.195Z",
     "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
-    "title": "Bot tra trạng thái đơn theo lời khai ĐVVC — chỉ đơn của chính khách đang chat",
-    "summary": "Công cụ quy trình get_order_status: bot trả lời «đơn tới đâu rồi» bằng lời khai ĐVVC, chỉ đơn của chính hội thoại; đã thu tiền mà chưa có sự kiện ĐVVC thì không suy «đã giao».",
+    "title": "Bot tra trạng thái đơn theo lời khai ĐVVC (Commerce Truth)",
+    "summary": "Sửa theo review độc lập: bỏ tra theo state.customer.id (CRITICAL), bình luận công khai không đọc đơn, trạng thái đơn trước vận đơn, vận đơn đại diện, «ĐVVC báo» chỉ khi có chứng từ, giao lỗi / hoàn ⇒ chuyển người, bỏ số tiền.",
     "tests": [
-      "tsc --noEmit: sạch",
-      "eslint tệp sửa: sạch",
-      "hội thoại vàng 12/12 (sau rebase lên 13b73bf2): đạt",
-      "tests/bot-order-status.test.ts: đạt"
+      "tests/bot-order-status (thuần + PGlite, gồm kịch bản tấn công id khách): đạt",
+      "hội thoại vàng 12/12 (diff = đúng một dòng lời nhắc, đối chiếu tự động)",
+      "đột biến 8/8 bị bắt",
+      "tsc + eslint: sạch"
     ]
   }
 }
