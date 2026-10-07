@@ -1,0 +1,8 @@
+{
+  "pr": 633,
+  "sha": "4ba38d8d7edf1bb32822505e21d9dcd548165f2a",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-07T09:59:07.699Z",
+  "note": "review độc lập PASS @758eb081 (14 bộ kiểm, không hồi quy HSLC) + 3 mục sửa @4ba38d8d: đệm 60s cấp tổ chức + notify:false + giới hạn sổ AI theo hội thoại; tin page không phải bot ở HANDOFF/TAKEOVER = nhân viên; index 0231 trên platform_ai_usage an toàn ở CSDL tổ chức (bảng giữ, chỉ xoá dòng)"
+}
