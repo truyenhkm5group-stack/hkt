@@ -378,6 +378,9 @@ export const NAV_TITLES: Record<string, string> = {
   "/reports/scenario": "Mô phỏng kịch bản",
   "/reports/target": "Kế hoạch mục tiêu lợi nhuận",
   "/shipments/stock-wait": "Chờ hàng & giao thành công",
+  // Vỏ app Chốt Đơn Tự Động (lib/constants/saas-nav.ts): hai trang chỉ có trên thanh tám mục của khách, không trên menu ERP.
+  "/ai/overview": "Tổng quan",
+  "/settings/shop": "Cài đặt",
   /*
     Trang tuỳ biến (Phase 4): MỘT khoá đếm cho mọi `/p/<slug>`. Bộ đếm lượt mở cố ý không nhận đường dẫn thô
     (lib/constants/page-usage.ts điều 2) — mỗi slug một khoá là để bảng phình theo cấu hình của từng tổ chức.

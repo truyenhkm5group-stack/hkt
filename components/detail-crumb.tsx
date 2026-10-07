@@ -16,10 +16,12 @@ import { DYNAMIC_PAGE_PREFIX } from "@/lib/pages/nav";
 /** Khu vực tự vẽ đường quay lại của chính nó (giao diện điện thoại) — không in dòng vị trí. */
 const OWN_NAV_PREFIXES = ["/wholesale/mobile"];
 
-export function DetailCrumb() {
+/** `skip`: trang đứng trên thanh tám mục của vỏ app Chốt Đơn — là trang gốc, không phải trang chi tiết, nên không in đường quay lại. */
+export function DetailCrumb({ skip = [] }: { skip?: readonly string[] }) {
   const pathname = usePathname();
   const segments = pathname.split("/").filter(Boolean);
   if (segments.length < 2) return null;
+  if (skip.includes(pathname)) return null;
   // Trang tuỳ biến `/p/<slug>` (Phase 4) không phải trang chi tiết: không có trang `/p` trần để quay về, và trang
   // động tự in tên của nó. "/p" có trong NAV_TITLES chỉ để làm khoá đếm lượt mở.
   if (`/${segments[0]}` === DYNAMIC_PAGE_PREFIX) return null;
