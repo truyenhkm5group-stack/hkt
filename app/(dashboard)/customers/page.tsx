@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { shellAllows } from "@/lib/constants/saas-nav";
 import { Filter, HeartHandshake, Plus, RotateCcw, UserPlus, Users } from "lucide-react";
 import { CustomersTable } from "@/app/(dashboard)/customers/customers-table";
 import { DataTableToolbar } from "@/components/data-table/toolbar";
@@ -53,9 +54,11 @@ export default async function CustomersPage({ searchParams }: { searchParams: Pr
                 <Link href="/customers/new"><Plus className="size-4" /> Tạo khách hàng</Link>
               </Button>
             ) : null}
-            <Button asChild variant="outline" size="sm">
-              <Link href="/customers/retention"><HeartHandshake className="size-4" /> Giữ chân khách</Link>
-            </Button>
+            {shellAllows(user, "/customers/retention") ? (
+              <Button asChild variant="outline" size="sm">
+                <Link href="/customers/retention"><HeartHandshake className="size-4" /> Giữ chân khách</Link>
+              </Button>
+            ) : null}
             <ModuleSyncButton viewer={user} job="pancake-customers" label="Đồng bộ khách hàng" />
           </div>
         }

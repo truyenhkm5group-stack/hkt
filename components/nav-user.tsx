@@ -21,7 +21,7 @@ import { ROLE_LABEL } from "@/lib/constants/roles";
  * Nút tài khoản trên thanh menu viên thuốc: chỉ còn ảnh đại diện tròn. Tên, vai trò và email hiện
  * khi rê chuột (`title`) và ở đầu menu thả xuống — thanh menu nằm ngang không có chỗ cho hai dòng chữ.
  */
-export function NavUser({ user }: { user: { name: string; email: string; role: Role } }) {
+export function NavUser({ user, hidePayslip = false }: { user: { name: string; email: string; role: Role }; /** Vỏ app Chốt Đơn: không có Lương, trang phiếu lương bị chặn ở máy chủ — không đặt lối cụt. */ hidePayslip?: boolean }) {
   const { setTheme, theme } = useTheme();
   return (
     <DropdownMenu>
@@ -51,11 +51,13 @@ export function NavUser({ user }: { user: { name: string; email: string; role: R
           </Link>
         </DropdownMenuItem>
         {/* Mọi tài khoản đều thấy: phiếu lương gửi riêng từng người, cổng là quyền sở hữu phiếu. */}
-        <DropdownMenuItem asChild>
-          <Link href="/my-payslip">
-            <ReceiptText className="size-4" /> Phiếu lương của tôi
-          </Link>
-        </DropdownMenuItem>
+        {hidePayslip ? null : (
+          <DropdownMenuItem asChild>
+            <Link href="/my-payslip">
+              <ReceiptText className="size-4" /> Phiếu lương của tôi
+            </Link>
+          </DropdownMenuItem>
+        )}
         <DropdownMenuItem asChild>
           <Link href="/help">
             <LifeBuoy className="size-4" /> Hướng dẫn sử dụng

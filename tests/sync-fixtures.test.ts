@@ -581,6 +581,7 @@ import { testPlatformJobs } from "./platform-jobs.test";
 import { testGSched } from "./g-sched.test";
 import { testSaasVnxRuntime } from "./saas-vnx-runtime.test";
 import { testSaasPageGate } from "./saas-page-gate.test";
+import { testSaasShell } from "./saas-shell.test";
 
 async function main() {
   await ensureMigrated();
@@ -2905,6 +2906,9 @@ async function main() {
   // Cổng page của nhà: module ai_sales + bot bật mà danh sách page rỗng ⇒ 0 tin trên mọi đường; BÓNG lưu câu soạn, 0 gửi;
   // LIVE như khách; khách không đổi (CSDL nhà dọn trong finally, tổ chức `pg-khach` tự cấp và tự dọn).
   await testSaasPageGate();
+  // Vỏ app Chốt Đơn Tự Động: workspace Sales Agent thấy đúng 8 mục, route ERP nội bộ chặn ở máy chủ (`/` ⇒ hộp thư), ERP / nhà
+  // không đổi; hợp đồng mobile (tổ chức `sa-shell` tự cấp và tự dọn).
+  await testSaasShell();
   // Nền tảng · phiên & RBAC (agent C): claim org, cổng module, platform:operate, đăng nhập theo tổ chức. Tự cấp
   // tổ chức `pr-` (CSDL riêng) và tự dọn; đứng cạnh bài ngữ cảnh vì cùng lý do.
   await testPlatformRbac();
