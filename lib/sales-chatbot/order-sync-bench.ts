@@ -81,9 +81,17 @@ export function scoreSyncCase(c: Pick<SyncBenchCase, "label" | "truth">, parsed:
 }
 
 export type SyncCallObs = { inputTokens: number; candidateTokens: number; thinkingTokens: number; latencyMs: number; costUsd: number | null; error: string | null };
-export type SyncBenchResult = { config: string; score: SyncCaseScore; obs: SyncCallObs };
+/** CHẨN ĐOÁN (không PII): model trả kiểu gì, luật quyết gì — lý do SKIP bỏ chữ số (chỉ còn câu luật của mã). */
+export type SyncDiag = { reply: "NEW_ORDER" | "CHANGE" | "NONE" | "INVALID"; decision: string };
+export type SyncBenchResult = { config: string; score: SyncCaseScore; obs: SyncCallObs; diag?: SyncDiag };
+
+/** HÀM THUẦN. */
+export function syncDiagOf(reply: { kind: "NEW_ORDER" | "CHANGE" | "NONE" } | null, decision: SyncDecision | null): SyncDiag {
+  return { reply: reply ? reply.kind : "INVALID", decision: !decision ? "—" : decision.kind === "SKIP" ? `SKIP: ${decision.reason.replace(/\d+/g, "#").slice(0, 60)}` : decision.kind };
+}
 
 const rate = (n: number, d: number) => (d > 0 ? n / d : null);
+const tally = (xs: readonly string[]) => xs.reduce<Record<string, number>>((m, x) => ({ ...m, [x]: (m[x] ?? 0) + 1 }), {});
 
 /** Gộp một cấu hình. HÀM THUẦN. */
 export function summarizeSyncBench(rows: readonly SyncBenchResult[]) {
@@ -111,6 +119,9 @@ export function summarizeSyncBench(rows: readonly SyncBenchResult[]) {
     falsePositive: negs.filter((r) => r.score.created).length,
     falsePositiveByLabel: Object.fromEntries((["DELETED_ORDER", "NO_ORDER_PHONE", "NO_ORDER"] as const).map((l) => [l, `${by(l).filter((r) => r.score.created).length}/${by(l).length}`])),
     exactOrderRate: rate(exact, pos.length),
+    /** Theo nhãn ORDER: model trả kiểu gì / luật quyết gì — chỗ recall rơi. */
+    replyOnOrder: tally(pos.map((r) => r.diag?.reply ?? "?")),
+    decisionOnOrder: tally(pos.map((r) => r.diag?.decision ?? "?")),
     phone: field("phoneOk"),
     address: field("addressOk"),
     name: field("nameOk"),
@@ -236,6 +247,7 @@ export async function runSyncCase(c: SyncBenchCase, cfg: SyncBenchConfig, provid
     return {
       config: cfg.key,
       score: scoreSyncCase(c, Boolean(reply), decision, productOf),
+      diag: syncDiagOf(reply, decision),
       obs: { inputTokens: res.usage.inputTokens + res.usage.cacheReadTokens, candidateTokens: res.usage.outputTokens - thinking, thinkingTokens: thinking, latencyMs: res.latencyMs, costUsd: estimateCostUsd(res.model || cfg.model, res.usage), error: null },
     };
   } catch (e) {
