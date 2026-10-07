@@ -115,7 +115,7 @@ export function mergeChannelSources(input: {
 
 // ─────────────────────────── Sức khoẻ ba mức ───────────────────────────
 
-const after = (a: string | null, b: string | null): boolean => Boolean(a) && (!b || a! > b);
+const newerThan = (a: string | null, b: string | null): boolean => Boolean(a) && (!b || a! > b);
 const sameOrAfter = (a: string | null, b: string | null): boolean => !b || (Boolean(a) && a! >= b);
 
 const PLATFORM_DOWN: CustomerIssue = { title: "Kết nối Facebook của nền tảng đang được bảo trì", action: "Không phải lỗi ở Page của bạn — liên hệ đội hỗ trợ nếu kéo dài quá vài giờ.", who: "SUPPORT" };
@@ -138,7 +138,7 @@ function directHealth(d: DirectFacts, webhook: WebhookFact | null, appReady: boo
   // Kết quả kiểm chỉ còn giá trị khi KHÔNG có tin nào về sau nó — tin về sau là chứng cứ mạnh hơn.
   const wh = d.kind === "PAGE" && webhook && webhook.state !== "OK" && webhook.state !== "UNKNOWN" && sameOrAfter(webhook.at, evt) ? webhook.state : null;
   if (wh === "TOKEN_EXPIRED" || wh === "NOT_SUBSCRIBED") return { level: "DISCONNECTED", issue: CUSTOMER_WEBHOOK_TEXT[wh], note: null };
-  const errFresh = d.hasError && after(d.lastErrorAt, evt);
+  const errFresh = d.hasError && newerThan(d.lastErrorAt, evt);
   if (errFresh && (d.errorKind === "TOKEN" || d.errorKind === "PERMISSION")) return { level: "DISCONNECTED", issue: graphIssue(d.errorKind), note: null };
   if (wh === "MISSING_FIELDS") return { level: "NEEDS_ACTION", issue: CUSTOMER_WEBHOOK_TEXT.MISSING_FIELDS, note: null };
   // Ngoài 24 giờ / khách chặn page / chạm trần: MỘT tin không gửi được, kết nối KHÔNG hỏng (graph-errors.ts) ⇒ không hạ mức.
