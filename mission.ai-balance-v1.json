@@ -18,15 +18,22 @@
   "owned_paths": [
     "lib/billing/ai-balance.ts",
     "lib/billing/ai-balance-rules.ts",
+    "lib/billing/ai-usage-charge.ts",
     "lib/billing/receiver.ts",
+    "lib/billing/service.ts",
     "lib/actions/ai-balance.ts",
     "components/billing/ai-balance-panel.tsx",
     "components/platform/ai-balance-forms.tsx",
     "app/(dashboard)/settings/ai-balance/**",
     "app/(dashboard)/platform/ai-balance/**",
+    "lib/pricing/ai-gate.ts",
+    "lib/pricing/ai-customer.ts",
+    "lib/pricing/ai-entitlement.ts",
     "tests/ai-balance.test.ts",
+    "tests/ai-balance-usage.test.ts",
     "docs/saas/AI_BALANCE_V1.md",
-    "docs/saas/AI_SESSION_BACKTEST_2026-10-08.md"
+    "docs/saas/AI_SESSION_BACKTEST_2026-10-08.md",
+    "drizzle/0235_ai_balance_ledger.sql"
   ],
   "dependencies": [
     "saas-l5-billing-trial"
@@ -35,8 +42,8 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-07T18:21:27.081Z",
-  "updated_at": "2026-10-07T18:21:27.081Z",
-  "last_heartbeat": "2026-10-07T18:21:27.081Z",
+  "updated_at": "2026-10-07T19:06:28.048Z",
+  "last_heartbeat": "2026-10-07T19:06:28.048Z",
   "definition_of_done": [
     "Nạp 1.000.000đ trên điện thoại bằng QR",
     "Tiền về cộng đúng một lần, không duyệt tay",
