@@ -51,6 +51,8 @@ export function ConversationControlBar({
   const [nowMs, setNowMs] = useState<number | null>(null);
   const refreshed = useRef(false);
   useEffect(() => {
+    // Lượt nhường MỚI (mốc hết hạn khác) ⇒ được làm mới một lần nữa khi nó hết hạn.
+    refreshed.current = false;
     if (hold.state !== "HUMAN_COOLDOWN") return;
     skew.current = null;
     const tick = () => {
@@ -61,7 +63,7 @@ export function ConversationControlBar({
     tick();
     const id = window.setInterval(tick, 1000);
     return () => window.clearInterval(id);
-  }, [hold.state, hold.serverNow]);
+  }, [hold.state, hold.serverNow, hold.until]);
   const remaining = hold.state === "HUMAN_COOLDOWN" && nowMs !== null ? cooldownRemainingMs(hold.until, nowMs, skew.current ?? 0) : null;
   const lapsed = remaining === 0;
   useEffect(() => {

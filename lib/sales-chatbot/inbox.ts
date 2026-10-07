@@ -440,7 +440,9 @@ export async function loadInboxThread(user: SessionUser, conversationId: unknown
       .orderBy(desc(t.createdAt))
       .limit(TIMELINE_MAX);
     // DẤU VẾT TỪNG TIN KHÁCH (ai-status.ts): dữ liệu ĐÃ CÓ — dòng tin, sổ AI của hội thoại, mốc các dòng BOT_SENT của thread.
-    const traceEv = { transport: await transportOfConversation(conv), aiUsage: await loadAiUsageForConversation(conv.id), botSentAt: rows.filter((r) => r.note === "BOT_SENT").map((r) => r.createdAt) };
+    // Sổ AI chỉ đọc từ tin CŨ NHẤT đang hiện (trừ 1 phút) — không quét cả đời hội thoại mỗi lượt làm mới.
+    const oldest = rows.length ? rows[rows.length - 1].createdAt : now;
+    const traceEv = { transport: await transportOfConversation(conv), aiUsage: await loadAiUsageForConversation(conv.id, new Date(oldest.getTime() - 60_000)), botSentAt: rows.filter((r) => r.note === "BOT_SENT").map((r) => r.createdAt) };
     // Một tin bot có thể có HAI dòng BOT_SENT (dòng ghi sẵn `bot-out:` trước khi gửi + dòng mang mã kênh trả về) — giữ một.
     const botSeen: { text: string; at: number }[] = [];
     for (const r of [...rows].reverse()) {
@@ -750,8 +752,10 @@ export async function handBackToAiCore(user: SessionUser, conversationId: unknow
   const before = aiHoldOf(conv, at);
   const resumed = await resumeConversationToAi(conv.id);
   if (!resumed) return { ok: false, error: "Không trả lại được — hội thoại vừa đổi trạng thái." };
-  await recordConversationEvent(conv.id, { type: "ai.resumed", actorKind: "HUMAN", actorUserId: user.id, occurredAt: at, reasonCode: humanResumeReason(before) ?? "RETURNED", payload: { from: before.state, cause: before.cause }, key: `resume:inbox:${conv.id}:${at.getTime()}` });
-  await audit({ userId: user.id, userEmail: user.email, action: "SALES_CHAT_RESUME_AI", entity: "SALES_CONVERSATION", entityId: conv.id, before: { status: "HANDOFF", reason: conv.handoffReason }, after: { status: "OPEN" }, reason: "Trả lại cho AI từ hộp thư" });
+  const resumeReason = humanResumeReason(before) ?? "RETURNED";
+  await recordConversationEvent(conv.id, { type: "ai.resumed", actorKind: "HUMAN", actorUserId: user.id, occurredAt: at, reasonCode: resumeReason, payload: { from: before.state, cause: before.cause }, key: `resume:inbox:${conv.id}:${at.getTime()}` });
+  // Cùng mã nhật ký với thanh điều khiển: cho AI tiếp tục NGAY trong lúc nhường ≠ trả lại sau tiếp quản / cần người.
+  await audit({ userId: user.id, userEmail: user.email, action: resumeReason === "RESUMED_NOW" ? "SALES_CHAT_AI_RESUME_NOW" : "SALES_CHAT_RESUME_AI", entity: "SALES_CONVERSATION", entityId: conv.id, before: { status: "HANDOFF", reason: conv.handoffReason, hold: before.state }, after: { status: "OPEN", hold: "AI_ACTIVE" }, reason: resumeReason === "RESUMED_NOW" ? "Cho AI tiếp tục ngay — bỏ thời gian nhường" : "Trả lại cho AI từ hộp thư" });
   return { ok: true };
 }
 

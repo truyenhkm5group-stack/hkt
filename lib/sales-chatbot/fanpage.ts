@@ -223,6 +223,17 @@ export function erpStaffEchoCond(pageId: string, threadId: string, echo: string,
 /** Bot nhắn trong chừng này mà có tin phía page lạ tới ⇒ nhân viên đang vào hội thoại (Pancake không gắn uid). */
 export const STAFF_INFER_WINDOW_MS = 3 * 3_600_000;
 
+/**
+ * Tin phía page (không phải tiếng vọng bot, không phải tin mẫu) là của NHÂN VIÊN khi: bot vừa nói trong `STAFF_INFER_WINDOW_MS`,
+ * HOẶC hội thoại đang do người cầm (`HANDOFF` — nhường / cần người — hay «Tiếp quản»). Vế sau (review #633): nhân viên chat
+ * hơn 3 giờ sau câu bot cuối thì vế đầu hết hạn, câu của họ không gia hạn nhường và AI chen vào giữa cuộc chat của người. Trả lời
+ * tự động của Meta chỉ tới ở ĐẦU hội thoại — lúc ấy hội thoại chưa bao giờ ở tay người.
+ */
+export function pageSideIsStaffCond(now: Date): SQL {
+  const c = schema.salesChatConversations;
+  return or(gte(c.lastBotAt, new Date(now.getTime() - STAFF_INFER_WINDOW_MS)), eq(c.status, "HANDOFF"), sql`coalesce(${c.state}->'control'->>'mode', '') = 'HUMAN'`) ?? sql`false`;
+}
+
 export type FanpageEvent = {
   pageId: string;
   threadId: string;
@@ -420,7 +431,7 @@ export async function receiveFanpageEvent(ev: FanpageEvent, now: Date = new Date
       const [active] = await db
         .select({ id: c.id })
         .from(c)
-        .where(and(eq(c.channel, "FANPAGE"), eq(c.visitorKey, fanpageVisitorKey(ev.pageId, ev.threadId)), gte(c.lastBotAt, new Date(now.getTime() - STAFF_INFER_WINDOW_MS))))
+        .where(and(eq(c.channel, "FANPAGE"), eq(c.visitorKey, fanpageVisitorKey(ev.pageId, ev.threadId)), pageSideIsStaffCond(now)))
         .limit(1);
       if (!active) return { queued: false, reason: "Trả lời tự động của page — bot không chen" };
     }

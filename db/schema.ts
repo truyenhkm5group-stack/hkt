@@ -5101,6 +5101,8 @@ export const platformAiUsage = pgTable(
     check("platform_ai_usage_modality_check", sql`${t.modality} IS NULL OR ${t.modality} IN ('TEXT','VISION','IMAGE')`),
     check("platform_ai_usage_event_key_check", sql`${t.eventKey} IS NULL OR length(${t.eventKey}) BETWEEN 1 AND 200`),
     index("platform_ai_usage_org_at_idx").on(t.orgCode, t.at),
+    // 0231: sổ AI theo HỘI THOẠI cho dấu vết từng tin khách ở hộp thư (lib/ai-usage/conversation-evidence.ts).
+    index("platform_ai_usage_org_ref_at_idx").on(t.orgCode, t.ref, t.at).where(sql`${t.ref} IS NOT NULL`),
     index("platform_ai_usage_at_idx").on(t.at),
     check("platform_ai_usage_source_check", sql`${t.billingSource} in ('BYOK','PLATFORM','HOME')`),
     check("platform_ai_usage_status_check", sql`${t.status} in ('OK','ERROR','BLOCKED_QUOTA')`),

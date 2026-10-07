@@ -11,3 +11,7 @@
 --    phút) như hôm nay. CSDL mọi tổ chức. Viết tay, idempotent.
 
 ALTER TABLE "sales_chat_conversations" ADD COLUMN IF NOT EXISTS "human_cooldown_until" timestamp with time zone;
+--> statement-breakpoint
+-- Hộp thư bán hàng đọc sổ AI THEO HỘI THOẠI (dấu vết từng tin — lib/ai-usage/conversation-evidence.ts): chỉ mục cũ chỉ có
+-- (org_code, at) nên lọc `ref` quét mọi dòng của tổ chức. Bảng có ở mọi CSDL (0176 tạo không điều kiện, lược đồ chung).
+CREATE INDEX IF NOT EXISTS "platform_ai_usage_org_ref_at_idx" ON "platform_ai_usage" USING btree ("org_code","ref","at") WHERE "ref" IS NOT NULL;

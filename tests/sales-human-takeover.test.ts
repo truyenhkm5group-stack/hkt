@@ -42,17 +42,17 @@ import {
   ZALO_STAFF_REASON,
 } from "@/lib/sales-chatbot/ai-hold-shared";
 import { aiBlock, controlBarStatus } from "@/lib/sales-chatbot/ai-status-shared";
-import { buildMessageTrace, classifyInboundNote, KNOWN_INBOUND_NOTES } from "@/lib/sales-chatbot/ai-status";
+import { aiStatusOrgComputesForTests, buildMessageTrace, classifyInboundNote, forgetAiStatus, KNOWN_INBOUND_NOTES } from "@/lib/sales-chatbot/ai-status";
 import { DEFAULT_SALES_CHATBOT_CONFIG, SALES_CHATBOT_SETTING_KEY } from "@/lib/sales-chatbot/config";
 import { NEEDS_HUMAN_NOTE, readConversationControl, TAKEOVER_REASON } from "@/lib/sales-chatbot/conversation-control-shared";
-import { setConversationControlCore } from "@/lib/sales-chatbot/conversation-control";
+import { holdGate, setConversationControlCore } from "@/lib/sales-chatbot/conversation-control";
 import { setSalesChatProviderForTests, TURN_BOT_OFF_ERROR, TURN_MODULE_OFF_ERROR } from "@/lib/sales-chatbot/engine";
 import { conversationFor, HUMAN_TAKEOVER_MINUTES, processFanpageThread, receiveFanpageEvent, STAFF_REASON } from "@/lib/sales-chatbot/fanpage";
 import { CONV_OPEN_FAILED_NOTE, DEAD_AI_DOWN_NOTE, DEAD_SEND_NOTE_PREFIX } from "@/lib/sales-chatbot/inbound-retry";
 import { OPERATING_MODE_SETTING_KEY } from "@/lib/sales-chatbot/operating-mode-shared";
 import { PAGE_OFF_NOTE, PAGE_RUNTIME_SETTING_KEY, PAGE_SHADOW_BOT_OFF_NOTE, PAGE_SHADOW_NOTE } from "@/lib/sales-chatbot/page-runtime-shared";
 import { setSettingJson } from "@/lib/settings";
-import { loadInboxThread, sendStaffReplyCore } from "@/lib/sales-chatbot/inbox";
+import { handBackToAiCore, loadInboxThread, sendStaffReplyCore } from "@/lib/sales-chatbot/inbox";
 import { connectMessengerPage, processMessengerThread, receiveMessengerEvent } from "@/lib/sales-chatbot/messenger";
 
 const ORG = "nhuong-nguoi";
@@ -397,6 +397,7 @@ async function testFlow() {
       // ═══ Tổ chức KHÁCH: bot tắt ⇒ AI_BLOCKED / BOT_DISABLED + dấu vết AI_SKIPPED_DISABLED; bật lại ⇒ AI_ACTIVE ═══
       const off = JSON.stringify({ ...DEFAULT_SALES_CHATBOT_CONFIG, enabled: false });
       await db.update(schema.settings).set({ value: off }).where(eq(schema.settings.key, SALES_CHATBOT_SETTING_KEY));
+      await forgetAiStatus();
       const P3 = "p-tat-bot";
       await receiveFanpageEvent(pev(P3, "p3.1", "Có giao hôm nay không?"));
       ai0 = aiCalls;
@@ -411,9 +412,53 @@ async function testFlow() {
       assert.ok(sOff.state === "AI_BLOCKED" && !/AI đang (tự )?trả lời/.test(sOff.text), JSON.stringify(sOff));
       assert.equal((await traceOf(convP3, "Có giao hôm nay không?")).code, "AI_SKIPPED_DISABLED");
       await db.update(schema.settings).set({ value: cfg }).where(eq(schema.settings.key, SALES_CHATBOT_SETTING_KEY));
+      await forgetAiStatus();
       const tOn = await loadInboxThread(lan, convP3);
       assert.ok(tOn.ok && tOn.thread.aiBlocks.length === 0, JSON.stringify(tOn.ok && tOn.thread.aiBlocks));
       assert.equal(controlBarStatus({ hold: tOn.thread.aiHold, blocks: tOn.thread.aiBlocks, mode: "AUTO", handoffReason: null, control: null, lapsed: false, formatAt: (s) => s }).state, "AI_ACTIVE", "tổ chức khách bình thường ⇒ AI_ACTIVE");
+
+      // ═══ HIỆU NĂNG: hộp thư tự làm mới vài giây một lần — phần cấp tổ chức tính MỘT lần trong cửa sổ đệm; đường XEM không ghi thông báo ═══
+      const n0 = aiStatusOrgComputesForTests();
+      const notif0 = (await db.select({ id: schema.notifications.id }).from(schema.notifications)).length;
+      for (let i = 0; i < 4; i++) assert.ok((await loadInboxThread(lan, i % 2 ? convP3 : convA)).ok);
+      assert.equal(aiStatusOrgComputesForTests() - n0, 0, "đệm vừa được tính ở lượt trên ⇒ bốn lượt làm mới (hai hội thoại) không tính lại lần nào");
+      await forgetAiStatus();
+      for (let i = 0; i < 3; i++) assert.ok((await loadInboxThread(lan, convA)).ok);
+      assert.equal(aiStatusOrgComputesForTests() - n0, 1, "hết đệm ⇒ đúng MỘT lần tính cho cả hộp thư, không theo từng lượt");
+      assert.equal((await db.select({ id: schema.notifications.id }).from(schema.notifications)).length, notif0, "mở hộp thư không ghi thông báo nào");
+
+      // ═══ AI KHÔNG CHEN VÀO CUỘC CHAT NGƯỜI: Pancake không gắn uid, câu bot cuối đã 4 giờ — hội thoại đang ở tay người ⇒ vẫn là nhân viên ═══
+      const P4 = "p-chat-nguoi";
+      const convP4 = await openedP(P4);
+      const T4 = new Date();
+      await receiveFanpageEvent(pev(P4, "p4.staff1", "Dạ em kiểm hàng cho chị nhé", true), new Date(T4.getTime() - 25 * MIN));
+      await db.update(schema.salesChatConversations).set({ lastBotAt: new Date(T4.getTime() - 4 * 60 * MIN) }).where(eq(schema.salesChatConversations.id, convP4));
+      const noUid = await receiveFanpageEvent({ ...pev(P4, "p4.staff2", "Dạ mẫu mới về rồi chị ơi, em gửi chị xem", true), humanStaff: false }, T4);
+      assert.match(noUid.reason, /bot nhường/, `tin phía page không uid lúc hội thoại đang ở tay người ⇒ nhân viên: ${JSON.stringify(noUid)}`);
+      assert.equal((await convOf(P4)).humanCooldownUntil?.getTime(), T4.getTime() + 30 * MIN, "nhường được gia hạn từ câu mới nhất");
+      await receiveFanpageEvent(pev(P4, "p4.2", "Ok em gửi đi"));
+      ai0 = aiCalls;
+      mark = pancake.calls.length;
+      const pP4 = await processFanpageThread(PAGE_P, P4, { fetch: pancake.fetch, now: () => new Date(T4.getTime() + 10 * MIN) });
+      assert.ok(pP4.replies === 0 && aiCalls === ai0 && pancake.sends(mark).length === 0, `nhân viên đang chat ⇒ AI không chen: ${JSON.stringify(pP4)}`);
+
+      // ═══ «Mở lại có điều kiện» của holdGate: ảnh chụp cũ nói «đã hết hạn» nhưng nhân viên VỪA gửi thêm ⇒ không mở, vẫn im ═══
+      const P5 = "p-tranh-chap";
+      const convP5 = await openedP(P5);
+      const T5 = new Date();
+      await receiveFanpageEvent(pev(P5, "p5.staff", "Dạ em trả lời chị đây", true), T5);
+      const fresh = await convOf(P5);
+      const stale = { id: fresh.id, status: "HANDOFF", handoffReason: fresh.handoffReason, state: fresh.state, updatedAt: fresh.updatedAt, humanCooldownUntil: new Date(T5.getTime() - MIN) };
+      const gate = await holdGate(stale, T5);
+      assert.ok(gate && gate.skip === STAFF_REASON, `ảnh chụp cũ hết hạn nhưng CSDL mang mốc mới ⇒ vẫn bỏ qua: ${JSON.stringify(gate)}`);
+      const afterGate = await convOf(P5);
+      assert.ok(afterGate.status === "HANDOFF" && afterGate.humanCooldownUntil?.getTime() === T5.getTime() + 30 * MIN, "không mở lại, mốc mới giữ nguyên");
+      assert.ok(!(await eventsOf(convP5)).some((e) => e.type === "ai.resumed"), "không ghi kết thúc nhường giả");
+      // «Trả lại AI» của hộp thư trong lúc nhường ⇒ cùng mã nhật ký với thanh điều khiển.
+      assert.ok((await handBackToAiCore(lan, convP5)).ok);
+      const audP5 = await db.select().from(schema.auditLogs).where(and(eq(schema.auditLogs.entityId, convP5), eq(schema.auditLogs.action, "SALES_CHAT_AI_RESUME_NOW")));
+      assert.equal(audP5.length, 1, "handBackToAiCore lúc đang nhường ⇒ SALES_CHAT_AI_RESUME_NOW");
+      assert.equal((await convOf(P5)).humanCooldownUntil, null);
     });
 
     // ═══ Cô lập tổ chức: mã hội thoại của tổ chức khác ⇒ không có, không đổi được ═══
@@ -533,6 +578,7 @@ async function testHomeBlocked() {
         assert.ok("ok" in (await setConnectionStatus(admin, "pancake-fanpage", "ACTIVE")));
         await db.delete(st).where(inArray(st.key, [PAGE_RUNTIME_SETTING_KEY, OPERATING_MODE_SETTING_KEY]));
         await setSettingJson(SALES_CHATBOT_SETTING_KEY, { ...DEFAULT_SALES_CHATBOT_CONFIG, enabled: true });
+        await forgetAiStatus();
         const TH = "h-nhuong-1";
         const conv = await conversationFor(PAGE_H, TH);
         assert.ok(conv);
@@ -552,6 +598,7 @@ async function testHomeBlocked() {
         // Ba lớp của sự cố cùng lúc: page OFF · bot tắt · không nguồn AI nào chạy được — đúng thứ tự đường xử lý.
         await setSettingJson(SALES_CHATBOT_SETTING_KEY, { ...DEFAULT_SALES_CHATBOT_CONFIG, enabled: false });
         setSalesChatProviderForTests(() => null);
+        await forgetAiStatus();
         const th3 = await loadInboxThread(admin, conv.id);
         assert.ok(th3.ok);
         assert.deepEqual(th3.thread.aiBlocks.map((b) => b.code), ["PAGE_OFF", "BOT_DISABLED", "NO_AI_SOURCE"], JSON.stringify(th3.thread.aiBlocks));
@@ -566,6 +613,7 @@ async function testHomeBlocked() {
         await db.delete(schema.users).where(eq(schema.users.id, u.id));
         await db.delete(st).where(inArray(st.key, KEYS));
         if (snap.length) await db.insert(st).values(snap);
+        await forgetAiStatus();
       }
     });
   } finally {

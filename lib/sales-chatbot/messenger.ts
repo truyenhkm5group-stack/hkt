@@ -37,7 +37,7 @@ import {
   sendFanpageImages,
   sendFanpageText,
   STAFF_IMAGE_MARK,
-  STAFF_INFER_WINDOW_MS,
+  pageSideIsStaffCond,
   STAFF_OUT_PREFIX,
   STAFF_REASON,
   staffOutRowId,
@@ -323,7 +323,7 @@ export async function receiveMessengerEvent(ev: MessengerEvent, now: Date = new 
     const [active] = await db
       .select({ id: c.id, status: c.status })
       .from(c)
-      .where(and(eq(c.channel, "FANPAGE"), eq(c.visitorKey, key), gte(c.lastBotAt, new Date(now.getTime() - STAFF_INFER_WINDOW_MS))))
+      .where(and(eq(c.channel, "FANPAGE"), eq(c.visitorKey, key), pageSideIsStaffCond(now)))
       .limit(1);
     if (!active) return { queued: false, reason: "Trả lời tự động của page — bot không chen" };
     // Nhường 30 phút + sự kiện «bắt đầu nhường» — CÙNG đường với Pancake (`startHumanCooldown`). Thiếu sự kiện thì hội thoại nhân

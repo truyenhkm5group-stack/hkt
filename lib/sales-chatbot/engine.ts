@@ -1071,22 +1071,26 @@ export type SalesAiReadiness = { ok: true } | { ok: false; code: "KILL_SWITCH" |
  * KHÔNG gọi model nào và không ghi sổ AI. Màn hộp thư dùng để nói thật «AI không trả lời được vì …» thay vì «AI đang trả lời».
  * Một khoá sai (401) chỉ lộ ra khi gọi — phần đó đọc từ CHỨNG CỨ lượt gọi gần nhất (`ai-status.ts`), không đoán ở đây.
  */
-export async function salesAiReadiness(ref: string | null = null): Promise<SalesAiReadiness> {
+export async function salesAiReadiness(): Promise<SalesAiReadiness> {
   const cfg = await loadSalesChatbotConfig();
   const org = await currentOrganization();
   const killed = await aiKillSwitchDenial(org.code);
   if (killed) return { ok: false, code: "KILL_SWITCH", reason: killed };
-  const billing = salesBotBillingSource(cfg.connectorKey, { home: org.isHome });
-  const quota = await checkAiQuota(org.code, billing);
-  const fb = effectiveFallback(cfg);
-  const fbSource = fb ? salesBotBillingSource(fb.connectorKey, { home: org.isHome }) : null;
-  if (!quota.ok && !(fbSource && fbSource !== billing && (await checkAiQuota(org.code, fbSource)).ok)) return { ok: false, code: "QUOTA", reason: quota.error };
-  const usage: FailoverUsage = { feature: "sales_chatbot", actorId: null, ref };
-  const primary: ProviderPick = quota.ok ? await resolveConnector(cfg, cfg.connectorKey, cfg.model, usage) : { ok: false, error: quota.error };
+  // Đường XEM: không báo ai (`notify: false`), không ghi sổ AI, không ghim nhánh theo hội thoại (ref null). AI dùng chung đã tự
+  // kiểm hạn mức trong `platformChatAi` ⇒ không kiểm lần thứ hai — mỗi lần kiểm là một phép cộng dồn cả tháng sổ AI.
+  const usage: FailoverUsage = { feature: "sales_chatbot", actorId: null, ref: null };
+  const tryKey = async (key: SalesChatbotConfig["connectorKey"], model: string): Promise<{ ok: true } | { ok: false; quota: boolean; error: string }> => {
+    const source = salesBotBillingSource(key, { home: org.isHome });
+    if (source !== "PLATFORM") {
+      const q = await checkAiQuota(org.code, source, { notify: false });
+      if (!q.ok) return { ok: false, quota: true, error: q.error };
+    }
+    const r = await resolveConnector(cfg, key, model, usage);
+    return r.ok ? { ok: true } : { ok: false, quota: false, error: r.error };
+  };
+  const primary = await tryKey(cfg.connectorKey, cfg.model);
   if (primary.ok) return { ok: true };
-  if (fb) {
-    const second = await resolveConnector(cfg, fb.connectorKey, fb.model, usage);
-    if (second.ok) return { ok: true };
-  }
-  return { ok: false, code: "NO_AI_SOURCE", reason: primary.error };
+  const fb = effectiveFallback(cfg);
+  if (fb && (await tryKey(fb.connectorKey, fb.model)).ok) return { ok: true };
+  return { ok: false, code: primary.quota ? "QUOTA" : "NO_AI_SOURCE", reason: primary.error };
 }

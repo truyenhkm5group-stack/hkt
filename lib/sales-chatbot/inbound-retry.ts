@@ -177,7 +177,7 @@ export async function requeueAiDownDeadLetters(aiDownReason: string, providerRec
       // Mở lại ĐÚNG hội thoại đang ở lý do AI hỏng (điều kiện trong câu ghi — người vừa nhận thì câu này không chạm gì).
       const reopened = await db
         .update(c)
-        .set({ status: "OPEN", handoffReason: null, state: sql`${c.state} - 'handoff'`, updatedAt: now })
+        .set({ status: "OPEN", handoffReason: null, state: sql`${c.state} - 'handoff'`, humanCooldownUntil: null, updatedAt: now })
         .where(and(eq(c.id, r.conv_id), eq(c.status, "HANDOFF"), eq(c.handoffReason, aiDownReason)))
         .returning({ id: c.id });
       if (!reopened.length) {

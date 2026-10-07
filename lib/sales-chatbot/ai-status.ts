@@ -18,6 +18,7 @@
 import { and, desc, eq, gte, isNotNull } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { lastSalesAiCall, salesAiCallsForConversation } from "@/lib/ai-usage/conversation-evidence";
+import { forgetMemo, memo } from "@/lib/cache";
 import { canUseModule } from "@/lib/platform/capabilities";
 import { currentOrganization } from "@/lib/platform/context";
 import { AI_DOWN_HANDOFF_REASON, FANPAGE_STAFF_REASON, ZALO_STAFF_REASON } from "@/lib/sales-chatbot/ai-hold-shared";
@@ -30,9 +31,9 @@ import { HISTORY_NOTE } from "@/lib/sales-chatbot/history-shared";
 import { ALREADY_REPLIED_NOTE, CONV_OPEN_FAILED_NOTE, DEAD_AI_DOWN_NOTE, DEAD_SEND_NOTE_PREFIX, EMPTY_REPLY_NOTE, HANDOFF_SILENT_NOTE } from "@/lib/sales-chatbot/inbound-retry";
 import { messengerOwnedPageIds, messengerPageAiOn, PAGE_AI_OFF_NOTE } from "@/lib/sales-chatbot/messenger";
 import { loadModeConfig } from "@/lib/sales-chatbot/operating-mode";
-import { readPinnedArm, replyGate } from "@/lib/sales-chatbot/operating-mode-shared";
-import { pageRuntimeMode } from "@/lib/sales-chatbot/page-runtime";
-import { PAGE_NOT_LIVE_SEND_ERROR, PAGE_OFF_NOTE, PAGE_SHADOW_BOT_OFF_NOTE, PAGE_SHADOW_NOTE } from "@/lib/sales-chatbot/page-runtime-shared";
+import { readPinnedArm, replyGate, type ModeConfig } from "@/lib/sales-chatbot/operating-mode-shared";
+import { loadPageRuntime } from "@/lib/sales-chatbot/page-runtime";
+import { PAGE_NOT_LIVE_SEND_ERROR, PAGE_OFF_NOTE, PAGE_SHADOW_BOT_OFF_NOTE, PAGE_SHADOW_NOTE, pageRuntimeModeOf, type PageRuntimeMap } from "@/lib/sales-chatbot/page-runtime-shared";
 import { ZALO_OUTSIDE_WINDOW } from "@/lib/sales-chatbot/zalo";
 
 // ─────────────────────────── 1. Lý do AI không trả lời ───────────────────────────
@@ -49,40 +50,88 @@ function isPageChannel(channel: string): boolean {
  * `aiHoldOf`). Mỗi bước đọc lỗi ⇒ ghi lý do «không đọc được», không bao giờ im lặng thành «AI đang trả lời».
  */
 export async function conversationAiBlocks(conv: BlockConv): Promise<AiBlock[]> {
+  const org = await orgAiFacts();
   const out: AiBlock[] = [];
   const pageId = (conv.pageId ?? "").trim();
   if (isPageChannel(conv.channel)) {
-    const mode = await pageRuntimeMode(pageId);
+    // ĐÚNG hàm thuần của cổng page (`pageRuntimeModeOf`, cổng `inboundPageGate` gọi qua `pageRuntimeMode`) trên danh sách page đã
+    // đọc một lần cho cả tổ chức. Đọc lỗi ⇒ OFF (hẹp) như cổng.
+    const mode = org.pageRuntime ? pageRuntimeModeOf({ isHome: org.pageRuntime.isHome }, org.pageRuntime.map, pageId) : "OFF";
     if (mode === "OFF") out.push(aiBlock("PAGE_OFF", "Page chưa bật cho bot Chốt Đơn (workspace nhà) — mọi tin khách bị bỏ qua"));
     if (mode === "SHADOW") out.push(aiBlock("PAGE_SHADOW", "Page đang chạy BÓNG — bot chỉ soạn để so, không gửi khách"));
-    try {
-      const gate = replyGate(await loadModeConfig(), conv.visitorKey ?? conv.id, readPinnedArm(conv.state));
+    if (!org.modeConfig) out.push(aiBlock("ORG_OBSERVE", "Không đọc được chế độ vận hành của tổ chức"));
+    else {
+      const gate = replyGate(org.modeConfig, conv.visitorKey ?? conv.id, readPinnedArm(conv.state));
       if (gate.mode === "OBSERVE") out.push(aiBlock("ORG_OBSERVE", gate.arm ? "Thử nghiệm AI vs người: hội thoại thuộc nhánh NGƯỜI" : "Tổ chức đang ở chế độ Quan sát — người của shop trả lời"));
       if (gate.mode === "COPILOT") out.push(aiBlock("ORG_COPILOT", "Tổ chức đang ở chế độ Copilot — AI chỉ soạn gợi ý, không gửi"));
-    } catch {
-      out.push(aiBlock("ORG_OBSERVE", "Không đọc được chế độ vận hành của tổ chức"));
     }
     if (conv.channel === "FANPAGE" && pageId) {
-      try {
-        if ((await messengerOwnedPageIds()).includes(pageId) && transportOwnerOf(await loadTransportFacts(), pageId) === "MESSENGER" && !(await messengerPageAiOn(pageId))) {
-          out.push(aiBlock("PAGE_AI_OFF", "AI đang tắt cho page Messenger này"));
-        }
-      } catch {
-        out.push(aiBlock("PAGE_AI_OFF", "Không đọc được trạng thái AI của page Messenger"));
-      }
+      if (org.messengerAiOff === null) out.push(aiBlock("PAGE_AI_OFF", "Không đọc được trạng thái AI của page Messenger"));
+      else if (org.messengerAiOff.includes(pageId)) out.push(aiBlock("PAGE_AI_OFF", "AI đang tắt cho page Messenger này"));
     }
   }
-  if (!(await canUseModule("ai_sales"))) out.push(aiBlock("MODULE_OFF", "Module AI bán hàng chưa bật cho tổ chức"));
-  const cfg = await loadSalesChatbotConfig().catch(() => null);
-  if (!cfg?.enabled) out.push(aiBlock("BOT_DISABLED", cfg ? "Bot bán hàng đang TẮT (Cấu hình → Bật bot)" : "Không đọc được cấu hình bot"));
-  const ready = await salesAiReadiness(conv.id).catch((e: unknown) => ({ ok: false as const, code: "NO_AI_SOURCE" as const, reason: e instanceof Error ? e.message : String(e) }));
-  if (!ready.ok) {
-    out.push(aiBlock(ready.code, ready.code === "KILL_SWITCH" ? `AI bị người vận hành nền tảng tạm tắt: ${ready.reason}` : ready.code === "QUOTA" ? `Hết hạn mức AI: ${ready.reason}` : `Không có nguồn AI chạy được: ${ready.reason}`));
-  } else {
-    const failing = await lastAiCallFailed().catch(() => null);
-    if (failing) out.push(aiBlock("AI_PROVIDER_ERROR", failing));
-  }
+  out.push(...org.orgBlocks);
   return out;
+}
+
+/** Sự thật CẤP TỔ CHỨC của trạng thái AI — giống nhau ở mọi hội thoại, nên đọc MỘT lần (memo 60 giây theo tổ chức). */
+type OrgAiFacts = {
+  pageRuntime: { isHome: boolean; map: PageRuntimeMap } | null;
+  modeConfig: ModeConfig | null;
+  /** Page Messenger (đi đường Messenger) đang TẮT AI; `null` = đọc lỗi. */
+  messengerAiOff: string[] | null;
+  /** Module · công tắc bot · nguồn AI · chứng cứ lượt gọi gần nhất — theo thứ tự đường xử lý. */
+  orgBlocks: AiBlock[];
+};
+
+export const AI_STATUS_MEMO_KEY = "sales-chatbot:ai-status-org";
+export const AI_STATUS_MEMO_MS = 60_000;
+
+/** Chỉ bài kiểm: số lần thật sự tính lại phần cấp tổ chức (không tính lượt trúng đệm). */
+let orgFactComputes = 0;
+export function aiStatusOrgComputesForTests(): number {
+  return orgFactComputes;
+}
+
+/**
+ * Hộp thư tự làm mới vài giây một lần — phần cấp tổ chức (đọc gói, cộng sổ AI cả tháng, khoá AI…) KHÔNG được chạy lại mỗi lượt.
+ * Đổi cấu hình thì màn hình đúng lại tối đa sau `AI_STATUS_MEMO_MS`; `forgetAiStatus()` để nơi vừa đổi quên ngay.
+ */
+async function orgAiFacts(): Promise<OrgAiFacts> {
+  return memo(AI_STATUS_MEMO_KEY, AI_STATUS_MEMO_MS, async () => {
+    orgFactComputes += 1;
+    const pageRuntime = await loadPageRuntime().catch(() => null);
+    const modeConfig = await loadModeConfig().catch(() => null);
+    let messengerAiOff: string[] | null = [];
+    try {
+      const owned = await messengerOwnedPageIds();
+      if (owned.length) {
+        const facts = await loadTransportFacts();
+        const off: string[] = [];
+        for (const id of owned) if (transportOwnerOf(facts, id) === "MESSENGER" && !(await messengerPageAiOn(id))) off.push(id);
+        messengerAiOff = off;
+      }
+    } catch {
+      messengerAiOff = null;
+    }
+    const orgBlocks: AiBlock[] = [];
+    if (!(await canUseModule("ai_sales"))) orgBlocks.push(aiBlock("MODULE_OFF", "Module AI bán hàng chưa bật cho tổ chức"));
+    const cfg = await loadSalesChatbotConfig().catch(() => null);
+    if (!cfg?.enabled) orgBlocks.push(aiBlock("BOT_DISABLED", cfg ? "Bot bán hàng đang TẮT (Cấu hình → Bật bot)" : "Không đọc được cấu hình bot"));
+    const ready = await salesAiReadiness().catch((e: unknown) => ({ ok: false as const, code: "NO_AI_SOURCE" as const, reason: e instanceof Error ? e.message : String(e) }));
+    if (!ready.ok) {
+      orgBlocks.push(aiBlock(ready.code, ready.code === "KILL_SWITCH" ? `AI bị người vận hành nền tảng tạm tắt: ${ready.reason}` : ready.code === "QUOTA" ? `Hết hạn mức AI: ${ready.reason}` : `Không có nguồn AI chạy được: ${ready.reason}`));
+    } else {
+      const failing = await lastAiCallFailed().catch(() => null);
+      if (failing) orgBlocks.push(aiBlock("AI_PROVIDER_ERROR", failing));
+    }
+    return { pageRuntime, modeConfig, messengerAiOff, orgBlocks };
+  });
+}
+
+/** Quên phần cấp tổ chức của tổ chức NGỮ CẢNH (vừa đổi cấu hình bot / page / nguồn AI). */
+export async function forgetAiStatus(): Promise<void> {
+  await forgetMemo(AI_STATUS_MEMO_KEY);
 }
 
 /** Chứng cứ «khoá có nhưng gọi hỏng»: lượt gọi AI gần nhất (24 giờ) của bot là lỗi. Kèm câu lỗi đã lưu nếu có. Không đoán. */
@@ -243,10 +292,10 @@ export function buildMessageTrace(row: TraceRow, ev: TraceEvidence, now: Date): 
 }
 
 /** Dấu vết cho các tin khách của MỘT hội thoại nhắn tin (đọc sổ AI một lần). Lỗi đọc sổ AI ⇒ bước «Đã soạn» chưa đo, không chặn. */
-export async function loadAiUsageForConversation(conversationId: string): Promise<{ at: Date; status: string }[]> {
+export async function loadAiUsageForConversation(conversationId: string, since: Date): Promise<{ at: Date; status: string }[]> {
   try {
     const org = await currentOrganization();
-    return await salesAiCallsForConversation(org.code, conversationId);
+    return await salesAiCallsForConversation(org.code, conversationId, since);
   } catch {
     return [];
   }
