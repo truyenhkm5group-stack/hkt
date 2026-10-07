@@ -3,7 +3,7 @@
   "mission_id": "saas-b-internal-special-cases",
   "title": "Phase B: gỡ nhánh isHome thương mại — nhà đọc gói internal qua cùng đường khách ngoài, bài kiểm so trước/sau",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "VERIFYING",
   "priority": "P1",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -46,9 +46,13 @@
     "0227": "2026-10-06T17:10:33.541Z"
   },
   "created_at": "2026-10-06T17:03:21.073Z",
-  "updated_at": "2026-10-06T21:05:50.685Z",
+  "updated_at": "2026-10-07T02:13:54.953Z",
   "last_heartbeat": "2026-10-06T21:05:50.685Z",
   "definition_of_done": [],
+  "evidence": {
+    "verify": "PASS 0276e0258faf85e6497d5b82634772d146ec6575 2026-10-07T02:13:52.171Z",
+    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/37557688936"
+  },
   "handoff": {
     "branch": "feat/saas-b-internal",
     "sha": "2cd8896a6cf153ce889dd5b27a3bcaaf09e3ff99",
