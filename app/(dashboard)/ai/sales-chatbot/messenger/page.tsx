@@ -138,9 +138,9 @@ export default async function MessengerSettingsPage({ searchParams }: { searchPa
   const ct = one("ct").slice(0, 300);
   // Câu gốc của Meta (`msg`) chỉ cho người vận hành; người khác thấy câu đã ánh xạ (lỗi cấu hình đăng nhập ⇒ việc của nền tảng).
   const loginMode = loginConfigMode(env.oauth.facebookMessengerLoginConfigId);
-  const metaErr = one("loi") === "fb" ? classifyMetaConnectError({ message: one("msg") || "Facebook từ chối." }, { configId: loginMode.mode === "CONFIG" ? loginMode.configId : null, appId: messengerApp()?.appId ?? null }) : null;
+  const metaErr = one("loi") === "fb" || one("loi") === "meta" ? classifyMetaConnectError(one("loi") === "meta" ? { errorCode: one("ma"), errorReason: one("ly") } : { message: one("msg") || "Facebook từ chối." }, { configId: loginMode.mode === "CONFIG" ? loginMode.configId : null, appId: messengerApp()?.appId ?? null }) : null;
   const error = one("loi")
-    ? one("loi") === "fb"
+    ? one("loi") === "fb" || one("loi") === "meta"
       ? metaErr
         ? `${metaErr.customer.title} — ${metaErr.customer.action}`
         : "Facebook chưa cho kết nối lúc này."

@@ -35,7 +35,7 @@ import {
 import { loadChannelsOverview } from "@/lib/channels/overview";
 import { DISCOVERY_REASONS, MESSENGER_REQUIRED_PERMISSIONS, WEBHOOK_STATES, type DiscoveryReason } from "@/lib/integrations/messenger/graph";
 import { CUSTOMER_GRAPH_ERROR_TEXT, GRAPH_ERROR_HINT, graphErrorKindOfText } from "@/lib/integrations/messenger/graph-errors";
-import { CUSTOMER_DISCOVERY_TEXT, CUSTOMER_WEBHOOK_TEXT, DISCOVERY_GUIDE, classifyMetaConnectError, configPermissionAudit, customerDiscoveryIssue, loginConfigMode, loginModeText } from "@/lib/integrations/messenger/permission-guide";
+import { CUSTOMER_DISCOVERY_TEXT, CUSTOMER_WEBHOOK_TEXT, DISCOVERY_GUIDE, classifyMetaConnectError, configPermissionAudit, customerDiscoveryIssue, loginConfigMode, loginModeText, metaDialogError, metaDialogErrorQuery } from "@/lib/integrations/messenger/permission-guide";
 import { currentOrganization } from "@/lib/platform/context";
 import { transportOwnerOf, type TransportFacts } from "@/lib/sales-chatbot/channel-ownership";
 
@@ -205,9 +205,36 @@ function testLoginConfig() {
   for (const f of ["lib/integrations/messenger/graph.ts", "lib/integrations/messenger/permission-guide.ts", "lib/env.ts", "lib/channels/overview-shared.ts", "lib/channels/overview.ts", "app/(dashboard)/ai/channels/page.tsx", "app/(dashboard)/platform/page.tsx", "app/(dashboard)/ai/sales-chatbot/messenger/page.tsx", "app/api/connect/messenger/start/route.ts"]) {
     assert.ok(!readFileSync(f, "utf8").includes(realId), `${f}: không ghi cứng Configuration ID`);
   }
+  // Lỗi HỘP THOẠI Meta quay về callback: tự huỷ ⇒ như cũ; có mã ⇒ chỉ mã + lý do đã lọc; chuỗi độc bị lọc.
+  const qs = (o: Record<string, string>) => new URLSearchParams(o);
+  assert.equal(metaDialogError(qs({ code: "abc", state: "x" })), null, "không lỗi ⇒ đi tiếp đổi mã như cũ");
+  assert.deepEqual(metaDialogError(qs({ error: "access_denied", error_reason: "user_denied", error_code: "200", error_description: "Permissions error" })), { kind: "CANCELLED" }, "người dùng tự huỷ ⇒ loi=huy như cũ");
+  assert.deepEqual(metaDialogError(qs({ error: "access_denied" })), { kind: "CANCELLED" }, "lỗi không mã ⇒ như cũ");
+  const cfgErr = metaDialogError(qs({ error: "invalid_request", error_code: "100", error_reason: "invalid_config", error_message: "Invalid config_id 555000111 for app 777000222", state: "s", access_token: "EAAGbimat" }));
+  assert.deepEqual(cfgErr, { kind: "ERROR", code: "100", reason: "invalid_config" });
+  assert.ok(cfgErr?.kind === "ERROR");
+  const fwd = metaDialogErrorQuery(cfgErr);
+  assert.equal(fwd, "loi=meta&ma=100&ly=invalid_config", "chỉ mã + lý do đi tiếp");
+  assert.ok(!/Invalid|EAAG|state|555000111/.test(fwd), "không câu chữ Meta / token / state trong tham số chuyển tiếp");
+  const poison = metaDialogError(qs({ error: "x", error_code: "100<script>", error_reason: "Bad Reason!<img>", error_message: "x".repeat(5000) }));
+  assert.deepEqual(poison, { kind: "CANCELLED" }, "mã không phải chữ số ⇒ không đi tiếp gì (rơi về như cũ)");
+  const poison2 = metaDialogError(qs({ error: "x", error_code: "12345678901", error_reason: "ok" }));
+  assert.deepEqual(poison2, { kind: "CANCELLED" }, "mã quá 10 chữ số bị lọc");
+  const poison3 = metaDialogError(qs({ error: "x", error_code: "100", error_reason: "a".repeat(41) }));
+  assert.deepEqual(poison3, { kind: "ERROR", code: "100", reason: null }, "lý do quá dài / ký tự lạ bị bỏ");
+  assert.equal(metaDialogErrorQuery(poison3 as Extract<typeof poison3, { kind: "ERROR" }>), "loi=meta&ma=100");
+  const diagCfg = classifyMetaConnectError({ errorCode: "100", errorReason: "invalid_config" }, { configId: "555000111", appId: "777000222" });
+  assert.ok(diagCfg?.kind === "CONFIG_REJECTED" && /Configuration ID 555000111 không khớp app Messenger 777000222/.test(diagCfg.operator), "mã lỗi cấu hình ⇒ chẩn đoán Configuration ID");
+  assert.ok(!/100|invalid|555000111/.test(`${diagCfg.customer.title} ${diagCfg.customer.action}`) && customerTextViolations(`${diagCfg.customer.title} ${diagCfg.customer.action}`).length === 0, "khách: câu thường");
+  assert.equal(classifyMetaConnectError({ errorCode: "100" }, { configId: "", appId: "1" })?.kind, "OTHER", "đi bằng danh sách quyền ⇒ mã 100 không quy cho cấu hình");
+  assert.match(classifyMetaConnectError({ errorCode: "191" }, { configId: "555000111", appId: "1" })?.operator ?? "", /URI chuyển hướng/);
+  const o = connectOutcome({ loi: "meta", ma: "100", ly: "invalid_config" }, null, isReason);
+  assert.ok(o?.kind === "ERROR" && o.issue.who === "SUPPORT" && customerTextViolations(`${o.issue.title} ${o.issue.action}`).length === 0);
   // Luồng OAuth không đổi: callback vẫn quay về trang Messenger; trang đó chỉ CHUYỂN TIẾP khi lượt bắt đầu từ màn Kênh kết nối.
   const cb = readFileSync("app/api/connect/messenger/callback/route.ts", "utf8");
   assert.match(cb, /new URL\(`\$\{MESSENGER_SETTINGS_PATH\}\?\$\{q\}`, origin\)/);
+  assert.match(cb, /const dialogErr = metaDialogError\(q\);\s*if \(dialogErr\) return back\(dialogErr\.kind === "CANCELLED" \? "loi=huy" : metaDialogErrorQuery\(dialogErr\)\);/, "callback chuyển tiếp lỗi hộp thoại đã lọc");
+  assert.ok(!/error_message|error_description/.test(cb), "callback không đọc câu chữ lỗi của Meta");
   const mp = readFileSync("app/(dashboard)/ai/sales-chatbot/messenger/page.tsx", "utf8");
   assert.match(mp, /get\(CHANNELS_RETURN_COOKIE\)\?\.value === "1" && \(one\("chon"\) \|\| one\("ok"\) \|\| one\("loi"\)\)/, "chỉ chuyển tiếp kết quả callback khi có cờ");
   assert.ok(!/one\("msg"\) \|\| "Facebook từ chối\."\s*:/.test(mp), "trang Messenger không còn in nguyên văn lỗi Meta cho mọi người");

@@ -5,6 +5,7 @@ import { can } from "@/lib/auth/session";
 import { sessionCookieSecure } from "@/lib/constants/session";
 import { MESSENGER_CONNECT_PATH, MESSENGER_SETTINGS_PATH, MESSENGER_STATE_COOKIE, messengerRedirectUri, storePendingPages } from "@/lib/integrations/messenger/connect";
 import { checkPageWebhook, discoveryLogLine, isPermissionReason, messengerApp, pagesFromCode, type DiscoveryDiagnostic } from "@/lib/integrations/messenger/graph";
+import { metaDialogError, metaDialogErrorQuery } from "@/lib/integrations/messenger/permission-guide";
 import { setSettingJson } from "@/lib/settings";
 import { connectMessengerPage } from "@/lib/sales-chatbot/messenger";
 
@@ -31,7 +32,9 @@ export async function GET(req: NextRequest) {
   const app = messengerApp();
   if (!app) return back("loi=app");
   const q = req.nextUrl.searchParams;
-  if (q.get("error")) return back("loi=huy");
+  // Lỗi hộp thoại: tự huỷ / không mã ⇒ `loi=huy` như cũ; có mã ⇒ chỉ mã + lý do ĐÃ LỌC đi tiếp (không câu chữ của Meta).
+  const dialogErr = metaDialogError(q);
+  if (dialogErr) return back(dialogErr.kind === "CANCELLED" ? "loi=huy" : metaDialogErrorQuery(dialogErr));
   const st = await readOAuthToken<{ state: string; org: string; uid: string }>("erp-messenger-connect", req.cookies.get(MESSENGER_STATE_COOKIE)?.value);
   if (!st || st.state !== q.get("state") || st.org !== user.organization.code || st.uid !== user.id) return back("loi=state");
   const code = q.get("code") ?? "";

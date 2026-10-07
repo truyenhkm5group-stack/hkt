@@ -33,7 +33,7 @@ export default async function ChannelsPage({ searchParams }: { searchParams: Pro
   const app = messengerApp();
   const granted = Array.isArray(diag?.granted) ? diag.granted.filter((x): x is string => typeof x === "string") : null;
   const permAudit = configPermissionAudit(granted, mode, MESSENGER_REQUIRED_PERMISSIONS);
-  const metaErr = params.loi === "fb" ? classifyMetaConnectError({ message: params.msg }, { configId: mode.mode === "CONFIG" ? mode.configId : null, appId: app?.appId ?? null }) : null;
+  const metaErr = params.loi === "fb" || params.loi === "meta" ? classifyMetaConnectError(params.loi === "meta" ? { errorCode: params.ma, errorReason: params.ly } : { message: params.msg }, { configId: mode.mode === "CONFIG" ? mode.configId : null, appId: app?.appId ?? null }) : null;
   const reason = params.lydo && isReason(params.lydo) ? params.lydo : diag?.reason && isReason(diag.reason) ? diag.reason : null;
   let outcome = connectOutcome(params, diag, isReason);
   // Câu gốc của Meta không bao giờ tới khách: lỗi Meta ⇒ câu đã ánh xạ; đi bằng Configuration ID mà thiếu quyền ⇒ câu theo quyền thiếu.

@@ -240,12 +240,16 @@ const CONNECT_RETRY: CustomerIssue = { title: "Facebook chưa cho kết nối l�
  * Lỗi Meta trả về ở lượt kết nối (câu `msg` của callback, hoặc `error_code` / `error_message` của hộp thoại) ⇒ câu khách (KHÔNG
  * mang chữ nào của Meta) + câu người vận hành (mang nguyên văn, Configuration ID, App ID). Không có lỗi ⇒ `null`. HÀM THUẦN.
  */
-export function classifyMetaConnectError(input: { message?: string | null; errorCode?: string | null; errorMessage?: string | null }, ctx: { configId?: string | null; appId?: string | null }): MetaConnectError | null {
-  const raw = [input.errorCode ? `mã ${input.errorCode}` : "", input.errorMessage ?? "", input.message ?? ""].map((s) => s.trim()).filter(Boolean).join(" · ").slice(0, 400);
+export function classifyMetaConnectError(input: { message?: string | null; errorCode?: string | null; errorReason?: string | null; errorMessage?: string | null }, ctx: { configId?: string | null; appId?: string | null }): MetaConnectError | null {
+  const raw = [input.errorCode ? `mã ${input.errorCode}` : "", input.errorReason ? `lý do ${input.errorReason}` : "", input.errorMessage ?? "", input.message ?? ""].map((s) => s.trim()).filter(Boolean).join(" · ").slice(0, 400);
   if (!raw) return null;
   const mode = loginConfigMode(ctx.configId);
   const app = (ctx.appId ?? "").trim() || "(chưa khai)";
-  if (CONFIG_ERROR_RE.test(raw)) {
+  const dialogCode = input.errorCode && /^\d{1,10}$/.test(input.errorCode) ? Number(input.errorCode) : null;
+  if (dialogCode === DIALOG_REDIRECT_CODE) return { kind: "OTHER", customer: CONNECT_INCOMPLETE, operator: `URI chuyển hướng không thuộc app ${app} — khai đủ «URI chuyển hướng OAuth hợp lệ» (khối Messenger ở /platform). Meta: ${raw}` };
+  // Hộp thoại chỉ trả MÃ (callback không chuyển câu chữ của Meta): đi bằng Configuration ID mà Meta báo «tham số không hợp lệ» ⇒
+  // tham số khác thường duy nhất của lượt là `config_id`. Đi bằng danh sách quyền thì mã đó KHÔNG được quy cho cấu hình.
+  if (CONFIG_ERROR_RE.test(raw) || (dialogCode !== null && DIALOG_CONFIG_CODES.has(dialogCode) && mode.mode === "CONFIG")) {
     const operator =
       mode.mode === "CONFIG"
         ? `Configuration ID ${mode.configId} không khớp app Messenger ${app} — kiểm ở Meta: Facebook Login for Business → Configurations. Meta: ${raw}`
@@ -253,6 +257,35 @@ export function classifyMetaConnectError(input: { message?: string | null; error
     return { kind: "CONFIG_REJECTED", customer: CONNECT_INCOMPLETE, operator };
   }
   return { kind: "OTHER", customer: CONNECT_RETRY, operator: `${loginModeText(mode)} Meta: ${raw}` };
+}
+
+/**
+ * Mã lỗi HỘP THOẠI của Meta (tham số `error_code` khi quay về callback). 100 = tham số không hợp lệ; 191 = URI chuyển hướng không
+ * thuộc app. Chưa đo trên Meta thật với một Configuration ID sai — mã khác rơi về OTHER (vẫn in đủ cho người vận hành).
+ */
+const DIALOG_CONFIG_CODES: ReadonlySet<number> = new Set([100]);
+const DIALOG_REDIRECT_CODE = 191;
+
+export type MetaDialogError = { kind: "CANCELLED" } | { kind: "ERROR"; code: string; reason: string | null };
+
+/**
+ * Hộp thoại Meta quay về callback với lỗi ⇒ chỉ giữ phần ĐÃ LỌC: `error_code` toàn chữ số (≤ 10), `error_reason` khớp
+ * `^[a-z_]{1,40}$`. `error_message` / `error_description` KHÔNG BAO GIỜ đi tiếp (câu chữ tự do của bên ngoài vào URL rồi vào màn
+ * hình). Người dùng tự huỷ (`user_denied`) hoặc không có mã ⇒ `CANCELLED` — đúng hành vi cũ `loi=huy`. Không lỗi ⇒ `null`. HÀM THUẦN.
+ */
+export function metaDialogError(q: { get(name: string): string | null }): MetaDialogError | null {
+  if (!["error", "error_code", "error_reason"].some((k) => (q.get(k) ?? "") !== "")) return null;
+  const rawCode = q.get("error_code") ?? "";
+  const rawReason = q.get("error_reason") ?? "";
+  const code = /^\d{1,10}$/.test(rawCode) ? rawCode : null;
+  const reason = /^[a-z_]{1,40}$/.test(rawReason) ? rawReason : null;
+  if (reason === "user_denied" || !code) return { kind: "CANCELLED" };
+  return { kind: "ERROR", code, reason };
+}
+
+/** Tham số quay về trang Messenger cho một lỗi hộp thoại đã lọc. */
+export function metaDialogErrorQuery(e: Extract<MetaDialogError, { kind: "ERROR" }>): string {
+  return new URLSearchParams({ loi: "meta", ma: e.code, ...(e.reason ? { ly: e.reason } : {}) }).toString();
 }
 
 /** Quyền Messenger KHÔNG cần mà một Configuration hay cấp kèm — chỉ cảnh báo cho người vận hành. */

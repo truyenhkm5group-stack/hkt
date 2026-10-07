@@ -30,7 +30,7 @@ export const CHANNELS_ROUTE = "/ai/channels";
 export const CHANNELS_RETURN_COOKIE = "erp_channels_return";
 export const CHANNELS_RETURN_TTL_SEC = 15 * 60;
 /** Tham số callback mà màn này hiểu (đúng bộ trang Messenger đang đọc). */
-export const CONNECT_RESULT_PARAMS = ["chon", "ok", "loi", "lydo", "ct", "msg", "webhook"] as const;
+export const CONNECT_RESULT_PARAMS = ["chon", "ok", "loi", "lydo", "ct", "msg", "webhook", "ma", "ly"] as const;
 
 export type ChannelPlatform = "FACEBOOK" | "INSTAGRAM" | "ZALO";
 /** Đường đang nhận tin của page — `null` = không đường nào (đã gỡ / chưa bật). */
@@ -221,6 +221,7 @@ const CONNECT_ERROR_TEXT: Record<string, CustomerIssue> = {
   huy: { title: "Bạn đã dừng ở bước cấp quyền của Facebook", action: "Bấm «Kết nối Facebook» lại khi sẵn sàng.", who: "SHOP" },
   state: { title: "Phiên kết nối đã hết hạn", action: "Bấm «Kết nối Facebook» lại.", who: "SHOP" },
   khongpage: { title: "Chưa nối được Page nào", action: "Bấm «Kết nối lại» và tick đủ các Page cần dùng.", who: "SHOP" },
+  meta: { title: "Kết nối Facebook chưa hoàn tất", action: "Lỗi nằm ở phía nền tảng, không phải ở Page của bạn — liên hệ đội hỗ trợ; khi được báo đã sửa, bấm «Kết nối lại».", who: "SUPPORT" },
   fb: { title: "Facebook chưa cho kết nối lúc này", action: "Thử lại sau ít phút; nếu vẫn lỗi, liên hệ đội hỗ trợ.", who: "SHOP" },
 };
 const GENERIC_CONNECT_ERROR: CustomerIssue = { title: "Kết nối chưa xong", action: "Bấm «Kết nối Facebook» lại.", who: "SHOP" };
