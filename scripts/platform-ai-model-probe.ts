@@ -15,10 +15,13 @@
   arg GHI (cùng lõi với nút trên màn hình, nhật ký nguồn SCRIPT; model chính được kiểm lại NGAY trước khi ghi):
     `--apply=<1-100> <model>`        — chạy thử (< 100) / áp dụng (100) `<model>`; dự phòng = model đang chạy
     `--rollback`                     — hoàn tác về bản trước (không có ⇒ tắt chính sách ⇒ model của biến môi trường)
+  arg ĐỌC thêm:
+    `--report`                       — bảng A/B canary vs đối chứng (lib/ai-usage/platform-ai-ab.ts): chỉ số tổng hợp + đề xuất
 */
 import "dotenv/config";
 import { applyPlatformAiPolicyAsScript, probeWithPlatformKey, rollbackPlatformAiPolicyAsScript, SCRIPT_WRITER_LABEL } from "@/lib/ai-usage/platform-ai-admin";
 import { readPlatformAiPolicy } from "@/lib/ai-usage/platform-ai-policy";
+import { AB_DECISION_LABEL, readPlatformModelAbForScript, type AbArm } from "@/lib/ai-usage/platform-ai-ab";
 
 const tomTat = (s: string) => console.log(`[ops:tom-tat] ${s.slice(0, 300)}`);
 const DEFAULT_MODELS = ["gemini-2.5-flash-lite", "gemini-3.5-flash-lite"];
@@ -38,6 +41,26 @@ async function main() {
       tomTat("model không hợp lệ (chỉ chữ thường, số, . -) — dừng");
       process.exit(64);
     }
+  }
+  if (flags.includes("--report")) {
+    const r = await readPlatformModelAbForScript();
+    if (!r) {
+      tomTat("A/B: chưa có chính sách nào ⇒ không có cohort");
+      process.exit(0);
+    }
+    const p = (v: number | null) => (v === null ? "—" : `${(v * 100).toFixed(1)}%`);
+    const n = (v: number | null, d = 0) => (v === null ? "—" : v.toFixed(d));
+    // Hai dòng / nhánh: kênh tóm tắt cắt ở 300 ký tự.
+    const line = (label: string, a: AbArm) => {
+      tomTat(`${label} ${a.model}: HT ${a.conversations} · đơn ${a.orders} · chốt ${p(a.closeRate)} · SĐT ${p(a.phoneRate)} · địa chỉ ${p(a.addressRate)} · handoff ${p(a.handoffRate)} · lỗi ${p(a.errorRate)} (${a.requests} lượt)`);
+      tomTat(`${label} ${a.model}: p50/p95 ${n(a.p50Ms)}/${n(a.p95Ms)} ms · công cụ đúng ${p(a.toolSuccessRate)} · upsell mời ${p(a.upsellOfferRate)} nhận ${p(a.upsellAcceptRate)} · token/HT ${n(a.inputPerConv)}+${n(a.outputPerConv)} · USD/HT ${n(a.costPerConvUsd, 5)} · USD/đơn ${n(a.costPerOrderUsd, 4)} · tổng ${a.costUsd.toFixed(4)}`);
+    };
+    tomTat(`A/B cohort từ ${r.since} · canary ${r.policy.enabled ? `${r.policy.canaryPct}%` : "TẮT"} · ${r.orgs} tổ chức${r.errors.length ? ` · ${r.errors.length} tổ chức không đọc được` : ""}`);
+    line("CANARY", r.canary);
+    line("ĐỐI CHỨNG", r.control);
+    tomTat(`ĐỀ XUẤT: ${AB_DECISION_LABEL[r.verdict.decision]}${r.verdict.nextPct ? ` → ${r.verdict.nextPct}%` : ""} · ${r.verdict.reasons.join(" ")}`);
+    for (const c of r.verdict.checks) tomTat(`${c.ok === null ? "○" : c.ok ? "✓" : "✗"} ${c.label}: ${c.detail}`);
+    process.exit(0);
   }
   const apply = flags.find((f) => f.startsWith("--apply="));
   if (flags.includes("--rollback")) {

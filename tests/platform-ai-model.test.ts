@@ -25,7 +25,8 @@ import { resetPlatformPrimarySkipForTests, withPlatformFallback, type PlatformPr
 import type { SessionUser } from "@/lib/auth/session";
 import { PLATFORM_GEMINI_DEFAULT_MODEL, platformAiConfig } from "@/lib/ai-usage/platform-ai";
 import { applyPlatformAiPolicyAsScript, controlStage, estimateSwitch, loadPlatformAiControl, PLATFORM_AI_PROBES_KEY, probePlatformAiModelAsOperator, probeWithPlatformKey, rollbackPlatformAiPolicy, rollbackPlatformAiPolicyAsScript, SCRIPT_WRITER_LABEL, setPlatformAiPolicy } from "@/lib/ai-usage/platform-ai-admin";
-import { canaryBucket, invalidatePlatformAiPolicy, parsePlatformAiPolicy, PLATFORM_AI_POLICY_KEY, readPlatformAiPolicy, routePlatformModel, type PlatformAiPolicy } from "@/lib/ai-usage/platform-ai-policy";
+import { abVerdict, AB_RULES, armStats, quantile, readPlatformModelAbForScript, type AbConversation } from "@/lib/ai-usage/platform-ai-ab";
+import { canaryBucket, invalidatePlatformAiPolicy, readConversationPlatformModels, parsePlatformAiPolicy, PLATFORM_AI_POLICY_KEY, readPlatformAiPolicy, routePlatformModel, type PlatformAiPolicy } from "@/lib/ai-usage/platform-ai-policy";
 import { classifyProbe, probeRequestBody, redactProbeMessage } from "@/lib/ai-usage/platform-model-probe";
 import { invalidateCapabilities } from "@/lib/platform/capabilities";
 import { withOrganization } from "@/lib/platform/context";
@@ -47,7 +48,7 @@ function sessionUser(over: Partial<SessionUser>): SessionUser {
 }
 
 function policy(over: Partial<PlatformAiPolicy> = {}): PlatformAiPolicy {
-  return { enabled: true, provider: "gemini", primaryModel: M25, fallbackModel: M35, canaryPct: 100, effectiveFrom: "2026-10-01T00:00:00.000Z", reason: "giảm chi phí", changedBy: "op@local", changedAt: "2026-10-01T00:00:00.000Z", previous: null, ...over };
+  return { enabled: true, provider: "gemini", primaryModel: M25, fallbackModel: M35, canaryPct: 100, effectiveFrom: "2026-10-01T00:00:00.000Z", reason: "giảm chi phí", changedBy: "op@local", changedAt: "2026-10-01T00:00:00.000Z", cohortSince: "2026-10-01T00:00:00.000Z", previous: null, ...over };
 }
 
 type Seen = { url: string; headers: Record<string, string>; body: Record<string, unknown> };
@@ -382,12 +383,146 @@ async function testLedger() {
       assert.ok(r25 && r25.inputTokens === 1000 && r25.outputTokens === 50 && Math.abs((r25.costUsd ?? NaN) - (1000 * 0.1 + 50 * 0.4) / 1e6) < 1e-12, JSON.stringify(r25));
       assert.ok(r35 && r35.inputTokens === 2000 && r35.outputTokens === 80 && Math.abs((r35.costUsd ?? NaN) - (2000 * 0.3 + 80 * 2.5) / 1e6) < 1e-12, JSON.stringify(r35));
       assert.equal(failed.length, 1, "lượt hỏng của model mới được báo để ghi một dòng ERROR");
+
+      // ── A/B trên hai sổ THẬT: 12 hội thoại canary (3.1) · 12 đối chứng (3.5) · 1 hội thoại khung thử (bị loại) ──
+      await cleanupSettings();
+      const M31 = "gemini-3.1-flash-lite";
+      const start = new Date(Date.now() - 3_600_000);
+      const g31 = fakeGemini({ [M31]: { status: 200, body: okBody(M31) } });
+      const ap = await applyPlatformAiPolicyAsScript({ primaryModel: M31, canaryPct: 10, reason: "canary 3.1" }, { env: GEMINI_ENV, fetch: g31.fetch, now: start });
+      assert.ok("ok" in ap, JSON.stringify(ap));
+      const conv = schema.salesChatConversations;
+      const ev = schema.salesConversationEvents;
+      const mkConv = async (channel: string, phone: string | null) => (await db.insert(conv).values({ channel, customerPhone: phone }).returning({ id: conv.id }))[0].id;
+      const evt = (conversationId: string, type: string, payload: Record<string, unknown> = {}) => ({ conversationId, type, actorKind: "AI", channel: "WEB", occurredAt: new Date(), payload, dedupeKey: `pam:${conversationId}:${type}` });
+      const ledger: (typeof schema.platformAiUsage.$inferInsert)[] = [];
+      const row = (ref: string, model: string, status: "OK" | "ERROR", inT: number | null, outT: number | null, cost: number | null) => ledger.push({ orgCode: ORG, feature: "sales_chatbot", billingSource: "PLATFORM", provider: "gemini-platform", model, requests: 1, inputTokens: inT, outputTokens: outT, costUsd: cost, status, ref });
+      for (let i = 0; i < 12; i++) {
+        // Canary: mọi hội thoại có SĐT + địa chỉ, 9/12 chốt; 1 lượt hỏng 3.1 được 3.5 đỡ ở hội thoại đầu.
+        const c = await mkConv("WEB", null);
+        await db.insert(ev).values([evt(c, "customer.identified", { simulated: false }), evt(c, "ai.replied", { mode: "AI", responseMs: 1000 + i * 100 }), ...(i < 9 ? [evt(c, "order.confirmed", { simulated: false })] : i === 11 ? [evt(c, "order.confirmed", { simulated: true })] : [])]);
+        await db.insert(schema.salesChatMessages).values({ conversationId: c, seq: 1, role: "user", content: [{ type: "tool_result", toolUseId: "t1", content: "{}" }, { type: "tool_result", toolUseId: "t2", content: "{}", isError: i === 0 }] });
+        row(c, M31, "OK", 4000, 100, (4000 * 0.25 + 100 * 1.5) / 1e6);
+        if (i === 0) {
+          row(c, M31, "ERROR", null, null, null);
+          row(c, M35, "OK", 4000, 100, (4000 * 0.3 + 100 * 2.5) / 1e6);
+        }
+        // Đối chứng: SĐT ở cột hội thoại cho 10/12, địa chỉ 8/12, chốt 6/12, handoff 2/12.
+        const k = await mkConv("FANPAGE", i < 10 ? "0912000000" : null);
+        await db.insert(ev).values([evt(k, "ai.replied", { mode: "AI", responseMs: 2000 }), ...(i < 8 ? [evt(k, "customer.identified", { simulated: false })] : []), ...(i < 6 ? [evt(k, "order.confirmed", { simulated: false })] : []), ...(i >= 10 ? [evt(k, "handoff.requested")] : [])]);
+        row(k, M35, "OK", 4000, 100, (4000 * 0.3 + 100 * 2.5) / 1e6);
+      }
+      const t = await mkConv("TEST", "0912000001");
+      await db.insert(ev).values([evt(t, "order.confirmed", { simulated: true })]);
+      row(t, M31, "OK", 1, 1, 0);
+      await pdb.insert(schema.platformAiUsage).values(ledger);
+
+      // Ghim nhánh: hội thoại đã chạy 3.1 (kể cả dòng ERROR) đọc ra 3.1.
+      const firstCanary = ledger[0].ref as string;
+      assert.deepEqual((await readConversationPlatformModels(ORG, firstCanary)).sort(), [M31, M35].sort());
+
+      const ab = await readPlatformModelAbForScript(new Date(), GEMINI_ENV);
+      assert.ok(ab, "có chính sách ⇒ có báo cáo");
+      if (ab) {
+        assert.equal(ab.canary.conversations, 12, "khung thử bị loại");
+        assert.equal(ab.control.conversations, 12);
+        assert.equal(ab.canary.model, M31);
+        assert.equal(ab.control.model, M35);
+        assert.equal(ab.canary.orders, 9, "đơn mô phỏng không tính");
+        assert.equal(ab.canary.closeRate, 9 / 12);
+        assert.equal(ab.control.closeRate, 6 / 12);
+        assert.equal(ab.canary.phoneRate, 1);
+        assert.equal(ab.control.phoneRate, 10 / 12, "SĐT ở cột hội thoại cũng tính");
+        assert.equal(ab.control.addressRate, 8 / 12);
+        assert.equal(ab.control.handoffRate, 2 / 12);
+        assert.equal(ab.canary.requests, 14);
+        assert.equal(ab.canary.errorRate, 1 / 14, "lượt hỏng của 3.1 được 3.5 đỡ vẫn là lỗi của cohort canary");
+        assert.equal(ab.canary.toolSuccessRate, 23 / 24);
+        assert.equal(ab.control.toolSuccessRate, null, "không có công cụ ⇒ chưa đo");
+        assert.equal(ab.canary.p50Ms, quantile(Array.from({ length: 12 }, (_, i) => 1000 + i * 100), 0.5));
+        const canaryCost = 12 * ((4000 * 0.25 + 100 * 1.5) / 1e6) + (4000 * 0.3 + 100 * 2.5) / 1e6;
+        assert.ok(Math.abs((ab.canary.costPerConvUsd ?? NaN) - canaryCost / 12) < 1e-12, "chi phí canary gồm cả lượt 3.5 đỡ");
+        assert.ok(Math.abs((ab.canary.costPerOrderUsd ?? NaN) - canaryCost / 9) < 1e-12);
+        assert.equal(ab.verdict.decision, "INSUFFICIENT_DATA", "12 < 200 hội thoại và 9 < 50 đơn ⇒ giữ nấc");
+      }
+
+      // Tăng nấc với CÙNG cặp model ⇒ giữ mốc cohort; đổi cặp ⇒ mốc mới.
+      const before30 = await readPlatformAiPolicy({ fresh: true });
+      assert.ok("ok" in (await applyPlatformAiPolicyAsScript({ primaryModel: M31, canaryPct: 30, reason: "len 30" }, { env: GEMINI_ENV, fetch: g31.fetch, now: new Date() })));
+      const after30 = await readPlatformAiPolicy({ fresh: true });
+      assert.ok(before30 && after30 && after30.canaryPct === 30 && after30.cohortSince === before30.cohortSince, "tăng nấc giữ cohort");
     });
   } finally {
     setSalesChatProviderForTests(null);
     resetPlatformPrimarySkipForTests();
+    await cleanupSettings();
     await cleanupOrg();
   }
+}
+
+// ─────────────────────────── ⑧ ghim nhánh + luật quyết định A/B (thuần) ───────────────────────────
+
+async function testStickyAndVerdict() {
+  const priced = (m: string) => giaCuaModel(m) !== null;
+  const M31 = "gemini-3.1-flash-lite";
+  const p10 = policy({ primaryModel: M31, canaryPct: 10 });
+  const route = (p: PlatformAiPolicy | null, key: string, prior: string[]) => routePlatformModel({ baseModel: M35, provider: "gemini", policy: p, now: NOW, routingKey: key, priced, prior });
+  // Tìm một khoá rơi vào ô ≥ 10 (đối chứng) và một khoá < 10 (canary).
+  let ctl = "";
+  let can = "";
+  for (let i = 0; (!ctl || !can) && i < 1000; i++) {
+    const k = `conv-${i}`;
+    if (canaryBucket(k) < 10) can ||= k;
+    else if (canaryBucket(k) >= 50) ctl ||= k;
+  }
+  assert.equal(route(p10, can, []).arm, "CANARY");
+  assert.equal(route(p10, ctl, []).arm, "CONTROL");
+  assert.equal(route(p10, ctl, [M31]).arm, "CANARY", "đã chạy 3.1 ⇒ giữ 3.1 dù ô băm là đối chứng");
+  assert.equal(route(p10, can, [M35]).arm, "CONTROL", "hội thoại mở trước canary (chỉ có 3.5) ⇒ không đổi model giữa chừng");
+  assert.equal(route(policy({ primaryModel: M31, canaryPct: 100 }), can, [M35]).arm, "CONTROL", "lên 100% vẫn không kéo hội thoại đang dở");
+  assert.equal(route(policy({ primaryModel: M31, enabled: false }), can, [M31]).arm, "BASE", "hoàn tác thắng ghim: về model ổn định ngay");
+
+  // Đường nóng chỉ hỏi sổ AI khi chính sách đang chạy.
+  const cfg = platformAiConfig(GEMINI_ENV);
+  if (!cfg.ready) throw new Error("cấu hình giả phải sẵn sàng");
+  let asked = 0;
+  const priorModels = async () => {
+    asked++;
+    return [M31];
+  };
+  await platformRoute(cfg, "org-x", { policy: null, routingKey: ctl, now: NOW, priorModels });
+  await platformRoute(cfg, "org-x", { policy: policy({ primaryModel: M31, enabled: false }), routingKey: ctl, now: NOW, priorModels });
+  assert.equal(asked, 0, "không chạy thử ⇒ không tốn câu đọc sổ nào");
+  assert.equal((await platformRoute(cfg, "org-x", { policy: p10, routingKey: ctl, now: NOW, priorModels })).model, M31);
+  assert.equal(asked, 1);
+
+  // Luật quyết định.
+  const conv = (over: Partial<AbConversation>): AbConversation => ({ arm: "CANARY", requests: 2, errors: 0, inputTokens: 4000, outputTokens: 100, costUsd: 0.001, unpriced: false, phone: true, address: true, orders: 1, handoff: false, upsellOffered: false, upsellAccepted: false, toolResults: 4, toolErrors: 0, responseMs: [1500], ...over });
+  const many = (n: number, f: (i: number) => Partial<AbConversation>) => Array.from({ length: n }, (_, i) => conv(f(i)));
+  const control = armStats(M35, many(1800, (i) => ({ arm: "CONTROL", orders: i % 2 ? 0 : 1, costUsd: 0.0013 })));
+  const good = armStats(M31, many(200, (i) => ({ orders: i % 2 ? 0 : 1, costUsd: 0.001 })));
+  const ctx = { currentPct: 10, hoursSinceChange: 30, enabled: true };
+  const pv = abVerdict(good, control, ctx);
+  assert.deepEqual([pv.decision, pv.nextPct], ["PROMOTE", 30], JSON.stringify(pv));
+  assert.deepEqual([abVerdict(good, control, { ...ctx, currentPct: 30 }).nextPct, abVerdict(good, control, { ...ctx, currentPct: 50 }).nextPct], [50, 100], "10 → 30 → 50 → 100");
+  assert.equal(abVerdict(good, control, { ...ctx, currentPct: 100 }).decision, "DONE");
+  assert.equal(abVerdict(good, control, { ...ctx, hoursSinceChange: 5 }).decision, "HOLD", "mỗi nấc ≥ 24 giờ");
+  assert.equal(abVerdict(armStats(M31, many(199, (i) => ({ orders: i % 5 === 0 ? 1 : 0, costUsd: 0.001 }))), control, ctx).decision, "INSUFFICIENT_DATA", "199 hội thoại · 40 đơn ⇒ chưa đủ mẫu, chưa kết luận gì");
+  assert.equal(abVerdict(armStats(M31, many(60, () => ({ orders: 1, costUsd: 0.001 }))), control, ctx).decision, "PROMOTE", "≥ 50 đơn cũng là đủ mẫu");
+  const lowClose = armStats(M31, many(200, (i) => ({ orders: i % 5 === 0 ? 1 : 0, costUsd: 0.001 })));
+  assert.equal(abVerdict(lowClose, control, ctx).decision, "ROLLBACK", "chốt giảm > 5% tương đối ⇒ hoàn tác");
+  const cheapNotEnough = armStats(M31, many(200, (i) => ({ orders: i % 2 ? 0 : 1, costUsd: 0.0012 })));
+  assert.equal(abVerdict(cheapNotEnough, control, ctx).decision, "ROLLBACK", "rẻ hơn < 15% ⇒ không thắng");
+  const noPhone = armStats(M31, many(200, (i) => ({ orders: i % 2 ? 0 : 1, costUsd: 0.001, phone: i % 4 !== 0 })));
+  assert.equal(abVerdict(noPhone, control, ctx).decision, "ROLLBACK", "SĐT giảm 25% ⇒ hoàn tác");
+  const badTools = armStats(M31, many(200, (i) => ({ orders: i % 2 ? 0 : 1, costUsd: 0.001, toolErrors: i % 10 === 0 ? 1 : 0 })));
+  assert.equal(abVerdict(badTools, control, ctx).decision, "ROLLBACK", "công cụ đúng giảm 2,5 điểm ⇒ hoàn tác");
+  const severe = armStats(M31, many(30, () => ({ errors: 1, requests: 4 })));
+  assert.equal(abVerdict(severe, control, ctx).decision, "ROLLBACK", "lỗi tăng 25 điểm khi mới 30 hội thoại ⇒ hoàn tác ngay");
+  const unpriced = armStats(M31, many(200, (i) => ({ orders: i % 2 ? 0 : 1, unpriced: i === 0 })));
+  assert.equal(abVerdict(unpriced, control, ctx).decision, "HOLD", "có lượt chưa định giá ⇒ chi phí là cận dưới ⇒ chưa kết luận");
+  assert.equal(armStats(M31, many(9, () => ({}))).closeRate, null, "dưới 10 hội thoại ⇒ tỷ lệ CHƯA ĐỦ, không phải 0");
+  assert.equal(AB_RULES.steps.join(","), "10,30,50,100");
 }
 
 export async function testPlatformAiModel() {
@@ -396,8 +531,9 @@ export async function testPlatformAiModel() {
   await testFallback();
   await testProbe();
   await testOperatorWorkflow();
+  await testStickyAndVerdict();
   await testLedger();
-  console.log("✓ Platform AI Model Control: PLATFORM_AI_MODEL resolve đúng, giá 2.5 / 3.5 đúng · chính sách hỏng / tắt / chưa hiệu lực ⇒ model cũ, canary băm ổn định · 404 ⇒ cùng lượt đi model dự phòng, lượt hỏng là ERROR không token · kiểm khả dụng tách 5 lớp, không lộ khoá · chưa kiểm / 404 / khách ⇒ không đổi được · hoàn tác về bản trước hoặc tắt · sổ AI tách dòng theo model thật");
+  console.log("✓ Platform AI Model Control: PLATFORM_AI_MODEL resolve đúng, giá 2.5 / 3.5 đúng · chính sách hỏng / tắt / chưa hiệu lực ⇒ model cũ, canary băm ổn định · 404 ⇒ cùng lượt đi model dự phòng, lượt hỏng là ERROR không token · kiểm khả dụng tách 5 lớp, không lộ khoá · chưa kiểm / 404 / khách ⇒ không đổi được · hoàn tác về bản trước hoặc tắt · sổ AI tách dòng theo model thật · canary ghim theo hội thoại, tăng nấc giữ cohort · A/B đo chốt / SĐT / địa chỉ / handoff / lỗi / p95 / công cụ / chi phí từ hai sổ thật, đề xuất giữ · lên nấc · hoàn tác đúng luật chủ nền tảng");
 }
 
 if (/platform-ai-model\.test\.ts$/.test(process.argv[1] ?? "")) {

@@ -272,7 +272,10 @@ async function applyPolicy(w: Writer, raw: PolicyInput, deps: { env?: EnvReader;
   if (fallbackModel !== cfg.model && !probeIsFreshAvailable(probes[fallbackModel], now)) return { error: `Model dự phòng ${fallbackModel} không phải model đang chạy và chưa được kiểm khả dụng trong 24 giờ.` };
   const effectiveFrom = typeof raw.effectiveFrom === "string" && Number.isFinite(Date.parse(raw.effectiveFrom)) ? new Date(raw.effectiveFrom).toISOString() : now.toISOString();
   const before = await readPlatformAiPolicy({ fresh: true });
-  const core: PlatformAiPolicyCore = { enabled: true, provider: cfg.provider, primaryModel, fallbackModel, canaryPct, effectiveFrom, reason, changedBy: w.label, changedAt: now.toISOString() };
+  // Tăng / giảm nấc với CÙNG cặp model ⇒ giữ mốc cohort (phép so A/B cộng dồn); đổi cặp ⇒ cohort mới.
+  const sameCohort = before?.enabled && before.primaryModel === primaryModel && (before.fallbackModel ?? cfg.model) === fallbackModel;
+  const cohortSince = sameCohort ? before.cohortSince : effectiveFrom;
+  const core: PlatformAiPolicyCore = { enabled: true, provider: cfg.provider, primaryModel, fallbackModel, canaryPct, effectiveFrom, reason, changedBy: w.label, changedAt: now.toISOString(), cohortSince };
   const next: PlatformAiPolicy = { ...core, previous: before ? stripPrevious(before) : null };
   await putSetting(w, PLATFORM_AI_POLICY_KEY, next);
   const home = await getHomeOrganization();

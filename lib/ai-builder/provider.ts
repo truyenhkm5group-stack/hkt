@@ -4,7 +4,7 @@ import { openActiveConnection } from "@/lib/connectors/service";
 import { currentOrganization } from "@/lib/platform/context";
 import { aiKillSwitchDenial } from "@/lib/ai-usage/control";
 import { defaultEnvReader, platformAiConfig, type EnvReader, type PlatformAiConfig } from "@/lib/ai-usage/platform-ai";
-import { readPlatformAiPolicy, routePlatformModel, type PlatformAiPolicy, type PlatformModelRoute } from "@/lib/ai-usage/platform-ai-policy";
+import { livePolicy, readPlatformAiPolicy, routePlatformModel, type PlatformAiPolicy, type PlatformModelRoute } from "@/lib/ai-usage/platform-ai-policy";
 import { checkAiQuota, resolveAiLimits } from "@/lib/ai-usage/quota";
 import { withPlatformFallback, type PlatformPrimaryFailure } from "@/lib/ai-builder/platform-fallback";
 import { ByokAnthropicProvider, ByokGeminiProvider, ByokOpenAiProvider, BUILDER_TIMEOUT_MS } from "@/lib/ai-builder/providers";
@@ -102,12 +102,15 @@ async function platformAi(orgCode: string, deps: PlatformAiDeps): Promise<{ ok: 
  * đọc `platform.ai.policy`). `routingKey` = khoá băm canary (hội thoại) — trống ⇒ mã tổ chức. `onPrimaryFailed` = lượt hỏng
  * của model chính khi model dự phòng đã đỡ (bên gọi ghi một dòng `ERROR` vào sổ AI).
  */
-export type PlatformAiDeps = { fetch?: typeof fetch; env?: EnvReader; policy?: PlatformAiPolicy | null; routingKey?: string | null; now?: Date; onPrimaryFailed?: (f: PlatformPrimaryFailure) => void };
+export type PlatformAiDeps = { fetch?: typeof fetch; env?: EnvReader; policy?: PlatformAiPolicy | null; routingKey?: string | null; now?: Date; onPrimaryFailed?: (f: PlatformPrimaryFailure) => void; priorModels?: () => Promise<readonly string[]> };
 
 /** Model của lượt này theo Platform AI Policy (`lib/ai-usage/platform-ai-policy.ts`) — không có chính sách ⇒ model của biến môi trường. */
 export async function platformRoute(cfg: Extract<PlatformAiConfig, { ready: true }>, orgCode: string, deps: PlatformAiDeps = {}): Promise<PlatformModelRoute> {
   const policy = deps.policy !== undefined ? deps.policy : await readPlatformAiPolicy();
-  return routePlatformModel({ baseModel: cfg.model, provider: cfg.provider, policy, now: deps.now ?? new Date(), routingKey: deps.routingKey || orgCode, priced: (m) => giaCuaModel(m) !== null });
+  const now = deps.now ?? new Date();
+  // Chỉ hỏi sổ AI (ghim nhánh theo hội thoại) khi chính sách ĐANG chạy — không chạy thử thì đường nóng không tốn câu nào.
+  const prior = livePolicy(policy, now) && deps.priorModels ? await deps.priorModels().catch(() => []) : [];
+  return routePlatformModel({ baseModel: cfg.model, provider: cfg.provider, policy, now, routingKey: deps.routingKey || orgCode, priced: (m) => giaCuaModel(m) !== null, prior });
 }
 
 /**

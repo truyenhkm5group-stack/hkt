@@ -75,3 +75,36 @@ Chỉ người vận hành nền tảng (`platform:operate` + tổ chức nhà).
 ```sql
 select model, status, count(*) as dong, sum(requests) as luot, sum(input_tokens) as vao, sum(output_tokens) as ra, round(sum(cost_usd)::numeric, 4) as usd from platform_ai_usage where billing_source = 'PLATFORM' and at > now() - interval '24 hours' group by model, status order by luot desc
 ```
+
+## 7. Canary có đo — A/B model (07/10/2026)
+
+**Ghim theo hội thoại.** Hội thoại đã chạy model nào (sổ AI nguồn `PLATFORM`, kể cả dòng `ERROR`) thì giữ nhánh đó:
+tăng nấc 10 → 30 → 50 → 100% không kéo hội thoại đang dở của nhóm đối chứng sang model mới, và hội thoại mở trước khi bật
+canary không đổi model giữa chừng. Chỉ hội thoại MỚI được băm theo `canaryPct`. Hoàn tác thắng ghim: về model ổn định ngay.
+Đường nóng chỉ đọc sổ AI khi chính sách đang chạy (`livePolicy`).
+
+**Cohort.** Hội thoại `sales_chatbot` nguồn `PLATFORM` có lượt đầu ≥ `cohortSince` (tăng nấc với cùng cặp model giữ mốc;
+đổi cặp ⇒ mốc mới), trừ khung thử. Nhánh theo ý định điều trị: có dòng mang tên model canary ⇒ canary (kể cả lượt dự phòng
+đỡ — chi phí của lượt đỡ tính cho canary).
+
+**Chỉ số** (`lib/ai-usage/platform-ai-ab.ts`, cùng định nghĩa màn «Hiệu quả»): hội thoại · đơn chốt (không mô phỏng) · tỷ lệ
+chốt · SĐT · địa chỉ (`customer.identified`) · handoff · lỗi AI (lượt) · p50/p95 thời gian phản hồi khách · công cụ đúng
+(`tool_result` không lỗi) · upsell mời / nhận · token / hội thoại · chi phí / hội thoại · chi phí / đơn. Dưới 10 hội thoại
+⇒ «—».
+
+**Luật quyết định** (`AB_RULES`, chủ nền tảng chốt 07/10/2026 — máy chỉ ĐỀ XUẤT, người bấm):
+
+| Điều kiện | Ngưỡng |
+|---|---|
+| Đủ mẫu | canary ≥ 200 hội thoại **hoặc** ≥ 50 đơn chốt |
+| Lỗi AI | tăng ≤ 1 điểm % |
+| Chốt · SĐT · địa chỉ | giảm ≤ 5% tương đối |
+| Công cụ đúng | giảm ≤ 2 điểm % |
+| Chi phí / hội thoại | giảm ≥ 15% |
+| Mỗi nấc | chạy ≥ 24 giờ |
+| Hồi quy nặng | lỗi tăng > 5 điểm % khi canary ≥ 30 hội thoại ⇒ hoàn tác ngay |
+
+Đạt hết ⇒ lên nấc kế (10 → 30 → 50 → 100, luôn giữ dự phòng); trượt một điều ⇒ hoàn tác; một điều chưa đo được ⇒ giữ.
+
+**Đo không cần đăng nhập:** ops `platform-ai-model-probe` arg `--report`. **Đổi nấc:** `--apply=30 gemini-3.1-flash-lite`.
+**Hoàn tác:** `--rollback` hoặc nút ở `/platform/saas` — không cần deploy.

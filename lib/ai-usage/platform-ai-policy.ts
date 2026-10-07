@@ -16,7 +16,7 @@
  * Phần thuần (parse · băm · định tuyến) không đọc CSDL; `readPlatformAiPolicy` đọc qua bộ đệm 30 giây (đường nóng: mỗi tin
  * khách một lượt đọc), lỗi đọc ⇒ `null` ⇒ `BASE`. Ghi DUY NHẤT qua lõi người vận hành `lib/ai-usage/platform-ai-admin.ts`.
  */
-import { eq } from "drizzle-orm";
+import { and, eq, gte } from "drizzle-orm";
 import { getPlatformDb, schema } from "@/db";
 import { PLATFORM_AI_PROVIDERS, type PlatformAiProviderName } from "@/lib/ai-usage/platform-ai";
 
@@ -36,6 +36,11 @@ export type PlatformAiPolicyCore = {
   reason: string;
   changedBy: string | null;
   changedAt: string;
+  /**
+   * Mốc bắt đầu COHORT của `primaryModel` — hội thoại mở từ mốc này mới vào phép so A/B. Tăng nấc (10 → 30 → 50 → 100) với
+   * CÙNG primary giữ nguyên mốc; đổi primary thì mốc mới. Bản cũ không có ô này ⇒ dùng `effectiveFrom`.
+   */
+  cohortSince: string;
 };
 /** `previous` = bản ngay trước lượt đổi — nút Hoàn tác trả về đúng bản đó (một nấc; nhật ký nền tảng giữ cả lịch sử). */
 export type PlatformAiPolicy = PlatformAiPolicyCore & { previous: PlatformAiPolicyCore | null };
@@ -66,6 +71,7 @@ function parseCore(raw: unknown): PlatformAiPolicyCore | null {
     reason: typeof raw.reason === "string" ? raw.reason.slice(0, 500) : "",
     changedBy: typeof raw.changedBy === "string" ? raw.changedBy : null,
     changedAt,
+    cohortSince: isoOrNull(raw.cohortSince) ?? effectiveFrom,
   };
 }
 
@@ -88,13 +94,18 @@ export function canaryBucket(routingKey: string): number {
 }
 
 export type PlatformModelArm = "BASE" | "CANARY" | "CONTROL";
+
+/** Chính sách ĐANG có hiệu lực lúc `now` (bật + đã tới giờ), không thì `null`. HÀM THUẦN. */
+export function livePolicy(policy: PlatformAiPolicy | null, now: Date): PlatformAiPolicy | null {
+  return policy && policy.enabled && Date.parse(policy.effectiveFrom) <= now.getTime() ? policy : null;
+}
 export type PlatformModelRoute = { model: string; fallbackModel: string | null; arm: PlatformModelArm; note: string | null };
 
 /**
  * Lượt AI dùng chung này đi model nào. HÀM THUẦN — đường nóng (`platformChatAi`) và màn người vận hành dùng CHUNG, nên
  * con số "bao nhiêu % lưu lượng đang đi model mới" trên màn hình là đúng luật đang chạy, không phải một bản chép.
  */
-export function routePlatformModel(input: { baseModel: string; provider: PlatformAiProviderName; policy: PlatformAiPolicy | null; now: Date; routingKey: string; priced: (model: string) => boolean }): PlatformModelRoute {
+export function routePlatformModel(input: { baseModel: string; provider: PlatformAiProviderName; policy: PlatformAiPolicy | null; now: Date; routingKey: string; priced: (model: string) => boolean; prior?: readonly string[] }): PlatformModelRoute {
   const base = (note: string | null): PlatformModelRoute => ({ model: input.baseModel, fallbackModel: null, arm: "BASE", note });
   const p = input.policy;
   if (!p) return base(null);
@@ -103,8 +114,15 @@ export function routePlatformModel(input: { baseModel: string; provider: Platfor
   if (input.now.getTime() < Date.parse(p.effectiveFrom)) return base("Chính sách chưa tới giờ hiệu lực.");
   if (!input.priced(p.primaryModel)) return base(`Model ${p.primaryModel} chưa có trong bảng giá — bỏ qua chính sách.`);
   const fb = p.fallbackModel && input.priced(p.fallbackModel) ? p.fallbackModel : input.baseModel;
-  if (canaryBucket(input.routingKey) < p.canaryPct) return { model: p.primaryModel, fallbackModel: fb === p.primaryModel ? null : fb, arm: "CANARY", note: null };
-  return { model: fb, fallbackModel: null, arm: "CONTROL", note: null };
+  const canary: PlatformModelRoute = { model: p.primaryModel, fallbackModel: fb === p.primaryModel ? null : fb, arm: "CANARY", note: null };
+  const control: PlatformModelRoute = { model: fb, fallbackModel: null, arm: "CONTROL", note: null };
+  // GHIM THEO HỘI THOẠI: hội thoại đã chạy model nào (sổ AI) thì giữ nhánh đó — tăng nấc 10 → 30% không kéo hội thoại đang
+  // dở của nhóm đối chứng sang model mới, và hội thoại mở TRƯỚC khi bật canary (chỉ có dòng của model ổn định) không đổi
+  // model giữa chừng. Lượt hỏng của primary (dòng ERROR mang tên primary) vẫn là nhánh canary.
+  const prior = input.prior ?? [];
+  if (prior.includes(p.primaryModel)) return canary;
+  if (prior.includes(fb)) return control;
+  return canaryBucket(input.routingKey) < p.canaryPct ? canary : control;
 }
 
 const holder = globalThis as typeof globalThis & { __erpPlatformAiPolicy?: { at: number; policy: PlatformAiPolicy | null } };
@@ -123,6 +141,24 @@ export async function readPlatformAiPolicy(opts: { fresh?: boolean } = {}): Prom
   }
   holder.__erpPlatformAiPolicy = { at: Date.now(), policy };
   return policy;
+}
+
+/**
+ * Model nguồn PLATFORM mà MỘT hội thoại đã chạy (cả dòng ERROR) trong 30 ngày — căn cứ ghim nhánh. Chỉ gọi khi có chính sách
+ * đang hiệu lực (đường nóng không tốn thêm câu nào khi không chạy thử). Lỗi đọc ⇒ `[]` ⇒ băm như hội thoại mới.
+ */
+export async function readConversationPlatformModels(orgCode: string, ref: string, now: Date = new Date()): Promise<string[]> {
+  try {
+    const pdb = await getPlatformDb();
+    const a = schema.platformAiUsage;
+    const rows = await pdb
+      .selectDistinct({ model: a.model })
+      .from(a)
+      .where(and(eq(a.orgCode, orgCode), gte(a.at, new Date(now.getTime() - 30 * 86_400_000)), eq(a.ref, ref), eq(a.billingSource, "PLATFORM")));
+    return rows.map((r) => r.model).filter((m): m is string => typeof m === "string" && m.length > 0);
+  } catch {
+    return [];
+  }
 }
 
 /** Sau mỗi lượt ghi: tiến trình này đọc lại ngay (tiến trình khác — scheduler — tối đa 30 giây sau). */
