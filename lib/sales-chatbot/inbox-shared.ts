@@ -3,22 +3,47 @@
  *
  * Tệp THUẦN (không CSDL): trang hộp thư (client) chỉ được `import` từ đây; lõi đọc / ghi ở `lib/sales-chatbot/inbox.ts`.
  */
-import type { AiHoldView } from "@/lib/sales-chatbot/ai-hold-shared";
+import type { AiHoldState, AiHoldView } from "@/lib/sales-chatbot/ai-hold-shared";
 import type { AiBlock, MessageTrace } from "@/lib/sales-chatbot/ai-status-shared";
 import type { ControlStamp } from "@/lib/sales-chatbot/conversation-control-shared";
 
 import type { CustomerLevel } from "@/lib/sales-chatbot/levels-shared";
 
-export const INBOX_FILTERS = ["ALL", "UNREAD", "UNANSWERED", "NEEDS_HUMAN", "MINE", "UNASSIGNED"] as const;
+/**
+ * Thẻ lọc của hộp thư (chủ shop 07/10/2026): Tất cả · Chưa đọc · AI đang xử lý · Người đang xử lý · Cần người · Đã chốt · Chưa chốt
+ * (+ Chờ trả lời · Của tôi · Chưa ai nhận). «AI / Người đang xử lý» đọc ĐÚNG `aiHoldOf` (ai-hold-shared.ts — một nguồn với huy hiệu
+ * trên từng hàng và thanh điều khiển trong luồng tin): AI = AI_ACTIVE; Người = HUMAN_COOLDOWN + HUMAN_TAKEOVER. «Đã chốt» = hội
+ * thoại có đơn ERP thật (không tính đơn nháp) hoặc level khách «Đã chốt đơn»; «Chưa chốt» là phần bù — hai thẻ phủ kín.
+ */
+export const INBOX_FILTERS = ["ALL", "UNREAD", "AI", "HUMAN", "NEEDS_HUMAN", "ORDERED", "NOT_ORDERED", "UNANSWERED", "MINE", "UNASSIGNED"] as const;
 export type InboxFilter = (typeof INBOX_FILTERS)[number];
 export const INBOX_FILTER_LABEL: Record<InboxFilter, string> = {
   ALL: "Tất cả",
   UNREAD: "Chưa đọc",
-  UNANSWERED: "Chờ trả lời",
+  AI: "AI đang xử lý",
+  HUMAN: "Người đang xử lý",
   NEEDS_HUMAN: "Cần người",
+  ORDERED: "Đã chốt",
+  NOT_ORDERED: "Chưa chốt",
+  UNANSWERED: "Chờ trả lời",
   MINE: "Của tôi",
   UNASSIGNED: "Chưa ai nhận",
 };
+
+/** Nguồn của hội thoại: Pancake · Meta trực tiếp (Messenger / Instagram) · Zalo OA · chat web. */
+export type InboxSource = "PANCAKE" | "DIRECT" | "ZALO" | "WEB";
+export const INBOX_SOURCE_LABEL: Record<InboxSource, string> = { PANCAKE: "Pancake", DIRECT: "Direct", ZALO: "Zalo", WEB: "Web" };
+
+/** Số chưa đọc in trên hàng — quá trần in «99+». HÀM THUẦN. */
+export function unreadBadge(n: number): string {
+  return n > 99 ? "99+" : String(Math.max(0, Math.floor(n)));
+}
+
+/** Địa chỉ ảnh đại diện dùng được (https, không mang khoá / token trong URL). Còn lại ⇒ `null` (hiện chữ cái). HÀM THUẦN. */
+export function safeAvatarUrl(v: unknown): string | null {
+  const url = typeof v === "string" ? v.trim() : "";
+  return /^https:\/\/[^\s"'<>]+$/i.test(url) && url.length <= 2000 && !/access_token|[?&](token|key|secret)=/i.test(url) ? url : null;
+}
 
 /**
  * Ai đang trả lời khách (conversation-control-shared.ts): AI = bot đang tự trả lời (không nhường, không ghi đè); HUMAN = đang
@@ -56,6 +81,15 @@ export type InboxRow = {
   waitingSince: string | null;
   /** Tin khách mới hơn lần cuối một nhân viên mở hội thoại. */
   unread: boolean;
+  /** SỐ tin khách chưa đọc (≥ 1 khi `unread`, 0 khi đã đọc). */
+  unreadCount: number;
+  /** Ảnh đại diện thật (Meta `profile_pic` / Pancake) — `null` ⇒ chữ cái. */
+  avatarUrl: string | null;
+  /** Trạng thái AI của hội thoại — `aiHoldOf` (một nguồn với thẻ lọc «AI / Người đang xử lý»). */
+  aiHold: AiHoldState;
+  /** Đã chốt đơn (đơn ERP thật hoặc level «Đã chốt đơn») — cùng định nghĩa với thẻ «Đã chốt». */
+  closed: boolean;
+  source: InboxSource;
   assigneeUserId: string | null;
   assigneeName: string | null;
   hasOrder: boolean;
@@ -123,6 +157,8 @@ export type InboxThread = {
   botYields: boolean;
   /** AI_ACTIVE · HUMAN_COOLDOWN (kèm mốc hết hạn + giờ máy chủ để đếm ngược) · HUMAN_TAKEOVER — `ai-hold-shared.ts::aiHoldOf`. */
   aiHold: AiHoldView;
+  /** Ảnh đại diện thật của khách (`safeAvatarUrl`) — `null` ⇒ chữ cái. */
+  avatarUrl: string | null;
   /** Lý do AI KHÔNG trả lời (cổng page · chế độ vận hành · module · bot tắt · nguồn AI…) — `ai-status-shared.ts`. */
   aiBlocks: AiBlock[];
   /** Chế độ AI của RIÊNG hội thoại (Tiếp quản / AI gợi ý); `null` = theo chế độ của tổ chức (conversation-control-shared.ts). */

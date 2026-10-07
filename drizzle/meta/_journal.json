@@ -1618,6 +1618,13 @@
       "when": 1791400380000,
       "tag": "0231_sales_human_cooldown",
       "breakpoints": true
+    },
+    {
+      "idx": 232,
+      "version": "7",
+      "when": 1791500000000,
+      "tag": "0232_saas_l3_inbox_routes",
+      "breakpoints": true
     }
   ]
 }

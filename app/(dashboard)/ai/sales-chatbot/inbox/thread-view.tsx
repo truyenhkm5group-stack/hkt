@@ -217,7 +217,7 @@ export function InboxThreadView({
             <Link href={backHref} className="mt-2 text-muted-foreground hover:text-foreground lg:hidden" aria-label="Về danh sách">
               <ArrowLeft className="size-4" />
             </Link>
-            <ChannelAvatar name={thread.customer.name} channel={thread.channel} size="lg" />
+            <ChannelAvatar name={thread.customer.name} channel={thread.channel} src={thread.avatarUrl} size="lg" />
             <div className="min-w-0 space-y-0.5">
               <p className="truncate text-base font-semibold leading-tight">{thread.customer.name}</p>
               <p className="truncate text-[12px] text-muted-foreground">

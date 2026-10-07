@@ -516,6 +516,7 @@ import { testWebProductImport } from "./web-product-import.test";
 import { testMessenger } from "./messenger.test";
 import { testConversationControl } from "./conversation-control.test";
 import { testSalesHumanTakeover } from "./sales-human-takeover.test";
+import { testSaasL3Inbox } from "./saas-l3-inbox.test";
 import { testConversationTrace } from "./conversation-trace.test";
 import { testMessengerHealth } from "./messenger-health.test";
 import { testConnectorsLegacy } from "./connectors-legacy.test";
@@ -2823,6 +2824,10 @@ async function main() {
   // AI nhường người: AI_ACTIVE · HUMAN_COOLDOWN (đếm ngược, «Cho AI tiếp tục ngay») · HUMAN_TAKEOVER («Trả lại cho AI») — tổ chức
   // THẬT `nhuong-nguoi` (+ `nhuong-nguoi-khac` cho cô lập), Messenger trực tiếp + fanpage Pancake giả, đồng hồ nhường tường minh.
   await testSalesHumanTakeover();
+  // Hộp thư hợp nhất + song song Pancake / Meta trực tiếp (0232): đường canonical theo page + backfill giữ đường hôm nay, khử
+  // trùng hai nguồn, đường phụ không kích AI, người trả lời ba nguồn ⇒ nhường, số phút nhường theo workspace, thẻ lọc ≡ aiHoldOf —
+  // tổ chức THẬT `l3-hop-thu` (+ `l3-hop-thu-khac` cho cô lập), Graph + Pancake giả.
+  await testSaasL3Inbox();
   // Đơn ↔ hội thoại ↔ khách: link hội thoại của đơn mở Hộp thư ERP (mọi kênh); hồ sơ khách chỉ thấy hội thoại nối bằng
   // khoá cứng — tổ chức THẬT `truy-vet-hoi-thoai`.
   await testConversationTrace();

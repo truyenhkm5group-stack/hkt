@@ -25,6 +25,7 @@ import { readPinnedArm, replyGate } from "@/lib/sales-chatbot/operating-mode-sha
 import { applyConversationControl, controlOf, controlSkipNote } from "@/lib/sales-chatbot/conversation-control-shared";
 import { botMaySend, captureSendSnapshot, holdGate, startHumanCooldown } from "@/lib/sales-chatbot/conversation-control";
 import { FANPAGE_STAFF_REASON, HUMAN_COOLDOWN_MINUTES } from "@/lib/sales-chatbot/ai-hold-shared";
+import { DUPLICATE_SOURCE_REASON, insertCustomerInbound, loadTransportFacts, MESSENGER_OWNS_PAGE_REASON, NON_CANONICAL_NOTE, routeVerdict, type RouteVerdict } from "@/lib/sales-chatbot/channel-ownership";
 import { createHash, randomUUID } from "node:crypto";
 import { and, asc, desc, eq, gte, inArray, isNotNull, isNull, like, lt, ne, or, sql, type SQL } from "drizzle-orm";
 import { getDb, schema } from "@/db";
@@ -252,6 +253,11 @@ export type FanpageEvent = {
   imageUrls: string[];
   /** 0225: quảng cáo dẫn KHÁCH vào hội thoại (`adReferralFromPancake`) — tin phía page / thiếu trường ⇒ không có. */
   adReferral?: AdReferral | null;
+  /**
+   * 0232: mã người gửi CHUẨN của tin KHÁCH (PSID Facebook: `conversation.from_psid`, rồi `message.from.id` — cùng cách đọc với
+   * `lib/integrations/pancake/pages.ts`) — khoá khử trùng với đường Meta trực tiếp. Thiếu ⇒ chỉ chống trùng theo mã tin.
+   */
+  senderId?: string;
 };
 
 const str = (v: unknown) => (typeof v === "string" ? v : typeof v === "number" ? String(v) : "");
@@ -293,7 +299,8 @@ export function parsePancakeWebhook(payload: unknown): FanpageEvent | null {
   const imageUrls = fromPage ? [] : pancakeImageUrls(msg);
   const automated = fromPage && Boolean(from.ai_generated || from.is_automated);
   const adReferral = fromPage ? null : adReferralFromPancake(payload);
-  return { pageId, threadId, messageId, text, customerName: fromPage ? "" : customerName, fromPage, humanStaff, automated, inbox, comment, imageUrls, adReferral };
+  const senderId = fromPage ? "" : str(conv?.from_psid) || str(from.id);
+  return { pageId, threadId, messageId, text, customerName: fromPage ? "" : customerName, fromPage, humanStaff, automated, inbox, comment, imageUrls, adReferral, senderId };
 }
 
 /** Khoá hội thoại fanpage (cột `visitor_key`, UNIQUE cho kênh FANPAGE): băm (page, hội thoại Pancake). */
@@ -380,6 +387,13 @@ export async function receiveFanpageEvent(ev: FanpageEvent, now: Date = new Date
   const conn = await openActiveConnection(FANPAGE_CONNECTOR);
   if (!conn.ok) return { queued: false, reason: "Kết nối fanpage chưa bật" };
   if ((conn.settings.pageId ?? "").trim() !== ev.pageId) return { queued: false, reason: "Tin của page khác page đã khai" };
+  // MỘT PAGE — MỘT ĐƯỜNG CANONICAL (channel-ownership.ts · 0232): page nhận tin qua Meta trực tiếp (đường chính, đang chạy) ⇒ đường
+  // Pancake nhường MỌI gói tin của page (cả tin phía page — tiếng vọng Meta đã báo nhân viên trả lời). Đường chính đã lưu mà không
+  // chạy ⇒ ghi tin khách cho người đọc, KHÔNG kích AI. Đọc hỏng ⇒ như trước 0232 (Pancake chạy — không gãy đường đang chạy thật).
+  const verdict: RouteVerdict = await loadTransportFacts()
+    .then((f) => routeVerdict(f, ev.pageId, "PANCAKE"))
+    .catch(() => "CANONICAL" as const);
+  if (verdict === "OTHER_OWNS") return { queued: false, reason: MESSENGER_OWNS_PAGE_REASON };
   const db = await getDb();
   const t = schema.salesChatInbound;
   if (PANCAKE_AUTO_NOTE_RE.test(ev.text)) return { queued: false, reason: "Ghi chú tự động của Pancake — không phải ai trả lời" };
@@ -453,18 +467,34 @@ export async function receiveFanpageEvent(ev: FanpageEvent, now: Date = new Date
     if (ev.inbox) {
       await stopFollowups(ev.pageId, ev.threadId, now, true);
       // NGƯỜI phải thấy tin này trong hộp thư (MEDIA_ONLY — không vào hàng chờ của bot).
-      await db.insert(t).values({ pageId: ev.pageId, threadId: ev.threadId, messageId: ev.messageId, text: MEDIA_ONLY_TEXT, customerName: ev.customerName || null, status: "DONE", processedAt: now, note: MEDIA_ONLY_NOTE }).onConflictDoNothing({ target: t.messageId });
+      const media = await insertCustomerInbound({ pageId: ev.pageId, threadId: ev.threadId, messageId: ev.messageId, text: MEDIA_ONLY_TEXT, customerName: ev.customerName || null, status: "DONE", processedAt: now, note: MEDIA_ONLY_NOTE, transport: "PANCAKE", senderId: ev.senderId ?? null }, now, { canonical: verdict === "CANONICAL" });
+      if (media.duplicate) return { queued: false, reason: DUPLICATE_SOURCE_REASON };
       await noteCustomerArrived(ev.pageId, ev.threadId, now);
     }
     return { queued: false, reason: "Tin không có chữ hay ảnh (nhãn dán / ghi âm / video) — để nhân viên xem" };
   }
-  const rows = await db
-    .insert(t)
-    .values({ pageId: ev.pageId, threadId: ev.threadId, messageId: ev.messageId, text: ev.text, customerName: ev.customerName || null, ...(images.length ? { imageUrls: images } : {}), ...(ev.comment ? { kind: "COMMENT", postId: ev.comment.postId, fromId: ev.comment.fromId } : {}) })
-    .onConflictDoNothing({ target: t.messageId })
-    .returning({ id: t.id });
-  if (rows.length) await noteCustomerArrived(ev.pageId, ev.threadId, now);
-  return rows.length ? { queued: true, reason: "Đã nhận" } : { queued: false, reason: "Tin trùng — đã nhận trước đó" };
+  const skipped = verdict === "CANONICAL_DOWN";
+  const ins = await insertCustomerInbound(
+    {
+      pageId: ev.pageId,
+      threadId: ev.threadId,
+      messageId: ev.messageId,
+      text: ev.text,
+      customerName: ev.customerName || null,
+      ...(images.length ? { imageUrls: images } : {}),
+      ...(ev.comment ? { kind: "COMMENT", postId: ev.comment.postId, fromId: ev.comment.fromId } : {}),
+      ...(skipped ? { status: "SKIPPED", processedAt: now, note: NON_CANONICAL_NOTE } : {}),
+      transport: "PANCAKE",
+      // Bình luận không khử trùng theo người gửi (mỗi bình luận một hàng chờ riêng, khoá là mã bình luận).
+      senderId: ev.comment ? null : (ev.senderId ?? null),
+    },
+    now,
+    { canonical: !skipped },
+  );
+  if (ins.duplicate) return { queued: false, reason: DUPLICATE_SOURCE_REASON };
+  if (ins.inserted) await noteCustomerArrived(ev.pageId, ev.threadId, now);
+  if (ins.inserted && skipped) return { queued: false, reason: NON_CANONICAL_NOTE };
+  return ins.inserted ? { queued: true, reason: "Đã nhận" } : { queued: false, reason: "Tin trùng — đã nhận trước đó" };
 }
 
 /** `catchUp` = lượt QUÉT LẠI (`catchUpFanpage`): tin đã cũ cả phút ⇒ không đợi khách gõ tiếp / đợi Meta nữa. */
@@ -835,6 +865,11 @@ export async function processFanpageThread(pageId: string, threadId: string, dep
   const out: ProcessResult = { processed: 0, replies: 0, skipped: null, error: null };
   const conn = await openActiveConnection(FANPAGE_CONNECTOR);
   if (!conn.ok || (conn.settings.pageId ?? "").trim() !== pageId) return { ...out, skipped: "Kết nối fanpage chưa bật / khác page" };
+  // Chỉ đường CANONICAL của page được kích AI (0232). Đọc hỏng ⇒ chạy như trước.
+  const verdict = await loadTransportFacts()
+    .then((f) => routeVerdict(f, pageId, "PANCAKE"))
+    .catch(() => "CANONICAL" as const);
+  if (verdict !== "CANONICAL") return { ...out, skipped: verdict === "OTHER_OWNS" ? MESSENGER_OWNS_PAGE_REASON : NON_CANONICAL_NOTE };
   const token = (conn.secrets.pageAccessToken ?? "").trim();
   const db = await getDb();
   const t = schema.salesChatInbound;
@@ -1256,6 +1291,11 @@ export async function catchUpFanpage(deps: FanpageDeps = {}): Promise<CatchUpRes
   const pageId = (conn.settings.pageId ?? "").trim();
   const token = (conn.secrets.pageAccessToken ?? "").trim();
   if (!pageId || !token) return { ...out, detail: ["kết nối fanpage thiếu page / token"] };
+  // Pancake không phải đường chính của page (0232) ⇒ không quét lại / mở lại tin qua đường này.
+  const verdict = await loadTransportFacts()
+    .then((f) => routeVerdict(f, pageId, "PANCAKE"))
+    .catch(() => "CANONICAL" as const);
+  if (verdict !== "CANONICAL") return { ...out, detail: [verdict === "OTHER_OWNS" ? MESSENGER_OWNS_PAGE_REASON : NON_CANONICAL_NOTE] };
   // Page của nhà đang OFF ⇒ không đọc Pancake, không nhận / mở lại tin nào (page-runtime.ts).
   if ((await pageRuntimeMode(pageId)) === "OFF") return { ...out, detail: [PAGE_OFF_NOTE] };
   // Chế độ API (không cần webhook — webhook của Pancake tốn 2 slot thuê bao): mốc đồng bộ + ngân sách + lùi khi lỗi theo
