@@ -5,7 +5,6 @@ import { listChannelPages } from "@/lib/connectors/service";
 import { MESSENGER_DIRECT_KEY } from "@/lib/sales-chatbot/channel-ownership";
 import type { AiBlock } from "@/lib/ai/provider";
 import { audit } from "@/lib/audit";
-import { publish } from "@/lib/realtime/bus";
 import { can, type SessionUser } from "@/lib/auth/session";
 import { isManualOrderId, manualOrderShortCode } from "@/lib/constants/manual-orders";
 import { sha256Hex, sniffImageType } from "@/lib/creative/images";
@@ -13,6 +12,9 @@ import { zaloWindow, ZALO_IMAGE_MAX_BYTES } from "@/lib/integrations/zalo/oa";
 import { ORDER_OUTCOME } from "@/lib/queries/return-rate";
 import { appendContextMessages, resumeConversationToAi, SHOP_SAID } from "@/lib/sales-chatbot/engine";
 import { recordConversationEvent } from "@/lib/sales-chatbot/events";
+import { aiHoldOf, aiHoldView, humanResumeReason } from "@/lib/sales-chatbot/ai-hold-shared";
+import { startHumanCooldown } from "@/lib/sales-chatbot/conversation-control";
+import { buildMessageTrace, conversationAiBlocks, loadAiUsageForConversation, transportOfConversation } from "@/lib/sales-chatbot/ai-status";
 import { readConversationControl } from "@/lib/sales-chatbot/conversation-control-shared";
 import { HISTORY_CREATED_BY } from "@/lib/sales-chatbot/history-shared";
 import { labelsFor, listLabels, notesFor } from "@/lib/sales-chatbot/inbox-labels";
@@ -432,11 +434,15 @@ export async function loadInboxThread(user: SessionUser, conversationId: unknown
   if (messaging) {
     const t = schema.salesChatInbound;
     const rows = await db
-      .select({ id: t.id, messageId: t.messageId, text: t.text, note: t.note, imageUrls: t.imageUrls, kind: t.kind, createdAt: t.createdAt })
+      .select({ id: t.id, messageId: t.messageId, text: t.text, note: t.note, imageUrls: t.imageUrls, kind: t.kind, createdAt: t.createdAt, status: t.status, attempts: t.attempts, lastError: t.lastError, claimId: t.claimId, claimedAt: t.claimedAt, processedAt: t.processedAt, nextAttemptAt: t.nextAttemptAt, importedAt: t.importedAt })
       .from(t)
       .where(and(eq(t.pageId, conv.pageId!), eq(t.threadId, conv.threadId!)))
       .orderBy(desc(t.createdAt))
       .limit(TIMELINE_MAX);
+    // DẤU VẾT TỪNG TIN KHÁCH (ai-status.ts): dữ liệu ĐÃ CÓ — dòng tin, sổ AI của hội thoại, mốc các dòng BOT_SENT của thread.
+    // Sổ AI chỉ đọc từ tin CŨ NHẤT đang hiện (trừ 1 phút) — không quét cả đời hội thoại mỗi lượt làm mới.
+    const oldest = rows.length ? rows[rows.length - 1].createdAt : now;
+    const traceEv = { transport: await transportOfConversation(conv), aiUsage: await loadAiUsageForConversation(conv.id, new Date(oldest.getTime() - 60_000)), botSentAt: rows.filter((r) => r.note === "BOT_SENT").map((r) => r.createdAt) };
     // Một tin bot có thể có HAI dòng BOT_SENT (dòng ghi sẵn `bot-out:` trước khi gửi + dòng mang mã kênh trả về) — giữ một.
     const botSeen: { text: string; at: number }[] = [];
     for (const r of [...rows].reverse()) {
@@ -454,7 +460,7 @@ export async function loadInboxThread(user: SessionUser, conversationId: unknown
       }
       const images = Array.isArray(r.imageUrls) ? (r.imageUrls as string[]).filter((x) => typeof x === "string") : [];
       if (!r.text.trim() && !images.length) continue;
-      items.push({ key: `i:${r.id}`, at: r.createdAt.toISOString(), side, text: r.kind === "COMMENT" ? `[Bình luận] ${r.text}` : r.text, images, author: side === "PAGE" ? "Phía page (ngoài ERP)" : null });
+      items.push({ key: `i:${r.id}`, at: r.createdAt.toISOString(), side, text: r.kind === "COMMENT" ? `[Bình luận] ${r.text}` : r.text, images, author: side === "PAGE" ? "Phía page (ngoài ERP)" : null, ...(side === "CUSTOMER" && !r.importedAt ? { trace: buildMessageTrace(r, traceEv, now) } : {}) });
     }
   }
   const s = schema.salesChatStaffMessages;
@@ -509,6 +515,9 @@ export async function loadInboxThread(user: SessionUser, conversationId: unknown
       status: conv.status,
       handoffReason: conv.handoffReason,
       botYields: conv.status === "HANDOFF",
+      aiHold: aiHoldView(conv, now),
+      // Lý do AI KHÔNG trả lời — hỏi đúng các cổng của đường xử lý (ai-status.ts). Không rỗng ⇒ màn hình không được nói «AI đang trả lời».
+      aiBlocks: await conversationAiBlocks(conv),
       control: readConversationControl(conv.state),
       customer: cust
         ? { id: cust.id, name: cust.name, phone: cust.phone, address: cust.address, province: cust.province }
@@ -650,25 +659,8 @@ export async function sendStaffReplyCore(user: SessionUser, conversationId: unkn
   const at = now();
   await db.update(s).set({ status: "SENT", sentAt: at, error: null }).where(eq(s.id, mark.staffMessageId));
 
-  // Bot nhường + người cầm hội thoại. Đang CẦN NGƯỜI vì lý do khác ⇒ giữ lý do đó.
-  const c = schema.salesChatConversations;
-  const reason = staffReasonOf(conv.channel);
-  const wasHandoff = conv.status === "HANDOFF";
-  await db
-    .update(c)
-    .set({
-      status: "HANDOFF",
-      handoffReason: sql`case when ${c.status} = 'HANDOFF' and ${c.handoffReason} is not null and ${c.handoffReason} <> ${reason} then ${c.handoffReason} else ${reason} end`,
-      lastStaffAt: at,
-      nextFollowupAt: null,
-      waitingSince: null,
-      assigneeUserId: sql`coalesce(${c.assigneeUserId}, ${user.id})`,
-      assignedAt: sql`coalesce(${c.assignedAt}, ${at})`,
-      updatedAt: at,
-    })
-    .where(eq(c.id, conv.id));
-  publish({ type: "chat", conversationId: conv.id });
-  if (!wasHandoff) await recordConversationEvent(conv.id, { type: "human.took_over", actorKind: "HUMAN", actorUserId: user.id, occurredAt: at, reasonCode: "STAFF_REPLIED", key: `staff:${STAFF_OUT_PREFIX}${mark.staffMessageId}` });
+  // Bot nhường 30 phút (mốc hết hạn tường minh) + người cầm hội thoại. Đang CẦN NGƯỜI / TIẾP QUẢN ⇒ giữ nguyên (`startHumanCooldown`).
+  await startHumanCooldown(conv.id, { reason: staffReasonOf(conv.channel), at, actorUserId: user.id, key: `staff:${STAFF_OUT_PREFIX}${mark.staffMessageId}`, via: "ERP_INBOX", inbox: { userId: user.id } });
   await recordConversationEvent(conv.id, { type: "human.replied", actorKind: "HUMAN", actorUserId: user.id, occurredAt: at, payload: { via: "ERP_INBOX", chars: row.text.length, images: row.imageCount }, key: `human-reply:${mark.staffMessageId}` });
   return { ok: true, messageId: mark.staffMessageId, reused: false };
 }
@@ -756,10 +748,14 @@ export async function handBackToAiCore(user: SessionUser, conversationId: unknow
   const conv = await loadConv(conversationId);
   if (!conv) return { ok: false, error: "Không có hội thoại này." };
   if (conv.status !== "HANDOFF") return { ok: false, error: "Bot đang trả lời hội thoại này rồi." };
+  const at = new Date();
+  const before = aiHoldOf(conv, at);
   const resumed = await resumeConversationToAi(conv.id);
   if (!resumed) return { ok: false, error: "Không trả lại được — hội thoại vừa đổi trạng thái." };
-  await recordConversationEvent(conv.id, { type: "ai.resumed", actorKind: "HUMAN", actorUserId: user.id, occurredAt: new Date(), key: `resume:inbox:${conv.id}:${Date.now()}` });
-  await audit({ userId: user.id, userEmail: user.email, action: "SALES_CHAT_RESUME_AI", entity: "SALES_CONVERSATION", entityId: conv.id, before: { status: "HANDOFF", reason: conv.handoffReason }, after: { status: "OPEN" }, reason: "Trả lại cho AI từ hộp thư" });
+  const resumeReason = humanResumeReason(before) ?? "RETURNED";
+  await recordConversationEvent(conv.id, { type: "ai.resumed", actorKind: "HUMAN", actorUserId: user.id, occurredAt: at, reasonCode: resumeReason, payload: { from: before.state, cause: before.cause }, key: `resume:inbox:${conv.id}:${at.getTime()}` });
+  // Cùng mã nhật ký với thanh điều khiển: cho AI tiếp tục NGAY trong lúc nhường ≠ trả lại sau tiếp quản / cần người.
+  await audit({ userId: user.id, userEmail: user.email, action: resumeReason === "RESUMED_NOW" ? "SALES_CHAT_AI_RESUME_NOW" : "SALES_CHAT_RESUME_AI", entity: "SALES_CONVERSATION", entityId: conv.id, before: { status: "HANDOFF", reason: conv.handoffReason, hold: before.state }, after: { status: "OPEN", hold: "AI_ACTIVE" }, reason: resumeReason === "RESUMED_NOW" ? "Cho AI tiếp tục ngay — bỏ thời gian nhường" : "Trả lại cho AI từ hộp thư" });
   return { ok: true };
 }
 

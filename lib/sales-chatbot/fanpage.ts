@@ -23,7 +23,8 @@
 import { draftCopilotSuggestion, loadModeConfig, pinArm } from "@/lib/sales-chatbot/operating-mode";
 import { readPinnedArm, replyGate } from "@/lib/sales-chatbot/operating-mode-shared";
 import { applyConversationControl, controlOf, controlSkipNote } from "@/lib/sales-chatbot/conversation-control-shared";
-import { botMaySend, captureSendSnapshot } from "@/lib/sales-chatbot/conversation-control";
+import { botMaySend, captureSendSnapshot, holdGate, startHumanCooldown } from "@/lib/sales-chatbot/conversation-control";
+import { FANPAGE_STAFF_REASON, HUMAN_COOLDOWN_MINUTES } from "@/lib/sales-chatbot/ai-hold-shared";
 import { createHash, randomUUID } from "node:crypto";
 import { and, asc, desc, eq, gte, inArray, isNotNull, isNull, like, lt, ne, or, sql, type SQL } from "drizzle-orm";
 import { getDb, schema } from "@/db";
@@ -35,9 +36,8 @@ import { describeNetworkFailure, isNetworkFailure } from "@/lib/connectors/net-e
 import { PANCAKE_PAGES_API, scrubSecrets } from "@/lib/connectors/testers";
 import { chunkText } from "@/lib/messaging/providers";
 import { AI_DOWN_HANDOFF_REASON, appendContextMessages, chatTurn, conversationView, describeCustomerImages, loadSalesChatbotConfig, openConversation } from "@/lib/sales-chatbot/engine";
-import { ALREADY_REPLIED_NOTE, alreadyRepliedRows, DEAD_AI_DOWN_NOTE, DEAD_SEND_NOTE_PREFIX, deadLetter, dueForClaim, releaseWithBackoff } from "@/lib/sales-chatbot/inbound-retry";
+import { ALREADY_REPLIED_NOTE, alreadyRepliedRows, CONV_OPEN_FAILED_NOTE, HANDOFF_SILENT_NOTE, DEAD_AI_DOWN_NOTE, DEAD_SEND_NOTE_PREFIX, deadLetter, dueForClaim, releaseWithBackoff } from "@/lib/sales-chatbot/inbound-retry";
 import { readQuickReplyImage, rememberPancakeContent } from "@/lib/sales-chatbot/quick-replies";
-import { recordConversationEvent } from "@/lib/sales-chatbot/events";
 import { loadPollState, savePollState } from "@/lib/sales-chatbot/pancake-poll";
 import { afterPoll, pollDecision, type PancakePollState } from "@/lib/sales-chatbot/pancake-poll-shared";
 import { nextFollowupAt } from "@/lib/sales-chatbot/followup-shared";
@@ -53,7 +53,7 @@ import { PAGE_NOT_LIVE_SEND_ERROR, PAGE_OFF_NOTE } from "@/lib/sales-chatbot/pag
 
 export const FANPAGE_CONNECTOR = "pancake-fanpage";
 /** Nhân viên thật vừa trả lời trên fanpage ⇒ bot im lặng chừng này phút cho hội thoại đó. */
-export const HUMAN_TAKEOVER_MINUTES = 30;
+export const HUMAN_TAKEOVER_MINUTES = HUMAN_COOLDOWN_MINUTES;
 /**
  * TRẢ LỜI NHANH NHẤT CÓ THỂ mà không chen ngang trả lời tự động của Meta (chủ shop 01/10/2026: bản đầu đợi 30 giây cho mọi
  * tin là quá chậm). Meta chỉ tự trả lời TIN ĐẦU của một hội thoại mới, và tin ấy tới qua Pancake sau vài giây ⇒
@@ -198,7 +198,7 @@ export function normalizeEcho(text: string): string {
 }
 export const CLAIM_STALE_MS = 3 * 60_000;
 const TEXT_MAX = 2000;
-export const STAFF_REASON = "Nhân viên đang trả lời trên fanpage";
+export const STAFF_REASON = FANPAGE_STAFF_REASON;
 
 /**
  * TIN NHÂN VIÊN GỬI TỪ HỘP THƯ ERP (0209 · lib/sales-chatbot/inbox.ts). Dòng ghi sẵn TRƯỚC khi gửi mang mã
@@ -222,6 +222,17 @@ export function erpStaffEchoCond(pageId: string, threadId: string, echo: string,
 }
 /** Bot nhắn trong chừng này mà có tin phía page lạ tới ⇒ nhân viên đang vào hội thoại (Pancake không gắn uid). */
 export const STAFF_INFER_WINDOW_MS = 3 * 3_600_000;
+
+/**
+ * Tin phía page (không phải tiếng vọng bot, không phải tin mẫu) là của NHÂN VIÊN khi: bot vừa nói trong `STAFF_INFER_WINDOW_MS`,
+ * HOẶC hội thoại đang do người cầm (`HANDOFF` — nhường / cần người — hay «Tiếp quản»). Vế sau (review #633): nhân viên chat
+ * hơn 3 giờ sau câu bot cuối thì vế đầu hết hạn, câu của họ không gia hạn nhường và AI chen vào giữa cuộc chat của người. Trả lời
+ * tự động của Meta chỉ tới ở ĐẦU hội thoại — lúc ấy hội thoại chưa bao giờ ở tay người.
+ */
+export function pageSideIsStaffCond(now: Date): SQL {
+  const c = schema.salesChatConversations;
+  return or(gte(c.lastBotAt, new Date(now.getTime() - STAFF_INFER_WINDOW_MS)), eq(c.status, "HANDOFF"), sql`coalesce(${c.state}->'control'->>'mode', '') = 'HUMAN'`) ?? sql`false`;
+}
 
 export type FanpageEvent = {
   pageId: string;
@@ -420,18 +431,14 @@ export async function receiveFanpageEvent(ev: FanpageEvent, now: Date = new Date
       const [active] = await db
         .select({ id: c.id })
         .from(c)
-        .where(and(eq(c.channel, "FANPAGE"), eq(c.visitorKey, fanpageVisitorKey(ev.pageId, ev.threadId)), gte(c.lastBotAt, new Date(now.getTime() - STAFF_INFER_WINDOW_MS))))
+        .where(and(eq(c.channel, "FANPAGE"), eq(c.visitorKey, fanpageVisitorKey(ev.pageId, ev.threadId)), pageSideIsStaffCond(now)))
         .limit(1);
       if (!active) return { queued: false, reason: "Trả lời tự động của page — bot không chen" };
     }
-    // Sổ sự kiện (0202): ghi «nhân viên nhận» khi hội thoại CHUYỂN sang người — không ghi lại mỗi tin của nhân viên.
-    const [took] = await db.select({ id: c.id, status: c.status }).from(c).where(and(eq(c.channel, "FANPAGE"), eq(c.visitorKey, fanpageVisitorKey(ev.pageId, ev.threadId)))).limit(1);
-    if (took && took.status !== "HANDOFF") await recordConversationEvent(took.id, { type: "human.took_over", actorKind: "HUMAN", occurredAt: now, reasonCode: "STAFF_REPLIED", key: `staff:${ev.messageId}` });
-    // Đang CẦN NGƯỜI XỬ LÝ vì lý do khác ⇒ giữ lý do đó (không biến thành «nhân viên đang trả lời» tự hết hạn sau 30 phút).
-    await db
-      .update(c)
-      .set({ status: "HANDOFF", handoffReason: sql`case when ${c.status} = 'HANDOFF' and ${c.handoffReason} is not null and ${c.handoffReason} <> ${STAFF_REASON} then ${c.handoffReason} else ${STAFF_REASON} end`, updatedAt: now })
-      .where(and(eq(c.channel, "FANPAGE"), eq(c.visitorKey, fanpageVisitorKey(ev.pageId, ev.threadId))));
+    // Nhân viên gửi tay ⇒ AI nhường 30 phút tính từ câu này, mốc hết hạn ghi tường minh; đang CẦN NGƯỜI / TIẾP QUẢN ⇒ giữ nguyên
+    // (`startHumanCooldown`). Sổ sự kiện ghi «bắt đầu nhường» khi AI đang trả lời — không ghi lại mỗi tin của nhân viên.
+    const [took] = await db.select({ id: c.id }).from(c).where(and(eq(c.channel, "FANPAGE"), eq(c.visitorKey, fanpageVisitorKey(ev.pageId, ev.threadId)))).limit(1);
+    if (took) await startHumanCooldown(took.id, { reason: STAFF_REASON, at: now, actorUserId: null, key: `staff:${ev.messageId}`, via: "PANCAKE" });
     return { queued: false, reason: "Nhân viên đang trả lời — bot nhường" };
   }
   // 0225: quảng cáo dẫn khách vào hội thoại — đường PHỤ, không làm hỏng lượt nhận (xem `noteCustomerAd`).
@@ -616,11 +623,11 @@ async function sendInbox(pageId: string, threadId: string, token: string, text: 
   }
 }
 
-export async function conversationFor(pageId: string, threadId: string): Promise<{ id: string; status: string; handoffReason: string | null; updatedAt: Date; createdAt: Date; state: Record<string, unknown> } | null> {
+export async function conversationFor(pageId: string, threadId: string): Promise<{ id: string; status: string; handoffReason: string | null; updatedAt: Date; humanCooldownUntil: Date | null; createdAt: Date; state: Record<string, unknown> } | null> {
   const db = await getDb();
   const c = schema.salesChatConversations;
   const key = fanpageVisitorKey(pageId, threadId);
-  const find = async () => (await db.select({ id: c.id, status: c.status, handoffReason: c.handoffReason, updatedAt: c.updatedAt, createdAt: c.createdAt, state: c.state }).from(c).where(and(eq(c.channel, "FANPAGE"), eq(c.visitorKey, key))).limit(1))[0] ?? null;
+  const find = async () => (await db.select({ id: c.id, status: c.status, handoffReason: c.handoffReason, updatedAt: c.updatedAt, humanCooldownUntil: c.humanCooldownUntil, createdAt: c.createdAt, state: c.state }).from(c).where(and(eq(c.channel, "FANPAGE"), eq(c.visitorKey, key))).limit(1))[0] ?? null;
   const existing = await find();
   if (existing) return existing;
   try {
@@ -929,29 +936,25 @@ export async function processFanpageThread(pageId: string, threadId: string, dep
     const conv = await conversationFor(pageId, threadId);
     if (!conv) {
       // Lỗi tạm: nhả tin, lùi dần 2 · 4 · 8 phút; hết lượt ⇒ DEAD (inbound-retry.ts) — không nằm PENDING mãi.
-      await releaseWithBackoff(db, ids, claim, "Không mở được hội thoại", now());
-      return { ...out, error: "Không mở được hội thoại" };
+      await releaseWithBackoff(db, ids, claim, CONV_OPEN_FAILED_NOTE, now());
+      return { ...out, error: CONV_OPEN_FAILED_NOTE };
     }
     // Hội thoại vừa mở ở tin đầu ⇒ ghi mốc tin cuối của khách (khung 24 giờ của Facebook cho follow-up).
     {
       const cv = schema.salesChatConversations;
       await db.update(cv).set({ lastCustomerAt }).where(and(eq(cv.id, conv.id), or(isNull(cv.lastCustomerAt), lt(cv.lastCustomerAt, lastCustomerAt))));
     }
-    if (conv.status === "HANDOFF") {
-      // Nhân viên trả lời trên page ⇒ nhường 30 phút rồi bot nhận lại. CẦN NGƯỜI XỬ LÝ (AI / công cụ yêu cầu) ⇒ ở nguyên tới
-      // khi người bấm «Trả lại cho AI» — không tự hết hạn (chủ shop 01/10/2026).
-      // AI HỎNG (03/10/2026: ô model sai làm hơn trăm hội thoại sang «AI tạm không trả lời được») không phải việc của người —
-      // hết nhường thì bot thử lại như sau khi nhân viên trả lời, không bắt ai bấm «Trả lại cho AI» từng hội thoại.
-      const ageMs = now().getTime() - conv.updatedAt.getTime();
-      const retryable = conv.handoffReason === STAFF_REASON || conv.handoffReason === AI_DOWN_HANDOFF_REASON;
-      if (!retryable || ageMs < HUMAN_TAKEOVER_MINUTES * 60_000) {
-        await finish("SKIPPED", conv.handoffReason ?? "Đã chuyển nhân viên");
+    // NHƯỜNG NGƯỜI (ai-hold-shared.ts — một hàm cho mọi kênh): nhân viên gửi tay ⇒ nhường 30 phút rồi bot nhận lại; «Tiếp quản» /
+    // CẦN NGƯỜI XỬ LÝ (AI / công cụ yêu cầu) ⇒ ở nguyên tới khi người bấm «Trả lại cho AI» (chủ shop 01/10/2026). AI HỎNG
+    // (03/10/2026) không phải việc của người — hết nhường thì bot thử lại. Tin đang chờ đã lưu; KHÔNG gọi AI, KHÔNG gửi.
+    {
+      const held = await holdGate(conv, now());
+      if (held) {
+        await finish("SKIPPED", held.skip);
         out.processed += ids.length;
-        out.skipped = conv.handoffReason ?? "Đã chuyển nhân viên";
+        out.skipped = held.skip;
         continue;
       }
-      const cv = schema.salesChatConversations;
-      await db.update(cv).set({ status: "OPEN", handoffReason: null, state: sql`${cv.state} - 'handoff'`, updatedAt: now() }).where(eq(cv.id, conv.id));
     }
     // Webhook của tin page có thể chưa tới ⇒ hỏi thẳng Pancake MỘT lần trước mọi bước tốn tiền (sau cổng «đang chuyển nhân viên» — hội thoại đang nhường thì khỏi hỏi) (`pageAnsweredVerdict`).
     // Bình luận đi đường tin riêng, không có hộp thư để đọc.
@@ -1042,7 +1045,7 @@ export async function processFanpageThread(pageId: string, threadId: string, dep
       const cvh = schema.salesChatConversations;
       const [hc] = await db.select({ reason: cvh.handoffReason, error: cvh.lastError }).from(cvh).where(eq(cvh.id, conv.id)).limit(1);
       if (hc?.reason === AI_DOWN_HANDOFF_REASON) await deadLetter(db, ids, claim, DEAD_AI_DOWN_NOTE, hc.error, now());
-      else await finish("DONE", "Chuyển nhân viên — bot không nhắn gì, chờ người trả lời");
+      else await finish("DONE", HANDOFF_SILENT_NOTE);
       out.processed += ids.length;
       out.skipped = "Chuyển nhân viên — bot im lặng";
       continue;
