@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { NAV_MODULES } from "@/lib/constants/department-modules";
+import { SALES_AGENT_NAV } from "@/lib/constants/saas-nav";
 
 /**
  * ═══════════ MỌI TUYẾN TRÊN THANH ĐIỀU HƯỚNG PHẢI ĐƯỢC SMOKE PHỦ ═══════════
@@ -116,6 +117,21 @@ const PHAN_NHOM: Record<string, { nhom: NhomTuyen; lyDo: string }> = {
   },
 };
 
+/**
+ * Thanh TÁM MỤC của vỏ app Chốt Đơn Tự Động (lib/constants/saas-nav.ts) cũng là thứ người dùng bấm vào được — cùng hợp đồng:
+ * có trong smoke, hoặc khai lý do. Bốn mục dưới đây thuộc module «AI bán hàng», mà smoke chạy bằng quản trị của NHÀ.
+ */
+const SHELL_PHAN_NHOM: Record<string, { nhom: NhomTuyen; lyDo: string }> = {
+  "/ai/overview": {
+    nhom: "INTENTIONALLY_EXCLUDED",
+    lyDo: "Tổng quan của vỏ Chốt Đơn thuộc module «AI bán hàng» — cùng lý do với /ai/sales-chatbot/performance: smoke của NHÀ không chứng minh được trang của khách; cổng + số đọc được kiểm ở tests/saas-shell.test.ts trên tổ chức khách thật.",
+  },
+  "/ai/sales-chatbot/messenger": {
+    nhom: "INTENTIONALLY_EXCLUDED",
+    lyDo: "«Kênh kết nối» của vỏ (Messenger trực tiếp) thuộc module «AI bán hàng» — smoke chạy bằng quản trị của NHÀ; trang được kiểm bằng tests/messenger*.test.ts và E2E của tổ chức khách.",
+  },
+};
+
 /** Chỉ để bài kiểm đọc: tuyến nào KHÔNG bắt buộc có mặt trong smoke. */
 const MIEN_TRU: Record<string, string> = Object.fromEntries(Object.entries(PHAN_NHOM).map(([k, v]) => [k, `${v.nhom}: ${v.lyDo}`]));
 
@@ -142,6 +158,14 @@ export function testSmokeCoverage() {
       "Người dùng bấm vào được thì lá chắn phải mở được. Thêm vào ROUTES của scripts/smoke.ts, " +
       "hoặc khai vào MIEN_TRU kèm lý do vì sao KHÔNG nên kiểm tự động.",
   );
+
+  // Vỏ app Chốt Đơn: tám mục, cùng luật — mở thử được, hoặc khai lý do (ở đây hoặc ở bảng của menu ERP).
+  const tuyenVo = SALES_AGENT_NAV.map((i) => i.href);
+  const thieuVo = tuyenVo.filter((r) => !daPhu.has(r) && !(r in MIEN_TRU) && !(r in SHELL_PHAN_NHOM));
+  assert.deepEqual(thieuVo, [], `mục của vỏ Chốt Đơn KHÔNG được smoke mở thử: ${thieuVo.join(", ")} — thêm vào ROUTES của scripts/smoke.ts hoặc khai vào SHELL_PHAN_NHOM kèm lý do`);
+  const thuaVo = Object.keys(SHELL_PHAN_NHOM).filter((r) => !tuyenVo.includes(r));
+  assert.deepEqual(thuaVo, [], `SHELL_PHAN_NHOM còn khai tuyến không còn trên thanh của vỏ: ${thuaVo.join(", ")}`);
+  for (const [r, v] of Object.entries(SHELL_PHAN_NHOM)) assert.ok(v.lyDo.length > 25, `SHELL_PHAN_NHOM["${r}"] phải nói VÌ SAO`);
 
   const thuaKhai = Object.keys(MIEN_TRU).filter((r) => !tuyen.includes(r));
   assert.deepEqual(thuaKhai, [], `MIEN_TRU còn khai tuyến đã bị xoá khỏi thanh điều hướng: ${thuaKhai.join(", ")}`);

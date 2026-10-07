@@ -21,6 +21,7 @@ import { findOrganization } from "@/lib/platform/organizations";
 import { billingWriteDenied } from "@/lib/billing/rules";
 import { orgBillingStanding } from "@/lib/billing/standing";
 import { billingLockApplies } from "@/lib/saas/policy";
+import { isSalesAgentUser, salesAgentHomeFor, salesAgentPathAllowed, SALES_AGENT_INBOX_HREF } from "@/lib/constants/saas-nav";
 
 export const ROLE_PERMISSIONS_KEY = "auth.rolePermissions";
 
@@ -47,7 +48,7 @@ export type SessionUser = {
    * Tổ chức của phiên (docs/platform/shared-contracts.md mục 7). Mọi `SessionUser` do
    * `resolveCurrentUser()` dựng LUÔN có trường này; vắng mặt chỉ ở người dùng dựng tay trong kiểm thử.
    */
-  organization?: { code: string; name: string; isHome: boolean };
+  organization?: { code: string; name: string; isHome: boolean; /** Thương hiệu nơi khách tự đăng ký (0215) — vỏ app Chốt Đơn đọc nó (`lib/constants/saas-nav.ts`). */ brand?: "vnx" | "chotdon" | null };
   /**
    * Module ĐANG BẬT của tổ chức (đã phân giải: dòng thiếu, core, đóng dưới phụ thuộc). Menu, cổng
    * đường dẫn và `can()` đọc trường này. `undefined` = không cổng module — chỉ người dựng tay trong
@@ -233,7 +234,7 @@ export async function loadPermissionSnapshots(): Promise<Record<string, string[]
  * Kết quả đầy đủ: hoặc là người dùng, hoặc là LÝ DO bị từ chối — mỗi lý do một câu khác nhau.
  * `module` chỉ có mặt khi `denied = "MODULE_DISABLED"`: khoá của module đang tắt mà đường dẫn thuộc về.
  */
-export type ResolvedUser = { user: SessionUser } | { denied: SessionDenyReason; module?: ModuleKey };
+export type ResolvedUser = { user: SessionUser } | { denied: SessionDenyReason; module?: ModuleKey; /** Chỉ khi `SHELL_RESTRICTED`: trang nhà của vỏ cho ĐÚNG người này. */ home?: string };
 
 /**
  * Người dùng hiện tại với quyền đã tính, HOẶC lý do bị từ chối. Không chuyển hướng.
@@ -271,6 +272,13 @@ export const resolveCurrentUser = cache(async (): Promise<ResolvedUser> => {
     `can()` và menu dùng (`user.modules`) — một ảnh chụp cho cả lượt dựng.
   */
   const path = await requestPath();
+  /*
+    CỔNG VỎ APP CHỐT ĐƠN (lib/constants/saas-nav.ts). Workspace «Sales Agent» chỉ mở được trang của vỏ; trang ERP nội bộ còn lại
+    chuyển về trang nhà của vỏ. Đứng TRƯỚC cổng module: trang ERP của một module tắt phải về hộp thư, không về «module chưa bật —
+    liên hệ quản trị» (khách không có ai để liên hệ, và họ không cần module đó). Phép quyết định chỉ đọc phiên đã có (thương hiệu
+    + module), không tốn thêm câu truy vấn nào.
+  */
+  if (path && isSalesAgentUser(ket.user) && !salesAgentPathAllowed(path)) return { denied: "SHELL_RESTRICTED", home: salesAgentHomeFor(ket.user) };
   const pathModule = path ? moduleOfPath(path) : null;
   if (pathModule && !(ket.user.modules ?? []).includes(pathModule)) return { denied: "MODULE_DISABLED", module: pathModule };
   /*
@@ -395,7 +403,7 @@ export async function activeUserIdsWhoCan(permission: Permission): Promise<strin
 async function platformOfSession(): Promise<Required<Pick<SessionUser, "organization" | "modules">>> {
   const ctx = await currentOrganization();
   const [org, modules] = await Promise.all([findOrganization(ctx.code), getEnabledModules(ctx.code)]);
-  return { organization: { code: ctx.code, name: org?.name ?? ctx.code, isHome: ctx.isHome }, modules: [...modules] };
+  return { organization: { code: ctx.code, name: org?.name ?? ctx.code, isHome: ctx.isHome, brand: org?.brand ?? null }, modules: [...modules] };
 }
 
 /**
@@ -423,6 +431,8 @@ export async function requireUser(roles?: Role[]): Promise<SessionUser> {
     if (ket.denied === "MODULE_DISABLED" && ket.module) redirect(`${MODULE_DISABLED_PATH}?m=${encodeURIComponent(ket.module)}`);
     // Quá hạn thanh toán: phiên hợp lệ, chỉ lượt GHI bị chặn ⇒ trang giải thích, không phải `/login`.
     if (ket.denied === "BILLING_LOCKED") redirect(BILLING_LOCKED_PATH);
+    // Trang ERP ngoài vỏ app Chốt Đơn: phiên hợp lệ ⇒ về trang nhà của vỏ (hộp thư), không về `/login`.
+    if (ket.denied === "SHELL_RESTRICTED") redirect(ket.home ?? SALES_AGENT_INBOX_HREF);
     redirect(`/login?reason=${DENY_REASON_PARAM[ket.denied]}`);
   }
   const user = ket.user;
