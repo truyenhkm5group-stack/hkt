@@ -27,11 +27,12 @@
   ],
   "blocked_by": [],
   "related_prs": [
-    621
+    621,
+    625
   ],
   "migration_reservations": [],
   "created_at": "2026-10-06T17:03:14.603Z",
-  "updated_at": "2026-10-07T00:06:31.011Z",
+  "updated_at": "2026-10-07T00:08:05.800Z",
   "last_heartbeat": "2026-10-07T00:06:31.011Z",
   "definition_of_done": [],
   "evidence": {
