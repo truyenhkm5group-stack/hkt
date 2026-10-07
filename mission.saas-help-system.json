@@ -1,0 +1,35 @@
+{
+  "schema": 1,
+  "mission_id": "saas-help-system",
+  "title": "Trợ giúp trong app cho khách: hướng dẫn theo màn + câu hỏi thường gặp",
+  "business_goal": "Khách tự gỡ được các tình huống hay gặp (nối page, AI không trả lời, hết lượt)",
+  "status": "BACKLOG",
+  "priority": "P2",
+  "risk": "MEDIUM",
+  "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "worker": null,
+  "worktree": null,
+  "branch": null,
+  "base_sha": null,
+  "domains": [
+    "saas",
+    "ui"
+  ],
+  "owned_paths": [
+    "docs/saas/help/**"
+  ],
+  "dependencies": [
+    "saas-l2-customer-shell"
+  ],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-07T17:24:14.816Z",
+  "updated_at": "2026-10-07T17:24:14.816Z",
+  "last_heartbeat": "2026-10-07T17:24:14.816Z",
+  "definition_of_done": [
+    "Danh mục tình huống từ dữ liệu hỗ trợ thật",
+    "Nội dung không lộ thông tin nội bộ",
+    "Gắn vào đúng màn"
+  ]
+}
