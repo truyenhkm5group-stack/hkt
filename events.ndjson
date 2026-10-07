@@ -235,3 +235,4 @@
 {"at":"2026-10-07T01:32:06.680Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"OVERLAP_DETECTED","mission":"saas-a-vnx-runtime","detail":"OVERLAP với saas-d-pricing-overage: phạm vi lib/sales-chatbot/fanpage.ts ⇒ tuần tự hoá (--after=saas-d-pricing-overage) hoặc khai cách tích hợp (--accept-overlap=\"…\")"}
 {"at":"2026-10-07T01:32:19.256Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"STATUS","mission":"saas-a-vnx-runtime","detail":"VERIFYING → READY · 8 mẫu phạm vi · HIGH"}
 {"at":"2026-10-07T01:33:31.630Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DEPLOY_DISPATCHED","detail":"0276e0258faf · run 37557688936 https://github.com/truyenhkm5group-stack/hkt/actions/runs/37557688936"}
+{"at":"2026-10-07T01:47:14.453Z","actor":"DESKTOP-56TH98Y:hkt-tech-control-plane","kind":"MIGRATION_RESERVED","mission":"tech-control-plane-workers","detail":"0230"}
