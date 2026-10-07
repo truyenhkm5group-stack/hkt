@@ -19,6 +19,8 @@ import { and, desc, eq, gte, isNotNull } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { lastSalesAiCall, salesAiCallsForConversation } from "@/lib/ai-usage/conversation-evidence";
 import { forgetMemo, memo } from "@/lib/cache";
+import { loadAiEntitlement } from "@/lib/pricing/ai-gate";
+import { AI_STOP_MESSAGE, AI_STOP_NOTE } from "@/lib/pricing/ai-entitlement";
 import { canUseModule } from "@/lib/platform/capabilities";
 import { currentOrganization } from "@/lib/platform/context";
 import { AI_DOWN_HANDOFF_REASON, FANPAGE_STAFF_REASON, ZALO_STAFF_REASON } from "@/lib/sales-chatbot/ai-hold-shared";
@@ -115,6 +117,10 @@ async function orgAiFacts(): Promise<OrgAiFacts> {
       messengerAiOff = null;
     }
     const orgBlocks: AiBlock[] = [];
+    // Cổng gói (L5 · lib/pricing/ai-gate.ts) — ĐÚNG hàm đường xử lý tin hỏi (`salesAiPlanGate`), không luật thứ hai. Đọc lỗi ⇒ cổng
+    // tự cho (nới), nên ở đây cũng không thêm lý do.
+    const plan = await loadAiEntitlement((await currentOrganization()).code).catch(() => null);
+    for (const r of plan?.reasons ?? []) orgBlocks.push(aiBlock(r, AI_STOP_MESSAGE[r]));
     if (!(await canUseModule("ai_sales"))) orgBlocks.push(aiBlock("MODULE_OFF", "Module AI bán hàng chưa bật cho tổ chức"));
     const cfg = await loadSalesChatbotConfig().catch(() => null);
     if (!cfg?.enabled) orgBlocks.push(aiBlock("BOT_DISABLED", cfg ? "Bot bán hàng đang TẮT (Cấu hình → Bật bot)" : "Không đọc được cấu hình bot"));
@@ -187,6 +193,9 @@ const EXACT: ReadonlyArray<[string, NoteVerdict]> = [
   [EMPTY_REPLY_NOTE, { code: "AI_EMPTY_RESPONSE", stop: "COMPOSED", kind: "FAIL" }],
   [BOT_YIELDED_NOTE, { code: "AI_YIELDED_TO_HUMAN", stop: "SENDING", kind: "SKIP" }],
   [PAGE_NOT_LIVE_SEND_ERROR, { code: "AI_SEND_BLOCKED_PAGE_NOT_LIVE", stop: "SENDING", kind: "SKIP" }],
+  [AI_STOP_NOTE.TRIAL_EXPIRED, { code: "AI_SKIPPED_TRIAL_EXPIRED", stop: "ELIGIBLE", kind: "SKIP" }],
+  [AI_STOP_NOTE.TRIAL_QUOTA_EXHAUSTED, { code: "AI_SKIPPED_TRIAL_QUOTA_EXHAUSTED", stop: "ELIGIBLE", kind: "SKIP" }],
+  [AI_STOP_NOTE.WORKSPACE_SUSPENDED, { code: "AI_SKIPPED_WORKSPACE_SUSPENDED", stop: "ELIGIBLE", kind: "SKIP" }],
 ];
 
 /** Mọi ghi chú đường xử lý tin ghi vào `sales_chat_inbound.note` mà bảng này biết — bài kiểm duyệt từng dòng. */

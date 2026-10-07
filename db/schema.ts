@@ -5176,12 +5176,21 @@ export const platformSubscriptions = pgTable(
     addons: jsonb("addons").$type<Record<string, unknown>>().notNull().default({}),
     /** Thông tin xuất hoá đơn VAT khách khai (0192, `lib/billing/addons.ts::InvoiceInfo`). `NULL` = chưa khai. */
     invoiceInfo: jsonb("invoice_info").$type<Record<string, unknown>>(),
+    /**
+     * 0232 · ĐIỀU KHOẢN DÙNG THỬ của thuê bao (lib/billing/service.ts::initWorkspaceBilling), chụp từ phiên bản giá lúc cấp phát
+     * (`platform_plan_prices.trial_days`). `trial_ends_at` là MỐC cổng AI so trực tiếp (lib/pricing/ai-entitlement.ts). NULL = không
+     * dùng thử / dòng cũ — KHÔNG backfill: tổ chức dùng thử từ trước 0232 đọc `paid_through` như cũ.
+     */
+    trialStartedAt: ts("trial_started_at"),
+    trialEndsAt: ts("trial_ends_at"),
+    trialDays: integer("trial_days"),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
   (t) => [
     check("platform_subscriptions_grace_check", sql`${t.graceDays} BETWEEN 0 AND 60`),
     check("platform_subscriptions_enabled_check", sql`${t.billingEnabled} = false OR ${t.paidThrough} IS NOT NULL`),
+    check("platform_subscriptions_trial_check", sql`(${t.trialDays} IS NULL OR ${t.trialDays} BETWEEN 1 AND 90) AND (${t.trialEndsAt} IS NULL OR ${t.trialStartedAt} IS NULL OR ${t.trialEndsAt} > ${t.trialStartedAt})`),
   ],
 );
 
@@ -5670,7 +5679,7 @@ export const platformPricePins = pgTable(
     pinnedByEmail: text("pinned_by_email"),
     pinnedAt: ts("pinned_at").notNull().defaultNow(),
   },
-  (t) => [index("platform_price_pins_version_idx").on(t.versionKey), check("platform_price_pins_source_check", sql`${t.source} IN ('MIGRATION_0228','INVOICE_PAID','OPERATOR','TEST')`)],
+  (t) => [index("platform_price_pins_version_idx").on(t.versionKey), check("platform_price_pins_source_check", sql`${t.source} IN ('MIGRATION_0228','INVOICE_PAID','OPERATOR','TEST','PROVISIONING')`)],
 );
 
 /** Nhật ký nền tảng: ai đổi module / cờ / tổ chức nào, trước → sau, vì sao. Chỉ THÊM. */

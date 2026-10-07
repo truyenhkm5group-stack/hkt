@@ -36,6 +36,8 @@ import { OBSERVE_NOTE } from "@/lib/sales-chatbot/fanpage";
 import { DEFAULT_MODE_CONFIG, OPERATING_MODE_SETTING_KEY } from "@/lib/sales-chatbot/operating-mode-shared";
 import { processZaloThread, receiveZaloEvent, zaloAccessToken, zaloPageKey, zaloSetupView, ZALO_OUTSIDE_WINDOW, ZALO_STAFF_REASON } from "@/lib/sales-chatbot/zalo";
 import { setSettingJson } from "@/lib/settings";
+import { readAiCustomerCounts } from "@/lib/pricing/ai-customer";
+import { usagePeriodOf } from "@/lib/pricing/meter";
 import { POST as zaloWebhook } from "@/app/api/webhooks/zalo-oa/[token]/route";
 
 const ORG = "zl-zalo";
@@ -125,6 +127,7 @@ async function cleanupOrg(code: string) {
     await pdb.delete(schema.platformOrganizations).where(eq(schema.platformOrganizations.id, org.id));
   }
   await pdb.delete(schema.platformAiUsage).where(eq(schema.platformAiUsage.orgCode, code));
+  await pdb.delete(schema.platformUsageEvents).where(eq(schema.platformUsageEvents.orgCode, code));
   await pdb.delete(schema.platformAuditLog).where(eq(schema.platformAuditLog.targetOrgCode, code));
   invalidateOrganizations();
   invalidateCapabilities();
@@ -238,6 +241,9 @@ async function testRealOrg() {
       assert.match(zalo.st.sends[0].text, /shop chào chị/);
       const conv = await db.query.salesChatConversations.findFirst({ where: eq(schema.salesChatConversations.channel, "ZALO") });
       assert.ok(conv && conv.pageId === zaloPageKey(OA_ID) && conv.threadId === USER && conv.lastBotAt && conv.lastCustomerAt);
+      // Đồng hồ khách AI (L5): câu DO MODEL SINH đã gửi qua Zalo ⇒ một khách AI (khoá theo người dùng Zalo, không theo hội thoại).
+      const aiCustomers = async () => (await readAiCustomerCounts([ORG], usagePeriodOf(new Date()).from, new Date(Date.now() + 120_000))).get(ORG) ?? 0;
+      assert.equal(await aiCustomers(), 1, "Zalo: câu AI tới khách ⇒ 1 khách AI");
 
       // Tiếng vọng: đúng mã tin bot vừa gửi ⇒ tin của bot; khác mã nhưng nguyên văn trong 10 phút ⇒ vẫn của bot.
       assert.equal((await receiveZaloEvent(parseZaloEvent(JSON.parse(ev("zm-1", zalo.st.sends[0].text, "oa_send_text"))))).reason, "Tin của chính bot");

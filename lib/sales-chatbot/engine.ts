@@ -41,6 +41,7 @@ import { manualOrderShortCode } from "@/lib/constants/manual-orders";
 import { canUseModule } from "@/lib/platform/capabilities";
 import { notifySalesChatAiDown, notifySalesChatHandoff, notifySalesChatModelFallback } from "@/lib/sales-chatbot/alerts";
 import { currentOrganization } from "@/lib/platform/context";
+import { salesAiPlanGate } from "@/lib/pricing/ai-gate";
 import { findOrganization } from "@/lib/platform/organizations";
 import { isMessagingChannel, isPublicChannel, parseSalesChatbotConfig, SALES_CHATBOT_LIMITS, SALES_THINKING_BUDGET, effectiveFallback, salesBotBillingSource, salesBotError, SALES_CHATBOT_SETTING_KEY, SALES_TONE_LABEL, withinBusinessHours, type ChatChannel, type ChatView, type SalesChatbotConfig } from "@/lib/sales-chatbot/config";
 import { parsePlaybookState, PLAYBOOK_LIMITS, PLAYBOOK_SETTING_KEY } from "@/lib/sales-chatbot/playbook-shared";
@@ -404,6 +405,9 @@ let providerOverride: ((cfg: SalesChatbotConfig) => AiProvider | null) | null = 
  * «Học từ hội thoại cũ» và nhắc khách. `source` = nguồn trả tiền để ghi sổ AI / kiểm hạn mức đúng chỗ.
  */
 export async function salesChatProvider(usage?: Partial<FailoverUsage>): Promise<{ ok: true; provider: AiProvider; source: AiBillingSource } | { ok: false; error: string }> {
+  // Cổng gói (L5 · lib/pricing/ai-gate.ts): nhắc khách / học / ghi đơn từ hội thoại đi qua đây — dùng thử hết hạn / hết lượt ⇒ không AI.
+  const plan = await salesAiPlanGate();
+  if (!plan.ok) return { ok: false, error: plan.message };
   return providerFor(await loadSalesChatbotConfig(), { feature: usage?.feature ?? "sales_chatbot", actorId: usage?.actorId ?? null, ref: usage?.ref ?? null, ...(usage?.workload ? { workload: usage.workload } : {}) });
 }
 
@@ -427,6 +431,7 @@ export async function describeCustomerImages(urls: readonly string[], opts: { co
   try {
     const cfg = await loadSalesChatbotConfig();
     if (!cfg.enabled) return fallback;
+    if (!(await salesAiPlanGate()).ok) return fallback;
     const org = await currentOrganization();
     if (await aiKillSwitchDenial(org.code)) return fallback;
     if (!(await checkAiQuota(org.code, salesBotBillingSource(cfg.connectorKey, { home: org.isHome }))).ok) return fallback;
@@ -717,6 +722,16 @@ async function chatTurnCore(conversationId: string, rawText: string, opts: { cha
       if (!isPublicChannel(opts.channel)) await reply(conv, seq, "Nhân viên của shop đang tiếp nhận hội thoại này — anh/chị đợi chút nhé.");
       await bump({ turns: conv.turns + 1 });
       return { ok: true, view: (await conversationView(conv.id))! };
+    }
+    // CỔNG GÓI (L5 · lib/pricing/ai-gate.ts — luật thuần ai-entitlement.ts): dùng thử HẾT HẠN / HẾT LƯỢT khách AI · workspace ĐÌNH
+    // CHỈ ⇒ bot KHÔNG tự trả lời (không câu mẫu, không câu ngoài giờ, không gọi model). Tin khách đã ghi ở trên — hộp thư vẫn thấy,
+    // người vẫn trả lời tay; hội thoại KHÔNG đổi trạng thái (không phải «AI hỏng → chuyển người»). Kênh nhắn tin ⇒ lỗi = ghi chú
+    // của dòng tin (`AI_STOP_NOTE`, ai-status.ts dịch ra mã); chat web ⇒ im lặng (khách lạ không đọc lý do nội bộ); khung THỬ ⇒ câu
+    // cho chủ shop. Gói trả phí / giá cũ không bao giờ dừng ở đây.
+    const plan = await salesAiPlanGate({ now });
+    if (!plan.ok) {
+      if (opts.channel === "WEB") return { ok: true, view: (await conversationView(conv.id))! };
+      return { ok: false, error: isMessagingChannel(opts.channel) ? plan.note : plan.message };
     }
     if (isPublicChannel(opts.channel) && !withinBusinessHours(cfg.businessHours, now)) {
       await reply(conv, seq, cfg.businessHours.outsideMessage);

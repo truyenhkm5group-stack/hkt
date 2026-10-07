@@ -166,7 +166,7 @@ export const SALES_COCKPIT_HREF = "/ai/sales-chatbot/cockpit";
  * tổ chức + trạng thái + câu kiểm (số đếm, lớp lỗi) — KHÔNG tên khách, SĐT, nội dung tin (luật ISO-05 của `loadAlertConfig`:
  * dữ liệu của tổ chức khách không bao giờ chảy vào nhóm của VNX). Không ném.
  */
-async function notifyPlatformOperator(title: string, lines: string[]): Promise<void> {
+export async function notifyPlatformOperator(title: string, lines: string[]): Promise<void> {
   const send = async () => {
     const cfg = await loadAlertConfig();
     if (cfg.larkManagerWebhookUrl) await sendLark(cfg.larkManagerWebhookUrl, cfg.larkManagerSecret, title, lines.map((text) => [{ text }]));

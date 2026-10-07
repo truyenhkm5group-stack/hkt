@@ -6,8 +6,12 @@
  * — chỉ được gọi sau khi câu trả lời AI đã tới kênh: fanpage nhắn · fanpage trả lời bình luận · Messenger).
  *
  *  · Sổ: `platform_usage_events` (0224), chỉ số `chotdon.ai_customers`, đường ghi duy nhất `recordUsage`. Khoá idempotent
- *    `ai_customer:<YYYY-MM>:<kênh>:<page>:<khách>` + chỉ mục duy nhất (tổ chức, khoá) ⇒ cùng khách cùng kỳ = MỘT dòng dù nhiều
- *    hội thoại / tin / lần thử lại; cùng khoá ở tổ chức khác là dòng khác (cô lập).
+ *    `aic:<YYYY-MM>:<page>:<băm khách chuẩn>` (L5 · `lib/pricing/ai-customer-identity.ts` — KHÔNG chứa mã hội thoại: cùng khách đổi
+ *    đường nhận tin giữa tháng vẫn là một khoá) + chỉ mục duy nhất (tổ chức, khoá) ⇒ cùng khách cùng kỳ = MỘT dòng dù nhiều hội
+ *    thoại / tin / lần thử lại / đường; cùng khoá ở tổ chức khác là dòng khác (cô lập). Dòng khoá cũ 0228
+ *    (`ai_customer:<kỳ>:<kênh>:<page>:<visitor_key>`) giữ nguyên; khách đã có dòng cũ trong kỳ ⇒ khoá mới ghi SỐ LƯỢNG 0 (bí danh)
+ *    ⇒ `sum(quantity)` của kỳ đếm mỗi khách chuẩn đúng một lần.
+ *  · Kênh: fanpage (Pancake) · Messenger · Zalo OA · chat web — cùng một điểm «câu do model sinh đã gửi thành công».
  *  · Kỳ = tháng lịch giờ VN — trùng kỳ hạn mức và credit AI (`lib/pricing/meter.ts`). Nền móng chưa có kỳ thu theo ngày gia
  *    hạn của từng thuê bao, nên đồng hồ không đổi theo `paid_through` (docs/saas/PRICING_V1.md §4 ghi lựa chọn này).
  *  · LỖI GHI SỔ KHÔNG BAO GIỜ làm hỏng việc gửi: `noteAiCustomerReply` nuốt mọi lỗi (đếm ở `aiCustomerMeterErrors`).
@@ -19,7 +23,8 @@ import { getDb, getPlatformDb, schema } from "@/db";
 import { canUseFeature, getEnabledModules } from "@/lib/platform/capabilities";
 import { currentOrganization } from "@/lib/platform/context";
 import { readAiCustomerMeterLiveAt } from "@/lib/pricing/price-book";
-import { aiCustomerCoverage, aiCustomerEventKey, meterMonthOf, type MeterCoverage } from "@/lib/pricing/versions";
+import { aiCustomerKeys } from "@/lib/pricing/ai-customer-identity";
+import { aiCustomerCoverage, meterMonthOf, type MeterCoverage } from "@/lib/pricing/versions";
 import { LEGACY_CHATBOT_FEATURE } from "@/lib/saas/catalog";
 import { recordUsage } from "@/lib/saas/ledger";
 
@@ -45,32 +50,58 @@ export function resetAiCustomerSeenForTests() {
   seen.clear();
 }
 
-export type AiCustomerInput = { orgCode: string; channel: string; pageId: string | null; customerKey: string | null; conversationId?: string | null; at: Date };
+/** `customerKey` = `visitor_key` của hội thoại; `threadId` = mã hội thoại / người dùng của kênh (dựng danh tính chuẩn). */
+export type AiCustomerInput = { orgCode: string; channel: string; pageId: string | null; customerKey: string | null; threadId?: string | null; conversationId?: string | null; at: Date };
+
+type Listener = (orgCode: string) => void;
+const listeners = new Set<Listener>();
+/** Cổng gói (`ai-gate.ts`) nghe khách AI MỚI để quên đệm của tổ chức ngay — hạn mức dùng thử đọc số tươi. */
+export function onAiCustomerRecorded(fn: Listener): void {
+  listeners.add(fn);
+}
 
 /**
- * Ghi MỘT khách AI cho kỳ của `at`. Trả `{ recorded }` (`false` = khách này đã được đếm trong kỳ — hoặc khoá không dựng được).
- * Ném khi sổ hỏng — chỉ `noteAiCustomerReply` (đường của runtime) nuốt lỗi.
+ * Ghi MỘT khách AI cho kỳ của `at`. Trả `{ recorded }` (`false` = khách này đã được đếm trong kỳ — qua khoá mới hoặc khoá cũ — hoặc
+ * khoá không dựng được). Ném khi sổ hỏng — chỉ `noteAiCustomerReply` (đường của runtime) nuốt lỗi.
  */
 export async function recordAiCustomer(input: AiCustomerInput): Promise<{ recorded: boolean; key: string | null }> {
   if (TEST_CHANNELS.has(input.channel)) return { recorded: false, key: null };
-  const key = aiCustomerEventKey({ month: meterMonthOf(input.at), channel: input.channel, pageId: input.pageId, customerKey: input.customerKey });
-  if (!key) return { recorded: false, key: null };
+  const keys = aiCustomerKeys(meterMonthOf(input.at), { channel: input.channel, pageId: input.pageId, threadId: input.threadId ?? null, visitorKey: input.customerKey });
+  if (!keys) return { recorded: false, key: null };
+  const { key, aliases, identity } = keys;
   const memoKey = `${input.orgCode}|${key}`;
   if (seen.has(memoKey)) return { recorded: false, key };
+  const pdb = await getPlatformDb();
+  const e = schema.platformUsageEvents;
+  const hits = await pdb
+    .select({ key: e.eventKey })
+    .from(e)
+    .where(and(eq(e.orgCode, input.orgCode), eq(e.productKey, AI_CUSTOMER_PRODUCT), eq(e.metric, AI_CUSTOMER_METRIC), inArray(e.eventKey, [key, ...aliases])));
+  const remember = () => {
+    if (seen.size >= SEEN_MAX) seen.clear();
+    seen.set(memoKey, input.at.getTime());
+  };
+  if (hits.some((h) => h.key === key)) {
+    remember();
+    return { recorded: false, key };
+  }
+  // Khách đã được đếm trong kỳ qua một khoá cũ / khoá theo hội thoại ⇒ khoá mới là BÍ DANH số lượng 0 (không đếm lần hai).
+  const aliasOf = hits.find((h) => aliases.includes(h.key))?.key ?? null;
   const r = await recordUsage({
     orgCode: input.orgCode,
     productKey: AI_CUSTOMER_PRODUCT,
     metric: AI_CUSTOMER_METRIC,
-    quantity: 1,
+    quantity: aliasOf ? 0 : 1,
     occurredAt: input.at,
     eventKey: key,
     correlationId: input.conversationId ?? null,
     source: "sales_chatbot",
-    metadata: { channel: input.channel },
+    metadata: { channel: input.channel, identity: identity.kind, ...(aliasOf ? { aliasOf } : {}) },
   });
-  if (seen.size >= SEEN_MAX) seen.clear();
-  seen.set(memoKey, input.at.getTime());
-  return { recorded: r.recorded, key };
+  remember();
+  const recorded = r.recorded && !aliasOf;
+  if (recorded) for (const fn of listeners) fn(input.orgCode);
+  return { recorded, key };
 }
 
 /**
@@ -82,9 +113,9 @@ export async function noteAiCustomerReply(conversationId: string, at: Date): Pro
     const org = await currentOrganization();
     const db = await getDb();
     const c = schema.salesChatConversations;
-    const [row] = await db.select({ channel: c.channel, pageId: c.pageId, visitorKey: c.visitorKey }).from(c).where(eq(c.id, conversationId)).limit(1);
+    const [row] = await db.select({ channel: c.channel, pageId: c.pageId, threadId: c.threadId, visitorKey: c.visitorKey }).from(c).where(eq(c.id, conversationId)).limit(1);
     if (!row) return;
-    await recordAiCustomer({ orgCode: org.code, channel: row.channel, pageId: row.pageId, customerKey: row.visitorKey, conversationId, at });
+    await recordAiCustomer({ orgCode: org.code, channel: row.channel, pageId: row.pageId, threadId: row.threadId, customerKey: row.visitorKey, conversationId, at });
   } catch (e) {
     const s = holder.__erpAiCustomerErrors!;
     s.n += 1;

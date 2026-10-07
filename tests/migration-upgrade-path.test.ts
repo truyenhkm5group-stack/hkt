@@ -179,6 +179,7 @@ const MOI = [
   "0229_tech_workers",
   "0230_tech_policy_budget",
   "0231_sales_human_cooldown",
+  "0232_billing_trial_cycle",
 ] as const;
 
 /*

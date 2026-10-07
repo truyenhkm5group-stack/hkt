@@ -119,7 +119,8 @@ cùng khách đếm một lần mỗi kỳ · hội thoại lặp không sinh ph
 - **Độ phủ** (`aiCustomerCoverage`): workspace chỉ chạy runtime cũ `chatbot/` (bot nhà, container riêng) ⇒ `null` + «chưa đo»,
   KHÔNG 0; đồng hồ bật giữa kỳ (mốc = `created_at` của phiên bản V1 do 0228 ghi; ghi đè được ở
   `platform.pricing.ai-customer-meter-live-at`) ⇒ cận dưới, phần vượt `null`.
-- Chưa đo: kênh Zalo OA và chat web công khai không đi qua `markWaitingForCustomer`.
+- Zalo OA và chat web công khai ghi CÙNG điểm «câu do model sinh đã gửi thành công» (L5 — xem §7). Khoá đồng hồ từ L5 là
+  `aic:<kỳ>:<page>:<băm khách chuẩn>` (không chứa mã hội thoại); khoá `ai_customer:…` ở trên là khoá CŨ, dòng cũ giữ nguyên.
 
 ### 3. Phần vượt, fair-use, cảnh báo
 
@@ -169,9 +170,36 @@ gói đích thấp hơn số dùng AI thật.
   đếm `priceReadWarningCount`) — không rơi về `platform_plans` thô. Khách AI đếm theo câu DO MODEL SINH đã gửi thành công ở
   CHÍNH lượt (không theo bộ đếm cộng dồn các vòng).
 - **Đếm thiếu có chủ ý (thận trọng)**: tin nhắn lại (follow-up) do AI soạn (`lib/sales-chatbot/followup.ts`) chưa ghi khách AI;
-  kênh Zalo OA và chat web cũng chưa. **Fanpage thêm 99.000 ₫** hôm nay chỉ tính qua dòng phần vượt của bảng kê — khách chưa tự
+  (Zalo OA và chat web đã đếm từ L5.) **Fanpage thêm 99.000 ₫** hôm nay chỉ tính qua dòng phần vượt của bảng kê — khách chưa tự
   mua thêm fanpage ở màn thanh toán được.
 - **Tiến trình vừa khởi động** mà lần đọc sổ giá đầu tiên lỗi ⇒ `AI_LIMITS_UNREADABLE` (không trần nào): NỚI chứ không chặn, có
   đếm cảnh báo (`priceReadWarningCount`); đệm «đọc được gần nhất» theo khoá (tổ chức, gói) — tổ chức này không bao giờ mượn trần
   của tổ chức khác. Khách AI đếm theo NGUỒN từng câu (`TurnResult.aiTexts` do engine đánh dấu): câu mẫu chữ / kèm ảnh trong lượt
   model không bao giờ được đếm.
+
+### 7. Dùng thử dừng AI · kỳ tính tiền · ngưỡng gửi thật · khoá khách chuẩn (L5 — sứ mệnh `saas-l5-billing-trial`, 07/10/2026)
+
+- **Cổng quyền dùng AI theo gói** (`lib/pricing/ai-entitlement.ts` — luật thuần; `lib/pricing/ai-gate.ts` — đọc): gói DÙNG THỬ (dòng
+  giá khai `trial_days`) dừng AI tự trả lời khi HẾT LƯỢT khách AI của kỳ (`dùng ≥ gồm`) HOẶC tới `trial_ends_at` — cái nào tới
+  trước. Gói trả phí / giá cũ (legacy, vd HSLC) KHÔNG BAO GIỜ dừng vì hạn mức (`pauseBot` của `usageAlert` vẫn là hằng `false`).
+  Workspace `SUSPENDED` ⇒ dừng. Số dùng / dòng giá không đọc được ⇒ CHO + cảnh báo. Lý do máy đọc được: `TRIAL_EXPIRED` ·
+  `TRIAL_QUOTA_EXHAUSTED` · `WORKSPACE_SUSPENDED` — vào `AI_BLOCKED` của hộp thư (`ai-status.ts::conversationAiBlocks`) và ghi chú
+  dòng tin (`AI_STOP_NOTE` → mã dấu vết `AI_SKIPPED_TRIAL_*`).
+- **Đường đi qua cổng**: `engine.ts::chatTurnCore` (trước câu ngoài giờ / câu mẫu / model — quét lại tin đi lại đường này) ·
+  `describeCustomerImages` · `salesChatProvider` (nhắc khách, học, ghi đơn từ hội thoại, sổ tay). Dừng AI KHÔNG khoá dữ liệu: tin
+  khách vẫn ghi, hộp thư và gửi tay vẫn chạy, hội thoại không chuyển «AI hỏng». Kênh web im lặng (khách lạ không đọc lý do nội bộ).
+- **Số ngày dùng thử theo phiên bản giá**, chụp vào thuê bao lúc cấp phát (`platform_subscriptions.trial_days` · `trial_started_at` ·
+  `trial_ends_at`, migration `0232_billing_trial_cycle`); `TRIAL_DAYS = 7` chỉ là mặc định. Dòng cũ không backfill — đọc
+  `paid_through` như trước.
+- **Một dịch vụ cấp phát thu phí** `lib/billing/service.ts::initWorkspaceBilling`, gọi từ bước BILLING của job người vận hành VÀ
+  từ `/start`: ghim phiên bản CATALOG hiện hành (nguồn `PROVISIONING`), chèn thuê bao, chụp dùng thử. Chỉ cửa hàng tự đăng ký (và
+  khi đã khai tài khoản nhận tiền) mới bật khoá chỉ xem. Kỳ tính tiền = tháng lịch giờ VN (`usagePeriodOf`) — không thêm bảng chu kỳ.
+- **Ngưỡng gửi thật** (`lib/pricing/usage-alerts.ts`, trong job `sales-health` sẵn có — không lịch mới): ngưỡng CAO NHẤT đã chạm
+  theo `alert_thresholds` của phiên bản; khoá `pricing:ai-customers:<kỳ>:<ngưỡng>` neo theo kỳ ⇒ một lần mỗi ngưỡng mỗi kỳ. Khách:
+  một dòng chuông (không token / USD / model). Người vận hành: `notifyPlatformOperator` (mã tổ chức + số đếm), chỉ khi dòng chuông
+  vừa ghi mới.
+- **Khoá khách chuẩn** (`lib/pricing/ai-customer-identity.ts`): PSID (Messenger: mã hội thoại; Pancake INBOX: `<page>_<PSID>`) ·
+  người dùng Zalo · khách truy cập web; dạng khác ⇒ theo `visitor_key` (không đoán). Kỳ chuyển tiếp: khách đã có dòng khoá cũ ⇒
+  khoá mới ghi số lượng 0 (`metadata.aliasOf`) ⇒ `sum(quantity)` đếm mỗi khách chuẩn một lần.
+- **Màn khách** `loadCustomerEntitlementView` (luồng L1 dựng giao diện): gói · khách AI X/gồm · fanpage · người dùng · ngày reset ·
+  hạn dùng thử / thuê bao · trạng thái AI (đang chạy / tạm dừng / hết lượt / hết dùng thử) — không trường nội bộ (bài kiểm duyệt đệ quy).

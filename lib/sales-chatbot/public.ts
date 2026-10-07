@@ -9,6 +9,7 @@
 import { canUseModule } from "@/lib/platform/capabilities";
 import { withOrganization } from "@/lib/platform/context";
 import { HOST_NOT_FOUND_MESSAGE, hostOrganization } from "@/lib/platform/host-org";
+import { noteAiCustomerReply } from "@/lib/pricing/ai-customer";
 import type { ChatView } from "@/lib/sales-chatbot/config";
 import { chatTurn, conversationView, loadSalesChatbotConfig, openConversation } from "@/lib/sales-chatbot/engine";
 
@@ -37,6 +38,9 @@ export async function startPublicChat(visitorKey: string | null): Promise<Public
 export async function sendPublicChat(visitorKey: string, conversationId: string, text: string): Promise<{ ok: true; view: ChatView } | { error: string; view?: ChatView | null }> {
   return inHostOrg<{ ok: true; view: ChatView }>(async () => {
     const r = await chatTurn(conversationId, text, { channel: "WEB", visitorKey });
+    // Đồng hồ khách AI (L5): câu DO MODEL SINH trả về trình duyệt của khách = đã gửi thành công (kênh web không có bước gửi
+    // riêng). Câu mẫu / im lặng ⇒ không đếm. Lỗi ghi sổ bị nuốt trong `noteAiCustomerReply`.
+    if (r.ok && (r.aiTexts?.length ?? 0) > 0) await noteAiCustomerReply(conversationId, new Date());
     return r.ok ? { ok: true as const, view: r.view } : { error: r.error, view: r.view ?? null };
   });
 }

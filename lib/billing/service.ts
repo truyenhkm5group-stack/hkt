@@ -10,7 +10,6 @@ import {
   isIsoDate,
   judgePayment,
   quoteRenewal,
-  TRIAL_DAYS,
   TRIAL_GRACE_DAYS,
   transferCodeFrom,
   trialPaidThrough,
@@ -47,11 +46,12 @@ import {
 import { invalidateSubscriptions, readSubscriptionAddons, readSubscriptionTerms } from "@/lib/billing/standing";
 import { ENTITLEMENT_SPEC } from "@/lib/entitlements/kinds";
 import { VN_BANK_BY_BIN, bankNameOf } from "@/lib/constants/vn-banks";
-import { HOME_PLAN_KEY, listPlans, planKeyOf, type PlanRow } from "@/lib/entitlements/check";
+import { DEFAULT_PLAN_KEY, HOME_PLAN_KEY, listPlans, planKeyOf, type PlanRow } from "@/lib/entitlements/check";
 import { buildVietQrPayload, toTransferText } from "@/lib/payroll/vietqr";
 import { parseCommercial, type PlanCommercial } from "@/lib/pricing/catalog";
 import { catalogPlans, loadPriceBook, orgPriceVersion, pinOrgPriceVersion, plansForOrg, publishCatalogVersion, readPricePin } from "@/lib/pricing/price-book";
-import { isSellable, priceOf, renewalPricing, type PlanPrice } from "@/lib/pricing/versions";
+import { currentCatalogVersion, isSellable, priceOf, renewalPricing, type PlanPrice } from "@/lib/pricing/versions";
+import { trialEndFromLastDay } from "@/lib/pricing/ai-entitlement";
 import type { PlatformActor, PlatformAuditAction } from "@/lib/platform/audit";
 import { KILL_SWITCH_REASON_MIN, parseOperatorTarget } from "@/lib/platform/kill-switches";
 import { findOrganization, getHomeOrganization, invalidateOrganizations, listOrganizations } from "@/lib/platform/organizations";
@@ -638,36 +638,77 @@ export async function setOrgBilling(user: SessionUser, raw: { orgCode?: unknown;
 }
 
 /**
- * DÙNG THỬ 14 NGÀY cho cửa hàng TỰ ĐĂNG KÝ (nguồn OPEN của `/start`) — gọi MỘT lần lúc dựng tổ chức mới.
+ * KHỞI TẠO THU PHÍ CỦA MỘT WORKSPACE MỚI — MỘT dịch vụ cho cả hai cửa tạo khách: người vận hành (`lib/saas/provisioning.ts` · bước
+ * BILLING, trước đây SKIPPED) và cửa hàng tự đăng ký / khách mời (`lib/onboarding/service.ts::runSetup`). Gọi MỘT lần sau khi
+ * dựng tổ chức; chạy lại an toàn (mọi bước idempotent).
  *
- *  · Chỉ CHÈN khi tổ chức chưa có dòng thuê bao: chạy lại lượt dựng, hoặc người vận hành đã đặt điều khoản riêng ⇒ không
- *    đụng (`onConflictDoNothing`).
- *  · Nền tảng CHƯA khai tài khoản nhận tiền ⇒ KHÔNG bật: khoá một khách không có đường nào để trả tiền là khoá oan. Tổ
- *    chức giữ «Chưa thu phí» như trước bản này; người vận hành bật tay ở /platform/org/<mã> khi đã khai tài khoản.
- *  · Hết hạn đi đúng đường quá hạn → chỉ xem của thuê bao trả tiền; không xoá dữ liệu.
+ *  1. GHIM phiên bản giá: tổ chức chưa có ghim ⇒ ghim bảng giá CATALOG đang hiệu lực (V1), nguồn `PROVISIONING`. Đổi giá về sau
+ *     (phiên bản mới) KHÔNG kéo khách này theo — đúng luật «thuê bao giữ phiên bản giá truy vết được». Ghim có sẵn ⇒ giữ nguyên.
+ *  2. THUÊ BAO + KỲ: chèn dòng `platform_subscriptions` khi chưa có (có rồi — chạy lại, hoặc người vận hành đã đặt điều khoản riêng
+ *     ⇒ không đụng). Kỳ tính tiền = tháng lịch giờ VN (`usagePeriodOf` — cùng kỳ của đồng hồ khách AI); không lưu bảng chu kỳ.
+ *  3. DÙNG THỬ: dòng giá của gói khai `trial_days` ⇒ chụp `trial_days` / `trial_started_at` / `trial_ends_at` (00:00 giờ VN sau ngày
+ *     cuối) + `paid_through` = ngày cuối. Cổng AI dừng bot khi tới `trial_ends_at` (lib/pricing/ai-gate.ts). Bật thu phí (khoá chỉ
+ *     xem khi quá hạn) CHỈ cho cửa hàng TỰ ĐĂNG KÝ và CHỈ khi nền tảng đã khai tài khoản nhận tiền — khoá một khách không có đường
+ *     trả tiền là khoá oan; khách người vận hành tạo giữ «Chưa thu phí» tới khi người vận hành đặt hạn trả.
  */
-export type TrialStart = { started: true; paidThrough: string } | { started: false; reason: "NOT_TENANT" | "NO_RECEIVER" | "EXISTS" };
+export type WorkspaceBillingInit = {
+  status: "DONE" | "SKIPPED";
+  detail: string;
+  pinnedVersion: string | null;
+  trial: { days: number; startedAt: string; endsAt: string; paidThrough: string } | null;
+  billingEnabled: boolean;
+  created: boolean;
+};
 
-export async function startSelfServiceTrial(orgCode: string, now: Date = new Date()): Promise<TrialStart> {
+export async function initWorkspaceBilling(orgCode: string, opts: { selfService: boolean; now?: Date; actor?: PlatformActor; reason?: string } = { selfService: false }): Promise<WorkspaceBillingInit> {
+  const now = opts.now ?? new Date();
   const org = await findOrganization(orgCode);
-  if (!org || org.isHome) return { started: false, reason: "NOT_TENANT" };
-  if (!(await getBillingReceiver())) return { started: false, reason: "NO_RECEIVER" };
-  const paidThrough = trialPaidThrough(vnDate(now));
-  const next = { billingEnabled: true, paidThrough, graceDays: TRIAL_GRACE_DAYS };
+  if (!org || org.isHome) return { status: "SKIPPED", detail: org ? "workspace nhà không thu phí" : "không có workspace", pinnedVersion: null, trial: null, billingEnabled: false, created: false };
+  const reason = opts.reason ?? (opts.selfService ? "Cửa hàng tự đăng ký" : "Cấp phát workspace");
+  // 1 · Ghim phiên bản giá.
+  const book = await loadPriceBook({ fresh: true });
+  let pinKey = await readPricePin(org.code, { fresh: true });
+  if (pinKey === null) {
+    const catalog = currentCatalogVersion(book, now);
+    if (catalog) {
+      await pinOrgPriceVersion(org.code, catalog.key, { source: "PROVISIONING", reason, email: null });
+      pinKey = catalog.key;
+    }
+  }
+  // 2 · Gói theo phiên bản đã ghim ⇒ số ngày dùng thử (gói không có ở phiên bản ⇒ dòng legacy ⇒ không dùng thử).
+  const price = priceOf(book, pinKey, org.plan ?? DEFAULT_PLAN_KEY)?.price ?? null;
+  const trialDays = price?.trialDays ?? null;
+  const today = vnDate(now);
+  let trial: WorkspaceBillingInit["trial"] = null;
+  let next: { billingEnabled: boolean; paidThrough: string | null; graceDays: number; note: string; trialStartedAt: Date | null; trialEndsAt: Date | null; trialDays: number | null };
+  if (trialDays !== null) {
+    const paidThrough = trialPaidThrough(today, trialDays);
+    const endsAt = trialEndFromLastDay(paidThrough)!;
+    const enable = opts.selfService && Boolean(await getBillingReceiver());
+    trial = { days: trialDays, startedAt: now.toISOString(), endsAt: endsAt.toISOString(), paidThrough };
+    next = { billingEnabled: enable, paidThrough, graceDays: TRIAL_GRACE_DAYS, note: `Dùng thử ${trialDays} ngày (phiên bản giá ${pinKey ?? "—"}) — ${reason}`, trialStartedAt: now, trialEndsAt: endsAt, trialDays };
+  } else {
+    next = { billingEnabled: false, paidThrough: null, graceDays: BILLING_DEFAULT_GRACE_DAYS, note: `Kỳ tính tiền tháng lịch giờ VN (phiên bản giá ${pinKey ?? "—"}) — người vận hành đặt hạn trả`, trialStartedAt: null, trialEndsAt: null, trialDays: null };
+  }
   const pdb = await getPlatformDb();
   const subs = schema.platformSubscriptions;
-  const started = await pdb.transaction(async (tx) => {
-    const rows = await tx
-      .insert(subs)
-      .values({ orgCode, ...next, note: `Dùng thử ${TRIAL_DAYS} ngày — cửa hàng tự đăng ký` })
-      .onConflictDoNothing({ target: subs.orgCode })
-      .returning({ orgCode: subs.orgCode });
+  const created = await pdb.transaction(async (tx) => {
+    const rows = await tx.insert(subs).values({ orgCode: org.code, ...next }).onConflictDoNothing({ target: subs.orgCode }).returning({ orgCode: subs.orgCode });
     if (rows.length === 0) return false;
-    await auditTx(tx, { action: "BILLING_SET", targetOrgCode: orgCode, subject: "subscription", before: null, after: next, reason: `Dùng thử ${TRIAL_DAYS} ngày cho cửa hàng tự đăng ký`, actor: null });
+    await auditTx(tx, {
+      action: "BILLING_SET",
+      targetOrgCode: org.code,
+      subject: "subscription",
+      before: null,
+      after: { billingEnabled: next.billingEnabled, paidThrough: next.paidThrough, graceDays: next.graceDays, trialDays: next.trialDays, trialEndsAt: next.trialEndsAt?.toISOString() ?? null, priceVersion: pinKey },
+      reason: trial ? `Dùng thử ${trial.days} ngày — ${reason}` : `Khởi tạo thu phí — ${reason}`,
+      actor: opts.actor ?? null,
+    });
     return true;
   });
-  invalidateSubscriptions(orgCode);
-  return started ? { started: true, paidThrough } : { started: false, reason: "EXISTS" };
+  invalidateSubscriptions(org.code);
+  const detail = [pinKey ? `ghim giá ${pinKey}` : "chưa có bảng giá niêm yết — chưa ghim", trial ? `dùng thử ${trial.days} ngày tới hết ${trial.paidThrough}` : "kỳ tháng lịch VN", created ? (next.billingEnabled ? "bật thu phí" : "chưa thu phí") : "thuê bao đã có — giữ điều khoản"].join(" · ");
+  return { status: "DONE", detail, pinnedVersion: pinKey, trial: created ? trial : null, billingEnabled: created && next.billingEnabled, created };
 }
 
 async function operatorInvoice(user: SessionUser, raw: { invoiceId?: unknown; reason?: unknown }): Promise<{ invoice: InvoiceRow; reason: string } | { error: string }> {

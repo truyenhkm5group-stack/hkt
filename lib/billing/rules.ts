@@ -154,10 +154,14 @@ export function mrrContribution(input: { isHome: boolean; orgStatus: string; sta
 // ─────────────────────────── Dùng thử của cửa hàng TỰ ĐĂNG KÝ ───────────────────────────
 
 /**
- * Cửa hàng tự đăng ký qua `/start` (nguồn OPEN) được bật thu phí NGAY lúc tạo với `paid_through` = hôm nay + 6 (tính cả
- * hôm nay = 7 ngày dùng thử — chủ nền tảng chốt 04/10/2026, trước đó 14 ngày) và ân hạn 3 ngày. Không có máy trạng thái thứ hai: hết hạn đi đúng đường «quá hạn → chỉ
- * xem» của thuê bao trả tiền, KHÔNG xoá dữ liệu. Khách trả tiền sớm thì kỳ trả tiền nối SAU ngày cuối dùng thử
- * (`quoteRenewal` · START) — không mất ngày dùng thử nào.
+ * Cửa hàng tự đăng ký qua `/start` (nguồn OPEN) được bật thu phí NGAY lúc tạo với `paid_through` = ngày cuối dùng thử (tính cả
+ * hôm nay) và ân hạn 3 ngày. Không có máy trạng thái thứ hai: hết hạn đi đúng đường «quá hạn → chỉ xem» của thuê bao trả tiền,
+ * KHÔNG xoá dữ liệu. Khách trả tiền sớm thì kỳ trả tiền nối SAU ngày cuối dùng thử (`quoteRenewal` · START) — không mất ngày
+ * dùng thử nào.
+ *
+ * SỐ NGÀY DÙNG THỬ đi theo PHIÊN BẢN GIÁ (`platform_plan_prices.trial_days` — V1 = 7, chủ shop chốt 07/10/2026) và được CHỤP vào
+ * thuê bao lúc cấp phát (`platform_subscriptions.trial_days` / `trial_ends_at`, 0232 · `lib/billing/service.ts::initWorkspaceBilling`).
+ * `TRIAL_DAYS` chỉ là MẶC ĐỊNH khi dòng giá không khai số ngày (Điều khoản sử dụng ghi con số này).
  */
 export const TRIAL_DAYS = 7;
 export const TRIAL_GRACE_DAYS = 3;
@@ -167,9 +171,10 @@ export const TRIAL_GRACE_DAYS = 3;
  */
 export const TRIAL_WARN_DAYS_LEFT = 3;
 
-/** Ngày cuối dùng thử (tính cả ngày đăng ký). */
-export function trialPaidThrough(today: string): string {
-  return addDays(today, TRIAL_DAYS - 1);
+/** Ngày cuối dùng thử (tính cả ngày đăng ký). `days` = số ngày dùng thử của phiên bản giá; thiếu / sai ⇒ `TRIAL_DAYS`. */
+export function trialPaidThrough(today: string, days: number | null = TRIAL_DAYS): string {
+  const n = typeof days === "number" && Number.isInteger(days) && days >= 1 && days <= 90 ? days : TRIAL_DAYS;
+  return addDays(today, n - 1);
 }
 
 function viDate(d: string | null): string {

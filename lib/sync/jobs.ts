@@ -81,6 +81,7 @@ import { refreshConversationLevels } from "@/lib/sales-chatbot/levels";
 import { sendNewOrderAlerts } from "@/lib/sales-chatbot/new-order-alert";
 import { runFanpageOrderSync } from "@/lib/sales-chatbot/order-sync";
 import { runSalesHealthCheck } from "@/lib/sales-chatbot/health";
+import { runAiCustomerUsageAlerts } from "@/lib/pricing/usage-alerts";
 import { retryAiDownMessages } from "@/lib/sales-chatbot/retry-runner";
 import { retryFailedDeliveries } from "@/lib/messaging/service";
 import { runWholesaleLeadsJob } from "@/lib/wholesale/job";
@@ -839,7 +840,9 @@ export const JOB_DEFINITIONS: Record<string, JobDefinition> = {
     run: (o) =>
       runSyncJob({ source: "ERP", job: "sales-health", trigger: o.trigger, actor: o.actor, observeOnly: true }, async (ctx) => {
         const r = await runSalesHealthCheck();
-        ctx.summary.detail = `${r.status} · ${r.alerted} · ${r.health.headline}`.slice(0, 900);
+        // Ngưỡng khách AI 80 · 100 · 120 · 150 (L5 · lib/pricing/usage-alerts.ts) đi CÙNG lịch giám sát — không thêm lịch mới.
+        const usage = await runAiCustomerUsageAlerts();
+        ctx.summary.detail = `${r.status} · ${r.alerted} · ${r.health.headline}${usage.sent ? ` · báo ngưỡng khách AI ${usage.sent}` : ""}`.slice(0, 900);
         if (r.status === "RED") ctx.summary.warning = r.health.headline.slice(0, 500);
         return r;
       }),
