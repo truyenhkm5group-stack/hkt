@@ -462,3 +462,4 @@
 {"at":"2026-10-07T23:06:13.966Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"ai-balance-economics","detail":"#648 @ 2df70448c0f6 → 1de28d458581 (MERGE_ISOLATED · HIGH · gates success)"}
 {"at":"2026-10-07T23:10:24.841Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"VERIFY_PASS","mission":"ai-balance-v1","detail":"PASS 638091636e303895c81f31b31a81470778029c8a 2026-10-07T23:10:21.353Z"}
 {"at":"2026-10-07T23:10:34.424Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"VERIFY_PASS","mission":"bot-order-status","detail":"PASS 638091636e303895c81f31b31a81470778029c8a 2026-10-07T23:10:30.822Z"}
+{"at":"2026-10-07T23:10:43.819Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"VERIFY_PASS","mission":"returning-history-leak","detail":"PASS 638091636e303895c81f31b31a81470778029c8a 2026-10-07T23:10:40.382Z"}
