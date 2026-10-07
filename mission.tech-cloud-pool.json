@@ -1,0 +1,32 @@
+{
+  "schema": 1,
+  "mission_id": "tech-cloud-pool",
+  "title": "Bể thực thi Claude Cloud (CLAUDE_CLOUD_PROMO): gói việc + prompt sinh sẵn, không secret, không merge/deploy",
+  "business_goal": "Dùng credit Cloud cho việc an toàn mà không dựng hệ thứ hai",
+  "status": "BACKLOG",
+  "priority": "P2",
+  "risk": "HIGH",
+  "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "worker": null,
+  "worktree": null,
+  "branch": null,
+  "base_sha": null,
+  "domains": [
+    "tech"
+  ],
+  "owned_paths": [
+    "docs/tech/cloud-pool/**"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-07T17:24:49.953Z",
+  "updated_at": "2026-10-07T17:24:49.953Z",
+  "last_heartbeat": "2026-10-07T17:24:49.953Z",
+  "definition_of_done": [
+    "Tuyến worker CLAUDE_CLOUD_PROMO trong /tech",
+    "Gói việc không mang secret",
+    "Chặn trùng + nhận PR về đúng sứ mệnh"
+  ]
+}
