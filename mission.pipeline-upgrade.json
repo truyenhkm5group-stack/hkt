@@ -1,0 +1,32 @@
+{
+  "schema": 1,
+  "mission_id": "pipeline-upgrade",
+  "title": "Nâng cấp pipeline giao hàng: CI theo phạm vi ảnh hưởng · gộp deploy · quan sát · rollback",
+  "business_goal": "Giảm thời gian từ PR tới production mà không bỏ cổng nào",
+  "status": "BACKLOG",
+  "priority": "P2",
+  "risk": "HIGH",
+  "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "worker": null,
+  "worktree": null,
+  "branch": null,
+  "base_sha": null,
+  "domains": [
+    "infra"
+  ],
+  "owned_paths": [
+    "docs/pipeline/**"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-07T17:24:44.108Z",
+  "updated_at": "2026-10-07T17:24:44.108Z",
+  "last_heartbeat": "2026-10-07T17:24:44.108Z",
+  "definition_of_done": [
+    "Báo cáo A–J",
+    "Đề xuất có số đo hiện trạng",
+    "Không đổi workflow khi chưa có quyết định"
+  ]
+}
