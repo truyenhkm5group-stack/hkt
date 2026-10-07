@@ -3,7 +3,7 @@
   "mission_id": "sales-human-takeover",
   "title": "Tiếp quản / cho AI tiếp tục trong hội thoại bán hàng",
   "business_goal": "",
-  "status": "RUNNING",
+  "status": "PR_READY",
   "priority": "P1",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-takeover",
@@ -33,7 +33,18 @@
     "0232": "2026-10-07T06:41:29.651Z"
   },
   "created_at": "2026-10-07T06:41:23.158Z",
-  "updated_at": "2026-10-07T06:41:29.651Z",
-  "last_heartbeat": "2026-10-07T06:41:23.158Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-07T08:54:44.338Z",
+  "last_heartbeat": "2026-10-07T08:54:44.338Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "feat/sales-human-takeover",
+    "sha": "758eb081019941e289662320f1a8c939babfe6f4",
+    "at": "2026-10-07T08:54:44.338Z",
+    "actor": "DESKTOP-56TH98Y:wt-takeover",
+    "title": "Tiếp quản / cho AI tiếp tục trong hội thoại bán hàng",
+    "summary": "",
+    "tests": [
+      "typecheck sạch · npm run lint sạch · npm test SAU commit: TẤT CẢ KIỂM THỬ ĐẠT · npm run build OK · tests/sales-human-takeover.test.ts (đường xử lý thật Messenger/Pancake + nhà page OFF) · 9 đột biến đều đỏ"
+    ]
+  }
 }
