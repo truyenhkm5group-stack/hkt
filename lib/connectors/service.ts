@@ -21,6 +21,7 @@ import type { ChatDiscoveryResult, ConnectionActionResult, ConnectionSnapshot, C
 import { PLATFORM_MODULES } from "@/lib/constants/platform-modules";
 import { currentOrganization } from "@/lib/platform/context";
 import { findOrganization } from "@/lib/platform/organizations";
+import { customerConnectionsView, customerFacing } from "@/lib/saas/visibility";
 
 /**
  * ═══════════ KẾT NỐI THEO TỔ CHỨC — ĐƯỜNG ĐỌC VÀ ĐƯỜNG GHI DUY NHẤT ═══════════
@@ -198,7 +199,7 @@ export async function loadConnectionsView(user: SessionUser, deps: { keyState?: 
     };
   };
 
-  return {
+  const full: ConnectionsView = {
     organization: org,
     secretsReady: (() => {
       const pub = secretsKeyPublicStatus(keyState);
@@ -206,6 +207,8 @@ export async function loadConnectionsView(user: SessionUser, deps: { keyState?: 
     })(),
     groups: CONNECTOR_KINDS.map((kind) => ({ kind, label: CONNECTOR_KIND_LABEL[kind], rows: CONNECTORS.filter((c) => c.kind === kind).map(view) })).filter((g) => g.rows.length > 0),
   };
+  // Workspace KHÁCH: lọc DTO ở máy chủ — không connector chỉ-nhà, không connector AI, không mô tả nội bộ (chủ shop 07/10/2026).
+  return customerFacing(org) ? customerConnectionsView(full) : full;
 }
 
 // ───────────────────────── ĐỌC LÚC CHẠY (consumer đã khai) ─────────────────────────
@@ -330,13 +333,22 @@ function checkValue(spec: ConnectorSpec, key: string, value: string): string | n
   return null;
 }
 
+/**
+ * Ai thực hiện một lượt ghi kết nối. Người của tổ chức: `id` = tài khoản trong CSDL tổ chức. Người vận hành nền tảng (khối
+ * «AI của workspace» ở `/platform/org/<mã>`): KHÔNG có tài khoản trong CSDL tổ chức ⇒ `id = null`, email mang nhãn «vận hành
+ * nền tảng», kèm LÝ DO — như `disableConnectionAsOperator`.
+ */
+type ConnectionActor = { id: string | null; email: string; reason?: string };
+
 export async function saveConnection(user: SessionUser, input: SaveConnectionInput, deps: { keyState?: SecretsKeyState } = {}): Promise<ConnectionActionResult> {
   const g = guard(user, String(input.connectorKey ?? ""));
   if ("error" in g) return g;
-  const { spec } = g;
   const org = await resolveOrg(user);
   if ("error" in org) return org;
+  return saveConnectionCore(org, g.spec, input, { id: user.id, email: user.email }, deps);
+}
 
+async function saveConnectionCore(org: OrgRef, spec: ConnectorSpec, input: SaveConnectionInput, actor: ConnectionActor, deps: { keyState?: SecretsKeyState }): Promise<ConnectionActionResult> {
   const rawSettings = input.settings && typeof input.settings === "object" ? input.settings : {};
   const rawSecrets = input.secrets && typeof input.secrets === "object" ? input.secrets : {};
   const plainKeys = new Set(plainFields(spec).map((f) => f.key));
@@ -410,21 +422,21 @@ export async function saveConnection(user: SessionUser, input: SaveConnectionInp
     lastTestMessage: null,
     activatedAt: null,
     activatedBy: null,
-    updatedBy: user.email,
+    updatedBy: actor.email,
     updatedAt: new Date(),
   };
   if (existing) await db.update(schema.orgConnections).set(values).where(eq(schema.orgConnections.id, existing.id));
-  else await db.insert(schema.orgConnections).values({ ...values, createdBy: user.email });
+  else await db.insert(schema.orgConnections).values({ ...values, createdBy: actor.email });
 
   await audit({
-    userId: user.id,
-    userEmail: user.email,
+    userId: actor.id,
+    userEmail: actor.email,
     action: "ORG_CONNECTION_SAVE",
     entity: "org_connection",
     entityId: spec.key,
     before: existing ? { status: existing.status, settings: existing.settings, secretFieldsSet: Object.keys(existingHints) } : null,
     after: { status: "DRAFT", settings, secretFieldsSet: Object.keys(hints), secretsChanged: Object.keys(incoming) },
-    reason: existing?.status === "ACTIVE" ? "Đổi cấu hình của kết nối đang bật ⇒ về Nháp, phải kiểm tra và bật lại" : undefined,
+    reason: [actor.reason, existing?.status === "ACTIVE" ? "Đổi cấu hình của kết nối đang bật ⇒ về Nháp, phải kiểm tra và bật lại" : undefined].filter(Boolean).join(" · ") || undefined,
   });
   return { ok: true, status: "DRAFT", message: existing?.status === "ACTIVE" ? "Đã lưu — kết nối về Nháp: kiểm tra lại rồi bật." : "Đã lưu — bấm Kiểm tra trước khi bật." };
 }
@@ -432,9 +444,12 @@ export async function saveConnection(user: SessionUser, input: SaveConnectionInp
 export async function testOrgConnection(user: SessionUser, connectorKey: string, deps: { keyState?: SecretsKeyState; tester?: TesterDeps } = {}): Promise<ConnectionActionResult> {
   const g = guard(user, connectorKey);
   if ("error" in g) return g;
-  const { spec } = g;
   const org = await resolveOrg(user);
   if ("error" in org) return org;
+  return testConnectionCore(org, g.spec, { id: user.id, email: user.email }, deps);
+}
+
+async function testConnectionCore(org: OrgRef, spec: ConnectorSpec, actor: ConnectionActor, deps: { keyState?: SecretsKeyState; tester?: TesterDeps }): Promise<ConnectionActionResult> {
   const row = await findRow(spec.key);
   const trip = tripwire(row, org);
   if (trip) return { error: trip };
@@ -458,7 +473,7 @@ export async function testOrgConnection(user: SessionUser, connectorKey: string,
     }
     if (secrets) {
       // Kết nối xoay vòng token (Zalo OA): hàm kiểm tra có thể làm mới token — cặp mới phải được lưu ngay, nên nó nhận đường lưu.
-      const rotate = ROTATING_CONNECTORS.has(spec.key) ? { rotate: <T,>(fn: SecretRotation<T>) => rotateOrgConnectionSecrets(spec.key, fn, { requireActive: false, actorLabel: user.email, userId: user.id, keyState: deps.keyState }) } : {};
+      const rotate = ROTATING_CONNECTORS.has(spec.key) ? { rotate: <T,>(fn: SecretRotation<T>) => rotateOrgConnectionSecrets(spec.key, fn, { requireActive: false, actorLabel: actor.email, ...(actor.id ? { userId: actor.id } : {}), keyState: deps.keyState }) } : {};
       const r = await tester({ secrets, settings: asStringMap(row.settings), orgName: org.name, ...rotate }, deps.tester);
       passed = r.ok;
       message = r.message;
@@ -471,14 +486,14 @@ export async function testOrgConnection(user: SessionUser, connectorKey: string,
     .set({ lastTestAt: new Date(), lastTestOk: passed, lastTestMessage: message, status: nextStatus, ...(nextStatus !== row.status ? { activatedAt: null, activatedBy: null } : {}), updatedAt: new Date() })
     .where(eq(schema.orgConnections.id, row.id));
   await audit({
-    userId: user.id,
-    userEmail: user.email,
+    userId: actor.id,
+    userEmail: actor.email,
     action: "ORG_CONNECTION_TEST",
     entity: "org_connection",
     entityId: spec.key,
     before: { status: row.status, lastTestOk: row.lastTestOk },
     after: { status: nextStatus, lastTestOk: passed },
-    reason: message,
+    reason: actor.reason ? `${actor.reason} · ${message}` : message,
   });
   if (!passed) return { error: nextStatus !== row.status ? `${message} — kết nối đang bật đã về Nháp.` : message };
   return { ok: true, status: nextStatus, message };
@@ -625,10 +640,13 @@ export async function rekeyOrgConnections(opts: { apply: boolean; keyState?: Sec
 export async function setConnectionStatus(user: SessionUser, connectorKey: string, status: string): Promise<ConnectionActionResult> {
   const g = guard(user, connectorKey);
   if ("error" in g) return g;
-  const { spec } = g;
   if (status !== "ACTIVE" && status !== "DISABLED") return { error: "Trạng thái chỉ nhận Bật hoặc Tắt." };
   const org = await resolveOrg(user);
   if ("error" in org) return org;
+  return setStatusCore(org, g.spec, status, { id: user.id, email: user.email });
+}
+
+async function setStatusCore(org: OrgRef, spec: ConnectorSpec, status: "ACTIVE" | "DISABLED", actor: ConnectionActor): Promise<ConnectionActionResult> {
   const row = await findRow(spec.key);
   const trip = tripwire(row, org);
   if (trip) return { error: trip };
@@ -638,16 +656,17 @@ export async function setConnectionStatus(user: SessionUser, connectorKey: strin
   const db = await getDb();
   await db
     .update(schema.orgConnections)
-    .set(status === "ACTIVE" ? { status, activatedAt: new Date(), activatedBy: user.email, updatedBy: user.email, updatedAt: new Date() } : { status, updatedBy: user.email, updatedAt: new Date() })
+    .set(status === "ACTIVE" ? { status, activatedAt: new Date(), activatedBy: actor.email, updatedBy: actor.email, updatedAt: new Date() } : { status, updatedBy: actor.email, updatedAt: new Date() })
     .where(eq(schema.orgConnections.id, row.id));
   await audit({
-    userId: user.id,
-    userEmail: user.email,
+    userId: actor.id,
+    userEmail: actor.email,
     action: status === "ACTIVE" ? "ORG_CONNECTION_ACTIVATE" : "ORG_CONNECTION_DISABLE",
     entity: "org_connection",
     entityId: spec.key,
     before: { status: row.status },
     after: { status },
+    ...(actor.reason ? { reason: actor.reason } : {}),
   });
   return { ok: true, status, message: status === "ACTIVE" ? `Đã bật «${spec.label}».` : `Đã tắt «${spec.label}».` };
 }
@@ -687,6 +706,83 @@ export async function disableConnectionAsOperator(input: { connectorKey: string;
     reason: input.reason,
   });
   return { ok: true, status: "DISABLED", changed: true, message: `Đã tắt «${spec.label}» của tổ chức.` };
+}
+
+/**
+ * ═══ KHOÁ AI CỦA WORKSPACE KHÁCH — NGƯỜI VẬN HÀNH NỀN TẢNG GHI (chủ shop 07/10/2026) ═══
+ *
+ * Khách không còn thấy / sửa connector AI trên màn Kết nối (lib/saas/visibility.ts): cấu hình AI của workspace khách thuộc
+ * người vận hành, ở khối «AI của workspace» trên `/platform/org/<mã>`. Đi qua ĐÚNG lõi Lưu / Kiểm tra / Bật-Tắt của người tổ
+ * chức (cùng luật «bật chỉ sau Kiểm tra đạt», cùng mã hoá, cùng nhật ký) — chỉ khác người thực hiện: `userId = null` + nhãn
+ * vận hành + lý do. Chạy trong ngữ cảnh tổ chức ĐÍCH; nơi gọi (`lib/saas/operator-ai.ts`) đã kiểm `platformOperatorDenial`,
+ * bọc `withOrganization(mã)` và ghi nhật ký nền tảng. CHỈ connector AI theo tổ chức — không thành cửa sau cho kết nối khác.
+ */
+export const OPERATOR_AI_CONNECTORS = ["anthropic-byok", "openai-byok", "gemini-byok"] as const;
+export type OperatorAiConnector = (typeof OPERATOR_AI_CONNECTORS)[number];
+type OperatorRef = { orgCode: string; email: string };
+
+async function operatorTarget(connectorKey: string, operator: OperatorRef, reason: string): Promise<{ org: OrgRef; spec: ConnectorSpec; actor: ConnectionActor } | { error: string }> {
+  if (!(OPERATOR_AI_CONNECTORS as readonly string[]).includes(connectorKey)) return { error: `«${connectorKey}» không phải khoá AI của workspace.` };
+  const spec = findConnector(connectorKey);
+  if (!spec || !isOrgConfigurable(spec)) return { error: `Không có connector «${connectorKey}» theo tổ chức.` };
+  const ctx = await currentOrganization();
+  return { org: { code: ctx.code, name: ctx.code, isHome: ctx.isHome }, spec, actor: { id: null, email: `${operator.email} (vận hành nền tảng · ${operator.orgCode})`, reason } };
+}
+
+export async function saveAiConnectionAsOperator(input: { connectorKey: string; settings?: Record<string, unknown>; secrets?: Record<string, unknown>; operator: OperatorRef; reason: string }, deps: { keyState?: SecretsKeyState } = {}): Promise<ConnectionActionResult> {
+  const t = await operatorTarget(input.connectorKey, input.operator, input.reason);
+  if ("error" in t) return t;
+  return saveConnectionCore(t.org, t.spec, { connectorKey: input.connectorKey, settings: input.settings, secrets: input.secrets }, t.actor, deps);
+}
+
+export async function testAiConnectionAsOperator(input: { connectorKey: string; operator: OperatorRef; reason: string }, deps: { keyState?: SecretsKeyState; tester?: TesterDeps } = {}): Promise<ConnectionActionResult> {
+  const t = await operatorTarget(input.connectorKey, input.operator, input.reason);
+  if ("error" in t) return t;
+  return testConnectionCore(t.org, t.spec, t.actor, deps);
+}
+
+export async function setAiConnectionStatusAsOperator(input: { connectorKey: string; status: string; operator: OperatorRef; reason: string }): Promise<ConnectionActionResult> {
+  if (input.status !== "ACTIVE" && input.status !== "DISABLED") return { error: "Trạng thái chỉ nhận Bật hoặc Tắt." };
+  const t = await operatorTarget(input.connectorKey, input.operator, input.reason);
+  if ("error" in t) return t;
+  return setStatusCore(t.org, t.spec, input.status, t.actor);
+}
+
+/** Khoá AI của tổ chức NGỮ CẢNH cho người vận hành: trạng thái + ô THƯỜNG (model) + ĐÃ CÓ khoá hay chưa — không gợi ý, không bản mã. */
+export type OperatorAiConnectionRow = {
+  connectorKey: OperatorAiConnector;
+  label: string;
+  status: ConnectionStatus | null;
+  lastTestOk: boolean | null;
+  lastTestMessage: string | null;
+  lastTestAt: string | null;
+  hasSecret: boolean;
+  plainSettings: Record<string, string>;
+  fields: { key: string; label: string; secret: boolean; required: boolean; hint?: string }[];
+};
+
+export async function aiConnectionsForOperator(): Promise<OperatorAiConnectionRow[]> {
+  const ctx = await currentOrganization();
+  const c = schema.orgConnections;
+  const rows = await (await getDb())
+    .select({ connectorKey: c.connectorKey, orgCode: c.orgCode, status: c.status, lastTestOk: c.lastTestOk, lastTestMessage: c.lastTestMessage, lastTestAt: c.lastTestAt, settings: c.settings, secretHints: c.secretHints })
+    .from(c);
+  return OPERATOR_AI_CONNECTORS.map((key) => {
+    const spec = findConnector(key);
+    const row = rows.find((r) => r.connectorKey === key && r.orgCode === ctx.code);
+    const plain = new Set(spec ? plainFields(spec).map((f) => f.key) : []);
+    return {
+      connectorKey: key,
+      label: spec?.label ?? key,
+      status: row ? (row.status as ConnectionStatus) : null,
+      lastTestOk: row?.lastTestOk ?? null,
+      lastTestMessage: row?.lastTestMessage ?? null,
+      lastTestAt: row?.lastTestAt ? row.lastTestAt.toISOString() : null,
+      hasSecret: row ? Object.keys(asStringMap(row.secretHints)).length > 0 : false,
+      plainSettings: row ? Object.fromEntries(Object.entries(asStringMap(row.settings)).filter(([k]) => plain.has(k))) : {},
+      fields: (spec?.settings ?? []).map((f) => ({ key: f.key, label: f.label, secret: f.secret, required: f.required, ...(f.hint ? { hint: f.hint } : {}) })),
+    };
+  });
 }
 
 /**

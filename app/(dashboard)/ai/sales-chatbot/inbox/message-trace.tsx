@@ -21,13 +21,20 @@ export function MessageTraceLine({ trace }: { trace: MessageTrace }) {
         {trace.code ? (
           <>
             {" · "}
-            <code className="font-mono">{trace.code.startsWith("UNKNOWN") ? "UNKNOWN" : trace.code}</code> {traceCodeLabel(trace.code)}
+            {/* Bản của khách mang NHÃN thường thay cho mã máy (lib/saas/visibility.ts) — chỉ mã máy mới in kiểu mã. */}
+            {/^[A-Z][A-Z0-9_]*(:|$)/.test(trace.code) ? (
+              <>
+                <code className="font-mono">{trace.code.startsWith("UNKNOWN") ? "UNKNOWN" : trace.code}</code> {traceCodeLabel(trace.code)}
+              </>
+            ) : (
+              trace.code
+            )}
           </>
         ) : null}
       </summary>
       <ol className="mt-1 space-y-0.5 rounded-md border bg-background/80 p-1.5 text-muted-foreground">
         {trace.steps.map((s) => (
-          <li key={s.stage} className={cn(s.state === "FAILED" && "font-medium text-rose-700 dark:text-rose-300")} title={s.source}>
+          <li key={s.stage} className={cn(s.state === "FAILED" && "font-medium text-rose-700 dark:text-rose-300")} title={s.source || undefined}>
             {MARK[s.state]} {TRACE_STAGE_LABEL[s.stage]} — {s.state === "NOT_REACHED" ? "chưa tới" : s.at ? formatDateTime(s.at) : "chưa đo"}
           </li>
         ))}

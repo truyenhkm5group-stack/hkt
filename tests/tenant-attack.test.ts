@@ -833,7 +833,9 @@ export async function testTenantAttack() {
       path: "/settings/plan",
       ownOnly: (v) => {
         khongSoCuaB(v);
-        assert.ok(serialize(v).includes(String(TOKEN_AI_A.input)), "đối chứng: màn Gói & hạn mức của A cộng đúng dòng sổ AI của A");
+        // 07/10/2026: sổ AI (token · tiền) là số NỘI BỘ — workspace khách không thấy cả dòng của CHÍNH mình (lib/saas/visibility.ts).
+        // Đối chứng cách ly sổ AI nằm ở lượt gọi loadOrgAiUsage ngay dưới.
+        assert.ok(!serialize(v).includes(String(TOKEN_AI_A.input)), "khách không thấy token trên màn Gói & hạn mức");
       },
     });
     const PlanPageVoiThamSo = PlanPage as unknown as (p: unknown) => Promise<unknown>;
@@ -841,7 +843,7 @@ export async function testTenantAttack() {
       path: "/settings/plan",
       ownOnly: (v) => {
         khongSoCuaB(v);
-        assert.ok(serialize(v).includes(String(TOKEN_AI_A.input)), "vẫn là sổ của A");
+        assert.ok(!serialize(v).includes(String(TOKEN_AI_A.input)), "tham số URL không mở lại sổ AI cho khách");
       },
     });
     const soA = await attack(Q, "loadOrgAiUsage(mã tổ chức của PHIÊN A)", async () => loadOrgAiUsage((await requireUser()).organization!.code), { path: "/settings/plan", ownOnly: khongSoCuaB });

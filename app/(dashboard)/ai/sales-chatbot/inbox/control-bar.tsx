@@ -27,6 +27,7 @@ export function ConversationControlBar({
   control,
   hold,
   blocks,
+  hideCodes = false,
   handoffReason,
   canWork,
 }: {
@@ -36,6 +37,8 @@ export function ConversationControlBar({
   hold: AiHoldView;
   /** Lý do AI KHÔNG trả lời do máy chủ tính bằng đúng các cổng của đường xử lý (ai-status.ts). */
   blocks: AiBlock[];
+  /** Workspace khách: không in mã máy của lý do chặn. */
+  hideCodes?: boolean;
   handoffReason: string | null;
   canWork: boolean;
 }) {
@@ -163,13 +166,14 @@ export function ConversationControlBar({
         <ul className="flex flex-wrap gap-x-3 gap-y-1 text-[11px]" data-testid="ai-blocks">
           {blocks.map((b) => (
             <li key={b.code} data-code={b.code} className="inline-flex items-center gap-1">
-              <code className="rounded bg-background/60 px-1 font-mono">{b.code}</code>
+              {/* Mã máy chỉ cho workspace nhà; khách đọc lý do bằng lời thường (lib/saas/visibility.ts). */}
+              {hideCodes ? <span>{b.reason}</span> : <code className="rounded bg-background/60 px-1 font-mono">{b.code}</code>}
               {b.fixHref ? (
                 <Link href={b.fixHref} className="font-medium underline underline-offset-2">
                   {b.fixLabel}
                 </Link>
               ) : (
-                <span className="opacity-80">liên hệ người vận hành</span>
+                <span className="opacity-80">{hideCodes ? "đội ngũ đang xử lý" : "liên hệ người vận hành"}</span>
               )}
             </li>
           ))}

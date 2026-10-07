@@ -173,7 +173,7 @@ function ConfigForm({ row, secretsReady }: { row: ConnectorView; secretsReady: b
           ))}
         </ul>
       ) : null}
-      {row.consumers.length === 0 ? <p className="text-[11px] leading-4 text-amber-700 dark:text-amber-400">Chưa luồng nào của ERP dùng kết nối này — bật lên chưa làm cảnh báo đi qua đây.</p> : null}
+      {row.consumers && row.consumers.length === 0 ? <p className="text-[11px] leading-4 text-amber-700 dark:text-amber-400">Chưa luồng nào của ERP dùng kết nối này — bật lên chưa làm cảnh báo đi qua đây.</p> : null}
     </div>
   );
 }
@@ -190,7 +190,7 @@ function ConfigCell({ row, secretsReady }: { row: ConnectorView; secretsReady: b
       </Button>
     );
   }
-  const where = row.configWhere;
+  const where = row.configWhere ?? "";
   const href = where.match(/\/(landing|bank|alerts|integrations)\b/)?.[0];
   return (
     <span className="text-xs leading-4 text-muted-foreground">
@@ -225,6 +225,8 @@ export function ConnectorGroupTable({ rows, secretsReady }: { rows: ConnectorVie
             <td className="px-3 py-2.5">
               <div className="flex items-center gap-1.5">
                 <span className="font-semibold">{row.label}</span>
+                {/* Mô tả nội bộ của sổ connector — chỉ workspace nhà nhận `why` (lib/saas/visibility.ts). */}
+                {row.why ? (
                 <InfoHint label={`Vì sao «${row.label}» được khai như vậy`}>
                   <p className="text-xs leading-5">{row.why}</p>
                   <p className="mt-1 text-[11px] text-muted-foreground">Năng lực: {row.capabilities.join(" · ")}</p>
@@ -235,6 +237,7 @@ export function ConnectorGroupTable({ rows, secretsReady }: { rows: ConnectorVie
                   ) : null}
                   <p className="mt-1 font-mono text-[11px] text-muted-foreground">{row.key}</p>
                 </InfoHint>
+                ) : null}
               </div>
               <p className="text-xs text-muted-foreground">
                 {row.vendor} · module {row.moduleLabel}
@@ -242,7 +245,7 @@ export function ConnectorGroupTable({ rows, secretsReady }: { rows: ConnectorVie
             </td>
             <td className="px-3 py-2.5">
               <div className="flex flex-wrap gap-1">
-                <Pill tone={row.tenancy === "PER_ORG" ? "ok" : "dashed"}>{row.tenancy === "PER_ORG" ? "Theo tổ chức" : "Chỉ tổ chức nhà"}</Pill>
+                {row.tenancy ? <Pill tone={row.tenancy === "PER_ORG" ? "ok" : "dashed"}>{row.tenancy === "PER_ORG" ? "Theo tổ chức" : "Chỉ tổ chức nhà"}</Pill> : null}
                 <Pill tone="muted">{CONNECTOR_AUTH_LABEL[row.auth]}</Pill>
                 {row.hasHealthCheck ? <Pill tone="muted">Có kiểm tra</Pill> : null}
               </div>
