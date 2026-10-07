@@ -1,8 +1,8 @@
 {
   "pr": 641,
-  "sha": "f44402a21cd2500ff58a0a1adf57c5eee9c2b44d",
+  "sha": "3984011f4a82d1544ed2be198f504b1e8e7acff9",
   "verdict": "PASS",
   "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
-  "at": "2026-10-07T18:10:00.405Z",
-  "note": "Lead: review độc lập PASS ở 3f311064; sửa sau review (COPILOT nhóm người · gác tin chờ khi đổi đường · không trả lời đôi · quét lại không bù tin trước mốc · số phút nhường · nhánh đọc hỏng · gỡ đường cuối) có bài kiểm, 7/7 đột biến bị bắt; phần còn lại chỉ là gộp main"
+  "at": "2026-10-07T18:30:07.124Z",
+  "note": "Lead: f44402a2 PASS; 3984011f chỉ gộp main (#638) + giải một xung đột mô tả trang hộp thư (giữ cả hai), bài kiểm L3 + vỏ app đạt"
 }
