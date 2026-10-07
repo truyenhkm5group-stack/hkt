@@ -189,7 +189,7 @@ gói đích thấp hơn số dùng AI thật.
   `describeCustomerImages` · `salesChatProvider` (nhắc khách, học, ghi đơn từ hội thoại, sổ tay). Dừng AI KHÔNG khoá dữ liệu: tin
   khách vẫn ghi, hộp thư và gửi tay vẫn chạy, hội thoại không chuyển «AI hỏng». Kênh web im lặng (khách lạ không đọc lý do nội bộ).
 - **Số ngày dùng thử theo phiên bản giá**, chụp vào thuê bao lúc cấp phát (`platform_subscriptions.trial_days` · `trial_started_at` ·
-  `trial_ends_at`, migration `0233_billing_trial_cycle`); `TRIAL_DAYS = 7` chỉ là mặc định. Dòng cũ không backfill — đọc
+  `trial_ends_at`, migration `0234_billing_trial_cycle`); `TRIAL_DAYS = 7` chỉ là mặc định. Dòng cũ không backfill — đọc
   `paid_through` như trước. **Một mốc hết dùng thử**: người vận hành gia hạn qua «Đã trả tới ngày» (`setOrgBilling`) ⇒ thuê bao
   đang mang điều khoản dùng thử ghi `trial_ends_at` CÙNG lượt (cùng nhật ký); cổng đọc mốc MUỘN HƠN giữa `trial_ends_at` và mốc
   suy từ `paid_through` (`effectiveTrialEnd`) — dữ liệu lệch không bao giờ dừng AI của khách vừa được gia hạn.

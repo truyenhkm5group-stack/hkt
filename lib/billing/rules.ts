@@ -160,7 +160,7 @@ export function mrrContribution(input: { isHome: boolean; orgStatus: string; sta
  * dùng thử nào.
  *
  * SỐ NGÀY DÙNG THỬ đi theo PHIÊN BẢN GIÁ (`platform_plan_prices.trial_days` — V1 = 7, chủ shop chốt 07/10/2026) và được CHỤP vào
- * thuê bao lúc cấp phát (`platform_subscriptions.trial_days` / `trial_ends_at`, 0233 · `lib/billing/service.ts::initWorkspaceBilling`).
+ * thuê bao lúc cấp phát (`platform_subscriptions.trial_days` / `trial_ends_at`, 0234 · `lib/billing/service.ts::initWorkspaceBilling`).
  * `TRIAL_DAYS` chỉ là MẶC ĐỊNH khi dòng giá không khai số ngày (Điều khoản sử dụng ghi con số này).
  */
 export const TRIAL_DAYS = 7;
