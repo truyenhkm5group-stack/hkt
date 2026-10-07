@@ -20,6 +20,7 @@ import { currentOrganization, OrgContextError, readSessionTokenRaw } from "@/lib
 import { findOrganization } from "@/lib/platform/organizations";
 import { billingWriteDenied } from "@/lib/billing/rules";
 import { orgBillingStanding } from "@/lib/billing/standing";
+import { billingLockApplies } from "@/lib/saas/policy";
 
 export const ROLE_PERMISSIONS_KEY = "auth.rolePermissions";
 
@@ -278,7 +279,8 @@ export const resolveCurrentUser = cache(async (): Promise<ResolvedUser> => {
     chức khách mới hỏi (đệm 10 giây). Trang gia hạn và đường đăng xuất được miễn (`BILLING_WRITE_EXEMPT_PATHS`).
   */
   const org = ket.user.organization;
-  if (org && !org.isHome) {
+  // `billingLockApplies` là vị từ CHUNG với khung gia hạn của /settings/plan — bị khoá thì trang luôn có mã QR.
+  if (org && billingLockApplies(org)) {
     const method = await requestMethod();
     if (method && method !== "GET" && method !== "HEAD") {
       const standing = await orgBillingStanding(org);

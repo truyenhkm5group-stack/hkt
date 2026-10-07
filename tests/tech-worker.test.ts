@@ -170,7 +170,7 @@ export function testTechWorkerPure() {
   assert.match(ds, /task\.leaseWorkerId && task\.leaseExpiresAt/, "giao GitHub Actions bị từ chối khi worker hàng đợi đang giữ lease");
 
   // Migration: CHECK provider / concurrency khớp hằng số.
-  const mig = readFileSync(path.join(goc, "drizzle/0226_tech_workers.sql"), "utf8");
+  const mig = readFileSync(path.join(goc, "drizzle/0228_tech_workers.sql"), "utf8");
   assert.match(mig, /"max_concurrency" BETWEEN 1 AND 4/);
   assert.equal(TECH_LEASE.maxConcurrencyCeiling, 4);
   assert.match(mig, /"provider" IN \('SUBSCRIPTION_CLAUDE_CODE','ANTHROPIC_API'\)/);

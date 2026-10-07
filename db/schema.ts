@@ -8009,7 +8009,7 @@ export const techTasks = pgTable(
     /** Khi `NEEDS_OWNER`: ĐÚNG việc chủ shop phải làm, đủ để làm theo mà không phải hỏi lại. */
     ownerAction: text("owner_action").notNull().default(""),
 
-    /* ───── Hàng đợi worker (0226, docs/tech-control-plane/README.md mục 4) ───── */
+    /* ───── Hàng đợi worker (0228, docs/tech-control-plane/README.md mục 4) ───── */
     /** Năng lực việc cần (`TECH_CAPABILITIES`). Rỗng = suy theo loại việc (`CAPABILITY_BY_TASK_TYPE`). */
     capability: text("capability").notNull().default(""),
     /** Worker đang giữ lease. `NULL` ⇔ `lease_expires_at NULL` (CHECK) — không ai giữ. */
@@ -8024,7 +8024,7 @@ export const techTasks = pgTable(
     nextAttemptAt: ts("next_attempt_at"),
     lastError: text("last_error").notNull().default(""),
     /**
-     * Mức chính sách R0–R4 (0227, `classifyTechPolicy`) — tính lúc GHI (tạo việc, đè rủi ro). `NULL` = CHƯA XẾP ⇒
+     * Mức chính sách R0–R4 (0229, `classifyTechPolicy`) — tính lúc GHI (tạo việc, đè rủi ro). `NULL` = CHƯA XẾP ⇒
      * không bao giờ tự động (đóng khi thiếu); dòng cũ không backfill, người bấm "Xếp lại chính sách".
      */
     policyLevel: text("policy_level"),
@@ -8200,7 +8200,7 @@ export const techAgentRuns = pgTable(
     reviewNote: text("review_note").notNull().default(""),
     reviewedByUserId: text("reviewed_by_user_id").references(() => users.id, { onDelete: "set null" }),
     reviewedAt: ts("reviewed_at"),
-    /* ───── Lượt chạy của worker hàng đợi (0226) ───── */
+    /* ───── Lượt chạy của worker hàng đợi (0228) ───── */
     /** Worker đã chạy lượt này. `NULL` = lượt cũ (GitHub Actions / chạy tay). */
     workerId: text("worker_id").references((): AnyPgColumn => techWorkers.id, { onDelete: "set null" }),
     /** `TECH_EXECUTION_PROVIDERS`. Rỗng = lượt cũ, chưa khai. */
@@ -8669,7 +8669,7 @@ export const techEvents = pgTable(
 );
 
 /**
- * WORKER — một tiến trình thi hành CÓ DANH TÍNH (0226). Khoá bí mật chỉ lưu BĂM (sha256); "sống / chập chờn /
+ * WORKER — một tiến trình thi hành CÓ DANH TÍNH (0228). Khoá bí mật chỉ lưu BĂM (sha256); "sống / chập chờn /
  * mất" là hàm của `last_heartbeat_at` và đồng hồ (`workerLiveness`), không có cột trạng thái.
  */
 export const techWorkers = pgTable(
@@ -8722,7 +8722,7 @@ export const techRunLogs = pgTable(
 );
 
 /**
- * NGÂN SÁCH THEO PHẠM VI (0227). Một dòng mỗi (phạm vi, id); ô `NULL` = CHƯA KHAI. Tầng hẹp đè tầng rộng TỪNG Ô
+ * NGÂN SÁCH THEO PHẠM VI (0229). Một dòng mỗi (phạm vi, id); ô `NULL` = CHƯA KHAI. Tầng hẹp đè tầng rộng TỪNG Ô
  * (`resolveBudget`). Tiền API CHƯA KHAI trần ngày ⇒ worker API không chạy (đóng khi thiếu).
  */
 export const techBudgets = pgTable(

@@ -55,7 +55,7 @@ export function BudgetForm({ scopeKind, scopeId, current, fields }: { scopeKind:
   );
 }
 
-/** Máy xếp lại mức chính sách R0–R4 (việc trước 0227 chưa có mức ⇒ không tự động cho tới khi xếp). */
+/** Máy xếp lại mức chính sách R0–R4 (việc trước 0229 chưa có mức ⇒ không tự động cho tới khi xếp). */
 export function PolicyReclassify({ taskId }: { taskId: string }) {
   const [pending, start] = useTransition();
   return (

@@ -1585,17 +1585,24 @@
       "breakpoints": true
     },
     {
-      "idx": 226,
+      "idx": 227,
       "version": "7",
-      "when": 1791350061000,
-      "tag": "0226_tech_workers",
+      "when": 1791350180000,
+      "tag": "0227_internal_plan_binding",
       "breakpoints": true
     },
     {
-      "idx": 227,
+      "idx": 228,
       "version": "7",
-      "when": 1791350062000,
-      "tag": "0227_tech_policy_budget",
+      "when": 1791350240000,
+      "tag": "0228_tech_workers",
+      "breakpoints": true
+    },
+    {
+      "idx": 229,
+      "version": "7",
+      "when": 1791350300000,
+      "tag": "0229_tech_policy_budget",
       "breakpoints": true
     }
   ]

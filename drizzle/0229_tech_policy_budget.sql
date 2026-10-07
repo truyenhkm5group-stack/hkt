@@ -1,4 +1,4 @@
--- 0227 · CHÍNH SÁCH R0–R4 + NGÂN SÁCH THEO PHẠM VI (docs/tech-control-plane/README.md mục 11).
+-- 0229 · CHÍNH SÁCH R0–R4 + NGÂN SÁCH THEO PHẠM VI (docs/tech-control-plane/README.md mục 11).
 --
 --  · CỘNG THÊM: `tech_tasks.policy_level` (NULL = CHƯA XẾP ⇒ không tự động — đóng khi thiếu; dòng cũ KHÔNG backfill)
 --    + `policy_reasons`; bảng `tech_budgets` (một dòng mỗi phạm vi, ô NULL = CHƯA KHAI).

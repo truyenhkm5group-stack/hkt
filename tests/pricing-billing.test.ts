@@ -97,8 +97,9 @@ function testPure() {
   assert.equal(trialDaysOf("growth"), null);
 
   // Bảng chân lý tính năng.
-  const base = { key: "api" as const, isHome: false, grandfathered: false, overrides: {}, planFeatures: ["ai_sales" as const] };
-  assert.deepEqual(featureGranted({ ...base, isHome: true }), { key: "api", granted: true, source: "HOME" });
+  const base = { key: "api" as const, grandfathered: false, overrides: {}, planFeatures: ["ai_sales" as const] };
+  // Không còn bậc "tổ chức nhà" (Phase 14): gói nội bộ khai đủ tính năng nên có API ở bậc GÓI, như mọi khách.
+  assert.deepEqual(featureGranted({ ...base, planFeatures: [...FEATURE_KEYS] }), { key: "api", granted: true, source: "PLAN" });
   assert.equal(featureGranted(base).granted, false);
   assert.equal(featureGranted({ ...base, grandfathered: true }).source, "GRANDFATHERED");
   assert.equal(featureGranted({ ...base, grandfathered: true, overrides: { api: false } }).granted, false, "ghi đè thắng cả giữ từ trước");

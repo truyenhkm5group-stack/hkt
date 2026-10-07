@@ -174,8 +174,9 @@ const MOI = [
   "0224_saas_control_plane",
   "0225_sales_chat_ad_referral",
   "0226_tech_control_plane_goals",
-  "0226_tech_workers",
-  "0227_tech_policy_budget",
+  "0227_internal_plan_binding",
+  "0228_tech_workers",
+  "0229_tech_policy_budget",
 ] as const;
 
 /*
