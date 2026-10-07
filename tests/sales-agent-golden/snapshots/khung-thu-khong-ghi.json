@@ -168,9 +168,15 @@
     },
     "confirmed": {
       "total": 400000,
-      "simulated": true
+      "simulated": true,
+      "stamp": {
+        "promptHashOk": true,
+        "model": "claude-sonnet-5",
+        "codeVersion": null
+      }
     },
     "declined": null,
+    "aiUsageConversation": "ALL",
     "order": null
   }
 }

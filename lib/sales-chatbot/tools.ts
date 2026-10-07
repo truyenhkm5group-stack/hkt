@@ -41,6 +41,7 @@ import { repeatsRecent } from "@/lib/sales-chatbot/quick-replies-shared";
 import type { OrderSyncThreadState } from "@/lib/sales-chatbot/order-sync-shared";
 import { customerOrderStatus } from "@/lib/sales-chatbot/order-status-shared";
 import { fanpageVisitorKeyMirror } from "@/lib/pricing/ai-customer-identity";
+import type { PromptStamp } from "@/lib/sales-chatbot/prompt-stamp";
 import type { PancakeThreadProfile, ReturningCustomer } from "@/lib/sales-chatbot/returning";
 
 export type CartLine = { variantId: string; quantity: number };
@@ -58,7 +59,8 @@ export type ChatState = {
    * ĐẦU. Chưa từng thấy tóm tắt ⇒ chốt chỉ ở lượt SAU; đã thấy ở lượt trước rồi đồng ý thêm / sửa món ⇒ sửa và chốt luôn.
    */
   draft?: { orderId: string | null; lines: CartLine[]; unitPrices: Record<string, number>; recipient: Recipient; note: string; simulated: boolean; shownTurn?: number; firstShownTurn?: number };
-  confirmed?: { orderId: string | null; simulated: boolean; total: number; at: string };
+  /** `stamp` = dấu lời nhắc / cấu hình / model / bản mã ĐÚNG lúc chốt (`prompt-stamp.ts`); đơn chốt trước 08/10/2026 không có. */
+  confirmed?: { orderId: string | null; simulated: boolean; total: number; at: string; stamp?: PromptStamp };
   /** Đơn đã chốt của các lượt mua TRƯỚC trong cùng hội thoại (khách mua lại sau `POST_ORDER_HANDOFF_MS`) — báo cáo vẫn đếm. */
   pastOrders?: { orderId: string | null; simulated: boolean; total: number; at: string }[];
   handoff?: { reason: string; at: string };
@@ -114,6 +116,8 @@ export type ToolContext = {
   customerName?: string | null;
   /** Lượt này trả lời BÌNH LUẬN công khai (engine — cùng gợi ý cổng Số dư AI dùng). Công cụ đọc đơn không chạy trong lượt này. */
   commentTurn?: boolean;
+  /** Dấu lời nhắc của lượt (engine dựng, kèm model của ĐÚNG lần gọi ra lệnh này) — `confirm_order` gắn vào `state.confirmed`. */
+  promptStamp?: PromptStamp;
 };
 
 /**
@@ -236,7 +240,7 @@ const PROCESS_DEFS: Record<ProcessTool, AiToolDef> = {
   get_order_status: {
     name: "get_order_status",
     description:
-      "Tra TRẠNG THÁI ĐƠN của CHÍNH khách đang chat (đơn chốt trong hội thoại này / của khách hội thoại đã nhận diện) khi khách hỏi «đơn của em tới đâu rồi», «bao giờ nhận hàng», «đã gửi chưa». Trả từng đơn: mã, ngày đặt, tổng tiền, trạng thái theo LỜI KHAI của đơn vị vận chuyển. Không có tham số. Nói ĐÚNG trạng thái trả về, không hứa ngày giao; không thấy đơn ⇒ xin mã đơn / SĐT đặt hàng rồi chuyển nhân viên kiểm tra.",
+      "Tra TRẠNG THÁI ĐƠN của CHÍNH hội thoại này (đơn đã lên / đã chốt trong hội thoại) khi khách hỏi «đơn của em tới đâu rồi», «bao giờ nhận hàng», «đã gửi chưa». Trả từng đơn: mã, ngày đặt, «status» theo LỜI KHAI của đơn vị vận chuyển, mã vận đơn, needs_staff. Không có tham số. Nói ĐÚNG «status», không hứa ngày giao, không nêu số tiền; needs_staff ⇒ hỏi khách có cần nhân viên shop hỗ trợ không. Không thấy đơn ⇒ máy chủ tự chuyển nhân viên — KHÔNG xin SĐT / mã đơn. Bình luận công khai ⇒ không đọc đơn.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
     kind: "read",
   },
@@ -628,7 +632,7 @@ export async function executeTool(name: string, rawInput: unknown, ctx: ToolCont
         if (!r.ok) return err("Chốt: lỗi", failureText(r), state);
         orderId = r.id;
       }
-      state.confirmed = { orderId, simulated, total: priced.total ?? priced.subtotal, at: new Date().toISOString() };
+      state.confirmed = { orderId, simulated, total: priced.total ?? priced.subtotal, at: new Date().toISOString(), ...(ctx.promptStamp ? { stamp: ctx.promptStamp } : {}) };
       state.stage = "DONE";
       return ok(`${simulated ? "(Thử) " : ""}Đã chốt đơn · ${formatVND(priced.subtotal)}`, {
         confirmed: true,
