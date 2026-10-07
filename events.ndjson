@@ -286,3 +286,4 @@
 {"at":"2026-10-07T08:29:42.018Z","actor":"DESKTOP-56TH98Y:wt-worker-onboard","kind":"HANDOFF","mission":"tech-worker-onboarding","detail":"feat/tech-worker-onboarding @ a1971b9a97ef · 1 lệnh kiểm thử"}
 {"at":"2026-10-07T08:54:44.367Z","actor":"DESKTOP-56TH98Y:wt-takeover","kind":"HANDOFF","mission":"sales-human-takeover","detail":"feat/sales-human-takeover @ 758eb0810199 · 1 lệnh kiểm thử"}
 {"at":"2026-10-07T08:56:24.510Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MIGRATION_RELEASED","mission":"tech-worker-onboarding","detail":"0231 — Hoán đổi thứ tự gộp: sales-human-takeover sẵn sàng trước (PR_READY 758eb081), onboarding còn một vòng sửa bảo mật — onboarding nhận lại 0232"}
+{"at":"2026-10-07T08:56:33.395Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MIGRATION_RELEASED","mission":"sales-human-takeover","detail":"0232 — Hoán đổi: takeover lấy 0231 (đúng số tệp đang mang), 0232 trả cho onboarding"}
