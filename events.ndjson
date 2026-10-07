@@ -289,3 +289,4 @@
 {"at":"2026-10-07T08:56:33.395Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MIGRATION_RELEASED","mission":"sales-human-takeover","detail":"0232 — Hoán đổi: takeover lấy 0231 (đúng số tệp đang mang), 0232 trả cho onboarding"}
 {"at":"2026-10-07T08:56:39.987Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MIGRATION_RESERVED","mission":"sales-human-takeover","detail":"0231"}
 {"at":"2026-10-07T08:56:46.537Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MIGRATION_RESERVED","mission":"tech-worker-onboarding","detail":"0232"}
+{"at":"2026-10-07T08:57:09.437Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"sales-human-takeover","detail":"#633 cho feat/sales-human-takeover @ 758eb0810199"}
