@@ -29,20 +29,20 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-07T22:50:41.455Z",
-  "updated_at": "2026-10-07T23:03:23.706Z",
-  "last_heartbeat": "2026-10-07T23:03:23.706Z",
+  "updated_at": "2026-10-07T23:12:22.153Z",
+  "last_heartbeat": "2026-10-07T23:12:22.153Z",
   "definition_of_done": [],
   "handoff": {
     "branch": "fix/ai-balance-hardening",
-    "sha": "51848fd3cf3d03095c817def480fe369cbc9643e",
-    "at": "2026-10-07T23:03:23.706Z",
+    "sha": "6ee19a60eb2772cddc4d1848dbf7d2e880e4b234",
+    "at": "2026-10-07T23:12:22.153Z",
     "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
     "title": "Số dư AI chặt thêm: sao kê không nạp hộ, tài khoản nhận đọc hỏng không khoá tiền, báo hết số dư không nuốt nhau",
-    "summary": "Vòng 2: N1 chiều ngược — chỉ tự cộng dòng do SePay tạo (source WEBHOOK/API); dòng sao kê/gõ tay SePay điền mã sau ⇒ «chưa xác nhận», người vận hành cộng tay.",
+    "summary": "Rebase sau #648; không đổi logic so với 51848fd3 (review PASS).",
     "tests": [
-      "typecheck + eslint: sạch",
-      "bank-ledger · ai-balance · ai-balance-usage · ai-balance-hardening · platform-billing: đạt",
-      "kiểm đột biến 7/7 bị bắt, đối chứng đạt"
+      "rebase lên main 1de28d45 (#648): xung đột duy nhất dòng import drizzle (lấy hợp)",
+      "bank-ledger · ai-balance · ai-balance-usage · ai-balance-economics · ai-balance-hardening · platform-billing · pricing-v1 · saas-platform · platform-isolation-static: đạt",
+      "typecheck + eslint: sạch"
     ]
   }
 }
