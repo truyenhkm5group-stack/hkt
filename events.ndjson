@@ -356,3 +356,4 @@
 {"at":"2026-10-07T16:31:36.285Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"saas-l1-hide-internal","detail":"#639 @ a67959488df5 → fbef46ca8b66 (MERGE_NOW · MEDIUM · gates success)"}
 {"at":"2026-10-07T16:35:08.076Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"saas-l2-customer-shell","detail":"feat/saas-l2-customer-shell @ e470cc02bc61 · 1 lệnh kiểm thử"}
 {"at":"2026-10-07T16:35:13.572Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#638 @ e470cc02bc61 · PASS @0305c8aa + delta tích hợp: gộp main (#637 #639 #642) + SALES_AGENT_CHANNELS_HREF = /ai/channels (khoá bằng CHANNELS_ROUTE); bài liên quan chạy riêng ĐẠT"}
+{"at":"2026-10-07T16:39:59.009Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"saas-l3-inbox","detail":"feat/saas-l3-inbox @ 4f2a1c077572 · 1 lệnh kiểm thử"}
