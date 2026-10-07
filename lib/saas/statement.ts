@@ -17,7 +17,7 @@
 import type { AllocatedLine } from "@/lib/saas/allocation";
 import { subscriptionGrantsUse, type BillingMode, type EffectiveSubscriptionStatus } from "@/lib/saas/policy";
 
-/** v2 (0226): giá gói theo PHIÊN BẢN đã ghim + phần vượt theo khối khách AI / fanpage / người dùng thêm (`billedOverage`). */
+/** v2 (0228): giá gói theo PHIÊN BẢN đã ghim + phần vượt theo khối khách AI / fanpage / người dùng thêm (`billedOverage`). */
 export const STATEMENT_ENGINE_VERSION = "saas-statement-v2";
 
 export type StatementLineKind = "PLAN" | "PRODUCT_PLAN" | "ADDON" | "OVERAGE" | "AI_COST" | "ALLOCATED_COST" | "DIRECT_COST";

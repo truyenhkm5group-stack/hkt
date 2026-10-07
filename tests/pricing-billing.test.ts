@@ -97,8 +97,9 @@ function testPure() {
   assert.equal(trialDaysOf("growth"), null);
 
   // Bảng chân lý tính năng.
-  const base = { key: "api" as const, isHome: false, grandfathered: false, overrides: {}, planFeatures: ["ai_sales" as const] };
-  assert.deepEqual(featureGranted({ ...base, isHome: true }), { key: "api", granted: true, source: "HOME" });
+  const base = { key: "api" as const, grandfathered: false, overrides: {}, planFeatures: ["ai_sales" as const] };
+  // Không còn bậc "tổ chức nhà" (Phase 14): gói nội bộ khai đủ tính năng nên có API ở bậc GÓI, như mọi khách.
+  assert.deepEqual(featureGranted({ ...base, planFeatures: [...FEATURE_KEYS] }), { key: "api", granted: true, source: "PLAN" });
   assert.equal(featureGranted(base).granted, false);
   assert.equal(featureGranted({ ...base, grandfathered: true }).source, "GRANDFATHERED");
   assert.equal(featureGranted({ ...base, grandfathered: true, overrides: { api: false } }).granted, false, "ghi đè thắng cả giữ từ trước");
@@ -213,7 +214,7 @@ function testNoPlanNameComparisons() {
   }
   assert.deepEqual(bad, [], "mã nghiệp vụ hỏi hasFeature(...) / checkUsageQuota(...), KHÔNG so khoá / tên gói bằng chuỗi gõ tay — gói là dữ liệu người vận hành sửa");
   assert.equal(homeDefs, 1, "HOME_PLAN_KEY khai đúng MỘT chỗ (lib/entitlements/kinds.ts)");
-  // Trang giá công khai chỉ đọc BẢNG GIÁ ĐANG NIÊM YẾT (sổ giá có phiên bản, 0226) + chế độ đăng ký (qua public-site) — không
+  // Trang giá công khai chỉ đọc BẢNG GIÁ ĐANG NIÊM YẾT (sổ giá có phiên bản, 0228) + chế độ đăng ký (qua public-site) — không
   // import truy vấn dữ liệu khách nào.
   const pub = readFileSync(path.join(goc, "lib/queries/public-pricing.ts"), "utf8");
   const imports = [...pub.matchAll(/from "([^"]+)"/g)].map((m) => m[1]).sort();

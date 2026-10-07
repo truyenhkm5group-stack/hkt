@@ -14,6 +14,7 @@ import { runningTechAgentRuns } from "@/lib/queries/tech-agents";
 import { getTechSystemHealth } from "@/lib/queries/tech-health";
 import { lastSuccessfulDeployment, openTechIncidents, recentTechDeployments } from "@/lib/queries/tech-ops";
 import { commitMatches } from "@/lib/tech/health-parse";
+import { techNeedsOwnerQueue } from "@/lib/queries/tech-control-plane";
 
 export const metadata = { title: "Phòng Tech AI" };
 
@@ -26,7 +27,7 @@ export default async function TechPage() {
   const user = await requirePermission("tech:view");
   const canManage = can(user, "tech:manage");
 
-  const [health, counts, top, cho, chay, deploys, lastDeploy, incidents] = await Promise.all([
+  const [health, counts, top, cho, chay, deploys, lastDeploy, incidents, canChuShop] = await Promise.all([
     getTechSystemHealth(),
     techOverviewCounts(),
     topTechTasks(8),
@@ -35,7 +36,9 @@ export default async function TechPage() {
     recentTechDeployments(5),
     lastSuccessfulDeployment(),
     openTechIncidents(6),
+    techNeedsOwnerQueue(),
   ]);
+  const goiChuShop = canChuShop.filter((t) => t.status === "NEEDS_OWNER");
 
   /*
     Commit ĐANG CHẠY (lời khai của tiến trình) so với commit của lượt deploy THÀNH CÔNG gần nhất
@@ -63,6 +66,27 @@ export default async function TechPage() {
       />
 
       <TechNav />
+
+      {/*
+        ───────── CẦN CHỦ SHOP: đứng TRÊN mọi thẻ số ─────────
+        Việc máy / agent đã dừng lại vì cần đúng một việc của chủ shop. Câu việc phải làm đứng đầu — đọc
+        trên điện thoại là làm được, không phải mở thêm trang nào để hiểu.
+      */}
+      {goiChuShop.length > 0 ? (
+        <Link href="/tech/needs-owner" className="block rounded-xl border-2 border-fuchsia-300 bg-fuchsia-50 p-4 dark:border-fuchsia-800 dark:bg-fuchsia-950/40">
+          <p className="text-sm font-bold text-fuchsia-900 dark:text-fuchsia-200">
+            {formatNumber(goiChuShop.length)} việc đang chờ bạn
+          </p>
+          <ul className="mt-1.5 space-y-1 text-sm">
+            {goiChuShop.slice(0, 3).map((t) => (
+              <li key={t.id} className="truncate">
+                <span className="font-semibold">{t.code}</span> · {t.ownerAction}
+              </li>
+            ))}
+          </ul>
+          {goiChuShop.length > 3 ? <p className="mt-1 text-xs text-muted-foreground">và {formatNumber(goiChuShop.length - 3)} việc nữa →</p> : null}
+        </Link>
+      ) : null}
 
       {/* ───────── Sáu thẻ dẫn dắt. Mỗi con số mở đúng bộ lọc đã sinh ra nó. ───────── */}
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">

@@ -254,7 +254,7 @@ async function cleanup(savedReceiver: unknown, savedPrices: Map<string, number |
   else await pdb.update(schema.platformSettings).set({ value: savedReceiver }).where(eq(schema.platformSettings.key, BILLING_RECEIVER_KEY));
   for (const [key, price] of savedPrices) await pdb.update(schema.platformPlans).set({ priceVnd: price }).where(eq(schema.platformPlans.key, key));
   for (const [key, prices] of savedAddonPrices) await pdb.update(schema.platformPlans).set({ addonPrices: (prices ?? {}) as Record<string, unknown> }).where(eq(schema.platformPlans.key, key));
-  // 0226: sửa giá = phát hành phiên bản giá mới (`cat-…`) — dọn mọi phiên bản bài kiểm tạo + ghim của tổ chức thử.
+  // 0228: sửa giá = phát hành phiên bản giá mới (`cat-…`) — dọn mọi phiên bản bài kiểm tạo + ghim của tổ chức thử.
   await pdb.delete(schema.platformPricePins).where(inArray(schema.platformPricePins.orgCode, [...ORGS]));
   const extra = (await pdb.select({ key: schema.platformPriceVersions.key }).from(schema.platformPriceVersions).where(like(schema.platformPriceVersions.key, "cat-%"))).map((r) => r.key);
   if (extra.length) {
@@ -337,8 +337,8 @@ export async function testPlatformBilling() {
 
   for (const code of ORGS) await provisionOrganization({ code, name: `Tổ chức ${code}`, modules: ["customers"], admin: { email: `admin@${code}.local`, name: `QT ${code}`, password: "Billing@12345" }, source: "TEST", actor: null });
   try {
-    // Ba gói bán gieo bằng 0187 — `platform_plans` giữ nguyên (giá legacy, ảnh chụp ở 0226). Tổ chức MỚI (chưa ghim) mua theo
-    // bảng giá V1 đang niêm yết (0226): Starter 790.000 · Growth 1.490.000.
+    // Ba gói bán gieo bằng 0187 — `platform_plans` giữ nguyên (giá legacy, ảnh chụp ở 0228). Tổ chức MỚI (chưa ghim) mua theo
+    // bảng giá V1 đang niêm yết (0228): Starter 790.000 · Growth 1.490.000.
     const plans = await listPlans();
     assert.deepEqual(
       ["starter", "growth", "pro"].map((k) => plans.find((p) => p.key === k)?.priceVnd),

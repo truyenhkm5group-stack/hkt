@@ -19,7 +19,9 @@ import { createHash } from "node:crypto";
 import { and, asc, desc, eq, gte, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import type { AiImage } from "@/lib/ai/images";
-import { estimateCostUsd, type AiBlock, type AiMessage, type AiProvider } from "@/lib/ai/provider";
+import { estimateCostUsd, getAiProvider, type AiBlock, type AiMessage, type AiProvider } from "@/lib/ai/provider";
+import { aiDisabledReason } from "@/lib/ai/router";
+import type { AiBillingSource } from "@/lib/ai-usage/types";
 import { ByokAnthropicProvider, ByokGeminiProvider, ByokOpenAiProvider } from "@/lib/ai-builder/providers";
 import { platformChatAi } from "@/lib/ai-builder/provider";
 import { aiKillSwitchDenial } from "@/lib/ai-usage/control";
@@ -398,7 +400,7 @@ let providerOverride: ((cfg: SalesChatbotConfig) => AiProvider | null) | null = 
  * Nhà cung cấp AI của chatbot (AI dùng chung của nền tảng HOẶC khoá BYOK của tổ chức; bài kiểm thay được) — dùng chung cho
  * «Học từ hội thoại cũ» và nhắc khách. `source` = nguồn trả tiền để ghi sổ AI / kiểm hạn mức đúng chỗ.
  */
-export async function salesChatProvider(usage?: Partial<FailoverUsage>): Promise<{ ok: true; provider: AiProvider; source: "PLATFORM" | "BYOK" } | { ok: false; error: string }> {
+export async function salesChatProvider(usage?: Partial<FailoverUsage>): Promise<{ ok: true; provider: AiProvider; source: AiBillingSource } | { ok: false; error: string }> {
   return providerFor(await loadSalesChatbotConfig(), { feature: usage?.feature ?? "sales_chatbot", actorId: usage?.actorId ?? null, ref: usage?.ref ?? null });
 }
 
@@ -424,7 +426,7 @@ export async function describeCustomerImages(urls: readonly string[], opts: { co
     if (!cfg.enabled) return fallback;
     const org = await currentOrganization();
     if (await aiKillSwitchDenial(org.code)) return fallback;
-    if (!(await checkAiQuota(org.code, salesBotBillingSource(cfg.connectorKey))).ok) return fallback;
+    if (!(await checkAiQuota(org.code, salesBotBillingSource(cfg.connectorKey, { home: org.isHome }))).ok) return fallback;
     const prov = await providerFor(cfg, { feature: "sales_chatbot", actorId: opts.actorId ?? null, ref: opts.conversationId ?? null });
     if (!prov.ok) return fallback;
     const images = (await Promise.all(list.map((u) => fetchCustomerImage(u, opts.fetch)))).filter((x): x is AiImage => x !== null);
@@ -450,20 +452,29 @@ export function setSalesChatProviderForTests(fn: ((cfg: SalesChatbotConfig) => A
   providerOverride = fn;
 }
 
-type ProviderPick = { ok: true; provider: AiProvider; source: "PLATFORM" | "BYOK" } | { ok: false; error: string };
+type ProviderPick = { ok: true; provider: AiProvider; source: AiBillingSource } | { ok: false; error: string };
 
 /** Ngữ cảnh ghi sổ AI cho lời gọi hỏng của khoá chính khi lượt đã chuyển sang khoá dự phòng (provider-failover.ts). */
 export type FailoverUsage = { feature: AiUsageFeature; actorId: string | null; ref: string | null };
 
 /** MỘT khoá AI (chính hoặc dự phòng) ⇒ provider. Bài kiểm thay được qua `providerOverride` (nhận cấu hình mang khoá đó). */
 async function resolveConnector(cfg: SalesChatbotConfig, key: SalesChatbotConfig["connectorKey"], modelName: string, usage?: FailoverUsage): Promise<ProviderPick> {
-  const source = salesBotBillingSource(key);
+  const org = await currentOrganization();
+  const source = salesBotBillingSource(key, { home: org.isHome });
   if (providerOverride) {
     const p = providerOverride(key === cfg.connectorKey && modelName === cfg.model ? cfg : { ...cfg, connectorKey: key, model: modelName });
     return p ? { ok: true, provider: p, source } : { ok: false, error: "Không có AI (kiểm thử)." };
   }
+  if (key === "platform" && org.isHome) {
+    // Tổ chức NHÀ (Phase 8b): «AI không phải khoá riêng» = khoá `.env` của nhà — ĐÚNG bộ chọn mà AI Builder dùng cho nhà
+    // (`getAiProvider`, nhánh 2 của lib/ai-builder/provider.ts). `getAiProvider` tự trả `null` trong ngữ cảnh tường minh của
+    // tổ chức khác, nên khoá của nhà không bao giờ trả tiền cho ai khác. Ô model của cấu hình không áp: model theo `.env`.
+    // Platform AI Policy (#618) KHÔNG áp ở đây: nó điều khiển model của khoá NỀN TẢNG (`PLATFORM_AI_API_KEY`, khác khoá nhà),
+    // vốn chỉ phục vụ tổ chức khách. Sổ AI vẫn ghi model THẬT của từng vòng (tách dòng theo `res.model` ở chatTurnCore).
+    const home = getAiProvider("copilot");
+    return home ? { ok: true, provider: home, source } : { ok: false, error: `Tổ chức nhà chưa cấu hình AI: ${aiDisabledReason() ?? "không rõ"}.` };
+  }
   if (key === "platform") {
-    const org = await currentOrganization();
     // Platform AI Policy: băm canary theo HỘI THOẠI (một hội thoại không nhảy model giữa hai tin); lượt hỏng của model chính
     // mà model dự phòng đã đỡ vẫn là MỘT dòng ERROR trong sổ AI (token / tiền NULL) — tỷ lệ lỗi của model mới đo được.
     const plat = await platformChatAi(org.code, {
@@ -574,7 +585,7 @@ export function withModelFallback(primary: AiProvider, fallback: AiProvider, onF
  * chính câu mẫu đó); thiếu ⇒ sau toàn bộ phần chữ.
  */
 /**
- * Đồng hồ khách AI (0226): `aiTexts` = chữ của từng tin DO MODEL SINH trong lượt này, đúng như `view.messages[].text` của tin đó
+ * Đồng hồ khách AI (0228): `aiTexts` = chữ của từng tin DO MODEL SINH trong lượt này, đúng như `view.messages[].text` của tin đó
  * (đánh dấu TẠI NGUỒN — câu mẫu / ảnh mẫu / câu hệ thống / câu chuyển người không bao giờ nằm ở đây). Kênh gửi đếm một tin là
  * "câu AI đã gửi" khi chữ của nó nằm trong tập này. `aiGenerated` = tập khác rỗng.
  */
@@ -741,12 +752,12 @@ async function chatTurnCore(conversationId: string, rawText: string, opts: { cha
     };
     const killed = await aiKillSwitchDenial(org.code);
     if (killed) return blocked("DISABLED", "AI đang bị người vận hành nền tảng tạm tắt cho tổ chức này — liên hệ người vận hành", `AI đang tắt: ${killed}`);
-    const billing = salesBotBillingSource(cfg.connectorKey);
+    const billing = salesBotBillingSource(cfg.connectorKey, { home: org.isHome });
     const quota = await checkAiQuota(org.code, billing);
     // Hạn mức của nguồn trả tiền của khoá CHÍNH đã hết (vd AI dùng chung hết credit gói) mà khoá dự phòng trả tiền ở NGUỒN
     // KHÁC còn hạn mức ⇒ lượt này đi thẳng khoá dự phòng (provider-failover.ts). Dòng BLOCKED_QUOTA của khoá chính vẫn ghi.
     const fbQuota = effectiveFallback(cfg);
-    const fbSource = fbQuota ? salesBotBillingSource(fbQuota.connectorKey) : null;
+    const fbSource = fbQuota ? salesBotBillingSource(fbQuota.connectorKey, { home: org.isHome }) : null;
     if (!quota.ok) await recordAiUsage({ orgCode: org.code, feature: "sales_chatbot", source: billing, provider: null, model: null, requests: 0, inputTokens: null, outputTokens: null, costUsd: null, status: "BLOCKED_QUOTA", actorId: opts.actorId ?? null, ref: conv.id }).catch(() => undefined);
     if (!quota.ok && !(fbSource && fbSource !== billing && (await checkAiQuota(org.code, fbSource)).ok)) return blocked("QUOTA", "Tổ chức đã dùng hết hạn mức AI của gói dịch vụ — nâng gói hoặc chờ kỳ sau", quota.error);
     const prov = await providerFor(cfg, { feature: "sales_chatbot", actorId: opts.actorId ?? null, ref: conv.id }, quota.ok ? undefined : quota.error);
@@ -795,7 +806,7 @@ async function chatTurnCore(conversationId: string, rawText: string, opts: { cha
     // SỔ AI THEO NHÀ CUNG CẤP THẬT (provider-failover.ts): vòng công cụ có thể đổi khoá giữa chừng (khoá chính hỏng ở vòng 3)
     // ⇒ mỗi đoạn liền một nhà cung cấp là MỘT dòng, để tiền không ghi nhầm nguồn trả (BYOK ≠ credit gói). Không đổi khoá ⇒
     // đúng một dòng như trước.
-    type Segment = { name: string; source: "PLATFORM" | "BYOK"; model: string; calls: number; inTok: number; outTok: number; cost: number | null };
+    type Segment = { name: string; source: AiBillingSource; model: string; calls: number; inTok: number; outTok: number; cost: number | null };
     const newSegment = (): Segment => ({ name: prov.provider.name, source: prov.source, model: prov.provider.model, calls: 0, inTok: 0, outTok: 0, cost: 0 });
     let seg = newSegment();
     const recordSegment = (s: Segment, st: "OK" | "ERROR") => recordAiUsage({ orgCode: org.code, feature: "sales_chatbot", source: s.source, provider: s.name, model: s.model, requests: s.calls, inputTokens: s.inTok, outputTokens: s.outTok, costUsd: s.calls ? s.cost : null, status: st, actorId: opts.actorId ?? null, ref: conv.id }).catch(() => undefined);

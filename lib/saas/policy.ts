@@ -73,6 +73,17 @@ export function marginApplicable(mode: BillingMode): boolean {
   return mode === "EXTERNAL_INVOICE";
 }
 
+/**
+ * Workspace này có thể bị KHOÁ THANH TOÁN không (quá hạn + hết ân hạn ⇒ chỉ xem). MỘT vị từ cho HAI chỗ phải nói cùng một
+ * điều: cổng ghi `lib/auth/session.ts` (khoá) và trang `/settings/plan` (khung gia hạn bằng QR). Hai chỗ đọc hai điều kiện
+ * khác nhau là đường cụt: bị khoá → «Gia hạn ngay» → trang không có mã QR (review PR #622: workspace khách nằm trong tài
+ * khoản chargeback). Nền tảng không thu phí của chính nó, nên workspace nhà không bị khoá — nhánh AN TOÀN / thu phí, giữ
+ * (docs/saas/ENTITLEMENTS.md «Nhánh GIỮ»). Loại tài khoản KHÔNG tham gia: khoá đọc thuê bao, không đọc `billing_mode`.
+ */
+export function billingLockApplies(org: { isHome: boolean }): boolean {
+  return !org.isHome;
+}
+
 /** Tài khoản loại này có được GỢI Ý gộp theo tên không — chỉ khách ngoài (khách nội bộ do người vận hành tự quản). */
 /**
  * Job cấp phát có được HUỶ thuê bao (thu hồi module độc quyền) của tài khoản loại này không. Nội bộ thì KHÔNG: huỷ ERP của

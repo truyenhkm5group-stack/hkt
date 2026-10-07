@@ -20,6 +20,7 @@ import { appendBotMessage, conversationView, loadSalesChatbotConfig, salesChatPr
 import { recordConversationEvent } from "@/lib/sales-chatbot/events";
 import { PAGE_REPLY, type FanpageDeps } from "@/lib/sales-chatbot/fanpage";
 import { sendBotText } from "@/lib/sales-chatbot/messenger";
+import { pageRuntimeMode } from "@/lib/sales-chatbot/page-runtime";
 import { nextFollowupAt, withinMessagingWindow } from "@/lib/sales-chatbot/followup-shared";
 import { loadFollowupSettings } from "@/lib/sales-chatbot/followup-settings";
 import { publishedPlaybookText } from "@/lib/sales-chatbot/playbook";
@@ -107,6 +108,11 @@ export async function runSalesFollowups(deps: FanpageDeps = {}): Promise<Followu
       stop("thiếu địa chỉ fanpage");
       continue;
     }
+    // Cổng page của nhà (page-runtime.ts): page chưa LIVE ⇒ thôi nhắc (đã giành mốc ⇒ không còn lịch), KHÔNG gọi AI, không gửi.
+    if ((await pageRuntimeMode(row.pageId)) !== "LIVE") {
+      stop("page chưa LIVE cho bot Chốt Đơn (workspace nhà)");
+      continue;
+    }
     // Nhân viên / tự động của page đã nhắn SAU tin cuối của bot (vd nhân viên vào chốt đơn trên Pancake) ⇒ khách không còn
     // «im lặng với bot» — bot nhắc chen vào là làm phiền khách đã mua. Phủ cả hội thoại đã xếp lịch trước khi có chặn lúc nhận.
     const since = row.lastBotAt ?? row.waitingSince;
@@ -135,7 +141,7 @@ export async function runSalesFollowups(deps: FanpageDeps = {}): Promise<Followu
       await putBack("AI đang bị tạm tắt");
       continue;
     }
-    if (!(await checkAiQuota(org.code, salesBotBillingSource(cfg.connectorKey))).ok) {
+    if (!(await checkAiQuota(org.code, salesBotBillingSource(cfg.connectorKey, { home: org.isHome }))).ok) {
       await putBack("hết hạn mức AI");
       continue;
     }

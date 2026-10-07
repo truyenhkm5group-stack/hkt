@@ -56,6 +56,8 @@ import { readPinnedArm, replyGate } from "@/lib/sales-chatbot/operating-mode-sha
 import { applyConversationControl, controlOf, controlSkipNote } from "@/lib/sales-chatbot/conversation-control-shared";
 import { botMaySend, captureSendSnapshot } from "@/lib/sales-chatbot/conversation-control";
 import { noteMessengerGraphFailure } from "@/lib/sales-chatbot/messenger-health";
+import { botSendAllowed, inboundPageGate } from "@/lib/sales-chatbot/page-runtime";
+import { PAGE_NOT_LIVE_SEND_ERROR } from "@/lib/sales-chatbot/page-runtime-shared";
 
 /**
  * ═══════════ MESSENGER TRỰC TIẾP — BOT FANPAGE KHÔNG CẦN PANCAKE (0207 · docs/platform/messenger.md) ═══════════
@@ -370,6 +372,8 @@ const fanpageKey = (pageId: string, psid: string) => fanpageVisitorKey(pageId, p
 export async function sendMessengerPageText(pageId: string, psid: string, text: string, deps: FanpageDeps = {}, mark?: StaffMark): Promise<{ ok: true } | { ok: false; error: string }> {
   const tk = await messengerTokenFor(pageId);
   if (!tk.ok) return { ok: false, error: tk.error };
+  // Chốt cuối của cổng page (page-runtime.ts): tin BOT chỉ đi khi page LIVE; tin nhân viên (`mark`) không qua cổng.
+  if (!mark && !(await botSendAllowed(pageId))) return { ok: false, error: PAGE_NOT_LIVE_SEND_ERROR };
   const app = messengerApp();
   if (!app) return { ok: false, error: "Nền tảng chưa cấu hình app Facebook" };
   const token = tk.token;
@@ -443,6 +447,8 @@ export async function sendPageImages(pageId: string, threadId: string, images: r
  * đó, không chặn ảnh sau; lỗi gửi ⇒ dừng, trả câu lỗi.
  */
 export async function sendBotImages(pageId: string, psid: string, imageIds: readonly string[], deps: FanpageDeps = {}): Promise<{ ok: true; sent: number } | { ok: false; error: string }> {
+  // Chốt cổng page (page-runtime.ts) trước cả lời đọc token: ảnh của bot chỉ đi khi page LIVE.
+  if (!(await botSendAllowed(pageId))) return { ok: false, error: PAGE_NOT_LIVE_SEND_ERROR };
   const tk = await messengerTokenFor(pageId);
   if (!tk.ok) return { ok: false, error: tk.error };
   const app = messengerApp();
@@ -534,6 +540,14 @@ export async function processMessengerThread(pageId: string, psid: string, deps:
         .set(status === "PENDING" ? { claimId: null, claimedAt: null, note } : { status, processedAt: now(), note })
         .where(and(inArray(t.id, ids), eq(t.claimId, claim)));
     const lastCustomerAt = new Date(Math.max(...claimed.map((r) => r.createdAt.getTime())));
+    // CỔNG PAGE CỦA NHÀ (page-runtime.ts) — cùng cổng với đường Pancake.
+    const pageGate = await inboundPageGate({ pageId, threadId: psid, rows: claimed, conversation: () => conversationFor(pageId, psid), mirror: (id, at) => mirrorFanpageContext(id, pageId, psid, at) });
+    if (pageGate) {
+      await finish("SKIPPED", pageGate);
+      out.processed += ids.length;
+      out.skipped = pageGate;
+      continue;
+    }
     if (await pageRepliedSince()) {
       await finish("SKIPPED", PAGE_REPLIED_REASON);
       out.processed += ids.length;
@@ -646,6 +660,13 @@ export async function processMessengerThread(pageId: string, psid: string, deps:
     if (commentRow) {
       // MỘT tin riêng gộp mọi câu trả lời (Meta chỉ cho một tin riêng mỗi bình luận). Ảnh câu mẫu không đi kèm được tin riêng.
       const replyText = replies.map((r) => r.text).join("\n\n").trim();
+      // Chốt cổng page ngay trước tin riêng trả lời bình luận (sendPrivateReply là lời gọi Graph trực tiếp).
+      if (!(await botSendAllowed(pageId))) {
+        await finish("SKIPPED", PAGE_NOT_LIVE_SEND_ERROR);
+        out.processed += ids.length;
+        out.skipped = PAGE_NOT_LIVE_SEND_ERROR;
+        continue;
+      }
       const app = messengerApp();
       const commentId = commentRow.messageId.replace(/^comment:/, "");
       const pr = replyText && app ? await sendPrivateReply(app, token, commentId, replyText, deps.fetch ?? fetch) : null;
@@ -665,7 +686,7 @@ export async function processMessengerThread(pageId: string, psid: string, deps:
       continue;
     }
     let sendError: string | null = null;
-    // Đồng hồ khách AI (0226): đếm câu DO MODEL SINH (đánh dấu tại nguồn — `turn.aiTexts`) đã gửi THÀNH CÔNG ở CHÍNH lượt
+    // Đồng hồ khách AI (0228): đếm câu DO MODEL SINH (đánh dấu tại nguồn — `turn.aiTexts`) đã gửi THÀNH CÔNG ở CHÍNH lượt
     // này; câu mẫu (chữ hay kèm ảnh) đi trong lượt model không bao giờ được đếm.
     let aiSent = 0;
     const aiTexts = new Set(turn.aiTexts ?? []);

@@ -10,7 +10,7 @@ import type { SignupMode } from "@/lib/onboarding/shared";
  *
  * Chỉ đọc HAI thứ của nền tảng, không một dòng dữ liệu khách nào:
  *  · chế độ đăng ký đang có hiệu lực — để nút «Đăng ký» nói đúng điều sẽ xảy ra khi bấm (mở · cần mã mời · tạm đóng);
- *  · gói cước của BẢNG GIÁ ĐANG NIÊM YẾT (phiên bản CATALOG hiện hành — `lib/pricing/price-book.ts::catalogPlans`, 0226) — giá
+ *  · gói cước của BẢNG GIÁ ĐANG NIÊM YẾT (phiên bản CATALOG hiện hành — `lib/pricing/price-book.ts::catalogPlans`, 0228) — giá
  *    in trên trang LÀ giá hoá đơn của khách mới dùng, không gõ lại số nào ở đây (gõ lại là mở đường cho trang giới thiệu
  *    nói một giá, hoá đơn nói giá khác).
  *

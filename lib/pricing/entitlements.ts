@@ -9,16 +9,19 @@
  * Đọc ở mặt phẳng điều khiển (`platform_plans` · `platform_org_pricing` · `platform_settings`), đệm 10 giây trong tiến trình
  * như tình trạng thu phí; lượt ghi của người vận hành xoá đệm ngay. Bảng chưa có (máy chưa migrate 0222) ⇒ coi như không
  * có dòng ghi đè — không ai mất tính năng vì một lỗi đọc.
+ *
+ * Workspace nhà KHÔNG có nhánh riêng ở đây (Phase 14): `resolveOrgPricing` đọc gói được GÁN cho nó (`planKeyOf` → cột
+ * `platform_organizations.plan`) → dòng ghi đè `platform_org_pricing` → giữ từ trước, đúng như mọi khách.
  */
 import { eq } from "drizzle-orm";
 import { getPlatformDb, schema } from "@/db";
-import { DEFAULT_PLAN_KEY, planKeyOf } from "@/lib/entitlements/check";
+import { effectivePlanRow, planKeyOf } from "@/lib/entitlements/check";
 import { recordAiUsage, type AiUsageEntry } from "@/lib/ai-usage/ledger";
 import { currentOrganization } from "@/lib/platform/context";
 import { findOrganization } from "@/lib/platform/organizations";
 import { readPeriodUsage } from "@/lib/platform/usage-meter";
 import type { Organization } from "@/lib/platform/types";
-import { applyQuotaOverrides, parseCommercial, planQuotas, QUOTA_KEYS, type PlanCommercial, type QuotaKey } from "@/lib/pricing/catalog";
+import { applyQuotaOverrides, parseCommercial, planQuotas, type PlanCommercial, type QuotaKey } from "@/lib/pricing/catalog";
 import { featureGranted, FEATURE_KEYS, parseFeatureOverrides, type FeatureDecision, type FeatureKey } from "@/lib/pricing/features";
 import { DEFAULT_GUARD_CONFIG, evaluateQuota, parseGuardConfig, type Enforcement, type GuardConfig, type QuotaVerdict } from "@/lib/pricing/guard";
 import { usagePeriodOf, type MeterKey, type MeterReadings } from "@/lib/pricing/meter";
@@ -81,8 +84,7 @@ export async function readGuardConfig(opts: { fresh?: boolean } = {}): Promise<G
 
 export type OrgPricing = {
   orgCode: string;
-  isHome: boolean;
-  /** Giá / phần thương mại theo PHIÊN BẢN giá của tổ chức (0226, `lib/pricing/price-book.ts`). */
+  /** Giá / phần thương mại theo PHIÊN BẢN giá của tổ chức (0228, `lib/pricing/price-book.ts`). */
   plan: { key: string; name: string; priceVnd: number | null; yearlyFreeMonths: number; limits: unknown; commercial: PlanCommercial; priceVersionKey: string | null; planPrice: PlanPrice | null } | null;
   /** Gói khai trên tổ chức không có trong bảng ⇒ đang áp gói Dùng thử. */
   fellBack: boolean;
@@ -92,19 +94,16 @@ export type OrgPricing = {
 };
 
 export async function resolveOrgPricing(org: Pick<Organization, "code" | "isHome" | "plan">): Promise<OrgPricing> {
-  const row = org.isHome ? NO_ROW : await readOrgPricingRow(org.code);
-  // Gói "như hoá đơn của tổ chức đọc" — giá + phần thương mại theo phiên bản đã ghim (0226).
-  const plans = await plansForOrgSafe(org.code);
-  const key = planKeyOf(org);
-  const hit = plans.find((p) => p.key === key);
-  const p = hit ?? plans.find((x) => x.key === DEFAULT_PLAN_KEY) ?? null;
+  const row = await readOrgPricingRow(org.code);
+  // Gói "như hoá đơn của tổ chức đọc" — giá + phần thương mại theo phiên bản đã ghim (0228), cùng phép chọn gói hiệu lực.
+  const picked = effectivePlanRow(await plansForOrgSafe(org.code), planKeyOf(org));
+  const p = picked?.row ?? null;
   const commercial = parseCommercial(p?.commercial);
-  const quotas = org.isHome ? (Object.fromEntries(QUOTA_KEYS.map((k) => [k, null])) as Record<QuotaKey, null>) : applyQuotaOverrides(planQuotas(p?.limits, commercial), row.quotaOverrides);
+  const quotas = applyQuotaOverrides(planQuotas(p?.limits, commercial), row.quotaOverrides);
   return {
     orgCode: org.code,
-    isHome: org.isHome,
     plan: p ? { key: p.key, name: p.name, priceVnd: p.priceVnd, yearlyFreeMonths: p.yearlyFreeMonths, limits: p.limits, commercial, priceVersionKey: p.priceVersionKey, planPrice: p.planPrice } : null,
-    fellBack: !org.isHome && !hit,
+    fellBack: picked?.fellBack ?? true,
     row,
     quotas,
   };
@@ -119,7 +118,7 @@ export async function featureDecisions(orgCode?: string): Promise<FeatureDecisio
   const org = await targetOrg(orgCode);
   if (!org) return FEATURE_KEYS.map((key) => ({ key, granted: false, source: "PLAN" as const }));
   const pricing = await resolveOrgPricing(org);
-  return FEATURE_KEYS.map((key) => featureGranted({ key, isHome: org.isHome, grandfathered: pricing.row.grandfathered, overrides: pricing.row.featureOverrides, planFeatures: pricing.plan?.commercial.features ?? null }));
+  return FEATURE_KEYS.map((key) => featureGranted({ key, grandfathered: pricing.row.grandfathered, overrides: pricing.row.featureOverrides, planFeatures: pricing.plan?.commercial.features ?? null }));
 }
 
 /**
@@ -130,7 +129,7 @@ export async function hasFeature(key: FeatureKey, opts: { orgCode?: string } = {
   const org = await targetOrg(opts.orgCode);
   if (!org) return false;
   const pricing = await resolveOrgPricing(org);
-  return featureGranted({ key, isHome: org.isHome, grandfathered: pricing.row.grandfathered, overrides: pricing.row.featureOverrides, planFeatures: pricing.plan?.commercial.features ?? null }).granted;
+  return featureGranted({ key, grandfathered: pricing.row.grandfathered, overrides: pricing.row.featureOverrides, planFeatures: pricing.plan?.commercial.features ?? null }).granted;
 }
 
 /** Ô hạn mức ⇒ đồng hồ đo đếm nó. `users` đếm ở `lib/entitlements` (bộ đếm người dùng đã có), không đo lại ở đây. */
@@ -168,7 +167,7 @@ export async function checkUsageQuota(key: Exclude<QuotaKey, "users">, opts: { o
   const c = pricing.plan?.commercial;
   const evalWith = (used: number | null) =>
     evaluateQuota({ key, used, included, policy: c?.overage.policy ?? "SOFT_ONLY", unitPriceVnd: c?.overage.unitPricesVnd[key] ?? null, graceAllowancePct: c?.overage.graceAllowancePct ?? 0, limitMode: c?.limitModes[key] ?? "SOFT", enforcement: pricing.row.enforcement, config, delta: opts.delta });
-  if (org.isHome || included === null || included === undefined) return evalWith(null);
+  if (included === null || included === undefined) return evalWith(null);
   let readings = await readingsFor(org, now, false);
   let verdict = evalWith(readings[QUOTA_METER[key]]);
   if (verdict.level === "WARN" || verdict.level === "LIMIT") {

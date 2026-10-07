@@ -44,7 +44,7 @@ export async function setAiUnitPricesAction(input: { prices: Record<string, { in
   return r;
 }
 
-/** Dải biên lãi gộp chiếu (0226 · đích 75–85 · cảnh báo < 70 · nguy cấp < 60). */
+/** Dải biên lãi gộp chiếu (0228 · đích 75–85 · cảnh báo < 70 · nguy cấp < 60). */
 export async function setPricingMarginAction(input: { config: Record<string, unknown>; reason: string }): Promise<PricingResult> {
   const user = await requirePermission("platform:operate");
   const r = await setPricingMargin(user, input ?? {});
@@ -52,7 +52,7 @@ export async function setPricingMarginAction(input: { config: Record<string, unk
   return r;
 }
 
-/** Chuyển một tổ chức sang một phiên bản giá (0226) — có lý do, vào nhật ký nền tảng. */
+/** Chuyển một tổ chức sang một phiên bản giá (0228) — có lý do, vào nhật ký nền tảng. */
 export async function setOrgPriceVersionAction(input: { orgCode: string; versionKey: string; reason: string }): Promise<PricingResult> {
   const user = await requirePermission("platform:operate");
   const r = await setOrgPriceVersion(user, input ?? {});

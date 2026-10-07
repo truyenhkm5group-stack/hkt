@@ -137,7 +137,7 @@ export const PRODUCTS: readonly ProductDef[] = [
     needsCommerceCore: true,
     aiFeatures: ["sales_chatbot", "sales_playbook"],
     metrics: [
-      // ĐỒNG HỒ THU CHÍNH (0226 · docs/saas/PRICING_V1.md): khách nhận ít nhất một câu trả lời AI đã gửi trong kỳ — ghi ở điểm
+      // ĐỒNG HỒ THU CHÍNH (0228 · docs/saas/PRICING_V1.md): khách nhận ít nhất một câu trả lời AI đã gửi trong kỳ — ghi ở điểm
       // gửi thành công (`lib/pricing/ai-customer.ts`), khoá idempotent theo (kỳ, kênh, page, khách).
       { key: "ai_customers", label: "Khách AI", unit: "khách AI", source: "EVENT_LEDGER", emitterLive: true, billable: true },
       { key: "conversations_started", label: "Hội thoại mới", unit: "hội thoại", source: "DAILY_SNAPSHOT", snapshotColumn: "conversationsStarted", billable: false },

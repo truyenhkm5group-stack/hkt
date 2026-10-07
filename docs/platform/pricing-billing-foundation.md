@@ -84,12 +84,12 @@ không trần cứng. Gói, giá, `paid_through` không đổi. Tổ chức tạ
 - Thu tiền phần vượt: chưa có hoá đơn `OVERAGE`; cần chủ nền tảng chốt đơn giá + kỳ thu.
 - Cổng thẻ (VNPay / PayOS / Stripe) — dịch vụ ngoài, phải hỏi chủ nền tảng (AGENTS.md §7).
 
-## 10. Bảng giá V1 có phiên bản (0226 · `docs/saas/PRICING_V1.md`)
+## 10. Bảng giá V1 có phiên bản (0228 · `docs/saas/PRICING_V1.md`)
 
 - GIÁ không còn đọc thẳng từ `platform_plans` để lập hoá đơn: `platform_price_versions` + `platform_plan_prices` +
   `platform_price_pins`, resolver `lib/pricing/price-book.ts`. `platform_plans` giữ danh tính gói, hạn mức kỹ thuật
   (`checkEntitlement`, trần AI) và phần thương mại của gói CŨ.
-- Tổ chức có từ trước 0226 ghim `legacy` (ảnh chụp đúng `platform_plans` lúc migrate) ⇒ số tiền không đổi. Tổ chức mới / đổi gói
+- Tổ chức có từ trước 0228 ghim `legacy` (ảnh chụp đúng `platform_plans` lúc migrate) ⇒ số tiền không đổi. Tổ chức mới / đổi gói
   đi V1. Sửa giá = phiên bản mới (§«Đổi giá» ở trên giờ phát hành phiên bản, không sửa dòng).
 - Đồng hồ thu chính: khách AI (`chotdon.ai_customers`, `lib/pricing/ai-customer.ts`). Hội thoại / tin AI ở §1–2 trở thành
   fair-use (không sinh phí). Ngưỡng cảnh báo khách AI 80 / 100 / 120 / 150 theo phiên bản; ngưỡng 50 / 80 / 100 của Margin

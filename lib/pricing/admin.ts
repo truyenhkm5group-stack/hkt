@@ -173,7 +173,7 @@ export async function setPricingGuard(user: SessionUser, raw: { config?: unknown
   return { ok: true, message: `Đã lưu ngưỡng ${applied.noticePct}% · ${applied.warnPct}% · ${applied.limitPct}%. Trần cứng của nền tảng: ${applied.hardLimitsEnabled ? "BẬT" : "tắt"}.` };
 }
 
-// ─────────────────────────── Dải biên lãi gộp (0226) ───────────────────────────
+// ─────────────────────────── Dải biên lãi gộp (0228) ───────────────────────────
 
 /** Đích / cảnh báo / nguy cấp của biên lãi gộp CHIẾU. Bộ không đúng thứ tự (nguy cấp < cảnh báo ≤ đích thấp ≤ đích cao) bị từ chối. */
 export async function setPricingMargin(user: SessionUser, raw: { config?: unknown; reason?: unknown }): Promise<PricingResult> {
@@ -266,7 +266,7 @@ export type TenantGuardRow = {
   routing: (RoutingSuggestion & { scope: "PLATFORM" | "BYOK" }) | null;
   readings: MeterReadings;
   errors: string[];
-  /** Bảng giá có phiên bản (0226): phiên bản đã ghim, khách AI (đồng hồ thu chính) + mức cảnh báo 80/100/120/150, phần vượt
+  /** Bảng giá có phiên bản (0228): phiên bản đã ghim, khách AI (đồng hồ thu chính) + mức cảnh báo 80/100/120/150, phần vượt
    * ước tính, fair-use, biên CHIẾU (doanh thu gói + vượt − AI chiếu) và dải biên (đích · cảnh báo · nguy cấp). */
   priceVersionKey: string | null;
   aiCustomers: AiCustomerReading | null;
@@ -392,7 +392,7 @@ export async function loadPricingEconomics(user: SessionUser, now: Date = new Da
     const costByDay = new Map(byDay.filter((d) => d.orgCode === o.code).map((d) => [d.day, Number(d.cost)]));
     const spike = detectCostSpike(histDays.map((d) => costByDay.get(d) ?? 0), costByDay.get(today) ?? 0, guard);
     const top = [...models].sort((x, y) => y.input + y.output - (x.input + x.output))[0];
-    // Bảng giá có phiên bản (0226): phần vượt + biên CHIẾU. Phần vượt cần số người dùng — chỉ đọc khi phiên bản có luật vượt.
+    // Bảng giá có phiên bản (0228): phần vượt + biên CHIẾU. Phần vượt cần số người dùng — chỉ đọc khi phiên bản có luật vượt.
     const price = pricing.plan?.planPrice ?? null;
     const version = await orgPriceVersion(o.code, now);
     const acRead = aiCustomers.get(o.code) ?? null;

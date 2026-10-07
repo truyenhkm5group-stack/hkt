@@ -19,7 +19,7 @@ import { getPlatformDb, schema } from "@/db";
 import type { SessionUser } from "@/lib/auth/session";
 import { listPlans, type PlanRow } from "@/lib/entitlements/check";
 import { platformAudit, type PlatformActor } from "@/lib/platform/audit";
-import { getHomeOrganization } from "@/lib/platform/organizations";
+import { findOrganization, getHomeOrganization } from "@/lib/platform/organizations";
 import { platformOperatorDenial } from "@/lib/platform-ui/module-toggle";
 import type { AiLimits } from "@/lib/ai-usage/types";
 import { env } from "@/lib/env";
@@ -86,6 +86,9 @@ export type OrgPriceVersion = ResolvedVersion & { pinKey: string | null; book: P
 
 export async function orgPriceVersion(orgCode: string, now: Date = new Date()): Promise<OrgPriceVersion> {
   const [book, pinKey] = await Promise.all([loadPriceBook(), readPricePin(orgCode)]);
+  // Workspace NHÀ không có dòng ghim (dựng sau 0228 — máy mới / CSDL thử) ⇒ giá cũ (legacy), không bao giờ tự sang bảng giá
+  // hiện hành: gán nhà vào gói V1 là việc người vận hành chạy `scripts/pricing-internal-fit.ts` (ghi kèm ghim).
+  if (pinKey === null && (await findOrganization(orgCode))?.isHome) return { ...resolveOrgVersion(book, LEGACY_VERSION_KEY, now), pinKey, book };
   return { ...resolveOrgVersion(book, pinKey, now), pinKey, book };
 }
 
@@ -177,7 +180,7 @@ export async function readMarginConfig(): Promise<MarginConfig> {
 
 /**
  * Mốc đồng hồ khách AI bắt đầu ghi: ghi đè tay ở `platform.pricing.ai-customer-meter-live-at` nếu có; không thì `created_at`
- * của phiên bản CATALOG ĐẦU TIÊN — dòng V1 do 0226 ghi lúc migrate, cùng lần deploy với mã ghi đồng hồ. `null` = chưa bật.
+ * của phiên bản CATALOG ĐẦU TIÊN — dòng V1 do 0228 ghi lúc migrate, cùng lần deploy với mã ghi đồng hồ. `null` = chưa bật.
  */
 // Lỗi đọc ⇒ `null` = đồng hồ CHƯA ĐO ⇒ phần vượt khách AI `null` (phía an toàn: không thu), không bao giờ "đo trọn kỳ".
 export async function readAiCustomerMeterLiveAt(): Promise<Date | null> {

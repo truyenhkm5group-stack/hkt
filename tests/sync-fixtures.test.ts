@@ -68,6 +68,7 @@ import { testFinanceTruth } from "./finance-truth.test";
 import { testFinanceInvariants } from "./finance-invariants.test";
 import { testWorkOs } from "./work-os.test";
 import { testTechControlPlaneDb, testTechHealthParsing, testTechLifecycle, testTechPermissions, testTechRiskEngine } from "./tech-control-plane.test";
+import { testTechControlPlaneGoalsDb, testTechControlPlaneVocabulary } from "./tech-control-plane-goals.test";
 import { testAgentRunner, testAgentSandbox, testGithubDeploymentSync, testPhase2aBarriers, testPhase2aSourceGuards, testTechWorkProjection } from "./tech-phase2a.test";
 import { cleanupPrProjectionFixtures, testGithubPrSync, testPrPureMappers, testSyncIncidentPure, testSyncIncidentWatch } from "./tech-pr-projection.test";
 import { cleanupAgentIngestFixtures, testAgentIngestDb, testAgentIngestPure, testAgentIngestSourceGuards } from "./agent-run-ingest.test";
@@ -537,6 +538,7 @@ import { testPricingBilling } from "./pricing-billing.test";
 import { testSaasPlatform } from "./saas-platform.test";
 import { testPricingV1 } from "./pricing-v1.test";
 import { testAiCustomerSend } from "./ai-customer-send.test";
+import { testSaasInternalPlan } from "./saas-internal-plan.test";
 import { testPlatformSaas } from "./platform-saas.test";
 import { testTenantAttack } from "./tenant-attack.test";
 import { testAiSalesIsolation } from "./ai-sales-isolation.test";
@@ -571,6 +573,8 @@ import { testPlatformNoDb } from "./platform-no-db.test";
 import { testPlatformProcessIsolation } from "./platform-process-isolation.test";
 import { testPlatformJobs } from "./platform-jobs.test";
 import { testGSched } from "./g-sched.test";
+import { testSaasVnxRuntime } from "./saas-vnx-runtime.test";
+import { testSaasPageGate } from "./saas-page-gate.test";
 
 async function main() {
   await ensureMigrated();
@@ -2407,6 +2411,7 @@ async function main() {
     tất cả nằm trong các bảng `tech_*` nên không đụng tới con số của bài nào phía trên.
   */
   await testTechControlPlaneDb();
+  await testTechControlPlaneGoalsDb();
   /*
     PHASE 2A. Chạy ngay sau mặt phẳng điều khiển và tự dọn bằng tiền tố `p2a-`. Ba khối đầu đụng
     CSDL; khối runner còn dựng KHO GIT TẠM và chạy tiến trình con thật (`npm run typecheck` trong
@@ -2604,6 +2609,7 @@ async function main() {
   testAdsMappingGuards();
   testAdsIngestGuardsProductFk();
   testTechRiskEngine();
+  testTechControlPlaneVocabulary();
   testTechPermissions();
   testTechHealthParsing();
   testRepoIntegrity();
@@ -2859,6 +2865,9 @@ async function main() {
   await testSaasPlatform();
   await testPricingV1();
   await testAiCustomerSend();
+  // Phase 14: workspace nhà đi ĐÚNG đường thương mại của khách (gói gán → ghi đè → giữ từ trước) — bài so trước/sau từng
+  // quyết định (tính năng · hạn mức · hạn mức tháng · gói · trang gói) + năm đột biến dữ liệu; khôi phục sổ gói trong finally.
+  await testSaasInternalPlan();
   // Sổ kinh tế SaaS + Owner Cockpit (0203): hai tổ chức THẬT `saas-a` / `saas-b`, tự cấp, tự dọn.
   await testPlatformSaas();
   await testPlatformUi();
@@ -2870,6 +2879,12 @@ async function main() {
   await testPlatformJobs();
   // G-SCHED: luật tự động của tổ chức khách tự chạy qua fan-out tuần tự (mã `gs-`, tự cấp và tự dọn); nhà giữ nguyên.
   await testGSched();
+  // Phase 8b: nhà chạy được runtime Chốt Đơn KHI bật ai_sales — webhook fanpage/Zalo, lịch job, nguồn AI HOME; nhà tắt ⇒ như
+  // cũ; khách không đổi (mã `vr-`, tự cấp và tự dọn; dòng ai_sales của nhà trả lại nguyên trạng trong finally).
+  await testSaasVnxRuntime();
+  // Cổng page của nhà: module ai_sales + bot bật mà danh sách page rỗng ⇒ 0 tin trên mọi đường; BÓNG lưu câu soạn, 0 gửi;
+  // LIVE như khách; khách không đổi (CSDL nhà dọn trong finally, tổ chức `pg-khach` tự cấp và tự dọn).
+  await testSaasPageGate();
   // Nền tảng · phiên & RBAC (agent C): claim org, cổng module, platform:operate, đăng nhập theo tổ chức. Tự cấp
   // tổ chức `pr-` (CSDL riêng) và tự dọn; đứng cạnh bài ngữ cảnh vì cùng lý do.
   await testPlatformRbac();

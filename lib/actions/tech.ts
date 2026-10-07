@@ -14,6 +14,7 @@ import {
   TECH_INCIDENT_SEVERITIES,
   TECH_INCIDENT_STATUSES,
   TECH_MODULES,
+  TECH_OWNER_ESCALATIONS,
   TECH_PRIORITIES,
   TECH_RISKS,
   TECH_TASK_SOURCES,
@@ -57,6 +58,9 @@ function loi(error: unknown, mac: string) {
 function lamMoi(taskId?: string) {
   revalidatePath("/tech");
   revalidatePath("/tech/tasks");
+  revalidatePath("/tech/missions");
+  revalidatePath("/tech/goals");
+  revalidatePath("/tech/needs-owner");
   revalidatePath("/tech/agents");
   revalidatePath("/tech/deployments");
   revalidatePath("/tech/incidents");
@@ -77,6 +81,7 @@ const taoSchema = z.object({
   dependsOn: z.array(z.string().trim().max(60)).max(20).optional(),
   agentId: z.string().trim().max(60).nullish(),
   riskOverride: z.object({ risk: z.enum(TECH_RISKS), reason: z.string().trim().min(10, "Đè mức rủi ro thì phải nói vì sao") }).nullish(),
+  missionId: z.string().trim().max(60).nullish(),
 });
 
 export async function createTechTaskAction(input: unknown): Promise<TechResult<{ id: string; code: string }>> {
@@ -107,6 +112,8 @@ const trangThaiSchema = z.object({
   taskId: z.string().min(1),
   to: z.enum(TECH_TASK_STATUSES),
   note: z.string().trim().max(4000).optional(),
+  ownerEscalation: z.enum(TECH_OWNER_ESCALATIONS).nullish(),
+  ownerAction: z.string().trim().max(2000).nullish(),
 });
 
 export async function setTechTaskStatusAction(input: unknown): Promise<TechResult> {
@@ -123,7 +130,15 @@ export async function setTechTaskStatusAction(input: unknown): Promise<TechResul
   // Bấm lại đúng trạng thái đang có thì KHÔNG ghi nhật ký: một dòng "đổi từ X sang X" làm loãng
   // nhật ký và khiến người đọc tưởng có việc gì đó vừa xảy ra.
   if (!res.skipped) {
-    await audit({ userId: user.id, userEmail: user.email, action: "TECH_TASK_STATUS", entity: "TECH_TASK", entityId: data.taskId, after: { status: data.to }, reason: data.note });
+    await audit({
+      userId: user.id,
+      userEmail: user.email,
+      action: "TECH_TASK_STATUS",
+      entity: "TECH_TASK",
+      entityId: data.taskId,
+      after: data.to === "NEEDS_OWNER" ? { status: data.to, ownerEscalation: data.ownerEscalation, ownerAction: data.ownerAction } : { status: data.to },
+      reason: data.note,
+    });
   }
   // Cả nhánh bấm lại đúng trạng thái cũng làm mới — lượt gọi mang luôn giao diện mới, client không cần router.refresh().
   lamMoi(data.taskId);

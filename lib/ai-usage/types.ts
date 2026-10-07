@@ -49,7 +49,7 @@ export const AI_DISABLED_BY_OPERATOR = "AI đang bị tắt bởi người vận
  *  · `costUsdPerMonth.hard` — tới trần ⇒ từ chối TRƯỚC khi gọi model.
  *  · `platformCreditUsdPerMonth` — credit nền tảng / tháng; `0` ⇒ nguồn PLATFORM không bao giờ chạy. Với nguồn PLATFORM,
  *    trần cứng thật = min(`hard`, credit).
- *  · `softOnly` (0226 · gói AI của bảng giá có phiên bản): credit là NGÂN SÁCH MỀM — vượt chỉ cảnh báo, KHÔNG thành trần cứng
+ *  · `softOnly` (0228 · gói AI của bảng giá có phiên bản): credit là NGÂN SÁCH MỀM — vượt chỉ cảnh báo, KHÔNG thành trần cứng
  *    (quyết định 07/10/2026: không tự tắt AI bán hàng vì dùng nhiều; thu bằng phần vượt khách AI). Ghi đè tay của người vận
  *    hành (chính sách lạm dụng / bất thường) vẫn áp như cũ.
  */

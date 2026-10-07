@@ -59,12 +59,17 @@ export const FANOUT_JOBS = Object.freeze(["dashboard-warm", "outcome-materialize
 export const AUTOMATION_FANOUT_JOBS = Object.freeze(["workflows", "work-recurrence", "sales-followup", "sales-health", "messaging-retry", "ads-spend-org", "wholesale-leads", "creative-publish-org", "shipping-route"]);
 
 /**
- * Job CHỈ chạy qua fan-out — bộ lập lịch KHÔNG gọi lượt của nhà cho chúng (luật của nhà chạy ké `alerts`; nhà TẮT module
- * AI bán hàng nên không có follow-up nào để chạy; chi tiêu quảng cáo của nhà đi qua `facebook-ads`; nhà TẮT module Săn
- * khách sỉ — 0197; camp của nhà đăng tiếp qua `creative-loop`; nhà đồng bộ đơn Pancake nên không có đơn tạo tay nào để xếp
- * tuyến giao).
+ * Job CHỈ chạy qua fan-out — bộ lập lịch KHÔNG gọi lượt của nhà cho chúng (luật của nhà chạy ké `alerts`; chi tiêu quảng
+ * cáo của nhà đi qua `facebook-ads`; nhà TẮT module Săn khách sỉ — 0197; camp của nhà đăng tiếp qua `creative-loop`; nhà
+ * đồng bộ đơn Pancake nên không có đơn tạo tay nào để xếp tuyến giao).
+ *
+ * `sales-followup` · `sales-health` RỜI danh sách này ở Phase 8b (docs/saas/OWNERSHIP.md §4 chặn 3): workspace nhà phải chạy
+ * được runtime Chốt Đơn khi chủ shop bật module AI bán hàng của nhà, và lúc đó follow-up + giám sát là một phần của runtime.
+ * Công tắc KHÔNG nằm ở đây mà ở module: nhà TẮT `ai_sales` (0180) ⇒ `runJob` trả `MODULE_DISABLED` ngay sau một lần đọc cấu
+ * hình module đã đệm — không chạy, không ghi `sync_runs`, không ném. Cái giá khi tắt: hai lượt gọi rỗng / 5 phút vào chính
+ * ứng dụng; đổi lại không cần deploy hay sửa lịch lần nữa vào ngày bật.
  */
-export const FANOUT_ONLY_JOBS = Object.freeze(["workflows", "sales-followup", "sales-health", "ads-spend-org", "wholesale-leads", "creative-publish-org", "shipping-route"]);
+export const FANOUT_ONLY_JOBS = Object.freeze(["workflows", "ads-spend-org", "wholesale-leads", "creative-publish-org", "shipping-route"]);
 
 /**
  * Nhịp GÕ của job `workflows` (phút) — BẰNG `WORKFLOW_CADENCE_MIN_MINUTES` của `lib/constants/workflow-cadence.ts`

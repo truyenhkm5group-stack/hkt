@@ -53,6 +53,7 @@ import { currentOrganization, withOrganization } from "@/lib/platform/context";
 import { findOrganization } from "@/lib/platform/organizations";
 import { orgBillingStanding } from "@/lib/billing/standing";
 import { canUseModule } from "@/lib/platform/capabilities";
+import { homeSalesRuntimeEnabled } from "@/lib/platform/home-sales-runtime";
 import type { ModuleKey } from "@/lib/constants/platform-modules";
 import { reconcileSepay } from "@/lib/integrations/bank/sepay-reconcile";
 import { runSyncJob, type SyncTrigger } from "@/lib/sync/runner";
@@ -1171,6 +1172,15 @@ export async function runJob(job: string, options: JobOptions) {
         const skipped: JobSkipped = { skipped: "MODULE_DISABLED", job, org: org.code, module: moduleKey, detail: `Bỏ qua: module "${moduleKey}" đang tắt cho tổ chức "${org.code}".` };
         return skipped;
       }
+    }
+    /*
+      Phase 8b: job của runtime Chốt Đơn (module ai_sales) ở tổ chức NHÀ đi CÙNG cổng với webhook — đòi dòng ai_sales bật
+      TƯỜNG MINH (`homeSalesRuntimeEnabled`), không chỉ `canUseModule` (nhà khai module_default ENABLED nên bảng module thiếu
+      dòng sẽ nói "bật"). Nhà đang tắt ai_sales ⇒ vòng trên đã trả MODULE_DISABLED trước khi tới đây.
+    */
+    if (org.isHome && jobModules(definition).includes("ai_sales") && !(await homeSalesRuntimeEnabled({ code: org.code, isHome: true, status: "ACTIVE" }))) {
+      const skipped: JobSkipped = { skipped: "MODULE_DISABLED", job, org: org.code, module: "ai_sales", detail: `Bỏ qua: tổ chức nhà chưa bật tường minh module "ai_sales" (runtime Chốt Đơn).` };
+      return skipped;
     }
     // Đánh dấu ĐANG CHẠY JOB NỀN để `audit()` đánh dấu đệm là cũ thay vì xoá hẳn — xem lib/cache.ts.
     return trongJobNen(() => definition.run(options));

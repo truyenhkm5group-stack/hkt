@@ -1580,8 +1580,22 @@
     {
       "idx": 226,
       "version": "7",
-      "when": 1791400100000,
-      "tag": "0226_pricing_v1_versions",
+      "when": 1791350120000,
+      "tag": "0226_tech_control_plane_goals",
+      "breakpoints": true
+    },
+    {
+      "idx": 227,
+      "version": "7",
+      "when": 1791350180000,
+      "tag": "0227_internal_plan_binding",
+      "breakpoints": true
+    },
+    {
+      "idx": 228,
+      "version": "7",
+      "when": 1791400200000,
+      "tag": "0228_pricing_v1_versions",
       "breakpoints": true
     }
   ]

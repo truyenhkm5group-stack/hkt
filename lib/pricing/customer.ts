@@ -4,6 +4,11 @@
  * Đọc cho `/settings/plan` của CHÍNH tổ chức người xem (mã tổ chức do trang lấy từ PHIÊN). Khách thấy: gói, giá tháng / năm,
  * ngày gia hạn, "3.245 / 5.000 hội thoại AI" + phần trăm + mức, tính năng gói có. Khách KHÔNG thấy token, model hay chi phí
  * AI của nền tảng — đó là việc của người vận hành (`lib/pricing/admin.ts`).
+ *
+ * Trang có khung nào là `loadPlanPageFrame` — hai vị từ, không hỏi loại tài khoản (Phase 14 · review PR #622):
+ *  · khung THANH TOÁN hiện khi workspace CÓ THỂ bị khoá thanh toán — CÙNG vị từ với cổng ghi (`billingLockApplies`);
+ *  · khung HẠN MỨC THÁNG hiện khi có khung thanh toán, hoặc khi gói đang gán còn một ô hạn mức có trần (ô `checkUsageQuota`
+ *    thật sự so). Nhà mang gói không trần nào ⇒ không khung, như trước; gán cho nhà một gói có trần ⇒ khung tự hiện.
  */
 import { readSubscriptionTerms } from "@/lib/billing/standing";
 import { billingStanding, vnDate } from "@/lib/billing/rules";
@@ -13,15 +18,16 @@ import { getPlanUsage } from "@/lib/entitlements/check";
 import { monthlyOnYearlyVnd, yearlyPriceVnd, type QuotaKey } from "@/lib/pricing/catalog";
 import { evaluateQuota, usageLine, type QuotaVerdict } from "@/lib/pricing/guard";
 import { featureGranted, FEATURE_KEYS, type FeatureDecision } from "@/lib/pricing/features";
-import { readGuardConfig, resolveOrgPricing, QUOTA_METER } from "@/lib/pricing/entitlements";
+import { readGuardConfig, resolveOrgPricing, QUOTA_METER, type OrgPricing } from "@/lib/pricing/entitlements";
 import { usagePeriodOf } from "@/lib/pricing/meter";
 import { readAiCustomerUsage } from "@/lib/pricing/ai-customer";
 import { orgPriceVersion } from "@/lib/pricing/price-book";
 import { estimateBill, fairUseVerdict, usageAlert, type BillEstimate, type FairUseVerdict, type MeterCoverage, type UsageAlert } from "@/lib/pricing/versions";
+import { billingLockApplies } from "@/lib/saas/policy";
 
 export type CustomerQuotaRow = QuotaVerdict & { line: string };
 
-/** Một ô "đã dùng / gồm" của bảng giá có phiên bản (0226). `used = null` = chưa đo · `included = null` = không giới hạn. */
+/** Một ô "đã dùng / gồm" của bảng giá có phiên bản (0228). `used = null` = chưa đo · `included = null` = không giới hạn. */
 export type CustomerMeterRow = { used: number | null; included: number | null | undefined; alert: UsageAlert };
 
 /**
@@ -55,14 +61,32 @@ export type CustomerPlanView = {
   features: FeatureDecision[];
   /** Câu lỗi khi một nguồn đếm hỏng — số của nguồn đó in «—». */
   errors: string[];
-  /** Bảng giá có phiên bản (0226). `null` = tổ chức chưa có dòng giá ở phiên bản nào (máy chưa migrate 0226). */
+  /** Bảng giá có phiên bản (0228). `null` = tổ chức chưa có dòng giá ở phiên bản nào (máy chưa migrate 0228). */
   meter: CustomerBillingMeter | null;
 };
 
+export type PlanPageFrame = { billing: boolean; monthlyQuotas: boolean };
+
+/** Hai vị từ của trang gói — thuần (xem đầu tệp). */
+export function planPageFrame(org: Parameters<typeof billingLockApplies>[0], pricing: Pick<OrgPricing, "quotas">): PlanPageFrame {
+  const billing = billingLockApplies(org);
+  const capped = Object.values(pricing.quotas).some((q) => typeof q === "number");
+  return { billing, monthlyQuotas: billing || capped };
+}
+
+/** Khung của trang `/settings/plan` cho một workspace. Không có workspace ⇒ không khung nào. */
+export async function loadPlanPageFrame(orgCode: string): Promise<PlanPageFrame> {
+  const org = await findOrganization(orgCode);
+  if (!org) return { billing: false, monthlyQuotas: false };
+  return planPageFrame(org, await resolveOrgPricing(org));
+}
+
 export async function loadCustomerPlan(orgCode: string, now: Date = new Date()): Promise<CustomerPlanView | null> {
   const org = await findOrganization(orgCode);
-  if (!org || org.isHome) return null;
-  const [pricing, config, terms, planUsage] = await Promise.all([resolveOrgPricing(org), readGuardConfig(), readSubscriptionTerms(org.code), getPlanUsage(org.code)]);
+  if (!org) return null;
+  const pricing = await resolveOrgPricing(org);
+  if (!planPageFrame(org, pricing).monthlyQuotas) return null;
+  const [config, terms, planUsage] = await Promise.all([readGuardConfig(), readSubscriptionTerms(org.code), getPlanUsage(org.code)]);
   const period = usagePeriodOf(now);
   const usage = await readPeriodUsage(org, period, now);
   const c = pricing.plan?.commercial;
@@ -74,7 +98,7 @@ export async function loadCustomerPlan(orgCode: string, now: Date = new Date()):
     return { ...v, line: usageLine(key, used, pricing.quotas[key]) };
   });
   const standing = billingStanding(terms, vnDate(now));
-  const features = FEATURE_KEYS.map((key) => featureGranted({ key, isHome: false, grandfathered: pricing.row.grandfathered, overrides: pricing.row.featureOverrides, planFeatures: c?.features ?? null }));
+  const features = FEATURE_KEYS.map((key) => featureGranted({ key, grandfathered: pricing.row.grandfathered, overrides: pricing.row.featureOverrides, planFeatures: c?.features ?? null }));
   const price = pricing.plan?.planPrice ?? null;
   let meter: CustomerBillingMeter | null = null;
   if (price) {

@@ -7,6 +7,8 @@ import { TechNav } from "@/app/(dashboard)/tech/tech-nav";
 import { TechTaskActions } from "@/app/(dashboard)/tech/tasks/[id]/task-actions";
 import { RequestFix } from "@/app/(dashboard)/tech/tasks/[id]/request-fix";
 import { RunVerdict } from "@/app/(dashboard)/tech/tasks/[id]/run-verdict";
+import { TaskMissionPicker } from "@/app/(dashboard)/tech/tasks/[id]/mission-picker";
+import { listOpenTechMissionOptions } from "@/lib/queries/tech-control-plane";
 import { PageHeader } from "@/components/page-header";
 import { DescriptionList, EmptyState, SectionCard } from "@/components/ui-bits";
 import { can, requirePermission } from "@/lib/auth/session";
@@ -16,6 +18,7 @@ import {
   TECH_EVENT_KIND_LABEL,
   TECH_MERGE_STATE_LABEL,
   TECH_MODULE_LABEL,
+  TECH_OWNER_ESCALATION_LABEL,
   TECH_PR_STATE_LABEL,
   TECH_REVIEW_STATE_LABEL,
   TECH_RUN_STATUS_LABEL,
@@ -28,6 +31,7 @@ import {
   type TechDeployStatus,
   type TechEventKind,
   type TechGateResult,
+  type TechOwnerEscalation,
   type TechIncidentSeverity,
   type TechMergeState,
   type TechModule,
@@ -62,6 +66,10 @@ export default async function TechTaskDetailPage({ params }: { params: Promise<{
   if (!data) notFound();
   const { task, events, runs, deployments, incidents, dependsOn } = data;
   const agents = canManage ? await listEnabledTechAgents() : [];
+  // Sứ mệnh đang gắn có thể đã đóng — vẫn đưa vào danh sách để ô chọn hiện đúng giá trị hiện tại.
+  const missionOptions = canManage ? await listOpenTechMissionOptions() : [];
+  const ganHienTai = task.mission;
+  if (ganHienTai && !missionOptions.some((m) => m.id === ganHienTai.id)) missionOptions.unshift({ ...ganHienTai });
 
   return (
     <div className="space-y-5">
@@ -83,7 +91,22 @@ export default async function TechTaskDetailPage({ params }: { params: Promise<{
         <TechPriorityBadge priority={task.priority as TechPriority} />
         <TechRiskBadge risk={task.risk as TechRisk} />
         <TechApprovalBadge status={task.approvalStatus as TechApprovalStatus} />
+        {task.mission ? (
+          <Link href={`/tech/missions/${task.mission.id}`} className="text-xs font-semibold text-primary hover:underline">
+            Sứ mệnh {task.mission.code} · {task.mission.title}
+          </Link>
+        ) : null}
       </div>
+
+      {task.status === "NEEDS_OWNER" ? (
+        <div className="rounded-xl border-2 border-fuchsia-300 bg-fuchsia-50 p-4 dark:border-fuchsia-800 dark:bg-fuchsia-950/40">
+          <p className="text-sm font-bold text-fuchsia-900 dark:text-fuchsia-200">
+            Cần chủ shop · {TECH_OWNER_ESCALATION_LABEL[task.ownerEscalation as TechOwnerEscalation] ?? task.ownerEscalation}
+          </p>
+          <p className="mt-1 whitespace-pre-wrap text-sm leading-6">{task.ownerAction}</p>
+          <p className="mt-2 text-xs text-muted-foreground">Làm xong thì bấm trạng thái tiếp theo ở khối Thao tác và ghi lại đã làm gì — chỉ người gỡ được trạng thái này.</p>
+        </div>
+      ) : null}
 
       <div className="grid gap-4 lg:grid-cols-3">
         <div className="space-y-4 lg:col-span-2">
@@ -275,6 +298,16 @@ export default async function TechTaskDetailPage({ params }: { params: Promise<{
             <DescriptionList
               columns={1}
               items={[
+                {
+                  label: "Sứ mệnh",
+                  value: canManage ? (
+                    <TaskMissionPicker taskId={task.id} missionId={task.missionId} missions={missionOptions} disabled={task.status === "DONE" || task.status === "CANCELLED"} />
+                  ) : task.mission ? (
+                    `${task.mission.code} · ${task.mission.title}`
+                  ) : (
+                    <span className="text-muted-foreground">— việc lẻ</span>
+                  ),
+                },
                 { label: "Nguồn", value: TECH_TASK_SOURCE_LABEL[task.source as TechTaskSource] ?? task.source },
                 { label: "Chứng từ gốc", value: gach(task.sourceRef) },
                 { label: "Nhánh git", value: gach(task.branch) },

@@ -79,10 +79,13 @@ export function testTechLifecycle() {
   const chet = TECH_TASK_STATUSES.filter((s) => !toiDuoc.has(s));
   assert.deepEqual(chet, [], `trạng thái không bao giờ tới được từ NEW: ${chet.join(", ")}`);
 
-  // ───────── 1.2 Chỉ DONE là trạng thái kết thúc ─────────
-  assert.deepEqual(TECH_TASK_TERMINAL, ["DONE"], "chỉ 'Xong' mới là trạng thái kết thúc");
+  // ───────── 1.2 Chỉ DONE và CANCELLED là trạng thái kết thúc ─────────
+  // CANCELLED (0226, docs/tech-control-plane/README.md) là quyết định "không làm nữa" của NGƯỜI — kết thúc
+  // như DONE nhưng không phải xong. FAILED / ROLLED_BACK / NEEDS_OWNER vẫn mở.
+  assert.deepEqual(TECH_TASK_TERMINAL, ["DONE", "CANCELLED"], "chỉ 'Xong' và 'Đã huỷ' mới là trạng thái kết thúc");
   assert.ok(!TECH_TASK_OPEN.includes("DONE"), "DONE không nằm trong nhóm 'còn mở'");
-  for (const s of ["FAILED", "ROLLED_BACK", "BLOCKED"] as TechTaskStatus[]) {
+  assert.ok(!TECH_TASK_OPEN.includes("CANCELLED"), "CANCELLED không nằm trong nhóm 'còn mở'");
+  for (const s of ["FAILED", "ROLLED_BACK", "BLOCKED", "NEEDS_OWNER"] as TechTaskStatus[]) {
     assert.ok(TECH_TASK_OPEN.includes(s), `${s} phải VẪN ĐẾM là việc còn mở — một việc thất bại là việc chưa xong`);
   }
 
@@ -119,7 +122,7 @@ export function testTechLifecycle() {
   assert.equal(techIncidentCloseBlockers({ resolution: "" }).length, 1, "đóng sự cố mà không kể đã làm gì phải bị chặn");
   assert.deepEqual(techIncidentCloseBlockers({ resolution: "Đã revert commit abc1234 và deploy lại lúc 15:02" }), [], "kể được đã làm gì thì đóng được");
 
-  console.log(`✓ Vòng đời Tech: ${TECH_TASK_STATUSES.length} trạng thái, mọi trạng thái tới được, chỉ DONE kết thúc, không đường tắt tới deploy, cổng phê duyệt nói được lý do`);
+  console.log(`✓ Vòng đời Tech: ${TECH_TASK_STATUSES.length} trạng thái, mọi trạng thái tới được, chỉ DONE / CANCELLED kết thúc, không đường tắt tới deploy, cổng phê duyệt nói được lý do`);
 }
 
 /* ═════════════════════ 2. MÁY XẾP RỦI RO ═════════════════════ */

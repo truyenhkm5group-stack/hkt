@@ -21,6 +21,9 @@ import {
   verifyTechTaskAction,
 } from "@/lib/actions/tech";
 import {
+  OWNER_ACTION_MIN_CHARS,
+  TECH_OWNER_ESCALATIONS,
+  TECH_OWNER_ESCALATION_LABEL,
   TECH_PRIORITIES,
   TECH_PRIORITY_LABEL,
   TECH_RISKS,
@@ -28,6 +31,7 @@ import {
   TECH_TASK_STATUS_HINT,
   TECH_TASK_STATUS_LABEL,
   TECH_TASK_TRANSITIONS,
+  type TechOwnerEscalation,
   type TechPriority,
   type TechRisk,
   type TechTaskStatus,
@@ -74,6 +78,8 @@ export function TechTaskActions({ taskId, taskCode, dispatchReason, status, prio
   const [lyDoKy, setLyDoKy] = useState("");
   const [nhanh, setNhanh] = useState(branch);
   const [cay, setCay] = useState(worktree);
+  const [leoThang, setLeoThang] = useState<TechOwnerEscalation>("APPROVAL_REQUIRED");
+  const [viecChuShop, setViecChuShop] = useState("");
 
   const chay = (fn: () => Promise<{ ok: true } | { error: string }>, thanhCong: string) =>
     start(async () => {
@@ -85,12 +91,22 @@ export function TechTaskActions({ taskId, taskCode, dispatchReason, status, prio
       toast.success(thanhCong);
     });
 
-  const doiTrangThai = (to: TechTaskStatus, note?: string) => chay(() => setTechTaskStatusAction({ taskId, to, note }), `Đã chuyển sang “${TECH_TASK_STATUS_LABEL[to]}”`);
+  const doiTrangThai = (to: TechTaskStatus, note?: string, owner?: { ownerEscalation: TechOwnerEscalation; ownerAction: string }) =>
+    chay(() => setTechTaskStatusAction({ taskId, to, note, ...owner }), `Đã chuyển sang “${TECH_TASK_STATUS_LABEL[to]}”`);
+
+  /*
+    Năm nước đi cần một câu: BLOCKED (chặn bởi gì) · DONE chưa xác minh (vì sao không cần) · CANCELLED (vì sao
+    bỏ) · NEEDS_OWNER (lý do trong chín + đúng việc chủ shop phải làm) · RỜI NEEDS_OWNER (chủ shop đã làm gì).
+    Máy chủ đòi đúng các câu ấy — hộp thoại chỉ hỏi trước để người bấm không bị từ chối sau.
+  */
+  const doDaiToiThieu = (to: TechTaskStatus | null) =>
+    to === "DONE" || to === "CANCELLED" ? 10 : to === "NEEDS_OWNER" ? 0 : 5;
 
   const bamTrangThai = (to: TechTaskStatus) => {
-    const canLyDo = to === "BLOCKED" || (to === "DONE" && !verified);
+    const canLyDo = to === "BLOCKED" || to === "CANCELLED" || to === "NEEDS_OWNER" || status === "NEEDS_OWNER" || (to === "DONE" && !verified);
     if (canLyDo) {
       setLyDo("");
+      setViecChuShop("");
       setHoiLyDo(to);
       return;
     }
@@ -297,25 +313,60 @@ export function TechTaskActions({ taskId, taskCode, dispatchReason, status, prio
       <Dialog open={hoiLyDo !== null} onOpenChange={(v) => (v ? null : setHoiLyDo(null))}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>{hoiLyDo === "BLOCKED" ? "Việc này bị chặn bởi cái gì?" : "Đóng việc mà chưa xác minh production"}</DialogTitle>
+            <DialogTitle>
+              {hoiLyDo === "BLOCKED"
+                ? "Việc này bị chặn bởi cái gì?"
+                : hoiLyDo === "NEEDS_OWNER"
+                  ? "Chủ shop cần làm đúng việc gì?"
+                  : hoiLyDo === "CANCELLED"
+                    ? "Vì sao bỏ việc này?"
+                    : status === "NEEDS_OWNER"
+                      ? "Chủ shop đã quyết / đã làm gì?"
+                      : "Đóng việc mà chưa xác minh production"}
+            </DialogTitle>
             <DialogDescription>
               {hoiLyDo === "BLOCKED"
                 ? "Chặn mà không nói vì sao thì không ai gỡ được — và việc sẽ nằm mãi trong hàng đợi."
-                : "Nói rõ vì sao việc này không có gì để xác minh trên production (tài liệu, dọn mã, kiểm thử). Nếu có thứ để xác minh thì bấm “Xác minh trên production” trước."}
+                : hoiLyDo === "NEEDS_OWNER"
+                  ? "Chọn đúng một lý do và viết việc cần làm đủ rõ để làm theo trên điện thoại mà không phải hỏi lại (bấm ở đâu, cấp quyền gì)."
+                  : hoiLyDo === "CANCELLED"
+                    ? "Huỷ là kết thúc — nhánh và lịch sử giữ nguyên, nhưng việc không quay lại hàng đợi. Cần làm lại thì mở việc mới."
+                    : status === "NEEDS_OWNER"
+                      ? "Ghi lại câu trả lời của chủ shop — lần sau đọc nhật ký còn biết vì sao việc đi tiếp."
+                      : "Nói rõ vì sao việc này không có gì để xác minh trên production (tài liệu, dọn mã, kiểm thử). Nếu có thứ để xác minh thì bấm “Xác minh trên production” trước."}
             </DialogDescription>
           </DialogHeader>
-          <Textarea rows={4} value={lyDo} onChange={(e) => setLyDo(e.target.value)} />
+          {hoiLyDo === "NEEDS_OWNER" ? (
+            <div className="space-y-2">
+              <Select value={leoThang} onValueChange={(v) => setLeoThang(v as TechOwnerEscalation)}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {TECH_OWNER_ESCALATIONS.map((v) => (
+                    <SelectItem key={v} value={v}>
+                      {TECH_OWNER_ESCALATION_LABEL[v]}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Textarea rows={4} value={viecChuShop} onChange={(e) => setViecChuShop(e.target.value)} placeholder="Ví dụ: Mở Meta App Dashboard → Use cases → thêm quyền pages_messaging → bấm Kết nối lại" />
+            </div>
+          ) : (
+            <Textarea rows={4} value={lyDo} onChange={(e) => setLyDo(e.target.value)} />
+          )}
           <DialogFooter>
             <Button variant="ghost" onClick={() => setHoiLyDo(null)} disabled={pending}>
               Huỷ
             </Button>
             <Button
-              disabled={pending || lyDo.trim().length < (hoiLyDo === "BLOCKED" ? 5 : 10)}
+              disabled={pending || (hoiLyDo === "NEEDS_OWNER" ? viecChuShop.trim().length < OWNER_ACTION_MIN_CHARS : lyDo.trim().length < doDaiToiThieu(hoiLyDo))}
               onClick={() => {
                 const to = hoiLyDo;
                 if (!to) return;
                 setHoiLyDo(null);
-                doiTrangThai(to, lyDo);
+                if (to === "NEEDS_OWNER") doiTrangThai(to, undefined, { ownerEscalation: leoThang, ownerAction: viecChuShop });
+                else doiTrangThai(to, lyDo);
               }}
             >
               Xác nhận

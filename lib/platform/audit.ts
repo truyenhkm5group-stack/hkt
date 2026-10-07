@@ -59,7 +59,7 @@ export type PlatformAuditAction = "MODULE_ENABLE" | "MODULE_DISABLE" | "FEATURE_
   | "COST_ENTRY_VOID"
   | "STATEMENT_FINALIZE"
   | "PROVISIONING_RUN"
-  // Bảng giá có phiên bản (0226, lib/pricing/price-book.ts): phát hành một phiên bản giá mới (sửa giá = phiên bản mới, không
+  // Bảng giá có phiên bản (0228, lib/pricing/price-book.ts): phát hành một phiên bản giá mới (sửa giá = phiên bản mới, không
   // sửa dòng cũ) và ghim / chuyển một tổ chức sang một phiên bản giá.
   | "PRICE_VERSION_PUBLISH"
   | "PRICE_VERSION_PIN"

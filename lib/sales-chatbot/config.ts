@@ -9,6 +9,7 @@
  * Tệp này KHÔNG import gì chạy được: form cấu hình và máy chủ dùng CHUNG lược đồ, mặc định và nhãn.
  */
 import { z } from "zod";
+import type { AiBillingSource } from "@/lib/ai-usage/types";
 import { AI_CLASSES_CAN_NGUOI, classifyAiError, type AiErrorClass, type AiFailureClass } from "@/lib/constants/ai-incidents";
 import { bookingConfigZ, DEFAULT_BOOKING_CONFIG } from "@/lib/constants/booking";
 import { DEFAULT_FREE_SHIPPING } from "@/lib/sales-chatbot/shipping";
@@ -64,9 +65,17 @@ export const SALES_THINKING_BUDGET: Record<SalesThinking, { maxTokens: number; r
 export const SALES_BOT_CONNECTORS = ["platform", "anthropic-byok", "openai-byok", "gemini-byok"] as const;
 export type SalesBotConnector = (typeof SALES_BOT_CONNECTORS)[number];
 
-/** Nguồn trả tiền trên sổ AI theo lựa chọn khoá — MỘT chỗ quyết, mọi lượt ghi sổ / kiểm hạn mức hỏi ở đây. */
-export function salesBotBillingSource(key: SalesBotConnector): "PLATFORM" | "BYOK" {
-  return key === "platform" ? "PLATFORM" : "BYOK";
+/**
+ * Nguồn trả tiền trên sổ AI theo lựa chọn khoá — MỘT chỗ quyết, mọi lượt ghi sổ / kiểm hạn mức hỏi ở đây.
+ *
+ * `platform` ở tổ chức NHÀ = khoá `.env` của nhà (`HOME`) — Phase 8b, docs/saas/OWNERSHIP.md §4 chặn 4. Cùng luật với AI
+ * Builder (`lib/ai-builder/provider.ts`): "AI không phải khoá riêng của tổ chức" là `HOME` ở nhà và `PLATFORM` ở mọi tổ chức
+ * khác — hai nhánh loại trừ nhau theo `isHome`, nên không có lựa chọn nào để một tổ chức khách chọn trúng khoá của nhà.
+ * Không truyền `home` ⇒ `PLATFORM` như trước (hỏng về phía khách, không bao giờ về phía nhà).
+ */
+export function salesBotBillingSource(key: SalesBotConnector, opts: { home?: boolean } = {}): AiBillingSource {
+  if (key !== "platform") return "BYOK";
+  return opts.home === true ? "HOME" : "PLATFORM";
 }
 
 /**

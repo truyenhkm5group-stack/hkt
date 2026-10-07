@@ -100,6 +100,21 @@ export async function testCareAutoAssign(db: Db) {
   const action = fs.readFileSync(path.join(goc, "lib/actions/workforce.ts"), "utf8");
   assert.ok(action.includes("buildDepartmentPlan(") && !action.includes("planDistribution("), "nút xem trước phải dùng CHUNG hàm dựng kế hoạch với job nền");
 
+  // (f) Máy giao một việc CHIẾU chưa có lớp ghi chú (người phụ trách do lớp công việc giữ): dòng `work_items` sinh ra phải mang
+  //     `created_by` / `assigned_by` = NULL (MÁY làm — AGENTS.md mục 34), không phải chuỗi rỗng. Production 05–07/10/2026: mọi lượt
+  //     job hỏng vì `ensureOverlay` ghi `created_by = ''` ⇒ vi phạm khoá ngoại sang `users`, cứ 10 phút một lần.
+  const viecChieu = "RETURN_INSPECTION:caa-ri-1";
+  const gChieu = await assignByMachine(viecChieu, "caa-quan");
+  assert.ok("ok" in gChieu, `(f) máy giao được việc chiếu chưa có lớp ghi chú: ${JSON.stringify(gChieu)}`);
+  const lop = await db.query.workItems.findFirst({ where: eq(schema.workItems.sourceKey, "caa-ri-1") });
+  assert.equal(lop?.assigneeId, "caa-quan", "(f) người được giao ghi vào lớp công việc");
+  assert.equal(lop?.createdBy, null, "(f) dòng do MÁY tạo mang created_by NULL, không phải chuỗi rỗng");
+  assert.equal(lop?.assignedBy, null, "(f) lượt giao của MÁY mang assigned_by NULL");
+  if (lop) {
+    await db.delete(schema.workItemEvents).where(eq(schema.workItemEvents.workItemId, lop.id));
+    await db.delete(schema.workItems).where(eq(schema.workItems.id, lop.id));
+  }
+
   await db.delete(schema.careCaseEvents).where(eq(schema.careCaseEvents.shipmentId, "caa-s1"));
   await db.delete(schema.careCaseEvents).where(eq(schema.careCaseEvents.shipmentId, "caa-s3"));
   await db.delete(schema.shipmentEvents).where(eq(schema.shipmentEvents.shipmentId, "caa-s2"));

@@ -19,7 +19,7 @@ import { QUICK_REPLY_SETTING_KEY } from "@/lib/sales-chatbot/quick-replies-share
 import { setSettingJson } from "@/lib/settings";
 
 /**
- * ═══════════ ĐỒNG HỒ KHÁCH AI TRÊN ĐƯỜNG GỬI THẬT (0226 · docs/saas/PRICING_V1.md §II.2) ═══════════
+ * ═══════════ ĐỒNG HỒ KHÁCH AI TRÊN ĐƯỜNG GỬI THẬT (0228 · docs/saas/PRICING_V1.md §II.2) ═══════════
  *
  * Chạy ĐƯỜNG THẬT của bot fanpage (receiveFanpageEvent → processFanpageThread → engine → gửi Pancake) với Pancake giả và
  * provider AI giả. Đặc tả: một khách AI = khách đã nhận ÍT NHẤT MỘT câu trả lời do AI SINH RA và đã gửi THÀNH CÔNG.

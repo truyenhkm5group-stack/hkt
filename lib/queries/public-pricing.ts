@@ -6,7 +6,7 @@ import { TAX_MODE_LABEL, type Included, type OverageSpec } from "@/lib/pricing/v
 import { getPublicSiteData, planIncludesAi, type PublicSiteData } from "@/lib/queries/public-site";
 
 /**
- * DỮ LIỆU CỦA TRANG GIÁ CÔNG KHAI `/pricing` (0222 · 0226). Cùng giới hạn với trang giới thiệu (`public-site.ts`): chỉ đọc BẢNG
+ * DỮ LIỆU CỦA TRANG GIÁ CÔNG KHAI `/pricing` (0222 · 0228). Cùng giới hạn với trang giới thiệu (`public-site.ts`): chỉ đọc BẢNG
  * GIÁ ĐANG NIÊM YẾT (phiên bản CATALOG hiện hành) và chế độ đăng ký — không một dòng dữ liệu khách nào
  * (`tests/pricing-billing.test.ts` khoá danh sách import). Mọi giá / hạn mức / đơn giá vượt đọc từ phiên bản — trang không gõ
  * lại số nào.

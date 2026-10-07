@@ -47,6 +47,7 @@ import { loadSalesChatbotConfig, readJsonSetting, salesChatProvider } from "@/li
 import { controlOf } from "@/lib/sales-chatbot/conversation-control-shared";
 import { conversationFor, FANPAGE_CONNECTOR, PAGE_REPLY, sendFanpageText, STAFF_OUT_PREFIX } from "@/lib/sales-chatbot/fanpage";
 import { messengerOwnedPageIds, messengerPageAiOn, sendMessengerPageText } from "@/lib/sales-chatbot/messenger";
+import { pageRuntimeMode } from "@/lib/sales-chatbot/page-runtime";
 import {
   ORDER_SYNC_CHANNEL,
   ORDER_SYNC_LIMITS,
@@ -463,8 +464,12 @@ export async function runFanpageOrderSync(deps: { fetch?: typeof fetch; now?: ()
     if (!(await canUseModule("ai_sales"))) return { ...out, detail: ["module AI bán hàng tắt"] };
     const cfg = await loadOrderSyncConfig();
     if (!cfg.enabled) return { ...out, detail: ["ghi đơn từ hội thoại đang tắt"] };
-    const sources = await orderSyncSources(deps.fetch ?? fetch, now);
-    if (!sources.length) return { ...out, detail: ["chưa nối kênh nhắn tin nào (Facebook trực tiếp / Pancake)"] };
+    const all = await orderSyncSources(deps.fetch ?? fetch, now);
+    if (!all.length) return { ...out, detail: ["chưa nối kênh nhắn tin nào (Facebook trực tiếp / Pancake)"] };
+    // Cổng page của nhà (page-runtime.ts): page chưa LIVE ⇒ không đọc hội thoại, không lên đơn, không nhắn xác nhận đặt lại.
+    const sources: OrderSyncSource[] = [];
+    for (const s of all) if ((await pageRuntimeMode(s.pageId)) === "LIVE") sources.push(s);
+    if (!sources.length) return { ...out, detail: ["workspace nhà: chưa page nào LIVE cho bot Chốt Đơn"] };
     for (const src of sources) {
       if (out.checked >= ORDER_SYNC_LIMITS.threadsPerRun) break;
       await runPageOrderSync(src, cfg, out, now, deps);
