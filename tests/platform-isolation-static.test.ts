@@ -745,7 +745,7 @@ const LOI_VAN_HANH: Record<string, string> = {
   "lib/ai-usage/control.ts::setPlatformAiEnabled": "Công tắc AI toàn nền tảng.",
   "lib/ai-usage/control.ts::setOrgAiControl": "Công tắc AI + ghi đè hạn mức AI của một tổ chức.",
   // Platform AI Model Control (06/10/2026) — model của AI DÙNG CHUNG cho mọi tổ chức khách; sổ AI nguồn PLATFORM toàn nền tảng.
-  "lib/ai-usage/platform-ai-admin.ts::loadPlatformAiControl": "Khung Platform AI Model Control: sổ AI nguồn PLATFORM của MỌI tổ chức (30 ngày theo model) + chính sách + lượt kiểm khả dụng + nhật ký.",
+  "lib/ai-usage/platform-ai-admin.ts::loadPlatformAiControl": "Khung Platform AI Model Control: sổ AI nguồn PLATFORM của MỌI tổ chức (30 ngày theo model / loại việc) + mở CSDL từng tổ chức có lượt AI dùng chung để ĐẾM đơn AI gắn hội thoại + chính sách + lượt kiểm khả dụng + nhật ký.",
   "lib/ai-usage/platform-ai-admin.ts::probePlatformAiModelAsOperator": "Kiểm khả dụng một model bằng khoá nền tảng — lưu kết quả, nhật ký PLATFORM_AI_MODEL_PROBE.",
   "lib/ai-usage/platform-ai-admin.ts::setPlatformAiPolicy": "Chạy thử / áp dụng model AI dùng chung cho cả nền tảng — bắt buộc lý do + lượt kiểm AVAILABLE trong 24 giờ, nhật ký PLATFORM_AI_POLICY_SET.",
   "lib/ai-usage/platform-ai-ab.ts::loadPlatformModelAb": "Bảng A/B model AI dùng chung: sổ AI nguồn PLATFORM của MỌI tổ chức + mở CSDL từng tổ chức có hội thoại cohort để ĐẾM (SĐT · địa chỉ · chốt · handoff · công cụ) — không trả tên, SĐT, nội dung tin.",

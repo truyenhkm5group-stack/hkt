@@ -1623,7 +1623,14 @@
       "idx": 232,
       "version": "7",
       "when": 1791400440000,
-      "tag": "0232_tech_worker_onboarding",
+      "tag": "0232_platform_ai_usage_telemetry",
+      "breakpoints": true
+    },
+    {
+      "idx": 233,
+      "version": "7",
+      "when": 1791400500000,
+      "tag": "0233_tech_worker_onboarding",
       "breakpoints": true
     }
   ]

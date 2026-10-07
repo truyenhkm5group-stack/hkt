@@ -144,6 +144,56 @@ export function PlatformAiModelControlSection({ data, usdToVnd, now, ab }: { dat
           </div>
         </div>
 
+        <div className="space-y-1" data-platform-ai-by-model>
+          <h3 className="font-semibold">Theo workload × model · {data.windowDays} ngày</h3>
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[64rem] text-xs">
+              <thead className="text-left text-[11px] uppercase text-muted-foreground">
+                <tr>
+                  <th className="py-1 pr-2">Loại việc · model</th>
+                  <th className="py-1 pr-2 text-right">Hội thoại · lượt</th>
+                  <th className="py-1 pr-2 text-right">Lỗi</th>
+                  <th className="py-1 pr-2 text-right" title="token vào / hội thoại · phần đọc từ bộ đệm">Vào · cache</th>
+                  <th className="py-1 pr-2 text-right" title="token ra / hội thoại = hiện ra + suy nghĩ">Ra (hiện · suy nghĩ)</th>
+                  <th className="py-1 pr-2 text-right">Độ trễ p50</th>
+                  <th className="py-1 pr-2 text-right">Chi phí / HT</th>
+                  <th className="py-1 pr-2 text-right" title="hội thoại có đơn AI / hội thoại">Chốt</th>
+                  <th className="py-1 pr-2 text-right">Đơn AI</th>
+                  <th className="py-1 text-right">Chi phí / đơn AI</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.byModel.map((r) => (
+                  <tr key={`${r.workload}-${r.model}`} className="border-t border-hairline">
+                    <td className="py-1 pr-2">
+                      {r.workload === "other" ? "Khác" : PLATFORM_WORKLOAD_LABEL[r.workload]} · <span className="font-mono">{r.model}</span>
+                    </td>
+                    <td className="numeric py-1 pr-2 text-right">
+                      {formatNumber(r.conversations)} · {formatNumber(r.calls)}
+                    </td>
+                    <td className="numeric py-1 pr-2 text-right">{r.errorRate === null ? "—" : formatPercent(r.errorRate * 100, 1)}</td>
+                    <td className="numeric py-1 pr-2 text-right">
+                      {formatNumber(r.inputPerConv === null ? null : Math.round(r.inputPerConv))} · {r.cachedShare === null ? "—" : formatPercent(r.cachedShare * 100, 0)}
+                    </td>
+                    <td className="numeric py-1 pr-2 text-right">
+                      {formatNumber(r.outputPerConv === null ? null : Math.round(r.outputPerConv))} ({formatNumber(r.visiblePerConv)} · {formatNumber(r.thinkingPerConv)})
+                    </td>
+                    <td className="numeric py-1 pr-2 text-right">{r.latencyP50Ms === null ? "—" : `${Math.round(r.latencyP50Ms)} ms`}</td>
+                    <td className="numeric py-1 pr-2 text-right">{usd(r.costPerConvUsd)}</td>
+                    <td className="numeric py-1 pr-2 text-right">{r.closeRate === null ? "—" : formatPercent(r.closeRate * 100, 1)}</td>
+                    <td className="numeric py-1 pr-2 text-right">{formatNumber(r.aiOrders)}</td>
+                    <td className="numeric py-1 text-right">{usd(r.costPerAiOrderUsd)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <p className="text-[11px] text-muted-foreground">
+            Hiện ra · suy nghĩ · cache · độ trễ: chỉ lượt đã đo đủ (sổ AI từ 0232); «—» = chưa có lượt nào đo được — không phải 0.
+            {data.byModelErrors.length ? ` Không đếm được đơn của: ${data.byModelErrors.join(" · ")}.` : ""}
+          </p>
+        </div>
+
         {ab ? <PlatformModelAbTable report={ab} usdToVnd={usdToVnd} /> : null}
 
         {data.usage.length ? (

@@ -5095,10 +5095,20 @@ export const platformAiUsage = pgTable(
     conversationId: text("conversation_id"),
     /** `TEXT` · `VISION` (đọc ảnh khách gửi) · `IMAGE` (vẽ ảnh) — 0222. `NULL` = nơi gọi chưa khai. */
     modality: text("modality"),
+    /**
+     * QUAN SÁT (0232) — KHÔNG đổi nghĩa `input_tokens` / `output_tokens` / `cost_usd`. `thinking_tokens` ⊂ `output_tokens` (phần
+     * suy nghĩ); `cached_tokens` ⊂ `input_tokens` (đọc từ bộ đệm); `latency_ms` = thời gian lời gọi model; `workload` = loại việc
+     * của Platform AI Policy. `NULL` = chưa đo (dòng cũ / nhà cung cấp không tách), không phải 0.
+     */
+    cachedTokens: integer("cached_tokens"),
+    thinkingTokens: integer("thinking_tokens"),
+    latencyMs: integer("latency_ms"),
+    workload: text("workload"),
   },
   (t) => [
     uniqueIndex("platform_ai_usage_org_event_key").on(t.orgCode, t.eventKey).where(sql`${t.eventKey} IS NOT NULL`),
     check("platform_ai_usage_modality_check", sql`${t.modality} IS NULL OR ${t.modality} IN ('TEXT','VISION','IMAGE')`),
+    check("platform_ai_usage_workload_check", sql`${t.workload} IS NULL OR ${t.workload} IN ('sales_chatbot','order_sync','quick_extract','vision')`),
     check("platform_ai_usage_event_key_check", sql`${t.eventKey} IS NULL OR length(${t.eventKey}) BETWEEN 1 AND 200`),
     index("platform_ai_usage_org_at_idx").on(t.orgCode, t.at),
     // 0231: sổ AI theo HỘI THOẠI cho dấu vết từng tin khách ở hộp thư (lib/ai-usage/conversation-evidence.ts).
@@ -8780,7 +8790,7 @@ export const techWorkers = pgTable(
     createdAt: createdAt(),
     updatedAt: updatedAt(),
     /*
-      ─── CÀI MỘT NÚT (0232, docs/tech-control-plane/README.md mục 15) ───
+      ─── CÀI MỘT NÚT (0233, docs/tech-control-plane/README.md mục 15) ───
       `secret_revoked_at` khác NULL ⇒ KHÔNG có khoá nào hợp lệ (băm hiện tại là băm của một chuỗi ngẫu nhiên không ai
       giữ) — xác thực từ chối dù băm có khớp. Chỉ một lượt ĐỔI MÃ GHI DANH đặt lại nó về NULL.
     */
@@ -8806,7 +8816,7 @@ export const techWorkers = pgTable(
 );
 
 /**
- * MÃ GHI DANH WORKER (0232) — bộ cài tải về mang mã này, KHÔNG mang khoá worker. Dùng MỘT lần (`used_at`), hạn ngắn
+ * MÃ GHI DANH WORKER (0233) — bộ cài tải về mang mã này, KHÔNG mang khoá worker. Dùng MỘT lần (`used_at`), hạn ngắn
  * (`expires_at`), gắn với đúng một worker, CSDL chỉ giữ băm. Đổi mã ⇒ máy chủ xoay khoá worker và trả khoá mới một lần.
  */
 export const techWorkerEnrollments = pgTable(
