@@ -397,6 +397,10 @@ async function readModelAb(now: Date, env: EnvReader): Promise<ModelAbReport | n
       costUsd: sql<number>`coalesce(sum(${a.costUsd}), 0)::float8`,
       unpriced: sql<number>`count(*) filter (where ${a.costUsd} is null and ${a.status} = 'OK')::int`,
       okCalls: sql<number>`coalesce(sum(${a.requests}) filter (where ${a.status} = 'OK'), 0)::int`,
+      thinkKnownCalls: sql<number>`coalesce(sum(${a.requests}) filter (where ${a.status} = 'OK' and ${a.thinkingTokens} is not null), 0)::int`,
+      thinkingTokens: sql<number>`coalesce(sum(${a.thinkingTokens}) filter (where ${a.status} = 'OK'), 0)::float8`,
+      outKnown: sql<number>`coalesce(sum(${a.outputTokens}) filter (where ${a.status} = 'OK' and ${a.thinkingTokens} is not null), 0)::float8`,
+      callMs: sql<number[] | null>`array_agg(${a.latencyMs} / greatest(${a.requests}, 1)) filter (where ${a.status} = 'OK' and ${a.latencyMs} is not null)`,
     })
     .from(a)
     .where(and(eq(a.billingSource, "PLATFORM"), eq(a.feature, "sales_chatbot"), gte(a.at, new Date(earliest - 30 * DAY_MS)), sql`${a.ref} is not null`, sql`${a.status} <> 'BLOCKED_QUOTA'`))
@@ -412,8 +416,8 @@ async function readModelAb(now: Date, env: EnvReader): Promise<ModelAbReport | n
     outputTokens: Number(r.outputTokens),
     costUsd: Number(r.costUsd),
     unpriced: Number(r.unpriced),
-    // Cột suy nghĩ / độ trễ của sổ đi ở migration riêng (ledger.ts) — tới lúc đó độ phủ = 0 ⇒ cột token in «—», không phải 0.
-    obs: { ...NO_OBS, okCalls: Number(r.okCalls) },
+    // Dòng trước 0232 không có cột suy nghĩ / độ trễ ⇒ độ phủ < 100% ⇒ chỉ hội thoại đo đủ mới vào cột token.
+    obs: { okCalls: Number(r.okCalls), thinkKnownCalls: Number(r.thinkKnownCalls), thinkingTokens: Number(r.thinkingTokens), outKnown: Number(r.outKnown), callMs: (r.callMs ?? []).map(Number).filter((v) => Number.isFinite(v) && v >= 0) },
   }));
   // Mỗi workload chỉ nhận hội thoại mở từ mốc cohort CỦA NÓ; nhánh = hội thoại có dòng mang tên model canary của nó.
   const inCohort = (p: PlatformAiPolicy | null, c: LedgerConv) => Boolean(p) && c.firstAt >= Date.parse(p!.cohortSince);

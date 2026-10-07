@@ -206,7 +206,7 @@ export async function connectMessengerPages(user: SessionUser, pages: readonly C
         .onConflictDoUpdate({ target: idx.pageId, set: { pageName: name.slice(0, 120), connectedByEmail: user.email, updatedAt: new Date() }, where: eq(idx.orgCode, orgCode) });
     }
     connected.push(page.id);
-    // PAGE MỚI ƯU TIÊN META TRỰC TIẾP (0232): Pancake không chạy page này ⇒ đường chính = Meta trực tiếp (nguồn CONNECT, người nối).
+    // PAGE MỚI ƯU TIÊN META TRỰC TIẾP (0233): Pancake không chạy page này ⇒ đường chính = Meta trực tiếp (nguồn CONNECT, người nối).
     // Pancake đang chạy page này thì đã bị từ chối ở trên — không bao giờ tới đây.
     for (const [id] of indexed) {
       if (liveTransportsOf(facts, id).PANCAKE || facts.modes?.[id] === "META_DIRECT") continue;
@@ -278,7 +278,7 @@ export async function disconnectMessengerPage(user: SessionUser, pageId?: string
 }
 
 /**
- * Người gỡ Meta trực tiếp của page mà Pancake ĐANG chạy page đó ⇒ đường chính về Pancake (0232) — hệ quả TƯỜNG MINH của chính thao
+ * Người gỡ Meta trực tiếp của page mà Pancake ĐANG chạy page đó ⇒ đường chính về Pancake (0233) — hệ quả TƯỜNG MINH của chính thao
  * tác gỡ, có nhật ký; không có bước này page im lặng (đường chính đã lưu không chạy). Pancake không chạy ⇒ giữ nguyên dòng.
  */
 async function handBackToPancake(user: SessionUser, pageIds: readonly string[]): Promise<string> {
@@ -321,7 +321,7 @@ export async function receiveMessengerEvent(ev: MessengerEvent, now: Date = new 
   if (!owned.length) return { queued: false, reason: "Kết nối Messenger chưa bật" };
   if (!owned.includes(ev.pageId)) return { queued: false, reason: "Tin của page khác page đã nối" };
   await noteChannelPageHealth(MESSENGER_CONNECTOR, ev.pageId, { ok: true }, now);
-  // MỘT PAGE — MỘT ĐƯỜNG CANONICAL (channel-ownership.ts · 0232): Pancake là đường chính của page và đang chạy ⇒ đường này nhường
+  // MỘT PAGE — MỘT ĐƯỜNG CANONICAL (channel-ownership.ts · 0233): Pancake là đường chính của page và đang chạy ⇒ đường này nhường
   // MỌI gói tin của page đó (cả tiếng vọng) — không hội thoại thứ hai, không câu trả lời thứ hai. Đường chính đã lưu mà KHÔNG chạy
   // ⇒ vẫn ghi tin khách cho người đọc, KHÔNG kích AI (`NON_CANONICAL_NOTE`).
   const verdict: RouteVerdict = routeVerdict(await loadTransportFacts(), ev.pageId, "MESSENGER");
@@ -501,9 +501,9 @@ export async function sendBotImages(pageId: string, psid: string, imageIds: read
 }
 
 /**
- * Đường GỬI của một luồng fanpage (0232). Luồng do đường Messenger ghi ⇒ Messenger; luồng do Pancake ghi ⇒ đường cũ (thử Pancake rồi
+ * Đường GỬI của một luồng fanpage (0233). Luồng do đường Messenger ghi ⇒ Messenger; luồng do Pancake ghi ⇒ đường cũ (thử Pancake rồi
  * Messenger); dòng cũ chưa mang đường ⇒ theo đường canonical của page — page Meta trực tiếp không gửi nhầm qua Pancake với mã PSID.
- * Lỗi đọc ⇒ `null` (đường cũ — hành vi trước 0232).
+ * Lỗi đọc ⇒ `null` (đường cũ — hành vi trước 0233).
  */
 async function sendRouteOf(pageId: string, threadId: string): Promise<"MESSENGER" | "PANCAKE" | null> {
   try {
@@ -529,7 +529,7 @@ export async function sendBotText(pageId: string, threadId: string, text: string
 export async function processMessengerThread(pageId: string, psid: string, deps: FanpageDeps = {}): Promise<ProcessResult> {
   const now = deps.now ?? (() => new Date());
   const out: ProcessResult = { processed: 0, replies: 0, skipped: null, error: null };
-  // Chỉ đường CANONICAL của page được kích AI (0232). Đọc hỏng ⇒ chạy như trước (không chặn đường đang chạy vì một lỗi đọc).
+  // Chỉ đường CANONICAL của page được kích AI (0233). Đọc hỏng ⇒ chạy như trước (không chặn đường đang chạy vì một lỗi đọc).
   const verdict = await loadTransportFacts()
     .then((f) => routeVerdict(f, pageId, "MESSENGER"))
     .catch(() => "CANONICAL" as const);
@@ -813,7 +813,7 @@ export async function processMessengerThreadDebounced(pageId: string, psid: stri
 export const PROFILE_REFRESH_MS = 3 * 24 * 3_600_000;
 
 /**
- * ẢNH ĐẠI DIỆN KHÁCH MESSENGER cho hộp thư (0232): `GET /{PSID}?fields=profile_pic` bằng token của page. Meta chỉ trả khi app có
+ * ẢNH ĐẠI DIỆN KHÁCH MESSENGER cho hộp thư (0233): `GET /{PSID}?fields=profile_pic` bằng token của page. Meta chỉ trả khi app có
  * quyền đọc hồ sơ người dùng (Business Asset User Profile Access) — không có ⇒ ghi lỗi, hộp thư hiện chữ cái. Ghi vào
  * `state.messengerProfile` `{ pic, at, error }` (không đẩy `updated_at` — đồng hồ nhường không đọc cột đó nhưng màn khác thì có);
  * đọc lại sau `PROFILE_REFRESH_MS`. Không bao giờ lưu token; câu lỗi đã che bí mật. Không mở hội thoại mới.

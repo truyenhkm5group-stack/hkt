@@ -524,6 +524,7 @@ import { testNativeOrderSync } from "./native-order-sync.test";
 import { testMessengerLifecycle } from "./messenger-lifecycle.test";
 import { testMessengerDiscovery } from "./messenger-discovery.test";
 import { testMessengerWebhookSecrets } from "./messenger-webhook-secrets.test";
+import { testChannelsOverview } from "./channels-overview.test";
 import { testSalesAiDownAlert } from "./sales-ai-down-alert.test";
 import { testAiSalesHealth } from "./ai-sales-health.test";
 import { testAiSalesRetry } from "./ai-sales-retry.test";
@@ -544,6 +545,7 @@ import { testSaasPlatform } from "./saas-platform.test";
 import { testPricingV1 } from "./pricing-v1.test";
 import { testAiCustomerSend } from "./ai-customer-send.test";
 import { testSaasInternalPlan } from "./saas-internal-plan.test";
+import { testSaasHideInternal } from "./saas-hide-internal.test";
 import { testPlatformSaas } from "./platform-saas.test";
 import { testTenantAttack } from "./tenant-attack.test";
 import { testAiSalesIsolation } from "./ai-sales-isolation.test";
@@ -2824,7 +2826,7 @@ async function main() {
   // AI nhường người: AI_ACTIVE · HUMAN_COOLDOWN (đếm ngược, «Cho AI tiếp tục ngay») · HUMAN_TAKEOVER («Trả lại cho AI») — tổ chức
   // THẬT `nhuong-nguoi` (+ `nhuong-nguoi-khac` cho cô lập), Messenger trực tiếp + fanpage Pancake giả, đồng hồ nhường tường minh.
   await testSalesHumanTakeover();
-  // Hộp thư hợp nhất + song song Pancake / Meta trực tiếp (0232): đường canonical theo page + backfill giữ đường hôm nay, khử
+  // Hộp thư hợp nhất + song song Pancake / Meta trực tiếp (0233): đường canonical theo page + backfill giữ đường hôm nay, khử
   // trùng hai nguồn, đường phụ không kích AI, người trả lời ba nguồn ⇒ nhường, số phút nhường theo workspace, thẻ lọc ≡ aiHoldOf —
   // tổ chức THẬT `l3-hop-thu` (+ `l3-hop-thu-khac` cho cô lập), Graph + Pancake giả.
   await testSaasL3Inbox();
@@ -2844,6 +2846,8 @@ async function main() {
   await testMessengerDiscovery();
   // App Meta riêng cho Messenger (cấu hình thử): bắt tay GET + chữ ký của hai app + đường đưa secret lên máy chủ.
   await testMessengerWebhookSecrets();
+  // Kênh kết nối hợp nhất: gộp hai nguồn · sức khoẻ ba mức · câu khách không từ kỹ thuật · Configuration ID · cô lập tổ chức.
+  await testChannelsOverview();
   testSalesAiDownAlert();
   // Giám sát AI bán hàng (sau sự cố P0 06/10/2026): sự cố hết tiền phải ĐỎ đúng nguyên nhân, báo một lần mỗi khung.
   await testAiSalesHealth();
@@ -2886,6 +2890,9 @@ async function main() {
   // Phase 14: workspace nhà đi ĐÚNG đường thương mại của khách (gói gán → ghi đè → giữ từ trước) — bài so trước/sau từng
   // quyết định (tính năng · hạn mức · hạn mức tháng · gói · trang gói) + năm đột biến dữ liệu; khôi phục sổ gói trong finally.
   await testSaasInternalPlan();
+  // Che dữ liệu AI nội bộ khỏi khách (07/10/2026): DTO máy chủ + lưu cấu hình giữ động cơ AI + quét mã + khối vận hành —
+  // tổ chức THẬT `hi-shop`, tự cấp, tự dọn; khoá bí mật kiểm thử trả lại nguyên trạng trong finally.
+  await testSaasHideInternal();
   // Sổ kinh tế SaaS + Owner Cockpit (0203): hai tổ chức THẬT `saas-a` / `saas-b`, tự cấp, tự dọn.
   await testPlatformSaas();
   await testPlatformUi();

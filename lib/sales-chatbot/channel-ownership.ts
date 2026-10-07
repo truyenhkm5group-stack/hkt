@@ -1,5 +1,5 @@
 /**
- * ═══════════ MỘT PAGE — MỘT ĐƯỜNG NHẬN TIN CANONICAL (docs/messaging-providers.md §3 · 0232) ═══════════
+ * ═══════════ MỘT PAGE — MỘT ĐƯỜNG NHẬN TIN CANONICAL (docs/messaging-providers.md §3 · 0233) ═══════════
  *
  * Một shop có thể nối CÙNG một Facebook page qua Pancake VÀ qua Meta trực tiếp (Messenger / Instagram). Hai đường cùng nhận một
  * tin khách, mỗi đường mở một hội thoại riêng (Pancake khoá theo mã hội thoại của Pancake, Messenger theo PSID), hai bot cùng trả
@@ -7,7 +7,7 @@
  * được kích AI — `connection_mode` canonical LƯU ĐƯỢC (`channel_page_modes`):
  *  · `PANCAKE_WEBHOOK` ⇒ chỉ đường Pancake ghi tin + kích AI; Meta trực tiếp nhường MỌI gói tin của page.
  *  · `META_DIRECT`     ⇒ ngược lại.
- *  · Page CHƯA có dòng (page có trước 0232 mà backfill không thấy, hoặc đường vừa nối không qua `connectMessengerPages`) ⇒ LUẬT CŨ:
+ *  · Page CHƯA có dòng (page có trước 0233 mà backfill không thấy, hoặc đường vừa nối không qua `connectMessengerPages`) ⇒ LUẬT CŨ:
  *    Pancake thắng. Không đoán.
  *  · Đường canonical ĐÃ LƯU mà không chạy (gỡ kết nối…) ⇒ KHÔNG đường nào kích AI; đường kia vẫn GHI tin khách (người thấy ở hộp
  *    thư) với ghi chú `NON_CANONICAL_NOTE` — không tự đổi đường (chủ shop 07/10/2026: chuyển đường là thao tác tường minh).
@@ -36,7 +36,7 @@ export const MESSENGER_DIRECT_KEY = "facebook-messenger";
 export type TransportFacts = {
   pancake: { active: boolean; pageId: string | null };
   messenger: { active: boolean; pageIds: readonly string[] };
-  /** Đường canonical ĐÃ LƯU theo page (0232). Thiếu ⇒ luật cũ cho mọi page. */
+  /** Đường canonical ĐÃ LƯU theo page (0233). Thiếu ⇒ luật cũ cho mọi page. */
   modes?: Readonly<Record<string, ConnectionMode>>;
 };
 
@@ -239,7 +239,7 @@ export async function insertCustomerInbound(row: InboundInsert & { transport: Tr
   });
 }
 
-/** Đường đã ghi tin KHÁCH gần nhất của một luồng (0232) — `null` = dòng cũ chưa có cột. */
+/** Đường đã ghi tin KHÁCH gần nhất của một luồng (0233) — `null` = dòng cũ chưa có cột. */
 export async function threadTransport(pageId: string, threadId: string): Promise<TransportOwner | null> {
   const db = await getDb();
   const t = schema.salesChatInbound;

@@ -1,5 +1,5 @@
 /**
- * ═══════════ ĐƯỜNG NHẬN TIN CANONICAL CỦA PAGE — KIỂU + NHÃN DÙNG CHUNG MÁY CHỦ / TRÌNH DUYỆT (0232) ═══════════
+ * ═══════════ ĐƯỜNG NHẬN TIN CANONICAL CỦA PAGE — KIỂU + NHÃN DÙNG CHUNG MÁY CHỦ / TRÌNH DUYỆT (0233) ═══════════
  *
  * Tệp THUẦN (không CSDL): khung «Đường nhận tin» của hộp thư (client) chỉ được `import` từ đây; luật + đọc / ghi ở
  * `lib/sales-chatbot/channel-ownership.ts`.

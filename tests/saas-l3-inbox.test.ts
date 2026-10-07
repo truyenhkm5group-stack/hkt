@@ -1,10 +1,10 @@
 /**
- * ═══════════ HỘP THƯ HỢP NHẤT + SONG SONG PANCAKE / META TRỰC TIẾP (sứ mệnh saas-l3-inbox · 0232) ═══════════
+ * ═══════════ HỘP THƯ HỢP NHẤT + SONG SONG PANCAKE / META TRỰC TIẾP (sứ mệnh saas-l3-inbox · 0233) ═══════════
  *
  * Khoá — gọi ĐƯỜNG THẬT (webhook Pancake giả + Graph giả + AI giả đếm lượt, tổ chức THẬT), không regex mã nguồn:
  *  · THUẦN: đường canonical (`transportOwnerOf` / `routeVerdict`) — page chưa có dòng ⇒ luật cũ (Pancake thắng), có dòng ⇒ đúng
  *    đường đó, đường đó không chạy ⇒ không đường nào kích AI; số phút nhường; lọc ảnh đại diện; nhãn nguồn.
- *  · BACKFILL 0232 trên CSDL nâng cấp (PGlite, sổ cắt trước 0232): page Pancake (kể cả page nối CẢ HAI đường) ⇒ PANCAKE_WEBHOOK,
+ *  · BACKFILL 0233 trên CSDL nâng cấp (PGlite, sổ cắt trước 0233): page Pancake (kể cả page nối CẢ HAI đường) ⇒ PANCAKE_WEBHOOK,
  *    page chỉ Messenger ⇒ META_DIRECT, page đã gỡ ⇒ không dòng; đường kích AI TRƯỚC và SAU backfill giống hệt từng page; chạy lại
  *    không nhân dòng.
  *  · Tổ chức Pancake (kiểu HSLC): cùng tin, trước và sau backfill ⇒ cùng kết quả (nhận · 1 lượt trả lời · 1 tin gửi qua Pancake).
@@ -120,7 +120,7 @@ function testPure() {
   assert.ok(INBOX_FILTERS.includes("AI") && INBOX_FILTERS.includes("HUMAN") && INBOX_FILTERS.includes("ORDERED") && INBOX_FILTERS.includes("NOT_ORDERED"));
 }
 
-// ─────────────────────────── Backfill 0232 trên CSDL nâng cấp ───────────────────────────
+// ─────────────────────────── Backfill 0233 trên CSDL nâng cấp ───────────────────────────
 
 async function testBackfillUpgrade() {
   const goc = path.join(process.cwd(), "drizzle");
@@ -150,7 +150,7 @@ async function testBackfillUpgrade() {
     const rows = (await client.query<{ page_id: string; mode: string; source: string; reason: string; set_by_user_id: string | null }>(`select page_id, mode, source, reason, set_by_user_id from channel_page_modes order by page_id`)).rows;
     const modes: Record<string, ConnectionMode> = Object.fromEntries(rows.map((r) => [r.page_id, r.mode as ConnectionMode]));
     assert.deepEqual(modes, { "111": "PANCAKE_WEBHOOK", "222": "META_DIRECT", "999": "META_DIRECT" }, `backfill chép ĐÚNG đường hôm nay: ${JSON.stringify(rows)}`);
-    assert.ok(rows.every((r) => r.source === "BACKFILL" && r.set_by_user_id === null && r.reason.startsWith("0232:")), "nguồn BACKFILL, của MÁY, có lý do");
+    assert.ok(rows.every((r) => r.source === "BACKFILL" && r.set_by_user_id === null && r.reason.startsWith("0233:")), "nguồn BACKFILL, của MÁY, có lý do");
     // Trước / sau: đường kích AI của TỪNG page không đổi (page Pancake — kiểu HSLC — giữ Pancake).
     const legacy: TransportFacts = { pancake: { active: true, pageId: "111" }, messenger: { active: true, pageIds: ["111", "222", "999"] } };
     for (const id of ["111", "222", "999", "333", "444"]) assert.equal(transportOwnerOf({ ...legacy, modes }, id), transportOwnerOf(legacy, id), `page ${id}: đường trước = đường sau backfill`);
@@ -268,7 +268,7 @@ async function testFlow(backfillStmts: readonly string[]) {
       const audConnect = await db.select().from(schema.auditLogs).where(and(eq(schema.auditLogs.action, "SALES_CHANNEL_MODE_SET"), eq(schema.auditLogs.entityId, PAGE_M)));
       assert.ok(audConnect.length === 1 && audConnect[0].userId === admin.id, "nhật ký đặt đường khi nối");
 
-      // Pancake cho PAGE_P — kiểu HSLC: chưa có dòng canonical nào (page có trước 0232).
+      // Pancake cho PAGE_P — kiểu HSLC: chưa có dòng canonical nào (page có trước 0233).
       assert.ok("ok" in (await saveConnection(admin, { connectorKey: "pancake-fanpage", settings: { pageId: PAGE_P }, secrets: { pageAccessToken: PANCAKE_TOKEN } })));
       assert.ok("ok" in (await testOrgConnection(admin, "pancake-fanpage", { tester: { fetch: pancake.fetch } })));
       assert.ok("ok" in (await setConnectionStatus(admin, "pancake-fanpage", "ACTIVE")));
@@ -625,7 +625,7 @@ export async function testSaasL3Inbox() {
     await cleanupOrg(ORG_B);
   }
   console.log(
-    "✓ Hộp thư hợp nhất + song song Pancake/Meta: đường canonical lưu theo page (backfill 0232 giữ ĐÚNG đường hôm nay — page Pancake trước = sau, chạy lại không nhân dòng); page mới nối Meta ⇒ META_DIRECT; cùng tin hai webhook ⇒ 1 dòng, AI/sổ AI/tin gửi như một đường; chuyển đường giữa chừng ⇒ AI đúng một lần; đường phụ lưu cho người, 0 AI; người trả lời từ ERP · Pancake · Hộp thư Meta ⇒ AI nhường ở cả hai chế độ; số phút nhường cấu hình theo workspace; thẻ AI/Người ≡ aiHoldOf trên ma trận 14 dòng; Đã chốt/Chưa chốt phủ kín; số chưa đọc; ảnh đại diện Graph (lỗi quyền ⇒ chữ cái, không lộ token); cô lập tổ chức",
+    "✓ Hộp thư hợp nhất + song song Pancake/Meta: đường canonical lưu theo page (backfill 0233 giữ ĐÚNG đường hôm nay — page Pancake trước = sau, chạy lại không nhân dòng); page mới nối Meta ⇒ META_DIRECT; cùng tin hai webhook ⇒ 1 dòng, AI/sổ AI/tin gửi như một đường; chuyển đường giữa chừng ⇒ AI đúng một lần; đường phụ lưu cho người, 0 AI; người trả lời từ ERP · Pancake · Hộp thư Meta ⇒ AI nhường ở cả hai chế độ; số phút nhường cấu hình theo workspace; thẻ AI/Người ≡ aiHoldOf trên ma trận 14 dòng; Đã chốt/Chưa chốt phủ kín; số chưa đọc; ảnh đại diện Graph (lỗi quyền ⇒ chữ cái, không lộ token); cô lập tổ chức",
   );
 }
 

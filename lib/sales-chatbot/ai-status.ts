@@ -187,9 +187,9 @@ const EXACT: ReadonlyArray<[string, NoteVerdict]> = [
   [EMPTY_REPLY_NOTE, { code: "AI_EMPTY_RESPONSE", stop: "COMPOSED", kind: "FAIL" }],
   [BOT_YIELDED_NOTE, { code: "AI_YIELDED_TO_HUMAN", stop: "SENDING", kind: "SKIP" }],
   [PAGE_NOT_LIVE_SEND_ERROR, { code: "AI_SEND_BLOCKED_PAGE_NOT_LIVE", stop: "SENDING", kind: "SKIP" }],
-  // 0232: đường nhận tin KHÔNG canonical ghi tin khách (đường chính của page đã lưu mà không chạy) — lưu cho người, không kích AI.
+  // 0233: đường nhận tin KHÔNG canonical ghi tin khách (đường chính của page đã lưu mà không chạy) — lưu cho người, không kích AI.
   [NON_CANONICAL_NOTE, { code: "AI_SKIPPED_NON_CANONICAL_ROUTE", stop: "ELIGIBLE", kind: "SKIP" }],
-  // 0232: bản sao của một tin khách đã tới qua đường kia (đường chính vừa đổi) — bản của đường chính được AI trả lời.
+  // 0233: bản sao của một tin khách đã tới qua đường kia (đường chính vừa đổi) — bản của đường chính được AI trả lời.
   [DUPLICATE_SOURCE_REASON, { code: "AI_SKIPPED_DUPLICATE_SOURCE", stop: "ELIGIBLE", kind: "SKIP" }],
 ];
 

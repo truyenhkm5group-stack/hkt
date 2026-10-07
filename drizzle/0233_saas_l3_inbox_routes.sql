@@ -1,4 +1,4 @@
--- 0232 · ĐƯỜNG NHẬN TIN CANONICAL CỦA MỖI PAGE + KHỬ TRÙNG HAI NGUỒN (sứ mệnh saas-l3-inbox · lib/sales-chatbot/channel-ownership.ts).
+-- 0233 · ĐƯỜNG NHẬN TIN CANONICAL CỦA MỖI PAGE + KHỬ TRÙNG HAI NGUỒN (sứ mệnh saas-l3-inbox · lib/sales-chatbot/channel-ownership.ts).
 --
 --  · Một page có thể nối qua Pancake VÀ qua Meta trực tiếp (Messenger / Instagram). Trước bản này «đường nào kích AI» là luật cứng
 --    trong mã: Pancake luôn thắng. Chủ shop 07/10/2026: mỗi page có MỘT `connection_mode` canonical LƯU ĐƯỢC
@@ -32,21 +32,21 @@ CREATE UNIQUE INDEX IF NOT EXISTS "channel_page_modes_page_uq" ON "channel_page_
 --> statement-breakpoint
 INSERT INTO "channel_page_modes" ("id", "page_id", "mode", "source", "reason")
 SELECT gen_random_uuid()::text, btrim("settings"->>'pageId'), 'PANCAKE_WEBHOOK', 'BACKFILL',
-  '0232: page đang nhận tin qua Pancake lúc nâng cấp — giữ nguyên đường đang chạy (Pancake thắng như trước)'
+  '0233: page đang nhận tin qua Pancake lúc nâng cấp — giữ nguyên đường đang chạy (Pancake thắng như trước)'
 FROM "org_connections"
 WHERE "connector_key" = 'pancake-fanpage' AND "status" = 'ACTIVE' AND coalesce(btrim("settings"->>'pageId'), '') <> ''
 ON CONFLICT ("page_id") DO NOTHING;
 --> statement-breakpoint
 INSERT INTO "channel_page_modes" ("id", "page_id", "mode", "source", "reason")
 SELECT gen_random_uuid()::text, "page_id", 'META_DIRECT', 'BACKFILL',
-  '0232: page chỉ nhận tin qua Meta trực tiếp lúc nâng cấp — giữ nguyên đường đang chạy'
+  '0233: page chỉ nhận tin qua Meta trực tiếp lúc nâng cấp — giữ nguyên đường đang chạy'
 FROM "org_channel_pages"
 WHERE "connector_key" = 'facebook-messenger' AND "status" = 'ACTIVE' AND btrim("page_id") <> ''
 ON CONFLICT ("page_id") DO NOTHING;
 --> statement-breakpoint
 INSERT INTO "channel_page_modes" ("id", "page_id", "mode", "source", "reason")
 SELECT gen_random_uuid()::text, x.id, 'META_DIRECT', 'BACKFILL',
-  '0232: page của kết nối Messenger đơn cũ (trước 0220) lúc nâng cấp — giữ nguyên đường đang chạy'
+  '0233: page của kết nối Messenger đơn cũ (trước 0220) lúc nâng cấp — giữ nguyên đường đang chạy'
 FROM "org_connections" oc
 CROSS JOIN LATERAL (VALUES (btrim(coalesce(oc."settings"->>'pageId', ''))), (btrim(coalesce(oc."settings"->>'igAccountId', '')))) AS x(id)
 WHERE oc."connector_key" = 'facebook-messenger' AND oc."status" = 'ACTIVE' AND x.id <> ''

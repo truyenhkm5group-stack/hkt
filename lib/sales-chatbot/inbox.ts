@@ -136,7 +136,7 @@ const UNREAD_COUNT = sql<number>`(case when "${sql.raw(C)}"."page_id" is not nul
     and i.created_at > coalesce("${sql.raw(C)}"."staff_seen_at", 'epoch'::timestamptz) limit 100) x)
   else (select count(*)::int from (select 1 from "sales_chat_messages" m where m.conversation_id = "${sql.raw(C)}"."id" and m.role = 'user'
     and m.created_at > coalesce("${sql.raw(C)}"."staff_seen_at", 'epoch'::timestamptz) limit 100) y) end)`;
-/** Đường đã ghi tin khách gần nhất của luồng (0232) — `NULL` ở dòng cũ ⇒ đường canonical hiện tại của page. */
+/** Đường đã ghi tin khách gần nhất của luồng (0233) — `NULL` ở dòng cũ ⇒ đường canonical hiện tại của page. */
 const THREAD_TRANSPORT = sql<string | null>`(select i.transport from "sales_chat_inbound" i where i.page_id = "${sql.raw(C)}"."page_id" and i.thread_id = "${sql.raw(C)}"."thread_id" and i.transport is not null order by i.created_at desc limit 1)`;
 
 /** Nhãn nguồn của hàng: Zalo · Web · Direct (Meta trực tiếp) · Pancake. HÀM THUẦN. */

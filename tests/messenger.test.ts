@@ -295,14 +295,14 @@ async function testFlow() {
       assert.ok(botCalls.slice(botBefore).some((r) => r.system.includes("ÁO SƠ MI LINEN") && r.system.includes("BÌNH LUẬN DƯỚI BÀI VIẾT")), "lời nhắc có nội dung bài viết");
       // Tin của page KHÁC page đã nối ⇒ không nhận.
       assert.equal((await receiveMessengerEvent({ ...ev("m.7", "hi"), pageId: "5555555555" })).queued, false);
-      // MỘT PAGE — MỘT ĐƯỜNG CANONICAL (channel-ownership.ts · 0232). Page NỐI MESSENGER TRƯỚC ⇒ đường chính đã lưu = Meta trực
+      // MỘT PAGE — MỘT ĐƯỜNG CANONICAL (channel-ownership.ts · 0233). Page NỐI MESSENGER TRƯỚC ⇒ đường chính đã lưu = Meta trực
       // tiếp (page mới ưu tiên Direct); CÙNG page bật thêm qua Pancake SAU ⇒ Messenger VẪN là đường kích AI, nối lại page được.
       const oc = schema.orgConnections;
       const modeRow = (await db.select().from(schema.channelPageModes).where(eq(schema.channelPageModes.pageId, PAGE)))[0];
       assert.ok(modeRow && modeRow.mode === "META_DIRECT" && modeRow.source === "CONNECT", `nối Messenger cho page mới ⇒ META_DIRECT: ${JSON.stringify(modeRow)}`);
       await db.insert(oc).values({ orgCode: ORG, connectorKey: "pancake-fanpage", status: "ACTIVE", settings: { pageId: PAGE }, lastTestOk: true });
       assert.equal((await receiveMessengerEvent(ev("m.direct.1", "Áo này còn không?"))).queued, true, "đường chính Meta trực tiếp ⇒ nhận dù Pancake cũng bật");
-      // Page CÓ TỪ TRƯỚC 0232 (không dòng canonical) ⇒ LUẬT CŨ: Pancake thắng, đường Messenger nhường MỌI gói tin của page đó (không
+      // Page CÓ TỪ TRƯỚC 0233 (không dòng canonical) ⇒ LUẬT CŨ: Pancake thắng, đường Messenger nhường MỌI gói tin của page đó (không
       // hàng chờ, không hội thoại thứ hai) và không cho nối lại page ấy.
       await db.delete(schema.channelPageModes).where(eq(schema.channelPageModes.pageId, PAGE));
       const inboundBefore = (await db.select().from(schema.salesChatInbound)).length;

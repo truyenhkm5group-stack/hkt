@@ -619,8 +619,12 @@ async function testJourney() {
     const noByok = await saveSalesChatbotConfig(admin, { ...DEFAULT_SALES_CHATBOT_CONFIG, connectorKey: "anthropic-byok", enabled: true });
     assert.ok(!noByok.ok && /Chưa bật được bot/.test(noByok.error), "bật bot khi chưa có khoá AI riêng ⇒ từ chối");
     // Hành trình này kiểm đường KHOÁ RIÊNG của shop (BYOK) — đường AI dùng chung có bài riêng ở tests/quick-start.test.ts.
-    const cfgOk = await saveSalesChatbotConfig(admin, { ...DEFAULT_SALES_CHATBOT_CONFIG, connectorKey: "anthropic-byok", shippingFee: null });
+    // Workspace KHÁCH (07/10/2026): nguồn AI là của người vận hành — đặt thẳng như khối «AI của workspace» đã đặt; lượt lưu
+    // của khách gửi nguồn khác thì máy chủ GIỮ NGUYÊN nguồn đang lưu (lib/saas/visibility.ts::keepStoredEngineFields).
+    await setSettingJson(SALES_CHATBOT_SETTING_KEY, { ...DEFAULT_SALES_CHATBOT_CONFIG, connectorKey: "anthropic-byok", shippingFee: null });
+    const cfgOk = await saveSalesChatbotConfig(admin, { ...DEFAULT_SALES_CHATBOT_CONFIG, connectorKey: "platform", model: "mot-model-khac", shippingFee: null });
     assert.ok(cfgOk.ok);
+    assert.ok(cfgOk.ok && cfgOk.config.connectorKey === "anthropic-byok" && cfgOk.config.model === "", "khách lưu cấu hình ⇒ nguồn AI / model giữ nguyên giá trị đang lưu");
 
     setSalesChatProviderForTests(() => fakeProvider(hslcScript({ chaMuc, ruocTom })));
     try {

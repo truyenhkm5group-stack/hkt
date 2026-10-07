@@ -8,7 +8,7 @@ import { CONNECTION_MODE_LABEL, MODE_SOURCE_LABEL, TRANSPORT_MODE, type Connecti
 import { cn } from "@/lib/utils";
 
 /**
- * «ĐƯỜNG NHẬN TIN & AI NHƯỜNG» (0232) — cho người quản lý: mỗi page một dòng (đường chính · đường nào đang chạy · cảnh báo), nút
+ * «ĐƯỜNG NHẬN TIN & AI NHƯỜNG» (0233) — cho người quản lý: mỗi page một dòng (đường chính · đường nào đang chạy · cảnh báo), nút
  * chuyển đường TƯỜNG MINH (bắt buộc lý do, vào nhật ký), và số phút AI tự trả lời lại sau câu tay của nhân viên (theo workspace).
  * Không có gì tự đổi: máy không bao giờ chuyển đường hộ người.
  */

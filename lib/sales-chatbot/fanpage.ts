@@ -254,7 +254,7 @@ export type FanpageEvent = {
   /** 0225: quảng cáo dẫn KHÁCH vào hội thoại (`adReferralFromPancake`) — tin phía page / thiếu trường ⇒ không có. */
   adReferral?: AdReferral | null;
   /**
-   * 0232: mã người gửi CHUẨN của tin KHÁCH (PSID Facebook: `conversation.from_psid`, rồi `message.from.id` — cùng cách đọc với
+   * 0233: mã người gửi CHUẨN của tin KHÁCH (PSID Facebook: `conversation.from_psid`, rồi `message.from.id` — cùng cách đọc với
    * `lib/integrations/pancake/pages.ts`) — khoá khử trùng với đường Meta trực tiếp. Thiếu ⇒ chỉ chống trùng theo mã tin.
    */
   senderId?: string;
@@ -387,9 +387,9 @@ export async function receiveFanpageEvent(ev: FanpageEvent, now: Date = new Date
   const conn = await openActiveConnection(FANPAGE_CONNECTOR);
   if (!conn.ok) return { queued: false, reason: "Kết nối fanpage chưa bật" };
   if ((conn.settings.pageId ?? "").trim() !== ev.pageId) return { queued: false, reason: "Tin của page khác page đã khai" };
-  // MỘT PAGE — MỘT ĐƯỜNG CANONICAL (channel-ownership.ts · 0232): page nhận tin qua Meta trực tiếp (đường chính, đang chạy) ⇒ đường
+  // MỘT PAGE — MỘT ĐƯỜNG CANONICAL (channel-ownership.ts · 0233): page nhận tin qua Meta trực tiếp (đường chính, đang chạy) ⇒ đường
   // Pancake nhường MỌI gói tin của page (cả tin phía page — tiếng vọng Meta đã báo nhân viên trả lời). Đường chính đã lưu mà không
-  // chạy ⇒ ghi tin khách cho người đọc, KHÔNG kích AI. Đọc hỏng ⇒ như trước 0232 (Pancake chạy — không gãy đường đang chạy thật).
+  // chạy ⇒ ghi tin khách cho người đọc, KHÔNG kích AI. Đọc hỏng ⇒ như trước 0233 (Pancake chạy — không gãy đường đang chạy thật).
   const verdict: RouteVerdict = await loadTransportFacts()
     .then((f) => routeVerdict(f, ev.pageId, "PANCAKE"))
     .catch(() => "CANONICAL" as const);
@@ -865,7 +865,7 @@ export async function processFanpageThread(pageId: string, threadId: string, dep
   const out: ProcessResult = { processed: 0, replies: 0, skipped: null, error: null };
   const conn = await openActiveConnection(FANPAGE_CONNECTOR);
   if (!conn.ok || (conn.settings.pageId ?? "").trim() !== pageId) return { ...out, skipped: "Kết nối fanpage chưa bật / khác page" };
-  // Chỉ đường CANONICAL của page được kích AI (0232). Đọc hỏng ⇒ chạy như trước.
+  // Chỉ đường CANONICAL của page được kích AI (0233). Đọc hỏng ⇒ chạy như trước.
   const verdict = await loadTransportFacts()
     .then((f) => routeVerdict(f, pageId, "PANCAKE"))
     .catch(() => "CANONICAL" as const);
@@ -1291,7 +1291,7 @@ export async function catchUpFanpage(deps: FanpageDeps = {}): Promise<CatchUpRes
   const pageId = (conn.settings.pageId ?? "").trim();
   const token = (conn.secrets.pageAccessToken ?? "").trim();
   if (!pageId || !token) return { ...out, detail: ["kết nối fanpage thiếu page / token"] };
-  // Pancake không phải đường chính của page (0232) ⇒ không quét lại / mở lại tin qua đường này.
+  // Pancake không phải đường chính của page (0233) ⇒ không quét lại / mở lại tin qua đường này.
   const verdict = await loadTransportFacts()
     .then((f) => routeVerdict(f, pageId, "PANCAKE"))
     .catch(() => "CANONICAL" as const);

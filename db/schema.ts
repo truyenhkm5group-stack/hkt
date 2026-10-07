@@ -5095,10 +5095,20 @@ export const platformAiUsage = pgTable(
     conversationId: text("conversation_id"),
     /** `TEXT` · `VISION` (đọc ảnh khách gửi) · `IMAGE` (vẽ ảnh) — 0222. `NULL` = nơi gọi chưa khai. */
     modality: text("modality"),
+    /**
+     * QUAN SÁT (0232) — KHÔNG đổi nghĩa `input_tokens` / `output_tokens` / `cost_usd`. `thinking_tokens` ⊂ `output_tokens` (phần
+     * suy nghĩ); `cached_tokens` ⊂ `input_tokens` (đọc từ bộ đệm); `latency_ms` = thời gian lời gọi model; `workload` = loại việc
+     * của Platform AI Policy. `NULL` = chưa đo (dòng cũ / nhà cung cấp không tách), không phải 0.
+     */
+    cachedTokens: integer("cached_tokens"),
+    thinkingTokens: integer("thinking_tokens"),
+    latencyMs: integer("latency_ms"),
+    workload: text("workload"),
   },
   (t) => [
     uniqueIndex("platform_ai_usage_org_event_key").on(t.orgCode, t.eventKey).where(sql`${t.eventKey} IS NOT NULL`),
     check("platform_ai_usage_modality_check", sql`${t.modality} IS NULL OR ${t.modality} IN ('TEXT','VISION','IMAGE')`),
+    check("platform_ai_usage_workload_check", sql`${t.workload} IS NULL OR ${t.workload} IN ('sales_chatbot','order_sync','quick_extract','vision')`),
     check("platform_ai_usage_event_key_check", sql`${t.eventKey} IS NULL OR length(${t.eventKey}) BETWEEN 1 AND 200`),
     index("platform_ai_usage_org_at_idx").on(t.orgCode, t.at),
     // 0231: sổ AI theo HỘI THOẠI cho dấu vết từng tin khách ở hộp thư (lib/ai-usage/conversation-evidence.ts).
@@ -10412,10 +10422,10 @@ export const orgChannelPages = pgTable(
   ],
 );
 
-// ═══ ĐƯỜNG NHẬN TIN CANONICAL CỦA MỖI PAGE (0232 · lib/sales-chatbot/channel-ownership.ts) ═══
+// ═══ ĐƯỜNG NHẬN TIN CANONICAL CỦA MỖI PAGE (0233 · lib/sales-chatbot/channel-ownership.ts) ═══
 //
 // Một page có thể nối qua Pancake VÀ qua Meta trực tiếp; chỉ MỘT đường được kích AI. Trước bảng này «đường nào thắng» là luật
-// cứng trong mã (Pancake luôn thắng). Nay mỗi page một dòng: `META_DIRECT` | `PANCAKE_WEBHOOK`, kèm NGUỒN (`BACKFILL` — 0232 chép
+// cứng trong mã (Pancake luôn thắng). Nay mỗi page một dòng: `META_DIRECT` | `PANCAKE_WEBHOOK`, kèm NGUỒN (`BACKFILL` — 0233 chép
 // đúng đường đang chạy hôm nay · `CONNECT` — người nối Messenger cho page chưa chạy qua Pancake · `MANUAL` — người bấm chuyển
 // đường) và LÝ DO. Page chưa có dòng ⇒ luật cũ (Pancake thắng) — không đoán. Chỉ đọc / ghi qua channel-ownership.ts.
 export const channelPageModes = pgTable(
@@ -10426,7 +10436,7 @@ export const channelPageModes = pgTable(
     mode: text("mode").notNull(),
     source: text("source").notNull(),
     reason: text("reason").notNull(),
-    /** Người bấm (`users.id`, luật 34) — `NULL` = máy (lượt backfill của 0232). */
+    /** Người bấm (`users.id`, luật 34) — `NULL` = máy (lượt backfill của 0233). */
     setByUserId: text("set_by_user_id"),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
@@ -10933,7 +10943,7 @@ export const salesChatInbound = pgTable(
     nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true }),
     lastError: text("last_error"),
     /**
-     * 0232 — HAI ĐƯỜNG NHẬN TIN CỦA MỘT PAGE (lib/sales-chatbot/channel-ownership.ts): đường đã ghi dòng tin KHÁCH này
+     * 0233 — HAI ĐƯỜNG NHẬN TIN CỦA MỘT PAGE (lib/sales-chatbot/channel-ownership.ts): đường đã ghi dòng tin KHÁCH này
      * (`PANCAKE` · `MESSENGER`) và mã người gửi CHUẨN (PSID của Facebook). Dùng để khử trùng một tin khách tới qua CẢ HAI webhook
      * (cùng page + cùng người gửi + cùng chữ, khác đường, trong cửa sổ ngắn). `NULL` ở dòng cũ / tin phía page = không khử trùng.
      */

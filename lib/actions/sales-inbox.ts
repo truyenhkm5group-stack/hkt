@@ -104,7 +104,7 @@ export async function submitFeedbackAction(conversationId: string, text: string)
   return done(await submitConversationFeedbackCore(user, conversationId, text));
 }
 
-/** Chuyển đường nhận tin canonical của MỘT page (Meta trực tiếp ⇄ Pancake) — thao tác tường minh, lý do vào nhật ký (0232). */
+/** Chuyển đường nhận tin canonical của MỘT page (Meta trực tiếp ⇄ Pancake) — thao tác tường minh, lý do vào nhật ký (0233). */
 export async function setPageConnectionModeAction(pageId: string, mode: ConnectionMode, reason: string): Promise<Out<{ changed: boolean; from: ConnectionMode | null }>> {
   const user = await requireUser();
   return done(await setPageConnectionModeCore(user, pageId, mode, reason));
