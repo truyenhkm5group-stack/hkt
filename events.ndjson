@@ -298,3 +298,4 @@
 {"at":"2026-10-07T10:31:08.992Z","actor":"DESKTOP-56TH98Y:wt-saas-l1","kind":"CLAIM","mission":"saas-l1-hide-internal","detail":"RUNNING · 11 mẫu phạm vi · MEDIUM"}
 {"at":"2026-10-07T10:35:43.966Z","actor":"DESKTOP-56TH98Y:wt-saas-l4","kind":"OVERLAP_DETECTED","mission":"saas-l4-channels","detail":"OVERLAP với saas-l1-hide-internal: phạm vi app/(dashboard)/settings/connections/page.tsx ↔ app/(dashboard)/settings/connections ⇒ tuần tự hoá (--after=saas-l1-hide-internal) hoặc khai cách tích hợp (--accept-overlap=\"…\")"}
 {"at":"2026-10-07T10:35:57.798Z","actor":"DESKTOP-56TH98Y:wt-saas-l4","kind":"CLAIM","mission":"saas-l4-channels","detail":"RUNNING · 8 mẫu phạm vi · MEDIUM"}
+{"at":"2026-10-07T10:36:55.135Z","actor":"DESKTOP-56TH98Y:wt-saas-l2","kind":"CLAIM","mission":"saas-l2-customer-shell","detail":"RUNNING · 11 mẫu phạm vi · HIGH"}
