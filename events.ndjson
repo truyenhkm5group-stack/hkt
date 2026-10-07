@@ -446,3 +446,4 @@
 {"at":"2026-10-07T22:13:41.372Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"order-truth-stamp","detail":"feat/order-truth-stamp @ e433706d09de · 3 lệnh kiểm thử"}
 {"at":"2026-10-07T22:13:55.293Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"order-truth-stamp","detail":"#649 cho feat/order-truth-stamp @ e433706d09de"}
 {"at":"2026-10-07T22:38:46.475Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#647 @ b1a013ab0fef · Review bảo mật độc lập 4 vòng + phần chênh: PASS, không CRITICAL/HIGH; kiểm đột biến 17/17 bị bắt"}
+{"at":"2026-10-07T22:39:10.585Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"returning-history-leak","detail":"#647 @ b1a013ab0fef → 638091636e30 (MERGE_NOW · MEDIUM · gates success)"}
