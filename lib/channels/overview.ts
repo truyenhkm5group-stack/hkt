@@ -12,13 +12,13 @@
  */
 import { and, gte, inArray, isNull, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
-import { messagingConnectionSummaries } from "@/lib/connectors/service";
+import { listChannelPages, messagingConnectionSummaries } from "@/lib/connectors/service";
 import { WEBHOOK_STATES, messengerApp, type WebhookState } from "@/lib/integrations/messenger/graph";
 import { graphErrorKindOfText } from "@/lib/integrations/messenger/graph-errors";
 import { WEBHOOK_LABEL } from "@/lib/integrations/messenger/permission-guide";
 import { currentOrganization } from "@/lib/platform/context";
 import { getSettingJson } from "@/lib/settings";
-import { PANCAKE_FANPAGE_KEY, loadTransportFacts, transportOwnerOf } from "@/lib/sales-chatbot/channel-ownership";
+import { MESSENGER_DIRECT_KEY, PANCAKE_FANPAGE_KEY, loadTransportFacts, transportOwnerOf } from "@/lib/sales-chatbot/channel-ownership";
 import { loadSalesChatbotConfig } from "@/lib/sales-chatbot/engine";
 import { messengerView } from "@/lib/sales-chatbot/messenger";
 import { zaloPageKey } from "@/lib/sales-chatbot/zalo";
@@ -77,13 +77,15 @@ async function lastActivity(pageIds: readonly string[], now: Date): Promise<Map<
 
 export async function loadChannelsOverview(viewer: { operator: boolean }, now: Date = new Date()): Promise<ChannelsOverview> {
   const org = await currentOrganization();
-  const [view, facts, conns, whStored, cfg] = await Promise.all([
+  const [view, facts, conns, whStored, cfg, pageRows] = await Promise.all([
     messengerView(),
     loadTransportFacts(),
     messagingConnectionSummaries([PANCAKE_FANPAGE_KEY, ZALO_OA_KEY]),
     getSettingJson<StoredWebhookCheck | null>(WEBHOOK_CHECK_SETTING_KEY, null),
     loadSalesChatbotConfig(),
+    listChannelPages(MESSENGER_DIRECT_KEY),
   ]);
+  const savedAt = new Map(pageRows.map((r) => [r.pageId, r.updatedAt.toISOString()]));
   const pancakeConn = conns.find((c) => c.connectorKey === PANCAKE_FANPAGE_KEY) ?? null;
   const zaloConn = conns.find((c) => c.connectorKey === ZALO_OA_KEY) ?? null;
   const pancakePageId = (pancakeConn?.plainSettings.pageId ?? "").trim();
@@ -92,7 +94,7 @@ export async function loadChannelsOverview(viewer: { operator: boolean }, now: D
   const rawError = new Map(view.pages.map((p) => [p.id, p.lastError]));
 
   const merged = mergeChannelSources({
-    direct: view.pages.map((p) => ({ id: p.id, name: p.name, status: p.status, kind: p.kind, parentPageId: p.parentPageId, aiEnabled: p.aiEnabled, lastEventAt: p.lastEventAt, lastErrorAt: p.lastErrorAt, errorKind: graphErrorKindOfText(p.lastError), hasError: Boolean(p.lastErrorAt), legacy: p.legacy })),
+    direct: view.pages.map((p) => ({ id: p.id, name: p.name, status: p.status, kind: p.kind, parentPageId: p.parentPageId, aiEnabled: p.aiEnabled, lastEventAt: p.lastEventAt, lastErrorAt: p.lastErrorAt, errorKind: graphErrorKindOfText(p.lastError), hasError: Boolean(p.lastErrorAt), legacy: p.legacy, savedAt: savedAt.get(p.id) ?? null })),
     pancake: pancakeConn && pancakePageId ? { pageId: pancakePageId, facts: { status: asConnStatus(pancakeConn.status), lastTestOk: pancakeConn.lastTestOk, lastActivityAt: activity.get(pancakePageId) ?? null } } : null,
     zalo: zaloConn && zaloOaId ? { oaId: zaloOaId, facts: { status: asConnStatus(zaloConn.status), lastTestOk: zaloConn.lastTestOk, lastActivityAt: activity.get(zaloPageKey(zaloOaId)) ?? null } } : null,
     ownerOf: (id) => transportOwnerOf(facts, id),

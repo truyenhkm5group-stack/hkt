@@ -4,7 +4,8 @@ import { redirect } from "next/navigation";
 import { PageHeader } from "@/components/page-header";
 import { SectionCard } from "@/components/ui-bits";
 import { can, requirePermission } from "@/lib/auth/session";
-import { CHANNELS_RETURN_COOKIE, CHANNELS_ROUTE, CONNECT_RESULT_PARAMS } from "@/lib/channels/overview-shared";
+import { CHANNELS_RETURN_COOKIE, CHANNELS_RETURN_PARAM, CHANNELS_ROUTE, CONNECT_RESULT_PARAMS } from "@/lib/channels/overview-shared";
+import { ClearChannelsReturn } from "../../channels/clear-return-cookie";
 import { env } from "@/lib/env";
 import { loadPendingPages, messengerRedirectUris } from "@/lib/integrations/messenger/connect";
 import { DISCOVERY_REASONS, MESSENGER_REQUIRED_PERMISSIONS, WEBHOOK_STATES, messengerApp, messengerVerifyToken, type DiscoveryDiagnostic, type DiscoveryReason, type PageWebhookCheck, type WebhookState } from "@/lib/integrations/messenger/graph";
@@ -123,7 +124,10 @@ export default async function MessengerSettingsPage({ searchParams }: { searchPa
   const sp = await searchParams;
   const one = (k: string) => (typeof sp[k] === "string" ? (sp[k] as string) : "");
   // Lượt «Kết nối Facebook» bắt đầu từ màn Kênh kết nối ⇒ callback (không đổi) về đây, chuyển tiếp nguyên kết quả sang màn đó.
-  if ((await cookies()).get(CHANNELS_RETURN_COOKIE)?.value === "1" && (one("chon") || one("ok") || one("loi"))) {
+  // Cờ đi bằng tham số khi qua callback (callback đã xoá cookie); cookie còn sống chỉ khi lượt dừng trước callback (lỗi ở route
+  // start) hoặc bỏ dở — trang này gỡ nó ngay (ClearChannelsReturn) để lượt sau không bị chuyển nhầm.
+  const returnCookie = (await cookies()).get(CHANNELS_RETURN_COOKIE)?.value === "1";
+  if ((one(CHANNELS_RETURN_PARAM) === "1" || returnCookie) && (one("chon") || one("ok") || one("loi"))) {
     const q = new URLSearchParams(CONNECT_RESULT_PARAMS.filter((k) => one(k)).map((k) => [k, one(k)]));
     redirect(`${CHANNELS_ROUTE}?${q}`);
   }
@@ -166,6 +170,7 @@ export default async function MessengerSettingsPage({ searchParams }: { searchPa
     .map((c) => webhookRow({ pageId: c.pageId, state: c.state, missingFields: strs(c.missingFields), token: c.token ?? { state: "UNKNOWN", expiresAt: null, why: null }, detail: typeof c.detail === "string" ? c.detail : null }, typeof c.name === "string" ? c.name : c.pageId));
   return (
     <div className="space-y-5">
+      {returnCookie ? <ClearChannelsReturn /> : null}
       <PageHeader eyebrow="AI · Chatbot bán hàng" title="Messenger trực tiếp" description="Bot trả lời tin nhắn fanpage và Instagram — không cần Pancake" />
       {error ? <p className="rounded-md bg-rose-50 px-3 py-2 text-sm text-rose-800 dark:bg-rose-950/60 dark:text-rose-200">{error}</p> : null}
       {operatorErrorLines.length ? (

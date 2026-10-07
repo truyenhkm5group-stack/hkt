@@ -20,6 +20,7 @@ import {
   aiControlOf,
   channelHealth,
   connectionLabel,
+  customerSafeMessage,
   initialOf,
   lastSyncOf,
   pageAvatarUrl,
@@ -157,7 +158,7 @@ function ChannelRow({ row, webhook, appReady, manage, operator, extraTechnical, 
 }
 
 /** Bước «Chọn Page» sau khi Facebook trả danh sách (danh sách + quyền niêm phong ở máy chủ; client chỉ gửi MÃ page). */
-function PagePickStep({ pages, connected, onDone }: { pages: { id: string; name: string }[]; connected: string[]; onDone: () => Promise<void> }) {
+function PagePickStep({ pages, connected, operator, onDone }: { pages: { id: string; name: string }[]; connected: string[]; operator: boolean; onDone: () => Promise<void> }) {
   const [q, setQ] = useState("");
   const [picked, setPicked] = useState<Set<string>>(() => new Set(pages.filter((p) => !connected.includes(p.id)).map((p) => p.id)));
   const [pending, start] = useTransition();
@@ -176,10 +177,10 @@ function PagePickStep({ pages, connected, onDone }: { pages: { id: string; name:
     start(async () => {
       const r = await pickMessengerPagesAction([...picked]);
       if ("error" in r) {
-        toast.error(r.error);
+        toast.error(customerSafeMessage(r.error, operator, "Chưa kết nối được Page đã chọn — bấm «Kết nối lại»; nếu vẫn lỗi, liên hệ đội hỗ trợ."));
         return;
       }
-      toast.success(r.message);
+      toast.success(customerSafeMessage(r.message, operator, "Đã lưu các Page đã chọn — Page nào chưa kết nối được sẽ hiện «Cần xử lý» hoặc «Mất kết nối» bên dưới."));
       await onDone();
     });
   return (
@@ -255,7 +256,7 @@ export function ChannelsPanel({ rows, appReady, botEnabled, manage, operator, ou
   const onToggleAi = (row: ChannelRowView, on: boolean) =>
     startToggle(async () => {
       const r = await setMessengerPagesAiAction([row.pageId], on);
-      if ("error" in r) toast.error(r.error);
+      if ("error" in r) toast.error(customerSafeMessage(r.error, operator, "Chưa đổi được — thử lại sau ít phút."));
       else {
         toast.success(on ? `Đã bật AI cho «${row.name}».` : `Đã tạm dừng AI cho «${row.name}» — nhân viên trả lời.`);
         router.refresh();
@@ -310,7 +311,7 @@ export function ChannelsPanel({ rows, appReady, botEnabled, manage, operator, ou
           )}
         </div>
       ) : null}
-      {outcome?.kind === "PICK" && manage ? pending && pending.length ? <PagePickStep pages={pending} connected={connectedIds} onDone={afterPick} /> : <p className="rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:bg-amber-950/60 dark:text-amber-200">Danh sách Page đã hết hạn — bấm «Kết nối Facebook» lại.</p> : null}
+      {outcome?.kind === "PICK" && manage ? pending && pending.length ? <PagePickStep pages={pending} connected={connectedIds} operator={operator} onDone={afterPick} /> : <p className="rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:bg-amber-950/60 dark:text-amber-200">Danh sách Page đã hết hạn — bấm «Kết nối Facebook» lại.</p> : null}
 
       {!botEnabled ? (
         <p className="rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:bg-amber-950/60 dark:text-amber-200" data-testid="channels-bot-off">

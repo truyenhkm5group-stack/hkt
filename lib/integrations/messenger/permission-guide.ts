@@ -265,6 +265,7 @@ export function classifyMetaConnectError(input: { message?: string | null; error
  */
 const DIALOG_CONFIG_CODES: ReadonlySet<number> = new Set([100]);
 const DIALOG_REDIRECT_CODE = 191;
+const DIALOG_CANCEL_CODES: ReadonlySet<number> = new Set([4201]);
 
 export type MetaDialogError = { kind: "CANCELLED" } | { kind: "ERROR"; code: string; reason: string | null };
 
@@ -279,7 +280,8 @@ export function metaDialogError(q: { get(name: string): string | null }): MetaDi
   const rawReason = q.get("error_reason") ?? "";
   const code = /^\d{1,10}$/.test(rawCode) ? rawCode : null;
   const reason = /^[a-z_]{1,40}$/.test(rawReason) ? rawReason : null;
-  if (reason === "user_denied" || !code) return { kind: "CANCELLED" };
+  // 4201 = «User canceled the Dialog flow» — Meta gửi KHÔNG kèm error_reason.
+  if (reason === "user_denied" || !code || DIALOG_CANCEL_CODES.has(Number(code))) return { kind: "CANCELLED" };
   return { kind: "ERROR", code, reason };
 }
 

@@ -29,6 +29,8 @@ export const CHANNELS_ROUTE = "/ai/channels";
  */
 export const CHANNELS_RETURN_COOKIE = "erp_channels_return";
 export const CHANNELS_RETURN_TTL_SEC = 15 * 60;
+/** Callback xoá cookie ngay và mang cờ đi tiếp bằng tham số này (trang Messenger đọc để chuyển tiếp). */
+export const CHANNELS_RETURN_PARAM = "kenh";
 /** Tham số callback mà màn này hiểu (đúng bộ trang Messenger đang đọc). */
 export const CONNECT_RESULT_PARAMS = ["chon", "ok", "loi", "lydo", "ct", "msg", "webhook", "ma", "ly"] as const;
 
@@ -54,6 +56,11 @@ export type DirectFacts = {
   errorKind: GraphErrorKind | null;
   hasError: boolean;
   legacy: boolean;
+  /**
+   * Mốc hàng page được GHI lần cuối (`org_channel_pages.updated_at`; nối lại ghi mốc này và xoá lỗi cũ). Kết quả kiểm cũ hơn
+   * mốc này không còn nói về kết nối hiện tại. `null` = page của hàng kết nối đơn cũ (không hàng riêng).
+   */
+  savedAt: string | null;
 };
 
 /** Sự thật của một kết nối một-page (Pancake · Zalo) — đọc từ `org_connections`, không bí mật. */
@@ -95,7 +102,7 @@ export function mergeChannelSources(input: {
   for (const d of input.direct) {
     const id = d.id.trim();
     if (!id || rows.has(id)) continue;
-    const facts: DirectFacts = { status: d.status, kind: d.kind, parentPageId: d.parentPageId, aiEnabled: d.aiEnabled, lastEventAt: d.lastEventAt, lastErrorAt: d.lastErrorAt, errorKind: d.errorKind, hasError: d.hasError, legacy: d.legacy };
+    const facts: DirectFacts = { status: d.status, kind: d.kind, parentPageId: d.parentPageId, aiEnabled: d.aiEnabled, lastEventAt: d.lastEventAt, lastErrorAt: d.lastErrorAt, errorKind: d.errorKind, hasError: d.hasError, legacy: d.legacy, savedAt: d.savedAt };
     rows.set(id, { key: id, pageId: id, name: d.name.trim() || id, platform: d.kind === "INSTAGRAM" ? "INSTAGRAM" : "FACEBOOK", owner: null, direct: facts, pancake: null, zalo: null });
   }
   const pid = input.pancake?.pageId.trim() ?? "";
@@ -116,7 +123,6 @@ export function mergeChannelSources(input: {
 // ─────────────────────────── Sức khoẻ ba mức ───────────────────────────
 
 const newerThan = (a: string | null, b: string | null): boolean => Boolean(a) && (!b || a! > b);
-const sameOrAfter = (a: string | null, b: string | null): boolean => !b || (Boolean(a) && a! >= b);
 
 const PLATFORM_DOWN: CustomerIssue = { title: "Kết nối Facebook của nền tảng đang được bảo trì", action: "Không phải lỗi ở Page của bạn — liên hệ đội hỗ trợ nếu kéo dài quá vài giờ.", who: "SUPPORT" };
 
@@ -135,11 +141,14 @@ function directHealth(d: DirectFacts, webhook: WebhookFact | null, appReady: boo
   if (d.status === "DISABLED") return { level: "DISCONNECTED", issue: { title: "Bạn đã gỡ Page này khỏi ERP", action: "Bấm «Kết nối Facebook» và chọn lại Page nếu muốn dùng.", who: "SHOP" }, note: null };
   if (!appReady) return { level: "NEEDS_ACTION", issue: PLATFORM_DOWN, note: null };
   const evt = d.lastEventAt;
-  // Kết quả kiểm chỉ còn giá trị khi KHÔNG có tin nào về sau nó — tin về sau là chứng cứ mạnh hơn.
-  const wh = d.kind === "PAGE" && webhook && webhook.state !== "OK" && webhook.state !== "UNKNOWN" && sameOrAfter(webhook.at, evt) ? webhook.state : null;
+  // TIN ĐẾN KHÔNG CHỨNG MINH KẾT NỐI CÒN SỐNG: `last_event_at` ghi ở MỌI gói webhook vào (kể cả tiếng vọng khi nhân viên trả
+  // lời trong Business Suite), còn lỗi chỉ ghi khi BOT GỬI hỏng — AI page tắt / đang nhường / bot tắt thì không có lượt gửi
+  // nào để ghi lỗi mới. Nên lỗi kết nối (kiểm báo hết hạn / chưa đăng ký / thiếu trường; lỗi gửi loại TOKEN · PERMISSION)
+  // GIỮ NGUYÊN tới khi NỐI LẠI: nối lại xoá `last_error` (upsertChannelPage) và ghi mốc hàng mới hơn lần kiểm.
+  const wh = d.kind === "PAGE" && webhook && webhook.state !== "OK" && webhook.state !== "UNKNOWN" && !newerThan(d.savedAt, webhook.at) ? webhook.state : null;
   if (wh === "TOKEN_EXPIRED" || wh === "NOT_SUBSCRIBED") return { level: "DISCONNECTED", issue: CUSTOMER_WEBHOOK_TEXT[wh], note: null };
+  if (d.hasError && (d.errorKind === "TOKEN" || d.errorKind === "PERMISSION")) return { level: "DISCONNECTED", issue: graphIssue(d.errorKind), note: null };
   const errFresh = d.hasError && newerThan(d.lastErrorAt, evt);
-  if (errFresh && (d.errorKind === "TOKEN" || d.errorKind === "PERMISSION")) return { level: "DISCONNECTED", issue: graphIssue(d.errorKind), note: null };
   if (wh === "MISSING_FIELDS") return { level: "NEEDS_ACTION", issue: CUSTOMER_WEBHOOK_TEXT.MISSING_FIELDS, note: null };
   // Ngoài 24 giờ / khách chặn page / chạm trần: MỘT tin không gửi được, kết nối KHÔNG hỏng (graph-errors.ts) ⇒ không hạ mức.
   if (errFresh && (d.errorKind === null || d.errorKind === "OTHER")) return { level: "NEEDS_ACTION", issue: graphIssue("OTHER"), note: null };
@@ -250,6 +259,13 @@ export function connectOutcome(p: ConnectParams, diag: StoredDiagnosticFacts, is
     return { kind: "OK", webhook: w && w in CUSTOMER_WEBHOOK_TEXT ? w : null };
   }
   return null;
+}
+
+/** Câu máy chủ trả về (lỗi / kết quả nối page) có thể mang câu gốc của Facebook ⇒ khách nhận câu thay thế; người vận hành nhận nguyên văn. */
+const VENDOR_TEXT_RE = /Facebook từ chối|Không gọi được Facebook|\(#\d+\)/;
+export function customerSafeMessage(raw: string, operator: boolean, fallback: string): string {
+  if (operator) return raw;
+  return customerTextViolations(raw).length || VENDOR_TEXT_RE.test(raw) ? fallback : raw;
 }
 
 // ─────────────────────────── Từ cấm trên màn khách ───────────────────────────

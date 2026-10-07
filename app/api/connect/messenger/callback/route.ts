@@ -5,6 +5,7 @@ import { can } from "@/lib/auth/session";
 import { sessionCookieSecure } from "@/lib/constants/session";
 import { MESSENGER_CONNECT_PATH, MESSENGER_SETTINGS_PATH, MESSENGER_STATE_COOKIE, messengerRedirectUri, storePendingPages } from "@/lib/integrations/messenger/connect";
 import { checkPageWebhook, discoveryLogLine, isPermissionReason, messengerApp, pagesFromCode, type DiscoveryDiagnostic } from "@/lib/integrations/messenger/graph";
+import { CHANNELS_RETURN_COOKIE, CHANNELS_RETURN_PARAM } from "@/lib/channels/overview-shared";
 import { metaDialogError, metaDialogErrorQuery } from "@/lib/integrations/messenger/permission-guide";
 import { setSettingJson } from "@/lib/settings";
 import { connectMessengerPage } from "@/lib/sales-chatbot/messenger";
@@ -19,9 +20,12 @@ export async function GET(req: NextRequest) {
   // Cùng gốc với lượt start (Facebook trả về đúng host đã gửi đi) — bước đổi mã phải dùng ĐÚNG redirect_uri đó.
   const origin = appOriginForHost(req.headers.get("host"));
   const secure = sessionCookieSecure(process.env.NODE_ENV, origin);
+  // Lượt bắt đầu từ màn Kênh kết nối (cờ cookie) ⇒ cờ đi tiếp trong tham số `kenh=1` và cookie bị xoá NGAY, thành công hay lỗi.
+  const fromChannels = req.cookies.get(CHANNELS_RETURN_COOKIE)?.value === "1";
   const back = (q: string) => {
-    const res = NextResponse.redirect(new URL(`${MESSENGER_SETTINGS_PATH}?${q}`, origin));
+    const res = NextResponse.redirect(new URL(`${MESSENGER_SETTINGS_PATH}?${q}${fromChannels ? `&${CHANNELS_RETURN_PARAM}=1` : ""}`, origin));
     res.cookies.set(MESSENGER_STATE_COOKIE, "", { path: MESSENGER_CONNECT_PATH, maxAge: 0, httpOnly: true, sameSite: "lax", secure });
+    if (fromChannels) res.cookies.set(CHANNELS_RETURN_COOKIE, "", { path: "/", maxAge: 0, sameSite: "lax" });
     return res;
   };
   // Cổng chung (phiên · tổ chức còn hoạt động · module · quyền) — bị chặn thì về trang cài đặt / đăng nhập, không trả JSON.

@@ -23,6 +23,7 @@ import {
   channelHealth,
   connectOutcome,
   connectionLabel,
+  customerSafeMessage,
   customerTextViolations,
   lastSyncOf,
   mergeChannelSources,
@@ -44,7 +45,7 @@ const T0 = "2026-10-01T08:00:00.000Z";
 const T1 = "2026-10-01T09:00:00.000Z";
 const T2 = "2026-10-01T10:00:00.000Z";
 
-const direct = (over: Partial<DirectFacts> = {}): DirectFacts => ({ status: "ACTIVE", kind: "PAGE", parentPageId: null, aiEnabled: true, lastEventAt: null, lastErrorAt: null, errorKind: null, hasError: false, legacy: false, ...over });
+const direct = (over: Partial<DirectFacts> = {}): DirectFacts => ({ status: "ACTIVE", kind: "PAGE", parentPageId: null, aiEnabled: true, lastEventAt: null, lastErrorAt: null, errorKind: null, hasError: false, legacy: false, savedAt: null, ...over });
 const conn = (over: Partial<ConnectionFacts> = {}): ConnectionFacts => ({ status: "ACTIVE", lastTestOk: true, lastActivityAt: null, ...over });
 const row = (over: Partial<ChannelRowFacts>): ChannelRowFacts => ({ key: "100000001", pageId: "100000001", name: "Shop A", platform: "FACEBOOK", owner: "MESSENGER", direct: direct(), pancake: null, zalo: null, ...over });
 
@@ -92,11 +93,18 @@ function testHealth() {
   assert.equal(h(row({}), { state: "UNKNOWN", at: T1 }).level, "NEEDS_ACTION", "kiểm không đọc được ⇒ không kết luận khoẻ");
   assert.equal(h(row({ direct: direct({ lastEventAt: T0 }) }), { state: "TOKEN_EXPIRED", at: T1 }).level, "DISCONNECTED");
   assert.equal(h(row({ direct: direct({ lastEventAt: T0 }) }), { state: "NOT_SUBSCRIBED", at: T1 }).level, "DISCONNECTED");
-  assert.equal(h(row({ direct: direct({ lastEventAt: T2 }) }), { state: "NOT_SUBSCRIBED", at: T1 }).level, "READY", "tin về SAU lần kiểm hỏng ⇒ chứng cứ mới hơn thắng");
+  // Tin đến KHÔNG chứng minh kết nối còn sống (last_event_at ghi ở mọi gói vào, kể cả tiếng vọng nhân viên) ⇒ kiểm hỏng GIỮ tới khi nối lại.
+  assert.equal(h(row({ direct: direct({ lastEventAt: T2 }) }), { state: "NOT_SUBSCRIBED", at: T1 }).level, "DISCONNECTED", "tin về sau lần kiểm hỏng KHÔNG xoá được kết luận");
+  assert.equal(h(row({ direct: direct({ lastEventAt: T2 }) }), { state: "TOKEN_EXPIRED", at: T1 }).level, "DISCONNECTED");
+  assert.equal(h(row({ direct: direct({ lastEventAt: T0, savedAt: T2 }) }), { state: "TOKEN_EXPIRED", at: T1 }).level, "READY", "nối lại SAU lần kiểm ⇒ lần kiểm cũ hết giá trị");
+  assert.equal(h(row({ direct: direct({ lastEventAt: T0, savedAt: T1 }) }), { state: "TOKEN_EXPIRED", at: T1 }).level, "DISCONNECTED", "cùng mốc không phải mới hơn");
   assert.equal(h(row({ direct: direct({ lastEventAt: T0 }) }), { state: "MISSING_FIELDS", at: T1 }).level, "NEEDS_ACTION");
   assert.equal(h(row({ direct: direct({ lastEventAt: T0, hasError: true, lastErrorAt: T1, errorKind: "TOKEN" }) })).level, "DISCONNECTED");
   assert.equal(h(row({ direct: direct({ lastEventAt: T0, hasError: true, lastErrorAt: T1, errorKind: "PERMISSION" }) })).level, "DISCONNECTED");
-  assert.equal(h(row({ direct: direct({ lastEventAt: T2, hasError: true, lastErrorAt: T1, errorKind: "TOKEN" }) })).level, "READY", "lỗi cũ hơn tin gần nhất ⇒ đã hồi");
+  // Token chết, AI page tắt nên bot không gửi ⇒ không có lỗi mới, nhưng tin (tiếng vọng) vẫn về: phải GIỮ «Mất kết nối».
+  assert.equal(h(row({ direct: direct({ aiEnabled: false, lastEventAt: T2, hasError: true, lastErrorAt: T1, errorKind: "TOKEN" }) })).level, "DISCONNECTED", "lỗi TOKEN cũ hơn tin gần nhất vẫn là mất kết nối tới khi nối lại");
+  assert.equal(h(row({ direct: direct({ lastEventAt: T2, hasError: true, lastErrorAt: T1, errorKind: "PERMISSION" }) })).level, "DISCONNECTED");
+  assert.equal(h(row({ direct: direct({ lastEventAt: T2, hasError: true, lastErrorAt: T1, errorKind: "OTHER" }) })).level, "READY", "lỗi KHÁC cũ hơn tin gần nhất ⇒ đã hồi (không phải lỗi kết nối)");
   for (const k of ["WINDOW", "RECIPIENT", "RATE_LIMIT"] as const) assert.equal(h(row({ direct: direct({ lastEventAt: T0, hasError: true, lastErrorAt: T1, errorKind: k }) })).level, "READY", `${k}: một tin không gửi được, kết nối KHÔNG hỏng`);
   assert.equal(h(row({ direct: direct({ lastEventAt: T0, hasError: true, lastErrorAt: T1, errorKind: null }) })).level, "NEEDS_ACTION", "lỗi không nhận ra loại ⇒ cần xử lý, không đoán là mất kết nối");
   const down = h(row({ direct: direct({ lastEventAt: T1 }) }), null, false);
@@ -210,6 +218,13 @@ function testLoginConfig() {
   assert.equal(metaDialogError(qs({ code: "abc", state: "x" })), null, "không lỗi ⇒ đi tiếp đổi mã như cũ");
   assert.deepEqual(metaDialogError(qs({ error: "access_denied", error_reason: "user_denied", error_code: "200", error_description: "Permissions error" })), { kind: "CANCELLED" }, "người dùng tự huỷ ⇒ loi=huy như cũ");
   assert.deepEqual(metaDialogError(qs({ error: "access_denied" })), { kind: "CANCELLED" }, "lỗi không mã ⇒ như cũ");
+  assert.deepEqual(metaDialogError(qs({ error_code: "4201", error_message: "User canceled the Dialog flow" })), { kind: "CANCELLED" }, "4201 không kèm lý do ⇒ huỷ");
+  // Câu máy chủ có câu gốc của Facebook ⇒ khách nhận câu thay thế, người vận hành nhận nguyên văn.
+  const graphRaw = "Shop A: Facebook từ chối: (#200) Requires pages_messaging — App không còn quyền nhắn tin với page — nối lại page (cấp lại quyền) hoặc kiểm tra App Review.";
+  assert.equal(customerSafeMessage(graphRaw, false, "THAY"), "THAY");
+  assert.equal(customerSafeMessage(graphRaw, true, "THAY"), graphRaw);
+  assert.equal(customerSafeMessage("Token page hết hạn", false, "THAY"), "THAY");
+  assert.equal(customerSafeMessage("Chưa chọn page nào.", false, "THAY"), "Chưa chọn page nào.", "câu thường của ERP giữ nguyên");
   const cfgErr = metaDialogError(qs({ error: "invalid_request", error_code: "100", error_reason: "invalid_config", error_message: "Invalid config_id 555000111 for app 777000222", state: "s", access_token: "EAAGbimat" }));
   assert.deepEqual(cfgErr, { kind: "ERROR", code: "100", reason: "invalid_config" });
   assert.ok(cfgErr?.kind === "ERROR");
@@ -232,11 +247,13 @@ function testLoginConfig() {
   assert.ok(o?.kind === "ERROR" && o.issue.who === "SUPPORT" && customerTextViolations(`${o.issue.title} ${o.issue.action}`).length === 0);
   // Luồng OAuth không đổi: callback vẫn quay về trang Messenger; trang đó chỉ CHUYỂN TIẾP khi lượt bắt đầu từ màn Kênh kết nối.
   const cb = readFileSync("app/api/connect/messenger/callback/route.ts", "utf8");
-  assert.match(cb, /new URL\(`\$\{MESSENGER_SETTINGS_PATH\}\?\$\{q\}`, origin\)/);
+  assert.ok(cb.includes("new URL(`${MESSENGER_SETTINGS_PATH}?${q}${fromChannels ? `&${CHANNELS_RETURN_PARAM}=1` : \"\"}`, origin)"), "callback vẫn về trang Messenger, chỉ mang thêm cờ");
+  assert.ok(cb.includes('if (fromChannels) res.cookies.set(CHANNELS_RETURN_COOKIE, "", { path: "/", maxAge: 0, sameSite: "lax" });'), "callback xoá cờ cookie ngay, thành công hay lỗi");
   assert.match(cb, /const dialogErr = metaDialogError\(q\);\s*if \(dialogErr\) return back\(dialogErr\.kind === "CANCELLED" \? "loi=huy" : metaDialogErrorQuery\(dialogErr\)\);/, "callback chuyển tiếp lỗi hộp thoại đã lọc");
   assert.ok(!/error_message|error_description/.test(cb), "callback không đọc câu chữ lỗi của Meta");
   const mp = readFileSync("app/(dashboard)/ai/sales-chatbot/messenger/page.tsx", "utf8");
-  assert.match(mp, /get\(CHANNELS_RETURN_COOKIE\)\?\.value === "1" && \(one\("chon"\) \|\| one\("ok"\) \|\| one\("loi"\)\)/, "chỉ chuyển tiếp kết quả callback khi có cờ");
+  assert.ok(mp.includes('if ((one(CHANNELS_RETURN_PARAM) === "1" || returnCookie) && (one("chon") || one("ok") || one("loi"))) {'), "chỉ chuyển tiếp kết quả callback khi có cờ");
+  assert.ok(mp.includes("{returnCookie ? <ClearChannelsReturn /> : null}"), "vào trang Messenger mà cờ còn sống ⇒ gỡ ngay");
   assert.ok(!/one\("msg"\) \|\| "Facebook từ chối\."\s*:/.test(mp), "trang Messenger không còn in nguyên văn lỗi Meta cho mọi người");
 }
 
