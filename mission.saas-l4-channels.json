@@ -28,22 +28,22 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-07T10:35:57.696Z",
-  "updated_at": "2026-10-07T11:41:33.457Z",
-  "last_heartbeat": "2026-10-07T11:41:33.457Z",
+  "updated_at": "2026-10-07T12:22:47.843Z",
+  "last_heartbeat": "2026-10-07T12:22:47.843Z",
   "definition_of_done": [],
   "handoff": {
     "branch": "feat/saas-l4-channels",
-    "sha": "f6c153f3462bf4f72354ab8ee753719cc5433604",
-    "at": "2026-10-07T11:41:33.457Z",
+    "sha": "07d5d69eece0f2cc7b91032c83ecb4433e7a8245",
+    "at": "2026-10-07T12:22:47.843Z",
     "actor": "DESKTOP-56TH98Y:wt-saas-l4",
     "title": "Kênh kết nối hợp nhất cho khách",
-    "summary": "Màn /ai/channels (CHANNELS_ROUTE) gộp page Messenger trực tiếp + Pancake + Zalo, sức khoẻ 3 mức, câu khách không từ kỹ thuật; chẩn đoán Configuration ID (thiếu / Meta từ chối / thiếu quyền / thừa quyền) ở /platform, màn kênh, trang Messenger. Không đổi OAuth/callback/webhook.",
+    "summary": "Thêm: callback chuyển tiếp lỗi hộp thoại Meta đã lọc (loi=meta&ma&ly; user_denied ⇒ loi=huy như cũ), ánh xạ mã 100 khi đi Configuration ID ⇒ chẩn đoán cấu hình, 191 ⇒ URI chuyển hướng.",
     "tests": [
       "npm run typecheck: sạch",
       "npm run lint: sạch",
-      "npm test (sau commit f6c153f3): TẤT CẢ KIỂM THỬ ĐẠT",
-      "npm run build: đạt (/ai/channels 9,67 kB)",
-      "đột biến: 5/5 bị bắt"
+      "npm test (sau commit 07d5d69e): TẤT CẢ KIỂM THỬ ĐẠT",
+      "npm run build: đạt",
+      "đột biến: 7/7 bị bắt"
     ]
   }
 }
