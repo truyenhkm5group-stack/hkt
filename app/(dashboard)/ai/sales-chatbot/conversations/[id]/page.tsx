@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { PageHeader } from "@/components/page-header";
 import { SectionCard } from "@/components/ui-bits";
 import { requirePermission } from "@/lib/auth/session";
+import { customerChatView, customerFacing } from "@/lib/saas/visibility";
 import { formatDateTime } from "@/lib/format";
 import { CHAT_CHANNEL_LABEL, type ChatChannel } from "@/lib/sales-chatbot/config";
 import { HANDOFF_REASON_LABEL, type HandoffReasonCode } from "@/lib/sales-chatbot/events-shared";
@@ -20,7 +21,8 @@ export default async function ConversationReviewPage({ params }: { params: Promi
   const { id } = await params;
   const r = await loadConversationReview(user, decodeURIComponent(id));
   if ("error" in r) notFound();
-  const v = r.value;
+  // Workspace KHÁCH: không tên / tóm tắt công cụ bot đã gọi (lib/saas/visibility.ts) — lọc trước khi dựng.
+  const v = customerFacing(user.organization) ? { ...r.value, view: customerChatView(r.value.view) } : r.value;
   return (
     <div className="space-y-5">
       <PageHeader

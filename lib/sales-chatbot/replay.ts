@@ -1,5 +1,6 @@
 import { and, desc, eq, gte, inArray, ne, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
+import { CUSTOMER_AI_NOT_READY_LABEL, CUSTOMER_AI_STATE_HINT, customerFacing } from "@/lib/saas/visibility";
 import type { AiBlock } from "@/lib/ai/provider";
 import { checkAiQuota } from "@/lib/ai-usage/quota";
 import { can, type SessionUser } from "@/lib/auth/session";
@@ -74,10 +75,11 @@ export async function startReplay(user: SessionUser, raw: { points?: unknown; da
   if (!(REPLAY_LIMITS.pointChoices as readonly number[]).includes(points)) return { error: "Số điểm không hợp lệ." };
   if (!(REPLAY_LIMITS.dayChoices as readonly number[]).includes(days)) return { error: "Khoảng ngày không hợp lệ." };
   const prov = await salesChatProvider();
-  if (!prov.ok) return { error: prov.error };
+  // Workspace KHÁCH: không câu lỗi nguồn AI / hạn mức gốc (tên khoá, USD) — lib/saas/visibility.ts.
+  if (!prov.ok) return { error: customerFacing(user.organization) ? CUSTOMER_AI_NOT_READY_LABEL : prov.error };
   const org = await currentOrganization();
   const quota = await checkAiQuota(org.code, prov.source);
-  if (!quota.ok) return { error: quota.error };
+  if (!quota.ok) return { error: customerFacing(user.organization) ? CUSTOMER_AI_STATE_HINT.OUT_OF_QUOTA : quota.error };
   const db = await getDb();
   const r = schema.salesReplayRuns;
   const [running] = await db.select({ id: r.id, startedAt: r.startedAt }).from(r).where(eq(r.status, "RUNNING")).orderBy(desc(r.startedAt)).limit(1);

@@ -1,5 +1,6 @@
 "use server";
 
+import { customerAiDraft, customerFacing, customerSafeAiError } from "@/lib/saas/visibility";
 import { revalidatePath } from "next/cache";
 import { requirePermission } from "@/lib/auth/session";
 import { applyDraft, createDraft, discardDraft, previewDraft } from "@/lib/ai-builder/service";
@@ -20,7 +21,7 @@ export async function createAiDraftAction(input: { mode: string; prompt: string 
   const user = await requirePermission("metadata:manage");
   const r = await createDraft(user, input);
   revalidatePath(PATH);
-  return r;
+  return forViewer(user, r);
 }
 
 /** Xem trước = kế hoạch Phase 7 trên gói đã lọc theo mục người giữ lại. Chỉ đọc. */
@@ -43,5 +44,11 @@ export async function discardAiDraftAction(id: string): Promise<AiBuilderResult<
   const user = await requirePermission("metadata:manage");
   const r = await discardDraft(user, id);
   revalidatePath(PATH);
-  return r;
+  return forViewer(user, r);
+}
+
+/** Workspace KHÁCH: bản nháp không mang nhà cung cấp / model / token / USD; lỗi lạ (nguồn AI, hạn mức USD) thành câu chung. */
+function forViewer(user: { organization?: { isHome: boolean } }, r: AiBuilderResult<AiDraftView>): AiBuilderResult<AiDraftView> {
+  if (!customerFacing(user.organization)) return r;
+  return r.ok ? { ok: true, value: customerAiDraft(r.value) } : { ok: false, error: customerSafeAiError(r.error) };
 }

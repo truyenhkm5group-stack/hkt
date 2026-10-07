@@ -64,7 +64,13 @@ export function OrgAiConfigPanel({ orgCode, botEnabled, engine, connections, hea
 function KeyRow({ row, orgCode, reason, pending, run }: { row: OperatorAiConnectionRow; orgCode: string; reason: string; pending: boolean; run: (fn: () => Promise<{ ok: true; message: string } | { error: string }>, after?: () => void) => void }) {
   const [settings, setSettings] = useState<Record<string, string>>(row.plainSettings);
   const [secrets, setSecrets] = useState<Record<string, string>>({});
-  const op = (o: "save" | "test" | "activate" | "disable") => run(() => operateOrgAiConnectionAction({ orgCode, reason, connectorKey: row.connectorKey, op: o, ...(o === "save" ? { settings, secrets } : {}) }), o === "save" ? () => setSecrets({}) : undefined);
+  const op = (o: "save" | "test" | "activate" | "disable") => {
+    // Luật lõi: lưu ⇒ Nháp. Khoá đang bật là nguồn AI thật của bot — báo trước; máy chủ tự kiểm lại + bật lại khi đạt.
+    if (o === "save" && row.status === "ACTIVE" && !window.confirm(`«${row.label}» đang BẬT. Lưu sẽ đưa khoá về Nháp; máy tự kiểm tra lại và bật lại nếu đạt — nếu kiểm tra hỏng, bot dùng khoá này sẽ NGỪNG trả lời cho tới khi sửa. Tiếp tục?`)) return;
+    if (o === "disable" && !window.confirm(`Tắt «${row.label}»? Bot đang dùng khoá này sẽ ngừng trả lời (hoặc chuyển sang khoá dự phòng nếu có).`)) return;
+    runOp(o);
+  };
+  const runOp = (o: "save" | "test" | "activate" | "disable") => run(() => operateOrgAiConnectionAction({ orgCode, reason, connectorKey: row.connectorKey, op: o, ...(o === "save" ? { settings, secrets } : {}) }), o === "save" ? () => setSecrets({}) : undefined);
   return (
     <div className="space-y-2 rounded-lg border p-3" data-connector={row.connectorKey}>
       <p className="text-sm">

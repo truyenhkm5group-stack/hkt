@@ -2,6 +2,7 @@ import Link from "next/link";
 import { PageHeader } from "@/components/page-header";
 import { EmptyState, SectionCard } from "@/components/ui-bits";
 import { can, requirePermission } from "@/lib/auth/session";
+import { customerFacing, customerReplayDetail } from "@/lib/saas/visibility";
 import { formatDateTime, formatPercent, formatVND } from "@/lib/format";
 import { listReplayRuns, loadReplayRun, type ReplayRunRow } from "@/lib/sales-chatbot/replay";
 import { REPLAY_FLAG_LABEL, REPLAY_LIMITS, type ReplayFlag } from "@/lib/sales-chatbot/replay-shared";
@@ -51,7 +52,8 @@ export default async function ReplayPage({ searchParams }: { searchParams: Promi
   const list = await listReplayRuns(user);
   const runs = "ok" in list ? list.runs : [];
   const selected = runId ? await loadReplayRun(user, runId) : runs[0] ? await loadReplayRun(user, runs[0].id) : null;
-  const detail = selected && "ok" in selected ? selected : null;
+  // Workspace KHÁCH: câu lỗi lượt / điểm qua danh sách cho phép, không tên công cụ (lib/saas/visibility.ts).
+  const detail = selected && "ok" in selected ? (customerFacing(user.organization) ? customerReplayDetail(selected) : selected) : null;
   const s = detail?.run.summary ?? null;
   const manage = can(user, SALES_CHATBOT_MANAGE);
   return (

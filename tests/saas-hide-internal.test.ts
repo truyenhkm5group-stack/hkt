@@ -14,12 +14,12 @@
  * Không ghim ngày (luật 50 · 65); khoá bí mật là khoá KIỂM THỬ, trả lại nguyên trạng trong finally.
  */
 import assert from "node:assert/strict";
-import { readFileSync, rmSync } from "node:fs";
+import { readdirSync, readFileSync, rmSync } from "node:fs";
 import path from "node:path";
 import { eq } from "drizzle-orm";
 import { getDb, getPlatformDb, organizationDatabaseUrl, schema } from "@/db";
 import type { SessionUser } from "@/lib/auth/session";
-import { loadConnectionsView } from "@/lib/connectors/service";
+import { aiConnectionsForOperator, loadConnectionsView, saveConnection, setConnectionStatus, testOrgConnection } from "@/lib/connectors/service";
 import type { ConnectionsView } from "@/lib/connectors/types";
 import { getEnabledModules, invalidateCapabilities } from "@/lib/platform/capabilities";
 import { withOrganization } from "@/lib/platform/context";
@@ -30,13 +30,23 @@ import { loadSalesChatbotConfig, openConversation } from "@/lib/sales-chatbot/en
 import type { SalesHealth } from "@/lib/sales-chatbot/health-shared";
 import type { MessageTrace } from "@/lib/sales-chatbot/ai-status-shared";
 import { loadInboxThread } from "@/lib/sales-chatbot/inbox";
+import { startReplay } from "@/lib/sales-chatbot/replay";
+import { REPLAY_LIMITS } from "@/lib/sales-chatbot/replay-shared";
 import type { InboxThread } from "@/lib/sales-chatbot/inbox-shared";
 import { loadAiSalesPerformance } from "@/lib/sales-chatbot/performance";
 import { saveSalesChatbotConfig } from "@/lib/sales-chatbot/settings";
 import { loadOperatorOrgAiConfig, operateOrgAiConnection, saveOrgChatbotEngine } from "@/lib/saas/operator-ai";
 import {
   CHATBOT_ENGINE_FIELDS,
+  CUSTOMER_AI_CONFIG_MANAGED,
   CUSTOMER_AI_INCIDENT_LABEL,
+  CUSTOMER_AI_NOT_READY_LABEL,
+  customerAiBuilderView,
+  customerAiDraft,
+  customerLessons,
+  customerOrderSyncView,
+  customerPlaybookState,
+  customerReplayDetail,
   customerAiBlocks,
   customerAiState,
   customerChatbotConfig,
@@ -378,6 +388,10 @@ export async function testHideInternalLive() {
       assert.deepEqual(stringHits(shown, INBOX_FORBIDDEN), [], `payload hộp thư thật của khách sạch: ${stringHits(shown, INBOX_FORBIDDEN).join(" | ")}`);
       assert.deepEqual(internalKeyPaths(shown), [], "không khoá nội bộ trong payload hộp thư");
 
+      // Phát lại: lõi trả câu của KHÁCH khi nguồn AI chưa dùng được — không «Chưa dùng được khoá AI «gemini-byok»…».
+      const rp = await startReplay(admin, { points: REPLAY_LIMITS.pointChoices[0], days: REPLAY_LIMITS.dayChoices[0] });
+      assert.ok("error" in rp && rp.error === CUSTOMER_AI_NOT_READY_LABEL, JSON.stringify(rp));
+
       // (e) Khách KHÔNG gọi được lõi của người vận hành.
       assert.ok("error" in (await saveOrgChatbotEngine(admin, { orgCode: ORG, reason: "khách tự sửa", engine: { model: "gpt-bia" } })), "khách không ghi được động cơ AI qua cửa vận hành");
       assert.ok(!(await loadOperatorOrgAiConfig(admin, ORG)).ok, "khách không đọc được khối vận hành");
@@ -407,6 +421,31 @@ export async function testHideInternalLive() {
     assert.ok("ok" in (await operateOrgAiConnection(operator, { orgCode: ORG, reason: "Nhập khoá Gemini của shop", connectorKey: "gemini-byok", op: "save", secrets: { apiKey: GEMINI_KEY } })));
     assert.ok("ok" in (await operateOrgAiConnection(operator, { orgCode: ORG, reason: "Kiểm tra khoá", connectorKey: "gemini-byok", op: "test" }, { tester: { fetch: fakeGemini } })));
     assert.ok("ok" in (await operateOrgAiConnection(operator, { orgCode: ORG, reason: "Bật khoá", connectorKey: "gemini-byok", op: "activate" })));
+    // BLOCKING (review #639): ADMIN của khách KHÔNG lưu / kiểm tra / tắt được khoá AI qua đường của màn Kết nối — khoá đứng
+    // nguyên ACTIVE, ô model không đổi. Một lượt «lưu» từng đưa khoá chính của bot về Nháp, một lượt «tắt» đánh sập nguồn AI.
+    await withOrganization(ORG, async () => {
+      const keyRow = async () => (await aiConnectionsForOperator()).find((k) => k.connectorKey === "gemini-byok");
+      const before = await keyRow();
+      assert.equal(before?.status, "ACTIVE", "tiền đề: khoá đang bật");
+      const tries = [
+        await saveConnection(admin, { connectorKey: "gemini-byok", settings: { model: "gemini-2.5-pro" }, secrets: {} }),
+        await setConnectionStatus(admin, "gemini-byok", "DISABLED"),
+        await testOrgConnection(admin, "gemini-byok", { tester: { fetch: fakeGemini } }),
+        await saveConnection(admin, { connectorKey: "openai-byok", secrets: { apiKey: "sk-khach-tu-dan-0123456789abcdefghij" } }),
+      ];
+      for (const r of tries) assert.ok("error" in r && r.error === CUSTOMER_AI_CONFIG_MANAGED, `khách ghi khoá AI ⇒ từ chối: ${JSON.stringify(r)}`);
+      const after = await keyRow();
+      assert.ok(after?.status === "ACTIVE" && after.lastTestOk === true && JSON.stringify(after.plainSettings) === JSON.stringify(before?.plainSettings), `khoá nguyên trạng: ${JSON.stringify(after)}`);
+      assert.equal((await aiConnectionsForOperator()).find((k) => k.connectorKey === "openai-byok")?.status, null, "khách không tạo được khoá mới");
+    });
+    // Người vận hành lưu khoá ĐANG BẬT ⇒ lõi về Nháp, rồi TỰ kiểm lại + bật lại khi đạt (không bỏ bot không nguồn AI).
+    const resaved = await operateOrgAiConnection(operator, { orgCode: ORG, reason: "Đổi model khoá Gemini", connectorKey: "gemini-byok", op: "save", settings: { model: "gemini-3.5-flash" }, secrets: {} }, { tester: { fetch: fakeGemini } });
+    assert.ok("ok" in resaved && /bật lại/.test(resaved.message), JSON.stringify(resaved));
+    const badFetch = (async () => new Response(JSON.stringify({ error: { message: "API key not valid" } }), { status: 400, headers: { "content-type": "application/json" } })) as typeof fetch;
+    const resavedBad = await operateOrgAiConnection(operator, { orgCode: ORG, reason: "Đổi khoá hỏng", connectorKey: "gemini-byok", op: "save", secrets: {} }, { tester: { fetch: badFetch } });
+    assert.ok("error" in resavedBad && /Nháp/.test(resavedBad.error), `kiểm lại hỏng ⇒ nói rõ khoá đang Nháp: ${JSON.stringify(resavedBad)}`);
+    assert.ok("ok" in (await operateOrgAiConnection(operator, { orgCode: ORG, reason: "Kiểm lại", connectorKey: "gemini-byok", op: "test" }, { tester: { fetch: fakeGemini } })));
+    assert.ok("ok" in (await operateOrgAiConnection(operator, { orgCode: ORG, reason: "Bật lại", connectorKey: "gemini-byok", op: "activate" })));
     assert.ok("error" in (await operateOrgAiConnection(operator, { orgCode: ORG, reason: "Thử cửa sau", connectorKey: "lark-webhook", op: "save", secrets: { webhookUrl: "https://open.larksuite.com/x" } })), "chỉ khoá AI — không cửa sau cho kết nối khác");
     const opView = await loadOperatorOrgAiConfig(operator, ORG);
     assert.ok(opView.ok, JSON.stringify(opView));
@@ -429,10 +468,85 @@ export async function testHideInternalLive() {
   }
 }
 
+// ─────────────────────────── REVIEW #639: danh sách cho phép + phát lại / tự học / sổ tay / AI dựng cấu hình ───────────────────────────
+
+export function testHideInternalReview() {
+  // Câu lỗi: DANH SÁCH CHO PHÉP — câu lạ, câu có USD / $ / token / model ⇒ câu chung; câu nghiệp vụ đã duyệt giữ nguyên.
+  for (const raw of ["Chi phí AI tháng này đã chạm trần 5.00 USD (5.12 USD) — AI tạm dừng", "Hết credit: còn $0.12", "Lỗi lạ chưa ai duyệt", "fetch failed", "Không có nguồn AI chạy được: PLATFORM_AI_ENABLED≠1", "Mô tả quá ngắn nhưng model gemini lỗi"])
+    assert.equal(customerSafeAiError(raw), CUSTOMER_AI_INCIDENT_LABEL, `«${raw}» ⇒ câu chung`);
+  for (const ok of ["Tin nhắn trống.", "Số điểm không hợp lệ.", "Đang có một lượt phát lại chạy — đợi xong rồi chạy lại.", "Mô tả quá ngắn — viết ít nhất một câu.", "Đã tới hạn mức của gói «Dùng thử»: bản nháp AI 3/3 lượt.", CUSTOMER_AI_NOT_READY_LABEL])
+    assert.equal(customerSafeAiError(ok), ok, `«${ok}» giữ nguyên`);
+
+  const replay = customerReplayDetail({ ok: true, run: { id: "r", error: "Chưa dùng được khoá AI «gemini-byok»: hết credit 5.00 USD" }, points: [{ id: "p", error: "TypeError: Cannot read properties of undefined (reading 'model')", tools: [{ name: "search_products", ok: true, summary: "3 kết quả" }] }] });
+  assert.deepEqual(stringHits(replay, INBOX_FORBIDDEN), [], "phát lại của khách: không lỗi gốc");
+  assert.ok(replay.points[0].tools.length === 0 && replay.run.error === CUSTOMER_AI_INCIDENT_LABEL, "không tên công cụ, lỗi lượt là câu chung");
+
+  const lessons = customerLessons({ enabled: true, lastRun: { at: "a", status: "ERROR", threads: 3, note: "429 RESOURCE_EXHAUSTED gemini-3.5-flash quota" } });
+  assert.equal(lessons.lastRun?.note, CUSTOMER_AI_INCIDENT_LABEL);
+  assert.equal(customerLessons({ enabled: true, lastRun: { at: "a", status: "OK", threads: 3, note: "Học từ 3 hội thoại: 2 bài" } }).lastRun?.note, "Học từ 3 hội thoại: 2 bài", "lượt OK giữ ghi chú nghiệp vụ");
+  const pb = customerPlaybookState({ draft: { text: "x", createdAt: "a", createdBy: null, stats: { conversations: 1, messages: 2, aiCalls: 1, costUsd: 0.04, pricesRemoved: 0 } }, published: null, history: [] });
+  assert.equal(pb.draft?.stats?.costUsd, null, "sổ tay của khách: bản nháp không USD");
+
+  const draft = customerAiDraft({ id: "d", provider: "gemini-byok", model: "gemini-3.5-flash", inputTokens: 1200, outputTokens: 300, costUsd: 0.01, error: "Gọi AI hỏng: 401 API key not valid", errors: [{ path: "", message: "Gọi AI hỏng: 401 API key not valid" }], quotaWarning: "Chi phí AI đã vượt 4.00 USD" });
+  assert.ok(draft.provider === null && draft.model === null && draft.inputTokens === 0 && draft.outputTokens === 0 && draft.costUsd === null && !draft.quotaWarning, JSON.stringify(draft));
+  assert.deepEqual(stringHits(draft, INBOX_FORBIDDEN), [], "bản nháp AI dựng cấu hình của khách sạch");
+  const bv = customerAiBuilderView({ ai: { available: false, source: null, provider: "anthropic-byok", model: "claude-x", reason: "Chưa có kết nối «Anthropic — khoá AI của tổ chức»" }, drafts: [{ costUsd: 0.2 }] });
+  assert.ok(bv.ai.provider === null && bv.ai.model === null && bv.ai.reason === CUSTOMER_AI_NOT_READY_LABEL && bv.drafts[0].costUsd === null, JSON.stringify(bv));
+  const os = customerOrderSyncView({ recent: [{ outcome: "ERROR", result: "lỗi: 503 gemini overloaded" }, { outcome: "SKIPPED", result: "Không ghi được đơn: thiếu SĐT" }] });
+  assert.ok(os.recent[0].result === CUSTOMER_AI_INCIDENT_LABEL && os.recent[1].result === "Không ghi được đơn: thiếu SĐT", JSON.stringify(os));
+}
+
+/**
+ * QUÉT MỞ (không danh sách tệp đóng): MỌI tệp dưới app/(dashboard)/ai/** và app/(dashboard)/settings/** (+ action chúng import,
+ * + thành phần AI dùng chung) có đọc trường nội bộ — câu lỗi ngoại lệ, lỗi nguồn AI / hạn mức, costUsd, model, token, lớp lỗi,
+ * tên công cụ — phải đi qua bộ lọc của khách (`customerFacing(` / nhánh `customer ?` / `internal ?` / `hideCodes`) hoặc khai miễn
+ * trừ có LÝ DO. Tệp mới thêm vào hai thư mục đó tự vào phạm vi quét.
+ */
+const SENSITIVE_READ = /instanceof Error \? \w+\.message|\b(prov|quota|plat|ready)\.(error|reason)\b|\bcostUsd\b|\.model\b|\binputTokens\b|\boutputTokens\b|\blastErrorClass\b|\.tools\b/;
+const FILTER_MARK = /customerFacing\(|\bcustomer \?|\binternal \?|hideCodes/;
+const OPEN_SCAN_EXEMPT: Record<string, string> = {
+  "app/(dashboard)/ai/sales-chatbot/playbook-panel.tsx": "Đọc run.stats.costUsd để in; máy chủ đặt null cho khách trước props (customerPlaybookRun / customerPlaybookState ở page.tsx).",
+  "components/ai-usage/ai-engine-fields.tsx": "Khối động cơ AI — chỉ dựng khi có `engine` (workspace nhà) hoặc ở khối vận hành /platform/org/<mã>.",
+  "components/ai-usage/ai-usage-tables.tsx": "Bảng sổ AI — chỉ dựng ở nhánh nhà của trang gói (`ai` null với khách) và ở /platform/org/<mã> (platform:operate).",
+};
+
+function walkFiles(dir: string, out: string[] = []): string[] {
+  for (const e of readdirSync(dir, { withFileTypes: true })) {
+    const p = `${dir}/${e.name}`;
+    if (e.isDirectory()) walkFiles(p, out);
+    else if (/\.(ts|tsx)$/.test(e.name)) out.push(p);
+  }
+  return out;
+}
+
+export function testHideInternalOpenScan() {
+  const read = (f: string) => readFileSync(path.join(process.cwd(), f), "utf8");
+  const pages = [...walkFiles("app/(dashboard)/ai"), ...walkFiles("app/(dashboard)/settings"), ...walkFiles("components/ai-builder"), ...walkFiles("components/ai-usage")];
+  const actions = new Set<string>();
+  for (const f of pages) for (const m of read(f).matchAll(/from "@\/lib\/actions\/([\w-]+)"/g)) actions.add(`lib/actions/${m[1]}.ts`);
+  const files = [...pages, ...actions];
+  assert.ok(files.length > 60 && actions.has("lib/actions/sales-chatbot.ts"), `phạm vi quét phải phủ hai thư mục + action — thấy ${files.length}`);
+  const unfiltered: string[] = [];
+  const used = new Set<string>();
+  for (const f of files) {
+    const src = read(f).replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+    if (!SENSITIVE_READ.test(src)) continue;
+    if (OPEN_SCAN_EXEMPT[f]) {
+      used.add(f);
+      continue;
+    }
+    if (!FILTER_MARK.test(src)) unfiltered.push(f);
+  }
+  assert.deepEqual(unfiltered, [], "tệp trang / action khách chạm tới đọc trường nội bộ mà không đi qua bộ lọc của khách (hoặc khai miễn trừ có lý do)");
+  assert.deepEqual(Object.keys(OPEN_SCAN_EXEMPT).filter((f) => !used.has(f)), [], "miễn trừ không còn đọc trường nội bộ nào — xoá");
+}
+
 export async function testSaasHideInternal() {
   testHideInternalPure();
   testHideInternalStatic();
   testHideInternalInbox();
+  testHideInternalReview();
+  testHideInternalOpenScan();
   await testHideInternalLive();
   console.log("✓ Che dữ liệu AI nội bộ khỏi khách: DTO máy chủ (chatbot · gói · kết nối · hiệu quả · cockpit · khung thử), lưu cấu hình giữ động cơ AI, quét mã nguồn, khối vận hành");
 }

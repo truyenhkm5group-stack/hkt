@@ -70,7 +70,17 @@ export async function operateOrgAiConnection(user: SessionUser, input: unknown, 
   const obj = (v: unknown) => (v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : undefined);
   const operator = { orgCode: p.actor.orgCode, email: p.actor.email };
   const r = await withOrganization(p.org.code, async () => {
-    if (op === "save") return saveAiConnectionAsOperator({ connectorKey, settings: obj(raw.settings), secrets: obj(raw.secrets), operator, reason: p.reason });
+    if (op === "save") {
+      // Luật lõi: lưu ⇒ Nháp. Khoá ĐANG BẬT (vd khoá chính của bot HSLC) mà để Nháp là bot mất nguồn AI — nên lưu xong TỰ kiểm tra
+      // lại và bật lại khi đạt; kiểm tra hỏng ⇒ báo rõ khoá đang ở Nháp (màn hình đã cảnh báo trước khi bấm).
+      const wasActive = (await aiConnectionsForOperator()).find((k) => k.connectorKey === connectorKey)?.status === "ACTIVE";
+      const saved = await saveAiConnectionAsOperator({ connectorKey, settings: obj(raw.settings), secrets: obj(raw.secrets), operator, reason: p.reason });
+      if ("error" in saved || !wasActive) return saved;
+      const tested = await testAiConnectionAsOperator({ connectorKey, operator, reason: `${p.reason} (tự kiểm lại sau khi lưu)` }, deps.tester ? { tester: deps.tester } : {});
+      if ("error" in tested) return { error: `Đã lưu nhưng kiểm tra lại HỎNG — khoá đang ở Nháp, bot không dùng được khoá này: ${tested.error}` };
+      const on = await setAiConnectionStatusAsOperator({ connectorKey, status: "ACTIVE", operator, reason: `${p.reason} (bật lại sau khi kiểm tra đạt)` });
+      return "error" in on ? { error: `Đã lưu và kiểm tra đạt nhưng chưa bật lại được: ${on.error}` } : { ok: true as const, status: on.status, message: "Đã lưu, kiểm tra lại đạt và bật lại khoá." };
+    }
     if (op === "test") return testAiConnectionAsOperator({ connectorKey, operator, reason: p.reason }, deps.tester ? { tester: deps.tester } : {});
     if (op === "activate" || op === "disable") return setAiConnectionStatusAsOperator({ connectorKey, status: op === "activate" ? "ACTIVE" : "DISABLED", operator, reason: p.reason });
     return { error: "Thao tác không hợp lệ." };

@@ -6,6 +6,7 @@ import { EmptyState, SectionCard } from "@/components/ui-bits";
 import { AI_BUILDER_MODE_LABEL, AI_DRAFT_STATUS_LABEL } from "@/lib/ai-builder/types";
 import { loadAiBuilderView, loadDraft } from "@/lib/ai-builder/service";
 import { requirePermission } from "@/lib/auth/session";
+import { customerAiBuilderView, customerAiDraft, customerFacing } from "@/lib/saas/visibility";
 import { formatDateTime } from "@/lib/format";
 
 export const metadata = { title: "AI dựng cấu hình" };
@@ -17,8 +18,12 @@ export const metadata = { title: "AI dựng cấu hình" };
 export default async function AiBuilderPage({ searchParams }: { searchParams: Promise<{ draft?: string }> }) {
   const user = await requirePermission("metadata:manage");
   const { draft: draftId } = await searchParams;
-  const loaded = await loadAiBuilderView(user);
-  const opened = loaded.ok && draftId ? await loadDraft(user, draftId) : null;
+  // Workspace KHÁCH: không nhà cung cấp / model / token / USD trong DTO (lib/saas/visibility.ts) — lọc trước props.
+  const customer = customerFacing(user.organization);
+  const rawLoaded = await loadAiBuilderView(user);
+  const loaded = rawLoaded.ok && customer ? { ok: true as const, value: customerAiBuilderView(rawLoaded.value) } : rawLoaded;
+  const rawOpened = loaded.ok && draftId ? await loadDraft(user, draftId) : null;
+  const opened = rawOpened?.ok && customer ? { ok: true as const, value: customerAiDraft(rawOpened.value) } : rawOpened;
 
   return (
     <div className="space-y-5">
@@ -30,7 +35,7 @@ export default async function AiBuilderPage({ searchParams }: { searchParams: Pr
           <div className="space-y-1.5 text-xs leading-5">
             <p>Mô tả doanh nghiệp (dựng mới) hoặc một thay đổi (sửa lặp) — AI soạn một GÓI cấu hình: module, field, form, danh sách, trang, luật, vai trò.</p>
             <p>AI không ghi gì. Bạn bỏ chọn mục không muốn → Xem trước (máy liệt kê từng thao tác) → Áp dụng. Luật luôn ở NHÁP + CHẠY THỬ.</p>
-            <p>Khoá AI là của CHÍNH tổ chức (Kết nối theo tổ chức) — ai dùng người ấy trả; tổ chức khác không bao giờ dùng khoá của nhau.</p>
+            {customer ? null : <p>Khoá AI là của CHÍNH tổ chức (Kết nối theo tổ chức) — ai dùng người ấy trả; tổ chức khác không bao giờ dùng khoá của nhau.</p>}
           </div>
         }
       />

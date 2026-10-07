@@ -1,4 +1,6 @@
 import { platformChatAi } from "@/lib/ai-builder/provider";
+import { checkAiQuota } from "@/lib/ai-usage/quota";
+import { CUSTOMER_AI_NOT_READY_LABEL, CUSTOMER_AI_STATE_HINT } from "@/lib/saas/visibility";
 import { can, type SessionUser } from "@/lib/auth/session";
 import { CONNECTIONS_PERMISSION, saveConnection, setConnectionStatus, testOrgConnection } from "@/lib/connectors/service";
 import type { TesterDeps } from "@/lib/connectors/testers";
@@ -99,8 +101,18 @@ export async function loadGoLive(user: SessionUser): Promise<GoLiveView> {
     webChat: channels.webChat,
     messagesReceived,
     stage,
-    bot: { enabled: cfg.enabled, usesPlatformAi, aiReady, aiReason: plat && !plat.ok ? plat.reason : null },
+    bot: { enabled: cfg.enabled, usesPlatformAi, aiReady, aiReason: plat && !plat.ok ? await customerAiReason(orgCode) : null },
   };
+}
+
+/**
+ * Ô «Vào việc ngay» chỉ dựng cho workspace KHÁCH (nhà ⇒ `off` ở trên), nên lý do AI chưa dùng được nói bằng câu của khách
+ * (lib/saas/visibility.ts): hết lượt của gói ⇒ hướng dẫn trang gói; còn lại ⇒ đội ngũ đang xử lý. Không câu gốc của nền tảng
+ * (tên biến, USD) và không bảo khách tự chọn khoá AI — khách không còn cấu hình AI.
+ */
+async function customerAiReason(orgCode: string): Promise<string> {
+  const quota = await checkAiQuota(orgCode, "PLATFORM", { notify: false }).catch(() => null);
+  return quota && !quota.ok && quota.reason !== "PLAN_UNREADABLE" && quota.reason !== "NO_PLATFORM_CREDIT" ? CUSTOMER_AI_STATE_HINT.OUT_OF_QUOTA : CUSTOMER_AI_NOT_READY_LABEL;
 }
 
 /** Lưu → Kiểm tra → Bật kết nối «Fanpage qua Pancake» trong MỘT lượt bấm. */

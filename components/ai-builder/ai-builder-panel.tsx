@@ -38,6 +38,8 @@ function usd(v: number | null): string {
  * lựa chọn sau khi xem trước ⇒ kế hoạch bị xoá, phải xem trước lại — người bấm Áp dụng chỉ xác nhận thứ đang THẤY.
  */
 export function AiBuilderPanel({ view, initialDraft }: { view: AiBuilderView; initialDraft: AiDraftView | null }) {
+  // Workspace KHÁCH: không model / token / USD / hướng dẫn khoá AI (DTO đã lọc ở máy chủ — lib/saas/visibility.ts).
+  const internal = view.organization.isHome;
   const [mode, setMode] = useState<AiBuilderMode>(initialDraft?.mode ?? "new");
   const [prompt, setPrompt] = useState("");
   const [draft, setDraft] = useState<AiDraftView | null>(initialDraft);
@@ -135,7 +137,9 @@ export function AiBuilderPanel({ view, initialDraft }: { view: AiBuilderView; in
         title="Mô tả cho AI"
         description={
           view.ai.available
-            ? `${view.ai.source ? AI_SOURCE_LABEL[view.ai.source] : ""} · ${view.ai.model ?? ""} · hôm nay đã dùng ${view.usedToday}/${view.limits.maxDraftsPerDay} lượt`
+            ? internal
+              ? `${view.ai.source ? AI_SOURCE_LABEL[view.ai.source] : ""} · ${view.ai.model ?? ""} · hôm nay đã dùng ${view.usedToday}/${view.limits.maxDraftsPerDay} lượt`
+              : `Hôm nay đã dùng ${view.usedToday}/${view.limits.maxDraftsPerDay} lượt`
             : "Chưa có kết nối AI"
         }
       >
@@ -143,6 +147,7 @@ export function AiBuilderPanel({ view, initialDraft }: { view: AiBuilderView; in
           <div className="space-y-2 text-sm">
             <p className="font-medium">Chưa có kết nối AI cho tổ chức này.</p>
             <p className="text-muted-foreground">{view.ai.reason}</p>
+            {internal ? (
             <p>
               <Link href="/settings/connections" className="font-medium text-primary underline underline-offset-2">
                 Mở Kết nối theo tổ chức
@@ -153,6 +158,9 @@ export function AiBuilderPanel({ view, initialDraft }: { view: AiBuilderView; in
               </Link>
               .
             </p>
+            ) : (
+              <p className="text-muted-foreground">Bộ phận hỗ trợ đang hoàn tất cấu hình AI cho tổ chức. Mẫu cấu hình dựng sẵn vẫn dùng được ở <Link href="/settings/templates" className="font-medium text-primary underline underline-offset-2">Mẫu cấu hình</Link>.</p>
+            )}
           </div>
         ) : (
           <div className="space-y-3">
@@ -199,7 +207,7 @@ export function AiBuilderPanel({ view, initialDraft }: { view: AiBuilderView; in
       {draft ? (
         <SectionCard
           title={draft.name ?? "Bản nháp chưa có gói"}
-          description={`${AI_BUILDER_MODE_LABEL[draft.mode]} · ${AI_DRAFT_STATUS_LABEL[draft.status]} · ${draft.aiCalls} lượt gọi AI · ${draft.inputTokens + draft.outputTokens} token · ${usd(draft.costUsd)}`}
+          description={`${AI_BUILDER_MODE_LABEL[draft.mode]} · ${AI_DRAFT_STATUS_LABEL[draft.status]} · ${draft.aiCalls} lượt gọi AI${internal ? ` · ${draft.inputTokens + draft.outputTokens} token · ${usd(draft.costUsd)}` : ""}`}
           actions={
             draft.status === "DRAFT" ? (
               <div className="flex flex-wrap gap-2">

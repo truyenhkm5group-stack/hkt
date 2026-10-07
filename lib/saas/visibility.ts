@@ -84,13 +84,46 @@ export const CUSTOMER_AI_STATE_HINT: Record<CustomerAiState, string> = {
   OUT_OF_QUOTA: "Shop đã dùng hết lượt khách AI xử lý của gói — xem Hệ thống → Gói & thanh toán để mua thêm hoặc nâng gói.",
 };
 
+/** Khách gọi đường ghi khoá AI (màn Kết nối / action) ⇒ từ chối bằng câu này. */
+export const CUSTOMER_AI_CONFIG_MANAGED = "Cấu hình AI do đội ngũ quản lý — liên hệ hỗ trợ nếu cần thay đổi.";
+
 /** Câu DUY NHẤT khách thấy khi AI hỏng (hết tiền · khoá bị từ chối · quá tải · lỗi nhà cung cấp) — không câu lỗi gốc. */
 export const CUSTOMER_AI_INCIDENT_LABEL = "AI đang gặp sự cố — đội ngũ đã được báo";
 
-/** Câu lỗi của lượt AI cho KHÁCH: lỗi nhắc khoá / nhà cung cấp / model / hạn mức nội bộ ⇒ MỘT câu chung; lỗi nghiệp vụ giữ nguyên. */
-const INTERNAL_AI_ERROR = /khoá AI|kết nối AI|model|provider|token|credit|gemini|openai|anthropic|claude|nhà cung cấp|nền tảng|tổ chức nhà|api/i;
+/**
+ * Câu lỗi nghiệp vụ được phép tới KHÁCH nguyên văn — DANH SÁCH CHO PHÉP (review #639): câu nào không bắt đầu bằng một mục ở
+ * đây (lỗi nhà cung cấp, hạn mức tính bằng USD, tên khoá / model, e.message thô, câu mới chưa ai duyệt…) ⇒ câu chung. Thêm câu
+ * mới = thêm vào đây sau khi đọc chắc nó không mang chữ nội bộ; KHÔNG thêm một câu có tham số do hệ thống ngoài điền.
+ */
+const CUSTOMER_SAFE_ERROR_PREFIXES: readonly string[] = [
+  "Tin nhắn trống",
+  "Không có hội thoại này",
+  "Shop chưa mở chat",
+  "Module AI bán hàng chưa bật",
+  "Bạn không có quyền",
+  "Số điểm không hợp lệ",
+  "Số hội thoại không hợp lệ",
+  "Khoảng ngày không hợp lệ",
+  "Đang có một lượt",
+  "Bật kết nối «Fanpage qua Pancake»",
+  "Chế độ phải là dựng mới hoặc sửa lặp",
+  "Mô tả quá ngắn",
+  "Mô tả dài quá",
+  "Tổ chức đã dùng hết",
+  "Đã tới hạn mức của gói «",
+  "Không có bản nháp này",
+  "Phiên đăng nhập thuộc tổ chức khác",
+  "AI không trả về danh sách bài học",
+  "AI trả về danh sách rỗng",
+  "Treo quá lâu",
+];
+
+/** Câu lỗi cho KHÁCH: đúng câu khách đã định nghĩa (danh sách cho phép + câu của tệp này), mọi câu lạ ⇒ MỘT câu chung. */
 export function customerSafeAiError(message: string): string {
-  return INTERNAL_AI_ERROR.test(message) ? CUSTOMER_AI_INCIDENT_LABEL : message;
+  const own = [CUSTOMER_AI_INCIDENT_LABEL, CUSTOMER_AI_CONFIG_MANAGED, CUSTOMER_AI_NOT_READY_LABEL, ...Object.values(CUSTOMER_AI_STATE_HINT)];
+  if (own.includes(message)) return message;
+  if (/\$|USD|token|model|provider|api[ _-]?key/i.test(message)) return CUSTOMER_AI_INCIDENT_LABEL;
+  return CUSTOMER_SAFE_ERROR_PREFIXES.some((p) => message.startsWith(p)) ? message : CUSTOMER_AI_INCIDENT_LABEL;
 }
 
 /** Thứ tự: hết lượt (khách tự xử được ở trang gói) → chưa sẵn sàng (việc của hỗ trợ) → khách tự tắt → đang chạy. */
@@ -264,4 +297,48 @@ export function customerInboxThread(thread: InboxThread): InboxThread {
     aiBlocks: customerAiBlocks(thread.aiBlocks),
     items: thread.items.map((it) => (it.trace ? { ...it, trace: customerMessageTrace(it.trace) } : it)),
   };
+}
+
+// ───────────────────────── PHÁT LẠI · TỰ HỌC · SỔ TAY · AI DỰNG CẤU HÌNH (review #639) ─────────────────────────
+
+/** Một lượt phát lại cho KHÁCH: câu lỗi lượt / điểm qua danh sách cho phép, không tên công cụ bot đã gọi. */
+export function customerReplayDetail<R extends { error: string | null }, P extends { error: string | null; tools: { name: string; ok: boolean; summary: string }[] }>(d: { ok: true; run: R; points: P[] }): { ok: true; run: R; points: P[] } {
+  return { ok: true, run: { ...d.run, error: d.run.error === null ? null : customerSafeAiError(d.run.error) }, points: d.points.map((p) => ({ ...p, error: p.error === null ? null : customerSafeAiError(p.error), tools: [] })) };
+}
+
+/** Trạng thái tự học cho KHÁCH: ghi chú lượt LỖI (có thể là lỗi gốc / hạn mức / tên khoá) thành câu chung. */
+export function customerLessons<L extends { lastRun: { status: string; note: string } | null }>(state: L): L {
+  return state.lastRun && state.lastRun.status === "ERROR" ? { ...state, lastRun: { ...state.lastRun, note: customerSafeAiError(state.lastRun.note) } } : state;
+}
+
+/** Sổ tay cho KHÁCH: bản nháp không mang tiền AI (USD) của lượt học đã sinh ra nó. */
+export function customerPlaybookState<S extends { draft: { stats: { costUsd: number | null } | null } | null }>(state: S): S {
+  return state.draft?.stats ? { ...state, draft: { ...state.draft, stats: { ...state.draft.stats, costUsd: null } } } : state;
+}
+
+type BuilderDraftLike = { provider: string | null; model: string | null; inputTokens: number; outputTokens: number; costUsd: number | null; error: string | null; errors: { path: string; message: string }[]; quotaWarning?: string | null };
+
+/** Bản nháp AI dựng cấu hình cho KHÁCH: không nhà cung cấp / model / token / USD, lỗi gọi AI thành câu chung. */
+export function customerAiDraft<D extends BuilderDraftLike>(d: D): D {
+  return {
+    ...d,
+    provider: null,
+    model: null,
+    inputTokens: 0,
+    outputTokens: 0,
+    costUsd: null,
+    error: d.error === null ? null : customerSafeAiError(d.error),
+    errors: d.errors.map((e) => (/^Gọi AI hỏng/.test(e.message) ? { ...e, message: CUSTOMER_AI_INCIDENT_LABEL } : e)),
+    ...(d.quotaWarning ? { quotaWarning: null } : {}),
+  };
+}
+
+/** Màn AI dựng cấu hình cho KHÁCH: nguồn AI không mang nhà cung cấp / model, lý do «chưa dùng được» thành câu khách. */
+export function customerAiBuilderView<V extends { ai: { provider: string | null; model: string | null; reason: string | null }; drafts: { costUsd: number | null }[] }>(v: V): V {
+  return { ...v, ai: { ...v.ai, provider: null, model: null, reason: v.ai.reason === null ? null : CUSTOMER_AI_NOT_READY_LABEL }, drafts: v.drafts.map((d) => ({ ...d, costUsd: null })) };
+}
+
+/** Ghi đơn từ hội thoại cho KHÁCH: dòng LỖI (nhánh catch — có thể là lỗi gốc của AI) thành câu chung; dòng nghiệp vụ giữ nguyên. */
+export function customerOrderSyncView<V extends { recent: { outcome: string; result: string }[] }>(v: V): V {
+  return { ...v, recent: v.recent.map((r) => (r.outcome === "ERROR" ? { ...r, result: customerSafeAiError(r.result) } : r)) };
 }

@@ -21,7 +21,7 @@ import type { ChatDiscoveryResult, ConnectionActionResult, ConnectionSnapshot, C
 import { PLATFORM_MODULES } from "@/lib/constants/platform-modules";
 import { currentOrganization } from "@/lib/platform/context";
 import { findOrganization } from "@/lib/platform/organizations";
-import { customerConnectionsView, customerFacing } from "@/lib/saas/visibility";
+import { CUSTOMER_AI_CONFIG_MANAGED, customerConnectionsView, customerFacing } from "@/lib/saas/visibility";
 
 /**
  * ═══════════ KẾT NỐI THEO TỔ CHỨC — ĐƯỜNG ĐỌC VÀ ĐƯỜNG GHI DUY NHẤT ═══════════
@@ -111,6 +111,9 @@ function guard(user: SessionUser, connectorKey: string): { spec: ConnectorSpec }
     return { error: spec.tenancy === "HOME_ONLY" ? `«${spec.label}» dùng credential của tổ chức nhà ở biến môi trường — màn hình này chỉ đọc, không đổi được.` : `«${spec.label}» cấu hình ở chỗ khác: ${spec.config.where}.` };
   }
   if (!moduleEnabled(user, spec)) return { error: `Module «${moduleLabel(spec.module)}» của «${spec.label}» đang tắt ở tổ chức này.` };
+  // Workspace KHÁCH không lưu / kiểm tra / bật / tắt khoá AI (07/10/2026, lib/saas/visibility.ts): một lượt «lưu» đưa khoá đang
+  // bật về Nháp, một lượt «tắt» đánh sập nguồn AI chính của bot. Người vận hành đi đường riêng (`*AiConnectionAsOperator`).
+  if (spec.kind === "AI" && customerFacing(user.organization)) return { error: CUSTOMER_AI_CONFIG_MANAGED };
   return { spec };
 }
 

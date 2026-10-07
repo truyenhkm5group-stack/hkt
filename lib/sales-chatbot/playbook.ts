@@ -8,6 +8,7 @@
  * Mỗi lời gọi AI một dòng sổ dùng AI (`sales_playbook`), chịu trần chi phí của gói.
  */
 import { audit } from "@/lib/audit";
+import { CUSTOMER_AI_NOT_READY_LABEL, CUSTOMER_AI_STATE_HINT, customerFacing } from "@/lib/saas/visibility";
 import { can, type SessionUser } from "@/lib/auth/session";
 import { estimateCostUsd, type AiBlock } from "@/lib/ai/provider";
 import { recordAiUsage } from "@/lib/ai-usage/ledger";
@@ -83,10 +84,11 @@ export async function startPlaybookLearning(user: SessionUser, raw: { conversati
   const conn = await openActiveConnection(FANPAGE);
   if (!conn.ok) return { error: "Bật kết nối «Fanpage qua Pancake» (Cài đặt → Kết nối) trước — máy đọc lịch sử bằng page access token của shop." };
   const prov = await salesChatProvider();
-  if (!prov.ok) return { error: prov.error };
+  // Workspace KHÁCH: không câu lỗi nguồn AI / hạn mức gốc (tên khoá, USD) — lib/saas/visibility.ts.
+  if (!prov.ok) return { error: customerFacing(user.organization) ? CUSTOMER_AI_NOT_READY_LABEL : prov.error };
   const org = await currentOrganization();
   const quota = await checkAiQuota(org.code, prov.source);
-  if (!quota.ok) return { error: quota.error };
+  if (!quota.ok) return { error: customerFacing(user.organization) ? CUSTOMER_AI_STATE_HINT.OUT_OF_QUOTA : quota.error };
   const run = await loadPlaybookRun();
   if (run.state === "RUNNING" && now.getTime() - new Date(run.startedAt).getTime() < PLAYBOOK_LIMITS.runStaleMinutes * 60_000) return { error: "Đang có một lượt học chạy — đợi xong rồi chạy lại." };
   await setSettingJson(PLAYBOOK_RUN_SETTING_KEY, { state: "RUNNING", startedAt: now.toISOString(), startedBy: user.email, target, days, fetched: 0, note: "Đang đọc lịch sử tin nhắn" } satisfies PlaybookRun);

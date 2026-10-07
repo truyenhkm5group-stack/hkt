@@ -62,7 +62,7 @@ export async function testGoLive() {
       assert.ok(v0.show && v0.canConnect && v0.canBot && v0.fanpage?.status === "NOT_CONFIGURED", JSON.stringify(v0));
       // KHÔNG BẮT BUỘC PANCAKE: chưa nối gì ⇒ chưa có lối (màn hình cho chọn, khuyên nối thẳng Facebook), mốc đầu tiên.
       assert.ok(v0.path === null && v0.stage === "ACCOUNT_CREATED" && !v0.messenger.connected && v0.messagesReceived === 0, JSON.stringify({ path: v0.path, stage: v0.stage }));
-      assert.ok(v0.bot.usesPlatformAi && !v0.bot.aiReady && v0.bot.aiReason?.includes("chưa bật AI dùng chung"), "mặc định AI dùng chung; nền tảng chưa bật ⇒ nói rõ");
+      assert.ok(v0.bot.usesPlatformAi && !v0.bot.aiReady && v0.bot.aiReason === "AI chưa sẵn sàng — đội ngũ đang xử lý" && !/PLATFORM_AI|USD|khoá/i.test(v0.bot.aiReason), "mặc định AI dùng chung; nền tảng chưa bật ⇒ nói rõ");
       assert.equal((await loadGoLive(viewer)).show, false, "không quyền ⇒ không vẽ ô");
       assert.ok("error" in (await quickConnectFanpage(viewer, { pageId: PAGE, pageAccessToken: TOKEN }, { tester: { fetch: fakePancake(true) } })), "không quyền ⇒ lõi chặn");
 

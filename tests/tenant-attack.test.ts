@@ -128,7 +128,7 @@ import { WHOLESALE_BLUEPRINT } from "@/lib/blueprints/templates/wholesale";
 import { getBranding, readLogo, saveBrandingCore, uploadLogoCore } from "@/lib/branding/service";
 import { clearMemo } from "@/lib/cache";
 import { ORG_BACKUP_STATUS_SUBDIR, ORG_BACKUP_SUMMARY_FILE } from "@/lib/constants/backup";
-import { loadConnectionsView, openActiveConnection, saveConnection, setConnectionStatus, testOrgConnection } from "@/lib/connectors/service";
+import { loadConnectionsView, openActiveConnection, saveAiConnectionAsOperator, saveConnection, setAiConnectionStatusAsOperator, setConnectionStatus, testAiConnectionAsOperator, testOrgConnection } from "@/lib/connectors/service";
 import { env } from "@/lib/env";
 import { createCustomField } from "@/lib/metadata/fields";
 import type { MetadataActor } from "@/lib/metadata/types";
@@ -163,6 +163,8 @@ import { getBackupHealth } from "@/lib/queries/backup-status";
 import { parseListParams } from "@/lib/search-params";
 import { runWorkflows } from "@/lib/workflow/engine";
 import { saveRule, setRuleMode, setRuleStatus } from "@/lib/workflow/rules";
+
+const OPERATOR_AI_REF = { orgCode: "home", email: "op@nha.local" }; // khoá AI của workspace khách: chỉ người vận hành ghi (lib/saas/visibility.ts)
 
 const A = "ta-a";
 const B = "ta-b";
@@ -706,9 +708,9 @@ export async function testTenantAttack() {
       assert.ok("ok" in (await setConnectionStatus(qtB, "lark-webhook", "ACTIVE")));
       // Khoá AI của chính B (BYOK) — kết nối DUY NHẤT có luồng đọc bí mật lúc chạy (AI Builder).
       const probe = async () => new Response(JSON.stringify({ data: [] }), { status: 200, headers: { "content-type": "application/json" } });
-      assert.ok("ok" in (await saveConnection(qtB, { connectorKey: "anthropic-byok", settings: {}, secrets: { apiKey: AI_KEY_B } })));
-      assert.ok("ok" in (await testOrgConnection(qtB, "anthropic-byok", { tester: { fetch: probe } })));
-      assert.ok("ok" in (await setConnectionStatus(qtB, "anthropic-byok", "ACTIVE")));
+      assert.ok("ok" in (await saveAiConnectionAsOperator({ operator: OPERATOR_AI_REF, reason: "kiểm thử", connectorKey: "anthropic-byok", settings: {}, secrets: { apiKey: AI_KEY_B } })));
+      assert.ok("ok" in (await testAiConnectionAsOperator({ connectorKey: "anthropic-byok", operator: OPERATOR_AI_REF, reason: "kiểm thử" }, { tester: { fetch: probe } })));
+      assert.ok("ok" in (await setAiConnectionStatusAsOperator({ connectorKey: "anthropic-byok", status: "ACTIVE", operator: OPERATOR_AI_REF, reason: "kiểm thử" })));
       const own = await openActiveConnection("anthropic-byok");
       assert.ok(own.ok && own.secrets.apiKey === AI_KEY_B, `B mở được khoá AI của chính mình: ${JSON.stringify(own.ok ? "ok" : own.reason)}`);
 
