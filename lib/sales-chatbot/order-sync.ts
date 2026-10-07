@@ -43,7 +43,7 @@ import { chatOrderAdId } from "@/lib/sales-chatbot/ad-referral";
 import { operationsGroupChannel, orderNotifyRuleLive } from "@/lib/sales-chatbot/alerts";
 import { placeGapLine } from "@/lib/sales-chatbot/new-order-alert";
 import { sellableCatalog, type CatalogItem } from "@/lib/sales-chatbot/catalog";
-import { loadSalesChatbotConfig, readJsonSetting, salesChatProvider } from "@/lib/sales-chatbot/engine";
+import { loadSalesChatbotConfig, readJsonSetting, salesChatProvider, usageDetail } from "@/lib/sales-chatbot/engine";
 import { controlOf } from "@/lib/sales-chatbot/conversation-control-shared";
 import { conversationFor, FANPAGE_CONNECTOR, PAGE_REPLY, sendFanpageText, STAFF_OUT_PREFIX } from "@/lib/sales-chatbot/fanpage";
 import { messengerOwnedPageIds, messengerPageAiOn, sendMessengerPageText } from "@/lib/sales-chatbot/messenger";
@@ -389,7 +389,8 @@ export type OrderSyncSource = {
   aiOn: () => Promise<boolean>;
 };
 
-const READ_LIMITS = { priorMessages: ORDER_SYNC_LIMITS.messages, priorChars: ORDER_SYNC_LIMITS.messageChars, pages: 3 } as const;
+export const ORDER_SYNC_READ_LIMITS = { priorMessages: ORDER_SYNC_LIMITS.messages, priorChars: ORDER_SYNC_LIMITS.messageChars, pages: 3 } as const;
+const READ_LIMITS = ORDER_SYNC_READ_LIMITS;
 
 async function orderSyncSources(fetchImpl: typeof fetch, now: Date): Promise<OrderSyncSource[]> {
   const out: OrderSyncSource[] = [];
@@ -617,7 +618,7 @@ async function syncThread(a: {
   // Nguồn trả tiền theo ĐÚNG lựa chọn khoá của bot (AI dùng chung ⇒ PLATFORM, khoá riêng ⇒ BYOK) — sổ AI và hạn mức kiểm đúng chỗ.
   // Khoá hội thoại = ĐÚNG chuỗi `ref` của sổ AI bên dưới: canary của Platform AI Policy băm và GHIM theo từng hội thoại (thiếu
   // khoá ⇒ cả tổ chức rơi chung một ô — 07/10/2026 canary 10% thực tế nhận 0% vì mọi lượt ghi đơn của `qa` băm theo mã tổ chức).
-  const prov = await salesChatProvider({ feature: "sales_chatbot", ref: `order-sync:${conv.id}` });
+  const prov = await salesChatProvider({ feature: "sales_chatbot", ref: `order-sync:${conv.id}`, workload: "order_sync" });
   if (!prov.ok) return { retry: true, result: prov.error };
   const quota = await checkAiQuota(org.code, prov.source);
   if (!quota.ok) return { retry: true, result: quota.error };
@@ -625,10 +626,10 @@ async function syncThread(a: {
   let reply: OrderSyncReply | null = null;
   try {
     const res = await prov.provider.complete({ system: prompt.system, messages: [{ role: "user", content: [{ type: "text", text: prompt.user }] }], tools: [], maxTokens: 4_000, reasoning: "low" });
-    await recordAiUsage({ orgCode: org.code, feature: "sales_chatbot", source: prov.source, provider: prov.provider.name, model: res.model || prov.provider.model, requests: 1, inputTokens: res.usage.inputTokens + res.usage.cacheReadTokens + res.usage.cacheWriteTokens, outputTokens: res.usage.outputTokens, costUsd: estimateCostUsd(res.model || prov.provider.model, res.usage), status: "OK", actorId: null, ref: `order-sync:${conv.id}` }).catch(() => undefined);
+    await recordAiUsage({ orgCode: org.code, feature: "sales_chatbot", source: prov.source, provider: prov.provider.name, model: res.model || prov.provider.model, requests: 1, inputTokens: res.usage.inputTokens + res.usage.cacheReadTokens + res.usage.cacheWriteTokens, outputTokens: res.usage.outputTokens, costUsd: estimateCostUsd(res.model || prov.provider.model, res.usage), status: "OK", actorId: null, ref: `order-sync:${conv.id}`, workload: "order_sync", ...usageDetail(res) }).catch(() => undefined);
     reply = parseOrderSyncReply(textOf(res.content));
   } catch (e) {
-    await recordAiUsage({ orgCode: org.code, feature: "sales_chatbot", source: prov.source, provider: prov.provider.name, model: prov.provider.model, requests: 1, inputTokens: null, outputTokens: null, costUsd: null, status: "ERROR", actorId: null, ref: `order-sync:${conv.id}` }).catch(() => undefined);
+    await recordAiUsage({ orgCode: org.code, feature: "sales_chatbot", source: prov.source, provider: prov.provider.name, model: prov.provider.model, requests: 1, inputTokens: null, outputTokens: null, costUsd: null, status: "ERROR", actorId: null, ref: `order-sync:${conv.id}`, workload: "order_sync" }).catch(() => undefined);
     return { retry: true, result: `AI lỗi: ${(e instanceof Error ? e.message : String(e)).slice(0, 160)}` };
   }
   if (!reply) return { outcome: "ERROR", result: "AI trả lời sai định dạng — chưa ghi đơn (lượt sau đọc lại khi có tin mới)" };

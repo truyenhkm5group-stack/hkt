@@ -190,6 +190,7 @@ export const GEMINI_DEFAULT_MODEL = "gemini-3.5-flash-lite";
 /** Cấu hình suy nghĩ theo dòng model. HÀM THUẦN. */
 export function geminiThinkingConfig(model: string, reasoning: AiRequest["reasoning"]): Record<string, unknown> | null {
   if (/^gemini-2\.5-flash/.test(model)) return { thinkingBudget: reasoning === "high" ? 4096 : reasoning === "medium" ? 1024 : 0 };
+  // Dòng 3 nhận thêm «minimal» (suy nghĩ ít nhất có thể). Model không nhận ⇒ 400 «thinking» ⇒ gửi lại không kèm cấu hình (bên dưới).
   if (/^gemini-3/.test(model) && reasoning) return { thinkingLevel: reasoning };
   return null;
 }
@@ -305,7 +306,8 @@ export class ByokGeminiProvider implements AiProvider {
     return {
       content,
       stopReason: calls ? "tool_use" : cand?.finishReason === "MAX_TOKENS" ? "max_tokens" : cand?.finishReason === "SAFETY" ? "refusal" : "end_turn",
-      usage: { inputTokens: Math.max(0, Number(u.promptTokenCount ?? 0) - cached), outputTokens: Number(u.candidatesTokenCount ?? 0) + Number(u.thoughtsTokenCount ?? 0), cacheReadTokens: cached, cacheWriteTokens: 0 },
+      // Token ra TÍNH TIỀN = hiện ra + suy nghĩ (giữ nguyên); phần suy nghĩ tách riêng chỉ để quan sát.
+      usage: { inputTokens: Math.max(0, Number(u.promptTokenCount ?? 0) - cached), outputTokens: Number(u.candidatesTokenCount ?? 0) + Number(u.thoughtsTokenCount ?? 0), cacheReadTokens: cached, cacheWriteTokens: 0, thoughtTokens: Number(u.thoughtsTokenCount ?? 0) },
       model: data?.modelVersion || this.model,
       latencyMs: Date.now() - started,
     };

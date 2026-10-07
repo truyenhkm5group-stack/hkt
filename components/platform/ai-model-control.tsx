@@ -6,6 +6,7 @@ import { formatDateTime, formatNumber, formatPercent, formatVND } from "@/lib/fo
 import { cn } from "@/lib/utils";
 import { PlatformModelAbTable } from "@/components/platform/ai-model-ab";
 import type { ModelAbReport } from "@/lib/ai-usage/platform-ai-ab";
+import { PLATFORM_WORKLOAD_LABEL } from "@/lib/ai-usage/types";
 
 /**
  * PLATFORM AI MODEL CONTROL (06/10/2026 · docs/platform/ai-model-control.md) — model của AI DÙNG CHUNG (khoá nền tảng) cho
@@ -97,6 +98,51 @@ export function PlatformAiModelControlSection({ data, usdToVnd, now, ab }: { dat
             </div>
           </div>
         ) : null}
+
+        <div className="space-y-1" data-platform-ai-routing>
+          <h3 className="font-semibold">PLATFORM AI ROUTING · {data.windowDays} ngày</h3>
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[56rem] text-xs">
+              <thead className="text-left text-[11px] uppercase text-muted-foreground">
+                <tr>
+                  <th className="py-1 pr-2">Loại việc</th>
+                  <th className="py-1 pr-2">Model · dự phòng</th>
+                  <th className="py-1 pr-2">Suy nghĩ</th>
+                  <th className="py-1 pr-2 text-right">Canary</th>
+                  <th className="py-1 pr-2 text-right">Lượt</th>
+                  <th className="py-1 pr-2 text-right">Lỗi</th>
+                  <th className="py-1 pr-2 text-right" title="token suy nghĩ đã tách được (sổ AI 0231) · độ phủ">Token suy nghĩ</th>
+                  <th className="py-1 pr-2 text-right">Chi phí</th>
+                  <th className="py-1 text-right" title="mỗi hội thoại (ref sổ AI)">Chi phí / đơn vị</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.routing.map((r) => (
+                  <tr key={r.workload} className="border-t border-hairline" data-workload={r.workload}>
+                    <td className="py-1 pr-2">
+                      {r.workload === "other" ? "Khác (học hội thoại · sổ tay · AI Builder)" : PLATFORM_WORKLOAD_LABEL[r.workload]}
+                      <div className="text-[11px] text-muted-foreground">{r.scope === null ? "biến môi trường" : r.scope === "global" ? "chính sách chung" : "chính sách riêng"}</div>
+                    </td>
+                    <td className="py-1 pr-2 font-mono">
+                      {r.model ?? "—"}
+                      {r.fallbackModel ? <div className="text-[11px] text-muted-foreground">↳ {r.fallbackModel}</div> : null}
+                    </td>
+                    <td className="py-1 pr-2">{r.reasoning ?? "theo nơi gọi"}</td>
+                    <td className="numeric py-1 pr-2 text-right">{r.canaryPct === null ? "0%" : `${r.canaryPct}%`}</td>
+                    <td className="numeric py-1 pr-2 text-right">{formatNumber(r.calls)}</td>
+                    <td className="numeric py-1 pr-2 text-right">{r.errorRate === null ? "—" : formatPercent(r.errorRate * 100, 1)}</td>
+                    <td className="numeric py-1 pr-2 text-right">
+                      {formatNumber(r.thinkingTokens)}
+                      {r.thinkCoverage !== null && r.thinkCoverage < 1 ? <span className="text-muted-foreground"> · phủ {formatPercent(r.thinkCoverage * 100, 0)}</span> : null}
+                    </td>
+                    <td className="numeric py-1 pr-2 text-right">{usd(r.costUsd)}</td>
+                    <td className="numeric py-1 text-right">{usd(r.costPerUnitUsd)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
 
         {ab ? <PlatformModelAbTable report={ab} usdToVnd={usdToVnd} /> : null}
 

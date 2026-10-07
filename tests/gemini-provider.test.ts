@@ -55,7 +55,7 @@ export async function testGeminiProvider() {
   assert.equal(geminiThinkingConfig("gemma-3", "low"), null);
   assert.ok(!JSON.stringify(s0.body.tools).includes("additionalProperties"));
   assert.ok(r.stopReason === "tool_use" && r.content[0].type === "tool_use" && r.content[0].name === "search_products" && r.content[0].id.endsWith("|SIG9"), JSON.stringify(r));
-  assert.deepEqual(r.usage, { inputTokens: 1000, outputTokens: 40, cacheReadTokens: 200, cacheWriteTokens: 0 }, "token suy nghĩ tính vào token ra");
+  assert.deepEqual(r.usage, { inputTokens: 1000, outputTokens: 40, cacheReadTokens: 200, cacheWriteTokens: 0, thoughtTokens: 10 }, "token suy nghĩ tính vào token ra (tính tiền), và tách riêng để quan sát");
   // Mức «medium» ⇒ ngân sách suy nghĩ 1024.
   const fm = fakeGemini([{ body: { candidates: [{ content: { parts: [{ text: "Dạ 280.000đ ạ" }] }, finishReason: "STOP" }], usageMetadata: {} } }]);
   const rm = await new ByokGeminiProvider({ apiKey: KEY, model: "gemini-2.5-flash", fetch: fm.fetch }).complete({ ...req, reasoning: "medium", tools: [] });

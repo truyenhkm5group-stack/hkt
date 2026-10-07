@@ -25,7 +25,13 @@ import { resetPlatformPrimarySkipForTests, withPlatformFallback, type PlatformPr
 import type { SessionUser } from "@/lib/auth/session";
 import { PLATFORM_GEMINI_DEFAULT_MODEL, platformAiConfig } from "@/lib/ai-usage/platform-ai";
 import { applyPlatformAiPolicyAsScript, controlStage, estimateSwitch, loadPlatformAiControl, PLATFORM_AI_PROBES_KEY, probePlatformAiModelAsOperator, probeWithPlatformKey, rollbackPlatformAiPolicy, rollbackPlatformAiPolicyAsScript, SCRIPT_WRITER_LABEL, setPlatformAiPolicy } from "@/lib/ai-usage/platform-ai-admin";
-import { abVerdict, AB_RULES, armStats, combineVerdicts, quantile, readPlatformModelAbForScript, syncArmStats, syncVerdict, type AbConversation, type SyncConversation } from "@/lib/ai-usage/platform-ai-ab";
+import { abVerdict, AB_RULES, armStats, combineVerdicts, NO_OBS, quantile, readPlatformModelAbForScript, syncArmStats, syncVerdict, type AbConversation, type SyncConversation } from "@/lib/ai-usage/platform-ai-ab";
+import { recordAiUsage, setAiUsageCaptureForBench } from "@/lib/ai-usage/ledger";
+import { usageDetail } from "@/lib/sales-chatbot/engine";
+import { addressMatches, scoreSyncCase, summarizeSyncBench } from "@/lib/sales-chatbot/order-sync-bench";
+import { scoreSalesPoint, situationsOf, summarizeSalesBench } from "@/lib/sales-chatbot/sales-bench";
+import { policyForWorkload, readPlatformAiPolicies } from "@/lib/ai-usage/platform-ai-policy";
+import { withRequestOverrides } from "@/lib/ai-builder/provider";
 import { canaryBucket, invalidatePlatformAiPolicy, readConversationPlatformModels, parsePlatformAiPolicy, PLATFORM_AI_POLICY_KEY, readPlatformAiPolicy, routePlatformModel, type PlatformAiPolicy } from "@/lib/ai-usage/platform-ai-policy";
 import { classifyProbe, probeRequestBody, redactProbeMessage } from "@/lib/ai-usage/platform-model-probe";
 import { invalidateCapabilities } from "@/lib/platform/capabilities";
@@ -48,7 +54,7 @@ function sessionUser(over: Partial<SessionUser>): SessionUser {
 }
 
 function policy(over: Partial<PlatformAiPolicy> = {}): PlatformAiPolicy {
-  return { enabled: true, provider: "gemini", primaryModel: M25, fallbackModel: M35, canaryPct: 100, effectiveFrom: "2026-10-01T00:00:00.000Z", reason: "giảm chi phí", changedBy: "op@local", changedAt: "2026-10-01T00:00:00.000Z", cohortSince: "2026-10-01T00:00:00.000Z", previous: null, ...over };
+  return { enabled: true, provider: "gemini", primaryModel: M25, fallbackModel: M35, canaryPct: 100, effectiveFrom: "2026-10-01T00:00:00.000Z", reason: "giảm chi phí", changedBy: "op@local", changedAt: "2026-10-01T00:00:00.000Z", cohortSince: "2026-10-01T00:00:00.000Z", reasoning: null, maxOutputTokens: null, previous: null, ...over };
 }
 
 type Seen = { url: string; headers: Record<string, string>; body: Record<string, unknown> };
@@ -282,6 +288,8 @@ async function testOperatorWorkflow() {
     const sApplied = await loadPlatformAiControl(op, NOW, env);
     assert.ok(sApplied.ok && sApplied.value.stage === "APPLIED" && sApplied.value.currentModel === M25);
     assert.ok(sApplied.ok && sApplied.value.prices.current?.output === 2.5 && sApplied.value.prices.candidate?.output === 0.4, "so giá: 3.5 → 2.5");
+    assert.ok(sApplied.ok && sApplied.value.routing.map((r) => r.workload).join(",") === "sales_chatbot,order_sync,quick_extract,vision,other", "bảng routing đủ bốn loại việc + khác");
+    assert.ok(sApplied.ok && sApplied.value.routing.find((r) => r.workload === "order_sync")?.scope === "global" && sApplied.value.routing.find((r) => r.workload === "order_sync")?.canaryPct === 100, "chưa có chính sách riêng ⇒ ghi đơn đi chính sách chung");
     const p2 = await readPlatformAiPolicy({ fresh: true });
     assert.equal(p2?.previous?.canaryPct, 10, "bản trước được giữ để hoàn tác");
 
@@ -435,36 +443,40 @@ async function testLedger() {
       const ab = await readPlatformModelAbForScript(new Date(), GEMINI_ENV);
       assert.ok(ab, "có chính sách ⇒ có báo cáo");
       if (ab) {
-        assert.equal(ab.canary.conversations, 12, "khung thử bị loại");
-        assert.equal(ab.control.conversations, 12);
-        assert.equal(ab.canary.model, M31);
-        assert.equal(ab.control.model, M35);
-        assert.equal(ab.canary.orders, 9, "đơn mô phỏng không tính");
-        assert.equal(ab.canary.closeRate, 9 / 12);
-        assert.equal(ab.control.closeRate, 6 / 12);
-        assert.equal(ab.canary.phoneRate, 1);
-        assert.equal(ab.control.phoneRate, 10 / 12, "SĐT ở cột hội thoại cũng tính");
-        assert.equal(ab.control.addressRate, 8 / 12);
-        assert.equal(ab.control.handoffRate, 2 / 12);
-        assert.equal(ab.canary.requests, 14);
-        assert.equal(ab.canary.errorRate, 1 / 14, "lượt hỏng của 3.1 được 3.5 đỡ vẫn là lỗi của cohort canary");
-        assert.equal(ab.canary.toolSuccessRate, 23 / 24);
-        assert.equal(ab.control.toolSuccessRate, null, "không có công cụ ⇒ chưa đo");
-        assert.equal(ab.canary.p50Ms, quantile(Array.from({ length: 12 }, (_, i) => 1000 + i * 100), 0.5));
+        assert.equal(ab.chat!.canary.conversations, 12, "khung thử bị loại");
+        assert.equal(ab.chat!.control.conversations, 12);
+        assert.equal(ab.chat!.canary.model, M31);
+        assert.equal(ab.chat!.control.model, M35);
+        assert.equal(ab.chat!.canary.orders, 9, "đơn mô phỏng không tính");
+        assert.equal(ab.chat!.canary.closeRate, 9 / 12);
+        assert.equal(ab.chat!.control.closeRate, 6 / 12);
+        assert.equal(ab.chat!.canary.phoneRate, 1);
+        assert.equal(ab.chat!.control.phoneRate, 10 / 12, "SĐT ở cột hội thoại cũng tính");
+        assert.equal(ab.chat!.control.addressRate, 8 / 12);
+        assert.equal(ab.chat!.control.handoffRate, 2 / 12);
+        assert.equal(ab.chat!.canary.requests, 14);
+        assert.equal(ab.chat!.canary.errorRate, 1 / 14, "lượt hỏng của 3.1 được 3.5 đỡ vẫn là lỗi của cohort canary");
+        assert.equal(ab.chat!.canary.toolSuccessRate, 23 / 24);
+        assert.equal(ab.chat!.control.toolSuccessRate, null, "không có công cụ ⇒ chưa đo");
+        assert.equal(ab.chat!.canary.p50Ms, quantile(Array.from({ length: 12 }, (_, i) => 1000 + i * 100), 0.5));
         const canaryCost = 12 * ((4000 * 0.25 + 100 * 1.5) / 1e6) + (4000 * 0.3 + 100 * 2.5) / 1e6;
-        assert.ok(Math.abs((ab.canary.costPerConvUsd ?? NaN) - canaryCost / 12) < 1e-12, "chi phí canary gồm cả lượt 3.5 đỡ");
-        assert.ok(Math.abs((ab.canary.costPerOrderUsd ?? NaN) - canaryCost / 9) < 1e-12);
-        assert.equal(ab.chatVerdict.decision, "INSUFFICIENT_DATA", "12 < 200 hội thoại và 9 < 50 đơn ⇒ giữ nấc");
+        assert.ok(Math.abs((ab.chat!.canary.costPerConvUsd ?? NaN) - canaryCost / 12) < 1e-12, "chi phí canary gồm cả lượt 3.5 đỡ");
+        assert.ok(Math.abs((ab.chat!.canary.costPerOrderUsd ?? NaN) - canaryCost / 9) < 1e-12);
+        assert.equal(ab.chat!.verdict.decision, "INSUFFICIENT_DATA", "12 < 200 hội thoại và 9 < 50 đơn ⇒ giữ nấc");
         assert.equal(ab.verdict.decision, "INSUFFICIENT_DATA");
-        assert.equal(ab.sync.canary.threads, 12);
-        assert.equal(ab.sync.control.threads, 12);
-        assert.equal(ab.sync.canary.orders, 8);
-        assert.equal(ab.sync.canary.orderRate, 8 / 12);
-        assert.equal(ab.sync.canary.leadConversion, 8 / 10);
-        assert.equal(ab.sync.control.leadConversion, 6 / 10);
-        assert.equal(ab.sync.control.missedLeadRate, 4 / 12);
-        assert.ok(Math.abs((ab.sync.canary.costPerThreadUsd ?? NaN) - (3000 * 0.25 + 60 * 1.5) / 1e6) < 1e-12);
-        assert.ok(Math.abs((ab.sync.control.costPerOrderUsd ?? NaN) - (12 * (3000 * 0.3 + 60 * 2.5)) / 1e6 / 6) < 1e-12);
+        assert.equal(ab.sync!.canary.threads, 12);
+        assert.equal(ab.sync!.control.threads, 12);
+        assert.equal(ab.sync!.canary.orders, 8);
+        assert.equal(ab.sync!.canary.orderRate, 8 / 12);
+        assert.equal(ab.sync!.canary.leadConversion, 8 / 10);
+        assert.equal(ab.sync!.control.leadConversion, 6 / 10);
+        assert.equal(ab.sync!.control.missedLeadRate, 4 / 12);
+        assert.ok(Math.abs((ab.sync!.canary.costPerThreadUsd ?? NaN) - (3000 * 0.25 + 60 * 1.5) / 1e6) < 1e-12);
+        assert.ok(Math.abs((ab.sync!.control.costPerOrderUsd ?? NaN) - (12 * (3000 * 0.3 + 60 * 2.5)) / 1e6 / 6) < 1e-12);
+        // Sổ chưa có cột suy nghĩ (migration riêng) ⇒ cột token CHƯA ĐO, không phải 0.
+        assert.equal(ab.sync!.canary.thinkingPerConv, null);
+        assert.equal(ab.sync!.canary.thinkCoverage, 0);
+        assert.equal(ab.sync!.scope, "global");
       }
 
       // Tăng nấc với CÙNG cặp model ⇒ giữ mốc cohort; đổi cặp ⇒ mốc mới.
@@ -472,6 +484,20 @@ async function testLedger() {
       assert.ok("ok" in (await applyPlatformAiPolicyAsScript({ primaryModel: M31, canaryPct: 30, reason: "len 30" }, { env: GEMINI_ENV, fetch: g31.fetch, now: new Date() })));
       const after30 = await readPlatformAiPolicy({ fresh: true });
       assert.ok(before30 && after30 && after30.canaryPct === 30 && after30.cohortSince === before30.cohortSince, "tăng nấc giữ cohort");
+
+      // Chính sách RIÊNG cho ghi đơn: 3.1 + suy nghĩ minimal + trần 1024 — chat vẫn đi chính sách chung.
+      const own = await applyPlatformAiPolicyAsScript({ primaryModel: M31, canaryPct: 10, reason: "order sync rieng", workload: "order_sync", reasoning: "minimal", maxOutputTokens: 1024 }, { env: GEMINI_ENV, fetch: g31.fetch, now: new Date() });
+      assert.ok("ok" in own, JSON.stringify(own));
+      const set = await readPlatformAiPolicies({ fresh: true });
+      assert.equal(policyForWorkload(set, "order_sync").scope, "order_sync");
+      assert.equal(policyForWorkload(set, "order_sync").policy?.reasoning, "minimal");
+      assert.equal(policyForWorkload(set, "sales_chatbot").scope, "global", "loại việc chưa có chính sách riêng ⇒ chính sách chung");
+      assert.ok("error" in (await applyPlatformAiPolicyAsScript({ primaryModel: M31, canaryPct: 10, reason: "sai loai", workload: "khong-co" as never }, { env: GEMINI_ENV, fetch: g31.fetch })), "loại việc lạ ⇒ từ chối");
+      const ab2 = await readPlatformModelAbForScript(new Date(), GEMINI_ENV);
+      assert.equal(ab2?.sync?.scope, "order_sync");
+      assert.ok(ab2?.sync && ab2.sync.canary.threads === 0, "cohort riêng mở từ lúc đặt ⇒ dòng sổ cũ hơn không vào");
+      assert.ok("ok" in (await rollbackPlatformAiPolicyAsScript({ reason: "bo rieng", workload: "order_sync" }, { now: new Date() })));
+      assert.equal(policyForWorkload(await readPlatformAiPolicies({ fresh: true }), "order_sync").scope, "global", "hoàn tác chính sách riêng (không bản trước) ⇒ về chính sách chung");
     });
   } finally {
     setSalesChatProviderForTests(null);
@@ -518,7 +544,7 @@ async function testStickyAndVerdict() {
   assert.equal(asked, 1);
 
   // Luật quyết định.
-  const conv = (over: Partial<AbConversation>): AbConversation => ({ arm: "CANARY", requests: 2, errors: 0, inputTokens: 4000, outputTokens: 100, costUsd: 0.001, unpriced: false, phone: true, address: true, orders: 1, handoff: false, upsellOffered: false, upsellAccepted: false, toolResults: 4, toolErrors: 0, responseMs: [1500], ...over });
+  const conv = (over: Partial<AbConversation>): AbConversation => ({ obs: NO_OBS, arm: "CANARY", requests: 2, errors: 0, inputTokens: 4000, outputTokens: 100, costUsd: 0.001, unpriced: false, phone: true, address: true, orders: 1, handoff: false, upsellOffered: false, upsellAccepted: false, toolResults: 4, toolErrors: 0, responseMs: [1500], ...over });
   const many = (n: number, f: (i: number) => Partial<AbConversation>) => Array.from({ length: n }, (_, i) => conv(f(i)));
   const control = armStats(M35, many(1800, (i) => ({ arm: "CONTROL", orders: i % 2 ? 0 : 1, costUsd: 0.0013 })));
   const good = armStats(M31, many(200, (i) => ({ orders: i % 2 ? 0 : 1, costUsd: 0.001 })));
@@ -548,10 +574,10 @@ async function testStickyAndVerdict() {
   // Khoá phải là ĐÚNG chuỗi `ref` mà sổ AI ghi, nếu không ghim nhánh (đọc sổ theo ref) không bao giờ khớp.
   const sync = readFileSync("lib/sales-chatbot/order-sync.ts", "utf8");
   assert.match(sync, /salesChatProvider\(\{[^}]*ref: `order-sync:\$\{conv\.id\}`/, "ghi đơn băm canary theo từng hội thoại");
-  assert.ok(sync.includes("ref: `order-sync:${conv.id}` }).catch"), "sổ AI của ghi đơn dùng cùng khoá");
+  assert.ok(sync.includes("ref: `order-sync:${conv.id}`, workload: \"order_sync\""), "sổ AI của ghi đơn dùng cùng khoá");
 
   // Ghi đơn: cùng luật, KPI là ra đơn + lead → đơn.
-  const sconv = (over: Partial<SyncConversation>): SyncConversation => ({ arm: "CANARY", requests: 1, errors: 0, inputTokens: 3000, outputTokens: 60, costUsd: 0.00084, unpriced: false, orders: 0, missedLead: false, ...over });
+  const sconv = (over: Partial<SyncConversation>): SyncConversation => ({ obs: NO_OBS, arm: "CANARY", requests: 1, errors: 0, inputTokens: 3000, outputTokens: 60, costUsd: 0.00084, unpriced: false, orders: 0, missedLead: false, ...over });
   const smany = (n: number, f: (i: number) => Partial<SyncConversation>) => Array.from({ length: n }, (_, i) => sconv(f(i)));
   const sCtl = syncArmStats(M35, smany(1800, (i) => ({ arm: "CONTROL", costUsd: 0.00105, orders: i % 3 === 0 ? 1 : 0, missedLead: i % 3 === 1 })));
   const sGood = syncArmStats(M31, smany(200, (i) => ({ orders: i % 3 === 0 ? 1 : 0, missedLead: i % 3 === 1 })));
@@ -565,6 +591,75 @@ async function testStickyAndVerdict() {
   assert.equal(combineVerdicts([{ label: "chat", active: true, verdict: ins }, { label: "sync", active: true, verdict: sv }]).decision, "INSUFFICIENT_DATA");
   assert.equal(combineVerdicts([{ label: "chat", active: true, verdict: pv }, { label: "sync", active: true, verdict: syncVerdict(sMissed, sCtl, ctx) }]).decision, "ROLLBACK");
   assert.equal(combineVerdicts([{ label: "chat", active: false, verdict: pv }]).decision, "INSUFFICIENT_DATA", "không workload nào có lưu lượng ⇒ không kết luận");
+
+  // Đắt hơn rõ rệt (chủ nền tảng 07/10): ≥ 30 hội thoại, chi phí > +20%, không lợi ích chất lượng ⇒ hoàn tác không chờ 200.
+  const sExp = syncArmStats(M31, smany(30, (i) => ({ orders: i % 3 === 0 ? 1 : 0, missedLead: i % 3 === 1, costUsd: 0.00105 * 1.3 })));
+  const ve = syncVerdict(sExp, sCtl, ctx);
+  assert.equal(ve.decision, "ROLLBACK", JSON.stringify(ve.reasons));
+  assert.match(ve.reasons[0], /ĐẮT HƠN RÕ RỆT/);
+  const sExpBetter = syncArmStats(M31, smany(30, (i) => ({ orders: i % 2 === 0 ? 1 : 0, missedLead: false, costUsd: 0.00105 * 1.3 })));
+  assert.equal(syncVerdict(sExpBetter, sCtl, ctx).decision, "INSUFFICIENT_DATA", "đắt hơn nhưng ra đơn cao hơn rõ ⇒ tiếp tục thu thập");
+  assert.equal(syncVerdict(syncArmStats(M31, smany(29, () => ({ costUsd: 0.01 }))), sCtl, ctx).decision, "INSUFFICIENT_DATA", "dưới 30 hội thoại ⇒ chưa kết luận đắt");
+  assert.equal(syncVerdict(syncArmStats(M31, smany(30, (i) => ({ orders: i % 3 === 0 ? 1 : 0, missedLead: i % 3 === 1, costUsd: 0.00105 * 1.15 }))), sCtl, ctx).decision, "INSUFFICIENT_DATA", "đắt hơn 15% (< 20%) ⇒ tiếp tục thu thập");
+
+  // Mức suy nghĩ / trần token của chính sách CHỈ đè lời gọi của model chính.
+  const seen: AiRequest[] = [];
+  const rec: AiProvider = { name: "x", model: M31, schemaDialect: "openai", complete: async (r) => (seen.push(r), resp(M31)) };
+  await withRequestOverrides(rec, { reasoning: "minimal", maxTokens: 1024 }).complete({ ...REQ, reasoning: "medium", maxTokens: 4000 });
+  assert.deepEqual([seen[0].reasoning, seen[0].maxTokens], ["minimal", 1024]);
+  assert.deepEqual(route(policy({ primaryModel: M31, canaryPct: 100, reasoning: "low", maxOutputTokens: 2048 }), can, []).overrides, { reasoning: "low", maxTokens: 2048 });
+  assert.equal(route(policy({ primaryModel: M31, canaryPct: 10, reasoning: "low" }), ctl, []).overrides, undefined, "nhánh đối chứng giữ cấu hình của nơi gọi");
+  assert.deepEqual(usageDetail({ usage: { inputTokens: 100, outputTokens: 900, cacheReadTokens: 20, cacheWriteTokens: 0, thoughtTokens: 800 }, latencyMs: 1500 }), { cachedTokens: 20, thinkingTokens: 800, latencyMs: 1500 });
+  assert.equal(usageDetail({ usage: { inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0 }, latencyMs: 1 }).thinkingTokens, null, "nhà cung cấp không tách ⇒ CHƯA BIẾT");
+
+  // Benchmark ghi đơn — chấm thuần.
+  assert.ok(addressMatches("12 Hàng Bạc, Hoàn Kiếm, Hà Nội", "12 hang bac hoan kiem ha noi"));
+  assert.ok(!addressMatches("Quận 1, TP HCM", "12 Hàng Bạc, Hoàn Kiếm, Hà Nội"));
+  const truth = { phone: "0912345678", address: "12 Hàng Bạc, Hoàn Kiếm, Hà Nội", name: "Lan", lines: [{ variantId: "v1", productId: "p1", quantity: 2 }] };
+  const create = (lines: { variantId: string; quantity: number }[], phone = "0912 345 678") => ({ kind: "CREATE" as const, lines, agreement: { index: 1, id: null, from: "customer" as const, text: "", at: "" }, recipient: { name: "Nguyễn Thị Lan", phone, address: "12 Hàng Bạc, Hoàn Kiếm", province: "Hà Nội" }, phoneFrom: "CHAT" as const, addressFrom: "CHAT" as const, deliveryNote: "", summary: "" });
+  const productOf = (v: string) => (v.startsWith("v1") ? "p1" : "p2");
+  const okScore = scoreSyncCase({ label: "ORDER", truth }, true, create([{ variantId: "v1", quantity: 2 }]), productOf);
+  assert.deepEqual([okScore.phoneOk, okScore.addressOk, okScore.nameOk, okScore.productOk, okScore.variantOk, okScore.quantityOk], [true, true, true, true, true, true]);
+  const wrongQty = scoreSyncCase({ label: "ORDER", truth }, true, create([{ variantId: "v1", quantity: 1 }], "0900000000"), productOf);
+  assert.deepEqual([wrongQty.phoneOk, wrongQty.quantityOk, wrongQty.variantOk], [false, false, true]);
+  const fp = scoreSyncCase({ label: "DELETED_ORDER", truth: null }, true, create([{ variantId: "v1", quantity: 1 }]), productOf);
+  const sum = summarizeSyncBench([
+    { config: "x", score: okScore, obs: { inputTokens: 3000, candidateTokens: 60, thinkingTokens: 0, latencyMs: 900, costUsd: 0.001, error: null } },
+    { config: "x", score: scoreSyncCase({ label: "ORDER", truth }, true, { kind: "NONE", reason: "" }, productOf), obs: { inputTokens: 3000, candidateTokens: 40, thinkingTokens: 800, latencyMs: 2000, costUsd: 0.002, error: null } },
+    { config: "x", score: fp, obs: { inputTokens: 3000, candidateTokens: 60, thinkingTokens: 0, latencyMs: 1000, costUsd: 0.001, error: null } },
+  ]);
+  assert.deepEqual([sum.recall, sum.falseNegative, sum.falsePositive, sum.falsePositiveByLabel.DELETED_ORDER, sum.decisionAccuracy], [0.5, 1, 1, "1/1", 1 / 3]);
+  assert.equal(sum.avgThinking, 800 / 3);
+
+  // Benchmark Sales Agent — chấm thuần.
+  assert.deepEqual(situationsOf("Chả mực bao nhiêu 1kg vậy shop?").includes("price"), true);
+  assert.ok(situationsOf("sdt 0912345678, 12 đường Láng, Đống Đa").includes("phone") && situationsOf("12 đường Láng, Đống Đa").includes("address"));
+  const shadowOk = { ok: true, reply: "Dạ chả mực 400.000đ/kg, còn hàng ạ", status: "OPEN", tools: [{ name: "search_products", ok: true, summary: "Chả mực 400.000" }], error: null };
+  const sp = scoreSalesPoint({ customerText: "Chả mực bao nhiêu?", historicalSpeaker: "BOT" }, shadowOk, new Set([400_000]));
+  assert.deepEqual([sp.priceGrounded, sp.rightTool, sp.stockFabricated, sp.leak], [true, true, false, false]);
+  const bad = scoreSalesPoint({ customerText: "Chả mực bao nhiêu?", historicalSpeaker: "BOT" }, { ok: true, reply: "Dạ 350.000đ, còn hàng ạ. search_products", status: "OPEN", tools: [], error: null }, new Set([400_000]));
+  assert.deepEqual([bad.priceGrounded, bad.rightTool, bad.stockFabricated, bad.leak], [false, false, true, true]);
+  const ss = summarizeSalesBench([
+    { config: "x", score: sp, obs: { calls: 2, inputTokens: 8000, outputTokens: 300, thinkingTokens: 200, latencyMs: 3000, costUsd: 0.003, unpriced: false } },
+    { config: "x", score: bad, obs: { calls: 1, inputTokens: 4000, outputTokens: 100, thinkingTokens: 0, latencyMs: 1000, costUsd: 0.001, unpriced: false } },
+  ]);
+  assert.deepEqual([ss.priceGrounded, ss.stockFabricated, ss.rightTool.ok, ss.rightTool.n, ss.leaks, ss.costPerPointUsd], [0.5, 1, 1, 2, 1, 0.002]);
+
+  // Sổ AI: cột quan sát được ghi; lượt benchmark KHÔNG vào sổ thật.
+  const pdb = await getPlatformDb();
+  await recordAiUsage({ orgCode: "pam-tel", feature: "sales_chatbot", source: "PLATFORM", provider: "gemini-platform", model: M31, requests: 1, inputTokens: 3000, outputTokens: 900, costUsd: 0.002, status: "OK", actorId: null, ref: "order-sync:x", workload: "order_sync", thinkingTokens: 800, cachedTokens: 0, latencyMs: 1500 });
+  const [tel] = await pdb.select().from(schema.platformAiUsage).where(eq(schema.platformAiUsage.orgCode, "pam-tel"));
+  assert.deepEqual([tel.outputTokens, tel.costUsd], [900, 0.002], "token ra / tiền GIỮ nguyên nghĩa (gồm cả suy nghĩ) — ô quan sát không đổi phép tính tiền");
+  const captured: string[] = [];
+  setAiUsageCaptureForBench((e) => captured.push(e.ref ?? ""));
+  try {
+    assert.equal((await recordAiUsage({ orgCode: "pam-tel", feature: "sales_chatbot", source: "BYOK", provider: "x", model: M31, requests: 1, inputTokens: 1, outputTokens: 1, costUsd: 0, status: "OK", actorId: null, ref: "bench" })).recorded, false);
+  } finally {
+    setAiUsageCaptureForBench(null);
+  }
+  assert.deepEqual(captured, ["bench"]);
+  assert.equal((await pdb.select().from(schema.platformAiUsage).where(eq(schema.platformAiUsage.orgCode, "pam-tel"))).length, 1, "lượt benchmark không có dòng sổ thật");
+  await pdb.delete(schema.platformAiUsage).where(eq(schema.platformAiUsage.orgCode, "pam-tel"));
 }
 
 export async function testPlatformAiModel() {

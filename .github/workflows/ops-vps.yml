@@ -104,6 +104,7 @@ on:
           - sepay-schedule      # bật / tắt lịch đối chiếu SePay định kỳ (arg: số phút, ví dụ "60"; "off" để tắt)
           - ai-check            # kiểm AI production đầy đủ: routing 3 bậc, chat, read tool, case care, write tool có xác nhận (arg "--write" mới ghi note kiểm thử), lỗi mạng/hạn mức, audit — chỉ in meta
           - platform-ai-model-probe  # khoá AI dùng chung (PLATFORM_AI_API_KEY) gọi được model nào — một lời gọi 1 chữ / model, không in khoá (MẶC ĐỊNH CHỈ ĐỌC; arg: các model, trống = gemini-2.5-flash-lite gemini-3.5-flash-lite; "--apply=<1-100> <model>" chạy thử/áp dụng · "--rollback" hoàn tác — ghi chính sách, có nhật ký · "--report" bảng A/B canary vs đối chứng)
+          - platform-ai-bench   # benchmark phát lại OFFLINE bằng khoá nền tảng: "sync <tổ chức>" ghi đơn (chỉ đọc) · "sales <tổ chức>" Sales Agent (kênh THỬ, công cụ mô phỏng) — chỉ in số tổng hợp
       days:
         description: "Số ngày (cho sync-pancake-all / sync-vtp-import)"
         type: string
@@ -489,7 +490,7 @@ jobs:
             # ─── PHÂN LOẠI: mặc định là GHI, và cờ ghi đè lên tên ───
             DOC_NHE="status perf disk logs db-query backup-status pitr-status"
             DOC_PROBE="check-integrations vtp-debug vtp-probe vtp-web-probe phone-probe pages-debug meta-id-probe meta-ad-post-probe vtp-capability ads-level-probe"
-            DOC_NANG="platform-secrets-verify verify smoke session-verify perf-probe perf-audit kpi-snapshot explain-stock outcome-explain outcome-parity returns-parity reason-coverage reason-backfill cogs-drift profit-verify marketing-calibrate marketing-explain payroll-reconcile fanpage-evidence-backfill care-false-reopen care-outcome-before-open care-waiting-reconcile cs-rule-update cs-stale sepay-reconcile cod-rebuild cod-status-repair vtp-return-status-repair agent-run-reattach vtp-rebuild-state vtp-replay-files vtp-replay-explain vtp-manual-verify vtp-statement-peek cod-statement-audit stock-wait-summary org-summary company-os-summary velocity-compare confirm-funnel-audit returns-hmt ai-check platform-ai-model-probe backup restore-drill restore-drill-org pitr-basebackup pitr-drill org-order-audit"
+            DOC_NANG="platform-secrets-verify verify smoke session-verify perf-probe perf-audit kpi-snapshot explain-stock outcome-explain outcome-parity returns-parity reason-coverage reason-backfill cogs-drift profit-verify marketing-calibrate marketing-explain payroll-reconcile fanpage-evidence-backfill care-false-reopen care-outcome-before-open care-waiting-reconcile cs-rule-update cs-stale sepay-reconcile cod-rebuild cod-status-repair vtp-return-status-repair agent-run-reattach vtp-rebuild-state vtp-replay-files vtp-replay-explain vtp-manual-verify vtp-statement-peek cod-statement-audit stock-wait-summary org-summary company-os-summary velocity-compare confirm-funnel-audit returns-hmt ai-check platform-ai-model-probe platform-ai-bench backup restore-drill restore-drill-org pitr-basebackup pitr-drill org-order-audit"
 
             LOP=GHI
             case "$ARG" in
@@ -1293,6 +1294,12 @@ jobs:
                 # /platform/saas (kiểm khả dụng lại ngay trước khi ghi, nhật ký nền tảng nguồn SCRIPT). Không dữ liệu khách ⇒ không mã hoá.
                 fetch_script platform-ai-model-probe.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/platform-ai-model-probe.ts'
                 chay_voi_arg docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/platform-ai-model-probe.ts ;;
+              platform-ai-bench)
+                # Phát lại dữ liệu đã lưu với nhiều cấu hình model bằng khoá nền tảng TRONG container. Ghi đơn: chỉ đọc. Sales:
+                # đường «Phát lại hội thoại cũ» (kênh THỬ, công cụ mô phỏng, hội thoại tạm bị xoá, lượt AI không vào sổ AI thật).
+                # Chỉ in số tổng hợp ⇒ không mã hoá. Giữ mỗi lượt ≤ ~10 phút (arg --cases / --points nhỏ).
+                fetch_script platform-ai-bench.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/platform-ai-bench.ts'
+                chay_voi_arg docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/platform-ai-bench.ts ;;
               apply-sepay-env)
                 # Ghi secret webhook SePay từ Secrets vào .env rồi khởi động lại app.
                 #
