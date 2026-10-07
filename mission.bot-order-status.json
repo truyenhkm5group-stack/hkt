@@ -32,8 +32,8 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-07T19:29:21.995Z",
-  "updated_at": "2026-10-07T21:29:14.941Z",
-  "last_heartbeat": "2026-10-07T21:29:14.941Z",
+  "updated_at": "2026-10-07T22:04:46.954Z",
+  "last_heartbeat": "2026-10-07T22:04:46.954Z",
   "definition_of_done": [
     "Chỉ đơn của chính hội thoại",
     "Trạng thái = lời khai ĐVVC, không suy từ tiền",
@@ -42,16 +42,18 @@
   ],
   "handoff": {
     "branch": "feat/bot-order-status",
-    "sha": "2dcc7498b7c56b562e344e7694543fb5a41dfd3b",
-    "at": "2026-10-07T21:29:14.941Z",
+    "sha": "4bd8d21ba2b2df8ddf20671645719fc091fa1647",
+    "at": "2026-10-07T22:04:46.954Z",
     "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
     "title": "Bot tra trạng thái đơn theo lời khai ĐVVC (Commerce Truth)",
-    "summary": "Vòng 3: chốt bình luận hai lớp (lượt từ engine + CSDL đóng khi không chắc), giao lỗi / hoàn ⇒ needs_staff và bot hỏi khách thay vì tự chuyển người; dựng lại trên main sau #644.",
+    "summary": "Vòng 3 review: M1 (lời nhắc khớp needs_staff — hỏi khách, không tự hứa) + L1 (hộp thư bị chặn ⇒ câu trung tính + chuyển người). LOW mô tả công cụ get_order_status cũ để PR order-truth (cùng khu vực).",
     "tests": [
-      "tests/bot-order-status (thuần + PGlite: tấn công id khách · lượt bình luận · luồng đổi mã · thiếu mã luồng · needs_staff): đạt",
-      "hội thoại vàng 12/12",
-      "đột biến 8/8 + 5/5",
-      "tsc + eslint: sạch"
+      "npm run typecheck: sạch",
+      "npm run lint: sạch",
+      "tests/bot-order-status.test.ts: đạt (c6/c8 chặn + chuyển người, không «nhắn tin riêng»)",
+      "hội thoại vàng 12/12: đạt (mỗi tệp đổi đúng một dòng lời nhắc)",
+      "gates CI tại 4bd8d21b: success",
+      "review độc lập vòng 4 tại 4bd8d21b: PASS"
     ]
   }
 }
