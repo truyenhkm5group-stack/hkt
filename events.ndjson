@@ -457,3 +457,4 @@
 {"at":"2026-10-07T22:54:32.806Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#648 @ 2df70448c0f6 · Review độc lập vòng 2: PASS, không CRITICAL/HIGH; 2 MEDIUM (cockpit chưa gồm doanh thu Số dư; đảo khoản trừ chưa trỏ khoản gốc) để PR tiếp theo; đột biến 24/24"}
 {"at":"2026-10-07T23:03:23.745Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"ai-balance-hardening","detail":"fix/ai-balance-hardening @ 51848fd3cf3d · 3 lệnh kiểm thử"}
 {"at":"2026-10-07T23:04:14.403Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"order-truth-stamp","detail":"feat/order-truth-stamp @ c79677988d60 · 2 lệnh kiểm thử"}
+{"at":"2026-10-07T23:04:39.741Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"order-truth-stamp","detail":"#649 @ c79677988d60 → b0706eaa236e (MERGE_NOW · MEDIUM · gates success)"}
