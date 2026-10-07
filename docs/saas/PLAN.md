@@ -27,7 +27,7 @@ KHÔNG cần nó. Nên đợt 1 dựng toàn bộ lớp thương mại trên mô
 | 11 | Operator Console | **XONG** — `/platform/customers`, `/platform/products` (+ `/platform`, `/platform/saas` có sẵn) |
 | 12 | Cổng khách | **MỘT PHẦN** — «Sản phẩm của tôi» ở `/settings/plan`; tự đổi gói theo sản phẩm, API key, tên miền theo sản phẩm chưa có |
 | 13 | KPI SaaS | **MỘT PHẦN** — `/platform/saas` (MRR, NRR/GRR, churn, kích hoạt) + kinh tế theo khách / sản phẩm ở console; ARPA theo sản phẩm chờ có gói riêng |
-| 14 | Dọn di sản | CHƯA — gỡ nhánh `isHome` thương mại (ENTITLEMENTS cuối trang) bằng đọc gói `internal` qua cùng đường, có bài kiểm so trước/sau |
+| 14 | Dọn di sản | **XONG phần entitlement** — nhà đọc gói GÁN cho nó (cột `plan`, 0227) qua cùng resolver với khách; bài so trước/sau + đột biến (`tests/saas-internal-plan.test.ts`). Còn: hạn mức AI nhà (đi cùng khoá AI `HOME`), chặn thu phí nhà ở `lib/billing/**` — ENTITLEMENTS «Nhánh GIỮ» |
 
 ## Phase 8b — chuyển runtime bán hàng của VNX (cần chủ shop)
 

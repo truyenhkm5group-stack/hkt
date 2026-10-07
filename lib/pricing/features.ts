@@ -69,22 +69,21 @@ export function parseFeatureOverrides(raw: unknown): Partial<Record<FeatureKey, 
   return out;
 }
 
-export type FeatureSource = "HOME" | "GRANDFATHERED" | "OVERRIDE" | "PLAN" | "PLAN_UNDECLARED";
+export type FeatureSource = "GRANDFATHERED" | "OVERRIDE" | "PLAN" | "PLAN_UNDECLARED";
 
 export type FeatureDecision = { key: FeatureKey; granted: boolean; source: FeatureSource };
 
 /**
- * QUYẾT ĐỊNH DUY NHẤT "tổ chức này có tính năng X không" — thuần. Thứ tự:
- *  1. Tổ chức nhà ⇒ có (gói `internal`, không giới hạn — như mọi cổng gói khác).
- *  2. Ghi đè của người vận hành (`feature_overrides`) ⇒ thắng, kể cả TẮT một tính năng của tổ chức grandfathered.
- *  3. Tổ chức có từ trước 0222 (`grandfathered`) ⇒ có: một lần deploy không được làm khách mất tính năng đang dùng.
- *  4. Gói CHƯA KHAI danh sách tính năng ⇒ có, nguồn `PLAN_UNDECLARED` (màn hình nói ra): chưa khai không phải "không có" —
+ * QUYẾT ĐỊNH DUY NHẤT "tổ chức này có tính năng X không" — thuần. Không có bậc "tổ chức nhà" (Phase 14): nhà có X khi
+ * ghi đè / giữ từ trước / gói được gán cho nó cho X — đúng các bậc của mọi khách. Thứ tự:
+ *  1. Ghi đè của người vận hành (`feature_overrides`) ⇒ thắng, kể cả TẮT một tính năng của tổ chức grandfathered.
+ *  2. Tổ chức có từ trước 0222 (`grandfathered`) ⇒ có: một lần deploy không được làm khách mất tính năng đang dùng.
+ *  3. Gói CHƯA KHAI danh sách tính năng ⇒ có, nguồn `PLAN_UNDECLARED` (màn hình nói ra): chưa khai không phải "không có" —
  *     đóng một tính năng chỉ vì người vận hành chưa điền là chặn khách bằng một ô trống.
- *  5. Gói khai ⇒ có khi khoá nằm trong danh sách.
+ *  4. Gói khai ⇒ có khi khoá nằm trong danh sách.
  */
-export function featureGranted(input: { key: FeatureKey; isHome: boolean; grandfathered: boolean; overrides: Partial<Record<FeatureKey, boolean>>; planFeatures: readonly FeatureKey[] | null }): FeatureDecision {
+export function featureGranted(input: { key: FeatureKey; grandfathered: boolean; overrides: Partial<Record<FeatureKey, boolean>>; planFeatures: readonly FeatureKey[] | null }): FeatureDecision {
   const { key } = input;
-  if (input.isHome) return { key, granted: true, source: "HOME" };
   const o = input.overrides[key];
   if (typeof o === "boolean") return { key, granted: o, source: "OVERRIDE" };
   if (input.grandfathered) return { key, granted: true, source: "GRANDFATHERED" };
@@ -93,7 +92,6 @@ export function featureGranted(input: { key: FeatureKey; isHome: boolean; grandf
 }
 
 export const FEATURE_SOURCE_LABEL: Record<FeatureSource, string> = {
-  HOME: "Tổ chức nhà",
   GRANDFATHERED: "Giữ từ trước bảng giá mới",
   OVERRIDE: "Người vận hành ghi đè",
   PLAN: "Theo gói",

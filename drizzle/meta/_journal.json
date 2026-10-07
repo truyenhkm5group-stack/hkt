@@ -1583,6 +1583,13 @@
       "when": 1791350120000,
       "tag": "0226_tech_control_plane_goals",
       "breakpoints": true
+    },
+    {
+      "idx": 227,
+      "version": "7",
+      "when": 1791350180000,
+      "tag": "0227_internal_plan_binding",
+      "breakpoints": true
     }
   ]
 }
