@@ -3,7 +3,7 @@
   "mission_id": "chatbot-security-2",
   "title": "Bot bán hàng: đơn nháp người lạ không chặn đơn thật · đơn máy nối hỏng vẫn là đơn máy · bài học AI xin chuyển khoản không tự áp",
   "business_goal": "",
-  "status": "PLANNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -31,7 +31,21 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-07T23:55:08.953Z",
-  "updated_at": "2026-10-07T23:55:08.953Z",
-  "last_heartbeat": "2026-10-07T23:55:08.953Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-07T23:55:26.026Z",
+  "last_heartbeat": "2026-10-07T23:55:26.026Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "fix/chatbot-security-2",
+    "sha": "5867637ba61cd495140803dc7cc6a0d87f37cc6e",
+    "at": "2026-10-07T23:55:26.026Z",
+    "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+    "title": "Bot bán hàng: đơn nháp người lạ không chặn đơn thật · đơn máy nối hỏng vẫn là đơn máy · bài học AI xin chuyển khoản không tự áp",
+    "summary": "Review bảo mật #651: L4 (đơn máy của hội thoại khác không chặn ghi đơn / không nâng mức khách) · L1 (raw.agent nhận đơn máy khi lượt nối hỏng) · L3 (C1 / Cf) · L2 (đọc ảnh bình luận theo người bình luận) · INFO (khách đã xác minh giữ đơn nháp của mình) · MEDIUM có từ trước (bài học AI nhắc tới tiền / tài khoản / liên kết không tự áp — tự học lẫn góp ý)",
+    "tests": [
+      "typecheck + eslint: sạch",
+      "sales-order-sync · inbox-advanced · self-service-journey · hội thoại vàng 12/12: đạt",
+      "kiểm đột biến 17/17 bị bắt, đối chứng đạt; soi 4 đột biến: chết đúng khẳng định của mình",
+      "quét ký tự vô hình trên dòng thêm: 0"
+    ]
+  }
 }
