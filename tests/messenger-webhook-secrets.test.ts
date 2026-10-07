@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { NextRequest } from "next/server";
 import { GET } from "@/app/api/webhooks/messenger/route";
-import { messengerAppFrom, messengerConnectUrl, messengerVerifyToken, verifyMessengerSignatureAny, webhookSecretsFrom } from "@/lib/integrations/messenger/graph";
+import { META_CONNECT_SCOPES, auditRequestedScopes, messengerAppFrom, messengerConnectUrl, messengerVerifyToken, scopesOfConnectUrl, verifyMessengerSignatureAny, webhookSecretsFrom } from "@/lib/integrations/messenger/graph";
 
 /**
  * ═══════════ APP META RIÊNG CHO MESSENGER («ChotDonTuDong Messenger», 06/10/2026) — CẤU HÌNH THỬ, CHƯA CHUYỂN ═══════════
@@ -67,6 +67,24 @@ export async function testMessengerWebhookSecrets() {
   const viaScope = new URL(messengerConnectUrl(app, "https://erp.example.test/api/connect/messenger/callback", "st"));
   assert.equal(viaScope.searchParams.get("client_id"), "222", "hộp thoại đi bằng app Messenger");
   assert.ok(viaScope.searchParams.get("scope")?.includes("pages_messaging") && !viaScope.searchParams.has("config_id"), "không Configuration ID ⇒ xin quyền bằng scope");
+  // 07/10/2026 «Invalid Scopes»: hộp thoại Messenger CHỈ xin quyền Facebook Page — không quyền Instagram, không quyền nào ngoài bộ.
+  const xin = scopesOfConnectUrl(viaScope.toString()) ?? [];
+  assert.ok(!xin.includes("instagram_basic"), "Messenger KHÔNG xin instagram_basic");
+  assert.ok(!xin.includes("instagram_manage_messages"), "Messenger KHÔNG xin instagram_manage_messages");
+  assert.ok(!xin.some((p) => p.startsWith("instagram_")), "Messenger không xin bất kỳ quyền instagram_* nào");
+  assert.deepEqual([...xin].sort(), ["pages_manage_metadata", "pages_messaging", "pages_read_engagement", "pages_show_list", "public_profile"], "đúng NĂM quyền Facebook Page, không hơn không kém");
+  const kiem = auditRequestedScopes(xin, "FACEBOOK_MESSENGER");
+  assert.deepEqual([kiem.missing, kiem.excess, kiem.foreign], [[], [], []], "bộ quyền hộp thoại khớp đúng khả năng FACEBOOK_MESSENGER");
+  // Bộ chẩn đoán bắt được đúng lỗi cũ: quyền Instagram lẫn vào luồng Messenger là «của luồng khác», thiếu quyền Page là «thiếu».
+  const cu = auditRequestedScopes(["pages_show_list", "pages_messaging", "business_management", "instagram_basic", "instagram_manage_messages"], "FACEBOOK_MESSENGER");
+  assert.deepEqual(cu.foreign, ["instagram_basic", "instagram_manage_messages"], "chẩn đoán gọi tên quyền Instagram lạc vào Messenger");
+  assert.deepEqual(cu.excess, ["business_management", "instagram_basic", "instagram_manage_messages"]);
+  assert.deepEqual(cu.missing, ["public_profile", "pages_manage_metadata", "pages_read_engagement"]);
+  // Instagram là khả năng RIÊNG (luồng kết nối sau này) — hai bộ không giao nhau, không gộp vào một danh sách cứng.
+  assert.ok(META_CONNECT_SCOPES.INSTAGRAM_MESSAGING.every((p) => !(META_CONNECT_SCOPES.FACEBOOK_MESSENGER as readonly string[]).includes(p)), "bộ Instagram tách khỏi bộ Messenger");
+  assert.equal(scopesOfConnectUrl(new URL(messengerConnectUrl(app, "https://x/cb", "st", "987654")).toString()), null, "đi bằng config_id ⇒ bộ quyền do Meta quyết, không có scope");
+  const nutKetNoi = readFileSync(path.join(root, "app/api/connect/messenger/start/route.ts"), "utf8");
+  assert.ok(nutKetNoi.includes("messengerConnectUrl(") && !/instagram_/.test(nutKetNoi), "nút «Kết nối Facebook Page» đi đúng hàm dựng hộp thoại Facebook, không tự ghép quyền Instagram");
   const viaConfig = new URL(messengerConnectUrl(app, "https://erp.example.test/api/connect/messenger/callback", "st", " 987654 "));
   assert.equal(viaConfig.searchParams.get("config_id"), "987654", "Login for Business ⇒ config_id");
   assert.ok(!viaConfig.searchParams.has("scope"), "có config_id thì không gửi scope (Meta bỏ qua scope ở app Doanh nghiệp)");

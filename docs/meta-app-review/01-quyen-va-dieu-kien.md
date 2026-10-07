@@ -34,10 +34,12 @@ khoản Tester là đúng và đủ để quay video.
 | `instagram_basic`, `instagram_manage_messages` | Instagram DM là use case khác («Manage messaging & content on Instagram»), cần tài khoản Instagram doanh nghiệp gắn page và một video riêng. Tách ra đợt sau để đợt đầu chỉ có một câu chuyện: Messenger. |
 | Human Agent (thẻ `HUMAN_AGENT`) | Mã chưa dùng (docs/meta-production-readiness.md §4). |
 
-**Rủi ro cần kiểm:** `MESSENGER_SCOPES` (hộp thoại OAuth) hiện VẪN xin `business_management` và `instagram_*`. Theo hành vi
-thường thấy, quyền chưa có Advanced Access chỉ bị bỏ qua với người không có vai trò, không chặn cả hộp thoại. Nếu khi thử mà
-Facebook báo «Invalid Scopes», ghi lại thông báo đó và báo kỹ thuật — KHÔNG tự sửa danh sách quyền xin (chủ shop cấm viết lại
-luồng OAuth để lách quyền; muốn đổi phải có quyết định riêng).
+**Đã xảy ra và đã sửa (07/10/2026):** hộp thoại OAuth từng xin kèm `business_management` và `instagram_*`, và Facebook báo
+«Invalid Scopes» cho `instagram_basic` / `instagram_manage_messages` — chủ shop không tới được màn đồng ý. Theo quyết định riêng của
+chủ shop, hộp thoại «Kết nối Facebook Page» nay CHỈ xin `public_profile`, `pages_show_list`, `pages_messaging`,
+`pages_manage_metadata`, `pages_read_engagement` (`META_CONNECT_SCOPES.FACEBOOK_MESSENGER` trong `lib/integrations/messenger/graph.ts`).
+Instagram DM là khả năng RIÊNG (`META_CONNECT_SCOPES.INSTAGRAM_MESSAGING`) cho một luồng kết nối sau này — không thêm lại vào luồng
+Messenger. `/platform` → khung Webhook Messenger in đúng bộ quyền hộp thoại đang xin và báo thiếu / thừa / quyền của luồng khác.
 
 ## 4. Điều kiện tiên quyết
 

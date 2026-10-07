@@ -25,7 +25,7 @@ import { phoneOtpSummary, readPhoneOtpSetting, homeZaloConnected } from "@/lib/o
 import { signupModeState } from "@/lib/onboarding/signup-mode";
 import { platformOperatorDenial } from "@/lib/platform-ui/module-toggle";
 import { env } from "@/lib/env";
-import { MESSENGER_FIELDS, messengerApp, messengerVerifyToken, messengerWebhookSecrets } from "@/lib/integrations/messenger/graph";
+import { MESSENGER_FIELDS, auditRequestedScopes, messengerApp, messengerConnectUrl, messengerVerifyToken, messengerWebhookSecrets, scopesOfConnectUrl } from "@/lib/integrations/messenger/graph";
 import { messengerRedirectUris } from "@/lib/integrations/messenger/connect";
 import { PILOT_STAGE_LABEL } from "@/lib/constants/pilot";
 import { listOrgSupportSummaries } from "@/lib/platform/support";
@@ -162,6 +162,10 @@ export default async function PlatformPage({ searchParams }: { searchParams: Pro
           <dd className="text-xs">{messengerWebhookSecrets().length} app secret</dd>
           <dt className="text-muted-foreground">Nối page dùng app</dt>
           <dd className="text-xs">{messengerApp()?.source === "MESSENGER_APP" ? "App Messenger riêng" : messengerApp() ? "App đăng nhập (chưa khai đủ app Messenger)" : "Chưa khai app nào"}{env.oauth.facebookMessengerLoginConfigId ? " · hộp thoại theo Configuration ID (Login for Business)" : " · hộp thoại theo danh sách quyền (scope)"}</dd>
+          <dt className="text-muted-foreground">Quyền hộp thoại «Kết nối Facebook Page» xin</dt>
+          <dd className="text-xs" data-testid="platform-messenger-scopes">
+            <MessengerScopeAudit />
+          </dd>
           <dt className="text-muted-foreground">URI chuyển hướng OAuth hợp lệ</dt>
           <dd className="space-y-1">
             {messengerRedirectUris().map((u) => (
@@ -504,5 +508,31 @@ export default async function PlatformPage({ searchParams }: { searchParams: Pro
         </SectionCard>
       ) : null}
     </div>
+  );
+}
+
+/**
+ * Quyền THẬT mà nút «Kết nối Facebook Page» xin — dựng đúng URL mà /api/connect/messenger/start dựng (cùng hàm, cùng app, cùng
+ * Configuration ID) rồi đọc lại tham số `scope`. Thiếu / thừa / quyền thuộc khả năng khác (Instagram) in ra ngay — lỗi
+ * «Invalid Scopes» 07/10/2026 đã nằm trong danh sách này mà không màn hình nào cho thấy.
+ */
+function MessengerScopeAudit() {
+  const app = messengerApp();
+  if (!app) return <>Chưa khai app nào — chưa dựng được hộp thoại.</>;
+  const scopes = scopesOfConnectUrl(messengerConnectUrl(app, messengerRedirectUris()[0] ?? `${env.appUrl}/api/connect/messenger/callback`, "chan-doan", env.oauth.facebookMessengerLoginConfigId));
+  if (scopes === null) return <>Theo Configuration ID {env.oauth.facebookMessengerLoginConfigId.trim()} — bộ quyền do cấu hình Login for Business trên Meta quyết (kiểm ở app Meta).</>;
+  const a = auditRequestedScopes(scopes, "FACEBOOK_MESSENGER");
+  const ok = !a.missing.length && !a.excess.length;
+  return (
+    <span className="space-y-1">
+      <code className="block break-all">{a.requested.join(", ") || "(trống)"}</code>
+      <span className={ok ? "block text-emerald-700 dark:text-emerald-400" : "block text-destructive"}>
+        {ok ? "Đúng bộ quyền Facebook Page (Messenger)." : [
+          a.missing.length ? `Thiếu: ${a.missing.join(", ")}` : "",
+          a.foreign.length ? `Quyền của luồng khác (Meta sẽ từ chối «Invalid Scopes»): ${a.foreign.join(", ")}` : "",
+          a.excess.filter((x) => !a.foreign.includes(x)).length ? `Thừa: ${a.excess.filter((x) => !a.foreign.includes(x)).join(", ")}` : "",
+        ].filter(Boolean).join(" · ")}
+      </span>
+    </span>
   );
 }
