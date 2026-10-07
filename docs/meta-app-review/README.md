@@ -46,7 +46,7 @@ bản này ERP tự tách được bằng vai trò của người bấm trong ap
 1. Mở **developers.facebook.com** → **My Apps** → chọn app đăng nhập của nền tảng.
 2. Cột trái **Use cases** → dòng **Engage with customers on Messenger from Meta** → **Customize**.
 3. Mục **Permissions**: bảo đảm `pages_show_list`, `pages_messaging`, `pages_manage_metadata`, `pages_read_engagement` đều đã
-   **Added** (nút «Add» nếu chưa). KHÔNG thêm `business_management` / `instagram_*` vào đợt này (01 §3).
+   **Added** (nút «Add» nếu chưa). KHÔNG thêm `business_management` / `instagram_*` vào đợt này (01 §3) — hộp thoại kết nối cũng không xin chúng nữa.
 4. Cùng trang, mục **Configure webhooks**: Callback URL + Verify token lấy ở ERP `/ai/sales-chatbot/messenger` (tổ chức nhà,
    khối «Người vận hành nền tảng») → **Verify and save** → bật các trường `messages`, `messaging_postbacks`,
    `message_echoes`, `feed`.

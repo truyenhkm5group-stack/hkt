@@ -19,10 +19,41 @@ import { adReferralFromMessenger, type AdReferral } from "@/lib/sales-chatbot/ad
  */
 
 /**
- * Quyền xin chủ page. Hai quyền `instagram_*` để nối LUÔN tài khoản Instagram doanh nghiệp gắn với page (Instagram DM đi qua
- * CÙNG app, CÙNG page token, CÙNG Send API) — người chỉ dùng Messenger bỏ chọn được, phần Messenger vẫn chạy.
+ * QUYỀN THEO TỪNG KHẢ NĂNG KẾT NỐI META — mỗi khả năng MỘT bộ, không gộp vào một danh sách cứng. Luồng «Kết nối Facebook Page»
+ * (Messenger) CHỈ xin quyền Page; Instagram DM sẽ là một luồng kết nối RIÊNG (use case + App Review riêng) đọc bộ
+ * `INSTAGRAM_MESSAGING`. 07/10/2026: hộp thoại Messenger từng xin kèm `instagram_basic` + `instagram_manage_messages` (và
+ * `business_management`) ⇒ Meta từ chối CẢ hộp thoại («Invalid Scopes») vì app chưa có use case Instagram — chủ shop không tới
+ * được màn đồng ý. Đừng thêm quyền Instagram trở lại bộ Messenger.
  */
-export const MESSENGER_SCOPES = ["pages_show_list", "pages_messaging", "pages_manage_metadata", "pages_read_engagement", "business_management", "instagram_basic", "instagram_manage_messages"] as const;
+export const META_CONNECT_SCOPES = {
+  FACEBOOK_MESSENGER: ["public_profile", "pages_show_list", "pages_messaging", "pages_manage_metadata", "pages_read_engagement"],
+  INSTAGRAM_MESSAGING: ["instagram_basic", "instagram_manage_messages"],
+} as const satisfies Record<string, readonly string[]>;
+export type MetaConnectCapability = keyof typeof META_CONNECT_SCOPES;
+/** Quyền nút «Kết nối Facebook Page» xin — đúng bộ `FACEBOOK_MESSENGER`, không hơn. */
+export const MESSENGER_SCOPES = META_CONNECT_SCOPES.FACEBOOK_MESSENGER;
+
+/** Kết quả so bộ quyền một hộp thoại xin với bộ của khả năng: thiếu · thừa · thuộc khả năng KHÁC (vd `instagram_*` trong Messenger). */
+export type ScopeAudit = { requested: string[]; missing: string[]; excess: string[]; foreign: string[] };
+export function auditRequestedScopes(requested: readonly string[], capability: MetaConnectCapability): ScopeAudit {
+  const want: readonly string[] = META_CONNECT_SCOPES[capability];
+  const others = (Object.keys(META_CONNECT_SCOPES) as MetaConnectCapability[])
+    .filter((k) => k !== capability)
+    .flatMap((k): readonly string[] => META_CONNECT_SCOPES[k]);
+  const uniq = [...new Set(requested.map((s) => s.trim()).filter(Boolean))];
+  return {
+    requested: uniq,
+    missing: want.filter((s) => !uniq.includes(s)),
+    excess: uniq.filter((s) => !want.includes(s)),
+    foreign: uniq.filter((s) => others.includes(s)),
+  };
+}
+/** Quyền mà URL hộp thoại THẬT SỰ xin; `null` = đi bằng `config_id` (bộ quyền do cấu hình Login for Business trên Meta quyết). */
+export function scopesOfConnectUrl(url: string): string[] | null {
+  const q = new URL(url).searchParams;
+  if (q.has("config_id")) return null;
+  return (q.get("scope") ?? "").split(",").filter(Boolean);
+}
 /** Sự kiện trang mà app đăng ký nhận. `message_echoes`: tin page gửi đi (của bot, của nhân viên trong Hộp thư Meta). */
 export const MESSENGER_FIELDS = ["messages", "messaging_postbacks", "message_echoes", "feed"] as const;
 const TIMEOUT_MS = 15_000;
