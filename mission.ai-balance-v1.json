@@ -39,10 +39,12 @@
     "saas-l5-billing-trial"
   ],
   "blocked_by": [],
-  "related_prs": [],
+  "related_prs": [
+    644
+  ],
   "migration_reservations": [],
   "created_at": "2026-10-07T18:21:27.081Z",
-  "updated_at": "2026-10-07T19:06:35.403Z",
+  "updated_at": "2026-10-07T19:06:49.028Z",
   "last_heartbeat": "2026-10-07T19:06:35.403Z",
   "definition_of_done": [
     "Nạp 1.000.000đ trên điện thoại bằng QR",
