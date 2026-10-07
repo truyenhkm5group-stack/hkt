@@ -406,3 +406,4 @@
 {"at":"2026-10-07T19:06:49.057Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"ai-balance-v1","detail":"#644 cho feat/ai-balance-v1 @ 83703b9e9fb9"}
 {"at":"2026-10-07T19:16:28.644Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"VERIFY_PASS","mission":"saas-l3-inbox","detail":"PASS 0f42e5d752794c36c339d05e2cea0512b8818f1c 2026-10-07T19:16:25.271Z"}
 {"at":"2026-10-07T19:16:37.070Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DONE","mission":"saas-l3-inbox","detail":"0f42e5d7 lên production 07/10 19:13Z (run 37667608381), hậu kiểm ĐẠT: health · migration 234 (0233 backfill đường nhận tin) · /login 200"}
+{"at":"2026-10-07T19:17:05.324Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DEPLOY_DISPATCHED","detail":"13b73bf2bd22 · run 37673293447 https://github.com/truyenhkm5group-stack/hkt/actions/runs/37673293447"}
