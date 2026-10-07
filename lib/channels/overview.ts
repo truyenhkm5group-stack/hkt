@@ -10,9 +10,9 @@
  * Không ghi gì, không gọi Facebook. Câu lỗi gốc chỉ đi ra trong `technical`, và `technical` chỉ có khi người xem là người vận
  * hành nền tảng (`viewer.operator`).
  */
-import { and, gte, inArray, isNull, sql } from "drizzle-orm";
+import { and, eq, gte, inArray, isNull, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
-import { listChannelPages, messagingConnectionSummaries } from "@/lib/connectors/service";
+import { messagingConnectionSummaries } from "@/lib/connectors/service";
 import { WEBHOOK_STATES, messengerApp, type WebhookState } from "@/lib/integrations/messenger/graph";
 import { graphErrorKindOfText } from "@/lib/integrations/messenger/graph-errors";
 import { WEBHOOK_LABEL } from "@/lib/integrations/messenger/permission-guide";
@@ -75,17 +75,35 @@ async function lastActivity(pageIds: readonly string[], now: Date): Promise<Map<
   return new Map(rows.filter((r) => r.pageId && r.last).map((r) => [r.pageId as string, new Date(r.last as string | Date).toISOString()]));
 }
 
+/** Nhật ký mà CHỈ lượt nối page (upsertChannelPage, kèm token mới) ghi — bật / tắt AI ghi hành động khác. */
+export const PAGE_CONNECT_AUDIT_ACTION = "ORG_CHANNEL_PAGE_CONNECT";
+
+/**
+ * Mốc NỐI LẠI THẬT gần nhất của từng page nối thẳng — đọc nhật ký, không đọc `updated_at` (bật / tắt AI cũng đẩy mốc đó).
+ * Nhật ký ghi hỏng thì page không có mốc ⇒ kiểm hỏng giữ nguyên: lỗi rơi về phía «Mất kết nối», không về phía «Sẵn sàng».
+ */
+async function lastConnectAt(pageIds: readonly string[]): Promise<Map<string, string>> {
+  const ids = [...new Set(pageIds.filter(Boolean))];
+  if (!ids.length) return new Map();
+  const a = schema.auditLogs;
+  const rows = await (await getDb())
+    .select({ entityId: a.entityId, last: sql<Date | string | null>`max(${a.createdAt})` })
+    .from(a)
+    .where(and(eq(a.action, PAGE_CONNECT_AUDIT_ACTION), inArray(a.entityId, ids.map((id) => `${MESSENGER_DIRECT_KEY}:${id}`))))
+    .groupBy(a.entityId);
+  return new Map(rows.filter((r) => r.last).map((r) => [r.entityId.slice(MESSENGER_DIRECT_KEY.length + 1), new Date(r.last as string | Date).toISOString()]));
+}
+
 export async function loadChannelsOverview(viewer: { operator: boolean }, now: Date = new Date()): Promise<ChannelsOverview> {
   const org = await currentOrganization();
-  const [view, facts, conns, whStored, cfg, pageRows] = await Promise.all([
+  const [view, facts, conns, whStored, cfg] = await Promise.all([
     messengerView(),
     loadTransportFacts(),
     messagingConnectionSummaries([PANCAKE_FANPAGE_KEY, ZALO_OA_KEY]),
     getSettingJson<StoredWebhookCheck | null>(WEBHOOK_CHECK_SETTING_KEY, null),
     loadSalesChatbotConfig(),
-    listChannelPages(MESSENGER_DIRECT_KEY),
   ]);
-  const savedAt = new Map(pageRows.map((r) => [r.pageId, r.updatedAt.toISOString()]));
+  const connectedAt = await lastConnectAt(view.pages.map((p) => p.id));
   const pancakeConn = conns.find((c) => c.connectorKey === PANCAKE_FANPAGE_KEY) ?? null;
   const zaloConn = conns.find((c) => c.connectorKey === ZALO_OA_KEY) ?? null;
   const pancakePageId = (pancakeConn?.plainSettings.pageId ?? "").trim();
@@ -94,7 +112,7 @@ export async function loadChannelsOverview(viewer: { operator: boolean }, now: D
   const rawError = new Map(view.pages.map((p) => [p.id, p.lastError]));
 
   const merged = mergeChannelSources({
-    direct: view.pages.map((p) => ({ id: p.id, name: p.name, status: p.status, kind: p.kind, parentPageId: p.parentPageId, aiEnabled: p.aiEnabled, lastEventAt: p.lastEventAt, lastErrorAt: p.lastErrorAt, errorKind: graphErrorKindOfText(p.lastError), hasError: Boolean(p.lastErrorAt), legacy: p.legacy, savedAt: savedAt.get(p.id) ?? null })),
+    direct: view.pages.map((p) => ({ id: p.id, name: p.name, status: p.status, kind: p.kind, parentPageId: p.parentPageId, aiEnabled: p.aiEnabled, lastEventAt: p.lastEventAt, lastErrorAt: p.lastErrorAt, errorKind: graphErrorKindOfText(p.lastError), hasError: Boolean(p.lastErrorAt), legacy: p.legacy, connectedAt: connectedAt.get(p.id) ?? null })),
     pancake: pancakeConn && pancakePageId ? { pageId: pancakePageId, facts: { status: asConnStatus(pancakeConn.status), lastTestOk: pancakeConn.lastTestOk, lastActivityAt: activity.get(pancakePageId) ?? null } } : null,
     zalo: zaloConn && zaloOaId ? { oaId: zaloOaId, facts: { status: asConnStatus(zaloConn.status), lastTestOk: zaloConn.lastTestOk, lastActivityAt: activity.get(zaloPageKey(zaloOaId)) ?? null } } : null,
     ownerOf: (id) => transportOwnerOf(facts, id),

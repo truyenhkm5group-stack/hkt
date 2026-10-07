@@ -33,7 +33,8 @@ import {
   type DirectFacts,
   type DirectPageInput,
 } from "@/lib/channels/overview-shared";
-import { loadChannelsOverview } from "@/lib/channels/overview";
+import { PAGE_CONNECT_AUDIT_ACTION, WEBHOOK_CHECK_SETTING_KEY, loadChannelsOverview } from "@/lib/channels/overview";
+import { getSettingJson, setSettingJson } from "@/lib/settings";
 import { DISCOVERY_REASONS, MESSENGER_REQUIRED_PERMISSIONS, WEBHOOK_STATES, type DiscoveryReason } from "@/lib/integrations/messenger/graph";
 import { CUSTOMER_GRAPH_ERROR_TEXT, GRAPH_ERROR_HINT, graphErrorKindOfText } from "@/lib/integrations/messenger/graph-errors";
 import { CUSTOMER_DISCOVERY_TEXT, CUSTOMER_WEBHOOK_TEXT, DISCOVERY_GUIDE, classifyMetaConnectError, configPermissionAudit, customerDiscoveryIssue, loginConfigMode, loginModeText, metaDialogError, metaDialogErrorQuery } from "@/lib/integrations/messenger/permission-guide";
@@ -45,7 +46,7 @@ const T0 = "2026-10-01T08:00:00.000Z";
 const T1 = "2026-10-01T09:00:00.000Z";
 const T2 = "2026-10-01T10:00:00.000Z";
 
-const direct = (over: Partial<DirectFacts> = {}): DirectFacts => ({ status: "ACTIVE", kind: "PAGE", parentPageId: null, aiEnabled: true, lastEventAt: null, lastErrorAt: null, errorKind: null, hasError: false, legacy: false, savedAt: null, ...over });
+const direct = (over: Partial<DirectFacts> = {}): DirectFacts => ({ status: "ACTIVE", kind: "PAGE", parentPageId: null, aiEnabled: true, lastEventAt: null, lastErrorAt: null, errorKind: null, hasError: false, legacy: false, connectedAt: null, ...over });
 const conn = (over: Partial<ConnectionFacts> = {}): ConnectionFacts => ({ status: "ACTIVE", lastTestOk: true, lastActivityAt: null, ...over });
 const row = (over: Partial<ChannelRowFacts>): ChannelRowFacts => ({ key: "100000001", pageId: "100000001", name: "Shop A", platform: "FACEBOOK", owner: "MESSENGER", direct: direct(), pancake: null, zalo: null, ...over });
 
@@ -96,8 +97,8 @@ function testHealth() {
   // Tin đến KHÔNG chứng minh kết nối còn sống (last_event_at ghi ở mọi gói vào, kể cả tiếng vọng nhân viên) ⇒ kiểm hỏng GIỮ tới khi nối lại.
   assert.equal(h(row({ direct: direct({ lastEventAt: T2 }) }), { state: "NOT_SUBSCRIBED", at: T1 }).level, "DISCONNECTED", "tin về sau lần kiểm hỏng KHÔNG xoá được kết luận");
   assert.equal(h(row({ direct: direct({ lastEventAt: T2 }) }), { state: "TOKEN_EXPIRED", at: T1 }).level, "DISCONNECTED");
-  assert.equal(h(row({ direct: direct({ lastEventAt: T0, savedAt: T2 }) }), { state: "TOKEN_EXPIRED", at: T1 }).level, "READY", "nối lại SAU lần kiểm ⇒ lần kiểm cũ hết giá trị");
-  assert.equal(h(row({ direct: direct({ lastEventAt: T0, savedAt: T1 }) }), { state: "TOKEN_EXPIRED", at: T1 }).level, "DISCONNECTED", "cùng mốc không phải mới hơn");
+  assert.equal(h(row({ direct: direct({ lastEventAt: T0, connectedAt: T2 }) }), { state: "TOKEN_EXPIRED", at: T1 }).level, "READY", "nối lại SAU lần kiểm ⇒ lần kiểm cũ hết giá trị");
+  assert.equal(h(row({ direct: direct({ lastEventAt: T0, connectedAt: T1 }) }), { state: "TOKEN_EXPIRED", at: T1 }).level, "DISCONNECTED", "cùng mốc không phải mới hơn");
   assert.equal(h(row({ direct: direct({ lastEventAt: T0 }) }), { state: "MISSING_FIELDS", at: T1 }).level, "NEEDS_ACTION");
   assert.equal(h(row({ direct: direct({ lastEventAt: T0, hasError: true, lastErrorAt: T1, errorKind: "TOKEN" }) })).level, "DISCONNECTED");
   assert.equal(h(row({ direct: direct({ lastEventAt: T0, hasError: true, lastErrorAt: T1, errorKind: "PERMISSION" }) })).level, "DISCONNECTED");
@@ -260,12 +261,13 @@ function testLoginConfig() {
 async function testOverviewDb() {
   const ctx = await currentOrganization();
   const db = await getDb();
-  const P = { A: "910000001", B: "910000002", OTHER: "910000003" } as const;
+  const P = { A: "910000001", B: "910000002", OTHER: "910000003", C: "910000004" } as const;
   const RAW = "Gửi tin: Facebook từ chối: Error validating access token: session invalidated — " + GRAPH_ERROR_HINT.TOKEN;
   const cp = schema.orgChannelPages;
   const oc = schema.orgConnections;
   const savedPancake = await db.select().from(oc).where(eq(oc.connectorKey, "pancake-fanpage"));
   const inboundIds: string[] = [];
+  const savedCheck = await getSettingJson<unknown>(WEBHOOK_CHECK_SETTING_KEY, null);
   try {
     await db.delete(cp).where(inArray(cp.pageId, Object.values(P)));
     await db.insert(cp).values([
@@ -296,8 +298,27 @@ async function testOverviewDb() {
     assert.ok(opB.technical?.some((t) => t.includes("session invalidated")), "người vận hành thấy câu lỗi gốc");
     assert.ok(op.rows.find((r) => r.pageId === P.A)?.technical?.some((t) => /transportOwnerOf = PANCAKE/.test(t)));
     assert.ok(!op.rows.some((r) => r.pageId === P.OTHER), "kể cả người vận hành: lớp đọc chỉ thấy tổ chức ngữ cảnh");
+
+    // Kiểm hỏng TOKEN_EXPIRED → bật / tắt AI (đẩy updated_at) → có tin đến ⇒ VẪN «Mất kết nối»; chỉ NỐI LẠI thật mới gỡ.
+    const tCheck = new Date(Date.now() - 3_600_000);
+    await setSettingJson(WEBHOOK_CHECK_SETTING_KEY, { at: tCheck.toISOString(), pages: [{ pageId: P.C, state: "TOKEN_EXPIRED", missingFields: [], detail: null }] });
+    await db.insert(cp).values({ orgCode: ctx.code, connectorKey: "facebook-messenger", pageId: P.C, kind: "PAGE", name: "Shop C", status: "ACTIVE" });
+    await db.update(cp).set({ aiEnabled: false, updatedAt: new Date(tCheck.getTime() + 60_000) }).where(eq(cp.pageId, P.C));
+    await db.update(cp).set({ aiEnabled: true, updatedAt: new Date(tCheck.getTime() + 120_000), lastEventAt: new Date(tCheck.getTime() + 180_000) }).where(eq(cp.pageId, P.C));
+    const cStale = (await loadChannelsOverview({ operator: false })).rows.find((r) => r.pageId === P.C)!;
+    assert.equal(channelHealth(cStale, cStale.webhook, true).level, "DISCONNECTED", "bật/tắt AI + tin vọng KHÔNG làm token chết thành «Sẵn sàng»");
+    await db.insert(schema.auditLogs).values({ userEmail: "kenh@test", action: PAGE_CONNECT_AUDIT_ACTION, entity: "org_channel_page", entityId: `facebook-messenger:${P.C}`, createdAt: new Date(tCheck.getTime() + 240_000) });
+    const cBack = (await loadChannelsOverview({ operator: false })).rows.find((r) => r.pageId === P.C)!;
+    assert.equal(channelHealth(cBack, cBack.webhook, true).level, "READY", "nối lại thật (nhật ký nối mới hơn lần kiểm) ⇒ lần kiểm cũ hết giá trị");
+    // Mốc nối CHỈ do đường nối page ghi — đường bật / tắt AI ghi hành động khác.
+    const svc = readFileSync("lib/connectors/service.ts", "utf8");
+    const upsertBody = svc.slice(svc.indexOf("export async function upsertChannelPage("), svc.indexOf("export async function openChannelPageToken("));
+    const stateBody = svc.slice(svc.indexOf("export async function setChannelPagesState("), svc.indexOf("export async function noteChannelPageHealth("));
+    assert.ok(upsertBody.includes(`action: "${PAGE_CONNECT_AUDIT_ACTION}"`) && !stateBody.includes(PAGE_CONNECT_AUDIT_ACTION), "mốc nối lại chỉ đến từ upsertChannelPage");
   } finally {
     await db.delete(cp).where(inArray(cp.pageId, Object.values(P)));
+    await db.delete(schema.auditLogs).where(and(eq(schema.auditLogs.action, PAGE_CONNECT_AUDIT_ACTION), eq(schema.auditLogs.entityId, `facebook-messenger:${P.C}`)));
+    await setSettingJson(WEBHOOK_CHECK_SETTING_KEY, savedCheck ?? {});
     await db.delete(oc).where(eq(oc.connectorKey, "pancake-fanpage"));
     if (savedPancake.length) await db.insert(oc).values(savedPancake);
     if (inboundIds.length) await db.delete(schema.salesChatInbound).where(and(inArray(schema.salesChatInbound.id, inboundIds), eq(schema.salesChatInbound.threadId, "kenh-t1")));

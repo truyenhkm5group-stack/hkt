@@ -57,10 +57,11 @@ export type DirectFacts = {
   hasError: boolean;
   legacy: boolean;
   /**
-   * Mốc hàng page được GHI lần cuối (`org_channel_pages.updated_at`; nối lại ghi mốc này và xoá lỗi cũ). Kết quả kiểm cũ hơn
-   * mốc này không còn nói về kết nối hiện tại. `null` = page của hàng kết nối đơn cũ (không hàng riêng).
+   * Mốc NỐI LẠI THẬT gần nhất của page — dòng nhật ký `ORG_CHANNEL_PAGE_CONNECT` mà CHỈ upsertChannelPage ghi (kèm token mới).
+   * KHÔNG dùng `org_channel_pages.updated_at`: bật / tắt AI cũng đẩy mốc đó, và một cú bấm AI không làm token sống lại.
+   * Kết quả kiểm cũ hơn mốc này không còn nói về kết nối hiện tại. `null` = chưa thấy lượt nối nào ⇒ kiểm hỏng giữ nguyên.
    */
-  savedAt: string | null;
+  connectedAt: string | null;
 };
 
 /** Sự thật của một kết nối một-page (Pancake · Zalo) — đọc từ `org_connections`, không bí mật. */
@@ -102,7 +103,7 @@ export function mergeChannelSources(input: {
   for (const d of input.direct) {
     const id = d.id.trim();
     if (!id || rows.has(id)) continue;
-    const facts: DirectFacts = { status: d.status, kind: d.kind, parentPageId: d.parentPageId, aiEnabled: d.aiEnabled, lastEventAt: d.lastEventAt, lastErrorAt: d.lastErrorAt, errorKind: d.errorKind, hasError: d.hasError, legacy: d.legacy, savedAt: d.savedAt };
+    const facts: DirectFacts = { status: d.status, kind: d.kind, parentPageId: d.parentPageId, aiEnabled: d.aiEnabled, lastEventAt: d.lastEventAt, lastErrorAt: d.lastErrorAt, errorKind: d.errorKind, hasError: d.hasError, legacy: d.legacy, connectedAt: d.connectedAt };
     rows.set(id, { key: id, pageId: id, name: d.name.trim() || id, platform: d.kind === "INSTAGRAM" ? "INSTAGRAM" : "FACEBOOK", owner: null, direct: facts, pancake: null, zalo: null });
   }
   const pid = input.pancake?.pageId.trim() ?? "";
@@ -144,8 +145,8 @@ function directHealth(d: DirectFacts, webhook: WebhookFact | null, appReady: boo
   // TIN ĐẾN KHÔNG CHỨNG MINH KẾT NỐI CÒN SỐNG: `last_event_at` ghi ở MỌI gói webhook vào (kể cả tiếng vọng khi nhân viên trả
   // lời trong Business Suite), còn lỗi chỉ ghi khi BOT GỬI hỏng — AI page tắt / đang nhường / bot tắt thì không có lượt gửi
   // nào để ghi lỗi mới. Nên lỗi kết nối (kiểm báo hết hạn / chưa đăng ký / thiếu trường; lỗi gửi loại TOKEN · PERMISSION)
-  // GIỮ NGUYÊN tới khi NỐI LẠI: nối lại xoá `last_error` (upsertChannelPage) và ghi mốc hàng mới hơn lần kiểm.
-  const wh = d.kind === "PAGE" && webhook && webhook.state !== "OK" && webhook.state !== "UNKNOWN" && !newerThan(d.savedAt, webhook.at) ? webhook.state : null;
+  // GIỮ NGUYÊN tới khi NỐI LẠI: nối lại xoá `last_error` (upsertChannelPage) và ghi nhật ký nối mới hơn lần kiểm.
+  const wh = d.kind === "PAGE" && webhook && webhook.state !== "OK" && webhook.state !== "UNKNOWN" && !newerThan(d.connectedAt, webhook.at) ? webhook.state : null;
   if (wh === "TOKEN_EXPIRED" || wh === "NOT_SUBSCRIBED") return { level: "DISCONNECTED", issue: CUSTOMER_WEBHOOK_TEXT[wh], note: null };
   if (d.hasError && (d.errorKind === "TOKEN" || d.errorKind === "PERMISSION")) return { level: "DISCONNECTED", issue: graphIssue(d.errorKind), note: null };
   const errFresh = d.hasError && newerThan(d.lastErrorAt, evt);
