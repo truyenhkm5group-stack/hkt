@@ -229,3 +229,4 @@
 {"at":"2026-10-07T00:08:05.832Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"saas-a-vnx-runtime","detail":"#625 cho feat/saas-a2-page-gate @ 502a252f5bc4"}
 {"at":"2026-10-07T00:46:14.047Z","actor":"DESKTOP-56TH98Y:wt-saas-a2","kind":"HANDOFF","mission":"saas-a-vnx-runtime","detail":"feat/saas-a2-page-gate @ 38e0ceb98937 · 1 lệnh kiểm thử"}
 {"at":"2026-10-07T00:47:18.803Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#625 @ 38e0ceb98937 · review độc lập PASS @502a252f + delta đọc bởi Lead: chốt botSendAllowed trong hàm gửi bot (STAFF khai rõ, không chặn), khách trả về sớm isHome=false ⇒ LIVE, ghi nguyên tử, 2 đột biến sống đã có bài"}
+{"at":"2026-10-07T01:06:14.182Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"saas-a-vnx-runtime","detail":"#625 @ 38e0ceb98937 → 42952b8c83ca (MERGE_NOW · MEDIUM · gates success)"}

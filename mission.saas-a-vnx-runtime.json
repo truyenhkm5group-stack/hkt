@@ -3,7 +3,7 @@
   "mission_id": "saas-a-vnx-runtime",
   "title": "Phase A: chuyển runtime chatbot VNX sang Chốt Đơn — gỡ 4 chặn kỹ thuật (ai_sales nhà vẫn TẮT), rồi bóng từng page",
   "business_goal": "Phase A phần 2: PancakePosSink (bot nhà ghi đơn Pancake: POST nháp/PUT sửa/PUT xác nhận + luật trùng 14 ngày, nối lib/sales-chatbot/tools.ts) + cổng chạy bóng THEO PAGE trước khi bật ai_sales nhà; phần 1 (#621, gỡ chặn 2-3-4) đã lên production 657fb732",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P1",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -32,11 +32,11 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-06T17:03:14.603Z",
-  "updated_at": "2026-10-07T00:46:14.018Z",
+  "updated_at": "2026-10-07T01:06:14.155Z",
   "last_heartbeat": "2026-10-07T00:46:14.018Z",
   "definition_of_done": [],
   "evidence": {
-    "merged": "#621 → 657fb7327a61bae802c43b3eaf8f00aa76a353ce",
+    "merged": "#625 → 42952b8c83caaf42fa3abda15dfce691e86f9b26",
     "verify": "PASS 657fb7327a61bae802c43b3eaf8f00aa76a353ce 2026-10-06T21:32:21.652Z",
     "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/37531822071"
   },
