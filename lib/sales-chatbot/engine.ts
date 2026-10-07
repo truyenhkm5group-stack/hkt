@@ -175,6 +175,7 @@ export function systemPrompt(cfg: SalesChatbotConfig, shopName: string, profile:
       : "  B4 UPSELL — Gợi ý ĐÚNG MỘT món bổ trợ còn bán (search_products) ngay trong tin tóm tắt đơn; khách từ chối ⇒ không mời lại.",
     "  B5 CONFIRM — create_draft_order ⇒ TÓM TẮT NGẮN, tối đa 3 dòng: món × SL + tổng tiền hàng · ship (theo shipping_text) · giao tới địa chỉ + SĐT; KHÔNG ghi «Người nhận», mã đơn, đơn giá từng dòng khi chỉ 1–2 món; kết bằng «Mình lấy thêm gì không, không thì em giao luôn ạ?». Khách thêm món ⇒ update_draft_order rồi gửi lại tóm tắt; khách đồng ý ⇒ confirm_order.",
     "  Khách hẹn ngày / giờ giao ⇒ ghi vào delivery_note, KHÔNG cần chuyển người. Khách TỪ CHỐI RÕ RÀNG ⇒ mark_declined, chào lịch sự, không nài.",
+    "  Khách hỏi ĐƠN ĐÃ ĐẶT tới đâu / bao giờ nhận / đã gửi chưa ⇒ get_order_status rồi nói ĐÚNG «status» trả về — KHÔNG hứa ngày giao, KHÔNG tự đoán, KHÔNG nêu số tiền. Đơn có needs_staff ⇒ nói đúng «status» rồi HỎI khách có cần nhân viên shop hỗ trợ không — khách cần ⇒ handoff_to_human; KHÔNG tự hứa nhân viên sẽ gọi / sẽ kiểm tra. Không thấy đơn ⇒ máy chủ tự chuyển nhân viên. KHÔNG xin SĐT, KHÔNG gọi lookup_customer / create_customer để tìm đơn.",
     "HIỂU KHÁCH:",
     "  · Tin bắt đầu bằng «[Shop đã nhắn]» là của nhân viên / trả lời tự động của page — khách đang nói tiếp về đúng món, đúng giá trong đó. KHÔNG hỏi lại khách muốn món gì nếu lịch sử đã rõ.",
     `${pack.describeLine}`,
@@ -939,7 +940,7 @@ async function chatTurnCore(
         if (uses.length === 0) break;
         const results: AiBlock[] = [];
         for (const u of uses) {
-          const r = await executeTool(u.name, u.input, { conversationId: conv.id, channel: opts.channel, config: cfg, state, lastUserText: text, agent: SALES_AGENT, customerName: opts.customerName ?? null, quickReplies: quickCatalog, returning, recentSaid, turn: turnSeq, bookingOn, now });
+          const r = await executeTool(u.name, u.input, { conversationId: conv.id, channel: opts.channel, config: cfg, state, lastUserText: text, agent: SALES_AGENT, customerName: opts.customerName ?? null, quickReplies: quickCatalog, returning, recentSaid, turn: turnSeq, bookingOn, now, commentTurn: opts.aiCustomer?.threadKind === "COMMENT" });
           state = r.state;
           if (r.deliver) {
             deliveredImages.push(...r.deliver.imageIds);

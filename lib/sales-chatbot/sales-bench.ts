@@ -63,7 +63,7 @@ export function pickBenchPoints(sources: readonly SourceConversation[], max: num
 const PRICE_TOOLS = new Set(["search_products", "get_current_price", "calculate_cart"]);
 const STOCK_TOOLS = new Set(["check_inventory", "search_products", "calculate_cart", "get_current_price"]);
 // Tên công cụ đọc trên câu GỐC (bộ gấp dấu tiếng Việt có thể đổi dấu gạch dưới); lời lẩm bẩm đọc trên câu đã gấp dấu.
-const LEAK_TOOL = /\b(search_products|get_current_price|calculate_cart|check_inventory|create_customer|create_draft_order|confirm_order|handoff_to_human|tool_use|function_call)\b/i;
+const LEAK_TOOL = /\b(search_products|get_current_price|calculate_cart|check_inventory|create_customer|create_draft_order|confirm_order|handoff_to_human|get_order_status|tool_use|function_call)\b/i;
 const LEAK_PHRASE = /khach vua nhan|ta dap|suy nghi:|thinking/i;
 const STOCK_CLAIM = /\b(con hang|het hang|san hang|co san|con \d+)\b/;
 const ASKS_INFO = /\b(sdt|so dien thoai|dia chi|ten nguoi nhan)\b/;
