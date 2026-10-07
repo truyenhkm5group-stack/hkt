@@ -3,7 +3,7 @@
   "mission_id": "ai-balance-v1",
   "title": "Số dư AI + nạp QR (SePay, mã ERPNAP) — sổ cái chỉ ghi thêm, màn khách + vận hành, cờ canary",
   "business_goal": "Chủ shop nạp tiền bằng QR, tiền về tự cộng đúng một lần, không ai duyệt tay",
-  "status": "RUNNING",
+  "status": "PR_READY",
   "priority": "P1",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -42,13 +42,24 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-07T18:21:27.081Z",
-  "updated_at": "2026-10-07T19:06:28.048Z",
-  "last_heartbeat": "2026-10-07T19:06:28.048Z",
+  "updated_at": "2026-10-07T19:06:35.403Z",
+  "last_heartbeat": "2026-10-07T19:06:35.403Z",
   "definition_of_done": [
     "Nạp 1.000.000đ trên điện thoại bằng QR",
     "Tiền về cộng đúng một lần, không duyệt tay",
     "Sổ cái dựng lại được",
     "Màn vận hành thấy số dư + khoản cần xem lại",
     "Canary trên workspace thử trước"
-  ]
+  ],
+  "handoff": {
+    "branch": "feat/ai-balance-v1",
+    "sha": "83703b9e9fb9d7f3bbaa83dff7243216cba94e9c",
+    "at": "2026-10-07T19:06:35.403Z",
+    "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+    "title": "Số dư AI + nạp QR (SePay, mã ERPNAP) — sổ cái chỉ ghi thêm, màn khách + vận hành, cờ canary",
+    "summary": "",
+    "tests": [
+      "tsc + eslint sạch; ai-balance · ai-balance-usage · L5 · sổ migration · diễn tập khôi phục · điều hướng · toàn vẹn kho đạt sau commit; kiểm đột biến 9/9"
+    ]
+  }
 }
