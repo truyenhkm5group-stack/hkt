@@ -267,3 +267,4 @@
 {"at":"2026-10-07T03:27:03.649Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"tech-control-plane-workers","detail":"#629 @ 8d72f5656fbb → 1393caf057f4 (MERGE_ISOLATED · HIGH · gates success)"}
 {"at":"2026-10-07T03:47:51.685Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"VERIFY_PASS","mission":"messenger-oauth-scopes","detail":"PASS 6c13fc7c125007587950e99a726bc954c3845b24 2026-10-07T03:47:49.363Z"}
 {"at":"2026-10-07T03:48:13.093Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DONE","mission":"messenger-oauth-scopes","detail":"PR #628 gộp 6c13fc7c; deploy run 37566448070; hậu kiểm ĐẠT; hộp thoại chỉ xin 5 quyền Facebook Page (bài kiểm + đột biến)"}
+{"at":"2026-10-07T03:48:51.195Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DEPLOY_DISPATCHED","detail":"1393caf057f4 · run 37568481637 https://github.com/truyenhkm5group-stack/hkt/actions/runs/37568481637"}
