@@ -10,8 +10,7 @@ import { attachTechTaskToMission, createTechGoal, createTechMission, seedTechPro
 import { reclassifyTechTaskPolicy, type TechActor, type TechResult } from "@/lib/tech/service";
 import { TECH_BUDGET_SCOPES } from "@/lib/constants/tech-policy";
 import { setTechBudget } from "@/lib/tech/budget";
-import { TECH_QUEUE_PROVIDERS, type TechExecutionProvider } from "@/lib/constants/tech-worker";
-import { reapExpiredTechLeases, registerTechWorker, setTechWorkerEnabled } from "@/lib/tech/worker-service";
+import { reapExpiredTechLeases, setTechWorkerEnabled } from "@/lib/tech/worker-service";
 
 /**
  * ───────────── SERVER ACTION — GOAL · MISSION ─────────────
@@ -159,27 +158,11 @@ export async function attachTechTaskToMissionAction(input: unknown): Promise<Tec
 
 /* ═════════════════════ WORKER (Pha 2) ═════════════════════ */
 
-const workerSchema = z.object({
-  key: z.string().trim().min(3).max(40),
-  name: z.string().trim().max(120),
-  host: z.string().trim().max(120).optional(),
-  provider: z.enum(TECH_QUEUE_PROVIDERS as unknown as [TechExecutionProvider, ...TechExecutionProvider[]]),
-  capabilities: z.array(z.string().max(60)).min(1).max(20),
-  maxConcurrency: z.number().int().min(1).max(4).optional(),
-});
-
-/** Đăng ký worker. Khoá trả về ĐÚNG MỘT LẦN cho người bấm — không ghi vào nhật ký, không lưu thô. */
-export async function registerTechWorkerAction(input: unknown): Promise<TechResult<{ id: string; token: string }>> {
-  const user = await nguoiQuanTri();
-  if (!user) return { error: KHONG_QUYEN };
-  const p = parse(workerSchema, input);
-  if ("error" in p) return p;
-  const res = await registerTechWorker(p.data, actorOf(user));
-  if ("error" in res) return res;
-  await audit({ userId: user.id, userEmail: user.email, action: "TECH_WORKER_REGISTERED", entity: "TECH_WORKER", entityId: res.id, after: { key: p.data.key, provider: p.data.provider, capabilities: p.data.capabilities } });
-  revalidatePath("/tech/workers");
-  return res;
-}
+/*
+  Đăng ký worker KHÔNG còn ở đây: `createTechWorkerAction` (lib/actions/tech-worker-onboarding.ts) tạo worker mà KHÔNG trả
+  khoá — khoá chỉ sinh khi bộ cài đổi mã ghi danh (docs/tech-control-plane/README.md mục 15). Đường cũ hiện khoá ra màn
+  hình để dán vào PowerShell đã bị gỡ: đó đúng là đường làm lộ khoá của `dogfood-1`.
+*/
 
 const workerEnabledSchema = z.object({ workerId: z.string().min(1), enabled: z.boolean(), reason: z.string().trim().max(500).optional() });
 

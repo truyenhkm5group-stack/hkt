@@ -237,6 +237,34 @@ async function installationToken(cfg: AgentGithubConfig, now: Date = new Date())
   return json.token;
 }
 
+/**
+ * ═══ TOKEN ĐẨY NHÁNH CHO WORKER HÀNG ĐỢI (/tech, docs/tech-control-plane/README.md mục 15) ═══
+ *
+ * Worker trên máy của chủ shop phải `git push` nhánh `ai/worker/*` mà chủ shop không cấu hình được Git. Thay vì để
+ * worker mượn credential của máy (có khi là tài khoản quản trị kho của chủ shop), máy chủ xin cho ĐÚNG lượt đẩy đó một
+ * token cài đặt MỚI, khác token đệm ở trên ba điểm:
+ *   · KHÔNG đệm — mỗi lượt đẩy một token; không token nào sống lâu hơn GitHub cho phép (≤ 60 phút);
+ *   · quyền thu hẹp xuống `contents: write` — không `pull_requests`: PR vẫn do máy chủ mở bằng cầu nối;
+ *   · nhánh kiểm bằng `assertAgentBranch` TRƯỚC khi xin (token GitHub không giới hạn được theo nhánh — ruleset `main`
+ *     chặn đẩy thẳng, và máy chủ chỉ cấp khi lượt chạy đang giữ đúng nhánh `ai/worker/*` nó đã cấp).
+ * Người gọi (lib/tech/worker-onboarding.ts) trả token trong THÂN phản hồi cho đúng worker đã xác thực; không ghi CSDL.
+ */
+export async function mintAgentPushToken(input: { branch: string; now?: Date }): Promise<{ token: string; expiresAt: string }> {
+  const cfg = must();
+  assertAgentBranch(input.branch);
+  const now = input.now ?? new Date();
+  const res = await call(`${API}/app/installations/${encodeURIComponent(cfg.installationId)}/access_tokens`, {
+    method: "POST",
+    auth: appJwt(cfg, now),
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ repositories: [cfg.repo], permissions: { contents: "write" } }),
+  });
+  if (!res.ok) throw new Error(`Không xin được token đẩy nhánh (HTTP ${res.status})`);
+  const json = (await res.json()) as { token?: string; expires_at?: string };
+  if (!json.token) throw new Error("GitHub không trả token đẩy nhánh");
+  return { token: json.token, expiresAt: json.expires_at ?? new Date(now.getTime() + 60 * 60_000).toISOString() };
+}
+
 /** Vứt token đang giữ. Gọi khi đổi cấu hình hoặc khi một lượt trả 401. */
 export function forgetAgentToken() {
   cached = null;

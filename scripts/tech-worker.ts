@@ -11,19 +11,36 @@
  *   TECH_WORKER_REPO    một bản clone của kho (worktree được dựng TỪ đây, không bao giờ sửa trong nó)
  *   TECH_WORKER_ROOT    thư mục chứa cây làm việc (mặc định: thư mục cha của TECH_WORKER_REPO)
  *   TECH_WORKER_ANTHROPIC_API_KEY   chỉ cho worker ANTHROPIC_API
+ *   TECH_WORKER_INSTALLED   "1" khi chạy qua trình khởi động của bộ cài (docs mục 15) — đặt tự động
+ *   TECH_WORKER_ALLOW_MACHINE_GIT   "1" = cho phép đẩy nhánh bằng credential Git CỦA MÁY khi máy chủ chưa cấp được
+ *                       token bot. Mặc định TẮT: credential của máy có thể là tài khoản quản trị kho của chủ shop.
+ *
+ * Bộ cài một nút (/tech/workers → «Cài worker trên máy Windows này») đặt mọi biến trên; không ai phải gõ tay.
  *
  * Không có `DATABASE_URL`: worker chỉ nói chuyện với ERP qua `/api/tech/worker/*`. Không mở PR, không gộp,
  * không deploy (Pha 3 thêm yêu cầu mở PR qua máy chủ — bằng danh tính bot, để chủ shop duyệt được).
  * Không chạy được việc ⇒ báo `BLOCKED` / `NEEDS_OWNER` kèm lý do; không bao giờ chờ một lời nhắc tương tác.
  */
 import { execFileSync, spawn } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { TECH_OWNER_ESCALATIONS, type TechOwnerEscalation } from "@/lib/constants/tech";
-import { TECH_LEASE, buildChildEnv, forbiddenTouched, isTechExecutionProvider, taskWorktreeDirName, type TechExecutionProvider, type TechRunOutcome } from "@/lib/constants/tech-worker";
+import { API_BILLING_ENV, TECH_LEASE, buildChildEnv, forbiddenTouched, isTechExecutionProvider, taskWorktreeDirName, type TechExecutionProvider, type TechRunOutcome } from "@/lib/constants/tech-worker";
+import {
+  PUSH_TOKEN_ENV,
+  WORKER_EXIT,
+  isTechRepairCommand,
+  parseClaudeAuthStatus,
+  pushGitArgs,
+  workerReadiness,
+  workerStartupBlockers,
+  type ClaudeAuthState,
+  type TechRepairCommand,
+  type WorkerDiagnostics,
+} from "@/lib/constants/tech-worker-onboarding";
 import { buildAgentPrompt, gatesForTask, parseAgentResult, toolAllowlist } from "./tech-worker/brief";
-import { createAdapter, type ExecutionAdapter } from "./tech-worker/adapters";
+import { createAdapter, resolveClaudeBin, type ExecutionAdapter } from "./tech-worker/adapters";
 
 const VERSION = "tech-worker/1";
 const args = new Set(process.argv.slice(2));
@@ -36,7 +53,17 @@ const cfg = {
   repo: process.env.TECH_WORKER_REPO ?? "",
   root: process.env.TECH_WORKER_ROOT ?? "",
   timeoutMin: Number(process.env.TECH_WORKER_TIMEOUT_MIN ?? 45),
+  installed: process.env.TECH_WORKER_INSTALLED === "1",
+  allowMachineGit: process.env.TECH_WORKER_ALLOW_MACHINE_GIT === "1",
 };
+
+/** Lỗi gần nhất (đã cắt) — đi lên máy chủ trong báo cáo tự kiểm, máy chủ che thêm một lần. */
+let lastError = "";
+/** Báo cáo tự kiểm gần nhất; `diagDirty` ⇒ nhịp tim kế mang nó lên. */
+let diag: WorkerDiagnostics | null = null;
+let diagDirty = false;
+/** Lệnh sửa chưa thi hành được (đang giữ việc) — làm khi rảnh. */
+let pendingRepair: TechRepairCommand | null = null;
 
 type Claimed = {
   runId: string;
@@ -274,7 +301,11 @@ async function execute(adapter: ExecutionAdapter, provider: TechExecutionProvide
     a.progressPct = 90;
     git(dir, "-c", "user.name=tech-worker", "-c", "user.email=tech-worker@users.noreply.github.com", "commit", "-q", "-m", `${t.code}: ${t.title}\n\n${(khai.summary || res.resultText).slice(0, 3000)}\n\nWorker: ${VERSION} · lượt ${t.runId} · lần thử ${t.attempt}`);
     const resultCommit = git(dir, "rev-parse", "HEAD");
-    git(dir, "push", "-q", "origin", `${t.branch}:${t.branch}`);
+    const day = await pushBranch(t, dir);
+    if (!day.ok) {
+      await complete(t, { outcome: "BLOCKED", error: day.error, gates, model: res.model, cost, branch: t.branch, filesChanged: files, resultCommit, summary: khai.summary });
+      return;
+    }
     await complete(t, {
       outcome: "SUCCEEDED",
       summary: (khai.summary || res.resultText).slice(0, 8000),
@@ -288,6 +319,7 @@ async function execute(adapter: ExecutionAdapter, provider: TechExecutionProvide
     });
   } catch (e) {
     const msg = e instanceof Error ? e.message.split("\n")[0].slice(0, 1000) : String(e);
+    lastError = `${t.code}: ${msg}`.slice(0, 500);
     push("error", msg);
     await complete(t, { outcome: "FAILED", error: msg, branch: t.branch }).catch(() => undefined);
   } finally {
@@ -301,6 +333,177 @@ async function execute(adapter: ExecutionAdapter, provider: TechExecutionProvide
   }
 }
 
+/* ═════════════════════ ĐẨY NHÁNH (docs mục 15) ═════════════════════ */
+
+/**
+ * Đẩy nhánh của lượt. Mặc định bằng token NGẮN HẠN máy chủ cấp cho đúng lượt này (bot `erp-agent`, chỉ `contents:
+ * write`): token chỉ nằm trong biến môi trường của ĐÚNG một tiến trình `git push`, không trong tham số, không trong URL,
+ * không ghi đĩa; mọi trình trợ giúp credential của máy bị tắt cho lượt đẩy đó (`pushGitArgs`). Máy chủ chưa có danh tính
+ * bot ⇒ chỉ dùng credential CỦA MÁY khi `TECH_WORKER_ALLOW_MACHINE_GIT=1` được bật tường minh — không thì BLOCKED kèm
+ * câu nói rõ ai phải làm gì. Không bao giờ hỏi token cá nhân.
+ */
+async function pushBranch(t: Claimed, dir: string): Promise<{ ok: true } | { ok: false; error: string }> {
+  const r = await api<{ ok?: true; token?: string; error?: string; detail?: string }>("push-credential", { runId: t.runId, leaseGeneration: t.leaseGeneration });
+  if (r.status === 200 && r.data.token) {
+    const env: Record<string, string> = { ...buildChildEnv("SUBSCRIPTION_CLAUDE_CODE", process.env, null), GIT_TERMINAL_PROMPT: "0", GCM_INTERACTIVE: "never" };
+    env[PUSH_TOKEN_ENV] = r.data.token;
+    try {
+      execFileSync("git", pushGitArgs(t.branch), { cwd: dir, env: env as NodeJS.ProcessEnv, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 5 * 60_000, windowsHide: true });
+      return { ok: true };
+    } catch (e) {
+      const msg = e instanceof Error ? e.message.split("\n").slice(0, 3).join(" ").slice(0, 400) : "lỗi";
+      return { ok: false, error: `git push bằng token bot thất bại: ${msg.split(r.data.token).join("[đã che]")}` };
+    }
+  }
+  if (r.data.error === "NOT_CONFIGURED" && cfg.allowMachineGit) {
+    git(dir, "push", "-q", "origin", `${t.branch}:${t.branch}`);
+    return { ok: true };
+  }
+  if (r.data.error === "NOT_CONFIGURED") {
+    return { ok: false, error: "Máy chủ chưa có danh tính bot erp-agent nên chưa cấp được token đẩy nhánh — đã commit trong kho của worker nhưng KHÔNG đẩy. Kỹ thuật chạy ops apply-agent-env rồi mở lại việc." };
+  }
+  return { ok: false, error: `Máy chủ không cấp token đẩy nhánh (HTTP ${r.status} ${r.data.error ?? ""}).` };
+}
+
+/* ═════════════════════ TỰ KIỂM (docs mục 15) ═════════════════════ */
+
+/**
+ * Chạy một lệnh BẤT ĐỒNG BỘ (không khoá event loop — nhịp tim phải chạy tiếp), lấy stdout kể cả khi mã thoát khác 0
+ * (`claude auth status` thoát 1 khi chưa đăng nhập). Không chạy được / quá 30 giây ⇒ `null` = CHƯA BIẾT.
+ */
+function stdoutOf(bin: string, args: string[], env?: Record<string, string>): Promise<string | null> {
+  return new Promise((resolve) => {
+    let out = "";
+    let xong = false;
+    const ket = (v: string | null) => {
+      if (xong) return;
+      xong = true;
+      clearTimeout(timer);
+      resolve(v);
+    };
+    const child = spawn(bin, args, { stdio: ["ignore", "pipe", "ignore"], env: (env ?? process.env) as NodeJS.ProcessEnv, windowsHide: true, shell: false });
+    const timer = setTimeout(() => {
+      child.kill();
+      ket(null);
+    }, 30_000);
+    child.stdout.on("data", (d: Buffer) => {
+      if (out.length < 64_000) out += d.toString("utf8");
+    });
+    child.on("error", () => ket(null));
+    child.on("close", () => ket(out.trim()));
+  });
+}
+
+/**
+ * Báo cáo tự kiểm — KHÔNG chứa bí mật: không khoá, không email / mã tổ chức của tài khoản Claude, URL kho chỉ là URL
+ * public. Máy chủ vẫn lọc + che lại (`sanitizeWorkerDiagnostics`). Lệnh `claude` chạy trong môi trường gói thuê bao
+ * (không biến tính tiền API) để trạng thái đăng nhập đọc được là của CHÍNH đăng nhập máy, không phải của một khoá API.
+ */
+async function selfCheck(adapter: ExecutionAdapter): Promise<WorkerDiagnostics> {
+  const subEnv = buildChildEnv("SUBSCRIPTION_CLAUDE_CODE", process.env, null);
+  const bin = resolveClaudeBin();
+  const claudeVersion = bin ? ((await stdoutOf(bin, ["--version"], subEnv)) ?? "") : "";
+  let claudeAuth: ClaudeAuthState = "UNKNOWN";
+  if (bin) {
+    const out = await stdoutOf(bin, ["auth", "status", "--json"], subEnv);
+    claudeAuth = out ? parseClaudeAuthStatus(out) : "UNKNOWN";
+  }
+  let repo = { ok: false, head: "", detail: "Không đọc được kho của worker" };
+  try {
+    const head = git(cfg.repo, "rev-parse", "HEAD");
+    const url = git(cfg.repo, "remote", "get-url", "origin");
+    repo = /^https:\/\/[^@/]+@/.test(url) ? { ok: false, head, detail: "URL remote của kho mang credential — chạy lại bộ cài để đặt lại" } : { ok: true, head, detail: "origin/main" };
+  } catch {
+    /* giữ mặc định */
+  }
+  const adapterOk = resolveNpmCli() ? await adapter.check() : ({ ok: false, reason: "Không tìm thấy npm-cli.js — cổng / npm ci sẽ không chạy được" } as const);
+  return {
+    checkedAt: new Date().toISOString(),
+    workerVersion: VERSION,
+    platform: `${process.platform}-${os.release()}`,
+    nodeVersion: process.version,
+    gitVersion: (await stdoutOf("git", ["--version"])) ?? "",
+    claudeVersion,
+    claudeAuth,
+    repo,
+    adapter: adapterOk.ok ? { ok: true, detail: "" } : { ok: false, detail: adapterOk.reason },
+    apiKeyAbsent: API_BILLING_ENV.every((k) => !process.env[k]),
+    pushMode: cfg.allowMachineGit ? "MACHINE_CREDENTIAL" : "SERVER_TOKEN",
+    installMode: cfg.installed,
+    lastError,
+  };
+}
+
+/* ═════════════════════ LỆNH SỬA — CHỈ DANH SÁCH ĐÓNG ═════════════════════ */
+
+function workRoot(): string {
+  return cfg.root || path.dirname(path.resolve(cfg.repo));
+}
+
+/** Gỡ cây `wt-tech-*` không thuộc lượt nào đang chạy — nhánh giữ nguyên (bằng chứng). */
+function pruneWorktrees(): number {
+  try {
+    git(cfg.repo, "worktree", "prune");
+  } catch {
+    /* tiếp */
+  }
+  const root = workRoot();
+  if (!existsSync(root)) return 0;
+  const giu = new Set([...active.values()].map((a) => taskWorktreeDirName(a.task.code, a.task.leaseGeneration)));
+  let n = 0;
+  for (const d of readdirSync(root)) {
+    if (!/^wt-tech-[a-z0-9-]+$/.test(d) || giu.has(d)) continue;
+    const full = path.join(root, d);
+    try {
+      git(cfg.repo, "worktree", "remove", "--force", full);
+    } catch {
+      rmSync(full, { recursive: true, force: true });
+    }
+    n += 1;
+  }
+  try {
+    git(cfg.repo, "worktree", "prune");
+  } catch {
+    /* tiếp */
+  }
+  return n;
+}
+
+let ctx: { adapter: ExecutionAdapter; provider: TechExecutionProvider } | null = null;
+
+/**
+ * Thi hành MỘT lệnh sửa — chỉ lệnh trong `TECH_REPAIR_COMMANDS`, không tham số. Lệnh cần thoát tiến trình (làm mới kho,
+ * khởi động lại) chỉ chạy khi KHÔNG giữ việc; đang giữ thì hoãn tới lúc rảnh. Thoát bằng mã riêng để trình khởi động của
+ * bộ cài biết mở lại (và làm mới kho trước nếu cần).
+ */
+async function runRepair(cmd: TechRepairCommand) {
+  if (!ctx) return;
+  switch (cmd) {
+    case "RERUN_SELF_CHECK":
+      diag = await selfCheck(ctx.adapter);
+      diagDirty = true;
+      log("đã tự kiểm lại theo yêu cầu máy chủ");
+      return;
+    case "PRUNE_WORKTREES": {
+      const n = pruneWorktrees();
+      log(`đã dọn ${n} cây làm việc cũ`);
+      diag = await selfCheck(ctx.adapter);
+      diagDirty = true;
+      return;
+    }
+    case "REFRESH_REPO":
+    case "RESTART_LOOP":
+      if (active.size) {
+        pendingRepair = cmd;
+        log(`hoãn ${cmd} tới khi xong việc đang giữ`);
+        return;
+      }
+      log(cmd === "REFRESH_REPO" ? "thoát để làm mới kho rồi khởi động lại" : "thoát để khởi động lại");
+      if (!cfg.installed) log("(chạy tay, không có trình khởi động — tự chạy lại lệnh worker)");
+      process.exit(cmd === "REFRESH_REPO" ? WORKER_EXIT.REFRESH_AND_RESTART : WORKER_EXIT.RESTART);
+  }
+}
+
 async function beat() {
   const runs = [...active.values()].map((a) => ({
     runId: a.task.runId,
@@ -310,14 +513,29 @@ async function beat() {
     logs: a.logs.splice(0, TECH_LEASE.maxLogLinesPerBeat).map((l) => ({ level: l.level, line: l.line.slice(0, TECH_LEASE.maxLogLineChars) })),
   }));
   try {
-    const r = await api<{ runs?: { runId: string; action: string; reason?: string }[] }>("heartbeat", { version: VERSION, runs });
+    const guiDiag = diagDirty && diag ? { diagnostics: { ...diag, lastError } } : {};
+    const r = await api<{ runs?: { runId: string; action: string; reason?: string }[]; repair?: string }>("heartbeat", { version: VERSION, runs, ...guiDiag });
+    if (r.status === 401) {
+      // Khoá bị thu hồi (tạo lại token / gỡ worker): dừng hẳn — chạy tiếp với khoá chết là đập cửa vô ích.
+      log("Máy chủ từ chối khoá worker (đã tạo lại token hoặc đã gỡ worker) — dừng. Cài lại bằng bộ cài mới nếu cần.");
+      for (const a of active.values()) a.abort.abort();
+      process.exit(WORKER_EXIT.CONFIG);
+    }
+    if (r.status === 200) diagDirty = false;
     for (const x of r.data.runs ?? []) {
       if (x.action === "ABORT") {
         log(`máy chủ yêu cầu DỪNG lượt ${x.runId}: ${x.reason ?? ""}`);
         active.get(x.runId)?.abort.abort();
       }
     }
+    if (r.data.repair !== undefined) {
+      if (isTechRepairCommand(r.data.repair)) {
+        log(`lệnh sửa từ máy chủ: ${r.data.repair}`);
+        await runRepair(r.data.repair);
+      } else log("bỏ qua lệnh sửa không nằm trong danh sách an toàn");
+    }
   } catch (e) {
+    lastError = `nhịp tim: ${e instanceof Error ? e.message : String(e)}`.slice(0, 300);
     log(`nhịp tim lỗi: ${e instanceof Error ? e.message : e} — sẽ thử lại`);
   }
 }
@@ -326,41 +544,85 @@ async function main() {
   const thieu = Object.entries({ TECH_WORKER_URL: cfg.url, TECH_WORKER_TOKEN: cfg.token, TECH_WORKER_REPO: cfg.repo }).filter(([, v]) => !v).map(([k]) => k);
   if (thieu.length) {
     console.error(`Thiếu biến môi trường: ${thieu.join(", ")}`);
-    process.exit(2);
+    process.exit(WORKER_EXIT.CONFIG);
   }
   if (!existsSync(path.join(cfg.repo, ".git"))) {
     console.error("TECH_WORKER_REPO không phải một kho git.");
-    process.exit(2);
+    process.exit(WORKER_EXIT.CONFIG);
+  }
+  if (cfg.installed) {
+    // Bộ cài / tệp gỡ dừng ĐÚNG tiến trình này khi cài lại (không để hai worker cùng danh tính chạy song song).
+    try {
+      writeFileSync(path.join(path.dirname(workRoot()), "node.pid"), String(process.pid), "ascii");
+    } catch {
+      /* không chặn */
+    }
   }
   const hello = await api<{ worker?: { key: string; provider: string; enabled: boolean }; openRuns?: { runId: string }[]; error?: string }>("hello");
   if (hello.status !== 200 || !hello.data.worker) {
     console.error(`Máy chủ từ chối khoá worker (HTTP ${hello.status}).`);
-    process.exit(2);
+    process.exit(WORKER_EXIT.CONFIG);
   }
   const provider = hello.data.worker.provider;
   if (!isTechExecutionProvider(provider)) throw new Error(`Provider lạ: ${provider}`);
   const adapter = createAdapter(provider);
-  const npmOk = resolveNpmCli();
-  const ok = npmOk ? await adapter.check() : ({ ok: false, reason: "Không tìm thấy npm-cli.js — cổng / npm ci sẽ không chạy được" } as const);
-  log(`worker ${hello.data.worker.key} · ${provider} · ${os.hostname()} · adapter ${ok.ok ? "SẴN SÀNG" : `KHÔNG CHẠY ĐƯỢC: ${ok.reason}`}`);
+  ctx = { adapter, provider };
+
+  diag = await selfCheck(adapter);
+  diagDirty = true;
+  /*
+    RANH GIỚI THANH TOÁN LÚC KHỞI ĐỘNG: worker gói thuê bao mà CHÍNH tiến trình có ANTHROPIC_API_KEY ⇒ từ chối chạy (báo
+    lý do lên máy chủ một lần rồi thoát) — không lọc im lặng rồi chạy tiếp.
+  */
+  const chan = workerStartupBlockers(provider, process.env);
+  if (chan.length) {
+    lastError = chan[0]!.slice(0, 500);
+    await beat();
+    console.error(chan.join("\n"));
+    process.exit(WORKER_EXIT.BILLING_BOUNDARY);
+  }
+  let rd = workerReadiness(provider, diag);
+  log(`worker ${hello.data.worker.key} · ${provider} · ${os.hostname()} · ${rd.ready ? "SẴN SÀNG" : `CHƯA NHẬN VIỆC: ${rd.reasons.join(" · ")}`}`);
   if (hello.data.openRuns?.length) log(`còn ${hello.data.openRuns.length} lượt mở từ lần chạy trước — không nhận lại; lease của chúng sẽ hết hạn và việc được thả về hàng đợi.`);
-  if (CHECK || !ok.ok) process.exit(ok.ok ? 0 : 3);
+  if (CHECK) {
+    await beat();
+    process.exit(rd.ready ? 0 : diag.claudeAuth === "LOGGED_IN_API" && provider === "SUBSCRIPTION_CLAUDE_CODE" ? WORKER_EXIT.BILLING_BOUNDARY : WORKER_EXIT.ADAPTER);
+  }
+  if (ONCE && !rd.ready) process.exit(WORKER_EXIT.ADAPTER);
 
   const hb = setInterval(() => void beat(), TECH_LEASE.heartbeatSeconds * 1000);
   await beat();
+  let lanKiem = Date.now();
   for (;;) {
-    if (active.size === 0) {
-      const r = await api<{ task: Claimed | null; reason?: string }>("claim");
-      if (r.data.task) {
-        log(`${r.data.task.code}: nhận việc (lần ${r.data.task.attempt}/${r.data.task.maxAttempts}) → ${r.data.task.branch}`);
-        await execute(adapter, provider, r.data.task);
-        await beat();
-        if (ONCE) break;
-        continue;
-      }
-      if (ONCE) {
-        log(`không có việc: ${r.data.reason ?? r.status}`);
-        break;
+    // Tự kiểm lại: 5′ khi CHƯA sẵn sàng (chủ shop vừa đăng nhập Claude thì worker tự thấy), 30′ khi đang ổn.
+    if (Date.now() - lanKiem > (rd.ready ? 30 : 5) * 60_000 && active.size === 0) {
+      diag = await selfCheck(adapter);
+      diagDirty = true;
+      lanKiem = Date.now();
+    }
+    if (diag) rd = workerReadiness(provider, diag);
+    if (pendingRepair && active.size === 0) {
+      const c = pendingRepair;
+      pendingRepair = null;
+      await runRepair(c);
+    }
+    if (rd.ready && active.size === 0) {
+      try {
+        const r = await api<{ task: Claimed | null; reason?: string }>("claim");
+        if (r.data.task) {
+          log(`${r.data.task.code}: nhận việc (lần ${r.data.task.attempt}/${r.data.task.maxAttempts}) → ${r.data.task.branch}`);
+          await execute(adapter, provider, r.data.task);
+          await beat();
+          if (ONCE) break;
+          continue;
+        }
+        if (ONCE) {
+          log(`không có việc: ${r.data.reason ?? r.status}`);
+          break;
+        }
+      } catch (e) {
+        lastError = `xin việc: ${e instanceof Error ? e.message : String(e)}`.slice(0, 300);
+        log(`${lastError} — sẽ thử lại`);
       }
     }
     await new Promise((res) => setTimeout(res, 60_000));

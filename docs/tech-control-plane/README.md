@@ -237,18 +237,12 @@ Kết luận: MÃ đủ cả 16 điểm, nhưng chưa điểm nào CHẠY trên 
 | Hàng đợi PostgreSQL: nhận việc `UPDATE … (SELECT … FOR UPDATE OF c SKIP LOCKED)`, fencing `lease_generation`, thu hồi lười | `lib/tech/worker-service.ts` |
 | Cửa worker `POST /api/tech/worker/{hello,heartbeat,claim,start,complete}` — khoá RIÊNG từng worker, CSDL giữ băm | `app/api/tech/worker/[op]/route.ts` |
 | Worker daemon + adapter (`SUBSCRIPTION_CLAUDE_CODE` · `ANTHROPIC_API`, cùng CLI Claude Code, khác đúng môi trường) | `scripts/tech-worker.ts`, `scripts/tech-worker/*` |
-| Trang | `/tech/workers` (đăng ký — khoá hiện một lần, bật/tắt, thu hồi lease, lượt chạy + nhật ký có trần) |
+| Trang | `/tech/workers` (tạo worker + bộ cài một nút — mục 15; bật/tắt, thu hồi lease, lượt chạy + nhật ký có trần) |
 
-Chạy một worker trên máy có Claude Code (đăng nhập gói thuê bao):
-
-```
-$env:TECH_WORKER_URL="https://erp.vnxcommerce.com"
-$env:TECH_WORKER_TOKEN="tw_…"            # /tech/workers → Đăng ký worker (hiện một lần)
-$env:TECH_WORKER_REPO="D:\tech-worker\hkt"   # bản clone RIÊNG cho worker
-npm run tech:worker -- --check           # kiểm cấu hình + adapter, không xin việc
-npm run tech:worker -- --once            # nhận một việc, làm, thoát
-npm run tech:worker                      # chạy mãi
-```
+Cài một worker: **/tech/workers → «Tạo worker» → «Cài worker trên máy Windows này» → bấm đúp tệp tải về** (mục 15).
+Khoá worker không còn hiện ra màn hình và không ai phải gõ biến môi trường. Chạy tay (máy dev, không qua bộ cài) vẫn
+được — đặt `TECH_WORKER_URL` / `TECH_WORKER_TOKEN` / `TECH_WORKER_REPO` rồi `npm run tech:worker -- --check`; khoá lấy
+bằng cách chạy bộ cài một lần hoặc đổi mã ghi danh qua `POST /api/tech/worker/enroll` (mã trong thân request).
 
 **Chế độ dogfood an toàn** (lượt production đầu tiên) — không cần mã mới, chỉ cấu hình:
 
@@ -366,3 +360,70 @@ vì vậy BẮT BUỘC khi chạy production: tài khoản hệ điều hành RI
 credential dưới đây), không nhúng token vào URL remote của bản clone, credential là fine-grained token chỉ cho ĐÚNG kho này, chỉ
 `contents: write` (token không giới hạn được theo nhánh — ruleset `main` hiện có chặn đẩy thẳng; muốn chặn mọi nhánh
 ngoài `ai/worker/*` thì thêm ruleset), KHÔNG dùng tài khoản GitHub cá nhân của chủ shop.
+
+## 15. Cài worker một nút cho chủ shop không kỹ thuật (07/10/2026, migration 0231)
+
+Chủ shop không phải lập trình viên: không clone kho, không sửa biến môi trường, không dán khoá vào PowerShell, không chạy
+npm, không cấu hình Windows service. Bốn bước hiện trên `/tech/workers`:
+
+| Bước | Chủ shop làm | Máy làm |
+|---|---|---|
+| 1 Tạo worker | «Tạo worker» — lần đầu điền sẵn `dogfood-1`, gói thuê bao, chỉ «Viết tài liệu», 1 việc / lúc | `createTechWorkerAction` tạo worker và **không trả khoá** |
+| 2 Tải bộ cài | «Cài worker trên máy Windows này», bấm đúp `cai-worker-<mã>.cmd` | tạo MÃ GHI DANH (một lần, 30′, CSDL chỉ giữ băm) nhúng trong tệp — tệp đi về trong thân phản hồi Server Action, không có URL tải |
+| 3 Đăng nhập Claude nếu được hỏi | đăng nhập một lần trong cửa sổ hiện ra | bộ cài đọc `claude auth status --json`; chưa đăng nhập / đăng nhập Console (tiền API) ⇒ mở `claude auth login --claudeai` |
+| 4 Worker Online | không gì — trang tự làm mới | bộ cài tự kiểm, khởi động worker; nhịp tim đầu ⇒ «Đang sống» |
+
+| Mảnh | Tệp |
+|---|---|
+| Luật thuần (mã ghi danh, lệnh sửa đóng, chẩn đoán + che secret, sẵn sàng xin việc, ranh giới thanh toán lúc khởi động, tham số `git push`, bốn bước) | `lib/constants/tech-worker-onboarding.ts` |
+| Đổi mã · xoay khoá · tạo lại token · gỡ · chẩn đoán · lệnh sửa · token đẩy | `lib/tech/worker-onboarding.ts` |
+| Bộ cài / trình khởi động / tệp gỡ (hàm thuần sinh chuỗi) | `lib/tech/worker-installer.ts` |
+| Cửa ghi danh (không cần khoá, mã chỉ từ THÂN, mọi thất bại cùng một `401`) | `app/api/tech/worker/enroll/route.ts` |
+| Nhịp tim mang chẩn đoán + nhận lệnh sửa; `push-credential` | `app/api/tech/worker/[op]/route.ts` |
+| Server Action (quyền `tech:manage` + audit, không ghi mã / khoá) | `lib/actions/tech-worker-onboarding.ts` |
+
+**Khoá worker không bao giờ đi qua người.** Bộ cài đổi mã ⇒ máy chủ XOAY khoá (khoá cũ — kể cả khoá đã lộ — chết ngay),
+bật lại worker, trả khoá mới MỘT lần trong thân phản hồi. «Tạo lại token» = khoá hiện tại chết ngay + bộ cài mới. «Gỡ worker»
+= tắt + thu hồi khoá + huỷ mã đang chờ + thu hồi lease (qua đúng bộ thu hồi của hàng đợi) + tệp `go-worker-<mã>.cmd` xoá
+Scheduled Task, khoá đã cất và thư mục trên máy. Mọi thất bại xác thực rơi về phía HẸP.
+
+**Cất khoá: DPAPI theo người dùng Windows** (`ConvertFrom-SecureString`, không `-Key`), tệp
+`%LOCALAPPDATA%\VNX\tech-worker\<mã>\worker-credential.dpapi`, ACL chỉ chính người dùng. Chọn thay Credential Manager vì
+Windows PowerShell 5.1 không có cmdlet cho Credential Manager (phải cài module hoặc `Add-Type` biên dịch C# lúc chạy —
+hay bị AMSI chặn); cả hai cùng dựa trên DPAPI nên cùng mức bảo vệ. Trình khởi động `start-worker.ps1` giải khoá vào biến
+môi trường CỦA TIẾN TRÌNH worker, không ghi tệp thường, không `.env`. Giới hạn thật (như Credential Manager): tiến trình
+cùng tài khoản Windows giải được — việc R1 trở lên vẫn cần tài khoản Windows riêng (mục 14).
+
+**Không rơi sang tiền API — ba lớp:** trình khởi động gỡ mọi biến `API_BILLING_ENV` khỏi tiến trình worker gói thuê bao;
+worker TỪ CHỐI CHẠY nếu vẫn thấy một biến như thế (`workerStartupBlockers`, thoát mã 4, báo lý do lên trang); và worker
+KHÔNG xin việc khi Claude Code đăng nhập bằng Console (tiền API) hoặc chưa đọc được trạng thái đăng nhập
+(`workerReadiness`). Đường Anthropic API vẫn chọn được ở form, kèm cảnh báo tiền + ô xác nhận; bộ cài hỏi khoá API
+riêng bằng `Read-Host -AsSecureString` (không hiện, không vào lịch sử) và cất DPAPI; worker API vẫn chỉ chạy khi đã khai
+trần chi API / ngày.
+
+**Chẩn đoán + «Sửa lỗi tự động».** Nhịp tim mang báo cáo tự kiểm (kết nối · đăng nhập Claude · kho · Claude Code chạy được
+· phiên bản · ANTHROPIC_API_KEY vắng mặt · cách đẩy nhánh · lỗi gần nhất); máy chủ lọc trường, che chuỗi giống secret
+(`tw_` · `twe_` · `sk-ant-` · `gh*_` · `Bearer` · `*_TOKEN=` · chuỗi dài ≥ 33 ký tự) và giữ ≤ 4 KB. Lệnh sửa là danh sách
+ĐÓNG có CHECK ở CSDL: `RERUN_SELF_CHECK` · `REFRESH_REPO` (fetch + đặt lại bản clone RIÊNG của worker về `origin/main`,
+`npm ci` nếu lockfile đổi, khởi động lại) · `PRUNE_WORKTREES` (gỡ cây `wt-tech-*` không thuộc lượt đang chạy, nhánh giữ
+nguyên) · `RESTART_LOOP`. Giao đúng một lần ở nhịp tim kế; lệnh cần thoát tiến trình hoãn tới khi worker rảnh. Không có
+lệnh tuỳ ý, không tham số.
+
+**Đẩy nhánh (git push) không cần chủ shop cấu hình Git.** Sau khi cổng xanh, worker gọi `push-credential`: máy chủ kiểm
+fencing + nhánh `ai/worker/*` đã cấp, rồi xin cho ĐÚNG lượt đó một token cài đặt GitHub App `erp-agent` MỚI (không đệm,
+≤ 60′, `permissions: { contents: write }`, đúng một kho) — `mintAgentPushToken`. Token chỉ nằm trong biến môi trường của
+một tiến trình `git push`; trình trợ giúp credential của máy bị xoá cho lượt đó (`-c credential.helper=` trước), nên
+Git Credential Manager không đưa credential cá nhân ra và không lưu token. Máy chủ chưa có danh tính bot ⇒ worker dừng
+`BLOCKED` kèm câu chỉ đúng việc (ops `apply-agent-env`); dùng credential CỦA MÁY chỉ khi bật tường minh
+`TECH_WORKER_ALLOW_MACHINE_GIT=1`. Không bao giờ hỏi PAT. Giới hạn: token GitHub không giới hạn được theo nhánh — `main`
+được ruleset chặn đẩy thẳng; muốn chặn mọi nhánh ngoài `ai/worker/*` cho App thì thêm ruleset.
+
+**Thu hồi khoá lộ của `dogfood-1` (0231).** Khoá đó đã hiện ra màn hình qua đường "dán vào PowerShell" cũ — đường này đã
+gỡ (`registerTechWorkerAction`). Migration đặt băm của một chuỗi ngẫu nhiên không ai giữ + `secret_revoked_at` + tắt worker
++ lý do «Khoá cũ có thể đã lộ — tạo lại bằng bộ cài», ghi một sự kiện `worker.secret_revoked`; điều kiện chặt
+(`key = 'dogfood-1'`, chưa từng nhịp tim, chưa từng ghi danh, chưa thu hồi, tạo trước mốc deploy), chạy lại không đổi gì,
+không xoá dòng. Sau deploy: chủ shop bấm «Cài worker trên máy Windows này» cho `dogfood-1`.
+
+Chủ shop vẫn phải tự làm: bấm đúp tệp (Windows SmartScreen có thể hỏi «vẫn chạy?» vì tệp tải từ web); đăng nhập Claude
+một lần nếu được hỏi; trả lời có / không cho «tự chạy khi đăng nhập Windows». Máy không có winget thì phải tự cài Git /
+Node LTS (bộ cài nói rõ). Kiểm thử: `tests/tech-worker-onboarding.test.ts` (phân tích tĩnh bộ cài, không cần Windows).

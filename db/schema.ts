@@ -8777,6 +8777,21 @@ export const techWorkers = pgTable(
     createdById: text("created_by_id").references(() => users.id, { onDelete: "set null" }),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
+    /*
+      ─── CÀI MỘT NÚT (0231, docs/tech-control-plane/README.md mục 15) ───
+      `secret_revoked_at` khác NULL ⇒ KHÔNG có khoá nào hợp lệ (băm hiện tại là băm của một chuỗi ngẫu nhiên không ai
+      giữ) — xác thực từ chối dù băm có khớp. Chỉ một lượt ĐỔI MÃ GHI DANH đặt lại nó về NULL.
+    */
+    secretRotatedAt: ts("secret_rotated_at"),
+    secretRevokedAt: ts("secret_revoked_at"),
+    enrolledAt: ts("enrolled_at"),
+    removedAt: ts("removed_at"),
+    /** Báo cáo tự kiểm gần nhất — ĐÃ LỌC + CHE ở máy chủ (`sanitizeWorkerDiagnostics`), ≤ 4 KB. */
+    diagnostics: jsonb("diagnostics").$type<Record<string, unknown>>(),
+    diagnosticsAt: ts("diagnostics_at"),
+    /** Lệnh sửa đang chờ worker lấy ở nhịp tim kế — danh sách ĐÓNG `TECH_REPAIR_COMMANDS`; rỗng = không có. */
+    repairCommand: text("repair_command").notNull().default(""),
+    repairRequestedAt: ts("repair_requested_at"),
   },
   (t) => [
     uniqueIndex("tech_workers_key_uq").on(t.key),
@@ -8784,6 +8799,34 @@ export const techWorkers = pgTable(
     check("tech_workers_provider_check", sql`${t.provider} IN ('SUBSCRIPTION_CLAUDE_CODE','ANTHROPIC_API')`),
     check("tech_workers_concurrency_check", sql`${t.maxConcurrency} BETWEEN 1 AND 4`),
     check("tech_workers_secret_check", sql`${t.secretHash} ~ '^[0-9a-f]{64}$'`),
+    check("tech_workers_repair_check", sql`${t.repairCommand} IN ('','RERUN_SELF_CHECK','REFRESH_REPO','PRUNE_WORKTREES','RESTART_LOOP')`),
+  ],
+);
+
+/**
+ * MÃ GHI DANH WORKER (0231) — bộ cài tải về mang mã này, KHÔNG mang khoá worker. Dùng MỘT lần (`used_at`), hạn ngắn
+ * (`expires_at`), gắn với đúng một worker, CSDL chỉ giữ băm. Đổi mã ⇒ máy chủ xoay khoá worker và trả khoá mới một lần.
+ */
+export const techWorkerEnrollments = pgTable(
+  "tech_worker_enrollments",
+  {
+    id: id(),
+    workerId: text("worker_id")
+      .notNull()
+      .references(() => techWorkers.id, { onDelete: "cascade" }),
+    codeHash: text("code_hash").notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    usedAt: ts("used_at"),
+    /** Bị vô hiệu trước khi dùng (tải bộ cài mới, tạo lại token, gỡ worker). */
+    revokedAt: ts("revoked_at"),
+    usedFromHost: text("used_from_host").notNull().default(""),
+    createdById: text("created_by_id").references(() => users.id, { onDelete: "set null" }),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    uniqueIndex("tech_worker_enrollments_code_uq").on(t.codeHash),
+    index("tech_worker_enrollments_worker_idx").on(t.workerId, t.createdAt),
+    check("tech_worker_enrollments_code_check", sql`${t.codeHash} ~ '^[0-9a-f]{64}$'`),
   ],
 );
 
@@ -8842,6 +8885,11 @@ export const techBudgets = pgTable(
 
 export const techWorkersRelations = relations(techWorkers, ({ many }) => ({
   runs: many(techAgentRuns),
+  enrollments: many(techWorkerEnrollments),
+}));
+
+export const techWorkerEnrollmentsRelations = relations(techWorkerEnrollments, ({ one }) => ({
+  worker: one(techWorkers, { fields: [techWorkerEnrollments.workerId], references: [techWorkers.id] }),
 }));
 
 export const techProjectsRelations = relations(techProjects, ({ many }) => ({
