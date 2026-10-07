@@ -304,3 +304,4 @@
 {"at":"2026-10-07T11:04:11.285Z","actor":"DESKTOP-56TH98Y:wt-takeover","kind":"HANDOFF","mission":"sales-human-takeover","detail":"feat/sales-human-takeover @ faf750c8fa24 · 1 lệnh kiểm thử"}
 {"at":"2026-10-07T11:04:57.748Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#633 @ faf750c8fa24 · PASS @4ba38d8d + delta: decideHealthAlert khung nhắc neo prev.since (lỗi có sẵn từ #607, CI đỏ khi bộ kiểm bắt đầu phút 58–59), không đổi kỳ vọng; gộp main 4d30d4ec"}
 {"at":"2026-10-07T11:12:52.085Z","actor":"DESKTOP-56TH98Y:wt-saas-l1","kind":"UPDATE","mission":"saas-l1-hide-internal","detail":"RUNNING → RUNNING · 26 mẫu phạm vi · MEDIUM"}
+{"at":"2026-10-07T11:27:26.122Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"sales-human-takeover","detail":"#633 @ faf750c8fa24 → 12fccb30f72b (MERGE_ISOLATED · HIGH · gates success)"}

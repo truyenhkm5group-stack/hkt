@@ -3,7 +3,7 @@
   "mission_id": "sales-human-takeover",
   "title": "Tiếp quản / cho AI tiếp tục trong hội thoại bán hàng",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P1",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-takeover",
@@ -35,9 +35,12 @@
     "0231": "2026-10-07T08:56:39.958Z"
   },
   "created_at": "2026-10-07T06:41:23.158Z",
-  "updated_at": "2026-10-07T11:04:11.218Z",
+  "updated_at": "2026-10-07T11:27:26.081Z",
   "last_heartbeat": "2026-10-07T11:04:11.218Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#633 → 12fccb30f72b599426db54a9c493604c8b347cef"
+  },
   "handoff": {
     "branch": "feat/sales-human-takeover",
     "sha": "faf750c8fa2416dbd4e93888f494936bcc881c92",
