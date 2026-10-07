@@ -5,7 +5,7 @@
  */
 import type { AiHoldState, AiHoldView } from "@/lib/sales-chatbot/ai-hold-shared";
 import type { AiBlock, MessageTrace } from "@/lib/sales-chatbot/ai-status-shared";
-import type { ControlStamp } from "@/lib/sales-chatbot/conversation-control-shared";
+import { readConversationControl, type ControlStamp } from "@/lib/sales-chatbot/conversation-control-shared";
 
 import type { CustomerLevel } from "@/lib/sales-chatbot/levels-shared";
 
@@ -46,12 +46,28 @@ export function safeAvatarUrl(v: unknown): string | null {
 }
 
 /**
- * Ai đang trả lời khách (conversation-control-shared.ts): AI = bot đang tự trả lời (không nhường, không ghi đè); HUMAN = đang
- * nhường cho người · Tiếp quản · AI gợi ý (người gửi). Hai nhóm phủ kín, không giao nhau.
+ * Ai đang trả lời khách — lớp PHÂN LOẠI của hộp thư (`inboxHandlingOf`): AI = bot tự trả lời và gửi (`aiHoldOf` = AI_ACTIVE, không ở
+ * chế độ AI gợi ý); HUMAN = đang nhường người · Tiếp quản · cần người · AI GỢI Ý (bot soạn, NGƯỜI gửi — của hội thoại hoặc chế độ
+ * vận hành của cả tổ chức). Quyết định sản phẩm 07/10/2026: AI gợi ý thuộc nhóm NGƯỜI để nhân viên không bỏ sót khách đang chờ;
+ * `aiHoldOf` của đường xử lý KHÔNG đổi (bot vẫn soạn gợi ý). Hai nhóm phủ kín, không giao nhau.
  */
 export const INBOX_HANDLERS = ["AI", "HUMAN"] as const;
 export type InboxHandler = (typeof INBOX_HANDLERS)[number];
 export const INBOX_HANDLER_LABEL: Record<InboxHandler, string> = { AI: "AI đang trả lời", HUMAN: "Người đang xử lý" };
+
+/** Phân loại trên từng hàng: AI · AI gợi ý (người gửi — thuộc nhóm NGƯỜI) · Người. */
+export type InboxHandling = "AI" | "COPILOT" | "HUMAN";
+export const INBOX_HANDLING_LABEL: Record<InboxHandling, string> = { AI: "AI", COPILOT: "AI gợi ý · người gửi", HUMAN: "Người" };
+
+/**
+ * Hộp thư xếp hội thoại vào nhóm nào: AI đang nhường / bị tiếp quản ⇒ HUMAN; AI gợi ý (của hội thoại, hoặc tổ chức đang ở chế độ
+ * Copilot) ⇒ COPILOT; còn lại ⇒ AI. HÀM THUẦN — điều kiện SQL của thẻ lọc (`inboxHumanSql`) là bản tương đương, bài kiểm so hai bên.
+ */
+export function inboxHandlingOf(hold: AiHoldState, state: unknown, orgCopilot: boolean): InboxHandling {
+  if (hold !== "AI_ACTIVE") return "HUMAN";
+  if (orgCopilot || readConversationControl(state)?.mode === "COPILOT") return "COPILOT";
+  return "AI";
+}
 
 /** Lọc theo mốc TIN cuối của hội thoại (giờ Việt Nam). `CUSTOM` = khoảng ngày người chọn. */
 export const INBOX_PERIODS = ["TODAY", "YESTERDAY", "7D", "30D", "CUSTOM"] as const;
@@ -85,8 +101,10 @@ export type InboxRow = {
   unreadCount: number;
   /** Ảnh đại diện thật (Meta `profile_pic` / Pancake) — `null` ⇒ chữ cái. */
   avatarUrl: string | null;
-  /** Trạng thái AI của hội thoại — `aiHoldOf` (một nguồn với thẻ lọc «AI / Người đang xử lý»). */
+  /** Trạng thái AI của hội thoại — `aiHoldOf` (đường xử lý). */
   aiHold: AiHoldState;
+  /** Nhóm trên hộp thư (`inboxHandlingOf`) — một nguồn với thẻ lọc «AI / Người đang xử lý». */
+  handling: InboxHandling;
   /** Đã chốt đơn (đơn ERP thật hoặc level «Đã chốt đơn») — cùng định nghĩa với thẻ «Đã chốt». */
   closed: boolean;
   source: InboxSource;
@@ -159,6 +177,8 @@ export type InboxThread = {
   aiHold: AiHoldView;
   /** Ảnh đại diện thật của khách (`safeAvatarUrl`) — `null` ⇒ chữ cái. */
   avatarUrl: string | null;
+  /** Số phút AI nhường của workspace (`humanCooldownMinutes()`). */
+  cooldownMinutes: number;
   /** Lý do AI KHÔNG trả lời (cổng page · chế độ vận hành · module · bot tắt · nguồn AI…) — `ai-status-shared.ts`. */
   aiBlocks: AiBlock[];
   /**

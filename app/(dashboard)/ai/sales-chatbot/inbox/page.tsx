@@ -5,7 +5,7 @@ import { formatTimeAgo, formatVND } from "@/lib/format";
 import { assignableUsers, inboxAssignees, inboxPages, listInbox, loadInboxThread } from "@/lib/sales-chatbot/inbox";
 import { customerFacing, customerInboxThread } from "@/lib/saas/visibility";
 import { listLabels } from "@/lib/sales-chatbot/inbox-labels";
-import { INBOX_CHANNEL_LABEL, INBOX_CHANNELS, INBOX_FILTER_LABEL, INBOX_FILTERS, INBOX_LIST_MAX, INBOX_PERIOD_LABEL, INBOX_PERIODS, INBOX_SOURCE_LABEL, unreadBadge, type InboxChannel, type InboxFilter, type InboxHandler, type InboxPeriod, type InboxRow } from "@/lib/sales-chatbot/inbox-shared";
+import { INBOX_CHANNEL_LABEL, INBOX_CHANNELS, INBOX_FILTER_LABEL, INBOX_FILTERS, INBOX_LIST_MAX, INBOX_PERIOD_LABEL, INBOX_HANDLING_LABEL, INBOX_PERIODS, INBOX_SOURCE_LABEL, unreadBadge, type InboxChannel, type InboxFilter, type InboxHandler, type InboxPeriod, type InboxRow } from "@/lib/sales-chatbot/inbox-shared";
 import { AI_HOLD_LABEL } from "@/lib/sales-chatbot/ai-hold-shared";
 import { listPageRoutes } from "@/lib/sales-chatbot/channel-ownership";
 import { humanCooldownMinutes } from "@/lib/sales-chatbot/conversation-control";
@@ -65,9 +65,9 @@ function ListItem({ r, href, active, showPage }: { r: InboxRow; href: string; ac
           ) : null}
         </div>
         <div className="mt-1 flex flex-wrap items-center gap-1 text-[11px]">
-          {/* Huy hiệu AI / Người — `aiHoldOf` (một nguồn với thẻ lọc và thanh điều khiển trong luồng tin). */}
-          <span className={cn("rounded px-1.5 font-semibold", r.aiHold === "AI_ACTIVE" ? "bg-violet-600 text-white" : "bg-orange-500 text-white")} title={AI_HOLD_LABEL[r.aiHold]} data-handler={r.aiHold === "AI_ACTIVE" ? "AI" : "HUMAN"}>
-            {r.aiHold === "AI_ACTIVE" ? "AI" : "Người"}
+          {/* Huy hiệu AI / AI gợi ý / Người — `inboxHandlingOf` (một nguồn với thẻ lọc «AI / Người đang xử lý»). */}
+          <span className={cn("rounded px-1.5 font-semibold", r.handling === "AI" ? "bg-violet-600 text-white" : r.handling === "COPILOT" ? "bg-amber-500 text-white" : "bg-orange-500 text-white")} title={AI_HOLD_LABEL[r.aiHold]} data-handler={r.handling === "AI" ? "AI" : "HUMAN"} data-handling={r.handling}>
+            {INBOX_HANDLING_LABEL[r.handling]}
           </span>
           <span className={cn("rounded px-1.5 font-medium", r.closed ? "bg-green-600 text-white dark:bg-green-500 dark:text-black" : "border border-foreground/20 text-foreground/70")} data-closed={r.closed ? "1" : "0"}>
             {r.closed ? "Đã chốt" : "Chưa chốt"}

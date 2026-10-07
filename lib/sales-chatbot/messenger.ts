@@ -11,7 +11,7 @@ import { chunkText } from "@/lib/messaging/providers";
 import { canUseModule } from "@/lib/platform/capabilities";
 import { AI_DOWN_HANDOFF_REASON, chatTurn, conversationView, describeCustomerImages } from "@/lib/sales-chatbot/engine";
 import { ALREADY_REPLIED_NOTE, alreadyRepliedRows, CONV_OPEN_FAILED_NOTE, EMPTY_REPLY_NOTE, HANDOFF_SILENT_NOTE, DEAD_AI_DOWN_NOTE, DEAD_SEND_NOTE_PREFIX, deadLetter, dueForClaim, releaseWithBackoff } from "@/lib/sales-chatbot/inbound-retry";
-import { dualConnectedPages, DUPLICATE_SOURCE_REASON, insertCustomerInbound, liveTransportsOf, loadTransportFacts, NON_CANONICAL_NOTE, PANCAKE_OWNS_PAGE_REASON, recordPageMode, routeVerdict, threadTransport, transportOwnerOf, type RouteVerdict } from "@/lib/sales-chatbot/channel-ownership";
+import { clearPageMode, dualConnectedPages, DUPLICATE_SOURCE_REASON, insertCustomerInbound, liveTransportsOf, loadTransportFacts, NON_CANONICAL_NOTE, PANCAKE_OWNS_PAGE_REASON, recordPageMode, routeVerdict, threadTransport, transportOwnerOf, type RouteVerdict } from "@/lib/sales-chatbot/channel-ownership";
 import {
   CLAIM_STALE_MS,
   conversationFor,
@@ -286,7 +286,13 @@ async function handBackToPancake(user: SessionUser, pageIds: readonly string[]):
     const facts = await loadTransportFacts();
     const moved: string[] = [];
     for (const id of pageIds) {
-      if (facts.modes?.[id] !== "META_DIRECT" || !liveTransportsOf(facts, id).PANCAKE) continue;
+      if (facts.modes?.[id] !== "META_DIRECT") continue;
+      if (!liveTransportsOf(facts, id).PANCAKE) {
+        // Không còn đường nào chạy page ⇒ bỏ dòng canonical (về luật mặc định): nối Pancake sau này chạy ngay, không bị dòng cũ trỏ
+        // vào đường đã gỡ làm AI im.
+        if (await clearPageMode(id)) await audit({ userId: user.id, userEmail: user.email, action: "SALES_CHANNEL_MODE_SET", entity: "CHANNEL_PAGE", entityId: id, detail: { from: "META_DIRECT", to: "DEFAULT", reason: "DISCONNECT_META_NO_ROUTE" } });
+        continue;
+      }
       await recordPageMode(id, "PANCAKE_WEBHOOK", "MANUAL", `Gỡ Meta trực tiếp — Pancake đang chạy page này nên đường chính về Pancake (${user.name || user.email})`.slice(0, 300), user.id);
       await audit({ userId: user.id, userEmail: user.email, action: "SALES_CHANNEL_MODE_SET", entity: "CHANNEL_PAGE", entityId: id, detail: { from: "META_DIRECT", to: "PANCAKE_WEBHOOK", reason: "DISCONNECT_META" } });
       moved.push(id);

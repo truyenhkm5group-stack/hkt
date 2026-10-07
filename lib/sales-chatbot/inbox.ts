@@ -13,7 +13,7 @@ import { ORDER_OUTCOME } from "@/lib/queries/return-rate";
 import { appendContextMessages, resumeConversationToAi, SHOP_SAID } from "@/lib/sales-chatbot/engine";
 import { recordConversationEvent } from "@/lib/sales-chatbot/events";
 import { AI_DOWN_HANDOFF_REASON, aiHoldOf, aiHoldView, HUMAN_COOLDOWN_MINUTES, humanResumeReason, STAFF_COOLDOWN_REASON_LIST } from "@/lib/sales-chatbot/ai-hold-shared";
-import { startHumanCooldown } from "@/lib/sales-chatbot/conversation-control";
+import { humanCooldownMinutes, startHumanCooldown } from "@/lib/sales-chatbot/conversation-control";
 import { buildMessageTrace, conversationAiBlocks, loadAiUsageForConversation, transportOfConversation } from "@/lib/sales-chatbot/ai-status";
 import { readConversationControl } from "@/lib/sales-chatbot/conversation-control-shared";
 import { HISTORY_CREATED_BY } from "@/lib/sales-chatbot/history-shared";
@@ -28,6 +28,7 @@ import {
   INBOX_LIST_MAX,
   INBOX_OUTCOME_LABEL,
   INBOX_PERIODS,
+  inboxHandlingOf,
   safeAvatarUrl,
   STAFF_IMAGE_MAX_BYTES,
   STAFF_IMAGE_TYPES,
@@ -48,7 +49,7 @@ import {
 
 type StaffImageType = (typeof STAFF_IMAGE_TYPES)[number];
 import { sendBotText, sendPageImages } from "@/lib/sales-chatbot/messenger";
-import { draftCopilotSuggestion } from "@/lib/sales-chatbot/operating-mode";
+import { draftCopilotSuggestion, loadModeConfig } from "@/lib/sales-chatbot/operating-mode";
 import { feedbackFor } from "@/lib/sales-chatbot/inbox-feedback";
 import { CUSTOMER_LEVELS, parseCustomerLevel, type CustomerLevel } from "@/lib/sales-chatbot/levels-shared";
 import type { ChatState } from "@/lib/sales-chatbot/tools";
@@ -126,6 +127,14 @@ export function humanHoldSql(now: Date): SQL<boolean> {
   return sql<boolean>`(coalesce("${sql.raw(C)}"."state"->'control'->>'mode', '') = 'HUMAN' or ("${sql.raw(C)}"."status" = 'HANDOFF' and not (
     (coalesce("${sql.raw(C)}"."handoff_reason", '') in (${reasons}) and coalesce("${sql.raw(C)}"."human_cooldown_until", ${fallback}) <= ${now})
     or (coalesce("${sql.raw(C)}"."handoff_reason", '') = ${AI_DOWN_HANDOFF_REASON} and ${fallback} <= ${now}))))`;
+}
+/**
+ * Thẻ «Người đang xử lý» của hộp thư = `humanHoldSql` HOẶC AI gợi ý (hội thoại ở chế độ COPILOT, hoặc cả tổ chức đang ở chế độ
+ * Copilot) — tương đương `inboxHandlingOf(...) !== "AI"`. Quyết định sản phẩm: bot soạn gợi ý, NGƯỜI gửi ⇒ việc của người.
+ */
+export function inboxHumanSql(now: Date, orgCopilot: boolean): SQL<boolean> {
+  if (orgCopilot) return sql<boolean>`true`;
+  return sql<boolean>`(${humanHoldSql(now)} or coalesce("${sql.raw(C)}"."state"->'control'->>'mode', '') = 'COPILOT')`;
 }
 /** Đã chốt: đơn ERP thật của hội thoại (không tính đơn nháp) hoặc level khách «Đã chốt đơn» (job level). */
 const CLOSED = sql<boolean>`("${sql.raw(C)}"."order_id" is not null or coalesce("${sql.raw(C)}"."customer_level", '') = 'ORDERED' or exists (select 1 from "orders" o where o.sales_conversation_id = "${sql.raw(C)}"."id"))`;
@@ -259,8 +268,9 @@ export async function listInbox(user: SessionUser, rawQuery: unknown, now: Date 
   }
   if (q.phone === "HAS") base.push(HAS_PHONE);
   if (q.phone === "NONE") base.push(sql`not ${HAS_PHONE}`);
-  // Ai đang trả lời (INBOX_HANDLERS) — CÙNG điều kiện với thẻ «AI / Người đang xử lý» (`aiHoldOf`, một nguồn).
-  const byHuman = humanHoldSql(now);
+  // Ai đang trả lời (INBOX_HANDLERS) — CÙNG điều kiện với huy hiệu trên hàng (`inboxHandlingOf`, một nguồn).
+  const orgCopilot = (await loadModeConfig().catch(() => null))?.mode === "COPILOT";
+  const byHuman = inboxHumanSql(now, orgCopilot);
   if (q.handler === "HUMAN") base.push(byHuman);
   if (q.handler === "AI") base.push(sql`not ${byHuman}`);
   if (q.assignee === "none") base.push(isNull(c.assigneeUserId));
@@ -376,31 +386,35 @@ export async function listInbox(user: SessionUser, rawQuery: unknown, now: Date 
     levelCounts,
     phoneCount: Number(countRow?.phone ?? 0),
     total: counts[q.filter],
-    rows: rows.map((r) => ({
-      id: r.id,
-      channel: r.channel,
-      pageId: r.pageId,
-      pageName: r.pageId ? (pageNames.get(r.pageId) ?? null) : null,
-      status: r.status,
-      handoffReason: r.handoffReason,
-      customerName: r.customerName || r.stateName || r.inboundName || "Khách",
-      customerPhone: r.customerPhone || r.statePhone || r.convPhone || null,
-      preview: (previews.get(r.id)?.text ?? "").slice(0, 140),
-      previewSide: previews.get(r.id)?.side ?? null,
-      lastActivityAt: iso(r.activity) ?? new Date(0).toISOString(),
-      waitingSince: r.needsReply ? iso(r.lastCustomerAt) : null,
-      unread: Boolean(r.unread),
-      unreadCount: r.unread ? Math.max(1, Number(r.unreadN ?? 0)) : 0,
-      avatarUrl: avatarOf(r.state),
-      aiHold: aiHoldOf({ status: r.status, handoffReason: r.handoffReason, state: r.state, updatedAt: r.updatedAt, humanCooldownUntil: r.humanCooldownUntil }, now).state,
-      closed: Boolean(r.closed),
-      source: inboxSourceOf(r, facts),
-      assigneeUserId: r.assigneeUserId,
-      assigneeName: r.assigneeName,
-      hasOrder: Boolean(r.hasOrder),
-      labels: labels.get(r.id) ?? [],
-      level: parseCustomerLevel(r.level),
-    })),
+    rows: rows.map((r) => {
+      const hold = aiHoldOf({ status: r.status, handoffReason: r.handoffReason, state: r.state, updatedAt: r.updatedAt, humanCooldownUntil: r.humanCooldownUntil }, now).state;
+      return {
+        id: r.id,
+        channel: r.channel,
+        pageId: r.pageId,
+        pageName: r.pageId ? (pageNames.get(r.pageId) ?? null) : null,
+        status: r.status,
+        handoffReason: r.handoffReason,
+        customerName: r.customerName || r.stateName || r.inboundName || "Khách",
+        customerPhone: r.customerPhone || r.statePhone || r.convPhone || null,
+        preview: (previews.get(r.id)?.text ?? "").slice(0, 140),
+        previewSide: previews.get(r.id)?.side ?? null,
+        lastActivityAt: iso(r.activity) ?? new Date(0).toISOString(),
+        waitingSince: r.needsReply ? iso(r.lastCustomerAt) : null,
+        unread: Boolean(r.unread),
+        unreadCount: r.unread ? Math.max(1, Number(r.unreadN ?? 0)) : 0,
+        avatarUrl: avatarOf(r.state),
+        aiHold: hold,
+        handling: inboxHandlingOf(hold, r.state, orgCopilot),
+        closed: Boolean(r.closed),
+        source: inboxSourceOf(r, facts),
+        assigneeUserId: r.assigneeUserId,
+        assigneeName: r.assigneeName,
+        hasOrder: Boolean(r.hasOrder),
+        labels: labels.get(r.id) ?? [],
+        level: parseCustomerLevel(r.level),
+      };
+    }),
   };
 }
 
@@ -578,6 +592,7 @@ export async function loadInboxThread(user: SessionUser, conversationId: unknown
       botYields: conv.status === "HANDOFF",
       aiHold: aiHoldView(conv, now),
       avatarUrl: avatarOf(conv.state),
+      cooldownMinutes: await humanCooldownMinutes(),
       // Lý do AI KHÔNG trả lời — hỏi đúng các cổng của đường xử lý (ai-status.ts). Không rỗng ⇒ màn hình không được nói «AI đang trả lời».
       aiBlocks: await conversationAiBlocks(conv),
       control: readConversationControl(conv.state),

@@ -58,6 +58,8 @@ export type ControlStatusInput = {
   lapsed: boolean;
   /** Định dạng mốc «dd/mm/yyyy HH:mm» (client truyền `formatDateTime`). */
   formatAt: (iso: string) => string;
+  /** Số phút AI nhường của workspace (`humanCooldownMinutes()`); thiếu ⇒ mặc định. */
+  cooldownMinutes?: number;
 };
 
 /**
@@ -84,7 +86,7 @@ export function controlBarStatus(i: ControlStatusInput): { state: AiDisplayState
   }
   if (state === "AI_BLOCKED") return { state, text: `AI KHÔNG trả lời khách này — ${i.blocks[0].reason}`, note: i.blocks.length > 1 ? `Còn: ${i.blocks.slice(1).map((b) => b.reason).join(" · ")}` : null };
   if (i.mode === "COPILOT") return { state, text: "AI chỉ soạn gợi ý, không gửi — bạn gửi khách.", note: null };
-  return { state, text: `${AI_HOLD_LABEL.AI_ACTIVE}. Bạn gửi tin thì AI nhường ${HUMAN_COOLDOWN_MINUTES} phút; bấm «Tiếp quản» để AI im hẳn.`, note: null };
+  return { state, text: `${AI_HOLD_LABEL.AI_ACTIVE}. Bạn gửi tin thì AI nhường ${i.cooldownMinutes ?? HUMAN_COOLDOWN_MINUTES} phút; bấm «Tiếp quản» để AI im hẳn.`, note: null };
 }
 
 // ─────────────────────────── Dấu vết từng tin khách ───────────────────────────

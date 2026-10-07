@@ -41,18 +41,22 @@ import {
   MESSENGER_OWNS_PAGE_REASON,
   NON_CANONICAL_NOTE,
   PANCAKE_OWNS_PAGE_REASON,
+  ROUTE_SWITCH_NOTE,
   routeVerdict,
   setPageConnectionModeCore,
+  setTransportFactsForTests,
   transportOwnerOf,
   type ConnectionMode,
   type TransportFacts,
 } from "@/lib/sales-chatbot/channel-ownership";
+import { controlBarStatus } from "@/lib/sales-chatbot/ai-status-shared";
 import { DEFAULT_SALES_CHATBOT_CONFIG, SALES_CHATBOT_SETTING_KEY } from "@/lib/sales-chatbot/config";
 import { humanCooldownMinutes, setHumanCooldownMinutesCore } from "@/lib/sales-chatbot/conversation-control";
 import { setSalesChatProviderForTests } from "@/lib/sales-chatbot/engine";
-import { parsePancakeWebhook, processFanpageThread, receiveFanpageEvent, type FanpageEvent } from "@/lib/sales-chatbot/fanpage";
+import { catchUpFanpage, parsePancakeWebhook, processFanpageThread, receiveFanpageEvent, type FanpageEvent } from "@/lib/sales-chatbot/fanpage";
 import { inboxSourceOf, listInbox, loadInboxThread, sendStaffReplyCore } from "@/lib/sales-chatbot/inbox";
-import { INBOX_FILTERS, safeAvatarUrl, unreadBadge } from "@/lib/sales-chatbot/inbox-shared";
+import { INBOX_FILTERS, inboxHandlingOf, safeAvatarUrl, unreadBadge } from "@/lib/sales-chatbot/inbox-shared";
+import { OPERATING_MODE_SETTING_KEY } from "@/lib/sales-chatbot/operating-mode-shared";
 import { connectMessengerPage, disconnectMessengerPage, processMessengerThread, receiveMessengerEvent, refreshMessengerProfile } from "@/lib/sales-chatbot/messenger";
 
 const ORG = "l3-hop-thu";
@@ -118,6 +122,18 @@ function testPure() {
   const pk2 = parsePancakeWebhook({ event_type: "messaging", page_id: "P", data: { conversation: { id: "P_4100", type: "INBOX" }, message: { id: "m2", type: "INBOX", message: "Chào shop", from: { id: "4101", name: "Lan" } } } });
   assert.equal(pk2?.senderId, "4101", "thiếu from_psid ⇒ mã người gửi của tin");
   assert.ok(INBOX_FILTERS.includes("AI") && INBOX_FILTERS.includes("HUMAN") && INBOX_FILTERS.includes("ORDERED") && INBOX_FILTERS.includes("NOT_ORDERED"));
+  // AI gợi ý (bot soạn, NGƯỜI gửi) thuộc nhóm NGƯỜI trên hộp thư — quyết định sản phẩm 07/10/2026: nhân viên không bỏ sót khách.
+  const copilot = { control: { mode: "COPILOT", byUserId: "u1", byName: "Lan", at: new Date().toISOString(), reason: null } };
+  assert.equal(inboxHandlingOf("AI_ACTIVE", null, false), "AI");
+  assert.equal(inboxHandlingOf("AI_ACTIVE", copilot, false), "COPILOT", "hội thoại AI gợi ý ⇒ nhóm người");
+  assert.equal(inboxHandlingOf("AI_ACTIVE", null, true), "COPILOT", "tổ chức ở chế độ Copilot ⇒ nhóm người");
+  assert.equal(inboxHandlingOf("HUMAN_COOLDOWN", copilot, true), "HUMAN");
+  assert.equal(inboxHandlingOf("HUMAN_TAKEOVER", null, false), "HUMAN");
+  // Câu trạng thái nói ĐÚNG số phút nhường workspace đã khai; thiếu ⇒ mặc định.
+  const bar = (cooldownMinutes?: number) =>
+    controlBarStatus({ hold: { state: "AI_ACTIVE", cause: null, until: null, serverNow: new Date().toISOString() }, blocks: [], mode: "AUTO", handoffReason: null, control: null, lapsed: false, formatAt: (s) => s, cooldownMinutes }).text;
+  assert.match(bar(45), /nhường 45 phút/);
+  assert.match(bar(), new RegExp(`nhường ${HUMAN_COOLDOWN_MINUTES} phút`));
 }
 
 // ─────────────────────────── Backfill 0233 trên CSDL nâng cấp ───────────────────────────
@@ -307,6 +323,13 @@ async function testFlow(backfillStmts: readonly string[]) {
       assert.ok(before.queued && before.replies >= 1 && before.sends >= 1, `Pancake trước backfill chạy: ${JSON.stringify(before)}`);
       assert.deepEqual(after, before, "Pancake SAU backfill = TRƯỚC backfill (nhận · số trả lời · số tin gửi · số lượt AI)");
       aConvIds.push((await convOf(PAGE_P, "p-sau")).id);
+      // A2. Đọc đường canonical HỎNG ⇒ Pancake chạy như trước 0233 (không gãy đường đang chạy thật) — khoá nhánh `.catch`.
+      setTransportFactsForTests(() => Promise.reject(new Error("đọc kết nối hỏng")));
+      try {
+        assert.deepEqual(await runPancake("p-hong", "ph.1"), before, "đọc hỏng ⇒ Pancake nhận + trả lời như thường");
+      } finally {
+        setTransportFactsForTests(null);
+      }
 
       // Đường đơn (một tin, một đường) — mốc so cho «AI một lần, usage một lần».
       const s0 = "4100000000100";
@@ -347,10 +370,11 @@ async function testFlow(backfillStmts: readonly string[]) {
       assert.ok(sw.ok && sw.changed && sw.from === "META_DIRECT", JSON.stringify(sw));
       const audSw = await db.select().from(schema.auditLogs).where(and(eq(schema.auditLogs.action, "SALES_CHANNEL_MODE_SET"), eq(schema.auditLogs.entityId, PAGE_M), eq(schema.auditLogs.userId, admin.id)));
       assert.ok(audSw.some((a) => JSON.stringify(a.detail).includes("Chuyển về Pancake để thử")), "nhật ký chuyển đường mang lý do");
-      const pThread2 = `${PAGE_M}_${s2}`;
-      assert.ok((await receiveFanpageEvent(pev(PAGE_M, pThread2, "pk.2", T2, { senderId: s2 }))).queued, "bản của đường chính MỚI được ghi");
+      // Đổi đường ⇒ tin CHỜ (chưa ai giành) của đường cũ bị gác NGAY — không PENDING mãi, không bị trả lời ngược khi chuyển lại.
       const stranded = (await db.select().from(t).where(eq(t.messageId, "m.2")))[0];
-      assert.ok(stranded.status === "SKIPPED" && stranded.note === DUPLICATE_SOURCE_REASON, `bản mắc kẹt bị thay, không bao giờ vào lượt AI: ${JSON.stringify({ s: stranded.status, n: stranded.note })}`);
+      assert.ok(stranded.status === "SKIPPED" && stranded.note === ROUTE_SWITCH_NOTE && stranded.claimId === null, `tin chờ của đường cũ bị gác lúc đổi đường: ${JSON.stringify({ s: stranded.status, n: stranded.note })}`);
+      const pThread2 = `${PAGE_M}_${s2}`;
+      assert.ok((await receiveFanpageEvent(pev(PAGE_M, pThread2, "pk.2", T2, { senderId: s2 }))).queued, "bản của đường chính MỚI được ghi (bản bị gác chưa ai trả lời — không phải «đã có»)");
       const [ai2, us2] = [aiCalls, await usageRows()];
       const pm2 = await processMessengerThread(PAGE_M, s2, { fetch: g.fetch, now: at(31_000) });
       assert.equal(pm2.skipped, PANCAKE_OWNS_PAGE_REASON, "đường Meta nay nhường");
@@ -375,6 +399,20 @@ async function testFlow(backfillStmts: readonly string[]) {
       await receiveMessengerEvent(mev(s4, "m.4a", "Dạ"));
       await receiveMessengerEvent(mev(s4, "m.4b", "Dạ"));
       assert.equal((await db.select({ id: t.id }).from(t).where(and(eq(t.threadId, s4), eq(t.text, "Dạ")))).length, 2, "hai tin thật, hai dòng");
+
+      // ═══ C4. Tin của đường cũ ĐANG được một lượt AI giành lúc đổi đường ⇒ không gác (lượt đó tự chốt); bản của đường mới ⇒ «đã có» ═══
+      const s6 = "4100000000106";
+      const T6 = "Váy này có size XL không shop?";
+      assert.ok((await receiveMessengerEvent(mev(s6, "m.6", T6))).queued);
+      await db.update(t).set({ claimId: "luot-dang-chay", claimedAt: new Date() }).where(eq(t.messageId, "m.6"));
+      assert.ok((await setPageConnectionModeCore(admin, PAGE_M, "PANCAKE_WEBHOOK", "Đổi đường lúc bot đang trả lời")).ok);
+      const claimed = (await db.select().from(t).where(eq(t.messageId, "m.6")))[0];
+      assert.ok(claimed.status === "PENDING" && claimed.claimId === "luot-dang-chay", `tin đang được giành KHÔNG bị gác: ${JSON.stringify({ s: claimed.status, n: claimed.note })}`);
+      const ai6 = aiCalls;
+      assert.deepEqual(await receiveFanpageEvent(pev(PAGE_M, `${PAGE_M}_${s6}`, "pk.6", T6, { senderId: s6 })), { queued: false, reason: DUPLICATE_SOURCE_REASON }, "bản đường mới của tin đang được trả lời ⇒ không ghi (không trả lời đôi)");
+      assert.equal(aiCalls, ai6, "0 lượt AI cho bản của đường mới");
+      await db.update(t).set({ status: "DONE", claimId: null, claimedAt: null, processedAt: new Date() }).where(eq(t.messageId, "m.6"));
+      assert.ok((await setPageConnectionModeCore(admin, PAGE_M, "META_DIRECT", "Về lại Meta trực tiếp")).ok);
 
       // ═══ D. Đường chính KHÔNG chạy ⇒ đường kia lưu tin cho người, 0 lượt AI; khung đường báo ═══
       await db.update(schema.orgChannelPages).set({ status: "DISABLED" }).where(eq(schema.orgChannelPages.pageId, PAGE_M));
@@ -514,11 +552,20 @@ async function testFlow(backfillStmts: readonly string[]) {
       for (const r of all.rows) {
         const d = byId.get(r.id)!;
         const st = aiHoldOf(d, now).state;
-        assert.equal(r.aiHold, st, `huy hiệu = aiHoldOf (${r.id})`);
-        assert.equal(humanIds.has(r.id), st !== "AI_ACTIVE", `thẻ «Người đang xử lý» ≡ aiHoldOf cho ${matrix.find((m) => ids[m.name] === r.id)?.name ?? r.id}: ${st}`);
+        assert.equal(r.aiHold, st, `trạng thái AI của hàng = aiHoldOf (${r.id})`);
+        assert.equal(r.handling, inboxHandlingOf(st, d.state, false), `huy hiệu = inboxHandlingOf (${r.id})`);
+        assert.equal(humanIds.has(r.id), r.handling !== "AI", `thẻ «Người đang xử lý» ≡ huy hiệu cho ${matrix.find((m) => ids[m.name] === r.id)?.name ?? r.id}: ${r.handling}`);
       }
-      const expectHuman = ["nhường còn hạn", "nhường cũ không mốc — còn hạn", "AI hỏng — còn hạn", "cần người (lý do khác)", "cần người (không lý do)", "tiếp quản"];
+      const expectHuman = ["nhường còn hạn", "nhường cũ không mốc — còn hạn", "AI hỏng — còn hạn", "cần người (lý do khác)", "cần người (không lý do)", "tiếp quản", "AI gợi ý"];
       for (const m of matrix) assert.equal(humanIds.has(ids[m.name]), expectHuman.includes(m.name), `ma trận: «${m.name}»`);
+      const cp = all.rows.find((r) => r.id === ids["AI gợi ý"]);
+      assert.ok(cp && cp.aiHold === "AI_ACTIVE" && cp.handling === "COPILOT", "AI gợi ý: đường xử lý KHÔNG đổi (bot vẫn soạn gợi ý), hộp thư xếp vào nhóm người");
+      // Cả tổ chức ở chế độ Copilot ⇒ không hội thoại nào ở nhóm «AI đang trả lời» (bot không gửi gì cho ai).
+      const copilotMode = JSON.stringify({ mode: "COPILOT", aiSharePct: 50 });
+      await db.insert(schema.settings).values({ key: OPERATING_MODE_SETTING_KEY, value: copilotMode }).onConflictDoUpdate({ target: schema.settings.key, set: { value: copilotMode } });
+      const orgCp = await listInbox(admin, { limit: 500 }, now);
+      assert.ok(orgCp.ok && orgCp.counts.AI === 0 && orgCp.counts.HUMAN === orgCp.counts.ALL && orgCp.rows.every((r) => r.handling !== "AI"), `tổ chức Copilot ⇒ mọi hội thoại thuộc nhóm người: ${JSON.stringify(orgCp.ok ? orgCp.counts : orgCp)}`);
+      await db.delete(schema.settings).where(eq(schema.settings.key, OPERATING_MODE_SETTING_KEY));
       assert.ok(ordered.rows.every((r) => r.closed) && notOrdered.rows.every((r) => !r.closed));
       const orderedIds = new Set(ordered.rows.map((r) => r.id));
       assert.ok(orderedIds.has(ids["đã chốt (đơn ERP)"]) && orderedIds.has(ids["đã chốt (level)"]) && !orderedIds.has(ids["đơn nháp"]), "đơn nháp KHÔNG là đã chốt");
@@ -568,6 +615,20 @@ async function testFlow(backfillStmts: readonly string[]) {
       assert.equal(avatars.rows.find((r) => r.id === cE5)?.avatarUrl, null, "URL mang khoá ⇒ chữ cái");
       aConvIds.push(convU, cE1);
 
+      // ═══ I0. Gỡ Meta trực tiếp khi KHÔNG còn đường nào chạy page ⇒ bỏ dòng canonical (về luật mặc định), có nhật ký ═══
+      // Dòng META_DIRECT ở lại thì nối Pancake sau đó AI im: đường chính trỏ vào đường đã gỡ. (Pancake lúc này nối PAGE_P.)
+      assert.ok("ok" in (await disconnectMessengerPage(admin, PAGE_M, { fetch: g.fetch })));
+      assert.equal((await db.select().from(modesT).where(eq(modesT.pageId, PAGE_M))).length, 0, "không còn đường nào ⇒ bỏ dòng canonical");
+      const audClear = await db.select().from(schema.auditLogs).where(and(eq(schema.auditLogs.action, "SALES_CHANNEL_MODE_SET"), eq(schema.auditLogs.entityId, PAGE_M)));
+      assert.ok(audClear.some((a) => a.userId === admin.id && JSON.stringify(a.detail).includes("DISCONNECT_META_NO_ROUTE")), "nhật ký bỏ dòng");
+      await setPancakePage(PAGE_M);
+      assert.equal(transportOwnerOf(await loadTransportFacts(), PAGE_M), "PANCAKE", "nối Pancake sau đó ⇒ Pancake chạy page ngay, AI không im");
+      // Nối lại Meta (Pancake về PAGE_P) để khối I kiểm nhánh «Pancake đang chạy page».
+      await setPancakePage(PAGE_P);
+      const reconn = await connectMessengerPage(admin, { id: PAGE_M, name: "Shop L3", token: PAGE_TOKEN, canMessage: true }, { fetch: g.fetch });
+      assert.ok("ok" in reconn, JSON.stringify(reconn));
+      assert.equal((await db.select().from(modesT).where(eq(modesT.pageId, PAGE_M)))[0]?.mode, "META_DIRECT");
+
       // ═══ I. Gỡ Meta trực tiếp của page Pancake đang chạy ⇒ đường chính về Pancake (hệ quả tường minh, nhật ký) ═══
       await setPancakePage(PAGE_M);
       const off = await disconnectMessengerPage(admin, PAGE_M, { fetch: g.fetch });
@@ -575,6 +636,31 @@ async function testFlow(backfillStmts: readonly string[]) {
       const rowOff = (await db.select().from(modesT).where(eq(modesT.pageId, PAGE_M)))[0];
       assert.ok(rowOff.mode === "PANCAKE_WEBHOOK" && rowOff.source === "MANUAL" && rowOff.setByUserId === admin.id, JSON.stringify(rowOff));
       assert.equal(transportOwnerOf(await loadTransportFacts(), PAGE_M), "PANCAKE");
+
+      // ═══ J. Lượt QUÉT LẠI của Pancake không trả lời bù tin khách TRƯỚC mốc người đổi đường chính (lúc đó Meta giữ page) ═══
+      const switchedAt = rowOff.updatedAt.getTime();
+      const isoAt = (ms: number) => new Date(ms).toISOString().replace("Z", "");
+      const cuMsgs: Record<string, Record<string, unknown>[]> = {
+        "cu-truoc": [{ id: "cu-truoc.1", message: "Shop ơi áo này còn không?", from: { id: "cust-cu-truoc" }, inserted_at: isoAt(switchedAt - 4 * MIN) }],
+        "cu-sau": [{ id: "cu-sau.1", message: "Cho em hỏi giá váy hoa", from: { id: "cust-cu-sau" }, inserted_at: isoAt(switchedAt + 2 * MIN) }],
+      };
+      const cuCalls: Call[] = [];
+      const cuFetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        cuCalls.push({ url, init });
+        const thread = /\/conversations\/([^/?]+)\/messages/.exec(url)?.[1];
+        const list = Object.entries(cuMsgs).map(([id, ms]) => {
+          const last = ms[ms.length - 1];
+          return { id, updated_at: last.inserted_at, snippet: last.message, last_sent_by: { id: (last.from as { id: string }).id }, from: { name: `Khách ${id}` } };
+        });
+        const body = init?.method === "POST" ? { success: true, id: `cu-out-${cuCalls.length}` } : url.includes("/conversations?") ? { success: true, conversations: list } : thread ? { success: true, messages: cuMsgs[decodeURIComponent(thread)] ?? [] } : { success: true };
+        return new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
+      }) as typeof fetch;
+      const cu = await catchUpFanpage({ fetch: cuFetch, now: () => new Date(switchedAt + 5 * MIN) });
+      const postsTo = (thread: string) => cuCalls.filter((x) => x.init?.method === "POST" && x.url.includes(`/conversations/${thread}/messages`)).length;
+      assert.ok(postsTo("cu-sau") >= 1, `tin SAU mốc đổi đường ⇒ vẫn trả lời bù: ${JSON.stringify(cu)}`);
+      assert.equal(postsTo("cu-truoc"), 0, `tin TRƯỚC mốc đổi đường ⇒ không trả lời bù qua đường mới: ${JSON.stringify(cu)}`);
+      assert.equal((await db.select({ id: t.id }).from(t).where(eq(t.messageId, "cu-truoc.1"))).length, 0, "không nhận tin cũ vào hàng chờ");
     });
 
     // ═══ H. Cô lập tổ chức ═══
@@ -625,7 +711,7 @@ export async function testSaasL3Inbox() {
     await cleanupOrg(ORG_B);
   }
   console.log(
-    "✓ Hộp thư hợp nhất + song song Pancake/Meta: đường canonical lưu theo page (backfill 0233 giữ ĐÚNG đường hôm nay — page Pancake trước = sau, chạy lại không nhân dòng); page mới nối Meta ⇒ META_DIRECT; cùng tin hai webhook ⇒ 1 dòng, AI/sổ AI/tin gửi như một đường; chuyển đường giữa chừng ⇒ AI đúng một lần; đường phụ lưu cho người, 0 AI; người trả lời từ ERP · Pancake · Hộp thư Meta ⇒ AI nhường ở cả hai chế độ; số phút nhường cấu hình theo workspace; thẻ AI/Người ≡ aiHoldOf trên ma trận 14 dòng; Đã chốt/Chưa chốt phủ kín; số chưa đọc; ảnh đại diện Graph (lỗi quyền ⇒ chữ cái, không lộ token); cô lập tổ chức",
+    "✓ Hộp thư hợp nhất + song song Pancake/Meta: đường canonical lưu theo page (backfill 0233 giữ ĐÚNG đường hôm nay — page Pancake trước = sau, chạy lại không nhân dòng); page mới nối Meta ⇒ META_DIRECT; cùng tin hai webhook ⇒ 1 dòng, AI/sổ AI/tin gửi như một đường; chuyển đường giữa chừng ⇒ AI đúng một lần; đường phụ lưu cho người, 0 AI; người trả lời từ ERP · Pancake · Hộp thư Meta ⇒ AI nhường ở cả hai chế độ; số phút nhường cấu hình theo workspace; thẻ AI/Người ≡ huy hiệu trên ma trận 14 dòng (AI gợi ý thuộc nhóm người, cả hội thoại lẫn chế độ tổ chức); đổi đường ⇒ tin chờ đường cũ bị gác, tin đang giành không trả lời đôi, quét lại không trả lời bù tin trước mốc đổi; đọc đường hỏng ⇒ Pancake chạy như cũ; gỡ đường cuối ⇒ bỏ dòng canonical; Đã chốt/Chưa chốt phủ kín; số chưa đọc; ảnh đại diện Graph (lỗi quyền ⇒ chữ cái, không lộ token); cô lập tổ chức",
   );
 }
 
