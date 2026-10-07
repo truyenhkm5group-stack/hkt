@@ -16,7 +16,7 @@
  * dòng nào vượt tồn KHẢ DỤNG đã biết, và `customer_confirmation` là nguyên văn một đoạn trong câu CUỐI của khách — model
  * không tự chốt thay khách được.
  */
-import { and, desc, eq, inArray, ne, or, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, ne, or } from "drizzle-orm";
 import { z } from "zod";
 import { getDb, schema } from "@/db";
 import type { AiToolDef } from "@/lib/ai/provider";
@@ -53,7 +53,14 @@ export { SALES_STAGE_LABEL, SALES_STAGES, type SalesStage } from "@/lib/sales-ch
 export type ChatState = {
   /** `at` = lần ĐẦU khách để lại SĐT này (02/10/2026 — báo cáo chi phí AI / SĐT theo ngày); dòng cũ không có mốc. */
   /** `savedAddress` = địa chỉ do MÁY CHỦ điền từ đơn cũ khớp qua SĐT (`use_saved_address`) — bot chỉ thấy bản đã che. */
-  customer?: { id: string | null; name: string; phone: string; address: string; province: string; simulated: boolean; at?: string; savedAddress?: boolean };
+  /**
+   * `verifiedIdentity` = hồ sơ là CHÍNH người đang nhắn — khớp mã Facebook (`returning.ts`, mức FB_ID). Chỉ khi đó hội thoại được
+   * đọc dữ liệu thuộc chủ hồ sơ: lịch sử mua, bảng giá riêng, hạn mức nợ. Khớp hồ sơ có sẵn qua SĐT gõ tay, hồ sơ dựng từ địa chỉ
+   * máy điền (`savedAddress`), đơn đã lên trong chính hội thoại (ai cũng lên được đơn ghi SĐT người khác), hay state cũ ⇒ không
+   * (review bảo mật 08/10/2026). `savedAddress` = địa chỉ / tên do MÁY CHỦ điền từ
+   * hồ sơ chủ SĐT — mọi màn đọc cho khách phải che.
+   */
+  customer?: { id: string | null; name: string; phone: string; address: string; province: string; simulated: boolean; at?: string; savedAddress?: boolean; verifiedIdentity?: boolean };
   /**
    * `shownTurn` = lượt (seq tin khách) bot lên / sửa đơn nháp và đọc tóm tắt; `firstShownTurn` = lượt khách thấy tóm tắt LẦN
    * ĐẦU. Chưa từng thấy tóm tắt ⇒ chốt chỉ ở lượt SAU; đã thấy ở lượt trước rồi đồng ý thêm / sửa món ⇒ sửa và chốt luôn.
@@ -233,7 +240,7 @@ const PROCESS_DEFS: Record<ProcessTool, AiToolDef> = {
   },
   lookup_customer: {
     name: "lookup_customer",
-    description: "Kiểm tra KHÁCH CŨ theo số điện thoại khách vừa cho: đã mua bao nhiêu đơn, gợi ý địa chỉ cũ (đã che một phần). CHỈ để hỏi lại khách «giao về địa chỉ cũ … phải không ạ?» — không tự điền khi khách chưa xác nhận.",
+    description: "Kiểm tra KHÁCH CŨ theo số điện thoại khách vừa cho: có trong sổ không, tên gọi + khu vực địa chỉ cũ (đã che). CHỈ để hỏi lại khách «giao về địa chỉ cũ … phải không ạ?» — không tự điền khi khách chưa xác nhận, không nói lịch sử mua.",
     inputSchema: { type: "object", properties: { phone: { type: "string" } }, required: ["phone"], additionalProperties: false },
     kind: "read",
   },
@@ -285,10 +292,29 @@ async function busyOfDay(day: string) {
 }
 
 /** Địa chỉ cũ ĐÃ CHE cho khách xác nhận: chỉ hai phần cuối (vd «…, Hà Nam, Thành phố Hải Phòng») — người gõ SĐT của người khác không đọc được số nhà. */
+/** Cấp hành chính đầu phần địa chỉ — phần mang nó được giữ khi che (không phải số nhà / tên đường). */
+const ADMIN_PART = /^(phường|p\.|xã|thị trấn|tt\.?|quận|q\.|huyện|h\.|thị xã|tx\.?|thành phố|tp\.?|tỉnh)\s/i;
+
+/**
+ * Địa chỉ ĐÃ CHE cho người chưa xác minh danh tính: KHÔNG bao giờ phần đầu (số nhà · ngõ · đường), không phần nào mang chữ số
+ * trừ cấp hành chính có tên («Quận 1»), chỉ giữ tối đa HAI cấp cuối — cấp hành chính có tên, hoặc phần cuối (tỉnh / thành).
+ * «12 Hàng Bạc, Hoàn Kiếm» ⇒ «…, Hoàn Kiếm»; «12 Ngõ 5, Lê Lợi, Hà Đông» ⇒ «…, Hà Đông» (review bảo mật 08/10/2026: bản cũ
+ * giữ hai phần cuối nên địa chỉ hai phần lộ nguyên, ba phần lộ tên đường). HÀM THUẦN.
+ */
 export function maskAddress(address: string): string {
   const parts = address.split(",").map((p) => p.trim()).filter(Boolean);
-  if (parts.length <= 1) return parts.length ? "…" : "";
-  return `…, ${parts.slice(-2).join(", ")}`;
+  if (!parts.length) return "";
+  const rest = parts.slice(1);
+  const keep = rest.filter((p, i) => ADMIN_PART.test(`${p} `) || (i === rest.length - 1 && !/\d/.test(p)));
+  return keep.length ? `…, ${keep.slice(-2).join(", ")}` : "…";
+}
+
+/** Tên gọi (chữ cuối) — người nhận lấy từ hồ sơ chủ SĐT chỉ được đọc cho khách ở dạng này. */
+const givenName = (name: string) => name.trim().split(/\s+/).pop() ?? "";
+
+/** Hồ sơ của hội thoại đã XÁC MINH là người đang nhắn ⇒ mã hồ sơ cho dữ liệu riêng (bảng giá riêng · lịch sử); không ⇒ `null`. */
+function verifiedCustomerId(state: ChatState): string | null {
+  return state.customer && state.customer.verifiedIdentity === true ? state.customer.id : null;
 }
 
 const price = (n: number | null) => (n === null ? "chưa có giá" : formatVND(n));
@@ -325,7 +351,9 @@ function unitPriceFor(it: CatalogItem, quantity: number, books: Awaited<ReturnTy
  * cho cùng một lượt mua (lỗi mạng, gọi lại) trả về ĐÚNG đơn đầu — không đơn thứ hai.
  */
 function agentOrderOpts(ctx: ToolContext, state: ChatState, creating: boolean): AgentOrderOptions {
-  return { pricing: ctx.config.wholesalePricing ? "PRICE_BOOK" : "RETAIL", idempotencyKey: creating ? `sales-chat:${ctx.conversationId}:${state.pastOrders?.length ?? 0}` : null, allowShortStock: ctx.config.sellWithoutStockCheck };
+  // Bảng giá RIÊNG của khách chỉ khi danh tính đã xác minh — lõi đơn tính lại đúng chế độ này nên báo giá và đơn không lệch nhau.
+  const pricing = !ctx.config.wholesalePricing ? "RETAIL" : verifiedCustomerId(state) ? "PRICE_BOOK" : "DEFAULT_BOOK";
+  return { pricing, idempotencyKey: creating ? `sales-chat:${ctx.conversationId}:${state.pastOrders?.length ?? 0}` : null, allowShortStock: ctx.config.sellWithoutStockCheck };
 }
 
 /** `address` = địa chỉ giao (đơn nháp / khách đã lưu) — cho luật miễn ship theo khu vực; `null` khi chưa biết. */
@@ -409,10 +437,13 @@ function recipientFrom(input: { recipient_name?: string; recipient_phone?: strin
 /** Người nhận bot được đọc cho khách: địa chỉ máy chủ điền từ đơn cũ (khớp qua SĐT) chỉ hiện bản ĐÃ CHE. */
 function recipientView(r: Recipient, state: ChatState): Recipient & { address_note?: string } {
   if (!state.customer?.savedAddress || r.address !== state.customer.address) return r;
-  return { ...r, address: maskAddress([r.address, r.province].filter((x) => x.trim()).join(", ")), province: "", address_note: "Địa chỉ cũ của khách (đã che) — đọc đúng như vậy, không đoán số nhà." };
+  // Địa chỉ + họ tên do MÁY CHỦ điền từ hồ sơ chủ SĐT ⇒ cả hai đều che (họ tên đầy đủ cũng là dữ liệu của chủ hồ sơ).
+  return { ...r, name: givenName(r.name) || r.name, address: maskAddress([r.address, r.province].filter((x) => x.trim()).join(", ")), province: "", address_note: "Địa chỉ cũ của khách (đã che) — đọc đúng như vậy, không đoán số nhà, không đọc họ tên đầy đủ." };
 }
 
 function failureText(r: { errors: { field: string; message: string }[] }): string {
+  // Lỗi HẠN MỨC NỢ mang họ tên + dư nợ của chủ hồ sơ ⇒ model chỉ nhận câu chung (nhân viên xem chi tiết trên đơn).
+  if (r.errors.some((e) => e.field === "customerId")) return "Đơn cần nhân viên duyệt trước khi chốt — chuyển nhân viên (handoff_to_human «Đơn cần duyệt»).";
   return r.errors.map((e) => e.message).join(" · ") || "Không ghi được.";
 }
 
@@ -485,7 +516,7 @@ export async function executeTool(name: string, rawInput: unknown, ctx: ToolCont
       if (!it) return err(`${name}: không có mã`, "Không có mẫu mã này (hoặc đã thôi bán).", state);
       if (name === "get_current_price") {
         const qty = z.number().int().min(1).max(100_000).safeParse(input.quantity);
-        const books = await booksForChat(ctx.config, state.customer?.id ?? null);
+        const books = await booksForChat(ctx.config, verifiedCustomerId(state));
         if (!books) return ok(`Giá ${it.name}: ${price(it.price)}`, { variant_id: it.variantId, name: it.name, price: it.price, price_text: price(it.price), as_of: new Date().toISOString() }, state);
         const quantity = qty.success ? qty.data : 1;
         const unit = unitPriceFor(it, quantity, books);
@@ -521,7 +552,7 @@ export async function executeTool(name: string, rawInput: unknown, ctx: ToolCont
       const items = itemsZ.safeParse(input.items);
       if (!items.success) return err("Tính giỏ: sai đầu vào", "items phải là danh sách { variant_id, quantity ≥ 1 }.", state);
       const knownAddress = state.draft ? [state.draft.recipient.address, state.draft.recipient.province].join(", ") : state.customer ? [state.customer.address, state.customer.province].join(", ") : null;
-      const priced = await priceLines(mergeLines(items.data.map((i) => ({ variantId: i.variant_id, quantity: i.quantity }))), ctx.config, state.customer?.id ?? null, knownAddress);
+      const priced = await priceLines(mergeLines(items.data.map((i) => ({ variantId: i.variant_id, quantity: i.quantity }))), ctx.config, verifiedCustomerId(state), knownAddress);
       if (priced.missing.length) return err("Tính giỏ: mã không có", `Không có mẫu mã: ${priced.missing.join(", ")}.`, state);
       if (priced.unpriced.length) return { ...err("Tính giỏ: mã chưa có giá", `Chưa có giá: ${priced.unpriced.join(", ")} — không báo giá, chuyển nhân viên.`, state), requireHuman: `Giá bất thường: ${priced.unpriced.join(", ")} chưa có giá` };
       return ok(`Giỏ: ${formatVND(priced.subtotal)}${priced.total !== null ? ` · COD ${formatVND(priced.total)}` : ""}`, cartView(priced), state);
@@ -537,6 +568,7 @@ export async function executeTool(name: string, rawInput: unknown, ctx: ToolCont
         if (!quote.success || !foldVi(ctx.lastUserText).includes(foldVi(quote.data))) return err("Lưu khách: khách chưa xác nhận địa chỉ cũ", "customer_confirmation phải là nguyên văn lời khách xác nhận giao về địa chỉ cũ, trong câu CUỐI của khách. Khách chưa xác nhận ⇒ hỏi lại.", state);
         const typed = typeof input.name === "string" ? input.name.trim() : "";
         fields = { name: typed.length >= 2 ? typed : r.name, phone: r.phone, address: r.address, province: r.province };
+        // Mức PHONE — và THREAD mà chính nó đã là địa chỉ máy điền (`returning.ts` trả về mức PHONE) — đều là dữ liệu chủ SĐT.
         saved = r.trust === "PHONE";
       }
       // Họ tên: AI ghi ⇒ dùng; trống / quá ngắn ⇒ tên Facebook của khách (kênh fanpage) — không bắt khách khai lại tên.
@@ -551,7 +583,16 @@ export async function executeTool(name: string, rawInput: unknown, ctx: ToolCont
       }
       const r = await createCustomerAsAgent(ctx.agent, { name: v.data.name, phone: v.data.phone, address: v.data.address, province: v.data.province });
       if (!r.ok) return err("Lưu khách: lỗi", failureText(r), state);
-      state.customer = { id: r.id, name: v.data.name, phone: v.data.phone, address: v.data.address, province: v.data.province ?? "", simulated: false, at: firstAt, ...(saved ? { savedAddress: true } : {}) };
+      // XÁC MINH = hồ sơ chính là hồ sơ khớp mã Facebook của người đang nhắn (FB_ID) — DUY NHẤT. Không đủ: hồ sơ «mới» (khoá theo
+      // SĐT — ai gõ trước SĐT của người chưa có hồ sơ thì đơn sau này của chủ SĐT gắn vào hồ sơ ấy, review bảo mật L1), và «hội
+      // thoại từng có đơn của hồ sơ» (đặt một đơn ghi SĐT X không chứng minh là chủ SĐT X: kẻ gian tự lên đơn nháp mang SĐT nạn
+      // nhân ngay trong hội thoại của mình — review bảo mật vòng 3, CRITICAL). Đã xác minh ở lượt trước của CHÍNH hội thoại và vẫn
+      // là hồ sơ ấy (khách đổi địa chỉ giữa chừng — lượt sau `ctx.returning` đã là mức THREAD) ⇒ giữ cờ, không thì báo giá riêng
+      // rồi đơn tính bảng mặc định (review vòng 4 L-a). Cờ trong state chỉ máy chủ ghi, và chỉ ở vế FB_ID.
+      const verifiedIdentity = (ctx.returning?.trust === "FB_ID" && ctx.returning.customerId === r.id) || (state.customer?.verifiedIdentity === true && state.customer.id === r.id);
+      // Địa chỉ máy điền giữ nhãn khi khách gọi lại công cụ với ĐÚNG thông tin đó — không để lượt sau bỏ che (review bảo mật H1).
+      const keepSaved = saved || (state.customer?.savedAddress === true && state.customer.phone === v.data.phone && state.customer.address === v.data.address);
+      state.customer = { id: r.id, name: v.data.name, phone: v.data.phone, address: v.data.address, province: v.data.province ?? "", simulated: false, at: firstAt, ...(keepSaved ? { savedAddress: true } : {}), ...(verifiedIdentity ? { verifiedIdentity: true } : {}) };
       return ok(r.existing ? `Khách cũ (${v.data.phone})` : `Đã lưu khách ${v.data.name}`, { customer_id: r.id, existing_customer: r.existing }, state);
     }
     case "create_draft_order":
@@ -575,7 +616,7 @@ export async function executeTool(name: string, rawInput: unknown, ctx: ToolCont
       const base: Recipient = existing?.recipient ?? { name: state.customer.name, phone: state.customer.phone, address: state.customer.address, province: state.customer.province };
       const lines = v.data.items ? mergeLines(v.data.items.map((i) => ({ variantId: i.variant_id, quantity: i.quantity }))) : existing!.lines;
       const recipient = recipientFrom(v.data, base);
-      const priced = await priceLines(lines, ctx.config, state.customer?.id ?? null, [recipient.address, recipient.province].join(", "));
+      const priced = await priceLines(lines, ctx.config, verifiedCustomerId(state), [recipient.address, recipient.province].join(", "));
       if (priced.missing.length) return err("Đơn nháp: mã không có", `Không có mẫu mã: ${priced.missing.join(", ")}.`, state);
       if (priced.unpriced.length) return { ...err("Đơn nháp: mã chưa có giá", `Chưa có giá: ${priced.unpriced.join(", ")}.`, state), requireHuman: `Giá bất thường: ${priced.unpriced.join(", ")} chưa có giá` };
       const firstShown = existing?.firstShownTurn ?? existing?.shownTurn ?? ctx.turn;
@@ -609,7 +650,7 @@ export async function executeTool(name: string, rawInput: unknown, ctx: ToolCont
       }
       const d = state.draft;
       if (!d.recipient.name || !d.recipient.phone || !d.recipient.address) return err("Chốt: thiếu người nhận", "Thiếu tên / SĐT / địa chỉ người nhận.", state);
-      const priced = await priceLines(d.lines, ctx.config, state.customer?.id ?? null, [d.recipient.address, d.recipient.province].join(", "));
+      const priced = await priceLines(d.lines, ctx.config, verifiedCustomerId(state), [d.recipient.address, d.recipient.province].join(", "));
       if (priced.missing.length || priced.unpriced.length) return err("Chốt: mã không bán được", "Có mẫu mã không còn bán hoặc chưa có giá — chuyển nhân viên.", state);
       const changed = priced.lines.filter((l) => d.unitPrices[l.variantId] !== l.unitPrice);
       if (changed.length) {
@@ -667,9 +708,9 @@ export async function executeTool(name: string, rawInput: unknown, ctx: ToolCont
       const db = await getDb();
       const [c] = await db.select({ id: schema.customers.id, name: schema.customers.name, address: schema.customers.address }).from(schema.customers).where(eq(schema.customers.phone, phone)).limit(1);
       if (!c) return ok("Khách mới (chưa có SĐT trong sổ)", { returning_customer: false }, state);
-      const [n] = await db.select({ n: sql<number>`count(*)::int` }).from(schema.orders).where(and(eq(schema.orders.customerId, c.id), ne(schema.orders.stage, "DELETED")));
+      // SĐT gõ tay ⇒ chỉ GỢI Ý tên gọi + địa chỉ ĐÃ CHE; KHÔNG số đơn / lịch sử mua của chủ SĐT (kể cả trong `__summary` model đọc).
       const nameHint = c.name.trim().split(/\s+/).pop() ?? "";
-      return ok(`Khách cũ · ${Number(n?.n ?? 0)} đơn`, { returning_customer: true, orders: Number(n?.n ?? 0), name_hint: nameHint, previous_address_hint: maskAddress(c.address) || null, note: "Chỉ GỢI Ý — hỏi khách xác nhận địa chỉ, không tự điền." }, state);
+      return ok("Khách cũ (SĐT có trong sổ)", { returning_customer: true, name_hint: nameHint, previous_address_hint: maskAddress(c.address) || null, note: "Chỉ GỢI Ý — hỏi khách xác nhận địa chỉ, không tự điền. Không nói lịch sử mua của SĐT này." }, state);
     }
     case "get_order_status": {
       // TRẠNG THÁI ĐƠN CỦA CHÍNH KHÁCH NÀY (Commerce Truth · Master Mission mục V). PHẠM VI: CHỈ đơn gắn với hội thoại này

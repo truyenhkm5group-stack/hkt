@@ -27,11 +27,19 @@ async function inHostOrg<T>(fn: (orgName: string) => Promise<T | { error: string
 
 export type PublicChatOpened = { ok: true; shopName: string; botName: string; view: ChatView } | { error: string };
 
+/**
+ * Bản xem cho trình duyệt CÔNG KHAI: bỏ vết công cụ (`tools` — tóm tắt nội bộ như «Khách cũ (SĐT có trong sổ)», giá theo bảng
+ * riêng). Ô chat công khai không hiện chúng, nhưng gửi qua mạng là ai mở công cụ trình duyệt cũng đọc được (review bảo mật).
+ */
+export function publicView(v: ChatView): ChatView {
+  return { ...v, messages: v.messages.map((m) => ({ role: m.role, text: m.text })) };
+}
+
 export async function startPublicChat(visitorKey: string | null): Promise<PublicChatOpened> {
   return inHostOrg<{ ok: true; shopName: string; botName: string; view: ChatView }>(async (shopName) => {
     const conv = await openConversation("WEB", { visitorKey });
     const view = await conversationView(conv.id);
-    return view ? { ok: true, shopName, botName: conv.botName, view } : { error: "Không mở được hội thoại." };
+    return view ? { ok: true, shopName, botName: conv.botName, view: publicView(view) } : { error: "Không mở được hội thoại." };
   });
 }
 
@@ -41,7 +49,7 @@ export async function sendPublicChat(visitorKey: string, conversationId: string,
     // Đồng hồ khách AI (L5): câu DO MODEL SINH trả về trình duyệt của khách = đã gửi thành công (kênh web không có bước gửi
     // riêng). Câu mẫu / im lặng ⇒ không đếm. Lỗi ghi sổ bị nuốt trong `noteAiCustomerReply`.
     if (r.ok && (r.aiTexts?.length ?? 0) > 0) await noteAiCustomerReply(conversationId, new Date());
-    return r.ok ? { ok: true as const, view: r.view } : { error: r.error, view: r.view ?? null };
+    return r.ok ? { ok: true as const, view: publicView(r.view) } : { error: r.error, view: r.view ? publicView(r.view) : null };
   });
 }
 

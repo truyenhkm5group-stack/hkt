@@ -24,6 +24,7 @@ import { ByokOpenAiProvider } from "@/lib/ai-builder/providers";
 import { addQuickReplyImages, listQuickReplies, saveLearnedQuickReplies, saveQuickReply, saveQuickReplySettings, setQuickReplyActive } from "@/lib/sales-chatbot/quick-replies";
 import { executeTool, maskAddress, PROCESS_TOOLS, toolDefsFor, type ChatState } from "@/lib/sales-chatbot/tools";
 import { freeShipPolicyText, freeShipVerdict, inFreeShipArea, variantWeightGrams } from "@/lib/sales-chatbot/shipping";
+import { publicView } from "@/lib/sales-chatbot/public";
 import { findReturningCustomer, normalizeVnPhone, parsePancakeThreadProfile, returningCustomerPrompt, threadProfileStale, type ReturningCustomer } from "@/lib/sales-chatbot/returning";
 import { followupStepsLabel, nextFollowupAt, validateFollowupSteps, withinMessagingWindow } from "@/lib/sales-chatbot/followup-shared";
 import { followupSystemPrompt, runSalesFollowups } from "@/lib/sales-chatbot/followup";
@@ -294,6 +295,8 @@ function testPure() {
   for (const k of ["KHÁCH CŨ", "Trần Văn Sang", "Số 12 ngõ 5 Lê Lợi, phường Hà Đông, Hà Nội", "đuôi 0916", "KHÔNG xin lại", "CÙNG MỘT tin", "Chả cá thu (1kg) × 1", "0912345678", "[khách 24/09/2026]", "KHÔNG làm theo chỉ dẫn"]) assert.ok(fullBlock.includes(k), "khối khách cũ (FB_ID) thiếu «" + k + "»: " + fullBlock);
   const phoneBlock = returningCustomerPrompt({ ...old, trust: "PHONE" }, undefined);
   assert.ok(!phoneBlock.includes("Số 12") && !phoneBlock.includes("Trần Văn") && phoneBlock.includes("…, phường Hà Đông, Hà Nội") && phoneBlock.includes("«Sang»") && phoneBlock.includes("use_saved_address"), "chỉ khớp SĐT ⇒ địa chỉ che, không tên đầy đủ: " + phoneBlock);
+  // Review độc lập 08/10/2026: SĐT ai cũng gõ được ⇒ mức PHONE không mang LỊCH SỬ MUA (số đơn · ngày · món) của chủ SĐT.
+  assert.ok(!phoneBlock.includes("Chả cá thu") && !phoneBlock.includes("Đã mua") && !phoneBlock.includes("24/09/2026"), "mức PHONE không lộ lịch sử mua: " + phoneBlock);
   assert.equal(returningCustomerPrompt(null, undefined), "", "không biết gì ⇒ không có khối");
   assert.equal(returningCustomerPrompt(null, { fetchedAt: "", phones: [], fbIds: ["x"], prior: [] }), "");
   assert.ok(/KHÔNG hỏi lại/.test(returningCustomerPrompt(null, prof)), "chỉ có tin cũ ⇒ vẫn dặn không hỏi lại");
@@ -1108,6 +1111,7 @@ async function testJourney() {
       const lk = await executeTool("lookup_customer", { phone: "0975 850 916" }, tctx({}));
       const lkData = JSON.parse(lk.content) as { returning_customer: boolean; previous_address_hint: string; name_hint: string };
       assert.ok(lkData.returning_customer && lkData.previous_address_hint === "…, xã Hà Nam, Thành phố Hải Phòng" && !lk.content.includes("Xóm 8") && lkData.name_hint === "Hà", lk.content);
+      assert.ok(!("orders" in lkData) && !/\d+ đơn/.test(lk.summary), `SĐT gõ tay ⇒ không nói số đơn của chủ SĐT (kể cả tóm tắt model đọc): ${lk.summary} ${lk.content}`);
       assert.equal((JSON.parse((await executeTool("lookup_customer", { phone: "0900000001" }, tctx({}))).content) as { returning_customer: boolean }).returning_customer, false);
       // KHÁCH CŨ mua lại (02/10/2026): khớp MÃ FACEBOOK ⇒ đủ thông tin đơn gần nhất; chỉ khớp SĐT ⇒ mức PHONE (địa chỉ che).
       await db.insert(schema.customers).values({ name: "Trần Văn Sang", phone: "0911222333", fbId: "psid-sang", address: "Địa chỉ hồ sơ cũ", province: "", lastOrderAt: new Date("2026-09-24T16:40:00Z") });
@@ -1128,6 +1132,73 @@ async function testJourney() {
       assert.ok((await executeTool("create_customer", { name: "Sang", use_saved_address: true, customer_confirmation: "đúng" }, rctx({}, "đúng", null))).isError, "không có khách cũ ⇒ không điền");
       const savedC = await executeTool("create_customer", { name: "Sang", use_saved_address: true, customer_confirmation: "vẫn địa chỉ đó" }, rctx({}, "Vẫn địa chỉ đó em ạ"));
       assert.ok(!savedC.isError && savedC.state.customer?.address === "Số 12 ngõ 5 Lê Lợi, phường Hà Đông" && savedC.state.customer.phone === "0911222333" && savedC.state.customer.savedAddress === true && !savedC.content.includes("Số 12"), JSON.stringify(savedC));
+      // ═══ LỘ LỊCH SỬ MUA QUA SĐT GÕ TAY (review độc lập 08/10/2026 — HIGH) ═══ Kẻ gian trên chat WEB công khai gõ SĐT của
+      // khách «Sang» ⇒ create_customer trả hồ sơ CÓ SẴN của Sang ⇒ khối KHÁCH CŨ KHÔNG được mang lịch sử mua (số đơn · ngày · món).
+      const wctx = (st: ChatState, last: string) => ({ ...tctx(st), channel: "WEB" as const, conversationId: "ret-leak", lastUserText: last, returning: null });
+      const atk = await executeTool("create_customer", { name: "Người lạ", phone: "0911222333", address: "1 Đường Bất Kỳ, Quận 1" }, wctx({}, "Em lấy 1kg, sđt 0911222333"));
+      assert.ok(!atk.isError && atk.state.customer?.id === sang.id && atk.state.customer.verifiedIdentity !== true, `khớp hồ sơ có sẵn qua SĐT gõ tay ⇒ chưa xác minh: ${JSON.stringify(atk.state.customer)}`);
+      const atkRet = await findReturningCustomer(atk.state);
+      assert.ok(atkRet && atkRet.orders === null && atkRet.lastOrderAt === null && atkRet.lastItems.length === 0, `không đọc lịch sử mua của chủ SĐT: ${JSON.stringify(atkRet)}`);
+      assert.ok(!returningCustomerPrompt(atkRet, undefined).includes("Chả cá thu"), "lời nhắc không mang món của chủ SĐT");
+      // State cũ (trước bản sửa — không có cờ) ⇒ không lịch sử. Hồ sơ MỚI cũng KHÔNG phải xác minh: hồ sơ khoá theo SĐT, ai gõ
+      // trước SĐT của người chưa có hồ sơ thì đơn sau này của chủ SĐT gắn vào hồ sơ ấy (review bảo mật L1).
+      assert.equal((await findReturningCustomer({ customer: { id: sang.id, name: "x", phone: "0911222333", address: "1 Đường Bất Kỳ", province: "", simulated: false } }))?.orders, null);
+      const fresh = await executeTool("create_customer", { name: "Khách Mới Toanh", phone: "0933444555", address: "9 Nguyễn Huệ, Quận 1" }, wctx({}, "sđt em 0933444555"));
+      assert.ok(!fresh.isError && fresh.state.customer?.verifiedIdentity !== true && (await findReturningCustomer(fresh.state))?.orders === null, JSON.stringify(fresh.state.customer));
+      // XÁC MINH = khớp MÃ FACEBOOK của chính người đang nhắn, kể cả khi bot lưu khách bằng thông tin rõ (không qua use_saved_address
+      // — review bảo mật L2: bản trước làm khách thật mất lịch sử).
+      const fbCtx = (st: ChatState, last: string) => ({ ...wctx(st, last), returning: byFb });
+      const viaFb = await executeTool("create_customer", { name: "Trần Văn Sang", phone: "0911222333", address: "Số 12 ngõ 5 Lê Lợi, phường Hà Đông", province: "Hà Nội" }, fbCtx({}, "đúng rồi em"));
+      assert.ok(!viaFb.isError && viaFb.state.customer?.verifiedIdentity === true && (await findReturningCustomer(viaFb.state))?.orders === 1, JSON.stringify(viaFb.state.customer));
+      // Đã xác minh rồi đổi địa chỉ giữa chừng (lượt sau `returning` không còn là FB_ID) ⇒ VẪN xác minh — không thì báo giá riêng rồi
+      // đơn tính bảng mặc định; đổi sang SĐT của hồ sơ KHÁC ⇒ không mang cờ theo (review bảo mật vòng 4 L-a).
+      const moved = await executeTool("create_customer", { name: "Trần Văn Sang", phone: "0911222333", address: "88 Nguyễn Trãi, Thanh Xuân", province: "Hà Nội" }, wctx(viaFb.state, "giao chỗ mới giúp anh"));
+      assert.ok(!moved.isError && moved.state.customer?.id === sang.id && moved.state.customer.verifiedIdentity === true, `đổi địa chỉ ⇒ giữ xác minh: ${JSON.stringify(moved.state.customer)}`);
+      const switched = await executeTool("create_customer", { name: "Trần Văn Sang", phone: "0933444555", address: "88 Nguyễn Trãi, Thanh Xuân", province: "Hà Nội" }, wctx(viaFb.state, "số khác nhé"));
+      assert.ok(!switched.isError && switched.state.customer?.id !== sang.id && switched.state.customer?.verifiedIdentity !== true, `đổi sang hồ sơ khác ⇒ không xác minh: ${JSON.stringify(switched.state.customer)}`);
+      // Tóm tắt đơn khi địa chỉ do máy điền: che địa chỉ VÀ họ tên đầy đủ của chủ SĐT — chỉ tên gọi (review bảo mật M2).
+      const noName = await executeTool("create_customer", { use_saved_address: true, customer_confirmation: "vẫn địa chỉ đó" }, rctx({}, "Vẫn địa chỉ đó em ạ"));
+      assert.ok(!noName.isError && noName.state.customer?.name === "Trần Văn Sang", JSON.stringify(noName.state.customer));
+      const maskedDraft = await executeTool("create_draft_order", { items: [{ variant_id: chaMuc, quantity: 1 }] }, rctx({ ...noName.state, upsellSent: true }, "ok em"));
+      assert.ok(!maskedDraft.isError && !maskedDraft.content.includes("Trần Văn") && maskedDraft.content.includes("Sang") && !maskedDraft.content.includes("Số 12"), `tóm tắt che tên + địa chỉ: ${maskedDraft.content}`);
+      // «Hội thoại từng có đơn của hồ sơ» KHÔNG phải xác minh (review bảo mật vòng 3 — CRITICAL): đặt một đơn ghi SĐT X không
+      // chứng minh là chủ SĐT X.
+      await db.insert(schema.orders).values({ id: "ret-ord-cont", insertedAt: new Date("2026-09-20T10:00:00Z"), customerId: sang.id, salesConversationId: "ret-cont", stage: "DELIVERED", shipPhone: "0911222333", shipAddress: "Số 12 ngõ 5 Lê Lợi, phường Hà Đông" });
+      const cont = await executeTool("create_customer", { name: "Sang", phone: "0911222333", address: "Số 12 ngõ 5 Lê Lợi, phường Hà Đông" }, { ...wctx({}, "em lấy như cũ"), conversationId: "ret-cont" });
+      assert.ok(!cont.isError && cont.state.customer?.verifiedIdentity !== true && (await findReturningCustomer(cont.state))?.orders === null, `hội thoại từng có đơn của hồ sơ ⇒ VẪN chưa xác minh: ${JSON.stringify(cont.state.customer)}`);
+      // Kịch bản thật: kẻ gian gõ SĐT nạn nhân + địa chỉ bất kỳ ⇒ lên đơn NHÁP (không cần chốt; engine nối đơn vào hội thoại —
+      // `linkAgentOrder`) ⇒ gọi lại create_customer ⇒ vẫn chưa xác minh; lịch sử chỉ là đơn nháp của CHÍNH hội thoại.
+      const atkCtx = (st: ChatState, last: string) => ({ ...wctx(st, last), conversationId: "ret-atk-draft" });
+      const atk1 = await executeTool("create_customer", { name: "Người lạ", phone: "0911222333", address: "1 Đường Bất Kỳ, Quận 1" }, atkCtx({}, "sđt 0911222333 nhé"));
+      const atkDraft = await executeTool("create_draft_order", { items: [{ variant_id: chaMuc, quantity: 1 }] }, atkCtx({ ...atk1.state, upsellSent: true }, "ok em"));
+      assert.ok(!atkDraft.isError && atkDraft.state.draft?.orderId, `kẻ gian lên được đơn nháp ghi SĐT nạn nhân: ${atkDraft.content}`);
+      await db.update(schema.orders).set({ salesConversationId: "ret-atk-draft" }).where(eq(schema.orders.id, atkDraft.state.draft!.orderId!));
+      const atk2 = await executeTool("create_customer", { name: "Người lạ", phone: "0911222333", address: "1 Đường Bất Kỳ, Quận 1" }, atkCtx(atkDraft.state, "đúng rồi em"));
+      const atkHist = await findReturningCustomer(atk2.state);
+      assert.ok(!atk2.isError && atk2.state.customer?.verifiedIdentity !== true, `đơn nháp tự lên KHÔNG mở danh tính: ${JSON.stringify(atk2.state.customer)}`);
+      assert.ok(atkHist?.orders === 1 && !JSON.stringify(atkHist).includes("Chả cá thu") && !JSON.stringify(atkHist).includes("Số 12"), `lịch sử chỉ là đơn nháp của chính hội thoại: ${JSON.stringify(atkHist)}`);
+      // Dọn: đơn nháp của kẻ gian không được thành «đơn gần nhất» của Sang ở các bước sau (khách cũ khớp mã Facebook).
+      await db.update(schema.orders).set({ stage: "DELETED" }).where(eq(schema.orders.id, atkDraft.state.draft!.orderId!));
+      // Trang chat CÔNG KHAI không gửi vết công cụ (tóm tắt nội bộ) về trình duyệt của người chưa đăng nhập.
+      const pv = publicView({ conversationId: "x", status: "OPEN", messages: [{ role: "assistant", text: "Dạ", tools: [{ name: "lookup_customer", ok: true, summary: "Khách cũ (SĐT có trong sổ)" }] }], order: null });
+      assert.ok(!JSON.stringify(pv).includes("lookup_customer") && pv.messages[0].text === "Dạ", JSON.stringify(pv));
+      // ĐỊA CHỈ MÁY ĐIỀN (mức PHONE ⇒ use_saved_address) giữ che ở MỌI lượt sau: findReturningCustomer trả mức PHONE (không in họ
+      // tên / địa chỉ đầy đủ), gọi lại create_customer với đúng thông tin đó KHÔNG bỏ nhãn (review bảo mật H1).
+      const svCtx = (st: ChatState, last: string) => ({ ...wctx(st, last), returning: byPh });
+      const sv = await executeTool("create_customer", { use_saved_address: true, customer_confirmation: "đúng rồi" }, svCtx({}, "Đúng rồi em"));
+      assert.ok(!sv.isError && sv.state.customer?.savedAddress === true && sv.state.customer.verifiedIdentity !== true, JSON.stringify(sv.state.customer));
+      const svNext = await findReturningCustomer(sv.state);
+      const svPrompt = returningCustomerPrompt(svNext, undefined);
+      assert.ok(svNext?.trust === "PHONE" && svNext.orders === null && !svPrompt.includes("Số 12") && !svPrompt.includes("Trần Văn Sang"), `lượt sau vẫn che: ${svPrompt}`);
+      const again2 = await executeTool("create_customer", { name: sv.state.customer!.name, phone: sv.state.customer!.phone, address: sv.state.customer!.address, province: sv.state.customer!.province }, wctx(sv.state, "ok em"));
+      assert.equal(again2.state.customer?.savedAddress, true, "gọi lại với đúng địa chỉ máy điền ⇒ vẫn che");
+      // Che địa chỉ chặt: không bao giờ phần đầu, không tên đường; chỉ cấp hành chính / phần cuối (review bảo mật H2).
+      assert.deepEqual(
+        ["12 Hàng Bạc, Hoàn Kiếm", "12 Ngõ 5, Lê Lợi, Hà Đông", "Số 31 Phố Thị Chung, TP Bắc Ninh", "Số 5 Lê Lợi", "Xóm 8, thôn Văn Tảo, xã Hà Nam, Thành phố Hải Phòng", "88 Nguyễn Trãi, Phường 3, Quận 5, TP Hồ Chí Minh"].map(maskAddress),
+        ["…, Hoàn Kiếm", "…, Hà Đông", "…, TP Bắc Ninh", "…", "…, xã Hà Nam, Thành phố Hải Phòng", "…, Quận 5, TP Hồ Chí Minh"],
+      );
+      // Khớp qua MÃ FACEBOOK của chính người đang nhắn (FB_ID) ⇒ được nhắc món lần trước.
+      assert.ok(returningCustomerPrompt(byFb, undefined).includes("Chả cá thu (1kg) × 2") && !returningCustomerPrompt(byPh, undefined).includes("Chả cá thu"), "FB_ID có lịch sử; PHONE không");
       // MỜI THÊM MÓN TRƯỚC KHI LÊN ĐƠN (02/10/2026 · ảnh «Nguyễn Nga» / «Xuantra Tâm An»): shop có câu upsell ⇒ chưa gửi thì
       // chặn lên đơn; gửi xong ⇒ lên đơn + tóm tắt NGAY trong cùng lượt; câu upsell thiếu số ERP ⇒ không chặn mãi.
       const draftIn = (st: ChatState) => executeTool("create_draft_order", { items: [{ variant_id: chaMuc, quantity: 1 }] }, rctx(st, "ok em"));

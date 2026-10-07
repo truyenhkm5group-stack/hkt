@@ -28,7 +28,7 @@ import { invalidateOrganizations } from "@/lib/platform/organizations";
 import { provisionOrganization } from "@/lib/platform/provision";
 import { DEFAULT_SALES_CHATBOT_CONFIG, SALES_CHATBOT_LIMITS, SALES_CHATBOT_SETTING_KEY } from "@/lib/sales-chatbot/config";
 import { chatTurn, cycleStartTurns, loadSalesChatbotConfig, openConversation, POST_ORDER_HANDOFF_MS, setSalesChatProviderForTests } from "@/lib/sales-chatbot/engine";
-import { addressGrounded, decideOrderSync, loadOrderSyncConfig, orderSyncPrompt, parseOrderSyncReply, phonesInText, reorderConfirmText, runFanpageOrderSync, saveOrderSyncConfig, syncCutoff, syncFanpageThreadWhenQuiet, type OrderSyncReply, type SyncMessage } from "@/lib/sales-chatbot/order-sync";
+import { addressGrounded, decideOrderSync, loadOrderSyncConfig, orderSyncPrompt, parseOrderSyncReply, phonesInText, reorderConfirmText, reorderTotalVisible, runFanpageOrderSync, saveOrderSyncConfig, syncCutoff, syncFanpageThreadWhenQuiet, type OrderSyncReply, type SyncMessage } from "@/lib/sales-chatbot/order-sync";
 import { ORDER_SYNC_CHANNEL, ORDER_SYNC_LIMITS, ORDER_SYNC_SETTING_KEY, orderGroupText, parseOrderSyncConfig, type OrderSyncThreadState } from "@/lib/sales-chatbot/order-sync-shared";
 import type { ReturningCustomer } from "@/lib/sales-chatbot/returning";
 import type { ChatState } from "@/lib/sales-chatbot/tools";
@@ -106,6 +106,18 @@ function testPure() {
   const again: SyncMessage[] = [{ index: 1, id: "n1", from: "customer", text: "Cho chị 1kg chả mực nữa nhé", at: at(10) }, { index: 2, id: "n2", from: "customer", text: "ừ em", at: at(11) }];
   const reorder = decideOrderSync({ ...base, messages: again, returning: old, reply: reply({ items: [{ variant_id: "v1", quantity: 1 }], use_previous_address: true, agreement_index: 2 }) });
   assert.ok(reorder.kind === "CREATE" && reorder.phoneFrom === "PREVIOUS" && reorder.addressFrom === "PREVIOUS", JSON.stringify(reorder));
+  // REVIEW BẢO MẬT 08/10/2026 (CRITICAL): khách cũ chỉ khớp qua SĐT xuất hiện trong hội thoại (mức PHONE — ai cũng gõ được SĐT
+  // người khác) ⇒ KHÔNG dùng SĐT / địa chỉ lần trước. Không có lối tắt «hội thoại từng có đơn mang SĐT đó» (review vòng 3: kẻ gian
+  // tự lên đơn nháp ghi SĐT nạn nhân là có) — chỉ khớp mã Facebook (FB_ID) hoặc khách tự khai trong hội thoại (THREAD).
+  const phoneOnly: ReturningCustomer = { ...old, trust: "PHONE", lastItems: ["Chả cá thu (1kg) × 2"] };
+  const spoof = decideOrderSync({ ...base, messages: again, returning: phoneOnly, reply: reply({ items: [{ variant_id: "v1", quantity: 1 }], use_previous_address: true, agreement_index: 2 }) });
+  assert.ok(spoof.kind === "SKIP" && /chưa chứng minh là cùng người/.test(spoof.reason), `chỉ khớp SĐT ⇒ không lên đơn về địa chỉ cũ: ${JSON.stringify(spoof)}`);
+  const byFbId: ReturningCustomer = { ...phoneOnly, trust: "FB_ID" };
+  const viaFb = decideOrderSync({ ...base, messages: again, returning: byFbId, reply: reply({ items: [{ variant_id: "v1", quantity: 1 }], use_previous_address: true, agreement_index: 2 }) });
+  assert.ok(viaFb.kind === "CREATE" && viaFb.addressFrom === "PREVIOUS" && viaFb.phoneFrom === "PREVIOUS", `khớp mã Facebook ⇒ khách cũ đặt lại như luật HSLC: ${JSON.stringify(viaFb)}`);
+  assert.ok(orderSyncPrompt({ shop: "S", catalog: [], messages: again, cutoffMs: 0, returning: byFbId, lastRecorded: null }).user.includes("Chả cá thu"), "FB_ID ⇒ lời nhắc có món lần trước");
+  const spoofPrompt = orderSyncPrompt({ shop: "S", catalog: [], messages: again, cutoffMs: 0, returning: phoneOnly, lastRecorded: null });
+  assert.ok(!spoofPrompt.user.includes("Chả cá thu") && !spoofPrompt.system.includes("Chả cá thu") && /CHƯA chứng minh là cùng người/.test(spoofPrompt.user + spoofPrompt.system), "lời nhắc ghi đơn không mang món / thông tin cũ khi chưa chứng minh");
   assert.deepEqual(reorder.recipient, { name: "Nguyễn Thị Lan", phone: "0912345678", address: "12 Hàng Bạc, Hoàn Kiếm", province: "Hà Nội" }, "khách cũ không gửi lại ⇒ SĐT / địa chỉ / tên đơn trước");
   // ── Luật chốt của chủ shop HSLC (05/10/2026) ──
   //  · «Nguyễn Thị Nguyệt Quế»: khách chỉ hỏi giá; nhân viên DÁN LẠI lời đặt hàng cũ của khách + «E giao về đây cho c nhé» ⇒
@@ -138,6 +150,20 @@ function testPure() {
   assert.ok(re.kind === "CREATE" && re.phoneFrom === "PREVIOUS" && re.addressFrom === "PREVIOUS" && re.agreement.id === "r1", JSON.stringify(re));
   const conf = reorderConfirmText({ lines: [{ name: "Chả cá thu (1kg)", quantity: 1 }], total: 280_000, shippingFee: null, address: "12 Hàng Bạc, Hoàn Kiếm, Thành phố Hà Nội", phone: "0912345678" });
   for (const k of ["Chả cá thu (1kg) × 1", "280.000", "+ phí ship", "12 Hàng Bạc", "0912345678"]) assert.ok(conf.includes(k), `tin xác nhận lại thiếu «${k}»: ${conf}`);
+  // Tổng theo bảng giá RIÊNG của hồ sơ khớp SĐT chỉ nhắn ra khi khớp mã Facebook (review bảo mật #647 M-a) — giá của đơn không đổi.
+  assert.deepEqual(
+    [
+      reorderTotalVisible({ wholesalePricing: false, trust: "THREAD", hasCustomerList: true }),
+      reorderTotalVisible({ wholesalePricing: true, trust: "THREAD", hasCustomerList: false }),
+      reorderTotalVisible({ wholesalePricing: true, trust: "THREAD", hasCustomerList: true }),
+      reorderTotalVisible({ wholesalePricing: true, trust: "FB_ID", hasCustomerList: true }),
+      reorderTotalVisible({ wholesalePricing: true, trust: null, hasCustomerList: true }),
+    ],
+    [true, true, false, true, false],
+    "giá lẻ / không bảng riêng / mã Facebook ⇒ nêu tổng; SĐT tự gõ + bảng riêng ⇒ không",
+  );
+  const hidden = reorderConfirmText({ lines: [{ name: "Chả cá thu (1kg)", quantity: 1 }], total: null, shippingFee: 25_000, address: "12 Hàng Bạc", phone: "0912345678" });
+  assert.ok(!hidden.includes("₫") && !/\d{2,3}\.\d{3}/.test(hidden) && hidden.includes("nhân viên shop báo lại") && hidden.includes("Chả cá thu (1kg) × 1"), `không nêu tổng: ${hidden}`);
   assert.equal(decideOrderSync({ ...base, reply: reply({ kind: "CHANGE", summary: "thêm 1 hộp" }) }).kind, "CHANGE");
   assert.equal(decideOrderSync({ ...base, reply: reply({ kind: "NONE" }) }).kind, "NONE");
 
