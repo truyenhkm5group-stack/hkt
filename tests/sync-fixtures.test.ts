@@ -457,6 +457,7 @@ import { testOpsLogLeak } from "./ops-log-leak.test";
 import { testPlatformRbac } from "./platform-rbac.test";
 import { testPlatformContext } from "./platform-context.test";
 import { testPlatformIsolation } from "./platform-isolation.test";
+import { testAiBalanceHardening } from "./ai-balance-hardening.test";
 import { testPlatformHardening } from "./platform-hardening.test";
 import { testPlatformUi } from "./platform-ui.test";
 import { testPilotProducts } from "./pilot-products.test";
@@ -2940,6 +2941,9 @@ async function main() {
   await testPlatformContext();
   // Kịch bản chấp nhận §55 + tấn công truy cập trực tiếp theo id (mã `pq-`).
   await testPlatformIsolation();
+  // Hardening Số dư AI (review #644, LOW): báo «hết» tách theo mức chặn · gợi ý người bình luận bỏ dòng bot / page tự gửi ·
+  // đối chiếu sổ thu phí chỉ ở tổ chức nhà — tổ chức THẬT `aibh-growth`, tự cấp, tự dọn.
+  await testAiBalanceHardening();
   // Nền tảng · 1.x: trang tổng hợp / công cụ AI theo module, chẩn đoán chỉ đọc, tệp hai tổ chức (mã `ph-`, tự cấp và tự dọn).
   await testPlatformHardening();
   console.log("\nTẤT CẢ KIỂM THỬ ĐẠT");

@@ -15,7 +15,7 @@
  *     Ghi chú → mã là một bảng TƯỜNG MINH (`classifyInboundNote`) trên đúng các hằng mà đường ghi dùng; ghi chú lạ ⇒
  *     «UNKNOWN: <ghi chú>», không đoán. Bước không có mốc đã lưu ⇒ `at = null` («chưa đo»), không bịa.
  */
-import { and, desc, eq, gte, isNotNull } from "drizzle-orm";
+import { and, desc, eq, gte, isNotNull, isNull, notInArray, or } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { lastSalesAiCall, salesAiCallsForConversation } from "@/lib/ai-usage/conversation-evidence";
 import { forgetMemo, memo } from "@/lib/cache";
@@ -28,7 +28,7 @@ import { aiBlock, type AiBlock, type MessageTrace, type TraceStage, type TraceSt
 import { DUPLICATE_SOURCE_REASON, loadTransportFacts, NON_CANONICAL_NOTE, ROUTE_SWITCH_NOTE, transportOwnerOf } from "@/lib/sales-chatbot/channel-ownership";
 import { BOT_YIELDED_NOTE, CONTROL_COPILOT_NOTE, CONTROL_HUMAN_NOTE, NEEDS_HUMAN_NOTE, TAKEOVER_REASON } from "@/lib/sales-chatbot/conversation-control-shared";
 import { loadSalesChatbotConfig, salesAiReadiness, TURN_BOT_OFF_ERROR, TURN_BUSY_ERROR, TURN_EMPTY_ERROR, TURN_MODULE_OFF_ERROR, TURN_NO_CONVERSATION_ERROR } from "@/lib/sales-chatbot/engine";
-import { COPILOT_NOTE, MEDIA_ONLY_NOTE, OBSERVE_HUMAN_ARM_NOTE, OBSERVE_NOTE, PAGE_REPLIED_REASON } from "@/lib/sales-chatbot/fanpage";
+import { COPILOT_NOTE, MEDIA_ONLY_NOTE, OBSERVE_HUMAN_ARM_NOTE, OBSERVE_NOTE, PAGE_REPLIED_REASON, PAGE_REPLY } from "@/lib/sales-chatbot/fanpage";
 import { HISTORY_NOTE } from "@/lib/sales-chatbot/history-shared";
 import { ALREADY_REPLIED_NOTE, CONV_OPEN_FAILED_NOTE, DEAD_AI_DOWN_NOTE, DEAD_SEND_NOTE_PREFIX, EMPTY_REPLY_NOTE, HANDOFF_SILENT_NOTE } from "@/lib/sales-chatbot/inbound-retry";
 import { messengerOwnedPageIds, messengerPageAiOn, PAGE_AI_OFF_NOTE } from "@/lib/sales-chatbot/messenger";
@@ -86,14 +86,16 @@ export async function conversationAiBlocks(conv: BlockConv): Promise<AiBlock[]> 
  * Tin khách MỚI NHẤT của hội thoại page là BÌNH LUẬN ⇒ khách AI của lượt kế tiếp là NGƯỜI bình luận đó (đồng hồ ghi theo người
  * bình luận) — cổng Số dư AI phải hỏi đúng khoá ấy, không thì báo chặn oan người đã được tính trong tháng (review 08/10/2026, M2).
  */
-async function commenterHint(conv: BlockConv): Promise<{ threadKind: "COMMENT"; commenterId: string | null } | Record<string, never>> {
+export async function commenterHint(conv: Pick<BlockConv, "channel" | "pageId" | "threadId">): Promise<{ threadKind: "COMMENT"; commenterId: string | null } | Record<string, never>> {
   if (conv.channel !== "FANPAGE" || !conv.pageId || !conv.threadId) return {};
   try {
     const t = schema.salesChatInbound;
     const [last] = await (await getDb())
       .select({ kind: t.kind, fromId: t.fromId })
       .from(t)
-      .where(and(eq(t.pageId, conv.pageId), eq(t.threadId, conv.threadId)))
+      // Chỉ tin của KHÁCH: dòng bot / page tự gửi (`note` BOT_SENT · PAGE_REPLY) mang loại INBOX mặc định — đọc nó là coi luồng
+      // bình luận như hộp thư sau mỗi câu bot trả lời, và báo «hết số dư» oan (review Số dư AI 08/10/2026, LOW).
+      .where(and(eq(t.pageId, conv.pageId), eq(t.threadId, conv.threadId), or(isNull(t.note), notInArray(t.note, ["BOT_SENT", PAGE_REPLY]))))
       .orderBy(desc(t.createdAt))
       .limit(1);
     return last?.kind === "COMMENT" ? { threadKind: "COMMENT", commenterId: last.fromId ?? null } : {};

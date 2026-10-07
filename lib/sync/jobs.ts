@@ -89,6 +89,9 @@ import { retryFailedDeliveries } from "@/lib/messaging/service";
 import { runWholesaleLeadsJob } from "@/lib/wholesale/job";
 import { runShippingRouteJob } from "@/lib/shipping/routing";
 
+
+/** Trần số ngày lùi lại của lượt đối chiếu sổ thu phí đi kèm job `sepay-reconcile`. */
+const BILLING_RECONCILE_MAX_DAYS = 35;
 export type JobOptions = {
   trigger: SyncTrigger;
   actor: string;
@@ -405,7 +408,10 @@ export const JOB_DEFINITIONS: Record<string, JobDefinition> = {
       });
       // Giao dịch vá từ API có thể mang mã thuê bao `ERPHD…` / mã nạp `ERPNAP…` — đối chiếu ngay (đúng hàm của webhook), không đợi
       // một gói tin khác tới (review 08/10/2026, L7). Hỏng ở đây không mất tiền: nút «Đối chiếu lại» quét lại được.
-      if (o.params?.apply === "1") await reconcileBillingPayments({ lookbackDays: Math.max(3, num(o.params?.days) ?? 3) }).catch(() => undefined);
+      // Sổ thu phí là của NỀN TẢNG (đọc CSDL nhà): chỉ lượt chạy của tổ chức NHÀ đối chiếu — job của tổ chức khách không kéo một
+      // lượt quét toàn nền tảng. Trần lùi `BILLING_RECONCILE_MAX_DAYS`: `days` của lượt quét SePay (tới 180) không kéo theo một
+      // lượt quét sổ thu phí dài như thế (review Số dư AI 08/10/2026, LOW).
+      if (o.params?.apply === "1" && (await currentOrganization()).isHome) await reconcileBillingPayments({ lookbackDays: Math.min(BILLING_RECONCILE_MAX_DAYS, Math.max(3, num(o.params?.days) ?? 3)) }).catch(() => undefined);
       return r;
     },
   },

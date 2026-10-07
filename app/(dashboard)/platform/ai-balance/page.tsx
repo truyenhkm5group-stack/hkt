@@ -111,7 +111,7 @@ export default async function PlatformAiBalancePage() {
       {v.unconfirmed.length ? (
         <SectionCard
           title="Tiền mang mã nạp mà SePay CHƯA xác nhận"
-          description="Dòng gõ tay / sao kê nhập vào sổ ngân hàng nhà — KHÔNG tự cộng (một người ghi sổ không được tự «nạp» cho khách). SePay xác nhận cùng mã bút toán thì lượt đối chiếu sau tự cộng; dòng trùng một khoản đã cộng thì bỏ qua."
+          description="Dòng gõ tay / sao kê nhập vào sổ ngân hàng nhà — KHÔNG tự cộng, kể cả khi SePay xác nhận cùng mã bút toán SAU đó (số tiền và nội dung vẫn là của người nhập — một người ghi sổ không được tự «nạp» cho khách). Đối chiếu trên app ngân hàng: là tiền thật chưa cộng thì «điều chỉnh tiền thật» cho đúng tổ chức, ghi mã giao dịch vào lý do; trùng một khoản đã cộng thì bỏ qua."
         >
           <ul className="divide-y text-sm" data-ai-balance-unconfirmed>
             {v.unconfirmed.map((r) => (

@@ -9,8 +9,8 @@
  *     VietQR, hạn 30 phút) · tiền SePay xác nhận ⇒ cộng ĐÚNG một lần dù đối chiếu chạy 10 lần · tự lành khi khách hỏi trạng thái
  *     · lệch số tiền / mã lạ / trả muộn · cô lập tổ chức · khoá chống trùng + ràng buộc dấu ở CSDL · người vận hành tặng / hoàn
  *     (bấm hai lần ra một dòng) · màn khách / màn vận hành · tắt cờ không làm mất tiền.
- *  4. REVIEW ĐỘC LẬP 08/10/2026: dòng gõ tay / sao kê nhập chưa được SePay xác nhận KHÔNG tự cộng (SePay xác nhận cùng mã bút
- *     toán ⇒ cộng) · sao kê trùng một khoản đã cộng (khác mã tham chiếu) KHÔNG cộng lần hai · mã của phiếu đã cộng ⇒ GIỮ LẠI,
+ *  4. REVIEW ĐỘC LẬP 08/10/2026: dòng gõ tay / sao kê nhập KHÔNG tự cộng — kể cả khi SePay xác nhận cùng mã bút toán SAU đó
+ *     (review #650: số tiền / nội dung vẫn của người nhập) · sao kê trùng một khoản đã cộng (khác mã tham chiếu) KHÔNG cộng lần hai · mã của phiếu đã cộng ⇒ GIỮ LẠI,
  *     không cộng · tiền vào tài khoản khác tài khoản nhận ⇒ giữ lại · tiền nạp không lẫn vào «Tiền chưa khớp» của thuê bao và
  *     không được đếm là «khớp và gia hạn» · số tiền có phần lẻ bị từ chối, tặng / hoàn số âm bị từ chối.
  */
@@ -88,8 +88,11 @@ function testPure() {
   assert.equal(topupOutcome({ status: "CANCELLED", amountVnd: 500_000 }, 500_000), "TOPUP_CREDITED_REVIEW", "phiếu đã huỷ mà tiền vẫn tới ⇒ cộng, cần xem lại");
 
   // Độ tin của dòng sổ ngân hàng: chỉ dòng SePay xác nhận, vào ĐÚNG tài khoản nhận.
-  const sepay = { provider: "SEPAY", providerTxnId: "92001", account: "0123456789" };
+  const sepay = { provider: "SEPAY", providerTxnId: "92001", account: "0123456789", source: "WEBHOOK" };
   assert.equal(topupBankRowTrust(sepay, "0123 456 789"), "TRUSTED");
+  assert.equal(topupBankRowTrust({ ...sepay, source: "API" }, "0123456789"), "TRUSTED", "lượt quét API của SePay");
+  assert.equal(topupBankRowTrust({ ...sepay, source: "IMPORT" }, "0123456789"), "UNCONFIRMED", "sao kê nhập TRƯỚC rồi SePay điền mã giao dịch SAU — số tiền vẫn do người nhập dựng");
+  assert.equal(topupBankRowTrust({ ...sepay, source: "MANUAL" }, "0123456789"), "UNCONFIRMED");
   assert.equal(topupBankRowTrust({ ...sepay, provider: "" }, "0123456789"), "UNCONFIRMED", "dòng gõ tay / sao kê nhập");
   assert.equal(topupBankRowTrust({ ...sepay, providerTxnId: " " }, "0123456789"), "UNCONFIRMED");
   assert.equal(topupBankRowTrust({ ...sepay, account: "9999999999" }, "0123456789"), "OTHER_ACCOUNT", "tiền vào tài khoản khác tài khoản nhận");
@@ -302,7 +305,9 @@ async function run() {
   assert.deepEqual([pX.outcome, pX.orgCode, pX.paymentIntentId], ["NO_INVOICE", null, null]);
   assert.equal((await readAiBalance(A)).totalVnd, 3_000_000, "mã lạ không cộng");
 
-  // ── H1: dòng GÕ TAY mang mã của phiếu đang chờ ⇒ KHÔNG tự cộng, KHÔNG ghi gì; SePay xác nhận CÙNG mã bút toán ⇒ cộng.
+  // ── H1: dòng GÕ TAY mang mã của phiếu đang chờ ⇒ KHÔNG tự cộng, KHÔNG ghi gì — kể cả khi SePay điền mã giao dịch cho CÙNG mã
+  //    bút toán SAU đó (review #650: đường ghi SePay không sửa số tiền / nội dung của dòng đã có). Người vận hành đối chiếu app
+  //    ngân hàng rồi «điều chỉnh tiền thật».
   const r6 = await createAiTopupIntent(tenantA, { amountVnd: 100_000 }, now);
   assert.ok("ok" in r6);
   const refM = await bankInRaw(100_000, `NAP ${r6.intent.referenceCode}`, "MANUAL");
@@ -310,10 +315,12 @@ async function run() {
   assert.equal(await aiTopupStatus(tenantA, r6.intent.id, now).then((st) => ("ok" in st ? st.status : st.error)), "PENDING", "người có quyền ghi sổ ngân hàng không tự «nạp» được cho khách");
   assert.equal((await readAiBalance(A)).totalVnd, 3_000_000);
   assert.equal(await paymentOf(refM), undefined, "dòng chưa xác nhận không bị «xử lý xong» — lượt sau còn xét lại");
-  await pdb.update(schema.bankTransactions).set({ provider: "SEPAY", providerTxnId: "aib-sepay-confirm-m", lastSeenSource: "WEBHOOK" }).where(eq(schema.bankTransactions.bankRef, refM));
+  await pdb.update(schema.bankTransactions).set({ provider: "SEPAY", providerTxnId: "aib-sepay-confirm-m", account: RECEIVER_ACCOUNT, lastSeenSource: "WEBHOOK" }).where(eq(schema.bankTransactions.bankRef, refM));
   await reconcileBillingPayments({ lookbackDays: 3 });
-  assert.equal((await paymentOf(refM)).outcome, "TOPUP_CREDITED", "SePay xác nhận cùng mã bút toán ⇒ tự cộng");
-  assert.equal((await readAiBalance(A)).totalVnd, 3_100_000);
+  assert.equal(await paymentOf(refM), undefined, "dòng không do SePay tạo ⇒ vẫn không tự cộng dù SePay điền mã giao dịch sau");
+  assert.equal((await readAiBalance(A)).totalVnd, 3_000_000);
+  assert.ok("ok" in (await adjustAiBalance(op, { orgCode: A, kind: "ADJUST_CASH", amountVnd: 100_000, reason: `Tiền thật, đối chiếu app ngân hàng — ${refM}`, requestKey: "rkaibmanual01" })));
+  assert.equal((await readAiBalance(A)).totalVnd, 3_100_000, "người vận hành cộng tay sau khi đối chiếu");
   // ── H1: SAO KÊ nhập trùng một khoản ĐÃ cộng (khác mã tham chiếu) ⇒ không cộng lần hai, không ghi gì.
   const refDup = await bankInRaw(500_000, `NAP ${r2.intent.referenceCode}`, "IMPORT");
   await reconcileBillingPayments({ lookbackDays: 3 });
@@ -334,7 +341,7 @@ async function run() {
   const refR1 = await bankIn(200_000, `${r8.intent.referenceCode}`);
   const refR2 = await bankIn(200_000, `${r8.intent.referenceCode} lan hai`);
   const bt = schema.bankTransactions;
-  const rowOf = async (ref: string) => (await pdb.select({ bankRef: bt.bankRef, txnAt: bt.txnAt, amount: bt.amount, description: bt.description, provider: bt.provider, providerTxnId: bt.providerTxnId, account: bt.account }).from(bt).where(eq(bt.bankRef, ref)))[0];
+  const rowOf = async (ref: string) => (await pdb.select({ bankRef: bt.bankRef, txnAt: bt.txnAt, amount: bt.amount, description: bt.description, provider: bt.provider, providerTxnId: bt.providerTxnId, account: bt.account, source: bt.source }).from(bt).where(eq(bt.bankRef, ref)))[0];
   const [row1, row2] = [await rowOf(refR1), await rowOf(refR2)];
   const raced = await Promise.all([creditTopupFromBankRow(row1, [r8.intent.referenceCode], now), creditTopupFromBankRow(row2, [r8.intent.referenceCode], now)]);
   assert.deepEqual([...raced].sort(), ["TOPUP_CREDITED", "TOPUP_HELD"], `một khoản cộng, một khoản giữ lại: ${JSON.stringify(raced)}`);
@@ -373,7 +380,7 @@ async function run() {
   assert.ok("ok" in (await adjustAiBalance(op, { orgCode: A, kind: "REFUND", amountVnd: 100_000, reason: "Khách xin hoàn một phần", requestKey: "rkaibtest003" })));
   assert.deepEqual(await readAiBalance(A), { cashVnd: 3_300_000, promoVnd: 200_000, totalVnd: 3_500_000 });
   const adjAudit = await pdb.select().from(schema.platformAuditLog).where(and(eq(schema.platformAuditLog.targetOrgCode, A), eq(schema.platformAuditLog.action, "AI_BALANCE_ADJUST")));
-  assert.equal(adjAudit.length, 2, "một dòng nhật ký mỗi lượt ghi thật (lượt bấm lại không ghi)");
+  assert.equal(adjAudit.length, 3, "một dòng nhật ký mỗi lượt ghi thật — cộng tay dòng gõ tay (H1) + tặng + hoàn; lượt bấm lại không ghi");
 
   // ── Ngưỡng báo số dư thấp.
   assert.ok("error" in (await setLowBalanceThreshold(viewerA, { amountVnd: "400000" })));
@@ -395,7 +402,7 @@ async function run() {
   const reviewRefs = new Set(opView.review.map((r) => r.bankRef));
   assert.ok(reviewRefs.has(ref3) && reviewRefs.has(ref3b) && reviewRefs.has(refX) && reviewRefs.has(refO) && !reviewRefs.has(ref1) && !reviewRefs.has(refM), JSON.stringify(opView.review));
   assert.ok(opView.review.every((r) => typeof r.paymentId === "string" && r.paymentId), "mỗi khoản cần xem lại mang mã dòng để đánh dấu đã xử lý");
-  assert.ok(opView.unconfirmed.some((r) => r.bankRef === refDup && r.source === "IMPORT") && !opView.unconfirmed.some((r) => r.bankRef === refM), JSON.stringify(opView.unconfirmed));
+  assert.ok(opView.unconfirmed.some((r) => r.bankRef === refDup && r.source === "IMPORT") && opView.unconfirmed.some((r) => r.bankRef === refM && r.source === "MANUAL"), JSON.stringify(opView.unconfirmed));
   // ── M1: tiền nạp không lẫn vào «Tiền chưa khớp» của khung thu phí thuê bao (nhầm là dùng một khoản tiền hai lần).
   const billing = await loadPlatformBilling(op, now);
   assert.ok(!("error" in billing));
@@ -411,6 +418,35 @@ async function run() {
   await bankIn(200_000, `${r5.intent.referenceCode}`);
   await reconcileBillingPayments({ lookbackDays: 3 });
   assert.equal((await readAiBalance(A)).totalVnd, 3_700_000, "tắt cờ không làm mất tiền về muộn");
+
+  // ── Không đọc được tài khoản nhận (chưa khai / lỗi đọc) ⇒ KHÔNG xử lý khoản nạp lượt này — `bank_ref` không bị khoá thành «giữ
+  //    lại» VĨNH VIỄN; lượt sau đọc được thì cộng (review Số dư AI 08/10/2026, LOW).
+  assert.ok("ok" in (await setAiBalanceEnabled(op, { orgCode: A, enabled: true, reason: "Bật lại để thử tài khoản nhận" })));
+  invalidateOrgFlags();
+  const r9 = await createAiTopupIntent(tenantA, { amountVnd: 150_000 }, now);
+  assert.ok("ok" in r9);
+  const recv = await pdb.query.platformSettings.findFirst({ where: eq(schema.platformSettings.key, BILLING_RECEIVER_KEY) });
+  assert.ok(recv, "đã khai tài khoản nhận");
+  await pdb.delete(schema.platformSettings).where(eq(schema.platformSettings.key, BILLING_RECEIVER_KEY));
+  const refNoRecv = await bankIn(150_000, `${r9.intent.referenceCode}`);
+  await reconcileBillingPayments({ lookbackDays: 3 });
+  assert.equal(await paymentOf(refNoRecv), undefined, "chưa đọc được tài khoản nhận ⇒ chưa ghi gì, không khoá «giữ lại»");
+  await pdb.insert(schema.platformSettings).values({ key: BILLING_RECEIVER_KEY, value: recv.value });
+  await reconcileBillingPayments({ lookbackDays: 3 });
+  assert.equal((await paymentOf(refNoRecv))?.outcome, "TOPUP_CREDITED", "đọc lại được tài khoản nhận ⇒ cộng");
+  assert.equal((await readAiBalance(A)).totalVnd, 3_850_000);
+
+  // ── N1 chiều ngược (review #650): sao kê dựng sẵn nhập TRƯỚC (mã bút toán thật + 50 triệu + mã nạp «ERPNAP…»), SePay xác nhận
+  //    khoản THẬT 10.000đ SAU — đường ghi SePay chỉ điền ô rỗng, không sửa số tiền / mô tả ⇒ KHÔNG tự cộng, nằm ở «chưa xác nhận».
+  const r10 = await createAiTopupIntent(tenantA, { amountVnd: 100_000 }, now);
+  assert.ok("ok" in r10);
+  const refFake = await bankInRaw(50_000_000, `${r10.intent.referenceCode}`, "IMPORT");
+  await pdb.update(schema.bankTransactions).set({ provider: "SEPAY", providerTxnId: "aib-sepay-late", account: RECEIVER_ACCOUNT, lastSeenSource: "WEBHOOK" }).where(eq(schema.bankTransactions.bankRef, refFake));
+  await reconcileBillingPayments({ lookbackDays: 3 });
+  assert.equal(await paymentOf(refFake), undefined, "dòng không do SePay tạo ⇒ không ghi, không cộng");
+  assert.equal((await readAiBalance(A)).totalVnd, 3_850_000, "số dư không đổi");
+  const opLate = await loadAiBalanceOperatorView(op, now);
+  assert.ok(!("error" in opLate) && opLate.unconfirmed.some((r) => r.bankRef === refFake), "nằm ở danh sách «chưa xác nhận» của người vận hành");
 }
 
 export async function testAiBalance() {

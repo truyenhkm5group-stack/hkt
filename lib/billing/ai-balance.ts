@@ -17,7 +17,7 @@
  *  · Màn khách KHÔNG có token / model / chi phí nhà cung cấp — chỉ số tiền và nhãn dễ hiểu.
  */
 import { randomInt, randomUUID } from "node:crypto";
-import { and, desc, eq, gt, gte, inArray, isNull, like, lt, ne, or, sql } from "drizzle-orm";
+import { and, desc, eq, gt, gte, inArray, isNull, like, lt, ne, notInArray, or, sql } from "drizzle-orm";
 import { getPlatformDb, schema } from "@/db";
 import { can, type SessionUser } from "@/lib/auth/session";
 import {
@@ -42,6 +42,7 @@ import {
   type AiLedgerSource,
   type BalanceForecast,
   type TopupIntentStatus,
+  SEPAY_ROW_SOURCES,
 } from "@/lib/billing/ai-balance-rules";
 import { getBillingReceiver, type BillingReceiverView } from "@/lib/billing/receiver";
 import { buildVietQrPayload } from "@/lib/payroll/vietqr";
@@ -241,7 +242,7 @@ export async function aiTopupStatus(user: SessionUser, intentId: unknown, now: D
 // ─────────────────────────── Tiền về ───────────────────────────
 
 /** Một dòng sổ ngân hàng của nhà — kèm DẤU XÁC NHẬN của SePay (`provider` · `providerTxnId`) và tài khoản phát sinh. */
-export type BankRow = { bankRef: string; txnAt: Date; amount: number; description: string; provider: string; providerTxnId: string; account: string };
+export type BankRow = { bankRef: string; txnAt: Date; amount: number; description: string; provider: string; providerTxnId: string; account: string; source: string };
 export type TopupCreditOutcome = "TOPUP_CREDITED" | "TOPUP_CREDITED_REVIEW" | "TOPUP_HELD" | "NO_INVOICE";
 
 /**
@@ -252,7 +253,11 @@ export type TopupCreditOutcome = "TOPUP_CREDITED" | "TOPUP_CREDITED_REVIEW" | "T
  */
 export async function creditTopupFromBankRow(row: BankRow, codes: readonly string[], now: Date = new Date()): Promise<TopupCreditOutcome | null> {
   if (!codes.length || !(row.amount > 0)) return null;
-  const trust = topupBankRowTrust(row, (await getBillingReceiver())?.accountNumber ?? null);
+  // Không đọc được tài khoản nhận (chưa khai · lỗi đọc) ⇒ KHÔNG xử lý dòng này lượt này. Ghi «giữ lại» ở đây là khoá `bank_ref`
+  // VĨNH VIỄN: một lần đọc hỏng biến khoản nạp hợp lệ thành tiền giữ lại (review Số dư AI 08/10/2026, LOW). Lượt sau đọc lại.
+  const receiver = await getBillingReceiver();
+  if (!receiver) return null;
+  const trust = topupBankRowTrust(row, receiver.accountNumber);
   if (trust === "UNCONFIRMED") return null;
   const pdb = await getPlatformDb();
   const t = schema.platformPaymentIntents;
@@ -307,7 +312,7 @@ export async function reconcileTopupCodes(codes: readonly string[], now: Date = 
   const bt = schema.bankTransactions;
   const since = new Date(now.getTime() - TOPUP_RECONCILE_LOOKBACK_DAYS * 86_400_000);
   const rows = await pdb
-    .select({ bankRef: bt.bankRef, txnAt: bt.txnAt, amount: bt.amount, description: bt.description, provider: bt.provider, providerTxnId: bt.providerTxnId, account: bt.account })
+    .select({ bankRef: bt.bankRef, txnAt: bt.txnAt, amount: bt.amount, description: bt.description, provider: bt.provider, providerTxnId: bt.providerTxnId, account: bt.account, source: bt.source })
     .from(bt)
     .where(
       and(
@@ -591,7 +596,7 @@ export async function loadAiBalanceOperatorView(user: SessionUser, now: Date = n
         gt(bt.amount, 0),
         gte(bt.txnAt, new Date(now.getTime() - 60 * 86_400_000)),
         sql`regexp_replace(upper(${bt.description}), '[^A-Z0-9]', '', 'g') like ${`%${TOPUP_CODE_PREFIX}%`}`,
-        or(ne(bt.provider, "SEPAY"), eq(bt.providerTxnId, "")),
+        or(ne(bt.provider, "SEPAY"), eq(bt.providerTxnId, ""), notInArray(bt.source, [...SEPAY_ROW_SOURCES])),
         // Câu con tương quan: tên bảng viết tường minh (bộ nhớ drizzle — cột trần trong exists() bị hiểu sai).
         sql`not exists (select 1 from platform_billing_payments p where p.bank_ref = "bank_transactions"."bank_ref")`,
       ),

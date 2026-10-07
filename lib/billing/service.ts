@@ -533,7 +533,7 @@ export async function reconcileBillingPayments(opts: { bankRefs?: readonly strin
   const bt = schema.bankTransactions;
   const since = new Date(now.getTime() - (opts.lookbackDays ?? BILLING_RECONCILE_LOOKBACK_DAYS) * 86_400_000);
   const rows = await pdb
-    .select({ bankRef: bt.bankRef, txnAt: bt.txnAt, amount: bt.amount, description: bt.description, provider: bt.provider, providerTxnId: bt.providerTxnId, account: bt.account })
+    .select({ bankRef: bt.bankRef, txnAt: bt.txnAt, amount: bt.amount, description: bt.description, provider: bt.provider, providerTxnId: bt.providerTxnId, account: bt.account, source: bt.source })
     .from(bt)
     .where(
       and(

@@ -44,9 +44,12 @@ Khách chuyển khoản
 | Cổng thanh toán trừu tượng | `BillingProvider` (lib/billing/provider.ts) + cột `provider` của phiếu nạp. payOS là dịch vụ ngoài MỚI ⇒ phải hỏi chủ shop trước khi tích hợp (AGENTS §7). |
 
 Chống trùng / an toàn (sửa theo review độc lập 08/10/2026 — bảng chân lý ở `topupOutcome` + `topupBankRowTrust`):
-- CHỈ dòng sổ ngân hàng mà SePay đã XÁC NHẬN (webhook / lượt quét API — `provider = SEPAY` + mã giao dịch SePay) và tiền vào
-  ĐÚNG tài khoản nhận đã khai mới được TỰ cộng. Dòng gõ tay / sao kê nhập mà SePay chưa xác nhận: KHÔNG tự cộng, KHÔNG ghi gì
-  (lượt sau SePay xác nhận cùng mã bút toán thì cộng); chúng hiện ở khung «Tiền mang mã nạp mà SePay CHƯA xác nhận». Lý do: một
+- CHỈ dòng sổ ngân hàng do CHÍNH SePay tạo (webhook / lượt quét API — `source` WEBHOOK · API, `provider = SEPAY` + mã giao
+  dịch SePay) và tiền vào ĐÚNG tài khoản nhận đã khai mới được TỰ cộng. Dòng gõ tay / sao kê nhập: KHÔNG tự cộng, KHÔNG ghi gì —
+  kể cả khi SePay xác nhận cùng mã bút toán SAU đó, vì đường ghi SePay chỉ điền ô còn rỗng, không sửa số tiền / nội dung của dòng
+  đã có (review #650: nhập trước một sao kê dựng sẵn mang mã nạp + số tiền tuỳ ý, rồi chờ SePay «xác nhận» khoản thật nhỏ hơn).
+  Chúng hiện ở khung «Tiền mang mã nạp mà SePay CHƯA xác nhận»; người vận hành đối chiếu app ngân hàng rồi «điều chỉnh tiền thật».
+  Đường chuẩn (webhook về trong vài giây) vẫn tự cộng; sao kê thường nhập sau nhiều ngày. Lý do: một
   người có quyền ghi sổ ngân hàng (kế toán) không được tự «nạp» cho khách bằng một dòng gõ tay, và một khoản tiền vào sổ hai lần
   (sao kê + webhook khác mã tham chiếu) không được sinh tiền hai lần.
 - Phiếu CHƯA trả (đang chờ — kể cả quá hạn hiển thị; đã huỷ) ⇒ cộng NGUYÊN số tiền thật nhận được, ĐÚNG MỘT lần: lượt cộng GIÀNH
