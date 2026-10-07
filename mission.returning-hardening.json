@@ -3,7 +3,7 @@
   "mission_id": "returning-hardening",
   "title": "Khách cũ: đơn nháp người lạ không thành «lần trước» của chủ thật; giá đại lý chỉ cho đúng chủ hồ sơ",
   "business_goal": "",
-  "status": "PLANNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -26,7 +26,20 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-07T23:12:51.520Z",
-  "updated_at": "2026-10-07T23:12:51.520Z",
-  "last_heartbeat": "2026-10-07T23:12:51.520Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-07T23:12:59.942Z",
+  "last_heartbeat": "2026-10-07T23:12:59.942Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "fix/returning-hardening",
+    "sha": "17c28bd18c45e42e725e77fa87c2a2df7ea68471",
+    "at": "2026-10-07T23:12:59.942Z",
+    "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+    "title": "Khách cũ: đơn nháp người lạ không thành «lần trước» của chủ thật; giá đại lý chỉ cho đúng chủ hồ sơ",
+    "summary": "Review bảo mật #647 vòng 4: M-b (đơn gần nhất của hồ sơ chỉ là đơn có người đứng sau + ô chữ là dữ liệu) · LOW-1/LOW-2 (giá riêng chỉ cho chủ hồ sơ) · #645 L2 (mã đơn Pancake).",
+    "tests": [
+      "typecheck + eslint: sạch",
+      "sales-order-sync · self-service-journey · bot-order-status · seafood-os · native-order-sync · golden 12/12 (3 ảnh đổi đúng dòng nhãn) · sales-replay · order-truth-stamp: đạt",
+      "kiểm đột biến 10/10 bị bắt, đối chứng đạt"
+    ]
+  }
 }
