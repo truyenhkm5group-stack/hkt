@@ -19,7 +19,7 @@
  * của chính đường này nên khách nhắn cùng một chữ hai lần vẫn là hai tin. Giới hạn: tin chỉ có ảnh (URL CDN hai đường khác nhau) và
  * gói Pancake thiếu mã người gửi KHÔNG khử trùng được theo khoá thứ hai — lớp chặn chính vẫn là luật một-đường ở trên.
  */
-import { and, desc, eq, gte, isNotNull, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, gte, isNotNull, isNull, lte, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { audit } from "@/lib/audit";
 import { can, type SessionUser } from "@/lib/auth/session";
@@ -45,6 +45,8 @@ export const MESSENGER_OWNS_PAGE_REASON = "Page nhận tin qua Meta trực tiế
 /** Ghi chú của dòng tin khách do đường KHÔNG canonical ghi (đường canonical đã lưu mà không chạy) — lưu cho người đọc, không kích AI. */
 export const NON_CANONICAL_NOTE = "Đường nhận tin chính của page chưa chạy — tin lưu cho người đọc, AI không trả lời qua đường phụ";
 export const DUPLICATE_SOURCE_REASON = "Cùng tin khách đã tới qua đường nhận tin kia — không ghi lần hai, không gọi AI lần hai";
+/** Ghi chú của tin CHỜ (chưa ai giành) của đường cũ lúc người đổi đường chính — không trả lời bù qua đường nào. */
+export const ROUTE_SWITCH_NOTE = "Đường nhận tin của page vừa đổi — tin chờ của đường cũ không được trả lời bù";
 /** Cửa sổ khử trùng hai nguồn: Meta / Pancake chuyển một tin trong vài giây; 2 phút là dư mà vẫn đủ ngắn để không nuốt tin thật. */
 export const DUP_WINDOW_MS = 120_000;
 
@@ -97,8 +99,15 @@ export async function loadPageModes(): Promise<Record<string, ConnectionMode>> {
   }
 }
 
+let factsForTests: (() => Promise<TransportFacts>) | null = null;
+/** CHỈ bài kiểm: thay bộ đọc (vd. ném lỗi để khoá nhánh «đọc hỏng ⇒ Pancake chạy như trước»). `null` = bộ đọc thật. */
+export function setTransportFactsForTests(fn: (() => Promise<TransportFacts>) | null): void {
+  factsForTests = fn;
+}
+
 /** Đọc trạng thái hai kết nối + đường canonical của tổ chức NGỮ CẢNH (chỉ đọc ô cài đặt không bí mật). */
 export async function loadTransportFacts(): Promise<TransportFacts> {
+  if (factsForTests) return factsForTests();
   const rows = await messagingConnectionSummaries([PANCAKE_FANPAGE_KEY, MESSENGER_DIRECT_KEY]);
   const p = rows.find((r) => r.connectorKey === PANCAKE_FANPAGE_KEY);
   const m = rows.find((r) => r.connectorKey === MESSENGER_DIRECT_KEY);
@@ -119,15 +128,55 @@ export async function loadTransportFacts(): Promise<TransportFacts> {
  * Ghi đường canonical của một page (nguồn + lý do + người). Trả đường TRƯỚC đó (`null` = chưa có dòng). Không kiểm quyền — chỉ gọi
  * từ đường đã kiểm (lõi nối / gỡ Messenger, `setPageConnectionModeCore`).
  */
-export async function recordPageMode(pageId: string, mode: ConnectionMode, source: ModeSource, reason: string, userId: string | null): Promise<ConnectionMode | null> {
+export async function recordPageMode(pageId: string, mode: ConnectionMode, source: ModeSource, reason: string, userId: string | null, now: Date = new Date()): Promise<ConnectionMode | null> {
   const db = await getDb();
   const m = schema.channelPageModes;
   const [before] = await db.select({ mode: m.mode }).from(m).where(eq(m.pageId, pageId)).limit(1);
   await db
     .insert(m)
-    .values({ pageId, mode, source, reason: reason.slice(0, 300), setByUserId: userId })
-    .onConflictDoUpdate({ target: m.pageId, set: { mode, source, reason: reason.slice(0, 300), setByUserId: userId, updatedAt: new Date() } });
+    .values({ pageId, mode, source, reason: reason.slice(0, 300), setByUserId: userId, updatedAt: now })
+    .onConflictDoUpdate({ target: m.pageId, set: { mode, source, reason: reason.slice(0, 300), setByUserId: userId, updatedAt: now } });
+  if (before?.mode !== mode) await supersedeOldRoutePending(pageId, MODE_TRANSPORT[mode], now);
   return (before?.mode as ConnectionMode | undefined) ?? null;
+}
+
+/**
+ * ĐỔI ĐƯỜNG KHÔNG ĐỂ TIN CHỜ MÃI: tin khách CHỜ (chưa ai giành) của page do đường KHÁC đường chính mới ghi ⇒ `SKIPPED` +
+ * `ROUTE_SWITCH_NOTE` — đường cũ không còn được kích AI, đường mới không đọc luồng của đường cũ; để `PENDING` là để lượt quét lại
+ * nhặt nó lên mãi. Tin ĐANG được giành (một lượt AI đang chạy) không đụng: lượt đó tự chốt, và bản của đường mới nhận ra nó qua
+ * khử trùng (đếm là «đã có»). Trả số dòng đã đánh dấu.
+ */
+async function supersedeOldRoutePending(pageId: string, newTransport: TransportOwner, now: Date): Promise<number> {
+  const db = await getDb();
+  const t = schema.salesChatInbound;
+  const rows = await db
+    .update(t)
+    .set({ status: "SKIPPED", processedAt: now, note: ROUTE_SWITCH_NOTE })
+    .where(and(eq(t.pageId, pageId), eq(t.status, "PENDING"), isNull(t.claimId), sql`coalesce(${t.transport}, '') <> ${newTransport}`, lte(t.createdAt, now)))
+    .returning({ id: t.id });
+  return rows.length;
+}
+
+/** Bỏ dòng canonical của page (về luật mặc định) — khi người gỡ đường chính mà không còn đường nào chạy page đó. */
+export async function clearPageMode(pageId: string): Promise<boolean> {
+  const db = await getDb();
+  const m = schema.channelPageModes;
+  const gone = await db.delete(m).where(eq(m.pageId, pageId)).returning({ id: m.id });
+  return gone.length > 0;
+}
+
+/**
+ * Mốc NGƯỜI đổi đường chính của page gần nhất (`null` = chưa từng đổi — dòng của lượt backfill không tính). Lượt QUÉT LẠI của một
+ * đường không trả lời bù tin khách TRƯỚC mốc này: lúc đó đường kia đang là đường chính.
+ */
+export async function pageRouteChangedAt(pageId: string): Promise<Date | null> {
+  try {
+    const m = schema.channelPageModes;
+    const [r] = await (await getDb()).select({ source: m.source, at: m.updatedAt }).from(m).where(eq(m.pageId, pageId)).limit(1);
+    return r && r.source !== "BACKFILL" ? r.at : null;
+  } catch {
+    return null;
+  }
 }
 
 /** Mọi page có dòng canonical hoặc đang nối qua ít nhất một đường — cho khung «Đường nhận tin» của hộp thư. */
@@ -214,8 +263,10 @@ export async function insertCustomerInbound(row: InboundInsert & { transport: Tr
     const match = and(eq(t.pageId, row.pageId), eq(t.senderId, sender), eq(t.kind, "INBOX"), gte(t.createdAt, new Date(now.getTime() - DUP_WINDOW_MS)), sql`regexp_replace(btrim(${t.text}), '[[:space:]]+', ' ', 'g') = ${key}`);
     const [n] = await tx
       .select({
-        handled: sql<number>`count(*) filter (where ${t.transport} <> ${row.transport} and ${t.status} <> 'PENDING')::int`,
-        stranded: sql<number>`count(*) filter (where ${t.transport} <> ${row.transport} and ${t.status} = 'PENDING')::int`,
+        // «Đã có» = đã xử lý HOẶC đang được một lượt AI giành (lượt đó sẽ trả lời — trả lời lại là trả lời đôi). Bản bị gác lúc đổi
+        // đường (ROUTE_SWITCH_NOTE) KHÔNG phải «đã có»: chưa ai trả lời nó.
+        handled: sql<number>`count(*) filter (where ${t.transport} <> ${row.transport} and ((${t.status} <> 'PENDING' and coalesce(${t.note}, '') <> ${ROUTE_SWITCH_NOTE}) or ${t.claimId} is not null))::int`,
+        stranded: sql<number>`count(*) filter (where ${t.transport} <> ${row.transport} and ${t.status} = 'PENDING' and ${t.claimId} is null)::int`,
         same: sql<number>`count(*) filter (where ${t.transport} = ${row.transport})::int`,
       })
       .from(t)

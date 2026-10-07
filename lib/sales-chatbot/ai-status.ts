@@ -23,7 +23,7 @@ import { canUseModule } from "@/lib/platform/capabilities";
 import { currentOrganization } from "@/lib/platform/context";
 import { AI_DOWN_HANDOFF_REASON, FANPAGE_STAFF_REASON, ZALO_STAFF_REASON } from "@/lib/sales-chatbot/ai-hold-shared";
 import { aiBlock, type AiBlock, type MessageTrace, type TraceStage, type TraceStep, TRACE_STAGES } from "@/lib/sales-chatbot/ai-status-shared";
-import { DUPLICATE_SOURCE_REASON, loadTransportFacts, NON_CANONICAL_NOTE, transportOwnerOf } from "@/lib/sales-chatbot/channel-ownership";
+import { DUPLICATE_SOURCE_REASON, loadTransportFacts, NON_CANONICAL_NOTE, ROUTE_SWITCH_NOTE, transportOwnerOf } from "@/lib/sales-chatbot/channel-ownership";
 import { BOT_YIELDED_NOTE, CONTROL_COPILOT_NOTE, CONTROL_HUMAN_NOTE, NEEDS_HUMAN_NOTE, TAKEOVER_REASON } from "@/lib/sales-chatbot/conversation-control-shared";
 import { loadSalesChatbotConfig, salesAiReadiness, TURN_BOT_OFF_ERROR, TURN_BUSY_ERROR, TURN_EMPTY_ERROR, TURN_MODULE_OFF_ERROR, TURN_NO_CONVERSATION_ERROR } from "@/lib/sales-chatbot/engine";
 import { COPILOT_NOTE, MEDIA_ONLY_NOTE, OBSERVE_HUMAN_ARM_NOTE, OBSERVE_NOTE, PAGE_REPLIED_REASON } from "@/lib/sales-chatbot/fanpage";
@@ -191,6 +191,7 @@ const EXACT: ReadonlyArray<[string, NoteVerdict]> = [
   [NON_CANONICAL_NOTE, { code: "AI_SKIPPED_NON_CANONICAL_ROUTE", stop: "ELIGIBLE", kind: "SKIP" }],
   // 0232: bản sao của một tin khách đã tới qua đường kia (đường chính vừa đổi) — bản của đường chính được AI trả lời.
   [DUPLICATE_SOURCE_REASON, { code: "AI_SKIPPED_DUPLICATE_SOURCE", stop: "ELIGIBLE", kind: "SKIP" }],
+  [ROUTE_SWITCH_NOTE, { code: "AI_SKIPPED_ROUTE_SWITCHED", stop: "ELIGIBLE", kind: "SKIP" }],
 ];
 
 /** Mọi ghi chú đường xử lý tin ghi vào `sales_chat_inbound.note` mà bảng này biết — bài kiểm duyệt từng dòng. */

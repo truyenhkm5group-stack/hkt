@@ -29,6 +29,7 @@ export function ConversationControlBar({
   blocks,
   handoffReason,
   canWork,
+  cooldownMinutes,
 }: {
   conversationId: string;
   channel: string;
@@ -38,6 +39,8 @@ export function ConversationControlBar({
   blocks: AiBlock[];
   handoffReason: string | null;
   canWork: boolean;
+  /** Số phút AI nhường của workspace — câu trạng thái nói đúng số đã khai. */
+  cooldownMinutes?: number;
 }) {
   const router = useRouter();
   const [pending, setPending] = useState<ConversationControl | null>(null);
@@ -99,7 +102,7 @@ export function ConversationControlBar({
   };
 
   // Câu hiển thị dựng bằng MỘT hàm thuần (ai-status-shared.ts): còn lý do chặn ⇒ AI_BLOCKED, không bao giờ «AI đang trả lời».
-  const shown = controlBarStatus({ hold, blocks, mode, handoffReason, control, lapsed, formatAt: formatDateTime });
+  const shown = controlBarStatus({ hold, blocks, mode, handoffReason, control, lapsed, formatAt: formatDateTime, cooldownMinutes });
   const status = shown.text;
   const tone = shown.state === "HUMAN_TAKEOVER" || shown.state === "AI_BLOCKED" ? "rose" : (shown.state === "HUMAN_COOLDOWN" && !lapsed) || mode === "COPILOT" ? "amber" : "violet";
 

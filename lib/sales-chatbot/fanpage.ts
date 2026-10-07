@@ -25,7 +25,7 @@ import { readPinnedArm, replyGate } from "@/lib/sales-chatbot/operating-mode-sha
 import { applyConversationControl, controlOf, controlSkipNote } from "@/lib/sales-chatbot/conversation-control-shared";
 import { botMaySend, captureSendSnapshot, holdGate, startHumanCooldown } from "@/lib/sales-chatbot/conversation-control";
 import { FANPAGE_STAFF_REASON, HUMAN_COOLDOWN_MINUTES } from "@/lib/sales-chatbot/ai-hold-shared";
-import { DUPLICATE_SOURCE_REASON, insertCustomerInbound, loadTransportFacts, MESSENGER_OWNS_PAGE_REASON, NON_CANONICAL_NOTE, routeVerdict, type RouteVerdict } from "@/lib/sales-chatbot/channel-ownership";
+import { DUPLICATE_SOURCE_REASON, insertCustomerInbound, loadTransportFacts, MESSENGER_OWNS_PAGE_REASON, NON_CANONICAL_NOTE, pageRouteChangedAt, routeVerdict, type RouteVerdict } from "@/lib/sales-chatbot/channel-ownership";
 import { createHash, randomUUID } from "node:crypto";
 import { and, asc, desc, eq, gte, inArray, isNotNull, isNull, like, lt, ne, or, sql, type SQL } from "drizzle-orm";
 import { getDb, schema } from "@/db";
@@ -1346,12 +1346,14 @@ export async function catchUpFanpage(deps: FanpageDeps = {}): Promise<CatchUpRes
   const db = await getDb();
   const t = schema.salesChatInbound;
   const batch = candidates.slice(0, decision.threadBudget);
+  // Đường chính vừa đổi (0232) ⇒ tin khách TRƯỚC mốc đổi không trả lời bù qua đường này (lúc đó đường kia đang giữ page).
+  const routeSince = (await pageRouteChangedAt(pageId))?.getTime() ?? null;
   for (const c of batch) {
     const threadId = str(c.id);
     if (!threadId) continue;
     const body = await get(`${PANCAKE_PAGES_API}/v1/pages/${encodeURIComponent(pageId)}/conversations/${encodeURIComponent(threadId)}/messages?${q}`);
     const msgs = normalizeThreadMessages((Array.isArray(body?.messages) ? body.messages : []) as Record<string, unknown>[], pageId);
-    const waiting = unansweredCustomerMessages(msgs, nowMs, CATCH_UP_LIMITS.minAgeSeconds * 1000, maxAgeMs);
+    const waiting = unansweredCustomerMessages(msgs, nowMs, CATCH_UP_LIMITS.minAgeSeconds * 1000, maxAgeMs).filter((m) => routeSince === null || m.at > routeSince);
     if (!waiting.length) continue;
     const customerName = str((c.from as { name?: unknown } | undefined)?.name) || str(((c.customers as { name?: unknown }[] | undefined) ?? [])[0]?.name);
     let touched = 0;
