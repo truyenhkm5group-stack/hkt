@@ -27,6 +27,7 @@ import { provisionOrganization } from "@/lib/platform/provision";
 import { createProductCore } from "@/lib/records/product-create";
 import { DEFAULT_SALES_CHATBOT_CONFIG, SALES_CHATBOT_SETTING_KEY } from "@/lib/sales-chatbot/config";
 import { chatTurn, nowPromptLine, openConversation, setSalesChatProviderForTests, visitorKeyOf } from "@/lib/sales-chatbot/engine";
+import { promptStampOf, type PromptStamp } from "@/lib/sales-chatbot/prompt-stamp";
 import type { ChatState } from "@/lib/sales-chatbot/tools";
 import { setSettingJson } from "@/lib/settings";
 
@@ -175,8 +176,14 @@ export type GoldenTranscript = {
     stage: string | null;
     customer: { name: string; phone: string; address: string; simulated: boolean } | null;
     draft: { lines: { sku: string; quantity: number; unitPrice: number | null }[]; simulated: boolean } | null;
-    confirmed: { total: number; simulated: boolean } | null;
+    /**
+     * `stamp` (Order Truth): dấu lời nhắc trên đơn chốt — `promptHashOk` = băm của ĐÚNG lời nhắc + tập công cụ mà lượt ra lệnh
+     * `confirm_order` đã gửi model (tính lại từ bản thô ở đây, không chép số băm vào ảnh chụp vì lời nhắc có ngày chạy).
+     */
+    confirmed: { total: number; simulated: boolean; stamp: { promptHashOk: boolean; model: string | null; codeVersion: string | null } | null } | null;
     declined: string | null;
+    /** Sổ chi phí AI của hội thoại: mọi dòng `ref` = hội thoại có mang `conversation_id` = hội thoại (ALL) — không còn phải tra qua `ref`. */
+    aiUsageConversation: "ALL" | "SOME" | "NONE" | "NO_ROWS";
     order: { stage: string; total: number; source: string; shipAddress: string; items: { sku: string; quantity: number; price: number }[] } | null;
   };
 };
@@ -191,6 +198,8 @@ async function runCase(c: GoldenCase, ids: Map<string, string>): Promise<GoldenT
   let steps: Step[] = [];
   let stepIdx = 0;
   let rounds: GoldenTranscript["turns"][number]["rounds"] = [];
+  // Bản THÔ của mỗi vòng (không vào ảnh chụp): lời nhắc + tên công cụ gửi model + công cụ model gọi — để kiểm dấu lời nhắc.
+  const rawRounds: { system: string; toolNames: string[]; calls: string[] }[] = [];
   const provider: AiProvider = {
     name: "golden-fake",
     model: "claude-sonnet-5",
@@ -204,6 +213,7 @@ async function runCase(c: GoldenCase, ids: Map<string, string>): Promise<GoldenT
       const step = steps[stepIdx++];
       const content = step ? step({ v: (sku) => ids.get(sku) ?? `KHÔNG-CÓ-${sku}`, results }) : [say("[HẾT KỊCH BẢN]")];
       rounds.push({ prompt: pi, tools: content.filter((b): b is Extract<AiBlock, { type: "tool_use" }> => b.type === "tool_use").map((b) => ({ name: b.name, input: b.input })), text: content.filter((b): b is Extract<AiBlock, { type: "text" }> => b.type === "text").map((b) => b.text).join("\n"), results: [] });
+      rawRounds.push({ system: req.system, toolNames: req.tools.map((t) => t.name), calls: content.filter((b): b is Extract<AiBlock, { type: "tool_use" }> => b.type === "tool_use").map((b) => b.name) });
       return { content, stopReason: content.some((b) => b.type === "tool_use") ? "tool_use" : "end_turn", usage: { inputTokens: 100, outputTokens: 20, cacheReadTokens: 0, cacheWriteTokens: 0 }, model: "claude-sonnet-5", latencyMs: 1 };
     },
   };
@@ -235,6 +245,18 @@ async function runCase(c: GoldenCase, ids: Map<string, string>): Promise<GoldenT
       }
       const [row] = await db.select().from(schema.salesChatConversations).where(eq(schema.salesChatConversations.id, conv.id));
       const st = (row.state ?? {}) as ChatState;
+      const stampOf = (stamp: PromptStamp | undefined) =>
+        stamp
+          ? {
+              promptHashOk: rawRounds.some((r) => r.calls.includes("confirm_order") && promptStampOf({ system: r.system, tools: r.toolNames, config: null, model: null, codeVersion: null }).promptHash === stamp.promptHash),
+              model: stamp.model,
+              codeVersion: stamp.codeVersion,
+            }
+          : null;
+      const u = schema.platformAiUsage;
+      const usageRows = await (await getPlatformDb()).select({ conversationId: u.conversationId }).from(u).where(and(eq(u.orgCode, spec.code), eq(u.ref, conv.id)));
+      const withConv = usageRows.filter((r) => r.conversationId === conv.id).length;
+      const aiUsageConversation = usageRows.length === 0 ? "NO_ROWS" : withConv === usageRows.length ? "ALL" : withConv === 0 ? "NONE" : "SOME";
       let order: GoldenTranscript["final"]["order"] = null;
       const orderId = row.orderId ?? row.draftOrderId;
       if (orderId) {
@@ -255,8 +277,9 @@ async function runCase(c: GoldenCase, ids: Map<string, string>): Promise<GoldenT
           stage: st.stage ?? null,
           customer: st.customer ? { name: st.customer.name, phone: st.customer.phone, address: st.customer.address, simulated: st.customer.simulated } : null,
           draft: st.draft ? { lines: st.draft.lines.map((l) => ({ sku: skuOfId.get(l.variantId.toLowerCase()) ?? l.variantId, quantity: l.quantity, unitPrice: st.draft?.unitPrices[l.variantId] ?? null })), simulated: st.draft.simulated } : null,
-          confirmed: st.confirmed ? { total: st.confirmed.total, simulated: st.confirmed.simulated } : null,
+          confirmed: st.confirmed ? { total: st.confirmed.total, simulated: st.confirmed.simulated, stamp: stampOf(st.confirmed.stamp) } : null,
           declined: st.declined?.reason ?? null,
+          aiUsageConversation,
           order,
         },
       };

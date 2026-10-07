@@ -62,6 +62,7 @@
     "draft": null,
     "confirmed": null,
     "declined": null,
+    "aiUsageConversation": "ALL",
     "order": null
   }
 }

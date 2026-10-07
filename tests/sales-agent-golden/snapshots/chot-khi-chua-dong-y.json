@@ -148,6 +148,7 @@
     },
     "confirmed": null,
     "declined": null,
+    "aiUsageConversation": "ALL",
     "order": {
       "stage": "NEW",
       "total": 350000,

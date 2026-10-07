@@ -173,7 +173,7 @@ export async function runSalesFollowups(deps: FanpageDeps = {}): Promise<Followu
         reasoning: "low",
       });
       const inTok = res.usage.inputTokens + res.usage.cacheReadTokens + res.usage.cacheWriteTokens;
-      await recordAiUsage({ orgCode: org.code, feature: "sales_chatbot", source: prov.source, provider: prov.provider.name, model: res.model || prov.provider.model, requests: 1, inputTokens: inTok, outputTokens: res.usage.outputTokens, costUsd: estimateCostUsd(res.model || prov.provider.model, res.usage), status: "OK", actorId: null, ref: row.id }).catch(() => undefined);
+      await recordAiUsage({ orgCode: org.code, feature: "sales_chatbot", source: prov.source, provider: prov.provider.name, model: res.model || prov.provider.model, requests: 1, inputTokens: inTok, outputTokens: res.usage.outputTokens, costUsd: estimateCostUsd(res.model || prov.provider.model, res.usage), status: "OK", actorId: null, ref: row.id, conversationId: row.id }).catch(() => undefined);
       await db.update(c).set({ aiCalls: row.aiCalls + 1, inputTokens: row.inputTokens + inTok, outputTokens: row.outputTokens + res.usage.outputTokens }).where(eq(c.id, row.id));
       const text = res.content.map((b) => (b.type === "text" ? b.text : "")).join("\n").trim().slice(0, 1000);
       // Câu rỗng, hay lỡ nêu giá (giá chỉ được đọc từ ERP lúc chat) ⇒ BỎ lần nhắc này, sang mốc sau — không gửi câu sai.

@@ -252,7 +252,7 @@ export function deriveTurnEvents(input: { before: TurnSnapshot; after: TurnSnaps
   }
 
   if (a.confirmed && !b.confirmed) {
-    out.push({ type: "order.confirmed", actorKind: "CUSTOMER", occurredAt: turnAt, orderId: a.confirmed.orderId, amountVnd: Math.round(a.confirmed.total), payload: { simulated: a.confirmed.simulated }, key: `confirm:${a.confirmed.orderId ?? `sim:${cycle}`}` });
+    out.push({ type: "order.confirmed", actorKind: "CUSTOMER", occurredAt: turnAt, orderId: a.confirmed.orderId, amountVnd: Math.round(a.confirmed.total), payload: { simulated: a.confirmed.simulated, ...(a.confirmed.stamp ? { stamp: a.confirmed.stamp } : {}) }, key: `confirm:${a.confirmed.orderId ?? `sim:${cycle}`}` });
     if (a.upsellSent && !accepted) out.push({ type: "upsell.declined", actorKind: "CUSTOMER", occurredAt: turnAt, key: `upsell-decline:${cycle}` });
   }
 
