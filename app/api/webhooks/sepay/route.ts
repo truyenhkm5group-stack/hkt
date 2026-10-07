@@ -29,6 +29,7 @@ import { resolveWebhookOrganization } from "@/lib/platform/webhooks";
 import { after } from "next/server";
 import { getDb } from "@/db";
 import { extractTransferCodes } from "@/lib/billing/rules";
+import { extractTopupCodes } from "@/lib/billing/ai-balance-rules";
 import { reconcileBillingPayments } from "@/lib/billing/service";
 import { staleMemo } from "@/lib/cache";
 import { env } from "@/lib/env";
@@ -157,9 +158,10 @@ async function handlePost(request: NextRequest) {
       } catch (error) {
         console.error(`[sepay-webhook] gán nhãn hỏng cho ${transactionId}: ${error instanceof Error ? error.message : String(error)}`);
       }
-      // TIỀN THUÊ BAO NỀN TẢNG (0187): chỉ khi nội dung mang mã `ERPHD…` — mọi giao dịch khác không tốn thêm câu nào.
-      // Hỏng ở đây không mất tiền: khoản vẫn nằm trong sổ ngân hàng, nút «Đối chiếu lại» ở /platform quét lại được.
-      if (parsed.txn.direction === "in" && extractTransferCodes(parsed.txn.content).length > 0) {
+      // TIỀN THUÊ BAO NỀN TẢNG (0187) + TIỀN NẠP SỐ DƯ AI (0235): chỉ khi nội dung mang mã `ERPHD…` / `ERPNAP…` — mọi giao
+      // dịch khác không tốn thêm câu nào. Hỏng ở đây không mất tiền: khoản vẫn nằm trong sổ ngân hàng, nút «Đối chiếu lại» ở
+      // /platform quét lại được, và màn nạp tiền của khách tự khớp mã của chính phiếu khi hỏi trạng thái.
+      if (parsed.txn.direction === "in" && (extractTransferCodes(parsed.txn.content).length > 0 || extractTopupCodes(parsed.txn.content).length > 0)) {
         try {
           const r = await reconcileBillingPayments({ lookbackDays: 3 });
           if (r.errors.length) console.error(`[sepay-webhook] đối chiếu thuê bao hỏng: ${r.errors.join(" · ")}`);

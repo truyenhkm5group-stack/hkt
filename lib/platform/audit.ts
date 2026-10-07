@@ -38,6 +38,8 @@ export type PlatformAuditAction = "MODULE_ENABLE" | "MODULE_DISABLE" | "FEATURE_
   | "ORG_ADDONS_SET"
   | "INVOICE_INFO_SET"
   | "INVOICE_VAT_ISSUED"
+  // Số dư AI (0235, `lib/billing/ai-balance.ts`): người vận hành điều chỉnh / tặng / hoàn số dư của một tổ chức — bắt buộc lý do.
+  | "AI_BALANCE_ADJUST"
   // Người vận hành tạo liên kết đặt lại mật khẩu cho tài khoản của tổ chức khách (0191, lib/users/password-reset.ts).
   | "PASSWORD_RESET_LINK"
   // Chủ nền tảng khai chi phí hạ tầng / hỗ trợ khách theo tháng (0203, lib/platform/saas-ledger.ts) — mẫu số biên lợi nhuận.

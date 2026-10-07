@@ -4,7 +4,7 @@ import type { SessionUser } from "@/lib/auth/session";
 import { disableConnectionAsOperator } from "@/lib/connectors/service";
 import { platformAudit } from "@/lib/platform/audit";
 import { withOrganization } from "@/lib/platform/context";
-import { readOrgFlag, WORKFLOWS_PAUSED_FLAG, writeOrgFlag } from "@/lib/platform/org-flags";
+import { AI_BALANCE_FLAG, readOrgFlag, WORKFLOWS_PAUSED_FLAG, writeOrgFlag } from "@/lib/platform/org-flags";
 import { findOrganization, invalidateOrganizations } from "@/lib/platform/organizations";
 import { ORGANIZATION_CODE_PATTERN, type Organization } from "@/lib/platform/types";
 import { platformOperatorDenial } from "@/lib/platform-ui/module-toggle";
@@ -110,6 +110,30 @@ export async function setWorkflowsPaused(user: SessionUser, input: unknown): Pro
       ? `Đã tạm dừng luật tự động của «${org.name}»: lượt chạy kế tiếp bỏ qua tổ chức này, lượt chờ duyệt giữ nguyên.`
       : `Đã cho chạy lại luật tự động của «${org.name}» — lượt kế tiếp xét tiếp từ chỗ dừng, không làm lại việc đã làm.`,
   };
+}
+
+/**
+ * Bật / tắt Số dư AI + nạp QR cho MỘT tổ chức (canary — 0235). Cùng đường ghi cờ + nhật ký như công tắc 2; tắt lại KHÔNG
+ * đụng tiền đã nạp (sổ cái giữ nguyên, tiền về muộn vẫn được cộng) — chỉ ẩn màn khách và chặn tạo phiếu nạp mới.
+ */
+export async function setAiBalanceEnabled(user: SessionUser, input: unknown): Promise<KillSwitchResult> {
+  const raw = (input && typeof input === "object" ? input : {}) as { orgCode?: unknown; reason?: unknown; enabled?: unknown };
+  const p = await parseCommon(user, raw);
+  if ("error" in p) return p;
+  if (typeof raw.enabled !== "boolean") return { error: "Thiếu hướng: bật hay tắt Số dư AI." };
+  const { org, reason, actor } = p;
+  const before = await readOrgFlag(org.code, AI_BALANCE_FLAG, { fresh: true });
+  const was = before?.enabled === true;
+  if (was === raw.enabled) return { ok: true, changed: false, message: raw.enabled ? "Số dư AI đã bật sẵn." : "Số dư AI đang tắt sẵn." };
+  const by = `${actor.orgCode}:${actor.userId}`;
+  await writeOrgFlag(org.id, AI_BALANCE_FLAG, raw.enabled, by);
+  try {
+    await platformAudit({ action: "FLAG_SET", targetOrgCode: org.code, subject: AI_BALANCE_FLAG, before: { enabled: was }, after: { enabled: raw.enabled }, reason, source: "UI", actor });
+  } catch {
+    await writeOrgFlag(org.id, AI_BALANCE_FLAG, was, before?.updatedBy ?? by);
+    return { error: "Không ghi được nhật ký nền tảng — đã hoàn lại, chưa đổi gì." };
+  }
+  return { ok: true, changed: true, message: raw.enabled ? `Đã bật Số dư AI cho «${org.name}».` : `Đã tắt Số dư AI của «${org.name}» — tiền đã nạp giữ nguyên.` };
 }
 
 /** 3 · Tắt MỘT kết nối của tổ chức, qua đường ghi của sổ kết nối. */

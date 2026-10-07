@@ -294,6 +294,10 @@ export function testNavigationCoverage() {
     // hạn) — vào từ thẻ «Bắt đầu» ở trang chủ của tổ chức đó, không thêm mục vào menu của tổ chức nhà.
     "/settings/branding": "bước 'Đặt tên hiển thị, màu và logo' trên thẻ Bắt đầu (trang chủ tổ chức không-nhà)",
     "/settings/plan": "liên kết 'Gói & hạn mức' ở đầu thẻ Bắt đầu (trang chủ tổ chức không-nhà)",
+    // Số dư AI (0235): chỉ có nghĩa khi người vận hành đã bật cờ `ai_balance.enabled` cho tổ chức (canary) — vào từ liên kết
+    // «Số dư AI →» ở đầu /settings/plan (cùng điều kiện cờ); cờ tắt thì trang trả 404.
+    "/settings/ai-balance": "liên kết 'Số dư AI →' ở đầu /settings/plan (chỉ khi cờ ai_balance.enabled của tổ chức bật)",
+    "/platform/ai-balance": "liên kết 'Số dư AI →' ở đầu /platform/saas (người vận hành nền tảng)",
     // 0183 · câu trả lời mẫu là cấu hình CỦA chatbot bán hàng (cùng quyền ai_sales:*), không phải module riêng.
     "/ai/sales-chatbot/quick-replies": "nút 'Câu trả lời mẫu (Q&A)' ở đầu trang /ai/sales-chatbot",
     "/ai/sales-chatbot/messenger": "thẻ 'Messenger trực tiếp (không cần Pancake)' trong trang /ai/sales-chatbot (người có quyền cấu hình)",

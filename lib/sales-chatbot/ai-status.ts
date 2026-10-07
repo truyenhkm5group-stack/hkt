@@ -19,7 +19,7 @@ import { and, desc, eq, gte, isNotNull } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { lastSalesAiCall, salesAiCallsForConversation } from "@/lib/ai-usage/conversation-evidence";
 import { forgetMemo, memo } from "@/lib/cache";
-import { loadAiEntitlement } from "@/lib/pricing/ai-gate";
+import { aiBalanceGate, loadAiEntitlement } from "@/lib/pricing/ai-gate";
 import { AI_STOP_MESSAGE, AI_STOP_NOTE } from "@/lib/pricing/ai-entitlement";
 import { canUseModule } from "@/lib/platform/capabilities";
 import { currentOrganization } from "@/lib/platform/context";
@@ -40,7 +40,7 @@ import { ZALO_OUTSIDE_WINDOW } from "@/lib/sales-chatbot/zalo";
 
 // ─────────────────────────── 1. Lý do AI không trả lời ───────────────────────────
 
-export type BlockConv = { id: string; channel: string; pageId: string | null; visitorKey: string | null; state: unknown };
+export type BlockConv = { id: string; channel: string; pageId: string | null; visitorKey: string | null; state: unknown; threadId?: string | null };
 
 /** Kênh có người trả lời song song (cổng page + chế độ vận hành áp ở đây) — chat web / khung thử không qua hai cổng này. */
 function isPageChannel(channel: string): boolean {
@@ -73,7 +73,33 @@ export async function conversationAiBlocks(conv: BlockConv): Promise<AiBlock[]> 
     }
   }
   out.push(...org.orgBlocks);
+  // Số dư AI — cổng THEO HỘI THOẠI (ai-gate.ts::aiBalanceGate, ĐÚNG hàm của đường xử lý): khách mới + số dư đã hết ⇒ nói ra, kèm
+  // lối «Nạp tiền». Khách đã được AI chăm trong kỳ thì cổng cho qua — màn hình không báo chặn oan.
+  const orgCode = (await currentOrganization()).code;
+  if (!(await aiBalanceGate(orgCode, { channel: conv.channel, pageId: conv.pageId, threadId: conv.threadId ?? null, visitorKey: conv.visitorKey, ...(await commenterHint(conv)) }))) {
+    out.push(aiBlock("BALANCE_EXHAUSTED", AI_STOP_MESSAGE.BALANCE_EXHAUSTED));
+  }
   return out;
+}
+
+/**
+ * Tin khách MỚI NHẤT của hội thoại page là BÌNH LUẬN ⇒ khách AI của lượt kế tiếp là NGƯỜI bình luận đó (đồng hồ ghi theo người
+ * bình luận) — cổng Số dư AI phải hỏi đúng khoá ấy, không thì báo chặn oan người đã được tính trong tháng (review 08/10/2026, M2).
+ */
+async function commenterHint(conv: BlockConv): Promise<{ threadKind: "COMMENT"; commenterId: string | null } | Record<string, never>> {
+  if (conv.channel !== "FANPAGE" || !conv.pageId || !conv.threadId) return {};
+  try {
+    const t = schema.salesChatInbound;
+    const [last] = await (await getDb())
+      .select({ kind: t.kind, fromId: t.fromId })
+      .from(t)
+      .where(and(eq(t.pageId, conv.pageId), eq(t.threadId, conv.threadId)))
+      .orderBy(desc(t.createdAt))
+      .limit(1);
+    return last?.kind === "COMMENT" ? { threadKind: "COMMENT", commenterId: last.fromId ?? null } : {};
+  } catch {
+    return {};
+  }
 }
 
 /** Sự thật CẤP TỔ CHỨC của trạng thái AI — giống nhau ở mọi hội thoại, nên đọc MỘT lần (memo 60 giây theo tổ chức). */
@@ -201,6 +227,7 @@ const EXACT: ReadonlyArray<[string, NoteVerdict]> = [
   [AI_STOP_NOTE.TRIAL_EXPIRED, { code: "AI_SKIPPED_TRIAL_EXPIRED", stop: "ELIGIBLE", kind: "SKIP" }],
   [AI_STOP_NOTE.TRIAL_QUOTA_EXHAUSTED, { code: "AI_SKIPPED_TRIAL_QUOTA_EXHAUSTED", stop: "ELIGIBLE", kind: "SKIP" }],
   [AI_STOP_NOTE.WORKSPACE_SUSPENDED, { code: "AI_SKIPPED_WORKSPACE_SUSPENDED", stop: "ELIGIBLE", kind: "SKIP" }],
+  [AI_STOP_NOTE.BALANCE_EXHAUSTED, { code: "AI_SKIPPED_BALANCE_EXHAUSTED", stop: "ELIGIBLE", kind: "SKIP" }],
 ];
 
 /** Mọi ghi chú đường xử lý tin ghi vào `sales_chat_inbound.note` mà bảng này biết — bài kiểm duyệt từng dòng. */

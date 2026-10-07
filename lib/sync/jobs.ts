@@ -82,6 +82,8 @@ import { sendNewOrderAlerts } from "@/lib/sales-chatbot/new-order-alert";
 import { runFanpageOrderSync } from "@/lib/sales-chatbot/order-sync";
 import { runSalesHealthCheck } from "@/lib/sales-chatbot/health";
 import { runAiCustomerUsageAlerts } from "@/lib/pricing/usage-alerts";
+import { runAiBalanceAlerts } from "@/lib/billing/ai-usage-charge";
+import { reconcileBillingPayments } from "@/lib/billing/service";
 import { retryAiDownMessages } from "@/lib/sales-chatbot/retry-runner";
 import { retryFailedDeliveries } from "@/lib/messaging/service";
 import { runWholesaleLeadsJob } from "@/lib/wholesale/job";
@@ -394,13 +396,18 @@ export const JOB_DEFINITIONS: Record<string, JobDefinition> = {
     module: "connector_bank",
     description:
       "Quét lại N ngày qua API SePay và vá những gói tin webhook không bao giờ tới. Webhook chỉ được SePay thử lại 7 lần trong 5 giờ; sự cố dài hơn thế làm mất hẳn giao dịch, và sổ thiếu tiền mà nhìn vào không thấy gì bất thường. MẶC ĐỊNH CHẠY THỬ — truyền apply=1 mới ghi.",
-    run: (o) =>
-      reconcileSepay({
+    run: async (o) => {
+      const r = await reconcileSepay({
         days: num(o.params?.days),
         apply: o.params?.apply === "1",
         trigger: o.trigger,
         actor: o.actor,
-      }),
+      });
+      // Giao dịch vá từ API có thể mang mã thuê bao `ERPHD…` / mã nạp `ERPNAP…` — đối chiếu ngay (đúng hàm của webhook), không đợi
+      // một gói tin khác tới (review 08/10/2026, L7). Hỏng ở đây không mất tiền: nút «Đối chiếu lại» quét lại được.
+      if (o.params?.apply === "1") await reconcileBillingPayments({ lookbackDays: Math.max(3, num(o.params?.days) ?? 3) }).catch(() => undefined);
+      return r;
+    },
   },
   "pancake-orders": {
     label: "Đơn hàng mới cập nhật",
@@ -842,7 +849,9 @@ export const JOB_DEFINITIONS: Record<string, JobDefinition> = {
         const r = await runSalesHealthCheck();
         // Ngưỡng khách AI 80 · 100 · 120 · 150 (L5 · lib/pricing/usage-alerts.ts) đi CÙNG lịch giám sát — không thêm lịch mới.
         const usage = await runAiCustomerUsageAlerts();
-        ctx.summary.detail = `${r.status} · ${r.alerted} · ${r.health.headline}${usage.sent ? ` · báo ngưỡng khách AI ${usage.sent}` : ""}`.slice(0, 900);
+        // Số dư AI thấp / hết (docs/saas/AI_BALANCE_V1.md) — cùng lịch, một chuông mỗi mức mỗi ngày.
+        const balance = await runAiBalanceAlerts();
+        ctx.summary.detail = `${r.status} · ${r.alerted} · ${r.health.headline}${usage.sent ? ` · báo ngưỡng khách AI ${usage.sent}` : ""}${balance.sent ? ` · báo số dư AI ${balance.sent}` : ""}`.slice(0, 900);
         if (r.status === "RED") ctx.summary.warning = r.health.headline.slice(0, 500);
         return r;
       }),

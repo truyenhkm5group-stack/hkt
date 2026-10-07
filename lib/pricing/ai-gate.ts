@@ -18,7 +18,9 @@ import { getPlanUsage } from "@/lib/entitlements/check";
 import { currentOrganization, withOrganization } from "@/lib/platform/context";
 import { findOrganization } from "@/lib/platform/organizations";
 import { readPeriodUsage } from "@/lib/platform/usage-meter";
-import { onAiCustomerRecorded, readAiCustomerUsage } from "@/lib/pricing/ai-customer";
+import { aiCustomerCountedThisPeriod, onAiCustomerRecorded, readAiCustomerUsage } from "@/lib/pricing/ai-customer";
+import { aiBalanceEnabled, readAiBalance } from "@/lib/billing/ai-balance";
+import { balanceOverageTerms } from "@/lib/billing/ai-usage-charge";
 import {
   AI_STOP_MESSAGE,
   AI_STOP_NOTE,
@@ -113,13 +115,44 @@ export async function loadAiEntitlement(orgCode: string, opts: { now?: Date; fre
 
 export type SalesAiPlanGate = { ok: true } | { ok: false; reason: AiStopReason; message: string; note: string };
 
+/** Danh tính hội thoại cho cổng Số dư AI (cùng bốn ô đồng hồ khách AI dựng khoá). */
+/** Hội thoại của lượt + (bình luận) loại luồng và NGƯỜI bình luận — đúng các trường đồng hồ khách AI dùng để dựng khoá. */
+export type GateConversation = { channel: string; pageId: string | null; threadId: string | null; visitorKey: string | null; threadKind?: "INBOX" | "COMMENT" | null; commenterId?: string | null };
+
+/**
+ * CỔNG SỐ DƯ AI THEO HỘI THOẠI (docs/saas/AI_BALANCE_V1.md · chủ shop 08/10/2026: «hết số dư ⇒ khách đã trả trong tháng vẫn được
+ * trả lời; khách MỚI không nhận AI; âm tối đa đúng 1 khách»). Chặn (`false`) CHỈ khi đủ cả năm điều: tổ chức đã bật Số dư AI ·
+ * gói trừ số dư (trả phí, phần vượt tính tiền) · khách này CHƯA là khách AI của kỳ · số khách của kỳ đã chạm phần gói gồm · số
+ * dư ≤ 0. Số dư còn dương dù nhỏ hơn đơn giá ⇒ CHO (lượt trừ sau có thể âm — tối đa một đơn giá). Mọi lỗi đọc ⇒ CHO (nới) —
+ * không bao giờ chặn khách đang mua hàng vì một lần CSDL chập.
+ */
+export async function aiBalanceGate(orgCode: string, conv: GateConversation, now: Date = new Date()): Promise<boolean> {
+  try {
+    if (!(await aiBalanceEnabled(orgCode))) return true;
+    const terms = await balanceOverageTerms(orgCode);
+    if (!terms) return true;
+    if (await aiCustomerCountedThisPeriod(orgCode, conv, now)) return true;
+    const org = await findOrganization(orgCode);
+    if (!org) return true;
+    const used = (await readAiCustomerUsage([org.code], usagePeriodOf(now), now)).get(org.code)?.value ?? null;
+    if (used === null || used < terms.included) return true;
+    return (await readAiBalance(orgCode)).totalVnd > 0;
+  } catch {
+    return true;
+  }
+}
+
 /** Cổng của RUNTIME (tổ chức ngữ cảnh). Không ném: lỗi ⇒ cho. */
-export async function salesAiPlanGate(opts: { now?: Date } = {}): Promise<SalesAiPlanGate> {
+export async function salesAiPlanGate(opts: { now?: Date; conversation?: GateConversation } = {}): Promise<SalesAiPlanGate> {
   try {
     const org = await currentOrganization();
     const d = await loadAiEntitlement(org.code, opts.now ? { now: opts.now } : {});
-    if (d.allowed || !d.reason) return { ok: true };
-    return { ok: false, reason: d.reason, message: AI_STOP_MESSAGE[d.reason], note: AI_STOP_NOTE[d.reason] };
+    if (!d.allowed && d.reason) return { ok: false, reason: d.reason, message: AI_STOP_MESSAGE[d.reason], note: AI_STOP_NOTE[d.reason] };
+    // Số dư AI: chỉ lượt CÓ hội thoại (một khách cụ thể) mới hỏi — việc nội bộ (học, ghi đơn hộ) không mở khách AI mới.
+    if (opts.conversation && !(await aiBalanceGate(org.code, opts.conversation, opts.now))) {
+      return { ok: false, reason: "BALANCE_EXHAUSTED", message: AI_STOP_MESSAGE.BALANCE_EXHAUSTED, note: AI_STOP_NOTE.BALANCE_EXHAUSTED };
+    }
+    return { ok: true };
   } catch {
     return { ok: true };
   }

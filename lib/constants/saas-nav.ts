@@ -78,7 +78,7 @@ export const SALES_AGENT_NAV: readonly SalesAgentNavItem[] = [
   { key: "products", href: "/products", label: "Sản phẩm", short: "Sản phẩm", permission: "products:view", owns: ["/inventory/receipts"] },
   { key: "channels", href: SALES_AGENT_CHANNELS_HREF, label: "Kênh kết nối", short: "Kênh", permission: "ai_sales:view", owns: ["/settings/connections"] },
   { key: "staff", href: "/settings/users", label: "Nhân viên", short: "Nhân viên", permission: "users:manage" },
-  { key: "plan", href: "/settings/plan", label: "Gói dịch vụ", short: "Gói", permission: "settings:manage", owns: ["/billing-locked"] },
+  { key: "plan", href: "/settings/plan", label: "Gói dịch vụ", short: "Gói", permission: "settings:manage", owns: ["/billing-locked", "/settings/ai-balance"] },
   { key: "settings", href: SALES_AGENT_SETTINGS_HREF, label: "Cài đặt", short: "Cài đặt", owns: ["/settings/branding", "/settings/notifications", "/settings/profile", "/settings/data-export", "/setup", "/help"] },
 ];
 
@@ -140,6 +140,8 @@ export const SALES_AGENT_ALLOWED_PREFIXES: readonly string[] = [
   "/customers",
   "/settings/users",
   "/settings/plan",
+  // Số dư AI (0235): trang con của «Gói dịch vụ» — tiền trả trước cho khách AI vượt phần gói gồm (cờ canary ai_balance.enabled).
+  "/settings/ai-balance",
   "/settings/profile",
   "/settings/branding",
   "/settings/notifications",

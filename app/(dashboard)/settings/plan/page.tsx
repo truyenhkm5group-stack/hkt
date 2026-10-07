@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { PageHeader } from "@/components/page-header";
 import { EmptyState, SectionCard } from "@/components/ui-bits";
 import { requirePermission } from "@/lib/auth/session";
@@ -15,6 +16,7 @@ import { CustomerUsageSection } from "@/components/pricing/customer-usage";
 import { loadCustomerPlan, loadPlanPageFrame } from "@/lib/pricing/customer";
 import { MyProductsSection } from "@/components/saas/my-products";
 import { loadMyProducts } from "@/lib/saas/portal";
+import { aiBalanceEnabled } from "@/lib/billing/ai-balance";
 
 export const metadata = { title: "Gói & thanh toán" };
 
@@ -49,6 +51,14 @@ export default async function PlanPage() {
         title="Gói & thanh toán"
         description={usage.plan ? `Gói «${usage.plan.name}»${!frame.billing && unlimited ? " — không thu phí, không giới hạn" : ""}` : "Không đọc được gói"}
         hint="Hạn mức kiểm ở đúng chỗ tạo: người dùng, trang tuỳ biến, luật tự động, tải tệp. Vượt thì thao tác đó báo lỗi rõ ràng, không có gì bị xoá. Thiếu đúng một hạng mục: mua thêm giữa kỳ, trả theo số ngày còn lại. Nâng gói: chọn gói ở khung Thanh toán, chuyển khoản theo mã QR — tiền về là gói mới có hiệu lực."
+        actions={
+          // Số dư AI chỉ hiện khi người vận hành đã bật cho tổ chức (canary `ai_balance.enabled`).
+          (await aiBalanceEnabled(usage.orgCode)) ? (
+            <Link href="/settings/ai-balance" className="text-sm font-medium text-primary hover:underline" data-link-ai-balance>
+              Số dư AI →
+            </Link>
+          ) : undefined
+        }
       />
       {"error" in products ? null : <MyProductsSection view={products} />}
       {customer ? <CustomerUsageSection view={customer} /> : null}

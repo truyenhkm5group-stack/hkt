@@ -647,6 +647,8 @@ export function testServerActionQuaCongPhien(): number {
  *    CSDL được mở hộ họ.
  */
 const ACTION_NHAN_MA_TO_CHUC: Record<string, { lyDo: string; loai: "VAN_HANH" | "CONG_KHAI" }> = {
+  "lib/actions/ai-balance.ts::adjustAiBalanceAction": { loai: "VAN_HANH", lyDo: "Người vận hành tặng / điều chỉnh / hoàn Số dư AI của MỘT tổ chức (/platform/ai-balance, 0235) — requirePermission(platform:operate), lõi adjustAiBalance hỏi platformOperatorDenial trước mọi lượt đọc, bắt buộc lý do, dòng sổ + nhật ký nền tảng AI_BALANCE_ADJUST trong CÙNG một giao dịch." },
+  "lib/actions/ai-balance.ts::setAiBalanceEnabledAction": { loai: "VAN_HANH", lyDo: "Người vận hành bật / tắt Số dư AI (cờ canary ai_balance.enabled) của MỘT tổ chức — requirePermission(platform:operate), lõi setAiBalanceEnabled (kill-switches.ts) hỏi platformOperatorDenial, bắt buộc lý do, nhật ký nền tảng FLAG_SET; tắt cờ không đụng tiền." },
   "lib/actions/billing.ts::setOrgBillingAction": { loai: "VAN_HANH", lyDo: "Người vận hành bật / tắt / sửa ngày trả tới + ân hạn thu phí của MỘT tổ chức (/platform/org/<mã>) — requirePermission(platform:operate), lõi setOrgBilling hỏi platformOperatorDenial trước mọi lượt đọc, bắt buộc lý do, nhật ký nền tảng." },
   "lib/actions/oauth.ts::pickSocialOrgAction": { loai: "CONG_KHAI", lyDo: "Chọn cửa hàng sau đăng nhập Google / Facebook (CHƯA có phiên): mã tổ chức gửi lên chỉ được chấp nhận khi nằm trong danh sách của cookie KÝ do máy chủ ghi ở bước callback (sau khi đổi code lấy hồ sơ ở nhà cung cấp); completeProviderLogin kiểm tài khoản + trạng thái trong withOrganization." },
   "lib/actions/pricing.ts::setOrgPriceVersionAction": { loai: "VAN_HANH", lyDo: "Người vận hành chuyển MỘT tổ chức sang một phiên bản giá (/platform/saas, 0228) — requirePermission(platform:operate), lõi setOrgPriceVersion hỏi platformOperatorDenial trước mọi lượt đọc, bắt buộc lý do, nhật ký nền tảng PRICE_VERSION_PIN." },
@@ -732,6 +734,9 @@ const LOI_VAN_HANH: Record<string, string> = {
   "lib/platform/kill-switches.ts::setOrganizationSuspended": "Công tắc khẩn: đình chỉ / bật lại một tổ chức (hỏi qua parseCommon).",
   "lib/platform/kill-switches.ts::setWorkflowsPaused": "Công tắc khẩn: tạm dừng luật tự động của một tổ chức (hỏi qua parseCommon).",
   "lib/platform/kill-switches.ts::disableOrgConnection": "Công tắc khẩn: tắt một kết nối trong CSDL của tổ chức đích (hỏi qua parseCommon).",
+  "lib/platform/kill-switches.ts::setAiBalanceEnabled": "Bật / tắt Số dư AI (cờ canary ai_balance.enabled, 0235) của một tổ chức (hỏi qua parseCommon) — tắt cờ không đụng tiền.",
+  "lib/billing/ai-balance.ts::adjustAiBalance": "Tặng / điều chỉnh / hoàn Số dư AI của một tổ chức — dòng sổ + nhật ký nền tảng AI_BALANCE_ADJUST trong CÙNG một giao dịch, bắt buộc lý do.",
+  "lib/billing/ai-balance.ts::loadAiBalanceOperatorView": "Màn /platform/ai-balance: số dư mọi tổ chức (tiền thật · tiền tặng) + khoản tiền nạp cần xem lại — chỉ đọc mặt phẳng điều khiển.",
   "lib/platform/org-plan.ts::setOrganizationPlan": "Đổi gói của một tổ chức sau lúc tạo — ghi cột plan của mặt phẳng điều khiển + nhật ký nền tảng.",
   "lib/platform/org-brand.ts::setOrganizationBrand": "Đặt thương hiệu (vnx · chotdon, 0215) của một tổ chức có từ trước — ghi cột brand của mặt phẳng điều khiển + nhật ký nền tảng.",
   "lib/platform/pilot.ts::setPilotStage": "Đổi giai đoạn pilot của một tổ chức — ghi mặt phẳng điều khiển + đo CSDL của khách.",
