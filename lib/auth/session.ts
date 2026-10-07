@@ -21,7 +21,7 @@ import { findOrganization } from "@/lib/platform/organizations";
 import { billingWriteDenied } from "@/lib/billing/rules";
 import { orgBillingStanding } from "@/lib/billing/standing";
 import { billingLockApplies } from "@/lib/saas/policy";
-import { isSalesAgentUser, salesAgentHomeFor, salesAgentPathAllowed, SALES_AGENT_INBOX_HREF } from "@/lib/constants/saas-nav";
+import { isSalesAgentUser, salesAgentPathAllowed, salesAgentRedirectFor, SALES_AGENT_INBOX_HREF } from "@/lib/constants/saas-nav";
 
 export const ROLE_PERMISSIONS_KEY = "auth.rolePermissions";
 
@@ -278,7 +278,7 @@ export const resolveCurrentUser = cache(async (): Promise<ResolvedUser> => {
     liên hệ quản trị» (khách không có ai để liên hệ, và họ không cần module đó). Phép quyết định chỉ đọc phiên đã có (thương hiệu
     + module), không tốn thêm câu truy vấn nào.
   */
-  if (path && isSalesAgentUser(ket.user) && !salesAgentPathAllowed(path)) return { denied: "SHELL_RESTRICTED", home: salesAgentHomeFor(ket.user) };
+  if (path && isSalesAgentUser(ket.user) && !salesAgentPathAllowed(path)) return { denied: "SHELL_RESTRICTED", home: salesAgentRedirectFor(ket.user, path) };
   const pathModule = path ? moduleOfPath(path) : null;
   if (pathModule && !(ket.user.modules ?? []).includes(pathModule)) return { denied: "MODULE_DISABLED", module: pathModule };
   /*

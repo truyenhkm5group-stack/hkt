@@ -36,7 +36,11 @@ import {
   salesAgentHomeFor,
   salesAgentNavFor,
   salesAgentPathAllowed,
+  salesAgentRedirectFor,
   salesAgentShell,
+  SHELL_BLOCKED_PARAM,
+  shellAllows,
+  shellFitHeight,
 } from "@/lib/constants/saas-nav";
 import { DENY_REASON_MESSAGE, DENY_REASON_PARAM, loginShouldStay } from "@/lib/constants/session-revocation";
 import { invalidateCapabilities } from "@/lib/platform/capabilities";
@@ -73,8 +77,10 @@ const BLOCKED = [
   "/settings/templates",
   "/settings/forms",
   "/inventory",
-  "/inventory/receipts",
   "/inventory/packing",
+  "/inventory/returns",
+  "/inventory/planning",
+  "/inventory/decisions",
   "/orders/verify",
   "/orders/carrier-labels",
   "/customers/receivables",
@@ -95,6 +101,8 @@ const ALLOWED = [
   "/ai/sales-chatbot/messenger",
   "/products",
   "/products/123",
+  "/inventory/receipts",
+  "/inventory/receipts?receipt=abc",
   "/orders",
   "/orders/9007199254740993",
   "/orders/123/edit",
@@ -206,6 +214,29 @@ function kiemThuan() {
   assert.equal(salesAgentActiveKey("/settings/branding", all), "settings");
   assert.equal(salesAgentActiveKey("/ai/overview", all), "overview");
   assert.equal(salesAgentActiveKey("/products/123", all), "products");
+  assert.equal(salesAgentActiveKey("/inventory/receipts", all), "products", "phiếu kho là trang con của Sản phẩm");
+
+  // ── shellAllows: CÙNG phép quyết định với cổng máy chủ; ngoài vỏ luôn vẽ ──
+  const erpAdmin = { ...admin, organization: { isHome: false, brand: null } };
+  for (const p of [...BLOCKED, ...ALLOWED]) {
+    assert.equal(shellAllows(admin, p), salesAgentPathAllowed(p), `shellAllows(${p}) phải nói đúng điều cổng máy chủ nói`);
+    assert.equal(shellAllows(erpAdmin, p), true, `ngoài vỏ: link ${p} vẽ như cũ`);
+  }
+  assert.equal(shellAllows(null, "/inventory/planning"), true);
+
+  // ── Chuyển hướng: `/` im lặng về hộp thư; trang bị chặn kèm câu «không có trong gói» ──
+  assert.equal(salesAgentRedirectFor(admin, "/"), SALES_AGENT_INBOX_HREF, "`/` là cửa vào mặc định — không kèm câu từ chối");
+  assert.equal(salesAgentRedirectFor(admin, "/cockpit"), `${SALES_AGENT_INBOX_HREF}?${SHELL_BLOCKED_PARAM}=1`);
+  assert.equal(salesAgentRedirectFor(trang, "/work"), `/settings/shop?${SHELL_BLOCKED_PARAM}=1`, "người không đọc được hộp thư: về Cài đặt, vẫn có câu");
+
+  // ── Chiều cao khung hộp thư trong vỏ: ô soạn tin không bao giờ nằm dưới thanh dưới ──
+  // iPhone 14 (390×844): mép trên khung ~190px, thanh dưới 64 + vùng an toàn 34 = 98px.
+  const h390 = shellFitHeight({ viewport: 844, top: 190, bottomNav: 98 });
+  assert.ok(190 + h390 + 98 <= 844, `390×844: khung (${h390}px) + thanh dưới phải vừa màn hình`);
+  const h375 = shellFitHeight({ viewport: 667, top: 170, bottomNav: 64 });
+  assert.ok(170 + h375 + 64 <= 667, `375×667: khung (${h375}px) + thanh dưới phải vừa màn hình`);
+  assert.equal(shellFitHeight({ viewport: 400, top: 200, bottomNav: 98 }), 280, "màn quá thấp ⇒ giữ tối thiểu, cuộn trang thay vì bóp khung về 0");
+  assert.equal(shellFitHeight({ viewport: 900, top: 100, bottomNav: 0, gap: 0 }), 800, "màn rộng không có thanh dưới");
 }
 
 /* ═════════════ 2 · QUÉT TRANG ═════════════ */
@@ -229,6 +260,41 @@ function kiemTrang() {
     if (it.permission) assert.ok(src.includes(`"${it.permission}"`) || /PUBLISH_PERMISSION|CONNECTIONS_PERMISSION/.test(src), `${rel(f)} phải đòi đúng "${it.permission}" như mục ${it.label} khai`);
     else assert.match(src, /requireUser\(\)/, `${rel(f)}: mục không khai khoá ⇒ trang chỉ được đòi đăng nhập`);
   }
+  // LỐI CỤT: trang mở được trong vỏ không được vẽ link vào route vỏ chặn, trừ khi bọc trong `shellAllows(…)` (CÙNG hàm với
+  // cổng máy chủ — không danh sách thứ hai). `/` không phải lối cụt: máy chủ đưa về trang nhà.
+  const loiCut: string[] = [];
+  for (const pg of open) {
+    const dir = path.dirname(path.join(goc, pg.file));
+    for (const f of readdirSync(dir).filter((x) => x.endsWith(".tsx"))) {
+      const src = readFileSync(path.join(dir, f), "utf8");
+      const boc = [...src.matchAll(/shellAllows\([^,()]+,\s*"([^"]+)"\)/g)].map((m) => m[1]);
+      for (const m of src.matchAll(/href(?:=\{?|:\s*)["`](\/[^"`?#$]*)/g)) {
+        const p = m[1].replace(/\/$/, "") || "/";
+        if (p === "/" || salesAgentPathAllowed(p) || salesAgentPathAllowed(`${p}/x`)) continue;
+        if (!boc.some((l) => p === l || p.startsWith(`${l}/`))) loiCut.push(`${pg.url} (${f}): ${m[1]}`);
+      }
+    }
+  }
+  assert.deepEqual(loiCut, [], `link trỏ vào route vỏ chặn mà không bọc shellAllows — với khách Chốt Đơn đó là lối cụt: ${loiCut.join(" · ")}`);
+
+  // TỒN KHO: khách tự nhập / điều chỉnh tồn qua ĐÚNG trang phiếu kho có sẵn, gọi ĐÚNG server action phiếu kho — không luật thứ hai.
+  assert.ok(salesAgentPathAllowed("/inventory/receipts") && !salesAgentPathAllowed("/inventory"), "mở đúng trang phiếu kho, sổ kho tổng vẫn chặn");
+  const dialog = readFileSync(path.join(goc, "app", "(dashboard)", "inventory", "receipts", "receipt-dialog.tsx"), "utf8");
+  assert.match(dialog, /import \{ createStockReceipt \} from "@\/lib\/actions\/stock"/, "phiếu kho đi qua createStockReceipt (tồn = tổng phiếu kho − đã xuất, AGENTS §3.10)");
+  assert.equal(moduleOfPath("/inventory/receipts"), "inventory", "trang phiếu kho thuộc lõi thương mại dùng chung, không phải module ERP độc quyền");
+
+  // HỘP THƯ trong vỏ: khung tự đo theo thanh dưới (đã gồm safe-area) thay vì `100dvh - 13.5rem` canh cho thanh ERP.
+  const inbox = readFileSync(pageFileOf(SALES_AGENT_INBOX_HREF), "utf8");
+  assert.match(inbox, /shell = isSalesAgentUser\(user\)/);
+  assert.match(inbox, /<ShellViewportFit/, "trong vỏ, khung hộp thư đo chiều cao thật");
+  assert.match(inbox, /h-\[calc\(100dvh-13\.5rem\)\] min-h-\[560px\]/, "ngoài vỏ: đúng chiều cao cũ");
+  const fit = readFileSync(path.join(goc, "components", "shell-viewport-fit.tsx"), "utf8");
+  assert.match(fit, /sales-agent-bottom-nav/, "khung đo thanh dưới thật của vỏ");
+  assert.match(fit, /visualViewport/, "theo dõi bàn phím ảo / đổi cỡ màn");
+  assert.match(fit, /shellFitHeight\(/, "dùng hàm thuần đã kiểm");
+  const shellSrc = readFileSync(path.join(goc, "components", "saas-shell.tsx"), "utf8");
+  assert.match(shellSrc, /SHELL_BLOCKED_PARAM/, "vỏ in câu «không có trong gói» khi bị chuyển hướng");
+
   // Tổng quan: số của shop, KHÔNG chi phí / token / model của nhà cung cấp.
   const ov = readFileSync(pageFileOf("/ai/overview"), "utf8");
   assert.match(ov, /withMoney: false/, "Tổng quan đọc hiệu quả AI KHÔNG kèm tiền AI");
@@ -321,11 +387,12 @@ async function kiemMayChu() {
     for (const p of ["/cockpit", "/work", "/departments", "/data-quality", "/audit", "/settings/data-model", "/settings/workflows", "/inventory", "/orders/verify", "/production"]) {
       const ket = await asRequest(token, p, () => resolveCurrentUser());
       assert.ok("denied" in ket && ket.denied === "SHELL_RESTRICTED", `${p} phải bị chặn ở MÁY CHỦ, nhận ${JSON.stringify(ket)}`);
-      assert.equal(ket.home, SALES_AGENT_INBOX_HREF);
-      assert.equal(await asRequest(token, p, () => redirectTarget(() => requireUser())), SALES_AGENT_INBOX_HREF, `${p}: requireUser chuyển về hộp thư, không về /login`);
+      const dich = `${SALES_AGENT_INBOX_HREF}?${SHELL_BLOCKED_PARAM}=1`;
+      assert.equal(ket.home, dich, "về hộp thư KÈM tham số để vỏ nói «không có trong gói», không im lặng");
+      assert.equal(await asRequest(token, p, () => redirectTarget(() => requireUser())), dich, `${p}: requireUser chuyển về hộp thư, không về /login`);
     }
     assert.equal(await asRequest(token, "/", () => redirectTarget(() => requireUser())), SALES_AGENT_INBOX_HREF, "`/` ⇒ hộp thư");
-    for (const p of ["/ai/overview", "/ai/sales-chatbot", "/products", "/orders/123", "/customers/abc", "/settings/users", "/settings/plan", "/settings/shop", "/api/events", "/api/notifications"]) {
+    for (const p of ["/ai/overview", "/ai/sales-chatbot", "/products", "/inventory/receipts", "/orders/123", "/customers/abc", "/settings/users", "/settings/plan", "/settings/shop", "/api/events", "/api/notifications"]) {
       const ket = await asRequest(token, p, () => resolveCurrentUser());
       assert.ok("user" in ket, `${p} phải đi qua cổng vỏ, nhận ${JSON.stringify(ket)}`);
     }

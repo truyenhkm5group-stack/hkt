@@ -73,7 +73,7 @@ export const SALES_AGENT_NAV: readonly SalesAgentNavItem[] = [
   { key: "overview", href: SALES_AGENT_OVERVIEW_HREF, label: "Tổng quan", short: "Tổng quan", permission: "ai_sales:view" },
   { key: "inbox", href: SALES_AGENT_INBOX_HREF, label: "Hội thoại", short: "Hội thoại", permission: "ai_sales:view", owns: ["/ai/sales-chatbot/conversations", "/orders", "/customers"] },
   { key: "ai", href: "/ai/sales-chatbot", label: "AI Sales", short: "AI Sales", permission: "ai_sales:view" },
-  { key: "products", href: "/products", label: "Sản phẩm", short: "Sản phẩm", permission: "products:view" },
+  { key: "products", href: "/products", label: "Sản phẩm", short: "Sản phẩm", permission: "products:view", owns: ["/inventory/receipts"] },
   { key: "channels", href: SALES_AGENT_CHANNELS_HREF, label: "Kênh kết nối", short: "Kênh", permission: "ai_sales:view", owns: ["/settings/connections"] },
   { key: "staff", href: "/settings/users", label: "Nhân viên", short: "Nhân viên", permission: "users:manage" },
   { key: "plan", href: "/settings/plan", label: "Gói dịch vụ", short: "Gói", permission: "settings:manage", owns: ["/billing-locked"] },
@@ -118,8 +118,11 @@ export function salesAgentHomeFor(user: ShellUser): string {
  *    của «Hội thoại»: hộp thư dẫn thẳng tới đơn AI vừa chốt (`/orders/<id>`), tới chỗ sửa đơn nháp bot lên sai
  *    (`/orders/<id>/edit`) và tới hồ sơ khách. Chặn chúng là cắt đúng đường chủ shop dùng để kiểm đơn AI tạo ra. Công cụ ERP
  *    quanh đơn (xác minh, nhãn vận chuyển, tự giao, tuyến giao) và quanh khách (công nợ, nhắc mua lại, giữ chân) vẫn CHẶN.
- *  · `/inventory` CHẶN hoàn toàn: sổ kho (phiếu nhập, tái nhập hàng hoàn, đóng gói) là nghiệp vụ ERP. Bot vẫn đọc tồn từ ERP; tồn
- *    chưa có phiếu nhập là CHƯA BIẾT và bot không hứa còn hàng — đúng luật hiện có, không cần mở kho cho khách.
+ *  · Tồn kho: khách TỰ khai sản phẩm, giá, size, màu VÀ tồn (chủ shop chốt 07/10/2026) — nên mở ĐÚNG MỘT trang của sổ kho,
+ *    `/inventory/receipts` (Nhập hàng · Kiểm kê · Tái nhập hàng hoàn, trang con của «Sản phẩm»). Đường ít mã nhất và không có
+ *    luật thứ hai: trang ấy gọi đúng server action phiếu kho (`createStockReceipt`), tồn vẫn = tổng phiếu kho − đã xuất
+ *    (AGENTS §3.10), «Kiểm kê» ghi phiếu ADJUSTMENT theo SỐ ĐẾM chứ không ghi thẳng con số tồn. Phần còn lại của `/inventory`
+ *    (sổ kho tổng, đóng gói, mua hàng, sản xuất, quyết định nhập/xả, hàng hoàn chờ nhận) CHẶN — nghiệp vụ ERP.
  *  · Trong `/products`: hiệu quả theo mã (tỷ lệ giao thành công ERP), bảng giá sỉ và hàng giữ chỗ là công cụ ERP — CHẶN.
  *  · Trong `/settings`: chỉ người dùng, gói, tài khoản, thương hiệu, thông báo nhóm, kết nối, xuất dữ liệu và trang Cài đặt gọn.
  *    Bộ dựng (data-model, objects, forms, lists, statuses, workflows, pages, ai-builder, advanced, templates, modules) CHẶN.
@@ -130,6 +133,7 @@ export function salesAgentHomeFor(user: ShellUser): string {
 export const SALES_AGENT_ALLOWED_PREFIXES: readonly string[] = [
   "/ai",
   "/products",
+  "/inventory/receipts",
   "/orders",
   "/customers",
   "/settings/users",
@@ -171,6 +175,40 @@ export function salesAgentPathAllowed(rawPath: string): boolean {
   if (!allow) return false;
   const deny = SALES_AGENT_DENIED_PREFIXES.filter((p) => underPrefix(path, p)).sort((a, b) => b.length - a.length)[0];
   return !deny || deny.length < allow.length;
+}
+
+/**
+ * Một liên kết có nên VẼ cho người này không — ĐÚNG phép quyết định của cổng máy chủ (`salesAgentPathAllowed`), không danh sách
+ * thứ hai. Ngoài vỏ ⇒ luôn `true` (menu ERP y như cũ). Trang dùng chung với ERP gọi hàm này quanh mọi link trỏ vào route mà vỏ
+ * chặn: một nút dẫn tới trang sẽ bị chuyển về hộp thư là lối cụt.
+ */
+export function shellAllows(user: ShellUser | null | undefined, href: string): boolean {
+  return !isSalesAgentUser(user) || salesAgentPathAllowed(href);
+}
+
+/** Tham số trên trang nhà khi máy chủ vừa chuyển người dùng khỏi một trang ngoài vỏ — vỏ in một câu ngắn thay vì im lặng. */
+export const SHELL_BLOCKED_PARAM = "ngoai-goi";
+export const SHELL_BLOCKED_MESSAGE = "Trang này không có trong gói Chốt Đơn — đã đưa bạn về đây.";
+
+/**
+ * Đích chuyển hướng khi cổng vỏ chặn `path`: trang nhà của người này, kèm `?ngoai-goi=1` để vỏ nói ra vì sao. `/` là cửa vào
+ * mặc định (sau đăng nhập, bấm thương hiệu) nên KHÔNG kèm câu — không có gì bị từ chối ở đó.
+ */
+export function salesAgentRedirectFor(user: ShellUser, rawPath: string): string {
+  const home = salesAgentHomeFor(user);
+  const path = (rawPath.split(/[?#]/)[0] || "/").replace(/\/+$/, "") || "/";
+  return path === "/" ? home : `${home}?${SHELL_BLOCKED_PARAM}=1`;
+}
+
+/**
+ * Chiều cao một khung «lấp đầy màn hình» (hộp thư) trong vỏ: phần nhìn thấy của viewport trừ mép trên của khung, trừ thanh dưới
+ * (đã gồm vùng an toàn iPhone vì nó mang `padding-bottom: env(safe-area-inset-bottom)`), trừ khe thở. Thuần để kiểm được; khung
+ * client đo ba số này rồi gọi hàm. Không bao giờ thấp hơn `min` — màn quá thấp thì cuộn trang, không bóp ô soạn tin về 0.
+ */
+export function shellFitHeight(input: { viewport: number; top: number; bottomNav: number; gap?: number; min?: number }): number {
+  const gap = input.gap ?? 8;
+  const min = input.min ?? 280;
+  return Math.max(min, Math.floor(input.viewport - input.top - input.bottomNav - gap));
 }
 
 /** Mục tô sáng cho trang hiện tại: href / `owns` khớp dài nhất, trong đúng các mục người này thấy. */

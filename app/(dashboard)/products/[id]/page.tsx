@@ -25,7 +25,8 @@ import { STOCK_RECEIPT_KIND_LABEL, type StockReceiptKind } from "@/lib/validatio
 import { successTone } from "@/lib/constants/returns";
 import { resolvePeriod } from "@/lib/search-params";
 import { cn } from "@/lib/utils";
-import { can, requirePermission } from "@/lib/auth/session";
+import { can, requirePermission, type SessionUser } from "@/lib/auth/session";
+import { shellAllows } from "@/lib/constants/saas-nav";
 import { ProductNotes } from "@/app/(dashboard)/products/[id]/product-notes";
 import { listProductNotes } from "@/lib/queries/product-notes";
 import { getModelByProductId } from "@/lib/queries/models";
@@ -75,7 +76,7 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
         description={`${product.categories.length ? `${product.categories.join(", ")} · ` : ""}${formatNumber(product.variants.length)} mẫu mã (${formatNumber(totals.selling)} đang bán) · ${manual ? `tạo trên ERP ${formatDateTime(product.insertedAt ?? product.createdAt)}${unit ? ` · đơn vị ${unit}` : ""}` : `đồng bộ ${formatDateTime(product.syncedAt)}`}`}
         actions={
           <>
-            {mau ? (
+            {mau && shellAllows(user, "/models") ? (
               <Button asChild variant="outline" size="sm">
                 <Link href={`/models/${mau.id}`}>Vòng đời mẫu</Link>
               </Button>
@@ -140,9 +141,9 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
         <MetricCard label="Bán 30 ngày" value={formatNumber(totals.sold30)} note={`90 ngày: ${formatNumber(totals.sold90)} sp · ${formatNumber(totals.orders90)} đơn · ${formatVND(totals.revenue90, { compact: true })} tiền hàng (không tính đơn huỷ)`} icon={ShoppingBag} tone="green" />
       </section>
 
-      <VariantStockSection product={product} />
+      <VariantStockSection product={product} user={user} />
 
-      <OrderAdviceSection product={product} />
+      <OrderAdviceSection product={product} user={user} />
 
       <div className="grid gap-5 xl:grid-cols-[minmax(0,1.5fr)_minmax(320px,0.9fr)]">
         <div className="space-y-5">
@@ -150,7 +151,7 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
             <ProductSalesChart data={product.daily} />
           </SectionCard>
 
-          <SizeBreakNotice variants={product.variants} />
+          <SizeBreakNotice variants={product.variants} user={user} />
 
           <StockSizeMatrix variants={product.variants} />
 
@@ -451,7 +452,7 @@ function StockSizeMatrix({ variants }: { variants: VariantRow[] }) {
  * VIỆC (`openPoQty: null` ⇒ hàm không dựng câu hành động) và trỏ sang trang kia cho việc nên làm — để
  * hai trang không thể đề xuất hai số đặt khác nhau cho cùng một size.
  */
-function SizeBreakNotice({ variants }: { variants: VariantRow[] }) {
+function SizeBreakNotice({ variants, user }: { variants: VariantRow[]; user: SessionUser }) {
   const inputs = variants.flatMap((v) =>
     !v.isRemoved && v.ledger
       ? [{ variantId: v.id, productId: v.ledger.productId, productName: v.ledger.productName, productCode: v.ledger.productCode, color: v.color, size: v.size, stockKnown: v.ledger.stockKnown, available: v.ledger.available, status: v.ledger.status, sold30: v.ledger.sold30, unitCost: v.ledger.unitCost > 0 ? v.ledger.unitCost : null, suggestedQty: null, openPoQty: null }]
@@ -464,7 +465,9 @@ function SizeBreakNotice({ variants }: { variants: VariantRow[] }) {
       <div className="flex flex-wrap items-center gap-2 font-semibold">
         <AlertTriangle className="size-4 shrink-0 text-rose-600" />
         Còn hàng nhưng thiếu đúng size khách mua
-        <Link href="/inventory/decisions" className="ml-auto text-xs font-medium text-primary hover:underline">Việc nên làm ở Quyết định vốn tồn kho →</Link>
+        {shellAllows(user, "/inventory/decisions") ? (
+          <Link href="/inventory/decisions" className="ml-auto text-xs font-medium text-primary hover:underline">Việc nên làm ở Quyết định vốn tồn kho →</Link>
+        ) : null}
       </div>
       <ul className="mt-1.5 space-y-1">
         {groups.map((g) => (
@@ -487,7 +490,7 @@ function SizeBreakNotice({ variants }: { variants: VariantRow[] }) {
  *   Còn thiếu = max(0, −Khả dụng) — đơn đã hứa khách mà kho không đủ hàng để xuất
  *   Cần đặt / hạn đặt = `computePlan`, cùng bộ máy với trang Kế hoạch SX
  */
-function VariantStockSection({ product }: { product: ProductDetail }) {
+function VariantStockSection({ product, user }: { product: ProductDetail; user: SessionUser }) {
   const { totals } = product;
   const a = product.planning.assumptions;
   const image = product.image || product.variants.find((v) => v.images[0])?.images[0] || null;
@@ -506,7 +509,9 @@ function VariantStockSection({ product }: { product: ProductDetail }) {
       actions={
         <>
           <Link href="/inventory/receipts" className="text-xs font-semibold text-primary hover:underline">Lập phiếu nhập</Link>
-          <Link href="/inventory/planning" className="text-xs font-semibold text-primary hover:underline">Kế hoạch SX</Link>
+          {shellAllows(user, "/inventory/planning") ? (
+            <Link href="/inventory/planning" className="text-xs font-semibold text-primary hover:underline">Kế hoạch SX</Link>
+          ) : null}
         </>
       }
       padded={false}
@@ -660,7 +665,7 @@ type AdviceItem = { v: VariantRow; e: PlanExplanation };
  * Chỉ liệt kê mẫu mã CÓ VIỆC: sẽ hết / đang thiếu / sắp thiếu, hoặc chưa có phiếu nhập mà đang có
  * đơn chờ xuất. Mẫu mã đủ hàng không cần lời giải — nó chỉ làm loãng những dòng cần quyết định.
  */
-function OrderAdviceSection({ product }: { product: ProductDetail }) {
+function OrderAdviceSection({ product, user }: { product: ProductDetail; user: SessionUser }) {
   const used = product.planning.used;
   const items: AdviceItem[] = product.variants
     .filter((v) => {
@@ -691,7 +696,7 @@ function OrderAdviceSection({ product }: { product: ProductDetail }) {
           <b>Cần có</b> = tốc độ gửi đi × (sản xuất + đủ bán + an toàn) − hàng hoàn của CHÍNH các đơn ấy về kịp bán lại. <b>Đặt</b> = cần có − (khả dụng + hàng hoàn đang về). Tốc độ gửi đi tính trên đơn đã chốt (không huỷ), gồm cả đơn đang giao và đơn đã hoàn — phần quay về được trừ tường minh theo <b>tỷ lệ giao thành công của mã</b> (cùng thang bậc với Báo cáo lợi nhuận) và tỷ lệ hàng hoàn bán lại được. Hàng hoàn chỉ tính là về kịp nếu đơn gửi đi trước khi hết kỳ ít nhất <b>độ trễ hoàn</b> = ĐVVC trả về ({used.vtpReturnLagDays === null ? "chưa đo được" : `${formatNumber(used.vtpReturnLagDays)} ngày, đo`}) + kho tái nhập ({formatNumber(used.restockDays)} ngày, Giả định ở trang Kế hoạch SX).
         </>
       }
-      actions={<Link href="/inventory/planning" className="text-xs font-semibold text-primary hover:underline">Sửa giả định</Link>}
+      actions={shellAllows(user, "/inventory/planning") ? <Link href="/inventory/planning" className="text-xs font-semibold text-primary hover:underline">Sửa giả định</Link> : null}
       padded={false}
     >
       {first ? (

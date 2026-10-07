@@ -16,7 +16,7 @@ import { orgBillingStanding } from "@/lib/billing/standing";
 import { billingNotice as billingNoticeOf } from "@/lib/billing/rules";
 import { planKeyOf } from "@/lib/entitlements/check";
 import { SalesAgentShell } from "@/components/saas-shell";
-import { isSalesAgentUser } from "@/lib/constants/saas-nav";
+import { isSalesAgentUser, SALES_AGENT_NAV } from "@/lib/constants/saas-nav";
 import { cn } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
@@ -89,7 +89,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
             )}
           </p>
         ) : null}
-        <DetailCrumb />
+        <DetailCrumb skip={shell ? SALES_AGENT_NAV.map((i) => i.href) : undefined} />
         {children}
       </main>
     </StaleWhileRefreshing>

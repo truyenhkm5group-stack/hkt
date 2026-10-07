@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { shellAllows } from "@/lib/constants/saas-nav";
 import { AlertTriangle, Boxes, Download, PackagePlus, PackageX, Plus, ShoppingBag, Upload, Warehouse } from "lucide-react";
 import { ProductsTable } from "@/app/(dashboard)/products/products-table";
 import { DataTableToolbar } from "@/components/data-table/toolbar";
@@ -134,7 +135,7 @@ export default async function ProductsPage({ searchParams }: { searchParams: Pro
             hint: `${copy.name("SHIPPING")} báo đã hoàn nhưng kho chưa lập phiếu tái nhập với số đếm thực tế. Hàng này CHƯA nằm trong tồn khả dụng, và cố ý như vậy.`,
             icon: PackagePlus,
             tone: summary.awaitingReturn ? ("amber" as const) : ("muted" as const),
-            href: "/inventory/returns",
+            href: shellAllows(user, "/inventory/returns") ? "/inventory/returns" : undefined,
           },
         ]}
       />

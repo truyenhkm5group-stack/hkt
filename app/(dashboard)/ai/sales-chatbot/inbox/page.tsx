@@ -12,6 +12,21 @@ import { InboxAutoRefresh } from "./auto-refresh";
 import { ChannelAvatar } from "./avatar";
 import { LabelChip } from "./labels-panel";
 import { InboxThreadView } from "./thread-view";
+import { ShellViewportFit } from "@/components/shell-viewport-fit";
+import { isSalesAgentUser } from "@/lib/constants/saas-nav";
+
+/**
+ * Khung hai cột của hộp thư. Ngoài vỏ: ĐÚNG chiều cao cũ (canh cho thanh menu ERP). Trong vỏ app Chốt Đơn: khung tự đo
+ * (`ShellViewportFit`) — thanh dưới cố định của vỏ + vùng an toàn iPhone làm `100dvh - 13.5rem` đẩy ô soạn tin xuống dưới nó.
+ */
+function InboxFrame({ shell, children }: { shell: boolean; children: React.ReactNode }) {
+  if (!shell) return <div className="grid h-[calc(100dvh-13.5rem)] min-h-[560px] overflow-hidden rounded-xl border border-foreground/15 bg-background lg:grid-cols-[360px_minmax(0,1fr)]">{children}</div>;
+  return (
+    <ShellViewportFit testId="inbox-frame" className="grid overflow-hidden rounded-xl border border-foreground/15 bg-background lg:grid-cols-[360px_minmax(0,1fr)]" fallbackClassName="h-[calc(100dvh-15rem-env(safe-area-inset-bottom))] lg:h-[calc(100dvh-9rem)]">
+      {children}
+    </ShellViewportFit>
+  );
+}
 
 export const metadata = { title: "Hộp thư khách" };
 
@@ -92,6 +107,8 @@ function ListItem({ r, href, active, showPage }: { r: InboxRow; href: string; ac
  */
 export default async function SalesInboxPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const user = await requirePermission("ai_sales:view");
+  // Vỏ app Chốt Đơn: khung hộp thư đo theo thanh trên + thanh dưới của vỏ (ô soạn tin không bị thanh dưới che), đầu trang gọn.
+  const shell = isSalesAgentUser(user);
   const sp = await searchParams;
   const one = (k: string) => (typeof sp[k] === "string" ? (sp[k] as string) : "");
   const filter = ((INBOX_FILTERS as readonly string[]).includes(one("f")) ? one("f") : "ALL") as InboxFilter;
@@ -146,7 +163,10 @@ export default async function SalesInboxPage({ searchParams }: { searchParams: P
       <PageHeader
         eyebrow="AI"
         title="Hộp thư khách"
-        description="Facebook · Instagram · Zalo OA · chat web — trả lời khách ngay trong ERP. Nhân viên gửi tin thì bot nhường."
+        description={shell ? undefined : "Facebook · Instagram · Zalo OA · chat web — trả lời khách ngay trong ERP. Nhân viên gửi tin thì bot nhường."}
+        // Vỏ app trên điện thoại, đang mở một hội thoại: nhường cả chiều cao cho hội thoại (đầu hội thoại có nút quay lại) —
+        // 375×667 không đủ chỗ cho đầu trang + đầu hội thoại + ô soạn tin cùng lúc.
+        className={shell && selected ? "hidden lg:flex" : undefined}
         refresh={false}
         actions={
           <div className="flex items-center gap-3">
@@ -160,7 +180,7 @@ export default async function SalesInboxPage({ searchParams }: { searchParams: P
       {"error" in list ? (
         <p className="text-sm text-destructive">{list.error}</p>
       ) : (
-        <div className="grid h-[calc(100dvh-13.5rem)] min-h-[560px] overflow-hidden rounded-xl border border-foreground/15 bg-background lg:grid-cols-[360px_minmax(0,1fr)]">
+        <InboxFrame shell={shell}>
           <aside className={cn("min-h-0 flex-col border-r", selected ? "hidden lg:flex" : "flex")}>
             <div className="space-y-2 border-b bg-muted/30 p-2">
               <div className="flex flex-wrap gap-1">
@@ -323,7 +343,7 @@ export default async function SalesInboxPage({ searchParams }: { searchParams: P
               />
             )}
           </section>
-        </div>
+        </InboxFrame>
       )}
     </div>
   );

@@ -1,8 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
-import { useState } from "react";
+import { usePathname, useSearchParams } from "next/navigation";
+import { Suspense, useState } from "react";
 import { Bot, CreditCard, LayoutDashboard, MessagesSquare, MoreHorizontal, Package, Plug, Settings, Users } from "lucide-react";
 import type { Role } from "@/db/schema";
 import { bellShowsSharedQueue } from "@/components/app-sidebar";
@@ -12,7 +12,7 @@ import { NavUser } from "@/components/nav-user";
 import { NotificationBell } from "@/components/notification-bell";
 import { RealtimeIndicator } from "@/components/realtime-provider";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
-import { SALES_AGENT_MOBILE_PRIMARY, salesAgentActiveKey, salesAgentHomeFor, salesAgentNavFor, type SalesAgentNavItem, type SalesAgentNavKey } from "@/lib/constants/saas-nav";
+import { SALES_AGENT_MOBILE_PRIMARY, SHELL_BLOCKED_MESSAGE, SHELL_BLOCKED_PARAM, salesAgentActiveKey, salesAgentHomeFor, salesAgentNavFor, type SalesAgentNavItem, type SalesAgentNavKey } from "@/lib/constants/saas-nav";
 import { cn } from "@/lib/utils";
 
 /**
@@ -51,6 +51,17 @@ function Brand({ brand, home }: { brand: TopNavBrand; home: string }) {
       )}
       <span className="truncate text-[15px] font-bold text-foreground">{name}</span>
     </Link>
+  );
+}
+
+/** Máy chủ vừa chuyển người dùng khỏi một trang ngoài vỏ (`?ngoai-goi=1`) ⇒ nói ra một câu, không im lặng. */
+function BlockedNotice() {
+  const params = useSearchParams();
+  if (params?.get(SHELL_BLOCKED_PARAM) !== "1") return null;
+  return (
+    <p role="status" className="mx-3 mt-3 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 sm:mx-5 lg:mx-6 lg:mt-6 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-200" data-testid="shell-blocked-notice">
+      {SHELL_BLOCKED_MESSAGE}
+    </p>
   );
 }
 
@@ -112,6 +123,9 @@ export function SalesAgentShell({ user, brand, children }: { user: SalesAgentShe
           <NavUser user={user} hidePayslip />
         </header>
 
+        <Suspense fallback={null}>
+          <BlockedNotice />
+        </Suspense>
         {children}
 
         {/* ── Màn hẹp: thanh dưới bốn mục + «Thêm» ── */}

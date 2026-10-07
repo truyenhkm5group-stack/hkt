@@ -11,6 +11,7 @@ import { env } from "@/lib/env";
 import { getGettingStarted } from "@/lib/onboarding/progress";
 import { PUBLISH_PERMISSION, publishChecklist } from "@/lib/platform/publish";
 import { cn } from "@/lib/utils";
+import { isSalesAgentUser, salesAgentNavFor, shellAllows } from "@/lib/constants/saas-nav";
 import { and, gt, ne } from "drizzle-orm";
 import { DomainForm, PublishPanel } from "./setup-client";
 
@@ -46,7 +47,8 @@ export default async function SetupPage() {
   const modules = (user.modules ?? []) as ModuleKey[];
   // Xem trước menu = ĐÚNG menu người này thấy (`visibleGroups`): cùng luật module, quyền, nguồn số liệu và trang gom của
   // tổ chức khách — không lọc lần thứ hai ở đây (AGENTS.md mục 28).
-  const nav = visibleGroups(user);
+  // Vỏ app Chốt Đơn: «Xem trước» hiện ĐÚNG thanh tám mục khách thấy, không phải menu ERP (mục ERP bị chặn ở máy chủ).
+  const nav = isSalesAgentUser(user) ? [{ label: "Ứng dụng Chốt Đơn", items: salesAgentNavFor(user).map((i) => ({ href: i.href, label: i.label })) }] : visibleGroups(user);
   const erpUrl = pub.state === "PUBLISHED" && pub.url ? `${pub.url}/login` : null;
   const stateLabel = pub.state === "PUBLISHED" ? "ĐÃ XUẤT BẢN" : pub.state === "DRAFT" ? "BẢN NHÁP" : "Đang chạy";
 
@@ -106,9 +108,11 @@ export default async function SetupPage() {
             <div>
               <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Module đang bật ({modules.length})</p>
               <p className="text-xs leading-5">{modules.map((m) => moduleDef(m)?.label ?? m).join(" · ")}</p>
-              <Link href="/settings/modules" className="text-xs text-primary underline underline-offset-2">
-                Bật / tắt module
-              </Link>
+              {shellAllows(user, "/settings/modules") ? (
+                <Link href="/settings/modules" className="text-xs text-primary underline underline-offset-2">
+                  Bật / tắt module
+                </Link>
+              ) : null}
             </div>
             <div>
               <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Menu</p>
@@ -135,7 +139,7 @@ export default async function SetupPage() {
                 <Link href="/" className="rounded-full border px-3 py-1 text-xs hover:bg-muted">
                   Trang chủ
                 </Link>
-                {pages.map((p) => (
+                {(shellAllows(user, "/p") ? pages : []).map((p) => (
                   <Link key={p.slug} href={`/p/${p.slug}`} className="rounded-full border px-3 py-1 text-xs hover:bg-muted">
                     {p.name}
                   </Link>
@@ -146,9 +150,11 @@ export default async function SetupPage() {
                 <Link href="/customers/new" className="rounded-full border px-3 py-1 text-xs hover:bg-muted">
                   Form tạo khách
                 </Link>
-                <Link href="/settings/forms" className="rounded-full border px-3 py-1 text-xs hover:bg-muted">
-                  Sửa form
-                </Link>
+                {shellAllows(user, "/settings/forms") ? (
+                  <Link href="/settings/forms" className="rounded-full border px-3 py-1 text-xs hover:bg-muted">
+                    Sửa form
+                  </Link>
+                ) : null}
               </div>
             </div>
           </div>
