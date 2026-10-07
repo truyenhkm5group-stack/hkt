@@ -18,6 +18,7 @@ const TABS = [
   { href: "/tech/missions", label: "Sứ mệnh" },
   { href: "/tech/tasks", label: "Hàng đợi việc" },
   { href: "/tech/cto", label: "AI CTO" },
+  { href: "/tech/workers", label: "Worker" },
   { href: "/tech/agents", label: "Sổ agent" },
   { href: "/tech/deployments", label: "Deploy" },
   { href: "/tech/incidents", label: "Sự cố" },

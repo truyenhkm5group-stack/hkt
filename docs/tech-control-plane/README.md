@@ -193,18 +193,30 @@ toán, chi lớn, thao tác không hoàn tác, tắt bảo vệ, lách CI / bran
 | Pha | Nội dung | Trạng thái |
 |---|---|---|
 | 0 | Kiểm kê (tài liệu này) | XONG |
-| 1 | Project · Goal · Mission · NEEDS_OWNER · CANCELLED · vòng đời chuẩn · sự kiện + audit · trang Goals/Missions | ĐANG LÀM (PR 1) |
-| 2 | Worker · lease · heartbeat · cửa worker · adapter thi hành | |
-| 3 | Worktree theo mã việc · PR/CI/deploy chảy về · webhook GitHub · nối (B) | |
-| 4 | Rủi ro R0–R4 · ngân sách · watchdog | |
-| 5 | Cockpit mobile trên `/tech` | |
-| 6 | Sổ năng lực · skill nội bộ · định tuyến vai/model | |
-| 7 | Dogfood R0/R1 đầu-cuối | |
-| 8 | Gia cố, thử sập/phục hồi | |
+| 1 | Project · Goal · Mission · NEEDS_OWNER · CANCELLED · vòng đời chuẩn · sự kiện + audit · trang Goals/Missions | XONG — đã vào `main` (#623, migration 0226) và đã deploy |
+| 2 | Worker · lease · heartbeat · cửa worker · adapter thi hành · sổ năng lực tối thiểu · trang Worker | XONG (migration 0229) — mục 8 |
+| 3 | Nhánh / cây theo mã việc · PR qua cầu nối bot · CI đỏ ⇒ việc sửa · nối deploy · hậu kiểm | XONG — mục 10 |
+| 4 | Chính sách R0–R4 · ngân sách · watchdog | XONG (migration 0230) — mục 11 |
+| 5 | Buồng lái mobile trên `/tech` | XONG — mục 12 |
+| 6 | Sổ năng lực · định tuyến model | XONG — mục 13 |
+| 7 | Dogfood R0/R1 đầu-cuối | XONG CỤC BỘ (07/10/2026) — mục 14; chưa chạy trên production |
+| 8 | Gia cố, thử sập/phục hồi | MỘT PHẦN: sập worker / lease hết hạn / fencing / nộp muộn đã khoá bằng bài kiểm; cô lập ĐỌC và credential cần tài khoản hệ điều hành riêng (mục 14) |
 
-Chưa được nói "vận hành tự động sẵn sàng" cho tới khi đủ 16 điểm trong đặc tả của chủ shop (tạo goal/task từ
-`/tech` · worker headless · heartbeat · lease · worktree · log về `/tech` · phục hồi khi worker sập · retry ·
-PR · CI · deploy · verify · chính sách · ngân sách · NEEDS_OWNER · audit).
+Pha 2–6 nằm trên nhánh `feat/tech-control-plane-policy`, gộp SAU nhánh Pha 1. Review độc lập 5 lượt, PASS @ `2c9ba494`.
+
+Chưa được nói "vận hành tự động sẵn sàng" cho tới khi đủ 16 điểm trong đặc tả của chủ shop. Tình trạng 07/10/2026:
+
+| Điểm | Mã | Đã chạy thật trên production |
+|---|---|---|
+| Tạo goal / task từ `/tech` | có | chưa (chưa gộp) |
+| Worker headless · heartbeat · lease · worktree | có | chưa — dogfood cục bộ đạt |
+| Log về `/tech` | có | chưa — dogfood cục bộ đạt (38 dòng) |
+| Phục hồi khi worker sập · retry | có, khoá bằng bài kiểm | chưa |
+| PR | có (cầu nối bot `agent-open-pr.yml`) | chưa — dogfood cục bộ không có cấu hình GitHub |
+| CI · deploy · verify | có | chưa |
+| Chính sách · ngân sách · NEEDS_OWNER · audit | có | chưa |
+
+Kết luận: MÃ đủ cả 16 điểm, nhưng chưa điểm nào CHẠY trên production — chưa được tuyên bố sẵn sàng.
 
 ## 7. Kế hoạch quay lui
 
@@ -216,6 +228,51 @@ PR · CI · deploy · verify · chính sách · ngân sách · NEEDS_OWNER · au
 - Worker/adapter (Pha 2) mặc định TẮT; tắt bằng cách dừng tiến trình worker — hàng đợi vẫn nguyên, lease hết
   hạn tự nhả.
 
+## 8. Pha 2 — worker headless (đã dựng)
+
+| Mảnh | Tệp |
+|---|---|
+| Luật thuần (lease 5′, nhịp tim 30′′, 3 lần thử, lùi dần 5′→60′, 10 lá chắn nhận việc, kết cục → bước kế, tên nhánh tất định, ranh giới thanh toán) | `lib/constants/tech-worker.ts` |
+| Sổ năng lực (15 năng lực, mỗi dòng trỏ tệp có thật; worker chỉ được khai năng lực `autonomous`) | `lib/constants/tech-capabilities.ts` |
+| Hàng đợi PostgreSQL: nhận việc `UPDATE … (SELECT … FOR UPDATE OF c SKIP LOCKED)`, fencing `lease_generation`, thu hồi lười | `lib/tech/worker-service.ts` |
+| Cửa worker `POST /api/tech/worker/{hello,heartbeat,claim,start,complete}` — khoá RIÊNG từng worker, CSDL giữ băm | `app/api/tech/worker/[op]/route.ts` |
+| Worker daemon + adapter (`SUBSCRIPTION_CLAUDE_CODE` · `ANTHROPIC_API`, cùng CLI Claude Code, khác đúng môi trường) | `scripts/tech-worker.ts`, `scripts/tech-worker/*` |
+| Trang | `/tech/workers` (đăng ký — khoá hiện một lần, bật/tắt, thu hồi lease, lượt chạy + nhật ký có trần) |
+
+Chạy một worker trên máy có Claude Code (đăng nhập gói thuê bao):
+
+```
+$env:TECH_WORKER_URL="https://erp.vnxcommerce.com"
+$env:TECH_WORKER_TOKEN="tw_…"            # /tech/workers → Đăng ký worker (hiện một lần)
+$env:TECH_WORKER_REPO="D:\tech-worker\hkt"   # bản clone RIÊNG cho worker
+npm run tech:worker -- --check           # kiểm cấu hình + adapter, không xin việc
+npm run tech:worker -- --once            # nhận một việc, làm, thoát
+npm run tech:worker                      # chạy mãi
+```
+
+**Chế độ dogfood an toàn** (lượt production đầu tiên) — không cần mã mới, chỉ cấu hình:
+
+| Ràng buộc | Cách đặt |
+|---|---|
+| Chỉ R0 | mặc định của trần chính sách (không khai `tech.worker-policy-ceiling`) |
+| Một việc một lúc | đăng ký worker với số lượt song song = 1; ngân sách công ty `maxConcurrentRuns = 1` |
+| Không thử lại vô hạn | `max_attempts` của việc (3) ∧ ngân sách `maxAttempts = 1` cho sứ mệnh dogfood |
+| Không rơi sang tiền API | chỉ đăng ký worker `SUBSCRIPTION_CLAUDE_CODE`; không đặt `TECH_WORKER_ANTHROPIC_API_KEY` |
+| Chỉ việc tài liệu | worker khai đúng một năng lực `write-docs` |
+| Không đụng production | worker không giữ secret production; deploy vẫn do người / Delivery Controller; năng lực deploy / migration `autonomous = false` |
+| Không lách nhánh bảo vệ | PR mở bằng bot `agent-open-pr.yml`, gộp qua `gates / gates` + 1 người duyệt |
+| CI đỏ trên PR của worker | NGƯỜI sửa tay. Việc `ci-debug` máy tự tạo là loại BUGFIX ⇒ chính sách R1 ⇒ KHÔNG được nhận dưới trần R0; nó nằm SPEC_READY và việc gốc đứng ở REVIEW (không tự FAILED, không chi tiền). Huỷ việc `ci-debug` đó trên `/tech` sau khi sửa tay |
+
+Bất biến đã khoá bằng bài kiểm (`tests/tech-worker.test.ts`): hai worker không nhận trùng · phụ thuộc chưa DONE /
+R2 / sứ mệnh hoặc mục tiêu không chạy ⇒ không bao giờ nhận, và bản TypeScript `claimBlockers` nói đúng điều câu SQL
+làm · nhịp tim gia hạn lease, nhật ký có trần · thất bại còn lượt ⇒ về hàng đợi sau lùi dần, hết lượt ⇒ `FAILED` ·
+worker chết ⇒ lease hết hạn ⇒ thu hồi ⇒ việc về hàng đợi · fencing chặn worker cũ sống lại · người huỷ / chuyển
+"Cần chủ shop" giữa chừng ⇒ worker nhận lệnh DỪNG ở nhịp tim kế, kết quả nộp muộn không đè quyết định của người ·
+worker gói thuê bao không bao giờ thấy `ANTHROPIC_API_KEY` / `DATABASE_URL` / token · tiền của lượt gói thuê bao
+ghi `estimated: true`.
+
+Còn thiếu (Pha 3): worker đẩy nhánh nhưng CHƯA mở PR — PR phải mở bằng danh tính bot (`agent-open-pr.yml`) để
+chủ shop duyệt được; máy chủ ERP sẽ dispatch thay worker (worker không giữ quyền ghi GitHub nào ngoài `git push`).
 ## 9. Hạn chế đã biết (Pha 1)
 
 - Việc vào "Cần chủ shop" từ `OBSERVING` không quay lại được `OBSERVING` / `DONE`: bảng chuyển không cho NEEDS_OWNER
@@ -225,3 +282,87 @@ PR · CI · deploy · verify · chính sách · ngân sách · NEEDS_OWNER · au
 - Bỏ mục tiêu / huỷ sứ mệnh không đổi trạng thái các VIỆC bên dưới (việc vẫn hiện, người huỷ từng việc nếu muốn), nhưng
   cổng giao việc cho agent (`dispatch-service`) và hàng đợi worker (Pha 2) đều từ chối việc của sứ mệnh / mục tiêu
   không chạy.
+
+## 10. Pha 3 — đường giao hàng: PR → CI → gộp → deploy → hậu kiểm (đã dựng)
+
+Luật thuần: `lib/constants/tech-delivery.ts`. Đọc/ghi + GitHub: `lib/tech/delivery.ts`. Không thêm lịch chạy: móc vào
+`github-pr-sync` (sự kiện PR/CI) và `task-advance-watch` (nối deploy + hậu kiểm), cả hai đã có lịch 15′.
+
+| Bước | Ai quyết | Chứng cứ |
+|---|---|---|
+| Worker đẩy nhánh `ai/worker/<MÃ>-a<n>` · lượt THÀNH CÔNG | máy chủ dispatch **`agent-open-pr.yml`** (cầu nối bot đã có, chạy trên `main`) | PR mang tên `erp-agent-vnx[bot]` ⇒ chủ shop duyệt được |
+| PR / CI đổi | `github-pr-sync` ghi `pr.opened` · `ci.passed` · `ci.failed` · `pr.merged` · `pr.closed` (khoá chống trùng gắn PR + SHA) | phép chiếu PR đã có |
+| CI đỏ trên PR worker | mở MỘT việc con `ci-debug` trên CHÍNH nhánh đó (worker sửa, đẩy lên, PR tự cập nhật); tối đa `CI_FIX_MAX = 2`, hết ⇒ việc gốc `FAILED` | `ci.fix_requested` · `ci.retry_exhausted` |
+| Gộp | NGƯỜI duyệt PR + Delivery Controller gộp theo `queue` (không đổi) | `REVIEW → QA` (task-advance, đã có) |
+| Lên production | lượt deploy do người / Delivery Controller dispatch (không đổi) | máy chỉ GHI LẠI: deploy THÀNH CÔNG + ĐÃ ĐỐI CHIẾU mà commit đang chạy **chứa** commit gộp (GitHub `compare`, không đoán theo giờ) ⇒ `QA → READY_TO_DEPLOY → DEPLOYING → OBSERVING`; R2 chưa duyệt đứng yên |
+| Hậu kiểm | ≥ 30′ quan sát, 0 sự cố SEV0/SEV1 mở sau mốc deploy ⇒ ghi bằng chứng xác minh rồi `DONE`; có sự cố nặng ⇒ `NEEDS_OWNER` (PRODUCTION_INCIDENT) | `verification.passed` · `verification.failed` |
+
+Thay đổi so với Nấc 4 cũ ("máy không bao giờ tự đặt READY_TO_DEPLOY / DONE"): luật đó vẫn đúng cho
+`task-advance` (đẩy theo PR). Đường giao hàng là đường KHÁC: nó không quyết deploy, chỉ ghi lại một lượt deploy ĐÃ
+xảy ra và đã đối chiếu commit; `DONE` chỉ sau khi bằng chứng xác minh được ghi (cùng cổng `setTechTaskStatus`).
+Việc vào OBSERVING bằng tay (không có sự kiện `deploy.reached`) máy KHÔNG đụng.
+
+## 11. Pha 4 — chính sách R0–R4 · ngân sách · watchdog (đã dựng)
+
+- **Chính sách** (`lib/constants/tech-policy.ts::classifyTechPolicy`): dẫn xuất từ máy xếp rủi ro + loại việc + từ khoá
+  nguy hiểm; chỉ NÂNG, mọi lần nâng có lý do. Lưu `tech_tasks.policy_level` lúc GHI (tạo việc, đè rủi ro, nút
+  "Xếp lại chính sách"). `NULL` (việc trước 0230) = không tự động — đóng khi thiếu, không backfill ngầm. Worker chỉ
+  nhận tới TRẦN `settings["tech.worker-policy-ceiling"]` — mặc định **chỉ R0** (chế độ dogfood an toàn), chủ shop mở R1
+  bằng `set-setting tech.worker-policy-ceiling {"maxPolicy":"R1"}`, giá trị lạ rơi về R0 (SQL + `claimBlockers` cùng luật); R3/R4 bật cổng duyệt người; R4 = luật SECRETS · ACCESS · DATA_FIX ·
+  SCHEDULER, loại SECURITY / DATA_FIX, hoặc nhắc xoá dữ liệu / DNS / thanh toán / lách cổng / mật khẩu / OAuth.
+- **Ngân sách** (`tech_budgets`, `lib/tech/budget.ts`): công ty → dự án → mục tiêu → sứ mệnh, tầng hẹp đè TỪNG Ô; ô
+  trống = chưa khai. Tiền API chưa khai trần ngày ⇒ worker API không chạy; chạm trần ngày / tổng ⇒ dừng; trần
+  đồng thời cấp công ty; trần phút / lượt gửi xuống worker (biến môi trường chỉ được hạ thêm). Tiền API đếm từ sổ
+  lượt chạy (`billing = API`); ước tính của gói thuê bao in riêng, KHÔNG cộng vào tiền API.
+- **Watchdog** (`lib/tech/watchdog.ts`, trong `task-advance-watch` — không thêm lịch): thu hồi lease hết hạn, ghi
+  `worker.lost` khi worker giữ việc mà mất nhịp tim, `budget.warning` (≥ 80%) / `budget.exceeded` (chạm trần) —
+  mỗi sự việc MỘT dòng (khoá chống trùng). Vòng thử vô hạn không tồn tại: `max_attempts` · `CI_FIX_MAX` · trần tiền.
+
+## 12. Pha 5 — buồng lái trên `/tech` (đã dựng)
+
+`lib/queries/tech-cockpit.ts` + `app/(dashboard)/tech/cockpit.tsx`, đứng đầu trang `/tech`, lưới 2 cột trên điện thoại:
+Cần bạn · Đang chạy (worker sống) · Đang chờ (sẵn sàng / tồn đọng) · Đường giao hàng · Bị chặn · Thất bại · Pull
+request (CI đỏ · xanh chờ duyệt) · Chi API hôm nay (trần, tháng). Dưới đó: mỗi lượt đang chạy với việc · năng lực ·
+worker · provider · model · thời gian chạy · nhịp tim · bước · % · PR/nhánh · 5 dòng nhật ký cuối. Tab mới:
+Cần chủ shop · Mục tiêu · Sứ mệnh · Worker (ngân sách công ty ở trang Worker, ngân sách sứ mệnh ở trang sứ mệnh).
+
+## 13. Pha 6 — định tuyến model + sổ năng lực (đã dựng)
+
+- Sổ năng lực: `lib/constants/tech-capabilities.ts` (15 năng lực, mỗi dòng trỏ tệp có thật — bài kiểm mở từng tệp;
+  `autonomous = false` cho deploy / migration / review an ninh / e2e — worker không khai được). Vai PLANNER · DEV ·
+  QA · REVIEWER · OPS là nhóm năng lực, không phải tiến trình thường trực.
+- Định tuyến model: `lib/constants/tech-routing.ts` — bốn HẠNG (`cheap` · `coding` · `reasoning` · `critical`) theo
+  năng lực; mặc định là BÍ DANH của Claude Code (`sonnet` / `opus`), đè ở `settings["tech.model-routing"]` không cần
+  deploy; chuỗi đè sai hình dạng bị bỏ. Máy chủ chọn ở lượt nhận việc, worker truyền `--model`. Lý do có thật: lượt
+  dogfood đầu tiên (việc tài liệu R0) chạy mặc định bằng model mạnh nhất, ước tính $4,19 / lượt.
+
+## 14. Dogfood đầu-cuối đầu tiên (07/10/2026, cục bộ)
+
+Mặt phẳng điều khiển chạy cục bộ (Next dev + PGlite, mã của nhánh Pha 4), worker chạy headless bằng Claude Code gói
+thuê bao trên máy dev — không VS Code, không người can thiệp giữa chừng:
+
+```
+GOAL-1 (ACTIVE) → MIS-1 (ACTIVE) → TECH-1 "Viết runbook vận hành worker headless" (R0 · chính sách R0 · SPEC_READY)
+→ worker dogfood-local-1 nhận việc qua hàng đợi (lease, lần 1/3) → cây riêng wt-tech-tech-1-a1 từ origin/main
+→ npm ci → Claude Code headless (môi trường cho-phép, không khoá API) → cổng typecheck ✅ lint ✅
+→ worker commit + đẩy ai/worker/TECH-1-a1 (1 tệp, 254 dòng) → complete SUCCEEDED → TECH-1 REVIEW, lease nhả
+→ yêu cầu PR: pr.request_failed "chưa có ERP_GITHUB_REPO" (đúng: ERP cục bộ không có cấu hình GitHub)
+```
+
+16 phút · 38 dòng nhật ký · tiền ước tính $4,19 (gói thuê bao, `estimated: true`, không cộng vào tiền API).
+Ba lỗi dogfood lộ ra và đã sửa: `cod` khớp nhầm "Claude **Cod**e" (máy xếp rủi ro khớp theo từ), một nhịp tim
+lọt ra sau khi nộp kết quả, model mặc định là loại mạnh nhất cho việc tài liệu (định tuyến model).
+
+Hạn chế đã biết (Pha 8): Claude Code đọc được tệp NGOÀI cây làm việc (lượt dogfood đọc mã worker ở cây khác vì
+`origin/main` chưa có nó). Cô lập GHI đã giữ (diff đúng 1 tệp trong cây), cô lập ĐỌC cần chạy worker dưới tài khoản
+hệ điều hành / container riêng chỉ thấy bản clone của worker.
+
+Credential Git: cổng (`npm ci` / typecheck / lint / test chạy mã của nhánh) đã bị cắt khỏi cấu hình Git HỆ THỐNG và
+TOÀN CỤC (`GIT_CONFIG_NOSYSTEM`, `GIT_CONFIG_GLOBAL` trỏ tệp tạm, tắt lời nhắc, HOME tạm) nên không gọi được Git
+Credential Manager QUA cấu hình Git (đo 07/10/2026 trên máy dev: `credential.helper=manager` của
+`C:/Program Files/Git/etc/gitconfig` không còn thấy dưới env của cổng). Mã chạy dưới CÙNG người dùng hệ điều hành vẫn
+gọi THẲNG được tệp chạy của GCM, và chính worker vẫn phải `git push`, nên tài khoản chạy worker giữ MỘT credential —
+vì vậy BẮT BUỘC khi chạy production: tài khoản hệ điều hành RIÊNG cho worker (Credential Manager của nó chỉ có
+credential dưới đây), không nhúng token vào URL remote của bản clone, credential là fine-grained token chỉ cho ĐÚNG kho này, chỉ
+`contents: write` (token không giới hạn được theo nhánh — ruleset `main` hiện có chặn đẩy thẳng; muốn chặn mọi nhánh
+ngoài `ai/worker/*` thì thêm ruleset), KHÔNG dùng tài khoản GitHub cá nhân của chủ shop.

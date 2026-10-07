@@ -47,11 +47,15 @@ import {
  * `/gioi-thieu` (`SITE_PAGE_PATH`): trang giới thiệu công khai — chỉ đọc gói cước và chế độ đăng ký, không dữ liệu khách nào.
  * Ở tên miền gốc nó được phục vụ tại `/` (khối tên miền gốc trong `middleware()`); ở host ERP mở được để xem trước.
  *
+ * `/api/tech/worker/` (Pha 2, docs/tech-control-plane/README.md mục 4): worker headless ở máy khác gọi về bằng khoá
+ * RIÊNG từng worker (`Authorization: Bearer tw_…`, CSDL chỉ giữ băm) — tự xác thực trong route. Khai kèm dấu `/` cuối:
+ * chỉ mở đúng nhánh của worker, không phải `/api/tech`.
+ *
  * `/join/` (mời người dùng qua liên kết): người được mời CHƯA có tài khoản. Trang chỉ đọc; cổng của nó là mã mời
  * 256 bit trong đường dẫn, tra trong CSDL của tổ chức ghi trong đường dẫn bằng `withOrganization` tường minh
  * (lib/users/invites.ts). Khai kèm dấu `/` cuối: chỉ mở đúng nhánh `/join/<tổ chức>/<mã>`.
  */
-const PUBLIC_PREFIXES = ["/login", "/start", SITE_PAGE_PATH, ...SITE_LEGAL_PATHS, "/join/", "/reset/", "/api/webhooks", "/api/health", "/api/sync", "/api/tech/agent-run", "/api/tech/agent-task", "/api/video-scale/public/", "/api/ical/", "/_next", "/favicon", "/icon", "/apple-icon", "/apple-touch-icon", "/manifest", "/robots", "/sitemap", BRAND_ASSET_PREFIX];
+const PUBLIC_PREFIXES = ["/login", "/start", SITE_PAGE_PATH, ...SITE_LEGAL_PATHS, "/join/", "/reset/", "/api/webhooks", "/api/health", "/api/sync", "/api/tech/agent-run", "/api/tech/agent-task", "/api/tech/worker/", "/api/video-scale/public/", "/api/ical/", "/_next", "/favicon", "/icon", "/apple-icon", "/apple-touch-icon", "/manifest", "/robots", "/sitemap", BRAND_ASSET_PREFIX];
 
 /**
  * Đường công khai khớp ĐÚNG TỪNG CHỮ (0180), không theo tiền tố — `/chat` theo tiền tố sẽ mở luôn `/chatbot` (trang bot

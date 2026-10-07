@@ -8094,6 +8094,27 @@ export const techTasks = pgTable(
     ownerEscalation: text("owner_escalation").notNull().default(""),
     /** Khi `NEEDS_OWNER`: ĐÚNG việc chủ shop phải làm, đủ để làm theo mà không phải hỏi lại. */
     ownerAction: text("owner_action").notNull().default(""),
+
+    /* ───── Hàng đợi worker (0229, docs/tech-control-plane/README.md mục 4) ───── */
+    /** Năng lực việc cần (`TECH_CAPABILITIES`). Rỗng = suy theo loại việc (`CAPABILITY_BY_TASK_TYPE`). */
+    capability: text("capability").notNull().default(""),
+    /** Worker đang giữ lease. `NULL` ⇔ `lease_expires_at NULL` (CHECK) — không ai giữ. */
+    leaseWorkerId: text("lease_worker_id").references((): AnyPgColumn => techWorkers.id, { onDelete: "set null" }),
+    leaseExpiresAt: ts("lease_expires_at"),
+    /** FENCING TOKEN: tăng mỗi lần nhận. Kết quả mang generation cũ ⇒ bị từ chối. */
+    leaseGeneration: integer("lease_generation").notNull().default(0),
+    /** Số lần đã nhận (gồm lần đang chạy). Có trần — không vòng thử lại vô hạn. */
+    attempts: integer("attempts").notNull().default(0),
+    maxAttempts: integer("max_attempts").notNull().default(3),
+    /** Lùi dần: chưa tới mốc này thì không worker nào nhận lại. */
+    nextAttemptAt: ts("next_attempt_at"),
+    lastError: text("last_error").notNull().default(""),
+    /**
+     * Mức chính sách R0–R4 (0230, `classifyTechPolicy`) — tính lúc GHI (tạo việc, đè rủi ro). `NULL` = CHƯA XẾP ⇒
+     * không bao giờ tự động (đóng khi thiếu); dòng cũ không backfill, người bấm "Xếp lại chính sách".
+     */
+    policyLevel: text("policy_level"),
+    policyReasons: jsonb("policy_reasons").$type<string[]>().notNull().default([]),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
@@ -8101,6 +8122,11 @@ export const techTasks = pgTable(
     uniqueIndex("tech_tasks_code_uq").on(t.code),
     index("tech_tasks_mission_idx").on(t.missionId),
     index("tech_tasks_project_idx").on(t.projectId),
+    index("tech_tasks_claim_idx").on(t.status, t.priority, t.createdAt).where(sql`${t.status} = 'SPEC_READY'`),
+    index("tech_tasks_lease_idx").on(t.leaseExpiresAt).where(sql`${t.leaseWorkerId} IS NOT NULL`),
+    check("tech_tasks_lease_pair_check", sql`(${t.leaseWorkerId} IS NULL) = (${t.leaseExpiresAt} IS NULL)`),
+    check("tech_tasks_attempts_check", sql`${t.attempts} >= 0 AND ${t.maxAttempts} BETWEEN 1 AND 10 AND ${t.leaseGeneration} >= 0`),
+    check("tech_tasks_policy_check", sql`${t.policyLevel} IS NULL OR ${t.policyLevel} IN ('R0','R1','R2','R3','R4')`),
     index("tech_tasks_status_idx").on(t.status, t.priority),
     index("tech_tasks_created_idx").on(t.createdAt),
     index("tech_tasks_agent_idx").on(t.agentId),
@@ -8260,10 +8286,19 @@ export const techAgentRuns = pgTable(
     reviewNote: text("review_note").notNull().default(""),
     reviewedByUserId: text("reviewed_by_user_id").references(() => users.id, { onDelete: "set null" }),
     reviewedAt: ts("reviewed_at"),
+    /* ───── Lượt chạy của worker hàng đợi (0229) ───── */
+    /** Worker đã chạy lượt này. `NULL` = lượt cũ (GitHub Actions / chạy tay). */
+    workerId: text("worker_id").references((): AnyPgColumn => techWorkers.id, { onDelete: "set null" }),
+    /** `TECH_EXECUTION_PROVIDERS`. Rỗng = lượt cũ, chưa khai. */
+    provider: text("provider").notNull().default(""),
+    model: text("model").notNull().default(""),
+    /** Generation của lease lúc nhận việc — fencing của mọi lời gọi về sau. */
+    leaseGeneration: integer("lease_generation"),
     createdAt: createdAt(),
   },
   (t) => [
     index("tech_agent_runs_agent_idx").on(t.agentId, t.startedAt),
+    index("tech_agent_runs_worker_idx").on(t.workerId, t.status),
     index("tech_agent_runs_task_idx").on(t.taskId, t.startedAt),
     index("tech_agent_runs_started_idx").on(t.startedAt),
     /* Chép hai lần KHÔNG đẻ hai dòng — bảo đảm ở CSDL, xem chú thích của `external_ref`. */
@@ -8712,12 +8747,102 @@ export const techEvents = pgTable(
     index("tech_events_occurred_idx").on(t.occurredAt),
     index("tech_events_mission_idx").on(t.missionId, t.occurredAt),
     check("tech_events_name_check", sql`${t.name} ~ '^[a-z_]+(\\.[a-z_]+)+$'`),
-    check("tech_events_subject_check", sql`${t.subjectType} IN ('GOAL','MISSION','TASK','WORKER','RUN','DEPLOYMENT','INCIDENT')`),
+    check("tech_events_subject_check", sql`${t.subjectType} IN ('GOAL','MISSION','TASK','WORKER','RUN','DEPLOYMENT','INCIDENT','BUDGET')`),
     check("tech_events_actor_kind_check", sql`${t.actorKind} IN ('HUMAN','SYSTEM','AI_AGENT')`),
     check("tech_events_human_link_check", sql`${t.actorKind} = 'HUMAN' OR ${t.actorId} IS NULL`),
     check("tech_events_agent_link_check", sql`${t.actorKind} = 'AI_AGENT' OR ${t.actorAgentId} IS NULL`),
   ],
 );
+
+/**
+ * WORKER — một tiến trình thi hành CÓ DANH TÍNH (0229). Khoá bí mật chỉ lưu BĂM (sha256); "sống / chập chờn /
+ * mất" là hàm của `last_heartbeat_at` và đồng hồ (`workerLiveness`), không có cột trạng thái.
+ */
+export const techWorkers = pgTable(
+  "tech_workers",
+  {
+    id: id(),
+    key: text("key").notNull(),
+    name: text("name").notNull(),
+    host: text("host").notNull().default(""),
+    /** `SUBSCRIPTION_CLAUDE_CODE` · `ANTHROPIC_API` — ranh giới thanh toán đi theo worker. */
+    provider: text("provider").notNull(),
+    capabilities: jsonb("capabilities").$type<string[]>().notNull().default([]),
+    maxConcurrency: integer("max_concurrency").notNull().default(1),
+    enabled: boolean("enabled").notNull().default(true),
+    disabledReason: text("disabled_reason").notNull().default(""),
+    secretHash: text("secret_hash").notNull(),
+    version: text("version").notNull().default(""),
+    lastHeartbeatAt: ts("last_heartbeat_at"),
+    createdById: text("created_by_id").references(() => users.id, { onDelete: "set null" }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex("tech_workers_key_uq").on(t.key),
+    check("tech_workers_key_check", sql`${t.key} ~ '^[a-z][a-z0-9-]{2,39}$'`),
+    check("tech_workers_provider_check", sql`${t.provider} IN ('SUBSCRIPTION_CLAUDE_CODE','ANTHROPIC_API')`),
+    check("tech_workers_concurrency_check", sql`${t.maxConcurrency} BETWEEN 1 AND 4`),
+    check("tech_workers_secret_check", sql`${t.secretHash} ~ '^[0-9a-f]{64}$'`),
+  ],
+);
+
+/** NHẬT KÝ LƯỢT CHẠY — có TRẦN (`TECH_LEASE.maxLogLinesPerRun` dòng, mỗi dòng ≤ 2000 ký tự). */
+export const techRunLogs = pgTable(
+  "tech_run_logs",
+  {
+    id: id(),
+    runId: text("run_id")
+      .notNull()
+      .references(() => techAgentRuns.id, { onDelete: "cascade" }),
+    seq: integer("seq").notNull(),
+    at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
+    level: text("level").notNull().default("info"),
+    line: text("line").notNull(),
+  },
+  (t) => [
+    uniqueIndex("tech_run_logs_run_seq_uq").on(t.runId, t.seq),
+    check("tech_run_logs_level_check", sql`${t.level} IN ('info','warn','error')`),
+    check("tech_run_logs_line_check", sql`length(${t.line}) <= 2000`),
+  ],
+);
+
+/**
+ * NGÂN SÁCH THEO PHẠM VI (0230). Một dòng mỗi (phạm vi, id); ô `NULL` = CHƯA KHAI. Tầng hẹp đè tầng rộng TỪNG Ô
+ * (`resolveBudget`). Tiền API CHƯA KHAI trần ngày ⇒ worker API không chạy (đóng khi thiếu).
+ */
+export const techBudgets = pgTable(
+  "tech_budgets",
+  {
+    id: id(),
+    /** `TECH_BUDGET_SCOPES`: COMPANY · PROJECT · GOAL · MISSION. */
+    scopeKind: text("scope_kind").notNull(),
+    /** Rỗng cho COMPANY. */
+    scopeId: text("scope_id").notNull().default(""),
+    apiUsdDaily: doublePrecision("api_usd_daily"),
+    apiUsdTotal: doublePrecision("api_usd_total"),
+    maxRunMinutes: integer("max_run_minutes"),
+    maxAttempts: integer("max_attempts"),
+    maxConcurrentRuns: integer("max_concurrent_runs"),
+    note: text("note").notNull().default(""),
+    updatedById: text("updated_by_id").references(() => users.id, { onDelete: "set null" }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex("tech_budgets_scope_uq").on(t.scopeKind, t.scopeId),
+    check("tech_budgets_scope_check", sql`${t.scopeKind} IN ('COMPANY','PROJECT','GOAL','MISSION')`),
+    check("tech_budgets_company_check", sql`(${t.scopeKind} = 'COMPANY') = (${t.scopeId} = '')`),
+    check(
+      "tech_budgets_values_check",
+      sql`(${t.apiUsdDaily} IS NULL OR ${t.apiUsdDaily} >= 0) AND (${t.apiUsdTotal} IS NULL OR ${t.apiUsdTotal} >= 0) AND (${t.maxRunMinutes} IS NULL OR ${t.maxRunMinutes} BETWEEN 5 AND 240) AND (${t.maxAttempts} IS NULL OR ${t.maxAttempts} BETWEEN 1 AND 10) AND (${t.maxConcurrentRuns} IS NULL OR ${t.maxConcurrentRuns} BETWEEN 1 AND 16)`,
+    ),
+  ],
+);
+
+export const techWorkersRelations = relations(techWorkers, ({ many }) => ({
+  runs: many(techAgentRuns),
+}));
 
 export const techProjectsRelations = relations(techProjects, ({ many }) => ({
   goals: many(techGoals),
@@ -8739,6 +8864,7 @@ export const techTasksRelations = relations(techTasks, ({ one, many }) => ({
   agent: one(techAgents, { fields: [techTasks.agentId], references: [techAgents.id] }),
   mission: one(techMissions, { fields: [techTasks.missionId], references: [techMissions.id] }),
   project: one(techProjects, { fields: [techTasks.projectId], references: [techProjects.id] }),
+  leaseWorker: one(techWorkers, { fields: [techTasks.leaseWorkerId], references: [techWorkers.id] }),
   parent: one(techTasks, { fields: [techTasks.parentTaskId], references: [techTasks.id], relationName: "techTaskParent" }),
   children: many(techTasks, { relationName: "techTaskParent" }),
   events: many(techTaskEvents),
@@ -8757,8 +8883,10 @@ export const techAgentsRelations = relations(techAgents, ({ many }) => ({
   runs: many(techAgentRuns),
 }));
 
-export const techAgentRunsRelations = relations(techAgentRuns, ({ one }) => ({
+export const techAgentRunsRelations = relations(techAgentRuns, ({ one, many }) => ({
   agent: one(techAgents, { fields: [techAgentRuns.agentId], references: [techAgents.id] }),
+  worker: one(techWorkers, { fields: [techAgentRuns.workerId], references: [techWorkers.id] }),
+  logs: many(techRunLogs),
   task: one(techTasks, { fields: [techAgentRuns.taskId], references: [techTasks.id] }),
 }));
 
@@ -8782,6 +8910,13 @@ export type TechProjectRow = typeof techProjects.$inferSelect;
 export type TechGoalRow = typeof techGoals.$inferSelect;
 export type TechMissionRow = typeof techMissions.$inferSelect;
 export type TechEventRow = typeof techEvents.$inferSelect;
+export type TechWorkerDbRow = typeof techWorkers.$inferSelect;
+export type TechRunLogRow = typeof techRunLogs.$inferSelect;
+export type TechBudgetRow = typeof techBudgets.$inferSelect;
+
+export const techRunLogsRelations = relations(techRunLogs, ({ one }) => ({
+  run: one(techAgentRuns, { fields: [techRunLogs.runId], references: [techAgentRuns.id] }),
+}));
 
 // ═══ Company OS · Agent A · sổ mẫu, vòng đời, sự kiện ═══
 //

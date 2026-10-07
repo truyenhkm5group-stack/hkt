@@ -216,3 +216,57 @@ export async function dispatchAgentRun(input: {
 
 /** Kiểu lỗi của client đọc, dùng lại để nơi gọi chỉ phải bắt một họ lỗi. */
 export { GithubError };
+
+/**
+ * YÊU CẦU MỞ PR BẰNG DANH TÍNH BOT — cho nhánh worker hàng đợi (docs/tech-control-plane/README.md mục 4).
+ *
+ * KHÔNG phải đường mở PR thứ hai: nó dispatch ĐÚNG cầu nối đã có (`agent-open-pr.yml`, chạy trên `main`, secret
+ * trong Environment `agent-identity`, không checkout nhánh nguồn — docs/agent-pr-bridge.md). PR mang tên
+ * `erp-agent-vnx[bot]` nên chủ shop DUYỆT ĐƯỢC (GitHub cấm tác giả tự duyệt). Worker không bao giờ cầm quyền ghi
+ * GitHub nào ngoài `git push` nhánh của nó.
+ *
+ * Mọi ô inputs của workflow là CÔNG KHAI trên giao diện Actions ⇒ tên nhánh phải đúng hình dạng nhánh worker, tiêu
+ * đề / mô tả cắt ngắn. 204 không trả số PR — số PR về qua `github-pr-sync` (nối bằng nhánh).
+ */
+export const AGENT_OPEN_PR_WORKFLOW = "agent-open-pr.yml";
+
+export async function dispatchAgentOpenPr(input: { head: string; title: string; body: string }): Promise<DispatchResult> {
+  const head = input.head.trim();
+  if (!/^ai\/worker\/[A-Za-z0-9-]{1,40}-a[0-9]{1,6}$/.test(head)) {
+    return { ok: false, kind: "FORBIDDEN", detail: `“${head}” không phải nhánh worker (ai/worker/<MÃ>-a<n>) — cầu nối chỉ mở PR cho nhánh của worker.` };
+  }
+  await assertHomeCredentials("github");
+  const cfg = dispatchConfig();
+  if (!cfg.configured || !cfg.repo) return { ok: false, kind: "NOT_CONFIGURED", detail: cfg.reason ?? "Chưa cấu hình." };
+  const t = dispatchToken();
+  if (!t) return { ok: false, kind: "NOT_CONFIGURED", detail: cfg.reason ?? "Chưa có khoá ghi." };
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+  try {
+    let res: Awaited<ReturnType<FetchLike>>;
+    try {
+      res = await (fetchImpl ?? fetch)(`${API}/repos/${cfg.repo}/actions/workflows/${AGENT_OPEN_PR_WORKFLOW}/dispatches`, {
+        method: "POST",
+        headers: {
+          Accept: "application/vnd.github+json",
+          "X-GitHub-Api-Version": "2022-11-28",
+          "User-Agent": "vnxcommerce-erp",
+          Authorization: `Bearer ${t}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ ref: DISPATCH_REF, inputs: { head, base: "main", title: input.title.slice(0, 200), body: input.body.slice(0, 6000) } }),
+        signal: controller.signal,
+        cache: "no-store",
+      });
+    } catch (e) {
+      const m = e instanceof Error ? e.message : String(e);
+      return { ok: false, kind: "NETWORK", detail: controller.signal.aborted ? `Hết ${TIMEOUT_MS / 1000} giây chờ GitHub trả lời.` : `Không gọi được GitHub: ${m}` };
+    }
+    if (res.status === 204) return { ok: true, workflow: AGENT_OPEN_PR_WORKFLOW, ref: DISPATCH_REF };
+    if (res.status === 401 || res.status === 403) return { ok: false, kind: "FORBIDDEN", detail: `GitHub từ chối (${res.status}) — ERP_GITHUB_DISPATCH_TOKEN cần quyền \`actions: write\`.` };
+    if (res.status === 404) return { ok: false, kind: "NOT_FOUND", detail: `GitHub không thấy \`${AGENT_OPEN_PR_WORKFLOW}\` trên kho \`${cfg.repo}\` (404).` };
+    return { ok: false, kind: "HTTP", detail: `GitHub trả ${res.status}.` };
+  } finally {
+    clearTimeout(timer);
+  }
+}

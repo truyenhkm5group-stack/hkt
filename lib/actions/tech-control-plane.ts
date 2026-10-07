@@ -7,7 +7,11 @@ import { can, requireUser } from "@/lib/auth/session";
 import { TECH_PRIORITIES } from "@/lib/constants/tech";
 import { TECH_GOAL_STATUSES, TECH_MISSION_STATUSES } from "@/lib/constants/tech-control-plane";
 import { attachTechTaskToMission, createTechGoal, createTechMission, seedTechProjects, setTechGoalStatus, setTechMissionStatus } from "@/lib/tech/control-plane";
-import type { TechActor, TechResult } from "@/lib/tech/service";
+import { reclassifyTechTaskPolicy, type TechActor, type TechResult } from "@/lib/tech/service";
+import { TECH_BUDGET_SCOPES } from "@/lib/constants/tech-policy";
+import { setTechBudget } from "@/lib/tech/budget";
+import { TECH_QUEUE_PROVIDERS, type TechExecutionProvider } from "@/lib/constants/tech-worker";
+import { reapExpiredTechLeases, registerTechWorker, setTechWorkerEnabled } from "@/lib/tech/worker-service";
 
 /**
  * ───────────── SERVER ACTION — GOAL · MISSION ─────────────
@@ -151,4 +155,93 @@ export async function attachTechTaskToMissionAction(input: unknown): Promise<Tec
   lamMoi({ missionId: p.data.missionId, taskId: p.data.taskId });
   if (res.previousMissionId) revalidatePath(`/tech/missions/${res.previousMissionId}`);
   return { ok: true };
+}
+
+/* ═════════════════════ WORKER (Pha 2) ═════════════════════ */
+
+const workerSchema = z.object({
+  key: z.string().trim().min(3).max(40),
+  name: z.string().trim().max(120),
+  host: z.string().trim().max(120).optional(),
+  provider: z.enum(TECH_QUEUE_PROVIDERS as unknown as [TechExecutionProvider, ...TechExecutionProvider[]]),
+  capabilities: z.array(z.string().max(60)).min(1).max(20),
+  maxConcurrency: z.number().int().min(1).max(4).optional(),
+});
+
+/** Đăng ký worker. Khoá trả về ĐÚNG MỘT LẦN cho người bấm — không ghi vào nhật ký, không lưu thô. */
+export async function registerTechWorkerAction(input: unknown): Promise<TechResult<{ id: string; token: string }>> {
+  const user = await nguoiQuanTri();
+  if (!user) return { error: KHONG_QUYEN };
+  const p = parse(workerSchema, input);
+  if ("error" in p) return p;
+  const res = await registerTechWorker(p.data, actorOf(user));
+  if ("error" in res) return res;
+  await audit({ userId: user.id, userEmail: user.email, action: "TECH_WORKER_REGISTERED", entity: "TECH_WORKER", entityId: res.id, after: { key: p.data.key, provider: p.data.provider, capabilities: p.data.capabilities } });
+  revalidatePath("/tech/workers");
+  return res;
+}
+
+const workerEnabledSchema = z.object({ workerId: z.string().min(1), enabled: z.boolean(), reason: z.string().trim().max(500).optional() });
+
+export async function setTechWorkerEnabledAction(input: unknown): Promise<TechResult> {
+  const user = await nguoiQuanTri();
+  if (!user) return { error: KHONG_QUYEN };
+  const p = parse(workerEnabledSchema, input);
+  if ("error" in p) return p;
+  const res = await setTechWorkerEnabled(p.data, actorOf(user));
+  if ("error" in res) return res;
+  await audit({ userId: user.id, userEmail: user.email, action: "TECH_WORKER_ENABLED", entity: "TECH_WORKER", entityId: p.data.workerId, after: { enabled: p.data.enabled }, reason: p.data.reason });
+  revalidatePath("/tech/workers");
+  return { ok: true };
+}
+
+/** Thu hồi tay mọi lease đã hết hạn — cùng hàm mà mỗi lượt xin việc của worker chạy trước. */
+export async function reapTechLeasesAction(): Promise<TechResult<{ reaped: number }>> {
+  const user = await nguoiQuanTri();
+  if (!user) return { error: KHONG_QUYEN };
+  const r = await reapExpiredTechLeases();
+  if (r.reaped) await audit({ userId: user.id, userEmail: user.email, action: "TECH_LEASES_REAPED", entity: "TECH_TASK", after: r });
+  lamMoi();
+  revalidatePath("/tech/workers");
+  return { ok: true, reaped: r.reaped };
+}
+
+/* ═════════════════════ CHÍNH SÁCH & NGÂN SÁCH (Pha 4) ═════════════════════ */
+
+const soHoacNull = z.number().finite().nullable().optional();
+const budgetSchema = z.object({
+  scopeKind: z.enum(TECH_BUDGET_SCOPES),
+  scopeId: z.string().trim().max(60).nullish(),
+  apiUsdDaily: soHoacNull,
+  apiUsdTotal: soHoacNull,
+  maxRunMinutes: z.number().int().nullable().optional(),
+  maxAttempts: z.number().int().nullable().optional(),
+  maxConcurrentRuns: z.number().int().nullable().optional(),
+  note: z.string().trim().max(500).optional(),
+});
+
+/** Đặt trần một phạm vi. Ô bỏ trống = CHƯA KHAI (tiền API chưa khai ⇒ worker API không chạy). */
+export async function setTechBudgetAction(input: unknown): Promise<TechResult> {
+  const user = await nguoiQuanTri();
+  if (!user) return { error: KHONG_QUYEN };
+  const p = parse(budgetSchema, input);
+  if ("error" in p) return p;
+  const res = await setTechBudget(p.data, actorOf(user));
+  if ("error" in res) return res;
+  await audit({ userId: user.id, userEmail: user.email, action: "TECH_BUDGET_SET", entity: "TECH_BUDGET", entityId: `${p.data.scopeKind}:${p.data.scopeId ?? ""}`, after: p.data, reason: p.data.note });
+  revalidatePath("/tech/workers");
+  lamMoi({ missionId: p.data.scopeKind === "MISSION" ? p.data.scopeId : null, goalId: p.data.scopeKind === "GOAL" ? p.data.scopeId : null });
+  return { ok: true };
+}
+
+export async function reclassifyTechTaskPolicyAction(input: unknown): Promise<TechResult<{ level: string }>> {
+  const user = await nguoiQuanTri();
+  if (!user) return { error: KHONG_QUYEN };
+  const p = parse(z.object({ taskId: z.string().min(1) }), input);
+  if ("error" in p) return p;
+  const res = await reclassifyTechTaskPolicy(p.data, actorOf(user));
+  if ("error" in res) return res;
+  await audit({ userId: user.id, userEmail: user.email, action: "TECH_TASK_POLICY", entity: "TECH_TASK", entityId: p.data.taskId, after: { policyLevel: res.level } });
+  lamMoi({ taskId: p.data.taskId });
+  return res;
 }

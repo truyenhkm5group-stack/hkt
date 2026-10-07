@@ -82,10 +82,17 @@ export async function dispatchTaskToAgent(input: {
   const db = await getDb();
   const task = await db.query.techTasks.findFirst({
     where: eq(schema.techTasks.code, input.taskCode),
-    columns: { id: true, code: true, risk: true, status: true, approvalRequired: true, approvalStatus: true, agentId: true, branch: true, missionId: true },
+    columns: { id: true, code: true, risk: true, status: true, approvalRequired: true, approvalStatus: true, agentId: true, branch: true, missionId: true, leaseWorkerId: true, leaseExpiresAt: true },
   });
   if (!task) return { ok: false, code: "UNKNOWN_TASK", reason: `Không có việc \`${input.taskCode}\`.` };
 
+  /*
+    HAI ĐƯỜNG THI HÀNH, MỘT VIỆC (review 07/10, mục 11): việc đang có worker hàng đợi giữ lease thì KHÔNG giao thêm
+    cho GitHub Actions — hai nhánh, hai PR, chi hai lần.
+  */
+  if (task.leaseWorkerId && task.leaseExpiresAt && task.leaseExpiresAt.getTime() > Date.now()) {
+    return { ok: false, code: "TASK", reason: `Việc ${task.code} đang được một worker hàng đợi làm — đợi lượt đó kết thúc.` };
+  }
   /* "Cần chủ shop" chỉ NGƯỜI gỡ, kèm câu đã quyết gì — nút giao sửa không phải đường tắt qua cổng đó. */
   if (task.status === "NEEDS_OWNER") {
     return { ok: false, code: "TASK", reason: `Việc ${task.code} đang chờ chủ shop — gỡ “Cần chủ shop” (ghi lại đã quyết gì) rồi mới giao lại.` };

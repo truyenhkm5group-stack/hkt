@@ -299,14 +299,40 @@ export const TECH_EVENT_NAMES = [
   "mission.created",
   "mission.status_changed",
   "mission.task_attached",
+  // Pha 2 — worker / lượt chạy (lib/tech/worker-service.ts)
+  "worker.registered",
+  "worker.enabled",
+  "worker.disabled",
+  "worker.claimed",
+  "run.succeeded",
+  "run.failed",
+  "run.lease_expired",
   "mission.task_detached",
+  // Pha 3 — đường giao hàng (lib/tech/delivery.ts)
+  "pr.requested",
+  "pr.request_failed",
+  "pr.opened",
+  "pr.merged",
+  "pr.closed",
+  "ci.passed",
+  "ci.failed",
+  "ci.fix_requested",
+  "ci.retry_exhausted",
+  "deploy.reached",
+  "verification.passed",
+  "verification.failed",
+  // Pha 4 — ngân sách / watchdog (lib/tech/budget.ts, lib/tech/watchdog.ts)
+  "budget.updated",
+  "budget.warning",
+  "budget.exceeded",
+  "worker.lost",
 ] as const;
 export type TechEventName = (typeof TECH_EVENT_NAMES)[number];
 
 /** Cùng biểu thức với CHECK `tech_events_name_check`. */
 export const TECH_EVENT_NAME_PATTERN = /^[a-z_]+(\.[a-z_]+)+$/;
 
-export const TECH_EVENT_SUBJECTS = ["GOAL", "MISSION", "TASK", "WORKER", "RUN", "DEPLOYMENT", "INCIDENT"] as const;
+export const TECH_EVENT_SUBJECTS = ["GOAL", "MISSION", "TASK", "WORKER", "RUN", "DEPLOYMENT", "INCIDENT", "BUDGET"] as const;
 export type TechEventSubject = (typeof TECH_EVENT_SUBJECTS)[number];
 
 export const TECH_EVENT_LABEL: Record<TechEventName, string> = {
@@ -315,5 +341,28 @@ export const TECH_EVENT_LABEL: Record<TechEventName, string> = {
   "mission.created": "Tạo sứ mệnh",
   "mission.status_changed": "Sứ mệnh đổi trạng thái",
   "mission.task_attached": "Gắn việc vào sứ mệnh",
+  "worker.registered": "Đăng ký worker",
+  "worker.enabled": "Bật worker",
+  "worker.disabled": "Tắt worker",
+  "worker.claimed": "Worker nhận việc",
+  "run.succeeded": "Lượt chạy xong",
+  "run.failed": "Lượt chạy thất bại",
+  "run.lease_expired": "Lease hết hạn — việc về hàng đợi",
   "mission.task_detached": "Việc rời sứ mệnh",
+  "pr.requested": "Đã yêu cầu mở PR (bot)",
+  "pr.request_failed": "Chưa mở được PR",
+  "pr.opened": "PR đã mở",
+  "pr.merged": "PR đã gộp",
+  "pr.closed": "PR đã đóng (không gộp)",
+  "ci.passed": "Cổng CI xanh",
+  "ci.failed": "Cổng CI đỏ",
+  "ci.fix_requested": "Mở việc sửa CI",
+  "ci.retry_exhausted": "Hết lượt sửa CI tự động",
+  "deploy.reached": "Đã lên production (deploy đã đối chiếu)",
+  "verification.passed": "Hậu kiểm production ĐẠT",
+  "verification.failed": "Hậu kiểm: có sự cố nặng",
+  "budget.updated": "Đổi ngân sách",
+  "budget.warning": "Chi API ≥ 80% trần ngày",
+  "budget.exceeded": "Chi API chạm trần ngày — worker API dừng",
+  "worker.lost": "Worker mất nhịp tim khi đang giữ việc",
 };

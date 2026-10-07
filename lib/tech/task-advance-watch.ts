@@ -3,6 +3,8 @@ import { getDb, schema } from "@/db";
 import { shouldAdvanceTask, type TaskPrState } from "@/lib/constants/task-advance";
 import { type TechTaskStatus } from "@/lib/constants/tech";
 import { runSyncJob, type SyncTrigger } from "@/lib/sync/runner";
+import { runDeliveryWatch } from "@/lib/tech/delivery";
+import { runTechWatchdog } from "@/lib/tech/watchdog";
 import { setTechTaskStatus } from "@/lib/tech/service";
 
 /**
@@ -122,6 +124,17 @@ export async function runTaskAdvanceWatch(opts: { trigger: SyncTrigger; actor: s
     ctx.summary.detail = `Xét ${r.xet} việc có phép chiếu PR: đẩy ${r.daDay}, ${r.nguoiGiu} để nguyên vì người vừa đổi, ${r.chuaDu} chưa đủ bằng chứng.`;
     if (r.loi) ctx.summary.warning = `${r.loi} việc không đẩy được: ${r.chiTiet.filter((x) => !x.to).map((x) => `${x.code} (${x.ly})`).join(" · ")}`;
     for (const d of r.chiTiet.filter((x) => x.to)) ctx.log(`${d.code}: ${d.from} → ${d.to} — ${d.ly}`);
-    return r;
+    /*
+      ĐƯỜNG GIAO HÀNG (docs/tech-control-plane/README.md mục 10): việc đã gộp mà commit đang chạy production chứa
+      nó ⇒ OBSERVING; đủ cửa sổ quan sát không sự cố nặng ⇒ xác minh + DONE. Chạy CHUNG job này — không thêm lịch.
+    */
+    const g = await runDeliveryWatch();
+    ctx.log(`Giao hàng: xét ${g.deploy.considered} việc đã gộp, ${g.deploy.advanced} đã lên production; hậu kiểm ${g.verify.considered} việc: ${g.verify.passed} ĐẠT, ${g.verify.incident} có sự cố, ${g.verify.waiting} đang quan sát.`);
+    if (g.deploy.errors) ctx.summary.warning = `${ctx.summary.warning ? `${ctx.summary.warning} · ` : ""}${g.deploy.errors} việc không đối chiếu được với GitHub`;
+    // WATCHDOG (docs mục 11): thu hồi lease hết hạn · worker mất nhịp tim · chi API chạm trần — cùng job, không thêm lịch.
+    const w = await runTechWatchdog().catch(() => null);
+    if (w) ctx.log(`Watchdog: thả ${w.reaped} việc lease hết hạn · ${w.lostWorkers} worker mất liên lạc · chi API ${w.apiAlert ?? "chưa khai trần"}.`);
+    if (w?.apiAlert === "EXCEEDED") ctx.summary.warning = `${ctx.summary.warning ? `${ctx.summary.warning} · ` : ""}chi API chạm trần ngày — worker API đã dừng`;
+    return { ...r, giaoHang: g, watchdog: w };
   });
 }

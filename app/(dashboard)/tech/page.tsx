@@ -15,6 +15,8 @@ import { getTechSystemHealth } from "@/lib/queries/tech-health";
 import { lastSuccessfulDeployment, openTechIncidents, recentTechDeployments } from "@/lib/queries/tech-ops";
 import { commitMatches } from "@/lib/tech/health-parse";
 import { techNeedsOwnerQueue } from "@/lib/queries/tech-control-plane";
+import { techCockpit } from "@/lib/queries/tech-cockpit";
+import { TechCockpitPanel } from "@/app/(dashboard)/tech/cockpit";
 
 export const metadata = { title: "Phòng Tech AI" };
 
@@ -27,7 +29,7 @@ export default async function TechPage() {
   const user = await requirePermission("tech:view");
   const canManage = can(user, "tech:manage");
 
-  const [health, counts, top, cho, chay, deploys, lastDeploy, incidents, canChuShop] = await Promise.all([
+  const [health, counts, top, cho, chay, deploys, lastDeploy, incidents, canChuShop, buongLai] = await Promise.all([
     getTechSystemHealth(),
     techOverviewCounts(),
     topTechTasks(8),
@@ -37,6 +39,7 @@ export default async function TechPage() {
     lastSuccessfulDeployment(),
     openTechIncidents(6),
     techNeedsOwnerQueue(),
+    techCockpit(),
   ]);
   const goiChuShop = canChuShop.filter((t) => t.status === "NEEDS_OWNER");
 
@@ -87,6 +90,9 @@ export default async function TechPage() {
           {goiChuShop.length > 3 ? <p className="mt-1 text-xs text-muted-foreground">và {formatNumber(goiChuShop.length - 3)} việc nữa →</p> : null}
         </Link>
       ) : null}
+
+      {/* ───────── BUỒNG LÁI (docs/tech-control-plane/README.md mục 12) — đọc được trên điện thoại ───────── */}
+      <TechCockpitPanel c={buongLai} />
 
       {/* ───────── Sáu thẻ dẫn dắt. Mỗi con số mở đúng bộ lọc đã sinh ra nó. ───────── */}
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
