@@ -517,6 +517,7 @@ import { testMessenger } from "./messenger.test";
 import { testConversationControl } from "./conversation-control.test";
 import { testSalesHumanTakeover } from "./sales-human-takeover.test";
 import { testSaasL3Inbox } from "./saas-l3-inbox.test";
+import { testBotOrderStatus } from "./bot-order-status.test";
 import { testConversationTrace } from "./conversation-trace.test";
 import { testMessengerHealth } from "./messenger-health.test";
 import { testConnectorsLegacy } from "./connectors-legacy.test";
@@ -2831,6 +2832,8 @@ async function main() {
   // trùng hai nguồn, đường phụ không kích AI, người trả lời ba nguồn ⇒ nhường, số phút nhường theo workspace, thẻ lọc ≡ aiHoldOf —
   // tổ chức THẬT `l3-hop-thu` (+ `l3-hop-thu-khac` cho cô lập), Graph + Pancake giả.
   await testSaasL3Inbox();
+  // Bot tra trạng thái đơn (Commerce Truth): chỉ đơn của CHÍNH hội thoại, trạng thái = lời khai ĐVVC — tổ chức THẬT `bot-tra-don`.
+  await testBotOrderStatus();
   // Đơn ↔ hội thoại ↔ khách: link hội thoại của đơn mở Hộp thư ERP (mọi kênh); hồ sơ khách chỉ thấy hội thoại nối bằng
   // khoá cứng — tổ chức THẬT `truy-vet-hoi-thoai`.
   await testConversationTrace();

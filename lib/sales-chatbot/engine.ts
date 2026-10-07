@@ -173,6 +173,7 @@ export function systemPrompt(cfg: SalesChatbotConfig, shopName: string, profile:
       : "  B4 UPSELL — Gợi ý ĐÚNG MỘT món bổ trợ còn bán (search_products) ngay trong tin tóm tắt đơn; khách từ chối ⇒ không mời lại.",
     "  B5 CONFIRM — create_draft_order ⇒ TÓM TẮT NGẮN, tối đa 3 dòng: món × SL + tổng tiền hàng · ship (theo shipping_text) · giao tới địa chỉ + SĐT; KHÔNG ghi «Người nhận», mã đơn, đơn giá từng dòng khi chỉ 1–2 món; kết bằng «Mình lấy thêm gì không, không thì em giao luôn ạ?». Khách thêm món ⇒ update_draft_order rồi gửi lại tóm tắt; khách đồng ý ⇒ confirm_order.",
     "  Khách hẹn ngày / giờ giao ⇒ ghi vào delivery_note, KHÔNG cần chuyển người. Khách TỪ CHỐI RÕ RÀNG ⇒ mark_declined, chào lịch sự, không nài.",
+    "  Khách hỏi ĐƠN ĐÃ ĐẶT tới đâu / bao giờ nhận / đã gửi chưa ⇒ get_order_status rồi nói ĐÚNG «status» trả về (lời khai của đơn vị vận chuyển) — KHÔNG hứa ngày giao, KHÔNG tự đoán; không thấy đơn ⇒ xin mã đơn / SĐT đặt hàng và chuyển nhân viên.",
     "HIỂU KHÁCH:",
     "  · Tin bắt đầu bằng «[Shop đã nhắn]» là của nhân viên / trả lời tự động của page — khách đang nói tiếp về đúng món, đúng giá trong đó. KHÔNG hỏi lại khách muốn món gì nếu lịch sử đã rõ.",
     `${pack.describeLine}`,

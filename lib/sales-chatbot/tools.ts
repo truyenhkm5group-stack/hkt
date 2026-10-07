@@ -16,7 +16,7 @@
  * dòng nào vượt tồn KHẢ DỤNG đã biết, và `customer_confirmation` là nguyên văn một đoạn trong câu CUỐI của khách — model
  * không tự chốt thay khách được.
  */
-import { and, eq, ne, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, ne, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { getDb, schema } from "@/db";
 import type { AiToolDef } from "@/lib/ai/provider";
@@ -79,7 +79,7 @@ export type ChatState = {
 };
 
 /** Công cụ QUY TRÌNH — luôn bật (không nằm trong `allowedTools` đã lưu của tổ chức, nên công cụ mới tới được mọi tổ chức). */
-export const PROCESS_TOOLS = ["send_quick_reply", "set_sales_stage", "lookup_customer", "mark_declined"] as const;
+export const PROCESS_TOOLS = ["send_quick_reply", "set_sales_stage", "lookup_customer", "mark_declined", "get_order_status"] as const;
 export type ProcessTool = (typeof PROCESS_TOOLS)[number];
 
 /** Công cụ ĐẶT LỊCH — chỉ khi shop bật «Nhận đặt lịch qua chat» VÀ tổ chức bật module Lịch hẹn (`ToolContext.bookingOn`). */
@@ -225,6 +225,13 @@ const PROCESS_DEFS: Record<ProcessTool, AiToolDef> = {
     name: "lookup_customer",
     description: "Kiểm tra KHÁCH CŨ theo số điện thoại khách vừa cho: đã mua bao nhiêu đơn, gợi ý địa chỉ cũ (đã che một phần). CHỈ để hỏi lại khách «giao về địa chỉ cũ … phải không ạ?» — không tự điền khi khách chưa xác nhận.",
     inputSchema: { type: "object", properties: { phone: { type: "string" } }, required: ["phone"], additionalProperties: false },
+    kind: "read",
+  },
+  get_order_status: {
+    name: "get_order_status",
+    description:
+      "Tra TRẠNG THÁI ĐƠN của CHÍNH khách đang chat (đơn chốt trong hội thoại này / của khách hội thoại đã nhận diện) khi khách hỏi «đơn của em tới đâu rồi», «bao giờ nhận hàng», «đã gửi chưa». Trả từng đơn: mã, ngày đặt, tổng tiền, trạng thái theo LỜI KHAI của đơn vị vận chuyển. Không có tham số. Nói ĐÚNG trạng thái trả về, không hứa ngày giao; không thấy đơn ⇒ xin mã đơn / SĐT đặt hàng rồi chuyển nhân viên kiểm tra.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
     kind: "read",
   },
   mark_declined: {
@@ -654,6 +661,15 @@ export async function executeTool(name: string, rawInput: unknown, ctx: ToolCont
       const nameHint = c.name.trim().split(/\s+/).pop() ?? "";
       return ok(`Khách cũ · ${Number(n?.n ?? 0)} đơn`, { returning_customer: true, orders: Number(n?.n ?? 0), name_hint: nameHint, previous_address_hint: maskAddress(c.address) || null, note: "Chỉ GỢI Ý — hỏi khách xác nhận địa chỉ, không tự điền." }, state);
     }
+    case "get_order_status": {
+      // TRẠNG THÁI ĐƠN CỦA CHÍNH KHÁCH NÀY (Commerce Truth · Master Mission mục V). PHẠM VI: đơn gắn với hội thoại này
+      // (`sales_conversation_id`), đơn bot đã chốt trong hội thoại (`state.confirmed` / `pastOrders`) hoặc của khách hội thoại đã
+      // nhận diện (`state.customer.id`) — KHÔNG tra theo SĐT khách tự gõ: gõ số người khác là đọc được đơn người khác.
+      // TRẠNG THÁI = LỜI KHAI CỦA ĐƠN VỊ VẬN CHUYỂN (chặng dựng từ sự kiện ĐVVC — AGENTS mục 47, ORDER_OUTCOME.md mục 1): không bao
+      // giờ suy «đã giao» từ tiền / COD / trạng thái Pancake; chưa có sự kiện ĐVVC nào ⇒ nói thẳng «chưa có thông tin vận chuyển».
+      if (simulated) return ok("(Thử) Tra đơn", { orders: [], note: "Khung thử không có đơn thật — đơn mô phỏng không có vận chuyển." }, state);
+      return ok(...(await orderStatusFor(ctx.conversationId, state)), state);
+    }
     case "mark_declined": {
       const reason = z.string().trim().min(2).max(300).safeParse(input.reason);
       state.declined = { reason: reason.success ? reason.data : "Khách từ chối", at: new Date().toISOString() };
@@ -671,6 +687,68 @@ export async function executeTool(name: string, rawInput: unknown, ctx: ToolCont
   }
   return err(`${name}: không có`, `Không có công cụ «${name}».`, state);
 }
+
+/**
+ * Câu trạng thái cho KHÁCH theo chặng vận đơn (lời khai ĐVVC) — `null` = chưa có vận đơn. Chặng là của CHIỀU ĐI: sự kiện chiều
+ * hoàn đã được quy đổi khi dựng chặng (lib/integrations/viettelpost/state.ts), nên «Giao thành công» ở đây không phải hàng
+ * hoàn về shop. Vẫn là LỜI KHAI của đơn vị vận chuyển, không phải kết luận kết quả đơn của ERP (`ORDER_OUTCOME`).
+ */
+export const CUSTOMER_SHIPMENT_STATUS: Record<string, string> = {
+  PENDING: "Đơn đã tạo vận đơn, đang chờ đơn vị vận chuyển tới lấy hàng",
+  PICKED_UP: "Đơn vị vận chuyển đã lấy hàng, đang trên đường",
+  IN_TRANSIT: "Đơn đang được vận chuyển",
+  OUT_FOR_DELIVERY: "Bưu tá đang giao tới anh/chị",
+  DELIVERY_FAILED: "Đơn vị vận chuyển báo lần giao vừa rồi chưa thành công — sẽ giao lại hoặc liên hệ anh/chị",
+  DELIVERED: "Đơn vị vận chuyển báo đã giao thành công",
+  RETURNING: "Đơn vị vận chuyển báo đơn đang chuyển hoàn về shop",
+  RETURNED: "Đơn vị vận chuyển báo đơn đã hoàn về shop",
+  CANCELLED: "Vận đơn đã huỷ",
+  UNKNOWN: "Chưa có thông tin từ đơn vị vận chuyển",
+};
+
+const ORDER_STATUS_MAX = 3;
+
+/** Đơn của CHÍNH khách trong hội thoại + trạng thái vận chuyển (lời khai ĐVVC). Chỉ đọc. */
+async function orderStatusFor(conversationId: string, state: ChatState): Promise<[string, unknown]> {
+  const db = await getDb();
+  const o = schema.orders;
+  const ids = [state.confirmed?.orderId, ...(state.pastOrders ?? []).map((p) => p.orderId)].filter((x): x is string => typeof x === "string" && x.length > 0);
+  const customerId = state.customer && !state.customer.simulated ? state.customer.id : null;
+  const scope = [eq(o.salesConversationId, conversationId), ...(ids.length ? [inArray(o.id, ids)] : []), ...(customerId ? [eq(o.customerId, customerId)] : [])];
+  const rows = await db
+    .select({ id: o.id, at: o.insertedAt, total: o.totalPrice, stage: o.stage })
+    .from(o)
+    .where(and(or(...scope), ne(o.stage, "DELETED")))
+    .orderBy(desc(o.insertedAt))
+    .limit(ORDER_STATUS_MAX);
+  if (!rows.length) return ["Tra đơn: không thấy", { orders: [], note: "Không thấy đơn nào của khách trong hội thoại này. Hỏi mã đơn hoặc SĐT đặt hàng rồi chuyển nhân viên kiểm tra — KHÔNG tự tra theo SĐT, KHÔNG đoán trạng thái." }];
+  const sh = schema.shipments;
+  const ships = await db
+    .select({ orderId: sh.orderId, stage: sh.stage, name: sh.vtpStatusName, at: sh.vtpStatusDate, code: sh.vtpOrderNumber, carrier: sh.carrier })
+    .from(sh)
+    .where(inArray(sh.orderId, rows.map((r) => r.id)));
+  const latest = new Map<string, (typeof ships)[number]>();
+  for (const s of ships) {
+    if (!s.orderId) continue;
+    const prev = latest.get(s.orderId);
+    if (!prev || (s.at?.getTime() ?? 0) > (prev.at?.getTime() ?? 0)) latest.set(s.orderId, s);
+  }
+  const view = rows.map((r) => {
+    const s = latest.get(r.id) ?? null;
+    return {
+      order_code: `#${manualOrderShortCode(r.id)}`,
+      ordered_at: formatVnDate(r.at),
+      total: r.total === null ? null : formatVND(Number(r.total)),
+      status: s ? (CUSTOMER_SHIPMENT_STATUS[s.stage] ?? CUSTOMER_SHIPMENT_STATUS.UNKNOWN) : r.stage === "CANCELLED" ? "Đơn đã huỷ" : "Shop đang chuẩn bị đơn — chưa giao cho đơn vị vận chuyển",
+      carrier_status: s?.name || null,
+      carrier_status_at: s?.at ? formatVnDate(s.at) : null,
+      tracking_code: s?.code || null,
+    };
+  });
+  return [`Tra đơn: ${view.length}`, { orders: view, note: "«status» là LỜI KHAI của đơn vị vận chuyển — nói đúng như vậy, không hứa ngày giao, không suy ra «đã giao» khi chưa thấy chữ đó. Khách khiếu nại / cần đổi trả ⇒ chuyển nhân viên." }];
+}
+
+const formatVnDate = (d: Date) => new Intl.DateTimeFormat("vi-VN", { timeZone: "Asia/Ho_Chi_Minh", day: "2-digit", month: "2-digit", year: "numeric" }).format(d);
 
 /** Tổng tiền đơn đã chốt / nháp để màn hình in (không gọi lại công cụ). */
 export function orderTotalsOf(state: ChatState): number | null {
