@@ -147,3 +147,131 @@ export function appRoleText(r: AppRoleCheck | null): string | null {
   if (r.state === "NO_ROLE") return r.role ? `Tài khoản bấm kết nối chỉ có vai trò «${r.role}» — không đủ để dùng quyền trước App Review.` : "Tài khoản bấm kết nối KHÔNG có vai trò trong app.";
   return `Chưa xác định được vai trò trong app: ${r.why}`;
 }
+
+// ─────────────────────────── Câu cho KHÁCH (màn «Kênh kết nối») ───────────────────────────
+//
+// DISCOVERY_GUIDE / WEBHOOK_GUIDE ở trên viết cho người biết App Dashboard (tên quyền, «webhook», «token»). Chủ shop không
+// làm gì được với những chữ đó — nên màn của khách đọc bản dưới đây: lời thường + MỘT việc phải làm + AI làm. Lỗi nằm ở phía
+// nền tảng (quyền của app, App Review) thì nói thẳng là KHÔNG phải lỗi của Page, không bắt khách đi sửa chỗ họ không vào được.
+// Chi tiết kỹ thuật chỉ hiện cho người vận hành nền tảng (lib/channels/overview-shared.ts quét chuỗi cấm).
+
+/** Ai làm việc của câu: chủ shop tự làm được, hay phải nhờ đội hỗ trợ nền tảng. */
+export type CustomerIssueWho = "SHOP" | "SUPPORT";
+export type CustomerIssue = { title: string; action: string; who: CustomerIssueWho };
+
+/** Tên thường của từng quyền bắt buộc — để câu khách nói «quyền nhắn tin», không nói `pages_messaging`. */
+export const PERMISSION_PLAIN_LABEL: Record<RequiredPermission, string> = {
+  pages_show_list: "xem danh sách Page",
+  pages_messaging: "nhắn tin",
+  pages_manage_metadata: "nhận tin nhắn mới",
+  pages_read_engagement: "đọc bình luận",
+};
+
+const SUPPORT_SIDE: CustomerIssue = {
+  title: "Facebook chưa mở quyền nhắn tin cho ứng dụng của nền tảng",
+  action: "Đây không phải lỗi ở Page của bạn — liên hệ đội hỗ trợ để được mở. Trong lúc chờ, Page vẫn nhận tin qua Pancake nếu bạn đang dùng.",
+  who: "SUPPORT",
+};
+
+export const CUSTOMER_DISCOVERY_TEXT: Record<DiscoveryReason, CustomerIssue> = {
+  TOKEN_EXPIRED: { title: "Lần đăng nhập Facebook vừa rồi không còn hiệu lực", action: "Bấm «Kết nối Facebook» lại và đăng nhập từ đầu.", who: "SHOP" },
+  PERMISSION_DECLINED: { title: "Bạn chưa cấp đủ quyền cho Page", action: "Bấm «Kết nối lại», giữ BẬT mọi quyền Facebook hỏi và tick đủ các Page cần dùng.", who: "SHOP" },
+  PERMISSION_NOT_IN_APP: SUPPORT_SIDE,
+  PERMISSION_NEEDS_APP_REVIEW: SUPPORT_SIDE,
+  PERMISSION_NOT_GRANTED: SUPPORT_SIDE,
+  NO_PAGES: { title: "Tài khoản Facebook này chưa quản lý Page nào", action: "Đăng nhập bằng tài khoản quản trị Page (hoặc nhờ quản trị Page thêm bạn với quyền Tin nhắn), rồi bấm «Kết nối lại».", who: "SHOP" },
+  NO_PAGE_TOKEN: { title: "Bạn chưa chọn Page nào ở bước «Chọn trang» của Facebook", action: "Bấm «Kết nối lại» và tick đủ các Page cần dùng.", who: "SHOP" },
+  NO_MESSAGING_TASK: { title: "Tài khoản của bạn chưa có quyền nhắn tin trên Page", action: "Nhờ quản trị Page cấp quyền «Tin nhắn» (hoặc Toàn quyền) cho tài khoản này, rồi bấm «Kết nối lại».", who: "SHOP" },
+};
+
+export const CUSTOMER_WEBHOOK_TEXT: Record<Exclude<WebhookState, "OK">, CustomerIssue> = {
+  NOT_SUBSCRIBED: { title: "Page chưa gửi tin nhắn mới về ERP", action: "Bấm «Kết nối lại» và chọn lại Page này.", who: "SHOP" },
+  MISSING_FIELDS: { title: "Page mới gửi về một phần (thiếu tin nhắn hoặc bình luận)", action: "Bấm «Kết nối lại» và chọn lại Page này.", who: "SHOP" },
+  TOKEN_EXPIRED: { title: "Facebook đã ngắt quyền của ERP với Page này", action: "Bấm «Kết nối lại» và đăng nhập bằng tài khoản quản trị Page.", who: "SHOP" },
+  UNKNOWN: { title: "Chưa kiểm tra được Page", action: "Bấm «Kiểm tra lại» sau ít phút.", who: "SHOP" },
+};
+
+/**
+ * Câu khách của MỘT lý do nối không được, kèm phần CỤ THỂ đọc được từ chẩn đoán đã lưu: quyền nào thiếu (tên thường),
+ * Page nào thiếu quyền nhắn tin. Tên quyền kỹ thuật lạ (không thuộc bộ bắt buộc) bị bỏ — không in ra màn khách. HÀM THUẦN.
+ */
+export function customerDiscoveryIssue(reason: DiscoveryReason, facts: { missing?: readonly string[]; pageNames?: readonly string[] } = {}): CustomerIssue {
+  const base = CUSTOMER_DISCOVERY_TEXT[reason];
+  if (reason === "PERMISSION_DECLINED") {
+    const labels = (facts.missing ?? []).filter((p): p is RequiredPermission => p in PERMISSION_PLAIN_LABEL).map((p) => PERMISSION_PLAIN_LABEL[p]);
+    return labels.length ? { ...base, title: `Bạn chưa cấp quyền ${labels.join(", ")} cho Page` } : base;
+  }
+  if (reason === "NO_MESSAGING_TASK") {
+    const names = (facts.pageNames ?? []).map((n) => n.trim()).filter(Boolean).slice(0, 3);
+    return names.length ? { ...base, title: `Tài khoản của bạn chưa có quyền nhắn tin trên Page ${names.map((n) => `«${n}»`).join(", ")}` } : base;
+  }
+  return base;
+}
+
+// ─────────────────────────── Configuration ID (Facebook Login for Business) ───────────────────────────
+//
+// App kiểu Doanh nghiệp cấp quyền theo CẤU HÌNH trên Meta, không theo `scope` (graph.ts `messengerConnectUrl`). Ba chỗ hỏng có
+// ba người sửa khác nhau, nên ba chẩn đoán tách rời: (1) không khai Configuration ID ⇒ đang xin bằng danh sách quyền; (2) Meta
+// từ chối cấu hình (không thuộc app / không hợp lệ) ⇒ việc của chủ nền tảng ở Meta; (3) cấu hình cấp THIẾU quyền bắt buộc ⇒
+// thêm quyền vào Configuration; cấp THỪA chỉ là cảnh báo. Mã Configuration ID KHÔNG ghi cứng ở đâu — luôn đọc biến môi trường
+// rồi truyền vào đây. Khách không bao giờ thấy câu gốc của Meta.
+
+export type LoginConfigMode = { mode: "CONFIG"; configId: string } | { mode: "SCOPE" };
+
+export function loginConfigMode(configId: string | null | undefined): LoginConfigMode {
+  const id = (configId ?? "").trim();
+  return id ? { mode: "CONFIG", configId: id } : { mode: "SCOPE" };
+}
+
+/** Câu NGƯỜI VẬN HÀNH: hộp thoại đang xin quyền bằng cách nào. */
+export function loginModeText(m: LoginConfigMode): string {
+  return m.mode === "CONFIG" ? `Đang xin quyền bằng Configuration ID ${m.configId} (Facebook Login for Business) — bộ quyền do cấu hình trên Meta quyết.` : "Đang xin quyền bằng danh sách quyền (không có Configuration ID) — app kiểu Doanh nghiệp có thể bỏ qua danh sách này.";
+}
+
+/** Câu Meta nhắc tới cấu hình đăng nhập (config_id không thuộc app / không hợp lệ / không tìm thấy). */
+const CONFIG_ERROR_RE = /\bconfig(uration)?(_id|\s+id)?\b/i;
+
+export type MetaConnectError = { kind: "CONFIG_REJECTED" | "OTHER"; customer: CustomerIssue; operator: string };
+
+const CONNECT_INCOMPLETE: CustomerIssue = { title: "Kết nối Facebook chưa hoàn tất", action: "Lỗi nằm ở phía nền tảng, không phải ở Page của bạn — liên hệ đội hỗ trợ; khi được báo đã sửa, bấm «Kết nối lại».", who: "SUPPORT" };
+const CONNECT_RETRY: CustomerIssue = { title: "Facebook chưa cho kết nối lúc này", action: "Thử «Kết nối lại» sau ít phút; nếu vẫn lỗi, liên hệ đội hỗ trợ.", who: "SHOP" };
+
+/**
+ * Lỗi Meta trả về ở lượt kết nối (câu `msg` của callback, hoặc `error_code` / `error_message` của hộp thoại) ⇒ câu khách (KHÔNG
+ * mang chữ nào của Meta) + câu người vận hành (mang nguyên văn, Configuration ID, App ID). Không có lỗi ⇒ `null`. HÀM THUẦN.
+ */
+export function classifyMetaConnectError(input: { message?: string | null; errorCode?: string | null; errorMessage?: string | null }, ctx: { configId?: string | null; appId?: string | null }): MetaConnectError | null {
+  const raw = [input.errorCode ? `mã ${input.errorCode}` : "", input.errorMessage ?? "", input.message ?? ""].map((s) => s.trim()).filter(Boolean).join(" · ").slice(0, 400);
+  if (!raw) return null;
+  const mode = loginConfigMode(ctx.configId);
+  const app = (ctx.appId ?? "").trim() || "(chưa khai)";
+  if (CONFIG_ERROR_RE.test(raw)) {
+    const operator =
+      mode.mode === "CONFIG"
+        ? `Configuration ID ${mode.configId} không khớp app Messenger ${app} — kiểm ở Meta: Facebook Login for Business → Configurations. Meta: ${raw}`
+        : `Meta nhắc tới cấu hình đăng nhập nhưng ERP đang xin quyền bằng danh sách quyền (không có Configuration ID) — app ${app} có thể đòi Configuration ID. Meta: ${raw}`;
+    return { kind: "CONFIG_REJECTED", customer: CONNECT_INCOMPLETE, operator };
+  }
+  return { kind: "OTHER", customer: CONNECT_RETRY, operator: `${loginModeText(mode)} Meta: ${raw}` };
+}
+
+/** Quyền Messenger KHÔNG cần mà một Configuration hay cấp kèm — chỉ cảnh báo cho người vận hành. */
+const EXCESS_RE = /^(instagram_|business_management$)/;
+
+/**
+ * Đi bằng Configuration ID mà quyền ĐƯỢC CẤP thiếu một quyền bắt buộc ⇒ lỗi ở cấu hình (người vận hành thêm vào Configuration);
+ * khách thấy câu thường + nút kết nối lại (có khi chính họ bỏ chọn). Quyền thừa chỉ thành cảnh báo cho người vận hành. Đi bằng
+ * danh sách quyền, hoặc không đọc được quyền đã cấp (`granted = null`) ⇒ không kết luận (mảng rỗng, `customer = null`). HÀM THUẦN.
+ */
+export function configPermissionAudit(granted: readonly string[] | null, mode: LoginConfigMode, required: readonly RequiredPermission[]): { missing: RequiredPermission[]; excess: string[]; operator: string[]; customer: CustomerIssue | null } {
+  if (mode.mode !== "CONFIG" || granted === null) return { missing: [], excess: [], operator: [], customer: null };
+  const missing = required.filter((p) => !granted.includes(p));
+  const excess = granted.filter((p) => EXCESS_RE.test(p));
+  const operator = [
+    ...missing.map((p) => `Cấu hình Login for Business ${mode.configId} thiếu quyền ${p} — thêm vào Configuration.`),
+    ...(excess.length ? [`Cấu hình Login for Business ${mode.configId} cấp thừa ${excess.join(", ")} — Messenger không cần, nên bỏ khỏi Configuration (chỉ cảnh báo).`] : []),
+  ];
+  const labels = missing.map((p) => PERMISSION_PLAIN_LABEL[p]);
+  const customer: CustomerIssue | null = missing.length ? { title: `Facebook chưa cấp quyền ${labels.join(", ")} cho Page`, action: "Bấm «Kết nối lại» và giữ BẬT mọi quyền Facebook hỏi; nếu vẫn thiếu, liên hệ đội hỗ trợ.", who: "SHOP" } : null;
+  return { missing, excess, operator, customer };
+}

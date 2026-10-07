@@ -1,11 +1,14 @@
 import Link from "next/link";
+import { cookies } from "next/headers";
+import { redirect } from "next/navigation";
 import { PageHeader } from "@/components/page-header";
 import { SectionCard } from "@/components/ui-bits";
 import { can, requirePermission } from "@/lib/auth/session";
+import { CHANNELS_RETURN_COOKIE, CHANNELS_ROUTE, CONNECT_RESULT_PARAMS } from "@/lib/channels/overview-shared";
 import { env } from "@/lib/env";
 import { loadPendingPages, messengerRedirectUris } from "@/lib/integrations/messenger/connect";
-import { DISCOVERY_REASONS, MESSENGER_REQUIRED_PERMISSIONS, WEBHOOK_STATES, messengerVerifyToken, type DiscoveryDiagnostic, type DiscoveryReason, type PageWebhookCheck, type WebhookState } from "@/lib/integrations/messenger/graph";
-import { DISCOVERY_GUIDE, GUIDE_ACTOR_LABEL, PERMISSION_STATUS_LABEL, WEBHOOK_GUIDE, appRoleText, permissionTable, webhookRow, type Guide } from "@/lib/integrations/messenger/permission-guide";
+import { DISCOVERY_REASONS, MESSENGER_REQUIRED_PERMISSIONS, WEBHOOK_STATES, messengerApp, messengerVerifyToken, type DiscoveryDiagnostic, type DiscoveryReason, type PageWebhookCheck, type WebhookState } from "@/lib/integrations/messenger/graph";
+import { DISCOVERY_GUIDE, GUIDE_ACTOR_LABEL, PERMISSION_STATUS_LABEL, WEBHOOK_GUIDE, appRoleText, classifyMetaConnectError, configPermissionAudit, loginConfigMode, permissionTable, webhookRow, type Guide } from "@/lib/integrations/messenger/permission-guide";
 import { getSettingJson } from "@/lib/settings";
 import { platformOperatorDenial } from "@/lib/platform-ui/module-toggle";
 import { messengerView } from "@/lib/sales-chatbot/messenger";
@@ -119,6 +122,11 @@ export default async function MessengerSettingsPage({ searchParams }: { searchPa
   const user = await requirePermission("ai_sales:view");
   const sp = await searchParams;
   const one = (k: string) => (typeof sp[k] === "string" ? (sp[k] as string) : "");
+  // Lượt «Kết nối Facebook» bắt đầu từ màn Kênh kết nối ⇒ callback (không đổi) về đây, chuyển tiếp nguyên kết quả sang màn đó.
+  if ((await cookies()).get(CHANNELS_RETURN_COOKIE)?.value === "1" && (one("chon") || one("ok") || one("loi"))) {
+    const q = new URLSearchParams(CONNECT_RESULT_PARAMS.filter((k) => one(k)).map((k) => [k, one(k)]));
+    redirect(`${CHANNELS_ROUTE}?${q}`);
+  }
   const manage = can(user, "settings:manage");
   const view = await messengerView();
   const canConfig = can(user, SALES_CHATBOT_MANAGE);
@@ -128,9 +136,14 @@ export default async function MessengerSettingsPage({ searchParams }: { searchPa
   const lydo = one("lydo");
   const reasonQ = isReason(lydo) ? lydo : null;
   const ct = one("ct").slice(0, 300);
+  // Câu gốc của Meta (`msg`) chỉ cho người vận hành; người khác thấy câu đã ánh xạ (lỗi cấu hình đăng nhập ⇒ việc của nền tảng).
+  const loginMode = loginConfigMode(env.oauth.facebookMessengerLoginConfigId);
+  const metaErr = one("loi") === "fb" ? classifyMetaConnectError({ message: one("msg") || "Facebook từ chối." }, { configId: loginMode.mode === "CONFIG" ? loginMode.configId : null, appId: messengerApp()?.appId ?? null }) : null;
   const error = one("loi")
     ? one("loi") === "fb"
-      ? one("msg") || "Facebook từ chối."
+      ? metaErr
+        ? `${metaErr.customer.title} — ${metaErr.customer.action}`
+        : "Facebook chưa cho kết nối lúc này."
       : one("loi") === "khongpage" && reasonQ
         ? `${DISCOVERY_GUIDE[reasonQ].title}${ct ? ` — ${ct}` : ""}. Xem hướng xử lý bên dưới.`
         : (ERROR_TEXT[one("loi")] ?? "Kết nối chưa xong.")
@@ -140,6 +153,8 @@ export default async function MessengerSettingsPage({ searchParams }: { searchPa
   const storedReason = stored && typeof stored.reason === "string" && isReason(stored.reason) ? stored.reason : null;
   const diagReason = reasonQ ?? storedReason;
   const showDiag = Boolean(stored && (diagReason || one("loi") === "khongpage"));
+  const configAudit = configPermissionAudit(stored && Array.isArray(stored.granted) ? strs(stored.granted) : null, loginMode, MESSENGER_REQUIRED_PERMISSIONS);
+  const operatorErrorLines = operator ? [...(metaErr ? [metaErr.operator] : []), ...(one("loi") ? configAudit.operator : [])] : [];
   const webhookParam = one("webhook");
   const webhookQ = isWebhookState(webhookParam) && webhookParam !== "OK" ? webhookParam : null;
   const whStored = manage ? await getSettingJson<StoredWebhookCheck | null>("messenger.lastWebhookCheck", null) : null;
@@ -153,6 +168,15 @@ export default async function MessengerSettingsPage({ searchParams }: { searchPa
     <div className="space-y-5">
       <PageHeader eyebrow="AI · Chatbot bán hàng" title="Messenger trực tiếp" description="Bot trả lời tin nhắn fanpage và Instagram — không cần Pancake" />
       {error ? <p className="rounded-md bg-rose-50 px-3 py-2 text-sm text-rose-800 dark:bg-rose-950/60 dark:text-rose-200">{error}</p> : null}
+      {operatorErrorLines.length ? (
+        <ul className="space-y-0.5 rounded-md border border-dashed px-3 py-2 text-xs text-muted-foreground" data-testid="messenger-operator-error">
+          {operatorErrorLines.map((t) => (
+            <li key={t} className="break-words">
+              Người vận hành: {t}
+            </li>
+          ))}
+        </ul>
+      ) : null}
       {one("ok") ? <p className="rounded-md bg-emerald-50 px-3 py-2 text-sm text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-200">Đã nối page — nhắn thử một tin vào page để thấy bot trả lời.</p> : null}
       {webhookQ ? (
         <div className="space-y-1 rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:bg-amber-950/60 dark:text-amber-200" data-testid="messenger-webhook-warning">
@@ -197,6 +221,13 @@ export default async function MessengerSettingsPage({ searchParams }: { searchPa
 
       <SectionCard title="Lưu ý">
         <ul className="list-disc space-y-1 pl-5 text-sm text-muted-foreground">
+          <li>
+            Xem MỌI Page của cửa hàng (Facebook trực tiếp, qua Pancake, Zalo) cùng sức khoẻ ở{" "}
+            <Link href={CHANNELS_ROUTE} className="text-primary underline" data-testid="messenger-channels-link">
+              Kênh kết nối
+            </Link>
+            .
+          </li>
           <li>Bot dùng chung cấu hình, sản phẩm, câu mẫu, follow-up của <Link href="/ai/sales-chatbot" className="text-primary underline">Chatbot bán hàng</Link>.</li>
           <li>Nhân viên trả lời trong Hộp thư Meta Business Suite ⇒ bot tự nhường 30 phút cho hội thoại đó.</li>
           <li>Mỗi page chỉ nhận tin qua MỘT đường: page đang chạy qua «Fanpage qua Pancake» không nối thêm ở đây được (và ngược lại) — để khách không nhận hai câu trả lời.</li>

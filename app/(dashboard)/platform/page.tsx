@@ -26,6 +26,7 @@ import { signupModeState } from "@/lib/onboarding/signup-mode";
 import { platformOperatorDenial } from "@/lib/platform-ui/module-toggle";
 import { env } from "@/lib/env";
 import { MESSENGER_FIELDS, auditRequestedScopes, messengerApp, messengerConnectUrl, messengerVerifyToken, messengerWebhookSecrets, scopesOfConnectUrl } from "@/lib/integrations/messenger/graph";
+import { loginConfigMode, loginModeText } from "@/lib/integrations/messenger/permission-guide";
 import { messengerRedirectUris } from "@/lib/integrations/messenger/connect";
 import { PILOT_STAGE_LABEL } from "@/lib/constants/pilot";
 import { listOrgSupportSummaries } from "@/lib/platform/support";
@@ -161,7 +162,9 @@ export default async function PlatformPage({ searchParams }: { searchParams: Pro
           <dt className="text-muted-foreground">Chữ ký được chấp nhận</dt>
           <dd className="text-xs">{messengerWebhookSecrets().length} app secret</dd>
           <dt className="text-muted-foreground">Nối page dùng app</dt>
-          <dd className="text-xs">{messengerApp()?.source === "MESSENGER_APP" ? "App Messenger riêng" : messengerApp() ? "App đăng nhập (chưa khai đủ app Messenger)" : "Chưa khai app nào"}{env.oauth.facebookMessengerLoginConfigId ? " · hộp thoại theo Configuration ID (Login for Business)" : " · hộp thoại theo danh sách quyền (scope)"}</dd>
+          <dd className="text-xs">{messengerApp()?.source === "MESSENGER_APP" ? "App Messenger riêng" : messengerApp() ? "App đăng nhập (chưa khai đủ app Messenger)" : "Chưa khai app nào"}</dd>
+          <dt className="text-muted-foreground">Cách xin quyền</dt>
+          <dd className="text-xs" data-testid="platform-messenger-login-mode">{loginModeText(loginConfigMode(env.oauth.facebookMessengerLoginConfigId))}</dd>
           <dt className="text-muted-foreground">Quyền hộp thoại «Kết nối Facebook Page» xin</dt>
           <dd className="text-xs" data-testid="platform-messenger-scopes">
             <MessengerScopeAudit />
@@ -520,7 +523,7 @@ function MessengerScopeAudit() {
   const app = messengerApp();
   if (!app) return <>Chưa khai app nào — chưa dựng được hộp thoại.</>;
   const scopes = scopesOfConnectUrl(messengerConnectUrl(app, messengerRedirectUris()[0] ?? `${env.appUrl}/api/connect/messenger/callback`, "chan-doan", env.oauth.facebookMessengerLoginConfigId));
-  if (scopes === null) return <>Theo Configuration ID {env.oauth.facebookMessengerLoginConfigId.trim()} — bộ quyền do cấu hình Login for Business trên Meta quyết (kiểm ở app Meta).</>;
+  if (scopes === null) return <>{loginModeText(loginConfigMode(env.oauth.facebookMessengerLoginConfigId))} Quyền THẬT được cấp đọc ở «Chẩn đoán lần kết nối gần nhất» của từng cửa hàng (thiếu quyền nào là thiếu trong Configuration).</>;
   const a = auditRequestedScopes(scopes, "FACEBOOK_MESSENGER");
   const ok = !a.missing.length && !a.excess.length;
   return (
