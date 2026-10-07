@@ -3,7 +3,7 @@
   "mission_id": "returning-hardening",
   "title": "Khách cũ: đơn nháp người lạ không thành «lần trước» của chủ thật; giá đại lý chỉ cho đúng chủ hồ sơ",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -28,9 +28,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-07T23:12:51.520Z",
-  "updated_at": "2026-10-07T23:13:15.179Z",
+  "updated_at": "2026-10-07T23:47:21.221Z",
   "last_heartbeat": "2026-10-07T23:12:59.942Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#651 → 08785a6f1863c1dd7fb4b86484f555bce265cba6"
+  },
   "handoff": {
     "branch": "fix/returning-hardening",
     "sha": "17c28bd18c45e42e725e77fa87c2a2df7ea68471",
