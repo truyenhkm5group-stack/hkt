@@ -264,3 +264,4 @@
 {"at":"2026-10-07T03:21:11.121Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"messenger-oauth-scopes","detail":"#628 @ f50dfb2f531d → 6c13fc7c1250 (MERGE_NOW · MEDIUM · gates success)"}
 {"at":"2026-10-07T03:22:08.843Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DONE","mission":"saas-d-pricing-overage","detail":"PR #627 (chủ shop gộp) 64c90acb; deploy run 37564156345; hậu kiểm ĐẠT; production: 8/8 tổ chức ghim legacy, V1 v1-2026-10 gieo đúng giá, 0 job hỏng"}
 {"at":"2026-10-07T03:22:38.462Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DEPLOY_DISPATCHED","detail":"6c13fc7c1250 · run 37566448070 https://github.com/truyenhkm5group-stack/hkt/actions/runs/37566448070"}
+{"at":"2026-10-07T03:27:03.649Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"tech-control-plane-workers","detail":"#629 @ 8d72f5656fbb → 1393caf057f4 (MERGE_ISOLATED · HIGH · gates success)"}
