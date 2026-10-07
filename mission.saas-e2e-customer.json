@@ -1,0 +1,37 @@
+{
+  "schema": 1,
+  "mission_id": "saas-e2e-customer",
+  "title": "E2E như khách ngoài sau 4 PR SaaS (đăng ký → hộp thư → kênh → AI trả lời → tiếp quản → đơn → hạn mức)",
+  "business_goal": "Chứng minh một khách trả tiền đầu tiên đi trọn đường không cần người vận hành",
+  "status": "BACKLOG",
+  "priority": "P0",
+  "risk": "MEDIUM",
+  "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "worker": null,
+  "worktree": null,
+  "branch": null,
+  "base_sha": null,
+  "domains": [
+    "saas",
+    "qa"
+  ],
+  "owned_paths": [
+    "docs/saas/e2e/**"
+  ],
+  "dependencies": [
+    "saas-l2-customer-shell",
+    "saas-l3-inbox",
+    "saas-l5-billing-trial"
+  ],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-07T17:23:57.164Z",
+  "updated_at": "2026-10-07T17:23:57.164Z",
+  "last_heartbeat": "2026-10-07T17:23:57.164Z",
+  "definition_of_done": [
+    "Kịch bản E2E chạy trên production với workspace thử hs-thien-nga-test",
+    "Mỗi bước có bằng chứng (ảnh/log)",
+    "Danh sách chặn trước khách trả tiền đầu tiên"
+  ]
+}
