@@ -261,6 +261,7 @@ npm run tech:worker                      # chạy mãi
 | Chỉ việc tài liệu | worker khai đúng một năng lực `write-docs` |
 | Không đụng production | worker không giữ secret production; deploy vẫn do người / Delivery Controller; năng lực deploy / migration `autonomous = false` |
 | Không lách nhánh bảo vệ | PR mở bằng bot `agent-open-pr.yml`, gộp qua `gates / gates` + 1 người duyệt |
+| CI đỏ trên PR của worker | NGƯỜI sửa tay. Việc `ci-debug` máy tự tạo là loại BUGFIX ⇒ chính sách R1 ⇒ KHÔNG được nhận dưới trần R0; nó nằm SPEC_READY và việc gốc đứng ở REVIEW (không tự FAILED, không chi tiền). Huỷ việc `ci-debug` đó trên `/tech` sau khi sửa tay |
 
 Bất biến đã khoá bằng bài kiểm (`tests/tech-worker.test.ts`): hai worker không nhận trùng · phụ thuộc chưa DONE /
 R2 / sứ mệnh hoặc mục tiêu không chạy ⇒ không bao giờ nhận, và bản TypeScript `claimBlockers` nói đúng điều câu SQL
