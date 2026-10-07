@@ -16,7 +16,8 @@
  * Mốc thời gian đi theo ĐỒNG HỒ THẬT (luật 50): mọi mốc tính từ `new Date()` lúc chạy.
  */
 import assert from "node:assert/strict";
-import { rmSync } from "node:fs";
+import { readFileSync, rmSync } from "node:fs";
+import path from "node:path";
 import { and, eq } from "drizzle-orm";
 import { getDb, getPlatformDb, organizationDatabaseUrl, schema } from "@/db";
 import type { AiBlock, AiProvider, AiRequest, AiResponse } from "@/lib/ai/provider";
@@ -28,7 +29,7 @@ import { invalidateOrganizations } from "@/lib/platform/organizations";
 import { provisionOrganization } from "@/lib/platform/provision";
 import { DEFAULT_SALES_CHATBOT_CONFIG, SALES_CHATBOT_LIMITS, SALES_CHATBOT_SETTING_KEY } from "@/lib/sales-chatbot/config";
 import { chatTurn, cycleStartTurns, loadSalesChatbotConfig, openConversation, POST_ORDER_HANDOFF_MS, setSalesChatProviderForTests } from "@/lib/sales-chatbot/engine";
-import { addressGrounded, decideOrderSync, loadOrderSyncConfig, orderSyncPrompt, parseOrderSyncReply, phonesInText, reorderConfirmText, reorderTotalVisible, runFanpageOrderSync, saveOrderSyncConfig, syncCutoff, syncFanpageThreadWhenQuiet, type OrderSyncReply, type SyncMessage } from "@/lib/sales-chatbot/order-sync";
+import { addressGrounded, decideOrderSync, loadOrderSyncConfig, orderSyncPrompt, parseOrderSyncReply, phonesInText, orderSyncPricing, reorderConfirmText, runFanpageOrderSync, saveOrderSyncConfig, syncCutoff, syncFanpageThreadWhenQuiet, type OrderSyncReply, type SyncMessage } from "@/lib/sales-chatbot/order-sync";
 import { ORDER_SYNC_CHANNEL, ORDER_SYNC_LIMITS, ORDER_SYNC_SETTING_KEY, orderGroupText, parseOrderSyncConfig, type OrderSyncThreadState } from "@/lib/sales-chatbot/order-sync-shared";
 import type { ReturningCustomer } from "@/lib/sales-chatbot/returning";
 import type { ChatState } from "@/lib/sales-chatbot/tools";
@@ -150,18 +151,27 @@ function testPure() {
   assert.ok(re.kind === "CREATE" && re.phoneFrom === "PREVIOUS" && re.addressFrom === "PREVIOUS" && re.agreement.id === "r1", JSON.stringify(re));
   const conf = reorderConfirmText({ lines: [{ name: "Chả cá thu (1kg)", quantity: 1 }], total: 280_000, shippingFee: null, address: "12 Hàng Bạc, Hoàn Kiếm, Thành phố Hà Nội", phone: "0912345678" });
   for (const k of ["Chả cá thu (1kg) × 1", "280.000", "+ phí ship", "12 Hàng Bạc", "0912345678"]) assert.ok(conf.includes(k), `tin xác nhận lại thiếu «${k}»: ${conf}`);
-  // Tổng theo bảng giá RIÊNG của hồ sơ khớp SĐT chỉ nhắn ra khi khớp mã Facebook (review bảo mật #647 M-a) — giá của đơn không đổi.
+  // Bảng giá RIÊNG của hồ sơ khớp SĐT người nhận chỉ khi người chat là CHÍNH chủ hồ sơ (review bảo mật #647 vòng 4, LOW-1/LOW-2):
+  // khớp mã Facebook ĐÚNG hồ sơ đó, hoặc bot đã xác minh đúng hồ sơ đó. Không thì bảng MẶC ĐỊNH — cùng luật với bot.
+  const fb = (customerId: string | null) => ({ trust: "FB_ID" as const, customerId });
   assert.deepEqual(
     [
-      reorderTotalVisible({ wholesalePricing: false, trust: "THREAD", hasCustomerList: true }),
-      reorderTotalVisible({ wholesalePricing: true, trust: "THREAD", hasCustomerList: false }),
-      reorderTotalVisible({ wholesalePricing: true, trust: "THREAD", hasCustomerList: true }),
-      reorderTotalVisible({ wholesalePricing: true, trust: "FB_ID", hasCustomerList: true }),
-      reorderTotalVisible({ wholesalePricing: true, trust: null, hasCustomerList: true }),
-    ],
-    [true, true, false, true, false],
-    "giá lẻ / không bảng riêng / mã Facebook ⇒ nêu tổng; SĐT tự gõ + bảng riêng ⇒ không",
+      orderSyncPricing({ wholesalePricing: false, custId: "c1", returning: fb("c1"), stateVerifiedId: null }),
+      orderSyncPricing({ wholesalePricing: true, custId: "c1", returning: fb("c1"), stateVerifiedId: null }),
+      orderSyncPricing({ wholesalePricing: true, custId: "c1", returning: fb("c2"), stateVerifiedId: null }),
+      orderSyncPricing({ wholesalePricing: true, custId: "c1", returning: { trust: "THREAD", customerId: "c1" }, stateVerifiedId: null }),
+      orderSyncPricing({ wholesalePricing: true, custId: "c1", returning: { trust: "PHONE", customerId: "c1" }, stateVerifiedId: null }),
+      orderSyncPricing({ wholesalePricing: true, custId: "c1", returning: null, stateVerifiedId: "c1" }),
+      orderSyncPricing({ wholesalePricing: true, custId: "c1", returning: null, stateVerifiedId: "c2" }),
+    ].map((p) => `${p.mode}:${p.priceCustomerId ?? "-"}`),
+    ["RETAIL:-", "PRICE_BOOK:c1", "DEFAULT_BOOK:-", "DEFAULT_BOOK:-", "DEFAULT_BOOK:-", "PRICE_BOOK:c1", "DEFAULT_BOOK:-"],
+    "giá lẻ khi tắt giá sỉ · mã Facebook đúng hồ sơ / bot đã xác minh đúng hồ sơ ⇒ bảng riêng · còn lại ⇒ bảng mặc định",
   );
+  // Đường ghi đơn dùng ĐÚNG kết quả ấy cho cả giá dòng lẫn chế độ giá của lõi đơn (quét mã nguồn — không đường tắt theo `cust.id`).
+  const syncSrc = readFileSync(path.join(process.cwd(), "lib/sales-chatbot/order-sync.ts"), "utf8");
+  assert.match(syncSrc, /const priced = await priceLines\(decision\.lines, a\.botCfg, pricing\.priceCustomerId, /);
+  assert.match(syncSrc, /\}, \{ pricing: pricing\.mode, idempotencyKey:/);
+  assert.ok(!/priceLines\(decision\.lines, a\.botCfg, cust\.id/.test(syncSrc), "không còn định giá theo hồ sơ khớp SĐT");
   const hidden = reorderConfirmText({ lines: [{ name: "Chả cá thu (1kg)", quantity: 1 }], total: null, shippingFee: 25_000, address: "12 Hàng Bạc", phone: "0912345678" });
   assert.ok(!hidden.includes("₫") && !/\d{2,3}\.\d{3}/.test(hidden) && hidden.includes("nhân viên shop báo lại") && hidden.includes("Chả cá thu (1kg) × 1"), `không nêu tổng: ${hidden}`);
   assert.equal(decideOrderSync({ ...base, reply: reply({ kind: "CHANGE", summary: "thêm 1 hộp" }) }).kind, "CHANGE");

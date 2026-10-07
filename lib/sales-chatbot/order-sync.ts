@@ -59,7 +59,7 @@ import {
   type OrderSyncOutcome,
   type OrderSyncThreadState,
 } from "@/lib/sales-chatbot/order-sync-shared";
-import { fetchPancakeThreadProfile, findReturningCustomer, normalizeVnPhone, RETURNING_LIMITS, type PancakeThreadProfile, type PriorMessage, type ReturningCustomer, type ReturningTrust, type ThreadReadLimits } from "@/lib/sales-chatbot/returning";
+import { fetchPancakeThreadProfile, findReturningCustomer, normalizeVnPhone, RETURNING_LIMITS, type PancakeThreadProfile, type PriorMessage, type ReturningCustomer, type ThreadReadLimits } from "@/lib/sales-chatbot/returning";
 import { priceBooksFor } from "@/lib/queries/price-lists";
 import { SALES_CHATBOT_MANAGE } from "@/lib/sales-chatbot/settings";
 import { foldVi } from "@/lib/sales-chatbot/text";
@@ -257,12 +257,16 @@ export function decideOrderSync(input: {
 }
 
 /**
- * Tin xác nhận đơn đặt lại được nêu TỔNG TIỀN không (review bảo mật #647 M-a). Shop bật giá sỉ và hồ sơ khớp SĐT người nhận có
- * BẢNG GIÁ RIÊNG ⇒ tổng tính theo bảng ấy — chỉ nhắn ra khi danh tính đã XÁC MINH (mã Facebook): mức THREAD là SĐT người chat tự
- * gõ, có thể là SĐT đại lý của người khác (đơn một dòng × 1 là lộ đơn giá sỉ). Giá của ĐƠN không đổi. HÀM THUẦN.
+ * Bảng giá của đơn ghi từ hội thoại (review bảo mật #647 vòng 4, LOW-1 + LOW-2): bảng giá RIÊNG của hồ sơ khớp SĐT người nhận
+ * CHỈ khi người chat là CHÍNH chủ hồ sơ ấy — khớp mã Facebook (FB_ID) ĐÚNG hồ sơ đó, hoặc bot đã xác minh trong hội thoại
+ * (`state.customer.verifiedIdentity` của đúng hồ sơ). Không thì bảng MẶC ĐỊNH: SĐT người chat tự gõ có thể là SĐT đại lý của người
+ * khác — định giá theo bảng riêng là lên đơn giá đại lý cho người lạ (đơn tự xác nhận đi thẳng) và nhắn ra tổng giá sỉ. Cùng luật
+ * với bot (`agentOrderOpts`). Shop không bật giá sỉ ⇒ giá lẻ như cũ. HÀM THUẦN.
  */
-export function reorderTotalVisible(o: { wholesalePricing: boolean; trust: ReturningTrust | null; hasCustomerList: boolean }): boolean {
-  return !o.wholesalePricing || !o.hasCustomerList || o.trust === "FB_ID";
+export function orderSyncPricing(o: { wholesalePricing: boolean; custId: string; returning: Pick<ReturningCustomer, "trust" | "customerId"> | null; stateVerifiedId: string | null }): { mode: "RETAIL" | "PRICE_BOOK" | "DEFAULT_BOOK"; priceCustomerId: string | null } {
+  if (!o.wholesalePricing) return { mode: "RETAIL", priceCustomerId: null };
+  const owner = (o.returning?.trust === "FB_ID" && o.returning.customerId === o.custId) || o.stateVerifiedId === o.custId;
+  return owner ? { mode: "PRICE_BOOK", priceCustomerId: o.custId } : { mode: "DEFAULT_BOOK", priceCustomerId: null };
 }
 
 /** Tin xác nhận lại đơn đặt lại cho khách cũ — món × SL, tiền (`null` ⇒ nhân viên báo), địa chỉ + SĐT sẽ giao. HÀM THUẦN. */
@@ -694,13 +698,17 @@ async function syncThread(a: {
   const guardFrom = new Date(new Date(ag.at).getTime() - ORDER_SYNC_LIMITS.recentOrderGuardMinutes * 60_000);
   const [recent] = await db.select({ id: o.id, at: o.insertedAt }).from(o).where(and(eq(o.customerId, cust.id), ne(o.stage, "DELETED"), gte(o.insertedAt, guardFrom))).orderBy(desc(o.insertedAt)).limit(1);
   if (recent) return { outcome: "SKIPPED", result: `Khách đã có đơn #${manualOrderShortCode(recent.id)} ghi lúc ${formatDateTime(recent.at)} — không ghi thêm` };
-  const priced = await priceLines(decision.lines, a.botCfg, cust.id, [decision.recipient.address, decision.recipient.province].join(", "));
+  const pricing = orderSyncPricing({ wholesalePricing: a.botCfg.wholesalePricing, custId: cust.id, returning, stateVerifiedId: st.customer?.verifiedIdentity === true ? st.customer.id : null });
+  const priced = await priceLines(decision.lines, a.botCfg, pricing.priceCustomerId, [decision.recipient.address, decision.recipient.province].join(", "));
+  // Hồ sơ có bảng giá riêng mà người chat chưa xác minh là chủ hồ sơ ⇒ nói rõ cho người kiểm đơn (giá đại lý là việc của người).
+  const privateSkipped = pricing.mode === "DEFAULT_BOOK" && Boolean((await priceBooksFor(cust.id)).customerList);
   if (priced.missing.length || priced.unpriced.length || !priced.lines.length) return { outcome: "SKIPPED", result: `Món chưa có giá / thôi bán (${[...priced.unpriced, ...priced.missing].join(", ")}) — nhân viên lên đơn tay` };
   const notes = [
     "Ghi tự động từ hội thoại fanpage (nhân viên chốt) — KIỂM rồi chốt đơn.",
     `Lời chốt ${formatDateTime(ag.at)} (${ag.from === "customer" ? "khách" : "shop"}): «${ag.text.slice(0, 200)}»`,
     decision.phoneFrom === "PREVIOUS" || decision.addressFrom === "PREVIOUS" ? `${[decision.phoneFrom === "PREVIOUS" ? "SĐT" : "", decision.addressFrom === "PREVIOUS" ? "địa chỉ" : ""].filter(Boolean).join(" + ")} lấy từ ĐƠN TRƯỚC của khách (khách không gửi lại) — xác nhận với khách trước khi giao.` : "",
     decision.deliveryNote,
+    privateSkipped ? "Giá theo bảng MẶC ĐỊNH: hồ sơ khách có bảng giá riêng nhưng người chat chưa xác minh là chủ hồ sơ (mã Facebook) — đúng là đại lý thì nhân viên áp bảng giá riêng trước khi chốt." : "",
     priced.shippingFee === null ? "Phí ship: CHƯA BÁO — cập nhật trước khi giao." : priced.ship.kind === "FREE_IF_AREA" ? "Miễn ship NẾU địa chỉ thuộc khu vực miễn ship — kiểm địa chỉ trước khi giao." : "",
     marker,
   ].filter((x) => x.trim());
@@ -713,7 +721,7 @@ async function syncThread(a: {
     note: notes.join("\n").slice(0, 2000),
     channel: ORDER_SYNC_CHANNEL,
     recipient: decision.recipient,
-  }, { pricing: a.botCfg.wholesalePricing ? "PRICE_BOOK" : "RETAIL", idempotencyKey: `order-sync:${conv.id}:${ag.id || ag.at}`, adId: await chatOrderAdId(conv.id, now) });
+  }, { pricing: pricing.mode, idempotencyKey: `order-sync:${conv.id}:${ag.id || ag.at}`, adId: await chatOrderAdId(conv.id, now) });
   if (!created.ok) return { outcome: "SKIPPED", result: `Không ghi được đơn: ${"errors" in created ? created.errors.map((e) => e.message).join(" · ") : "lỗi"}` };
   const code = `#${manualOrderShortCode(created.id)}`;
   // Tổ chức bật «đơn đủ thông tin = đã xác nhận» ⇒ lõi ghi đơn đã ghi thẳng «Đã xác nhận».
@@ -731,8 +739,8 @@ async function syncThread(a: {
   // Khách cũ đặt lại theo thông tin lần trước (chủ shop HSLC 05/10/2026: «xác nhận thông tin đơn hàng lại cho khách và tính là
   // chốt đơn mới đã xác nhận») ⇒ máy nhắn lại khách đúng món · tiền · địa chỉ · SĐT sẽ giao, để khách thấy và sửa nếu đã đổi.
   const reorder = decision.phoneFrom === "PREVIOUS" || decision.addressFrom === "PREVIOUS";
-  const showTotal = reorderTotalVisible({ wholesalePricing: a.botCfg.wholesalePricing, trust: returning?.trust ?? null, hasCustomerList: reorder && a.botCfg.wholesalePricing ? Boolean((await priceBooksFor(cust.id)).customerList) : false });
-  const told = reorder ? await a.src.sendText(a.threadId, reorderConfirmText({ lines: priced.lines, total: showTotal ? total : null, shippingFee: priced.shippingFee, address: saved?.full || [decision.recipient.address, decision.recipient.province].filter(Boolean).join(", "), phone: decision.recipient.phone })).catch(() => ({ ok: false as const, error: "lỗi gửi" })) : null;
+  // Tổng tính theo ĐÚNG bảng giá của người mua (`orderSyncPricing`) — người chưa xác minh chỉ thấy giá bảng mặc định.
+  const told = reorder ? await a.src.sendText(a.threadId, reorderConfirmText({ lines: priced.lines, total, shippingFee: priced.shippingFee, address: saved?.full || [decision.recipient.address, decision.recipient.province].filter(Boolean).join(", "), phone: decision.recipient.phone })).catch(() => ({ ok: false as const, error: "lỗi gửi" })) : null;
   const fromPrevious = reorder ? `${[decision.phoneFrom === "PREVIOUS" ? "SĐT" : "", decision.addressFrom === "PREVIOUS" ? "Địa chỉ" : ""].filter(Boolean).join(" + ")} theo đơn trước — ${told?.ok ? "đã nhắn xác nhận lại cho khách" : "CHƯA nhắn được cho khách, xác nhận với khách"}` : "";
   const groupText = orderGroupText({
     header: confirmed ? "🧾 ĐƠN MỚI — nhân viên chốt trên fanpage (đã tính đơn)" : "🧾 ĐƠN MỚI — nhân viên chốt trên fanpage (máy ghi, cần kiểm)",

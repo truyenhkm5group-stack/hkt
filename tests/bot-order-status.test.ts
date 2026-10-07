@@ -117,6 +117,13 @@ async function run() {
     assert.ok(r1.v.orders.some((o) => o.tracking_code === null && /chưa có thông tin vận chuyển/.test(o.status)), "đơn chưa có vận đơn ⇒ không khẳng định «chưa giao»");
     assert.ok(!r1.content.includes("BTD100009") && r1.v.orders.every((o) => o.total === undefined), "đơn của khách khác không lộ; không nêu số tiền");
     assert.equal(r1.requireHuman, undefined, "không đơn nào cần người ⇒ bot tự trả lời");
+    // Đơn Pancake: mã HIỂN THỊ (khách thấy trên POS / tin xác nhận), không phải id nội bộ; thiếu mã hiển thị ⇒ id (review #645, L2).
+    const cP = await conv();
+    await order("7712345678901234567", cP, 15, { displayId: 4321 });
+    await order("7712345678901234999", cP, 14);
+    const codes = (await ask(cP)).v.orders.map((x) => x.order_code).sort();
+    assert.deepEqual(codes, ["#4321", "#7712345678901234999"], `mã đơn Pancake: ${JSON.stringify(codes)}`);
+    assert.deepEqual(r1.v.orders.map((x) => x.order_code).sort(), ["#BTD-O1", "#BTD-O2", "#BTD-O3"], "đơn ERP giữ mã ngắn như cũ");
 
     // CRITICAL (review 08/10/2026): hội thoại mới mang `state.customer.id` của khách A (vd kẻ gian gõ SĐT của A ⇒ create_customer
     // trả id của A) ⇒ KHÔNG đọc được đơn nào của A.
