@@ -32,18 +32,18 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-07T10:36:55.036Z",
-  "updated_at": "2026-10-07T16:46:07.897Z",
-  "last_heartbeat": "2026-10-07T16:46:07.897Z",
+  "updated_at": "2026-10-07T18:07:32.196Z",
+  "last_heartbeat": "2026-10-07T18:07:32.196Z",
   "definition_of_done": [],
   "handoff": {
     "branch": "feat/saas-l2-customer-shell",
-    "sha": "f99919f8602a847825acddca05aade6ecd057b7b",
-    "at": "2026-10-07T16:46:07.897Z",
+    "sha": "4ff55959877cf528120e9de4258ab4741d98b159",
+    "at": "2026-10-07T18:07:32.196Z",
     "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
     "title": "Vỏ app khách Chốt Đơn: 8 mục, mặc định hộp thư, mobile",
     "summary": "",
     "tests": [
-      "CI đỏ ở e470cc02 vì smoke-coverage (mục /ai/channels của vỏ chưa có lý do smoke) — sửa: SHELL_PHAN_NHOM thay tuyến cũ; smoke-coverage + ui-consistency + navigation chạy riêng ĐẠT"
+      "gates xanh ở 4ff55959877cf528120e9de4258ab4741d98b159 (gộp main 48911ba4: chỉ thêm bản vá bài kiểm nhất quán #643)"
     ]
   }
 }
