@@ -45,18 +45,18 @@
     "0231": "2026-10-07T06:14:43.265Z"
   },
   "created_at": "2026-10-07T06:14:32.231Z",
-  "updated_at": "2026-10-07T07:33:58.241Z",
-  "last_heartbeat": "2026-10-07T07:30:43.116Z",
+  "updated_at": "2026-10-07T08:29:41.991Z",
+  "last_heartbeat": "2026-10-07T08:29:41.991Z",
   "definition_of_done": [],
   "handoff": {
     "branch": "feat/tech-worker-onboarding",
-    "sha": "69d6ee5e8958ab36d3da1e1ecce473439b5a7f4a",
-    "at": "2026-10-07T07:30:43.116Z",
+    "sha": "a1971b9a97ef877e9df1244c5d13da364cd5e98f",
+    "at": "2026-10-07T08:29:41.991Z",
     "actor": "DESKTOP-56TH98Y:wt-worker-onboard",
     "title": "Cài worker /tech một nút cho chủ shop không kỹ thuật",
     "summary": "",
     "tests": [
-      "typecheck sạch · eslint --max-warnings=0 tệp sửa + npm run lint sạch · npm test SAU commit: TẤT CẢ KIỂM THỬ ĐẠT (lượt 4; lượt 1 tiến trình thoát im lặng giữa creative-manual-gen — nhất thời, lượt 2–3 lộ 2 bộ gác tĩnh access-control / platform-isolation, đã khai) · npm run build đạt · đột biến 6/6 đỏ · bộ cài sinh ra qua PowerShell Parser 0 lỗi, vỏ batch chạy thật mã thoát đúng"
+      "sửa review bảo mật PR #631: typecheck · eslint tệp sửa · npm run lint sạch · npm test sau commit TẤT CẢ KIỂM THỬ ĐẠT · build đạt · git thật trên kho tạm (hook không thấy token, cấu hình nguy hiểm ⇒ từ chối, cây người không bị đụng) · đột biến 10/10 đỏ"
     ]
   }
 }
