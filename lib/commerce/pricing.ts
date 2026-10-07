@@ -8,13 +8,15 @@
  * Hai chế độ (khai bởi lớp gọi, không đoán):
  *  · `RETAIL` — giá lẻ của mẫu mã (`product_variants.retail_price`; 0 / thiếu ⇒ CHƯA CÓ GIÁ, không phải 0 ₫).
  *  · `PRICE_BOOK` — bảng giá riêng của khách → bảng mặc định → giá lẻ (`quoteUnitPrice`, cùng hàm với form đơn tay).
+ *  · `DEFAULT_BOOK` — bảng mặc định → giá lẻ, KHÔNG bảng riêng của khách: đường agent khi danh tính khách CHƯA xác minh (khớp hồ
+ *    sơ qua SĐT gõ tay — ai cũng gõ được SĐT của khách sỉ để lấy giá sỉ của họ; review bảo mật 08/10/2026).
  */
 import { inArray } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { quoteUnitPrice, type PriceListBook } from "@/lib/constants/price-lists";
 import { priceBooksFor } from "@/lib/queries/price-lists";
 
-export type AgentPricingMode = "RETAIL" | "PRICE_BOOK";
+export type AgentPricingMode = "RETAIL" | "PRICE_BOOK" | "DEFAULT_BOOK";
 export type PriceBooks = { customerList: PriceListBook | null; defaultList: PriceListBook | null } | null;
 
 /** Đơn giá của MỘT dòng — HÀM THUẦN. `retailPrice` ≤ 0 / null ⇒ chưa có giá lẻ. `books = null` ⇒ chế độ giá lẻ. */
@@ -26,7 +28,7 @@ export function agentUnitPrice(input: { variantId: string; quantity: number; ret
 
 /** Bảng giá cần cho một chế độ — `null` ở chế độ giá lẻ (không đọc CSDL). */
 export async function priceBooksForMode(mode: AgentPricingMode, customerId: string | null): Promise<PriceBooks> {
-  return mode === "PRICE_BOOK" ? priceBooksFor(customerId) : null;
+  return mode === "PRICE_BOOK" ? priceBooksFor(customerId) : mode === "DEFAULT_BOOK" ? priceBooksFor(null) : null;
 }
 
 /** Đơn giá MÁY CHỦ tính cho từng dòng (mẫu mã không có ⇒ không có trong Map). */
