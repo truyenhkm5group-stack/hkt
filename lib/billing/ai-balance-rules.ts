@@ -199,3 +199,35 @@ export const TOPUP_STATUS_LABEL: Record<TopupIntentStatus, string> = {
   EXPIRED: "Hết hạn",
   CANCELLED: "Đã huỷ",
 };
+
+// ─────────────────────────── Kinh tế đơn vị (người vận hành) ───────────────────────────
+
+/**
+ * Sổ cái Số dư AI của MỘT tổ chức trong một kỳ, cho khung doanh thu · chi phí · biên ở /platform. Ba loại tiền KHÔNG lẫn:
+ *  · `usageCashVnd` — tiền THẬT khách đã dùng cho AI = doanh thu ghi nhận lúc dùng; `reversalCashVnd` — khoản trừ oan đã ĐẢO
+ *    (loại điều chỉnh riêng `REVERSE_USAGE`) — trừ khỏi doanh thu (`aiBalanceRevenueVnd`);
+ *  · `topupVnd` (nạp qua QR) / `adjustCashVnd` (điều chỉnh tiền thật của người vận hành) / `balanceCashVnd` — tiền khách đưa
+ *    trước, còn giữ để phục vụ — CHƯA phải doanh thu;
+ *  · `usagePromoVnd` / `balancePromoVnd` — tiền nền tảng TẶNG — doanh thu BỎ QUA, KHÔNG BAO GIỜ là doanh thu (chi phí thật của
+ *    lượt AI ấy đã nằm ở `platform_ai_usage` — không cộng thêm lần hai);
+ *  · `aiCustomerUnits` — SỐ khách AI đã thu qua Số dư trong kỳ (dòng `aic-charge`, kể cả khoản đã đảo): bảng kê / hoá đơn ước
+ *    tính KHÔNG tính lại những khách này (`overageNetOfBalance`).
+ * Số dương (đã đổi dấu từ sổ); số dư tính tới cuối kỳ đọc.
+ */
+export type AiBalancePeriod = {
+  topupVnd: number;
+  usageCashVnd: number;
+  usagePromoVnd: number;
+  reversalCashVnd: number;
+  adjustCashVnd: number;
+  aiCustomerUnits: number;
+  balanceCashVnd: number;
+  balancePromoVnd: number;
+};
+
+export const EMPTY_AI_BALANCE_PERIOD: AiBalancePeriod = { topupVnd: 0, usageCashVnd: 0, usagePromoVnd: 0, reversalCashVnd: 0, adjustCashVnd: 0, aiCustomerUnits: 0, balanceCashVnd: 0, balancePromoVnd: 0 };
+
+/** Doanh thu Số dư AI của kỳ = tiền THẬT đã dùng − khoản trừ oan đã đảo. Không có sổ ⇒ 0 THẬT (chưa dùng thì không thu). */
+export function aiBalanceRevenueVnd(b: AiBalancePeriod | null): number {
+  return b ? b.usageCashVnd - b.reversalCashVnd : 0;
+}

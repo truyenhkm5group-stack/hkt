@@ -25,11 +25,14 @@ import { normalizeCommercialInput, parseCommercial, QUOTA_KEYS, QUOTA_MAX, type 
 import { aiCreditLevel, detectCostSpike, ENFORCEMENTS, evaluateQuota, suggestCheaperModel, worstLevel, type Enforcement, type GuardConfig, type QuotaLevel, type QuotaVerdict, type RoutingSuggestion, type SpikeVerdict } from "@/lib/pricing/guard";
 import { parseFeatureOverrides, type FeatureKey } from "@/lib/pricing/features";
 import { invalidatePricing, PRICING_GUARD_KEY, readGuardConfig, readOrgPricingRow, resolveOrgPricing, QUOTA_METER, type OrgPricingRow } from "@/lib/pricing/entitlements";
-import { marginRisk, projectToPeriodEnd, tenantUnitEconomics, trialConversion, div, type MarginRisk, type TenantUnitEconomics, type TrialConversion } from "@/lib/pricing/economics";
+import { aiBalanceTotals, marginRisk, platformGrossMargin, projectToPeriodEnd, revenueWithAiBalance, tenantUnitEconomics, trialConversion, div, type AiBalanceTotals, type MarginRisk, type TenantUnitEconomics, type TrialConversion } from "@/lib/pricing/economics";
 import { periodProgress, usagePeriodOf, type MeterReadings } from "@/lib/pricing/meter";
 import { AI_UNIT_PRICES_KEY, parseUnitPriceOverrides, priceKeyFor, readUnitPriceOverrides, resolveUnitPrices, type UnitPriceRow } from "@/lib/pricing/unit-prices";
 import { parseAiLimits } from "@/lib/ai-usage/types";
 import { getPlanUsage } from "@/lib/entitlements/check";
+import { readAiBalancePeriod } from "@/lib/billing/ai-balance";
+import { AI_BALANCE_FLAG, orgsWithFlag } from "@/lib/platform/org-flags";
+import { EMPTY_AI_BALANCE_PERIOD, type AiBalancePeriod } from "@/lib/billing/ai-balance-rules";
 import { readAiCustomerUsage, type AiCustomerReading } from "@/lib/pricing/ai-customer";
 import { orgPriceVersion, PRICING_MARGIN_KEY, readMarginConfig } from "@/lib/pricing/price-book";
 import { computeOverage, fairUseVerdict, marginBand, parseMarginConfig, usageAlert, type FairUseVerdict, type MarginBand, type MarginConfig, type OverageResult, type UsageAlert } from "@/lib/pricing/versions";
@@ -277,6 +280,11 @@ export type TenantGuardRow = {
   projectedRevenueVnd: number | null;
   projectedMarginPct: number | null;
   marginBand: MarginBand;
+  /**
+   * Số dư AI của kỳ (sổ cái) — `null` khi tổ chức chưa có dòng sổ nào và cờ tắt. Doanh thu KHÔNG rẽ theo trường này (một công
+   * thức cho mọi tổ chức — `revenueWithAiBalance`). `enabled = null` = không đọc được cờ (in «—», không đoán là tắt).
+   */
+  aiBalance: (AiBalancePeriod & { enabled: boolean | null }) | null;
 };
 
 export type PricingEconomics = {
@@ -294,6 +302,8 @@ export type PricingEconomics = {
     projectedPlatformAiCostVnd: number | null;
     aiCostComplete: boolean;
     infraVnd: number | null;
+    /** Doanh thu của lãi gộp: MRR trả tiền + doanh thu Số dư AI CHIẾU cuối kỳ (`platformGrossMargin`) — `null` khi chưa chiếu được. */
+    marginRevenueVnd: number | null;
     grossProfitVnd: number | null;
     grossMarginPct: number | null;
     arpuVnd: number | null;
@@ -304,6 +314,8 @@ export type PricingEconomics = {
     aiConversations: number | null;
     negativeRisk: number;
     spikes: number;
+    /** Số dư AI cả nền tảng (`aiBalanceTotals`): dòng tiền kỳ của tổ chức trong khung + số dư cuối kỳ của MỌI tổ chức trừ nhà. */
+    aiBalance: AiBalanceTotals;
   };
   trial: TrialConversion;
   costs: PlatformCostDeclaration;
@@ -327,7 +339,7 @@ export async function loadPricingEconomics(user: SessionUser, now: Date = new Da
   const { elapsedDays, totalDays } = periodProgress(period, now);
   const usdToVnd = env.facebook.usdToVnd;
   const historyFrom = new Date(now.getTime() - 15 * DAY);
-  const [orgs, guard, ai, daily, costs, unit, marginCfg] = await Promise.all([
+  const [orgs, guard, ai, daily, costs, unit, marginCfg, balances, flagged] = await Promise.all([
     listOrganizations(),
     readGuardConfig(),
     readAiUsageByOrg(period.from, now),
@@ -335,6 +347,8 @@ export async function loadPricingEconomics(user: SessionUser, now: Date = new Da
     readCostDeclaration(),
     resolveUnitPrices(),
     readMarginConfig(),
+    readAiBalancePeriod(period.from, now),
+    orgsWithFlag(AI_BALANCE_FLAG).catch(() => null),
   ]);
   const aiCustomers = await readAiCustomerUsage(
     orgs.filter((o) => !o.isHome && o.status === "ACTIVE").map((o) => o.code),
@@ -403,7 +417,12 @@ export async function loadPricingEconomics(user: SessionUser, now: Date = new Da
       overage = computeOverage(price, { aiCustomers: acRead?.value ?? null, aiCustomersCoverage: acRead?.coverage ?? "NOT_MEASURED", fanpages: usage.readings.fanpages_active, users: usersUsed, aiConversations: usage.readings.ai_conversations, aiReplies: usage.readings.outgoing_ai_messages });
       fairUse = fairUseVerdict({ aiConversations: usage.readings.ai_conversations, aiReplies: usage.readings.outgoing_ai_messages }, price.included, version.version?.alerts);
     }
-    const projectedRevenue = mrrVnd === null || !overage || overage.totalVnd === null ? null : mrrVnd + overage.totalVnd;
+    // Số dư AI (0235): MỘT công thức cho mọi tổ chức — dòng «khách AI vượt» trừ đúng số khách đã thu qua sổ cái (cùng hàm với
+    // bảng kê), doanh thu Số dư (tiền thật đã dùng − khoản đảo) cộng riêng và CHIẾU cùng nhịp với chi phí AI. Không rẽ theo cờ.
+    const balance = balances.get(o.code) ?? null;
+    const balanceOn = flagged === null ? null : flagged.has(o.code);
+    const rev = revenueWithAiBalance({ mrrVnd, overage, balance, blockSize: price?.overage.aiCustomerBlockSize ?? null, projection: { elapsedDays, totalDays } });
+    const projectedRevenue = rev.projectedVnd;
     const projectedMarginPct = projectedRevenue && projected !== null ? ((projectedRevenue - projected) / projectedRevenue) * 100 : null;
     const suggested = top?.model ? suggestCheaperModel({ model: top.model, inputTokens: top.input, outputTokens: top.output, prices: unit.byModel, priceKeyOf: (m) => priceKeyFor(m, unit.byModel), minSavingsPct: guard.routingMinSavingsPct }) : null;
     // Model của AI DÙNG CHUNG (nguồn PLATFORM) do người vận hành đổi ở Platform AI Model Control — một chỗ cho cả nền tảng;
@@ -421,8 +440,8 @@ export async function loadPricingEconomics(user: SessionUser, now: Date = new Da
       byokAiCostUsd: orgAi?.byok.costUsd ?? 0,
       unpricedCalls: unpriced,
       reestimatedUnpricedUsd: reest,
-      economics: tenantUnitEconomics({ revenueVnd: mrrVnd, platformAiCostVnd: platformCost.vnd, aiCostComplete: platformCost.complete, aiOrders: usage.readings.orders_created_by_ai, aiConversations: usage.readings.ai_conversations }),
-      risk: marginRisk({ revenueVnd: mrrVnd, platformAiCostToDateVnd: platformCost.vnd, projectedPlatformAiCostVnd: projected }),
+      economics: tenantUnitEconomics({ revenueVnd: rev.realizedVnd, platformAiCostVnd: platformCost.vnd, aiCostComplete: platformCost.complete, aiOrders: usage.readings.orders_created_by_ai, aiConversations: usage.readings.ai_conversations }),
+      risk: marginRisk({ revenueVnd: rev.realizedVnd, platformAiCostToDateVnd: platformCost.vnd, projectedPlatformAiCostVnd: projected }),
       quotas,
       aiCredit: credit,
       worst: worstLevel([...quotas.map((q) => q.level), credit.level]),
@@ -434,11 +453,12 @@ export async function loadPricingEconomics(user: SessionUser, now: Date = new Da
       aiCustomers: acRead,
       aiCustomerIncluded: price?.included.aiCustomers,
       aiCustomerAlert: price ? usageAlert(acRead?.value ?? null, price.included.aiCustomers, version.version?.alerts) : null,
-      overage,
+      overage: rev.overage,
       fairUse,
       projectedRevenueVnd: projectedRevenue,
       projectedMarginPct,
       marginBand: marginBand(projectedMarginPct, marginCfg),
+      aiBalance: balance || balanceOn ? { ...(balance ?? EMPTY_AI_BALANCE_PERIOD), enabled: balanceOn } : null,
     });
   }
   const riskRank: Record<MarginRisk, number> = { NEGATIVE: 0, TRIAL_COST: 1, UNKNOWN: 2, OK: 3, NO_COST: 4 };
@@ -451,8 +471,12 @@ export async function loadPricingEconomics(user: SessionUser, now: Date = new Da
   const sumKnown = (vals: (number | null)[]) => (vals.some((v) => v === null) ? null : vals.reduce<number>((s, v) => s + (v ?? 0), 0));
   const aiOrders = sumKnown(tenants.map((t) => t.readings.orders_created_by_ai));
   const aiConversations = sumKnown(tenants.map((t) => t.readings.ai_conversations));
-  const aiForMargin = projectedTotal === null ? null : projectedTotal;
-  const gross = revenue > 0 && aiForMargin !== null && costs.infraMonthlyVnd !== null ? revenue - aiForMargin - costs.infraMonthlyVnd : null;
+  // Chi phí AI chiếu ĐÃ LÀM TRÒN — đúng con số ô «chiếu cuối tháng» in ra, để lãi gộp tính lại được từ chính các ô trên màn.
+  const aiForMargin = projectedTotal === null ? null : Math.round(projectedTotal);
+  // Số dư AI cả nền tảng + lãi gộp: HAI hàm thuần có bài kiểm số chính xác (review #648 H1). Dòng tiền kỳ chỉ của tổ chức trong
+  // khung (cùng tập với chi phí AI); số dư đang giữ của MỌI tổ chức trừ nhà (M1). Tiền nạp / tiền tặng không vào doanh thu.
+  const aiBalance = aiBalanceTotals({ balances, tenantCodes: new Set(tenants.map((t) => t.code)), homeCode: orgs.find((o) => o.isHome)?.code ?? null });
+  const gm = platformGrossMargin({ mrrPayingVnd: revenue, aiBalanceRevenueToDateVnd: aiBalance.revenueVnd, elapsedDays, totalDays, projectedAiCostVnd: aiForMargin, infraVnd: costs.infraMonthlyVnd });
   const withCost = tenants.filter((t) => t.platformAiCostVnd > 0);
   return {
     ok: true,
@@ -471,8 +495,9 @@ export async function loadPricingEconomics(user: SessionUser, now: Date = new Da
         projectedPlatformAiCostVnd: projectedTotal === null ? null : Math.round(projectedTotal),
         aiCostComplete: tenants.every((t) => t.unpricedCalls === 0),
         infraVnd: costs.infraMonthlyVnd,
-        grossProfitVnd: gross === null ? null : Math.round(gross),
-        grossMarginPct: gross === null ? null : (gross / revenue) * 100,
+        marginRevenueVnd: gm.marginRevenueVnd,
+        grossProfitVnd: gm.grossProfitVnd,
+        grossMarginPct: gm.grossMarginPct,
         arpuVnd: paying.length ? Math.round(revenue / paying.length) : null,
         aiCostPerTenantVnd: withCost.length ? Math.round(aiTotal / withCost.length) : null,
         aiCostPerOrderVnd: div(aiTotal, aiOrders),
@@ -481,12 +506,13 @@ export async function loadPricingEconomics(user: SessionUser, now: Date = new Da
         aiConversations,
         negativeRisk: tenants.filter((t) => t.risk === "NEGATIVE").length,
         spikes: tenants.filter((t) => t.spike.state === "SPIKE").length,
+        aiBalance,
       },
       trial: trialConversion(daily),
       costs,
       tenants,
       margin: marginCfg,
-      marginBand: marginBand(gross === null ? null : (gross / revenue) * 100, marginCfg),
+      marginBand: marginBand(gm.grossMarginPct, marginCfg),
       aiCustomersTotal: sumKnown(tenants.map((t) => t.aiCustomers?.value ?? null)),
     },
   };

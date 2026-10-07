@@ -71,10 +71,13 @@ Chống trùng / an toàn (sửa theo review độc lập 08/10/2026 — bảng 
 - Khách — `/settings/ai-balance` (vào từ «Số dư AI →» ở «Gói dịch vụ»; trong vỏ Chốt Đơn là trang con của mục «Gói»): số dư,
   đã dùng tháng này, chi trung bình 7 ngày, dự kiến còn N ngày, gợi ý nạp tới cuối tháng, 4 mức chọn sẵn + số khác, mã QR
   (máy tính) / sao chép STK · số tiền · nội dung + lưu ảnh QR (điện thoại), đếm ngược, báo «Đã nhận» ngay khi tiền về, lịch sử
-  (dùng AI gộp theo ngày), ngưỡng cảnh báo. Không token / model / chi phí nhà cung cấp.
+  (dùng AI gộp theo ngày), ngưỡng cảnh báo. Không token / model / chi phí nhà cung cấp. Ở «Gói dịch vụ», khi Số dư AI đang bật,
+  «Hoá đơn ước tính» KHÔNG còn dòng khách AI vượt (đã trừ vào số dư — để lại là báo khách trả hai lần) và câu cuối khung nói đúng
+  luật hết số dư thay cho «không bao giờ tự tắt».
 - Người vận hành — `/platform/ai-balance` (vào từ «Số dư AI →» ở /platform/saas): số dư từng tổ chức tách tiền thật / tiền
   tặng, nạp 30 ngày, dùng 30 ngày, khoản cần xem lại, bật / tắt từng tổ chức, tặng · điều chỉnh · hoàn (một lượt một dòng,
-  bắt buộc lý do, bấm hai lần ra một dòng, hoàn không vượt tiền thật).
+  bắt buộc lý do, bấm hai lần ra một dòng, hoàn không vượt tiền thật). «Dùng 30 ngày» tách phần tiền thật; lối «Doanh thu · chi
+  phí · biên →» sang khung kinh tế đơn vị.
 
 ## 4. CẦN CHỦ SHOP / KẾ TOÁN / PHÁP LÝ XEM TRƯỚC KHI BẬT CHO KHÁCH THẬT
 
@@ -89,16 +92,47 @@ Kỹ thuật KHÔNG tự kết luận các điểm dưới đây — chúng đư
 6. **Thứ tự trừ** giữa tiền tặng và tiền thật khi bắt đầu trừ (đề xuất: trừ tiền tặng trước — có lợi cho khách, cần kế toán duyệt).
 7. **Phí thu hộ** của SePay / ngân hàng (nếu có) — đưa vào «chi phí thu tiền» của kinh tế đơn vị.
 
-## 5. Còn lại (theo thứ tự phụ thuộc)
+## 5. Doanh thu · chi phí · biên (người vận hành — /platform/saas#unit-economics)
+
+Một chỗ tính, dùng lại khung kinh tế đơn vị sẵn có (`lib/pricing/admin.ts::loadPricingEconomics`), không dựng màn thứ hai:
+
+| Khoản | Nguồn | Vào doanh thu? |
+|-------|-------|----------------|
+| Thuê bao | MRR của ảnh chụp ngày (`platform_saas_daily`) | Có (như cũ) |
+| Tiền THẬT khách đã dùng AI qua Số dư | Sổ cái — dòng `AI_USAGE` lớp `CASH` trong kỳ (`readAiBalancePeriod`) | **Có** — doanh thu ghi nhận lúc dùng |
+| Đảo một khoản trừ oan | Dòng `ADJUSTMENT` lớp `CASH` nguồn `AI_CUSTOMER` (loại «Đảo khoản trừ AI» ở /platform/ai-balance — trần = tiền thật đã trừ chưa đảo) | **Trừ** khỏi doanh thu (`aiBalanceRevenueVnd`), cộng lại số dư |
+| Tiền khách nạp, chưa dùng | Dòng `TOPUP` (nạp QR) · điều chỉnh tiền thật nguồn `OPERATOR` (tiền đưa ngoài QR) · số dư `CASH` | **Không** — tiền giữ để phục vụ, khoản phải hoàn (khung «Số dư AI khách đang giữ» — MỌI tổ chức trừ nhà, kể cả đình chỉ / lưu trữ; số dư âm tách thành «khách đang nợ») |
+| Tiền nền tảng tặng đã dùng | Dòng `AI_USAGE` lớp `PROMO` | **Không** — doanh thu BỎ QUA. Chi phí thật của lượt AI ấy đã nằm ở `platform_ai_usage`; không trừ thêm lần hai |
+| Hoàn tiền | Dòng `REFUND` | Không phải doanh thu âm — giảm tiền đang giữ |
+| Chi phí AI nhà cung cấp | `platform_ai_usage` (nguồn `PLATFORM`) | Là CHI PHÍ (như cũ) |
+
+- Lãi gộp cả nền tảng (`platformGrossMargin`) = MRR + doanh thu Số dư AI CHIẾU cuối tháng (cùng nhịp với chi phí AI chiếu — so
+  tới-nay với cả-tháng là biên đầu tháng NGUY CẤP giả) − chi phí AI chiếu − hạ tầng đã khai. Tổng Số dư (`aiBalanceTotals`):
+  dòng tiền kỳ chỉ của tổ chức trong khung (cùng tập với chi phí AI); số dư đang giữ của mọi tổ chức trừ nhà.
+- PHẦN VƯỢT KHÁCH AI — MỘT hàm cho mọi màn (`overageNetOfBalance`, review N2 08/10/2026): dòng «khách AI vượt» trừ ĐÚNG số khách
+  đã thu qua sổ cái trong CHÍNH kỳ đó (dòng `aic-charge`, kể cả khoản đã đảo), KHÔNG theo cờ hiện tại. Khách vượt chưa trừ
+  (trước khi bật cờ · sau khi tắt · lượt trừ hỏng) vẫn tính theo KHỐI như bảng giá. Bảng kê (`lib/saas/customers.ts`), hoá
+  đơn ước tính của khách (`lib/pricing/customer.ts`), khung /platform/saas và /platform/customers đều đi qua nó ⇒ hai màn vận
+  hành không nói hai số cho cùng một kỳ. Sổ không đọc được ⇒ bảng kê KHÔNG chốt (như ghim giá); hoá đơn ước tính in dòng «chưa
+  biết». Tổ chức chưa từng có dòng sổ ⇒ trừ 0 khách ⇒ công thức cũ nguyên vẹn (production 08/10/2026: chưa tổ chức nào bật ⇒
+  trước = sau).
+- Doanh thu Số dư AI vào phần KINH TẾ của /platform/customers và /platform/products (sản phẩm Chốt Đơn) — KHÔNG thành dòng bảng
+  kê (đã thu qua số dư; đưa vào bảng kê là thu hai lần). Thiếu nó thì khách trả phần vượt qua số dư bị gắn «lỗ» oan.
+- Phần vượt khi cờ TẮT vẫn chỉ là ƯỚC TÍNH: chưa có đường thu hoá đơn phần vượt (`docs/saas/COST_BILLING.md`) — khung kinh tế
+  đơn vị in nó như doanh thu chiếu, Số dư AI là đường đầu tiên biến phần vượt thành tiền thật.
+
+## 6. Còn lại (theo thứ tự phụ thuộc)
 
 | Việc | Phụ thuộc | Ghi chú |
 |------|-----------|---------|
 | ~~Trừ số dư cho khách AI VƯỢT phần gồm · cổng hết số dư (chỉ chặn khách MỚI, bình luận theo NGƯỜI bình luận) · cảnh báo số dư thấp / hết~~ | — | Xong trong PR này (`lib/billing/ai-usage-charge.ts`, `aiBalanceGate`, `runAiBalanceAlerts`). |
-| ~~Hoá đơn ước tính + bảng kê kỳ KHÔNG gồm khách AI đã trừ số dư~~ | — | Xong (`overageWithoutAiCustomers` — review độc lập H2). Bảng kê dựng theo trạng thái cờ LÚC DỰNG: bật / tắt cờ giữa tháng thì phần trước / sau mốc đổi không tách được — đổi cờ vào ĐẦU kỳ. |
-| Lượt bù khi trừ tiền hỏng (khách đã ghi đồng hồ mà chưa có dòng `aic-charge:`) | Không | Review độc lập M3: lượt ghi đồng hồ và lượt trừ là hai giao dịch; trừ hỏng (vd máy khởi động lại giữa hai bước) ⇒ khách ấy dùng AI miễn phí cả tháng. Bù bằng job idempotent theo khoá sẵn có — CHỈ cho khách ghi SAU mốc bật cờ (không trừ hồi tố phần trước khi bật). Rủi ro là doanh thu nền tảng, không phải tiền khách. |
+| ~~Hoá đơn ước tính + bảng kê kỳ KHÔNG gồm khách AI đã trừ số dư~~ | — | Xong — đếm theo dòng sổ của kỳ, không theo cờ (`overageNetOfBalance`, review N2): bật / tắt cờ giữa tháng, chốt bảng kê sau mốc đổi cờ đều ra đúng số. |
+| Lượt bù khi trừ tiền hỏng (khách đã ghi đồng hồ mà chưa có dòng `aic-charge:`) | Không | Doanh thu KHÔNG còn mất: khách chưa trừ nằm lại dòng vượt của bảng kê (N2). Còn lại là công bằng cho khách — phần ấy tính theo KHỐI thay vì đơn giá từng khách; bù bằng job idempotent theo khoá sẵn có, CHỈ kỳ đang mở và khách ghi SAU mốc bật cờ (bảng kê đã chốt thì không trừ thêm — thu hai lần). |
+| ~~Đảo một khoản trừ oan~~ | — | Xong — loại «Đảo khoản trừ AI» (ADJUSTMENT nguồn `AI_CUSTOMER`), trừ khỏi doanh thu, trần = tiền thật đã trừ chưa đảo. Khách bị trừ oan vẫn KHÔNG bị tính lại ở bảng kê. |
 | Ranh giới «âm tối đa 1 khách» khi NHIỀU khách mới tới cùng lúc | Không | Cổng chỉ hỏi số dư > 0 trước lượt; hai khách mới cùng lúc khi còn 20đ ⇒ âm hai đơn giá. Hiếm; sửa bằng khoá theo tổ chức quanh cổng + lượt ghi. |
 | Tiền tặng lẻ nhỏ hơn một đơn giá | Không | Không bao giờ được trừ (trừ tiền tặng chỉ khi đủ một đơn giá). Chấp nhận ở V1; hạn dùng tiền tặng (§4.5) sẽ dọn phần lẻ. |
-| Kinh tế đơn vị trên /platform: doanh thu dùng AI, chi phí nhà cung cấp thật, chi phí thu tiền, lợi nhuận góp, biên — theo tổ chức / ngày / tháng / việc / model | Dòng trừ số dư | Dữ liệu chi phí đã có ở `platform_ai_usage`. |
+| ~~Kinh tế đơn vị: doanh thu dùng AI · chi phí nhà cung cấp · biên theo tổ chức / tháng~~ | — | Xong (§5). |
+| Kinh tế đơn vị theo ngày / việc / model · chi phí thu tiền (phí SePay / ngân hàng) | Chủ shop khai phí thu hộ (§4.7) | Chi phí theo model đã có ở khung Platform AI; phí thu tiền chưa có nguồn. |
 | Backtest «phiên khách AI 24 giờ» trên log thật (399–799đ) ⇒ đề xuất Starter / Growth / Scale | Không | Chỉ đọc; KHÔNG công bố giá khi chưa có bằng chứng. |
 | Liên kết mở thẳng app ngân hàng trên điện thoại (deeplink) | Không | V1 dùng sao chép + lưu ảnh QR (luôn chạy); deeplink tuỳ ngân hàng, thêm sau. |
 | Xử lý khoản «cần xem lại» bằng một nút (gán về tổ chức · cộng · hoàn) | Không | Hôm nay: «điều chỉnh tiền thật» ở khung «Tặng · điều chỉnh · hoàn tiền» (có lý do + nhật ký), rồi nút «Đã xử lý…» ngay trên dòng (cùng hàm đánh dấu của luồng thu phí). |

@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { PageHeader } from "@/components/page-header";
 import { ResolvePaymentForm } from "@/components/billing/operator-billing";
@@ -21,8 +22,9 @@ const RESOLVE_TOPUP_NOTE =
 
 /**
  * SỐ DƯ AI — MÀN NGƯỜI VẬN HÀNH (docs/saas/AI_BALANCE_V1.md): số dư từng tổ chức tách tiền thật / tiền tặng, nạp 30 ngày,
- * dùng 30 ngày; khoản tiền nạp cần xem lại; bật / tắt từng tổ chức (canary) và tặng / điều chỉnh / hoàn — mọi lượt bắt
- * buộc lý do, vào sổ và nhật ký nền tảng.
+ * dùng 30 ngày (tách phần tiền thật — doanh thu); khoản tiền nạp cần xem lại; bật / tắt từng tổ chức (canary) và tặng /
+ * điều chỉnh / hoàn — mọi lượt bắt buộc lý do, vào sổ và nhật ký nền tảng. Doanh thu · chi phí AI · biên của cùng tổ chức nằm
+ * ở khung kinh tế đơn vị /platform/saas (một chỗ tính, không tính lại ở đây).
  */
 export default async function PlatformAiBalancePage() {
   const user = await requirePermission("platform:operate");
@@ -31,7 +33,15 @@ export default async function PlatformAiBalancePage() {
   if ("error" in v) redirect("/?forbidden=1");
   return (
     <div className="space-y-5">
-      <PageHeader title="Số dư AI" description="Sổ cái chỉ ghi thêm · tiền thật (CASH) tách tiền tặng (PROMO) · nạp qua VietQR mã ERPNAP… khớp tự động." />
+      <PageHeader
+        title="Số dư AI"
+        description="Sổ cái chỉ ghi thêm · tiền thật (CASH) tách tiền tặng (PROMO) · nạp qua VietQR mã ERPNAP… khớp tự động."
+        actions={
+          <Link href="/platform/saas#unit-economics" className="text-sm font-medium text-primary hover:underline" data-link-unit-economics>
+            Doanh thu · chi phí · biên →
+          </Link>
+        }
+      />
       {!v.receiverReady ? (
         <p className="rounded-lg border border-amber-400 bg-amber-50 p-3 text-sm dark:bg-amber-950/30">
           Chưa khai tài khoản nhận tiền (khung «Thu phí thuê bao» ở /platform) — khách chưa tạo được mã nạp. Đây là bước bắt buộc trước khi bật cho khách thật.
@@ -64,7 +74,10 @@ export default async function PlatformAiBalancePage() {
                     <td className="numeric py-2 pr-3 text-right">{formatVND(r.promoVnd)}</td>
                     <td className="numeric py-2 pr-3 text-right font-semibold">{formatVND(r.totalVnd)}</td>
                     <td className="numeric py-2 pr-3 text-right">{formatVND(r.topup30dVnd)}</td>
-                    <td className="numeric py-2 pr-3 text-right">{formatVND(r.usage30dVnd)}</td>
+                    <td className="numeric py-2 pr-3 text-right">
+                      <div>{formatVND(r.usage30dVnd)}</div>
+                      {r.usage30dCashVnd !== r.usage30dVnd ? <div className="text-xs text-muted-foreground">tiền thật {formatVND(r.usage30dCashVnd)}</div> : null}
+                    </td>
                     <td className="py-2 text-xs">{r.lastTopupAt ? formatDateTime(r.lastTopupAt) : "—"}</td>
                   </tr>
                 ))}

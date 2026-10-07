@@ -10,7 +10,7 @@
  *  · khung HẠN MỨC THÁNG hiện khi có khung thanh toán, hoặc khi gói đang gán còn một ô hạn mức có trần (ô `checkUsageQuota`
  *    thật sự so). Nhà mang gói không trần nào ⇒ không khung, như trước; gán cho nhà một gói có trần ⇒ khung tự hiện.
  */
-import { aiBalanceEnabled } from "@/lib/billing/ai-balance";
+import { aiBalanceEnabled, readAiCustomerChargedUnits } from "@/lib/billing/ai-balance";
 import { readSubscriptionTerms } from "@/lib/billing/standing";
 import { billingStanding, vnDate } from "@/lib/billing/rules";
 import { findOrganization } from "@/lib/platform/organizations";
@@ -23,7 +23,7 @@ import { readGuardConfig, resolveOrgPricing, QUOTA_METER, type OrgPricing } from
 import { usagePeriodOf } from "@/lib/pricing/meter";
 import { readAiCustomerUsage } from "@/lib/pricing/ai-customer";
 import { orgPriceVersion } from "@/lib/pricing/price-book";
-import { billWithoutAiCustomerLine, estimateBill, fairUseVerdict, usageAlert, type BillEstimate, type FairUseVerdict, type MeterCoverage, type UsageAlert } from "@/lib/pricing/versions";
+import { billNetOfBalance, estimateBill, fairUseVerdict, usageAlert, type BillEstimate, type FairUseVerdict, type MeterCoverage, type UsageAlert } from "@/lib/pricing/versions";
 import { billingLockApplies } from "@/lib/saas/policy";
 
 export type CustomerQuotaRow = QuotaVerdict & { line: string };
@@ -117,6 +117,9 @@ export async function loadCustomerPlan(orgCode: string, now: Date = new Date()):
     const trial = price.trialDays !== null;
     const balanceOn = !trial && (await aiBalanceEnabled(org.code).catch(() => false));
     const estimate = estimateBill({ ...price, included: { ...inc, users: usersInc, fanpages: fanpagesInc } }, { aiCustomers: aiRead.value, aiCustomersCoverage: aiRead.coverage, fanpages: fanpagesUsed, users: usersUsed, aiConversations: usage.readings.ai_conversations, aiReplies: usage.readings.outgoing_ai_messages }, { trial });
+    // Khách AI đã thu qua Số dư trong kỳ không vào lại hoá đơn ước tính — đếm theo dòng sổ, không theo cờ (review N2). Đọc sổ hỏng
+    // ⇒ dòng khách AI «chưa biết», không in một hoá đơn đoán.
+    const charged = trial ? 0 : await readAiCustomerChargedUnits(org.code, period.from, period.to).catch(() => null);
     meter = {
       versionLabel: version.version?.label ?? null,
       pinned: version.pinned,
@@ -125,7 +128,7 @@ export async function loadCustomerPlan(orgCode: string, now: Date = new Date()):
       fanpages: { used: fanpagesUsed, included: fanpagesInc, alert: usageAlert(fanpagesUsed, fanpagesInc, alerts) },
       users: { used: usersUsed, included: usersInc, alert: usageAlert(usersUsed, usersInc, alerts) },
       fairUse: fair,
-      estimate: balanceOn ? billWithoutAiCustomerLine(estimate) : estimate,
+      estimate: trial ? estimate : billNetOfBalance(estimate, charged, price.overage.aiCustomerBlockSize),
       aiSales: features.find((f) => f.key === "ai_sales")?.granted ?? false,
       aiBalance: balanceOn,
     };

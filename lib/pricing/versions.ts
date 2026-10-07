@@ -432,23 +432,35 @@ export function estimateBill(price: PlanPrice, usage: BillableUsage, opts: { tri
 }
 
 /**
- * Phần vượt KHÔNG gồm dòng khách AI — dùng khi tổ chức trả phần vượt khách AI bằng SỐ DƯ AI (cờ `ai_balance.enabled`, chủ shop
- * 08/10/2026): khách AI vượt phần gồm đã bị trừ thẳng vào số dư, để dòng ấy lại trong hoá đơn ước tính / bảng kê kỳ là thu HAI
- * lần cùng một khách (review độc lập 08/10/2026, H2). Dòng fanpage / người dùng thêm giữ nguyên. Không có dòng khách AI ⇒ trả
- * nguyên đối tượng cũ.
+ * Phần vượt SAU KHI trừ các khách AI đã thu qua SỐ DƯ AI trong CHÍNH kỳ đó (chủ shop 08/10/2026: khách AI vượt phần gồm trừ
+ * thẳng vào số dư — để lại trong hoá đơn / bảng kê là thu HAI lần cùng một khách). Đếm theo DÒNG SỔ `aic-charge` của kỳ
+ * (`chargedUnits`), KHÔNG theo cờ hiện tại: bảng kê tháng trước thường chốt SAU mốc đổi cờ — tắt cờ rồi chốt là thu hai lần,
+ * bật cờ rồi chốt là mất phần vượt chưa hề trừ (review 08/10/2026, N2). Khách vượt CHƯA trừ (trước khi bật cờ · lượt trừ hỏng)
+ * vẫn tính theo KHỐI như cũ. `chargedUnits = null` (không đọc được sổ) ⇒ dòng CHƯA BIẾT — không chốt bảng kê bằng số đoán.
+ * Không có dòng khách AI / chưa thu khách nào ⇒ trả nguyên đối tượng cũ. HÀM THUẦN.
  */
-export function overageWithoutAiCustomers(o: OverageResult): OverageResult {
-  const lines = o.lines.filter((l) => l.key !== "aiCustomers");
-  if (lines.length === o.lines.length) return o;
-  const known = lines.filter((l) => l.amountVnd !== null);
-  const knownVnd = known.reduce((a, l) => a + (l.amountVnd ?? 0), 0);
+export function overageNetOfBalance(o: OverageResult, chargedUnits: number | null, blockSize: number | null): OverageResult {
+  const i = o.lines.findIndex((l) => l.key === "aiCustomers");
+  if (i < 0 || chargedUnits === 0) return o;
+  const l = o.lines[i];
+  let next: OverageLine;
+  if (chargedUnits === null) next = { ...l, blocks: null, amountVnd: null, note: "chưa đọc được sổ Số dư AI — chưa tính được phần vượt khách AI" };
+  else if (l.overUnits === null) next = { ...l, note: [l.note, `đã thu qua Số dư AI ${chargedUnits} khách`].filter(Boolean).join(" · ") };
+  else {
+    const remaining = Math.max(0, l.overUnits - chargedUnits);
+    const blocks = remaining === 0 ? 0 : Math.ceil(remaining / Math.max(1, blockSize ?? 1));
+    next = { ...l, overUnits: remaining, blocks, amountVnd: blocks === 0 ? 0 : l.unitVnd === null ? null : blocks * l.unitVnd, note: `đã thu qua Số dư AI ${chargedUnits} khách${remaining ? ` · còn ${remaining} khách chưa trừ — tính theo khối` : ""}` };
+  }
+  const lines = o.lines.map((x, j) => (j === i ? next : x));
+  const known = lines.filter((x) => x.amountVnd !== null);
+  const knownVnd = known.reduce((a, x) => a + (x.amountVnd ?? 0), 0);
   const unknownLines = lines.length - known.length;
-  return { ...o, lines, knownVnd, unknownLines, totalVnd: unknownLines ? null : knownVnd, note: o.note };
+  return { ...o, lines, knownVnd, unknownLines, totalVnd: unknownLines ? null : knownVnd };
 }
 
-/** Hoá đơn ước tính của gói TRẢ PHÍ đang trừ phần vượt khách AI qua Số dư AI — xem `overageWithoutAiCustomers`. Không dùng cho dùng thử. */
-export function billWithoutAiCustomerLine(est: BillEstimate): BillEstimate {
-  const overage = overageWithoutAiCustomers(est.overage);
+/** Hoá đơn ước tính của gói TRẢ PHÍ sau khi trừ khách AI đã thu qua Số dư — xem `overageNetOfBalance`. Không dùng cho dùng thử. */
+export function billNetOfBalance(est: BillEstimate, chargedUnits: number | null, blockSize: number | null): BillEstimate {
+  const overage = overageNetOfBalance(est.overage, chargedUnits, blockSize);
   if (overage === est.overage) return est;
   return { ...est, overage, totalVnd: est.planVnd === null || overage.totalVnd === null ? null : est.planVnd + overage.totalVnd };
 }

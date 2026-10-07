@@ -47,6 +47,7 @@ export default async function SaasCustomersPage({ searchParams }: { searchParams
   const mrr = mrrKnown.reduce((a, c) => a + (c.economics.revenueVnd ?? 0), 0);
   const cost = customers.reduce((a, c) => a + c.economics.costVnd, 0);
   const gp = mrrKnown.reduce((a, c) => a + (c.economics.grossProfitVnd ?? 0), 0);
+  const balanceRev = mrrKnown.reduce((a, c) => a + c.economics.aiBalanceRevenueVnd, 0);
   const alerts = customers.filter((c) => c.flags.length);
   const label = `${data.periodMonth.slice(5, 7)}/${data.periodMonth.slice(0, 4)}`;
 
@@ -57,7 +58,7 @@ export default async function SaasCustomersPage({ searchParams }: { searchParams
       <div className="grid gap-2 sm:grid-cols-3 lg:grid-cols-6">
         <Tile label="Tài khoản" value={formatNumber(customers.length)} sub={`${external.length} ngoài · ${internal.length} nội bộ`} />
         <Tile label="Thuê bao sống" value={formatNumber(statuses.length)} sub={`${statuses.filter((s) => s === "TRIAL").length} dùng thử · ${statuses.filter((s) => s === "PAST_DUE" || s === "EXPIRED").length} quá hạn`} />
-        <Tile label="MRR (khách ngoài)" value={formatVND(mrr)} sub={mrrKnown.length < external.length ? `${external.length - mrrKnown.length} khách có gói không niêm yết giá` : "ARR " + formatVND(mrr * 12)} />
+        <Tile label="Doanh thu kỳ (khách ngoài)" value={formatVND(mrr)} sub={mrrKnown.length < external.length ? `${external.length - mrrKnown.length} khách có gói không niêm yết giá` : balanceRev ? `gồm Số dư AI ${formatVND(balanceRev)}` : "gói · mua thêm · vượt"} />
         <Tile label="Chi phí kỳ" value={formatVND(cost)} sub="AI nền tảng trả + phân bổ" />
         <Tile label="Lãi gộp (khách ngoài)" value={formatVND(gp)} sub={mrr ? formatPercent((gp / mrr) * 100) : "—"} />
         <Tile label="Cần xử lý" value={formatNumber(alerts.length)} sub="khách có cờ cảnh báo" />

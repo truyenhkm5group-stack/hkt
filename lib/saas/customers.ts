@@ -22,8 +22,9 @@ import { buildStatement, type PlanRef, type Statement, type StatementWorkspace }
 import { getPlanUsage } from "@/lib/entitlements/check";
 import { readAiCustomerUsage, type AiCustomerReading } from "@/lib/pricing/ai-customer";
 import { loadPriceBook } from "@/lib/pricing/price-book";
-import { aiBalanceEnabled } from "@/lib/billing/ai-balance";
-import { computeOverage, currentCatalogVersion, fairUseVerdict, overageWithoutAiCustomers, priceOf, resolveOrgVersion, yearlyAmountVnd, type FairUseVerdict, type OverageResult, type PlanPrice, type PriceBook } from "@/lib/pricing/versions";
+import { readAiBalancePeriod } from "@/lib/billing/ai-balance";
+import { aiBalanceRevenueVnd } from "@/lib/billing/ai-balance-rules";
+import { computeOverage, currentCatalogVersion, fairUseVerdict, overageNetOfBalance, priceOf, resolveOrgVersion, yearlyAmountVnd, type FairUseVerdict, type OverageResult, type PlanPrice, type PriceBook } from "@/lib/pricing/versions";
 import { periodRange } from "@/lib/saas/ledger";
 
 export type PlanInfo = PlanRef & { addonPrices: unknown; productKeys: string[] | null; commercial: unknown };
@@ -70,7 +71,8 @@ export type CustomerView = {
   workspaces: WorkspaceView[];
   products: string[];
   statement: Statement;
-  economics: { revenueVnd: number | null; costVnd: number; grossProfitVnd: number | null; marginPct: number | null; marginApplicable: boolean; byokUsd: number };
+  /** `revenueVnd` = bảng kê (gói · mua thêm · vượt CHƯA thu qua số dư) + `aiBalanceRevenueVnd` (Số dư AI: tiền thật đã dùng − khoản đảo). */
+  economics: { revenueVnd: number | null; aiBalanceRevenueVnd: number; costVnd: number; grossProfitVnd: number | null; marginPct: number | null; marginApplicable: boolean; byokUsd: number };
   flags: HealthFlag[];
   failedJobs: number;
 };
@@ -138,6 +140,9 @@ export async function loadCommercialSnapshot(opts: { periodMonth?: string; now?:
     range,
     now,
   ).catch(() => new Map<string, AiCustomerReading>());
+  // Sổ Số dư AI của KỲ (review N2): khách AI đã thu qua số dư trong kỳ không vào lại dòng vượt; doanh thu Số dư vào phần kinh tế.
+  // Lỗi đọc ⇒ NÉM như ghim giá — bảng kê FINAL bất biến, không chốt trên một sổ không đọc được (`finalizeStatement` từ chối).
+  const balances = await readAiBalancePeriod(range.from, range.to);
   const today = vnDate(now);
   const termsBy = new Map(terms.map((t) => [t.orgCode, t]));
   const accountById = new Map(registry.accounts.map((a) => [a.id, a]));
@@ -175,9 +180,9 @@ export async function loadCommercialSnapshot(opts: { periodMonth?: string; now?:
       const conv = wsUsage.find((u) => u.productKey === "chotdon" && u.metric === "conversations_started")?.value ?? null;
       const replies = wsUsage.find((u) => u.productKey === "chotdon" && u.metric === "bot_messages")?.value ?? null;
       overage = computeOverage(price, { aiCustomers: ac?.value ?? null, aiCustomersCoverage: ac?.coverage ?? "NOT_MEASURED", fanpages, users: usersUsed, aiConversations: conv, aiReplies: replies });
-      // Số dư AI (0235): khách AI vượt phần gồm đã trừ thẳng vào số dư — dòng ấy không vào bảng kê kỳ (bảng kê chốt là bất biến,
-      // thu hai lần ở đây không sửa lại được). Tắt / bật cờ GIỮA tháng: bảng kê theo trạng thái cờ lúc dựng — xem AI_BALANCE_V1 §6.
-      if (await aiBalanceEnabled(w.code).catch(() => false)) overage = overageWithoutAiCustomers(overage);
+      // Số dư AI (0235): khách AI vượt phần gồm đã trừ thẳng vào số dư KHÔNG vào bảng kê kỳ (thu hai lần — bảng kê chốt là bất
+      // biến). Đếm theo SỐ DÒNG SỔ của chính kỳ, không theo cờ lúc dựng: bảng kê tháng trước thường chốt SAU mốc đổi cờ (N2).
+      overage = overageNetOfBalance(overage, balances.get(w.code)?.aiCustomerUnits ?? 0, price.overage.aiCustomerBlockSize);
       fairUse = fairUseVerdict({ aiConversations: conv, aiReplies: replies }, price.included, version.version?.alerts);
     }
     return {
@@ -229,7 +234,10 @@ export async function loadCommercialSnapshot(opts: { periodMonth?: string; now?:
     const applicable = marginApplicable(mode);
     const revenueLines = statement.lines.filter((l) => l.kind === "PLAN" || l.kind === "PRODUCT_PLAN" || l.kind === "ADDON" || l.kind === "OVERAGE");
     const revenueKnown = revenueLines.every((l) => l.amountVnd !== null);
-    const revenueVnd = applicable ? (revenueKnown ? statement.revenueKnownVnd : null) : null;
+    // Doanh thu Số dư AI của kỳ (tiền thật đã dùng − khoản đảo) — phần KINH TẾ, KHÔNG phải dòng bảng kê (đã thu qua số dư; đưa
+    // vào bảng kê là thu hai lần). Thiếu nó thì khách trả phần vượt qua số dư bị gắn «lỗ» oan (review #648 M4).
+    const aiBalanceRevenue = workspaces.reduce((a, w) => a + aiBalanceRevenueVnd(balances.get(w.code) ?? null), 0);
+    const revenueVnd = applicable ? (revenueKnown ? statement.revenueKnownVnd + aiBalanceRevenue : null) : null;
     const grossProfitVnd = revenueVnd === null ? null : revenueVnd - costVnd;
     const marginPct = revenueVnd && grossProfitVnd !== null ? Math.round((grossProfitVnd / revenueVnd) * 1000) / 10 : null;
     const unknownCost = workspaces.some((w) => w.aiCost.some((c) => c.unpricedCalls > 0) || w.allocated.some((l) => l.amountVnd === null));
@@ -246,7 +254,7 @@ export async function loadCommercialSnapshot(opts: { periodMonth?: string; now?:
       workspaces,
       products: [...new Set(workspaces.flatMap((w) => w.subscriptions.filter((s) => subscriptionGrantsUse(s.status)).map((s) => s.productKey)))],
       statement,
-      economics: { revenueVnd, costVnd, grossProfitVnd, marginPct, marginApplicable: applicable, byokUsd: workspaces.reduce((a, w) => a + w.aiCost.reduce((b, c) => b + c.byokUsd, 0), 0) },
+      economics: { revenueVnd, aiBalanceRevenueVnd: aiBalanceRevenue, costVnd, grossProfitVnd, marginPct, marginApplicable: applicable, byokUsd: workspaces.reduce((a, w) => a + w.aiCost.reduce((b, c) => b + c.byokUsd, 0), 0) },
       flags,
       failedJobs,
     });
@@ -290,6 +298,8 @@ export function productEconomics(snap: CommercialSnapshot, catalog: readonly Pro
     const own = ext.flatMap((c) => c.statement.lines.filter((l) => (l.kind === "PRODUCT_PLAN" || l.kind === "OVERAGE") && l.productKey === product.key));
     const bundled = ext.flatMap((c) => c.statement.lines.filter((l) => l.kind === "PLAN")).length;
     const unknown = own.some((l) => l.amountVnd === null);
+    // Doanh thu Số dư AI thuộc sản phẩm của đồng hồ khách AI (Chốt Đơn) — cùng một con số với phần kinh tế của từng khách.
+    const balanceRevenue = product.key === "chotdon" ? ext.reduce((a, c) => a + c.economics.aiBalanceRevenueVnd, 0) : 0;
     const usage = product.metrics.map((m) => {
       const vals = snap.customers.flatMap((c) => c.workspaces.flatMap((w) => w.usage.filter((u) => u.productKey === product.key && u.metric === m.key).map((u) => u.value)));
       const known = vals.filter((v): v is number => v !== null);
@@ -302,7 +312,7 @@ export function productEconomics(snap: CommercialSnapshot, catalog: readonly Pro
       byStatus,
       aiCostVnd,
       directCostVnd,
-      revenueVnd: unknown ? null : own.reduce((a, l) => a + (l.amountVnd ?? 0), 0),
+      revenueVnd: unknown ? null : own.reduce((a, l) => a + (l.amountVnd ?? 0), 0) + balanceRevenue,
       revenueNote: bundled ? `${bundled} workspace trả theo gói GỘP — doanh thu gộp không chia về từng sản phẩm` : null,
       usage,
     };
