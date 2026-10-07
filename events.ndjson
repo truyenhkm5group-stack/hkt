@@ -422,3 +422,4 @@
 {"at":"2026-10-07T20:20:24.526Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"conversation-delivered-profit","detail":"#646 cho feat/conversation-delivered-profit @ 21bd377d9b8f"}
 {"at":"2026-10-07T20:43:24.395Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"conversation-delivered-profit","detail":"#646 @ 21bd377d9b8f → fd678891a496 (MERGE_NOW · MEDIUM · gates success)"}
 {"at":"2026-10-07T20:44:23.628Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DEPLOY_DISPATCHED","detail":"fd678891a496 · run 37684290837 https://github.com/truyenhkm5group-stack/hkt/actions/runs/37684290837"}
+{"at":"2026-10-07T21:00:02.213Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"ai-balance-v1","detail":"feat/ai-balance-v1 @ dcf9c7853677 · 3 lệnh kiểm thử"}
