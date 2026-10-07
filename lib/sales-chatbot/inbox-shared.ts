@@ -3,6 +3,7 @@
  *
  * Tệp THUẦN (không CSDL): trang hộp thư (client) chỉ được `import` từ đây; lõi đọc / ghi ở `lib/sales-chatbot/inbox.ts`.
  */
+import type { AiHoldView } from "@/lib/sales-chatbot/ai-hold-shared";
 import type { ControlStamp } from "@/lib/sales-chatbot/conversation-control-shared";
 
 import type { CustomerLevel } from "@/lib/sales-chatbot/levels-shared";
@@ -117,6 +118,8 @@ export type InboxThread = {
   status: string;
   handoffReason: string | null;
   botYields: boolean;
+  /** AI_ACTIVE · HUMAN_COOLDOWN (kèm mốc hết hạn + giờ máy chủ để đếm ngược) · HUMAN_TAKEOVER — `ai-hold-shared.ts::aiHoldOf`. */
+  aiHold: AiHoldView;
   /** Chế độ AI của RIÊNG hội thoại (Tiếp quản / AI gợi ý); `null` = theo chế độ của tổ chức (conversation-control-shared.ts). */
   control: ControlStamp | null;
   customer: { id: string | null; name: string; phone: string | null; address: string | null; province: string | null };

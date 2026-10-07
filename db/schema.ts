@@ -10668,6 +10668,12 @@ export const salesChatConversations = pgTable(
     adId: text("ad_id"),
     adSeenAt: ts("ad_seen_at"),
     adSource: text("ad_source"),
+    /**
+     * 0231 · AI NHƯỜNG NGƯỜI (lib/sales-chatbot/ai-hold-shared.ts): mốc AI được trả lời lại sau khi NHÂN VIÊN gửi tay. Ghi ở mọi
+     * đường nhận tin nhân viên, xoá khi «Cho AI tiếp tục ngay» / «Trả lại cho AI» / hết hạn. KHÔNG dùng `updated_at` làm đồng hồ
+     * nhường nữa — mọi lượt ghi đều đẩy cột ấy về «bây giờ». NULL ở dòng cũ = đọc mốc cũ như trước (không backfill).
+     */
+    humanCooldownUntil: ts("human_cooldown_until"),
     /** Giỏ nháp của khung THỬ (không ghi đơn thật) + mốc tóm tắt đã đọc cho khách — lib/sales-chatbot/engine.ts. */
     state: jsonb("state").$type<Record<string, unknown>>().notNull().default({}),
     createdBy: text("created_by"),

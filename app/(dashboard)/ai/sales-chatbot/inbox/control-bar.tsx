@@ -1,37 +1,71 @@
 "use client";
 
-import { useState } from "react";
-import { Bot, Hand, Loader2, Sparkles } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
+import { Bot, Hand, Loader2, Play, Sparkles, Timer } from "lucide-react";
 import { toast } from "sonner";
 import { setConversationControlAction } from "@/lib/actions/sales-inbox";
-import { CONTROL_REASON_MAX, CONVERSATION_CONTROL_LABEL, type ControlStamp, type ConversationControl } from "@/lib/sales-chatbot/conversation-control-shared";
+import { AI_HOLD_LABEL, cooldownClock, cooldownRemainingMs, formatCountdown, HUMAN_COOLDOWN_MINUTES, type AiHoldView } from "@/lib/sales-chatbot/ai-hold-shared";
+import { CONTROL_REASON_MAX, type ControlStamp, type ConversationControl } from "@/lib/sales-chatbot/conversation-control-shared";
 import { formatDateTime } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
 /**
- * THANH AI ↔ NGƯỜI của một hội thoại (conversation-control-shared.ts): ba nút — AI tự trả lời · AI gợi ý · Tiếp quản — và một
- * câu nói rõ ai đang trả lời khách. Tiếp quản hỏi lý do (không bắt buộc) ngay tại chỗ, vào nhật ký. Mọi phép kiểm ở máy chủ;
- * hai người bấm cùng lúc ⇒ người sau được báo tải lại. Nút xuống dòng trên điện thoại.
+ * THANH AI ↔ NGƯỜI của một hội thoại. Trạng thái TƯỜNG MINH do máy chủ tính (`ai-hold-shared.ts::aiHoldOf`):
+ *  · AI_ACTIVE      — AI đang trả lời. Nút: AI gợi ý · Tiếp quản.
+ *  · HUMAN_COOLDOWN — AI đang nhường sau câu tay của nhân viên: ĐỒNG HỒ ĐẾM NGƯỢC theo giờ MÁY CHỦ (`serverNow` bù lệch đồng hồ
+ *                     trình duyệt). Nút: «Cho AI tiếp tục ngay» · Tiếp quản.
+ *  · HUMAN_TAKEOVER — người tiếp quản / cần người xử lý: AI im không thời hạn. Nút: «Trả lại cho AI».
+ * Tiếp quản hỏi lý do (không bắt buộc) ngay tại chỗ, vào nhật ký. Mọi phép kiểm ở máy chủ; hai người bấm cùng lúc ⇒ người sau
+ * được báo tải lại. Nút xuống dòng trên điện thoại.
  */
 export function ConversationControlBar({
   conversationId,
   channel,
   control,
-  botYields,
+  hold,
   handoffReason,
   canWork,
 }: {
   conversationId: string;
   channel: string;
   control: ControlStamp | null;
-  botYields: boolean;
+  hold: AiHoldView;
   handoffReason: string | null;
   canWork: boolean;
 }) {
+  const router = useRouter();
   const [pending, setPending] = useState<ConversationControl | null>(null);
   const [asking, setAsking] = useState(false);
   const [reason, setReason] = useState("");
   const mode: ConversationControl = control?.mode ?? "AUTO";
+
+  // Đồng hồ đếm ngược: chỉ chạy sau khi gắn vào trang (bản dựng sẵn ở máy chủ không mang số giây). Lệch = giờ máy chủ − giờ trình
+  // duyệt lúc nhận ảnh chụp, nên máy nhân viên nhanh / chậm vài phút không làm sai số còn lại.
+  const skew = useRef<number | null>(null);
+  const [nowMs, setNowMs] = useState<number | null>(null);
+  const refreshed = useRef(false);
+  useEffect(() => {
+    if (hold.state !== "HUMAN_COOLDOWN") return;
+    skew.current = null;
+    const tick = () => {
+      const t = Date.now();
+      if (skew.current === null) skew.current = new Date(hold.serverNow).getTime() - t;
+      setNowMs(t);
+    };
+    tick();
+    const id = window.setInterval(tick, 1000);
+    return () => window.clearInterval(id);
+  }, [hold.state, hold.serverNow]);
+  const remaining = hold.state === "HUMAN_COOLDOWN" && nowMs !== null ? cooldownRemainingMs(hold.until, nowMs, skew.current ?? 0) : null;
+  const lapsed = remaining === 0;
+  useEffect(() => {
+    // Hết nhường ⇒ đọc lại trạng thái từ máy chủ một lần (máy chủ mới là nơi quyết định).
+    if (lapsed && !refreshed.current) {
+      refreshed.current = true;
+      router.refresh();
+    }
+  }, [lapsed, router]);
 
   const apply = async (next: ConversationControl, why?: string) => {
     setPending(next);
@@ -41,7 +75,15 @@ export function ConversationControlBar({
         toast.error(r.error);
         return;
       }
-      toast.success(next === "HUMAN" ? "Đã tiếp quản — AI im cho tới khi bạn trả lại" : next === "COPILOT" ? "AI chỉ gợi ý, bạn gửi" : "Đã trả lại cho AI");
+      toast.success(
+        next === "HUMAN"
+          ? "Đã tiếp quản — AI im cho tới khi bạn trả lại"
+          : next === "COPILOT"
+            ? "AI chỉ gợi ý, bạn gửi"
+            : hold.state === "HUMAN_COOLDOWN"
+              ? "AI tiếp tục ngay — trả lời từ tin khách kế tiếp"
+              : "Đã trả lại cho AI",
+      );
       setAsking(false);
       setReason("");
     } finally {
@@ -50,48 +92,70 @@ export function ConversationControlBar({
   };
 
   const status =
-    mode === "HUMAN"
-      ? `Người đang xử lý — AI im${control?.byName ? ` · ${control.byName}` : ""}${control?.at ? ` · ${formatDateTime(control.at)}` : ""}${control?.reason ? ` · «${control.reason}»` : ""}`
-      : mode === "COPILOT"
-        ? "AI chỉ soạn gợi ý, không gửi — bạn gửi khách."
-        : botYields
-          ? `AI đang nhường cho người — ${handoffReason ?? "cần người xử lý"}`
-          : "AI đang tự trả lời khách này. Bạn gửi tin thì AI nhường 30 phút; bấm «Tiếp quản» để AI im hẳn.";
-  const human = mode === "HUMAN" || botYields;
-  // Nút đang chọn: chế độ ghi đè của hội thoại; không ghi đè thì «AI tự trả lời» chỉ khi AI không đang nhường (nhường 30 phút
-  // sau một câu của nhân viên KHÔNG phải tiếp quản — không nút nào sáng, để người thấy còn một bước «Tiếp quản» hẳn).
-  const active: ConversationControl | null = mode !== "AUTO" ? mode : botYields ? null : "AUTO";
+    hold.state === "HUMAN_TAKEOVER"
+      ? hold.cause === "TAKEOVER"
+        ? `${AI_HOLD_LABEL.HUMAN_TAKEOVER} cho tới khi trả lại${control?.byName ? ` · ${control.byName}` : ""}${control?.at ? ` · ${formatDateTime(control.at)}` : ""}${control?.reason ? ` · «${control.reason}»` : ""}`
+        : `Cần người xử lý — ${handoffReason ?? "AI đã chuyển người"}. AI im cho tới khi trả lại.`
+      : hold.state === "HUMAN_COOLDOWN"
+        ? lapsed
+          ? "Hết nhường — AI trả lời từ tin khách kế tiếp."
+          : `${AI_HOLD_LABEL.HUMAN_COOLDOWN}${hold.cause === "AI_DOWN" ? " (AI tạm hỏng, tự thử lại)" : " — nhân viên vừa gửi tay"} · tự trả lời lại lúc ${cooldownClock(hold.until)}`
+        : mode === "COPILOT"
+          ? "AI chỉ soạn gợi ý, không gửi — bạn gửi khách."
+          : `${AI_HOLD_LABEL.AI_ACTIVE}. Bạn gửi tin thì AI nhường ${HUMAN_COOLDOWN_MINUTES} phút; bấm «Tiếp quản» để AI im hẳn.`;
+  const tone = hold.state === "HUMAN_TAKEOVER" ? "rose" : (hold.state === "HUMAN_COOLDOWN" && !lapsed) || mode === "COPILOT" ? "amber" : "violet";
 
-  const btn = (key: ConversationControl, icon: React.ReactNode, label: string, onClick: () => void) => (
+  const btn = (key: string, target: ConversationControl, icon: React.ReactNode, label: string, onClick: () => void, active = false) => (
     <button
       key={key}
       type="button"
       data-testid={`control-${key}`}
-      aria-pressed={active === key}
-      disabled={!canWork || pending !== null || active === key}
+      aria-pressed={active}
+      disabled={!canWork || pending !== null || active}
       onClick={onClick}
       className={cn(
         "inline-flex h-7 items-center gap-1 rounded-md border px-2 text-[12px] font-medium transition-colors disabled:cursor-default",
-        active === key ? "border-transparent bg-foreground text-background" : "bg-background hover:bg-muted disabled:opacity-50",
+        active ? "border-transparent bg-foreground text-background" : "bg-background hover:bg-muted disabled:opacity-50",
       )}
     >
-      {pending === key ? <Loader2 className="size-3.5 animate-spin" /> : icon}
+      {pending === target ? <Loader2 className="size-3.5 animate-spin" /> : icon}
       {label}
     </button>
   );
 
+  const buttons: React.ReactNode[] = [];
+  if (hold.state === "AI_ACTIVE") buttons.push(btn("AUTO", "AUTO", <Bot className="size-3.5" />, "AI tự trả lời", () => void apply("AUTO"), mode === "AUTO"));
+  else if (hold.state === "HUMAN_COOLDOWN") buttons.push(btn("RESUME", "AUTO", <Play className="size-3.5" />, "Cho AI tiếp tục ngay", () => void apply("AUTO")));
+  else buttons.push(btn("RETURN", "AUTO", <Bot className="size-3.5" />, "Trả lại cho AI", () => void apply("AUTO")));
+  if (channel !== "WEB") buttons.push(btn("COPILOT", "COPILOT", <Sparkles className="size-3.5" />, "AI gợi ý", () => void apply("COPILOT"), mode === "COPILOT" && hold.state !== "HUMAN_TAKEOVER"));
+  buttons.push(btn("HUMAN", "HUMAN", <Hand className="size-3.5" />, mode === "HUMAN" ? "Đang tiếp quản" : "Tiếp quản", () => setAsking((v) => !v), mode === "HUMAN"));
+
   return (
-    <div className={cn("space-y-1.5 border-b px-4 py-1.5 text-[12px]", human ? "bg-rose-50 text-rose-900 dark:bg-rose-950/40 dark:text-rose-200" : mode === "COPILOT" ? "bg-amber-50 text-amber-900 dark:bg-amber-950/40 dark:text-amber-200" : "bg-violet-50 text-violet-900 dark:bg-violet-950/40 dark:text-violet-200")} data-testid="conversation-control">
+    <div
+      className={cn(
+        "space-y-1.5 border-b px-4 py-1.5 text-[12px]",
+        tone === "rose" && "bg-rose-50 text-rose-900 dark:bg-rose-950/40 dark:text-rose-200",
+        tone === "amber" && "bg-amber-50 text-amber-900 dark:bg-amber-950/40 dark:text-amber-200",
+        tone === "violet" && "bg-violet-50 text-violet-900 dark:bg-violet-950/40 dark:text-violet-200",
+      )}
+      data-testid="conversation-control"
+      data-hold-state={hold.state}
+    >
       <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5">
         <span className="flex min-w-0 items-start gap-1.5">
-          <Bot className="mt-0.5 size-3.5 shrink-0" />
-          <span className="break-words">{status}</span>
+          {hold.state === "HUMAN_COOLDOWN" ? <Timer className="mt-0.5 size-3.5 shrink-0" /> : hold.state === "HUMAN_TAKEOVER" ? <Hand className="mt-0.5 size-3.5 shrink-0" /> : <Bot className="mt-0.5 size-3.5 shrink-0" />}
+          <span className="break-words">
+            {remaining !== null && !lapsed ? (
+              <span className="mr-1.5 inline-block rounded bg-amber-200/70 px-1.5 font-mono font-semibold tabular-nums dark:bg-amber-900/60" data-testid="cooldown-countdown" aria-label="Thời gian AI còn nhường">
+                {formatCountdown(remaining)}
+              </span>
+            ) : null}
+            {status}
+          </span>
         </span>
         {canWork ? (
           <div className="flex flex-wrap items-center gap-1" role="group" aria-label="Ai trả lời khách">
-            {btn("AUTO", <Bot className="size-3.5" />, mode === "AUTO" && !botYields ? CONVERSATION_CONTROL_LABEL.AUTO : "Trả lại AI", () => void apply("AUTO"))}
-            {channel !== "WEB" ? btn("COPILOT", <Sparkles className="size-3.5" />, "AI gợi ý", () => void apply("COPILOT")) : null}
-            {btn("HUMAN", <Hand className="size-3.5" />, mode === "HUMAN" ? "Đang tiếp quản" : "Tiếp quản", () => setAsking((v) => !v))}
+            {buttons}
           </div>
         ) : null}
       </div>

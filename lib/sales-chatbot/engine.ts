@@ -18,6 +18,7 @@
 import { createHash } from "node:crypto";
 import { and, asc, desc, eq, gte, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
+import { AI_DOWN_HANDOFF_REASON as AI_DOWN_REASON_TEXT } from "@/lib/sales-chatbot/ai-hold-shared";
 import type { AiImage } from "@/lib/ai/images";
 import { estimateCostUsd, getAiProvider, type AiBlock, type AiMessage, type AiProvider } from "@/lib/ai/provider";
 import { aiDisabledReason } from "@/lib/ai/router";
@@ -637,7 +638,8 @@ async function notifyProviderFailure(lastError: string | null, now: Date): Promi
 /** Câu gửi khách khi model không trả chữ nào dùng được (rỗng, hoặc bị bộ lọc suy luận chặn hết) — một chữ cho mọi đường. */
 export const EMPTY_REPLY_TEXT = "Dạ, anh/chị nói rõ hơn giúp em nhé.";
 
-export const AI_DOWN_HANDOFF_REASON = "AI tạm không trả lời được — nhân viên liên hệ lại khách";
+/** Chữ ở ai-hold-shared.ts — hàm quyết định «AI nhường» so đúng chữ này. */
+export const AI_DOWN_HANDOFF_REASON = AI_DOWN_REASON_TEXT;
 
 function aiDownReply(cfg: SalesChatbotConfig): string {
   return `Xin lỗi, em đang gặp trục trặc. ${cfg.handoff.message}`;
@@ -1022,7 +1024,7 @@ export async function resumeConversationToAi(id: string): Promise<boolean> {
   const [row] = await db
     .update(c)
     // Trả lại cho AI cũng gỡ chế độ «người xử lý» của hội thoại (conversation-control-shared.ts) — nếu không, bot vẫn im.
-    .set({ status: "OPEN", handoffReason: null, state: sql`${c.state} - 'handoff' - 'control'`, updatedAt: new Date() })
+    .set({ status: "OPEN", handoffReason: null, state: sql`${c.state} - 'handoff' - 'control'`, humanCooldownUntil: null, updatedAt: new Date() })
     .where(and(eq(c.id, id), eq(c.status, "HANDOFF")))
     .returning({ id: c.id });
   return Boolean(row);
