@@ -47,6 +47,9 @@ import {
 import { invalidateSubscriptions, readSubscriptionAddons, readSubscriptionTerms } from "@/lib/billing/standing";
 import { ENTITLEMENT_SPEC } from "@/lib/entitlements/kinds";
 import { VN_BANK_BY_BIN, bankNameOf } from "@/lib/constants/vn-banks";
+import { BILLING_RECEIVER_KEY, getBillingReceiver, parseReceiver, type BillingReceiverView } from "@/lib/billing/receiver";
+import { creditTopupFromBankRow } from "@/lib/billing/ai-balance";
+import { extractTopupCodes } from "@/lib/billing/ai-balance-rules";
 import { HOME_PLAN_KEY, listPlans, planKeyOf, type PlanRow } from "@/lib/entitlements/check";
 import { buildVietQrPayload, toTransferText } from "@/lib/payroll/vietqr";
 import { parseCommercial, type PlanCommercial } from "@/lib/pricing/catalog";
@@ -74,7 +77,6 @@ import { platformOperatorDenial } from "@/lib/platform-ui/module-toggle";
 
 export type BillingResult = { ok: true; message: string } | { error: string };
 
-export const BILLING_RECEIVER_KEY = "platform.billing.receiver";
 /** Số ngày lùi lại khi quét sổ ngân hàng tìm tiền thuê bao. Giao dịch cũ hơn đối chiếu tay. */
 export const BILLING_RECONCILE_LOOKBACK_DAYS = 60;
 /** Trần giá một tháng khi người vận hành sửa giá (chặn gõ thừa số 0). */
@@ -113,29 +115,8 @@ const vnd = (n: number) => `${n.toLocaleString("vi-VN")} ₫`;
 
 // ─────────────────────────── Tài khoản nhận tiền ───────────────────────────
 
-export type BillingReceiver = { bin: string; accountNumber: string; accountName: string };
-export type BillingReceiverView = BillingReceiver & { bankName: string };
-
-function parseReceiver(value: unknown): BillingReceiver | null {
-  if (!value || typeof value !== "object") return null;
-  const v = value as Record<string, unknown>;
-  const bin = typeof v.bin === "string" ? v.bin.trim() : "";
-  const accountNumber = typeof v.accountNumber === "string" ? v.accountNumber.trim() : "";
-  const accountName = typeof v.accountName === "string" ? v.accountName.trim() : "";
-  if (!/^\d{6}$/.test(bin) || !/^[0-9A-Za-z]{4,19}$/.test(accountNumber) || !accountName) return null;
-  return { bin, accountNumber, accountName };
-}
-
-export async function getBillingReceiver(): Promise<BillingReceiverView | null> {
-  try {
-    const pdb = await getPlatformDb();
-    const row = await pdb.query.platformSettings.findFirst({ where: eq(schema.platformSettings.key, BILLING_RECEIVER_KEY) });
-    const r = parseReceiver(row?.value);
-    return r ? { ...r, bankName: bankNameOf(r.bin) } : null;
-  } catch {
-    return null;
-  }
-}
+// Đọc + kiểm hợp lệ ở `lib/billing/receiver.ts` (đọc chung với tiền nạp Số dư AI); đường ghi ở đây.
+export { BILLING_RECEIVER_KEY, getBillingReceiver, type BillingReceiver, type BillingReceiverView } from "@/lib/billing/receiver";
 
 export async function setBillingReceiver(user: SessionUser, raw: { bin?: unknown; accountNumber?: unknown; accountName?: unknown; reason?: unknown }): Promise<BillingResult> {
   const denial = platformOperatorDenial(user);
@@ -556,7 +537,8 @@ export async function reconcileBillingPayments(opts: { bankRefs?: readonly strin
       and(
         gt(bt.amount, 0),
         gte(bt.txnAt, since),
-        sql`regexp_replace(upper(${bt.description}), '[^A-Z0-9]', '', 'g') like '%ERPHD%'`,
+        // Mã thuê bao `ERPHD…` HOẶC mã phiếu nạp Số dư AI `ERPNAP…` (0233) — một lượt đọc sổ, mỗi giao dịch xử lý đúng một lần.
+        sql`(regexp_replace(upper(${bt.description}), '[^A-Z0-9]', '', 'g') like '%ERPHD%' or regexp_replace(upper(${bt.description}), '[^A-Z0-9]', '', 'g') like '%ERPNAP%')`,
         // Câu con tương quan: viết tên bảng tường minh — `${bt.bankRef}` trong exists() in ra cột trần (bộ nhớ drizzle).
         sql`not exists (select 1 from platform_billing_payments p where p.bank_ref = "bank_transactions"."bank_ref")`,
         opts.bankRefs ? inArray(bt.bankRef, [...opts.bankRefs]) : undefined,
@@ -567,7 +549,21 @@ export async function reconcileBillingPayments(opts: { bankRefs?: readonly strin
   for (const row of rows) {
     out.scanned++;
     const codes = extractTransferCodes(row.description);
-    if (codes.length === 0) continue;
+    if (codes.length === 0) {
+      // Tiền nạp Số dư AI: cùng sổ ngân hàng, cùng bảng ghi-một-lần (`bank_ref`), hàm cộng tiền ở `lib/billing/ai-balance.ts`.
+      const topups = extractTopupCodes(row.description);
+      if (topups.length === 0) continue;
+      try {
+        const credited = await creditTopupFromBankRow(row, topups, now);
+        if (credited === null) continue;
+        out.recorded++;
+        if (credited === "NO_INVOICE") out.unmatched++;
+        else out.matched++;
+      } catch (error) {
+        out.errors.push(`${row.bankRef}: ${error instanceof Error ? error.message : String(error)}`);
+      }
+      continue;
+    }
     try {
       const candidates = await pdb.select().from(inv).where(inArray(inv.transferCode, codes));
       const invoice = candidates.find((c) => c.status === "OPEN") ?? candidates[0] ?? null;

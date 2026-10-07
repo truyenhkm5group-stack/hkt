@@ -539,6 +539,7 @@ import { testChotDonAssets, testChotDonBrand, testMissedOrdersCalculator, testOr
 import { testDataExport } from "./data-export.test";
 import { testPilotOps } from "./pilot-ops.test";
 import { testPlatformBilling } from "./platform-billing.test";
+import { testAiBalance } from "./ai-balance.test";
 import { testPricingBilling } from "./pricing-billing.test";
 import { testSaasPlatform } from "./saas-platform.test";
 import { testPricingV1 } from "./pricing-v1.test";
@@ -2876,6 +2877,9 @@ async function main() {
   // (tạo hộ qua /start) / `pop-b` (tự cấp, tự dọn).
   await testPilotOps();
   await testPlatformBilling();
+  // Số dư AI + nạp QR (0233): sổ cái chỉ ghi thêm, phiếu nạp ERPNAP, tiền về cộng đúng một lần, tự lành, cô lập tổ chức —
+  // hai tổ chức THẬT `aib-a` / `aib-b`, tự cấp, tự dọn; khôi phục tài khoản nhận tiền trong finally.
+  await testAiBalance();
   // Nền móng giá & thu phí (0222): gói cấu hình được, tính năng, hạn mức mềm / cứng, đồng hồ đo, sự kiện trùng, kinh tế đơn vị —
   // ba tổ chức THẬT `prc-a` / `prc-b` / `prc-c`, tự cấp, tự dọn; khôi phục cấu hình gói + ngưỡng trong finally.
   await testPricingBilling();

@@ -1625,6 +1625,13 @@
       "when": 1791400440000,
       "tag": "0232_platform_ai_usage_telemetry",
       "breakpoints": true
+    },
+    {
+      "idx": 233,
+      "version": "7",
+      "when": 1791487000000,
+      "tag": "0233_ai_balance_ledger",
+      "breakpoints": true
     }
   ]
 }

@@ -5278,14 +5278,122 @@ export const platformBillingPayments = pgTable(
     description: text("description").notNull().default(""),
     transferCode: text("transfer_code").notNull(),
     invoiceId: text("invoice_id"),
+    /** Phiếu nạp Số dư AI mà khoản tiền này khớp (0233 · `ERPNAP…`) — `NULL` với tiền thuê bao. */
+    paymentIntentId: text("payment_intent_id"),
     orgCode: text("org_code"),
+    /**
+     * `TOPUP_CREDITED` = đã cộng vào Số dư AI, khớp gọn · `TOPUP_CREDITED_REVIEW` = ĐÃ cộng nguyên số tiền thật nhận được
+     * nhưng lệch số tiền / phiếu đã trả / đã huỷ — người vận hành xem lại, khách không phải chờ ai duyệt.
+     */
     outcome: text("outcome").notNull(),
     resolvedAt: ts("resolved_at"),
     resolvedByEmail: text("resolved_by_email"),
     resolvedNote: text("resolved_note"),
     createdAt: createdAt(),
   },
-  (t) => [uniqueIndex("platform_billing_payments_bank_ref_key").on(t.bankRef), check("platform_billing_payments_outcome_check", sql`${t.outcome} IN ('MATCHED','UNDERPAID','INVOICE_NOT_OPEN','NO_INVOICE')`)],
+  (t) => [
+    uniqueIndex("platform_billing_payments_bank_ref_key").on(t.bankRef),
+    check("platform_billing_payments_outcome_check", sql`${t.outcome} IN ('MATCHED','UNDERPAID','INVOICE_NOT_OPEN','NO_INVOICE','TOPUP_CREDITED','TOPUP_CREDITED_REVIEW')`),
+  ],
+);
+
+/**
+ * SỐ DƯ AI (0233 · docs/saas/AI_BALANCE_V1.md) — mặt phẳng điều khiển, chỉ thật ở CSDL NHÀ. Một dòng mỗi tổ chức: trạng
+ * thái + ngưỡng báo số dư thấp do khách khai. KHÔNG có cột số dư: số dư = Σ `platform_ai_ledger_entries` (dựng lại được).
+ */
+export const platformAiAccounts = pgTable(
+  "platform_ai_accounts",
+  {
+    orgCode: text("org_code").primaryKey(),
+    status: text("status").notNull().default("ACTIVE"),
+    /** Ngưỡng báo số dư thấp khách tự khai — `NULL` = theo mặc định `LOW_BALANCE_DEFAULT_VND`. */
+    lowBalanceVnd: integer("low_balance_vnd"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    check("platform_ai_accounts_status_check", sql`${t.status} IN ('ACTIVE','FROZEN')`),
+    check("platform_ai_accounts_low_check", sql`${t.lowBalanceVnd} IS NULL OR ${t.lowBalanceVnd} BETWEEN 0 AND 100000000`),
+  ],
+);
+
+/**
+ * SỔ CÁI SỐ DƯ AI — CHỈ GHI THÊM (0233). Mọi biến động tiền là MỘT dòng mang khoá chống trùng (`idempotency_key`, duy nhất
+ * toàn sổ): webhook gửi lại 10 lần vẫn chỉ cộng một lần. Không dòng nào bị sửa / xoá — đường ghi DUY NHẤT là
+ * `lib/billing/ai-balance.ts::postAiLedgerEntry` (`tests/ai-balance.test.ts` quét mã nguồn). Lớp tiền `CASH` (khách chuyển)
+ * tách khỏi `PROMO` (nền tảng tặng — không phải doanh thu) cho kế toán. Dấu tiền theo loại: ràng buộc `sign_check`.
+ */
+export const platformAiLedgerEntries = pgTable(
+  "platform_ai_ledger_entries",
+  {
+    id: id(),
+    orgCode: text("org_code").notNull(),
+    entryType: text("entry_type").notNull(),
+    fundsClass: text("funds_class").notNull(),
+    amountVnd: integer("amount_vnd").notNull(),
+    idempotencyKey: text("idempotency_key").notNull(),
+    sourceType: text("source_type").notNull(),
+    /** Chứng từ của nguồn: id phiếu nạp · mã giao dịch ngân hàng · khoá khách AI · id nhật ký người vận hành. */
+    sourceRef: text("source_ref"),
+    /** Dòng `AI_USAGE`: phiên bản giá + đơn giá + số đơn vị lúc trừ — đổi bảng giá về sau không đổi dòng cũ. */
+    priceVersionKey: text("price_version_key"),
+    unitPriceVnd: integer("unit_price_vnd"),
+    units: integer("units"),
+    note: text("note"),
+    actorUserId: text("actor_user_id"),
+    actorEmail: text("actor_email"),
+    occurredAt: ts("occurred_at").notNull().defaultNow(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    uniqueIndex("platform_ai_ledger_entries_idem_key").on(t.idempotencyKey),
+    index("platform_ai_ledger_entries_org_idx").on(t.orgCode, t.occurredAt),
+    check("platform_ai_ledger_entries_type_check", sql`${t.entryType} IN ('TOPUP','PROMO_CREDIT','AI_USAGE','REFUND','ADJUSTMENT','EXPIRY')`),
+    check("platform_ai_ledger_entries_class_check", sql`${t.fundsClass} IN ('CASH','PROMO')`),
+    check("platform_ai_ledger_entries_source_check", sql`${t.sourceType} IN ('PAYMENT_INTENT','BANK_PAYMENT','AI_CUSTOMER','OPERATOR','SYSTEM')`),
+    check(
+      "platform_ai_ledger_entries_sign_check",
+      sql`(${t.entryType} = 'TOPUP' AND ${t.fundsClass} = 'CASH' AND ${t.amountVnd} > 0) OR (${t.entryType} = 'PROMO_CREDIT' AND ${t.fundsClass} = 'PROMO' AND ${t.amountVnd} > 0) OR (${t.entryType} = 'REFUND' AND ${t.fundsClass} = 'CASH' AND ${t.amountVnd} < 0) OR (${t.entryType} IN ('AI_USAGE','EXPIRY') AND ${t.amountVnd} < 0) OR (${t.entryType} = 'ADJUSTMENT' AND ${t.amountVnd} <> 0)`,
+    ),
+    check("platform_ai_ledger_entries_max_check", sql`abs(${t.amountVnd}) <= 1000000000`),
+  ],
+);
+
+/**
+ * PHIẾU NẠP (0233) — yêu cầu thanh toán động: số tiền + tài khoản nhận + mã chuyển khoản DUY NHẤT `ERPNAP…` nằm sẵn trong
+ * mã VietQR, khách không gõ nội dung tay. Tiền về khớp theo mã (`reconcileBillingPayments`, cùng đường với tiền thuê bao);
+ * cổng thanh toán là một cột (`provider`) để thêm cổng khác không phải đổi lõi.
+ */
+export const platformPaymentIntents = pgTable(
+  "platform_payment_intents",
+  {
+    id: id(),
+    orgCode: text("org_code").notNull(),
+    purpose: text("purpose").notNull().default("AI_TOPUP"),
+    provider: text("provider").notNull().default("SEPAY_BANK_TRANSFER"),
+    amountVnd: integer("amount_vnd").notNull(),
+    referenceCode: text("reference_code").notNull(),
+    status: text("status").notNull().default("PENDING"),
+    expiresAt: ts("expires_at").notNull(),
+    paidAt: ts("paid_at"),
+    paidAmountVnd: integer("paid_amount_vnd"),
+    bankRef: text("bank_ref"),
+    ledgerEntryId: text("ledger_entry_id"),
+    createdByUserId: text("created_by_user_id"),
+    createdByEmail: text("created_by_email"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex("platform_payment_intents_reference_key").on(t.referenceCode),
+    index("platform_payment_intents_org_idx").on(t.orgCode, t.createdAt),
+    check("platform_payment_intents_purpose_check", sql`${t.purpose} IN ('AI_TOPUP')`),
+    check("platform_payment_intents_provider_check", sql`${t.provider} IN ('SEPAY_BANK_TRANSFER')`),
+    check("platform_payment_intents_status_check", sql`${t.status} IN ('PENDING','PAID','EXPIRED','CANCELLED')`),
+    check("platform_payment_intents_amount_check", sql`${t.amountVnd} > 0`),
+    check("platform_payment_intents_code_check", sql`${t.referenceCode} ~ '^ERPNAP[2-9A-HJ-NP-Z]{6}$'`),
+    check("platform_payment_intents_paid_check", sql`(${t.status} = 'PAID') = (${t.paidAt} IS NOT NULL)`),
+  ],
 );
 
 /**
