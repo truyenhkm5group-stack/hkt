@@ -1,4 +1,4 @@
--- 0233 · SỐ DƯ AI + PHIẾU NẠP QR (docs/saas/AI_BALANCE_V1.md · quyết định chủ shop 08/10/2026).
+-- 0235 · SỐ DƯ AI + PHIẾU NẠP QR (docs/saas/AI_BALANCE_V1.md · quyết định chủ shop 08/10/2026).
 --
 --  · `platform_ai_accounts`: một dòng mỗi tổ chức (trạng thái + ngưỡng báo số dư thấp). KHÔNG có cột số dư — số dư là
 --    TỔNG sổ cái, dựng lại được bất cứ lúc nào.

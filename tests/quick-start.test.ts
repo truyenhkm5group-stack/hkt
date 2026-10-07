@@ -229,7 +229,10 @@ async function testQuickSignupFlow() {
   assert.equal(admin?.role, "ADMIN");
   assert.deepEqual((await findIdentity("PHONE", "84912345601")).map((h) => h.orgCode), [QS_A]);
   assert.deepEqual((await findIdentity("EMAIL", "chu@qs-a.vn")).map((h) => h.orgCode), [QS_A]);
-  assert.equal(await readSubscriptionTerms(QS_A, { fresh: true }), null, "chưa khai tài khoản nhận tiền ⇒ không bật dùng thử có hạn");
+  // L5 (0234): thuê bao + mốc dùng thử vẫn được CHỤP (cổng AI cần mốc hết hạn), nhưng KHÔNG bật thu phí ⇒ không bao giờ khoá chỉ xem.
+  const termsA = await readSubscriptionTerms(QS_A, { fresh: true });
+  assert.equal(termsA?.billingEnabled ?? false, false, "chưa khai tài khoản nhận tiền ⇒ không bật thu phí (không khoá)");
+  assert.equal(billingStanding(termsA, vnDate(new Date())).kind, "NOT_BILLED", "chưa khai tài khoản nhận tiền ⇒ «Chưa thu phí», không khoá chỉ xem");
 
   // Bấm lại / trình duyệt gửi lại ⇒ không đẻ cửa hàng thứ hai với mã khác.
   const again = await quickSignup({ storeName: "QS Bánh Mì Một", businessType: "food", phone: "0912 345 601", email: "chu@qs-a.vn", password: PW }, who, { issue });

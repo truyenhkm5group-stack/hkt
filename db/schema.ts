@@ -5186,12 +5186,21 @@ export const platformSubscriptions = pgTable(
     addons: jsonb("addons").$type<Record<string, unknown>>().notNull().default({}),
     /** Thông tin xuất hoá đơn VAT khách khai (0192, `lib/billing/addons.ts::InvoiceInfo`). `NULL` = chưa khai. */
     invoiceInfo: jsonb("invoice_info").$type<Record<string, unknown>>(),
+    /**
+     * 0234 · ĐIỀU KHOẢN DÙNG THỬ của thuê bao (lib/billing/service.ts::initWorkspaceBilling), chụp từ phiên bản giá lúc cấp phát
+     * (`platform_plan_prices.trial_days`). `trial_ends_at` là MỐC cổng AI so trực tiếp (lib/pricing/ai-entitlement.ts). NULL = không
+     * dùng thử / dòng cũ — KHÔNG backfill: tổ chức dùng thử từ trước 0234 đọc `paid_through` như cũ.
+     */
+    trialStartedAt: ts("trial_started_at"),
+    trialEndsAt: ts("trial_ends_at"),
+    trialDays: integer("trial_days"),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
   (t) => [
     check("platform_subscriptions_grace_check", sql`${t.graceDays} BETWEEN 0 AND 60`),
     check("platform_subscriptions_enabled_check", sql`${t.billingEnabled} = false OR ${t.paidThrough} IS NOT NULL`),
+    check("platform_subscriptions_trial_check", sql`(${t.trialDays} IS NULL OR ${t.trialDays} BETWEEN 1 AND 90) AND (${t.trialEndsAt} IS NULL OR ${t.trialStartedAt} IS NULL OR ${t.trialEndsAt} > ${t.trialStartedAt})`),
   ],
 );
 
@@ -5788,7 +5797,7 @@ export const platformPricePins = pgTable(
     pinnedByEmail: text("pinned_by_email"),
     pinnedAt: ts("pinned_at").notNull().defaultNow(),
   },
-  (t) => [index("platform_price_pins_version_idx").on(t.versionKey), check("platform_price_pins_source_check", sql`${t.source} IN ('MIGRATION_0228','INVOICE_PAID','OPERATOR','TEST')`)],
+  (t) => [index("platform_price_pins_version_idx").on(t.versionKey), check("platform_price_pins_source_check", sql`${t.source} IN ('MIGRATION_0228','INVOICE_PAID','OPERATOR','TEST','PROVISIONING')`)],
 );
 
 /** Nhật ký nền tảng: ai đổi module / cờ / tổ chức nào, trước → sau, vì sao. Chỉ THÊM. */
@@ -10530,6 +10539,32 @@ export const orgChannelPages = pgTable(
   ],
 );
 
+// ═══ ĐƯỜNG NHẬN TIN CANONICAL CỦA MỖI PAGE (0233 · lib/sales-chatbot/channel-ownership.ts) ═══
+//
+// Một page có thể nối qua Pancake VÀ qua Meta trực tiếp; chỉ MỘT đường được kích AI. Trước bảng này «đường nào thắng» là luật
+// cứng trong mã (Pancake luôn thắng). Nay mỗi page một dòng: `META_DIRECT` | `PANCAKE_WEBHOOK`, kèm NGUỒN (`BACKFILL` — 0233 chép
+// đúng đường đang chạy hôm nay · `CONNECT` — người nối Messenger cho page chưa chạy qua Pancake · `MANUAL` — người bấm chuyển
+// đường) và LÝ DO. Page chưa có dòng ⇒ luật cũ (Pancake thắng) — không đoán. Chỉ đọc / ghi qua channel-ownership.ts.
+export const channelPageModes = pgTable(
+  "channel_page_modes",
+  {
+    id: id(),
+    pageId: text("page_id").notNull(),
+    mode: text("mode").notNull(),
+    source: text("source").notNull(),
+    reason: text("reason").notNull(),
+    /** Người bấm (`users.id`, luật 34) — `NULL` = máy (lượt backfill của 0233). */
+    setByUserId: text("set_by_user_id"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex("channel_page_modes_page_uq").on(t.pageId),
+    check("channel_page_modes_mode_check", sql`${t.mode} in ('META_DIRECT','PANCAKE_WEBHOOK')`),
+    check("channel_page_modes_source_check", sql`${t.source} in ('BACKFILL','CONNECT','MANUAL')`),
+  ],
+);
+
 // ═══ PHASE 7 — BLUEPRINT + MẪU NGÀNH (docs/platform/phase-7-contracts.md mục 3) ═══
 //
 // Sổ cài đặt của gói metadata trong CSDL tổ chức. `blueprint_items` giữ hai băm của phép so ba chiều X4: băm của mục
@@ -11024,10 +11059,19 @@ export const salesChatInbound = pgTable(
     attempts: integer("attempts").notNull().default(0),
     nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true }),
     lastError: text("last_error"),
+    /**
+     * 0233 — HAI ĐƯỜNG NHẬN TIN CỦA MỘT PAGE (lib/sales-chatbot/channel-ownership.ts): đường đã ghi dòng tin KHÁCH này
+     * (`PANCAKE` · `MESSENGER`) và mã người gửi CHUẨN (PSID của Facebook). Dùng để khử trùng một tin khách tới qua CẢ HAI webhook
+     * (cùng page + cùng người gửi + cùng chữ, khác đường, trong cửa sổ ngắn). `NULL` ở dòng cũ / tin phía page = không khử trùng.
+     */
+    transport: text("transport"),
+    senderId: text("sender_id"),
     createdAt: createdAt(),
   },
   (t) => [
     uniqueIndex("sales_chat_inbound_message_key").on(t.messageId),
+    index("sales_chat_inbound_sender_idx").on(t.pageId, t.senderId, t.createdAt).where(sql`${t.senderId} is not null`),
+    check("sales_chat_inbound_transport_check", sql`${t.transport} IS NULL OR ${t.transport} IN ('PANCAKE','MESSENGER')`),
     index("sales_chat_inbound_thread_idx").on(t.pageId, t.threadId, t.status),
     index("sales_chat_inbound_created_idx").on(t.createdAt),
     check("sales_chat_inbound_status_check", sql`${t.status} IN ('PENDING','DONE','SKIPPED','DEAD')`),

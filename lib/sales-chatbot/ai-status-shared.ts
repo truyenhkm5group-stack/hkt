@@ -14,7 +14,7 @@ import { AI_HOLD_LABEL, cooldownClock, HUMAN_COOLDOWN_MINUTES, type AiHoldView }
  * Thứ tự mã = thứ tự đường xử lý đi qua (cổng page → chế độ vận hành → AI theo page → module → công tắc bot → công tắc người
  * vận hành → hạn mức → nguồn AI → chứng cứ lượt gọi gần nhất), nên lý do ĐẦU là lý do khách đang gặp.
  */
-export const AI_BLOCK_CODES = ["PAGE_OFF", "PAGE_SHADOW", "ORG_OBSERVE", "PAGE_AI_OFF", "ORG_COPILOT", "MODULE_OFF", "BOT_DISABLED", "KILL_SWITCH", "QUOTA", "NO_AI_SOURCE", "AI_PROVIDER_ERROR"] as const;
+export const AI_BLOCK_CODES = ["PAGE_OFF", "PAGE_SHADOW", "ORG_OBSERVE", "PAGE_AI_OFF", "ORG_COPILOT", "MODULE_OFF", "BOT_DISABLED", "KILL_SWITCH", "WORKSPACE_SUSPENDED", "TRIAL_EXPIRED", "TRIAL_QUOTA_EXHAUSTED", "QUOTA", "NO_AI_SOURCE", "AI_PROVIDER_ERROR"] as const;
 export type AiBlockCode = (typeof AI_BLOCK_CODES)[number];
 
 export type AiBlock = { code: AiBlockCode; reason: string; fixHref: string | null; fixLabel: string | null };
@@ -29,6 +29,10 @@ export const AI_BLOCK_FIX: Record<AiBlockCode, { href: string; label: string } |
   MODULE_OFF: { href: "/settings/modules", label: "Bật module AI bán hàng" },
   BOT_DISABLED: { href: "/ai/sales-chatbot#bot-config", label: "Bật bot trong Cấu hình" },
   KILL_SWITCH: null,
+  // Cổng gói (L5 · lib/pricing/ai-entitlement.ts): dùng thử hết hạn / hết lượt ⇒ chọn gói; đình chỉ là việc của người vận hành.
+  WORKSPACE_SUSPENDED: null,
+  TRIAL_EXPIRED: { href: "/settings/plan", label: "Chọn gói" },
+  TRIAL_QUOTA_EXHAUSTED: { href: "/settings/plan", label: "Nâng gói" },
   QUOTA: { href: "/ai/sales-chatbot#bot-config", label: "Khoá AI / gói dịch vụ" },
   NO_AI_SOURCE: { href: "/ai/sales-chatbot#bot-config", label: "Cấu hình nguồn AI" },
   AI_PROVIDER_ERROR: { href: "/ai/sales-chatbot#bot-config", label: "Kiểm tra khoá AI" },
@@ -58,6 +62,8 @@ export type ControlStatusInput = {
   lapsed: boolean;
   /** Định dạng mốc «dd/mm/yyyy HH:mm» (client truyền `formatDateTime`). */
   formatAt: (iso: string) => string;
+  /** Số phút AI nhường của workspace (`humanCooldownMinutes()`); thiếu ⇒ mặc định. */
+  cooldownMinutes?: number;
 };
 
 /**
@@ -84,7 +90,7 @@ export function controlBarStatus(i: ControlStatusInput): { state: AiDisplayState
   }
   if (state === "AI_BLOCKED") return { state, text: `AI KHÔNG trả lời khách này — ${i.blocks[0].reason}`, note: i.blocks.length > 1 ? `Còn: ${i.blocks.slice(1).map((b) => b.reason).join(" · ")}` : null };
   if (i.mode === "COPILOT") return { state, text: "AI chỉ soạn gợi ý, không gửi — bạn gửi khách.", note: null };
-  return { state, text: `${AI_HOLD_LABEL.AI_ACTIVE}. Bạn gửi tin thì AI nhường ${HUMAN_COOLDOWN_MINUTES} phút; bấm «Tiếp quản» để AI im hẳn.`, note: null };
+  return { state, text: `${AI_HOLD_LABEL.AI_ACTIVE}. Bạn gửi tin thì AI nhường ${i.cooldownMinutes ?? HUMAN_COOLDOWN_MINUTES} phút; bấm «Tiếp quản» để AI im hẳn.`, note: null };
 }
 
 // ─────────────────────────── Dấu vết từng tin khách ───────────────────────────

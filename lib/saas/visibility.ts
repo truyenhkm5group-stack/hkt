@@ -221,6 +221,10 @@ const CUSTOMER_AI_BLOCK: Record<AiBlockCode, { code: AiBlockCode; reason: string
   MODULE_OFF: { code: "MODULE_OFF", reason: "Module AI bán hàng chưa bật", fix: { href: "/settings/modules", label: "Bật module AI bán hàng" } },
   BOT_DISABLED: { code: "BOT_DISABLED", reason: "Bot đang tắt", fix: { href: "/ai/sales-chatbot#bot-config", label: "Bật bot" } },
   QUOTA: { code: "QUOTA", reason: "Shop đã dùng hết lượt khách AI xử lý của gói", fix: { href: "/settings/plan", label: "Xem gói & mua thêm" } },
+  // Cổng gói (L5): dùng thử hết lượt / hết hạn ⇒ AI dừng tự trả lời, hộp thư + gửi tay vẫn chạy; tạm ngưng = người vận hành tạm dừng.
+  TRIAL_QUOTA_EXHAUSTED: { code: "TRIAL_QUOTA_EXHAUSTED", reason: "Bạn đã sử dụng hết lượt AI của gói hiện tại.", fix: { href: "/settings/plan", label: "Chọn gói" } },
+  TRIAL_EXPIRED: { code: "TRIAL_EXPIRED", reason: "Đã hết thời gian dùng thử — chọn gói để AI tiếp tục trả lời khách.", fix: { href: "/settings/plan", label: "Chọn gói" } },
+  WORKSPACE_SUSPENDED: { code: "WORKSPACE_SUSPENDED", reason: "Tài khoản shop đang tạm ngưng — liên hệ đội hỗ trợ.", fix: null },
   KILL_SWITCH: { code: "NO_AI_SOURCE", reason: CUSTOMER_AI_NOT_READY_LABEL, fix: null },
   NO_AI_SOURCE: { code: "NO_AI_SOURCE", reason: CUSTOMER_AI_NOT_READY_LABEL, fix: null },
   AI_PROVIDER_ERROR: { code: "NO_AI_SOURCE", reason: CUSTOMER_AI_INCIDENT_LABEL, fix: null },
