@@ -45,18 +45,18 @@
     "0232": "2026-10-07T08:56:46.509Z"
   },
   "created_at": "2026-10-07T06:14:32.231Z",
-  "updated_at": "2026-10-07T09:59:55.517Z",
-  "last_heartbeat": "2026-10-07T09:59:55.517Z",
+  "updated_at": "2026-10-07T11:31:47.431Z",
+  "last_heartbeat": "2026-10-07T11:31:47.431Z",
   "definition_of_done": [],
   "handoff": {
     "branch": "feat/tech-worker-onboarding",
-    "sha": "6188134ee9b1c6068bec210e93d9dc0146780262",
-    "at": "2026-10-07T09:59:55.517Z",
-    "actor": "DESKTOP-56TH98Y:wt-worker-onboard",
+    "sha": "3c96996560854f0b83312c59198b568406c9495f",
+    "at": "2026-10-07T11:31:47.431Z",
+    "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
     "title": "Cài worker /tech một nút cho chủ shop không kỹ thuật",
     "summary": "",
     "tests": [
-      "lượt sửa 3: chặn tệp chỉ dẫn agent mọi độ sâu + public/ ngoài write-docs · typecheck · eslint · lint · npm test sau commit TẤT CẢ KIỂM THỬ ĐẠT · đột biến 4/4 đỏ"
+      "review bảo mật 3 lượt (PASS @8298bd3e) + sửa cuối 6188134e (CLAUDE.md/AGENTS.md/.claude lồng, public/) đọc bởi Lead; tích hợp: gộp main #633, 0231→0232; migration-journal 232 mục + upgrade-path 86→232 + tech-worker-onboarding ĐẠT; typecheck sạch"
     ]
   }
 }
