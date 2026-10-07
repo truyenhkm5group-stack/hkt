@@ -425,3 +425,4 @@
 {"at":"2026-10-07T21:00:02.213Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"ai-balance-v1","detail":"feat/ai-balance-v1 @ dcf9c7853677 · 3 lệnh kiểm thử"}
 {"at":"2026-10-07T21:00:11.223Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"bot-order-status","detail":"feat/bot-order-status @ 3abd8e66649f · 4 lệnh kiểm thử"}
 {"at":"2026-10-07T21:10:20.448Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"VERIFY_PASS","mission":"conversation-delivered-profit","detail":"PASS fd678891a496f2bc47f1179c98f3368a3a433040 2026-10-07T21:10:17.215Z"}
+{"at":"2026-10-07T21:10:39.829Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DONE","mission":"conversation-delivered-profit","detail":"#646 gộp fd678891, lên production 07/10 21:05Z (run 37684290837), hậu kiểm ĐẠT: health · migration 235 · /login"}
