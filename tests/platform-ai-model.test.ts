@@ -28,7 +28,7 @@ import { applyPlatformAiPolicyAsScript, controlStage, estimateSwitch, loadPlatfo
 import { abVerdict, AB_RULES, armStats, combineVerdicts, NO_OBS, quantile, readPlatformModelAbForScript, syncArmStats, syncVerdict, type AbConversation, type SyncConversation } from "@/lib/ai-usage/platform-ai-ab";
 import { recordAiUsage, setAiUsageCaptureForBench } from "@/lib/ai-usage/ledger";
 import { usageDetail } from "@/lib/sales-chatbot/engine";
-import { addressMatches, scoreSyncCase, summarizeSyncBench } from "@/lib/sales-chatbot/order-sync-bench";
+import { addressMatches, scoreSyncCase, summarizeSyncBench, syncDiagOf } from "@/lib/sales-chatbot/order-sync-bench";
 import { scoreSalesPoint, situationsOf, summarizeSalesBench } from "@/lib/sales-chatbot/sales-bench";
 import { policyForWorkload, readPlatformAiPolicies } from "@/lib/ai-usage/platform-ai-policy";
 import { withRequestOverrides } from "@/lib/ai-builder/provider";
@@ -630,6 +630,8 @@ async function testStickyAndVerdict() {
   ]);
   assert.deepEqual([sum.recall, sum.falseNegative, sum.falsePositive, sum.falsePositiveByLabel.DELETED_ORDER, sum.decisionAccuracy], [0.5, 1, 1, "1/1", 1 / 3]);
   assert.equal(sum.avgThinking, 800 / 3);
+  assert.deepEqual(syncDiagOf({ kind: "NEW_ORDER" }, { kind: "SKIP", reason: "Món không có trong danh mục đang bán (2 dòng)" }), { reply: "NEW_ORDER", decision: "SKIP: Món không có trong danh mục đang bán (# dòng)" });
+  assert.deepEqual(syncDiagOf(null, null), { reply: "INVALID", decision: "—" });
 
   // Benchmark Sales Agent — chấm thuần.
   assert.deepEqual(situationsOf("Chả mực bao nhiêu 1kg vậy shop?").includes("price"), true);
