@@ -3,7 +3,7 @@
   "mission_id": "conversation-delivered-profit",
   "title": "Lãi gộp đã giao theo nhãn AI tự bán / AI góp công / Người bán (Master Mission P0.5)",
   "business_goal": "",
-  "status": "RUNNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -25,7 +25,22 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-07T20:20:00.128Z",
-  "updated_at": "2026-10-07T20:20:00.128Z",
-  "last_heartbeat": "2026-10-07T20:20:00.128Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-07T20:20:09.175Z",
+  "last_heartbeat": "2026-10-07T20:20:09.175Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "feat/conversation-delivered-profit",
+    "sha": "21bd377d9b8fd863ccf78976f320fb87b0a76259",
+    "at": "2026-10-07T20:20:09.175Z",
+    "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+    "title": "Lãi gộp đã giao theo AI tự bán / AI góp công / Người bán — giá vốn qua đường chung của báo cáo lợi nhuận",
+    "summary": "Màn Hiệu quả AI: lãi gộp đã giao theo ba nhãn qua đường giá vốn chung orderCogsFast; đơn chưa có giá vốn đứng riêng, không lãi giả.",
+    "tests": [
+      "tsc --noEmit: sạch",
+      "eslint tệp sửa: sạch",
+      "tests/order-attribution.test.ts (thuần + tổ chức thật PGlite): đạt",
+      "tests/pricing-v1.test.ts: đạt",
+      "đột biến 4/4 bị bắt"
+    ]
+  }
 }
