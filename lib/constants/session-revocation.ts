@@ -114,7 +114,13 @@ export type SessionDenyReason =
    * Tổ chức quá hạn thanh toán và hết ân hạn (0187, `lib/billing/rules.ts`) — CHỈ XEM: mọi lượt ĐỌC vẫn đi, lượt GHI bị
    * từ chối. Không đưa về `/login` (phiên hợp lệ) mà về `/billing-locked`, nơi nói ai trả được và trả ở đâu.
    */
-  | "BILLING_LOCKED";
+  | "BILLING_LOCKED"
+  /**
+   * Workspace mang vỏ app Chốt Đơn Tự Động (`lib/constants/saas-nav.ts::salesAgentShell`) mở một trang ERP nội bộ không thuộc
+   * vỏ. Phiên hợp lệ — không về `/login` mà về trang nhà của vỏ (hộp thư). Tham số dưới đây chỉ để câu có mặt nếu nó lọt tới
+   * `/login`.
+   */
+  | "SHELL_RESTRICTED";
 
 /** Tham số `?reason=` trên `/login` cho từng nguyên nhân. */
 export const DENY_REASON_PARAM: Record<SessionDenyReason, string> = {
@@ -125,6 +131,7 @@ export const DENY_REASON_PARAM: Record<SessionDenyReason, string> = {
   MODULE_DISABLED: "module-disabled",
   HOST_MISMATCH: "host-mismatch",
   BILLING_LOCKED: "billing-locked",
+  SHELL_RESTRICTED: "shell-restricted",
 };
 
 /** Trang giải thích "module chưa bật" — `requireUser()` chuyển tới đây kèm `?m=<khoá module>`. */
@@ -143,6 +150,7 @@ export const DENY_REASON_MESSAGE: Record<string, string> = {
   "org-inactive": "Tổ chức của phiên đăng nhập này đang tạm ngừng hoặc không còn tồn tại. Liên hệ quản trị viên của tổ chức.",
   "module-disabled": "Chức năng này chưa được bật cho tổ chức của bạn. Liên hệ quản trị viên của tổ chức.",
   "host-mismatch": "Phiên đăng nhập này thuộc một ERP khác địa chỉ đang mở. Đăng nhập bằng tài khoản của ERP ở địa chỉ này.",
+  "shell-restricted": "Trang này thuộc ERP đầy đủ, không có trong ứng dụng Chốt Đơn Tự Động của cửa hàng bạn.",
   "billing-locked": "Tổ chức đang ở chế độ chỉ xem vì quá hạn thanh toán. Quản trị của tổ chức gia hạn ở Hệ thống → Gói & thanh toán.",
   // KHÔNG dùng chung câu "đã bị thu hồi": người vừa tự bấm đổi mật khẩu mà đọc câu ấy sẽ tưởng
   // mình bị quản trị đá ra. Cùng một cơ chế, hai tình huống, hai câu.
@@ -158,7 +166,7 @@ export const DENY_REASON_MESSAGE: Record<string, string> = {
  * trang trong, trang đó gọi `requireUser()` → bị từ chối → đẩy ngược ra `/login` → **vòng lặp vô
  * tận**. Mọi nguyên nhân từ chối phải nằm trong danh sách này.
  */
-export const LOGIN_REASONS_STAY: readonly string[] = ["invalid", "inactive", "revoked", "org-inactive", "module-disabled", "host-mismatch", "billing-locked", REASON_PASSWORD_CHANGED];
+export const LOGIN_REASONS_STAY: readonly string[] = ["invalid", "inactive", "revoked", "org-inactive", "module-disabled", "host-mismatch", "billing-locked", "shell-restricted", REASON_PASSWORD_CHANGED];
 
 export function loginShouldStay(reason: string | undefined): boolean {
   return !!reason && LOGIN_REASONS_STAY.includes(reason);

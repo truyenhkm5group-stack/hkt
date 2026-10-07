@@ -239,6 +239,10 @@ const ROUTES = [
   "/tech/workers",
   "/integrations",
   "/settings/users",
+  // Vỏ app Chốt Đơn Tự Động (lib/constants/saas-nav.ts): «Cài đặt» gọn + «Gói dịch vụ» là mục của thanh tám mục — trang lõi,
+  // mở được ở nhà nên lá chắn phải mở thử (bài tests/smoke-coverage.test.ts đọc cả sổ khai của vỏ).
+  "/settings/shop",
+  "/settings/plan",
   "/audit",
   // Nền tảng đa tổ chức: bảng module đọc qua bộ phân giải năng lực; `/platform` mở CSDL của MỌI
   // tổ chức để đo sức khoẻ — tuyến nặng nhất khi có nhiều tổ chức, nên phải nằm trong lá chắn.
