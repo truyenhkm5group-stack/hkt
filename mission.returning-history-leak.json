@@ -3,7 +3,7 @@
   "mission_id": "returning-history-leak",
   "title": "Chặn lộ lịch sử mua của khách khác qua SĐT gõ tay (bảo mật)",
   "business_goal": "",
-  "status": "RUNNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -22,7 +22,20 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-07T21:17:58.572Z",
-  "updated_at": "2026-10-07T21:17:58.572Z",
-  "last_heartbeat": "2026-10-07T21:17:58.572Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-07T21:18:07.030Z",
+  "last_heartbeat": "2026-10-07T21:18:07.030Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "fix/returning-history-leak",
+    "sha": "a8f067de09cb704c91157d4ae963dc636ad81724",
+    "at": "2026-10-07T21:18:07.030Z",
+    "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+    "title": "Chặn lộ lịch sử mua của khách khác qua SĐT gõ tay — chỉ nhắc đơn cũ khi danh tính đã xác minh",
+    "summary": "Khối khách cũ chỉ mang lịch sử mua khi danh tính xác minh qua kênh (FB_ID) hoặc hồ sơ do chính hội thoại tạo; mức PHONE và lookup_customer không còn số đơn / ngày / món của chủ SĐT.",
+    "tests": [
+      "tests/self-service-journey (gồm kịch bản tấn công SĐT gõ tay): đạt",
+      "hội thoại vàng 12/12 không đổi",
+      "tsc + eslint tệp sửa: sạch"
+    ]
+  }
 }
