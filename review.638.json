@@ -1,8 +1,8 @@
 {
   "pr": 638,
-  "sha": "e470cc02bc614c7fe4c630888bb64ee2512c41d3",
+  "sha": "f99919f8602a847825acddca05aade6ecd057b7b",
   "verdict": "PASS",
   "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
-  "at": "2026-10-07T16:35:11.008Z",
-  "note": "PASS @0305c8aa + delta tích hợp: gộp main (#637 #639 #642) + SALES_AGENT_CHANNELS_HREF = /ai/channels (khoá bằng CHANNELS_ROUTE); bài liên quan chạy riêng ĐẠT"
+  "at": "2026-10-07T16:46:12.377Z",
+  "note": "PASS @e470cc02 + sửa CI smoke-coverage (SHELL_PHAN_NHOM: /ai/channels thay /ai/sales-chatbot/messenger, kèm bài kiểm thật của trang)"
 }
