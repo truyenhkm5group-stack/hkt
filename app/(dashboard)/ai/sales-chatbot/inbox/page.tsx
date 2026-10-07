@@ -3,6 +3,7 @@ import { PageHeader } from "@/components/page-header";
 import { requirePermission } from "@/lib/auth/session";
 import { formatTimeAgo, formatVND } from "@/lib/format";
 import { assignableUsers, inboxAssignees, inboxPages, listInbox, loadInboxThread } from "@/lib/sales-chatbot/inbox";
+import { customerFacing, customerInboxThread } from "@/lib/saas/visibility";
 import { listLabels } from "@/lib/sales-chatbot/inbox-labels";
 import { INBOX_CHANNEL_LABEL, INBOX_CHANNELS, INBOX_FILTER_LABEL, INBOX_FILTERS, INBOX_HANDLER_LABEL, INBOX_LIST_MAX, INBOX_PERIOD_LABEL, INBOX_PERIODS, type InboxChannel, type InboxFilter, type InboxHandler, type InboxPeriod, type InboxRow } from "@/lib/sales-chatbot/inbox-shared";
 import { organizationLevelPack } from "@/lib/sales-chatbot/levels";
@@ -113,7 +114,9 @@ export default async function SalesInboxPage({ searchParams }: { searchParams: P
   const pages = await inboxPages();
   const page = pages.some((p) => p.id === one("pg")) ? one("pg") : null;
   // Mở hội thoại TRƯỚC (đánh dấu đã đọc) rồi mới đọc danh sách — không thì hội thoại đang mở vẫn hiện «chưa đọc».
-  const thread = selected ? await loadInboxThread(user, selected) : null;
+  // Workspace KHÁCH: lý do AI không trả lời + dấu vết từng tin lọc ở MÁY CHỦ trước khi vào props (lib/saas/visibility.ts).
+  const loaded = selected ? await loadInboxThread(user, selected) : null;
+  const thread = loaded && "thread" in loaded && customerFacing(user.organization) ? { ...loaded, thread: customerInboxThread(loaded.thread) } : loaded;
   const [list, users, assignees, pack] = await Promise.all([listInbox(user, { filter, channel, q, label, page, phone, level, assignee, period, from, to, limit, handler }), assignableUsers(user), inboxAssignees(user), organizationLevelPack()]);
   const levels = levelsForPack(pack);
   const advanced = Boolean(channel || label || assignee || period || phone === "NONE" || handler);

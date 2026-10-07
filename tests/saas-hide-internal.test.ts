@@ -26,19 +26,25 @@ import { withOrganization } from "@/lib/platform/context";
 import { getHomeOrganization, invalidateOrganizations } from "@/lib/platform/organizations";
 import { provisionOrganization } from "@/lib/platform/provision";
 import { DEFAULT_SALES_CHATBOT_CONFIG, SALES_CHATBOT_SETTING_KEY, type ChatView, type SalesChatbotConfig } from "@/lib/sales-chatbot/config";
-import { loadSalesChatbotConfig } from "@/lib/sales-chatbot/engine";
+import { loadSalesChatbotConfig, openConversation } from "@/lib/sales-chatbot/engine";
 import type { SalesHealth } from "@/lib/sales-chatbot/health-shared";
+import type { MessageTrace } from "@/lib/sales-chatbot/ai-status-shared";
+import { loadInboxThread } from "@/lib/sales-chatbot/inbox";
+import type { InboxThread } from "@/lib/sales-chatbot/inbox-shared";
 import { loadAiSalesPerformance } from "@/lib/sales-chatbot/performance";
 import { saveSalesChatbotConfig } from "@/lib/sales-chatbot/settings";
 import { loadOperatorOrgAiConfig, operateOrgAiConnection, saveOrgChatbotEngine } from "@/lib/saas/operator-ai";
 import {
   CHATBOT_ENGINE_FIELDS,
   CUSTOMER_AI_INCIDENT_LABEL,
+  customerAiBlocks,
   customerAiState,
   customerChatbotConfig,
   customerChatView,
   customerConnectionsView,
   customerFacing,
+  customerInboxThread,
+  customerMessageTrace,
   customerPlaybookRun,
   customerReadinessChecks,
   customerSafeAiError,
@@ -64,6 +70,61 @@ export function internalKeyPaths(v: unknown, re: RegExp = INTERNAL_KEY, at = "$"
     }
   }
   return out;
+}
+
+/** Mọi CHUỖI (giá trị, không phải khoá) ở bất kỳ độ sâu nào khớp `re` — câu lỗi gốc, tên nhà cung cấp, mã kỹ thuật. */
+export function stringHits(v: unknown, re: RegExp, at = "$", out: string[] = []): string[] {
+  if (typeof v === "string") {
+    if (re.test(v)) out.push(`${at} = «${v.slice(0, 120)}»`);
+  } else if (Array.isArray(v)) v.forEach((x, i) => stringHits(x, re, `${at}[${i}]`, out));
+  else if (v && typeof v === "object") for (const [k, x] of Object.entries(v as Record<string, unknown>)) stringHits(x, re, `${at}.${k}`, out);
+  return out;
+}
+
+/** Chữ khách không được đọc trong payload hộp thư: mã nhà cung cấp, tên nhà cung cấp / model, «token / provider / model», khoá AI. */
+const INBOX_FORBIDDEN = /PROVIDER|AI_MODEL|AI_CONTEXT|KILL_SWITCH|NOT_CONFIGURED|\b(token|provider|model)\b|gemini|openai|anthropic|claude|khoá AI|nguồn AI|RESOURCE_EXHAUSTED|429/i;
+
+export function testHideInternalInbox() {
+  const blocks = customerAiBlocks([
+    { code: "BOT_DISABLED", reason: "Bot bán hàng đang TẮT (Cấu hình → Bật bot)", fixHref: "/ai/sales-chatbot#bot-config", fixLabel: "Bật bot trong Cấu hình" },
+    { code: "NO_AI_SOURCE", reason: "Không có nguồn AI chạy được: Kết nối «Google Gemini — khoá AI của tổ chức» chưa bật", fixHref: "/ai/sales-chatbot#bot-config", fixLabel: "Cấu hình nguồn AI" },
+    { code: "AI_PROVIDER_ERROR", reason: "Lỗi model / nhà cung cấp AI: 429 RESOURCE_EXHAUSTED gemini-3.5-flash", fixHref: "/ai/sales-chatbot#bot-config", fixLabel: "Kiểm tra khoá AI" },
+    { code: "QUOTA", reason: "Hết hạn mức AI: PLATFORM_CREDIT_USED", fixHref: "/ai/sales-chatbot#bot-config", fixLabel: "Khoá AI / gói dịch vụ" },
+  ]);
+  assert.deepEqual(stringHits(blocks, INBOX_FORBIDDEN), [], "lý do chặn cho khách: không mã / câu lỗi / tên nhà cung cấp");
+  assert.deepEqual(blocks.map((b) => b.code), ["BOT_DISABLED", "NO_AI_SOURCE", "QUOTA"], "lỗi nguồn AI gộp MỘT dòng; lý do khác giữ nguyên thứ tự");
+  assert.ok(blocks[0].fixHref === "/ai/sales-chatbot#bot-config" && blocks[2].fixHref === "/settings/plan", "lý do khách sửa được có nút tới đúng chỗ");
+  assert.ok(blocks[1].reason === "AI chưa sẵn sàng — đội ngũ đang xử lý" && blocks[1].fixHref === null, "NO_AI_SOURCE với khách: đội ngũ xử lý, không nút cấu hình AI");
+  const kill = customerAiBlocks([{ code: "AI_PROVIDER_ERROR", reason: "x", fixHref: null, fixLabel: null }]);
+  assert.equal(kill[0].reason, CUSTOMER_AI_INCIDENT_LABEL);
+
+  const trace = (code: string | null, detail: string | null): MessageTrace => ({ steps: [{ stage: "RECEIVED", state: "DONE", at: "2026-10-07T01:00:00.000Z", source: "sales_chat_inbound.created_at" }, { stage: "COMPOSING", state: "FAILED", at: null, source: "platform_ai_usage.status" }], code, detail, outcome: "STOPPED" });
+  for (const [code, want] of [["AI_MODEL_ERROR", "AI gặp sự cố"], ["AI_PROVIDER_AUTH_ERROR", "AI gặp sự cố"], ["AI_PROVIDER_QUOTA", "AI gặp sự cố"], ["AI_CONTEXT_ERROR", "AI gặp sự cố"], ["AI_PROVIDER_NOT_CONFIGURED", "Chờ cấu hình AI"], ["AI_SKIPPED_DISABLED", "Bot đang tắt"], ["UNKNOWN: ghi chú lạ", "Chưa xác định"]] as const) {
+    const t = customerMessageTrace(trace(code, "429 RESOURCE_EXHAUSTED: gemini-3.5-flash quota"));
+    assert.equal(t.code, want, `${code} ⇒ «${want}»`);
+    assert.ok(t.detail === null && t.steps.every((s) => s.source === ""), "không lỗi gốc, không tên bảng / cột");
+    assert.deepEqual(stringHits(t, INBOX_FORBIDDEN), [], `${code}: dấu vết của khách sạch`);
+  }
+  assert.equal(customerMessageTrace(trace(null, null)).code, null, "đi trọn ⇒ không mã");
+
+  // Cả hội thoại: duyệt đệ quy payload sau bộ lọc.
+  const thread = {
+    id: "c1",
+    channel: "FANPAGE",
+    channelLabel: "Facebook / Instagram",
+    status: "OPEN",
+    handoffReason: null,
+    botYields: false,
+    aiBlocks: [{ code: "AI_PROVIDER_ERROR" as const, reason: "Lỗi model / nhà cung cấp AI: invalid x-goog-api-key", fixHref: "/ai/sales-chatbot#bot-config", fixLabel: "Kiểm tra khoá AI" }],
+    items: [
+      { key: "i:1", at: "2026-10-07T01:00:00.000Z", side: "CUSTOMER" as const, text: "Còn hàng không shop", images: [], author: null, trace: trace("AI_PROVIDER_AUTH_ERROR", "401 API key not valid (gemini)") },
+      { key: "i:2", at: "2026-10-07T01:01:00.000Z", side: "BOT" as const, text: "Dạ còn ạ", images: [], author: null },
+    ],
+  } as unknown as InboxThread;
+  const ct = customerInboxThread(thread);
+  assert.deepEqual(stringHits(ct, INBOX_FORBIDDEN), [], "payload hộp thư của khách sạch");
+  assert.equal(ct.customerView, true, "màn hình biết không in mã máy");
+  assert.ok(stringHits(thread, INBOX_FORBIDDEN).length > 0, "đối chứng: bản nhà còn mã / lỗi gốc");
 }
 
 async function cleanup() {
@@ -172,6 +233,9 @@ const CUSTOMER_FILES = [
   "app/(dashboard)/ai/sales-chatbot/order-sync-panel.tsx",
   "app/(dashboard)/ai/sales-chatbot/playbook-panel.tsx",
   "app/(dashboard)/ai/sales-chatbot/resume-button.tsx",
+  "app/(dashboard)/ai/sales-chatbot/inbox/control-bar.tsx",
+  "app/(dashboard)/ai/sales-chatbot/inbox/message-trace.tsx",
+  "app/(dashboard)/ai/sales-chatbot/inbox/thread-view.tsx",
   "app/(dashboard)/ai/sales-chatbot/performance/page.tsx",
   "app/(dashboard)/ai/sales-chatbot/cockpit/page.tsx",
   "app/(dashboard)/settings/connections/page.tsx",
@@ -242,6 +306,7 @@ export function testHideInternalStatic() {
   assert.ok(/customerConnectionsView\(full\)/.test(read("lib/connectors/service.ts")), "danh mục kết nối lọc DTO ở máy chủ");
   assert.ok(/keepStoredEngineFields\(before, raw\)/.test(read("lib/sales-chatbot/settings.ts")), "đường lưu cấu hình bot giữ động cơ AI của khách");
   const actions = read("lib/actions/sales-chatbot.ts");
+  assert.ok(read("app/(dashboard)/ai/sales-chatbot/inbox/page.tsx").includes('const thread = loaded && "thread" in loaded && customerFacing(user.organization) ? { ...loaded, thread: customerInboxThread(loaded.thread) } : loaded;'), "hộp thư: hội thoại của khách lọc ở máy chủ trước khi vào props");
   assert.equal((actions.match(/testView\(user,/g) ?? []).length, 3, "cả hai action khung thử trả view qua bộ lọc của khách");
 
   // (d) Cockpit: chi tiết đòi ai_sales:manage; phần nhà cung cấp không tới khách.
@@ -303,6 +368,16 @@ export async function testHideInternalLive() {
       const perf = await loadAiSalesPerformance(ORG, { days: 30, withMoney: aiPerformanceWithMoney(admin, true) });
       assert.ok(perf.cost === null && perf.human === null && perf.economics.aiCostPerConversationVnd === null && perf.economics.revenuePerAiCost === null, "khách: không chi phí AI / ROI theo tiền AI");
 
+      // Hộp thư: hội thoại THẬT của tổ chức khách qua đúng loader + bộ lọc của trang (bot tắt, khoá chưa bật ⇒ có lý do chặn).
+      const conv = await openConversation("WEB", { visitorKey: "hi-visitor-0123456789abcdef" });
+      const loaded = await loadInboxThread(admin, conv.id);
+      assert.ok(loaded.ok && "thread" in loaded, JSON.stringify(loaded).slice(0, 300));
+      const raw = loaded.thread;
+      assert.ok(raw.aiBlocks.length > 0, "tiền đề: có lý do chặn");
+      const shown = customerInboxThread(raw);
+      assert.deepEqual(stringHits(shown, INBOX_FORBIDDEN), [], `payload hộp thư thật của khách sạch: ${stringHits(shown, INBOX_FORBIDDEN).join(" | ")}`);
+      assert.deepEqual(internalKeyPaths(shown), [], "không khoá nội bộ trong payload hộp thư");
+
       // (e) Khách KHÔNG gọi được lõi của người vận hành.
       assert.ok("error" in (await saveOrgChatbotEngine(admin, { orgCode: ORG, reason: "khách tự sửa", engine: { model: "gpt-bia" } })), "khách không ghi được động cơ AI qua cửa vận hành");
       assert.ok(!(await loadOperatorOrgAiConfig(admin, ORG)).ok, "khách không đọc được khối vận hành");
@@ -357,6 +432,7 @@ export async function testHideInternalLive() {
 export async function testSaasHideInternal() {
   testHideInternalPure();
   testHideInternalStatic();
+  testHideInternalInbox();
   await testHideInternalLive();
   console.log("✓ Che dữ liệu AI nội bộ khỏi khách: DTO máy chủ (chatbot · gói · kết nối · hiệu quả · cockpit · khung thử), lưu cấu hình giữ động cơ AI, quét mã nguồn, khối vận hành");
 }

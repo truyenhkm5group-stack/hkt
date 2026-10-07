@@ -265,7 +265,7 @@ export function InboxThreadView({
         </header>
 
         {/* ── AI hay người trả lời khách: AI_ACTIVE · HUMAN_COOLDOWN (đếm ngược, «Cho AI tiếp tục ngay») · HUMAN_TAKEOVER («Trả lại cho AI») ── */}
-        <ConversationControlBar key={`${thread.control?.mode ?? "AUTO"}:${thread.status}:${thread.aiHold.state}:${thread.aiHold.until ?? ""}`} conversationId={thread.id} channel={thread.channel} control={thread.control} hold={thread.aiHold} blocks={thread.aiBlocks} handoffReason={thread.handoffReason} canWork={thread.canWork} />
+        <ConversationControlBar key={`${thread.control?.mode ?? "AUTO"}:${thread.status}:${thread.aiHold.state}:${thread.aiHold.until ?? ""}`} conversationId={thread.id} channel={thread.channel} control={thread.control} hold={thread.aiHold} blocks={thread.aiBlocks} hideCodes={thread.customerView === true} handoffReason={thread.handoffReason} canWork={thread.canWork} />
 
         {/* ── Tin nhắn ── */}
         <div className="relative min-h-0 flex-1">

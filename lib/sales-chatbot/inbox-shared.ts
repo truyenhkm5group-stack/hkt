@@ -125,6 +125,11 @@ export type InboxThread = {
   aiHold: AiHoldView;
   /** Lý do AI KHÔNG trả lời (cổng page · chế độ vận hành · module · bot tắt · nguồn AI…) — `ai-status-shared.ts`. */
   aiBlocks: AiBlock[];
+  /**
+   * Bản lọc cho workspace KHÁCH (`lib/saas/visibility.ts::customerInboxThread`): lý do chặn / dấu vết đã thành lời thường, không
+   * mã kỹ thuật, không lỗi gốc — màn hình không in mã máy. Vắng = bản đầy đủ (workspace nhà).
+   */
+  customerView?: boolean;
   /** Chế độ AI của RIÊNG hội thoại (Tiếp quản / AI gợi ý); `null` = theo chế độ của tổ chức (conversation-control-shared.ts). */
   control: ControlStamp | null;
   customer: { id: string | null; name: string; phone: string | null; address: string | null; province: string | null };

@@ -17,6 +17,8 @@ import type { ChatView, SalesBotConnector, SalesChatbotConfig } from "@/lib/sale
 import type { HealthCheck, SalesHealth } from "@/lib/sales-chatbot/health-shared";
 import type { PlaybookRun } from "@/lib/sales-chatbot/playbook-shared";
 import type { ReadinessCheck } from "@/lib/sales-chatbot/readiness-shared";
+import { traceCodeLabel, type AiBlock, type AiBlockCode, type MessageTrace } from "@/lib/sales-chatbot/ai-status-shared";
+import type { InboxThread } from "@/lib/sales-chatbot/inbox-shared";
 
 export type VisibilityOrg = { isHome?: boolean } | null | undefined;
 
@@ -197,5 +199,69 @@ function customerConnectorRow(r: ConnectorView): ConnectorView {
     fields: r.fields,
     connection: r.connection,
     ...(r.mode === "ELSEWHERE" ? { configWhere: href ? `Cấu hình tại ${href}` : "Cấu hình ở màn hình nghiệp vụ tương ứng." } : {}),
+  };
+}
+
+// ───────────────────────── HỘP THƯ: lý do AI không trả lời + dấu vết từng tin (#633) ─────────────────────────
+
+/** Câu «AI chưa sẵn sàng» cho khách — khách không tự cấu hình AI nữa, đội ngũ vận hành xử lý. */
+export const CUSTOMER_AI_NOT_READY_LABEL = "AI chưa sẵn sàng — đội ngũ đang xử lý";
+
+/**
+ * Lý do AI KHÔNG trả lời — bản cho KHÁCH. Lý do khách tự sửa được nói bằng lời thường kèm đúng chỗ sửa; lý do thuộc nguồn AI
+ * (công tắc người vận hành · không nguồn AI · lỗi nhà cung cấp) gộp về MỘT mã `NO_AI_SOURCE` với câu chung, không lối sửa —
+ * không câu lỗi gốc, không tên khoá / nhà cung cấp / model. `null` = không bao giờ tới khách (cổng page của workspace nhà).
+ */
+const CUSTOMER_AI_BLOCK: Record<AiBlockCode, { code: AiBlockCode; reason: string; fix: { href: string; label: string } | null }> = {
+  PAGE_OFF: { code: "PAGE_OFF", reason: "Page chưa bật cho bot", fix: { href: "/ai/sales-chatbot#page-runtime", label: "Bật page cho bot" } },
+  PAGE_SHADOW: { code: "PAGE_SHADOW", reason: "Page đang chạy thử — bot chỉ soạn, không gửi khách", fix: { href: "/ai/sales-chatbot#page-runtime", label: "Đổi chế độ page" } },
+  ORG_OBSERVE: { code: "ORG_OBSERVE", reason: "Shop đang ở chế độ Quan sát — nhân viên trả lời khách", fix: { href: "/ai/sales-chatbot#operating-mode", label: "Chế độ vận hành" } },
+  PAGE_AI_OFF: { code: "PAGE_AI_OFF", reason: "AI đang tắt cho page này", fix: { href: "/ai/sales-chatbot/messenger", label: "Bật AI cho page" } },
+  ORG_COPILOT: { code: "ORG_COPILOT", reason: "Shop đang ở chế độ Gợi ý — AI chỉ soạn, nhân viên gửi", fix: { href: "/ai/sales-chatbot#operating-mode", label: "Chế độ vận hành" } },
+  MODULE_OFF: { code: "MODULE_OFF", reason: "Module AI bán hàng chưa bật", fix: { href: "/settings/modules", label: "Bật module AI bán hàng" } },
+  BOT_DISABLED: { code: "BOT_DISABLED", reason: "Bot đang tắt", fix: { href: "/ai/sales-chatbot#bot-config", label: "Bật bot" } },
+  QUOTA: { code: "QUOTA", reason: "Shop đã dùng hết lượt khách AI xử lý của gói", fix: { href: "/settings/plan", label: "Xem gói & mua thêm" } },
+  KILL_SWITCH: { code: "NO_AI_SOURCE", reason: CUSTOMER_AI_NOT_READY_LABEL, fix: null },
+  NO_AI_SOURCE: { code: "NO_AI_SOURCE", reason: CUSTOMER_AI_NOT_READY_LABEL, fix: null },
+  AI_PROVIDER_ERROR: { code: "NO_AI_SOURCE", reason: CUSTOMER_AI_INCIDENT_LABEL, fix: null },
+};
+
+export function customerAiBlocks(blocks: readonly AiBlock[]): AiBlock[] {
+  const out: AiBlock[] = [];
+  for (const b of blocks) {
+    const c = CUSTOMER_AI_BLOCK[b.code];
+    if (out.some((x) => x.code === c.code)) continue;
+    out.push({ code: c.code, reason: c.reason, fixHref: c.fix?.href ?? null, fixLabel: c.fix?.label ?? null });
+  }
+  return out;
+}
+
+/** Mã dấu vết thuộc nguồn AI / nhà cung cấp ⇒ nhãn thường cho khách. Mã khác dùng nhãn tiếng Việt sẵn có; mã lạ ⇒ «Chưa xác định». */
+const CUSTOMER_TRACE_LABEL: Record<string, string> = {
+  AI_PROVIDER_AUTH_ERROR: "AI gặp sự cố",
+  AI_PROVIDER_QUOTA: "AI gặp sự cố",
+  AI_MODEL_ERROR: "AI gặp sự cố",
+  AI_CONTEXT_ERROR: "AI gặp sự cố",
+  AI_SKIPPED_AI_DOWN_COOLDOWN: "AI gặp sự cố — chờ thử lại",
+  AI_PROVIDER_NOT_CONFIGURED: "Chờ cấu hình AI",
+  AI_SKIPPED_KILL_SWITCH: "AI tạm dừng — đội ngũ đang xử lý",
+};
+
+/**
+ * Dấu vết một tin khách cho KHÁCH: `code` thành NHÃN THƯỜNG (không mã kỹ thuật), bỏ `detail` (ghi chú / lỗi gốc đã lưu) và
+ * nguồn dữ liệu của từng bước (tên bảng / cột). Các bước và mốc giữ nguyên — đó là việc của shop.
+ */
+export function customerMessageTrace(t: MessageTrace): MessageTrace {
+  const code = t.code === null ? null : (CUSTOMER_TRACE_LABEL[t.code] ?? (/^[A-Z][A-Z0-9_]*$/.test(t.code) && traceCodeLabel(t.code) !== t.code ? traceCodeLabel(t.code) : "Chưa xác định"));
+  return { steps: t.steps.map((s) => ({ stage: s.stage, state: s.state, at: s.at, source: "" })), code, detail: null, outcome: t.outcome };
+}
+
+/** Hội thoại hộp thư cho KHÁCH — lọc ở máy chủ trước khi vào props của client component. */
+export function customerInboxThread(thread: InboxThread): InboxThread {
+  return {
+    ...thread,
+    customerView: true,
+    aiBlocks: customerAiBlocks(thread.aiBlocks),
+    items: thread.items.map((it) => (it.trace ? { ...it, trace: customerMessageTrace(it.trace) } : it)),
   };
 }
