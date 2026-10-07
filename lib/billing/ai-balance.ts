@@ -17,7 +17,7 @@
  *  · Màn khách KHÔNG có token / model / chi phí nhà cung cấp — chỉ số tiền và nhãn dễ hiểu.
  */
 import { randomInt, randomUUID } from "node:crypto";
-import { and, desc, eq, gt, gte, inArray, isNull, like, ne, or, sql } from "drizzle-orm";
+import { and, desc, eq, gt, gte, inArray, isNull, like, lt, ne, or, sql } from "drizzle-orm";
 import { getPlatformDb, schema } from "@/db";
 import { can, type SessionUser } from "@/lib/auth/session";
 import {
@@ -36,6 +36,7 @@ import {
   parseVndInteger,
   topupBankRowTrust,
   topupOutcome,
+  type AiBalancePeriod,
   type AiFundsClass,
   type AiLedgerEntryType,
   type AiLedgerSource,
@@ -348,7 +349,7 @@ export async function setLowBalanceThreshold(user: SessionUser, raw: { amountVnd
 
 // ─────────────────────────── Người vận hành: tặng / điều chỉnh / hoàn ───────────────────────────
 
-export const AI_BALANCE_ADJUST_KINDS = ["PROMO_CREDIT", "ADJUST_CASH", "ADJUST_PROMO", "REFUND"] as const;
+export const AI_BALANCE_ADJUST_KINDS = ["PROMO_CREDIT", "ADJUST_CASH", "ADJUST_PROMO", "REFUND", "REVERSE_USAGE"] as const;
 export type AiBalanceAdjustKind = (typeof AI_BALANCE_ADJUST_KINDS)[number];
 
 /**
@@ -366,21 +367,26 @@ export async function adjustAiBalance(
   if (!ORGANIZATION_CODE_PATTERN.test(code)) return { error: "Mã tổ chức không hợp lệ." };
   const org = await findOrganization(code);
   if (!org) return { error: `Không có tổ chức mã «${code}».` };
-  if (!(AI_BALANCE_ADJUST_KINDS as readonly string[]).includes(String(raw.kind))) return { error: "Chọn loại: tặng · điều chỉnh tiền thật · điều chỉnh tiền tặng · hoàn tiền." };
+  if (!(AI_BALANCE_ADJUST_KINDS as readonly string[]).includes(String(raw.kind))) return { error: "Chọn loại: tặng · điều chỉnh tiền thật · điều chỉnh tiền tặng · hoàn tiền · đảo khoản trừ AI." };
   const kind = raw.kind as AiBalanceAdjustKind;
   const amount = parseVndInteger(raw.amountVnd);
   if (amount === null || amount === 0) return { error: "Số tiền phải là số nguyên VND khác 0 (vd 500.000) — không có phần lẻ." };
-  if ((kind === "PROMO_CREDIT" || kind === "REFUND") && amount < 0) return { error: "Tặng / hoàn tiền nhập số DƯƠNG — muốn bớt tiền tặng thì chọn «điều chỉnh tiền tặng»." };
+  if ((kind === "PROMO_CREDIT" || kind === "REFUND" || kind === "REVERSE_USAGE") && amount < 0) return { error: "Tặng / hoàn tiền / đảo khoản trừ nhập số DƯƠNG — muốn bớt tiền tặng thì chọn «điều chỉnh tiền tặng»." };
   const reason = typeof raw.reason === "string" ? raw.reason.trim().slice(0, 500) : "";
   if (reason.length < KILL_SWITCH_REASON_MIN) return { error: `Ghi lý do (ít nhất ${KILL_SWITCH_REASON_MIN} ký tự) — nó vào sổ và nhật ký nền tảng.` };
   const requestKey = typeof raw.requestKey === "string" && /^[A-Za-z0-9_-]{8,80}$/.test(raw.requestKey) ? raw.requestKey : null;
   if (!requestKey) return { error: "Thiếu mã lượt gửi — tải lại trang rồi thử lại." };
-  const entry: Pick<LedgerPost, "entryType" | "fundsClass" | "amountVnd"> =
+  // Đảo khoản trừ AI oan (review #648 M3): ADJUSTMENT tiền thật mang nguồn AI_CUSTOMER — trả lại tiền vào số dư VÀ trừ khỏi
+  // doanh thu (`aiBalanceRevenueVnd`). «Điều chỉnh tiền thật» thường (nguồn OPERATOR) là tiền khách đưa ngoài QR — không đụng
+  // doanh thu. Hai việc khác nhau thì hai loại dòng, không đoán từ lý do.
+  const entry: Pick<LedgerPost, "entryType" | "fundsClass" | "amountVnd" | "sourceType"> =
     kind === "PROMO_CREDIT"
-      ? { entryType: "PROMO_CREDIT", fundsClass: "PROMO", amountVnd: amount }
+      ? { entryType: "PROMO_CREDIT", fundsClass: "PROMO", amountVnd: amount, sourceType: "OPERATOR" }
       : kind === "REFUND"
-        ? { entryType: "REFUND", fundsClass: "CASH", amountVnd: -amount }
-        : { entryType: "ADJUSTMENT", fundsClass: kind === "ADJUST_CASH" ? "CASH" : "PROMO", amountVnd: amount };
+        ? { entryType: "REFUND", fundsClass: "CASH", amountVnd: -amount, sourceType: "OPERATOR" }
+        : kind === "REVERSE_USAGE"
+          ? { entryType: "ADJUSTMENT", fundsClass: "CASH", amountVnd: amount, sourceType: "AI_CUSTOMER" }
+          : { entryType: "ADJUSTMENT", fundsClass: kind === "ADJUST_CASH" ? "CASH" : "PROMO", amountVnd: amount, sourceType: "OPERATOR" };
   const actor = { orgCode: user.organization!.code, userId: user.id, email: user.email };
   const pdb = await getPlatformDb();
   try {
@@ -389,11 +395,23 @@ export async function adjustAiBalance(
         const bal = await readAiBalance(org.code, tx);
         if (bal.cashVnd < Math.abs(entry.amountVnd)) return { error: `Chỉ hoàn được tối đa số tiền thật đang có (${bal.cashVnd.toLocaleString("vi-VN")}đ).` } as const;
       }
+      if (kind === "REVERSE_USAGE") {
+        // Không đảo nhiều hơn số tiền thật đã từng trừ cho AI (trừ phần đã đảo) — đảo vượt là bịa doanh thu âm.
+        const e = schema.platformAiLedgerEntries;
+        const [sum] = await tx
+          .select({
+            charged: sql<string>`coalesce(sum(-${e.amountVnd}) filter (where ${e.entryType} = 'AI_USAGE' and ${e.fundsClass} = 'CASH'), 0)::bigint`,
+            reversed: sql<string>`coalesce(sum(${e.amountVnd}) filter (where ${e.entryType} = 'ADJUSTMENT' and ${e.fundsClass} = 'CASH' and ${e.sourceType} = 'AI_CUSTOMER'), 0)::bigint`,
+          })
+          .from(e)
+          .where(eq(e.orgCode, org.code));
+        const room = Number(sum?.charged ?? 0) - Number(sum?.reversed ?? 0);
+        if (entry.amountVnd > room) return { error: `Chỉ đảo được tối đa số tiền thật đã trừ cho AI mà chưa đảo (${room.toLocaleString("vi-VN")}đ).` } as const;
+      }
       const posted = await postAiLedgerEntry(tx, {
         orgCode: org.code,
         ...entry,
         idempotencyKey: `op:${org.code}:${requestKey}`,
-        sourceType: "OPERATOR",
         sourceRef: requestKey,
         note: reason,
         actor: { userId: user.id, email: user.email },
@@ -405,7 +423,7 @@ export async function adjustAiBalance(
         actorEmail: actor.email,
         targetOrgCode: org.code,
         action: "AI_BALANCE_ADJUST",
-        subject: `ai_balance:${entry.entryType}`,
+        subject: `ai_balance:${kind}`,
         before: null,
         after: { entryId: posted.id, entryType: entry.entryType, fundsClass: entry.fundsClass, amountVnd: entry.amountVnd },
         reason,
@@ -520,7 +538,7 @@ export async function loadAiBalanceView(orgCode: string, now: Date = new Date())
 
 // ─────────────────────────── Màn người vận hành ───────────────────────────
 
-export type AiBalanceOperatorRow = { orgCode: string; orgName: string; enabled: boolean; cashVnd: number; promoVnd: number; totalVnd: number; topup30dVnd: number; usage30dVnd: number; lastTopupAt: string | null };
+export type AiBalanceOperatorRow = { orgCode: string; orgName: string; enabled: boolean; cashVnd: number; promoVnd: number; totalVnd: number; topup30dVnd: number; usage30dVnd: number; usage30dCashVnd: number; lastTopupAt: string | null };
 export type AiBalanceReviewItem = { paymentId: string; bankRef: string; txnAt: string; amountVnd: number; transferCode: string; orgCode: string | null; outcome: string };
 /** Tiền vào sổ ngân hàng nhà mang mã nạp nhưng SePay CHƯA xác nhận (gõ tay / sao kê nhập) — không tự cộng; người vận hành xem. */
 export type AiBalanceUnconfirmedItem = { bankRef: string; txnAt: string; amountVnd: number; description: string; source: string };
@@ -540,6 +558,7 @@ export async function loadAiBalanceOperatorView(user: SessionUser, now: Date = n
       promo: sql<string>`coalesce(sum(case when ${e.fundsClass} = 'PROMO' then ${e.amountVnd} else 0 end), 0)::bigint`,
       topup30: sql<string>`coalesce(sum(case when ${e.entryType} = 'TOPUP' and ${e.occurredAt} >= ${since.toISOString()}::timestamptz then ${e.amountVnd} else 0 end), 0)::bigint`,
       usage30: sql<string>`coalesce(sum(case when ${e.entryType} = 'AI_USAGE' and ${e.occurredAt} >= ${since.toISOString()}::timestamptz then -${e.amountVnd} else 0 end), 0)::bigint`,
+      usage30Cash: sql<string>`coalesce(sum(case when ${e.entryType} = 'AI_USAGE' and ${e.fundsClass} = 'CASH' and ${e.occurredAt} >= ${since.toISOString()}::timestamptz then -${e.amountVnd} else 0 end), 0)::bigint`,
       lastTopup: sql<Date | string | null>`max(case when ${e.entryType} = 'TOPUP' then ${e.occurredAt} end)`,
     })
     .from(e)
@@ -554,7 +573,7 @@ export async function loadAiBalanceOperatorView(user: SessionUser, now: Date = n
     const cash = Number(s?.cash ?? 0);
     const promo = Number(s?.promo ?? 0);
     const last = s?.lastTopup ? new Date(s.lastTopup) : null;
-    rows.push({ orgCode: o.code, orgName: o.name, enabled, cashVnd: cash, promoVnd: promo, totalVnd: cash + promo, topup30dVnd: Number(s?.topup30 ?? 0), usage30dVnd: Number(s?.usage30 ?? 0), lastTopupAt: last ? last.toISOString() : null });
+    rows.push({ orgCode: o.code, orgName: o.name, enabled, cashVnd: cash, promoVnd: promo, totalVnd: cash + promo, topup30dVnd: Number(s?.topup30 ?? 0), usage30dVnd: Number(s?.usage30 ?? 0), usage30dCashVnd: Number(s?.usage30Cash ?? 0), lastTopupAt: last ? last.toISOString() : null });
   }
   const bp = schema.platformBillingPayments;
   const review = await pdb
@@ -585,4 +604,62 @@ export async function loadAiBalanceOperatorView(user: SessionUser, now: Date = n
     review: review.map((r) => ({ ...r, txnAt: r.txnAt.toISOString() })),
     unconfirmed: unconfirmed.map((r) => ({ ...r, txnAt: r.txnAt.toISOString() })),
   };
+}
+
+// ─────────────────────────── Kinh tế đơn vị (khung /platform/saas) ───────────────────────────
+
+/**
+ * Sổ cái gộp theo tổ chức cho khung doanh thu · chi phí · biên của người vận hành (`lib/pricing/admin.ts`). CHỈ ĐỌC. Dòng
+ * trong `[from, to)` tạo số của kỳ; số dư tính mọi dòng TRƯỚC `to` (dòng ghi sau mốc đọc không làm đổi kỳ đang xem). Tổ chức
+ * chưa có dòng sổ nào KHÔNG có mặt — khác «có, bằng 0»: chưa từng dùng Số dư AI thì cách tính doanh thu cũ giữ nguyên.
+ */
+export async function readAiBalancePeriod(from: Date, to: Date): Promise<Map<string, AiBalancePeriod>> {
+  const pdb = await getPlatformDb();
+  const e = schema.platformAiLedgerEntries;
+  const inPeriod = sql`${e.occurredAt} >= ${from.toISOString()}::timestamptz`;
+  const rows = await pdb
+    .select({
+      orgCode: e.orgCode,
+      topup: sql<string>`coalesce(sum(${e.amountVnd}) filter (where ${e.entryType} = 'TOPUP' and ${inPeriod}), 0)::bigint`,
+      usageCash: sql<string>`coalesce(sum(-${e.amountVnd}) filter (where ${e.entryType} = 'AI_USAGE' and ${e.fundsClass} = 'CASH' and ${inPeriod}), 0)::bigint`,
+      usagePromo: sql<string>`coalesce(sum(-${e.amountVnd}) filter (where ${e.entryType} = 'AI_USAGE' and ${e.fundsClass} = 'PROMO' and ${inPeriod}), 0)::bigint`,
+      // Đảo khoản trừ oan: ADJUSTMENT tiền thật mang nguồn AI_CUSTOMER (chỉ `REVERSE_USAGE` ghi) — khác điều chỉnh tay (OPERATOR).
+      reversalCash: sql<string>`coalesce(sum(${e.amountVnd}) filter (where ${e.entryType} = 'ADJUSTMENT' and ${e.fundsClass} = 'CASH' and ${e.sourceType} = 'AI_CUSTOMER' and ${inPeriod}), 0)::bigint`,
+      adjustCash: sql<string>`coalesce(sum(${e.amountVnd}) filter (where ${e.entryType} = 'ADJUSTMENT' and ${e.fundsClass} = 'CASH' and ${e.sourceType} = 'OPERATOR' and ${inPeriod}), 0)::bigint`,
+      aiUnits: sql<string>`count(*) filter (where ${e.entryType} = 'AI_USAGE' and ${e.sourceType} = 'AI_CUSTOMER' and ${inPeriod})::bigint`,
+      cash: sql<string>`coalesce(sum(${e.amountVnd}) filter (where ${e.fundsClass} = 'CASH'), 0)::bigint`,
+      promo: sql<string>`coalesce(sum(${e.amountVnd}) filter (where ${e.fundsClass} = 'PROMO'), 0)::bigint`,
+    })
+    .from(e)
+    .where(lt(e.occurredAt, to))
+    .groupBy(e.orgCode);
+  return new Map(
+    rows.map((r) => [
+      r.orgCode,
+      {
+        topupVnd: Number(r.topup),
+        usageCashVnd: Number(r.usageCash),
+        usagePromoVnd: Number(r.usagePromo),
+        reversalCashVnd: Number(r.reversalCash),
+        adjustCashVnd: Number(r.adjustCash),
+        aiCustomerUnits: Number(r.aiUnits),
+        balanceCashVnd: Number(r.cash),
+        balancePromoVnd: Number(r.promo),
+      },
+    ]),
+  );
+}
+
+/**
+ * SỐ khách AI của MỘT tổ chức đã thu qua Số dư trong `[from, to)` (dòng `aic-charge` — kể cả khoản đã đảo: khách bị trừ oan
+ * không bị tính lại ở bảng kê). Hoá đơn ước tính của chính khách đọc hàm này (chỉ tổ chức của PHIÊN). Lỗi ⇒ ném.
+ */
+export async function readAiCustomerChargedUnits(orgCode: string, from: Date, to: Date): Promise<number> {
+  const pdb = await getPlatformDb();
+  const e = schema.platformAiLedgerEntries;
+  const [r] = await pdb
+    .select({ n: sql<number>`count(*)::int` })
+    .from(e)
+    .where(and(eq(e.orgCode, orgCode), eq(e.entryType, "AI_USAGE"), eq(e.sourceType, "AI_CUSTOMER"), gte(e.occurredAt, from), lt(e.occurredAt, to)));
+  return Number(r?.n ?? 0);
 }

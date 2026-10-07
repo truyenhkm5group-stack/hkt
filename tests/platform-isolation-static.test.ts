@@ -883,6 +883,25 @@ export function testLoiVanHanhHoiTruoc(): number {
   }
   assert.deepEqual(goiSoAi, [], "S21: loadOrgAiUsage(mã) không hỏi người — chỉ gọi ở chỗ khai (mã tổ chức từ PHIÊN hoặc sau cổng người vận hành)");
   khongMienTruMoCoi("S21 · sổ AI", DOC_SO_AI, daDungSoAi);
+
+  // 4b · Sổ Số dư AI của MỌI tổ chức (`readAiBalancePeriod`) không hỏi người — chỉ gọi ở chỗ khai, sau cổng người vận hành
+  //      (review #648 L6). Bản đọc MỘT tổ chức (`readAiCustomerChargedUnits`) chỉ với mã tổ chức của PHIÊN.
+  const DOC_SO_DU_AI: Record<string, string> = {
+    "lib/pricing/admin.ts": "loadPricingEconomics — sau platformOperatorDenial.",
+    "lib/saas/customers.ts": "loadCommercialSnapshot — chỉ lib/saas/console.ts (sau cổng vận hành) và finalizeStatement (lõi chốt bảng kê của người vận hành) gọi.",
+    "lib/pricing/customer.ts": "loadCustomerPlan(mã) — readAiCustomerChargedUnits với mã từ PHIÊN (/settings/plan: usage.orgCode của user.organization).",
+  };
+  const goiSoDu: string[] = [];
+  const daDungSoDu = new Set<string>();
+  for (const tep of tepMa(["lib/", "app/", "components/"])) {
+    const code = ma(tep).replace(/export async function (readAiBalancePeriod|readAiCustomerChargedUnits)\(/g, "");
+    if (!/\b(readAiBalancePeriod|readAiCustomerChargedUnits)\(/.test(code)) continue;
+    if (DOC_SO_DU_AI[tep]) daDungSoDu.add(tep);
+    else goiSoDu.push(tep);
+  }
+  assert.deepEqual(goiSoDu, [], "S21: sổ Số dư AI theo tổ chức chỉ đọc ở chỗ khai (sau cổng người vận hành, hoặc mã tổ chức từ PHIÊN)");
+  khongMienTruMoCoi("S21 · sổ Số dư AI", DOC_SO_DU_AI, daDungSoDu);
+  assert.match(ma("lib/saas/console.ts"), /platformOperatorDenial\(/, "S21: bảng điều khiển SaaS (người gọi loadCommercialSnapshot) hỏi người vận hành");
   const plan = ma("app/(dashboard)/settings/plan/page.tsx");
   assert.ok(!/\b(?:searchParams|params)\b/.test(plan) && /getPlanUsage\(\s*user\.organization\?\.code\s*\)/.test(plan) && /loadOrgAiUsage\(\s*usage\.orgCode\s*\)/.test(plan), "S21: /settings/plan lấy mã tổ chức từ PHIÊN (user.organization) — không từ params / searchParams");
 

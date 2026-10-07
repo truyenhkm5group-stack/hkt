@@ -55,6 +55,23 @@ export async function readOrgFlag(orgCode: string, flagKey: OrgFlagKey, opts: { 
   return value;
 }
 
+/**
+ * Mã mọi tổ chức đang BẬT một cờ — MỘT câu đọc cho bảng nhiều tổ chức (khung /platform/saas không hỏi từng tổ chức một —
+ * review #648 L1). Bảng chưa có ⇒ tập rỗng (như `readOrgFlag`); lỗi KHÁC ném — người gọi tự quyết in «—».
+ */
+export async function orgsWithFlag(flagKey: OrgFlagKey): Promise<Set<string>> {
+  const pdb = await getPlatformDb();
+  const f = schema.platformFlagOverrides;
+  const o = schema.platformOrganizations;
+  try {
+    const rows = await pdb.select({ code: o.code }).from(f).innerJoin(o, eq(o.id, f.organizationId)).where(and(eq(f.flagKey, flagKey), eq(f.enabled, true)));
+    return new Set(rows.map((r) => r.code));
+  } catch (error) {
+    if (isMissingTable(error)) return new Set();
+    throw error;
+  }
+}
+
 /** Luật tự động của tổ chức có đang bị người vận hành tạm dừng không. */
 export async function workflowsPaused(orgCode: string): Promise<OrgFlag | null> {
   const flag = await readOrgFlag(orgCode, WORKFLOWS_PAUSED_FLAG);

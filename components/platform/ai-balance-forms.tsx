@@ -49,6 +49,7 @@ const KINDS = [
   { value: "ADJUST_CASH", label: "Điều chỉnh tiền thật (+/−)" },
   { value: "ADJUST_PROMO", label: "Điều chỉnh tiền tặng (+/−)" },
   { value: "REFUND", label: "Hoàn tiền thật cho khách (trừ số dư)" },
+  { value: "REVERSE_USAGE", label: "Đảo khoản trừ AI oan (trả lại số dư, trừ khỏi doanh thu)" },
 ] as const;
 
 export function AiBalanceAdjustForm() {

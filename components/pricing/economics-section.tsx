@@ -1,5 +1,6 @@
 import { SectionCard } from "@/components/ui-bits";
 import { AiUnitPricesForm, GuardConfigForm, MarginConfigForm, OrgPricingForm, PriceVersionPinForm } from "@/components/pricing/operator-pricing";
+import { aiBalanceRevenueVnd } from "@/lib/billing/ai-balance-rules";
 import { formatNumber, formatPercent, formatVND } from "@/lib/format";
 import { QUOTA_SPEC } from "@/lib/pricing/catalog";
 import { ENFORCEMENT_LABEL, QUOTA_LEVEL_LABEL, type QuotaLevel } from "@/lib/pricing/guard";
@@ -71,7 +72,7 @@ export function PricingEconomicsSection({ data, unitPrices }: { data: PricingEco
       id="unit-economics"
       title="Kinh tế đơn vị & Margin Guard"
       description={`Kỳ ${data.periodLabel} · ngày ${data.elapsedDays}/${data.totalDays} · tỷ giá ${formatNumber(data.usdToVnd)} ₫/USD · ngưỡng ${data.guard.noticePct}% / ${data.guard.warnPct}% / ${data.guard.limitPct}% · trần cứng nền tảng ${data.guard.hardLimitsEnabled ? "BẬT" : "tắt"}`}
-      hint="Chi phí AI nền tảng = lượt chạy bằng credit của nền tảng (BYOK là tiền của khách, chỉ in để tham khảo). Chiếu cuối tháng = nhịp hiện tại × số ngày của tháng (cần ≥ 3 ngày). Lãi gộp = MRR − chi phí AI chiếu − hạ tầng đã khai; hỗ trợ khách chưa phân bổ về từng tổ chức. Nguy cơ âm biên = chi phí AI chiếu vượt MRR của chính tổ chức đó. Không có ngưỡng biên nào được bịa."
+      hint="Chi phí AI nền tảng = lượt chạy bằng credit của nền tảng (BYOK là tiền của khách, chỉ in để tham khảo). Chiếu cuối tháng = nhịp hiện tại × số ngày của tháng (cần ≥ 3 ngày). Lãi gộp = MRR + doanh thu Số dư AI chiếu cuối tháng (tiền thật đã dùng − khoản đảo, cùng nhịp với chi phí AI) − chi phí AI chiếu − hạ tầng đã khai; hỗ trợ khách chưa phân bổ về từng tổ chức. Tiền khách nạp chưa dùng là tiền giữ để phục vụ (khoản phải hoàn); tiền nền tảng tặng đã dùng là doanh thu bỏ qua — chi phí thật của lượt AI ấy đã nằm trong chi phí AI, không trừ thêm lần hai. Cả hai KHÔNG phải doanh thu. Nguy cơ âm biên = chi phí AI chiếu vượt doanh thu của chính tổ chức đó. Không có ngưỡng biên nào được bịa."
     >
       <div className="space-y-5 text-sm" data-unit-economics>
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -85,6 +86,16 @@ export function PricingEconomicsSection({ data, unitPrices }: { data: PricingEco
           <Tile label="Cần để ý" value={`${t.negativeRisk} âm biên · ${t.spikes} bất thường`} sub="AI / đơn giao thành công: CHƯA ĐO (cần nối ORDER_OUTCOME từng tổ chức)" />
           <Tile label="Khách AI tháng này" value={formatNumber(data.aiCustomersTotal)} sub="đồng hồ thu chính — «—» khi có workspace chưa đo được" />
           <Tile label="Dải biên lãi gộp" value={MARGIN_BAND_LABEL[data.marginBand]} sub={`đích ${data.margin.targetLowPct}–${data.margin.targetHighPct}% · cảnh báo < ${data.margin.warnBelowPct}% · nguy cấp < ${data.margin.criticalBelowPct}%`} />
+          <Tile
+            label="Số dư AI — doanh thu tới nay"
+            value={formatVND(t.aiBalance.revenueVnd)}
+            sub={`tiền thật đã dùng ${formatVND(t.aiBalance.usageCashVnd)}${t.aiBalance.reversalCashVnd ? ` − đảo ${formatVND(t.aiBalance.reversalCashVnd)}` : ""} · tiền tặng đã dùng ${formatVND(t.aiBalance.usagePromoVnd)} (bỏ qua, không phải doanh thu) · ${t.aiBalance.orgs} tổ chức`}
+          />
+          <Tile
+            label="Số dư AI khách đang giữ"
+            value={formatVND(t.aiBalance.heldCashVnd)}
+            sub={`${t.aiBalance.heldOrgs} tổ chức, kể cả đình chỉ · khách đang nợ ${formatVND(t.aiBalance.owedCashVnd)} · nạp QR kỳ này ${formatVND(t.aiBalance.topupVnd)} · điều chỉnh tiền thật ${formatVND(t.aiBalance.adjustCashVnd)} · tiền tặng còn ${formatVND(t.aiBalance.heldPromoVnd)}`}
+          />
         </div>
 
         {data.tenants.length === 0 ? (
@@ -115,6 +126,12 @@ export function PricingEconomicsSection({ data, unitPrices }: { data: PricingEco
                     </td>
                     <td className="numeric py-2 pr-3 text-right">
                       <div>{formatVND(r.mrrVnd)}</div>
+                      {r.aiBalance ? (
+                        <div className="text-muted-foreground" data-ai-balance-revenue>
+                          + AI số dư {formatVND(aiBalanceRevenueVnd(r.aiBalance))}
+                          {r.aiBalance.usagePromoVnd > 0 ? ` · tặng ${formatVND(r.aiBalance.usagePromoVnd)}` : ""}
+                        </div>
+                      ) : null}
                       <div className="text-muted-foreground">{r.economics.grossMarginPct === null ? "—" : formatPercent(r.economics.grossMarginPct)}</div>
                       <div className={cn(BAND_TONE[r.marginBand])} data-margin-band={r.marginBand}>
                         chiếu {r.projectedMarginPct === null ? "—" : formatPercent(r.projectedMarginPct)} · {MARGIN_BAND_LABEL[r.marginBand].toLowerCase()}
