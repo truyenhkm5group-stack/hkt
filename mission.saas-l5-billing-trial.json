@@ -3,7 +3,7 @@
   "mission_id": "saas-l5-billing-trial",
   "title": "Dùng thử + hết lượt dừng AI, kỳ tính tiền, ngưỡng cảnh báo",
   "business_goal": "",
-  "status": "RUNNING",
+  "status": "PR_READY",
   "priority": "P1",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-saas-l5",
@@ -39,7 +39,22 @@
     "0234": "2026-10-07T11:39:51.974Z"
   },
   "created_at": "2026-10-07T11:39:43.015Z",
-  "updated_at": "2026-10-07T11:39:51.974Z",
-  "last_heartbeat": "2026-10-07T11:39:43.015Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-07T13:11:04.861Z",
+  "last_heartbeat": "2026-10-07T13:11:04.861Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "feat/saas-l5-billing-trial",
+    "sha": "c22f171324e3475f6236bf1e32bde35d4b3808b1",
+    "at": "2026-10-07T13:11:04.861Z",
+    "actor": "DESKTOP-56TH98Y:wt-saas-l5",
+    "title": "Dùng thử + hết lượt dừng AI, kỳ tính tiền, ngưỡng cảnh báo",
+    "summary": "Cổng gói dừng AI khi dùng thử hết lượt/hết hạn; initWorkspaceBilling một dịch vụ (job + /start); migration 0232 (giữ chỗ 0234, renumber lúc tích hợp); ngưỡng trong sales-health; khoá đồng hồ aic: theo khách chuẩn; Zalo+web ghi đồng hồ; loadCustomerEntitlementView. SHA c22f1713",
+    "tests": [
+      "npm run typecheck: sạch",
+      "npm run lint: sạch",
+      "npm test: lượt đầy đủ đạt tới quick-start, quick-start + đuôi (51 bài, gồm L5) TẤT CẢ ĐẠT; lượt lặp đỏ vì Array buffer allocation failed (RAM máy) ở org-export",
+      "npm run build: đạt",
+      "đột biến 6/6 bị bắt"
+    ]
+  }
 }
