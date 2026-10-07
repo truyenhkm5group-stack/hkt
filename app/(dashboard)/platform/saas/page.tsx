@@ -9,6 +9,8 @@ import { loadOwnerCockpit, type TenantRow } from "@/lib/platform/saas-cockpit";
 import { MRR_MOVEMENT_LABEL, TENANT_LIFECYCLE_LABEL, TENANT_LIFECYCLES, TREND_LABEL, type PeriodMovement } from "@/lib/platform/saas-metrics";
 import { platformOperatorDenial } from "@/lib/platform-ui/module-toggle";
 import { PricingEconomicsSection } from "@/components/pricing/economics-section";
+import { PlatformAiModelControlSection } from "@/components/platform/ai-model-control";
+import { loadPlatformAiControl } from "@/lib/ai-usage/platform-ai-admin";
 import { loadPricingAdmin, loadPricingEconomics } from "@/lib/pricing/admin";
 import { cn } from "@/lib/utils";
 
@@ -157,7 +159,8 @@ export default async function OwnerCockpitPage() {
   if (!r.ok) redirect("/?forbidden=1");
   const c = r.value;
   // Kinh tế đơn vị + Margin Guard (0222) — đọc SAU cockpit (cockpit đã chụp ảnh MRR hôm nay). Lỗi ⇒ khung nói lỗi, trang vẫn dựng.
-  const [econ, admin] = await Promise.all([loadPricingEconomics(user), loadPricingAdmin(user)]);
+  const now = new Date();
+  const [econ, admin, aiModel] = await Promise.all([loadPricingEconomics(user), loadPricingAdmin(user), loadPlatformAiControl(user, now)]);
   const h = c.headline;
   return (
     <div className="space-y-5">
@@ -305,6 +308,8 @@ export default async function OwnerCockpitPage() {
       <SectionCard title="Từng tổ chức" description="Bấm tên để mở chẩn đoán, thu phí và sổ AI của tổ chức đó" padded={false}>
         {c.tenants.length === 0 ? <EmptyState title="Chưa có tổ chức nào" className="m-4" /> : <TenantTable rows={c.tenants} />}
       </SectionCard>
+
+      {aiModel.ok ? <PlatformAiModelControlSection data={aiModel.value} usdToVnd={c.usdToVnd} now={now} /> : <EmptyState title="Chưa đọc được Platform AI Model Control" description={aiModel.error} />}
 
       {econ.ok && admin.ok ? (
         <PricingEconomicsSection data={econ.value} unitPrices={admin.value.unitPrices} />

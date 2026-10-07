@@ -43,7 +43,7 @@ import { techOverviewCounts } from "@/lib/queries/tech";
 import { canDispatchTask } from "@/lib/constants/agent-dispatch";
 
 /**
- * ═══════════ MẶT PHẲNG ĐIỀU KHIỂN CÔNG TY — GOAL · MISSION · NEEDS_OWNER (0225) ═══════════
+ * ═══════════ MẶT PHẲNG ĐIỀU KHIỂN CÔNG TY — GOAL · MISSION · NEEDS_OWNER (0226) ═══════════
  *
  * docs/tech-control-plane/README.md. Bài này khoá:
  *  1. Vòng đời chuẩn là PHÉP CHIẾU đủ mọi trạng thái lưu, phụ thuộc chưa xong không bao giờ "sẵn sàng".
@@ -55,7 +55,7 @@ import { canDispatchTask } from "@/lib/constants/agent-dispatch";
  */
 
 const goc = path.resolve(__dirname, "..");
-const MIGRATION = readFileSync(path.join(goc, "drizzle/0225_tech_control_plane_goals.sql"), "utf8");
+const MIGRATION = readFileSync(path.join(goc, "drizzle/0226_tech_control_plane_goals.sql"), "utf8");
 
 /* ═════════════════════ 1. HÀM THUẦN ═════════════════════ */
 

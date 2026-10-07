@@ -456,7 +456,7 @@ type ProviderPick = { ok: true; provider: AiProvider; source: "PLATFORM" | "BYOK
 export type FailoverUsage = { feature: AiUsageFeature; actorId: string | null; ref: string | null };
 
 /** MỘT khoá AI (chính hoặc dự phòng) ⇒ provider. Bài kiểm thay được qua `providerOverride` (nhận cấu hình mang khoá đó). */
-async function resolveConnector(cfg: SalesChatbotConfig, key: SalesChatbotConfig["connectorKey"], modelName: string): Promise<ProviderPick> {
+async function resolveConnector(cfg: SalesChatbotConfig, key: SalesChatbotConfig["connectorKey"], modelName: string, usage?: FailoverUsage): Promise<ProviderPick> {
   const source = salesBotBillingSource(key);
   if (providerOverride) {
     const p = providerOverride(key === cfg.connectorKey && modelName === cfg.model ? cfg : { ...cfg, connectorKey: key, model: modelName });
@@ -464,7 +464,12 @@ async function resolveConnector(cfg: SalesChatbotConfig, key: SalesChatbotConfig
   }
   if (key === "platform") {
     const org = await currentOrganization();
-    const plat = await platformChatAi(org.code);
+    // Platform AI Policy: băm canary theo HỘI THOẠI (một hội thoại không nhảy model giữa hai tin); lượt hỏng của model chính
+    // mà model dự phòng đã đỡ vẫn là MỘT dòng ERROR trong sổ AI (token / tiền NULL) — tỷ lệ lỗi của model mới đo được.
+    const plat = await platformChatAi(org.code, {
+      routingKey: usage?.ref ?? null,
+      onPrimaryFailed: (f) => void recordAiUsage({ orgCode: org.code, feature: usage?.feature ?? "sales_chatbot", source: "PLATFORM", provider: f.name, model: f.model, requests: 1, inputTokens: null, outputTokens: null, costUsd: null, status: "ERROR", actorId: usage?.actorId ?? null, ref: usage?.ref ?? null }).catch(() => undefined),
+    });
     return plat.ok ? { ok: true, provider: plat.provider, source } : { ok: false, error: plat.reason };
   }
   const conn = await openActiveConnection(key);
@@ -487,12 +492,12 @@ async function resolveConnector(cfg: SalesChatbotConfig, key: SalesChatbotConfig
  * SAU lời gọi là của nhà cung cấp vừa phục vụ, nên sổ AI và kiểm credit đi đúng nơi trả tiền.
  */
 async function providerFor(cfg: SalesChatbotConfig, usage: FailoverUsage = { feature: "sales_chatbot", actorId: null, ref: null }, primaryBlocked?: string): Promise<ProviderPick> {
-  const primary: ProviderPick = primaryBlocked ? { ok: false, error: primaryBlocked } : await resolveConnector(cfg, cfg.connectorKey, cfg.model);
+  const primary: ProviderPick = primaryBlocked ? { ok: false, error: primaryBlocked } : await resolveConnector(cfg, cfg.connectorKey, cfg.model, usage);
   const fb = effectiveFallback(cfg);
   if (!fb) return primary;
   const org = await currentOrganization();
   let opened: Promise<ProviderPick> | null = null;
-  const openFallback = () => (opened ??= resolveConnector(cfg, fb.connectorKey, fb.model));
+  const openFallback = () => (opened ??= resolveConnector(cfg, fb.connectorKey, fb.model, usage));
   const fp = new FailoverProvider({
     orgCode: org.code,
     primary: primary.ok ? { key: cfg.connectorKey, source: primary.source, provider: primary.provider } : null,
@@ -794,7 +799,9 @@ async function chatTurnCore(conversationId: string, rawText: string, opts: { cha
         // KHÔNG GỬI TRÙNG: `complete` trả về ĐÚNG MỘT kết quả (khoá chính hoặc khoá dự phòng) — chữ chỉ được ghi / gửi SAU dòng
         // này, nên chuyển khoá không bao giờ sinh câu thứ hai cho khách.
         const res = await prov.provider.complete({ system, messages: history, tools, ...SALES_THINKING_BUDGET[cfg.thinking] });
-        if (seg.calls && (seg.name !== prov.provider.name || seg.source !== prov.source)) {
+        // Đổi MODEL giữa chừng (canary của Platform AI Policy lùi về model dự phòng ở vòng 2) cũng tách dòng: một dòng sổ mang
+        // một tên model, nên tiền và tỷ lệ lỗi theo model không bị ghi gộp dưới tên model của vòng cuối.
+        if (seg.calls && (seg.name !== prov.provider.name || seg.source !== prov.source || seg.model !== (res.model || prov.provider.model))) {
           await recordSegment(seg, "OK");
           seg = newSegment();
         }

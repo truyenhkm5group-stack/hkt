@@ -238,7 +238,7 @@ export type TenantGuardRow = {
   aiCredit: { level: QuotaLevel; pct: number | null; note: string | null };
   worst: QuotaLevel;
   spike: SpikeVerdict;
-  routing: RoutingSuggestion | null;
+  routing: (RoutingSuggestion & { scope: "PLATFORM" | "BYOK" }) | null;
   readings: MeterReadings;
   errors: string[];
 };
@@ -300,10 +300,10 @@ export async function loadPricingEconomics(user: SessionUser, now: Date = new Da
   const dayExpr = sql<string>`to_char((${a.at} at time zone 'UTC') + interval '7 hours', 'YYYY-MM-DD')`;
   const [byModel, byDay] = await Promise.all([
     pdb
-      .select({ orgCode: a.orgCode, model: a.model, input: sql<number>`coalesce(sum(${a.inputTokens}), 0)::float8`, output: sql<number>`coalesce(sum(${a.outputTokens}), 0)::float8`, unpricedInput: sql<number>`coalesce(sum(${a.inputTokens}) filter (where ${a.costUsd} is null), 0)::float8`, unpricedOutput: sql<number>`coalesce(sum(${a.outputTokens}) filter (where ${a.costUsd} is null), 0)::float8` })
+      .select({ orgCode: a.orgCode, model: a.model, source: a.billingSource, input: sql<number>`coalesce(sum(${a.inputTokens}), 0)::float8`, output: sql<number>`coalesce(sum(${a.outputTokens}), 0)::float8`, unpricedInput: sql<number>`coalesce(sum(${a.inputTokens}) filter (where ${a.costUsd} is null), 0)::float8`, unpricedOutput: sql<number>`coalesce(sum(${a.outputTokens}) filter (where ${a.costUsd} is null), 0)::float8` })
       .from(a)
       .where(and(gte(a.at, period.from), lt(a.at, now), ne(a.status, "BLOCKED_QUOTA")))
-      .groupBy(a.orgCode, a.model),
+      .groupBy(a.orgCode, a.model, a.billingSource),
     pdb
       .select({ orgCode: a.orgCode, day: dayExpr, cost: sql<number>`coalesce(sum(${a.costUsd}), 0)::float8` })
       .from(a)
@@ -346,7 +346,10 @@ export async function loadPricingEconomics(user: SessionUser, now: Date = new Da
     const costByDay = new Map(byDay.filter((d) => d.orgCode === o.code).map((d) => [d.day, Number(d.cost)]));
     const spike = detectCostSpike(histDays.map((d) => costByDay.get(d) ?? 0), costByDay.get(today) ?? 0, guard);
     const top = [...models].sort((x, y) => y.input + y.output - (x.input + x.output))[0];
-    const routing = top?.model ? suggestCheaperModel({ model: top.model, inputTokens: top.input, outputTokens: top.output, prices: unit.byModel, priceKeyOf: (m) => priceKeyFor(m, unit.byModel), minSavingsPct: guard.routingMinSavingsPct }) : null;
+    const suggested = top?.model ? suggestCheaperModel({ model: top.model, inputTokens: top.input, outputTokens: top.output, prices: unit.byModel, priceKeyOf: (m) => priceKeyFor(m, unit.byModel), minSavingsPct: guard.routingMinSavingsPct }) : null;
+    // Model của AI DÙNG CHUNG (nguồn PLATFORM) do người vận hành đổi ở Platform AI Model Control — một chỗ cho cả nền tảng;
+    // model của khoá riêng (BYOK) là cấu hình của chính tổ chức.
+    const routing = suggested ? { ...suggested, scope: top.source === "PLATFORM" ? ("PLATFORM" as const) : ("BYOK" as const) } : null;
     tenants.push({
       code: o.code,
       name: o.name,
