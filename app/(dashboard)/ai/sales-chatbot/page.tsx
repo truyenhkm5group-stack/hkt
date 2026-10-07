@@ -5,13 +5,11 @@ import { moduleOn } from "@/lib/platform-ui/module-visibility";
 import { PageHeader } from "@/components/page-header";
 import { SalesChatPanel } from "@/components/sales-chat/chat-panel";
 import { SectionCard } from "@/components/ui-bits";
-import { connectionStatusRows } from "@/lib/connectors/service";
 import { can, requirePermission } from "@/lib/auth/session";
 import { formatDateTime } from "@/lib/format";
 import { publicationOf } from "@/lib/platform/publish";
 import { productCustomFieldOptions } from "@/lib/sales-chatbot/catalog";
-import { CHAT_CHANNEL_LABEL, SALES_BOT_CONNECTORS, salesBotError, type ChatChannel } from "@/lib/sales-chatbot/config";
-import { platformChatAi } from "@/lib/ai-builder/provider";
+import { CHAT_CHANNEL_LABEL, salesBotError, type ChatChannel } from "@/lib/sales-chatbot/config";
 import { fanpageSetupView } from "@/lib/sales-chatbot/fanpage";
 import { zaloSetupView } from "@/lib/sales-chatbot/zalo";
 import { loadInboxHistoryView } from "@/lib/sales-chatbot/history";
@@ -20,7 +18,6 @@ import { loadLessons } from "@/lib/sales-chatbot/lessons";
 import { listConversations, loadSalesChatbotConfig } from "@/lib/sales-chatbot/engine";
 import { SALES_CHATBOT_MANAGE } from "@/lib/sales-chatbot/settings";
 import { ChatbotConfigForm } from "./config-form";
-import { loadProviderHealth } from "@/lib/sales-chatbot/provider-failover";
 import { InboxHistoryPanel } from "./history-panel";
 import { MessengerHistoryPanel } from "./messenger-history-panel";
 import { loadMessengerHistoryView } from "@/lib/sales-chatbot/messenger-history";
@@ -38,7 +35,8 @@ import { ResumeToAiButton } from "./resume-button";
 import { ModePanel } from "./mode-panel";
 import { loadModeConfig } from "@/lib/sales-chatbot/operating-mode";
 import { ChatCostPanel } from "./cost-panel";
-import { loadChatCostReport } from "@/lib/sales-chatbot/cost-report";
+import { loadChatbotAiView } from "@/lib/saas/visibility-loaders";
+import { CUSTOMER_AI_INCIDENT_LABEL, customerFacing, customerPlaybookRun, customerReadinessChecks } from "@/lib/saas/visibility";
 import { SALES_STAGE_LABEL, type SalesStage } from "@/lib/sales-chatbot/stages";
 import { loadReadiness } from "@/lib/sales-chatbot/readiness";
 import { READINESS_VERDICT_LABEL } from "@/lib/sales-chatbot/readiness-shared";
@@ -57,20 +55,17 @@ const STATUS_LABEL: Record<string, string> = { OPEN: "Đang chat", WAITING: "Ch�
 export default async function SalesChatbotPage() {
   const user = await requirePermission("ai_sales:view");
   const manage = can(user, SALES_CHATBOT_MANAGE);
-  const [cfg, fields, conversations, connections, pub] = await Promise.all([
-    loadSalesChatbotConfig(),
-    productCustomFieldOptions(),
-    listConversations(30),
-    connectionStatusRows(),
-    publicationOf(user.organization?.code ?? ""),
-  ]);
+  // Workspace KHÁCH (chủ shop 07/10/2026): không model / nguồn AI / chi phí / sức khoẻ khoá trong props — lib/saas/visibility.ts.
+  const customer = customerFacing(user.organization);
+  const [cfg, fields, conversations, pub] = await Promise.all([loadSalesChatbotConfig(), productCustomFieldOptions(), listConversations(30), publicationOf(user.organization?.code ?? "")]);
   const fanpage = manage && user.organization?.code ? await fanpageSetupView(user.organization.code) : null;
   const zalo = manage && user.organization?.code ? await zaloSetupView(user.organization.code) : null;
-  const providerHealth = manage ? Object.entries(await loadProviderHealth()).map(([key, h]) => ({ key, lastSuccessAt: h.lastSuccessAt, lastFailureAt: h.lastFailureAt, lastErrorClass: h.lastErrorClass, openUntil: h.openUntil })) : [];
   const [playbook, playbookRun, lessons] = manage ? await Promise.all([loadPlaybook(), loadPlaybookRun(), loadLessons()]) : [null, null, null];
   const [levelScripts, levelPack, levelCountMap] = manage ? await Promise.all([loadLevelScripts(), organizationLevelPack(), levelCounts()]) : [null, null, null];
-  // Chi phí AI theo ngày — tiền là vùng nhạy cảm, chỉ người cấu hình bot thấy. Sổ AI ở CSDL nhà hỏng ⇒ ẩn bảng, không sập trang.
-  const costReport = manage && user.organization?.code ? await loadChatCostReport(user.organization.code).catch(() => null) : null;
+  // Phần AI (động cơ, sức khoẻ khoá, chi phí AI theo ngày) — ĐÃ LỌC theo người xem: khách không nhận khoá nội bộ nào; chi phí
+  // chỉ người cấu hình bot ở workspace nhà thấy, sổ AI hỏng ⇒ ẩn bảng, không sập trang.
+  const ai = await loadChatbotAiView(user, cfg, { manage });
+  const costReport = ai.audience === "INTERNAL" ? ai.costReport : null;
   const [followup, waitingCount] = fanpage ? await Promise.all([loadFollowupSettings(), countWaitingConversations()]) : [null, 0];
   const orderSync = fanpage ? await orderSyncView() : null;
   // Đồng bộ lịch sử hộp thư — chỉ khi tổ chức có khối Fanpage (qua Pancake) và người xem quản lý được chatbot.
@@ -80,18 +75,10 @@ export default async function SalesChatbotPage() {
   const modeConfig = fanpage ? await loadModeConfig() : null;
   // Workspace NHÀ: bot Chốt Đơn chỉ chạm page có trong danh sách (Tắt / Bóng / Chạy thật) — page-runtime.ts. Khách: không có khối này.
   const pageRuntime = user.organization?.isHome ? await pageRuntimeView().catch(() => null) : null;
-  // «AI dùng chung của nền tảng» (0193) không phải một kết nối của tổ chức: sẵn sàng = nền tảng bật + gói có credit + còn credit.
-  const platformAi = user.organization?.code ? await platformChatAi(user.organization.code) : { ok: false as const, reason: "Không xác định được tổ chức." };
-  const aiConnections = SALES_BOT_CONNECTORS.map((k) => {
-    // `vendor` = nhà cung cấp AI thật sau khoá (AI dùng chung: theo khoá nền tảng) — để form cảnh báo khoá dự phòng CÙNG nhà.
-    if (k === "platform") return { key: k, ready: platformAi.ok, configured: platformAi.ok, reason: platformAi.ok ? null : platformAi.reason, vendor: platformAi.ok ? platformAi.provider.name.split("-")[0] : null };
-    const row = connections.find((c) => c.connectorKey === k);
-    return { key: k, ready: Boolean(row && row.status === "ACTIVE" && row.lastTestOk === true), configured: Boolean(row), reason: null, vendor: k.split("-")[0] };
-  });
   const publicUrl = pub.state === "PUBLISHED" && pub.url ? `${pub.url}/chat` : null;
   // Sẵn sàng tự trả lời (P8): chỉ đếm số thật; THÔNG TIN, không chặn đổi chế độ.
-  const selectedAi = aiConnections.find((a) => a.key === cfg.connectorKey);
-  const readiness = manage ? await loadReadiness(cfg, { ready: Boolean(selectedAi?.ready), reason: selectedAi?.reason ?? null }) : null;
+  const rawReadiness = manage ? await loadReadiness(cfg, { ready: ai.aiReady, reason: ai.audience === "INTERNAL" ? ai.aiReason : null }) : null;
+  const readiness = rawReadiness && ai.audience === "CUSTOMER" ? { ...rawReadiness, checks: customerReadinessChecks(rawReadiness.checks, ai.aiState) } : rawReadiness;
   return (
     <div className="space-y-5">
       <PageHeader
@@ -101,7 +88,11 @@ export default async function SalesChatbotPage() {
         hint={
           <div className="space-y-1.5 text-xs leading-5">
             <p>Bot trả lời khách của shop: tìm sản phẩm, báo giá và tồn ĐỌC TỪ ERP ngay lúc hỏi (không nằm trong lời nhắc), tính tiền giỏ, lên đơn nháp, đọc lại tóm tắt và CHỈ chốt khi khách xác nhận. Đơn chốt ⇒ giữ hàng ở kho + báo nhóm vận hành (nếu đã cấu hình Thông báo nhóm).</p>
-            <p>Khoá AI là của CHÍNH tổ chức (Cài đặt → Kết nối → Anthropic / OpenAI) — tổ chức trả tiền token. Khung thử bên phải dùng giá / tồn thật nhưng KHÔNG tạo khách, đơn hay tin nhóm thật.</p>
+            {customer ? (
+              <p>Khung thử bên phải dùng giá / tồn thật nhưng KHÔNG tạo khách, đơn hay tin nhóm thật.</p>
+            ) : (
+              <p>Khoá AI là của CHÍNH tổ chức (Cài đặt → Kết nối → Anthropic / OpenAI) — tổ chức trả tiền token. Khung thử bên phải dùng giá / tồn thật nhưng KHÔNG tạo khách, đơn hay tin nhóm thật.</p>
+            )}
           </div>
         }
         actions={
@@ -228,9 +219,13 @@ export default async function SalesChatbotPage() {
           {followup ? <FollowupPanel settings={followup} waiting={waitingCount} manage={manage} /> : null}
           {lessons ? <LessonsPanel key={`${lessons.version}-${lessons.updatedAt ?? ""}`} state={lessons} /> : null}
           {levelScripts && levelPack && levelCountMap ? <LevelScriptsPanel key={JSON.stringify(levelScripts)} scripts={levelScripts} levels={levelsForPack(levelPack)} counts={levelCountMap} /> : null}
-          {playbook && playbookRun ? <PlaybookPanel key={playbook.draft?.createdAt ?? "chua-co-nhap"} state={playbook} run={playbookRun} fanpageReady={fanpage?.status === "ACTIVE"} /> : null}
+          {playbook && playbookRun ? <PlaybookPanel key={playbook.draft?.createdAt ?? "chua-co-nhap"} state={playbook} run={customer ? customerPlaybookRun(playbookRun) : playbookRun} fanpageReady={fanpage?.status === "ACTIVE"} /> : null}
           {manage ? (
-            <ChatbotConfigForm config={cfg} fields={fields} connections={aiConnections} appointmentsOn={moduleOn(user, "appointments")} health={providerHealth} />
+            ai.audience === "INTERNAL" ? (
+              <ChatbotConfigForm config={ai.config} fields={fields} engine={ai.engine} appointmentsOn={moduleOn(user, "appointments")} />
+            ) : (
+              <ChatbotConfigForm config={ai.config} fields={fields} aiState={ai.aiState} appointmentsOn={moduleOn(user, "appointments")} />
+            )
           ) : (
             <SectionCard title="Cấu hình">
               <p className="text-sm text-muted-foreground">Bạn xem được hội thoại; cấu hình bot cần quyền «AI bán hàng: cấu hình & xuất bản chatbot».</p>
@@ -284,7 +279,7 @@ export default async function SalesChatbotPage() {
                       ) : null}
                       {c.lastError ? (
                         <span className="text-destructive">
-                          Lỗi: {salesBotError(c.lastError)?.label}
+                          Lỗi: {customer ? CUSTOMER_AI_INCIDENT_LABEL : salesBotError(c.lastError)?.label}
                         </span>
                       ) : null}
                       {formatDateTime(c.updatedAt)}

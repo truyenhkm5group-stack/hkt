@@ -30,7 +30,7 @@ import {
   maskSecret,
   type ConnectorSpec,
 } from "@/lib/connectors/registry";
-import { SELF_TEST_ORG, SecretsDecryptError, SecretsUnavailableError, openSecrets, sealSecrets, secretsKeyHealth, secretsKeyState, selfTestSecrets } from "@/lib/connectors/secrets";
+import { SELF_TEST_ORG, SecretsDecryptError, SecretsUnavailableError, openSecrets, sealSecrets, secretsKeyHealth, secretsKeyPublicStatus, secretsKeyState, selfTestSecrets } from "@/lib/connectors/secrets";
 import { loadConnectionsView, openActiveConnection, saveConnection, setConnectionStatus, testOrgConnection, type RekeyVerdict } from "@/lib/connectors/service";
 import { LARK_HOOK_PATTERN, ORG_CONNECTION_CHAT_DISCOVERY, ORG_CONNECTION_TESTERS, TELEGRAM_CHAT_PATTERN, TELEGRAM_TOKEN_PATTERN, testLarkWebhook, testTelegramBot, testZaloBot, testPancakeFanpage, pancakeVerdict, PANCAKE_TEST_MAX_BYTES } from "@/lib/connectors/testers";
 import { chunkText } from "@/lib/messaging/providers";
@@ -749,8 +749,11 @@ export async function testConnectionsTwoOrgs() {
       delete process.env.PLATFORM_SECRETS_KEY;
       const v0 = (await loadConnectionsView(adminA)) as ConnectionsView;
       assert.equal(v0.secretsReady.ok, false);
-      assert.match(v0.secretsReady.reason ?? "", /PLATFORM_SECRETS_KEY/);
-      assert.match(v0.secretsReady.reason ?? "", /secret GitHub PLATFORM_SECRETS_KEY.*deploy/, "câu nói rõ người vận hành làm gì: thêm secret GitHub rồi deploy");
+      // Khách (07/10/2026): câu chung «liên hệ hỗ trợ» — tên biến môi trường / secret GitHub là thông tin vận hành nội bộ.
+      assert.ok(!/PLATFORM_SECRETS_KEY|GitHub|deploy/.test(v0.secretsReady.reason ?? ""), `khách không đọc tên biến / quy trình deploy: ${v0.secretsReady.reason}`);
+      assert.match(v0.secretsReady.reason ?? "", /hỗ trợ/);
+      const pubNoKey = secretsKeyPublicStatus(secretsKeyState(() => undefined));
+      assert.ok(!pubNoKey.ready && /secret GitHub PLATFORM_SECRETS_KEY.*deploy/.test(pubNoKey.reason), "câu cho người vận hành (nhà) vẫn nói rõ: thêm secret GitHub rồi deploy");
       assert.equal(v0.secretsReady.keyIdShort, null, "chưa có khoá ⇒ không có mã khoá");
       const noKey = await saveConnection(adminA, { connectorKey: "lark-webhook", secrets: { webhookUrl: LARK_URL } });
       assert.ok("error" in noKey && /PLATFORM_SECRETS_KEY/.test(noKey.error), "thiếu PLATFORM_SECRETS_KEY ⇒ từ chối lưu");
@@ -758,9 +761,11 @@ export async function testConnectionsTwoOrgs() {
 
       process.env.PLATFORM_SECRETS_KEY = MASTER;
       const rows0 = v0.groups.flatMap((g) => g.rows);
-      for (const r of rows0.filter((x) => x.tenancy === "HOME_ONLY")) {
-        assert.equal(r.mode, "HOME_ONLY_UNAVAILABLE", `${r.key}: tổ chức khác thấy "chưa mở"`);
+      // 07/10/2026 (lib/saas/visibility.ts): workspace KHÁCH không nhận connector chỉ-nhà, không connector AI, không mô tả nội bộ.
+      for (const k of ["pancake-pos", "viettelpost", "ai-chat", "anthropic-byok", "openai-byok", "gemini-byok"]) assert.ok(!rows0.some((r) => r.key === k), `${k}: khách không thấy connector chỉ-nhà / AI`);
+      for (const r of rows0) {
         assert.equal(r.homeReadiness, null, `${r.key}: tổ chức khác KHÔNG được đọc trạng thái cấu hình của nhà`);
+        for (const k of ["tenancy", "why", "consumers", "webhook", "configStore"] as const) assert.ok(!(k in r), `${r.key}: khách không nhận «${k}»`);
       }
       // Quyền, module, tổ chức lệch, connector HOME_ONLY, đầu vào sai.
       const viewer: SessionUser = { ...adminA, role: "VIEWER", permissions: ["dashboard:view"] };
@@ -831,9 +836,9 @@ export async function testConnectionsTwoOrgs() {
       const opened = await openActiveConnection("anthropic-byok");
       assert.ok(opened.ok && opened.secrets.apiKey === AI_KEY, "lưu → đọc lại qua service ra ĐÚNG bản rõ");
       const vAi = (await loadConnectionsView(adminA)) as ConnectionsView;
-      assert.equal(vAi.groups.flatMap((g) => g.rows).find((r) => r.key === "anthropic-byok")?.connection?.secretHints.apiKey, `••••${AI_KEY.slice(-4)}`, "màn hình: •••• + 4 ký tự");
-      const kid = secretsKeyState((n) => (n === "PLATFORM_SECRETS_KEY" ? MASTER : undefined));
-      assert.ok(vAi.secretsReady.ok && kid.ok && vAi.secretsReady.keyIdShort === `${kid.keyId.slice(0, 8)}…`, "có khoá ⇒ màn hình chỉ in 8 ký tự đầu của MÃ khoá");
+      // Khách: khoá AI của chính họ cũng không còn trên màn Kết nối (người vận hành sửa ở /platform/org/<mã>) — kể cả gợi ý ••••.
+      assert.equal(vAi.groups.flatMap((g) => g.rows).find((r) => r.key === "anthropic-byok"), undefined, "màn hình khách: không dòng khoá AI");
+      assert.ok(vAi.secretsReady.ok && vAi.secretsReady.keyIdShort === null, "khách: máy chủ sẵn sàng nhưng KHÔNG in mã khoá mã hoá");
       assertNoSecret("màn hình + action của khoá AI", [vAi, aiSaved, aiTest, aiOn], SECRETS);
 
       // Không đường trả về nào mang bí mật: màn hình, kết quả action, nhật ký.

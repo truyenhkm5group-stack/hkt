@@ -16,6 +16,7 @@ import { checkLearnNow, learnLessons, rollbackLessons, saveLessons, setLessonsEn
 import { publishPlaybook, rollbackPlaybook, runPlaybookLearning, savePlaybookDraft, startPlaybookLearning, unpublishPlaybook } from "@/lib/sales-chatbot/playbook";
 import { saveSalesChatbotConfig, SALES_CHATBOT_MANAGE } from "@/lib/sales-chatbot/settings";
 import { saveOrderSyncConfig } from "@/lib/sales-chatbot/order-sync";
+import { customerChatView, customerFacing, customerSafeAiError } from "@/lib/saas/visibility";
 
 /**
  * Server action của trang «Chatbot bán hàng» (0180): lưu cấu hình và KHUNG THỬ. Khung thử chạy trong tổ chức của PHIÊN
@@ -36,15 +37,20 @@ export async function startTestChatAction(): Promise<{ ok: true; view: ChatView 
   if (!can(user, SALES_CHATBOT_MANAGE)) return { error: "Bạn không có quyền chạy khung thử chatbot (ai_sales:manage)." };
   const conv = await openConversation("TEST", { createdBy: user.email });
   const view = await conversationView(conv.id);
-  return view ? { ok: true, view } : { error: "Không mở được hội thoại thử." };
+  return view ? { ok: true, view: testView(user, view) } : { error: "Không mở được hội thoại thử." };
 }
 
 export async function sendTestChatAction(conversationId: string, text: string): Promise<{ ok: true; view: ChatView } | { error: string; view?: ChatView | null }> {
   const user = await requireUser();
   if (!can(user, SALES_CHATBOT_MANAGE)) return { error: "Bạn không có quyền chạy khung thử chatbot (ai_sales:manage)." };
   const r = await chatTurn(String(conversationId ?? ""), String(text ?? ""), { channel: "TEST", actorId: user.id });
-  if (!r.ok) return { error: r.error, view: r.view ?? null };
-  return { ok: true, view: r.view };
+  if (!r.ok) return { error: customerFacing(user.organization) ? customerSafeAiError(r.error) : r.error, view: r.view ? testView(user, r.view) : null };
+  return { ok: true, view: testView(user, r.view) };
+}
+
+/** Khung thử của workspace KHÁCH không trả tên / tóm tắt công cụ bot đã gọi (lib/saas/visibility.ts). */
+function testView(user: { organization?: { isHome: boolean } }, view: ChatView): ChatView {
+  return customerFacing(user.organization) ? customerChatView(view) : view;
 }
 
 // ─── «Học từ hội thoại cũ» (lib/sales-chatbot/playbook.ts) — vỏ mỏng: phiên → lõi (kiểm module + quyền lần nữa) ───
