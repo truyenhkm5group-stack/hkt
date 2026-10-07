@@ -46,7 +46,9 @@ export function isSalesAgentUser(user: ShellUser | null | undefined): boolean {
 }
 
 /** Trang «Kênh kết nối». Luồng L4 đang dựng trang kênh hợp nhất — đổi ĐÚNG hằng này khi nó xong. */
-export const SALES_AGENT_CHANNELS_HREF = "/ai/sales-chatbot/messenger";
+// Trang «Kênh kết nối» hợp nhất của luồng L4 (`CHANNELS_ROUTE`, lib/channels/overview-shared.ts) — giá trị đặt thẳng để tệp hằng của
+// menu không kéo câu lỗi Messenger vào gói client; tests/saas-shell.test.ts khoá hai hằng bằng nhau.
+export const SALES_AGENT_CHANNELS_HREF = "/ai/channels";
 /** Hộp thư khách — trang mặc định sau đăng nhập (`/` chuyển về đây). */
 export const SALES_AGENT_INBOX_HREF = "/ai/sales-chatbot/inbox";
 export const SALES_AGENT_OVERVIEW_HREF = "/ai/overview";

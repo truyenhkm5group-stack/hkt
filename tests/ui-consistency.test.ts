@@ -299,7 +299,6 @@ export function testNavigationCoverage() {
     "/ai/sales-chatbot/messenger": "thẻ 'Messenger trực tiếp (không cần Pancake)' trong trang /ai/sales-chatbot (người có quyền cấu hình)",
     // Kênh kết nối hợp nhất (lib/channels/overview-shared.ts::CHANNELS_ROUTE): luồng menu (L2) trỏ vào hằng đó; tới lúc ấy
     // vào từ liên kết cuối trang Messenger trực tiếp và là đích chuyển tiếp của lượt «Kết nối Facebook» bắt đầu từ chính màn này.
-    "/ai/channels": "liên kết 'Kênh kết nối' trên /ai/sales-chatbot/messenger; mục menu do luồng điều hướng trỏ vào CHANNELS_ROUTE",
   };
 
   const pages = walkPages("app/(dashboard)");

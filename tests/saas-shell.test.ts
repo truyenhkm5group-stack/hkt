@@ -15,6 +15,7 @@
  *
  * Tự dọn: tổ chức `sa-shell` lưu trữ + xoá thư mục CSDL trong `finally`.
  */
+import { CHANNELS_ROUTE } from "@/lib/channels/overview-shared";
 import assert from "node:assert/strict";
 import { existsSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import path from "node:path";
@@ -174,6 +175,7 @@ function kiemThuan() {
   );
   assert.equal(new Set(SALES_AGENT_NAV.map((i) => i.href)).size, 8, "tám mục, tám trang khác nhau");
   assert.equal(SALES_AGENT_NAV.find((i) => i.key === "channels")?.href, SALES_AGENT_CHANNELS_HREF, "Kênh kết nối đi qua MỘT hằng (L4 đổi đúng chỗ đó)");
+  assert.equal(SALES_AGENT_CHANNELS_HREF, CHANNELS_ROUTE, "mục «Kênh kết nối» của vỏ khách trỏ đúng trang kênh hợp nhất của L4");
   assert.equal(SALES_AGENT_NAV.find((i) => i.key === "inbox")?.href, SALES_AGENT_INBOX_HREF);
   for (const it of SALES_AGENT_NAV) {
     assert.ok(salesAgentPathAllowed(it.href), `mục ${it.label} (${it.href}) phải mở được trong vỏ — mục dẫn vào trang bị chặn là lối cụt`);
