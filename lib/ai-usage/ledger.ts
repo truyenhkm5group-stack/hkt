@@ -25,6 +25,8 @@ import {
   type AiUsageFeature,
   type AiUsageModality,
   type AiUsageStatus,
+  PLATFORM_WORKLOADS,
+  type PlatformWorkload,
 } from "@/lib/ai-usage/types";
 
 export type AiUsageEntry = {
@@ -53,6 +55,11 @@ export type AiUsageEntry = {
   conversationId?: string | null;
   /** `TEXT` · `VISION` · `IMAGE` (0222). */
   modality?: AiUsageModality | null;
+  /** QUAN SÁT (0231): phần của `inputTokens` đọc từ bộ đệm · phần của `outputTokens` là suy nghĩ · thời gian gọi · loại việc. */
+  cachedTokens?: number | null;
+  thinkingTokens?: number | null;
+  latencyMs?: number | null;
+  workload?: PlatformWorkload | null;
 };
 
 const intOrNull = (v: number | null): number | null => (v === null || !Number.isFinite(v) ? null : Math.max(0, Math.round(v)));
@@ -61,7 +68,22 @@ const intOrNull = (v: number | null): number | null => (v === null || !Number.is
  * Ghi MỘT dòng. Ném khi dữ liệu sai hình hoặc CSDL hỏng — nơi gọi quyết (AI Builder: lỗi hiện ra; Copilot: nuốt).
  * `recorded: false` = khoá sự kiện đã có (lượt thử lại / gói tin trùng) — KHÔNG có dòng thứ hai, không tính tiền hai lần.
  */
+let benchCapture: ((e: AiUsageEntry) => void) | null = null;
+
+/**
+ * CHỈ benchmark phát lại (scripts/platform-ai-bench.ts — tiến trình RIÊNG, không phải máy chủ app): lượt AI của phát lại không
+ * phải lượt dùng của shop ⇒ KHÔNG ghi vào sổ thật (không trừ hạn mức, không lẫn vào chi phí / A/B) — chuyển cho hàm bắt để
+ * tính tiền / token / độ trễ của chính benchmark. `null` để gỡ.
+ */
+export function setAiUsageCaptureForBench(fn: ((e: AiUsageEntry) => void) | null) {
+  benchCapture = fn;
+}
+
 export async function recordAiUsage(e: AiUsageEntry): Promise<{ recorded: boolean }> {
+  if (benchCapture) {
+    benchCapture(e);
+    return { recorded: false };
+  }
   if (!(AI_USAGE_FEATURES as readonly string[]).includes(e.feature)) throw new Error(`Tính năng AI lạ: ${e.feature}`);
   if (!(AI_BILLING_SOURCES as readonly string[]).includes(e.source)) throw new Error(`Nguồn tính tiền AI lạ: ${e.source}`);
   if (!(AI_USAGE_STATUSES as readonly string[]).includes(e.status)) throw new Error(`Trạng thái lượt AI lạ: ${e.status}`);
@@ -84,6 +106,10 @@ export async function recordAiUsage(e: AiUsageEntry): Promise<{ recorded: boolea
     eventKey,
     conversationId: e.conversationId ?? null,
     modality: e.modality ?? null,
+    cachedTokens: intOrNull(e.cachedTokens ?? null),
+    thinkingTokens: intOrNull(e.thinkingTokens ?? null),
+    latencyMs: intOrNull(e.latencyMs ?? null),
+    workload: e.workload && (PLATFORM_WORKLOADS as readonly string[]).includes(e.workload) ? e.workload : null,
     ...(e.at ? { at: e.at } : {}),
   });
   if (!eventKey) {

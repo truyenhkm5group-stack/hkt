@@ -178,6 +178,7 @@ const MOI = [
   "0228_pricing_v1_versions",
   "0229_tech_workers",
   "0230_tech_policy_budget",
+  "0231_platform_ai_usage_telemetry",
 ] as const;
 
 /*

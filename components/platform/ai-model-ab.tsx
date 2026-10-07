@@ -1,4 +1,4 @@
-import { AB_DECISION_LABEL, AB_RULES, type AbArm, type AbVerdict, type ModelAbReport, type SyncArm } from "@/lib/ai-usage/platform-ai-ab";
+import { AB_DECISION_LABEL, AB_RULES, type AbArm, type AbSection, type AbVerdict, type ModelAbReport, type SyncArm, type TokenArm } from "@/lib/ai-usage/platform-ai-ab";
 import { formatDateTime, formatNumber, formatPercent, formatVND } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
@@ -85,67 +85,150 @@ function Checks({ v }: { v: AbVerdict }) {
   );
 }
 
+/** Phần token: hiện ra / suy nghĩ / % suy nghĩ / tổng ra mỗi hội thoại, chi phí, độ trễ LỜI GỌI model (sổ AI 0231). */
+function TokenRows({ arms, usdToVnd }: { arms: { label: string; model: string; a: TokenArm; outPerConv: number | null; costPerConvUsd: number | null }[]; usdToVnd: number }) {
+  const vnd = (v: number | null) => (v === null ? "—" : formatVND(Math.round(v * usdToVnd)));
+  const num = (v: number | null) => formatNumber(v === null ? null : Math.round(v));
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full min-w-[52rem] text-xs" data-platform-ai-tokens>
+        <thead className="text-left text-[11px] uppercase text-muted-foreground">
+          <tr>
+            <th className="py-1 pr-2">Model</th>
+            <th className="py-1 pr-2 text-right" title="token ra KHÔNG phải suy nghĩ">Ra hiện / HT</th>
+            <th className="py-1 pr-2 text-right">Suy nghĩ / HT</th>
+            <th className="py-1 pr-2 text-right">% suy nghĩ</th>
+            <th className="py-1 pr-2 text-right">Tổng ra / HT</th>
+            <th className="py-1 pr-2 text-right">Chi phí / HT</th>
+            <th className="py-1 pr-2 text-right" title="ước tính theo giá ra của model">Tiền suy nghĩ / HT</th>
+            <th className="py-1 pr-2 text-right">Lời gọi p50 · p95</th>
+            <th className="py-1 text-right" title="lượt OK đã tách được suy nghĩ / mọi lượt OK (dòng trước 0231 = chưa đo)">Độ phủ</th>
+          </tr>
+        </thead>
+        <tbody>
+          {arms.map((x) => (
+            <tr key={x.label} className="border-t border-hairline">
+              <td className="py-1 pr-2">
+                <span className="font-mono">{x.model || "—"}</span> <span className="text-muted-foreground">{x.label}</span>
+              </td>
+              <td className="numeric py-1 pr-2 text-right">{num(x.a.visibleOutPerConv)}</td>
+              <td className="numeric py-1 pr-2 text-right">{num(x.a.thinkingPerConv)}</td>
+              <td className="numeric py-1 pr-2 text-right">{rate(x.a.thinkingPct)}</td>
+              <td className="numeric py-1 pr-2 text-right">{num(x.outPerConv)}</td>
+              <td className="numeric py-1 pr-2 text-right">{vnd(x.costPerConvUsd)}</td>
+              <td className="numeric py-1 pr-2 text-right">{vnd(x.a.thinkingCostPerConvUsd)}</td>
+              <td className="numeric py-1 pr-2 text-right">
+                {ms(x.a.callP50Ms)} · {ms(x.a.callP95Ms)}
+              </td>
+              <td className="numeric py-1 text-right">{rate(x.a.thinkCoverage)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function SectionHead({ title, sec }: { title: string; sec: AbSection<unknown> }) {
+  const p = sec.policy;
+  return (
+    <div className="flex flex-wrap items-baseline justify-between gap-2">
+      <h3 className="font-semibold">
+        {title} · cohort từ {formatDateTime(sec.since)}
+      </h3>
+      <span className="text-xs text-muted-foreground">
+        chính sách {sec.scope === "global" ? "chung" : "riêng"} · {sec.canaryModel}
+        {p.reasoning ? ` · suy nghĩ ${p.reasoning}` : ""}
+        {p.maxOutputTokens ? ` · trần ${p.maxOutputTokens}` : ""} · canary {p.enabled ? `${p.canaryPct}%` : "TẮT"} · đối chứng {sec.controlModel}
+      </span>
+    </div>
+  );
+}
+
 export function PlatformModelAbTable({ report, usdToVnd }: { report: ModelAbReport; usdToVnd: number }) {
   const v = report.verdict;
+  const { chat, sync } = report;
   return (
-    <div className="space-y-2" data-platform-ai-ab data-decision={v.decision}>
-      <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <h3 className="font-semibold">A/B model · cohort từ {formatDateTime(report.since)} · AI Sales chat với khách</h3>
-        <span className="text-xs text-muted-foreground">
-          canary {report.policy.enabled ? `${report.policy.canaryPct}%` : "TẮT"} · đủ mẫu khi canary ≥ {AB_RULES.minCanaryConversations} hội thoại hoặc ≥ {AB_RULES.minCanaryOrders} đơn chốt · {report.orgs} tổ chức
-        </span>
-      </div>
-      <div className="overflow-x-auto">
-        <table className="w-full min-w-[64rem] text-xs">
-          <thead className="text-left text-[11px] uppercase text-muted-foreground">
-            <tr>
-              <th className="py-1 pr-2">Model</th>
-              <th className="py-1 pr-2 text-right">Hội thoại</th>
-              <th className="py-1 pr-2 text-right">Đơn</th>
-              <th className="py-1 pr-2 text-right">Chốt</th>
-              <th className="py-1 pr-2 text-right">SĐT</th>
-              <th className="py-1 pr-2 text-right">Địa chỉ</th>
-              <th className="py-1 pr-2 text-right">Handoff</th>
-              <th className="py-1 pr-2 text-right">Lỗi AI</th>
-              <th className="py-1 pr-2 text-right">p95 phản hồi</th>
-              <th className="py-1 pr-2 text-right">Token / HT</th>
-              <th className="py-1 pr-2 text-right">Chi phí / HT</th>
-              <th className="py-1 pr-2 text-right">Chi phí / đơn</th>
-              <th className="py-1 pr-2 text-right">Công cụ đúng</th>
-              <th className="py-1 text-right">Upsell</th>
-            </tr>
-          </thead>
-          <tbody>
-            <Row label="canary" a={report.canary} usdToVnd={usdToVnd} />
-            <Row label="đối chứng" a={report.control} usdToVnd={usdToVnd} />
-          </tbody>
-        </table>
-      </div>
-      <Checks v={report.chatVerdict} />
-      <h4 className="pt-1 text-xs font-semibold">Ghi đơn từ hội thoại nhân viên (order-sync)</h4>
-      <div className="overflow-x-auto">
-        <table className="w-full min-w-[48rem] text-xs" data-platform-ai-ab-sync>
-          <thead className="text-left text-[11px] uppercase text-muted-foreground">
-            <tr>
-              <th className="py-1 pr-2">Model</th>
-              <th className="py-1 pr-2 text-right">Hội thoại</th>
-              <th className="py-1 pr-2 text-right">Đơn ghi</th>
-              <th className="py-1 pr-2 text-right">Ra đơn</th>
-              <th className="py-1 pr-2 text-right" title="hội thoại có đơn / hội thoại khách đã để SĐT">Lead → đơn</th>
-              <th className="py-1 pr-2 text-right" title="khách để SĐT mà máy không lên đơn (đã báo nhân viên)">Lead bị lỡ</th>
-              <th className="py-1 pr-2 text-right">Lỗi AI</th>
-              <th className="py-1 pr-2 text-right">Token / HT</th>
-              <th className="py-1 pr-2 text-right">Chi phí / HT</th>
-              <th className="py-1 text-right">Chi phí / đơn</th>
-            </tr>
-          </thead>
-          <tbody>
-            <SyncRow label="canary" a={report.sync.canary} usdToVnd={usdToVnd} />
-            <SyncRow label="đối chứng" a={report.sync.control} usdToVnd={usdToVnd} />
-          </tbody>
-        </table>
-      </div>
-      <Checks v={report.sync.verdict} />
+    <div className="space-y-3" data-platform-ai-ab data-decision={v.decision}>
+      <p className="text-[11px] text-muted-foreground">
+        Đủ mẫu khi canary ≥ {AB_RULES.minCanaryConversations} hội thoại hoặc ≥ {AB_RULES.minCanaryOrders} đơn · canary ≥ {AB_RULES.expensiveMinConversations} hội thoại mà đắt hơn &gt; {AB_RULES.maxCostIncrease * 100}% không lợi ích chất lượng ⇒ hoàn tác · {report.orgs} tổ chức
+      </p>
+      {chat ? (
+        <div className="space-y-2">
+          <SectionHead title="AI Sales chat với khách" sec={chat} />
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[64rem] text-xs">
+              <thead className="text-left text-[11px] uppercase text-muted-foreground">
+                <tr>
+                  <th className="py-1 pr-2">Model</th>
+                  <th className="py-1 pr-2 text-right">Hội thoại</th>
+                  <th className="py-1 pr-2 text-right">Đơn</th>
+                  <th className="py-1 pr-2 text-right">Chốt</th>
+                  <th className="py-1 pr-2 text-right">SĐT</th>
+                  <th className="py-1 pr-2 text-right">Địa chỉ</th>
+                  <th className="py-1 pr-2 text-right">Handoff</th>
+                  <th className="py-1 pr-2 text-right">Lỗi AI</th>
+                  <th className="py-1 pr-2 text-right">p95 phản hồi</th>
+                  <th className="py-1 pr-2 text-right">Token / HT</th>
+                  <th className="py-1 pr-2 text-right">Chi phí / HT</th>
+                  <th className="py-1 pr-2 text-right">Chi phí / đơn</th>
+                  <th className="py-1 pr-2 text-right">Công cụ đúng</th>
+                  <th className="py-1 text-right">Upsell</th>
+                </tr>
+              </thead>
+              <tbody>
+                <Row label="canary" a={chat.canary} usdToVnd={usdToVnd} />
+                <Row label="đối chứng" a={chat.control} usdToVnd={usdToVnd} />
+              </tbody>
+            </table>
+          </div>
+          <TokenRows
+            arms={[
+              { label: "canary", model: chat.canary.model, a: chat.canary, outPerConv: chat.canary.outputPerConv, costPerConvUsd: chat.canary.costPerConvUsd },
+              { label: "đối chứng", model: chat.control.model, a: chat.control, outPerConv: chat.control.outputPerConv, costPerConvUsd: chat.control.costPerConvUsd },
+            ]}
+            usdToVnd={usdToVnd}
+          />
+          <VerdictLine v={chat.verdict} />
+          <Checks v={chat.verdict} />
+        </div>
+      ) : null}
+      {sync ? (
+        <div className="space-y-2">
+          <SectionHead title="Ghi đơn từ hội thoại nhân viên (order-sync)" sec={sync} />
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[48rem] text-xs" data-platform-ai-ab-sync>
+              <thead className="text-left text-[11px] uppercase text-muted-foreground">
+                <tr>
+                  <th className="py-1 pr-2">Model</th>
+                  <th className="py-1 pr-2 text-right">Hội thoại</th>
+                  <th className="py-1 pr-2 text-right">Đơn ghi</th>
+                  <th className="py-1 pr-2 text-right">Ra đơn</th>
+                  <th className="py-1 pr-2 text-right" title="hội thoại có đơn / hội thoại khách đã để SĐT">Lead → đơn</th>
+                  <th className="py-1 pr-2 text-right" title="khách để SĐT mà máy không lên đơn (đã báo nhân viên)">Lead bị lỡ</th>
+                  <th className="py-1 pr-2 text-right">Lỗi AI</th>
+                  <th className="py-1 pr-2 text-right">Token / HT</th>
+                  <th className="py-1 pr-2 text-right">Chi phí / HT</th>
+                  <th className="py-1 text-right">Chi phí / đơn</th>
+                </tr>
+              </thead>
+              <tbody>
+                <SyncRow label="canary" a={sync.canary} usdToVnd={usdToVnd} />
+                <SyncRow label="đối chứng" a={sync.control} usdToVnd={usdToVnd} />
+              </tbody>
+            </table>
+          </div>
+          <TokenRows
+            arms={[
+              { label: "canary", model: sync.canary.model, a: sync.canary, outPerConv: outPer(sync.canary), costPerConvUsd: sync.canary.costPerThreadUsd },
+              { label: "đối chứng", model: sync.control.model, a: sync.control, outPerConv: outPer(sync.control), costPerConvUsd: sync.control.costPerThreadUsd },
+            ]}
+            usdToVnd={usdToVnd}
+          />
+          <VerdictLine v={sync.verdict} />
+          <Checks v={sync.verdict} />
+        </div>
+      ) : null}
       <div className="rounded-md border border-hairline p-2">
         <div className="text-[11px] font-semibold uppercase text-muted-foreground">Kết luận chung (chỉ workload có lưu lượng)</div>
         <VerdictLine v={v} />
@@ -154,3 +237,5 @@ export function PlatformModelAbTable({ report, usdToVnd }: { report: ModelAbRepo
     </div>
   );
 }
+
+const outPer = (a: SyncArm) => (a.visibleOutPerConv === null || a.thinkingPerConv === null ? null : a.visibleOutPerConv + a.thinkingPerConv);

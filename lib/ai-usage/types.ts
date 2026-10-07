@@ -27,6 +27,15 @@ export const AI_BILLING_SOURCE_LABEL: Record<AiBillingSource, string> = {
 export const AI_USAGE_FEATURES = ["ai_builder", "copilot", "sales_chatbot", "sales_playbook", "lead_hunter", "creative_image", "creative_copy"] as const;
 export type AiUsageFeature = (typeof AI_USAGE_FEATURES)[number];
 
+/**
+ * LOẠI VIỆC của Platform AI Policy (0231) — mỗi loại một chính sách model riêng được (docs/platform/ai-model-control.md §8).
+ * `sales_chatbot` = bot trả lời khách · `order_sync` = ghi đơn từ hội thoại nhân viên · `quick_extract` = AI chọn câu mẫu /
+ * phân loại ngắn · `vision` = đọc ảnh khách gửi.
+ */
+export const PLATFORM_WORKLOADS = ["sales_chatbot", "order_sync", "quick_extract", "vision"] as const;
+export type PlatformWorkload = (typeof PLATFORM_WORKLOADS)[number];
+export const PLATFORM_WORKLOAD_LABEL: Record<PlatformWorkload, string> = { sales_chatbot: "Sales Chat", order_sync: "Order Sync", quick_extract: "Quick Extract", vision: "Vision" };
+
 export const AI_USAGE_FEATURE_LABEL: Record<AiUsageFeature, string> = { ai_builder: "AI Builder", copilot: "AI Copilot", sales_chatbot: "Chatbot bán hàng", sales_playbook: "Học từ hội thoại cũ", lead_hunter: "Lời chào khách sỉ", creative_image: "Vẽ ảnh quảng cáo", creative_copy: "Câu chữ quảng cáo" };
 
 /** Loại lượt (0222): chữ · đọc ảnh khách gửi · vẽ ảnh. `NULL` trong sổ = nơi gọi chưa khai. */

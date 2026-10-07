@@ -124,3 +124,40 @@ Kết luận chung chỉ xét workload có lưu lượng (đối chứng ≥ 10 
 workload có lưu lượng đều đạt. Ghi đơn băm canary theo TỪNG hội thoại (`salesChatProvider({ ref: order-sync:<id> })`) —
 trước 07/10 nó băm theo mã tổ chức nên canary 10% nhận 0% lưu lượng. Các việc nền khác (học hội thoại, sổ tay, nhắc khách)
 vẫn băm theo tổ chức.
+
+## 8. Chính sách theo loại việc + quan sát token (07/10/2026)
+
+**Không một model cho mọi việc.** Mỗi loại việc có thể có chính sách RIÊNG ở `platform.ai.policy.<workload>`:
+
+| Loại việc | Nơi gọi | Mặc định nơi gọi |
+|---|---|---|
+| `sales_chatbot` | bot trả lời khách (engine) | SMART = suy nghĩ medium / 10.000 · FAST = low / 4.000 |
+| `order_sync` | ghi đơn từ hội thoại nhân viên | suy nghĩ **low** / 4.000 |
+| `quick_extract` | AI chọn câu mẫu | theo bot |
+| `vision` | đọc ảnh khách gửi | theo bot |
+
+Chính sách riêng thêm `reasoning` (minimal · low · medium · high) và `maxOutputTokens` — CHỈ đè lời gọi của model chính
+(nhánh canary); model dự phòng luôn chạy đúng cấu hình của nơi gọi. Chưa có / đã tắt ⇒ loại việc đi chính sách chung (tương
+thích ngược). Hai nhánh phải KHÁC model (A/B phân nhánh theo tên model trong sổ AI); so mức suy nghĩ của CÙNG model dùng
+benchmark (§9). Ops: `--apply=10 <model> --workload=order_sync --reasoning=minimal --max-tokens=1024` · `--rollback --workload=order_sync`.
+
+**Quan sát (migration 0231, không đổi tiền).** `platform_ai_usage` thêm `thinking_tokens` (⊂ `output_tokens`),
+`cached_tokens` (⊂ `input_tokens`), `latency_ms`, `workload`. `output_tokens` / `cost_usd` GIỮ NGUYÊN nghĩa — Gemini tính tiền
+token suy nghĩ như token ra. Dòng cũ `NULL` = chưa đo. Bảng A/B có: ra hiện / suy nghĩ / % suy nghĩ / tổng ra mỗi hội thoại,
+tiền phần suy nghĩ, độ trễ lời gọi p50/p95 kèm độ phủ. `/platform/saas` có bảng **PLATFORM AI ROUTING** theo loại việc.
+
+**Đắt hơn rõ rệt ⇒ hoàn tác sớm:** canary ≥ 30 hội thoại, chi phí / hội thoại > +20% đối chứng, chỉ số chính (chốt / ra
+đơn / lead → đơn) không cao hơn ≥ 5% ⇒ ROLLBACK, không chờ 200.
+
+## 9. Benchmark phát lại offline (ops `platform-ai-bench`)
+
+- `sync <tổ chức> [--cases=120] [--configs=D35l,C31l,E31n,B31m,A35m]` — ghi đơn, CHỈ ĐỌC. Ca dựng từ tin đã lưu tới trước
+  mốc có kết quả thật: ORDER (đơn còn sống ⇒ phải ra đơn; chấm SĐT · địa chỉ · tên · món · mẫu · SL), DELETED_ORDER (người xoá
+  đơn máy ghi ⇒ không được ra đơn), NO_ORDER_PHONE / NO_ORDER. Đo FP / FN, JSON hợp lệ, token vào / ra hiện / suy nghĩ,
+  USD / ca, p50 / p95.
+- `sales <tổ chức> [--points=60] [--configs=S35,S31,F31]` — Sales Agent qua `shadowTurn` (kênh THỬ, công cụ mô phỏng,
+  hội thoại tạm bị xoá, KHÔNG khoá dự phòng — bộ ngắt mạch không chạm cài đặt thật của shop; lượt AI không vào sổ AI thật).
+  Chấm tất định: đúng giá, bịa tồn, đúng công cụ, SĐT / địa chỉ, chốt khi chưa xác nhận, chuyển người, lộ suy nghĩ, mời mua
+  thêm, độ dài, tiền / độ trễ.
+- Cấu hình: D35l = production hôm nay (3.5 · low · 4.000) · A35m · B31m · C31l · E31n (3.1 · minimal) · F35n · G31l1k · H31n1k;
+  Sales: S35 · S31 (SMART) · F31 · F35 (FAST). Mọi lời gọi bằng khoá nền tảng. Chỉ in số tổng hợp. Mỗi lượt ≤ ~10 phút.
