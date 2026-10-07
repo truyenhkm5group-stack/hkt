@@ -12,8 +12,10 @@
  *   TECH_WORKER_ROOT    thư mục chứa cây làm việc (mặc định: thư mục cha của TECH_WORKER_REPO)
  *   TECH_WORKER_ANTHROPIC_API_KEY   chỉ cho worker ANTHROPIC_API
  *   TECH_WORKER_INSTALLED   "1" khi chạy qua trình khởi động của bộ cài (docs mục 15) — đặt tự động
- *   TECH_WORKER_ALLOW_MACHINE_GIT   "1" = cho phép đẩy nhánh bằng credential Git CỦA MÁY khi máy chủ chưa cấp được
- *                       token bot. Mặc định TẮT: credential của máy có thể là tài khoản quản trị kho của chủ shop.
+ *
+ * Worker KHÔNG giữ bất kỳ quyền ghi GitHub nào và KHÔNG `git push`: nó nộp BỘ THAY ĐỔI lên `submit-changes`, máy chủ kiểm
+ * rồi tự ghi nhánh bằng bot (docs mục 15). Mã agent chạy trong cổng dưới cùng tài khoản giải được mọi thứ worker giữ, nên
+ * không thứ gì worker giữ được phép là một quyền ghi GitHub.
  *
  * Bộ cài một nút (/tech/workers → «Cài worker trên máy Windows này») đặt mọi biến trên; không ai phải gõ tay.
  *
@@ -39,7 +41,7 @@ import {
 } from "@/lib/constants/tech-worker-onboarding";
 import { buildAgentPrompt, gatesForTask, parseAgentResult, toolAllowlist } from "./tech-worker/brief";
 import { createAdapter, resolveClaudeBin, type ExecutionAdapter } from "./tech-worker/adapters";
-import { pruneWorkerWorktrees, pushConfigViolations, pushSandbox, revokeInstallationToken, safePush } from "./tech-worker/git-safety";
+import { pruneWorkerWorktrees } from "./tech-worker/git-safety";
 
 const VERSION = "tech-worker/1";
 const args = new Set(process.argv.slice(2));
@@ -53,7 +55,6 @@ const cfg = {
   root: process.env.TECH_WORKER_ROOT ?? "",
   timeoutMin: Number(process.env.TECH_WORKER_TIMEOUT_MIN ?? 45),
   installed: process.env.TECH_WORKER_INSTALLED === "1",
-  allowMachineGit: process.env.TECH_WORKER_ALLOW_MACHINE_GIT === "1",
 };
 
 /** Lỗi gần nhất (đã cắt) — đi lên máy chủ trong báo cáo tự kiểm, máy chủ che thêm một lần. */
@@ -295,16 +296,15 @@ async function execute(adapter: ExecutionAdapter, provider: TechExecutionProvide
       return;
     }
 
-    // 7. Worker commit + đẩy (agent không có quyền git). PR do máy chủ yêu cầu bằng danh tính bot.
-    a.step = "commit + đẩy nhánh";
+    // 7. Nộp bộ thay đổi — MÁY CHỦ tự ghi nhánh bằng bot (worker không giữ quyền ghi GitHub nào). PR do máy chủ yêu cầu.
+    a.step = "nộp thay đổi — máy chủ ghi nhánh";
     a.progressPct = 90;
-    git(dir, "-c", "user.name=tech-worker", "-c", "user.email=tech-worker@users.noreply.github.com", "commit", "-q", "-m", `${t.code}: ${t.title}\n\n${(khai.summary || res.resultText).slice(0, 3000)}\n\nWorker: ${VERSION} · lượt ${t.runId} · lần thử ${t.attempt}`);
-    const resultCommit = git(dir, "rev-parse", "HEAD");
-    const day = await pushBranch(t, dir);
-    if (!day.ok) {
-      await complete(t, { outcome: "BLOCKED", error: day.error, gates, model: res.model, cost, branch: t.branch, filesChanged: files, resultCommit, summary: khai.summary });
+    const nop = await submitChanges(t, dir, `${t.code}: ${t.title}\n\n${(khai.summary || res.resultText).slice(0, 3000)}`);
+    if (!nop.ok) {
+      await complete(t, { outcome: "BLOCKED", error: nop.error, gates, model: res.model, cost, branch: t.branch, filesChanged: files, summary: khai.summary });
       return;
     }
+    const resultCommit = nop.commitSha;
     await complete(t, {
       outcome: "SUCCEEDED",
       summary: (khai.summary || res.resultText).slice(0, 8000),
@@ -332,40 +332,33 @@ async function execute(adapter: ExecutionAdapter, provider: TechExecutionProvide
   }
 }
 
-/* ═════════════════════ ĐẨY NHÁNH (docs mục 15) ═════════════════════ */
+/* ═════════════════════ NỘP BỘ THAY ĐỔI (docs mục 15) ═════════════════════ */
 
 /**
- * Đẩy nhánh của lượt bằng token NGẮN HẠN máy chủ cấp cho đúng lượt này (bot `erp-agent`, chỉ `contents: write`), qua
- * `safePush` (scripts/tech-worker/git-safety.ts): không đọc cấu hình hệ thống / toàn cục, TỪ CHỐI khi `.git/config` có
- * khoá nguy hiểm (mã trong cổng có thể đã cài hook / pushurl / insteadOf / proxy), hook trỏ vào thư mục rỗng, helper chỉ
- * gắn github.com, URL + nhánh do MÁY CHỦ cấp. Token bị THU HỒI ngay sau lượt đẩy, dù đẩy được hay không.
- * Máy chủ chưa có danh tính bot ⇒ credential CỦA MÁY chỉ khi `TECH_WORKER_ALLOW_MACHINE_GIT=1` bật tường minh (vẫn kiểm
- * cấu hình cục bộ + tắt hook) — không thì BLOCKED kèm câu nói rõ ai phải làm gì. Không bao giờ hỏi token cá nhân.
+ * Bộ thay đổi đã `git add -A` so với commit gốc của lượt: thêm / sửa ⇒ nội dung base64 + chế độ tệp ĐÃ STAGE; xoá ⇒ cờ xoá.
+ * Gửi lên `submit-changes`; máy chủ kiểm đường dẫn / năng lực / chính sách / trần rồi tự tạo commit trên ĐÚNG nhánh nó đã
+ * cấp. Worker không gửi tên nhánh, không gửi commit gốc — máy chủ lấy từ lượt chạy.
  */
-async function pushBranch(t: Claimed, dir: string): Promise<{ ok: true } | { ok: false; error: string }> {
-  const r = await api<{ ok?: true; token?: string; repo?: string; branch?: string; error?: string; detail?: string }>("push-credential", { runId: t.runId, leaseGeneration: t.leaseGeneration });
-  if (r.status === 200 && r.data.token) {
-    const token = r.data.token;
-    try {
-      if (r.data.branch !== t.branch) return { ok: false, error: "Máy chủ cấp token cho nhánh khác nhánh của lượt — không đẩy." };
-      if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(r.data.repo ?? "")) return { ok: false, error: "Máy chủ không cho biết kho đích hợp lệ — không đẩy." };
-      return safePush({ dir, branch: t.branch, url: `https://github.com/${r.data.repo}.git`, token, root: workRoot(), baseEnv: buildChildEnv("SUBSCRIPTION_CLAUDE_CODE", process.env, null) });
-    } finally {
-      // Token không sống quá lượt đẩy — thu hồi ngay, kể cả khi đẩy hỏng.
-      if (!(await revokeInstallationToken(token))) log("chưa thu hồi được token đẩy (sẽ tự hết hạn ≤ 60 phút)");
+async function submitChanges(t: Claimed, dir: string, message: string): Promise<{ ok: true; commitSha: string } | { ok: false; error: string }> {
+  const raw = git(dir, "diff", "--cached", "--no-renames", "--name-status", "-z", "HEAD");
+  const parts = raw.split("\0").filter((x) => x !== "");
+  const files: { path: string; mode?: string; contentBase64?: string; delete?: true }[] = [];
+  for (let i = 0; i + 1 < parts.length; i += 2) {
+    const status = parts[i]!;
+    const p = parts[i + 1]!;
+    if (status.startsWith("D")) {
+      files.push({ path: p, delete: true });
+      continue;
     }
+    const mode = git(dir, "ls-files", "-s", "--", p).split(/\s+/)[0] ?? "";
+    files.push({ path: p, mode, contentBase64: readFileSync(path.join(dir, p)).toString("base64") });
   }
-  if (r.data.error === "NOT_CONFIGURED" && cfg.allowMachineGit) {
-    const sai = pushConfigViolations(git(dir, "config", "--local", "--list"));
-    if (sai.length) return { ok: false, error: `Cấu hình git cục bộ có khoá nguy hiểm — KHÔNG đẩy: ${sai.join(", ")}` };
-    const { hooksDir } = pushSandbox(workRoot());
-    git(dir, "-c", `core.hooksPath=${hooksDir}`, "push", "--no-verify", "-q", "origin", `HEAD:refs/heads/${t.branch}`);
-    return { ok: true };
-  }
-  if (r.data.error === "NOT_CONFIGURED") {
-    return { ok: false, error: "Máy chủ chưa có danh tính bot erp-agent nên chưa cấp được token đẩy nhánh — đã commit trong kho của worker nhưng KHÔNG đẩy. Kỹ thuật chạy ops apply-agent-env rồi mở lại việc." };
-  }
-  return { ok: false, error: `Máy chủ không cấp token đẩy nhánh (HTTP ${r.status} ${r.data.error ?? ""}).` };
+  if (!files.length) return { ok: false, error: "Không có thay đổi nào để nộp." };
+  const r = await api<{ ok?: true; commitSha?: string; error?: string; detail?: string | string[] }>("submit-changes", { runId: t.runId, leaseGeneration: t.leaseGeneration, message, files });
+  if (r.status === 200 && r.data.commitSha) return { ok: true, commitSha: r.data.commitSha };
+  const chiTiet = Array.isArray(r.data.detail) ? r.data.detail.join(" · ") : (r.data.detail ?? "");
+  if (r.data.error === "NOT_CONFIGURED") return { ok: false, error: "Máy chủ chưa có danh tính bot erp-agent nên chưa ghi được nhánh — kỹ thuật chạy ops apply-agent-env rồi mở lại việc." };
+  return { ok: false, error: `Máy chủ không ghi nhánh (HTTP ${r.status} ${r.data.error ?? ""}): ${chiTiet}`.slice(0, 2000) };
 }
 
 /* ═════════════════════ TỰ KIỂM (docs mục 15) ═════════════════════ */
@@ -431,7 +424,7 @@ async function selfCheck(adapter: ExecutionAdapter): Promise<WorkerDiagnostics> 
     repo,
     adapter: adapterOk.ok ? { ok: true, detail: "" } : { ok: false, detail: adapterOk.reason },
     apiKeyAbsent: API_BILLING_ENV.every((k) => !process.env[k]),
-    pushMode: cfg.allowMachineGit ? "MACHINE_CREDENTIAL" : "SERVER_TOKEN",
+    pushMode: "SERVER_COMMIT",
     installMode: cfg.installed,
     lastError,
   };

@@ -4,15 +4,16 @@ import { getDb, schema } from "@/db";
 import {
   ENROLLMENT_CODE_PATTERN,
   ENROLLMENT_CODE_PREFIX,
-  PUSH_TOKENS_PER_RUN,
   enrollmentExpiry,
   isTechRepairCommand,
   sanitizeWorkerDiagnostics,
   type TechRepairCommand,
   type WorkerDiagnostics,
 } from "@/lib/constants/tech-worker-onboarding";
-import { WORKER_BRANCH_PATTERN } from "@/lib/constants/tech-worker";
-import { agentGithubDisabledReason, mintAgentPushToken } from "@/lib/integrations/github/agent-identity";
+import { taskCapability } from "@/lib/constants/tech-capabilities";
+import { serverWritableBranch, validateSubmission, type SubmittedFile } from "@/lib/constants/tech-worker-submit";
+import { audit } from "@/lib/audit";
+import { agentGithubDisabledReason, commitAgentChanges } from "@/lib/integrations/github/agent-identity";
 import { rowsOf } from "@/lib/sql-rows";
 import { recordTechEvent } from "@/lib/tech/control-plane";
 import type { TechActor, TechResult } from "@/lib/tech/service";
@@ -213,53 +214,68 @@ export async function takeWorkerRepair(workerId: string): Promise<TechRepairComm
   return isTechRepairCommand(cmd) ? cmd : null;
 }
 
-/* ═════════════════════ TOKEN ĐẨY NHÁNH (D) ═════════════════════ */
+/* ═════════════════════ MÁY CHỦ GHI NHÁNH (D) ═════════════════════ */
 
-export type PushTokenResult = { ok: true; token: string; expiresAt: string; repo: string; branch: string } | { error: string; detail?: string };
+export type SubmitResult = { ok: true; commitSha: string; branch: string; files: number; bytes: number; reused: boolean } | { error: string; detail?: string | string[] };
 
-/**
- * Cấp token đẩy NGẮN HẠN cho ĐÚNG một lượt chạy đang giữ lease: worker bật, lượt còn mở + đúng generation (fencing), và
- * nhánh của lượt là nhánh `ai/worker/*` MÁY CHỦ đã cấp lúc nhận việc — worker không tự chọn nhánh. Token đi trong thân
- * phản hồi, KHÔNG ghi CSDL; sự kiện chỉ ghi "đã cấp" + hạn.
- */
-export async function issueWorkerPushToken(worker: TechWorkerRow, fence: { runId: string; leaseGeneration: number }, now = new Date()): Promise<PushTokenResult> {
-  if (!worker.enabled) return { error: "WORKER_DISABLED" };
-  const db = await getDb();
-  const f = await fenced(db, worker, fence);
-  if (!f.ok) return { error: f.reason };
-  if (!WORKER_BRANCH_PATTERN.test(f.run.branch)) return { error: "BRANCH_NOT_ALLOWED" };
-  const chua = agentGithubDisabledReason();
-  if (chua) return { error: "NOT_CONFIGURED", detail: "Máy chủ chưa có danh tính bot erp-agent — không cấp được token đẩy nhánh." };
-  /*
-    TRẦN SỐ TOKEN MỖI LƯỢT (review bảo mật PR #631): giữ chỗ bằng MỘT câu UPDATE có điều kiện trên bộ đếm trong metadata của
-    lượt chạy — hai lời xin chen nhau không vượt trần. Đếm cả lần xin mà GitHub từ chối: trần là trần số lần HỎI.
-  */
-  const giu = await db.execute(sql`
-    UPDATE tech_agent_runs
-    SET metadata = jsonb_set(coalesce(metadata, '{}'::jsonb), '{pushTokensIssued}', to_jsonb(coalesce((metadata->>'pushTokensIssued')::int, 0) + 1))
-    WHERE id = ${f.run.id} AND status = 'RUNNING' AND coalesce((metadata->>'pushTokensIssued')::int, 0) < ${PUSH_TOKENS_PER_RUN}
-    RETURNING id
-  `);
-  if (!rowsOf<{ id: string }>(giu).length) return { error: "PUSH_TOKEN_LIMIT", detail: `Lượt này đã xin đủ ${PUSH_TOKENS_PER_RUN} token đẩy.` };
-  try {
-    const t = await mintAgentPushToken({ branch: f.run.branch, now });
-    await recordTechEvent(
-      db,
-      { name: "worker.push_token_issued", subjectType: "WORKER", subjectId: worker.id, taskId: f.task.id, payload: { runId: f.run.id, branch: f.run.branch, expiresAt: t.expiresAt } },
-      { kind: "SYSTEM", name: `worker:${worker.key}` },
-    );
-    return { ok: true, token: t.token, expiresAt: t.expiresAt, repo: t.repo, branch: f.run.branch };
-  } catch (e) {
-    return { error: "GITHUB_ERROR", detail: e instanceof Error ? e.message.slice(0, 200) : "lỗi" };
-  }
+/** Dấu vân tay của một bộ thay đổi — gửi lại đúng bộ đó (mạng chập chờn) không đẻ commit thứ hai. */
+function submissionHash(baseSha: string, message: string, files: SubmittedFile[]): string {
+  const chuan = [...files].sort((x, y) => (x.path < y.path ? -1 : x.path > y.path ? 1 : 0)).map((f) => [f.path, f.delete === true ? "D" : (f.mode ?? ""), f.contentBase64 ?? ""]);
+  return sha256(JSON.stringify([baseSha, message.trim(), chuan]));
 }
 
-/** Máy chủ có cấp được token đẩy không — cho trang worker nói đúng câu (không bắt chủ shop dán PAT). */
+/**
+ * Worker nộp bộ thay đổi của lượt đang giữ lease; MÁY CHỦ kiểm rồi tự ghi nhánh (`commitAgentChanges`). Token GitHub không
+ * bao giờ rời máy chủ. Ba điều máy chủ KHÔNG nhận từ worker: tên nhánh (lấy từ lượt chạy — `ai/worker/<MÃ>-a<n>` do máy chủ
+ * dựng lúc nhận việc), commit gốc (lấy `base_commit` đã ghi lúc `start`, và GitHub phải xác nhận nó nằm trên main / là đỉnh
+ * nhánh), và phạm vi được ghi (năng lực + chính sách của VIỆC ở CSDL).
+ */
+export async function submitWorkerChanges(worker: TechWorkerRow, input: { runId: string; leaseGeneration: number; message: string; files: SubmittedFile[] }, now = new Date()): Promise<SubmitResult> {
+  if (!worker.enabled) return { error: "WORKER_DISABLED" };
+  const db = await getDb();
+  const f = await fenced(db, worker, input);
+  if (!f.ok) return { error: f.reason };
+  const branch = serverWritableBranch(f.run.branch);
+  if (!branch) return { error: "BRANCH_NOT_ALLOWED" };
+  const baseSha = f.run.baseCommit;
+  if (!/^[0-9a-f]{40}$/.test(baseSha)) return { error: "NO_BASE", detail: "Lượt chưa ghi commit gốc (start) — không ghi nhánh." };
+  const kiem = validateSubmission(input, { capability: taskCapability(f.task), policyLevel: f.task.policyLevel });
+  if (!kiem.ok) return { error: "REJECTED", detail: kiem.errors.slice(0, 50) };
+  const hash = submissionHash(baseSha, input.message, input.files);
+  const meta = (f.run.metadata as Record<string, unknown> | null) ?? {};
+  const da = meta.submission as { hash?: string; commitSha?: string } | undefined;
+  if (da?.commitSha) {
+    if (da.hash === hash) return { ok: true, commitSha: da.commitSha, branch, files: input.files.length, bytes: kiem.totalBytes, reused: true };
+    return { error: "ALREADY_SUBMITTED", detail: "Lượt này đã ghi một bộ thay đổi khác — mỗi lượt đúng một commit." };
+  }
+  if (agentGithubDisabledReason()) return { error: "NOT_CONFIGURED", detail: "Máy chủ chưa có danh tính bot erp-agent — chưa ghi được nhánh." };
+  let commitSha: string;
+  try {
+    const message = `${input.message.trim()}\n\nWorker: ${worker.key} · lượt ${f.run.id} · lần thử ${f.task.attempts}`;
+    commitSha = (await commitAgentChanges({ branch, baseSha, files: input.files, message, now })).commitSha;
+  } catch (e) {
+    return { error: "GITHUB_ERROR", detail: e instanceof Error ? e.message.slice(0, 300) : "lỗi" };
+  }
+  const tom = { hash, commitSha, files: input.files.length, bytes: kiem.totalBytes, at: now.toISOString() };
+  await db
+    .update(schema.techAgentRuns)
+    .set({ metadata: sql`coalesce(${schema.techAgentRuns.metadata}, '{}'::jsonb) || ${JSON.stringify({ submission: tom })}::jsonb`, resultCommit: commitSha })
+    .where(eq(schema.techAgentRuns.id, f.run.id));
+  await recordTechEvent(
+    db,
+    { name: "worker.branch_written", subjectType: "RUN", subjectId: f.run.id, taskId: f.task.id, missionId: f.task.missionId, payload: { branch, baseSha, commitSha, files: tom.files, bytes: tom.bytes } },
+    { kind: "SYSTEM", name: `worker:${worker.key}` },
+  );
+  await audit({ userEmail: `job:tech-worker:${worker.key}`, action: "TECH_WORKER_BRANCH_WRITTEN", entity: "TECH_AGENT_RUN", entityId: f.run.id, after: { branch, baseSha, commitSha, files: tom.files, bytes: tom.bytes } });
+  return { ok: true, commitSha, branch, files: tom.files, bytes: tom.bytes, reused: false };
+}
+
+/** Máy chủ có ghi được nhánh không — cho trang worker nói đúng câu (không bắt chủ shop dán PAT). */
 export function workerPushReadiness(): { ready: boolean; detail: string } {
   const chua = agentGithubDisabledReason();
   return chua
-    ? { ready: false, detail: "Máy chủ chưa có danh tính bot erp-agent nên chưa cấp được token đẩy nhánh. Worker vẫn làm việc nhưng dừng ở bước đẩy (BLOCKED) — nhờ kỹ thuật chạy ops apply-agent-env. Không cần (và không nên) dán token GitHub cá nhân." }
-    : { ready: true, detail: "Đẩy nhánh bằng token ngắn hạn của bot erp-agent, máy chủ cấp cho từng lượt — máy của bạn không cần cấu hình Git." };
+    ? { ready: false, detail: "Máy chủ chưa có danh tính bot erp-agent nên chưa ghi được nhánh. Worker vẫn làm việc nhưng dừng ở bước nộp thay đổi (BLOCKED) — nhờ kỹ thuật chạy ops apply-agent-env. Không cần (và không nên) dán token GitHub nào." }
+    : { ready: true, detail: "Máy chủ tự ghi nhánh bằng bot erp-agent từ bộ thay đổi worker nộp — máy của bạn không giữ quyền ghi GitHub nào." };
 }
 
 /** Các mã ghi danh còn đổi được của một nhóm worker — cho bước 2 của bốn bước. */

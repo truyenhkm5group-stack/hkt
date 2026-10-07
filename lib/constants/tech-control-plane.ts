@@ -333,7 +333,7 @@ export const TECH_EVENT_NAMES = [
   "worker.secret_revoked",
   "worker.removed",
   "worker.repair_requested",
-  "worker.push_token_issued",
+  "worker.branch_written",
 ] as const;
 export type TechEventName = (typeof TECH_EVENT_NAMES)[number];
 
@@ -379,5 +379,5 @@ export const TECH_EVENT_LABEL: Record<TechEventName, string> = {
   "worker.secret_revoked": "Thu hồi khoá worker",
   "worker.removed": "Gỡ worker",
   "worker.repair_requested": "Yêu cầu sửa lỗi tự động",
-  "worker.push_token_issued": "Cấp token đẩy nhánh ngắn hạn (bot)",
+  "worker.branch_written": "Máy chủ ghi nhánh từ bộ thay đổi worker nộp (bot)",
 };

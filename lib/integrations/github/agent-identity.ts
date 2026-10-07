@@ -238,31 +238,71 @@ async function installationToken(cfg: AgentGithubConfig, now: Date = new Date())
 }
 
 /**
- * ═══ TOKEN ĐẨY NHÁNH CHO WORKER HÀNG ĐỢI (/tech, docs/tech-control-plane/README.md mục 15) ═══
+ * ═══ MÁY CHỦ GHI NHÁNH THAY WORKER (/tech, docs/tech-control-plane/README.md mục 15) ═══
  *
- * Worker trên máy của chủ shop phải `git push` nhánh `ai/worker/*` mà chủ shop không cấu hình được Git. Thay vì để
- * worker mượn credential của máy (có khi là tài khoản quản trị kho của chủ shop), máy chủ xin cho ĐÚNG lượt đẩy đó một
- * token cài đặt MỚI, khác token đệm ở trên ba điểm:
- *   · KHÔNG đệm — mỗi lượt đẩy một token; không token nào sống lâu hơn GitHub cho phép (≤ 60 phút);
- *   · quyền thu hẹp xuống `contents: write` — không `pull_requests`: PR vẫn do máy chủ mở bằng cầu nối;
- *   · nhánh kiểm bằng `assertAgentBranch` TRƯỚC khi xin (token GitHub không giới hạn được theo nhánh — ruleset `main`
- *     chặn đẩy thẳng, và máy chủ chỉ cấp khi lượt chạy đang giữ đúng nhánh `ai/worker/*` nó đã cấp).
- * Người gọi (lib/tech/worker-onboarding.ts) trả token trong THÂN phản hồi cho đúng worker đã xác thực; không ghi CSDL.
+ * Worker KHÔNG giữ bất kỳ quyền ghi GitHub nào (review bảo mật PR #631: mã agent chạy trong cổng dưới cùng tài khoản
+ * Windows giải được mọi thứ worker giữ). Worker nộp bộ thay đổi; máy chủ — đã kiểm đường dẫn / năng lực / chính sách —
+ * gọi hàm này. Token cài đặt dùng ở đây là token RIÊNG của lượt ghi (không đệm, `contents: write`, đúng một kho), không
+ * bao giờ rời hàm, và bị THU HỒI (`DELETE /installation/token`) ngay khi xong — kể cả khi hỏng giữa chừng.
+ *
+ * Chuỗi Git Data API: commit gốc → blobs → tree (`base_tree` = tree của gốc) → commit (parent = gốc) → ref. Ref:
+ *   · chưa có ⇒ tạo, và gốc phải là commit ĐÃ NẰM TRÊN `main` (compare gốc...main = ahead / identical);
+ *   · đã có (việc sửa CI trên nhánh PR) ⇒ đỉnh hiện tại PHẢI bằng gốc, cập nhật KHÔNG force.
+ * Nhánh do người gọi truyền (máy chủ dựng từ lượt chạy), vẫn qua `assertAgentBranch` — không bao giờ ghi `main`.
  */
-export async function mintAgentPushToken(input: { branch: string; now?: Date }): Promise<{ token: string; expiresAt: string; repo: string }> {
+export type AgentChange = { path: string; mode?: string; contentBase64?: string; delete?: boolean };
+
+export async function commitAgentChanges(input: { branch: string; baseSha: string; files: AgentChange[]; message: string; now?: Date }): Promise<{ commitSha: string; created: boolean }> {
   const cfg = must();
-  assertAgentBranch(input.branch);
+  const branch = assertAgentBranch(input.branch);
+  if (!/^[0-9a-f]{40}$/.test(input.baseSha)) throw new Error("Commit gốc không hợp lệ");
   const now = input.now ?? new Date();
-  const res = await call(`${API}/app/installations/${encodeURIComponent(cfg.installationId)}/access_tokens`, {
+  const tokRes = await call(`${API}/app/installations/${encodeURIComponent(cfg.installationId)}/access_tokens`, {
     method: "POST",
     auth: appJwt(cfg, now),
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ repositories: [cfg.repo], permissions: { contents: "write" } }),
   });
-  if (!res.ok) throw new Error(`Không xin được token đẩy nhánh (HTTP ${res.status})`);
-  const json = (await res.json()) as { token?: string; expires_at?: string };
-  if (!json.token) throw new Error("GitHub không trả token đẩy nhánh");
-  return { token: json.token, expiresAt: json.expires_at ?? new Date(now.getTime() + 60 * 60_000).toISOString(), repo: `${cfg.owner}/${cfg.repo}` };
+  if (!tokRes.ok) throw new Error(`Không xin được token ghi nhánh (HTTP ${tokRes.status})`);
+  const token = ((await tokRes.json()) as { token?: string }).token;
+  if (!token) throw new Error("GitHub không trả token ghi nhánh");
+  const repoApi = `${API}/repos/${cfg.owner}/${cfg.repo}`;
+  const json = async <T>(res: Response, viec: string): Promise<T> => {
+    if (!res.ok) throw new Error(`${viec} thất bại (HTTP ${res.status})`);
+    return (await res.json()) as T;
+  };
+  const post = (url: string, body: unknown, method = "POST") => call(url, { method, auth: token, headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+  try {
+    const goc = await json<{ tree?: { sha?: string } }>(await call(`${repoApi}/git/commits/${input.baseSha}`, { auth: token }), "Đọc commit gốc");
+    if (!goc.tree?.sha) throw new Error("Commit gốc không có tree");
+    const refRes = await call(`${repoApi}/git/ref/heads/${branch.split("/").map(encodeURIComponent).join("/")}`, { auth: token });
+    let dinh: string | null = null;
+    if (refRes.ok) dinh = ((await refRes.json()) as { object?: { sha?: string } }).object?.sha ?? null;
+    else if (refRes.status !== 404) throw new Error(`Đọc nhánh thất bại (HTTP ${refRes.status})`);
+    if (dinh !== null && dinh !== input.baseSha) throw new Error("Nhánh đã đi khỏi commit gốc của lượt — không ghi đè");
+    if (dinh === null) {
+      const cmp = await json<{ status?: string }>(await call(`${repoApi}/compare/${input.baseSha}...main`, { auth: token }), "So commit gốc với main");
+      if (cmp.status !== "ahead" && cmp.status !== "identical") throw new Error("Commit gốc không nằm trên main — không tạo nhánh");
+    }
+    const tree: { path: string; mode: string; type: "blob"; sha: string | null }[] = [];
+    for (const f of input.files) {
+      if (f.delete) {
+        tree.push({ path: f.path, mode: "100644", type: "blob", sha: null });
+        continue;
+      }
+      const blob = await json<{ sha?: string }>(await post(`${repoApi}/git/blobs`, { content: f.contentBase64 ?? "", encoding: "base64" }), "Tạo blob");
+      if (!blob.sha) throw new Error("GitHub không trả blob");
+      tree.push({ path: f.path, mode: f.mode ?? "100644", type: "blob", sha: blob.sha });
+    }
+    const t = await json<{ sha?: string }>(await post(`${repoApi}/git/trees`, { base_tree: goc.tree.sha, tree }), "Tạo tree");
+    const c = await json<{ sha?: string }>(await post(`${repoApi}/git/commits`, { message: input.message, tree: t.sha, parents: [input.baseSha] }), "Tạo commit");
+    if (!c.sha) throw new Error("GitHub không trả commit");
+    if (dinh === null) await json(await post(`${repoApi}/git/refs`, { ref: `refs/heads/${branch}`, sha: c.sha }), "Tạo nhánh");
+    else await json(await post(`${repoApi}/git/refs/heads/${branch.split("/").map(encodeURIComponent).join("/")}`, { sha: c.sha, force: false }, "PATCH"), "Cập nhật nhánh");
+    return { commitSha: c.sha, created: dinh === null };
+  } finally {
+    await call(`${API}/installation/token`, { method: "DELETE", auth: token }).catch(() => undefined);
+  }
 }
 
 /** Vứt token đang giữ. Gọi khi đổi cấu hình hoặc khi một lượt trả 401. */

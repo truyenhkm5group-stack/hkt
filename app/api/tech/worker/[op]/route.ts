@@ -3,7 +3,8 @@ import { z } from "zod";
 import { clientIpFrom } from "@/lib/auth/client-ip";
 import { TECH_GATE_RESULTS, TECH_OWNER_ESCALATIONS } from "@/lib/constants/tech";
 import { TECH_LEASE, TECH_RUN_OUTCOMES } from "@/lib/constants/tech-worker";
-import { issueWorkerPushToken, recordWorkerDiagnostics, takeWorkerRepair } from "@/lib/tech/worker-onboarding";
+import { SUBMIT_LIMITS, SUBMIT_MODES } from "@/lib/constants/tech-worker-submit";
+import { recordWorkerDiagnostics, submitWorkerChanges, takeWorkerRepair } from "@/lib/tech/worker-onboarding";
 import {
   authenticateTechWorker,
   claimNextTechTask,
@@ -27,7 +28,8 @@ export const dynamic = "force-dynamic";
  *   POST /api/tech/worker/claim      — xin MỘT việc
  *   POST /api/tech/worker/start      — đã dựng cây làm việc
  *   POST /api/tech/worker/complete   — kết cục trong danh sách đóng
- *   POST /api/tech/worker/push-credential — token đẩy nhánh NGẮN HẠN cho đúng lượt đang giữ (mục 15)
+ *   POST /api/tech/worker/submit-changes — nộp BỘ THAY ĐỔI; MÁY CHỦ kiểm rồi tự ghi nhánh (mục 15). Worker KHÔNG nhận
+ *        bất kỳ credential GitHub nào — không có cửa nào trao token xuống.
  *
  * (`POST /api/tech/worker/enroll` là route RIÊNG, không cần khoá worker — bộ cài đổi mã ghi danh lấy khoá.)
  *
@@ -83,6 +85,27 @@ const completeSchema = z
   })
   .strict();
 
+/** Bộ thay đổi — trần thô ở đây (chặn gói khổng lồ trước khi đọc), luật thật ở `validateSubmission`. */
+const submitSchema = z
+  .object({
+    ...fence,
+    message: z.string().min(1).max(SUBMIT_LIMITS.maxMessageChars),
+    files: z
+      .array(
+        z
+          .object({
+            path: z.string().min(1).max(SUBMIT_LIMITS.maxPathChars),
+            mode: z.enum(SUBMIT_MODES).optional(),
+            contentBase64: z.string().max(Math.ceil(SUBMIT_LIMITS.maxFileBytes / 3) * 4).optional(),
+            delete: z.literal(true).optional(),
+          })
+          .strict(),
+      )
+      .min(1)
+      .max(SUBMIT_LIMITS.maxFiles),
+  })
+  .strict();
+
 /** Lỗi fencing là câu trả lời BÌNH THƯỜNG (worker cũ sống lại) ⇒ 409, không phải 500. */
 const FENCE_ERRORS = new Set(["RUN_NOT_YOURS", "RUN_CLOSED", "STALE_LEASE", "BRANCH_MISMATCH", "WORKER_DISABLED"]);
 
@@ -124,6 +147,8 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ op: string
   // Ngăn của khoá ĐÃ xác thực — chỉ chính worker đó chạm tới được.
   if (quaTran(`ok:${worker.id}`)) return NextResponse.json({ error: "rate_limited" }, { status: 429 });
 
+  // Gói quá trần thô (bộ thay đổi tối đa ~5 MB nội dung ⇒ ~7 MB base64) ⇒ từ chối trước khi đọc thân.
+  if (Number(req.headers.get("content-length") ?? 0) > 8_000_000) return NextResponse.json({ error: "payload too large" }, { status: 413 });
   let body: unknown = {};
   try {
     body = await req.json();
@@ -163,13 +188,12 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ op: string
         if ("error" in r) return NextResponse.json(r, { status: FENCE_ERRORS.has(r.error) ? 409 : 422 });
         return NextResponse.json(r);
       }
-      case "push-credential": {
-        const p = z.object(fence).strict().safeParse(body);
+      case "submit-changes": {
+        const p = submitSchema.safeParse(body);
         if (!p.success) return NextResponse.json({ error: p.error.issues[0]?.message ?? "bad request" }, { status: 400 });
-        const r = await issueWorkerPushToken(worker, p.data);
-        if ("error" in r) return NextResponse.json(r, { status: r.error === "NOT_CONFIGURED" ? 503 : r.error === "PUSH_TOKEN_LIMIT" ? 429 : FENCE_ERRORS.has(r.error) ? 409 : 422 });
-        // Token NGẮN HẠN trong thân phản hồi — không ghi nhật ký, không cache.
-        return NextResponse.json(r, { headers: { "cache-control": "no-store" } });
+        const r = await submitWorkerChanges(worker, p.data);
+        if ("error" in r) return NextResponse.json(r, { status: r.error === "NOT_CONFIGURED" ? 503 : FENCE_ERRORS.has(r.error) ? 409 : 422 });
+        return NextResponse.json(r);
       }
       default:
         return NextResponse.json({ error: "unknown op" }, { status: 404 });

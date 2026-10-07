@@ -56,6 +56,7 @@ export const DOGFOOD_WORKER_DEFAULTS = {
  * đường rơi sang API…). Thêm một dòng ở đây mà không có phép đo đi kèm là khai khống.
  */
 export const WORKER_POLICY_FACTS = [
+  { key: "githubWrite", label: "Quyền ghi GitHub trên máy worker", value: "KHÔNG CÓ", why: "Worker chỉ nộp bộ thay đổi; máy chủ kiểm theo năng lực + chính sách của việc rồi tự ghi đúng nhánh ai/worker/* bằng bot." },
   { key: "apiFallback", label: "Rơi sang tiền API", value: "TẮT", why: "Worker gói thuê bao không bao giờ nhận khoá API; có ANTHROPIC_API_KEY trong môi trường là worker từ chối chạy." },
   { key: "destructive", label: "Thao tác phá huỷ", value: "CẤM", why: "Chính sách R4 (xoá dữ liệu, secret, DNS, thanh toán, lách cổng) luôn cần người; worker chỉ nhận tới trần R0." },
   { key: "deployProduction", label: "Deploy production", value: "CẤM", why: "Năng lực deploy-production không giao được cho worker tự động; deploy do người / Delivery Controller." },
@@ -108,15 +109,6 @@ export function workerStartupBlockers(provider: TechExecutionProvider, env: Reco
   return out;
 }
 
-/* ═════════════════════ ĐẨY NHÁNH BẰNG TOKEN NGẮN HẠN ═════════════════════ */
-
-/**
- * Số token đẩy tối đa máy chủ cấp cho MỘT lượt chạy đang giữ lease. Một lượt đẩy đúng một lần; 3 đủ cho lỗi mạng
- * thoáng qua, không đủ để biến một worker bị chiếm thành máy xin token liên tục. Đẩy an toàn ở
- * `scripts/tech-worker/git-safety.ts`.
- */
-export const PUSH_TOKENS_PER_RUN = 3;
-
 /* ═════════════════════ BÁO CÁO TỰ KIỂM (CHẨN ĐOÁN) ═════════════════════ */
 
 export const CLAUDE_AUTH_STATES = ["LOGGED_IN_SUBSCRIPTION", "LOGGED_IN_API", "NOT_LOGGED_IN", "UNKNOWN"] as const;
@@ -129,7 +121,8 @@ export const CLAUDE_AUTH_LABEL: Record<ClaudeAuthState, string> = {
   UNKNOWN: "Chưa rõ",
 };
 
-export const PUSH_MODES = ["SERVER_TOKEN", "MACHINE_CREDENTIAL", "NONE"] as const;
+/** Cách nhánh lên GitHub: `SERVER_COMMIT` = worker nộp bộ thay đổi, máy chủ tự ghi nhánh (worker không giữ quyền ghi nào). */
+export const PUSH_MODES = ["SERVER_COMMIT", "NONE"] as const;
 export type PushMode = (typeof PUSH_MODES)[number];
 
 export type WorkerDiagnostics = {

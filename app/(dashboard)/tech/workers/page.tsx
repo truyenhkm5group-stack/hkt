@@ -162,7 +162,7 @@ export default async function TechWorkersPage() {
                   <Cell label="Claude Code chạy được" value={diag ? (diag.adapter.ok ? "Có" : diag.adapter.detail || "Không") : "—"} tone={!diag ? "unknown" : diag.adapter.ok ? "ok" : "bad"} />
                   <Cell label="ANTHROPIC_API_KEY trong môi trường" value={diag ? (diag.apiKeyAbsent ? "Vắng mặt" : "CÓ — worker từ chối chạy") : "—"} tone={!diag ? "unknown" : diag.apiKeyAbsent ? "ok" : sub ? "bad" : "unknown"} />
                   <Cell label="Phiên bản" value={diag ? [diag.workerVersion, diag.claudeVersion, diag.nodeVersion].filter(Boolean).join(" · ") || "—" : w.version || "—"} tone={diag ? undefined : "unknown"} />
-                  <Cell label="Đẩy nhánh" value={day.ready ? "Token ngắn hạn của bot" : "Chưa cấp được (máy chủ)"} tone={day.ready ? "ok" : "bad"} />
+                  <Cell label="Ghi nhánh" value={day.ready ? "Máy chủ ghi bằng bot — máy không giữ quyền GitHub" : "Máy chủ chưa ghi được (thiếu bot)"} tone={day.ready ? "ok" : "bad"} />
                   <Cell label="Tự kiểm gần nhất" value={w.diagnosticsAt ? formatTimeAgo(w.diagnosticsAt) : "—"} tone={w.diagnosticsAt ? undefined : "unknown"} />
                   <Cell label="Lỗi gần nhất" value={diag?.lastError || "—"} tone={diag?.lastError ? "bad" : "unknown"} />
                 </div>
