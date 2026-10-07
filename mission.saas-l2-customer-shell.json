@@ -3,7 +3,7 @@
   "mission_id": "saas-l2-customer-shell",
   "title": "Vỏ app khách Chốt Đơn: 8 mục, mặc định hộp thư, mobile",
   "business_goal": "",
-  "status": "RUNNING",
+  "status": "PR_READY",
   "priority": "P1",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-saas-l2",
@@ -30,7 +30,23 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-07T10:36:55.036Z",
-  "updated_at": "2026-10-07T10:36:55.036Z",
-  "last_heartbeat": "2026-10-07T10:36:55.036Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-07T12:12:57.526Z",
+  "last_heartbeat": "2026-10-07T12:12:57.526Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "feat/saas-l2-customer-shell",
+    "sha": "45cddeff8446ea1882b1d60ea294c01866f565fd",
+    "at": "2026-10-07T12:12:57.526Z",
+    "actor": "DESKTOP-56TH98Y:wt-saas-l2",
+    "title": "Vỏ app khách Chốt Đơn: 8 mục, mặc định hộp thư, mobile",
+    "summary": "Workspace Chốt Đơn (brand chotdon + chỉ sản phẩm chotdon theo module) thấy 8 mục, / về hộp thư, route ERP chặn ở máy chủ (SHELL_RESTRICTED), mobile thanh dưới; ERP/nhà không đổi",
+    "tests": [
+      "npm run typecheck: sạch",
+      "npm run lint: sạch",
+      "npm test (sau commit, một mình): TẤT CẢ KIỂM THỬ ĐẠT",
+      "npm run build: đạt",
+      "tests/saas-shell.test.ts: đạt, 5 đột biến đều đỏ",
+      "chạy thật next start + Chrome 390px/1366px: 30 lượt, 0 lỗi, 0 tràn ngang, route ERP chuyển về hộp thư"
+    ]
+  }
 }
