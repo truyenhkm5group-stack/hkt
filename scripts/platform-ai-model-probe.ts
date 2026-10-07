@@ -21,7 +21,7 @@
 import "dotenv/config";
 import { applyPlatformAiPolicyAsScript, probeWithPlatformKey, rollbackPlatformAiPolicyAsScript, SCRIPT_WRITER_LABEL } from "@/lib/ai-usage/platform-ai-admin";
 import { readPlatformAiPolicy } from "@/lib/ai-usage/platform-ai-policy";
-import { AB_DECISION_LABEL, readPlatformModelAbForScript, type AbArm } from "@/lib/ai-usage/platform-ai-ab";
+import { AB_DECISION_LABEL, readPlatformModelAbForScript, type AbArm, type SyncArm } from "@/lib/ai-usage/platform-ai-ab";
 
 const tomTat = (s: string) => console.log(`[ops:tom-tat] ${s.slice(0, 300)}`);
 const DEFAULT_MODELS = ["gemini-2.5-flash-lite", "gemini-3.5-flash-lite"];
@@ -56,10 +56,18 @@ async function main() {
       tomTat(`${label} ${a.model}: p50/p95 ${n(a.p50Ms)}/${n(a.p95Ms)} ms · công cụ đúng ${p(a.toolSuccessRate)} · upsell mời ${p(a.upsellOfferRate)} nhận ${p(a.upsellAcceptRate)} · token/HT ${n(a.inputPerConv)}+${n(a.outputPerConv)} · USD/HT ${n(a.costPerConvUsd, 5)} · USD/đơn ${n(a.costPerOrderUsd, 4)} · tổng ${a.costUsd.toFixed(4)}`);
     };
     tomTat(`A/B cohort từ ${r.since} · canary ${r.policy.enabled ? `${r.policy.canaryPct}%` : "TẮT"} · ${r.orgs} tổ chức${r.errors.length ? ` · ${r.errors.length} tổ chức không đọc được` : ""}`);
-    line("CANARY", r.canary);
-    line("ĐỐI CHỨNG", r.control);
-    tomTat(`ĐỀ XUẤT: ${AB_DECISION_LABEL[r.verdict.decision]}${r.verdict.nextPct ? ` → ${r.verdict.nextPct}%` : ""} · ${r.verdict.reasons.join(" ")}`);
-    for (const c of r.verdict.checks) tomTat(`${c.ok === null ? "○" : c.ok ? "✓" : "✗"} ${c.label}: ${c.detail}`);
+    const sync = (label: string, a: SyncArm) =>
+      tomTat(`GHI ĐƠN ${label} ${a.model}: HT ${a.threads} · ${a.requests} lượt · lỗi ${p(a.errorRate)} · đơn ${a.orders} · ra đơn ${p(a.orderRate)} · lead→đơn ${p(a.leadConversion)} · lead lỡ ${p(a.missedLeadRate)} · token/HT ${n(a.tokensPerThread)} · USD/HT ${n(a.costPerThreadUsd, 5)} · USD/đơn ${n(a.costPerOrderUsd, 4)} · tổng ${a.costUsd.toFixed(4)}`);
+    line("CHAT CANARY", r.canary);
+    line("CHAT ĐỐI CHỨNG", r.control);
+    sync("CANARY", r.sync.canary);
+    sync("ĐỐI CHỨNG", r.sync.control);
+    const said = (tag: string, v: typeof r.verdict) => tomTat(`${tag}: ${AB_DECISION_LABEL[v.decision]}${v.nextPct ? ` → ${v.nextPct}%` : ""} · ${v.reasons.join(" ")}`);
+    said("CHAT", r.chatVerdict);
+    for (const c of r.chatVerdict.checks) tomTat(`chat ${c.ok === null ? "○" : c.ok ? "✓" : "✗"} ${c.label}: ${c.detail}`);
+    said("GHI ĐƠN", r.sync.verdict);
+    for (const c of r.sync.verdict.checks) tomTat(`ghi đơn ${c.ok === null ? "○" : c.ok ? "✓" : "✗"} ${c.label}: ${c.detail}`);
+    said("ĐỀ XUẤT CHUNG", r.verdict);
     process.exit(0);
   }
   const apply = flags.find((f) => f.startsWith("--apply="));

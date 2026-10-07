@@ -108,3 +108,19 @@ chốt · SĐT · địa chỉ (`customer.identified`) · handoff · lỗi AI (l
 
 **Đo không cần đăng nhập:** ops `platform-ai-model-probe` arg `--report`. **Đổi nấc:** `--apply=30 gemini-3.1-flash-lite`.
 **Hoàn tác:** `--rollback` hoặc nút ở `/platform/saas` — không cần deploy.
+
+### 7.1 Hai workload (đo 07/10/2026)
+
+30 ngày qua 100% chi phí AI dùng chung là **ghi đơn từ hội thoại nhân viên** (`order-sync`, shop `qa`, sổ AI
+`ref = order-sync:<hội thoại>`) và **0 hội thoại AI Sales với khách** — các shop chat với khách đều dùng khoá riêng. Nên
+bảng A/B có hai phần:
+
+- **AI Sales chat**: chốt · SĐT · địa chỉ · handoff · lỗi · p95 · công cụ đúng · upsell · token / chi phí (§7).
+- **Ghi đơn từ hội thoại**: hội thoại được đọc · đơn ghi được (`orders.origin = AI_ORDER_SYNC`) · tỷ lệ ra đơn · lead → đơn
+  (lead bị lỡ = chuông `sales-order-sync:lead:*` «khách để SĐT mà máy chưa lên đơn») · lỗi · token / chi phí. Luật: lỗi ≤ +1
+  điểm, ra đơn và lead → đơn giảm ≤ 5% tương đối, chi phí / hội thoại giảm ≥ 15%, cùng ngưỡng đủ mẫu.
+
+Kết luận chung chỉ xét workload có lưu lượng (đối chứng ≥ 10 hội thoại): một workload trượt ⇒ hoàn tác; lên nấc khi mọi
+workload có lưu lượng đều đạt. Ghi đơn băm canary theo TỪNG hội thoại (`salesChatProvider({ ref: order-sync:<id> })`) —
+trước 07/10 nó băm theo mã tổ chức nên canary 10% nhận 0% lưu lượng. Các việc nền khác (học hội thoại, sổ tay, nhắc khách)
+vẫn băm theo tổ chức.

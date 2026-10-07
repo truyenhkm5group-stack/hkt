@@ -615,7 +615,9 @@ async function syncThread(a: {
   const killed = await aiKillSwitchDenial(org.code);
   if (killed) return { retry: true, result: `AI đang tắt: ${killed}` };
   // Nguồn trả tiền theo ĐÚNG lựa chọn khoá của bot (AI dùng chung ⇒ PLATFORM, khoá riêng ⇒ BYOK) — sổ AI và hạn mức kiểm đúng chỗ.
-  const prov = await salesChatProvider();
+  // Khoá hội thoại = ĐÚNG chuỗi `ref` của sổ AI bên dưới: canary của Platform AI Policy băm và GHIM theo từng hội thoại (thiếu
+  // khoá ⇒ cả tổ chức rơi chung một ô — 07/10/2026 canary 10% thực tế nhận 0% vì mọi lượt ghi đơn của `qa` băm theo mã tổ chức).
+  const prov = await salesChatProvider({ feature: "sales_chatbot", ref: `order-sync:${conv.id}` });
   if (!prov.ok) return { retry: true, result: prov.error };
   const quota = await checkAiQuota(org.code, prov.source);
   if (!quota.ok) return { retry: true, result: quota.error };
