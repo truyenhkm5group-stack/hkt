@@ -229,7 +229,7 @@ function testPure() {
   assert.ok((VALUE_KPI_SPEC.cross_sell_rate.missingWhat ?? "").length > 40);
   const empty = buildValueKpis({ attribution: null, aiOrders: null, funnel: { conversations: 0, quoted: 0, identified: 0, drafted: 0, confirmed: 0 }, upsell: { offered: 0, accepted: 0 } });
   assert.deepEqual([empty.conversion_rate, empty.upsell_rate, empty.cross_sell_rate, empty.orders_assisted], [null, null, null, null], "mẫu số 0 / chưa đo ⇒ null, không bao giờ 0%");
-  const r = { orders: 0, valueVnd: 0, delivered: 0, deliveredRevenueVnd: 0, settled: 0, cancelled: 0 };
+  const r = { orders: 0, valueVnd: 0, delivered: 0, deliveredRevenueVnd: 0, settled: 0, cancelled: 0, grossProfitVnd: 0, costedRevenueVnd: 0, cogsUnknown: 0, cogsUnknownRevenueVnd: 0 };
   const kp = buildValueKpis({ attribution: { AI_ONLY: { ...r, orders: 3, valueVnd: 900_000, deliveredRevenueVnd: 600_000 }, AI_ASSISTED: { ...r, orders: 2, valueVnd: 500_000, deliveredRevenueVnd: 0 }, HUMAN_ONLY: { ...r, orders: 9, valueVnd: 9_000_000 }, unattributed: 1 }, aiOrders: 4, funnel: { conversations: 20, quoted: 10, identified: 8, drafted: 6, confirmed: 5 }, upsell: { offered: 10, accepted: 3 } });
   assert.deepEqual([kp.orders_closed_by_ai, kp.orders_assisted, kp.revenue_attributed_to_ai, kp.gmv_attributed_to_ai, kp.conversion_rate, kp.upsell_rate], [3, 2, 600_000, 1_400_000, 0.25, 0.3], "doanh thu theo ORDER_OUTCOME, GMV = giá trị lúc tạo, người bán không tính cho AI");
   assert.equal(VALUE_KPI_KEYS.length, 8);

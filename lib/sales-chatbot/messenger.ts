@@ -686,7 +686,8 @@ export async function processMessengerThread(pageId: string, psid: string, deps:
     }
     // Ảnh chụp ĐẦU LƯỢT: người gửi tin / tiếp quản trong lúc AI đang soạn ⇒ bot không gửi câu đã soạn.
     const sendGuard = await captureSendSnapshot(conv.id);
-    const turn = await chatTurn(conv.id, text, { channel: "FANPAGE", visitorKey: fanpageKey(pageId, psid), now: now(), customerName: null, ...(context ? { context } : {}) });
+    // Bình luận: cổng Số dư AI dựng khoá theo NGƯỜI bình luận — đúng khoá đồng hồ ghi sau khi gửi (`commentRow.fromId`).
+    const turn = await chatTurn(conv.id, text, { channel: "FANPAGE", visitorKey: fanpageKey(pageId, psid), now: now(), customerName: null, ...(context ? { context } : {}), ...(commentRow ? { aiCustomer: { threadKind: "COMMENT" as const, commenterId: commentRow.fromId ?? null } } : {}) });
     if (!turn.ok) {
       const busy = /Đang trả lời câu trước/.test(turn.error);
       await finish(busy ? "PENDING" : "SKIPPED", turn.error.slice(0, 300));

@@ -29,6 +29,7 @@ import { readConversationPlatformModels } from "@/lib/ai-usage/platform-ai-polic
 import type { PlatformWorkload } from "@/lib/ai-usage/types";
 import { aiKillSwitchDenial } from "@/lib/ai-usage/control";
 import { recordAiUsage } from "@/lib/ai-usage/ledger";
+import type { AiCustomerHint } from "@/lib/pricing/ai-customer";
 import type { AiUsageFeature } from "@/lib/ai-usage/types";
 import { MODEL_UNAVAILABLE_RE } from "@/lib/constants/ai-incidents";
 import { FailoverProvider, notifyPrimaryFailover, settingsHealthStore } from "@/lib/sales-chatbot/provider-failover";
@@ -41,7 +42,7 @@ import { manualOrderShortCode } from "@/lib/constants/manual-orders";
 import { canUseModule } from "@/lib/platform/capabilities";
 import { notifySalesChatAiDown, notifySalesChatHandoff, notifySalesChatModelFallback } from "@/lib/sales-chatbot/alerts";
 import { currentOrganization } from "@/lib/platform/context";
-import { salesAiPlanGate } from "@/lib/pricing/ai-gate";
+import { salesAiPlanGate, type GateConversation } from "@/lib/pricing/ai-gate";
 import { findOrganization } from "@/lib/platform/organizations";
 import { isMessagingChannel, isPublicChannel, parseSalesChatbotConfig, SALES_CHATBOT_LIMITS, SALES_THINKING_BUDGET, effectiveFallback, salesBotBillingSource, salesBotError, SALES_CHATBOT_SETTING_KEY, SALES_TONE_LABEL, withinBusinessHours, type ChatChannel, type ChatView, type SalesChatbotConfig } from "@/lib/sales-chatbot/config";
 import { parsePlaybookState, PLAYBOOK_LIMITS, PLAYBOOK_SETTING_KEY } from "@/lib/sales-chatbot/playbook-shared";
@@ -424,14 +425,15 @@ async function learnedLessons(): Promise<string> {
  * bật, công tắc AI của người vận hành, hạn mức gói, khoá AI của shop — và ghi MỘT dòng sổ chi phí `sales_chatbot` (đọc ảnh là
  * tiền của cùng con bot). Mọi nhánh hỏng ⇒ dòng «bot chưa xem được ảnh», KHÔNG ném: khách vẫn được trả lời.
  */
-export async function describeCustomerImages(urls: readonly string[], opts: { conversationId?: string | null; actorId?: string | null; fetch?: typeof fetch } = {}): Promise<string> {
+export async function describeCustomerImages(urls: readonly string[], opts: { conversationId?: string | null; actorId?: string | null; fetch?: typeof fetch; aiCustomer?: AiCustomerHint } = {}): Promise<string> {
   const fallback = imageLine(urls.length, null);
   const list = urls.filter(allowedImageUrl).slice(0, VISION_LIMITS.imagesPerTurn);
   if (!list.length) return fallback;
   try {
     const cfg = await loadSalesChatbotConfig();
     if (!cfg.enabled) return fallback;
-    if (!(await salesAiPlanGate()).ok) return fallback;
+    const gateConv = opts.conversationId ? await conversationForGate(opts.conversationId) : null;
+    if (!(await salesAiPlanGate(gateConv ? { conversation: { ...gateConv, ...(opts.aiCustomer ?? {}) } } : {})).ok) return fallback;
     const org = await currentOrganization();
     if (await aiKillSwitchDenial(org.code)) return fallback;
     if (!(await checkAiQuota(org.code, salesBotBillingSource(cfg.connectorKey, { home: org.isHome }))).ok) return fallback;
@@ -475,6 +477,17 @@ export function setSalesChatBenchProvider(provider: AiProvider | null) {
 type ProviderPick = { ok: true; provider: AiProvider; source: AiBillingSource } | { ok: false; error: string };
 
 /** Ngữ cảnh ghi sổ AI cho lời gọi hỏng của khoá chính khi lượt đã chuyển sang khoá dự phòng (provider-failover.ts). */
+/** Bốn trường của hội thoại mà cổng Số dư AI cần — `null` khi không đọc được (cổng khi ấy chỉ xét quyền gói, như cũ). */
+async function conversationForGate(id: string): Promise<GateConversation | null> {
+  try {
+    const c = schema.salesChatConversations;
+    const [row] = await (await getDb()).select({ channel: c.channel, pageId: c.pageId, threadId: c.threadId, visitorKey: c.visitorKey }).from(c).where(eq(c.id, id)).limit(1);
+    return row ?? null;
+  } catch {
+    return null;
+  }
+}
+
 export type FailoverUsage = { feature: AiUsageFeature; actorId: string | null; ref: string | null; /** Loại việc của Platform AI Policy (§8). */ workload?: PlatformWorkload };
 
 /** Phần QUAN SÁT của một lời gọi cho sổ AI (0231) — không đổi token / tiền tính phí. */
@@ -690,7 +703,20 @@ async function notifyAiDownHandoff(conv: ConvRow, state: ChatState, channel: Cha
  * Có ngữ cảnh ⇒ bỏ qua câu mẫu khớp chữ / AI chọn mã: câu khách («cho giá») chỉ hiểu đúng khi đọc cùng ngữ cảnh.
  */
 export const chatTurn = withTurnEvents(chatTurnCore);
-async function chatTurnCore(conversationId: string, rawText: string, opts: { channel: ChatChannel; visitorKey?: string | null; actorId?: string | null; now?: Date; context?: string; customerName?: string | null }): Promise<TurnResult> {
+async function chatTurnCore(
+  conversationId: string,
+  rawText: string,
+  opts: {
+    channel: ChatChannel;
+    visitorKey?: string | null;
+    actorId?: string | null;
+    now?: Date;
+    context?: string;
+    customerName?: string | null;
+    /** Lượt trả lời BÌNH LUẬN: người bình luận — cổng Số dư AI dựng khoá khách AI giống hệt lượt ghi đồng hồ (M2). */
+    aiCustomer?: AiCustomerHint;
+  },
+): Promise<TurnResult> {
   const text = rawText.trim().slice(0, SALES_CHATBOT_LIMITS.messageMax);
   if (!text) return { ok: false, error: TURN_EMPTY_ERROR };
   if (!(await canUseModule("ai_sales"))) return { ok: false, error: TURN_MODULE_OFF_ERROR };
@@ -728,7 +754,7 @@ async function chatTurnCore(conversationId: string, rawText: string, opts: { cha
     // người vẫn trả lời tay; hội thoại KHÔNG đổi trạng thái (không phải «AI hỏng → chuyển người»). Kênh nhắn tin ⇒ lỗi = ghi chú
     // của dòng tin (`AI_STOP_NOTE`, ai-status.ts dịch ra mã); chat web ⇒ im lặng (khách lạ không đọc lý do nội bộ); khung THỬ ⇒ câu
     // cho chủ shop. Gói trả phí / giá cũ không bao giờ dừng ở đây.
-    const plan = await salesAiPlanGate({ now });
+    const plan = await salesAiPlanGate({ now, conversation: { channel: conv.channel, pageId: conv.pageId, threadId: conv.threadId, visitorKey: conv.visitorKey, ...(opts.aiCustomer ?? {}) } });
     if (!plan.ok) {
       if (opts.channel === "WEB") return { ok: true, view: (await conversationView(conv.id))! };
       return { ok: false, error: isMessagingChannel(opts.channel) ? plan.note : plan.message };

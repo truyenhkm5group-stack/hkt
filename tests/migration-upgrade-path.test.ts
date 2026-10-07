@@ -182,7 +182,8 @@ const MOI = [
   "0232_platform_ai_usage_telemetry",
   "0233_saas_l3_inbox_routes",
   "0234_billing_trial_cycle",
-  "0235_tech_worker_onboarding",
+  "0235_ai_balance_ledger",
+  "0236_tech_worker_onboarding",
 ] as const;
 
 /*

@@ -121,13 +121,13 @@ export function ReconcileBillingButton() {
   );
 }
 
-export function ResolvePaymentForm({ paymentId }: { paymentId: string }) {
+export function ResolvePaymentForm({ paymentId, consequence }: { paymentId: string; consequence?: string }) {
   return (
     <ConfirmWithReason
       id={`resolve-${paymentId}`}
       label="Đã xử lý…"
       title="Đánh dấu khoản tiền này đã xử lý?"
-      consequence="Khoản tiền rời danh sách «Tiền chưa khớp» nhưng KHÔNG bị xoá — dòng và lý do của bạn còn trong nhật ký. Nếu cần gia hạn cho khách, xác nhận tay hoá đơn của họ ở trang tổ chức trước."
+      consequence={consequence ?? "Khoản tiền rời danh sách «Tiền chưa khớp» nhưng KHÔNG bị xoá — dòng và lý do của bạn còn trong nhật ký. Nếu cần gia hạn cho khách, xác nhận tay hoá đơn của họ ở trang tổ chức trước."}
       minReason={PILOT_REASON_MIN}
       placeholder="Đã hoàn tiền cho khách / đã xác nhận tay hoá đơn mới"
       run={(reason) => resolveBillingPaymentAction({ paymentId, reason })}

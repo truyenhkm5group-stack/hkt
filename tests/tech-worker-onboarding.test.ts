@@ -55,7 +55,7 @@ import { parseWorktreeList, pruneCandidates, pruneWorkerWorktrees } from "../scr
  *  3. Bộ cài sinh ra KHÔNG chứa khoá worker, không chứa ANTHROPIC_API_KEY, không ghi `.env`; cất khoá bằng DPAPI.
  *  4. Worker gói thuê bao từ chối chạy khi có ANTHROPIC_API_KEY; báo cáo chẩn đoán có trần và che chuỗi giống secret;
  *     lệnh sửa chỉ từ danh sách đóng.
- *  5. Migration 0233 thu hồi khoá `dogfood-1` đúng điều kiện và chạy lại không đổi gì.
+ *  5. Migration 0236 thu hồi khoá `dogfood-1` đúng điều kiện và chạy lại không đổi gì.
  * Không phụ thuộc máy Windows / biến môi trường thật (AGENTS.md mục 65): PowerShell kiểm bằng phân tích tĩnh trên chuỗi
  * do hàm thuần sinh ra; biến môi trường của danh tính bot được đặt rồi TRẢ LẠI nguyên trạng. Đồng hồ: `now` thật (mục 50).
  */
@@ -160,7 +160,7 @@ export function testTechWorkerOnboardingPure() {
   // 1.6 Lệnh sửa: danh sách ĐÓNG, khớp CHECK ở CSDL (schema + migration) — không hai danh sách lệch nhau.
   assert.ok(!isTechRepairCommand("rm -rf /") && !isTechRepairCommand("RUN_SHELL") && !isTechRepairCommand(""));
   for (const c of TECH_REPAIR_COMMANDS) assert.ok(isTechRepairCommand(c));
-  const mig = src("drizzle/0235_tech_worker_onboarding.sql");
+  const mig = src("drizzle/0236_tech_worker_onboarding.sql");
   const checkMig = /"repair_command" IN \(([^)]*)\)/.exec(mig)?.[1] ?? "";
   const checkSchema = /repairCommand\} IN \(([^)]*)\)/.exec(src("db/schema.ts"))?.[1] ?? "";
   for (const ds of [checkMig, checkSchema]) {
@@ -646,12 +646,12 @@ function testWorkerGitSafetyReal() {
 }
 
 /**
- * Migration 0233 — chạy ĐÚNG câu lệnh thu hồi trong tệp migration (không viết lại luật bằng tay) trên dòng `dogfood-1`
+ * Migration 0236 — chạy ĐÚNG câu lệnh thu hồi trong tệp migration (không viết lại luật bằng tay) trên dòng `dogfood-1`
  * thử, qua từng điều kiện chặn, rồi chạy lại để chứng minh idempotent.
  */
 async function testDogfoodRevocation() {
   const db = await getDb();
-  const cau = src("drizzle/0235_tech_worker_onboarding.sql")
+  const cau = src("drizzle/0236_tech_worker_onboarding.sql")
     .split("--> statement-breakpoint")
     .map((x) => x.trim())
     .find((x) => x.startsWith('WITH "thu_hoi"'));

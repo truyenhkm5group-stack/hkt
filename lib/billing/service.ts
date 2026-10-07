@@ -1,4 +1,4 @@
-import { and, desc, eq, gt, gte, inArray, isNotNull, isNull, ne, sql } from "drizzle-orm";
+import { and, desc, eq, gt, gte, inArray, isNotNull, isNull, ne, notInArray, notLike, sql } from "drizzle-orm";
 import { getPlatformDb, schema } from "@/db";
 import type { SessionUser } from "@/lib/auth/session";
 import {
@@ -46,6 +46,9 @@ import {
 import { invalidateSubscriptions, readSubscriptionAddons, readSubscriptionTerms } from "@/lib/billing/standing";
 import { ENTITLEMENT_SPEC } from "@/lib/entitlements/kinds";
 import { VN_BANK_BY_BIN, bankNameOf } from "@/lib/constants/vn-banks";
+import { BILLING_RECEIVER_KEY, getBillingReceiver, parseReceiver, type BillingReceiverView } from "@/lib/billing/receiver";
+import { creditTopupFromBankRow } from "@/lib/billing/ai-balance";
+import { extractTopupCodes, TOPUP_CODE_PREFIX, TOPUP_PAYMENT_OUTCOMES } from "@/lib/billing/ai-balance-rules";
 import { DEFAULT_PLAN_KEY, HOME_PLAN_KEY, listPlans, planKeyOf, type PlanRow } from "@/lib/entitlements/check";
 import { buildVietQrPayload, toTransferText } from "@/lib/payroll/vietqr";
 import { parseCommercial, type PlanCommercial } from "@/lib/pricing/catalog";
@@ -74,7 +77,6 @@ import { platformOperatorDenial } from "@/lib/platform-ui/module-toggle";
 
 export type BillingResult = { ok: true; message: string } | { error: string };
 
-export const BILLING_RECEIVER_KEY = "platform.billing.receiver";
 /** Số ngày lùi lại khi quét sổ ngân hàng tìm tiền thuê bao. Giao dịch cũ hơn đối chiếu tay. */
 export const BILLING_RECONCILE_LOOKBACK_DAYS = 60;
 /** Trần giá một tháng khi người vận hành sửa giá (chặn gõ thừa số 0). */
@@ -113,29 +115,8 @@ const vnd = (n: number) => `${n.toLocaleString("vi-VN")} ₫`;
 
 // ─────────────────────────── Tài khoản nhận tiền ───────────────────────────
 
-export type BillingReceiver = { bin: string; accountNumber: string; accountName: string };
-export type BillingReceiverView = BillingReceiver & { bankName: string };
-
-function parseReceiver(value: unknown): BillingReceiver | null {
-  if (!value || typeof value !== "object") return null;
-  const v = value as Record<string, unknown>;
-  const bin = typeof v.bin === "string" ? v.bin.trim() : "";
-  const accountNumber = typeof v.accountNumber === "string" ? v.accountNumber.trim() : "";
-  const accountName = typeof v.accountName === "string" ? v.accountName.trim() : "";
-  if (!/^\d{6}$/.test(bin) || !/^[0-9A-Za-z]{4,19}$/.test(accountNumber) || !accountName) return null;
-  return { bin, accountNumber, accountName };
-}
-
-export async function getBillingReceiver(): Promise<BillingReceiverView | null> {
-  try {
-    const pdb = await getPlatformDb();
-    const row = await pdb.query.platformSettings.findFirst({ where: eq(schema.platformSettings.key, BILLING_RECEIVER_KEY) });
-    const r = parseReceiver(row?.value);
-    return r ? { ...r, bankName: bankNameOf(r.bin) } : null;
-  } catch {
-    return null;
-  }
-}
+// Đọc + kiểm hợp lệ ở `lib/billing/receiver.ts` (đọc chung với tiền nạp Số dư AI); đường ghi ở đây.
+export { BILLING_RECEIVER_KEY, getBillingReceiver, type BillingReceiver, type BillingReceiverView } from "@/lib/billing/receiver";
 
 export async function setBillingReceiver(user: SessionUser, raw: { bin?: unknown; accountNumber?: unknown; accountName?: unknown; reason?: unknown }): Promise<BillingResult> {
   const denial = platformOperatorDenial(user);
@@ -535,7 +516,9 @@ function afterPaidWrite(orgCode: string) {
 
 // ─────────────────────────── Đối chiếu tiền về ───────────────────────────
 
-export type ReconcileSummary = { scanned: number; recorded: number; matched: number; unmatched: number; errors: string[] };
+/** `matched` / `unmatched` chỉ đếm tiền THUÊ BAO; tiền nạp Số dư AI đếm riêng (`topupCredited` · `topupHeld`) — gộp vào «khớp và
+ * gia hạn» là để người vận hành tưởng tiền nạp là tiền thuê bao (review 08/10/2026, M1). */
+export type ReconcileSummary = { scanned: number; recorded: number; matched: number; unmatched: number; topupCredited: number; topupHeld: number; errors: string[] };
 
 /**
  * Đọc sổ ngân hàng của NHÀ, tìm tiền VÀO mang mã `ERPHD…` chưa từng ghi ở `platform_billing_payments`, ghi mỗi khoản ĐÚNG
@@ -544,19 +527,20 @@ export type ReconcileSummary = { scanned: number; recorded: number; matched: num
  */
 export async function reconcileBillingPayments(opts: { bankRefs?: readonly string[]; lookbackDays?: number; now?: Date } = {}): Promise<ReconcileSummary> {
   const now = opts.now ?? new Date();
-  const out: ReconcileSummary = { scanned: 0, recorded: 0, matched: 0, unmatched: 0, errors: [] };
+  const out: ReconcileSummary = { scanned: 0, recorded: 0, matched: 0, unmatched: 0, topupCredited: 0, topupHeld: 0, errors: [] };
   if (opts.bankRefs && opts.bankRefs.length === 0) return out;
   const pdb = await getPlatformDb();
   const bt = schema.bankTransactions;
   const since = new Date(now.getTime() - (opts.lookbackDays ?? BILLING_RECONCILE_LOOKBACK_DAYS) * 86_400_000);
   const rows = await pdb
-    .select({ bankRef: bt.bankRef, txnAt: bt.txnAt, amount: bt.amount, description: bt.description })
+    .select({ bankRef: bt.bankRef, txnAt: bt.txnAt, amount: bt.amount, description: bt.description, provider: bt.provider, providerTxnId: bt.providerTxnId, account: bt.account })
     .from(bt)
     .where(
       and(
         gt(bt.amount, 0),
         gte(bt.txnAt, since),
-        sql`regexp_replace(upper(${bt.description}), '[^A-Z0-9]', '', 'g') like '%ERPHD%'`,
+        // Mã thuê bao `ERPHD…` HOẶC mã phiếu nạp Số dư AI `ERPNAP…` (0235) — một lượt đọc sổ, mỗi giao dịch xử lý đúng một lần.
+        sql`(regexp_replace(upper(${bt.description}), '[^A-Z0-9]', '', 'g') like '%ERPHD%' or regexp_replace(upper(${bt.description}), '[^A-Z0-9]', '', 'g') like '%ERPNAP%')`,
         // Câu con tương quan: viết tên bảng tường minh — `${bt.bankRef}` trong exists() in ra cột trần (bộ nhớ drizzle).
         sql`not exists (select 1 from platform_billing_payments p where p.bank_ref = "bank_transactions"."bank_ref")`,
         opts.bankRefs ? inArray(bt.bankRef, [...opts.bankRefs]) : undefined,
@@ -567,7 +551,21 @@ export async function reconcileBillingPayments(opts: { bankRefs?: readonly strin
   for (const row of rows) {
     out.scanned++;
     const codes = extractTransferCodes(row.description);
-    if (codes.length === 0) continue;
+    if (codes.length === 0) {
+      // Tiền nạp Số dư AI: cùng sổ ngân hàng, cùng bảng ghi-một-lần (`bank_ref`), hàm cộng tiền ở `lib/billing/ai-balance.ts`.
+      const topups = extractTopupCodes(row.description);
+      if (topups.length === 0) continue;
+      try {
+        const credited = await creditTopupFromBankRow(row, topups, now);
+        if (credited === null) continue;
+        out.recorded++;
+        if (credited === "TOPUP_CREDITED" || credited === "TOPUP_CREDITED_REVIEW") out.topupCredited++;
+        else out.topupHeld++;
+      } catch (error) {
+        out.errors.push(`${row.bankRef}: ${error instanceof Error ? error.message : String(error)}`);
+      }
+      continue;
+    }
     try {
       const candidates = await pdb.select().from(inv).where(inArray(inv.transferCode, codes));
       const invoice = candidates.find((c) => c.status === "OPEN") ?? candidates[0] ?? null;
@@ -605,7 +603,8 @@ export async function reconcileBillingAsOperator(user: SessionUser): Promise<Bil
   if (denial) return { error: denial };
   const r = await reconcileBillingPayments();
   if (r.errors.length) return { error: `Đã ghi ${r.recorded} khoản (${r.matched} khớp); ${r.errors.length} khoản hỏng: ${r.errors.slice(0, 2).join(" · ")}` };
-  return { ok: true, message: r.recorded === 0 ? `Không có khoản tiền mới mang mã thanh toán (đã quét ${BILLING_RECONCILE_LOOKBACK_DAYS} ngày).` : `Đã ghi ${r.recorded} khoản: ${r.matched} khớp và gia hạn, ${r.unmatched} cần xem tay.` };
+  const topups = r.topupCredited + r.topupHeld ? ` · Số dư AI: ${r.topupCredited} khoản nạp đã cộng, ${r.topupHeld} khoản giữ lại chờ xem (trang Số dư AI)` : "";
+  return { ok: true, message: r.recorded === 0 ? `Không có khoản tiền mới mang mã thanh toán (đã quét ${BILLING_RECONCILE_LOOKBACK_DAYS} ngày).` : `Đã ghi ${r.recorded} khoản: ${r.matched} khớp và gia hạn, ${r.unmatched} cần xem tay${topups}.` };
 }
 
 // ─────────────────────────── Người vận hành ───────────────────────────
@@ -998,6 +997,15 @@ export async function loadTenantBilling(orgCode: string, now: Date = new Date())
   };
 }
 
+/**
+ * Khoản tiền THUÊ BAO (không phải tiền nạp Số dư AI): kết quả không thuộc nhóm TOPUP_* và mã không phải `ERPNAP…`. Tiền nạp có
+ * màn riêng (/platform/ai-balance) — để chung danh sách «Tiền chưa khớp» là để người vận hành dùng nhầm một khoản nạp xác nhận
+ * tay một hoá đơn thuê bao, tức một khoản tiền dùng hai lần (review 08/10/2026, M1).
+ */
+function notTopupPayment(pay: typeof schema.platformBillingPayments) {
+  return and(notInArray(pay.outcome, [...TOPUP_PAYMENT_OUTCOMES]), notLike(pay.transferCode, `${TOPUP_CODE_PREFIX}%`));
+}
+
 export type PaymentView = { id: string; bankRef: string; txnAt: string; amountVnd: number; description: string; transferCode: string; orgCode: string | null; outcome: PaymentOutcome; resolvedAt: string | null; resolvedByEmail: string | null; resolvedNote: string | null };
 
 function paymentView(r: typeof schema.platformBillingPayments.$inferSelect): PaymentView {
@@ -1069,7 +1077,7 @@ export async function loadPlatformBilling(user: SessionUser, now: Date = new Dat
   const [openRows, paidRows, payRows, vatRows] = await Promise.all([
     pdb.select().from(inv).where(eq(inv.status, "OPEN")).orderBy(desc(inv.createdAt)).limit(50),
     pdb.select().from(inv).where(eq(inv.status, "PAID")).orderBy(desc(inv.paidAt)).limit(15),
-    pdb.select().from(pay).where(and(ne(pay.outcome, "MATCHED"), isNull(pay.resolvedAt))).orderBy(desc(pay.txnAt)).limit(50),
+    pdb.select().from(pay).where(and(ne(pay.outcome, "MATCHED"), notTopupPayment(pay), isNull(pay.resolvedAt))).orderBy(desc(pay.txnAt)).limit(50),
     pdb.select().from(inv).where(and(eq(inv.status, "PAID"), isNotNull(inv.invoiceInfo), isNull(inv.vatIssuedAt))).orderBy(inv.paidAt).limit(50),
   ]);
   return {
@@ -1109,7 +1117,7 @@ export async function loadOrgBilling(user: SessionUser, orgCode: string, now: Da
   const pay = schema.platformBillingPayments;
   const [rows, payRows, [sub]] = await Promise.all([
     pdb.select().from(inv).where(eq(inv.orgCode, orgCode)).orderBy(desc(inv.createdAt)).limit(24),
-    pdb.select().from(pay).where(eq(pay.orgCode, orgCode)).orderBy(desc(pay.txnAt)).limit(24),
+    pdb.select().from(pay).where(and(eq(pay.orgCode, orgCode), notTopupPayment(pay))).orderBy(desc(pay.txnAt)).limit(24),
     pdb.select({ addons: schema.platformSubscriptions.addons, invoiceInfo: schema.platformSubscriptions.invoiceInfo }).from(schema.platformSubscriptions).where(eq(schema.platformSubscriptions.orgCode, orgCode)).limit(1),
   ]);
   return {

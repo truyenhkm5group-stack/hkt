@@ -359,7 +359,7 @@ gọi THẲNG được tệp chạy của GCM. **Đã thay (mục 15, review b�
 credential GitHub nào — máy chủ tự ghi nhánh. Máy chạy worker KHÔNG nên có credential GitHub nào trong Credential Manager
 (nhất là tài khoản quản trị kho của chủ shop): mã agent trong cổng chạy dưới cùng tài khoản và gọi thẳng được GCM.
 
-## 15. Cài worker một nút cho chủ shop không kỹ thuật (07/10/2026, migration 0233)
+## 15. Cài worker một nút cho chủ shop không kỹ thuật (07/10/2026, migration 0236)
 
 Chủ shop không phải lập trình viên: không clone kho, không sửa biến môi trường, không dán khoá vào PowerShell, không chạy
 npm, không cấu hình Windows service. Bốn bước hiện trên `/tech/workers`:
@@ -436,7 +436,7 @@ xanh nếu có NGƯỜI (hoặc Delivery Controller) bấm gộp. Phạm vi ghi 
 người gộp vẫn là chốt chặn cuối. Máy chủ chưa có danh tính bot ⇒ worker dừng `BLOCKED` kèm câu chỉ đúng việc (ops
 `apply-agent-env`). Không bao giờ hỏi PAT.
 
-**Thu hồi khoá lộ của `dogfood-1` (0233).** Khoá đó đã hiện ra màn hình qua đường "dán vào PowerShell" cũ — đường này đã
+**Thu hồi khoá lộ của `dogfood-1` (0236).** Khoá đó đã hiện ra màn hình qua đường "dán vào PowerShell" cũ — đường này đã
 gỡ (`registerTechWorkerAction`). Migration đặt băm của một chuỗi ngẫu nhiên không ai giữ + `secret_revoked_at` + tắt worker
 + lý do «Khoá cũ có thể đã lộ — tạo lại bằng bộ cài», ghi một sự kiện `worker.secret_revoked`; điều kiện chặt
 (`key = 'dogfood-1'`, chưa từng ghi danh qua bộ cài, chưa thu hồi, tạo trước mốc deploy — KHÔNG xét nhịp tim: khoá đã hiện

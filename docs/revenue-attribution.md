@@ -38,6 +38,13 @@ tham gia» — không in ô ấy: cộng «AI tự bán» với «AI góp công�
 Doanh thu của mọi nhãn = `orders.total_price_after_discount` của đơn có `ORDER_OUTCOME = 'DELIVERED'` và
 `REVENUE_RECOGNIZED_ON_DELIVERY` — cùng biểu thức với màn «Hiệu quả». «Đặt» (giá trị đơn chốt) in cạnh, không thay.
 
+**Lãi gộp đã giao** (Master Mission P0.5 «Conversation → Delivered Profit», 08/10/2026) = doanh thu đã giao − giá vốn, theo
+từng nhãn. Giá vốn đọc qua `orderCogsFast()` (lib/queries/cogs.ts) — ĐÚNG đường của Báo cáo lợi nhuận: giá vốn đã chốt lúc
+giao, nên phiếu nhập mới không viết lại lãi của kỳ cũ (docs/cogs-recognition-contract.md §6). Đơn có doanh thu mà giá vốn 0
+(cả ba nguồn đều trống — cùng nghĩa `IS_MISSING_COGS`) là CHƯA BIẾT: đếm riêng (`cogsUnknown` + doanh thu của chúng), KHÔNG
+cộng vào lãi với giá vốn 0; biên gộp chỉ tính trên đơn biết giá vốn, chưa đơn nào biết ⇒ «—». Chưa trừ chi phí AI (khung «Chi
+phí AI & ROI» đứng riêng), cước, quảng cáo.
+
 ## 4. Follow-up thu hồi
 
 - **Khách trả lời** = có `message.received` SAU một `followup.sent` trong cùng lượt mua.
@@ -57,3 +64,4 @@ sai và xoá sạch đơn bot (bài kiểm đột biến ở `tests/chat-order.t
 | Phiên bản | Ngày | Thay đổi |
 |---|---|---|
 | 1 | 05/10/2026 | Bản đầu |
+| 1 | 08/10/2026 | Thêm lãi gộp đã giao theo nhãn (không đổi định nghĩa nhãn — phiên bản quy kết giữ nguyên) |

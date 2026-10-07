@@ -24,6 +24,8 @@ import { canUseFeature, getEnabledModules } from "@/lib/platform/capabilities";
 import { currentOrganization } from "@/lib/platform/context";
 import { readAiCustomerMeterLiveAt } from "@/lib/pricing/price-book";
 import { aiCustomerKeys } from "@/lib/pricing/ai-customer-identity";
+import { chargeAiCustomerUsage } from "@/lib/billing/ai-usage-charge";
+import { usagePeriodOf } from "@/lib/pricing/meter";
 import { aiCustomerCoverage, meterMonthOf, type MeterCoverage } from "@/lib/pricing/versions";
 import { LEGACY_CHATBOT_FEATURE } from "@/lib/saas/catalog";
 import { recordUsage } from "@/lib/saas/ledger";
@@ -120,12 +122,42 @@ export async function noteAiCustomerReply(conversationId: string, at: Date, hint
     const c = schema.salesChatConversations;
     const [row] = await db.select({ channel: c.channel, pageId: c.pageId, threadId: c.threadId, visitorKey: c.visitorKey }).from(c).where(eq(c.id, conversationId)).limit(1);
     if (!row) return;
-    await recordAiCustomer({ orgCode: org.code, channel: row.channel, pageId: row.pageId, threadId: row.threadId, customerKey: row.visitorKey, threadKind: hint?.threadKind ?? null, commenterId: hint?.commenterId ?? null, conversationId, at });
+    const r = await recordAiCustomer({ orgCode: org.code, channel: row.channel, pageId: row.pageId, threadId: row.threadId, customerKey: row.visitorKey, threadKind: hint?.threadKind ?? null, commenterId: hint?.commenterId ?? null, conversationId, at });
+    // SỐ DƯ AI (docs/saas/AI_BALANCE_V1.md): khách AI MỚI vượt phần gói gồm ⇒ trừ đơn giá vượt vào số dư — ĐÚNG điểm này (câu AI
+    // đã tới khách), không ở nơi nào khác. Gọi TƯỜNG MINH (không qua listener): một tiến trình quên đăng ký là mất doanh thu im lặng.
+    if (r.recorded && r.key) {
+      const period = usagePeriodOf(at);
+      const count = (await readAiCustomerCounts([org.code], period.from, period.to)).get(org.code) ?? 0;
+      await chargeAiCustomerUsage({ orgCode: org.code, eventKey: r.key, at, periodCount: count });
+    }
   } catch (e) {
     const s = holder.__erpAiCustomerErrors!;
     s.n += 1;
     s.last = e instanceof Error ? e.message.slice(0, 160) : String(e).slice(0, 160);
   }
+}
+
+/**
+ * Khách của hội thoại này ĐÃ là khách AI của kỳ chứa `at` chưa (khoá mới hoặc bất kỳ bí danh nào) — cổng Số dư AI hỏi câu này:
+ * khách đã tính phí trong kỳ thì vẫn được AI trả lời dù số dư đã hết. Không dựng được danh tính ⇒ `false` (coi là khách mới).
+ */
+export async function aiCustomerCountedThisPeriod(
+  orgCode: string,
+  conv: { channel: string; pageId: string | null; threadId: string | null; visitorKey: string | null; threadKind?: "INBOX" | "COMMENT" | null; commenterId?: string | null },
+  at: Date,
+): Promise<boolean> {
+  // CÙNG khoá với lượt ghi (`noteAiCustomerReply` + gợi ý bình luận): bình luận đếm theo NGƯỜI bình luận — dựng khoá thiếu hai
+  // trường này thì người bình luận đã trả tiền trong tháng bị coi là khách mới và bị chặn oan (review 08/10/2026, M2).
+  const keys = aiCustomerKeys(meterMonthOf(at), { channel: conv.channel, pageId: conv.pageId, threadId: conv.threadId, visitorKey: conv.visitorKey, threadKind: conv.threadKind ?? null, commenterId: conv.commenterId ?? null });
+  if (!keys) return false;
+  const pdb = await getPlatformDb();
+  const e = schema.platformUsageEvents;
+  const [hit] = await pdb
+    .select({ key: e.eventKey })
+    .from(e)
+    .where(and(eq(e.orgCode, orgCode), eq(e.productKey, AI_CUSTOMER_PRODUCT), eq(e.metric, AI_CUSTOMER_METRIC), inArray(e.eventKey, [keys.key, ...keys.aliases])))
+    .limit(1);
+  return Boolean(hit);
 }
 
 /** Số khách AI ĐÃ GHI của mỗi tổ chức trong `[from, to)` — đọc thô từ sổ, chưa xét độ phủ. */
