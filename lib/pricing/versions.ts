@@ -444,12 +444,15 @@ export function overageNetOfBalance(o: OverageResult, chargedUnits: number | nul
   if (i < 0 || chargedUnits === 0) return o;
   const l = o.lines[i];
   let next: OverageLine;
-  if (chargedUnits === null) next = { ...l, blocks: null, amountVnd: null, note: "chưa đọc được sổ Số dư AI — chưa tính được phần vượt khách AI" };
-  else if (l.overUnits === null) next = { ...l, note: [l.note, `đã thu qua Số dư AI ${chargedUnits} khách`].filter(Boolean).join(" · ") };
+  const withNote = (extra: string) => [l.note, extra].filter(Boolean).join(" · ");
+  // Chưa vượt phần gồm ⇒ 0đ đã BIẾT, không cần sổ (review #648 vòng 2, LOW-2).
+  if (chargedUnits === null && l.overUnits === 0) return o;
+  if (chargedUnits === null) next = { ...l, blocks: null, amountVnd: null, note: withNote("chưa đọc được sổ Số dư AI — chưa tính được phần vượt khách AI") };
+  else if (l.overUnits === null) next = { ...l, note: withNote(`đã thu qua Số dư AI ${chargedUnits} khách`) };
   else {
     const remaining = Math.max(0, l.overUnits - chargedUnits);
     const blocks = remaining === 0 ? 0 : Math.ceil(remaining / Math.max(1, blockSize ?? 1));
-    next = { ...l, overUnits: remaining, blocks, amountVnd: blocks === 0 ? 0 : l.unitVnd === null ? null : blocks * l.unitVnd, note: `đã thu qua Số dư AI ${chargedUnits} khách${remaining ? ` · còn ${remaining} khách chưa trừ — tính theo khối` : ""}` };
+    next = { ...l, overUnits: remaining, blocks, amountVnd: blocks === 0 ? 0 : l.unitVnd === null ? null : blocks * l.unitVnd, note: withNote(`đã thu qua Số dư AI ${chargedUnits} khách${remaining ? ` · còn ${remaining} khách chưa trừ — tính theo khối` : ""}`) };
   }
   const lines = o.lines.map((x, j) => (j === i ? next : x));
   const known = lines.filter((x) => x.amountVnd !== null);

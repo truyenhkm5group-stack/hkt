@@ -363,15 +363,23 @@ export type TenantEconomics = {
   /** Chi phí AI do NỀN TẢNG trả (`billing_source = PLATFORM`). BYOK là tiền của khách — không phải giá vốn của nền tảng. */
   platformAiCostVnd: number;
   aiCostComplete: boolean;
-  /** MRR − chi phí AI nền tảng trả. Hạ tầng / hỗ trợ CHƯA phân bổ về từng tổ chức (chưa có căn cứ — AGENTS §14). */
+  /** Doanh thu Số dư AI của cửa sổ (tiền thật đã dùng − khoản đảo) — cùng cửa sổ 30 ngày với chi phí AI. */
+  aiBalanceRevenueVnd: number;
+  /** MRR + doanh thu Số dư AI − chi phí AI nền tảng trả. Hạ tầng / hỗ trợ CHƯA phân bổ về từng tổ chức (chưa có căn cứ — AGENTS §14). */
   contributionVnd: number | null;
   contributionMargin: number | null;
 };
 
-export function tenantEconomics(mrrVnd: number | null, platformAi: AiCost, usdToVnd: number): TenantEconomics {
+/**
+ * Kinh tế một tổ chức ở cockpit chủ nền tảng. Doanh thu = MRR + doanh thu Số dư AI của CÙNG cửa sổ với chi phí AI (review #648
+ * vòng 2, MEDIUM-1): thiếu nó thì tổ chức trả phần vượt qua Số dư hiện «Đóng góp» âm, tô đỏ, trong khi khung kinh tế đơn vị ngay
+ * bên dưới nói có lãi. `mrrVnd = null` (chưa có ảnh chụp) ⇒ chưa biết, không đoán. HÀM THUẦN.
+ */
+export function tenantEconomics(mrrVnd: number | null, platformAi: AiCost, usdToVnd: number, aiBalanceRevenueVnd = 0): TenantEconomics {
   const ai = aiCostVnd(platformAi, usdToVnd);
-  const contribution = mrrVnd === null ? null : mrrVnd - ai.vnd;
-  return { mrrVnd, platformAiCostVnd: ai.vnd, aiCostComplete: ai.complete, contributionVnd: contribution, contributionMargin: mrrVnd && contribution !== null ? contribution / mrrVnd : null };
+  const revenue = mrrVnd === null ? null : mrrVnd + aiBalanceRevenueVnd;
+  const contribution = revenue === null ? null : revenue - ai.vnd;
+  return { mrrVnd, aiBalanceRevenueVnd, platformAiCostVnd: ai.vnd, aiCostComplete: ai.complete, contributionVnd: contribution, contributionMargin: revenue !== null && revenue > 0 && contribution !== null ? contribution / revenue : null };
 }
 
 export type PlatformMargin = {

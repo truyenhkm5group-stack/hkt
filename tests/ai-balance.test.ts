@@ -47,6 +47,7 @@ import { setAiBalanceEnabled } from "@/lib/platform/kill-switches";
 import { AI_BALANCE_FLAG, invalidateOrgFlags } from "@/lib/platform/org-flags";
 import { getHomeOrganization, invalidateOrganizations } from "@/lib/platform/organizations";
 import { provisionOrganization } from "@/lib/platform/provision";
+import { ingestSepayTransaction } from "@/lib/integrations/bank/sepay-ingest";
 
 const A = "aib-a";
 const B = "aib-b";
@@ -445,6 +446,15 @@ async function run() {
   await reconcileBillingPayments({ lookbackDays: 3 });
   assert.equal(await paymentOf(refFake), undefined, "dòng không do SePay tạo ⇒ không ghi, không cộng");
   assert.equal((await readAiBalance(A)).totalVnd, 3_850_000, "số dư không đổi");
+  // Qua ĐÚNG đường ghi SePay (`ingestSepayTransaction`): sao kê IMPORT có trước, SePay xác nhận cùng mã bút toán với số tiền thật
+  // khác ⇒ dòng vẫn mang `source = IMPORT` + số tiền của người nhập ⇒ không tự cộng (review #650 vòng 2, LOW).
+  await pdb.insert(schema.bankTransactions).values({ txnAt: now, amount: 30_000_000, description: `${r10.intent.referenceCode}`, bankRef: "FT26281AIBING01", source: "IMPORT", account: RECEIVER_ACCOUNT });
+  await ingestSepayTransaction(pdb, { providerTxnId: "aib-ing-1", gateway: "MBBank", accountNumber: RECEIVER_ACCOUNT, subAccount: "", referenceCode: "FT26281AIBING01", amount: 10_000, direction: "in", txnAt: now, content: "chuyen tien", code: "", balanceAfter: null }, { source: "WEBHOOK", now });
+  const [ingested] = await pdb.select({ source: schema.bankTransactions.source, amount: schema.bankTransactions.amount, provider: schema.bankTransactions.provider }).from(schema.bankTransactions).where(eq(schema.bankTransactions.bankRef, "FT26281AIBING01"));
+  assert.deepEqual([ingested?.source, ingested?.amount], ["IMPORT", 30_000_000], "đường ghi SePay không đổi nguồn / số tiền của dòng đã có");
+  await reconcileBillingPayments({ lookbackDays: 3 });
+  assert.equal(await paymentOf("FT26281AIBING01"), undefined, "dòng không do SePay tạo ⇒ không tự cộng dù SePay đã ghé qua");
+  assert.equal((await readAiBalance(A)).totalVnd, 3_850_000);
   const opLate = await loadAiBalanceOperatorView(op, now);
   assert.ok(!("error" in opLate) && opLate.unconfirmed.some((r) => r.bankRef === refFake), "nằm ở danh sách «chưa xác nhận» của người vận hành");
 }

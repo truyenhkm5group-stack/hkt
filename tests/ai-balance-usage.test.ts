@@ -23,7 +23,7 @@ import { getDb, getPlatformDb, organizationDatabaseUrl, schema } from "@/db";
 import type { SessionUser } from "@/lib/auth/session";
 import { initWorkspaceBilling } from "@/lib/billing/service";
 import { invalidateSubscriptions } from "@/lib/billing/standing";
-import { adjustAiBalance, loadAiBalanceOperatorView, readAiBalance, readAiBalancePeriod } from "@/lib/billing/ai-balance";
+import { adjustAiBalance, loadAiBalanceOperatorView, loadAiBalanceView, postAiLedgerEntry, readAiBalance, readAiBalancePeriod, readAiCustomerChargedUnits, readAiNetSpend, reverseAiUsageCharge } from "@/lib/billing/ai-balance";
 import { EMPTY_AI_BALANCE_PERIOD } from "@/lib/billing/ai-balance-rules";
 import { balanceOverageTerms, chargeAiCustomerUsage, runAiBalanceAlerts } from "@/lib/billing/ai-usage-charge";
 import { invalidateCapabilities } from "@/lib/platform/capabilities";
@@ -34,6 +34,7 @@ import { getHomeOrganization, invalidateOrganizations } from "@/lib/platform/org
 import { provisionOrganization } from "@/lib/platform/provision";
 import { captureSaasSnapshot } from "@/lib/platform/saas-ledger";
 import { loadPricingEconomics } from "@/lib/pricing/admin";
+import { loadOwnerCockpit } from "@/lib/platform/saas-cockpit";
 import { aiBalanceTotals, platformGrossMargin, projectToPeriodEnd } from "@/lib/pricing/economics";
 import { usagePeriodOf } from "@/lib/pricing/meter";
 import { loadCustomerPlan } from "@/lib/pricing/customer";
@@ -167,7 +168,7 @@ async function run() {
 
   // ── Hoá đơn ước tính + bảng kê kỳ: mới CHẠM phần gồm ⇒ dòng khách AI 0đ (chưa vượt). Phần trừ theo sổ cái kiểm ở cuối.
   const aiLineOf = (o: { lines: { key: string; overUnits: number | null; blocks: number | null; amountVnd: number | null; note: string | null }[] } | null | undefined) => o?.lines.find((l) => l.key === "aiCustomers") ?? null;
-  const planOn = await loadCustomerPlan(U);
+  const planOn = await loadCustomerPlan(U, now);
   assert.ok(planOn?.meter?.aiBalance === true && aiLineOf(planOn.meter.estimate?.overage)?.amountVnd === 0, JSON.stringify(planOn?.meter?.estimate?.overage.lines));
   const wsOf = async () => (await loadCommercialSnapshot({ now })).customers.flatMap((c) => c.workspaces).find((w) => w.code === U);
   assert.equal(aiLineOf((await wsOf())?.pricing.overage)?.amountVnd, 0, "chưa vượt phần gồm ⇒ bảng kê 0đ dòng khách AI");
@@ -249,7 +250,7 @@ async function run() {
   const per = usagePeriodOf(now);
   const spent = (await readAiBalancePeriod(per.from, per.to)).get(U);
   assert.equal(spent?.aiCustomerUnits, 5, "sổ: 5 khách AI đã thu qua Số dư trong kỳ");
-  const onEst = aiLineOf((await loadCustomerPlan(U))?.meter?.estimate?.overage);
+  const onEst = aiLineOf((await loadCustomerPlan(U, now))?.meter?.estimate?.overage);
   assert.ok(onEst?.overUnits === 0 && onEst.amountVnd === 0 && /đã thu qua Số dư AI 5 khách/.test(onEst.note ?? ""), `hoá đơn ước tính không thu lại khách đã trừ số dư: ${JSON.stringify(onEst)}`);
   const onSt = aiLineOf((await wsOf())?.pricing.overage);
   assert.ok(onSt?.overUnits === 0 && onSt.amountVnd === 0, `bảng kê kỳ không thu lại khách đã trừ số dư: ${JSON.stringify(onSt)}`);
@@ -265,7 +266,7 @@ async function run() {
   // N2 (review 08/10/2026): tắt cờ rồi mới dựng / chốt bảng kê ⇒ 5 khách ĐÃ trừ số dư KHÔNG quay lại (từng thu hai lần, đóng băng
   // trong bảng kê FINAL); khách vượt MỚI sau khi tắt cờ (chưa trừ) tính theo khối như cũ — đúng 1 khối cho 1 khách.
   const block = growth.overage.aiCustomerBlockVnd as number;
-  const planOff = await loadCustomerPlan(U);
+  const planOff = await loadCustomerPlan(U, now);
   const offEst = aiLineOf(planOff?.meter?.estimate?.overage);
   assert.ok(planOff?.meter?.aiBalance === false && offEst?.overUnits === 1 && offEst.blocks === 1 && offEst.amountVnd === block && /đã thu qua Số dư AI 5 khách/.test(offEst.note ?? ""), `cờ tắt: hoá đơn ước tính chỉ tính khách chưa trừ: ${JSON.stringify(offEst)}`);
   const offSt = aiLineOf((await wsOf())?.pricing.overage);
@@ -302,7 +303,7 @@ async function run() {
     const fresh = await readAiBalancePeriod(usagePeriodOf(readAt).from, readAt);
     assert.deepEqual(v.totals.aiBalance, aiBalanceTotals({ balances: fresh, tenantCodes: new Set(v.tenants.map((t) => t.code)), homeCode: home.code }));
     assert.ok(v.totals.aiBalance.revenueVnd >= 4 * unit && v.totals.aiBalance.heldOrgs >= 1, JSON.stringify(v.totals.aiBalance));
-    const gm = platformGrossMargin({ mrrPayingVnd: v.totals.revenueVnd, aiBalanceRevenueToDateVnd: v.totals.aiBalance.revenueVnd, elapsedDays: v.elapsedDays, totalDays: v.totalDays, projectedAiCostVnd: v.totals.projectedPlatformAiCostVnd, infraVnd: v.totals.infraVnd });
+    const gm = platformGrossMargin({ mrrPayingVnd: v.totals.revenueVnd, aiBalanceRevenueToDateVnd: v.totals.aiBalance.revenueVnd, aiBalanceReversalToDateVnd: v.totals.aiBalance.reversalCashVnd, elapsedDays: v.elapsedDays, totalDays: v.totalDays, projectedAiCostVnd: v.totals.projectedPlatformAiCostVnd, infraVnd: v.totals.infraVnd });
     assert.deepEqual([v.totals.marginRevenueVnd, v.totals.grossProfitVnd, v.totals.grossMarginPct], [gm.marginRevenueVnd, gm.grossProfitVnd, gm.grossMarginPct], "lãi gộp tính lại được từ chính các ô trên màn");
     assert.equal(v.tenants.find((t) => t.code === TR)?.aiBalance, null, "chưa từng dùng Số dư, cờ tắt ⇒ không có khung");
   }
@@ -332,17 +333,88 @@ async function run() {
   assert.ok(balanceAll >= 4 * unit);
   if (!ownChot.some((l) => l.amountVnd === null)) assert.equal(chot?.revenueVnd, ownChot.reduce((s, l) => s + (l.amountVnd ?? 0), 0) + balanceAll, "sản phẩm Chốt Đơn gồm doanh thu Số dư");
 
-  // ── M3: ĐẢO một khoản trừ oan — trả lại số dư, TRỪ khỏi doanh thu, không tính lại khách ở bảng kê; trần = tiền thật đã trừ chưa đảo.
-  const revOk = await adjustAiBalance(op, { orgCode: U, kind: "REVERSE_USAGE", amountVnd: unit, reason: "Trừ oan khách thử", requestKey: "rkaibu00009" });
-  assert.ok("ok" in revOk, JSON.stringify(revOk));
+  // ── ĐẢO ĐÚNG MỘT khoản trừ oan (review #648 vòng 2, MEDIUM-2): theo mã dòng trừ — số tiền / lớp tiền của khoản ấy, `source_ref`
+  //    = khoá khách AI, mỗi khoản một lần kể cả hai lượt bấm cùng lúc; trả lại số dư, TRỪ khỏi doanh thu, khách KHÔNG tính lại ở bảng kê.
+  const cashCharge = (await usage()).find((r) => r.fundsClass === "CASH")!;
+  const [rv1, rv2] = await Promise.all([
+    reverseAiUsageCharge(op, { orgCode: U, chargeId: cashCharge.id, reason: "Trừ oan khách thử" }),
+    reverseAiUsageCharge(op, { orgCode: U, chargeId: cashCharge.id, reason: "Trừ oan khách thử" }),
+  ]);
+  assert.ok("ok" in rv1 && "ok" in rv2, JSON.stringify([rv1, rv2]));
+  const reversals = await pdb.select().from(schema.platformAiLedgerEntries).where(and(eq(schema.platformAiLedgerEntries.orgCode, U), eq(schema.platformAiLedgerEntries.entryType, "ADJUSTMENT"), eq(schema.platformAiLedgerEntries.sourceType, "AI_CUSTOMER")));
+  assert.deepEqual(
+    reversals.map((r) => [r.idempotencyKey, Number(r.amountVnd), r.fundsClass, r.sourceRef]),
+    [[`aic-reverse:${cashCharge.id}`, unit, "CASH", cashCharge.sourceRef]],
+    "đúng MỘT dòng đảo: số tiền + lớp tiền của khoản trừ, khoá khách AI để truy",
+  );
+  const promoCharge = (await usage()).find((r) => r.fundsClass === "PROMO")!;
+  assert.ok("ok" in (await reverseAiUsageCharge(op, { orgCode: U, chargeId: promoCharge.id, reason: "Đảo khoản trừ tiền tặng" })));
+  // Sai tổ chức: khoản trừ CHƯA đảo của U gửi kèm mã tổ chức KHÁC ⇒ «không thấy», không một dòng đảo nào (ở tổ chức nào). Dùng khoản
+  // đã đảo thì lệnh ghi cũng hỏng — nhưng ở khoá chống trùng, không phải ở bước kiểm tổ chức.
+  const otherCash = (await usage()).find((r) => r.fundsClass === "CASH" && r.id !== cashCharge.id)!;
+  const wrongOrg = await reverseAiUsageCharge(op, { orgCode: TR, chargeId: otherCash.id, reason: "Sai tổ chức thử" });
+  assert.ok("error" in wrongOrg && /Không thấy khoản trừ AI/.test(wrongOrg.error), JSON.stringify(wrongOrg));
+  assert.equal((await pdb.select({ id: schema.platformAiLedgerEntries.id }).from(schema.platformAiLedgerEntries).where(eq(schema.platformAiLedgerEntries.idempotencyKey, `aic-reverse:${otherCash.id}`))).length, 0, "mã dòng của tổ chức KHÁC ⇒ không ghi dòng đảo nào");
+  assert.ok("error" in (await reverseAiUsageCharge(op, { orgCode: U, chargeId: cashCharge.id, reason: "" })), "bắt buộc lý do");
+  const tenantU = sessionUser({ id: "aibu-tenant", email: "t@aibu.local", organization: { code: U, name: U, isHome: false } });
+  assert.ok("error" in (await reverseAiUsageCharge(tenantU, { orgCode: U, chargeId: cashCharge.id, reason: "Khách tự đảo" })), "chỉ người vận hành");
   const pAfter = (await readAiBalancePeriod(per.from, per.to)).get(U);
-  assert.deepEqual([pAfter?.reversalCashVnd, pAfter?.usageCashVnd, pAfter?.aiCustomerUnits, pAfter?.adjustCashVnd], [unit, 4 * unit, 5, 1_000], "khoản đảo tách khỏi điều chỉnh tay; số khách đã thu KHÔNG giảm");
-  assert.equal((await readAiBalance(U)).cashVnd, 1_000 - 4 * unit + unit, "đảo ⇒ tiền thật trở lại số dư");
+  assert.deepEqual([pAfter?.reversalCashVnd, pAfter?.usageCashVnd, pAfter?.aiCustomerUnits, pAfter?.adjustCashVnd], [unit, 4 * unit, 5, 1_000], "khoản đảo tách khỏi điều chỉnh tay; khoản đảo tiền tặng KHÔNG vào khoản đảo tiền thật; số khách đã thu KHÔNG giảm");
+  assert.deepEqual([(await readAiBalance(U)).cashVnd, (await readAiBalance(U)).promoVnd], [1_000 - 4 * unit + unit, unit], "đảo ⇒ tiền thật / tiền tặng trở lại đúng lớp");
   assert.equal((await loadCommercialSnapshot({ now: readAt })).customers.find((c) => c.workspaces.some((w) => w.code === U))?.economics.aiBalanceRevenueVnd, 3 * unit, "doanh thu kỳ = tiền thật đã dùng − khoản đảo");
   assert.equal(aiLineOf((await wsOf())?.pricing.overage)?.overUnits, 1, "khách bị trừ oan không bị tính lại ở bảng kê");
-  const tooMuch = await adjustAiBalance(op, { orgCode: U, kind: "REVERSE_USAGE", amountVnd: 4 * unit, reason: "Đảo vượt số đã trừ", requestKey: "rkaibu00010" });
-  assert.ok("error" in tooMuch && /tối đa/.test(tooMuch.error), `đảo vượt tiền thật đã trừ chưa đảo ⇒ từ chối: ${JSON.stringify(tooMuch)}`);
-  assert.ok("error" in (await adjustAiBalance(op, { orgCode: U, kind: "REVERSE_USAGE", amountVnd: -unit, reason: "Số âm không hợp lệ", requestKey: "rkaibu00011" })), "đảo nhập số dương");
+  assert.ok("error" in (await adjustAiBalance(op, { orgCode: U, kind: "REVERSE_USAGE", amountVnd: unit, reason: "Đường cũ gõ số tiền", requestKey: "rkaibu00010" })), "không còn đường đảo bằng số tiền gõ tay");
+  // Màn vận hành: khoản trừ gần đây biết khoản nào đã đảo; khung /platform/saas đọc lại SAU khoản đảo (review #648 vòng 2, LOW-7).
+  const opAfter = await loadAiBalanceOperatorView(op, new Date(Date.now() + 1_000));
+  assert.ok(!("error" in opAfter) && opAfter.recentCharges.some((c) => c.id === cashCharge.id && c.reversed && c.amountVnd === unit) && opAfter.recentCharges.some((c) => c.orgCode === U && !c.reversed), JSON.stringify(!("error" in opAfter) ? opAfter.recentCharges.slice(0, 6) : opAfter));
+  // Review follow-up LOW-4: «dùng 30 ngày» (màn vận hành) và «đã dùng tháng này» (màn khách) là RÒNG — khoản đã đảo trừ ra (5 khách
+  // vượt − 1 khoản tiền thật − 1 khoản tiền tặng đã đảo).
+  const rowU = !("error" in opAfter) ? opAfter.rows.find((r) => r.orgCode === U) : undefined;
+  assert.deepEqual([rowU?.usage30dVnd, rowU?.usage30dCashVnd], [3 * unit, 3 * unit], JSON.stringify(rowU));
+  assert.equal((await loadAiBalanceView(U, readAt)).usedThisMonthVnd, 3 * unit, "khách không thấy «đã dùng» gồm tiền đã được trả lại");
+  assert.equal(await readAiNetSpend(U, new Date(now.getTime() - 7 * 86_400_000)), 3 * unit, "chi 7 ngày của chuông «sắp hết» cùng phép tính ròng với màn khách");
+  const econ3 = await loadPricingEconomics(op, new Date(Date.now() + 1_000));
+  assert.ok(econ3.ok);
+  if (econ3.ok) {
+    const r3 = econ3.value.tenants.find((t) => t.code === U);
+    assert.ok(r3 && r3.mrrVnd !== null && r3.economics.revenueVnd === r3.mrrVnd + 3 * unit, `doanh thu tổ chức sau khoản đảo = MRR + 3 đơn giá: ${JSON.stringify(r3?.economics)}`);
+    assert.ok(econ3.value.totals.aiBalance.reversalCashVnd >= unit && econ3.value.totals.aiBalance.revenueVnd === econ3.value.totals.aiBalance.usageCashVnd - econ3.value.totals.aiBalance.reversalCashVnd, JSON.stringify(econ3.value.totals.aiBalance));
+  }
+  // Cockpit chủ nền tảng (MEDIUM-1): «Đóng góp» của U có doanh thu Số dư 30 ngày; biên nền tảng tính trên MRR + Số dư.
+  const ck = await loadOwnerCockpit(op, new Date(Date.now() + 1_000));
+  assert.ok(ck.ok, JSON.stringify(ck));
+  if (ck.ok) {
+    const cu = ck.value.tenants.find((t) => t.code === U);
+    assert.ok(cu && cu.economics.aiBalanceRevenueVnd === 3 * unit && cu.economics.mrrVnd !== null && cu.economics.contributionVnd === cu.economics.mrrVnd + 3 * unit - cu.economics.platformAiCostVnd, JSON.stringify(cu?.economics));
+    assert.equal(ck.value.margin.revenueVnd, ck.value.headline.mrrVnd + ck.value.margin.aiBalanceRevenueVnd, "doanh thu biên nền tảng = MRR + doanh thu Số dư 30 ngày");
+  }
+  // Tổ chức NHÀ dùng Số dư không phải doanh thu nền tảng (khách INTERNAL): biên của cockpit không đổi, dòng của nhà 0đ.
+  const homeRevBefore = ck.ok ? ck.value.margin.aiBalanceRevenueVnd : null;
+  await postAiLedgerEntry(pdb, { orgCode: home.code, entryType: "AI_USAGE", fundsClass: "CASH", amountVnd: -5 * unit, units: 1, idempotencyKey: "aibu-home-usage", sourceType: "AI_CUSTOMER", sourceRef: "fanpage:aibu-home:khach", note: "tổ chức nhà dùng Số dư", occurredAt: now });
+  try {
+    const ckHome = await loadOwnerCockpit(op, new Date(Date.now() + 1_000));
+    assert.ok(ckHome.ok && homeRevBefore !== null && ckHome.value.margin.aiBalanceRevenueVnd === homeRevBefore && (ckHome.value.tenants.find((t) => t.code === home.code)?.economics.aiBalanceRevenueVnd ?? 0) === 0, `tổ chức nhà không vào doanh thu Số dư của cockpit: ${ckHome.ok ? ckHome.value.margin.aiBalanceRevenueVnd : JSON.stringify(ckHome)} (trước: ${homeRevBefore})`);
+  } finally {
+    await pdb.delete(schema.platformAiLedgerEntries).where(eq(schema.platformAiLedgerEntries.idempotencyKey, "aibu-home-usage"));
+  }
+  // MỘT dòng trừ có thể mang NHIỀU đơn vị (vd tính theo «phiên 24 giờ»): số khách đã thu đếm theo `units`, không theo số DÒNG — cả
+  // sổ kỳ (doanh thu · bảng kê nền tảng) lẫn hoá đơn ước tính của chính khách (review #648 vòng 2, LOW-6).
+  const unitsBefore = (await readAiBalancePeriod(per.from, per.to)).get(U)?.aiCustomerUnits ?? 0;
+  const chargedBefore = await readAiCustomerChargedUnits(U, per.from, per.to);
+  await postAiLedgerEntry(pdb, { orgCode: U, entryType: "AI_USAGE", fundsClass: "CASH", amountVnd: -2 * unit, units: 2, idempotencyKey: "aibu-units-x2", sourceType: "AI_CUSTOMER", sourceRef: "fanpage:aibu:hai-don-vi", note: "hai đơn vị trong một dòng", occurredAt: now });
+  assert.deepEqual([(await readAiBalancePeriod(per.from, per.to)).get(U)?.aiCustomerUnits, await readAiCustomerChargedUnits(U, per.from, per.to)], [unitsBefore + 2, chargedBefore + 2], "một dòng hai đơn vị ⇒ +2 khách, không phải +1");
+  // Review follow-up LOW-5: «Khoản trừ AI gần đây» lọc theo MỘT tổ chức — khoản của tổ chức khác không lẫn vào, mã tổ chức sai ⇒ bỏ lọc.
+  await postAiLedgerEntry(pdb, { orgCode: TR, entryType: "AI_USAGE", fundsClass: "CASH", amountVnd: -unit, units: 1, idempotencyKey: "aibu-tr-usage", sourceType: "AI_CUSTOMER", sourceRef: "fanpage:aibu-tr:khach", note: "khoản trừ của tổ chức khác", occurredAt: now });
+  const allCharges = await loadAiBalanceOperatorView(op, new Date(Date.now() + 1_000));
+  const onlyU = await loadAiBalanceOperatorView(op, new Date(Date.now() + 1_000), { chargesOrg: U });
+  const badOrg = await loadAiBalanceOperatorView(op, new Date(Date.now() + 1_000), { chargesOrg: "mã sai!" });
+  assert.ok(!("error" in allCharges) && allCharges.chargesOrg === null && allCharges.recentCharges.some((c) => c.orgCode === TR), "không lọc ⇒ thấy cả tổ chức khác");
+  assert.ok(!("error" in onlyU) && onlyU.chargesOrg === U && onlyU.recentCharges.length >= 5 && onlyU.recentCharges.every((c) => c.orgCode === U), JSON.stringify(!("error" in onlyU) ? onlyU.recentCharges.map((c) => c.orgCode) : onlyU));
+  assert.ok(!("error" in badOrg) && badOrg.chargesOrg === null, "mã tổ chức sai ⇒ bỏ lọc, không ném");
+  // Review follow-up LOW-7: lõi đảo chỉ nhận khoản trừ nguồn AI_CUSTOMER — cùng tập với danh sách.
+  const opUsage = await postAiLedgerEntry(pdb, { orgCode: U, entryType: "AI_USAGE", fundsClass: "CASH", amountVnd: -unit, idempotencyKey: "aibu-usage-operator", sourceType: "OPERATOR", note: "khoản trừ không phải khách AI", occurredAt: now });
+  const notCustomer = await reverseAiUsageCharge(op, { orgCode: U, chargeId: opUsage.id, reason: "Đảo khoản không phải khách AI" });
+  assert.ok("error" in notCustomer && /Không thấy khoản trừ AI/.test(notCustomer.error), JSON.stringify(notCustomer));
 }
 
 export async function testAiBalanceUsage() {

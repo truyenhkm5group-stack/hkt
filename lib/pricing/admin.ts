@@ -25,7 +25,7 @@ import { normalizeCommercialInput, parseCommercial, QUOTA_KEYS, QUOTA_MAX, type 
 import { aiCreditLevel, detectCostSpike, ENFORCEMENTS, evaluateQuota, suggestCheaperModel, worstLevel, type Enforcement, type GuardConfig, type QuotaLevel, type QuotaVerdict, type RoutingSuggestion, type SpikeVerdict } from "@/lib/pricing/guard";
 import { parseFeatureOverrides, type FeatureKey } from "@/lib/pricing/features";
 import { invalidatePricing, PRICING_GUARD_KEY, readGuardConfig, readOrgPricingRow, resolveOrgPricing, QUOTA_METER, type OrgPricingRow } from "@/lib/pricing/entitlements";
-import { aiBalanceTotals, marginRisk, platformGrossMargin, projectToPeriodEnd, revenueWithAiBalance, tenantUnitEconomics, trialConversion, div, type AiBalanceTotals, type MarginRisk, type TenantUnitEconomics, type TrialConversion } from "@/lib/pricing/economics";
+import { aiBalanceTotals, platformGrossMargin, projectToPeriodEnd, revenueWithAiBalance, tenantMarginRisk, tenantUnitEconomics, trialConversion, div, type AiBalanceTotals, type MarginRisk, type TenantUnitEconomics, type TrialConversion } from "@/lib/pricing/economics";
 import { periodProgress, usagePeriodOf, type MeterReadings } from "@/lib/pricing/meter";
 import { AI_UNIT_PRICES_KEY, parseUnitPriceOverrides, priceKeyFor, readUnitPriceOverrides, resolveUnitPrices, type UnitPriceRow } from "@/lib/pricing/unit-prices";
 import { parseAiLimits } from "@/lib/ai-usage/types";
@@ -441,7 +441,7 @@ export async function loadPricingEconomics(user: SessionUser, now: Date = new Da
       unpricedCalls: unpriced,
       reestimatedUnpricedUsd: reest,
       economics: tenantUnitEconomics({ revenueVnd: rev.realizedVnd, platformAiCostVnd: platformCost.vnd, aiCostComplete: platformCost.complete, aiOrders: usage.readings.orders_created_by_ai, aiConversations: usage.readings.ai_conversations }),
-      risk: marginRisk({ revenueVnd: rev.realizedVnd, platformAiCostToDateVnd: platformCost.vnd, projectedPlatformAiCostVnd: projected }),
+      risk: tenantMarginRisk(rev, platformCost.vnd, projected),
       quotas,
       aiCredit: credit,
       worst: worstLevel([...quotas.map((q) => q.level), credit.level]),
@@ -476,7 +476,7 @@ export async function loadPricingEconomics(user: SessionUser, now: Date = new Da
   // Số dư AI cả nền tảng + lãi gộp: HAI hàm thuần có bài kiểm số chính xác (review #648 H1). Dòng tiền kỳ chỉ của tổ chức trong
   // khung (cùng tập với chi phí AI); số dư đang giữ của MỌI tổ chức trừ nhà (M1). Tiền nạp / tiền tặng không vào doanh thu.
   const aiBalance = aiBalanceTotals({ balances, tenantCodes: new Set(tenants.map((t) => t.code)), homeCode: orgs.find((o) => o.isHome)?.code ?? null });
-  const gm = platformGrossMargin({ mrrPayingVnd: revenue, aiBalanceRevenueToDateVnd: aiBalance.revenueVnd, elapsedDays, totalDays, projectedAiCostVnd: aiForMargin, infraVnd: costs.infraMonthlyVnd });
+  const gm = platformGrossMargin({ mrrPayingVnd: revenue, aiBalanceRevenueToDateVnd: aiBalance.revenueVnd, aiBalanceReversalToDateVnd: aiBalance.reversalCashVnd, elapsedDays, totalDays, projectedAiCostVnd: aiForMargin, infraVnd: costs.infraMonthlyVnd });
   const withCost = tenants.filter((t) => t.platformAiCostVnd > 0);
   return {
     ok: true,

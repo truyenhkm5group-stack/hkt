@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { requirePermission } from "@/lib/auth/session";
-import { adjustAiBalance, aiTopupStatus, createAiTopupIntent, setLowBalanceThreshold, type TopupResult, type TopupStatusResult } from "@/lib/billing/ai-balance";
+import { adjustAiBalance, aiTopupStatus, createAiTopupIntent, reverseAiUsageCharge, setLowBalanceThreshold, type TopupResult, type TopupStatusResult } from "@/lib/billing/ai-balance";
 import { setAiBalanceEnabled, type KillSwitchResult } from "@/lib/platform/kill-switches";
 
 /**
@@ -36,6 +36,13 @@ export async function setLowBalanceAction(input: { amountVnd: unknown }): Promis
 export async function adjustAiBalanceAction(input: { orgCode: unknown; kind: unknown; amountVnd: unknown; reason: unknown; requestKey: unknown }): Promise<{ ok: true; message: string } | { error: string }> {
   const user = await requirePermission("platform:operate");
   const r = await adjustAiBalance(user, input ?? {});
+  if ("ok" in r) revalidatePath("/platform/ai-balance");
+  return r;
+}
+
+export async function reverseAiUsageChargeAction(input: { orgCode: unknown; chargeId: unknown; reason: unknown }): Promise<{ ok: true; message: string } | { error: string }> {
+  const user = await requirePermission("platform:operate");
+  const r = await reverseAiUsageCharge(user, input ?? {});
   if ("ok" in r) revalidatePath("/platform/ai-balance");
   return r;
 }

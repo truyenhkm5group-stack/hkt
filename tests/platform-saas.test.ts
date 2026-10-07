@@ -186,6 +186,13 @@ function testPure() {
   assert.equal(econ.platformAiCostVnd, 50_000);
   assert.equal(econ.contributionVnd, 449_000);
   assert.equal(econ.aiCostComplete, false, "lượt chưa định giá ⇒ số tiền là cận dưới");
+  // Doanh thu Số dư AI cùng cửa sổ (review #648 vòng 2, MEDIUM-1): đóng góp + biên tính trên MRR + Số dư; chưa có MRR ⇒ chưa biết.
+  const withBalance = tenantEconomics(499_000, { costUsd: 2, requests: 10, unpricedRequests: 0 }, 25_000, 30_000);
+  assert.deepEqual([withBalance.aiBalanceRevenueVnd, withBalance.contributionVnd, withBalance.contributionMargin], [30_000, 479_000, 479_000 / 529_000]);
+  assert.deepEqual([tenantEconomics(null, { costUsd: 0, requests: 0, unpricedRequests: 0 }, 25_000, 30_000).contributionVnd, tenantEconomics(0, { costUsd: 2, requests: 1, unpricedRequests: 0 }, 25_000, 0).contributionMargin], [null, null]);
+  // Review follow-up LOW-3: cửa sổ chỉ có khoản đảo ⇒ doanh thu ÂM ⇒ không có biên (chia hai số âm ra biên DƯƠNG giả).
+  const negative = tenantEconomics(0, { costUsd: 0.1, requests: 1, unpricedRequests: 0 }, 25_000, -1_590);
+  assert.deepEqual([negative.contributionVnd, negative.contributionMargin], [-1_590 - 2_500, null]);
 
   // Xu hướng.
   assert.equal(trendOf(3, 2), "NONE", "dưới 10 lượt không gọi là xu hướng");

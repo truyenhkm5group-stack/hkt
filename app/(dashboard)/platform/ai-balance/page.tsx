@@ -2,7 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { PageHeader } from "@/components/page-header";
 import { ResolvePaymentForm } from "@/components/billing/operator-billing";
-import { AiBalanceAdjustForm, AiBalanceToggleForm } from "@/components/platform/ai-balance-forms";
+import { AiBalanceAdjustForm, AiBalanceToggleForm, ReverseChargeForm } from "@/components/platform/ai-balance-forms";
 import { EmptyState, SectionCard } from "@/components/ui-bits";
 import { requirePermission } from "@/lib/auth/session";
 import { loadAiBalanceOperatorView } from "@/lib/billing/ai-balance";
@@ -26,10 +26,11 @@ const RESOLVE_TOPUP_NOTE =
  * điều chỉnh / hoàn — mọi lượt bắt buộc lý do, vào sổ và nhật ký nền tảng. Doanh thu · chi phí AI · biên của cùng tổ chức nằm
  * ở khung kinh tế đơn vị /platform/saas (một chỗ tính, không tính lại ở đây).
  */
-export default async function PlatformAiBalancePage() {
+export default async function PlatformAiBalancePage({ searchParams }: { searchParams: Promise<{ org?: string }> }) {
   const user = await requirePermission("platform:operate");
   if (platformOperatorDenial(user)) redirect("/?forbidden=1");
-  const v = await loadAiBalanceOperatorView(user);
+  const { org } = await searchParams;
+  const v = await loadAiBalanceOperatorView(user, new Date(), { chargesOrg: org ?? null });
   if ("error" in v) redirect("/?forbidden=1");
   return (
     <div className="space-y-5">
@@ -67,7 +68,10 @@ export default async function PlatformAiBalancePage() {
                 {v.rows.map((r) => (
                   <tr key={r.orgCode} data-ai-balance-org={r.orgCode}>
                     <td className="py-2 pr-3">
-                      <span className="font-medium">{r.orgName}</span> <span className="text-xs text-muted-foreground">{r.orgCode}</span>
+                      <span className="font-medium">{r.orgName}</span> <span className="text-xs text-muted-foreground">{r.orgCode}</span>{" "}
+                      <Link href={`/platform/ai-balance?org=${encodeURIComponent(r.orgCode)}#charges`} className="text-xs text-primary hover:underline" data-charges-of={r.orgCode}>
+                        khoản trừ
+                      </Link>
                     </td>
                     <td className="py-2 pr-3">{r.enabled ? "Bật" : "Tắt"}</td>
                     <td className="numeric py-2 pr-3 text-right">{formatVND(r.cashVnd)}</td>
@@ -125,6 +129,39 @@ export default async function PlatformAiBalancePage() {
           </ul>
         </SectionCard>
       ) : null}
+      <SectionCard
+        id="charges"
+        title={v.chargesOrg ? `Khoản trừ AI của ${v.chargesOrg}` : "Khoản trừ AI gần đây"}
+        actions={
+          v.chargesOrg ? (
+            <Link href="/platform/ai-balance#charges" className="text-sm text-primary hover:underline">
+              Bỏ lọc
+            </Link>
+          ) : undefined
+        }
+        description={`${v.chargesOrg ? "100 khoản mới nhất của tổ chức này" : "30 khoản mới nhất toàn nền tảng — bấm «khoản trừ» ở dòng tổ chức để xem riêng"}. Trừ oan (vd không phải khách mới) ⇒ «Đảo»: trả lại ĐÚNG khoản ấy vào số dư và trừ khỏi doanh thu — mỗi khoản một lần, bắt buộc lý do. Khách bị đảo không bị tính lại ở bảng kê.`}
+      >
+        {v.recentCharges.length ? (
+          <ul className="divide-y text-sm" data-ai-balance-charges>
+            {v.recentCharges.map((c) => (
+              <li key={c.id} className="flex flex-wrap items-center justify-between gap-2 py-2" data-ai-balance-charge={c.id}>
+                <span className="min-w-0">
+                  {formatDateTime(c.occurredAt)} · {c.orgCode} · <span className="font-mono text-xs text-muted-foreground">{c.customerKey.slice(-24)}</span>
+                </span>
+                <span className="flex items-center gap-3">
+                  <span className="numeric font-medium">
+                    {formatVND(c.amountVnd)}
+                    {c.fundsClass === "PROMO" ? " (tặng)" : ""}
+                  </span>
+                  {c.reversed ? <span className="text-xs text-muted-foreground">đã đảo</span> : <ReverseChargeForm orgCode={c.orgCode} chargeId={c.id} />}
+                </span>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="text-sm text-muted-foreground">Chưa có khoản trừ AI nào.</p>
+        )}
+      </SectionCard>
       <div className="grid gap-5 lg:grid-cols-2">
         <SectionCard title="Bật / tắt cho một tổ chức" description="Tắt lại không đụng tiền đã nạp — chỉ ẩn màn khách và chặn tạo mã nạp mới.">
           <AiBalanceToggleForm />

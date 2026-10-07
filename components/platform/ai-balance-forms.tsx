@@ -5,7 +5,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { adjustAiBalanceAction, setAiBalanceEnabledAction } from "@/lib/actions/ai-balance";
+import { adjustAiBalanceAction, reverseAiUsageChargeAction, setAiBalanceEnabledAction } from "@/lib/actions/ai-balance";
 
 /** Mã lượt gửi mới cho mỗi lần mở form — bấm hai lần không ra hai dòng sổ (lõi khoá theo mã này). */
 function newRequestKey(): string {
@@ -49,8 +49,34 @@ const KINDS = [
   { value: "ADJUST_CASH", label: "Điều chỉnh tiền thật (+/−)" },
   { value: "ADJUST_PROMO", label: "Điều chỉnh tiền tặng (+/−)" },
   { value: "REFUND", label: "Hoàn tiền thật cho khách (trừ số dư)" },
-  { value: "REVERSE_USAGE", label: "Đảo khoản trừ AI oan (trả lại số dư, trừ khỏi doanh thu)" },
 ] as const;
+
+/** «Đảo» ĐÚNG một khoản trừ AI oan — số tiền là của khoản ấy (không gõ), mỗi khoản một lần, bắt buộc lý do. */
+export function ReverseChargeForm({ orgCode, chargeId }: { orgCode: string; chargeId: string }) {
+  const [reason, setReason] = useState("");
+  const [pending, start] = useTransition();
+  return (
+    <form
+      className="flex items-center gap-2"
+      onSubmit={(e) => {
+        e.preventDefault();
+        start(async () => {
+          const r = await reverseAiUsageChargeAction({ orgCode, chargeId, reason });
+          if ("error" in r) toast.error(r.error);
+          else {
+            toast.success(r.message);
+            setReason("");
+          }
+        });
+      }}
+    >
+      <Input className="h-8 w-44" value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Lý do đảo" aria-label="Lý do đảo khoản trừ" />
+      <Button type="submit" size="sm" variant="outline" disabled={pending || !reason.trim()}>
+        Đảo
+      </Button>
+    </form>
+  );
+}
 
 export function AiBalanceAdjustForm() {
   const [orgCode, setOrgCode] = useState("");
