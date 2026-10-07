@@ -14,7 +14,8 @@ import {
   type SendSnapshot,
 } from "@/lib/sales-chatbot/conversation-control-shared";
 import { recordConversationEvent } from "@/lib/sales-chatbot/events";
-import { aiHoldOf, cooldownUntilFrom, humanResumeReason, type AiHold, type AiHoldInput } from "@/lib/sales-chatbot/ai-hold-shared";
+import { aiHoldOf, cooldownUntilFrom, HUMAN_COOLDOWN_MAX_MINUTES, HUMAN_COOLDOWN_MIN_MINUTES, HUMAN_COOLDOWN_MINUTES, HUMAN_COOLDOWN_SETTING_KEY, humanResumeReason, normalizeCooldownMinutes, type AiHold, type AiHoldInput } from "@/lib/sales-chatbot/ai-hold-shared";
+import { getSettingJson, setSettingJson } from "@/lib/settings";
 import { controlOf, controlSkipNote, NEEDS_HUMAN_NOTE } from "@/lib/sales-chatbot/conversation-control-shared";
 
 /**
@@ -213,7 +214,7 @@ export async function startHumanCooldown(conversationId: string, note: StaffRepl
   const [row] = await db.select({ id: c.id, status: c.status, handoffReason: c.handoffReason, state: c.state, updatedAt: c.updatedAt, humanCooldownUntil: c.humanCooldownUntil }).from(c).where(eq(c.id, conversationId)).limit(1);
   if (!row) return null;
   const before = aiHoldOf(row, note.at);
-  const until = cooldownUntilFrom(note.at);
+  const until = cooldownUntilFrom(note.at, await humanCooldownMinutes());
   await recordCooldownExpired(row.id, before);
   await db
     .update(c)
@@ -232,4 +233,27 @@ export async function startHumanCooldown(conversationId: string, note: StaffRepl
   }
   publish({ type: "chat", conversationId: row.id });
   return before;
+}
+
+// ─────────────────────────── Số phút AI nhường — cấu hình theo workspace ───────────────────────────
+
+/**
+ * Số phút AI tự trả lời lại sau câu tay của nhân viên — MỘT hàm đọc cho mọi đường nhận tin nhân viên (hộp thư ERP · Pancake ·
+ * Messenger · Zalo đều đi qua `startHumanCooldown`). Chưa khai / khai sai ⇒ `HUMAN_COOLDOWN_MINUTES` (30 — đúng hành vi cũ).
+ */
+export async function humanCooldownMinutes(): Promise<number> {
+  const v = await getSettingJson<{ minutes?: unknown }>(HUMAN_COOLDOWN_SETTING_KEY, {});
+  return normalizeCooldownMinutes(v.minutes);
+}
+
+/** Người quản lý khai số phút nhường của workspace (nhật ký trước → sau). Chỉ áp cho câu tay GỬI SAU lúc lưu — mốc đã ghi giữ nguyên. */
+export async function setHumanCooldownMinutesCore(user: SessionUser, minutes: unknown): Promise<{ ok: true; minutes: number; changed: boolean } | { ok: false; error: string }> {
+  if (!can(user, "ai_sales:manage")) return { ok: false, error: "Bạn không có quyền đổi cấu hình AI bán hàng (ai_sales:manage)." };
+  const n = typeof minutes === "number" ? minutes : typeof minutes === "string" && minutes.trim() ? Number(minutes) : NaN;
+  if (!Number.isInteger(n) || n < HUMAN_COOLDOWN_MIN_MINUTES || n > HUMAN_COOLDOWN_MAX_MINUTES) return { ok: false, error: `Số phút phải là số nguyên từ ${HUMAN_COOLDOWN_MIN_MINUTES} tới ${HUMAN_COOLDOWN_MAX_MINUTES}.` };
+  const before = await humanCooldownMinutes();
+  if (before === n) return { ok: true, minutes: n, changed: false };
+  await setSettingJson(HUMAN_COOLDOWN_SETTING_KEY, { minutes: n });
+  await audit({ userId: user.id, userEmail: user.email, action: "SALES_CHAT_COOLDOWN_SET", entity: "SETTING", entityId: HUMAN_COOLDOWN_SETTING_KEY, detail: { from: before, to: n, defaultMinutes: HUMAN_COOLDOWN_MINUTES } });
+  return { ok: true, minutes: n, changed: true };
 }

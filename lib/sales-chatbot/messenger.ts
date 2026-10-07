@@ -2,15 +2,16 @@ import { noteAiCustomerReply } from "@/lib/pricing/ai-customer";
 import { randomUUID } from "node:crypto";
 import { and, eq, gte, inArray, isNotNull, isNull, lt, or, sql } from "drizzle-orm";
 import { getDb, getPlatformDb, schema } from "@/db";
+import { audit } from "@/lib/audit";
 import type { SessionUser } from "@/lib/auth/session";
 import { adoptLegacyChannelPages, disableChannelPages, listChannelPages, messagingConnectionSummaries, noteChannelPageHealth, openActiveConnection, openChannelPageToken, saveConnection, setChannelPagesState, setConnectionStatus, testOrgConnection, upsertChannelPage } from "@/lib/connectors/service";
 import type { TesterDeps } from "@/lib/connectors/testers";
-import { instagramAccountOf, messengerApp, messengerBotAppIds, postMessage, sendMessengerImage, sendMessengerText, sendPrivateReply, subscribePage, unsubscribePage, MESSENGER_TEXT_MAX, type ConnectablePage, type MessengerEvent } from "@/lib/integrations/messenger/graph";
+import { appSecretProof, graphBase, instagramAccountOf, messengerApp, messengerBotAppIds, postMessage, sendMessengerImage, sendMessengerText, sendPrivateReply, subscribePage, unsubscribePage, MESSENGER_TEXT_MAX, type ConnectablePage, type MessengerEvent } from "@/lib/integrations/messenger/graph";
 import { chunkText } from "@/lib/messaging/providers";
 import { canUseModule } from "@/lib/platform/capabilities";
 import { AI_DOWN_HANDOFF_REASON, chatTurn, conversationView, describeCustomerImages } from "@/lib/sales-chatbot/engine";
 import { ALREADY_REPLIED_NOTE, alreadyRepliedRows, CONV_OPEN_FAILED_NOTE, EMPTY_REPLY_NOTE, HANDOFF_SILENT_NOTE, DEAD_AI_DOWN_NOTE, DEAD_SEND_NOTE_PREFIX, deadLetter, dueForClaim, releaseWithBackoff } from "@/lib/sales-chatbot/inbound-retry";
-import { dualConnectedPages, loadTransportFacts, PANCAKE_OWNS_PAGE_REASON, transportOwnerOf } from "@/lib/sales-chatbot/channel-ownership";
+import { clearPageMode, dualConnectedPages, DUPLICATE_SOURCE_REASON, insertCustomerInbound, liveTransportsOf, loadTransportFacts, NON_CANONICAL_NOTE, PANCAKE_OWNS_PAGE_REASON, recordPageMode, routeVerdict, threadTransport, transportOwnerOf, type RouteVerdict } from "@/lib/sales-chatbot/channel-ownership";
 import {
   CLAIM_STALE_MS,
   conversationFor,
@@ -205,6 +206,13 @@ export async function connectMessengerPages(user: SessionUser, pages: readonly C
         .onConflictDoUpdate({ target: idx.pageId, set: { pageName: name.slice(0, 120), connectedByEmail: user.email, updatedAt: new Date() }, where: eq(idx.orgCode, orgCode) });
     }
     connected.push(page.id);
+    // PAGE MỚI ƯU TIÊN META TRỰC TIẾP (0233): Pancake không chạy page này ⇒ đường chính = Meta trực tiếp (nguồn CONNECT, người nối).
+    // Pancake đang chạy page này thì đã bị từ chối ở trên — không bao giờ tới đây.
+    for (const [id] of indexed) {
+      if (liveTransportsOf(facts, id).PANCAKE || facts.modes?.[id] === "META_DIRECT") continue;
+      const from = await recordPageMode(id, "META_DIRECT", "CONNECT", `Nối Meta trực tiếp cho page — Pancake không chạy page này (${user.name || user.email})`.slice(0, 300), user.id);
+      await audit({ userId: user.id, userEmail: user.email, action: "SALES_CHANNEL_MODE_SET", entity: "CHANNEL_PAGE", entityId: id, detail: { from: from ?? "NONE", to: "META_DIRECT", reason: "CONNECT" } });
+    }
     if (igOk) notes.push(`Instagram @${igOk.username}`);
     else if (ig) notes.push(`Instagram @${ig.username} của «${label}» đang nối với cửa hàng khác — chưa nối`);
   }
@@ -257,14 +265,42 @@ export async function disconnectMessengerPage(user: SessionUser, pageId?: string
     const off = await disableChannelPages(user, MESSENGER_CONNECTOR, group.map((p) => ({ pageId: p.id, kind: p.kind, parentPageId: p.parentPageId, name: p.name })));
     if ("error" in off) return off;
     await pdb.delete(idx).where(and(eq(idx.orgCode, orgCode), inArray(idx.pageId, group.map((p) => p.id))));
-    return { ok: true, message: `Đã gỡ page «${target.name || target.id}» — các page khác vẫn chạy.${note}` };
+    const back = await handBackToPancake(user, group.map((p) => p.id));
+    return { ok: true, message: `Đã gỡ page «${target.name || target.id}» — các page khác vẫn chạy.${back}${note}` };
   }
   const note = await unsubscribeMetaPages(view.pages.filter((p) => p.kind === "PAGE").map((p) => p.id), deps.fetch);
   const off = await setConnectionStatus(user, MESSENGER_CONNECTOR, "DISABLED");
   if ("error" in off) return { error: off.error };
   if (view.pages.length) await disableChannelPages(user, MESSENGER_CONNECTOR, view.pages.map((p) => ({ pageId: p.id, kind: p.kind, parentPageId: p.parentPageId, name: p.name })));
   await pdb.delete(idx).where(eq(idx.orgCode, orgCode));
-  return { ok: true, message: `Đã gỡ Messenger trực tiếp — bot không nhận tin từ page qua đường này nữa.${note}` };
+  const back = await handBackToPancake(user, view.pages.map((p) => p.id));
+  return { ok: true, message: `Đã gỡ Messenger trực tiếp — bot không nhận tin từ page qua đường này nữa.${back}${note}` };
+}
+
+/**
+ * Người gỡ Meta trực tiếp của page mà Pancake ĐANG chạy page đó ⇒ đường chính về Pancake (0233) — hệ quả TƯỜNG MINH của chính thao
+ * tác gỡ, có nhật ký; không có bước này page im lặng (đường chính đã lưu không chạy). Pancake không chạy ⇒ giữ nguyên dòng.
+ */
+async function handBackToPancake(user: SessionUser, pageIds: readonly string[]): Promise<string> {
+  try {
+    const facts = await loadTransportFacts();
+    const moved: string[] = [];
+    for (const id of pageIds) {
+      if (facts.modes?.[id] !== "META_DIRECT") continue;
+      if (!liveTransportsOf(facts, id).PANCAKE) {
+        // Không còn đường nào chạy page ⇒ bỏ dòng canonical (về luật mặc định): nối Pancake sau này chạy ngay, không bị dòng cũ trỏ
+        // vào đường đã gỡ làm AI im.
+        if (await clearPageMode(id)) await audit({ userId: user.id, userEmail: user.email, action: "SALES_CHANNEL_MODE_SET", entity: "CHANNEL_PAGE", entityId: id, detail: { from: "META_DIRECT", to: "DEFAULT", reason: "DISCONNECT_META_NO_ROUTE" } });
+        continue;
+      }
+      await recordPageMode(id, "PANCAKE_WEBHOOK", "MANUAL", `Gỡ Meta trực tiếp — Pancake đang chạy page này nên đường chính về Pancake (${user.name || user.email})`.slice(0, 300), user.id);
+      await audit({ userId: user.id, userEmail: user.email, action: "SALES_CHANNEL_MODE_SET", entity: "CHANNEL_PAGE", entityId: id, detail: { from: "META_DIRECT", to: "PANCAKE_WEBHOOK", reason: "DISCONNECT_META" } });
+      moved.push(id);
+    }
+    return moved.length ? ` Page ${moved.join(", ")} chuyển về nhận tin qua Pancake.` : "";
+  } catch {
+    return "";
+  }
 }
 
 /** Bật / tắt AI cho NHIỀU page một lượt (thao tác hàng loạt; quyền kiểm ở lõi kết nối). Page đã gỡ không bật lại được ở đây. */
@@ -291,9 +327,11 @@ export async function receiveMessengerEvent(ev: MessengerEvent, now: Date = new 
   if (!owned.length) return { queued: false, reason: "Kết nối Messenger chưa bật" };
   if (!owned.includes(ev.pageId)) return { queued: false, reason: "Tin của page khác page đã nối" };
   await noteChannelPageHealth(MESSENGER_CONNECTOR, ev.pageId, { ok: true }, now);
-  // Page cùng lúc bật qua Pancake (trạng thái cũ / bật lại ở trang Kết nối) ⇒ Pancake thắng, đường này nhường MỌI gói tin của
-  // page đó (cả tiếng vọng) — không hội thoại thứ hai, không câu trả lời thứ hai.
-  if (transportOwnerOf(await loadTransportFacts(), ev.pageId) === "PANCAKE") return { queued: false, reason: PANCAKE_OWNS_PAGE_REASON };
+  // MỘT PAGE — MỘT ĐƯỜNG CANONICAL (channel-ownership.ts · 0233): Pancake là đường chính của page và đang chạy ⇒ đường này nhường
+  // MỌI gói tin của page đó (cả tiếng vọng) — không hội thoại thứ hai, không câu trả lời thứ hai. Đường chính đã lưu mà KHÔNG chạy
+  // ⇒ vẫn ghi tin khách cho người đọc, KHÔNG kích AI (`NON_CANONICAL_NOTE`).
+  const verdict: RouteVerdict = routeVerdict(await loadTransportFacts(), ev.pageId, "MESSENGER");
+  if (verdict === "OTHER_OWNS") return { queued: false, reason: PANCAKE_OWNS_PAGE_REASON };
   const db = await getDb();
   const t = schema.salesChatInbound;
   // 0225: quảng cáo dẫn KHÁCH vào hội thoại — ghi lên hội thoại (đường phụ, không làm hỏng lượt nhận). Sự kiện CHỈ mang quảng
@@ -336,7 +374,7 @@ export async function receiveMessengerEvent(ev: MessengerEvent, now: Date = new 
   if (ev.comment) {
     const rows = await db
       .insert(t)
-      .values({ pageId: ev.pageId, threadId: ev.mid, messageId: ev.mid, text: ev.text, kind: "COMMENT", postId: ev.comment.postId, fromId: ev.psid })
+      .values({ pageId: ev.pageId, threadId: ev.mid, messageId: ev.mid, text: ev.text, kind: "COMMENT", postId: ev.comment.postId, fromId: ev.psid, transport: "MESSENGER", ...(verdict === "CANONICAL_DOWN" ? { status: "SKIPPED", processedAt: now, note: NON_CANONICAL_NOTE } : {}) })
       .onConflictDoNothing({ target: t.messageId })
       .returning({ id: t.id });
     return rows.length ? { queued: true, reason: "Đã nhận bình luận" } : { queued: false, reason: "Bình luận trùng — đã nhận trước đó" };
@@ -344,17 +382,21 @@ export async function receiveMessengerEvent(ev: MessengerEvent, now: Date = new 
   if (!ev.text && !ev.imageUrls.length) {
     await stopFollowups(ev.pageId, ev.psid, now, true);
     // NGƯỜI phải thấy tin này trong hộp thư (MEDIA_ONLY — không vào hàng chờ của bot).
-    await db.insert(t).values({ pageId: ev.pageId, threadId: ev.psid, messageId: ev.mid, text: MEDIA_ONLY_TEXT, status: "DONE", processedAt: now, note: MEDIA_ONLY_NOTE }).onConflictDoNothing({ target: t.messageId });
+    const media = await insertCustomerInbound({ pageId: ev.pageId, threadId: ev.psid, messageId: ev.mid, text: MEDIA_ONLY_TEXT, status: "DONE", processedAt: now, note: MEDIA_ONLY_NOTE, transport: "MESSENGER", senderId: ev.psid }, now, { canonical: verdict === "CANONICAL" });
+    if (media.duplicate) return { queued: false, reason: DUPLICATE_SOURCE_REASON };
     await noteCustomerArrived(ev.pageId, ev.psid, now);
     return { queued: false, reason: "Tin không có chữ hay ảnh — để nhân viên xem" };
   }
-  const rows = await db
-    .insert(t)
-    .values({ pageId: ev.pageId, threadId: ev.psid, messageId: ev.mid, text: ev.text, ...(ev.imageUrls.length ? { imageUrls: ev.imageUrls } : {}) })
-    .onConflictDoNothing({ target: t.messageId })
-    .returning({ id: t.id });
-  if (rows.length) await noteCustomerArrived(ev.pageId, ev.psid, now);
-  return rows.length ? { queued: true, reason: "Đã nhận" } : { queued: false, reason: "Tin trùng — đã nhận trước đó" };
+  const skipped = verdict === "CANONICAL_DOWN";
+  const ins = await insertCustomerInbound(
+    { pageId: ev.pageId, threadId: ev.psid, messageId: ev.mid, text: ev.text, ...(ev.imageUrls.length ? { imageUrls: ev.imageUrls } : {}), ...(skipped ? { status: "SKIPPED", processedAt: now, note: NON_CANONICAL_NOTE } : {}), transport: "MESSENGER", senderId: ev.psid },
+    now,
+    { canonical: !skipped },
+  );
+  if (ins.duplicate) return { queued: false, reason: DUPLICATE_SOURCE_REASON };
+  if (ins.inserted) await noteCustomerArrived(ev.pageId, ev.psid, now);
+  if (ins.inserted && skipped) return { queued: false, reason: NON_CANONICAL_NOTE };
+  return ins.inserted ? { queued: true, reason: "Đã nhận" } : { queued: false, reason: "Tin trùng — đã nhận trước đó" };
 }
 
 /** Cùng khoá hội thoại với đường Pancake (băm page + mã hội thoại) — PSID và mã hội thoại Pancake không bao giờ trùng nhau. */
@@ -430,6 +472,7 @@ export async function sendMessengerPageImages(pageId: string, psid: string, imag
 
 /** Ảnh của nhân viên vào hội thoại fanpage, ĐÚNG đường của page: Pancake nếu page nối qua Pancake, không thì Messenger trực tiếp. */
 export async function sendPageImages(pageId: string, threadId: string, images: readonly { data: Uint8Array; contentType: string }[], deps: FanpageDeps, mark: StaffMark): Promise<{ ok: true } | { ok: false; error: string }> {
+  if ((await sendRouteOf(pageId, threadId)) === "MESSENGER") return sendMessengerPageImages(pageId, threadId, images, deps, mark);
   const viaPancake = await sendFanpageImages(pageId, threadId, images, deps, mark);
   if (viaPancake.ok || !/chưa bật \/ khác page/.test(viaPancake.error)) return viaPancake;
   return sendMessengerPageImages(pageId, threadId, images, deps, mark);
@@ -463,8 +506,24 @@ export async function sendBotImages(pageId: string, psid: string, imageIds: read
   return { ok: true, sent };
 }
 
+/**
+ * Đường GỬI của một luồng fanpage (0233). Luồng do đường Messenger ghi ⇒ Messenger; luồng do Pancake ghi ⇒ đường cũ (thử Pancake rồi
+ * Messenger); dòng cũ chưa mang đường ⇒ theo đường canonical của page — page Meta trực tiếp không gửi nhầm qua Pancake với mã PSID.
+ * Lỗi đọc ⇒ `null` (đường cũ — hành vi trước 0233).
+ */
+async function sendRouteOf(pageId: string, threadId: string): Promise<"MESSENGER" | "PANCAKE" | null> {
+  try {
+    const own = await threadTransport(pageId, threadId);
+    if (own) return own;
+    return transportOwnerOf(await loadTransportFacts(), pageId);
+  } catch {
+    return null;
+  }
+}
+
 /** Một tin của bot vào hội thoại fanpage, ĐÚNG đường của page: Pancake nếu page nối qua Pancake, không thì Messenger trực tiếp. */
 export async function sendBotText(pageId: string, threadId: string, text: string, deps: FanpageDeps = {}, mark?: StaffMark): Promise<{ ok: true } | { ok: false; error: string }> {
+  if ((await sendRouteOf(pageId, threadId)) === "MESSENGER") return sendMessengerPageText(pageId, threadId, text, deps, mark);
   const viaPancake = await sendFanpageText(pageId, threadId, text, deps, mark);
   if (viaPancake.ok || !/chưa bật \/ khác page/.test(viaPancake.error)) return viaPancake;
   return sendMessengerPageText(pageId, threadId, text, deps, mark);
@@ -476,6 +535,11 @@ export async function sendBotText(pageId: string, threadId: string, text: string
 export async function processMessengerThread(pageId: string, psid: string, deps: FanpageDeps = {}): Promise<ProcessResult> {
   const now = deps.now ?? (() => new Date());
   const out: ProcessResult = { processed: 0, replies: 0, skipped: null, error: null };
+  // Chỉ đường CANONICAL của page được kích AI (0233). Đọc hỏng ⇒ chạy như trước (không chặn đường đang chạy vì một lỗi đọc).
+  const verdict = await loadTransportFacts()
+    .then((f) => routeVerdict(f, pageId, "MESSENGER"))
+    .catch(() => "CANONICAL" as const);
+  if (verdict !== "CANONICAL") return { ...out, skipped: verdict === "OTHER_OWNS" ? PANCAKE_OWNS_PAGE_REASON : NON_CANONICAL_NOTE };
   const tk = await messengerTokenFor(pageId);
   if (!tk.ok) return { ...out, skipped: tk.error };
   const token = tk.token;
@@ -746,7 +810,51 @@ export async function processMessengerThreadDebounced(pageId: string, psid: stri
     if (last.skipped !== "Hội thoại đang được trả lời" && last.skipped !== WAITING) break;
     await sleep(RETRY_MS);
   }
+  // Ảnh đại diện cho hộp thư — SAU lượt trả lời (không làm chậm câu trả lời), hỏng thì thôi.
+  await refreshMessengerProfile(pageId, psid, deps).catch(() => "FAILED");
   return last;
+}
+
+/** Ảnh đại diện Meta là URL CDN có hạn — đọc lại sau chừng này. */
+export const PROFILE_REFRESH_MS = 3 * 24 * 3_600_000;
+
+/**
+ * ẢNH ĐẠI DIỆN KHÁCH MESSENGER cho hộp thư (0233): `GET /{PSID}?fields=profile_pic` bằng token của page. Meta chỉ trả khi app có
+ * quyền đọc hồ sơ người dùng (Business Asset User Profile Access) — không có ⇒ ghi lỗi, hộp thư hiện chữ cái. Ghi vào
+ * `state.messengerProfile` `{ pic, at, error }` (không đẩy `updated_at` — đồng hồ nhường không đọc cột đó nhưng màn khác thì có);
+ * đọc lại sau `PROFILE_REFRESH_MS`. Không bao giờ lưu token; câu lỗi đã che bí mật. Không mở hội thoại mới.
+ */
+export async function refreshMessengerProfile(pageId: string, psid: string, deps: FanpageDeps = {}): Promise<"FETCHED" | "FRESH" | "FAILED" | "SKIPPED"> {
+  if (!/^\d{5,30}$/.test(psid)) return "SKIPPED";
+  const now = (deps.now ?? (() => new Date()))();
+  const db = await getDb();
+  const c = schema.salesChatConversations;
+  const [row] = await db.select({ id: c.id, state: c.state }).from(c).where(and(eq(c.channel, "FANPAGE"), eq(c.visitorKey, fanpageKey(pageId, psid)))).limit(1);
+  if (!row) return "SKIPPED";
+  const prev = (row.state as Record<string, unknown> | null)?.messengerProfile as { at?: unknown } | undefined;
+  const prevAt = typeof prev?.at === "string" ? Date.parse(prev.at) : NaN;
+  if (Number.isFinite(prevAt) && now.getTime() - prevAt < PROFILE_REFRESH_MS) return "FRESH";
+  const app = messengerApp();
+  const tk = await messengerTokenFor(pageId);
+  if (!app || !tk.ok) return "SKIPPED";
+  let pic: string | null = null;
+  let error: string | null = null;
+  try {
+    const url = `${graphBase()}/${encodeURIComponent(psid)}?${new URLSearchParams({ fields: "profile_pic", access_token: tk.token, appsecret_proof: appSecretProof(tk.token, app.appSecret) })}`;
+    const res = await (deps.fetch ?? fetch)(url, { method: "GET", redirect: "manual", signal: AbortSignal.timeout(5_000) });
+    const body = ((await res.json().catch(() => null)) ?? {}) as { profile_pic?: unknown; error?: { message?: unknown } };
+    const raw = typeof body.profile_pic === "string" ? body.profile_pic.trim() : "";
+    if (res.ok && /^https:\/\/[^\s]+$/i.test(raw) && raw.length <= 2000) pic = raw;
+    else error = (typeof body.error?.message === "string" ? body.error.message : `HTTP ${res.status}`).split(tk.token).join("…").split(app.appSecret).join("…").slice(0, 200);
+  } catch (e) {
+    error = (e instanceof Error ? e.message : String(e)).split(tk.token).join("…").slice(0, 200);
+  }
+  const stamp = { messengerProfile: { pic, at: now.toISOString(), error } };
+  await db
+    .update(c)
+    .set({ state: sql`${c.state} || ${JSON.stringify(stamp)}::jsonb`, updatedAt: sql`${c.updatedAt}` })
+    .where(eq(c.id, row.id));
+  return pic ? "FETCHED" : "FAILED";
 }
 
 /**
