@@ -15,22 +15,32 @@
   arg GHI (cùng lõi với nút trên màn hình, nhật ký nguồn SCRIPT; model chính được kiểm lại NGAY trước khi ghi):
     `--apply=<1-100> <model>`        — chạy thử (< 100) / áp dụng (100) `<model>`; dự phòng = model đang chạy
     `--rollback`                     — hoàn tác về bản trước (không có ⇒ tắt chính sách ⇒ model của biến môi trường)
+    thêm cho hai cờ trên (Platform AI Policy theo loại việc, §8):
+    `--workload=<sales_chatbot|order_sync|quick_extract|vision>` — chính sách RIÊNG của loại việc (trống = chính sách chung)
+    `--reasoning=<minimal|low|medium|high>` · `--max-tokens=<256-16000>` — chỉ cho model chính (nhánh canary)
   arg ĐỌC thêm:
     `--report`                       — bảng A/B canary vs đối chứng (lib/ai-usage/platform-ai-ab.ts): chỉ số tổng hợp + đề xuất
 */
 import "dotenv/config";
 import { applyPlatformAiPolicyAsScript, probeWithPlatformKey, rollbackPlatformAiPolicyAsScript, SCRIPT_WRITER_LABEL } from "@/lib/ai-usage/platform-ai-admin";
-import { readPlatformAiPolicy } from "@/lib/ai-usage/platform-ai-policy";
-import { AB_DECISION_LABEL, readPlatformModelAbForScript, type AbArm, type SyncArm } from "@/lib/ai-usage/platform-ai-ab";
+import { PLATFORM_AI_REASONINGS, readPlatformAiPolicies, type PlatformAiPolicy, type PlatformAiReasoning } from "@/lib/ai-usage/platform-ai-policy";
+import { PLATFORM_WORKLOADS, type PlatformWorkload } from "@/lib/ai-usage/types";
+import { AB_DECISION_LABEL, readPlatformModelAbForScript, type AbVerdict, type TokenArm } from "@/lib/ai-usage/platform-ai-ab";
 
 const tomTat = (s: string) => console.log(`[ops:tom-tat] ${s.slice(0, 300)}`);
 const DEFAULT_MODELS = ["gemini-2.5-flash-lite", "gemini-3.5-flash-lite"];
 const MODEL_RE = /^[a-z0-9][a-z0-9.\-]{1,60}$/;
 
 async function printPolicy() {
-  const p = await readPlatformAiPolicy({ fresh: true });
-  tomTat(p ? `chính sách: ${p.enabled ? "BẬT" : "TẮT"} · ${p.primaryModel} ở ${p.canaryPct}% · dự phòng ${p.fallbackModel ?? "(biến môi trường)"} · từ ${p.effectiveFrom} · bởi ${p.changedBy === SCRIPT_WRITER_LABEL ? "ops" : "người vận hành (xem nhật ký nền tảng)"}` : "chính sách: (chưa có) ⇒ model của biến môi trường");
+  const set = await readPlatformAiPolicies({ fresh: true });
+  const line = (tag: string, p: PlatformAiPolicy | null | undefined) =>
+    tomTat(p ? `chính sách ${tag}: ${p.enabled ? "BẬT" : "TẮT"} · ${p.primaryModel}${p.reasoning ? ` suy nghĩ ${p.reasoning}` : ""}${p.maxOutputTokens ? ` trần ${p.maxOutputTokens}` : ""} ở ${p.canaryPct}% · dự phòng ${p.fallbackModel ?? "(biến môi trường)"} · từ ${p.effectiveFrom} · bởi ${p.changedBy === SCRIPT_WRITER_LABEL ? "ops" : "người vận hành (xem nhật ký nền tảng)"}` : `chính sách ${tag}: (chưa có)`);
+  line("chung", set.global);
+  for (const w of PLATFORM_WORKLOADS) if (set.workloads[w]) line(w, set.workloads[w]);
 }
+
+/** `--ten=giá-trị` ⇒ giá trị; không có ⇒ null. */
+const flagValue = (flags: readonly string[], name: string) => flags.find((f) => f.startsWith(`--${name}=`))?.slice(name.length + 3) ?? null;
 
 async function main() {
   const argv = process.argv.slice(2).join(" ").split(/\s+/).filter(Boolean);
@@ -50,29 +60,54 @@ async function main() {
     }
     const p = (v: number | null) => (v === null ? "—" : `${(v * 100).toFixed(1)}%`);
     const n = (v: number | null, d = 0) => (v === null ? "—" : v.toFixed(d));
-    // Hai dòng / nhánh: kênh tóm tắt cắt ở 300 ký tự.
-    const line = (label: string, a: AbArm) => {
-      tomTat(`${label} ${a.model}: HT ${a.conversations} · đơn ${a.orders} · chốt ${p(a.closeRate)} · SĐT ${p(a.phoneRate)} · địa chỉ ${p(a.addressRate)} · handoff ${p(a.handoffRate)} · lỗi ${p(a.errorRate)} (${a.requests} lượt)`);
-      tomTat(`${label} ${a.model}: p50/p95 ${n(a.p50Ms)}/${n(a.p95Ms)} ms · công cụ đúng ${p(a.toolSuccessRate)} · upsell mời ${p(a.upsellOfferRate)} nhận ${p(a.upsellAcceptRate)} · token/HT ${n(a.inputPerConv)}+${n(a.outputPerConv)} · USD/HT ${n(a.costPerConvUsd, 5)} · USD/đơn ${n(a.costPerOrderUsd, 4)} · tổng ${a.costUsd.toFixed(4)}`);
+    const tok = (tag: string, a: TokenArm) => tomTat(`${tag}: ra hiện/HT ${n(a.visibleOutPerConv)} · suy nghĩ/HT ${n(a.thinkingPerConv)} (${p(a.thinkingPct)}) · USD suy nghĩ/HT ${n(a.thinkingCostPerConvUsd, 5)} · lời gọi p50/p95 ${n(a.callP50Ms)}/${n(a.callP95Ms)} ms · độ phủ ${p(a.thinkCoverage)}`);
+    const said = (tag: string, v: AbVerdict) => tomTat(`${tag}: ${AB_DECISION_LABEL[v.decision]}${v.nextPct ? ` → ${v.nextPct}%` : ""} · ${v.reasons.join(" ")}`);
+    const checks = (tag: string, v: AbVerdict) => {
+      for (const c of v.checks) tomTat(`${tag} ${c.ok === null ? "○" : c.ok ? "✓" : "✗"} ${c.label}: ${c.detail}`);
     };
-    tomTat(`A/B cohort từ ${r.since} · canary ${r.policy.enabled ? `${r.policy.canaryPct}%` : "TẮT"} · ${r.orgs} tổ chức${r.errors.length ? ` · ${r.errors.length} tổ chức không đọc được` : ""}`);
-    const sync = (label: string, a: SyncArm) =>
-      tomTat(`GHI ĐƠN ${label} ${a.model}: HT ${a.threads} · ${a.requests} lượt · lỗi ${p(a.errorRate)} · đơn ${a.orders} · ra đơn ${p(a.orderRate)} · lead→đơn ${p(a.leadConversion)} · lead lỡ ${p(a.missedLeadRate)} · token/HT ${n(a.tokensPerThread)} · USD/HT ${n(a.costPerThreadUsd, 5)} · USD/đơn ${n(a.costPerOrderUsd, 4)} · tổng ${a.costUsd.toFixed(4)}`);
-    line("CHAT CANARY", r.canary);
-    line("CHAT ĐỐI CHỨNG", r.control);
-    sync("CANARY", r.sync.canary);
-    sync("ĐỐI CHỨNG", r.sync.control);
-    const said = (tag: string, v: typeof r.verdict) => tomTat(`${tag}: ${AB_DECISION_LABEL[v.decision]}${v.nextPct ? ` → ${v.nextPct}%` : ""} · ${v.reasons.join(" ")}`);
-    said("CHAT", r.chatVerdict);
-    for (const c of r.chatVerdict.checks) tomTat(`chat ${c.ok === null ? "○" : c.ok ? "✓" : "✗"} ${c.label}: ${c.detail}`);
-    said("GHI ĐƠN", r.sync.verdict);
-    for (const c of r.sync.verdict.checks) tomTat(`ghi đơn ${c.ok === null ? "○" : c.ok ? "✓" : "✗"} ${c.label}: ${c.detail}`);
+    const head = (tag: string, s: { scope: string; since: string; policy: { canaryPct: number; enabled: boolean; reasoning: string | null; maxOutputTokens: number | null }; canaryModel: string; controlModel: string }) =>
+      tomTat(`${tag} · chính sách ${s.scope} · cohort từ ${s.since} · ${s.canaryModel}${s.policy.reasoning ? ` suy nghĩ ${s.policy.reasoning}` : ""}${s.policy.maxOutputTokens ? ` trần ${s.policy.maxOutputTokens}` : ""} ${s.policy.enabled ? `${s.policy.canaryPct}%` : "TẮT"} vs ${s.controlModel}`);
+    tomTat(`A/B · ${r.orgs} tổ chức${r.errors.length ? ` · ${r.errors.length} tổ chức không đọc được` : ""}`);
+    if (r.chat) {
+      const c = r.chat;
+      head("CHAT", c);
+      for (const [label, a] of [["CANARY", c.canary], ["ĐỐI CHỨNG", c.control]] as const) {
+        tomTat(`CHAT ${label} ${a.model}: HT ${a.conversations} · đơn ${a.orders} · chốt ${p(a.closeRate)} · SĐT ${p(a.phoneRate)} · địa chỉ ${p(a.addressRate)} · handoff ${p(a.handoffRate)} · lỗi ${p(a.errorRate)} (${a.requests} lượt)`);
+        tomTat(`CHAT ${label} ${a.model}: p50/p95 ${n(a.p50Ms)}/${n(a.p95Ms)} ms · công cụ đúng ${p(a.toolSuccessRate)} · upsell mời ${p(a.upsellOfferRate)} nhận ${p(a.upsellAcceptRate)} · token/HT ${n(a.inputPerConv)}+${n(a.outputPerConv)} · USD/HT ${n(a.costPerConvUsd, 5)} · USD/đơn ${n(a.costPerOrderUsd, 4)}`);
+        tok(`CHAT ${label} token`, a);
+      }
+      said("CHAT", c.verdict);
+      checks("chat", c.verdict);
+    }
+    if (r.sync) {
+      const s2 = r.sync;
+      head("GHI ĐƠN", s2);
+      for (const [label, a] of [["CANARY", s2.canary], ["ĐỐI CHỨNG", s2.control]] as const) {
+        tomTat(`GHI ĐƠN ${label} ${a.model}: HT ${a.threads} · ${a.requests} lượt · lỗi ${p(a.errorRate)} · đơn ${a.orders} · ra đơn ${p(a.orderRate)} · lead→đơn ${p(a.leadConversion)} · lead lỡ ${p(a.missedLeadRate)} · token/HT ${n(a.tokensPerThread)} · USD/HT ${n(a.costPerThreadUsd, 5)} · tổng ${a.costUsd.toFixed(4)}`);
+        tok(`GHI ĐƠN ${label} token`, a);
+      }
+      said("GHI ĐƠN", s2.verdict);
+      checks("ghi đơn", s2.verdict);
+    }
     said("ĐỀ XUẤT CHUNG", r.verdict);
     process.exit(0);
   }
   const apply = flags.find((f) => f.startsWith("--apply="));
+  const wlRaw = flagValue(flags, "workload");
+  if (wlRaw !== null && !(PLATFORM_WORKLOADS as readonly string[]).includes(wlRaw)) {
+    tomTat(`--workload không hợp lệ (${PLATFORM_WORKLOADS.join(" · ")}) — dừng, không ghi gì`);
+    process.exit(64);
+  }
+  const workload = wlRaw as PlatformWorkload | null;
+  const reasoningRaw = flagValue(flags, "reasoning");
+  if (reasoningRaw !== null && !(PLATFORM_AI_REASONINGS as readonly string[]).includes(reasoningRaw)) {
+    tomTat("--reasoning phải là minimal · low · medium · high — dừng, không ghi gì");
+    process.exit(64);
+  }
+  const maxRaw = flagValue(flags, "max-tokens");
+  const maxOutputTokens = maxRaw === null ? null : Number(maxRaw);
   if (flags.includes("--rollback")) {
-    const r = await rollbackPlatformAiPolicyAsScript({ reason: "Hoàn tác qua ops platform-ai-model-probe" });
+    const r = await rollbackPlatformAiPolicyAsScript({ reason: `Hoàn tác qua ops platform-ai-model-probe${workload ? ` (${workload})` : ""}`, workload });
     tomTat("error" in r ? `HOÀN TÁC KHÔNG CHẠY: ${r.error}` : r.message);
     await printPolicy();
     process.exit("error" in r ? 1 : 0);
@@ -83,7 +118,7 @@ async function main() {
       tomTat("--apply=<1-100> cần ĐÚNG MỘT model — dừng, không ghi gì");
       process.exit(64);
     }
-    const r = await applyPlatformAiPolicyAsScript({ primaryModel: models[0], canaryPct: pct, reason: `Ops: ${pct >= 100 ? "áp dụng" : `chạy thử ${pct}%`} ${models[0]} — giảm chi phí AI dùng chung` });
+    const r = await applyPlatformAiPolicyAsScript({ primaryModel: models[0], canaryPct: pct, reason: `Ops: ${pct >= 100 ? "áp dụng" : `chạy thử ${pct}%`} ${models[0]}${workload ? ` cho ${workload}` : ""} — giảm chi phí AI dùng chung`, workload, reasoning: reasoningRaw as PlatformAiReasoning | null, maxOutputTokens });
     tomTat("error" in r ? `KHÔNG ĐỔI PRODUCTION: ${r.error}` : `${r.message} (kiểm khả dụng ngay trước khi ghi: ${r.verdict})`);
     await printPolicy();
     process.exit("error" in r ? 1 : 0);

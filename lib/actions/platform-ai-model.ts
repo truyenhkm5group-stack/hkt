@@ -19,14 +19,14 @@ export async function probePlatformAiModelAction(input: { model: string }): Prom
   return r;
 }
 
-export async function setPlatformAiPolicyAction(input: { primaryModel: string; fallbackModel: string; canaryPct: number; reason: string }): Promise<PlatformAiResult> {
+export async function setPlatformAiPolicyAction(input: { primaryModel: string; fallbackModel: string; canaryPct: number; reason: string; workload?: string | null; reasoning?: string | null; maxOutputTokens?: number | null }): Promise<PlatformAiResult> {
   const user = await requirePermission("platform:operate");
   const r = await setPlatformAiPolicy(user, input ?? {});
   if ("ok" in r) revalidatePath("/platform/saas");
   return r;
 }
 
-export async function rollbackPlatformAiPolicyAction(input: { reason: string }): Promise<PlatformAiResult> {
+export async function rollbackPlatformAiPolicyAction(input: { reason: string; workload?: string | null }): Promise<PlatformAiResult> {
   const user = await requirePermission("platform:operate");
   const r = await rollbackPlatformAiPolicy(user, input ?? {});
   if ("ok" in r) revalidatePath("/platform/saas");

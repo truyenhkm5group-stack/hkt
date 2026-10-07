@@ -96,7 +96,7 @@ const textOf = (content: AiBlock[]) =>
     .trim();
 
 /** Hội thoại nguồn: kênh khách thật (không THỬ, không hội thoại tạm của lượt phát lại), trong `days` ngày, có tin khách. */
-async function loadSources(days: number, now: Date, limit: number): Promise<SourceConversation[]> {
+export async function loadReplaySources(days: number, now: Date, limit: number): Promise<SourceConversation[]> {
   const db = await getDb();
   const c = schema.salesChatConversations;
   const m = schema.salesChatMessages;
@@ -145,7 +145,7 @@ export async function runReplay(runId: string, actor: { id: string | null }, dep
   const [run] = await db.select().from(r).where(eq(r.id, runId)).limit(1);
   if (!run || run.status !== "RUNNING") return run ? runRow(run) : null;
   try {
-    const sources = await loadSources(run.days, now(), run.targetPoints * 4);
+    const sources = await loadReplaySources(run.days, now(), run.targetPoints * 4);
     const points = pickReplayPoints(sources, run.targetPoints);
     const grounded = await groundedPrices();
     const judged: { conversationId: string; flags: ReplayFlag[]; aiReply: string | null }[] = [];

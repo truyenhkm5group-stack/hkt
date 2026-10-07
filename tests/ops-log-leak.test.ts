@@ -310,6 +310,7 @@ const KHONG_MA_HOA_DA_RA: Record<string, string> = {
   "sepay-reconcile": "mã tham chiếu ngân hàng + số tiền mâu thuẫn — không nội dung chuyển khoản",
   "sepay-schedule": "số phút của lịch",
   "ai-check": "chỉ meta: độ dài câu trả lời, id vận đơn thử, note kiểm thử tổng hợp",
+  "platform-ai-bench": "chỉ số tổng hợp của benchmark phát lại (số ca theo nhãn · tỷ lệ đúng · số FP/FN · token / USD / độ trễ trung bình) — không tên, SĐT, địa chỉ, nội dung tin, mã hội thoại",
   "platform-ai-model-probe": "chỉ tên model, phán quyết, mã HTTP, độ trễ, câu lỗi của Google đã che khoá + che dãy số dài; chính sách model (tên model, %, «ops» / «người vận hành» — KHÔNG in email); --report chỉ in số tổng hợp hai cohort (đếm · tỷ lệ · token · USD), không mã hội thoại / tổ chức / người — không dữ liệu khách",
 };
 
