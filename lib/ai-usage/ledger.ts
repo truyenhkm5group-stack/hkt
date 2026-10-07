@@ -25,6 +25,7 @@ import {
   type AiUsageFeature,
   type AiUsageModality,
   type AiUsageStatus,
+  PLATFORM_WORKLOADS,
   type PlatformWorkload,
 } from "@/lib/ai-usage/types";
 
@@ -54,11 +55,7 @@ export type AiUsageEntry = {
   conversationId?: string | null;
   /** `TEXT` · `VISION` · `IMAGE` (0222). */
   modality?: AiUsageModality | null;
-  /**
-   * QUAN SÁT: phần của `inputTokens` đọc từ bộ đệm · phần của `outputTokens` là suy nghĩ · thời gian gọi · loại việc. Nơi gọi
-   * đã điền; cột sổ đi ở migration RIÊNG (nhánh claude/platform-ai-ledger-telemetry — số 0231 / 0232 đang do hai sứ mệnh khác
-   * giữ chỗ). Tới lúc đó chỉ benchmark đọc được (qua `setAiUsageCaptureForBench`) — sổ thật KHÔNG ghi các ô này.
-   */
+  /** QUAN SÁT (0232): phần của `inputTokens` đọc từ bộ đệm · phần của `outputTokens` là suy nghĩ · thời gian gọi · loại việc. */
   cachedTokens?: number | null;
   thinkingTokens?: number | null;
   latencyMs?: number | null;
@@ -109,6 +106,10 @@ export async function recordAiUsage(e: AiUsageEntry): Promise<{ recorded: boolea
     eventKey,
     conversationId: e.conversationId ?? null,
     modality: e.modality ?? null,
+    cachedTokens: intOrNull(e.cachedTokens ?? null),
+    thinkingTokens: intOrNull(e.thinkingTokens ?? null),
+    latencyMs: intOrNull(e.latencyMs ?? null),
+    workload: e.workload && (PLATFORM_WORKLOADS as readonly string[]).includes(e.workload) ? e.workload : null,
     ...(e.at ? { at: e.at } : {}),
   });
   if (!eventKey) {

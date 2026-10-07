@@ -14,7 +14,7 @@ import { billingStanding, vnDate, type BillingStanding, type SubscriptionTerms }
  */
 
 const TTL_MS = 10_000;
-/** Điều khoản dùng thử của thuê bao (0232). Mọi ô `null` = không dùng thử / dòng cũ / đọc lỗi. */
+/** Điều khoản dùng thử của thuê bao (0233). Mọi ô `null` = không dùng thử / dòng cũ / đọc lỗi. */
 export type TrialTerms = { trialStartedAt: Date | null; trialEndsAt: Date | null; trialDays: number | null; paidThrough: string | null };
 const NO_TRIAL: TrialTerms = { trialStartedAt: null, trialEndsAt: null, trialDays: null, paidThrough: null };
 type Entry = { at: number; terms: SubscriptionTerms | null; addons: AddonUnits; trial: TrialTerms };
@@ -60,7 +60,7 @@ export async function readSubscriptionAddons(orgCode: string, opts: { fresh?: bo
   return (await readEntry(orgCode, !!opts.fresh)).addons;
 }
 
-/** Điều khoản dùng thử (0232) — cùng đệm 10 giây. Cổng AI (`lib/pricing/ai-gate.ts`) đọc mốc hết hạn ở đây. */
+/** Điều khoản dùng thử (0233) — cùng đệm 10 giây. Cổng AI (`lib/pricing/ai-gate.ts`) đọc mốc hết hạn ở đây. */
 export async function readTrialTerms(orgCode: string, opts: { fresh?: boolean } = {}): Promise<TrialTerms> {
   return (await readEntry(orgCode, !!opts.fresh)).trial;
 }

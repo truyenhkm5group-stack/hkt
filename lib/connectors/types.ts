@@ -35,18 +35,22 @@ export type ConnectorView = {
   label: string;
   vendor: string;
   kind: ConnectorKind;
-  tenancy: ConnectorTenancy;
   auth: ConnectorAuth;
   capabilities: string[];
   moduleKey: string;
   moduleLabel: string;
   moduleEnabled: boolean;
-  why: string;
-  configStore: ConnectorConfigStore;
-  configWhere: string;
   hasHealthCheck: boolean;
-  consumers: string[];
-  webhook: { path: string; tenantResolution: string } | null;
+  /*
+    Phần MÔ TẢ NỘI BỘ của sổ connector — chỉ workspace nhà nhận (`lib/saas/visibility.ts::customerConnectionsView` bỏ hẳn
+    các khoá này khỏi DTO của khách, không gửi rồi ẩn). Dòng «cấu hình ở chỗ khác» của khách chỉ còn `configWhere` rút gọn.
+  */
+  tenancy?: ConnectorTenancy;
+  why?: string;
+  configStore?: ConnectorConfigStore;
+  configWhere?: string;
+  consumers?: string[];
+  webhook?: { path: string; tenantResolution: string } | null;
   mode: ConnectorViewMode;
   homeReadiness: HomeReadiness | null;
   fields: Pick<SettingField, "key" | "label" | "type" | "secret" | "required" | "hint">[];

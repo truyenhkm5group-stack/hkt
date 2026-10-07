@@ -1,7 +1,9 @@
 import Link from "next/link";
 import { PageHeader } from "@/components/page-header";
 import { SectionCard } from "@/components/ui-bits";
-import { requirePermission } from "@/lib/auth/session";
+import { can, requirePermission } from "@/lib/auth/session";
+import { CUSTOMER_AI_INCIDENT_LABEL, customerFacing, customerSalesHealth } from "@/lib/saas/visibility";
+import { SALES_CHATBOT_MANAGE } from "@/lib/sales-chatbot/settings";
 import { formatDateTime, formatNumber, formatPercent, formatTimeAgo, formatVND } from "@/lib/format";
 import { loadAiSalesSlo, readSalesHealthSnapshot, readSalesHealthState, salesHealthDrilldown } from "@/lib/sales-chatbot/health";
 import { evaluateSalesHealth, STATUS_DOT, STATUS_LABEL, type HealthLevel } from "@/lib/sales-chatbot/health-shared";
@@ -12,19 +14,30 @@ export const dynamic = "force-dynamic";
 
 const LEVEL_DOT: Record<HealthLevel, string> = { OK: "🟢", WARNING: "🟡", CRITICAL: "🔴", UNKNOWN: "⚪" };
 const DRILL_LABEL = { PENDING: "Đang chờ", SEND_FAILED: "Gửi lỗi", AI_DOWN: "AI hỏng → chuyển người" } as const;
+const CUSTOMER_DRILL_LABEL = { ...DRILL_LABEL, AI_DOWN: "AI gặp sự cố → chuyển người" } as const;
 
 /**
  * COCKPIT AI BÁN HÀNG (chủ shop yêu cầu sau sự cố P0 06/10/2026): nhìn một lần biết AI đang sống hay chết. Đo TRỰC TIẾP lúc
  * mở trang (cùng hàm job `sales-health` dùng) — không đọc số cũ; dòng «lần kiểm tự động cuối» cho biết job giám sát còn chạy.
  * Giá trị đơn là DANH NGHĨA lúc chốt, không phải doanh thu theo ORDER_OUTCOME.
+ *
+ * Hai lớp che (chủ shop 07/10/2026, lib/saas/visibility.ts): (1) phần CHẨN ĐOÁN (từng kiểm, kênh, nhà cung cấp AI) cần
+ * `ai_sales:manage` — CS / người xem chỉ thấy trạng thái tổng, các ô kinh doanh và danh sách khách đang chờ; (2) workspace
+ * KHÁCH không bao giờ thấy phần nhà cung cấp AI (số lượt OK / lỗi, lớp lỗi, câu lỗi gốc) — chỉ «AI đang hoạt động / gặp sự
+ * cố, đội ngũ đã được báo».
  */
 export default async function SalesCockpitPage() {
-  await requirePermission("ai_sales:view");
+  const user = await requirePermission("ai_sales:view");
+  const customer = customerFacing(user.organization);
+  const detail = can(user, SALES_CHATBOT_MANAGE);
   const now = new Date();
   const slo = await loadAiSalesSlo();
   const [snap, stored, drill, missed] = await Promise.all([readSalesHealthSnapshot(now, slo), readSalesHealthState(), salesHealthDrilldown(now), findMissedConversations(new Date(now.getTime() - 86_400_000), now, now)]);
   const missedOrder: MissedClass[] = ["HUMAN_REVIEW", "AI_SAFE_RESUME", "STAFF_HANDLED", "HAS_ORDER"];
-  const health = evaluateSalesHealth(snap, slo);
+  const rawHealth = evaluateSalesHealth(snap, slo);
+  const health = customer ? customerSalesHealth(rawHealth) : rawHealth;
+  const aiRow = health.checks.find((c) => c.key === "PROVIDER");
+  const drillNote = (r: { kind: keyof typeof DRILL_LABEL; note: string | null }) => (r.kind === "AI_DOWN" && (customer || !detail) ? null : r.note);
   const sec = (v: number | null) => (v === null ? "—" : `${Math.round(v)} giây`);
   const tiles: { label: string; value: string; hint?: string }[] = [
     { label: "Tin khách cuối", value: formatTimeAgo(snap.lastCustomerMessageAt), hint: formatDateTime(snap.lastCustomerMessageAt) },
@@ -32,7 +45,7 @@ export default async function SalesCockpitPage() {
     { label: "Đơn AI tạo cuối", value: formatTimeAgo(snap.lastAiOrderAt), hint: formatDateTime(snap.lastAiOrderAt) },
     { label: "Đang chờ / đang thử lại", value: `${formatNumber(snap.queue.pending)} / ${formatNumber(snap.queue.retrying)}` },
     { label: "Tin chờ lâu nhất", value: snap.queue.oldestPendingAt ? formatTimeAgo(snap.queue.oldestPendingAt) : "không có", hint: `SLO: cảnh báo ${slo.backlogWarnMinutes} phút · nguy cấp ${slo.backlogCriticalMinutes} phút` },
-    { label: "Dead-letter 24 giờ", value: snap.queue.deadLetter === null ? "—" : formatNumber(snap.queue.deadLetter), hint: "tin bot không trả lời được: AI hỏng · gửi hỏng · hết lượt thử" },
+    ...(customer ? [] : [{ label: "Dead-letter 24 giờ", value: snap.queue.deadLetter === null ? "—" : formatNumber(snap.queue.deadLetter), hint: "tin bot không trả lời được: AI hỏng · gửi hỏng · hết lượt thử" }]),
     { label: "Lỗi 24 giờ", value: formatNumber(snap.errors24h), hint: `gửi lỗi ${snap.queue.failedSend24h} · hội thoại AI hỏng ${snap.queue.failedAiDown24h} · tin bị bỏ sót ${snap.queue.abandoned24h}` },
     { label: "Độ trễ P50 / P95", value: `${sec(snap.latency.p50Seconds)} / ${sec(snap.latency.p95Seconds)}`, hint: `${snap.latency.sample} lượt đo trong 24 giờ · SLO ${slo.replyTargetSeconds} giây` },
     { label: "Hội thoại AI hôm nay", value: formatNumber(snap.today.conversationsAi) },
@@ -45,7 +58,7 @@ export default async function SalesCockpitPage() {
       <PageHeader
         title={`${STATUS_DOT[health.status]} AI bán hàng: ${STATUS_LABEL[health.status]}`}
         description={health.headline}
-        hint={`Đo lúc mở trang. Lần kiểm tự động cuối: ${stored ? `${formatTimeAgo(stored.checkedAt)} (${STATUS_LABEL[stored.status]})` : "chưa có — job sales-health chưa chạy"}.`}
+        hint={customer ? "Đo lúc mở trang." : `Đo lúc mở trang. Lần kiểm tự động cuối: ${stored ? `${formatTimeAgo(stored.checkedAt)} (${STATUS_LABEL[stored.status]})` : "chưa có — job sales-health chưa chạy"}.`}
         actions={<Link href="/ai/sales-chatbot" className="text-sm text-primary underline">Cấu hình chatbot</Link>}
       />
 
@@ -58,6 +71,13 @@ export default async function SalesCockpitPage() {
         ))}
       </div>
 
+      {customer && aiRow ? (
+        <p className={`rounded-xl border px-3 py-2 text-sm font-medium ${aiRow.detail === CUSTOMER_AI_INCIDENT_LABEL ? "border-destructive/40 text-destructive" : ""}`} data-testid="cockpit-ai-state">
+          {LEVEL_DOT[aiRow.level]} {aiRow.detail}
+        </p>
+      ) : null}
+
+      {detail ? (
       <SectionCard title="Từng kiểm" description="Mỗi dòng sửa ở một chỗ khác — xem «cách sửa».">
         <table className="w-full text-sm">
           <tbody>
@@ -74,7 +94,9 @@ export default async function SalesCockpitPage() {
           </tbody>
         </table>
       </SectionCard>
+      ) : null}
 
+      {detail ? (
       <SectionCard title="Kênh">
         <table className="w-full text-sm">
           <tbody>
@@ -89,16 +111,19 @@ export default async function SalesCockpitPage() {
                 {snap.channels.messenger.lastError ? <span className="block text-xs text-destructive">Lỗi {formatTimeAgo(snap.channels.messenger.lastErrorAt)}: {snap.channels.messenger.lastError}</span> : null}
               </td>
             </tr>
-            <tr>
-              <td className="py-2 font-medium">Nhà cung cấp AI</td>
-              <td className="py-2">
-                Thành công cuối {formatTimeAgo(snap.provider.lastOkAt)} · lỗi cuối {formatTimeAgo(snap.provider.lastErrorAt)} · {slo.providerWindowMinutes} phút qua: {snap.provider.okInWindow} OK / {snap.provider.errorsInWindow} lỗi / {snap.provider.blockedInWindow} bị chặn
-                {snap.provider.lastErrorLabel ? <span className="block text-xs text-muted-foreground">Lớp lỗi gần nhất: {snap.provider.lastErrorLabel}</span> : null}
-              </td>
-            </tr>
+            {customer ? null : (
+              <tr>
+                <td className="py-2 font-medium">Nhà cung cấp AI</td>
+                <td className="py-2">
+                  Thành công cuối {formatTimeAgo(snap.provider.lastOkAt)} · lỗi cuối {formatTimeAgo(snap.provider.lastErrorAt)} · {slo.providerWindowMinutes} phút qua: {snap.provider.okInWindow} OK / {snap.provider.errorsInWindow} lỗi / {snap.provider.blockedInWindow} bị chặn
+                  {snap.provider.lastErrorLabel ? <span className="block text-xs text-muted-foreground">Lớp lỗi gần nhất: {snap.provider.lastErrorLabel}</span> : null}
+                </td>
+              </tr>
+            )}
           </tbody>
         </table>
       </SectionCard>
+      ) : null}
 
       <SectionCard
         title={`Hội thoại khách nhắn mà bot chưa trả lời (24 giờ) — ${missed.length}`}
@@ -156,10 +181,11 @@ export default async function SalesCockpitPage() {
               {drill.map((r, i) => (
                 <tr key={`${r.threadId}-${r.at}-${i}`} className="border-t border-hairline align-top">
                   <td className="whitespace-nowrap py-1.5 pr-2">{formatDateTime(r.at)}</td>
-                  <td className="whitespace-nowrap py-1.5 pr-2">{DRILL_LABEL[r.kind]}</td>
+                  <td className="whitespace-nowrap py-1.5 pr-2">{(customer ? CUSTOMER_DRILL_LABEL : DRILL_LABEL)[r.kind]}</td>
                   <td className="py-1.5 pr-2">{r.conversationId ? <Link href={`/ai/sales-chatbot/conversations/${r.conversationId}`} className="text-primary underline">{r.customerName ?? "Mở hội thoại"}</Link> : (r.customerName ?? "—")}</td>
                   <td className="max-w-[28ch] truncate py-1.5 pr-2" title={r.text}>{r.text}</td>
-                  <td className="max-w-[32ch] truncate py-1.5 text-xs text-muted-foreground" title={r.note ?? ""}>{r.note ?? "—"}</td>
+                  {/* Ghi chú của tin AI hỏng có thể là câu lỗi gốc của nhà cung cấp — khách không thấy; người xem không cấu hình bot cũng không. */}
+                  <td className="max-w-[32ch] truncate py-1.5 text-xs text-muted-foreground" title={drillNote(r) ?? ""}>{drillNote(r) ?? "—"}</td>
                 </tr>
               ))}
             </tbody>

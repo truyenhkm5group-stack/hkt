@@ -5095,10 +5095,20 @@ export const platformAiUsage = pgTable(
     conversationId: text("conversation_id"),
     /** `TEXT` · `VISION` (đọc ảnh khách gửi) · `IMAGE` (vẽ ảnh) — 0222. `NULL` = nơi gọi chưa khai. */
     modality: text("modality"),
+    /**
+     * QUAN SÁT (0232) — KHÔNG đổi nghĩa `input_tokens` / `output_tokens` / `cost_usd`. `thinking_tokens` ⊂ `output_tokens` (phần
+     * suy nghĩ); `cached_tokens` ⊂ `input_tokens` (đọc từ bộ đệm); `latency_ms` = thời gian lời gọi model; `workload` = loại việc
+     * của Platform AI Policy. `NULL` = chưa đo (dòng cũ / nhà cung cấp không tách), không phải 0.
+     */
+    cachedTokens: integer("cached_tokens"),
+    thinkingTokens: integer("thinking_tokens"),
+    latencyMs: integer("latency_ms"),
+    workload: text("workload"),
   },
   (t) => [
     uniqueIndex("platform_ai_usage_org_event_key").on(t.orgCode, t.eventKey).where(sql`${t.eventKey} IS NOT NULL`),
     check("platform_ai_usage_modality_check", sql`${t.modality} IS NULL OR ${t.modality} IN ('TEXT','VISION','IMAGE')`),
+    check("platform_ai_usage_workload_check", sql`${t.workload} IS NULL OR ${t.workload} IN ('sales_chatbot','order_sync','quick_extract','vision')`),
     check("platform_ai_usage_event_key_check", sql`${t.eventKey} IS NULL OR length(${t.eventKey}) BETWEEN 1 AND 200`),
     index("platform_ai_usage_org_at_idx").on(t.orgCode, t.at),
     // 0231: sổ AI theo HỘI THOẠI cho dấu vết từng tin khách ở hộp thư (lib/ai-usage/conversation-evidence.ts).
@@ -5177,9 +5187,9 @@ export const platformSubscriptions = pgTable(
     /** Thông tin xuất hoá đơn VAT khách khai (0192, `lib/billing/addons.ts::InvoiceInfo`). `NULL` = chưa khai. */
     invoiceInfo: jsonb("invoice_info").$type<Record<string, unknown>>(),
     /**
-     * 0232 · ĐIỀU KHOẢN DÙNG THỬ của thuê bao (lib/billing/service.ts::initWorkspaceBilling), chụp từ phiên bản giá lúc cấp phát
+     * 0233 · ĐIỀU KHOẢN DÙNG THỬ của thuê bao (lib/billing/service.ts::initWorkspaceBilling), chụp từ phiên bản giá lúc cấp phát
      * (`platform_plan_prices.trial_days`). `trial_ends_at` là MỐC cổng AI so trực tiếp (lib/pricing/ai-entitlement.ts). NULL = không
-     * dùng thử / dòng cũ — KHÔNG backfill: tổ chức dùng thử từ trước 0232 đọc `paid_through` như cũ.
+     * dùng thử / dòng cũ — KHÔNG backfill: tổ chức dùng thử từ trước 0233 đọc `paid_through` như cũ.
      */
     trialStartedAt: ts("trial_started_at"),
     trialEndsAt: ts("trial_ends_at"),

@@ -43,7 +43,7 @@ export function LessonsPanel({ state }: { state: LessonsState }) {
           <Button size="sm" variant="outline" disabled={pending} onClick={() => act(() => setLessonsEnabledAction(!state.enabled))}>
             {state.enabled ? "Tắt tự học" : "Bật tự học"}
           </Button>
-          <Button size="sm" disabled={pending || running || !state.enabled} title="Tốn token trên khoá AI của shop" onClick={() => act(() => learnLessonsNowAction())}>
+          <Button size="sm" disabled={pending || running || !state.enabled} title="Mỗi lượt học dùng AI của shop" onClick={() => act(() => learnLessonsNowAction())}>
             {pending || running ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : null}
             Học ngay
           </Button>

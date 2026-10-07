@@ -1,4 +1,4 @@
--- 0232 · DÙNG THỬ CÓ MỐC HẾT HẠN TƯỜNG MINH + GHIM GIÁ LÚC CẤP PHÁT (sứ mệnh saas-l5-billing-trial · docs/saas/PRICING_V1.md §II.7).
+-- 0233 · DÙNG THỬ CÓ MỐC HẾT HẠN TƯỜNG MINH + GHIM GIÁ LÚC CẤP PHÁT (sứ mệnh saas-l5-billing-trial · docs/saas/PRICING_V1.md §II.7).
 --
 --  · Kiểm toán 07/10/2026: bot AI không dừng khi hết dùng thử — số ngày dùng thử là hằng toàn cục (`TRIAL_DAYS = 7`) và hạn dùng
 --    thử chỉ tồn tại gián tiếp qua `paid_through` (mà chỉ được ghi khi nền tảng đã khai tài khoản nhận tiền). Khách người vận hành

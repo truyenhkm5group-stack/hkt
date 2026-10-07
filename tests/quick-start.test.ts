@@ -229,7 +229,7 @@ async function testQuickSignupFlow() {
   assert.equal(admin?.role, "ADMIN");
   assert.deepEqual((await findIdentity("PHONE", "84912345601")).map((h) => h.orgCode), [QS_A]);
   assert.deepEqual((await findIdentity("EMAIL", "chu@qs-a.vn")).map((h) => h.orgCode), [QS_A]);
-  // L5 (0232): thuê bao + mốc dùng thử vẫn được CHỤP (cổng AI cần mốc hết hạn), nhưng KHÔNG bật thu phí ⇒ không bao giờ khoá chỉ xem.
+  // L5 (0233): thuê bao + mốc dùng thử vẫn được CHỤP (cổng AI cần mốc hết hạn), nhưng KHÔNG bật thu phí ⇒ không bao giờ khoá chỉ xem.
   const termsA = await readSubscriptionTerms(QS_A, { fresh: true });
   assert.equal(termsA?.billingEnabled ?? false, false, "chưa khai tài khoản nhận tiền ⇒ không bật thu phí (không khoá)");
   assert.equal(billingStanding(termsA, vnDate(new Date())).kind, "NOT_BILLED", "chưa khai tài khoản nhận tiền ⇒ «Chưa thu phí», không khoá chỉ xem");

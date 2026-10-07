@@ -17,6 +17,8 @@ import { HOME_PLAN_KEY, listPlans } from "@/lib/entitlements/check";
 import { formatDateTime, formatNumber } from "@/lib/format";
 import { platformOperatorDenial } from "@/lib/platform-ui/module-toggle";
 import { loadOperatorOrgAi } from "@/lib/ai-usage/view";
+import { loadOperatorOrgAiConfig } from "@/lib/saas/operator-ai";
+import { OrgAiConfigPanel } from "@/components/platform/org-ai-config";
 import { PILOT_STAGE_LABEL } from "@/lib/constants/pilot";
 import { loadOrgSupport } from "@/lib/platform/support";
 import { loadOrgDiagnostics, type Measured } from "@/lib/queries/platform-org-diagnostics";
@@ -86,6 +88,9 @@ export default async function PlatformOrgPage({ params }: { params: Promise<{ co
   const d = result.value;
   const o = d.organization;
   const ai = await loadOperatorOrgAi(user, o.code);
+  // Cấu hình AI của workspace KHÁCH (07/10/2026): khách không còn ô nguồn AI / model / khoá AI — người vận hành sửa ở đây.
+  // Workspace nhà tự sửa ở trang chatbot của chính nó.
+  const aiConfig = o.isHome ? null : await loadOperatorOrgAiConfig(user, o.code);
   const billing = o.isHome ? null : await loadOrgBilling(user, o.code);
   // Thương hiệu (0215) — đọc từ sổ tổ chức; `null` = không theo dõi.
   const brand = o.isHome ? null : ((await findOrganization(o.code))?.brand ?? null);
@@ -203,6 +208,18 @@ export default async function PlatformOrgPage({ params }: { params: Promise<{ co
               <OrgAiControlForm orgCode={o.code} orgName={o.name} disabled={ai.value.control.disabled} limits={ai.value.control.limits} cacheSeconds={ai.value.cacheSeconds} />
             </div>
           </div>
+        </SectionCard>
+      ) : null}
+
+      {aiConfig ? (
+        <SectionCard
+          id="ai-config"
+          title="AI của workspace"
+          description={aiConfig.ok ? "Nguồn AI · model · dự phòng của chatbot bán hàng và khoá AI của workspace — khách không thấy, không sửa được các ô này." : aiConfig.error}
+          hint="Đọc / ghi trong CSDL của tổ chức này bằng đúng hàm cấu hình của nó. Khoá AI chỉ nhập, không hiện lại. Mọi lượt ghi cần lý do: nhật ký của tổ chức (nhãn vận hành nền tảng) + nhật ký nền tảng."
+          padded={false}
+        >
+          {aiConfig.ok ? <OrgAiConfigPanel orgCode={o.code} botEnabled={aiConfig.value.botEnabled} engine={aiConfig.value.engine} connections={aiConfig.value.connections} health={aiConfig.value.health} keys={aiConfig.value.keys} /> : null}
         </SectionCard>
       ) : null}
 

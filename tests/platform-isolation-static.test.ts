@@ -741,7 +741,7 @@ const LOI_VAN_HANH: Record<string, string> = {
   "lib/ai-usage/control.ts::setPlatformAiEnabled": "Công tắc AI toàn nền tảng.",
   "lib/ai-usage/control.ts::setOrgAiControl": "Công tắc AI + ghi đè hạn mức AI của một tổ chức.",
   // Platform AI Model Control (06/10/2026) — model của AI DÙNG CHUNG cho mọi tổ chức khách; sổ AI nguồn PLATFORM toàn nền tảng.
-  "lib/ai-usage/platform-ai-admin.ts::loadPlatformAiControl": "Khung Platform AI Model Control: sổ AI nguồn PLATFORM của MỌI tổ chức (30 ngày theo model) + chính sách + lượt kiểm khả dụng + nhật ký.",
+  "lib/ai-usage/platform-ai-admin.ts::loadPlatformAiControl": "Khung Platform AI Model Control: sổ AI nguồn PLATFORM của MỌI tổ chức (30 ngày theo model / loại việc) + mở CSDL từng tổ chức có lượt AI dùng chung để ĐẾM đơn AI gắn hội thoại + chính sách + lượt kiểm khả dụng + nhật ký.",
   "lib/ai-usage/platform-ai-admin.ts::probePlatformAiModelAsOperator": "Kiểm khả dụng một model bằng khoá nền tảng — lưu kết quả, nhật ký PLATFORM_AI_MODEL_PROBE.",
   "lib/ai-usage/platform-ai-admin.ts::setPlatformAiPolicy": "Chạy thử / áp dụng model AI dùng chung cho cả nền tảng — bắt buộc lý do + lượt kiểm AVAILABLE trong 24 giờ, nhật ký PLATFORM_AI_POLICY_SET.",
   "lib/ai-usage/platform-ai-ab.ts::loadPlatformModelAb": "Bảng A/B model AI dùng chung: sổ AI nguồn PLATFORM của MỌI tổ chức + mở CSDL từng tổ chức có hội thoại cohort để ĐẾM (SĐT · địa chỉ · chốt · handoff · công cụ) — không trả tên, SĐT, nội dung tin.",
@@ -793,6 +793,10 @@ const LOI_VAN_HANH: Record<string, string> = {
   "lib/saas/console.ts::addCostEntryAsOperator": "Ghi khoản chi phí ngoài AI có căn cứ phân bổ.",
   "lib/saas/console.ts::voidCostEntryAsOperator": "Huỷ khoản chi phí (giữ dòng, lý do bắt buộc).",
   "lib/saas/console.ts::finalizeStatementAsOperator": "Chốt bảng kê kỳ đã qua của một tài khoản (bất biến).",
+  // «AI của workspace» (07/10/2026, lib/saas/operator-ai.ts) — khách không còn ô cấu hình AI; người vận hành sửa trong CSDL tổ chức đích.
+  "lib/saas/operator-ai.ts::loadOperatorOrgAiConfig": "Đọc động cơ AI của chatbot + trạng thái khoá AI (không gợi ý, không bản mã) trong CSDL của MỘT tổ chức khách.",
+  "lib/saas/operator-ai.ts::saveOrgChatbotEngine": "Đổi nguồn AI / model / dự phòng của chatbot một tổ chức khách — bắt buộc lý do, nhật ký tổ chức + nền tảng AI_ORG_CONTROL_SET.",
+  "lib/saas/operator-ai.ts::operateOrgAiConnection": "Lưu / Kiểm tra / Bật / Tắt khoá AI của một tổ chức khách qua lõi sổ kết nối — bắt buộc lý do, nhật ký tổ chức + nền tảng.",
 };
 
 const DOC_PHIEN = new Set(["requireUser", "requirePermission", "getCurrentUser", "resolveCurrentUser", "getSession"]);

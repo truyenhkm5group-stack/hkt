@@ -6,6 +6,7 @@ import { formatDate, formatNumber, formatPercent, formatVND } from "@/lib/format
 import { loadAiSalesPerformance, type AiSalesPerformance } from "@/lib/sales-chatbot/performance";
 import { AI_SALES_METRICS, AI_SALES_MIN_SAMPLE, type FunnelRow } from "@/lib/sales-chatbot/performance-shared";
 import { SALES_CHATBOT_MANAGE } from "@/lib/sales-chatbot/settings";
+import { aiPerformanceWithMoney } from "@/lib/saas/visibility-loaders";
 import { HumanCostForm } from "./human-cost-form";
 import { ExperimentBlock } from "./experiment-block";
 import { loadExperimentReport } from "@/lib/sales-chatbot/experiment-report";
@@ -64,7 +65,8 @@ export default async function AiSalesPerformancePage({ searchParams }: { searchP
   const pages = await inboxPages();
   const pageId = pages.some((p) => p.id === sp.pg) ? (sp.pg as string) : null;
   const pgQ = pageId ? `&pg=${encodeURIComponent(pageId)}` : "";
-  const r: AiSalesPerformance = await loadAiSalesPerformance(user.organization?.code ?? "", { days, withMoney: manage, pageId });
+  // Tiền AI / token là số NỘI BỘ: workspace khách không tính luôn (`cost = null`) — giữ chỉ số kinh doanh (lib/saas/visibility.ts).
+  const r: AiSalesPerformance = await loadAiSalesPerformance(user.organization?.code ?? "", { days, withMoney: aiPerformanceWithMoney(user, manage), pageId });
   const experiment = await loadExperimentReport();
   const basket = await loadBasketStats({ days, pageId });
   const attr = await loadOrderAttribution({ days, pageId });
