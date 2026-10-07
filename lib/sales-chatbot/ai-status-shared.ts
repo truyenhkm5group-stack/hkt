@@ -14,7 +14,7 @@ import { AI_HOLD_LABEL, cooldownClock, HUMAN_COOLDOWN_MINUTES, type AiHoldView }
  * Thứ tự mã = thứ tự đường xử lý đi qua (cổng page → chế độ vận hành → AI theo page → module → công tắc bot → công tắc người
  * vận hành → hạn mức → nguồn AI → chứng cứ lượt gọi gần nhất), nên lý do ĐẦU là lý do khách đang gặp.
  */
-export const AI_BLOCK_CODES = ["PAGE_OFF", "PAGE_SHADOW", "ORG_OBSERVE", "PAGE_AI_OFF", "ORG_COPILOT", "MODULE_OFF", "BOT_DISABLED", "KILL_SWITCH", "QUOTA", "NO_AI_SOURCE", "AI_PROVIDER_ERROR"] as const;
+export const AI_BLOCK_CODES = ["PAGE_OFF", "PAGE_SHADOW", "ORG_OBSERVE", "PAGE_AI_OFF", "ORG_COPILOT", "MODULE_OFF", "BOT_DISABLED", "KILL_SWITCH", "WORKSPACE_SUSPENDED", "TRIAL_EXPIRED", "TRIAL_QUOTA_EXHAUSTED", "QUOTA", "NO_AI_SOURCE", "AI_PROVIDER_ERROR"] as const;
 export type AiBlockCode = (typeof AI_BLOCK_CODES)[number];
 
 export type AiBlock = { code: AiBlockCode; reason: string; fixHref: string | null; fixLabel: string | null };
@@ -29,6 +29,10 @@ export const AI_BLOCK_FIX: Record<AiBlockCode, { href: string; label: string } |
   MODULE_OFF: { href: "/settings/modules", label: "Bật module AI bán hàng" },
   BOT_DISABLED: { href: "/ai/sales-chatbot#bot-config", label: "Bật bot trong Cấu hình" },
   KILL_SWITCH: null,
+  // Cổng gói (L5 · lib/pricing/ai-entitlement.ts): dùng thử hết hạn / hết lượt ⇒ chọn gói; đình chỉ là việc của người vận hành.
+  WORKSPACE_SUSPENDED: null,
+  TRIAL_EXPIRED: { href: "/settings/plan", label: "Chọn gói" },
+  TRIAL_QUOTA_EXHAUSTED: { href: "/settings/plan", label: "Nâng gói" },
   QUOTA: { href: "/ai/sales-chatbot#bot-config", label: "Khoá AI / gói dịch vụ" },
   NO_AI_SOURCE: { href: "/ai/sales-chatbot#bot-config", label: "Cấu hình nguồn AI" },
   AI_PROVIDER_ERROR: { href: "/ai/sales-chatbot#bot-config", label: "Kiểm tra khoá AI" },

@@ -544,6 +544,7 @@ import { testPricingBilling } from "./pricing-billing.test";
 import { testSaasPlatform } from "./saas-platform.test";
 import { testPricingV1 } from "./pricing-v1.test";
 import { testAiCustomerSend } from "./ai-customer-send.test";
+import { testSaasL5BillingTrial } from "./saas-l5-billing-trial.test";
 import { testSaasInternalPlan } from "./saas-internal-plan.test";
 import { testSaasHideInternal } from "./saas-hide-internal.test";
 import { testPlatformSaas } from "./platform-saas.test";
@@ -2888,6 +2889,7 @@ async function main() {
   await testSaasPlatform();
   await testPricingV1();
   await testAiCustomerSend();
+  await testSaasL5BillingTrial();
   // Phase 14: workspace nhà đi ĐÚNG đường thương mại của khách (gói gán → ghi đè → giữ từ trước) — bài so trước/sau từng
   // quyết định (tính năng · hạn mức · hạn mức tháng · gói · trang gói) + năm đột biến dữ liệu; khôi phục sổ gói trong finally.
   await testSaasInternalPlan();

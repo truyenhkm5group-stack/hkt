@@ -1109,7 +1109,8 @@ export async function processFanpageThread(pageId: string, threadId: string, dep
       if (pr.kind === "SENT") {
         out.replies += 1;
         // Đồng hồ khách AI (0228): chỉ câu do MODEL sinh, chỉ sau khi gửi thành công; lỗi ghi sổ không chặn việc gửi.
-        if (replies.some((r) => (turn.aiTexts ?? []).includes(r.text))) await noteAiCustomerReply(conv.id, now());
+        // Bình luận: khách AI là NGƯỜI bình luận, không phải mã hội thoại của cả bài (L5 · ai-customer-identity.ts).
+        if (replies.some((r) => (turn.aiTexts ?? []).includes(r.text))) await noteAiCustomerReply(conv.id, now(), { threadKind: "COMMENT", commenterId: lastComment.fromId });
         if (pr.inboxId) await markWaitingForCustomer(conv.id, now(), pr.inboxId);
       }
       // Gửi hỏng ⇒ DEAD (không tự gửi lại — lượt gửi có thể đã tới nơi); đã gửi / đã có ⇒ như cũ.
@@ -1180,7 +1181,8 @@ export async function processFanpageThread(pageId: string, threadId: string, dep
     // Gửi hỏng ⇒ DEAD-LETTER (khách chưa nhận đủ câu trả lời — việc của người). KHÔNG tự gửi lại: lời gọi gửi có thể đã tới nơi.
     if (sendError) await deadLetter(db, ids, claim, `${DEAD_SEND_NOTE_PREFIX}${sendError}`, sendError, now());
     else await finish("DONE", yielded);
-    if (aiSent > 0) await noteAiCustomerReply(conv.id, now());
+    // Lượt có bình luận mà thiếu người bình luận (đi đường tin nhắn) ⇒ vẫn là hội thoại bình luận: không suy PSID từ mã hội thoại.
+    if (aiSent > 0) await noteAiCustomerReply(conv.id, now(), claimed.some((r) => r.kind === "COMMENT") ? { threadKind: "COMMENT", commenterId: null } : undefined);
     if (!sendError && out.replies > 0) await markWaitingForCustomer(conv.id, now());
     if (yielded) out.skipped = yielded;
     out.processed += ids.length;

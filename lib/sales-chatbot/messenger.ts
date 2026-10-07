@@ -579,7 +579,7 @@ export async function processMessengerThread(pageId: string, psid: string, deps:
       .update(t)
       .set({ claimId: claim, claimedAt: now() })
       .where(and(eq(t.pageId, pageId), eq(t.threadId, psid), eq(t.status, "PENDING"), or(isNull(t.claimId), lt(t.claimedAt, staleBefore)), dueForClaim(now())))
-      .returning({ id: t.id, text: t.text, createdAt: t.createdAt, imageUrls: t.imageUrls, kind: t.kind, postId: t.postId, messageId: t.messageId });
+      .returning({ id: t.id, text: t.text, createdAt: t.createdAt, imageUrls: t.imageUrls, kind: t.kind, postId: t.postId, messageId: t.messageId, fromId: t.fromId });
     if (!claimed.length) break;
     // KHÔNG TRẢ LỜI TRÙNG: chỉ CHÍNH các tin của lượt quá hạn đã kịp được trả lời mới chốt; tin mới cùng lượt vẫn xử lý.
     const repliedIds = staleRows.length ? await alreadyRepliedRows(db, pageId, psid, staleRows, claimed) : [];
@@ -729,7 +729,8 @@ export async function processMessengerThread(pageId: string, psid: string, deps:
       if (pr && !pr.ok) await noteMessengerGraphFailure(pr, pageId);
       if (pr?.ok) {
         out.replies += 1;
-        if (replies.some((r) => (turn.aiTexts ?? []).includes(r.text))) await noteAiCustomerReply(conv.id, now());
+        // Bình luận: khách AI là NGƯỜI bình luận (L5 · ai-customer-identity.ts).
+        if (replies.some((r) => (turn.aiTexts ?? []).includes(r.text))) await noteAiCustomerReply(conv.id, now(), { threadKind: "COMMENT", commenterId: commentRow.fromId });
         if (pr.id) await db.insert(t).values({ pageId, threadId: psid, messageId: pr.id, text: replyText.slice(0, TEXT_MAX), status: "DONE", processedAt: now(), note: "BOT_SENT" }).onConflictDoNothing({ target: t.messageId });
       }
       if (pr && !pr.ok) await deadLetter(db, ids, claim, `${DEAD_SEND_NOTE_PREFIX}${pr.error}`, pr.error, now());
@@ -787,7 +788,7 @@ export async function processMessengerThread(pageId: string, psid: string, deps:
     // Gửi hỏng ⇒ DEAD-LETTER, KHÔNG tự gửi lại (lời gọi gửi có thể đã tới nơi).
     if (sendError) await deadLetter(db, ids, claim, `${DEAD_SEND_NOTE_PREFIX}${sendError}`, sendError, now());
     else await finish("DONE", yielded);
-    if (aiSent > 0) await noteAiCustomerReply(conv.id, now());
+    if (aiSent > 0) await noteAiCustomerReply(conv.id, now(), claimed.some((r) => r.kind === "COMMENT") ? { threadKind: "COMMENT", commenterId: null } : undefined);
     if (!sendError && out.replies > 0) await markWaitingForCustomer(conv.id, now());
     if (yielded) out.skipped = yielded;
     out.processed += ids.length;

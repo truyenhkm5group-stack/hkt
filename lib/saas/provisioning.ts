@@ -12,6 +12,7 @@
 import { randomBytes } from "node:crypto";
 import { and, eq, isNull } from "drizzle-orm";
 import { getPlatformDb, schema } from "@/db";
+import { initWorkspaceBilling } from "@/lib/billing/service";
 import { platformAudit, type PlatformActor } from "@/lib/platform/audit";
 import { getEnabledModules, invalidateCapabilities } from "@/lib/platform/capabilities";
 import { setOrganizationModule } from "@/lib/platform/module-config";
@@ -229,7 +230,14 @@ async function runCreateCustomer(req: CreateCustomerRequest, ctx: Ctx, step: Ste
     await insertSubscription({ accountId: account.id, orgCode: res.organization.code, productKey: p.key, planKey: null }, { actor: ctx.actor, source: ctx.source, reason: `Job cấp phát ${ctx.idempotencyKey}` });
   }
   step("SUBSCRIPTIONS", "DONE", products.map((p) => p.key).join(", "));
-  step("BILLING", "SKIPPED", "điều khoản thu phí (hạn trả, ân hạn) đặt ở trang workspace — 0187; chargeback nội bộ không cần");
+  // 4. Thu phí: ghim phiên bản giá hiện hành + thuê bao (kỳ tháng lịch VN) + dùng thử theo phiên bản — CÙNG dịch vụ với /start
+  //    (`initWorkspaceBilling`). Khách người vận hành tạo KHÔNG bật khoá chỉ xem: hạn trả vẫn do người vận hành đặt (0187).
+  try {
+    const billing = await initWorkspaceBilling(res.organization.code, { selfService: false, actor: ctx.actor, reason: `Job cấp phát ${ctx.idempotencyKey}` });
+    step("BILLING", billing.status, billing.detail);
+  } catch (e) {
+    fail(step, "BILLING", `Không khởi tạo được thu phí: ${e instanceof Error ? e.message : String(e)} — chạy lại job (bước idempotent).`);
+  }
   return { accountId: account.id, orgCode: res.organization.code };
 }
 

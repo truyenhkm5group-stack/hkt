@@ -200,7 +200,7 @@ export async function readAiCustomerMeterLiveAt(): Promise<Date | null> {
 
 // ─────────────────────────── Ghi ───────────────────────────
 
-export type PinSource = "INVOICE_PAID" | "OPERATOR" | "TEST";
+export type PinSource = "INVOICE_PAID" | "OPERATOR" | "TEST" | "PROVISIONING";
 type Tx = Parameters<Parameters<Awaited<ReturnType<typeof getPlatformDb>>["transaction"]>[0]>[0];
 
 /**
