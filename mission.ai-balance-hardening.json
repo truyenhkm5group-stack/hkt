@@ -29,20 +29,20 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-07T22:50:41.455Z",
-  "updated_at": "2026-10-07T22:51:12.012Z",
-  "last_heartbeat": "2026-10-07T22:50:58.178Z",
+  "updated_at": "2026-10-07T23:03:23.706Z",
+  "last_heartbeat": "2026-10-07T23:03:23.706Z",
   "definition_of_done": [],
   "handoff": {
     "branch": "fix/ai-balance-hardening",
-    "sha": "5c2f791641a24434db19e8f98285061b1140517d",
-    "at": "2026-10-07T22:50:58.178Z",
+    "sha": "51848fd3cf3d03095c817def480fe369cbc9643e",
+    "at": "2026-10-07T23:03:23.706Z",
     "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
     "title": "Số dư AI chặt thêm: sao kê không nạp hộ, tài khoản nhận đọc hỏng không khoá tiền, báo hết số dư không nuốt nhau",
-    "summary": "Review #644: N1 (sao kê không đè mô tả dòng SePay) + LOW (tài khoản nhận đọc hỏng, đối chiếu thu phí chỉ ở nhà + trần, chống trùng «hết» theo mức chặn, gợi ý người bình luận bỏ dòng bot).",
+    "summary": "Vòng 2: N1 chiều ngược — chỉ tự cộng dòng do SePay tạo (source WEBHOOK/API); dòng sao kê/gõ tay SePay điền mã sau ⇒ «chưa xác nhận», người vận hành cộng tay.",
     "tests": [
       "typecheck + eslint: sạch",
-      "bank-ledger · ai-balance · ai-balance-usage · ai-balance-hardening: đạt",
-      "kiểm đột biến 6/6 bị bắt, đối chứng đạt"
+      "bank-ledger · ai-balance · ai-balance-usage · ai-balance-hardening · platform-billing: đạt",
+      "kiểm đột biến 7/7 bị bắt, đối chứng đạt"
     ]
   }
 }
