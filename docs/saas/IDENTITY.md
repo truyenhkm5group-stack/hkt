@@ -24,9 +24,9 @@ ngẫu nhiên (`db/schema.ts:6` — `crypto.randomUUID()`). Không có chuyển 
 | Thu hồi | `lib/auth/session-revoke.ts:37-92` | một đường ghi, `GREATEST` chỉ tiến, theo từng dòng `users` của MỘT workspace |
 | Chỉ mục danh tính | `db/schema.ts:5129-5145` (`platform_identities`, 0193) · `lib/auth/identities.ts:19,34` | `(kind, value, org_code) ⇒ user_id`, kind ∈ EMAIL · PHONE · GOOGLE · FACEBOOK. CHỈ là chỉ mục; bản ở CSDL workspace bị xoá mỗi lần mở (`db/migrate.ts:85-86`) |
 | Đăng nhập trang chung | `lib/actions/auth.ts:48-63` · `lib/auth/login.ts:132` `loginCandidates`, `:109` `credentialsMatch`, `:85` `verifyLogin` | không mã workspace ⇒ ứng viên = chỉ mục + nhà ⇒ thử mật khẩu ở TỪNG workspace (trong `withOrganization`) ⇒ khớp 1 vào thẳng, khớp nhiều hỏi chọn, 0 ⇒ câu sai mật khẩu chung |
-| Ghi chỉ mục | `login.ts:76-77, 156` · `lib/onboarding/quick.ts:103-105` | ghi khi đăng nhập thành công / đăng ký nhanh; ghi hỏng không làm hỏng đăng nhập |
-| Google / Facebook | `lib/auth/social.ts:18-20` · `app/login/oauth/[provider]/callback/route.ts:50-60` · `lib/actions/oauth.ts:18-28` | tra GOOGLE/FACEBOOK theo `sub` của nhà cung cấp; không có ⇒ tra **EMAIL** đã xác minh của hồ sơ; một workspace vào thẳng, nhiều ⇒ cookie ký `erp_pick` |
-| Nhận lời mời | `lib/users/invites.ts:236, 313` | tạo dòng `users` mới trong workspace đích rồi `verifyLogin` |
+| Ghi chỉ mục | `lib/auth/identities.ts::indexAccountIdentities` (một đường) ← cấp phát quản trị (`lib/platform/provision.ts`) · tạo hộ + nhận lời mời (`lib/users/create-user.ts::indexNewUserAccount`) · đặt mật khẩu qua liên kết (`lib/users/password-reset.ts`) · quản trị đặt mật khẩu tay (`lib/actions/users.ts`) · đăng nhập (`login.ts::openSession`) · đăng ký nhanh | từ 08/10/2026 (§1b) ghi NGAY khi tài khoản dùng được bằng mật khẩu, `last_used_at = NULL`; đăng nhập ghi mốc dùng. Ghi hỏng không làm hỏng lượt gọi |
+| Google / Facebook | `lib/auth/social.ts:18-20` · `app/login/oauth/[provider]/callback/route.ts:50-60` · `lib/actions/oauth.ts:18-28` | tra GOOGLE/FACEBOOK theo `sub` của nhà cung cấp; không có ⇒ tra **EMAIL** đã xác minh của hồ sơ — CHỈ dòng đã dùng để đăng nhập (`usedOnly`, §1b); một workspace vào thẳng, nhiều ⇒ cookie ký `erp_pick` |
+| Nhận lời mời | `lib/users/invites.ts:236, 313` | tạo dòng `users` mới trong workspace đích, ghi chỉ mục, rồi `verifyLogin` |
 
 **Bất biến SECURITY §3 đứng được là nhờ `sub` cục bộ:** token `org = B`, `sub` = id người của A ⇒ tra trong CSDL B ⇒ id
 ngẫu nhiên đó không tồn tại ⇒ `NOT_FOUND`. Có bài kiểm: `tests/tenant-attack.test.ts` (`:1166-1170` "không phiên nào mang org = B được ký cho tài khoản
@@ -42,6 +42,42 @@ của A"; đòn 9 phiên giả `:1419`), `tests/platform-isolation.test.ts`, `te
    KHÔNG được thừa kế phép khớp này (xem B6).
 3. Đăng nhập trang chung khớp mật khẩu ở nhiều workspace (`actions/auth.ts:52`) là chứng cứ mạnh nhất hiện có rằng hai
    tài khoản thuộc cùng một người — và hệ thống đang không lưu lại điều đó.
+
+## 1b. Bản vá P0 08/10/2026 — khách do admin tạo đăng nhập bằng email + mật khẩu
+
+**Lỗi đo thật** (`FINISH_LINE_2026-10-08.md` blocker 1): chỉ mục chỉ được ghi SAU lần đăng nhập thành công đầu tiên, mà lần
+đầu ấy lại cần chỉ mục để trang chung biết thử tổ chức nào ⇒ quản trị khách do job cấp phát tạo, kích hoạt xong, vẫn nhận
+«Email / số điện thoại hoặc mật khẩu không đúng.» cho tới khi gõ «mã tổ chức». Cùng lỗi cho người tạo hộ ở `/settings/users`
+và tổ chức người vận hành tạo ở `/platform`.
+
+**Sửa ở tầng chỉ mục, không ở giao diện.** Một hàm ghi (`indexAccountIdentities`), gọi ở MỌI lượt tài khoản trở nên đăng
+nhập được bằng mật khẩu (bảng §1, dòng «Ghi chỉ mục»). Xác định: email UNIQUE trong CSDL tổ chức ⇒ dòng chỉ mục trỏ ĐÚNG
+một tài khoản của ĐÚNG tổ chức; không có phép ghép người nào giữa các tổ chức (luật 35). Khoá duy nhất `(kind, value,
+org_code)` ⇒ chạy lại cấp phát / kích hoạt không đẻ dòng thứ hai.
+
+**`last_used_at` có nghĩa**: `NULL` = chỉ mục (tài khoản dùng được nhưng chưa ai đăng nhập) · khác `NULL` = đã đăng nhập
+vào ĐÚNG tài khoản này. Ghi chỉ-mục KHÔNG xoá mốc dùng của cùng tài khoản; dòng đổi chủ thì mốc về `NULL`. Hai chỗ đọc dựa
+vào nó: ô «Người đã đăng nhập» (`workspaceReach` — không đếm lời mời / quản trị chưa kích hoạt) và phép khớp EMAIL của
+Google / Facebook (`usedOnly`) — email do quản trị gõ chưa ai xác minh, nên chỉ mở đường vào KHÔNG mật khẩu sau khi tài khoản
+ấy từng vào bằng mật khẩu: đúng phạm vi trước bản vá, không rộng thêm (quan sát 2 ở trên vẫn mở).
+
+**Quyết định kèm theo** (chỗ nào đổi phải đọc lại đây):
+- Tài khoản bị KHOÁ: không ghi dòng mới; dòng cũ GIỮ — đọc vẫn tra CSDL tổ chức, người bị khoá gõ đúng mật khẩu nhận đúng câu
+  «Tài khoản đã bị khoá», không phải «sai mật khẩu». Mở khoá không cần ghi lại.
+- ERP không có đường ĐỔI EMAIL hay XOÁ tài khoản (chỉ khoá). Thêm một trong hai ⇒ phải gọi `indexAccountIdentities` cho giá trị
+  mới và gỡ dòng cũ (`forgetIdentitiesOf`), nếu không chỉ mục nói một đằng, CSDL một nẻo (chỉ hẹp lại lúc đọc, nhưng email mới
+  sẽ lại đòi «mã tổ chức»). `tests/identity-email-login.test.ts` quét: mọi đường chèn `users` trong `lib/` · `app/` phải gọi
+  hàm ghi chỉ mục (miễn trừ duy nhất: quản trị đầu tiên của NHÀ lúc khởi động — nhà luôn là ứng viên).
+- Email trùng nhiều workspace: mật khẩu quyết định — khớp một nơi vào thẳng, khớp nhiều nơi hỏi chọn (danh sách chỉ hiện khi
+  mật khẩu đã khớp ở MỌI nơi trong đó). Thứ tự TẤT ĐỊNH: mới dùng nhất trước, chưa dùng sau, rồi theo mã tổ chức.
+- Dữ liệu cũ (tài khoản tạo trước bản vá, chưa từng đăng nhập): ops `identity-reconcile` (`lib/platform/identity-reconcile.ts`)
+  — mặc định CHẠY THỬ, `--apply` ghi bù qua đúng hàm trên, idempotent, nhật ký nền tảng `IDENTITY_RECONCILE` (chỉ số đếm).
+
+**Chưa làm — rủi ro còn lại (SUY LUẬN, chưa đo):** trang chung so mật khẩu ở TỪNG tổ chức ứng viên, nên thời gian phản hồi
+của một lượt sai mật khẩu tăng theo số tổ chức có email đó (bcrypt ~ vài chục ms mỗi lượt). Đây là kênh đo thời gian có từ
+0193; bản vá làm nó phủ thêm tài khoản chưa từng đăng nhập. Nó KHÔNG lộ tổ chức nào (câu trả lời và danh sách không đổi), chỉ
+lộ «email này có tài khoản ở đâu đó trên nền tảng». Đệm số lượt so băm tới một hằng số thì hết kênh nhưng mọi lượt đăng nhập
+(cả nhà) chậm thêm — quyết định của chủ shop, không làm trong bản vá.
 
 ## 2. Mục tiêu
 

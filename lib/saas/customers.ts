@@ -7,7 +7,7 @@
  *
  * Người gọi kiểm `platformOperatorDenial` TRƯỚC (console.ts) — hàm này nhìn xuyên mọi tài khoản.
  */
-import { desc, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, sql } from "drizzle-orm";
 import { getPlatformDb, schema } from "@/db";
 import { addonMonthlyVnd, parseAddonPrices, parseAddonUnits } from "@/lib/billing/addons";
 import { billingStanding, vnDate, type BillingStandingKind } from "@/lib/billing/rules";
@@ -334,7 +334,11 @@ export async function accountProvisioningJobs(account: AccountRow, orgCodes: rea
   return pdb.select().from(j).where(where).orderBy(desc(j.createdAt)).limit(limit);
 }
 
-/** Kênh / người đã đăng nhập theo workspace — từ chỉ mục ở mặt phẳng điều khiển, không mở CSDL workspace. */
+/**
+ * Kênh / người đã đăng nhập theo workspace — từ chỉ mục ở mặt phẳng điều khiển, không mở CSDL workspace. «Người đã đăng nhập» chỉ
+ * đếm dòng có mốc dùng: từ 08/10/2026 chỉ mục được ghi NGAY lúc cấp phát / tạo hộ / mời (lib/auth/identities.ts), nên đếm mọi dòng
+ * là đếm cả quản trị chưa kích hoạt và lời mời chưa ai mở — đúng con số người vận hành dùng để hỏi «khách đã vào chưa».
+ */
 export async function workspaceReach(orgCodes: readonly string[]): Promise<Map<string, { identities: number; lastLoginAt: Date | null; messengerPages: number }>> {
   const out = new Map<string, { identities: number; lastLoginAt: Date | null; messengerPages: number }>();
   if (!orgCodes.length) return out;
@@ -342,7 +346,7 @@ export async function workspaceReach(orgCodes: readonly string[]): Promise<Map<s
   const i = schema.platformIdentities;
   const p = schema.platformMessengerPages;
   const [ids, pages] = await Promise.all([
-    pdb.select({ orgCode: i.orgCode, n: sql<number>`count(distinct ${i.userId})::int`, last: sql<Date | string | null>`max(${i.lastUsedAt})` }).from(i).where(inArray(i.orgCode, [...orgCodes])).groupBy(i.orgCode),
+    pdb.select({ orgCode: i.orgCode, n: sql<number>`count(distinct ${i.userId})::int`, last: sql<Date | string | null>`max(${i.lastUsedAt})` }).from(i).where(and(inArray(i.orgCode, [...orgCodes]), isNotNull(i.lastUsedAt))).groupBy(i.orgCode),
     pdb.select({ orgCode: p.orgCode, n: sql<number>`count(*)::int` }).from(p).where(inArray(p.orgCode, [...orgCodes])).groupBy(p.orgCode),
   ]);
   for (const c of orgCodes) out.set(c, { identities: 0, lastLoginAt: null, messengerPages: 0 });

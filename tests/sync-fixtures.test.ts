@@ -542,6 +542,7 @@ import { testMessengerMultiPage } from "./messenger-multipage.test";
 import { testPush } from "./push.test";
 import { testUserInvites } from "./user-invites.test";
 import { testPasswordReset } from "./password-reset.test";
+import { testIdentityEmailLogin } from "./identity-email-login.test";
 import { testTestOrgCodes } from "./test-org-codes.test";
 import { testHelpGuides } from "./help-guides.test";
 import { testChotDonAssets, testChotDonBrand, testMissedOrdersCalculator, testOrgLinkOrigin, testPublicSiteData, testPublicSiteHost, testPublicSiteSource } from "./public-site.test";
@@ -2904,6 +2905,10 @@ async function main() {
   await testUserInvites();
   testTestOrgCodes();
   await testPasswordReset();
+  // P0 08/10/2026: khách do admin tạo (job cấp phát) đăng nhập bằng email + mật khẩu KHÔNG cần mã tổ chức — chỉ mục danh tính ghi
+  // ngay lúc cấp phát / tạo hộ / mời / đặt mật khẩu; gửi lại kích hoạt; email trùng hai workspace; đối chiếu dữ liệu cũ. Tổ chức
+  // THẬT `iel-*`, tự cấp, tự dọn; loginAction / logoutAction chạy trong phạm vi request dựng tay của Next.
+  await testIdentityEmailLogin();
   testHelpGuides();
   // Trang giới thiệu: bảng giá đọc thật từ platform_plans, gói khởi điểm không bao giờ in thành 0 ₫.
   await testPublicSiteData();

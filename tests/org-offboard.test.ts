@@ -213,10 +213,14 @@ async function provision(code: string, brand: "chotdon" | "vnx" | null, onboardi
     await db.update(schema.users).set({ phone: SDT }).where(eq(schema.users.email, EMAIL));
   });
   const [u] = rowsOf<{ id: string }>(await withOrganization(code, async () => (await getDb()).execute(sql`select id from users where email = ${EMAIL}`)));
-  await pdb.insert(schema.platformIdentities).values([
-    { kind: "EMAIL", value: EMAIL, orgCode: code, userId: u.id },
-    { kind: "PHONE", value: SDT, orgCode: code, userId: u.id },
-  ]);
+  // Dòng EMAIL đã do chính lượt cấp phát ghi (P0 08/10/2026 — lib/auth/identities.ts) ⇒ không chèn trùng; vẫn đúng hai dòng.
+  await pdb
+    .insert(schema.platformIdentities)
+    .values([
+      { kind: "EMAIL", value: EMAIL, orgCode: code, userId: u.id },
+      { kind: "PHONE", value: SDT, orgCode: code, userId: u.id },
+    ])
+    .onConflictDoNothing();
   await pdb.insert(schema.platformAiUsage).values({ orgCode: code, feature: "sales_chatbot", billingSource: "PLATFORM", requests: 1, status: "OK", costUsd: 0.0123 });
   await pdb.insert(schema.platformOrgMilestones).values({ orgCode: code, milestone: "FIRST_ORDER", reachedAt: new Date(), source: "TEST" });
   await pdb.insert(schema.platformSubscriptions).values({ orgCode: code, billingEnabled: false });

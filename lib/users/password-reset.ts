@@ -15,11 +15,16 @@
  * ─── TRANG CÔNG KHAI ─── `/reset/<mã tổ chức>/<mã>` không có phiên: mọi lượt tra chạy trong `withOrganization(mã trong
  * đường dẫn)` TƯỜNG MINH. Mọi lý do không hợp lệ ra CÙNG một câu, và mỗi lượt sai đếm vào bộ chặn dò theo IP (cùng bộ đếm
  * với màn đăng nhập) — không ai dò được tổ chức nào / mã nào tồn tại.
+ *
+ * ─── KÍCH HOẠT ─── Quản trị khách do job cấp phát tạo có mật khẩu ngẫu nhiên không ai biết; liên kết này là đường KÍCH HOẠT của
+ * họ (`purpose: "ACTIVATION"` trong nhật ký nền tảng). Đặt xong ⇒ chỉ mục đăng nhập (email ⇒ tổ chức) chắc chắn có — idempotent —
+ * để lượt đăng nhập ngay sau ở trang chung không đòi «mã tổ chức» (P0 08/10/2026, lib/auth/identities.ts).
  */
 import { createHash, randomBytes } from "node:crypto";
 import { and, eq, gt, isNull, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { audit } from "@/lib/audit";
+import { indexAccountIdentities } from "@/lib/auth/identities";
 import { hashPassword } from "@/lib/auth/password";
 import { loginAllowed, recordLoginFailure } from "@/lib/auth/login-throttle";
 import { applySessionRevocation } from "@/lib/auth/session-revoke";
@@ -102,9 +107,11 @@ export async function createResetLinkCore(user: SessionUser, targetUserId: strin
 
 /**
  * Người vận hành nền tảng tạo liên kết cho một tài khoản (theo email) của tổ chức khách — lối ra khi chính quản trị của
- * khách quên mật khẩu. Hỏi người vận hành TRƯỚC mọi lượt đọc; bắt buộc lý do; nhật ký nền tảng ghi trước khi trả liên kết.
+ * khách quên mật khẩu, và đường KÍCH HOẠT quản trị khách mới / gửi lại kích hoạt (`opts.purpose = "ACTIVATION"` — chỉ lõi máy
+ * chủ truyền, ghi vào nhật ký nền tảng). Hỏi người vận hành TRƯỚC mọi lượt đọc; bắt buộc lý do; nhật ký nền tảng ghi trước khi
+ * trả liên kết.
  */
-export async function createResetLinkAsOperator(user: SessionUser, raw: { orgCode?: unknown; email?: unknown; reason?: unknown }): Promise<CreatedResetLink | { error: string }> {
+export async function createResetLinkAsOperator(user: SessionUser, raw: { orgCode?: unknown; email?: unknown; reason?: unknown }, opts: { purpose?: "RESET" | "ACTIVATION" } = {}): Promise<CreatedResetLink | { error: string }> {
   const denial = platformOperatorDenial(user);
   if (denial) return { error: denial };
   const reason = typeof raw.reason === "string" ? raw.reason.trim().slice(0, 500) : "";
@@ -120,7 +127,7 @@ export async function createResetLinkAsOperator(user: SessionUser, raw: { orgCod
   });
   if (!target) return { error: `Tổ chức «${org.name}» không có tài khoản ${email}.` };
   if (!target.active) return { error: "Tài khoản đang khoá — quản trị tổ chức mở khoá trước." };
-  await platformAudit({ action: "PASSWORD_RESET_LINK", targetOrgCode: org.code, subject: `user:${target.email}`, after: { expiresInHours: PASSWORD_RESET_TTL_HOURS }, reason, source: "UI", actor: { orgCode: user.organization!.code, userId: user.id, email: user.email } });
+  await platformAudit({ action: "PASSWORD_RESET_LINK", targetOrgCode: org.code, subject: `user:${target.email}`, after: { expiresInHours: PASSWORD_RESET_TTL_HOURS, ...(opts.purpose === "ACTIVATION" ? { purpose: "ACTIVATION" } : {}) }, reason, source: "UI", actor: { orgCode: user.organization!.code, userId: user.id, email: user.email } });
   const { token, expiresAt } = await withOrganization(org.code, () => issueInContext(target, "PLATFORM", { id: null, email: `platform:${user.email}` }));
   return { ok: true, link: resetLinkFor(org.code, token, await organizationBaseUrl(org.code)), expiresAt, email: target.email };
 }
@@ -131,7 +138,7 @@ async function activeTokenRow(token: string) {
   const db = await getDb();
   const t = schema.passwordResetTokens;
   const [row] = await db
-    .select({ id: t.id, userId: t.userId, expiresAt: t.expiresAt, email: schema.users.email, active: schema.users.active })
+    .select({ id: t.id, userId: t.userId, expiresAt: t.expiresAt, email: schema.users.email, phone: schema.users.phone, active: schema.users.active })
     .from(t)
     .innerJoin(schema.users, eq(schema.users.id, t.userId))
     .where(and(eq(t.tokenHash, hashResetToken(token)), isNull(t.usedAt), isNull(t.revokedAt), gt(t.expiresAt, sql`now()`)))
@@ -197,6 +204,9 @@ export async function completePasswordResetCore(orgCode: string, token: string, 
       // Đặt lại mà phiên cũ vẫn sống thì việc đặt lại vô nghĩa — thu hồi bắt buộc, không cờ tắt.
       await applySessionRevocation({ targetUserId: row.userId, targetEmail: row.email, trigger: "PASSWORD_RESET", actor: { id: null, label: "liên kết đặt lại mật khẩu" } });
       await audit({ userId: row.userId, userEmail: row.email, action: "PASSWORD_RESET_COMPLETE", entity: "USER", entityId: row.userId, after: { via: "LINK" }, reason: "Người dùng tự đặt mật khẩu mới qua liên kết dùng một lần" });
+      // Kích hoạt / đặt lại xong ⇒ chỉ mục đăng nhập CHẮC CHẮN có (idempotent): tài khoản tạo trước bản vá 08/10/2026 chưa có dòng
+      // nào, và đặt mật khẩu không phải một lượt đăng nhập — mốc dùng để trống (lib/auth/identities.ts).
+      await indexAccountIdentities(org.code, { id: row.userId, email: row.email, phone: row.phone, active: row.active });
       return { userId: row.userId, email: row.email };
     });
   } catch (error) {

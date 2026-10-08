@@ -797,6 +797,7 @@ const LOI_VAN_HANH: Record<string, string> = {
   "lib/saas/console.ts::loadCustomerDetail": "MỘT tài khoản khách bất kỳ: workspace, entitlement, nhật ký, job, bảng kê, chi phí (/platform/customers/<mã>).",
   "lib/saas/console.ts::loadProductsConsole": "Kinh tế theo sản phẩm trên MỌI khách (/platform/products).",
   "lib/saas/console.ts::createCustomerAsOperator": "Tạo khách qua job cấp phát (tài khoản + workspace + CSDL + thuê bao + quản trị) rồi tạo liên kết kích hoạt.",
+  "lib/saas/console.ts::resendActivationAsOperator": "Gửi lại liên kết kích hoạt cho quản trị khách CHƯA kích hoạt (người nhận do máy chủ tra từ workspace, không từ trình duyệt) — qua createResetLinkAsOperator: thu hồi liên kết cũ, chỉ băm trong CSDL, lý do bắt buộc, nhật ký nền tảng.",
   "lib/saas/console.ts::subscribeProductAsOperator": "Thuê thêm sản phẩm cho một workspace bất kỳ (job: bật module + mở thuê bao).",
   "lib/saas/console.ts::changeSubscriptionAsOperator": "Tạm dừng / tiếp tục / huỷ (job: tắt module độc quyền) thuê bao của một workspace bất kỳ.",
   "lib/saas/console.ts::retryProvisioningAsOperator": "Chạy lại một job cấp phát hỏng / treo.",

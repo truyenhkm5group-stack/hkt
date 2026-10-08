@@ -12,6 +12,7 @@ import { createResetLinkAsOperator } from "@/lib/users/password-reset";
 import { platformOperatorDenial } from "@/lib/platform-ui/module-toggle";
 import type { PlatformActor } from "@/lib/platform/audit";
 import { findAccountByCode, findAccountById, moveWorkspaceToAccount, openSubscriptionsForProductsInUse, productsInUse, setSubscriptionState, updateAccount, accountMergeCandidates } from "@/lib/saas/accounts";
+import { activationRefusal, loadAdminActivations, loadWorkspaceActivation, type AdminActivation } from "@/lib/saas/activation";
 import { finalizeStatement } from "@/lib/saas/billing";
 import { PRODUCT_KEYS, productDef } from "@/lib/saas/catalog";
 import { accountAuditTrail, accountProvisioningJobs, finalizedStatements, loadCommercialSnapshot, moduleDrift, productEconomics, workspaceReach, type CommercialSnapshot, type CustomerView } from "@/lib/saas/customers";
@@ -52,6 +53,8 @@ export type CustomerDetail = {
   entitlements: Record<string, ProductEntitlement[]>;
   drift: Record<string, { missingSubscription: string[]; subscribedButOff: string[] }>;
   reach: Map<string, { identities: number; lastLoginAt: Date | null; messengerPages: number }>;
+  /** Kích hoạt của quản trị khách theo workspace (lib/saas/activation.ts); workspace nhà ⇒ `null`. */
+  activation: Record<string, AdminActivation | null>;
   audit: Awaited<ReturnType<typeof accountAuditTrail>>;
   jobs: JobRow[];
   statements: Awaited<ReturnType<typeof finalizedStatements>>;
@@ -72,7 +75,7 @@ export async function loadCustomerDetail(user: SessionUser, accountCode: string,
     entitlements[w.code] = await Promise.all(w.subscriptions.filter((s) => productDef(s.productKey)).map((s) => productEntitlement(w.code, s.productKey)));
     drift[w.code] = moduleDrift(await productsInUse(w.code).catch(() => []), w.subscriptions);
   }
-  const [reach, audit, jobs, statements, costEntries] = await Promise.all([workspaceReach(codes), accountAuditTrail(customer.account, codes), accountProvisioningJobs(customer.account, codes), finalizedStatements(customer.account.id), listCostEntries(snap.periodMonth)]);
+  const [reach, activation, audit, jobs, statements, costEntries] = await Promise.all([workspaceReach(codes), loadAdminActivations(customer.workspaces), accountAuditTrail(customer.account, codes), accountProvisioningJobs(customer.account, codes), finalizedStatements(customer.account.id), listCostEntries(snap.periodMonth)]);
   return {
     customer,
     periodMonth: snap.periodMonth,
@@ -80,6 +83,7 @@ export async function loadCustomerDetail(user: SessionUser, accountCode: string,
     entitlements,
     drift,
     reach,
+    activation,
     audit,
     jobs,
     statements,
@@ -131,12 +135,43 @@ export async function createCustomerAsOperator(user: SessionUser, raw: unknown):
   if ("error" in res) return res;
   const job = res.job;
   let activationLink: string | null = null;
+  let activationNote = "";
   if (job.status === "SUCCEEDED") {
-    const link = await createResetLinkAsOperator(user, { orgCode: d.workspace.code, email: d.admin.email, reason: `Kích hoạt quản trị khách mới (job ${job.id.slice(0, 8)}): ${d.reason}` });
-    if ("ok" in link) activationLink = link.link;
+    // Gửi lại CÙNG khoá (job đã xong từ trước) chỉ phát liên kết khi quản trị CHƯA kích hoạt: liên kết cho người đã vào được là
+    // liên kết ĐẶT LẠI mật khẩu, không phải kích hoạt — cùng luật với «Gửi lại liên kết kích hoạt» (`resendActivationAsOperator`).
+    const before = res.reused ? await loadWorkspaceActivation(d.workspace.code) : null;
+    if (before && !before.canResend) activationNote = ` ${activationRefusal(before.state)}`;
+    else {
+      const link = await createResetLinkAsOperator(user, { orgCode: d.workspace.code, email: d.admin.email, reason: `Kích hoạt quản trị khách mới (job ${job.id.slice(0, 8)}): ${d.reason}` }, { purpose: "ACTIVATION" });
+      if ("ok" in link) activationLink = link.link;
+    }
   }
   const account = job.accountId ? ((await findAccountById(job.accountId))?.code ?? null) : null;
-  return { ok: true, jobId: job.id, status: job.status, activationLink, accountCode: account, message: job.status === "SUCCEEDED" ? (res.reused ? "Yêu cầu này đã chạy xong trước đó." : "Đã tạo khách.") : `Job ${job.status}: ${job.lastError ?? ""}` };
+  return { ok: true, jobId: job.id, status: job.status, activationLink, accountCode: account, message: job.status === "SUCCEEDED" ? (res.reused ? `Yêu cầu này đã chạy xong trước đó.${activationNote}` : "Đã tạo khách.") : `Job ${job.status}: ${job.lastError ?? ""}` };
+}
+
+const resendActivationInput = z.object({ orgCode: z.string().trim().toLowerCase().min(2).max(64), reason });
+
+/**
+ * «Gửi lại liên kết kích hoạt» cho quản trị khách (FINISH_LINE 08/10/2026 blocker 5): liên kết kích hoạt dùng một lần, hết hạn sau
+ * 24 giờ và chỉ in MỘT lần trong khung kết quả của form «Tạo khách» — đóng trang là mất. Chỉ khi quản trị CHƯA vào được (liên kết
+ * còn hạn mà khách không nhận được · đã hết hạn · không còn liên kết dùng được — lib/saas/activation.ts); người đã kích hoạt thì
+ * lối ra là «Đặt lại mật khẩu cho khách». Người nhận = quản trị do MÁY CHỦ tra (job «Tạo khách» / quản trị đầu tiên), không bao
+ * giờ một email từ trình duyệt. Liên kết tạo qua ĐÚNG hàm của job (`createResetLinkAsOperator`): liên kết cũ chưa dùng bị THU HỒI,
+ * CSDL chỉ giữ băm, nhật ký nền tảng (`PASSWORD_RESET_LINK`, `purpose: ACTIVATION`, kèm lý do) ghi TRƯỚC khi trả. Chưa có kênh
+ * thư (dịch vụ ngoài mới cần chủ shop duyệt) ⇒ liên kết trả về người vận hành MỘT lần để gửi tay.
+ */
+export async function resendActivationAsOperator(user: SessionUser, raw: unknown): Promise<{ ok: true; link: string; expiresAt: string; email: string; message: string } | Denied> {
+  const denial = platformOperatorDenial(user);
+  if (denial) return { error: denial };
+  const p = resendActivationInput.safeParse(raw);
+  if (!p.success) return { error: firstIssue(p.error) };
+  const act = await loadWorkspaceActivation(p.data.orgCode);
+  if (!act) return { error: "Chỉ gửi kích hoạt cho quản trị của một workspace khách." };
+  if (!act.canResend || !act.email) return { error: activationRefusal(act.state) };
+  const r = await createResetLinkAsOperator(user, { orgCode: act.orgCode, email: act.email, reason: `Gửi lại liên kết kích hoạt: ${p.data.reason}` }, { purpose: "ACTIVATION" });
+  if ("error" in r) return r;
+  return { ok: true, link: r.link, expiresAt: r.expiresAt.toISOString(), email: r.email, message: "Đã tạo liên kết kích hoạt mới — liên kết cũ chưa dùng hết hiệu lực." };
 }
 
 const subscribeInput = z.object({ orgCode: z.string().trim(), productKey: z.enum(PRODUCT_KEYS), planKey: z.string().trim().optional().or(z.literal("")), idempotencyKey: z.string().trim().min(8).max(200), reason });

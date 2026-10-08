@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { PageHeader } from "@/components/page-header";
+import { ResendActivation } from "@/components/platform/resend-activation";
 import { SaasConsoleNav, StatusPill } from "@/components/saas/console-bits";
 import { AccountEditForm, CostEntryForm, FinalizeStatementButton, MoveWorkspaceForm, ReconcileButton, RetryJobButton, SubscribeProductForm, SubscriptionButtons, VoidCostButton } from "@/components/saas/operator-actions";
 import { EmptyState, SectionCard } from "@/components/ui-bits";
@@ -122,6 +123,7 @@ export default async function SaasCustomerPage({ params, searchParams }: { param
                 <Stat label="Kênh Messenger nối thẳng" value={formatNumber(reach?.messengerPages ?? 0)} sub="page ⇒ workspace (platform_messenger_pages)" />
                 <Stat label="Tạo lúc" value={formatDate(w.createdAt)} />
               </div>
+              <ResendActivation accountCode={a.code} activation={d.activation[w.code] ?? null} />
 
               <div className="mt-3 overflow-x-auto">
                 <table className="w-full min-w-[760px] text-sm">
