@@ -237,6 +237,7 @@ const CUSTOMER_FILES = [
   "app/(dashboard)/ai/sales-chatbot/inbox/message-trace.tsx",
   "app/(dashboard)/ai/sales-chatbot/inbox/thread-view.tsx",
   "app/(dashboard)/ai/sales-chatbot/performance/page.tsx",
+  "app/(dashboard)/ai/sales-chatbot/performance/experiment-block.tsx",
   "app/(dashboard)/ai/sales-chatbot/cockpit/page.tsx",
   "app/(dashboard)/settings/connections/page.tsx",
   "components/connectors/connector-group-table.tsx",
@@ -250,6 +251,7 @@ const EXEMPT: [string, string, string][] = [
   ["app/(dashboard)/settings/plan/page.tsx", "không gọi model", "Câu gợi ý của cùng khung «Dùng AI» (chỉ nhà)."],
   ["app/(dashboard)/ai/sales-chatbot/page.tsx", "Anthropic / OpenAI) — tổ chức trả tiền token", "Câu gợi ý nhánh `customer ? … : (nhà)`."],
   ["app/(dashboard)/ai/sales-chatbot/performance/page.tsx", "token thật × bảng giá model", "Khối «Chi phí AI & ROI» chỉ dựng khi `r.cost` khác null — khách: `withMoney = aiPerformanceWithMoney(...) = false` ⇒ `cost = null`."],
+  ["app/(dashboard)/ai/sales-chatbot/performance/experiment-block.tsx", "token thật × bảng giá model", "Đoạn giải thích tiền AI của khối AI vs Người chỉ dựng khi `report.withMoney` — `loadExperimentReport({ withMoney: aiPerformanceWithMoney(user, manage) })`, khách ⇒ false ⇒ không đọc sổ AI."],
   ["app/(dashboard)/ai/sales-chatbot/page.tsx", "nhập Page ID và page access token", "Hướng dẫn nối fanpage qua Pancake — token của KÊNH do chính shop dán (chẩn đoán / cấu hình kết nối thật), không phải token AI."],
   ["app/(dashboard)/ai/sales-chatbot/page.tsx", "lấy refresh token ở API Explorer", "Hướng dẫn nối Zalo OA của chính shop — token của KÊNH, không phải token AI."],
   ["app/(dashboard)/ai/sales-chatbot/page.tsx", "Máy tự làm mới token và lưu cặp mới", "Cùng hướng dẫn Zalo OA — token của KÊNH."],
@@ -300,6 +302,10 @@ export function testHideInternalStatic() {
   assert.ok(/loadChatbotAiView\(user, cfg/.test(page) && !/loadProviderHealth\(|loadChatCostReport\(|platformChatAi\(/.test(page), "trang chatbot đọc phần AI qua loader đã lọc, không tự gọi sức khoẻ khoá / chi phí / AI nền tảng");
   assert.ok(/customerFacing\(user\.organization\) \? null : await loadOrgAiUsage\(usage\.orgCode\)/.test(read("app/(dashboard)/settings/plan/page.tsx")), "trang gói: khách không đọc sổ AI");
   assert.ok(/withMoney: aiPerformanceWithMoney\(user, manage\)/.test(read("app/(dashboard)/ai/sales-chatbot/performance/page.tsx")), "trang hiệu quả: khách không tính tiền AI");
+  assert.ok(/loadExperimentReport\(\{ withMoney: aiPerformanceWithMoney\(user, manage\) \}\)/.test(read("app/(dashboard)/ai/sales-chatbot/performance/page.tsx")), "khối AI vs người: tiền AI cùng cổng với khung «Chi phí AI & ROI»");
+  const experimentBlock = read("app/(dashboard)/ai/sales-chatbot/performance/experiment-block.tsx");
+  assert.ok(/\{report\.withMoney \? \(/.test(experimentBlock), "khối AI vs người: đoạn tiền AI chỉ dựng khi được xem tiền");
+  assert.ok(/\.\.\.\(report\.withMoney\s*\?\s*\[/.test(experimentBlock), "khối AI vs người: dòng tiền AI của bảng chỉ dựng khi được xem tiền");
   assert.ok(page.includes("run={customer ? customerPlaybookRun(playbookRun) : playbookRun}"), "lượt học của khách đi qua bộ lọc (không USD)");
   const form = read("app/(dashboard)/ai/sales-chatbot/config-form.tsx");
   assert.ok(!/cb-model|cb-conn|cb-thinking|fallbackModel|connectorKey/.test(form), "form của khách không còn ô nguồn AI / model / mức suy nghĩ (chúng ở ai-engine-fields, chỉ dựng khi có `engine`)");
