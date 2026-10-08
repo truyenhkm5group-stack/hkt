@@ -117,6 +117,8 @@ export function ChatOrderForm({
     );
   }
 
+  // Hồ sơ gắn qua SĐT gõ tay (chưa khớp Facebook): chữ hiển thị là chữ khách GÕ trong hội thoại, không phải của hồ sơ (luật 5).
+  const unverified = Boolean(ctx.customer && !ctx.customer.verified);
   const setLine = (i: number, patch: Partial<Line>) => setLines((prev) => prev.map((l, j) => (j === i ? { ...l, ...patch } : l)));
   const submit = async () => {
     setPending(true);
@@ -169,14 +171,19 @@ export function ChatOrderForm({
         <label className="flex items-center gap-2">
           <input type="checkbox" checked={useCustomer} onChange={(e) => setUseCustomer(e.target.checked)} />
           <span>
-            Khách của hội thoại: <b>{ctx.customer ? `${ctx.customer.name}${ctx.customer.phone ? ` · ${ctx.customer.phone}` : ""}` : "đã gắn"}</b>
+            {unverified ? "Khách gõ trong hội thoại" : "Khách của hội thoại"}: <b>{ctx.customer ? [ctx.customer.name, ctx.customer.phone].filter(Boolean).join(" · ") || "—" : "đã gắn"}</b>
           </span>
         </label>
       ) : null}
+      {unverified ? (
+        <p className="text-[11.5px] text-muted-foreground" data-testid="chat-order-unverified">
+          Chưa xác minh là chủ hồ sơ của SĐT này (chưa khớp tài khoản Facebook đang chat) — ERP không điền tên / địa chỉ đã lưu của hồ sơ. Ô trống lấy chữ khách gõ trong hội thoại; không có thì phải nhập.
+        </p>
+      ) : null}
       <div className="grid gap-2 sm:grid-cols-2">
-        <Input value={name} onChange={(e) => setName(e.target.value)} placeholder={customerId ? "Người nhận (trống = tên khách)" : "Tên khách"} aria-label="Tên người nhận" />
+        <Input value={name} onChange={(e) => setName(e.target.value)} placeholder={unverified ? (ctx.customer?.name ? "Người nhận (trống = tên khách gõ trong chat)" : "Tên người nhận (bắt buộc)") : customerId ? "Người nhận (trống = tên khách)" : "Tên khách"} aria-label="Tên người nhận" />
         <Input value={phone} onChange={(e) => setPhone(e.target.value)} inputMode="tel" placeholder={customerId ? "SĐT nhận (trống = SĐT khách)" : "SĐT khách"} aria-label="SĐT người nhận" />
-        <Input value={address} onChange={(e) => setAddress(e.target.value)} placeholder={customerId ? "Địa chỉ giao (trống = địa chỉ khách)" : "Địa chỉ giao"} aria-label="Địa chỉ giao" className="sm:col-span-2" />
+        <Input value={address} onChange={(e) => setAddress(e.target.value)} placeholder={unverified ? (ctx.customer?.address ? "Địa chỉ giao (trống = địa chỉ khách gõ trong chat)" : "Địa chỉ giao (bắt buộc)") : customerId ? "Địa chỉ giao (trống = địa chỉ khách)" : "Địa chỉ giao"} aria-label="Địa chỉ giao" className="sm:col-span-2" />
         <Input value={province} onChange={(e) => setProvince(e.target.value)} placeholder="Tỉnh / thành (tuỳ chọn)" aria-label="Tỉnh / thành" />
         <AddressPlace check={check} ward={ward} onPick={setPickedWard} />
       </div>

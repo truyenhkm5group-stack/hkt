@@ -23,6 +23,11 @@ import { recordConversationEvent } from "@/lib/sales-chatbot/events";
  *  3. KHÔNG ĐÈ. Đơn đã mang khoá hội thoại khác thì không đổi (`sales_conversation_id is null`); khách đã có cùng SĐT thì dùng
  *     lại, KHÔNG sửa tên / địa chỉ đang lưu (mục 3.12) — địa chỉ của lần mua này vào NGƯỜI NHẬN của đơn.
  *  4. CẢNH BÁO, KHÔNG CHẶN. Hội thoại đã có đơn còn sống (bot chốt hay người tạo) ⇒ form hiện cảnh báo trùng; người quyết.
+ *  5. HỒ SƠ CHƯA XÁC MINH KHÔNG ĐIỀN SẴN (review bảo mật #656, MEDIUM). Hồ sơ gắn với hội thoại qua SĐT GÕ TAY không chứng minh
+ *     người đang chat là chủ hồ sơ: kẻ gian gõ SĐT nạn nhân rồi xin gặp người ⇒ form từng điền tên + địa chỉ THẬT của nạn nhân
+ *     dưới nhãn «khách của hội thoại», và ô để trống thì đơn đi về địa chỉ ĐÃ LƯU (hồ sơ do máy tạo thì là địa chỉ người lạ gõ).
+ *     Chỉ hồ sơ khớp mã Facebook của người đang nhắn (`verifiedIdentity`) mới điền sẵn / làm dự phòng như cũ; còn lại form và ô
+ *     trống chỉ dùng chữ khách GÕ trong chính hội thoại, không có thì bắt nhập.
  * Hội thoại khung thử (`TEST`) không tạo đơn thật.
  */
 
@@ -32,7 +37,11 @@ export type ChatOrderContext = {
   canCreate: boolean;
   reason: string | null;
   channel: string;
-  customer: { id: string; name: string; phone: string; address: string; province: string } | null;
+  /**
+   * `verified` = hồ sơ khớp mã Facebook của người đang chat ⇒ tên / địa chỉ là của HỒ SƠ. `false` ⇒ tên / địa chỉ là chữ khách GÕ
+   * trong hội thoại (có thể rỗng) — KHÔNG BAO GIỜ là chữ đã lưu của hồ sơ (luật 5).
+   */
+  customer: { id: string; name: string; phone: string; address: string; province: string; verified: boolean } | null;
   variants: ManualOrderVariantOption[];
   /** Đơn CÒN SỐNG đã gắn với hội thoại — để form cảnh báo trùng. */
   existing: ChatOrderExisting[];
@@ -40,11 +49,31 @@ export type ChatOrderContext = {
 
 const DEAD_STAGES = ["CANCELLED", "DELETED"] as const;
 
-async function loadConversation(conversationId: unknown): Promise<{ ok: true; id: string; channel: string; customerId: string | null; orderId: string | null; draftOrderId: string | null } | MetaFailure> {
+/** Chữ khách GÕ trong hội thoại — máy chủ ghi ở `state.customer` khi bot lưu khách; không phải chữ đã lưu của hồ sơ. */
+export type ChatTypedCustomer = { name: string; phone: string; address: string; province: string };
+
+/**
+ * Hồ sơ đang gắn có ĐÚNG là của người đang chat không: CHỈ khi máy chủ đã khớp mã Facebook của người đang nhắn với ĐÚNG hồ sơ ấy
+ * (`state.customer.verifiedIdentity` — cờ chỉ máy chủ ghi, lib/sales-chatbot/tools.ts). Gắn qua SĐT gõ tay thì KHÔNG (luật 5).
+ * `typed` = chữ khách gõ trong hội thoại — bỏ qua khi là khung thử, khi là chữ của MỘT hồ sơ khác hồ sơ đang gắn, và khi là chữ MÁY
+ * CHỦ điền từ đơn cũ khớp qua SĐT (`savedAddress` — `use_saved_address` ở mức PHONE ghi tên ĐẦY ĐỦ + địa chỉ ĐẦY ĐỦ của chủ SĐT; khách
+ * chỉ xác nhận bản ĐÃ CHE — review bảo mật #657, MEDIUM: hiện chữ ấy dưới nhãn «khách gõ» còn khiến nhân viên tin hơn nhãn cũ). HÀM THUẦN.
+ */
+export function chatCustomerTrust(state: unknown, customerId: string | null): { verified: boolean; typed: ChatTypedCustomer | null } {
+  const raw = state && typeof state === "object" ? (state as { customer?: unknown }).customer : null;
+  if (!raw || typeof raw !== "object") return { verified: false, typed: null };
+  const c = raw as Record<string, unknown>;
+  const str = (v: unknown) => (typeof v === "string" ? v.trim() : "");
+  const sameProfile = Boolean(customerId) && c.id === customerId;
+  const typed = c.simulated === true || c.savedAddress === true || (Boolean(c.id) && !sameProfile) ? null : { name: str(c.name), phone: str(c.phone), address: str(c.address), province: str(c.province) };
+  return { verified: sameProfile && c.verifiedIdentity === true, typed };
+}
+
+async function loadConversation(conversationId: unknown): Promise<{ ok: true; id: string; channel: string; customerId: string | null; orderId: string | null; draftOrderId: string | null; state: unknown } | MetaFailure> {
   if (typeof conversationId !== "string" || !conversationId || conversationId.length > 200) return fail("NOT_FOUND", "Không có hội thoại này.");
   const db = await getDb();
   const c = schema.salesChatConversations;
-  const [row] = await db.select({ id: c.id, channel: c.channel, customerId: c.customerId, orderId: c.orderId, draftOrderId: c.draftOrderId }).from(c).where(eq(c.id, conversationId)).limit(1);
+  const [row] = await db.select({ id: c.id, channel: c.channel, customerId: c.customerId, orderId: c.orderId, draftOrderId: c.draftOrderId, state: c.state }).from(c).where(eq(c.id, conversationId)).limit(1);
   if (!row) return fail("NOT_FOUND", "Không có hội thoại này.");
   if (row.channel === "TEST") return fail("NOT_SUPPORTED", "Hội thoại ở khung thử — không tạo đơn thật.");
   return { ok: true, ...row };
@@ -72,13 +101,18 @@ export async function chatOrderContext(user: SessionUser, conversationId: unknow
     ? await db.select({ id: schema.customers.id, name: schema.customers.name, phone: schema.customers.phone, address: schema.customers.address, province: schema.customers.province }).from(schema.customers).where(eq(schema.customers.id, conv.customerId)).limit(1)
     : [];
   const [variants, existing] = gate.allowed ? await Promise.all([manualOrderFormOptions().then((x) => x.variants), existingOrders(conv)]) : [[], [] as ChatOrderExisting[]];
+  const trust = chatCustomerTrust(conv.state, conv.customerId);
   return {
     ok: true,
     value: {
       canCreate: gate.allowed,
       reason: gate.allowed ? null : gate.reason,
       channel: CHAT_CHANNEL_LABEL[conv.channel as ChatChannel] ?? conv.channel,
-      customer: customer ? { id: customer.id, name: customer.name, phone: customer.phone ?? "", address: customer.address ?? "", province: customer.province ?? "" } : null,
+      customer: !customer
+        ? null
+        : trust.verified
+          ? { id: customer.id, name: customer.name, phone: customer.phone ?? "", address: customer.address ?? "", province: customer.province ?? "", verified: true }
+          : { id: customer.id, name: trust.typed?.name ?? "", phone: trust.typed?.phone || (customer.phone ?? ""), address: trust.typed?.address ?? "", province: trust.typed?.province ?? "", verified: false },
       variants,
       existing,
     },
@@ -116,6 +150,20 @@ export async function createOrderFromChatCore(user: SessionUser, conversationId:
   const v = parsed.data;
   const db = await getDb();
 
+  // ── Người nhận (luật 5): hồ sơ không xác minh là của người đang chat ⇒ ô trống lấy chữ khách GÕ trong hội thoại, KHÔNG lấy chữ đã
+  // lưu của hồ sơ (lõi sẽ lấy nếu để trống — kể cả hồ sơ tìm theo SĐT khi bỏ chọn); vẫn trống thì bắt nhập. ──
+  const trust = chatCustomerTrust(conv.state, conv.customerId);
+  const profileVerified = trust.verified && v.customerId !== null && v.customerId === conv.customerId;
+  const typed = trust.typed;
+  const recipient = profileVerified
+    ? { name: v.name, phone: v.phone, address: v.address, province: v.province, ward: v.ward }
+    : { name: v.name || typed?.name || "", phone: v.phone || typed?.phone || "", address: v.address || typed?.address || "", province: v.province || (v.address ? "" : typed?.province || ""), ward: v.ward };
+  if (!profileVerified) {
+    const why = "hồ sơ chưa xác minh là của người đang chat, ERP không lấy chữ đã lưu của hồ sơ";
+    const missing = [...(recipient.name ? [] : [{ field: "name", message: `Nhập tên người nhận — ${why}.` }]), ...(recipient.address ? [] : [{ field: "address", message: `Nhập địa chỉ giao — ${why}.` }])];
+    if (missing.length) return fail("INVALID", missing);
+  }
+
   // ── Khách: chọn sẵn ⇒ phải có thật; không chọn ⇒ tìm / tạo theo SĐT (không đè hồ sơ đang lưu) ──
   let customerId: string;
   let customerExisting: boolean | null = null;
@@ -124,7 +172,7 @@ export async function createOrderFromChatCore(user: SessionUser, conversationId:
     if (!c) return fail("INVALID", [{ field: "customerId", message: "Khách đã chọn không còn — chọn lại." }]);
     customerId = c.id;
   } else {
-    const found = await findOrCreateCustomerForUser(user, { name: v.name, phone: v.phone, address: v.address, province: v.province });
+    const found = await findOrCreateCustomerForUser(user, { name: recipient.name, phone: recipient.phone, address: recipient.address, province: recipient.province });
     if (!found.ok) return found;
     customerId = found.id;
     customerExisting = found.existing;
@@ -140,8 +188,8 @@ export async function createOrderFromChatCore(user: SessionUser, conversationId:
       orderDiscount: v.orderDiscount,
       note: v.note,
       channel: CHAT_CHANNEL_LABEL[conv.channel as ChatChannel] ?? conv.channel,
-      // Người nhận của LẦN MUA này — ô trống lấy của hồ sơ khách (lõi quyết).
-      recipient: { name: v.name, phone: v.phone, address: v.address, province: v.province, ward: v.ward },
+      // Người nhận của LẦN MUA này — ô trống lấy của hồ sơ khách (lõi quyết) CHỈ khi hồ sơ đã xác minh (luật 5).
+      recipient,
     },
     { idempotencyKey: `chat:${conv.id}:${v.requestKey}` },
   );
