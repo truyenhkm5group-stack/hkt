@@ -1,0 +1,8 @@
+{
+  "pr": 676,
+  "sha": "c61a36210f87934e47d16f1f8c83fa70452e8195",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-08T09:30:55.756Z",
+  "note": "Review lại 08/10 (chỉ đọc): MEDIUM-1 đóng (trần kỹ thuật qua resolvePlan + countEntitlementUsage cùng bộ đếm, ENTITLEMENT_BELOW_USAGE không vượt được, LOWER_LIMITS cần cờ riêng); MEDIUM-2 đóng (loại HOME + từ chối isHome); một giao dịch có khoá ghim; tách bộ đếm không đổi checkEntitlement. LOW sau: số đếm BẰNG trần mới vẫn chặn lượt tạo kế tiếp — mở rộng cảnh báo «chạm trần» ra mọi hạn mức; gói đề"
+}
