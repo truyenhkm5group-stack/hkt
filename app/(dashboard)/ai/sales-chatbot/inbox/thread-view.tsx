@@ -8,10 +8,11 @@ import { Button } from "@/components/ui/button";
 import { ChatOrderForm } from "@/components/orders/chat-order-form";
 import { assignConversationAction, claimConversationAction, releaseConversationAction, sendStaffReplyAction, suggestReplyAction } from "@/lib/actions/sales-inbox";
 import { formatDateTime, formatNumber, vnClock, vnDateKey } from "@/lib/format";
+import { insertIntoDraft } from "@/lib/sales-chatbot/inbox-composer-shared";
 import { STAFF_IMAGE_MAX_BYTES, STAFF_IMAGES_MAX, STAFF_REPLY_MAX, type InboxOrder, type InboxThread, type TimelineItem } from "@/lib/sales-chatbot/inbox-shared";
 import { cn } from "@/lib/utils";
 import { ChannelAvatar } from "./avatar";
-import { ComposerTools, insertIntoDraft } from "./composer-tools";
+import { ComposerTools } from "./composer-tools";
 import { ConversationControlBar } from "./control-bar";
 import { MessageTraceLine } from "./message-trace";
 import { LabelsPanel } from "./labels-panel";
@@ -208,15 +209,20 @@ export function InboxThreadView({
   /**
    * «Câu mẫu» / «Sản phẩm» (composer-tools.tsx) chèn chữ vào ô soạn tại con trỏ (hoặc vùng đang chọn) — KHÔNG gửi. Tin sẽ vượt trần
    * ⇒ không chèn gì (trần `maxLength` của ô không chặn chữ do mã đặt vào). Chữ đổi ⇒ lượt gửi mới, như «AI gợi ý».
+   * Hàm được gọi SAU một lượt hỏi máy chủ: nhân viên có thể đã gõ thêm trong lúc chờ, nên chữ hiện tại đọc từ Ô SOẠN (DOM), không
+   * từ biến `text` chụp lúc dựng trang, và lượt ghi là cập nhật theo bản mới nhất (`setText(prev => …)`) — không đè chữ vừa gõ.
    */
   const insertSnippet = (snippet: string): boolean => {
     const el = input.current;
-    const r = insertIntoDraft(text, el?.selectionStart ?? text.length, el?.selectionEnd ?? text.length, snippet);
+    const current = el?.value ?? text;
+    const start = el?.selectionStart ?? current.length;
+    const end = el?.selectionEnd ?? current.length;
+    const r = insertIntoDraft(current, start, end, snippet);
     if (r.text.length > STAFF_REPLY_MAX) {
       toast.error(`Tin sẽ quá ${formatNumber(STAFF_REPLY_MAX)} ký tự — bớt chữ trong ô soạn rồi chèn lại.`);
       return false;
     }
-    setText(r.text);
+    setText((prev) => insertIntoDraft(prev, start, end, snippet).text);
     setRequestKey(newKey());
     requestAnimationFrame(() => {
       const box = input.current;

@@ -3,22 +3,27 @@
  *
  * Khoá:
  *  · THUẦN: lọc câu mẫu bỏ dấu (`foldVi`, gõ dở vẫn ra, khớp ở tên đứng trước) · tồn ⇒ chữ chèn (CHỈ «còn hàng» / «hết hàng»;
- *    bán không kiểm tồn / chưa có phiếu nhập / tồn âm ⇒ im lặng) · dòng chèn (thiếu giá ⇒ không in giá, không bao giờ «0 ₫») ·
- *    chèn vào ô soạn tại con trỏ / thay vùng chọn / nối cuối, đoạn chèn đứng dòng riêng (`insertIntoDraft` của trang).
+ *    bán không kiểm tồn / chưa có phiếu nhập / tồn âm ⇒ im lặng) · dòng chèn (thiếu giá ⇒ không in giá, không bao giờ «0 ₫»; giá
+ *    sỉ bật ⇒ «(giá lẻ)» cạnh giá) · chèn vào ô soạn tại con trỏ / thay vùng chọn / nối cuối trên dòng riêng (`insertIntoDraft`).
+ *  · MÃ NGUỒN: ô soạn gọi CỔNG CHUNG `replyGate` (cùng «Gửi»), không tự gọi `can(` — bản chép của vị từ trả lời từng trôi khỏi bản
+ *    gốc mà bài kiểm vẫn xanh (review PR #661, đột biến D3).
  *  · CSDL — hai tổ chức THẬT `o-soan-a` / `o-soan-b` (hai CSDL PGlite riêng, tự cấp, tự dọn):
  *    – câu mẫu: chỉ câu ĐANG BẬT; lọc không dấu; câu có ảnh báo số ảnh; chỗ trống điền số ERP LÚC BẤM bằng cấu hình của PAGE của
- *      hội thoại (page đè phí ship); thiếu số (phí ship chưa khai · tồn chưa biết) ⇒ không chèn; câu đã tắt ⇒ không chèn;
- *    – sản phẩm: giá BẰNG giá bot báo (`executeTool("search_products")`, cùng thứ tự); mẫu mã đã gỡ / đang ẩn / sản phẩm đã gỡ
- *      không ra; bấm ⇒ đọc lại giá LÚC BẤM; ẩn sau lúc tìm ⇒ không chèn; `sellWithoutStockCheck` ⇒ không một chữ tồn nào;
- *    – từ khoá rỗng / quá 200 ký tự ⇒ lỗi rõ; hội thoại khung thử / không có ⇒ từ chối;
- *    – QUYỀN = cổng của «Gửi»: so từng ô với `sendStaffReplyCore` trên một ma trận quyền (gồm phiên mang danh sách module thiếu
- *      `ai_sales`); module tắt ở TỔ CHỨC ⇒ từ chối cả người dựng tay không mang danh sách module;
+ *      hội thoại (page đè phí ship); thiếu số (phí ship chưa khai · tồn chưa biết · tồn ÂM) ⇒ không chèn; bán không kiểm tồn mà
+ *      câu có {{tồn}} ⇒ không chèn; câu đã tắt ⇒ không chèn. Đường bot (`renderQuickAnswer`): tồn âm ⇒ thiếu số; bán không kiểm
+ *      tồn ⇒ KHÔNG đổi (quyết định của shop);
+ *    – sản phẩm: giá BẰNG giá bot báo (`executeTool("search_products")`, cùng thứ tự, kể cả trần 20 và field tuỳ biến); mẫu mã đã
+ *      gỡ / đang ẩn / sản phẩm đã gỡ không ra; lượt TÌM không mang tồn; bấm ⇒ đọc lại ĐÍCH DANH mẫu mã (giá + tồn) lúc bấm; ẩn sau
+ *      lúc tìm ⇒ không chèn; `sellWithoutStockCheck` ⇒ không một chữ tồn nào; giá sỉ ⇒ «(giá lẻ)» trong dòng chèn;
+ *    – từ khoá: tìm sản phẩm cần ≥ 2 ký tự, tối đa 200; hội thoại khung thử / không có / mã > 100 ký tự / của tổ chức khác ⇒ từ chối;
+ *    – QUYỀN ≡ «Gửi»: ma trận 9 ca so với `sendStaffReplyCore` trên hội thoại THẬT (qua cổng rồi dừng ở «Tin trống» — mọi kiểm sau
+ *      bước nạp hội thoại đều thấy được), gồm người phạm vi phòng ban (phạm vi không thu hẹp quyền trả lời) và phiên mang danh sách
+ *      module thiếu `ai_sales`; module tắt ở TỔ CHỨC ⇒ từ chối như mọi action hộp thư;
  *    – CÔ LẬP: A không thấy / không chèn được câu mẫu, sản phẩm, hội thoại của B — và ngược lại; đối chứng chính chủ vẫn chạy.
  */
 import assert from "node:assert/strict";
-import { rmSync } from "node:fs";
+import { readFileSync, rmSync } from "node:fs";
 import { and, eq } from "drizzle-orm";
-import { insertIntoDraft } from "@/app/(dashboard)/ai/sales-chatbot/inbox/composer-tools";
 import { getDb, getPlatformDb, organizationDatabaseUrl, schema } from "@/db";
 import type { SessionUser } from "@/lib/auth/session";
 import { formatVND } from "@/lib/format";
@@ -32,6 +37,7 @@ import { loadSalesChatbotConfigFor } from "@/lib/sales-chatbot/engine";
 import { sendStaffReplyCore } from "@/lib/sales-chatbot/inbox";
 import {
   COMPOSER_LIMITS,
+  COMPOSER_RETAIL_MARK,
   COMPOSER_STOCK_SAY,
   composerProductLine,
   composerProductPick,
@@ -40,10 +46,11 @@ import {
   composerQuickReplyText,
   composerStockOf,
   matchComposerQuickReplies,
-  type ComposerProduct,
+  type ComposerProductHit,
 } from "@/lib/sales-chatbot/inbox-composer";
+import { COMPOSER_QUERY, insertIntoDraft } from "@/lib/sales-chatbot/inbox-composer-shared";
 import { PAGE_OVERRIDES_SETTING_KEY } from "@/lib/sales-chatbot/page-config-shared";
-import { addQuickReplyImages, saveQuickReply } from "@/lib/sales-chatbot/quick-replies";
+import { addQuickReplyImages, renderQuickAnswer, saveQuickReply } from "@/lib/sales-chatbot/quick-replies";
 import { executeTool } from "@/lib/sales-chatbot/tools";
 import { setSettingJson } from "@/lib/settings";
 
@@ -55,11 +62,16 @@ const markOf = (org: string) => `OSOAN-${org.toUpperCase()}-4417`;
 const PAGE = "page-o-soan";
 const PAGE_2 = "page-o-soan-2";
 const NOT_FOUND = "Không có hội thoại này.";
+/** «Gửi» với chữ rỗng dừng NGAY SAU cổng + bước nạp hội thoại — câu này nghĩa là «qua được cổng», không gửi gì. */
+const PASSED_GATE = "Tin trống — gõ chữ hoặc chọn ảnh.";
+const DENIED = ["Bạn không có quyền xem hội thoại (ai_sales:view).", "Bạn không có quyền trả lời khách (ai_sales:reply)."];
+/** Mã hội thoại 101 ký tự — có THẬT trong CSDL, nhưng cổng chặn mọi mã dài quá 100 trước khi đọc. */
+const LONG_CONV_ID = "c".repeat(101);
 
 /** Ảnh PNG 1×1 thật (chữ ký + IHDR + IDAT + IEND). */
 const PNG = Uint8Array.from(Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==", "base64"));
 
-// ─────────────────────────── Thuần ───────────────────────────
+// ─────────────────────────── Thuần + mã nguồn ───────────────────────────
 
 function testPure() {
   // Thứ tự gốc CỐ Ý để câu chỉ khớp ở câu trả lời («gio») đứng TRƯỚC câu khớp ở tên («bq»): xếp tên-trước phải đảo được chúng.
@@ -96,6 +108,8 @@ function testPure() {
   assert.equal(composerProductLine({ name: "Áo thun", variant: "", price: 199_000 }, null), `Áo thun — ${formatVND(199_000)}`);
   assert.equal(composerProductLine({ name: "Áo thun", variant: "Đỏ · M", price: null }, "hết hàng"), "Áo thun · Đỏ · M — hết hàng", "chưa có giá ⇒ bỏ vế giá, không in «0 ₫»");
   assert.equal(composerProductLine({ name: "Áo thun", variant: "Đỏ · M", price: null }, null), "Áo thun · Đỏ · M");
+  assert.equal(composerProductLine({ name: "Áo thun", variant: "Đỏ · M", price: 199_000 }, "còn hàng", true), `Áo thun · Đỏ · M — ${formatVND(199_000)} ${COMPOSER_RETAIL_MARK} · còn hàng`, "giá sỉ bật ⇒ «(giá lẻ)» NGAY cạnh giá");
+  assert.equal(composerProductLine({ name: "Áo thun", variant: "", price: null }, null, true), "Áo thun", "không có giá thì không có gì để ghi «(giá lẻ)»");
 
   // Chèn vào ô soạn (phía trang): tại con trỏ / thay vùng chọn / nối cuối — đoạn chèn luôn đứng DÒNG RIÊNG, con trỏ ngay sau nó.
   const S = `Áo A — ${formatVND(100_000)}`;
@@ -109,6 +123,26 @@ function testPure() {
   assert.deepEqual(insertIntoDraft("abc", 2, 1, S), { text: `ab\n${S}\nc`, caret: 3 + S.length }, "vùng ngược ⇒ coi như con trỏ");
 }
 
+/** Hai đầu vào của cổng chung, đọc từ MÃ NGUỒN: ô soạn chỉ đi qua `replyGate`, «Gửi» cũng vậy — không chỗ nào chép lại vị từ. */
+function testOneGate() {
+  const composer = readFileSync("lib/sales-chatbot/inbox-composer.ts", "utf8").replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
+  assert.ok(!/\bcan\s*\(/.test(composer), "ô soạn KHÔNG tự gọi can( — quyền trả lời chỉ nằm ở replyGate (lib/sales-chatbot/inbox.ts)");
+  assert.ok(!/ai_sales:reply|outreach:send|ai_sales:view/.test(composer), "ô soạn không nhắc lại khoá quyền nào — mọi khoá nằm ở cổng chung");
+  assert.ok(!/salesChatConversations/.test(composer), "ô soạn không tự nạp hội thoại — bước nạp (mã ≤ 100, không khung thử) nằm ở cổng chung");
+  const exported = [...composer.matchAll(/export async function (\w+)\(user: SessionUser, conversationId: unknown/g)].map((m) => m[1]);
+  assert.deepEqual(exported.sort(), ["composerProductPick", "composerProductSearch", "composerQuickReplies", "composerQuickReplyText"], "bốn lối của ô soạn đều nhận hội thoại");
+  // Thân hàm mở bằng «{» cuối dòng chữ ký — ngoặc của kiểu trả về (`InboxResult<{ … }>`) nằm giữa dòng, không cuối dòng.
+  const firstStatement = (src: string, fn: string) => {
+    const from = src.indexOf(`export async function ${fn}(`);
+    assert.ok(from >= 0, `không thấy hàm ${fn}`);
+    const open = src.indexOf("{\n", from);
+    return src.slice(open + 2, open + 200).trimStart();
+  };
+  for (const name of exported) assert.match(firstStatement(composer, name), /^const g = await replyGate\(user, conversationId\);/, `${name}: lệnh đầu tiên là cổng chung`);
+  const inbox = readFileSync("lib/sales-chatbot/inbox.ts", "utf8");
+  assert.match(firstStatement(inbox, "sendStaffReplyCore"), /^const gate = await replyGate\(user, conversationId\);/, "«Gửi» đi qua ĐÚNG cổng chung");
+}
+
 // ─────────────────────────── CSDL ───────────────────────────
 
 type Seeded = {
@@ -116,7 +150,7 @@ type Seeded = {
   conv: string;
   conv2: string;
   testConv: string;
-  qr: { photo: string; price: string; off: string; ship: string; unknownStock: string; mark: string; long: string };
+  qr: { photo: string; price: string; off: string; ship: string; unknownStock: string; mark: string; long: string; negStock: string; okStock: string };
   v: { muc: string; kg: string; norec: string; noprice: string; am: string; removed: string; hidden: string; goneProduct: string; mark: string; jar: string };
 };
 
@@ -129,8 +163,9 @@ async function adminOf(org: string): Promise<SessionUser> {
   return { id: u.id, email: u.email, name: u.name, role: "ADMIN", permissions: [], scope: "ALL", departmentCodes: [], positionId: null, organization: { code: org, name: org, isHome: false } };
 }
 
-function staffOf(org: string, id: string, permissions: string[], modules?: string[]): SessionUser {
-  return { id, email: `${id}@${org}.local`, name: id, role: "CS", permissions, scope: "ALL", departmentCodes: [], positionId: null, organization: { code: org, name: org, isHome: false }, ...(modules ? { modules } : {}) };
+function staffOf(org: string, id: string, permissions: string[], opts: { modules?: string[]; scope?: SessionUser["scope"] } = {}): SessionUser {
+  const scope = opts.scope ?? "ALL";
+  return { id, email: `${id}@${org}.local`, name: id, role: "CS", permissions, scope, departmentCodes: scope === "ALL" ? [] : ["SALES"], positionId: null, organization: { code: org, name: org, isHome: false }, ...(opts.modules ? { modules: opts.modules } : {}) };
 }
 
 async function seed(org: string): Promise<Seeded> {
@@ -197,6 +232,7 @@ async function seed(org: string): Promise<Seeded> {
     const [conv] = await db.insert(c).values({ channel: "FANPAGE", status: "OPEN", visitorKey: `${org}-t1`, pageId: PAGE, threadId: `${org}-t1`, lastCustomerAt: new Date() }).returning({ id: c.id });
     const [conv2] = await db.insert(c).values({ channel: "FANPAGE", status: "OPEN", visitorKey: `${org}-t2`, pageId: PAGE_2, threadId: `${org}-t2`, lastCustomerAt: new Date() }).returning({ id: c.id });
     const [testConv] = await db.insert(c).values({ channel: "TEST", status: "OPEN", createdBy: admin.email }).returning({ id: c.id });
+    await db.insert(c).values({ id: LONG_CONV_ID, channel: "FANPAGE", status: "OPEN", visitorKey: `${org}-t-dai`, pageId: PAGE, threadId: `${org}-t-dai`, lastCustomerAt: new Date() });
 
     const qr = async (title: string, triggers: string[], answer: string, active = true) => {
       const r = await saveQuickReply(admin, { title, triggers, answer, active });
@@ -219,6 +255,8 @@ async function seed(org: string): Promise<Seeded> {
         unknownStock: await qr("Tồn chả mực", ["còn hàng không"], "Còn {{tồn:OS-NOREC}} hộp ạ."),
         mark: await qr(`Câu riêng ${MARK}`, ["câu riêng"], `Nội dung riêng ${MARK}.`),
         long: await qr("Chính sách đổi trả", ["đổi trả thế nào"], LONG_ANSWER),
+        negStock: await qr("Tồn hộp 300g", ["hộp 300g còn không"], "Còn {{tồn:OS-AM}} hộp ạ."),
+        okStock: await qr("Tồn hộp 500g", ["hộp 500g còn không"], "Còn {{tồn:OS-MUC}} hộp ạ."),
       },
       v,
     };
@@ -252,36 +290,41 @@ async function cleanup() {
   invalidateCapabilities();
 }
 
-/** Quyết định của «Gửi» cho một người — hội thoại không tồn tại, nên qua được cổng là dừng ở «Không có hội thoại này», không ghi gì. */
-async function sendDecision(u: SessionUser): Promise<"ALLOW" | "DENY"> {
-  const r = await sendStaffReplyCore(u, "khong-co-hoi-thoai-nay", { text: "Dạ", requestKey: "kiem-quyen-o-soan" });
+/**
+ * Quyết định của «Gửi» trên hội thoại THẬT: chữ rỗng ⇒ qua cổng (quyền + nạp hội thoại) rồi dừng ở «Tin trống», không gửi gì. Mọi
+ * kiểm «Gửi» thêm SAU bước nạp hội thoại đều hiện ra ở đây (bản cũ gọi trên hội thoại không tồn tại nên không thấy chúng).
+ */
+async function sendDecision(u: SessionUser, conv: string): Promise<"ALLOW" | "DENY"> {
+  const r = await sendStaffReplyCore(u, conv, { text: "", requestKey: "kiem-quyen-o-soan" });
   assert.ok(!r.ok);
-  return r.error === NOT_FOUND ? "ALLOW" : "DENY";
+  if (r.error === PASSED_GATE) return "ALLOW";
+  assert.ok(DENIED.includes(r.error), `«Gửi» trả một câu ngoài dự kiến: ${r.error}`);
+  return "DENY";
 }
 
 async function composerDecisions(u: SessionUser, s: Seeded): Promise<("ALLOW" | "DENY")[]> {
-  const out = [await composerQuickReplies(u, ""), await composerQuickReplyText(u, s.conv, s.qr.photo), await composerProductSearch(u, s.conv, "cha muc"), await composerProductPick(u, s.conv, s.v.muc)];
+  const out = [await composerQuickReplies(u, s.conv, ""), await composerQuickReplyText(u, s.conv, s.qr.photo), await composerProductSearch(u, s.conv, "cha muc"), await composerProductPick(u, s.conv, s.v.muc)];
   return out.map((r) => (r.ok ? "ALLOW" : "DENY"));
 }
 
 async function testQuickReplies(org: string, s: Seeded) {
   const staff = staffOf(org, "nv-tra-loi", ["ai_sales:view", "ai_sales:reply"]);
   await withOrganization(org, async () => {
-    const all = await composerQuickReplies(staff, "");
+    const all = await composerQuickReplies(staff, s.conv, "");
     assert.ok(all.ok, JSON.stringify(all));
-    assert.equal(all.total, 6, "chỉ câu ĐANG BẬT (6 bật · 1 tắt)");
-    assert.equal(all.items.length, 6);
+    assert.equal(all.total, 8, "chỉ câu ĐANG BẬT (8 bật · 1 tắt)");
+    assert.equal(all.items.length, 8);
     assert.ok(!all.items.some((i) => i.id === s.qr.off), "câu đã tắt không có trong danh sách");
     const photo = all.items.find((i) => i.id === s.qr.photo);
     assert.ok(photo && photo.imageCount === 2 && !photo.needsErp && photo.preview === "Để ngăn đá được 3 tháng ạ.", JSON.stringify(photo));
     assert.ok(all.items.find((i) => i.id === s.qr.price)?.needsErp, "câu có chỗ trống ⇒ báo điền số ERP lúc bấm");
     const longQr = all.items.find((i) => i.id === s.qr.long);
     assert.ok(longQr && longQr.preview.endsWith("…") && Array.from(longQr.preview).length <= COMPOSER_LIMITS.previewChars + 1 && LONG_ANSWER.startsWith(longQr.preview.slice(0, -1)), `câu dài ⇒ chỉ hiện đoạn đầu: ${JSON.stringify(longQr?.preview)}`);
-    const filtered = await composerQuickReplies(staff, "bao quan");
-    assert.ok(filtered.ok && filtered.items.length === 1 && filtered.total === 6, "`total` là số câu ĐANG BẬT, không phải số câu khớp — trang phân biệt «chưa có câu nào» với «không câu nào khớp»");
+    const filtered = await composerQuickReplies(staff, s.conv, "bao quan");
+    assert.ok(filtered.ok && filtered.items.length === 1 && filtered.total === 8, "`total` là số câu ĐANG BẬT, không phải số câu khớp — trang phân biệt «chưa có câu nào» với «không câu nào khớp»");
 
     const ids = async (q: string) => {
-      const r = await composerQuickReplies(staff, q);
+      const r = await composerQuickReplies(staff, s.conv, q);
       assert.ok(r.ok, JSON.stringify(r));
       return r.items.map((i) => i.id);
     };
@@ -289,7 +332,7 @@ async function testQuickReplies(org: string, s: Seeded) {
     assert.deepEqual(await ids("BẢO QUẢN"), [s.qr.photo]);
     assert.deepEqual(await ids("bảo qu"), [s.qr.photo], "gõ dở vẫn ra");
     assert.deepEqual((await ids("cha muc")).sort(), [s.qr.price, s.qr.unknownStock].sort());
-    const long = await composerQuickReplies(staff, "x".repeat(COMPOSER_LIMITS.queryChars + 1));
+    const long = await composerQuickReplies(staff, s.conv, "x".repeat(COMPOSER_QUERY.max + 1));
     assert.ok(!long.ok && /tối đa 200 ký tự/.test(long.error), JSON.stringify(long));
 
     // Chữ chèn — đọc lúc bấm, bằng đúng hàm + cấu hình bot dùng cho hội thoại đó.
@@ -301,6 +344,10 @@ async function testQuickReplies(org: string, s: Seeded) {
     assert.ok(!off.ok && /không còn bật/.test(off.error), "câu đã tắt không chèn được dù biết mã");
     const unknown = await composerQuickReplyText(staff, s.conv, s.qr.unknownStock);
     assert.ok(!unknown.ok && /số đọc từ ERP/.test(unknown.error), "tồn CHƯA BIẾT ⇒ không chèn (không in thành 0)");
+    const neg = await composerQuickReplyText(staff, s.conv, s.qr.negStock);
+    assert.ok(!neg.ok && /số đọc từ ERP/.test(neg.error), `tồn ÂM ⇒ coi là thiếu số, không chèn «Còn -2 hộp»: ${JSON.stringify(neg)}`);
+    const okStock = await composerQuickReplyText(staff, s.conv, s.qr.okStock);
+    assert.ok(okStock.ok && okStock.text === "Còn 10 hộp ạ.", JSON.stringify(okStock));
     const noShip = await composerQuickReplyText(staff, s.conv, s.qr.ship);
     assert.ok(!noShip.ok && /số đọc từ ERP/.test(noShip.error), "phí ship chưa khai ⇒ không chèn câu có {{ship}}");
     // Phí ship: tổ chức 25.000, page của hội thoại 1 đè 30.000 ⇒ mỗi hội thoại đúng số bot sẽ nói trong hội thoại đó.
@@ -311,15 +358,28 @@ async function testQuickReplies(org: string, s: Seeded) {
     assert.ok(ship1.ok && ship1.text === `Phí ship ${formatVND(30_000)} ạ.`, JSON.stringify(ship1));
     assert.ok(ship2.ok && ship2.text === `Phí ship ${formatVND(25_000)} ạ.`, JSON.stringify(ship2));
     await setSettingJson(PAGE_OVERRIDES_SETTING_KEY, {});
+    // Shop bán không kiểm tồn ⇒ ô soạn không chèn câu có {{tồn}} (câu không có {{tồn}} vẫn chèn được).
+    await setSettingJson(SALES_CHATBOT_SETTING_KEY, { ...DEFAULT_SALES_CHATBOT_CONFIG, sellWithoutStockCheck: true });
+    const noCheck = await composerQuickReplyText(staff, s.conv, s.qr.okStock);
+    assert.ok(!noCheck.ok && /không cần kiểm tồn/.test(noCheck.error), `bán không kiểm tồn ⇒ không chèn số tồn: ${JSON.stringify(noCheck)}`);
+    assert.ok((await composerQuickReplyText(staff, s.conv, s.qr.price)).ok, "câu không có {{tồn}} không bị ảnh hưởng");
     await setSettingJson(SALES_CHATBOT_SETTING_KEY, { ...DEFAULT_SALES_CHATBOT_CONFIG });
+
+    // Đường BOT gửi khách (`renderQuickAnswer`): tồn ÂM ⇒ thiếu số ⇒ bot không gửi câu mẫu (lỗi có sẵn, vá cùng lượt này);
+    // bán không kiểm tồn KHÔNG đổi hành vi bot — đó là quyết định của shop, hàm này không đọc cờ ấy.
+    assert.equal(await renderQuickAnswer("Còn {{tồn:OS-AM}} hộp ạ.", { shippingFee: null }), null, "bot không gửi «Còn -2 hộp ạ»");
+    assert.equal(await renderQuickAnswer("Còn {{tồn:OS-MUC}} hộp ạ.", { shippingFee: null }), "Còn 10 hộp ạ.");
+    assert.equal(await renderQuickAnswer("Còn {{tồn:OS-MUC-1KG}} hộp ạ.", { shippingFee: null }), "Còn 0 hộp ạ.", "tồn 0 THẬT vẫn là một con số (khác tồn âm)");
 
     for (const [conv, why] of [
       [s.testConv, "hội thoại khung thử"],
       ["khong-co", "hội thoại không có"],
       [123, "mã không phải chữ"],
+      [LONG_CONV_ID, "mã dài quá 100 ký tự (có thật trong CSDL)"],
     ] as const) {
       const r = await composerQuickReplyText(staff, conv, s.qr.photo);
-      assert.ok(!r.ok && r.error === NOT_FOUND, `${why} ⇒ từ chối`);
+      const l = await composerQuickReplies(staff, conv, "");
+      assert.ok(!r.ok && r.error === NOT_FOUND && !l.ok && l.error === NOT_FOUND, `${why} ⇒ từ chối`);
     }
   });
 }
@@ -332,6 +392,7 @@ async function testProducts(org: string, s: Seeded) {
     assert.ok(r.ok, JSON.stringify(r));
     const byId = new Map(r.items.map((i) => [i.variantId, i]));
     assert.deepEqual([...byId.keys()].sort(), [s.v.muc, s.v.kg, s.v.norec, s.v.noprice, s.v.am].sort(), "chỉ mẫu mã ĐANG BÁN — gỡ / ẩn / sản phẩm đã gỡ không ra");
+    assert.ok(r.items.every((i) => !("stockState" in i) && !("stockSay" in i)), "lượt TÌM không mang tồn — tồn chỉ đọc lúc bấm");
 
     // MỘT nguồn giá: so với đúng công cụ bot gọi để báo giá, cùng cấu hình của page của hội thoại.
     const cfg = await loadSalesChatbotConfigFor(PAGE);
@@ -340,7 +401,7 @@ async function testProducts(org: string, s: Seeded) {
       assert.ok(!bot.isError, bot.content);
       return (JSON.parse(bot.content) as { results: { variant_id: string; price: number | null; price_text: string }[] }).results;
     };
-    const samePrices = (mine: readonly ComposerProduct[], botRows: Awaited<ReturnType<typeof botSearch>>, why: string) => {
+    const samePrices = (mine: readonly ComposerProductHit[], botRows: Awaited<ReturnType<typeof botSearch>>, why: string) => {
       assert.ok(botRows.length > 0, `${why}: bot thấy mẫu mã`);
       assert.deepEqual(mine.slice(0, botRows.length).map((i) => i.variantId), botRows.map((x) => x.variant_id), `${why}: cùng thứ tự với bot`);
       for (const [i, x] of botRows.entries()) {
@@ -360,58 +421,75 @@ async function testProducts(org: string, s: Seeded) {
     assert.ok(byField.ok && byField.items.map((i) => i.variantId).join() === s.v.jar, JSON.stringify(byField));
     samePrices(byField.items, await botSearch("thuy tinh"), "«thuy tinh»");
 
-    const line = (id: string) => byId.get(id)?.line;
-    const order = [s.v.muc, s.v.kg, s.v.norec, s.v.noprice, s.v.am];
-    assert.deepEqual(order.map((id) => byId.get(id)?.stockState), ["IN_STOCK", "OUT_OF_STOCK", "UNKNOWN", "IN_STOCK", "NEGATIVE"]);
-    assert.deepEqual(order.map((id) => byId.get(id)?.stockSay), ["còn hàng", "hết hàng", null, "còn hàng", null], "chữ tồn trang hiện = chữ tồn trong dòng chèn");
-    assert.equal(line(s.v.muc), `Chả mực Hạ Long · Hộp 500g — ${formatVND(180_000)} · còn hàng`);
-    assert.equal(line(s.v.kg), `Chả mực Hạ Long · Hộp 1kg — ${formatVND(350_000)} · hết hàng`);
-    assert.equal(line(s.v.norec), `Chả mực Hạ Long · Hộp 200g — ${formatVND(120_000)}`, "chưa có phiếu nhập ⇒ không nói gì về tồn");
-    assert.match(byId.get(s.v.norec)?.stockNote ?? "", /phiếu nhập/);
-    assert.equal(line(s.v.noprice), "Chả mực Hạ Long · Hộp nhỏ — còn hàng", "chưa có giá ⇒ không in giá (không bao giờ «0 ₫»)");
+    // Dòng của lượt tìm: chưa có vế tồn.
+    const hitLine = (id: string) => byId.get(id)?.line;
+    assert.equal(hitLine(s.v.muc), `Chả mực Hạ Long · Hộp 500g — ${formatVND(180_000)}`);
+    assert.equal(hitLine(s.v.noprice), "Chả mực Hạ Long · Hộp nhỏ", "chưa có giá ⇒ không in giá (không bao giờ «0 ₫»)");
     assert.ok(byId.get(s.v.noprice)?.price === null && byId.get(s.v.noprice)?.priceText === null);
-    assert.equal(line(s.v.am), `Chả mực Hạ Long · Hộp 300g — ${formatVND(90_000)}`, "tồn âm ⇒ không nói tồn");
-    assert.match(byId.get(s.v.am)?.stockNote ?? "", /ÂM/);
     assert.equal(r.priceNote, null, "shop không bật giá sỉ ⇒ không ghi chú giá");
 
-    // Bấm ⇒ đọc lại lúc bấm: giá đổi sau lượt tìm thì dòng chèn mang giá MỚI.
-    const pick = await composerProductPick(staff, s.conv, s.v.muc);
-    assert.ok(pick.ok && pick.product.line === line(s.v.muc), JSON.stringify(pick));
+    // Bấm ⇒ đọc ĐÍCH DANH mẫu mã đó: giá + tồn lúc bấm.
+    const picked = async (id: string) => {
+      const x = await composerProductPick(staff, s.conv, id);
+      assert.ok(x.ok, `bấm ${id}: ${JSON.stringify(x)}`);
+      return x.product;
+    };
+    const order = [s.v.muc, s.v.kg, s.v.norec, s.v.noprice, s.v.am];
+    const products = await Promise.all(order.map(picked));
+    assert.deepEqual(products.map((p) => p.stockState), ["IN_STOCK", "OUT_OF_STOCK", "UNKNOWN", "IN_STOCK", "NEGATIVE"]);
+    assert.deepEqual(products.map((p) => p.stockSay), ["còn hàng", "hết hàng", null, "còn hàng", null], "chữ tồn trang hiện = chữ tồn trong dòng chèn");
+    assert.deepEqual(
+      products.map((p) => p.line),
+      [
+        `Chả mực Hạ Long · Hộp 500g — ${formatVND(180_000)} · còn hàng`,
+        `Chả mực Hạ Long · Hộp 1kg — ${formatVND(350_000)} · hết hàng`,
+        `Chả mực Hạ Long · Hộp 200g — ${formatVND(120_000)}`,
+        "Chả mực Hạ Long · Hộp nhỏ — còn hàng",
+        `Chả mực Hạ Long · Hộp 300g — ${formatVND(90_000)}`,
+      ],
+      "tồn chưa biết / âm ⇒ không nói tồn; chưa có giá ⇒ không in giá",
+    );
+    assert.match(products[2].stockNote ?? "", /phiếu nhập/);
+    assert.match(products[4].stockNote ?? "", /ÂM/);
+    // Giá đổi sau lượt tìm ⇒ dòng chèn mang giá MỚI.
     await db.update(schema.productVariants).set({ retailPrice: 190_000 }).where(eq(schema.productVariants.id, s.v.muc));
-    const repriced = await composerProductPick(staff, s.conv, s.v.muc);
-    assert.ok(repriced.ok && repriced.product.line === `Chả mực Hạ Long · Hộp 500g — ${formatVND(190_000)} · còn hàng`, JSON.stringify(repriced));
-    // Ẩn sau lượt tìm ⇒ không chèn; mã đã gỡ / ẩn / không có / sai kiểu ⇒ không chèn.
+    assert.equal((await picked(s.v.muc)).line, `Chả mực Hạ Long · Hộp 500g — ${formatVND(190_000)} · còn hàng`);
+    // Ẩn sau lượt tìm ⇒ không chèn; mã đã gỡ / ẩn / không có / sai kiểu / rỗng ⇒ không chèn.
     await db.update(schema.productVariants).set({ isHidden: true }).where(eq(schema.productVariants.id, s.v.kg));
-    for (const id of [s.v.kg, s.v.removed, s.v.hidden, s.v.goneProduct, "khong-co", 42]) {
+    for (const id of [s.v.kg, s.v.removed, s.v.hidden, s.v.goneProduct, "khong-co", 42, ""]) {
       const x = await composerProductPick(staff, s.conv, id);
       assert.ok(!x.ok && /không còn bán/.test(x.error), `mẫu mã ${String(id)} không chèn được`);
     }
     await db.update(schema.productVariants).set({ isHidden: false }).where(eq(schema.productVariants.id, s.v.kg));
 
-    // Shop bán không kiểm tồn ⇒ không một chữ tồn nào, cả lúc tìm lẫn lúc bấm.
-    await setSettingJson(SALES_CHATBOT_SETTING_KEY, { ...DEFAULT_SALES_CHATBOT_CONFIG, sellWithoutStockCheck: true, wholesalePricing: true });
-    const open = await composerProductSearch(staff, s.conv, "cha muc");
-    assert.ok(open.ok && open.items.length === 5, JSON.stringify(open));
-    const says = (items: readonly ComposerProduct[]) => items.filter((i) => i.stockSay !== null || /còn hàng|hết hàng/.test(i.line));
-    assert.deepEqual(says(open.items), [], "bán không kiểm tồn ⇒ không «còn hàng» / «hết hàng»");
-    assert.ok(open.items.every((i) => i.stockState === "NOT_CHECKED" && /không cần kiểm tồn/.test(i.stockNote ?? "")), "KHÔNG ÁP DỤNG, không phải CHƯA BIẾT");
-    assert.match(open.priceNote ?? "", /giá LẺ/i, "bật giá sỉ ⇒ nói rõ đây là giá lẻ");
-    const pickOpen = await composerProductPick(staff, s.conv, s.v.muc);
-    assert.ok(pickOpen.ok && pickOpen.product.stockSay === null && pickOpen.product.stockState === "NOT_CHECKED" && pickOpen.product.line === `Chả mực Hạ Long · Hộp 500g — ${formatVND(190_000)}`, JSON.stringify(pickOpen));
+    // Shop bật giá sỉ ⇒ «(giá lẻ)» ngay trong dòng — lúc tìm lẫn lúc bấm (chân bảng không đi theo dòng đã chèn).
+    await setSettingJson(SALES_CHATBOT_SETTING_KEY, { ...DEFAULT_SALES_CHATBOT_CONFIG, wholesalePricing: true });
+    const ws = await composerProductSearch(staff, s.conv, "cha muc");
+    assert.ok(ws.ok && /giá LẺ/i.test(ws.priceNote ?? ""), "bật giá sỉ ⇒ chân bảng nói rõ đây là giá lẻ");
+    assert.equal(ws.items.find((i) => i.variantId === s.v.muc)?.line, `Chả mực Hạ Long · Hộp 500g — ${formatVND(190_000)} ${COMPOSER_RETAIL_MARK}`);
+    assert.equal(ws.items.find((i) => i.variantId === s.v.noprice)?.line, "Chả mực Hạ Long · Hộp nhỏ", "không có giá ⇒ không có «(giá lẻ)»");
+    assert.equal((await picked(s.v.muc)).line, `Chả mực Hạ Long · Hộp 500g — ${formatVND(190_000)} ${COMPOSER_RETAIL_MARK} · còn hàng`);
+
+    // Shop bán không kiểm tồn ⇒ không một chữ tồn nào lúc bấm.
+    await setSettingJson(SALES_CHATBOT_SETTING_KEY, { ...DEFAULT_SALES_CHATBOT_CONFIG, sellWithoutStockCheck: true });
+    const noCheck = await Promise.all(order.map(picked));
+    assert.deepEqual(noCheck.filter((p) => p.stockSay !== null || /còn hàng|hết hàng/.test(p.line)), [], "bán không kiểm tồn ⇒ không «còn hàng» / «hết hàng»");
+    assert.ok(noCheck.every((p) => p.stockState === "NOT_CHECKED" && /không cần kiểm tồn/.test(p.stockNote ?? "")), "KHÔNG ÁP DỤNG, không phải CHƯA BIẾT");
     await setSettingJson(SALES_CHATBOT_SETTING_KEY, { ...DEFAULT_SALES_CHATBOT_CONFIG });
 
-    // Từ khoá: rỗng / chỉ khoảng trắng / quá 200 ký tự ⇒ lỗi rõ; đúng 200 ký tự vẫn tìm.
-    for (const q of ["", "   ", undefined]) {
+    // Từ khoá: dưới 2 ký tự / chỉ khoảng trắng / quá 200 ký tự ⇒ lỗi rõ; đúng 2 và đúng 200 ký tự vẫn tìm.
+    for (const q of ["", "   ", undefined, "a", "  a  "]) {
       const x = await composerProductSearch(staff, s.conv, q);
-      assert.ok(!x.ok && /Gõ tên sản phẩm/.test(x.error), `từ khoá ${JSON.stringify(q)}`);
+      assert.ok(!x.ok && /ít nhất 2 ký tự/.test(x.error), `từ khoá ${JSON.stringify(q)}`);
     }
-    const tooLong = await composerProductSearch(staff, s.conv, "a".repeat(COMPOSER_LIMITS.queryChars + 1));
+    assert.ok((await composerProductSearch(staff, s.conv, "ch")).ok, `đúng ${COMPOSER_QUERY.productMin} ký tự vẫn tìm`);
+    const tooLong = await composerProductSearch(staff, s.conv, "a".repeat(COMPOSER_QUERY.max + 1));
     assert.ok(!tooLong.ok && /tối đa 200 ký tự/.test(tooLong.error));
-    assert.ok((await composerProductSearch(staff, s.conv, "a".repeat(COMPOSER_LIMITS.queryChars))).ok, "đúng trần vẫn tìm");
-    for (const conv of [s.testConv, "khong-co"]) {
+    assert.ok((await composerProductSearch(staff, s.conv, "a".repeat(COMPOSER_QUERY.max))).ok, "đúng trần vẫn tìm");
+    for (const conv of [s.testConv, "khong-co", LONG_CONV_ID]) {
       const x = await composerProductSearch(staff, conv, "cha muc");
       const y = await composerProductPick(staff, conv, s.v.muc);
-      assert.ok(!x.ok && x.error === NOT_FOUND && !y.ok && y.error === NOT_FOUND, "hội thoại khung thử / không có ⇒ từ chối");
+      assert.ok(!x.ok && x.error === NOT_FOUND && !y.ok && y.error === NOT_FOUND, "hội thoại khung thử / không có / mã quá dài ⇒ từ chối");
     }
   });
 }
@@ -425,19 +503,22 @@ async function testPermissions(org: string, s: Seeded) {
     ["chỉ trả lời, không xem", staffOf(org, "nv-tl", ["ai_sales:reply"]), "DENY"],
     ["xem + trả lời", staffOf(org, "nv-xem-tl", ["ai_sales:view", "ai_sales:reply"]), "ALLOW"],
     ["xem + gửi tin chăm sóc", staffOf(org, "nv-xem-cs", ["ai_sales:view", "outreach:send"]), "ALLOW"],
+    // Phạm vi dữ liệu không thu hẹp quyền trả lời (hộp thư chưa có luật phạm vi) — siết luật ở cổng chung phải làm ca này đỏ.
+    ["xem + trả lời, phạm vi phòng ban", staffOf(org, "nv-pb", ["ai_sales:view", "ai_sales:reply"], { scope: "DEPARTMENT" }), "ALLOW"],
     ["quản trị", s.admin, "ALLOW"],
-    ["phiên thật đủ quyền nhưng module ai_sales tắt trong phiên", staffOf(org, "nv-tat", ["ai_sales:view", "ai_sales:reply"], withoutAi), "DENY"],
+    ["phiên thật đủ quyền nhưng module ai_sales tắt trong phiên", staffOf(org, "nv-tat", ["ai_sales:view", "ai_sales:reply"], { modules: withoutAi }), "DENY"],
     ["quản trị, module ai_sales tắt trong phiên", { ...s.admin, modules: withoutAi }, "DENY"],
   ];
   await withOrganization(org, async () => {
     for (const [why, u, expected] of matrix) {
-      const send = await sendDecision(u);
+      const send = await sendDecision(u, s.conv);
       assert.equal(send, expected, `«Gửi» với ${why}`);
       assert.deepEqual(await composerDecisions(u, s), [send, send, send, send], `công cụ ô soạn đòi ĐÚNG quyền của «Gửi» — ${why}`);
     }
   });
 }
 
+/** Module AI bán hàng tắt ở TỔ CHỨC ⇒ phiên dựng lại (danh sách module không còn `ai_sales`) bị từ chối ở «Gửi» lẫn ô soạn. */
 async function testModuleOff(org: string, s: Seeded) {
   await setModule(org, "ai_sales", false);
   try {
@@ -445,12 +526,11 @@ async function testModuleOff(org: string, s: Seeded) {
       const enabled = [...(await getEnabledModules(org))];
       assert.ok(!enabled.includes("ai_sales"));
       const session = { ...s.admin, modules: enabled };
-      assert.equal(await sendDecision(session), "DENY", "«Gửi» từ chối khi module tắt");
-      for (const u of [session, s.admin]) {
-        const r = await composerQuickReplies(u, "");
-        assert.ok(!r.ok && /Module AI bán hàng chưa bật/.test(r.error), JSON.stringify(r));
-        assert.deepEqual(await composerDecisions(u, s), ["DENY", "DENY", "DENY", "DENY"], "module tắt ⇒ mọi công cụ ô soạn từ chối, kể cả người dựng tay không mang danh sách module");
-      }
+      assert.equal(await sendDecision(session, s.conv), "DENY", "«Gửi» từ chối khi module tắt");
+      assert.deepEqual(await composerDecisions(session, s), ["DENY", "DENY", "DENY", "DENY"], "module tắt ⇒ mọi công cụ ô soạn từ chối, như mọi action hộp thư");
+      // Người dựng tay KHÔNG mang danh sách module (chỉ có ở kiểm thử / script): ô soạn quyết y như «Gửi» — một cổng, một đáp án.
+      const bare = await sendDecision(s.admin, s.conv);
+      assert.deepEqual(await composerDecisions(s.admin, s), [bare, bare, bare, bare], "người dựng tay: ô soạn ≡ «Gửi»");
     });
   } finally {
     await setModule(org, "ai_sales", true);
@@ -461,9 +541,10 @@ async function attack(attacker: string, admin: SessionUser, own: Seeded, victimC
   const leaks: string[] = [];
   const victimMark = markOf(victimCode);
   await withOrganization(attacker, async () => {
-    const list = await composerQuickReplies(admin, "");
+    const list = await composerQuickReplies(admin, own.conv, "");
     if (!list.ok || JSON.stringify(list).includes(victimMark)) leaks.push("danh sách câu mẫu lẫn của tổ chức khác");
-    if ((await composerQuickReplies(admin, "cau rieng")).ok === false) leaks.push("lọc câu mẫu hỏng");
+    if ((await composerQuickReplies(admin, own.conv, "cau rieng")).ok === false) leaks.push("lọc câu mẫu hỏng");
+    if ((await composerQuickReplies(admin, victim.conv, "")).ok) leaks.push("dùng được hội thoại của tổ chức khác (danh sách câu mẫu)");
     if ((await composerQuickReplyText(admin, own.conv, victim.qr.mark)).ok) leaks.push("chèn được câu mẫu của tổ chức khác");
     if ((await composerQuickReplyText(admin, victim.conv, own.qr.photo)).ok) leaks.push("dùng được hội thoại của tổ chức khác (câu mẫu)");
     const search = await composerProductSearch(admin, own.conv, "hang rieng");
@@ -480,6 +561,7 @@ async function attack(attacker: string, admin: SessionUser, own: Seeded, victimC
 
 export async function testInboxComposer() {
   testPure();
+  testOneGate();
   await cleanup();
   for (const code of ORGS) {
     await provisionOrganization({ code, name: `Tổ chức ${code}`, plan: "standard", modules: ["customers", "products", "orders", "inventory", "ai_sales"], admin: { email: `admin@${code}.local`, name: `QT ${code}`, password: "OSoan@123456" }, source: "TEST", actor: null });
@@ -498,7 +580,7 @@ export async function testInboxComposer() {
       assert.deepEqual(await attack(attacker, own.admin, own, victimCode, victim), [], `${attacker} → ${victimCode}: phải bị từ chối / rỗng mọi đòn`);
     }
     console.log(
-      "  ✓ Ô soạn hộp thư: chèn tại con trỏ / nối cuối trên dòng riêng · câu mẫu ĐANG BẬT, lọc không dấu, số ảnh báo rõ (ảnh không kèm), chỗ trống điền số ERP lúc bấm theo cấu hình page (thiếu số ⇒ không chèn) · sản phẩm cùng giá + thứ tự với bot, gỡ / ẩn không ra, giá đọc lại lúc bấm, tồn chỉ «còn / hết» khi đọc được và không bật bán không kiểm tồn · từ khoá rỗng / quá dài ⇒ lỗi · quyền ≡ «Gửi» trên 8 ca, module tắt ⇒ từ chối · cô lập 2 chiều",
+      "  ✓ Ô soạn hộp thư: MỘT cổng với «Gửi» (mã nguồn + ma trận 9 ca trên hội thoại thật, gồm phạm vi phòng ban) · chèn tại con trỏ / nối cuối trên dòng riêng · câu mẫu ĐANG BẬT, lọc không dấu, ảnh không kèm, chỗ trống điền số ERP lúc bấm theo page (thiếu số / tồn âm / bán không kiểm tồn ⇒ không chèn; bot không gửi tồn âm) · sản phẩm cùng giá + thứ tự với bot, tìm ≥ 2 ký tự không đọc tồn, bấm đọc đích danh giá + tồn, «(giá lẻ)» khi bật giá sỉ · mã hội thoại > 100 / khung thử ⇒ từ chối · module tắt ⇒ từ chối · cô lập 2 chiều",
     );
   } finally {
     await cleanup();

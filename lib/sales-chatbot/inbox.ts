@@ -80,6 +80,7 @@ const MANAGE = "ai_sales:manage";
 
 const NO_VIEW = "Bạn không có quyền xem hội thoại (ai_sales:view).";
 const NO_REPLY = "Bạn không có quyền trả lời khách (ai_sales:reply).";
+const NO_CONVERSATION = "Không có hội thoại này.";
 
 /**
  * Trả lời khách = GỬI TIN cho khách. Khoá riêng `ai_sales:reply` (module AI bán hàng — tổ chức chỉ mua AI bán hàng vẫn có);
@@ -464,6 +465,20 @@ async function loadConv(id: unknown): Promise<ConvRow | null> {
   return row && row.channel !== "TEST" ? row : null;
 }
 
+/**
+ * CỔNG TRẢ LỜI KHÁCH — MỘT chỗ cho mọi lối nhân viên đưa chữ tới khách: «Gửi» (`sendStaffReplyCore`) và công cụ ô soạn
+ * (`inbox-composer.ts` — câu mẫu · dòng sản phẩm). Xem hộp thư → được trả lời khách → hội thoại có thật trong CSDL của tổ chức
+ * PHIÊN (không phải khung thử, mã ≤ 100 ký tự). Siết hay nới luật ở ĐÂY là siết / nới cho cả hai lối: review PR #661 bắt được
+ * bản chép của vị từ này trong ô soạn — sửa bản gốc thì bản chép không đổi theo, và bài kiểm vẫn xanh.
+ */
+export async function replyGate(user: SessionUser, conversationId: unknown): Promise<InboxResult<{ conv: ConvRow }>> {
+  if (!can(user, VIEW)) return { ok: false, error: NO_VIEW };
+  if (!canReplyTo(user)) return { ok: false, error: NO_REPLY };
+  const conv = await loadConv(conversationId);
+  if (!conv) return { ok: false, error: NO_CONVERSATION };
+  return { ok: true, conv };
+}
+
 /** Khung gửi của kênh tại `now` — xem `SendWindow`. */
 export function sendWindowOf(conv: Pick<ConvRow, "channel" | "lastCustomerAt">, now: Date): SendWindow {
   if (conv.channel === "WEB") return { kind: "OPEN", until: null, note: "Khách thấy tin khi mở lại khung chat trên website." };
@@ -658,13 +673,12 @@ export function checkStaffImages(channel: string, images: readonly StaffImageInp
  * Gửi chữ trước, ảnh sau; chữ đã tới khách thì ghi `text_sent_at` ⇒ bấm lại một tin hỏng ở phần ảnh chỉ gửi lại ẢNH.
  */
 export async function sendStaffReplyCore(user: SessionUser, conversationId: unknown, raw: unknown, deps: SendDeps = {}, rawImages: readonly StaffImageInput[] = []): Promise<InboxResult<{ messageId: string; reused: boolean }>> {
-  if (!can(user, VIEW)) return { ok: false, error: NO_VIEW };
-  if (!canReplyTo(user)) return { ok: false, error: NO_REPLY };
+  const gate = await replyGate(user, conversationId);
+  if (!gate.ok) return gate;
+  const conv = gate.conv;
   const parsed = sendZ.safeParse(raw);
   if (!parsed.success) return { ok: false, error: parsed.error.issues.map((i) => i.message).join(" · ") };
   const { text, requestKey, confirmPaid } = parsed.data;
-  const conv = await loadConv(conversationId);
-  if (!conv) return { ok: false, error: "Không có hội thoại này." };
   const checked = checkStaffImages(conv.channel, rawImages);
   if (!checked.ok) return checked;
   if (!text && !checked.images.length) return { ok: false, error: "Tin trống — gõ chữ hoặc chọn ảnh." };
