@@ -3,7 +3,7 @@
   "mission_id": "saas-v1-plan-migration",
   "title": "Chuyển tổ chức từ giá legacy sang bảng giá V1: báo cáo chạy thử theo từng tổ chức + chuyển có nhật ký",
   "business_goal": "",
-  "status": "RUNNING",
+  "status": "PR_READY",
   "priority": "P1",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -30,7 +30,18 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-08T08:16:54.954Z",
-  "updated_at": "2026-10-08T09:00:20.073Z",
-  "last_heartbeat": "2026-10-08T09:00:20.073Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-08T09:00:34.348Z",
+  "last_heartbeat": "2026-10-08T09:00:34.348Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "feat/v1-plan-migration",
+    "sha": "3796355a8bbb6e05f29af47e3c564b4b7694ef15",
+    "at": "2026-10-08T09:00:34.348Z",
+    "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+    "title": "Chuyển tổ chức từ giá legacy sang bảng giá V1: báo cáo chạy thử theo từng tổ chức + chuyển có nhật ký",
+    "summary": "Ops saas-v1-migration: chạy thử từng tổ chức (số dùng thật, gói V1 đề xuất qua smallestFittingPlan, giá cũ → mới, phần vượt, trần AI trước/sau, chặn); --apply ghim một tổ chức qua pinOrgPriceVersion có nhật ký SCRIPT, không bật thu phí / không hoá đơn / không dùng thử; sửa O1 thu đôi ghế ADDON (billableIncluded dùng chung cho bảng kê, màn khách, admin)",
+    "tests": [
+      "tsc + eslint sạch; saas-v1-migration (thuần + PGlite: chạy thử không ghi, từ chối gói nhỏ hơn số dùng, ghim đúng một tổ chức, thu phí tắt, không hoá đơn, bot BYOK không bị chặn, không thu đôi ghế) + pricing-billing, saas-platform, pricing-v1, saas-l5-billing-trial, saas-internal-plan, ai-balance-* đạt; hợp đồng tĩnh sau commit; đột biến 5/5; 0 ký tự vô hình"
+    ]
+  }
 }
