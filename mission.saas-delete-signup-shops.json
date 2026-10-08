@@ -3,7 +3,7 @@
   "mission_id": "saas-delete-signup-shops",
   "title": "Xoá các cửa hàng tự đăng ký cũ (chủ shop chốt 08/10) bằng ops có chạy thử + sao lưu trước",
   "business_goal": "",
-  "status": "RUNNING",
+  "status": "PR_READY",
   "priority": "P1",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -27,7 +27,18 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-08T07:41:17.624Z",
-  "updated_at": "2026-10-08T08:09:37.558Z",
-  "last_heartbeat": "2026-10-08T08:09:37.558Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-08T08:09:50.520Z",
+  "last_heartbeat": "2026-10-08T08:09:50.520Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "feat/org-offboard-delete",
+    "sha": "83df75b3cc04616284f51d17740450ff811d4ce0",
+    "at": "2026-10-08T08:09:50.520Z",
+    "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+    "title": "Xoá các cửa hàng tự đăng ký cũ (chủ shop chốt 08/10) bằng ops có chạy thử + sao lưu trước",
+    "summary": "Ops org-offboard: xoá tổ chức TỰ ĐĂNG KÝ (brand + chứng cứ /start, không dấu người vận hành), chặn khi có tiền thật / nhà / sai --confirm; mỗi bảng platform_* có quyết định XOÁ/GIỮ/CHẶN/CHUNG (bài kiểm đòi phủ đủ); nhật ký trước/sau, gỡ webhook Meta, DROP DATABASE không FORCE; mặc định chạy thử; kết quả mã hoá",
+    "tests": [
+      "tsc + eslint sạch; org-offboard (PGlite 4 tổ chức + nhà: chạy thử/từ chối không đổi băm 31 bảng, xoá đúng, idempotent, không PII) + ops-log-leak, ops-concurrency, restore-drill-config, repo-integrity, ai-balance + hợp đồng tĩnh đạt; đột biến 8/8; 0 ký tự vô hình"
+    ]
+  }
 }
