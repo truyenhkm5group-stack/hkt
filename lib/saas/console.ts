@@ -15,6 +15,8 @@ import { findAccountByCode, findAccountById, moveWorkspaceToAccount, openSubscri
 import { finalizeStatement } from "@/lib/saas/billing";
 import { PRODUCT_KEYS, productDef } from "@/lib/saas/catalog";
 import { accountAuditTrail, accountProvisioningJobs, finalizedStatements, loadCommercialSnapshot, moduleDrift, productEconomics, workspaceReach, type CommercialSnapshot, type CustomerView } from "@/lib/saas/customers";
+import type { CustomerHealth } from "@/lib/saas/customer-health";
+import { readCustomerHealth } from "@/lib/saas/customer-signals";
 import { productEntitlement, type ProductEntitlement } from "@/lib/saas/entitlements";
 import { COST_CATEGORIES, addCostEntry, listCostEntries, voidCostEntry } from "@/lib/saas/ledger";
 import { ACCOUNT_STATUSES, ACCOUNT_TYPES, BILLING_MODES } from "@/lib/saas/policy";
@@ -38,11 +40,17 @@ const period = z.string().refine(isPeriodMonth, "Kỳ phải có dạng YYYY-MM-
 
 // ─────────────────────────── Đọc ───────────────────────────
 
-export async function loadCustomersConsole(user: SessionUser, periodMonth?: string): Promise<(CommercialSnapshot & { mergeCandidates: { stem: string; accounts: string[] }[] }) | Denied> {
+/**
+ * Danh sách khách + SỨC KHOẺ từng khách (mức · lý do · chỗ chưa đo — `lib/saas/customer-health.ts`). Tín hiệu sức khoẻ đọc
+ * bằng vài câu gom ở CSDL nhà cho cả danh sách (`readCustomerHealth`), không mở CSDL tổ chức nào; mốc là LÚC ĐỌC, không theo kỳ.
+ */
+export async function loadCustomersConsole(user: SessionUser, periodMonth?: string): Promise<(CommercialSnapshot & { mergeCandidates: { stem: string; accounts: string[] }[]; health: Record<string, CustomerHealth>; healthAt: Date }) | Denied> {
   const denial = platformOperatorDenial(user);
   if (denial) return { error: denial };
   const snap = await loadCommercialSnapshot({ periodMonth: periodMonth && isPeriodMonth(periodMonth) ? periodMonth : undefined });
-  return { ...snap, mergeCandidates: accountMergeCandidates(snap.customers.map((c) => c.account)) };
+  const healthAt = new Date();
+  const health = await readCustomerHealth(snap.customers, healthAt);
+  return { ...snap, mergeCandidates: accountMergeCandidates(snap.customers.map((c) => c.account)), health, healthAt };
 }
 
 export type CustomerDetail = {
@@ -57,6 +65,9 @@ export type CustomerDetail = {
   statements: Awaited<ReturnType<typeof finalizedStatements>>;
   costEntries: Awaited<ReturnType<typeof listCostEntries>>;
   accounts: { id: string; code: string; name: string }[];
+  /** Sức khoẻ của khách này — cùng đường đọc + cùng hàm phân loại với danh sách. */
+  health: CustomerHealth;
+  healthAt: Date;
 };
 
 export async function loadCustomerDetail(user: SessionUser, accountCode: string, periodMonth?: string): Promise<CustomerDetail | Denied | null> {
@@ -72,9 +83,12 @@ export async function loadCustomerDetail(user: SessionUser, accountCode: string,
     entitlements[w.code] = await Promise.all(w.subscriptions.filter((s) => productDef(s.productKey)).map((s) => productEntitlement(w.code, s.productKey)));
     drift[w.code] = moduleDrift(await productsInUse(w.code).catch(() => []), w.subscriptions);
   }
-  const [reach, audit, jobs, statements, costEntries] = await Promise.all([workspaceReach(codes), accountAuditTrail(customer.account, codes), accountProvisioningJobs(customer.account, codes), finalizedStatements(customer.account.id), listCostEntries(snap.periodMonth)]);
+  const healthAt = new Date();
+  const [reach, audit, jobs, statements, costEntries, health] = await Promise.all([workspaceReach(codes), accountAuditTrail(customer.account, codes), accountProvisioningJobs(customer.account, codes), finalizedStatements(customer.account.id), listCostEntries(snap.periodMonth), readCustomerHealth([customer], healthAt)]);
   return {
     customer,
+    health: health[customer.account.id],
+    healthAt,
     periodMonth: snap.periodMonth,
     usdToVnd: snap.usdToVnd,
     entitlements,

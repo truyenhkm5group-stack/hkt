@@ -15,6 +15,7 @@ import { HEALTH_FLAG_LABEL, readPlans } from "@/lib/saas/customers";
 import { ACCOUNT_STATUS_LABEL, ACCOUNT_TYPE_LABEL, ACCOUNT_TYPE_TONE, BILLING_MODE_LABEL, SUBSCRIPTION_STATUS_LABEL, statementLabel, type AccountStatus, type AccountType, type BillingMode } from "@/lib/saas/policy";
 import { JOB_KIND_LABEL, JOB_STATUS_LABEL, type JobStatus, type JobStep, type ProvisioningKind } from "@/lib/saas/provisioning";
 import { STATEMENT_LINE_LABEL } from "@/lib/saas/statement";
+import { CustomerHealthPanel } from "@/components/saas/customer-health";
 import { runningVersion } from "@/lib/version";
 import { cn } from "@/lib/utils";
 
@@ -77,6 +78,9 @@ export default async function SaasCustomerPage({ params, searchParams }: { param
           </span>
         }
       />
+
+      {/* Sức khoẻ — cùng đường đọc + cùng hàm phân loại với danh sách khách */}
+      <CustomerHealthPanel health={d.health} now={d.healthAt} />
 
       {/* Tổng quan */}
       <SectionCard title="Tổng quan">
