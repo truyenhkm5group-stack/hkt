@@ -12,6 +12,7 @@
  *     nhánh từ sổ AI (cả `order-sync:` của nhánh người, lượt chưa định giá ⇒ cận dưới, dòng trước NGÀY vào nhánh không tính);
  *     không được xem tiền ⇒ mọi ô tiền AI `null` và sổ AI không bị đọc; khung «Chi phí AI & ROI» ra ĐÚNG số dựng tay.
  */
+import { parsePerfPeriod, perfPeriodParams } from "@/lib/sales-chatbot/performance-shared";
 import assert from "node:assert/strict";
 import { readFileSync, rmSync } from "node:fs";
 import { eq, inArray } from "drizzle-orm";
@@ -154,6 +155,24 @@ function testPure() {
   assert.deepEqual(parseDrillFilter({ days: "999", cohort: "XYZ", arm: "AI", reason: "WHOLESALE", confirmed: "1" }), { days: 30, cohort: null, arm: "AI", reason: "WHOLESALE", confirmed: true, lost: null, page: null });
   assert.equal(parseDrillFilter({ reason: "drop table" }).reason, null);
   assert.equal(drillHref({ days: 7, cohort: "AI_ONLY" }), "/ai/sales-chatbot/conversations?days=7&cohort=AI_ONLY");
+  // Kỳ của màn Hiệu quả (HSLC 08/10/2026): «Hôm nay» = days=1; tuỳ chỉnh from/to theo giờ VN, kết thúc trước hôm nay ⇒ có cận trên.
+  const nowVn = new Date("2026-10-08T05:00:00Z"); // 12:00 08/10 giờ VN
+  const homNay = parsePerfPeriod({ days: "1" }, nowVn);
+  assert.deepEqual([homNay.days, homNay.from, homNay.to, homNay.custom, homNay.until, homNay.label], [1, "2026-10-08", "2026-10-08", false, null, "Hôm nay"]);
+  assert.equal(parsePerfPeriod({ days: "999" }, nowVn).days, 30, "days lạ ⇒ 30");
+  const tuy = parsePerfPeriod({ from: "2026-10-01", to: "2026-10-07" }, nowVn);
+  assert.deepEqual([tuy.days, tuy.custom, tuy.label, tuy.until?.toISOString(), tuy.now.toISOString()], [7, true, "01/10/2026 → 07/10/2026", "2026-10-07T16:59:59.999Z", "2026-10-07T16:59:59.999Z"], "kỳ đã qua: now = 23:59:59 VN của ngày cuối, until = chính mốc ấy");
+  const toiNay = parsePerfPeriod({ from: "2026-10-06", to: "2026-10-08" }, nowVn);
+  assert.deepEqual([toiNay.days, toiNay.until, toiNay.now], [3, null, nowVn], "kỳ gồm hôm nay: không cận trên, now thật");
+  assert.equal(parsePerfPeriod({ from: "2026-10-09", to: "2026-10-10" }, nowVn).custom, false, "tương lai ⇒ bỏ, về mặc định");
+  assert.equal(parsePerfPeriod({ from: "2026-10-07", to: "2026-10-01" }, nowVn).custom, false, "từ > đến ⇒ bỏ");
+  assert.equal(parsePerfPeriod({ from: "2026-02-30", to: "2026-03-01" }, nowVn).custom, false, "ngày không có ⇒ bỏ");
+  assert.equal(parsePerfPeriod({ from: "2025-01-01", to: "2026-10-01" }, nowVn).custom, false, "quá 180 ngày ⇒ bỏ");
+  assert.deepEqual(perfPeriodParams(tuy), { from: "2026-10-01", to: "2026-10-07" });
+  assert.deepEqual(perfPeriodParams(homNay), { days: "1" });
+  const fd = parseDrillFilter({ from: "2026-10-01", to: "2026-10-07", cohort: "AI_ONLY" });
+  assert.deepEqual([fd.days, fd.from, fd.to, fd.cohort], [7, "2026-10-01", "2026-10-07", "AI_ONLY"], "drill nhận from/to, days dẫn xuất");
+  assert.equal(drillHref(fd), "/ai/sales-chatbot/conversations?from=2026-10-01&to=2026-10-07&cohort=AI_ONLY", "có from/to thì không ghi days");
   assert.equal(maskPhones("SĐT em 0912345678 nhé"), "SĐT em ••••678 nhé");
   assert.equal(maskPhones("+84 912 345 678"), "••••678");
   assert.equal(maskPhones("lấy 2 hộp 500g giá 250.000đ"), "lấy 2 hộp 500g giá 250.000đ", "không che số tiền / số lượng");

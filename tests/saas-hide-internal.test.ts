@@ -494,7 +494,6 @@ const EXEMPT: [string, string, string][] = [
   ["app/(dashboard)/settings/plan/page.tsx", "Lượt · token · tiền ƯỚC TÍNH theo bảng giá model", "Khung «Dùng AI» chỉ dựng khi `ai` khác null — `customerFacing(user.organization) ? null : loadOrgAiUsage(...)`."],
   ["app/(dashboard)/settings/plan/page.tsx", "không gọi model", "Câu gợi ý của cùng khung «Dùng AI» (chỉ nhà)."],
   ["app/(dashboard)/ai/sales-chatbot/page.tsx", "Anthropic / OpenAI) — tổ chức trả tiền token", "Câu gợi ý nhánh `customer ? … : (nhà)`."],
-  ["app/(dashboard)/ai/sales-chatbot/performance/page.tsx", "token thật × bảng giá model", "Khối «Chi phí AI & ROI» chỉ dựng khi `r.cost` khác null — khách: `withMoney = aiPerformanceWithMoney(...) = false` ⇒ `cost = null`."],
   ["app/(dashboard)/ai/sales-chatbot/performance/experiment-block.tsx", "token thật × bảng giá model", "Đoạn giải thích tiền AI của khối AI vs Người chỉ dựng khi `report.withMoney` — `loadExperimentReport({ withMoney: aiPerformanceWithMoney(user, manage) })`, khách ⇒ false ⇒ không đọc sổ AI."],
   ["app/(dashboard)/ai/sales-chatbot/page.tsx", "nhập Page ID và page access token", "Hướng dẫn nối fanpage qua Pancake — token của KÊNH do chính shop dán (chẩn đoán / cấu hình kết nối thật), không phải token AI."],
   ["app/(dashboard)/ai/sales-chatbot/page.tsx", "lấy refresh token ở API Explorer", "Hướng dẫn nối Zalo OA của chính shop — token của KÊNH, không phải token AI."],

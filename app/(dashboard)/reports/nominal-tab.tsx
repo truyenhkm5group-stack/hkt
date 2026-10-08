@@ -42,7 +42,7 @@ import { AdsCeilingTable } from "@/app/(dashboard)/reports/ads-ceiling-table";
 import { adsCeiling } from "@/lib/constants/estimated-cost";
 import { DELIVERY_RATE_MEASURED } from "@/lib/constants/delivery-rate";
 import { PROJECTED_GTC_VERSION } from "@/lib/constants/projected-delivery";
-import { TIME_BASES, TIME_BASIS_LABEL, TIME_BASIS_QUESTION, type TimeBasis } from "@/lib/constants/report-time-basis";
+import { TIME_BASES, TIME_BASIS_LABEL, type TimeBasis } from "@/lib/constants/report-time-basis";
 import { successTone } from "@/lib/constants/returns";
 import { ADS_EXCLUDED_NOTE, NO_ORDER_VALUE_FILTER, orderValueActive, orderValueLabel, type OrderValueFilter } from "@/lib/constants/order-value";
 import { OrderValueFilterControl } from "@/components/order-value-filter";
@@ -348,7 +348,6 @@ export async function NominalTab({
   const mktChon = daily.filter.marketerKey ? daily.marketers.find((m) => m.value === daily.filter.marketerKey) : null;
   const t = report.totals;
   const pj = t.projection;
-  const riskPct = report.assumptions.inventoryRiskPercent ?? DEFAULT_PROFIT_ASSUMPTIONS.inventoryRiskPercent;
 
   return (
     <div className="space-y-5">
@@ -377,7 +376,6 @@ export async function NominalTab({
         resultLabel={
           <span className="inline-flex items-center gap-1">
             Mốc: {TIME_BASIS_LABEL[basis]}
-            <InfoHint>{`${TIME_BASIS_QUESTION[basis]} Cùng mốc + cùng mã ⇒ trang Tỷ lệ giao thành công phải ra cùng một tỷ lệ GTC ước tính. Chi phí quảng cáo và chi phí vận hành luôn theo NGÀY PHÁT SINH của chính chúng, không đổi theo mốc này; bảng theo marketer giữ mốc ngày tạo đơn vì nó ghi đơn theo người phụ trách fanpage tại lúc đơn lên.`}</InfoHint>
           </span>
         }
       >
@@ -429,7 +427,6 @@ export async function NominalTab({
         />
         <MetricCard
           label="Doanh thu GTC ước tính"
-          hint="DT đơn ĐÃ GIAO THẬT + Σ(DT từng đơn đang giao × xác suất giao được của trạng thái ĐVVC nó đang ở) + Σ(DT đơn chưa gửi × P(chưa gửi)). Cân theo TỪNG ĐƠN, không nhân tổng doanh số với một tỷ lệ. Mã có tỷ lệ ghi đè tay / lịch sử / mặc định thì mới tính Doanh số POS × tỷ lệ và mang nhãn “ước tính theo tỷ lệ”. Đơn ở trạng thái chưa đủ mẫu nằm NGOÀI ước tính và được nêu riêng."
           value={formatVND(t.expectedRevenue, { compact: true })}
           note={`Thực tế đã giao ${formatVND(t.actualRevenue, { compact: true })}${t.pendingOrders ? ` · ${formatNumber(t.pendingOrders)} đơn chưa gửi` : ""}${t.unmodelledRevenue ? ` · ${formatVND(t.unmodelledRevenue, { compact: true })} ngoài ước tính` : ""}`}
           icon={Calculator}
@@ -449,7 +446,6 @@ export async function NominalTab({
         />
         <MetricCard
           label="Chi phí ngoài hàng · QC · vận chuyển"
-          hint={`Gồm: vận hành ${formatVND(t.opexTotal, { compact: true })} + rủi ro TK ${formatVND(t.inventoryRisk, { compact: true })} + thuế ${formatVND(t.tax, { compact: true })} + CP khác ${formatVND(t.otherCost, { compact: true })}`}
           value={formatVND(t.otherCostsTotal, { compact: true })}
           note={`${formatVND(t.opexPerOrder)}/đơn lên · ${formatVND(t.opexPerDelivered)}/đơn GTC ước tính`}
           icon={TrendingUp}
@@ -464,7 +460,6 @@ export async function NominalTab({
               {formatVND(t.netProfit, { compact: true })}
             </span>
           }
-          hint={`= DT GTC ƯT − giá vốn − vận chuyển − CPQC − vận hành ${formatVND(t.opexTotal, { compact: true })} (đã nhập ${formatVND(t.operatingExpenses, { compact: true })} · ${formatNumber(report.operatingCount)} khoản, đóng hàng ${formatVND(t.packingCost, { compact: true })}, NV vận đơn ${formatVND(t.opsStaffCost, { compact: true })} · cứu ước ${formatNumber(t.rescued)} đơn, cố định ${formatVND(t.fixedCost, { compact: true })} · ${report.periodMonths} tháng) − rủi ro TK ${formatVND(t.inventoryRisk, { compact: true })} (${riskPct}% giá vốn hàng bán ${formatVND(t.expectedCogs, { compact: true })}; còn treo trên tồn ${formatVND(t.inventoryRiskPending, { compact: true })}) − thuế ${formatVND(t.tax, { compact: true })} − CP khác ${formatVND(t.otherCost, { compact: true })}`}
           note={
             <>
               Margin {t.netMargin !== null ? `${t.netMargin.toFixed(1)}%` : "—"}{" "}
@@ -512,7 +507,6 @@ export async function NominalTab({
         */}
         <MetricCard
           label="QC / Doanh số POS"
-          hint="Tổng chi quảng cáo trong kỳ (kể cả phần chưa quy kết) ÷ doanh số đơn đã chốt trên Pancake, CHƯA trừ hoàn. Luôn đẹp hơn hai tỷ lệ kia vì mẫu số chưa trừ đơn hoàn."
           value={t.ads.overPosSales !== null ? `${t.ads.overPosSales.toFixed(1)}%` : "—"}
           note={`${period.label} · ${formatVND(t.adSpend, { compact: true })} ÷ ${formatVND(t.salesAfterDiscount, { compact: true })} doanh số POS${t.ads.overPosSales === null ? " · chưa có doanh số để chia" : ""}`}
           icon={Percent}
@@ -520,7 +514,6 @@ export async function NominalTab({
         />
         <MetricCard
           label="QC / DT GTC ước tính"
-          hint="Tổng chi quảng cáo ÷ Doanh thu GTC ƯỚC TÍNH (đã giao thật + đang giao × P, cân theo từng đơn). Đây là mẫu số mà bảng theo mã dùng ở cột cùng tên. Thẻ bên cạnh chia cho doanh thu ĐÃ GIAO THẬT tới hôm nay — hai mẫu số khác nhau, hai con số khác nhau, cố ý."
           value={t.ads.overProjectedRevenue !== null ? `${t.ads.overProjectedRevenue.toFixed(1)}%` : "—"}
           note={`${period.label} · ${formatVND(t.adSpend, { compact: true })} ÷ ${formatVND(t.expectedRevenue, { compact: true })} DT GTC ước tính · so với DT ĐÃ GIAO THẬT ${formatVND(t.actualRevenue, { compact: true })}: ${t.ads.overDeliveredActual !== null ? `${t.ads.overDeliveredActual.toFixed(1)}%` : "—"}`}
           icon={Percent}
@@ -531,44 +524,6 @@ export async function NominalTab({
       <SectionCard
         title="Lợi nhuận danh nghĩa theo mã hàng"
         description={period.label}
-        hint={
-          <>
-            <p className="mb-2">
-              Mỗi mã: đơn ĐÃ XÁC NHẬN lên trong kỳ, CPQC Facebook ghép theo tên chiến dịch. Cột nhỏ dưới mỗi con số là phần chi tiết của chính nó. Bấm mã để xem theo ngày.
-            </p>
-            <p>
-              Tỷ lệ và doanh thu GTC ước tính (đơn GTC theo ORDER_OUTCOME) dùng CÙNG hợp đồng với trang Tỷ lệ giao thành công
-              theo mã hàng ({PROJECTED_GTC_VERSION}): mỗi đơn chưa có kết cục được cân theo xác suất của CHÍNH trạng thái
-              Viettel Post nó đang ở, học từ vận đơn đã kết thúc và đủ chín. Mã có cohort mà chưa đo được thì in “—” (không lùi
-              về giả định); chỉ mã KHÔNG có đơn nào trong cohort mới dùng tỷ lệ hoàn {report.assumptions.returnRateWindowDays}{" "}
-              ngày của mã, và tiền của mã đó mang nhãn “ước tính theo tỷ lệ”. Cột nhỏ dưới mỗi tỷ lệ nói rõ nguồn.
-            </p>
-            <p className="mt-2">
-              Bảng gộp những con số vốn phải đọc CÙNG NHAU vào một ô hai tầng (tiền ở trên, phần chi tiết ở dưới) thay vì tách
-              thành hai mươi tư cột. Thanh cuộn ngang làm người đọc mất cột “Mã hàng” ngay khi kéo, nên mọi phép so sánh theo
-              hàng phải làm bằng trí nhớ. Không con số nào bị bỏ đi — nút “Cột” ở góc bảng vẫn ẩn/hiện được từng cột.
-            </p>
-            <p className="mt-2">
-              Công thức mỗi mã (TL GTC = tỷ lệ giao thành công ước tính, đơn GTC theo ORDER_OUTCOME): DT GTC ước tính = DT đơn đã giao thật + Σ(DT
-              từng đơn đang giao × xác suất giao được của trạng thái ĐVVC nó đang ở) + Σ(DT đơn chưa gửi × P(chưa gửi)) — cân theo TỪNG ĐƠN; giá
-              vốn cân cùng cách. Chỉ dòng mang nhãn “ước tính theo tỷ lệ” (ghi đè tay / lịch sử / mặc định) mới là Doanh số POS × TL GTC và Giá
-              vốn = SP × giá nhập × TL GTC. Đơn ở trạng thái chưa đủ mẫu nằm NGOÀI ước tính (dòng “ngoài ƯT”). Vận chuyển = Đơn × cước gửi + Đơn
-              × (1 − TL GTC) × phí hoàn về (tức Đơn × [TL GTC × cước gửi + (1 − TL GTC)
-              × cước đơn hoàn đi + về]), cộng khoản cước / phí hoàn điều chỉnh tay có lý do ở bảng Chi phí (tiền thật, chia theo số đơn của mã
-              {t.logisticsAdjustment.amount ? ` — kỳ này ${formatVND(t.logisticsAdjustment.amount)} từ ${t.logisticsAdjustment.count} khoản` : ""}). LN danh nghĩa = DT − giá vốn − vận chuyển
-              − CPQC − CP vận hành đã nhập (bảng Chi phí, trừ QC & nhập hàng, phân
-              bổ theo doanh số) − đóng hàng (đơn × đơn giá) − nhân viên vận đơn (đơn
-              × đơn giá + đơn cứu được GTC ước theo % × thưởng) − CP cố định (tháng ×
-              số tháng của kỳ, phân bổ theo doanh số) − dự phòng rủi ro tồn kho (% ×
-              GIÁ VỐN HÀNG BÁN RA trong kỳ, không phải % giá trị hàng nhập — phần
-              rủi ro của hàng chưa bán hiện riêng ở dòng “còn treo”) − thuế − CP khác. CP vận hành/đơn = mọi chi phí ngoài tiền
-              hàng, QC, vận chuyển chia cho số đơn lên (trước hoàn) hoặc số đơn giao
-              thành công ước tính (sau hoàn huỷ); sửa đơn giá ở Giả định. Đơn chưa giao vẫn được tính theo tỷ lệ ước tính, nên
-              đây là lợi nhuận danh nghĩa; đối chiếu với tab “Dòng tiền thực” khi
-              tiền về.
-            </p>
-          </>
-        }
         padded={false}
       >
         <div className="overflow-x-auto">
@@ -975,7 +930,6 @@ export async function NominalTab({
       <SectionCard
         title="Lợi nhuận danh nghĩa theo Marketer"
         description={`${byMarketer.pagesMapped}/${byMarketer.pagesTotal} page có đơn đã có người nhận`}
-        hint={`Cách ghi nhận: đơn & DT GTC ước tính của mỗi mã ghi cho marketer theo FANPAGE phát sinh đơn — trước hết bằng ẢNH CHỤP người phụ trách page TẠI MỐC ĐƠN LÊN (đổi người phụ trách hôm nay KHÔNG làm đổi số của kỳ đã qua), rồi tới bảng gán phẳng khai ở Lương & hoa hồng (${byMarketer.pagesMapped}/${byMarketer.pagesTotal} page có đơn đã có người nhận). Fanpage không nói được gì thì mới tới AD_ID của đơn; còn lại chia theo tỷ trọng tiền QC trên mã, không QC → về chủ mã. Quảng cáo KHÔNG ghi đè người được tính đơn theo fanpage. LN ròng trước QC của mã (đã trừ giá vốn, vận chuyển, vận hành gồm đóng hàng / NV vận đơn / cố định, rủi ro TK, thuế) × tỷ trọng − QC của chính mình − CP khác theo QC − QC test = LN ròng cá nhân; chủ mã hưởng X% LN đơn của mình, người chạy cùng hưởng Y% LN đơn mình tạo và (100 − Y)% về chủ mã (mặc định Y = ${100 - byMarketer.ownerSharePct}%, khai riêng từng mã ở Lương & hoa hồng). Bấm tên marketer để xem chi tiết từng mã hàng có phát sinh số liệu.`}
         padded={false}
       >
         <div className="overflow-x-auto">

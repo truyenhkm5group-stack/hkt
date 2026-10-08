@@ -23,7 +23,7 @@
 import { formatNumber } from "@/lib/format";
 import { grossMarginOf, orderRow, type OrderFacts } from "@/lib/sales-chatbot/attribution-shared";
 import { LOST_REASONS, type LostReason } from "@/lib/sales-chatbot/lost-reasons-shared";
-import { AI_SALES_MIN_SAMPLE, rateOrNull } from "@/lib/sales-chatbot/performance-shared";
+import { AI_SALES_MIN_SAMPLE, parsePerfPeriod, rateOrNull } from "@/lib/sales-chatbot/performance-shared";
 
 export type ArmRaw = {
   conversations: number;
@@ -218,25 +218,29 @@ export type DrillCohort = (typeof DRILL_COHORTS)[number];
 export const DRILL_ARMS = ["AI", "HUMAN"] as const;
 export type DrillArm = (typeof DRILL_ARMS)[number];
 
-export type DrillFilter = { days: number; cohort: DrillCohort | null; reason: string | null; arm: DrillArm | null; confirmed: boolean; /** Lý do không mua (`lost-reasons-shared.ts`). */ lost?: LostReason | null; /** Một page (chiều lọc của shop nhiều page). */ page?: string | null };
+export type DrillFilter = { days: number; /** Kỳ tuỳ chỉnh (YYYY-MM-DD, giờ VN) — có cả hai thì thắng `days`. */ from?: string | null; to?: string | null; cohort: DrillCohort | null; reason: string | null; arm: DrillArm | null; confirmed: boolean; /** Lý do không mua (`lost-reasons-shared.ts`). */ lost?: LostReason | null; /** Một page (chiều lọc của shop nhiều page). */ page?: string | null };
 
 export const DRILL_PERIODS = [7, 30, 90] as const;
 
 /** Đọc bộ lọc từ searchParams — giá trị lạ bị bỏ, không đoán. HÀM THUẦN. */
 export function parseDrillFilter(sp: Record<string, string | string[] | undefined>): DrillFilter {
   const one = (k: string) => (typeof sp[k] === "string" ? (sp[k] as string) : null);
-  const days = (DRILL_PERIODS as readonly number[]).includes(Number(one("days"))) ? Number(one("days")) : 30;
+  const period = parsePerfPeriod(sp);
+  const days = period.custom ? period.days : (DRILL_PERIODS as readonly number[]).includes(Number(one("days"))) ? Number(one("days")) : 30;
   const cohort = (DRILL_COHORTS as readonly string[]).includes(one("cohort") ?? "") ? (one("cohort") as DrillCohort) : null;
   const arm = (DRILL_ARMS as readonly string[]).includes(one("arm") ?? "") ? (one("arm") as DrillArm) : null;
   const reason = one("reason");
   const lost = (LOST_REASONS as readonly string[]).includes(one("lost") ?? "") ? (one("lost") as LostReason) : null;
   const pg = one("pg");
-  return { days, cohort, arm, reason: reason && /^[A-Z_]{2,40}$/.test(reason) ? reason : null, confirmed: one("confirmed") === "1", lost, page: pg && /^[A-Za-z0-9_:.-]{1,80}$/.test(pg) ? pg : null };
+  return { days, ...(period.custom ? { from: period.from, to: period.to } : {}), cohort, arm, reason: reason && /^[A-Z_]{2,40}$/.test(reason) ? reason : null, confirmed: one("confirmed") === "1", lost, page: pg && /^[A-Za-z0-9_:.-]{1,80}$/.test(pg) ? pg : null };
 }
 
 export function drillHref(f: Partial<DrillFilter>): string {
   const q = new URLSearchParams();
-  if (f.days) q.set("days", String(f.days));
+  if (f.from && f.to) {
+    q.set("from", f.from);
+    q.set("to", f.to);
+  } else if (f.days) q.set("days", String(f.days));
   if (f.cohort) q.set("cohort", f.cohort);
   if (f.reason) q.set("reason", f.reason);
   if (f.arm) q.set("arm", f.arm);

@@ -39,16 +39,16 @@ export default async function DrillConversationsPage({ searchParams }: { searchP
       <PageHeader
         eyebrow="AI"
         title="Hội thoại theo chỉ số"
-        description={`${chips.length ? chips.join(" · ") : "Mọi hội thoại có khách nhắn"} · ${f.days} ngày`}
+        description={`${chips.length ? chips.join(" · ") : "Mọi hội thoại có khách nhắn"} · ${f.from && f.to ? `${f.from} → ${f.to}` : f.days === 1 ? "hôm nay" : `${f.days} ngày`}`}
         actions={
-          <Link href={`/ai/sales-chatbot/performance?days=${f.days}${f.page ? `&pg=${encodeURIComponent(f.page)}` : ""}`} className="text-sm font-medium text-primary hover:underline">
+          <Link href={`/ai/sales-chatbot/performance?${f.from && f.to ? `from=${f.from}&to=${f.to}` : `days=${f.days}`}${f.page ? `&pg=${encodeURIComponent(f.page)}` : ""}`} className="text-sm font-medium text-primary hover:underline">
             ← Hiệu quả
           </Link>
         }
       />
       <div className="flex flex-wrap gap-2 text-xs">
         {DRILL_PERIODS.map((d) => (
-          <Link key={d} href={drillHref({ ...f, days: d })} className={d === f.days ? "rounded border bg-primary/10 px-2 py-1 font-semibold" : "rounded border px-2 py-1 hover:bg-muted"}>
+          <Link key={d} href={drillHref({ ...f, from: null, to: null, days: d })} className={d === f.days ? "rounded border bg-primary/10 px-2 py-1 font-semibold" : "rounded border px-2 py-1 hover:bg-muted"}>
             {d} ngày
           </Link>
         ))}

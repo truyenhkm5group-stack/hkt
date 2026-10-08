@@ -1,4 +1,5 @@
-import { and, desc, eq, gte, inArray, ne, sql } from "drizzle-orm";
+import { parsePerfPeriod } from "@/lib/sales-chatbot/performance-shared";
+import { and, desc, eq, gte, inArray, lte, ne, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { dauNgayVN } from "@/lib/ai/budget";
 import { aiCostOfConversationSets } from "@/lib/ai-usage/conversation-cost";
@@ -140,7 +141,9 @@ export async function listDrillConversations(user: SessionUser, f: DrillFilter, 
   const db = await getDb();
   const e = schema.salesConversationEvents;
   const c = schema.salesChatConversations;
-  const since = new Date(dauNgayVN(now).getTime() - (f.days - 1) * 86_400_000);
+  // Kỳ tuỳ chỉnh (from/to) đi cùng luật của màn Hiệu quả: `now` lùi về cuối ngày `to`, có cận trên.
+  const period = parsePerfPeriod(f.from && f.to ? { from: f.from, to: f.to } : { days: String(f.days) }, now);
+  const since = new Date(dauNgayVN(period.now).getTime() - (period.days - 1) * 86_400_000);
   const human = sql`bool_or(${HUMAN_TOUCHED})`;
   const conds = [sql`bool_or(${e.type} = 'message.received')`];
   if (f.cohort === "AI_ONLY") conds.push(sql`not ${human}`);
@@ -150,12 +153,12 @@ export async function listDrillConversations(user: SessionUser, f: DrillFilter, 
   const ids = db
     .select({ id: e.conversationId })
     .from(e)
-    .where(and(gte(e.occurredAt, since), ne(e.channel, "TEST")))
+    .where(and(gte(e.occurredAt, since), period.until ? lte(e.occurredAt, period.until) : undefined, ne(e.channel, "TEST")))
     .groupBy(e.conversationId)
     .having(and(...conds));
   const LIMIT = 200;
   // Lý do không mua là phân loại LÚC ĐỌC (không có cột) ⇒ lấy đúng tập hội thoại của bảng «Vì sao khách không mua».
-  const lostIds = f.lost ? ((await loadLostReasons({ days: f.days, now, pageId: f.page ?? null })).idsByReason[f.lost] ?? []) : null;
+  const lostIds = f.lost ? ((await loadLostReasons({ days: period.days, now: period.now, until: period.until, pageId: f.page ?? null })).idsByReason[f.lost] ?? []) : null;
   if (lostIds && lostIds.length === 0) return { ok: true, rows: [], truncated: false };
   const rows = await db
     .select({ id: c.id, channel: c.channel, status: c.status, turns: c.turns, stage: sql<string | null>`${c.state}->>'stage'`, handoffReason: c.handoffReason, orderId: c.orderId, updatedAt: c.updatedAt, arm: sql<string | null>`${c.state}->'experiment'->>'arm'` })

@@ -11,7 +11,7 @@
  *
  * Trước ngày bật sổ sự kiện KHÔNG có số — màn hình in «đo từ ngày …», không in 0 (luật 42, không backfill — luật 35).
  */
-import { and, eq, gte, inArray, isNotNull, ne, sql } from "drizzle-orm";
+import { and, eq, gte, inArray, isNotNull, lte, ne, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { dauNgayVN } from "@/lib/ai/budget";
 import { addUsdAsVnd, conversationOfRef, SALES_CONVERSATION_FEATURES } from "@/lib/ai-usage/conversation-cost";
@@ -72,13 +72,14 @@ export async function loadPerformanceSettings(): Promise<AiSalesPerformanceSetti
  * Số hiệu quả của tổ chức NGỮ CẢNH. `withMoney` = người xem có quyền thấy tiền (chi phí AI, tiết kiệm ước tính) — tiền là
  * vùng nhạy cảm như ở bảng «Chi phí AI theo ngày».
  */
-export async function loadAiSalesPerformance(orgCode: string, opts: { days?: number; now?: Date; withMoney: boolean; /** Một page (chiều lọc); `null` = mọi page. */ pageId?: string | null }): Promise<AiSalesPerformance> {
+export async function loadAiSalesPerformance(orgCode: string, opts: { days?: number; now?: Date; /** Cận trên của kỳ (kỳ tuỳ chỉnh kết thúc trước hôm nay) — `null` = tới hiện tại. */ until?: Date | null; withMoney: boolean; /** Một page (chiều lọc); `null` = mọi page. */ pageId?: string | null }): Promise<AiSalesPerformance> {
   const days = Math.min(Math.max(Math.trunc(opts.days ?? 30), 1), 180);
   const now = opts.now ?? new Date();
   const since = new Date(dauNgayVN(now).getTime() - (days - 1) * 86_400_000);
   const db = await getDb();
   const e = schema.salesConversationEvents;
-  const inPeriod = and(gte(e.occurredAt, since), ne(e.channel, "TEST"), onPage(opts.pageId));
+  const until = opts.until ?? null;
+  const inPeriod = and(gte(e.occurredAt, since), until ? lte(e.occurredAt, until) : undefined, ne(e.channel, "TEST"), onPage(opts.pageId));
 
   const [first] = await db.select({ at: sql<Date | null>`min(${e.occurredAt})` }).from(e).where(onPage(opts.pageId));
   const measuredSince = first?.at ? new Date(first.at) : null;
@@ -106,8 +107,8 @@ export async function loadAiSalesPerformance(orgCode: string, opts: { days?: num
   // ── Độ phủ của sổ ──
   const c = schema.salesChatConversations;
   const coverageFrom = measuredSince && measuredSince > since ? measuredSince : since;
-  const [active] = await db.select({ n: sql<number>`count(*)::int` }).from(c).where(and(ne(c.channel, "TEST"), sql`${c.turns} > 0`, gte(c.updatedAt, coverageFrom), ...(opts.pageId ? [eq(c.pageId, opts.pageId)] : [])));
-  const [withEv] = await db.select({ n: sql<number>`count(distinct ${e.conversationId})::int` }).from(e).where(and(ne(e.channel, "TEST"), gte(e.occurredAt, coverageFrom), onPage(opts.pageId)));
+  const [active] = await db.select({ n: sql<number>`count(*)::int` }).from(c).where(and(ne(c.channel, "TEST"), sql`${c.turns} > 0`, gte(c.updatedAt, coverageFrom), until ? lte(c.updatedAt, until) : undefined, ...(opts.pageId ? [eq(c.pageId, opts.pageId)] : [])));
+  const [withEv] = await db.select({ n: sql<number>`count(distinct ${e.conversationId})::int` }).from(e).where(and(ne(e.channel, "TEST"), gte(e.occurredAt, coverageFrom), until ? lte(e.occurredAt, until) : undefined, onPage(opts.pageId)));
 
   // ── Thời gian trả lời (ngưỡng mẫu áp SAU khi SQL trả về — percentile_cont luôn ra số khi có một dòng, luật 63) ──
   const responseMs = sql`(${e.payload}->>'responseMs')::bigint`;
@@ -190,7 +191,7 @@ export async function loadAiSalesPerformance(orgCode: string, opts: { days?: num
   let human: AiSalesPerformance["human"] = null;
   if (opts.withMoney) {
     const rate = env.facebook.usdToVnd;
-    const usage = await aiUsageByRef(orgCode, SALES_CONVERSATION_FEATURES, since);
+    const usage = await aiUsageByRef(orgCode, SALES_CONVERSATION_FEATURES, since, until);
     const testIds = new Set((await db.select({ id: c.id }).from(c).where(eq(c.channel, "TEST"))).map((r) => r.id));
     // Một page ⇒ chỉ chi phí AI của hội thoại thuộc page đó (sổ AI ghi `ref` = mã hội thoại).
     const pageConvs = opts.pageId ? new Set((await db.select({ id: c.id }).from(c).where(eq(c.pageId, opts.pageId))).map((r) => r.id)) : null;
