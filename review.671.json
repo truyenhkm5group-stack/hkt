@@ -1,0 +1,8 @@
+{
+  "pr": 671,
+  "sha": "7b5177e1c479e6c9b16fa8c1fac6dee7112dbac4",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-08T06:53:36.285Z",
+  "note": "Review độc lập chỉ đọc 08/10: mọi đích là đầu ra safeNextPath hoặc trang nhà vỏ (đã soát //evil, /\\evil, %2F, %2e%2e, @); không tính quyền lần hai (luật 28), lib/auth không chạm; ERP nhà y như cũ; nhánh /login giữ. LOW sau: warn khi không đọc lại được phiên vừa mở (phụ thuộc ngầm React.cache/cookies), next hợp lệ nhưng thiếu quyền vẫn rơi vào ?forbidden (lát tầng cổng)"
+}
