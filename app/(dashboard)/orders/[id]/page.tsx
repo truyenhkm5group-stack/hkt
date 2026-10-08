@@ -541,7 +541,8 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
           {risk?.risky ? (
             <div className={cn("rounded-xl border p-3 text-sm", risk.severity === "critical" ? "border-rose-300 bg-rose-50 text-rose-900 dark:border-rose-900 dark:bg-rose-950/40 dark:text-rose-100" : "border-amber-300 bg-amber-50 text-amber-900 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-100")}>
               <div className="font-semibold">⚠ Khách rủi ro — nên xin cọc / xác nhận kỹ trước khi gửi ĐVVC</div>
-              <div className="mt-0.5 text-xs">Giao thành công {risk.succeed} · hoàn {risk.returned}{risk.rate ? ` (${Math.round(risk.rate * 100)}%)` : ""} · {risk.reasons.join(", ")} (theo Pancake và lịch sử vận đơn cùng SĐT trong ERP)</div>
+              {/* Số "giao thành công" chỉ của ERP (ORDER_OUTCOME, cùng SĐT); số Pancake chỉ hiện trong lý do, mang nhãn "Pancake ghi nhận". */}
+              <div className="mt-0.5 text-xs">Lịch sử ERP cùng SĐT: giao thành công {risk.succeed} · hoàn {risk.returned}{risk.rate !== null ? ` (${Math.round(risk.rate * 100)}%)` : ""} · lý do: {risk.reasons.join(", ")}</div>
             </div>
           ) : null}
           {newPhone ? (
