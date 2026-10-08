@@ -676,3 +676,4 @@
 {"at":"2026-10-08T07:41:01.158Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"OVERLAP_DETECTED","mission":"order-confirm-rules-0810","detail":"OVERLAP với saas-order-accuracy: phạm vi tests/order-golden/** ⇒ tuần tự hoá (--after=saas-order-accuracy) hoặc khai cách tích hợp (--accept-overlap=\"…\")"}
 {"at":"2026-10-08T07:41:09.206Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"CLAIM","mission":"hslc-prepaid-ai","detail":"RUNNING · 5 mẫu phạm vi · HIGH"}
 {"at":"2026-10-08T07:41:17.695Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"CLAIM","mission":"saas-delete-signup-shops","detail":"RUNNING · 3 mẫu phạm vi · HIGH"}
+{"at":"2026-10-08T07:41:25.605Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"CLAIM","mission":"meta-review-guide","detail":"RUNNING · 1 mẫu phạm vi · MEDIUM"}
