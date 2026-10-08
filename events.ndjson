@@ -1005,3 +1005,4 @@
 {"at":"2026-10-08T21:25:23.317Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"CLAIM","mission":"ops-signals-check","detail":"RUNNING · 5 mẫu phạm vi · HIGH"}
 {"at":"2026-10-08T21:27:39.286Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#706 @ c5f6c666da9b · Sửa đúng HIGH: bước 2 + FAQ nêu Pancake (chạy thật) và chat web / Zalo OA; nối thẳng Facebook ghi «sắp mở»; bài public-site khoá câu cũ (kiểm đột biến đỏ khi đưa lại)."}
 {"at":"2026-10-08T21:30:03.337Z","actor":"DESKTOP-56TH98Y:wt-pr-g","kind":"HANDOFF","mission":"erp-a11y-bo-cuc","detail":"claude/erp-a11y-bo-cuc @ 8276b8c2d7b3 · 4 lệnh kiểm thử"}
+{"at":"2026-10-08T21:35:25.907Z","actor":"DESKTOP-56TH98Y:wt-pr-h","kind":"UPDATE","mission":"kenh-dang-chay-trong-app","detail":"RUNNING → RUNNING · 13 mẫu phạm vi · MEDIUM"}
