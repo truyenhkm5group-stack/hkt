@@ -843,3 +843,4 @@
 {"at":"2026-10-08T14:00:20.869Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"saas-shell-gate-redirects","detail":"#686 @ e1b521e0f185 → cd777445f78e (MERGE_ISOLATED · HIGH · gates success)"}
 {"at":"2026-10-08T14:13:16.176Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"launch-gate-r2","detail":"#687 @ d46573fc6118 → fd89b2953673 (MERGE_NOW · LOW · gates success)"}
 {"at":"2026-10-08T14:32:07.627Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"backup-drive-trash","detail":"fix/backup-drive-trash @ 54e6574bc663 · 1 lệnh kiểm thử"}
+{"at":"2026-10-08T14:32:34.740Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"backup-drive-trash","detail":"#689 cho fix/backup-drive-trash @ 54e6574bc663"}
