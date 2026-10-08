@@ -1,0 +1,27 @@
+{
+  "schema": 1,
+  "mission_id": "legal-counsel-pack",
+  "title": "MM-REC-23/24: gói câu hỏi luật sư COUNSEL_PACK vào kho (docs-only) + sự cố 24/09 thành câu hỏi luật sư",
+  "business_goal": "",
+  "status": "PLANNING",
+  "priority": "P2",
+  "risk": "MEDIUM",
+  "owner": "DESKTOP-56TH98Y:wt-legal-compliance",
+  "worker": null,
+  "worktree": null,
+  "branch": "claude/legal-counsel-pack",
+  "base_sha": "0be392ba1afb8b8f890856f1c249ea6a08df5969",
+  "domains": [],
+  "owned_paths": [
+    "docs/legal/COUNSEL_PACK.md",
+    "docs/legal/README.md"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-08T19:40:18.632Z",
+  "updated_at": "2026-10-08T19:40:18.632Z",
+  "last_heartbeat": "2026-10-08T19:40:18.632Z",
+  "definition_of_done": []
+}
