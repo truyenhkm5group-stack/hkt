@@ -21,8 +21,8 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-08T15:31:26.044Z",
-  "updated_at": "2026-10-08T17:32:25.291Z",
-  "last_heartbeat": "2026-10-08T17:32:25.291Z",
+  "updated_at": "2026-10-08T17:59:36.628Z",
+  "last_heartbeat": "2026-10-08T17:59:36.628Z",
   "definition_of_done": [],
   "intake": {
     "verdict": "MISSING",
@@ -30,11 +30,11 @@
   },
   "handoff": {
     "branch": "claude/commercial-sweep",
-    "sha": "8661ddf0e07adc8bddef76c7cd4cd5882c49f446",
-    "at": "2026-10-08T17:32:25.291Z",
+    "sha": "79d5ca1d2d2ef625942d558d74444d98280d2815",
+    "at": "2026-10-08T17:59:36.628Z",
     "actor": "DESKTOP-56TH98Y:wt-sweep",
     "title": "Commercial Perfection Sweep — Phase A chỉ đọc: kiểm kê 207 trang + bảng chất lượng thương mại (docs/product)",
-    "summary": "Phase A chỉ đọc + cập nhật sau đào sâu: kiểm kê 207 trang, bảng C0–C3, gốc thật của «thiếu h1» / ô không tên / tràn /payroll; C1 14 → 6 sau PR A · C · G",
+    "summary": "Phase A + đào sâu: 207 trang, bảng C0–C3, gốc thật / báo nhầm đã sửa; C1 14 → 6 sau PR A · C · G",
     "tests": [
       "chỉ tài liệu (docs/product), không mã: không chạy gates"
     ]
