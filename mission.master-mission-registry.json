@@ -3,7 +3,7 @@
   "mission_id": "master-mission-registry",
   "title": "Sổ sứ mệnh tổng + checkpoint bền",
   "business_goal": "",
-  "status": "RUNNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -21,7 +21,18 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-08T17:36:45.468Z",
-  "updated_at": "2026-10-08T17:36:45.468Z",
-  "last_heartbeat": "2026-10-08T17:36:45.468Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-08T18:05:49.443Z",
+  "last_heartbeat": "2026-10-08T18:05:49.443Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "docs/master-mission-registry",
+    "sha": "78504bbb0dee8d77396ecaf78eb37f7c766b3cca",
+    "at": "2026-10-08T18:05:49.443Z",
+    "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+    "title": "Sổ sứ mệnh tổng + checkpoint bền",
+    "summary": "docs/tech/MASTER_MISSION_REGISTRY.md (202 mission, 20 việc thất lạc khôi phục, 15 chỗ nguồn mâu thuẫn) + docs/tech/CURRENT_CHECKPOINT.md, kèm giao thức đầu/cuối phiên",
+    "tests": [
+      "Chỉ tài liệu; đối chiếu sổ /tech + PR + production + docs + ghi nhớ"
+    ]
+  }
 }
