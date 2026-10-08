@@ -136,7 +136,8 @@ async function testLifecycle(op: SessionUser, outsiders: SessionUser[]) {
       org: { name: "Bán sỉ Pilot POP", code: A },
       admin: { name: "Quản trị POP", email: ADMIN_EMAIL, password: "PilotPop@2026!" },
       plan: { businessType: "wholesale", templateKey: "wholesale", modules: WHOLESALE_BLUEPRINT.modules.filter((m) => !CORE_MODULES.includes(m)) },
-      planKey: "standard",
+      // Gói đang niêm yết: /start tạo tài khoản khách ngoài ⇒ gói cũ (standard) bị luật thương mại chung từ chối (review #682).
+      planKey: "growth",
     },
     opActor,
   );
@@ -452,28 +453,31 @@ async function testConnectionDisable(op: SessionUser, outsiders: SessionUser[]) 
 async function testOrgPlan(op: SessionUser, outsiders: SessionUser[]) {
   const planOf = async () => (await (await getPlatformDb()).query.platformOrganizations.findFirst({ where: eq(schema.platformOrganizations.code, B) }))?.plan ?? null;
   const keys = (await listPlans()).map((x) => x.key);
-  assert.ok(keys.includes("trial") && keys.includes("standard"), `sổ gói phải có trial + standard: ${keys.join(",")}`);
+  assert.ok(keys.includes("trial") && keys.includes("growth") && keys.includes("standard"), `sổ gói phải có trial + growth + standard: ${keys.join(",")}`);
   const before = await planOf();
-  for (const u of outsiders) assert.ok("error" in (await setOrganizationPlan(u, { orgCode: B, planKey: "standard", reason: "tự nâng gói cho mình" })), `${u.email} không đổi được gói`);
+  for (const u of outsiders) assert.ok("error" in (await setOrganizationPlan(u, { orgCode: B, planKey: "growth", reason: "tự nâng gói cho mình" })), `${u.email} không đổi được gói`);
   assert.equal(await planOf(), before, "người ngoài không đổi một byte");
-  assert.ok("error" in (await setOrganizationPlan(op, { orgCode: B, planKey: "standard", reason: "" })), "thiếu lý do ⇒ từ chối");
+  assert.ok("error" in (await setOrganizationPlan(op, { orgCode: B, planKey: "growth", reason: "" })), "thiếu lý do ⇒ từ chối");
+  // Luật thương mại chung (review #682 · L1): khách NGOÀI không nhận gói chỉ còn ở giá cũ — giá legacy, không dùng thử, bot có thể im.
+  const legacy = await setOrganizationPlan(op, { orgCode: B, planKey: "standard", reason: "Khách xin lại gói cũ" });
+  assert.ok("error" in legacy && legacy.error.includes("giá cũ"), `gói cũ cho khách ngoài ⇒ từ chối: ${JSON.stringify(legacy)}`);
   assert.ok("error" in (await setOrganizationPlan(op, { orgCode: B, planKey: "internal", reason: "cho khách không giới hạn" })), "không cấp gói nội bộ cho khách");
   assert.ok("error" in (await setOrganizationPlan(op, { orgCode: B, planKey: "khong-co-goi", reason: "gói không tồn tại" })), "gói lạ ⇒ từ chối");
   assert.ok("error" in (await setOrganizationPlan(op, { orgCode: (await getHomeOrganization()).code, planKey: "trial", reason: "hạ gói nhà thử xem" })), "nhà không đổi gói");
   assert.equal((await auditRows(B, "ORG_PLAN_SET")).length, 0, "lượt bị từ chối không ghi nhật ký");
 
   const trialUsers = await withOrganization(B, () => checkEntitlement("users", 0));
-  const up = await setOrganizationPlan(op, { orgCode: B, planKey: "standard", reason: "Khách chốt UAT, cần thêm người" });
+  const up = await setOrganizationPlan(op, { orgCode: B, planKey: "growth", reason: "Khách chốt UAT, cần thêm người" });
   assert.ok("ok" in up && up.changed, JSON.stringify(up));
-  assert.equal(await planOf(), "standard");
+  assert.equal(await planOf(), "growth");
   invalidateOrganizations();
   const stdUsers = await withOrganization(B, () => checkEntitlement("users", 0));
-  assert.equal(stdUsers.planKey, "standard", "hạn mức đọc gói mới ngay trong tiến trình");
-  assert.ok(stdUsers.ok && trialUsers.planKey !== "standard", "trước là gói cũ, sau là gói mới");
+  assert.equal(stdUsers.planKey, "growth", "hạn mức đọc gói mới ngay trong tiến trình");
+  assert.ok(stdUsers.ok && trialUsers.planKey !== "growth", "trước là gói cũ, sau là gói mới");
   const rows = await auditRows(B, "ORG_PLAN_SET");
   assert.equal(rows.length, 1);
   assert.equal(rows[0].actorEmail, op.email);
-  const again = await setOrganizationPlan(op, { orgCode: B, planKey: "standard", reason: "bấm lại lần hai" });
+  const again = await setOrganizationPlan(op, { orgCode: B, planKey: "growth", reason: "bấm lại lần hai" });
   assert.ok("ok" in again && !again.changed, "bấm lại không đổi");
   assert.equal((await auditRows(B, "ORG_PLAN_SET")).length, 1, "bấm lại không ghi thêm");
   const down = await setOrganizationPlan(op, { orgCode: B, planKey: "trial", reason: "Khách xin quay lại gói dùng thử" });

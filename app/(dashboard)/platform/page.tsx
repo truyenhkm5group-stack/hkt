@@ -14,7 +14,7 @@ import { requirePermission } from "@/lib/auth/session";
 import { ORG_TEMPLATES } from "@/lib/constants/platform-modules";
 import { AI_BILLING_SOURCE_LABEL, formatUsd } from "@/lib/ai-usage/types";
 import { loadPlatformAiSummary } from "@/lib/ai-usage/view";
-import { HOME_PLAN_KEY, listPlans, planKeyOf } from "@/lib/entitlements/check";
+import { listPlans, planKeyOf } from "@/lib/entitlements/check";
 import { formatDateTime } from "@/lib/format";
 import { INVITE_STATUS_LABEL, listInvites } from "@/lib/onboarding/invites";
 import { listOrganizations } from "@/lib/platform/organizations";
@@ -24,6 +24,9 @@ import { SIGNUP_MODE_LABEL } from "@/lib/onboarding/shared";
 import { phoneOtpSummary, readPhoneOtpSetting, homeZaloConnected } from "@/lib/onboarding/phone-otp";
 import { signupModeState } from "@/lib/onboarding/signup-mode";
 import { platformOperatorDenial } from "@/lib/platform-ui/module-toggle";
+import { loadPriceBook } from "@/lib/pricing/price-book";
+import { createCustomerPlanOptions, planOptionLabel, plansForAccountType } from "@/lib/saas/create-customer-rules";
+import { readPlans } from "@/lib/saas/customers";
 import { env } from "@/lib/env";
 import { MESSENGER_FIELDS, auditRequestedScopes, messengerApp, messengerConnectUrl, messengerVerifyToken, messengerWebhookSecrets, scopesOfConnectUrl } from "@/lib/integrations/messenger/graph";
 import { loginConfigMode, loginModeText } from "@/lib/integrations/messenger/permission-guide";
@@ -95,6 +98,9 @@ export default async function PlatformPage({ searchParams }: { searchParams: Pro
   const secretsKey = secretsKeyPublicStatus();
   const planOfCode = (code: string, isHome: boolean) => planKeyOf({ isHome, plan: registry.find((r) => r.code === code)?.plan ?? null });
   const planName = (key: string) => plans.find((p) => p.key === key)?.name ?? key;
+  // Mã mời dẫn tới /start ⇒ tổ chức mới của KHÁCH NGOÀI: chỉ gói đặt được theo luật thương mại chung (review #682 · L1); máy chủ
+  // kiểm lại khi tạo mã (`invitePlanRefusal`) và khi khách dùng mã (`decideNewWorkspace`).
+  const invitePlans = plansForAccountType(createCustomerPlanOptions(await readPlans(), await loadPriceBook(), new Date()), "EXTERNAL").map((p) => ({ key: p.key, name: planOptionLabel(p) }));
 
   return (
     <div className="space-y-5">
@@ -447,15 +453,20 @@ export default async function PlatformPage({ searchParams }: { searchParams: Pro
       <SectionCard
         title="Tự phục vụ — mã mời & tạo tổ chức"
         description={`Đăng ký công khai đang có hiệu lực: ${SIGNUP_MODE_LABEL[signup.effective]} — đổi ở khung «Cổng mở bán» phía trên`}
-        hint="Người vận hành luôn tạo được tổ chức cho khách qua /start — cùng luồng với khách, không cần cờ, và phiên của bạn không đổi. Mã mời dùng một lần, có hạn; CSDL chỉ giữ băm của mã. Dựng hỏng giữa chừng ⇒ tổ chức ở «Dựng hỏng» (bảng trên) kèm nút Chạy lại — không có CSDL nào bị xoá tự động."
+        hint="Tạo khách trả tiền ở «Khách hàng SaaS» (job cấp phát: tài khoản, thuê bao, thu phí, liên kết kích hoạt dùng một lần, mẫu Chốt Đơn). /start vẫn dựng hộ được theo mẫu ngành — cùng luồng với khách, không cần cờ, CÙNG luật gói / thương hiệu (khách ngoài chỉ gói đang niêm yết). Mã mời dùng một lần, có hạn; CSDL chỉ giữ băm của mã. Dựng hỏng giữa chừng ⇒ tổ chức ở «Dựng hỏng» (bảng trên) kèm nút Chạy lại — không có CSDL nào bị xoá tự động."
         actions={
-          <Button asChild size="sm">
-            <Link href="/start">Tạo tổ chức cho khách</Link>
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            <Button asChild size="sm">
+              <Link href="/platform/customers">Tạo khách mới</Link>
+            </Button>
+            <Button asChild size="sm" variant="outline">
+              <Link href="/start">Dựng theo mẫu ngành (/start)</Link>
+            </Button>
+          </div>
         }
       >
         <div className="space-y-4">
-          <InvitePanel plans={plans.filter((p) => p.key !== HOME_PLAN_KEY).map((p) => ({ key: p.key, name: p.name }))} />
+          <InvitePanel plans={invitePlans} />
           {invites.length === 0 ? (
             <EmptyState title="Chưa có mã mời nào" description="Tạo mã ở trên rồi gửi liên kết cho khách." />
           ) : (

@@ -21,11 +21,12 @@ export async function planForOrg(bp: Blueprint, user: SessionUser, resolutions: 
   return planBlueprint(bp, { orgState, can: (p) => can(subject, p as Parameters<typeof can>[1]), resolutions });
 }
 
-export async function installBlueprint(bp: Blueprint, user: SessionUser, opts: { expectedPlanHash?: string | null; resolutions?: Record<string, StepResolution> } = {}): Promise<ApplyResult> {
+/** `note` = lý do của lượt cài (vd «Job cấp phát <khoá>» — bước mẫu của job «Tạo khách»), ghi cạnh nguồn mẫu trong nhật ký. */
+export async function installBlueprint(bp: Blueprint, user: SessionUser, opts: { expectedPlanHash?: string | null; resolutions?: Record<string, StepResolution>; note?: string } = {}): Promise<ApplyResult> {
   if (!user.organization) return { ok: false, installId: null, failedStep: null, errors: [{ path: "", message: "Phiên chưa gắn tổ chức — đăng nhập lại." }], outcomes: [] };
   const plan = await planForOrg(bp, user, opts.resolutions ?? {});
   if (opts.expectedPlanHash && opts.expectedPlanHash !== plan.planHash) {
     return { ok: false, installId: null, failedStep: null, errors: [{ path: "planHash", message: "Tổ chức đã đổi từ lúc xem trước — kế hoạch không còn như bạn đã xem. Xem trước lại rồi cài." }], outcomes: [] };
   }
-  return applyBlueprint(plan, user, { blueprint: bp });
+  return applyBlueprint(plan, user, { blueprint: bp, note: opts.note });
 }

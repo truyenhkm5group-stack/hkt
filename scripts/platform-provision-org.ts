@@ -81,6 +81,9 @@ async function main() {
     admin: adminEmail && adminPassword ? { email: adminEmail, name: `Quản trị ${name}`, password: adminPassword } : undefined,
     source: "SCRIPT",
     actor: null,
+    // Cửa cấp phát của người vận hành ⇒ CÙNG luật thương mại với mọi cửa (review #682): tổ chức mới gắn tài khoản khách ngoài, gói
+    // mặc định dùng thử, thương hiệu theo bộ sản phẩm của mẫu.
+    commercial: {},
   });
   console.log(
     `[platform] Tổ chức "${result.organization.code}" ${result.created ? "đã TẠO" : "đã có sẵn"} · mẫu ${templateKey} (${template.modules.length} module) · quản trị ${result.adminCreated ? "đã tạo" : adminEmail ? "đã có sẵn" : "không yêu cầu"}.`,

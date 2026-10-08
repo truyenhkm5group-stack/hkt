@@ -563,6 +563,7 @@ import { testSaasL5BillingTrial } from "./saas-l5-billing-trial.test";
 import { testSaasInternalPlan } from "./saas-internal-plan.test";
 import { testSaasHideInternal } from "./saas-hide-internal.test";
 import { testSaasSignupSubscription } from "./saas-signup-subscription.test";
+import { testCreateCustomerRules } from "./create-customer-rules.test";
 import { testPlatformSaas } from "./platform-saas.test";
 import { testTenantAttack } from "./tenant-attack.test";
 import { testAiSalesIsolation } from "./ai-sales-isolation.test";
@@ -2958,6 +2959,10 @@ async function main() {
   // F-02 (kiểm vỏ khách 08/10/2026): cửa hàng tự đăng ký qua /start có thuê bao sản phẩm theo module mẫu vừa bật, lỗi không làm
   // hỏng đăng ký mà để vết, trang Gói của khách không in nhãn nội bộ, sửa bù chạy thử không ghi — tổ chức THẬT `ssu-*`, tự dọn.
   await testSaasSignupSubscription();
+  // «Tạo khách mới» của người vận hành (kiểm khởi chạy 08/10/2026): thương hiệu theo bộ sản phẩm, gói theo bảng giá niêm yết (máy
+  // chủ chặn giá cũ / `internal` cho khách ngoài), mẫu «Chỉ cần AI bán hàng» cài bằng bộ cài /start (chạy lại không nhân đôi, hỏng có
+  // vết), form nói vì sao chưa bấm được; nội bộ / nhà không đổi — tổ chức THẬT `ccr-*`, tự cấp, tự dọn.
+  await testCreateCustomerRules();
   // Sổ kinh tế SaaS + Owner Cockpit (0203): hai tổ chức THẬT `saas-a` / `saas-b`, tự cấp, tự dọn.
   await testPlatformSaas();
   await testPlatformUi();

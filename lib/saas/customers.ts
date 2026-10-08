@@ -123,7 +123,8 @@ export async function loadCommercialSnapshot(opts: { periodMonth?: string; now?:
     pdb
       .select({ accountId: schema.platformProvisioningJobs.accountId, orgCode: schema.platformProvisioningJobs.orgCode, n: sql<number>`count(*)::int` })
       .from(schema.platformProvisioningJobs)
-      .where(eq(schema.platformProvisioningJobs.status, "FAILED"))
+      // Job hỏng + job xong mà còn bước không chặn hỏng (bước mẫu — mang `last_error`, review #682): cả hai cần người vận hành.
+      .where(sql`(${schema.platformProvisioningJobs.status} = 'FAILED' or (${schema.platformProvisioningJobs.status} = 'SUCCEEDED' and ${schema.platformProvisioningJobs.lastError} is not null))`)
       .groupBy(schema.platformProvisioningJobs.accountId, schema.platformProvisioningJobs.orgCode),
     loadPriceBook(),
     pdb

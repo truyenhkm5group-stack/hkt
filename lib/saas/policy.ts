@@ -93,6 +93,18 @@ export function cancelByJobAllowed(type: AccountType): boolean {
   return type !== "INTERNAL";
 }
 
+/**
+ * Workspace MỚI («Tạo khách», job cấp phát) được đặt vào một gói CHỈ CÒN ở giá cũ (có trong `platform_plans` nhưng không có
+ * trong bảng giá đang niêm yết — basic · pro · standard) không. Chỉ tài khoản NỘI BỘ (chargeback): giữ luật đang có cho khách
+ * nội bộ — gán họ vào gói V1 là việc có chạy thử của người vận hành (docs/saas/PRICING_V1.md §II.4). Khách NGOÀI thì KHÔNG
+ * (kiểm khởi chạy 08/10/2026): gói cũ đọc giá legacy, không có dùng thử theo phiên bản, trần AI theo dòng cũ của `platform_plans`
+ * — gói credit 0 làm bot im ngay ngày đầu. Loại lạ / thiếu ⇒ KHÔNG (mọi nhánh lỗi rơi về phía hẹp hơn). Gói `internal` không
+ * thuộc câu hỏi này: nó chỉ dành cho workspace nhà (`lib/saas/create-customer-rules.ts`).
+ */
+export function legacyPlanOnCreateAllowed(type: string | null | undefined): boolean {
+  return type === "INTERNAL";
+}
+
 export function mergeSuggestible(type: AccountType): boolean {
   return type === "EXTERNAL";
 }

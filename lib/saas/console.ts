@@ -19,7 +19,7 @@ import { accountAuditTrail, accountProvisioningJobs, finalizedStatements, loadCo
 import { productEntitlement, type ProductEntitlement } from "@/lib/saas/entitlements";
 import { COST_CATEGORIES, addCostEntry, listCostEntries, voidCostEntry } from "@/lib/saas/ledger";
 import { ACCOUNT_STATUSES, ACCOUNT_TYPES, BILLING_MODES } from "@/lib/saas/policy";
-import { requestProvisioning, retryJob, type CreateCustomerRequest, type JobRow } from "@/lib/saas/provisioning";
+import { requestProvisioning, retryJob, templateRetryPending, type CreateCustomerRequest, type JobRow, type SubscribeRequest } from "@/lib/saas/provisioning";
 import { isPeriodMonth } from "@/lib/saas/statement";
 
 export const OPERATOR_REASON_MIN = 5;
@@ -153,7 +153,14 @@ export async function createCustomerAsOperator(user: SessionUser, raw: unknown):
     }
   }
   const account = job.accountId ? ((await findAccountById(job.accountId))?.code ?? null) : null;
-  return { ok: true, jobId: job.id, status: job.status, activationLink, accountCode: account, message: job.status === "SUCCEEDED" ? (res.reused ? `Yêu cầu này đã chạy xong trước đó.${activationNote}` : "Đã tạo khách.") : `Job ${job.status}: ${job.lastError ?? ""}` };
+  // Bước mẫu hỏng (review #682 · MEDIUM-1): khách ĐÃ tạo nhưng thiếu phần dựng sẵn — câu kết quả nói thẳng và chỉ chỗ sửa.
+  const pendingTemplate = templateRetryPending(job);
+  const done = pendingTemplate
+    ? `Đã tạo khách — CHƯA cài được mẫu: ${pendingTemplate.detail ?? "không rõ lỗi"} Bấm «Cài lại mẫu» ở trang khách (khung Job cấp phát).${activationNote}`
+    : res.reused
+      ? `Yêu cầu này đã chạy xong trước đó.${activationNote}`
+      : "Đã tạo khách.";
+  return { ok: true, jobId: job.id, status: job.status, activationLink, accountCode: account, message: job.status === "SUCCEEDED" ? done : `Job ${job.status}: ${job.lastError ?? ""}` };
 }
 
 const resendActivationInput = z.object({ orgCode: z.string().trim().toLowerCase().min(2).max(64), reason });
@@ -189,7 +196,10 @@ export async function subscribeProductAsOperator(user: SessionUser, raw: unknown
   if (!p.success) return { error: firstIssue(p.error) };
   const res = await requestProvisioning({ kind: "SUBSCRIBE_PRODUCT", orgCode: p.data.orgCode, productKey: p.data.productKey, planKey: p.data.planKey || null }, { actor: actorOf(user), email: user.email, source: "OPERATOR", idempotencyKey: p.data.idempotencyKey });
   if ("error" in res) return res;
-  return { ok: true, status: res.job.status, message: res.job.status === "SUCCEEDED" ? "Đã thuê sản phẩm." : `Job ${res.job.status}: ${res.job.lastError ?? ""}` };
+  // Câu kết quả nói ĐÚNG sản phẩm job đã thuê — đọc từ đầu vào đã lưu của job, không từ form (review #684 · M1: khoá cũ từng trả job
+  // của sản phẩm trước và báo «Đã thuê sản phẩm.» cho sản phẩm vừa chọn). Khoá dùng lại cho lượt KHÁC đã bị `requestProvisioning` từ chối.
+  const subscribed = (res.job.input as Partial<SubscribeRequest>).productKey ?? p.data.productKey;
+  return { ok: true, status: res.job.status, message: res.job.status === "SUCCEEDED" ? `Đã thuê ${productDef(subscribed)?.name ?? subscribed}.` : `Job ${res.job.status}: ${res.job.lastError ?? ""}` };
 }
 
 const subscriptionChangeInput = z.object({ subscriptionId: z.string().trim().min(1), action: z.enum(["PAUSE", "RESUME", "CANCEL"]), reason, idempotencyKey: z.string().trim().min(8).max(200).optional() });
@@ -213,14 +223,16 @@ export async function changeSubscriptionAsOperator(user: SessionUser, raw: unkno
   }
 }
 
-export async function retryProvisioningAsOperator(user: SessionUser, raw: unknown): Promise<{ ok: true; status: string; message: string } | Denied> {
+export async function retryProvisioningAsOperator(user: SessionUser, raw: unknown): Promise<{ ok: true; status: string; templatePending: boolean; message: string } | Denied> {
   const denial = platformOperatorDenial(user);
   if (denial) return { error: denial };
   const p = z.object({ jobId: z.string().trim().min(1) }).safeParse(raw);
   if (!p.success) return { error: firstIssue(p.error) };
   const r = await retryJob(p.data.jobId, { actor: actorOf(user), email: user.email, source: "OPERATOR" });
   if ("error" in r) return r;
-  return { ok: true, status: r.status, message: r.status === "SUCCEEDED" ? "Job đã chạy xong." : `Vẫn hỏng: ${r.lastError ?? ""}` };
+  // Job xong mà bước mẫu VẪN hỏng (review #682 · MEDIUM-1) không phải «đã chạy xong».
+  const pending = templateRetryPending(r);
+  return { ok: true, status: r.status, templatePending: pending !== null, message: pending ? `Vẫn chưa cài được mẫu: ${pending.detail ?? ""}` : r.status === "SUCCEEDED" ? "Job đã chạy xong." : `Vẫn hỏng: ${r.lastError ?? ""}` };
 }
 
 const updateInput = z.object({ accountCode: z.string().trim(), name: z.string().trim().min(2).max(200).optional(), accountType: z.enum(ACCOUNT_TYPES).optional(), billingMode: z.enum(BILLING_MODES).optional(), status: z.enum(ACCOUNT_STATUSES).optional(), legalName: z.string().trim().max(300).optional(), taxCode: z.string().trim().max(30).optional(), billingEmail: z.string().trim().max(200).optional(), reason });

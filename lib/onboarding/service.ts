@@ -41,7 +41,9 @@ import { findOrganization, getHomeOrganization, invalidateOrganizations } from "
 import { markPilotConfigured, markPilotCreated } from "@/lib/platform/pilot";
 import { provisionOrganization } from "@/lib/platform/provision";
 import { markOrganizationDraft } from "@/lib/platform/publish";
+import { productsFromModules } from "@/lib/saas/catalog";
 import { openSignupSubscriptions } from "@/lib/saas/signup-subscriptions";
+import { decideNewWorkspace } from "@/lib/saas/workspace-commercial";
 import { buildSignupBlueprint, freshOrgState, type SignupBlueprint } from "@/lib/onboarding/blueprint";
 import { claimInvite, lookupInvite, type InviteRow } from "@/lib/onboarding/invites";
 import { checkSignupRate, hashIp, recordAttempt, type AttemptMode } from "@/lib/onboarding/rate";
@@ -317,7 +319,11 @@ export type CreateResult =
   | { ok: true; orgCode: string; created: boolean; loggedIn: boolean; installId: string | null }
   | { error: string; orgCode?: string; setupFailed?: boolean };
 
-async function adminSessionUser(orgCode: string, orgName: string, email: string): Promise<SessionUser | null> {
+/**
+ * Phiên của quản trị đầu tiên — người ĐỨNG TÊN lượt cài mẫu. Dùng chung cho bước INSTALL ở đây và bước TEMPLATE của job «Tạo
+ * khách» (lib/saas/provisioning-template.ts): một mẫu, một bộ cài, một người đứng tên — không dựng phiên thứ hai.
+ */
+export async function adminSessionUser(orgCode: string, orgName: string, email: string): Promise<SessionUser | null> {
   return withOrganization(orgCode, async () => {
     const db = await getDb();
     const u = await db.query.users.findFirst({ where: eq(schema.users.email, email) });
@@ -362,6 +368,14 @@ type SetupInput = {
 };
 
 /**
+ * Sản phẩm DỰ ĐỊNH của tổ chức sắp dựng: module lõi + module của mẫu đã cắt. /start cấp module LÕI trước rồi mới cài mẫu, nên lúc ghi
+ * dòng tổ chức module chưa nói được khách sẽ dùng gì — luật thương mại (gói · thương hiệu) đọc bộ này (review #682 · MEDIUM-2).
+ */
+export function setupProducts(built: Pick<SignupBlueprint, "modules">): string[] {
+  return productsFromModules(new Set<string>([...CORE_MODULES, ...built.modules]));
+}
+
+/**
  * Các bước GHI của lượt dựng — dùng chung cho lượt đầu và lượt chạy lại. Ném ⇒ người gọi đánh dấu `SETUP_FAILED`.
  * Trả mã lượt cài blueprint.
  */
@@ -369,7 +383,7 @@ async function runSetup(input: SetupInput, step: { current: SetupStepName }): Pr
   const actor = platformActorOf(input.who);
   const source = "UI" as const;
   step.current = "PROVISION";
-  await provisionOrganization({ code: input.code, name: input.name, templateKey: input.built.fromTemplate, plan: input.planKey, brand: input.brand, modules: CORE_MODULES, source, actor });
+  await provisionOrganization({ code: input.code, name: input.name, templateKey: input.built.fromTemplate, plan: input.planKey, brand: input.brand, modules: CORE_MODULES, source, actor, commercial: { products: setupProducts(input.built) } });
   // Vòng đời pilot (docs/platform/pilot-operations.md): tổ chức MỚI của luồng này bắt đầu ở «Vừa tạo». Chỉ ghi khi chưa
   // có giai đoạn — chạy lại sau hỏng không đè giai đoạn người vận hành đã đổi.
   if (input.isNew) await markPilotCreated(input.code, actor, source);
@@ -411,7 +425,7 @@ async function runSetup(input: SetupInput, step: { current: SetupStepName }): Pr
 
   step.current = "ADMIN";
   if (input.admin) {
-    await provisionOrganization({ code: input.code, name: input.name, templateKey: input.built.fromTemplate, plan: input.planKey, modules: CORE_MODULES, admin: input.admin, source, actor });
+    await provisionOrganization({ code: input.code, name: input.name, templateKey: input.built.fromTemplate, plan: input.planKey, modules: CORE_MODULES, admin: input.admin, source, actor, commercial: { products: setupProducts(input.built) } });
   }
   const org = await findOrganization(input.code);
   const subject = await adminSessionUser(input.code, org?.name ?? input.name, input.adminEmail);
@@ -531,6 +545,20 @@ export async function createOrganizationFromSignup(rawDraft: unknown, who: Signu
       return { error: "Tổ chức đang được dựng — đợi vài giây rồi thử lại." };
     }
     if (who.kind === "public" && state.adminEmail !== draft.admin.email) return { error: "Lượt chạy lại phải dùng đúng email quản trị của lượt đầu." };
+  }
+
+  // Luật thương mại của tổ chức MỚI (review #682 · MEDIUM-2) — CÙNG hàm mà `provisionOrganization` hỏi lại lúc ghi dòng tổ chức; hỏi
+  // TRƯỚC để gói / mã mời sai luật bị từ chối khi chưa dựng gì (không tổ chức «Dựng hỏng», không tiêu mã mời). /start không gắn tài
+  // khoản có sẵn ⇒ tài khoản mới là khách ngoài; thương hiệu của host chỉ là gợi ý — bộ sản phẩm của mẫu khoá thì thắng. Khách tự
+  // đăng ký chỉ bị chặn ở đây khi MÃ MỜI gắn một gói không còn mở (mã tạo trước luật) — họ không chọn gói, nên câu nói việc HỌ làm
+  // được; câu đầy đủ (vì sao gói bị chặn) dành cho người vận hành.
+  if (!existing) {
+    const decided = await decideNewWorkspace({ planKey, brand: who.kind === "operator" ? null : (opts.brand ?? null), brandIsChoice: false, accountType: "EXTERNAL", products: setupProducts(pv.built) });
+    if ("error" in decided) {
+      if (g.mode === "operator") return { error: decided.error };
+      await recordAttempt({ mode: g.mode, ipHash: g.ipHash, orgCode: code, outcome: "REJECTED", reason: "PLAN" });
+      return { error: "Mã mời này gắn một gói không còn mở cho cửa hàng mới — liên hệ người gửi mã để nhận mã mới." };
+    }
   }
 
   // Giữ mã mời cho mã tổ chức này (một câu điều kiện — hai lượt đua thì một lượt thua).

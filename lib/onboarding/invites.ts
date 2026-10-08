@@ -13,6 +13,7 @@ import { and, desc, eq, gt, isNull, sql } from "drizzle-orm";
 import { getPlatformDb, schema } from "@/db";
 import { platformAudit, type PlatformActor } from "@/lib/platform/audit";
 import { getHomeOrganization } from "@/lib/platform/organizations";
+import { workspacePlanRefusal } from "@/lib/saas/workspace-commercial";
 
 export const INVITE_TTL_DAYS_DEFAULT = 7;
 export const INVITE_TTL_DAYS_MAX = 30;
@@ -48,8 +49,19 @@ export function inviteStatus(row: Pick<InviteRow, "usedAt" | "revokedAt" | "expi
 
 export const INVITE_STATUS_LABEL: Record<InviteStatus, string> = { ACTIVE: "Còn dùng được", USED: "Đã dùng", EXPIRED: "Hết hạn", REVOKED: "Đã thu hồi" };
 
-/** Tạo mã mời. Trả mã THÔ đúng một lần — không có cách đọc lại. */
+/**
+ * Gói gắn trên mã mời có ĐẶT được cho tổ chức sinh ra từ mã không — mã mời dẫn tới /start, nơi tạo tài khoản KHÁCH NGOÀI mới, nên
+ * cùng luật thương mại chung (review #682 · L1: không gói cũ, không `internal`). `null` = được (kể cả không gắn gói = dùng thử).
+ */
+export async function invitePlanRefusal(planKey: string | null | undefined): Promise<string | null> {
+  const key = planKey?.trim();
+  return key ? workspacePlanRefusal({ planKey: key, accountType: "EXTERNAL", products: [] }) : null;
+}
+
+/** Tạo mã mời. Trả mã THÔ đúng một lần — không có cách đọc lại. Gói sai luật ⇒ NÉM (cửa action hỏi `invitePlanRefusal` trước). */
 export async function createInvite(input: { actor: PlatformActor; note?: string | null; planKey?: string | null; ttlDays?: number }): Promise<{ id: string; code: string; expiresAt: Date }> {
+  const refusal = await invitePlanRefusal(input.planKey);
+  if (refusal) throw new Error(refusal);
   const days = Math.min(INVITE_TTL_DAYS_MAX, Math.max(1, Math.floor(input.ttlDays ?? INVITE_TTL_DAYS_DEFAULT)));
   const code = generateInviteCode();
   const expiresAt = new Date(Date.now() + days * 86_400_000);

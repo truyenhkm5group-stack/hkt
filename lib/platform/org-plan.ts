@@ -6,6 +6,7 @@ import { platformAudit } from "@/lib/platform/audit";
 import { parseOperatorTarget, type KillSwitchResult } from "@/lib/platform/kill-switches";
 import { invalidateOrganizations } from "@/lib/platform/organizations";
 import { platformOperatorDenial } from "@/lib/platform-ui/module-toggle";
+import { existingWorkspacePlanRefusal } from "@/lib/saas/workspace-commercial";
 
 /**
  * ═══════════ ĐỔI GÓI CỦA MỘT TỔ CHỨC — NGƯỜI VẬN HÀNH, KHÔNG SQL (docs/platform/pilot-operations.md §4) ═══════════
@@ -14,7 +15,9 @@ import { platformOperatorDenial } from "@/lib/platform-ui/module-toggle";
  * muốn thêm người thì chỉ còn đường sửa CSDL tay. Hàm này là đường ghi DUY NHẤT sau lúc tạo:
  *  · chỉ người vận hành của tổ chức nhà (`platformOperatorDenial`), bắt buộc lý do, ghi `platform_audit_log`
  *    (`ORG_PLAN_SET`, trước → sau); nhật ký hỏng ⇒ hoàn gói cũ;
- *  · gói phải có trong `platform_plans`; KHÔNG cấp gói `internal` (không giới hạn — gói của tổ chức nhà) cho khách;
+ *  · gói phải có trong `platform_plans`; KHÔNG cấp gói `internal` (không giới hạn — gói của tổ chức nhà) cho khách; và gói phải
+ *    ĐẶT được theo luật thương mại chung (review #682 · L1 / L2, lib/saas/workspace-commercial.ts): khách ngoài chỉ gói đang niêm
+ *    yết + dùng thử, nội bộ thêm gói cũ trừ khi workspace chỉ dùng Chốt Đơn. Gói cũ ĐANG dùng giữ nguyên (không ép đổi);
  *  · tổ chức nhà không đổi gói (nhà luôn `internal`, `planKeyOf`);
  *  · ghi CÓ ĐIỀU KIỆN theo gói đang đọc được — hai người bấm cùng lúc thì lượt sau được báo tải lại, không đè im lặng;
  *  · hạ gói KHÔNG xoá gì: hạn mức mới chỉ chặn lượt TẠO kế tiếp (`checkEntitlement`), dữ liệu đang có giữ nguyên.
@@ -36,6 +39,8 @@ export async function setOrganizationPlan(user: SessionUser, input: unknown): Pr
   if (!plan) return { error: `Không có gói «${planKey}» trong sổ gói.` };
   const from = planKeyOf(org);
   if (from === planKey) return { ok: true, changed: false, message: `«${org.name}» đang ở gói ${plan.name} sẵn.` };
+  const refusal = await existingWorkspacePlanRefusal(org.code, planKey);
+  if (refusal) return { error: refusal };
 
   const pdb = await getPlatformDb();
   const t = schema.platformOrganizations;

@@ -13,9 +13,12 @@ import { loadOrgBilling } from "@/lib/billing/service";
 import { EmptyState, SectionCard } from "@/components/ui-bits";
 import { requirePermission } from "@/lib/auth/session";
 import { ORG_TEMPLATES } from "@/lib/constants/platform-modules";
-import { HOME_PLAN_KEY, listPlans } from "@/lib/entitlements/check";
 import { formatDateTime, formatNumber } from "@/lib/format";
 import { platformOperatorDenial } from "@/lib/platform-ui/module-toggle";
+import { loadPriceBook } from "@/lib/pricing/price-book";
+import { accountOfWorkspace, productsInUse } from "@/lib/saas/accounts";
+import { createCustomerPlanOptions, planOptionLabel, plansForAccountType } from "@/lib/saas/create-customer-rules";
+import { readPlans } from "@/lib/saas/customers";
 import { loadOperatorOrgAi } from "@/lib/ai-usage/view";
 import { loadOperatorOrgAiConfig } from "@/lib/saas/operator-ai";
 import { OrgAiConfigPanel } from "@/components/platform/org-ai-config";
@@ -94,7 +97,14 @@ export default async function PlatformOrgPage({ params }: { params: Promise<{ co
   const billing = o.isHome ? null : await loadOrgBilling(user, o.code);
   // Thương hiệu (0215) — đọc từ sổ tổ chức; `null` = không theo dõi.
   const brand = o.isHome ? null : ((await findOrganization(o.code))?.brand ?? null);
-  const plans = o.isHome ? [] : (await listPlans()).filter((x) => x.key !== HOME_PLAN_KEY).map((x) => ({ key: x.key, name: x.name }));
+  // Gói ĐẶT được cho workspace này (luật thương mại chung, review #682 · L1 / L2) — máy chủ kiểm lại khi đổi. Gói đang dùng mà nay
+  // không đặt lại được (giá cũ) vẫn hiện, để ô chọn nói đúng hiện trạng.
+  const planOptions = o.isHome ? [] : createCustomerPlanOptions(await readPlans(), await loadPriceBook(), new Date());
+  const allowedPlans = o.isHome ? [] : plansForAccountType(planOptions, (await accountOfWorkspace(o.code))?.accountType ?? null, await productsInUse(o.code));
+  const currentPlan = planOptions.find((x) => x.key === d.planKey);
+  const plans = o.isHome
+    ? []
+    : [...allowedPlans.map((x) => ({ key: x.key, name: planOptionLabel(x) })), ...(allowedPlans.some((x) => x.key === d.planKey) ? [] : [{ key: d.planKey, name: `${currentPlan?.name ?? d.planKey} — ${currentPlan?.tier === "HOME_ONLY" ? "gói của workspace nhà" : "giá cũ"}, không chọn lại được` }])];
   const stage = s.pilot?.record.stage ?? null;
 
   return (
