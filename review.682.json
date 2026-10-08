@@ -1,0 +1,8 @@
+{
+  "pr": 682,
+  "sha": "e87159d826dfd3180afbcc06ab867823fdbb1cd1",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-08T17:05:18.069Z",
+  "note": "Re-review vòng 2 PASS: luật gói + thương hiệu ở tầng ghi chung phủ mọi cửa (provision, /start ×3, script, org-plan, org-brand, SUBSCRIBE, mã mời, retryRefusal), Cài lại mẫu có quyền + audit + idempotent, mã mời gói cũ không bị tiêu; tsc + create-customer-rules + identity-email-login + onboarding + saas-platform + pilot-ops đạt; merge-tree sạch. LOW theo sau: commercial bắt buộc ở kiểu, moveWorkspa"
+}
