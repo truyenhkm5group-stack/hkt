@@ -369,6 +369,18 @@ export const PAYMENT_OUTCOME_LABEL: Record<PaymentOutcome, string> = {
 };
 
 /**
+ * Lượt đối chiếu tiền thuê bao / tiền nạp chạy sau MỘT gói tin SePay (route webhook gọi): dòng MỚI mang mã ⇒ quét 3 ngày gần đây;
+ * SePay xác nhận một dòng ĐÃ có (thường là sao kê nhập trước — `duplicate` mà KHÔNG phải gói gửi lại) ⇒ đúng mã bút toán ấy, cửa sổ
+ * 60 ngày (dòng ấy có thể đã cũ); còn lại ⇒ không chạy. HÀM THUẦN — route chỉ nối dây, ngữ nghĩa `duplicate` có bài kiểm ở ingest.
+ */
+export function sepayReconcilePlan(i: { created: boolean; duplicate: boolean; resent: boolean; incoming: boolean; hasCode: boolean; bankRef: string }): { lookbackDays: number; bankRefs?: string[] } | null {
+  if (!i.incoming || !i.hasCode) return null;
+  if (i.created) return { lookbackDays: 3 };
+  if (i.duplicate && !i.resent && i.bankRef) return { lookbackDays: 60, bankRefs: [i.bankRef] };
+  return null;
+}
+
+/**
  * Trả THỪA vẫn là khớp (khách chuyển tròn số) — số thực nhận ghi ở hoá đơn để người vận hành thấy. Trả THIẾU không gia
  * hạn: một phần kỳ là một quyết định, không phải phép chia — người vận hành xác nhận tay nếu đồng ý.
  */

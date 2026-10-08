@@ -241,6 +241,10 @@ export async function testSepayWebhook(db: Db) {
   const hoiTu = await ingestSepayTransaction(db, webhookTrungFile);
   assert.equal(hoiTu.created, false, "10. cùng mã bút toán ngân hàng ⇒ KHÔNG tạo dòng thứ hai");
   assert.equal(hoiTu.transactionId, "sepay-test-file-1", "10. webhook hội tụ đúng vào dòng đã nhập từ file");
+  // Ngữ nghĩa mà route dựa vào để đối chiếu tiền thuê bao ngay khi SePay xác nhận một dòng sao kê có sẵn (`sepayReconcilePlan`):
+  // gộp vào dòng có sẵn ⇒ `duplicate` + mã bút toán của CHÍNH dòng ấy.
+  assert.equal(hoiTu.duplicate, true, "10. gộp vào dòng sao kê có sẵn ⇒ duplicate");
+  assert.equal(hoiTu.bankRef, "FT26254097039999", "10. trả đúng mã bút toán của dòng có sẵn");
 
   const [sauHoiTu] = await db.select().from(b).where(eq(b.id, "sepay-test-file-1"));
   assert.equal(sauHoiTu.accountingGroup, "PURCHASE", "10. NHÃN người dùng đã gán KHÔNG bị webhook xoá");

@@ -162,6 +162,12 @@ export function topupBankRowTrust(row: { provider: string; providerTxnId: string
   return "TRUSTED";
 }
 
+/**
+ * CÙNG luật cho tiền THUÊ BAO (`reconcileBillingPayments`, mã `ERPHD…`): một tài khoản SePay thu cả hai (chủ shop 08/10/2026), và
+ * một người có quyền ghi sổ ngân hàng của nhà cũng không được tự «gia hạn» cho khách bằng một dòng gõ tay / sao kê dựng sẵn.
+ */
+export const paymentBankRowTrust = topupBankRowTrust;
+
 // ─────────────────────────── Dự báo cho khách ───────────────────────────
 
 export type BalanceForecast = {

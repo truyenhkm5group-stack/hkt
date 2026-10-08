@@ -72,9 +72,26 @@ không có phép nhân nào khác được tự thêm vào. Bảng giá và phé
      chọn thì hoá đơn cũ thành `VOID`.
 2. Khách chuyển khoản. SePay ghi giao dịch vào **sổ ngân hàng của tổ chức nhà** như mọi giao dịch khác. Không có bảng tiền
    thứ hai.
-3. `reconcileBillingPayments()` đọc chính sổ đó và tìm tiền VÀO mang mã `ERPHD`. Nó phủ cả ba đường tiền vào: webhook, lượt
-   quét API, sao kê nhập tay. Mỗi khoản được ghi **đúng một** dòng `platform_billing_payments`, khoá theo `bank_ref`. Có
-   bốn phán quyết:
+3. `reconcileBillingPayments()` đọc chính sổ đó và tìm tiền VÀO mang mã `ERPHD`. **Chỉ dòng do SePay TẠO** (webhook / lượt
+   quét API, mang mã giao dịch SePay) vào **đúng tài khoản nhận** mới tự gia hạn — cùng luật với tiền nạp Số dư AI
+   (`paymentBankRowTrust`). Dòng sao kê nhập tệp, dòng gõ tay, hoặc SePay ghi vào tài khoản khác: KHÔNG ghi, KHÔNG gia hạn,
+   nằm ở «Tiền thuê bao chờ xác nhận nguồn» kèm hoá đơn khớp mã (60 ngày); người vận hành kiểm tiền thật trong ngân hàng rồi
+   bấm «Đã nhận tiền…» (lõi `confirmBankPayment`, tham chiếu = mã bút toán) — và dòng rời danh sách. Lý do: người có
+   quyền ghi sổ ngân hàng của nhà không được tự «gia hạn» cho khách bằng một dòng gõ tay hay một tệp sao kê dựng sẵn. Dòng đủ
+   căn cứ được ghi **đúng một** dòng `platform_billing_payments`, khoá theo `bank_ref`. Có bốn phán quyết:
+   - «Đã nhận tiền…» đi lõi riêng `confirmBankPayment`: máy chủ đọc lại số tiền của DÒNG (không tin số client gửi), mã hoá đơn phải
+     nằm trong nội dung, cùng `judgePayment` — trả THIẾU phải chủ động «nhận thiếu» kèm lý do — và ghi `platform_billing_payments` trong
+     cùng giao dịch, nên một dòng chỉ trả MỘT hoá đơn. Form «Xác nhận đã thu» chung: tham chiếu so cả dạng chuẩn hoá của mã bút
+     toán; từ chối tham chiếu của hoá đơn khác, bút toán đã dùng, bút toán MANG MÃ (đi danh sách chờ); bút toán KHÔNG mã (khách quên
+     ghi mã) thì nhận khi số tiền nhập đúng số của bút toán, và bút toán bị khoá trong cùng giao dịch. «Không phải tiền thuê bao…» gạt
+     dòng nhiễu (bản trùng, chuyển nhầm mã) — không xoá, có lý do + nhật ký; không gạt khoản đủ tiền hay trả thiếu của hoá đơn đang mở.
+   - Có khoản chờ mang mã của hoá đơn ĐANG MỞ ⇒ người vận hành nhận MỘT tin mỗi ngày trong hộp thư (không chuông chung — ai trong
+     nhà cũng đọc được chuông). Đối chiếu chạy cả ngay sau khi nhập sao kê và khi SePay xác nhận một dòng có sẵn, nên khoản kẹt được
+     báo mà không cần ai bấm «Đối chiếu lại». Dòng sao kê mà SePay xác nhận sau mang nhãn «SePay đã xác nhận sau».
+   - **Khôi phục sau sự cố webhook:** chạy lượt quét API SePay TRƯỚC (nguồn API được tin), nhập sao kê SAU. Nhập sao kê trước thì
+     mọi khoản thuê bao trong khoảng ấy thành việc xác nhận tay (dòng giữ nguồn `IMPORT` dù SePay xác nhận sau). Luật so tài khoản
+     nhận đọc `bank_transactions.account` (tài khoản chính) — khai tài khoản ảo (VA) làm tài khoản nhận thì mọi khoản thành «tài
+     khoản khác».
    - `MATCHED`: trả đủ hoặc trả thừa. Một giao dịch CSDL làm 4 việc:
      - hoá đơn chuyển sang `PAID`;
      - `paid_through` = `period_end`;

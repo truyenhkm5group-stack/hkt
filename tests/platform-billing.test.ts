@@ -25,7 +25,7 @@ import {
   billingStanding,
   billingWriteDenied,
   extractTransferCodes,
-  judgePayment,
+  judgePayment, sepayReconcilePlan,
   periodEndFor,
   quoteRenewal,
   transferCodeFrom,
@@ -40,11 +40,15 @@ import {
 } from "@/lib/billing/rules";
 import {
   BILLING_RECEIVER_KEY,
+  confirmBankPayment,
   createRenewalInvoice,
+  dismissBankPayment,
+  reconcileAfterStatementImport,
   loadPlatformBilling,
   loadTenantBilling,
   markInvoicePaidManually,
   previewRenewal,
+  reconcileBillingAsOperator,
   reconcileBillingPayments,
   resolveBillingPayment,
   setBillingReceiver,
@@ -67,6 +71,8 @@ const A = "bil-a";
 const B = "bil-b";
 const ORGS = [A, B] as const;
 const REF = "bil-test-";
+/** Tài khoản vận hành THẬT của nhà trong bài kiểm — người nhận tin «tiền thuê bao chờ xác nhận nguồn». */
+const OPS_EMAIL = "bil-ops@bil.local";
 
 function sessionUser(over: Partial<SessionUser>): SessionUser {
   return { id: "bil-user", email: "bil@local", name: "BIL", role: "ADMIN", permissions: [], scope: "ALL", departmentCodes: [], positionId: null, ...over };
@@ -240,6 +246,13 @@ function testPure() {
   assert.equal(judgePayment(100, { status: "VOID", amountVnd: 100 }), "INVOICE_NOT_OPEN");
   assert.equal(judgePayment(99, { status: "OPEN", amountVnd: 100 }), "UNDERPAID");
   assert.equal(judgePayment(150, { status: "OPEN", amountVnd: 100 }), "MATCHED", "trả thừa vẫn khớp");
+  // Kế hoạch đối chiếu sau MỘT gói tin SePay: dòng mới mang mã ⇒ 3 ngày; SePay xác nhận dòng có sẵn (không phải gói gửi lại) ⇒ đúng mã
+  // bút toán ấy, 60 ngày; gói gửi lại / tiền ra / không mã ⇒ không chạy.
+  const plan = (o: Partial<Parameters<typeof sepayReconcilePlan>[0]>) => sepayReconcilePlan({ created: false, duplicate: false, resent: false, incoming: true, hasCode: true, bankRef: "FT1", ...o });
+  assert.deepEqual(
+    [plan({ created: true }), plan({ duplicate: true }), plan({ duplicate: true, resent: true }), plan({ created: true, incoming: false }), plan({ created: true, hasCode: false }), plan({})],
+    [{ lookbackDays: 3 }, { lookbackDays: 60, bankRefs: ["FT1"] }, null, null, null, null],
+  );
 }
 
 // ═══════════ 2–4 · CSDL THẬT ═══════════
@@ -265,6 +278,14 @@ async function cleanup(savedReceiver: unknown, savedPrices: Map<string, number |
   invalidatePriceBook();
   const home = await getHomeOrganization();
   await pdb.delete(schema.platformAuditLog).where(and(eq(schema.platformAuditLog.targetOrgCode, home.code), inArray(schema.platformAuditLog.action, ["BILLING_RECEIVER_SET", "PLAN_PRICE_SET", "BILLING_PAYMENT_RESOLVE", "ADDON_PRICE_SET", "PRICE_VERSION_PUBLISH"])));
+  await withOrganization(home.code, async () => {
+    const db = await getDb();
+    await db.delete(schema.userMessages).where(like(schema.userMessages.dedupeKey, "billing-unconfirmed:%"));
+    await db.delete(schema.users).where(eq(schema.users.email, OPS_EMAIL));
+  });
+  // Bút toán mã viết hoa (dạng SePay chuẩn hoá) của bài kiểm tham chiếu chuẩn hoá.
+  await pdb.delete(schema.platformBillingPayments).where(like(schema.platformBillingPayments.bankRef, "BIL-TEST-%"));
+  await pdb.delete(schema.bankTransactions).where(like(schema.bankTransactions.bankRef, "BIL-TEST-%"));
   for (const code of ORGS) {
     const org = await pdb.query.platformOrganizations.findFirst({ where: eq(schema.platformOrganizations.code, code) });
     if (org) {
@@ -281,10 +302,17 @@ async function cleanup(savedReceiver: unknown, savedPrices: Map<string, number |
 }
 
 let txnSeq = 0;
-async function bankIn(amount: number, description: string): Promise<string> {
+/** Tài khoản nhận tiền bài kiểm khai (`setBillingReceiver` bên dưới). */
+const RECEIVER_ACCOUNT = "0123456789";
+/**
+ * Một dòng tiền vào sổ ngân hàng của nhà. Mặc định là dòng SePay TẠO (webhook, mã giao dịch SePay) vào ĐÚNG tài khoản nhận — đường
+ * tự gia hạn; `as` đổi nguồn để kiểm sao kê nhập tệp · gõ tay · tài khoản khác.
+ */
+async function bankIn(amount: number, description: string, as: { source?: "WEBHOOK" | "API" | "IMPORT" | "MANUAL"; provider?: "" | "SEPAY"; account?: string } = {}): Promise<string> {
   const pdb = await getPlatformDb();
   const bankRef = `${REF}${++txnSeq}`;
-  await pdb.insert(schema.bankTransactions).values({ txnAt: new Date(), amount, description, bankRef });
+  const provider = as.provider ?? "SEPAY";
+  await pdb.insert(schema.bankTransactions).values({ txnAt: new Date(), amount, description, bankRef, source: as.source ?? "WEBHOOK", provider, providerTxnId: provider ? `sp-${bankRef}` : "", account: as.account ?? RECEIVER_ACCOUNT });
   return bankRef;
 }
 
@@ -356,7 +384,7 @@ export async function testPlatformBilling() {
     for (const u of outsiders) assert.ok("error" in (await setBillingReceiver(u, { bin: "970422", accountNumber: "0123456789", accountName: "CONG TY X", reason: "khai tài khoản" })), `${u.email} không khai được`);
     assert.ok("error" in (await setBillingReceiver(op, { bin: "970422", accountNumber: "0123456789", accountName: "CONG TY X", reason: "" })), "thiếu lý do");
     assert.ok("error" in (await setBillingReceiver(op, { bin: "999999", accountNumber: "0123456789", accountName: "CONG TY X", reason: "ngân hàng lạ" })));
-    const rcv = await setBillingReceiver(op, { bin: "970422", accountNumber: "0123456789", accountName: "Công ty Nền Tảng", reason: "Tài khoản doanh thu nền tảng" });
+    const rcv = await setBillingReceiver(op, { bin: "970422", accountNumber: RECEIVER_ACCOUNT, accountName: "Công ty Nền Tảng", reason: "Tài khoản doanh thu nền tảng" });
     assert.ok("ok" in rcv, JSON.stringify(rcv));
 
     // ── Tạo mã; bấm lại không đẻ mã thứ hai; đổi lựa chọn ⇒ mã cũ VOID.
@@ -565,6 +593,152 @@ export async function testPlatformBilling() {
     for (const u of outsiders) assert.ok("error" in (await voidInvoice(u, { invoiceId: c4.invoiceId, reason: "huỷ hộ" })));
     assert.ok("ok" in (await voidInvoice(op, { invoiceId: c4.invoiceId, reason: "Khách đổi ý" })));
     assert.ok("error" in (await voidInvoice(op, { invoiceId: c4.invoiceId, reason: "Huỷ lần hai" })));
+
+    // ── NGUỒN TIỀN (cùng luật với tiền nạp Số dư AI): chỉ dòng do SePay TẠO (webhook / API, mã giao dịch SePay) vào ĐÚNG tài khoản
+    //    nhận mới TỰ gia hạn — mọi lượt khớp ở trên đi đường ấy. Sao kê nhập tệp · gõ tay · tài khoản khác mang mã thuê bao ⇒ KHÔNG
+    //    ghi, KHÔNG gia hạn; nằm ở «Tiền thuê bao chờ xác nhận nguồn» kèm hoá đơn khớp mã; người vận hành kiểm ngân hàng rồi xác nhận
+    //    (tham chiếu = mã bút toán) ⇒ gia hạn và dòng rời danh sách.
+    const c5 = await createRenewalInvoice(tenant, { planKey: "growth", months: 1 });
+    assert.ok("ok" in c5, JSON.stringify(c5));
+    const inv5 = await invoiceById(c5.invoiceId);
+    const subBefore5 = await pdb.query.platformSubscriptions.findFirst({ where: eq(schema.platformSubscriptions.orgCode, A) });
+    const imported = await bankIn(inv5.amountVnd, `CK ${inv5.transferCode}`, { source: "IMPORT", provider: "" });
+    const typed = await bankIn(inv5.amountVnd, `${inv5.transferCode} chuyen khoan`, { source: "MANUAL", provider: "" });
+    const otherAcc = await bankIn(inv5.amountVnd, `IBFT ${inv5.transferCode}`, { account: "9999999999" });
+    // Dòng sao kê có sẵn mà SePay điền mã giao dịch vào SAU: số tiền + mô tả vẫn là của người nhập ⇒ vẫn chưa đủ căn cứ.
+    const filledLater = await bankIn(inv5.amountVnd, `${inv5.transferCode} sepay dien sau`, { source: "IMPORT" });
+    const untrusted = [imported, typed, otherAcc, filledLater];
+    const opsUserId = await withOrganization(home.code, async () => (await (await getDb()).insert(schema.users).values({ email: OPS_EMAIL, name: "Vận hành thu phí", role: "ADMIN", passwordHash: "x", active: true }).returning({ id: schema.users.id }))[0].id);
+    const r5 = await reconcileBillingPayments({ bankRefs: untrusted });
+    assert.deepEqual([r5.scanned, r5.recorded, r5.matched, r5.unconfirmed], [4, 0, 0, 4], JSON.stringify(r5));
+    assert.equal((await invoiceById(inv5.id)).status, "OPEN", "không do SePay tạo vào đúng tài khoản ⇒ không gia hạn");
+    assert.deepEqual(await pdb.query.platformSubscriptions.findFirst({ where: eq(schema.platformSubscriptions.orgCode, A) }), subBefore5, "thuê bao không đổi");
+    for (const ref of untrusted) assert.equal(await paymentByRef(ref), undefined, `${ref}: không ghi ⇒ không «tiêu» mất dòng`);
+    const reconcileMsg = await reconcileBillingAsOperator(op);
+    assert.ok("ok" in reconcileMsg && Number(/([0-9]+) khoản mang mã thuê bao KHÔNG do SePay/.exec(reconcileMsg.message)?.[1] ?? 0) >= 4, `nút «Đối chiếu lại» nói ra khoản chờ xác nhận: ${JSON.stringify(reconcileMsg)}`);
+    const ub = await loadPlatformBilling(op);
+    assert.ok(!("error" in ub));
+    assert.deepEqual(
+      ub.unconfirmedPayments.filter((p) => p.bankRef.startsWith(REF)).map((p) => [p.bankRef, p.reason, p.source, p.invoice?.id, p.invoice?.status, p.amountVnd]).sort(),
+      [
+        [imported, "NOT_SEPAY", "IMPORT", inv5.id, "OPEN", inv5.amountVnd],
+        [typed, "NOT_SEPAY", "MANUAL", inv5.id, "OPEN", inv5.amountVnd],
+        [otherAcc, "OTHER_ACCOUNT", "WEBHOOK", inv5.id, "OPEN", inv5.amountVnd],
+        [filledLater, "NOT_SEPAY", "IMPORT", inv5.id, "OPEN", inv5.amountVnd],
+      ].sort(),
+      "bốn dòng chưa đủ căn cứ, mỗi dòng kèm hoá đơn khớp mã",
+    );
+    assert.deepEqual(ub.unconfirmedPayments.filter((p) => p.bankRef === otherAcc || p.bankRef === imported).map((p) => [p.bankRef, p.accountTail]).sort(), [[imported, "6789"], [otherAcc, "9999"]].sort(), "danh sách in đuôi tài khoản tiền vào");
+    assert.deepEqual(ub.unconfirmedPayments.filter((p) => p.bankRef.startsWith(REF) && p.sepayConfirmedLater).map((p) => p.bankRef), [filledLater], "dòng sao kê mà SePay xác nhận sau mang nhãn riêng");
+    // Khoản chờ khớp một hoá đơn ĐANG MỞ ⇒ người vận hành nhận MỘT tin mỗi ngày; đối chiếu lại trong ngày không nhân tin.
+    // Tin vào HỘP THƯ của người vận hành (không chuông chung — ai trong nhà cũng đọc được chuông).
+    const inbox = () => withOrganization(home.code, async () => (await getDb()).select({ id: schema.userMessages.id }).from(schema.userMessages).where(and(eq(schema.userMessages.userId, opsUserId), like(schema.userMessages.dedupeKey, "billing-unconfirmed:%"))));
+    const bell = () => withOrganization(home.code, async () => (await getDb()).select({ id: schema.notifications.id }).from(schema.notifications).where(like(schema.notifications.dedupeKey, "billing-unconfirmed:%")));
+    const dayOfNotice = vnDate(new Date());
+    const n1 = (await inbox()).length;
+    assert.ok(n1 >= 1 && (await bell()).length === 0, `có tin trong hộp thư người vận hành, không chuông chung: ${n1}`);
+    await reconcileBillingPayments({ bankRefs: untrusted });
+    if (vnDate(new Date()) === dayOfNotice) assert.equal((await inbox()).length, n1, "đối chiếu lại trong ngày không nhân tin");
+    // Chưa khai / chưa đọc được tài khoản nhận ⇒ dòng SePay mang lý do RIÊNG (không phải «tài khoản khác»).
+    const savedRcv = await pdb.query.platformSettings.findFirst({ where: eq(schema.platformSettings.key, BILLING_RECEIVER_KEY) });
+    await pdb.delete(schema.platformSettings).where(eq(schema.platformSettings.key, BILLING_RECEIVER_KEY));
+    try {
+      const noRcv = await loadPlatformBilling(op);
+      assert.ok(!("error" in noRcv) && noRcv.unconfirmedPayments.find((p) => p.bankRef === otherAcc)?.reason === "NO_RECEIVER" && noRcv.unconfirmedPayments.find((p) => p.bankRef === imported)?.reason === "NOT_SEPAY", "chưa khai tài khoản nhận ⇒ lý do riêng");
+    } finally {
+      if (savedRcv) await pdb.insert(schema.platformSettings).values({ key: savedRcv.key, value: savedRcv.value }).onConflictDoNothing();
+    }
+    // «Đã nhận tiền…» đi LÕI RIÊNG: máy chủ đọc lại DÒNG — sai mã hoá đơn / dòng SePay đã khớp / người ngoài ⇒ từ chối.
+    const wrongInv = await confirmBankPayment(op, { bankRef: imported, invoiceId: c1.invoiceId, reason: "Nhầm hoá đơn thử" });
+    assert.ok("error" in wrongInv && /không mang mã/.test(wrongInv.error), JSON.stringify(wrongInv));
+    assert.ok("error" in (await confirmBankPayment(op, { bankRef: full, invoiceId: inv.id, reason: "Dòng SePay đã khớp" })), "dòng đã khớp ⇒ không xác nhận tay");
+    for (const u of outsiders) assert.ok("error" in (await confirmBankPayment(u, { bankRef: imported, invoiceId: inv5.id, reason: "xác nhận hộ" })));
+    // Xác nhận đúng ⇒ gia hạn; khoản tiền vào bảng đối chiếu (MATCHED) với tham chiếu = mã bút toán; số tiền là của DÒNG.
+    assert.ok("ok" in (await confirmBankPayment(op, { bankRef: imported, invoiceId: inv5.id, reason: "Đã kiểm app ngân hàng, tiền vào thật" })));
+    const paid5 = await invoiceById(inv5.id);
+    assert.ok(paid5.status === "PAID" && paid5.paidRef === imported && paid5.paidSource === "MANUAL" && paid5.paidAmountVnd === inv5.amountVnd, JSON.stringify(paid5));
+    assert.equal((await paymentByRef(imported))?.outcome, "MATCHED");
+    // MỘT dòng chỉ trả MỘT hoá đơn — kể cả qua form «Xác nhận đã thu» chung.
+    const c7 = await createRenewalInvoice(tenant, { planKey: "growth", months: 1 });
+    assert.ok("ok" in c7, JSON.stringify(c7));
+    const inv7 = await invoiceById(c7.invoiceId);
+    assert.ok("error" in (await confirmBankPayment(op, { bankRef: imported, invoiceId: inv7.id, reason: "Dùng lại dòng cũ" })), "dòng đã dùng ⇒ từ chối");
+    assert.ok("error" in (await markInvoicePaidManually(op, { invoiceId: inv7.id, amountVnd: 1_000, ref: imported, reason: "Dùng lại mã bút toán" })), "form chung: bút toán đã dùng ⇒ từ chối");
+    assert.ok("error" in (await markInvoicePaidManually(op, { invoiceId: inv7.id, amountVnd: 1_000, ref: typed, reason: "Bút toán chưa khớp" })), "form chung: bút toán chưa khớp ⇒ phải đi «Đã nhận tiền…»");
+    assert.ok("error" in (await markInvoicePaidManually(op, { invoiceId: inv7.id, amountVnd: 1_000, ref: "UNC-ACB-778", reason: "Tham chiếu của hoá đơn khác" })), "form chung: tham chiếu của hoá đơn khác ⇒ từ chối");
+    assert.equal((await invoiceById(inv7.id)).status, "OPEN");
+    // Trả THIẾU: cùng `judgePayment` với bộ khớp — không «nhận thiếu» ⇒ từ chối; có ⇒ gia hạn, khoản ghi UNDERPAID «đã xử lý» kèm lý do.
+    const enough7 = await bankIn(inv7.amountVnd, `CK ${inv7.transferCode} du`, { source: "IMPORT", provider: "" });
+    const short7 = await bankIn(inv7.amountVnd - 50_000, `CK ${inv7.transferCode} thieu`, { source: "IMPORT", provider: "" });
+    const dismissOpen = await dismissBankPayment(op, { bankRef: enough7, reason: "Gạt dòng của hoá đơn đang mở" });
+    assert.ok("error" in dismissOpen && /đang mở/.test(dismissOpen.error), `hoá đơn đang mở + đủ tiền ⇒ không cho gạt: ${JSON.stringify(dismissOpen)}`);
+    const noFlag = await confirmBankPayment(op, { bankRef: short7, invoiceId: inv7.id, reason: "Khách chuyển thiếu" });
+    assert.ok("error" in noFlag && /THIẾU/.test(noFlag.error) && (await invoiceById(inv7.id)).status === "OPEN", JSON.stringify(noFlag));
+    assert.ok("ok" in (await confirmBankPayment(op, { bankRef: short7, invoiceId: inv7.id, acceptUnderpaid: true, reason: "Khách thiếu 50.000, chủ shop đồng ý bỏ qua" })));
+    const paid7 = await invoiceById(inv7.id);
+    const pay7 = await paymentByRef(short7);
+    assert.ok(paid7.status === "PAID" && paid7.paidAmountVnd === inv7.amountVnd - 50_000 && pay7?.outcome === "UNDERPAID" && pay7.resolvedAt && /NHẬN THIẾU/.test(pay7.resolvedNote ?? ""), JSON.stringify([paid7, pay7]));
+    // «Không phải tiền thuê bao / trùng»: bản trùng của khoản đã thu ⇒ gạt khỏi danh sách (ghi «đã xử lý», không xoá); gạt lần hai ⇒ từ chối.
+    assert.ok("ok" in (await dismissBankPayment(op, { bankRef: typed, reason: "Bản trùng của khoản đã xác nhận" })));
+    const payTyped = await paymentByRef(typed);
+    assert.ok(payTyped?.outcome === "INVOICE_NOT_OPEN" && payTyped.resolvedAt, JSON.stringify(payTyped));
+    const dismissAudit = await pdb.select().from(schema.platformAuditLog).where(and(eq(schema.platformAuditLog.action, "BILLING_PAYMENT_RESOLVE"), eq(schema.platformAuditLog.subject, `payment:${typed}`)));
+    assert.ok(dismissAudit.length === 1 && dismissAudit[0].actorEmail === op.email && dismissAudit[0].reason === "Bản trùng của khoản đã xác nhận", "gạt có nhật ký nền tảng (ai · lý do)");
+    assert.ok("error" in (await dismissBankPayment(op, { bankRef: typed, reason: "Gạt lần hai" })), "đã xử lý ⇒ không gạt lần hai");
+    // Dòng sao kê CŨ đã ghi ở bảng đối chiếu trước luật này (bộ khớp cũ nhận mọi nguồn) ⇒ không nằm ở danh sách chờ.
+    const legacy = await bankIn(inv5.amountVnd, `CK ${inv5.transferCode} cu`, { source: "IMPORT", provider: "" });
+    await pdb.insert(schema.platformBillingPayments).values({ bankRef: legacy, txnAt: new Date(), amountVnd: inv5.amountVnd, description: "dòng cũ", transferCode: inv5.transferCode, invoiceId: inv5.id, orgCode: A, outcome: "INVOICE_NOT_OPEN" });
+    const ub2 = await loadPlatformBilling(op);
+    assert.ok(!("error" in ub2));
+    const left = ub2.unconfirmedPayments.filter((p) => p.bankRef.startsWith(REF));
+    assert.deepEqual(left.map((p) => p.bankRef).sort(), [otherAcc, filledLater, enough7].sort(), "đã xác nhận / đã gạt / dòng cũ đã ghi ⇒ rời danh sách");
+    assert.ok(left.every((p) => p.invoice?.status === "PAID"), "dòng còn lại thấy hoá đơn đã thu (không còn nút xác nhận)");
+    // Dòng ĐỦ căn cứ vẫn không nằm ở danh sách này (bộ khớp đã ghi nó ở «Vừa thu» / «Tiền chưa khớp»).
+    assert.ok(!left.some((p) => p.bankRef === full), "dòng SePay đúng tài khoản không bao giờ «chờ xác nhận nguồn»");
+    // Kể cả khi nó CHƯA tới lượt khớp (webhook vừa ghi, bộ khớp chưa chạy): máy sẽ tự xử lý, người vận hành không phải xác nhận.
+    const justIn = await bankIn(1_000, `${inv5.transferCode} sepay vua ghi`);
+    const ub3 = await loadPlatformBilling(op);
+    assert.ok(!("error" in ub3) && !(await paymentByRef(justIn)) && !ub3.unconfirmedPayments.some((p) => p.bankRef === justIn), "dòng đủ căn cứ chưa khớp không nằm ở danh sách chờ xác nhận");
+    // …và KHÔNG xác nhận tay được: dòng SePay đúng tài khoản là việc của bộ khớp (tay chen vào là bỏ qua `judgePayment` của máy).
+    const c9 = await createRenewalInvoice(tenant, { planKey: "growth", months: 1 });
+    assert.ok("ok" in c9, JSON.stringify(c9));
+    const inv9 = await invoiceById(c9.invoiceId);
+    const sepayPending = await bankIn(inv9.amountVnd, `IBFT ${inv9.transferCode}`);
+    const byHand = await confirmBankPayment(op, { bankRef: sepayPending, invoiceId: inv9.id, reason: "Xác nhận tay dòng SePay" });
+    assert.ok("error" in byHand && /bộ khớp tự xử lý/.test(byHand.error) && (await invoiceById(inv9.id)).status === "OPEN", JSON.stringify(byHand));
+    assert.equal((await reconcileBillingPayments({ bankRefs: [sepayPending] })).matched, 1, "bộ khớp tự gia hạn đúng dòng ấy");
+    // Trả THIẾU cho hoá đơn ĐANG MỞ là tiền thật — không gạt được (lượt duyệt lại, LOW-3).
+    const c10 = await createRenewalInvoice(tenant, { planKey: "growth", months: 1 });
+    assert.ok("ok" in c10, JSON.stringify(c10));
+    const inv10 = await invoiceById(c10.invoiceId);
+    const short10 = await bankIn(inv10.amountVnd - 10_000, `CK ${inv10.transferCode} thieu`, { source: "IMPORT", provider: "" });
+    const dismissShort = await dismissBankPayment(op, { bankRef: short10, reason: "Gạt khoản trả thiếu" });
+    assert.ok("error" in dismissShort && /THIẾU/.test(dismissShort.error), JSON.stringify(dismissShort));
+    // Sau khi NHẬP SAO KÊ vào sổ của nhà: đối chiếu NGAY đúng những dòng mang mã (MEDIUM-A) — dòng không mã bỏ qua; tổ chức khác ⇒ không làm gì.
+    const afterImport = await reconcileAfterStatementImport([
+      { bankRef: short10, description: `CK ${inv10.transferCode} thieu`, amount: inv10.amountVnd - 10_000 },
+      { bankRef: `${REF}khong-ma`, description: "chuyen tien", amount: 5_000 },
+    ]);
+    assert.ok(afterImport !== null && afterImport.scanned === 1 && afterImport.unconfirmed === 1, JSON.stringify(afterImport));
+    assert.equal(await withOrganization(A, () => reconcileAfterStatementImport([{ bankRef: short10, description: `CK ${inv10.transferCode}`, amount: 1 }])), null, "tổ chức khác ⇒ không đối chiếu sổ của nhà");
+    // Khách chuyển khoản KHÔNG ghi mã (MEDIUM-B): xác nhận ở form chung với tham chiếu = mã bút toán — so cả dạng chuẩn hoá (LOW-1);
+    // số tiền phải đúng số của bút toán; bút toán bị khoá trong cùng giao dịch ⇒ không trả được hoá đơn thứ hai.
+    const noCodeRef = "BIL-TEST-FT26281ABC";
+    await pdb.insert(schema.bankTransactions).values({ txnAt: new Date(), amount: inv10.amountVnd, description: "Chuyen tien phan mem thang 10", bankRef: noCodeRef, source: "IMPORT" });
+    const wrongAmount = await markInvoicePaidManually(op, { invoiceId: inv10.id, amountVnd: inv10.amountVnd - 1, ref: "bil-test-ft26281 abc", reason: "Khách quên ghi mã" });
+    assert.ok("error" in wrongAmount && /khác số tiền của bút toán/.test(wrongAmount.error), JSON.stringify(wrongAmount));
+    assert.ok("ok" in (await markInvoicePaidManually(op, { invoiceId: inv10.id, amountVnd: inv10.amountVnd, ref: "bil-test-ft26281 abc", reason: "Khách quên ghi mã, đã kiểm app ngân hàng" })));
+    const paid10 = await invoiceById(inv10.id);
+    assert.ok(paid10.status === "PAID" && paid10.paidRef === noCodeRef && (await paymentByRef(noCodeRef))?.outcome === "MATCHED", JSON.stringify(paid10));
+    const c11 = await createRenewalInvoice(tenant, { planKey: "growth", months: 1 });
+    assert.ok("ok" in c11, JSON.stringify(c11));
+    assert.ok("error" in (await markInvoicePaidManually(op, { invoiceId: c11.invoiceId, amountVnd: inv10.amountVnd, ref: noCodeRef, reason: "Dùng lại bút toán không mã" })), "bút toán không mã cũng chỉ trả MỘT hoá đơn");
+    // Bút toán mang mã NẠP Số dư AI là tiền của sản phẩm khác — form chung không dùng nó trả hoá đơn thuê bao (lượt duyệt ba, L1).
+    const topupRef = "BIL-TEST-ERPNAP1";
+    await pdb.insert(schema.bankTransactions).values({ txnAt: new Date(), amount: inv10.amountVnd, description: "Nap so du ERPNAPABCDEF", bankRef: topupRef, source: "IMPORT" });
+    const viaTopup = await markInvoicePaidManually(op, { invoiceId: c11.invoiceId, amountVnd: inv10.amountVnd, ref: topupRef, reason: "Dùng khoản nạp trả thuê bao" });
+    assert.ok("error" in viaTopup && /Số dư AI/.test(viaTopup.error), JSON.stringify(viaTopup));
+    assert.ok("ok" in (await voidInvoice(op, { invoiceId: c11.invoiceId, reason: "Dọn hoá đơn thử" })));
 
     // Giá gói: chỉ người vận hành, không bán gói nội bộ, chặn giá vô lý; hoá đơn mới dùng giá mới.
     for (const u of outsiders) assert.ok("error" in (await setPlanPrice(u, { planKey: "starter", priceVnd: 1, reason: "giảm giá" })));

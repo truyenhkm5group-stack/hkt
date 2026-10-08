@@ -18,6 +18,7 @@ import { LINK_TARGET_TYPES } from "@/lib/constants/finance-truth";
 import { autoLinkActor, createLink, removeAllLinks, removeLinksToTarget } from "@/lib/finance/linkage";
 import { parseLedgerFile } from "@/lib/integrations/bank/statement-file";
 import { dedupeByRef, toBankRow } from "@/lib/integrations/bank/statement";
+import { reconcileAfterStatementImport } from "@/lib/billing/service";
 import { importStatementRows } from "@/lib/integrations/bank/statement-import";
 import { applyBankRules as runBankRules } from "@/lib/integrations/bank/apply-rules";
 
@@ -112,6 +113,9 @@ export async function importBankStatement(
 
   const kq = await importStatementRows(db, rows.rows, { bankAccountId, filename });
   const labelled = await applyRulesInternal();
+  // Dòng mang mã thuê bao / mã nạp vừa vào sổ của NHÀ ⇒ đối chiếu ngay: không tự gia hạn (nguồn IMPORT) nhưng vào danh sách chờ và
+  // BÁO người vận hành nếu khớp hoá đơn đang mở (docs/platform/billing.md §4). Hỏng không làm hỏng lượt nhập.
+  await reconcileAfterStatementImport(rows.rows);
   await audit({
     userId: g.user.id,
     userEmail: g.user.email,

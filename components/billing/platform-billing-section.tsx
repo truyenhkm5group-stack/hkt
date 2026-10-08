@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { BillingReceiverForm, PlanAddonPricesForm, PlanPriceForm, ReconcileBillingButton, ResolvePaymentForm, VatIssuedForm } from "@/components/billing/operator-billing";
+import { BillingReceiverForm, ConfirmBankPaymentForm, DismissBankPaymentForm, PlanAddonPricesForm, PlanPriceForm, ReconcileBillingButton, ResolvePaymentForm, VatIssuedForm } from "@/components/billing/operator-billing";
 import { SectionCard } from "@/components/ui-bits";
 import { PlanCommercialForm } from "@/components/pricing/operator-pricing";
 import { OVERAGE_POLICY_LABEL, type PlanCommercial } from "@/lib/pricing/catalog";
@@ -139,6 +139,45 @@ export function PlatformBillingSection({ data }: { data: PlatformBilling }) {
                     {p.description}
                   </p>
                   <ResolvePaymentForm paymentId={p.id} />
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className="space-y-2" data-unconfirmed-payments={data.unconfirmedPayments.length}>
+          <h3 className="font-semibold" title="Dòng mang mã thanh toán nhưng KHÔNG do SePay tạo vào đúng tài khoản nhận (sao kê nhập tệp · gõ tay · tài khoản khác) — máy không tự gia hạn. Kiểm tiền thật trong ngân hàng rồi mới xác nhận.">
+            Tiền thuê bao chờ xác nhận nguồn ({data.unconfirmedPayments.length}) ⓘ
+          </h3>
+          {data.unconfirmedPayments.length === 0 ? (
+            <p className="text-xs text-muted-foreground">Không có khoản nào.</p>
+          ) : (
+            <div className="space-y-3">
+              {data.unconfirmedPayments.map((p) => (
+                <div key={p.bankRef} className="space-y-1 border-t border-hairline pt-3">
+                  <div className="flex flex-wrap gap-x-3 text-xs">
+                    <span className="numeric font-medium">{formatVND(p.amountVnd)}</span>
+                    <span>{formatDateTime(p.txnAt)}</span>
+                    <span className="font-mono">{p.bankRef}</span>
+                    {p.accountTail ? <span>TK …{p.accountTail}</span> : null}
+                    <span className="text-amber-700 dark:text-amber-400">{p.reason === "OTHER_ACCOUNT" ? "SePay ghi vào tài khoản khác" : p.reason === "NO_RECEIVER" ? "chưa khai / chưa đọc được tài khoản nhận" : p.source === "MANUAL" ? "gõ tay" : "sao kê nhập tệp"}</span>
+                    {p.sepayConfirmedLater ? <span className="font-medium text-emerald-700 dark:text-emerald-400">SePay đã xác nhận sau</span> : null}
+                    {p.invoice ? (
+                      <span>
+                        <span className="font-mono">{p.invoice.transferCode}</span> · {p.invoice.orgCode} · {p.invoice.label} · <span className="numeric">{formatVND(p.invoice.amountVnd)}</span>
+                        {p.invoice.status === "OPEN" ? "" : ` · hoá đơn ${p.invoice.status === "PAID" ? "đã thu" : "đã huỷ"}`}
+                      </span>
+                    ) : (
+                      <span className="text-rose-700 dark:text-rose-400">mã không khớp hoá đơn nào</span>
+                    )}
+                  </div>
+                  <p className="truncate text-xs text-muted-foreground" title={p.description}>
+                    {p.description}
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    {p.invoice?.status === "OPEN" ? <ConfirmBankPaymentForm invoice={p.invoice} bankRef={p.bankRef} amountVnd={p.amountVnd} accountTail={p.accountTail} /> : null}
+                    <DismissBankPaymentForm bankRef={p.bankRef} />
+                  </div>
                 </div>
               ))}
             </div>
