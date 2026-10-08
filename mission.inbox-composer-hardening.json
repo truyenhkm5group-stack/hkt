@@ -3,7 +3,7 @@
   "mission_id": "inbox-composer-hardening",
   "title": "Ô soạn hộp thư: dùng CHUNG cổng quyền với Gửi, không ghi đè chữ đang gõ, không chèn tồn âm, ghi rõ giá lẻ, tìm nhẹ hơn (LOW của review #661)",
   "business_goal": "",
-  "status": "RUNNING",
+  "status": "PR_READY",
   "priority": "P1",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -30,7 +30,18 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-08T05:00:53.265Z",
-  "updated_at": "2026-10-08T06:17:01.289Z",
-  "last_heartbeat": "2026-10-08T06:17:01.289Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-08T06:17:23.407Z",
+  "last_heartbeat": "2026-10-08T06:17:23.407Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "feat/inbox-composer-hardening",
+    "sha": "919d56ed52b8f86f67dd9f37e3eb0483b4aaee08",
+    "at": "2026-10-08T06:17:23.407Z",
+    "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+    "title": "Ô soạn hộp thư: dùng CHUNG cổng quyền với Gửi, không ghi đè chữ đang gõ, không chèn tồn âm, ghi rõ giá lẻ, tìm nhẹ hơn (LOW của review #661)",
+    "summary": "Vá 5 LOW review #661: một cổng replyGate dùng chung cho Gửi và ô soạn (D3 nay đỏ), không ghi đè chữ đang gõ khi kết quả về muộn, câu mẫu {{tồn}} âm / chưa biết / bán không kiểm tồn không chèn và bot không còn gửi «Còn -2 hộp», ghi «(giá lẻ)» khi bật giá sỉ, tìm sản phẩm ≥ 2 ký tự không đọc tồn, lúc bấm đọc đích danh mẫu mã",
+    "tests": [
+      "tsc + eslint 9 tệp sạch; 15 bộ kiểm hộp thư / bot / isolation đạt; hợp đồng tĩnh sau commit đạt; npm run build đạt; kiểm tay race 10/10 (action chậm 2,5 s) + 34/34 luồng thường ở 1366/390 px; đột biến 33/33 gồm D3"
+    ]
+  }
 }
