@@ -687,3 +687,4 @@
 {"at":"2026-10-08T08:09:37.696Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"UPDATE","mission":"saas-delete-signup-shops","detail":"RUNNING → RUNNING · 8 mẫu phạm vi · HIGH"}
 {"at":"2026-10-08T08:09:37.696Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"OVERLAP_ACCEPTED","mission":"saas-delete-signup-shops","detail":"OVERLAP_ACCEPTED với org-ai-platform-cutover: phạm vi tests/platform-isolation-static.test.ts — cách tích hợp: db/index.ts thêm releaseOrganizationDb; tests isolation khai S17 — cùng việc xoá tổ chức tự đăng ký"}
 {"at":"2026-10-08T08:09:50.578Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"saas-delete-signup-shops","detail":"feat/org-offboard-delete @ 83df75b3cc04 · 1 lệnh kiểm thử"}
+{"at":"2026-10-08T08:10:12.197Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"saas-delete-signup-shops","detail":"#673 cho feat/org-offboard-delete @ 83df75b3cc04"}
