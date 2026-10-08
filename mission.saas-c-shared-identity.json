@@ -3,7 +3,7 @@
   "mission_id": "saas-c-shared-identity",
   "title": "Phase C: danh tính toàn nền tảng + membership nhiều workspace (rủi ro xác thực cao — thiết kế + bất biến SECURITY §3 trước khi code)",
   "business_goal": "",
-  "status": "VERIFYING",
+  "status": "DONE",
   "priority": "P2",
   "risk": "CRITICAL",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -24,13 +24,14 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-06T17:03:28.190Z",
-  "updated_at": "2026-10-08T04:38:47.040Z",
-  "last_heartbeat": "2026-10-06T17:14:34.985Z",
+  "updated_at": "2026-10-08T04:39:04.644Z",
+  "last_heartbeat": "2026-10-08T04:39:04.644Z",
   "definition_of_done": [],
   "evidence": {
     "merged": "#617 → 27764f377d63f155b3bcb9a7babe23bad2112bcb",
     "verify": "PASS 85faea0b168cc3aeee53f54486eba9a6baf62404 2026-10-08T04:38:42.544Z",
-    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/37719581360"
+    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/37719581360",
+    "done": "#617 → 27764f37 (tài liệu docs/saas/IDENTITY.md, thiết kế Phase C); nằm trong production 85faea0b; verify PASS 85faea0b 2026-10-08T04:38:42Z (lượt FAIL ngay trước là do verify so khớp đúng SHA 27764f37 trong khi production đã đi trước — không phải sự cố). Phần MÃ của danh tính chung là sứ mệnh riêng, chờ chủ shop trả lời IDENTITY.md §7 Q1–Q6"
   },
   "handoff": {
     "branch": "docs/saas-c-identity",
