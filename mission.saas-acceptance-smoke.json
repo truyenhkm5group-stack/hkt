@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "mission_id": "saas-acceptance-smoke",
-  "title": "Smoke nghiệm thu khách Chốt Đơn trên production: cấp phát · kích hoạt · đăng nhập email · vỏ · chat web → AI → đơn (P0-D)",
+  "title": "Smoke nghiệm thu khách Chốt Đơn trên production",
   "business_goal": "",
   "status": "RUNNING",
   "priority": "P2",
@@ -10,7 +10,7 @@
   "worker": null,
   "worktree": null,
   "branch": "feat/saas-acceptance-smoke",
-  "base_sha": null,
+  "base_sha": "fd89b295367301ceabf207ca5725f4096b090ffd",
   "domains": [],
   "owned_paths": [
     "scripts/saas-acceptance.ts",
@@ -18,14 +18,23 @@
     "lib/constants/saas-acceptance.ts",
     "tests/saas-acceptance.test.ts",
     "docs/saas/ACCEPTANCE.md",
-    ".github/workflows/ops-vps.yml"
+    ".github/workflows/ops-vps.yml",
+    "lib/auth/login.ts",
+    "lib/actions/auth.ts",
+    "lib/users/password-reset.ts",
+    "lib/saas/activation.ts",
+    "lib/saas/console.ts",
+    "lib/constants/saas-nav.ts",
+    "tests/saas-shell.test.ts",
+    "tests/platform-isolation-static.test.ts",
+    "tests/sync-fixtures.test.ts"
   ],
   "dependencies": [],
   "blocked_by": [],
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-08T12:24:39.666Z",
-  "updated_at": "2026-10-08T12:24:39.666Z",
-  "last_heartbeat": "2026-10-08T12:24:39.666Z",
+  "updated_at": "2026-10-08T14:39:53.401Z",
+  "last_heartbeat": "2026-10-08T14:39:53.401Z",
   "definition_of_done": []
 }
