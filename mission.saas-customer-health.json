@@ -27,18 +27,18 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-08T10:13:22.566Z",
-  "updated_at": "2026-10-08T12:40:49.855Z",
-  "last_heartbeat": "2026-10-08T12:38:23.943Z",
+  "updated_at": "2026-10-08T16:53:58.816Z",
+  "last_heartbeat": "2026-10-08T16:53:58.816Z",
   "definition_of_done": [],
   "handoff": {
     "branch": "feat/customer-health",
-    "sha": "bddfed44e8c3eba10face6b33f9e6ab1e89907b5",
-    "at": "2026-10-08T12:38:23.943Z",
+    "sha": "e2b6cbf66e4b8ba35f6ce28ead546cf0baaba799",
+    "at": "2026-10-08T16:53:58.816Z",
     "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
     "title": "P1: danh sách / chi tiết khách cho admin thấy sức khoẻ trong < 30 giây (Messenger · AI · đăng nhập · đơn · hạn mức · vấn đề) — chỉ dữ liệu thật",
-    "summary": "Danh sách khách /platform/customers phân mức Nguy cấp · Cần chú ý · Chưa đủ dữ liệu · Khoẻ · Đã dừng kèm lý do có số và mốc; mức = lý do nặng nhất (không điểm tổng); thiếu tín hiệu không bao giờ thành Khoẻ; một lượt gom ~9 câu ở CSDL nhà, không mở CSDL tổ chức; khối Sức khoẻ ở trang chi tiết",
+    "summary": "Sửa review #683: 3 đường thiếu dữ liệu ra chỗ chưa đo, nhãn AI ghi đơn hộ lỗi, mốc phục hồi tách lượt trả lời, ngưỡng đổi tên + mặc định kỹ thuật, nguồn hỏng tiêm được + test, sắp chạm ≠ vượt, chữ kỹ thuật ẩn, N/A, nhãn dòng nặng nhất, sức khoẻ luôn hiện tại, lỗ gộp chỉ khách trả tiền, now truyền vào, N+1 đếm lượt, lời khuyên kích hoạt theo #681, đồng hồ chưa đo",
     "tests": [
-      "tsc + eslint sạch; npm run build một mình đạt; tests/customer-health.test.ts (thuần + mã nguồn + PGlite 3 tổ chức) đạt; ai-sales-health, ai-usage, platform-saas, saas-platform, ai-balance-usage đạt trên commit đã rebase; hợp đồng tĩnh sau commit đạt; đột biến 14/14 bị giết; dựng thử Chrome headless 1.150 px không cuộn ngang"
+      "Trên bản trước rebase (cùng nội dung, base fd89b295): tsc + eslint 14 tệp sạch; runner customer-health, identity-email-login, saas-platform, ai-sales-health, platform-saas, ai-usage đạt; tĩnh platform-isolation-static S17/S21, test-hygiene, repo-integrity đạt; đột biến 31/31. Build chưa chạy trên SHA cuối (máy cạn RAM) — cổng CI dựng bản production"
     ]
   }
 }
