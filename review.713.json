@@ -1,0 +1,8 @@
+{
+  "pr": 713,
+  "sha": "e02b67f30f13fa8440a0764e7c86934412f02098",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-08T23:02:48.565Z",
+  "note": "Tiêu đề vỏ theo menu (Sản phẩm · Gói dịch vụ) chỉ khi isSalesAgentUser; tỷ lệ hoàn mẫu số 0 ⇒ «—» (luật 42) và bỏ ngưỡng tô màu viết cứng (luật 38); FEATURE_SPEC chỉ đổi nhãn API/Webhook, không đổi giá trị/quyền."
+}

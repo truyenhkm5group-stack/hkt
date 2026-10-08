@@ -1036,3 +1036,4 @@
 {"at":"2026-10-08T23:01:30.039Z","actor":"DESKTOP-56TH98Y:wt-saas-r2","kind":"HANDOFF","mission":"saas-finish-line-r2","detail":"claude/saas-finish-line-r2 @ e02b67f30f13 · 1 lệnh kiểm thử"}
 {"at":"2026-10-08T23:02:02.823Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"saas-finish-line-r2","detail":"#713 cho claude/saas-finish-line-r2 @ e02b67f30f13"}
 {"at":"2026-10-08T23:02:23.927Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"platform-viec-hang-ngay-len-dau","detail":"#714 cho claude/platform-viec-hang-ngay-len-dau @ c41c2a6c2db4"}
+{"at":"2026-10-08T23:02:55.223Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#713 @ e02b67f30f13 · Tiêu đề vỏ theo menu (Sản phẩm · Gói dịch vụ) chỉ khi isSalesAgentUser; tỷ lệ hoàn mẫu số 0 ⇒ «—» (luật 42) và bỏ ngưỡng tô màu viết cứng (luật 38); FEATURE_SPEC chỉ đổi nhãn API/Webhook, không đổi giá trị/quyền."}
