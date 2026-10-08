@@ -821,3 +821,4 @@
 {"at":"2026-10-08T12:51:06.641Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DONE","mission":"saas-v1-plan-migration","detail":"#676 trên production 67fc09b1 (deploy 37772436572); công cụ chuyển V1 chạy thử theo tổ chức, chưa tổ chức nào được chuyển"}
 {"at":"2026-10-08T12:51:19.813Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DONE","mission":"hslc-prepaid-ai","detail":"#674 trên production; HSLC trả trước chờ chủ shop khai tài khoản nhận tiền rồi mới MỞ NẠP"}
 {"at":"2026-10-08T12:51:33.874Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DONE","mission":"saas-delete-signup-shops","detail":"#673 trên production; đã xoá kd (run 37771243600, sao lưu trước); qa + hs-thien-nga-test giữ chờ chủ shop"}
+{"at":"2026-10-08T12:51:47.203Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DONE","mission":"launch-gate","detail":"#678 trên production db0ac290+; docs/saas/LAUNCH_GATE.md là nguồn sự thật readiness"}
