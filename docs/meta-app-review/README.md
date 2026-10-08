@@ -22,6 +22,9 @@ bản này ERP tự tách được bằng vai trò của người bấm trong ap
 
 ## Mục lục
 
+0. [HUONG_DAN_CHU_SHOP.md](HUONG_DAN_CHU_SHOP.md) — **bắt đầu ở đây nếu bạn là chủ shop**: từng bước trên Meta (kiểm điều kiện →
+   thêm quyền + nối thử → chuẩn bị hồ sơ → nộp / xử lý khi bị từ chối) và bảng chia việc chủ shop / kỹ thuật. Lưu ý: từ 06/10/2026
+   app nộp review là app **«ChotDonTuDong Messenger»** (`FACEBOOK_MESSENGER_APP_ID`), không phải app đăng nhập như đoạn mở đầu ở trên.
 1. [01-quyen-va-dieu-kien.md](01-quyen-va-dieu-kien.md) — use case, checklist 4 quyền, Standard vs Advanced, quyền KHÔNG nộp
    đợt đầu, điều kiện tiên quyết (Business Verification, Live, Privacy Policy, Data deletion) và **việc cần làm** với trang
    chính sách.
