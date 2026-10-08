@@ -871,3 +871,4 @@
 {"at":"2026-10-08T16:00:54.126Z","actor":"DESKTOP-56TH98Y:wt-pr-a","kind":"CLAIM","mission":"trang-chu-su-that-thuong-mai","detail":"RUNNING · 2 mẫu phạm vi · MEDIUM"}
 {"at":"2026-10-08T16:53:58.894Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"saas-customer-health","detail":"feat/customer-health @ e2b6cbf66e4b · 1 lệnh kiểm thử"}
 {"at":"2026-10-08T16:55:23.170Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"platform-key-project-probe","detail":"feat/platform-key-project-probe @ 23bffbc0b51a · 1 lệnh kiểm thử"}
+{"at":"2026-10-08T16:56:17.975Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"platform-key-project-probe","detail":"#694 cho feat/platform-key-project-probe @ 23bffbc0b51a"}
