@@ -3,7 +3,7 @@
   "mission_id": "saas-finish-line",
   "title": "Finish line SaaS: audit admin console + vỏ khách, sửa quick wins UX R1 (trạng thái rỗng · chữ kỹ thuật · help link · 404 · AI Sales cuộn · nhãn readiness)",
   "business_goal": "",
-  "status": "INTEGRATING",
+  "status": "VERIFYING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -43,7 +43,7 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-08T07:51:05.873Z",
-  "updated_at": "2026-10-08T13:06:36.553Z",
+  "updated_at": "2026-10-08T13:39:43.581Z",
   "last_heartbeat": "2026-10-08T13:05:43.193Z",
   "definition_of_done": [],
   "intake": {
@@ -51,7 +51,9 @@
     "evidence": []
   },
   "evidence": {
-    "merged": "#680 → aa4b69ceaed122c356ab6f1361cffc63b462e70f"
+    "merged": "#680 → aa4b69ceaed122c356ab6f1361cffc63b462e70f",
+    "verify": "PASS aa4b69ceaed122c356ab6f1361cffc63b462e70f 2026-10-08T13:39:35.156Z",
+    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/37781964748"
   },
   "handoff": {
     "branch": "integrate/saas-finish-line",
