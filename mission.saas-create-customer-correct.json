@@ -3,7 +3,7 @@
   "mission_id": "saas-create-customer-correct",
   "title": "LAUNCH BLOCKER: Tạo khách mới đúng mặc định — thương hiệu Chốt Đơn tự đặt, chỉ gói đang bán (chặn internal / legacy), nút không khoá im lặng, cài mẫu AI bán hàng như /start",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P0",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -34,9 +34,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-08T10:41:59.510Z",
-  "updated_at": "2026-10-08T15:47:14.031Z",
+  "updated_at": "2026-10-08T17:07:12.473Z",
   "last_heartbeat": "2026-10-08T15:47:14.031Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#682 → 67647aae887104ed85fec394ad4f25fb3e612979"
+  },
   "handoff": {
     "branch": "fix/create-customer-defaults",
     "sha": "e87159d826dfd3180afbcc06ab867823fdbb1cd1",
