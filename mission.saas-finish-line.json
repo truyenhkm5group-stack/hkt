@@ -43,8 +43,8 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-08T07:51:05.873Z",
-  "updated_at": "2026-10-08T11:49:35.755Z",
-  "last_heartbeat": "2026-10-08T11:49:35.755Z",
+  "updated_at": "2026-10-08T13:05:43.193Z",
+  "last_heartbeat": "2026-10-08T13:05:43.193Z",
   "definition_of_done": [],
   "intake": {
     "verdict": "PARTIAL",
@@ -52,13 +52,13 @@
   },
   "handoff": {
     "branch": "integrate/saas-finish-line",
-    "sha": "8e7b69bbf1e7e00f92745fcdf3d593d62d819e31",
-    "at": "2026-10-08T11:49:35.755Z",
+    "sha": "89345085861db8ce309493d6ca2920932a68106c",
+    "at": "2026-10-08T13:05:43.193Z",
     "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
     "title": "Finish line SaaS: audit admin console + vỏ khách, sửa quick wins UX R1 (trạng thái rỗng · chữ kỹ thuật · help link · 404 · AI Sales cuộn · nhãn readiness)",
-    "summary": "Finish Line R1 sau review: 4 lối về / ngoài (dashboard) dùng <a> tải cả trang (hết vòng trắng), Hướng dẫn theo vỏ (đường menu, quyền, chữ cấm), nút nối kênh theo quyền settings:manage, «chưa nối kênh» tính mọi kênh, trạng thái «Đang chuẩn bị», tên sản phẩm theo host, câu giữ dữ liệu theo Điều khoản",
+    "summary": "Finish Line R1 + sửa review vòng 2: /login dùng landingAfterSignIn, memo loadChannelFacts 60s, câu hết lượt AI dẫn «Gói dịch vụ»",
     "tests": [
-      "tsc + eslint 21 tệp sạch; help-guides, public-site, saas-shell, sales-inbox, saas-hide-internal, order-review, go-live, channels-overview, ai-quality đạt; static sau commit; npm run build đạt; đột biến 17/17; đo trình duyệt 4 lối về / từ 5.451–6.833 xuống 2 lần điều hướng"
+      "Vòng 3 @ 89345085: tsc sạch; eslint --max-warnings=0 sạch; 10 bài đạt (help-guides, public-site ×2, saas-shell, sales-inbox, saas-hide-internal, go-live, channels-overview, ai-quality, login-throttle, shell-login-landing); hợp đồng tĩnh sau commit đạt; npm run build một mình thoát 0; đột biến vòng 2 6/6 bị bắt; đo Chrome headless /login vòng trắng 6.007 → 2 lần điều hướng; review độc lập vòng 3 PASS"
     ]
   }
 }
