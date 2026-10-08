@@ -34,18 +34,18 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-08T08:16:54.954Z",
-  "updated_at": "2026-10-08T09:29:05.980Z",
-  "last_heartbeat": "2026-10-08T09:29:05.980Z",
+  "updated_at": "2026-10-08T09:29:17.295Z",
+  "last_heartbeat": "2026-10-08T09:29:17.295Z",
   "definition_of_done": [],
   "handoff": {
     "branch": "feat/v1-plan-migration",
-    "sha": "3796355a8bbb6e05f29af47e3c564b4b7694ef15",
-    "at": "2026-10-08T09:00:34.348Z",
+    "sha": "c61a36210f87934e47d16f1f8c83fa70452e8195",
+    "at": "2026-10-08T09:29:17.295Z",
     "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
     "title": "Chuyển tổ chức từ giá legacy sang bảng giá V1: báo cáo chạy thử theo từng tổ chức + chuyển có nhật ký",
-    "summary": "Ops saas-v1-migration: chạy thử từng tổ chức (số dùng thật, gói V1 đề xuất qua smallestFittingPlan, giá cũ → mới, phần vượt, trần AI trước/sau, chặn); --apply ghim một tổ chức qua pinOrgPriceVersion có nhật ký SCRIPT, không bật thu phí / không hoá đơn / không dùng thử; sửa O1 thu đôi ghế ADDON (billableIncluded dùng chung cho bảng kê, màn khách, admin)",
+    "summary": "Sau review #676: đánh giá trần kỹ thuật theo gói (ENTITLEMENT_BELOW_USAGE không vượt được, LOWER_LIMITS cần --accept-lower-limits); loại workspace nhà; ghi gói + ghim + nhật ký trong một giao dịch, khoá ghim FOR UPDATE và đếm lại hoá đơn / thu phí / Số dư; log không in ô arg; billableIncluded cho internal-fit",
     "tests": [
-      "tsc + eslint sạch; saas-v1-migration (thuần + PGlite: chạy thử không ghi, từ chối gói nhỏ hơn số dùng, ghim đúng một tổ chức, thu phí tắt, không hoá đơn, bot BYOK không bị chặn, không thu đôi ghế) + pricing-billing, saas-platform, pricing-v1, saas-l5-billing-trial, saas-internal-plan, ai-balance-* đạt; hợp đồng tĩnh sau commit; đột biến 5/5; 0 ký tự vô hình"
+      "tsc + eslint sạch; saas-v1-migration, pricing-billing, saas-platform, pricing-v1, saas-internal-plan, onboarding, pilot-ops đạt; static sau commit; đột biến 3/4 (1 lớp phòng thủ thứ hai); 0 ký tự vô hình"
     ]
   }
 }
