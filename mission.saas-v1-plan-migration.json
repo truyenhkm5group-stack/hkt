@@ -3,7 +3,7 @@
   "mission_id": "saas-v1-plan-migration",
   "title": "Chuyển tổ chức từ giá legacy sang bảng giá V1: báo cáo chạy thử theo từng tổ chức + chuyển có nhật ký",
   "business_goal": "",
-  "status": "INTEGRATING",
+  "status": "VERIFYING",
   "priority": "P1",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -34,11 +34,13 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-08T08:16:54.954Z",
-  "updated_at": "2026-10-08T11:46:49.750Z",
+  "updated_at": "2026-10-08T12:49:36.235Z",
   "last_heartbeat": "2026-10-08T11:20:23.293Z",
   "definition_of_done": [],
   "evidence": {
-    "merged": "#676 → 67fc09b108a931137fc888f6d71ba6744cc956b9"
+    "merged": "#676 → 67fc09b108a931137fc888f6d71ba6744cc956b9",
+    "verify": "PASS 67fc09b108a931137fc888f6d71ba6744cc956b9 2026-10-08T12:49:29.969Z",
+    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/37772436572"
   },
   "handoff": {
     "branch": "feat/v1-plan-migration",
