@@ -4,9 +4,10 @@ import { HOST_NOT_FOUND_MESSAGE, hostOrganization } from "@/lib/platform/host-or
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { audit } from "@/lib/audit";
+import { recordAuthFailure } from "@/lib/platform/auth-failures";
 import { clientIpFrom } from "@/lib/auth/client-ip";
-import { LOGIN_BAD_CREDENTIALS, matchingLoginOrganizations, verifyLogin } from "@/lib/auth/login";
-import { clearLoginFailures, loginAllowed, loginThrottleKeys, recordLoginFailure } from "@/lib/auth/login-throttle";
+import { LOGIN_BAD_CREDENTIALS, loginOrganizationsCheck, strongestLoginFailure, verifyLogin, type LoginFailureNote, type LoginFailureReason } from "@/lib/auth/login";
+import { clearLoginFailures, loginAllowed, loginLockOf, loginThrottleKeys, recordLoginFailure } from "@/lib/auth/login-throttle";
 import { landingAfterSignIn } from "@/lib/saas/shell-landing";
 import { createSession, destroySession, getSession } from "@/lib/auth/session";
 import { OrgContextError } from "@/lib/platform/context";
@@ -40,13 +41,22 @@ export async function loginAction(_prev: LoginState, formData: FormData): Promis
   const ip = clientIpFrom(h.get("x-forwarded-for"));
   const throttleKeys = loginThrottleKeys(email, ip, orgCode ?? "*");
   const gate = loginAllowed(throttleKeys);
+  /*
+    LỖI CÓ LÝ DO (sứ mệnh saas-ops-signals · lib/platform/auth-failures.ts): mọi nhánh hỏng ghi MỘT dòng `platform_auth_failures`
+    (định danh băm + bản che, IP băm, mã tổ chức chỉ khi có thật) để người vận hành chẩn đoán «khách không đăng nhập được». Câu trả
+    người dùng KHÔNG đổi. Lượt BỊ CHẶN chỉ ghi một dòng mỗi cửa sổ khoá — kẻ dò không khuếch đại được lượt ghi. Không bao giờ ném.
+  */
+  const noteFailure = (reason: LoginFailureReason | "THROTTLED", failedOrg: string | null) =>
+    recordAuthFailure({ flow: "LOGIN", reason, orgCode: failedOrg, identifier: email, ip, lock: reason === "THROTTLED" ? loginLockOf(throttleKeys) : null });
   if (!gate.ok) {
     console.warn(`[login] chặn dò mật khẩu · email=${email} · ip=${ip} · đợi ${gate.retryAfterSec}s`);
+    await noteFailure("THROTTLED", orgCode);
     return { error: `Sai quá nhiều lần. Thử lại sau ${Math.ceil(gate.retryAfterSec / 60)} phút.` };
   }
 
   if (!orgCode) {
-    const matched = await matchingLoginOrganizations(email, password);
+    // Một phép dò dùng chung với ops nghiệm thu (`matchingLoginOrganizations`) — kèm lý do từng tổ chức không khớp cho sổ lỗi.
+    const { matched, fails, homeCode } = await loginOrganizationsCheck(email, password);
     if (matched.length > 1) {
       // Không lộ gì cho người KHÔNG biết mật khẩu: danh sách chỉ hiện khi mật khẩu đã khớp ở mọi tổ chức trong đó.
       const choose = await Promise.all(matched.map(async (code) => ({ code, name: (await findOrganization(code))?.name ?? code })));
@@ -54,6 +64,8 @@ export async function loginAction(_prev: LoginState, formData: FormData): Promis
     }
     if (matched.length === 0) {
       recordLoginFailure(throttleKeys);
+      const f = strongestLoginFailure(fails, homeCode);
+      await noteFailure(f.reason, f.orgCode);
       await new Promise((r) => setTimeout(r, 400));
       return { error: LOGIN_BAD_CREDENTIALS };
     }
@@ -64,15 +76,21 @@ export async function loginAction(_prev: LoginState, formData: FormData): Promis
     Tra người, kiểm mật khẩu, ký phiên mang `org`, ghi `lastLoginAt` và nhật ký — TẤT CẢ trong ngữ cảnh
     của tổ chức đã chọn (lib/auth/login.ts). Mã tổ chức sai trả ĐÚNG câu của sai mật khẩu.
   */
-  const verdict = await verifyLogin({ email, password, orgCode }, async (subject) => {
-    clearLoginFailures(throttleKeys);
-    await createSession(subject);
-  });
+  // Lý do NỘI BỘ chỉ đi qua `onFailure` để ghi sổ — kết quả `verifyLogin` giữ đúng ba trường công khai, client chỉ nhận `{ error }`.
+  const seen: { note: LoginFailureNote | null } = { note: null };
+  const verdict = await verifyLogin(
+    { email, password, orgCode },
+    async (subject) => {
+      clearLoginFailures(throttleKeys);
+      await createSession(subject);
+    },
+    { onFailure: (note) => (seen.note = note) },
+  );
   if (!verdict.ok) {
-    if (verdict.code === "BAD_CREDENTIALS") {
-      recordLoginFailure(throttleKeys);
-      await new Promise((r) => setTimeout(r, 400));
-    }
+    if (verdict.code === "BAD_CREDENTIALS") recordLoginFailure(throttleKeys);
+    // `onFailure` luôn được gọi trước khi một lượt hỏng trả về; thiếu (không thể) ⇒ ghi lý do chung, không đoán tổ chức.
+    await noteFailure(seen.note?.reason ?? "BAD_PASSWORD", seen.note?.orgCode ?? null);
+    if (verdict.code === "BAD_CREDENTIALS") await new Promise((r) => setTimeout(r, 400));
     return { error: verdict.error };
   }
   /*

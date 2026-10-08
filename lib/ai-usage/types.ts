@@ -14,6 +14,7 @@
  * Mỗi nguồn đếm RIÊNG: lượt BYOK của A không bao giờ trừ vào credit PLATFORM, và không tổ chức nào trừ vào sổ của tổ
  * chức khác (câu đếm luôn lọc `org_code` + `billing_source`).
  */
+import { AI_FAILURE_CLASSES, classifyAiFailure, type AiFailureClass } from "@/lib/constants/ai-incidents";
 
 export const AI_BILLING_SOURCES = ["BYOK", "PLATFORM", "HOME"] as const;
 export type AiBillingSource = (typeof AI_BILLING_SOURCES)[number];
@@ -180,7 +181,25 @@ export type AiSourceUsage = { requestsToday: number; requestsMonth: number; cost
 
 export const EMPTY_SOURCE_USAGE: AiSourceUsage = { requestsToday: 0, requestsMonth: 0, costUsdMonth: 0, unknownCostMonth: 0 };
 
-export type AiQuotaBlockReason = "REQUESTS_DAY" | "REQUESTS_MONTH" | "COST_HARD" | "NO_PLATFORM_CREDIT" | "PLATFORM_CREDIT_USED" | "PLAN_UNREADABLE";
+/** Trần hạn mức nào chặn lượt — `evaluateAiQuota` / `checkAiQuota` trả về, dòng `BLOCKED_QUOTA` mang lại ở `error_class` (0237). */
+export const AI_QUOTA_BLOCK_REASONS = ["REQUESTS_DAY", "REQUESTS_MONTH", "COST_HARD", "NO_PLATFORM_CREDIT", "PLATFORM_CREDIT_USED", "PLAN_UNREADABLE"] as const;
+export type AiQuotaBlockReason = (typeof AI_QUOTA_BLOCK_REASONS)[number];
+
+/**
+ * ═══ AI IM CÓ TÊN (0237 · sứ mệnh saas-ops-signals) ═══
+ *
+ * `platform_ai_usage.error_class`: dòng `ERROR` mang LỚP LỖI của nhà cung cấp — đúng bộ phân loại đã có (`classifyAiFailure`,
+ * lib/constants/ai-incidents.ts: bốn lớp thô của `salesBotError` đi trước, chỉ tách mịn phần «khác»); dòng `BLOCKED_QUOTA`
+ * mang TRẦN nào chạm (`AiQuotaBlockReason`). `NULL` = CHƯA PHÂN LOẠI (dòng trước 0237, đường ghi chưa nối) — không phải «khác».
+ * Danh sách đóng, CHECK ở CSDL cùng đúng các giá trị này.
+ */
+export const AI_USAGE_ERROR_CLASSES = [...AI_FAILURE_CLASSES, ...AI_QUOTA_BLOCK_REASONS] as const;
+export type AiUsageErrorClass = (typeof AI_USAGE_ERROR_CLASSES)[number];
+
+/** Lỗi ném ra từ lời gọi model ⇒ lớp lỗi cho sổ AI. HÀM THUẦN, không giữ câu lỗi (câu có thể mang dữ liệu). */
+export function aiErrorClassOf(error: unknown): AiFailureClass {
+  return classifyAiFailure(error instanceof Error ? error.message : typeof error === "string" ? error : String(error ?? ""));
+}
 
 export type AiQuotaVerdict =
   | { ok: true; source: AiBillingSource; softExceeded: boolean; warning: string | null; usage: AiSourceUsage; limits: AiLimits }

@@ -24,9 +24,11 @@ import { createHash, randomBytes } from "node:crypto";
 import { and, eq, gt, isNull, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { audit } from "@/lib/audit";
+import { recordAuthFailure } from "@/lib/platform/auth-failures";
 import { indexAccountIdentities } from "@/lib/auth/identities";
 import { hashPassword } from "@/lib/auth/password";
-import { loginAllowed, recordLoginFailure } from "@/lib/auth/login-throttle";
+import { loginAllowed, loginLockOf, recordLoginFailure } from "@/lib/auth/login-throttle";
+import type { AuthFailureReason } from "@/lib/constants/auth-failures";
 import { applySessionRevocation } from "@/lib/auth/session-revoke";
 import { can, type SessionUser } from "@/lib/auth/session";
 import { ACCEPTANCE_ACTOR_LABEL, ACCEPTANCE_REGISTRY_REFUSAL, acceptanceWorkspaceOf } from "@/lib/constants/saas-acceptance";
@@ -63,10 +65,10 @@ function ipKeys(ip: string): string[] {
   return [`ip:reset:${h}`];
 }
 
-type Gate = { ok: true; keys: string[] } | { ok: false; error: string };
+type Gate = { ok: true; keys: string[] } | { ok: false; error: string; keys: string[] };
 function throttleGate(ip: string): Gate {
   const keys = ipKeys(ip);
-  return loginAllowed(keys).ok ? { ok: true, keys } : { ok: false, error: PASSWORD_RESET_THROTTLED };
+  return loginAllowed(keys).ok ? { ok: true, keys } : { ok: false, error: PASSWORD_RESET_THROTTLED, keys };
 }
 
 async function activeOrg(orgCode: string) {
@@ -74,6 +76,65 @@ async function activeOrg(orgCode: string) {
   if (!ORGANIZATION_CODE_PATTERN.test(code)) return null;
   const org = await findOrganization(code);
   return org && org.status === "ACTIVE" ? org : null;
+}
+
+// ═══ LỖI CÓ LÝ DO (sứ mệnh saas-ops-signals) ═══
+// Người mở liên kết hỏng vẫn nhận ĐÚNG một câu chung (`PASSWORD_RESET_INVALID`); lý do thật chỉ vào sổ `platform_auth_failures`
+// cho người vận hành («khách bấm liên kết kích hoạt không vào được» ⇒ hết hạn? đã dùng? đã có liên kết mới hơn?). Lượt tra lý do
+// chạy ĐÚNG ở nhánh hỏng, mỗi lượt hỏng đã bị bộ chặn dò theo IP giới hạn (30 / máy / 15 phút).
+
+/** Mã tổ chức của đường dẫn không dùng được vì sao — `null` = tổ chức có và đang chạy. */
+async function linkOrgFailure(orgCode: string): Promise<AuthFailureReason | null> {
+  const code = String(orgCode ?? "").trim().toLowerCase();
+  const org = ORGANIZATION_CODE_PATTERN.test(code) ? await findOrganization(code) : null;
+  if (!org) return "ORG_NOT_FOUND";
+  return org.status === "ACTIVE" ? null : "ORG_INACTIVE";
+}
+
+/** Liên kết không còn dùng được vì sao — chỉ gọi trong `withOrganization` của tổ chức đường dẫn, SAU khi lượt tra «còn dùng được» hỏng. */
+async function resetTokenFailure(token: string): Promise<{ reason: AuthFailureReason; email: string | null }> {
+  const db = await getDb();
+  const t = schema.passwordResetTokens;
+  const [row] = await db
+    .select({ usedAt: t.usedAt, revokedAt: t.revokedAt, expiresAt: t.expiresAt, email: schema.users.email, active: schema.users.active })
+    .from(t)
+    .innerJoin(schema.users, eq(schema.users.id, t.userId))
+    .where(eq(t.tokenHash, hashResetToken(token)))
+    .limit(1);
+  if (!row) return { reason: "RESET_LINK_INVALID", email: null };
+  if (row.usedAt) return { reason: "RESET_LINK_USED", email: row.email };
+  if (row.revokedAt) return { reason: "RESET_LINK_REVOKED", email: row.email };
+  if (row.expiresAt.getTime() <= Date.now()) return { reason: "RESET_LINK_EXPIRED", email: row.email };
+  if (!row.active) return { reason: "USER_INACTIVE", email: row.email };
+  return { reason: "RESET_LINK_INVALID", email: row.email };
+}
+
+/**
+ * Lý do của một lượt hỏng — KHÔNG BAO GIỜ ném: cả phần tra tổ chức (`linkOrgFailure`) cũng nằm trong try, vì lỗi tra lý do (CSDL nhà chập)
+ * mà bay lên là người mở liên kết nhận trang 500 thay cho câu chung. Lỗi ⇒ «liên kết sai» (không đoán).
+ */
+async function resetFailureWhy(orgCode: string, token: string): Promise<{ reason: AuthFailureReason; email: string | null }> {
+  try {
+    return await resetFailureWhyCore(orgCode, token);
+  } catch {
+    return { reason: "RESET_LINK_INVALID", email: null };
+  }
+}
+
+async function resetFailureWhyCore(orgCode: string, token: string): Promise<{ reason: AuthFailureReason; email: string | null }> {
+  if (!TOKEN_PATTERN.test(String(token ?? ""))) return { reason: "RESET_LINK_INVALID", email: null };
+  const orgWhy = await linkOrgFailure(orgCode);
+  if (orgWhy) return { reason: orgWhy, email: null };
+  try {
+    return await withOrganization(String(orgCode).trim().toLowerCase(), () => resetTokenFailure(token));
+  } catch (error) {
+    // Tổ chức vừa bị đình chỉ giữa chừng ⇒ đúng lý do; lỗi khác (CSDL) ⇒ không đoán, ghi «liên kết sai».
+    return { reason: error instanceof OrgContextError ? "ORG_INACTIVE" : "RESET_LINK_INVALID", email: null };
+  }
+}
+
+async function noteResetFailure(orgCode: string, ip: string, why: { reason: AuthFailureReason; email: string | null }, lockKeys?: string[]): Promise<void> {
+  await recordAuthFailure({ flow: "RESET_LINK", reason: why.reason, orgCode, identifier: why.email, ip, lock: lockKeys ? loginLockOf(lockKeys) : null });
 }
 
 // ═══ TẠO LIÊN KẾT ═══
@@ -180,9 +241,13 @@ export type ResetLookup = { ok: true; orgCode: string; orgName: string; email: s
 /** Mở trang: CHỈ ĐỌC, không tiêu mã (bot xem trước liên kết của Zalo / Messenger không làm hỏng liên kết). */
 export async function lookupResetToken(orgCode: string, token: string, opts: { ip: string }): Promise<ResetLookup> {
   const gate = throttleGate(opts.ip);
-  if (!gate.ok) return { ok: false, error: gate.error };
-  const fail = (): ResetLookup => {
+  if (!gate.ok) {
+    await noteResetFailure(orgCode, opts.ip, { reason: "THROTTLED", email: null }, gate.keys);
+    return { ok: false, error: gate.error };
+  }
+  const fail = async (): Promise<ResetLookup> => {
     recordLoginFailure(gate.keys);
+    await noteResetFailure(orgCode, opts.ip, await resetFailureWhy(orgCode, token));
     return { ok: false, error: PASSWORD_RESET_INVALID };
   };
   if (!TOKEN_PATTERN.test(String(token ?? ""))) return fail();
@@ -201,11 +266,15 @@ export async function lookupResetToken(orgCode: string, token: string, opts: { i
 /** Đặt mật khẩu mới: tiêu mã + ghi mật khẩu trong MỘT giao dịch, rồi thu hồi mọi phiên của người đó. Không tự đăng nhập. */
 export async function completePasswordResetCore(orgCode: string, token: string, input: unknown, opts: { ip: string }): Promise<{ ok: true; orgCode: string; email: string } | { error: string }> {
   const gate = throttleGate(opts.ip);
-  if (!gate.ok) return { error: gate.error };
+  if (!gate.ok) {
+    await noteResetFailure(orgCode, opts.ip, { reason: "THROTTLED", email: null }, gate.keys);
+    return { error: gate.error };
+  }
   const parsed = completeResetSchema.safeParse(input);
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dữ liệu không hợp lệ" };
-  const invalid = () => {
+  const invalid = async () => {
     recordLoginFailure(gate.keys);
+    await noteResetFailure(orgCode, opts.ip, await resetFailureWhy(orgCode, token));
     return { error: PASSWORD_RESET_INVALID };
   };
   if (!TOKEN_PATTERN.test(String(token ?? ""))) return invalid();

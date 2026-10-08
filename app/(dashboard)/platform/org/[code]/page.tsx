@@ -4,6 +4,8 @@ import { OrgAiControlForm } from "@/components/ai-usage/ai-controls";
 import { AiLimitsTable, AiUsageDailyTable, AiUsageTotalsTable } from "@/components/ai-usage/ai-usage-tables";
 import { PageHeader } from "@/components/page-header";
 import { KillSwitchPanel, PilotPanel, SupportHealthPanel } from "@/components/platform/org-support-panels";
+import { OpsSignalsPanel } from "@/components/platform/ops-signals-panel";
+import { loadOrgOpsSignals } from "@/lib/platform/ops-signals";
 import { OrgBrandControl, OrgPlanControl } from "@/components/platform/pilot-ops";
 import { ORG_BRAND_LABEL, ORG_BRANDS } from "@/lib/platform/org-brand";
 import { findOrganization } from "@/lib/platform/organizations";
@@ -106,6 +108,12 @@ export default async function PlatformOrgPage({ params }: { params: Promise<{ co
     ? []
     : [...allowedPlans.map((x) => ({ key: x.key, name: planOptionLabel(x) })), ...(allowedPlans.some((x) => x.key === d.planKey) ? [] : [{ key: d.planKey, name: `${currentPlan?.name ?? d.planKey} — ${currentPlan?.tier === "HOME_ONLY" ? "gói của workspace nhà" : "giá cũ"}, không chọn lại được` }])];
   const stage = s.pilot?.record.stage ?? null;
+  // Sự cố 24 giờ / 7 ngày (sứ mệnh saas-ops-signals): MỘT câu ở CSDL nhà — cùng cổng người vận hành (hàm đọc hỏi lại).
+  // Khung sự cố là phần CHẨN ĐOÁN thêm — lỗi đọc nó chỉ ẩn khung (và ghi log), không được làm sập trang tổ chức người vận hành đang cần.
+  const ops = await loadOrgOpsSignals(user, o.code, { aiSalesEnabled: d.modules.enabled.some((m) => m.key === "ai_sales") }).catch((e: unknown) => {
+    console.error(`[platform/org] khung sự cố của ${o.code} lỗi: ${e instanceof Error ? e.message.slice(0, 200) : "lỗi lạ"}`);
+    return { ok: false as const };
+  });
 
   return (
     <div className="space-y-5">
@@ -139,6 +147,7 @@ export default async function PlatformOrgPage({ params }: { params: Promise<{ co
 
       <KillSwitchPanel s={s} connections={d.connections.value ? d.connections.value.map((c) => ({ connectorKey: c.connectorKey, label: c.label, status: c.status })) : null} />
       <PilotPanel s={s} />
+      {ops.ok ? <OpsSignalsPanel data={ops.value} /> : null}
       <SupportHealthPanel s={s} />
       {billing && !("error" in billing) ? <OrgBillingSection orgCode={o.code} orgName={o.name} data={billing} /> : null}
       {o.isHome || o.status !== "ACTIVE" ? null : <OperatorResetLinkPanel orgCode={o.code} orgName={o.name} />}

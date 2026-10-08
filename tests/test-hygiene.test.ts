@@ -182,6 +182,8 @@ const DOC_MOI_TRUONG_DA_KHAI: Record<string, string> = {
     "ĐẶT FACEBOOK_LOGIN_APP_ID / SECRET (app Facebook GIẢ — Graph cũng giả) và PLATFORM_SECRETS_KEY (khoá thử mã hoá page token), cùng cách messenger.test — ĐẦU VÀO của phép kiểm, trả lại nguyên trạng trong finally; kết luận không phụ thuộc máy có khai các biến đó hay không.",
   "tests/messenger-multipage.test.ts":
     "ĐẶT FACEBOOK_LOGIN_APP_ID / SECRET (app Facebook GIẢ — Graph cũng giả) và PLATFORM_SECRETS_KEY (khoá thử mã hoá page token) — ĐẦU VÀO của phép kiểm, trả lại nguyên trạng trong finally; kết luận không phụ thuộc máy có khai các biến đó hay không.",
+  "tests/ops-signals.test.ts":
+    "ĐẶT FACEBOOK_LOGIN_APP_ID / SECRET (app Facebook GIẢ — Graph cũng giả, đếm lượt gọi) và PLATFORM_SECRETS_KEY (khoá thử mã hoá page token) quanh ĐÚNG phần kiểm đăng ký webhook có trần, rồi trả lại nguyên trạng trong finally. Phần chạy job trước đó không có page nối thẳng nào nên không gọi Graph dù máy có khai app hay không — kết luận không rẽ theo môi trường.",
   "tests/go-live.test.ts":
     "ĐẶT PLATFORM_SECRETS_KEY (khoá thử để mã hoá token Pancake) và PLATFORM_AI_* (bật AI dùng chung bằng khoá GIẢ) — ĐẦU VÀO của phép kiểm, trả lại nguyên trạng trong finally; kết luận không phụ thuộc máy có khai các biến đó hay không.",
   "tests/phone-otp.test.ts":

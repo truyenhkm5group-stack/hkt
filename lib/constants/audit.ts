@@ -2,6 +2,9 @@
 export const AUDIT_ACTION_LABEL: Record<string, string> = {
   LOGIN: "Đăng nhập",
   LOGOUT: "Đăng xuất",
+  // Sứ mệnh saas-ops-signals: bot ghi đơn KHÔNG thành (lib/sales-chatbot/order-signals.ts).
+  "order.create_failed": "Bot ghi đơn hỏng (lõi đơn lỗi)",
+  "order.validation_failed": "Bot ghi đơn bị từ chối (đơn không hợp lệ)",
   PASSWORD_CHANGE: "Đổi mật khẩu",
   USER_CREATE: "Tạo người dùng",
   USER_UPDATE: "Sửa người dùng",

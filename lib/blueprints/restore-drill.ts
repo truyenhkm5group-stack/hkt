@@ -96,6 +96,8 @@ export const CONTROL_PLANE_TABLES = [
   "platform_ai_accounts",
   "platform_ai_ledger_entries",
   "platform_payment_intents",
+  "platform_org_health",
+  "platform_auth_failures",
 ] as const;
 export type ControlPlaneTable = (typeof CONTROL_PLANE_TABLES)[number];
 
