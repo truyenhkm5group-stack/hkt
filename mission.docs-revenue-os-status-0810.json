@@ -3,7 +3,7 @@
   "mission_id": "docs-revenue-os-status-0810",
   "title": "Bản đồ AI Revenue OS cập nhật sau chuỗi 08/10 (tài liệu)",
   "business_goal": "",
-  "status": "VERIFYING",
+  "status": "DONE",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -22,13 +22,14 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-08T04:28:19.463Z",
-  "updated_at": "2026-10-08T06:50:47.706Z",
-  "last_heartbeat": "2026-10-08T04:28:27.660Z",
+  "updated_at": "2026-10-08T06:50:58.357Z",
+  "last_heartbeat": "2026-10-08T06:50:58.357Z",
   "definition_of_done": [],
   "evidence": {
     "merged": "#660 → 217cb26c3654c759271dc9b90327c12eca329b80",
     "verify": "PASS 36b7791b9ec790690b85229cfa82a7e7cafdbc82 2026-10-08T06:50:42.752Z",
-    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/37735795033"
+    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/37735795033",
+    "done": "gộp vào main; deploy 37735795033 (36b7791b) success; verify PASS 36b7791b"
   },
   "handoff": {
     "branch": "docs/revenue-os-status-0810",
