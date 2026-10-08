@@ -9,6 +9,20 @@
 | `terms-of-service.md` | Điều khoản sử dụng dịch vụ (khách thuê ↔ nền tảng) |
 | `privacy-policy.md` | Chính sách bảo vệ dữ liệu cá nhân (dữ liệu của khách thuê VÀ của khách hàng cuối mà khách thuê nhập vào) |
 
+## Hồ sơ tuân thủ pháp luật Việt Nam — Phase 1 (08/10/2026: nghiên cứu + kiểm kê + khoảng trống)
+
+> KHÔNG phải ý kiến pháp lý. Mọi dòng «LEGAL COUNSEL REQUIRED» là câu hỏi chưa có trả lời. **Chưa hồ sơ nào được nộp
+> cho cơ quan nhà nước.** Đọc theo thứ tự:
+
+| Tệp | Trả lời câu gì |
+|---|---|
+| `VIETNAM_LEGAL_COMPLIANCE.md` | Luật nào chạm sản phẩm (14 văn bản, có mức tin cậy số điều), sản phẩm làm gì, khoảng trống, ai phải làm gì (F chủ sở hữu · G luật sư · D cơ quan · E kế toán · U chưa biết) |
+| `LEGAL_LAUNCH_GATE.md` | Có được bán cho khách trả tiền chưa — 12 mục LEGAL-P0 (hôm nay ~21 %), P1, POST-LAUNCH; bốn trạng thái ENGINEERING / LEGAL / META / COMMERCIAL READY |
+| `DATA_PROCESSING_REGISTER.md` | 17 tập dữ liệu × 15 cột (chủ thể, vai trò, căn cứ, lưu, xuyên biên giới, xoá, xuất); tra ngược bảng → tập; bảng retention mẫu; khung DPA |
+| `DATA_FLOW_MAP.md` | Dữ liệu đi đâu, qua bước nào, tệp:dòng; điểm chạm xuyên biên giới |
+| `SUBPROCESSOR_REGISTER.md` | 30 bên ngoài mã nguồn gọi tới: pháp nhân, dữ liệu, vùng (UNKNOWN khi chưa đọc điều khoản), đã công bố chưa; TÊN biến bí mật |
+| `TECH_HANDOFF_LEGAL.md` | Mission có biên cho Tech Lead (Phase 2), đánh dấu mission chờ quyết định chủ sở hữu / luật sư |
+
 ## Đã công bố
 
 - **Chính sách quyền riêng tư — phiên bản 1.0, hiệu lực 03/10/2026**: `https://vnxcommerce.com/chinh-sach-bao-mat`
