@@ -31,23 +31,20 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-08T02:03:03.068Z",
-  "updated_at": "2026-10-08T02:53:40.991Z",
-  "last_heartbeat": "2026-10-08T02:53:27.078Z",
+  "updated_at": "2026-10-08T03:43:48.540Z",
+  "last_heartbeat": "2026-10-08T03:43:48.540Z",
   "definition_of_done": [],
   "handoff": {
     "branch": "feat/ai-vs-human-profit",
-    "sha": "95c53bf32f6ae7f4285e92f33491230c352ea8a8",
-    "at": "2026-10-08T02:53:27.078Z",
+    "sha": "c21419bfd3b92ca4c43ee197fa052c210b6b2e59",
+    "at": "2026-10-08T03:43:48.540Z",
     "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
     "title": "AI vs Người theo lãi gộp đã giao + sau chi phí AI theo nhánh thử nghiệm (Master Mission P0.5 · P1.7)",
-    "summary": "Khối AI vs Người theo nhánh thử nghiệm so bằng lãi đã giao: lãi gộp (đường giá vốn chung #646), lãi gộp / hội thoại, và — chỉ người được xem tiền — chi phí AI ước tính theo hội thoại của nhánh (đường ref chung với «Chi phí AI & ROI»), lãi sau AI, chênh lệch có chiều cận. Thiếu giá vốn hay chi phí chưa định giá thì không kết luận. Số cũ của khối và của khung ROI không đổi.",
+    "summary": "Khối AI vs Người theo nhánh thử nghiệm so bằng lãi đã giao + chi phí AI ước tính; review độc lập MEDIUM-1 đã vá: thử nghiệm đã dừng thì không in chênh lệch lãi (đơn và tiền AI sau mốc dừng vẫn cộng vào nhánh), nhãn «(ước tính)».",
     "tests": [
-      "tests/sales-experiment-report.test.ts: phần thuần (armRaw · luật lãi đủ/chưa đủ · ngưỡng mẫu · làm tròn · chiều cận · profitAfterAiLift) + phần tổ chức thật (giá vốn có/không ở mỗi nhánh · hoàn/huỷ · sổ AI kể cả order-sync: và lượt chưa định giá · withMoney false không đọc sổ)",
-      "đối chứng khung «Chi phí AI & ROI»: sổ AI biết trước, khẳng định sellingVnd/orderSyncVnd/testVnd/unknownCost/turns kể cả lọc page — xanh trên performance.ts cũ và mới",
-      "tests/saas-hide-internal.test.ts: experiment-block là màn hình khách, tiền AI sau cổng withMoney",
-      "order-attribution · sales-events · e2e-ai-sales-platform · ai-sales-isolation · chat-order · messenger-multipage · lost-reasons xanh",
-      "kiểm đột biến 35/35",
-      "typecheck + eslint + hợp đồng tĩnh sạch; ký tự vô hình 0"
+      "sales-experiment-report (thuần + tổ chức thật, gồm ca thử nghiệm đã dừng) · saas-hide-internal · order-attribution đạt",
+      "đột biến 35/35 + 15/15",
+      "typecheck + eslint + hợp đồng tĩnh sạch"
     ]
   }
 }
