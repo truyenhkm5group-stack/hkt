@@ -1,0 +1,27 @@
+{
+  "schema": 1,
+  "mission_id": "launch-gate-r3",
+  "title": "Launch Gate r3: bằng chứng production sau nghiệm thu PASS 4/4 (c7183395)",
+  "business_goal": "",
+  "status": "RUNNING",
+  "priority": "P2",
+  "risk": "MEDIUM",
+  "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "worker": null,
+  "worktree": null,
+  "branch": "docs/launch-gate-r3",
+  "base_sha": "9833d9818bd69153a2ef4dc0b8fee63d08916fde",
+  "domains": [],
+  "owned_paths": [
+    "docs/saas/LAUNCH_GATE.md",
+    "docs/tech/CURRENT_CHECKPOINT.md"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-08T21:21:02.119Z",
+  "updated_at": "2026-10-08T21:21:02.119Z",
+  "last_heartbeat": "2026-10-08T21:21:02.119Z",
+  "definition_of_done": []
+}
