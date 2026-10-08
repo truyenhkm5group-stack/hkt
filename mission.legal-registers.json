@@ -1,0 +1,32 @@
+{
+  "schema": 1,
+  "mission_id": "legal-registers",
+  "title": "Pháp lý L1: sổ phiên bản văn bản · bên xử lý phụ · chuyển dữ liệu xuyên biên giới · khung lưu trữ · sổ hệ thống AI · cổng pháp lý 5 trạng thái · quy trình DSR / sự cố (tài liệu)",
+  "business_goal": "",
+  "status": "RUNNING",
+  "priority": "P2",
+  "risk": "MEDIUM",
+  "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "worker": null,
+  "worktree": null,
+  "branch": "feat/legal-registers",
+  "base_sha": null,
+  "domains": [],
+  "owned_paths": [
+    "lib/constants/legal-documents.ts",
+    "lib/constants/legal-registers.ts",
+    "lib/constants/retention.ts",
+    "lib/constants/ai-systems.ts",
+    "lib/constants/legal-gate.ts",
+    "docs/legal",
+    "tests/legal-registers.test.ts"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-08T17:08:33.091Z",
+  "updated_at": "2026-10-08T17:08:33.091Z",
+  "last_heartbeat": "2026-10-08T17:08:33.091Z",
+  "definition_of_done": []
+}
