@@ -663,3 +663,4 @@
 {"at":"2026-10-08T07:08:06.759Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DEPLOY_DISPATCHED","detail":"3a28e83e9971 · run 37741568283 https://github.com/truyenhkm5group-stack/hkt/actions/runs/37741568283"}
 {"at":"2026-10-08T07:18:07.749Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"saas-signup-subscription","detail":"#670 @ 10866a689525 → fad85b8ae527 (MERGE_NOW · MEDIUM · gates success)"}
 {"at":"2026-10-08T07:18:57.081Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"product-excellence-baseline","detail":"#668 @ 6e136b36d2dd → 806dac143bd4 (MERGE_NOW · LOW · gates success)"}
+{"at":"2026-10-08T07:24:13.700Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"saas-shell-login-loop","detail":"#671 @ 7b5177e1c479 → c360b7c662e5 (MERGE_NOW · MEDIUM · gates success)"}
