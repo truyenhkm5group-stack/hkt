@@ -3,7 +3,7 @@
   "mission_id": "ops-signals-check",
   "title": "Ops chỉ đọc ops-signals-check: chứng minh 8 tín hiệu O1–O8 chạy trên production",
   "business_goal": "",
-  "status": "RUNNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -24,7 +24,18 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-08T21:25:23.233Z",
-  "updated_at": "2026-10-08T21:25:23.233Z",
-  "last_heartbeat": "2026-10-08T21:25:23.233Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-08T22:03:26.724Z",
+  "last_heartbeat": "2026-10-08T22:03:26.724Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "feat/ops-signals-check",
+    "sha": "0e52fc04506531f7c244fb8339aaf33fb298560a",
+    "at": "2026-10-08T22:03:26.724Z",
+    "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+    "title": "Ops chỉ đọc ops-signals-check: chứng minh 8 tín hiệu O1–O8 chạy trên production",
+    "summary": "ops chỉ đọc ops-signals-check gọi đúng loadOpsSignalsForOrgs",
+    "tests": [
+      "npm test TẤT CẢ KIỂM THỬ ĐẠT; typecheck + lint sạch; chạy thử PGlite ERP_READ_ONLY PASS 1 tổ chức × 8"
+    ]
+  }
 }
