@@ -1,0 +1,8 @@
+{
+  "pr": 675,
+  "sha": "c98b45df60b8501c9878d2e34d79f2618ec7594d",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-08T09:15:40.062Z",
+  "note": "Review lại 08/10 (chỉ đọc): M1 đóng — dấu vết đã thấy bắt buộc, mọi ghi raw đơn erp- qua lockOrderRaw + gộp, lý do chưa thấy ⇒ CONFLICT; ORDER_OUTCOME.md không đổi; SĐT dạng 0… không hồi quy. LOW sau: gỡ cờ trên đơn đã giao/hoàn bị kẹt vì manualOrderGaps áp cả nhánh gỡ cờ; đếm Cần kiểm chạy mỗi lần mở trang ở tổ chức đồng bộ Pancake"
+}
