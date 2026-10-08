@@ -239,7 +239,16 @@ export async function testBankLedger(db: Db) {
   assert.equal(khongTk.inserted, 1);
   assert.ok(khongTk.warnings.some((w) => /không gắn tài khoản/i.test(w)), "6b. nhập không tài khoản phải nói ra hậu quả");
 
-  await db.delete(schema.bankTransactions).where(sql`${schema.bankTransactions.bankRef} in ('BANK-TEST-NEW', 'BANK-TEST-NOACC')`);
+  // 6c. Dòng SePay (chứng từ ngân hàng gửi thẳng — mã nạp Số dư AI đọc từ mô tả) KHÔNG bị nhập sao kê đè mô tả / đối tác /
+  // khoá khớp: tệp lấy đúng mã giao dịch + số tiền của khoản tiền vào thật, đặt mô tả «ERPNAP…» là tự nạp cho một shop (review
+  // Số dư AI N1). Dòng không phải SePay vẫn được làm giàu như 6b.
+  await db.insert(schema.bankTransactions).values({ id: "bank-test-sepay", txnAt: new Date("2026-10-08T03:00:00Z"), amount: 500_000, description: "CK tu KH 0901", counterparty: "NGUYEN VAN A", bankRef: "BANK-TEST-SEPAY", source: "WEBHOOK", provider: "SEPAY", providerTxnId: "sp-990001", account: "9990009999", bankAccountId: "bank-test-acc-a", matchKey: "" });
+  const lanBon = await importStatementRows(db, [{ ...rows[0], bankRef: "BANK-TEST-SEPAY", amount: 500_000, description: "ERPNAPABC123 nap so du", counterparty: "SHOP THONG DONG" }], { bankAccountId: "bank-test-acc-a", filename: "sao-ke-gia.csv" });
+  const [sp] = await db.select().from(schema.bankTransactions).where(eq(schema.bankTransactions.bankRef, "BANK-TEST-SEPAY"));
+  assert.ok(lanBon.updated === 1 && sp.description === "CK tu KH 0901" && sp.counterparty === "NGUYEN VAN A" && sp.matchKey === "", `6c. nhập sao kê không đè mô tả / đối tác / khoá khớp dòng SePay: ${JSON.stringify({ d: sp.description, c: sp.counterparty, m: sp.matchKey })}`);
+  assert.equal(sp.lastSeenSource, "IMPORT", "6c. vẫn ghi provenance của lượt nhập — chỉ phần chữ của chứng từ được giữ");
+
+  await db.delete(schema.bankTransactions).where(sql`${schema.bankTransactions.bankRef} in ('BANK-TEST-NEW', 'BANK-TEST-NOACC', 'BANK-TEST-SEPAY')`);
   await db.delete(schema.bankTransactions).where(sql`${schema.bankTransactions.id} like 'bank-test-%'`);
   await db.delete(schema.bankAccounts).where(sql`${schema.bankAccounts.id} like 'bank-test-%'`);
   console.log("✓ Nhập sao kê: cùng khoá với webhook · dòng đã có không bị đổi số tiền (mâu thuẫn được nêu) · gắn tài khoản · provenance nối thêm");

@@ -107,10 +107,12 @@ export async function runAiBalanceAlerts(now: Date = new Date()): Promise<AiBala
           ? "Khách đã được AI chăm trong tháng vẫn được trả lời; khách mới chuyển cho nhân viên. Nạp tiền để AI nhận khách mới lại ngay."
           : "AI vẫn trả lời bình thường trong phần khách AI gói đã gồm. Khi vượt phần gồm mà số dư còn 0đ, khách MỚI sẽ chuyển cho nhân viên — nạp trước để không gián đoạn."
         : `Dưới ngưỡng cảnh báo ${vnd(threshold)}${f.daysRemaining !== null ? ` · dự kiến còn ${f.daysRemaining} ngày` : ""}${f.recommendTopupVnd ? ` · nên nạp thêm ${vnd(f.recommendTopupVnd)}` : ""}.`;
+    // Khoá chống trùng theo NGÀY + MỨC, và «hết» tách theo đang chặn hay chưa: bản «chưa chặn» buổi sáng không được nuốt bản «AI
+    // đã ngừng nhận khách mới» khi khách AI chạm phần gói gồm trong cùng ngày (review Số dư AI 08/10/2026, LOW).
     const db = await getDb();
     const inserted = await db
       .insert(schema.notifications)
-      .values({ kind: "SYSTEM", severity: level === "EXHAUSTED" ? "critical" : "warning", title, body, href: "/settings/ai-balance", entityType: "AI_BALANCE", entityId: `ai-balance:${level}`, dedupeKey: `ai-balance:${org.code}:${vnDayKey(now)}:${level}`, occurredAt: now })
+      .values({ kind: "SYSTEM", severity: level === "EXHAUSTED" ? "critical" : "warning", title, body, href: "/settings/ai-balance", entityType: "AI_BALANCE", entityId: `ai-balance:${level}`, dedupeKey: `ai-balance:${org.code}:${vnDayKey(now)}:${level}${level === "EXHAUSTED" && blocking ? ":BLOCKING" : ""}`, occurredAt: now })
       .onConflictDoNothing({ target: schema.notifications.dedupeKey })
       .returning({ id: schema.notifications.id });
     return inserted.length ? { sent: level, balanceVnd: bal.totalVnd, skipped: null } : { sent: null, balanceVnd: bal.totalVnd, skipped: "mức này đã báo hôm nay" };

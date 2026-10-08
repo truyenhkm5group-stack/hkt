@@ -20,7 +20,7 @@
 import { inArray, sql } from "drizzle-orm";
 import { schema, type Db } from "@/db";
 import type { BankImportRow } from "@/lib/integrations/bank/statement";
-import type { SeenSource } from "@/lib/integrations/bank/sepay-ingest";
+import { SEPAY_PROVIDER, type SeenSource } from "@/lib/integrations/bank/sepay-ingest";
 
 const b = schema.bankTransactions;
 
@@ -109,10 +109,13 @@ export async function importStatementRows(db: Db, rows: BankImportRow[], options
         set: {
           // CHỈ làm giàu phần MÔ TẢ. Số tiền, mốc giờ, nhãn (`accounting_group`, `note`,
           // `classified_by`) và mối nối KHÔNG đụng tới — dòng đã là chứng từ.
-          description: sql`case when excluded.description <> '' then excluded.description else ${b.description} end`,
-          counterparty: sql`case when excluded.counterparty <> '' then excluded.counterparty else ${b.counterparty} end`,
+          // Dòng SePay (`provider = 'SEPAY'`) là chứng từ NGÂN HÀNG gửi thẳng — mã nạp Số dư AI đọc từ chính mô tả ấy. Nhập sao
+          // kê KHÔNG đè mô tả / đối tác / khoá khớp của nó: người có `bank:write` dựng tệp lấy đúng mã giao dịch + số tiền của một
+          // khoản tiền vào thật rồi đặt mô tả «ERPNAP…» là tự «nạp» cho một shop (review Số dư AI 08/10/2026, N1).
+          description: sql`case when ${b.provider} = ${SEPAY_PROVIDER} then ${b.description} when excluded.description <> '' then excluded.description else ${b.description} end`,
+          counterparty: sql`case when ${b.provider} = ${SEPAY_PROVIDER} then ${b.counterparty} when excluded.counterparty <> '' then excluded.counterparty else ${b.counterparty} end`,
           bankAccountId: sql`coalesce(${b.bankAccountId}, excluded.bank_account_id)`,
-          matchKey: sql`case when ${b.matchKey} = '' then excluded.match_key else ${b.matchKey} end`,
+          matchKey: sql`case when ${b.provider} = ${SEPAY_PROVIDER} or ${b.matchKey} <> '' then ${b.matchKey} else excluded.match_key end`,
           lastSeenSource: STATEMENT_IMPORT_SOURCE,
           seenSources: sql`${b.seenSources} || ${JSON.stringify([entry])}::jsonb`,
           updatedAt: now,

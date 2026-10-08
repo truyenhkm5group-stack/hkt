@@ -141,17 +141,22 @@ export function topupOutcome(intent: { status: TopupIntentStatus; amountVnd: num
   return "TOPUP_CREDITED_REVIEW";
 }
 
+/** Nguồn của dòng `bank_transactions` do CHÍNH SePay tạo — webhook hoặc lượt quét API (`bank_txn_source_check`). */
+export const SEPAY_ROW_SOURCES = ["WEBHOOK", "API"] as const;
+
 /**
  * Dòng sổ ngân hàng của nhà có được TỰ cộng vào Số dư AI không (review 08/10/2026, H1). Chỉ khi SePay đã XÁC NHẬN dòng ấy
  * (webhook / lượt quét API — mang mã giao dịch SePay) VÀ tiền vào ĐÚNG tài khoản nhận đã khai:
- *  · `UNCONFIRMED` — dòng gõ tay / sao kê nhập mà SePay chưa xác nhận: KHÔNG tự cộng, KHÔNG ghi gì (lượt sau SePay xác nhận cùng
- *    mã bút toán thì cộng). Một người có quyền ghi sổ ngân hàng không được tự «nạp» cho khách bằng một dòng gõ tay;
+ *  · `UNCONFIRMED` — dòng KHÔNG do SePay tạo (gõ tay / sao kê nhập), kể cả khi SePay điền mã giao dịch vào SAU: SePay chỉ điền ô
+ *    còn rỗng, không bao giờ sửa SỐ TIỀN hay mô tả của dòng đã có — dòng ấy vẫn mang số tiền + mã nạp do người nhập dựng (review
+ *    #650, N1 chiều ngược: nhập sao kê «ERPNAP…» 50 triệu trước khi khoản 10.000đ thật tới). KHÔNG tự cộng, KHÔNG ghi gì — nằm ở
+ *    danh sách «chưa xác nhận» của người vận hành. Một người có quyền ghi sổ ngân hàng không được tự «nạp» cho khách;
  *  · `OTHER_ACCOUNT` — SePay xác nhận nhưng tiền vào tài khoản KHÁC tài khoản nhận ⇒ giữ lại chờ người vận hành;
  *  · `TRUSTED` — tự cộng.
  * HÀM THUẦN — so số tài khoản theo CHỮ SỐ (bỏ khoảng trắng / dấu).
  */
-export function topupBankRowTrust(row: { provider: string; providerTxnId: string; account: string }, receiverAccount: string | null): "TRUSTED" | "UNCONFIRMED" | "OTHER_ACCOUNT" {
-  if (row.provider !== "SEPAY" || !row.providerTxnId.trim()) return "UNCONFIRMED";
+export function topupBankRowTrust(row: { provider: string; providerTxnId: string; account: string; source: string }, receiverAccount: string | null): "TRUSTED" | "UNCONFIRMED" | "OTHER_ACCOUNT" {
+  if (!(SEPAY_ROW_SOURCES as readonly string[]).includes(row.source) || row.provider !== "SEPAY" || !row.providerTxnId.trim()) return "UNCONFIRMED";
   const digits = (v: string) => v.replace(/\D/g, "");
   if (!receiverAccount || !digits(row.account) || digits(row.account) !== digits(receiverAccount)) return "OTHER_ACCOUNT";
   return "TRUSTED";
