@@ -1015,3 +1015,4 @@
 {"at":"2026-10-08T21:56:34.175Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"hide-internal-429-flake","detail":"#709 cho fix/hide-internal-429-flake @ 1f8626dc15bf"}
 {"at":"2026-10-08T21:56:55.980Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#709 @ 1f8626dc15bf · Chỉ bài kiểm: thu hẹp mẫu 429 về ranh giới từ, ý định giữ nguyên, hai khẳng định khoá cả hai chiều. Không phải contract test, không đổi giá trị kỳ vọng nghiệp vụ."}
 {"at":"2026-10-08T22:03:26.795Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"ops-signals-check","detail":"feat/ops-signals-check @ 0e52fc045065 · 1 lệnh kiểm thử"}
+{"at":"2026-10-08T22:03:47.975Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"ops-signals-check","detail":"#710 cho feat/ops-signals-check @ 0e52fc045065"}
