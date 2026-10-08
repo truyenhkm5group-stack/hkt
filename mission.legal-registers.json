@@ -3,7 +3,7 @@
   "mission_id": "legal-registers",
   "title": "Pháp lý L1: sổ phiên bản văn bản · bên xử lý phụ · chuyển dữ liệu xuyên biên giới · khung lưu trữ · sổ hệ thống AI · cổng pháp lý 5 trạng thái · quy trình DSR / sự cố (tài liệu)",
   "business_goal": "",
-  "status": "RUNNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -26,7 +26,18 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-08T17:08:33.091Z",
-  "updated_at": "2026-10-08T17:08:33.091Z",
-  "last_heartbeat": "2026-10-08T17:08:33.091Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-08T18:05:12.769Z",
+  "last_heartbeat": "2026-10-08T18:05:12.769Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "feat/legal-registers",
+    "sha": "69523ae2a70c02884ba8df4eaa152657e8f7efd5",
+    "at": "2026-10-08T18:05:12.769Z",
+    "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+    "title": "Pháp lý L1: sổ phiên bản văn bản · bên xử lý phụ · chuyển dữ liệu xuyên biên giới · khung lưu trữ · sổ hệ thống AI · cổng pháp lý 5 trạng thái · quy trình DSR / sự cố (tài liệu)",
+    "summary": "Sổ văn bản pháp lý (băm nội dung), bên xử lý phụ S1–S30 + NOT_IN_USE, chuyển xuyên biên giới X1–X11 toàn UNKNOWN, khung lưu trữ toàn null, sổ AI-01…08, cổng pháp lý 5 chiều + OWNER (LEGAL READY dẫn xuất), DSR_PROCEDURE + INCIDENT_RESPONSE",
+    "tests": [
+      "tsc + eslint sạch; npm run build một mình đạt; legal-registers 7 khối đạt; public-site, repo-integrity, client-boundary-exports, tĩnh đạt; HTML hai trang pháp lý trùng từng byte trước/sau; đột biến 5/5"
+    ]
+  }
 }
