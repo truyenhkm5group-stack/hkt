@@ -74,7 +74,7 @@ export default async function TopicPage({ params }: { params: Promise<{ id: stri
         title={d.topic.title}
         description={`${d.model ? `${d.model.code}${d.model.name ? ` · ${d.model.name}` : ""}` : "—"} · mở bởi ${d.topic.createdBy || "—"} · ${formatDateTime(d.topic.createdAt)}`}
         actions={
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <TopicStatusBadge status={d.topic.status} />
             {openCtx?.early ? (
               <span

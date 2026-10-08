@@ -96,6 +96,34 @@ export const ENRICHMENT_STATUS_LABEL: Record<string, string> = {
   FAILED: "Lỗi lấy dữ liệu",
 };
 
+/** Trạng thái hoạt động Google Places trả về (`business_status`). Mã lạ ⇒ «Chưa rõ», không in mã thô. */
+export const BUSINESS_STATUS_LABEL: Record<string, string> = {
+  OPERATIONAL: "Đang hoạt động",
+  CLOSED_TEMPORARILY: "Tạm đóng cửa",
+  CLOSED_PERMANENTLY: "Đã đóng cửa vĩnh viễn",
+};
+
+/** Loại thông tin đọc được từ website công khai của doanh nghiệp (`WebsiteFinding.kind`). */
+export const ENRICHMENT_KIND_LABEL: Record<string, string> = {
+  PHONE: "Số điện thoại",
+  EMAIL: "Email",
+  FACEBOOK: "Facebook",
+  ZALO: "Zalo",
+  CONTACT_PAGE: "Trang liên hệ",
+  DESCRIPTION: "Mô tả",
+};
+
+/** Ô nhân viên sửa tay trên hồ sơ khách sỉ (`staffEditedFields`, ghi ở lib/wholesale/leads.ts). */
+export const LEAD_FIELD_LABEL: Record<string, string> = {
+  businessName: "Tên doanh nghiệp",
+  address: "Địa chỉ",
+  phone: "SĐT",
+  email: "Email",
+  website: "Website",
+  facebookUrl: "Facebook",
+  zaloUrl: "Zalo",
+};
+
 export const FILTER_REASON_LABEL: Record<string, string> = {
   CLOSED: "Đã đóng cửa vĩnh viễn",
   CLOSED_TEMPORARILY: "Tạm đóng cửa",

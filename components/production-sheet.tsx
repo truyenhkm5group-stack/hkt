@@ -9,35 +9,38 @@ export function ProductionSheet({ data, compact = false }: { data: SheetData; co
   const t = matrixTotals(data.colors, data.sizes, data.cells);
   return (
     <div className={cn("space-y-4", compact ? "text-sm" : "text-base")}>
-      <table className="w-full border-collapse border border-zinc-300 text-center tabular-nums">
-        <thead>
-          <tr>
-            <th className="border border-zinc-300 bg-zinc-100 px-3 py-2 text-left font-bold text-zinc-900">Bảng chốt SL hàng cần đặt</th>
-            {data.colors.map((c) => {
-              const sw = colorSwatch(c);
-              return <th key={c} className="border border-zinc-300 px-3 py-2 font-bold" style={{ background: sw.bg, color: sw.fg }}>{c}</th>;
-            })}
-            <th className="border border-zinc-300 bg-rose-100 px-3 py-2 font-bold text-zinc-900">Tổng</th>
-          </tr>
-        </thead>
-        <tbody>
-          {data.sizes.map((s) => (
-            <tr key={s}>
-              <td className="border border-zinc-300 px-3 py-1.5 text-right font-semibold text-zinc-900">{s}</td>
-              {data.colors.map((c) => <td key={c} className="border border-zinc-300 px-3 py-1.5 text-zinc-900">{data.cells[cellKey(c, s)] || 0}</td>)}
-              <td className="border border-zinc-300 bg-rose-50 px-3 py-1.5 font-semibold text-zinc-900">{t.bySize[s] ?? 0}</td>
+      {/* Màu × size rộng hơn màn điện thoại ⇒ cuộn ngang trong khung, không đẩy cả trang tràn 390 px; bản in giữ nguyên. */}
+      <div className="overflow-x-auto print:overflow-visible">
+        <table className="w-full border-collapse border border-zinc-300 text-center tabular-nums">
+          <thead>
+            <tr>
+              <th className="border border-zinc-300 bg-zinc-100 px-3 py-2 text-left font-bold text-zinc-900">Bảng chốt SL hàng cần đặt</th>
+              {data.colors.map((c) => {
+                const sw = colorSwatch(c);
+                return <th key={c} className="border border-zinc-300 px-3 py-2 font-bold" style={{ background: sw.bg, color: sw.fg }}>{c}</th>;
+              })}
+              <th className="border border-zinc-300 bg-rose-100 px-3 py-2 font-bold text-zinc-900">Tổng</th>
             </tr>
-          ))}
-          <tr>
-            <td className="border border-zinc-300 bg-zinc-100 px-3 py-2 text-left font-bold text-zinc-900">Tổng</td>
-            {data.colors.map((c) => {
-              const sw = colorSwatch(c);
-              return <td key={c} className="border border-zinc-300 px-3 py-2 font-bold" style={{ background: sw.bg, color: sw.fg }}>{t.byColor[c] ?? 0}</td>;
-            })}
-            <td className="border border-zinc-300 bg-rose-100 px-3 py-2 font-bold text-zinc-900">{t.total}</td>
-          </tr>
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {data.sizes.map((s) => (
+              <tr key={s}>
+                <td className="border border-zinc-300 px-3 py-1.5 text-right font-semibold text-zinc-900">{s}</td>
+                {data.colors.map((c) => <td key={c} className="border border-zinc-300 px-3 py-1.5 text-zinc-900">{data.cells[cellKey(c, s)] || 0}</td>)}
+                <td className="border border-zinc-300 bg-rose-50 px-3 py-1.5 font-semibold text-zinc-900">{t.bySize[s] ?? 0}</td>
+              </tr>
+            ))}
+            <tr>
+              <td className="border border-zinc-300 bg-zinc-100 px-3 py-2 text-left font-bold text-zinc-900">Tổng</td>
+              {data.colors.map((c) => {
+                const sw = colorSwatch(c);
+                return <td key={c} className="border border-zinc-300 px-3 py-2 font-bold" style={{ background: sw.bg, color: sw.fg }}>{t.byColor[c] ?? 0}</td>;
+              })}
+              <td className="border border-zinc-300 bg-rose-100 px-3 py-2 font-bold text-zinc-900">{t.total}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
       {data.images.length ? (
         <div className="flex flex-wrap gap-4">
           {data.images.map((img) => (

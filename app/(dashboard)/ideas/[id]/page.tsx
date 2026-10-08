@@ -38,7 +38,7 @@ export default async function IdeaDetailPage({ params }: { params: Promise<{ id:
         title={ideaTitle(idea.content)}
         description={`${idea.marketerName || "—"} · ${formatDate(idea.ideaDate)} · đăng bởi ${idea.createdByName || idea.createdBy}`}
         actions={
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <span className={cn("rounded-md px-2 py-1 text-xs font-semibold", IDEA_STATUS_TONE[idea.status])}>{IDEA_STATUS_LABEL[idea.status]}</span>
             {idea.model ? (
               can(user, "models:view") ? (

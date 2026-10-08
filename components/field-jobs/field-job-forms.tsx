@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Loader2, Plus, Trash2 } from "lucide-react";
+import { formatVND } from "@/lib/format";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -32,7 +33,7 @@ function intOrNull(raw: string): number | null {
   return /^\d+$/.test(v) ? Number(v) : null;
 }
 
-const vnd = (n: number | null) => (n === null ? "—" : `${n.toLocaleString("vi-VN")} ₫`);
+const vnd = (n: number | null) => formatVND(n);
 
 type LineDraft = { description: string; quantity: string; unitPrice: string };
 

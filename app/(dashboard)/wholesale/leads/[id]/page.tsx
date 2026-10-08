@@ -7,7 +7,7 @@ import { requireResource, rowInScope } from "@/lib/auth/scope-guard";
 import { can } from "@/lib/auth/session";
 import { formatDateTime, formatNumber, formatTimeAgo } from "@/lib/format";
 import { assignableUsers, getWholesaleLead } from "@/lib/queries/wholesale";
-import { ACTIVITY_KIND_LABEL, CALL_OUTCOME_LABEL, ENRICHMENT_STATUS_LABEL, FILTER_REASON_LABEL, LEAD_SOURCE_LABEL, LEAD_STATUS_LABEL, OUTREACH_CHANNEL_LABEL, OUTREACH_RESULT_LABEL, OUTREACH_STATUS_LABEL, isLeadStatus, type CallOutcome, type LeadSourceKey, type OutreachChannel, type OutreachResult } from "@/lib/wholesale/constants";
+import { ACTIVITY_KIND_LABEL, BUSINESS_STATUS_LABEL, CALL_OUTCOME_LABEL, ENRICHMENT_KIND_LABEL, ENRICHMENT_STATUS_LABEL, LEAD_FIELD_LABEL, FILTER_REASON_LABEL, LEAD_SOURCE_LABEL, LEAD_STATUS_LABEL, OUTREACH_CHANNEL_LABEL, OUTREACH_RESULT_LABEL, OUTREACH_STATUS_LABEL, isLeadStatus, type CallOutcome, type LeadSourceKey, type OutreachChannel, type OutreachResult } from "@/lib/wholesale/constants";
 import { leadView } from "@/lib/wholesale/engine";
 import { fieldHandoffOptions } from "@/lib/wholesale/field-handoff";
 import { formatVnPhone, PHONE_KIND_LABEL } from "@/lib/wholesale/phone";
@@ -62,15 +62,15 @@ export default async function WholesaleLeadPage({ params }: { params: Promise<{ 
                 { label: "Địa chỉ", value: v.address ?? "—", span: true },
                 { label: "Email", value: lead.email ?? "—" },
                 { label: "Facebook / Zalo", value: lead.facebookUrl || lead.zaloUrl ? [lead.facebookUrl, lead.zaloUrl].filter((u): u is string => Boolean(u)).map((u) => <a key={u} className="mr-2 text-primary hover:underline" href={u} target="_blank" rel="noopener noreferrer nofollow">{u.includes("zalo") ? "Zalo" : "Facebook"}</a>) : "—" },
-                { label: "Đánh giá Google", value: v.rating != null ? `${v.rating.toFixed(1)}★ · ${formatNumber(v.reviewCount ?? 0)} đánh giá` : v.ratingsRequested ? "Chưa có đánh giá" : "—" },
-                { label: "Hoạt động", value: v.businessStatus === "OPERATIONAL" ? "Đang hoạt động" : (v.businessStatus ?? "—") },
+                { label: "Đánh giá Google", value: v.rating != null ? `${v.rating.toFixed(1)}★${v.reviewCount != null ? ` · ${formatNumber(v.reviewCount)} đánh giá` : ""}` : v.ratingsRequested ? "Chưa có đánh giá" : "—" },
+                { label: "Hoạt động", value: v.businessStatus ? (BUSINESS_STATUS_LABEL[v.businessStatus] ?? "Chưa rõ") : "—" },
                 { label: "Nguồn", value: `${LEAD_SOURCE_LABEL[lead.source as LeadSourceKey] ?? lead.source}${data.sourceCampaign ? ` · chiến dịch «${data.sourceCampaign.name}»` : ""}` },
                 { label: "Truy vấn tìm thấy", value: lead.sourceQuery ?? "—" },
                 { label: "Lần đầu thấy", value: formatDateTime(lead.firstSeenAt) },
                 { label: "Dữ liệu", value: `${ENRICHMENT_STATUS_LABEL[lead.enrichmentStatus] ?? lead.enrichmentStatus}${lead.filterReason ? ` — ${FILTER_REASON_LABEL[lead.filterReason] ?? lead.filterReason}` : ""}` },
               ]}
             />
-            {lead.staffEditedFields.length ? <p className="mt-2 text-[11px] text-muted-foreground">Nhân viên đã sửa: {lead.staffEditedFields.join(", ")} — máy không ghi đè các ô này.</p> : null}
+            {lead.staffEditedFields.length ? <p className="mt-2 text-[11px] text-muted-foreground">Nhân viên đã sửa: {lead.staffEditedFields.map((f) => LEAD_FIELD_LABEL[f] ?? f).join(", ")} — máy không ghi đè các ô này.</p> : null}
           </SectionCard>
 
           <SectionCard title="Điểm & lý do" hint="Điểm tính bằng luật cố định từ dữ liệu có thật — cùng dữ liệu luôn ra cùng điểm. AI không tham gia chấm.">
@@ -138,7 +138,7 @@ export default async function WholesaleLeadPage({ params }: { params: Promise<{ 
               <ul className="space-y-1 text-sm">
                 {data.enrichments.map((e) => (
                   <li key={e.id} className="flex flex-wrap gap-2">
-                    <span className="w-28 shrink-0 text-muted-foreground">{e.kind}</span>
+                    <span className="w-28 shrink-0 text-muted-foreground">{ENRICHMENT_KIND_LABEL[e.kind] ?? "Khác"}</span>
                     <span className="break-all">{e.kind === "PHONE" ? formatVnPhone(e.value) : e.value}</span>
                     <a className="text-[11px] text-primary hover:underline" href={e.sourceUrl} target="_blank" rel="noopener noreferrer nofollow">
                       nguồn
