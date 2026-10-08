@@ -1,0 +1,8 @@
+{
+  "pr": 689,
+  "sha": "54e6574bc663db617b6ec1bc42af81b655f86a28",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-08T14:46:11.030Z",
+  "note": "Review độc lập PASS: 10 rclone delete + 1 rmdirs, đích gán cứng + 2 lớp lá chắn (11 ca chặn 0 lời gọi Drive), --drive-trashed-only chỉ dưới cây erp-backup (chắc chắn cao theo mã rclone), tập tệp xoay vòng giữ nguyên, đẩy hỏng ⇒ không xoay vòng, status chỉ đọc; testSaoLuu + testPitr + tsc đạt. LOW theo sau: sàn giữ N bản mới nhất, dọn trước khi giữ khoá FD8/9, che ID thư mục còn sót, dọn qua gcrypt"
+}
