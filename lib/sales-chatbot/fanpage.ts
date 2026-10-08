@@ -46,7 +46,7 @@ import { fetchPancakeThreadProfile, threadProfileStale } from "@/lib/sales-chatb
 import { noteAiCustomerReply } from "@/lib/pricing/ai-customer";
 import { loadFollowupSettings } from "@/lib/sales-chatbot/followup-settings";
 import type { ChatState } from "@/lib/sales-chatbot/tools";
-import { pancakeImageUrls } from "@/lib/sales-chatbot/vision";
+import { imagesAlreadyDescribed, pancakeImageUrls, pancakeStickerUrls } from "@/lib/sales-chatbot/vision";
 import { adReferralFromPancake, isPancakePageSide, type AdReferral } from "@/lib/sales-chatbot/ad-referral-shared";
 import { recordConversationAd } from "@/lib/sales-chatbot/ad-referral";
 import { botSendAllowed, inboundPageGate, pageRuntimeMode } from "@/lib/sales-chatbot/page-runtime";
@@ -249,8 +249,13 @@ export type FanpageEvent = {
   inbox: boolean;
   /** Bình luận (0184): bài viết + người bình luận (private reply đòi cả hai). `null` với tin nhắn. */
   comment: { postId: string; fromId: string } | null;
-  /** Ảnh KHÁCH gửi trong tin (0195 · `pancakeImageUrls`) — tin phía page luôn rỗng. */
+  /**
+   * Ảnh trong tin (0195 · `pancakeImageUrls`): của KHÁCH ⇒ bot đọc lúc trả lời; của PAGE (08/10/2026 — Pancake / nhân viên gửi
+   * ảnh menu) ⇒ chỉ để hộp thư hiện, bot không đọc.
+   */
   imageUrls: string[];
+  /** Nhãn dán (👍, sticker) khách gửi (`pancakeStickerUrls`) — chỉ để hộp thư HIỆN; bot không trả lời, không đọc. */
+  stickerUrls?: string[];
   /** 0225: quảng cáo dẫn KHÁCH vào hội thoại (`adReferralFromPancake`) — tin phía page / thiếu trường ⇒ không có. */
   adReferral?: AdReferral | null;
   /**
@@ -264,10 +269,17 @@ const str = (v: unknown) => (typeof v === "string" ? v : typeof v === "number" ?
 
 /** Chữ Pancake (HTML) ⇒ chữ thường — dùng chung với lượt nhập lịch sử (history.ts). HÀM THUẦN. */
 export function stripHtml(s: string): string {
+  // Emoji trong chữ Pancake có thể tới dưới dạng thực thể số (`&#128077;` / `&#x1F44D;`) — không giải thì hộp thư in nguyên mã
+  // thay vì 👍 (08/10/2026). `&amp;` giải CUỐI để «&amp;#39;» (mã hoá hai lớp) không thành dấu nháy.
+  const cp = (n: number) => (Number.isFinite(n) && n > 0 && n <= 0x10ffff && !(n >= 0xd800 && n <= 0xdfff) ? String.fromCodePoint(n) : "");
   return s
     .replace(/<br\s*\/?>/gi, "\n")
     .replace(/<[^>]+>/g, "")
     .replace(/&nbsp;/g, " ")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;|&apos;/g, "'")
+    .replace(/&#x([0-9a-f]{1,6});/gi, (_, h: string) => cp(parseInt(h, 16)))
+    .replace(/&#(\d{1,7});/g, (_, d: string) => cp(Number(d)))
     .replace(/&amp;/g, "&")
     .replace(/&lt;/g, "<")
     .replace(/&gt;/g, ">")
@@ -296,11 +308,12 @@ export function parsePancakeWebhook(payload: unknown): FanpageEvent | null {
   const post = (conv?.post ?? {}) as { id?: unknown };
   const postId = str(msg?.post_id) || str(conv?.post_id) || str(post.id) || threadId.split("_")[0];
   const comment = !inbox && type === "COMMENT" ? { postId, fromId: str(from.id) } : null;
-  const imageUrls = fromPage ? [] : pancakeImageUrls(msg);
+  const imageUrls = pancakeImageUrls(msg);
+  const stickerUrls = pancakeStickerUrls(msg);
   const automated = fromPage && Boolean(from.ai_generated || from.is_automated);
   const adReferral = fromPage ? null : adReferralFromPancake(payload);
   const senderId = fromPage ? "" : str(conv?.from_psid) || str(from.id);
-  return { pageId, threadId, messageId, text, customerName: fromPage ? "" : customerName, fromPage, humanStaff, automated, inbox, comment, imageUrls, adReferral, senderId };
+  return { pageId, threadId, messageId, text, customerName: fromPage ? "" : customerName, fromPage, humanStaff, automated, inbox, comment, imageUrls, stickerUrls, adReferral, senderId };
 }
 
 /** Khoá hội thoại fanpage (cột `visitor_key`, UNIQUE cho kênh FANPAGE): băm (page, hội thoại Pancake). */
@@ -416,6 +429,10 @@ export async function receiveFanpageEvent(ev: FanpageEvent, now: Date = new Date
           echo ? and(eq(t.pageId, ev.pageId), eq(t.threadId, PRIVATE_REPLY_THREAD), eq(t.note, "BOT_SENT"), eq(t.text, echo), gte(t.createdAt, new Date(now.getTime() - PRIVATE_ECHO_WINDOW_MS))) : sql`false`,
           // Tin nhân viên gửi từ hộp thư ERP — đã ghi sẵn, đã quy kết người gửi, đã cho bot nhường.
           erpStaffEchoCond(ev.pageId, ev.threadId, echo, now),
+          // Tiếng vọng ẢNH nhân viên gửi từ ERP (`staff-out:<id>:img`, «[Ảnh]»): không có chữ để so nguyên văn ⇒ so theo dòng ghi
+          // sẵn gần nhất trong 10 phút. Trước 08/10/2026 nó bị bỏ chung với mọi tin page không chữ; nay tin page không chữ mà
+          // có ảnh được ghi để hộp thư hiện, nên phải nhận ra tiếng vọng này — không thì ảnh nhân viên hiện HAI lần.
+          !echo ? and(eq(t.pageId, ev.pageId), eq(t.threadId, ev.threadId), eq(t.note, PAGE_REPLY), like(t.messageId, `${STAFF_OUT_PREFIX}%:img`), gte(t.createdAt, new Date(now.getTime() - ECHO_WINDOW_MS))) : sql`false`,
         ),
       )
       .limit(1);
@@ -423,11 +440,23 @@ export async function receiveFanpageEvent(ev: FanpageEvent, now: Date = new Date
     // Tin phía page KHÔNG CÓ CHỮ (dòng hệ thống của Pancake tới qua webhook không kèm chữ, thẻ quảng cáo…) KHÔNG phải ai trả lời
     // khách (03/10/2026, «Nguyễn Loan»: gửi SĐT + địa chỉ, ngay sau đó Pancake chèn «Đã thêm nhãn tự động…», bot im). Nhân viên
     // chỉ gửi ảnh cũng rơi vào đây — bot có thể trả lời thêm một câu, vẫn tốt hơn để khách chờ.
-    if (!ev.text.trim()) return { queued: false, reason: "Tin phía page không có chữ — không tính là trả lời" };
-    // Mọi tin khác phía page = page ĐÃ trả lời ⇒ tin khách đang chờ trước nó không cần bot nữa.
+    const pageMedia = [...ev.imageUrls, ...(ev.stickerUrls ?? [])].slice(0, 6);
+    if (!ev.text.trim()) {
+      // ẢNH / NHÃN DÁN phía page không chữ (08/10/2026, HSLC «Mailan Tran»: Pancake gửi ảnh menu sau khi khách cho địa chỉ, hộp
+      // thư ERP trống chỗ đó trong khi Pancake hiện ảnh): ghi MỘT dòng để NGƯỜI thấy — cùng dạng dòng ảnh nhân viên gửi từ ERP
+      // («[Ảnh]» · PAGE_REPLY). Vẫn KHÔNG tính là trả lời: không dừng nhắc, không nhường — luật ở trên giữ nguyên.
+      if (pageMedia.length) {
+        await db
+          .insert(t)
+          .values({ pageId: ev.pageId, threadId: ev.threadId, messageId: ev.messageId, text: STAFF_IMAGE_MARK, imageUrls: pageMedia, status: "DONE", processedAt: now, note: PAGE_REPLY })
+          .onConflictDoNothing({ target: t.messageId });
+      }
+      return { queued: false, reason: "Tin phía page không có chữ — không tính là trả lời" };
+    }
+    // Mọi tin khác phía page = page ĐÃ trả lời ⇒ tin khách đang chờ trước nó không cần bot nữa. Ảnh đi kèm chữ ghi vào cùng dòng.
     await db
       .insert(t)
-      .values({ pageId: ev.pageId, threadId: ev.threadId, messageId: ev.messageId, text: ev.text, status: "DONE", processedAt: now, note: PAGE_REPLY })
+      .values({ pageId: ev.pageId, threadId: ev.threadId, messageId: ev.messageId, text: ev.text, ...(pageMedia.length ? { imageUrls: pageMedia } : {}), status: "DONE", processedAt: now, note: PAGE_REPLY })
       .onConflictDoNothing({ target: t.messageId });
     if (ev.inbox) await stopFollowups(ev.pageId, ev.threadId, now, false);
     if (ev.comment) return { queued: false, reason: "Page đã trả lời bình luận — bot không chen" };
@@ -466,8 +495,10 @@ export async function receiveFanpageEvent(ev: FanpageEvent, now: Date = new Date
     // 👍 / nhãn dán / video / ghi âm: bot không trả lời, nhưng khách ĐÃ phản hồi ⇒ không còn «im lặng» để nhắc.
     if (ev.inbox) {
       await stopFollowups(ev.pageId, ev.threadId, now, true);
-      // NGƯỜI phải thấy tin này trong hộp thư (MEDIA_ONLY — không vào hàng chờ của bot).
-      const media = await insertCustomerInbound({ pageId: ev.pageId, threadId: ev.threadId, messageId: ev.messageId, text: MEDIA_ONLY_TEXT, customerName: ev.customerName || null, status: "DONE", processedAt: now, note: MEDIA_ONLY_NOTE, transport: "PANCAKE", senderId: ev.senderId ?? null }, now, { canonical: verdict === "CANONICAL" });
+      // NGƯỜI phải thấy tin này trong hộp thư (MEDIA_ONLY — không vào hàng chờ của bot). Nhãn dán (👍) có địa chỉ ảnh ⇒ hiện
+      // đúng nhãn dán như Pancake (08/10/2026), không hiện câu «mở trên kênh để xem»; dòng DONE nên bot không bao giờ đọc nó.
+      const stickers = (ev.stickerUrls ?? []).slice(0, 3);
+      const media = await insertCustomerInbound({ pageId: ev.pageId, threadId: ev.threadId, messageId: ev.messageId, text: stickers.length ? "" : MEDIA_ONLY_TEXT, ...(stickers.length ? { imageUrls: stickers } : {}), customerName: ev.customerName || null, status: "DONE", processedAt: now, note: MEDIA_ONLY_NOTE, transport: "PANCAKE", senderId: ev.senderId ?? null }, now, { canonical: verdict === "CANONICAL" });
       if (media.duplicate) return { queued: false, reason: DUPLICATE_SOURCE_REASON };
       await noteCustomerArrived(ev.pageId, ev.threadId, now);
     }
@@ -1021,14 +1052,15 @@ export async function processFanpageThread(pageId: string, threadId: string, dep
       const cv = schema.salesChatConversations;
       if (prof) await db.update(cv).set({ state: sql`${cv.state} || ${JSON.stringify({ returning: prof })}::jsonb` }).where(eq(cv.id, conv.id));
     }
-    // ẢNH KHÁCH GỬI (0195): mô tả MỘT lần mỗi tin rồi ghi vào chính dòng tin (xoá địa chỉ ảnh) — lượt sau (hội thoại bận ⇒
-    // nhả tin, thử lại) không tốn tiền đọc lại ảnh. Đọc hỏng ⇒ dòng «bot chưa xem được ảnh»: bot vẫn trả lời, không im.
+    // ẢNH KHÁCH GỬI (0195): mô tả MỘT lần mỗi tin rồi ghi vào chính dòng tin — lượt sau (hội thoại bận ⇒ nhả tin, thử lại)
+    // không tốn tiền đọc lại ảnh: dấu «đã đọc» là chính dòng mô tả trong chữ (`imagesAlreadyDescribed`), KHÔNG xoá địa chỉ ảnh
+    // — xoá là hộp thư mất ảnh khách ngay sau khi bot đọc (08/10/2026). Đọc hỏng ⇒ dòng «bot chưa xem được ảnh»: bot vẫn trả lời.
     for (const r of claimed) {
       const urls = Array.isArray(r.imageUrls) ? r.imageUrls.filter((u): u is string => typeof u === "string") : [];
-      if (!urls.length) continue;
+      if (!urls.length || imagesAlreadyDescribed(r.text)) continue;
       const line = await describeCustomerImages(urls, { conversationId: conv.id, ...(deps.fetch ? { fetch: deps.fetch } : {}), ...(r.kind === "COMMENT" && r.postId && r.fromId ? { aiCustomer: { threadKind: "COMMENT" as const, commenterId: r.fromId } } : {}) });
       r.text = [r.text, line].filter(Boolean).join("\n").slice(0, TEXT_MAX);
-      await db.update(t).set({ text: r.text, imageUrls: null }).where(eq(t.id, r.id));
+      await db.update(t).set({ text: r.text }).where(eq(t.id, r.id));
     }
     const before = (await conversationView(conv.id))?.messages.length ?? 0;
     const text = claimed

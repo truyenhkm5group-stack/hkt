@@ -12,7 +12,9 @@ import assert from "node:assert/strict";
 import { anthropicImageBlocks, geminiImageParts, lastUserIndex, openAiImageParts } from "@/lib/ai/images";
 import { ByokGeminiProvider, toGeminiContents } from "@/lib/ai-builder/providers";
 import type { AiMessage } from "@/lib/ai/provider";
-import { allowedImageUrl, fetchCustomerImage, imageLine, pancakeImageUrls, sniffImageMime, VISION_LIMITS } from "@/lib/sales-chatbot/vision";
+import { readFileSync } from "node:fs";
+import { parsePancakeWebhook, stripHtml } from "@/lib/sales-chatbot/fanpage";
+import { allowedImageUrl, fetchCustomerImage, imageLine, imagesAlreadyDescribed, pancakeImageUrls, pancakeStickerUrls, sniffImageMime, VISION_LIMITS } from "@/lib/sales-chatbot/vision";
 
 const JPEG = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46]);
 const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13]);
@@ -31,6 +33,25 @@ function testPancakeImages() {
   assert.deepEqual(att([many[0], many[0]]), [many[0].url], "trùng ⇒ một");
   assert.deepEqual(pancakeImageUrls(null), []);
   assert.deepEqual(pancakeImageUrls({ attachments: "x" }), []);
+
+  // ── Hộp thư hiện như Pancake (chủ shop HSLC 08/10/2026): nhãn dán để HIỆN, không để bot đọc; ảnh phía page không bị bỏ ──
+  const stk = (list: unknown[]) => pancakeStickerUrls({ attachments: list });
+  assert.deepEqual(stk([{ type: "sticker", url: "https://scontent.xx.fbcdn.net/s.png" }, { url: "https://scontent.xx.fbcdn.net/s2.png", sticker_id: 369239263222822 }, { type: "sticker", payload: { sticker_url: "https://cdn.fbsbx.com/s3.png" } }]), ["https://scontent.xx.fbcdn.net/s.png", "https://scontent.xx.fbcdn.net/s2.png", "https://cdn.fbsbx.com/s3.png"]);
+  assert.deepEqual(stk([{ type: "photo", url: "https://scontent.xx.fbcdn.net/a.jpg" }, { type: "audio", url: "https://cdn.fbsbx.com/a.mp4" }]), [], "ảnh / ghi âm không phải nhãn dán");
+  assert.deepEqual(pancakeStickerUrls(null), []);
+  const webhook = (from: Record<string, unknown>, attachments: unknown[], message = "") => parsePancakeWebhook({ event_type: "messaging", page_id: "P1", data: { conversation: { id: "c1", type: "INBOX" }, message: { id: `m-${attachments.length}-${from.id}`, from, message, attachments } } });
+  const pageImg = webhook({ id: "P1" }, [{ type: "photo", url: "https://content.pancake.vn/menu.jpg" }]);
+  assert.deepEqual(pageImg && [pageImg.fromPage, pageImg.text, pageImg.imageUrls, pageImg.stickerUrls], [true, "", ["https://content.pancake.vn/menu.jpg"], []], "ảnh page gửi (menu) KHÔNG bị bỏ nữa");
+  const like = webhook({ id: "U9", name: "Khách" }, [{ type: "sticker", url: "https://scontent.xx.fbcdn.net/like.png" }]);
+  assert.deepEqual(like && [like.fromPage, like.imageUrls, like.stickerUrls], [false, [], ["https://scontent.xx.fbcdn.net/like.png"]], "nhãn dán khách: không vào ảnh bot đọc, có ở ảnh hiện");
+  // Emoji tới dưới dạng thực thể số ⇒ ra ký tự; mã hoá hai lớp giữ nguyên; `<br>` vẫn xuống dòng.
+  assert.equal(stripHtml("Ok &#128077; &#x2764;&#xFE0F; &quot;chốt&quot; &#39;1kg&#39; &amp;#39;<br>x &amp; y"), "Ok 👍 ❤️ \"chốt\" '1kg' &#39;\nx & y");
+  assert.equal(stripHtml("&#0; &#xD83D; &#9999999;"), "", "mã không hợp lệ / nửa cặp bị bỏ, không ném");
+  // Dấu «ảnh đã mô tả» là dòng mô tả trong chữ — KHÔNG phải xoá địa chỉ ảnh.
+  assert.ok(imagesAlreadyDescribed(`Cái này bao nhiêu\n${imageLine(1, "Hộp chả cá thu")}`) && imagesAlreadyDescribed(imageLine(2, null)) && !imagesAlreadyDescribed("Cho mình xin ảnh"));
+  for (const f of ["lib/sales-chatbot/fanpage.ts", "lib/sales-chatbot/messenger.ts", "lib/sales-chatbot/zalo.ts"]) {
+    assert.ok(!/imageUrls:\s*null/.test(readFileSync(f, "utf8")), `${f}: không xoá địa chỉ ảnh sau khi bot mô tả — hộp thư còn phải hiện ảnh`);
+  }
 }
 
 function testAllowedHosts() {
