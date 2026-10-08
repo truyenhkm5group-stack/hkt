@@ -3,7 +3,7 @@
   "mission_id": "org-ai-platform-cutover",
   "title": "HSLC: kiểm khoá AI (vân tay · project Google) và chuyển AI Bán hàng sang AI dùng chung của nền tảng — ops org-ai-cutover",
   "business_goal": "",
-  "status": "PLANNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -23,7 +23,20 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-08T03:17:21.525Z",
-  "updated_at": "2026-10-08T03:17:21.525Z",
-  "last_heartbeat": "2026-10-08T03:17:21.525Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-08T03:29:41.838Z",
+  "last_heartbeat": "2026-10-08T03:29:41.838Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "feat/org-ai-cutover",
+    "sha": "aada36471607db982b4f240c96851ccb3fb108b0",
+    "at": "2026-10-08T03:29:41.838Z",
+    "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+    "title": "HSLC: kiểm khoá AI (vân tay · project Google) và chuyển AI Bán hàng sang AI dùng chung của nền tảng — ops org-ai-cutover",
+    "summary": "Thao tác ops org-ai-cutover cho MỘT tổ chức khách: KIỂM (chỉ đọc) động cơ AI của bot, vân tay khoá (SHA-256 rút gọn, khoá chỉ trong RAM), SAME/DIFFERENT_KEY, project Google (Lookup nếu có credential quản trị, không thì UNAVAILABLE), credit gói so với mức dùng 30 ngày, ai còn dùng gemini-byok, sổ AI 30 ngày; --apply chuyển AI Bán hàng sang AI dùng chung qua đúng lõi /platform/org (không dự phòng, nhật ký SCRIPT, từ chối khi credit trần cứng không đủ); --apply-probe lượt thử kênh TEST + đếm sổ AI từ mốc. Kết quả mã hoá.",
+    "tests": [
+      "tests/org-ai-cutover.test.ts: vân tay · SAME/DIFFERENT · consumer · credit · phán quyết sau cutover · quét mã nguồn không in khoá · ops-vps khai + mã hoá + phân loại",
+      "ops-log-leak · ops-concurrency đạt",
+      "typecheck + eslint + hợp đồng tĩnh sạch; ký tự vô hình 0"
+    ]
+  }
 }
