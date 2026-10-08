@@ -2,7 +2,7 @@ import Link from "next/link";
 import { PageHeader } from "@/components/page-header";
 import { SectionCard } from "@/components/ui-bits";
 import { can, requirePermission } from "@/lib/auth/session";
-import { SALES_AGENT_INBOX_HREF } from "@/lib/constants/saas-nav";
+import { SALES_AGENT_CHANNELS_HREF, SALES_AGENT_INBOX_HREF } from "@/lib/constants/saas-nav";
 import { formatDate, formatNumber, formatPercent, formatVND } from "@/lib/format";
 import { METER_COVERAGE_LABEL } from "@/lib/pricing/versions";
 import { readAiCustomerUsage, type AiCustomerReading } from "@/lib/pricing/ai-customer";
@@ -83,7 +83,10 @@ export default async function SalesAgentOverviewPage({ searchParams }: { searchP
 
       {r.measuredSince === null ? (
         <p className="rounded-2xl bg-card p-4 text-sm text-muted-foreground shadow-[var(--shadow-card)]" data-testid="overview-empty">
-          AI chưa trả lời khách nào kể từ khi bật đo lường — số sẽ hiện sau tin khách đầu tiên. Kết nối fanpage ở mục <b>Kênh kết nối</b>.
+          AI chưa trả lời khách nào kể từ khi bật đo lường — số sẽ hiện sau tin khách đầu tiên.{" "}
+          <Link href={SALES_AGENT_CHANNELS_HREF} className="font-medium text-primary hover:underline">
+            Kết nối Facebook ở mục Kênh kết nối →
+          </Link>
         </p>
       ) : null}
 

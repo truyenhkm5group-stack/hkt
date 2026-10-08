@@ -15,6 +15,9 @@ export const READINESS_VERDICT_LABEL: Record<ReadinessVerdict, string> = {
   READY: "Sẵn sàng",
 };
 
+/** Nhãn từng dòng — việc CHƯA LÀM gọi là «Cần làm», không gọi là «Hỏng» (HELP_CENTER §6: không đổ lỗi cho người dùng). */
+export const READINESS_STATUS_LABEL: Record<ReadinessStatus, string> = { PASS: "Xong", WARN: "Nên làm", FAIL: "Cần làm" };
+
 export type ReadinessCheck = { key: string; label: string; status: ReadinessStatus; detail: string; href: string | null };
 
 export type ReadinessInput = {
@@ -45,14 +48,14 @@ export function assessReadiness(i: ReadinessInput): { verdict: ReadinessVerdict;
     i.sellWithoutStockCheck
       ? { key: "STOCK", label: "Bán không kiểm tồn (shop chọn)", status: "WARN", detail: "Bot sẽ nhận đơn kể cả khi kho chưa đủ hàng.", href: null }
       : i.stockReceipts > 0
-        ? { key: "STOCK", label: "Có số tồn kho", status: "PASS", detail: "Bot kiểm tồn trước khi chốt.", href: "/inventory" }
-        : { key: "STOCK", label: "Chưa có phiếu nhập kho", status: "WARN", detail: "Tồn là CHƯA BIẾT — bot sẽ không khẳng định còn hàng.", href: "/inventory" },
+        ? { key: "STOCK", label: "Có số tồn kho", status: "PASS", detail: "Bot kiểm tồn trước khi chốt.", href: "/inventory/receipts" }
+        : { key: "STOCK", label: "Chưa có phiếu nhập kho", status: "WARN", detail: "Tồn là CHƯA BIẾT — bot sẽ không khẳng định còn hàng. Nhập hàng ở trang phiếu kho.", href: "/inventory/receipts" },
     i.notifyGroupOnHandoff
       ? { key: "HANDOFF", label: "Chuyển người có báo nhóm", status: "PASS", detail: "Khi bot chuyển khách cho người, nhóm Lark / Telegram được báo.", href: null }
       : { key: "HANDOFF", label: "Chuyển người không báo nhóm", status: "WARN", detail: "Khách bot chuyển sang người chỉ hiện trong ERP — dễ bị bỏ quên. Bật «báo nhóm» ở Cấu hình.", href: null },
     i.realConversations30d > 0
       ? { key: "CHANNEL", label: `${i.realConversations30d.toLocaleString("vi-VN")} hội thoại thật trong 30 ngày`, status: "PASS", detail: "Kênh đang nhận tin khách.", href: "/ai/sales-chatbot/performance" }
-      : { key: "CHANNEL", label: "Chưa có tin khách thật nào trong 30 ngày", status: "WARN", detail: "Kiểm tra kênh đã nối (fanpage / Messenger / Zalo / chat web) và webhook.", href: null },
+      : { key: "CHANNEL", label: "Chưa có tin khách thật nào trong 30 ngày", status: "WARN", detail: "Chưa có tin khách nào. Mở «Kênh kết nối» xem đã nối Facebook / Zalo / chat web chưa.", href: "/ai/channels" },
     i.testDrafts30d > 0
       ? { key: "TEST_ORDER", label: "Đã thử lên đơn trong khung thử", status: "PASS", detail: "Ít nhất một lượt thử đi tới đơn nháp trong 30 ngày.", href: null }
       : { key: "TEST_ORDER", label: "Chưa thử lên đơn trong khung thử", status: "WARN", detail: "Chat thử một lượt mua trọn vòng ở khung thử bên phải trước khi để bot tự chốt.", href: null },

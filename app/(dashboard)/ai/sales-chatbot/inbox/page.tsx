@@ -18,7 +18,7 @@ import { LabelChip } from "./labels-panel";
 import { PageRoutesPanel } from "./page-routes";
 import { InboxThreadView } from "./thread-view";
 import { ShellViewportFit } from "@/components/shell-viewport-fit";
-import { isSalesAgentUser } from "@/lib/constants/saas-nav";
+import { isSalesAgentUser, SALES_AGENT_CHANNELS_HREF } from "@/lib/constants/saas-nav";
 import { manualOrderGate } from "@/lib/records/order-create";
 
 /**
@@ -166,6 +166,8 @@ export default async function SalesInboxPage({ searchParams }: { searchParams: P
   ]);
   const levels = levelsForPack(pack);
   const advanced = Boolean(channel || label || assignee || period || phone === "NONE");
+  // Chưa nối page nào VÀ chưa có hội thoại nào (không lọc gì) ⇒ trạng thái rỗng «chưa nối kênh»; có lọc thì vẫn là «bộ lọc này».
+  const noChannelYet = pages.length === 0 && list.ok && list.total === 0 && filter === "ALL" && !q && !advanced && !level && phone === null && !handler;
   const href = (patch: Record<string, string | null>) => {
     const p = new URLSearchParams();
     const cur: Record<string, string | null> = {
@@ -193,8 +195,8 @@ export default async function SalesInboxPage({ searchParams }: { searchParams: P
   return (
     <div className="space-y-2">
       <PageHeader
-        eyebrow="AI"
-        title="Hộp thư khách"
+        eyebrow={shell ? undefined : "AI"}
+        title={shell ? "Hội thoại" : "Hộp thư khách"}
         description={shell ? undefined : `Facebook · Instagram · Zalo OA · chat web — trả lời khách ngay trong ERP. Nhân viên gửi tin thì AI nhường ${cooldown} phút.`}
         // Vỏ app trên điện thoại, đang mở một hội thoại: nhường cả chiều cao cho hội thoại (đầu hội thoại có nút quay lại) —
         // 375×667 không đủ chỗ cho đầu trang + đầu hội thoại + ô soạn tin cùng lúc.
@@ -338,7 +340,25 @@ export default async function SalesInboxPage({ searchParams }: { searchParams: P
               {canManage ? <PageRoutesPanel routes={routes} pageNames={Object.fromEntries(pages.map((p) => [p.id, p.name]))} cooldownMinutes={cooldown} canManage={canManage} /> : null}
             </div>
             <ul className="min-h-0 flex-1 divide-y divide-foreground/10 overflow-y-auto" data-testid="inbox-list">
-              {list.rows.length === 0 ? <li className="p-6 text-center text-sm text-muted-foreground">Không có hội thoại nào ở bộ lọc này.</li> : null}
+              {list.rows.length === 0 ? (
+                noChannelYet ? (
+                  // Cửa hàng mới, chưa nối kênh nào: hộp thư rỗng vì CHƯA CÓ ĐƯỜNG tin tới — nói ra và dẫn đúng một việc tiếp theo
+                  // (kiểm vỏ khách 08/10/2026, F-03), thay vì «không có hội thoại ở bộ lọc này» như thể khách chưa nhắn.
+                  <li className="space-y-3 p-6 text-center text-sm" data-testid="inbox-empty-no-channel">
+                    <p className="font-semibold text-foreground">Chưa có tin khách vì cửa hàng chưa nối kênh bán hàng</p>
+                    <p className="text-muted-foreground">Nối fanpage Facebook (hoặc Zalo OA, ô chat trên website) — tin khách sẽ hiện ở đây và AI bắt đầu trả lời.</p>
+                    {canManage ? (
+                      <Link href={SALES_AGENT_CHANNELS_HREF} className="inline-flex h-10 items-center rounded-full bg-primary px-4 font-medium text-primary-foreground hover:bg-primary/90">
+                        Kết nối Facebook
+                      </Link>
+                    ) : (
+                      <p className="text-xs text-muted-foreground">Nhờ quản trị cửa hàng kết nối kênh ở mục «Kênh kết nối».</p>
+                    )}
+                  </li>
+                ) : (
+                  <li className="p-6 text-center text-sm text-muted-foreground">Không có hội thoại nào ở bộ lọc này.</li>
+                )
+              ) : null}
               {list.rows.map((r) => (
                 <li key={r.id}>
                   <ListItem r={r} href={href({ c: r.id })} active={r.id === selected} showPage={pages.length > 1 && !page} />
