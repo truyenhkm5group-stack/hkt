@@ -1009,3 +1009,4 @@
 {"at":"2026-10-08T21:36:30.954Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"erp-a11y-bo-cuc","detail":"#708 cho claude/erp-a11y-bo-cuc @ 8276b8c2d7b3"}
 {"at":"2026-10-08T21:36:52.801Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#708 @ 8276b8c2d7b3 · Chỉ trợ năng: htmlFor/id, aria-label cho Switch/ô số/nút biểu tượng, h1 cho not-found; không đổi giá trị mặc định hay luật. Bài erp-a11y khoá."}
 {"at":"2026-10-08T21:41:38.616Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"error-boundary-than-thien","detail":"#705 @ 69d576e18ee9 → 02d9c1fb1de1 (MERGE_NOW · MEDIUM · gates success)"}
+{"at":"2026-10-08T21:51:04.971Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"trang-chu-su-that-thuong-mai","detail":"#706 @ c5f6c666da9b → 5374b54fc4be (MERGE_NOW · MEDIUM · gates success)"}
