@@ -32,8 +32,8 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-08T17:07:59.589Z",
-  "updated_at": "2026-10-08T21:36:30.919Z",
-  "last_heartbeat": "2026-10-08T21:30:03.306Z",
+  "updated_at": "2026-10-08T22:07:25.752Z",
+  "last_heartbeat": "2026-10-08T22:07:25.752Z",
   "definition_of_done": [],
   "intake": {
     "verdict": "MISSING",
@@ -41,16 +41,17 @@
   },
   "handoff": {
     "branch": "claude/erp-a11y-bo-cuc",
-    "sha": "8276b8c2d7b3464e1af69476daadfd7e00531f5d",
-    "at": "2026-10-08T21:30:03.306Z",
+    "sha": "91e11e9e1d5143eff9dd27a1b3cf0324afe3ec52",
+    "at": "2026-10-08T22:07:25.752Z",
     "actor": "DESKTOP-56TH98Y:wt-pr-g",
     "title": "ERP: màn «không tìm thấy» có h1; công tắc / ô số / nút biểu tượng có tên cho trình đọc màn hình (/work/settings · /alerts · /inventory/shortage); /payroll không tràn ngang 390 px",
-    "summary": "ERP: màn «không tìm thấy» có h1 (gốc của «11 trang thiếu h1»); 10+1 ô số /alerts nối nhãn; công tắc + ô ngưỡng /work/settings có tên; nút sao chép /inventory/shortage có tên; /payroll không tràn ngang 390 px. Không đổi hành vi / dữ liệu / quyền.",
+    "summary": "ERP: màn «không tìm thấy» có h1; ô số /alerts nối nhãn; công tắc + ô ngưỡng /work/settings có tên; nút sao chép có tên; /payroll không tràn 390 px. Rebase giải xung đột đăng ký test với #705.",
     "tests": [
+      "rebase lên 5374b54f: giải xung đột tests/sync-fixtures.test.ts (import + lời gọi) GIỮ CẢ testErrorBoundary (#705) lẫn testErpA11y",
       "npx tsc --noEmit: 0",
-      "npx eslint: 0",
-      "npm test: TẤT CẢ KIỂM THỬ ĐẠT (Windows, base 0be392ba)",
-      "tests/erp-a11y.test.ts: mới, nối cuối sync-fixtures"
+      "eslint: 0",
+      "error-boundary + erp-a11y chạy cùng: đạt",
+      "npm test đầy đủ: ĐẠT ở 8276b8c2 (trước rebase, chỉ khác 2 dòng đăng ký)"
     ]
   }
 }
