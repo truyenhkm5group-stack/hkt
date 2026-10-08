@@ -5,6 +5,8 @@ import { platformAudit } from "@/lib/platform/audit";
 import { parseOperatorTarget, type KillSwitchResult } from "@/lib/platform/kill-switches";
 import { invalidateOrganizations } from "@/lib/platform/organizations";
 import { platformOperatorDenial } from "@/lib/platform-ui/module-toggle";
+import { productsInUse } from "@/lib/saas/accounts";
+import { resolveCreateBrand } from "@/lib/saas/create-customer-rules";
 
 /**
  * ═══════════ ĐẶT THƯƠNG HIỆU CỦA MỘT TỔ CHỨC — NGƯỜI VẬN HÀNH QUYẾT, MÁY KHÔNG ĐOÁN (0215) ═══════════
@@ -34,6 +36,10 @@ export async function setOrganizationBrand(user: SessionUser, input: unknown): P
   if (!brand) return { error: "Chọn thương hiệu." };
   const stored = org.brand ?? null;
   if (stored === brand) return { ok: true, changed: false, message: `«${org.name}» đang mang thương hiệu ${ORG_BRAND_LABEL[brand]} sẵn.` };
+  // Workspace CHỈ dùng Chốt Đơn phải mang thương hiệu Chốt Đơn (review #682 · L1 — CÙNG luật lúc tạo, lib/saas/create-customer-rules.ts):
+  // đặt VNX là đưa khách về menu ERP nội bộ và liên kết sang phần mềm họ không dùng.
+  const locked = resolveCreateBrand(await productsInUse(org.code), brand);
+  if ("error" in locked) return { error: locked.error };
 
   const pdb = await getPlatformDb();
   const t = schema.platformOrganizations;

@@ -230,6 +230,17 @@ async function testInviteFlow(): Promise<SessionSubject> {
       assert.ok("error" in r, `mã ${bad} phải bị từ chối`);
     }
     assert.equal(await findOrganization("ob-a"), null);
+
+    // ── Mã mời tạo TRƯỚC luật thương mại (review #682) gắn gói giá cũ — dữ liệu lịch sử, `createInvite` nay từ chối nên đổi gói
+    // trên dòng. Khách không chọn gói ⇒ câu nói việc HỌ làm được, không lộ lý do nội bộ; mã không bị tiêu, không tạo gì. IP riêng
+    // để lượt này không ăn vào trần lượt thử của các bước sau.
+    const legacyInvite = await createInvite({ actor: null, note: `${NOTE} gói cũ` });
+    await pdb.update(schema.platformSignupInvites).set({ planKey: "standard" }).where(eq(schema.platformSignupInvites.id, legacyInvite.id));
+    const legacyRun = await createOrganizationFromSignup(draft({ invite: legacyInvite.code }), { kind: "public", ip: "10.77.0.9" });
+    assert.ok("error" in legacyRun && legacyRun.error.includes("liên hệ người gửi mã") && !legacyRun.error.includes("credit"), JSON.stringify(legacyRun));
+    const legacyRow = await pdb.query.platformSignupInvites.findFirst({ where: eq(schema.platformSignupInvites.id, legacyInvite.id) });
+    assert.ok(legacyRow && !legacyRow.usedAt && !legacyRow.organizationCode, "mã mời gói cũ không bị tiêu");
+    assert.equal(await findOrganization("ob-a"), null, "gói của mã mời sai luật ⇒ không tạo gì");
     assert.match((await checkOrgStep({ name: "Minh An", code: "ob-a" }, null, PUBLIC) as { error: string }).error, /mã mời/i, "không mã mời thì không dò được mã tổ chức");
 
     // ── Từng bước kiểm ở máy chủ ──
@@ -349,7 +360,7 @@ async function testSetupFailed() {
     });
     let r;
     try {
-      r = await createOrganizationFromSignup(draft({ org: { name: "Khách vận hành", code: "ob-c" }, admin: { name: "Chị C", email: "c@ob-c.local", password: "KhachC@12345" }, planKey: "standard", plan: { businessType: "blank", templateKey: null, modules: [] } }), op);
+      r = await createOrganizationFromSignup(draft({ org: { name: "Khách vận hành", code: "ob-c" }, admin: { name: "Chị C", email: "c@ob-c.local", password: "KhachC@12345" }, planKey: "growth", plan: { businessType: "blank", templateKey: null, modules: [] } }), op);
     } finally {
       setOnboardingFaultForTests(null);
     }
@@ -358,7 +369,7 @@ async function testSetupFailed() {
     const again = await retryOrganizationSetup("ob-c", op);
     assert.ok("ok" in again, JSON.stringify(again));
     const org = await findOrganization("ob-c");
-    assert.ok(org?.status === "ACTIVE" && org.plan === "standard");
+    assert.ok(org?.status === "ACTIVE" && org.plan === "growth");
     assert.equal((await readOnboarding("ob-c"))?.source, "OPERATOR");
   });
 }

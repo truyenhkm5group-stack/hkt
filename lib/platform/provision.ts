@@ -7,7 +7,9 @@ import { invalidateCapabilities } from "@/lib/platform/capabilities";
 import { withOrganization } from "@/lib/platform/context";
 import { findOrganization, invalidateOrganizations } from "@/lib/platform/organizations";
 import { ORGANIZATION_CODE_PATTERN, type Organization } from "@/lib/platform/types";
-import { ensureAccountForWorkspace, openSubscriptionsForProductsInUse } from "@/lib/saas/accounts";
+import { ensureAccountForWorkspace, findAccountById, openSubscriptionsForProductsInUse } from "@/lib/saas/accounts";
+import { productsFromModules } from "@/lib/saas/catalog";
+import { decideNewWorkspace } from "@/lib/saas/workspace-commercial";
 
 /**
  * ═══════════ CẤP MỘT TỔ CHỨC MỚI ═══════════
@@ -15,7 +17,8 @@ import { ensureAccountForWorkspace, openSubscriptionsForProductsInUse } from "@/
  * Năm bước, theo thứ tự, mỗi bước idempotent — chạy lại sau một lần hỏng giữa chừng là đi tiếp chứ
  * không nhân đôi:
  *
- *  1. Dòng `platform_organizations` (`module_default = DISABLED`: tổ chức mới chỉ có đúng thứ được bật).
+ *  1. Dòng `platform_organizations` (`module_default = DISABLED`: tổ chức mới chỉ có đúng thứ được bật) — cửa khai `commercial` thì
+ *     gói + thương hiệu đi qua luật thương mại chung TRƯỚC khi ghi (sai luật ⇒ ném, chưa ghi gì).
  *  2. CSDL: Postgres ⇒ `CREATE DATABASE` nếu chưa có (cần quyền CREATEDB trên máy chủ Postgres —
  *     trên production đây là HUMAN GATE, docs/platform/migration-strategy.md mục 6). PGlite ⇒ thư mục
  *     tự tạo khi mở.
@@ -48,6 +51,14 @@ export type ProvisionInput = {
   admin?: { email: string; name: string; password: string };
   source: PlatformAuditSource;
   actor: PlatformActor;
+  /**
+   * LUẬT THƯƠNG MẠI cho workspace MỚI (review #682 · lib/saas/workspace-commercial.ts::decideNewWorkspace): gói theo loại tài khoản
+   * + bộ sản phẩm, thương hiệu theo bộ sản phẩm (`brand` ở đây là GỢI Ý — bộ sản phẩm khoá thì thắng). MỌI cửa tạo tổ chức của sản
+   * phẩm khai ô này (job «Tạo khách», /start, script cấp phát) — tests/create-customer-rules.test.ts quét mã nguồn chặn lời gọi ngoài
+   * tests/ thiếu nó. `products` = sản phẩm DỰ ĐỊNH (bỏ trống ⇒ suy từ `modules`): /start cấp module lõi trước rồi mới cài mẫu, nên
+   * module lúc này chưa nói được khách sẽ dùng gì. Chỉ bộ dựng dữ liệu kiểm thử bỏ ô này (tổ chức giá cũ có chủ đích).
+   */
+  commercial?: { products?: readonly string[] | null };
 };
 
 export type ProvisionResult = { organization: Organization; created: boolean; adminCreated: boolean };
@@ -61,9 +72,17 @@ export async function provisionOrganization(input: ProvisionInput): Promise<Prov
   const existing = await findOrganization(input.code);
   if (existing?.isHome) throw new Error("Không cấp lại tổ chức nhà.");
   if (!existing) {
+    let brand = input.brand ?? null;
+    if (input.commercial) {
+      // Không gắn tài khoản có sẵn ⇒ bước 6 tạo tài khoản KHÁCH NGOÀI (`ensureAccountForWorkspace`).
+      const accountType = input.accountId ? ((await findAccountById(input.accountId))?.accountType ?? null) : "EXTERNAL";
+      const decided = await decideNewWorkspace({ planKey: input.plan, brand: input.brand, brandIsChoice: false, accountType, products: input.commercial.products ?? productsFromModules(new Set(input.modules)) });
+      if ("error" in decided) throw new Error(decided.error);
+      brand = decided.brand;
+    }
     const inserted = await pdb
       .insert(schema.platformOrganizations)
-      .values({ code: input.code, name: input.name, status: "ACTIVE", isHome: false, moduleDefault: "DISABLED", templateKey: input.templateKey ?? null, plan: input.plan ?? null, brand: input.brand ?? null })
+      .values({ code: input.code, name: input.name, status: "ACTIVE", isHome: false, moduleDefault: "DISABLED", templateKey: input.templateKey ?? null, plan: input.plan ?? null, brand })
       .onConflictDoNothing()
       .returning({ id: schema.platformOrganizations.id });
     created = inserted.length > 0;

@@ -222,8 +222,9 @@ export function InvoiceOperatorActions({ invoice }: { invoice: { id: string; tra
   const [amount, setAmount] = useState(String(invoice.amountVnd));
   const [ref, setRef] = useState("");
   const parsed = Number(amount.replace(/[^\d]/g, ""));
+  // Khung trái có ô nhập (ô lý do + nút nằm DƯỚI), khung phải chỉ có lý do + nút ⇒ canh ĐÁY để hai hàng nút ngang nhau (review #682 · L4).
   return (
-    <div className="grid gap-3 lg:grid-cols-2">
+    <div className="grid gap-3 lg:grid-cols-2 lg:items-end">
       <ConfirmWithReason
         id={`paid-${invoice.id}`}
         label="Xác nhận đã thu…"

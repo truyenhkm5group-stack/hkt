@@ -18,6 +18,17 @@ import {
   updateAccountAction,
   voidCostEntryAction,
 } from "@/lib/actions/saas";
+import {
+  createCustomerMissing,
+  defaultCreatePlanKey,
+  lockedBrandFor,
+  planOptionLabel,
+  plansForAccountType,
+  provisioningTemplateFor,
+  suggestedBrandFor,
+  type CreateBrand,
+  type CreatePlanOption,
+} from "@/lib/saas/create-customer-rules";
 
 /** Lý do tối thiểu — trùng `OPERATOR_REASON_MIN` của lõi (lib/saas/console.ts); lõi kiểm lại. */
 const MIN = 5;
@@ -46,9 +57,15 @@ export function SubscriptionButtons({ accountCode, subscriptionId, state, produc
 }
 
 export function SubscribeProductForm({ accountCode, orgCode, products, plans }: { accountCode: string; orgCode: string; products: { key: string; name: string }[]; plans: { key: string; name: string }[] }) {
-  const [productKey, setProduct] = useState(products[0]?.key ?? "");
+  const [picked, setProduct] = useState(products[0]?.key ?? "");
   const [planKey, setPlan] = useState("");
-  const idem = useMemo(() => key(`sub-${orgCode}`), [orgCode]);
+  // MỘT khoá idempotent cho MỘT lượt thuê: bấm lại ĐÚNG lượt ấy (mạng chập, bấm đúp) không chạy hai lần; lượt thành công xong thì khoá
+  // MỚI — giữ một khoá suốt vòng đời form thì lượt thuê sản phẩm kế tiếp nhận lại job của sản phẩm trước và báo «đã thuê» giả
+  // (review #684 · M1; máy chủ nay từ chối khoá dùng lại cho lượt KHÁC, `requestProvisioning`).
+  const [round, setRound] = useState(0);
+  const idem = useMemo(() => key(`sub-${orgCode}-${round}`), [orgCode, round]);
+  // Lựa chọn suy từ danh sách HIỆN TẠI: sản phẩm vừa thuê rời danh sách thì ô chọn về sản phẩm còn lại, không gửi đi lựa chọn cũ.
+  const productKey = products.some((p) => p.key === picked) ? picked : (products[0]?.key ?? "");
   if (!products.length) return <p className="text-xs text-muted-foreground">Workspace đã thuê mọi sản phẩm trong danh mục.</p>;
   return (
     <ConfirmWithReason
@@ -59,7 +76,14 @@ export function SubscribeProductForm({ accountCode, orgCode, products, plans }: 
       consequence="Job cấp phát bật module của sản phẩm (đúng thứ tự phụ thuộc) rồi mở thuê bao. Gửi lại cùng yêu cầu không chạy hai lần."
       minReason={MIN}
       placeholder="Khách mua thêm ERP"
-      run={(reason) => subscribeProductAction({ orgCode, productKey, planKey, idempotencyKey: idem, reason }, accountCode)}
+      run={async (reason) => {
+        const r = await subscribeProductAction({ orgCode, productKey, planKey, idempotencyKey: idem, reason }, accountCode);
+        if ("error" in r) return r;
+        // Job hỏng / còn đang chạy KHÔNG phải «đã thuê»: báo ở dòng lỗi, giữ khoá để «Thuê» lại chạy lại đúng job ấy.
+        if (r.status !== "SUCCEEDED") return { error: r.message };
+        setRound((n) => n + 1);
+        return r;
+      }}
     >
       <div className="grid gap-2 text-xs sm:grid-cols-2">
         <div className="space-y-1">
@@ -88,7 +112,8 @@ export function SubscribeProductForm({ accountCode, orgCode, products, plans }: 
   );
 }
 
-export function RetryJobButton({ accountCode, jobId }: { accountCode: string; jobId: string }) {
+/** «Chạy lại» job hỏng — hoặc «Cài lại mẫu» cho job đã xong mà bước mẫu hỏng (máy chủ tự chạy RIÊNG bước mẫu, `retryJob`). */
+export function RetryJobButton({ accountCode, jobId, label = "Chạy lại" }: { accountCode: string; jobId: string; label?: string }) {
   const [pending, start] = useTransition();
   return (
     <Button
@@ -99,12 +124,12 @@ export function RetryJobButton({ accountCode, jobId }: { accountCode: string; jo
         start(async () => {
           const r = await retryProvisioningAction({ jobId }, accountCode);
           if ("error" in r) toast.error(r.error);
-          else if (r.status === "SUCCEEDED") toast.success(r.message);
+          else if (r.status === "SUCCEEDED" && !r.templatePending) toast.success(r.message);
           else toast.error(r.message);
         })
       }
     >
-      {pending ? "Đang chạy…" : "Chạy lại"}
+      {pending ? "Đang chạy…" : label}
     </Button>
   );
 }
@@ -307,39 +332,75 @@ export function FinalizeStatementButton({ accountCode, periodMonth }: { accountC
   );
 }
 
-export function CreateCustomerForm({ plans, products, accounts }: { plans: { key: string; name: string; priceVnd: number | null }[]; products: { key: string; name: string }[]; accounts: { id: string; code: string; name: string }[] }) {
-  const [f, setF] = useState({ accountId: "", accountName: "", accountCode: "", accountType: "EXTERNAL", workspaceCode: "", workspaceName: "", planKey: plans[0]?.key ?? "", brand: "", adminEmail: "", adminName: "" });
+/**
+ * «Tạo khách mới» — form chỉ PHẢN ÁNH luật của máy chủ (`lib/saas/create-customer-rules.ts`, `validateRequest` kiểm lại mọi thứ):
+ * gói chỉ liệt kê gói tạo được cho LOẠI tài khoản đang chọn (mặc định dùng thử), thương hiệu tự theo bộ sản phẩm (chỉ Chốt Đơn ⇒
+ * Chốt Đơn, khoá), và nút nói rõ còn thiếu gì. Ô lý do + nút nằm DƯỚI các ô nhập (`ConfirmWithReason`).
+ */
+export function CreateCustomerForm({
+  plans,
+  products,
+  accounts,
+  brands,
+  salesTemplate,
+}: {
+  plans: CreatePlanOption[];
+  products: { key: string; name: string }[];
+  accounts: { id: string; code: string; name: string; accountType: string }[];
+  brands: { key: CreateBrand; label: string }[];
+  salesTemplate: { label: string; summary: string } | null;
+}) {
+  const [f, setF] = useState({ accountId: "", accountName: "", accountCode: "", accountType: "EXTERNAL", workspaceCode: "", workspaceName: "", planKey: "", brand: "", adminEmail: "", adminName: "" });
   const [chosen, setChosen] = useState<string[]>(products.slice(-1).map((p) => p.key));
   const [result, setResult] = useState<{ link: string | null; message: string } | null>(null);
   const idem = useMemo(() => key("create"), []);
   const set = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => setF({ ...f, [k]: e.target.value });
+  // Loại tài khoản + bộ sản phẩm QUYẾT danh sách gói — tài khoản có sẵn mang loại của nó, tài khoản mới mang loại đang chọn; bộ chỉ
+  // Chốt Đơn chỉ nhận gói đang niêm yết với MỌI loại tài khoản (gói cũ credit AI 0 ⇒ bot im).
+  const accountType = f.accountId ? (accounts.find((a) => a.id === f.accountId)?.accountType ?? null) : f.accountType;
+  const offered = plansForAccountType(plans, accountType, chosen);
+  const planKey = offered.some((p) => p.key === f.planKey) ? f.planKey : defaultCreatePlanKey(offered);
+  const plan = offered.find((p) => p.key === planKey) ?? null;
+  const locked = lockedBrandFor(chosen);
+  const brand: CreateBrand = locked ?? (brands.some((b) => b.key === f.brand) ? (f.brand as CreateBrand) : suggestedBrandFor(chosen));
+  const template = provisioningTemplateFor(chosen, { planAiSales: plan?.aiSales ?? null }) ? salesTemplate : null;
+  const noAiPlan = lockedBrandFor(chosen) !== null && plan?.aiSales === false;
+  const missing = createCustomerMissing({ workspaceCode: f.workspaceCode, workspaceName: f.workspaceName, products: chosen, planKey, offeredPlanKeys: offered.map((p) => p.key), adminEmail: f.adminEmail });
+  const listed = offered.filter((p) => p.tier === "CATALOG");
+  const legacy = offered.filter((p) => p.tier === "LEGACY");
   return (
     <div className="space-y-3">
       <ConfirmWithReason
         id="create-customer"
         label="Tạo khách…"
+        blockedLead="Chưa thể tạo khách"
+        missing={missing}
         title="Tạo khách mới qua job cấp phát?"
-        consequence="Tạo (hoặc dùng) tài khoản → workspace + CSDL riêng → bật module của sản phẩm → mở thuê bao → tài khoản quản trị. Mỗi bước có vết; hỏng giữa chừng thì «Chạy lại» ở trang khách. Quản trị nhận liên kết kích hoạt dùng một lần."
+        consequence={`Tạo (hoặc dùng) tài khoản → workspace + CSDL riêng → bật module của sản phẩm → mở thuê bao → tài khoản quản trị → thu phí theo gói${template ? ` → cài mẫu «${template.label}»` : ""}. Mỗi bước có vết; hỏng giữa chừng thì «Chạy lại» ở trang khách. Quản trị nhận liên kết kích hoạt dùng một lần.`}
         minReason={MIN}
         placeholder="Khách ký hợp đồng dùng thử"
         run={async (reason) => {
           const r = await createCustomerAction({
             accountId: f.accountId || undefined,
             account: f.accountId ? undefined : { name: f.accountName || f.workspaceName, code: f.accountCode, accountType: f.accountType },
-            workspace: { code: f.workspaceCode, name: f.workspaceName, planKey: f.planKey, brand: f.brand || null },
+            workspace: { code: f.workspaceCode, name: f.workspaceName, planKey: planKey ?? "", brand },
             products: chosen,
             admin: { email: f.adminEmail, name: f.adminName },
             idempotencyKey: idem,
             reason,
           });
-          if ("ok" in r) setResult({ link: r.activationLink, message: r.message });
-          return "ok" in r ? { ok: true, message: r.message } : r;
+          if ("error" in r) return r;
+          // Job hỏng / còn đang chạy KHÔNG phải «đã tạo»: báo ở dòng lỗi dưới nút, không toast xanh (review #684 · M1 — không bao giờ
+          // báo thành công giả). Job xong mà mẫu còn dở vẫn là đã tạo: liên kết kích hoạt hiện kèm câu «CHƯA cài được mẫu».
+          if (r.status !== "SUCCEEDED") return { error: r.message };
+          setResult({ link: r.activationLink, message: r.message });
+          return { ok: true, message: r.message };
         }}
       >
         <div className="grid gap-2 text-xs sm:grid-cols-2">
           <div className="space-y-1 sm:col-span-2">
-            <Label>Tài khoản khách</Label>
-            <select className={sel} value={f.accountId} onChange={set("accountId")}>
+            <Label htmlFor="cc-account">Tài khoản khách</Label>
+            <select id="cc-account" className={sel} value={f.accountId} onChange={set("accountId")}>
               <option value="">— Tài khoản mới —</option>
               {accounts.map((a) => (
                 <option key={a.id} value={a.id}>
@@ -351,16 +412,16 @@ export function CreateCustomerForm({ plans, products, accounts }: { plans: { key
           {f.accountId ? null : (
             <>
               <div className="space-y-1">
-                <Label>Tên khách</Label>
-                <Input value={f.accountName} onChange={set("accountName")} placeholder="Hải Sản Làng Chài" />
+                <Label htmlFor="cc-account-name">Tên khách</Label>
+                <Input id="cc-account-name" value={f.accountName} onChange={set("accountName")} placeholder="Hải Sản Làng Chài" />
               </div>
               <div className="space-y-1">
-                <Label>Mã tài khoản (tuỳ chọn)</Label>
-                <Input value={f.accountCode} onChange={set("accountCode")} placeholder="tự sinh từ tên" />
+                <Label htmlFor="cc-account-code">Mã tài khoản (tuỳ chọn)</Label>
+                <Input id="cc-account-code" value={f.accountCode} onChange={set("accountCode")} placeholder="tự sinh từ tên" />
               </div>
               <div className="space-y-1">
-                <Label>Loại</Label>
-                <select className={sel} value={f.accountType} onChange={set("accountType")}>
+                <Label htmlFor="cc-account-type">Loại</Label>
+                <select id="cc-account-type" className={sel} value={f.accountType} onChange={set("accountType")}>
                   <option value="EXTERNAL">Khách ngoài — hoá đơn</option>
                   <option value="INTERNAL">Nội bộ — chargeback</option>
                 </select>
@@ -368,31 +429,12 @@ export function CreateCustomerForm({ plans, products, accounts }: { plans: { key
             </>
           )}
           <div className="space-y-1">
-            <Label>Mã workspace</Label>
-            <Input value={f.workspaceCode} onChange={set("workspaceCode")} placeholder="hslc-shop2" />
+            <Label htmlFor="cc-ws-code">Mã workspace</Label>
+            <Input id="cc-ws-code" value={f.workspaceCode} onChange={set("workspaceCode")} placeholder="hslc-shop2" />
           </div>
           <div className="space-y-1">
-            <Label>Tên workspace</Label>
-            <Input value={f.workspaceName} onChange={set("workspaceName")} />
-          </div>
-          <div className="space-y-1">
-            <Label>Gói</Label>
-            <select className={sel} value={f.planKey} onChange={set("planKey")}>
-              {plans.map((p) => (
-                <option key={p.key} value={p.key}>
-                  {p.name}
-                  {p.priceVnd ? ` — ${p.priceVnd.toLocaleString("vi-VN")} ₫` : ""}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="space-y-1">
-            <Label>Thương hiệu</Label>
-            <select className={sel} value={f.brand} onChange={set("brand")}>
-              <option value="">(mặc định)</option>
-              <option value="vnx">VNX</option>
-              <option value="chotdon">Chốt Đơn</option>
-            </select>
+            <Label htmlFor="cc-ws-name">Tên workspace</Label>
+            <Input id="cc-ws-name" value={f.workspaceName} onChange={set("workspaceName")} />
           </div>
           <fieldset className="space-y-1 sm:col-span-2">
             <legend className="text-xs font-medium">Sản phẩm</legend>
@@ -406,13 +448,55 @@ export function CreateCustomerForm({ plans, products, accounts }: { plans: { key
             </div>
           </fieldset>
           <div className="space-y-1">
-            <Label>Email quản trị</Label>
-            <Input type="email" value={f.adminEmail} onChange={set("adminEmail")} />
+            <Label htmlFor="cc-plan">Gói</Label>
+            <select id="cc-plan" className={sel} value={planKey ?? ""} onChange={set("planKey")}>
+              {planKey ? null : <option value="">— chưa có gói tạo được —</option>}
+              <optgroup label="Bảng giá đang niêm yết">
+                {listed.map((p) => (
+                  <option key={p.key} value={p.key}>
+                    {planOptionLabel(p)}
+                  </option>
+                ))}
+              </optgroup>
+              {legacy.length ? (
+                <optgroup label="Giá cũ — chỉ tài khoản nội bộ">
+                  {legacy.map((p) => (
+                    <option key={p.key} value={p.key}>
+                      {planOptionLabel(p)}
+                    </option>
+                  ))}
+                </optgroup>
+              ) : null}
+            </select>
           </div>
           <div className="space-y-1">
-            <Label>Tên quản trị</Label>
-            <Input value={f.adminName} onChange={set("adminName")} />
+            <Label htmlFor="cc-brand">Thương hiệu</Label>
+            <select id="cc-brand" className={sel} value={brand} onChange={set("brand")} disabled={locked !== null}>
+              {brands.map((b) => (
+                <option key={b.key} value={b.key}>
+                  {b.label}
+                </option>
+              ))}
+            </select>
+            {locked ? <p className="text-[11px] text-muted-foreground">Chỉ thuê Chốt Đơn ⇒ thương hiệu Chốt Đơn: khách vào app 8 mục, liên kết mời về đúng app của họ. Chọn thêm ERP mới đổi được.</p> : null}
           </div>
+          <div className="space-y-1">
+            <Label htmlFor="cc-admin-email">Email quản trị</Label>
+            <Input id="cc-admin-email" type="email" value={f.adminEmail} onChange={set("adminEmail")} />
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor="cc-admin-name">Tên quản trị</Label>
+            <Input id="cc-admin-name" value={f.adminName} onChange={set("adminName")} />
+          </div>
+          {chosen.length ? (
+            <p className="text-[11px] text-muted-foreground sm:col-span-2">
+              {template
+                ? `Cài sẵn mẫu «${template.label}»${template.summary ? `: ${template.summary}` : ""} — khách trong app Chốt Đơn không tự cài được mẫu.`
+                : noAiPlan
+                  ? `Gói «${plan?.name ?? ""}» không có AI bán hàng — job không cài mẫu AI bán hàng; khách trả lời tay trong hộp thư.`
+                  : "Khách thuê kèm ERP: quản trị tự chọn mẫu ngành ở Cài đặt → Mẫu cấu hình (job không cài mẫu nào)."}
+            </p>
+          ) : null}
         </div>
       </ConfirmWithReason>
       {result ? (

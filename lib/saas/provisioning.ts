@@ -19,10 +19,15 @@ import { setOrganizationModule } from "@/lib/platform/module-config";
 import { findOrganization, getHomeOrganization } from "@/lib/platform/organizations";
 import { provisionOrganization } from "@/lib/platform/provision";
 import { ORGANIZATION_CODE_PATTERN } from "@/lib/platform/types";
+import { orgPriceVersion } from "@/lib/pricing/price-book";
+import { priceOf } from "@/lib/pricing/versions";
 import { accountOfWorkspace, createAccount, findAccountByCode, findAccountById, insertSubscription, liveSubscriptions, setSubscriptionState, type SaasSource } from "@/lib/saas/accounts";
 import { PRODUCTS, SHARED_COMMERCE_CORE, modulesToProvision, productDef, type ProductDef } from "@/lib/saas/catalog";
+import { ADMIN_EMAIL_PATTERN, lockedBrandFor, provisioningTemplateFor, resolveCreateBrand, salesAgentOnly } from "@/lib/saas/create-customer-rules";
 import { readPlans } from "@/lib/saas/customers";
 import { ACCOUNT_TYPES, BILLING_MODES, cancelByJobAllowed, type AccountType, type BillingMode } from "@/lib/saas/policy";
+import { installProvisioningTemplate } from "@/lib/saas/provisioning-template";
+import { decideNewWorkspace, existingWorkspacePlanRefusal, workspacePlanRefusal } from "@/lib/saas/workspace-commercial";
 
 export type ProvisioningKind = "CREATE_CUSTOMER" | "SUBSCRIBE_PRODUCT" | "CANCEL_SUBSCRIPTION";
 export type JobStatus = "PENDING" | "RUNNING" | "SUCCEEDED" | "FAILED";
@@ -54,6 +59,23 @@ type Ctx = { actor: PlatformActor; email: string | null; source: SaasSource; ide
 
 class StepFailure extends Error {}
 
+/**
+ * Loại tài khoản mà workspace mới SẼ thuộc — tra ĐÚNG như bước ACCOUNT của job tra (theo id; không có thì theo mã đã có; cuối cùng
+ * là loại khai cho tài khoản mới), để một mã tài khoản có sẵn không mượn được loại khai tay. Không tra được ⇒ `null` (phía hẹp).
+ */
+async function createAccountType(req: CreateCustomerRequest): Promise<string | null> {
+  if (req.accountId) return (await findAccountById(req.accountId))?.accountType ?? null;
+  const existing = req.account?.code ? await findAccountByCode(req.account.code) : null;
+  return existing?.accountType ?? req.account?.accountType ?? null;
+}
+
+/** Đầu vào ĐÃ QUYẾT ghi vào job: thương hiệu theo bộ sản phẩm (create-customer-rules) — lượt chạy lại dùng đúng nó, không suy lại. */
+function decidedRequest(req: ProvisioningRequest, catalog: readonly ProductDef[]): ProvisioningRequest {
+  if (req.kind !== "CREATE_CUSTOMER") return req;
+  const brand = resolveCreateBrand(req.products, req.workspace.brand, catalog);
+  return "error" in brand ? req : { ...req, workspace: { ...req.workspace, brand: brand.brand } };
+}
+
 /** Kiểm đầu vào TRƯỚC khi ghi job — đầu vào sai không đáng một dòng FAILED. */
 export async function validateRequest(req: ProvisioningRequest, catalog: readonly ProductDef[] = PRODUCTS): Promise<string | null> {
   if (req.kind === "CREATE_CUSTOMER") {
@@ -61,12 +83,16 @@ export async function validateRequest(req: ProvisioningRequest, catalog: readonl
     if (req.workspace.name.trim().length < 2) return "Tên workspace cần ít nhất 2 ký tự.";
     if (!req.products.length) return "Chọn ít nhất một sản phẩm.";
     for (const p of req.products) if (!productDef(p, catalog)) return `Sản phẩm "${p}" không có trong danh mục.`;
-    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(req.admin.email.trim())) return "Email quản trị không hợp lệ.";
+    if (!ADMIN_EMAIL_PATTERN.test(req.admin.email.trim())) return "Email quản trị không hợp lệ.";
     if (!req.accountId && !req.account) return "Thiếu tài khoản khách (chọn có sẵn hoặc khai mới).";
     if (req.account && !(ACCOUNT_TYPES as readonly string[]).includes(req.account.accountType)) return "Loại tài khoản không hợp lệ.";
     if (req.account?.billingMode && !(BILLING_MODES as readonly string[]).includes(req.account.billingMode)) return "Cách lập chứng từ không hợp lệ.";
     const plan = (await readPlans()).find((p) => p.key === req.workspace.planKey);
     if (!plan) return `Gói "${req.workspace.planKey}" không có.`;
+    // Thương hiệu (lựa chọn TƯỜNG MINH của người vận hành) + gói của workspace MỚI — CÙNG luật `provisionOrganization` hỏi lại lúc
+    // ghi dòng tổ chức (lib/saas/workspace-commercial.ts, kiểm khởi chạy 08/10/2026 + review #682).
+    const decided = await decideNewWorkspace({ planKey: plan.key, brand: req.workspace.brand, brandIsChoice: true, accountType: await createAccountType(req), products: req.products, catalog });
+    if ("error" in decided) return decided.error;
     const outside = req.products.filter((p) => plan.productKeys && !plan.productKeys.includes(p));
     if (outside.length) return `Gói «${plan.name}» không phủ sản phẩm: ${outside.join(", ")}.`;
     const existing = await findOrganization(req.workspace.code);
@@ -81,6 +107,9 @@ export async function validateRequest(req: ProvisioningRequest, catalog: readonl
       const plan = (await readPlans()).find((p) => p.key === req.planKey);
       if (!plan) return `Gói "${req.planKey}" không có.`;
       if (plan.productKeys && !plan.productKeys.includes(req.productKey)) return `Gói «${plan.name}» không phủ sản phẩm này.`;
+      // Gói riêng của thuê bao đi CÙNG luật gói với workspace (review #682 · L1): khách ngoài không nhận gói cũ / `internal`.
+      const refusal = await existingWorkspacePlanRefusal(req.orgCode, req.planKey, { adding: req.productKey, catalog });
+      if (refusal) return refusal;
     }
     return null;
   }
@@ -105,48 +134,97 @@ async function cancelGuard(subscriptionId: string): Promise<string | null> {
   return null;
 }
 
-/** «Tạo khách» gửi lại cùng khoá mà đầu vào KHÁC đầu vào job đã lưu. */
+/** Câu MỞ ĐẦU khi «Tạo khách» gửi lại cùng khoá mà đầu vào KHÁC đầu vào job đã lưu — câu đầy đủ: `keyReusedMessage`. */
 export const CREATE_CUSTOMER_KEY_REUSED =
-  "Yêu cầu này đã gửi trước đó với thông tin KHÁC (tài khoản / workspace / sản phẩm / quản trị) — job luôn chạy theo thông tin của lần gửi đầu. Tải lại form để tạo một yêu cầu mới.";
+  "Yêu cầu này đã gửi trước đó với thông tin KHÁC (tài khoản / workspace / gói / thương hiệu / sản phẩm / quản trị) — job luôn chạy theo thông tin của lần gửi đầu.";
 
-function canonical(v: unknown): unknown {
-  if (Array.isArray(v)) return v.map(canonical);
-  if (v && typeof v === "object") {
-    const o = v as Record<string, unknown>;
-    return Object.fromEntries(
-      Object.keys(o)
-        .filter((k) => o[k] !== undefined)
-        .sort()
-        .map((k) => [k, canonical(o[k])]),
-    );
-  }
-  return v;
+/** Câu MỞ ĐẦU khi «Thuê sản phẩm» dùng lại khoá của một lượt thuê KHÁC (review #684 · M1) — lượt vừa bấm không chạy. */
+export const SUBSCRIBE_KEY_REUSED = "Khoá yêu cầu này đã dùng cho một lượt thuê KHÁC — lượt thuê vừa bấm CHƯA chạy, không sản phẩm nào được thuê thêm.";
+
+type Normalizer<V> = (value: V | undefined) => unknown;
+
+/**
+ * Bộ chuẩn hoá cho MỌI trường của `T` (`-?`: trường tuỳ chọn cũng phải khai). Bảng dấu vân khai bằng `satisfies FingerprintFields<…>`
+ * ⇒ thêm một trường vào yêu cầu mà quên dấu vân là LỖI BIÊN DỊCH, không phải hai yêu cầu khác nhau ra «giống» (review #684 · L-c).
+ */
+export type FingerprintFields<T> = { [K in keyof T]-?: Normalizer<T[K]> };
+
+const asIs = <V,>(value: V | undefined) => value ?? null;
+/** Ô chữ: bỏ khoảng trắng hai đầu; trống ⇔ `null`. */
+const text = (value: string | null | undefined) => (typeof value === "string" ? value.trim() || null : null);
+/** Mã / email: như `text` và không phân biệt hoa thường. */
+const lowered = (value: string | null | undefined) => (typeof value === "string" ? value.trim().toLowerCase() || null : null);
+
+function pickFields<T>(value: T | null | undefined, fields: FingerprintFields<T>): Record<string, unknown> | null {
+  if (value === null || value === undefined || typeof value !== "object") return null;
+  const out: Record<string, unknown> = {};
+  for (const k of (Object.keys(fields) as (keyof T & string)[]).sort()) out[k] = fields[k](value[k]);
+  return out;
 }
+
+type AccountFields = NonNullable<CreateCustomerRequest["account"]>;
+
+export const ACCOUNT_FINGERPRINT_FIELDS = { code: lowered, name: text, accountType: asIs, billingMode: asIs, legalName: text, taxCode: text, billingEmail: lowered } satisfies FingerprintFields<AccountFields>;
+export const WORKSPACE_FINGERPRINT_FIELDS = { code: lowered, name: text, planKey: text, brand: asIs } satisfies FingerprintFields<CreateCustomerRequest["workspace"]>;
+export const ADMIN_FINGERPRINT_FIELDS = { email: lowered, name: text } satisfies FingerprintFields<CreateCustomerRequest["admin"]>;
+
+const CREATE_CUSTOMER_FINGERPRINT_FIELDS = {
+  kind: asIs,
+  accountId: text,
+  account: (value) => pickFields(value, ACCOUNT_FINGERPRINT_FIELDS),
+  workspace: (value) => pickFields(value, WORKSPACE_FINGERPRINT_FIELDS),
+  // Thứ tự sản phẩm không là khác. MẪU job cài suy từ sản phẩm + gói (`provisioningTemplateFor`) — đổi mẫu là đổi một trong hai.
+  products: (value) => (Array.isArray(value) ? [...value].sort() : []),
+  admin: (value) => pickFields(value, ADMIN_FINGERPRINT_FIELDS),
+} satisfies FingerprintFields<CreateCustomerRequest>;
+
+const SUBSCRIBE_FINGERPRINT_FIELDS = { kind: asIs, orgCode: lowered, productKey: asIs, planKey: text } satisfies FingerprintFields<SubscribeRequest>;
 
 /**
  * THUẦN. Dấu vân của một yêu cầu «Tạo khách» — để so lượt gửi lại cùng khoá với đầu vào ĐÃ LƯU của job (jsonb đổi thứ tự khoá;
  * thứ tự sản phẩm, chữ hoa / khoảng trắng của email và mã, ô trống ⇔ null đều không tính là khác). Lý do của lượt gửi không thuộc
- * yêu cầu (không lưu trên job) nên không vào dấu vân.
+ * yêu cầu (không lưu trên job) nên không vào dấu vân. Người gọi đưa vào ĐÚNG bản sẽ / đã ghi lên job — bản SAU `decidedRequest`
+ * (thương hiệu đã chốt): so với đầu vào thô thì mọi lượt gửi lại để trống ô thương hiệu đều bị chặn oan.
  */
 export function createCustomerFingerprint(raw: unknown): string {
-  const r = (raw ?? {}) as Partial<CreateCustomerRequest>;
-  const acc = r.account ?? null;
-  const ws = r.workspace;
-  return JSON.stringify(
-    canonical({
-      accountId: r.accountId || null,
-      account: acc ? { ...acc, code: acc.code?.trim().toLowerCase() || null, name: acc.name?.trim() ?? null } : null,
-      workspace: ws ? { code: ws.code?.trim().toLowerCase() ?? null, name: ws.name?.trim() ?? null, planKey: ws.planKey ?? null, brand: ws.brand ?? null } : null,
-      products: [...(r.products ?? [])].sort(),
-      admin: r.admin ? { email: r.admin.email?.trim().toLowerCase() ?? null, name: r.admin.name?.trim() ?? null } : null,
-    }),
-  );
+  return JSON.stringify(pickFields((raw ?? {}) as CreateCustomerRequest, CREATE_CUSTOMER_FINGERPRINT_FIELDS));
+}
+
+/** THUẦN. Dấu vân của «Thuê sản phẩm»: workspace · sản phẩm · gói riêng. */
+export function subscribeFingerprint(raw: unknown): string {
+  return JSON.stringify(pickFields((raw ?? {}) as SubscribeRequest, SUBSCRIBE_FINGERPRINT_FIELDS));
+}
+
+/** Dấu vân theo loại yêu cầu; `null` = loại không so (xem `requestProvisioning`). */
+function fingerprintOf(kind: string, raw: unknown): string | null {
+  if (kind === "CREATE_CUSTOMER") return createCustomerFingerprint(raw);
+  if (kind === "SUBSCRIBE_PRODUCT") return subscribeFingerprint(raw);
+  return null;
+}
+
+/**
+ * Câu trả về khi một khoá đã dùng cho yêu cầu KHÁC (review #684 · L-a): job cũ đang ở trạng thái nào, mã job, và lối ra ĐÚNG với
+ * trạng thái ấy — không chỉ «Tải lại form». `accountCode` = tài khoản của job (để chỉ thẳng trang khách) nếu tra được.
+ */
+export function keyReusedMessage(job: Pick<JobRow, "id" | "kind" | "status" | "orgCode" | "steps" | "input">, accountCode: string | null): string {
+  const ref = `job ${job.id.slice(0, 8)} · ${JOB_STATUS_LABEL[job.status as JobStatus] ?? job.status}`;
+  if (job.kind === "SUBSCRIBE_PRODUCT") {
+    const earlier = (job.input as Partial<SubscribeRequest> | null)?.productKey ?? "?";
+    return `${SUBSCRIBE_KEY_REUSED} Khoá thuộc lượt thuê «${earlier}» của ${job.orgCode ?? "một workspace khác"} (${ref}). Tải lại trang rồi thuê lại.`;
+  }
+  const steps = Array.isArray(job.steps) ? (job.steps as JobStep[]) : [];
+  const page = accountCode ? `/platform/customers/${accountCode}` : "trang khách";
+  const next = steps.some((s) => s?.key === "WORKSPACE" && s.status === "DONE")
+    ? `Job đã tạo workspace «${job.orgCode}» theo lần gửi đầu — ở ${page}, ${job.status === "FAILED" ? "bấm «Chạy lại» job này rồi " : ""}bấm «Gửi lại liên kết kích hoạt» cho quản trị của lần gửi đầu. Tạo khách KHÁC ⇒ tải lại form để có yêu cầu mới.`
+    : "Job chưa tạo workspace nào: tải lại form để tạo một yêu cầu mới.";
+  return `${CREATE_CUSTOMER_KEY_REUSED} (${ref}) ${next}`;
 }
 
 /** Gửi một yêu cầu cấp phát. Cùng khoá ⇒ cùng job; job đã xong không chạy lại; job hỏng / treo chạy lại. */
-export async function requestProvisioning(req: ProvisioningRequest, ctx: Ctx): Promise<JobResult | { error: string }> {
-  const invalid = await validateRequest(req, ctx.catalog);
+export async function requestProvisioning(input: ProvisioningRequest, ctx: Ctx): Promise<JobResult | { error: string }> {
+  const invalid = await validateRequest(input, ctx.catalog);
   if (invalid) return { error: invalid };
+  const req = decidedRequest(input, ctx.catalog ?? PRODUCTS);
   const key = ctx.idempotencyKey.trim();
   if (!key || key.length > 200) return { error: "Thiếu khoá idempotent (1–200 ký tự)." };
   const pdb = await getPlatformDb();
@@ -161,27 +239,85 @@ export async function requestProvisioning(req: ProvisioningRequest, ctx: Ctx): P
   if (!job) return { error: "Không ghi / đọc được job cấp phát." };
   if (!inserted.length) {
     if (job.kind !== req.kind) return { error: `Khoá "${key}" đã dùng cho một yêu cầu loại khác.` };
-    // «Tạo khách» cùng khoá mà đầu vào KHÁC ⇒ từ chối TRƯỚC mọi lượt chạy lại: job chạy theo đầu vào đã lưu, nên nhận lượt này là để
-    // người vận hành tưởng email / workspace mới đã được dùng — và lượt phát liên kết kích hoạt nhắm sai người. Chỉ áp cho «Tạo khách»:
-    // khoá mặc định của «Huỷ thuê bao» suy từ mã thuê bao, bấm lại với lý do khác vẫn phải chạy lại được job hỏng.
-    if (req.kind === "CREATE_CUSTOMER" && createCustomerFingerprint(job.input) !== createCustomerFingerprint(req)) return { error: CREATE_CUSTOMER_KEY_REUSED };
+    // Cùng khoá mà đầu vào KHÁC ⇒ từ chối TRƯỚC mọi lượt chạy lại: job chạy theo đầu vào đã lưu, nên nhận lượt này là để người vận
+    // hành tưởng yêu cầu MỚI đã chạy — «Tạo khách»: email / workspace mới, liên kết kích hoạt nhắm sai người; «Thuê sản phẩm»: báo «đã
+    // thuê» trong khi sản phẩm vừa chọn chưa được thuê (review #684 · M1). So trên `req` — bản ĐÃ chuẩn hoá, đúng bản đã ghi lên job.
+    // Không áp cho «Huỷ thuê bao»: khoá mặc định suy từ mã thuê bao, bấm lại với lý do khác vẫn phải chạy lại được job hỏng.
+    const mine = fingerprintOf(req.kind, req);
+    if (mine !== null && fingerprintOf(job.kind, job.input) !== mine) {
+      const accountCode = job.accountId ? ((await findAccountById(job.accountId))?.code ?? null) : null;
+      return { error: keyReusedMessage(job, accountCode) };
+    }
     if (job.status === "SUCCEEDED") return { job, reused: true };
     if (job.status === "RUNNING" && job.startedAt && Date.now() - job.startedAt.getTime() < STALE_RUNNING_MS) return { job, reused: true };
   }
   return { job: await runJob(job, ctx), reused: !inserted.length };
 }
 
-/** Chạy lại một job FAILED / treo (nút «Chạy lại» của người vận hành). */
+/**
+ * Bước MẪU gần nhất của một job «Tạo khách» ĐÃ XONG, nếu bước ấy HỎNG — việc còn dở không chặn cấp phát (review #682 · MEDIUM-1).
+ * Job như vậy mang `lastError`, không hiện xanh «Xong», và «Chạy lại» chạy RIÊNG bước mẫu (`retryJob`). `null` = không có gì dở.
+ */
+export function templateRetryPending(job: Pick<JobRow, "kind" | "status" | "steps">): JobStep | null {
+  if (job.kind !== "CREATE_CUSTOMER" || job.status !== "SUCCEEDED") return null;
+  const steps = Array.isArray(job.steps) ? (job.steps as JobStep[]) : [];
+  const last = [...steps].reverse().find((s) => s?.key === "TEMPLATE");
+  return last?.status === "FAILED" ? last : null;
+}
+
+export type JobView = { label: string; tone: "good" | "bad" | "info"; retry: "JOB" | "TEMPLATE" | null };
+
+/** Nhãn + sắc thái + nút của job trên màn người vận hành — MỘT chỗ quyết, trang chỉ vẽ. */
+export function jobView(job: Pick<JobRow, "kind" | "status" | "steps">): JobView {
+  if (templateRetryPending(job)) return { label: "Xong — CHƯA cài được mẫu", tone: "bad", retry: "TEMPLATE" };
+  if (job.status === "SUCCEEDED") return { label: JOB_STATUS_LABEL.SUCCEEDED, tone: "good", retry: null };
+  if (job.status === "FAILED") return { label: JOB_STATUS_LABEL.FAILED, tone: "bad", retry: "JOB" };
+  return { label: JOB_STATUS_LABEL[job.status as JobStatus] ?? job.status, tone: "info", retry: null };
+}
+
+/** Đầu câu `lastError` của job xong mà bước mẫu hỏng — khác hẳn job hỏng (job này KHÔNG FAILED). */
+export const TEMPLATE_PENDING_PREFIX = "Chưa cài được mẫu: ";
+
+/**
+ * Đầu vào của một job xếp TRƯỚC luật hiện hành (review #682 · L7): chạy lại đúng đầu vào cũ là dựng lại đúng cái sai (thương hiệu
+ * trống cho khách chỉ Chốt Đơn, gói cũ cho khách ngoài). Báo cần sửa thay vì chạy. `null` = chạy lại được.
+ */
+async function retryRefusal(job: JobRow, catalog: readonly ProductDef[]): Promise<string | null> {
+  const req = job.input as unknown as ProvisioningRequest;
+  let why: string | null = null;
+  if (req.kind === "SUBSCRIBE_PRODUCT" && req.planKey) why = await existingWorkspacePlanRefusal(req.orgCode, req.planKey, { adding: req.productKey, catalog });
+  if (req.kind === "CREATE_CUSTOMER") {
+    const locked = lockedBrandFor(req.products, catalog);
+    if (locked && req.workspace.brand !== locked) why = `thương hiệu đã lưu trên job là «${req.workspace.brand ?? "trống"}», nhưng workspace chỉ dùng Chốt Đơn phải mang thương hiệu «${locked}».`;
+    else {
+      const accountType = job.accountId ? ((await findAccountById(job.accountId))?.accountType ?? null) : await createAccountType(req);
+      why = await workspacePlanRefusal({ planKey: req.workspace.planKey, accountType, products: req.products, catalog });
+    }
+  }
+  if (!why) return null;
+  const where = job.orgCode ? `/platform/org/${job.orgCode}` : "trang tổ chức";
+  return `Job này xếp trước luật «Tạo khách» hiện hành — ${why} Không chạy lại theo đầu vào cũ: workspace chưa tạo thì gửi «Tạo khách» mới; đã tạo dở thì sửa gói / thương hiệu ở ${where}.`;
+}
+
+/**
+ * Chạy lại một job FAILED / treo (nút «Chạy lại» của người vận hành) — và job ĐÃ XONG mà bước mẫu hỏng: chạy RIÊNG bước mẫu
+ * (`templateRetryPending`, nút «Cài lại mẫu»), không đụng tài khoản / workspace / thuê bao / thu phí đã xong.
+ */
 export async function retryJob(jobId: string, ctx: Omit<Ctx, "idempotencyKey">): Promise<JobRow | { error: string }> {
   const pdb = await getPlatformDb();
   const job = await pdb.query.platformProvisioningJobs.findFirst({ where: eq(schema.platformProvisioningJobs.id, jobId) });
   if (!job) return { error: "Không có job này." };
-  if (job.status === "SUCCEEDED") return { error: "Job đã xong — không chạy lại." };
+  const templateOnly = templateRetryPending(job) !== null;
+  if (job.status === "SUCCEEDED" && !templateOnly) return { error: "Job đã xong — không chạy lại." };
   if (job.status === "RUNNING" && job.startedAt && Date.now() - job.startedAt.getTime() < STALE_RUNNING_MS) return { error: "Job đang chạy — đợi xong hoặc quá 10 phút mới chạy lại." };
-  return runJob(job, { ...ctx, idempotencyKey: job.idempotencyKey });
+  if (!templateOnly) {
+    const stale = await retryRefusal(job, ctx.catalog ?? PRODUCTS);
+    if (stale) return { error: stale };
+  }
+  return runJob(job, { ...ctx, idempotencyKey: job.idempotencyKey }, { templateOnly });
 }
 
-async function runJob(job: JobRow, ctx: Ctx): Promise<JobRow> {
+async function runJob(job: JobRow, ctx: Ctx, opts: { templateOnly?: boolean } = {}): Promise<JobRow> {
   const pdb = await getPlatformDb();
   // Chiếm job bằng so-và-ghi: hai lượt cùng chạy một job thì chỉ một lượt thắng.
   const claimed = await pdb
@@ -203,16 +339,21 @@ async function runJob(job: JobRow, ctx: Ctx): Promise<JobRow> {
     // thì accountId đã ghi ngay lượt đầu (review tích hợp 06/10/2026).
     const priorSteps = Array.isArray(job.steps) ? (job.steps as { key?: unknown }[]) : [];
     const isRerun = job.attempts > 0 && priorSteps.some((s) => s?.key === "ACCOUNT");
-    if (req.kind === "CREATE_CUSTOMER") ({ accountId, orgCode } = await runCreateCustomer(req, ctx, step, accountId, catalog, isRerun));
+    if (req.kind === "CREATE_CUSTOMER" && opts.templateOnly && orgCode) await runTemplateStep(req, ctx, step, orgCode, catalog);
+    else if (req.kind === "CREATE_CUSTOMER") ({ accountId, orgCode } = await runCreateCustomer(req, ctx, step, accountId, catalog, isRerun));
     else if (req.kind === "SUBSCRIBE_PRODUCT") accountId = await runSubscribe(req, ctx, step, catalog);
     else ({ accountId, orgCode } = await runCancel(req, ctx, step, catalog));
   } catch (e) {
     error = e instanceof Error ? e.message : String(e);
     if (!(e instanceof StepFailure)) step("UNEXPECTED", "FAILED", error);
   }
+  // Bước mẫu hỏng KHÔNG làm job hỏng, nhưng job mang câu lỗi (việc còn dở) — trang khách không tô xanh «Xong», danh sách khách bật
+  // cờ «Cấp phát hỏng», và lượt cài lại thành công xoá câu này.
+  const template = error ? null : ([...steps].reverse().find((s) => s.key === "TEMPLATE") ?? null);
+  const lastError = error ?? (template?.status === "FAILED" ? `${TEMPLATE_PENDING_PREFIX}${template.detail ?? ""}` : null);
   const [done] = await pdb
     .update(schema.platformProvisioningJobs)
-    .set({ status: error ? "FAILED" : "SUCCEEDED", steps: [...((job.steps as JobStep[]) ?? []), ...steps], lastError: error, finishedAt: new Date(), accountId, orgCode })
+    .set({ status: error ? "FAILED" : "SUCCEEDED", steps: [...((job.steps as JobStep[]) ?? []), ...steps], lastError, finishedAt: new Date(), accountId, orgCode })
     .where(eq(schema.platformProvisioningJobs.id, job.id))
     .returning();
   const home = await getHomeOrganization();
@@ -261,6 +402,7 @@ async function runCreateCustomer(req: CreateCustomerRequest, ctx: Ctx, step: Ste
     accountId: account.id,
     source: ctx.source === "TEST" ? "TEST" : "UI",
     actor: ctx.actor,
+    commercial: { products: req.products },
   });
   step("WORKSPACE", "DONE", `${res.organization.code}${res.created ? " (mới)" : " (đã có)"} · ${modules.length} module`);
   step("ADMIN", "DONE", res.adminCreated ? `tạo ${req.admin.email.trim().toLowerCase()} — kích hoạt bằng liên kết dùng một lần` : "quản trị đã có");
@@ -280,7 +422,35 @@ async function runCreateCustomer(req: CreateCustomerRequest, ctx: Ctx, step: Ste
   } catch (e) {
     fail(step, "BILLING", `Không khởi tạo được thu phí: ${e instanceof Error ? e.message : String(e)} — chạy lại job (bước idempotent).`);
   }
+  // 5. Mẫu «Chỉ cần AI bán hàng» (bước TEMPLATE) — không bao giờ làm hỏng job.
+  await runTemplateStep(req, ctx, step, res.organization.code, catalog);
   return { accountId: account.id, orgCode: res.organization.code };
+}
+
+/** Gói của workspace (theo phiên bản giá đã ghim) có «AI bán hàng» không; `null` = gói chưa khai tính năng / không đọc được. */
+async function planHasAiSales(orgCode: string, planKey: string): Promise<boolean | null> {
+  try {
+    const v = await orgPriceVersion(orgCode);
+    const features = priceOf(v.book, v.version?.key ?? null, planKey)?.price.features ?? null;
+    return features ? features.includes("ai_sales") : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Bước TEMPLATE: mẫu «Chỉ cần AI bán hàng» cho khách CHỈ thuê Chốt Đơn ở gói CÓ AI bán hàng — CÙNG bộ cài với /start
+ * (lib/saas/provisioning-template.ts). Không bao giờ ném: hỏng ⇒ bước FAILED + nhật ký nền tảng, job vẫn xong nhưng mang câu lỗi và
+ * «Cài lại mẫu» chạy riêng bước này (`retryJob`). Lượt cài ghi lý do «Job cấp phát <khoá>».
+ */
+async function runTemplateStep(req: CreateCustomerRequest, ctx: Ctx, step: StepFn, orgCode: string, catalog: readonly ProductDef[]) {
+  const template = provisioningTemplateFor(req.products, { planAiSales: await planHasAiSales(orgCode, req.workspace.planKey) }, catalog);
+  if (!template) {
+    step("TEMPLATE", "SKIPPED", salesAgentOnly(req.products, catalog) ? `gói «${req.workspace.planKey}» không có AI bán hàng — không cài mẫu AI bán hàng (khách trả lời tay trong hộp thư)` : "bộ sản phẩm không chỉ có Chốt Đơn — mẫu ngành do quản trị tự chọn ở Cài đặt → Mẫu cấu hình, không cài tự động");
+    return;
+  }
+  const t = await installProvisioningTemplate({ orgCode, adminEmail: req.admin.email, template, actor: ctx.actor, auditSource: ctx.source === "TEST" ? "TEST" : ctx.source === "OPERATOR" ? "UI" : "SCRIPT", note: `Job cấp phát ${ctx.idempotencyKey}` });
+  step("TEMPLATE", t.status, t.detail);
 }
 
 /** Bật module theo thứ tự phụ thuộc: lõi trước, module của sản phẩm sau. */

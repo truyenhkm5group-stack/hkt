@@ -10,11 +10,13 @@ import { BLUEPRINT_TEMPLATES } from "@/lib/blueprints/templates";
 import { initialQuickBusinessType } from "@/lib/onboarding/quick-shared";
 import { hostBrand } from "@/lib/platform/host-brand";
 import { moduleDef } from "@/lib/constants/platform-modules";
-import { listPlans } from "@/lib/entitlements/check";
 import { phoneOtpRequired } from "@/lib/onboarding/phone-otp";
 import { signupMode } from "@/lib/onboarding/service";
 import { BUSINESS_TYPE_SPEC, BUSINESS_TYPES, CORE_MODULES, SELECTABLE_MODULES } from "@/lib/onboarding/shared";
 import { platformOperatorDenial } from "@/lib/platform-ui/module-toggle";
+import { loadPriceBook } from "@/lib/pricing/price-book";
+import { createCustomerPlanOptions, planOptionLabel, plansForAccountType } from "@/lib/saas/create-customer-rules";
+import { readPlans } from "@/lib/saas/customers";
 
 export const dynamic = "force-dynamic";
 export const metadata: Metadata = { title: { absolute: "Tạo cửa hàng" }, description: "Tạo cửa hàng mới trên nền tảng ERP — khoảng 1 phút.", robots: { index: false, follow: false } };
@@ -77,7 +79,9 @@ export default async function StartPage({ searchParams }: { searchParams: Promis
     const d = moduleDef(k)!;
     return { key: k, label: d.label, description: d.description, dependsOn: d.dependsOn.filter((x) => SELECTABLE_MODULES.includes(x)) };
   });
-  const plans = flow === "operator" ? (await listPlans()).map((p) => ({ key: p.key, name: p.name })) : [];
+  // Người vận hành tạo hộ: chỉ gói ĐẶT được cho tổ chức mới — /start tạo tài khoản khách ngoài (luật thương mại chung, review #682);
+  // máy chủ kiểm lại lúc tạo (`decideNewWorkspace`).
+  const plans = flow === "operator" ? plansForAccountType(createCustomerPlanOptions(await readPlans(), await loadPriceBook(), new Date()), "EXTERNAL").map((p) => ({ key: p.key, name: planOptionLabel(p) })) : [];
 
   return (
     <main className="flex min-h-screen flex-col items-center gap-6 p-4 pt-10 sm:p-8 sm:pt-14">

@@ -283,7 +283,8 @@ async function testCustomer03(op: SessionUser) {
   const pdb = await getPlatformDb();
   const job = await pdb.query.platformProvisioningJobs.findFirst({ where: eq(schema.platformProvisioningJobs.idempotencyKey, "sp-c3-create") });
   assert.ok(!JSON.stringify(job).toLowerCase().includes("password"), "job không mang mật khẩu");
-  assert.deepEqual((job!.steps as { key: string }[]).map((s) => s.key), ["ACCOUNT", "WORKSPACE", "ADMIN", "SUBSCRIPTIONS", "BILLING"]);
+  // TEMPLATE: khách chỉ thuê Chốt Đơn ⇒ job cài mẫu «Chỉ cần AI bán hàng» như /start (tests/create-customer-rules.test.ts).
+  assert.deepEqual((job!.steps as { key: string }[]).map((s) => s.key), ["ACCOUNT", "WORKSPACE", "ADMIN", "SUBSCRIPTIONS", "BILLING", "TEMPLATE"]);
 
   // Gửi lại cùng khoá ⇒ cùng job, không chạy lại.
   const again = await createCustomerAsOperator(op, { account: { code: "sp-customer03", name: "Customer 03", accountType: "EXTERNAL" }, workspace: { code: C3, name: "Customer 03 Shop", planKey: "starter", brand: "chotdon" }, products: ["chotdon"], admin: { email: "owner@c3.local", name: "Chủ C3" }, idempotencyKey: "sp-c3-create", reason: "Bấm hai lần" });

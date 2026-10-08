@@ -222,10 +222,12 @@ function carriedItem(step: PlanStep): { templateHash: string; appliedHash: strin
   return { templateHash: step.templateHash, appliedHash: step.currentHash };
 }
 
-export type ApplyOptions = { blueprint: Blueprint };
+/** `note` = lý do của lượt cài do người gọi khai (vd «Job cấp phát <khoá>») — nối sau nguồn mẫu trong nhật ký của lượt cài. */
+export type ApplyOptions = { blueprint: Blueprint; note?: string };
 
 export async function applyBlueprint(plan: BlueprintPlan, actor: SessionUser, opts: ApplyOptions): Promise<ApplyResult> {
   const bp = opts.blueprint;
+  const why = opts.note?.trim() ? `${originOf(bp)} · ${opts.note.trim()}` : originOf(bp);
   if (plan.blueprint.key !== bp.key || plan.blueprint.version !== bp.version) {
     return { ok: false, installId: null, failedStep: null, errors: [{ path: "", message: "Kế hoạch không thuộc gói này — xem trước lại." }], outcomes: [] };
   }
@@ -249,7 +251,7 @@ export async function applyBlueprint(plan: BlueprintPlan, actor: SessionUser, op
     email: user.email,
     plan: { planHash: plan.planHash, installedVersion: plan.installedVersion, steps: plan.steps.map((s) => ({ kind: s.kind, key: s.key, action: s.action })) },
   });
-  await audit({ userId: user.id, userEmail: user.email, action: "BLUEPRINT_INSTALL_START", entity: "BLUEPRINT", entityId: bp.key, before: { version: plan.installedVersion }, after: { version: bp.version, counts: plan.counts }, reason: originOf(bp), correlationId: installId });
+  await audit({ userId: user.id, userEmail: user.email, action: "BLUEPRINT_INSTALL_START", entity: "BLUEPRINT", entityId: bp.key, before: { version: plan.installedVersion }, after: { version: bp.version, counts: plan.counts }, reason: why, correlationId: installId });
 
   const ctx = await newReadContext();
   const outcomes: StepOutcome[] = [];
@@ -275,7 +277,7 @@ export async function applyBlueprint(plan: BlueprintPlan, actor: SessionUser, op
       for (const rest of plan.steps.slice(i + 1)) outcomes.push({ kind: rest.kind, key: rest.key, label: rest.label, action: rest.action, status: "NOT_RUN", message: null });
       const error = `${step.label}: ${result.error}`;
       await finishInstall(installId, { status: "FAILED", outcomes, error });
-      await audit({ userId: user.id, userEmail: user.email, action: "BLUEPRINT_INSTALL_FAILED", entity: "BLUEPRINT", entityId: bp.key, after: { version: bp.version, failedStep: sk, error }, reason: originOf(bp), correlationId: installId });
+      await audit({ userId: user.id, userEmail: user.email, action: "BLUEPRINT_INSTALL_FAILED", entity: "BLUEPRINT", entityId: bp.key, after: { version: bp.version, failedStep: sk, error }, reason: why, correlationId: installId });
       return { ok: false, installId, failedStep: { kind: step.kind, key: step.key }, errors: [{ path: sk, message: error }], outcomes };
     }
     if (step.kind === "module") {
@@ -295,14 +297,14 @@ export async function applyBlueprint(plan: BlueprintPlan, actor: SessionUser, op
       entityId: `${bp.key}:${sk}`,
       before: { hash: step.currentHash },
       after: { hash: appliedHash, action: step.action, published: step.publish },
-      reason: originOf(bp),
+      reason: why,
       correlationId: installId,
     });
     outcomes.push({ kind: step.kind, key: step.key, label: step.label, action: step.action, status: "DONE", message: step.reason });
   }
 
   await finishInstall(installId, { status: "DONE", outcomes, error: null });
-  await audit({ userId: user.id, userEmail: user.email, action: "BLUEPRINT_INSTALL_DONE", entity: "BLUEPRINT", entityId: bp.key, after: { version: bp.version, done: outcomes.filter((o) => o.status === "DONE").length }, reason: originOf(bp), correlationId: installId });
+  await audit({ userId: user.id, userEmail: user.email, action: "BLUEPRINT_INSTALL_DONE", entity: "BLUEPRINT", entityId: bp.key, after: { version: bp.version, done: outcomes.filter((o) => o.status === "DONE").length }, reason: why, correlationId: installId });
   return { ok: true, installId, version: bp.version, outcomes };
 }
 

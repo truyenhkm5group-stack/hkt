@@ -9,12 +9,14 @@ import { requirePermission } from "@/lib/auth/session";
 import { BILLING_STANDING_LABEL } from "@/lib/billing/rules";
 import { formatDate, formatDateTime, formatNumber, formatPercent, formatVND } from "@/lib/format";
 import { platformOperatorDenial } from "@/lib/platform-ui/module-toggle";
+import { loadPriceBook } from "@/lib/pricing/price-book";
 import { ALLOCATION_BASIS_LABEL } from "@/lib/saas/allocation";
 import { PRODUCT_LABEL, PRODUCTS } from "@/lib/saas/catalog";
 import { loadCustomerDetail } from "@/lib/saas/console";
+import { createCustomerPlanOptions, plansForAccountType } from "@/lib/saas/create-customer-rules";
 import { HEALTH_FLAG_LABEL, readPlans } from "@/lib/saas/customers";
 import { ACCOUNT_STATUS_LABEL, ACCOUNT_TYPE_LABEL, ACCOUNT_TYPE_TONE, BILLING_MODE_LABEL, SUBSCRIPTION_STATUS_LABEL, statementLabel, type AccountStatus, type AccountType, type BillingMode } from "@/lib/saas/policy";
-import { JOB_KIND_LABEL, JOB_STATUS_LABEL, type JobStatus, type JobStep, type ProvisioningKind } from "@/lib/saas/provisioning";
+import { JOB_KIND_LABEL, jobView, type JobStep, type ProvisioningKind } from "@/lib/saas/provisioning";
 import { STATEMENT_LINE_LABEL } from "@/lib/saas/statement";
 import { runningVersion } from "@/lib/version";
 import { cn } from "@/lib/utils";
@@ -55,7 +57,8 @@ export default async function SaasCustomerPage({ params, searchParams }: { param
   const mode = a.billingMode as BillingMode;
   const version = runningVersion();
   const allProducts = PRODUCTS.map((p) => ({ key: p.key, name: p.name }));
-  const planList = (await readPlans()).map((p) => ({ key: p.key, name: p.name }));
+  // Gói riêng của thuê bao: chỉ gói ĐẶT được cho loại tài khoản này (lib/saas/create-customer-rules.ts) — máy chủ kiểm lại khi thuê.
+  const planList = plansForAccountType(createCustomerPlanOptions(await readPlans(), await loadPriceBook(), new Date()), a.accountType).map((p) => ({ key: p.key, name: p.name }));
   const label = `${d.periodMonth.slice(5, 7)}/${d.periodMonth.slice(0, 4)}`;
 
   return (
@@ -361,11 +364,11 @@ export default async function SaasCustomerPage({ params, searchParams }: { param
               <li key={j.id} className="space-y-1 px-5 py-2">
                 <div className="flex flex-wrap items-center gap-2">
                   <b>{JOB_KIND_LABEL[j.kind as ProvisioningKind]}</b>
-                  <StatusPill tone={j.status === "SUCCEEDED" ? "good" : j.status === "FAILED" ? "bad" : "info"}>{JOB_STATUS_LABEL[j.status as JobStatus]}</StatusPill>
+                  <StatusPill tone={jobView(j).tone}>{jobView(j).label}</StatusPill>
                   <span className="text-xs text-muted-foreground">
                     {formatDateTime(j.createdAt)} · lần {j.attempts} · {j.requestedByEmail ?? "máy"}
                   </span>
-                  {j.status === "FAILED" ? <RetryJobButton accountCode={a.code} jobId={j.id} /> : null}
+                  {jobView(j).retry ? <RetryJobButton accountCode={a.code} jobId={j.id} label={jobView(j).retry === "TEMPLATE" ? "Cài lại mẫu" : "Chạy lại"} /> : null}
                 </div>
                 {j.lastError ? <p className="text-xs text-destructive">{j.lastError}</p> : null}
                 <p className="text-[11px] text-muted-foreground">{(j.steps as JobStep[]).map((s) => `${s.key}:${s.status}${s.detail ? ` (${s.detail})` : ""}`).join(" → ")}</p>

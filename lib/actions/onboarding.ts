@@ -5,7 +5,7 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { clientIpFrom } from "@/lib/auth/client-ip";
 import { createSession, getCurrentUser, requirePermission, type SessionUser } from "@/lib/auth/session";
-import { createInvite, revokeInvite } from "@/lib/onboarding/invites";
+import { createInvite, invitePlanRefusal, revokeInvite } from "@/lib/onboarding/invites";
 import { checkAdminStep, checkInviteStep, checkOrgStep, createOrganizationFromSignup, previewSignup, retryOrganizationSetup, type SignupActor } from "@/lib/onboarding/service";
 import type { SignupPreview, SignupStepResult } from "@/lib/onboarding/shared";
 import { setSignupSetting } from "@/lib/onboarding/signup-mode";
@@ -131,6 +131,9 @@ export async function createInviteAction(input: { note?: string; planKey?: strin
   const note = typeof input?.note === "string" ? input.note.trim().slice(0, 200) : "";
   const planKey = typeof input?.planKey === "string" && /^[a-z][a-z0-9-]{1,30}$/.test(input.planKey) ? input.planKey : null;
   const ttlDays = typeof input?.ttlDays === "number" && Number.isFinite(input.ttlDays) ? input.ttlDays : undefined;
+  // Gói gắn trên mã mời đi CÙNG luật thương mại của tổ chức mới (review #682 · L1) — lỗi nghiệp vụ trả về, không ném.
+  const refusal = await invitePlanRefusal(planKey);
+  if (refusal) return { error: refusal };
   const created = await createInvite({ actor: { orgCode: r.user.organization!.code, userId: r.user.id, email: r.user.email }, note, planKey, ttlDays });
   revalidatePath("/platform");
   return { ok: true, code: created.code, expiresAt: created.expiresAt.toISOString() };

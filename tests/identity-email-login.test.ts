@@ -543,7 +543,9 @@ async function testResend(op: SessionUser, home: { code: string; name: string })
     { ...inputR, admin: { email: R_ADMIN, name: "Tên khác" } },
     { ...inputR, workspace: { ...inputR.workspace, code: A } },
   ]) {
-    assert.equal(errOf(await createCustomerAsOperator(op, khac)), CREATE_CUSTOMER_KEY_REUSED, JSON.stringify(khac));
+    // Câu nói job cũ đang ở đâu (mã + trạng thái) và lối ra theo trạng thái ấy — không chỉ «tải lại form» (review #684 · L-a).
+    const refusal = errOf(await createCustomerAsOperator(op, khac));
+    assert.ok(refusal.startsWith(CREATE_CUSTOMER_KEY_REUSED) && refusal.includes(`job ${created.jobId.slice(0, 8)} · Xong`) && refusal.includes("/platform/customers/iel-acct-r") && refusal.includes("«Gửi lại liên kết kích hoạt»"), `${JSON.stringify(khac)} ⇒ ${refusal}`);
   }
   assert.equal((await linkLogs()).length, 1, "lượt bị từ chối không phát liên kết, không ghi nhật ký");
   assert.equal(await userOf(R, "ke-gian@iel-shop-r.vn"), undefined);
@@ -593,7 +595,9 @@ async function testResend(op: SessionUser, home: { code: string; name: string })
   assert.match(errOf(await resendActivationAsOperator(op, { orgCode: R, reason: why })), /đã kích hoạt/, "người đã vào được ⇒ đi đường đặt lại mật khẩu");
   await waitPastRevocation(R, R_ADMIN);
   const r = await login(R_ADMIN, PW1);
-  assert.equal(r.redirectTo, "/", "workspace không thuộc vỏ Chốt Đơn ⇒ đích cũ");
+  // Chỉ thuê Chốt Đơn mà không khai thương hiệu ⇒ máy chủ tự đặt Chốt Đơn, kể cả tài khoản nội bộ (review #682 — trước đó NULL ⇒ menu
+  // ERP) ⇒ vào thẳng vỏ khách. Đích cũ của workspace KHÔNG thuộc vỏ: tests/shell-login-landing.test.ts.
+  assert.equal(r.redirectTo, SALES_AGENT_INBOX_HREF, "chỉ Chốt Đơn ⇒ thương hiệu tự đặt ⇒ vỏ khách");
   assert.equal((await whoIs(r.cookie)).orgCode, R);
 }
 
