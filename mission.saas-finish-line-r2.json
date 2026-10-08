@@ -3,7 +3,7 @@
   "mission_id": "saas-finish-line-r2",
   "title": "Round 2 finish line: tiêu đề theo menu vỏ (Sản phẩm · Nhân viên · Gói), tỷ lệ hoàn mẫu số 0 in —, nhãn tính năng API/Webhook thành chữ khách hiểu",
   "business_goal": "",
-  "status": "RUNNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-saas-r2",
@@ -25,11 +25,22 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-08T14:34:44.541Z",
-  "updated_at": "2026-10-08T14:34:44.541Z",
-  "last_heartbeat": "2026-10-08T14:34:44.541Z",
+  "updated_at": "2026-10-08T23:01:29.997Z",
+  "last_heartbeat": "2026-10-08T23:01:29.997Z",
   "definition_of_done": [],
   "intake": {
     "verdict": "MISSING",
     "evidence": []
+  },
+  "handoff": {
+    "branch": "claude/saas-finish-line-r2",
+    "sha": "e02b67f30f13fa8440a0764e7c86934412f02098",
+    "at": "2026-10-08T23:01:29.997Z",
+    "actor": "DESKTOP-56TH98Y:wt-saas-r2",
+    "title": "Round 2 finish line: tiêu đề theo menu vỏ (Sản phẩm · Nhân viên · Gói), tỷ lệ hoàn mẫu số 0 in —, nhãn tính năng API/Webhook thành chữ khách hiểu",
+    "summary": "",
+    "tests": [
+      "npm run typecheck + lint + npm test ĐẦY ĐỦ ĐẠT trên deebb335 (TẤT CẢ KIỂM THỬ ĐẠT, EXIT=0, 09/10 05:59); rebase sạch lên dbab6813 → e02b67f3, 18 tệp main mới không chồng 5 tệp của nhánh"
+    ]
   }
 }
