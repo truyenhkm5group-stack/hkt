@@ -3,7 +3,7 @@
   "mission_id": "org-ai-platform-cutover",
   "title": "HSLC: kiểm khoá AI (dấu băm · project Google) và chuyển AI Bán hàng sang AI dùng chung của nền tảng — ops org-ai-cutover",
   "business_goal": "",
-  "status": "INTEGRATING",
+  "status": "VERIFYING",
   "priority": "P2",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -28,13 +28,13 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-08T03:17:21.525Z",
-  "updated_at": "2026-10-08T07:02:03.905Z",
+  "updated_at": "2026-10-08T07:39:32.941Z",
   "last_heartbeat": "2026-10-08T06:38:01.540Z",
   "definition_of_done": [],
   "evidence": {
     "merged": "#667 → 926f7230e0a8ddd410fc9fc9c628ef4cf4af51ff",
-    "verify": "PASS 051f49a55160dd3d650a1259abe9df6b12b89f92 2026-10-08T05:08:37.356Z",
-    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/37727378042"
+    "verify": "PASS 3a28e83e9971e73fec586bbf7fb0f5076c90ff19 2026-10-08T07:39:28.617Z",
+    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/37741568283"
   },
   "handoff": {
     "branch": "fix/org-ai-cutover-credit",
