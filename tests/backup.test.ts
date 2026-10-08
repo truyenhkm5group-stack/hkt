@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import {
@@ -874,14 +874,19 @@ export function testNgoaiMayGoogleDrive() {
 
 /**
  * Băm SHA-256 của `scripts/erp-backup.sh` SAU KHI gỡ mọi khối `# >>> TỔ CHỨC KHÁC NHÀ` … `# <<< TỔ
- * CHỨC KHÁC NHÀ` — tức đúng bản trước Phase 11 (origin/main 64cd4732). Đây là lời khẳng định "phần của
- * nhà KHÔNG đổi một byte" ở dạng máy kiểm được.
+ * CHỨC KHÁC NHÀ` — tức bản trước Phase 11 (origin/main 64cd4732) cộng ĐÚNG các lần đổi CỐ Ý ghi dưới đây.
+ * Đây là lời khẳng định "phần của nhà KHÔNG đổi một byte ngoài các lần đã ghi" ở dạng máy kiểm được.
  *
  * Đỏ ở đây nghĩa là ai đó đã sửa đường sao lưu của CSDL NHÀ (VNX). Nếu việc đó là CỐ Ý: cập nhật băm
- * CÙNG commit và nói trong commit vì sao đường của nhà đổi. Nếu không cố ý: phần tổ chức đã rò ra ngoài
- * khối có dấu — đưa nó về trong khối.
+ * CÙNG commit, thêm một dòng vào sổ dưới đây và nói trong commit vì sao đường của nhà đổi. Nếu không cố
+ * ý: phần tổ chức đã rò ra ngoài khối có dấu — đưa nó về trong khối.
+ *
+ * Sổ đổi cố ý (băm trước → sau):
+ *  · 08/10/2026 — sự cố 403 storageQuotaExceeded: xoay vòng phía Drive xoá HẲN (`CO_KHONG_THUNG_RAC`), lượt `run` dọn
+ *    thùng rác CHỈ của thư mục sao lưu trước bước đẩy, `status` đo dung lượng Drive và in ID thư mục ở dạng che (§13).
+ *    57d9b50d… → 300ca205…. Đường dump / kiểm toàn vẹn / xoay vòng TRÊN MÁY / trạng thái JSON của nhà không đổi.
  */
-const BAM_PHAN_NHA = "57d9b50d8667042817dac3c830bc9253fafd4186bcb7a4ec15725ca0b27892b1";
+const BAM_PHAN_NHA = "300ca205a28d2c986f5989123c19ae741507129a7069985f6aa2ee7ac571f7fa";
 const DAU_MO = "# >>> TỔ CHỨC KHÁC NHÀ";
 const DAU_DONG = "# <<< TỔ CHỨC KHÁC NHÀ";
 
@@ -911,7 +916,7 @@ function tachPhanToChuc(): { nha: string; toChuc: string } {
 export function testToChucPhanNhaKhongDoi() {
   const { nha, toChuc } = tachPhanToChuc();
   const bam = createHash("sha256").update(nha).digest("hex");
-  assert.equal(bam, BAM_PHAN_NHA, "gỡ các khối TỔ CHỨC KHÁC NHÀ ra phải được NGUYÊN VĂN bản sao lưu của nhà trước Phase 11 — xem chú thích BAM_PHAN_NHA");
+  assert.equal(bam, BAM_PHAN_NHA, "gỡ các khối TỔ CHỨC KHÁC NHÀ ra phải được NGUYÊN VĂN bản sao lưu của nhà trước Phase 11 cộng đúng các lần đổi cố ý đã ghi — xem sổ trong chú thích BAM_PHAN_NHA");
   assert.ok(!/to_chuc|erp_org|TO_CHUC/i.test(nha), "phần của nhà không được nhắc tới tổ chức khác — mọi thứ về tổ chức nằm trong khối có dấu");
 
   // Lệnh then chốt của nhà còn nguyên (đọc được cả khi ai đó cố ý cập nhật băm).
@@ -959,7 +964,7 @@ export function testToChucPhanNhaKhongDoi() {
   assert.deepEqual(xoay, ["daily=$GIU_BAN_NGAY", "weekly=$GIU_BAN_TUAN", "manual=$GIU_BAN_TAY"], "tổ chức xoay vòng ba thư mục của CHÍNH nó, theo tiền tố tên CSDL, bằng hằng số GIU_BAN_*");
   assert.match(code, /grep -E "\^\$\{tien_to\}-\[0-9\]\{8\}-\[0-9\]\{4\}\\\."/, "mẫu xoay vòng dùng chung phải neo `<tiền tố>-<8 số>` — erp_org_ab không ăn vào erp_org_abc");
 
-  console.log(`✓ Tổ chức khác nhà (mã nguồn): gỡ khối có dấu ⇒ đúng băm bản trước Phase 11 · lệnh then chốt của nhà còn nguyên · khối tổ chức không exit / that_bai / set -e, không ghi biến của nhà, không đòi orders · gọi SAU trạng thái của nhà trong ngữ cảnh || true · mẫu tên ${mau} chung với ERP · xoay vòng riêng theo tiền tố`);
+  console.log(`✓ Tổ chức khác nhà (mã nguồn): gỡ khối có dấu ⇒ đúng băm BAM_PHAN_NHA (bản trước Phase 11 + các lần đổi cố ý đã ghi sổ) · lệnh then chốt của nhà còn nguyên · khối tổ chức không exit / that_bai / set -e, không ghi biến của nhà, không đòi orders · gọi SAU trạng thái của nhà trong ngữ cảnh || true · mẫu tên ${mau} chung với ERP · xoay vòng riêng theo tiền tố`);
 }
 
 /** ANSI-C quoting của bash — chuyển nguyên vẹn xuống dòng, nháy, gạch ngược. */
@@ -1604,7 +1609,8 @@ export function testLuotGioToChucChayThat() {
   assert.ok(!files.some((f) => f.startsWith("orgs/erp_org_beta/") && f.endsWith(".dump")) && !files.some((f) => f.includes(".dang-ghi")), "beta hỏng ⇒ không bản nào, không tệp dở");
   // Ngoài máy: đúng thư mục hourly/ của alpha; dọn theo tuổi suy từ GIU_BAN_GIO; không đụng daily/weekly/manual.
   assert.deepEqual(dong(hai.ra, "REMOTE"), ["./orgs/erp_org_alpha/hourly/erp_org_alpha-20260929-1047.dump"]);
-  assert.deepEqual(dong(hai.ra, "DOCKER").filter((l) => l.startsWith("rclone delete")), [`rclone delete gia:orgs/erp_org_alpha/hourly --min-age ${giu + 1}h`], "lượt giờ chỉ dọn hourly/ — không 72 lượt gọi Drive vô ích mỗi ngày");
+  // Đuôi `--drive-use-trash=false` từ 08/10/2026 (§13): xoá HẲN, không vào thùng rác Drive — đọc từ CHÍNH hằng số của script.
+  assert.deepEqual(dong(hai.ra, "DOCKER").filter((l) => l.startsWith("rclone delete")), [`rclone delete gia:orgs/erp_org_alpha/hourly --min-age ${giu + 1}h ${hangSoChuoi("CO_KHONG_THUNG_RAC")[0]}`], "lượt giờ chỉ dọn hourly/ — không 72 lượt gọi Drive vô ích mỗi ngày");
   // Trạng thái đọc được bằng CHÍNH bộ đọc của ERP.
   const h = parseBackupRun(JSON.parse(phan(hai.ra, "HALPHA")));
   assert.ok(h, "last-hourly.json đọc được bằng bộ đọc của ERP");
@@ -1874,6 +1880,426 @@ export async function testChamRpoGio() {
   console.log(`✓ Thẻ sao lưu · RPO giờ: tổ chức quá ${ORG_BACKUP_RPO_ALERT_HOURS} giờ ⇒ vàng (quá ${BACKUP_MAX_AGE_HOURS} giờ vẫn đỏ) · nhà không bị chấm theo giờ và không bao giờ đọc lượt giờ · lượt giờ hỏng sau bản tốt ⇒ vàng, hỏng cũ đã tự lành · lượt giờ của CSDL khác / tệp hỏng không làm căn cứ`);
 }
 
+/* ═════════════ 13 · THÙNG RÁC GOOGLE DRIVE — sự cố 403 storageQuotaExceeded (08/10/2026) ═════════════ */
+
+/**
+ * Ops `backup` 08/10/2026 18:20: dump nhà + 8 CSDL tổ chức ĐẠT trên VPS, PITR chạy, nhưng `rclone copyto` lên Drive lỗi
+ * «Error 403: The user's Drive storage quota has been exceeded» ⇒ bản ngoài máy hỏng. rclone với Google Drive mặc định
+ * `--drive-use-trash=true`: mỗi lệnh xoay vòng theo tuổi chỉ đưa tệp vào THÙNG RÁC, và thùng rác VẪN tính vào hạn mức
+ * tới 30 ngày — bản giờ của từng CSDL tổ chức, bản nền + WAL của PITR rơi vào đó mỗi giờ / mỗi 15 phút.
+ *
+ * Mỗi lời khẳng định dưới đây được CHẠY (rclone giả qua PATH — không một lời gọi nào tới Drive thật):
+ *  1. mọi `rclone delete` phía ngoài máy — nhà, CSDL tổ chức, PITR — xoá HẲN qua MỘT hằng số `CO_KHONG_THUNG_RAC`;
+ *  2. lượt `run` dọn thùng rác TRƯỚC bước đẩy, CHỈ dưới đúng thư mục mà crypt bọc; không đâu có `rclone cleanup` /
+ *     `rclone purge` (Drive CÁ NHÂN của chủ shop — thùng rác chung có thể chứa tệp riêng của họ);
+ *  3. lá chắn: tên rỗng / lạ, cấu hình lệch ⇒ 0 lời gọi Drive, nói rõ vì sao;
+ *  4. đẩy hỏng ⇒ 0 lệnh xoay vòng phía Drive (nhà, tổ chức, PITR) — bản cũ ngoài máy còn nguyên;
+ *  5. `status` đo Total · Used · Trashed · Other · Free + thư mục sao lưu (sống / thùng rác): có trần thời gian, CHỈ
+ *     ĐỌC, không in ID thư mục / token / mật khẩu, lỗi không làm hỏng phần còn lại.
+ */
+const GIB = 1024 ** 3;
+/** `rclone size --json` in MỘT dòng `{"count":…,"bytes":…,"sizeless":…}` — đúng hình dạng đo trên rclone v1.75.1. */
+const kichThuocJson = (count: number, bytes: number) => JSON.stringify({ count, bytes, sizeless: 0 });
+/** `rclone about --json` in nhiều dòng thụt TAB (đo trên rclone v1.75.1). Thiếu khoá = Google không trả số. */
+const aboutJson = (o: Partial<Record<"total" | "used" | "trashed" | "other" | "free", number>>) => JSON.stringify(o, null, "\t");
+
+/** Tên remote / thư mục / cờ đọc từ CHÍNH hằng số của script (mục 65) — đích dọn và đường crypt bọc dựng từ cùng chỗ. */
+function cauHinhDrive() {
+  const remoteDrive = hangSoChuoi("REMOTE_DRIVE")[0];
+  const remoteCrypt = hangSoChuoi("REMOTE_CRYPT")[0];
+  const thuMuc = hangSoChuoi("THU_MUC_TREN_DRIVE")[0];
+  return { remoteDrive, remoteCrypt, thuMuc, dich: `${remoteDrive}:${thuMuc}`, co: hangSoChuoi("CO_KHONG_THUNG_RAC")[0] };
+}
+
+/** Mã của một tệp bất kỳ (kể cả shell nhúng trong YAML), đã bỏ dòng chú thích, kết thúc dòng quy về LF. */
+const maTep = (tep: string) => boChuThichShell(readFileSync(tep, "utf8").replace(/\r\n/g, "\n"));
+
+/** Thân một hàm shell trong MỘT tệp bất kỳ, đã bỏ chú thích. */
+function thanHamTrong(tep: string, ten: string): string {
+  const code = readFileSync(tep, "utf8").replace(/\r\n/g, "\n");
+  const i = code.indexOf(`\n${ten}() {`);
+  assert.ok(i >= 0, `${tep} phải có hàm ${ten}`);
+  return boChuThichShell(code.slice(i, code.indexOf("\n}\n", i)));
+}
+
+/** Mọi tệp có thể mang lệnh rclone chạy trên máy chủ: shell ở scripts/ + deploy/, và shell nhúng trong workflow. */
+function tepCoLenhRclone(): string[] {
+  const ra: string[] = [];
+  const di = (d: string, hop: (ten: string) => boolean) => {
+    for (const m of readdirSync(d, { withFileTypes: true })) {
+      const con = `${d}/${m.name}`;
+      if (m.isDirectory()) di(con, hop);
+      else if (hop(m.name)) ra.push(con);
+    }
+  };
+  di("scripts", (t) => t.endsWith(".sh"));
+  di("deploy", (t) => t.endsWith(".sh"));
+  di(".github/workflows", (t) => /\.ya?ml$/.test(t));
+  return ra;
+}
+
+/** Biến môi trường của khung Drive: giá trị bí mật (token, mật khẩu, ID thư mục) đi qua MÔI TRƯỜNG như Actions truyền. */
+function moiTruongDrive(over: Record<string, string> = {}): Record<string, string> {
+  return {
+    STUB_THU_MUC: THU_MUC_MAU,
+    STUB_TOKEN: TOKEN_MAU,
+    STUB_MK: MK_MAU,
+    STUB_RAC: kichThuocJson(3, 3 * GIB),
+    STUB_SONG: kichThuocJson(812, 3_447_095_132),
+    STUB_ABOUT: aboutJson({ total: 15 * GIB, used: 14.5 * GIB, trashed: 9 * GIB, other: GIB, free: -0.5 * GIB }),
+    RAC_RONG: kichThuocJson(0, 0),
+    ...over,
+  };
+}
+
+/**
+ * Khung chạy với cấu hình Google Drive ĐÚNG bộ biến configure-offsite dựng (testNgoaiMayGoogleDrive khoá bộ đó) và một
+ * `rclone` GIẢ hiểu `about` / `size` / `delete --drive-trashed-only`: thùng rác của thư mục sao lưu là MỘT tệp JSON, lệnh
+ * dọn làm rỗng nó. `docker` / `df` giả như khungChay (nhà có orders/shipments, không CSDL tổ chức nào).
+ */
+function khungDrive(lenh: string, truoc = ""): string {
+  const { remoteDrive, remoteCrypt, dich } = cauHinhDrive();
+  const D = `RCLONE_CONFIG_${remoteDrive.toUpperCase()}`;
+  const C = `RCLONE_CONFIG_${remoteCrypt.toUpperCase()}`;
+  return [
+    "#!/usr/bin/env bash",
+    "set -uo pipefail",
+    "unset BACKUP_OFFSITE_REMOTE $(compgen -v RCLONE_CONFIG_ || true)",
+    'T="$(mktemp -d)"',
+    'mkdir -p "$T/bin" "$T/erp" "$T/bot" "$T/remote"',
+    'echo "khoa-bot-gia" > "$T/bot/bot.env"',
+    "cat > \"$T/bin/docker\" <<'EOF'",
+    "#!/usr/bin/env bash",
+    'echo "$*" >> "$DOCKER_LOG"',
+    'case "$1" in',
+    "  inspect)",
+    '    case "$*" in',
+    "      *State.Running*) echo true ;;",
+    "      *Destination*) echo erp_chatbot_data ;;",
+    "      *Config.Image*) echo postgres:16-alpine ;;",
+    "    esac ;;",
+    "  exec)",
+    '    case "$*" in',
+    '      *pg_dump*) printf "PGDMP-ban-gia-%0300d" 7 ;;',
+    '      *"pg_restore --list"*) cat > /dev/null; printf "1; 0 0 TABLE DATA public users erp\\n2; 0 0 TABLE DATA public shipments erp\\n3; 0 0 TABLE DATA public orders erp\\n" ;;',
+    "    esac ;;",
+    '  run) cd "$BOT_DATA" && tar --mtime=@0 --owner=0 --group=0 --numeric-owner -cf - . | gzip -n ;;',
+    "esac",
+    "EOF",
+    "cat > \"$T/bin/df\" <<'EOF'",
+    "#!/usr/bin/env bash",
+    'echo "Filesystem 1048576-blocks Used Available Capacity Mounted"',
+    'echo "/dev/gia 40000 1 999999 1% /"',
+    "EOF",
+    "cat > \"$T/bin/rclone\" <<'EOF'",
+    "#!/usr/bin/env bash",
+    'echo "rclone $*" >> "$DOCKER_LOG"',
+    'rac=0; for a in "$@"; do [ "$a" = "--drive-trashed-only" ] && rac=1; done',
+    'dich() { printf "%s" "$REMOTE_DIR/${1#*:}"; }',
+    'hong() { [ -n "${1:-}" ] || return 0; echo "${2:-loi gia}" >&2; exit "$1"; }',
+    'case "$1" in',
+    '  version) echo "rclone v1.53.3" ;;',
+    '  about) hong "${STUB_ABOUT_MA:-}" "${STUB_ABOUT_LOI:-}"; printf "%s\\n" "$STUB_ABOUT" ;;',
+    '  size) if [ "$rac" = 1 ]; then hong "${STUB_RAC_MA:-}" "${STUB_RAC_LOI:-}"; cat "$RAC_TEP"; echo; else hong "${STUB_SONG_MA:-}" "${STUB_SONG_LOI:-}"; printf "%s\\n" "$STUB_SONG"; fi ;;',
+    '  delete) if [ "$rac" = 1 ]; then printf "%s" "$RAC_RONG" > "$RAC_TEP"; fi ;;',
+    '  copyto) hong "${STUB_COPY_MA:-}" "${STUB_COPY_LOI:-}"; shift; while [ "${1#--}" != "$1" ]; do shift; [ "$1" = 3 ] && shift; done; mkdir -p "$(dirname "$(dich "$2")")"; cp "$1" "$(dich "$2")" ;;',
+    '  lsf) f="$(dich "${!#}")"; [ -f "$f" ] || { echo "directory not found" >&2; exit 3; }; stat -c %s "$f" ;;',
+    "esac",
+    "EOF",
+    'chmod +x "$T/bin/docker" "$T/bin/df" "$T/bin/rclone"',
+    'export PATH="$T/bin:$PATH" DOCKER_LOG="$T/docker.log" BOT_DATA="$T/bot" REMOTE_DIR="$T/remote" RAC_TEP="$T/rac.json"',
+    'export ERP_BACKUP_DIR="$T/backups" ERP_DIR="$T/erp" ERP_LOCK_DIR="$T/locks" ERP_CRON_FILE="$T/cron" ERP_BACKUP_OFFSITE_ENV="$T/khong-co.env"',
+    `export BACKUP_OFFSITE_REMOTE=${remoteCrypt}: ${D}_TYPE=drive ${D}_SCOPE=drive ${C}_TYPE=crypt ${C}_REMOTE=${dich} ${C}_FILENAME_ENCRYPTION=standard`,
+    `export ${D}_ROOT_FOLDER_ID="\${STUB_THU_MUC:-}" ${D}_TOKEN="\${STUB_TOKEN:-}" ${C}_PASSWORD="\${STUB_MK:-}"`,
+    'printf "%s" "$STUB_RAC" > "$RAC_TEP"',
+    ': > "$DOCKER_LOG"',
+    `source "${bashPath(SCRIPT)}"`,
+    "set +e",
+    "khoa_chong_chong() { return 0; }   # khoá: đo riêng bằng flock THẬT",
+    "giu_khoa() { return 0; }",
+    truoc,
+    `( set -e; ${lenh} ) > "$T/out" 2>&1; rc=$?`, // set -e: ĐÚNG cờ của script khi chạy thật
+    'echo "@@EXIT"; echo "$rc"',
+    'echo "@@OUT"; cat "$T/out"',
+    'echo "@@RUN"; cat "$T/backups/status/last-run.json" 2>/dev/null',
+    'echo "@@RAC"; cat "$RAC_TEP"; echo',
+    'echo "@@LOG"; grep "^rclone " "$DOCKER_LOG" || true',
+    'echo "@@HET"',
+    'rm -rf "$T"',
+    "",
+  ].join("\n");
+}
+
+export function testThungRacDriveMaNguon() {
+  const { remoteDrive, remoteCrypt, thuMuc, co } = cauHinhDrive();
+  assert.equal(co, "--drive-use-trash=false", "cờ xoá hẳn: --drive-use-trash=false (rclone mặc định true = vào thùng rác, vẫn tính dung lượng)");
+  assert.ok(remoteDrive && remoteCrypt && thuMuc, "tên remote / thư mục sao lưu trên Drive không được rỗng");
+
+  // ───────── MỌI `rclone delete` CHẠY TRÊN MÁY CHỦ: xoá HẲN qua hằng chung · không cleanup / purge ─────────
+  const tepQuet = tepCoLenhRclone();
+  assert.ok(tepQuet.includes(SCRIPT) && tepQuet.includes("scripts/erp-pitr.sh") && tepQuet.length > 5, `phải quét được các tệp có thể mang lệnh rclone (thấy ${tepQuet.length})`);
+  const xoaKhongCo: string[] = [];
+  const donCaDrive: string[] = [];
+  const coGoLai: string[] = [];
+  const soXoa: Record<string, number> = {};
+  for (const tep of tepQuet) {
+    for (const dong of maTep(tep).split("\n")) {
+      if (/\brclone\s+(cleanup|purge)\b/.test(dong)) donCaDrive.push(`${tep}: ${dong.trim()}`);
+      if (/\brclone\s+delete\b/.test(dong)) {
+        soXoa[tep] = (soXoa[tep] ?? 0) + 1;
+        if (!dong.includes('"$CO_KHONG_THUNG_RAC"')) xoaKhongCo.push(`${tep}: ${dong.trim()}`);
+      }
+      if (dong.includes("--drive-use-trash") && !(tep === SCRIPT && dong === `CO_KHONG_THUNG_RAC="${co}"`)) coGoLai.push(`${tep}: ${dong.trim()}`);
+    }
+  }
+  assert.deepEqual(donCaDrive, [], "KHÔNG BAO GIỜ `rclone cleanup` / `rclone purge`: Drive cá nhân của chủ shop — thùng rác chung có thể chứa tệp riêng của họ");
+  assert.deepEqual(xoaKhongCo, [], 'mọi `rclone delete` phía ngoài máy phải mang "$CO_KHONG_THUNG_RAC" — thiếu là bản quá hạn lại nằm trong thùng rác Drive 30 ngày');
+  assert.deepEqual(coGoLai, [], "cờ --drive-use-trash khai ĐÚNG MỘT chỗ (hằng CO_KHONG_THUNG_RAC) — không gõ lại ở từng dòng");
+  assert.ok((soXoa[SCRIPT] ?? 0) >= 8, `erp-backup.sh: 3 lệnh dọn của nhà + 4 của tổ chức + 1 dọn thùng rác (thấy ${soXoa[SCRIPT] ?? 0}) — không được xanh vì quét trượt`);
+  assert.ok((soXoa["scripts/erp-pitr.sh"] ?? 0) >= 2, `erp-pitr.sh: dọn bản nền + dọn WAL trên Drive (thấy ${soXoa["scripts/erp-pitr.sh"] ?? 0})`);
+
+  // ───────── DỌN THÙNG RÁC: một lệnh, đích là đường lá chắn dựng, chỉ thấy tệp trong thùng rác ─────────
+  const code = boChuThichShell(src().replace(/\r\n/g, "\n"));
+  const dongRac = code.split("\n").filter((d) => d.includes("--drive-trashed-only"));
+  assert.ok(dongRac.length >= 3, `phải thấy lệnh dọn + phép đo thùng rác (thấy ${dongRac.length})`);
+  for (const d of dongRac) assert.ok(d.includes('"$DRIVE_SAO_LUU"'), `mọi lệnh chạm thùng rác chỉ nhắm "$DRIVE_SAO_LUU" (đường lá chắn dựng): ${d.trim()}`);
+  const lenhDon = dongRac.filter((d) => /\brclone\s+delete\b/.test(d));
+  assert.equal(lenhDon.length, 1, "đúng MỘT lệnh dọn thùng rác");
+  assert.match(lenhDon[0], /rclone delete "\$DRIVE_SAO_LUU" --drive-trashed-only "\$CO_KHONG_THUNG_RAC"/, "lệnh dọn: chỉ tệp trong thùng rác, xoá hẳn, đích = thư mục sao lưu");
+  assert.ok(!maTep("scripts/erp-pitr.sh").includes("--drive-trashed-only"), "PITR không tự dọn thùng rác — một chỗ dọn, ở lượt run");
+  // Đích dọn và thư mục crypt bọc dựng từ CÙNG một biểu thức ⇒ thứ được dọn chính là thứ chứa bản sao lưu.
+  const chan = thanHam("xac_dinh_drive_sao_luu");
+  assert.match(chan, /goc="\$REMOTE_DRIVE:\$THU_MUC_TREN_DRIVE"/, "đích dọn = $REMOTE_DRIVE:$THU_MUC_TREN_DRIVE");
+  assert.match(thanHam("cmd_configure_offsite"), /RCLONE_CONFIG_\$\{REMOTE_CRYPT\^\^\}_REMOTE=\$REMOTE_DRIVE:\$THU_MUC_TREN_DRIVE/, "crypt bọc ĐÚNG $REMOTE_DRIVE:$THU_MUC_TREN_DRIVE");
+  assert.deepEqual([...code.matchAll(/DRIVE_SAO_LUU="([^"]+)"/g)].map((m) => m[1]), ["$goc"], "DRIVE_SAO_LUU chỉ được gán khác rỗng ở ĐÚNG MỘT chỗ — cuối lá chắn, sau mọi phép kiểm");
+  const iRong = chan.indexOf('[ -z "$THU_MUC_TREN_DRIVE" ]');
+  assert.ok(iRong > 0 && iRong < chan.indexOf("${!"), "chuỗi rỗng kiểm TRƯỚC mọi phép thế gián tiếp — đường rỗng là gốc Drive");
+  // Một chỗ gọi: lượt run (cron đêm / ops backup), TRƯỚC bước đẩy. Không mỗi giờ, không trong status.
+  const goi = code.split("\n").filter((d) => /\bdon_thung_rac_drive\b/.test(d) && !/^don_thung_rac_drive\(\) \{/.test(d));
+  assert.deepEqual(goi.map((d) => d.trim()), ["don_thung_rac_drive || true"], "dọn thùng rác gọi ĐÚNG MỘT chỗ, và hỏng không làm đổ lượt sao lưu");
+  const run = thanHam("cmd_run");
+  assert.ok(run.indexOf("don_thung_rac_drive") > 0 && run.indexOf("don_thung_rac_drive") < run.indexOf('day_ngoai_may "$(basename "$thu_muc")"'), "dọn thùng rác TRƯỚC bước đẩy — giải phóng chỗ cho bản mới");
+  assert.ok(!/delete|don_thung_rac/.test(thanHam("trang_thai_dung_luong_drive")), "phần Drive của status CHỈ ĐỌC — không một lệnh xoá");
+  assert.match(thanHam("cmd_status"), /trang_thai_dung_luong_drive \|\| true/, "status đo dung lượng Drive, lỗi không làm hỏng phần còn lại");
+
+  // ───────── XOAY VÒNG PHÍA DRIVE CHỈ SAU LƯỢT ĐẨY THÀNH CÔNG (hai script) ─────────
+  for (const [tep, ham, dauOk] of [
+    [SCRIPT, "day_ngoai_may", 'OFFSITE_STATE="OK"'],
+    [SCRIPT, "day_ngoai_may_to_chuc", 'ORG_OFFSITE_STATE="OK"'],
+    ["scripts/erp-pitr.sh", "day_ban_nen_ngoai_may", 'PITR_OFFSITE_STATE="OK"'],
+    ["scripts/erp-pitr.sh", "cmd_push_wal", "ghi_trang_thai_ngoai_may OK"],
+  ] as const) {
+    const than = thanHamTrong(tep, ham);
+    const iOk = than.indexOf(dauOk);
+    assert.ok(iOk > 0 && than.indexOf("rclone delete") > iOk, `${ham}: xoay vòng phía Drive chỉ được đứng SAU mốc đẩy thành công`);
+    assert.ok(!/rclone copy/.test(than.slice(iOk)), `${ham}: sau mốc thành công không còn lệnh đẩy nào`);
+  }
+
+  console.log(`✓ Thùng rác Drive (mã nguồn): ${Object.values(soXoa).reduce((a, b) => a + b, 0)} lệnh rclone delete trên ${tepQuet.length} tệp đều mang "${co}" qua MỘT hằng · 0 cleanup / purge · một lệnh dọn --drive-trashed-only, đích ${remoteDrive}:${thuMuc} = đúng thứ crypt bọc, rỗng kiểm trước · gọi một chỗ, trong run, trước bước đẩy · status chỉ đọc · xoay vòng (nhà, tổ chức, bản nền, WAL) chỉ sau mốc đẩy thành công`);
+}
+
+export function testThungRacDriveChayThat() {
+  const { dich, co, remoteDrive, remoteCrypt } = cauHinhDrive();
+  const D = `RCLONE_CONFIG_${remoteDrive.toUpperCase()}`;
+  const C = `RCLONE_CONFIG_${remoteCrypt.toUpperCase()}`;
+  const dongLog = (ra: string) => phan(ra, "LOG").split("\n").filter(Boolean);
+  const xoa = (ra: string) => dongLog(ra).filter((l) => l.startsWith("rclone delete "));
+  const LENH_DON = `rclone delete ${dich} --drive-trashed-only ${co}`;
+  const DO_RAC = `rclone size --json --drive-trashed-only ${dich}`;
+  const ngay = hangSo("GIU_BAN_NGAY");
+  const tuan = hangSo("GIU_BAN_TUAN");
+  // TRIGGER=ops (đúng ops `backup`): không phụ thuộc hôm nay có phải Chủ nhật hay không (mục 50 · 65).
+  const LUOT = "TRIGGER=ops; cmd_run";
+
+  // ───────── LƯỢT run: đo thùng rác → dọn (chỉ thư mục sao lưu) → đẩy → xoay vòng xoá HẲN ─────────
+  const dat = chayBash(khungDrive(LUOT), moiTruongDrive());
+  assert.equal(phan(dat.ra, "EXIT"), "0", `lượt run với Drive đủ cấu hình phải đạt:\n${dat.ra}`);
+  const run = parseBackupRun(JSON.parse(phan(dat.ra, "RUN")));
+  assert.equal(run?.result, "OK");
+  assert.equal(run?.offsite.state, "OK");
+  const log = dongLog(dat.ra);
+  const iDo = log.indexOf(DO_RAC);
+  const iDon = log.indexOf(LENH_DON);
+  const iDay = log.findIndex((l) => l.startsWith("rclone copyto "));
+  assert.ok(iDo >= 0 && iDon > iDo && iDay > iDon, `thứ tự phải là đo thùng rác → dọn → đẩy (đang ${iDo} · ${iDon} · ${iDay}):\n${log.join("\n")}`);
+  assert.deepEqual(xoa(dat.ra).filter((l) => l.includes("--drive-trashed-only")), [LENH_DON], `đúng MỘT lệnh dọn thùng rác, đích ĐÚNG ${dich} — không gốc Drive, không remote crypt`);
+  for (const l of xoa(dat.ra)) assert.ok(l.endsWith(` ${co}`), `mọi lệnh xoá phía Drive phải xoá HẲN: ${l}`);
+  assert.deepEqual(
+    xoa(dat.ra).filter((l) => !l.includes("--drive-trashed-only")),
+    [
+      `rclone delete ${remoteCrypt}:daily --min-age ${ngay + 1}d ${co}`,
+      `rclone delete ${remoteCrypt}:weekly --min-age ${tuan * 7 + 1}d ${co}`,
+      `rclone delete ${remoteCrypt}:manual --min-age ${ngay + 1}d ${co}`,
+    ],
+    "xoay vòng: CÙNG ba thư mục, CÙNG --min-age suy từ GIU_BAN_* — chỉ đổi «vào thùng rác» thành «xoá hẳn»",
+  );
+  assert.ok(!log.some((l) => /^rclone (cleanup|purge)\b/.test(l)), "không bao giờ cleanup / purge");
+  assert.equal((JSON.parse(phan(dat.ra, "RAC")) as { count: number }).count, 0, "thùng rác của thư mục sao lưu đã rỗng");
+  assert.ok(phan(dat.ra, "OUT").includes(`đã xoá hẳn 3 tệp · 3,00 GB khỏi thùng rác của ${dich}`), `log phải nói số tệp + dung lượng đã dọn:\n${phan(dat.ra, "OUT")}`);
+
+  // ───────── ĐẨY HỎNG (đúng lỗi 403 của 08/10) ⇒ 0 lệnh xoay vòng phía Drive: bản cũ ngoài máy còn nguyên ─────────
+  const hong = chayBash(khungDrive(LUOT), moiTruongDrive({ STUB_COPY_MA: "1", STUB_COPY_LOI: "Error 403: The user's Drive storage quota has been exceeded., storageQuotaExceeded" }));
+  const runHong = parseBackupRun(JSON.parse(phan(hong.ra, "RUN")));
+  assert.equal(runHong?.offsite.state, "FAILED");
+  assert.equal(runHong?.result, "PARTIAL", "CSDL dùng được, ngoài máy hỏng ⇒ MỘT PHẦN");
+  assert.match(runHong?.offsite.reason ?? "", /storage quota has been exceeded/, "lý do ngoài máy mang nguyên văn lỗi của Drive");
+  assert.notEqual(phan(hong.ra, "EXIT"), "0", "lượt một phần phải thoát khác 0 để ops đỏ");
+  assert.deepEqual(xoa(hong.ra).filter((l) => !l.includes("--drive-trashed-only")), [], "đẩy hỏng ⇒ KHÔNG một lệnh xoay vòng phía Drive — xoá bản cũ khi bản mới không lên được là để ngoài máy rỗng");
+  assert.ok(dongLog(hong.ra).includes(LENH_DON), "thùng rác vẫn được dọn TRƯỚC lượt đẩy — tệp trong đó đã quá hạn giữ, không phải bản đang sống");
+
+  // ───────── THÙNG RÁC RỖNG ⇒ không lệnh dọn · ĐO HỎNG ⇒ vẫn dọn, lỗi in ra đã che ID thư mục gốc ─────────
+  const rong = chayBash(khungDrive(LUOT), moiTruongDrive({ STUB_RAC: kichThuocJson(0, 0) }));
+  assert.equal(phan(rong.ra, "EXIT"), "0");
+  assert.ok(!dongLog(rong.ra).includes(LENH_DON), "thùng rác rỗng ⇒ không gọi lệnh dọn");
+  assert.match(phan(rong.ra, "OUT"), /không có tệp nào trong thùng rác — không có gì để dọn/);
+  assert.equal(xoa(rong.ra).length, 3, "xoay vòng vẫn chạy như thường");
+  const chuaCo = chayBash(khungDrive(LUOT), moiTruongDrive({ STUB_RAC_MA: "3", STUB_RAC_LOI: "Failed to size: directory not found" }));
+  assert.ok(!dongLog(chuaCo.ra).includes(LENH_DON) && !/::warning::/.test(phan(chuaCo.ra, "OUT")), "lượt đầu tiên (thư mục sao lưu chưa có trên Drive) ⇒ không dọn, không cảnh báo nhầm");
+  assert.match(phan(chuaCo.ra, "OUT"), /chưa có trên Drive \(tạo ở lượt đẩy đầu tiên\) — không có gì để dọn/);
+  const doHong = chayBash(khungDrive(LUOT), moiTruongDrive({ STUB_RAC_MA: "1", STUB_RAC_LOI: `googleapi: Error 404: File not found: ${THU_MUC_MAU}., notFound` }));
+  assert.ok(dongLog(doHong.ra).includes(LENH_DON), "đo thùng rác hỏng KHÔNG chặn lệnh dọn — đích đã qua lá chắn, lệnh chỉ thấy tệp trong thùng rác");
+  assert.match(phan(doHong.ra, "OUT"), /trước: chưa đo được · sau: chưa đo được/, "không đo được thì nói CHƯA ĐO ĐƯỢC, không in 0 tệp");
+  assert.ok(phan(doHong.ra, "OUT").includes("<thư mục gốc>") && !doHong.ra.includes(THU_MUC_MAU), "lỗi 404 của Google in nguyên ID thư mục — phải được che trước khi vào log công khai");
+
+  // ───────── LÁ CHẮN: cấu hình rỗng / lạ / lệch ⇒ 0 lời gọi Drive, nói rõ vì sao ─────────
+  const chan: [string, string][] = [
+    ["thư mục sao lưu RỖNG (đích sẽ là GỐC Drive)", 'THU_MUC_TREN_DRIVE=""'],
+    ["remote Drive rỗng", 'REMOTE_DRIVE=""'],
+    ["thư mục có ..", 'THU_MUC_TREN_DRIVE="../erp-backup"'],
+    ["thư mục có /", 'THU_MUC_TREN_DRIVE="erp-backup/orgs"'],
+    ["thư mục có dấu cách", 'THU_MUC_TREN_DRIVE="erp backup"'],
+    ["crypt bọc GỐC Drive", `export ${C}_REMOTE=${remoteDrive}:`],
+    ["crypt bọc thư mục khác", `export ${C}_REMOTE=${remoteDrive}:thu-muc-khac`],
+    ["chưa khai nơi lưu ngoài máy", "unset BACKUP_OFFSITE_REMOTE"],
+    ["nơi lưu ngoài máy không phải crypt Drive", "export BACKUP_OFFSITE_REMOTE=b2:kho/erp"],
+    ["remote không phải Drive", `export ${D}_TYPE=s3`],
+    ["chưa khai thư mục gốc", `unset ${D}_ROOT_FOLDER_ID`],
+  ];
+  // Mỗi ca một tiến trình con riêng (biến đổi không rò sang ca sau); ca cuối là ĐỐI CHỨNG đủ cấu hình — chứng minh
+  // khung thật sự gọi được rclone, để "0 lời gọi" ở các ca trên không xanh vì khung hỏng.
+  const ca = [...chan, ["ĐỐI CHỨNG: cấu hình đúng", ":"] as [string, string]];
+  const chanRa = chayBash(
+    khungDrive(ca.map(([, truoc], i) => `echo "@@C${i}"; ( ${truoc}; don_thung_rac_drive ) 2>&1; grep -c "^rclone " "$DOCKER_LOG" || true; : > "$DOCKER_LOG"`).join("\n")),
+    moiTruongDrive(),
+  );
+  assert.equal(phan(chanRa.ra, "EXIT"), "0", `lá chắn không làm đổ lượt sao lưu:\n${chanRa.ra}`);
+  ca.forEach(([ten], i) => {
+    const dong = phan(chanRa.ra, `C${i}`).split("\n");
+    const soGoi = dong.at(-1);
+    if (i < chan.length) {
+      assert.equal(soGoi, "0", `${ten}: KHÔNG một lời gọi Drive nào:\n${dong.join("\n")}`);
+      assert.match(dong.join("\n"), /thùng rác Drive: KHÔNG dọn — /, `${ten}: phải nói rõ vì sao không dọn`);
+    } else {
+      assert.equal(soGoi, "3", `${ten}: đo → dọn → đo lại (3 lời gọi) — khung gọi được rclone thật sự:\n${dong.join("\n")}`);
+    }
+  });
+
+  // ───────── CSDL TỔ CHỨC: xoay vòng phía Drive cũng xoá hẳn; đẩy hỏng ⇒ 0 lệnh xoay vòng (nhà lẫn tổ chức) ─────────
+  const toChuc = chayBash(khungToChuc(), { STUB_ORGS: "erp_org_alpha\n" });
+  const xoaToChuc = phan(toChuc.ra, "DOCKER").split("\n").filter((l) => l.startsWith("rclone delete "));
+  assert.ok(xoaToChuc.filter((l) => l.includes(" gia:orgs/erp_org_alpha/")).length >= 3, `phải thấy xoay vòng phía Drive của tổ chức:\n${xoaToChuc.join("\n")}`);
+  for (const l of xoaToChuc) assert.ok(l.endsWith(` ${co}`), `xoay vòng phía Drive (nhà lẫn tổ chức) phải xoá HẲN: ${l}`);
+  const toChucHong = chayBash(khungToChuc(), { STUB_ORGS: "erp_org_alpha\n", STUB_RCLONE_LOI: "1" });
+  assert.deepEqual(phan(toChucHong.ra, "DOCKER").split("\n").filter((l) => l.startsWith("rclone delete ")), [], "đẩy hỏng ⇒ 0 lệnh xoay vòng phía Drive, của nhà lẫn của tổ chức");
+
+  console.log(`✓ Thùng rác Drive (cmd_run chạy thật, rclone giả): đo → dọn ${dich} --drive-trashed-only → đẩy, nói "đã xoá hẳn 3 tệp · 3,00 GB" · xoay vòng cùng ba thư mục, cùng --min-age, đuôi ${co} · đẩy lỗi 403 ⇒ PARTIAL + 0 lệnh xoay vòng (nhà lẫn tổ chức) · thùng rác rỗng ⇒ không dọn · đo hỏng ⇒ vẫn dọn, nói CHƯA ĐO ĐƯỢC, ID thư mục bị che · ${chan.length} ca lá chắn ⇒ 0 lời gọi Drive (đối chứng đủ cấu hình ⇒ 3)`);
+}
+
+/** Khung chạy hai hàm đẩy của PITR (`day_ban_nen_ngoai_may`, `cmd_push_wal`) với rclone giả — `flock` giả (đo ở pitr.test). */
+function khungPitrNgoaiMay(dong: string[]): string {
+  return [
+    "#!/usr/bin/env bash",
+    "set -uo pipefail",
+    "unset BACKUP_OFFSITE_REMOTE $(compgen -v RCLONE_CONFIG_ || true)",
+    'T="$(mktemp -d)"; mkdir -p "$T/bin" "$T/remote"',
+    "cat > \"$T/bin/rclone\" <<'EOF'",
+    "#!/usr/bin/env bash",
+    'echo "rclone $*" >> "$RLOG"',
+    'dich() { printf "%s" "$REMOTE_DIR/${1#*:}"; }',
+    'case "$1" in',
+    '  copyto) [ "${STUB_LOI:-0}" = 1 ] && { echo "Error 403: storage quota exceeded" >&2; exit 1; }; shift; while [ "${1#--}" != "$1" ]; do shift; [ "$1" = 3 ] && shift; done; mkdir -p "$(dirname "$(dich "$2")")"; cp "$1" "$(dich "$2")" ;;',
+    '  copy) [ "${STUB_LOI:-0}" = 1 ] && { echo "Error 403: storage quota exceeded" >&2; exit 1; }; : ;;',
+    '  lsf) f="$(dich "${!#}")"; [ -f "$f" ] || exit 1; stat -c %s "$f" ;;',
+    "esac",
+    "EOF",
+    'chmod +x "$T/bin/rclone"',
+    'export PATH="$T/bin:$PATH" RLOG="$T/rlog" REMOTE_DIR="$T/remote"',
+    'export ERP_BACKUP_DIR="$T/backups" ERP_DIR="$T/erp" ERP_LOCK_DIR="$T/locks" ERP_BACKUP_OFFSITE_ENV="$T/khong-co.env" BACKUP_OFFSITE_REMOTE=gia:',
+    ': > "$RLOG"',
+    `source "${bashPath("scripts/erp-pitr.sh")}"`,
+    "set +e",
+    "flock() { return 0; }   # khoá đẩy WAL: đo ở tests/pitr.test.ts",
+    'mkdir -p "$PITR_WAL" "$PITR_BASE/base-20261008-0227" "$STATUS_DIR"',
+    'echo x > "$PITR_WAL/000000010000000000000021.gz"; echo y > "$PITR_BASE/base-20261008-0227/base.tar.gz"',
+    ...dong,
+    'echo "@@HET"; rm -rf "$T"',
+    "",
+  ].join("\n");
+}
+
+export function testThungRacDrivePitr() {
+  const { co } = cauHinhDrive();
+  const giu = Number(/^PITR_GIU_BAN_NEN=(\d+)/m.exec(readFileSync("scripts/erp-pitr.sh", "utf8"))?.[1]);
+  assert.ok(giu >= 1, "erp-pitr.sh phải khai PITR_GIU_BAN_NEN");
+  const r = chayBash(
+    khungPitrNgoaiMay([
+      '( cmd_push_wal ) > /dev/null 2>&1; echo "@@WAL"; grep "^rclone delete" "$RLOG" || true; : > "$RLOG"',
+      '( STUB_LOI=1 cmd_push_wal ) > /dev/null 2>&1; echo "@@WALHONG"; grep -c "^rclone copy " "$RLOG" || true; grep "^rclone delete" "$RLOG" || true; : > "$RLOG"',
+      '( day_ban_nen_ngoai_may base-20261008-0227 ) > /dev/null 2>&1; echo "@@NEN"; grep "^rclone delete" "$RLOG" || true; : > "$RLOG"',
+      '( STUB_LOI=1 day_ban_nen_ngoai_may base-20261008-0227 ) > /dev/null 2>&1; echo "@@NENHONG"; grep -c "^rclone copyto " "$RLOG" || true; grep "^rclone delete" "$RLOG" || true; : > "$RLOG"',
+    ]),
+  );
+  assert.deepEqual(phan(r.ra, "WAL").split("\n"), [`rclone delete gia:pitr/wal --min-age ${giu + 2}d ${co}`], `PITR đẩy WAL xong ⇒ dọn WAL cũ trên Drive bằng xoá HẲN:\n${r.ra}`);
+  assert.deepEqual(phan(r.ra, "WALHONG").split("\n"), ["1"], "PITR đẩy WAL hỏng (đã thử đẩy đúng một lần) ⇒ KHÔNG dọn WAL cũ trên Drive");
+  assert.deepEqual(phan(r.ra, "NEN").split("\n"), [`rclone delete gia:pitr/base --min-age ${giu + 2}d ${co}`], "PITR đẩy bản nền xong ⇒ dọn bản nền cũ bằng xoá HẲN");
+  assert.deepEqual(phan(r.ra, "NENHONG").split("\n"), ["1"], "PITR đẩy bản nền hỏng ⇒ KHÔNG dọn bản nền cũ trên Drive");
+  console.log(`✓ Thùng rác Drive · PITR (chạy thật): đẩy WAL / bản nền xong ⇒ dọn --min-age ${giu + 2}d xoá HẲN (${co}) · đẩy hỏng ⇒ 0 lệnh dọn`);
+}
+
+export function testTrangThaiDungLuongDrive() {
+  const { dich, remoteDrive } = cauHinhDrive();
+  const tran = hangSo("TRAN_DO_DRIVE_GIAY");
+  const doc = (env: Record<string, string> = {}, truoc = "") => chayBash(khungDrive("cmd_status", truoc), moiTruongDrive(env));
+  const doDrive = (ra: string) => phan(ra, "LOG").split("\n").filter((l) => /^rclone (about|size|delete|cleanup|purge)\b/.test(l));
+
+  // ───────── ĐỦ CẤU HÌNH: năm số của tài khoản + thư mục sao lưu (sống / thùng rác), quy ra MB / GB ─────────
+  const r = doc({ STUB_RAC: kichThuocJson(5400, 9_556_302_233) });
+  assert.equal(phan(r.ra, "EXIT"), "0", `status phải thoát 0:\n${r.ra}`);
+  const out = phan(r.ra, "OUT");
+  assert.ok(out.includes(`Cả tài khoản Google (rclone about ${remoteDrive}:): Total 15,00 GB · Used 14,50 GB · Trashed 9,00 GB · Other 1,00 GB · Free -512 MB`), `about phải quy ra MB/GB đủ năm số:\n${out}`);
+  assert.match(out, /Drive HẾT CHỖ \(Free ≤ 0\)/, "Free ≤ 0 ⇒ nói thẳng mọi lượt đẩy sẽ lỗi 403");
+  assert.ok(out.includes(`Thư mục sao lưu ${dich} (tên đã mã hoá) · đang sống: 812 tệp · 3,21 GB`), "phần đang sống của thư mục sao lưu");
+  assert.ok(out.includes(`Thư mục sao lưu ${dich} · trong thùng rác: 5400 tệp · 8,90 GB`), "phần trong thùng rác của thư mục sao lưu");
+  assert.deepEqual(doDrive(r.ra), [`rclone about --json ${remoteDrive}:`, `rclone size --json ${dich}`, `rclone size --json --drive-trashed-only ${dich}`], "status đo đúng ba phép — CHỈ ĐỌC, không một lệnh xoá");
+  assert.ok(out.indexOf("── Dung lượng Google Drive") > 0 && out.indexOf("── Dung lượng Google Drive") < out.indexOf("── CSDL tổ chức khác nhà"), "phần còn lại của status vẫn chạy sau phần Drive");
+  khongLoBiMat(r.ra, "status");
+  assert.ok(!r.ra.includes(THU_MUC_MAU), "status KHÔNG in ID thư mục Drive — log ops của kho PUBLIC");
+  assert.ok(out.includes(`thư mục gốc …${THU_MUC_MAU.slice(-4)} (${THU_MUC_MAU.length} ký tự)`), "ID thư mục in ở dạng ĐÃ CHE — đủ để đối chiếu với Variable");
+
+  // ───────── HỎNG TỪNG PHÉP: about quá giờ, đo thư mục lỗi (Google in nguyên ID) ⇒ nói ra, che ID, status chạy hết ─────────
+  const hong = doc({ STUB_ABOUT_MA: "124", STUB_SONG_MA: "1", STUB_SONG_LOI: `googleapi: Error 404: File not found: ${THU_MUC_MAU}., notFound` });
+  assert.equal(phan(hong.ra, "EXIT"), "0", `lỗi đo Drive không làm status thất bại:\n${hong.ra}`);
+  const outHong = phan(hong.ra, "OUT");
+  assert.ok(outHong.includes(`KHÔNG ĐỌC ĐƯỢC — quá ${tran} giây — CHƯA ĐO ĐƯỢC`), `quá trần thời gian ⇒ CHƯA ĐO ĐƯỢC, không treo:\n${outHong}`);
+  assert.ok(outHong.includes("đang sống: KHÔNG ĐỌC ĐƯỢC — googleapi: Error 404: File not found: <thư mục gốc>"), "dòng lỗi được in, ID thư mục bị che");
+  assert.ok(!hong.ra.includes(THU_MUC_MAU), "không lọt ID thư mục qua dòng lỗi");
+  assert.ok(outHong.includes(`trong thùng rác: 3 tệp · 3,00 GB — lượt backup`), "một phép đo hỏng không kéo theo phép đo khác");
+  assert.ok(outHong.indexOf("── CSDL tổ chức khác nhà") > outHong.indexOf("── Dung lượng Google Drive"), "lỗi Drive không làm hỏng phần còn lại của status");
+
+  // ───────── Google không trả hạn mức (tài khoản không giới hạn) ⇒ «—», không in thành 0, không kết luận hết chỗ ─────────
+  const voHan = doc({ STUB_ABOUT: aboutJson({ used: 2 * GIB, trashed: 0, other: 0 }) });
+  assert.ok(phan(voHan.ra, "OUT").includes("Total — · Used 2,00 GB · Trashed 0 MB · Other 0 MB · Free —"), `thiếu số ⇒ «—» (CHƯA BIẾT, mục 42):\n${phan(voHan.ra, "OUT")}`);
+  assert.ok(!/HẾT CHỖ/.test(phan(voHan.ra, "OUT")), "không có số Free thì không kết luận hết chỗ");
+
+  // ───────── Nơi lưu không phải crypt Drive ⇒ không đo, nói vì sao, 0 lời gọi about / size ─────────
+  const b2 = doc({}, "export BACKUP_OFFSITE_REMOTE=b2:kho/erp");
+  assert.match(phan(b2.ra, "OUT"), /── Dung lượng Google Drive[^\n]*\nKhông đo: nơi lưu ngoài máy không phải /, "cấu hình khác ⇒ nói rõ không đo và vì sao");
+  assert.deepEqual(doDrive(b2.ra), [], "không phải Drive do deploy dựng ⇒ 0 phép đo Drive");
+  assert.equal(phan(b2.ra, "EXIT"), "0");
+
+  console.log(`✓ Trạng thái Drive (status chạy thật): Total 15,00 GB · Used 14,50 GB · Trashed 9,00 GB · Other 1,00 GB · Free -512 MB ⇒ HẾT CHỖ · thư mục sao lưu sống 812 tệp / thùng rác 5400 tệp · đúng ba phép đo, 0 lệnh xoá · ID thư mục / token / mật khẩu không lọt (ID in dạng che) · quá ${tran}s ⇒ CHƯA ĐO ĐƯỢC, lỗi 404 bị che ID, status vẫn chạy hết · không giới hạn ⇒ «—» · không phải Drive ⇒ không đo`);
+}
+
 export async function testSaoLuu() {
   testLichSaoLuuDuocCai();
   testXoayVongMotChoKhai();
@@ -1895,5 +2321,9 @@ export async function testSaoLuu() {
   testDienTapTuanToChucChayThat();
   testLichToChucMoi();
   await testChamRpoGio();
+  testThungRacDriveMaNguon();
+  testThungRacDriveChayThat();
+  testThungRacDrivePitr();
+  testTrangThaiDungLuongDrive();
 }
 
