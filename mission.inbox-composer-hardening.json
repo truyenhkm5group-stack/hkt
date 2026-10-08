@@ -27,10 +27,12 @@
     "inbox-composer-templates"
   ],
   "blocked_by": [],
-  "related_prs": [],
+  "related_prs": [
+    666
+  ],
   "migration_reservations": [],
   "created_at": "2026-10-08T05:00:53.265Z",
-  "updated_at": "2026-10-08T06:17:23.407Z",
+  "updated_at": "2026-10-08T06:17:50.864Z",
   "last_heartbeat": "2026-10-08T06:17:23.407Z",
   "definition_of_done": [],
   "handoff": {
