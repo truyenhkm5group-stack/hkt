@@ -918,3 +918,4 @@
 {"at":"2026-10-08T18:15:47.718Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"CLAIM","mission":"cutover-unpriced-tolerance","detail":"RUNNING · 2 mẫu phạm vi · MEDIUM"}
 {"at":"2026-10-08T18:15:47.718Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"OVERLAP_ACCEPTED","mission":"cutover-unpriced-tolerance","detail":"OVERLAP_ACCEPTED với platform-key-project-probe: phạm vi scripts/org-ai-cutover.ts, tests/org-ai-cutover.test.ts — cách tích hợp: platform-key-project-probe (#694) đã gộp; cùng tệp, dựng trên main có #694"}
 {"at":"2026-10-08T18:16:05.566Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"cutover-unpriced-tolerance","detail":"fix/cutover-unpriced-tolerance @ a4285c67c673 · 1 lệnh kiểm thử"}
+{"at":"2026-10-08T18:16:36.749Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"cutover-unpriced-tolerance","detail":"#699 cho fix/cutover-unpriced-tolerance @ a4285c67c673"}
