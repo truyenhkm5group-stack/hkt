@@ -549,6 +549,7 @@ import { testSaasAcceptance } from "./saas-acceptance.test";
 import { testTestOrgCodes } from "./test-org-codes.test";
 import { testHelpGuides } from "./help-guides.test";
 import { testChotDonAssets, testChotDonBrand, testMissedOrdersCalculator, testOrgLinkOrigin, testPublicSiteData, testPublicSiteHost, testPublicSiteSource } from "./public-site.test";
+import { testLegalRegisters } from "./legal-registers.test";
 import { testDataExport } from "./data-export.test";
 import { testPilotOps } from "./pilot-ops.test";
 import { testPlatformBilling } from "./platform-billing.test";
@@ -2586,6 +2587,9 @@ async function main() {
   testChotDonBrand();
   testMissedOrdersCalculator();
   testChotDonAssets();
+  // Sổ pháp lý có kiểu (docs/legal/*): văn bản + băm nội dung, bên xử lý phụ, xuyên biên giới, lưu trữ, hệ thống AI, cổng theo
+  // chiều — tài liệu ↔ hằng khớp, UNKNOWN hiện ra, LEGAL READY dẫn xuất, mã nguồn không gọi bên ngoài chưa khai.
+  testLegalRegisters();
   testOrgLinkOrigin();
   testAgentIngestSourceGuards();
   testTestHygiene();

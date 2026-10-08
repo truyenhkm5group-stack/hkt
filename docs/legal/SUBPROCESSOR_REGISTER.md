@@ -5,6 +5,11 @@
 > — KHÔNG đoán. «Pháp nhân» ghi theo tên thương mại khi chưa đọc hợp đồng; luật sư / chủ sở hữu điền pháp nhân ký kết.
 > «DPA / điều khoản» = đã có thoả thuận xử lý dữ liệu ký riêng hay chỉ chấp nhận điều khoản chuẩn (ToS).
 > Cột «Công bố» = đã có tên trong Chính sách quyền riêng tư 1.1 (`app/chinh-sach-bao-mat/page.tsx:105-117`) chưa.
+>
+> **Bản có kiểu (09/10/2026):** `lib/constants/legal-registers.ts` (`SUBPROCESSORS`, `CROSS_BORDER_TRANSFERS`). Bài kiểm
+> `tests/legal-registers.test.ts` giữ hai bên khớp: bộ id S1…S30 trùng nhau; hằng không được ghi vùng / DPA khi tài liệu ghi
+> UNKNOWN; mã nguồn gọi một hostname / SDK chưa khai ⇒ ĐỎ; các mục §5 («KHÔNG có») thành dòng `NOT_IN_USE` có danh sách canh
+> gác. Thêm / bớt một bên: sửa CẢ bảng này VÀ hằng.
 
 ## 1. Hạ tầng và vận hành
 
