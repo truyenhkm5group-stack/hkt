@@ -1,0 +1,8 @@
+{
+  "pr": 699,
+  "sha": "022c180cb93794cdc4b1ef3f06eb30ba2d9bcd4f",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-08T18:20:21.940Z",
+  "note": "Review độc lập (a4285c67) chỉ ra tử số chỉ tính phần đã định giá ⇒ dự phóng thấp 1/(1−share); 022c180c sửa ĐÚNG công thức reviewer đề xuất (allIn/allOut toàn hỗn hợp, current giữ phần đã định giá) kèm assertion 1,25 và credit vừa khít bị từ chối; phần còn lại reviewer đã xác nhận đạt"
+}
