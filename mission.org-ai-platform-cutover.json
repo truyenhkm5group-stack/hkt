@@ -28,13 +28,13 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-08T03:17:21.525Z",
-  "updated_at": "2026-10-08T07:39:32.941Z",
+  "updated_at": "2026-10-08T12:50:42.633Z",
   "last_heartbeat": "2026-10-08T06:38:01.540Z",
   "definition_of_done": [],
   "evidence": {
     "merged": "#667 → 926f7230e0a8ddd410fc9fc9c628ef4cf4af51ff",
-    "verify": "PASS 3a28e83e9971e73fec586bbf7fb0f5076c90ff19 2026-10-08T07:39:28.617Z",
-    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/37741568283"
+    "verify": "PASS 67fc09b108a931137fc888f6d71ba6744cc956b9 2026-10-08T12:50:36.682Z",
+    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/37772436572"
   },
   "handoff": {
     "branch": "fix/org-ai-cutover-credit",
