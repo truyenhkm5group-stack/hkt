@@ -3,7 +3,7 @@
   "mission_id": "docs-saas-platform-design",
   "title": "Thiết kế nền tảng SaaS (R0): hoá đơn vượt gói · Continuous Auditor · quy đổi thang rủi ro · chi phí AI theo loại việc + DAG master mission",
   "business_goal": "",
-  "status": "INTEGRATING",
+  "status": "VERIFYING",
   "priority": "P1",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -26,11 +26,13 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-08T04:40:14.153Z",
-  "updated_at": "2026-10-08T06:03:32.821Z",
+  "updated_at": "2026-10-08T06:51:09.304Z",
   "last_heartbeat": "2026-10-08T05:16:51.324Z",
   "definition_of_done": [],
   "evidence": {
-    "merged": "#662 → 8327f5717d13c99b69037bfdee64720c0690ee29"
+    "merged": "#662 → 8327f5717d13c99b69037bfdee64720c0690ee29",
+    "verify": "PASS 36b7791b9ec790690b85229cfa82a7e7cafdbc82 2026-10-08T06:51:04.466Z",
+    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/37735795033"
   },
   "handoff": {
     "branch": "docs/saas-platform-design",
