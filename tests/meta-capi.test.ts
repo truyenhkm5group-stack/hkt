@@ -165,7 +165,7 @@ export async function testMetaCapiDb() {
         { pageId: PAGE, threadId: "t-capi-g", messageId: "m-capi-g", text: "ok em", status: "DONE", kind: "INBOX", senderId: "24800000000000007" },
       ]);
       const now = new Date();
-      const ord = (id: string, value: number, conversationId: string | null, stage = "CONFIRMED") => ({ id, stage, status: 1, billFullName: "Khách thử", totalPrice: value, totalPriceAfterDiscount: value, insertedAt: now, origin: "AI_AGENT", salesConversationId: conversationId });
+      const ord = (id: string, value: number, conversationId: string | null, stage: "CONFIRMED" | "CANCELLED" = "CONFIRMED") => ({ id, stage, status: 1, billFullName: "Khách thử", totalPrice: value, totalPriceAfterDiscount: value, insertedAt: now, origin: "AI_AGENT", salesConversationId: conversationId });
       await db.insert(schema.orders).values([
         ord("erp-capi-a", 280_000, cA),
         ord("erp-capi-d", 540_000, cD),
