@@ -24,7 +24,7 @@ import { FakeProvider, setAiProviderForTests, type AiRequest, type AiResponse } 
 import { findUnsupportedKeywords, schemaShapeProblems, toDialectSchema } from "@/lib/ai/schema-dialect";
 import type { SessionUser } from "@/lib/auth/session";
 import { findConnector, isOrgConfigurable } from "@/lib/connectors/registry";
-import { saveConnection, setConnectionStatus, testOrgConnection } from "@/lib/connectors/service";
+import { saveAiConnectionAsOperator, setAiConnectionStatusAsOperator, testAiConnectionAsOperator } from "@/lib/connectors/service";
 import { ANTHROPIC_MODELS_URL, OPENAI_MODELS_URL, testAnthropicKey, testOpenAiKey } from "@/lib/connectors/testers";
 import { listFields } from "@/lib/metadata/fields";
 import { saveCustomValues } from "@/lib/metadata/values";
@@ -44,6 +44,8 @@ import { ANTHROPIC_BASE_URL } from "@/lib/ai-builder/providers";
 import { filterBlueprint, sanitizeExcludedKeys, summarizeDraft } from "@/lib/ai-builder/select";
 import { applyDraft, createDraft, discardDraft, loadAiBuilderView, loadDraft, previewDraft } from "@/lib/ai-builder/service";
 import { AI_BUILDER_LIMITS } from "@/lib/ai-builder/types";
+
+const OPERATOR_AI_REF = { orgCode: "home", email: "op@nha.local" }; // khoá AI của workspace khách: chỉ người vận hành ghi (lib/saas/visibility.ts)
 
 const A = "ai-a";
 const B = "ai-b";
@@ -284,11 +286,11 @@ async function testProviderSelection() {
     process.env.PLATFORM_SECRETS_KEY = MASTER;
     await withOrganization(A, async () => {
       const adminA = await adminOf(A);
-      assert.ok("ok" in (await saveConnection(adminA, { connectorKey: "anthropic-byok", secrets: { apiKey: ORG_KEY } })));
+      assert.ok("ok" in (await saveAiConnectionAsOperator({ operator: OPERATOR_AI_REF, reason: "kiểm thử", connectorKey: "anthropic-byok", secrets: { apiKey: ORG_KEY } })));
       assert.ok(!(await getBuilderAi()).ok, "kết nối NHÁP chưa được dùng");
       const probe = async () => new Response(JSON.stringify({ data: [] }), { status: 200, headers: { "content-type": "application/json" } });
-      assert.ok("ok" in (await testOrgConnection(adminA, "anthropic-byok", { tester: { fetch: probe } })));
-      assert.ok("ok" in (await setConnectionStatus(adminA, "anthropic-byok", "ACTIVE")));
+      assert.ok("ok" in (await testAiConnectionAsOperator({ connectorKey: "anthropic-byok", operator: OPERATOR_AI_REF, reason: "kiểm thử" }, { tester: { fetch: probe } })));
+      assert.ok("ok" in (await setAiConnectionStatusAsOperator({ connectorKey: "anthropic-byok", status: "ACTIVE", operator: OPERATOR_AI_REF, reason: "kiểm thử" })));
       // Biến môi trường của NHÀ đặt BỊA để chứng minh chúng không lẫn vào lời gọi của A.
       process.env.ANTHROPIC_AUTH_TOKEN = HOME_TOKEN;
       process.env.ANTHROPIC_BASE_URL = "https://may-chu-la.example";

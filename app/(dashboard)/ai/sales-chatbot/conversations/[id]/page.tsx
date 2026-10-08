@@ -4,6 +4,7 @@ import { PageHeader } from "@/components/page-header";
 import { SectionCard } from "@/components/ui-bits";
 import { requirePermission } from "@/lib/auth/session";
 import { formatDateTime } from "@/lib/format";
+import { customerChatView, customerFacing } from "@/lib/saas/visibility";
 import { CHAT_CHANNEL_LABEL, type ChatChannel } from "@/lib/sales-chatbot/config";
 import { HANDOFF_REASON_LABEL, type HandoffReasonCode } from "@/lib/sales-chatbot/events-shared";
 import { loadConversationReview } from "@/lib/sales-chatbot/experiment-report";
@@ -14,13 +15,14 @@ export const metadata = { title: "Xem lại hội thoại" };
 
 const ACTOR_LABEL: Record<string, string> = { CUSTOMER: "Khách", AI: "AI", HUMAN: "Người", SYSTEM: "Máy" };
 
-/** XEM LẠI MỘT HỘI THOẠI (lệnh §11.E) — chữ + công cụ AI đã gọi + dòng sổ sự kiện; SĐT trong chữ bị che, giữ 3 số cuối. */
+/** XEM LẠI MỘT HỘI THOẠI (lệnh §11.E) — chữ + công cụ AI đã gọi (chỉ workspace nhà) + dòng sổ sự kiện; SĐT trong chữ bị che, giữ 3 số cuối. */
 export default async function ConversationReviewPage({ params }: { params: Promise<{ id: string }> }) {
   const user = await requirePermission("ai_sales:view");
   const { id } = await params;
   const r = await loadConversationReview(user, decodeURIComponent(id));
   if ("error" in r) notFound();
-  const v = r.value;
+  // Workspace KHÁCH (lib/saas/visibility.ts): không tên / tóm tắt công cụ bot đã gọi — lọc trước khi dựng.
+  const v = customerFacing(user.organization) ? { ...r.value, view: customerChatView(r.value.view) } : r.value;
   return (
     <div className="space-y-5">
       <PageHeader

@@ -25,7 +25,8 @@ import { rmSync } from "node:fs";
 import { and, eq, inArray } from "drizzle-orm";
 import { getDb, getPlatformDb, organizationDatabaseUrl, schema } from "@/db";
 import type { SessionUser } from "@/lib/auth/session";
-import { saveConnection, setConnectionStatus, testOrgConnection, openActiveConnection } from "@/lib/connectors/service";
+import { saveAiConnectionAsOperator, saveConnection, setAiConnectionStatusAsOperator, setConnectionStatus, testAiConnectionAsOperator, openActiveConnection } from "@/lib/connectors/service";
+import { CUSTOMER_AI_CONFIG_MANAGED } from "@/lib/saas/visibility";
 import {
   FOOD_COPY_FORMULAS,
   FOOD_COPY_STRUCTURE,
@@ -49,6 +50,8 @@ import { withOrganization } from "@/lib/platform/context";
 import { isConnectorUnavailable } from "@/lib/platform/credentials";
 import { invalidateOrganizations } from "@/lib/platform/organizations";
 import { provisionOrganization } from "@/lib/platform/provision";
+
+const OPERATOR_AI_REF = { orgCode: "home", email: "op@nha.local" }; // khoá AI của workspace khách: chỉ người vận hành ghi (lib/saas/visibility.ts)
 
 /** Chữ thời trang KHÔNG được có trong câu lệnh / lời dặn của shop thực phẩm. */
 const FASHION_WORDS = /\b(fashion|garment|fabric|wearing|worn|mannequin|dress|selfie|model|outfit|silhouette)\b|vải|váy|người mẫu|thời trang|chất liệu|form dáng/i;
@@ -303,10 +306,12 @@ export async function testCreativeFoodIndustryOrg() {
       );
       assert.equal(seen.length, 0);
 
-      // Bật «OpenAI — khoá của tổ chức».
-      assert.ok("ok" in (await saveConnection(adminA, { connectorKey: "openai-byok", secrets: { apiKey: KEY_A } })));
-      assert.ok("ok" in (await testOrgConnection(adminA, "openai-byok", { tester: { fetch: globalThis.fetch } })));
-      assert.ok("ok" in (await setConnectionStatus(adminA, "openai-byok", "ACTIVE")));
+      // Bật «OpenAI — khoá của tổ chức». Quản trị shop KHÔNG tự lưu khoá AI (lib/saas/visibility.ts) — người vận hành ghi hộ.
+      const selfA = await saveConnection(adminA, { connectorKey: "openai-byok", secrets: { apiKey: KEY_A } });
+      assert.ok("error" in selfA && selfA.error === CUSTOMER_AI_CONFIG_MANAGED, `shop tự lưu khoá AI của Thư viện Media ⇒ từ chối: ${JSON.stringify(selfA)}`);
+      assert.ok("ok" in (await saveAiConnectionAsOperator({ operator: OPERATOR_AI_REF, reason: "kiểm thử", connectorKey: "openai-byok", secrets: { apiKey: KEY_A } })));
+      assert.ok("ok" in (await testAiConnectionAsOperator({ connectorKey: "openai-byok", operator: OPERATOR_AI_REF, reason: "kiểm thử" }, { tester: { fetch: globalThis.fetch } })));
+      assert.ok("ok" in (await setAiConnectionStatusAsOperator({ connectorKey: "openai-byok", status: "ACTIVE", operator: OPERATOR_AI_REF, reason: "kiểm thử" })));
       const st = await creativeAiStatus(cfg.imageModel);
       assert.ok(st.mode === "BYOK" && st.connectorKey === "openai-byok" && st.imageReady && st.imageModel === cfg.imageModel, JSON.stringify(st));
       seen.length = 0;
@@ -396,10 +401,12 @@ export async function testCreativeFoodIndustryOrg() {
       assert.ok(ind.industry === "FOOD" && ind.basis === "OVERRIDE");
       const { actor } = await seedProduct("cfb-", "Chả mực", { package_size: "Hộp 300g" });
 
-      // Gemini chưa khai model vẽ ⇒ câu chữ được, vẽ KHÔNG (không đoán model).
-      assert.ok("ok" in (await saveConnection(adminB, { connectorKey: "gemini-byok", secrets: { apiKey: KEY_B_GEMINI } })));
-      assert.ok("ok" in (await testOrgConnection(adminB, "gemini-byok", { tester: { fetch: globalThis.fetch } })));
-      assert.ok("ok" in (await setConnectionStatus(adminB, "gemini-byok", "ACTIVE")));
+      // Gemini chưa khai model vẽ ⇒ câu chữ được, vẽ KHÔNG (không đoán model). Shop không tự lưu / bật khoá AI — người vận hành ghi hộ.
+      for (const r of [await saveConnection(adminB, { connectorKey: "gemini-byok", secrets: { apiKey: KEY_B_GEMINI } }), await setConnectionStatus(adminB, "gemini-byok", "ACTIVE")])
+        assert.ok("error" in r && r.error === CUSTOMER_AI_CONFIG_MANAGED, `shop tự ghi khoá AI ⇒ từ chối: ${JSON.stringify(r)}`);
+      assert.ok("ok" in (await saveAiConnectionAsOperator({ operator: OPERATOR_AI_REF, reason: "kiểm thử", connectorKey: "gemini-byok", secrets: { apiKey: KEY_B_GEMINI } })));
+      assert.ok("ok" in (await testAiConnectionAsOperator({ connectorKey: "gemini-byok", operator: OPERATOR_AI_REF, reason: "kiểm thử" }, { tester: { fetch: globalThis.fetch } })));
+      assert.ok("ok" in (await setAiConnectionStatusAsOperator({ connectorKey: "gemini-byok", status: "ACTIVE", operator: OPERATOR_AI_REF, reason: "kiểm thử" })));
       const st0 = await creativeAiStatus(cfg.imageModel);
       assert.ok(st0.mode === "BYOK" && !st0.imageReady && /Model vẽ ảnh/.test(st0.imageReason ?? ""), JSON.stringify(st0));
       const n0 = seen.length;
@@ -407,9 +414,9 @@ export async function testCreativeFoodIndustryOrg() {
       assert.equal(seen.length, n0);
 
       // Khai model vẽ ⇒ vẽ bằng khoá của B, ảnh PNG, tiền CHƯA BIẾT.
-      assert.ok("ok" in (await saveConnection(adminB, { connectorKey: "gemini-byok", settings: { imageModel: GEMINI_IMAGE_MODEL }, secrets: {} })));
-      assert.ok("ok" in (await testOrgConnection(adminB, "gemini-byok", { tester: { fetch: globalThis.fetch } })));
-      assert.ok("ok" in (await setConnectionStatus(adminB, "gemini-byok", "ACTIVE")));
+      assert.ok("ok" in (await saveAiConnectionAsOperator({ operator: OPERATOR_AI_REF, reason: "kiểm thử", connectorKey: "gemini-byok", settings: { imageModel: GEMINI_IMAGE_MODEL }, secrets: {} })));
+      assert.ok("ok" in (await testAiConnectionAsOperator({ connectorKey: "gemini-byok", operator: OPERATOR_AI_REF, reason: "kiểm thử" }, { tester: { fetch: globalThis.fetch } })));
+      assert.ok("ok" in (await setAiConnectionStatusAsOperator({ connectorKey: "gemini-byok", status: "ACTIVE", operator: OPERATOR_AI_REF, reason: "kiểm thử" })));
       const st1 = await creativeAiStatus(cfg.imageModel);
       assert.ok(st1.mode === "BYOK" && st1.imageReady && st1.imageModel === GEMINI_IMAGE_MODEL, JSON.stringify(st1));
       const s = await startManualGen(db, { productPhotoSourceId: "cfb-photo", ownAdSourceId: null, idea: "", count: 1 }, { ...cfg, imageModel: GEMINI_IMAGE_MODEL }, actor, { industry: "FOOD" });

@@ -24,6 +24,7 @@ import { droppedLessonsText, lessonTranscript, LESSON_LIMITS, normalizeLessons, 
 import { loadLessons } from "@/lib/sales-chatbot/lessons";
 import { setSettingJson } from "@/lib/settings";
 import { LESSONS_SETTING_KEY } from "@/lib/sales-chatbot/lessons-shared";
+import { customerFacing, customerQuotaError, customerSafeAiError } from "@/lib/saas/visibility";
 
 export const FEEDBACK_MAX = 1_000;
 const FEEDBACK_AI_TOKENS = 1_500;
@@ -96,15 +97,18 @@ export async function submitConversationFeedbackCore(user: SessionUser, conversa
   if (transcript === null) return { ok: false, error: "Không thấy hội thoại." };
   const db = await getDb();
   const f = schema.salesChatFeedback;
-  const fail = async (error: string): Promise<Result> => {
+  // Dòng góp ý giữ câu lỗi GỐC (chẩn đoán); câu trả về cho workspace KHÁCH qua bộ lọc (lib/saas/visibility.ts) — câu nguồn AI /
+  // hạn mức mang tên khoá, USD. Câu đã lưu tới màn hình khách qua `customerInboxThread` (cùng bộ lọc).
+  const customer = customerFacing(user.organization);
+  const fail = async (error: string, shown: string = customer ? customerSafeAiError(error) : error): Promise<Result> => {
     await db.insert(f).values({ conversationId: id, userId: user.id, userName: user.name ?? user.email, text, lessons: [], status: "FAILED", error: error.slice(0, 300), createdAt: now });
-    return { ok: false, error: `Đã lưu góp ý nhưng chưa rút được bài học: ${error}` };
+    return { ok: false, error: `Đã lưu góp ý nhưng chưa rút được bài học: ${shown}` };
   };
   const org = await currentOrganization();
   const prov = await salesChatProvider();
   if (!prov.ok) return fail(prov.error);
   const quota = await checkAiQuota(org.code, prov.source);
-  if (!quota.ok) return fail(quota.error);
+  if (!quota.ok) return fail(quota.error, customer ? customerQuotaError(quota.reason) : quota.error);
   let state: LessonsState = await loadLessons();
   const prompt = [`BÀI HỌC ĐANG CÓ (${state.lessons.length}):`, state.lessons.map((l, i) => `${i + 1}. ${l}`).join("\n") || "(chưa có)", "", "GÓP Ý CỦA NHÂN VIÊN:", text, "", "HỘI THOẠI:", transcript].join("\n");
   let out = "";

@@ -60,6 +60,8 @@ Job AI khác của VNX (creative, video, CSKH) CHƯA ghi vào sổ này — vẫ
 - `requestsPerDay` / `requestsPerMonth` — trần cứng theo lượt. `costUsdPerMonth.hard` — tới trần ⇒ từ chối. Với
   PLATFORM, trần cứng thật = min(`hard`, credit). `soft` — vượt ⇒ vẫn chạy, câu cảnh báo hiện cho người bấm, và MỘT
   thông báo / ngày / nguồn cho tổ chức (bảng `notifications` của CHÍNH tổ chức, khoá `ai-quota-soft:<nguồn>:<ngày VN>`).
+  Nguồn PLATFORM là tiền của NỀN TẢNG ⇒ thông báo tới tổ chức khách là câu kinh doanh, KHÔNG số USD / tên nguồn
+  (`CUSTOMER_AI_SOFT_LIMIT_NOTICE`, lib/saas/visibility.ts); BYOK (khoá của chính tổ chức) giữ câu có số tiền.
 - Trần tiền so với tiền ĐÃ BIẾT trước lượt: một lượt có thể vượt trần tối đa bằng giá của chính nó (~1,1 USD / bản
   nháp AI Builder đo thật trên claude-opus-5). Lượt chưa định giá không được cộng như 0 mà cũng không được đoán giá —
   màn hình nói ra số lượt ấy.

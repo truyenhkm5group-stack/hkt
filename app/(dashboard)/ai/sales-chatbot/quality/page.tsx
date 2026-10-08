@@ -3,6 +3,7 @@ import { PageHeader } from "@/components/page-header";
 import { EmptyState, SectionCard } from "@/components/ui-bits";
 import { can, requirePermission } from "@/lib/auth/session";
 import { formatDateTime, formatNumber, formatVND } from "@/lib/format";
+import { customerFacing, customerQualityItems } from "@/lib/saas/visibility";
 import { CHAT_CHANNEL_LABEL, type ChatChannel } from "@/lib/sales-chatbot/config";
 import { loadQualityQueue } from "@/lib/sales-chatbot/quality";
 import { QUALITY_KIND_LABEL, QUALITY_KINDS, REVIEW_STATUS_LABEL } from "@/lib/sales-chatbot/quality-shared";
@@ -25,6 +26,8 @@ export default async function AiQualityPage({ searchParams }: { searchParams: Pr
   const sp = await searchParams;
   const days = PERIODS.find((d) => String(d) === sp.days) ?? 7;
   const r = await loadQualityQueue(user, { days });
+  // Workspace KHÁCH (lib/saas/visibility.ts): dấu hiệu «công cụ lỗi» không mang tên công cụ bot gọi / câu trả về thô của nó.
+  const items = "ok" in r ? (customerFacing(user.organization) ? customerQualityItems(r.value.items) : r.value.items) : [];
   return (
     <div className="space-y-5">
       <PageHeader
@@ -66,11 +69,11 @@ export default async function AiQualityPage({ searchParams }: { searchParams: Pr
           </div>
           {r.value.truncated ? <p className="text-xs text-muted-foreground">Chỉ quét 300 hội thoại gần nhất của kỳ — chọn kỳ ngắn hơn để rà hết.</p> : null}
           <SectionCard title="Phát hiện" padded={false}>
-            {r.value.items.length === 0 ? (
+            {items.length === 0 ? (
               <EmptyState title="Không có phát hiện nào trong kỳ" className="m-4" />
             ) : (
               <ul className="divide-y text-sm" data-testid="ai-quality-list">
-                {r.value.items.map((it) => (
+                {items.map((it) => (
                   <li key={`${it.conversationId}:${it.seq}:${it.kind}`} className="px-4 py-3">
                     <div className="flex flex-wrap items-center gap-2 text-xs">
                       <span className={`rounded px-1.5 py-0.5 font-semibold ${SEVERITY_CLASS[it.severity]}`}>{SEVERITY_LABEL[it.severity]}</span>

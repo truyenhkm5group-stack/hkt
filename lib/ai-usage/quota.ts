@@ -18,6 +18,7 @@ import { findOrganization } from "@/lib/platform/organizations";
 import { readOrgAiControl } from "@/lib/ai-usage/control";
 import { orgAiLimits } from "@/lib/pricing/price-book";
 import { sourceUsage } from "@/lib/ai-usage/ledger";
+import { CUSTOMER_AI_SOFT_LIMIT_NOTICE } from "@/lib/saas/visibility";
 import {
   applyAiOverride,
   EMPTY_SOURCE_USAGE,
@@ -61,14 +62,20 @@ export function softWarningKey(source: AiBillingSource, now: Date): string {
   return `ai-quota-soft:${source}:${vnDayKey(now)}`;
 }
 
-/** Báo quản trị tổ chức: một dòng `notifications` trong CSDL của CHÍNH tổ chức. Trùng khoá ⇒ không thêm. Lỗi ⇒ nuốt (câu cảnh báo vẫn trả cho nơi gọi). */
+/**
+ * Báo quản trị tổ chức: một dòng `notifications` trong CSDL của CHÍNH tổ chức. Trùng khoá ⇒ không thêm. Lỗi ⇒ nuốt (câu cảnh báo
+ * vẫn trả cho nơi gọi). Chỉ tổ chức KHÁCH tới đây (nhà không đếm). Nguồn PLATFORM = AI dùng chung, tiền của NỀN TẢNG ⇒ câu kinh
+ * doanh, không số USD / tên nguồn nội bộ (`CUSTOMER_AI_SOFT_LIMIT_NOTICE`, lib/saas/visibility.ts); BYOK = khoá của chính shop ⇒
+ * câu có số tiền như cũ.
+ */
 async function notifySoftOnce(orgCode: string, source: AiBillingSource, warning: string, now: Date): Promise<void> {
+  const notice = source === "PLATFORM" ? CUSTOMER_AI_SOFT_LIMIT_NOTICE : { title: "Chi phí AI vượt ngưỡng cảnh báo", body: warning };
   try {
     await inOrg(orgCode, async () => {
       const db = await getDb();
       await db
         .insert(schema.notifications)
-        .values({ kind: "SYSTEM", severity: "warning", title: "Chi phí AI vượt ngưỡng cảnh báo", body: warning, href: "/settings/plan", entityType: "AI_QUOTA", entityId: source, dedupeKey: softWarningKey(source, now), occurredAt: now })
+        .values({ kind: "SYSTEM", severity: "warning", title: notice.title, body: notice.body, href: "/settings/plan", entityType: "AI_QUOTA", entityId: source, dedupeKey: softWarningKey(source, now), occurredAt: now })
         .onConflictDoNothing({ target: schema.notifications.dedupeKey });
     });
   } catch {

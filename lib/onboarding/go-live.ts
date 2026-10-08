@@ -1,4 +1,3 @@
-import { platformChatAi } from "@/lib/ai-builder/provider";
 import { can, type SessionUser } from "@/lib/auth/session";
 import { CONNECTIONS_PERMISSION, saveConnection, setConnectionStatus, testOrgConnection } from "@/lib/connectors/service";
 import type { TesterDeps } from "@/lib/connectors/testers";
@@ -13,6 +12,8 @@ import { publicationOf } from "@/lib/platform/publish";
 import { messengerView } from "@/lib/sales-chatbot/messenger";
 import { zaloSetupView } from "@/lib/sales-chatbot/zalo";
 import { loadTransportFacts, transportOwnerOf } from "@/lib/sales-chatbot/channel-ownership";
+import { CUSTOMER_AI_STATE_HINT } from "@/lib/saas/visibility";
+import { loadChatbotAiView } from "@/lib/saas/visibility-loaders";
 
 /**
  * ═══════════ «VÀO VIỆC NGAY» — KẾT NỐI FANPAGE + BẬT CHATBOT TỪ TRANG BẮT ĐẦU (docs/platform/quick-start.md §6) ═══════════
@@ -48,7 +49,11 @@ export type GoLiveView = {
   /** Tin khách THẬT đã nhận qua mọi kênh (hàng chờ nhận tin + chat web; tiếng vọng của bot / tin của page không tính) — bước «nhận tin đầu tiên» xong khi > 0. */
   messagesReceived: number;
   stage: OnboardingStage;
-  bot: { enabled: boolean; usesPlatformAi: boolean; aiReady: boolean; aiReason: string | null };
+  /**
+   * Ô chỉ dựng cho workspace KHÁCH (nhà ⇒ `off`), nên phần AI nói bằng trạng thái của khách (lib/saas/visibility.ts): sẵn sàng hay
+   * chưa + MỘT câu khách — không nguồn AI (dùng chung / khoá riêng), không câu gốc của nền tảng (tên biến, USD, tên khoá).
+   */
+  bot: { enabled: boolean; aiReady: boolean; aiReason: string | null };
 };
 
 export async function loadGoLive(user: SessionUser): Promise<GoLiveView> {
@@ -66,13 +71,15 @@ export async function loadGoLive(user: SessionUser): Promise<GoLiveView> {
     webChat: false,
     messagesReceived: 0,
     stage: "ACCOUNT_CREATED",
-    bot: { enabled: false, usesPlatformAi: false, aiReady: false, aiReason: null },
+    bot: { enabled: false, aiReady: false, aiReason: null },
   };
   if (!orgCode || user.organization?.isHome || !(canConnect || canBot) || !(await canUseModule("ai_sales"))) return off;
   const [fanpage, cfg, messenger, zalo, pub] = await Promise.all([fanpageSetupView(orgCode), loadSalesChatbotConfig(), messengerView(), zaloSetupView(orgCode), publicationOf(orgCode)]);
-  const usesPlatformAi = cfg.connectorKey === "platform";
-  const plat = usesPlatformAi ? await platformChatAi(orgCode) : null;
-  const aiReady = plat ? plat.ok : true;
+  // CÙNG loader với trang Chatbot (lib/saas/visibility-loaders.ts): nguồn AI dùng chung lẫn khoá riêng đều đọc thật (trước đây
+  // khoá riêng luôn coi là sẵn sàng), và «hết lượt» tách khỏi «cần cấu hình» bằng đúng một luật.
+  const ai = await loadChatbotAiView(user, cfg, { manage: false });
+  const aiReady = ai.aiReady;
+  const aiReason = aiReady ? null : ai.audience === "CUSTOMER" ? CUSTOMER_AI_STATE_HINT[ai.aiState] : CUSTOMER_AI_STATE_HINT.NEEDS_SETUP;
   const db = await getDb();
   const e = schema.salesConversationEvents;
   const v = schema.productVariants;
@@ -99,7 +106,7 @@ export async function loadGoLive(user: SessionUser): Promise<GoLiveView> {
     webChat: channels.webChat,
     messagesReceived,
     stage,
-    bot: { enabled: cfg.enabled, usesPlatformAi, aiReady, aiReason: plat && !plat.ok ? plat.reason : null },
+    bot: { enabled: cfg.enabled, aiReady, aiReason },
   };
 }
 

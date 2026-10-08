@@ -240,7 +240,9 @@ async function usableDraft(id: unknown, rawExcluded: unknown): Promise<Usable | 
   const row = await findDraft(id);
   if (!row) return { error: "Không có bản nháp này trong tổ chức." };
   if (row.status !== "DRAFT") return { error: row.status === "APPLIED" ? "Bản nháp đã được áp dụng." : "Bản nháp đã bị bỏ." };
-  if (!row.blueprint) return { error: row.error ?? "Bản nháp không có gói cấu hình nào để áp dụng." };
+  // Câu lỗi của LƯỢT soạn (`row.error` — có thể là lỗi gốc của lời gọi AI) đã hiện ở thẻ bản nháp; xem trước / áp dụng không lặp
+  // lại nó: đường này tới cả workspace khách (lib/saas/visibility.ts), câu nghiệp vụ là đủ.
+  if (!row.blueprint) return { error: "Bản nháp không có gói cấu hình nào để áp dụng." };
   const context = strings(row.contextKeys);
   const excluded = sanitizeExcludedKeys(rawExcluded, row.blueprint, context);
   return { row, bp: filterBlueprint(row.blueprint as Blueprint, excluded, context), excluded };

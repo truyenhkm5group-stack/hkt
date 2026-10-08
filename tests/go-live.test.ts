@@ -18,6 +18,7 @@ import { getEnabledModules, invalidateCapabilities } from "@/lib/platform/capabi
 import { withOrganization } from "@/lib/platform/context";
 import { invalidateOrganizations } from "@/lib/platform/organizations";
 import { provisionOrganization } from "@/lib/platform/provision";
+import { CUSTOMER_AI_STATE_HINT } from "@/lib/saas/visibility";
 
 const GL_ORG = "gl-shop";
 const PAGE = "1122334455";
@@ -62,7 +63,10 @@ export async function testGoLive() {
       assert.ok(v0.show && v0.canConnect && v0.canBot && v0.fanpage?.status === "NOT_CONFIGURED", JSON.stringify(v0));
       // KHÔNG BẮT BUỘC PANCAKE: chưa nối gì ⇒ chưa có lối (màn hình cho chọn, khuyên nối thẳng Facebook), mốc đầu tiên.
       assert.ok(v0.path === null && v0.stage === "ACCOUNT_CREATED" && !v0.messenger.connected && v0.messagesReceived === 0, JSON.stringify({ path: v0.path, stage: v0.stage }));
-      assert.ok(v0.bot.usesPlatformAi && !v0.bot.aiReady && v0.bot.aiReason?.includes("chưa bật AI dùng chung"), "mặc định AI dùng chung; nền tảng chưa bật ⇒ nói rõ");
+      // Ô chỉ dựng cho KHÁCH (lib/saas/visibility.ts): AI chưa sẵn sàng ⇒ câu của khách — không nguồn AI (dùng chung / khoá riêng),
+      // không câu gốc của nền tảng (tên biến PLATFORM_AI_*, USD, «chọn khoá AI riêng»).
+      assert.ok(!v0.bot.aiReady && v0.bot.aiReason === CUSTOMER_AI_STATE_HINT.NEEDS_SETUP, JSON.stringify(v0.bot));
+      assert.ok(!("usesPlatformAi" in v0.bot) && !/PLATFORM_AI|USD|khoá|dùng chung|nền tảng/i.test(JSON.stringify(v0.bot)), `ô của khách không nói nguồn AI: ${JSON.stringify(v0.bot)}`);
       assert.equal((await loadGoLive(viewer)).show, false, "không quyền ⇒ không vẽ ô");
       assert.ok("error" in (await quickConnectFanpage(viewer, { pageId: PAGE, pageAccessToken: TOKEN }, { tester: { fetch: fakePancake(true) } })), "không quyền ⇒ lõi chặn");
 
@@ -108,7 +112,7 @@ export async function testGoLive() {
       process.env.PLATFORM_AI_API_KEY = "khoa-ai-nen-tang-gia-gl";
       process.env.PLATFORM_AI_PROVIDER = "gemini";
       const v2 = await loadGoLive(admin);
-      assert.ok(v2.bot.aiReady, JSON.stringify(v2.bot));
+      assert.ok(v2.bot.aiReady && v2.bot.aiReason === null, JSON.stringify(v2.bot));
       const on = await quickEnableBot(admin);
       assert.ok("ok" in on, JSON.stringify(on));
       assert.ok((await loadGoLive(admin)).bot.enabled, "bot đã bật");
