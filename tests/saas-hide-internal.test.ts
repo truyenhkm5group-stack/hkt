@@ -118,10 +118,14 @@ export function stringHits(v: unknown, re: RegExp, at = "$", out: string[] = [])
   return out;
 }
 
-/** Chữ khách không được đọc trong payload hộp thư: mã nhà cung cấp, tên nhà cung cấp / model, «token / provider / model», khoá AI. */
-const INBOX_FORBIDDEN = /PROVIDER|AI_MODEL|AI_CONTEXT|KILL_SWITCH|NOT_CONFIGURED|\b(token|provider|model)\b|gemini|openai|anthropic|claude|khoá AI|nguồn AI|RESOURCE_EXHAUSTED|429/i;
+/** Chữ khách không được đọc trong payload hộp thư: mã nhà cung cấp, tên nhà cung cấp / model, «token / provider / model», khoá AI.
+ *  `429` đứng riêng (mã HTTP) — KHÔNG phải chuỗi con: một UUID ngẫu nhiên kiểu «faba2977-5d98-429e-…» từng làm bài đỏ chập chờn
+ *  trên CI (08/10/2026, PR #707 chỉ đổi tài liệu). */
+const INBOX_FORBIDDEN = /PROVIDER|AI_MODEL|AI_CONTEXT|KILL_SWITCH|NOT_CONFIGURED|\b(token|provider|model)\b|gemini|openai|anthropic|claude|khoá AI|nguồn AI|RESOURCE_EXHAUSTED|\b429\b/i;
 
 export function testHideInternalInbox() {
+  assert.ok(INBOX_FORBIDDEN.test("Pancake bận (HTTP 429)") && INBOX_FORBIDDEN.test("429 RESOURCE_EXHAUSTED"), "mã 429 đứng riêng vẫn bị bắt");
+  assert.ok(!INBOX_FORBIDDEN.test("faba2977-5d98-429e-b031-0e509f4af9f8"), "UUID ngẫu nhiên chứa «429» không phải rò nội bộ");
   const blocks = customerAiBlocks([
     { code: "BOT_DISABLED", reason: "Bot bán hàng đang TẮT (Cấu hình → Bật bot)", fixHref: "/ai/sales-chatbot#bot-config", fixLabel: "Bật bot trong Cấu hình" },
     { code: "NO_AI_SOURCE", reason: "Không có nguồn AI chạy được: Kết nối «Google Gemini — khoá AI của tổ chức» chưa bật", fixHref: "/ai/sales-chatbot#bot-config", fixLabel: "Cấu hình nguồn AI" },
