@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import type { Permission } from "@/lib/auth/permissions";
 import { can, permissionModuleDisabled, resolveCurrentUser, type SessionUser } from "@/lib/auth/session";
+import { billingLockedMessage } from "@/lib/constants/session-revocation";
 
 /**
  * ═══════════ CỔNG CỦA ROUTE `/api/*` ═══════════
@@ -34,7 +35,7 @@ export const API_DENY_MESSAGE: Record<ApiDenyCode, string> = {
   MODULE_DISABLED: "Chức năng này chưa được bật cho tổ chức của bạn",
   ORG_INACTIVE: "Tổ chức của phiên đăng nhập đang tạm ngừng hoặc không còn tồn tại",
   FORBIDDEN: "Không có quyền",
-  BILLING_LOCKED: "Tổ chức đang ở chế độ chỉ xem vì quá hạn thanh toán — gia hạn ở Hệ thống → Gói & thanh toán",
+  BILLING_LOCKED: billingLockedMessage("API", false),
 };
 
 function deny(status: 401 | 402 | 403, code: ApiDenyCode, opts: ApiGuardOptions, extra: { module?: string; message?: string } = {}): NextResponse {
@@ -60,7 +61,8 @@ export async function apiGuard(permission?: Permission | null, opts: ApiGuardOpt
   if ("denied" in ket) {
     if (ket.denied === "MODULE_DISABLED") return deny(403, "MODULE_DISABLED", opts, { module: ket.module });
     if (ket.denied === "ORG_INACTIVE") return deny(403, "ORG_INACTIVE", opts);
-    if (ket.denied === "BILLING_LOCKED") return deny(402, "BILLING_LOCKED", opts);
+    // Vỏ Chốt Đơn không có menu «Hệ thống» — câu chỉ tới «trang Gói dịch vụ»; ERP giữ nguyên câu cũ.
+    if (ket.denied === "BILLING_LOCKED") return deny(402, "BILLING_LOCKED", opts, ket.shell ? { message: billingLockedMessage("API", true) } : {});
     return deny(401, "UNAUTHENTICATED", opts);
   }
   const user = ket.user;

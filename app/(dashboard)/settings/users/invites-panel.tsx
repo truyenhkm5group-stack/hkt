@@ -41,7 +41,8 @@ const STATUS_TONE: Record<UserInviteStatus, string> = {
 };
 
 /** Nút + hộp thoại tạo lời mời. Sau khi tạo, hộp thoại chuyển sang hiện liên kết + nút sao chép. */
-export function InviteUserDialog({ customRoles }: { customRoles: InviteRoleOption[] }) {
+/** `appName`: tên phần mềm trong câu chữ — ERP «ERP» (chữ cũ, từng ký tự), vỏ Chốt Đơn «Chốt Đơn». */
+export function InviteUserDialog({ customRoles, appName = "ERP" }: { customRoles: InviteRoleOption[]; appName?: string }) {
   const [open, setOpen] = useState(false);
   const [email, setEmail] = useState("");
   const [choice, setChoice] = useState<string>("role:VIEWER");
@@ -100,7 +101,7 @@ export function InviteUserDialog({ customRoles }: { customRoles: InviteRoleOptio
             <DialogHeader>
               <DialogTitle>Liên kết mời cho {created.email}</DialogTitle>
               <DialogDescription>
-                Gửi liên kết này cho nhân viên qua kênh của bạn (Zalo, email, tin nhắn…) — ERP chưa tự gửi thư. Người nhận mở liên kết, tự đặt tên và mật khẩu, rồi vào thẳng ERP với đúng vai trò đã chọn.
+                Gửi liên kết này cho nhân viên qua kênh của bạn (Zalo, email, tin nhắn…) — {appName} chưa tự gửi thư. Người nhận mở liên kết, tự đặt tên và mật khẩu, rồi vào thẳng {appName} với đúng vai trò đã chọn.
               </DialogDescription>
             </DialogHeader>
             <div className="space-y-2">
@@ -125,7 +126,7 @@ export function InviteUserDialog({ customRoles }: { customRoles: InviteRoleOptio
           <form onSubmit={submit} className="space-y-4">
             <DialogHeader>
               <DialogTitle>Mời người dùng</DialogTitle>
-              <DialogDescription>Nhập email và chọn vai trò. ERP tạo một liên kết dùng một lần, hạn {USER_INVITE_TTL_DAYS} ngày — nhân viên tự đặt mật khẩu, bạn không phải biết mật khẩu của họ.</DialogDescription>
+              <DialogDescription>Nhập email và chọn vai trò. {appName} tạo một liên kết dùng một lần, hạn {USER_INVITE_TTL_DAYS} ngày — nhân viên tự đặt mật khẩu, bạn không phải biết mật khẩu của họ.</DialogDescription>
             </DialogHeader>
             <div className="space-y-1.5">
               <Label htmlFor="invite-email">Email của người được mời</Label>

@@ -21,8 +21,10 @@ import {
   BRAND_ASSET_PREFIX,
   brandAppOrigin,
   brandFromHeader,
+  brandHost,
   brandIconPath,
   brandOfHost,
+  brandOfRequest,
   CHOTDON_ASSETS,
   chotdonDomainFrom,
   DEFAULT_CHOTDON_DOMAIN,
@@ -169,6 +171,21 @@ export function testChotDonBrand() {
   assert.equal(brandFromHeader("CHOTDON"), "vnx", "giá trị lạ ⇒ vnx, không đoán");
   assert.equal(brandFromHeader(null), "vnx");
 
+  // HOST QUYẾT THƯƠNG HIỆU (P1 Finish Line R2): lượt RSC máy chủ tự xin sau `redirect()` của server action tới `localhost:<cổng>`
+  // (Node bỏ header Host) — chỉ `x-forwarded-host` còn giữ host thật. Trước bản vá: `brandOfHost("localhost:3321")` ⇒ `vnx`.
+  const hdr = (h: Record<string, string>) => (name: string) => h[name] ?? null;
+  assert.equal(brandOfRequest(hdr({ host: "localhost:3321", "x-forwarded-host": "app.chotdontudong.com" }), env), "chotdon", "lượt RSC sau redirect() trên host Chốt Đơn ⇒ chotdon");
+  assert.equal(brandOfHost("localhost:3321", env), "vnx", "đối chứng: chỉ đọc host thì ra vnx — đúng lỗi đã đo");
+  assert.equal(brandOfRequest(hdr({ host: "app.chotdontudong.com", "x-forwarded-host": "app.chotdontudong.com" }), env), "chotdon", "lượt thường qua Caddy");
+  assert.equal(brandOfRequest(hdr({ host: "app.chotdontudong.com" }), env), "chotdon", "không proxy, không x-forwarded-host ⇒ host");
+  assert.equal(brandOfRequest(hdr({ host: "localhost:3321", "x-forwarded-host": "erp.vnxcommerce.com" }), env), "vnx");
+  assert.equal(brandOfRequest(hdr({ host: "localhost:3321", "x-forwarded-host": "app.chotdontudong.com:443, proxy.noi-bo" }), env), "chotdon", "chuỗi proxy ⇒ giá trị ĐẦU");
+  assert.equal(brandOfRequest(hdr({ host: "app.chotdontudong.com", "x-forwarded-host": " " }), env), "chotdon", "x-forwarded-host rỗng ⇒ host");
+  assert.equal(brandOfRequest(hdr({}), env), "vnx", "không header nào ⇒ vnx");
+  assert.equal(brandHost("a", "b"), "b");
+  assert.equal(brandHost(" a ", null), "a");
+  assert.equal(brandHost(null, undefined), null);
+
   assert.equal(brandAppOrigin("chotdon", env), "https://app.chotdontudong.com");
   assert.equal(brandAppOrigin("chotdon", { ...env, CHOTDON_APP_URL: "https://ban.chotdontudong.com/" }), "https://ban.chotdontudong.com");
   assert.equal(brandAppOrigin("chotdon", { ...env, CHOTDON_APP_URL: "https://chotdontudong.com" }), null, "gốc phần mềm trỏ về chính mặt tiền ⇒ không chuyển vòng tròn");
@@ -207,6 +224,14 @@ export function testChotDonBrand() {
   const iBrand = mw.indexOf("headers.set(ERP_SITE_BRAND_HEADER");
   assert.ok(iStrip > 0 && iBrand > iStrip, "header thương hiệu đặt SAU khi xoá x-erp-* của trình duyệt");
   assert.ok(ERP_SITE_BRAND_HEADER.startsWith("x-erp-"), "header thương hiệu phải nằm trong vùng x-erp-* bị xoá");
+  // Middleware đặt thương hiệu bằng `brandOfRequest` (x-forwarded-host trước) — đọc trần `host` là lỗi P1 quay lại. Tên miền con
+  // của tổ chức (gắn phiên với tổ chức) và định tuyến mặt tiền VẪN đọc `host`: x-forwarded-host chỉ được quyết phần trình bày.
+  assert.match(mw, /headers\.set\(ERP_SITE_BRAND_HEADER, brandOfRequest\(\(name\) => request\.headers\.get\(name\)/, "header thương hiệu dựng bằng brandOfRequest");
+  assert.ok(!/brandOfHost\(request\.headers\.get\("host"\)/.test(mw), "middleware không còn quyết thương hiệu từ riêng header host");
+  assert.match(mw, /hostSlug\(request\.headers\.get\("host"\)/, "tên miền con của tổ chức vẫn đọc host — x-forwarded-host không quyết tổ chức");
+  assert.match(mw, /matchSite\(request\.headers\.get\("host"\), siteEnv\(\)\)/, "định tuyến mặt tiền vẫn đọc host");
+  const hb = readFileSync("lib/platform/host-brand.ts", "utf8");
+  assert.match(hb, /raw !== null \? brandFromHeader\(raw\) : brandOfRequest\(/, "hostBrand(): thiếu header máy chủ ⇒ suy bằng CHÍNH luật của middleware, không rơi thẳng về vnx");
   const caddy = readFileSync("deploy/Caddyfile", "utf8");
   const block = caddy.slice(caddy.indexOf("{$CHOTDON_DOMAIN"));
   assert.ok(block.includes("app.{$CHOTDON_DOMAIN") && /tls\s*\{\s*on_demand\s*\}/.test(block), "khối Chốt Đơn: mặt tiền + app, chứng chỉ theo yêu cầu");

@@ -231,6 +231,11 @@ export function salesAgentHomeOfRedirect(target: string): string {
  */
 export const FORBIDDEN_PARAM = "forbidden";
 export const SHELL_FORBIDDEN_MESSAGE = "Bạn không có quyền mở trang hoặc làm thao tác vừa rồi — đã đưa bạn về đây. Cần quyền này thì nhờ chủ cửa hàng cấp.";
+/**
+ * Câu RIÊNG cho chủ shop (ADMIN). ADMIN có mọi khoá, nên khi cổng quyền vẫn từ chối thì lý do là khoá ấy thuộc một chức năng
+ * NGOÀI GÓI / chưa bật cho cửa hàng (cổng module trong `can()`) — bảo chủ shop «nhờ chủ cửa hàng cấp» là bảo họ đi tìm chính mình.
+ */
+export const SHELL_FORBIDDEN_OWNER_MESSAGE = "Trang hoặc thao tác vừa rồi chưa có trong gói hiện tại của cửa hàng — đã đưa bạn về đây. Xem và nâng gói ở mục «Gói dịch vụ».";
 
 /**
  * ═══ ĐÍCH KHI CỔNG QUYỀN TỪ CHỐI — `requirePermission` · `requireUser(roles)` (và `requireResource`, đi qua `requirePermission`) ═══
@@ -249,10 +254,13 @@ export function forbiddenRedirectFor(user: ShellUser): string {
 /** Câu vỏ in khi máy chủ vừa đưa người dùng về trang nhà. `kind` = tham số đã kích hoạt nó. */
 export type ShellNotice = { kind: typeof SHELL_BLOCKED_PARAM | typeof FORBIDDEN_PARAM; text: string };
 
-/** THUẦN: đọc tham số qua `param` (thanh vỏ đưa `useSearchParams().get`, bài kiểm đưa `URLSearchParams.get`) — một bản cho cả hai. */
-export function shellNoticeOf(param: (name: string) => string | null | undefined): ShellNotice | null {
+/**
+ * THUẦN: đọc tham số qua `param` (thanh vỏ đưa `useSearchParams().get`, bài kiểm đưa `URLSearchParams.get`) — một bản cho cả hai.
+ * `viewer` chỉ chọn CÂU (chủ shop ⇒ câu «ngoài gói»), không đổi luật nào.
+ */
+export function shellNoticeOf(param: (name: string) => string | null | undefined, viewer?: { role: string } | null): ShellNotice | null {
   if (param(SHELL_BLOCKED_PARAM) === "1") return { kind: SHELL_BLOCKED_PARAM, text: SHELL_BLOCKED_MESSAGE };
-  if (param(FORBIDDEN_PARAM) === "1") return { kind: FORBIDDEN_PARAM, text: SHELL_FORBIDDEN_MESSAGE };
+  if (param(FORBIDDEN_PARAM) === "1") return { kind: FORBIDDEN_PARAM, text: viewer?.role === "ADMIN" ? SHELL_FORBIDDEN_OWNER_MESSAGE : SHELL_FORBIDDEN_MESSAGE };
   return null;
 }
 

@@ -143,6 +143,17 @@ export const BILLING_LOCKED_PATH = "/billing-locked";
 /** Lý do KHÔNG phải một lượt từ chối: người dùng vừa tự đổi mật khẩu và được đưa về đây. */
 export const REASON_PASSWORD_CHANGED = "password-changed";
 
+/**
+ * Câu «chỉ xem vì quá hạn thanh toán» theo SẢN PHẨM của người đọc. Vỏ Chốt Đơn không có menu «Hệ thống» — chỗ gia hạn là
+ * «trang Gói dịch vụ» (mục menu của vỏ); ERP giữ NGUYÊN từng chữ «Hệ thống → Gói & thanh toán». `API` = thân lỗi 402 của
+ * `/api/*` (lib/auth/api-guard.ts — vỏ hay không do `resolveCurrentUser` nói), `LOGIN` = câu trên `/login?reason=billing-locked`
+ * (chưa chắc có phiên ⇒ đọc theo thương hiệu của host). Chỉ trình bày: luật khoá ghi vẫn ở `billingWriteDenied`.
+ */
+export function billingLockedMessage(kind: "API" | "LOGIN", shell: boolean): string {
+  if (shell) return kind === "API" ? "Cửa hàng đang ở chế độ chỉ xem vì quá hạn thanh toán — gia hạn ở trang Gói dịch vụ" : "Cửa hàng đang ở chế độ chỉ xem vì quá hạn thanh toán. Chủ cửa hàng gia hạn ở trang Gói dịch vụ.";
+  return kind === "API" ? "Tổ chức đang ở chế độ chỉ xem vì quá hạn thanh toán — gia hạn ở Hệ thống → Gói & thanh toán" : "Tổ chức đang ở chế độ chỉ xem vì quá hạn thanh toán. Quản trị của tổ chức gia hạn ở Hệ thống → Gói & thanh toán.";
+}
+
 export const DENY_REASON_MESSAGE: Record<string, string> = {
   invalid: "Phiên đăng nhập không hợp lệ. Vui lòng đăng nhập lại.",
   inactive: "Tài khoản đã bị khoá. Liên hệ quản trị viên.",
@@ -151,7 +162,7 @@ export const DENY_REASON_MESSAGE: Record<string, string> = {
   "module-disabled": "Chức năng này chưa được bật cho tổ chức của bạn. Liên hệ quản trị viên của tổ chức.",
   "host-mismatch": "Phiên đăng nhập này thuộc một ERP khác địa chỉ đang mở. Đăng nhập bằng tài khoản của ERP ở địa chỉ này.",
   "shell-restricted": "Trang này thuộc ERP đầy đủ, không có trong ứng dụng Chốt Đơn Tự Động của cửa hàng bạn.",
-  "billing-locked": "Tổ chức đang ở chế độ chỉ xem vì quá hạn thanh toán. Quản trị của tổ chức gia hạn ở Hệ thống → Gói & thanh toán.",
+  "billing-locked": billingLockedMessage("LOGIN", false),
   // KHÔNG dùng chung câu "đã bị thu hồi": người vừa tự bấm đổi mật khẩu mà đọc câu ấy sẽ tưởng
   // mình bị quản trị đá ra. Cùng một cơ chế, hai tình huống, hai câu.
   [REASON_PASSWORD_CHANGED]: "Đã đổi mật khẩu. Hãy đăng nhập lại bằng mật khẩu mới.",
@@ -170,4 +181,11 @@ export const LOGIN_REASONS_STAY: readonly string[] = ["invalid", "inactive", "re
 
 export function loginShouldStay(reason: string | undefined): boolean {
   return !!reason && LOGIN_REASONS_STAY.includes(reason);
+}
+
+/** Câu trên `/login` cho `?reason=` — `shell` (host Chốt Đơn) chỉ đổi câu có nhắc chỗ gia hạn; lý do lạ ⇒ `null`. */
+export function denyReasonMessage(reason: string | undefined, opts: { shell: boolean }): string | null {
+  if (!reason) return null;
+  if (reason === DENY_REASON_PARAM.BILLING_LOCKED) return billingLockedMessage("LOGIN", opts.shell);
+  return DENY_REASON_MESSAGE[reason] ?? null;
 }

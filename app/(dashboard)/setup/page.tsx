@@ -48,7 +48,9 @@ export default async function SetupPage() {
   // Xem trước menu = ĐÚNG menu người này thấy (`visibleGroups`): cùng luật module, quyền, nguồn số liệu và trang gom của
   // tổ chức khách — không lọc lần thứ hai ở đây (AGENTS.md mục 28).
   // Vỏ app Chốt Đơn: «Xem trước» hiện ĐÚNG thanh tám mục khách thấy, không phải menu ERP (mục ERP bị chặn ở máy chủ).
-  const nav = isSalesAgentUser(user) ? [{ label: "Ứng dụng Chốt Đơn", items: salesAgentNavFor(user).map((i) => ({ href: i.href, label: i.label })) }] : visibleGroups(user);
+  // Vỏ Chốt Đơn: câu chữ không «ERP» / «module» (khách không thuê ERP) — chỉ trình bày, luật không đổi.
+  const shell = isSalesAgentUser(user);
+  const nav = shell ? [{ label: "Ứng dụng Chốt Đơn", items: salesAgentNavFor(user).map((i) => ({ href: i.href, label: i.label })) }] : visibleGroups(user);
   const erpUrl = pub.state === "PUBLISHED" && pub.url ? `${pub.url}/login` : null;
   const stateLabel = pub.state === "PUBLISHED" ? "ĐÃ XUẤT BẢN" : pub.state === "DRAFT" ? "BẢN NHÁP" : "Đang chạy";
 
@@ -60,7 +62,7 @@ export default async function SetupPage() {
         description={`${stateLabel} · ${gs.done}/${gs.measurable} bước đã xong`}
         hint={
           <div className="space-y-1.5 text-xs leading-5">
-            <p>ERP bạn đang dùng CHÍNH LÀ bản xem trước: mọi menu, trang, form ở đây là thứ nhân viên sẽ thấy sau khi xuất bản. Bản nháp chỉ khác một điều: chưa có tên miền con riêng và trang chat công khai chưa nhận khách.</p>
+            <p>{shell ? "Ứng dụng" : "ERP"} bạn đang dùng CHÍNH LÀ bản xem trước: mọi menu, trang, form ở đây là thứ nhân viên sẽ thấy sau khi xuất bản. Bản nháp chỉ khác một điều: chưa có tên miền con riêng và trang chat công khai chưa nhận khách.</p>
             <p>Xuất bản không deploy, không cần người vận hành nền tảng: máy kiểm lại cấu hình rồi bật địa chỉ riêng của bạn ngay.</p>
           </div>
         }
@@ -87,7 +89,7 @@ export default async function SetupPage() {
           </ul>
         </SectionCard>
 
-        <SectionCard title="Xem trước ERP" description="Đúng thứ người dùng thấy — mở từng mục để thử.">
+        <SectionCard title={shell ? "Xem trước ứng dụng" : "Xem trước ERP"} description="Đúng thứ người dùng thấy — mở từng mục để thử.">
           <div className="space-y-4 text-sm" data-testid="setup-preview">
             <div className="flex items-center gap-3">
               {branding.logoFileId ? (
@@ -106,7 +108,7 @@ export default async function SetupPage() {
               </div>
             </div>
             <div>
-              <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Module đang bật ({modules.length})</p>
+              <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">{shell ? `Chức năng đang dùng (${modules.length})` : `Module đang bật (${modules.length})`}</p>
               <p className="text-xs leading-5">{modules.map((m) => moduleDef(m)?.label ?? m).join(" · ")}</p>
               {shellAllows(user, "/settings/modules") ? (
                 <Link href="/settings/modules" className="text-xs text-primary underline underline-offset-2">
@@ -162,7 +164,7 @@ export default async function SetupPage() {
       </div>
 
       {pub.state !== "UNTRACKED" ? (
-        <SectionCard id="ten-mien" title="Tên miền con" description={pub.baseDomain ? `Địa chỉ riêng dạng <tên>.${pub.baseDomain}` : "Nền tảng chưa bật định tuyến theo tên miền con (PLATFORM_BASE_DOMAIN) — vẫn giữ được tên, và ERP mở bằng mã tổ chức."}>
+        <SectionCard id="ten-mien" title="Tên miền con" description={pub.baseDomain ? `Địa chỉ riêng dạng <tên>.${pub.baseDomain}` : shell ? "Tên miền con chưa mở trên hệ thống — vẫn giữ được tên, và cửa hàng mở bằng mã cửa hàng." : "Nền tảng chưa bật định tuyến theo tên miền con (PLATFORM_BASE_DOMAIN) — vẫn giữ được tên, và ERP mở bằng mã tổ chức."}>
           <DomainForm current={pub.slug} baseDomain={pub.baseDomain} locked={pub.state === "PUBLISHED"} />
         </SectionCard>
       ) : null}

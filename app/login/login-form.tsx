@@ -11,7 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { DENY_REASON_MESSAGE } from "@/lib/constants/session-revocation";
+import { denyReasonMessage } from "@/lib/constants/session-revocation";
 
 const OAUTH_MESSAGE: Record<string, string> = {
   off: "Cách đăng nhập này chưa được bật.",
@@ -45,6 +45,8 @@ export function LoginForm({
   const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
   const social = !orgName && (providers.google || providers.facebook);
+  // Host Chốt Đơn ⇒ câu nhắc chỗ gia hạn chỉ «trang Gói dịch vụ» (vỏ không có menu «Hệ thống»); ERP giữ nguyên câu cũ.
+  const reasonText = denyReasonMessage(reason, { shell: brand === "chotdon" });
 
   return (
     <div className="w-full max-w-sm space-y-6">
@@ -107,7 +109,7 @@ export function LoginForm({
                 </div>
               </details>
             ) : null}
-            {reason && DENY_REASON_MESSAGE[reason] ? <p className="text-sm text-destructive">{DENY_REASON_MESSAGE[reason]}</p> : null}
+            {reasonText ? <p className="text-sm text-destructive">{reasonText}</p> : null}
             {oauth && OAUTH_MESSAGE[oauth] ? <p className="text-sm text-destructive">{OAUTH_MESSAGE[oauth]}</p> : null}
             {state?.error ? <p className="text-sm text-destructive">{state.error}</p> : null}
             <Button type="submit" className="w-full" disabled={pending}>

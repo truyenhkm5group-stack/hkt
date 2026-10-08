@@ -23,7 +23,7 @@ import { cn } from "@/lib/utils";
 
 const badge = "inline-flex items-center gap-1.5 whitespace-nowrap rounded-md px-2 py-0.5 text-[11.5px] font-semibold leading-5";
 
-function UserRowActions({ user, isSelf, isLastAdmin, templates }: { user: UserRow; isSelf: boolean; isLastAdmin: boolean; templates: RolePermissionMap }) {
+function UserRowActions({ user, isSelf, isLastAdmin, templates, appName }: { user: UserRow; isSelf: boolean; isLastAdmin: boolean; templates: RolePermissionMap; appName?: string }) {
   const [editOpen, setEditOpen] = useState(false);
   const [permOpen, setPermOpen] = useState(false);
   const [resetOpen, setResetOpen] = useState(false);
@@ -85,7 +85,7 @@ function UserRowActions({ user, isSelf, isLastAdmin, templates }: { user: UserRo
       <PermissionsDialog user={user} templates={templates} open={permOpen} onOpenChange={setPermOpen} />
       <ResetPasswordDialog user={user} open={resetOpen} onOpenChange={setResetOpen} />
       <ResetLinkDialog user={user} open={linkOpen} onOpenChange={setLinkOpen} />
-      <RevokeSessionsDialog user={user} open={revokeOpen} onOpenChange={setRevokeOpen} />
+      <RevokeSessionsDialog user={user} open={revokeOpen} onOpenChange={setRevokeOpen} appName={appName} />
       <AlertDialog open={lockOpen} onOpenChange={setLockOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -132,6 +132,8 @@ export function UsersTable({
   accessByUser,
   roleOptions,
   positionOptions,
+  compact = false,
+  appName,
 }: {
   users: UserRow[];
   currentUserId: string;
@@ -142,13 +144,21 @@ export function UsersTable({
   accessByUser: Record<string, UserAccessView>;
   roleOptions: AccessOption[];
   positionOptions: AccessOption[];
+  /**
+   * Vỏ Chốt Đơn: bỏ hai cột của mô hình tổ chức ERP (Phòng ban · Quyền & phạm vi — vai trò tuỳ chỉnh, chức danh, phạm vi dữ
+   * liệu). Chỉ bớt CỘT HIỂN THỊ: quyền vẫn do vai trò + «Phân quyền» quyết, phạm vi mặc định giữ nguyên, máy chủ không đổi gì.
+   */
+  compact?: boolean;
+  /** Tên phần mềm trong câu chữ của hộp thoại (mặc định «ERP»). */
+  appName?: string;
 }) {
+  const headers = compact ? ["Nhân viên", "Email", "Vai trò", "Trạng thái", "Đăng nhập gần nhất", "Tạo lúc", ""] : ["Người dùng", "Email", "Vai trò", "Phòng ban", "Quyền & phạm vi", "Trạng thái", "Đăng nhập gần nhất", "Tạo lúc", ""];
   return (
     <div className="overflow-x-auto">
-      <Table className="min-w-[1240px]">
+      <Table className={compact ? "min-w-[760px]" : "min-w-[1240px]"}>
         <TableHeader className="bg-muted/50">
           <TableRow className="hover:bg-transparent">
-            {["Người dùng", "Email", "Vai trò", "Phòng ban", "Quyền & phạm vi", "Trạng thái", "Đăng nhập gần nhất", "Tạo lúc", ""].map((h, i) => (
+            {headers.map((h, i) => (
               <TableHead key={i} className="h-10 text-[11.5px] font-semibold uppercase tracking-wide text-muted-foreground">
                 {h}
               </TableHead>
@@ -193,30 +203,34 @@ export function UsersTable({
                   PHÒNG BAN SỬA ĐƯỢC NGAY TỪ ĐÂY — cùng Server Action với màn Cấu hình công việc.
                   Một sự thật, hai lối vào; trước đây chỉ có một lối và khi nó hỏng thì hết đường.
                 */}
-                <TableCell>
-                  <DepartmentCell
-                    userId={u.id}
-                    userName={u.name}
-                    userActive={u.active}
-                    departments={departmentsByUser[u.id] ?? []}
-                    all={allDepartments}
-                  />
-                </TableCell>
+                {compact ? null : (
+                  <TableCell>
+                    <DepartmentCell
+                      userId={u.id}
+                      userName={u.name}
+                      userActive={u.active}
+                      departments={departmentsByUser[u.id] ?? []}
+                      all={allDepartments}
+                    />
+                  </TableCell>
+                )}
                 {/*
                   BA CHIỀU CỦA QUYỀN TRUY CẬP trong một ô: vai trò (được làm gì) · chức danh (làm
                   chức gì) · phạm vi (trên dữ liệu nào). Bấm vào mở hộp thoại có XEM TRƯỚC quyền
                   thực tế — chủ shop thấy hậu quả trước khi lưu, không phải sau.
                 */}
-                <TableCell>
-                  <AccessCell
-                    userId={u.id}
-                    userName={u.name}
-                    isAdmin={u.role === "ADMIN"}
-                    view={accessByUser[u.id] ?? { accessRoleId: null, accessRoleName: "", positionId: null, positionName: "", scope: "ALL" }}
-                    roles={roleOptions}
-                    positions={positionOptions}
-                  />
-                </TableCell>
+                {compact ? null : (
+                  <TableCell>
+                    <AccessCell
+                      userId={u.id}
+                      userName={u.name}
+                      isAdmin={u.role === "ADMIN"}
+                      view={accessByUser[u.id] ?? { accessRoleId: null, accessRoleName: "", positionId: null, positionName: "", scope: "ALL" }}
+                      roles={roleOptions}
+                      positions={positionOptions}
+                    />
+                  </TableCell>
+                )}
                 <TableCell>
                   {u.active ? (
                     <span className={cn(badge, "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300")}>
@@ -240,7 +254,7 @@ export function UsersTable({
                 </TableCell>
                 <TableCell className="text-xs text-muted-foreground">{formatDateTime(u.createdAt)}</TableCell>
                 <TableCell className="text-right">
-                  <UserRowActions user={u} isSelf={isSelf} isLastAdmin={isLastAdmin} templates={templates} />
+                  <UserRowActions user={u} isSelf={isSelf} isLastAdmin={isLastAdmin} templates={templates} appName={appName} />
                 </TableCell>
               </TableRow>
             );

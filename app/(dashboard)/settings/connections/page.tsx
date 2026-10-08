@@ -10,6 +10,7 @@ import { CONNECTIONS_PERMISSION, loadConnectionsView } from "@/lib/connectors/se
 import { splitLegacyConnectors } from "@/lib/connectors/legacy";
 import { getBrandCopy } from "@/lib/branding/service";
 import { moduleOn } from "@/lib/platform-ui/module-visibility";
+import { isSalesAgentUser } from "@/lib/constants/saas-nav";
 import Link from "next/link";
 
 export const metadata = { title: "Kết nối theo tổ chức" };
@@ -27,11 +28,14 @@ const TITLE = "Kết nối theo tổ chức";
  */
 export default async function ConnectionsPage() {
   const user = await requirePermission(CONNECTIONS_PERMISSION);
+  // Vỏ Chốt Đơn: cùng sổ kết nối, cùng nút, câu chữ của chủ shop (không «connector» / «module» / «ERP») — chỉ trình bày.
+  const shell = isSalesAgentUser(user);
+  const title = shell ? "Kết nối" : TITLE;
   const [view, copy] = await Promise.all([loadConnectionsView(user), getBrandCopy(user)]);
   if ("error" in view) {
     return (
       <div className="space-y-5">
-        <PageHeader eyebrow="Hệ thống" title={TITLE} />
+        <PageHeader eyebrow={shell ? undefined : "Hệ thống"} title={title} />
         <EmptyState title="Chưa mở được danh sách kết nối" description={view.error} />
       </div>
     );
@@ -46,15 +50,22 @@ export default async function ConnectionsPage() {
   return (
     <div className="space-y-5">
       <PageHeader
-        eyebrow="Hệ thống"
-        title={TITLE}
-        description={`${view.organization.name} · ${total} connector trong sổ · ${active}/${configurable.length} kết nối của tổ chức đang bật`}
+        eyebrow={shell ? undefined : "Hệ thống"}
+        title={title}
+        description={shell ? `${view.organization.name} · ${active}/${configurable.length} kết nối đang bật` : `${view.organization.name} · ${total} connector trong sổ · ${active}/${configurable.length} kết nối của tổ chức đang bật`}
         hint={
+          shell ? (
+            <div className="space-y-1.5 text-xs leading-5">
+              <p>Mật khẩu / khoá của kết nối được mã hoá, chỉ hiện •••• + 4 ký tự cuối. Lưu ⇒ về Nháp; «Kiểm tra» thử kết nối thật; «Bật» chỉ được sau khi Kiểm tra đạt.</p>
+              <p>Mọi lượt lưu / kiểm tra / bật / tắt đều được ghi lại (không kèm mật khẩu).</p>
+            </div>
+          ) : (
           <div className="space-y-1.5 text-xs leading-5">
             <p>{copy.text("connections.homeIntegrations")}</p>
             <p>Kết nối «theo tổ chức» do chính tổ chức khai: bí mật mã hoá trong CSDL của tổ chức, chỉ hiện •••• + 4 ký tự cuối. Lưu ⇒ về Nháp; Kiểm tra gửi một yêu cầu thật; Bật chỉ được sau khi Kiểm tra đạt.</p>
             <p>Mọi lượt lưu / kiểm tra / bật / tắt ghi vào Nhật ký hệ thống (không kèm bí mật).</p>
           </div>
+          )
         }
       />
       {!view.secretsReady.ok ? (
@@ -68,7 +79,7 @@ export default async function ConnectionsPage() {
         </p>
       ) : null}
       {directFacebook ? (
-        <SectionCard title="Facebook · Instagram — nối thẳng, không cần phần mềm chat trung gian" description="Cách khuyên dùng cho shop bán qua Facebook: chủ page bấm Kết nối Facebook, chọn page — tin khách về Hộp thư ERP, bot AI trả lời, nhân viên tiếp quản ngay trong ERP.">
+        <SectionCard title="Facebook · Instagram — nối thẳng, không cần phần mềm chat trung gian" description={shell ? "Cách khuyên dùng cho shop bán qua Facebook: chủ page bấm Kết nối Facebook, chọn page — tin khách về Hộp thư, bot AI trả lời, nhân viên tiếp quản ngay trong ứng dụng." : "Cách khuyên dùng cho shop bán qua Facebook: chủ page bấm Kết nối Facebook, chọn page — tin khách về Hộp thư ERP, bot AI trả lời, nhân viên tiếp quản ngay trong ERP."}>
           <Link href="/ai/sales-chatbot/messenger" className="text-sm font-semibold text-primary hover:underline" data-testid="connections-direct-facebook">
             Mở Kết nối Facebook →
           </Link>
@@ -78,15 +89,15 @@ export default async function ConnectionsPage() {
       {view.organization.isHome ? null : <OrgGhnPanel orgCode={view.organization.code} />}
       {view.organization.isHome ? null : <OrgGhtkPanel orgCode={view.organization.code} />}
       {split.groups.length === 0 ? (
-        <EmptyState title="Chưa có connector nào trong sổ" description="Sổ connector của mã nguồn rỗng — không nên xảy ra; báo đội kỹ thuật." />
+        <EmptyState title={shell ? "Chưa có kết nối nào" : "Chưa có connector nào trong sổ"} description={shell ? "Không nên xảy ra — báo đội hỗ trợ." : "Sổ connector của mã nguồn rỗng — không nên xảy ra; báo đội kỹ thuật."} />
       ) : (
         split.groups.map((g) => (
-          <SectionCard key={g.kind} title={g.label} description={`${g.rows.length} connector`} padded={false} contentClassName="overflow-x-auto p-0">
-            <ConnectorGroupTable rows={g.rows} secretsReady={view.secretsReady.ok} />
+          <SectionCard key={g.kind} title={g.label} description={shell ? `${g.rows.length} kết nối` : `${g.rows.length} connector`} padded={false} contentClassName="overflow-x-auto p-0">
+            <ConnectorGroupTable rows={g.rows} secretsReady={view.secretsReady.ok} plain={shell} />
           </SectionCard>
         ))
       )}
-      {view.organization.isHome ? null : <LegacyConnections orgCode={view.organization.code} rows={split.legacy} open={split.legacyInUse} secretsReady={view.secretsReady.ok} />}
+      {view.organization.isHome ? null : <LegacyConnections orgCode={view.organization.code} rows={split.legacy} open={split.legacyInUse} secretsReady={view.secretsReady.ok} plain={shell} />}
     </div>
   );
 }
