@@ -42,21 +42,22 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-08T00:48:09.139Z",
-  "updated_at": "2026-10-08T00:48:44.917Z",
-  "last_heartbeat": "2026-10-08T00:48:29.677Z",
+  "updated_at": "2026-10-08T01:10:57.975Z",
+  "last_heartbeat": "2026-10-08T01:10:57.975Z",
   "definition_of_done": [],
   "handoff": {
     "branch": "fix/ai-balance-followup",
-    "sha": "72ec07f2de57819d05e380c5839b23abb4a749f2",
-    "at": "2026-10-08T00:48:29.677Z",
+    "sha": "4160ee8acfe3959f75559205e571068ef1447884",
+    "at": "2026-10-08T01:10:57.975Z",
     "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
     "title": "Số dư AI: đảo đúng một khoản trừ theo mã dòng, cockpit tính cả doanh thu Số dư, số đầu tháng không còn «—» oan",
-    "summary": "Review #648 vòng 2 (MEDIUM-1 cockpit tính doanh thu Số dư · MEDIUM-2 đảo đúng một khoản trừ theo mã dòng) + LOW #648/#650 + 7 LOW của review chính PR này + 2 LOW lượt duyệt lại. Nội dung = bản e8d8e144 đã PASS (patch-id 14b8ac66… trùng sau rebase lên #650).",
+    "summary": "Review #648 vòng 2 (MEDIUM-1 · MEDIUM-2) + LOW #648/#650 + 7 LOW review chính PR + 2 LOW lượt duyệt lại; thêm khung xương loading.tsx cho /platform/ai-balance (hợp đồng giao diện).",
     "tests": [
       "typecheck + eslint: sạch",
       "ai-balance-usage · ai-balance-economics · ai-balance · ai-balance-hardening · platform-saas · bank-ledger · platform-billing · pricing-v1 · saas-platform · e2e-ai-sales-platform · platform-isolation-static: đạt",
-      "kiểm đột biến: 20 + 1 (vòng đầu, 5 chỗ sống đã có bài kiểm riêng) + 8/8 cho 7 LOW review — tất cả chết, đối chứng đạt",
-      "đo production 08/10 00:26Z (db-query run 37707743462): platform_ai_ledger_entries 0 dòng ⇒ không có dòng đảo kiểu cũ"
+      "hợp đồng tĩnh (ui-consistency · navigation · department-map · loading-ux · drilldown · alert-config · migration-journal · smoke-timing · cs/care-ui-contrast · test-hygiene): đạt — thêm loading.tsx cho /platform/ai-balance (trang đọc ?org= nên là trang động; CI lượt trước đỏ đúng ở đây)",
+      "kiểm đột biến: 20 + 1 + 8/8 chết, đối chứng đạt",
+      "production 08/10 00:26Z: platform_ai_ledger_entries 0 dòng"
     ]
   }
 }

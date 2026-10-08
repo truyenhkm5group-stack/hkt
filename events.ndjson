@@ -507,3 +507,4 @@
 {"at":"2026-10-08T00:49:45.868Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"chatbot-security-3","detail":"fix/chatbot-security-3 @ e5447d0f7189 · 4 lệnh kiểm thử"}
 {"at":"2026-10-08T00:50:01.269Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"chatbot-security-3","detail":"#654 cho fix/chatbot-security-3 @ e5447d0f7189"}
 {"at":"2026-10-08T01:03:44.303Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#654 @ e5447d0f7189 · Review bảo mật độc lập: không CRITICAL/HIGH. Còn MEDIUM có từ #652 (danh sách đuôi tên miền hẹp — .click/.live… lọt) + LOW (dấu chấm che giấu · @ sau dấu câu · ký tự Cf giữa từ · lookup_customer · tên/địa chỉ dự phòng) ⇒ PR chatbot-security-4."}
+{"at":"2026-10-08T01:10:58.004Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"ai-balance-followup","detail":"fix/ai-balance-followup @ 4160ee8acfe3 · 5 lệnh kiểm thử"}
