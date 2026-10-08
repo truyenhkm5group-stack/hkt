@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "mission_id": "chatbot-security-5",
-  "title": "Đơn trong khung chat: hồ sơ chưa xác minh là của người đang chat không điền sẵn / không làm dự phòng tên · địa chỉ",
+  "title": "Đơn trong khung chat: hồ sơ chưa xác minh không điền sẵn / không làm dự phòng; bài học bot: LOW review #656 vòng 2",
   "business_goal": "",
   "status": "PLANNING",
   "priority": "P2",
@@ -15,14 +15,19 @@
   "owned_paths": [
     "lib/records/chat-order.ts",
     "components/orders/chat-order-form.tsx",
-    "tests/chat-order.test.ts"
+    "tests/chat-order.test.ts",
+    "lib/sales-chatbot/lessons-shared.ts",
+    "lib/sales-chatbot/playbook-shared.ts",
+    "tests/self-service-journey.test.ts"
   ],
-  "dependencies": [],
+  "dependencies": [
+    "chatbot-security-4"
+  ],
   "blocked_by": [],
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-08T02:07:54.255Z",
-  "updated_at": "2026-10-08T02:07:54.255Z",
-  "last_heartbeat": "2026-10-08T02:07:54.255Z",
+  "updated_at": "2026-10-08T02:40:52.939Z",
+  "last_heartbeat": "2026-10-08T02:40:52.939Z",
   "definition_of_done": []
 }
