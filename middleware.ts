@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { jwtVerify, SignJWT } from "jose";
 import { hostSlug } from "@/lib/platform/host";
-import { BRAND_ASSET_PREFIX, brandAppOrigin, brandIconPath, brandOfHost, ERP_SITE_BRAND_HEADER, matchSite, SITE_LEGAL_PATHS, SITE_PAGE_PATH, siteRoute, type SiteEnv } from "@/lib/platform/site-host";
+import { BRAND_ASSET_PREFIX, brandAppOrigin, brandIconPath, brandOfRequest, ERP_SITE_BRAND_HEADER, matchSite, SITE_LEGAL_PATHS, SITE_PAGE_PATH, siteEnvFromProcess, siteRoute, type SiteEnv } from "@/lib/platform/site-host";
 import { WIDGET_EMBED_PATH, WIDGET_SCRIPT_PATH } from "@/lib/sales-chatbot/widget";
 import {
   ERP_HEADER_PREFIX,
@@ -116,21 +116,21 @@ function serverHeaders(request: NextRequest, pathname: string): Headers {
   const slug = hostSlug(request.headers.get("host"), process.env.PLATFORM_BASE_DOMAIN);
   if (slug) headers.set(ERP_HOST_SLUG_HEADER, slug);
   // Thương hiệu của host (vnxcommerce.com ⇒ vnx, chotdontudong.com · www · app ⇒ chotdon) — cùng luật "chỉ máy chủ đặt".
-  headers.set(ERP_SITE_BRAND_HEADER, brandOfHost(request.headers.get("host"), siteEnv()));
+  // `brandOfRequest` đọc `x-forwarded-host` trước `host`: lượt RSC máy chủ tự xin sau `redirect()` của server action đi tới
+  // `localhost:<cổng>` (Node bỏ header Host), chỉ `x-forwarded-host` còn giữ host thật — `brandHost` (lib/platform/site-host.ts).
+  headers.set(ERP_SITE_BRAND_HEADER, brandOfRequest((name) => request.headers.get(name), siteEnvFromProcess()));
   return headers;
 }
 
 /** Biến môi trường của lớp mặt tiền — đọc ở mỗi lượt gọi (Edge không có `lib/env`). */
-function siteEnv(): SiteEnv {
-  return { SITE_DOMAIN: process.env.SITE_DOMAIN, CHOTDON_DOMAIN: process.env.CHOTDON_DOMAIN, APP_URL: process.env.APP_URL, CHOTDON_APP_URL: process.env.CHOTDON_APP_URL };
-}
+const siteEnv: () => SiteEnv = siteEnvFromProcess;
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const next = () => NextResponse.next({ request: { headers: serverHeaders(request, pathname) } });
 
   // Biểu tượng mặc định (`/favicon.ico`…) theo thương hiệu của host — bot và trình duyệt xin thẳng, không đọc `<link>`.
-  const icon = brandIconPath(brandOfHost(request.headers.get("host"), siteEnv()), pathname);
+  const icon = brandIconPath(brandOfRequest((name) => request.headers.get(name), siteEnv()), pathname);
   if (icon) {
     const url = request.nextUrl.clone();
     url.pathname = icon;

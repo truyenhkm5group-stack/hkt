@@ -16,7 +16,8 @@ import { PLAYBOOK_LIMITS, type PlaybookRun, type PlaybookState } from "@/lib/sal
  * NHÁP) → chủ shop sửa → xuất bản (bot dùng ngay) → quay lại bản trước / gỡ. Không `router.refresh()` sau action
  * (action đã `revalidatePath`); nút «Làm mới» chỉ để xem tiến độ lượt chạy nền.
  */
-export function PlaybookPanel({ state, run, fanpageReady }: { state: PlaybookState; run: PlaybookRun; fanpageReady: boolean }) {
+/** `shell`: vỏ Chốt Đơn — chỉ đổi CHỮ (không «ERP» / chữ kỹ thuật), câu của ERP giữ nguyên từng ký tự. */
+export function PlaybookPanel({ state, run, fanpageReady, shell = false }: { state: PlaybookState; run: PlaybookRun; fanpageReady: boolean; shell?: boolean }) {
   const router = useRouter();
   const [pending, start] = useTransition();
   const [target, setTarget] = useState<number>(100);
@@ -34,7 +35,7 @@ export function PlaybookPanel({ state, run, fanpageReady }: { state: PlaybookSta
     });
 
   return (
-    <SectionCard title="Học từ hội thoại cũ" description="Đọc lịch sử tin nhắn fanpage (qua Pancake), che SĐT · địa chỉ · tên khách · mọi con số, rồi AI của shop chắt thành «Sổ tay bán hàng». Chủ shop sửa và xuất bản — giá và tồn bot vẫn chỉ lấy từ ERP.">
+    <SectionCard title="Học từ hội thoại cũ" description={`Đọc lịch sử tin nhắn fanpage (qua Pancake), che SĐT · địa chỉ · tên khách · mọi con số, rồi AI của shop chắt thành «Sổ tay bán hàng». Chủ shop sửa và xuất bản — giá và tồn bot vẫn chỉ lấy từ ${shell ? "sổ sản phẩm của shop" : "ERP"}.`}>
       <div className="space-y-4 text-sm" data-testid="playbook-panel">
         <div className="flex flex-wrap items-end gap-2">
           <label className="space-y-0.5 text-xs">
@@ -65,7 +66,7 @@ export function PlaybookPanel({ state, run, fanpageReady }: { state: PlaybookSta
             Làm mới
           </Button>
         </div>
-        {!fanpageReady ? <p className="text-xs text-amber-700 dark:text-amber-400">Cần bật kết nối «Fanpage qua Pancake» (Cài đặt → Kết nối) — máy đọc lịch sử bằng page access token của shop.</p> : null}
+        {!fanpageReady ? <p className="text-xs text-amber-700 dark:text-amber-400">Cần bật kết nối «Fanpage qua Pancake» ({shell ? "trang Kết nối" : "Cài đặt → Kết nối"}) — máy đọc lịch sử bằng page access token của shop.</p> : null}
         <p className="text-xs text-muted-foreground" data-testid="playbook-run">
           {run.state === "RUNNING"
             ? `Đang chạy (từ ${formatDateTime(run.startedAt)}): ${run.note} · đã đọc ${run.fetched} hội thoại.`

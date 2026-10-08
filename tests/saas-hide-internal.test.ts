@@ -320,6 +320,8 @@ export function testHideInternalErrors() {
     assert.equal(customerSafeAiError(raw), CUSTOMER_AI_NOT_READY_LABEL, raw);
   for (const raw of ["Pancake từ chối: access_token hết hạn", "Pancake bận (HTTP 429)", "Không gọi được Pancake sau 3 lần thử: Pancake bận (HTTP 503)", "Không gọi được Pancake: Máy chủ ERP không tới được pages.fm"])
     assert.equal(customerSafeAiError(raw), CUSTOMER_PANCAKE_READ_FAILED, raw);
+  // Vỏ Chốt Đơn không có menu «Cài đặt → Kết nối» (mục của nó là «Kênh kết nối») ⇒ câu chỉ «trang Kết nối», không đường menu ERP.
+  assert.ok(/trang Kết nối/.test(CUSTOMER_PANCAKE_READ_FAILED) && !/Cài đặt →/.test(CUSTOMER_PANCAKE_READ_FAILED), CUSTOMER_PANCAKE_READ_FAILED);
 
   // (3) DANH SÁCH CHO PHÉP: câu lạ / câu mang chữ nội bộ ⇒ câu chung của nơi gọi; câu nghiệp vụ đã duyệt ⇒ nguyên văn.
   const internal = [
@@ -510,7 +512,7 @@ const EXEMPT: [string, string, string][] = [
   ["components/onboarding/go-live-card.tsx", "kiểm lại Page ID / token", "Câu kiểm tra kết nối KÊNH (Pancake) — token của page, không phải token AI."],
 ];
 
-function visibleTexts(src: string): string[] {
+export function visibleTexts(src: string): string[] {
   const code = src
     .replace(/\/\*[\s\S]*?\*\//g, "")
     .replace(/\{\s*\/\*[\s\S]*?\*\/\s*\}/g, "")

@@ -58,9 +58,10 @@ function Brand({ brand, home }: { brand: TopNavBrand; home: string }) {
  * Máy chủ vừa đưa người dùng về trang nhà ⇒ nói ra một câu, không im lặng. Hai lý do, hai câu (`shellNoticeOf`): trang ngoài vỏ
  * (`?ngoai-goi=1`, cổng vỏ) và thiếu quyền (`?forbidden=1`, cổng quyền — `forbiddenRedirectFor`).
  */
-function BlockedNotice() {
+function BlockedNotice({ viewer }: { viewer: { role: string } }) {
   const params = useSearchParams();
-  const notice = shellNoticeOf((name) => params?.get(name));
+  // Chủ shop (ADMIN) bị từ chối chỉ vì chức năng ngoài gói ⇒ câu chỉ đường «Gói dịch vụ», không «nhờ chủ cửa hàng cấp».
+  const notice = shellNoticeOf((name) => params?.get(name), viewer);
   if (!notice) return null;
   return (
     <p role="status" className="mx-3 mt-3 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 sm:mx-5 lg:mx-6 lg:mt-6 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-200" data-testid={notice.kind === SHELL_BLOCKED_PARAM ? "shell-blocked-notice" : "shell-forbidden-notice"}>
@@ -128,7 +129,7 @@ export function SalesAgentShell({ user, brand, children }: { user: SalesAgentShe
         </header>
 
         <Suspense fallback={null}>
-          <BlockedNotice />
+          <BlockedNotice viewer={user} />
         </Suspense>
         {children}
 

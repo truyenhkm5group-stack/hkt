@@ -5,6 +5,7 @@ import { PageHeader } from "@/components/page-header";
 import { DescriptionList, SectionCard } from "@/components/ui-bits";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { requireUser } from "@/lib/auth/session";
+import { isSalesAgentUser } from "@/lib/constants/saas-nav";
 import { ROLE_HINT, ROLE_LABEL } from "@/lib/constants/roles";
 import { initials } from "@/lib/format";
 import { vapidKeys } from "@/lib/push/web-push";
@@ -13,9 +14,11 @@ export const metadata = { title: "Tài khoản của tôi" };
 
 export default async function ProfilePage() {
   const user = await requireUser();
+  // Vỏ Chốt Đơn: không nhãn nhóm «Hệ thống», không chữ «ERP» — chỉ trình bày.
+  const shell = isSalesAgentUser(user);
   return (
     <div className="space-y-5">
-      <PageHeader eyebrow="Hệ thống" title="Tài khoản của tôi" description="Thông tin đăng nhập và đổi mật khẩu" />
+      <PageHeader eyebrow={shell ? undefined : "Hệ thống"} title="Tài khoản của tôi" description="Thông tin đăng nhập và đổi mật khẩu" />
       <section className="grid gap-5 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
         <SectionCard title="Thông tin tài khoản" description="Liên hệ quản trị viên nếu cần đổi tên, email hoặc vai trò">
           <div className="mb-4 flex items-center gap-3">
@@ -46,7 +49,7 @@ export default async function ProfilePage() {
         </SectionCard>
       </section>
       <section className="grid gap-5 lg:grid-cols-2">
-        <SectionCard title="Thông báo trên điện thoại / máy tính" description="Cài ERP lên màn hình chính rồi bật để nhận tin ngay cả khi không mở ERP">
+        <SectionCard title="Thông báo trên điện thoại / máy tính" description={shell ? "Cài ứng dụng lên màn hình chính rồi bật để nhận tin ngay cả khi không mở ứng dụng" : "Cài ERP lên màn hình chính rồi bật để nhận tin ngay cả khi không mở ERP"}>
           <PushToggle publicKey={vapidKeys().publicKey} />
         </SectionCard>
         <SectionCard title="Phiên đăng nhập" description="Thu hồi mọi phiên đang mở mà không đổi mật khẩu">

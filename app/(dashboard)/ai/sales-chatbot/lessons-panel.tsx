@@ -17,7 +17,8 @@ const RUN_LABEL: Record<string, string> = { RUNNING: "Đang học", OK: "Đã h�
  * «BOT TỰ HỌC» — trang Chatbot bán hàng. Bài học do AI rút từ hội thoại thật mỗi 6 giờ, bot dùng NGAY; chủ shop sửa / xoá
  * (mỗi dòng một bài), quay lại bản trước, học ngay, hoặc tắt. Không `router.refresh()` sau action (action đã `revalidatePath`).
  */
-export function LessonsPanel({ state }: { state: LessonsState }) {
+/** `shell`: vỏ Chốt Đơn — chỉ đổi CHỮ (không «ERP» / chữ kỹ thuật), câu của ERP giữ nguyên từng ký tự. */
+export function LessonsPanel({ state, shell = false }: { state: LessonsState; shell?: boolean }) {
   const router = useRouter();
   const [pending, start] = useTransition();
   const saved = state.lessons.join("\n");
@@ -38,7 +39,7 @@ export function LessonsPanel({ state }: { state: LessonsState }) {
   return (
     <SectionCard
       title="Bot tự học"
-      description={`Cứ 6 giờ một lần, AI của shop đọc các hội thoại fanpage vừa xong (đã che SĐT · tên · link) — nhất là chỗ nhân viên phải vào thay bot hoặc khách bỏ đi — rồi cập nhật tối đa ${LESSON_LIMITS.maxLessons} bài học «Khi … ⇒ …». Bot dùng ngay ở tin kế tiếp; giá và tồn vẫn chỉ lấy từ ERP.`}
+      description={`Cứ 6 giờ một lần, AI của shop đọc các hội thoại fanpage vừa xong (đã che SĐT · tên · link) — nhất là chỗ nhân viên phải vào thay bot hoặc khách bỏ đi — rồi cập nhật tối đa ${LESSON_LIMITS.maxLessons} bài học «Khi … ⇒ …». Bot dùng ngay ở tin kế tiếp; giá và tồn vẫn chỉ lấy từ ${shell ? "sổ sản phẩm của shop" : "ERP"}.`}
     >
       <div className="space-y-3 text-sm" data-testid="lessons-panel">
         <div className="flex flex-wrap items-center gap-2">

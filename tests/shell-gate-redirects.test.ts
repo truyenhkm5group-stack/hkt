@@ -48,10 +48,12 @@ import {
   SHELL_BLOCKED_MESSAGE,
   SHELL_BLOCKED_PARAM,
   SHELL_FORBIDDEN_MESSAGE,
+  SHELL_FORBIDDEN_OWNER_MESSAGE,
   shellNoticeOf,
   type ShellUser,
 } from "@/lib/constants/saas-nav";
-import { BILLING_LOCKED_PATH, MODULE_DISABLED_PATH } from "@/lib/constants/session-revocation";
+import { BILLING_LOCKED_PATH, billingLockedMessage, DENY_REASON_MESSAGE, DENY_REASON_PARAM, denyReasonMessage, MODULE_DISABLED_PATH } from "@/lib/constants/session-revocation";
+import { API_DENY_MESSAGE } from "@/lib/auth/api-guard";
 import { invalidateCapabilities } from "@/lib/platform/capabilities";
 import { setSessionTokenSourceForTests, withOrganization } from "@/lib/platform/context";
 import { getHomeOrganization, invalidateOrganizations } from "@/lib/platform/organizations";
@@ -131,6 +133,27 @@ function kiemThuan() {
   const chu: ShellUser = { role: "ADMIN", permissions: [], organization: SHELL_ORG, modules: AI_SALES_MODULES };
   const url = new URL(forbiddenRedirectFor(chu), APP);
   assert.equal(shellNoticeOf((k) => url.searchParams.get(k))?.kind, FORBIDDEN_PARAM);
+  // Chủ shop (ADMIN) có mọi khoá ⇒ bị từ chối chỉ vì chức năng ngoài gói / chưa bật: câu chỉ đường nâng gói, KHÔNG «nhờ chủ cửa
+  // hàng cấp» (người đọc chính là chủ cửa hàng). Nhân viên giữ câu cũ; «ngoài gói» của cổng vỏ không đổi theo người xem.
+  assert.deepEqual(shellNoticeOf((k) => url.searchParams.get(k), chu), { kind: FORBIDDEN_PARAM, text: SHELL_FORBIDDEN_OWNER_MESSAGE });
+  assert.ok(!/nhờ chủ cửa hàng/i.test(SHELL_FORBIDDEN_OWNER_MESSAGE) && /Gói dịch vụ/.test(SHELL_FORBIDDEN_OWNER_MESSAGE), "câu của chủ shop chỉ tới «Gói dịch vụ»");
+  assert.notEqual(SHELL_FORBIDDEN_OWNER_MESSAGE, SHELL_BLOCKED_MESSAGE);
+  for (const role of ROLES.filter((r) => r !== "ADMIN")) assert.equal(shellNoticeOf(doc(`${FORBIDDEN_PARAM}=1`), { role })?.text, SHELL_FORBIDDEN_MESSAGE, `${role}: câu «nhờ chủ cửa hàng cấp» như cũ`);
+  assert.equal(shellNoticeOf(doc(`${SHELL_BLOCKED_PARAM}=1`), chu)?.text, SHELL_BLOCKED_MESSAGE, "«ngoài gói» của cổng vỏ: một câu cho mọi người");
+  assert.equal(shellNoticeOf(doc(`${FORBIDDEN_PARAM}=1`), null)?.text, SHELL_FORBIDDEN_MESSAGE, "không biết người xem ⇒ câu chung");
+
+  // QUÁ HẠN THANH TOÁN — chỗ gia hạn theo sản phẩm. ERP giữ NGUYÊN từng chữ; vỏ Chốt Đơn không có menu «Hệ thống» ⇒ «trang Gói dịch vụ».
+  assert.equal(API_DENY_MESSAGE.BILLING_LOCKED, "Tổ chức đang ở chế độ chỉ xem vì quá hạn thanh toán — gia hạn ở Hệ thống → Gói & thanh toán", "API của ERP: câu cũ");
+  assert.equal(DENY_REASON_MESSAGE["billing-locked"], "Tổ chức đang ở chế độ chỉ xem vì quá hạn thanh toán. Quản trị của tổ chức gia hạn ở Hệ thống → Gói & thanh toán.", "/login của ERP: câu cũ");
+  for (const kind of ["API", "LOGIN"] as const) {
+    const vo = billingLockedMessage(kind, true);
+    assert.ok(/trang Gói dịch vụ/.test(vo) && !/Hệ thống|Gói & thanh toán|tổ chức/i.test(vo), `${kind} của vỏ chỉ «trang Gói dịch vụ», không menu ERP: ${vo}`);
+  }
+  assert.equal(denyReasonMessage(DENY_REASON_PARAM.BILLING_LOCKED, { shell: false }), DENY_REASON_MESSAGE["billing-locked"]);
+  assert.equal(denyReasonMessage(DENY_REASON_PARAM.BILLING_LOCKED, { shell: true }), billingLockedMessage("LOGIN", true));
+  for (const r of Object.values(DENY_REASON_PARAM).filter((x) => x !== DENY_REASON_PARAM.BILLING_LOCKED)) assert.equal(denyReasonMessage(r, { shell: true }), DENY_REASON_MESSAGE[r], `${r}: không đổi theo host`);
+  assert.equal(denyReasonMessage("la-hoac-thieu", { shell: true }), null);
+  assert.equal(denyReasonMessage(undefined, { shell: false }), null);
 }
 
 /* ═════════════ B · MÁY CHỦ ═════════════ */
@@ -327,6 +350,14 @@ function kiemMaNguon() {
   // Vỏ in câu «không có quyền» — cùng một chỗ in câu «ngoài gói», đọc qua shellNoticeOf.
   const shell = boChuThich(readFileSync(path.join(goc, "components", "saas-shell.tsx"), "utf8"));
   assert.match(shell, /shellNoticeOf\(/, "vỏ đọc câu thông báo qua shellNoticeOf");
+  assert.match(shell, /shellNoticeOf\(\(name\) => params\?\.get\(name\), viewer\)/, "vỏ đưa người xem vào shellNoticeOf để chủ shop nhận câu «ngoài gói»");
+  assert.match(shell, /<BlockedNotice viewer=\{user\} \/>/, "vỏ truyền người dùng của phiên vào khung thông báo");
+  // Quá hạn thanh toán: cờ vỏ đi từ CHÍNH cổng phiên (không tính lại), API và /login đọc câu theo sản phẩm.
+  const sessionSrc = readFileSync(path.join(goc, "lib", "auth", "session.ts"), "utf8");
+  assert.match(sessionSrc, /return \{ denied: "BILLING_LOCKED", shell: isSalesAgentUser\(ket\.user\) \}/, "resolveCurrentUser gắn cờ vỏ vào lý do BILLING_LOCKED");
+  const guardSrc = readFileSync(path.join(goc, "lib", "auth", "api-guard.ts"), "utf8");
+  assert.match(guardSrc, /ket\.shell \? \{ message: billingLockedMessage\("API", true\) \} : \{\}/, "API 402 của người vỏ: câu «trang Gói dịch vụ»");
+  assert.match(readFileSync(path.join(goc, "app", "login", "login-form.tsx"), "utf8"), /denyReasonMessage\(reason, \{ shell: brand === "chotdon" \}\)/, "/login đọc câu lý do theo thương hiệu của host");
 }
 
 export async function testShellGateRedirects() {

@@ -31,6 +31,7 @@ export function ChatbotConfigForm({
   engine = null,
   aiState = null,
   appointmentsOn = false,
+  shell = false,
 }: {
   config: CustomerChatbotConfig;
   fields: { key: string; label: string }[];
@@ -40,6 +41,8 @@ export function ChatbotConfigForm({
   aiState?: CustomerAiState | null;
   /** Module Lịch hẹn đang bật — chỉ khi đó mới có khung «Đặt lịch qua chat». */
   appointmentsOn?: boolean;
+  /** Vỏ Chốt Đơn — chỉ đổi chữ (không «ERP» / «field»), câu của ERP giữ nguyên. */
+  shell?: boolean;
 }) {
   const router = useRouter();
   const [c, setC] = useState<CustomerChatbotConfig>(config);
@@ -276,20 +279,20 @@ export function ChatbotConfigForm({
         </fieldset>
         <fieldset className="space-y-1.5 rounded-lg border p-3">
           <legend className="px-1 text-sm font-medium">Thông tin sản phẩm bot được đọc</legend>
-          {fields.length === 0 ? <p className="text-xs text-muted-foreground">Sản phẩm chưa có field tuỳ biến nào (mẫu «Thực phẩm đóng gói» có sẵn quy cách, bảo quản…).</p> : null}
+          {fields.length === 0 ? <p className="text-xs text-muted-foreground">{shell ? "Sản phẩm chưa có thông tin bổ sung nào (mẫu «Thực phẩm đóng gói» có sẵn quy cách, bảo quản…)." : "Sản phẩm chưa có field tuỳ biến nào (mẫu «Thực phẩm đóng gói» có sẵn quy cách, bảo quản…)."}</p> : null}
           {fields.map((f) => (
             <label key={f.key} className="flex items-center gap-2 text-sm">
               <input type="checkbox" checked={c.productFields.includes(f.key)} onChange={(e) => set("productFields", e.target.checked ? [...c.productFields, f.key] : c.productFields.filter((x) => x !== f.key))} />
               {f.label}
             </label>
           ))}
-          <p className="text-xs text-muted-foreground">Field không tick bot không biết tới (vd giá nhập, ghi chú nội bộ).</p>
+          <p className="text-xs text-muted-foreground">{shell ? "Thông tin không tick bot không biết tới (vd giá nhập, ghi chú nội bộ)." : "Field không tick bot không biết tới (vd giá nhập, ghi chú nội bộ)."}</p>
         </fieldset>
       </div>
       <div className="mt-5 space-y-1.5">
         <Label htmlFor="cb-extra">Hướng dẫn thêm · chính sách shop (tuỳ chọn)</Label>
         <Textarea id="cb-extra" rows={3} maxLength={1500} value={c.extraInstructions} placeholder="vd «Xưng em, gọi khách là anh/chị. Khách được kiểm tra thoải mái, ưng ý mới nhận hàng và thanh toán.» — bot trả lời câu hỏi chính sách theo đúng nội dung ở đây thay vì chuyển nhân viên." onChange={(e) => set("extraInstructions", e.target.value)} />
-        <p className="text-xs text-muted-foreground">Không ghi giá hay tồn ở đây — bot luôn đọc giá / tồn từ ERP.</p>
+        <p className="text-xs text-muted-foreground">Không ghi giá hay tồn ở đây — bot luôn đọc giá / tồn từ {shell ? "sổ sản phẩm của shop" : "ERP"}.</p>
       </div>
     </SectionCard>
   );

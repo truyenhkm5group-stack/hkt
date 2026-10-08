@@ -59,6 +59,7 @@ import { setSessionTokenSourceForTests, withOrganization } from "@/lib/platform/
 import { getHomeOrganization, invalidateOrganizations } from "@/lib/platform/organizations";
 import { provisionOrganization } from "@/lib/platform/provision";
 import { PRODUCTS, SHARED_COMMERCE_CORE } from "@/lib/saas/catalog";
+import { visibleTexts } from "./saas-hide-internal.test";
 
 const goc = path.resolve(__dirname, "..");
 const ORG = "sa-shell";
@@ -276,8 +277,12 @@ function kiemTrang() {
   }
   // LỐI CỤT: trang mở được trong vỏ không được vẽ link vào route vỏ chặn, trừ khi bọc trong `shellAllows(…)` (CÙNG hàm với
   // cổng máy chủ — không danh sách thứ hai). `/` không phải lối cụt: máy chủ đưa về trang nhà.
+  // Trang vỏ mở được mà đứng NGOÀI nhóm (dashboard) (`/module-disabled` — đứng ngoài để layout không chuyển hướng vào chính nó)
+  // vẫn là trang của vỏ: quét CÙNG luật, nếu không một nút «Mở Module của tổ chức» trần ở đó là lối cụt không ai thấy.
+  const moNgoaiNhom = SALES_AGENT_ALLOWED_PREFIXES.filter(ngoaiNhom).map((prefix) => ({ url: prefix, file: rel(path.join(goc, "app", ...prefix.split("/").filter(Boolean), "page.tsx")) }));
+  assert.ok(moNgoaiNhom.some((p) => p.url === "/module-disabled"), `quét cả trang vỏ ngoài nhóm (dashboard): ${moNgoaiNhom.map((p) => p.url).join(", ")}`);
   const loiCut: string[] = [];
-  for (const pg of open) {
+  for (const pg of [...open, ...moNgoaiNhom]) {
     const dir = path.dirname(path.join(goc, pg.file));
     for (const f of readdirSync(dir).filter((x) => x.endsWith(".tsx"))) {
       const src = readFileSync(path.join(dir, f), "utf8");
@@ -426,6 +431,86 @@ function kiemNgoaiDashboard() {
   assert.ok(nf.includes("hostOrganization()") && nf.includes("hostProductName(host, brand)"), "404 gốc đọc tên theo host như bố cục gốc (app/layout.tsx)");
 }
 
+/* ═════════════ 7 · CHỮ KỸ THUẬT Ở VỎ (Launch Gate C3) ═════════════
+ *
+ * Finish Line R2 đo 21 đường của vỏ: còn «webhook · module · ERP · API · connector · TEST» ở AI Sales, Nhân viên, Kết nối,
+ * Thiết lập, Kho, Tài khoản. Câu của ERP giữ NGUYÊN, nên câu chữ đi theo sản phẩm: `shell ? «câu chủ shop» : «câu ERP»` (cờ
+ * `isSalesAgentUser`). Bộ quét: bỏ vế ERP của mọi `shell|plain|isSalesAgentUser(user) ? "…" : "…"`, rồi mọi chữ hiển thị còn mang
+ * từ cấm phải nằm trong danh sách miễn trừ ĐÓNG có lý do (vế chỉ dựng cho ERP / nhà, hoặc TÊN MỤC của phần mềm bên thứ ba mà chủ
+ * shop phải bấm). Miễn trừ mồ côi cũng đỏ.
+ */
+const SHELL_COPY_FILES = [
+  "app/(dashboard)/settings/users/page.tsx",
+  "app/(dashboard)/settings/users/invites-panel.tsx",
+  "app/(dashboard)/settings/users/revoke-sessions-dialog.tsx",
+  "app/(dashboard)/settings/users/users-table.tsx",
+  "app/(dashboard)/ai/sales-chatbot/page.tsx",
+  "app/(dashboard)/ai/sales-chatbot/order-sync-panel.tsx",
+  "app/(dashboard)/ai/sales-chatbot/history-panel.tsx",
+  "app/(dashboard)/ai/sales-chatbot/lessons-panel.tsx",
+  "app/(dashboard)/ai/sales-chatbot/playbook-panel.tsx",
+  "app/(dashboard)/ai/sales-chatbot/config-form.tsx",
+  "app/(dashboard)/settings/connections/page.tsx",
+  "components/connectors/connector-group-table.tsx",
+  "components/connectors/legacy-connections.tsx",
+  "app/(dashboard)/setup/page.tsx",
+  "app/(dashboard)/settings/profile/page.tsx",
+  "app/(dashboard)/inventory/receipts/page.tsx",
+  "app/module-disabled/page.tsx",
+  "app/module-disabled/error.tsx",
+] as const;
+const SHELL_FORBIDDEN = /\bERP\b|\bAPI\b|\bTEST\b|\bField\b|\b[Mm]odule\b|\b[Ww]ebhook\b|\b[Cc]onnector\b/;
+const SHELL_COPY_EXEMPT: [string, string, string][] = [
+  ["app/(dashboard)/ai/sales-chatbot/page.tsx", "mục «Webhook» (tên mục của Pancake)", "Tên MỤC trong Pancake mà chủ shop phải bấm — đổi chữ là hướng dẫn sai."],
+  ["app/(dashboard)/ai/sales-chatbot/page.tsx", "developers.zalo.me:", "Tên mục / công cụ của Zalo Developers (Webhook · API Explorer) mà chủ shop phải bấm."],
+  ["app/(dashboard)/ai/sales-chatbot/page.tsx", "Trong Zalo Developers → Webhook", "Tên mục của Zalo Developers mà chủ shop phải bấm."],
+  ["app/(dashboard)/ai/sales-chatbot/page.tsx", "c.channel !== \"TEST\"", "Mã so sánh kênh, không phải chữ hiển thị (bộ quét bắt nhầm đoạn mã giữa hai thẻ)."],
+  ["components/connectors/connector-group-table.tsx", "Chưa luồng nào của ERP dùng kết nối này", "Chỉ dựng khi DTO có `consumers` — DTO của khách bị lọc ở máy chủ (`customerConnectionsView`)."],
+  ["components/connectors/connector-group-table.tsx", "{row.webhook ? (", "Đoạn mã trong khối `row.why ?` — `why` / `webhook` chỉ workspace nhà nhận."],
+  ["components/connectors/connector-group-table.tsx", "Webhook", "Dòng «Webhook <đường dẫn>» trong khối `row.why ?` — chỉ workspace nhà."],
+  ["app/(dashboard)/setup/page.tsx", "Bật / tắt module", "Nằm sau `shellAllows(user, \"/settings/modules\")` — vỏ chặn trang ấy nên không bao giờ dựng."],
+  ["app/module-disabled/page.tsx", "Module chưa bật", "Tiêu đề tab của ERP; vỏ dùng SHELL_TITLE."],
+  ["app/module-disabled/page.tsx", "[module-disabled]", "Nhãn nhật ký máy chủ (console.warn), không hiện ra màn hình."],
+  ["app/module-disabled/page.tsx", "thuộc một module chưa được bật", "Nhánh ERP (sau `if (shell) return`)."],
+  ["app/module-disabled/page.tsx", "chưa dùng mảng này của ERP", "Nhánh ERP (sau `if (shell) return`)."],
+  ["app/module-disabled/page.tsx", "Module này dùng thông tin kết nối của tổ chức nhà", "Nhánh ERP (sau `if (shell) return`)."],
+  ["app/module-disabled/page.tsx", "Bật / tắt module của tổ chức", "Nhánh ERP (sau `if (shell) return`)."],
+  ["app/module-disabled/page.tsx", "Module của tổ chức", "Nhánh ERP, và sau `shellAllows(user, \"/settings/modules\")`."],
+  // Chung nhất — đứng CUỐI để các mục cụ thể ở trên khớp trước (`findIndex` lấy mục đầu tiên).
+  ["app/module-disabled/page.tsx", "Module", "Nhãn nhóm «Module» của nhánh ERP — người vỏ đã `return` sớm ở `if (shell)`."],
+];
+
+function kiemChuKyThuatVo() {
+  const lit = String.raw`"(?:[^"\\\n]|\\.)*"|` + "`(?:[^`\\\\]|\\\\.)*`";
+  const ternary = new RegExp(String.raw`\b(?:shell|plain|isSalesAgentUser\(user\))\s*\?\s*(${lit}|null|undefined)\s*:\s*(?:${lit})`, "g");
+  const hits: string[] = [];
+  const used = new Set<number>();
+  for (const f of SHELL_COPY_FILES) {
+    const src = readFileSync(path.join(goc, f), "utf8").replace(ternary, (_m, shellSide: string) => shellSide);
+    for (const t of visibleTexts(src)) {
+      if (!SHELL_FORBIDDEN.test(t) || /^[a-z0-9-]+$/.test(t.trim()) || t.trim().startsWith("/")) continue;
+      const i = SHELL_COPY_EXEMPT.findIndex(([ef, snippet]) => ef === f && t.includes(snippet));
+      if (i >= 0) used.add(i);
+      else hits.push(`${f}: «${t.trim().slice(0, 140)}»`);
+    }
+  }
+  assert.deepEqual(hits, [], "vỏ Chốt Đơn in chữ kỹ thuật (webhook · module · ERP · API · connector · TEST) — đưa vào `shell ? «câu chủ shop» : «câu ERP»` hoặc khai miễn trừ có lý do");
+  const orphan = SHELL_COPY_EXEMPT.filter((_, i) => !used.has(i)).map(([f, x]) => `${f}: «${x}»`);
+  assert.deepEqual(orphan, [], "miễn trừ không còn khớp chữ nào — xoá khỏi danh sách");
+  // Tự kiểm bộ quét: vế ERP bị bỏ, vế vỏ còn được quét.
+  const thu = `<p>{shell ? "Sổ của shop" : "Đọc từ ERP"}</p>\n<p>{shell ? "Tải module" : "x"}</p>`.replace(ternary, (_m, a: string) => a);
+  assert.ok(!visibleTexts(thu).some((t) => /ERP/.test(t)) && visibleTexts(thu).some((t) => SHELL_FORBIDDEN.test(t)), "bộ quét bỏ đúng vế ERP, giữ vế vỏ");
+
+  // TRANG NHÂN VIÊN (Finish Line R2: 786 ô < 32px, 4.296px ở 390px): vỏ ⇒ tiêu đề «Nhân viên», bảng gọn, ẩn ba khối ERP nâng cao.
+  const users = readFileSync(pageFileOf("/settings/users"), "utf8");
+  assert.match(users, /const shell = isSalesAgentUser\(user\)/, "trang Nhân viên quyết vỏ bằng ĐÚNG hàm chung");
+  assert.match(users, /title=\{shell \? "Nhân viên" : "Người dùng"\}/, "tiêu đề = tên mục menu vỏ; ERP giữ «Người dùng»");
+  assert.match(users, /compact=\{shell\}/, "bảng gọn (bỏ Phòng ban · Quyền & phạm vi) chỉ ở vỏ");
+  const anKhoi = users.slice(users.indexOf("{shell ? null : ("));
+  assert.ok(users.includes("{shell ? null : (") && ["<RolesPanel", "<PositionsPanel", "<RoleMatrix"].every((c) => anKhoi.includes(c)), "Vai trò tuỳ chỉnh · Chức danh · ma trận quyền chỉ dựng ngoài vỏ");
+  assert.match(users, /requirePermission\("users:manage"\)/, "cổng trang không đổi");
+}
+
 /* ═════════════ 4 · MÁY CHỦ ═════════════ */
 async function asRequest<T>(token: string, reqPath: string, fn: () => Promise<T>): Promise<T> {
   setSessionTokenSourceForTests(async () => token);
@@ -531,6 +616,7 @@ export async function testSaasShell() {
   kiemTruocSau();
   kiemMobile();
   kiemNgoaiDashboard();
+  kiemChuKyThuatVo();
   await kiemMayChu();
   console.log(
     `✓ Vỏ app Chốt Đơn: workspace Sales Agent = thương hiệu chotdon + chỉ sản phẩm Chốt Đơn theo module · đúng ${EIGHT.length} mục · ${BLOCKED.length} route nội bộ chặn ở máy chủ (SHELL_RESTRICTED ⇒ hộp thư) · \`/\` ⇒ hộp thư · bật module ERP / bỏ thương hiệu ⇒ menu ERP như cũ · nhà không đổi · thanh dưới điện thoại ≥ 44px · trang ngoài (dashboard) không điều hướng client tới \`/\` · hộp thư rỗng hỏi MỌI kênh, nút nối kênh theo quyền nối kênh`,

@@ -178,10 +178,10 @@ function ConfigForm({ row, secretsReady }: { row: ConnectorView; secretsReady: b
   );
 }
 
-function ConfigCell({ row, secretsReady }: { row: ConnectorView; secretsReady: boolean }) {
+function ConfigCell({ row, secretsReady, plain }: { row: ConnectorView; secretsReady: boolean; plain: boolean }) {
   const [open, setOpen] = useState(false);
   if (row.mode === "CONFIGURABLE") {
-    if (!row.moduleEnabled) return <span className="text-xs text-muted-foreground">Module «{row.moduleLabel}» đang tắt — bật ở Module của tổ chức.</span>;
+    if (!row.moduleEnabled) return <span className="text-xs text-muted-foreground">{plain ? "Chưa có trong gói của cửa hàng." : `Module «${row.moduleLabel}» đang tắt — bật ở Module của tổ chức.`}</span>;
     return open ? (
       <ConfigForm row={row} secretsReady={secretsReady} />
     ) : (
@@ -207,14 +207,18 @@ function ConfigCell({ row, secretsReady }: { row: ConnectorView; secretsReady: b
   );
 }
 
-export function ConnectorGroupTable({ rows, secretsReady }: { rows: ConnectorView[]; secretsReady: boolean }) {
-  if (rows.length === 0) return <p className="p-3 text-xs text-muted-foreground">Chưa có connector nào thuộc loại này.</p>;
+/**
+ * `plain` (vỏ Chốt Đơn): cùng bảng, cùng nút, cùng server action — chỉ bỏ chữ kỹ thuật của sổ connector («Connector», «module …»,
+ * loại xác thực) khỏi phần HIỂN THỊ. Không đổi dòng nào được thấy hay làm gì được.
+ */
+export function ConnectorGroupTable({ rows, secretsReady, plain = false }: { rows: ConnectorView[]; secretsReady: boolean; plain?: boolean }) {
+  if (rows.length === 0) return <p className="p-3 text-xs text-muted-foreground">{plain ? "Chưa có kết nối nào thuộc loại này." : "Chưa có connector nào thuộc loại này."}</p>;
   return (
     <table className="w-full min-w-[860px] text-left text-[13px]">
       <thead>
         <tr className="border-b border-hairline text-[11px] uppercase tracking-wide text-muted-foreground">
-          <th className="px-3 py-2 font-medium">Connector</th>
-          <th className="px-3 py-2 font-medium">Thuê bao · xác thực</th>
+          <th className="px-3 py-2 font-medium">{plain ? "Kết nối" : "Connector"}</th>
+          <th className="px-3 py-2 font-medium">{plain ? "Ghi chú" : "Thuê bao · xác thực"}</th>
           <th className="px-3 py-2 font-medium">Trạng thái</th>
           <th className="w-[380px] px-3 py-2 font-medium">Cấu hình</th>
         </tr>
@@ -240,13 +244,13 @@ export function ConnectorGroupTable({ rows, secretsReady }: { rows: ConnectorVie
                 ) : null}
               </div>
               <p className="text-xs text-muted-foreground">
-                {row.vendor} · module {row.moduleLabel}
+                {plain ? `${row.vendor}` : `${row.vendor} · module ${row.moduleLabel}`}
               </p>
             </td>
             <td className="px-3 py-2.5">
               <div className="flex flex-wrap gap-1">
                 {row.tenancy ? <Pill tone={row.tenancy === "PER_ORG" ? "ok" : "dashed"}>{row.tenancy === "PER_ORG" ? "Theo tổ chức" : "Chỉ tổ chức nhà"}</Pill> : null}
-                <Pill tone="muted">{CONNECTOR_AUTH_LABEL[row.auth]}</Pill>
+                {plain ? null : <Pill tone="muted">{CONNECTOR_AUTH_LABEL[row.auth]}</Pill>}
                 {row.hasHealthCheck ? <Pill tone="muted">Có kiểm tra</Pill> : null}
               </div>
             </td>
@@ -254,7 +258,7 @@ export function ConnectorGroupTable({ rows, secretsReady }: { rows: ConnectorVie
               <StatusCell row={row} />
             </td>
             <td className="px-3 py-2.5">
-              <ConfigCell row={row} secretsReady={secretsReady} />
+              <ConfigCell row={row} secretsReady={secretsReady} plain={plain} />
             </td>
           </tr>
         ))}

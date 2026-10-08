@@ -88,7 +88,8 @@ export const DEFAULT_CHOTDON_DOMAIN = "chotdontudong.com";
 
 /**
  * Header MÁY CHỦ mang thương hiệu của host đang gọi. Đặt SAU khi middleware xoá mọi `x-erp-*` trình duyệt gửi lên — trình
- * duyệt không tự khai được mình đang ở thương hiệu nào. Vắng header ⇒ `vnx`.
+ * duyệt không tự khai được mình đang ở thương hiệu nào. Vắng header ⇒ `hostBrand()` suy lại bằng CHÍNH luật của middleware
+ * (`brandOfRequest`); ngoài ngữ cảnh request ⇒ `vnx`.
  */
 export const ERP_SITE_BRAND_HEADER = "x-erp-site-brand";
 
@@ -166,7 +167,7 @@ export function chotdonAppHost(env: SiteEnv): string | null {
 
 /**
  * Thương hiệu của MỌI host (mặt tiền lẫn phần mềm): `chotdontudong.com` · `www.` · `app.` ⇒ `chotdon`; còn lại ⇒ `vnx`.
- * Middleware đặt kết quả vào `ERP_SITE_BRAND_HEADER` cho mọi lượt gọi.
+ * Middleware đặt kết quả vào `ERP_SITE_BRAND_HEADER` cho mọi lượt gọi — host đưa vào chọn bằng `brandHost` (dưới).
  */
 export function brandOfHost(host: string | null | undefined, env: SiteEnv): SiteBrand {
   const site = matchSite(host, env);
@@ -178,6 +179,39 @@ export function brandOfHost(host: string | null | undefined, env: SiteEnv): Site
 /** Đọc lại header thương hiệu — giá trị lạ / vắng ⇒ `vnx`, không bao giờ đoán sang thương hiệu khác. */
 export function brandFromHeader(raw: string | null | undefined): SiteBrand {
   return raw === "chotdon" ? "chotdon" : "vnx";
+}
+
+/**
+ * ═══ HOST NÀO QUYẾT THƯƠNG HIỆU: `x-forwarded-host` TRƯỚC, `host` SAU ═══
+ *
+ * P1 Finish Line R2 (08/10/2026): khách Chốt Đơn đặt mật khẩu ở `/reset/…` trên host Chốt Đơn ⇒ trang đăng nhập hiện ra mang
+ * thương hiệu VNXcommerce; tải lại thì đúng. Cơ chế (truy trong Next 15.5.25 — `createRedirectRenderResult` của
+ * `server/app-render/action-handler`): server action `redirect(X)` khiến máy chủ TỰ xin RSC của X bằng `fetch` tới
+ * `__NEXT_PRIVATE_ORIGIN` (`http://localhost:<cổng>` — `HOSTNAME=0.0.0.0` của Docker cũng ra `localhost`), mang theo header của
+ * lượt POST. `fetch` của Node BỎ header `Host` (header cấm của chuẩn Fetch) và dùng host của URL ⇒ lượt ấy đi qua middleware
+ * với `host = localhost:<cổng>` ⇒ thương hiệu `vnx`. Header `x-forwarded-host` thì đi nguyên: Caddy đặt nó bằng host thật
+ * (production), Next tự đặt khi chạy không có proxy.
+ *
+ * Chỉ dùng cho THƯƠNG HIỆU — chữ và hình, không quyết quyền, không quyết dữ liệu: một lượt gọi thẳng vào cổng Node tự khai
+ * `x-forwarded-host` chỉ đổi được thương hiệu của chính trang nó xem, đúng như tự gõ host kia vào thanh địa chỉ (cả hai host
+ * đều công khai). KHÔNG dùng cho tên miền con của tổ chức (`hostSlug` — gắn phiên với tổ chức) hay định tuyến mặt tiền
+ * (`matchSite`): những thứ ấy vẫn đọc `host`.
+ */
+export function brandHost(host: string | null | undefined, forwardedHost: string | null | undefined): string | null {
+  const forwarded = String(forwardedHost ?? "").split(",")[0]?.trim();
+  if (forwarded) return forwarded;
+  const h = String(host ?? "").trim();
+  return h || null;
+}
+
+/** Thương hiệu của MỘT lượt gọi từ header của nó — luật duy nhất cho middleware lẫn `hostBrand()` khi thiếu header máy chủ. */
+export function brandOfRequest(get: (name: string) => string | null | undefined, env: SiteEnv): SiteBrand {
+  return brandOfHost(brandHost(get("host"), get("x-forwarded-host")), env);
+}
+
+/** Biến môi trường của lớp mặt tiền — đọc ở MỖI lượt gọi (middleware chạy ở Edge, không có `lib/env`). */
+export function siteEnvFromProcess(): SiteEnv {
+  return { SITE_DOMAIN: process.env.SITE_DOMAIN, CHOTDON_DOMAIN: process.env.CHOTDON_DOMAIN, APP_URL: process.env.APP_URL, CHOTDON_APP_URL: process.env.CHOTDON_APP_URL };
 }
 
 /**

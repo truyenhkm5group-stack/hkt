@@ -18,6 +18,7 @@ import { planKeyOf, resolvePlan } from "@/lib/entitlements/check";
 import { findOrganization } from "@/lib/platform/organizations";
 import { publicationOf } from "@/lib/platform/publish";
 import { productCreateGate } from "@/lib/records/product-create";
+import { isSalesAgentUser } from "@/lib/constants/saas-nav";
 import { loadSalesChatbotConfig } from "@/lib/sales-chatbot/engine";
 import { listRules } from "@/lib/workflow/rules";
 
@@ -84,7 +85,7 @@ export async function getGettingStarted(user: SessionUser): Promise<GettingStart
     steps.push({ key: "chatbot", label: "Cấu hình chatbot bán hàng", detail: bot.enabled ? `Bot «${bot.botName}» đang bật` : "Chưa bật — dùng AI có sẵn trong gói (hoặc khoá AI riêng), chạy khung thử rồi bật.", href: "/ai/sales-chatbot", cta: "Mở chatbot", done: bot.enabled });
   }
   const liveNotify = (await listRules()).filter((r) => r.status === "ACTIVE" && r.mode === "LIVE" && r.actions.some((a) => a.kind === "send_message")).length;
-  steps.push({ key: "notifications", label: "Báo đơn cho nhóm vận hành", detail: liveNotify > 0 ? `${liveNotify} luật gửi tin nhóm đang chạy` : "Chưa có — đơn chốt chỉ báo trong ERP.", href: "/settings/notifications", cta: "Cấu hình thông báo", done: liveNotify > 0 });
+  steps.push({ key: "notifications", label: "Báo đơn cho nhóm vận hành", detail: liveNotify > 0 ? `${liveNotify} luật gửi tin nhóm đang chạy` : isSalesAgentUser(user) ? "Chưa có — đơn chốt chỉ báo trong ứng dụng." : "Chưa có — đơn chốt chỉ báo trong ERP.", href: "/settings/notifications", cta: "Cấu hình thông báo", done: liveNotify > 0 });
   if (user.organization && !user.organization.isHome) {
     const pub = await publicationOf(user.organization.code);
     if (pub.state !== "UNTRACKED") {

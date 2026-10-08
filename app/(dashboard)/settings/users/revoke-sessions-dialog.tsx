@@ -20,10 +20,13 @@ export function RevokeSessionsDialog({
   user,
   open,
   onOpenChange,
+  appName = "ERP",
 }: {
   user: { id: string; name: string; email: string };
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** Tên phần mềm in trong câu chữ — ERP «ERP» (chữ cũ, từng ký tự), vỏ Chốt Đơn «Chốt Đơn». */
+  appName?: string;
 }) {
   const [reason, setReason] = useState("");
   const [pending, startTransition] = useTransition();
@@ -64,7 +67,7 @@ export function RevokeSessionsDialog({
             id="revoke-reason"
             value={reason}
             onChange={(e) => setReason(e.target.value)}
-            placeholder="Ví dụ: nhân viên báo mất điện thoại đang đăng nhập ERP"
+            placeholder={`Ví dụ: nhân viên báo mất điện thoại đang đăng nhập ${appName}`}
             rows={3}
             maxLength={500}
           />

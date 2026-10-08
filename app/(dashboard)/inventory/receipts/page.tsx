@@ -20,6 +20,7 @@ import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { can,  } from "@/lib/auth/session";
 import { requireResource } from "@/lib/auth/scope-guard";
+import { isSalesAgentUser } from "@/lib/constants/saas-nav";
 import { ScopeDenied } from "@/components/scope-denied";
 import { formatDate, formatDateTime, formatNumber, formatVND } from "@/lib/format";
 import { pendingReturnsByVariant } from "@/lib/returns/warehouse";
@@ -33,6 +34,8 @@ export const metadata = { title: "Nhập hàng & kiểm kê" };
 export default async function StockReceiptsPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const raw = await searchParams;
   const { user, decision } = await requireResource("INVENTORY", "products:view");
+  // Vỏ Chốt Đơn: câu chữ không «ERP» (khách không thuê ERP) — luật sổ kho không đổi.
+  const app = isSalesAgentUser(user) ? "Chốt Đơn" : "ERP";
   // Phạm vi hẹp hơn thứ dữ liệu này biểu diễn được ⇒ TỪ CHỐI và nói rõ, không cho xem hết.
   if (decision.allow === "NONE") return <ScopeDenied title="Phiếu nhập kho" reason={decision.reason} fix={decision.fix} />;
   const canWrite = can(user, "inventory:write");
@@ -87,7 +90,7 @@ export default async function StockReceiptsPage({ searchParams }: { searchParams
       <PageHeader
         eyebrow="Kho"
         title="Nhập hàng & kiểm kê"
-        description={`Sổ kho do shop tự ghi nhận trên ERP · ${formatNumber(summary.receipts)} phiếu nhập · ${formatNumber(summary.adjustments)} phiếu điều chỉnh${pendingReturnTotal ? ` · ${formatNumber(pendingReturnTotal)} sản phẩm hàng hoàn đang chờ kho nhận` : ""}${summary.lastAt ? ` · gần nhất ${formatDate(summary.lastAt)}` : ""}`}
+        description={`Sổ kho do shop tự ghi nhận trên ${app} · ${formatNumber(summary.receipts)} phiếu nhập · ${formatNumber(summary.adjustments)} phiếu điều chỉnh${pendingReturnTotal ? ` · ${formatNumber(pendingReturnTotal)} sản phẩm hàng hoàn đang chờ kho nhận` : ""}${summary.lastAt ? ` · gần nhất ${formatDate(summary.lastAt)}` : ""}`}
         actions={
           canWrite ? (
             <>
@@ -111,13 +114,13 @@ export default async function StockReceiptsPage({ searchParams }: { searchParams
         <MetricCard label="Tổng đã nhập" value={`+${formatNumber(summary.received)}`} note={`${formatNumber(summary.receipts)} phiếu nhập hàng`} icon={ArrowDownToLine} tone="green" />
         <MetricCard label="Điều chỉnh kiểm kê" value={`${summary.adjusted > 0 ? "+" : ""}${formatNumber(summary.adjusted)}`} note={`${formatNumber(summary.adjustments)} phiếu điều chỉnh`} icon={ClipboardCheck} tone={summary.adjusted < 0 ? "rose" : "slate"} />
         <MetricCard label="Giá trị hàng nhập" value={formatVND(summary.cost, { compact: true })} note={khaiGia ? "Theo giá ghi trên phiếu — đơn giá khai trên phiếu nhập" : "Theo giá ghi trên phiếu — phiếu nhập mới lấy giá báo MKT"} icon={Coins} tone="primary" />
-        <MetricCard label="Mẫu mã trong ERP" value={formatNumber(variants.length || 0)} note={`${formatNumber(variants.filter((v) => v.currentStock <= 0).length)} mẫu mã tồn ≤ 0`} icon={ListOrdered} tone="blue" />
+        <MetricCard label={`Mẫu mã trong ${app}`} value={formatNumber(variants.length || 0)} note={`${formatNumber(variants.filter((v) => v.currentStock <= 0).length)} mẫu mã tồn ≤ 0`} icon={ListOrdered} tone="blue" />
       </section>
 
       <div className="flex items-start gap-3 rounded-xl border bg-muted/40 p-3.5 text-[13px] text-muted-foreground">
         <Info className="mt-0.5 size-4 shrink-0" />
         <div>
-          <b className="text-foreground">Cách dùng lần đầu:</b> bấm <b className="text-foreground">Kiểm kê</b>, nhập số đếm thực tế của từng mẫu mã đang có trong kho → ERP tạo phiếu điều chỉnh để tồn khả dụng bằng đúng số đếm (đã tính hàng đang giao). Từ đó về sau, mỗi lần hàng về thì bấm <b className="text-foreground">Nhập hàng</b>. <b className="text-foreground">Tồn thực tế</b> = tổng phiếu kho − hàng đã xuất; <b className="text-foreground">Khả dụng bán</b> = Tồn thực tế − hàng đã chốt đơn chưa xuất. Hàng hoàn <b className="text-foreground">KHÔNG</b> tự về kho: chỉ khi kho lập phiếu <b className="text-foreground">Tái nhập hàng hoàn</b> với số đếm thực tế — đơn vị vận chuyển báo &ldquo;đã hoàn&rdquo; là chưa đủ. Xem tồn tại <Link href="/products" className="font-semibold text-primary hover:underline">Sản phẩm &amp; tồn kho</Link>.
+          <b className="text-foreground">Cách dùng lần đầu:</b> bấm <b className="text-foreground">Kiểm kê</b>, nhập số đếm thực tế của từng mẫu mã đang có trong kho → {app} tạo phiếu điều chỉnh để tồn khả dụng bằng đúng số đếm (đã tính hàng đang giao). Từ đó về sau, mỗi lần hàng về thì bấm <b className="text-foreground">Nhập hàng</b>. <b className="text-foreground">Tồn thực tế</b> = tổng phiếu kho − hàng đã xuất; <b className="text-foreground">Khả dụng bán</b> = Tồn thực tế − hàng đã chốt đơn chưa xuất. Hàng hoàn <b className="text-foreground">KHÔNG</b> tự về kho: chỉ khi kho lập phiếu <b className="text-foreground">Tái nhập hàng hoàn</b> với số đếm thực tế — đơn vị vận chuyển báo &ldquo;đã hoàn&rdquo; là chưa đủ. Xem tồn tại <Link href="/products" className="font-semibold text-primary hover:underline">Sản phẩm &amp; tồn kho</Link>.
         </div>
       </div>
 

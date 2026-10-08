@@ -15,7 +15,8 @@ import { HISTORY_LIMITS, HISTORY_STATUS_LABEL, historyCountsText, historyRemaini
  * Pancake vào «Hộp thư khách» (lib/sales-chatbot/history.ts). Chạy nền, tiến độ lưu ở máy chủ — đóng trang không dừng lượt. Không
  * `router.refresh()` sau action (action đã `revalidatePath`); «Làm mới» chỉ để xem tiến độ.
  */
-export function InboxHistoryPanel({ run, fanpageReady }: { run: HistoryRun; fanpageReady: boolean }) {
+/** `shell`: vỏ Chốt Đơn — chỉ đổi CHỮ (không «ERP» / chữ kỹ thuật), câu của ERP giữ nguyên từng ký tự. */
+export function InboxHistoryPanel({ run, fanpageReady, shell = false }: { run: HistoryRun; fanpageReady: boolean; shell?: boolean }) {
   const router = useRouter();
   const [pending, start] = useTransition();
   const stale = historyRunStale(run, new Date());
@@ -32,7 +33,7 @@ export function InboxHistoryPanel({ run, fanpageReady }: { run: HistoryRun; fanp
   return (
     <SectionCard
       title="Đồng bộ lịch sử hộp thư"
-      description="Đọc TẤT CẢ hội thoại và tin cũ của fanpage (qua Pancake) vào «Hộp thư khách» — kể cả khách nhắn trước lúc nối page với ERP. Tin cũ chỉ để xem: bot không trả lời lại, máy ghi đơn không đọc lại, không tính «chưa đọc» / «chờ trả lời»."
+      description={`Đọc TẤT CẢ hội thoại và tin cũ của fanpage (qua Pancake) vào «Hộp thư khách» — kể cả khách nhắn trước lúc nối page với ${shell ? "Chốt Đơn" : "ERP"}. Tin cũ chỉ để xem: bot không trả lời lại, máy ghi đơn không đọc lại, không tính «chưa đọc» / «chờ trả lời».`}
     >
       <div className="space-y-3 text-sm" data-testid="inbox-history-panel">
         <div className="flex flex-wrap items-center gap-2">
@@ -58,7 +59,7 @@ export function InboxHistoryPanel({ run, fanpageReady }: { run: HistoryRun; fanp
             Làm mới
           </Button>
         </div>
-        {!fanpageReady ? <p className="text-xs text-amber-700 dark:text-amber-400">Cần bật kết nối «Fanpage qua Pancake» (Cài đặt → Kết nối) — máy đọc lịch sử bằng page access token của shop.</p> : null}
+        {!fanpageReady ? <p className="text-xs text-amber-700 dark:text-amber-400">Cần bật kết nối «Fanpage qua Pancake» ({shell ? "trang Kết nối" : "Cài đặt → Kết nối"}) — máy đọc lịch sử bằng page access token của shop.</p> : null}
 
         <div className="space-y-1 text-xs" data-testid="inbox-history-status">
           <p>
@@ -77,8 +78,8 @@ export function InboxHistoryPanel({ run, fanpageReady }: { run: HistoryRun; fanp
           <summary className="cursor-pointer">Máy làm gì · giới hạn</summary>
           <ul className="mt-1 list-disc space-y-0.5 pl-4">
             <li>Đọc danh sách hội thoại của page từ mới tới cũ, rồi từng hội thoại; mỗi lời gọi cách nhau ≥ {HISTORY_LIMITS.requestGapMs} ms, Pancake báo quá tải thì tự nghỉ rồi đọc tiếp.</li>
-            <li>Tin đã có trong ERP (webhook đã ghi, lượt trước đã nhập) bị bỏ qua — chạy lại bao nhiêu lần cũng không nhân đôi.</li>
-            <li>Tin mới hơn {HISTORY_LIMITS.freshMinutes} phút không nhập — đó là việc của bot / webhook.</li>
+            <li>{shell ? "Tin đã có (đã nhận trực tiếp hoặc lượt trước đã nhập) bị bỏ qua — chạy lại bao nhiêu lần cũng không nhân đôi." : "Tin đã có trong ERP (webhook đã ghi, lượt trước đã nhập) bị bỏ qua — chạy lại bao nhiêu lần cũng không nhân đôi."}</li>
+            <li>Tin mới hơn {HISTORY_LIMITS.freshMinutes} phút không nhập — đó là việc của bot{shell ? "" : " / webhook"}.</li>
             <li>Tiến độ lưu ở máy chủ sau mỗi lời gọi: máy khởi động lại thì tự đọc tiếp từ chỗ dừng (trong vòng 5 phút).</li>
             <li>SĐT khách Pancake đã ghi nhận được lưu cùng hội thoại để lọc «có SĐT».</li>
             <li>Chỉ kênh Facebook qua Pancake. Page nối trực tiếp với Facebook nhập ở khung «Hội thoại gần đây từ Facebook / Instagram»; Zalo OA chưa nhập được lịch sử.</li>

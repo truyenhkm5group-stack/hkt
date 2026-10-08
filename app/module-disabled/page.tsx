@@ -12,6 +12,8 @@ import { listActiveAdmins } from "@/lib/queries/platform-modules";
 import { cn } from "@/lib/utils";
 
 const TITLE = "Module chưa bật";
+/** Tiêu đề tab cho khách Chốt Đơn — vỏ không nói «module» (chữ kỹ thuật của ERP). */
+const SHELL_TITLE = "Chưa có trong gói";
 
 /**
  * Tab theo tổ chức của phiên. Trang này đứng NGOÀI bố cục `(dashboard)` (xem dưới), nên không thừa hưởng tiêu đề / biểu tượng
@@ -19,11 +21,19 @@ const TITLE = "Module chưa bật";
  * tổ chức khách không thấy «VNXcommerce ERP» trên tab (Phase 10 · §4).
  */
 export async function generateMetadata(): Promise<Metadata> {
-  const user = await getCurrentUser();
-  if (!user?.organization || user.organization.isHome) return { title: TITLE };
-  const brand = await getOrgBrand(user);
-  const name = brand?.name ?? user.organization.name;
-  return { ...orgTabMetadata({ name, logoUrl: brand?.logoUrl ?? null }), title: { absolute: `${TITLE} · ${name}` } };
+  // Trang này là ĐÍCH của một lượt bị chặn: đọc phiên / thương hiệu hỏng thì tab mang tiêu đề chung, không làm hỏng cả trang.
+  try {
+    const user = await getCurrentUser();
+    if (!user?.organization || user.organization.isHome) return { title: TITLE };
+    const brand = await getOrgBrand(user).catch((error: unknown) => {
+      console.warn(`[module-disabled] không đọc được thương hiệu — dùng tên tổ chức: ${error instanceof Error ? error.message : String(error)}`);
+      return null;
+    });
+    const name = brand?.name ?? user.organization.name;
+    return { ...orgTabMetadata({ name, logoUrl: brand?.logoUrl ?? null }), title: { absolute: `${isSalesAgentUser(user) ? SHELL_TITLE : TITLE} · ${name}` } };
+  } catch {
+    return { title: TITLE };
+  }
 }
 
 /**
@@ -45,6 +55,15 @@ export async function generateMetadata(): Promise<Metadata> {
  * Cũng vì thế mọi lối RA khỏi trang là `<a>` TẢI CẢ TRANG, không `<Link>`: điều hướng client từ trang ngoài nhóm vào `(dashboard)`
  * dựng layout trong một lượt RSC — với người vỏ Chốt Đơn, `/` bị chính layout chặn, đúng mẫu vòng trắng. Người vỏ về trang nhà
  * của vỏ (`salesAgentHomeFor`), không về `/`. `tests/shell-gate-redirects.test.ts` khoá cả hai.
+ *
+ * ─── VỎ CHỐT ĐƠN: CÙNG MỘT LUẬT, CÂU CHỮ CỦA CHỦ SHOP ───
+ *
+ * Khách Chốt Đơn không thuê ERP nên không có «module» nào để bật: với họ trang này nói «chưa có trong gói», chỉ đường tới
+ * «Gói dịch vụ» (người quản lý được gói) thay cho «Module của tổ chức» (trang bộ dựng — vỏ chặn), và bỏ danh sách «cần bật trước».
+ * Chỉ đổi chữ: ai bật được, trang nào mở được vẫn do cổng máy chủ quyết.
+ *
+ * Đọc danh sách quản trị hỏng (CSDL bận…) ⇒ câu chung, không trang lỗi — đây là trang GIẢI THÍCH một lượt bị chặn, nó mà sập thì
+ * người dùng không còn câu nào; lỗi ngoài dự kiến còn lại rơi vào `error.tsx` cạnh đây (lối ra cũng tải cả trang).
  */
 export default async function ModuleDisabledPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const user = await requireUser();
@@ -54,8 +73,44 @@ export default async function ModuleDisabledPage({ searchParams }: { searchParam
   const orgName = user.organization?.name ?? "tổ chức của bạn";
   const enabled = new Set(user.modules ?? []);
   const canManage = can(user, "modules:manage");
-  const admins = await listActiveAdmins();
-  const home = isSalesAgentUser(user) ? salesAgentHomeFor(user) : "/";
+  const shell = isSalesAgentUser(user);
+  const admins = await listActiveAdmins().catch((error: unknown) => {
+    console.warn(`[module-disabled] không đọc được danh sách quản trị — in câu chung: ${error instanceof Error ? error.message : String(error)}`);
+    return [];
+  });
+  const home = shell ? salesAgentHomeFor(user) : "/";
+  // Vỏ: người quản lý được gói (đúng khoá trang Gói dịch vụ đòi) thấy lối nâng gói; cổng vỏ phải mở được trang đó.
+  const planHref = "/settings/plan";
+  const canPlan = shell && can(user, "settings:manage") && shellAllows(user, planHref);
+
+  if (shell) {
+    return (
+      <main className="mx-auto w-full max-w-3xl space-y-5 px-3 py-6 sm:px-5 sm:py-10">
+        <PageHeader title={def ? `«${def.label}» chưa có trong gói của cửa hàng` : "Trang này chưa có trong gói của cửa hàng"} description={user.organization?.name} refresh={false} />
+        <SectionCard>
+          <div className="flex gap-4">
+            <span className="flex size-10 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground">
+              <Blocks className="size-5" />
+            </span>
+            <div className="min-w-0 space-y-3 text-sm">
+              <p>Gói Chốt Đơn hiện tại của cửa hàng chưa gồm phần này, nên trang của nó không mở được.</p>
+              <p className="text-muted-foreground">{canPlan ? "Xem các gói và nâng gói ở trang Gói dịch vụ." : "Cần dùng phần này thì nhờ chủ cửa hàng xem trang Gói dịch vụ."}</p>
+              <div className="flex flex-wrap gap-2 pt-1">
+                {canPlan ? (
+                  <Button asChild size="sm">
+                    <a href={planHref}>Xem Gói dịch vụ</a>
+                  </Button>
+                ) : null}
+                <Button asChild size="sm" variant="outline">
+                  <a href={home}>Về trang chính</a>
+                </Button>
+              </div>
+            </div>
+          </div>
+        </SectionCard>
+      </main>
+    );
+  }
 
   return (
     <main className="mx-auto w-full max-w-3xl space-y-5 px-3 py-6 sm:px-5 sm:py-10">

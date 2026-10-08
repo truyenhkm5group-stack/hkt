@@ -106,7 +106,7 @@ export const CUSTOMER_AI_CONFIG_MANAGED = "Cấu hình AI của shop do đội n
 export const CUSTOMER_AI_DRAFT_FAILED = "AI chưa soạn được gói cấu hình — thử lại, hoặc viết mô tả ngắn gọn, rõ hơn.";
 
 /** Đọc lịch sử tin nhắn qua Pancake hỏng (từ chối · bận · mạng) — câu cho KHÁCH, KHÔNG kèm chữ do Pancake trả về. */
-export const CUSTOMER_PANCAKE_READ_FAILED = "Không đọc được tin nhắn từ Pancake — thử lại sau, hoặc kiểm tra kết nối «Fanpage qua Pancake» ở Cài đặt → Kết nối.";
+export const CUSTOMER_PANCAKE_READ_FAILED = "Không đọc được tin nhắn từ Pancake — thử lại sau, hoặc kiểm tra kết nối «Fanpage qua Pancake» ở trang Kết nối.";
 
 /**
  * Hạn mức AI chặn một lượt — với KHÁCH đó là «hết lượt của gói» (khách tự xử ở trang gói) hay «chưa sẵn sàng» (việc của hỗ trợ:

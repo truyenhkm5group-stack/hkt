@@ -93,7 +93,7 @@ export default async function SalesChatbotPage() {
         description={user.organization?.name}
         hint={
           <div className="space-y-1.5 text-xs leading-5">
-            <p>Bot trả lời khách của shop: tìm sản phẩm, báo giá và tồn ĐỌC TỪ ERP ngay lúc hỏi (không nằm trong lời nhắc), tính tiền giỏ, lên đơn nháp, đọc lại tóm tắt và CHỈ chốt khi khách xác nhận. Đơn chốt ⇒ giữ hàng ở kho + báo nhóm vận hành (nếu đã cấu hình Thông báo nhóm).</p>
+            <p>Bot trả lời khách của shop: tìm sản phẩm, báo giá và tồn ĐỌC TỪ {shell ? "SỔ SẢN PHẨM CỦA SHOP" : "ERP"} ngay lúc hỏi (không nằm trong lời nhắc), tính tiền giỏ, lên đơn nháp, đọc lại tóm tắt và CHỈ chốt khi khách xác nhận. Đơn chốt ⇒ giữ hàng ở kho + báo nhóm vận hành (nếu đã cấu hình Thông báo nhóm).</p>
             {customer ? (
               <p>Khung thử bên phải dùng giá / tồn thật nhưng KHÔNG tạo khách, đơn hay tin nhóm thật.</p>
             ) : (
@@ -117,7 +117,7 @@ export default async function SalesChatbotPage() {
       />
       <div className="grid gap-5 xl:grid-cols-[1fr_440px]">
         <div className="space-y-5">
-          {orderSync ? <OrderSyncPanel view={customer ? customerOrderSyncView(orderSync) : orderSync} manage={manage} /> : null}
+          {orderSync ? <OrderSyncPanel view={customer ? customerOrderSyncView(orderSync) : orderSync} manage={manage} shell={shell} /> : null}
           {readiness ? (
             <SectionCard
               title={`AI đã sẵn sàng tự trả lời khách? — ${READINESS_VERDICT_LABEL[readiness.verdict]}`}
@@ -187,18 +187,18 @@ export default async function SalesChatbotPage() {
                 ) : null}
                 <ol className="list-decimal space-y-1 pl-5 text-xs leading-5 text-muted-foreground">
                   <li>
-                    <Link href="/settings/connections" className="underline underline-offset-2">Cài đặt → Kết nối</Link> → «Fanpage qua Pancake»: nhập Page ID và page access token (Pancake → Cài đặt page → Công cụ) → Lưu → Kiểm tra → Bật.
+                    <Link href="/settings/connections" className="underline underline-offset-2">{shell ? "Trang Kết nối" : "Cài đặt → Kết nối"}</Link> → «Fanpage qua Pancake»: nhập Page ID và page access token (Pancake → Cài đặt page → Công cụ) → Lưu → Kiểm tra → Bật.
                   </li>
-                  <li>Trong Pancake: Cài đặt page → Webhook → bật sự kiện tin nhắn (messaging) → dán URL dưới đây.</li>
+                  <li>{shell ? "Trong Pancake: Cài đặt page → mục «Webhook» (tên mục của Pancake) → bật sự kiện tin nhắn → dán địa chỉ dưới đây." : "Trong Pancake: Cài đặt page → Webhook → bật sự kiện tin nhắn (messaging) → dán URL dưới đây."}</li>
                   <li>Bật bot ở khung Cấu hình bên dưới. Bot trả lời sau khoảng 5 giây (tin đầu của hội thoại mới: tối đa 10 giây để nhường trả lời tự động của Meta); page đã trả lời thì bot không chen; nhân viên trả lời trên fanpage ⇒ bot nhường hội thoại đó 30 phút.</li>
                 </ol>
                 {fanpage.webhookUrl ? (
                   <div className="space-y-1">
-                    <p className="text-xs font-medium">URL webhook của shop (giữ kín — ai có URL này gửi được tin giả vào bot):</p>
+                    <p className="text-xs font-medium">{shell ? "Địa chỉ nhận tin của shop — dán ở bước 2 (giữ kín: ai có địa chỉ này gửi được tin giả vào bot):" : "URL webhook của shop (giữ kín — ai có URL này gửi được tin giả vào bot):"}</p>
                     <code className="block break-all rounded-md bg-muted px-2 py-1.5 text-[11px]" data-testid="fanpage-webhook-url">{fanpage.webhookUrl}</code>
                   </div>
                 ) : (
-                  <p className="text-xs text-amber-700 dark:text-amber-400">Máy chủ chưa có khoá bí mật nền tảng — chưa dựng được URL webhook. Báo người vận hành nền tảng.</p>
+                  <p className="text-xs text-amber-700 dark:text-amber-400">{shell ? "Chưa tạo được địa chỉ nhận tin của shop — báo đội hỗ trợ." : "Máy chủ chưa có khoá bí mật nền tảng — chưa dựng được URL webhook. Báo người vận hành nền tảng."}</p>
                 )}
               </div>
             </SectionCard>
@@ -214,34 +214,34 @@ export default async function SalesChatbotPage() {
                 <ol className="list-decimal space-y-1 pl-5 text-xs leading-5 text-muted-foreground">
                   <li>developers.zalo.me: tạo ứng dụng, liên kết OA của shop, lấy App ID · App Secret · OA Secret Key (mục Webhook); lấy refresh token ở API Explorer (loại OA Access Token).</li>
                   <li>
-                    <Link href="/settings/connections" className="underline underline-offset-2">Cài đặt → Kết nối</Link> → «Zalo OA»: nhập đủ các ô → Lưu → Kiểm tra → Bật. Máy tự làm mới token và lưu cặp mới.
+                    <Link href="/settings/connections" className="underline underline-offset-2">{shell ? "Trang Kết nối" : "Cài đặt → Kết nối"}</Link> → «Zalo OA»: nhập đủ các ô → Lưu → Kiểm tra → Bật. {shell ? "Máy tự gia hạn quyền truy cập Zalo." : "Máy tự làm mới token và lưu cặp mới."}
                   </li>
                   <li>Trong Zalo Developers → Webhook: dán URL dưới đây, bật sự kiện «Người dùng gửi tin nhắn» và «OA gửi tin nhắn» (để bot biết nhân viên đang trả lời).</li>
                   <li>Bot chỉ trả lời trong 48 giờ từ tin cuối của khách — ngoài đó Zalo tính phí tin tư vấn nên bot không gửi. Nhân viên trả lời trong OA ⇒ bot nhường hội thoại 30 phút. Ảnh của câu trả lời mẫu chưa gửi được qua Zalo (chỉ phần chữ).</li>
                 </ol>
                 {zalo.webhookUrl ? (
                   <div className="space-y-1">
-                    <p className="text-xs font-medium">URL webhook Zalo của shop (giữ kín):</p>
+                    <p className="text-xs font-medium">{shell ? "Địa chỉ nhận tin Zalo của shop — dán ở bước 3 (giữ kín):" : "URL webhook Zalo của shop (giữ kín):"}</p>
                     <code className="block break-all rounded-md bg-muted px-2 py-1.5 text-[11px]" data-testid="zalo-webhook-url">{zalo.webhookUrl}</code>
                   </div>
                 ) : (
-                  <p className="text-xs text-amber-700 dark:text-amber-400">Máy chủ chưa có khoá bí mật nền tảng — chưa dựng được URL webhook. Báo người vận hành nền tảng.</p>
+                  <p className="text-xs text-amber-700 dark:text-amber-400">{shell ? "Chưa tạo được địa chỉ nhận tin của shop — báo đội hỗ trợ." : "Máy chủ chưa có khoá bí mật nền tảng — chưa dựng được URL webhook. Báo người vận hành nền tảng."}</p>
                 )}
               </div>
             </SectionCard>
           ) : null}
-          {inboxHistory ? <InboxHistoryPanel run={inboxHistory.run} fanpageReady={inboxHistory.fanpageReady} /> : null}
+          {inboxHistory ? <InboxHistoryPanel run={inboxHistory.run} fanpageReady={inboxHistory.fanpageReady} shell={shell} /> : null}
           {messengerHistory ? <MessengerHistoryPanel run={messengerHistory.run} pages={messengerHistory.pages} /> : null}
           {costReport ? <ChatCostPanel report={costReport} /> : null}
           {followup ? <FollowupPanel settings={followup} waiting={waitingCount} manage={manage} /> : null}
-          {lessons ? <LessonsPanel key={`${lessons.version}-${lessons.updatedAt ?? ""}`} state={customer ? customerLessons(lessons) : lessons} /> : null}
+          {lessons ? <LessonsPanel key={`${lessons.version}-${lessons.updatedAt ?? ""}`} state={customer ? customerLessons(lessons) : lessons} shell={shell} /> : null}
           {levelScripts && levelPack && levelCountMap ? <LevelScriptsPanel key={JSON.stringify(levelScripts)} scripts={levelScripts} levels={levelsForPack(levelPack)} counts={levelCountMap} /> : null}
-          {playbook && playbookRun ? <PlaybookPanel key={playbook.draft?.createdAt ?? "chua-co-nhap"} state={customer ? customerPlaybookState(playbook) : playbook} run={customer ? customerPlaybookRun(playbookRun) : playbookRun} fanpageReady={fanpage?.status === "ACTIVE"} /> : null}
+          {playbook && playbookRun ? <PlaybookPanel key={playbook.draft?.createdAt ?? "chua-co-nhap"} state={customer ? customerPlaybookState(playbook) : playbook} run={customer ? customerPlaybookRun(playbookRun) : playbookRun} fanpageReady={fanpage?.status === "ACTIVE"} shell={shell} /> : null}
           {manage ? (
             ai.audience === "INTERNAL" ? (
               <ChatbotConfigForm config={ai.config} fields={fields} engine={ai.engine} appointmentsOn={moduleOn(user, "appointments")} />
             ) : (
-              <ChatbotConfigForm config={ai.config} fields={fields} aiState={ai.aiState} appointmentsOn={moduleOn(user, "appointments")} />
+              <ChatbotConfigForm config={ai.config} fields={fields} aiState={ai.aiState} appointmentsOn={moduleOn(user, "appointments")} shell={shell} />
             )
           ) : (
             <SectionCard id="bot-config" title="Cấu hình">
@@ -261,7 +261,7 @@ export default async function SalesChatbotPage() {
             {publicUrl && pub.url ? <EmbedSnippet snippet={widgetSnippet(pub.url)} /> : null}
             {publicUrl ? null : (
               <p className="text-sm text-muted-foreground">
-                Trang chat công khai có sau khi ERP được xuất bản với tên miền con — <Link href="/setup" className="underline underline-offset-2">Thiết lập & xuất bản</Link>.
+                Trang chat công khai có sau khi {shell ? "cửa hàng" : "ERP"} được xuất bản với tên miền con — <Link href="/setup" className="underline underline-offset-2">Thiết lập & xuất bản</Link>.
               </p>
             )}
           </SectionCard>
@@ -309,7 +309,7 @@ export default async function SalesChatbotPage() {
         </div>
         {manage ? (
           <div className="space-y-2">
-            <p className="text-sm font-semibold">Khung thử (TEST)</p>
+            <p className="text-sm font-semibold">{shell ? "Khung thử" : "Khung thử (TEST)"}</p>
             <SalesChatPanel mode="test" title={`${cfg.botName} · thử`} />
           </div>
         ) : null}

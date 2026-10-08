@@ -234,7 +234,16 @@ export async function loadPermissionSnapshots(): Promise<Record<string, string[]
  * Kết quả đầy đủ: hoặc là người dùng, hoặc là LÝ DO bị từ chối — mỗi lý do một câu khác nhau.
  * `module` chỉ có mặt khi `denied = "MODULE_DISABLED"`: khoá của module đang tắt mà đường dẫn thuộc về.
  */
-export type ResolvedUser = { user: SessionUser } | { denied: SessionDenyReason; module?: ModuleKey; /** Chỉ khi `SHELL_RESTRICTED`: trang nhà của vỏ cho ĐÚNG người này. */ home?: string };
+export type ResolvedUser =
+  | { user: SessionUser }
+  | {
+      denied: SessionDenyReason;
+      module?: ModuleKey;
+      /** Chỉ khi `SHELL_RESTRICTED`: trang nhà của vỏ cho ĐÚNG người này. */
+      home?: string;
+      /** Chỉ khi `BILLING_LOCKED`: phiên thuộc vỏ Chốt Đơn — CHỈ để câu chữ chỉ đúng chỗ gia hạn của sản phẩm, không quyết gì. */
+      shell?: boolean;
+    };
 
 /**
  * Người dùng hiện tại với quyền đã tính, HOẶC lý do bị từ chối. Không chuyển hướng.
@@ -292,7 +301,7 @@ export const resolveCurrentUser = cache(async (): Promise<ResolvedUser> => {
     const method = await requestMethod();
     if (method && method !== "GET" && method !== "HEAD") {
       const standing = await orgBillingStanding(org);
-      if (billingWriteDenied({ isHome: org.isHome, standing: standing.kind, method, path })) return { denied: "BILLING_LOCKED" };
+      if (billingWriteDenied({ isHome: org.isHome, standing: standing.kind, method, path })) return { denied: "BILLING_LOCKED", shell: isSalesAgentUser(ket.user) };
     }
   }
   return ket;

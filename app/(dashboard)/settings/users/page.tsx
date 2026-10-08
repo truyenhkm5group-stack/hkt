@@ -11,6 +11,7 @@ import { RoleMatrix } from "@/app/(dashboard)/settings/users/role-matrix";
 import { RolesPanel } from "@/app/(dashboard)/settings/users/roles-panel";
 import { PositionsPanel } from "@/app/(dashboard)/settings/users/positions-panel";
 import { loadRoleTemplates, requirePermission } from "@/lib/auth/session";
+import { isSalesAgentUser } from "@/lib/constants/saas-nav";
 import { ROLE_LABEL, ROLE_ORDER } from "@/lib/constants/roles";
 import { formatNumber } from "@/lib/format";
 import { listUsers } from "@/lib/queries/users";
@@ -22,8 +23,18 @@ import type { UserDept } from "@/app/(dashboard)/settings/users/department-cell"
 
 export const metadata = { title: "Người dùng" };
 
+/**
+ * ─── VỎ CHỐT ĐƠN: «NHÂN VIÊN» ───
+ *
+ * Khách Chốt Đơn (`isSalesAgentUser`) vào trang này từ mục menu «Nhân viên». Họ không thuê ERP nên không có mô hình tổ chức của
+ * ERP: trang đổi TIÊU ĐỀ + CÂU CHỮ (không «module» / «ERP» / «Nhật ký hệ thống»), bỏ hai cột Phòng ban · Quyền & phạm vi của bảng,
+ * và ẨN ba khối nâng cao (Vai trò tuỳ chỉnh · Chức danh · ma trận «Vai trò hệ thống & quyền» — riêng ma trận là ~780 ô bấm nhỏ hơn
+ * 32px, trang dài 4.296px ở 390px, đo Finish Line R2). Chỉ là trình bày: mời / tạo / sửa vai trò / «Phân quyền» từng người / khoá
+ * vẫn như cũ, quyền vẫn do `can()` quyết, mọi server action giữ nguyên cổng của nó. ERP / nhà: trang y như trước, từng chữ.
+ */
 export default async function UsersPage() {
   const user = await requirePermission("users:manage");
+  const shell = isSalesAgentUser(user);
   const [{ rows, activeAdmins }, templates, departments, accessRoles, positions, accessByUserRow, invites] = await Promise.all([
     listUsers(),
     loadRoleTemplates(),
@@ -73,10 +84,14 @@ export default async function UsersPage() {
   return (
     <div className="space-y-5">
       <PageHeader
-        eyebrow="Hệ thống"
-        title="Người dùng"
-        description="Tài khoản đăng nhập nội bộ, vai trò và quyền theo từng module."
-        hint="Tài khoản đăng nhập nội bộ, vai trò và quyền truy cập theo từng module. Mỗi thao tác quan trọng được ghi vào Nhật ký hệ thống."
+        eyebrow={shell ? undefined : "Hệ thống"}
+        title={shell ? "Nhân viên" : "Người dùng"}
+        description={shell ? "Tài khoản đăng nhập của nhân viên cửa hàng và việc mỗi người được làm." : "Tài khoản đăng nhập nội bộ, vai trò và quyền theo từng module."}
+        hint={
+          shell
+            ? "Mời nhân viên bằng liên kết hoặc tạo tài khoản, rồi chọn vai trò — vai trò quyết người đó được làm gì. Cần khác vai trò cho một người thì dùng «Phân quyền» ở menu cuối dòng."
+            : "Tài khoản đăng nhập nội bộ, vai trò và quyền truy cập theo từng module. Mỗi thao tác quan trọng được ghi vào Nhật ký hệ thống."
+        }
         actions={
           <>
             <Button asChild variant="outline" size="sm">
@@ -84,7 +99,7 @@ export default async function UsersPage() {
                 <KeyRound className="size-4" /> Đổi mật khẩu của tôi
               </Link>
             </Button>
-            <InviteUserDialog customRoles={inviteRoleOptions} />
+            <InviteUserDialog customRoles={inviteRoleOptions} appName={shell ? "Chốt Đơn" : undefined} />
             <CreateUserDialog />
           </>
         }
@@ -97,13 +112,19 @@ export default async function UsersPage() {
       </section>
 
       <SectionCard
-        title="Danh sách người dùng"
+        title={shell ? "Danh sách nhân viên" : "Danh sách người dùng"}
         description={
-          chuaCoPhong
-            ? `Sửa tên / vai trò / phòng ban ngay trên dòng — còn ${chuaCoPhong} người chưa có phòng ban.`
-            : "Sửa tên / vai trò / phòng ban ngay trên dòng; phân quyền riêng, đặt lại mật khẩu hoặc khoá tài khoản từ menu cuối dòng."
+          shell
+            ? "Sửa tên / vai trò ở menu cuối dòng; ở đó cũng có phân quyền riêng, đặt lại mật khẩu và khoá tài khoản."
+            : chuaCoPhong
+              ? `Sửa tên / vai trò / phòng ban ngay trên dòng — còn ${chuaCoPhong} người chưa có phòng ban.`
+              : "Sửa tên / vai trò / phòng ban ngay trên dòng; phân quyền riêng, đặt lại mật khẩu hoặc khoá tài khoản từ menu cuối dòng."
         }
-        hint="Vai trò nói người đó ĐƯỢC LÀM GÌ; phòng ban nói họ LÀM VIỆC Ở ĐÂU. Hai thứ khác nhau và ERP không suy cái này ra cái kia — hai người cùng vai “Quản lý” có thể phụ trách hai mảng chẳng liên quan. Phòng ban quyết định hàng đợi công việc của họ có gì."
+        hint={
+          shell
+            ? "Vai trò nói người đó ĐƯỢC LÀM GÌ. Đổi vai trò hay quyền thì có hiệu lực ở lần tải trang tiếp theo của người đó."
+            : "Vai trò nói người đó ĐƯỢC LÀM GÌ; phòng ban nói họ LÀM VIỆC Ở ĐÂU. Hai thứ khác nhau và ERP không suy cái này ra cái kia — hai người cùng vai “Quản lý” có thể phụ trách hai mảng chẳng liên quan. Phòng ban quyết định hàng đợi công việc của họ có gì."
+        }
         padded={false}
       >
         <UsersTable
@@ -116,16 +137,25 @@ export default async function UsersPage() {
           accessByUser={accessByUser}
           roleOptions={roleOptions}
           positionOptions={positionOptions}
+          compact={shell}
+          appName={shell ? "Chốt Đơn" : undefined}
         />
       </SectionCard>
 
       <SectionCard
         title="Lời mời"
         description={invitesActive ? `${invitesActive} lời mời còn hạn chưa được nhận — mỗi lời mời giữ một chỗ trong hạn mức người dùng của gói.` : "Mời nhân viên bằng liên kết: họ tự đặt mật khẩu, bạn không phải biết mật khẩu của ai."}
-        hint="Liên kết mời dùng một lần, hạn 7 ngày, chỉ hiện một lần lúc tạo — ERP chỉ giữ bản băm. ERP chưa tự gửi thư: bạn gửi liên kết cho nhân viên qua kênh của mình. Thu hồi ở đây là liên kết chết ngay."
+        hint={
+          shell
+            ? "Liên kết mời dùng một lần, hạn 7 ngày, chỉ hiện một lần lúc tạo. Chốt Đơn chưa tự gửi thư: bạn gửi liên kết cho nhân viên qua kênh của mình. Thu hồi ở đây là liên kết chết ngay."
+            : "Liên kết mời dùng một lần, hạn 7 ngày, chỉ hiện một lần lúc tạo — ERP chỉ giữ bản băm. ERP chưa tự gửi thư: bạn gửi liên kết cho nhân viên qua kênh của mình. Thu hồi ở đây là liên kết chết ngay."
+        }
       >
         <InvitesPanel invites={inviteRows} />
       </SectionCard>
+
+      {shell ? null : (
+        <>
 
       <SectionCard
         title="Vai trò tuỳ chỉnh"
@@ -147,6 +177,8 @@ export default async function UsersPage() {
  hint="Vai trò là mẫu quyền khởi điểm: tích/bỏ tích để đổi quyền mặc định của từng vai trò. Muốn khác biệt cho một người cụ thể, dùng “Phân quyền” ở menu cuối dòng.">
         <RoleMatrix templates={templates} canEdit />
       </SectionCard>
+        </>
+      )}
     </div>
   );
 }
