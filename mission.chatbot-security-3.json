@@ -1,0 +1,33 @@
+{
+  "schema": 1,
+  "mission_id": "chatbot-security-3",
+  "title": "Bài học bot: tên miền / handle trần không lọt bộ lọc · không chặn nhầm · bài bị bỏ in nguyên văn; hồ sơ máy tạo không làm địa chỉ dự phòng",
+  "business_goal": "",
+  "status": "PLANNING",
+  "priority": "P2",
+  "risk": "MEDIUM",
+  "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "worker": null,
+  "worktree": null,
+  "branch": "fix/chatbot-security-3",
+  "base_sha": "b6c9951cb76a07e75169f8ead90d8ac53a81ad05",
+  "domains": [],
+  "owned_paths": [
+    "app/(dashboard)/ai/sales-chatbot/lessons-panel.tsx",
+    "lib/sales-chatbot/inbox-feedback.ts",
+    "lib/sales-chatbot/lessons-shared.ts",
+    "lib/sales-chatbot/lessons.ts",
+    "lib/sales-chatbot/playbook-shared.ts",
+    "lib/sales-chatbot/returning.ts",
+    "tests/inbox-advanced.test.ts",
+    "tests/self-service-journey.test.ts"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-08T00:49:27.866Z",
+  "updated_at": "2026-10-08T00:49:27.866Z",
+  "last_heartbeat": "2026-10-08T00:49:27.866Z",
+  "definition_of_done": []
+}
