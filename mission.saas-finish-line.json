@@ -1,0 +1,41 @@
+{
+  "schema": 1,
+  "mission_id": "saas-finish-line",
+  "title": "Finish line SaaS: audit admin console + vỏ khách, sửa quick wins UX R1 (trạng thái rỗng · chữ kỹ thuật · help link · 404 · AI Sales cuộn · nhãn readiness)",
+  "business_goal": "",
+  "status": "RUNNING",
+  "priority": "P2",
+  "risk": "MEDIUM",
+  "owner": "DESKTOP-56TH98Y:wt-saas-finish-line",
+  "worker": null,
+  "worktree": null,
+  "branch": "claude/saas-finish-line",
+  "base_sha": "c360b7c662e52d9447fc19a880f8a956851cf764",
+  "domains": [],
+  "owned_paths": [
+    "app/(dashboard)/platform/customers",
+    "app/(dashboard)/ai/overview",
+    "app/(dashboard)/ai/channels",
+    "app/(dashboard)/ai/sales-chatbot/page.tsx",
+    "app/(dashboard)/ai/sales-chatbot/inbox/page.tsx",
+    "app/(dashboard)/help",
+    "app/(dashboard)/settings/ai-balance",
+    "app/not-found.tsx",
+    "lib/constants/help-guides.ts",
+    "lib/sales-chatbot/readiness-shared.ts",
+    "components/sales-chat/chat-panel.tsx",
+    "docs/saas/FINISH_LINE_2026-10-08.md"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-08T07:51:05.873Z",
+  "updated_at": "2026-10-08T07:51:05.873Z",
+  "last_heartbeat": "2026-10-08T07:51:05.873Z",
+  "definition_of_done": [],
+  "intake": {
+    "verdict": "PARTIAL",
+    "evidence": []
+  }
+}
