@@ -23,11 +23,12 @@
   "dependencies": [],
   "blocked_by": [],
   "related_prs": [
-    659
+    659,
+    667
   ],
   "migration_reservations": [],
   "created_at": "2026-10-08T03:17:21.525Z",
-  "updated_at": "2026-10-08T06:18:35.348Z",
+  "updated_at": "2026-10-08T06:18:59.667Z",
   "last_heartbeat": "2026-10-08T06:18:35.348Z",
   "definition_of_done": [],
   "evidence": {
