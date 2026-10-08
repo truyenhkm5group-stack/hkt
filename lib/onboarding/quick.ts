@@ -52,7 +52,7 @@ export function quickModules(businessType: keyof typeof BUSINESS_TYPE_SPEC): { t
 export async function quickSignup(
   raw: unknown,
   who: SignupActor,
-  opts: { issue?: (subject: SessionSubject) => Promise<void>; social?: SocialProfile | null; brand?: "vnx" | "chotdon" | null } = {},
+  opts: { issue?: (subject: SessionSubject) => Promise<void>; social?: SocialProfile | null; brand?: "vnx" | "chotdon" | null; userAgent?: string | null } = {},
 ): Promise<QuickSignupResult> {
   const parsed = quickSignupZ.safeParse(raw);
   if (!parsed.success) return { error: firstIssue(parsed.error) };
@@ -89,7 +89,9 @@ export async function quickSignup(
     plan: { businessType: input.businessType, templateKey: plan.templateKey, modules: plan.modules },
     planKey: null,
   };
-  const r = await createOrganizationFromSignup(draft, who, { ...(opts.issue ? { issue: opts.issue } : {}), brand: opts.brand ?? null });
+  // Màn đăng ký nhanh (kể cả qua Google / Facebook) luôn mang dòng «Bằng việc tạo cửa hàng, bạn đồng ý…» ngay dưới nút tạo ⇒ lõi
+  // ghi sổ chấp thuận cho lượt tạo thành công của khách (lib/legal/acceptance.ts · `START_QUICK`).
+  const r = await createOrganizationFromSignup(draft, who, { ...(opts.issue ? { issue: opts.issue } : {}), brand: opts.brand ?? null, consent: { surface: "START_QUICK", userAgent: opts.userAgent ?? null } });
   if ("error" in r) return { error: r.error };
   if (otpId) await consumeSignupOtp(otpId);
 

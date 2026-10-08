@@ -28,6 +28,11 @@ async function ipOfRequest(): Promise<string> {
   return clientIpFrom((await headers()).get("x-forwarded-for"));
 }
 
+/** User-Agent của trình duyệt khách — chỉ cho sổ chấp thuận (lib/legal/acceptance.ts cắt độ dài), không dùng quyết định gì. */
+async function userAgentOfRequest(): Promise<string | null> {
+  return (await headers()).get("user-agent");
+}
+
 function operatorOf(user: SessionUser | null): SignupActor | null {
   if (!user || platformOperatorDenial(user)) return null;
   return { kind: "operator", ip: "", actor: { orgCode: user.organization!.code, userId: user.id, email: user.email } };
@@ -64,7 +69,8 @@ export async function createOrganizationAction(draft: unknown): Promise<{ ok: tr
   const who = await whoAmI();
   // Thương hiệu của host khách đang đứng (header MÁY CHỦ do middleware đặt) — liên kết về sau đi đúng phần mềm này.
   const brand = await hostBrand();
-  const result = await createOrganizationFromSignup(draft, who, who.kind === "public" ? { issue: createSession, brand } : { brand });
+  // Khách bấm Tạo ở bước xem trước — nơi có dòng «Bằng việc bấm Tạo, bạn đồng ý…» ⇒ lõi ghi sổ chấp thuận (`START_WIZARD`).
+  const result = await createOrganizationFromSignup(draft, who, who.kind === "public" ? { issue: createSession, brand, consent: { surface: "START_WIZARD", userAgent: await userAgentOfRequest() } } : { brand });
   if ("error" in result) {
     if (result.setupFailed) revalidatePath("/platform");
     return { error: result.error };
@@ -92,7 +98,7 @@ export async function quickSignupAction(input: unknown): Promise<{ error: string
   if (who.kind === "operator") return { error: "Người vận hành tạo hộ khách bằng trình hướng dẫn đầy đủ (/start?day-du=1)." };
   const store = await cookies();
   const social = await readOAuthToken<SocialProfile>("erp-social-signup", store.get(SOCIAL_SIGNUP_COOKIE)?.value);
-  const r = await quickSignup(input, who, { issue: createSession, social, brand: await hostBrand() });
+  const r = await quickSignup(input, who, { issue: createSession, social, brand: await hostBrand(), userAgent: await userAgentOfRequest() });
   if ("error" in r) return r;
   // Hồ sơ Google / Facebook đã dùng xong — cho cookie hết hạn (không phải dữ liệu nghiệp vụ).
   store.set(SOCIAL_SIGNUP_COOKIE, "", { path: "/", maxAge: 0 });

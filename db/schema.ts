@@ -5000,6 +5000,49 @@ export const platformSignupAttempts = pgTable(
   ],
 );
 
+/**
+ * SỔ CHẤP THUẬN VĂN BẢN PHÁP LÝ (0236 · lib/legal/acceptance.ts · docs/legal/TECH_HANDOFF_LEGAL.md mục M-ACCEPT): mỗi lần
+ * một người đồng ý một văn bản ở MỘT chỗ trên giao diện có dòng đồng ý thật, một dòng. KHÔNG email thô (chỉ HMAC), KHÔNG IP
+ * thô (cùng phép băm với `platform_signup_attempts`). `content_sha256 NULL` = CHƯA BIẾT băm nội dung (chưa có hàm băm bản đã
+ * render), không phải «không có nội dung». Không khoá ngoài tới tổ chức / tài khoản: đây là BẰNG CHỨNG — xoá tổ chức vẫn giữ.
+ */
+export const platformLegalAcceptances = pgTable(
+  "platform_legal_acceptances",
+  {
+    id: id(),
+    /** Mã tổ chức lúc chấp thuận — mã có thể được DÙNG LẠI sau khi xoá tổ chức, nên đọc kèm `organization_id`. */
+    orgCode: text("org_code"),
+    /** `platform_organizations.id` lúc chấp thuận — phân biệt hai đời tổ chức cùng mã. */
+    organizationId: text("organization_id"),
+    accountId: text("account_id"),
+    /** `users.id` trong CSDL tổ chức (AGENTS 3.34 — khoá tài khoản, không ô chữ). */
+    userId: text("user_id"),
+    emailHash: text("email_hash"),
+    document: text("document").notNull(),
+    version: text("version").notNull(),
+    contentSha256: text("content_sha256"),
+    action: text("action").notNull(),
+    acceptedAt: ts("accepted_at").notNull().defaultNow(),
+    ipHash: text("ip_hash"),
+    userAgent: text("user_agent"),
+    /** Chỗ trên giao diện mang dòng đồng ý (`LEGAL_CONSENT_SURFACES`) — không có chỗ đó thì không có dòng sổ. */
+    source: text("source").notNull(),
+  },
+  (t) => [
+    index("platform_legal_acceptances_org_idx").on(t.orgCode, t.acceptedAt),
+    index("platform_legal_acceptances_account_idx").on(t.accountId),
+    uniqueIndex("platform_legal_acceptances_signup_key").on(t.organizationId, t.document, t.version, t.action).where(sql`${t.action} = 'SIGNUP' AND ${t.organizationId} IS NOT NULL`),
+    check("platform_legal_acceptances_document_check", sql`${t.document} IN ('TERMS','PRIVACY','DPA')`),
+    check("platform_legal_acceptances_action_check", sql`${t.action} IN ('SIGNUP','INVITE_ACCEPT','NOTICE_SEEN')`),
+    check("platform_legal_acceptances_source_check", sql`${t.source} IN ('START_WIZARD','START_QUICK')`),
+    check("platform_legal_acceptances_version_check", sql`length(${t.version}) BETWEEN 1 AND 40`),
+    check("platform_legal_acceptances_sha_check", sql`${t.contentSha256} IS NULL OR ${t.contentSha256} ~ '^[0-9a-f]{64}$'`),
+    check("platform_legal_acceptances_email_hash_check", sql`${t.emailHash} IS NULL OR ${t.emailHash} ~ '^[0-9a-f]{64}$'`),
+    check("platform_legal_acceptances_ip_hash_check", sql`${t.ipHash} IS NULL OR ${t.ipHash} ~ '^[0-9a-f]{64}$'`),
+    check("platform_legal_acceptances_ua_check", sql`${t.userAgent} IS NULL OR length(${t.userAgent}) <= 300`),
+  ],
+);
+
 /** Cấu hình module theo tổ chức. Khoá module khai ở `lib/constants/platform-modules.ts` và BẤT BIẾN. */
 export const platformOrganizationModules = pgTable(
   "platform_organization_modules",

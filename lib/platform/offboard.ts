@@ -90,6 +90,11 @@ export const OFFBOARD_TABLES: Readonly<Record<ControlPlaneTable, TableSpec>> = {
   platform_price_versions: { disposition: "GLOBAL", why: "Phiên bản bảng giá — của nền tảng." },
   platform_plan_prices: { disposition: "GLOBAL", why: "Giá gói theo phiên bản — của nền tảng." },
   platform_price_pins: { disposition: "DELETE", why: "Ghim phiên bản giá của tổ chức.", where: byCode },
+  // GIỮ, không XOÁ: đây là BẰNG CHỨNG khách đã đồng ý văn bản nào, phiên bản nào, lúc nào — đúng thứ cần đưa ra khi có tranh chấp
+  // SAU khi tổ chức đã bị xoá. Không mang dữ liệu người thô (email HMAC, IP băm, UA cắt). Mã được dùng lại không làm lẫn hai đời
+  // tổ chức vì mỗi dòng mang `organization_id` (lib/legal/acceptance.ts::listAcceptances đánh dấu đời cũ). Thời hạn lưu do luật sư
+  // chốt (M-RETENTION) — chưa chốt thì không xoá.
+  platform_legal_acceptances: { disposition: "KEEP", why: "Sổ chấp thuận Điều khoản / Chính sách (email HMAC, IP băm) — bằng chứng pháp lý phải sống lâu hơn tổ chức; mỗi dòng mang organization_id nên mã dùng lại không lẫn đời.", where: byCode },
   platform_ai_accounts: { disposition: "DELETE", why: "Trạng thái + ngưỡng Số dư AI (không có cột số dư — số dư là tổng sổ cái).", where: byCode },
   platform_ai_ledger_entries: { disposition: "BLOCK", why: "Sổ cái Số dư AI CHỈ GHI THÊM — có dòng (kể cả tặng / trừ) ⇒ từ chối; mã dùng lại sẽ thừa kế số dư.", where: byCode },
   platform_payment_intents: { disposition: "DELETE", why: "Phiếu nạp hết hạn / đã huỷ — phiếu ĐÃ TRẢ là tiền thật (chặn ở MONEY_CHECKS VÀ không bao giờ khớp điều kiện xoá), phiếu PENDING còn hạn ⇒ từ chối.", where: (s) => sql`org_code = ${s.code} and status <> 'PAID'` },

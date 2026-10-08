@@ -49,7 +49,7 @@ export function testOrgOffboardPure() {
   }
   const xoa = Object.entries(OFFBOARD_TABLES).filter(([, s]) => s.disposition === "DELETE").map(([t]) => t).sort();
   assert.deepEqual([...OFFBOARD_DELETE_ORDER].sort(), xoa, "thứ tự xoá phủ ĐÚNG các bảng XOÁ — không bảng tiền / nhật ký / chung nào");
-  for (const t of ["platform_audit_log", "platform_ai_ledger_entries", "platform_billing_payments", "platform_cost_entries", "platform_billing_statements", "platform_signup_attempts"]) {
+  for (const t of ["platform_audit_log", "platform_ai_ledger_entries", "platform_billing_payments", "platform_cost_entries", "platform_billing_statements", "platform_signup_attempts", "platform_legal_acceptances"]) {
     assert.ok(!(OFFBOARD_DELETE_ORDER as readonly string[]).includes(t), `${t} không bao giờ bị xoá`);
   }
   const at = (t: string) => OFFBOARD_DELETE_ORDER.indexOf(t as (typeof OFFBOARD_DELETE_ORDER)[number]);

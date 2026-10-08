@@ -41,6 +41,7 @@ import { findOrganization, getHomeOrganization, invalidateOrganizations } from "
 import { markPilotConfigured, markPilotCreated } from "@/lib/platform/pilot";
 import { provisionOrganization } from "@/lib/platform/provision";
 import { markOrganizationDraft } from "@/lib/platform/publish";
+import { recordSignupAcceptance, signupDocuments, type LegalConsentSurface } from "@/lib/legal/acceptance";
 import { productsFromModules } from "@/lib/saas/catalog";
 import { openSignupSubscriptions } from "@/lib/saas/signup-subscriptions";
 import { decideNewWorkspace } from "@/lib/saas/workspace-commercial";
@@ -377,9 +378,9 @@ export function setupProducts(built: Pick<SignupBlueprint, "modules">): string[]
 
 /**
  * Các bước GHI của lượt dựng — dùng chung cho lượt đầu và lượt chạy lại. Ném ⇒ người gọi đánh dấu `SETUP_FAILED`.
- * Trả mã lượt cài blueprint.
+ * Trả mã lượt cài blueprint + id quản trị đứng tên lượt cài (sổ chấp thuận ghi khoá tài khoản — AGENTS 3.34).
  */
-async function runSetup(input: SetupInput, step: { current: SetupStepName }): Promise<string | null> {
+async function runSetup(input: SetupInput, step: { current: SetupStepName }): Promise<{ installId: string | null; adminUserId: string }> {
   const actor = platformActorOf(input.who);
   const source = "UI" as const;
   step.current = "PROVISION";
@@ -454,7 +455,7 @@ async function runSetup(input: SetupInput, step: { current: SetupStepName }): Pr
     }),
   );
   faultHook?.("FINISH");
-  return result.installId;
+  return { installId: result.installId, adminUserId: subject.id };
 }
 
 async function markFailed(code: string, stepName: SetupStepName, message: string, who: SignupActor) {
@@ -482,8 +483,16 @@ async function reactivateForRetry(code: string) {
  *
  * `brand` = thương hiệu của host khách đang đứng khi bấm tạo (tầng action đọc `hostBrand()` rồi truyền vào — service không
  * đọc header). Người vận hành tạo hộ ⇒ KHÔNG ghi: host của người vận hành không nói gì về khách.
+ *
+ * `consent` = chỗ trên giao diện mang dòng «Bằng việc tạo cửa hàng, bạn đồng ý…» mà khách vừa bấm (tầng action / đăng ký nhanh
+ * truyền vào, kèm User-Agent đọc từ header). Có ⇒ lượt tạo THÀNH CÔNG của khách ghi sổ chấp thuận Điều khoản + Chính sách
+ * (lib/legal/acceptance.ts). Không có, hoặc người vận hành tạo hộ ⇒ KHÔNG ghi — không bịa chấp thuận cho người không thấy dòng đó.
  */
-export async function createOrganizationFromSignup(rawDraft: unknown, who: SignupActor, opts: { issue?: (subject: SessionSubject) => Promise<void>; brand?: "vnx" | "chotdon" | null } = {}): Promise<CreateResult> {
+export async function createOrganizationFromSignup(
+  rawDraft: unknown,
+  who: SignupActor,
+  opts: { issue?: (subject: SessionSubject) => Promise<void>; brand?: "vnx" | "chotdon" | null; consent?: { surface: LegalConsentSurface; userAgent?: string | null } } = {},
+): Promise<CreateResult> {
   const g = await gate(who);
   if (!g.ok) return { error: g.error };
   const parsed = signupDraftZ.safeParse(rawDraft);
@@ -571,8 +580,9 @@ export async function createOrganizationFromSignup(rawDraft: unknown, who: Signu
 
   const step: { current: SetupStepName } = { current: "PROVISION" };
   let installId: string | null = null;
+  let adminUserId: string | null = null;
   try {
-    installId = await runSetup(
+    ({ installId, adminUserId } = await runSetup(
       {
         code,
         name: draft.org.name,
@@ -587,7 +597,7 @@ export async function createOrganizationFromSignup(rawDraft: unknown, who: Signu
         brand: who.kind === "operator" ? null : (opts.brand ?? null),
       },
       step,
-    );
+    ));
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     if (error instanceof SetupBusyError) return { error: message, orgCode: code };
@@ -598,6 +608,11 @@ export async function createOrganizationFromSignup(rawDraft: unknown, who: Signu
   }
   await markDone(code, installId, who);
   await recordAttempt({ mode: g.mode, ipHash: g.ipHash, orgCode: code, outcome: "CREATED" });
+  // SỔ CHẤP THUẬN (M-ACCEPT): chỉ KHÁCH, chỉ khi giao diện họ vừa bấm có dòng đồng ý. Hàm không bao giờ ném — sổ hỏng không làm
+  // hỏng đăng ký (lib/legal/acceptance.ts).
+  if (who.kind === "public" && opts.consent) {
+    await recordSignupAcceptance({ orgCode: code, userId: adminUserId, email: draft.admin.email, ipHash: g.ipHash, userAgent: opts.consent.userAgent, surface: opts.consent.surface, documents: signupDocuments() });
+  }
   // Khách: vào thẳng ERP mới qua ĐÚNG đường đăng nhập (kiểm mật khẩu, ký phiên mang `org`, ghi nhật ký LOGIN).
   const loggedIn = await loginInto();
   return { ok: true, orgCode: code, created: !existing, loggedIn, installId };
@@ -618,7 +633,7 @@ export async function retryOrganizationSetup(code: string, who: Extract<SignupAc
   const step: { current: SetupStepName } = { current: "PROVISION" };
   let installId: string | null = null;
   try {
-    installId = await runSetup({ code, name: org.name, planKey: org.plan ?? DEFAULT_PLAN_KEY, built, admin: null, adminEmail: state.adminEmail, source: state.source, inviteId: state.inviteId, who, isNew: false, brand: null }, step);
+    ({ installId } = await runSetup({ code, name: org.name, planKey: org.plan ?? DEFAULT_PLAN_KEY, built, admin: null, adminEmail: state.adminEmail, source: state.source, inviteId: state.inviteId, who, isNew: false, brand: null }, step));
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     if (error instanceof SetupBusyError) return { error: message, orgCode: code };

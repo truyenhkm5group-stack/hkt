@@ -93,6 +93,23 @@
   `accepted_at`, `ip`, `user_agent`, `action` (SIGNUP · NOTICE_SEEN). `/start` ghi khi tạo (giữ `ORG_ONBOARDED`). Đổi phiên
   bản ⇒ **thông báo trong app** (banner đóng được, ghi NOTICE_SEEN), **không chặn** đăng nhập, **không checkbox**. Trang
   «Văn bản đã chấp thuận» cho khách tải bản đúng phiên bản.
+- **Trạng thái (nhánh `feat/legal-acceptance`, migration 0236):** bảng + đường ghi ở `lib/legal/acceptance.ts`. Ghi TERMS +
+  PRIVACY (`SIGNUP`) khi khách tạo cửa hàng THÀNH CÔNG qua `/start` — đăng ký nhanh (`START_QUICK`, kể cả Google / Facebook)
+  và trình hướng dẫn đầy đủ (`START_WIZARD`). Không checkbox, không bước mới. Email = HMAC (`AUTH_SECRET`), IP = cùng phép băm
+  với `platform_signup_attempts`, UA cắt 300 ký tự. Sổ hỏng không làm hỏng đăng ký. Xoá tổ chức **GIỮ** sổ (bằng chứng; mỗi
+  dòng mang `organization_id` nên mã dùng lại không lẫn đời). Người vận hành đọc qua `listAcceptances` (chưa có trang).
+  Không backfill tổ chức tạo trước sổ. Chưa làm: banner `NOTICE_SEEN`, trang «Văn bản đã chấp thuận».
+- **Chỗ hở cho luật sư (G) — không có dòng sổ, cố ý, vì giao diện KHÔNG có dòng đồng ý nào:**
+  1. Khách do người vận hành tạo (job «Tạo khách») rồi kích hoạt bằng liên kết đặt mật khẩu (`/reset/[org]/[token]`): trang
+     đặt mật khẩu không nhắc Điều khoản ⇒ không có chứng cứ khách đồng ý. Cần quyết: thêm một dòng «Bằng việc đặt mật khẩu,
+     bạn đồng ý…» (sẽ ghi được, không thêm cú bấm) hay dựa vào hợp đồng / báo giá ký ngoài hệ thống.
+  2. Người vận hành tạo hộ ở `/start`: người bấm là nhân viên nền tảng, không phải khách ⇒ không ghi.
+  3. Nhân viên được khách mời vào qua `/join` (`INVITE_ACCEPT` đã khai trong danh sách đóng nhưng chưa có đường ghi): khách
+     thuê chịu trách nhiệm người dùng của mình (Điều khoản Đ.1.3) — luật sư xác nhận có cần chấp thuận riêng của từng người.
+  4. `content_sha256` đang `NULL` (CHƯA BIẾT) cho tới khi có hàm băm bản đã render dùng chung với trang
+     (`lib/constants/legal-documents.ts::legalContentSha256`, sứ mệnh `legal-registers`) — bằng chứng hiện chỉ có SỐ PHIÊN BẢN;
+     muốn chứng minh nội dung đúng phiên bản thì phải giữ lịch sử mã nguồn trang (git) theo phiên bản.
+  5. Các tổ chức tạo TRƯỚC sổ chỉ có phiên bản trong nhật ký `ORG_ONBOARDED` của CSDL tổ chức (không IP / UA).
 
 ### M-CONSENT — Sổ đồng ý backend · MANDATORY khi dùng căn cứ đồng ý · CĐ NONE
 - Bảng `consent_records` (đặc tả `VIETNAM_LEGAL_COMPLIANCE.md` §10). Điểm ghi: đăng ký (SERVICE), khách thuê bật follow-up /
