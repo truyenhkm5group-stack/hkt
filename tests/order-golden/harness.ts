@@ -13,9 +13,10 @@
  *  · `AUTO_CONFIRM_ON`  — bật «đơn đủ thông tin = đã xác nhận» (`orders.autoConfirmComplete` — `lib/records/order-create.ts`).
  * Không ghi tệp nào: `update-baseline.ts` mới ghi số đo hiện trạng.
  */
-import { and, asc, eq, inArray } from "drizzle-orm";
+import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { AUTO_CONFIRM_COMPLETE_SETTING_KEY } from "@/lib/constants/manual-orders";
+import { reviewCodes, reviewFromValue } from "@/lib/constants/order-review";
 import { scoreOrderCase, summarizeOrderGolden, type ObservedOrder, type OrderCaseObservation, type OrderCaseScore, type OrderGoldenLabel, type OrderGoldenSummary } from "@/lib/sales-chatbot/order-golden-metrics";
 import { setSettingJson } from "@/lib/settings";
 import { runGoldenCases, type GoldenCase, type GoldenTranscript } from "../sales-agent-golden/harness";
@@ -56,7 +57,7 @@ async function ordersSince(before: ReadonlySet<string>, ids: ReadonlyMap<string,
   const db = await getDb();
   const o = schema.orders;
   const all = await db
-    .select({ id: o.id, stage: o.stage, phone: o.shipPhone, province: o.shipProvince, ward: o.shipCommune, address: o.shipAddress, fee: o.shippingFee, net: o.totalPriceAfterDiscount })
+    .select({ id: o.id, stage: o.stage, phone: o.shipPhone, province: o.shipProvince, ward: o.shipCommune, address: o.shipAddress, fee: o.shippingFee, net: o.totalPriceAfterDiscount, review: sql<unknown>`${o.raw}->'review'` })
     .from(o)
     .orderBy(asc(o.insertedAt), asc(o.id));
   const rows = all.filter((r) => !before.has(r.id));
@@ -81,6 +82,7 @@ async function ordersSince(before: ReadonlySet<string>, ids: ReadonlyMap<string,
     shippingFee: r.fee,
     total: r.net + r.fee,
     confirmedEvents: events.filter((e) => e.subjectId === r.id).length,
+    review: reviewCodes(reviewFromValue(r.review)),
   }));
 }
 

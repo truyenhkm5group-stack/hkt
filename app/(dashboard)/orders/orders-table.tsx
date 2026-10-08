@@ -11,6 +11,8 @@ import { formatTimeAgo } from "@/lib/format";
 import type { OrderListRow } from "@/lib/queries/orders";
 import type { CarrierKey } from "@/lib/carriers/types";
 import { CarrierBulkActions } from "@/app/(dashboard)/orders/carrier-bulk-actions";
+import { OrderQuickDecision, OrderReviewEntries } from "@/components/orders/order-review-quick";
+import { isManualOrderId } from "@/lib/constants/manual-orders";
 
 /**
  * `meta` / `stageLabels` vắng mặt ⇒ y hệt trước Phase 2. `stageLabels`: nhãn tổ chức đặt cho trạng
@@ -19,26 +21,30 @@ import { CarrierBulkActions } from "@/app/(dashboard)/orders/carrier-bulk-action
  * mang nhãn mặc định của sổ): khai rồi thì nhãn tổ chức thắng nhãn Pancake gửi về — lựa chọn tường
  * minh cho đúng giá trị ấy; chưa khai thì hiển thị y như cũ (nhãn Pancake, rồi nhãn mặc định).
  */
-export function OrdersTable({ rows, pageCount, total, meta, stageLabels, carrierBulk = [] }: { rows: OrderListRow[]; pageCount: number; total: number; meta?: ListMetadataProps; stageLabels?: Record<string, string>; carrierBulk?: { key: CarrierKey; label: string }[] }) {
+export function OrdersTable({ rows, pageCount, total, meta, stageLabels, carrierBulk = [], canDecide = false }: { rows: OrderListRow[]; pageCount: number; total: number; meta?: ListMetadataProps; stageLabels?: Record<string, string>; carrierBulk?: { key: CarrierKey; label: string }[]; canDecide?: boolean }) {
   const columns = React.useMemo(() => {
-    const base: ColumnDef<OrderListRow, unknown>[] =
-      stageLabels && Object.keys(stageLabels).length
-        ? orderColumns.map((c) =>
-            c.id !== "status"
-              ? c
-              : {
-                  ...c,
-                  cell: ({ row }) => (
-                    <div className="space-y-1">
-                      <OrderStageBadge stage={row.original.stage} label={stageLabels[row.original.stage] ?? (row.original.statusName || undefined)} />
-                      {row.original.lastUpdateStatusAt ? <div className="text-[10.5px] text-muted-foreground">{formatTimeAgo(row.original.lastUpdateStatusAt)}</div> : null}
-                    </div>
-                  ),
-                },
-          )
-        : orderColumns;
+    const relabel = Boolean(stageLabels && Object.keys(stageLabels).length);
+    /*
+      CỘT TRẠNG THÁI mang thêm cờ CẦN NGƯỜI KIỂM (chủ shop 08/10/2026) và — với người có quyền sửa đơn tay — nút nhanh «Xác nhận
+      đơn» / «Huỷ đơn» cho đơn tay đang cần kiểm hoặc còn «Mới» / «Chờ hàng». Nút đi qua đúng server action của đơn tay.
+    */
+    const base: ColumnDef<OrderListRow, unknown>[] = orderColumns.map((c) =>
+      c.id !== "status"
+        ? c
+        : {
+            ...c,
+            cell: ({ row }) => (
+              <div className="space-y-1">
+                <OrderStageBadge stage={row.original.stage} label={(relabel ? stageLabels?.[row.original.stage] : undefined) ?? (row.original.statusName || undefined)} />
+                {row.original.lastUpdateStatusAt ? <div className="text-[10.5px] text-muted-foreground">{formatTimeAgo(row.original.lastUpdateStatusAt)}</div> : null}
+                <OrderReviewEntries entries={row.original.review} compact />
+                {canDecide && isManualOrderId(row.original.id) ? <OrderQuickDecision orderId={row.original.id} stage={row.original.stage} entries={row.original.review} gaps={row.original.gaps} size="xs" /> : null}
+              </div>
+            ),
+          },
+    );
     return columnsWithListView(base, meta, ORDER_LIST_REF_COLUMNS, (row) => row.id);
-  }, [meta, stageLabels]);
+  }, [meta, stageLabels, canDecide]);
   return (
     <DataTable
       defaultSort="insertedAt"

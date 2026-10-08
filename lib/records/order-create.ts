@@ -57,6 +57,7 @@ import {
   AUTO_CONFIRM_COMPLETE_SETTING_KEY,
   ERP_NATIVE_SETTING_KEY,
   manualOrderComplete,
+  manualOrderGaps,
   MANUAL_FAILED_FROM_STAGES,
   parseManualDeliveryFee,
   isManualOrderId,
@@ -86,6 +87,9 @@ import { currentOrganization } from "@/lib/platform/context";
 import { agentPriceProblems, agentUnitPrices, type AgentPricingMode } from "@/lib/commerce/pricing";
 import { additionalNeed, lockVariants, shortfalls, type StockTx } from "@/lib/commerce/stock";
 import { getSettingJson, setSettingJson } from "@/lib/settings";
+import { normalizeCustomerPhone } from "@/lib/records/customer-create";
+import { normalizePhone as pancakePhone } from "@/lib/integrations/http";
+import { canFlagOrderForReview, orderReviewOf, reviewConflictMessage, unseenReviewEntries, withCustomerReconfirm, withReviewEntry, withReviewResolved, type OrderReviewEntry, type OrderReviewResolution, type ReviewSeen } from "@/lib/constants/order-review";
 
 export type OrderGate = { allowed: true } | { allowed: false; code: "FORBIDDEN" | "NOT_SUPPORTED" | "MODULE_DISABLED"; reason: string };
 
@@ -197,6 +201,18 @@ type Prepared = {
   variants: Map<string, { id: string; productId: string; productName: string; sku: string; detail: string; color: string; size: string; image: string | null; weight: number }>;
 };
 
+/**
+ * SĐT người nhận ở DẠNG LƯU (đường ghi): số Việt Nam về đúng dạng Pancake ghi `ship_phone` (`0…` — `lib/integrations/http.ts`
+ * `normalizePhone`, cùng hàm mapper Pancake dùng), để tra khách cũ theo SĐT (`returning.ts` · lịch sử ở hộp thư) khớp được đơn ERP
+ * như khớp đơn Pancake. Số ngoài VN ⇒ dạng hồ sơ khách (`normalizeCustomerPhone`); không chuẩn hoá được ⇒ giữ chữ khách gõ (đã cắt
+ * hai đầu) — không đoán số. HÀM THUẦN.
+ */
+export function canonicalRecipientPhone(raw: string): string {
+  const vn = pancakePhone(raw.trim());
+  if (/^0\d{9,10}$/.test(vn)) return vn;
+  return normalizeCustomerPhone(raw) ?? raw.trim();
+}
+
 /** Kiểm đầu vào + tra khách / mẫu mã THẬT. Không ghi gì. */
 async function prepare(rawInput: unknown): Promise<{ ok: true; p: Prepared } | MetaFailure> {
   const parsed = orderInputZ.safeParse(rawInput);
@@ -242,7 +258,9 @@ async function prepare(rawInput: unknown): Promise<{ ok: true; p: Prepared } | M
   const provinceText = r?.province || (r?.address ? "" : customer.province);
   // Tỉnh + xã theo địa giới mới, đọc từ dòng địa chỉ khi chưa có — đơn bot / máy ghi chỉ có một dòng chữ (05/10/2026).
   const place = resolveRecipientPlace({ address, province: provinceText, ward: r?.ward ?? "" });
-  const recipient: Recipient = { name: r?.name || customer.name, phone: r?.phone || (customer.phone ?? ""), address, province: place.province, ward: place.ward };
+  // SĐT lưu dạng CHUẨN HOÁ ở đường ghi (`canonicalRecipientPhone`): khách gõ «0919.000.808» / «+84 919 000 808» ⇒ «0919000808».
+  const typedPhone = r?.phone || (customer.phone ?? "");
+  const recipient: Recipient = { name: r?.name || customer.name, phone: canonicalRecipientPhone(typedPhone), address, province: place.province, ward: place.ward };
   return { ok: true, p: { customer, recipient, stage: v.stage, note: v.note.trim(), channel: v.channel.trim(), orderDiscount: v.orderDiscount, totals: t.totals, variants } };
 }
 
@@ -339,7 +357,9 @@ export function materialChanges(before: OrderMaterial, after: OrderMaterial): Or
   const out: OrderMaterialChange[] = [];
   const norm = (l: OrderMaterial["lines"]) => JSON.stringify(l.map((x) => [x.variantId, x.quantity, x.unitPrice, x.discount]).sort());
   if (norm(before.lines) !== norm(after.lines)) out.push("lines");
-  const rc = (r: Recipient) => [r.name, r.phone, r.address, r.province, r.ward ?? ""].map((x) => x.trim()).join("|");
+  // SĐT so SAU chuẩn hoá: đơn cũ lưu «0919.000.808», lượt sửa ghi «0919000808» — cùng một số, không phải một lượt đổi người nhận
+  // (không phát `order.updated` giả cho nhóm vận hành).
+  const rc = (r: Recipient) => [r.name, canonicalRecipientPhone(r.phone), r.address, r.province, r.ward ?? ""].map((x) => x.trim()).join("|");
   if (rc(before.recipient) !== rc(after.recipient)) out.push("shipping_address");
   if (before.amountDue !== after.amountDue) out.push("amount_due");
   if (before.customerId !== after.customerId) out.push("customer");
@@ -371,6 +391,31 @@ async function kickWorkflows() {
 
 export type ManualOrderResult = { ok: true; id: string; reused?: boolean } | MetaFailure;
 
+/**
+ * MÁY chốt («Đã xác nhận») khi xã / phường CHƯA ghép được ⇒ cờ CẦN NGƯỜI KIỂM (chủ shop 08/10/2026: vẫn chốt như trước, người
+ * kiểm lại địa chỉ rồi xác nhận). Người chốt tay thì không gắn — người đã nhìn thấy ô xã trống trên form. HÀM THUẦN.
+ */
+function addressReview(w: Writer, p: Prepared, raw: Record<string, unknown>, now: Date): { raw: Record<string, unknown>; changed: boolean } {
+  if (w.actorKind !== "AGENT" || p.stage !== "CONFIRMED" || (p.recipient.ward ?? "").trim()) return { raw, changed: false };
+  const where = p.recipient.province ? `tỉnh ${p.recipient.province}, chưa có xã / phường` : "chưa nhận ra tỉnh / thành và xã / phường";
+  return withReviewEntry(raw, { code: "ADDRESS_UNRESOLVED", note: `Máy chốt khi địa chỉ chưa ghép được (${where}) — dòng địa chỉ: ${p.recipient.address}`, quote: null, at: now.toISOString(), by: w.name });
+}
+
+/** Nhật ký một lượt gắn / gỡ cờ CẦN NGƯỜI KIỂM — tách khỏi nhật ký sửa đơn để tra được riêng. */
+async function auditReview(w: Writer, orderId: string, kind: "FLAG" | "RESOLVE", detail: { entries: OrderReviewEntry[]; action?: OrderReviewResolution["action"] }) {
+  await audit({
+    userId: w.userId,
+    userEmail: w.email,
+    actorKind: w.actorKind === "AGENT" ? "AGENT" : undefined,
+    action: kind === "FLAG" ? "ORDER_REVIEW_FLAG" : "ORDER_REVIEW_RESOLVE",
+    entity: "ORDER",
+    entityId: orderId,
+    before: kind === "FLAG" ? null : { review: detail.entries },
+    after: kind === "FLAG" ? { review: detail.entries } : { review: null, action: detail.action ?? null },
+    reason: kind === "FLAG" ? `Cần người kiểm: ${detail.entries.map((e) => e.code).join(", ")}` : `Người đã kiểm — ${detail.action === "CANCELLED" ? "huỷ đơn" : "xác nhận đơn"}`,
+  });
+}
+
 /** Đơn giá máy gửi phải đúng giá máy chủ tính theo chế độ đã khai; máy không chiết khấu. */
 async function agentPriceGate(p: Prepared, mode: AgentPricingMode): Promise<MetaFailure | null> {
   const lines = p.totals.lines;
@@ -383,6 +428,19 @@ class StockShortError extends Error {
   constructor(readonly failure: MetaFailure) {
     super("Không đủ hàng khả dụng");
   }
+}
+
+/** Cờ CẦN NGƯỜI KIỂM vừa đổi giữa lúc người xem và lúc ghi ⇒ ném để huỷ giao dịch, trả CONFLICT đọc được. */
+class ReviewConflictError extends Error {
+  constructor(readonly failure: MetaFailure) {
+    super("Cờ cần người kiểm vừa đổi");
+  }
+}
+
+/** Dòng đơn KHOÁ trong giao dịch — mọi lượt ghi `raw` dựng lại từ đây để không đè cờ ai đó vừa gắn (review #675, M1). */
+async function lockOrderRaw(tx: Tx, orderId: string): Promise<Record<string, unknown>> {
+  const [locked] = await tx.select({ raw: schema.orders.raw }).from(schema.orders).where(eq(schema.orders.id, orderId)).limit(1).for("update");
+  return (locked?.raw ?? {}) as Record<string, unknown>;
 }
 
 /**
@@ -457,8 +515,10 @@ export async function loadAutoConfirmComplete(): Promise<boolean> {
  * Đơn «Mới» ĐỦ THÔNG TIN ở tổ chức bật công tắc ⇒ «Đã xác nhận» (`AUTO_CONFIRM_COMPLETE_SETTING_KEY`). Vượt hạn mức nợ ⇒ giữ
  * «Mới» — hạn mức là quyết định của người, công tắc không được vượt qua nó.
  */
-async function autoConfirmComplete(p: Prepared, existingOrderId?: string): Promise<Prepared> {
+async function autoConfirmComplete(p: Prepared, existingOrderId?: string, existingRaw?: unknown): Promise<Prepared> {
   if (p.stage !== "NEW" || !manualOrderComplete(p.recipient, p.totals.lines.length) || !(await loadAutoConfirmComplete())) return p;
+  // Luật 04/10 «trừ những đơn huỷ»: đơn khách đã báo huỷ (cờ CẦN NGƯỜI KIỂM còn mở) KHÔNG được công tắc tự nâng — người quyết.
+  if (orderReviewOf(existingRaw)?.entries.some((e) => e.code === "CUSTOMER_CANCELLED")) return p;
   const promoted: Prepared = { ...p, stage: "CONFIRMED" };
   return (await creditGate(promoted, existingOrderId)) ? p : promoted;
 }
@@ -481,6 +541,7 @@ async function createOrder(w: Writer, rawInput: unknown, agentOpts?: AgentOrderO
   const db = await getDb();
   const key = (agentOpts?.idempotencyKey ?? userKey)?.trim().slice(0, 200) || null;
   let reused = null as string | null;
+  let createdReview: OrderReviewEntry[] = [];
   try {
     await db.transaction(async (tx) => {
       if (key) {
@@ -493,7 +554,10 @@ async function createOrder(w: Writer, rawInput: unknown, agentOpts?: AgentOrderO
         }
       }
       if (agentOpts && !agentOpts.allowShortStock && p.stage === "CONFIRMED") await assertAgentStock(tx, p, []);
-      await tx.insert(schema.orders).values({ id, ...orderColumns(p, w, key ? { agentKey: key } : {}), ...(agentOpts?.adId ? { adId: agentOpts.adId } : {}), insertedAt: now, lastUpdateStatusAt: now, syncedAt: now });
+      const cols = orderColumns(p, w, key ? { agentKey: key } : {});
+      const flagged = addressReview(w, p, cols.raw, now);
+      createdReview = flagged.changed ? (orderReviewOf(flagged.raw)?.entries ?? []) : [];
+      await tx.insert(schema.orders).values({ id, ...cols, raw: flagged.raw, ...(agentOpts?.adId ? { adId: agentOpts.adId } : {}), insertedAt: now, lastUpdateStatusAt: now, syncedAt: now });
     await tx.insert(schema.orderItems).values(itemRows(id, p));
     await tx.insert(schema.orderStatusHistory).values({ orderId: id, status: MANUAL_ORDER_STATUS_CODE[p.stage], oldStatus: null, editorName: w.name, updatedAt: now });
       if (p.stage === "CONFIRMED") await emitOrderEvent(tx, w, "order.confirmed", id, `order.confirmed:${id}`, { stage: p.stage, wasConfirmed: false, changes: [] });
@@ -504,6 +568,7 @@ async function createOrder(w: Writer, rawInput: unknown, agentOpts?: AgentOrderO
   }
   if (reused) return { ok: true, id: reused, reused: true };
   await audit({ userId: w.userId, userEmail: w.email, actorKind: w.actorKind === "AGENT" ? "AGENT" : undefined, action: "ORDER_MANUAL_CREATE", entity: "ORDER", entityId: id, before: null, after: snapshotOf(p), reason: w.agent ? `Tạo đơn bởi ${w.agent}` : "Tạo đơn tay trên ERP (tổ chức không đồng bộ đơn)" });
+  if (createdReview.length) await auditReview(w, id, "FLAG", { entries: createdReview });
   if (p.stage === "CONFIRMED") await kickWorkflows();
   announceOrder(id, "created");
   return { ok: true, id };
@@ -561,7 +626,11 @@ function storedRecipient(row: typeof schema.orders.$inferSelect): Recipient {
   return { name: row.shipFullName ?? "", phone: row.shipPhone ?? "", address: row.shipAddress ?? "", province: row.shipProvince ?? "", ward: row.shipCommune ?? "" };
 }
 
-async function updateOrder(w: Writer, orderId: unknown, rawInput: unknown, agentOpts?: AgentOrderOptions): Promise<ManualOrderResult> {
+/**
+ * `resolveReview` = lượt này là NGƯỜI kiểm và xác nhận đơn (nút nhanh «Xác nhận đơn») ⇒ gỡ cờ CẦN NGƯỜI KIỂM trong cùng giao dịch —
+ * CHỈ khi dòng đã khoá không có lý do nào người bấm chưa thấy (`seen`); có ⇒ CONFLICT, không ghi gì.
+ */
+async function updateOrder(w: Writer, orderId: unknown, rawInput: unknown, agentOpts?: AgentOrderOptions, opts: { resolveReview?: { seen: ReviewSeen } } = {}): Promise<ManualOrderResult> {
   const existing = await loadEditable(orderId);
   if (!existing.ok) return existing;
   const prep = await prepare(rawInput);
@@ -571,7 +640,7 @@ async function updateOrder(w: Writer, orderId: unknown, rawInput: unknown, agent
     if (priceBad) return priceBad;
   }
   const row = existing.row;
-  let p = await autoConfirmComplete(prep.p, row.id);
+  let p = await autoConfirmComplete(prep.p, row.id, row.raw);
   // Như lượt tạo: công tắc tự nâng đơn NHÁP của máy mà thiếu hàng ⇒ giữ «Mới» (đơn tự nâng chỉ đi từ «Mới» ⇒ chưa giữ hàng).
   if (agentOpts && !agentOpts.allowShortStock && p !== prep.p && (await agentStockFailure(await getDb(), p, [], false))) p = prep.p;
   const credit = await creditGate(p, row.id);
@@ -593,6 +662,9 @@ async function updateOrder(w: Writer, orderId: unknown, rawInput: unknown, agent
   // Chốt LẦN ĐẦU qua lượt sửa ⇒ `confirmed`. Đơn ĐÃ chốt đổi phần vận hành phải biết ⇒ `updated`, khoá theo mốc sửa TRƯỚC
   // đó + bản mới: gửi lại đúng lượt sửa này thì bản mới = bản đang lưu ⇒ không đổi gì ⇒ không sự kiện; A→B→A→B thì mỗi
   // lượt một mốc khác ⇒ mỗi lượt một sự kiện.
+  const promoted = p !== prep.p;
+  let flagged: { raw: Record<string, unknown>; changed: boolean } = { raw: {}, changed: false };
+  let resolved: { changed: boolean; resolved: OrderReviewEntry[] } = { changed: false, resolved: [] };
   const event: { name: "order.confirmed" | "order.updated"; key: string } | null =
     !wasConfirmed && p.stage === "CONFIRMED"
       ? { name: "order.confirmed", key: `order.confirmed:${row.id}` }
@@ -601,11 +673,25 @@ async function updateOrder(w: Writer, orderId: unknown, rawInput: unknown, agent
         : null;
   try {
     await db.transaction(async (tx) => {
+      // `raw` dựng lại từ dòng ĐÃ KHOÁ và GỘP (không đè): lời khai gốc (origin · agentKey …) + cờ cần kiểm ai đó vừa gắn giữ nguyên
+      // dù lượt này đọc đơn trước đó. Máy chốt khi xã chưa ghép ⇒ thêm cờ; người xác nhận ⇒ gỡ cờ — sau khi so dấu vết đã thấy.
+      const lockedRaw = await lockOrderRaw(tx, row.id);
+      const openNow = orderReviewOf(lockedRaw);
+      if (opts.resolveReview) {
+        const unseen = unseenReviewEntries(openNow, opts.resolveReview.seen);
+        if (unseen.length) throw new ReviewConflictError(fail("CONFLICT", reviewConflictMessage(unseen)));
+      }
+      // Công tắc tự nâng một đơn mà khách vừa báo huỷ (cờ gắn sau lượt đọc ở trên) ⇒ phía an toàn: không ghi gì.
+      if (promoted && openNow?.entries.some((e) => e.code === "CUSTOMER_CANCELLED")) throw new ReviewConflictError(fail("CONFLICT", reviewConflictMessage(openNow.entries)));
+      const baseRaw: Record<string, unknown> = { ...lockedRaw, ...(manualOrderRaw(lockedRaw) as ManualOrderRaw), orderDiscount: p.orderDiscount };
+      flagged = addressReview(w, p, baseRaw, now);
+      const r = opts.resolveReview && p.stage === "CONFIRMED" ? withReviewResolved(flagged.raw, { action: "CONFIRMED", at: now.toISOString(), byUserId: w.userId, byName: w.name }) : { raw: flagged.raw, changed: false, resolved: [] as OrderReviewEntry[] };
+      resolved = r;
       // Máy chốt / sửa đơn đã chốt ⇒ kiểm phần hàng CẦN THÊM so với phần đơn này đang giữ (đơn đã chốt trước đó).
       if (agentOpts && !agentOpts.allowShortStock && p.stage === "CONFIRMED") await assertAgentStock(tx, p, wasConfirmed ? beforeItems.flatMap((i) => (i.variantId ? [{ variantId: i.variantId, quantity: i.quantity }] : [])) : []);
       await tx
       .update(schema.orders)
-      .set({ ...orderColumns(p, w), creatorName: row.creatorName, raw: { ...(row.raw as Record<string, unknown>), ...(manualOrderRaw(row.raw) as ManualOrderRaw), orderDiscount: p.orderDiscount }, ...(stageChanged ? { lastUpdateStatusAt: now } : {}), updatedAt: now })
+      .set({ ...orderColumns(p, w), creatorName: row.creatorName, raw: r.raw, ...(stageChanged ? { lastUpdateStatusAt: now } : {}), updatedAt: now })
       .where(and(eq(schema.orders.id, row.id)));
     await tx.delete(schema.orderItems).where(eq(schema.orderItems.orderId, row.id));
     await tx.insert(schema.orderItems).values(itemRows(row.id, p));
@@ -613,7 +699,7 @@ async function updateOrder(w: Writer, orderId: unknown, rawInput: unknown, agent
       if (event) await emitOrderEvent(tx, w, event.name, row.id, event.key, { stage: p.stage, wasConfirmed, changes });
     });
   } catch (error) {
-    if (error instanceof StockShortError) return error.failure;
+    if (error instanceof StockShortError || error instanceof ReviewConflictError) return error.failure;
     throw error;
   }
   await audit({
@@ -627,6 +713,8 @@ async function updateOrder(w: Writer, orderId: unknown, rawInput: unknown, agent
     after: snapshotOf(p),
     reason: w.agent ? `Sửa đơn bởi ${w.agent}` : "Sửa đơn tạo tay",
   });
+  if (flagged.changed) await auditReview(w, row.id, "FLAG", { entries: orderReviewOf(flagged.raw)?.entries ?? [] });
+  if (resolved.changed) await auditReview(w, row.id, "RESOLVE", { entries: resolved.resolved, action: "CONFIRMED" });
   if (event) await kickWorkflows();
   announceOrder(row.id, "updated");
   return { ok: true, id: row.id };
@@ -648,14 +736,131 @@ async function cancelOrder(w: Writer, orderId: unknown, rawInput: unknown): Prom
   const row = existing.row;
   const now = new Date();
   const db = await getDb();
+  // Đơn đang mang cờ CẦN NGƯỜI KIỂM (khách báo huỷ · địa chỉ chưa ghép) ⇒ lượt huỷ này CHÍNH LÀ quyết định của người: gỡ cờ, ghi vết.
+  // Dựng từ dòng ĐÃ KHOÁ — cờ gắn sau lúc người mở trang vẫn vào vết, không biến mất.
+  let resolved: { raw: Record<string, unknown>; changed: boolean; resolved: OrderReviewEntry[] } = { raw: {}, changed: false, resolved: [] };
   await db.transaction(async (tx) => {
-    await tx.update(schema.orders).set({ stage: "CANCELLED", status: MANUAL_ORDER_STATUS_CODE.CANCELLED, statusName: manualOrderStageLabel("CANCELLED"), lastUpdateStatusAt: now, updatedAt: now }).where(eq(schema.orders.id, row.id));
+    resolved = withReviewResolved(await lockOrderRaw(tx, row.id), { action: "CANCELLED", at: now.toISOString(), byUserId: w.userId, byName: w.name });
+    await tx.update(schema.orders).set({ stage: "CANCELLED", status: MANUAL_ORDER_STATUS_CODE.CANCELLED, statusName: manualOrderStageLabel("CANCELLED"), ...(resolved.changed ? { raw: resolved.raw } : {}), lastUpdateStatusAt: now, updatedAt: now }).where(eq(schema.orders.id, row.id));
     await tx.insert(schema.orderStatusHistory).values({ orderId: row.id, status: MANUAL_ORDER_STATUS_CODE.CANCELLED, oldStatus: row.status, editorName: w.name, updatedAt: now });
     await emitOrderEvent(tx, w, "order.cancelled", row.id, `order.cancelled:${row.id}`, { stage: "CANCELLED", wasConfirmed: row.stage === "CONFIRMED", changes: ["stage"], reason: parsed.data.reason });
   });
   await audit({ userId: w.userId, userEmail: w.email, actorKind: w.actorKind === "AGENT" ? "AGENT" : undefined, action: "ORDER_MANUAL_CANCEL", entity: "ORDER", entityId: row.id, before: { stage: row.stage }, after: { stage: "CANCELLED" }, reason: parsed.data.reason });
+  if (resolved.changed) await auditReview(w, row.id, "RESOLVE", { entries: resolved.resolved, action: "CANCELLED" });
   await kickWorkflows();
   announceOrder(row.id, "updated");
+  return { ok: true, id: row.id };
+}
+
+// ─────────────────────────── Đơn cần người kiểm (chủ shop 08/10/2026) ───────────────────────────
+
+export type ReviewFlagResult = { ok: true; id: string; flagged: boolean; stage: string | null } | MetaFailure;
+
+/**
+ * MÁY ghi chú «khách huỷ» (hoặc lý do khác) lên đơn của CHÍNH hội thoại và gắn cờ CẦN NGƯỜI KIỂM — KHÔNG đổi stage, KHÔNG huỷ
+ * đơn, không phát sự kiện `order.*` (đơn không đổi gì về vận hành cho tới khi người quyết). Đơn không còn ở giai đoạn gắn cờ
+ * được (đã huỷ / đã giao / đã hoàn) ⇒ `flagged = false`, không ghi gì. Cùng lý do + cùng câu khách gửi lại ⇒ không ghi thêm.
+ * Khoá dòng đơn trong giao dịch để hai lượt ghi cờ không đè nhau. Nhật ký `ORDER_REVIEW_FLAG` (tác nhân MÁY — luật 36).
+ * `stage` trả về để lớp gọi biết đơn ĐÃ XÁC NHẬN (giữ hàng, nhóm đã nhận tin) ⇒ phải báo người ngay (review #675, L1).
+ */
+export async function flagOrderForReviewAsAgent(agent: OrderAgent, orderId: string, entry: Omit<OrderReviewEntry, "by" | "at">, now: Date = new Date()): Promise<ReviewFlagResult> {
+  const gate = await manualOrderOrgGate();
+  if (!gate.allowed) return fail(gate.code, gate.reason);
+  if (!isManualOrderId(orderId) || orderId.length > 200) return fail("NOT_FOUND", "Không có đơn này.");
+  const w = agentWriter(agent);
+  const db = await getDb();
+  const out = await db.transaction(async (tx) => {
+    const [row] = await tx.select({ id: schema.orders.id, stage: schema.orders.stage, raw: schema.orders.raw }).from(schema.orders).where(eq(schema.orders.id, orderId)).limit(1).for("update");
+    if (!row || !manualOrderRaw(row.raw) || !canFlagOrderForReview(row.stage)) return { stage: row?.stage ?? null, added: null };
+    const next = withReviewEntry(row.raw as Record<string, unknown>, { ...entry, at: now.toISOString(), by: w.name });
+    if (!next.changed) return { stage: row.stage, added: [] as OrderReviewEntry[] };
+    await tx.update(schema.orders).set({ raw: next.raw, updatedAt: now }).where(eq(schema.orders.id, row.id));
+    return { stage: row.stage, added: orderReviewOf(next.raw)?.entries.slice(-1) ?? [] };
+  });
+  if (out.added === null) return { ok: true, id: orderId, flagged: false, stage: out.stage };
+  if (out.added.length) {
+    await auditReview(w, orderId, "FLAG", { entries: out.added });
+    announceOrder(orderId, "updated");
+  }
+  return { ok: true, id: orderId, flagged: true, stage: out.stage };
+}
+
+/**
+ * Khách đã báo huỷ rồi ĐỒNG Ý lại với bot (lời xác nhận hợp lệ ở `confirm_order`) ⇒ một dòng vết «khách xác nhận lại» (nguyên văn +
+ * mốc) — KHÔNG gỡ cờ: người đọc cả hai lời rồi quyết (review #675, L8). Không có cờ «khách huỷ» đang mở ⇒ không ghi gì.
+ */
+export async function noteCustomerReconfirmAsAgent(agent: OrderAgent, orderId: string, quote: string | null, now: Date = new Date()): Promise<boolean> {
+  if (!isManualOrderId(orderId) || orderId.length > 200) return false;
+  const w = agentWriter(agent);
+  const db = await getDb();
+  const changed = await db.transaction(async (tx) => {
+    const raw = await lockOrderRaw(tx, orderId);
+    if (!manualOrderRaw(raw)) return false;
+    const next = withCustomerReconfirm(raw, { at: now.toISOString(), byName: w.name, quote });
+    if (next.changed) await tx.update(schema.orders).set({ raw: next.raw, updatedAt: now }).where(eq(schema.orders.id, orderId));
+    return next.changed;
+  });
+  if (changed) {
+    await audit({ userId: null, userEmail: w.email, actorKind: "AGENT", action: "ORDER_REVIEW_NOTE", entity: "ORDER", entityId: orderId, before: null, after: { action: "CUSTOMER_RECONFIRMED", quote }, reason: "Khách xác nhận lại sau khi đã báo huỷ — cờ cần kiểm giữ nguyên, người quyết" });
+    announceOrder(orderId, "updated");
+  }
+  return changed;
+}
+
+const seenZ = z.object({ count: z.number().int().min(0).max(1000), latestAt: z.string().max(40).nullable() }).strict();
+
+/**
+ * NÚT NHANH «XÁC NHẬN ĐƠN» (hộp thư · danh sách đơn · trang đơn). Cùng cổng với sửa đơn (`manualOrderGate` — `orders:write`):
+ *  · `seen` = dấu vết lý do cần kiểm người bấm ĐÃ THẤY trên trang (`reviewSeenOf`). Dòng đã khoá có lý do mới (bot vừa gắn «khách
+ *    huỷ» sau khi trang dựng) ⇒ CONFLICT «tải lại để xem», KHÔNG chốt, KHÔNG gỡ cờ — cả hai nhánh dưới (review #675, M1);
+ *  · đơn còn chỗ thiếu (`manualOrderGaps` — SĐT · địa chỉ · tỉnh · xã / phường · hàng) ⇒ từ chối, sửa đơn trước (review #675, L2);
+ *  · đơn «Mới» / «Chờ hàng» ⇒ «Đã xác nhận» qua ĐÚNG đường sửa đơn (`updateOrder`: hạn mức nợ, sự kiện `order.confirmed`, nhật
+ *    ký) — cùng cách công tắc «đơn đủ thông tin» chuyển đơn; cờ CẦN NGƯỜI KIỂM (nếu có) gỡ trong CÙNG giao dịch;
+ *  · đơn đã «Đã xác nhận» mà còn cờ ⇒ chỉ gỡ cờ (người đã kiểm, giữ đơn) — không đổi stage, không sự kiện;
+ *  · không còn gì để xác nhận (bấm hai lần, trình duyệt gửi lại) ⇒ KHÔNG ghi gì, trả về như cũ (mục 61).
+ */
+export async function confirmOrderReviewCore(user: SessionUser, orderId: unknown, seenInput: unknown): Promise<ManualOrderResult> {
+  const gate = await manualOrderGate(user);
+  if (!gate.allowed) return fail(gate.code, gate.reason);
+  if (typeof orderId !== "string" || !orderId || orderId.length > 200) return fail("NOT_FOUND", "Không có đơn này.");
+  const seen = seenZ.safeParse(seenInput);
+  if (!seen.success) return fail("INVALID", "Thiếu dấu vết lý do cần kiểm đã xem — tải lại trang rồi bấm lại.");
+  const db = await getDb();
+  const o = schema.orders;
+  const [row] = await db.select({ id: o.id, stage: o.stage, raw: o.raw, phone: o.shipPhone, address: o.shipAddress, province: o.shipProvince, ward: o.shipCommune, lines: o.itemsCount }).from(o).where(eq(o.id, orderId)).limit(1);
+  if (!row) return fail("NOT_FOUND", "Không có đơn này.");
+  if (!isManualOrderId(row.id) || !manualOrderRaw(row.raw)) return fail("NOT_SUPPORTED", "Đơn đồng bộ từ nguồn khác — xác nhận ở nguồn.");
+  if (row.stage === "CANCELLED" || row.stage === "DELETED") return fail("CONFLICT", "Đơn đã huỷ — không xác nhận được.");
+  const w = userWriter(user);
+  const kind = row.stage === "NEW" || row.stage === "WAITING" ? "CONFIRM" : "RESOLVE";
+  // Đã xác nhận, không cờ, không lý do mới ⇒ không có gì để làm (bấm hai lần).
+  if (kind === "RESOLVE" && !orderReviewOf(row.raw)) return { ok: true, id: row.id };
+  const gaps = manualOrderGaps({ phone: row.phone, address: row.address, province: row.province, ward: row.ward }, row.lines);
+  if (gaps.length) return fail("CONFLICT", `Đơn còn thiếu ${gaps.join(", ")} — sửa đơn trước rồi xác nhận.`);
+  if (kind === "CONFIRM") {
+    const values = await manualOrderFormValues(row.id);
+    if (!values) return fail("CONFLICT", "Đơn vừa đổi trạng thái — tải lại trang rồi thử lại.");
+    return updateOrder(w, row.id, { ...values, stage: "CONFIRMED" }, undefined, { resolveReview: { seen: seen.data } });
+  }
+  const now = new Date();
+  let out: { changed: boolean; resolved: OrderReviewEntry[] } = { changed: false, resolved: [] };
+  try {
+    await db.transaction(async (tx) => {
+      const raw = await lockOrderRaw(tx, row.id);
+      const unseen = unseenReviewEntries(orderReviewOf(raw), seen.data);
+      if (unseen.length) throw new ReviewConflictError(fail("CONFLICT", reviewConflictMessage(unseen)));
+      const r = withReviewResolved(raw, { action: "CONFIRMED", at: now.toISOString(), byUserId: user.id, byName: user.name });
+      if (r.changed) await tx.update(schema.orders).set({ raw: r.raw, updatedAt: now }).where(eq(schema.orders.id, row.id));
+      out = r;
+    });
+  } catch (error) {
+    if (error instanceof ReviewConflictError) return error.failure;
+    throw error;
+  }
+  if (out.changed) {
+    await auditReview(w, row.id, "RESOLVE", { entries: out.resolved, action: "CONFIRMED" });
+    announceOrder(row.id, "updated");
+  }
   return { ok: true, id: row.id };
 }
 

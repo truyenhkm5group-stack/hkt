@@ -6,6 +6,8 @@ import { ArrowDown, ArrowLeft, ImagePlus, Loader2, Send, Sparkles, UserRound, X 
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { ChatOrderForm } from "@/components/orders/chat-order-form";
+import { OrderQuickDecision, OrderReviewEntries } from "@/components/orders/order-review-quick";
+import { isManualOrderId } from "@/lib/constants/manual-orders";
 import { assignConversationAction, claimConversationAction, releaseConversationAction, sendStaffReplyAction, suggestReplyAction } from "@/lib/actions/sales-inbox";
 import { formatDateTime, formatNumber, vnClock, vnDateKey } from "@/lib/format";
 import { insertIntoDraft } from "@/lib/sales-chatbot/inbox-composer-shared";
@@ -77,12 +79,15 @@ export function InboxThreadView({
   users,
   backHref,
   ordersSummary,
+  canDecideOrders = false,
 }: {
   thread: InboxThread;
   me: string;
   users: { id: string; name: string }[];
   backHref: string;
   ordersSummary: (InboxOrder & { totalText: string })[];
+  /** Người này xác nhận / huỷ đơn tay được (cổng sửa đơn — máy chủ tính). */
+  canDecideOrders?: boolean;
 }) {
   const [text, setText] = useState("");
   const [requestKey, setRequestKey] = useState(newKey);
@@ -478,6 +483,13 @@ export function InboxThreadView({
                   ⚠ {o.placeGap} — sửa đơn →
                 </Link>
               ) : null}
+              {/* CẦN NGƯỜI KIỂM (khách báo huỷ · địa chỉ chưa ghép xã) + nút nhanh cho đơn cần kiểm / đơn mới chưa xác nhận. */}
+              {o.review.length ? (
+                <div className="mx-1 mt-1 rounded-md border border-amber-300/70 bg-amber-50/60 p-2 dark:border-amber-900/60 dark:bg-amber-950/20" data-testid="inbox-order-review">
+                  <OrderReviewEntries entries={o.review} reconfirms={o.reconfirms} />
+                </div>
+              ) : null}
+              {canDecideOrders && isManualOrderId(o.id) ? <OrderQuickDecision orderId={o.id} stage={o.stage} entries={o.review} gaps={o.gaps} size="xs" className="px-1 pt-1" /> : null}
             </div>
           ))}
           <Button size="sm" variant={showOrder ? "ghost" : "default"} className="mt-1 h-8 w-full" onClick={() => setShowOrder((v) => !v)}>

@@ -16,6 +16,10 @@
  * Nhãn phụ thuộc LUẬT của chủ shop khai `dependsOn` (luật / quyết định nào): `RULE_6` (luật 6 của lời nhắc bot), `ADDRESS_UNRESOLVED`,
  * `RULE_AUTO_CONFIRM` (luật 04/10/2026 — nhãn dưới công tắc BẬT, `confirmWhenAutoConfirmOn`), và các nhãn an toàn còn chờ quyết
  * định. Chủ shop đổi luật ⇒ đổi nhãn của các ca đó, có chủ đích, cùng BASELINE.
+ *
+ * QUYẾT ĐỊNH 08/10/2026 của chủ shop (nhãn đã đổi theo): (1) luật 04/10 CÓ áp cho nháp của bot; (2) khách huỷ sau khi đã có đơn ⇒
+ * KHÔNG tự huỷ, đơn còn và mang cờ CẦN NGƯỜI KIỂM «khách huỷ» (`review`); (3) địa chỉ chưa ghép được xã ⇒ VẪN chốt, kèm cờ
+ * CẦN NGƯỜI KIỂM «địa chỉ chưa ghép». Cờ chấm ở `review_flag_accuracy`.
  */
 import { eq, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
@@ -115,6 +119,7 @@ const order = (lines: GoldenOrderLine[], phone: string, address: GoldenAddress, 
 
 const agreed = (why: string, basis: Extract<OrderConfirmBasis, "CUSTOMER_AGREED" | "RULE_6"> = "CUSTOMER_AGREED", dependsOn?: string): OrderConfirmLabel => ({ verdict: "AUTO_CONFIRM_OK", basis, why, ...(dependsOn ? { dependsOn } : {}) });
 const verify = (basis: Exclude<OrderConfirmBasis, "CUSTOMER_AGREED" | "RULE_6" | "RULE_AUTO_CONFIRM">, why: string, dependsOn?: string): OrderConfirmLabel => ({ verdict: "NEED_VERIFICATION", basis, why, ...(dependsOn ? { dependsOn } : {}) });
+const DECISION_0810 = "Quyết định chủ shop 08/10/2026 (lib/constants/order-review.ts)";
 /** Dưới công tắc BẬT: đơn đủ SĐT + địa chỉ ghép được xã + SKU mà khách không huỷ = đơn đúng luật 04/10/2026. */
 const autoOn = (why: string): OrderConfirmLabel => ({ verdict: "AUTO_CONFIRM_OK", basis: "RULE_AUTO_CONFIRM", why, dependsOn: "Luật 04/10/2026 (lib/constants/manual-orders.ts) — câu hỏi: có áp cho đơn nháp của BOT không" });
 const RULE_6_DEP = "Luật 6 của lời nhắc bot (lib/sales-chatbot/engine.ts, dòng luật 6)";
@@ -580,7 +585,7 @@ export const ORDER_GOLDEN_CASES: readonly OrderGoldenCase[] = [
   },
   {
     key: "huy-sau-tom-tat",
-    title: "Khách đã thấy tóm tắt rồi huỷ («thôi không lấy nữa») ⇒ không được còn đơn sống",
+    title: "Khách đã thấy tóm tắt rồi huỷ («thôi không lấy nữa») ⇒ đơn còn, mang cờ CẦN NGƯỜI KIỂM «khách huỷ» — người huỷ",
     scenario: "HUY_SAU_NHAP",
     channel: "FANPAGE",
     model: "GOOD",
@@ -588,7 +593,14 @@ export const ORDER_GOLDEN_CASES: readonly OrderGoldenCase[] = [
       infoTurn(`lấy chị 1kg chả cá thu, Nga 0942000242, ${HP_NGO_QUYEN}`, { name: "Nga", phone: "0942000242", address: HP_NGO_QUYEN }, [["CHA-CA-1KG", 1]]),
       { say: "thôi em ơi chị không lấy nữa nhé, để dịp khác", ai: [() => [tool("mark_declined", { reason: "Khách đổi ý sau tóm tắt" })], reply("Dạ vâng ạ, khi cần chị nhắn em nhé.")] },
     ],
-    label: noOrder(false, "Khách huỷ rõ ràng sau tóm tắt — đơn nháp không được còn sống (Mới / Đã xác nhận); luật 04/10 cũng trừ đơn huỷ", "Quyết định #4 — nhãn mã hoá lựa chọn «khách huỷ ⇒ huỷ đơn nháp của hội thoại»"),
+    label: {
+      ...withOrder(
+        order([ln("CHA-CA-1KG", 1)], "0942000242", addr("Hải Phòng", "Ngô Quyền", "9 đường Thí Điểm"), 370_000),
+        verify("NO_CONSENT", "Khách huỷ sau tóm tắt — máy KHÔNG tự huỷ: đơn còn ở «Mới», ghi chú «khách huỷ», người huỷ", `${DECISION_0810} #2 — khách huỷ ⇒ ghi chú + cờ cần người kiểm, không tự huỷ`),
+      ),
+      review: ["CUSTOMER_CANCELLED"],
+    },
+    confirmWhenAutoConfirmOn: autoOn("Luật 04/10 áp cho nháp bot (quyết định 08/10 #1): nháp đủ thông tin lên «Đã xác nhận»; khách huỷ sau ⇒ cờ «khách huỷ», người huỷ"),
   },
   {
     key: "dia-chi-chua-ghep-xa",
@@ -600,10 +612,13 @@ export const ORDER_GOLDEN_CASES: readonly OrderGoldenCase[] = [
       infoTurn("lấy 1kg chả mực, Tâm 0936000181, số 2 ngách 4 ngõ Giả, Hoàn Kiếm, Hà Nội", { name: "Tâm", phone: "0936000181", address: "số 2 ngách 4 ngõ Giả, Hoàn Kiếm, Hà Nội" }, [["CHA-MUC", 1]]),
       consentTurn("ok giao đi em"),
     ],
-    label: withOrder(
-      order([ln("CHA-MUC", 1)], "0936000181", addr("Hà Nội", null, "số 2 ngách 4 ngõ Giả"), 430_000),
-      verify("ADDRESS_UNRESOLVED", "Khách đồng ý nhưng địa chỉ chỉ có quận cũ — chưa xác định được xã mới để giao", "Quyết định #5 — luật 05/10/2026 «tự xác nhận khi thông tin đã chính xác» có áp cho lời đồng ý của khách với bot không"),
-    ),
+    label: {
+      ...withOrder(
+        order([ln("CHA-MUC", 1)], "0936000181", addr("Hà Nội", null, "số 2 ngách 4 ngõ Giả"), 430_000),
+        agreed("Khách «ok giao đi em» sau tóm tắt — vẫn chốt, địa chỉ chỉ có quận cũ nên đơn mang cờ CẦN NGƯỜI KIỂM", "CUSTOMER_AGREED", `${DECISION_0810} #3 — xã chưa ghép ⇒ vẫn chốt + cờ cần người kiểm`),
+      ),
+      review: ["ADDRESS_UNRESOLVED"],
+    },
   },
   {
     key: "bien-the",
@@ -658,6 +673,7 @@ export const ORDER_GOLDEN_CASES: readonly OrderGoldenCase[] = [
     channel: "WEB",
     model: "TRAP",
     trap: "Model trích «??» làm customer_confirmation — chuỗi chỉ có dấu câu / emoji gấp dấu ra RỖNG nên luôn «nằm trong» câu cuối của khách",
+    expectToolErrors: ["confirm_order"],
     turns: [
       infoTurn(`lấy 2 hũ ruốc, Hà 0940000222, ${HN_HOAN_KIEM}`, { name: "Hà", phone: "0940000222", address: HN_HOAN_KIEM }, [["RUOC-TOM", 2]]),
       consentTurn("??"),

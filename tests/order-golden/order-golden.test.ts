@@ -74,6 +74,7 @@ function testOrderGoldenMetrics() {
     shippingFee: 30,
     total: 230,
     confirmedEvents: 0,
+    review: [],
     ...over,
   });
   const obs = (key: string, orders: ObservedOrder[]) => ({ key, orders });
@@ -133,6 +134,18 @@ function testOrderGoldenMetrics() {
   assert.equal(scoreOrderCase(verifyLabel, obs("dong-ranh-gioi", [ord({ addressLine: "Số 7 ngõ Thửa, Phường Hoàn Kiếm" })])).fields?.address.line, false, "so theo ranh giới từ: «ngõ Thử» không khớp «ngõ Thửa»");
   assert.deepEqual(scoreOrderCase(verifyLabel, obs("dong-sai", [ord({ addressLine: "10 đường Mẫu, Phường Hoàn Kiếm" })])).fields?.wrong, ["address_line"]);
   assert.deepEqual(scoreOrderCase(verifyLabel, obs("tinh-sai", [ord({ province: "Thành phố Hải Phòng" })])).fields?.wrong, ["province"]);
+  // Cờ CẦN NGƯỜI KIỂM (quyết định 08/10/2026): chấm hai chiều, KHÔNG nằm trong trường người phải sửa.
+  const reviewLabel: OrderGoldenLabel = { ...verifyLabel, review: ["CUSTOMER_CANCELLED"] };
+  assert.deepEqual(labelProblems(reviewLabel), []);
+  assert.ok(labelProblems({ ...noLabel, review: ["CUSTOMER_CANCELLED"] }).length > 0, "cờ cần kiểm chỉ khai cho ca có đơn");
+  const rOk = scoreOrderCase(reviewLabel, obs("co-co", [ord({ review: ["CUSTOMER_CANCELLED"] })]));
+  assert.deepEqual([rOk.fields?.review, rOk.fields?.wrong], [true, []], "nhãn đòi cờ + đơn mang đúng cờ");
+  assert.equal(scoreOrderCase(reviewLabel, obs("thieu-co", [ord()])).fields?.review, false, "nhãn đòi cờ mà đơn không mang ⇒ sai");
+  assert.equal(scoreOrderCase(verifyLabel, obs("thua-co", [ord({ review: ["ADDRESS_UNRESOLVED"] })])).fields?.review, false, "đơn mang cờ nhãn không đòi ⇒ việc giả cho người");
+  assert.deepEqual(scoreOrderCase(reviewLabel, obs("thieu-co-2", [ord()])).fields?.wrong, [], "cờ sai không đẩy vào trường người phải sửa");
+  const sens = summarizeOrderGolden([rOk, scoreOrderCase(reviewLabel, obs("thieu-co-3", [ord()])), scoreOrderCase(verifyLabel, obs("am", [ord()]))]);
+  assert.deepEqual([sens.metrics.review_flag_accuracy.numerator, sens.metrics.review_flag_accuracy.denominator], [2, 3], "độ đúng gộp cả ca âm");
+  assert.deepEqual(sens.reviewFlagSensitivity, { rate: 1 / 2, numerator: 1, denominator: 2 }, "độ nhạy chỉ trên ca nhãn đòi cờ");
 
   // Gộp: tử / mẫu từng chỉ số, ca sai, cờ CRITICAL, tách căn cứ.
   const scores = [s1, s2, s3, s4, s5, s6, s9];
@@ -154,11 +167,13 @@ function testOrderGoldenMetrics() {
       duplicate_order_rate: [1, 7],
       missing_order_rate: [1, 6],
       human_correction_rate: [1, 5],
+      review_flag_accuracy: [5, 5],
     },
   );
   assert.equal(sum.metrics.false_auto_confirm_rate.rate, 2 / 6);
   assert.deepEqual(sum.critical.map((c) => [c.metric, c.cases]), [["false_auto_confirm_rate", ["chot-sai", "ao"]], ["duplicate_order_rate", ["trung"]]], "chốt sai + đơn trùng vượt 0 ⇒ cờ CRITICAL kèm ca");
   assert.deepEqual(sum.falseAutoConfirmWithOrder, { rate: 1 / 5, numerator: 1, denominator: 5 }, "bỏ ca NO_ORDER khỏi mẫu số chốt sai");
+  assert.deepEqual(sum.reviewFlagSensitivity, { rate: null, numerator: 0, denominator: 0 }, "không ca nào đòi cờ ⇒ độ nhạy CHƯA ĐO ĐƯỢC, không phải 0");
   assert.deepEqual(sum.falseAutoConfirmByBasis, { NO_CONSENT: { rate: 1 / 5, numerator: 1, denominator: 5 }, NO_ORDER: { rate: 1, numerator: 1, denominator: 1 } });
   assert.deepEqual([sum.failing.order_intent_recall, sum.failing.order_intent_precision, sum.failing.quantity_accuracy, sum.failing.missed_confirm_rate, sum.failing.missing_order_rate], [["thieu"], ["ao"], ["sai-sl"], ["lo-chot"], ["thieu"]]);
   assert.deepEqual(summarizeOrderGolden(scores), sum, "hàm thuần: chạy lại ra đúng như cũ");
@@ -166,7 +181,7 @@ function testOrderGoldenMetrics() {
   // Mẫu số 0 ⇒ null (CHƯA ĐO ĐƯỢC), không 0; tỷ lệ null không bao giờ bật cờ.
   const empty = summarizeOrderGolden([s7]);
   assert.deepEqual(empty.metrics.duplicate_order_rate, { rate: null, numerator: 0, denominator: 0 }, "không đơn nào ⇒ tỷ lệ trùng CHƯA ĐO ĐƯỢC");
-  for (const m of ["order_intent_recall", "order_intent_precision", "sku_accuracy", "quantity_accuracy", "phone_accuracy", "address_component_accuracy", "price_accuracy", "total_accuracy", "missed_confirm_rate", "missing_order_rate", "human_correction_rate"] as const) {
+  for (const m of ["order_intent_recall", "order_intent_precision", "sku_accuracy", "quantity_accuracy", "phone_accuracy", "address_component_accuracy", "price_accuracy", "total_accuracy", "missed_confirm_rate", "missing_order_rate", "human_correction_rate", "review_flag_accuracy"] as const) {
     assert.equal(empty.metrics[m].rate, null, `${m}: mẫu số 0 ⇒ null`);
   }
   assert.deepEqual(empty.metrics.false_auto_confirm_rate, { rate: 0, numerator: 0, denominator: 1 }, "đo được và bằng 0 — khác CHƯA ĐO ĐƯỢC");

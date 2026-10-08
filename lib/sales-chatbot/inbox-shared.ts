@@ -8,6 +8,7 @@ import type { AiBlock, MessageTrace } from "@/lib/sales-chatbot/ai-status-shared
 import { readConversationControl, type ControlStamp } from "@/lib/sales-chatbot/conversation-control-shared";
 
 import type { CustomerLevel } from "@/lib/sales-chatbot/levels-shared";
+import type { OrderReviewEntry, OrderReviewResolution } from "@/lib/constants/order-review";
 
 /**
  * Thẻ lọc của hộp thư (chủ shop 07/10/2026): Tất cả · Chưa đọc · AI đang xử lý · Người đang xử lý · Cần người · Đã chốt · Chưa chốt
@@ -143,8 +144,13 @@ export type SendWindow =
   | { kind: "CLOSED"; note: string }
   | { kind: "UNKNOWN"; note: string };
 
-/** `placeGap` = đơn ERP còn sống chưa ghép được tỉnh / xã (không gửi được hãng vận chuyển, không tự xác nhận) — `null` = đủ. */
-export type InboxOrder = { id: string; shortCode: string; stage: string; outcome: string | null; outcomeLabel: string; total: number; insertedAt: string; byBot: boolean; placeGap: string | null };
+/**
+ * `placeGap` = đơn ERP còn sống chưa ghép được tỉnh / xã (không gửi được hãng vận chuyển, không tự xác nhận) — `null` = đủ.
+ * `review` = lý do CẦN NGƯỜI KIỂM đang mở (khách báo huỷ · máy chốt khi địa chỉ chưa ghép xã — `lib/constants/order-review.ts`);
+ * rỗng = không cờ. `reconfirms` = lời «khách xác nhận lại» ghi SAU lý do «khách huỷ» đang mở (cờ vẫn mở, người quyết).
+ * `gaps` = chỗ còn thiếu của đơn tay (`manualOrderGaps`) — còn thiếu thì nút nhanh không chốt, dẫn sang sửa đơn.
+ */
+export type InboxOrder = { id: string; shortCode: string; stage: string; outcome: string | null; outcomeLabel: string; total: number; insertedAt: string; byBot: boolean; placeGap: string | null; review: OrderReviewEntry[]; reconfirms: OrderReviewResolution[]; gaps: string[] };
 
 /**
  * Lịch sử mua của khách — kết quả đơn theo `ORDER_OUTCOME` (một công thức, AGENTS 0.2) trên đơn ERP cùng khách / cùng SĐT, cộng

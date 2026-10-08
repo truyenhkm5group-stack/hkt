@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/auth/session";
 import type { MetadataErrorCode } from "@/lib/metadata/errors";
 import type { FieldError } from "@/lib/metadata/types";
-import { cancelManualOrderCore, confirmManualDeliveryCore, createManualOrderCore, declareErpNativeCore, markManualDeliveryFailedCore, saveAutoConfirmCompleteCore, saveManualDeliveryFeeCore, undoManualDeliveryFailedCore, updateManualOrderCore, voidManualDeliveryCore } from "@/lib/records/order-create";
+import { cancelManualOrderCore, confirmManualDeliveryCore, confirmOrderReviewCore, createManualOrderCore, declareErpNativeCore, markManualDeliveryFailedCore, saveAutoConfirmCompleteCore, saveManualDeliveryFeeCore, undoManualDeliveryFailedCore, updateManualOrderCore, voidManualDeliveryCore } from "@/lib/records/order-create";
 import { recordManualPaymentCore, voidManualPaymentCore } from "@/lib/records/order-payments";
 
 /**
@@ -44,7 +44,24 @@ export async function cancelManualOrderAction(orderId: string, input: unknown): 
   if (!r.ok) return failure(r);
   revalidatePath("/orders");
   revalidatePath(`/orders/${encodeURIComponent(r.id)}`);
+  // Nút nhanh «Huỷ đơn» còn nằm ở panel đơn của hộp thư.
+  revalidatePath("/ai/sales-chatbot/inbox");
   return { ok: true, id: r.id, redirectTo: `/orders/${encodeURIComponent(r.id)}`, message: "Đã huỷ đơn" };
+}
+
+/**
+ * Nút nhanh «Xác nhận đơn» (hộp thư · danh sách · trang đơn): «Mới» / «Chờ hàng» ⇒ «Đã xác nhận» qua đúng đường sửa đơn, gỡ cờ
+ * CẦN NGƯỜI KIỂM nếu có; đơn đã xác nhận còn cờ ⇒ chỉ gỡ cờ. `seen` = dấu vết lý do người bấm đã thấy (`reviewSeenOf`) — có lý do
+ * mới ⇒ từ chối. Lõi: `confirmOrderReviewCore`.
+ */
+export async function confirmOrderReviewAction(orderId: string, seen: unknown): Promise<Success | Failure> {
+  const user = await requireUser();
+  const r = await confirmOrderReviewCore(user, orderId, seen);
+  if (!r.ok) return failure(r);
+  revalidatePath("/orders");
+  revalidatePath(`/orders/${encodeURIComponent(r.id)}`);
+  revalidatePath("/ai/sales-chatbot/inbox");
+  return { ok: true, id: r.id, redirectTo: `/orders/${encodeURIComponent(r.id)}`, message: "Đã xác nhận đơn" };
 }
 
 /** Xác nhận ĐÃ GIAO bằng phiếu giao có ký nhận (G-ORDER) — chỉ id đơn trong CSDL của phiên; không nhận mã tổ chức. */

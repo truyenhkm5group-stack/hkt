@@ -7,7 +7,8 @@ import { ORDER_OUTCOME_FAST, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
 import { manualPaymentStates } from "@/lib/queries/order-payments";
 import type { OrderStage } from "@/db/schema";
 import { ORDER_STAGE_LABEL, ORDER_STAGE_ORDER, pancakeConversationUrl } from "@/lib/constants/pancake";
-import { isManualOrderId } from "@/lib/constants/manual-orders";
+import { isManualOrderId, MANUAL_ORDER_ID_PREFIX, manualOrderGaps } from "@/lib/constants/manual-orders";
+import { reviewFromValue } from "@/lib/constants/order-review";
 import { canUseModule } from "@/lib/platform/capabilities";
 import type { ListParams } from "@/lib/search-params";
 import { loadAlertConfig } from "@/lib/alerts/config";
@@ -39,10 +40,16 @@ function getShipmentSearch(like: string) {
   return sql`(select 1 from ${schema.shipments} s where s.order_id = ${schema.orders.id} and (s.tracking_code ilike ${like} or s.vtp_order_number ilike ${like}))`;
 }
 
-export function orderListWhere(params: ListParams, opts: { ignoreAddressFilter?: boolean } = {}) {
+/**
+ * ĐƠN CẦN NGƯỜI KIỂM (chủ shop 08/10/2026 — `lib/constants/order-review.ts`): đơn tay `erp-` đang mang `raw.review` (khách báo
+ * huỷ · địa chỉ chưa ghép xã). MỘT biểu thức cho bộ lọc và con số trên nhãn bộ lọc. Đơn đồng bộ không bao giờ khớp.
+ */
+export const ORDER_NEEDS_REVIEW = sql`(${schema.orders.id} like ${`${MANUAL_ORDER_ID_PREFIX}%`} and jsonb_typeof(${schema.orders.raw}->'review') = 'object')`;
+
+export function orderListWhere(params: ListParams, opts: { ignoreAddressFilter?: boolean; ignoreReviewFilter?: boolean } = {}) {
   const conds: (SQL | undefined)[] = [];
   const { period, q } = params;
-  const filters: Record<string, string[] | undefined> = opts.ignoreAddressFilter ? { ...params.filters, address: undefined } : params.filters;
+  const filters: Record<string, string[] | undefined> = { ...params.filters, ...(opts.ignoreAddressFilter ? { address: undefined } : {}), ...(opts.ignoreReviewFilter ? { review: undefined } : {}) };
   if (period.from) conds.push(gte(schema.orders.insertedAt, period.from));
   if (period.to) conds.push(lte(schema.orders.insertedAt, period.to));
   if (filters.stage?.length) conds.push(inArray(schema.orders.stage, filters.stage as OrderStage[]));
@@ -55,6 +62,7 @@ export function orderListWhere(params: ListParams, opts: { ignoreAddressFilter?:
   // cung cấp địa chỉ cần chuẩn hoá" — nhân viên phải mở đơn, hỏi lại khách rồi chọn tay.
   if (filters.address?.includes("unnormalized")) conds.push(sql`coalesce(${schema.orders.shipProvince}, '') = ''`);
   if (filters.address?.includes("normalized")) conds.push(sql`coalesce(${schema.orders.shipProvince}, '') <> ''`);
+  if (filters.review?.includes("flagged")) conds.push(ORDER_NEEDS_REVIEW);
   if (filters.payment?.includes("cod")) conds.push(sql`${schema.orders.moneyToCollect} > 0`);
   if (filters.payment?.includes("prepaid")) conds.push(sql`${schema.orders.moneyToCollect} = 0`);
   /*
@@ -98,6 +106,8 @@ export async function listOrders(params: ListParams) {
         billPhone: true,
         shipProvince: true,
         shipCommune: true,
+        shipPhone: true,
+        shipAddress: true,
         source: true,
         totalPriceAfterDiscount: true,
         shippingFee: true,
@@ -113,6 +123,8 @@ export async function listOrders(params: ListParams) {
         pageId: true,
         conversationId: true,
       },
+      // Cờ CẦN NGƯỜI KIỂM — chỉ khoá `review` của đơn tay, không kéo cả `raw` (payload Pancake) về trang danh sách.
+      extras: { review: sql<unknown>`case when ${schema.orders.id} like ${`${MANUAL_ORDER_ID_PREFIX}%`} then ${schema.orders.raw}->'review' end`.as("review") },
       with: {
         // MỌI lần gửi rồi CHỌN lần đại diện — cùng luật với `PRIMARY_ATTEMPT` mà cột tiền dùng.
         attempts: { columns: { id: true, attemptNo: true, direction: true, createdAt: true, vtpOrderNumber: true, trackingCode: true, stage: true, carrier: true, codStatus: true, vtpStatusName: true } },
@@ -147,7 +159,9 @@ export async function listOrders(params: ListParams) {
       của đúng luật ấy. Để mỗi cột tự chọn lần gửi là mở đường cho dòng nói hai điều khác nhau.
     */
     const chat = chatLinkOf(chats.get(r.id), inboxOn, { pageId: r.pageId, conversationId: r.conversationId });
-    return { ...r, shipment: vanDonDaiDien(r.attempts), risk: risk?.risky ? { severity: risk.severity, reasons: risk.reasons } : null, payment: payStates.get(r.id) ?? null, chatUrl: chat?.href ?? null, chatInternal: chat?.internal ?? false };
+    // Chỗ còn thiếu của đơn tay — nút nhanh «Xác nhận đơn» không chốt đơn thiếu xã / SĐT / địa chỉ, dẫn sang sửa đơn (review #675, L2).
+    const gaps = isManualOrderId(r.id) ? manualOrderGaps({ phone: r.shipPhone, address: r.shipAddress, province: r.shipProvince, ward: r.shipCommune }, r.itemsCount) : [];
+    return { ...r, review: reviewFromValue(r.review)?.entries ?? [], gaps, shipment: vanDonDaiDien(r.attempts), risk: risk?.risky ? { severity: risk.severity, reasons: risk.reasons } : null, payment: payStates.get(r.id) ?? null, chatUrl: chat?.href ?? null, chatInternal: chat?.internal ?? false };
   });
 
   return { rows, total: Number(total), pageCount: Math.max(1, Math.ceil(Number(total) / params.pageSize)) };
@@ -274,6 +288,17 @@ async function orderSummaryUncached(params: ListParams) {
     .from(schema.orders)
     .where(and(orderListWhere(params, { ignoreAddressFilter: true }), sql`coalesce(${schema.orders.shipProvince}, '') = ''`, sql`${schema.orders.stage} not in ('CANCELLED','DELETED')`));
   return { orders: Number(row?.orders ?? 0), revenue: Number(row?.revenue ?? 0), cod: Number(row?.cod ?? 0), success: Number(row?.success ?? 0), quantity: Number(row?.quantity ?? 0), unnormalizedAddress: Number(unnormalized?.n ?? 0) };
+}
+
+/**
+ * Số đơn CẦN NGƯỜI KIỂM trên nhãn bộ lọc — KHÔNG qua bộ nhớ đệm của dải số (`orderSummary`, 30 giây): người vừa bấm «Xác nhận đơn»
+ * phải thấy con số giảm ngay ở lượt dựng lại (review #675, L6). Một câu `count` trên chỉ mục khoá chính. Bỏ qua chính bộ lọc «Cần
+ * người kiểm», để con số không tự về 0 / tự bằng tổng.
+ */
+export async function orderNeedsReviewCount(params: ListParams): Promise<number> {
+  const db = await getDb();
+  const [r] = await db.select({ n: count() }).from(schema.orders).where(and(orderListWhere(params, { ignoreReviewFilter: true }), ORDER_NEEDS_REVIEW));
+  return Number(r?.n ?? 0);
 }
 
 export async function getOrderDetail(id: string) {
