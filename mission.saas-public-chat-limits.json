@@ -3,7 +3,7 @@
   "mission_id": "saas-public-chat-limits",
   "title": "Chat công khai / ô chat nhúng có giới hạn tần suất: kẻ xấu không đốt được credit AI của shop và không làm bot im với khách thật",
   "business_goal": "",
-  "status": "VERIFYING",
+  "status": "DONE",
   "priority": "P0",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -30,8 +30,8 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-08T04:41:59.376Z",
-  "updated_at": "2026-10-08T07:38:21.494Z",
-  "last_heartbeat": "2026-10-08T05:39:19.076Z",
+  "updated_at": "2026-10-08T07:38:31.243Z",
+  "last_heartbeat": "2026-10-08T07:38:31.243Z",
   "definition_of_done": [
     "Mở hội thoại mới và gửi tin ở /chat + /chat/embed có trần theo khách (cookie) · theo IP · theo tổ chức; vượt trần KHÔNG gọi AI, trả câu kinh doanh",
     "Không tin header IP do client tự đặt; dùng lại cách lấy IP của lib/actions/auth.ts",
@@ -40,7 +40,8 @@
   "evidence": {
     "merged": "#665 → e6c3ebdbd6fdb91a5107e8e983ccce7c81df2260",
     "verify": "PASS 3a28e83e9971e73fec586bbf7fb0f5076c90ff19 2026-10-08T07:38:17.083Z",
-    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/37741568283"
+    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/37741568283",
+    "done": "gộp vào main; deploy 37741568283 (3a28e83e) success; verify PASS"
   },
   "handoff": {
     "branch": "feat/public-chat-limits",
