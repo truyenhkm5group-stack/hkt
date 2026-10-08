@@ -1,0 +1,40 @@
+{
+  "schema": 1,
+  "mission_id": "erp-a11y-bo-cuc",
+  "title": "ERP: màn «không tìm thấy» có h1; công tắc / ô số / nút biểu tượng có tên cho trình đọc màn hình (/work/settings · /alerts · /inventory/shortage); /payroll không tràn ngang 390 px",
+  "business_goal": "",
+  "status": "RUNNING",
+  "priority": "P2",
+  "risk": "MEDIUM",
+  "owner": "DESKTOP-56TH98Y:wt-pr-g",
+  "worker": null,
+  "worktree": null,
+  "branch": "claude/erp-a11y-bo-cuc",
+  "base_sha": "67647aae887104ed85fec394ad4f25fb3e612979",
+  "domains": [],
+  "owned_paths": [
+    "app/(dashboard)/not-found.tsx",
+    "app/(dashboard)/payroll/page.tsx",
+    "app/(dashboard)/alerts/alerts-actions.tsx",
+    "app/(dashboard)/alerts/marketing-digest-form.tsx",
+    "app/(dashboard)/work/settings/panels.tsx",
+    "app/(dashboard)/work/settings/staffing-panel.tsx",
+    "app/(dashboard)/work/settings/logistics-panel.tsx",
+    "app/(dashboard)/work/settings/targets-panel.tsx",
+    "app/(dashboard)/inventory/shortage/pending-matrix-section.tsx",
+    "tests/erp-a11y.test.ts",
+    "tests/sync-fixtures.test.ts"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-08T17:07:59.589Z",
+  "updated_at": "2026-10-08T17:07:59.589Z",
+  "last_heartbeat": "2026-10-08T17:07:59.589Z",
+  "definition_of_done": [],
+  "intake": {
+    "verdict": "MISSING",
+    "evidence": []
+  }
+}
