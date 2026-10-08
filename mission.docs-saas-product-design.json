@@ -16,14 +16,15 @@
     "docs/saas/INBOX_V2.md",
     "docs/saas/ORDER_CANDIDATE.md",
     "docs/saas/HELP_CENTER.md",
-    "docs/saas/SHELL_AUDIT_2026-10-08.md"
+    "docs/saas/SHELL_AUDIT_2026-10-08.md",
+    "docs/saas/README.md"
   ],
   "dependencies": [],
   "blocked_by": [],
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-08T04:40:06.657Z",
-  "updated_at": "2026-10-08T04:40:06.657Z",
-  "last_heartbeat": "2026-10-08T04:40:06.657Z",
+  "updated_at": "2026-10-08T05:29:55.896Z",
+  "last_heartbeat": "2026-10-08T05:29:55.896Z",
   "definition_of_done": []
 }
