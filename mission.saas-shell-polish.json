@@ -1,0 +1,33 @@
+{
+  "schema": 1,
+  "mission_id": "saas-shell-polish",
+  "title": "Vỏ Chốt Đơn: /login sau đặt mật khẩu đúng thương hiệu, bỏ chữ kỹ thuật còn lộ, /module-disabled có ranh giới lỗi, câu chữ BILLING_LOCKED theo sản phẩm",
+  "business_goal": "",
+  "status": "RUNNING",
+  "priority": "P2",
+  "risk": "HIGH",
+  "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "worker": null,
+  "worktree": null,
+  "branch": "fix/saas-shell-polish",
+  "base_sha": null,
+  "domains": [],
+  "owned_paths": [
+    "app/login",
+    "lib/branding",
+    "lib/actions/password-reset.ts",
+    "app/module-disabled",
+    "lib/auth/api-guard.ts",
+    "lib/constants/session-revocation.ts",
+    "lib/saas/visibility.ts",
+    "tests/saas-shell-polish.test.ts"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-08T15:00:07.905Z",
+  "updated_at": "2026-10-08T15:00:07.905Z",
+  "last_heartbeat": "2026-10-08T15:00:07.905Z",
+  "definition_of_done": []
+}
