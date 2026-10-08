@@ -3,7 +3,7 @@
   "mission_id": "cutover-unpriced-tolerance",
   "title": "org-ai-cutover: bỏ phần nhỏ token model chưa có giá khỏi phép cân giá, in tên model chưa có giá — gỡ chặn chuyển khoá HSLC",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -23,9 +23,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-08T18:15:47.531Z",
-  "updated_at": "2026-10-08T18:20:17.175Z",
+  "updated_at": "2026-10-08T18:50:18.303Z",
   "last_heartbeat": "2026-10-08T18:20:17.175Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#699 → aa1fb680cd245af959bd556f4fbf9ac6bd3f6815"
+  },
   "handoff": {
     "branch": "fix/cutover-unpriced-tolerance",
     "sha": "022c180cb93794cdc4b1ef3f06eb30ba2d9bcd4f",
