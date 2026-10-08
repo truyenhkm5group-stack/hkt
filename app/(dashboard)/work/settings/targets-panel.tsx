@@ -252,8 +252,8 @@ export function TargetsPanel({
         </div>
 
         <div className="grid gap-1">
-          <Label className="text-xs">Có hiệu lực từ</Label>
-          <Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
+          <Label className="text-xs" htmlFor="dich-hieu-luc-tu">Có hiệu lực từ</Label>
+          <Input id="dich-hieu-luc-tu" type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
           {/* Kỳ đã chốt TRƯỚC mốc này không bị chấm lại — luật "không sửa ngầm kỳ đã chốt". */}
           <p className="text-[11px] text-muted-foreground">Kỳ đã chốt trước mốc này không bị chấm lại.</p>
         </div>

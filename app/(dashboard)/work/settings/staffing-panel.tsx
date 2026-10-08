@@ -89,6 +89,7 @@ export function StaffingPanel({
                 <TableCell>
                   <div className="flex items-center gap-2">
                     <Switch
+                      aria-label={`Phân việc tự động cho ${DEPARTMENT_LABEL[d]}`}
                       checked={autoAssign[d] === true}
                       disabled={pending}
                       onCheckedChange={(v) => run(() => patchStaffing({ autoAssign: { [d]: v } }), v ? "Đã bật phân việc tự động" : "Đã tắt phân việc tự động")}
@@ -99,6 +100,7 @@ export function StaffingPanel({
                 <TableCell>
                   <div className="flex items-center gap-2">
                     <Switch
+                      aria-label={`Leo thang SLA cho ${DEPARTMENT_LABEL[d]}`}
                       checked={escalationOff[d] !== true}
                       disabled={pending}
                       onCheckedChange={(v) => run(() => patchStaffing({ escalationOff: { [d]: !v } }), v ? "Đã bật leo thang" : "Đã tắt leo thang")}

@@ -82,7 +82,7 @@ export function DepartmentsPanel({ departments, people }: { departments: Dept[];
                 ]}
                 onPick={(v) => run(() => setLead({ departmentId: d.id, userId: v === "__none" ? null : v }), "Đã đổi trưởng phòng")}
               />
-              <Switch checked={d.active} disabled={pending} onCheckedChange={(v) => run(() => saveDepartment({ id: d.id, code: d.code, name: d.name, leadUserId: d.leadUserId, active: v }), v ? "Đã bật lại phòng" : "Đã ngừng dùng phòng")} />
+              <Switch aria-label={`Phòng ${d.name} đang hoạt động`} checked={d.active} disabled={pending} onCheckedChange={(v) => run(() => saveDepartment({ id: d.id, code: d.code, name: d.name, leadUserId: d.leadUserId, active: v }), v ? "Đã bật lại phòng" : "Đã ngừng dùng phòng")} />
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-1.5">
@@ -200,7 +200,7 @@ export function RecurrencePanel({ rows, departments, people }: { rows: Rec[]; de
                 <TableCell className="text-xs text-muted-foreground">{r.lastGeneratedKey || "chưa sinh lần nào"}</TableCell>
                 <TableCell className="text-right">
                   <div className="flex items-center justify-end gap-2">
-                    <Switch checked={r.active} disabled={pending} onCheckedChange={() => run(() => saveRecurrence({ id: r.id, title: r.title, department: departments.find((d) => d.id === r.departmentId)?.code ?? "MANAGEMENT", cadence: r.cadence, cadenceDay: r.cadenceDay, hourOfDay: r.hourOfDay, dueInHours: r.dueInHours, assigneeId: r.assigneeId, active: !r.active }), "Đã cập nhật")} />
+                    <Switch aria-label={`Bật việc định kỳ «${r.title}»`} checked={r.active} disabled={pending} onCheckedChange={() => run(() => saveRecurrence({ id: r.id, title: r.title, department: departments.find((d) => d.id === r.departmentId)?.code ?? "MANAGEMENT", cadence: r.cadence, cadenceDay: r.cadenceDay, hourOfDay: r.hourOfDay, dueInHours: r.dueInHours, assigneeId: r.assigneeId, active: !r.active }), "Đã cập nhật")} />
                     <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" disabled={pending} onClick={() => run(() => deleteRecurrence(r.id), "Đã xoá định nghĩa — việc đã sinh vẫn giữ nguyên")}>Xoá</Button>
                   </div>
                 </TableCell>

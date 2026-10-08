@@ -390,28 +390,28 @@ export function AlertConfigForm({
         </div>
         <OwnerDigestSwitch initial={ownerDigestEnabled} hasManagerWebhook={Boolean(config.larkManagerWebhookUrl)} />
         <div className="space-y-1">
-          <Label>Cảnh báo khi dư nợ đạt (% ngưỡng thanh toán)</Label>
-          <Input type="number" min={10} max={100} value={form.billingWarnPercent} onChange={(e) => setForm({ ...form, billingWarnPercent: Number(e.target.value) || 80 })} />
+          <Label htmlFor="canh-bao-1">Cảnh báo khi dư nợ đạt (% ngưỡng thanh toán)</Label>
+          <Input id="canh-bao-1" type="number" min={10} max={100} value={form.billingWarnPercent} onChange={(e) => setForm({ ...form, billingWarnPercent: Number(e.target.value) || 80 })} />
         </div>
         <div className="space-y-1">
-          <Label>Đơn rủi ro: khách đã hoàn từ (đơn)</Label>
-          <Input type="number" min={1} value={form.riskMinReturned} onChange={(e) => setForm({ ...form, riskMinReturned: Number(e.target.value) || 2 })} />
+          <Label htmlFor="canh-bao-2">Đơn rủi ro: khách đã hoàn từ (đơn)</Label>
+          <Input id="canh-bao-2" type="number" min={1} value={form.riskMinReturned} onChange={(e) => setForm({ ...form, riskMinReturned: Number(e.target.value) || 2 })} />
         </div>
         <div className="space-y-1">
-          <Label>và tỷ lệ hoàn từ (%)</Label>
-          <Input type="number" min={1} max={100} value={form.riskReturnRatePct} onChange={(e) => setForm({ ...form, riskReturnRatePct: Number(e.target.value) || 40 })} />
+          <Label htmlFor="canh-bao-3">và tỷ lệ hoàn từ (%)</Label>
+          <Input id="canh-bao-3" type="number" min={1} max={100} value={form.riskReturnRatePct} onChange={(e) => setForm({ ...form, riskReturnRatePct: Number(e.target.value) || 40 })} />
         </div>
         <div className="space-y-1">
-          <Label title="Số Pancake trên toàn mạng, hiện ở danh sách Đơn chờ xuất — khác tỷ lệ hoàn theo lịch sử ERP ở ô trên">Đơn chờ xuất rủi ro: tỷ lệ hoàn Pancake vượt (%)</Label>
-          <Input type="number" min={0} max={99} value={form.phoneRiskReturnRatePct} onChange={(e) => setForm({ ...form, phoneRiskReturnRatePct: Number.isFinite(Number(e.target.value)) ? Number(e.target.value) : 40 })} />
+          <Label htmlFor="canh-bao-8" title="Số Pancake trên toàn mạng, hiện ở danh sách Đơn chờ xuất — khác tỷ lệ hoàn theo lịch sử ERP ở ô trên">Đơn chờ xuất rủi ro: tỷ lệ hoàn Pancake vượt (%)</Label>
+          <Input id="canh-bao-8" type="number" min={0} max={99} value={form.phoneRiskReturnRatePct} onChange={(e) => setForm({ ...form, phoneRiskReturnRatePct: Number.isFinite(Number(e.target.value)) ? Number(e.target.value) : 40 })} />
         </div>
         <div className="space-y-1">
-          <Label title="Số lần SĐT bị shop khác báo trên Pancake">hoặc SĐT bị báo vượt (lần)</Label>
-          <Input type="number" min={0} max={1000} value={form.phoneRiskWarningCount} onChange={(e) => setForm({ ...form, phoneRiskWarningCount: Number.isFinite(Number(e.target.value)) ? Number(e.target.value) : 10 })} />
+          <Label htmlFor="canh-bao-9" title="Số lần SĐT bị shop khác báo trên Pancake">hoặc SĐT bị báo vượt (lần)</Label>
+          <Input id="canh-bao-9" type="number" min={0} max={1000} value={form.phoneRiskWarningCount} onChange={(e) => setForm({ ...form, phoneRiskWarningCount: Number.isFinite(Number(e.target.value)) ? Number(e.target.value) : 10 })} />
         </div>
         <div className="space-y-1">
-          <Label title="Tỷ lệ hoàn Pancake chỉ được xét khi SĐT đã có ít nhất chừng này đơn kết thúc — 1/1 thất bại là 100% nhưng chưa nói lên điều gì">Tỷ lệ hoàn chỉ xét khi SĐT có từ (đơn)</Label>
-          <Input type="number" min={1} max={1000} value={form.phoneRiskMinOrders} onChange={(e) => setForm({ ...form, phoneRiskMinOrders: Number(e.target.value) || 5 })} />
+          <Label htmlFor="canh-bao-10" title="Tỷ lệ hoàn Pancake chỉ được xét khi SĐT đã có ít nhất chừng này đơn kết thúc — 1/1 thất bại là 100% nhưng chưa nói lên điều gì">Tỷ lệ hoàn chỉ xét khi SĐT có từ (đơn)</Label>
+          <Input id="canh-bao-10" type="number" min={1} max={1000} value={form.phoneRiskMinOrders} onChange={(e) => setForm({ ...form, phoneRiskMinOrders: Number(e.target.value) || 5 })} />
         </div>
         <div className="space-y-1">
           <Label>Telegram Bot Token</Label>
@@ -422,12 +422,12 @@ export function AlertConfigForm({
           <Input value={form.telegramChatId} onChange={(e) => setForm({ ...form, telegramChatId: e.target.value })} placeholder="-1001234567890 (thêm bot vào nhóm, lấy ID qua @userinfobot)" />
         </div>
         <div className="space-y-1">
-          <Label>Đơn chờ xử lý quá (giờ)</Label>
-          <Input type="number" min={1} value={form.pendingHours} onChange={(e) => setForm({ ...form, pendingHours: Number(e.target.value) || 24 })} />
+          <Label htmlFor="canh-bao-4">Đơn chờ xử lý quá (giờ)</Label>
+          <Input id="canh-bao-4" type="number" min={1} value={form.pendingHours} onChange={(e) => setForm({ ...form, pendingHours: Number(e.target.value) || 24 })} />
         </div>
         <div className="space-y-1">
-          <Label>Vận đơn treo không cập nhật quá (ngày)</Label>
-          <Input type="number" min={1} value={form.staleDays} onChange={(e) => setForm({ ...form, staleDays: Number(e.target.value) || 4 })} />
+          <Label htmlFor="canh-bao-5">Vận đơn treo không cập nhật quá (ngày)</Label>
+          <Input id="canh-bao-5" type="number" min={1} value={form.staleDays} onChange={(e) => setForm({ ...form, staleDays: Number(e.target.value) || 4 })} />
           {/*
             Ngưỡng này là TRẦN CHUNG, không phải ngưỡng duy nhất: mỗi chặng có ngưỡng riêng ngặt hơn
             (đang đi giao 48 giờ, đã lấy hàng 72 giờ) vì im lặng ở mỗi chặng có ý nghĩa khác nhau.
@@ -438,13 +438,13 @@ export function AlertConfigForm({
           </p>
         </div>
         <div className="space-y-1">
-          <Label>Chỉ xét đơn phát sinh trong (ngày)</Label>
-          <Input type="number" min={1} value={form.lookbackDays} onChange={(e) => setForm({ ...form, lookbackDays: Number(e.target.value) || 14 })} />
+          <Label htmlFor="canh-bao-6">Chỉ xét đơn phát sinh trong (ngày)</Label>
+          <Input id="canh-bao-6" type="number" min={1} value={form.lookbackDays} onChange={(e) => setForm({ ...form, lookbackDays: Number(e.target.value) || 14 })} />
         </div>
         {/* Hàng hoàn vừa về hôm qua chưa kịp kiểm đếm là bình thường — chỉ báo sau ngưỡng này. */}
         <div className="space-y-1">
-          <Label>Hàng hoàn về quá (ngày) mà chưa tái nhập</Label>
-          <Input type="number" min={1} value={form.returnInspectionDays} onChange={(e) => setForm({ ...form, returnInspectionDays: Number(e.target.value) || 3 })} />
+          <Label htmlFor="canh-bao-7">Hàng hoàn về quá (ngày) mà chưa tái nhập</Label>
+          <Input id="canh-bao-7" type="number" min={1} value={form.returnInspectionDays} onChange={(e) => setForm({ ...form, returnInspectionDays: Number(e.target.value) || 3 })} />
         </div>
       </div>
       <div className="flex flex-wrap gap-4">

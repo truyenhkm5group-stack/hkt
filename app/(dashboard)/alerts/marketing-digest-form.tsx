@@ -98,8 +98,8 @@ export function MarketingDigestForm({ config, marketers }: { config: MarketingAl
 
       <div className="grid gap-3 sm:grid-cols-3">
         <div className="space-y-1">
-          <Label className="text-xs">Giờ gửi (giờ VN)</Label>
-          <Input type="number" min={0} max={23} value={form.digestHour} onChange={(e) => set("digestHour", Number(e.target.value))} />
+          <Label className="text-xs" htmlFor="ban-tin-gio-gui">Giờ gửi (giờ VN)</Label>
+          <Input id="ban-tin-gio-gui" type="number" min={0} max={23} value={form.digestHour} onChange={(e) => set("digestHour", Number(e.target.value))} />
         </div>
         <div className="space-y-1">
           <Label className="text-xs">Mức tối thiểu để làm phiền MKTer</Label>
