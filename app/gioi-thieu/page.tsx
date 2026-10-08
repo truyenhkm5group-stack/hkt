@@ -239,7 +239,7 @@ const CAPABILITIES: Capability[] = [
   { icon: Repeat, title: "Nhận ra khách cũ", text: "Gợi ý lại địa chỉ đã giao (che bớt số), mời mua lại, gợi ý mua kèm." },
   { icon: Hand, title: "Biết lúc cần người", text: "Khiếu nại, đòi gặp người, đơn sỉ ngoài bảng giá — chuyển ngay cho nhân viên. Nhân viên trả lời là trợ lý tự lùi lại." },
   { icon: GraduationCap, title: "Tự học mỗi ngày", text: "Soạn sổ tay bán hàng từ hội thoại cũ để chủ shop duyệt, rút bài học từ hội thoại thật mỗi 6 giờ." },
-  { icon: Zap, title: "Không sót tin nào", text: "Tin bị rơi được quét lại và trả lời trong khoảng 5 phút. Chạy 24/7 hoặc theo giờ mở cửa." },
+  { icon: Zap, title: "Quét lại tin bị rơi", text: "Tin chưa được trả lời được quét lại và trả lời trong khoảng 5 phút. Chạy 24/7 hoặc theo giờ mở cửa." },
   {
     icon: CalendarCheck,
     title: "Đặt lịch, đặt bàn, báo giá sỉ",
@@ -253,13 +253,13 @@ const SAFETY: { icon: LucideIcon; title: string; text: string }[] = [
   { icon: ShieldCheck, title: "Không bịa giá", text: "Giá, hàng còn và phí ship chỉ lấy từ hệ thống. Không tự giảm giá ngoài bảng giá." },
   { icon: BadgeCheck, title: "Chốt khi khách đồng ý", text: "Gửi bản tóm tắt, chỉ chốt khi khách xác nhận — và kiểm lại giá, tồn ngay trước khi chốt." },
   { icon: Hand, title: "Người luôn cầm lái", text: "Ca khó tự chuyển cho nhân viên. Nhân viên nhắn là trợ lý im 30 phút; một nút để trả lại cho AI." },
-  { icon: Wallet, title: "Chi phí AI hiện rõ", text: "Bảng điều khiển tính sẵn chi phí AI trên mỗi đơn chốt và mỗi số điện thoại thu được." },
+  { icon: Wallet, title: "Dùng bao nhiêu, thấy bấy nhiêu", text: "Trang Gói dịch vụ hiện số khách AI đã xử lý, số đơn AI chốt và hạn mức còn lại trong tháng — không đoán, không bất ngờ." },
 ];
 
 const COMPARE: { topic: string; old: string; next: string }[] = [
   { topic: "Hiểu khách", old: "Chỉ hiểu từ khoá đã cài sẵn", next: "Hiểu câu nói tự nhiên, cả ảnh khách gửi" },
   { topic: "Giá & tồn kho", old: "Gõ tay vào kịch bản, dễ lệch", next: "Đọc thẳng từ kho, đúng size và màu" },
-  { topic: "Chốt đơn", old: "Thu thông tin rồi chờ người nhập", next: "Tóm tắt, chốt khi khách đồng ý, đơn vào thẳng hệ thống" },
+  { topic: "Chốt đơn", old: "Thu thông tin rồi chờ người nhập", next: "Tóm tắt, chốt khi khách đồng ý, đơn tự ghi vào hệ thống" },
   { topic: "Khách im lặng", old: "Bỏ lửng", next: "Nhắn lại sau 1, 6 và 22 giờ" },
   { topic: "Ca khó", old: "Trả lời sai hoặc im lặng", next: "Chuyển cho nhân viên, nhân viên vào là trợ lý lùi" },
   { topic: "Học thêm", old: "Phải tự sửa kịch bản", next: "Rút bài học từ hội thoại thật mỗi 6 giờ" },
@@ -291,7 +291,7 @@ const BEHIND: { icon: LucideIcon; title: string; text: string }[] = [
 
 const START_STEPS = [
   { title: "Tạo cửa hàng", text: "Năm ô: tên cửa hàng, ngành, số điện thoại, email, mật khẩu — hoặc một nút Google / Facebook." },
-  { title: "Kết nối fanpage", text: "Dán mã trang và mã truy cập Pancake, chép đường dẫn nhận tin vào Pancake." },
+  { title: "Kết nối kênh bán hàng", text: "Fanpage nối qua Pancake: dán mã trang và mã truy cập Pancake ở trang Kết nối. Không dùng Pancake thì gắn ô chat lên website hoặc nối Zalo OA. Nối thẳng Facebook (không qua Pancake) sắp mở." },
   { title: "Bật trợ lý", text: "Một nút. AI có sẵn trong gói — không phải tự mua tài khoản AI." },
 ];
 
@@ -307,7 +307,7 @@ function faqs(chotdon = false): { q: string; a: string }[] {
     { q: "Trợ lý có báo sai giá không?", a: "Trợ lý chỉ báo giá, hàng còn và phí ship lấy từ hệ thống của shop. Sản phẩm chưa có giá thì trợ lý nói nhân viên sẽ báo sau, không tự đoán; không tự giảm giá ngoài bảng giá." },
     { q: "Trợ lý có tự chốt đơn không?", a: "Có. Trợ lý gửi bản tóm tắt đơn và chỉ chốt khi khách đồng ý, kiểm lại giá và hàng còn ngay trước khi chốt. Đơn chốt xong có mặt ngay trong hệ thống. Ca khó — khiếu nại, đòi gặp người, đơn sỉ ngoài bảng giá — được chuyển cho nhân viên." },
     { q: "Nhân viên muốn tự trả lời thì sao?", a: "Nhân viên nhắn vào cuộc trò chuyện là trợ lý tự im 30 phút. Muốn giao lại thì bấm “Trả lại cho AI”." },
-    { q: "Cần những gì để chạy?", a: "Fanpage của shop kết nối qua Pancake. Mỗi gói có sẵn hạn mức AI hằng tháng; shop muốn dùng tài khoản AI riêng (Anthropic, OpenAI, Gemini) thì vẫn khai được." },
+    { q: "Cần những gì để chạy?", a: "Một fanpage Facebook nối qua Pancake, hoặc ô chat trên website / Zalo OA. Nối thẳng Facebook không qua Pancake sắp mở. Mỗi gói có sẵn hạn mức AI hằng tháng — không phải tự mua tài khoản AI." },
     { q: "Ngoài fanpage, trợ lý chạy ở đâu nữa?", a: "Ô chat gắn lên website của shop bằng một dòng mã, và trang chat riêng ở địa chỉ của cửa hàng sau khi xuất bản." },
     { q: "Dùng thử thế nào, có mất tiền không?", a: `${TRIAL_DAYS} ngày miễn phí, không cần thẻ ngân hàng. Hết hạn mà chưa chọn gói thì cửa hàng chuyển sang chỉ xem; dữ liệu được giữ ít nhất ${SERVICE_COMMITMENTS.retainAfterExpiryDays} ngày.` },
     { q: "Thanh toán gói trả phí thế nào?", a: `Chuyển khoản theo mã thanh toán phần mềm tạo sẵn; tiền về, khớp mã là gói được gia hạn. Lần thanh toán đầu tiên được hoàn 100% nếu yêu cầu trong ${SERVICE_COMMITMENTS.firstPaymentRefundDays} ngày.` },
@@ -546,7 +546,7 @@ function ChotDonHeroStats() {
 
 const BEFORE_AFTER: { topic: string; before: string; after: string }[] = [
   { topic: "Giờ trả lời", before: "Phụ thuộc người trực — tối, đêm, cuối tuần bỏ trống", after: "Vài giây, ở mọi khung giờ" },
-  { topic: "Báo giá", before: "Nhớ giá trong đầu, dễ nhầm khi vừa đổi giá", after: "Đọc từ bảng giá đang áp dụng, không bao giờ báo bừa" },
+  { topic: "Báo giá", before: "Nhớ giá trong đầu, dễ nhầm khi vừa đổi giá", after: "Đọc từ bảng giá đang áp dụng, không báo giá ngoài bảng" },
   { topic: "Hàng còn", before: "Hỏi kho rồi mới trả lời — khách chờ, khách đi", after: "Tra tồn theo size, màu ngay trong câu trả lời" },
   { topic: "Khách im lặng", before: "Thường bị bỏ quên sau tin nhắn đầu", after: "Tự nhắn lại 3 lần: sau 1 · 6 · 22 giờ" },
   { topic: "Lên đơn", before: "Chép tay số điện thoại, địa chỉ sang phần mềm", after: "Tóm tắt, chốt khi khách đồng ý, ghi thẳng vào sổ đơn" },
@@ -890,7 +890,7 @@ export default async function SitePage({ searchParams }: PageProps) {
               <h1 className={`${SERIF} mt-6 text-[clamp(2.25rem,1.2rem+3.2vw,4.4rem)] font-bold leading-[1.08] tracking-tight text-balance`}>
                 {chotdon ? (
                   <>
-                    Không bỏ lỡ tin nhắn nào. <Accent>Không để lọt đơn hàng nào.</Accent>
+                    Trả lời khách trong vài giây. <Accent>Chốt đơn cả khi bạn không trực.</Accent>
                   </>
                 ) : (
                   <>
@@ -913,7 +913,7 @@ export default async function SitePage({ searchParams }: PageProps) {
                 <ChotDonHeroStats />
               ) : (
                 <ul className="mt-8 flex flex-col gap-2.5 text-sm text-foreground/80 sm:flex-row sm:flex-wrap sm:gap-x-7">
-                  {["AI có sẵn trong gói", "Cài trong 3 bước", "Đơn vào thẳng kho & sổ sách"].map((t) => (
+                  {["AI có sẵn trong gói", "Cài trong 3 bước", "Đơn tự ghi vào kho & sổ sách"].map((t) => (
                     <li key={t} className="flex items-center gap-2">
                       <Check className="size-4 shrink-0 text-brand" aria-hidden />
                       {t}

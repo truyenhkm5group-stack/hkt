@@ -116,6 +116,32 @@ export function testPublicSiteSource() {
   const page = readFileSync("app/gioi-thieu/page.tsx", "utf8");
   assert.ok(!/@\/db|lib\/queries\/(?!public-site)/.test(page), "trang giới thiệu không được đọc CSDL / truy vấn nào khác");
 
+  /*
+    SỰ THẬT THƯƠNG MẠI (Commercial Sweep 08/10/2026, PR A). Trang chủ là lời hứa với khách trả tiền:
+     · Chỉ hứa đường nối ĐANG CHẠY: fanpage qua Pancake, ô chat website, Zalo OA. Nối thẳng Facebook chờ Meta duyệt quyền Page
+       (sứ mệnh meta-messenger-access BLOCKED_EXTERNAL) ⇒ chỉ được nhắc kèm «sắp mở», không bao giờ là bước khách phải làm —
+       khách trả tiền đầu tiên làm đúng bước ấy sẽ hỏng ngay (review #706). Bước kết nối phải nêu ít nhất một lựa chọn ngoài
+       Pancake để visitor không đọc ra Pancake là bắt buộc.
+     · Không claim tuyệt đối mà kỹ thuật không bảo đảm 100 %: «Không bỏ lỡ tin nhắn nào», «Không để lọt đơn hàng nào»,
+       «không bao giờ báo bừa», «Không sót tin nào».
+     · Không hứa «Chi phí AI hiện rõ» / tên nhà cung cấp AI với khách: khách thấy khách AI · đơn AI chốt · hạn mức, không thấy
+       kinh tế model (#669: khách không tự khai khoá AI).
+  */
+  const copy = page.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+  const buocKenh = /\{ title: "Kết nối kênh bán hàng", text: "([^"]+)" \}/.exec(copy)?.[1] ?? "";
+  const faqChay = /q: "Cần những gì để chạy\?", a: "([^"]+)"/.exec(copy)?.[1] ?? "";
+  assert.ok(buocKenh.length > 20 && faqChay.length > 20, "phải có bước «Kết nối kênh bán hàng» và FAQ «Cần những gì để chạy?»");
+  for (const [ten, cau] of [["bước kết nối", buocKenh], ["FAQ cần gì để chạy", faqChay]] as const) {
+    assert.match(cau, /Pancake/, `${ten}: phải nêu đường nối đang chạy (Pancake)`);
+    assert.match(cau, /website|Zalo/, `${ten}: phải nêu lựa chọn ngoài Pancake (ô chat website / Zalo OA)`);
+    assert.doesNotMatch(cau, /Bấm «Kết nối Facebook»/, `${ten}: không bảo khách nối Facebook thẳng khi Meta chưa duyệt quyền Page`);
+    if (/nối thẳng|thẳng Facebook/i.test(cau)) assert.match(cau, /sắp mở/, `${ten}: nhắc nối thẳng Facebook thì phải kèm «sắp mở»`);
+  }
+  assert.doesNotMatch(faqChay, /Anthropic|OpenAI|Gemini/, "FAQ không nêu nhà cung cấp AI với khách");
+  for (const cam of ["Không bỏ lỡ tin nhắn nào", "Không để lọt đơn hàng nào", "không bao giờ báo bừa", "Không sót tin nào", "Chi phí AI hiện rõ"]) {
+    assert.ok(!copy.includes(cam), `trang chủ còn claim tuyệt đối / sai định hướng: «${cam}»`);
+  }
+
   // Caddy: tên miền gốc xin chứng chỉ THEO YÊU CẦU — không đốt hạn mức Let's Encrypt trước ngày DNS trỏ về.
   const caddy = readFileSync("deploy/Caddyfile", "utf8");
   const block = caddy.slice(caddy.indexOf("{$SITE_DOMAIN"));
