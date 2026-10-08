@@ -3,7 +3,7 @@
   "mission_id": "saas-create-customer-correct",
   "title": "LAUNCH BLOCKER: Tạo khách mới đúng mặc định — thương hiệu Chốt Đơn tự đặt, chỉ gói đang bán (chặn internal / legacy), nút không khoá im lặng, cài mẫu AI bán hàng như /start",
   "business_goal": "",
-  "status": "VERIFYING",
+  "status": "DONE",
   "priority": "P0",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -34,13 +34,14 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-08T10:41:59.510Z",
-  "updated_at": "2026-10-08T21:11:55.514Z",
-  "last_heartbeat": "2026-10-08T15:47:14.031Z",
+  "updated_at": "2026-10-08T21:15:22.095Z",
+  "last_heartbeat": "2026-10-08T21:15:22.095Z",
   "definition_of_done": [],
   "evidence": {
     "merged": "#682 → 67647aae887104ed85fec394ad4f25fb3e612979",
     "verify": "PASS c7183395051955e6cff5343a787e9df97d71d12b 2026-10-08T21:11:49.289Z",
-    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/37838226087"
+    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/37838226087",
+    "done": "production c71833950519 · deploy 37838226087 xanh (smoke) · verify ĐẠT; nghiệm thu production saas-acceptance --apply PASS 4/4 (A tạo khách · B1 kích hoạt + đăng nhập email không mã tổ chức · C vỏ 8 mục · B2 xoay mật khẩu) run 37838073371"
   },
   "handoff": {
     "branch": "fix/create-customer-defaults",
