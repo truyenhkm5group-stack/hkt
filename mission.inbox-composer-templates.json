@@ -3,7 +3,7 @@
   "mission_id": "inbox-composer-templates",
   "title": "Hộp thư: chèn câu mẫu + dòng sản phẩm (giá / tồn đọc từ ERP) ngay ô soạn (Master Mission P0.2)",
   "business_goal": "",
-  "status": "INTEGRATING",
+  "status": "VERIFYING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -27,11 +27,13 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-08T02:54:28.492Z",
-  "updated_at": "2026-10-08T04:59:00.664Z",
+  "updated_at": "2026-10-08T06:50:25.565Z",
   "last_heartbeat": "2026-10-08T04:34:48.915Z",
   "definition_of_done": [],
   "evidence": {
-    "merged": "#661 → 07ef8aa890bbba0f30737297a474fce9237d4c1f"
+    "merged": "#661 → 07ef8aa890bbba0f30737297a474fce9237d4c1f",
+    "verify": "PASS 36b7791b9ec790690b85229cfa82a7e7cafdbc82 2026-10-08T06:50:20.262Z",
+    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/37735795033"
   },
   "handoff": {
     "branch": "feat/inbox-composer-templates",
