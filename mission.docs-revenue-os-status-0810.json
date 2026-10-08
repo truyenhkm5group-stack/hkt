@@ -3,7 +3,7 @@
   "mission_id": "docs-revenue-os-status-0810",
   "title": "Bản đồ AI Revenue OS cập nhật sau chuỗi 08/10 (tài liệu)",
   "business_goal": "",
-  "status": "PLANNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -20,7 +20,18 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-08T04:28:19.463Z",
-  "updated_at": "2026-10-08T04:28:19.463Z",
-  "last_heartbeat": "2026-10-08T04:28:19.463Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-08T04:28:27.660Z",
+  "last_heartbeat": "2026-10-08T04:28:27.660Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "docs/revenue-os-status-0810",
+    "sha": "a87190818e32656cdc5bbb914e486600d8c81e37",
+    "at": "2026-10-08T04:28:27.660Z",
+    "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+    "title": "Bản đồ AI Revenue OS cập nhật sau chuỗi 08/10 (tài liệu)",
+    "summary": "Cập nhật bản đồ hiện trạng AI Revenue OS theo các PR đã gộp 08/10 (#649 #653 #655 #656 #657 #658 #659).",
+    "tests": [
+      "chỉ tài liệu"
+    ]
+  }
 }

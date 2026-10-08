@@ -571,3 +571,4 @@
 {"at":"2026-10-08T04:24:28.288Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"org-ai-platform-cutover","detail":"#659 @ b168cab44687 → 051f49a55160 (MERGE_ISOLATED · HIGH · gates success)"}
 {"at":"2026-10-08T04:25:15.520Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DEPLOY_DISPATCHED","detail":"051f49a55160 · run 37727378042 https://github.com/truyenhkm5group-stack/hkt/actions/runs/37727378042"}
 {"at":"2026-10-08T04:28:19.544Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"CLAIM","mission":"docs-revenue-os-status-0810","detail":"PLANNING · 1 mẫu phạm vi · MEDIUM"}
+{"at":"2026-10-08T04:28:27.687Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"docs-revenue-os-status-0810","detail":"docs/revenue-os-status-0810 @ a87190818e32 · 1 lệnh kiểm thử"}
