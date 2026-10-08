@@ -3,7 +3,7 @@
   "mission_id": "launch-gate",
   "title": "Launch Gate khách trả tiền đầu tiên: bảng kiểm Admin · Khách · Bảo mật có bằng chứng (nguồn sự thật cho readiness)",
   "business_goal": "",
-  "status": "RUNNING",
+  "status": "PR_READY",
   "priority": "P0",
   "risk": "LOW",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -20,7 +20,18 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-08T10:23:16.019Z",
-  "updated_at": "2026-10-08T10:23:16.019Z",
-  "last_heartbeat": "2026-10-08T10:23:16.019Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-08T10:23:26.997Z",
+  "last_heartbeat": "2026-10-08T10:23:26.997Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "docs/launch-gate",
+    "sha": "3526d13f755735315c61b6016a52df05f9fd912b",
+    "at": "2026-10-08T10:23:26.997Z",
+    "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+    "title": "Launch Gate khách trả tiền đầu tiên: bảng kiểm Admin · Khách · Bảo mật có bằng chứng (nguồn sự thật cho readiness)",
+    "summary": "Launch Gate: 33 mục Admin/Khách/Bảo mật, cách chấm (PROD/CODE/WIP/THIẾU/NGOÀI), tài khoản kiểm thử production, phân loại WIP; điểm khởi đầu 41 %, 1/33 đã kiểm production",
+    "tests": [
+      "Chỉ tài liệu"
+    ]
+  }
 }
