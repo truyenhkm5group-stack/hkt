@@ -80,6 +80,7 @@ import { currentCatalogVersion } from "@/lib/pricing/versions";
 import { normalizeCustomerPhone } from "@/lib/records/customer-create";
 import { loadAutoConfirmComplete } from "@/lib/records/order-create";
 import { accountOfWorkspace } from "@/lib/saas/accounts";
+import { acceptanceWorkspaceOwned } from "@/lib/saas/acceptance-guard";
 import { activationRefusal, loadWorkspaceActivation, resendActivation } from "@/lib/saas/activation";
 import { PRODUCTS } from "@/lib/saas/catalog";
 import { readPlans } from "@/lib/saas/customers";
@@ -117,6 +118,8 @@ const MAX_BODY_BYTES = 6 * 1024 * 1024;
 const PAGE_TIMEOUT_MS = 60_000;
 /** Số lần chuyển hướng tối đa theo một tuyến — quá ngần này là vòng lặp, kể cả khi đích không lặp lại nguyên văn. */
 const MAX_REDIRECTS = 5;
+/** Hạn phiên ký cho bước C — đủ cho 10 tuyến kể cả máy chủ chậm, rồi tự chết. */
+export const ACCEPTANCE_SESSION_TTL_SEC = 15 * 60;
 /** «IP» của lượt gọi trang `/reset` (kèm mã lượt chạy) — chỉ để dựng khoá bộ chặn dò (băm): lượt cố ý dùng lại liên kết để kiểm «dùng một lần» không dồn bộ đếm của lượt sau. */
 const ACCEPTANCE_IP = "ops-saas-acceptance";
 
@@ -297,17 +300,6 @@ async function trialPlanOfCatalog(now: Date): Promise<{ planKey: string; version
   return { planKey: trial.planKey, versionKey: catalog.key };
 }
 
-/**
- * Workspace mang mã này có phải của CHÍNH ops nghiệm thu không: job «Tạo khách» khoá cố định của ops này cho đúng mã + tài khoản
- * của workspace đúng mã trong sổ khai. Một khách thật tự đăng ký trùng mã ⇒ `false` ⇒ không bước nào chạm vào nó.
- */
-async function ownedByAcceptance(entry: AcceptanceWorkspace): Promise<boolean> {
-  const pdb = await getPlatformDb();
-  const job = await pdb.query.platformProvisioningJobs.findFirst({ where: eq(schema.platformProvisioningJobs.idempotencyKey, acceptanceIdempotencyKey(entry.code)) });
-  const account = await accountOfWorkspace(entry.code);
-  return Boolean(job && job.kind === "CREATE_CUSTOMER" && job.orgCode === entry.code && account && account.code === entry.accountCode);
-}
-
 async function stepWorkspace(ctx: Ctx): Promise<Outcome> {
   const { entry } = ctx;
   const now = ctx.deps.now();
@@ -318,7 +310,7 @@ async function stepWorkspace(ctx: Ctx): Promise<Outcome> {
   invalidateOrganizations();
   const before = await findOrganization(entry.code);
   // Mã đã có mà không phải của ops này ⇒ dừng TRƯỚC mọi lượt ghi (kể cả một job cấp phát sẽ hỏng).
-  if (before && !(await ownedByAcceptance(entry))) {
+  if (before && !(await acceptanceWorkspaceOwned(entry))) {
     ctx.exists = true;
     return fail("mã trùng một workspace KHÔNG do ops nghiệm thu tạo (không có job khoá nghiệm thu / tài khoản khác sổ khai) — không chạm, đổi mã trong sổ khai");
   }
@@ -350,7 +342,7 @@ async function stepWorkspace(ctx: Ctx): Promise<Outcome> {
   ctx.exists = Boolean(org);
   if (!org) return fail(ctx.mode === "READ" ? "chưa có workspace nghiệm thu — chạy ops với --apply một lần để tạo" : "job xong mà không thấy workspace trong sổ tổ chức", detail);
   // Bằng chứng SỞ HỮU (lần nữa, sau cấp phát): job khoá cố định của ops này cho ĐÚNG mã + tài khoản đúng mã trong sổ.
-  ctx.owned = await ownedByAcceptance(entry);
+  ctx.owned = await acceptanceWorkspaceOwned(entry);
   if (!ctx.owned) return fail("mã trùng một workspace KHÔNG do ops nghiệm thu tạo (không có job khoá nghiệm thu / tài khoản khác sổ khai) — không chạm, đổi mã trong sổ khai", detail);
   const pdb = await getPlatformDb();
   const job = await pdb.query.platformProvisioningJobs.findFirst({ where: eq(schema.platformProvisioningJobs.idempotencyKey, acceptanceIdempotencyKey(entry.code)) });
@@ -403,7 +395,7 @@ async function stepActivateAndLogin(ctx: Ctx): Promise<Outcome> {
   let link: string;
   let via: string;
   if (act0.canResend) {
-    // ĐÚNG luật của nút «Gửi lại liên kết kích hoạt» (lib/saas/activation.ts), phát bằng đường của máy (lá chắn sổ khai).
+    // ĐÚNG luật của nút «Gửi lại liên kết kích hoạt» (lib/saas/activation.ts), phát bằng đường của máy (ba lá chắn của `createAcceptanceResetLink`).
     const r = await resendActivation({ orgCode: entry.code, reason: `${reason} — kích hoạt tài khoản thử` }, (i) => createAcceptanceResetLink(i, { purpose: "ACTIVATION" }));
     if ("error" in r) return fail(`gửi lại kích hoạt bị từ chối: ${r.error}`, detail);
     link = r.link;
@@ -426,9 +418,10 @@ async function stepActivateAndLogin(ctx: Ctx): Promise<Outcome> {
   if (look.email !== entry.ownerEmail) return fail("liên kết thuộc một tài khoản khác tài khoản thử", detail);
   const password = deps.newPassword();
   ctx.secrets.add(password);
+  // Ghi nhận TRƯỚC lời gọi: lời gọi ném giữa chừng (mật khẩu có thể đã đổi) vẫn để B2 xoay — mật khẩu của lượt chạy không ở lại.
+  ctx.knownPassword = password;
   const done = await completePasswordResetCore(entry.code, parsed.token, { password, confirmPassword: password }, { ip: `${ACCEPTANCE_IP}:${deps.runId}` });
   if ("error" in done) return fail(`đặt mật khẩu qua liên kết hỏng: ${done.error}`, detail);
-  ctx.knownPassword = password;
   ctx.lastPasswordChangeMs = Date.now();
   const reused = await completePasswordResetCore(entry.code, parsed.token, { password, confirmPassword: password }, { ip: `${ACCEPTANCE_IP}:${deps.runId}` });
   if (!("error" in reused)) return fail("liên kết dùng LẦN HAI vẫn đặt được mật khẩu — mã phải dùng một lần", detail);
@@ -557,7 +550,8 @@ async function stepShell(ctx: Ctx): Promise<Outcome> {
   // Phiên ký như lượt đăng nhập ký (cùng `signSession`) — SAU mốc thu hồi của lượt đổi mật khẩu gần nhất (làm tròn LÊN giây).
   const wait = ctx.lastPasswordChangeMs ? revokeMarkFrom(ctx.lastPasswordChangeMs) + 50 - Date.now() : 0;
   if (wait > 0) await deps.sleep(wait);
-  const token = await signSession({ id: userId, email: entry.ownerEmail, name: entry.ownerName, role: "ADMIN", orgCode: entry.code });
+  // Hạn NGẮN (ACCEPTANCE_SESSION_TTL_SEC), không phải 7 ngày của phiên người: phiên này chỉ sống trong bộ nhớ đúng một lượt C.
+  const token = await signSession({ id: userId, email: entry.ownerEmail, name: entry.ownerName, role: "ADMIN", orgCode: entry.code }, { ttlSec: ACCEPTANCE_SESSION_TTL_SEC });
   ctx.secrets.add(token);
   const cookie = `${SESSION_COOKIE}=${token}`;
   const lines: { ok: boolean; text: string }[] = [];

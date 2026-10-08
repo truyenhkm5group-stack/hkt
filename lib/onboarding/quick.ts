@@ -6,6 +6,7 @@ import { normalizeEmail, normalizePhone } from "@/lib/auth/identity-shared";
 import { OAUTH_IDENTITY_KIND, type SocialProfile } from "@/lib/auth/oauth";
 import type { SessionSubject } from "@/lib/auth/session";
 import { templateBlueprint } from "@/lib/blueprints/templates";
+import { acceptanceReservedName } from "@/lib/constants/saas-acceptance-registry";
 import { withOrganization } from "@/lib/platform/context";
 import { findOrganization, getHomeOrganization } from "@/lib/platform/organizations";
 import { consumeSignupOtp, phoneOtpRequired, verifySignupOtp } from "@/lib/onboarding/phone-otp";
@@ -28,15 +29,18 @@ import { BUSINESS_TYPE_SPEC, closeUnderDependencies, firstIssue, SELECTABLE_MODU
 
 export type QuickSignupResult = { ok: true; orgCode: string; loggedIn: boolean } | { error: string; needOtp?: true };
 
-/** Mã tổ chức chưa ai dùng cho tên cửa hàng này. */
+/**
+ * Mã tổ chức chưa ai dùng cho tên cửa hàng này. Bỏ qua mã mà sổ khai nghiệm thu GIỮ CHỖ («CDT Nghiem Thu» ra đúng
+ * `cdt-nghiem-thu` — kho mã PUBLIC, mã đã lộ): lược đồ đăng ký cũng từ chối nó, nên trả nó ra là làm hỏng lượt đăng ký của khách.
+ */
 export async function freeOrgCode(storeName: string): Promise<string> {
   const home = (await getHomeOrganization()).code;
   for (const code of orgCodeCandidates(orgCodeBase(storeName))) {
-    if (code !== home && !(await findOrganization(code))) return code;
+    if (code !== home && !acceptanceReservedName(code) && !(await findOrganization(code))) return code;
   }
   for (let i = 0; i < 5; i++) {
     const code = `${orgCodeBase(storeName).slice(0, 24)}-${randomBytes(3).toString("hex")}`;
-    if (!(await findOrganization(code))) return code;
+    if (!acceptanceReservedName(code) && !(await findOrganization(code))) return code;
   }
   throw new Error("Không tìm được mã tổ chức trống — thử lại.");
 }

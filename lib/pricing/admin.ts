@@ -16,6 +16,7 @@ import { HOME_PLAN_KEY, listPlans, planKeyOf } from "@/lib/entitlements/check";
 import { env } from "@/lib/env";
 import { platformAudit } from "@/lib/platform/audit";
 import { KILL_SWITCH_REASON_MIN } from "@/lib/platform/kill-switches";
+import { acceptanceWorkspaceOf } from "@/lib/constants/saas-acceptance-registry";
 import { findOrganization, getHomeOrganization, listOrganizations } from "@/lib/platform/organizations";
 import { platformOperatorDenial } from "@/lib/platform-ui/module-toggle";
 import { readAiUsageByOrg, readCostDeclaration, readSaasDaily } from "@/lib/platform/saas-ledger";
@@ -250,6 +251,8 @@ export async function loadPricingAdmin(user: SessionUser): Promise<{ ok: true; v
 export type TenantGuardRow = {
   code: string;
   name: string;
+  /** Workspace KIỂM THỬ của ops nghiệm thu — vẫn có dòng (hạn mức / AI của nó vẫn phải canh), KHÔNG vào ô tổng của kinh tế đơn vị. */
+  test: boolean;
   planName: string;
   grandfathered: boolean;
   enforcement: Enforcement;
@@ -435,6 +438,7 @@ export async function loadPricingEconomics(user: SessionUser, now: Date = new Da
     tenants.push({
       code: o.code,
       name: o.name,
+      test: acceptanceWorkspaceOf(o.code) !== null,
       planName: pricing.plan?.name ?? planKeyOf(o),
       grandfathered: pricing.row.grandfathered,
       enforcement: pricing.row.enforcement,
@@ -468,20 +472,22 @@ export async function loadPricingEconomics(user: SessionUser, now: Date = new Da
   const riskRank: Record<MarginRisk, number> = { NEGATIVE: 0, TRIAL_COST: 1, UNKNOWN: 2, OK: 3, NO_COST: 4 };
   tenants.sort((x, y) => riskRank[x.risk] - riskRank[y.risk] || y.platformAiCostVnd - x.platformAiCostVnd || x.code.localeCompare(y.code));
 
-  const paying = tenants.filter((t) => (t.mrrVnd ?? 0) > 0);
+  // Ô TỔNG chỉ nói về KHÁCH: workspace kiểm thử của ops nghiệm thu không vào doanh thu / chi phí AI / chi phí mỗi khách / mỗi đơn.
+  const counted = tenants.filter((t) => !t.test);
+  const paying = counted.filter((t) => (t.mrrVnd ?? 0) > 0);
   const revenue = paying.reduce((s, t) => s + (t.mrrVnd ?? 0), 0);
-  const aiTotal = tenants.reduce((s, t) => s + t.platformAiCostVnd, 0);
+  const aiTotal = counted.reduce((s, t) => s + t.platformAiCostVnd, 0);
   const projectedTotal = projectToPeriodEnd(aiTotal, elapsedDays, totalDays);
   const sumKnown = (vals: (number | null)[]) => (vals.some((v) => v === null) ? null : vals.reduce<number>((s, v) => s + (v ?? 0), 0));
-  const aiOrders = sumKnown(tenants.map((t) => t.readings.orders_created_by_ai));
-  const aiConversations = sumKnown(tenants.map((t) => t.readings.ai_conversations));
+  const aiOrders = sumKnown(counted.map((t) => t.readings.orders_created_by_ai));
+  const aiConversations = sumKnown(counted.map((t) => t.readings.ai_conversations));
   // Chi phí AI chiếu ĐÃ LÀM TRÒN — đúng con số ô «chiếu cuối tháng» in ra, để lãi gộp tính lại được từ chính các ô trên màn.
   const aiForMargin = projectedTotal === null ? null : Math.round(projectedTotal);
   // Số dư AI cả nền tảng + lãi gộp: HAI hàm thuần có bài kiểm số chính xác (review #648 H1). Dòng tiền kỳ chỉ của tổ chức trong
   // khung (cùng tập với chi phí AI); số dư đang giữ của MỌI tổ chức trừ nhà (M1). Tiền nạp / tiền tặng không vào doanh thu.
-  const aiBalance = aiBalanceTotals({ balances, tenantCodes: new Set(tenants.map((t) => t.code)), homeCode: orgs.find((o) => o.isHome)?.code ?? null });
+  const aiBalance = aiBalanceTotals({ balances, tenantCodes: new Set(counted.map((t) => t.code)), homeCode: orgs.find((o) => o.isHome)?.code ?? null });
   const gm = platformGrossMargin({ mrrPayingVnd: revenue, aiBalanceRevenueToDateVnd: aiBalance.revenueVnd, aiBalanceReversalToDateVnd: aiBalance.reversalCashVnd, elapsedDays, totalDays, projectedAiCostVnd: aiForMargin, infraVnd: costs.infraMonthlyVnd });
-  const withCost = tenants.filter((t) => t.platformAiCostVnd > 0);
+  const withCost = counted.filter((t) => t.platformAiCostVnd > 0);
   return {
     ok: true,
     value: {
@@ -494,10 +500,10 @@ export async function loadPricingEconomics(user: SessionUser, now: Date = new Da
       totals: {
         revenueVnd: revenue,
         payingTenants: paying.length,
-        trialTenants: tenants.filter((t) => t.mrrVnd === 0 && latest.get(t.code)?.billingEnabled).length,
+        trialTenants: counted.filter((t) => t.mrrVnd === 0 && latest.get(t.code)?.billingEnabled).length,
         platformAiCostVnd: aiTotal,
         projectedPlatformAiCostVnd: projectedTotal === null ? null : Math.round(projectedTotal),
-        aiCostComplete: tenants.every((t) => t.unpricedCalls === 0),
+        aiCostComplete: counted.every((t) => t.unpricedCalls === 0),
         infraVnd: costs.infraMonthlyVnd,
         marginRevenueVnd: gm.marginRevenueVnd,
         grossProfitVnd: gm.grossProfitVnd,
@@ -508,16 +514,16 @@ export async function loadPricingEconomics(user: SessionUser, now: Date = new Da
         aiCostPerConversationVnd: div(aiTotal, aiConversations),
         aiOrders,
         aiConversations,
-        negativeRisk: tenants.filter((t) => t.risk === "NEGATIVE").length,
-        spikes: tenants.filter((t) => t.spike.state === "SPIKE").length,
+        negativeRisk: counted.filter((t) => t.risk === "NEGATIVE").length,
+        spikes: counted.filter((t) => t.spike.state === "SPIKE").length,
         aiBalance,
       },
-      trial: trialConversion(daily),
+      trial: trialConversion(daily.filter((r) => !acceptanceWorkspaceOf(r.orgCode))),
       costs,
       tenants,
       margin: marginCfg,
       marginBand: marginBand(gm.grossMarginPct, marginCfg),
-      aiCustomersTotal: sumKnown(tenants.map((t) => t.aiCustomers?.value ?? null)),
+      aiCustomersTotal: sumKnown(counted.map((t) => t.aiCustomers?.value ?? null)),
     },
   };
 }

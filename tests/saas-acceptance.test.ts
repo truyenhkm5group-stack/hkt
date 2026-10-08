@@ -20,7 +20,8 @@
  * Tổ chức THẬT trên PGlite mang đúng mã của sổ khai; tự dọn trước và sau. Mốc thời gian theo đồng hồ thật (AGENTS 50 · 65).
  */
 import assert from "node:assert/strict";
-import { readdirSync, readFileSync, rmSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { readFileSync, rmSync } from "node:fs";
 import path from "node:path";
 import { and, eq, inArray, like } from "drizzle-orm";
 import { getDb, getPlatformDb, organizationDatabaseUrl, releaseOrganizationDb, schema } from "@/db";
@@ -33,6 +34,7 @@ import {
   ACCEPTANCE_ACTOR_LABEL,
   ACCEPTANCE_ORDER,
   ACCEPTANCE_REGISTRY_REFUSAL,
+  ACCEPTANCE_RESERVED_MESSAGE,
   ACCEPTANCE_SAMPLE_PRODUCTS,
   ACCEPTANCE_SUMMARY_MAX,
   ACCEPTANCE_WORKSPACES,
@@ -40,6 +42,7 @@ import {
   acceptanceIdempotencyKey,
   acceptanceOrderNote,
   acceptanceRegistryProblems,
+  acceptanceReservedName,
   acceptanceSummary,
   acceptanceWorkspaceOf,
   formatStepLine,
@@ -54,12 +57,19 @@ import { env } from "@/lib/env";
 import { getEnabledModules, invalidateCapabilities } from "@/lib/platform/capabilities";
 import { withOrganization } from "@/lib/platform/context";
 import { HOST_NOT_FOUND_MESSAGE } from "@/lib/platform/host-org";
-import { findOrganization, getHomeOrganization, invalidateOrganizations } from "@/lib/platform/organizations";
+import { freeOrgCode } from "@/lib/onboarding/quick";
+import { orgCodeBase } from "@/lib/onboarding/quick-shared";
+import { orgStepZ } from "@/lib/onboarding/shared";
+import { findOrganization, getHomeOrganization, invalidateOrganizations, listOrganizations } from "@/lib/platform/organizations";
 import { provisionOrganization } from "@/lib/platform/provision";
-import { publishOrganization, setDomainSlug } from "@/lib/platform/publish";
+import { checkDomainSlug, publishOrganization, setDomainSlug } from "@/lib/platform/publish";
+import { loadOwnerCockpit } from "@/lib/platform/saas-cockpit";
+import { captureSaasSnapshot } from "@/lib/platform/saas-ledger";
 import { CHOTDON_ASSETS } from "@/lib/platform/site-host";
 import { createProductCore } from "@/lib/records/product-create";
-import { deniedLanding, metaRedirectTarget, probeShellRoute, publicChatProblem, runAcceptance, shellBodyProblem, shellRoutesFor, type AcceptanceDeps, type AcceptanceReport, type HttpReply } from "@/lib/saas/acceptance";
+import { ACCEPTANCE_NOT_OWNED_REFUSAL, ACCEPTANCE_RUNTIME_REFUSAL, acceptanceRuntimeRefusal } from "@/lib/saas/acceptance-guard";
+import { ACCEPTANCE_SESSION_TTL_SEC, deniedLanding, metaRedirectTarget, probeShellRoute, publicChatProblem, runAcceptance, shellBodyProblem, shellRoutesFor, type AcceptanceDeps, type AcceptanceReport, type HttpReply } from "@/lib/saas/acceptance";
+import { loadCommercialSnapshot, productEconomics } from "@/lib/saas/customers";
 import { foldVi } from "@/lib/sales-chatbot/catalog";
 import { DEFAULT_SALES_CHATBOT_CONFIG, SALES_CHATBOT_SETTING_KEY } from "@/lib/sales-chatbot/config";
 import { setSalesChatProviderForTests } from "@/lib/sales-chatbot/engine";
@@ -79,6 +89,9 @@ const SQUAT_PW = "KhachThat@2026xyz";
 
 const reply = (status: number, location: string | null, body: string): HttpReply => ({ status, location, body });
 
+/** Hạn (exp − iat, giây) của phiên vỏ mà ứng dụng giả nhận gần nhất — L2: phiên máy phải NGẮN, không phải 7 ngày. */
+let lastShellSessionTtl: number | null = null;
+
 /** Ứng dụng GIẢ cho bước C / E: cổng vỏ bằng ĐÚNG hàm của vỏ; phiên kiểm bằng ĐÚNG hàm đọc phiên. */
 function fakeApp(opts: { userId: () => Promise<string | null>; shopName: string; leakErp?: boolean }): AcceptanceDeps["appGet"] {
   return async (p, req) => {
@@ -90,6 +103,10 @@ function fakeApp(opts: { userId: () => Promise<string | null>; shopName: string;
     if (req.host !== APP_HOST) return reply(200, null, '<html><a aria-label="VNXcommerce — về trang tổng quan" href="/">x</a></html>');
     const token = /(?:^|;\s*)erp_session=([^;]+)/.exec(req.cookie ?? "")?.[1];
     const who = token ? await verifySessionToken(token) : null;
+    if (token) {
+      const claims = JSON.parse(Buffer.from(token.split(".")[1] ?? "", "base64url").toString("utf8")) as { iat?: number; exp?: number };
+      lastShellSessionTtl = typeof claims.exp === "number" && typeof claims.iat === "number" ? claims.exp - claims.iat : null;
+    }
     if (!who || who.id !== (await opts.userId())) return reply(307, "/login?reason=expired", "");
     const user: ShellUser = { role: "ADMIN", permissions: [], organization: { isHome: false, brand: "chotdon" }, modules: ["core", "customers", "products", "orders", "inventory", "ai_sales"] };
     if (!salesAgentPathAllowed(pathname)) return reply(307, salesAgentRedirectFor(user, pathname), "");
@@ -210,6 +227,16 @@ function testPure() {
   ]);
   for (const want of ["dành riêng", "tên miền con", "tên miền của nền tảng", "không phải khách thật", "thiếu lý do", "mã trùng"]) assert.ok(xau.some((p) => p.includes(want)), `sổ khai xấu phải bị bắt: ${want}`);
   assert.equal(acceptanceIdempotencyKey(CODE), `saas-acceptance:${CODE}`);
+  // (b) Đường máy chỉ sống trong tiến trình ops: Next đặt NEXT_RUNTIME (nodejs / edge) ⇒ từ chối; tsx để trống ⇒ được chạy.
+  for (const rt of ["nodejs", "edge"]) assert.equal(acceptanceRuntimeRefusal(rt), ACCEPTANCE_RUNTIME_REFUSAL, `máy chủ ứng dụng (${rt}) không mở được đường máy`);
+  for (const rt of [undefined, ""]) assert.equal(acceptanceRuntimeRefusal(rt), null);
+  // (c) Giữ chỗ: mã + tên miền con của sổ khai, không ai tự đăng ký được (kho PUBLIC — mã đã lộ).
+  assert.equal(acceptanceReservedName(` ${CODE.toUpperCase()} `)?.code, CODE);
+  assert.equal(acceptanceReservedName(ENTRY.domainSlug)?.code, CODE);
+  assert.equal(acceptanceReservedName(`${CODE}-2`), null);
+  const dangKy = orgStepZ.safeParse({ name: "CDT Nghiem Thu", code: CODE });
+  assert.ok(!dangKy.success && dangKy.error.issues.some((i) => i.message === ACCEPTANCE_RESERVED_MESSAGE), "lược đồ tự đăng ký (/start · đăng ký nhanh) từ chối mã nghiệm thu");
+  assert.ok(orgStepZ.safeParse({ name: "CDT Nghiem Thu Hai", code: `${CODE}-2` }).success, "chỉ đúng tên giữ chỗ bị chặn, không chặn theo tiền tố");
 
   // Ô arg: chế độ + cờ lạ / lặp / sai cặp.
   assert.deepEqual(parseAcceptanceArgs([]), { ok: true, mode: "READ", orgCode: null });
@@ -311,32 +338,116 @@ async function testProbe() {
 
 // ═══════════ 2 · MÃ NGUỒN ═══════════
 
-function sourceFiles(dirs: readonly string[]): string[] {
-  const out: string[] = [];
-  const walk = (d: string) => {
-    for (const e of readdirSync(path.join(goc, d), { withFileTypes: true })) {
-      const rel = `${d}/${e.name}`;
-      if (e.isDirectory()) {
-        if (e.name !== "node_modules" && !e.name.startsWith(".")) walk(rel);
-      } else if (/\.(ts|tsx)$/.test(e.name)) out.push(rel);
+/** Tệp TS đã vào kho (git ls-files) — gồm cả tệp mới tạo nếu đã `git add`; đường dẫn luôn dùng «/». */
+function trackedSources(): string[] {
+  return execFileSync("git", ["ls-files", "*.ts", "*.tsx"], { cwd: goc, encoding: "utf8" })
+    .split("\n")
+    .map((f) => f.trim())
+    .filter(Boolean);
+}
+
+/** Bỏ chú thích (khối + dòng) — mọi lần nhắc tới định danh trong MÃ (gọi · nhập · xuất lại · đổi tên) đều còn lại. */
+function codeOnly(src: string): string {
+  return src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:"'`])\/\/.*$/gm, "$1");
+}
+
+/** Các mệnh đề `import … from "x"` của một tệp: module + tên nhập (mặc định = "default", namespace = "*"). */
+function importsOf(src: string): { from: string; names: string[] }[] {
+  const out: { from: string; names: string[] }[] = [];
+  for (const m of src.matchAll(/^import\s+(?:type\s+)?([\s\S]*?)\s+from\s+"([^"]+)";/gm)) {
+    const clause = m[1];
+    const names: string[] = [];
+    const braces = /\{([\s\S]*)\}/.exec(clause);
+    if (braces) for (const part of braces[1].split(",")) {
+      const n = part.trim().replace(/^type\s+/, "").split(/\s+as\s+/)[0].trim();
+      if (n) names.push(n);
     }
-  };
-  for (const d of dirs) walk(d);
+    const rest = clause.replace(/\{[\s\S]*\}/, "").replace(/,/g, " ").trim();
+    if (/^\*\s+as\s+/.test(rest)) names.push("*");
+    else if (rest) names.push("default");
+    out.push({ from: m[2], names });
+  }
   return out;
 }
 
+/**
+ * «KHÔNG GHI HỘ» bằng ALLOWLIST (chỉ đạo 08/10/2026, review #690 L3): lõi ops chỉ được nhập ĐÚNG những tên này. Thêm một lõi ghi
+ * (tạo sản phẩm, lưu cấu hình bot, xuất bản, xác nhận đơn, thu phí…) là thêm một tên ngoài danh sách ⇒ đỏ, kể cả khi nó đến từ một
+ * module đã có mặt. Danh sách cấm cũ chỉ bắt được tên đã biết trước.
+ */
+const CORE_IMPORT_ALLOWLIST: Record<string, readonly string[]> = {
+  "node:crypto": ["randomBytes"],
+  "node:http": ["default"],
+  "node:https": ["default"],
+  "drizzle-orm": ["and", "eq"],
+  "@/db": ["getDb", "getPlatformDb", "schema"],
+  "@/lib/address/vn-address": ["foldVnText", "resolveRecipientPlace"],
+  "@/lib/auth/identities": ["findIdentity"],
+  "@/lib/auth/login": ["matchingLoginOrganizations", "verifyLogin"],
+  "@/lib/auth/session": ["signSession", "SessionSubject"],
+  "@/lib/commerce/stock": ["shortfalls"],
+  "@/lib/constants/saas-acceptance": [
+    "ACCEPTANCE_ACTOR_LABEL", "ACCEPTANCE_NUDGE_TURN", "ACCEPTANCE_ORDER", "ACCEPTANCE_REGISTRY_REFUSAL", "ACCEPTANCE_SAMPLE_PRODUCTS", "ACCEPTANCE_STEPS", "ACCEPTANCE_WORKSPACES",
+    "acceptanceChatTurns", "acceptanceIdempotencyKey", "acceptanceSummary", "acceptanceVerdict", "acceptanceWorkspaceOf", "formatAcceptanceUsd", "formatStepLine", "PAGE_ERROR_DIGEST", "PAGE_ERROR_MARKER", "scrubSecrets",
+    "AcceptanceMode", "AcceptanceStepKey", "AcceptanceWorkspace", "StepResult", "StepStatus",
+  ],
+  "@/lib/constants/saas-nav": ["ERP_FRAME_HTML_MARKERS", "FORBIDDEN_PARAM", "isSalesAgentUser", "SALES_AGENT_DENIED_PREFIXES", "SALES_AGENT_SHELL_HTML_MARKER", "SHELL_BLOCKED_PARAM", "salesAgentNavFor", "salesAgentRedirectFor", "ShellUser"],
+  "@/lib/constants/session": ["SESSION_COOKIE"],
+  "@/lib/constants/session-revocation": ["revokeMarkFrom"],
+  "@/lib/env": ["env"],
+  "@/lib/platform/capabilities": ["getEnabledModules", "invalidateCapabilities"],
+  "@/lib/platform/context": ["withOrganization"],
+  "@/lib/platform/host-org": ["HOST_NOT_FOUND_MESSAGE"],
+  "@/lib/platform/organizations": ["findOrganization", "invalidateOrganizations"],
+  "@/lib/platform/publish": ["platformBaseDomain", "publicationOf"],
+  "@/lib/platform/site-host": ["CHOTDON_ASSETS", "chotdonAppHost", "SiteEnv"],
+  "@/lib/pricing/ai-entitlement": ["AI_STOP_MESSAGE"],
+  "@/lib/pricing/ai-gate": ["loadAiEntitlement"],
+  "@/lib/pricing/price-book": ["loadPriceBook", "readPricePin"],
+  "@/lib/pricing/versions": ["currentCatalogVersion"],
+  "@/lib/records/customer-create": ["normalizeCustomerPhone"],
+  "@/lib/records/order-create": ["loadAutoConfirmComplete"],
+  "@/lib/saas/accounts": ["accountOfWorkspace"],
+  "@/lib/saas/acceptance-guard": ["acceptanceWorkspaceOwned"],
+  "@/lib/saas/activation": ["activationRefusal", "loadWorkspaceActivation", "resendActivation"],
+  "@/lib/saas/catalog": ["PRODUCTS"],
+  "@/lib/saas/customers": ["readPlans"],
+  "@/lib/saas/provisioning": ["requestProvisioning"],
+  "@/lib/sales-chatbot/config": ["withinBusinessHours"],
+  "@/lib/sales-chatbot/engine": ["chatTurn", "conversationView", "EMPTY_REPLY_TEXT", "loadSalesChatbotConfig", "openConversation", "salesChatProvider", "visitorKeyOf"],
+  "@/lib/users/password-reset": ["completePasswordResetCore", "createAcceptanceResetLink", "lookupResetToken"],
+};
+
 function testSource() {
-  const files = sourceFiles(["lib", "app", "components", "scripts"]);
-  const callers = (re: RegExp, def: string) => files.filter((f) => f !== def && re.test(readFileSync(path.join(goc, f), "utf8"))).sort();
-  // Đường phát liên kết của MÁY: chỉ ops nghiệm thu gọi.
-  assert.deepEqual(callers(/\bcreateAcceptanceResetLink\(/, "lib/users/password-reset.ts"), ["lib/saas/acceptance.ts"], "createAcceptanceResetLink chỉ được gọi từ lõi ops nghiệm thu");
-  // Luật gửi lại kích hoạt: MỘT bản — nút người vận hành (sau cổng) + ops nghiệm thu (sau lá chắn sổ khai).
-  assert.deepEqual(callers(/\bresendActivation\(/, "lib/saas/activation.ts"), ["lib/saas/acceptance.ts", "lib/saas/console.ts"]);
+  const files = trackedSources();
+  assert.ok(files.includes("lib/users/password-reset.ts") && files.includes("tests/saas-acceptance.test.ts"), "đọc được danh sách tệp đã vào kho");
+  // MỌI lần nhắc tới định danh trong MÃ (gọi · nhập · xuất lại · đổi tên) trên mọi tệp đã vào kho — không chỉ chuỗi `tên(`.
+  const mentions = (id: string) => files.filter((f) => new RegExp(`\\b${id}\\b`).test(codeOnly(readFileSync(path.join(goc, f), "utf8")))).sort();
+  // Đường phát liên kết của MÁY: định nghĩa + lõi ops (nơi gọi duy nhất) + bài kiểm này.
+  assert.deepEqual(mentions("createAcceptanceResetLink"), ["lib/saas/acceptance.ts", "lib/users/password-reset.ts", "tests/saas-acceptance.test.ts"], "createAcceptanceResetLink chỉ được nhắc tới ở lõi ops nghiệm thu (không xuất lại, không đổi tên)");
+  // Luật gửi lại kích hoạt: MỘT bản — nút người vận hành (sau cổng) + ops nghiệm thu (sau lá chắn).
+  assert.deepEqual(mentions("resendActivation"), ["lib/saas/acceptance.ts", "lib/saas/activation.ts", "lib/saas/console.ts", "tests/saas-acceptance.test.ts"]);
+  // Ba lá chắn của đường máy, theo ĐÚNG thứ tự, TRƯỚC lượt ghi: lúc chạy → cặp sổ khai → sở hữu → mới tới lõi chung.
+  const reset = readFileSync(path.join(goc, "lib", "users", "password-reset.ts"), "utf8");
+  const fn = reset.slice(reset.indexOf("export async function createAcceptanceResetLink("), reset.indexOf("async function issueCustomerAccountLink("));
+  const at = (needle: string) => fn.indexOf(needle);
+  assert.ok(at("const runtime = acceptanceRuntimeRefusal();") > 0 && at("if (runtime) return { error: runtime };") > at("const runtime"), "(b) lá chắn lúc chạy đứng đầu hàm");
+  assert.ok(at("if (runtime) return") < at("await "), "(b) lá chắn lúc chạy đứng TRƯỚC lượt await đầu tiên");
+  assert.ok(at("email !== entry.ownerEmail) return { error: ACCEPTANCE_REGISTRY_REFUSAL }") > at("if (runtime) return"), "cặp (mã, email) của sổ khai");
+  assert.ok(at("if (!(await acceptanceWorkspaceOwned(entry))) return { error: ACCEPTANCE_NOT_OWNED_REFUSAL };") > at("ACCEPTANCE_REGISTRY_REFUSAL"), "(a) kiểm sở hữu ngay trong hàm phát liên kết");
+  assert.ok(at("return issueCustomerAccountLink(") > at("acceptanceWorkspaceOwned(entry)"), "(a) lõi chung chỉ sau kiểm sở hữu");
+  // Next thay ĐÚNG biểu thức này lúc dựng — đọc qua biến trung gian là mù.
+  assert.match(readFileSync(path.join(goc, "lib", "saas", "acceptance-guard.ts"), "utf8"), /nextRuntime: string \| undefined = process\.env\.NEXT_RUNTIME\)/);
   // /login không mã tổ chức: MỘT phép quyết định, form và ops cùng đi qua.
   const auth = readFileSync(path.join(goc, "lib", "actions", "auth.ts"), "utf8");
   assert.ok(/matchingLoginOrganizations\(email, password\)/.test(auth) && !/credentialsMatch\(/.test(auth), "loginAction dùng matchingLoginOrganizations, không tự lặp lại phép dò");
-  // Lõi ops KHÔNG ghi hộ vào workspace (chỉ đạo 08/10/2026) và KHÔNG dùng móc chỉ-dành-cho-bài-kiểm.
+  // Lõi ops KHÔNG ghi hộ vào workspace (chỉ đạo 08/10/2026): ALLOWLIST import — mỗi tên nhập phải có trong danh sách khai.
   const core = readFileSync(path.join(goc, "lib", "saas", "acceptance.ts"), "utf8");
+  const imports = importsOf(core);
+  assert.equal(imports.length, core.match(/^import\s/gm)?.length ?? 0, "đọc được MỌI mệnh đề import của lõi");
+  const ngoai = imports.flatMap((i) => i.names.filter((n) => !(CORE_IMPORT_ALLOWLIST[i.from] ?? []).includes(n)).map((n) => `${i.from} → ${n}`));
+  assert.deepEqual(ngoai, [], "lõi ops chỉ nhập tên trong CORE_IMPORT_ALLOWLIST — lõi ghi mới phải qua review, không lặng lẽ thêm");
+  assert.ok(!/\brequire\(|\bimport\(/.test(codeOnly(core)), "không nạp động (vượt allowlist)");
   for (const cam of ["createProductCore", "createProductAction", "saveSalesChatbotConfig", "setSettingJson", "publishOrganization", "setDomainSlug", "confirmOrderReviewCore", "updateManualOrderCore", "createManualOrderCore", "setOrgBilling", "adminSessionUser", "ForTests(", "AsOperator("]) {
     assert.ok(!core.includes(cam), `lib/saas/acceptance.ts không được gọi ${cam}`);
   }
@@ -392,16 +503,28 @@ async function testGuardAndSquatter() {
   assert.equal(await findOrganization(CODE), null, "chạy thử không tạo tổ chức");
   assertNoSecrets(fresh.out, book, "chạy thử trống");
 
-  // KHÁCH THẬT TRÙNG MÃ (không qua ops): không bước nào chạm vào nó.
-  await provisionOrganization({ code: CODE, name: "Khách thật trùng mã", modules: ["customers", "products", "orders", "inventory", "ai_sales"], admin: { email: SQUAT_EMAIL, name: "Chủ thật", password: SQUAT_PW }, source: "TEST", actor: null, brand: "chotdon" });
+  // (c) GIỮ CHỖ ở mọi đường tự đăng ký / đặt tên miền: «CDT Nghiem Thu» ra đúng mã nghiệm thu nhưng không bao giờ được cấp nó.
+  assert.equal(orgCodeBase("CDT Nghiem Thu"), CODE, "tiền đề: tên cửa hàng này dựng ra đúng mã nghiệm thu");
+  const cap = await freeOrgCode("CDT Nghiem Thu");
+  assert.ok(cap !== CODE && acceptanceReservedName(cap) === null, `đăng ký nhanh bỏ qua mã giữ chỗ (cấp ${cap})`);
+  assert.deepEqual(await checkDomainSlug(ENTRY.domainSlug, "khach-khac"), { ok: false, error: ACCEPTANCE_RESERVED_MESSAGE }, "tổ chức khác không đặt được tên miền con của workspace thử");
+  assert.equal((await checkDomainSlug(ENTRY.domainSlug, CODE)).ok, true, "chính workspace thử vẫn đặt được tên miền con của nó (bước người làm ở ACCEPTANCE.md §3)");
+
+  // (d) KHÁCH THẬT TRÙNG CẢ MÃ LẪN EMAIL (đăng ký trước bản giữ chỗ — kho PUBLIC, mã đã lộ): không bước nào chạm vào nó, và chính
+  // hàm phát liên kết của máy cũng từ chối (sổ khai một mình KHÔNG đủ — review #690 MEDIUM-1).
+  await provisionOrganization({ code: CODE, name: "Khách thật trùng mã", modules: ["customers", "products", "orders", "inventory", "ai_sales"], admin: { email: ENTRY.ownerEmail, name: "Chủ thật", password: SQUAT_PW }, source: "TEST", actor: null, brand: "chotdon" });
+  const goiThang = await createAcceptanceResetLink({ orgCode: CODE, email: ENTRY.ownerEmail, reason: "Gọi thẳng hàm phát liên kết của máy" }, { purpose: "RESET" });
+  assert.deepEqual(goiThang, { error: ACCEPTANCE_NOT_OWNED_REFUSAL }, "(a) workspace trùng mã + email mà không do ops tạo ⇒ đường máy từ chối");
   const squat = await captured(() => runAcceptanceCli(["--apply", "--e2e"], deps("nt-squat", book)));
   assert.equal(squat.value, 1);
   assert.match(squat.out, /^FAIL A · workspace nghiệm thu — mã trùng một workspace KHÔNG do ops nghiệm thu tạo/m);
   for (const k of ["B · kích hoạt", "C · vỏ app", "D · chat web", "E · chat công khai", "B · xoay"]) assert.match(squat.out, new RegExp(`^SKIP ${k}`, "m"));
-  assert.equal(await credentialsMatch({ email: SQUAT_EMAIL, password: SQUAT_PW, orgCode: CODE }), true, "mật khẩu của chủ thật NGUYÊN");
+  assert.equal(await credentialsMatch({ email: ENTRY.ownerEmail, password: SQUAT_PW, orgCode: CODE }), true, "mật khẩu của chủ thật NGUYÊN");
   assert.equal((await pdb.select().from(schema.platformProvisioningJobs).where(eq(schema.platformProvisioningJobs.idempotencyKey, acceptanceIdempotencyKey(CODE)))).length, 0, "không cả một job cấp phát hỏng");
   const tokens = await withOrganization(CODE, async () => (await getDb()).select().from(schema.passwordResetTokens));
   assert.equal(tokens.length, 0, "không một liên kết đặt lại nào cho tài khoản của khách thật");
+  const nhatKy = await pdb.select().from(schema.platformAuditLog).where(and(eq(schema.platformAuditLog.targetOrgCode, CODE), eq(schema.platformAuditLog.action, "PASSWORD_RESET_LINK")));
+  assert.equal(nhatKy.length, 0, "không một dòng nhật ký phát liên kết nào cho workspace của khách thật");
   assertNoSecrets(squat.out, book, "khách trùng mã");
 }
 
@@ -454,6 +577,7 @@ async function testApplyFlow() {
   assert.deepEqual(await matchingLoginOrganizations(ENTRY.ownerEmail, pw1), [], "mật khẩu đã dùng trong lượt chạy KHÔNG còn đăng nhập được");
   assert.deepEqual(await matchingLoginOrganizations(ENTRY.ownerEmail, wrong), []);
   assert.deepEqual(await matchingLoginOrganizations(ENTRY.ownerEmail, rotated), [CODE], "đăng nhập email KHÔNG mã tổ chức ra đúng workspace thử");
+  assert.equal(lastShellSessionTtl, ACCEPTANCE_SESSION_TTL_SEC, "phiên ký cho bước C là phiên NGẮN của máy, không phải 7 ngày");
   // ── (6) C phủ đủ tuyến dẫn xuất ──
   assert.match(stepOf(r1, "C").reason, /^10\/10 tuyến của vỏ mở được qua host app\.chotdontudong\.com/);
 
@@ -543,6 +667,32 @@ async function testApplyFlow() {
   assert.deepEqual(after.bot, before.bot, "ops KHÔNG đổi cấu hình bot");
   const usage = await pdb.select().from(schema.platformAiUsage).where(and(eq(schema.platformAiUsage.orgCode, CODE), eq(schema.platformAiUsage.conversationId, after.conv.id)));
   assert.ok(usage.length > 0, "lượt AI được ghi sổ (chi phí đọc từ đó)");
+
+  // ── Workspace thử KHÔNG phải khách (review #690 MEDIUM-2, «không fake analytics»): đã kích hoạt + có đơn CONFIRMED + có lượt AI,
+  //    vẫn không vào sổ kinh tế SaaS, buồng lái, phễu kích hoạt, mốc vòng đời, phân bổ chi phí, kinh tế sản phẩm, ô đếm khách. ──
+  await captureSaasSnapshot(new Date());
+  assert.equal((await pdb.select().from(schema.platformSaasDaily).where(eq(schema.platformSaasDaily.orgCode, CODE))).length, 0, "sổ kinh tế không chụp MRR của workspace thử");
+  assert.equal((await pdb.select().from(schema.platformOrgMilestones).where(eq(schema.platformOrgMilestones.orgCode, CODE))).length, 0, "không mốc vòng đời / kích hoạt nào cho workspace thử");
+  assert.equal((await pdb.select().from(schema.platformTenantUsageDaily).where(eq(schema.platformTenantUsageDaily.orgCode, CODE))).length, 0, "không số dùng theo ngày cho workspace thử");
+  const home = await getHomeOrganization();
+  const op: SessionUser = { id: "nt-op", email: "op@nghiem-thu.local", name: "OP", role: "ADMIN", permissions: [], scope: "ALL", departmentCodes: [], positionId: null, organization: { code: home.code, name: home.name, isHome: true } };
+  const ck = await loadOwnerCockpit(op);
+  if (!ck.ok) assert.fail(ck.error);
+  assert.ok(!ck.value.tenants.some((t) => t.code === CODE), "buồng lái: không có dòng khách cho workspace thử");
+  assert.deepEqual(ck.value.testWorkspaces.codes, [CODE], "buồng lái nói RA workspace thử nào bị loại");
+  assert.ok(ck.value.testWorkspaces.aiRequests > 0, "chi phí AI của lượt nghiệm thu in riêng, không bị giấu");
+  invalidateOrganizations();
+  const khach = (await listOrganizations()).filter((o) => !o.isHome && o.status !== "ARCHIVED" && o.status !== "SETUP_FAILED" && o.code !== CODE).length;
+  assert.equal(ck.value.headline.tenants, khach, "số tổ chức khách không đếm workspace thử");
+  assert.equal(ck.value.activationOrgs, khach, "phễu kích hoạt không đếm workspace thử");
+  const snap = await loadCommercialSnapshot();
+  const thu = snap.customers.find((c) => c.account.code === ENTRY.accountCode);
+  assert.ok(thu?.test, "danh sách khách vẫn có tài khoản thử, mang cờ «Kiểm thử»");
+  assert.ok(snap.customers.every((c) => c === thu || !c.test), "chỉ tài khoản thử mang cờ");
+  assert.deepEqual(thu.workspaces.flatMap((w) => w.allocated), [], "phân bổ chi phí chung (EQUAL_ACTIVE_WORKSPACES) không chia cho workspace thử");
+  assert.ok(thu.workspaces.some((w) => w.subscriptions.some((s) => s.productKey === "chotdon")), "tiền đề: tài khoản thử thuê Chốt Đơn");
+  const chotdon = productEconomics(snap).find((e) => e.product.key === "chotdon");
+  assert.equal(chotdon?.customers, snap.customers.filter((c) => !c.test && c.workspaces.some((w) => w.subscriptions.some((s) => s.productKey === "chotdon"))).length, "kinh tế sản phẩm không đếm tài khoản thử");
 }
 
 export async function testSaasAcceptance() {

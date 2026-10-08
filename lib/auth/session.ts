@@ -83,16 +83,21 @@ export type SessionSubject = SessionIdentity & { orgCode: string };
  *
  * `iat` thì ngược lại: nó luôn là LÚC NÀY. Hai mốc tách nhau vì chúng trả lời hai câu khác nhau —
  * "phiên này bắt đầu khi nào" và "tờ giấy này được ký lại lần gần nhất khi nào".
+ *
+ * `ttlSec` — hạn RIÊNG, chỉ để RÚT NGẮN (phiên máy dùng vài phút: ops nghiệm thu mở vỏ app). Không bao giờ dài hơn hạn nhàn rỗi
+ * của phiên người; giá trị không hợp lệ ⇒ ném, không lặng lẽ rơi về 7 ngày.
  */
-export async function signSession(user: SessionSubject, opts: { loginAtSec?: number; nowSec?: number } = {}) {
+export async function signSession(user: SessionSubject, opts: { loginAtSec?: number; nowSec?: number; ttlSec?: number } = {}) {
   const nowSec = opts.nowSec ?? Math.floor(Date.now() / 1000);
   const loginAtSec = opts.loginAtSec ?? nowSec;
   if (!user.orgCode) throw new Error("signSession: thiếu mã tổ chức — phiên mới phải nói nó thuộc tổ chức nào.");
+  const idleSec = SESSION_IDLE_DAYS * NGAY_GIAY;
+  if (opts.ttlSec !== undefined && !(Number.isInteger(opts.ttlSec) && opts.ttlSec > 0 && opts.ttlSec <= idleSec)) throw new Error("signSession: ttlSec phải là số giây nguyên dương, không dài hơn hạn nhàn rỗi.");
   return new SignJWT({ email: user.email, name: user.name, role: user.role, [SESSION_ORG_CLAIM]: user.orgCode, [SESSION_LOGIN_CLAIM]: loginAtSec })
     .setProtectedHeader({ alg: "HS256" })
     .setSubject(user.id)
     .setIssuedAt(nowSec)
-    .setExpirationTime(nowSec + SESSION_IDLE_DAYS * NGAY_GIAY)
+    .setExpirationTime(nowSec + (opts.ttlSec ?? idleSec))
     .sign(secretKey());
 }
 

@@ -9,6 +9,7 @@
 import { z } from "zod";
 import { moduleDef, PLATFORM_MODULES, type ModuleKey } from "@/lib/constants/platform-modules";
 import { ORGANIZATION_CODE_PATTERN } from "@/lib/platform/types";
+import { ACCEPTANCE_RESERVED_MESSAGE, acceptanceReservedName } from "@/lib/constants/saas-acceptance-registry";
 
 // ═══ CHẾ ĐỘ ĐĂNG KÝ ═══
 
@@ -169,7 +170,9 @@ export const orgStepZ = z.object({
     .trim()
     .toLowerCase()
     .regex(ORGANIZATION_CODE_PATTERN, "Mã tổ chức: chữ thường không dấu, số, gạch ngang; 2–31 ký tự, bắt đầu bằng chữ")
-    .refine((c) => !(RESERVED_ORG_CODES as readonly string[]).includes(c), "Mã này dành riêng cho nền tảng — chọn mã khác"),
+    .refine((c) => !(RESERVED_ORG_CODES as readonly string[]).includes(c), "Mã này dành riêng cho nền tảng — chọn mã khác")
+    // Mã / tên miền con của workspace NGHIỆM THU: chỉ ops tạo được (job «Tạo khách»), không ai tự đăng ký — kho mã PUBLIC, mã đã lộ.
+    .refine((c) => !acceptanceReservedName(c), ACCEPTANCE_RESERVED_MESSAGE),
 });
 
 export const adminStepZ = z.object({

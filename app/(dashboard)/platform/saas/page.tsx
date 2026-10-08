@@ -197,6 +197,12 @@ export default async function OwnerCockpitPage() {
         </div>
       ) : null}
 
+      {c.testWorkspaces.codes.length ? (
+        <p className="text-xs text-muted-foreground" data-cockpit="test-workspaces">
+          Không tính workspace kiểm thử (ops nghiệm thu): {c.testWorkspaces.codes.join(", ")} — không phải khách nên không vào số khách, vòng đời, phễu kích hoạt, MRR hay AI của khách. Chi phí AI nền tảng của lượt nghiệm thu {c.margin.windowDays} ngày: {formatVND(c.testWorkspaces.platformAiCostVnd)} ({formatNumber(c.testWorkspaces.aiRequests)} lượt gọi).
+        </p>
+      ) : null}
+
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-8" data-cockpit="headline">
         <Tile label="MRR" value={formatVND(h.mrrVnd)} sub={`ARR ${formatVND(h.arrVnd, { compact: true })}`} />
         <Tile label="Khách trả tiền" value={formatNumber(h.payingTenants)} sub={`/ ${h.tenants} tổ chức · ARPA ${formatVND(h.arpaVnd, { compact: true })}`} />

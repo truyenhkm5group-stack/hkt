@@ -89,11 +89,19 @@ in ở dòng D + dòng tóm tắt («AI lượt này ≈ … USD»); lượt ch�
 Sau mỗi deploy chạm: vỏ app (`lib/constants/saas-nav.ts`, `components/saas-shell.tsx`, layout) · danh tính / đăng nhập / đặt lại mật
 khẩu · cấp phát / «Tạo khách» · bot bán hàng · đơn hàng. Tối thiểu chạy thử (rỗng); có chạm bot / đơn thì `--apply --e2e`.
 
-## 8. Chỉ số của buồng lái — CHƯA loại workspace thử
+## 8. Workspace thử KHÔNG phải khách — loại khỏi chỉ số, giữ chỗ tên
 
-Workspace thử là dùng thử (không thu phí) nên KHÔNG làm phồng MRR / doanh thu, nhưng CÓ được đếm như một khách ở: Owner Cockpit
-(`lib/platform/saas-cockpit.ts` — số tổ chức, vòng đời, phễu kích hoạt, tổng AI / chi phí AI, số dùng), sổ ảnh chụp
-(`lib/platform/saas-ledger.ts` — `platform_saas_daily`, mốc kích hoạt, biến động kỳ), danh sách khách + phân bổ chi phí
-`EQUAL_ACTIVE_WORKSPACES` + kinh tế sản phẩm (`lib/saas/customers.ts`), kinh tế đơn vị (`lib/pricing/admin.ts`), bảng thu phí
-(`lib/billing/service.ts`), top chi phí AI (`lib/ai-usage/view.ts`), tóm tắt /platform (`lib/platform/support.ts`). Loại trừ chạm
-cả bảy nơi (và đổi phân bổ chi phí của khách khác) nên CHƯA làm; vị ngữ dùng chung đã có (`acceptanceWorkspaceOf`).
+Một vị ngữ dùng chung (`acceptanceWorkspaceOf`, tệp lá `lib/constants/saas-acceptance-registry.ts`):
+
+- **Loại khỏi chỉ số khách**: sổ kinh tế SaaS không chụp nó (`captureSaasSnapshot` — không ảnh chụp MRR, không mốc vòng đời /
+  kích hoạt, không số dùng theo ngày); buồng lái (`lib/platform/saas-cockpit.ts`) không đếm nó ở số khách, vòng đời, phễu kích
+  hoạt, MRR, AI của khách, số dùng — và in RIÊNG một dòng «Không tính workspace kiểm thử … chi phí AI của lượt nghiệm thu» (tiền
+  thật, không giấu); phân bổ chi phí chung (`EQUAL_ACTIVE_WORKSPACES`) và kinh tế sản phẩm không chia / đếm nó; ô tổng của kinh
+  tế đơn vị (`lib/pricing/admin.ts`) không cộng nó. Danh sách khách (/platform/customers) vẫn hiện tài khoản thử, gắn nhãn
+  «Kiểm thử», không vào ô đếm.
+- **Vẫn hiện, có chủ ý**: hàng canh hạn mức AI của nó (`lib/pricing/admin.ts`, vẫn phải canh), bảng thu phí (gia hạn dùng thử ở
+  /platform/org/<mã>), top chi phí AI (`lib/ai-usage/view.ts` — tiền thật), tóm tắt hỗ trợ /platform.
+- **Giữ chỗ tên**: mã + tên miền con của sổ không ai tự đăng ký (`orgStepZ`, `freeOrgCode`) hay tự đặt tên miền con
+  (`checkDomainSlug`) được — kho mã PUBLIC, mã đã lộ. Chỉ job «Tạo khách» của ops mang được mã ấy.
+
+Workspace chưa tồn tại trên production lúc thêm luật này ⇒ mọi số hiện có không đổi.

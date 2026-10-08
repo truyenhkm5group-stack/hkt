@@ -8,6 +8,7 @@ import { planKeyOf, type PlanRow } from "@/lib/entitlements/check";
 import { platformAudit } from "@/lib/platform/audit";
 import { KILL_SWITCH_REASON_MIN } from "@/lib/platform/kill-switches";
 import { getHomeOrganization, listOrganizations } from "@/lib/platform/organizations";
+import { acceptanceWorkspaceOf } from "@/lib/constants/saas-acceptance-registry";
 import { plansForOrg } from "@/lib/pricing/price-book";
 import type { Organization } from "@/lib/platform/types";
 import { platformOperatorDenial } from "@/lib/platform-ui/module-toggle";
@@ -54,7 +55,9 @@ export type SnapshotResult = { day: string; orgs: number; mrrVnd: number; milest
 
 export async function captureSaasSnapshot(now: Date = new Date()): Promise<SnapshotResult> {
   const day = vnDate(now);
-  const orgs = await listOrganizations();
+  // Workspace KIỂM THỬ của ops nghiệm thu (sổ khai lib/constants/saas-acceptance-registry.ts) không phải khách: không ảnh chụp MRR,
+  // không mốc kích hoạt, không số dùng — mọi người đọc sổ này (buồng lái, phễu kích hoạt, chuyển đổi dùng thử) loại nó ở MỘT chỗ.
+  const orgs = (await listOrganizations()).filter((o) => !acceptanceWorkspaceOf(o.code));
   const pdb = await getPlatformDb();
   const subs = new Map((await pdb.select().from(schema.platformSubscriptions)).map((s) => [s.orgCode, { billingEnabled: s.billingEnabled, paidThrough: s.paidThrough ?? null, graceDays: s.graceDays, addons: s.addons }]));
   // Giá của MỖI tổ chức theo phiên bản giá đã ghim (0228) — MRR là số khách thật trả, không phải giá niêm yết hôm nay.

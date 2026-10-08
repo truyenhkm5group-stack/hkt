@@ -12,6 +12,7 @@ import { getPlatformDb, schema } from "@/db";
 import { addonMonthlyVnd, parseAddonPrices, parseAddonUnits } from "@/lib/billing/addons";
 import { billingStanding, vnDate, type BillingStandingKind } from "@/lib/billing/rules";
 import { planKeyOf } from "@/lib/entitlements/check";
+import { acceptanceWorkspaceOf } from "@/lib/constants/saas-acceptance-registry";
 import { readEverPaidOrgs } from "@/lib/platform/saas-ledger";
 import { readCommercialRegistry, type AccountRow, type SubscriptionRow, type WorkspaceRow } from "@/lib/saas/accounts";
 import { allocateCosts, type AllocatedLine } from "@/lib/saas/allocation";
@@ -80,6 +81,12 @@ export type CustomerView = {
   failedJobs: number;
   /** Phần của `failedJobs` chỉ là «chưa cài được mẫu» — lối ra «Cài lại mẫu», không phải «Chạy lại». */
   templatePendingJobs: number;
+  /**
+   * Tài khoản chỉ có workspace KIỂM THỬ của ops nghiệm thu (sổ khai lib/constants/saas-acceptance-registry.ts). Danh sách vẫn
+   * hiện nó (người vận hành cần thấy để gia hạn dùng thử / xem nhật ký) kèm nhãn «Kiểm thử»; nó KHÔNG vào phân bổ chi phí, kinh tế
+   * sản phẩm hay ô đếm khách.
+   */
+  test: boolean;
 };
 
 export type CommercialSnapshot = { periodMonth: string; customers: CustomerView[]; orphanWorkspaces: WorkspaceRow[]; plans: PlanInfo[]; usdToVnd: number };
@@ -165,8 +172,10 @@ export async function loadCommercialSnapshot(opts: { periodMonth?: string; now?:
   // Phân bổ chi phí trên MỌI workspace đang chạy (cả nhà): chi phí AI nền tảng trả là trọng số của AI_COST_SHARE.
   const liveSubs = registry.subscriptions.filter((s) => !s.endedAt);
   const aiPlatformVnd = (code: string) => [...(ai.get(code)?.values() ?? [])].reduce((a, c) => a + usdToVnd(c.platform.costUsd), 0);
+  // Workspace KIỂM THỬ (ops nghiệm thu) không gánh phần nào của chi phí chung: thêm nó vào mẫu số EQUAL_ACTIVE_WORKSPACES là chia
+  // chi phí của khách thật cho một khách không tồn tại. Chi phí AI riêng của nó vẫn hiện ở dòng của nó.
   const allocation = allocateCosts({
-    workspaces: registry.workspaces.map((w) => ({ orgCode: w.code, accountId: w.accountId, active: w.status === "ACTIVE", products: liveSubs.filter((s) => s.orgCode === w.code).map((s) => s.productKey), aiCostVnd: aiPlatformVnd(w.code) })),
+    workspaces: registry.workspaces.filter((w) => !acceptanceWorkspaceOf(w.code)).map((w) => ({ orgCode: w.code, accountId: w.accountId, active: w.status === "ACTIVE", products: liveSubs.filter((s) => s.orgCode === w.code).map((s) => s.productKey), aiCostVnd: aiPlatformVnd(w.code) })),
     declared: costs.declared,
     entries: costs.entries,
   });
@@ -280,6 +289,7 @@ export async function loadCommercialSnapshot(opts: { periodMonth?: string; now?:
       flags,
       failedJobs,
       templatePendingJobs,
+      test: workspaces.length > 0 && workspaces.every((w) => acceptanceWorkspaceOf(w.code) !== null),
     });
   }
   return { periodMonth, customers, orphanWorkspaces: registry.workspaces.filter((w) => !w.accountId || !accountById.has(w.accountId)), plans, usdToVnd: usdToVnd(1) };
@@ -310,21 +320,23 @@ export type ProductEconomics = { product: ProductDef; customers: number; liveSub
  * cộng dòng gói RIÊNG của sản phẩm (PRODUCT_PLAN) + vượt hạn mức của sản phẩm; phần gói gộp in riêng và nói rõ là gộp.
  */
 export function productEconomics(snap: CommercialSnapshot, catalog: readonly ProductDef[] = PRODUCTS): ProductEconomics[] {
+  // Chỉ KHÁCH: tài khoản kiểm thử của ops nghiệm thu không vào số khách / thuê bao / doanh thu / chi phí của sản phẩm.
+  const real = snap.customers.filter((c) => !c.test);
   return catalog.map((product) => {
-    const subs = snap.customers.flatMap((c) => c.workspaces.flatMap((w) => w.subscriptions.filter((s) => s.productKey === product.key)));
+    const subs = real.flatMap((c) => c.workspaces.flatMap((w) => w.subscriptions.filter((s) => s.productKey === product.key)));
     const byStatus: Partial<Record<EffectiveSubscriptionStatus, number>> = {};
     for (const s of subs) byStatus[s.status] = (byStatus[s.status] ?? 0) + 1;
-    const customers = snap.customers.filter((c) => c.workspaces.some((w) => w.subscriptions.some((s) => s.productKey === product.key))).length;
-    const aiCostVnd = snap.customers.reduce((a, c) => a + c.workspaces.reduce((b, w) => b + w.aiCost.filter((x) => x.productKey === product.key).reduce((d, x) => d + x.platformVnd, 0), 0), 0);
-    const directCostVnd = snap.customers.reduce((a, c) => a + c.workspaces.reduce((b, w) => b + w.allocated.filter((l) => l.productKey === product.key).reduce((d, l) => d + (l.amountVnd ?? 0), 0), 0), 0);
-    const ext = snap.customers.filter((c) => c.economics.marginApplicable);
+    const customers = real.filter((c) => c.workspaces.some((w) => w.subscriptions.some((s) => s.productKey === product.key))).length;
+    const aiCostVnd = real.reduce((a, c) => a + c.workspaces.reduce((b, w) => b + w.aiCost.filter((x) => x.productKey === product.key).reduce((d, x) => d + x.platformVnd, 0), 0), 0);
+    const directCostVnd = real.reduce((a, c) => a + c.workspaces.reduce((b, w) => b + w.allocated.filter((l) => l.productKey === product.key).reduce((d, l) => d + (l.amountVnd ?? 0), 0), 0), 0);
+    const ext = real.filter((c) => c.economics.marginApplicable);
     const own = ext.flatMap((c) => c.statement.lines.filter((l) => (l.kind === "PRODUCT_PLAN" || l.kind === "OVERAGE") && l.productKey === product.key));
     const bundled = ext.flatMap((c) => c.statement.lines.filter((l) => l.kind === "PLAN")).length;
     const unknown = own.some((l) => l.amountVnd === null);
     // Doanh thu Số dư AI thuộc sản phẩm của đồng hồ khách AI (Chốt Đơn) — cùng một con số với phần kinh tế của từng khách.
     const balanceRevenue = product.key === "chotdon" ? ext.reduce((a, c) => a + c.economics.aiBalanceRevenueVnd, 0) : 0;
     const usage = product.metrics.map((m) => {
-      const vals = snap.customers.flatMap((c) => c.workspaces.flatMap((w) => w.usage.filter((u) => u.productKey === product.key && u.metric === m.key).map((u) => u.value)));
+      const vals = real.flatMap((c) => c.workspaces.flatMap((w) => w.usage.filter((u) => u.productKey === product.key && u.metric === m.key).map((u) => u.value)));
       const known = vals.filter((v): v is number => v !== null);
       return { metric: m.key, label: m.label, unit: m.unit, total: known.length ? known.reduce((a, b) => a + b, 0) : null };
     });

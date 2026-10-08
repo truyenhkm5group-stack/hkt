@@ -30,6 +30,7 @@ import { clearMemo } from "@/lib/cache";
 import { moduleDef } from "@/lib/constants/platform-modules";
 import { env } from "@/lib/env";
 import { RESERVED_ORG_CODES } from "@/lib/onboarding/shared";
+import { ACCEPTANCE_RESERVED_MESSAGE, acceptanceReservedName } from "@/lib/constants/saas-acceptance-registry";
 import { platformAudit } from "@/lib/platform/audit";
 import { getEnabledModules, invalidateCapabilities } from "@/lib/platform/capabilities";
 import { currentOrganization } from "@/lib/platform/context";
@@ -99,6 +100,9 @@ export async function checkDomainSlug(raw: unknown, selfCode: string): Promise<S
   const problem = domainSlugProblem(slug);
   if (problem) return { ok: false, error: problem.message };
   if ((RESERVED_ORG_CODES as readonly string[]).includes(slug)) return { ok: false, error: "Tên này dành riêng cho nền tảng — chọn tên khác." };
+  // Tên miền con / mã của workspace NGHIỆM THU (sổ khai, kho mã PUBLIC nên tên đã lộ) chỉ CHÍNH workspace ấy mang được.
+  const held = acceptanceReservedName(slug);
+  if (held && held.code !== selfCode) return { ok: false, error: ACCEPTANCE_RESERVED_MESSAGE };
   const pdb = await getPlatformDb();
   const t = schema.platformOrganizations;
   const [taken] = await pdb.select({ code: t.code }).from(t).where(and(eq(t.domainSlug, slug), ne(t.code, selfCode))).limit(1);

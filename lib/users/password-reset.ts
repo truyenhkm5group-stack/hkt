@@ -31,6 +31,7 @@ import { applySessionRevocation } from "@/lib/auth/session-revoke";
 import { can, type SessionUser } from "@/lib/auth/session";
 import { ACCEPTANCE_ACTOR_LABEL, ACCEPTANCE_REGISTRY_REFUSAL, acceptanceWorkspaceOf } from "@/lib/constants/saas-acceptance";
 import { env } from "@/lib/env";
+import { ACCEPTANCE_NOT_OWNED_REFUSAL, acceptanceRuntimeRefusal, acceptanceWorkspaceOwned } from "@/lib/saas/acceptance-guard";
 import { platformAudit, type PlatformActor, type PlatformAuditSource } from "@/lib/platform/audit";
 import { OrgContextError, withOrganization } from "@/lib/platform/context";
 import { findOrganization } from "@/lib/platform/organizations";
@@ -119,21 +120,28 @@ export async function createResetLinkAsOperator(user: SessionUser, raw: { orgCod
 }
 
 /**
- * ĐƯỜNG CỦA MÁY — CHỈ workspace NGHIỆM THU trong sổ khai (`lib/constants/saas-acceptance.ts`): ops `saas-acceptance` kích hoạt /
- * đặt lại mật khẩu cho TÀI KHOẢN THỬ của chính nó bằng ĐÚNG lõi của nút người vận hành (thu hồi liên kết cũ, chỉ băm trong CSDL,
- * lý do bắt buộc, nhật ký nền tảng TRƯỚC khi trả liên kết). Người thao tác là MÁY: nhật ký nền tảng `actor = null` nguồn SCRIPT,
- * nhãn cố định — không mượn tên người nào (AGENTS 34). Mã ngoài sổ khai ⇒ TỪ CHỐI trước mọi lượt đọc: không có cách nào dùng đường
- * này cho tài khoản của một khách thật (tests/saas-acceptance.test.ts khoá cả lá chắn lẫn danh sách nơi gọi).
+ * ĐƯỜNG CỦA MÁY — ops `saas-acceptance` kích hoạt / đặt lại mật khẩu cho TÀI KHOẢN THỬ của chính nó bằng ĐÚNG lõi của nút người
+ * vận hành (thu hồi liên kết cũ, chỉ băm trong CSDL, lý do bắt buộc, nhật ký nền tảng TRƯỚC khi trả liên kết). Người thao tác là
+ * MÁY: nhật ký nền tảng `actor = null` nguồn SCRIPT, nhãn cố định — không mượn tên người nào (AGENTS 34).
+ *
+ * Ba lá chắn, theo thứ tự, TRƯỚC mọi lượt ghi (docs/saas/SECURITY.md §2):
+ *  1. Chỉ trong tiến trình ops — máy chủ ứng dụng (NEXT_RUNTIME có giá trị) bị từ chối (`acceptanceRuntimeRefusal`).
+ *  2. Đúng CẶP (mã workspace, email quản trị) của sổ khai — mã khác, hay tài khoản khác trong cùng workspace, đều bị từ chối.
+ *  3. Workspace mang mã ấy ĐÚNG do ops tạo (`acceptanceWorkspaceOwned`: job khoá `saas-acceptance:<mã>` + tài khoản đúng sổ).
+ *     Sổ khai một mình KHÔNG đủ: kho mã PUBLIC, mã đã lộ — một người tự đăng ký trùng cả mã lẫn email sẽ qua được lá chắn 2.
+ * Nơi gọi duy nhất là lõi ops `lib/saas/acceptance.ts` (tests/saas-acceptance.test.ts quét MỌI lần nhắc tới định danh này).
  */
 export async function createAcceptanceResetLink(raw: { orgCode?: unknown; email?: unknown; reason?: unknown }, opts: { purpose?: "RESET" | "ACTIVATION" } = {}): Promise<CreatedResetLink | { error: string }> {
+  const runtime = acceptanceRuntimeRefusal();
+  if (runtime) return { error: runtime };
   const entry = acceptanceWorkspaceOf(typeof raw.orgCode === "string" ? raw.orgCode : null);
-  // Đúng CẶP (workspace thử, email quản trị thử) của sổ khai — một tài khoản khác trong cùng workspace cũng không đi được đường này.
   const email = typeof raw.email === "string" ? raw.email.trim().toLowerCase() : "";
   if (!entry || email !== entry.ownerEmail) return { error: ACCEPTANCE_REGISTRY_REFUSAL };
+  if (!(await acceptanceWorkspaceOwned(entry))) return { error: ACCEPTANCE_NOT_OWNED_REFUSAL };
   return issueCustomerAccountLink(raw, { actor: null, by: ACCEPTANCE_ACTOR_LABEL, source: "SCRIPT" }, opts);
 }
 
-/** Lõi chung SAU cổng (người vận hành đã qua `platformOperatorDenial`, hoặc máy đã qua lá chắn sổ khai nghiệm thu). Không xuất. */
+/** Lõi chung SAU cổng (người vận hành đã qua `platformOperatorDenial`, hoặc máy đã qua ba lá chắn của `createAcceptanceResetLink`). Không xuất. */
 async function issueCustomerAccountLink(raw: { orgCode?: unknown; email?: unknown; reason?: unknown }, by: { actor: PlatformActor; by: string; source: PlatformAuditSource }, opts: { purpose?: "RESET" | "ACTIVATION" }): Promise<CreatedResetLink | { error: string }> {
   const reason = typeof raw.reason === "string" ? raw.reason.trim().slice(0, 500) : "";
   if (reason.length < OPERATOR_REASON_MIN) return { error: `Ghi lý do (ít nhất ${OPERATOR_REASON_MIN} ký tự) — nó vào nhật ký nền tảng.` };
