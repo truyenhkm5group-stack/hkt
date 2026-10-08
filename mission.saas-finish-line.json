@@ -3,7 +3,7 @@
   "mission_id": "saas-finish-line",
   "title": "Finish line SaaS: audit admin console + vỏ khách, sửa quick wins UX R1 (trạng thái rỗng · chữ kỹ thuật · help link · 404 · AI Sales cuộn · nhãn readiness)",
   "business_goal": "",
-  "status": "VERIFYING",
+  "status": "DONE",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -43,8 +43,8 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-08T07:51:05.873Z",
-  "updated_at": "2026-10-08T13:39:43.581Z",
-  "last_heartbeat": "2026-10-08T13:05:43.193Z",
+  "updated_at": "2026-10-08T13:40:17.147Z",
+  "last_heartbeat": "2026-10-08T13:40:17.147Z",
   "definition_of_done": [],
   "intake": {
     "verdict": "PARTIAL",
@@ -53,7 +53,8 @@
   "evidence": {
     "merged": "#680 → aa4b69ceaed122c356ab6f1361cffc63b462e70f",
     "verify": "PASS aa4b69ceaed122c356ab6f1361cffc63b462e70f 2026-10-08T13:39:35.156Z",
-    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/37781964748"
+    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/37781964748",
+    "done": "#680 trên production aa4b69ce (deploy 37781964748): vỏ khách quick wins R1 + /login không vòng trắng; Round 2 giao phiên Fable code-erp-a4"
   },
   "handoff": {
     "branch": "integrate/saas-finish-line",
