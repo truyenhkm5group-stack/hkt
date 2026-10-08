@@ -491,3 +491,4 @@
 {"at":"2026-10-08T00:13:44.461Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DONE","mission":"ai-balance-economics","detail":"deploy 37700846133 success · production 1de28d458581 · 236 migration · verify ĐẠT 2026-10-08T00:13Z"}
 {"at":"2026-10-08T00:13:53.559Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DONE","mission":"order-truth-stamp","detail":"deploy 37700846133 success · production 1de28d458581 · 236 migration · verify ĐẠT 2026-10-08T00:13Z"}
 {"at":"2026-10-08T00:18:12.090Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"chatbot-security-2","detail":"#652 @ 5867637ba61c → 454968bfc490 (MERGE_NOW · MEDIUM · gates success)"}
+{"at":"2026-10-08T00:18:56.803Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DEPLOY_DISPATCHED","detail":"454968bfc490 · run 37707093592 https://github.com/truyenhkm5group-stack/hkt/actions/runs/37707093592"}
