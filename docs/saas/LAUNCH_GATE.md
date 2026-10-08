@@ -26,24 +26,24 @@ production vẫn là 🟡. Mục từng 🟡 mà review tìm ra lỗi chặn th�
 
 | # | Mục | Trạng thái | Bằng chứng / việc còn lại |
 |---|---|---|---|
-| A1 | Tạo khách không cần CSDL / script | 🔧 WIP **P0-C** | Form + job cấp phát có từ trước, NHƯNG review #682 (08/10) tìm ra: cửa `/start` chế độ người vận hành (link trên `/platform`) vẫn cho chọn gói nội bộ / gói cũ và để thương hiệu NULL ⇒ khách ngoài thấy menu ERP, bot im (gói cũ credit 0); bước cài mẫu hỏng thì job vẫn «Xong» và không có đường sửa. Bản sửa `fix/create-customer-defaults` (#682) đặt luật gói + thương hiệu ở TẦNG GHI CHUNG cho mọi cửa |
-| A2 | Tài khoản / quản trị khách được cấp | 🟡 CODE | #681 (P0 danh tính) gộp + deploy 37781964748: cấp phát · kích hoạt · đặt lại mật khẩu đều ghi chỉ mục đăng nhập. Chờ smoke nghiệm thu đi qua trên production |
-| A3 | Gán sản phẩm Chốt Đơn | 🟡 CODE | Thuê bao sản phẩm theo module (#670) |
-| A4 | Gán gói / thuê bao | 🔧 WIP | Khách mới ghim V1 đúng (kiểm chỉ đọc 08/10), nhưng form / cửa khác vẫn cho gói nội bộ / cũ — cùng bản sửa #682 |
-| A5 | Gửi / gửi lại lời mời | 🟡 CODE | #681 (production aa4b69ce): nút gửi lại liên kết kích hoạt (không lộ token, có nhật ký); #684 gộp main 5c781cd5 (gửi lại form không phát liên kết cho người job chưa tạo; mở khoá ghi lại chỉ mục) — lên production lượt deploy kế |
-| A6 | Thấy trạng thái cấp phát | 🟡 CODE | Trang chi tiết khách đọc job; bước cài mẫu hỏng chưa hiện — #682 |
-| A7 | Thấy sức khoẻ Messenger / kênh | 🔧 WIP | #683 `feat/customer-health` (mất kênh = 0 page bật + 0 tin 2 ngày); lỗi token từng page chỉ ở CSDL tổ chức ⇒ `saas-ops-signals` |
-| A8 | Thấy sức khoẻ AI | 🔧 WIP | #683 (AI đang lỗi · bị chặn · im) |
+| A1 | Tạo khách không cần CSDL / script | ✅ PROD | #682 (luật gói + thương hiệu ở tầng ghi chung) deploy 37829126099. nghiệm thu production `saas-acceptance --apply` PASS 4/4 (run 37838073371, production 6883bfbf → c7183395) bước A: `requestProvisioning` — ĐÚNG job của form «Tạo khách mới» — tạo workspace `cdt-nghiem-thu` xong, không CSDL / script tay |
+| A2 | Tài khoản / quản trị khách được cấp | ✅ PROD | nghiệm thu production `saas-acceptance --apply` PASS 4/4 (run 37838073371, production 6883bfbf → c7183395) bước A: tài khoản EXTERNAL, chỉ mục đăng nhập email ⇒ workspace ghi đúng |
+| A3 | Gán sản phẩm Chốt Đơn | ✅ PROD | nghiệm thu production `saas-acceptance --apply` PASS 4/4 (run 37838073371, production 6883bfbf → c7183395) bước A: thương hiệu `chotdon`, module `ai_sales` bật |
+| A4 | Gán gói / thuê bao | ✅ PROD | #682 đã lên production. nghiệm thu production `saas-acceptance --apply` PASS 4/4 (run 37838073371, production 6883bfbf → c7183395) bước A: gói dùng thử của bảng giá CATALOG đang hiệu lực + ghim giá V1 |
+| A5 | Gửi / gửi lại lời mời | ✅ PROD | #681 + #684 đã lên production. nghiệm thu production `saas-acceptance --apply` PASS 4/4 (run 37838073371, production 6883bfbf → c7183395) bước B1: `resendActivation` (lõi nút «Gửi lại kích hoạt») phát liên kết dùng một lần, không lộ token |
+| A6 | Thấy trạng thái cấp phát | 🟡 CODE | #682 hiện bước cài mẫu hỏng + đường sửa; đã lên production c7183395 — chưa ai đi qua màn hình trên production |
+| A7 | Thấy sức khoẻ Messenger / kênh | 🟡 CODE | #683 + #692 (tín hiệu O2) đã lên production c7183395 — chưa có khách thật mất kênh để thấy trên `/platform/customers` |
+| A8 | Thấy sức khoẻ AI | 🟡 CODE | #683 (AI đang lỗi · bị chặn · im) đã lên production c7183395 — chưa kiểm trên production |
 | A9 | Thấy gói / mức dùng | 🟡 CODE | Danh sách khách có gói; mức dùng ở chi tiết |
-| A10 | Nhận ra khách có vấn đề | 🔧 WIP | #683: Nguy cấp · Cần chú ý · Chưa đủ dữ liệu · Khoẻ · Đã dừng, lý do có số + mốc; thiếu dữ liệu không bao giờ «Khoẻ» |
+| A10 | Nhận ra khách có vấn đề | 🟡 CODE | #683 (Nguy cấp · Cần chú ý · Chưa đủ dữ liệu · Khoẻ · Đã dừng) đã lên production c7183395 — chưa kiểm trên production |
 
 ## 2. KHÁCH
 
 | # | Mục | Trạng thái | Bằng chứng / việc còn lại |
 |---|---|---|---|
-| C1 | Kích hoạt (đặt mật khẩu) | 🟡 CODE | Liên kết `/reset/<mã>/<token>`; #681 ghi chỉ mục khi đặt mật khẩu |
-| C2 | Đăng nhập email + mật khẩu | 🟡 CODE | P0 ĐÃ SỬA ở #681 (deploy 37781964748, production aa4b69ce). Tài khoản tạo TRƯỚC bản vá: ops `identity-reconcile` chạy thử (run 37786092653: 19 tài khoản đủ điều kiện · THIẾU 12 — gồm 5 tài khoản khách HSLC) → ghi bù (run 37786400515: ghi 12 · hỏng 0 · sau: THIẾU 0 · LỆCH 0). Chờ smoke nghiệm thu đăng nhập KHÔNG gõ mã tổ chức trên production |
-| C3 | Vỏ không lộ nội bộ | 🟡 CODE | #669 (AI / model / USD), #680 (chữ kỹ thuật · nhãn readiness). Còn: câu `BILLING_LOCKED` ở lib/auth nói «Hệ thống → Gói & thanh toán» |
+| C1 | Kích hoạt (đặt mật khẩu) | ✅ PROD | nghiệm thu production `saas-acceptance --apply` PASS 4/4 (run 37838073371, production 6883bfbf → c7183395) bước B1: liên kết `/reset` kích hoạt, đặt mật khẩu bằng hai hàm của trang `/reset`; liên kết dùng một lần; bước B2 xoay mật khẩu sau lượt |
+| C2 | Đăng nhập email + mật khẩu | ✅ PROD | #681 + `identity-reconcile` (THIẾU 0). nghiệm thu production `saas-acceptance --apply` PASS 4/4 (run 37838073371, production 6883bfbf → c7183395) bước B1: đăng nhập email + mật khẩu KHÔNG mã tổ chức ra đúng workspace; mật khẩu sai bị từ chối |
+| C3 | Vỏ không lộ nội bộ | ✅ PROD | #669 · #680 · #700 (câu `BILLING_LOCKED` theo sản phẩm, thương hiệu sau redirect) đã lên production. nghiệm thu production `saas-acceptance --apply` PASS 4/4 (run 37838073371, production 6883bfbf → c7183395) bước C: 8 mục vỏ qua host app Chốt Đơn đều 200, mang dấu vỏ + thương hiệu Chốt Đơn, KHÔNG lộ khung ERP, không vòng chuyển hướng; tuyến ERP bị chặn về trang nhà |
 | C4 | Hướng dẫn bước tiếp theo | 🟡 CODE | #680 (trạng thái rỗng · Hướng dẫn · 404 · `/login` khi còn phiên không còn vòng trắng: 6.007 → 2 lần điều hướng) |
 | C5 | Thiết lập sản phẩm | 🟡 CODE | Nhập sản phẩm / mẫu ngành |
 | C6 | Nối Facebook | ⛔ NGOÀI | Meta chưa cấp quyền Page — `docs/meta-app-review/HUONG_DAN_CHU_SHOP.md` |
@@ -78,13 +78,13 @@ nhập chỉ trong bộ nhớ tiến trình; lỗi ghi đơn bị ghi NHẦM th�
 
 | # | Tín hiệu | Trạng thái | Hôm nay ghi ở đâu / còn hở |
 |---|---|---|---|
-| O1 | Khách đăng nhập hỏng | 🔧 WIP | Chỉ Map bộ nhớ (`lib/auth/login-throttle.ts`), mọi lý do gộp BAD_CREDENTIALS; liên kết kích hoạt hết hạn ra lỗi chung |
-| O2 | Facebook mất kết nối | 🔧 WIP | `org_channel_pages.last_error` + thông báo cho KHÁCH; người vận hành chỉ thấy trạng thái `org_connections` |
-| O3 | Webhook hỏng | 🔧 WIP | Từ chối chữ ký chỉ ra console; tin hỏng nằm `sales_chat_inbound` DEAD của tổ chức; job `sales-health` 5 phút tính sẵn nhưng chỉ báo Lark / Telegram |
-| O4 | AI im lặng | 🔧 WIP | `platform_ai_usage` có ERROR / BLOCKED_QUOTA nhưng không có loại lỗi; #683 phân mức AI đang lỗi / im |
-| O5 | Gửi tin (Send API) hỏng | 🔧 WIP | Chỉ trong CSDL tổ chức |
-| O6 | Đơn không hợp lệ | 🔧 WIP | Kết quả lỗi của công cụ bot trong `sales_chat_messages`, không có mã lý do ở nhà |
-| O7 | Ghi đơn (OMS) hỏng | 🔧 WIP | `fail()` không audit; lỗi CSDL bay lên thành AI ERROR + AI_DOWN (quy kết sai) |
+| O1 | Khách đăng nhập hỏng | 🟡 CODE | #692 (0237 `platform_auth_failures`, lý do đăng nhập hỏng tách khỏi BAD_CREDENTIALS công khai) đã lên production c7183395 — chưa có lượt kiểm trên production |
+| O2 | Facebook mất kết nối | 🟡 CODE | #692 bảng tín hiệu trên `/platform/org` đã lên production c7183395 — chưa kiểm trên production |
+| O3 | Webhook hỏng | 🟡 CODE | #692 đã lên production c7183395 — chưa kiểm trên production |
+| O4 | AI im lặng | 🟡 CODE | #692 (`error_class`) + #683 đã lên production c7183395 — chưa kiểm trên production |
+| O5 | Gửi tin (Send API) hỏng | 🟡 CODE | #692 đã lên production c7183395 — chưa kiểm trên production |
+| O6 | Đơn không hợp lệ | 🟡 CODE | #692 đã lên production c7183395 — chưa kiểm trên production |
+| O7 | Ghi đơn (OMS) hỏng | 🟡 CODE | #692 (`ORDER_POSTWRITE_ERROR` thôi quy kết thành AI lỗi; cảnh báo bàn giao ghi đơn treo 15 phút) đã lên production c7183395 — chưa kiểm trên production |
 | O8 | Hết hạn mức | 🟡 CODE | `/platform/org/<mã>` hiện «Bị chặn» + gói đã dùng / trần; chưa nói giới hạn nào chạm, chưa cờ hết số dư |
 
 ## 5. Kiểm được khi Meta duyệt (smoke tài khoản NGOÀI)
@@ -97,7 +97,7 @@ OAuth → tìm Page → nối → subscribe → khách nhắn Messenger → hộ
 | Tài khoản | Trạng thái |
 |---|---|
 | 1 người vận hành nền tảng (kiểm thử) | ❌ chưa có — tạo tài khoản mang quyền người vận hành là quyết định QUYỀN (AGENTS §7) của chủ shop. Đề xuất thay thế không sinh mật khẩu: smoke phía máy chủ ký phiên ngắn hạn (như `scripts/smoke.ts` đang làm cho `/platform*`) |
-| 1 khách EXTERNAL kiểm thử + 1 workspace kiểm thử | 🔧 WIP — ops `saas-acceptance` (sứ mệnh `saas-acceptance-smoke`): tạo qua ĐÚNG đường admin, kích hoạt + đăng nhập email với mật khẩu sinh trong bộ nhớ (không in, không lưu, xoay sau lượt chạy), mở vỏ, chat web → AI → đơn → OMS. Ghi vào workspace kiểm thử dưới danh tính CHÍNH tài khoản khách thử — không ghi hộ |
+| 1 khách EXTERNAL kiểm thử + 1 workspace kiểm thử | ✅ `cdt-nghiem-thu` tạo trên production 09/10 (run 37838073371), loại khỏi cockpit / sổ cái / phân bổ chi phí (#696). D / E (`--e2e`) chờ chủ shop chuẩn bị UI một lần (ACCEPTANCE.md §3) — ops `saas-acceptance` (sứ mệnh `saas-acceptance-smoke`): tạo qua ĐÚNG đường admin, kích hoạt + đăng nhập email với mật khẩu sinh trong bộ nhớ (không in, không lưu, xoay sau lượt chạy), mở vỏ, chat web → AI → đơn → OMS. Ghi vào workspace kiểm thử dưới danh tính CHÍNH tài khoản khách thử — không ghi hộ |
 | 1 Page Facebook kiểm thử | ⛔ dùng Page có vai trò trong app trong lúc chờ Meta |
 
 Không dùng dữ liệu khách thật theo cách phá huỷ.
@@ -106,15 +106,11 @@ Không dùng dữ liệu khách thật theo cách phá huỷ.
 
 | Việc | Loại |
 |---|---|
-| Tạo khách đúng mặc định — luật gói + thương hiệu ở tầng ghi chung (#682) | LAUNCH BLOCKER (P0-C) |
-| Smoke nghiệm thu production (`saas-acceptance-smoke`) | LAUNCH BLOCKER (P0-D + smoke xanh) |
-| Tín hiệu sự cố cho người vận hành (`saas-ops-signals`) | LAUNCH BLOCKER (§11) |
-| Sức khoẻ khách (#683) | LAUNCH SUPPORT |
-| Theo sau danh tính (#684) | LAUNCH SUPPORT |
-| Vỏ: thiếu quyền / module tắt không ra trang trắng (`saas-shell-gate-redirects`) | LAUNCH SUPPORT |
-| Sao lưu ngoài máy hỏng vì Drive đầy (`backup-drive-trash`) | LAUNCH SUPPORT (độ tin cậy dữ liệu) |
+| Nghiệm thu E2E production D + E (`saas-acceptance --apply --e2e`): chat web → AI → đơn CONFIRMED trong OMS · miền chat ngoài | LAUNCH BLOCKER (Khách ≥ 90 % cần C8–C17 lên ✅) — chờ chủ shop chuẩn bị UI một lần |
+| Kiểm 8 tín hiệu quan sát trên production (O1–O8) | LAUNCH BLOCKER (§11) |
+| Round 2 Production Acceptance + Commercial Sweep (phiên Fable: #705 màn lỗi · #706 trang chủ · R2 · G · F) | LAUNCH SUPPORT |
 | Chuyển giá legacy → V1 (#676, đã deploy — công cụ, chưa chuyển ai) | POST-LAUNCH |
-| HSLC trả trước (#674) · HSLC danh mục / giá sỉ (#677) | CUSTOMER-SPECIFIC |
+| HSLC trả trước + khoá AI nền tảng (đã chuyển 09/10) · danh mục / giá sỉ (#677, #701) | CUSTOMER-SPECIFIC |
 | Meta App Review | EXTERNAL BLOCKED |
 | Worker /tech một nút (#631) | POST-LAUNCH (CRITICAL — chủ shop gộp) |
 
@@ -124,8 +120,9 @@ Không dùng dữ liệu khách thật theo cách phá huỷ.
   hiệu riêng `<tên>.chotdontudong.com` là việc sau ra mắt (thêm một miền gốc + DNS wildcard).
 - `PLATFORM_SIGNUP_MODE = open`: ai cũng tự đăng ký được ngay bây giờ, trong khi quyết định 08/10 là các cửa hàng tự đăng ký
   «đăng ký lại khi hệ thống sẵn sàng».
-- Sao lưu ngoài máy (Google Drive) hỏng 403 từ 08/10; bản trên VPS + PITR vẫn tốt. Nghi phạm: rclone xoá vào THÙNG RÁC của Drive
-  (vẫn tính dung lượng 30 ngày) — sửa ở `backup-drive-trash`, không cần chủ shop dọn Drive nếu đúng.
+- Sao lưu ngoài máy (Google Drive): bản sửa thùng rác (`backup-drive-trash`) đã lên production; 7 CSDL tổ chức đẩy lên Drive OK.
+  CSDL nhà VẪN hỏng vì Drive 15 GB đầy bởi ~9,9 GB tệp riêng của chủ shop — cần chủ shop chọn (dọn / mua dung lượng / tài khoản
+  riêng / giảm số bản giữ). Bản trên VPS + PITR vẫn tốt.
 
 ## 9. Nhật ký cập nhật
 
@@ -133,3 +130,4 @@ Không dùng dữ liệu khách thật theo cách phá huỷ.
 |---|---|
 | 08/10/2026 | Mở cổng. Admin 3/10 (30 %) · Khách 8/19 (42 %) · Bảo mật 2,5/4 · Tổng 13,5/33 = 41 %. Đã kiểm production thật: 1/33. P0 còn: C2 đăng nhập email. NOT READY |
 | 08/10/2026 tối | #681 (P0 đăng nhập email) + #680 (Finish Line) gộp, deploy 37781964748 thành công (production aa4b69ce); `identity-reconcile` ghi bù 12 chỉ mục, THIẾU 0. Round 2 giao phiên Fable code-erp-a4. Thêm mục 4 QUAN SÁT (8 tín hiệu, §11) — mẫu số 33 → 41. A1 + A4 LÙI về 🔧 vì review #682. Admin 2,5/10 (25 %) · Khách 9/19 (47 %; 9/18 = 50 % bỏ Meta) · Bảo mật 2,5/4 · Quan sát 0,5/8 · Tổng 14,5/41 = 35 %. Đã kiểm production thật: 1/41. P0 còn: A1 / A4 tạo khách đúng mặc định (#682). NOT READY |
+| 09/10/2026 sáng | Deploy 37829126099 (6883bfbf: #682 #683 #690 #694 #696 #697 #698 #699 #700) + 37838226087 (c7183395: #692 #702 #703 #704), hậu kiểm ĐẠT (health · 238 migration · smoke). Nghiệm thu production `saas-acceptance --apply` PASS 4/4 (run 37838073371): A1–A5, C1–C3 lên ✅. A6–A8, A10 + O1–O7 lên 🟡 (đã deploy, chưa đi qua trên production). Admin 7,5/10 (75 %) · Khách 10,5/19 (55 %; 10,5/18 = 58 % bỏ Meta) · Bảo mật 2,5/4 · Quan sát 4/8 · Tổng 24,5/41 = 60 %. Đã kiểm production thật: 9/41. P0 trong cổng: 0 mở; đường tới ĐẠT = E2E D + E (C8–C17) và kiểm O1–O8 trên production. NOT READY |
