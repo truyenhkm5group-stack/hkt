@@ -3,7 +3,7 @@
   "mission_id": "registry-refresh-0909",
   "title": "Làm mới sổ sứ mệnh tổng + checkpoint + bảng tốc độ 24 giờ (sau #696–#700)",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -23,9 +23,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-08T19:35:06.966Z",
-  "updated_at": "2026-10-08T19:35:38.206Z",
+  "updated_at": "2026-10-08T20:03:54.024Z",
   "last_heartbeat": "2026-10-08T19:35:18.084Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#702 → d2c6b1d0124d7c4bb5562a9e52d16c728118015d"
+  },
   "handoff": {
     "branch": "docs/registry-refresh-0909",
     "sha": "beab5254e36575e0d779d61085057f6476c78acf",

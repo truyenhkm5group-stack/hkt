@@ -954,3 +954,4 @@
 {"at":"2026-10-08T19:40:57.362Z","actor":"DESKTOP-56TH98Y:wt-legal-compliance","kind":"HANDOFF","mission":"legal-counsel-pack","detail":"claude/legal-counsel-pack @ 05990928ea08 · 4 lệnh kiểm thử"}
 {"at":"2026-10-08T19:42:07.492Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"legal-counsel-pack","detail":"#704 cho claude/legal-counsel-pack @ 05990928ea08"}
 {"at":"2026-10-08T19:42:19.060Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#704 @ 05990928ea08 · Chỉ tài liệu (COUNSEL_PACK.md + 1 dòng README); Integration Lead quét: không SĐT khách / secret (chỉ MST công ty công khai); câu hỏi luật sư, không kết luận pháp lý"}
+{"at":"2026-10-08T20:03:54.055Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"registry-refresh-0909","detail":"#702 @ beab5254e365 → d2c6b1d0124d (MERGE_NOW · LOW · gates success)"}
