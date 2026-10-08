@@ -1,0 +1,26 @@
+{
+  "schema": 1,
+  "mission_id": "hide-internal-429-flake",
+  "title": "Bài kiểm hộp thư khách thôi đỏ ngẫu nhiên vì UUID chứa 429",
+  "business_goal": "",
+  "status": "RUNNING",
+  "priority": "P2",
+  "risk": "MEDIUM",
+  "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "worker": null,
+  "worktree": null,
+  "branch": "fix/hide-internal-429-flake",
+  "base_sha": "5374b54fc4be69eea4d252cdce3f0009c7b81567",
+  "domains": [],
+  "owned_paths": [
+    "tests/saas-hide-internal.test.ts"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-08T21:55:58.244Z",
+  "updated_at": "2026-10-08T21:55:58.244Z",
+  "last_heartbeat": "2026-10-08T21:55:58.244Z",
+  "definition_of_done": []
+}
