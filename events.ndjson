@@ -536,3 +536,4 @@
 {"at":"2026-10-08T02:33:44.732Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"chatbot-security-4","detail":"#656 @ 739b067ec78b → 85faea0b168c (MERGE_NOW · MEDIUM · gates success)"}
 {"at":"2026-10-08T02:40:53.067Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"UPDATE","mission":"chatbot-security-5","detail":"PLANNING → PLANNING · 6 mẫu phạm vi · MEDIUM"}
 {"at":"2026-10-08T02:44:02.099Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"chatbot-security-5","detail":"fix/chatbot-security-5 @ 89be68d92b45 · 4 lệnh kiểm thử"}
+{"at":"2026-10-08T02:44:16.968Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"chatbot-security-5","detail":"#657 cho fix/chatbot-security-5 @ 89be68d92b45"}

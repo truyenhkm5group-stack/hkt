@@ -24,10 +24,12 @@
     "chatbot-security-4"
   ],
   "blocked_by": [],
-  "related_prs": [],
+  "related_prs": [
+    657
+  ],
   "migration_reservations": [],
   "created_at": "2026-10-08T02:07:54.255Z",
-  "updated_at": "2026-10-08T02:44:02.071Z",
+  "updated_at": "2026-10-08T02:44:16.937Z",
   "last_heartbeat": "2026-10-08T02:44:02.071Z",
   "definition_of_done": [],
   "handoff": {
