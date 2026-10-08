@@ -712,3 +712,4 @@
 {"at":"2026-10-08T09:00:20.240Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"OVERLAP_ACCEPTED","mission":"saas-v1-plan-migration","detail":"OVERLAP_ACCEPTED với saas-delete-signup-shops: phạm vi .github/workflows/ops-vps.yml · điểm nóng SERIAL .github/ — cách tích hợp: ops-vps.yml: mỗi PR chỉ thêm một lựa chọn — gộp tuần tự, giữ cả các tên"}
 {"at":"2026-10-08T09:00:34.417Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"saas-v1-plan-migration","detail":"feat/v1-plan-migration @ 3796355a8bbb · 1 lệnh kiểm thử"}
 {"at":"2026-10-08T09:01:09.423Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"LEASE_TAKEOVER","detail":"integration-lead từ DESKTOP-56TH98Y:wt-tech-lead-v2 (hết hạn 2026-10-08T08:57:27.006Z)"}
+{"at":"2026-10-08T09:01:47.939Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"saas-v1-plan-migration","detail":"#676 cho feat/v1-plan-migration @ 3796355a8bbb"}
