@@ -681,3 +681,4 @@
 {"at":"2026-10-08T07:41:51.272Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"CLAIM","mission":"order-confirm-rules-0810","detail":"RUNNING · 9 mẫu phạm vi · HIGH"}
 {"at":"2026-10-08T07:48:30.068Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"UPDATE","mission":"meta-review-guide","detail":"RUNNING → RUNNING · 2 mẫu phạm vi · MEDIUM"}
 {"at":"2026-10-08T07:48:39.790Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"meta-review-guide","detail":"docs/meta-review-guide @ 5fcb52ba3185 · 1 lệnh kiểm thử"}
+{"at":"2026-10-08T07:48:55.800Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"meta-review-guide","detail":"#672 cho docs/meta-review-guide @ 5fcb52ba3185"}
