@@ -7,6 +7,8 @@ Tài liệu này mô tả MÃ ĐANG CÓ. Phần chưa làm nằm ở `PLAN.md`, 
 `ENTITLEMENTS.md`, `USAGE.md`, `COST_BILLING.md`, `PROVISIONING.md` (runbook), `SECURITY.md`, `PLAN.md`.
 Nền móng trước đó: `docs/platform/target-architecture.md` (SILO), `docs/platform/pricing-billing-foundation.md`
 (gói cấu hình được, entitlement tính năng, Margin Guard — PR #612).
+Thiết kế sản phẩm vỏ khách Chốt Đơn (08/10/2026): `INBOX_V2.md` (hộp thư) · `ORDER_CANDIDATE.md` (đơn đang lên từ hội thoại) ·
+`HELP_CENTER.md` (trợ giúp ba tầng + vào việc 10 bước) · `SHELL_AUDIT_2026-10-08.md` (kiểm vỏ ở 390 px / 1366 px).
 
 ## 1. Một câu
 
