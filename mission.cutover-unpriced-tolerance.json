@@ -23,18 +23,18 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-08T18:15:47.531Z",
-  "updated_at": "2026-10-08T18:16:36.692Z",
-  "last_heartbeat": "2026-10-08T18:16:05.493Z",
+  "updated_at": "2026-10-08T18:20:17.175Z",
+  "last_heartbeat": "2026-10-08T18:20:17.175Z",
   "definition_of_done": [],
   "handoff": {
     "branch": "fix/cutover-unpriced-tolerance",
-    "sha": "a4285c67c673fa5f04043067506bc8d489e1708f",
-    "at": "2026-10-08T18:16:05.493Z",
+    "sha": "022c180cb93794cdc4b1ef3f06eb30ba2d9bcd4f",
+    "at": "2026-10-08T18:20:17.175Z",
     "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
     "title": "org-ai-cutover: bỏ phần nhỏ token model chưa có giá khỏi phép cân giá, in tên model chưa có giá — gỡ chặn chuyển khoá HSLC",
-    "summary": "platformPriceRatio bỏ token model chưa có giá khi ≤ 20 %; dòng công khai ngắn tên model chưa có giá",
+    "summary": "Tử số tỷ lệ giá tính trên TOÀN BỘ token (ước cao, phía an toàn) theo review #699",
     "tests": [
-      "tsc + eslint sạch; runner org-ai-cutover đạt; ops-log-leak đạt; tĩnh + test-hygiene đạt; đột biến 4/4"
+      "Sau sửa review: tsc + eslint sạch; runner org-ai-cutover đạt (20 % ⇒ tỷ lệ 1,25; credit 117 bị từ chối, 147 chuyển); ops-log-leak + tĩnh đạt; đột biến M1 + M5 đỏ"
     ]
   }
 }
