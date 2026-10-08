@@ -1,8 +1,8 @@
 {
   "pr": 708,
-  "sha": "8276b8c2d7b3464e1af69476daadfd7e00531f5d",
+  "sha": "91e11e9e1d5143eff9dd27a1b3cf0324afe3ec52",
   "verdict": "PASS",
   "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
-  "at": "2026-10-08T21:36:45.853Z",
-  "note": "Chỉ trợ năng: htmlFor/id, aria-label cho Switch/ô số/nút biểu tượng, h1 cho not-found; không đổi giá trị mặc định hay luật. Bài erp-a11y khoá."
+  "at": "2026-10-08T22:08:15.818Z",
+  "note": "Rebase lên 5374b54f: chỉ giải xung đột đăng ký test trong sync-fixtures (giữ testErrorBoundary + testErpA11y); nội dung trợ năng không đổi so với lượt PASS 8276b8c2."
 }
