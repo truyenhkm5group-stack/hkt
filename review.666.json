@@ -1,0 +1,8 @@
+{
+  "pr": 666,
+  "sha": "919d56ed52b8f86f67dd9f37e3eb0483b4aaee08",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-08T06:26:29.115Z",
+  "note": "Review độc lập chỉ đọc 08/10: replyGate giữ đúng mọi kiểm của Gửi, ô soạn siết thêm có chủ đích; renderQuickAnswer chỉ thêm available>=0 (tồn 0 vẫn in, bot rơi về AI/check_inventory); sellableCatalog only không đổi 5 chỗ gọi cũ; ranh giới client sạch; race bỏ đúng kết quả cũ. LOW: bot vs ô soạn khác nhau khi bán không kiểm tồn (chủ shop chốt một luật); test đường bot chưa đi qua quickReplyByKeywor"
+}
