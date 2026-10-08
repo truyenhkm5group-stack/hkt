@@ -20,7 +20,7 @@ import { currentOrganization } from "@/lib/platform/context";
 import { publish } from "@/lib/realtime/bus";
 import { salesChatProvider } from "@/lib/sales-chatbot/engine";
 import { PAGE_REPLY } from "@/lib/sales-chatbot/fanpage";
-import { lessonTranscript, LESSON_LIMITS, normalizeLessons, parseLessonsFromAi, screenAiLessons, type LessonsState, type TranscriptLine } from "@/lib/sales-chatbot/lessons-shared";
+import { droppedLessonsText, lessonTranscript, LESSON_LIMITS, normalizeLessons, parseLessonsFromAi, screenAiLessons, type LessonsState, type TranscriptLine } from "@/lib/sales-chatbot/lessons-shared";
 import { loadLessons } from "@/lib/sales-chatbot/lessons";
 import { setSettingJson } from "@/lib/settings";
 import { LESSONS_SETTING_KEY } from "@/lib/sales-chatbot/lessons-shared";
@@ -124,7 +124,7 @@ export async function submitConversationFeedbackCore(user: SessionUser, conversa
   // #651). Bài như thế không tự áp; cần thật thì chủ shop tự viết ở trang Chatbot (sửa tay không qua bộ lọc này).
   const screened = screenAiLessons(parsed, state.lessons);
   const fresh = screened.kept;
-  if (!fresh.length) return fail("AI chỉ rút ra bài nhắc tới tiền / tài khoản / liên kết — không tự áp; cần thật thì chủ shop tự viết ở trang Chatbot");
+  if (!fresh.length) return fail(`AI chỉ rút ra bài nhắc tới tiền / tài khoản / liên kết (${droppedLessonsText(screened.droppedLessons)}) — không tự áp; cần thật thì chủ shop tự viết ở trang Chatbot`);
   const lessons = normalizeLessons([...fresh, ...state.lessons]);
   await setSettingJson(LESSONS_SETTING_KEY, {
     ...state,
@@ -138,7 +138,7 @@ export async function submitConversationFeedbackCore(user: SessionUser, conversa
   await db.insert(f).values({ conversationId: id, userId: user.id, userName: user.name ?? user.email, text, lessons: applied, status: "APPLIED", createdAt: now });
   await audit({ userId: user.id, userEmail: user.email, action: "SALES_CHAT_FEEDBACK", entity: "SALES_CHAT", entityId: id, after: { lessons: applied }, reason: text.slice(0, 200) });
   publish({ type: "chat", conversationId: id });
-  const skipped = screened.dropped ? ` Không áp ${screened.dropped} bài nhắc tới tiền / tài khoản / liên kết — cần thật thì chủ shop tự viết ở trang Chatbot.` : "";
+  const skipped = screened.dropped ? ` Không áp ${screened.dropped} bài nhắc tới tiền / tài khoản / liên kết (${droppedLessonsText(screened.droppedLessons)}) — cần thật thì chủ shop tự viết ở trang Chatbot.` : "";
   return { ok: true, message: (state.enabled ? `Bot đã học ${applied.length} bài — dùng từ lượt trả lời kế tiếp.` : `Đã lưu ${applied.length} bài học — bật «Tự học» ở trang Chatbot để bot dùng.`) + skipped, lessons: applied };
 }
 

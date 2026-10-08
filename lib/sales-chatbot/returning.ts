@@ -25,7 +25,7 @@
  * trả về ở mức `PHONE` (che), không thì lượt SAU lời nhắc in nguyên họ tên + địa chỉ của chủ SĐT.
  * Mọi mức đều chỉ là GỢI Ý: bot nhắc lại để khách xác nhận, đơn chỉ chốt khi khách đồng ý bản tóm tắt có địa chỉ.
  */
-import { and, desc, eq, inArray, ne, or, sql, type SQL } from "drizzle-orm";
+import { and, desc, eq, inArray, like, ne, or, sql, type SQL } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { PANCAKE_PAGES_API } from "@/lib/connectors/testers";
 import { MANUAL_ORDER_ORIGIN } from "@/lib/constants/manual-orders";
@@ -216,6 +216,22 @@ async function lastOrderWhere(where: SQL): Promise<{ count: number; last: LastOr
   };
 }
 
+/**
+ * Hồ sơ khách do MÁY tạo (bot · ghi đơn từ hội thoại — `createCustomerAsAgent`, nhật ký `CUSTOMER_CREATE` của tác tử). Người đang
+ * nhắn lúc ấy chưa xác minh, nên tên / địa chỉ của hồ sơ có thể là chữ một người lạ gõ cho SĐT này (review bảo mật #652, LOW).
+ * Đọc nhật ký có sẵn — không thêm cột, không backfill (mục 35); dòng trước cột `actor_kind` nhận ra qua email `agent:…`.
+ */
+async function agentCreatedCustomer(customerId: string): Promise<boolean> {
+  const db = await getDb();
+  const a = schema.auditLogs;
+  const [row] = await db
+    .select({ id: a.id })
+    .from(a)
+    .where(and(eq(a.entity, "CUSTOMER"), eq(a.entityId, customerId), eq(a.action, "CUSTOMER_CREATE"), or(eq(a.actorKind, "AGENT"), like(a.userEmail, "agent:%"))))
+    .limit(1);
+  return Boolean(row);
+}
+
 function textArray(values: readonly string[]): SQL {
   return sql`array[${sql.join(values.map((v) => sql`${v}`), sql`, `)}]::text[]`;
 }
@@ -260,6 +276,9 @@ export async function findReturningCustomer(state: ChatState): Promise<Returning
     const rows = await db.select({ id: c.id, name: c.name, phone: c.phone, address: c.address, province: c.province }).from(c).where(cand.where).orderBy(desc(c.lastOrderAt), desc(c.createdAt)).limit(3);
     for (const row of rows) {
       const { count, last } = await lastOrderWhere(and(eq(o.customerId, row.id), vouchedOrder(o))!);
+      // Chưa có đơn nào có người đứng sau ⇒ chỉ còn tên / địa chỉ của HỒ SƠ — hồ sơ do máy tạo thì không dùng (người lạ có thể đã
+      // gõ chúng cho SĐT của chủ thật; chủ thật đáp «đúng» là đơn giao về địa chỉ ấy).
+      if (!last && (await agentCreatedCustomer(row.id))) continue;
       const address = last?.address || row.address.trim();
       if (!address) continue;
       return {

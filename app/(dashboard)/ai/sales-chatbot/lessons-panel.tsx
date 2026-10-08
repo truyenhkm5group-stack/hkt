@@ -9,7 +9,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { SectionCard } from "@/components/ui-bits";
 import { learnLessonsNowAction, rollbackLessonsAction, saveLessonsAction, setLessonsEnabledAction } from "@/lib/actions/sales-chatbot";
 import { formatDateTime } from "@/lib/format";
-import { LESSON_LIMITS, type LessonsState } from "@/lib/sales-chatbot/lessons-shared";
+import { LESSON_LIMITS, riskyLesson, type LessonsState } from "@/lib/sales-chatbot/lessons-shared";
 
 const RUN_LABEL: Record<string, string> = { RUNNING: "Đang học", OK: "Đã học", SKIPPED: "Bỏ qua", ERROR: "Lỗi" };
 
@@ -24,6 +24,9 @@ export function LessonsPanel({ state }: { state: LessonsState }) {
   const [text, setText] = useState(saved);
   const dirty = text.trim() !== saved.trim();
   const running = state.lastRun?.status === "RUNNING";
+  // Bài ĐANG DÙNG mà nhắc tới tiền / tài khoản / liên kết: bài AI học trước khi có bộ lọc vẫn nằm đây (bộ lọc chỉ chặn bài MỚI) —
+  // gắn cờ cho chủ shop xem lại, không tự xoá (bài chủ shop tự viết là hợp lệ).
+  const risky = state.lessons.filter((l) => riskyLesson(l));
 
   const act = (fn: () => Promise<{ ok: true; message: string } | { error: string }>) =>
     start(async () => {
@@ -55,6 +58,16 @@ export function LessonsPanel({ state }: { state: LessonsState }) {
           {state.lastRun ? `Lượt gần nhất ${formatDateTime(state.lastRun.at)} · ${RUN_LABEL[state.lastRun.status] ?? state.lastRun.status} — ${state.lastRun.note}` : "Chưa học lượt nào."}
           {state.updatedAt ? ` · Bản ${state.version} cập nhật ${formatDateTime(state.updatedAt)} bởi ${state.updatedBy ?? "—"}` : ""}
         </p>
+        {risky.length ? (
+          <div className="rounded border border-amber-300 bg-amber-50 p-2 text-xs text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200" data-risky-lessons={risky.length}>
+            <p className="font-medium">{risky.length} bài đang dùng nhắc tới tiền / tài khoản / liên kết — xem lại: AI tự học bài kiểu này không còn được tự áp (một hội thoại dựng sẵn có thể cài vào). Bài anh/chị tự viết thì giữ.</p>
+            <ul className="mt-1 list-disc space-y-0.5 pl-4">
+              {risky.map((l) => (
+                <li key={l}>{l}</li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
         <Textarea rows={Math.min(16, Math.max(5, state.lessons.length + 2))} value={text} onChange={(e) => setText(e.target.value)} placeholder="Chưa có bài học — bấm «Học ngay», hoặc tự viết mỗi dòng một bài: Khi … ⇒ …" aria-label="Bài học của bot (mỗi dòng một bài)" disabled={pending} />
         <div className="flex flex-wrap items-center gap-2">
           <Button size="sm" variant="secondary" disabled={pending || !dirty} onClick={() => act(() => saveLessonsAction(text))}>

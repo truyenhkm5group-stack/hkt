@@ -61,6 +61,9 @@ function stripHtml(s: string): string {
     .replace(/&gt;/g, ">");
 }
 
+/** Đuôi tên miền hay gặp — dùng chung cho `redactForLearning` (che trước khi AI đọc) và bộ lọc bài học (`riskyLesson`). */
+export const BARE_DOMAIN_TLDS = "vn|com|net|org|me|io|co|shop|store|site|online|xyz|info|biz|link|top|app|page|ly|asia";
+
 /**
  * Làm sạch MỘT tin trước khi đưa cho AI. Mọi CHỮ SỐ ⇒ «[số]» (chặn giá cũ, SĐT, số nhà, mã đơn, số tài khoản — kể cả
  * cách viết «299k», «1tr5»); tên khách đã biết ⇒ «[khách]»; link / email ⇒ «[link]» / «[email]». HÀM THUẦN.
@@ -69,6 +72,9 @@ export function redactForLearning(text: string, names: readonly string[] = []): 
   let t = stripHtml(String(text ?? ""));
   t = t.replace(/https?:\/\/\S+|www\.\S+/gi, "[link]");
   t = t.replace(/[\w.+-]+@[\w-]+\.[\w.-]+/g, "[email]");
+  // Tên miền TRẦN (thanhtoan-xyz.com/pay · t.me/abc) và handle @… cũng là liên kết — AI học không được thấy (review bảo mật #652).
+  t = t.replace(new RegExp(`\\b[a-z0-9-]+(?:\\.[a-z0-9-]+)*\\.(?:${BARE_DOMAIN_TLDS})\\b(?:/[^\\s,;)»"']*)?`, "gi"), "[link]");
+  t = t.replace(/(^|[\s(«"'])@[A-Za-z0-9_.]{3,}/g, "$1[link]");
   for (const n of names) {
     const name = n.trim();
     if (name.length >= 2) t = t.split(name).join("[khách]");
