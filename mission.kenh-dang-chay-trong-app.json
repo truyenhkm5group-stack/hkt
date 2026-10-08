@@ -3,7 +3,7 @@
   "mission_id": "kenh-dang-chay-trong-app",
   "title": "Trong app chỉ hướng dẫn kênh đang chạy + cổng nối thẳng Facebook: khách thấy «sắp mở», người vận hành thấy nút thật, mở bằng cờ meta.direct-connect.open",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-pr-h",
@@ -34,12 +34,15 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-08T21:25:04.431Z",
-  "updated_at": "2026-10-08T23:00:45.306Z",
+  "updated_at": "2026-10-08T23:34:59.910Z",
   "last_heartbeat": "2026-10-08T22:59:56.866Z",
   "definition_of_done": [],
   "intake": {
     "verdict": "MISSING",
     "evidence": []
+  },
+  "evidence": {
+    "merged": "#712 → d23c0deb3ce17e61c94d78117b04a9b3c7043183"
   },
   "handoff": {
     "branch": "claude/kenh-dang-chay-trong-app",
