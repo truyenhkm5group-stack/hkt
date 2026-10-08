@@ -10,7 +10,8 @@
  *
  * LÃI GỘP ĐÃ GIAO (Master Mission mục P0.5 «Conversation → Delivered Profit»): giá vốn đọc qua `orderCogsFast` — ĐÚNG đường
  * của Báo cáo lợi nhuận (giá vốn đã chốt lúc giao, phiếu nhập mới không viết lại kỳ cũ). Đơn giá vốn 0 = CHƯA BIẾT, đứng
- * riêng (`cogsUnknown`), không cộng vào lãi với giá vốn 0.
+ * riêng (`cogsUnknown`), không cộng vào lãi với giá vốn 0. Cột đọc (`orderFactColumns`) + phép dựng dữ kiện đơn
+ * (`orderFactsOf`) là ĐƯỜNG CHUNG với so AI vs người theo nhánh thử nghiệm (experiment-report.ts) — không có bản thứ hai.
  */
 import { and, eq, gte, inArray, isNotNull, ne, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
@@ -20,7 +21,7 @@ import { isFinishedOutcome } from "@/lib/constants/truth";
 import { orderCogsFast } from "@/lib/queries/cogs";
 import { REVENUE_RECOGNIZED_ON_DELIVERY } from "@/lib/queries/manual-order-sql";
 import { ORDER_OUTCOME, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
-import { attributeOrder, attributionTable, deliveredCogs, followupRecovery, type AttributedOrder, type AttributionEvent, type AttributionTable } from "@/lib/sales-chatbot/attribution-shared";
+import { attributeOrder, attributionTable, deliveredCogs, followupRecovery, type AttributedOrder, type AttributionEvent, type AttributionTable, type OrderFacts } from "@/lib/sales-chatbot/attribution-shared";
 import { onPage } from "@/lib/sales-chatbot/events-sql";
 import { rateOrNull } from "@/lib/sales-chatbot/performance-shared";
 
@@ -43,6 +44,33 @@ const num = (v: unknown): number => {
   const n = Number(v ?? 0);
   return Number.isFinite(n) ? n : 0;
 };
+
+/**
+ * Cột đọc KẾT CỤC + DOANH THU + GIÁ VỐN của một đơn — ĐƯỜNG CHUNG của bảng quy kết theo nhãn và so AI vs người theo nhánh
+ * thử nghiệm (experiment-report.ts). Câu gọi phải `leftJoin(shipments, PRIMARY_ATTEMPT)`: mỗi đơn đúng một dòng (đơn gửi lại
+ * không đếm hai lần), và `orderCogsFast` đọc giá vốn đã chốt của CHÍNH lần gửi ấy.
+ */
+export function orderFactColumns() {
+  return { outcome: ORDER_OUTCOME, value: sql<number>`${schema.orders.totalPriceAfterDiscount}`, recognized: sql<boolean>`${REVENUE_RECOGNIZED_ON_DELIVERY}`, cogs: orderCogsFast() };
+}
+
+/**
+ * Một dòng đọc bằng `orderFactColumns()` ⇒ dữ kiện của đơn: doanh thu chỉ khi DELIVERED và được ghi nhận; giá vốn 0 trên đơn
+ * có doanh thu = CHƯA BIẾT (`deliveredCogs`). HÀM THUẦN.
+ */
+export function orderFactsOf(row: { outcome: string; value: unknown; recognized: unknown; cogs: unknown }): OrderFacts {
+  const value = num(row.value);
+  const delivered = row.outcome === "DELIVERED";
+  const deliveredRevenueVnd = delivered && row.recognized ? value : 0;
+  return {
+    valueVnd: value,
+    delivered,
+    deliveredRevenueVnd,
+    settled: isFinishedOutcome(row.outcome as OrderOutcome),
+    cancelled: row.outcome === "CANCELLED",
+    deliveredCogsVnd: deliveredCogs(deliveredRevenueVnd, num(row.cogs)),
+  };
+}
 
 const CHUNK = 500;
 async function inChunks<T>(ids: readonly string[], fn: (part: string[]) => Promise<T[]>): Promise<T[]> {
@@ -95,7 +123,7 @@ export async function loadOrderAttribution(opts: { days?: number; now?: Date; pa
   const s = schema.shipments;
   const outcomes = await inChunks(orderIds, (part) =>
     db
-      .select({ id: o.id, outcome: ORDER_OUTCOME, value: sql<number>`${o.totalPriceAfterDiscount}`, recognized: sql<boolean>`${REVENUE_RECOGNIZED_ON_DELIVERY}`, cogs: orderCogsFast() })
+      .select({ id: o.id, ...orderFactColumns() })
       .from(o)
       .leftJoin(s, and(eq(s.orderId, o.id), PRIMARY_ATTEMPT))
       .where(inArray(o.id, part)),
@@ -104,15 +132,13 @@ export async function loadOrderAttribution(opts: { days?: number; now?: Date; pa
   let unattributed = 0;
   const followup: FollowupStats = { conversations: nudgedRows.length, replied, replyRate: rateOrNull(replied, nudgedRows.length), recoveredOrders: 0, recoveredValueVnd: 0, recoveredDelivered: 0, recoveredDeliveredRevenueVnd: 0 };
   for (const row of outcomes) {
-    const value = num(row.value);
-    const delivered = row.outcome === "DELIVERED";
-    const deliveredRevenueVnd = delivered && row.recognized ? value : 0;
+    const facts = orderFactsOf(row);
     if (recovered.has(row.id)) {
       followup.recoveredOrders += 1;
-      followup.recoveredValueVnd += value;
-      if (delivered) {
+      followup.recoveredValueVnd += facts.valueVnd;
+      if (facts.delivered) {
         followup.recoveredDelivered += 1;
-        followup.recoveredDeliveredRevenueVnd += deliveredRevenueVnd;
+        followup.recoveredDeliveredRevenueVnd += facts.deliveredRevenueVnd;
       }
     }
     const label = attributeOrder(row.id, byConv.get(orderConv.get(row.id)!) ?? []);
@@ -120,15 +146,7 @@ export async function loadOrderAttribution(opts: { days?: number; now?: Date; pa
       unattributed += 1;
       continue;
     }
-    attributed.push({
-      attribution: label,
-      valueVnd: value,
-      delivered,
-      deliveredRevenueVnd,
-      settled: isFinishedOutcome(row.outcome as OrderOutcome),
-      cancelled: row.outcome === "CANCELLED",
-      deliveredCogsVnd: deliveredCogs(deliveredRevenueVnd, num(row.cogs)),
-    });
+    attributed.push({ attribution: label, ...facts });
   }
   return { table: attributionTable(attributed, unattributed), followup };
 }

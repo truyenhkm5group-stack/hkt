@@ -66,8 +66,11 @@ export function attributeOrder(orderId: string, events: readonly AttributionEven
   return humanTouched(confirm ? confirm.occurredAt : null) ? "AI_ASSISTED" : "AI_ONLY";
 }
 
-export type AttributedOrder = {
-  attribution: OrderAttribution;
+/**
+ * Dữ kiện của MỘT đơn đã đọc kết cục (chưa kèm nhãn) — dựng ở máy chủ bằng `orderFactsOf` (attribution.ts). Bảng quy kết theo
+ * nhãn và so AI vs người theo nhánh thử nghiệm (experiment-shared.ts) cộng CÙNG kiểu dữ kiện bằng CÙNG một luật (`orderRow`).
+ */
+export type OrderFacts = {
   valueVnd: number;
   delivered: boolean;
   deliveredRevenueVnd: number;
@@ -79,6 +82,7 @@ export type AttributedOrder = {
    */
   deliveredCogsVnd: number | null;
 };
+export type AttributedOrder = OrderFacts & { attribution: OrderAttribution };
 export type AttributionRow = {
   orders: number;
   valueVnd: number;
@@ -112,29 +116,41 @@ export function grossMarginOf(row: Pick<AttributionRow, "grossProfitVnd" | "cost
   return row.costedRevenueVnd > 0 ? row.grossProfitVnd / row.costedRevenueVnd : null;
 }
 
+/**
+ * Cộng MỘT đơn vào một dòng — luật DUY NHẤT của đếm / doanh thu đã giao / lãi gộp đã giao: đơn có doanh thu mà chưa có giá
+ * vốn đứng riêng (`cogsUnknown`), KHÔNG cộng vào lãi với giá vốn 0. Ghi vào `r`.
+ */
+function addOrder(r: AttributionRow, o: OrderFacts): void {
+  r.orders += 1;
+  r.valueVnd += o.valueVnd;
+  if (o.delivered) {
+    r.delivered += 1;
+    r.deliveredRevenueVnd += o.deliveredRevenueVnd;
+    if (o.deliveredRevenueVnd > 0) {
+      if (o.deliveredCogsVnd === null) {
+        r.cogsUnknown += 1;
+        r.cogsUnknownRevenueVnd += o.deliveredRevenueVnd;
+      } else {
+        r.costedRevenueVnd += o.deliveredRevenueVnd;
+        r.grossProfitVnd += o.deliveredRevenueVnd - o.deliveredCogsVnd;
+      }
+    }
+  }
+  if (o.settled) r.settled += 1;
+  if (o.cancelled) r.cancelled += 1;
+}
+
+/** Cộng một TẬP đơn thành MỘT dòng — cùng luật với bảng theo nhãn (dùng cho nhánh thử nghiệm AI vs người). HÀM THUẦN. */
+export function orderRow(orders: readonly OrderFacts[]): AttributionRow {
+  const r = emptyRow();
+  for (const o of orders) addOrder(r, o);
+  return r;
+}
+
 /** Cộng theo nhãn. Ba nhãn KHÔNG bao giờ gộp thành một ô (AI tự bán ≠ AI có người giúp). HÀM THUẦN. */
 export function attributionTable(orders: readonly AttributedOrder[], unattributed: number): AttributionTable {
   const t = { AI_ONLY: emptyRow(), AI_ASSISTED: emptyRow(), HUMAN_ONLY: emptyRow(), unattributed } as AttributionTable;
-  for (const o of orders) {
-    const r = t[o.attribution];
-    r.orders += 1;
-    r.valueVnd += o.valueVnd;
-    if (o.delivered) {
-      r.delivered += 1;
-      r.deliveredRevenueVnd += o.deliveredRevenueVnd;
-      if (o.deliveredRevenueVnd > 0) {
-        if (o.deliveredCogsVnd === null) {
-          r.cogsUnknown += 1;
-          r.cogsUnknownRevenueVnd += o.deliveredRevenueVnd;
-        } else {
-          r.costedRevenueVnd += o.deliveredRevenueVnd;
-          r.grossProfitVnd += o.deliveredRevenueVnd - o.deliveredCogsVnd;
-        }
-      }
-    }
-    if (o.settled) r.settled += 1;
-    if (o.cancelled) r.cancelled += 1;
-  }
+  for (const o of orders) addOrder(t[o.attribution], o);
   return t;
 }
 

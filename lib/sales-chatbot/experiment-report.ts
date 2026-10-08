@@ -1,14 +1,16 @@
 import { and, desc, eq, gte, inArray, ne, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { dauNgayVN } from "@/lib/ai/budget";
+import { aiCostOfConversationSets } from "@/lib/ai-usage/conversation-cost";
 import { can, type SessionUser } from "@/lib/auth/session";
-import { FINISHED_OUTCOMES_SQL } from "@/lib/constants/truth";
+import { env } from "@/lib/env";
 import { canUseModule } from "@/lib/platform/capabilities";
-import { REVENUE_RECOGNIZED_ON_DELIVERY } from "@/lib/queries/manual-order-sql";
-import { ORDER_OUTCOME, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
+import { currentOrganization } from "@/lib/platform/context";
+import { PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
+import { orderFactColumns, orderFactsOf } from "@/lib/sales-chatbot/attribution";
 import type { ChatView } from "@/lib/sales-chatbot/config";
 import { conversationView } from "@/lib/sales-chatbot/engine";
-import { armStats, type ArmRaw, type ArmStats, type DrillFilter } from "@/lib/sales-chatbot/experiment-shared";
+import { armRaw, armStats, grossProfitLift, profitAfterAiLift, type ArmAiCost, type ArmStats, type DrillFilter, type ProfitLift } from "@/lib/sales-chatbot/experiment-shared";
 import { BOT_CONFIRMED, HUMAN_TOUCHED } from "@/lib/sales-chatbot/events-sql";
 import { loadLostReasons } from "@/lib/sales-chatbot/lost-reasons";
 import { loadModeConfig } from "@/lib/sales-chatbot/operating-mode";
@@ -18,6 +20,19 @@ import { loadOrderSyncConfig } from "@/lib/sales-chatbot/order-sync";
  * ═══════════ SO AI vs NGƯỜI THEO NHÁNH + DRILL-DOWN VỀ HỘI THOẠI (DoD #9, #15) — CHỈ MÁY CHỦ ═══════════
  *
  * Luật ở experiment-shared.ts. Mọi câu đọc CSDL của tổ chức NGỮ CẢNH (`getDb()`); kênh THỬ không bao giờ tính.
+ *
+ * LỢI NHUẬN THEO NHÁNH (Master Mission P0.5 + P1.7, docs/revenue-attribution.md mục 7): từng đơn đọc bằng ĐÚNG đường của bảng
+ * quy kết (`orderFactColumns` + `orderFactsOf`: ORDER_OUTCOME · REVENUE_RECOGNIZED_ON_DELIVERY · orderCogsFast), gộp bằng
+ * `armRaw` (hàm thuần, luật `orderRow`). TIỀN AI chỉ đọc khi người xem được thấy tiền (`withMoney`), qua
+ * lib/ai-usage/conversation-cost.ts — cùng phép hiểu `ref` với khung «Chi phí AI & ROI».
+ *
+ * MỐC GÁN NHÁNH: `pinArm` (operating-mode.ts) ghi `state.experiment = { key, arm, at }` ở tin khách ĐẦU TIÊN qua cổng chế độ
+ * (fanpage / Messenger / Zalo) dưới khoá hiện hành — NGAY TRƯỚC mọi bước tốn tiền AI của lượt đó. Tiền AI của một hội thoại
+ * chỉ tính từ NGÀY (giờ VN) của mốc ấy: sổ AI gom theo ngày nên lượt cùng ngày mà trước mốc (lời nhắc follow-up, ghi đơn hộ
+ * chạy trước tin khách đầu tiên của thử nghiệm) vẫn bị tính — chi phí có thể CAO hơn thật, không bao giờ thấp hơn.
+ *
+ * MỐC CUỐI CHƯA CÓ: ERP chưa lưu lúc DỪNG thử nghiệm (`stoppedAt`). Dừng (chế độ rời EXPERIMENT, khoá giữ nguyên) thì cổng thôi
+ * chia nhánh nhưng đơn + tiền AI về sau của các hội thoại đã ghim vẫn cộng vào nhánh ⇒ `profitLifts` trống kèm lý do.
  */
 
 const num = (v: unknown) => {
@@ -31,11 +46,26 @@ export type ExperimentReport = {
   running: boolean;
   startedAt: string | null;
   orderSyncEnabled: boolean;
+  /** Người xem được thấy tiền AI — chỉ khi đó máy chủ đọc sổ AI và các ô tiền AI có số. */
+  withMoney: boolean;
+  /** Tỷ giá quy đổi tiền AI (₫/USD); `null` khi không được xem tiền. */
+  rateVndPerUsd: number | null;
   arms: { AI: ArmStats; HUMAN: ArmStats };
+  /** Chênh lệch LÃI AI − người — giao diện chỉ hiển thị, không tự tính. Thử nghiệm đã dừng ⇒ `null` + lý do (`STOPPED_LIFT_REASON`). */
+  profitLifts: { grossProfitPerConversation: ProfitLift; profitAfterAiPerConversation: ProfitLift };
 };
 
-/** `null` = chưa có hội thoại nào được chia theo khoá thử nghiệm hiện tại. */
-export async function loadExperimentReport(): Promise<ExperimentReport | null> {
+/** Mốc ghim nhánh đọc được ⇒ `Date`; chuỗi hỏng ⇒ `null`. */
+const pinnedAt = (v: string | null): Date | null => {
+  const d = v ? new Date(v) : null;
+  return d && Number.isFinite(d.getTime()) ? d : null;
+};
+
+/**
+ * `null` = chưa có hội thoại nào được chia theo khoá thử nghiệm hiện tại. `withMoney` = người xem được thấy tiền AI
+ * (`aiPerformanceWithMoney`); mặc định KHÔNG — không có quyền thì các ô tiền AI `null` và sổ AI không bị đọc.
+ */
+export async function loadExperimentReport(opts: { withMoney: boolean } = { withMoney: false }): Promise<ExperimentReport | null> {
   const cfg = await loadModeConfig();
   const db = await getDb();
   const c = schema.salesChatConversations;
@@ -49,42 +79,53 @@ export async function loadExperimentReport(): Promise<ExperimentReport | null> {
   if (!convs.length) return null;
   const count = (arm: string, channel?: string) => convs.filter((r) => r.arm === arm && (!channel || r.channel === channel)).reduce((s, r) => s + num(r.n), 0);
 
+  // TỪNG ĐƠN gắn với hội thoại của nhánh — mỗi đơn đúng một dòng (PRIMARY_ATTEMPT), đọc bằng đường chung của bảng quy kết.
   const o = schema.orders;
   const s = schema.shipments;
-  const per = db
-    .select({ arm: armOf.as("p_arm"), outcome: ORDER_OUTCOME.as("p_outcome"), value: sql<number>`${o.totalPriceAfterDiscount}`.as("p_value"), recognized: sql<boolean>`${REVENUE_RECOGNIZED_ON_DELIVERY}`.as("p_recognized") })
+  const orderRows = await db
+    .select({ arm: armOf, ...orderFactColumns() })
     .from(o)
     .innerJoin(c, eq(c.id, o.salesConversationId))
     .leftJoin(s, and(eq(s.orderId, o.id), PRIMARY_ATTEMPT))
-    .where(and(ne(c.channel, "TEST"), keyIs))
-    .as("p");
-  const agg = await db
-    .select({
-      arm: per.arm,
-      orders: sql<number>`count(*)::int`,
-      value: sql<number>`coalesce(sum(${per.value}), 0)`,
-      settled: sql<number>`count(*) filter (where ${per.outcome} in (${sql.raw(FINISHED_OUTCOMES_SQL)}))::int`,
-      delivered: sql<number>`count(*) filter (where ${per.outcome} = 'DELIVERED')::int`,
-      deliveredRevenue: sql<number>`coalesce(sum(${per.value}) filter (where ${per.outcome} = 'DELIVERED' and ${per.recognized}), 0)`,
-    })
-    .from(per)
-    .groupBy(per.arm);
-  const raw = (arm: string): ArmRaw => {
-    const a = agg.find((x) => x.arm === arm);
-    return { conversations: count(arm), orders: num(a?.orders), ordersValueVnd: num(a?.value), settled: num(a?.settled), delivered: num(a?.delivered), deliveredRevenueVnd: num(a?.deliveredRevenue) };
-  };
+    .where(and(ne(c.channel, "TEST"), keyIs));
+  const raw = (arm: string) => armRaw(count(arm), orderRows.filter((r) => r.arm === arm).map((r) => orderFactsOf(r)));
   const sync = await loadOrderSyncConfig();
   // Nhánh người chỉ có đơn qua «AI ghi đơn hộ nhân viên» — chạy trên FANPAGE và chỉ khi bật.
   const humanMeasurable = sync.enabled ? count("HUMAN", "FANPAGE") : 0;
   const humanNote = sync.enabled ? (humanMeasurable < count("HUMAN") ? "Chỉ hội thoại fanpage có đường ghi đơn hộ nhân viên" : null) : "«AI ghi đơn hộ nhân viên» đang TẮT — đơn của nhánh người chưa đo được";
   const firstAt = convs.map((r) => r.first).filter((x): x is string => Boolean(x)).sort()[0] ?? null;
+
+  // TIỀN AI theo nhánh — chỉ khi được xem tiền. Mỗi hội thoại tính từ mốc ghim của CHÍNH nó; mốc hỏng ⇒ mốc sớm nhất của khoá.
+  let money: { AI: ArmAiCost; HUMAN: ArmAiCost } | null = null;
+  const rate = opts.withMoney ? env.facebook.usdToVnd : null;
+  if (rate !== null) {
+    const pins = await db
+      .select({ id: c.id, arm: armOf, at: sql<string | null>`${c.state}->'experiment'->>'at'` })
+      .from(c)
+      .where(and(ne(c.channel, "TEST"), keyIs));
+    const fallback = pins.map((p) => pinnedAt(p.at)).reduce<Date | null>((a, d) => (d && (!a || d < a) ? d : a), null);
+    const sets = { AI: new Map<string, Date>(), HUMAN: new Map<string, Date>() };
+    for (const p of pins) {
+      const at = pinnedAt(p.at) ?? fallback;
+      if (at && (p.arm === "AI" || p.arm === "HUMAN")) sets[p.arm].set(p.id, at);
+    }
+    const org = await currentOrganization();
+    const cost = await aiCostOfConversationSets(org.code, sets, rate);
+    money = { AI: cost.AI, HUMAN: cost.HUMAN };
+  }
+  const running = cfg.mode === "EXPERIMENT";
+  const arms = { AI: armStats(raw("AI"), count("AI"), null, money?.AI ?? null), HUMAN: armStats(raw("HUMAN"), humanMeasurable, humanNote, money?.HUMAN ?? null) };
   return {
     key: cfg.experimentKey,
     aiSharePct: cfg.aiSharePct,
-    running: cfg.mode === "EXPERIMENT",
+    running,
     startedAt: firstAt,
     orderSyncEnabled: sync.enabled,
-    arms: { AI: armStats(raw("AI"), count("AI")), HUMAN: armStats(raw("HUMAN"), humanMeasurable, humanNote) },
+    withMoney: rate !== null,
+    rateVndPerUsd: rate,
+    arms,
+    // Thử nghiệm đã DỪNG ⇒ hai chênh lệch lãi trống kèm lý do (chưa có mốc dừng); số từng nhánh ở trên giữ nguyên.
+    profitLifts: { grossProfitPerConversation: grossProfitLift(arms.AI, arms.HUMAN, running), profitAfterAiPerConversation: profitAfterAiLift(arms.AI, arms.HUMAN, running) },
   };
 }
 

@@ -6,13 +6,15 @@
  *  · KẾT CỤC ĐƠN — `ORDER_OUTCOME` (lib/queries/return-rate.ts), MỘT công thức cho mọi báo cáo (AGENTS §0.2); doanh thu đi qua
  *    `REVENUE_RECOGNIZED_ON_DELIVERY`. Không tự tính «giao thành công» ở đây.
  *  · TIỀN AI — sổ `platform_ai_usage` qua `aiUsageByRef` (luôn lọc `org_code`). Lượt ghi đơn hộ nhân viên mang `ref`
- *    «order-sync:…» ⇒ tách khỏi chi phí bán hàng của bot; khung thử tách riêng.
+ *    «order-sync:…» ⇒ tách khỏi chi phí bán hàng của bot; khung thử tách riêng. Phép hiểu `ref` → hội thoại và phép quy ₫ là
+ *    của chung (lib/ai-usage/conversation-cost.ts) — khối so AI vs người theo nhánh đọc sổ bằng đúng hai hàm đó.
  *
  * Trước ngày bật sổ sự kiện KHÔNG có số — màn hình in «đo từ ngày …», không in 0 (luật 42, không backfill — luật 35).
  */
 import { and, eq, gte, inArray, isNotNull, ne, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { dauNgayVN } from "@/lib/ai/budget";
+import { addUsdAsVnd, conversationOfRef, SALES_CONVERSATION_FEATURES } from "@/lib/ai-usage/conversation-cost";
 import { aiUsageByRef } from "@/lib/ai-usage/ledger";
 import type { SessionUser } from "@/lib/auth/session";
 import { env } from "@/lib/env";
@@ -188,7 +190,7 @@ export async function loadAiSalesPerformance(orgCode: string, opts: { days?: num
   let human: AiSalesPerformance["human"] = null;
   if (opts.withMoney) {
     const rate = env.facebook.usdToVnd;
-    const usage = await aiUsageByRef(orgCode, ["sales_chatbot"], since);
+    const usage = await aiUsageByRef(orgCode, SALES_CONVERSATION_FEATURES, since);
     const testIds = new Set((await db.select({ id: c.id }).from(c).where(eq(c.channel, "TEST"))).map((r) => r.id));
     // Một page ⇒ chỉ chi phí AI của hội thoại thuộc page đó (sổ AI ghi `ref` = mã hội thoại).
     const pageConvs = opts.pageId ? new Set((await db.select({ id: c.id }).from(c).where(eq(c.pageId, opts.pageId))).map((r) => r.id)) : null;
@@ -197,11 +199,12 @@ export async function loadAiSalesPerformance(orgCode: string, opts: { days?: num
     let test: number | null = null;
     let unknown = 0;
     let turns = 0;
-    const add = (acc: number | null, usd: number | null) => (usd === null ? acc : (acc ?? 0) + usd * rate);
+    const add = (acc: number | null, usd: number | null) => addUsdAsVnd(acc, usd, rate);
     for (const u of usage) {
-      if (pageConvs && !(u.ref && pageConvs.has(u.ref.replace(/^order-sync:/, "")))) continue;
-      if (u.ref?.startsWith("order-sync:")) orderSync = add(orderSync, u.costUsd);
-      else if (u.ref && testIds.has(u.ref)) test = add(test, u.costUsd);
+      const conv = conversationOfRef(u.ref);
+      if (pageConvs && !(conv && pageConvs.has(conv.conversationId))) continue;
+      if (conv?.orderSync) orderSync = add(orderSync, u.costUsd);
+      else if (conv && testIds.has(conv.conversationId)) test = add(test, u.costUsd);
       else {
         selling = add(selling, u.costUsd);
         unknown += u.unknownCost;

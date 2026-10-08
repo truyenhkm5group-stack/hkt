@@ -67,7 +67,8 @@ export default async function AiSalesPerformancePage({ searchParams }: { searchP
   const pgQ = pageId ? `&pg=${encodeURIComponent(pageId)}` : "";
   // Tiền AI / token là số NỘI BỘ: workspace khách không tính luôn (`cost = null`) — giữ chỉ số kinh doanh (lib/saas/visibility.ts).
   const r: AiSalesPerformance = await loadAiSalesPerformance(user.organization?.code ?? "", { days, withMoney: aiPerformanceWithMoney(user, manage), pageId });
-  const experiment = await loadExperimentReport();
+  // Khối so AI vs người: tiền AI cùng cổng với khung «Chi phí AI & ROI» — khách / người không cấu hình bot không đọc sổ AI.
+  const experiment = await loadExperimentReport({ withMoney: aiPerformanceWithMoney(user, manage) });
   const basket = await loadBasketStats({ days, pageId });
   const attr = await loadOrderAttribution({ days, pageId });
   const lost = await loadLostReasons({ days, pageId });
