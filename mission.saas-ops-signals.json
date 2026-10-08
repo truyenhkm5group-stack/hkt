@@ -3,7 +3,7 @@
   "mission_id": "saas-ops-signals",
   "title": "Người vận hành chẩn đoán được 8 loại sự cố của khách: đăng nhập hỏng · page mất kết nối · webhook · AI im · gửi tin hỏng · đơn không hợp lệ · ghi đơn hỏng · hết hạn mức",
   "business_goal": "",
-  "status": "RUNNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -37,7 +37,18 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-08T12:43:20.463Z",
-  "updated_at": "2026-10-08T12:43:20.463Z",
-  "last_heartbeat": "2026-10-08T12:43:20.463Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-08T15:44:18.822Z",
+  "last_heartbeat": "2026-10-08T15:44:18.822Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "feat/saas-ops-signals",
+    "sha": "f20ebde9aa01c92b9e4d5f1c904cfd77d487baef",
+    "at": "2026-10-08T15:44:18.822Z",
+    "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+    "title": "Người vận hành chẩn đoán được 8 loại sự cố của khách: đăng nhập hỏng · page mất kết nối · webhook · AI im · gửi tin hỏng · đơn không hợp lệ · ghi đơn hỏng · hết hạn mức",
+    "summary": "8 tín hiệu sự cố cho người vận hành: platform_auth_failures (lý do đóng, băm + che), gương platform_org_health từ sales-health 5 phút (FB · webhook · AI · gửi tin · đơn), error_class + lý do quota trên platform_ai_usage, ghi đơn hỏng audit + chuyển người ORDER_WRITE_FAILED (không còn AI_DOWN), khung Sự cố trên /platform/org; migration 0236",
+    "tests": [
+      "tsc + eslint sạch; npm run build một mình đạt; tests/ops-signals.test.ts đạt; migration-journal, repo-integrity ×3, restore-drill-config, platform-isolation-static, test-hygiene đạt sau rebase; lân cận: login-throttle, user-invites, password-reset, identity-email-login, shell-login-landing, ai-sales-health, ai-sales-retry, ai-provider-failover, ai-usage, sales-events, sales-order-sync, native-order-sync, chat-ad-attribution, self-service-journey, e2e-ai-sales-platform, messenger-health, saas-l5-billing-trial, org-offboard, migration-upgrade-path đạt; đột biến 9/9 đỏ"
+    ]
+  }
 }
