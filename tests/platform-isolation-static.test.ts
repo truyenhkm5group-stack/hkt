@@ -818,6 +818,8 @@ const LOI_VAN_HANH: Record<string, string> = {
   // Tín hiệu vận hành (sứ mệnh saas-ops-signals, lib/platform/ops-signals.ts) — CHỈ ĐỌC CSDL nhà, không mở CSDL tổ chức nào.
   "lib/platform/ops-signals.ts::loadOpsSignalsForOrgs": "Tám tín hiệu vận hành (sự cố 24 giờ / 7 ngày) của NHIỀU tổ chức trong MỘT câu ở CSDL nhà: gương sức khoẻ, sổ lỗi đăng nhập (định danh đã che), sổ AI — cho danh sách khách.",
   "lib/platform/ops-signals.ts::loadOrgOpsSignals": "Khung «Sự cố 24 giờ / 7 ngày» của MỘT tổ chức ở /platform/org/<mã> — đi qua loadOpsSignalsForOrgs (cùng cổng, cùng câu).",
+  // Cổng «nối thẳng Facebook» (review #706, 09/10/2026) — không phải cửa vận hành: chỉ quyết VẼ nút thật hay ô «sắp mở».
+  "lib/channels/direct-connect.ts::directConnectFor": "Người vận hành nền tảng luôn thấy nút nối thẳng Facebook thật; người khác: đọc cờ meta.direct-connect.open ở CSDL nhà (CHỈ ĐỌC, so với mã tổ chức của PHIÊN) — hỏi platformOperatorDenial trước lượt đọc cờ.",
 };
 
 const DOC_PHIEN = new Set(["requireUser", "requirePermission", "getCurrentUser", "resolveCurrentUser", "getSession"]);

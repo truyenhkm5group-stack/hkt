@@ -147,6 +147,21 @@ export function testHelpGuides() {
   for (const item of SALES_AGENT_NAV.filter((i) => i.key !== "settings" && i.key !== "overview")) {
     assert.ok(shellGuides.some((g) => g.href === item.href || g.steps.some((s) => s.href === item.href)), `mục vỏ «${item.label}» (${item.href}) chưa có bài hướng dẫn nào trỏ đúng trang của nó`);
   }
+  // Chỉ hướng dẫn đường nối ĐANG CHẠY (review #706): nối thẳng Facebook chờ Meta duyệt quyền Page ⇒ bài cho vỏ không bảo khách
+  // bấm «Kết nối Facebook», và câu nào nhắc nối thẳng Facebook phải kèm «sắp mở». Bài nối kênh phải nêu Pancake + lựa chọn khác.
+  for (const g of HELP_GUIDES.filter((x) => x.audience === "CHOTDON")) {
+    for (const t of [g.title, g.summary, ...g.steps.map((s) => s.text)]) {
+      assert.doesNotMatch(t, /«Kết nối Facebook»/, `${g.key}: không bảo khách bấm «Kết nối Facebook» khi Meta chưa duyệt quyền Page: «${t}»`);
+      if (/nối thẳng Facebook|thẳng Facebook/i.test(t)) assert.match(t, /sắp mở/, `${g.key}: nhắc nối thẳng Facebook phải kèm «sắp mở»: «${t}»`);
+    }
+  }
+  {
+    const ket = HELP_GUIDES.find((g) => g.key === "chotdon-connect-facebook")!;
+    const all = [ket.summary, ...ket.steps.map((s) => s.text)].join(" ");
+    assert.match(all, /Pancake/, "bài nối kênh nêu đường Pancake");
+    assert.match(all, /Zalo OA/, "bài nối kênh nêu Zalo OA");
+    assert.match(all, /ô chat/, "bài nối kênh nêu ô chat website");
+  }
   // Bài nối Facebook: «Cài đặt → Kết nối» không có trong vỏ ⇒ dẫn THẲNG tới trang (vỏ mở được), và chỉ cho người nối được kênh.
   const fb = HELP_GUIDES.find((g) => g.key === "chotdon-connect-facebook")!;
   assert.ok(fb.steps.some((s) => s.href === "/settings/connections") && salesAgentPathAllowed("/settings/connections"), "bài nối Facebook dẫn thẳng tới trang Kết nối");

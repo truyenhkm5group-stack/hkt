@@ -6,6 +6,7 @@ import { Progress } from "@/components/ui/progress";
 import type { SessionUser } from "@/lib/auth/session";
 import { getGettingStarted } from "@/lib/onboarding/progress";
 import { loadGoLive } from "@/lib/onboarding/go-live";
+import { directConnectFor } from "@/lib/channels/direct-connect";
 import { GoLiveCard } from "@/components/onboarding/go-live-card";
 import { AiSalesToday } from "@/components/onboarding/ai-sales-today";
 import { cn } from "@/lib/utils";
@@ -16,7 +17,7 @@ import { cn } from "@/lib/utils";
  * liệu thật (`lib/onboarding/progress.ts`); bước không đo được hiện vòng nét đứt và không tính vào tiến độ.
  */
 export async function GettingStartedHome({ user }: { user: SessionUser }) {
-  const [gs, goLive] = await Promise.all([getGettingStarted(user), loadGoLive(user)]);
+  const [gs, goLive, directConnect] = await Promise.all([getGettingStarted(user), loadGoLive(user), directConnectFor(user)]);
   const pct = gs.measurable ? Math.round((gs.done / gs.measurable) * 100) : 0;
   return (
     <div className="space-y-5">
@@ -34,7 +35,7 @@ export async function GettingStartedHome({ user }: { user: SessionUser }) {
       <AiSalesToday user={user} />
       {goLive.show ? (
         <SectionCard title="Vào việc ngay — chatbot trả lời khách trên fanpage" description="Ba bước, mỗi bước một nút. Bot đọc giá, tồn kho từ ERP và lên đơn nháp cho bạn duyệt.">
-          <GoLiveCard view={goLive} />
+          <GoLiveCard view={goLive} directConnect={directConnect} />
         </SectionCard>
       ) : null}
       <SectionCard title="Dựng ERP của bạn" description="Mỗi bước tự đánh dấu xong khi dữ liệu thật xuất hiện — không có ô nào để bấm cho xong." padded={false} contentClassName="p-0">

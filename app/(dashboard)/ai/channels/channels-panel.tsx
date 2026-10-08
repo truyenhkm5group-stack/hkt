@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { createContext, useContext, useEffect, useMemo, useState, useTransition } from "react";
 import { Loader2, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -33,6 +33,7 @@ import type { CustomerIssue } from "@/lib/integrations/messenger/permission-guid
 import { CUSTOMER_WEBHOOK_TEXT } from "@/lib/integrations/messenger/permission-guide";
 import type { WebhookState } from "@/lib/integrations/messenger/graph";
 import { vnShortStamp } from "@/lib/format";
+import { DIRECT_CONNECT_SOON_LABEL } from "@/lib/channels/direct-connect-shared";
 import { cn } from "@/lib/utils";
 import { recheckMessengerWebhooksAction } from "../sales-chatbot/messenger/actions";
 
@@ -52,8 +53,22 @@ function startConnect() {
   window.location.href = CONNECT_START;
 }
 
+/**
+ * Cổng nối thẳng Facebook (lib/channels/direct-connect-shared.ts): máy chủ quyết, panel chỉ đọc. Đóng ⇒ nút chính thành ô tắt
+ * «Nối thẳng Facebook — sắp mở», nút «Kết nối lại» không vẽ — KHÔNG phần tử nào gọi `startConnect` (/api/connect/messenger/start).
+ */
+const DirectConnectContext = createContext(false);
+
 function ConnectButton({ appReady, label = "Kết nối Facebook", variant = "brand" }: { appReady: boolean; label?: string; variant?: "brand" | "outline" }) {
+  const directConnect = useContext(DirectConnectContext);
   if (!appReady) return null;
+  if (!directConnect) {
+    return variant === "brand" ? (
+      <span aria-disabled="true" className="inline-flex h-9 cursor-not-allowed items-center rounded-md border border-dashed px-4 text-sm font-medium text-muted-foreground" data-testid="channels-connect-soon">
+        {DIRECT_CONNECT_SOON_LABEL}
+      </span>
+    ) : null;
+  }
   return variant === "brand" ? (
     <button type="button" onClick={startConnect} className="inline-flex h-9 items-center rounded-md bg-[#1877F2] px-4 text-sm font-semibold text-white hover:opacity-90" data-testid="channels-connect">
       {label}
@@ -231,7 +246,7 @@ function Stepper({ current }: { current: number }) {
   );
 }
 
-export function ChannelsPanel({ rows, appReady, botEnabled, manage, operator, outcome, operatorDetail, operatorNotes = null, pending }: { rows: ChannelRowView[]; appReady: boolean; botEnabled: boolean; manage: boolean; operator: boolean; outcome: Outcome; operatorDetail: string[] | null; operatorNotes?: string[] | null; pending: { id: string; name: string }[] | null }) {
+export function ChannelsPanel({ rows, appReady, botEnabled, manage, operator, directConnect = false, outcome, operatorDetail, operatorNotes = null, pending }: { rows: ChannelRowView[]; appReady: boolean; botEnabled: boolean; manage: boolean; operator: boolean; directConnect?: boolean; outcome: Outcome; operatorDetail: string[] | null; operatorNotes?: string[] | null; pending: { id: string; name: string }[] | null }) {
   const router = useRouter();
   const [checks, setChecks] = useState<Record<string, { fact: WebhookFact; detail: string | null }>>({});
   const [checking, startCheck] = useTransition();
@@ -279,6 +294,7 @@ export function ChannelsPanel({ rows, appReady, botEnabled, manage, operator, ou
   const rowEl = (r: ChannelRowView) => <ChannelRow key={r.key} row={r} webhook={checks[r.pageId]?.fact ?? r.webhook} appReady={appReady} manage={manage} operator={operator} extraTechnical={checks[r.pageId]?.detail ?? null} busy={toggling} onToggleAi={onToggleAi} onRecheck={onRecheck} />;
 
   return (
+    <DirectConnectContext.Provider value={directConnect}>
     <div className="space-y-4">
       {step !== null ? <Stepper current={step} /> : null}
 
@@ -351,12 +367,12 @@ export function ChannelsPanel({ rows, appReady, botEnabled, manage, operator, ou
             description={
               manage ? (
                 <>
-                  {appReady ? "Bấm «Kết nối Facebook», đăng nhập bằng tài khoản quản trị Page và chọn các Page cần dùng." : "Kết nối Facebook của nền tảng đang được bảo trì — thử lại sau; kéo dài thì nhắn hỗ trợ."}{" "}
-                  Đang dùng Pancake hoặc Zalo OA?{" "}
+                  {/* Chỉ chỉ đường ĐANG CHẠY trước: nối thẳng Facebook chờ Meta duyệt quyền Page (review #706) — nút bên dưới giữ nguyên. */}
+                  Fanpage qua Pancake và Zalo OA:{" "}
                   <Link href="/settings/connections" className="font-medium text-primary hover:underline">
-                    Nối ở trang Kết nối
+                    nối ở trang Kết nối
                   </Link>
-                  .
+                  . Nối thẳng Facebook (không qua Pancake) sắp mở.
                 </>
               ) : (
                 "Cần quản trị cửa hàng kết nối Page."
@@ -400,5 +416,6 @@ export function ChannelsPanel({ rows, appReady, botEnabled, manage, operator, ou
         </li>
       </ul>
     </div>
+    </DirectConnectContext.Provider>
   );
 }

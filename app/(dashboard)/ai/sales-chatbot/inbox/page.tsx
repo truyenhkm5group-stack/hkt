@@ -363,10 +363,10 @@ export default async function SalesInboxPage({ searchParams }: { searchParams: P
                   // (kiểm vỏ khách 08/10/2026, F-03), thay vì «không có hội thoại ở bộ lọc này» như thể khách chưa nhắn.
                   <li className="space-y-3 p-6 text-center text-sm" data-testid="inbox-empty-no-channel">
                     <p className="font-semibold text-foreground">Chưa có tin khách vì cửa hàng chưa nối kênh bán hàng</p>
-                    <p className="text-muted-foreground">Nối fanpage Facebook (hoặc Zalo OA, ô chat trên website) — tin khách sẽ hiện ở đây và AI bắt đầu trả lời.</p>
+                    <p className="text-muted-foreground">Nối fanpage qua Pancake, Zalo OA hoặc ô chat trên website — tin khách sẽ hiện ở đây và AI bắt đầu trả lời.</p>
                     {canConnect ? (
                       <Link href={SALES_AGENT_CHANNELS_HREF} className="inline-flex h-10 items-center rounded-full bg-primary px-4 font-medium text-primary-foreground hover:bg-primary/90" data-testid="inbox-empty-connect">
-                        Kết nối Facebook
+                        Nối kênh bán hàng
                       </Link>
                     ) : (
                       <p className="text-xs text-muted-foreground">Nhờ quản trị cửa hàng nối kênh ở mục «Kênh kết nối».</p>
