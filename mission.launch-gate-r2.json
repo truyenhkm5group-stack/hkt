@@ -3,7 +3,7 @@
   "mission_id": "launch-gate-r2",
   "title": "Launch Gate sau deploy aa4b69ce: thêm mục Quan sát O1–O8 (§11), chấm lại trung thực, bằng chứng identity-reconcile",
   "business_goal": "",
-  "status": "RUNNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -20,7 +20,18 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-08T13:43:20.648Z",
-  "updated_at": "2026-10-08T13:43:20.648Z",
-  "last_heartbeat": "2026-10-08T13:43:20.648Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-08T13:43:54.472Z",
+  "last_heartbeat": "2026-10-08T13:43:54.472Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "docs/launch-gate-r2",
+    "sha": "d46573fc6118d242c0507ae847a83e4ccf3018ef",
+    "at": "2026-10-08T13:43:54.472Z",
+    "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+    "title": "Launch Gate sau deploy aa4b69ce: thêm mục Quan sát O1–O8 (§11), chấm lại trung thực, bằng chứng identity-reconcile",
+    "summary": "Launch Gate: thêm mục Quan sát O1–O8 (§11), A1/A4 lùi WIP theo review #682, C2/C4 lên CODE, bằng chứng identity-reconcile, readiness 35 % NOT READY",
+    "tests": [
+      "Chỉ tài liệu; mọi con số trích từ run ops có mã (37786092653 · 37786400515) và deploy 37781964748; đường dẫn tệp trích dẫn đều có trên main"
+    ]
+  }
 }
