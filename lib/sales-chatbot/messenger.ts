@@ -10,6 +10,7 @@ import { appSecretProof, graphBase, instagramAccountOf, messengerApp, messengerB
 import { chunkText } from "@/lib/messaging/providers";
 import { canUseModule } from "@/lib/platform/capabilities";
 import { AI_DOWN_HANDOFF_REASON, chatTurn, conversationView, describeCustomerImages } from "@/lib/sales-chatbot/engine";
+import { imagesAlreadyDescribed } from "@/lib/sales-chatbot/vision";
 import { ALREADY_REPLIED_NOTE, alreadyRepliedRows, CONV_OPEN_FAILED_NOTE, EMPTY_REPLY_NOTE, HANDOFF_SILENT_NOTE, DEAD_AI_DOWN_NOTE, DEAD_SEND_NOTE_PREFIX, deadLetter, dueForClaim, releaseWithBackoff } from "@/lib/sales-chatbot/inbound-retry";
 import { clearPageMode, dualConnectedPages, DUPLICATE_SOURCE_REASON, insertCustomerInbound, liveTransportsOf, loadTransportFacts, NON_CANONICAL_NOTE, PANCAKE_OWNS_PAGE_REASON, recordPageMode, routeVerdict, threadTransport, transportOwnerOf, type RouteVerdict } from "@/lib/sales-chatbot/channel-ownership";
 import {
@@ -658,10 +659,11 @@ export async function processMessengerThread(pageId: string, psid: string, deps:
     }
     for (const r of claimed) {
       const urls = Array.isArray(r.imageUrls) ? r.imageUrls.filter((u): u is string => typeof u === "string") : [];
-      if (!urls.length) continue;
+      if (!urls.length || imagesAlreadyDescribed(r.text)) continue;
       const line = await describeCustomerImages(urls, { conversationId: conv.id, ...(deps.fetch ? { fetch: deps.fetch } : {}), ...(r.kind === "COMMENT" ? { aiCustomer: { threadKind: "COMMENT" as const, commenterId: r.fromId ?? null } } : {}) });
       r.text = [r.text, line].filter(Boolean).join("\n").slice(0, TEXT_MAX);
-      await db.update(t).set({ text: r.text, imageUrls: null }).where(eq(t.id, r.id));
+      // Giữ địa chỉ ảnh để hộp thư còn hiện ảnh; dấu «đã đọc» là dòng mô tả trong chữ (08/10/2026).
+      await db.update(t).set({ text: r.text }).where(eq(t.id, r.id));
     }
     const before = (await conversationView(conv.id))?.messages.length ?? 0;
     const text = claimed

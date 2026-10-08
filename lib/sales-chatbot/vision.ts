@@ -73,6 +73,37 @@ export function pancakeImageUrls(message: unknown): string[] {
   return out;
 }
 
+/**
+ * NHÃN DÁN (👍, sticker) trong tin Pancake — CHỈ để hộp thư HIỆN CHO NGƯỜI (chủ shop HSLC 08/10/2026: hộp thư ERP không hiện
+ * icon / nhãn dán như Pancake, chỉ có câu «mở trên kênh để xem»). KHÔNG gộp vào `pancakeImageUrls`: nhãn dán không phải ảnh
+ * để bot trả tiền đọc. HÀM THUẦN.
+ */
+export function pancakeStickerUrls(message: unknown): string[] {
+  const m = (message && typeof message === "object" ? message : {}) as { attachments?: unknown };
+  const list = Array.isArray(m.attachments) ? m.attachments : [];
+  const out: string[] = [];
+  for (const raw of list) {
+    if (!raw || typeof raw !== "object") continue;
+    const a = raw as Record<string, unknown>;
+    const type = str(a.type).toLowerCase();
+    if (type !== "sticker" && !a.sticker_id) continue;
+    const payload = (a.payload && typeof a.payload === "object" ? a.payload : {}) as Record<string, unknown>;
+    const url = str(a.url) || str(payload.url) || str(payload.sticker_url) || str(a.preview_url);
+    if (!url || out.includes(url)) continue;
+    out.push(url);
+    if (out.length >= VISION_LIMITS.imagesPerTurn) break;
+  }
+  return out;
+}
+
+/**
+ * Dòng tin ĐÃ mang mô tả ảnh (`imageLine`) ⇒ lượt sau không đọc lại ảnh. Trước đây dấu «đã đọc» là XOÁ địa chỉ ảnh khỏi dòng
+ * tin — và hộp thư mất luôn ảnh khách gửi ngay sau khi bot đọc xong (08/10/2026). HÀM THUẦN.
+ */
+export function imagesAlreadyDescribed(text: string): boolean {
+  return /\[Khách gửi (?:\d+ )?ảnh(?::| —)/.test(text);
+}
+
 /** Kiểu ảnh theo CHỮ KÝ tệp (không tin `content-type`). Không phải bốn kiểu nhận được ⇒ `null`. HÀM THUẦN. */
 export function sniffImageMime(b: Uint8Array): AiImageMime | null {
   if (b.length >= 3 && b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) return "image/jpeg";

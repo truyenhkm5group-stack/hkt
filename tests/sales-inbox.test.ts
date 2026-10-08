@@ -292,6 +292,28 @@ export async function testSalesInbox() {
       const tb = await loadInboxThread(lan, mc.id);
       assert.ok(tb.ok && tb.thread.items.filter((i) => i.side === "BOT").length === 1, JSON.stringify(tb.ok && tb.thread.items));
 
+      // ── HIỆN NHƯ PANCAKE (chủ shop HSLC 08/10/2026): ảnh phía page không chữ, nhãn dán của khách — hộp thư ERP phải thấy ──
+      const pageImg = await receiveFanpageEvent({ pageId: PAGE, threadId: "t-media", messageId: "page-img-1", text: "", customerName: "", fromPage: true, humanStaff: false, inbox: true, comment: null, imageUrls: ["https://content.pancake.vn/menu.jpg"] });
+      assert.equal(pageImg.queued, false);
+      assert.match(pageImg.reason ?? "", /không tính là trả lời/, "ảnh page không chữ vẫn KHÔNG tính là page đã trả lời");
+      const likeEv = await receiveFanpageEvent({ pageId: PAGE, threadId: "t-media", messageId: "m-like-1", text: "", customerName: "Chú Ba", fromPage: false, humanStaff: false, inbox: true, comment: null, imageUrls: [], stickerUrls: ["https://scontent.xx.fbcdn.net/like.png"] });
+      assert.equal(likeEv.queued, false, "bot không trả lời nhãn dán");
+      const tp = await loadInboxThread(lan, mc.id);
+      assert.ok(tp.ok, JSON.stringify(tp));
+      const pageItem = tp.ok ? tp.thread.items.find((i) => i.side === "PAGE") : undefined;
+      assert.deepEqual(pageItem && [pageItem.images, pageItem.author], [["https://content.pancake.vn/menu.jpg"], "Phía page (ngoài ERP)"], `ảnh page không chữ hiện ở hộp thư: ${JSON.stringify(tp.ok && tp.thread.items)}`);
+      const likeItem = tp.ok ? tp.thread.items.find((i) => i.side === "CUSTOMER" && i.images.includes("https://scontent.xx.fbcdn.net/like.png")) : undefined;
+      assert.ok(likeItem && !likeItem.text, `nhãn dán của khách hiện là ẢNH, không phải câu «mở trên kênh để xem»: ${JSON.stringify(tp.ok && tp.thread.items)}`);
+      const [likeRow] = await db.select().from(t).where(eq(t.messageId, "m-like-1"));
+      assert.ok(likeRow.status === "DONE" && likeRow.note === "MEDIA_ONLY", "dòng nhãn dán xong ngay — bot không bao giờ đọc nó như ảnh");
+      const [mcAfter] = await db.select().from(c).where(eq(c.id, mc.id));
+      assert.notEqual(mcAfter.handoffReason, STAFF_REASON, "ảnh page không chữ không làm bot nhường như nhân viên");
+      // Tiếng vọng ẢNH nhân viên gửi từ ERP (dòng ghi sẵn `staff-out:<id>:img`) không thành dòng page thứ hai.
+      await db.insert(t).values({ pageId: PAGE, threadId: "t-media", messageId: "staff-out:sm-img-1:img", text: "[Ảnh]", status: "DONE", note: PAGE_REPLY });
+      const echoImg = await receiveFanpageEvent({ pageId: PAGE, threadId: "t-media", messageId: "pancake-echo-img-1", text: "", customerName: "", fromPage: true, humanStaff: true, inbox: true, comment: null, imageUrls: ["https://content.pancake.vn/staff-sent.jpg"] });
+      assert.equal(echoImg.reason, "Tin của chính bot", "tiếng vọng ảnh nhân viên ERP được nhận ra");
+      assert.equal((await db.select().from(t).where(eq(t.messageId, "pancake-echo-img-1"))).length, 0, "không ghi dòng thứ hai cho ảnh nhân viên");
+
       // ── Ảnh (0211): chữ + ảnh qua Pancake; ảnh hỏng ⇒ bấm lại chỉ gửi lại ẢNH ──
       const convImg = await mk("t-img", 2);
       const pc = fakePancake();

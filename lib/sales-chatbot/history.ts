@@ -58,7 +58,7 @@ import {
 } from "@/lib/sales-chatbot/history-shared";
 import { normalizeVnPhone } from "@/lib/sales-chatbot/returning";
 import { SALES_CHATBOT_MANAGE } from "@/lib/sales-chatbot/settings";
-import { pancakeImageUrls } from "@/lib/sales-chatbot/vision";
+import { pancakeImageUrls, pancakeStickerUrls } from "@/lib/sales-chatbot/vision";
 import { getSettingJson, setSettingJson } from "@/lib/settings";
 import { runSyncJob, type SyncTrigger } from "@/lib/sync/runner";
 
@@ -150,16 +150,19 @@ export function planHistoryMessages(raw: readonly unknown[], pageId: string, opt
     const from = (m.from ?? {}) as { id?: unknown; name?: unknown; uid?: unknown; admin_id?: unknown };
     const fromPage = str(from.id) === pageId || Boolean(from.uid) || Boolean(from.admin_id);
     const text = stripHtml(str(m.original_message) || str(m.message)).slice(0, TEXT_MAX);
+    // Nhãn dán (👍) chỉ để hộp thư hiện (08/10/2026) — dòng nhập lịch sử không bao giờ vào lượt bot, nên gộp vào ảnh hiển thị.
     const images = pancakeImageUrls(m);
+    const stickers = pancakeStickerUrls(m);
+    const shown = images.length ? images : stickers;
     if (fromPage) {
-      if (PANCAKE_AUTO_NOTE_RE.test(text) || (!text.trim() && !images.length)) {
+      if (PANCAKE_AUTO_NOTE_RE.test(text) || (!text.trim() && !shown.length)) {
         skipped += 1;
         continue;
       }
-      rows.push({ messageId: id, side: "PAGE", text: text.trim() ? text : STAFF_IMAGE_MARK, at, imageUrls: images, customerName: null });
+      rows.push({ messageId: id, side: "PAGE", text: text.trim() ? text : STAFF_IMAGE_MARK, at, imageUrls: shown, customerName: null });
       continue;
     }
-    rows.push({ messageId: id, side: "CUSTOMER", text: text.trim() || images.length ? text : MEDIA_ONLY_TEXT, at, imageUrls: images, customerName: (str(from.name) || opts.fallbackName).slice(0, 200) || null });
+    rows.push({ messageId: id, side: "CUSTOMER", text: text.trim() || shown.length ? text : MEDIA_ONLY_TEXT, at, imageUrls: shown, customerName: (str(from.name) || opts.fallbackName).slice(0, 200) || null });
   }
   return { rows, fresh, skipped };
 }

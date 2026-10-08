@@ -31,6 +31,7 @@ import { publish } from "@/lib/realtime/bus";
 import { webhookUrlToken } from "@/lib/platform/webhooks";
 import { noteAiCustomerReply } from "@/lib/pricing/ai-customer";
 import { chatTurn, conversationView, describeCustomerImages, openConversation } from "@/lib/sales-chatbot/engine";
+import { imagesAlreadyDescribed } from "@/lib/sales-chatbot/vision";
 import { COPILOT_NOTE, erpStaffEchoCond, MEDIA_ONLY_NOTE, MEDIA_ONLY_TEXT, normalizeEcho, OBSERVE_HUMAN_ARM_NOTE, OBSERVE_NOTE, PAGE_REPLY, STAFF_IMAGE_MARK, STAFF_OUT_PREFIX, staffOutRowId, type StaffMark } from "@/lib/sales-chatbot/fanpage";
 import { draftCopilotSuggestion, loadModeConfig, pinArm } from "@/lib/sales-chatbot/operating-mode";
 import { readPinnedArm, replyGate } from "@/lib/sales-chatbot/operating-mode-shared";
@@ -333,10 +334,11 @@ export async function processZaloThread(userId: string, deps: ZaloDepsAll = {}):
     // Ảnh khách gửi: mô tả MỘT lần mỗi tin rồi ghi vào chính dòng tin — lượt sau không tốn tiền đọc lại.
     for (const r of claimed) {
       const urls = Array.isArray(r.imageUrls) ? r.imageUrls.filter((u): u is string => typeof u === "string") : [];
-      if (!urls.length) continue;
+      if (!urls.length || imagesAlreadyDescribed(r.text)) continue;
       const line = await describeCustomerImages(urls, { conversationId: conv.id, ...(deps.fetch ? { fetch: deps.fetch as typeof fetch } : {}) });
       r.text = [r.text, line].filter(Boolean).join("\n").slice(0, TEXT_MAX);
-      await db.update(t).set({ text: r.text, imageUrls: null }).where(eq(t.id, r.id));
+      // Giữ địa chỉ ảnh để hộp thư còn hiện ảnh; dấu «đã đọc» là dòng mô tả trong chữ (08/10/2026).
+      await db.update(t).set({ text: r.text }).where(eq(t.id, r.id));
     }
     const before = (await conversationView(conv.id))?.messages.length ?? 0;
     const text = claimed
