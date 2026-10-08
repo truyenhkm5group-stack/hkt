@@ -3,7 +3,7 @@
   "mission_id": "platform-key-project-probe",
   "title": "Dò số project Google của khoá AI nền tảng (chỉ đọc, không in khoá): lấy từ ErrorInfo của Google",
   "business_goal": "",
-  "status": "INTEGRATING",
+  "status": "VERIFYING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -23,11 +23,13 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-08T14:54:03.138Z",
-  "updated_at": "2026-10-08T17:49:36.879Z",
+  "updated_at": "2026-10-08T21:13:59.208Z",
   "last_heartbeat": "2026-10-08T17:20:02.039Z",
   "definition_of_done": [],
   "evidence": {
-    "merged": "#694 → a582a5ad7bc559f9594b10b1f9b81cce372e6d23"
+    "merged": "#694 → a582a5ad7bc559f9594b10b1f9b81cce372e6d23",
+    "verify": "PASS c7183395051955e6cff5343a787e9df97d71d12b 2026-10-08T21:13:53.062Z",
+    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/37838226087"
   },
   "handoff": {
     "branch": "feat/platform-key-project-probe",
