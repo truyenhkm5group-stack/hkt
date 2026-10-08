@@ -3,7 +3,7 @@
   "mission_id": "launch-gate-r3",
   "title": "Launch Gate r3: bằng chứng production sau nghiệm thu PASS 4/4 (c7183395)",
   "business_goal": "",
-  "status": "INTEGRATING",
+  "status": "VERIFYING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -23,11 +23,13 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-08T21:21:02.119Z",
-  "updated_at": "2026-10-08T22:19:25.625Z",
+  "updated_at": "2026-10-08T23:38:32.210Z",
   "last_heartbeat": "2026-10-08T21:23:28.558Z",
   "definition_of_done": [],
   "evidence": {
-    "merged": "#707 → 072852852b892631f8e09945ea222707f91a0621"
+    "merged": "#707 → 072852852b892631f8e09945ea222707f91a0621",
+    "verify": "PASS dbab68130a7261f6e759148d8ccd4575a2fbe849 2026-10-08T23:38:24.548Z",
+    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/37854562530"
   },
   "handoff": {
     "branch": "docs/launch-gate-r3",
