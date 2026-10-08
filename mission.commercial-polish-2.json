@@ -1,0 +1,33 @@
+{
+  "schema": 1,
+  "mission_id": "commercial-polish-2",
+  "title": "Commercial Sweep PR B: vỏ Chốt Đơn không có chữ dưới 11 px (token 12·13·14 + bài chốt) · câu an toàn của màn lỗi",
+  "business_goal": "",
+  "status": "PLANNING",
+  "priority": "P2",
+  "risk": "MEDIUM",
+  "owner": "DESKTOP-56TH98Y:wt-polish2",
+  "worker": null,
+  "worktree": null,
+  "branch": "claude/commercial-polish-2",
+  "base_sha": "dbab68130a7261f6e759148d8ccd4575a2fbe849",
+  "domains": [],
+  "owned_paths": [
+    "docs/design-system.md",
+    "tests/shell-typography.test.ts",
+    "tests/sync-fixtures.test.ts",
+    "app/(dashboard)/error.tsx",
+    "app/(dashboard)/ai/sales-chatbot/inbox/customer-insight.tsx",
+    "app/(dashboard)/ai/sales-chatbot/inbox/notes-panel.tsx"
+  ],
+  "dependencies": [
+    "error-boundary-than-thien"
+  ],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-08T23:03:51.844Z",
+  "updated_at": "2026-10-08T23:03:51.844Z",
+  "last_heartbeat": "2026-10-08T23:03:51.844Z",
+  "definition_of_done": []
+}
