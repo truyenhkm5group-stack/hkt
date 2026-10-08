@@ -3,7 +3,7 @@
   "mission_id": "saas-shell-gate-redirects",
   "title": "Vỏ khách không còn trang trắng khi thiếu quyền / module tắt: requirePermission và layout chuyển người vỏ về trang nhà vỏ, không về / hay trang trong cùng nhóm",
   "business_goal": "",
-  "status": "INTEGRATING",
+  "status": "VERIFYING",
   "priority": "P1",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -27,11 +27,13 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-08T12:00:41.153Z",
-  "updated_at": "2026-10-08T14:00:20.799Z",
+  "updated_at": "2026-10-08T21:12:20.627Z",
   "last_heartbeat": "2026-10-08T13:31:33.169Z",
   "definition_of_done": [],
   "evidence": {
-    "merged": "#686 → cd777445f78e53f85e6d768a56e09ded5310c893"
+    "merged": "#686 → cd777445f78e53f85e6d768a56e09ded5310c893",
+    "verify": "PASS c7183395051955e6cff5343a787e9df97d71d12b 2026-10-08T21:12:14.368Z",
+    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/37838226087"
   },
   "handoff": {
     "branch": "fix/shell-gate-redirects",
