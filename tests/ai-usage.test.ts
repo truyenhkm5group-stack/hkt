@@ -10,12 +10,14 @@
  *  · không cấu hình nền tảng ⇒ nhánh PLATFORM không bao giờ chạy và KHÔNG rơi về khoá nhà; khoá nền tảng trùng khoá nhà
  *    ⇒ từ chối; khoá nền tảng đi đúng tới api.anthropic.com, không bao giờ mang khoá nhà;
  *  · công tắc toàn nền tảng + theo tổ chức chặn TRƯỚC khi gọi model; người không vận hành không đổi được; đệm ≤ 30 s;
- *  · chi phí chưa biết giữ NULL (không phải 0).
+ *  · chi phí chưa biết giữ NULL (không phải 0);
+ *  · lõi credit của ops (`setOrgAiLimitAsOperator`) đi CÙNG đường ghi với màn hình: đúng một ô, giữ ô khác + công tắc, nhật ký
+ *    SCRIPT (máy), từ chối khoá lạ / số ≤ 0 / > trần / tổ chức không có / nhà; nhật ký hỏng ⇒ hoàn — cả ops lẫn màn hình.
  */
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync, rmSync } from "node:fs";
 import path from "node:path";
-import { and, eq, inArray, like } from "drizzle-orm";
+import { and, desc, eq, inArray, like, sql } from "drizzle-orm";
 import { getDb, getPlatformDb, organizationDatabaseUrl, schema } from "@/db";
 import { FakeProvider, setAiProviderForTests, type AiProvider, type AiResponse } from "@/lib/ai/provider";
 import type { SessionUser } from "@/lib/auth/session";
@@ -26,10 +28,10 @@ import { provisionOrganization } from "@/lib/platform/provision";
 import { getBuilderAi, setBuilderAiForTests } from "@/lib/ai-builder/provider";
 import { ANTHROPIC_BASE_URL } from "@/lib/ai-builder/providers";
 import { createDraft } from "@/lib/ai-builder/service";
-import { AI_CONTROL_CACHE_MS, invalidateAiControl, PLATFORM_AI_SWITCH_KEY, readPlatformAiSwitch, setOrgAiControl, setPlatformAiEnabled } from "@/lib/ai-usage/control";
+import { AI_CONTROL_CACHE_MS, invalidateAiControl, PLATFORM_AI_SWITCH_KEY, readOrgAiControl, readPlatformAiSwitch, SCRIPT_AI_CREDIT_MAX_USD, SCRIPT_AI_LIMIT_KEY, setOrgAiControl, setOrgAiLimitAsOperator, setPlatformAiEnabled } from "@/lib/ai-usage/control";
 import { recordAiUsage, sourceUsage } from "@/lib/ai-usage/ledger";
 import { platformAiConfig } from "@/lib/ai-usage/platform-ai";
-import { checkAiQuota, softWarningKey } from "@/lib/ai-usage/quota";
+import { checkAiQuota, resolveAiLimits, softWarningKey } from "@/lib/ai-usage/quota";
 import { AI_DISABLED_BY_OPERATOR, evaluateAiQuota, parseAiLimits, type AiLimits } from "@/lib/ai-usage/types";
 import { loadOperatorOrgAi, loadOrgAiUsage, loadPlatformAiSummary } from "@/lib/ai-usage/view";
 
@@ -385,6 +387,103 @@ async function testPlatformBranch(operator: SessionUser, adminB: SessionUser) {
   }
 }
 
+// ═══════════ 4 · LÕI CREDIT CỦA OPS — CÙNG ĐƯỜNG GHI VỚI MÀN HÌNH, HẸP HƠN ═══════════
+
+async function testOrgAiLimitScriptCore(operator: SessionUser) {
+  const pdb = await getPlatformDb();
+  const home = await getHomeOrganization();
+  const op = { orgCode: home.code, email: "script:org-ai-cutover" };
+  const LY_DO = "Đặt credit AI dùng chung trước khi chuyển AI Bán hàng (bài kiểm)";
+  const goi = (o: Record<string, unknown>) => setOrgAiLimitAsOperator({ orgCode: A, key: SCRIPT_AI_LIMIT_KEY, value: 150, operator: op, reason: LY_DO, ...o } as Parameters<typeof setOrgAiLimitAsOperator>[0]);
+  const doc = () => readOrgAiControl(A, { fresh: true });
+  const t = schema.platformAuditLog;
+  const soNhatKy = async () => (await pdb.select({ id: t.id }).from(t).where(and(eq(t.targetOrgCode, A), eq(t.action, "AI_ORG_CONTROL_SET")))).length;
+
+  // Trạng thái đầu: người vận hành (màn hình) đã đặt hai ô KHÁC; công tắc BẬT.
+  assert.ok("ok" in (await setOrgAiControl(operator, { orgCode: A, disabled: false, limits: { requestsPerDay: 7, costUsdHard: 40 }, reason: "ô khác của người vận hành" })));
+  const dau = await doc();
+  assert.deepEqual(dau.limits, { requestsPerDay: 7, costUsdHard: 40 });
+  const n0 = await soNhatKy();
+
+  // Từ chối — không ghi, không nhật ký.
+  const tuChoi: [Record<string, unknown>, string][] = [
+    [{ key: "costUsdHard" }, "khoá khác"],
+    [{ key: "requestsPerDay", value: 999 }, "khoá trần lượt"],
+    [{ key: "disabled" }, "công tắc"],
+    [{ key: "platformCreditUsdPerMonth " }, "khoá gần giống"],
+    [{ value: 0 }, "0"],
+    [{ value: -5 }, "số âm"],
+    [{ value: 0.004 }, "làm tròn về 0"],
+    [{ value: SCRIPT_AI_CREDIT_MAX_USD + 0.01 }, "> trần đường ops"],
+    [{ value: 5000 }, "> trần đường ops"],
+    [{ value: Number.NaN }, "NaN"],
+    [{ value: Number.POSITIVE_INFINITY }, "vô cực"],
+    [{ value: "150" }, "chuỗi"],
+    [{ orgCode: "khong-co-to-chuc" }, "tổ chức không có"],
+    [{ orgCode: "MA SAI" }, "mã tổ chức sai hình"],
+    [{ orgCode: home.code }, "tổ chức nhà"],
+    [{ reason: "x" }, "lý do quá ngắn"],
+    [{ operator: { orgCode: home.code, email: "" } }, "thiếu nhãn người vận hành"],
+  ];
+  for (const [o, vi] of tuChoi) {
+    const r = await goi(o);
+    assert.ok("error" in r, `${vi} phải bị từ chối: ${JSON.stringify(r)}`);
+  }
+  assert.deepEqual(await doc(), dau, "lượt bị từ chối không đổi gì");
+  assert.equal(await soNhatKy(), n0, "lượt bị từ chối không có nhật ký");
+
+  // Đặt: đúng ô credit, giữ ô khác + công tắc; nhật ký SCRIPT, người làm = MÁY; hạn mức ĐANG ÁP thấy ngay (đệm đã xoá).
+  assert.deepEqual(await goi({}), { ok: true, changed: true, previous: null, value: 150 });
+  const sau = await doc();
+  assert.deepEqual([sau.limits, sau.disabled], [{ requestsPerDay: 7, costUsdHard: 40, platformCreditUsdPerMonth: 150 }, false], "đúng ô credit, giữ nguyên ô khác + công tắc");
+  assert.equal(sau.updatedByEmail, `script:org-ai-cutover (vận hành nền tảng · ${home.code})`);
+  const dangAp = await resolveAiLimits(A);
+  assert.deepEqual([dangAp?.limits.platformCreditUsdPerMonth, dangAp?.limits.costUsdPerMonth.hard, dangAp?.limits.requestsPerDay], [150, 40, 7], "ghi đè thắng gói (au-tight: credit 0)");
+  const [nk] = await pdb.select().from(t).where(and(eq(t.targetOrgCode, A), eq(t.source, "SCRIPT"))).orderBy(desc(t.at)).limit(1);
+  assert.ok(nk && nk.action === "AI_ORG_CONTROL_SET" && nk.subject === "ai" && nk.reason === LY_DO, JSON.stringify(nk));
+  assert.deepEqual([nk.actorOrgCode, nk.actorUserId, nk.actorEmail], [null, null, null], "người làm = MÁY (luật 34)");
+  assert.deepEqual([nk.before, nk.after], [{ disabled: false, limits: { requestsPerDay: 7, costUsdHard: 40 } }, { disabled: false, limits: { requestsPerDay: 7, costUsdHard: 40, platformCreditUsdPerMonth: 150 } }]);
+  assert.equal(await soNhatKy(), n0 + 1);
+
+  // Cùng giá trị ⇒ không đổi, không nhật ký; làm tròn tới xu; `previous` là ghi đè cũ (để nơi gọi hoàn được).
+  assert.deepEqual(await goi({}), { ok: true, changed: false, previous: 150, value: 150 });
+  assert.equal(await soNhatKy(), n0 + 1, "không đổi ⇒ không nhật ký");
+  assert.deepEqual(await goi({ value: 117.456 }), { ok: true, changed: true, previous: 150, value: 117.46 });
+  assert.deepEqual(await goi({ value: SCRIPT_AI_CREDIT_MAX_USD }), { ok: true, changed: true, previous: 117.46, value: SCRIPT_AI_CREDIT_MAX_USD }, "đúng trần đường ops là được");
+
+  // Công tắc TẮT giữ nguyên — lõi ops không bao giờ bật lại AI của tổ chức.
+  assert.ok("ok" in (await setOrgAiControl(operator, { orgCode: A, disabled: true, reason: "tạm dừng AI của A" })));
+  assert.deepEqual(await goi({ value: 200 }), { ok: true, changed: true, previous: SCRIPT_AI_CREDIT_MAX_USD, value: 200 });
+  const tat = await doc();
+  assert.deepEqual([tat.disabled, tat.limits], [true, { requestsPerDay: 7, costUsdHard: 40, platformCreditUsdPerMonth: 200 }], "credit đổi; công tắc TẮT + ô khác giữ nguyên");
+  assert.ok("ok" in (await setOrgAiControl(operator, { orgCode: A, disabled: false, reason: "mở lại AI của A" })));
+
+  // Nhật ký hỏng ⇒ hoàn ĐÚNG giá trị cũ (kể cả người / mốc sửa cuối) — ops LẪN màn hình, vì cùng một đường ghi.
+  const truocHong = await doc();
+  const nHong = await soNhatKy();
+  await pdb.execute(sql.raw(`CREATE OR REPLACE FUNCTION au_fail_audit_fn() RETURNS trigger AS $$ BEGIN RAISE EXCEPTION 'nhật ký nền tảng hỏng (bài kiểm)'; END $$ LANGUAGE plpgsql`));
+  await pdb.execute(sql.raw(`CREATE TRIGGER au_fail_audit BEFORE INSERT ON platform_audit_log FOR EACH ROW WHEN (NEW.target_org_code = '${A}' AND NEW.action = 'AI_ORG_CONTROL_SET') EXECUTE FUNCTION au_fail_audit_fn()`));
+  try {
+    const hong = await goi({ value: 300 });
+    assert.ok("error" in hong && /nhật ký nền tảng/.test(hong.error), JSON.stringify(hong));
+    assert.deepEqual(await doc(), truocHong, "ops: nhật ký hỏng ⇒ hoàn đúng giá trị cũ");
+    const hongUi = await setOrgAiControl(operator, { orgCode: A, limits: { costUsdHard: 1 }, reason: "đổi trần lúc nhật ký hỏng" });
+    assert.ok("error" in hongUi && /nhật ký nền tảng/.test(hongUi.error), "màn hình: nhật ký hỏng ⇒ báo lỗi");
+    assert.deepEqual(await doc(), truocHong, "màn hình: nhật ký hỏng ⇒ hoàn đúng giá trị cũ (hành vi cũ giữ nguyên)");
+  } finally {
+    await pdb.execute(sql.raw("DROP TRIGGER IF EXISTS au_fail_audit ON platform_audit_log"));
+    await pdb.execute(sql.raw("DROP FUNCTION IF EXISTS au_fail_audit_fn()"));
+  }
+  assert.equal(await soNhatKy(), nHong, "lượt hỏng không để lại nhật ký");
+  assert.equal((await resolveAiLimits(A))?.limits.platformCreditUsdPerMonth, 200, "hạn mức ĐANG ÁP sau lượt hỏng vẫn là giá trị cũ (đệm đã xoá)");
+
+  // `null` ⇒ BỎ ghi đè ô credit (về theo gói) — đường HOÀN của script; ô khác giữ nguyên.
+  assert.deepEqual(await goi({ value: null }), { ok: true, changed: true, previous: 200, value: null });
+  assert.deepEqual((await doc()).limits, { requestsPerDay: 7, costUsdHard: 40 }, "bỏ đúng ô credit");
+  assert.equal((await resolveAiLimits(A))?.limits.platformCreditUsdPerMonth, 0, "về theo gói (au-tight: credit 0)");
+  assert.deepEqual(await goi({ value: null }), { ok: true, changed: false, previous: null, value: null }, "bỏ lần hai ⇒ không đổi");
+}
+
 export async function testAiUsage() {
   testPure();
   testSourceScan();
@@ -405,6 +504,7 @@ export async function testAiUsage() {
     await testQuotaAndLedger(adminA, adminB);
     await testOverrideAndSwitches(operator, adminA, adminB);
     await testPlatformBranch(operator, adminB);
+    await testOrgAiLimitScriptCore(operator);
     // Thông báo ngưỡng mang đúng khoá ngày (giờ VN) — một lần / ngày / nguồn.
     assert.match(softWarningKey("BYOK", new Date("2026-09-29T20:00:00Z")), /^ai-quota-soft:BYOK:2026-09-30$/);
   } finally {
@@ -416,7 +516,7 @@ export async function testAiUsage() {
     invalidateAiControl();
   }
   console.log(
-    "✓ Sổ dùng AI: mỗi lượt AI Builder một dòng đúng nguồn (BYOK · PLATFORM · HOME), không prompt; vượt hard ⇒ BLOCKED_QUOTA, model không được gọi; soft ⇒ cho qua + một thông báo / ngày; ghi đè theo tổ chức thắng gói; A không trừ vào B; BYOK không trừ credit nền tảng; nền tảng chưa cấu hình / khoá trùng nhà ⇒ không PLATFORM, không rơi về khoá nhà; khoá nền tảng chỉ tới api.anthropic.com; công tắc toàn nền tảng + theo tổ chức chặn trước model, người không vận hành không đổi được, đệm ≤ 30 s; chi phí chưa biết giữ NULL",
+    "✓ Sổ dùng AI: mỗi lượt AI Builder một dòng đúng nguồn (BYOK · PLATFORM · HOME), không prompt; vượt hard ⇒ BLOCKED_QUOTA, model không được gọi; soft ⇒ cho qua + một thông báo / ngày; ghi đè theo tổ chức thắng gói; A không trừ vào B; BYOK không trừ credit nền tảng; nền tảng chưa cấu hình / khoá trùng nhà ⇒ không PLATFORM, không rơi về khoá nhà; khoá nền tảng chỉ tới api.anthropic.com; công tắc toàn nền tảng + theo tổ chức chặn trước model, người không vận hành không đổi được, đệm ≤ 30 s; chi phí chưa biết giữ NULL; lõi credit của ops: đúng một ô, giữ ô khác + công tắc, nhật ký SCRIPT, nhật ký hỏng ⇒ hoàn (ops lẫn màn hình)",
   );
 }
 
