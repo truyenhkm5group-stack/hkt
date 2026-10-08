@@ -1,0 +1,8 @@
+{
+  "pr": 661,
+  "sha": "954bd16206d8183c634fa32cac708b02089b372e",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-08T04:56:53.335Z",
+  "note": "Review độc lập 08/10: quyền ≡ cổng Gửi (5 đột biến đỏ), cô lập tổ chức qua getDb phiên + pageId từ máy chủ, client chỉ import type, giá cùng nguồn search_products, luật 42. LOW để PR sau: L1 vị từ quyền/loadConv là bản chép (export từ inbox.ts), L2 race chèn ghi đè chữ vừa gõ (setText theo prev + bỏ kết quả cũ), L3 {{tồn:SKU}} in số âm/khi bán không kiểm tồn, L4 dòng chèn không ghi giá lẻ khi bật "
+}
