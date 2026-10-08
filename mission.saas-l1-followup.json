@@ -3,7 +3,7 @@
   "mission_id": "saas-l1-followup",
   "title": "Khách không ghi/tắt được khoá AI + che nốt chỗ rò (replay, học, ai-builder, USD, go-live)",
   "business_goal": "Khách không thấy và không đổi được cấu hình AI nội bộ ở bất kỳ màn nào",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P0",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -33,13 +33,16 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-07T17:24:03.294Z",
-  "updated_at": "2026-10-08T06:37:22.945Z",
+  "updated_at": "2026-10-08T07:02:57.420Z",
   "last_heartbeat": "2026-10-08T06:37:06.157Z",
   "definition_of_done": [
     "saveConnection/setConnectionStatus/testConnection chặn khoá AI ở workspace khách (máy chủ)",
     "replay · học · ai-builder · go-live không lộ model/USD/token",
     "Bài kiểm tấn công tenant xanh"
   ],
+  "evidence": {
+    "merged": "#669 → 3a28e83e9971e73fec586bbf7fb0f5076c90ff19"
+  },
   "handoff": {
     "branch": "feat/saas-l1-followup",
     "sha": "2c18494334e53d195e3ef0c775470d0d38af5042",
