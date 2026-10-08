@@ -1,0 +1,8 @@
+{
+  "pr": 664,
+  "sha": "814380ce37cdf954cf06d8348753112ef5912815",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-08T06:34:13.636Z",
+  "note": "Review lại 08/10 (chỉ đọc): MEDIUM-1 (đếm order.confirmed kể cả đơn đã huỷ) và MEDIUM-2 (nhãn theo biến thể, BẬT = luật 04/10) đã đóng; dia-chi-chua-ghep-xa đúng luật 05/10 và đánh dấu quyết định. LOW sau: câu về lựa chọn (c) trong BASELINE, cờ CRITICAL nên tách ca phụ thuộc luật, thêm ca ranh giới số nhà"
+}
