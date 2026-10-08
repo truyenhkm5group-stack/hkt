@@ -139,6 +139,18 @@ export async function loginCandidates(identifier: string): Promise<string[]> {
 }
 
 /**
+ * Trang CHUNG không mã tổ chức: những tổ chức mà mật khẩu KHỚP tài khoản này (ứng viên của `loginCandidates`, đúng thứ tự). Đây là
+ * phép quyết định của `loginAction` — đúng một nơi, để ops nghiệm thu (`lib/saas/acceptance.ts`) đi ĐÚNG đường của form `/login`
+ * thay vì chép lại: rỗng ⇒ câu sai mật khẩu · một ⇒ vào thẳng · nhiều ⇒ hỏi chọn cửa hàng. KHÔNG mở phiên, không chặn dò (việc
+ * của `loginAction`).
+ */
+export async function matchingLoginOrganizations(identifier: string, password: string): Promise<string[]> {
+  const matched: string[] = [];
+  for (const code of await loginCandidates(identifier)) if (await credentialsMatch({ email: identifier, password, orgCode: code })) matched.push(code);
+  return matched;
+}
+
+/**
  * Đăng nhập KHÔNG mật khẩu sau khi nhà cung cấp (Google / Facebook) đã xác minh người này — chỉ gọi từ đường OAuth đã kiểm
  * `state`. Tài khoản phải còn trong tổ chức, đúng `userId`, còn hoạt động. Ghi thêm danh tính của nhà cung cấp.
  */

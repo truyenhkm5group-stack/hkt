@@ -12,7 +12,7 @@ import { createResetLinkAsOperator } from "@/lib/users/password-reset";
 import { platformOperatorDenial } from "@/lib/platform-ui/module-toggle";
 import type { PlatformActor } from "@/lib/platform/audit";
 import { findAccountByCode, findAccountById, moveWorkspaceToAccount, openSubscriptionsForProductsInUse, productsInUse, setSubscriptionState, updateAccount, accountMergeCandidates } from "@/lib/saas/accounts";
-import { activationRefusal, loadAdminActivations, loadWorkspaceActivation, type AdminActivation } from "@/lib/saas/activation";
+import { activationRefusal, loadAdminActivations, loadWorkspaceActivation, resendActivation, type AdminActivation, type ResendActivationResult } from "@/lib/saas/activation";
 import { finalizeStatement } from "@/lib/saas/billing";
 import { PRODUCT_KEYS, productDef } from "@/lib/saas/catalog";
 import { accountAuditTrail, accountProvisioningJobs, finalizedStatements, loadCommercialSnapshot, moduleDrift, productEconomics, workspaceReach, type CommercialSnapshot, type CustomerView } from "@/lib/saas/customers";
@@ -167,17 +167,14 @@ const resendActivationInput = z.object({ orgCode: z.string().trim().toLowerCase(
  * CSDL chỉ giữ băm, nhật ký nền tảng (`PASSWORD_RESET_LINK`, `purpose: ACTIVATION`, kèm lý do) ghi TRƯỚC khi trả. Chưa có kênh
  * thư (dịch vụ ngoài mới cần chủ shop duyệt) ⇒ liên kết trả về người vận hành MỘT lần để gửi tay.
  */
-export async function resendActivationAsOperator(user: SessionUser, raw: unknown): Promise<{ ok: true; link: string; expiresAt: string; email: string; message: string } | Denied> {
+export async function resendActivationAsOperator(user: SessionUser, raw: unknown): Promise<ResendActivationResult | Denied> {
   const denial = platformOperatorDenial(user);
   if (denial) return { error: denial };
   const p = resendActivationInput.safeParse(raw);
   if (!p.success) return { error: firstIssue(p.error) };
-  const act = await loadWorkspaceActivation(p.data.orgCode);
-  if (!act) return { error: "Chỉ gửi kích hoạt cho quản trị của một workspace khách." };
-  if (!act.canResend || !act.email) return { error: activationRefusal(act.state) };
-  const r = await createResetLinkAsOperator(user, { orgCode: act.orgCode, email: act.email, reason: `Gửi lại liên kết kích hoạt: ${p.data.reason}` }, { purpose: "ACTIVATION" });
-  if ("error" in r) return r;
-  return { ok: true, link: r.link, expiresAt: r.expiresAt.toISOString(), email: r.email, message: "Đã tạo liên kết kích hoạt mới — liên kết cũ chưa dùng hết hiệu lực." };
+  // Luật gửi lại (người nhận do máy chủ tra, chỉ khi CHƯA kích hoạt) sống ở lib/saas/activation.ts — MỘT bản, dùng chung với ops
+  // nghiệm thu (máy, sau lá chắn sổ khai); liên kết phát qua đúng lõi của người vận hành đang bấm.
+  return resendActivation(p.data, (input) => createResetLinkAsOperator(user, input, { purpose: "ACTIVATION" }));
 }
 
 const subscribeInput = z.object({ orgCode: z.string().trim(), productKey: z.enum(PRODUCT_KEYS), planKey: z.string().trim().optional().or(z.literal("")), idempotencyKey: z.string().trim().min(8).max(200), reason });

@@ -190,6 +190,16 @@ export function shellAllows(user: ShellUser | null | undefined, href: string): b
   return !isSalesAgentUser(user) || salesAgentPathAllowed(href);
 }
 
+/**
+ * DẤU HIỆU TRÊN HTML THẬT — cho phép đo đọc trang qua HTTP (ops `saas-acceptance` bước C, lib/saas/acceptance.ts):
+ *  · vỏ app Chốt Đơn đã dựng ⇔ `components/saas-shell.tsx` vẽ thuộc tính này ở khung ngoài cùng;
+ *  · khung ERP NỘI BỘ lọt vào ⇔ một trong các dấu của thanh trên ERP (`components/app-topnav.tsx` — nhãn thương hiệu VNXcommerce,
+ *    nút AI Copilot của `components/ai-copilot.tsx`). Trang của vỏ KHÔNG BAO GIỜ được mang dấu nào trong số đó.
+ * tests/saas-shell.test.ts khoá các tệp ấy còn mang ĐÚNG những dấu này — đổi một bên mà quên bên kia là đỏ, phép đo không mù im lặng.
+ */
+export const SALES_AGENT_SHELL_HTML_MARKER = 'data-shell="sales-agent"';
+export const ERP_FRAME_HTML_MARKERS: readonly string[] = ['aria-label="VNXcommerce', 'aria-label="Mở AI Copilot"'];
+
 /** Tham số trên trang nhà khi máy chủ vừa chuyển người dùng khỏi một trang ngoài vỏ — vỏ in một câu ngắn thay vì im lặng. */
 export const SHELL_BLOCKED_PARAM = "ngoai-goi";
 export const SHELL_BLOCKED_MESSAGE = "Trang này không có trong gói Chốt Đơn — đã đưa bạn về đây.";

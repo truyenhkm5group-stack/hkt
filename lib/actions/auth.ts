@@ -5,7 +5,7 @@ import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { audit } from "@/lib/audit";
 import { clientIpFrom } from "@/lib/auth/client-ip";
-import { credentialsMatch, LOGIN_BAD_CREDENTIALS, loginCandidates, verifyLogin } from "@/lib/auth/login";
+import { LOGIN_BAD_CREDENTIALS, matchingLoginOrganizations, verifyLogin } from "@/lib/auth/login";
 import { clearLoginFailures, loginAllowed, loginThrottleKeys, recordLoginFailure } from "@/lib/auth/login-throttle";
 import { landingAfterSignIn } from "@/lib/saas/shell-landing";
 import { createSession, destroySession, getSession } from "@/lib/auth/session";
@@ -46,9 +46,7 @@ export async function loginAction(_prev: LoginState, formData: FormData): Promis
   }
 
   if (!orgCode) {
-    const candidates = await loginCandidates(email);
-    const matched: string[] = [];
-    for (const code of candidates) if (await credentialsMatch({ email, password, orgCode: code })) matched.push(code);
+    const matched = await matchingLoginOrganizations(email, password);
     if (matched.length > 1) {
       // Không lộ gì cho người KHÔNG biết mật khẩu: danh sách chỉ hiện khi mật khẩu đã khớp ở mọi tổ chức trong đó.
       const choose = await Promise.all(matched.map(async (code) => ({ code, name: (await findOrganization(code))?.name ?? code })));
