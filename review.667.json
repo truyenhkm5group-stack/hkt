@@ -1,0 +1,8 @@
+{
+  "pr": 667,
+  "sha": "6d98b7fe43b690aee33ea328c5ebcc1e75feed37",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-08T06:39:52.240Z",
+  "note": "Review lại 08/10 (chỉ đọc): M1 đóng — dùng đúng policyForWorkload + routePlatformModel như đường bot, phủ canary/đối chứng/dự phòng, tỷ lệ giá theo hỗn hợp token thật, thiếu giá ⇒ KHÔNG; L1/L3/L4/I4 đã sửa; log công khai không số. LOW sau: lỗi đọc chính sách bị nuốt ⇒ đánh giá thấp; chính sách hẹn giờ bị bỏ; reasoning của canary tăng token ra"
+}
