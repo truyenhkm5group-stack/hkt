@@ -7,6 +7,7 @@ import { setConversationControlCore, setHumanCooldownMinutesCore } from "@/lib/s
 import { setPageConnectionModeCore } from "@/lib/sales-chatbot/channel-ownership";
 import type { ConnectionMode } from "@/lib/sales-chatbot/channel-ownership-shared";
 import type { ConversationControl } from "@/lib/sales-chatbot/conversation-control-shared";
+import { composerProductPick, composerProductSearch, composerQuickReplies, composerQuickReplyText, type ComposerProduct, type ComposerQuickReply } from "@/lib/sales-chatbot/inbox-composer";
 import { submitConversationFeedbackCore } from "@/lib/sales-chatbot/inbox-feedback";
 import { addNoteCore, archiveLabelCore, createLabelCore, deleteNoteCore, setConversationLabelsCore } from "@/lib/sales-chatbot/inbox-labels";
 import { STAFF_IMAGE_MAX_BYTES, STAFF_IMAGES_MAX, type InboxLabel, type InboxNote } from "@/lib/sales-chatbot/inbox-shared";
@@ -15,7 +16,8 @@ import { STAFF_IMAGE_MAX_BYTES, STAFF_IMAGES_MAX, type InboxLabel, type InboxNot
  * ═══════════ SERVER ACTION: HỘP THƯ NGƯỜI (M8) ═══════════
  *
  * Mỏng: phiên → lõi `lib/sales-chatbot/inbox.ts` / `inbox-labels.ts` (quyền, khung gửi của kênh, chống gửi đôi, quy kết theo
- * khoá tài khoản, bot nhường, sổ sự kiện) → `revalidatePath`. Lỗi nghiệp vụ trả `{ error }`, không ném.
+ * khoá tài khoản, bot nhường, sổ sự kiện) → `revalidatePath`. Công cụ ô soạn (`inbox-composer.ts`) chỉ đọc nên không làm mới
+ * trang. Lỗi nghiệp vụ trả `{ error }`, không ném.
  */
 
 const PATH = "/ai/sales-chatbot/inbox";
@@ -68,6 +70,37 @@ export async function setConversationControlAction(conversationId: string, mode:
 export async function suggestReplyAction(conversationId: string): Promise<Out<{ suggestion: string }>> {
   const user = await requireUser();
   const r = await suggestReplyCore(user, conversationId);
+  return r.ok ? r : { error: r.error };
+}
+
+// ───────────────────────────── Công cụ ô soạn: câu mẫu · sản phẩm (P0.2) ─────────────────────────────
+// Chỉ ĐỌC (lib/sales-chatbot/inbox-composer.ts): không ghi dòng nào, không làm mới trang — chữ vào ô soạn, người sửa rồi bấm «Gửi».
+
+/** Câu mẫu ĐANG BẬT của tổ chức, lọc theo chữ gõ (bỏ dấu). */
+export async function composerQuickRepliesAction(query: string): Promise<Out<{ items: ComposerQuickReply[]; total: number }>> {
+  const user = await requireUser();
+  const r = await composerQuickReplies(user, query);
+  return r.ok ? r : { error: r.error };
+}
+
+/** Chữ của một câu mẫu cho ô soạn của một hội thoại — số ERP điền lúc bấm; thiếu số ⇒ lỗi, không chèn. */
+export async function composerQuickReplyTextAction(conversationId: string, quickReplyId: string): Promise<Out<{ text: string; title: string; imageCount: number }>> {
+  const user = await requireUser();
+  const r = await composerQuickReplyText(user, conversationId, quickReplyId);
+  return r.ok ? r : { error: r.error };
+}
+
+/** Tìm mẫu mã đang bán — cùng danh mục, phép tìm và giá với công cụ `search_products` của bot. */
+export async function composerProductSearchAction(conversationId: string, query: string): Promise<Out<{ items: ComposerProduct[]; priceNote: string | null }>> {
+  const user = await requireUser();
+  const r = await composerProductSearch(user, conversationId, query);
+  return r.ok ? r : { error: r.error };
+}
+
+/** Một mẫu mã lúc bấm chèn — giá + tồn đọc lại ngay lúc đó. */
+export async function composerProductPickAction(conversationId: string, variantId: string): Promise<Out<{ product: ComposerProduct }>> {
+  const user = await requireUser();
+  const r = await composerProductPick(user, conversationId, variantId);
   return r.ok ? r : { error: r.error };
 }
 

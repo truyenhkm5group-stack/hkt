@@ -7,10 +7,11 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { ChatOrderForm } from "@/components/orders/chat-order-form";
 import { assignConversationAction, claimConversationAction, releaseConversationAction, sendStaffReplyAction, suggestReplyAction } from "@/lib/actions/sales-inbox";
-import { formatDateTime, vnClock, vnDateKey } from "@/lib/format";
+import { formatDateTime, formatNumber, vnClock, vnDateKey } from "@/lib/format";
 import { STAFF_IMAGE_MAX_BYTES, STAFF_IMAGES_MAX, STAFF_REPLY_MAX, type InboxOrder, type InboxThread, type TimelineItem } from "@/lib/sales-chatbot/inbox-shared";
 import { cn } from "@/lib/utils";
 import { ChannelAvatar } from "./avatar";
+import { ComposerTools, insertIntoDraft } from "./composer-tools";
 import { ConversationControlBar } from "./control-bar";
 import { MessageTraceLine } from "./message-trace";
 import { LabelsPanel } from "./labels-panel";
@@ -19,7 +20,8 @@ import { CustomerHistoryCard, FeedbackPanel } from "./customer-insight";
 
 /**
  * MỘT HỘI THOẠI CỦA HỘP THƯ (M8): dòng thời gian (vạch ngày, gộp tin liền nhau, khách bên trái — shop bên phải) + khung soạn luôn
- * ở đáy (Enter gửi, Shift + Enter xuống dòng) + cột khách / ghi chú / đơn. Mọi phép kiểm ở máy chủ (`lib/sales-chatbot/inbox.ts`);
+ * ở đáy (Enter gửi, Shift + Enter xuống dòng; «Câu mẫu» / «Sản phẩm» chèn chữ vào ô, không gửi — composer-tools.tsx) + cột khách /
+ * ghi chú / đơn. Mọi phép kiểm ở máy chủ (`lib/sales-chatbot/inbox.ts`);
  * trang chỉ giữ chữ đang gõ và khoá lượt gửi (`requestKey` — bấm hai lần không gửi khách hai tin; gửi hỏng thì giữ nguyên khoá để
  * bấm lại là gửi lại ĐÚNG tin đó). Đang đọc tin cũ mà có tin mới ⇒ nút «Có tin mới ↓», không giật cuộn của người đang đọc.
  */
@@ -201,6 +203,28 @@ export function InboxThreadView({
     } finally {
       setPending(null);
     }
+  };
+
+  /**
+   * «Câu mẫu» / «Sản phẩm» (composer-tools.tsx) chèn chữ vào ô soạn tại con trỏ (hoặc vùng đang chọn) — KHÔNG gửi. Tin sẽ vượt trần
+   * ⇒ không chèn gì (trần `maxLength` của ô không chặn chữ do mã đặt vào). Chữ đổi ⇒ lượt gửi mới, như «AI gợi ý».
+   */
+  const insertSnippet = (snippet: string): boolean => {
+    const el = input.current;
+    const r = insertIntoDraft(text, el?.selectionStart ?? text.length, el?.selectionEnd ?? text.length, snippet);
+    if (r.text.length > STAFF_REPLY_MAX) {
+      toast.error(`Tin sẽ quá ${formatNumber(STAFF_REPLY_MAX)} ký tự — bớt chữ trong ô soạn rồi chèn lại.`);
+      return false;
+    }
+    setText(r.text);
+    setRequestKey(newKey());
+    requestAnimationFrame(() => {
+      const box = input.current;
+      if (!box) return;
+      box.focus();
+      box.setSelectionRange(r.caret, r.caret);
+    });
+    return true;
   };
 
   const mine = thread.assigneeUserId === me;
@@ -385,6 +409,7 @@ export function InboxThreadView({
                 <button type="button" className="inline-flex items-center gap-1 text-violet-700 hover:underline disabled:opacity-50 dark:text-violet-300" disabled={!!pending} onClick={() => void suggest()}>
                   {pending === "suggest" ? <Loader2 className="size-3.5 animate-spin" /> : <Sparkles className="size-3.5" />} AI gợi ý câu trả lời
                 </button>
+                <ComposerTools conversationId={thread.id} disabled={!!pending} onInsert={insertSnippet} />
                 {w.kind === "PAID" ? (
                   <label className="flex items-center gap-1 font-medium text-amber-800 dark:text-amber-200">
                     <input type="checkbox" checked={confirmPaid} onChange={(e) => setConfirmPaid(e.target.checked)} /> Gửi tin tính phí
