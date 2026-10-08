@@ -1,0 +1,31 @@
+{
+  "schema": 1,
+  "mission_id": "saas-acceptance-smoke",
+  "title": "Smoke nghiệm thu khách Chốt Đơn trên production: cấp phát · kích hoạt · đăng nhập email · vỏ · chat web → AI → đơn (P0-D)",
+  "business_goal": "",
+  "status": "RUNNING",
+  "priority": "P2",
+  "risk": "HIGH",
+  "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "worker": null,
+  "worktree": null,
+  "branch": "feat/saas-acceptance-smoke",
+  "base_sha": null,
+  "domains": [],
+  "owned_paths": [
+    "scripts/saas-acceptance.ts",
+    "lib/saas/acceptance.ts",
+    "lib/constants/saas-acceptance.ts",
+    "tests/saas-acceptance.test.ts",
+    "docs/saas/ACCEPTANCE.md",
+    ".github/workflows/ops-vps.yml"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-08T12:24:39.666Z",
+  "updated_at": "2026-10-08T12:24:39.666Z",
+  "last_heartbeat": "2026-10-08T12:24:39.666Z",
+  "definition_of_done": []
+}
