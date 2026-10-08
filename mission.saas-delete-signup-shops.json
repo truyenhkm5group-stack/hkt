@@ -10,19 +10,24 @@
   "worker": "worker:org-delete",
   "worktree": null,
   "branch": "feat/org-offboard-delete",
-  "base_sha": null,
+  "base_sha": "c360b7c662e52d9447fc19a880f8a956851cf764",
   "domains": [],
   "owned_paths": [
-    "scripts/org-offboard.ts",
+    ".github/workflows/ops-vps.yml",
+    "db/index.ts",
+    "lib/platform/audit.ts",
     "lib/platform/offboard.ts",
-    "tests/org-offboard.test.ts"
+    "scripts/org-offboard.ts",
+    "tests/org-offboard.test.ts",
+    "tests/platform-isolation-static.test.ts",
+    "tests/sync-fixtures.test.ts"
   ],
   "dependencies": [],
   "blocked_by": [],
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-08T07:41:17.624Z",
-  "updated_at": "2026-10-08T07:41:17.624Z",
-  "last_heartbeat": "2026-10-08T07:41:17.624Z",
+  "updated_at": "2026-10-08T08:09:37.558Z",
+  "last_heartbeat": "2026-10-08T08:09:37.558Z",
   "definition_of_done": []
 }
