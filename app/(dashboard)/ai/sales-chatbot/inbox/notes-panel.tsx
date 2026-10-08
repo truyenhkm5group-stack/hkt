@@ -52,7 +52,7 @@ export function NotesPanel({ conversationId, notes, canWrite }: { conversationId
       <ul className="space-y-1.5">
         {notes.map((n) => (
           <li key={n.id} className="rounded-md bg-amber-50 px-2 py-1.5 dark:bg-amber-950/30">
-            <div className="flex items-center justify-between gap-2 text-[10.5px] text-muted-foreground">
+            <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
               <span>
                 {n.author} · {formatDateTime(n.at)}
               </span>
