@@ -696,3 +696,4 @@
 {"at":"2026-10-08T08:18:46.155Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"order-confirm-rules-0810","detail":"feat/order-confirm-rules @ be387d7f627d · 1 lệnh kiểm thử"}
 {"at":"2026-10-08T08:19:03.619Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"order-confirm-rules-0810","detail":"#675 cho feat/order-confirm-rules @ be387d7f627d"}
 {"at":"2026-10-08T08:19:32.520Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"VERIFY_PASS","mission":"saas-shell-login-loop","detail":"PASS c360b7c662e52d9447fc19a880f8a956851cf764 2026-10-08T08:19:27.210Z"}
+{"at":"2026-10-08T08:19:44.024Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DONE","mission":"saas-shell-login-loop","detail":"gộp vào main; deploy 37744823972 (c360b7c6) success; verify PASS"}
