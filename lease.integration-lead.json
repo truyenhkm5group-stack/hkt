@@ -1,10 +1,10 @@
 {
   "name": "integration-lead",
   "holder": "DESKTOP-56TH98Y:wt-tech-lead-v2",
-  "purpose": "chuỗi deploy 08/10: #651+#652 → #650 → Số dư AI tiếp theo → thu phí → chatbot-security-3",
+  "purpose": "Integration Lead 08/10: deploy gộp #657–#659, HSLC cutover, #660/#661, master mission SaaS",
   "acquired_at": "2026-10-06T05:55:46.697Z",
-  "heartbeat_at": "2026-10-08T00:22:48.492Z",
-  "expires_at": "2026-10-08T06:22:48.492Z",
+  "heartbeat_at": "2026-10-08T04:57:27.006Z",
+  "expires_at": "2026-10-08T08:57:27.006Z",
   "generation": 1,
   "token_hash": "fa4fd240d30f992e35a5797bf344e6d62ac745c746a5d258579f1abfba181c4f"
 }
