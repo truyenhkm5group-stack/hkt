@@ -1012,3 +1012,4 @@
 {"at":"2026-10-08T21:51:04.971Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"trang-chu-su-that-thuong-mai","detail":"#706 @ c5f6c666da9b → 5374b54fc4be (MERGE_NOW · MEDIUM · gates success)"}
 {"at":"2026-10-08T21:55:58.351Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"CLAIM","mission":"hide-internal-429-flake","detail":"RUNNING · 1 mẫu phạm vi · MEDIUM"}
 {"at":"2026-10-08T21:56:11.188Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"hide-internal-429-flake","detail":"fix/hide-internal-429-flake @ 1f8626dc15bf · 1 lệnh kiểm thử"}
+{"at":"2026-10-08T21:56:34.175Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"hide-internal-429-flake","detail":"#709 cho fix/hide-internal-429-flake @ 1f8626dc15bf"}
