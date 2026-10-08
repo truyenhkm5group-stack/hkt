@@ -3,7 +3,7 @@
   "mission_id": "launch-gate",
   "title": "Launch Gate khách trả tiền đầu tiên: bảng kiểm Admin · Khách · Bảo mật có bằng chứng (nguồn sự thật cho readiness)",
   "business_goal": "",
-  "status": "INTEGRATING",
+  "status": "VERIFYING",
   "priority": "P0",
   "risk": "LOW",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -22,11 +22,13 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-08T10:23:16.019Z",
-  "updated_at": "2026-10-08T11:07:42.313Z",
+  "updated_at": "2026-10-08T12:50:16.617Z",
   "last_heartbeat": "2026-10-08T10:23:26.997Z",
   "definition_of_done": [],
   "evidence": {
-    "merged": "#678 → db0ac290d127f8b01077297dd905c66d09443a2c"
+    "merged": "#678 → db0ac290d127f8b01077297dd905c66d09443a2c",
+    "verify": "PASS 67fc09b108a931137fc888f6d71ba6744cc956b9 2026-10-08T12:50:10.060Z",
+    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/37772436572"
   },
   "handoff": {
     "branch": "docs/launch-gate",
