@@ -555,6 +555,7 @@ import { testAiCustomerSend } from "./ai-customer-send.test";
 import { testSaasL5BillingTrial } from "./saas-l5-billing-trial.test";
 import { testSaasInternalPlan } from "./saas-internal-plan.test";
 import { testSaasHideInternal } from "./saas-hide-internal.test";
+import { testSaasSignupSubscription } from "./saas-signup-subscription.test";
 import { testPlatformSaas } from "./platform-saas.test";
 import { testTenantAttack } from "./tenant-attack.test";
 import { testAiSalesIsolation } from "./ai-sales-isolation.test";
@@ -2918,6 +2919,9 @@ async function main() {
   // Che dữ liệu AI nội bộ khỏi khách (07/10/2026): DTO máy chủ + lưu cấu hình giữ động cơ AI + quét mã + khối vận hành —
   // tổ chức THẬT `hi-shop`, tự cấp, tự dọn; khoá bí mật kiểm thử trả lại nguyên trạng trong finally.
   await testSaasHideInternal();
+  // F-02 (kiểm vỏ khách 08/10/2026): cửa hàng tự đăng ký qua /start có thuê bao sản phẩm theo module mẫu vừa bật, lỗi không làm
+  // hỏng đăng ký mà để vết, trang Gói của khách không in nhãn nội bộ, sửa bù chạy thử không ghi — tổ chức THẬT `ssu-*`, tự dọn.
+  await testSaasSignupSubscription();
   // Sổ kinh tế SaaS + Owner Cockpit (0203): hai tổ chức THẬT `saas-a` / `saas-b`, tự cấp, tự dọn.
   await testPlatformSaas();
   await testPlatformUi();

@@ -186,6 +186,8 @@ const DOC_MOI_TRUONG_DA_KHAI: Record<string, string> = {
     "Đặt PLATFORM_SIGNUP_MODE=open trong khối try và TRẢ LẠI giá trị cũ ở finally — cùng mẫu với quick-start.test.ts: trần đăng ký là min(biến môi trường, cài đặt) nên bài kiểm phải tự dựng cả hai vế, không phụ thuộc máy đang chạy.",
   "tests/quick-start.test.ts":
     "ĐẶT PLATFORM_SIGNUP_MODE = open để đăng ký nhanh chạy được — ĐẦU VÀO của phép kiểm, trả lại nguyên trạng trong finally. Biến AI dùng chung (PLATFORM_AI_*) đi qua bộ đọc giả `envOf`, không đọc môi trường của máy.",
+  "tests/saas-signup-subscription.test.ts":
+    "ĐẶT PLATFORM_SIGNUP_MODE = open để /start (đăng ký nhanh + trình hướng dẫn) dựng được cửa hàng — ĐẦU VÀO của phép kiểm, cùng mẫu quick-start, trả lại nguyên trạng trong finally; kết luận không phụ thuộc máy đang chạy khai cờ gì.",
   "tests/onboarding.test.ts":
     "ĐẶT PLATFORM_SIGNUP_MODE (off / invite / open) để dựng từng cửa vào của /start — đó là ĐẦU VÀO của phép kiểm, trả lại nguyên trạng trong finally; kết luận không phụ thuộc máy đang chạy khai cờ gì.",
   "tests/pilot-ops.test.ts":
