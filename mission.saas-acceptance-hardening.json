@@ -3,7 +3,7 @@
   "mission_id": "saas-acceptance-hardening",
   "title": "Cứng hoá ops saas-acceptance sau review #690: chặn chiếm mã, loại workspace thử khỏi buồng lái",
   "business_goal": "",
-  "status": "RUNNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -36,7 +36,18 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-08T18:04:05.439Z",
-  "updated_at": "2026-10-08T18:04:05.439Z",
-  "last_heartbeat": "2026-10-08T18:04:05.439Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-08T18:04:20.142Z",
+  "last_heartbeat": "2026-10-08T18:04:20.142Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "fix/saas-acceptance-hardening",
+    "sha": "31bce102b4a792b952f5f3d25d90634457b8d983",
+    "at": "2026-10-08T18:04:20.142Z",
+    "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+    "title": "Cứng hoá ops saas-acceptance sau review #690: chặn chiếm mã, loại workspace thử khỏi buồng lái",
+    "summary": "Sửa review #690: lá chắn sở hữu + chốt NEXT_RUNTIME + giữ chỗ mã/tên miền con nghiệm thu; loại workspace thử khỏi sổ kinh tế, buồng lái, phân bổ chi phí, kinh tế sản phẩm; L1 xoay mật khẩu, L2 phiên 15 phút, L3 bài quét, L4 SECURITY.md",
+    "tests": [
+      "tsc sạch (cây tương đương); eslint sạch; testSaasAcceptance + onboarding + quick-start + platform-saas đạt; tĩnh sau commit đạt; đột biến 10/10"
+    ]
+  }
 }
