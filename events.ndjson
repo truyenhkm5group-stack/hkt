@@ -499,3 +499,4 @@
 {"at":"2026-10-08T00:42:42.149Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"ai-balance-hardening","detail":"#650 @ 6ee19a60eb27 → b6c9951cb76a (MERGE_ISOLATED · HIGH · gates success)"}
 {"at":"2026-10-08T00:43:23.596Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DEPLOY_DISPATCHED","detail":"b6c9951cb76a · run 37709225559 https://github.com/truyenhkm5group-stack/hkt/actions/runs/37709225559"}
 {"at":"2026-10-08T00:47:53.531Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"OVERLAP_DETECTED","mission":"ai-balance-followup","detail":"OVERLAP với ai-balance-hardening: phạm vi lib/billing/ai-balance.ts, lib/billing/ai-usage-charge.ts, tests/ai-balance.test.ts ⇒ tuần tự hoá (--after=ai-balance-hardening) hoặc khai cách tích hợp (--accept-overlap=\"…\")"}
+{"at":"2026-10-08T00:48:09.257Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"CLAIM","mission":"ai-balance-followup","detail":"PLANNING · 19 mẫu phạm vi · HIGH"}
