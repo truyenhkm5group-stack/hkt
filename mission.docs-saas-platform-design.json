@@ -1,0 +1,30 @@
+{
+  "schema": 1,
+  "mission_id": "docs-saas-platform-design",
+  "title": "Thiết kế nền tảng SaaS (R0): hoá đơn vượt gói · Continuous Auditor · quy đổi thang rủi ro · chi phí AI theo loại việc + DAG master mission",
+  "business_goal": "",
+  "status": "RUNNING",
+  "priority": "P1",
+  "risk": "MEDIUM",
+  "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "worker": "worker:saas-platform-design",
+  "worktree": null,
+  "branch": "docs/saas-platform-design",
+  "base_sha": "051f49a55160dd3d650a1259abe9df6b12b89f92",
+  "domains": [],
+  "owned_paths": [
+    "docs/saas/OVERAGE.md",
+    "docs/saas/auditor/**",
+    "docs/saas/RISK_SCALE.md",
+    "docs/saas/AI_COST_WORKLOAD.md",
+    "docs/revenue-os/MASTER_MISSION_STATUS.md"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-08T04:40:14.153Z",
+  "updated_at": "2026-10-08T04:40:14.153Z",
+  "last_heartbeat": "2026-10-08T04:40:14.153Z",
+  "definition_of_done": []
+}
