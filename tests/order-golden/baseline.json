@@ -1,0 +1,517 @@
+{
+  "datasetCases": 33,
+  "variants": {
+    "AUTO_CONFIRM_OFF": {
+      "metrics": {
+        "order_intent_recall": [29, 29],
+        "order_intent_precision": [29, 30],
+        "sku_accuracy": [29, 29],
+        "quantity_accuracy": [34, 34],
+        "phone_accuracy": [28, 29],
+        "address_component_accuracy": [87, 87],
+        "price_accuracy": [34, 34],
+        "total_accuracy": [29, 29],
+        "false_auto_confirm_rate": [4, 11],
+        "missed_confirm_rate": [0, 22],
+        "duplicate_order_rate": [0, 30],
+        "missing_order_rate": [0, 29],
+        "human_correction_rate": [1, 29]
+      },
+      "critical": [
+        {
+          "metric": "false_auto_confirm_rate",
+          "cases": ["ok-de-hoi-chong", "phu-dinh-co-chu-chot", "dia-chi-chua-ghep-xa", "xac-nhan-chi-dau-cau"]
+        }
+      ],
+      "cases": {
+        "mot-sku": {
+          "orders": ["CONFIRMED"],
+          "confirmedEvents": [1],
+          "wrong": [],
+          "status": "OPEN",
+          "toolErrors": []
+        },
+        "nhieu-sku": {
+          "orders": ["CONFIRMED"],
+          "confirmedEvents": [1],
+          "wrong": [],
+          "status": "OPEN",
+          "toolErrors": []
+        },
+        "doi-so-luong": {
+          "orders": ["CONFIRMED"],
+          "confirmedEvents": [1],
+          "wrong": [],
+          "status": "OPEN",
+          "toolErrors": []
+        },
+        "doi-dia-chi": {
+          "orders": ["CONFIRMED"],
+          "confirmedEvents": [1],
+          "wrong": [],
+          "status": "OPEN",
+          "toolErrors": []
+        },
+        "sua-sdt": {
+          "orders": ["CONFIRMED"],
+          "confirmedEvents": [1],
+          "wrong": [],
+          "status": "OPEN",
+          "toolErrors": []
+        },
+        "sua-sdt-tao-lai-khach": {
+          "orders": ["CONFIRMED"],
+          "confirmedEvents": [1],
+          "wrong": ["phone"],
+          "status": "OPEN",
+          "toolErrors": []
+        },
+        "ten-goi-tat": {
+          "orders": ["CONFIRMED"],
+          "confirmedEvents": [1],
+          "wrong": [],
+          "status": "OPEN",
+          "toolErrors": []
+        },
+        "go-sai-tieng-long": {
+          "orders": ["CONFIRMED"],
+          "confirmedEvents": [1],
+          "wrong": [],
+          "status": "OPEN",
+          "toolErrors": []
+        },
+        "nhieu-tin-roi": {
+          "orders": ["CONFIRMED"],
+          "confirmedEvents": [1],
+          "wrong": [],
+          "status": "OPEN",
+          "toolErrors": []
+        },
+        "hoi-gia-roi-mua": {
+          "orders": ["CONFIRMED"],
+          "confirmedEvents": [1],
+          "wrong": [],
+          "status": "OPEN",
+          "toolErrors": []
+        },
+        "tu-choi-roi-quay-lai": {
+          "orders": ["CONFIRMED"],
+          "confirmedEvents": [1],
+          "wrong": [],
+          "status": "OPEN",
+          "toolErrors": []
+        },
+        "upsell": {
+          "orders": ["CONFIRMED"],
+          "confirmedEvents": [1],
+          "wrong": [],
+          "status": "OPEN",
+          "toolErrors": []
+        },
+        "nhac-don-cu": {
+          "orders": ["CONFIRMED"],
+          "confirmedEvents": [1],
+          "wrong": [],
+          "status": "HANDOFF",
+          "toolErrors": []
+        },
+        "webhook-trung": {
+          "orders": ["CONFIRMED"],
+          "confirmedEvents": [1],
+          "wrong": [],
+          "status": "HANDOFF",
+          "toolErrors": []
+        },
+        "tiep-quan-nguoi": {
+          "orders": ["NEW"],
+          "confirmedEvents": [0],
+          "wrong": [],
+          "status": "HANDOFF",
+          "toolErrors": []
+        },
+        "ai-tiep-tuc": {
+          "orders": ["CONFIRMED"],
+          "confirmedEvents": [1],
+          "wrong": [],
+          "status": "OPEN",
+          "toolErrors": []
+        },
+        "thieu-thong-tin": {
+          "orders": [],
+          "confirmedEvents": [],
+          "wrong": null,
+          "status": "OPEN",
+          "toolErrors": ["create_customer", "create_draft_order"]
+        },
+        "sdt-ho-so-nguoi-khac": {
+          "orders": ["CONFIRMED"],
+          "confirmedEvents": [1],
+          "wrong": [],
+          "status": "OPEN",
+          "toolErrors": []
+        },
+        "dat-ho-nguoi-than": {
+          "orders": ["CONFIRMED"],
+          "confirmedEvents": [1],
+          "wrong": [],
+          "status": "OPEN",
+          "toolErrors": []
+        },
+        "dong-y-ok-tron": {
+          "orders": ["CONFIRMED"],
+          "confirmedEvents": [1],
+          "wrong": [],
+          "status": "OPEN",
+          "toolErrors": []
+        },
+        "dong-y-u": {
+          "orders": ["NEW"],
+          "confirmedEvents": [0],
+          "wrong": [],
+          "status": "OPEN",
+          "toolErrors": ["confirm_order"]
+        },
+        "ok-de-hoi-chong": {
+          "orders": ["CONFIRMED"],
+          "confirmedEvents": [1],
+          "wrong": [],
+          "status": "OPEN",
+          "toolErrors": []
+        },
+        "phu-dinh-co-chu-chot": {
+          "orders": ["CONFIRMED"],
+          "confirmedEvents": [1],
+          "wrong": [],
+          "status": "OPEN",
+          "toolErrors": []
+        },
+        "chua-dong-y-du-thong-tin": {
+          "orders": ["NEW"],
+          "confirmedEvents": [0],
+          "wrong": [],
+          "status": "OPEN",
+          "toolErrors": ["confirm_order"]
+        },
+        "hoi-gia-roi-thoi": {
+          "orders": [],
+          "confirmedEvents": [],
+          "wrong": null,
+          "status": "OPEN",
+          "toolErrors": []
+        },
+        "tu-choi-han": {
+          "orders": [],
+          "confirmedEvents": [],
+          "wrong": null,
+          "status": "OPEN",
+          "toolErrors": []
+        },
+        "huy-sau-tom-tat": {
+          "orders": ["NEW"],
+          "confirmedEvents": [0],
+          "wrong": null,
+          "status": "OPEN",
+          "toolErrors": []
+        },
+        "dia-chi-chua-ghep-xa": {
+          "orders": ["CONFIRMED"],
+          "confirmedEvents": [1],
+          "wrong": [],
+          "status": "OPEN",
+          "toolErrors": []
+        },
+        "bien-the": {
+          "orders": ["CONFIRMED"],
+          "confirmedEvents": [1],
+          "wrong": [],
+          "status": "OPEN",
+          "toolErrors": []
+        },
+        "quy-doi-don-vi": {
+          "orders": ["CONFIRMED"],
+          "confirmedEvents": [1],
+          "wrong": [],
+          "status": "OPEN",
+          "toolErrors": []
+        },
+        "mat-trang-thai-goi-lai": {
+          "orders": ["CONFIRMED"],
+          "confirmedEvents": [1],
+          "wrong": [],
+          "status": "OPEN",
+          "toolErrors": []
+        },
+        "xac-nhan-chi-dau-cau": {
+          "orders": ["CONFIRMED"],
+          "confirmedEvents": [1],
+          "wrong": [],
+          "status": "OPEN",
+          "toolErrors": []
+        },
+        "dia-chi-cu-viet-tat": {
+          "orders": ["CONFIRMED"],
+          "confirmedEvents": [1],
+          "wrong": [],
+          "status": "OPEN",
+          "toolErrors": []
+        }
+      }
+    },
+    "AUTO_CONFIRM_ON": {
+      "metrics": {
+        "order_intent_recall": [29, 29],
+        "order_intent_precision": [29, 30],
+        "sku_accuracy": [29, 29],
+        "quantity_accuracy": [34, 34],
+        "phone_accuracy": [28, 29],
+        "address_component_accuracy": [87, 87],
+        "price_accuracy": [34, 34],
+        "total_accuracy": [29, 29],
+        "false_auto_confirm_rate": [8, 11],
+        "missed_confirm_rate": [0, 22],
+        "duplicate_order_rate": [0, 30],
+        "missing_order_rate": [0, 29],
+        "human_correction_rate": [1, 29]
+      },
+      "critical": [
+        {
+          "metric": "false_auto_confirm_rate",
+          "cases": ["tiep-quan-nguoi", "dong-y-u", "ok-de-hoi-chong", "phu-dinh-co-chu-chot", "chua-dong-y-du-thong-tin", "huy-sau-tom-tat", "dia-chi-chua-ghep-xa", "xac-nhan-chi-dau-cau"]
+        }
+      ],
+      "cases": {
+        "mot-sku": {
+          "orders": ["CONFIRMED"],
+          "confirmedEvents": [1],
+          "wrong": [],
+          "status": "OPEN",
+          "toolErrors": []
+        },
+        "nhieu-sku": {
+          "orders": ["CONFIRMED"],
+          "confirmedEvents": [1],
+          "wrong": [],
+          "status": "OPEN",
+          "toolErrors": []
+        },
+        "doi-so-luong": {
+          "orders": ["CONFIRMED"],
+          "confirmedEvents": [1],
+          "wrong": [],
+          "status": "OPEN",
+          "toolErrors": []
+        },
+        "doi-dia-chi": {
+          "orders": ["CONFIRMED"],
+          "confirmedEvents": [1],
+          "wrong": [],
+          "status": "OPEN",
+          "toolErrors": []
+        },
+        "sua-sdt": {
+          "orders": ["CONFIRMED"],
+          "confirmedEvents": [1],
+          "wrong": [],
+          "status": "OPEN",
+          "toolErrors": []
+        },
+        "sua-sdt-tao-lai-khach": {
+          "orders": ["CONFIRMED"],
+          "confirmedEvents": [1],
+          "wrong": ["phone"],
+          "status": "OPEN",
+          "toolErrors": []
+        },
+        "ten-goi-tat": {
+          "orders": ["CONFIRMED"],
+          "confirmedEvents": [1],
+          "wrong": [],
+          "status": "OPEN",
+          "toolErrors": []
+        },
+        "go-sai-tieng-long": {
+          "orders": ["CONFIRMED"],
+          "confirmedEvents": [1],
+          "wrong": [],
+          "status": "OPEN",
+          "toolErrors": []
+        },
+        "nhieu-tin-roi": {
+          "orders": ["CONFIRMED"],
+          "confirmedEvents": [1],
+          "wrong": [],
+          "status": "OPEN",
+          "toolErrors": []
+        },
+        "hoi-gia-roi-mua": {
+          "orders": ["CONFIRMED"],
+          "confirmedEvents": [1],
+          "wrong": [],
+          "status": "OPEN",
+          "toolErrors": []
+        },
+        "tu-choi-roi-quay-lai": {
+          "orders": ["CONFIRMED"],
+          "confirmedEvents": [1],
+          "wrong": [],
+          "status": "OPEN",
+          "toolErrors": []
+        },
+        "upsell": {
+          "orders": ["CONFIRMED"],
+          "confirmedEvents": [1],
+          "wrong": [],
+          "status": "OPEN",
+          "toolErrors": []
+        },
+        "nhac-don-cu": {
+          "orders": ["CONFIRMED"],
+          "confirmedEvents": [1],
+          "wrong": [],
+          "status": "HANDOFF",
+          "toolErrors": []
+        },
+        "webhook-trung": {
+          "orders": ["CONFIRMED"],
+          "confirmedEvents": [1],
+          "wrong": [],
+          "status": "HANDOFF",
+          "toolErrors": []
+        },
+        "tiep-quan-nguoi": {
+          "orders": ["CONFIRMED"],
+          "confirmedEvents": [1],
+          "wrong": [],
+          "status": "HANDOFF",
+          "toolErrors": []
+        },
+        "ai-tiep-tuc": {
+          "orders": ["CONFIRMED"],
+          "confirmedEvents": [1],
+          "wrong": [],
+          "status": "OPEN",
+          "toolErrors": []
+        },
+        "thieu-thong-tin": {
+          "orders": [],
+          "confirmedEvents": [],
+          "wrong": null,
+          "status": "OPEN",
+          "toolErrors": ["create_customer", "create_draft_order"]
+        },
+        "sdt-ho-so-nguoi-khac": {
+          "orders": ["CONFIRMED"],
+          "confirmedEvents": [1],
+          "wrong": [],
+          "status": "OPEN",
+          "toolErrors": []
+        },
+        "dat-ho-nguoi-than": {
+          "orders": ["CONFIRMED"],
+          "confirmedEvents": [1],
+          "wrong": [],
+          "status": "OPEN",
+          "toolErrors": []
+        },
+        "dong-y-ok-tron": {
+          "orders": ["CONFIRMED"],
+          "confirmedEvents": [1],
+          "wrong": [],
+          "status": "OPEN",
+          "toolErrors": []
+        },
+        "dong-y-u": {
+          "orders": ["CONFIRMED"],
+          "confirmedEvents": [1],
+          "wrong": [],
+          "status": "OPEN",
+          "toolErrors": ["confirm_order"]
+        },
+        "ok-de-hoi-chong": {
+          "orders": ["CONFIRMED"],
+          "confirmedEvents": [1],
+          "wrong": [],
+          "status": "OPEN",
+          "toolErrors": []
+        },
+        "phu-dinh-co-chu-chot": {
+          "orders": ["CONFIRMED"],
+          "confirmedEvents": [1],
+          "wrong": [],
+          "status": "OPEN",
+          "toolErrors": []
+        },
+        "chua-dong-y-du-thong-tin": {
+          "orders": ["CONFIRMED"],
+          "confirmedEvents": [1],
+          "wrong": [],
+          "status": "OPEN",
+          "toolErrors": ["confirm_order"]
+        },
+        "hoi-gia-roi-thoi": {
+          "orders": [],
+          "confirmedEvents": [],
+          "wrong": null,
+          "status": "OPEN",
+          "toolErrors": []
+        },
+        "tu-choi-han": {
+          "orders": [],
+          "confirmedEvents": [],
+          "wrong": null,
+          "status": "OPEN",
+          "toolErrors": []
+        },
+        "huy-sau-tom-tat": {
+          "orders": ["CONFIRMED"],
+          "confirmedEvents": [1],
+          "wrong": null,
+          "status": "OPEN",
+          "toolErrors": []
+        },
+        "dia-chi-chua-ghep-xa": {
+          "orders": ["CONFIRMED"],
+          "confirmedEvents": [1],
+          "wrong": [],
+          "status": "OPEN",
+          "toolErrors": []
+        },
+        "bien-the": {
+          "orders": ["CONFIRMED"],
+          "confirmedEvents": [1],
+          "wrong": [],
+          "status": "OPEN",
+          "toolErrors": []
+        },
+        "quy-doi-don-vi": {
+          "orders": ["CONFIRMED"],
+          "confirmedEvents": [1],
+          "wrong": [],
+          "status": "OPEN",
+          "toolErrors": []
+        },
+        "mat-trang-thai-goi-lai": {
+          "orders": ["CONFIRMED"],
+          "confirmedEvents": [1],
+          "wrong": [],
+          "status": "OPEN",
+          "toolErrors": []
+        },
+        "xac-nhan-chi-dau-cau": {
+          "orders": ["CONFIRMED"],
+          "confirmedEvents": [1],
+          "wrong": [],
+          "status": "OPEN",
+          "toolErrors": []
+        },
+        "dia-chi-cu-viet-tat": {
+          "orders": ["CONFIRMED"],
+          "confirmedEvents": [1],
+          "wrong": [],
+          "status": "OPEN",
+          "toolErrors": []
+        }
+      }
+    }
+  }
+}
