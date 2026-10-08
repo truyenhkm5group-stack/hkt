@@ -3,7 +3,7 @@
   "mission_id": "saas-shell-gate-redirects",
   "title": "Vỏ khách không còn trang trắng khi thiếu quyền / module tắt: requirePermission và layout chuyển người vỏ về trang nhà vỏ, không về / hay trang trong cùng nhóm",
   "business_goal": "",
-  "status": "RUNNING",
+  "status": "PR_READY",
   "priority": "P1",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -25,7 +25,18 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-08T12:00:41.153Z",
-  "updated_at": "2026-10-08T12:00:41.153Z",
-  "last_heartbeat": "2026-10-08T12:00:41.153Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-08T13:31:33.169Z",
+  "last_heartbeat": "2026-10-08T13:31:33.169Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "fix/shell-gate-redirects",
+    "sha": "e1b521e0f18517955a1abb15b4aa16be2958afce",
+    "at": "2026-10-08T13:31:33.169Z",
+    "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+    "title": "Vỏ khách không còn trang trắng khi thiếu quyền / module tắt: requirePermission và layout chuyển người vỏ về trang nhà vỏ, không về / hay trang trong cùng nhóm",
+    "summary": "Người vỏ thiếu quyền về trang nhà vỏ ?forbidden=1 kèm câu giải thích thay vì / (vòng trắng); module tắt: trang /module-disabled ra khỏi nhóm (dashboard), nút ra là <a> tải cả trang; chỉ đổi ĐÍCH chuyển hướng, không đổi luật quyền",
+    "tests": [
+      "tsc + eslint sạch; npm run build một mình đạt; tests/shell-gate-redirects.test.ts mới (thuần 8 vai trò × 64 tổ hợp quyền, PGlite, quét nguồn) đạt; saas-shell, shell-login-landing, platform-rbac, access-control, help-guides, platform-modules, platform-ui, smoke-coverage, saas-hide-internal, platform-isolation-static, scope-enforcement, saas-signup-subscription, tenant-attack, repo-integrity, use-server-exports, action-wiring đạt; tĩnh sau commit đạt; đột biến 13/13; đo Chrome headless vòng trắng 6.000+ → 1-2 lần điều hướng"
+    ]
+  }
 }
