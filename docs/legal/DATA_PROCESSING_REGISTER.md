@@ -79,6 +79,9 @@
 
 ## 5. Mẫu bảng retention đề xuất (chủ sở hữu + luật sư + kế toán điền số)
 
+> Khung có kiểu: `lib/constants/retention.ts` — mọi thời hạn `null` (CHƯA QUYẾT = không xoá) cho tới khi F / G / E xác nhận;
+> con số dưới đây chỉ là đề xuất, nằm ở trường `proposal` dạng chữ.
+
 | Loại | Giữ trong thời gian thuê | Sau chấm dứt | Căn cứ giữ | Xoá bằng |
 |---|---|---|---|---|
 | Hội thoại, ảnh, AI output (D4, D9) | [N] tháng kể từ tin cuối (đề xuất 24) | 90 ngày rồi xoá (Điều khoản 7) | Hợp đồng | Job `retention-sweep` theo tổ chức |
