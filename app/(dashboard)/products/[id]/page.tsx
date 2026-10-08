@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
-import { AlertTriangle, Boxes, ExternalLink, Shirt, ShoppingBag, Warehouse } from "lucide-react";
+import { AlertTriangle, Boxes, ExternalLink, Plus, Shirt, ShoppingBag, Warehouse } from "lucide-react";
 import { ProductSalesChart } from "@/components/charts/product-sales-chart";
 import { MetricCard } from "@/components/metric-card";
 import { JsonViewer } from "@/components/misc";
@@ -41,9 +41,11 @@ function isPast(key: string) {
   return new Date(`${key}T00:00:00Z`).getTime() < Date.now();
 }
 
-export default async function ProductDetailPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function ProductDetailPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams?: Promise<{ edit?: string }> }) {
   const user = await requirePermission("products:view");
   const { id } = await params;
+  // `?edit=1` (nút «Thêm mẫu mã» ở đầu trang): mở sẵn form sửa — HSLC 08/10/2026 không tìm thấy nút vì form nằm gập trong một khối ở giữa trang.
+  const openEdit = ((await searchParams) ?? {}).edit === "1";
   const product = await getProductDetail(id);
   if (!product) {
     const productId = await findProductIdByVariant(id);
@@ -61,7 +63,8 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
   const manual = isManualRecordId(product.id);
   const pancakeUrl = manual ? null : pancakePosProductsUrl(env.pancake.shopId);
   const unit = manualProductUnit(product.raw);
-  const editable = manual && (await productCreateGate(user)).allowed;
+  const gate = manual ? await productCreateGate(user) : null;
+  const editable = gate?.allowed === true;
 
   return (
     <div className="space-y-5">
@@ -81,6 +84,14 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
                 <Link href={`/models/${mau.id}`}>Vòng đời mẫu</Link>
               </Button>
             ) : null}
+            {editable ? (
+              <Button asChild size="sm">
+                <Link href="?edit=1#sua-san-pham">
+                  <Plus className="size-4" /> Thêm mẫu mã
+                </Link>
+              </Button>
+            ) : null}
+            {gate && !gate.allowed ? <span className="self-center text-xs text-muted-foreground">Không sửa / thêm mẫu mã ở đây: {gate.reason}</span> : null}
             <ModuleSyncButton viewer={user} job="pancake-products" label="Đồng bộ sản phẩm từ Pancake" />
             {pancakeUrl ? (
               <Button asChild variant="outline" size="sm">
@@ -280,8 +291,8 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
           </SectionCard>
 
           {editable ? (
-            <SectionCard title="Sửa sản phẩm" description="Mã tạo trên ERP — sửa tên, mã, đơn vị, giá, thêm mẫu mã" hint="Mẫu mã đã có không xoá ở đây (xoá là mất dòng phiếu kho của nó): thôi bán thì bỏ ô «Đang bán». Tồn kho đổi bằng phiếu Nhập hàng / Kiểm kê, không đổi ở form này.">
-              <details>
+            <SectionCard id="sua-san-pham" title="Sửa sản phẩm" description="Mã tạo trên ERP — sửa tên, mã, đơn vị, giá, thêm mẫu mã (nút «Thêm mẫu mã» ở cuối form)" hint="Mẫu mã đã có không xoá ở đây (xoá là mất dòng phiếu kho của nó): thôi bán thì bỏ ô «Đang bán». Tồn kho đổi bằng phiếu Nhập hàng / Kiểm kê, không đổi ở form này.">
+              <details open={openEdit}>
                 <summary className="cursor-pointer text-sm font-semibold text-primary">Mở form sửa</summary>
                 <div className="mt-4">
                   {/* `key` theo mốc sửa: lưu xong trang dựng lại với mốc mới ⇒ form nạp lại mẫu mã vừa thêm (kèm id). */}
