@@ -26,10 +26,12 @@
   ],
   "dependencies": [],
   "blocked_by": [],
-  "related_prs": [],
+  "related_prs": [
+    670
+  ],
   "migration_reservations": [],
   "created_at": "2026-10-08T05:35:45.169Z",
-  "updated_at": "2026-10-08T06:46:05.949Z",
+  "updated_at": "2026-10-08T06:46:22.198Z",
   "last_heartbeat": "2026-10-08T06:46:05.949Z",
   "definition_of_done": [
     "/start (và đường đăng ký nhanh) mở thuê bao sản phẩm đúng thương hiệu, idempotent, dùng lại hàm sẵn có",
