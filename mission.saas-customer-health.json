@@ -3,7 +3,7 @@
   "mission_id": "saas-customer-health",
   "title": "P1: danh sách / chi tiết khách cho admin thấy sức khoẻ trong < 30 giây (Messenger · AI · đăng nhập · đơn · hạn mức · vấn đề) — chỉ dữ liệu thật",
   "business_goal": "",
-  "status": "RUNNING",
+  "status": "PR_READY",
   "priority": "P1",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -25,7 +25,18 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-08T10:13:22.566Z",
-  "updated_at": "2026-10-08T10:13:22.566Z",
-  "last_heartbeat": "2026-10-08T10:13:22.566Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-08T12:38:23.943Z",
+  "last_heartbeat": "2026-10-08T12:38:23.943Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "feat/customer-health",
+    "sha": "bddfed44e8c3eba10face6b33f9e6ab1e89907b5",
+    "at": "2026-10-08T12:38:23.943Z",
+    "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+    "title": "P1: danh sách / chi tiết khách cho admin thấy sức khoẻ trong < 30 giây (Messenger · AI · đăng nhập · đơn · hạn mức · vấn đề) — chỉ dữ liệu thật",
+    "summary": "Danh sách khách /platform/customers phân mức Nguy cấp · Cần chú ý · Chưa đủ dữ liệu · Khoẻ · Đã dừng kèm lý do có số và mốc; mức = lý do nặng nhất (không điểm tổng); thiếu tín hiệu không bao giờ thành Khoẻ; một lượt gom ~9 câu ở CSDL nhà, không mở CSDL tổ chức; khối Sức khoẻ ở trang chi tiết",
+    "tests": [
+      "tsc + eslint sạch; npm run build một mình đạt; tests/customer-health.test.ts (thuần + mã nguồn + PGlite 3 tổ chức) đạt; ai-sales-health, ai-usage, platform-saas, saas-platform, ai-balance-usage đạt trên commit đã rebase; hợp đồng tĩnh sau commit đạt; đột biến 14/14 bị giết; dựng thử Chrome headless 1.150 px không cuộn ngang"
+    ]
+  }
 }
