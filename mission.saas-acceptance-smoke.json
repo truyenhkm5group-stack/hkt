@@ -3,7 +3,7 @@
   "mission_id": "saas-acceptance-smoke",
   "title": "Smoke nghiệm thu khách Chốt Đơn trên production",
   "business_goal": "",
-  "status": "INTEGRATING",
+  "status": "VERIFYING",
   "priority": "P2",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -36,11 +36,13 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-08T12:24:39.666Z",
-  "updated_at": "2026-10-08T17:30:17.572Z",
+  "updated_at": "2026-10-08T21:14:36.895Z",
   "last_heartbeat": "2026-10-08T14:40:07.684Z",
   "definition_of_done": [],
   "evidence": {
-    "merged": "#690 → 5ce11027ad9fd0797d8fee2ddca1a8c842d02b8e"
+    "merged": "#690 → 5ce11027ad9fd0797d8fee2ddca1a8c842d02b8e",
+    "verify": "PASS c7183395051955e6cff5343a787e9df97d71d12b 2026-10-08T21:14:30.715Z",
+    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/37838226087"
   },
   "handoff": {
     "branch": "feat/saas-acceptance-smoke",
