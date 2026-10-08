@@ -1,0 +1,8 @@
+{
+  "pr": 669,
+  "sha": "2c18494334e53d195e3ef0c775470d0d38af5042",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-08T06:46:48.504Z",
+  "note": "Review độc lập chỉ đọc 08/10: chặn ghi khoá AI kín trong guard() theo loại connector, dùng customerFacing(), không isHome mới; đường người vận hành và mọi đường ĐỌC khoá (bot, Media, Săn khách sỉ) không đổi; câu gốc vẫn tới log/người vận hành; hai bài kiểm đổi kỳ vọng chặt hơn, không nới. LOW sau: thông báo ngưỡng mềm BYOK vẫn ghi USD (hỏi chủ shop), customerAiBuilderView gửi limits có maxTokensPe"
+}
