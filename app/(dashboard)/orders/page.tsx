@@ -37,7 +37,7 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
     ẩn-khỏi-bộ-lọc của `orders.stage`. Truy vấn nghiệp vụ, ORDER_OUTCOME và bộ lọc giữ nguyên — danh sách
     đơn KHÔNG nhận bộ lọc custom mặc định ở Phase 2.
   */
-  const [{ rows, total, pageCount }, facets, summary, meta, stageOptions, copy, createGate, needsReview] = await Promise.all([listOrders(params), orderFacets(params), orderSummary(params), getListMetadata("order", "default", user), getSystemStatusOptions("order", "stage"), getBrandCopy(user), manualOrderGate(user), orderNeedsReviewCount(params)]);
+  const [{ rows, total, pageCount }, facets, summary, meta, stageOptions, , createGate, needsReview] = await Promise.all([listOrders(params), orderFacets(params), orderSummary(params), getListMetadata("order", "default", user), getSystemStatusOptions("order", "stage"), getBrandCopy(user), manualOrderGate(user), orderNeedsReviewCount(params)]);
   // Phí giao đồng giá: chỉ tổ chức tạo đơn tay + người cấu hình được.
   const deliveryFee = createGate.allowed && can(user, "settings:manage") ? { fee: await loadManualDeliveryFee(), autoConfirm: await loadAutoConfirmComplete() } : null;
   // Tạo / in vận đơn hàng loạt (POS tự chủ): chỉ tổ chức tạo đơn tay + quyền vận đơn + hãng có kết nối đang bật.
@@ -98,10 +98,10 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
       */}
       <StatStrip
         items={[
-          { label: "Đơn trong bộ lọc", value: formatNumber(summary.orders), note: `${formatNumber(summary.quantity)} sản phẩm` },
-          { label: "Doanh thu lên đơn", value: formatVND(summary.revenue, { compact: true }), hint: "Tiền khách chốt lúc lên đơn, chưa nói gì về việc giao được hay thu được tiền." },
-          { label: "Giao thành công", value: formatNumber(summary.success), tone: "green", hint: `Kết luận theo chứng từ ${copy.name("SHIPPING")} rồi tới COD thực thu — không theo trạng thái ${copy.name("ORDER_SOURCE")}.` },
-          { label: "COD", value: formatVND(summary.cod, { compact: true }), hint: "Tổng tiền thu hộ khai báo trên các đơn đang lọc. Đã thu được bao nhiêu thì xem Đối soát COD." },
+          { label: "Đơn trong bộ lọc", value: formatNumber(summary.orders), note: `${formatNumber(summary.quantity)} sản phẩm${summary.cancelled ? ` · ${formatNumber(summary.cancelled)} đơn huỷ` : ""}` },
+          { label: "Doanh thu lên đơn", value: formatVND(summary.revenue, { compact: true }) },
+          { label: "Giao thành công", value: formatNumber(summary.success), tone: "green" },
+          { label: "COD", value: formatVND(summary.cod, { compact: true }) },
         ]}
       />
       <DataTableToolbar
@@ -128,7 +128,7 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
           { key: "address", label: "Địa chỉ", options: [{ value: "unnormalized", label: `Chưa chuẩn hoá · không giao được (${formatNumber(summary.unnormalizedAddress)})` }, { value: "normalized", label: "Đã chuẩn hoá" }], single: true },
           ...(facets.sellers.length ? [{ key: "seller", label: "Nhân viên", options: facets.sellers }] : []),
         ]}
-        resultLabel={total === summary.orders ? undefined : `${formatNumber(total)} đơn phù hợp`}
+        resultLabel={total === summary.orders + summary.cancelled ? undefined : `${formatNumber(total)} đơn phù hợp`}
       />
       <OrdersTable rows={rows} pageCount={pageCount} total={total} stageLabels={stageLabels} carrierBulk={carrierBulk} canDecide={createGate.allowed} meta={meta ? { listView: meta.schema, customFields: meta.customFields, customValues, userNames } : undefined} />
     </div>

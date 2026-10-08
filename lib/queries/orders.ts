@@ -271,7 +271,9 @@ async function orderSummaryUncached(params: ListParams) {
   const where = orderListWhere(params);
   const [row] = await db
     .select({
-      orders: count(),
+      // Đếm đơn KHÔNG huỷ — cùng định nghĩa với «Doanh số POS» ở Báo cáo lợi nhuận danh nghĩa (HSLC 08/10/2026: hai trang phải ra một số).
+      orders: sql<number>`count(*) filter (where ${schema.orders.stage} not in ('CANCELLED','DELETED'))`,
+      cancelled: sql<number>`count(*) filter (where ${schema.orders.stage} in ('CANCELLED','DELETED'))`,
       revenue: sql<number>`coalesce(sum(case when ${schema.orders.stage} not in ('CANCELLED','DELETED') then ${schema.orders.totalPriceAfterDiscount} else 0 end), 0)`,
       cod: sql<number>`coalesce(sum(case when ${schema.orders.stage} not in ('CANCELLED','DELETED') then ${schema.orders.moneyToCollect} else 0 end), 0)`,
       success: sql<number>`sum(case when ${ORDER_OUTCOME_FAST} = 'DELIVERED' then 1 else 0 end)`,
@@ -287,7 +289,7 @@ async function orderSummaryUncached(params: ListParams) {
     .select({ n: count() })
     .from(schema.orders)
     .where(and(orderListWhere(params, { ignoreAddressFilter: true }), sql`coalesce(${schema.orders.shipProvince}, '') = ''`, sql`${schema.orders.stage} not in ('CANCELLED','DELETED')`));
-  return { orders: Number(row?.orders ?? 0), revenue: Number(row?.revenue ?? 0), cod: Number(row?.cod ?? 0), success: Number(row?.success ?? 0), quantity: Number(row?.quantity ?? 0), unnormalizedAddress: Number(unnormalized?.n ?? 0) };
+  return { orders: Number(row?.orders ?? 0), cancelled: Number(row?.cancelled ?? 0), revenue: Number(row?.revenue ?? 0), cod: Number(row?.cod ?? 0), success: Number(row?.success ?? 0), quantity: Number(row?.quantity ?? 0), unnormalizedAddress: Number(unnormalized?.n ?? 0) };
 }
 
 /**

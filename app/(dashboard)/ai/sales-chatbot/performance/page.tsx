@@ -4,7 +4,7 @@ import { SectionCard } from "@/components/ui-bits";
 import { can, requirePermission } from "@/lib/auth/session";
 import { formatDate, formatNumber, formatPercent, formatVND } from "@/lib/format";
 import { loadAiSalesPerformance, type AiSalesPerformance } from "@/lib/sales-chatbot/performance";
-import { AI_SALES_METRICS, AI_SALES_MIN_SAMPLE, type FunnelRow } from "@/lib/sales-chatbot/performance-shared";
+import { AI_SALES_METRICS, PERF_PERIOD_LABEL, PERF_PERIODS, parsePerfPeriod, perfPeriodParams, type FunnelRow } from "@/lib/sales-chatbot/performance-shared";
 import { SALES_CHATBOT_MANAGE } from "@/lib/sales-chatbot/settings";
 import { aiPerformanceWithMoney } from "@/lib/saas/visibility-loaders";
 import { HumanCostForm } from "./human-cost-form";
@@ -19,7 +19,6 @@ import { inboxPages } from "@/lib/sales-chatbot/inbox";
 
 export const metadata = { title: "Hiệu quả AI bán hàng" };
 
-const PERIODS = [7, 30, 90] as const;
 const pctOf = (v: number | null) => (v === null ? null : v * 100);
 const seconds = (ms: number | null) => (ms === null ? "—" : ms < 60_000 ? `${Math.round(ms / 1000)} giây` : `${(ms / 60_000).toFixed(1)} phút`);
 
@@ -56,22 +55,26 @@ function FunnelCells({ row }: { row: FunnelRow }) {
  * thời gian trả lời, lý do chuyển người, upsell, đơn bot chốt theo kết cục GIAO THẬT (ORDER_OUTCOME), chi phí AI / đơn giao
  * thành công. Số đọc từ sổ sự kiện `sales_conversation_events` — trước ngày bật sổ là CHƯA ĐO.
  */
-export default async function AiSalesPerformancePage({ searchParams }: { searchParams: Promise<{ days?: string; pg?: string }> }) {
+export default async function AiSalesPerformancePage({ searchParams }: { searchParams: Promise<{ days?: string; from?: string; to?: string; pg?: string }> }) {
   const user = await requirePermission("ai_sales:view");
   const manage = can(user, SALES_CHATBOT_MANAGE);
   const sp = await searchParams;
-  const days = PERIODS.find((d) => String(d) === sp.days) ?? 30;
+  const period = parsePerfPeriod(sp);
+  const days = period.days;
+  const window = { days, now: period.now, until: period.until };
+  const drill = { page: null as string | null, days, ...(period.custom ? { from: period.from, to: period.to } : {}) };
   // NHIỀU PAGE: page là một CHIỀU lọc trên cùng công thức — «mọi page» và «một page» đọc cùng các hàm dưới đây.
   const pages = await inboxPages();
   const pageId = pages.some((p) => p.id === sp.pg) ? (sp.pg as string) : null;
   const pgQ = pageId ? `&pg=${encodeURIComponent(pageId)}` : "";
   // Tiền AI / token là số NỘI BỘ: workspace khách không tính luôn (`cost = null`) — giữ chỉ số kinh doanh (lib/saas/visibility.ts).
-  const r: AiSalesPerformance = await loadAiSalesPerformance(user.organization?.code ?? "", { days, withMoney: aiPerformanceWithMoney(user, manage), pageId });
+  const r: AiSalesPerformance = await loadAiSalesPerformance(user.organization?.code ?? "", { ...window, withMoney: aiPerformanceWithMoney(user, manage), pageId });
   // Khối so AI vs người: tiền AI cùng cổng với khung «Chi phí AI & ROI» — khách / người không cấu hình bot không đọc sổ AI.
   const experiment = await loadExperimentReport({ withMoney: aiPerformanceWithMoney(user, manage) });
-  const basket = await loadBasketStats({ days, pageId });
-  const attr = await loadOrderAttribution({ days, pageId });
-  const lost = await loadLostReasons({ days, pageId });
+  const basket = await loadBasketStats({ ...window, pageId });
+  const attr = await loadOrderAttribution({ ...window, pageId });
+  const lost = await loadLostReasons({ ...window, pageId });
+  drill.page = pageId;
   const t = r.cohorts.total;
   const coveragePct = r.coverage.conversationsActive > 0 ? (r.coverage.conversationsWithEvents / r.coverage.conversationsActive) * 100 : null;
   const unavailable = AI_SALES_METRICS.filter((m) => m.availability === "UNAVAILABLE");
@@ -80,25 +83,27 @@ export default async function AiSalesPerformancePage({ searchParams }: { searchP
       <PageHeader
         eyebrow="AI"
         title="Hiệu quả AI bán hàng"
-        description={`${days} ngày gần nhất · ${user.organization?.name ?? ""}${pageId ? ` · ${pages.find((p) => p.id === pageId)?.name ?? pageId}` : pages.length > 1 ? ` · ${pages.length} page` : ""}`}
-        hint={
-          <div className="space-y-1.5 text-xs leading-5">
-            <p>Số đọc từ SỔ SỰ KIỆN của bot: mỗi tin khách, câu trả lời, báo giá, SĐT, đơn nháp / chốt, chuyển người đều có mốc. Trước ngày bật sổ là CHƯA ĐO — không phải 0.</p>
-            <p>«AI bán được» là đơn GIAO THÀNH CÔNG theo kết cục đơn chung của ERP, không phải «bot chốt». Đơn còn đang giao in riêng.</p>
-            <p>«AI rồi chuyển người» là những hội thoại KHÓ hơn (bot chuyển vì khách sỉ, khiếu nại, ngoài chính sách…) — tỷ lệ của nhóm đó thấp hơn không có nghĩa nhân viên làm kém.</p>
-            <p>Tỷ lệ / trung vị cần ít nhất {AI_SALES_MIN_SAMPLE} quan sát; ít hơn thì để trống.</p>
-          </div>
-        }
+        description={`${period.label} · ${user.organization?.name ?? ""}${pageId ? ` · ${pages.find((p) => p.id === pageId)?.name ?? pageId}` : pages.length > 1 ? ` · ${pages.length} page` : ""}`}
         actions={
           <div className="flex flex-wrap items-center gap-1">
-            {PERIODS.map((d) => (
-              <Link key={d} href={`/ai/sales-chatbot/performance?days=${d}${pgQ}`} className={`inline-flex h-8 items-center rounded-md border px-3 text-sm ${d === days ? "bg-muted font-semibold" : "hover:bg-muted"}`}>
-                {d} ngày
+            {PERF_PERIODS.map((d) => (
+              <Link key={d} href={`/ai/sales-chatbot/performance?days=${d}${pgQ}`} className={`inline-flex h-8 items-center rounded-md border px-3 text-sm ${!period.custom && d === days ? "bg-muted font-semibold" : "hover:bg-muted"}`}>
+                {PERF_PERIOD_LABEL[d]}
               </Link>
             ))}
+            <form method="get" action="/ai/sales-chatbot/performance" className="flex items-center gap-1 sm:ml-2" data-testid="ai-perf-range">
+              {pageId ? <input type="hidden" name="pg" value={pageId} /> : null}
+              <input type="date" name="from" defaultValue={period.from} max={period.to} className="h-8 rounded-md border bg-background px-1 text-sm" aria-label="Từ ngày" />
+              <input type="date" name="to" defaultValue={period.to} className="h-8 rounded-md border bg-background px-1 text-sm" aria-label="Đến ngày" />
+              <button type="submit" className={`h-8 rounded-md border px-2 text-sm ${period.custom ? "bg-muted font-semibold" : "hover:bg-muted"}`}>
+                Xem
+              </button>
+            </form>
             {pages.length > 1 ? (
               <form method="get" action="/ai/sales-chatbot/performance" className="flex items-center gap-1 sm:ml-2" data-testid="ai-perf-page-filter">
-                <input type="hidden" name="days" value={days} />
+                {Object.entries(perfPeriodParams(period)).map(([k, v]) => (
+                  <input key={k} type="hidden" name={k} value={v} />
+                ))}
                 <select name="pg" defaultValue={pageId ?? ""} className="h-8 max-w-[11rem] rounded-md border bg-background px-1 text-sm" aria-label="Page">
                   <option value="">Mọi page</option>
                   {pages.map((p) => (
@@ -139,7 +144,7 @@ export default async function AiSalesPerformancePage({ searchParams }: { searchP
             <Stat label="độ phủ của sổ" value={formatPercent(coveragePct, 0)} sub={`${formatNumber(r.coverage.conversationsWithEvents)}/${formatNumber(r.coverage.conversationsActive)} hội thoại`} />
           </div>
 
-          <SectionCard title="Phễu theo hội thoại" hint={<p className="text-xs leading-5">Mỗi hội thoại một dòng đếm; một hội thoại đi tới bước nào thì tính ở bước đó. Hai nhóm cộng lại bằng dòng Tổng.</p>}>
+          <SectionCard title="Phễu theo hội thoại">
             <div className="overflow-x-auto">
               <table className="w-full text-sm" data-testid="ai-perf-funnel">
                 <thead>
@@ -155,7 +160,7 @@ export default async function AiSalesPerformancePage({ searchParams }: { searchP
                 <tbody>
                   <tr className="border-b">
                     <td className="py-1.5 pr-3">
-                      <Link href={drillHref({ page: pageId, days, cohort: "AI_ONLY" })} className="underline-offset-2 hover:underline">
+                      <Link href={drillHref({ ...drill, cohort: "AI_ONLY" })} className="underline-offset-2 hover:underline">
                         AI tự xử lý
                       </Link>
                     </td>
@@ -163,7 +168,7 @@ export default async function AiSalesPerformancePage({ searchParams }: { searchP
                   </tr>
                   <tr className="border-b">
                     <td className="py-1.5 pr-3">
-                      <Link href={drillHref({ page: pageId, days, cohort: "AI_THEN_HUMAN" })} className="underline-offset-2 hover:underline">
+                      <Link href={drillHref({ ...drill, cohort: "AI_THEN_HUMAN" })} className="underline-offset-2 hover:underline">
                         AI rồi chuyển người
                       </Link>
                     </td>
@@ -171,7 +176,7 @@ export default async function AiSalesPerformancePage({ searchParams }: { searchP
                   </tr>
                   <tr className="font-semibold">
                     <td className="py-1.5 pr-3">
-                      <Link href={drillHref({ page: pageId, days })} className="underline-offset-2 hover:underline">
+                      <Link href={drillHref(drill)} className="underline-offset-2 hover:underline">
                         Tổng
                       </Link>
                     </td>
@@ -182,10 +187,10 @@ export default async function AiSalesPerformancePage({ searchParams }: { searchP
             </div>
           </SectionCard>
 
-          {experiment ? <ExperimentBlock report={experiment} days={days} /> : null}
+          {experiment ? <ExperimentBlock report={experiment} days={days} from={period.custom ? period.from : null} to={period.custom ? period.to : null} /> : null}
 
           <div className="grid gap-5 lg:grid-cols-2">
-            <SectionCard title="Đơn bot chốt — kết cục giao thật" hint={<p className="text-xs leading-5">Kết cục theo ORDER_OUTCOME của ERP (phiếu giao ký nhận / chứng từ hãng vận chuyển). «Giao thành công» chỉ tính trên đơn ĐÃ ngã ngũ.</p>}>
+            <SectionCard title="Đơn bot chốt — kết cục giao thật">
               <div className="grid grid-cols-2 gap-2 sm:grid-cols-3" data-testid="ai-perf-orders">
                 <Stat label="đơn bot chốt" value={formatNumber(r.orders.confirmed)} sub={formatVND(r.orders.confirmedValueVnd)} />
                 <Stat label="giao thành công" value={formatNumber(r.orders.delivered)} sub={formatVND(r.orders.deliveredRevenueVnd)} />
@@ -211,7 +216,7 @@ export default async function AiSalesPerformancePage({ searchParams }: { searchP
                       r.handoffReasons.map((h) => (
                         <tr key={h.code} className="border-b last:border-0">
                           <td className="py-1 pr-3">
-                            <Link href={drillHref({ page: pageId, days, reason: h.code })} className="underline-offset-2 hover:underline">
+                            <Link href={drillHref({ ...drill, reason: h.code })} className="underline-offset-2 hover:underline">
                               {h.label}
                             </Link>
                           </td>
@@ -237,13 +242,6 @@ export default async function AiSalesPerformancePage({ searchParams }: { searchP
 
           <SectionCard
             title="Đơn theo người làm ra"
-            hint={
-              <div className="space-y-1.5 text-xs leading-5">
-                <p>Mỗi đơn chốt trong hội thoại mang ĐÚNG MỘT nhãn. «AI tự bán»: bot chốt, không ai chạm vào trước lúc chốt. «AI góp công»: có người chạm vào và bot đã báo giá / lên nháp / mời mua thêm / lấy được SĐT trước lúc lên đơn. «Người bán»: bot không làm việc bán hàng nào — một câu chào không tính.</p>
-                <p>Ba nhãn không cộng gộp. Đơn ngoài hội thoại (lên tay trên POS) không thuộc bảng này. Doanh thu = đơn GIAO THÀNH CÔNG theo kết cục đơn chung của ERP.</p>
-                <p>Lãi gộp = doanh thu đã giao − giá vốn, cùng đường giá vốn với Báo cáo lợi nhuận (giá vốn đã chốt lúc giao). Đơn chưa có giá vốn KHÔNG cộng vào lãi với giá vốn 0 — đếm riêng. Chưa trừ chi phí AI, cước, quảng cáo.</p>
-              </div>
-            }
           >
             <div className="grid gap-2 sm:grid-cols-3" data-testid="ai-perf-attribution">
               {ORDER_ATTRIBUTIONS.map((k) => (
@@ -279,12 +277,6 @@ export default async function AiSalesPerformancePage({ searchParams }: { searchP
           <SectionCard
             title="Vì sao khách không mua"
             description={`${formatNumber(lost.lost)} hội thoại không mua · ${formatNumber(lost.ordered)} có đơn · ${formatNumber(lost.open)} chưa ngã ngũ (khách nhắn trong 24 giờ qua)`}
-            hint={
-              <div className="space-y-1.5 text-xs leading-5">
-                <p>Khách TỪ CHỐI RÕ: lý do đọc từ câu bot ghi lại, xếp nhóm bằng từ khoá (không khớp ⇒ «lý do khác»). Khách IM quá 24 giờ (bot không còn được nhắn): nhóm «im lặng» là SUY RA, không phải lời khách.</p>
-                <p>«Chuyển người, ERP không thấy đơn» không có nghĩa là mất khách — nhân viên có thể đã bán trên kênh khác. Bấm một dòng để đọc lại đúng các hội thoại đó.</p>
-              </div>
-            }
           >
             {lost.rows.length === 0 ? (
               <p className="text-sm text-muted-foreground">Chưa có hội thoại nào ngã ngũ mà không mua trong kỳ.</p>
@@ -294,7 +286,7 @@ export default async function AiSalesPerformancePage({ searchParams }: { searchP
                   {lost.rows.map((row) => (
                     <tr key={row.code} className="border-b last:border-0">
                       <td className="py-1.5 pr-3">
-                        <Link href={drillHref({ page: pageId, days, lost: row.code })} className="underline-offset-2 hover:underline">
+                        <Link href={drillHref({ ...drill, lost: row.code })} className="underline-offset-2 hover:underline">
                           {row.label}
                         </Link>
                       </td>
@@ -310,12 +302,6 @@ export default async function AiSalesPerformancePage({ searchParams }: { searchP
           {r.cost ? (
             <SectionCard
               title="Chi phí AI & ROI"
-              hint={
-                <div className="space-y-1.5 text-xs leading-5">
-                  <p>Chi phí = token thật × bảng giá model × tỷ giá {formatNumber(r.cost.rateVndPerUsd)} ₫/USD — ƯỚC TÍNH. Khung thử và lượt AI ghi đơn hộ nhân viên KHÔNG chia vào đơn của bot.</p>
-                  <p>«Tiết kiệm nhân sự» chỉ có khi chủ shop khai chi phí một hội thoại do người làm — luôn là ước tính, không cộng vào doanh thu.</p>
-                </div>
-              }
             >
               <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-6" data-testid="ai-perf-cost">
                 <Stat label="chi phí AI bán hàng (ước tính)" value={formatVND(r.cost.sellingVnd)} sub={r.cost.unknownCost ? `cận dưới · ${formatNumber(r.cost.unknownCost)} lượt chưa định giá` : `${formatNumber(r.cost.turns)} lượt`} />
@@ -333,7 +319,7 @@ export default async function AiSalesPerformancePage({ searchParams }: { searchP
         </>
       )}
 
-      <SectionCard title="Chưa đo được" hint={<p className="text-xs leading-5">Chỉ số chủ shop sẽ muốn có nhưng dữ liệu chưa cho phép. Không thay bằng một con số gần đúng.</p>}>
+      <SectionCard title="Chưa đo được">
         <ul className="space-y-1.5 text-sm" data-testid="ai-perf-unavailable">
           {unavailable.map((m) => (
             <li key={m.key}>

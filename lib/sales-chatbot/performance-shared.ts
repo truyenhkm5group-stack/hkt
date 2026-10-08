@@ -145,3 +145,49 @@ export function salesEconomics(input: { conversations: number; confirmedOrders: 
     costIsLowerBound: input.unknownCostTurns > 0,
   };
 }
+
+// ─────────────────────────── Kỳ của màn «Hiệu quả» (chủ shop HSLC 08/10/2026: lọc HÔM NAY + tuỳ chỉnh ngày) ───────────────────────────
+
+import { vnDayOffset, vnInstant } from "@/lib/constants/booking";
+
+export const PERF_PERIODS = [1, 7, 30, 90] as const;
+export const PERF_PERIOD_LABEL: Record<(typeof PERF_PERIODS)[number], string> = { 1: "Hôm nay", 7: "7 ngày", 30: "30 ngày", 90: "90 ngày" };
+export const PERF_MAX_DAYS = 180;
+
+/**
+ * Một kỳ đọc được: `days` ngày kết thúc ở `to` (giờ VN). Mọi hàm nạp số liệu của màn này tính `since = 00:00 VN của (now − days + 1)`
+ * và lọc `occurred_at ≥ since` — nên kỳ TUỲ CHỈNH kết thúc trước hôm nay đi bằng `now` = 23:59:59 của `to` và `until` = chính mốc ấy
+ * (cận trên tường minh, không thì kỳ 1–7/10 sẽ gồm cả tin của ngày 8). Kỳ gồm hôm nay: `until = null` (không cần cận trên).
+ */
+export type PerfPeriod = { days: number; from: string; to: string; custom: boolean; now: Date; until: Date | null; label: string };
+
+const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
+const ddmm = (day: string) => day.split("-").reverse().join("/");
+
+/** Đọc kỳ từ searchParams: `from` + `to` (YYYY-MM-DD, ≤ hôm nay, ≤ 180 ngày) thắng `days`; sai dạng ⇒ 30 ngày. HÀM THUẦN. */
+export function parsePerfPeriod(sp: Record<string, string | string[] | undefined>, now: Date = new Date()): PerfPeriod {
+  const one = (k: string) => (typeof sp[k] === "string" ? (sp[k] as string) : "");
+  const today = vnDayOffset(now, 0);
+  const from = one("from");
+  const to = one("to");
+  if (DAY_RE.test(from) && DAY_RE.test(to)) {
+    const f = vnInstant(from, "00:00");
+    const t = vnInstant(to, "00:00");
+    if (f && t && f.getTime() <= t.getTime() && to <= today) {
+      const days = Math.round((t.getTime() - f.getTime()) / 86_400_000) + 1;
+      if (days <= PERF_MAX_DAYS) {
+        const endOfTo = new Date(t.getTime() + 86_400_000 - 1);
+        const includesToday = to === today;
+        return { days, from, to, custom: true, now: includesToday ? now : endOfTo, until: includesToday ? null : endOfTo, label: from === to ? `ngày ${ddmm(from)}` : `${ddmm(from)} → ${ddmm(to)}` };
+      }
+    }
+  }
+  const d = Number(one("days"));
+  const days = (PERF_PERIODS as readonly number[]).includes(d) ? d : 30;
+  return { days, from: vnDayOffset(now, -(days - 1)), to: today, custom: false, now, until: null, label: days === 1 ? "Hôm nay" : `${days} ngày gần nhất` };
+}
+
+/** Tham số URL của kỳ — kỳ tuỳ chỉnh ghi `from`/`to`, kỳ mẫu ghi `days`. HÀM THUẦN. */
+export function perfPeriodParams(p: Pick<PerfPeriod, "days" | "from" | "to" | "custom">): Record<string, string> {
+  return p.custom ? { from: p.from, to: p.to } : { days: String(p.days) };
+}

@@ -26,7 +26,7 @@ const afterAiSub = (perConversation: boolean) => (a: ArmStats) =>
   (perConversation ? a.profitAfterAiPerConversationVnd : a.profitAfterAiVnd) === null ? emptyProfitReason(a, { perConversation, needsCost: true }) : aiCostIsLowerBound(a) ? "cận trên (chi phí AI là cận dưới)" : null;
 
 /** Khối «AI vs Người theo nhánh thử nghiệm» của màn Hiệu quả — chỉ hiện khi đã có hội thoại được chia nhánh. */
-export function ExperimentBlock({ report, days }: { report: ExperimentReport; days: number }) {
+export function ExperimentBlock({ report, days, from = null, to = null }: { report: ExperimentReport; days: number; from?: string | null; to?: string | null }) {
   const { AI: ai, HUMAN: human } = report.arms;
   // Chênh lệch LÃI đọc từ báo cáo (đã chặn khi thử nghiệm dừng) — không tự tính lại ở đây.
   const grossLift = report.profitLifts.grossProfitPerConversation;
@@ -89,12 +89,12 @@ export function ExperimentBlock({ report, days }: { report: ExperimentReport; da
           <tr className="border-b text-left text-xs text-muted-foreground">
             <th className="py-1.5 pr-3 font-medium" />
             <th className="py-1.5 pr-3 text-right font-medium">
-              <Link href={drillHref({ days, arm: "AI" })} className="hover:underline">
+              <Link href={drillHref({ days, from, to, arm: "AI" })} className="hover:underline">
                 Nhánh AI
               </Link>
             </th>
             <th className="py-1.5 pr-3 text-right font-medium">
-              <Link href={drillHref({ days, arm: "HUMAN" })} className="hover:underline">
+              <Link href={drillHref({ days, from, to, arm: "HUMAN" })} className="hover:underline">
                 Nhánh người
               </Link>
             </th>
