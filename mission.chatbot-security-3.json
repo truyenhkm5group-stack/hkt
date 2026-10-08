@@ -3,7 +3,7 @@
   "mission_id": "chatbot-security-3",
   "title": "Bài học bot: tên miền / handle trần không lọt bộ lọc · không chặn nhầm · bài bị bỏ in nguyên văn; hồ sơ máy tạo không làm địa chỉ dự phòng",
   "business_goal": "",
-  "status": "PLANNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -27,7 +27,21 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-08T00:49:27.866Z",
-  "updated_at": "2026-10-08T00:49:27.866Z",
-  "last_heartbeat": "2026-10-08T00:49:27.866Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-08T00:49:45.834Z",
+  "last_heartbeat": "2026-10-08T00:49:45.834Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "fix/chatbot-security-3",
+    "sha": "e5447d0f7189a2b0c8dceb8a04ec2ef68a031d37",
+    "at": "2026-10-08T00:49:45.834Z",
+    "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+    "title": "Bài học bot: tên miền / handle trần không lọt bộ lọc · không chặn nhầm · bài bị bỏ in nguyên văn; hồ sơ máy tạo không làm địa chỉ dự phòng",
+    "summary": "Review bảo mật #652: MEDIUM (bộ lọc bài học lọt tên miền / handle trần — nay so trên 3 dạng chữ, che cả ở redactForLearning) · từ đồng nghĩa + không chặn nhầm (ngắn, hàng · đặt cốc · chuyện trước · gửi tiến độ) · nhật ký / thông báo in nguyên văn bài bị bỏ · cờ bài cũ trên trang Chatbot · LOW hồ sơ máy tạo không làm địa chỉ dự phòng (đọc nhật ký CUSTOMER_CREATE của tác tử).",
+    "tests": [
+      "typecheck + eslint: sạch",
+      "sales-order-sync · inbox-advanced · self-service-journey · hội thoại vàng 12/12 · chat-cost-report · saas-page-gate: đạt",
+      "kiểm đột biến 16/16 + 4/4 (đợt sửa chặn nhầm) chết, đối chứng đạt",
+      "quét ký tự vô hình trên dòng thêm: 0"
+    ]
+  }
 }
