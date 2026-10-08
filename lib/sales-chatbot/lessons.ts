@@ -22,6 +22,7 @@ import { loadSalesChatbotConfig, readJsonSetting, salesChatProvider } from "@/li
 import { fanpageVisitorKey, PAGE_REPLY, PANCAKE_AUTO_NOTE_RE } from "@/lib/sales-chatbot/fanpage";
 import { homeRuntimeIdleReason } from "@/lib/sales-chatbot/page-runtime";
 import {
+  droppedLessonsText,
   LESSON_LIMITS,
   LESSONS_SETTING_KEY,
   LESSONS_SYSTEM,
@@ -221,7 +222,7 @@ export async function learnLessons(opts: { now?: Date; force?: boolean; actor?: 
     const before = new Set(state.lessons);
     const added = lessons.filter((l) => !before.has(l)).length;
     const dropped = state.lessons.filter((l) => !lessons.includes(l)).length;
-    const note = `Học từ ${threads} hội thoại: ${lessons.length} bài (mới / sửa ${added} · bỏ ${dropped})${screened.dropped ? ` · không áp ${screened.dropped} bài nhắc tới tiền / tài khoản / liên kết (chủ shop tự thêm nếu thật sự cần)` : ""}`;
+    const note = `Học từ ${threads} hội thoại: ${lessons.length} bài (mới / sửa ${added} · bỏ ${dropped})${screened.dropped ? ` · không áp ${screened.dropped} bài nhắc tới tiền / tài khoản / liên kết (chủ shop tự thêm nếu thật sự cần): ${droppedLessonsText(screened.droppedLessons)}` : ""}`;
     await saveRun(
       state,
       { at: now.toISOString(), status: "OK", threads, note },

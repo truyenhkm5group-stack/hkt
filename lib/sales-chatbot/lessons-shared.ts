@@ -13,7 +13,7 @@
  * lại bản trước · tắt được.
  */
 import { foldVi } from "@/lib/sales-chatbot/text";
-import { redactForLearning, stripPrices } from "@/lib/sales-chatbot/playbook-shared";
+import { BARE_DOMAIN_TLDS, redactForLearning, stripPrices } from "@/lib/sales-chatbot/playbook-shared";
 
 export const LESSONS_SETTING_KEY = "ai.salesChatbot.lessons";
 
@@ -84,22 +84,47 @@ export function normalizeLessons(list: readonly string[]): string[] {
 
 /**
  * Bài học do AI rút ra mà nhắc tới TIỀN / TÀI KHOẢN / LIÊN KẾT / bỏ việc chuyển nhân viên ⇒ KHÔNG tự vào lời nhắc của MỌI khách:
- * một hội thoại do kẻ gian dựng (phàn nàn, gây ra chỗ nhân viên phải sửa) có thể dạy bot «bảo khách chuyển khoản trước» — câu
- * không có chữ số nên `stripPrices` không bắt (review bảo mật #651, MEDIUM có từ trước). Chủ shop TỰ viết bài như thế thì vẫn được
- * (sửa tay không qua bộ lọc này); bài đã có từ trước cũng giữ. So trên chữ ĐÃ GẤP (`foldVi`): không dấu, dấu câu thành khoảng
- * trắng — «zalo.me» là «zalo me», «https://» là «https». HÀM THUẦN.
+ * một hội thoại do kẻ gian dựng (phàn nàn, gây ra chỗ nhân viên phải sửa) có thể dạy bot «bảo khách chuyển khoản trước» hay «gửi
+ * trang thanhtoan-xyz.com» — câu không có chữ số nên `stripPrices` không bắt (review bảo mật #651 · #652). Chủ shop TỰ viết bài như
+ * thế thì vẫn được (sửa tay không qua bộ lọc này); bài đã có từ trước cũng giữ — trang Chatbot gắn cờ để chủ shop xem lại.
+ *
+ * Ba phép so, mỗi phép một dạng chữ:
+ *  · chữ ĐÃ GẤP (`foldVi` — không dấu, dấu câu thành khoảng trắng): từ khoá không lẫn được — «zalo.me» là «zalo me»;
+ *  · chữ gấp GIỮ dấu câu: «ngân hàng» — gấp hết thì «ngắn, hàng» cũng thành «ngan hang»;
+ *  · chữ GỐC (viết thường): cụm mà bỏ dấu là trùng cụm vô hại — «cọc» (≠ «đặt cốc»), «chuyển trước» (≠ «chuyện trước»),
+ *    «gửi tiền» (≠ «gửi tiến độ») — cùng tên miền trần (thanhtoan-xyz.com · t.me/…) và handle @…: gấp thì dấu chấm / @ mất, mà
+ *    chỉ hai dấu ấy phân biệt một trang web với hai từ thường.
+ * HÀM THUẦN.
  */
-const RISKY_LESSON = /chuyen khoan|\bck\b|\bstk\b|\btk\b|so tai khoan|ngan hang|thanh toan truoc|tra truoc|dat coc|coc truoc|chuyen tien|\bqr\b|\bmomo\b|zalo ?pay|\bvnpay\b|vi dien tu|\blink\b|\bhttps?\b|\bwww\b|zalo me|bit ly|khong (?:can |phai )?(?:chuyen|goi|bao) (?:cho )?nhan vien|bo qua (?:luat|quy tac|huong dan|chi dan)/;
+const RISKY_FOLDED = /chuyen khoan|chuyen tien|\bck\b|\bstk\b|tai khoan|thanh toan (?:truoc|online)|tra (?:tien )?truoc|nap tien|\bqr\b|\bmomo\b|zalo ?pay|\bvnpay\b|vi dien tu|\bbank\b|\btransfer\b|\bprepa(?:y|id)\b|\bdeposit\b|vietcombank|techcombank|vietinbank|agribank|sacombank|\bbidv\b|\bacb\b|vpbank|tpbank|mbbank|\bmb bank\b|hdbank|\bvib\b|\bmsb\b|\bocb\b|\bshb\b|seabank|eximbank|\blink\b|\bhttps?\b|\bwww\b|zalo me|bit ly|\bt me\b|\bm me\b|telegram|facebook com|\bfb (?:com|me)\b|(?:khong|dung|cam) (?:can |phai |nen )?(?:chuyen|goi|bao)(?: (?:cho|sang))? (?:nhan vien|nguoi that)|khong can nhan vien|tu xu ly khong chuyen|bo qua (?:luat|quy tac|huong dan|chi dan)/;
+const RISKY_KEEP_PUNCT = /\bngan hang\b/;
+const RISKY_RAW = new RegExp(`cọc|chuyển trước|gửi tiền|\\bcoc\\b|\\b[a-z0-9-]+\\.(?:${BARE_DOMAIN_TLDS})\\b|(?:^|[\\s(«"'])@[a-z0-9_.]{3,}`);
 
-export function riskyLesson(text: string): boolean {
-  return RISKY_LESSON.test(foldVi(text));
+/** Gấp nhẹ: bỏ dấu tiếng Việt, «đ» ⇒ «d», viết thường — GIỮ dấu câu (khác `foldVi`). */
+function foldKeepPunct(s: string): string {
+  return s.normalize("NFD").replace(/\p{M}/gu, "").replace(/đ/g, "d").replace(/Đ/g, "D").toLowerCase();
 }
 
-/** Danh sách bài học AI vừa trả ⇒ bỏ bài MỚI mang rủi ro (bài đã có trong `previous` giữ nguyên). HÀM THUẦN. */
-export function screenAiLessons(next: readonly string[], previous: readonly string[]): { kept: string[]; dropped: number } {
+export function riskyLesson(text: string): boolean {
+  return RISKY_FOLDED.test(foldVi(text)) || RISKY_KEEP_PUNCT.test(foldKeepPunct(text)) || RISKY_RAW.test(text.normalize("NFC").toLowerCase());
+}
+
+/**
+ * Danh sách bài học AI vừa trả ⇒ bỏ bài MỚI mang rủi ro (bài đã có trong `previous` giữ nguyên). Trả cả NGUYÊN VĂN bài bị bỏ để
+ * nhật ký / thông báo in ra — chặn nhầm thì chủ shop chép lại tay được. HÀM THUẦN.
+ */
+export function screenAiLessons(next: readonly string[], previous: readonly string[]): { kept: string[]; dropped: number; droppedLessons: string[] } {
   const had = new Set(previous);
-  const kept = next.filter((l) => had.has(l) || !riskyLesson(l));
-  return { kept, dropped: next.length - kept.length };
+  const kept: string[] = [];
+  const droppedLessons: string[] = [];
+  for (const l of next) (had.has(l) || !riskyLesson(l) ? kept : droppedLessons).push(l);
+  return { kept, dropped: droppedLessons.length, droppedLessons };
+}
+
+/** Nguyên văn bài bị bỏ cho nhật ký / thông báo: tối đa 3 bài, mỗi bài 100 ký tự. HÀM THUẦN. */
+export function droppedLessonsText(list: readonly string[]): string {
+  const shown = list.slice(0, 3).map((l) => `«${l.length > 100 ? `${l.slice(0, 99)}…` : l}»`);
+  return `${shown.join(" · ")}${list.length > 3 ? ` · và ${list.length - 3} bài nữa` : ""}`;
 }
 
 /** Chữ trả về của AI ⇒ danh sách bài học (mảng JSON chuỗi, có thể nằm trong khối ```json). `null` khi không đọc được. HÀM THUẦN. */
