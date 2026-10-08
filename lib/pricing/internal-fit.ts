@@ -19,10 +19,11 @@ import { platformAudit, type PlatformActor } from "@/lib/platform/audit";
 import { findOrganization, getHomeOrganization, invalidateOrganizations } from "@/lib/platform/organizations";
 import { readFanpagesActive } from "@/lib/platform/saas-ledger";
 import { readAiCustomerUsage } from "@/lib/pricing/ai-customer";
-import { invalidatePricing } from "@/lib/pricing/entitlements";
+import { invalidatePricing, readOrgPricingRow } from "@/lib/pricing/entitlements";
+import { readSubscriptionAddons } from "@/lib/billing/standing";
 import { env } from "@/lib/env";
 import { loadPriceBook, pinOrgPriceVersion, readMarginConfig } from "@/lib/pricing/price-book";
-import { catalogAiLimits, computeOverage, currentCatalogVersion, smallestFittingPlan, type FitResult, type MeterCoverage, type OverageResult } from "@/lib/pricing/versions";
+import { billableIncluded, catalogAiLimits, computeOverage, currentCatalogVersion, smallestFittingPlan, type FitResult, type MeterCoverage, type OverageResult, type PlanPrice } from "@/lib/pricing/versions";
 import { periodRange } from "@/lib/saas/ledger";
 
 export type AiLimitCheck = { requests: number; costUsd: number; limits: AiLimits | null; wouldExceed: boolean; note: string | null };
@@ -88,7 +89,10 @@ export async function planInternalFit(opts: { orgCode?: string; periodMonth?: st
     .then((db) => readFanpagesActive(db))
     .catch(() => null);
   const usage = { aiCustomers, aiCustomersCoverage: ac.coverage, aiCustomersNote: ac.note, fanpages, users, needsAiSales };
-  const fit = smallestFittingPlan({ aiCustomers, fanpages, users, needsAiSales }, prices);
+  // Phần gồm TÍNH TIỀN (dòng giá + ghi đè người vận hành + ghế đã mua thêm) — cùng hàm với bảng kê (OVERAGE O1).
+  const [addons, pricingRow] = await Promise.all([readSubscriptionAddons(org.code, { fresh: true }), readOrgPricingRow(org.code, { fresh: true })]);
+  const includedOf = (p: PlanPrice) => billableIncluded(p.included, { quotaOverrides: pricingRow.quotaOverrides, addons });
+  const fit = smallestFittingPlan({ aiCustomers, fanpages, users, needsAiSales }, prices, { includedOf });
   let aiLimits: AiLimitCheck | null = null;
   if (fit.plan) {
     const a = schema.platformAiUsage;
@@ -103,7 +107,7 @@ export async function planInternalFit(opts: { orgCode?: string; periodMonth?: st
   }
   const chargeback = fit.plan
     ? (() => {
-        const overage = computeOverage(fit.plan, { aiCustomers, aiCustomersCoverage: ac.coverage, fanpages, users, aiConversations: null, aiReplies: null });
+        const overage = computeOverage({ ...fit.plan, included: includedOf(fit.plan) }, { aiCustomers, aiCustomersCoverage: ac.coverage, fanpages, users, aiConversations: null, aiReplies: null });
         return { planVnd: fit.plan.monthlyVnd, overage, totalVnd: fit.plan.monthlyVnd === null || overage.totalVnd === null ? null : fit.plan.monthlyVnd + overage.totalVnd };
       })()
     : null;

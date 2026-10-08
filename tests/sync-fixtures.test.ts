@@ -556,6 +556,7 @@ import { testOrgPrepaidAi } from "./org-prepaid-ai.test";
 import { testPricingBilling } from "./pricing-billing.test";
 import { testSaasPlatform } from "./saas-platform.test";
 import { testPricingV1 } from "./pricing-v1.test";
+import { testSaasV1Migration } from "./saas-v1-migration.test";
 import { testAiCustomerSend } from "./ai-customer-send.test";
 import { testSaasL5BillingTrial } from "./saas-l5-billing-trial.test";
 import { testSaasInternalPlan } from "./saas-internal-plan.test";
@@ -2938,6 +2939,8 @@ async function main() {
   await testPricingBilling();
   await testSaasPlatform();
   await testPricingV1();
+  // Chuyển tổ chức legacy → V1 (ops saas-v1-migration) + phần gồm tính tiền dùng chung — không thu đôi ghế mua thêm (OVERAGE O1).
+  await testSaasV1Migration();
   await testAiCustomerSend();
   await testSaasL5BillingTrial();
   // Phase 14: workspace nhà đi ĐÚNG đường thương mại của khách (gói gán → ghi đè → giữ từ trước) — bài so trước/sau từng
