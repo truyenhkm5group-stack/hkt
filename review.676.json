@@ -1,8 +1,8 @@
 {
   "pr": 676,
-  "sha": "f10c19b01f7b2087463ef663a48b80cbd9fb0884",
+  "sha": "1edca5fc48a9eddebcd4949a61fc27023119238a",
   "verdict": "PASS",
   "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
-  "at": "2026-10-08T10:13:48.588Z",
-  "note": "Rebase sau #673–#675 do Integration Lead đọc: diff ops-vps.yml so với main chỉ thêm saas-v1-migration; mã giống hệt c61a3621 đã PASS"
+  "at": "2026-10-08T10:40:50.182Z",
+  "note": "Delta f10c19b0..1edca5fc do Integration Lead đọc: chỉ tests/saas-v1-migration.test.ts (khoá V1 đọc từ CSDL, hằng fixture, PREPAID_AI_VERSION_KEY); mã giống bản đã PASS"
 }
