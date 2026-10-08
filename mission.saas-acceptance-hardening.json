@@ -38,18 +38,18 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-08T18:04:05.439Z",
-  "updated_at": "2026-10-08T18:04:55.400Z",
-  "last_heartbeat": "2026-10-08T18:04:20.142Z",
+  "updated_at": "2026-10-08T18:35:25.929Z",
+  "last_heartbeat": "2026-10-08T18:35:25.929Z",
   "definition_of_done": [],
   "handoff": {
     "branch": "fix/saas-acceptance-hardening",
-    "sha": "31bce102b4a792b952f5f3d25d90634457b8d983",
-    "at": "2026-10-08T18:04:20.142Z",
+    "sha": "ab0f5a944aecdcf50e46dbefd6fccf4daa83fc30",
+    "at": "2026-10-08T18:35:25.929Z",
     "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
     "title": "Cứng hoá ops saas-acceptance sau review #690: chặn chiếm mã, loại workspace thử khỏi buồng lái",
-    "summary": "Sửa review #690: lá chắn sở hữu + chốt NEXT_RUNTIME + giữ chỗ mã/tên miền con nghiệm thu; loại workspace thử khỏi sổ kinh tế, buồng lái, phân bổ chi phí, kinh tế sản phẩm; L1 xoay mật khẩu, L2 phiên 15 phút, L3 bài quét, L4 SECURITY.md",
+    "summary": "Rebase #696 sau #683: customers.ts ghép trường test + templatePendingJobs; trang khách áp loại workspace thử lên bản #683 (ô đếm sức khoẻ tính trên real)",
     "tests": [
-      "tsc sạch (cây tương đương); eslint sạch; testSaasAcceptance + onboarding + quick-start + platform-saas đạt; tĩnh sau commit đạt; đột biến 10/10"
+      "Sau rebase lên 94bb5b0c (#683): tsc sạch; eslint sạch; saas-acceptance + customer-health + platform-saas đạt; tĩnh sau commit đạt"
     ]
   }
 }
