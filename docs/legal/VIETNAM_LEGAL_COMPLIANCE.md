@@ -63,9 +63,9 @@ chuyển ngang.
 
 | Hạng mục | Nội dung |
 |---|---|
-| **LEGAL READINESS %** | **~21 %** trên 12 mục LEGAL-P0 (2,5 / 12). Chi tiết `LEGAL_LAUNCH_GATE.md` §2 |
-| **LEGAL P0** | P0-1 phân loại dịch vụ xử lý DLCN + giấy chứng nhận · P0-2 DPIA · P0-3 hồ sơ chuyển xuyên biên giới + vùng xử lý · P0-4 minh bạch AI (Điều 11) · P0-5 DPA với khách thuê · P0-6 chấp thuận điện tử có bằng chứng · P0-7 nơi lưu dữ liệu · P0-8 thông báo nền tảng TMĐT · P0-9 quy trình sự cố 72 giờ · P0-10 quyền chủ thể dữ liệu (khách hàng cuối) · P0-11 Số dư AI không phải trung gian thanh toán · P0-12 thuế / hoá đơn |
-| **LEGAL P1** | sổ đồng ý · từ chối nhận tin tiếp thị · sổ hệ thống AI + phân loại rủi ro · `/platform/compliance` · nhật ký đăng nhập 12 tháng có IP · xác thực tài khoản bằng SĐT (NĐ 333) · bộ phận bảo vệ DLCN · chính sách ATTT chính thức · chính sách khiếu nại · tự động hoá lưu / xoá · bằng chứng từng trường của đơn |
+| **LEGAL READINESS %** | **~18 %** trên 11 mục LEGAL-P0 (2,0 / 11) sau OWNER OVERRIDE 08/10 (bản đầu: 21 % / 12 mục). Chi tiết `LEGAL_LAUNCH_GATE.md` §2 |
+| **LEGAL P0** (chỉ MANDATORY hoặc COUNSEL thuộc lớp giấy phép) | P0-1 phân loại dịch vụ xử lý DLCN + giấy chứng nhận · P0-2 DPIA · P0-3 hồ sơ chuyển xuyên biên giới + vùng xử lý · P0-4 công bố AI mức tối thiểu · P0-5 DPA (phụ lục Điều khoản) · P0-6 nơi lưu dữ liệu · P0-7 thông báo TMĐT · P0-8 khả năng thông báo sự cố 72 giờ · P0-9 khả năng đáp yêu cầu chủ thể trong hạn (quy trình tay) · P0-10 Số dư AI ≠ trung gian thanh toán · P0-11 hoá đơn đúng khi thu tiền |
+| **LEGAL P1** | Chính sách nêu đủ bên thứ ba · số công bố khớp mã · nhật ký đăng nhập 12 tháng · bộ phận bảo vệ DLCN · chính sách khiếu nại · ghi sổ chấp thuận backend (không checkbox) · sổ đồng ý backend (không popup) · từ chối nhận tin backend · sổ AI · ATTT / MFA · retention · bằng chứng đơn · bài kiểm tín dụng · công cụ DSR · bảng sự cố · danh mục thuế · chân trang TMĐT. **DEFER**: checkbox / màn chặn đồng ý lại · che SĐT trong tin đơn · tối thiểu hoá prompt · OTP trước workspace · `/platform/compliance` (`LEGAL_LAUNCH_GATE.md` §4) |
 | **LAWS / ARTICLES** | §2 (14 văn bản, có mức tin cậy từng số điều) |
 | **CURRENT GAP** | §4–§15, mỗi mục có cột «Hôm nay» trỏ tệp:dòng |
 | **OWNER ACTION** | §16.F |
@@ -286,9 +286,13 @@ xác nhận tay · lịch sử thay đổi: PR #552 → #688 · `AI-02 Bot ghi �
 agent nội bộ` (Anthropic — ERP nhà). Mỗi hệ thống cần: mức rủi ro, bằng chứng phân loại, phiên bản, người chịu trách
 nhiệm, quy trình sự cố — mẫu ở `TECH_HANDOFF_LEGAL.md` M-AI-REG.
 
-**Thiết kế công bố cho khách hàng cuối (đề xuất, chủ sở hữu quyết):** tin đầu tiên của bot trong mỗi hội thoại mới mang
-dòng «Trợ lý AI của [Tên shop] — nhắn “gặp nhân viên” để được người hỗ trợ»; profile / tên hiển thị kênh nói rõ; lệnh
-«gặp nhân viên» luôn gọi `handoff_to_human`. Không giả làm người thật.
+**Thiết kế công bố cho khách hàng cuối — bản sau OWNER OVERRIDE 08/10 (`CONVERSION_FIRST_REAUDIT.md` §3), mức TỐI
+THIỂU HỢP PHÁP:** (1) nhận diện ở lớp giao diện, ngoài nội dung tin — tên hiển thị bot «Trợ lý AI», greeting / ice breakers
+của Page, tiêu đề chat web — ma sát 0; (2) **một** dòng tự nhiên theo giọng shop, **một lần**, mở đầu câu trả lời đầu tiên
+của hội thoại mới («Trợ lý AI của {shop} hỗ trợ anh/chị ngay đây ạ 😊»), không tin riêng, không lặp; (3) hỏi thẳng là máy
+hay người thì trả lời thật một câu rồi tiếp tục bán; lệnh «gặp nhân viên» gọi `handoff_to_human` không qua AI quyết nhưng
+**không** in hướng dẫn trong tin. Không dùng «tôi không phải con người» / «bạn đang nói chuyện với máy». Luật sư xác nhận
+(1) một mình có đủ không (G-4). Mọi câu chữ phải đo A/B giữa các biến thể đều hợp pháp.
 
 ## 12. An toàn đơn hàng (ORDER SAFETY)
 
