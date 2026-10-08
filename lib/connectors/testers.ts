@@ -28,6 +28,7 @@ import { GHTK_API, GHTK_CLIENT_SOURCE_PATTERN, GHTK_TOKEN_PATTERN } from "@/lib/
 import { telegramApiBase, telegramApiHost } from "@/lib/connectors/telegram-api";
 import { describeNetworkFailure, isNetworkFailure } from "@/lib/connectors/net-error";
 import { adAccountStatusLabel, META_ADS_ORG_MAX_ACCOUNTS, META_SYSTEM_USER_TOKEN_PATTERN, parseAdAccountIds } from "@/lib/constants/meta-ads-org";
+import { META_DATASET_ID_PATTERN } from "@/lib/constants/meta-capi";
 import { env } from "@/lib/env";
 import { GOOGLE_API_KEY_PATTERN, placesRelayOf, textSearch } from "@/lib/integrations/google-places/client";
 import { ZALO_ID_PATTERN, zaloGetOa } from "@/lib/integrations/zalo/oa";
@@ -448,6 +449,39 @@ export async function testMetaAdsOrg(input: { secrets: Record<string, string>; s
 }
 
 /**
+ * SỰ KIỆN CHUYỂN ĐỔI META CỦA TỔ CHỨC (0236 · job `meta-capi-org`): `GET /{dataset}?fields=id,name` bằng token đã khai —
+ * CHỈ ĐỌC, không gửi sự kiện thử nào (một sự kiện thử không có `test_event_code` là một lượt mua giả trong số liệu của
+ * khách). Đạt ⇔ token đọc được ĐÚNG dataset đã khai. Token bị che trong mọi câu. HÀM THUẦN với `fetch` tiêm vào.
+ */
+export async function testMetaCapiOrg(input: { secrets: Record<string, string>; settings: Record<string, string> }, deps: TesterDeps = {}): Promise<TesterResult> {
+  const token = (input.secrets.accessToken ?? "").trim();
+  const datasetId = (input.settings.datasetId ?? "").trim();
+  const hide = [token];
+  if (!META_SYSTEM_USER_TOKEN_PATTERN.test(token)) return { ok: false, message: "Token không đúng dạng token System User của Meta (EAA…) — không gọi." };
+  if (!META_DATASET_ID_PATTERN.test(datasetId)) return { ok: false, message: "Mã dataset (Pixel) phải là dãy số — không gọi." };
+  const fetchImpl = deps.fetch ?? fetch;
+  try {
+    const url = `${META_GRAPH_HOST}/${encodeURIComponent(env.facebook.apiVersion)}/${encodeURIComponent(datasetId)}?fields=id,name`;
+    const res = await fetchImpl(url, { method: "GET", headers: { authorization: `Bearer ${token}` }, redirect: "manual", signal: AbortSignal.timeout(TIMEOUT_MS) });
+    if (res.status >= 300 && res.status < 400) return { ok: false, message: `Facebook trả chuyển hướng HTTP ${res.status} — không theo.` };
+    const body = (await readCapped(res)) as { id?: unknown; name?: unknown; error?: { code?: unknown; message?: unknown } } | null;
+    const err = body && body.error && typeof body.error === "object" ? body.error : null;
+    if (err || !res.ok) {
+      const code = err && typeof err.code === "number" ? err.code : null;
+      const msg = err && typeof err.message === "string" ? err.message.slice(0, 160) : `HTTP ${res.status}`;
+      if (code === 190) return { ok: false, message: "Token không hợp lệ hoặc đã hết hạn (mã 190)." };
+      if (code === 100 || code === 200 || code === 10 || res.status === 403) return { ok: false, message: scrubSecrets(`Token không đọc được dataset ${datasetId} — gán dataset cho người dùng hệ thống (Cài đặt doanh nghiệp → Nguồn dữ liệu → Tập dữ liệu) rồi tạo lại token: ${msg}`, hide) };
+      return { ok: false, message: scrubSecrets(`Facebook từ chối: ${msg}`, hide) };
+    }
+    if (!body || String(body.id ?? "") !== datasetId) return { ok: false, message: "Phản hồi của Facebook không có đúng mã dataset đã khai." };
+    const name = typeof body.name === "string" && body.name ? body.name : datasetId;
+    return { ok: true, message: scrubSecrets(`Đọc được dataset «${name}» (${datasetId}). Bật để mỗi đơn chốt trong hội thoại Messenger gửi một sự kiện Purchase (job «meta-capi-org», mỗi 10 phút). Dataset phải được liên kết với fanpage bán hàng thì Meta mới ghép được khách.`, hide) };
+  } catch (e) {
+    return { ok: false, message: scrubSecrets(isNetworkFailure(e) ? `Không gọi được Facebook: ${describeNetworkFailure(e, "graph.facebook.com")}` : e instanceof Error ? e.message : String(e), hide) };
+  }
+}
+
+/**
  * PANCAKE POS CỦA TỔ CHỨC (F1): `GET /shops?api_key=…` — chỉ đọc, địa chỉ hằng số (`PANCAKE_POS_API`), không theo chuyển
  * hướng, khoá bị che trong mọi câu. Đạt ⇔ khoá được nhận VÀ mã shop đã khai nằm trong danh sách shop của khoá — khoá đúng
  * mà sai shop thì mọi lượt đồng bộ sau đều rỗng, nên phải nói ra ngay ở bước kiểm tra. HÀM THUẦN với `fetch` tiêm vào.
@@ -655,6 +689,7 @@ export const ORG_CONNECTION_TESTERS: Readonly<Record<string, (input: { secrets: 
   "pancake-fanpage": (input, deps) => testPancakeFanpage(input, deps),
   "zalo-oa": (input, deps) => testZaloOa(input, deps),
   "meta-ads-org": (input, deps) => testMetaAdsOrg(input, deps),
+  "meta-capi-org": (input, deps) => testMetaCapiOrg(input, deps),
   "pancake-pos-org": (input, deps) => testPancakePosOrg(input, deps),
   "viettelpost-carrier": (input, deps) => testViettelPostCarrier(input, deps),
   "ghn-carrier": (input, deps) => testGhnCarrier(input, deps),

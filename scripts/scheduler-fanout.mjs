@@ -40,7 +40,7 @@
  * PARTIAL mỗi 10 phút) · `landing-sheet` (mỗi phút; tổ chức chưa khai sheet thì hỏng mỗi phút) ·
  * mọi job kéo dữ liệu từ nhà cung cấp ngoài.
  */
-export const FANOUT_JOBS = Object.freeze(["dashboard-warm", "outcome-materialize", "work-recurrence", "work-snapshot", "data-check", "workflows", "sales-followup", "sales-health", "messaging-retry", "ads-spend-org", "wholesale-leads", "creative-publish-org", "shipping-route"]);
+export const FANOUT_JOBS = Object.freeze(["dashboard-warm", "outcome-materialize", "work-recurrence", "work-snapshot", "data-check", "workflows", "sales-followup", "sales-health", "messaging-retry", "ads-spend-org", "wholesale-leads", "creative-publish-org", "shipping-route", "meta-capi-org"]);
 
 /**
  * Tầng tự động hoá (G-SCHED) — tập con của `FANOUT_JOBS`. `sales-followup` (follow-up chatbot fanpage — chủ shop yêu cầu
@@ -55,8 +55,10 @@ export const FANOUT_JOBS = Object.freeze(["dashboard-warm", "outcome-materialize
  * `sales-health` (giám sát AI bán hàng — sau sự cố P0 06/10/2026) đọc CSDL của CHÍNH tổ chức + sổ AI nền tảng lọc đúng mã tổ chức.
  * `shipping-route` (tuyến giao tự động — chủ shop chốt 06/10/2026) tạo vận đơn ở hãng bằng kết nối hãng CỦA CHÍNH tổ chức khi
  * tổ chức bật «Tự tạo vận đơn»; công tắc tắt (mặc định) / không đơn nào chờ ⇒ một câu đọc.
+ * `meta-capi-org` (sự kiện Purchase của đơn chốt — chủ shop HSLC 08/10/2026) gửi bằng kết nối «meta-capi-org» CỦA CHÍNH tổ
+ * chức; chưa bật kết nối / không đơn chốt mới ⇒ một câu đọc.
  */
-export const AUTOMATION_FANOUT_JOBS = Object.freeze(["workflows", "work-recurrence", "sales-followup", "sales-health", "messaging-retry", "ads-spend-org", "wholesale-leads", "creative-publish-org", "shipping-route"]);
+export const AUTOMATION_FANOUT_JOBS = Object.freeze(["workflows", "work-recurrence", "sales-followup", "sales-health", "messaging-retry", "ads-spend-org", "wholesale-leads", "creative-publish-org", "shipping-route", "meta-capi-org"]);
 
 /**
  * Job CHỈ chạy qua fan-out — bộ lập lịch KHÔNG gọi lượt của nhà cho chúng (luật của nhà chạy ké `alerts`; chi tiêu quảng
@@ -69,7 +71,7 @@ export const AUTOMATION_FANOUT_JOBS = Object.freeze(["workflows", "work-recurren
  * hình module đã đệm — không chạy, không ghi `sync_runs`, không ném. Cái giá khi tắt: hai lượt gọi rỗng / 5 phút vào chính
  * ứng dụng; đổi lại không cần deploy hay sửa lịch lần nữa vào ngày bật.
  */
-export const FANOUT_ONLY_JOBS = Object.freeze(["workflows", "ads-spend-org", "wholesale-leads", "creative-publish-org", "shipping-route"]);
+export const FANOUT_ONLY_JOBS = Object.freeze(["workflows", "ads-spend-org", "wholesale-leads", "creative-publish-org", "shipping-route", "meta-capi-org"]);
 
 /**
  * Nhịp GÕ của job `workflows` (phút) — BẰNG `WORKFLOW_CADENCE_MIN_MINUTES` của `lib/constants/workflow-cadence.ts`

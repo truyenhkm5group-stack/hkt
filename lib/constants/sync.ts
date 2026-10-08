@@ -17,6 +17,7 @@ export const SYNC_JOB_LABEL: Record<string, string> = {
   sepay_reconcile: "Đối chiếu giao dịch ngân hàng qua API SePay",
   "model-registry": "Đồng bộ sổ mẫu",
   "sales-inbox-history": "Nhập lịch sử hội thoại vào hộp thư",
+  capi_purchase: "Gửi sự kiện mua hàng sang Meta",
 };
 
 export function syncJobLabel(job: string) {
@@ -39,6 +40,7 @@ export const JOB_RUN_KEYS: Record<string, string[]> = {
   "facebook-ads": ["FACEBOOK:ads_insights"],
   // Cùng bộ đồng bộ (`syncFacebookAds`) ⇒ cùng tên con trong sync_runs, nhưng ghi vào CSDL của tổ chức khách.
   "ads-spend-org": ["FACEBOOK:ads_insights"],
+  "meta-capi-org": ["FACEBOOK:capi_purchase"],
   // Cùng bộ đồng bộ Pancake (`syncPancakeAll`) ⇒ cùng tên con trong sync_runs, ghi vào CSDL của tổ chức khách.
   "pancake-org": ["PANCAKE:warehouses", "PANCAKE:products", "PANCAKE:orders_backfill", "PANCAKE:orders_incremental", "PANCAKE:customers", "PANCAKE:order_returns", "PANCAKE:inventory_histories"],
   "github-deployments": ["GITHUB:deploy_runs"],

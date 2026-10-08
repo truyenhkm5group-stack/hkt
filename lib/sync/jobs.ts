@@ -44,6 +44,7 @@ import { syncPancakeChatCases } from "@/lib/cs/chat-detect";
 import { applyStaleReconciliation } from "@/lib/cs/stale";
 import { syncFacebookAds } from "@/lib/integrations/facebook/sync";
 import { syncOrgMetaAds } from "@/lib/marketing/meta-ads-org";
+import { runOrgMetaCapi } from "@/lib/marketing/meta-capi";
 import { runOrgCreativePublish } from "@/lib/creative/org-publish";
 import { importViettelPostOrders, syncViettelPostShipments } from "@/lib/integrations/viettelpost/sync";
 import { reconcileCareCoverage } from "@/lib/care/lifecycle";
@@ -597,6 +598,21 @@ export const JOB_DEFINITIONS: Record<string, JobDefinition> = {
       "Tổ chức khách đã bật kết nối «Quảng cáo Facebook (Meta) của tổ chức» ⇒ kéo chi tiêu theo ngày của các tài khoản quảng cáo đã khai vào bảng chi tiêu quảng cáo (cùng bộ đồng bộ, cùng khoá chống trùng với tổ chức nhà; dòng gõ tay không bị đụng). " +
       "Lượt thường kéo lùi 3 ngày, lượt đầu tiên 30 ngày; days=N để kéo lùi N ngày. Tài khoản tính bằng USD quy đổi theo tỷ giá cấu hình của máy chủ, tiền tệ khác không ghi. Ngay sau đó tra sổ mẩu (trạng thái · bài viết · creative · fanpage) cho các mẩu chưa có bài viết, chỉ đọc, ghi nhật ký đồng bộ riêng. Tổ chức nhà dùng «facebook-ads» và «facebook-ad-index».",
     run: (o) => syncOrgMetaAds({ trigger: o.trigger, actor: o.actor, days: num(o.params?.days) }),
+  },
+  /*
+    SỰ KIỆN CHUYỂN ĐỔI GỬI META (0236 — chủ shop HSLC 08/10/2026: «gửi sự kiện khi chốt đơn»). Tổ chức khách đã bật kết nối
+    «meta-capi-org» ⇒ đơn chốt trong hội thoại Messenger (sự kiện `order.confirmed` 7 ngày gần nhất) được gửi thành sự kiện
+    `Purchase` vào dataset của CHÍNH tổ chức. Không bật / không có việc ⇒ bỏ qua sau một câu đọc, không ghi sync_runs.
+  */
+  "meta-capi-org": {
+    label: "Gửi sự kiện mua hàng sang Meta (đơn chốt)",
+    source: "ALL",
+    module: "marketing",
+    fanOut: true,
+    description:
+      "Tổ chức khách đã bật kết nối «Sự kiện chuyển đổi Meta» ⇒ mỗi đơn chốt trong hội thoại Messenger gửi MỘT sự kiện Purchase (page + PSID khách + giá trị đơn) vào dataset đã khai. " +
+      "Đơn không từ Messenger / không có PSID / huỷ trước lúc gửi / quá 7 ngày được ghi «không gửi» kèm lý do. Lỗi của Meta thử lại lùi dần, không chạm tới đơn.",
+    run: (o) => runOrgMetaCapi({ trigger: o.trigger, actor: o.actor }),
   },
   /*
     ĐĂNG TIẾP CAMP CỦA TỔ CHỨC KHÁCH (chủ nền tảng chốt 04/10/2026 — Hải Sản Làng Chài «tự động 100% như nhà»). «Đăng camp»

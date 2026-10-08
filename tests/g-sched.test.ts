@@ -121,7 +121,8 @@ async function kiemLich(fan: FanOut) {
   // bằng kết nối «meta-ads-org» của chính tổ chức (không cần credential của nhà — khẳng định ngay dưới vẫn kiểm điều đó).
   // `wholesale-leads` thêm 04/10/2026 (0197): chiến dịch săn khách sỉ của tổ chức khách chạy nền bằng khoá Google của chính họ.
   // `shipping-route` thêm 06/10/2026 (POS tự chủ P7): tuyến giao tự động tạo vận đơn bằng kết nối hãng của chính tổ chức.
-  assert.deepEqual([...fan.AUTOMATION_FANOUT_JOBS].sort(), ["ads-spend-org", "creative-publish-org", "messaging-retry", "sales-followup", "sales-health", "shipping-route", "wholesale-leads", "work-recurrence", "workflows"], "tầng tự động hoá: luật + việc định kỳ + follow-up chatbot + giám sát AI bán hàng + gửi lại tin nhóm + chi tiêu quảng cáo của tổ chức + săn khách sỉ + đăng tiếp camp của tổ chức + tuyến giao tự động");
+  // `meta-capi-org` thêm 08/10/2026 (0236): sự kiện Purchase của đơn chốt gửi bằng kết nối «meta-capi-org» của chính tổ chức.
+  assert.deepEqual([...fan.AUTOMATION_FANOUT_JOBS].sort(), ["ads-spend-org", "creative-publish-org", "messaging-retry", "meta-capi-org", "sales-followup", "sales-health", "shipping-route", "wholesale-leads", "work-recurrence", "workflows"], "tầng tự động hoá: luật + việc định kỳ + follow-up chatbot + giám sát AI bán hàng + gửi lại tin nhóm + chi tiêu quảng cáo của tổ chức + săn khách sỉ + đăng tiếp camp của tổ chức + tuyến giao tự động");
   for (const j of fan.AUTOMATION_FANOUT_JOBS) {
     assert.ok(fan.FANOUT_JOBS.includes(j), `${j} phải khai fanOut`);
     assert.ok(!HOME_CREDENTIAL_JOBS[j], `${j} không được cần credential của nhà`);
@@ -130,10 +131,11 @@ async function kiemLich(fan: FanOut) {
   // `wholesale-leads` CHỈ fan-out: nhà tắt module Săn khách sỉ (homeOptIn, 0197).
   // `creative-publish-org` CHỈ fan-out (04/10/2026): camp «Đăng camp» của nhà đăng tiếp qua `creative-loop`.
   // `shipping-route` CHỈ fan-out (06/10/2026): nhà đồng bộ đơn Pancake, không có đơn tạo tay để xếp tuyến.
+  // `meta-capi-org` CHỈ fan-out (08/10/2026): nhà đồng bộ đơn Pancake, không có đơn tạo tay nào phát `order.confirmed`.
   // `sales-followup` · `sales-health` RỜI danh sách CHỈ fan-out (Phase 8b, docs/saas/OWNERSHIP.md §4 chặn 3): nhà phải chạy được
   // runtime Chốt Đơn khi chủ shop bật module AI bán hàng của nhà. Công tắc là MODULE — nhà tắt `ai_sales` ⇒ lượt của nhà bỏ qua
   // `MODULE_DISABLED`, không ghi `sync_runs` (khối «NHÀ» của phần 4 + 5 kiểm điều đó; nhà BẬT ⇒ tests/saas-vnx-runtime.test.ts).
-  assert.deepEqual([...fan.FANOUT_ONLY_JOBS], [WORKFLOWS_JOB, "ads-spend-org", "wholesale-leads", "creative-publish-org", "shipping-route"]);
+  assert.deepEqual([...fan.FANOUT_ONLY_JOBS], [WORKFLOWS_JOB, "ads-spend-org", "wholesale-leads", "creative-publish-org", "shipping-route", "meta-capi-org"]);
   for (const j of ["sales-followup", "sales-health"]) {
     assert.equal(fan.callsHome(j), true, `${j}: có lượt của nhà (công tắc là module ai_sales của nhà, không phải lịch)`);
     assert.equal(fan.fanOutPlan({ job: j, all: false, automation: true }), "AUTOMATION", `${j}: tổ chức khách vẫn chạy qua tầng tự động hoá như trước`);
