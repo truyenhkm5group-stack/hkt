@@ -34,18 +34,18 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-08T10:41:59.510Z",
-  "updated_at": "2026-10-08T11:48:55.354Z",
-  "last_heartbeat": "2026-10-08T11:48:36.857Z",
+  "updated_at": "2026-10-08T15:47:14.031Z",
+  "last_heartbeat": "2026-10-08T15:47:14.031Z",
   "definition_of_done": [],
   "handoff": {
     "branch": "fix/create-customer-defaults",
-    "sha": "90f42789c042888500c07a4396471a294af3193f",
-    "at": "2026-10-08T11:48:36.857Z",
+    "sha": "e87159d826dfd3180afbcc06ab867823fdbb1cd1",
+    "at": "2026-10-08T15:47:14.031Z",
     "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
     "title": "LAUNCH BLOCKER: Tạo khách mới đúng mặc định — thương hiệu Chốt Đơn tự đặt, chỉ gói đang bán (chặn internal / legacy), nút không khoá im lặng, cài mẫu AI bán hàng như /start",
-    "summary": "Tạo khách mới đúng mặc định: luật máy chủ create-customer-rules (chỉ Chốt Đơn ⇒ thương hiệu chotdon tự đặt; gói hợp lệ = gói CATALOG đang niêm yết + trial; giá cũ chỉ tài khoản nội bộ; internal không cấp); job cài mẫu «Chỉ cần AI bán hàng» như /start (bước TEMPLATE, idempotent, hỏng không làm hỏng cấp phát); ConfirmWithReason đưa lý do + nút xuống dưới và nói vì sao nút chưa bấm được",
+    "summary": "Sửa review #682 (M1 cài lại mẫu, M2 luật gói + thương hiệu ở tầng ghi chung cho mọi cửa, L1–L7, INFO) + phối hợp #684 (test 596, dấu vân trên decidedRequest, FingerprintFields satisfies, câu KEY_REUSED, Thuê sản phẩm khoá idempotent) + host liên kết kích hoạt theo thương hiệu",
     "tests": [
-      "tsc + eslint sạch; npm run build đạt; create-customer-rules, saas-platform, saas-l5-billing-trial, saas-signup-subscription đạt; static + repo-integrity + test-org-codes; dựng HTML 36 chỗ ConfirmWithReason; đột biến 12/12; 0 ký tự vô hình"
+      "tsc + eslint sạch; 11 runner đạt (create-customer-rules, identity-email-login, saas-platform, onboarding, quick-start, pilot-ops, saas-signup-subscription, saas-l5-billing-trial, shell-gate-redirects, saas-shell, shell-login-landing); static 19 nhóm + isolation + hygiene đạt; npm run build một mình đạt (59dd147d, cùng nội dung); đột biến 29/30 đỏ (M25 tương đương)"
     ]
   }
 }
