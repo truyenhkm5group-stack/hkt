@@ -3,7 +3,7 @@
   "mission_id": "saas-acceptance-smoke",
   "title": "Smoke nghiệm thu khách Chốt Đơn trên production",
   "business_goal": "",
-  "status": "RUNNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -34,7 +34,18 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-08T12:24:39.666Z",
-  "updated_at": "2026-10-08T14:39:53.401Z",
-  "last_heartbeat": "2026-10-08T14:39:53.401Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-08T14:40:07.684Z",
+  "last_heartbeat": "2026-10-08T14:40:07.684Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "feat/saas-acceptance-smoke",
+    "sha": "f16e1e1352dbc403a8c9f93ff8954a227dc5e0b8",
+    "at": "2026-10-08T14:40:07.684Z",
+    "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+    "title": "Smoke nghiệm thu khách Chốt Đơn trên production",
+    "summary": "Ops saas-acceptance: A cấp phát qua job Tạo khách · B kích hoạt + đăng nhập email không mã tổ chức, mật khẩu sinh trong bộ nhớ rồi xoay · C vỏ (tuyến dẫn xuất từ nav, phát hiện bị đá về trang nhà) · D chat web → AI → đơn (cần chuẩn bị UI, thiếu ⇒ SKIP) · E định tuyến chat công khai",
+    "tests": [
+      "tsc + eslint sạch; testSaasAcceptance đạt; password-reset, identity-email-login, saas-shell, shell-gate-redirects đạt; hợp đồng tĩnh sau commit đạt (isolation S6'/S17/S21, hygiene, navigation, ui, migration-journal); ops-log-leak, ops-concurrency, repo-integrity, smoke-coverage, test-org-codes đạt; đột biến 8/8 đỏ"
+    ]
+  }
 }
