@@ -544,6 +544,7 @@ import { testPush } from "./push.test";
 import { testUserInvites } from "./user-invites.test";
 import { testPasswordReset } from "./password-reset.test";
 import { testIdentityEmailLogin } from "./identity-email-login.test";
+import { testOpsSignals } from "./ops-signals.test";
 import { testTestOrgCodes } from "./test-org-codes.test";
 import { testHelpGuides } from "./help-guides.test";
 import { testChotDonAssets, testChotDonBrand, testMissedOrdersCalculator, testOrgLinkOrigin, testPublicSiteData, testPublicSiteHost, testPublicSiteSource } from "./public-site.test";
@@ -2914,6 +2915,10 @@ async function main() {
   // ngay lúc cấp phát / tạo hộ / mời / đặt mật khẩu; gửi lại kích hoạt; email trùng hai workspace; đối chiếu dữ liệu cũ. Tổ chức
   // THẬT `iel-*`, tự cấp, tự dọn; loginAction / logoutAction chạy trong phạm vi request dựng tay của Next.
   await testIdentityEmailLogin();
+  // LAUNCH SPRINT §11 «Observability before sales» (sứ mệnh saas-ops-signals): tám tín hiệu vận hành của MỘT khách — lỗi đăng nhập có
+  // lý do (không lộ cho người dùng, không email / mật khẩu thô, chặn dò không nhân dòng) · ghi đơn hỏng KHÔNG thành «AI hỏng» · AI im
+  // có tên · gương sức khoẻ ở CSDL nhà (job sales-health, hết lỗi ⇒ về OK) · khung chỉ người vận hành đọc được. Tổ chức THẬT `ops-sig*`.
+  await testOpsSignals();
   testHelpGuides();
   // Trang giới thiệu: bảng giá đọc thật từ platform_plans, gói khởi điểm không bao giờ in thành 0 ₫.
   await testPublicSiteData();

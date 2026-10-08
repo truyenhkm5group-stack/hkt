@@ -5104,11 +5104,20 @@ export const platformAiUsage = pgTable(
     thinkingTokens: integer("thinking_tokens"),
     latencyMs: integer("latency_ms"),
     workload: text("workload"),
+    /**
+     * AI IM CÓ TÊN (0236): `ERROR` ⇒ lớp lỗi của nhà cung cấp (`classifyAiFailure`); `BLOCKED_QUOTA` ⇒ trần hạn mức nào chạm.
+     * `NULL` = CHƯA PHÂN LOẠI (dòng cũ, đường ghi chưa nối) — không backfill. Danh sách đóng: `AI_USAGE_ERROR_CLASSES`.
+     */
+    errorClass: text("error_class"),
   },
   (t) => [
     uniqueIndex("platform_ai_usage_org_event_key").on(t.orgCode, t.eventKey).where(sql`${t.eventKey} IS NOT NULL`),
     check("platform_ai_usage_modality_check", sql`${t.modality} IS NULL OR ${t.modality} IN ('TEXT','VISION','IMAGE')`),
     check("platform_ai_usage_workload_check", sql`${t.workload} IS NULL OR ${t.workload} IN ('sales_chatbot','order_sync','quick_extract','vision')`),
+    check(
+      "platform_ai_usage_error_class_check",
+      sql`${t.errorClass} IS NULL OR ${t.errorClass} IN ('CREDIT','AUTH','RATE_LIMIT','MODEL_UNAVAILABLE','SERVER_ERROR','TIMEOUT','INVALID_REQUEST','OTHER','REQUESTS_DAY','REQUESTS_MONTH','COST_HARD','NO_PLATFORM_CREDIT','PLATFORM_CREDIT_USED','PLAN_UNREADABLE')`,
+    ),
     check("platform_ai_usage_event_key_check", sql`${t.eventKey} IS NULL OR length(${t.eventKey}) BETWEEN 1 AND 200`),
     index("platform_ai_usage_org_at_idx").on(t.orgCode, t.at),
     // 0231: sổ AI theo HỘI THOẠI cho dấu vết từng tin khách ở hộp thư (lib/ai-usage/conversation-evidence.ts).
@@ -5118,6 +5127,85 @@ export const platformAiUsage = pgTable(
     check("platform_ai_usage_status_check", sql`${t.status} in ('OK','ERROR','BLOCKED_QUOTA')`),
     check("platform_ai_usage_feature_check", sql`${t.feature} ~ '^[a-z][a-z0-9_]{1,40}$'`),
     check("platform_ai_usage_requests_check", sql`${t.requests} >= 0`),
+  ],
+);
+
+/**
+ * GƯƠNG SỨC KHOẺ TỔ CHỨC (0236 · sứ mệnh saas-ops-signals · LAUNCH SPRINT §11) — mặt phẳng điều khiển, chỉ thật ở CSDL NHÀ.
+ *
+ * Trạng thái Facebook / webhook / gửi tin / ghi đơn của MỘT khách chỉ nằm trong CSDL của khách; người vận hành muốn đọc là phải mở
+ * từng CSDL. Job `sales-health` (5 phút, từng tổ chức có AI bán hàng) đã TÍNH sẵn các kết luận đó — nay nó GHI LẠI kết luận ở đây,
+ * mỗi (tổ chức, kiểm) MỘT dòng, để `/platform/org/<mã>` và danh sách khách đọc trong một câu, không N+1.
+ *  · Kiểm đã hết ⇒ dòng VỀ mức OK (không xoá im) — «lần cuối» vẫn giữ.
+ *  · `measured_at` = lượt đo của job; `NULL` = mới chỉ có sự cố ghi thẳng từ đường nóng (`noteOrgHealthEvent`), chưa lượt đo nào.
+ *  · `since` = lúc mức hiện tại bắt đầu. `detail` NGẮN, không PII (số đếm + mã lý do), ≤ 300 ký tự.
+ *  · `count_*` `NULL` = CHƯA ĐO, không phải 0 (luật 42).
+ */
+export const platformOrgHealth = pgTable(
+  "platform_org_health",
+  {
+    orgCode: text("org_code").notNull(),
+    checkKey: text("check_key").notNull(),
+    level: text("level").notNull(),
+    count24h: integer("count_24h"),
+    count7d: integer("count_7d"),
+    lastAt: ts("last_at"),
+    lastReason: text("last_reason"),
+    /** Id hội thoại / mã đơn của lần cuối — khoá nối sang CSDL của khách, không phải dữ liệu người. */
+    correlationId: text("correlation_id"),
+    detail: text("detail"),
+    since: ts("since").notNull().defaultNow(),
+    measuredAt: ts("measured_at"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    primaryKey({ name: "platform_org_health_pkey", columns: [t.orgCode, t.checkKey] }),
+    check("platform_org_health_key_check", sql`${t.checkKey} IN ('FB_CONNECTION','WEBHOOK','AI','SEND','ORDER_VALIDATION','ORDER_WRITE','QUOTA')`),
+    check("platform_org_health_level_check", sql`${t.level} IN ('OK','WARNING','CRITICAL','UNKNOWN','NA')`),
+    check("platform_org_health_counts_check", sql`(${t.count24h} IS NULL OR ${t.count24h} >= 0) AND (${t.count7d} IS NULL OR ${t.count7d} >= 0)`),
+    check("platform_org_health_reason_check", sql`${t.lastReason} IS NULL OR ${t.lastReason} ~ '^[A-Z][A-Z0-9_]{1,40}$'`),
+    check("platform_org_health_detail_check", sql`${t.detail} IS NULL OR length(${t.detail}) <= 300`),
+    check("platform_org_health_correlation_check", sql`${t.correlationId} IS NULL OR length(${t.correlationId}) <= 200`),
+  ],
+);
+
+/**
+ * LỖI ĐĂNG NHẬP CÓ LÝ DO (0236 · sứ mệnh saas-ops-signals) — mặt phẳng điều khiển, chỉ thật ở CSDL NHÀ.
+ *
+ * Một dòng = một lượt đăng nhập / mở liên kết đặt mật khẩu / liên kết mời THẤT BẠI, mang LÝ DO (danh sách đóng
+ * `AUTH_FAILURE_REASONS`). Câu trả cho người đang đăng nhập KHÔNG đổi — lý do chỉ người vận hành đọc.
+ *  · KHÔNG mật khẩu, KHÔNG email / SĐT thô: `identifier_hash` = HMAC(AUTH_SECRET) của định danh đã chuẩn hoá (đếm được, tra ngược
+ *    không được), `identifier_masked` = «ng***@gmail.com» — CHECK buộc có «***». IP chỉ băm.
+ *  · `org_code` NULL khi không quy được về một tổ chức có thật (mã gõ sai không vào sổ).
+ *  · `THROTTLED` một dòng cho mỗi (định danh hoặc máy, cửa sổ khoá) — `dedupe_key` duy nhất chặn ở tầng CSDL; kẻ dò không khuếch đại
+ *    được lượt ghi.
+ *  · Hạn giữ 90 ngày (`AUTH_FAILURE_RETENTION_DAYS`).
+ */
+export const platformAuthFailures = pgTable(
+  "platform_auth_failures",
+  {
+    id: id(),
+    at: ts("at").notNull().defaultNow(),
+    orgCode: text("org_code"),
+    flow: text("flow").notNull(),
+    reasonCode: text("reason_code").notNull(),
+    identifierHash: text("identifier_hash"),
+    identifierMasked: text("identifier_masked"),
+    ipHash: text("ip_hash"),
+    dedupeKey: text("dedupe_key"),
+  },
+  (t) => [
+    index("platform_auth_failures_org_at_idx").on(t.orgCode, t.at),
+    index("platform_auth_failures_at_idx").on(t.at),
+    uniqueIndex("platform_auth_failures_dedupe_key").on(t.dedupeKey).where(sql`${t.dedupeKey} IS NOT NULL`),
+    check("platform_auth_failures_flow_check", sql`${t.flow} IN ('LOGIN','RESET_LINK','INVITE')`),
+    check(
+      "platform_auth_failures_reason_check",
+      sql`${t.reasonCode} IN ('NO_IDENTITY','BAD_PASSWORD','USER_INACTIVE','ORG_INACTIVE','ORG_NOT_FOUND','THROTTLED','RESET_LINK_INVALID','RESET_LINK_EXPIRED','RESET_LINK_USED','RESET_LINK_REVOKED','INVITE_INVALID','INVITE_EXPIRED','INVITE_USED','INVITE_REVOKED')`,
+    ),
+    check("platform_auth_failures_hash_check", sql`(${t.identifierHash} IS NULL OR ${t.identifierHash} ~ '^[0-9a-f]{64}$') AND (${t.ipHash} IS NULL OR ${t.ipHash} ~ '^[0-9a-f]{64}$') AND (${t.dedupeKey} IS NULL OR ${t.dedupeKey} ~ '^[0-9a-f]{64}$')`),
+    check("platform_auth_failures_masked_check", sql`${t.identifierMasked} IS NULL OR (length(${t.identifierMasked}) <= 80 AND position('***' in ${t.identifierMasked}) > 0)`),
   ],
 );
 

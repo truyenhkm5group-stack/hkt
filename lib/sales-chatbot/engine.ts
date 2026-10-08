@@ -22,7 +22,7 @@ import { AI_DOWN_HANDOFF_REASON as AI_DOWN_REASON_TEXT } from "@/lib/sales-chatb
 import type { AiImage } from "@/lib/ai/images";
 import { estimateCostUsd, getAiProvider, type AiBlock, type AiMessage, type AiProvider, type AiUsage } from "@/lib/ai/provider";
 import { aiDisabledReason } from "@/lib/ai/router";
-import type { AiBillingSource } from "@/lib/ai-usage/types";
+import { aiErrorClassOf, type AiBillingSource } from "@/lib/ai-usage/types";
 import { ByokAnthropicProvider, ByokGeminiProvider, ByokOpenAiProvider } from "@/lib/ai-builder/providers";
 import { platformChatAi } from "@/lib/ai-builder/provider";
 import { readConversationPlatformModels } from "@/lib/ai-usage/platform-ai-policy";
@@ -33,7 +33,10 @@ import type { AiCustomerHint } from "@/lib/pricing/ai-customer";
 import { promptStampOf } from "@/lib/sales-chatbot/prompt-stamp";
 import { runningVersion } from "@/lib/version";
 import type { AiUsageFeature } from "@/lib/ai-usage/types";
-import { MODEL_UNAVAILABLE_RE } from "@/lib/constants/ai-incidents";
+import { MODEL_UNAVAILABLE_RE, type AiFailureClass } from "@/lib/constants/ai-incidents";
+import { ORDER_WRITE_HANDOFF_REASON } from "@/lib/constants/ops-signals";
+import { noteOrgHealthEvent } from "@/lib/platform/org-health";
+import { OrderWriteError } from "@/lib/sales-chatbot/order-signals";
 import { FailoverProvider, notifyPrimaryFailover, settingsHealthStore } from "@/lib/sales-chatbot/provider-failover";
 import { checkAiQuota } from "@/lib/ai-usage/quota";
 import { AI_PROFILE_SETTING_KEY } from "@/lib/blueprints/types";
@@ -451,8 +454,8 @@ export async function describeCustomerImages(urls: readonly string[], opts: { co
       const model = res.model || prov.provider.model;
       await recordAiUsage({ ...base(), model, requests: 1, inputTokens: res.usage.inputTokens + res.usage.cacheReadTokens + res.usage.cacheWriteTokens, outputTokens: res.usage.outputTokens, costUsd: estimateCostUsd(model, res.usage), status: "OK", ...usageDetail(res) }).catch(() => undefined);
       return imageLine(urls.length, text || null);
-    } catch {
-      await recordAiUsage({ ...base(), model: prov.provider.model, requests: 1, inputTokens: null, outputTokens: null, costUsd: null, status: "ERROR" }).catch(() => undefined);
+    } catch (error) {
+      await recordAiUsage({ ...base(), model: prov.provider.model, requests: 1, inputTokens: null, outputTokens: null, costUsd: null, status: "ERROR", errorClass: aiErrorClassOf(error) }).catch(() => undefined);
       return fallback;
     }
   } catch {
@@ -531,7 +534,7 @@ async function resolveConnector(cfg: SalesChatbotConfig, key: SalesChatbotConfig
       workload: usage?.workload ?? null,
       routingKey: ref,
       priorModels: ref ? () => readConversationPlatformModels(org.code, ref) : undefined,
-      onPrimaryFailed: (f) => void recordAiUsage({ orgCode: org.code, feature: usage?.feature ?? "sales_chatbot", source: "PLATFORM", provider: f.name, model: f.model, requests: 1, inputTokens: null, outputTokens: null, costUsd: null, status: "ERROR", actorId: usage?.actorId ?? null, ref: usage?.ref ?? null, conversationId: usage?.conversationId ?? null, workload: usage?.workload ?? null }).catch(() => undefined),
+      onPrimaryFailed: (f) => void recordAiUsage({ orgCode: org.code, feature: usage?.feature ?? "sales_chatbot", source: "PLATFORM", provider: f.name, model: f.model, requests: 1, inputTokens: null, outputTokens: null, costUsd: null, status: "ERROR", errorClass: aiErrorClassOf(f.error), actorId: usage?.actorId ?? null, ref: usage?.ref ?? null, conversationId: usage?.conversationId ?? null, workload: usage?.workload ?? null }).catch(() => undefined),
     });
     return plat.ok ? { ok: true, provider: plat.provider, source } : { ok: false, error: plat.reason };
   }
@@ -573,7 +576,7 @@ async function providerFor(cfg: SalesChatbotConfig, usage: FailoverUsage = { fea
     longOpenMs: cfg.failoverOpenMinutes * 60_000,
     store: settingsHealthStore(org.code),
     onAttemptFailed: async (a) => {
-      await recordAiUsage({ orgCode: org.code, feature: usage.feature, source: a.source, provider: a.name, model: a.model, requests: 1, inputTokens: null, outputTokens: null, costUsd: null, status: "ERROR", actorId: usage.actorId, ref: usage.ref, conversationId: usage.conversationId ?? null, workload: usage.workload ?? null }).catch(() => undefined);
+      await recordAiUsage({ orgCode: org.code, feature: usage.feature, source: a.source, provider: a.name, model: a.model, requests: 1, inputTokens: null, outputTokens: null, costUsd: null, status: "ERROR", errorClass: a.kind, actorId: usage.actorId, ref: usage.ref, conversationId: usage.conversationId ?? null, workload: usage.workload ?? null }).catch(() => undefined);
     },
     onPrimaryNeedsHuman: (a) => notifyPrimaryFailover(a.key, a.kind, fb.connectorKey, new Date()).catch(() => undefined),
   });
@@ -767,6 +770,9 @@ async function chatTurnCore(
     // cho chủ shop. Gói trả phí / giá cũ không bao giờ dừng ở đây.
     const plan = await salesAiPlanGate({ now, conversation: { channel: conv.channel, pageId: conv.pageId, threadId: conv.threadId, visitorKey: conv.visitorKey, ...(opts.aiCustomer ?? {}) } });
     if (!plan.ok) {
+      // HẾT SỐ DƯ / DÙNG THỬ / ĐÌNH CHỈ CÓ TÊN (sứ mệnh saas-ops-signals): lý do vào gương sức khoẻ ở CSDL nhà — trước đây chỉ là ghi
+      // chú dòng tin trong CSDL tổ chức (chat web: không gì cả). Có trần tần suất, không ném, không đổi câu / hành vi với khách.
+      if (isPublicChannel(opts.channel)) await noteOrgHealthEvent((await currentOrganization()).code, "QUOTA", { level: "CRITICAL", reason: plan.reason, at: now, correlationId: conv.id });
       if (opts.channel === "WEB") return { ok: true, view: (await conversationView(conv.id))! };
       return { ok: false, error: isMessagingChannel(opts.channel) ? plan.note : plan.message };
     }
@@ -841,7 +847,7 @@ async function chatTurnCore(
     // KHÁC còn hạn mức ⇒ lượt này đi thẳng khoá dự phòng (provider-failover.ts). Dòng BLOCKED_QUOTA của khoá chính vẫn ghi.
     const fbQuota = effectiveFallback(cfg);
     const fbSource = fbQuota ? salesBotBillingSource(fbQuota.connectorKey, { home: org.isHome }) : null;
-    if (!quota.ok) await recordAiUsage({ orgCode: org.code, feature: "sales_chatbot", source: billing, provider: null, model: null, requests: 0, inputTokens: null, outputTokens: null, costUsd: null, status: "BLOCKED_QUOTA", actorId: opts.actorId ?? null, ref: conv.id, conversationId: conv.id }).catch(() => undefined);
+    if (!quota.ok) await recordAiUsage({ orgCode: org.code, feature: "sales_chatbot", source: billing, provider: null, model: null, requests: 0, inputTokens: null, outputTokens: null, costUsd: null, status: "BLOCKED_QUOTA", errorClass: quota.reason, actorId: opts.actorId ?? null, ref: conv.id, conversationId: conv.id }).catch(() => undefined);
     if (!quota.ok && !(fbSource && fbSource !== billing && (await checkAiQuota(org.code, fbSource)).ok)) return blocked("QUOTA", "Tổ chức đã dùng hết hạn mức AI của gói dịch vụ — nâng gói hoặc chờ kỳ sau", quota.error);
     const prov = await providerFor(cfg, { feature: "sales_chatbot", actorId: opts.actorId ?? null, ref: conv.id, conversationId: conv.id, workload: "sales_chatbot" }, quota.ok ? undefined : quota.error);
     if (!prov.ok) return blocked("CONNECTION", "Kết nối AI của shop chưa dùng được — mở Cài đặt → Kết nối, kiểm tra lại khoá AI", prov.error);
@@ -886,6 +892,10 @@ async function chatTurnCore(
     let outTok = 0;
     let status: "OK" | "ERROR" = "OK";
     let lastError: string | null = null;
+    // Lớp lỗi của lượt AI hỏng (0236 · sổ AI `error_class`) — đọc từ lỗi THẬT của lời gọi, không từ câu đã cắt.
+    let errorClass: AiFailureClass | null = null;
+    // GHI ĐƠN hỏng (lõi đơn ném trong công cụ — order-signals.ts) ≠ AI hỏng: lượt AI vẫn OK, chuyển người mang lý do ghi đơn.
+    let orderWriteFailed = false;
     let leaks = 0;
     // Lượt này đã có câu nào TỚI KHÁCH chưa (chữ còn lại sau bộ lọc, câu mẫu, câu báo của máy chủ) — xem «KHÔNG ĐỂ KHÁCH IM».
     let spoke = false;
@@ -898,7 +908,7 @@ async function chatTurnCore(
     type Segment = { name: string; source: AiBillingSource; model: string; calls: number; inTok: number; outTok: number; cost: number | null; think: number | null; cached: number; lat: number };
     const newSegment = (): Segment => ({ name: prov.provider.name, source: prov.source, model: prov.provider.model, calls: 0, inTok: 0, outTok: 0, cost: 0, think: 0, cached: 0, lat: 0 });
     let seg = newSegment();
-    const recordSegment = (s: Segment, st: "OK" | "ERROR") => recordAiUsage({ orgCode: org.code, feature: "sales_chatbot", source: s.source, provider: s.name, model: s.model, requests: s.calls, inputTokens: s.inTok, outputTokens: s.outTok, costUsd: s.calls ? s.cost : null, status: st, actorId: opts.actorId ?? null, ref: conv.id, conversationId: conv.id, workload: "sales_chatbot", cachedTokens: s.calls ? s.cached : null, thinkingTokens: s.calls ? s.think : null, latencyMs: s.calls ? s.lat : null }).catch(() => undefined);
+    const recordSegment = (s: Segment, st: "OK" | "ERROR") => recordAiUsage({ orgCode: org.code, feature: "sales_chatbot", source: s.source, provider: s.name, model: s.model, requests: s.calls, inputTokens: s.inTok, outputTokens: s.outTok, costUsd: s.calls ? s.cost : null, status: st, ...(st === "ERROR" ? { errorClass } : {}), actorId: opts.actorId ?? null, ref: conv.id, conversationId: conv.id, workload: "sales_chatbot", cachedTokens: s.calls ? s.cached : null, thinkingTokens: s.calls ? s.think : null, latencyMs: s.calls ? s.lat : null }).catch(() => undefined);
     try {
       for (let round = 0; round < SALES_CHATBOT_LIMITS.toolRounds; round++) {
         // Mức suy nghĩ theo cấu hình (Kỹ = suy luận vừa, Nhanh = thấp) — ngân sách đủ rộng để phần suy luận không ăn hết câu
@@ -986,20 +996,36 @@ async function chatTurnCore(
         }
       }
     } catch (error) {
-      status = "ERROR";
-      lastError = error instanceof Error ? error.message.slice(0, 300) : String(error).slice(0, 300);
-      if (error instanceof SeqConflict) throw error;
-      if (!isPublicChannel(opts.channel)) await reply(conv, seq++, aiDownReply(cfg)).catch(() => undefined);
-      state = { ...state, handoff: { reason: AI_DOWN_HANDOFF_REASON, at: now.toISOString() } };
-      await notifyAiDownHandoff(conv, state, opts.channel, now).catch(() => undefined);
-      await notifyProviderFailure(lastError, now).catch(() => undefined);
+      if (error instanceof OrderWriteError) {
+        /*
+          GHI ĐƠN HỎNG ≠ AI HỎNG (sứ mệnh saas-ops-signals): lõi đơn ném bên trong công cụ — nhà cung cấp AI vẫn chạy. Lượt AI KHÔNG
+          ghi ERROR, không báo «nhà cung cấp AI hỏng», hội thoại chuyển người với lý do GHI ĐƠN (không thuộc nhóm nhường tự hết hạn ⇒
+          bot không tự thử ghi lại một đơn chưa ai kiểm). Với khách: y như nhánh AI hỏng — kênh công khai bot im, nhân viên được báo;
+          không câu nào nói «đã chốt». Tín hiệu (`order.create_failed` + gương) đã ghi trong `executeTool`.
+        */
+        orderWriteFailed = true;
+        lastError = error.message;
+        if (!isPublicChannel(opts.channel)) await reply(conv, seq++, `Xin lỗi, em chưa ghi được đơn. ${cfg.handoff.message}`).catch(() => undefined);
+        state = { ...state, handoff: { reason: ORDER_WRITE_HANDOFF_REASON, at: now.toISOString() } };
+        if (isPublicChannel(opts.channel)) await notifySalesChatHandoff(conv.id, ORDER_WRITE_HANDOFF_REASON, state.customer, now).catch(() => undefined);
+      } else {
+        status = "ERROR";
+        lastError = error instanceof Error ? error.message.slice(0, 300) : String(error).slice(0, 300);
+        errorClass = aiErrorClassOf(error);
+        if (error instanceof SeqConflict) throw error;
+        if (!isPublicChannel(opts.channel)) await reply(conv, seq++, aiDownReply(cfg)).catch(() => undefined);
+        state = { ...state, handoff: { reason: AI_DOWN_HANDOFF_REASON, at: now.toISOString() } };
+        await notifyAiDownHandoff(conv, state, opts.channel, now).catch(() => undefined);
+        await notifyProviderFailure(lastError, now).catch(() => undefined);
+      }
     }
     // Câu bị lọc suy luận ⇒ ghi cho người vận hành (màn hình chỉ in nhãn, không in câu gốc).
     if (leaks && !lastError) lastError = `AI viết suy luận nội bộ vào câu trả lời (${leaks} đoạn) — đã lọc trước khi gửi khách`;
     // KHÔNG ĐỂ KHÁCH IM (04/10/2026 — bộ hội thoại vàng): model chỉ gọi công cụ chuyển người không kèm chữ, hoặc mọi chữ bị
     // bộ lọc suy luận chặn (kể cả khi model nhại lỗi công cụ) ⇒ lượt kết thúc mà khách không nhận một câu nào. Luật kênh giữ
     // nguyên: trên kênh NHẮN TIN (fanpage) chuyển người thì bot IM — nhân viên trả lời trực tiếp (chủ shop chốt 01/10/2026).
-    if (!spoke && status === "OK") {
+    // Ghi đơn hỏng đã xử lý câu với khách ở nhánh catch (như AI hỏng) — không thêm câu nào ở đây.
+    if (!spoke && status === "OK" && !orderWriteFailed) {
       const handedOffNow = Boolean(state.handoff) && conv.status !== "HANDOFF";
       if (handedOffNow) {
         if (!isMessagingChannel(opts.channel)) await reply(conv, seq++, cfg.handoff.message);

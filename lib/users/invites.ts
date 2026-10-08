@@ -28,8 +28,10 @@ import { and, desc, eq, gt, isNull, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import type { Role } from "@/db/schema";
 import { audit } from "@/lib/audit";
+import { recordAuthFailure } from "@/lib/auth/auth-failures";
 import { verifyLogin } from "@/lib/auth/login";
-import { loginAllowed, recordLoginFailure } from "@/lib/auth/login-throttle";
+import { loginAllowed, loginLockOf, recordLoginFailure } from "@/lib/auth/login-throttle";
+import type { AuthFailureReason } from "@/lib/constants/auth-failures";
 import { can, type SessionSubject, type SessionUser } from "@/lib/auth/session";
 import { normalizeScope } from "@/lib/constants/access-scope";
 import { ROLE_LABEL, ROLE_ORDER } from "@/lib/constants/roles";
@@ -71,11 +73,39 @@ function ipKey(ip: string): string[] {
   return [`ip:join:${h}`];
 }
 
-type Throttle = { ok: true; keys: string[] } | { ok: false; error: string };
+type Throttle = { ok: true; keys: string[] } | { ok: false; error: string; keys: string[] };
 
 function throttleGate(ip: string): Throttle {
   const keys = ipKey(ip);
-  return loginAllowed(keys).ok ? { ok: true, keys } : { ok: false, error: USER_INVITE_THROTTLED };
+  return loginAllowed(keys).ok ? { ok: true, keys } : { ok: false, error: USER_INVITE_THROTTLED, keys };
+}
+
+// ═══ LỖI CÓ LÝ DO (sứ mệnh saas-ops-signals) ═══
+// Người mở liên kết hỏng vẫn nhận ĐÚNG `USER_INVITE_INVALID`; lý do thật (hết hạn · đã nhận · đã thu hồi · tổ chức không chạy) chỉ
+// vào sổ `platform_auth_failures` cho người vận hành. Tra lý do CHỈ ở nhánh hỏng — mỗi lượt hỏng đã bị bộ chặn dò theo IP giới hạn.
+
+async function inviteFailureWhy(orgCode: string, token: string): Promise<{ reason: AuthFailureReason; email: string | null }> {
+  if (!TOKEN_PATTERN.test(String(token ?? ""))) return { reason: "INVITE_INVALID", email: null };
+  const code = String(orgCode ?? "").trim().toLowerCase();
+  const org = ORGANIZATION_CODE_PATTERN.test(code) ? await findOrganization(code) : null;
+  if (!org) return { reason: "ORG_NOT_FOUND", email: null };
+  if (org.status !== "ACTIVE") return { reason: "ORG_INACTIVE", email: null };
+  try {
+    return await withOrganization(org.code, async () => {
+      const db = await getDb();
+      const row = await db.query.userInvites.findFirst({ where: eq(schema.userInvites.tokenHash, hashUserInviteToken(token)) });
+      if (!row) return { reason: "INVITE_INVALID" as const, email: null };
+      const status = userInviteStatus(row);
+      const reason: AuthFailureReason = status === "ACCEPTED" ? "INVITE_USED" : status === "REVOKED" ? "INVITE_REVOKED" : status === "EXPIRED" ? "INVITE_EXPIRED" : "INVITE_INVALID";
+      return { reason, email: row.email };
+    });
+  } catch (error) {
+    return { reason: error instanceof OrgContextError ? "ORG_INACTIVE" : "INVITE_INVALID", email: null };
+  }
+}
+
+async function noteInviteFailure(orgCode: string, ip: string, why: { reason: AuthFailureReason; email: string | null }, lockKeys?: string[]): Promise<void> {
+  await recordAuthFailure({ flow: "INVITE", reason: why.reason, orgCode, identifier: why.email, ip, lock: lockKeys ? loginLockOf(lockKeys) : null });
 }
 
 // ═══ QUẢN TRỊ: TẠO · THU HỒI · LIỆT KÊ ═══
@@ -203,9 +233,13 @@ export type UserInviteLookup =
 /** Trang `/join/<tổ chức>/<mã>`: CHỈ ĐỌC, không tiêu mã. Không hợp lệ ⇒ câu chung + một lượt sai vào bộ chặn dò. */
 export async function lookupUserInvite(orgCode: string, token: string, opts: { ip: string }): Promise<UserInviteLookup> {
   const gate = throttleGate(opts.ip);
-  if (!gate.ok) return { ok: false, error: gate.error };
-  const fail = (): UserInviteLookup => {
+  if (!gate.ok) {
+    await noteInviteFailure(orgCode, opts.ip, { reason: "THROTTLED", email: null }, gate.keys);
+    return { ok: false, error: gate.error };
+  }
+  const fail = async (): Promise<UserInviteLookup> => {
     recordLoginFailure(gate.keys);
+    await noteInviteFailure(orgCode, opts.ip, await inviteFailureWhy(orgCode, token));
     return { ok: false, error: USER_INVITE_INVALID };
   };
   if (!TOKEN_PATTERN.test(String(token ?? ""))) return fail();
@@ -240,13 +274,17 @@ export async function acceptUserInviteCore(
   opts: { ip: string; issue?: (subject: SessionSubject) => Promise<void> },
 ): Promise<AcceptedUserInvite | { error: string }> {
   const gate = throttleGate(opts.ip);
-  if (!gate.ok) return { error: gate.error };
+  if (!gate.ok) {
+    await noteInviteFailure(orgCode, opts.ip, { reason: "THROTTLED", email: null }, gate.keys);
+    return { error: gate.error };
+  }
   // Lược đồ đứng TRƯỚC mọi lượt tra: lỗi ô nhập không nói gì về mã hay tổ chức.
   const parsed = acceptUserInviteSchema.safeParse(input);
   if (!parsed.success) return { error: firstIssue(parsed.error) };
   const { name, password } = parsed.data;
-  const invalid = () => {
+  const invalid = async () => {
     recordLoginFailure(gate.keys);
+    await noteInviteFailure(orgCode, opts.ip, await inviteFailureWhy(orgCode, token));
     return { error: USER_INVITE_INVALID };
   };
   if (!TOKEN_PATTERN.test(String(token ?? ""))) return invalid();

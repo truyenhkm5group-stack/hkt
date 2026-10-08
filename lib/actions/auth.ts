@@ -4,9 +4,10 @@ import { HOST_NOT_FOUND_MESSAGE, hostOrganization } from "@/lib/platform/host-or
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { audit } from "@/lib/audit";
+import { recordAuthFailure } from "@/lib/auth/auth-failures";
 import { clientIpFrom } from "@/lib/auth/client-ip";
-import { credentialsMatch, LOGIN_BAD_CREDENTIALS, loginCandidates, verifyLogin } from "@/lib/auth/login";
-import { clearLoginFailures, loginAllowed, loginThrottleKeys, recordLoginFailure } from "@/lib/auth/login-throttle";
+import { credentialsCheck, LOGIN_BAD_CREDENTIALS, loginCandidates, strongestLoginFailure, verifyLogin, type LoginFailureReason } from "@/lib/auth/login";
+import { clearLoginFailures, loginAllowed, loginLockOf, loginThrottleKeys, recordLoginFailure } from "@/lib/auth/login-throttle";
 import { landingAfterSignIn } from "@/lib/saas/shell-landing";
 import { createSession, destroySession, getSession } from "@/lib/auth/session";
 import { OrgContextError } from "@/lib/platform/context";
@@ -40,15 +41,28 @@ export async function loginAction(_prev: LoginState, formData: FormData): Promis
   const ip = clientIpFrom(h.get("x-forwarded-for"));
   const throttleKeys = loginThrottleKeys(email, ip, orgCode ?? "*");
   const gate = loginAllowed(throttleKeys);
+  /*
+    LỖI CÓ LÝ DO (sứ mệnh saas-ops-signals · lib/auth/auth-failures.ts): mọi nhánh hỏng ghi MỘT dòng `platform_auth_failures`
+    (định danh băm + bản che, IP băm, mã tổ chức chỉ khi có thật) để người vận hành chẩn đoán «khách không đăng nhập được». Câu trả
+    người dùng KHÔNG đổi. Lượt BỊ CHẶN chỉ ghi một dòng mỗi cửa sổ khoá — kẻ dò không khuếch đại được lượt ghi. Không bao giờ ném.
+  */
+  const noteFailure = (reason: LoginFailureReason | "THROTTLED", failedOrg: string | null) =>
+    recordAuthFailure({ flow: "LOGIN", reason, orgCode: failedOrg, identifier: email, ip, lock: reason === "THROTTLED" ? loginLockOf(throttleKeys) : null });
   if (!gate.ok) {
     console.warn(`[login] chặn dò mật khẩu · email=${email} · ip=${ip} · đợi ${gate.retryAfterSec}s`);
+    await noteFailure("THROTTLED", orgCode);
     return { error: `Sai quá nhiều lần. Thử lại sau ${Math.ceil(gate.retryAfterSec / 60)} phút.` };
   }
 
   if (!orgCode) {
     const candidates = await loginCandidates(email);
     const matched: string[] = [];
-    for (const code of candidates) if (await credentialsMatch({ email, password, orgCode: code })) matched.push(code);
+    const fails: { reason: LoginFailureReason; orgCode: string | null }[] = [];
+    for (const code of candidates) {
+      const c = await credentialsCheck({ email, password, orgCode: code });
+      if (c.ok) matched.push(code);
+      else fails.push(c);
+    }
     if (matched.length > 1) {
       // Không lộ gì cho người KHÔNG biết mật khẩu: danh sách chỉ hiện khi mật khẩu đã khớp ở mọi tổ chức trong đó.
       const choose = await Promise.all(matched.map(async (code) => ({ code, name: (await findOrganization(code))?.name ?? code })));
@@ -56,6 +70,9 @@ export async function loginAction(_prev: LoginState, formData: FormData): Promis
     }
     if (matched.length === 0) {
       recordLoginFailure(throttleKeys);
+      // `loginCandidates` luôn đặt tổ chức nhà CUỐI danh sách.
+      const f = strongestLoginFailure(fails, candidates[candidates.length - 1] ?? "");
+      await noteFailure(f.reason, f.orgCode);
       await new Promise((r) => setTimeout(r, 400));
       return { error: LOGIN_BAD_CREDENTIALS };
     }
@@ -71,10 +88,9 @@ export async function loginAction(_prev: LoginState, formData: FormData): Promis
     await createSession(subject);
   });
   if (!verdict.ok) {
-    if (verdict.code === "BAD_CREDENTIALS") {
-      recordLoginFailure(throttleKeys);
-      await new Promise((r) => setTimeout(r, 400));
-    }
+    if (verdict.code === "BAD_CREDENTIALS") recordLoginFailure(throttleKeys);
+    await noteFailure(verdict.reason, verdict.orgCode);
+    if (verdict.code === "BAD_CREDENTIALS") await new Promise((r) => setTimeout(r, 400));
     return { error: verdict.error };
   }
   /*

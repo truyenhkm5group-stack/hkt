@@ -15,6 +15,7 @@ import { getPlatformDb, schema } from "@/db";
 import { dauNgayVN } from "@/lib/ai/budget";
 import {
   AI_BILLING_SOURCES,
+  AI_USAGE_ERROR_CLASSES,
   AI_USAGE_FEATURES,
   AI_USAGE_MODALITIES,
   AI_USAGE_STATUSES,
@@ -22,6 +23,7 @@ import {
   monthStartVN,
   type AiBillingSource,
   type AiSourceUsage,
+  type AiUsageErrorClass,
   type AiUsageFeature,
   type AiUsageModality,
   type AiUsageStatus,
@@ -60,6 +62,11 @@ export type AiUsageEntry = {
   thinkingTokens?: number | null;
   latencyMs?: number | null;
   workload?: PlatformWorkload | null;
+  /**
+   * AI IM CÓ TÊN (0236): `ERROR` ⇒ lớp lỗi (`aiErrorClassOf`); `BLOCKED_QUOTA` ⇒ trần nào chạm (`AiQuotaBlockReason`). Bỏ trống ⇒
+   * NULL = CHƯA PHÂN LOẠI. Giá trị ngoài danh sách đóng ⇒ NULL (dòng sổ tiền không được mất vì một nhãn sai). Dòng `OK` không mang lớp.
+   */
+  errorClass?: AiUsageErrorClass | null;
 };
 
 const intOrNull = (v: number | null): number | null => (v === null || !Number.isFinite(v) ? null : Math.max(0, Math.round(v)));
@@ -110,6 +117,7 @@ export async function recordAiUsage(e: AiUsageEntry): Promise<{ recorded: boolea
     thinkingTokens: intOrNull(e.thinkingTokens ?? null),
     latencyMs: intOrNull(e.latencyMs ?? null),
     workload: e.workload && (PLATFORM_WORKLOADS as readonly string[]).includes(e.workload) ? e.workload : null,
+    errorClass: e.status !== "OK" && e.errorClass && (AI_USAGE_ERROR_CLASSES as readonly string[]).includes(e.errorClass) ? e.errorClass : null,
     ...(e.at ? { at: e.at } : {}),
   });
   if (!eventKey) {

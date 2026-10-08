@@ -90,8 +90,11 @@ export type AuditParams = {
 
   `ORG_CONNECTION_TOKEN_ROTATE` (máy lưu cặp token Zalo OA vừa làm mới — lib/connectors/service.ts): chỉ đổi bí mật đã mã
   hoá của một kết nối, chừng mỗi giờ một lần mỗi tổ chức; không có nó ở đây thì mỗi lần làm mới xoá đệm báo cáo.
+
+  `order.create_failed` / `order.validation_failed` (sứ mệnh saas-ops-signals · lib/sales-chatbot/order-signals.ts): vết của một lượt bot
+  ghi đơn KHÔNG thành — theo định nghĩa không có dòng đơn nào đổi; đơn nào đã ghi trước đó thì ghi bằng hành động khác của chính nó.
 */
-const KHONG_DOI_SO_LIEU = new Set(["LOGIN", "LOGOUT", "META_AD_POST_LOOKUP", "RECOMMENDATION_DECIDED", "OUTREACH_BROADCAST_START", "OUTREACH_BROADCAST_STOP", "OUTREACH_BROADCAST_RESUME", "CUSTOM_FILE_DOWNLOAD", "BLUEPRINT_EXPORT", "DATA_EXPORT", "CHATBOT_AD_BOT_SAVE", "CHATBOT_AD_BOT_SWITCH", "CHATBOT_AD_BOT_SYNC", "ORG_CONNECTION_TOKEN_ROTATE"]);
+const KHONG_DOI_SO_LIEU = new Set(["LOGIN", "LOGOUT", "META_AD_POST_LOOKUP", "RECOMMENDATION_DECIDED", "OUTREACH_BROADCAST_START", "OUTREACH_BROADCAST_STOP", "OUTREACH_BROADCAST_RESUME", "CUSTOM_FILE_DOWNLOAD", "BLUEPRINT_EXPORT", "DATA_EXPORT", "CHATBOT_AD_BOT_SAVE", "CHATBOT_AD_BOT_SWITCH", "CHATBOT_AD_BOT_SYNC", "ORG_CONNECTION_TOKEN_ROTATE", "order.create_failed", "order.validation_failed"]);
 
 /**
  * Loại tác nhân cho cột `audit_logs.actor_kind` (Company OS · Agent G).

@@ -183,6 +183,7 @@ const MOI = [
   "0233_saas_l3_inbox_routes",
   "0234_billing_trial_cycle",
   "0235_ai_balance_ledger",
+  "0236_saas_ops_signals",
 ] as const;
 
 /*
@@ -370,6 +371,17 @@ export async function testMigrationUpgradePath() {
     assert.equal(await dem("select count(*)::int as n from information_schema.tables where table_name = 'platform_settings'"), 1, "bước 2: 0172 phải tạo bảng platform_settings");
     assert.equal(await dem("select count(*)::int as n from platform_settings"), 0, "bước 2: 0172 không được gieo dòng nào — mở /start là việc của người vận hành");
     await assert.rejects(client.query(`insert into platform_settings (key, value) values ('platform.signup.mode', '"mo-het"'::jsonb)`), "bước 2: 0172 — giá trị ngoài off/invite/open phải bị CSDL từ chối");
+
+    // 0236 (tín hiệu vận hành — sứ mệnh saas-ops-signals): hai bảng mới RỖNG (không gieo, không backfill); CHECK chặn lớp lỗi lạ,
+    // lý do lạ, bản che thiếu «***» (email thô); gương một dòng mỗi (tổ chức, kiểm).
+    assert.equal(await dem("select count(*)::int as n from platform_org_health"), 0, "bước 2: 0236 không gieo dòng gương nào");
+    assert.equal(await dem("select count(*)::int as n from platform_auth_failures"), 0, "bước 2: 0236 không gieo dòng lỗi đăng nhập nào");
+    await assert.rejects(client.query(`insert into platform_ai_usage (id, org_code, feature, billing_source, status, error_class) values ('up-ec1', 'x', 'ai_builder', 'BYOK', 'ERROR', 'XUI_XEO')`), "bước 2: 0236 — lớp lỗi ngoài danh sách đóng bị từ chối");
+    await assert.rejects(client.query(`insert into platform_auth_failures (id, flow, reason_code) values ('up-af0', 'LOGIN', 'DOAN_MO')`), "bước 2: 0236 — lý do ngoài danh sách đóng bị từ chối");
+    await assert.rejects(client.query(`insert into platform_auth_failures (id, flow, reason_code, identifier_masked) values ('up-af1', 'LOGIN', 'BAD_PASSWORD', 'chu@shop.vn')`), "bước 2: 0236 — bản che không có «***» (email thô) bị từ chối");
+    await client.query(`insert into platform_org_health (org_code, check_key, level) values ('up-o', 'SEND', 'OK')`);
+    await assert.rejects(client.query(`insert into platform_org_health (org_code, check_key, level) values ('up-o', 'SEND', 'WARNING')`), "bước 2: 0236 — một dòng mỗi (tổ chức, kiểm)");
+    await client.query(`delete from platform_org_health where org_code = 'up-o'`);
 
     // 0178 (G-ORDER — phiếu giao có ký nhận của đơn tạo tay): bảng mới RỖNG (không đoán đơn nào "đã giao" — mục 8.8, 35);
     // CHECK chỉ nhận đơn `erp-`, bắt buộc tên người ký, huỷ phải có lý do; một phiếu còn hiệu lực mỗi đơn.

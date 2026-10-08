@@ -85,6 +85,8 @@ export const HANDOFF_REASON_CODES = [
   "CUSTOMER_REQUEST",
   "AFTER_ORDER",
   "AI_DOWN",
+  /** Lõi đơn hỏng khi bot ghi khách / đơn (sứ mệnh saas-ops-signals) — KHÁC «AI hỏng»: nhà cung cấp AI vẫn chạy. */
+  "ORDER_WRITE_FAILED",
   "TOO_LONG",
   "TOOL_ROUNDS",
   "TOOL_REQUIRES_HUMAN",
@@ -105,6 +107,7 @@ export const HANDOFF_REASON_LABEL: Record<HandoffReasonCode, string> = {
   CUSTOMER_REQUEST: "Khách muốn gặp người",
   AFTER_ORDER: "Khách nhắn sau khi đã chốt",
   AI_DOWN: "AI không trả lời được",
+  ORDER_WRITE_FAILED: "Ghi đơn hỏng",
   TOO_LONG: "Hội thoại quá dài",
   TOOL_ROUNDS: "Quá số vòng công cụ",
   TOOL_REQUIRES_HUMAN: "Công cụ thấy bất thường",
@@ -130,6 +133,7 @@ export function classifyHandoffReason(reason: string | null | undefined): Handof
   const r = fold(reason ?? "").trim();
   if (!r) return "OTHER";
   if (r.startsWith("ai tam khong tra loi")) return "AI_DOWN";
+  if (r.startsWith("ghi don hong")) return "ORDER_WRITE_FAILED";
   if (r.startsWith("hoi thoai qua dai")) return "TOO_LONG";
   if (r.startsWith("qua so vong cong cu")) return "TOOL_ROUNDS";
   if (r.startsWith("khach nhan sau khi da chot")) return "AFTER_ORDER";

@@ -105,6 +105,19 @@ export function loginAllowed(keys: readonly string[], now = Date.now()): LoginGa
   return retryAfterSec > 0 ? { ok: false, retryAfterSec } : { ok: true };
 }
 
+/**
+ * Khoá ĐANG CHẶN lượt này (khoá có mốc mở muộn nhất) — `null` khi không bị chặn. Cặp (khoá, `lockedUntil`) là danh tính của MỘT cửa
+ * sổ khoá: sổ lỗi đăng nhập ghi THROTTLED đúng một lần cho mỗi cặp (lib/auth/auth-failures.ts), không một dòng mỗi lượt thử.
+ */
+export function loginLockOf(keys: readonly string[], now = Date.now()): { key: string; lockedUntil: number } | null {
+  let best: { key: string; lockedUntil: number } | null = null;
+  for (const key of keys) {
+    const e = store.get(key);
+    if (e && e.lockedUntil > now && (!best || e.lockedUntil > best.lockedUntil)) best = { key, lockedUntil: e.lockedUntil };
+  }
+  return best;
+}
+
 /** Ghi một lần sai; vượt ngưỡng của khoá đó trong cửa sổ thì khoá. */
 export function recordLoginFailure(keys: readonly string[], now = Date.now()): void {
   for (const key of keys) {
