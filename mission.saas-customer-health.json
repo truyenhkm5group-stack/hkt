@@ -27,18 +27,18 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-08T10:13:22.566Z",
-  "updated_at": "2026-10-08T16:53:58.816Z",
-  "last_heartbeat": "2026-10-08T16:53:58.816Z",
+  "updated_at": "2026-10-08T18:08:45.250Z",
+  "last_heartbeat": "2026-10-08T18:08:45.250Z",
   "definition_of_done": [],
   "handoff": {
     "branch": "feat/customer-health",
-    "sha": "e2b6cbf66e4b8ba35f6ce28ead546cf0baaba799",
-    "at": "2026-10-08T16:53:58.816Z",
+    "sha": "48ca07ac6ab193181fc395d25d7a5e2b34811ef5",
+    "at": "2026-10-08T18:08:45.250Z",
     "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
     "title": "P1: danh sách / chi tiết khách cho admin thấy sức khoẻ trong < 30 giây (Messenger · AI · đăng nhập · đơn · hạn mức · vấn đề) — chỉ dữ liệu thật",
-    "summary": "Sửa review #683: 3 đường thiếu dữ liệu ra chỗ chưa đo, nhãn AI ghi đơn hộ lỗi, mốc phục hồi tách lượt trả lời, ngưỡng đổi tên + mặc định kỹ thuật, nguồn hỏng tiêm được + test, sắp chạm ≠ vượt, chữ kỹ thuật ẩn, N/A, nhãn dòng nặng nhất, sức khoẻ luôn hiện tại, lỗ gộp chỉ khách trả tiền, now truyền vào, N+1 đếm lượt, lời khuyên kích hoạt theo #681, đồng hồ chưa đo",
+    "summary": "Rebase lên #682 (giải xung đột trang danh sách khách), F1 chatOk7d, tách câu job hỏng / chưa cài mẫu",
     "tests": [
-      "Trên bản trước rebase (cùng nội dung, base fd89b295): tsc + eslint 14 tệp sạch; runner customer-health, identity-email-login, saas-platform, ai-sales-health, platform-saas, ai-usage đạt; tĩnh platform-isolation-static S17/S21, test-hygiene, repo-integrity đạt; đột biến 31/31. Build chưa chạy trên SHA cuối (máy cạn RAM) — cổng CI dựng bản production"
+      "Trên 48ca07ac: tsc + eslint sạch; npm run build một mình đạt; runner customer-health (thuần, nguồn, bộ đọc, PGlite) + create-customer-rules + saas-platform đạt; tĩnh S17/S21 4c + test-hygiene + repo-integrity + migration journal đạt; đột biến 35/35"
     ]
   }
 }
