@@ -609,6 +609,7 @@ import { testSaasPageGate } from "./saas-page-gate.test";
 import { testSaasShell } from "./saas-shell.test";
 import { testShellLoginLanding } from "./shell-login-landing.test";
 import { testShellGateRedirects } from "./shell-gate-redirects.test";
+import { testErrorBoundary } from "./error-boundary.test";
 
 async function main() {
   await ensureMigrated();
@@ -3010,6 +3011,8 @@ async function main() {
   // Cùng lớp vòng trắng ở tầng CỔNG: thiếu quyền ⇒ người vỏ về trang nhà của vỏ ?forbidden=1 (không «/» mà layout vỏ chặn), ERP
   // giữ /?forbidden=1; /module-disabled đứng ngoài nhóm (dashboard) (tổ chức `sgr-cong` tự cấp và tự dọn).
   await testShellGateRedirects();
+  // Màn hình lỗi dashboard + gốc: không in error.message / DATABASE_URL, chỉ mã tham chiếu, lối ra <a href="/"> (Commercial Sweep C1 #11).
+  testErrorBoundary();
   // Nền tảng · phiên & RBAC (agent C): claim org, cổng module, platform:operate, đăng nhập theo tổ chức. Tự cấp
   // tổ chức `pr-` (CSDL riêng) và tự dọn; đứng cạnh bài ngữ cảnh vì cùng lý do.
   await testPlatformRbac();
