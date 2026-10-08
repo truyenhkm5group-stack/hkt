@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { completeProviderLogin } from "@/lib/auth/login";
 import { OAUTH_IDENTITY_KIND, readOAuthToken, SOCIAL_PICK_COOKIE, SOCIAL_SIGNUP_COOKIE, type SocialPick } from "@/lib/auth/oauth";
 import { createSession } from "@/lib/auth/session";
+import { landingAfterSignIn } from "@/lib/saas/shell-landing";
 
 /** Cho cookie của luồng OAuth hết hạn ngay (không phải dữ liệu nghiệp vụ — tệp này không ghi CSDL; nhật ký LOGIN ghi ở lib/auth/login.ts). */
 async function expireCookie(name: string): Promise<void> {
@@ -24,7 +25,9 @@ export async function pickSocialOrgAction(orgCode: string): Promise<{ error: str
   const v = await completeProviderLogin({ orgCode: hit.orgCode, userId: hit.userId, provider: OAUTH_IDENTITY_KIND[pick.provider], subject: pick.subject }, createSession);
   if (!v.ok) return { error: v.error };
   await expireCookie(SOCIAL_PICK_COOKIE);
-  redirect("/");
+  // Đích cuối một bước (lib/saas/shell-landing.ts, F-01): người thuộc vỏ Chốt Đơn vào thẳng trang nhà của vỏ thay vì `/` mà
+  // layout chuyển hướng (trang trắng). Không thuộc vỏ ⇒ `/` như cũ.
+  redirect(await landingAfterSignIn("/"));
 }
 
 /** Bỏ hồ sơ Google / Facebook đang điền sẵn ở `/start` (người dùng muốn đăng ký bằng email). */

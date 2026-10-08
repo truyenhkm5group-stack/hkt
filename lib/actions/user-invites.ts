@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { clientIpFrom } from "@/lib/auth/client-ip";
 import { createSession, requireUser } from "@/lib/auth/session";
+import { landingAfterSignIn } from "@/lib/saas/shell-landing";
 import { acceptUserInviteCore, createUserInviteCore, revokeUserInviteCore } from "@/lib/users/invites";
 
 /**
@@ -40,5 +41,7 @@ export async function acceptUserInviteAction(org: string, token: string, input: 
   const ip = clientIpFrom((await headers()).get("x-forwarded-for"));
   const r = await acceptUserInviteCore(String(org ?? ""), String(token ?? ""), input, { ip, issue: createSession });
   if ("error" in r) return { error: r.error };
-  redirect(r.loggedIn ? "/" : "/login");
+  // Đích cuối một bước (lib/saas/shell-landing.ts, F-01): người thuộc vỏ Chốt Đơn vào thẳng trang nhà của vỏ thay vì `/` mà
+  // layout chuyển hướng (trang trắng). Không thuộc vỏ ⇒ `/` như cũ.
+  redirect(r.loggedIn ? await landingAfterSignIn("/") : "/login");
 }
