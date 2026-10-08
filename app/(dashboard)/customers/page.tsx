@@ -7,7 +7,7 @@ import { MetricCard } from "@/components/metric-card";
 import { PageHeader } from "@/components/page-header";
 import { ModuleSyncButton } from "@/components/module-sync-button";
 import { Button } from "@/components/ui/button";
-import { formatNumber, formatVND, pct } from "@/lib/format";
+import { formatNumber, formatPercent, formatVND, pctOrNull } from "@/lib/format";
 import { customerFacets, customerSummary, CUSTOMER_SORTABLE, listCustomers } from "@/lib/queries/customers";
 import { parseListParams, type SearchParams } from "@/lib/search-params";
 import { requireResource } from "@/lib/auth/scope-guard";
@@ -39,7 +39,8 @@ export default async function CustomersPage({ searchParams }: { searchParams: Pr
   const filterText = meta?.filters.map((f) => describeListFilter(f, meta.customFields.find((d) => `custom:${d.key}` === f.ref))) ?? [];
   const toggleQuery = new URLSearchParams(Object.entries(raw).flatMap(([k, v]) => (k === META_FILTER_OFF || k === "page" ? [] : Array.isArray(v) ? v.map((x) => [k, x]) : v ? [[k, v]] : [])));
   if (!filtersOff) toggleQuery.set(META_FILTER_OFF, "off");
-  const returnRate = pct(summary.returned, summary.orders);
+  // Mẫu số 0 ⇒ CHƯA CÓ MẪU SỐ ⇒ «—», không phải «0.0%» (luật 42). Không tô màu theo ngưỡng viết cứng (luật 38): đích nằm ở metric_targets.
+  const returnRate = pctOrNull(summary.returned, summary.orders);
 
   return (
     <div className="space-y-5">
@@ -72,7 +73,7 @@ export default async function CustomersPage({ searchParams }: { searchParams: Pr
       <section className="grid gap-4 sm:grid-cols-3">
         <MetricCard label="Tổng khách hàng" value={formatNumber(summary.total)} note={`${formatNumber(summary.withOrders)} khách có đơn · ${formatNumber(summary.orders)} đơn`} icon={Users} tone="blue" />
         <MetricCard label="Khách mới" value={formatNumber(summary.newInPeriod)} note={`Tạo trên ${copy.name("ORDER_SOURCE")} ${summary.newLabel}`} icon={UserPlus} tone="green" />
-        <MetricCard label="Tỷ lệ hoàn" value={`${returnRate.toFixed(1)}%`} note={`${formatNumber(summary.returned)} đơn hoàn / ${formatNumber(summary.orders)} đơn`} icon={RotateCcw} tone={returnRate >= 10 ? "rose" : "amber"} />
+        <MetricCard label="Tỷ lệ hoàn" value={formatPercent(returnRate, 1)} note={returnRate === null ? "Chưa có đơn nào trong bộ lọc — chưa tính được" : `${formatNumber(summary.returned)} đơn hoàn / ${formatNumber(summary.orders)} đơn`} icon={RotateCcw} tone="amber" />
       </section>
 
       <DataTableToolbar
