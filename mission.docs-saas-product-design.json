@@ -3,7 +3,7 @@
   "mission_id": "docs-saas-product-design",
   "title": "Thiết kế sản phẩm SaaS (R0): Inbox V2 + ưu tiên P0–P3 · Order Candidate · Help 3 tầng · kiểm vỏ khách 390px",
   "business_goal": "",
-  "status": "RUNNING",
+  "status": "PR_READY",
   "priority": "P1",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -24,7 +24,18 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-08T04:40:06.657Z",
-  "updated_at": "2026-10-08T05:29:55.896Z",
-  "last_heartbeat": "2026-10-08T05:29:55.896Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-08T05:30:08.968Z",
+  "last_heartbeat": "2026-10-08T05:30:08.968Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "docs/saas-product-design",
+    "sha": "9afb90944bd05101e5dd5c306338110e5d733982",
+    "at": "2026-10-08T05:30:08.968Z",
+    "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+    "title": "Thiết kế sản phẩm SaaS (R0): Inbox V2 + ưu tiên P0–P3 · Order Candidate · Help 3 tầng · kiểm vỏ khách 390px",
+    "summary": "Thiết kế sản phẩm SaaS (R0): INBOX_V2 (3 cột, ưu tiên P0–P3 hàm thuần, lọc gọn, timeline, lệnh /, Sales Copilot 7 khối, kế hoạch đo p50/p95), ORDER_CANDIDATE (state machine, bằng chứng từng trường, phương án zero-unverified A/B/C, chống trùng), HELP_CENTER (3 tầng + 10 bước hợp nhất), SHELL_AUDIT (16 phát hiện, 2 P0: trang trắng sau đăng nhập trong vỏ, tự đăng ký không có thuê bao)",
+    "tests": [
+      "Quét ký tự vô hình 0; 393 trích dẫn tệp:dòng đối chiếu trên 217cb26c không vượt độ dài tệp; kiểm vỏ khách chạy thật (PGlite + next start + Chrome headless, 19 đường × 2 khổ); kho không có bài kiểm quét docs/saas"
+    ]
+  }
 }
