@@ -595,6 +595,7 @@ async function testApplyFlow() {
   assert.equal(loginRows[0].reasonCode, "BAD_PASSWORD", "lý do lấy từ onFailure của verifyLogin, khác rỗng");
   assert.ok(loginRows[0].identifierMasked?.includes("***") && !loginRows[0].identifierMasked.includes(ENTRY.ownerEmail) && loginRows[0].ipHash === null, "định danh đã che, máy không có IP");
   assert.match(stepOf(r1, "B1").detail.join(" | "), /sổ lỗi đăng nhập: ghi 1 dòng LOGIN\/BAD_PASSWORD cho cdt-nghiem-thu/);
+  assert.ok(!/BAD_PASSWORD|sổ lỗi đăng nhập/.test(r1.summary), `lý do đăng nhập KHÔNG ra dòng tóm tắt công khai: ${r1.summary}`);
 
   // ── (2) lần hai: idempotent — cùng job, cùng tài khoản, cùng tổ chức, cùng một dòng chỉ mục; kích hoạt lại bằng «đặt lại» ──
   // Giả lập danh mục / bảng giá đã đổi kể từ lượt tạo (đầu vào ĐÃ LƯU của job khác đầu vào dựng hôm nay): «Tạo khách» gửi lại cùng
