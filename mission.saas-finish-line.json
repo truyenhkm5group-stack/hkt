@@ -3,7 +3,7 @@
   "mission_id": "saas-finish-line",
   "title": "Finish line SaaS: audit admin console + vỏ khách, sửa quick wins UX R1 (trạng thái rỗng · chữ kỹ thuật · help link · 404 · AI Sales cuộn · nhãn readiness)",
   "business_goal": "",
-  "status": "RUNNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -31,26 +31,22 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-08T07:51:05.873Z",
-  "updated_at": "2026-10-08T10:32:54.545Z",
-  "last_heartbeat": "2026-10-08T10:32:54.545Z",
+  "updated_at": "2026-10-08T10:33:07.844Z",
+  "last_heartbeat": "2026-10-08T10:33:07.844Z",
   "definition_of_done": [],
   "intake": {
     "verdict": "PARTIAL",
     "evidence": []
   },
   "handoff": {
-    "branch": "claude/saas-finish-line",
-    "sha": "607c24ce41e38130715dfbf011c332b4279380e4",
-    "at": "2026-10-08T09:25:57.324Z",
-    "actor": "DESKTOP-56TH98Y:wt-saas-finish-line",
+    "branch": "integrate/saas-finish-line",
+    "sha": "2ba341883d49e7a135726e05ea85685ffd04dbcc",
+    "at": "2026-10-08T10:33:07.844Z",
+    "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
     "title": "Finish line SaaS: audit admin console + vỏ khách, sửa quick wins UX R1 (trạng thái rỗng · chữ kỹ thuật · help link · 404 · AI Sales cuộn · nhãn readiness)",
-    "summary": "Quick win R1 cho vỏ Chốt Đơn sau kiểm finish line như người dùng thật (admin tạo khách → kích hoạt → vỏ 8 mục). Tài liệu docs/saas/FINISH_LINE_2026-10-08.md: ma trận admin 15 bước, blocker P0 khách do admin tạo không đăng nhập được (chỉ mục danh tính) — handoff Tech Lead, không sửa lõi.",
+    "summary": "Finish line SaaS R1: khách mới thấy việc tiếp theo thay vì màn trống, Hướng dẫn chỉ vào trang mở được trong vỏ, 404 tiếng Việt, AI Sales không tự cuộn trên điện thoại, nhãn readiness; tài liệu FINISH_LINE_2026-10-08",
     "tests": [
-      "npm run typecheck: sạch",
-      "npm run lint: sạch",
-      "npm test: TẤT CẢ KIỂM THỬ ĐẠT (ẩn danh, Windows)",
-      "npm run build: xong",
-      "kiểm trình duyệt 1366+390 trước/sau: AI Sales scrollY 7522→0, /automations 404 EN→VI, ai-balance 404→câu rõ, /help 0 chữ cấm"
+      "rebase lên a8eaa37d (xung đột duy nhất dòng import inbox/page.tsx, giữ cả #675); tsc + eslint 11 tệp sạch; help-guides, order-review, sales-inbox, saas-shell, repo-integrity, saas-hide-internal đạt; static sau commit; npm run build đạt; 0 ký tự vô hình"
     ]
   }
 }
