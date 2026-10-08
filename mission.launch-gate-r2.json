@@ -3,7 +3,7 @@
   "mission_id": "launch-gate-r2",
   "title": "Launch Gate sau deploy aa4b69ce: thêm mục Quan sát O1–O8 (§11), chấm lại trung thực, bằng chứng identity-reconcile",
   "business_goal": "",
-  "status": "INTEGRATING",
+  "status": "VERIFYING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -22,11 +22,13 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-08T13:43:20.648Z",
-  "updated_at": "2026-10-08T14:13:16.114Z",
+  "updated_at": "2026-10-08T21:13:10.071Z",
   "last_heartbeat": "2026-10-08T13:43:54.472Z",
   "definition_of_done": [],
   "evidence": {
-    "merged": "#687 → fd89b295367301ceabf207ca5725f4096b090ffd"
+    "merged": "#687 → fd89b295367301ceabf207ca5725f4096b090ffd",
+    "verify": "PASS c7183395051955e6cff5343a787e9df97d71d12b 2026-10-08T21:13:03.934Z",
+    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/37838226087"
   },
   "handoff": {
     "branch": "docs/launch-gate-r2",
