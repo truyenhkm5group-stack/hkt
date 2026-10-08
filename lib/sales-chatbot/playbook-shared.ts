@@ -61,25 +61,81 @@ function stripHtml(s: string): string {
     .replace(/&gt;/g, ">");
 }
 
-/** Đuôi tên miền hay gặp — dùng chung cho `redactForLearning` (che trước khi AI đọc) và bộ lọc bài học (`riskyLesson`). */
-export const BARE_DOMAIN_TLDS = "vn|com|net|org|me|io|co|shop|store|site|online|xyz|info|biz|link|top|app|page|ly|asia";
+/**
+ * Đuôi tên miền mà dấu chấm viết RỜI vẫn bị gộp lại («xyz . com», «xyz .com») hay viết thành chữ («xyz dot com», «xyz chấm com»).
+ * Chỉ các đuôi này: dạng rời mà nhận mọi đuôi thì «ok . em» thành tên miền (review bảo mật #656). Tên miền viết DÍNH thì đuôi là
+ * dạng CHUNG (`DOMAIN_RE`). Dấu cách chỉ đứng SAU dấu chấm («xyz. com») KHÔNG gộp — đó đúng là hình một chỗ ngắt câu («vâng. Shop»).
+ */
+export const SPACED_DOT_TLDS = "com|vn|net|org|info|xyz|click|shop|site|online|store|me|io|cc|co|live|link|top|app|asia|biz|pro|club|vip|tk|ly|gg|ws";
+
+/**
+ * Chữ «ĐÃ GỠ CHE» để dò liên kết: NFKC («＠» ⇒ «@», «．» ⇒ «.»), dấu chấm Đông Á / chấm giữa («。» «｡» «·» «・» «‧» «∙» «⋅» «•») ⇒
+ * «.», «[.]» / «(.)» ⇒ «.», dấu cách TRƯỚC dấu chấm của một đuôi quen ⇒ gộp, và XOÁ ký tự định dạng (zero-width · bidi) chen giữa
+ * từ — «chuy‹ký tự vô hình›ển» thành «chuyển» (review bảo mật #654 · #656). Xoá thì hai từ có thể dính nhau («chuyển‹vô hình›khoản» ⇒
+ * «chuyểnkhoản») — bộ lọc bài học vì thế nhận cả cụm viết DÍNH (`RISKY_FOLDED`). HÀM THUẦN.
+ */
+export function unmaskLinkText(s: string): string {
+  return s
+    .normalize("NFKC")
+    .replace(/\p{Cf}/gu, "")
+    .replace(/[。｡·・‧∙⋅•]/g, ".")
+    .replace(/\s*[[(]\s*\.\s*[\])]\s*/g, ".")
+    .replace(new RegExp(`([\\p{L}\\p{N}])\\s+\\.\\s*(${SPACED_DOT_TLDS})(?![\\p{L}\\p{N}])`, "giu"), "$1.$2");
+}
+
+/** Nhãn hành chính viết tắt trước dấu chấm («TP.HCM», «TX.Sơn Tây», «TT.Đông Anh») — KHÔNG phải tên miền. */
+const ADMIN_LABELS = new Set(["tp", "tx", "tt"]);
+
+/**
+ * Tên miền dạng CHUNG — đuôi 2–24 chữ cái — không dựa vào danh sách đuôi: đuôi mới / rẻ (.click · .live · .cc …) lọt mọi danh
+ * sách (review bảo mật #654, MEDIUM). Nhãn nhận CHỮ CÓ DẤU: tên miền tiếng Việt đăng ký được («thanhtoán.vn» — review #656). Nhãn
+ * hành chính («TP.HCM») không tính; nhãn 1 ký tự chỉ tính khi có đường dẫn theo sau («t.me/abc», kể cả «t.co /abc») hoặc là một
+ * trang rút gọn quen (`ONE_CHAR_HOSTS`) — không thì là viết tắt địa chỉ («P.Cổ Nhuế», «H.Mê Linh», «Q.1»).
+ * Nhóm 1 là ký tự đứng TRƯỚC (hoặc đầu chuỗi) thay cho nhìn-ngược: tệp này tới cả trình duyệt (khung Bài học nạp `riskyLesson`), và
+ * Safari < 16.4 không dịch được nhìn-ngược — cả khối mã của trang sẽ hỏng.
+ */
+const DOMAIN_RE = /(^|[^\p{L}\p{N}_-])([\p{L}\p{N}-]+)((?:\.[\p{L}\p{N}-]{2,})*)\.([a-z]{2,24})(?![\p{L}\p{N}_-])/giu;
+/** Trang rút gọn / nhắn tin mang nhãn MỘT ký tự — là tên miền dù không có đường dẫn theo sau. */
+const ONE_CHAR_HOSTS = new Set(["t.co", "x.co", "g.co", "t.me", "m.me", "s.id", "j.mp", "t.ly", "v.gd", "u.to"]);
+
+/** `after` = phần chữ ngay sau đuôi (đường dẫn, nếu có, bắt đầu bằng «/» — có thể cách một dấu cách). */
+function isDomainMatch(first: string, middle: string, tld: string, after: string): boolean {
+  if (middle) return true;
+  const label = first.toLowerCase();
+  if (ADMIN_LABELS.has(label)) return false;
+  return label.length >= 2 || /^\s*\//.test(after) || ONE_CHAR_HOSTS.has(`${label}.${tld.toLowerCase()}`);
+}
+
+/** Các tên miền trần trong một chữ (đã gỡ che). HÀM THUẦN. */
+export function findBareDomains(text: string): string[] {
+  const out: string[] = [];
+  for (const m of text.matchAll(DOMAIN_RE)) if (isDomainMatch(m[2], m[3], m[4], text.slice((m.index ?? 0) + m[0].length))) out.push(m[0].slice(m[1].length));
+  return out;
+}
+
+/**
+ * Handle «@tên» ở BẤT CỨ đâu — kể cả sau dấu câu và dính sau chữ («zalo@shop», «IG@shop» — review bảo mật #654 · #656). Email đã
+ * che trước bước này (tin khách) hay đã là tên miền (bài học), nên «@» còn lại chỉ có thể là một tài khoản.
+ */
+export const HANDLE_RE = /@[\p{L}\p{N}_.]{3,}/u;
 
 /**
  * Làm sạch MỘT tin trước khi đưa cho AI. Mọi CHỮ SỐ ⇒ «[số]» (chặn giá cũ, SĐT, số nhà, mã đơn, số tài khoản — kể cả
  * cách viết «299k», «1tr5»); tên khách đã biết ⇒ «[khách]»; link / email ⇒ «[link]» / «[email]». HÀM THUẦN.
  */
 export function redactForLearning(text: string, names: readonly string[] = []): string {
-  let t = stripHtml(String(text ?? ""));
+  let t = unmaskLinkText(stripHtml(String(text ?? "")));
   t = t.replace(/https?:\/\/\S+|www\.\S+/gi, "[link]");
   t = t.replace(/[\w.+-]+@[\w-]+\.[\w.-]+/g, "[email]");
   // Tên miền TRẦN (thanhtoan-xyz.com/pay · t.me/abc) và handle @… cũng là liên kết — AI học không được thấy (review bảo mật #652).
-  t = t.replace(new RegExp(`\\b[a-z0-9-]+(?:\\.[a-z0-9-]+)*\\.(?:${BARE_DOMAIN_TLDS})\\b(?:/[^\\s,;)»"']*)?`, "gi"), "[link]");
-  t = t.replace(/(^|[\s(«"'])@[A-Za-z0-9_.]{3,}/g, "$1[link]");
+  t = t.replace(new RegExp(`${DOMAIN_RE.source}(?:\\s*/[^\\s,;)»"']*)?`, "giu"), (m: string, pre: string, first: string, middle: string, tld: string) => (isDomainMatch(first, middle, tld, m.slice(pre.length + first.length + middle.length + 1 + tld.length)) ? `${pre}[link]` : m));
+  t = t.replace(new RegExp(HANDLE_RE.source, "gu"), "[link]");
   for (const n of names) {
     const name = n.trim();
     if (name.length >= 2) t = t.split(name).join("[khách]");
   }
-  t = t.replace(/\d(?:[\d\s.,:/-]*\d)?/g, "[số]");
+  // Mọi hệ chữ số (`\p{Nd}`): NFKC không đổi chữ số Ả Rập / Thái / Devanagari… về 0–9 (review bảo mật #656).
+  t = t.replace(/\p{Nd}(?:[\p{Nd}\s.,:/-]*\p{Nd})?/gu, "[số]");
   return t.replace(/\s+/g, " ").trim().slice(0, PLAYBOOK_LIMITS.messageChars);
 }
 

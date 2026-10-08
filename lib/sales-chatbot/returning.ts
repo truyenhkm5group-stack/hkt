@@ -221,7 +221,7 @@ async function lastOrderWhere(where: SQL): Promise<{ count: number; last: LastOr
  * nhắn lúc ấy chưa xác minh, nên tên / địa chỉ của hồ sơ có thể là chữ một người lạ gõ cho SĐT này (review bảo mật #652, LOW).
  * Đọc nhật ký có sẵn — không thêm cột, không backfill (mục 35); dòng trước cột `actor_kind` nhận ra qua email `agent:…`.
  */
-async function agentCreatedCustomer(customerId: string): Promise<boolean> {
+export async function agentCreatedCustomer(customerId: string): Promise<boolean> {
   const db = await getDb();
   const a = schema.auditLogs;
   const [row] = await db
@@ -276,15 +276,16 @@ export async function findReturningCustomer(state: ChatState): Promise<Returning
     const rows = await db.select({ id: c.id, name: c.name, phone: c.phone, address: c.address, province: c.province }).from(c).where(cand.where).orderBy(desc(c.lastOrderAt), desc(c.createdAt)).limit(3);
     for (const row of rows) {
       const { count, last } = await lastOrderWhere(and(eq(o.customerId, row.id), vouchedOrder(o))!);
-      // Chưa có đơn nào có người đứng sau ⇒ chỉ còn tên / địa chỉ của HỒ SƠ — hồ sơ do máy tạo thì không dùng (người lạ có thể đã
-      // gõ chúng cho SĐT của chủ thật; chủ thật đáp «đúng» là đơn giao về địa chỉ ấy).
-      if (!last && (await agentCreatedCustomer(row.id))) continue;
-      const address = last?.address || row.address.trim();
+      // Hồ sơ do MÁY tạo: tên / địa chỉ của HỒ SƠ có thể là chữ người lạ gõ cho SĐT của chủ thật (chủ thật đáp «đúng» là đơn giao về
+      // địa chỉ ấy) ⇒ KHÔNG BAO GIỜ làm dự phòng — chưa có đơn có người đứng sau, hay có đơn mà ô địa chỉ của đơn rỗng, thì không có
+      // địa chỉ nào và hồ sơ bị bỏ qua (review bảo mật #652 · #654).
+      const machine = await agentCreatedCustomer(row.id);
+      const address = last?.address || (machine ? "" : row.address.trim());
       if (!address) continue;
       return {
         trust: cand.trust,
         customerId: row.id,
-        name: last?.name || row.name.trim(),
+        name: last?.name || (machine ? "" : row.name.trim()),
         phone: last?.phone || row.phone?.trim() || phones[0] || "",
         address,
         province: last ? last.province : row.province.trim(),

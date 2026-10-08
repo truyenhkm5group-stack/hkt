@@ -708,6 +708,12 @@ export async function executeTool(name: string, rawInput: unknown, ctx: ToolCont
       const db = await getDb();
       const [c] = await db.select({ id: schema.customers.id, name: schema.customers.name, address: schema.customers.address }).from(schema.customers).where(eq(schema.customers.phone, phone)).limit(1);
       if (!c) return ok("Khách mới (chưa có SĐT trong sổ)", { returning_customer: false }, state);
+      // Hồ sơ do MÁY tạo: tên / địa chỉ của HỒ SƠ có thể do người lạ gõ cho SĐT này — không gợi ý gì từ nó, kể cả khi hồ sơ đã có đơn
+      // (chủ thật có đơn được nhận ra ở khối «khách cũ», vốn đọc chữ của ĐƠN — review bảo mật #654). Trả ĐÚNG câu của khách mới: câu
+      // khác là để lộ «có ai đó đã nhắn bot bằng SĐT này» (review #656, INFO). Nạp động: `returning.ts` đã nạp tệp này, nạp tĩnh là
+      // thành vòng.
+      const { agentCreatedCustomer } = await import("@/lib/sales-chatbot/returning");
+      if (await agentCreatedCustomer(c.id)) return ok("Khách mới (chưa có SĐT trong sổ)", { returning_customer: false }, state);
       // SĐT gõ tay ⇒ chỉ GỢI Ý tên gọi + địa chỉ ĐÃ CHE; KHÔNG số đơn / lịch sử mua của chủ SĐT (kể cả trong `__summary` model đọc).
       const nameHint = c.name.trim().split(/\s+/).pop() ?? "";
       return ok("Khách cũ (SĐT có trong sổ)", { returning_customer: true, name_hint: nameHint, previous_address_hint: maskAddress(c.address) || null, note: "Chỉ GỢI Ý — hỏi khách xác nhận địa chỉ, không tự điền. Không nói lịch sử mua của SĐT này." }, state);

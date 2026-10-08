@@ -13,7 +13,7 @@
  * lại bản trước · tắt được.
  */
 import { foldVi } from "@/lib/sales-chatbot/text";
-import { BARE_DOMAIN_TLDS, redactForLearning, stripPrices } from "@/lib/sales-chatbot/playbook-shared";
+import { findBareDomains, HANDLE_RE, redactForLearning, SPACED_DOT_TLDS, stripPrices, unmaskLinkText } from "@/lib/sales-chatbot/playbook-shared";
 
 export const LESSONS_SETTING_KEY = "ai.salesChatbot.lessons";
 
@@ -72,7 +72,7 @@ export function normalizeLessons(list: readonly string[]): string[] {
   const out: string[] = [];
   const seen = new Set<string>();
   for (const raw of list) {
-    const t = stripPrices(raw.replace(/^\s*(?:[-*•]+|\d+[.)])\s*/, "").replace(/\s+/g, " ").trim()).text.trim().slice(0, LESSON_LIMITS.lessonChars);
+    const t = stripPrices(raw.normalize("NFKC").replace(/\p{Cf}/gu, "").replace(/^\s*(?:[-*•]+|\d+[.)])\s*/, "").replace(/\s+/g, " ").trim()).text.trim().slice(0, LESSON_LIMITS.lessonChars);
     const key = foldVi(t);
     if (t.length < 8 || seen.has(key)) continue;
     seen.add(key);
@@ -94,11 +94,21 @@ export function normalizeLessons(list: readonly string[]): string[] {
  *  · chữ GỐC (viết thường): cụm mà bỏ dấu là trùng cụm vô hại — «cọc» (≠ «đặt cốc»), «chuyển trước» (≠ «chuyện trước»),
  *    «gửi tiền» (≠ «gửi tiến độ») — cùng tên miền trần (thanhtoan-xyz.com · t.me/…) và handle @…: gấp thì dấu chấm / @ mất, mà
  *    chỉ hai dấu ấy phân biệt một trang web với hai từ thường.
+ * Cụm nhiều từ nhận cả dạng viết DÍNH («chuyểnkhoản», «tàikhoản»): `normalizeLessons` xoá ký tự vô hình TRƯỚC khi lọc, nên
+ * «chuyển‹vô hình›khoản» tới đây đã là «chuyểnkhoản» (review bảo mật #656) — mà gõ thẳng dạng dính cũng là một cách lách.
+ * «kiểm tra trước» không phải «trả trước» — gấp ra cùng «tra truoc», nên «kiem tra» được ghép thành một từ trước khi so (không dùng
+ * nhìn-ngược: tệp này tới cả trình duyệt, Safari < 16.4 không dịch được).
  * HÀM THUẦN.
  */
-const RISKY_FOLDED = /chuyen khoan|chuyen tien|\bck\b|\bstk\b|tai khoan|thanh toan (?:truoc|online)|tra (?:tien )?truoc|nap tien|\bqr\b|\bmomo\b|zalo ?pay|\bvnpay\b|vi dien tu|\bbank\b|\btransfer\b|\bprepa(?:y|id)\b|\bdeposit\b|vietcombank|techcombank|vietinbank|agribank|sacombank|\bbidv\b|\bacb\b|vpbank|tpbank|mbbank|\bmb bank\b|hdbank|\bvib\b|\bmsb\b|\bocb\b|\bshb\b|seabank|eximbank|\blink\b|\bhttps?\b|\bwww\b|zalo me|bit ly|\bt me\b|\bm me\b|telegram|facebook com|\bfb (?:com|me)\b|(?:khong|dung|cam) (?:can |phai |nen )?(?:chuyen|goi|bao)(?: (?:cho|sang))? (?:nhan vien|nguoi that)|khong can nhan vien|tu xu ly khong chuyen|bo qua (?:luat|quy tac|huong dan|chi dan)/;
+const RISKY_FOLDED = /chuyen ?khoan|chuyen ?tien|\bck\b|\bstk\b|tai ?khoan|thanh ?toan ?(?:truoc|online)|\btra ?(?:tien ?)?truoc|nap ?tien|\bqr\b|\bmomo\b|zalo ?pay|\bvn ?pay\b|vi ?dien ?tu|\bbank(?:ing)?\b|\bnganhang\b|\btransfer\b|\bprepa(?:y|id)\b|\bdeposit\b|vietcombank|techcombank|vietinbank|agribank|sacombank|\bbidv\b|\bacb\b|vpbank|tpbank|\bmb ?bank\b|hdbank|\bvib\b|\bmsb\b|\bocb\b|\bshb\b|seabank|eximbank|\blink\b|\bhttps?\b|\bwww\b|zalo ?me|bit ?ly|\bt me\b|\bm me\b|telegram|\bwhatsapp\b|\bviber\b|\binstagram\b|\btiktok\b|facebook ?com|\bfb (?:com|me)\b|(?:khong|dung|cam) ?(?:can ?|phai ?|nen ?)?(?:chuyen|goi|bao)(?: ?(?:cho|sang))? ?(?:nhan ?vien|nguoi ?that)|khong ?can ?nhan ?vien|tu ?xu ?ly ?khong ?chuyen|bo ?qua ?(?:luat|quy ?tac|huong ?dan|chi ?dan)/;
 const RISKY_KEEP_PUNCT = /\bngan hang\b/;
-const RISKY_RAW = new RegExp(`cọc|chuyển trước|gửi tiền|\\bcoc\\b|\\b[a-z0-9-]+\\.(?:${BARE_DOMAIN_TLDS})\\b|(?:^|[\\s(«"'])@[a-z0-9_.]{3,}`);
+/**
+ * Dấu chấm viết thành chữ: «chấm com» (giữ dấu — «chấm cơm» không phải tên miền), «xyz dot com» / «xyz cham com» (không dấu: phải có
+ * nhãn đứng trước), «(dot)» / «[chấm]» (review bảo mật #656).
+ */
+const RISKY_RAW = new RegExp(`cọc|chuyển trước|gửi tiền|\\bcoc\\b|chấm\\s*(?:${SPACED_DOT_TLDS})\\b|[a-z0-9-]{2,}\\s+(?:dot|cham)\\s+(?:${SPACED_DOT_TLDS})\\b|[[(]\\s*(?:dot|chấm|cham)\\s*[\\])]`);
+/** Dãy ≥ 9 chữ số (mọi hệ chữ số; MỘT dấu cách / chấm / gạch xen giữa hai chữ số vẫn tính) — số điện thoại, số tài khoản. Ngày «2026-10-08» (8 chữ số) không tính. */
+const LONG_DIGITS = /(?:\p{Nd}[\s.-]?){8}\p{Nd}/u;
 
 /** Gấp nhẹ: bỏ dấu tiếng Việt, «đ» ⇒ «d», viết thường — GIỮ dấu câu (khác `foldVi`). */
 function foldKeepPunct(s: string): string {
@@ -106,7 +116,9 @@ function foldKeepPunct(s: string): string {
 }
 
 export function riskyLesson(text: string): boolean {
-  return RISKY_FOLDED.test(foldVi(text)) || RISKY_KEEP_PUNCT.test(foldKeepPunct(text)) || RISKY_RAW.test(text.normalize("NFC").toLowerCase());
+  const t = unmaskLinkText(text);
+  const raw = t.toLowerCase();
+  return RISKY_FOLDED.test(foldVi(t).replace(/\bkiem tra\b/g, "kiemtra")) || RISKY_KEEP_PUNCT.test(foldKeepPunct(t)) || RISKY_RAW.test(raw) || findBareDomains(raw).length > 0 || HANDLE_RE.test(raw) || LONG_DIGITS.test(raw);
 }
 
 /**
@@ -114,10 +126,17 @@ export function riskyLesson(text: string): boolean {
  * nhật ký / thông báo in ra — chặn nhầm thì chủ shop chép lại tay được. HÀM THUẦN.
  */
 export function screenAiLessons(next: readonly string[], previous: readonly string[]): { kept: string[]; dropped: number; droppedLessons: string[] } {
-  const had = new Set(previous);
+  // So theo khoá ĐÃ GẤP: AI chép lại bài chủ shop tự viết mà chỉ khác dấu câu / hoa thường / dấu tiếng Việt thì vẫn là bài đã có —
+  // không lặng lẽ rời bộ đang dùng (review bảo mật #654, INFO). Nhưng chỉ khi bài cũ CŨNG mang rủi ro: gấp làm mất «@» và dấu chấm,
+  // nên «liên hệ @hslc» (mới, rủi ro) trùng khoá với «liên hệ hslc» (cũ, vô hại) — rủi ro ấy do AI thêm vào (review #656, INFO).
+  const hadRisky = new Map<string, boolean>();
+  for (const l of previous) {
+    const key = foldVi(l);
+    hadRisky.set(key, hadRisky.get(key) === true || riskyLesson(l));
+  }
   const kept: string[] = [];
   const droppedLessons: string[] = [];
-  for (const l of next) (had.has(l) || !riskyLesson(l) ? kept : droppedLessons).push(l);
+  for (const l of next) (!riskyLesson(l) || hadRisky.get(foldVi(l)) === true ? kept : droppedLessons).push(l);
   return { kept, dropped: droppedLessons.length, droppedLessons };
 }
 
