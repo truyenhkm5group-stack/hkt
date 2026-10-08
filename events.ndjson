@@ -822,3 +822,4 @@
 {"at":"2026-10-08T12:51:19.813Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DONE","mission":"hslc-prepaid-ai","detail":"#674 trên production; HSLC trả trước chờ chủ shop khai tài khoản nhận tiền rồi mới MỞ NẠP"}
 {"at":"2026-10-08T12:51:33.874Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DONE","mission":"saas-delete-signup-shops","detail":"#673 trên production; đã xoá kd (run 37771243600, sao lưu trước); qa + hs-thien-nga-test giữ chờ chủ shop"}
 {"at":"2026-10-08T12:51:47.203Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DONE","mission":"launch-gate","detail":"#678 trên production db0ac290+; docs/saas/LAUNCH_GATE.md là nguồn sự thật readiness"}
+{"at":"2026-10-08T12:52:00.660Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DONE","mission":"meta-review-guide","detail":"Hướng dẫn Meta App Review cho chủ shop trên production"}
