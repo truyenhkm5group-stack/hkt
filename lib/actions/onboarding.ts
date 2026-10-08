@@ -14,6 +14,7 @@ import { sendSignupOtp, sendTestOtp, setPhoneOtpSetting, type PhoneOtpSetting, t
 import { readOAuthToken, SOCIAL_SIGNUP_COOKIE, type SocialProfile } from "@/lib/auth/oauth";
 import { platformOperatorDenial } from "@/lib/platform-ui/module-toggle";
 import { hostBrand } from "@/lib/platform/host-brand";
+import { landingAfterSignIn } from "@/lib/saas/shell-landing";
 
 /**
  * ═══════════ SERVER ACTION CỦA `/start` VÀ MÃ MỜI Ở `/platform` (Phase 10) ═══════════
@@ -93,7 +94,9 @@ export async function quickSignupAction(input: unknown): Promise<{ error: string
   if ("error" in r) return r;
   // Hồ sơ Google / Facebook đã dùng xong — cho cookie hết hạn (không phải dữ liệu nghiệp vụ).
   store.set(SOCIAL_SIGNUP_COOKIE, "", { path: "/", maxAge: 0 });
-  redirect(r.loggedIn ? "/" : "/login");
+  // Đích cuối một bước (lib/saas/shell-landing.ts): cửa hàng Chốt Đơn vào thẳng trang nhà của vỏ — `redirect("/")` cho họ từng
+  // là trang trắng (F-01). Không thuộc vỏ ⇒ `/` như cũ.
+  redirect(r.loggedIn ? await landingAfterSignIn("/") : "/login");
 }
 
 // ─── Người vận hành nền tảng (`/platform`) ───

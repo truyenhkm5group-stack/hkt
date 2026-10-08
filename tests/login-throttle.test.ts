@@ -117,7 +117,10 @@ export async function testLoginThrottle() {
   assert.equal(safeNextPath("/marketing/creatives"), "/marketing/creatives");
   const trang = readFileSync("app/login/page.tsx", "utf8");
   assert.ok(trang.includes("safeNextPath(") && !trang.includes('params.next.startsWith("/")'), "trang /login (đã đăng nhập) cũng phải đi qua safeNextPath");
-  assert.ok(auth.includes("redirect(safeNextPath(next))"), "loginAction phải chuyển hướng qua safeNextPath");
+  // Đích sau đăng nhập đi qua landingAfterSignIn (lib/saas/shell-landing.ts, F-01) — và hàm đó chuẩn hoá `next` bằng
+  // safeNextPath TRƯỚC mọi phép khác, nên ngoài vỏ đích vẫn đúng bằng safeNextPath(next) (tests/shell-login-landing.test.ts).
+  assert.ok(auth.includes("redirect(await landingAfterSignIn(next))"), "loginAction phải chuyển hướng qua landingAfterSignIn");
+  assert.match(readFileSync("lib/saas/shell-landing.ts", "utf8"), /export function landingPath\(rawNext: unknown, shellHome: string \| null\): string \{\n\s+const next = safeNextPath\(rawNext\);/, "landingPath phải đi qua safeNextPath trước tiên");
   // Trang /login công khai dùng chung mọi tổ chức: có tổ chức thứ hai thì KHÔNG in trạng thái Pancake / Viettel Post của
   // nhà và không in gợi ý tên biến .env (một tổ chức ⇒ y hệt trước). Trên tên miền con của tổ chức khách (0180) cũng không,
   // và trên host «Chốt Đơn Tự Động» (app.chotdontudong.com — khách của sản phẩm AI bán hàng) cũng không.
