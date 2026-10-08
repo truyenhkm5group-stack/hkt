@@ -750,3 +750,4 @@
 {"at":"2026-10-08T10:13:53.902Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#676 @ f10c19b01f7b · Rebase sau #673–#675 do Integration Lead đọc: diff ops-vps.yml so với main chỉ thêm saas-v1-migration; mã giống hệt c61a3621 đã PASS"}
 {"at":"2026-10-08T10:23:16.121Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"CLAIM","mission":"launch-gate","detail":"RUNNING · 1 mẫu phạm vi · LOW"}
 {"at":"2026-10-08T10:23:27.031Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"launch-gate","detail":"docs/launch-gate @ 3526d13f7557 · 1 lệnh kiểm thử"}
+{"at":"2026-10-08T10:23:48.620Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"launch-gate","detail":"#678 cho docs/launch-gate @ 3526d13f7557"}
