@@ -25,10 +25,12 @@
   ],
   "dependencies": [],
   "blocked_by": [],
-  "related_prs": [],
+  "related_prs": [
+    665
+  ],
   "migration_reservations": [],
   "created_at": "2026-10-08T04:41:59.376Z",
-  "updated_at": "2026-10-08T05:39:19.076Z",
+  "updated_at": "2026-10-08T05:39:42.942Z",
   "last_heartbeat": "2026-10-08T05:39:19.076Z",
   "definition_of_done": [
     "Mở hội thoại mới và gửi tin ở /chat + /chat/embed có trần theo khách (cookie) · theo IP · theo tổ chức; vượt trần KHÔNG gọi AI, trả câu kinh doanh",
