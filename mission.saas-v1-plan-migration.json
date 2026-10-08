@@ -10,20 +10,27 @@
   "worker": "worker:v1-migration",
   "worktree": null,
   "branch": "feat/v1-plan-migration",
-  "base_sha": null,
+  "base_sha": "c360b7c662e52d9447fc19a880f8a956851cf764",
   "domains": [],
   "owned_paths": [
-    "scripts/saas-v1-migration.ts",
+    ".github/workflows/ops-vps.yml",
+    "docs/saas/OVERAGE.md",
+    "docs/saas/V1_MIGRATION.md",
+    "lib/pricing/admin.ts",
+    "lib/pricing/customer.ts",
     "lib/pricing/migration.ts",
+    "lib/pricing/versions.ts",
+    "lib/saas/customers.ts",
+    "scripts/saas-v1-migration.ts",
     "tests/saas-v1-migration.test.ts",
-    "docs/saas/V1_MIGRATION.md"
+    "tests/sync-fixtures.test.ts"
   ],
   "dependencies": [],
   "blocked_by": [],
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-08T08:16:54.954Z",
-  "updated_at": "2026-10-08T08:16:54.954Z",
-  "last_heartbeat": "2026-10-08T08:16:54.954Z",
+  "updated_at": "2026-10-08T09:00:20.073Z",
+  "last_heartbeat": "2026-10-08T09:00:20.073Z",
   "definition_of_done": []
 }
