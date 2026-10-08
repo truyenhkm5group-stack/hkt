@@ -1,0 +1,31 @@
+{
+  "schema": 1,
+  "mission_id": "commercial-sweep",
+  "title": "Commercial Perfection Sweep — Phase A chỉ đọc: kiểm kê 207 trang + bảng chất lượng thương mại (docs/product)",
+  "business_goal": "",
+  "status": "RUNNING",
+  "priority": "P2",
+  "risk": "MEDIUM",
+  "owner": "DESKTOP-56TH98Y:wt-sweep",
+  "worker": null,
+  "worktree": null,
+  "branch": "claude/commercial-sweep",
+  "base_sha": "b3a8d74e13a673b319fda63b5d410f8ff8c15438",
+  "domains": [],
+  "owned_paths": [
+    "docs/product/COMMERCIAL_PAGE_INVENTORY.md",
+    "docs/product/COMMERCIAL_POLISH_BOARD.md"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-08T15:31:26.044Z",
+  "updated_at": "2026-10-08T15:31:26.044Z",
+  "last_heartbeat": "2026-10-08T15:31:26.044Z",
+  "definition_of_done": [],
+  "intake": {
+    "verdict": "MISSING",
+    "evidence": []
+  }
+}
