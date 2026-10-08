@@ -10769,6 +10769,44 @@ export const messagingDeliveries = pgTable(
   ],
 );
 
+/**
+ * SỔ SỰ KIỆN CHUYỂN ĐỔI GỬI META (0236 · lib/marketing/meta-capi.ts — chủ shop HSLC 08/10/2026: «gửi sự kiện khi chốt đơn»).
+ * MỘT dòng cho MỘT đơn (`order_id` UNIQUE): đơn chốt trong hội thoại Messenger ⇒ `PENDING` rồi `SENT`; đơn không gửi được
+ * (không từ hội thoại Messenger, không có PSID, huỷ trước lúc gửi, quá 7 ngày) ⇒ `SKIPPED` kèm lý do — đếm được, không biến
+ * mất. `FAILED` = Meta / mạng từ chối, thử lại theo `next_attempt_at`. `event_id` cố định theo đơn ⇒ Meta tự khử trùng nếu
+ * một lượt gửi lại vì không biết lượt trước đã tới chưa.
+ */
+export const metaConversionEvents = pgTable(
+  "meta_conversion_events",
+  {
+    id: id(),
+    orderId: text("order_id").notNull(),
+    eventName: text("event_name").notNull().default("Purchase"),
+    eventId: text("event_id").notNull(),
+    status: text("status").notNull().default("PENDING"),
+    skipReason: text("skip_reason"),
+    pageId: text("page_id"),
+    psid: text("psid"),
+    valueVnd: integer("value_vnd"),
+    /** Giờ NGHIỆP VỤ của lượt chốt (sự kiện `order.confirmed`) — gửi sang Meta làm `event_time`. */
+    eventTime: ts("event_time").notNull(),
+    attempts: integer("attempts").notNull().default(0),
+    nextAttemptAt: ts("next_attempt_at"),
+    lastError: text("last_error"),
+    fbtraceId: text("fbtrace_id"),
+    sentAt: ts("sent_at"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex("meta_conversion_events_order_uq").on(t.orderId),
+    index("meta_conversion_events_due_idx").on(t.status, t.nextAttemptAt),
+    index("meta_conversion_events_time_idx").on(t.eventTime),
+    check("meta_conversion_events_status_check", sql`${t.status} IN ('PENDING','SENT','SKIPPED','FAILED')`),
+    check("meta_conversion_events_skip_check", sql`(${t.status} = 'SKIPPED') = (${t.skipReason} IS NOT NULL)`),
+  ],
+);
+
 /** Hội thoại của chatbot bán hàng theo tổ chức (0180 · lib/sales-chatbot/*). `TEST` = khung thử trong ERP; `WEB` = trang chat công khai. */
 export const salesChatConversations = pgTable(
   "sales_chat_conversations",

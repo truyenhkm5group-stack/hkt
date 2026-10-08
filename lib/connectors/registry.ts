@@ -1,3 +1,4 @@
+import { META_DATASET_ID_PATTERN } from "@/lib/constants/meta-capi";
 import type { ModuleKey } from "@/lib/constants/platform-modules";
 
 /**
@@ -53,7 +54,7 @@ export const CAPABILITIES_BY_KIND = {
   ORDER_SOURCE: ["pull_orders", "pull_products", "pull_customers", "pull_inventory", "webhook_orders", "create_order", "read_public_sheet"],
   SHIPPING: ["track", "webhook_status", "create_label", "update_order", "import_file", "cod_statement"],
   PAYMENT: ["webhook_transactions", "pull_transactions", "import_statement"],
-  ADS: ["read_spend", "read_billing", "write_budget", "publish_ads"],
+  ADS: ["read_spend", "read_billing", "write_budget", "publish_ads", "send_conversions"],
   MESSAGING: ["send_group_message", "send_customer_message", "read_conversations", "bot_admin"],
   ACCOUNTING: ["export_ledger"],
   AI: ["chat", "vision", "image_generate", "video_generate", "speech"],
@@ -555,6 +556,51 @@ export const CONNECTORS: readonly ConnectorSpec[] = [
       "lib/marketing/meta-ads-org-write.ts::openOrgGraphCredential",
     ],
     why: "Chi tiêu quảng cáo Facebook của CHÍNH tổ chức khách (token System User của BM họ + tài khoản họ khai). Kiểm tra = GET từng act_<id> (tên · tiền tệ · trạng thái) — chỉ đọc, chỉ tới graph.facebook.com, token đi trong tiêu đề, không theo chuyển hướng. Job «ads-spend-org» mỗi 60 phút kéo chi tiêu theo ngày vào ad_spends của tổ chức, rồi tra sổ mẩu fb_ads (trạng thái · bài viết · creative) bằng cùng client chỉ đọc; nút «Nhập mẫu thắng / mẫu tốt» ở Nguồn ảnh đọc ảnh + câu chữ của mẩu do chính tài khoản đã khai chạy. Bật công tắc «Đăng quảng cáo bằng token của tổ chức» thì «Đăng camp» ở Thư viện Media tạo chiến dịch / nhóm / mẩu bằng token này qua cửa ghi `ads-write.ts` (token trong tiêu đề, chỉ tài khoản đã khai) và job «creative-publish-org» đăng tiếp camp còn dở. Khác «Meta Ads (Facebook)» của nhà (biến môi trường).",
+  },
+  /*
+    SỰ KIỆN CHUYỂN ĐỔI GỬI META CỦA TỔ CHỨC KHÁCH (0236 — chủ shop HSLC 08/10/2026: «gửi sự kiện khi chốt đơn»). Mỗi đơn chốt
+    trong hội thoại Messenger ⇒ một sự kiện `Purchase` (Conversions API cho tin nhắn doanh nghiệp) vào dataset của CHÍNH tổ
+    chức. Kết nối RIÊNG, không gộp vào «meta-ads-org»: token đọc chi tiêu (`ads_read`) không có quyền ghi dataset, và tắt
+    gửi sự kiện không được kéo theo tắt đồng bộ chi tiêu.
+  */
+  {
+    key: "meta-capi-org",
+    label: "Sự kiện chuyển đổi Meta (gửi đơn chốt)",
+    vendor: "Meta",
+    kind: "ADS",
+    capabilities: ["send_conversions"],
+    auth: "OAUTH_TOKEN",
+    settings: [
+      {
+        key: "datasetId",
+        label: "Mã dataset (Pixel) đã liên kết với fanpage",
+        type: "text",
+        secret: false,
+        required: true,
+        hint: "Trình quản lý sự kiện → Nguồn dữ liệu → chọn dataset → Cài đặt: «Mã tập dữ liệu». Dataset phải được liên kết với fanpage bán hàng (Cài đặt doanh nghiệp → Tập dữ liệu → Tài sản được kết nối).",
+        pattern: META_DATASET_ID_PATTERN.source,
+        maxLength: 20,
+      },
+      {
+        key: "accessToken",
+        label: "Token System User có quyền gửi sự kiện vào dataset",
+        type: "text",
+        secret: true,
+        required: true,
+        hint: "Cài đặt doanh nghiệp → Người dùng hệ thống → gán dataset (quyền Quản lý) → Tạo mã token. Có thể dùng chung token với kết nối quảng cáo nếu token đó đã được gán dataset.",
+        pattern: "^EAA[A-Za-z0-9]{30,1000}$",
+        maxLength: 1010,
+      },
+    ],
+    config: { store: "ORG_CONNECTIONS", where: "/settings/connections — bí mật mã hoá AES-256-GCM trong CSDL của tổ chức" },
+    webhook: null,
+    tenancy: "PER_ORG",
+    health: "testConnection",
+    healthRef: "lib/connectors/testers.ts::testMetaCapiOrg",
+    module: "marketing",
+    code: ["lib/connectors/testers.ts", "lib/marketing/meta-capi.ts", "lib/constants/meta-capi.ts"],
+    consumers: ["lib/marketing/meta-capi.ts::runOrgMetaCapi"],
+    why: "Gửi sự kiện Purchase của đơn chốt trong hội thoại Messenger sang dataset Meta CỦA CHÍNH tổ chức (token System User + mã dataset họ khai), để Trình quản lý quảng cáo đếm và tối ưu theo đơn ERP chốt. Kiểm tra = GET dataset (chỉ đọc, không gửi sự kiện thử). Mốc gửi = lúc chốt (chủ shop chọn) nên số lượt mua của Meta gồm cả đơn sẽ hoàn.",
   },
   // ─────────────── NGUỒN KHÁCH TIỀM NĂNG ───────────────
   /*

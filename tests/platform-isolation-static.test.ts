@@ -265,6 +265,7 @@ const GOI_MANG_KHONG_CREDENTIAL: Record<string, string> = {
   "lib/net/public-url.ts": "Tải MỘT trang công khai do quản trị tổ chức gõ (nhập sản phẩm từ website) — không gửi khoá / token / cookie nào, chỉ GET địa chỉ đã kiểm không phải mạng nội bộ.",
   "lib/sales-chatbot/history.ts": "«Đồng bộ lịch sử hộp thư»: ĐỌC danh sách hội thoại + tin qua pages.fm bằng page access token của CHÍNH tổ chức (org_connections, giải mã trong ngữ cảnh tổ chức) — không có credential môi trường nào của nhà.",
   "lib/sales-chatbot/playbook.ts": "«Học từ hội thoại cũ»: ĐỌC lịch sử tin nhắn qua pages.fm bằng page access token của CHÍNH tổ chức (org_connections, giải mã trong ngữ cảnh tổ chức) — không có credential môi trường nào của nhà.",
+  "lib/marketing/meta-capi.ts": "Gửi sự kiện Purchase của đơn chốt vào dataset Meta bằng token System User của CHÍNH tổ chức (kết nối «meta-capi-org» ở org_connections, giải mã trong ngữ cảnh tổ chức); tổ chức nhà bị bỏ qua ngay ở đầu job — không có credential môi trường nào của nhà.",
   "lib/sales-chatbot/fanpage.ts": "Trả lời tin fanpage qua pages.fm bằng page access token của CHÍNH tổ chức (org_connections, giải mã trong ngữ cảnh tổ chức) — không có credential môi trường nào của nhà.",
   "lib/sales-chatbot/messenger.ts":
     "Messenger trực tiếp (0207): Send API bằng page token của CHÍNH tổ chức (org_connections, giải mã trong ngữ cảnh tổ chức). App secret là của app NỀN TẢNG (FACEBOOK_LOGIN_APP_SECRET — cùng app đăng nhập), chỉ dùng ký appsecret_proof cho token của tổ chức; không có khoá / token nào của tổ chức nhà.",

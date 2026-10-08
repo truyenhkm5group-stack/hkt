@@ -104,6 +104,12 @@ const JOBS = [
   */
   { job: "creative-publish-org", every: 10, offset: 7 },
   /*
+    SỰ KIỆN CHUYỂN ĐỔI GỬI META (0236 — chủ shop HSLC 08/10/2026: «gửi sự kiện khi chốt đơn») — CHỈ FAN-OUT tự động hoá,
+    mỗi 10 phút (lệch pha 4, khác `creative-publish-org` ở phút 7). Tổ chức chưa bật kết nối «meta-capi-org» / không đơn chốt
+    mới bỏ qua sau một câu đọc. Nhà đồng bộ đơn Pancake, không có lượt của nhà.
+  */
+  { job: "meta-capi-org", every: 10, offset: 4 },
+  /*
     SĂN KHÁCH SỈ (0197) — CHỈ FAN-OUT tự động hoá, mỗi 3 phút (lệch pha 2). Một lượt ≤ 50 giây cho tổ chức có chiến dịch
     đang chạy; tổ chức không có việc trả ngay sau một câu đọc. Nhà TẮT module này.
   */
