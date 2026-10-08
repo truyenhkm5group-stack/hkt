@@ -3,7 +3,7 @@
   "mission_id": "chatbot-security-2",
   "title": "Bot bán hàng: đơn nháp người lạ không chặn đơn thật · đơn máy nối hỏng vẫn là đơn máy · bài học AI xin chuyển khoản không tự áp",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -33,9 +33,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-07T23:55:08.953Z",
-  "updated_at": "2026-10-07T23:55:45.549Z",
+  "updated_at": "2026-10-08T00:18:12.056Z",
   "last_heartbeat": "2026-10-07T23:55:26.026Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#652 → 454968bfc49055a4a0497fb66f80291b8b1d69a4"
+  },
   "handoff": {
     "branch": "fix/chatbot-security-2",
     "sha": "5867637ba61cd495140803dc7cc6a0d87f37cc6e",
