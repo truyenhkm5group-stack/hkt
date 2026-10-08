@@ -23,8 +23,8 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-08T16:00:52.554Z",
-  "updated_at": "2026-10-08T21:19:03.921Z",
-  "last_heartbeat": "2026-10-08T20:52:19.763Z",
+  "updated_at": "2026-10-08T21:22:35.542Z",
+  "last_heartbeat": "2026-10-08T21:22:35.542Z",
   "definition_of_done": [],
   "intake": {
     "verdict": "MISSING",
@@ -32,16 +32,17 @@
   },
   "handoff": {
     "branch": "claude/trang-chu-su-that-thuong-mai",
-    "sha": "308365e11b8720173876ba8f4ea9decd9d1c7a5a",
-    "at": "2026-10-08T20:52:19.763Z",
+    "sha": "c5f6c666da9b5ea5b06c53c54fbf4f741f057300",
+    "at": "2026-10-08T21:22:35.542Z",
     "actor": "DESKTOP-56TH98Y:wt-pr-a",
     "title": "Trang chủ Chốt Đơn nói đúng sản phẩm: nối Facebook thẳng (Pancake là lựa chọn), bỏ claim tuyệt đối, bỏ «Chi phí AI hiện rõ», FAQ không hứa khoá AI riêng",
-    "summary": "Trang chủ Chốt Đơn nói đúng sản phẩm: nối Facebook thẳng là đường chính (Pancake / Zalo là lựa chọn), FAQ không nêu nhà cung cấp AI / không hứa khoá AI riêng, bỏ «Chi phí AI hiện rõ», thay 5 claim tuyệt đối bằng câu bảo vệ được. Không đổi giá / gói / điều khoản / chế độ đăng ký.",
+    "summary": "Trang chủ chỉ hứa đường nối đang chạy (Pancake · ô chat website · Zalo OA; nối thẳng Facebook sắp mở), bỏ 5 claim tuyệt đối, bỏ «Chi phí AI hiện rõ», FAQ không nêu nhà cung cấp AI.",
     "tests": [
-      "npx tsc --noEmit: 0",
-      "npx eslint: 0",
-      "npm test: TẤT CẢ KIỂM THỬ ĐẠT (Windows, base 0be392ba — gồm khối public-site của #700)",
-      "tests/public-site.test.ts: thêm khoá bước Kết nối fanpage / FAQ / 5 claim tuyệt đối"
+      "sửa theo review #706: bước kết nối + FAQ chỉ hứa Pancake / ô chat website / Zalo OA, nối thẳng Facebook «sắp mở», không là bước bắt buộc",
+      "tests/public-site.test.ts (testPublicSiteSource · ChotDonBrand · MissedOrders): đạt",
+      "kiểm đột biến: đưa «Bấm «Kết nối Facebook»» trở lại ⇒ đỏ, khôi phục ⇒ xanh",
+      "npx eslint 2 tệp: 0",
+      "npm test đầy đủ: ĐẠT ở 308365e1 (khác bản này đúng 2 chuỗi + khối kiểm); lượt xác nhận trên c5f6c666 đang xếp hàng"
     ]
   }
 }
