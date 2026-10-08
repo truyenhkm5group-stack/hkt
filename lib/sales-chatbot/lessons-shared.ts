@@ -96,17 +96,17 @@ export function normalizeLessons(list: readonly string[]): string[] {
  *    chỉ hai dấu ấy phân biệt một trang web với hai từ thường.
  * Cụm nhiều từ nhận cả dạng viết DÍNH («chuyểnkhoản», «tàikhoản»): `normalizeLessons` xoá ký tự vô hình TRƯỚC khi lọc, nên
  * «chuyển‹vô hình›khoản» tới đây đã là «chuyểnkhoản» (review bảo mật #656) — mà gõ thẳng dạng dính cũng là một cách lách.
- * «kiểm tra trước» không phải «trả trước» — gấp ra cùng «tra truoc», nên «kiem tra» được ghép thành một từ trước khi so (không dùng
- * nhìn-ngược: tệp này tới cả trình duyệt, Safari < 16.4 không dịch được).
+ * «trả trước» so trên chữ GỐC còn dấu (như «chuyển trước»): «kiểm tra trước» gấp ra cùng «tra truoc» mà «tra» không có dấu hỏi nên
+ * tự khác — ghép «kiem tra» sau khi gấp thì «kiểm, trả trước» (dấu phẩy mất khi gấp) lọt (review #656 vòng 2).
  * HÀM THUẦN.
  */
-const RISKY_FOLDED = /chuyen ?khoan|chuyen ?tien|\bck\b|\bstk\b|tai ?khoan|thanh ?toan ?(?:truoc|online)|\btra ?(?:tien ?)?truoc|nap ?tien|\bqr\b|\bmomo\b|zalo ?pay|\bvn ?pay\b|vi ?dien ?tu|\bbank(?:ing)?\b|\bnganhang\b|\btransfer\b|\bprepa(?:y|id)\b|\bdeposit\b|vietcombank|techcombank|vietinbank|agribank|sacombank|\bbidv\b|\bacb\b|vpbank|tpbank|\bmb ?bank\b|hdbank|\bvib\b|\bmsb\b|\bocb\b|\bshb\b|seabank|eximbank|\blink\b|\bhttps?\b|\bwww\b|zalo ?me|bit ?ly|\bt me\b|\bm me\b|telegram|\bwhatsapp\b|\bviber\b|\binstagram\b|\btiktok\b|facebook ?com|\bfb (?:com|me)\b|(?:khong|dung|cam) ?(?:can ?|phai ?|nen ?)?(?:chuyen|goi|bao)(?: ?(?:cho|sang))? ?(?:nhan ?vien|nguoi ?that)|khong ?can ?nhan ?vien|tu ?xu ?ly ?khong ?chuyen|bo ?qua ?(?:luat|quy ?tac|huong ?dan|chi ?dan)/;
+const RISKY_FOLDED = /chuyen ?khoan|chuyen ?tien|\bck\b|\bstk\b|tai ?khoan|thanh ?toan ?(?:truoc|online)|nap ?tien|\bqr\b|\bmomo\b|zalo ?pay|\bvn ?pay\b|vi ?dien ?tu|\bbank(?:ing)?\b|\bnganhang\b|\btransfer\b|\bprepa(?:y|id)\b|\bdeposit\b|vietcombank|techcombank|vietinbank|agribank|sacombank|\bbidv\b|\bacb\b|vpbank|tpbank|\bmb ?bank\b|hdbank|\bvib\b|\bmsb\b|\bocb\b|\bshb\b|seabank|eximbank|\blink\b|\bhttps?\b|\bwww\b|zalo ?me|bit ?ly|\bt me\b|\bm me\b|telegram|\bwhatsapp\b|\bviber\b|\binstagram\b|\btiktok\b|facebook ?com|\bfb (?:com|me)\b|(?:khong|dung|cam) ?(?:can ?|phai ?|nen ?)?(?:chuyen|goi|bao)(?: ?(?:cho|sang))? ?(?:nhan ?vien|nguoi ?that)|khong ?can ?nhan ?vien|tu ?xu ?ly ?khong ?chuyen|bo ?qua ?(?:luat|quy ?tac|huong ?dan|chi ?dan)/;
 const RISKY_KEEP_PUNCT = /\bngan hang\b/;
 /**
  * Dấu chấm viết thành chữ: «chấm com» (giữ dấu — «chấm cơm» không phải tên miền), «xyz dot com» / «xyz cham com» (không dấu: phải có
  * nhãn đứng trước), «(dot)» / «[chấm]» (review bảo mật #656).
  */
-const RISKY_RAW = new RegExp(`cọc|chuyển trước|gửi tiền|\\bcoc\\b|chấm\\s*(?:${SPACED_DOT_TLDS})\\b|[a-z0-9-]{2,}\\s+(?:dot|cham)\\s+(?:${SPACED_DOT_TLDS})\\b|[[(]\\s*(?:dot|chấm|cham)\\s*[\\])]`);
+const RISKY_RAW = new RegExp(`cọc|chuyển trước|gửi tiền|trả\\s*(?:tiền\\s*)?trước|\\btra\\s*(?:tien\\s*)?truoc\\b|\\bcoc\\b|chấm\\s*(?:${SPACED_DOT_TLDS})\\b|[a-z0-9-]{2,}\\s+(?:dot|cham)\\s+(?:${SPACED_DOT_TLDS})\\b|[[(]\\s*(?:dot|chấm|cham)\\s*[\\])]`);
 /** Dãy ≥ 9 chữ số (mọi hệ chữ số; MỘT dấu cách / chấm / gạch xen giữa hai chữ số vẫn tính) — số điện thoại, số tài khoản. Ngày «2026-10-08» (8 chữ số) không tính. */
 const LONG_DIGITS = /(?:\p{Nd}[\s.-]?){8}\p{Nd}/u;
 
@@ -118,7 +118,7 @@ function foldKeepPunct(s: string): string {
 export function riskyLesson(text: string): boolean {
   const t = unmaskLinkText(text);
   const raw = t.toLowerCase();
-  return RISKY_FOLDED.test(foldVi(t).replace(/\bkiem tra\b/g, "kiemtra")) || RISKY_KEEP_PUNCT.test(foldKeepPunct(t)) || RISKY_RAW.test(raw) || findBareDomains(raw).length > 0 || HANDLE_RE.test(raw) || LONG_DIGITS.test(raw);
+  return RISKY_FOLDED.test(foldVi(t)) || RISKY_KEEP_PUNCT.test(foldKeepPunct(t)) || RISKY_RAW.test(raw) || findBareDomains(raw).length > 0 || HANDLE_RE.test(raw) || LONG_DIGITS.test(raw);
 }
 
 /**

@@ -66,11 +66,12 @@ function stripHtml(s: string): string {
  * Chỉ các đuôi này: dạng rời mà nhận mọi đuôi thì «ok . em» thành tên miền (review bảo mật #656). Tên miền viết DÍNH thì đuôi là
  * dạng CHUNG (`DOMAIN_RE`). Dấu cách chỉ đứng SAU dấu chấm («xyz. com») KHÔNG gộp — đó đúng là hình một chỗ ngắt câu («vâng. Shop»).
  */
-export const SPACED_DOT_TLDS = "com|vn|net|org|info|xyz|click|shop|site|online|store|me|io|cc|co|live|link|top|app|asia|biz|pro|club|vip|tk|ly|gg|ws";
+export const SPACED_DOT_TLDS = "com|vn|net|org|info|xyz|click|shop|site|online|store|me|io|cc|co|live|link|top|app|asia|biz|pro|club|vip|tk|ly|gg|ws|icu|cyou|sbs|cfd|bond|buzz|fun|space";
 
 /**
- * Chữ «ĐÃ GỠ CHE» để dò liên kết: NFKC («＠» ⇒ «@», «．» ⇒ «.»), dấu chấm Đông Á / chấm giữa («。» «｡» «·» «・» «‧» «∙» «⋅» «•») ⇒
- * «.», «[.]» / «(.)» ⇒ «.», dấu cách TRƯỚC dấu chấm của một đuôi quen ⇒ gộp, và XOÁ ký tự định dạng (zero-width · bidi) chen giữa
+ * Chữ «ĐÃ GỠ CHE» để dò liên kết: NFKC («＠» ⇒ «@», «．» ⇒ «.»), dấu chấm Đông Á («。» «｡») ⇒ «.», chấm giữa («·» «・» «‧» «∙» «⋅»
+ * «•») ⇒ «.» CHỈ khi DÍNH hai bên («xyz·com») — có dấu cách hai bên là dấu ngăn câu («xin lỗi · shop gửi lại», review #656 vòng 2),
+ * «[.]» / «(.)» ⇒ «.», dấu cách TRƯỚC dấu chấm của một đuôi quen ⇒ gộp, và XOÁ ký tự định dạng (zero-width · bidi) chen giữa
  * từ — «chuy‹ký tự vô hình›ển» thành «chuyển» (review bảo mật #654 · #656). Xoá thì hai từ có thể dính nhau («chuyển‹vô hình›khoản» ⇒
  * «chuyểnkhoản») — bộ lọc bài học vì thế nhận cả cụm viết DÍNH (`RISKY_FOLDED`). HÀM THUẦN.
  */
@@ -78,7 +79,8 @@ export function unmaskLinkText(s: string): string {
   return s
     .normalize("NFKC")
     .replace(/\p{Cf}/gu, "")
-    .replace(/[。｡·・‧∙⋅•]/g, ".")
+    .replace(/[。｡]/g, ".")
+    .replace(/(\S)[·・‧∙⋅•](?=\S)/g, "$1.")
     .replace(/\s*[[(]\s*\.\s*[\])]\s*/g, ".")
     .replace(new RegExp(`([\\p{L}\\p{N}])\\s+\\.\\s*(${SPACED_DOT_TLDS})(?![\\p{L}\\p{N}])`, "giu"), "$1.$2");
 }
@@ -98,11 +100,19 @@ const DOMAIN_RE = /(^|[^\p{L}\p{N}_-])([\p{L}\p{N}-]+)((?:\.[\p{L}\p{N}-]{2,})*)
 /** Trang rút gọn / nhắn tin mang nhãn MỘT ký tự — là tên miền dù không có đường dẫn theo sau. */
 const ONE_CHAR_HOSTS = new Set(["t.co", "x.co", "g.co", "t.me", "m.me", "s.id", "j.mp", "t.ly", "v.gd", "u.to"]);
 
-/** `after` = phần chữ ngay sau đuôi (đường dẫn, nếu có, bắt đầu bằng «/» — có thể cách một dấu cách). */
+/** Đuôi quen (`SPACED_DOT_TLDS`) — phân xử nhãn hành chính và nhãn có dấu. */
+const KNOWN_TLDS = new Set(SPACED_DOT_TLDS.split("|"));
+
+/**
+ * `after` = phần chữ ngay sau đuôi (đường dẫn, nếu có, bắt đầu bằng «/» — có thể cách một dấu cách). Nhãn hành chính chỉ được
+ * miễn khi KHÔNG có đường dẫn và đuôi KHÔNG phải đuôi quen: «TP.HCM» miễn, «tp.click/pay» / «tt.top» là tên miền (review #656
+ * vòng 2). Nhãn có dấu chỉ là tên miền khi có đường dẫn hoặc đuôi quen: «thanhtoán.vn» có, «Dạ.em» (thiếu dấu cách) không. Với hai
+ * loại nhãn này đường dẫn phải DÍNH liền — «TP.HCM / Hà Nội» là hai địa danh, không phải đường dẫn.
+ */
 function isDomainMatch(first: string, middle: string, tld: string, after: string): boolean {
   if (middle) return true;
   const label = first.toLowerCase();
-  if (ADMIN_LABELS.has(label)) return false;
+  if (ADMIN_LABELS.has(label) || /[^a-z0-9-]/.test(label)) return after.startsWith("/") || KNOWN_TLDS.has(tld.toLowerCase());
   return label.length >= 2 || /^\s*\//.test(after) || ONE_CHAR_HOSTS.has(`${label}.${tld.toLowerCase()}`);
 }
 

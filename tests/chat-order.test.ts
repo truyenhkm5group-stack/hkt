@@ -7,6 +7,8 @@
  *  · CÙNG `requestKey` (bấm hai lần) ⇒ đúng MỘT đơn, MỘT sự kiện, MỘT dòng nhật ký;
  *  · khách theo SĐT: chưa có ⇒ tạo; đã có ⇒ dùng lại và KHÔNG sửa tên / địa chỉ đang lưu — tên / địa chỉ mới vào NGƯỜI NHẬN;
  *  · hội thoại đã có đơn còn sống (bot chốt) ⇒ form thấy để cảnh báo, không chặn;
+ *  · hồ sơ CHƯA xác minh là của người đang chat (gắn qua SĐT gõ tay) ⇒ form không điền tên / địa chỉ ĐÃ LƯU, ô trống lấy chữ khách
+ *    gõ trong hội thoại, không có thì bắt nhập — kể cả khi bỏ chọn hồ sơ và chỉ gõ SĐT; hồ sơ khớp Facebook ⇒ như cũ;
  *  · khung thử ⇒ từ chối; thiếu `orders:write` ⇒ từ chối, không ghi; hội thoại lạ ⇒ không có.
  */
 import assert from "node:assert/strict";
@@ -19,7 +21,7 @@ import { withOrganization } from "@/lib/platform/context";
 import { invalidateOrganizations } from "@/lib/platform/organizations";
 import { provisionOrganization } from "@/lib/platform/provision";
 import { subscribe } from "@/lib/realtime/bus";
-import { chatOrderContext, createOrderFromChatCore } from "@/lib/records/chat-order";
+import { chatCustomerTrust, chatOrderContext, createOrderFromChatCore } from "@/lib/records/chat-order";
 import { recordConversationEvent } from "@/lib/sales-chatbot/events";
 import { listDrillConversations } from "@/lib/sales-chatbot/experiment-report";
 import { loadAiSalesPerformance } from "@/lib/sales-chatbot/performance";
@@ -39,6 +41,15 @@ async function cleanupOrg(code: string) {
 }
 
 export async function testChatOrder() {
+  // ── Hàm thuần: chỉ cờ máy chủ `verifiedIdentity` của ĐÚNG hồ sơ đang gắn mới là «đã xác minh» ──
+  assert.deepEqual(chatCustomerTrust(null, "kh-1"), { verified: false, typed: null });
+  assert.equal(chatCustomerTrust({ customer: { id: "kh-1", name: "A", verifiedIdentity: true } }, "kh-1").verified, true);
+  assert.deepEqual(chatCustomerTrust({ customer: { id: "kh-1", name: "A", verifiedIdentity: true } }, "kh-2"), { verified: false, typed: null }, "chữ của MỘT hồ sơ khác không phải của hội thoại này");
+  assert.deepEqual(chatCustomerTrust({ customer: { id: null, name: " Bé ", phone: "09", address: "1 A", province: "HN" } }, null), { verified: false, typed: { name: "Bé", phone: "09", address: "1 A", province: "HN" } });
+  assert.deepEqual(chatCustomerTrust({ customer: { id: null, name: "Thử", simulated: true } }, null), { verified: false, typed: null }, "khung thử không có khách thật");
+  assert.deepEqual(chatCustomerTrust({ customer: { id: "kh-1", name: "Chủ SĐT", address: "Địa chỉ đầy đủ", savedAddress: true } }, "kh-1"), { verified: false, typed: null }, "chữ MÁY CHỦ điền từ đơn cũ không phải chữ khách gõ");
+  assert.equal(chatCustomerTrust({ customer: { id: "kh-1", verifiedIdentity: "true" } }, "kh-1").verified, false, "chỉ đúng giá trị true");
+
   await cleanupOrg(ORG);
   try {
     await provisionOrganization({ code: ORG, name: "Shop tạo đơn trong chat", plan: "standard", modules: ["customers", "products", "orders", "inventory", "ai_sales"], admin: { email: `admin@${ORG}.local`, name: "QT", password: "DonTrongChat@123" }, source: "TEST", actor: null });
@@ -120,6 +131,67 @@ export async function testChatOrder() {
       const drillHuman = await listDrillConversations(admin, { days: 30, cohort: "AI_THEN_HUMAN", reason: null, arm: null, confirmed: false });
       assert.ok("ok" in drillHuman && drillHuman.rows.map((r) => r.id).join() === conv.id, JSON.stringify(drillHuman));
 
+      // ── Hồ sơ CHƯA xác minh là của người đang chat (review bảo mật #656, MEDIUM): kẻ gian gõ SĐT nạn nhân rồi xin gặp người ⇒
+      // form từng hiện tên + địa chỉ THẬT của nạn nhân dưới nhãn «khách của hội thoại», ô trống thì đơn đi về địa chỉ ĐÃ LƯU. ──
+      const [victim] = await db.insert(schema.customers).values({ name: "Nạn Nhân Thật", phone: "0977111222", address: "99 Đường Nhà Thật", province: "Hà Nội" }).returning({ id: schema.customers.id });
+      const [phish] = await db
+        .insert(schema.salesChatConversations)
+        .values({ channel: "FANPAGE", status: "HANDOFF", customerId: victim.id, state: { customer: { id: victim.id, name: "Kẻ Gõ", phone: "0977111222", address: "1 Đường Kẻ Gõ", province: "Hà Nội", simulated: false } } })
+        .returning({ id: schema.salesChatConversations.id });
+      const pc = await chatOrderContext(admin, phish.id);
+      assert.ok(pc.ok && pc.value.customer?.verified === false && pc.value.customer.name === "Kẻ Gõ" && pc.value.customer.address === "1 Đường Kẻ Gõ", JSON.stringify(pc));
+      assert.ok(!/Nạn Nhân Thật|99 Đường Nhà Thật/.test(JSON.stringify(pc)), "form không bao giờ thấy chữ ĐÃ LƯU của hồ sơ chưa xác minh");
+      const blank = { requestKey: "phish-bam-0001", customerId: victim.id, name: "", phone: "", address: "", province: "", stage: "NEW", lines: [{ variantId: "erp-chat-var", quantity: 1, unitPrice: 350_000 }] };
+      const ph1 = await createOrderFromChatCore(admin, phish.id, blank);
+      assert.ok(ph1.ok, JSON.stringify(ph1));
+      const [po] = await db.select().from(schema.orders).where(eq(schema.orders.id, ph1.orderId));
+      assert.ok(po.shipFullName === "Kẻ Gõ" && po.shipAddress === "1 Đường Kẻ Gõ", `ô trống ⇒ chữ khách gõ trong hội thoại, không phải của hồ sơ: ${JSON.stringify({ name: po.shipFullName, addr: po.shipAddress })}`);
+      assert.notEqual(po.shipProvince, "", "tỉnh khách gõ đi cùng địa chỉ khách gõ (dòng địa chỉ không nói tỉnh)");
+      // Bỏ chọn hồ sơ, để trống hết ⇒ tìm khách theo SĐT khách GÕ, người nhận là chữ khách gõ — không phải của hồ sơ tìm được.
+      const ph2 = await createOrderFromChatCore(admin, phish.id, { ...blank, requestKey: "phish-bam-0002", customerId: null });
+      assert.ok(ph2.ok && ph2.customerExisting === true, JSON.stringify(ph2));
+      const [po2] = await db.select().from(schema.orders).where(eq(schema.orders.id, ph2.orderId));
+      assert.ok(po2.customerId === victim.id && po2.shipFullName === "Kẻ Gõ" && po2.shipAddress === "1 Đường Kẻ Gõ", JSON.stringify({ c: po2.customerId, name: po2.shipFullName, addr: po2.shipAddress }));
+      // Hồ sơ gắn mà hội thoại chưa gõ gì ⇒ không điền sẵn; ô trống bị từ chối — kể cả khi bỏ chọn hồ sơ và chỉ gõ SĐT của nó.
+      const [bare] = await db.insert(schema.salesChatConversations).values({ channel: "FANPAGE", status: "HANDOFF", customerId: victim.id }).returning({ id: schema.salesChatConversations.id });
+      const bc = await chatOrderContext(admin, bare.id);
+      assert.ok(bc.ok && bc.value.customer?.verified === false && bc.value.customer.name === "" && bc.value.customer.address === "" && bc.value.customer.phone === "0977111222", JSON.stringify(bc));
+      const bareBefore = (await db.select().from(schema.orders)).length;
+      const b1 = await createOrderFromChatCore(admin, bare.id, { ...blank, requestKey: "bare-bam-0001" });
+      assert.ok(!b1.ok && b1.code === "INVALID" && /"address"/.test(JSON.stringify(b1)) && /"name"/.test(JSON.stringify(b1)), JSON.stringify(b1));
+      const b2 = await createOrderFromChatCore(admin, bare.id, { ...blank, requestKey: "bare-bam-0002", customerId: null, phone: "0977111222", name: "Ai Đó" });
+      assert.ok(!b2.ok && b2.code === "INVALID" && /"address"/.test(JSON.stringify(b2)) && !/"name"/.test(JSON.stringify(b2)), JSON.stringify(b2));
+      assert.equal((await db.select().from(schema.orders)).length, bareBefore, "ô trống của hồ sơ chưa xác minh ⇒ không ghi đơn");
+      // Hồ sơ ĐÃ xác minh (khớp mã Facebook — cờ máy chủ ghi) ⇒ như cũ: điền sẵn chữ của HỒ SƠ, ô trống lấy của hồ sơ.
+      const [own] = await db
+        .insert(schema.salesChatConversations)
+        .values({ channel: "FANPAGE", status: "HANDOFF", customerId: victim.id, state: { customer: { id: victim.id, name: "Tên Gõ", phone: "0977111222", address: "Địa Chỉ Gõ", province: "", simulated: false, verifiedIdentity: true } } })
+        .returning({ id: schema.salesChatConversations.id });
+      const oc = await chatOrderContext(admin, own.id);
+      assert.ok(oc.ok && oc.value.customer?.verified === true && oc.value.customer.name === "Nạn Nhân Thật" && oc.value.customer.address === "99 Đường Nhà Thật", JSON.stringify(oc));
+      const ov = await createOrderFromChatCore(admin, own.id, { ...blank, requestKey: "own-bam-0001" });
+      assert.ok(ov.ok, JSON.stringify(ov));
+      const [oo] = await db.select().from(schema.orders).where(eq(schema.orders.id, ov.orderId));
+      assert.ok(oo.shipFullName === "Nạn Nhân Thật" && oo.shipAddress === "99 Đường Nhà Thật", JSON.stringify({ name: oo.shipFullName, addr: oo.shipAddress }));
+      // Chọn một hồ sơ KHÁC hồ sơ đã xác minh của hội thoại ⇒ không còn là «đã xác minh»: ô trống lấy chữ gõ, không lấy của hồ sơ.
+      const [other] = await db.insert(schema.customers).values({ name: "Hồ Sơ Khác", phone: "0977333444", address: "7 Đường Khác", province: "" }).returning({ id: schema.customers.id });
+      const ox = await createOrderFromChatCore(admin, own.id, { ...blank, requestKey: "own-bam-0002", customerId: other.id });
+      assert.ok(ox.ok, JSON.stringify(ox));
+      const [oxo] = await db.select().from(schema.orders).where(eq(schema.orders.id, ox.orderId));
+      assert.ok(oxo.shipAddress === "Địa Chỉ Gõ" && oxo.shipFullName === "Tên Gõ", JSON.stringify({ name: oxo.shipFullName, addr: oxo.shipAddress }));
+      // Review #657 (MEDIUM): kẻ gian gõ SĐT nạn nhân, đáp «đúng» cho địa chỉ ĐÃ CHE ⇒ máy chủ ghi tên + địa chỉ ĐẦY ĐỦ của nạn nhân vào
+      // `state.customer` (`savedAddress`). Đó KHÔNG phải chữ khách gõ: form không hiện, ô trống không dùng.
+      const [saved] = await db
+        .insert(schema.salesChatConversations)
+        .values({ channel: "FANPAGE", status: "HANDOFF", customerId: victim.id, state: { customer: { id: victim.id, name: "Nạn Nhân Thật", phone: "0977111222", address: "99 Đường Nhà Thật", province: "Hà Nội", simulated: false, savedAddress: true } } })
+        .returning({ id: schema.salesChatConversations.id });
+      const sc = await chatOrderContext(admin, saved.id);
+      assert.ok(sc.ok && sc.value.customer?.verified === false && sc.value.customer.name === "" && sc.value.customer.address === "" && !/Nạn Nhân Thật|99 Đường Nhà Thật/.test(JSON.stringify(sc)), JSON.stringify(sc));
+      const savedBefore = (await db.select().from(schema.orders)).length;
+      const sv = await createOrderFromChatCore(admin, saved.id, { ...blank, requestKey: "saved-bam-0001" });
+      assert.ok(!sv.ok && sv.code === "INVALID" && /"address"/.test(JSON.stringify(sv)), JSON.stringify(sv));
+      assert.equal((await db.select().from(schema.orders)).length, savedBefore, "địa chỉ máy điền không thành người nhận");
+
       // ── Từ chối: khung thử, thiếu quyền, hội thoại lạ, khoá lượt bấm sai dạng ──
       const before = (await db.select().from(schema.orders)).length;
       const t = await createOrderFromChatCore(admin, testConv.id, input("lan-bam-0004"));
@@ -135,5 +207,5 @@ export async function testChatOrder() {
   } finally {
     await cleanupOrg(ORG);
   }
-  console.log("  ✓ Tạo đơn trong khung chat: đơn đi đường tạo đơn tay chung, origin ERP_FORM + khoá hội thoại, sự kiện HUMAN kèm khoá tài khoản; bấm hai lần cùng khoá ⇒ một đơn / một sự kiện / một nhật ký; đơn người KHÔNG vào «đơn bot chốt» và kéo hội thoại sang nhóm có người (màn Hiệu quả + drill-down), đơn bot chốt vẫn đếm; khách theo SĐT dùng lại, không đè hồ sơ, tên / địa chỉ mới vào người nhận; đơn bot chốt hiện để cảnh báo, không chặn; khung thử / thiếu quyền / hội thoại lạ / khoá sai ⇒ từ chối, không ghi");
+  console.log("  ✓ Tạo đơn trong khung chat: đơn đi đường tạo đơn tay chung, origin ERP_FORM + khoá hội thoại, sự kiện HUMAN kèm khoá tài khoản; bấm hai lần cùng khoá ⇒ một đơn / một sự kiện / một nhật ký; đơn người KHÔNG vào «đơn bot chốt» và kéo hội thoại sang nhóm có người (màn Hiệu quả + drill-down), đơn bot chốt vẫn đếm; khách theo SĐT dùng lại, không đè hồ sơ, tên / địa chỉ mới vào người nhận; hồ sơ chưa xác minh là của người đang chat ⇒ không điền sẵn / không làm dự phòng chữ đã lưu (ô trống lấy chữ gõ trong hội thoại, không có thì bắt nhập), hồ sơ khớp Facebook như cũ; đơn bot chốt hiện để cảnh báo, không chặn; khung thử / thiếu quyền / hội thoại lạ / khoá sai ⇒ từ chối, không ghi");
 }
