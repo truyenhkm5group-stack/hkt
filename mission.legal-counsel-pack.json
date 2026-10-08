@@ -3,7 +3,7 @@
   "mission_id": "legal-counsel-pack",
   "title": "MM-REC-23/24: gói câu hỏi luật sư COUNSEL_PACK vào kho (docs-only) + sự cố 24/09 thành câu hỏi luật sư",
   "business_goal": "",
-  "status": "PLANNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-legal-compliance",
@@ -21,7 +21,21 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-08T19:40:18.632Z",
-  "updated_at": "2026-10-08T19:40:18.632Z",
-  "last_heartbeat": "2026-10-08T19:40:18.632Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-08T19:40:57.329Z",
+  "last_heartbeat": "2026-10-08T19:40:57.329Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/legal-counsel-pack",
+    "sha": "05990928ea0819c58b1d505d3e659f390694fda3",
+    "at": "2026-10-08T19:40:57.329Z",
+    "actor": "DESKTOP-56TH98Y:wt-legal-compliance",
+    "title": "Gói câu hỏi gửi luật sư vào kho: ba câu chặn ra mắt + sự cố log 24/09, mỗi câu có ô YES / NO / CONDITIONS",
+    "summary": "MM-REC-23/24: COUNSEL_PACK.md vào kho (3 câu chặn + sự cố 24/09 thành câu hỏi luật sư + câu phụ + hồ sơ nếu YES + bằng chứng + còn thiếu); 1 dòng mục lục README. Docs-only, không mã / migration. Pháp lý ở trạng thái WAITING_FOR_LEGAL_COUNSEL.",
+    "tests": [
+      "docs-only: git diff origin/main...HEAD chỉ docs/legal/COUNSEL_PACK.md + docs/legal/README.md: ĐẠT",
+      "tests/legal-registers.test.ts không đọc COUNSEL_PACK.md hay README.md (grep 0 tham chiếu): ĐẠT",
+      "LEGAL_LAUNCH_GATE.md không đổi (bảng §8 sinh từ legal-gate.ts giữ nguyên): ĐẠT",
+      "npm test đầy đủ: chạy ở cổng gates của PR"
+    ]
+  }
 }
