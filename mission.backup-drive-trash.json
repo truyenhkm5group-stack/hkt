@@ -3,7 +3,7 @@
   "mission_id": "backup-drive-trash",
   "title": "Sao lưu ngoài máy hết 403 đầy Drive: xoá bản quá hạn KHÔNG qua thùng rác, dọn thùng rác chỉ trong thư mục sao lưu, backup-status đo dung lượng Drive",
   "business_goal": "",
-  "status": "VERIFYING",
+  "status": "DONE",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -24,13 +24,14 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-08T12:53:25.193Z",
-  "updated_at": "2026-10-08T21:12:32.704Z",
-  "last_heartbeat": "2026-10-08T14:32:07.583Z",
+  "updated_at": "2026-10-08T21:15:57.065Z",
+  "last_heartbeat": "2026-10-08T21:15:57.065Z",
   "definition_of_done": [],
   "evidence": {
     "merged": "#689 → b3a8d74e13a673b319fda63b5d410f8ff8c15438",
     "verify": "PASS c7183395051955e6cff5343a787e9df97d71d12b 2026-10-08T21:12:26.556Z",
-    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/37838226087"
+    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/37838226087",
+    "done": "production c71833950519 · deploy 37838226087 xanh (smoke) · verify ĐẠT"
   },
   "handoff": {
     "branch": "fix/backup-drive-trash",
