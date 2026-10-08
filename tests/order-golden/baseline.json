@@ -3,25 +3,27 @@
   "variants": {
     "AUTO_CONFIRM_OFF": {
       "metrics": {
-        "order_intent_recall": [29, 29],
-        "order_intent_precision": [29, 30],
-        "sku_accuracy": [29, 29],
-        "quantity_accuracy": [34, 34],
-        "phone_accuracy": [28, 29],
-        "address_component_accuracy": [87, 87],
-        "price_accuracy": [34, 34],
-        "total_accuracy": [29, 29],
-        "false_auto_confirm_rate": [4, 11],
-        "missed_confirm_rate": [0, 22],
+        "order_intent_recall": [30, 30],
+        "order_intent_precision": [30, 30],
+        "sku_accuracy": [30, 30],
+        "quantity_accuracy": [35, 35],
+        "phone_accuracy": [29, 30],
+        "address_component_accuracy": [90, 90],
+        "price_accuracy": [35, 35],
+        "total_accuracy": [30, 30],
+        "false_auto_confirm_rate": [2, 10],
+        "missed_confirm_rate": [0, 23],
         "duplicate_order_rate": [0, 30],
-        "missing_order_rate": [0, 29],
-        "human_correction_rate": [1, 29]
+        "missing_order_rate": [0, 30],
+        "human_correction_rate": [1, 30],
+        "review_flag_accuracy": [30, 30]
       },
-      "falseAutoConfirmWithOrder": [4, 7],
+      "falseAutoConfirmWithOrder": [2, 7],
+      "reviewFlagSensitivity": [2, 2],
       "critical": [
         {
           "metric": "false_auto_confirm_rate",
-          "cases": ["ok-de-hoi-chong", "phu-dinh-co-chu-chot", "dia-chi-chua-ghep-xa", "xac-nhan-chi-dau-cau"]
+          "cases": ["ok-de-hoi-chong", "phu-dinh-co-chu-chot"]
         }
       ],
       "cases": {
@@ -29,6 +31,9 @@
           "orders": ["CONFIRMED"],
           "confirmedEvents": [1],
           "wrong": [],
+          "review": [
+            []
+          ],
           "status": "OPEN",
           "toolErrors": []
         },
@@ -36,6 +41,9 @@
           "orders": ["CONFIRMED"],
           "confirmedEvents": [1],
           "wrong": [],
+          "review": [
+            []
+          ],
           "status": "OPEN",
           "toolErrors": []
         },
@@ -43,6 +51,9 @@
           "orders": ["CONFIRMED"],
           "confirmedEvents": [1],
           "wrong": [],
+          "review": [
+            []
+          ],
           "status": "OPEN",
           "toolErrors": []
         },
@@ -50,6 +61,9 @@
           "orders": ["CONFIRMED"],
           "confirmedEvents": [1],
           "wrong": [],
+          "review": [
+            []
+          ],
           "status": "OPEN",
           "toolErrors": []
         },
@@ -57,6 +71,9 @@
           "orders": ["CONFIRMED"],
           "confirmedEvents": [1],
           "wrong": [],
+          "review": [
+            []
+          ],
           "status": "OPEN",
           "toolErrors": []
         },
@@ -64,6 +81,9 @@
           "orders": ["CONFIRMED"],
           "confirmedEvents": [1],
           "wrong": ["phone"],
+          "review": [
+            []
+          ],
           "status": "OPEN",
           "toolErrors": []
         },
@@ -71,6 +91,9 @@
           "orders": ["CONFIRMED"],
           "confirmedEvents": [1],
           "wrong": [],
+          "review": [
+            []
+          ],
           "status": "OPEN",
           "toolErrors": []
         },
@@ -78,6 +101,9 @@
           "orders": ["CONFIRMED"],
           "confirmedEvents": [1],
           "wrong": [],
+          "review": [
+            []
+          ],
           "status": "OPEN",
           "toolErrors": []
         },
@@ -85,6 +111,9 @@
           "orders": ["CONFIRMED"],
           "confirmedEvents": [1],
           "wrong": [],
+          "review": [
+            []
+          ],
           "status": "OPEN",
           "toolErrors": []
         },
@@ -92,6 +121,9 @@
           "orders": ["CONFIRMED"],
           "confirmedEvents": [1],
           "wrong": [],
+          "review": [
+            []
+          ],
           "status": "OPEN",
           "toolErrors": []
         },
@@ -99,6 +131,9 @@
           "orders": ["CONFIRMED"],
           "confirmedEvents": [1],
           "wrong": [],
+          "review": [
+            []
+          ],
           "status": "OPEN",
           "toolErrors": []
         },
@@ -106,6 +141,9 @@
           "orders": ["CONFIRMED"],
           "confirmedEvents": [1],
           "wrong": [],
+          "review": [
+            []
+          ],
           "status": "OPEN",
           "toolErrors": []
         },
@@ -113,6 +151,9 @@
           "orders": ["CONFIRMED"],
           "confirmedEvents": [1],
           "wrong": [],
+          "review": [
+            []
+          ],
           "status": "HANDOFF",
           "toolErrors": []
         },
@@ -120,6 +161,9 @@
           "orders": ["CONFIRMED"],
           "confirmedEvents": [1],
           "wrong": [],
+          "review": [
+            []
+          ],
           "status": "HANDOFF",
           "toolErrors": []
         },
@@ -127,6 +171,9 @@
           "orders": ["NEW"],
           "confirmedEvents": [0],
           "wrong": [],
+          "review": [
+            []
+          ],
           "status": "HANDOFF",
           "toolErrors": []
         },
@@ -134,6 +181,9 @@
           "orders": ["CONFIRMED"],
           "confirmedEvents": [1],
           "wrong": [],
+          "review": [
+            []
+          ],
           "status": "OPEN",
           "toolErrors": []
         },
@@ -141,6 +191,7 @@
           "orders": [],
           "confirmedEvents": [],
           "wrong": null,
+          "review": [],
           "status": "OPEN",
           "toolErrors": ["create_customer", "create_draft_order"]
         },
@@ -148,6 +199,9 @@
           "orders": ["CONFIRMED"],
           "confirmedEvents": [1],
           "wrong": [],
+          "review": [
+            []
+          ],
           "status": "OPEN",
           "toolErrors": []
         },
@@ -155,6 +209,9 @@
           "orders": ["CONFIRMED"],
           "confirmedEvents": [1],
           "wrong": [],
+          "review": [
+            []
+          ],
           "status": "OPEN",
           "toolErrors": []
         },
@@ -162,6 +219,9 @@
           "orders": ["CONFIRMED"],
           "confirmedEvents": [1],
           "wrong": [],
+          "review": [
+            []
+          ],
           "status": "OPEN",
           "toolErrors": []
         },
@@ -169,6 +229,9 @@
           "orders": ["NEW"],
           "confirmedEvents": [0],
           "wrong": [],
+          "review": [
+            []
+          ],
           "status": "OPEN",
           "toolErrors": ["confirm_order"]
         },
@@ -176,6 +239,9 @@
           "orders": ["CONFIRMED"],
           "confirmedEvents": [1],
           "wrong": [],
+          "review": [
+            []
+          ],
           "status": "OPEN",
           "toolErrors": []
         },
@@ -183,6 +249,9 @@
           "orders": ["CONFIRMED"],
           "confirmedEvents": [1],
           "wrong": [],
+          "review": [
+            []
+          ],
           "status": "OPEN",
           "toolErrors": []
         },
@@ -190,6 +259,9 @@
           "orders": ["NEW"],
           "confirmedEvents": [0],
           "wrong": [],
+          "review": [
+            []
+          ],
           "status": "OPEN",
           "toolErrors": ["confirm_order"]
         },
@@ -197,6 +269,7 @@
           "orders": [],
           "confirmedEvents": [],
           "wrong": null,
+          "review": [],
           "status": "OPEN",
           "toolErrors": []
         },
@@ -204,13 +277,17 @@
           "orders": [],
           "confirmedEvents": [],
           "wrong": null,
+          "review": [],
           "status": "OPEN",
           "toolErrors": []
         },
         "huy-sau-tom-tat": {
           "orders": ["NEW"],
           "confirmedEvents": [0],
-          "wrong": null,
+          "wrong": [],
+          "review": [
+            ["CUSTOMER_CANCELLED"]
+          ],
           "status": "OPEN",
           "toolErrors": []
         },
@@ -218,6 +295,9 @@
           "orders": ["CONFIRMED"],
           "confirmedEvents": [1],
           "wrong": [],
+          "review": [
+            ["ADDRESS_UNRESOLVED"]
+          ],
           "status": "OPEN",
           "toolErrors": []
         },
@@ -225,6 +305,9 @@
           "orders": ["CONFIRMED"],
           "confirmedEvents": [1],
           "wrong": [],
+          "review": [
+            []
+          ],
           "status": "OPEN",
           "toolErrors": []
         },
@@ -232,6 +315,9 @@
           "orders": ["CONFIRMED"],
           "confirmedEvents": [1],
           "wrong": [],
+          "review": [
+            []
+          ],
           "status": "OPEN",
           "toolErrors": []
         },
@@ -239,20 +325,29 @@
           "orders": ["CONFIRMED"],
           "confirmedEvents": [1],
           "wrong": [],
+          "review": [
+            []
+          ],
           "status": "OPEN",
           "toolErrors": []
         },
         "xac-nhan-chi-dau-cau": {
-          "orders": ["CONFIRMED"],
-          "confirmedEvents": [1],
+          "orders": ["NEW"],
+          "confirmedEvents": [0],
           "wrong": [],
+          "review": [
+            []
+          ],
           "status": "OPEN",
-          "toolErrors": []
+          "toolErrors": ["confirm_order"]
         },
         "dia-chi-cu-viet-tat": {
           "orders": ["CONFIRMED"],
           "confirmedEvents": [1],
           "wrong": [],
+          "review": [
+            []
+          ],
           "status": "OPEN",
           "toolErrors": []
         }
@@ -260,32 +355,32 @@
     },
     "AUTO_CONFIRM_ON": {
       "metrics": {
-        "order_intent_recall": [29, 29],
-        "order_intent_precision": [29, 30],
-        "sku_accuracy": [29, 29],
-        "quantity_accuracy": [34, 34],
-        "phone_accuracy": [28, 29],
-        "address_component_accuracy": [87, 87],
-        "price_accuracy": [34, 34],
-        "total_accuracy": [29, 29],
-        "false_auto_confirm_rate": [2, 5],
-        "missed_confirm_rate": [0, 28],
+        "order_intent_recall": [30, 30],
+        "order_intent_precision": [30, 30],
+        "sku_accuracy": [30, 30],
+        "quantity_accuracy": [35, 35],
+        "phone_accuracy": [29, 30],
+        "address_component_accuracy": [90, 90],
+        "price_accuracy": [35, 35],
+        "total_accuracy": [30, 30],
+        "false_auto_confirm_rate": [0, 3],
+        "missed_confirm_rate": [0, 30],
         "duplicate_order_rate": [0, 30],
-        "missing_order_rate": [0, 29],
-        "human_correction_rate": [1, 29]
+        "missing_order_rate": [0, 30],
+        "human_correction_rate": [1, 30],
+        "review_flag_accuracy": [30, 30]
       },
-      "falseAutoConfirmWithOrder": [1, 1],
-      "critical": [
-        {
-          "metric": "false_auto_confirm_rate",
-          "cases": ["huy-sau-tom-tat", "dia-chi-chua-ghep-xa"]
-        }
-      ],
+      "falseAutoConfirmWithOrder": [0, 0],
+      "reviewFlagSensitivity": [2, 2],
+      "critical": [],
       "cases": {
         "mot-sku": {
           "orders": ["CONFIRMED"],
           "confirmedEvents": [1],
           "wrong": [],
+          "review": [
+            []
+          ],
           "status": "OPEN",
           "toolErrors": []
         },
@@ -293,6 +388,9 @@
           "orders": ["CONFIRMED"],
           "confirmedEvents": [1],
           "wrong": [],
+          "review": [
+            []
+          ],
           "status": "OPEN",
           "toolErrors": []
         },
@@ -300,6 +398,9 @@
           "orders": ["CONFIRMED"],
           "confirmedEvents": [1],
           "wrong": [],
+          "review": [
+            []
+          ],
           "status": "OPEN",
           "toolErrors": []
         },
@@ -307,6 +408,9 @@
           "orders": ["CONFIRMED"],
           "confirmedEvents": [1],
           "wrong": [],
+          "review": [
+            []
+          ],
           "status": "OPEN",
           "toolErrors": []
         },
@@ -314,6 +418,9 @@
           "orders": ["CONFIRMED"],
           "confirmedEvents": [1],
           "wrong": [],
+          "review": [
+            []
+          ],
           "status": "OPEN",
           "toolErrors": []
         },
@@ -321,6 +428,9 @@
           "orders": ["CONFIRMED"],
           "confirmedEvents": [1],
           "wrong": ["phone"],
+          "review": [
+            []
+          ],
           "status": "OPEN",
           "toolErrors": []
         },
@@ -328,6 +438,9 @@
           "orders": ["CONFIRMED"],
           "confirmedEvents": [1],
           "wrong": [],
+          "review": [
+            []
+          ],
           "status": "OPEN",
           "toolErrors": []
         },
@@ -335,6 +448,9 @@
           "orders": ["CONFIRMED"],
           "confirmedEvents": [1],
           "wrong": [],
+          "review": [
+            []
+          ],
           "status": "OPEN",
           "toolErrors": []
         },
@@ -342,6 +458,9 @@
           "orders": ["CONFIRMED"],
           "confirmedEvents": [1],
           "wrong": [],
+          "review": [
+            []
+          ],
           "status": "OPEN",
           "toolErrors": []
         },
@@ -349,6 +468,9 @@
           "orders": ["CONFIRMED"],
           "confirmedEvents": [1],
           "wrong": [],
+          "review": [
+            []
+          ],
           "status": "OPEN",
           "toolErrors": []
         },
@@ -356,6 +478,9 @@
           "orders": ["CONFIRMED"],
           "confirmedEvents": [1],
           "wrong": [],
+          "review": [
+            []
+          ],
           "status": "OPEN",
           "toolErrors": []
         },
@@ -363,6 +488,9 @@
           "orders": ["CONFIRMED"],
           "confirmedEvents": [1],
           "wrong": [],
+          "review": [
+            []
+          ],
           "status": "OPEN",
           "toolErrors": []
         },
@@ -370,6 +498,9 @@
           "orders": ["CONFIRMED"],
           "confirmedEvents": [1],
           "wrong": [],
+          "review": [
+            []
+          ],
           "status": "HANDOFF",
           "toolErrors": []
         },
@@ -377,6 +508,9 @@
           "orders": ["CONFIRMED"],
           "confirmedEvents": [1],
           "wrong": [],
+          "review": [
+            []
+          ],
           "status": "HANDOFF",
           "toolErrors": []
         },
@@ -384,6 +518,9 @@
           "orders": ["CONFIRMED"],
           "confirmedEvents": [1],
           "wrong": [],
+          "review": [
+            []
+          ],
           "status": "HANDOFF",
           "toolErrors": []
         },
@@ -391,6 +528,9 @@
           "orders": ["CONFIRMED"],
           "confirmedEvents": [1],
           "wrong": [],
+          "review": [
+            []
+          ],
           "status": "OPEN",
           "toolErrors": []
         },
@@ -398,6 +538,7 @@
           "orders": [],
           "confirmedEvents": [],
           "wrong": null,
+          "review": [],
           "status": "OPEN",
           "toolErrors": ["create_customer", "create_draft_order"]
         },
@@ -405,6 +546,9 @@
           "orders": ["CONFIRMED"],
           "confirmedEvents": [1],
           "wrong": [],
+          "review": [
+            []
+          ],
           "status": "OPEN",
           "toolErrors": []
         },
@@ -412,6 +556,9 @@
           "orders": ["CONFIRMED"],
           "confirmedEvents": [1],
           "wrong": [],
+          "review": [
+            []
+          ],
           "status": "OPEN",
           "toolErrors": []
         },
@@ -419,6 +566,9 @@
           "orders": ["CONFIRMED"],
           "confirmedEvents": [1],
           "wrong": [],
+          "review": [
+            []
+          ],
           "status": "OPEN",
           "toolErrors": []
         },
@@ -426,6 +576,9 @@
           "orders": ["CONFIRMED"],
           "confirmedEvents": [1],
           "wrong": [],
+          "review": [
+            []
+          ],
           "status": "OPEN",
           "toolErrors": ["confirm_order"]
         },
@@ -433,6 +586,9 @@
           "orders": ["CONFIRMED"],
           "confirmedEvents": [1],
           "wrong": [],
+          "review": [
+            []
+          ],
           "status": "OPEN",
           "toolErrors": []
         },
@@ -440,6 +596,9 @@
           "orders": ["CONFIRMED"],
           "confirmedEvents": [1],
           "wrong": [],
+          "review": [
+            []
+          ],
           "status": "OPEN",
           "toolErrors": []
         },
@@ -447,6 +606,9 @@
           "orders": ["CONFIRMED"],
           "confirmedEvents": [1],
           "wrong": [],
+          "review": [
+            []
+          ],
           "status": "OPEN",
           "toolErrors": ["confirm_order"]
         },
@@ -454,6 +616,7 @@
           "orders": [],
           "confirmedEvents": [],
           "wrong": null,
+          "review": [],
           "status": "OPEN",
           "toolErrors": []
         },
@@ -461,13 +624,17 @@
           "orders": [],
           "confirmedEvents": [],
           "wrong": null,
+          "review": [],
           "status": "OPEN",
           "toolErrors": []
         },
         "huy-sau-tom-tat": {
           "orders": ["CONFIRMED"],
           "confirmedEvents": [1],
-          "wrong": null,
+          "wrong": [],
+          "review": [
+            ["CUSTOMER_CANCELLED"]
+          ],
           "status": "OPEN",
           "toolErrors": []
         },
@@ -475,6 +642,9 @@
           "orders": ["CONFIRMED"],
           "confirmedEvents": [1],
           "wrong": [],
+          "review": [
+            ["ADDRESS_UNRESOLVED"]
+          ],
           "status": "OPEN",
           "toolErrors": []
         },
@@ -482,6 +652,9 @@
           "orders": ["CONFIRMED"],
           "confirmedEvents": [1],
           "wrong": [],
+          "review": [
+            []
+          ],
           "status": "OPEN",
           "toolErrors": []
         },
@@ -489,6 +662,9 @@
           "orders": ["CONFIRMED"],
           "confirmedEvents": [1],
           "wrong": [],
+          "review": [
+            []
+          ],
           "status": "OPEN",
           "toolErrors": []
         },
@@ -496,6 +672,9 @@
           "orders": ["CONFIRMED"],
           "confirmedEvents": [1],
           "wrong": [],
+          "review": [
+            []
+          ],
           "status": "OPEN",
           "toolErrors": []
         },
@@ -503,13 +682,19 @@
           "orders": ["CONFIRMED"],
           "confirmedEvents": [1],
           "wrong": [],
+          "review": [
+            []
+          ],
           "status": "OPEN",
-          "toolErrors": []
+          "toolErrors": ["confirm_order"]
         },
         "dia-chi-cu-viet-tat": {
           "orders": ["CONFIRMED"],
           "confirmedEvents": [1],
           "wrong": [],
+          "review": [
+            []
+          ],
           "status": "OPEN",
           "toolErrors": []
         }

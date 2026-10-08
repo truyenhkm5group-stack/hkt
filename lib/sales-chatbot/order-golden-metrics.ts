@@ -18,8 +18,12 @@
  *  · Cấp HUYỆN không chấm: địa giới từ 01/07/2025 bỏ cấp huyện và đơn ERP không có cột huyện (nhãn ghi `null` = KHÔNG ÁP DỤNG).
  *  · Xã nhãn `null` = lời khách KHÔNG đủ để xác định xã ⇒ đúng khi máy để TRỐNG, sai khi máy điền (máy không được đoán).
  *  · Tiền là số nguyên VND; chữ so bằng `foldVi` (bỏ dấu, chữ thường).
+ *  · Cờ CẦN NGƯỜI KIỂM (chủ shop 08/10/2026 — `lib/constants/order-review.ts`): nhãn khai `review` = tập lý do đơn PHẢI mang;
+ *    không khai = đơn KHÔNG được mang cờ. Chấm hai chiều (thiếu cờ ⇒ người không biết mà kiểm; thừa cờ ⇒ việc giả cho người) ở
+ *    `review_flag_accuracy`, tách khỏi `human_correction_rate` (cờ không phải một trường người phải sửa).
  */
 import { foldVi } from "@/lib/sales-chatbot/text";
+import type { OrderReviewCode } from "@/lib/constants/order-review";
 
 // ─────────────────────────── NHÃN ───────────────────────────
 
@@ -95,6 +99,8 @@ export type OrderGoldenLabel = {
   order: GoldenOrder | null;
   /** `dependsOn` = nhãn PHỤ THUỘC LUẬT / quyết định của chủ shop (ghi luật nào) — đổi luật thì đổi nhãn. */
   confirm: OrderConfirmLabel;
+  /** Lý do CẦN NGƯỜI KIỂM đơn PHẢI mang (chỉ ca có đơn); vắng = đơn không được mang cờ. */
+  review?: readonly OrderReviewCode[];
 };
 
 /** Nhãn tự mâu thuẫn ⇒ danh sách lỗi (rỗng = nhãn dùng được). HÀM THUẦN — chặn lỗi gõ nhãn trước khi nó thành «hệ chấm sai». */
@@ -107,6 +113,7 @@ export function labelProblems(label: OrderGoldenLabel): string[] {
   if ((label.confirm.basis === "NO_ORDER") !== (label.expectedOrders === 0)) out.push("căn cứ NO_ORDER chỉ dành cho ca không có đơn");
   if (!label.confirm.why.trim()) out.push("thiếu lý do của nhãn chốt");
   if (POLICY_BASES.has(label.confirm.basis) && !label.confirm.dependsOn?.trim()) out.push(`căn cứ ${label.confirm.basis} là luật của chủ shop — phải khai dependsOn`);
+  if (label.review?.length && label.expectedOrders !== 1) out.push("cờ cần người kiểm chỉ khai cho ca có đơn");
   const o = label.order;
   if (o) {
     if (!o.lines.length) out.push("đơn không có dòng hàng");
@@ -141,6 +148,8 @@ export type ObservedOrder = {
   total: number;
   /** Số sự kiện `order.confirmed` đã phát cho đơn (luật «báo nhóm» nghe sự kiện này). */
   confirmedEvents: number;
+  /** Lý do CẦN NGƯỜI KIỂM đang mở trên đơn (`orders.raw.review`), sắp xếp; rỗng = không cờ. */
+  review: readonly string[];
 };
 
 /** `orders` xếp theo lúc tạo (sớm nhất trước). */
@@ -170,6 +179,10 @@ export type OrderFieldScore = {
   phone: boolean;
   address: { province: boolean; ward: boolean; line: boolean };
   total: boolean;
+  /** Cờ CẦN NGƯỜI KIỂM đúng nhãn (đủ lý do nhãn đòi, không lý do thừa). Không nằm trong `wrong`. */
+  review: boolean;
+  /** Nhãn ĐÒI cờ (ca dương) — mẫu số của độ nhạy `reviewFlagSensitivity`. */
+  reviewWanted: boolean;
   /** Trường người phải sửa trước khi giao (rỗng = đơn đúng). */
   wrong: string[];
 };
@@ -193,7 +206,7 @@ export type OrderCaseScore = {
   fields: OrderFieldScore | null;
 };
 
-function scoreFields(want: GoldenOrder, got: ObservedOrder): OrderFieldScore {
+function scoreFields(want: GoldenOrder, got: ObservedOrder, wantReview: readonly string[]): OrderFieldScore {
   const gotBySku = new Map(got.lines.map((l) => [l.sku, l]));
   const wantSkus = new Set(want.lines.map((l) => l.sku));
   const sku = wantSkus.size === gotBySku.size && [...wantSkus].every((s) => gotBySku.has(s));
@@ -208,6 +221,7 @@ function scoreFields(want: GoldenOrder, got: ObservedOrder): OrderFieldScore {
     line: foldVi(want.address.line).length > 0 && ` ${foldVi(got.addressLine)} `.includes(` ${foldVi(want.address.line)} `),
   };
   const total = got.total === want.total;
+  const review = [...new Set(wantReview)].sort().join(",") === [...new Set(got.review)].sort().join(",");
   const wrong = [
     ...(sku ? [] : ["sku"]),
     ...lines.filter((x) => x.quantityOk === false).map((x) => `quantity:${x.sku}`),
@@ -218,7 +232,7 @@ function scoreFields(want: GoldenOrder, got: ObservedOrder): OrderFieldScore {
     ...(address.line ? [] : ["address_line"]),
     ...(total ? [] : ["total"]),
   ];
-  return { sku, lines, phone, address, total, wrong };
+  return { sku, lines, phone, address, total, review, reviewWanted: wantReview.length > 0, wrong };
 }
 
 const DEAD_STAGES: ReadonlySet<string> = new Set(["CANCELLED", "DELETED"]);
@@ -256,7 +270,7 @@ export function scoreOrderCase(label: OrderGoldenLabel, obs: OrderCaseObservatio
     falseAutoConfirm: needVerify ? confirmed : null,
     missedConfirm: needVerify ? null : !confirmed,
     basis: label.confirm.basis,
-    fields: label.order && first ? scoreFields(label.order, first) : null,
+    fields: label.order && first ? scoreFields(label.order, first, label.review ?? []) : null,
   };
 }
 
@@ -276,6 +290,7 @@ export const ORDER_GOLDEN_METRICS = [
   "duplicate_order_rate",
   "missing_order_rate",
   "human_correction_rate",
+  "review_flag_accuracy",
 ] as const;
 export type OrderGoldenMetric = (typeof ORDER_GOLDEN_METRICS)[number];
 
@@ -294,6 +309,7 @@ export const ORDER_GOLDEN_METRIC_INFO: Record<OrderGoldenMetric, { label: string
   duplicate_order_rate: { label: "Đơn trùng (CRITICAL)", better: "DOWN", definition: "đơn thừa (máy để lại quá số đơn nhãn, tối thiểu 1) / đơn được đếm (còn sống hoặc từng chốt)" },
   missing_order_rate: { label: "Thiếu đơn", better: "DOWN", definition: "đơn nhãn đòi mà máy không để lại / đơn theo nhãn" },
   human_correction_rate: { label: "Đơn người phải sửa", better: "DOWN", definition: "ca chấm được có ≥ 1 trường sai (SKU · SL · đơn giá · SĐT · tỉnh · xã · dòng địa chỉ · tổng) / ca chấm được" },
+  review_flag_accuracy: { label: "Đúng cờ cần người kiểm", better: "UP", definition: "ca chấm được có cờ CẦN NGƯỜI KIỂM đúng nhãn (đủ lý do nhãn đòi, không lý do thừa) / ca chấm được" },
 };
 
 /**
@@ -320,6 +336,11 @@ export type OrderGoldenSummary = {
   falseAutoConfirmByBasis: Partial<Record<OrderConfirmBasis, Rate>>;
   /** `false_auto_confirm_rate` bỏ các ca NO_ORDER — chỉ ca CÓ đơn phải người xác minh. */
   falseAutoConfirmWithOrder: Rate;
+  /**
+   * ĐỘ NHẠY của cờ cần người kiểm: trên các ca nhãn ĐÒI cờ, bao nhiêu đơn mang đúng cờ. `review_flag_accuracy` gộp cả ca âm (không
+   * cờ là đúng) nên một bộ máy KHÔNG BAO GIỜ gắn cờ vẫn đạt gần 100% — con số này lột phần đó ra (review #675, L7).
+   */
+  reviewFlagSensitivity: Rate;
   /** Ca làm sai theo từng chỉ số (khoá ca, theo thứ tự đầu vào). */
   failing: Record<OrderGoldenMetric, string[]>;
   critical: OrderGoldenCritical[];
@@ -357,6 +378,7 @@ export function summarizeOrderGolden(scores: readonly OrderCaseScore[]): OrderGo
     duplicate_order_rate: rateOf(scores.reduce((t, s) => t + s.duplicates, 0), createdTotal),
     missing_order_rate: rateOf(scores.reduce((t, s) => t + s.missing, 0), expectedTotal),
     human_correction_rate: rateOf(evaluated.filter((s) => s.fields.wrong.length > 0).length, evaluated.length),
+    review_flag_accuracy: rateOf(evaluated.filter((s) => s.fields.review).length, evaluated.length),
   };
 
   const failing: Record<OrderGoldenMetric, string[]> = {
@@ -373,6 +395,7 @@ export function summarizeOrderGolden(scores: readonly OrderCaseScore[]): OrderGo
     duplicate_order_rate: keysWhere(scores, (s) => s.duplicates > 0),
     missing_order_rate: keysWhere(scores, (s) => s.missing > 0),
     human_correction_rate: keysWhere(evaluated, (s) => s.fields.wrong.length > 0),
+    review_flag_accuracy: keysWhere(evaluated, (s) => !s.fields.review),
   };
 
   const falseAutoConfirmByBasis: Partial<Record<OrderConfirmBasis, Rate>> = {};
@@ -390,5 +413,7 @@ export function summarizeOrderGolden(scores: readonly OrderCaseScore[]): OrderGo
 
   const withOrder = needVerify.filter((s) => s.basis !== "NO_ORDER");
   const falseAutoConfirmWithOrder = rateOf(withOrder.filter((s) => s.falseAutoConfirm === true).length, withOrder.length);
-  return { cases: scores.length, metrics, addressByComponent: byComponent, falseAutoConfirmByBasis, falseAutoConfirmWithOrder, failing, critical };
+  const wanted = evaluated.filter((s) => s.fields.reviewWanted);
+  const reviewFlagSensitivity = rateOf(wanted.filter((s) => s.fields.review).length, wanted.length);
+  return { cases: scores.length, metrics, addressByComponent: byComponent, falseAutoConfirmByBasis, falseAutoConfirmWithOrder, reviewFlagSensitivity, failing, critical };
 }

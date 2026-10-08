@@ -35,11 +35,13 @@ import { CancelManualOrderButton, ConfirmManualDeliveryButton, ManualDeliveryFai
 import { ManualPaymentStatusText } from "@/app/(dashboard)/orders/payment-status";
 import { canRecordPayment, PAYMENT_KIND_LABEL, PAYMENT_METHOD_LABEL } from "@/lib/constants/order-payments";
 import { manualOrderPaymentView } from "@/lib/queries/order-payments";
-import { canConfirmManualDelivery, canMarkManualDeliveryFailed, isManualOrderId, manualOrderRaw, manualOrderShortCode } from "@/lib/constants/manual-orders";
+import { canConfirmManualDelivery, canMarkManualDeliveryFailed, isManualOrderId, manualOrderGaps, manualOrderRaw, manualOrderShortCode } from "@/lib/constants/manual-orders";
 import { manualOrderDeliveryView, manualOrderGate } from "@/lib/records/order-create";
 import { carrierPanel } from "@/lib/carriers/engine";
 import { attemptHoldsOrder } from "@/lib/constants/carrier-vtp";
 import { AttemptActions, CreateShipmentButton } from "@/app/(dashboard)/orders/[id]/carrier-shipment-actions";
+import { OrderQuickDecision, OrderReviewEntries } from "@/components/orders/order-review-quick";
+import { ORDER_REVIEW_LABEL, orderReviewLogOf, orderReviewOf, reconfirmsSinceOpen } from "@/lib/constants/order-review";
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -119,6 +121,12 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
   const chatThread = manual ? (await orderChatThreads([order.id])).get(order.id) : undefined;
   const chatLink = chatLinkOf(chatThread, chatThread ? await salesInboxEnabled() : false, { pageId: order.pageId, conversationId: order.conversationId });
   const grossProfit = order.totalPriceAfterDiscount - order.liveCogs - order.partnerFee - order.returnFee;
+  // CẦN NGƯỜI KIỂM (chủ shop 08/10/2026): lý do đang mở + lượt kiểm gần nhất. Chỉ đơn tay mang cờ này.
+  const reviewEntries = manual ? (orderReviewOf(order.raw)?.entries ?? []) : [];
+  const lastReview = manual ? (orderReviewLogOf(order.raw).find((r) => r.action !== "CUSTOMER_RECONFIRMED") ?? null) : null;
+  const reconfirms = manual ? reconfirmsSinceOpen(order.raw) : [];
+  const gaps = manual ? manualOrderGaps({ phone: order.shipPhone, address: order.shipAddress, province: order.shipProvince, ward: order.shipCommune }, order.itemsCount) : [];
+  const canDecide = manual && manualGate?.allowed === true;
 
   return (
     <div className="space-y-5">
@@ -163,6 +171,31 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
           </>
         }
       />
+
+      {/*
+        CẦN NGƯỜI KIỂM ĐỨNG ĐẦU TRANG: máy đã ghi nhận một điều nó không được tự quyết (khách báo huỷ · địa chỉ chưa ghép xã) — đơn
+        CHƯA bị huỷ, CHƯA bị bỏ qua. Người đọc lý do + nguyên văn câu khách rồi bấm một trong hai nút. Đơn «Mới» không cờ thì chỉ
+        có nút «Xác nhận đơn» nhanh ở đây; huỷ đơn thường vẫn ở nút «Huỷ đơn» trên tiêu đề.
+      */}
+      {reviewEntries.length ? (
+        <section className="space-y-2 rounded-xl border border-amber-300/70 bg-amber-50/60 px-4 py-3 dark:border-amber-900/60 dark:bg-amber-950/20" data-testid="order-review">
+          <p className="text-[13px] font-semibold">Cần người kiểm trước khi đi tiếp</p>
+          <OrderReviewEntries entries={reviewEntries} reconfirms={reconfirms} />
+          {canDecide ? <OrderQuickDecision orderId={order.id} stage={order.stage} entries={reviewEntries} gaps={gaps} /> : <p className="text-[12px] text-muted-foreground">Cần quyền sửa đơn (orders:write) để xác nhận / huỷ.</p>}
+        </section>
+      ) : canDecide && (order.stage === "NEW" || order.stage === "WAITING") ? (
+        <section className="flex flex-wrap items-center justify-between gap-2 rounded-xl border px-4 py-2.5">
+          <p className="text-[12.5px] text-muted-foreground">Đơn chưa xác nhận — kiểm hàng, người nhận, địa chỉ rồi xác nhận.</p>
+          <OrderQuickDecision orderId={order.id} stage={order.stage} entries={[]} gaps={gaps} />
+        </section>
+      ) : null}
+      {lastReview && !reviewEntries.length ? (
+        <p className="text-[12px] text-muted-foreground">
+          Đã kiểm {formatDateTime(lastReview.at)}
+          {lastReview.byName ? ` bởi ${lastReview.byName}` : ""} — {lastReview.action === "CANCELLED" ? "huỷ đơn" : "xác nhận đơn"} ({lastReview.entries.map((e) => ORDER_REVIEW_LABEL[e.code]).join(" · ")}
+          {lastReview.entries.find((e) => e.quote)?.quote ? `; khách nhắn «${lastReview.entries.find((e) => e.quote)?.quote}»` : ""}).
+        </p>
+      ) : null}
 
       {/*
         LỜI HẸN ĐỨNG NGAY DƯỚI TIÊU ĐỀ, TRÊN CẢ DẢI SOÁT.

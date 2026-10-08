@@ -29,12 +29,13 @@ import type { PriceListBook } from "@/lib/constants/price-lists";
 import { priceBooksFor } from "@/lib/queries/price-lists";
 import { createCustomerAsAgent, normalizeCustomerPhone } from "@/lib/records/customer-create";
 import { activeAppointmentRanges, createAppointmentAsAgent } from "@/lib/records/appointments";
-import { createOrderAsAgent, updateOrderAsAgent, type AgentOrderOptions, type OrderAgent } from "@/lib/records/order-create";
+import { createOrderAsAgent, flagOrderForReviewAsAgent, noteCustomerReconfirmAsAgent, updateOrderAsAgent, type AgentOrderOptions, type OrderAgent } from "@/lib/records/order-create";
 import { chatOrderAdId } from "@/lib/sales-chatbot/ad-referral";
 import { agentUnitPrice } from "@/lib/commerce/pricing";
 import { notifySalesChatBooking, notifySalesChatHandoff } from "@/lib/sales-chatbot/alerts";
 import { freeShipVerdict, variantWeightGrams, type ShipVerdict } from "@/lib/sales-chatbot/shipping";
-import { foldVi, searchCatalog, sellableCatalog, stockFor, type CatalogItem } from "@/lib/sales-chatbot/catalog";
+import { searchCatalog, sellableCatalog, stockFor, type CatalogItem } from "@/lib/sales-chatbot/catalog";
+import { quotedInText } from "@/lib/sales-chatbot/text";
 import { isMessagingChannel, type ChatChannel, type SalesChatbotConfig, type SalesTool } from "@/lib/sales-chatbot/config";
 import { renderQuickReplyForSend } from "@/lib/sales-chatbot/quick-replies";
 import { repeatsRecent } from "@/lib/sales-chatbot/quick-replies-shared";
@@ -253,7 +254,8 @@ const PROCESS_DEFS: Record<ProcessTool, AiToolDef> = {
   },
   mark_declined: {
     name: "mark_declined",
-    description: "Ghi nhận khách TỪ CHỐI RÕ RÀNG không mua (vd «thôi không lấy nữa», «không mua đâu»). Bot sẽ thôi nhắn follow-up. Không dùng khi khách chỉ phân vân / chê đắt.",
+    description:
+      "Ghi nhận khách TỪ CHỐI RÕ RÀNG không mua (vd «thôi không lấy nữa», «không mua đâu»). Bot sẽ thôi nhắn follow-up. Không dùng khi khách chỉ phân vân / chê đắt. Đã có đơn trong hội thoại ⇒ máy chủ KHÔNG huỷ đơn: ghi chú «khách huỷ» lên đơn để nhân viên kiểm (người huỷ hoặc xác nhận lại).",
     inputSchema: { type: "object", properties: { reason: { type: "string" } }, required: ["reason"], additionalProperties: false },
     kind: "write",
   },
@@ -477,7 +479,7 @@ export async function executeTool(name: string, rawInput: unknown, ctx: ToolCont
         .object({ variant_id: z.string().trim().min(1).max(200), date: z.string().trim(), time: z.string().trim(), name: z.string().trim().min(2).max(200), phone: z.string().trim().min(8).max(30), note: z.string().trim().max(500).optional(), customer_confirmation: z.string().trim().min(2).max(300) })
         .safeParse(input);
       if (!v.success) return err("Đặt lịch: thiếu thông tin", "Cần dịch vụ, ngày, giờ, họ tên, số điện thoại và lời đồng ý của khách.", state);
-      if (!foldVi(ctx.lastUserText).includes(foldVi(v.data.customer_confirmation))) return err("Đặt lịch: khách chưa xác nhận", "customer_confirmation phải là nguyên văn lời đồng ý trong câu CUỐI của khách. Khách chưa xác nhận ⇒ đọc lại tóm tắt lịch và hỏi.", state);
+      if (!quotedInText(v.data.customer_confirmation, ctx.lastUserText)) return err("Đặt lịch: khách chưa xác nhận", "customer_confirmation phải là nguyên văn lời đồng ý trong câu CUỐI của khách. Khách chưa xác nhận ⇒ đọc lại tóm tắt lịch và hỏi.", state);
       const phone = normalizeCustomerPhone(v.data.phone);
       if (!phone) return err("Đặt lịch: SĐT không hợp lệ", "Số điện thoại chỉ gồm 8–15 chữ số.", state);
       const service = (await sellableCatalog([])).find((c) => c.variantId === v.data.variant_id);
@@ -565,7 +567,7 @@ export async function executeTool(name: string, rawInput: unknown, ctx: ToolCont
         const r = ctx.returning;
         if (!r) return err("Lưu khách: không có địa chỉ cũ", "Shop không có địa chỉ cũ của khách này — hỏi khách SĐT và địa chỉ.", state);
         const quote = z.string().trim().min(2).max(300).safeParse(input.customer_confirmation);
-        if (!quote.success || !foldVi(ctx.lastUserText).includes(foldVi(quote.data))) return err("Lưu khách: khách chưa xác nhận địa chỉ cũ", "customer_confirmation phải là nguyên văn lời khách xác nhận giao về địa chỉ cũ, trong câu CUỐI của khách. Khách chưa xác nhận ⇒ hỏi lại.", state);
+        if (!quote.success || !quotedInText(quote.data, ctx.lastUserText)) return err("Lưu khách: khách chưa xác nhận địa chỉ cũ", "customer_confirmation phải là nguyên văn lời khách xác nhận giao về địa chỉ cũ, trong câu CUỐI của khách. Khách chưa xác nhận ⇒ hỏi lại.", state);
         const typed = typeof input.name === "string" ? input.name.trim() : "";
         fields = { name: typed.length >= 2 ? typed : r.name, phone: r.phone, address: r.address, province: r.province };
         // Mức PHONE — và THREAD mà chính nó đã là địa chỉ máy điền (`returning.ts` trả về mức PHONE) — đều là dữ liệu chủ SĐT.
@@ -645,7 +647,7 @@ export async function executeTool(name: string, rawInput: unknown, ctx: ToolCont
       }
       if (!state.draft) return err("Chốt: chưa có đơn nháp", "Chưa có đơn nháp để chốt.", state);
       if (state.confirmed) return ok("Đơn đã chốt từ trước", { already_confirmed: true, order_code: state.confirmed.orderId ? `#${manualOrderShortCode(state.confirmed.orderId)}` : "(thử)" }, state);
-      if (!quote.success || !foldVi(ctx.lastUserText).includes(foldVi(quote.data))) {
+      if (!quote.success || !quotedInText(quote.data, ctx.lastUserText)) {
         return err("Chốt: chưa có lời xác nhận của khách", "customer_confirmation phải là nguyên văn lời đồng ý trong câu CUỐI của khách. Khách chưa xác nhận ⇒ đọc lại tóm tắt và hỏi khách có đồng ý không.", state);
       }
       const d = state.draft;
@@ -672,6 +674,8 @@ export async function executeTool(name: string, rawInput: unknown, ctx: ToolCont
         const r = await updateOrderAsAgent(ctx.agent, d.orderId, payload, agentOrderOpts(ctx, state, false));
         if (!r.ok) return err("Chốt: lỗi", failureText(r), state);
         orderId = r.id;
+        // Khách từng báo huỷ rồi nay đồng ý lại ⇒ một dòng vết «khách xác nhận lại» trên đơn; cờ cần kiểm GIỮ NGUYÊN (người quyết).
+        if (state.declined) await noteCustomerReconfirmAsAgent(ctx.agent, r.id, quote.success ? ctx.lastUserText.trim().slice(0, 300) || null : null, now);
       }
       state.confirmed = { orderId, simulated, total: priced.total ?? priced.subtotal, at: new Date().toISOString(), ...(ctx.promptStamp ? { stamp: ctx.promptStamp } : {}) };
       state.stage = "DONE";
@@ -733,7 +737,22 @@ export async function executeTool(name: string, rawInput: unknown, ctx: ToolCont
       const reason = z.string().trim().min(2).max(300).safeParse(input.reason);
       state.declined = { reason: reason.success ? reason.data : "Khách từ chối", at: new Date().toISOString() };
       state.stage = "DECLINED";
-      return ok("Khách từ chối — thôi follow-up", { declined: true }, state);
+      // KHÁCH HUỶ SAU KHI ĐÃ CÓ ĐƠN (chủ shop 08/10/2026): KHÔNG tự huỷ — ghi chú «khách huỷ» (nguyên văn câu khách + mốc) lên đơn
+      // của CHÍNH hội thoại (nháp / đã chốt của lượt mua hiện tại) và gắn cờ CẦN NGƯỜI KIỂM; người huỷ, cứu được thì xác nhận lại.
+      // Khung thử không ghi gì. Đơn của các lượt mua TRƯỚC (`pastOrders`) không bị gắn — câu «thôi không lấy» nói về lần mua này.
+      const ids = simulated ? [] : [...new Set([state.confirmed?.orderId, state.draft?.orderId].filter((x): x is string => typeof x === "string" && x.length > 0))];
+      const flagged: string[] = [];
+      const quote = ctx.lastUserText.trim().slice(0, 300) || null;
+      for (const id of ids) {
+        const r = await flagOrderForReviewAsAgent(ctx.agent, id, { code: "CUSTOMER_CANCELLED", note: state.declined.reason, quote }, now);
+        if (!r.ok || !r.flagged) continue;
+        flagged.push(`#${manualOrderShortCode(id)}`);
+        // Đơn ĐÃ XÁC NHẬN (đang giữ hàng, nhóm vận hành đã nhận tin đơn) mà khách báo huỷ ⇒ báo người NGAY qua đường chuyển người có
+        // sẵn (chuông ERP + hàng đợi; nhóm chat nếu shop bật) — đơn nháp thì cờ trên hàng đợi «Cần kiểm» là đủ (review #675, L1).
+        if (r.stage === "CONFIRMED") await notifySalesChatHandoff(ctx.conversationId, `Khách báo huỷ đơn ĐÃ XÁC NHẬN #${manualOrderShortCode(id)}${quote ? ` — «${quote.slice(0, 120)}»` : ""}`, state.customer, now).catch(() => undefined);
+      }
+      if (!flagged.length) return ok("Khách từ chối — thôi follow-up", { declined: true }, state);
+      return ok(`Khách huỷ — đơn ${flagged.join(", ")} chờ nhân viên kiểm`, { declined: true, order_flagged: flagged, note: "Đơn KHÔNG bị huỷ tự động — đã ghi chú «khách huỷ» để nhân viên kiểm. Nói ngắn với khách: shop đã ghi nhận, không hứa đã huỷ đơn." }, state);
     }
     case "handoff_to_human": {
       const reason = z.string().trim().min(2).max(300).safeParse(input.reason);

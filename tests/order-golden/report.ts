@@ -23,20 +23,23 @@ export type CompactCase = {
   confirmedEvents: number[];
   /** Trường sai của đơn được chấm; `null` = ca không chấm trường (không nhãn đơn hoặc không đơn). */
   wrong: string[] | null;
+  /** Lý do CẦN NGƯỜI KIỂM đang mở của từng đơn (rỗng = không cờ). */
+  review: string[][];
   status: string;
   toolErrors: string[];
 };
-export type CompactRun = { metrics: Record<OrderGoldenMetric, [number, number]>; falseAutoConfirmWithOrder: [number, number]; critical: { metric: string; cases: string[] }[]; cases: Record<string, CompactCase> };
+export type CompactRun = { metrics: Record<OrderGoldenMetric, [number, number]>; falseAutoConfirmWithOrder: [number, number]; reviewFlagSensitivity: [number, number]; critical: { metric: string; cases: string[] }[]; cases: Record<string, CompactCase> };
 export type CompactBaseline = { datasetCases: number; variants: Record<OrderGoldenVariant, CompactRun> };
 
 export function compactRun(run: OrderGoldenRun): CompactRun {
   const metrics = Object.fromEntries(ORDER_GOLDEN_METRICS.map((m) => [m, [run.summary.metrics[m].numerator, run.summary.metrics[m].denominator]])) as Record<OrderGoldenMetric, [number, number]>;
   const cases: Record<string, CompactCase> = {};
   for (const c of run.cases) {
-    cases[c.key] = { orders: c.observation.orders.map((o) => o.stage), confirmedEvents: c.observation.orders.map((o) => o.confirmedEvents), wrong: c.score.fields ? c.score.fields.wrong : null, status: c.status, toolErrors: c.toolErrors };
+    cases[c.key] = { orders: c.observation.orders.map((o) => o.stage), confirmedEvents: c.observation.orders.map((o) => o.confirmedEvents), wrong: c.score.fields ? c.score.fields.wrong : null, review: c.observation.orders.map((o) => [...o.review]), status: c.status, toolErrors: c.toolErrors };
   }
   const fo = run.summary.falseAutoConfirmWithOrder;
-  return { metrics, falseAutoConfirmWithOrder: [fo.numerator, fo.denominator], critical: run.summary.critical.map((x) => ({ metric: x.metric, cases: x.cases })), cases };
+  const rs = run.summary.reviewFlagSensitivity;
+  return { metrics, falseAutoConfirmWithOrder: [fo.numerator, fo.denominator], reviewFlagSensitivity: [rs.numerator, rs.denominator], critical: run.summary.critical.map((x) => ({ metric: x.metric, cases: x.cases })), cases };
 }
 
 export function compactBaseline(runs: readonly OrderGoldenRun[]): CompactBaseline {
@@ -58,7 +61,7 @@ const cellEscape = (s: string) => s.replace(/\|/g, "\\|");
 
 /** Ô một ca — mọi phán xét đọc từ điểm của bộ đo (`score`), không chép lại luật đơn sống / đã chốt ở đây. */
 function caseCell(c: OrderGoldenCaseRun): string {
-  const orders = c.observation.orders.length ? c.observation.orders.map((o) => `${o.stage}${o.confirmedEvents ? ` (phát order.confirmed ×${o.confirmedEvents})` : ""}`).join(" + ") : "không đơn";
+  const orders = c.observation.orders.length ? c.observation.orders.map((o) => `${o.stage}${o.confirmedEvents ? ` (phát order.confirmed ×${o.confirmedEvents})` : ""}${o.review.length ? ` ⚑ cần kiểm: ${o.review.join(", ")}` : ""}`).join(" + ") : "không đơn";
   const flags = [
     c.score.falseAutoConfirm === true ? "✗ chốt sai" : "",
     c.score.missedConfirm === true ? "✗ bỏ lỡ lời chốt" : "",
@@ -66,6 +69,7 @@ function caseCell(c: OrderGoldenCaseRun): string {
     c.score.missing > 0 ? "✗ thiếu đơn" : "",
     c.score.expected === 0 && c.score.created > 0 ? "✗ đơn không có thật" : "",
     c.score.fields && c.score.fields.wrong.length ? `✗ sai: ${c.score.fields.wrong.join(", ")}` : "",
+    c.score.fields && !c.score.fields.review ? "✗ cờ cần kiểm sai" : "",
   ].filter(Boolean);
   return `${orders} · ${flags.length ? flags.join(" · ") : "✓"}`;
 }
@@ -104,6 +108,7 @@ export function renderBaselineTables(runs: readonly OrderGoldenRun[]): string {
     out.push(`| \`${m}\` — ${info.label} | ${cellEscape(info.definition)} | ${info.better === "UP" ? "↑ cao" : "↓ thấp"} | ${cell(off)} | ${cell(on)} |`);
   }
   out.push("", `\`false_auto_confirm_rate\` bỏ các ca NO_ORDER (chỉ ca CÓ đơn phải người xác minh): TẮT ${fmtRate(off.summary.falseAutoConfirmWithOrder)} · BẬT ${fmtRate(on.summary.falseAutoConfirmWithOrder)}.`);
+  out.push("", `\`review_flag_accuracy\` chỉ trên ca DƯƠNG (nhãn đòi cờ cần người kiểm — độ nhạy): TẮT ${fmtRate(off.summary.reviewFlagSensitivity)} · BẬT ${fmtRate(on.summary.reviewFlagSensitivity)}.`);
   out.push("", "Thành phần địa chỉ (gộp trong `address_component_accuracy`):", "", "| Thành phần | TẮT | BẬT |", "|---|---|---|");
   for (const k of ["province", "ward", "line"] as const) {
     out.push(`| ${k === "province" ? "Tỉnh / thành" : k === "ward" ? "Xã / phường" : "Dòng địa chỉ"} | ${fmtRate(off.summary.addressByComponent[k])} | ${fmtRate(on.summary.addressByComponent[k])} |`);
@@ -124,7 +129,7 @@ export function renderBaselineTables(runs: readonly OrderGoldenRun[]): string {
     if (!a || !z) throw new Error(`thiếu kết quả ca ${c.key}`);
     const label = (v: OrderGoldenVariant) => {
       const l = labelFor(c, v);
-      return `${l.expectedOrders} đơn · ${l.confirm.verdict} (${l.confirm.basis})${l.confirm.dependsOn ? " ⚖" : ""}`;
+      return `${l.expectedOrders} đơn · ${l.confirm.verdict} (${l.confirm.basis})${l.review?.length ? ` + ⚑ ${l.review.join(", ")}` : ""}${l.confirm.dependsOn ? " ⚖" : ""}`;
     };
     out.push(`| \`${c.key}\` | ${ORDER_SCENARIOS[c.scenario]} | ${c.model} | ${label("AUTO_CONFIRM_OFF")} | ${label("AUTO_CONFIRM_ON")} | ${cellEscape(caseCell(a))} | ${cellEscape(caseCell(z))} |`);
   }

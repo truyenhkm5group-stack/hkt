@@ -19,6 +19,7 @@ import { PageRoutesPanel } from "./page-routes";
 import { InboxThreadView } from "./thread-view";
 import { ShellViewportFit } from "@/components/shell-viewport-fit";
 import { isSalesAgentUser } from "@/lib/constants/saas-nav";
+import { manualOrderGate } from "@/lib/records/order-create";
 
 /**
  * Khung hai cột của hộp thư. Ngoài vỏ: ĐÚNG chiều cao cũ (canh cho thanh menu ERP). Trong vỏ app Chốt Đơn: khung tự đo
@@ -153,13 +154,15 @@ export default async function SalesInboxPage({ searchParams }: { searchParams: P
   const loaded = selected ? await loadInboxThread(user, selected) : null;
   const thread = loaded && "thread" in loaded && customerFacing(user.organization) ? { ...loaded, thread: customerInboxThread(loaded.thread) } : loaded;
   const canManage = can(user, "ai_sales:manage");
-  const [list, users, assignees, pack, routes, cooldown] = await Promise.all([
+  const [list, users, assignees, pack, routes, cooldown, orderGate] = await Promise.all([
     listInbox(user, { filter, channel, q, label, page, phone, level, assignee, period, from, to, limit, handler }),
     assignableUsers(user),
     inboxAssignees(user),
     organizationLevelPack(),
     canManage ? listPageRoutes().catch(() => []) : Promise.resolve([]),
     humanCooldownMinutes(),
+    // Nút nhanh «Xác nhận đơn» / «Huỷ đơn» trong panel đơn: CÙNG cổng với sửa đơn tay (`orders:write`, tổ chức không đồng bộ đơn).
+    manualOrderGate(user),
   ]);
   const levels = levelsForPack(pack);
   const advanced = Boolean(channel || label || assignee || period || phone === "NONE");
@@ -368,6 +371,7 @@ export default async function SalesInboxPage({ searchParams }: { searchParams: P
                 users={users}
                 backHref={href({ c: null })}
                 ordersSummary={thread.thread.orders.map((o) => ({ ...o, totalText: formatVND(o.total) }))}
+                canDecideOrders={orderGate.allowed}
               />
             )}
           </section>

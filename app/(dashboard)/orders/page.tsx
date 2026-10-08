@@ -13,7 +13,7 @@ import { StatStrip } from "@/components/stat-tile";
 import { ModuleSyncButton } from "@/components/module-sync-button";
 import { Button } from "@/components/ui/button";
 import { formatNumber, formatVND } from "@/lib/format";
-import { listOrders, orderFacets, orderSummary, ORDER_SORTABLE } from "@/lib/queries/orders";
+import { listOrders, orderFacets, orderNeedsReviewCount, orderSummary, ORDER_SORTABLE } from "@/lib/queries/orders";
 import { FULFILLMENT_BUCKET_LABEL, FULFILLMENT_BUCKET_ORDER } from "@/lib/constants/fulfillment-bucket";
 import { parseListParams, type SearchParams } from "@/lib/search-params";
 import { requireResource } from "@/lib/auth/scope-guard";
@@ -31,13 +31,13 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
   // Phạm vi hẹp hơn thứ dữ liệu này biểu diễn được ⇒ TỪ CHỐI và nói rõ, không cho xem hết.
   if (decision.allow === "NONE") return <ScopeDenied title="Đơn hàng" reason={decision.reason} fix={decision.fix} />;
   const raw = await searchParams;
-  const params = parseListParams(raw, { defaultSort: "insertedAt", filterKeys: ["stage", "source", "carrier", "seller", "payment", "tag", "address", "fulfillment"], sortable: ORDER_SORTABLE, defaultPeriod: "30d" });
+  const params = parseListParams(raw, { defaultSort: "insertedAt", filterKeys: ["stage", "source", "carrier", "seller", "payment", "tag", "address", "fulfillment", "review"], sortable: ORDER_SORTABLE, defaultPeriod: "30d" });
   /*
     Danh sách theo metadata (M9, M10) — CHỈ HIỂN THỊ: thứ tự/ẩn cột có sẵn, cột custom, nhãn / thứ tự /
     ẩn-khỏi-bộ-lọc của `orders.stage`. Truy vấn nghiệp vụ, ORDER_OUTCOME và bộ lọc giữ nguyên — danh sách
     đơn KHÔNG nhận bộ lọc custom mặc định ở Phase 2.
   */
-  const [{ rows, total, pageCount }, facets, summary, meta, stageOptions, copy, createGate] = await Promise.all([listOrders(params), orderFacets(params), orderSummary(params), getListMetadata("order", "default", user), getSystemStatusOptions("order", "stage"), getBrandCopy(user), manualOrderGate(user)]);
+  const [{ rows, total, pageCount }, facets, summary, meta, stageOptions, copy, createGate, needsReview] = await Promise.all([listOrders(params), orderFacets(params), orderSummary(params), getListMetadata("order", "default", user), getSystemStatusOptions("order", "stage"), getBrandCopy(user), manualOrderGate(user), orderNeedsReviewCount(params)]);
   // Phí giao đồng giá: chỉ tổ chức tạo đơn tay + người cấu hình được.
   const deliveryFee = createGate.allowed && can(user, "settings:manage") ? { fee: await loadManualDeliveryFee(), autoConfirm: await loadAutoConfirmComplete() } : null;
   // Tạo / in vận đơn hàng loạt (POS tự chủ): chỉ tổ chức tạo đơn tay + quyền vận đơn + hãng có kết nối đang bật.
@@ -120,12 +120,17 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
           */
           { key: "fulfillment", label: "Hàng đang ở đâu (ĐVVC)", options: FULFILLMENT_BUCKET_ORDER.map((b) => ({ value: b, label: FULFILLMENT_BUCKET_LABEL[b] })) },
           { key: "payment", label: "Thanh toán", options: [{ value: "cod", label: "Thu hộ COD" }, { value: "prepaid", label: "Đã thanh toán trước" }], single: true },
+          /*
+            ĐƠN CẦN NGƯỜI KIỂM (chủ shop 08/10/2026): khách báo huỷ trong hội thoại · máy chốt khi địa chỉ chưa ghép được xã. Máy
+            không tự huỷ / không tự bỏ qua — đơn nằm đây chờ người bấm «Xác nhận đơn» hoặc «Huỷ đơn».
+          */
+          ...(createGate.allowed || needsReview > 0 ? [{ key: "review", label: "Cần kiểm", options: [{ value: "flagged", label: `Cần người kiểm (${formatNumber(needsReview)})` }], single: true }] : []),
           { key: "address", label: "Địa chỉ", options: [{ value: "unnormalized", label: `Chưa chuẩn hoá · không giao được (${formatNumber(summary.unnormalizedAddress)})` }, { value: "normalized", label: "Đã chuẩn hoá" }], single: true },
           ...(facets.sellers.length ? [{ key: "seller", label: "Nhân viên", options: facets.sellers }] : []),
         ]}
         resultLabel={total === summary.orders ? undefined : `${formatNumber(total)} đơn phù hợp`}
       />
-      <OrdersTable rows={rows} pageCount={pageCount} total={total} stageLabels={stageLabels} carrierBulk={carrierBulk} meta={meta ? { listView: meta.schema, customFields: meta.customFields, customValues, userNames } : undefined} />
+      <OrdersTable rows={rows} pageCount={pageCount} total={total} stageLabels={stageLabels} carrierBulk={carrierBulk} canDecide={createGate.allowed} meta={meta ? { listView: meta.schema, customFields: meta.customFields, customValues, userNames } : undefined} />
     </div>
   );
 }

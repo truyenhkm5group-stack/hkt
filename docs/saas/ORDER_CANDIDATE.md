@@ -282,3 +282,20 @@ sales_order_candidate_fields
 3. HSLC có đồng ý để máy hỏi lại khi địa chỉ mơ hồ hoặc SĐT sai đầu số, thay vì chốt luôn không?
 4. Candidate bỏ dở thì đóng (`EXPIRED`) sau bao nhiêu giờ?
 5. Hội thoại thật có nhãn dùng cho Golden v2 được lưu ở đâu (có PII, không được vào kho PUBLIC)?
+
+## 12. Quyết định chủ shop 08/10/2026
+
+Đã chốt, đã có trong mã (`lib/constants/order-review.ts`, cờ CẦN NGƯỜI KIỂM ở `orders.raw.review` của đơn tay):
+
+1. **Công tắc «đơn đủ thông tin = đã xác nhận» CÓ áp cho nháp của bot.** Giữ nguyên hành vi (trả lời câu hỏi 2 ở §11).
+2. **Khách huỷ sau khi đã có đơn (nháp hoặc đã xác nhận) ⇒ máy KHÔNG tự huỷ.** `mark_declined` ghi chú «khách huỷ» (nguyên văn +
+   mốc) lên đơn của chính hội thoại và gắn cờ CẦN NGƯỜI KIỂM. Người huỷ đơn, hoặc cứu được thì xác nhận lại.
+3. **Địa chỉ chưa ghép được xã / phường ⇒ VẪN chốt, kèm cờ CẦN NGƯỜI KIỂM** và lý do; người sửa xã rồi xác nhận lại.
+4. **Nút nhanh «Xác nhận đơn» / «Huỷ đơn»** ở hộp thư (panel đơn của hội thoại) và quản lý đơn (danh sách + chi tiết), lọc
+   «Cần kiểm» ở danh sách đơn. Nút đi qua đúng server action / lõi đổi trạng thái đơn đang có.
+
+Hệ quả cho luật 04/10 (ghi ở đây, không sửa đặc tả `docs/business-rules/ORDER_OUTCOME.md` — đặc tả do chủ shop giữ):
+
+- Công tắc **không nâng** đơn `NEW` đang mang cờ «khách huỷ» (đúng vế «trừ những đơn huỷ»).
+- Cờ cần kiểm **không đổi `stage` và không đổi `ORDER_OUTCOME`**: đơn `CONFIRMED` mang cờ vẫn là đơn đã xác nhận và vẫn được đếm ở
+  mọi báo cáo như trước cho tới khi người huỷ (`CANCELLED`) — không có phép trừ tạm nào theo cờ.
