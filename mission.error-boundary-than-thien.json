@@ -3,7 +3,7 @@
   "mission_id": "error-boundary-than-thien",
   "title": "Lỗi thân thiện: error boundary dashboard + gốc không in error.message / DATABASE_URL, chỉ mã tham chiếu, lối ra tải cả trang",
   "business_goal": "",
-  "status": "RUNNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-pr-c",
@@ -23,11 +23,26 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-08T15:43:57.021Z",
-  "updated_at": "2026-10-08T15:43:57.021Z",
-  "last_heartbeat": "2026-10-08T15:43:57.021Z",
+  "updated_at": "2026-10-08T20:14:52.909Z",
+  "last_heartbeat": "2026-10-08T20:14:52.909Z",
   "definition_of_done": [],
   "intake": {
     "verdict": "MISSING",
     "evidence": []
+  },
+  "handoff": {
+    "branch": "claude/error-boundary-than-thien",
+    "sha": "69d576e18ee90cff3114f561339d8b7793e94644",
+    "at": "2026-10-08T20:14:52.909Z",
+    "actor": "DESKTOP-56TH98Y:wt-pr-c",
+    "title": "Lỗi thân thiện: error boundary dashboard + gốc không in error.message / DATABASE_URL, chỉ mã tham chiếu, lối ra tải cả trang",
+    "summary": "Màn lỗi dashboard + gốc không in error.message / «kiểm tra DATABASE_URL» cho khách: ba câu dễ hiểu, chỉ mã tham chiếu (digest), lối ra <a href=/> tải cả trang (cùng mẫu app/module-disabled/error.tsx của #700).",
+    "tests": [
+      "npx tsc --noEmit: 0",
+      "npx eslint: 0",
+      "npm test: TẤT CẢ KIỂM THỬ ĐẠT (Windows, base 0be392ba)",
+      "tests/error-boundary.test.ts: mới, nối cuối sync-fixtures",
+      "smoke-coverage + loading-ux-contract: đạt (ERROR_MARKER giữ nguyên)"
+    ]
   }
 }
