@@ -3,7 +3,7 @@
   "mission_id": "erp-a11y-bo-cuc",
   "title": "ERP: màn «không tìm thấy» có h1; công tắc / ô số / nút biểu tượng có tên cho trình đọc màn hình (/work/settings · /alerts · /inventory/shortage); /payroll không tràn ngang 390 px",
   "business_goal": "",
-  "status": "RUNNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-pr-g",
@@ -30,11 +30,25 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-08T17:07:59.589Z",
-  "updated_at": "2026-10-08T17:07:59.589Z",
-  "last_heartbeat": "2026-10-08T17:07:59.589Z",
+  "updated_at": "2026-10-08T21:30:03.306Z",
+  "last_heartbeat": "2026-10-08T21:30:03.306Z",
   "definition_of_done": [],
   "intake": {
     "verdict": "MISSING",
     "evidence": []
+  },
+  "handoff": {
+    "branch": "claude/erp-a11y-bo-cuc",
+    "sha": "8276b8c2d7b3464e1af69476daadfd7e00531f5d",
+    "at": "2026-10-08T21:30:03.306Z",
+    "actor": "DESKTOP-56TH98Y:wt-pr-g",
+    "title": "ERP: màn «không tìm thấy» có h1; công tắc / ô số / nút biểu tượng có tên cho trình đọc màn hình (/work/settings · /alerts · /inventory/shortage); /payroll không tràn ngang 390 px",
+    "summary": "ERP: màn «không tìm thấy» có h1 (gốc của «11 trang thiếu h1»); 10+1 ô số /alerts nối nhãn; công tắc + ô ngưỡng /work/settings có tên; nút sao chép /inventory/shortage có tên; /payroll không tràn ngang 390 px. Không đổi hành vi / dữ liệu / quyền.",
+    "tests": [
+      "npx tsc --noEmit: 0",
+      "npx eslint: 0",
+      "npm test: TẤT CẢ KIỂM THỬ ĐẠT (Windows, base 0be392ba)",
+      "tests/erp-a11y.test.ts: mới, nối cuối sync-fixtures"
+    ]
   }
 }
