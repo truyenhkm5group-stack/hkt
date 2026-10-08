@@ -30,7 +30,8 @@ liệu thì không.
     phút 27 `base-cron` (bản nền mỗi đêm SAU bản đêm) · phút 8/23/38/53 `push-wal` (kho WAL lên `gcrypt:pitr/wal/`).
 - **Giữ:** 7 bản ngày · 4 bản Chủ nhật · 3 bản bấm tay (`GIU_BAN_NGAY` / `GIU_BAN_TUAN` / `GIU_BAN_TAY`).
 - **Ngoài máy:** Google Drive qua remote `gcrypt:` (rclone crypt — Drive chỉ thấy byte mã hoá), cấu hình từ
-  Secrets ở `/root/.config/erp-backup/offsite.env`.
+  Secrets ở `/root/.config/erp-backup/offsite.env`. `gcrypt:` bọc thư mục `gdrive:erp-backup` (gốc `gdrive:` = thư mục
+  chủ shop chọn, Variable `BACKUP_GDRIVE_FOLDER_ID`). Bản quá hạn trên Drive bị xoá HẲN, không qua thùng rác — §2.3.
 - **Kiểm:** kích thước > 0, `pg_restore --list` đọc lại được, mục lục phải có dữ liệu `orders` + `shipments`; ops
   `restore-drill` nạp bản mới nhất vào container tạm rồi đếm 14 bảng then chốt. CSDL tổ chức: ops `restore-drill-org`
   (tay, và tự động mỗi Chủ nhật — §7).
@@ -60,7 +61,8 @@ Hôm nay khoảng hở này CHƯA gây mất gì vì production chưa có tổ c
 
 Không secret mới, không đổi lịch cron, không đổi một byte đường sao lưu của nhà. Toàn bộ phần tổ chức nằm giữa các
 cặp dấu `# >>> TỔ CHỨC KHÁC NHÀ` / `# <<< TỔ CHỨC KHÁC NHÀ` trong `scripts/erp-backup.sh`; `tests/backup.test.ts`
-gỡ các khối đó ra và băm phần còn lại (`BAM_PHAN_NHA` = đúng bản trước Phase 11), rồi chạy `cmd_run` thật với
+gỡ các khối đó ra và băm phần còn lại (`BAM_PHAN_NHA` = bản trước Phase 11 cộng đúng các lần đổi CỐ Ý ghi trong sổ
+ngay trên hằng đó — lần duy nhất tới nay: thùng rác Drive 08/10/2026, §2.3), rồi chạy `cmd_run` thật với
 `docker`/`psql`/`rclone` giả, so trạng thái + tệp + bản ngoài máy của nhà giữa lượt không có và có tổ chức.
 
 | Đề xuất (bản H3, giữ nguyên bên dưới) | Đã làm |
@@ -103,6 +105,49 @@ Hai giới hạn còn lại của BẢN ĐÊM, cố ý (lượt giờ §9.2 bù 
    cấp một tổ chức như thế phải kèm lịch sao lưu riêng — ghi vào checklist cấp tổ chức.
 
 Đổi lịch, thêm nơi lưu, hay thêm tải cho VPS 2 nhân là quyết định của chủ nền tảng (AGENTS.md §7).
+
+### 2.3 Thùng rác Google Drive TÍNH DUNG LƯỢNG — sự cố 403 ngày 08/10/2026
+
+**Sự cố.** Ops `backup` 08/10/2026 18:20: dump CSDL nhà (180 MB) + 8 CSDL tổ chức đạt, kiểm toàn vẹn đạt, PITR chạy;
+riêng `rclone copyto` lên Drive lỗi «Error 403: The user's Drive storage quota has been exceeded» ⇒ trạng thái
+`PARTIAL`, ngoài máy `FAILED`, workflow thoát 1. Bản trên VPS dùng được; **bản ngoài máy mới không lên được.**
+
+**Nguyên nhân (đọc từ mã).** Script CÓ dọn Drive theo tuổi (`rclone delete --min-age`, suy từ `GIU_BAN_*` /
+`GIU_BAN_GIO` / `PITR_GIU_BAN_NEN`). Nhưng rclone với Google Drive mặc định `--drive-use-trash=true`: tệp «đã xoá» chỉ
+nằm trong **thùng rác**, và thùng rác **vẫn tính vào hạn mức** tới khi Google tự xoá (≤ 30 ngày). Mỗi giờ một bản giờ của
+MỖI CSDL tổ chức, mỗi đêm một bản nền PITR, mỗi 15 phút các đoạn WAL — tất cả rơi vào thùng rác và nằm đó một tháng.
+Con số trước / sau đo bằng `backup-status` (dưới đây), không ước lượng ở đây.
+
+**Bản vá (`scripts/erp-backup.sh`, `scripts/erp-pitr.sh`):**
+
+| | Làm gì | Không làm gì |
+|---|---|---|
+| Xoay vòng phía Drive | MỌI `rclone delete` theo tuổi (nhà · tổ chức · bản nền + WAL của PITR) mang `--drive-use-trash=false` — khai MỘT chỗ ở hằng `CO_KHONG_THUNG_RAC` | Không đổi hạn giữ, không đổi tệp nào bị chọn xoá (cùng thư mục, cùng `--min-age`): chỉ đổi «vào thùng rác» thành «xoá hẳn» |
+| Thùng rác CŨ | Lượt `run` (bản đêm + ops `backup`), TRƯỚC bước đẩy: `rclone delete gdrive:erp-backup --drive-trashed-only --drive-use-trash=false` — chỉ tệp đã-xoá nằm dưới đúng thư mục mà `gcrypt:` bọc; in số tệp + dung lượng đã dọn và còn lại. Trần 900 giây (`TRAN_DON_THUNG_RAC_GIAY`): quá thì dọn dở, cảnh báo, lượt sau dọn tiếp — bước đẩy vẫn chạy | **Không bao giờ** `rclone cleanup` / `rclone purge`: đây là Drive CÁ NHÂN của chủ shop, thùng rác chung có thể chứa tệp riêng của họ. Lệnh dọn không thấy tệp đang sống, nên lượt đẩy sau đó có hỏng thì bản cũ ngoài máy vẫn còn |
+| Lá chắn | Chỉ chạy khi cấu hình ĐÚNG là thứ deploy dựng: `BACKUP_OFFSITE_REMOTE=gcrypt:`, crypt bọc đúng `gdrive:erp-backup`, remote kiểu `drive`, có thư mục gốc. Tên rỗng / lạ / lệch ⇒ 0 lời gọi Drive, log nói vì sao (một đường rỗng là GỐC Drive) | Cấu hình tay kiểu cũ (b2, rclone.conf…) không được dọn thùng rác — script không đoán |
+| An toàn của lần đẩy | Đã đúng từ trước và nay có bài kiểm chạy thật khoá lại: mọi nhánh đẩy hỏng `return` TRƯỚC lệnh xoay vòng (nhà, tổ chức, bản nền, WAL) ⇒ đẩy hỏng = 0 lệnh xoá phía Drive | — |
+
+**Đổi lại:** bản quá hạn không còn nằm 30 ngày trong thùng rác làm «lưới an toàn» cho một lệnh xoá nhầm. Lưới ấy
+chính là thứ đã làm đầy Drive; phần bảo vệ còn lại là phép chọn theo TUỔI (chỉ tệp quá hạn giữ) và luật «chỉ dọn sau
+một lượt đẩy thành công». Một tệp chủ shop lỡ bỏ vào thùng rác BÊN TRONG `erp-backup` cũng bị xoá hẳn ở lượt đêm kế
+tiếp — muốn cứu thì khôi phục trên drive.google.com trước lượt đó.
+
+**Đọc dung lượng:** ops `backup-status` (làn ĐỌC, không mã hoá) có khối «Dung lượng Google Drive»:
+
+- `Total · Used · Trashed · Other · Free` của CẢ TÀI KHOẢN Google (`rclone about gdrive: --json`, quy ra MB/GB).
+  `Trashed` là thùng rác (vẫn tính hạn mức); `Other` là Gmail / Google Photos; `—` = Google không trả số (tài khoản
+  không giới hạn), không phải 0. `Free ≤ 0` ⇒ dòng «Drive HẾT CHỖ»: mọi lượt đẩy sẽ lỗi 403.
+- Thư mục sao lưu `gdrive:erp-backup`: số tệp + dung lượng **đang sống** và **trong thùng rác** (`--drive-trashed-only`).
+- Mỗi phép đo có trần 300 giây (`TRAN_DO_DRIVE_GIAY`); hỏng thì in «KHÔNG ĐỌC ĐƯỢC — …» và phần còn lại của status vẫn
+  chạy. Dòng lỗi của rclone in ra đã che ID thư mục gốc; ID thư mục chỉ in ở dạng che (4 ký tự cuối + độ dài).
+- Số hạn mức của Google có thể cập nhật CHẬM sau khi xoá hẳn (phía Google tính lại); số tệp trong thùng rác của thư
+  mục sao lưu thì phản ánh ngay.
+
+**Xác nhận sau deploy (thứ tự):** `backup-status` (đo trước: Used / Trashed, thùng rác của thư mục sao lưu) → `backup`
+(log có `thùng rác Drive: đã xoá hẳn N tệp · X …` TRƯỚC dòng `ngoài máy: đã đẩy …`, rồi `KẾT QUẢ: OK · … · ngoài máy OK`)
+→ `backup-status` (đo sau: thùng rác của thư mục sao lưu ≈ 0, `Free` > 0). Còn `Free ≤ 0` sau khi thùng rác của thư mục
+sao lưu đã rỗng thì phần đầy nằm ngoài thư mục sao lưu (tệp riêng / Gmail / Photos của chủ shop) — việc của chủ shop,
+script không đụng tới.
 
 ## 3. Khôi phục CẤU HÌNH bằng blueprint
 
@@ -320,7 +365,7 @@ ngừng / mở lại ở `/platform`; và nó tăng theo cỡ CSDL (`pg_restore`
 | **RTO** | phần máy đo ở §8.3 (6,3 giây, tổ chức nhỏ); runbook có thời gian từng bước ở §10 | §8.3, §10 |
 | **Nơi lưu** | VPS `/root/backups/orgs/<csdl>/{hourly,daily,weekly,manual}/<csdl>-YYYYmmdd-HHMM.dump` (thư mục 700); Drive `gcrypt:orgs/<csdl>/{hourly,daily,weekly,manual}/` (rclone crypt — Drive chỉ thấy byte mã hoá) | `THU_MUC_TO_CHUC`, `REMOTE_CRYPT` |
 | **Giữ trên VPS** | 48 bản giờ · 7 bản ngày · 4 bản Chủ nhật · 3 bản bấm tay, đếm RIÊNG theo tiền tố từng CSDL | `GIU_BAN_GIO=48`, `GIU_BAN_NGAY=7`, `GIU_BAN_TUAN=4`, `GIU_BAN_TAY=3` |
-| **Giữ trên Drive** | xoá theo tuổi: `hourly` > 49 giờ, `daily` > 8 ngày, `weekly` > 29 ngày, `manual` > 8 ngày | `rclone delete --min-age` trong `erp-backup.sh` |
+| **Giữ trên Drive** | xoá HẲN theo tuổi (không qua thùng rác Drive — §2.3): `hourly` > 49 giờ, `daily` > 8 ngày, `weekly` > 29 ngày, `manual` > 8 ngày | `rclone delete --min-age … "$CO_KHONG_THUNG_RAC"` trong `erp-backup.sh` |
 
 ### 8.5 Quy trình khôi phục từng bước
 
@@ -388,7 +433,8 @@ production.»
   `last-run.json` / `last-success.json` / `daily-done` của nhà — phần của nhà trong `scripts/erp-backup.sh` vẫn đúng băm
   `BAM_PHAN_NHA`.
 - **Thư mục:** `/root/backups/orgs/<csdl>/hourly/<csdl>-YYYYmmdd-HHMM.dump`, giữ 48 bản (2 ngày); Drive
-  `gcrypt:orgs/<csdl>/hourly/`, xoá theo tuổi > 49 giờ (chỉ dọn `hourly/` — không 72 lượt gọi Drive vô ích mỗi ngày).
+  `gcrypt:orgs/<csdl>/hourly/`, xoá HẲN theo tuổi > 49 giờ (chỉ dọn `hourly/` — không 72 lượt gọi Drive vô ích mỗi
+  ngày; không qua thùng rác — §2.3).
   Lỗi đẩy Drive KHÔNG xoá bản cục bộ: trạng thái `PARTIAL`, thoát 1.
 - **Không chạy chồng:** cùng ổ khoá với bản đêm / ops / deploy. FD 7 KHÔNG chờ — bận ⇒ bỏ lượt, thoát 0, giờ sau làm
   lại; FD 8 / FD 9 chờ tối đa 10 phút (`TRAN_CHO_KHOA_GIO_GIAY`) để không treo sang lượt sau. Trong khung 02:00–05:59 mà

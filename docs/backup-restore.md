@@ -155,17 +155,20 @@ từ chối kèm cảnh báo. Log không bao giờ in giá trị, chỉ in độ
 
 **Bước 4 — chạy thử:** *Actions* → **Vận hành ERP trên VPS** → `backup`. Log phải có
 `ngoài máy: đã đẩy erp-…dump (… byte) → gcrypt:…/manual/` và `KẾT QUẢ: OK · … · ngoài máy OK`. Rồi
-chạy `backup-status`: mục *Ngoài máy* liệt kê bản trên Drive (tên đã giải mã, kèm kích thước). Trang
+chạy `backup-status`: mục *Ngoài máy* liệt kê bản trên Drive (tên đã giải mã, kèm kích thước) và khối
+*Dung lượng Google Drive* (hạn mức cả tài khoản + thư mục sao lưu, sống / thùng rác). Trang
 **Kết nối dữ liệu → Sao lưu dữ liệu** hết cảnh báo `CHƯA CÓ BẢN SAO NGOÀI MÁY` ngay sau lượt thành
 công đầu tiên (nó đọc `offsite.state` của bản thành công gần nhất). Trên Google Drive sẽ thấy thư mục
 `erp-backup` trong thư mục đã chọn, bên trong là các thư mục/tệp tên ngẫu nhiên — đó là đúng.
 
 **Cần biết về Google Drive:**
 
-- **Dung lượng:** ~11 bản đang giữ (7 ngày + 4 tuần; bản tay giữ ≤ 8 ngày) × ~70 MB ≈ 0,8 GB. Tệp bị
-  dọn đi vào **thùng rác** của Drive và Drive tự xoá hẳn sau 30 ngày, nên thực tế chiếm thêm tới
-  ~30 bản ngày trong thùng rác (≈ 2–3 GB). Vẫn nằm trong 15 GB miễn phí; thùng rác là lưới an toàn khi
-  một lệnh xoá sai.
+- **Dung lượng — thùng rác Drive TÍNH vào hạn mức.** Từ 08/10/2026 (sự cố 403 storageQuotaExceeded,
+  `docs/platform/backup-recovery.md` §2.3) bản quá hạn trên Drive bị **xoá hẳn**, không qua thùng rác: trước đó
+  mỗi lệnh dọn chỉ đưa tệp vào thùng rác, nơi chúng vẫn chiếm chỗ tới 30 ngày — và bản giờ của CSDL tổ chức, bản
+  nền + WAL của PITR làm đầy 15 GB miễn phí. Mỗi lượt `backup` / bản đêm còn dọn thùng rác **chỉ của thư mục
+  `erp-backup`** trước khi đẩy (không bao giờ `rclone cleanup` cả Drive — thùng rác chung là của chủ shop). Số
+  thật — Total · Used · Trashed · Other · Free và thư mục sao lưu (sống / thùng rác) — đọc ở `backup-status`.
 - **Giới hạn tốc độ:** token lấy bằng client ID mặc định của rclone — dùng chung với mọi người dùng
   rclone trên thế giới, nên thỉnh thoảng Google trả `rateLimitExceeded`. rclone tự thử lại; lượt nào
   vẫn hỏng thì ghi `ngoài máy FAILED` (ERP báo vàng) và đêm sau thử lại. Hỏng thường xuyên thì tạo
@@ -177,7 +180,7 @@ công đầu tiên (nó đọc `offsite.state` của bản thành công gần nh
   đọc các bản cũ.
 
 Script chỉ `rclone copyto` (không bao giờ `rclone sync` — sync sẽ xoá bản ngoài máy khi bản trên máy
-mất, đúng thứ bản ngoài máy sinh ra để giữ), đọc lại kích thước ở đầu kia, rồi dọn bản cũ theo tuổi
+mất, đúng thứ bản ngoài máy sinh ra để giữ), đọc lại kích thước ở đầu kia, rồi xoá HẲN bản cũ theo tuổi
 suy từ `GIU_BAN_*` — và chỉ dọn sau một lượt đẩy thành công.
 
 Cấu hình tay kiểu cũ (`BACKUP_OFFSITE_REMOTE` + `RCLONE_CONFIG_*` trong `/root/erp/.env`, hoặc

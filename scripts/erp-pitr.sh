@@ -152,8 +152,9 @@ day_ban_nen_ngoai_may() { # $1=tên bản nền
   done
   rm -f "$tep_loi"
   PITR_OFFSITE_STATE="OK"
-  # Dọn theo TUỔI: bản nền một đêm một bản, giữ PITR_GIU_BAN_NEN bản + 2 ngày đệm.
-  timeout 900 rclone delete "$(noi_duong "$remote" pitr/base)" --min-age "$((PITR_GIU_BAN_NEN + 2))d" 2>/dev/null || true
+  # Dọn theo TUỔI: bản nền một đêm một bản, giữ PITR_GIU_BAN_NEN bản + 2 ngày đệm. Xoá HẲN ("$CO_KHONG_THUNG_RAC" của
+  # erp-backup.sh): bản nền vào thùng rác Google Drive vẫn tính dung lượng tới 30 ngày (sự cố quota 08/10/2026).
+  timeout 900 rclone delete "$(noi_duong "$remote" pitr/base)" --min-age "$((PITR_GIU_BAN_NEN + 2))d" "$CO_KHONG_THUNG_RAC" 2>/dev/null || true
   timeout 900 rclone rmdirs "$(noi_duong "$remote" pitr/base)" --leave-root 2>/dev/null || true
   return 0
 }
@@ -195,7 +196,9 @@ cmd_push_wal() {
   fi
   rm -f "$tep_loi"
   ghi_trang_thai_ngoai_may OK "" "$(bay_gio_utc)"
-  timeout 900 rclone delete "$(noi_duong "$remote" pitr/wal)" --min-age "$((PITR_GIU_BAN_NEN + 2))d" 2>/dev/null || true
+  # Chỉ sau lượt đẩy thành công (nhánh hỏng `return 1` ở trên), và xoá HẲN — đoạn WAL mỗi 15 phút vào thùng rác Drive là
+  # một trong những thứ đã làm đầy hạn mức (08/10/2026).
+  timeout 900 rclone delete "$(noi_duong "$remote" pitr/wal)" --min-age "$((PITR_GIU_BAN_NEN + 2))d" "$CO_KHONG_THUNG_RAC" 2>/dev/null || true
   return 0
 }
 

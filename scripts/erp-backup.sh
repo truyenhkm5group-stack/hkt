@@ -49,6 +49,12 @@ TOI_THIEU_UOC_TINH_MB=512 # lần đầu chưa có bản trước để ước l
 HE_SO_UOC_TINH=2          # bản mới ước = 2 × bản gần nhất (CSDL chỉ lớn dần)
 TRAN_CHO_KHOA_GIAY=1800   # cùng trần với thao tác GHI của ops — deploy dài nhất vẫn nằm gọn trong đó
 TRAN_LENH_GIAY=3600       # pg_dump / tar / rclone treo quá 1 giờ thì dừng hẳn, không treo cả đêm
+TRAN_DO_DRIVE_GIAY=300    # một phép ĐO Google Drive (rclone about / size) — quá thì nói CHƯA ĐO ĐƯỢC, không treo lượt
+TRAN_DON_THUNG_RAC_GIAY=900 # lệnh dọn thùng rác của thư mục sao lưu (cùng trần các lệnh dọn theo tuổi) — quá thì dọn dở, lượt sau dọn tiếp
+# Xoay vòng phía Drive xoá HẲN, không qua thùng rác: rclone với Google Drive mặc định `--drive-use-trash=true`, và thùng
+# rác VẪN tính vào hạn mức tới khi Google tự xoá (≤ 30 ngày) — sự cố 403 storageQuotaExceeded 08/10/2026, xem khối
+# THÙNG RÁC GOOGLE DRIVE. Khai ĐÚNG MỘT chỗ; mọi `rclone delete` phía ngoài máy đọc nó. Remote không phải Drive bỏ qua cờ.
+CO_KHONG_THUNG_RAC="--drive-use-trash=false"
 RAM_TOI_THIEU_DIEN_TAP_MB=700
 BO_NHO_DIEN_TAP=512m      # container diễn tập: VPS chỉ ~1,9 GB và đang phục vụ người dùng thật
 BANG_DIEN_TAP="orders order_items shipments shipment_events expenses users customers products product_variants cod_statement_lines bank_transactions stock_receipts payroll_periods sync_runs"
@@ -363,12 +369,234 @@ day_ngoai_may() { # $1=thư mục con $2...=tệp cục bộ
   rm -f "$STATUS_DIR/.rclone.err"
   OFFSITE_STATE="OK"
   OFFSITE_REASON=""
-  # Dọn theo TUỔI, suy từ đúng hằng số giữ lại ở trên (+1 ngày đệm).
-  # Google Drive: tệp xoá đi vào THÙNG RÁC (Drive tự dọn sau 30 ngày) — một lệnh xoá nhầm vẫn cứu được,
-  # đổi lại thùng rác chiếm thêm dung lượng (docs/backup-restore.md mục 5 có con số).
-  timeout 900 rclone delete "$(noi_duong "$remote" daily)" --min-age "$((GIU_BAN_NGAY + 1))d" 2>/dev/null || true
-  timeout 900 rclone delete "$(noi_duong "$remote" weekly)" --min-age "$((GIU_BAN_TUAN * 7 + 1))d" 2>/dev/null || true
-  timeout 900 rclone delete "$(noi_duong "$remote" manual)" --min-age "$((GIU_BAN_NGAY + 1))d" 2>/dev/null || true
+  # Dọn theo TUỔI, suy từ đúng hằng số giữ lại ở trên (+1 ngày đệm). Chỉ tới được đây khi MỌI tệp của lượt đã lên đầu
+  # kia và đọc lại đúng kích thước — mọi nhánh hỏng ở trên `return 0` trước: đẩy hỏng thì bản cũ ngoài máy KHÔNG bị đụng.
+  # Xoá HẲN ("$CO_KHONG_THUNG_RAC"): thùng rác Google Drive vẫn tính dung lượng tới 30 ngày và đã làm đầy Drive
+  # (08/10/2026, khối THÙNG RÁC GOOGLE DRIVE). Tệp bị chọn không đổi — vẫn đúng --min-age dưới đây.
+  timeout 900 rclone delete "$(noi_duong "$remote" daily)" --min-age "$((GIU_BAN_NGAY + 1))d" "$CO_KHONG_THUNG_RAC" 2>/dev/null || true
+  timeout 900 rclone delete "$(noi_duong "$remote" weekly)" --min-age "$((GIU_BAN_TUAN * 7 + 1))d" "$CO_KHONG_THUNG_RAC" 2>/dev/null || true
+  timeout 900 rclone delete "$(noi_duong "$remote" manual)" --min-age "$((GIU_BAN_NGAY + 1))d" "$CO_KHONG_THUNG_RAC" 2>/dev/null || true
+}
+
+# ═══════════════ THÙNG RÁC GOOGLE DRIVE — ĐO DUNG LƯỢNG · DỌN THÙNG RÁC CỦA THƯ MỤC SAO LƯU ═══════════════
+#
+# SỰ CỐ 08/10/2026: ops `backup` dump + kiểm toàn vẹn ĐẠT trên VPS, nhưng `rclone copyto` lên Drive lỗi «Error 403: The
+# user's Drive storage quota has been exceeded» — bản ngoài máy mới không lên được. Chính phép xoay vòng gây ra: rclone
+# với Google Drive mặc định `--drive-use-trash=true`, nên mỗi `rclone delete` theo tuổi chỉ đưa tệp vào THÙNG RÁC, và
+# thùng rác VẪN tính vào hạn mức tới khi Google tự xoá (≤ 30 ngày). Bản giờ của từng CSDL khác nhà, bản nền + WAL của
+# PITR (scripts/erp-pitr.sh) rơi vào đó mỗi giờ / mỗi 15 phút.
+#
+# LUẬT CỦA KHỐI:
+#  · Xoay vòng xoá HẲN: mọi `rclone delete` phía ngoài máy mang "$CO_KHONG_THUNG_RAC" (khai một chỗ ở đầu tệp). Tệp bị
+#    chọn KHÔNG đổi — vẫn đúng `--min-age` suy từ hằng số giữ; chỉ đổi «vào thùng rác» thành «xoá hẳn».
+#  · Thùng rác CŨ (xoay vòng trước bản vá để lại) được dọn ở mỗi lượt `run`, TRƯỚC bước đẩy — giải phóng chỗ cho bản
+#    mới — và CHỈ dưới đúng thư mục mà crypt bọc ($REMOTE_DRIVE:$THU_MUC_TREN_DRIVE). Tệp đã-xoá ở đó đều do xoay vòng
+#    xoá, tức đã quá hạn giữ; Google cũng sẽ tự xoá chúng. Lệnh dọn chỉ THẤY tệp trong thùng rác (`--drive-trashed-only`):
+#    bản đang sống không bao giờ bị chạm, nên lượt đẩy sau đó có hỏng thì bản cũ ngoài máy vẫn còn nguyên.
+#  · KHÔNG BAO GIỜ `rclone cleanup` / `rclone purge`: đây là Drive CÁ NHÂN của chủ shop — thùng rác chung có thể chứa tệp
+#    riêng của họ (tests/backup.test.ts quét mã nguồn).
+#  · LÁ CHẮN: đường đích chỉ được dựng khi cấu hình ĐÚNG là thứ configure-offsite dựng (BACKUP_OFFSITE_REMOTE là crypt,
+#    crypt bọc đúng $REMOTE_DRIVE:$THU_MUC_TREN_DRIVE, remote kiểu drive, có thư mục gốc). Tên rỗng / lạ / lệch ⇒ KHÔNG
+#    một lời gọi Drive nào, và nói rõ vì sao — một đường rỗng là GỐC Drive.
+#  · Mọi phép đo có trần (TRAN_DO_DRIVE_GIAY); hỏng ⇒ in CHƯA ĐO ĐƯỢC kèm lý do, không làm đổ lượt sao lưu hay phần còn
+#    lại của `status`. Dòng lỗi rclone in ra đã che ID thư mục gốc (log ops của kho PUBLIC). Phần của `status` CHỈ ĐỌC.
+DRIVE_SAO_LUU=""; DRIVE_LY_DO=""; DO_RA=""; DO_LOI=""
+
+# Đường thư mục sao lưu trên Drive — ĐÚNG thứ crypt bọc. Đặt DRIVE_SAO_LUU khi mọi điều kiện đúng; không thì đặt
+# DRIVE_LY_DO và trả 1. Chuỗi rỗng / ký tự lạ kiểm TRƯỚC mọi thứ khác (và trước mọi phép thế gián tiếp `${!…}`).
+xac_dinh_drive_sao_luu() {
+  local goc bien_kieu bien_boc bien_goc
+  DRIVE_SAO_LUU=""; DRIVE_LY_DO=""
+  if [ -z "$REMOTE_DRIVE" ] || [ -z "$REMOTE_CRYPT" ] || [ -z "$THU_MUC_TREN_DRIVE" ]; then
+    DRIVE_LY_DO="tên remote hoặc thư mục sao lưu trên Drive RỖNG — đường đích sẽ là GỐC Drive; không gọi Drive."
+    return 1
+  fi
+  if ! [[ "$REMOTE_DRIVE" =~ ^[a-z][a-z0-9_]*$ ]] || ! [[ "$REMOTE_CRYPT" =~ ^[a-z][a-z0-9_]*$ ]] \
+    || ! [[ "$THU_MUC_TREN_DRIVE" =~ ^[A-Za-z0-9][A-Za-z0-9_-]*$ ]]; then
+    DRIVE_LY_DO="tên remote / thư mục sao lưu trên Drive có ký tự lạ (chỉ nhận chữ, số, - và _; không /, không ..) — không gọi Drive."
+    return 1
+  fi
+  goc="$REMOTE_DRIVE:$THU_MUC_TREN_DRIVE"
+  bien_kieu="RCLONE_CONFIG_${REMOTE_DRIVE^^}_TYPE"
+  bien_boc="RCLONE_CONFIG_${REMOTE_CRYPT^^}_REMOTE"
+  bien_goc="RCLONE_CONFIG_${REMOTE_DRIVE^^}_ROOT_FOLDER_ID"
+  if [ -z "${BACKUP_OFFSITE_REMOTE:-}" ]; then
+    DRIVE_LY_DO="chưa khai BACKUP_OFFSITE_REMOTE — chưa có nơi lưu ngoài máy."
+  elif [ "$BACKUP_OFFSITE_REMOTE" != "$REMOTE_CRYPT:" ]; then
+    DRIVE_LY_DO="nơi lưu ngoài máy không phải $REMOTE_CRYPT: (Google Drive + crypt do deploy dựng) — không biết thùng rác nào là của sao lưu."
+  elif [ "${!bien_kieu:-}" != "drive" ]; then
+    DRIVE_LY_DO="remote $REMOTE_DRIVE: không phải Google Drive ($bien_kieu khác drive)."
+  elif [ "${!bien_boc:-}" != "$goc" ]; then
+    DRIVE_LY_DO="crypt $REMOTE_CRYPT: không bọc đúng $goc ($bien_boc lệch) — không chắc thư mục sao lưu nằm đâu."
+  elif [ -z "${!bien_goc:-}" ]; then
+    DRIVE_LY_DO="chưa khai thư mục gốc Drive ($bien_goc) — $REMOTE_DRIVE: sẽ là gốc My Drive."
+  elif ! command -v rclone >/dev/null 2>&1; then
+    DRIVE_LY_DO="máy chưa cài rclone."
+  else
+    DRIVE_SAO_LUU="$goc"
+    return 0
+  fi
+  return 1
+}
+
+# Dòng lỗi CUỐI của rclone, đã che ID thư mục gốc Drive — lỗi 404 của Google in nguyên ID, và log ops của kho PUBLIC.
+dong_loi_rclone() { # $1=tệp lỗi
+  local d id="" bien=""
+  d="$(tail -n 1 "$1" 2>/dev/null || true)"
+  if [[ "$REMOTE_DRIVE" =~ ^[a-z][a-z0-9_]*$ ]]; then bien="RCLONE_CONFIG_${REMOTE_DRIVE^^}_ROOT_FOLDER_ID"; id="${!bien:-}"; fi
+  [ -z "$id" ] || d="${d//"$id"/<thư mục gốc>}"
+  printf '%s' "${d:-rclone không in lý do}"
+}
+
+# MỘT phép đo rclone, có trần thời gian. Đặt DO_RA (stdout) khi thành công; hỏng ⇒ DO_LOI nói vì sao (quá giờ, hoặc dòng
+# lỗi cuối đã che ID) và trả 1. Gọi TRỰC TIẾP, không trong `$(…)` — tiến trình con không trả được hai biến về.
+do_luong_drive() { # $@ = tham số rclone
+  local tep_loi="" ma=0
+  DO_RA=""; DO_LOI=""
+  if ! tep_loi="$(mktemp 2>/dev/null)"; then DO_LOI="không tạo được tệp tạm"; return 1; fi
+  DO_RA="$(timeout "$TRAN_DO_DRIVE_GIAY" rclone "$@" 2>"$tep_loi")" || ma=$?
+  if [ "$ma" -eq 124 ]; then
+    DO_LOI="quá ${TRAN_DO_DRIVE_GIAY} giây — CHƯA ĐO ĐƯỢC"
+  elif [ "$ma" -ne 0 ]; then
+    DO_LOI="$(dong_loi_rclone "$tep_loi")"
+  fi
+  rm -f "$tep_loi"
+  if [ "$ma" -ne 0 ]; then DO_RA=""; return 1; fi
+  return 0
+}
+
+# Số nguyên của MỘT khoá trong JSON phẳng rclone in ra (`about --json`, `size --json`), có thể âm (Free của Drive vượt hạn
+# mức). Thiếu khoá ⇒ RỖNG = CHƯA BIẾT (AGENTS.md mục 42): Drive không giới hạn thì rclone bỏ hẳn total / free.
+so_trong_json() { # $1=JSON $2=khoá
+  local m
+  m="$(printf '%s' "$1" | tr -d ' \t\r\n' | grep -o "\"$2\":-\{0,1\}[0-9]\{1,\}" | head -n 1 || true)"
+  printf '%s' "${m#*:}"
+}
+
+# Byte ⇒ chữ đọc được: dưới 1 GB in MB (làm tròn LÊN như mb_cua — 1 KB không in thành 0), từ 1 GB in GB hai chữ số lẻ,
+# dấu phẩy thập phân. Có thể âm. Không phải số ⇒ «—» (CHƯA BIẾT, không in thành 0 — AGENTS.md mục 42).
+doc_byte() { # $1=byte
+  local b="${1:-}" dau="" x
+  case "$b" in -*) dau="-"; b="${b#-}" ;; esac
+  case "$b" in '' | *[!0-9]*) printf '—'; return 0 ;; esac
+  b=$((10#$b))
+  [ "$b" -gt 0 ] || dau=""
+  if [ "$b" -lt 1073741824 ]; then
+    printf '%s%s MB' "$dau" "$(mb_cua "$b")"
+  else
+    x=$(( (b * 100 + 536870912) / 1073741824 ))
+    printf '%s%s,%02d GB' "$dau" "$((x / 100))" "$((x % 100))"
+  fi
+}
+
+# JSON của `rclone size --json` ⇒ "N tệp · X".
+tep_va_byte() { # $1=JSON
+  local n b
+  n="$(so_trong_json "$1" count)"
+  b="$(so_trong_json "$1" bytes)"
+  printf '%s tệp · %s' "${n:-—}" "$(doc_byte "$b")"
+}
+
+# Chuỗi định danh (ID thư mục Drive…) ⇒ dạng ĐÃ CHE cho log công khai: 4 ký tự cuối + độ dài — đủ để đối chiếu với
+# Variable, không đủ để dùng lại.
+che_dinh_danh() { # $1
+  local s="${1:-}"
+  if [ -z "$s" ]; then printf 'chưa khai'; return 0; fi
+  if [ "${#s}" -le 8 ]; then printf '(%s ký tự)' "${#s}"; return 0; fi
+  printf '…%s (%s ký tự)' "${s: -4}" "${#s}"
+}
+
+# Lượt `run`: dọn thùng rác CỦA THƯ MỤC SAO LƯU trước khi đẩy. Không bao giờ làm đổ lượt sao lưu: mọi bước tự kiểm, hỏng
+# thì nói ra rồi để bước đẩy chạy như cũ (Drive còn đầy thì lượt đẩy vẫn ghi ngoài máy FAILED như trước).
+don_thung_rac_drive() {
+  local n_truoc="" b_truoc="" n_sau="" b_sau="" tep_loi="" loi_xoa="" ma_xoa=0 truoc_chu="chưa đo được" sau_chu="chưa đo được" so='^[0-9]+$'
+  if ! xac_dinh_drive_sao_luu; then
+    bao "thùng rác Drive: KHÔNG dọn — $DRIVE_LY_DO"
+    return 0
+  fi
+  # Hàng rào thứ hai, ngay chỗ dùng: đích phải là ĐÚNG MỘT thư mục dưới remote Drive — không gốc, không đường con.
+  case "$DRIVE_SAO_LUU" in
+    */* | "$REMOTE_DRIVE:") bao "thùng rác Drive: KHÔNG dọn — đích không phải đúng một thư mục dưới $REMOTE_DRIVE:"; return 0 ;;
+    "$REMOTE_DRIVE:"?*) ;;
+    *) bao "thùng rác Drive: KHÔNG dọn — đích không nằm dưới $REMOTE_DRIVE:"; return 0 ;;
+  esac
+  if do_luong_drive size --json --drive-trashed-only "$DRIVE_SAO_LUU"; then
+    n_truoc="$(so_trong_json "$DO_RA" count)"
+    b_truoc="$(so_trong_json "$DO_RA" bytes)"
+  elif [[ "$DO_LOI" == *"directory not found"* ]]; then
+    bao "thùng rác Drive: $DRIVE_SAO_LUU chưa có trên Drive (tạo ở lượt đẩy đầu tiên) — không có gì để dọn"
+    return 0
+  else
+    bao "thùng rác Drive: chưa đo được thùng rác của $DRIVE_SAO_LUU trước khi dọn ($DO_LOI) — vẫn dọn"
+  fi
+  if [ "$n_truoc" = "0" ]; then
+    bao "thùng rác Drive: $DRIVE_SAO_LUU không có tệp nào trong thùng rác — không có gì để dọn"
+    return 0
+  fi
+  [[ "$n_truoc" =~ $so && "$b_truoc" =~ $so ]] && truoc_chu="$n_truoc tệp · $(doc_byte "$b_truoc")"
+  bao "thùng rác Drive: xoá HẲN tệp trong thùng rác của $DRIVE_SAO_LUU ($truoc_chu) — chỉ thư mục sao lưu, không đụng thùng rác chung của Drive"
+  tep_loi="$(mktemp 2>/dev/null || true)"
+  [ -n "$tep_loi" ] || tep_loi="$STATUS_DIR/.rclone-thung-rac.err"
+  timeout "$TRAN_DON_THUNG_RAC_GIAY" rclone delete "$DRIVE_SAO_LUU" --drive-trashed-only "$CO_KHONG_THUNG_RAC" 2>"$tep_loi" || ma_xoa=$?
+  if [ "$ma_xoa" -eq 124 ]; then
+    loi_xoa="quá ${TRAN_DON_THUNG_RAC_GIAY} giây — dọn dở, lượt sau dọn tiếp"
+  elif [ "$ma_xoa" -ne 0 ]; then
+    loi_xoa="$(dong_loi_rclone "$tep_loi")"
+  fi
+  rm -f "$tep_loi"
+  if do_luong_drive size --json --drive-trashed-only "$DRIVE_SAO_LUU"; then
+    n_sau="$(so_trong_json "$DO_RA" count)"
+    b_sau="$(so_trong_json "$DO_RA" bytes)"
+    [[ "$n_sau" =~ $so && "$b_sau" =~ $so ]] && sau_chu="$n_sau tệp · $(doc_byte "$b_sau")"
+  fi
+  if [[ "$n_truoc" =~ $so && "$b_truoc" =~ $so && "$n_sau" =~ $so && "$b_sau" =~ $so ]]; then
+    bao "thùng rác Drive: đã xoá hẳn $((n_truoc - n_sau)) tệp · $(doc_byte "$((b_truoc - b_sau))") khỏi thùng rác của $DRIVE_SAO_LUU (còn lại $sau_chu)"
+  else
+    bao "thùng rác Drive: đã chạy lệnh dọn $DRIVE_SAO_LUU — trước: $truoc_chu · sau: $sau_chu"
+  fi
+  [ -z "$loi_xoa" ] || printf '::warning::[sao-lưu] thùng rác Drive: lệnh dọn báo lỗi — %s (bước đẩy vẫn chạy).\n' "$loi_xoa"
+  return 0
+}
+
+# `status`: dung lượng Google Drive cả tài khoản + thư mục sao lưu (đang sống / trong thùng rác). Chỉ SỐ — không tên tệp,
+# không ID thư mục, không một dòng dữ liệu. CHỈ ĐỌC (không một lệnh xoá). Không bao giờ làm đổ phần còn lại của `status`.
+trang_thai_dung_luong_drive() {
+  local tong="" dung="" rac="" khac="" trong=""
+  echo
+  echo "── Dung lượng Google Drive (đo lúc chạy, trần ${TRAN_DO_DRIVE_GIAY} giây mỗi phép) ──"
+  if ! xac_dinh_drive_sao_luu; then
+    echo "Không đo: $DRIVE_LY_DO"
+    return 0
+  fi
+  if do_luong_drive about --json "$REMOTE_DRIVE:"; then
+    tong="$(so_trong_json "$DO_RA" total)"
+    dung="$(so_trong_json "$DO_RA" used)"
+    rac="$(so_trong_json "$DO_RA" trashed)"
+    khac="$(so_trong_json "$DO_RA" other)"
+    trong="$(so_trong_json "$DO_RA" free)"
+    echo "Cả tài khoản Google (rclone about $REMOTE_DRIVE:): Total $(doc_byte "$tong") · Used $(doc_byte "$dung") · Trashed $(doc_byte "$rac") · Other $(doc_byte "$khac") · Free $(doc_byte "$trong")"
+    echo "  Trashed = thùng rác: Google VẪN tính vào hạn mức tới khi bị xoá hẳn (tự xoá sau 30 ngày) · Other = Gmail / Google Photos · «—» = Google không trả số (tài khoản không giới hạn)."
+    case "$trong" in
+      -* | 0) echo "⚠ Drive HẾT CHỖ (Free ≤ 0): mọi lượt đẩy lỗi 403 storageQuotaExceeded tới khi có chỗ — lượt backup kế tiếp dọn thùng rác của thư mục sao lưu TRƯỚC khi đẩy." ;;
+    esac
+  else
+    echo "Cả tài khoản Google (rclone about $REMOTE_DRIVE:): KHÔNG ĐỌC ĐƯỢC — $DO_LOI"
+  fi
+  if do_luong_drive size --json "$DRIVE_SAO_LUU"; then
+    echo "Thư mục sao lưu $DRIVE_SAO_LUU (tên đã mã hoá) · đang sống: $(tep_va_byte "$DO_RA")"
+  else
+    echo "Thư mục sao lưu $DRIVE_SAO_LUU · đang sống: KHÔNG ĐỌC ĐƯỢC — $DO_LOI"
+  fi
+  if do_luong_drive size --json --drive-trashed-only "$DRIVE_SAO_LUU"; then
+    if [ "$(so_trong_json "$DO_RA" count)" = "0" ]; then
+      echo "Thư mục sao lưu $DRIVE_SAO_LUU · trong thùng rác: $(tep_va_byte "$DO_RA")"
+    else
+      echo "Thư mục sao lưu $DRIVE_SAO_LUU · trong thùng rác: $(tep_va_byte "$DO_RA") — lượt backup / bản đêm kế tiếp xoá hẳn (CHỈ thùng rác của thư mục này)."
+    fi
+  else
+    echo "Thư mục sao lưu $DRIVE_SAO_LUU · trong thùng rác: KHÔNG ĐỌC ĐƯỢC — $DO_LOI"
+  fi
+  return 0
 }
 
 # ═══════════════ DỮ LIỆU BOT CHAT ═══════════════
@@ -549,13 +777,15 @@ day_ngoai_may_to_chuc() { # $1=csdl $2=thư mục con $3...=tệp cục bộ
   ORG_OFFSITE_STATE="OK"
   ORG_OFFSITE_REASON=""
   # Lượt giờ chỉ dọn thư mục hourly/ của chính nó — ba lệnh dọn bên dưới mỗi giờ là 72 lượt gọi Drive vô ích mỗi ngày.
+  # Như của nhà: chỉ tới đây khi mọi tệp đã lên đầu kia, và xoá HẲN ("$CO_KHONG_THUNG_RAC") — bản giờ của mỗi CSDL rơi
+  # vào thùng rác Drive mỗi giờ chính là thứ đã làm đầy Drive 08/10/2026.
   if [ "$sub" = "hourly" ]; then
-    timeout 900 rclone delete "$(noi_duong "$remote" "orgs/$csdl/hourly")" --min-age "$((GIU_BAN_GIO + 1))h" 2>/dev/null || true
+    timeout 900 rclone delete "$(noi_duong "$remote" "orgs/$csdl/hourly")" --min-age "$((GIU_BAN_GIO + 1))h" "$CO_KHONG_THUNG_RAC" 2>/dev/null || true
     return 0
   fi
-  timeout 900 rclone delete "$(noi_duong "$remote" "orgs/$csdl/daily")" --min-age "$((GIU_BAN_NGAY + 1))d" 2>/dev/null || true
-  timeout 900 rclone delete "$(noi_duong "$remote" "orgs/$csdl/weekly")" --min-age "$((GIU_BAN_TUAN * 7 + 1))d" 2>/dev/null || true
-  timeout 900 rclone delete "$(noi_duong "$remote" "orgs/$csdl/manual")" --min-age "$((GIU_BAN_NGAY + 1))d" 2>/dev/null || true
+  timeout 900 rclone delete "$(noi_duong "$remote" "orgs/$csdl/daily")" --min-age "$((GIU_BAN_NGAY + 1))d" "$CO_KHONG_THUNG_RAC" 2>/dev/null || true
+  timeout 900 rclone delete "$(noi_duong "$remote" "orgs/$csdl/weekly")" --min-age "$((GIU_BAN_TUAN * 7 + 1))d" "$CO_KHONG_THUNG_RAC" 2>/dev/null || true
+  timeout 900 rclone delete "$(noi_duong "$remote" "orgs/$csdl/manual")" --min-age "$((GIU_BAN_NGAY + 1))d" "$CO_KHONG_THUNG_RAC" 2>/dev/null || true
 }
 
 # MỘT tổ chức: ổ đĩa → dump → kiểm toàn vẹn → (bản tuần) → xoay vòng → ngoài máy. Đặt ORG_*; trả 1
@@ -1121,7 +1351,8 @@ cmd_run() {
   # ─── 6 · XOAY VÒNG — chỉ SAU khi bản mới đã được kiểm ───
   xoay_vong_tat_ca
 
-  # ─── 7 · BẢN NGOÀI MÁY ───
+  # ─── 7 · BẢN NGOÀI MÁY — dọn thùng rác Drive CỦA THƯ MỤC SAO LƯU trước (giải phóng chỗ cho bản mới), rồi đẩy ───
+  don_thung_rac_drive || true
   day_ngoai_may "$(basename "$thu_muc")" "${tep_da_tao[@]}"
   if [ "${#tep_tuan[@]}" -gt 0 ] && [ "$OFFSITE_STATE" = "OK" ]; then
     day_ngoai_may weekly "${tep_tuan[@]}"
@@ -1200,9 +1431,10 @@ cmd_status() {
     echo "CHƯA CÓ BẢN SAO NGOÀI MÁY — chưa khai BACKUP_OFFSITE_REMOTE (xem docs/backup-restore.md, HUMAN GATE)."
   else
     echo "Remote: ${BACKUP_OFFSITE_REMOTE%%:*}: · rclone: $(command -v rclone >/dev/null 2>&1 && rclone version 2>/dev/null | head -n 1 || echo 'CHƯA CÀI')"
-    # Chỉ in thứ KHÔNG bí mật: thư mục Drive, có mã hoá hay không, có token hay không — không in giá trị.
+    # Chỉ in thứ KHÔNG bí mật: có mã hoá hay không, có token hay không — không in giá trị. ID thư mục Drive in ở dạng ĐÃ
+    # CHE (4 ký tự cuối + độ dài, đủ đối chiếu với Variable BACKUP_GDRIVE_FOLDER_ID): log ops của kho PUBLIC.
     if [ -n "${RCLONE_CONFIG_GDRIVE_ROOT_FOLDER_ID:-}" ]; then
-      echo "Google Drive: thư mục $RCLONE_CONFIG_GDRIVE_ROOT_FOLDER_ID · token: $([ -n "${RCLONE_CONFIG_GDRIVE_TOKEN:-}" ] && echo có || echo THIẾU) · mã hoá crypt: $([ -n "${RCLONE_CONFIG_GCRYPT_PASSWORD:-}" ] && echo có || echo KHÔNG) · cấu hình: $TEP_NGOAI_MAY"
+      echo "Google Drive: thư mục gốc $(che_dinh_danh "$RCLONE_CONFIG_GDRIVE_ROOT_FOLDER_ID") · token: $([ -n "${RCLONE_CONFIG_GDRIVE_TOKEN:-}" ] && echo có || echo THIẾU) · mã hoá crypt: $([ -n "${RCLONE_CONFIG_GCRYPT_PASSWORD:-}" ] && echo có || echo KHÔNG) · cấu hình: $TEP_NGOAI_MAY"
     fi
     if command -v rclone >/dev/null 2>&1; then
       local sub ds tep_loi
@@ -1219,6 +1451,8 @@ cmd_status() {
         fi
       done
       rm -f "$tep_loi"
+      # Total · Used · Trashed · Other · Free của Drive + thư mục sao lưu (sống / thùng rác) — CHỈ ĐỌC, có trần thời gian.
+      trang_thai_dung_luong_drive || true
     fi
   fi
   # >>> TỔ CHỨC KHÁC NHÀ
