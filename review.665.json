@@ -1,0 +1,8 @@
+{
+  "pr": 665,
+  "sha": "45a9273bc859a86ae210e3955f5fc900f4d0033e",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-08T06:16:17.015Z",
+  "note": "Review độc lập 08/10: lỗi vòng 15 giây tạo hội thoại là thật (chat-panel.tsx:52 trên 217cb26c); refresh chỉ đọc, kiểm chủ; xô lượt đúng; IP lấy phần Caddy ghi; cổng trước withOrganization; đột biến 4/4. LOW để sau: L1 trần shop thành công cụ DoS chat web (4–6 IPv4 chặn gần hết khách thật — đề xuất báo khi bị chặn kéo dài / ghi tin không gọi AI / Turnstile), L2 refresh không trần + loadMessages khô"
+}
