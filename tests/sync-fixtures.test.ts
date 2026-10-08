@@ -602,6 +602,7 @@ import { testSaasVnxRuntime } from "./saas-vnx-runtime.test";
 import { testSaasPageGate } from "./saas-page-gate.test";
 import { testSaasShell } from "./saas-shell.test";
 import { testShellLoginLanding } from "./shell-login-landing.test";
+import { testShellGateRedirects } from "./shell-gate-redirects.test";
 
 async function main() {
   await ensureMigrated();
@@ -2980,6 +2981,9 @@ async function main() {
   // F-01: đăng nhập / đăng ký trong vỏ Chốt Đơn tính đích cuối ngay trong action — không `redirect("/")` mà layout chuyển
   // hướng (vòng lặp trang trắng); nhà / workspace ERP đúng safeNextPath (tổ chức `dich-dang-nhap` tự cấp và tự dọn).
   await testShellLoginLanding();
+  // Cùng lớp vòng trắng ở tầng CỔNG: thiếu quyền ⇒ người vỏ về trang nhà của vỏ ?forbidden=1 (không «/» mà layout vỏ chặn), ERP
+  // giữ /?forbidden=1; /module-disabled đứng ngoài nhóm (dashboard) (tổ chức `sgr-cong` tự cấp và tự dọn).
+  await testShellGateRedirects();
   // Nền tảng · phiên & RBAC (agent C): claim org, cổng module, platform:operate, đăng nhập theo tổ chức. Tự cấp
   // tổ chức `pr-` (CSDL riêng) và tự dọn; đứng cạnh bài ngữ cảnh vì cùng lý do.
   await testPlatformRbac();

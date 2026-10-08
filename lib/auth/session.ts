@@ -21,7 +21,7 @@ import { findOrganization } from "@/lib/platform/organizations";
 import { billingWriteDenied } from "@/lib/billing/rules";
 import { orgBillingStanding } from "@/lib/billing/standing";
 import { billingLockApplies } from "@/lib/saas/policy";
-import { isSalesAgentUser, salesAgentPathAllowed, salesAgentRedirectFor, SALES_AGENT_INBOX_HREF } from "@/lib/constants/saas-nav";
+import { forbiddenRedirectFor, isSalesAgentUser, salesAgentPathAllowed, salesAgentRedirectFor, SALES_AGENT_INBOX_HREF } from "@/lib/constants/saas-nav";
 
 export const ROLE_PERMISSIONS_KEY = "auth.rolePermissions";
 
@@ -436,14 +436,16 @@ export async function requireUser(roles?: Role[]): Promise<SessionUser> {
     redirect(`/login?reason=${DENY_REASON_PARAM[ket.denied]}`);
   }
   const user = ket.user;
-  if (roles && !roles.includes(user.role) && user.role !== "ADMIN") redirect("/?forbidden=1");
+  // Đích từ chối theo người (lib/constants/saas-nav.ts::forbiddenRedirectFor): ERP `/?forbidden=1` như cũ; người vỏ Chốt Đơn về
+  // trang nhà của vỏ — `/` bị chính layout vỏ chặn, và từ một server action đó là vòng trang trắng.
+  if (roles && !roles.includes(user.role) && user.role !== "ADMIN") redirect(forbiddenRedirectFor(user));
   return user;
 }
 
-/** Như requireUser nhưng bắt buộc có quyền; thiếu quyền → về trang chủ với thông báo */
+/** Như requireUser nhưng bắt buộc có quyền; thiếu quyền → về trang nhà với thông báo (`forbiddenRedirectFor`) */
 export async function requirePermission(permission: Permission): Promise<SessionUser> {
   const user = await requireUser();
-  if (!can(user, permission)) redirect("/?forbidden=1");
+  if (!can(user, permission)) redirect(forbiddenRedirectFor(user));
   return user;
 }
 

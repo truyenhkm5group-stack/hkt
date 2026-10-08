@@ -215,6 +215,38 @@ export function salesAgentHomeOfRedirect(target: string): string {
 }
 
 /**
+ * Tham số «không có quyền» trên trang nhà — CÙNG tên với `/?forbidden=1` mà cổng quyền của ERP dùng từ trước. Vỏ in câu RIÊNG
+ * cho nó: «ngoài gói» (trang không có trong Chốt Đơn) và «không có quyền» (có trong gói nhưng người này chưa được cấp) đưa người
+ * đọc tới hai việc khác nhau — gộp làm một là bảo họ đi tìm nhầm chỗ.
+ */
+export const FORBIDDEN_PARAM = "forbidden";
+export const SHELL_FORBIDDEN_MESSAGE = "Bạn không có quyền mở trang hoặc làm thao tác vừa rồi — đã đưa bạn về đây. Cần quyền này thì nhờ chủ cửa hàng cấp.";
+
+/**
+ * ═══ ĐÍCH KHI CỔNG QUYỀN TỪ CHỐI — `requirePermission` · `requireUser(roles)` (và `requireResource`, đi qua `requirePermission`) ═══
+ *
+ * Chỉ đổi ĐÍCH, không đổi luật: có quyền hay không vẫn do `can()` quyết (AGENTS luật 28). ERP / nhà: `/?forbidden=1` y như
+ * trước. Người thuộc vỏ: `/` là trang mà CHÍNH layout `(dashboard)` chặn (SHELL_RESTRICTED). Một server action bị từ chối ⇒ máy
+ * chủ dựng `/` TỪ GỐC, layout ném `redirect(trang nhà)`, client giữ nút layout mang lỗi rồi `router.replace` hàng nghìn lần —
+ * trang trắng (cơ chế ở lib/saas/shell-landing.ts; đo 08/10/2026: 6.092–6.362 lần điều hướng trong 15 giây). Nên người vỏ về THẲNG
+ * trang nhà của vỏ: `salesAgentHomeFor` không bao giờ trả trang người đó bị đá ra, và cổng vỏ luôn cho nó đi qua — layout không
+ * chuyển hướng lần hai. Chuỗi chỉ ghép từ hằng (href của menu vỏ), không đầu vào nào của người dùng ⇒ không open redirect.
+ */
+export function forbiddenRedirectFor(user: ShellUser): string {
+  return `${isSalesAgentUser(user) ? salesAgentHomeFor(user) : "/"}?${FORBIDDEN_PARAM}=1`;
+}
+
+/** Câu vỏ in khi máy chủ vừa đưa người dùng về trang nhà. `kind` = tham số đã kích hoạt nó. */
+export type ShellNotice = { kind: typeof SHELL_BLOCKED_PARAM | typeof FORBIDDEN_PARAM; text: string };
+
+/** THUẦN: đọc tham số qua `param` (thanh vỏ đưa `useSearchParams().get`, bài kiểm đưa `URLSearchParams.get`) — một bản cho cả hai. */
+export function shellNoticeOf(param: (name: string) => string | null | undefined): ShellNotice | null {
+  if (param(SHELL_BLOCKED_PARAM) === "1") return { kind: SHELL_BLOCKED_PARAM, text: SHELL_BLOCKED_MESSAGE };
+  if (param(FORBIDDEN_PARAM) === "1") return { kind: FORBIDDEN_PARAM, text: SHELL_FORBIDDEN_MESSAGE };
+  return null;
+}
+
+/**
  * Chiều cao một khung «lấp đầy màn hình» (hộp thư) trong vỏ: phần nhìn thấy của viewport trừ mép trên của khung, trừ thanh dưới
  * (đã gồm vùng an toàn iPhone vì nó mang `padding-bottom: env(safe-area-inset-bottom)`), trừ khe thở. Thuần để kiểm được; khung
  * client đo ba số này rồi gọi hàm. Không bao giờ thấp hơn `min` — màn quá thấp thì cuộn trang, không bóp ô soạn tin về 0.
