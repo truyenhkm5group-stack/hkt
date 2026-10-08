@@ -3,7 +3,7 @@
   "mission_id": "error-boundary-than-thien",
   "title": "Lỗi thân thiện: error boundary dashboard + gốc không in error.message / DATABASE_URL, chỉ mã tham chiếu, lối ra tải cả trang",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-pr-c",
@@ -25,12 +25,15 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-08T15:43:57.021Z",
-  "updated_at": "2026-10-08T21:18:43.785Z",
+  "updated_at": "2026-10-08T21:41:38.586Z",
   "last_heartbeat": "2026-10-08T20:14:52.909Z",
   "definition_of_done": [],
   "intake": {
     "verdict": "MISSING",
     "evidence": []
+  },
+  "evidence": {
+    "merged": "#705 → 02d9c1fb1de18de858b73b93e050c1464aacc30d"
   },
   "handoff": {
     "branch": "claude/error-boundary-than-thien",
