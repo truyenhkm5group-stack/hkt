@@ -1,5 +1,6 @@
 import { eq, sql } from "drizzle-orm";
 import { getDbFor, getPlatformDb, isPglite, organizationDatabaseName, schema } from "@/db";
+import { indexAccountIdentities } from "@/lib/auth/identities";
 import { hashPassword } from "@/lib/auth/password";
 import { platformAudit, type PlatformActor, type PlatformAuditSource } from "@/lib/platform/audit";
 import { invalidateCapabilities } from "@/lib/platform/capabilities";
@@ -22,7 +23,10 @@ import { ensureAccountForWorkspace, openSubscriptionsForProductsInUse } from "@/
  *  4. Dòng module theo danh sách được truyền vào (người gọi dựng từ mẫu `ORG_TEMPLATES`), ghi TƯỜNG
  *     MINH `enabled = true` — không dựa vào mặc định.
  *  5. Tài khoản quản trị đầu tiên trong CSDL của CHÍNH tổ chức đó (tư cách thành viên = tài khoản
- *     trong CSDL tổ chức, target-architecture P5).
+ *     trong CSDL tổ chức, target-architecture P5) + dòng chỉ mục đăng nhập của nó (email ⇒ tổ chức,
+ *     `lib/auth/identities.ts`) — thiếu dòng này thì quản trị kích hoạt xong vẫn chỉ vào được khi gõ
+ *     «mã tổ chức» (P0 08/10/2026). Ghi cả khi quản trị ĐÃ có (lượt chạy lại sau một lần hỏng giữa
+ *     chừng); khoá duy nhất của chỉ mục giữ nó một dòng.
  *  6. Hồ sơ thương mại (0224, docs/saas/README.md): workspace gắn vào TÀI KHOẢN khách (`accountId` hoặc một tài khoản mới
  *     mang tên workspace) và mở thuê bao cho sản phẩm mà module vừa bật thuộc về. Mọi đường tạo workspace (tự đăng ký,
  *     người vận hành, job cấp phát) đều đi qua đây nên không workspace nào thiếu tài khoản.
@@ -98,13 +102,18 @@ export async function provisionOrganization(input: ProvisionInput): Promise<Prov
   let adminCreated = false;
   if (input.admin) {
     const admin = input.admin;
-    adminCreated = await withOrganization(org.code, async () => {
+    const cols = { id: schema.users.id, email: schema.users.email, phone: schema.users.phone, active: schema.users.active };
+    const account = await withOrganization(org.code, async () => {
       const email = admin.email.trim().toLowerCase();
-      const has = await odb.query.users.findFirst({ where: eq(schema.users.email, email), columns: { id: true } });
-      if (has) return false;
-      await odb.insert(schema.users).values({ email, name: admin.name, passwordHash: await hashPassword(admin.password), role: "ADMIN" });
-      return true;
+      const has = await odb.query.users.findFirst({ where: eq(schema.users.email, email), columns: { id: true, email: true, phone: true, active: true } });
+      if (has) return { row: has, created: false };
+      const [row] = await odb.insert(schema.users).values({ email, name: admin.name, passwordHash: await hashPassword(admin.password), role: "ADMIN" }).returning(cols);
+      return { row, created: true };
     });
+    adminCreated = account.created;
+    // Chỉ mục ĐÚNG dòng vừa tạo / tìm thấy (email UNIQUE trong CSDL tổ chức ⇒ xác định, không đoán). Chưa phải một lượt đăng
+    // nhập: mốc dùng để trống cho tới khi quản trị thật sự vào (lib/auth/identities.ts).
+    await indexAccountIdentities(org.code, account.row);
   }
 
   // 6. Hồ sơ thương mại — idempotent: đã gắn tài khoản / đã có thuê bao sống ⇒ không đổi gì.

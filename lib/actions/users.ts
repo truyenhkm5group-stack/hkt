@@ -4,6 +4,7 @@ import { and, count, eq, ne } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { getDb, schema } from "@/db";
 import { audit } from "@/lib/audit";
+import { indexAccountInCurrentOrganization } from "@/lib/auth/identities";
 import { hashPassword, verifyPassword } from "@/lib/auth/password";
 import { ALL_PERMISSIONS, USER_PERMISSION_SNAPSHOT_KEY } from "@/lib/auth/permissions";
 import { can, destroySession, loadPermissionSnapshots, requireUser, ROLE_PERMISSIONS_KEY } from "@/lib/auth/session";
@@ -103,10 +104,13 @@ export async function resetUserPassword(input: unknown): Promise<ActionResult> {
   if (!parsed.success) return { error: firstIssue(parsed.error) };
   const { id, password } = parsed.data;
   const db = await getDb();
-  const target = await db.query.users.findFirst({ where: eq(schema.users.id, id), columns: { id: true, email: true } });
+  const target = await db.query.users.findFirst({ where: eq(schema.users.id, id), columns: { id: true, email: true, phone: true, active: true } });
   if (!target) return { error: "Không tìm thấy người dùng" };
   await db.update(schema.users).set({ passwordHash: await hashPassword(password) }).where(eq(schema.users.id, id));
   await audit({ userId: user.id, userEmail: user.email, action: "USER_RESET_PASSWORD", entity: "USER", entityId: id, detail: { email: target.email } });
+  // Mật khẩu mới ⇒ tài khoản dùng được bằng mật khẩu ⇒ chỉ mục đăng nhập chắc chắn có (tài khoản tạo trước 08/10/2026 chưa có;
+  // idempotent — lib/auth/identities.ts). Đặt hộ không phải một lượt đăng nhập: không mốc dùng.
+  await indexAccountInCurrentOrganization(target);
   // Đặt lại mật khẩu mà token cũ vẫn sống thì việc đặt lại KHÔNG có tác dụng gì — đây chính là lý
   // do tồn tại của cả tính năng thu hồi. Bắt buộc, không có cờ tắt.
   await applySessionRevocation({ targetUserId: id, targetEmail: target.email, trigger: "PASSWORD_RESET", actor: { id: user.id, label: user.email } });

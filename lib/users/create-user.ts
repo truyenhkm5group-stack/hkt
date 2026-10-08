@@ -5,8 +5,9 @@
  *  · quản trị tạo hộ và đặt mật khẩu (`createUser` — lib/actions/users.ts → `createUserCore`);
  *  · nhân viên nhận lời mời và tự đặt mật khẩu (`acceptUserInviteCore` — lib/users/invites.ts).
  * Cả hai qua `checkNewUserAccount` (email trùng, hạn mức gói) → `insertUserAccount` (băm mật khẩu, vai trò, vai trò tuỳ
- * chỉnh, phạm vi dữ liệu) → `auditUserCreate`. Viết một câu `insert(users)` thứ hai là mở đường cho hai cửa lệch nhau:
- * một cửa quên băm, một cửa quên hạn mức.
+ * chỉnh, phạm vi dữ liệu) → `auditUserCreate` → `indexNewUserAccount` (chỉ mục đăng nhập: email ⇒ tổ chức, để người mới
+ * đăng nhập ở trang chung KHÔNG cần mã tổ chức — P0 08/10/2026). Viết một câu `insert(users)` thứ hai là mở đường cho hai
+ * cửa lệch nhau: một cửa quên băm, một cửa quên hạn mức, một cửa quên chỉ mục.
  *
  * Tách khỏi tệp "use server": mọi export ở đó là một cửa gọi được từ trình duyệt, và bài kiểm cần gọi đúng lõi này
  * không qua cookie của Next.
@@ -15,6 +16,7 @@ import { and, count, eq, gt, isNull, sql } from "drizzle-orm";
 import { getDb, schema, type Db } from "@/db";
 import type { Role } from "@/db/schema";
 import { audit } from "@/lib/audit";
+import { indexAccountInCurrentOrganization } from "@/lib/auth/identities";
 import { hashPassword } from "@/lib/auth/password";
 import { can, type SessionUser } from "@/lib/auth/session";
 import { normalizeScope, type AccessScope } from "@/lib/constants/access-scope";
@@ -109,6 +111,15 @@ export async function auditUserCreate(actor: { id: string | null; email: string 
   });
 }
 
+/**
+ * Chỉ mục đăng nhập của tài khoản VỪA tạo (lib/auth/identities.ts) — cùng cho hai cửa, gọi SAU khi dòng `users` chắc chắn đã có
+ * (giao dịch nhận lời mời đã chốt: ghi chỉ mục trong giao dịch rồi giao dịch lùi thì chỉ mục trỏ vào một tài khoản không tồn tại).
+ * Tổ chức = đúng tổ chức `getDb()` vừa ghi vào. Thiếu bước này thì người mới chỉ đăng nhập được khi gõ «mã tổ chức».
+ */
+export async function indexNewUserAccount(userId: string, data: Pick<NewUserAccount, "email">) {
+  await indexAccountInCurrentOrganization({ id: userId, email: data.email });
+}
+
 function firstIssue(error: { issues: { message: string }[] }) {
   return error.issues[0]?.message ?? "Dữ liệu không hợp lệ";
 }
@@ -125,5 +136,6 @@ export async function createUserCore(user: SessionUser, input: unknown): Promise
   const account: NewUserAccount = { email: data.email, name: data.name, password: data.password, role: data.role };
   const row = await insertUserAccount(db, account);
   await auditUserCreate({ id: user.id, email: user.email }, row.id, account);
+  await indexNewUserAccount(row.id, account);
   return { ok: true, id: row.id };
 }

@@ -9,6 +9,7 @@ import {
   finalizeStatementAsOperator,
   moveWorkspaceAsOperator,
   reconcileSubscriptionsAsOperator,
+  resendActivationAsOperator,
   retryProvisioningAsOperator,
   subscribeProductAsOperator,
   updateAccountAsOperator,
@@ -29,6 +30,14 @@ export async function createCustomerAction(input: unknown) {
   const user = await requirePermission("platform:operate");
   const r = await createCustomerAsOperator(user, input);
   if ("ok" in r) refresh(r.accountCode);
+  return r;
+}
+
+/** «Gửi lại liên kết kích hoạt» (trang khách): người nhận do lõi tra từ workspace — trình duyệt chỉ gửi mã workspace + lý do. */
+export async function resendActivationAction(input: unknown, accountCode: string) {
+  const user = await requirePermission("platform:operate");
+  const r = await resendActivationAsOperator(user, input);
+  if ("ok" in r) refresh(accountCode);
   return r;
 }
 

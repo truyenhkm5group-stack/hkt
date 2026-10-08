@@ -1,7 +1,7 @@
 import { eq } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { audit } from "@/lib/audit";
-import { findIdentity, recordIdentity } from "@/lib/auth/identities";
+import { findIdentity, indexAccountIdentities, recordIdentity } from "@/lib/auth/identities";
 import { parseLoginIdentifier, type IdentityKind } from "@/lib/auth/identity-shared";
 import { hashPassword, verifyPassword } from "@/lib/auth/password";
 import type { SessionSubject } from "@/lib/auth/session";
@@ -24,9 +24,10 @@ import { findOrganization, getHomeOrganization } from "@/lib/platform/organizati
  *
  * ─── EMAIL HOẶC SỐ ĐIỆN THOẠI (0193) ───
  *
- * Ô `email` nhận cả SĐT di động VN (`parseLoginIdentifier`). Đăng nhập đúng ⇒ ghi email + SĐT của tài khoản vào chỉ mục
- * danh tính toàn nền tảng (`lib/auth/identities.ts`), nhờ đó lần sau đăng nhập ở trang chung không cần mã tổ chức
- * (`loginCandidates`). Chỉ mục KHÔNG mở phiên: mật khẩu vẫn kiểm trong CSDL tổ chức như cũ.
+ * Ô `email` nhận cả SĐT di động VN (`parseLoginIdentifier`). Chỉ mục danh tính toàn nền tảng (`lib/auth/identities.ts`) cho
+ * trang chung biết thử những tổ chức nào (`loginCandidates`) — nó được ghi NGAY khi tài khoản dùng được bằng mật khẩu (cấp
+ * phát quản trị, tạo hộ, nhận lời mời, đặt mật khẩu qua liên kết), không đợi lần đăng nhập đầu; đăng nhập đúng ghi thêm mốc
+ * dùng. Chỉ mục KHÔNG mở phiên: mật khẩu vẫn kiểm trong CSDL tổ chức như cũ.
  *
  * Hàm này không đọc cookie / header: `loginAction` lo chặn dò mật khẩu và ghi cookie (qua `issue`),
  * nên nó chạy được trong bài kiểm ngoài Next.
@@ -73,8 +74,8 @@ async function openSession(user: UserRow, orgCode: string, issue: (subject: Sess
   const db = await getDb();
   await db.update(schema.users).set({ lastLoginAt: new Date() }).where(eq(schema.users.id, user.id));
   await audit({ userId: user.id, userEmail: user.email, action: "LOGIN", entity: "USER", entityId: user.id, ...(via ? { after: { via } } : {}) });
-  await recordIdentity("EMAIL", user.email, orgCode, user.id);
-  if (user.phone) await recordIdentity("PHONE", user.phone, orgCode, user.id);
+  // Cùng đường ghi với lúc tài khoản được tạo / kích hoạt — ở đây là một lượt ĐĂNG NHẬP nên có mốc dùng.
+  await indexAccountIdentities(orgCode, user, { usedAt: new Date() });
   return { ok: true, subject };
 }
 

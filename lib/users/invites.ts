@@ -37,7 +37,7 @@ import { env } from "@/lib/env";
 import { currentOrganization, OrgContextError, withOrganization } from "@/lib/platform/context";
 import { findOrganization } from "@/lib/platform/organizations";
 import { ORGANIZATION_CODE_PATTERN } from "@/lib/platform/types";
-import { auditUserCreate, checkNewUserAccount, insertUserAccount, pendingUserInviteCount, USER_EMAIL_TAKEN, type NewUserAccount } from "@/lib/users/create-user";
+import { auditUserCreate, checkNewUserAccount, indexNewUserAccount, insertUserAccount, pendingUserInviteCount, USER_EMAIL_TAKEN, type NewUserAccount } from "@/lib/users/create-user";
 import { inviteLinkFor } from "@/lib/users/invite-link";
 import {
   acceptUserInviteSchema,
@@ -299,6 +299,9 @@ export async function acceptUserInviteCore(
       if (!created) return { kind: "INVALID" };
       await auditUserCreate({ id: created.id, email: inv.email }, created.id, account, { via: "INVITE", inviteId: inv.id });
       await audit({ userId: created.id, userEmail: inv.email, action: "USER_INVITE_ACCEPT", entity: "USER_INVITE", entityId: inv.id, after: { userId: created.id, role: resolved.role, accessRoleCode: resolved.accessRoleCode, invitedBy: inv.invitedByEmail } });
+      // SAU giao dịch, trong ngữ cảnh TƯỜNG MINH của tổ chức đích: lượt đăng nhập ngay sau đây (nếu có) chỉ thêm mốc dùng; không
+      // có lượt ấy (`issue` bỏ trống, tổ chức vừa bị đình chỉ…) thì người mới vẫn đăng nhập được ở trang chung không cần mã.
+      await indexNewUserAccount(created.id, account);
       return { kind: "OK", userId: created.id, email: inv.email };
     });
   } catch (error) {

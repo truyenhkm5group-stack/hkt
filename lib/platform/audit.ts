@@ -72,7 +72,10 @@ export type PlatformAuditAction = "MODULE_ENABLE" | "MODULE_DISABLE" | "FEATURE_
   | "PLATFORM_AI_POLICY_ROLLBACK"
   // XOÁ một workspace TỰ ĐĂNG KÝ (08/10/2026, lib/platform/offboard.ts · ops `org-offboard`): ghi TRƯỚC khi xoá (`offboard:start`,
   // số dòng từng bảng — không tên / email / SĐT) và SAU khi xong (`offboard:done`). Nhật ký nền tảng là thứ DUY NHẤT được giữ lại.
-  | "ORG_OFFBOARD";
+  | "ORG_OFFBOARD"
+  // Đối chiếu chỉ mục danh tính (08/10/2026, lib/platform/identity-reconcile.ts · ops `identity-reconcile --apply`): ghi bù dòng
+  // email / SĐT ⇒ tổ chức cho tài khoản tạo trước bản vá P0 — một dòng mỗi tổ chức có ghi, CHỈ số đếm (không email / SĐT).
+  | "IDENTITY_RECONCILE";
 export type PlatformAuditSource = "UI" | "SCRIPT" | "MIGRATION" | "TEST";
 export type PlatformActor = { orgCode: string; userId: string; email: string } | null;
 

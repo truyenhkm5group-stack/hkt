@@ -6,10 +6,20 @@
    workspace · gói · thương hiệu · sản phẩm · email quản trị · lý do.
 2. Job `CREATE_CUSTOMER` chạy: `ACCOUNT → WORKSPACE (CSDL + migration + module + quản trị) → ADMIN → SUBSCRIPTIONS → BILLING`.
 3. Màn hình in **liên kết kích hoạt dùng một lần** cho quản trị (mật khẩu quản trị là ngẫu nhiên, không lưu, không hiện).
-   Gửi riêng cho khách. Quản trị mời thêm người ở `/settings/users`.
-4. Thu phí khách ngoài: đặt hạn trả / ân hạn ở `/platform/org/<mã>` (đường 0187). Khách tự đăng ký qua `/start` thì
+   Gửi riêng cho khách. Khách mở liên kết, đặt mật khẩu, rồi đăng nhập ở `/login` bằng **email + mật khẩu** — KHÔNG cần «mã
+   tổ chức» (chỉ mục đăng nhập ghi ngay lúc cấp phát, `IDENTITY.md` §1b; ô «Đăng nhập bằng mã tổ chức» chỉ còn là đường phụ).
+   Quản trị mời thêm người ở `/settings/users`.
+4. Trang khách `/platform/customers/<mã>` → từng workspace có dòng **«Quản trị khách»**: email · trạng thái đọc từ dữ liệu
+   THẬT của workspace (Đã kích hoạt · Chưa kích hoạt — liên kết còn hạn / đã hết hạn / không còn liên kết · Chưa có tài khoản
+   quản trị · Đang khoá) — `lib/saas/activation.ts`. Chưa kích hoạt ⇒ nút **«Gửi lại liên kết kích hoạt»** (lý do bắt buộc,
+   nhật ký nền tảng `PASSWORD_RESET_LINK` · `purpose: ACTIVATION`): liên kết cũ chưa dùng HẾT hiệu lực ngay, liên kết mới hiện
+   MỘT lần để sao chép (chưa có kênh thư — dịch vụ ngoài mới cần chủ shop duyệt). Người nhận do máy chủ tra (email job «Tạo
+   khách» đã tạo; workspace không qua job ⇒ quản trị ADMIN tạo sớm nhất), không nhận email từ trình duyệt. Quản trị ĐÃ kích hoạt
+   mà quên mật khẩu ⇒ «Đặt lại mật khẩu cho khách» ở `/platform/org/<mã>`. Gửi lại form «Tạo khách» cùng yêu cầu cũng không phát
+   liên kết cho người đã kích hoạt.
+5. Thu phí khách ngoài: đặt hạn trả / ân hạn ở `/platform/org/<mã>` (đường 0187). Khách tự đăng ký qua `/start` thì
    dùng thử tự bật.
-5. Kết nối (fanpage, Messenger, Zalo, khoá AI riêng): quản trị khách tự nối ở `/settings/connections`,
+6. Kết nối (fanpage, Messenger, Zalo, khoá AI riêng): quản trị khách tự nối ở `/settings/connections`,
    `/ai/sales-chatbot/messenger`.
 
 Tự đăng ký (`/start`), người vận hành tạo ở `/platform`, script `platform-provision-org` đều đi qua
@@ -48,6 +58,12 @@ Trên production, `CREATE DATABASE` cần quyền CREATEDB của role ứng dụ
   ở trang workspace.
 - Gộp hai tài khoản trùng khách: mở từng tài khoản thừa → «Chuyển sang tài khoản khác». Máy chỉ gợi ý (cùng từ đầu tên),
   không bao giờ tự gộp.
+- **Khách kích hoạt rồi mà `/login` vẫn báo sai mật khẩu, gõ «mã tổ chức» thì vào được** = tài khoản tạo TRƯỚC bản vá
+  08/10/2026, chưa có dòng chỉ mục đăng nhập. Ops `identity-reconcile` (arg rỗng = mọi tổ chức, hoặc `<mã>`): CHẠY THỬ, chỉ đọc —
+  đếm tài khoản đủ điều kiện (đang bật · email chuẩn · có mật khẩu) đã có / THIẾU / LỆCH dòng chỉ mục; phần mã hoá liệt kê từng
+  chỗ (email / SĐT đã che). Rồi `--apply` (hoặc `<mã> --apply`): ghi bù qua đúng đường ghi của ứng dụng, idempotent, nhật ký nền
+  tảng `IDENTITY_RECONCILE` nguồn SCRIPT; đọc lại sau khi ghi, còn thiếu ⇒ mã thoát 1. Một lượt kích hoạt / đặt lại mật khẩu
+  qua liên kết cũng tự ghi lại dòng của đúng tài khoản ấy.
 
 ## Vận hành
 
