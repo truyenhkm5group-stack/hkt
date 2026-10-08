@@ -16,7 +16,7 @@ export default async function NotFound() {
         <SearchX className="size-6" />
       </span>
       <div>
-        <h2 className="text-lg font-bold">Không tìm thấy dữ liệu</h2>
+        <h1 className="text-lg font-bold">Không tìm thấy dữ liệu</h1>
         <p className="mt-1 text-sm text-muted-foreground">{copy.text("notFound.body")}</p>
       </div>
       <Button asChild variant="outline">

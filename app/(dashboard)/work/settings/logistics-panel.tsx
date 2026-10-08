@@ -110,13 +110,13 @@ function DwellRowEditor({
       <TableCell className="align-top numeric text-sm">{row.live}</TableCell>
       {(
         [
-          [w, setW],
-          [wa, setWa],
-          [ex, setEx],
+          [w, setW, DWELL_LEVEL_LABEL.WATCH],
+          [wa, setWa, DWELL_LEVEL_LABEL.WARNING],
+          [ex, setEx, DWELL_LEVEL_LABEL.EXCEPTION],
         ] as const
-      ).map(([v, set], i) => (
+      ).map(([v, set, level], i) => (
         <TableCell key={i} className="align-top">
-          <Input type="number" min={1} max={2160} value={v} onChange={(e) => set(e.target.value)} className="h-8 w-[88px]" disabled={pending} />
+          <Input type="number" min={1} max={2160} value={v} onChange={(e) => set(e.target.value)} className="h-8 w-[88px]" disabled={pending} aria-label={`${row.stageLabel} · ${level} (giờ)`} />
         </TableCell>
       ))}
       <TableCell className="align-top">

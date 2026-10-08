@@ -198,8 +198,8 @@ function ProductMatrix({ m, measure, norm, onNorm }: { m: PendingMatrix; measure
             Hao hụt
             <Input inputMode="decimal" defaultValue={numText(norm.wastePct)} key={`w-${numText(norm.wastePct)}`} onBlur={(e) => onNorm({ wastePct: parseNum(e.target.value) })} className="h-7 w-12 px-2 text-right text-xs" placeholder="0" aria-label="Hao hụt phần trăm" />%
           </label>
-          <Button variant="ghost" size="sm" className="h-7 px-2" onClick={() => copy(pendingMatrixAsText(m, measure, norm), `bảng ${m.productCode || m.productName}`)}>
-            <Copy className="size-3.5" />
+          <Button variant="ghost" size="sm" className="h-7 px-2" aria-label={`Sao chép bảng ${m.productCode || m.productName}`} title="Sao chép bảng" onClick={() => copy(pendingMatrixAsText(m, measure, norm), `bảng ${m.productCode || m.productName}`)}>
+            <Copy className="size-3.5" aria-hidden />
           </Button>
         </div>
       </div>

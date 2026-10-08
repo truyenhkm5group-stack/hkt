@@ -610,6 +610,7 @@ import { testSaasShell } from "./saas-shell.test";
 import { testShellLoginLanding } from "./shell-login-landing.test";
 import { testShellGateRedirects } from "./shell-gate-redirects.test";
 import { testErrorBoundary } from "./error-boundary.test";
+import { testErpA11y } from "./erp-a11y.test";
 
 async function main() {
   await ensureMigrated();
@@ -3013,6 +3014,8 @@ async function main() {
   await testShellGateRedirects();
   // Màn hình lỗi dashboard + gốc: không in error.message / DATABASE_URL, chỉ mã tham chiếu, lối ra <a href="/"> (Commercial Sweep C1 #11).
   testErrorBoundary();
+  // ERP a11y + bố cục hẹp (Commercial Sweep PR G): h1 màn không tìm thấy, công tắc / ô số có tên, /payroll không tràn 390 px.
+  testErpA11y();
   // Nền tảng · phiên & RBAC (agent C): claim org, cổng module, platform:operate, đăng nhập theo tổ chức. Tự cấp
   // tổ chức `pr-` (CSDL riêng) và tự dọn; đứng cạnh bài ngữ cảnh vì cùng lý do.
   await testPlatformRbac();

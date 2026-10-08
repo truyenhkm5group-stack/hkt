@@ -175,7 +175,7 @@ export default async function PayrollPage({
           </p>
         }
         actions={
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             {/* Xuất ĐÚNG bảng đang xem: `qs` mang y nguyên kỳ và cơ sở lợi nhuận của màn hình. */}
             <Button asChild variant="outline" size="sm">
               <a href={`/api/export/payroll?${qs}`}>
