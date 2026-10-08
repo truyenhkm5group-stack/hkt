@@ -3,7 +3,7 @@
   "mission_id": "ai-balance-economics",
   "title": "Số dư AI: doanh thu · chi phí · biên trên /platform + hoá đơn ước tính không thu hai lần",
   "business_goal": "",
-  "status": "INTEGRATING",
+  "status": "VERIFYING",
   "priority": "P2",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -36,11 +36,13 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-07T20:04:41.305Z",
-  "updated_at": "2026-10-07T23:06:13.938Z",
+  "updated_at": "2026-10-08T00:13:19.696Z",
   "last_heartbeat": "2026-10-07T22:42:29.636Z",
   "definition_of_done": [],
   "evidence": {
-    "merged": "#648 → 1de28d4585810f15063e14c02f3d051282796e3e"
+    "merged": "#648 → 1de28d4585810f15063e14c02f3d051282796e3e",
+    "verify": "PASS 1de28d4585810f15063e14c02f3d051282796e3e 2026-10-08T00:13:16.093Z",
+    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/37700846133"
   },
   "handoff": {
     "branch": "feat/ai-balance-economics",
