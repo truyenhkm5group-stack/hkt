@@ -62,7 +62,9 @@ import {
   spendBasis,
   spendLines,
   storedSettingObject,
+  UNPRICED_MODELS_LINE_MAX,
   UNPRICED_SHARE_MAX,
+  unpricedModelsLine,
   unpricedSalesModels,
   type CutoverDeps,
   type KeyProjectProbe,
@@ -433,6 +435,34 @@ export function testOrgAiCutoverPure() {
   assert.deepEqual([rLa.cause, rLa.model], ["UNPRICED_CURRENT_MODEL", "la"]);
   assert.equal(platformPriceRatio([dongGia("re", 0, 0)], NOW, ["re"], gia).cause, "NO_TOKENS");
   assert.equal(platformPriceRatio([dongGia("re", 1000, 100)], NOW, [], gia).cause, "NO_PLATFORM_MODEL");
+
+  // ── Model ĐANG CHẠY chưa có giá (production 09/10: MỘT dòng sổ thiếu tên model làm cả phép cân thất bại ⇒ không credit nào qua) ──
+  const r5 = platformPriceRatio([dongGia("re", 950, 0), dongGia(null, 50, 0)], NOW, ["dat"], gia);
+  assert.deepEqual([r5.ratio, r5.cause ?? null, r5.unpricedTokenShare, r5.unpricedModels], [10.526, null, 0.05, [{ model: "", tokenShare: 0.05 }]], "5 % token không tên ⇒ không chặn; tử số tính CẢ 5 % ấy: 1000 × 10 / (950 × 1)");
+  assert.match(r5.reason, / · đã bỏ 5% token chưa có giá \(«\(không tên\)» 5%\) — giá hiện tại đo trên phần đã định giá, tử số tính CẢ phần này theo giá nền tảng \(ước cao, phía an toàn\)$/, "lý do nói rõ đã bỏ bao nhiêu");
+  assert.equal(platformPriceRatio([dongGia("re", 800, 0), dongGia("la", 200, 0)], NOW, ["dat"], gia).ratio, 12.5, `đúng ${UNPRICED_SHARE_MAX * 100}% vẫn cân (cùng biên với lượt chưa định giá)`);
+  // Review #699: cơ sở (spendBasis) chỉ cộng tiền phần ĐÃ định giá ⇒ tỷ lệ phải đẩy CẢ phần chưa giá lên. Model nền tảng CÙNG giá + 20 %
+  // token chưa giá ⇒ 1,25 (= 1 / 0,8), KHÔNG phải 1 — nếu là 1 thì phần thiếu ăn hết đúng CREDIT_MARGIN.
+  assert.equal(platformPriceRatio([dongGia("re", 800, 40), dongGia(null, 200, 10)], NOW, ["re"], gia).ratio, 1.25, "20 % token chưa giá, cùng giá ⇒ × 1,25");
+  assert.equal(platformPriceRatio([dongGia("re", 950, 0), dongGia("la", 50, 0)], NOW, ["re"], gia).ratio, 1.053, "5 % ⇒ × 1/0,95");
+  const r30 = platformPriceRatio([dongGia("re", 700, 0), dongGia(null, 300, 0)], NOW, ["dat"], gia);
+  assert.deepEqual([r30.ratio, r30.cause, r30.model, r30.unpricedTokenShare], [null, "UNPRICED_CURRENT_MODEL", null, 0.3], "30 % ⇒ vẫn thất bại");
+  const eb30 = effectiveBasis(co, r30);
+  assert.deepEqual([eb30.cause, eb30.priceCause, creditVerdict(tran(150), eb30.monthly, 0, left).code], ["PRICE_UNKNOWN", "UNPRICED_CURRENT_MODEL", "BASIS_UNMEASURED"]);
+  assert.deepEqual(platformPriceRatio([dongGia("re", 950, 0), dongGia(null, 20, 0), dongGia("la", 30, 0)], NOW, ["dat"], gia).unpricedModels, [{ model: "la", tokenShare: 0.03 }, { model: "", tokenShare: 0.02 }], "phần lớn trước");
+  assert.equal(platformPriceRatio([dongGia("re", 1000, 100)], NOW, ["dat"], gia).unpricedModels?.length, 0);
+  assert.ok(!platformPriceRatio([dongGia("re", 1000, 100)], NOW, ["dat"], gia).reason.includes("đã bỏ"));
+  // Dòng tóm tắt NGẮN riêng cho tên model chưa có giá.
+  assert.equal(unpricedModelsLine(r5), "Model chưa có giá (30 ngày, AI Bán hàng): (không tên — dòng sổ thiếu model) · 5% token — tổng 5%: đã bỏ khỏi phép cân giá");
+  assert.equal(unpricedModelsLine(r30), "Model chưa có giá (30 ngày, AI Bán hàng): (không tên — dòng sổ thiếu model) · 30% token — tổng 30% > 20%: không cân được giá");
+  assert.equal(unpricedModelsLine({ unpricedTokenShare: 0, unpricedModels: [] }), null);
+  assert.equal(unpricedModelsLine({}), null);
+  const dai = (c: string) => `gemini-${`${c}.`.repeat(28)}`;
+  const dongDai = unpricedModelsLine({ unpricedTokenShare: 0.19, unpricedModels: [{ model: KHOA_NEN_TANG, tokenShare: 0.08 }, { model: dai("1"), tokenShare: 0.05 }, { model: dai("2"), tokenShare: 0.04 }, { model: dai("3"), tokenShare: 0.02 }] }) ?? "";
+  assert.ok(dongDai.length <= UNPRICED_MODELS_LINE_MAX && UNPRICED_MODELS_LINE_MAX <= 200, `dòng tên model ≤ ${UNPRICED_MODELS_LINE_MAX} ký tự: ${dongDai.length}`);
+  assert.ok(dongDai.startsWith("Model chưa có giá (30 ngày, AI Bán hàng): (tên lạ) · 8% token; ") && dongDai.includes("; …") && dongDai.endsWith("— tổng 19%: đã bỏ khỏi phép cân giá"), dongDai);
+  assert.ok(!dongDai.includes("AIza") && !dongDai.includes(KHOA_NEN_TANG.slice(4, 20)), "khoá dán nhầm vào ô model qua lọc khoá");
+  assert.ok((unpricedModelsLine({ unpricedTokenShare: 0.01, unpricedModels: [{ model: "a", tokenShare: 0.004 }, { model: "b", tokenShare: 0.0004 }] }) ?? "").includes("b · <0,1% token"), "khác 0 mà làm tròn ra 0 ⇒ «<0,1%»");
   assert.deepEqual(unpricedSalesModels(hslcRows(), NOW), [MODEL_NAY], "7 ngày trọn: lượt chưa định giá ngày 06/10 của model đang chạy");
   assert.deepEqual(
     unpricedSalesModels(
@@ -863,6 +893,32 @@ export async function testOrgAiCutoverApply() {
   assert.match(r.pub, /KHÔNG CHUYỂN: hạn mức ĐANG ÁP sau khi đặt credit vẫn không đủ · mã lý do NO_PLATFORM_CREDIT \(/, "kiểm lại sau khi đặt cũng mang mã lý do");
   r = await chay(150, {});
   assert.ok(!r.pub.includes("mã lý do"), "ĐỦ ⇒ không mã lý do");
+  assert.ok(!r.pub.includes("Model chưa có giá"), "mọi model đều có giá ⇒ không dòng tên model");
+
+  // Production 09/10 (run 37821402901): dòng sổ THIẾU tên model trong hỗn hợp 30 ngày làm cả phép cân thất bại ⇒ BASIS_UNMEASURED với
+  // MỌI credit, và tên model bị cắt khỏi dòng công khai (300 ký tự). Nay: ≤ 20 % token ⇒ bỏ khỏi phép cân và CHUYỂN được; > 20 % ⇒ vẫn
+  // không, nhưng tên model nằm ở dòng ngắn riêng TRƯỚC dòng KHÔNG CHUYỂN.
+  const dongKhongTen = (inputTokens: number): SalesUsageRow => ({ day: "2026-10-06", feature: "sales_chatbot", turns: 1, costUsd: 0.001, unknownCost: 0, model: null, inputTokens, outputTokens: 0 });
+  r = await chay(150, { rows: [...hslcRows(), dongKhongTen(775_000)] });
+  assert.deepEqual([r.rc, r.calls.setCredit, r.calls.switches], [0, [150], 1], "5 % token không tên ⇒ cân được ⇒ chuyển");
+  assert.match(r.pub, /^\[ops:tom-tat\] Model chưa có giá \(30 ngày, AI Bán hàng\): \(không tên — dòng sổ thiếu model\) · 5% token — tổng 5%: đã bỏ khỏi phép cân giá$/m);
+  assert.match(r.priv, /Giá AI dùng chung: .* · đã bỏ 5% token chưa có giá \(«\(không tên\)» 5%\) — giá hiện tại đo trên phần đã định giá, tử số tính CẢ phần này/);
+  // Review #699: 20 % token không tên, cùng tỉ lệ vào / ra với phần đã định giá, model nền tảng = model đang chạy ⇒ tỷ lệ 1,25 ⇒ cơ sở
+  // 93,6 × 1,25 = 117 ⇒ cần 146,25. Credit 117 (vừa khít theo cách cũ: cân trên phần đã định giá ⇒ × 1) ⇒ KHÔNG CHUYỂN; 147 ⇒ chuyển.
+  const dong20: SalesUsageRow = { day: "2026-10-06", feature: "sales_chatbot", turns: 1, costUsd: 0.001, unknownCost: 0, model: null, inputTokens: 3_502_500, outputTokens: 175_125 };
+  r = await chay(117, { rows: [...hslcRows(), dong20] });
+  assert.deepEqual([r.rc, r.calls.setCredit, r.calls.switches], [1, [], 0], "credit vừa khít theo cách cũ ⇒ KHÔNG CHUYỂN");
+  assert.match(r.priv, /nhân cơ sở × 1\.250/);
+  assert.match(r.pub, /Model chưa có giá \(30 ngày, AI Bán hàng\): \(không tên — dòng sổ thiếu model\) · 20% token — tổng 20%: đã bỏ khỏi phép cân giá/);
+  assert.match(r.pub, /mã lý do CREDIT_BELOW_NEED \(/);
+  r = await chay(147, { rows: [...hslcRows(), dong20] });
+  assert.deepEqual([r.rc, r.calls.setCredit, r.calls.switches], [0, [147], 1], "credit ≥ 117 × 1,25 ⇒ chuyển");
+  r = await chay(150, { rows: [...hslcRows(), dongKhongTen(6_400_000)] });
+  assert.deepEqual([r.rc, r.calls.setCredit], [1, []], "30 % token không tên ⇒ vẫn không cân được");
+  assert.match(r.pub, /mã lý do BASIS_UNMEASURED \(chưa cân được giá model AI dùng chung: model đang chạy «\(không tên\)» chưa có trong bảng giá/);
+  const iTen = r.pub.indexOf("Model chưa có giá (30 ngày, AI Bán hàng): (không tên — dòng sổ thiếu model) · 30,3% token — tổng 30,3% > 20%: không cân được giá");
+  assert.ok(iTen >= 0 && iTen < r.pub.indexOf("KHÔNG CHUYỂN"), "dòng tên model đứng TRƯỚC dòng KHÔNG CHUYỂN");
+  for (const l of r.pub.split("\n")) if (l.includes("Model chưa có giá")) assert.ok(l.length <= "[ops:tom-tat] ".length + UNPRICED_MODELS_LINE_MAX, l);
 
   console.log("  ✓ ops org-ai-cutover --apply --credit: kiểm credit ĐỀ XUẤT trước khi ghi (100 ⇒ không ghi gì), đặt qua lõi → đọc lại → kiểm lại → chuyển; chuyển hỏng ⇒ hoàn về ghi đè cũ; lỗi giữa chừng mà bot đã / có thể đã sang AI dùng chung ⇒ GIỮ credit; hoàn hỏng nói thẳng; log công khai không mang số tiền; KHÔNG CHUYỂN ⇒ mã lý do (không số tiền)");
   // Chạy cùng lượt với --apply (sync-fixtures đã gọi hàm này) — phép dò dùng fetcher GIẢ, không gọi mạng thật.
