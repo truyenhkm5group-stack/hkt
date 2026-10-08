@@ -3,7 +3,7 @@
   "mission_id": "backup-drive-trash",
   "title": "Sao lưu ngoài máy hết 403 đầy Drive: xoá bản quá hạn KHÔNG qua thùng rác, dọn thùng rác chỉ trong thư mục sao lưu, backup-status đo dung lượng Drive",
   "business_goal": "",
-  "status": "RUNNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -22,7 +22,18 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-08T12:53:25.193Z",
-  "updated_at": "2026-10-08T12:53:25.193Z",
-  "last_heartbeat": "2026-10-08T12:53:25.193Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-08T14:32:07.583Z",
+  "last_heartbeat": "2026-10-08T14:32:07.583Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "fix/backup-drive-trash",
+    "sha": "54e6574bc663db617b6ec1bc42af81b655f86a28",
+    "at": "2026-10-08T14:32:07.583Z",
+    "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+    "title": "Sao lưu ngoài máy hết 403 đầy Drive: xoá bản quá hạn KHÔNG qua thùng rác, dọn thùng rác chỉ trong thư mục sao lưu, backup-status đo dung lượng Drive",
+    "summary": "Xoay vòng phía Drive xoá HẲN (--drive-use-trash=false, một hằng), lượt run dọn thùng rác CHỈ dưới gdrive:erp-backup có lá chắn cấu hình, backup-status đo Used/Trashed; PITR dọn bản nền/WAL cùng cờ; tài liệu sửa",
+    "tests": [
+      "bash -n sạch 2 script; testSaoLuu + testPitr + testRestoreDrillPg + testTestHygiene 40 ✓; tsc + eslint sạch; hợp đồng tĩnh + repo-integrity + ops-log-leak đạt; đột biến 9/9 đỏ; JSON rclone about đo trên rclone v1.75.1"
+    ]
+  }
 }
