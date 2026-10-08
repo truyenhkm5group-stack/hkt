@@ -3,7 +3,7 @@
   "mission_id": "saas-signup-subscription",
   "title": "Cửa hàng tự đăng ký có thuê bao sản phẩm (dùng thử) ngay khi tạo — trang Gói không còn «liên hệ người vận hành»",
   "business_goal": "",
-  "status": "INTEGRATING",
+  "status": "VERIFYING",
   "priority": "P0",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -31,7 +31,7 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-08T05:35:45.169Z",
-  "updated_at": "2026-10-08T07:18:07.719Z",
+  "updated_at": "2026-10-08T08:19:55.368Z",
   "last_heartbeat": "2026-10-08T06:46:05.949Z",
   "definition_of_done": [
     "/start (và đường đăng ký nhanh) mở thuê bao sản phẩm đúng thương hiệu, idempotent, dùng lại hàm sẵn có",
@@ -39,7 +39,9 @@
     "Script sửa bù mặc định CHẠY THỬ, liệt kê workspace thiếu thuê bao; ghi thật chờ chủ shop"
   ],
   "evidence": {
-    "merged": "#670 → fad85b8ae527c45a789866f1e76e0ba4b146b629"
+    "merged": "#670 → fad85b8ae527c45a789866f1e76e0ba4b146b629",
+    "verify": "PASS c360b7c662e52d9447fc19a880f8a956851cf764 2026-10-08T08:19:50.208Z",
+    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/37744823972"
   },
   "handoff": {
     "branch": "fix/signup-subscription",
