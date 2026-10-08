@@ -326,6 +326,14 @@ export const TECH_EVENT_NAMES = [
   "budget.warning",
   "budget.exceeded",
   "worker.lost",
+  // Cài một nút (lib/tech/worker-onboarding.ts, mục 15)
+  "worker.enrollment_created",
+  "worker.enrolled",
+  "worker.secret_rotated",
+  "worker.secret_revoked",
+  "worker.removed",
+  "worker.repair_requested",
+  "worker.branch_written",
 ] as const;
 export type TechEventName = (typeof TECH_EVENT_NAMES)[number];
 
@@ -365,4 +373,11 @@ export const TECH_EVENT_LABEL: Record<TechEventName, string> = {
   "budget.warning": "Chi API ≥ 80% trần ngày",
   "budget.exceeded": "Chi API chạm trần ngày — worker API dừng",
   "worker.lost": "Worker mất nhịp tim khi đang giữ việc",
+  "worker.enrollment_created": "Tạo bộ cài worker (mã ghi danh dùng một lần)",
+  "worker.enrolled": "Bộ cài đã ghi danh — khoá worker vừa được xoay",
+  "worker.secret_rotated": "Tạo lại token worker — khoá cũ chết ngay",
+  "worker.secret_revoked": "Thu hồi khoá worker",
+  "worker.removed": "Gỡ worker",
+  "worker.repair_requested": "Yêu cầu sửa lỗi tự động",
+  "worker.branch_written": "Máy chủ ghi nhánh từ bộ thay đổi worker nộp (bot)",
 };

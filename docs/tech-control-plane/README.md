@@ -50,7 +50,7 @@ nó đang là đường giao hàng đang chạy (`gates`, `deploy-plan`, `verify
 | Bộ lập lịch | `scripts/scheduler.mjs` → `/api/sync/<job>` + `sync_runs` | Đủ cho watchdog, không cần dịch vụ mới |
 | Nhật ký kiểm toán | `audit()` → `audit_logs` | |
 | Luồng sự kiện miền | `emitDomainEvent` → `domain_events` (append-only, dedupe, causation/correlation) | Dùng cho Goal/Mission/Worker — không tạo bảng sự kiện thứ hai |
-| Cổng CI + bảo vệ `main` | `gates.yml` (4 job + `gates / gates`), ruleset 1 duyệt người | KHÔNG nới, KHÔNG lách |
+| Cổng CI + bảo vệ `main` | `gates.yml` (4 job + `gates / gates`), ruleset `main`: PR bắt buộc + `gates / gates`, **0 lượt duyệt** (từ 25/09/2026 — câu "1 duyệt người" cũ đã sai) | KHÔNG nới, KHÔNG lách |
 | Deploy + smoke | `deploy-vps.yml` (dùng lại lượt cổng xanh đúng SHA, `flock` trên VPS, smoke `/api/health`) | |
 | Ngân sách AI theo ngày | `lib/ai/budget.ts` (trần ngày trong `settings`) · `platform_ai_usage` | Nền cho ngân sách API |
 
@@ -168,7 +168,7 @@ Vào: bất kỳ trạng thái mở nào, bởi người / máy / agent, BẮT B
             │  claim → worktree tech/<CODE>-<n>  │
             │  → adapter: SUBSCRIPTION_CLAUDE_CODE│  env KHÔNG có ANTHROPIC_API_KEY
             │           | ANTHROPIC_API           │  env có khoá, ngân sách bắt buộc
-            │  → cổng → commit → push → PR (App)  │
+            │  → cổng → NỘP bộ thay đổi ─────────┼→ máy chủ ghi nhánh + PR (App)
             └─────────────────────────────────────┘
 ```
 
@@ -237,18 +237,12 @@ Kết luận: MÃ đủ cả 16 điểm, nhưng chưa điểm nào CHẠY trên 
 | Hàng đợi PostgreSQL: nhận việc `UPDATE … (SELECT … FOR UPDATE OF c SKIP LOCKED)`, fencing `lease_generation`, thu hồi lười | `lib/tech/worker-service.ts` |
 | Cửa worker `POST /api/tech/worker/{hello,heartbeat,claim,start,complete}` — khoá RIÊNG từng worker, CSDL giữ băm | `app/api/tech/worker/[op]/route.ts` |
 | Worker daemon + adapter (`SUBSCRIPTION_CLAUDE_CODE` · `ANTHROPIC_API`, cùng CLI Claude Code, khác đúng môi trường) | `scripts/tech-worker.ts`, `scripts/tech-worker/*` |
-| Trang | `/tech/workers` (đăng ký — khoá hiện một lần, bật/tắt, thu hồi lease, lượt chạy + nhật ký có trần) |
+| Trang | `/tech/workers` (tạo worker + bộ cài một nút — mục 15; bật/tắt, thu hồi lease, lượt chạy + nhật ký có trần) |
 
-Chạy một worker trên máy có Claude Code (đăng nhập gói thuê bao):
-
-```
-$env:TECH_WORKER_URL="https://erp.vnxcommerce.com"
-$env:TECH_WORKER_TOKEN="tw_…"            # /tech/workers → Đăng ký worker (hiện một lần)
-$env:TECH_WORKER_REPO="D:\tech-worker\hkt"   # bản clone RIÊNG cho worker
-npm run tech:worker -- --check           # kiểm cấu hình + adapter, không xin việc
-npm run tech:worker -- --once            # nhận một việc, làm, thoát
-npm run tech:worker                      # chạy mãi
-```
+Cài một worker: **/tech/workers → «Tạo worker» → «Cài worker trên máy Windows này» → bấm đúp tệp tải về** (mục 15).
+Khoá worker không còn hiện ra màn hình và không ai phải gõ biến môi trường. Chạy tay (máy dev, không qua bộ cài) vẫn
+được — đặt `TECH_WORKER_URL` / `TECH_WORKER_TOKEN` / `TECH_WORKER_REPO` rồi `npm run tech:worker -- --check`; khoá lấy
+bằng cách chạy bộ cài một lần hoặc đổi mã ghi danh qua `POST /api/tech/worker/enroll` (mã trong thân request).
 
 **Chế độ dogfood an toàn** (lượt production đầu tiên) — không cần mã mới, chỉ cấu hình:
 
@@ -260,7 +254,7 @@ npm run tech:worker                      # chạy mãi
 | Không rơi sang tiền API | chỉ đăng ký worker `SUBSCRIPTION_CLAUDE_CODE`; không đặt `TECH_WORKER_ANTHROPIC_API_KEY` |
 | Chỉ việc tài liệu | worker khai đúng một năng lực `write-docs` |
 | Không đụng production | worker không giữ secret production; deploy vẫn do người / Delivery Controller; năng lực deploy / migration `autonomous = false` |
-| Không lách nhánh bảo vệ | PR mở bằng bot `agent-open-pr.yml`, gộp qua `gates / gates` + 1 người duyệt |
+| Không lách nhánh bảo vệ | PR mở bằng bot `agent-open-pr.yml`, gộp qua `gates / gates` (ruleset hiện 0 lượt duyệt — người gộp là chốt chặn) |
 | CI đỏ trên PR của worker | NGƯỜI sửa tay. Việc `ci-debug` máy tự tạo là loại BUGFIX ⇒ chính sách R1 ⇒ KHÔNG được nhận dưới trần R0; nó nằm SPEC_READY và việc gốc đứng ở REVIEW (không tự FAILED, không chi tiền). Huỷ việc `ci-debug` đó trên `/tech` sau khi sửa tay |
 
 Bất biến đã khoá bằng bài kiểm (`tests/tech-worker.test.ts`): hai worker không nhận trùng · phụ thuộc chưa DONE /
@@ -271,8 +265,8 @@ worker chết ⇒ lease hết hạn ⇒ thu hồi ⇒ việc về hàng đợi �
 worker gói thuê bao không bao giờ thấy `ANTHROPIC_API_KEY` / `DATABASE_URL` / token · tiền của lượt gói thuê bao
 ghi `estimated: true`.
 
-Còn thiếu (Pha 3): worker đẩy nhánh nhưng CHƯA mở PR — PR phải mở bằng danh tính bot (`agent-open-pr.yml`) để
-chủ shop duyệt được; máy chủ ERP sẽ dispatch thay worker (worker không giữ quyền ghi GitHub nào ngoài `git push`).
+Từ mục 15: worker KHÔNG giữ bất kỳ quyền ghi GitHub nào và không `git push` — nó nộp bộ thay đổi, máy chủ tự ghi nhánh bằng
+bot rồi dispatch `agent-open-pr.yml` (PR mang danh tính bot).
 ## 9. Hạn chế đã biết (Pha 1)
 
 - Việc vào "Cần chủ shop" từ `OBSERVING` không quay lại được `OBSERVING` / `DONE`: bảng chuyển không cho NEEDS_OWNER
@@ -290,7 +284,7 @@ Luật thuần: `lib/constants/tech-delivery.ts`. Đọc/ghi + GitHub: `lib/tech
 
 | Bước | Ai quyết | Chứng cứ |
 |---|---|---|
-| Worker đẩy nhánh `ai/worker/<MÃ>-a<n>` · lượt THÀNH CÔNG | máy chủ dispatch **`agent-open-pr.yml`** (cầu nối bot đã có, chạy trên `main`) | PR mang tên `erp-agent-vnx[bot]` ⇒ chủ shop duyệt được |
+| Máy chủ ghi nhánh `ai/worker/<MÃ>-a<n>` từ bộ thay đổi worker nộp (mục 15) · lượt THÀNH CÔNG | máy chủ dispatch **`agent-open-pr.yml`** (cầu nối bot đã có, chạy trên `main`) | PR mang tên `erp-agent-vnx[bot]` ⇒ chủ shop duyệt được |
 | PR / CI đổi | `github-pr-sync` ghi `pr.opened` · `ci.passed` · `ci.failed` · `pr.merged` · `pr.closed` (khoá chống trùng gắn PR + SHA) | phép chiếu PR đã có |
 | CI đỏ trên PR worker | mở MỘT việc con `ci-debug` trên CHÍNH nhánh đó (worker sửa, đẩy lên, PR tự cập nhật); tối đa `CI_FIX_MAX = 2`, hết ⇒ việc gốc `FAILED` | `ci.fix_requested` · `ci.retry_exhausted` |
 | Gộp | NGƯỜI duyệt PR + Delivery Controller gộp theo `queue` (không đổi) | `REVIEW → QA` (task-advance, đã có) |
@@ -361,8 +355,97 @@ Credential Git: cổng (`npm ci` / typecheck / lint / test chạy mã của nhá
 TOÀN CỤC (`GIT_CONFIG_NOSYSTEM`, `GIT_CONFIG_GLOBAL` trỏ tệp tạm, tắt lời nhắc, HOME tạm) nên không gọi được Git
 Credential Manager QUA cấu hình Git (đo 07/10/2026 trên máy dev: `credential.helper=manager` của
 `C:/Program Files/Git/etc/gitconfig` không còn thấy dưới env của cổng). Mã chạy dưới CÙNG người dùng hệ điều hành vẫn
-gọi THẲNG được tệp chạy của GCM, và chính worker vẫn phải `git push`, nên tài khoản chạy worker giữ MỘT credential —
-vì vậy BẮT BUỘC khi chạy production: tài khoản hệ điều hành RIÊNG cho worker (Credential Manager của nó chỉ có
-credential dưới đây), không nhúng token vào URL remote của bản clone, credential là fine-grained token chỉ cho ĐÚNG kho này, chỉ
-`contents: write` (token không giới hạn được theo nhánh — ruleset `main` hiện có chặn đẩy thẳng; muốn chặn mọi nhánh
-ngoài `ai/worker/*` thì thêm ruleset), KHÔNG dùng tài khoản GitHub cá nhân của chủ shop.
+gọi THẲNG được tệp chạy của GCM. **Đã thay (mục 15, review bảo mật PR #631):** worker không còn `git push` và không cần
+credential GitHub nào — máy chủ tự ghi nhánh. Máy chạy worker KHÔNG nên có credential GitHub nào trong Credential Manager
+(nhất là tài khoản quản trị kho của chủ shop): mã agent trong cổng chạy dưới cùng tài khoản và gọi thẳng được GCM.
+
+## 15. Cài worker một nút cho chủ shop không kỹ thuật (07/10/2026, migration 0236)
+
+Chủ shop không phải lập trình viên: không clone kho, không sửa biến môi trường, không dán khoá vào PowerShell, không chạy
+npm, không cấu hình Windows service. Bốn bước hiện trên `/tech/workers`:
+
+| Bước | Chủ shop làm | Máy làm |
+|---|---|---|
+| 1 Tạo worker | «Tạo worker» — lần đầu điền sẵn `dogfood-1`, gói thuê bao, chỉ «Viết tài liệu», 1 việc / lúc | `createTechWorkerAction` tạo worker và **không trả khoá** |
+| 2 Tải bộ cài | «Cài worker trên máy Windows này», bấm đúp `cai-worker-<mã>.cmd` | tạo MÃ GHI DANH (một lần, 30′, CSDL chỉ giữ băm) nhúng trong tệp — tệp đi về trong thân phản hồi Server Action, không có URL tải |
+| 3 Đăng nhập Claude nếu được hỏi | đăng nhập một lần trong cửa sổ hiện ra | bộ cài đọc `claude auth status --json`; chưa đăng nhập / đăng nhập Console (tiền API) ⇒ mở `claude auth login --claudeai` |
+| 4 Worker Online | không gì — trang tự làm mới | bộ cài tự kiểm, khởi động worker; nhịp tim đầu ⇒ «Đang sống» |
+
+| Mảnh | Tệp |
+|---|---|
+| Luật thuần (mã ghi danh, lệnh sửa đóng, chẩn đoán + che secret, sẵn sàng xin việc, ranh giới thanh toán lúc khởi động, trần + phạm vi bộ thay đổi worker nộp (`lib/constants/tech-worker-submit.ts`), bốn bước) | `lib/constants/tech-worker-onboarding.ts` |
+| Đổi mã · xoay khoá · tạo lại token · gỡ · chẩn đoán · lệnh sửa · token đẩy | `lib/tech/worker-onboarding.ts` |
+| Bộ cài / trình khởi động / tệp gỡ (hàm thuần sinh chuỗi) | `lib/tech/worker-installer.ts` |
+| Cửa ghi danh (không cần khoá, mã chỉ từ THÂN, mọi thất bại cùng một `401`) | `app/api/tech/worker/enroll/route.ts` |
+| Nhịp tim mang chẩn đoán + nhận lệnh sửa; `submit-changes` (máy chủ ghi nhánh) | `app/api/tech/worker/[op]/route.ts` |
+| Server Action (quyền `tech:manage` + audit, không ghi mã / khoá) | `lib/actions/tech-worker-onboarding.ts` |
+
+**Khoá worker không bao giờ đi qua người.** Bộ cài đổi mã ⇒ máy chủ XOAY khoá (khoá cũ — kể cả khoá đã lộ — chết ngay),
+bật lại worker, trả khoá mới MỘT lần trong thân phản hồi. «Tạo lại token» = khoá hiện tại chết ngay + bộ cài mới. «Gỡ worker»
+= tắt + thu hồi khoá + huỷ mã đang chờ + thu hồi lease (qua đúng bộ thu hồi của hàng đợi) + tệp `go-worker-<mã>.cmd` xoá
+Scheduled Task, khoá đã cất và thư mục trên máy. Mọi thất bại xác thực rơi về phía HẸP.
+
+**Cất khoá: DPAPI theo người dùng Windows** (`ConvertFrom-SecureString`, không `-Key`), tệp
+`%LOCALAPPDATA%\VNX\tech-worker\<mã>\worker-credential.dpapi`, ACL chỉ chính người dùng. Chọn thay Credential Manager vì
+Windows PowerShell 5.1 không có cmdlet cho Credential Manager (phải cài module hoặc `Add-Type` biên dịch C# lúc chạy —
+hay bị AMSI chặn); cả hai cùng dựa trên DPAPI nên cùng mức bảo vệ. Trình khởi động `start-worker.ps1` giải khoá vào biến
+môi trường CỦA TIẾN TRÌNH worker, không ghi tệp thường, không `.env`. Giới hạn thật (như Credential Manager): tiến trình
+cùng tài khoản Windows giải được — việc R1 trở lên vẫn cần tài khoản Windows riêng (mục 14).
+
+**Không rơi sang tiền API — ba lớp:** trình khởi động gỡ mọi biến `API_BILLING_ENV` khỏi tiến trình worker gói thuê bao;
+worker TỪ CHỐI CHẠY nếu vẫn thấy một biến như thế (`workerStartupBlockers`, thoát mã 4, báo lý do lên trang); và worker
+KHÔNG xin việc khi Claude Code đăng nhập bằng Console (tiền API) hoặc chưa đọc được trạng thái đăng nhập
+(`workerReadiness`). Đường Anthropic API vẫn chọn được ở form, kèm cảnh báo tiền + ô xác nhận; bộ cài hỏi khoá API
+riêng bằng `Read-Host -AsSecureString` (không hiện, không vào lịch sử) và cất DPAPI; worker API vẫn chỉ chạy khi đã khai
+trần chi API / ngày.
+
+**Chẩn đoán + «Sửa lỗi tự động».** Nhịp tim mang báo cáo tự kiểm (kết nối · đăng nhập Claude · kho · Claude Code chạy được
+· phiên bản · ANTHROPIC_API_KEY vắng mặt · cách đẩy nhánh · lỗi gần nhất); máy chủ lọc trường, che chuỗi giống secret
+(`tw_` · `twe_` · `sk-ant-` · `gh*_` · `Bearer` · `*_TOKEN=` · chuỗi dài ≥ 33 ký tự) và giữ ≤ 4 KB. Lệnh sửa là danh sách
+ĐÓNG có CHECK ở CSDL: `RERUN_SELF_CHECK` · `REFRESH_REPO` (fetch + đặt lại bản clone RIÊNG của worker về `origin/main`,
+`npm ci` nếu lockfile đổi, khởi động lại) · `PRUNE_WORKTREES` (chỉ khi có `TECH_WORKER_ROOT`; chỉ cây trong `git worktree
+list` của CHÍNH kho worker, nằm dưới gốc đó, tên `wt-tech-*`, nhánh `ai/worker/*`, không đang chạy, SẠCH và không còn commit
+chưa đẩy; gỡ bằng `git worktree remove` không `--force`, không bao giờ xoá đệ quy — review PR #631: gốc mặc định cũ là thư
+mục cha của kho, nơi có cây của người) · `RESTART_LOOP`. Giao đúng một lần ở nhịp tim kế; lệnh cần thoát tiến trình hoãn tới khi worker rảnh. Không có
+lệnh tuỳ ý, không tham số.
+
+**Worker KHÔNG giữ bất kỳ quyền ghi GitHub nào — máy chủ tự ghi nhánh.** Review bảo mật PR #631 (lượt 2): mã agent chạy
+trong cổng (`eslint.config.mjs`, `tests/*.ts`) dưới ĐÚNG tài khoản Windows của worker giải được khoá worker (DPAPI), gọi
+được mọi cửa của worker — nên mọi credential ghi GitHub xuống tới máy worker, dù ngắn hạn hay có trần, đều lấy trộm được,
+và token `contents: write` gộp được PR xanh vào `main`. Cửa `push-credential` đã BỎ HẲN. Đường hiện tại:
+
+- Worker xong cổng ⇒ `POST /api/tech/worker/submit-changes` (khoá worker + đúng lease + `leaseGeneration`): danh sách tệp
+  `{đường dẫn, nội dung base64 | xoá, chế độ}` + thông điệp commit. KHÔNG gửi tên nhánh. Commit gốc là `base_commit` worker
+  báo lúc `start` — máy chủ KHÔNG tin nó: chốt chặn là GitHub phải xác nhận gốc nằm trên `main` (hoặc là đỉnh nhánh).
+- Máy chủ kiểm (`validateSubmission`, không tin worker): trần 200 tệp / 1 MB mỗi tệp / 5 MB tổng; đường dẫn chuẩn hoá — cấm
+  tuyệt đối, `..`, `.`, đoạn rỗng, `\`, `.git`, `AGENT_FORBIDDEN_PATHS` (`.github/`, `drizzle/`, `package.json`, mã worker…),
+  script deploy / cài đặt, Dockerfile, `.gitmodules`; chỉ chế độ 100644 / 100755 (symlink 120000, submodule 160000 ⇒ từ
+  chối); tệp chỉ dẫn agent ở MỌI độ sâu theo tên (`CLAUDE.md`, `CLAUDE.local.md`, `AGENTS.md`, thư mục `.claude` / `.cursor` / `.codex`
+  / `.github` / `.husky`, không phân biệt hoa thường, cả ghi lẫn xoá); PHẠM VI theo năng lực của VIỆC (`write-docs` ⇒ chỉ
+  `docs/**` + `*.md`, trừ `public/**`) và chính sách (R0 ⇒ chỉ tài liệu / kiểm thử).
+- Máy chủ ghi bằng GitHub Git Data API (`commitAgentChanges`): commit gốc → blobs → tree (`base_tree`) → commit (cha = gốc)
+  → ref. Nhánh = `ai/worker/<MÃ>-a<n>` lấy từ lượt chạy ở CSDL; gốc = `base_commit` ghi lúc `start`, và GitHub phải xác nhận
+  nó nằm trên `main` (nhánh mới) hoặc đúng là đỉnh nhánh (việc sửa CI — cập nhật không force). Token cài đặt riêng của lượt
+  ghi (`contents: write`, một kho) không bao giờ rời hàm và bị THU HỒI trong `finally`.
+- Idempotent: gửi lại đúng bộ đó ⇒ trả commit cũ, không commit thứ hai; bộ khác cùng lượt ⇒ từ chối. Mỗi lần ghi: sự kiện
+  `worker.branch_written` + audit `TECH_WORKER_BRANCH_WRITTEN` (nhánh · gốc · SHA · số tệp · byte — không nội dung).
+- Đường `TECH_WORKER_ALLOW_MACHINE_GIT` đã gỡ: worker không còn lệnh `git push` nào.
+
+Rủi ro còn lại, nói thẳng: ruleset `main` hiện 0 lượt duyệt — PR do bot mở từ nhánh worker gộp được khi `gates / gates`
+xanh nếu có NGƯỜI (hoặc Delivery Controller) bấm gộp. Phạm vi ghi theo năng lực giới hạn thứ một lượt worker ghi được, nhưng
+người gộp vẫn là chốt chặn cuối. Máy chủ chưa có danh tính bot ⇒ worker dừng `BLOCKED` kèm câu chỉ đúng việc (ops
+`apply-agent-env`). Không bao giờ hỏi PAT.
+
+**Thu hồi khoá lộ của `dogfood-1` (0236).** Khoá đó đã hiện ra màn hình qua đường "dán vào PowerShell" cũ — đường này đã
+gỡ (`registerTechWorkerAction`). Migration đặt băm của một chuỗi ngẫu nhiên không ai giữ + `secret_revoked_at` + tắt worker
++ lý do «Khoá cũ có thể đã lộ — tạo lại bằng bộ cài», ghi một sự kiện `worker.secret_revoked`; điều kiện chặt
+(`key = 'dogfood-1'`, chưa từng ghi danh qua bộ cài, chưa thu hồi, tạo trước mốc deploy — KHÔNG xét nhịp tim: khoá đã hiện
+ra màn hình là lộ dù đã dùng hay chưa), chạy lại không đổi gì,
+không xoá dòng. Sau deploy: chủ shop bấm «Cài worker trên máy Windows này» cho `dogfood-1`.
+
+Chủ shop vẫn phải tự làm: bấm đúp tệp (Windows SmartScreen có thể hỏi «vẫn chạy?» vì tệp tải từ web); đăng nhập Claude
+một lần nếu được hỏi; trả lời có / không cho «tự chạy khi đăng nhập Windows». Máy không có winget thì phải tự cài Git /
+Node LTS (bộ cài nói rõ). Máy worker không cần (và không nên có) credential GitHub nào. Tắt worker cũng huỷ bộ cài đang chờ (đổi mã sẽ bật lại worker). Bộ cài / tệp gỡ chỉ dừng tiến
+trình theo tệp PID khi dòng lệnh của nó chứa thư mục của chính worker (PID có thể đã được Windows cấp lại). Kiểm thử:
+`tests/tech-worker-onboarding.test.ts` (phân tích tĩnh bộ cài, không cần Windows; git THẬT trên kho tạm cho lượt đẩy và bộ
+dọn cây).

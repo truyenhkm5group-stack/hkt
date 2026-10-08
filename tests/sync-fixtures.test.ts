@@ -70,6 +70,7 @@ import { testWorkOs } from "./work-os.test";
 import { testTechControlPlaneDb, testTechHealthParsing, testTechLifecycle, testTechPermissions, testTechRiskEngine } from "./tech-control-plane.test";
 import { testTechControlPlaneGoalsDb, testTechControlPlaneVocabulary } from "./tech-control-plane-goals.test";
 import { testTechWorkerDb, testTechWorkerPure } from "./tech-worker.test";
+import { testTechWorkerOnboardingDb, testTechWorkerOnboardingPure } from "./tech-worker-onboarding.test";
 import { testTechDeliveryDb, testTechDeliveryPure } from "./tech-delivery.test";
 import { testTechPolicyDb, testTechPolicyPure } from "./tech-policy.test";
 import { testAgentRunner, testAgentSandbox, testGithubDeploymentSync, testPhase2aBarriers, testPhase2aSourceGuards, testTechWorkProjection } from "./tech-phase2a.test";
@@ -2439,6 +2440,7 @@ async function main() {
   await testTechWorkerDb();
   await testTechDeliveryDb();
   await testTechPolicyDb();
+  await testTechWorkerOnboardingDb();
   /*
     PHASE 2A. Chạy ngay sau mặt phẳng điều khiển và tự dọn bằng tiền tố `p2a-`. Ba khối đầu đụng
     CSDL; khối runner còn dựng KHO GIT TẠM và chạy tiến trình con thật (`npm run typecheck` trong
@@ -2640,6 +2642,7 @@ async function main() {
   testTechWorkerPure();
   testTechDeliveryPure();
   testTechPolicyPure();
+  testTechWorkerOnboardingPure();
   testTechPermissions();
   testTechHealthParsing();
   testRepoIntegrity();

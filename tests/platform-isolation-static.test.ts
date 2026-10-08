@@ -491,6 +491,10 @@ const ROUTE_CONG_KHAI: Record<string, { lyDo: string; cong: RegExp | null }> = {
     lyDo: "Worker headless của Phòng Tech AI (docs/tech-control-plane/README.md mục 4) — không phiên; khoá RIÊNG từng worker (CSDL nhà giữ băm). Rơi về tổ chức NHÀ là ĐÚNG ý đồ: mặt phẳng điều khiển Tech chỉ có ở tổ chức nhà, worker chỉ chạm việc mình đang giữ lease.",
     cong: /\bauthenticateTechWorker\(/,
   },
+  "app/api/tech/worker/enroll/route.ts": {
+    lyDo: "Bộ cài worker (docs/tech-control-plane/README.md mục 15) đổi MÃ GHI DANH dùng một lần lấy khoá worker — chưa có phiên lẫn khoá. Mã do người có tech:manage tạo, CSDL nhà giữ băm, chỉ đọc từ thân request, mọi thất bại cùng 401, trần thử theo IP. Rơi về tổ chức NHÀ là ĐÚNG ý đồ: worker chỉ có ở tổ chức nhà.",
+    cong: /\bredeemWorkerEnrollment\(/,
+  },
   "app/api/tech/agent-task/route.ts": { lyDo: "Máy chạy agent đọc việc được giao — cùng khoá với cửa ghi, có trần lượt gọi.", cong: /\bsecretEquals\(/ },
   "app/api/video-scale/public/[id]/route.ts": { lyDo: "URL tệp video Meta tải về để đăng Reel — không có phiên; mỗi URL mang chữ ký HMAC có hạn, sai / hết hạn ⇒ 404.", cong: /\bverifyAssetSignature\(/ },
   "app/api/ical/[token]/route.ts": { lyDo: "Lịch .ics của một phòng (module stays) cho kênh lưu trú tự tải — không phiên; serveStayFeed tách mã tổ chức khỏi token, chạy trong withOrganization, kiểm module + token phòng ngẫu nhiên; sai ⇒ 404.", cong: /\bserveStayFeed\(/ },

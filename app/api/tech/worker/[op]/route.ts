@@ -3,6 +3,8 @@ import { z } from "zod";
 import { clientIpFrom } from "@/lib/auth/client-ip";
 import { TECH_GATE_RESULTS, TECH_OWNER_ESCALATIONS } from "@/lib/constants/tech";
 import { TECH_LEASE, TECH_RUN_OUTCOMES } from "@/lib/constants/tech-worker";
+import { SUBMIT_LIMITS, SUBMIT_MODES } from "@/lib/constants/tech-worker-submit";
+import { recordWorkerDiagnostics, submitWorkerChanges, takeWorkerRepair } from "@/lib/tech/worker-onboarding";
 import {
   authenticateTechWorker,
   claimNextTechTask,
@@ -26,6 +28,13 @@ export const dynamic = "force-dynamic";
  *   POST /api/tech/worker/claim      — xin MỘT việc
  *   POST /api/tech/worker/start      — đã dựng cây làm việc
  *   POST /api/tech/worker/complete   — kết cục trong danh sách đóng
+ *   POST /api/tech/worker/submit-changes — nộp BỘ THAY ĐỔI; MÁY CHỦ kiểm rồi tự ghi nhánh (mục 15). Worker KHÔNG nhận
+ *        bất kỳ credential GitHub nào — không có cửa nào trao token xuống.
+ *
+ * (`POST /api/tech/worker/enroll` là route RIÊNG, không cần khoá worker — bộ cài đổi mã ghi danh lấy khoá.)
+ *
+ * Nhịp tim mang kèm (tuỳ chọn) BÁO CÁO TỰ KIỂM — máy chủ lọc + che trước khi lưu — và nhận về (tuỳ chọn) MỘT lệnh
+ * sửa trong danh sách ĐÓNG `TECH_REPAIR_COMMANDS`.
  *
  * Xác thực bằng khoá RIÊNG từng worker (`Authorization: Bearer tw_<id>.<secret>`, CSDL chỉ giữ băm) — không
  * dùng `CRON_SECRET` hay khoá chung: tắt một worker không được làm sập worker khác. Lược đồ `.strict()`: trường
@@ -50,6 +59,8 @@ const heartbeatSchema = z
       )
       .max(TECH_LEASE.maxConcurrencyCeiling)
       .optional(),
+    /** Báo cáo tự kiểm — hình dạng do `sanitizeWorkerDiagnostics` quyết (lọc + che + trần 4 KB); ở đây chỉ chặn cỡ thô. */
+    diagnostics: z.record(z.string(), z.unknown()).optional(),
   })
   .strict();
 
@@ -71,6 +82,27 @@ const completeSchema = z
     cost: z.object({ usd: z.number().min(0).nullable().optional(), inputTokens: z.number().int().min(0).optional(), outputTokens: z.number().int().min(0).optional(), estimated: z.boolean().optional() }).strict().nullable().optional(),
     ownerEscalation: z.enum(TECH_OWNER_ESCALATIONS).nullable().optional(),
     ownerAction: z.string().max(2000).nullable().optional(),
+  })
+  .strict();
+
+/** Bộ thay đổi — trần thô ở đây (chặn gói khổng lồ trước khi đọc), luật thật ở `validateSubmission`. */
+const submitSchema = z
+  .object({
+    ...fence,
+    message: z.string().min(1).max(SUBMIT_LIMITS.maxMessageChars),
+    files: z
+      .array(
+        z
+          .object({
+            path: z.string().min(1).max(SUBMIT_LIMITS.maxPathChars),
+            mode: z.enum(SUBMIT_MODES).optional(),
+            contentBase64: z.string().max(Math.ceil(SUBMIT_LIMITS.maxFileBytes / 3) * 4).optional(),
+            delete: z.literal(true).optional(),
+          })
+          .strict(),
+      )
+      .min(1)
+      .max(SUBMIT_LIMITS.maxFiles),
   })
   .strict();
 
@@ -115,6 +147,8 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ op: string
   // Ngăn của khoá ĐÃ xác thực — chỉ chính worker đó chạm tới được.
   if (quaTran(`ok:${worker.id}`)) return NextResponse.json({ error: "rate_limited" }, { status: 429 });
 
+  // Gói quá trần thô (bộ thay đổi tối đa ~5 MB nội dung ⇒ ~7 MB base64) ⇒ từ chối trước khi đọc thân.
+  if (Number(req.headers.get("content-length") ?? 0) > 8_000_000) return NextResponse.json({ error: "payload too large" }, { status: 413 });
   let body: unknown = {};
   try {
     body = await req.json();
@@ -131,7 +165,11 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ op: string
       case "heartbeat": {
         const p = heartbeatSchema.safeParse(body);
         if (!p.success) return NextResponse.json({ error: p.error.issues[0]?.message ?? "bad request" }, { status: 400 });
-        return NextResponse.json(await techWorkerHeartbeat(worker, p.data));
+        if (p.data.diagnostics && JSON.stringify(p.data.diagnostics).length > 16_384) return NextResponse.json({ error: "diagnostics too large" }, { status: 413 });
+        const hb = await techWorkerHeartbeat(worker, p.data);
+        if (p.data.diagnostics) await recordWorkerDiagnostics(worker.id, p.data.diagnostics);
+        const repair = await takeWorkerRepair(worker.id);
+        return NextResponse.json(repair ? { ...hb, repair } : hb);
       }
       case "claim": {
         return NextResponse.json(await claimNextTechTask(worker));
@@ -148,6 +186,13 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ op: string
         if (!p.success) return NextResponse.json({ error: p.error.issues[0]?.message ?? "bad request" }, { status: 400 });
         const r = await completeTechWorkerRun(worker, p.data);
         if ("error" in r) return NextResponse.json(r, { status: FENCE_ERRORS.has(r.error) ? 409 : 422 });
+        return NextResponse.json(r);
+      }
+      case "submit-changes": {
+        const p = submitSchema.safeParse(body);
+        if (!p.success) return NextResponse.json({ error: p.error.issues[0]?.message ?? "bad request" }, { status: 400 });
+        const r = await submitWorkerChanges(worker, p.data);
+        if ("error" in r) return NextResponse.json(r, { status: r.error === "NOT_CONFIGURED" ? 503 : FENCE_ERRORS.has(r.error) ? 409 : 422 });
         return NextResponse.json(r);
       }
       default:

@@ -115,6 +115,13 @@ export async function setTechWorkerEnabled(input: { workerId: string; enabled: b
     .where(eq(schema.techWorkers.id, input.workerId))
     .returning({ id: schema.techWorkers.id });
   if (!row) return { error: "Không tìm thấy worker." };
+  // Tắt ⇒ bộ cài đang chờ (mã ghi danh còn hạn) cũng chết: đổi mã sẽ BẬT lại worker, nên để mã sống là để tắt vô nghĩa.
+  if (!input.enabled) {
+    await db
+      .update(schema.techWorkerEnrollments)
+      .set({ revokedAt: new Date() })
+      .where(and(eq(schema.techWorkerEnrollments.workerId, row.id), sql`${schema.techWorkerEnrollments.usedAt} IS NULL AND ${schema.techWorkerEnrollments.revokedAt} IS NULL`));
+  }
   await recordTechEvent(db, { name: input.enabled ? "worker.enabled" : "worker.disabled", subjectType: "WORKER", subjectId: row.id, payload: { reason: input.reason ?? "" } }, actor);
   return { ok: true };
 }
@@ -125,7 +132,8 @@ export async function authenticateTechWorker(header: string | null | undefined):
   if (!m) return null;
   const db = await getDb();
   const w = await db.query.techWorkers.findFirst({ where: eq(schema.techWorkers.id, m[1]) });
-  if (!w) return null;
+  // Khoá đã thu hồi (lộ / tạo lại token / gỡ worker) ⇒ không khoá nào hợp lệ, kể cả khi băm tình cờ khớp (mục 15).
+  if (!w || w.secretRevokedAt || w.removedAt) return null;
   const a = Buffer.from(sha256(m[2]), "hex");
   const b = Buffer.from(w.secretHash, "hex");
   if (a.length !== b.length || !timingSafeEqual(a, b)) return null;
@@ -401,8 +409,8 @@ export async function claimNextTechTask(worker: TechWorkerRow, now = new Date())
 
 type Fence = { runId: string; leaseGeneration: number };
 
-/** Lượt chạy còn thuộc worker này, đúng generation, còn mở — hoặc lý do không. */
-async function fenced(db: Db, worker: TechWorkerRow, f: Fence) {
+/** Lượt chạy còn thuộc worker này, đúng generation, còn mở — hoặc lý do không. Xuất ra cho cửa cấp token đẩy (mục 15). */
+export async function fenced(db: Db, worker: TechWorkerRow, f: Fence) {
   const run = await db.query.techAgentRuns.findFirst({ where: eq(schema.techAgentRuns.id, f.runId) });
   if (!run || run.workerId !== worker.id) return { ok: false as const, reason: "RUN_NOT_YOURS" };
   if (run.status !== "RUNNING") return { ok: false as const, reason: "RUN_CLOSED" };
