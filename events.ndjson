@@ -1007,3 +1007,4 @@
 {"at":"2026-10-08T21:30:03.337Z","actor":"DESKTOP-56TH98Y:wt-pr-g","kind":"HANDOFF","mission":"erp-a11y-bo-cuc","detail":"claude/erp-a11y-bo-cuc @ 8276b8c2d7b3 · 4 lệnh kiểm thử"}
 {"at":"2026-10-08T21:35:25.907Z","actor":"DESKTOP-56TH98Y:wt-pr-h","kind":"UPDATE","mission":"kenh-dang-chay-trong-app","detail":"RUNNING → RUNNING · 13 mẫu phạm vi · MEDIUM"}
 {"at":"2026-10-08T21:36:30.954Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"erp-a11y-bo-cuc","detail":"#708 cho claude/erp-a11y-bo-cuc @ 8276b8c2d7b3"}
+{"at":"2026-10-08T21:36:52.801Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#708 @ 8276b8c2d7b3 · Chỉ trợ năng: htmlFor/id, aria-label cho Switch/ô số/nút biểu tượng, h1 cho not-found; không đổi giá trị mặc định hay luật. Bài erp-a11y khoá."}

@@ -1,0 +1,8 @@
+{
+  "pr": 708,
+  "sha": "8276b8c2d7b3464e1af69476daadfd7e00531f5d",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-08T21:36:45.853Z",
+  "note": "Chỉ trợ năng: htmlFor/id, aria-label cho Switch/ô số/nút biểu tượng, h1 cho not-found; không đổi giá trị mặc định hay luật. Bài erp-a11y khoá."
+}
