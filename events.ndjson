@@ -694,3 +694,4 @@
 {"at":"2026-10-08T08:16:07.108Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"hslc-prepaid-ai","detail":"#674 cho feat/org-prepaid-ai @ 0c132d29539b"}
 {"at":"2026-10-08T08:16:55.093Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"CLAIM","mission":"saas-v1-plan-migration","detail":"RUNNING · 4 mẫu phạm vi · HIGH"}
 {"at":"2026-10-08T08:18:46.155Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"order-confirm-rules-0810","detail":"feat/order-confirm-rules @ be387d7f627d · 1 lệnh kiểm thử"}
+{"at":"2026-10-08T08:19:03.619Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"order-confirm-rules-0810","detail":"#675 cho feat/order-confirm-rules @ be387d7f627d"}
