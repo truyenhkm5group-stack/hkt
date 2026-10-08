@@ -29,20 +29,20 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-08T02:07:54.255Z",
-  "updated_at": "2026-10-08T02:44:16.937Z",
-  "last_heartbeat": "2026-10-08T02:44:02.071Z",
+  "updated_at": "2026-10-08T02:52:04.868Z",
+  "last_heartbeat": "2026-10-08T02:52:04.868Z",
   "definition_of_done": [],
   "handoff": {
     "branch": "fix/chatbot-security-5",
-    "sha": "89be68d92b45e2142ac21aef253673edd1acf9ca",
-    "at": "2026-10-08T02:44:02.071Z",
+    "sha": "b0067c21afcf0ca78c247fce2a165c121acdeaf6",
+    "at": "2026-10-08T02:52:04.868Z",
     "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
     "title": "Đơn trong khung chat: hồ sơ chưa xác minh không điền sẵn / không làm dự phòng; bài học bot: LOW review #656 vòng 2",
-    "summary": "MEDIUM review #656: form tạo đơn trong khung chat thôi điền tên / địa chỉ ĐÃ LƯU của hồ sơ gắn qua SĐT gõ tay (chưa khớp Facebook) và ô trống không còn lấy chữ đã lưu (kể cả khi bỏ chọn hồ sơ) — lấy chữ khách gõ trong hội thoại, không có thì bắt nhập; hồ sơ khớp Facebook như cũ. LOW review #656 vòng 2: chấm giữa có dấu cách không còn thành tên miền, nhãn hành chính / có dấu chỉ là tên miền khi có đường dẫn dính liền hoặc đuôi quen, «trả trước» so trên chữ gốc, thêm 8 đuôi rẻ. Rủi ro LOW còn lại (POS + hồ sơ bot tạo + ô địa chỉ trống) ghi nhận, không sửa.",
+    "summary": "MEDIUM review #656 + MEDIUM review #657: form tạo đơn trong khung chat không còn điền / dùng chữ ĐÃ LƯU của hồ sơ chưa xác minh, kể cả chữ máy chủ điền từ đơn cũ (savedAddress) — chỉ chữ khách gõ, không có thì bắt nhập; hồ sơ khớp Facebook như cũ. LOW review #656 vòng 2 cho bộ lọc bài học.",
     "tests": [
-      "tests/chat-order.test.ts: hàm thuần chatCustomerTrust · kẻ gian gõ SĐT nạn nhân ⇒ ngữ cảnh không chứa chữ đã lưu, ô trống lấy chữ gõ (tên · địa chỉ · tỉnh) · bỏ chọn hồ sơ ⇒ tìm theo SĐT gõ, người nhận vẫn là chữ gõ · hồ sơ gắn mà chưa gõ gì ⇒ từ chối, không ghi · hồ sơ khớp Facebook như cũ · chọn hồ sơ khác ⇒ không còn xác minh",
-      "tests/self-service-journey.test.ts: kiểm, trả trước · trả tiền trước · tra truoc · tp.click/pay · tt.top · tp.abcd/pay · thanhtoan . icu bắt; xin lỗi · shop · Dạ.em · TP.HCM / Hà Nội không chặn",
-      "kiểm đột biến 25/25 chết",
+      "tests/chat-order.test.ts: hàm thuần chatCustomerTrust (đúng hồ sơ · đúng true · khung thử · hồ sơ khác · savedAddress) · kẻ gian gõ SĐT nạn nhân ⇒ không chữ đã lưu, ô trống lấy chữ gõ · bỏ chọn hồ sơ · hồ sơ chưa gõ gì ⇒ từ chối · savedAddress (máy điền từ đơn cũ) ⇒ không hiện, từ chối · khớp Facebook như cũ · hồ sơ khác",
+      "tests/self-service-journey.test.ts: LOW #656 vòng 2 (bắt 7 · không chặn 3)",
+      "kiểm đột biến 26/26",
       "chat-order · native-order-sync · self-service-journey · inbox-advanced · hội thoại vàng 12/12; typecheck + eslint + hợp đồng tĩnh sạch; ký tự vô hình 0"
     ]
   }
