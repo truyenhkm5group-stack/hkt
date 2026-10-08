@@ -937,3 +937,4 @@
 {"at":"2026-10-08T18:50:18.333Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"cutover-unpriced-tolerance","detail":"#699 @ 022c180cb937 → aa1fb680cd24 (MERGE_NOW · MEDIUM · gates success)"}
 {"at":"2026-10-08T18:52:30.205Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"saas-shell-polish","detail":"#700 @ 8f063effd7ae → c2918d775972 (MERGE_ISOLATED · HIGH · gates success)"}
 {"at":"2026-10-08T18:59:49.985Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"saas-acceptance-hardening","detail":"#696 @ ab0f5a944aec → 6883bfbf9b23 (MERGE_ISOLATED · HIGH · gates success)"}
+{"at":"2026-10-08T19:04:14.094Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DEPLOY_DISPATCHED","detail":"6883bfbf9b23 · run 37829126099 https://github.com/truyenhkm5group-stack/hkt/actions/runs/37829126099"}
