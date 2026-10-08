@@ -1,0 +1,8 @@
+{
+  "pr": 658,
+  "sha": "c21419bfd3b92ca4c43ee197fa052c210b6b2e59",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-08T03:54:32.947Z",
+  "note": "Review đúng-sai độc lập 2 vòng: vòng 1 PASS ở 95c53bf3 (đối chứng cũ/mới chạy thật: tái cấu trúc không đổi số cũ) kèm MEDIUM-1 (thử nghiệm đã dừng vẫn in chênh lệch lãi); đã vá, vòng 2 PASS ở c21419bf. Hoãn có ghi nhận: LOW-A bài kiểm chưa ghim ô chênh lệch lấy từ báo cáo; LOW-B ba chênh lệch cũ (ra đơn / giao / tỷ lệ giao) vẫn in sau khi dừng; LOW cũ (COPILOT, nhãn cận, ERROR = chưa định giá, hiệ"
+}
