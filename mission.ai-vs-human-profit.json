@@ -10,23 +10,26 @@
   "worker": null,
   "worktree": null,
   "branch": "feat/ai-vs-human-profit",
-  "base_sha": null,
+  "base_sha": "85faea0b168cc3aeee53f54486eba9a6baf62404",
   "domains": [],
   "owned_paths": [
     "lib/sales-chatbot/experiment-report.ts",
     "lib/sales-chatbot/experiment-shared.ts",
     "lib/sales-chatbot/performance.ts",
+    "lib/sales-chatbot/attribution.ts",
+    "lib/sales-chatbot/attribution-shared.ts",
     "lib/ai-usage/conversation-cost.ts",
     "app/(dashboard)/ai/sales-chatbot/performance/**",
     "docs/revenue-attribution.md",
-    "tests/sales-experiment-report.test.ts"
+    "tests/sales-experiment-report.test.ts",
+    "tests/saas-hide-internal.test.ts"
   ],
   "dependencies": [],
   "blocked_by": [],
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-08T02:03:03.068Z",
-  "updated_at": "2026-10-08T02:03:03.068Z",
-  "last_heartbeat": "2026-10-08T02:03:03.068Z",
+  "updated_at": "2026-10-08T02:52:56.776Z",
+  "last_heartbeat": "2026-10-08T02:52:56.776Z",
   "definition_of_done": []
 }
