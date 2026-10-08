@@ -34,18 +34,18 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-08T07:41:09.134Z",
-  "updated_at": "2026-10-08T09:03:58.175Z",
-  "last_heartbeat": "2026-10-08T09:03:58.175Z",
+  "updated_at": "2026-10-08T09:04:14.400Z",
+  "last_heartbeat": "2026-10-08T09:04:14.400Z",
   "definition_of_done": [],
   "handoff": {
     "branch": "feat/org-prepaid-ai",
-    "sha": "0c132d29539b5b84615d02177ba3e44fc20cb237",
-    "at": "2026-10-08T08:15:45.865Z",
+    "sha": "95e2b3f1d5d73848bd4843b17b3817c7a9864b5b",
+    "at": "2026-10-08T09:04:14.400Z",
     "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
     "title": "HSLC dùng AI dùng chung trả trước: nạp QR như khách, nạp bao nhiêu dùng bấy nhiêu, đồng hồ khách AI như khách",
-    "summary": "Chế độ AI dùng chung trả trước cho một tổ chức (HSLC): phiên bản giá «Trả trước theo khách AI» chép giá cũ, gồm 0 khách AI, 590đ/khách dẫn xuất từ giá vượt Starter; cờ Số dư AI bật ⇒ softOnly, cổng chặn là số dư; ops org-prepaid-ai chạy thử mặc định, --apply từng bước MỞ NẠP / KÍCH HOẠT có nhật ký; chặn khi chưa khai tài khoản nhận tiền",
+    "summary": "Sau review #674: chặn kích hoạt khi còn hoá đơn gia hạn giá cũ đang mở + trả hoá đơn cũ không ghim lùi; có credit ⇒ credit là ngưỡng cảnh báo, trần cứng = credit × 3; chưa credit ⇒ trần của gói; kích hoạt đòi số dư ≥ max(100K, 1 ngày) và --unit khớp; isPrepaidAiPrice chỉ LEGACY_SNAPSHOT; runbook + giới hạn đã biết",
     "tests": [
-      "tsc + eslint sạch; org-prepaid-ai (PGlite: chặn khi chưa khai tài khoản, mở nạp, nạp SePay cộng 1 lần, kích hoạt, trừ 590đ/khách mới, hết số dư chặn khách mới, credit không phải cổng, tắt cờ ⇒ trần cứng, tổ chức khác nguyên) + platform-billing, ai-balance*, pricing-*, saas-l5-billing-trial, ai-usage, org-ai-cutover đạt; hợp đồng tĩnh sau commit; đột biến 6/7 (1 lớp phòng thủ); 0 ký tự vô hình"
+      "tsc + eslint sạch; org-prepaid-ai + ai-balance* + platform-billing + pricing-* + saas-l5 + ai-usage + org-ai-cutover đạt; static sau commit; đột biến 10/10; 0 ký tự vô hình"
     ]
   }
 }
