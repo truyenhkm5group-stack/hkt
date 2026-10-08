@@ -339,9 +339,17 @@ function verifiedCustomerId(state: ChatState): string | null {
 
 const price = (n: number | null) => (n === null ? "chưa có giá" : formatVND(n));
 
+export const ADD_ON_ONLY_NOTE = "CHỈ BÁN KÈM — KHÔNG báo giá riêng, KHÔNG chào như món chính, KHÔNG lên đơn chỉ có mẫu mã này. Chỉ thêm khi đơn đã có một mẫu mã chính và khách muốn lấy thêm (vd 1,5kg = 1kg + 0,5kg).";
+
 function itemView(it: CatalogItem) {
-  return { variant_id: it.variantId, name: it.name, variant: it.variant || null, sku: it.sku, price: it.price, price_text: price(it.price), ...it.fields };
+  return { variant_id: it.variantId, name: it.name, variant: it.variant || null, sku: it.sku, price: it.price, price_text: price(it.price), ...(it.addOnOnly ? { add_on_only: true, note: ADD_ON_ONLY_NOTE } : {}), ...it.fields };
 }
+
+/** Đơn / giỏ CHỈ gồm mẫu mã bán kèm ⇒ không bán (0238). HÀM THUẦN. */
+export function onlyAddOns(lines: readonly { variantId: string }[], items: ReadonlyMap<string, Pick<CatalogItem, "addOnOnly">>): boolean {
+  return lines.length > 0 && lines.every((l) => items.get(l.variantId)?.addOnOnly === true);
+}
+const ADD_ON_ONLY_ERROR = "Giỏ / đơn chỉ có mẫu mã CHỈ BÁN KÈM (vd 0,5kg) — không bán riêng. Báo khách quy cách nhỏ nhất bán riêng (vd 1kg) và giá; khách lấy món chính rồi mới thêm mẫu mã bán kèm.";
 
 function ok(summary: string, data: unknown, state: ChatState): ToolOutcome {
   return { content: JSON.stringify(data), isError: false, summary, state };
@@ -350,7 +358,7 @@ function err(summary: string, message: string, state: ChatState, orderSignal?: T
   return { content: JSON.stringify({ error: message }), isError: true, summary, state, ...(orderSignal ? { orderSignal } : {}) };
 }
 
-export type Priced = { ship: ShipVerdict; lines: { variantId: string; name: string; quantity: number; unitPrice: number; lineTotal: number }[]; subtotal: number; shippingFee: number | null; total: number | null; unpriced: string[]; missing: string[] };
+export type Priced = { ship: ShipVerdict; lines: { variantId: string; name: string; quantity: number; unitPrice: number; lineTotal: number }[]; subtotal: number; shippingFee: number | null; total: number | null; unpriced: string[]; missing: string[]; /** Mọi dòng là mẫu mã chỉ bán kèm (0238). */ addOnOnly?: boolean };
 
 /**
  * Bảng giá áp cho khách của hội thoại khi shop BẬT báo giá sỉ (`wholesalePricing`); TẮT ⇒ `null` = giá lẻ như trước. Khách
@@ -415,7 +423,7 @@ export async function priceLines(lines: readonly CartLine[], cfg: SalesChatbotCo
   }
   const ship = freeShipVerdict(cfg.freeShipping, subtotal, weight, address, formatVND);
   const shippingFee = ship.kind === "FREE" ? 0 : cfg.shippingFee;
-  return { ship, lines: out, subtotal, shippingFee, total: shippingFee === null ? null : subtotal + shippingFee, unpriced, missing };
+  return { ship, lines: out, subtotal, shippingFee, total: shippingFee === null ? null : subtotal + shippingFee, unpriced, missing, ...(onlyAddOns(lines, byId) ? { addOnOnly: true } : {}) };
 }
 
 export function mergeLines(lines: readonly CartLine[]): CartLine[] {
@@ -625,6 +633,7 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
       const priced = await priceLines(mergeLines(items.data.map((i) => ({ variantId: i.variant_id, quantity: i.quantity }))), ctx.config, verifiedCustomerId(state), knownAddress);
       if (priced.missing.length) return err("Tính giỏ: mã không có", `Không có mẫu mã: ${priced.missing.join(", ")}.`, state);
       if (priced.unpriced.length) return { ...err("Tính giỏ: mã chưa có giá", `Chưa có giá: ${priced.unpriced.join(", ")} — không báo giá, chuyển nhân viên.`, state), requireHuman: `Giá bất thường: ${priced.unpriced.join(", ")} chưa có giá` };
+      if (priced.addOnOnly) return err("Tính giỏ: chỉ có món bán kèm", ADD_ON_ONLY_ERROR, state);
       return ok(`Giỏ: ${formatVND(priced.subtotal)}${priced.total !== null ? ` · COD ${formatVND(priced.total)}` : ""}`, cartView(priced), state);
     }
     case "create_customer": {
@@ -689,6 +698,7 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
       const priced = await priceLines(lines, ctx.config, verifiedCustomerId(state), [recipient.address, recipient.province].join(", "));
       if (priced.missing.length) return err("Đơn nháp: mã không có", `Không có mẫu mã: ${priced.missing.join(", ")}.`, state, { reason: "UNKNOWN_SKU" });
       if (priced.unpriced.length) return { ...err("Đơn nháp: mã chưa có giá", `Chưa có giá: ${priced.unpriced.join(", ")}.`, state, { reason: "UNPRICED_SKU" }), requireHuman: `Giá bất thường: ${priced.unpriced.join(", ")} chưa có giá` };
+      if (priced.addOnOnly) return err("Đơn nháp: chỉ có món bán kèm", ADD_ON_ONLY_ERROR, state);
       const firstShown = existing?.firstShownTurn ?? existing?.shownTurn ?? ctx.turn;
       const draft = { ...(ctx.turn !== undefined ? { shownTurn: ctx.turn } : {}), ...(firstShown !== undefined ? { firstShownTurn: firstShown } : {}), orderId: existing?.orderId ?? null, lines, unitPrices: Object.fromEntries(priced.lines.map((l) => [l.variantId, l.unitPrice])), recipient, note: v.data.delivery_note ?? existing?.note ?? "", simulated };
       if (!simulated) {
@@ -723,6 +733,7 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
       if (!d.recipient.name || !d.recipient.phone || !d.recipient.address) return err("Chốt: thiếu người nhận", "Thiếu tên / SĐT / địa chỉ người nhận.", state, { reason: "MISSING_CONTACT", fields: (["name", "phone", "address"] as const).filter((k) => !d.recipient[k]).map((k) => `recipient.${k}`) });
       const priced = await priceLines(d.lines, ctx.config, verifiedCustomerId(state), [d.recipient.address, d.recipient.province].join(", "));
       if (priced.missing.length || priced.unpriced.length) return err("Chốt: mã không bán được", "Có mẫu mã không còn bán hoặc chưa có giá — chuyển nhân viên.", state, { reason: priced.missing.length ? "UNKNOWN_SKU" : "UNPRICED_SKU" });
+      if (priced.addOnOnly) return err("Chốt: chỉ có món bán kèm", ADD_ON_ONLY_ERROR, state);
       const changed = priced.lines.filter((l) => d.unitPrices[l.variantId] !== l.unitPrice);
       if (changed.length) {
         state.draft = { ...d, unitPrices: Object.fromEntries(priced.lines.map((l) => [l.variantId, l.unitPrice])) };

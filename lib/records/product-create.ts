@@ -100,6 +100,7 @@ function variantValues(data: ManualProductInput, v: ManualProductInput["variants
     retailPriceAfterDiscount: retail ?? 0,
     lastImportedPrice: cost ?? 0,
     isHidden: !v.selling,
+    addOnOnly: v.addOnOnly,
   };
 }
 
@@ -185,7 +186,7 @@ export async function updateProductCore(user: SessionUser, productId: string, ra
     action: "PRODUCT_UPDATE",
     entity: "PRODUCT",
     entityId: productId,
-    before: { name: before.name, code: before.customId, raw: before.raw, variants: before.variants.map((v) => ({ id: v.id, sku: v.sku, size: v.size, color: v.color, retailPrice: v.retailPrice, cost: v.lastImportedPrice, selling: !v.isHidden })) },
+    before: { name: before.name, code: before.customId, raw: before.raw, variants: before.variants.map((v) => ({ id: v.id, sku: v.sku, size: v.size, color: v.color, retailPrice: v.retailPrice, cost: v.lastImportedPrice, selling: !v.isHidden, addOnOnly: v.addOnOnly })) },
     after: { ...data, addedVariantIds: result.added },
     reason: "Sửa sản phẩm tạo tay trên ERP",
   });

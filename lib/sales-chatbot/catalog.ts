@@ -26,6 +26,8 @@ export type CatalogItem = {
   fields: Record<string, string>;
   /** Khối lượng mẫu mã (gram, cột `weight`) — `null` khi chưa nhập (luật miễn ship đọc quy cách trong tên thay thế). */
   weightGrams?: number | null;
+  /** CHỈ BÁN KÈM (0238): không báo giá riêng, không bán riêng — chỉ thêm khi đơn có mẫu mã chính. */
+  addOnOnly?: boolean;
 };
 
 export type StockInfo = { variantId: string; stockKnown: boolean; onHand: number | null; available: number | null };
@@ -67,7 +69,7 @@ export async function sellableCatalog(allowedFields: readonly string[], only?: r
   const pv = schema.productVariants;
   const p = schema.products;
   const rows = await db
-    .select({ variantId: pv.id, productId: pv.productId, name: p.name, sku: pv.sku, detail: pv.detail, color: pv.color, size: pv.size, price: pv.retailPrice, weight: pv.weight })
+    .select({ variantId: pv.id, productId: pv.productId, name: p.name, sku: pv.sku, detail: pv.detail, color: pv.color, size: pv.size, price: pv.retailPrice, weight: pv.weight, addOnOnly: pv.addOnOnly })
     .from(pv)
     .innerJoin(p, eq(p.id, pv.productId))
     .where(and(eq(pv.isRemoved, false), eq(pv.isHidden, false), eq(p.isRemoved, false), only ? inArray(pv.id, [...only]) : undefined))
@@ -83,6 +85,7 @@ export async function sellableCatalog(allowedFields: readonly string[], only?: r
     price: r.price > 0 ? r.price : null,
     fields: fields.get(r.productId) ?? {},
     weightGrams: r.weight > 0 ? r.weight : null,
+    ...(r.addOnOnly ? { addOnOnly: true } : {}),
   }));
 }
 
@@ -131,7 +134,7 @@ export function searchCatalog(items: readonly CatalogItem[], query: string, limi
   });
   return scored
     .filter((s) => s.hits > 0)
-    .sort((a, b) => b.score - a.score || a.i - b.i)
+    .sort((a, b) => b.score - a.score || Number(Boolean(a.it.addOnOnly)) - Number(Boolean(b.it.addOnOnly)) || a.i - b.i)
     .slice(0, limit)
     .map((s) => s.it);
 }

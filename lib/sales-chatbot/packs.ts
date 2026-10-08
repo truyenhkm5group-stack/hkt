@@ -27,17 +27,23 @@ export type SalesPack = {
   bulkHint: string;
   /** Luật 6 — ví dụ khách đồng ý lấy thêm món sau tóm tắt. */
   addMoreExample: string;
+  /** B1 — ví dụ câu nói khoản tiết kiệm của quy cách lớn hơn (tăng giá trị đơn). */
+  saveExample: string;
+  /** Mẫu mã chỉ bán kèm — ví dụ lúc được thêm vào đơn đã có món chính. */
+  addOnExample: string;
 };
 
 export const FOOD_PACK: SalesPack = {
   key: "food",
   label: "Thực phẩm / hải sản",
   specExample: "(vd 1kg hay 2kg)",
-  describeLine: "  · «nguyên chất», «tươi», «loại ngon», «thật»… là MÔ TẢ, không phải tên sản phẩm khác; «1kí», «1 ký», «1 cân», «1kg» đều là 1kg; «nửa ký» = 0,5kg. Chọn sản phẩm có TÊN khớp món khách nói (vd «chả cá thu») trong kết quả search_products — không kết luận «không có» khi kết quả có sản phẩm cùng tên chính. Mỗi QUY CÁCH (1kg, 0,5kg…) là một mẫu mã riêng với giá riêng: khách nói số lượng không khớp một quy cách (1,5kg, «nửa ký») ⇒ GHÉP từ các quy cách đang bán (vd 1kg + 0,5kg, mỗi dòng đúng mẫu mã của nó); không ghép được ⇒ nói các quy cách shop đang bán, KHÔNG tự chia / nhân giá.",
+  describeLine: "  · «nguyên chất», «tươi», «loại ngon», «thật»… là MÔ TẢ, không phải tên sản phẩm khác; «1kí», «1 ký», «1 cân», «1kg» đều là 1kg; «nửa ký» = 0,5kg. Chọn sản phẩm có TÊN khớp món khách nói (vd «chả cá thu») trong kết quả search_products — không kết luận «không có» khi kết quả có sản phẩm cùng tên chính. Mỗi QUY CÁCH (1kg, 0,5kg…) là một mẫu mã riêng với giá riêng: khách nói số lượng không khớp một quy cách (1,5kg, 2,5kg) ⇒ GHÉP từ các quy cách đang bán (vd 1kg + 0,5kg, mỗi dòng đúng mẫu mã của nó); quy cách mang add_on_only chỉ ghép KÈM một quy cách chính, không bao giờ bán riêng («nửa ký» một mình ⇒ mời quy cách chính nhỏ nhất); không ghép được ⇒ nói các quy cách shop đang bán, KHÔNG tự chia / nhân giá.",
   answeredExample: "(vd shop hỏi «lấy bao nhiêu kg», khách đáp «lấy lần 20-30 kg»)",
   nudgeExample: "(vd «Dạ mình lấy 1kg ăn thử trước nhé, em lên đơn luôn ạ?»)",
   bulkHint: " (từ 10kg)",
   addMoreExample: "«lấy thêm 1kg»",
+  saveExample: "(vd «2kg chỉ 540.000 ₫, rẻ hơn 20.000 ₫ so với lấy lẻ»)",
+  addOnExample: "(1,5kg = 1kg + 0,5kg; thêm 0,5kg món khác để ăn thử)",
 };
 
 export const FASHION_PACK: SalesPack = {
@@ -49,6 +55,8 @@ export const FASHION_PACK: SalesPack = {
   nudgeExample: "(vd «Dạ em lên đơn size M cho mình luôn nhé ạ?»)",
   bulkHint: "",
   addMoreExample: "«lấy thêm 1 cái size M»",
+  saveExample: "(vd «lấy combo 2 cái được giá tốt hơn mua lẻ»)",
+  addOnExample: "(vd phụ kiện đi kèm món chính)",
 };
 
 export const GENERIC_PACK: SalesPack = {
@@ -60,6 +68,8 @@ export const GENERIC_PACK: SalesPack = {
   nudgeExample: "(vd «Dạ em lên đơn cho mình luôn nhé ạ?»)",
   bulkHint: "",
   addMoreExample: "«lấy thêm 1 cái»",
+  saveExample: "(vd «gói lớn rẻ hơn tính theo đơn vị»)",
+  addOnExample: "(vd món phụ đi kèm món chính)",
 };
 
 export const SALES_PACKS: Record<SalesPackKey, SalesPack> = { food: FOOD_PACK, fashion: FASHION_PACK, generic: GENERIC_PACK };

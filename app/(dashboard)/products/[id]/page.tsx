@@ -306,7 +306,7 @@ export default async function ProductDetailPage({ params, searchParams }: { para
                       unit: unit ?? "",
                       retailPrice: "",
                       cost: "",
-                      variants: product.variants.map((v) => ({ id: v.id, sku: v.sku, size: v.size, color: v.color, retailPrice: v.retailPrice ? String(v.retailPrice) : "", cost: v.lastImportedPrice ? String(v.lastImportedPrice) : "", selling: !v.isHidden })),
+                      variants: product.variants.map((v) => ({ id: v.id, sku: v.sku, size: v.size, color: v.color, retailPrice: v.retailPrice ? String(v.retailPrice) : "", cost: v.lastImportedPrice ? String(v.lastImportedPrice) : "", selling: !v.isHidden, addOnOnly: v.addOnOnly })),
                     }}
                   />
                 </div>
