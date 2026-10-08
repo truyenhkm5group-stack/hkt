@@ -96,18 +96,20 @@ export const HELP_GUIDES: readonly HelpGuide[] = [
     key: "chotdon-connect-facebook",
     topic: "START",
     audience: "CHOTDON",
-    title: "Kết nối Facebook để nhận tin khách",
-    summary: "Nối fanpage là bước đầu tiên: tin khách nhắn vào fanpage sẽ hiện ở Hội thoại và AI bắt đầu trả lời.",
+    // Chỉ hướng dẫn đường nối ĐANG CHẠY (Pancake · Zalo OA · ô chat website). Nối thẳng Facebook chờ Meta duyệt quyền Page
+    // (meta-messenger-access BLOCKED_EXTERNAL) — chỉ nhắc kèm «sắp mở», không phải bước khách làm (review #706, 09/10/2026).
+    title: "Nối fanpage để nhận tin khách",
+    summary: "Nối kênh là bước đầu tiên: tin khách nhắn vào fanpage (qua Pancake), Zalo OA hoặc ô chat website sẽ hiện ở Hội thoại và AI bắt đầu trả lời.",
     href: "/ai/channels",
     permission: "ai_sales:view",
     // Nút «Kết nối Facebook» và trang Kết nối chỉ mở cho người có quyền cài đặt (cùng cổng với route bắt đầu nối Facebook).
     alsoRequires: ["settings:manage"],
     steps: [
-      { text: "Mở Kênh kết nối, bấm «Kết nối Facebook».", href: "/ai/channels" },
-      { text: "Đăng nhập Facebook bằng tài khoản ĐANG QUẢN TRỊ fanpage, rồi chọn các Page muốn dùng và đồng ý cấp quyền." },
-      { text: "Xong khi Page hiện trong danh sách với trạng thái sẵn sàng. Chưa thấy thì bấm «Kiểm tra lại»." },
       // Vỏ không có mục menu «Cài đặt → Kết nối»: dẫn thẳng tới trang (vỏ mở được — `/settings/connections` nằm dưới mục Kênh kết nối).
-      { text: "Đang dùng Pancake hoặc Zalo OA? Nối ở trang Kết nối — không cần nối lại Facebook.", href: "/settings/connections" },
+      { text: "Fanpage qua Pancake: mở trang Kết nối, mục «Fanpage qua Pancake», nhập mã trang và mã truy cập của page (lấy trong Pancake → Cài đặt page → Công cụ), rồi Lưu → Kiểm tra → Bật.", href: "/settings/connections" },
+      { text: "Trong Pancake: dán địa chỉ nhận tin của shop vào phần cài đặt nhận tin của page — làm theo từng bước trên thẻ «Fanpage (qua Pancake)» ở AI Sales.", href: "/ai/sales-chatbot" },
+      { text: "Không dùng Pancake: nối Zalo OA ở trang Kết nối, hoặc gắn ô chat lên website (thẻ «Trang chat công khai» trên AI Sales)." },
+      { text: "Nối thẳng Facebook (không qua Pancake) đang chờ Facebook duyệt quyền — sắp mở.", href: "/ai/channels" },
     ],
   },
   {
@@ -115,12 +117,12 @@ export const HELP_GUIDES: readonly HelpGuide[] = [
     topic: "START",
     audience: "CHOTDON",
     title: "Vì sao chưa thấy tin khách?",
-    summary: "Ba chỗ cần xem theo thứ tự: đã nối Page chưa · Page có sẵn sàng không · khách có nhắn thật không.",
+    summary: "Ba chỗ cần xem theo thứ tự: đã nối kênh chưa · đường nhận tin đã thông chưa · khách có nhắn thật không.",
     href: "/ai/channels",
     permission: "ai_sales:view",
     steps: [
-      { text: "Mở Kênh kết nối: chưa có Page nào ⇒ nối Facebook trước (xem bài Kết nối Facebook để nhận tin khách).", href: "/ai/channels" },
-      { text: "Page có nhưng báo cần nối lại ⇒ bấm «Thêm / nối lại Page» và cấp lại quyền bằng tài khoản quản trị fanpage." },
+      { text: "Mở Kênh kết nối: chưa có kênh nào ⇒ nối fanpage qua Pancake, Zalo OA hoặc ô chat website trước (xem bài Nối fanpage để nhận tin khách).", href: "/ai/channels" },
+      { text: "Fanpage qua Pancake mà vẫn trống ⇒ xem lại địa chỉ nhận tin đã dán đúng trong Pancake (thẻ «Fanpage (qua Pancake)» ở AI Sales) và kết nối ở trang Kết nối đang Bật." },
       { text: "Page sẵn sàng mà Hội thoại vẫn trống ⇒ nhờ một người nhắn thử vào fanpage; tin phải hiện trong vài giây.", href: "/ai/sales-chatbot/inbox" },
       { text: "Vẫn không thấy: nhắn hỗ trợ (cuối trang này) kèm tên cửa hàng và tên Page." },
     ],

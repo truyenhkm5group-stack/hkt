@@ -5,6 +5,8 @@ import { PageHeader } from "@/components/page-header";
 import { SectionCard } from "@/components/ui-bits";
 import { can, requirePermission } from "@/lib/auth/session";
 import { CHANNELS_RETURN_COOKIE, CHANNELS_RETURN_PARAM, CHANNELS_ROUTE, CONNECT_RESULT_PARAMS } from "@/lib/channels/overview-shared";
+import { directConnectFor } from "@/lib/channels/direct-connect";
+import { DIRECT_CONNECT_SOON_LABEL } from "@/lib/channels/direct-connect-shared";
 import { ClearChannelsReturn } from "../../channels/clear-return-cookie";
 import { env } from "@/lib/env";
 import { loadPendingPages, messengerRedirectUris } from "@/lib/integrations/messenger/connect";
@@ -121,6 +123,8 @@ function DiagnosticCard({ d, reason }: { d: StoredDiagnostic; reason: DiscoveryR
  */
 export default async function MessengerSettingsPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const user = await requirePermission("ai_sales:view");
+  // Nối thẳng Facebook chờ Meta duyệt quyền Page: khách thấy «sắp mở», người vận hành thấy nút thật (lib/channels/direct-connect.ts).
+  const directConnect = await directConnectFor(user);
   const sp = await searchParams;
   const one = (k: string) => (typeof sp[k] === "string" ? (sp[k] as string) : "");
   // Lượt «Kết nối Facebook» bắt đầu từ màn Kênh kết nối ⇒ callback (không đổi) về đây, chuyển tiếp nguyên kết quả sang màn đó.
@@ -204,9 +208,15 @@ export default async function MessengerSettingsPage({ searchParams }: { searchPa
             {view.pages.length ? <PageManager pages={view.pages} manage={manage} canConfig={canConfig} overrides={overrides} /> : null}
             {manage ? (
               <div className="flex flex-wrap items-center gap-3">
-                <a href="/api/connect/messenger/start" className="inline-flex h-9 items-center rounded-md bg-[#1877F2] px-4 text-sm font-semibold text-white hover:opacity-90" data-testid="messenger-connect">
-                  {connected ? "Thêm / nối lại page" : "Kết nối Facebook Page"}
-                </a>
+                {directConnect ? (
+                  <a href="/api/connect/messenger/start" className="inline-flex h-9 items-center rounded-md bg-[#1877F2] px-4 text-sm font-semibold text-white hover:opacity-90" data-testid="messenger-connect">
+                    {connected ? "Thêm / nối lại page" : "Kết nối Facebook Page"}
+                  </a>
+                ) : (
+                  <span aria-disabled="true" className="inline-flex h-9 cursor-not-allowed items-center rounded-md border border-dashed px-4 text-sm font-medium text-muted-foreground" data-testid="messenger-connect-soon">
+                    {DIRECT_CONNECT_SOON_LABEL}
+                  </span>
+                )}
                 {connected ? <DisconnectButton /> : null}
                 <span className="text-xs text-muted-foreground">Đăng nhập Facebook bằng tài khoản QUẢN TRỊ page, cho phép quyền nhắn tin, chọn các page. Token page được mã hoá trong ERP; gỡ được bất cứ lúc nào.</span>
               </div>

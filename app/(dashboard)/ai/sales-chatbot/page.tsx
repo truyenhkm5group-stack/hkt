@@ -8,6 +8,7 @@ import { SectionCard } from "@/components/ui-bits";
 import { can, requirePermission } from "@/lib/auth/session";
 import { COMPANY } from "@/lib/constants/company";
 import { isSalesAgentUser, shellAllows } from "@/lib/constants/saas-nav";
+import { directConnectFor } from "@/lib/channels/direct-connect";
 import { formatDateTime } from "@/lib/format";
 import { publicationOf } from "@/lib/platform/publish";
 import { productCustomFieldOptions } from "@/lib/sales-chatbot/catalog";
@@ -60,6 +61,8 @@ export default async function SalesChatbotPage() {
   // Workspace KHÁCH (chủ shop 07/10/2026): không model / nguồn AI / chi phí / sức khoẻ khoá trong props — lib/saas/visibility.ts.
   const customer = customerFacing(user.organization);
   const shell = isSalesAgentUser(user);
+  // Nối thẳng Facebook chờ Meta duyệt quyền Page (lib/channels/direct-connect.ts).
+  const directConnect = await directConnectFor(user);
   const [cfg, fields, conversations, pub] = await Promise.all([loadSalesChatbotConfig(), productCustomFieldOptions(), listConversations(30), publicationOf(user.organization?.code ?? "")]);
   const fanpage = manage && user.organization?.code ? await fanpageSetupView(user.organization.code) : null;
   const zalo = manage && user.organization?.code ? await zaloSetupView(user.organization.code) : null;
@@ -166,7 +169,7 @@ export default async function SalesChatbotPage() {
             </SectionCard>
           ) : null}
           {manage ? (
-            <SectionCard title="Messenger trực tiếp (không cần Pancake)" description="Nối fanpage thẳng với bot bằng một nút cấp quyền của Facebook — cho shop không dùng Pancake.">
+            <SectionCard title="Messenger trực tiếp (không cần Pancake)" description={directConnect ? "Nối fanpage thẳng với bot bằng một nút cấp quyền của Facebook — cho shop không dùng Pancake." : "Sắp mở — đang chờ Facebook duyệt quyền. Hôm nay nối fanpage qua thẻ «Fanpage (qua Pancake)» bên trên."}>
               <Link href="/ai/sales-chatbot/messenger" className="text-sm font-medium text-primary underline underline-offset-2" data-testid="messenger-link">
                 Mở cài đặt Messenger trực tiếp
               </Link>

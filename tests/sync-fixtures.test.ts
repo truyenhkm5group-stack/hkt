@@ -612,6 +612,7 @@ import { testShellLoginLanding } from "./shell-login-landing.test";
 import { testShellGateRedirects } from "./shell-gate-redirects.test";
 import { testErrorBoundary } from "./error-boundary.test";
 import { testErpA11y } from "./erp-a11y.test";
+import { testDirectConnectGate } from "./direct-connect-gate.test";
 
 async function main() {
   await ensureMigrated();
@@ -3020,6 +3021,8 @@ async function main() {
   testErrorBoundary();
   // ERP a11y + bố cục hẹp (Commercial Sweep PR G): h1 màn không tìm thấy, công tắc / ô số có tên, /payroll không tràn 390 px.
   testErpA11y();
+  // Cổng nối thẳng Facebook (review #706): khách thấy «sắp mở» khi cờ meta.direct-connect.open đóng; người vận hành thấy nút thật.
+  await testDirectConnectGate();
   // Nền tảng · phiên & RBAC (agent C): claim org, cổng module, platform:operate, đăng nhập theo tổ chức. Tự cấp
   // tổ chức `pr-` (CSDL riêng) và tự dọn; đứng cạnh bài ngữ cảnh vì cùng lý do.
   await testPlatformRbac();

@@ -1,6 +1,7 @@
 import { PageHeader } from "@/components/page-header";
 import { can, requirePermission } from "@/lib/auth/session";
 import { CHANNELS_MANAGE_PERMISSION, CONNECT_RESULT_PARAMS, connectOutcome, type ConnectParams, type StoredDiagnosticFacts } from "@/lib/channels/overview-shared";
+import { directConnectFor } from "@/lib/channels/direct-connect";
 import { loadChannelsOverview } from "@/lib/channels/overview";
 import { loadPendingPages } from "@/lib/integrations/messenger/connect";
 import { env } from "@/lib/env";
@@ -27,6 +28,8 @@ export default async function ChannelsPage({ searchParams }: { searchParams: Pro
   const manage = can(user, CHANNELS_MANAGE_PERMISSION);
   const operator = platformOperatorDenial(user) === null;
   const overview = await loadChannelsOverview({ operator });
+  // Nối thẳng Facebook chờ Meta duyệt quyền Page: khách thấy «sắp mở», người vận hành thấy nút thật (lib/channels/direct-connect.ts).
+  const directConnect = await directConnectFor(user);
   const diag = manage ? await getSettingJson<(StoredDiagnosticFacts & { granted?: unknown; at?: unknown }) | null>("messenger.lastConnectDiagnostic", null) : null;
   // Configuration ID chỉ ĐỌC từ biến môi trường (không ghi cứng) — cùng giá trị route start đang gửi cho Meta.
   const mode = loginConfigMode(env.oauth.facebookMessengerLoginConfigId);
@@ -56,6 +59,7 @@ export default async function ChannelsPage({ searchParams }: { searchParams: Pro
         botEnabled={overview.botEnabled}
         manage={manage}
         operator={operator}
+        directConnect={directConnect}
         outcome={outcome}
         operatorDetail={operatorDetail}
         operatorNotes={operatorNotes}

@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { quickConnectFanpageAction, quickEnableBotAction } from "@/lib/actions/go-live";
+import { DIRECT_CONNECT_SOON_LABEL } from "@/lib/channels/direct-connect-shared";
 import { COMPANY } from "@/lib/constants/company";
 import type { GoLiveView } from "@/lib/onboarding/go-live";
 import type { GoLivePath } from "@/lib/onboarding/go-live-shared";
@@ -27,8 +28,11 @@ const CHOICES: { key: GoLivePath; title: string; hint: string }[] = [
  *  (3) bật chatbot bằng MỘT nút.
  * Mỗi bước tự hiện «xong» khi dữ liệu thật đã có — không có ô bấm cho xong.
  */
-export function GoLiveCard({ view }: { view: GoLiveView }) {
-  const [choice, setChoice] = useState<GoLivePath>(view.path ?? "DIRECT");
+export function GoLiveCard({ view, directConnect = false }: { view: GoLiveView; directConnect?: boolean }) {
+  // Cổng nối thẳng Facebook (lib/channels/direct-connect-shared.ts) đóng ⇒ mặc định Pancake, lựa chọn «Nối thẳng» ghi «sắp mở»
+  // và KHÔNG có liên kết tới /api/connect/messenger/start — Meta chưa cấp quyền Page cho app nền tảng (review #706).
+  const choices = directConnect ? CHOICES : CHOICES.map((c) => (c.key === "DIRECT" ? { ...c, hint: "Sắp mở — đang chờ Facebook duyệt quyền" } : c));
+  const [choice, setChoice] = useState<GoLivePath>(view.path ?? (directConnect ? "DIRECT" : "PANCAKE"));
   const [pageId, setPageId] = useState(view.fanpage?.pageId ?? "");
   const [token, setToken] = useState("");
   const [pending, start] = useTransition();
@@ -78,7 +82,7 @@ export function GoLiveCard({ view }: { view: GoLiveView }) {
           <div className="space-y-3">
             <p className="text-xs text-muted-foreground">Hiện bạn trả lời tin nhắn khách bằng gì?</p>
             <div className="grid gap-2 sm:grid-cols-3" role="radiogroup" aria-label="Cách quản lý tin nhắn">
-              {CHOICES.map((c) => (
+              {choices.map((c) => (
                 <button
                   key={c.key}
                   type="button"
@@ -97,7 +101,11 @@ export function GoLiveCard({ view }: { view: GoLiveView }) {
             {choice === "DIRECT" ? (
               <div className="space-y-2" data-go-live-direct>
                 <p className="text-xs text-muted-foreground">Đăng nhập Facebook bằng tài khoản quản trị page → cho phép nhắn tin → chọn page. Không cần phần mềm khác, không cần dán gì. Page có gắn Instagram doanh nghiệp thì bot trả lời cả Instagram.</p>
-                {view.messenger.appReady ? (
+                {!directConnect ? (
+                  <span aria-disabled="true" className="inline-flex h-9 cursor-not-allowed items-center rounded-md border border-dashed px-4 text-sm font-medium text-muted-foreground" data-go-live-messenger-soon>
+                    {DIRECT_CONNECT_SOON_LABEL}
+                  </span>
+                ) : view.messenger.appReady ? (
                   <a href="/api/connect/messenger/start" className="inline-flex h-9 items-center rounded-md bg-[#1877F2] px-4 text-sm font-semibold text-white hover:opacity-90" data-go-live-messenger>
                     Kết nối Facebook Page
                   </a>
