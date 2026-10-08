@@ -32,18 +32,18 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-08T10:12:45.302Z",
-  "updated_at": "2026-10-08T11:47:21.407Z",
-  "last_heartbeat": "2026-10-08T11:47:02.746Z",
+  "updated_at": "2026-10-08T11:53:33.445Z",
+  "last_heartbeat": "2026-10-08T11:53:33.445Z",
   "definition_of_done": [],
   "handoff": {
     "branch": "fix/identity-email-login",
-    "sha": "fedaa828c38d8af5cde8d03f3cf49a39066d0004",
-    "at": "2026-10-08T11:47:02.746Z",
+    "sha": "ea9d513a2a756d8ea91b3c00fcba3536078e4847",
+    "at": "2026-10-08T11:53:33.445Z",
     "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
     "title": "P0: khách do admin tạo đăng nhập được bằng email + mật khẩu (ghi / đối chiếu chỉ mục danh tính ở cấp phát · kích hoạt · đặt lại mật khẩu) + gửi lại lời mời / liên kết kích hoạt",
-    "summary": "P0: khách do admin tạo đăng nhập được bằng email + mật khẩu — chỉ mục danh tính ghi ở MỌI đường tài khoản trở nên đăng nhập được (cấp phát, tạo hộ, lời mời, đặt mật khẩu qua liên kết, quản trị đặt tay) qua một hàm indexAccountIdentities; Google/Facebook theo email chỉ nhận dòng đã đăng nhập; trạng thái kích hoạt + gửi lại liên kết kích hoạt cho người vận hành; ops identity-reconcile chạy thử mặc định",
+    "summary": "P0 danh tính email (rebase sau #676)",
     "tests": [
-      "tsc + eslint sạch; identity-email-login A–I + 16 bộ auth/tenant/provisioning đạt; static sau commit; npm run build đạt (trước rebase); đột biến 15/16 (1 tương đương); 0 ký tự vô hình"
+      "rebase lên 67fc09b1 (ops-vps.yml giữ đủ 5 thao tác); tsc; identity-email-login; static + ops-log-leak + ops-concurrency đạt"
     ]
   }
 }
