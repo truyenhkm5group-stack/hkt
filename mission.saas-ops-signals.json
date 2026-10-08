@@ -3,7 +3,7 @@
   "mission_id": "saas-ops-signals",
   "title": "Người vận hành chẩn đoán được 8 loại sự cố của khách: đăng nhập hỏng · page mất kết nối · webhook · AI im · gửi tin hỏng · đơn không hợp lệ · ghi đơn hỏng · hết hạn mức",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P2",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -39,9 +39,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-08T12:43:20.463Z",
-  "updated_at": "2026-10-08T19:08:48.357Z",
+  "updated_at": "2026-10-08T19:35:27.551Z",
   "last_heartbeat": "2026-10-08T19:08:48.357Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#692 → 0be392ba1afb8b8f890856f1c249ea6a08df5969"
+  },
   "handoff": {
     "branch": "feat/saas-ops-signals",
     "sha": "a9aad1fb476906d1ef11e7129f9059ea77b4c160",
