@@ -16,7 +16,9 @@
     "scripts/org-ai-cutover.ts",
     "tests/org-ai-cutover.test.ts",
     "lib/ai-usage/control.ts",
-    "tests/ai-usage-control.test.ts"
+    "tests/ai-usage.test.ts",
+    "tests/platform-isolation-static.test.ts",
+    "docs/platform/ai-usage.md"
   ],
   "dependencies": [],
   "blocked_by": [],
@@ -25,8 +27,8 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-08T03:17:21.525Z",
-  "updated_at": "2026-10-08T05:17:47.206Z",
-  "last_heartbeat": "2026-10-08T05:17:47.206Z",
+  "updated_at": "2026-10-08T06:18:20.245Z",
+  "last_heartbeat": "2026-10-08T06:18:20.245Z",
   "definition_of_done": [],
   "evidence": {
     "merged": "#659 → 051f49a55160dd3d650a1259abe9df6b12b89f92",
