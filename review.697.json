@@ -1,0 +1,8 @@
+{
+  "pr": 697,
+  "sha": "69523ae2a70c02884ba8df4eaa152657e8f7efd5",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-08T18:17:40.540Z",
+  "note": "Review độc lập PASS: HTML hai trang pháp lý trùng từng byte (TERMS 10388, PRIVACY 11040), không số / vùng điền khi chưa có căn cứ, legalReady dẫn xuất, ranh giới server đúng; legal-registers 7 khối + tsc đạt. MEDIUM theo sau: test:119/122 gõ cứng phiên bản 1.1 (dùng terms.version/effective); LOW: sổ băm ghi thêm, đối chiếu cột Loại với NOT_NEEDED, RESERVED_TLDS thêm example.*"
+}
