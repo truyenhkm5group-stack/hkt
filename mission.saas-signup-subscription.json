@@ -1,0 +1,34 @@
+{
+  "schema": 1,
+  "mission_id": "saas-signup-subscription",
+  "title": "Cửa hàng tự đăng ký có thuê bao sản phẩm (dùng thử) ngay khi tạo — trang Gói không còn «liên hệ người vận hành»",
+  "business_goal": "",
+  "status": "RUNNING",
+  "priority": "P0",
+  "risk": "HIGH",
+  "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "worker": "worker:signup-subscription",
+  "worktree": null,
+  "branch": "fix/signup-subscription",
+  "base_sha": null,
+  "domains": [],
+  "owned_paths": [
+    "lib/onboarding/service.ts",
+    "lib/saas/accounts.ts",
+    "components/saas/my-products.tsx",
+    "tests/signup-subscription.test.ts",
+    "scripts/saas-subscription-repair.ts"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-08T05:35:45.169Z",
+  "updated_at": "2026-10-08T05:35:45.169Z",
+  "last_heartbeat": "2026-10-08T05:35:45.169Z",
+  "definition_of_done": [
+    "/start (và đường đăng ký nhanh) mở thuê bao sản phẩm đúng thương hiệu, idempotent, dùng lại hàm sẵn có",
+    "Trang Gói nói bằng ngôn ngữ kinh doanh, không lộ nhãn nội bộ",
+    "Script sửa bù mặc định CHẠY THỬ, liệt kê workspace thiếu thuê bao; ghi thật chờ chủ shop"
+  ]
+}
