@@ -46,7 +46,7 @@ export async function updateUser(input: unknown): Promise<ActionResult> {
   if (!parsed.success) return { error: firstIssue(parsed.error) };
   const data = parsed.data;
   const db = await getDb();
-  const target = await db.query.users.findFirst({ where: eq(schema.users.id, data.id), columns: { id: true, email: true, name: true, role: true, active: true } });
+  const target = await db.query.users.findFirst({ where: eq(schema.users.id, data.id), columns: { id: true, email: true, name: true, role: true, active: true, phone: true } });
   if (!target) return { error: "Không tìm thấy người dùng" };
   if (target.id === user.id && (!data.active || data.role !== "ADMIN")) return { error: "Không thể tự khoá hoặc tự hạ quyền tài khoản của chính bạn" };
   if (target.role === "ADMIN" && target.active && (data.role !== "ADMIN" || !data.active) && (await otherActiveAdmins(target.id)) === 0) {
@@ -62,6 +62,9 @@ export async function updateUser(input: unknown): Promise<ActionResult> {
   if (target.active && !data.active) {
     await applySessionRevocation({ targetUserId: target.id, targetEmail: target.email, trigger: "ACCOUNT_DISABLED", actor: { id: user.id, label: user.email } });
   }
+  // MỞ KHOÁ ⇒ chỉ mục đăng nhập chắc chắn có (idempotent): tài khoản bị khoá không được ghi chỉ mục (cấp phát lại / đối chiếu bỏ qua
+  // nó), nên mở khoá mà không ghi thì người ấy chỉ vào được khi gõ «mã tổ chức» (lib/auth/identities.ts).
+  if (!target.active && data.active) await indexAccountInCurrentOrganization({ ...target, active: true });
   revalidatePath("/settings/users");
   return { ok: true, id: target.id };
 }
@@ -73,7 +76,7 @@ export async function setUserActive(input: unknown): Promise<ActionResult> {
   if (!parsed.success) return { error: firstIssue(parsed.error) };
   const { id, active } = parsed.data;
   const db = await getDb();
-  const target = await db.query.users.findFirst({ where: eq(schema.users.id, id), columns: { id: true, email: true, role: true, active: true } });
+  const target = await db.query.users.findFirst({ where: eq(schema.users.id, id), columns: { id: true, email: true, role: true, active: true, phone: true } });
   if (!target) return { error: "Không tìm thấy người dùng" };
   if (target.id === user.id && !active) return { error: "Không thể tự khoá tài khoản của chính bạn" };
   if (!active && target.role === "ADMIN" && target.active && (await otherActiveAdmins(target.id)) === 0) return { error: "Không thể khoá quản trị viên cuối cùng" };
@@ -93,6 +96,8 @@ export async function setUserActive(input: unknown): Promise<ActionResult> {
   if (!active) {
     await applySessionRevocation({ targetUserId: id, targetEmail: target.email, trigger: "ACCOUNT_DISABLED", actor: { id: user.id, label: user.email } });
   }
+  // Mở khoá ⇒ chỉ mục đăng nhập chắc chắn có (idempotent) — cùng lý do với `updateUser`.
+  if (active) await indexAccountInCurrentOrganization({ ...target, active: true });
   revalidatePath("/settings/users");
   return { ok: true, id };
 }

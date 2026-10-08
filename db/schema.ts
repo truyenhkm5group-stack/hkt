@@ -5133,7 +5133,12 @@ export const platformAiUsage = pgTable(
  * CHỈ MỤC DANH TÍNH TOÀN NỀN TẢNG (0193, docs/platform/quick-start.md). Tài khoản sống trong CSDL của TỪNG tổ chức
  * (SILO), nên trước bảng này muốn đăng nhập phải biết mã tổ chức hoặc vào đúng tên miền con. Một dòng = «danh tính này
  * là tài khoản `user_id` của tổ chức `org_code`»:
- *  · `EMAIL` / `PHONE` — ghi khi đăng nhập thành công (mọi đường đi qua `verifyLogin`) và khi đăng ký nhanh;
+ *  · `EMAIL` / `PHONE` — MỘT đường ghi `lib/auth/identities.ts::indexAccountIdentities` (từ 08/10/2026, docs/saas/IDENTITY.md
+ *    §1b): NGAY khi tài khoản dùng được bằng mật khẩu — cấp phát quản trị (`provisionOrganization`), tạo hộ / nhận lời mời
+ *    (`lib/users/create-user.ts`), đặt mật khẩu qua liên kết hoặc tay, mở khoá, đối chiếu `identity-reconcile` — với
+ *    `last_used_at = NULL`; và mỗi lượt đăng nhập thành công (mọi đường đi qua `verifyLogin`, đăng ký nhanh) với
+ *    `last_used_at = lúc đó`. `last_used_at` khác NULL = «đã đăng nhập vào ĐÚNG tài khoản này» — phép khớp email của
+ *    Google / Facebook và ô «Người đã đăng nhập» chỉ đọc dòng đó;
  *  · `GOOGLE` / `FACEBOOK` — `value` = mã người dùng của nhà cung cấp (`sub` / `id`), ghi khi đăng nhập bằng nút đó.
  * Chỉ là CHỈ MỤC: mật khẩu, quyền, trạng thái khoá vẫn đọc ở CSDL tổ chức mỗi lượt. Dòng trỏ tới tài khoản đã xoá / tổ
  * chức đã đình chỉ thì bị bỏ qua lúc đọc, không bao giờ mở được phiên.

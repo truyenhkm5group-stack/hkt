@@ -105,6 +105,44 @@ async function cancelGuard(subscriptionId: string): Promise<string | null> {
   return null;
 }
 
+/** «Tạo khách» gửi lại cùng khoá mà đầu vào KHÁC đầu vào job đã lưu. */
+export const CREATE_CUSTOMER_KEY_REUSED =
+  "Yêu cầu này đã gửi trước đó với thông tin KHÁC (tài khoản / workspace / sản phẩm / quản trị) — job luôn chạy theo thông tin của lần gửi đầu. Tải lại form để tạo một yêu cầu mới.";
+
+function canonical(v: unknown): unknown {
+  if (Array.isArray(v)) return v.map(canonical);
+  if (v && typeof v === "object") {
+    const o = v as Record<string, unknown>;
+    return Object.fromEntries(
+      Object.keys(o)
+        .filter((k) => o[k] !== undefined)
+        .sort()
+        .map((k) => [k, canonical(o[k])]),
+    );
+  }
+  return v;
+}
+
+/**
+ * THUẦN. Dấu vân của một yêu cầu «Tạo khách» — để so lượt gửi lại cùng khoá với đầu vào ĐÃ LƯU của job (jsonb đổi thứ tự khoá;
+ * thứ tự sản phẩm, chữ hoa / khoảng trắng của email và mã, ô trống ⇔ null đều không tính là khác). Lý do của lượt gửi không thuộc
+ * yêu cầu (không lưu trên job) nên không vào dấu vân.
+ */
+export function createCustomerFingerprint(raw: unknown): string {
+  const r = (raw ?? {}) as Partial<CreateCustomerRequest>;
+  const acc = r.account ?? null;
+  const ws = r.workspace;
+  return JSON.stringify(
+    canonical({
+      accountId: r.accountId || null,
+      account: acc ? { ...acc, code: acc.code?.trim().toLowerCase() || null, name: acc.name?.trim() ?? null } : null,
+      workspace: ws ? { code: ws.code?.trim().toLowerCase() ?? null, name: ws.name?.trim() ?? null, planKey: ws.planKey ?? null, brand: ws.brand ?? null } : null,
+      products: [...(r.products ?? [])].sort(),
+      admin: r.admin ? { email: r.admin.email?.trim().toLowerCase() ?? null, name: r.admin.name?.trim() ?? null } : null,
+    }),
+  );
+}
+
 /** Gửi một yêu cầu cấp phát. Cùng khoá ⇒ cùng job; job đã xong không chạy lại; job hỏng / treo chạy lại. */
 export async function requestProvisioning(req: ProvisioningRequest, ctx: Ctx): Promise<JobResult | { error: string }> {
   const invalid = await validateRequest(req, ctx.catalog);
@@ -123,6 +161,10 @@ export async function requestProvisioning(req: ProvisioningRequest, ctx: Ctx): P
   if (!job) return { error: "Không ghi / đọc được job cấp phát." };
   if (!inserted.length) {
     if (job.kind !== req.kind) return { error: `Khoá "${key}" đã dùng cho một yêu cầu loại khác.` };
+    // «Tạo khách» cùng khoá mà đầu vào KHÁC ⇒ từ chối TRƯỚC mọi lượt chạy lại: job chạy theo đầu vào đã lưu, nên nhận lượt này là để
+    // người vận hành tưởng email / workspace mới đã được dùng — và lượt phát liên kết kích hoạt nhắm sai người. Chỉ áp cho «Tạo khách»:
+    // khoá mặc định của «Huỷ thuê bao» suy từ mã thuê bao, bấm lại với lý do khác vẫn phải chạy lại được job hỏng.
+    if (req.kind === "CREATE_CUSTOMER" && createCustomerFingerprint(job.input) !== createCustomerFingerprint(req)) return { error: CREATE_CUSTOMER_KEY_REUSED };
     if (job.status === "SUCCEEDED") return { job, reused: true };
     if (job.status === "RUNNING" && job.startedAt && Date.now() - job.startedAt.getTime() < STALE_RUNNING_MS) return { job, reused: true };
   }

@@ -24,7 +24,7 @@ ngẫu nhiên (`db/schema.ts:6` — `crypto.randomUUID()`). Không có chuyển 
 | Thu hồi | `lib/auth/session-revoke.ts:37-92` | một đường ghi, `GREATEST` chỉ tiến, theo từng dòng `users` của MỘT workspace |
 | Chỉ mục danh tính | `db/schema.ts:5129-5145` (`platform_identities`, 0193) · `lib/auth/identities.ts:19,34` | `(kind, value, org_code) ⇒ user_id`, kind ∈ EMAIL · PHONE · GOOGLE · FACEBOOK. CHỈ là chỉ mục; bản ở CSDL workspace bị xoá mỗi lần mở (`db/migrate.ts:85-86`) |
 | Đăng nhập trang chung | `lib/actions/auth.ts:48-63` · `lib/auth/login.ts:132` `loginCandidates`, `:109` `credentialsMatch`, `:85` `verifyLogin` | không mã workspace ⇒ ứng viên = chỉ mục + nhà ⇒ thử mật khẩu ở TỪNG workspace (trong `withOrganization`) ⇒ khớp 1 vào thẳng, khớp nhiều hỏi chọn, 0 ⇒ câu sai mật khẩu chung |
-| Ghi chỉ mục | `lib/auth/identities.ts::indexAccountIdentities` (một đường) ← cấp phát quản trị (`lib/platform/provision.ts`) · tạo hộ + nhận lời mời (`lib/users/create-user.ts::indexNewUserAccount`) · đặt mật khẩu qua liên kết (`lib/users/password-reset.ts`) · quản trị đặt mật khẩu tay (`lib/actions/users.ts`) · đăng nhập (`login.ts::openSession`) · đăng ký nhanh | từ 08/10/2026 (§1b) ghi NGAY khi tài khoản dùng được bằng mật khẩu, `last_used_at = NULL`; đăng nhập ghi mốc dùng. Ghi hỏng không làm hỏng lượt gọi |
+| Ghi chỉ mục | `lib/auth/identities.ts::indexAccountIdentities` (một đường) ← cấp phát quản trị (`lib/platform/provision.ts`) · tạo hộ + nhận lời mời (`lib/users/create-user.ts::indexNewUserAccount`) · đặt mật khẩu qua liên kết (`lib/users/password-reset.ts`) · quản trị đặt mật khẩu tay + mở khoá (`lib/actions/users.ts`) · đăng nhập (`login.ts::openSession`) · đăng ký nhanh | từ 08/10/2026 (§1b) ghi NGAY khi tài khoản dùng được bằng mật khẩu, `last_used_at = NULL`; đăng nhập ghi mốc dùng. Ghi hỏng không làm hỏng lượt gọi |
 | Google / Facebook | `lib/auth/social.ts:18-20` · `app/login/oauth/[provider]/callback/route.ts:50-60` · `lib/actions/oauth.ts:18-28` | tra GOOGLE/FACEBOOK theo `sub` của nhà cung cấp; không có ⇒ tra **EMAIL** đã xác minh của hồ sơ — CHỈ dòng đã dùng để đăng nhập (`usedOnly`, §1b); một workspace vào thẳng, nhiều ⇒ cookie ký `erp_pick` |
 | Nhận lời mời | `lib/users/invites.ts:236, 313` | tạo dòng `users` mới trong workspace đích, ghi chỉ mục, rồi `verifyLogin` |
 
@@ -45,7 +45,7 @@ của A"; đòn 9 phiên giả `:1419`), `tests/platform-isolation.test.ts`, `te
 
 ## 1b. Bản vá P0 08/10/2026 — khách do admin tạo đăng nhập bằng email + mật khẩu
 
-**Lỗi đo thật** (`FINISH_LINE_2026-10-08.md` blocker 1): chỉ mục chỉ được ghi SAU lần đăng nhập thành công đầu tiên, mà lần
+**Lỗi đo thật** (báo cáo Finish Line 08/10/2026 — PR #680, blocker 1): chỉ mục chỉ được ghi SAU lần đăng nhập thành công đầu tiên, mà lần
 đầu ấy lại cần chỉ mục để trang chung biết thử tổ chức nào ⇒ quản trị khách do job cấp phát tạo, kích hoạt xong, vẫn nhận
 «Email / số điện thoại hoặc mật khẩu không đúng.» cho tới khi gõ «mã tổ chức». Cùng lỗi cho người tạo hộ ở `/settings/users`
 và tổ chức người vận hành tạo ở `/platform`.
@@ -62,12 +62,16 @@ Google / Facebook (`usedOnly`) — email do quản trị gõ chưa ai xác minh,
 ấy từng vào bằng mật khẩu: đúng phạm vi trước bản vá, không rộng thêm (quan sát 2 ở trên vẫn mở).
 
 **Quyết định kèm theo** (chỗ nào đổi phải đọc lại đây):
-- Tài khoản bị KHOÁ: không ghi dòng mới; dòng cũ GIỮ — đọc vẫn tra CSDL tổ chức, người bị khoá gõ đúng mật khẩu nhận đúng câu
-  «Tài khoản đã bị khoá», không phải «sai mật khẩu». Mở khoá không cần ghi lại.
+- Tài khoản bị KHOÁ: không ghi dòng mới (cấp phát lại, đối chiếu đều bỏ qua nó); dòng cũ GIỮ — đọc vẫn tra CSDL tổ chức, người
+  bị khoá gõ đúng mật khẩu nhận đúng câu «Tài khoản đã bị khoá», không phải «sai mật khẩu». MỞ KHOÁ (`updateUser` ·
+  `setUserActive`, `false → true`) GHI LẠI chỉ mục (idempotent): tài khoản bị khoá trước khi kịp có dòng — vd bị khoá lúc chạy
+  `identity-reconcile` — vẫn vào được không cần mã tổ chức ngay sau khi mở.
 - ERP không có đường ĐỔI EMAIL hay XOÁ tài khoản (chỉ khoá). Thêm một trong hai ⇒ phải gọi `indexAccountIdentities` cho giá trị
   mới và gỡ dòng cũ (`forgetIdentitiesOf`), nếu không chỉ mục nói một đằng, CSDL một nẻo (chỉ hẹp lại lúc đọc, nhưng email mới
-  sẽ lại đòi «mã tổ chức»). `tests/identity-email-login.test.ts` quét: mọi đường chèn `users` trong `lib/` · `app/` phải gọi
-  hàm ghi chỉ mục (miễn trừ duy nhất: quản trị đầu tiên của NHÀ lúc khởi động — nhà luôn là ứng viên).
+  sẽ lại đòi «mã tổ chức»). `tests/identity-email-login.test.ts` quét `lib/` · `app/` theo TỪNG HÀM: mọi lượt chèn `users`
+  (kể cả qua bí danh `const u = schema.users`, câu SQL thô, `insertUserAccount`) và mọi lượt sửa `users` đụng `password_hash` ·
+  `active` · `email` · `phone` phải gọi hàm ghi chỉ mục trong cùng hàm, hoặc khai miễn trừ kèm lý do (quản trị đầu tiên của NHÀ
+  lúc khởi động; tự đổi mật khẩu của người đang đăng nhập; chính `insertUserAccount` — nơi gọi nó bị quét).
 - Email trùng nhiều workspace: mật khẩu quyết định — khớp một nơi vào thẳng, khớp nhiều nơi hỏi chọn (danh sách chỉ hiện khi
   mật khẩu đã khớp ở MỌI nơi trong đó). Thứ tự TẤT ĐỊNH: mới dùng nhất trước, chưa dùng sau, rồi theo mã tổ chức.
 - Dữ liệu cũ (tài khoản tạo trước bản vá, chưa từng đăng nhập): ops `identity-reconcile` (`lib/platform/identity-reconcile.ts`)
