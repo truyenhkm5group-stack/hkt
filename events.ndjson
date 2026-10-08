@@ -823,3 +823,4 @@
 {"at":"2026-10-08T12:51:33.874Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DONE","mission":"saas-delete-signup-shops","detail":"#673 trên production; đã xoá kd (run 37771243600, sao lưu trước); qa + hs-thien-nga-test giữ chờ chủ shop"}
 {"at":"2026-10-08T12:51:47.203Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DONE","mission":"launch-gate","detail":"#678 trên production db0ac290+; docs/saas/LAUNCH_GATE.md là nguồn sự thật readiness"}
 {"at":"2026-10-08T12:52:00.660Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DONE","mission":"meta-review-guide","detail":"Hướng dẫn Meta App Review cho chủ shop trên production"}
+{"at":"2026-10-08T12:52:13.864Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DONE","mission":"org-ai-platform-cutover","detail":"#667 trên production; quyết định 08/10 thay bằng HSLC nạp QR như khách (hslc-prepaid-ai)"}
