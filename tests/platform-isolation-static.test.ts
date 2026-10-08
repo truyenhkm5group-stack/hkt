@@ -898,6 +898,7 @@ export function testLoiVanHanhHoiTruoc(): number {
     "lib/platform/saas-cockpit.ts": "loadOwnerCockpit — sau platformOperatorDenial (doanh thu Số dư AI 30 ngày của cockpit).",
     "lib/saas/customers.ts": "loadCommercialSnapshot — chỉ lib/saas/console.ts (sau cổng vận hành) và finalizeStatement (lõi chốt bảng kê của người vận hành) gọi.",
     "lib/pricing/customer.ts": "loadCustomerPlan(mã) — readAiCustomerChargedUnits với mã từ PHIÊN (/settings/plan: usage.orgCode của user.organization).",
+    "lib/billing/prepaid-ai.ts": "planPrepaidAi(mã) — readAiCustomerChargedUnits của MỘT tổ chức cho kế hoạch trả trước; chỉ script ops org-prepaid-ai (người vận hành nền tảng chạy qua ops-vps, kết quả MÃ HOÁ) gọi — không server action / trang nào (tests/org-prepaid-ai.test.ts quét).",
   };
   const goiSoDu: string[] = [];
   const daDungSoDu = new Set<string>();

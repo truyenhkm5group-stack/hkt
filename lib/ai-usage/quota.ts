@@ -68,16 +68,23 @@ export function softWarningKey(source: AiBillingSource, now: Date): string {
  * doanh, không số USD / tên nguồn nội bộ (`CUSTOMER_AI_SOFT_LIMIT_NOTICE`, lib/saas/visibility.ts); BYOK = khoá của chính shop ⇒
  * câu có số tiền như cũ.
  */
-async function notifySoftOnce(orgCode: string, source: AiBillingSource, warning: string, now: Date): Promise<void> {
+async function notifySoftOnce(orgCode: string, source: AiBillingSource, warning: string, now: Date, operatorToo = false): Promise<void> {
   const notice = source === "PLATFORM" ? CUSTOMER_AI_SOFT_LIMIT_NOTICE : { title: "Chi phí AI vượt ngưỡng cảnh báo", body: warning };
   try {
-    await inOrg(orgCode, async () => {
+    const inserted = await inOrg(orgCode, async () => {
       const db = await getDb();
-      await db
+      return db
         .insert(schema.notifications)
         .values({ kind: "SYSTEM", severity: "warning", title: notice.title, body: notice.body, href: "/settings/plan", entityType: "AI_QUOTA", entityId: source, dedupeKey: softWarningKey(source, now), occurredAt: now })
-        .onConflictDoNothing({ target: schema.notifications.dedupeKey });
+        .onConflictDoNothing({ target: schema.notifications.dedupeKey })
+        .returning({ id: schema.notifications.id });
     });
+    // Trả trước theo khách AI (AI_BALANCE_V1 §7, review #674 M2): vượt ngưỡng cảnh báo (= credit) là tin cho NGƯỜI VẬN HÀNH — câu có
+    // số USD đi kênh vận hành, khách chỉ nhận câu kinh doanh ở trên. MỘT lần / ngày / nguồn (cùng khoá chống trùng của dòng chuông).
+    if (operatorToo && source === "PLATFORM" && inserted.length) {
+      const { notifyPlatformOperator } = await import("@/lib/sales-chatbot/alerts");
+      await notifyPlatformOperator(`AI dùng chung trả trước vượt ngưỡng cảnh báo — tổ chức ${orgCode}`, [warning, "Cổng khách AI mới là Số dư AI; trần cứng chống lạm dụng = credit × 3 (chặn cả AI Bán hàng khi chạm). Xem /platform/org/<mã>."]);
+    }
   } catch {
     // Thông báo là phụ: lượt AI không được hỏng vì nó.
   }
@@ -96,6 +103,6 @@ export async function checkAiQuota(orgCode: string, source: AiBillingSource, opt
   if (source === "HOME") return { ok: false, source, reason: "PLAN_UNREADABLE", error: "AI của tổ chức nhà chỉ dành cho tổ chức nhà.", usage: EMPTY_SOURCE_USAGE, limits: resolved.limits };
   const usage = await sourceUsage(orgCode, source, now);
   const verdict = evaluateAiQuota(source, resolved.limits, usage);
-  if (verdict.ok && verdict.softExceeded && verdict.warning && opts.notify !== false) await notifySoftOnce(orgCode, source, verdict.warning, now);
+  if (verdict.ok && verdict.softExceeded && verdict.warning && opts.notify !== false) await notifySoftOnce(orgCode, source, verdict.warning, now, resolved.limits.prepaid !== undefined);
   return verdict;
 }

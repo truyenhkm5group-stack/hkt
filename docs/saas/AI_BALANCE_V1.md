@@ -140,3 +140,73 @@ Một chỗ tính, dùng lại khung kinh tế đơn vị sẵn có (`lib/pricin
 | Liên kết mở thẳng app ngân hàng trên điện thoại (deeplink) | Không | V1 dùng sao chép + lưu ảnh QR (luôn chạy); deeplink tuỳ ngân hàng, thêm sau. |
 | Xử lý khoản «cần xem lại» bằng một nút (gán về tổ chức · cộng · hoàn) | Không | Hôm nay: «điều chỉnh tiền thật» ở khung «Tặng · điều chỉnh · hoàn tiền» (có lý do + nhật ký), rồi nút «Đã xử lý…» ngay trên dòng (cùng hàm đánh dấu của luồng thu phí). |
 | Ranh giới phần gồm khi HAI khách mới tới cùng lúc: khách thứ «gồm» có thể bị trừ một đơn giá (đếm kỳ đọc sau lượt ghi của cả hai) | Không | Hiếm, tối đa một đơn giá mỗi lần chạm ranh; sửa bằng khoá theo tổ chức quanh lượt ghi + đếm, hoặc đối soát cuối kỳ hoàn phần trừ thừa. |
+
+## 7. Chế độ trả trước toàn phần — «AI dùng chung trả trước theo khách AI» (08/10/2026)
+
+Quyết định chủ shop 08/10/2026: HSLC (`hslc-hmt-shop` — khách thật, bot AI Bán hàng ~2.000 lượt/ngày, đang chạy khoá Gemini RIÊNG
+`gemini-byok`, gói cũ `standard`, credit AI dùng chung = 0) chuyển sang AI DÙNG CHUNG của nền tảng NHƯ MỘT KHÁCH: nạp tiền qua QR,
+nạp bao nhiêu dùng bấy nhiêu, chạy đồng hồ khách AI như khách. KHÔNG cấp credit nền tảng miễn phí.
+
+**Phương án (ĐỀ XUẤT KỸ THUẬT theo «phương án tốt nhất» chủ shop giao — cần chủ shop xác nhận ĐƠN GIÁ trước khi kích hoạt):**
+chế độ này là DỮ LIỆU, không có nhánh theo mã tổ chức và không có hệ tính tiền thứ hai.
+
+| Mảnh | Thực hiện |
+|------|-----------|
+| Phiên bản giá «Trả trước theo khách AI» | `prepaid-ai-v1` (`lib/pricing/price-book.ts::publishPrepaidAiVersion`, nhật ký `PRICE_VERSION_PUBLISH`). Kind `LEGACY_SNAPSHOT` = CHỈ tới bằng ghim, không bao giờ thành bảng giá niêm yết (CHECK của 0228 buộc kind `CATALOG` phải có ngày hiệu lực; một kind riêng `PREPAID` cần migration đổi CHECK — không làm ở V1). `isPrepaidAiPrice` CHỈ nhận dòng của kind này — một gói CATALOG tương lai «gồm 0 + khối khách AI» không bị coi là trả trước. Chép MỌI dòng của giá cũ `legacy` rồi chỉ thay phần AI (`prepaidAiPriceRows`): giá thuê bao · tặng tháng · mua thêm · tính năng GIỮ NGUYÊN; `included.aiCustomers = 0`; khối khách AI = giá vượt của gói AI tự mua RẺ NHẤT trong bảng giá đang niêm yết (`prepaidAiTerms` — V1: Starter 59.000đ / 100 khách ⇒ **590đ / khách**, dẫn xuất, không gõ số); không phần vượt fanpage / người dùng (như giá cũ). Đổi đơn giá = `prepaid-ai-v2`, không sửa v1. |
+| Trừ tiền | KHÔNG đổi một dòng nào: `balanceOverageTerms` đọc `included = 0` ⇒ `chargeAiCustomerUsage` trừ MỌI khách AI mới của kỳ (một lần mỗi khách mỗi kỳ, dòng sổ mang `prepaid-ai-v1` + 590đ). |
+| Hết số dư | KHÔNG đổi: `aiBalanceGate` — khách MỚI không nhận AI (chuyển người, hộp thư nói lý do + lối nạp), khách đã tính trong kỳ vẫn được trả lời, âm tối đa một đơn giá. |
+| Trần AI | `isPrepaidAiPrice` + cờ Số dư AI BẬT ⇒ `prepaidAiLimits` (trần LƯỢT của gói giữ nguyên — AI Bán hàng không tính vào trần lượt); trần TIỀN quyết sau ghi đè (`applyAiOverride`). **Chưa có credit** (bot còn khoá riêng) ⇒ trần tiền của GÓI, không softOnly — y như trước khi chuyển. **Có credit** (đặt cùng lượt `org-ai-cutover --credit`) ⇒ `softOnly`: credit = **ngưỡng CẢNH BÁO** (khách nhận câu kinh doanh không số USD — `CUSTOMER_AI_SOFT_LIMIT_NOTICE`; người vận hành nhận tin có số qua kênh vận hành, một lần / ngày), **trần CỨNG chống lạm dụng = credit × 3** (`PREPAID_ABUSE_HARD_MULTIPLIER`). Cổng tiền của khách AI MỚI là Số dư AI; trần cứng giữ các việc KHÔNG qua cổng số dư (khách đã tính nhắn tiếp, học hội thoại, nhắc khách, Copilot / AI Builder) khi số dư ≤ 0 — chạm trần là chặn CẢ AI Bán hàng, người vận hành nâng credit. Ghi đè tường minh `costUsdSoft` / `costUsdHard` của người vận hành thắng. **Cờ TẮT ⇒ trần cũ của gói (credit là trần CỨNG)**: không trừ, không chặn khách mới thì cũng không có AI nền tảng không giới hạn. |
+| AI dùng chung mở cho tổ chức | `platformChatAi` vẫn đòi credit > 0 ⇒ người vận hành đặt credit bằng `org-ai-cutover <mã> --apply --credit=<USD>` — CÙNG lượt chuyển động cơ AI. Sổ AI ghi nguồn `PLATFORM` (`salesBotBillingSource("platform")`). |
+| Hoá đơn gia hạn | Kích hoạt BỊ CHẶN khi còn hoá đơn gia hạn ĐANG MỞ theo giá khác trả trước (huỷ, hoặc cho khách trả trước khi kích hoạt). Đường trả hoá đơn (`applyInvoicePaid`): tổ chức đang ghim trả trước + hoá đơn giá CŨ + CÙNG gói ⇒ KHÔNG ghim lùi (nhật ký `INVOICE_PAID` ghi `keptPrepaidPin`); đổi sang gói khác (vd mua gói V1) ⇒ ghim theo hoá đơn như thường. |
+
+**Thao tác người vận hành — `ops org-prepaid-ai` (`scripts/org-prepaid-ai.ts`, lõi `lib/billing/prepaid-ai.ts`):** mặc định CHẠY THỬ
+(chỉ đọc, hỏi lại Postgres; động cơ AI đọc bằng kết nối KIỂM TRA ép chỉ đọc): gói / phiên bản giá · tài khoản nhận tiền · cờ + số
+dư (đủ ≈ bao nhiêu giờ) · động cơ AI Bán hàng đang lưu · hoá đơn gia hạn đang mở · đơn giá · trần AI hiện tại / sau kích hoạt / sau
+cutover · mức dùng 7 ngày quy ra khách AI × đơn giá ≈ tiền / ngày + gợi ý nạp 7 / 30 ngày + credit gợi ý · khách AI trong kỳ chưa
+có dòng `aic-charge` · BƯỚC KẾ TIẾP. `--apply` làm ĐÚNG MỘT bước, đọc lại tươi trước khi ghi, nhật ký nền tảng nguồn SCRIPT:
+
+1. **MỞ NẠP** — bật cờ `ai_balance.enabled` (`enableAiBalanceAsOperator`) khi tổ chức còn ở giá cũ: giá cũ không có khối khách AI
+   ⇒ chưa trừ, chưa chặn gì; chủ shop tạo được mã QR ở /settings/ai-balance. Chạy thử CẢNH BÁO khi cờ bật + bot đang ở AI dùng
+   chung mà tổ chức chưa ở trả trước (AI nền tảng chạy mà không thu).
+2. **CHỜ NẠP** — số dư < max(100.000đ, ước tính 1 ngày) ⇒ TỪ CHỐI ghim, in «đủ ≈ N giờ». `--force-low-balance` (người vận hành chủ
+   động) hạ xuống > 0; số dư ≤ 0 thì KHÔNG BAO GIỜ ghim (bot im với khách thật).
+3. **KÍCH HOẠT** — đòi `--unit=<đ>` KHỚP đơn giá đọc lúc ghi (người bấm xác nhận đúng con số sẽ trừ); chặn khi còn hoá đơn gia hạn
+   đang mở theo giá cũ; phát hành `prepaid-ai-v1` (nếu chưa có) + ghim tổ chức (`PRICE_VERSION_PIN`); kiểm lại trên đúng đường trừ
+   tiền (gồm 0 · 590đ) — sai ⇒ hoàn ghim. Từ đây MỌI khách AI trừ số dư (kể cả khi bot còn chạy khoá riêng).
+4. **ĐANG CHẠY** — chạy thử in «CHƯA chuyển động cơ — đang thu 590đ trong khi chạy khoá riêng» khi bot còn ở khoá riêng; chạy NGAY
+   `org-ai-cutover <mã> --apply --credit=<USD>` (script này KHÔNG đổi động cơ AI, KHÔNG đặt credit) để bot sang AI dùng chung.
+
+Cổng chặn mọi bước: **chưa khai tài khoản nhận tiền ⇒ không làm gì** và in «chủ shop cần khai tài khoản nhận tiền ở /platform»
+(script KHÔNG tự khai). V1 chỉ chuyển tổ chức đang ở giá cũ `legacy` (tổ chức theo bảng giá V1 đã trừ Số dư cho khách vượt phần
+gồm); tổ chức nhà / tổ chức không ACTIVE / gói dùng thử bị chặn. Đã ghim mà cờ tắt (tắt khẩn) ⇒ ops không tự bật lại.
+
+**Runbook — chủ shop / người vận hành làm để HSLC chạy thật:**
+1. Khai tài khoản nhận tiền ở /platform (khung «Thu phí thuê bao») — hôm nay CHƯA khai.
+2. Chủ shop xác nhận đơn giá 590đ / khách AI (đề xuất: bằng giá vượt của gói Starter) và việc GIỮ giá thuê bao cũ của HSLC.
+3. Deploy bản có mã này (ops lấy script từ `main` nhưng `lib/` từ image đang chạy). `org-prepaid-ai hslc-hmt-shop` (chạy thử) để đọc
+   mức dùng quy ra tiền, rồi `org-prepaid-ai hslc-hmt-shop --apply` (MỞ NẠP).
+4. HSLC nạp ở /settings/ai-balance — ít nhất «gợi ý nạp 7 ngày» của bản chạy thử (cơ sở hội thoại AI là CẬN TRÊN khi đồng hồ
+   khách AI mới có dưới 3 ngày trọn). «~2.000 lượt / ngày» của HSLC là LƯỢT AI (tin), KHÔNG phải số khách — số khách AI / ngày
+   phải đọc ở bản chạy thử; tiền / ngày = khách AI MỚI / ngày × 590đ (vd 500 khách mới / ngày ≈ 295.000đ / ngày ≈ 8,9 triệu đ /
+   30 ngày). Đầu tháng gần như mọi khách đều mới; khách quay lại trong cùng tháng không bị tính lại.
+5. Có hoá đơn gia hạn đang mở theo giá cũ ⇒ huỷ hoặc cho khách trả TRƯỚC khi kích hoạt.
+6. `org-prepaid-ai hslc-hmt-shop --apply --unit=590` (KÍCH HOẠT) rồi NGAY `org-ai-cutover hslc-hmt-shop --apply --credit=<credit
+   gợi ý>` — credit = ngưỡng cảnh báo, trần cứng chống lạm dụng = credit × 3: chọn credit ≥ chi phí AI tháng dự kiến, nếu không bot
+   chạm trần cứng giữa tháng. Hậu kiểm `--apply-probe`.
+
+**Giới hạn đã biết (review #674 — ghi nhận, chưa sửa ở lát này):**
+- **L3** — khách AI ghi đồng hồ TRƯỚC lúc kích hoạt (hoặc lượt trừ hỏng) không có dòng `aic-charge` và không được bù; chạy thử in
+  số «khách AI trong kỳ chưa có dòng aic-charge» để người vận hành thấy. Lượt bù vẫn là việc ở §6.
+- **L4** — «Âm tối đa một đơn giá» chỉ đúng khi các lượt đi TUẦN TỰ: cổng (`aiBalanceGate`) đọc số dư TRƯỚC, lượt trừ
+  (`chargeAiCustomerUsage`) chạy SAU khi câu trả lời đã gửi, nên N khách MỚI tới đồng thời có thể làm số dư âm tới N × đơn giá.
+  Giới hạn này có từ trước PR này (§6 «Ranh giới âm tối đa 1 khách»); với gói trả trước «gồm 0» thì MỌI khách AI đi qua đường này.
+- **L8** — nếu `platformAudit` hỏng ngay sau khi phát hành phiên bản (`lib/pricing/price-book.ts::publishPrepaidAiVersion`, lượt ghi
+  nhật ký `PRICE_VERSION_PUBLISH` sau giao dịch chèn phiên bản), phiên bản ĐÃ có trong sổ giá mà KHÔNG có nhật ký phát hành, và các
+  lượt sau dùng lại nó (nhánh «đã có») KHÔNG ghi bù. Người vận hành đối chiếu bằng bảng phiên bản (`platform_price_versions`:
+  `created_at`, `created_by_email`, `note`).
+- Màn khách (/settings/plan) in dòng khách AI «Gói không gồm» cho gói trả trước — đúng về số (mọi khách AI trừ số dư) nhưng câu chữ
+  nên là «trả theo Số dư AI» (việc giao diện, chưa làm). Gói cũ có số người dùng / fanpage VƯỢT trần `platform_plans` sẽ hiện dòng
+  ghế «chưa khai đơn giá» trên hoá đơn ước tính (giá cũ là «không phần vượt»).
+- Câu cảnh báo vượt ngưỡng cho KHÁCH vẫn là câu chung «AI sắp chạm hạn mức tháng của gói» — với gói trả trước câu đúng hơn là về
+  Số dư AI (việc câu chữ, chưa làm).
+- Hệ số trần chống lạm dụng (× 3) là hằng số kỹ thuật — chủ shop chưa chốt.
