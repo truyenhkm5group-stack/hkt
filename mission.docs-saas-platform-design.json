@@ -3,7 +3,7 @@
   "mission_id": "docs-saas-platform-design",
   "title": "Thiết kế nền tảng SaaS (R0): hoá đơn vượt gói · Continuous Auditor · quy đổi thang rủi ro · chi phí AI theo loại việc + DAG master mission",
   "business_goal": "",
-  "status": "RUNNING",
+  "status": "PR_READY",
   "priority": "P1",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -24,7 +24,18 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-08T04:40:14.153Z",
-  "updated_at": "2026-10-08T04:40:14.153Z",
-  "last_heartbeat": "2026-10-08T04:40:14.153Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-08T05:16:51.324Z",
+  "last_heartbeat": "2026-10-08T05:16:51.324Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "docs/saas-platform-design",
+    "sha": "6a13d3c6797e25b6e65acbc288232764b5070c9b",
+    "at": "2026-10-08T05:16:51.324Z",
+    "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+    "title": "Thiết kế nền tảng SaaS (R0): hoá đơn vượt gói · Continuous Auditor · quy đổi thang rủi ro · chi phí AI theo loại việc + DAG master mission",
+    "summary": "Tài liệu thiết kế nền tảng SaaS (R0): OVERAGE.md (hoá đơn vượt gói + 10 câu hỏi chủ shop), auditor/DESIGN.md (Continuous SaaS Auditor, phép kiểm chỉ đọc trên dữ liệu có sẵn), RISK_SCALE.md (ba thang rủi ro đang song song + quy đổi), AI_COST_WORKLOAD.md (SQL nền chi phí AI theo loại việc × nguồn); mục DAG master mission cuối MASTER_MISSION_STATUS.md",
+    "tests": [
+      "Quét ký tự vô hình 0; không CR; bảng đủ cột; 11 khối SQL chạy thử trên PGlite (PostgreSQL 18) với dữ liệu mẫu đạt; mỗi khối một câu; chỉ thêm (+801/−0), nội dung #660 giữ nguyên"
+    ]
+  }
 }
