@@ -1,0 +1,8 @@
+{
+  "pr": 706,
+  "sha": "308365e11b8720173876ba8f4ea9decd9d1c7a5a",
+  "verdict": "FAIL",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-08T21:20:01.702Z",
+  "note": "Review Integration Lead — HIGH (sự thật thương mại): START_STEPS bước 2 «Bấm Kết nối Facebook, đăng nhập bằng tài khoản quản trị Page và chọn Page» và FAQ «Một fanpage Facebook (nối thẳng…)» hứa một luồng CHƯA chạy với khách ngoài: sứ mệnh meta-messenger-access đang BLOCKED_EXTERNAL (app nền tảng chưa được Meta cấp pages_messaging/pages_show_list, chưa App Review — MASTER_MISSION_REGISTRY §3; MM-M"
+}
