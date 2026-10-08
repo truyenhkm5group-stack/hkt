@@ -3,7 +3,7 @@
   "mission_id": "saas-identity-followup",
   "title": "Theo sau P0 danh tính: gửi lại form Tạo khách không phát liên kết cho người job chưa tạo; mở khoá tài khoản ghi lại chỉ mục đăng nhập",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P2",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -30,9 +30,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-08T12:47:23.798Z",
-  "updated_at": "2026-10-08T12:47:56.459Z",
+  "updated_at": "2026-10-08T13:22:03.734Z",
   "last_heartbeat": "2026-10-08T12:47:35.098Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#684 → 5c781cd5f4145c5ae77b7a1bd4935256d3045e60"
+  },
   "handoff": {
     "branch": "fix/identity-followup",
     "sha": "d227c148adbe70adbf1d8c8593621b41573480a8",
