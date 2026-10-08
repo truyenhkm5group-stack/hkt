@@ -3,7 +3,7 @@
   "mission_id": "chatbot-security-2",
   "title": "Bot bán hàng: đơn nháp người lạ không chặn đơn thật · đơn máy nối hỏng vẫn là đơn máy · bài học AI xin chuyển khoản không tự áp",
   "business_goal": "",
-  "status": "INTEGRATING",
+  "status": "VERIFYING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -33,11 +33,13 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-07T23:55:08.953Z",
-  "updated_at": "2026-10-08T00:18:12.056Z",
+  "updated_at": "2026-10-08T00:41:38.992Z",
   "last_heartbeat": "2026-10-07T23:55:26.026Z",
   "definition_of_done": [],
   "evidence": {
-    "merged": "#652 → 454968bfc49055a4a0497fb66f80291b8b1d69a4"
+    "merged": "#652 → 454968bfc49055a4a0497fb66f80291b8b1d69a4",
+    "verify": "PASS 454968bfc49055a4a0497fb66f80291b8b1d69a4 2026-10-08T00:41:35.309Z",
+    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/37707093592"
   },
   "handoff": {
     "branch": "fix/chatbot-security-2",
