@@ -1075,3 +1075,4 @@
 {"at":"2026-10-08T23:40:08.613Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DONE","mission":"launch-gate-r3","detail":"production dbab68130a72 · deploy 37854562530 xanh (smoke) · verify ĐẠT"}
 {"at":"2026-10-08T23:40:22.281Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DONE","mission":"erp-a11y-bo-cuc","detail":"production dbab68130a72 · deploy 37854562530 xanh (smoke) · verify ĐẠT"}
 {"at":"2026-10-08T23:40:36.144Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DONE","mission":"hide-internal-429-flake","detail":"production dbab68130a72 · deploy 37854562530 xanh (smoke) · verify ĐẠT; cổng #707 chạy lại xanh, bài thuần khoá hai chiều"}
+{"at":"2026-10-08T23:40:49.150Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DONE","mission":"ops-signals-check","detail":"production dbab68130a72 · deploy 37854562530 xanh (smoke) · verify ĐẠT; ops-signals-check chạy trên production PASS 9 tổ chức × 8 tín hiệu, 0 ô hỏng (run 37853956678)"}
