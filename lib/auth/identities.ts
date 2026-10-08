@@ -15,10 +15,10 @@ import { listOrganizations } from "@/lib/platform/organizations";
  *
  * Bản cũ chỉ ghi SAU lượt đăng nhập thành công đầu tiên, mà lượt đầu ấy lại cần chỉ mục mới tìm ra tổ chức: quản trị khách do
  * người vận hành tạo (job cấp phát) kích hoạt xong vẫn bị «sai mật khẩu» ở `/login` cho tới khi gõ «mã tổ chức» — thứ khách
- * không biết là gì (docs/saas/FINISH_LINE_2026-10-08.md blocker 1). Nay:
+ * không biết là gì (báo cáo Finish Line 08/10/2026 — PR #680, blocker 1). Nay:
  *  · TÀI KHOẢN VỪA ĐĂNG NHẬP ĐƯỢC BẰNG MẬT KHẨU — cấp phát quản trị (`provisionOrganization`), quản trị tạo hộ / nhân viên nhận
- *    lời mời (`lib/users/create-user.ts`), đặt mật khẩu qua liên kết, quản trị đặt mật khẩu tay, đối chiếu dữ liệu cũ
- *    (`lib/platform/identity-reconcile.ts`): `last_used_at = NULL` — chỉ mục CÓ, nhưng CHƯA AI DÙNG nó để đăng nhập.
+ *    lời mời (`lib/users/create-user.ts`), đặt mật khẩu qua liên kết, quản trị đặt mật khẩu tay, MỞ KHOÁ tài khoản, đối chiếu dữ
+ *    liệu cũ (`lib/platform/identity-reconcile.ts`): `last_used_at = NULL` — chỉ mục CÓ, nhưng CHƯA AI DÙNG nó để đăng nhập.
  *  · ĐĂNG NHẬP THÀNH CÔNG (`verifyLogin` — màn đăng nhập, đăng ký, nhận lời mời; Google / Facebook): `last_used_at = lúc đó`.
  *
  * `last_used_at` khác NULL = «danh tính này ĐÃ được dùng để đăng nhập vào ĐÚNG tài khoản này». Hai chỗ đọc dựa vào nó: ô «Người
@@ -91,6 +91,8 @@ export type IndexableAccount = { id: string; email: string | null; phone?: strin
  * nhập tra (`parseLoginIdentifier` ⇒ `findUserByIdentifier`): giá trị lệch dạng thì tài khoản ấy vốn không đăng nhập bằng nó
  * được, ghi vào chỉ đẻ một dòng không ai khớp. Tài khoản đang KHOÁ không ghi (đăng nhập không mở được nó); dòng cũ của nó GIỮ —
  * chỉ mục chỉ HẸP lại lúc đọc, và người bị khoá gõ đúng mật khẩu nhận đúng câu «Tài khoản đã bị khoá», không phải «sai mật khẩu».
+ * Vì lượt ghi bỏ qua tài khoản khoá, MỞ KHOÁ (`lib/actions/users.ts`) gọi lại hàm này — tài khoản bị khoá trước khi kịp có dòng
+ * vẫn vào được không cần mã tổ chức ngay sau khi mở.
  */
 export async function indexAccountIdentities(orgCode: string, account: IndexableAccount, opts: { usedAt?: Date | null } = {}): Promise<{ written: number; failed: number }> {
   const out = { written: 0, failed: 0 };

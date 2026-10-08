@@ -1,7 +1,7 @@
 /**
  * ═══════════ KHÁCH DO ADMIN TẠO ĐĂNG NHẬP BẰNG EMAIL + MẬT KHẨU (P0 `saas-identity-email-login`, 08/10/2026) ═══════════
  *
- * Lỗi đo thật (docs/saas/FINISH_LINE_2026-10-08.md blocker 1): người vận hành tạo khách ở `/platform/customers` → job cấp phát tạo
+ * Lỗi đo thật (báo cáo Finish Line 08/10/2026 — PR #680, blocker 1): người vận hành tạo khách ở `/platform/customers` → job cấp phát tạo
  * quản trị trong CSDL tổ chức → khách mở liên kết kích hoạt, đặt mật khẩu → `/login` báo «Email / số điện thoại hoặc mật khẩu không
  * đúng.» cho tới khi gõ «mã tổ chức». Gốc: chỉ mục danh tính (email ⇒ tổ chức) chỉ được ghi SAU lần đăng nhập thành công đầu tiên —
  * mà lần đầu ấy lại cần chỉ mục.
@@ -20,6 +20,8 @@
  *  + Gửi lại kích hoạt: chỉ người vận hành, lý do bắt buộc, thu hồi liên kết cũ, chỉ băm trong CSDL, nhật ký nền tảng; đặt xong ⇒ chỉ
  *    mục có lại kể cả khi đã mất. + Email trùng hai tổ chức ⇒ chọn cửa hàng TẤT ĐỊNH, mật khẩu sai không lộ tổ chức nào. + Người nhà /
  *    đường «mã tổ chức» không đổi. + Tạo hộ / nhận lời mời ⇒ chỉ mục có. + Đối chiếu dữ liệu cũ: chạy thử không ghi, ghi bù idempotent.
+ *  + Review #681: gửi lại form «Tạo khách» cùng khoá mà đầu vào khác job ⇒ từ chối, đúng yêu cầu ⇒ liên kết cho ĐÚNG người của job
+ *    (L1) · mở khoá ghi lại chỉ mục (L3) · bộ quét theo TỪNG HÀM bắt chèn qua bí danh / SQL thô và sửa mật khẩu · khoá · email · SĐT (L2).
  *
  * Tổ chức THẬT `iel-*` (tự cấp, tự dọn); mốc thời gian theo đồng hồ thật (AGENTS 50 · 65) — chỗ duy nhất phải đợi là mốc thu hồi
  * phiên làm tròn LÊN giây kế tiếp sau mỗi lượt đặt mật khẩu (lib/constants/session-revocation.ts), đọc thẳng từ CSDL.
@@ -34,6 +36,7 @@ import { workUnitAsyncStorage } from "next/dist/server/app-render/work-unit-asyn
 import { RequestCookies, ResponseCookies } from "next/dist/server/web/spec-extension/cookies";
 import { getDb, getPlatformDb, organizationDatabaseUrl, releaseOrganizationDb, schema } from "@/db";
 import { loginAction, logoutAction } from "@/lib/actions/auth";
+import { setUserActive, updateUser } from "@/lib/actions/users";
 import { findIdentity } from "@/lib/auth/identities";
 import { credentialsMatch, LOGIN_BAD_CREDENTIALS, loginCandidates } from "@/lib/auth/login";
 import { hashPassword } from "@/lib/auth/password";
@@ -49,7 +52,7 @@ import { provisionOrganization } from "@/lib/platform/provision";
 import { activationStateOf, jobAdminEmail, loadWorkspaceActivation } from "@/lib/saas/activation";
 import { createCustomerAsOperator, loadCustomerDetail, resendActivationAsOperator } from "@/lib/saas/console";
 import { workspaceReach } from "@/lib/saas/customers";
-import { retryJob } from "@/lib/saas/provisioning";
+import { CREATE_CUSTOMER_KEY_REUSED, createCustomerFingerprint, retryJob } from "@/lib/saas/provisioning";
 import { createUserCore } from "@/lib/users/create-user";
 import { acceptUserInviteCore, createUserInviteCore } from "@/lib/users/invites";
 import { completePasswordResetCore, createResetLinkAsOperator, hashResetToken, lookupResetToken } from "@/lib/users/password-reset";
@@ -258,6 +261,15 @@ function testPure() {
   assert.equal(maskIdentity("EMAIL", "chu@iel-shop-a.vn"), "c***@iel-shop-a.vn");
   assert.equal(maskIdentity("PHONE", "84912345678"), "8491****78");
 
+  // Dấu vân «Tạo khách» (L1): jsonb đổi thứ tự khoá, thứ tự sản phẩm, chữ hoa email / mã, ô trống ⇔ null KHÔNG tính là khác;
+  // email / workspace / sản phẩm / tài khoản khác ⇒ khác.
+  const yeuCau = { kind: "CREATE_CUSTOMER", accountId: null, account: { code: null, name: "Khách", accountType: "EXTERNAL" }, workspace: { code: "ws-a", name: "WS A", planKey: "starter", brand: null }, products: ["chotdon", "erp"], admin: { email: "chu@ws-a.vn", name: "Chủ" } };
+  const daoKhoa = { admin: { name: "Chủ", email: "CHU@WS-A.vn" }, products: ["erp", "chotdon"], workspace: { planKey: "starter", name: "WS A", code: "ws-a" }, account: { accountType: "EXTERNAL", name: "Khách", code: "" }, accountId: "", kind: "CREATE_CUSTOMER" };
+  assert.equal(createCustomerFingerprint(daoKhoa), createCustomerFingerprint(yeuCau));
+  for (const khac of [{ ...yeuCau, admin: { ...yeuCau.admin, email: "la@ws-a.vn" } }, { ...yeuCau, workspace: { ...yeuCau.workspace, code: "ws-b" } }, { ...yeuCau, products: ["chotdon"] }, { ...yeuCau, accountId: "acct-1" }]) {
+    assert.notEqual(createCustomerFingerprint(khac), createCustomerFingerprint(yeuCau), JSON.stringify(khac));
+  }
+
   // Ô arg của ops: rỗng / mã / --apply; cờ lạ, thừa, mã sai dạng ⇒ lỗi cách dùng (không đoán).
   assert.deepEqual(parseReconcileArgs([]), { ok: true, apply: false, orgCode: null });
   assert.deepEqual(parseReconcileArgs(["--apply"]), { ok: true, apply: true, orgCode: null });
@@ -268,25 +280,93 @@ function testPure() {
 
 // ═══════════ 2 · MÃ NGUỒN ═══════════
 
+function boChuThich(src: string): string {
+  return src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
+}
+
+/** Cột của `users` mà đổi đi là đổi khả năng đăng nhập bằng mật khẩu / chỗ chỉ mục trỏ tới. Khớp ở vị trí KHOÁ của `.set({…})`. */
+const COT_DANG_NHAP = /(?:^|[{,])\s*(passwordHash|active|email|phone)\s*(?=[:,}]|$)/;
+const COT_DANG_NHAP_SQL = /"?\b(password_hash|active|email|phone)\b"?\s*=/i;
+
+type LuotGhi = { kind: "INSERT" | "UPDATE" | "RAW"; at: number };
+
+/** Mọi lượt GHI vào `users` có thể đổi khả năng đăng nhập: chèn (thẳng, qua bí danh `const u = schema.users`, qua `insertUserAccount`, SQL thô) và sửa đụng {@link COT_DANG_NHAP}. */
+function luotGhiUsers(src: string): LuotGhi[] {
+  const out: LuotGhi[] = [];
+  const biDanh = [...src.matchAll(/\b(?:const|let|var)\s+(\w+)\s*=\s*schema\.users\b(?![\w.])/g)].map((m) => m[1]);
+  const bang = `(?:schema\\.users|users${biDanh.map((b) => `|${b}`).join("")})`;
+  for (const m of src.matchAll(new RegExp(String.raw`\.insert\(\s*${bang}\s*\)`, "g"))) out.push({ kind: "INSERT", at: m.index ?? 0 });
+  // Lời GỌI `insertUserAccount(` (không phải chính dòng định nghĩa) — vị trí giữ nguyên để `hamBaoQuanh` tìm đúng hàm gọi.
+  for (const m of src.matchAll(/(?<!function\s+)\binsertUserAccount\(/g)) out.push({ kind: "INSERT", at: m.index ?? 0 });
+  for (const m of src.matchAll(new RegExp(String.raw`\.update\(\s*${bang}\s*\)\s*\.set\(\s*\{([^}]*)\}`, "g"))) {
+    if (m[1].split(",").some((phan) => COT_DANG_NHAP.test(`,${phan}`))) out.push({ kind: "UPDATE", at: m.index ?? 0 });
+  }
+  for (const m of src.matchAll(/\b(INSERT\s+INTO|UPDATE)\s+"?users"?(?![\w."])([\s\S]*?)(?:`|;)/gi)) {
+    const set = /\bSET\b([\s\S]*?)(?:\bFROM\b|\bWHERE\b|\bRETURNING\b|$)/i.exec(m[2])?.[1] ?? "";
+    if (/^insert/i.test(m[1]) || COT_DANG_NHAP_SQL.test(set)) out.push({ kind: "RAW", at: m.index ?? 0 });
+  }
+  return out;
+}
+
+/** Hàm cấp cao nhất bao quanh vị trí `at` (tên + thân tới hàm kế tiếp); ngoài mọi hàm ⇒ cả tệp. */
+function hamBaoQuanh(src: string, at: number): { ten: string; than: string } {
+  let start = 0;
+  let end = src.length;
+  let ten = "(cấp tệp)";
+  for (const m of src.matchAll(/^(?:export\s+)?(?:async\s+)?function\s+(\w+)/gm)) {
+    const i = m.index ?? 0;
+    if (i <= at) {
+      start = i;
+      ten = m[1];
+    } else {
+      end = i;
+      break;
+    }
+  }
+  return { ten, than: src.slice(start, end) };
+}
+
+const GHI_CHI_MUC = /\b(indexAccountIdentities|indexNewUserAccount|indexAccountInCurrentOrganization)\(/;
+
 function testSource() {
   // Phép khớp EMAIL của Google / Facebook chỉ nhận dòng ĐÃ dùng để đăng nhập — chỉ mục ghi lúc cấp phát không mở đường vào không mật khẩu.
   assert.match(readFileSync("lib/auth/social.ts", "utf8"), /findIdentity\("EMAIL", profile\.email, \{ usedOnly: true \}\)/);
-  // Mọi đường chèn `users` trong mã ứng dụng ghi chỉ mục qua MỘT hàm — hoặc khai miễn trừ kèm lý do.
+  // Mọi lượt ghi `users` có thể đổi khả năng đăng nhập ghi chỉ mục qua MỘT hàm TRONG CÙNG HÀM — hoặc khai miễn trừ kèm lý do.
+  // Quét SAU khi bỏ chú thích: lời gọi nằm trong chú thích không phải lời gọi.
   const MIEN_TRU: Record<string, string> = {
-    "lib/auth/bootstrap.ts": "Quản trị đầu tiên của tổ chức NHÀ lúc khởi động — nhà luôn là ứng viên của trang đăng nhập chung (`loginCandidates`), không cần chỉ mục.",
+    "lib/auth/bootstrap.ts::ensureAdminUser": "Quản trị đầu tiên của tổ chức NHÀ lúc khởi động — nhà luôn là ứng viên của trang đăng nhập chung (`loginCandidates`), không cần chỉ mục.",
+    "lib/users/create-user.ts::insertUserAccount": "Đường chèn CHUNG của hai cửa tạo tài khoản — tự nó không biết giao dịch của nơi gọi đã chốt chưa; MỌI lời gọi `insertUserAccount(` bị quét như một lượt chèn và phải ghi chỉ mục ở hàm gọi (createUserCore · acceptUserInviteCore).",
+    "lib/actions/users.ts::changeMyPassword": "Người tự đổi mật khẩu đang ĐĂNG NHẬP — dòng chỉ mục của họ đã có từ lượt đăng nhập (kèm mốc dùng); đổi mật khẩu không đổi email / SĐT / trạng thái khoá.",
   };
   const files = execFileSync("git", ["ls-files", "lib", "app"], { encoding: "utf8" }).split("\n").filter((f) => /\.(ts|tsx)$/.test(f));
   const pham: string[] = [];
+  const daDung = new Set<string>();
   let seen = 0;
   for (const f of files) {
-    const src = readFileSync(f, "utf8");
-    if (!/\.insert\(schema\.users\)|\binsertUserAccount\(/.test(src)) continue;
-    seen += 1;
-    if (MIEN_TRU[f]) continue;
-    if (!/\b(indexAccountIdentities|indexNewUserAccount|indexAccountInCurrentOrganization)\(/.test(src)) pham.push(f);
+    const src = boChuThich(readFileSync(f, "utf8"));
+    for (const g of luotGhiUsers(src)) {
+      seen += 1;
+      const ham = hamBaoQuanh(src, g.at);
+      const khoa = `${f}::${ham.ten}`;
+      if (MIEN_TRU[khoa]) daDung.add(khoa);
+      else if (!GHI_CHI_MUC.test(ham.than)) pham.push(`${khoa} (${g.kind})`);
+    }
   }
-  assert.deepEqual(pham, [], "tệp tạo tài khoản mà không ghi chỉ mục đăng nhập ⇒ người mới chỉ vào được khi gõ «mã tổ chức» (P0 08/10/2026)");
-  assert.ok(seen >= 4, `phải thấy các đường tạo tài khoản đã biết (cấp phát, tạo hộ, lời mời, khởi động) — mới thấy ${seen}`);
+  assert.deepEqual(pham, [], "hàm ghi `users` (chèn · đổi mật khẩu / khoá / email / SĐT) mà không ghi chỉ mục đăng nhập ⇒ người ấy chỉ vào được khi gõ «mã tổ chức» (P0 08/10/2026)");
+  assert.ok(seen >= 10, `phải thấy các đường ghi đã biết (cấp phát, tạo hộ, lời mời, đặt / đổi mật khẩu, khoá / mở khoá, đăng ký nhanh, khởi động) — mới thấy ${seen}`);
+  assert.deepEqual(Object.keys(MIEN_TRU).filter((k) => !daDung.has(k)), [], "miễn trừ không còn khớp hàm nào — xoá khỏi danh sách");
+  // Tự kiểm bộ dò: không tin được nó thì luật trên mù.
+  const mau = [
+    "const u = schema.users;",
+    "export async function a() {\n  await db.insert(u).values({});\n}",
+    "export async function b() {\n  await db.update(schema.users).set({ active }).where(x);\n  await indexAccountIdentities(o, t);\n}",
+    "export async function c() {\n  await db.update(schema.users).set({ lastLoginAt: now, name: email }).where(x);\n}",
+    "export async function d() {\n  await db.execute(sql`UPDATE \"users\" SET \"password_hash\" = ${h} WHERE id = ${i}`);\n}",
+    'export async function e() {\n  await db.execute(sql`UPDATE "users" u SET "session_invalid_before" = now() FROM "users" t WHERE u.id = t.id`);\n}',
+    "export async function f() {\n  await tx.insert(users).values({});\n  await insertUserAccount(tx, x);\n}",
+  ].join("\n");
+  assert.deepEqual(luotGhiUsers(mau).map((g) => `${g.kind}:${hamBaoQuanh(mau, g.at).ten}`).sort(), ["INSERT:a", "INSERT:f", "INSERT:f", "RAW:d", "UPDATE:b"]);
+  assert.equal(GHI_CHI_MUC.test(boChuThich("export async function g() {\n  // indexAccountIdentities(o, t);\n}")), false, "lời gọi trong chú thích không tính");
   // Trang khách thêm ĐÚNG một dòng; component là client, chỉ nhập KIỂU từ lõi máy chủ.
   const page = readFileSync("app/(dashboard)/platform/customers/[code]/page.tsx", "utf8");
   assert.equal(page.match(/<ResendActivation\b/g)?.length, 1);
@@ -438,20 +518,45 @@ async function testCustomerFlow(op: SessionUser, home: { code: string }) {
 
 async function testResend(op: SessionUser, home: { code: string; name: string }) {
   // Khách NỘI BỘ (INTERNAL) đi cùng đường với khách ngoài — chỉ khác nhãn tài khoản.
-  const created = await createCustomerAsOperator(op, {
+  const inputR = {
     account: { code: "iel-acct-r", name: "Khách IEL R", accountType: "INTERNAL" },
     workspace: { code: R, name: "Shop IEL R", planKey: "starter" },
     products: ["chotdon"],
     admin: { email: R_ADMIN, name: "Chủ R" },
     idempotencyKey: "iel-create-r",
     reason: "Bài kiểm gửi lại kích hoạt",
-  });
+  };
+  const created = await createCustomerAsOperator(op, inputR);
   assert.ok("ok" in created && created.activationLink, JSON.stringify(created));
-  const t1 = tokenOf(created.activationLink!);
+  const t0 = tokenOf(created.activationLink!);
   const why = "Khách báo chưa nhận được liên kết";
   const rAdmin = await userOf(R, R_ADMIN);
   assert.ok(rAdmin);
   const errOf = (r: { error: string } | { ok: true }) => ("error" in r ? r.error : "OK");
+  const pdb = await getPlatformDb();
+  const linkLogs = () => pdb.select().from(schema.platformAuditLog).where(and(eq(schema.platformAuditLog.targetOrgCode, R), eq(schema.platformAuditLog.action, "PASSWORD_RESET_LINK")));
+
+  // L1 (review #681): gửi lại form «Tạo khách» CÙNG khoá mà đầu vào KHÁC đầu vào job đã lưu ⇒ từ chối trước khi làm gì — job chạy
+  // theo đầu vào cũ, nên nhận lượt này là phát liên kết cho người / workspace mà job chưa từng tạo.
+  for (const khac of [
+    { ...inputR, admin: { email: "ke-gian@iel-shop-r.vn", name: "Chủ R" } },
+    { ...inputR, admin: { email: R_ADMIN, name: "Tên khác" } },
+    { ...inputR, workspace: { ...inputR.workspace, code: A } },
+  ]) {
+    assert.equal(errOf(await createCustomerAsOperator(op, khac)), CREATE_CUSTOMER_KEY_REUSED, JSON.stringify(khac));
+  }
+  assert.equal((await linkLogs()).length, 1, "lượt bị từ chối không phát liên kết, không ghi nhật ký");
+  assert.equal(await userOf(R, "ke-gian@iel-shop-r.vn"), undefined);
+  // Gửi lại ĐÚNG yêu cầu (chữ hoa trong email · lý do khác đều không tính là khác) ⇒ cùng job, không chạy lại; quản trị chưa kích
+  // hoạt ⇒ liên kết MỚI cho ĐÚNG người của job, liên kết cũ hết hiệu lực, nhật ký nói «gửi lại» với purpose ACTIVATION.
+  const again = await createCustomerAsOperator(op, { ...inputR, admin: { email: "CHU@IEL-Shop-R.vn", name: "Chủ R" }, reason: "Khách chưa nhận được — bấm gửi lại form" });
+  assert.ok("ok" in again && again.jobId === created.jobId && again.activationLink, JSON.stringify(again));
+  const t1 = tokenOf(again.activationLink!);
+  assert.notEqual(t1, t0);
+  assert.equal(errOf(await reset(R, t0, PW1)), PASSWORD_RESET_INVALID, "liên kết của lần gửi đầu hết hiệu lực");
+  const viaForm = (await linkLogs()).find((l) => l.reason?.startsWith("Gửi lại liên kết kích hoạt — form «Tạo khách»"));
+  assert.ok(viaForm && viaForm.subject === `user:${R_ADMIN}` && (viaForm.after as { purpose?: string })?.purpose === "ACTIVATION", "nhật ký của lượt gửi lại form: đúng người của job, đúng purpose");
+  assert.equal((await pdb.query.platformProvisioningJobs.findFirst({ where: eq(schema.platformProvisioningJobs.idempotencyKey, "iel-create-r") }))?.attempts, 1, "gửi lại không chạy lại job");
   assert.match(errOf(await resendActivationAsOperator({ ...op, organization: { code: R, name: "R", isHome: false } }, { orgCode: R, reason: why })), /tổ chức nhà/, "quản trị của khách không tự gửi kích hoạt xuyên nền tảng");
   assert.match(errOf(await resendActivationAsOperator({ ...op, role: "CS" }, { orgCode: R, reason: why })), /không có quyền/);
   assert.match(errOf(await resendActivationAsOperator(op, { orgCode: R, reason: "x" })), /lý do/);
@@ -465,16 +570,15 @@ async function testResend(op: SessionUser, home: { code: string; name: string })
   assert.notEqual(t2, t1);
   assert.equal(errOf(await reset(R, t1, PW1)), PASSWORD_RESET_INVALID, "liên kết cũ hết hiệu lực ngay");
   assert.ok((await lookupResetToken(R, t2, { ip: nextIp() })).ok);
-  const pdb = await getPlatformDb();
-  const logs = await pdb.select().from(schema.platformAuditLog).where(and(eq(schema.platformAuditLog.targetOrgCode, R), eq(schema.platformAuditLog.action, "PASSWORD_RESET_LINK")));
-  assert.equal(logs.length, 2, "kích hoạt ban đầu + gửi lại — mỗi lượt một dòng nhật ký nền tảng");
-  const resent = logs.find((l) => l.reason?.startsWith("Gửi lại liên kết kích hoạt"));
+  const logs = await linkLogs();
+  assert.equal(logs.length, 3, "kích hoạt ban đầu + gửi lại form + gửi lại ở trang khách — mỗi lượt một dòng nhật ký nền tảng");
+  const resent = logs.find((l) => l.reason?.startsWith("Gửi lại liên kết kích hoạt: "));
   assert.ok(resent && resent.actorEmail === op.email && (resent.after as { purpose?: string })?.purpose === "ACTIVATION", JSON.stringify(logs));
-  assert.ok(!JSON.stringify(logs).includes(t1) && !JSON.stringify(logs).includes(t2), "nhật ký không chứa mã thô");
+  for (const tok of [t0, t1, t2]) assert.ok(!JSON.stringify(logs).includes(tok), "nhật ký không chứa mã thô");
   await withOrganization(R, async () => {
     const rows = await (await getDb()).select().from(schema.passwordResetTokens).where(eq(schema.passwordResetTokens.userId, rAdmin.id));
     assert.ok(!JSON.stringify(rows).includes(t2) && rows.some((r) => r.tokenHash === hashResetToken(t2)), "CSDL chỉ giữ băm");
-    assert.equal(rows.filter((r) => r.revokedAt).length, 1);
+    assert.equal(rows.filter((r) => r.revokedAt).length, 2, "hai liên kết trước bị thu hồi");
     // Liên kết đang chờ hết hạn ⇒ trạng thái «hết hạn», gửi lại được.
     await (await getDb()).update(schema.passwordResetTokens).set({ expiresAt: new Date(Date.now() - 60_000) }).where(eq(schema.passwordResetTokens.tokenHash, hashResetToken(t2)));
   });
@@ -589,6 +693,7 @@ async function testReconcile() {
       cu: await ins("cu@iel-shop-b.vn", { phone: "84987650001" }),
       lech: await ins("lech@iel-shop-b.vn"),
       khoa: await ins("khoa@iel-shop-b.vn", { active: false }),
+      khoa2: await ins("khoa2@iel-shop-b.vn", { active: false }),
       khongMk: await ins("khong-mk@iel-shop-b.vn", { passwordHash: "x" }),
       hoa: await ins("Hoa@IEL-shop-b.vn"),
     };
@@ -611,7 +716,7 @@ async function testReconcile() {
   assert.equal(b.error, null);
   assert.deepEqual(b.gaps.map((g) => `${g.kind}:${g.value}:${g.state}`).sort(), ["EMAIL:cu@iel-shop-b.vn:MISSING", "EMAIL:lech@iel-shop-b.vn:STALE", "PHONE:84987650001:MISSING"]);
   assert.ok(b.gaps.every((g) => g.userId === (g.value === "lech@iel-shop-b.vn" ? ids.lech : ids.cu)), "mỗi chỗ thiếu trỏ ĐÚNG tài khoản mang email đó trong CSDL B");
-  assert.deepEqual(b.skipped, { inactive: 1, noPassword: 1, emailNotNormalized: 1 }, "khoá · không mật khẩu · email lệch dạng ⇒ bỏ qua, không đoán");
+  assert.deepEqual(b.skipped, { inactive: 2, noPassword: 1, emailNotNormalized: 1 }, "khoá · không mật khẩu · email lệch dạng ⇒ bỏ qua, không đoán");
   assert.equal(b.orphans, 2, "dòng trỏ tài khoản không còn ⇒ chỉ đếm");
   const dry = await runIdentityReconcile({ orgCode: B, apply: false });
   assert.equal(dry.after, null);
@@ -642,6 +747,26 @@ async function testReconcile() {
   assert.equal((await whoIs(cu.cookie)).orgCode, B, "SAU đối chiếu: tài khoản cũ đăng nhập không cần mã tổ chức");
   const byPhone = await login("0987 650 001", LEGACY_PW);
   assert.equal((await whoIs(byPhone.cookie)).orgCode, B, "…và bằng SĐT");
+
+  // L3 (review #681): tài khoản bị khoá không có dòng (đối chiếu vừa bỏ qua nó) ⇒ MỞ KHOÁ ghi lại chỉ mục, qua CẢ HAI cửa của
+  // /settings/users — `setUserActive` và hộp sửa `updateUser`; lượt mở khoá lần hai không đẻ dòng thứ hai.
+  const quanTri = await login(B_ADMIN, "QuanTriB@2026");
+  assert.ok(quanTri.cookie, JSON.stringify(quanTri.value));
+  assert.deepEqual((await login("khoa@iel-shop-b.vn", LEGACY_PW)).value, { error: LOGIN_BAD_CREDENTIALS }, "TRƯỚC khi mở khoá: không có dòng ⇒ trang chung không biết tổ chức nào");
+  const moKhoa = await asAction(() => setUserActive({ id: ids.khoa, active: true }), { cookie: quanTri.cookie });
+  assert.deepEqual(moKhoa.value, { ok: true, id: ids.khoa }, JSON.stringify(moKhoa));
+  const rowKhoa = await identityRows(B, "khoa@iel-shop-b.vn");
+  assert.ok(rowKhoa.length === 1 && rowKhoa[0].userId === ids.khoa && rowKhoa[0].lastUsedAt === null, "mở khoá ⇒ chỉ mục có, chưa «đã dùng»");
+  assert.equal((await whoIs((await login("khoa@iel-shop-b.vn", LEGACY_PW)).cookie)).orgCode, B, "mở khoá xong đăng nhập không cần mã tổ chức");
+  const sua = await asAction(() => updateUser({ id: ids.khoa2, name: "Khoá hai", role: "VIEWER", active: true }), { cookie: quanTri.cookie });
+  assert.deepEqual(sua.value, { ok: true, id: ids.khoa2 }, JSON.stringify(sua));
+  assert.equal((await identityRows(B, "khoa2@iel-shop-b.vn")).length, 1, "mở khoá trong hộp sửa ⇒ chỉ mục có");
+  assert.equal((await whoIs((await login("khoa2@iel-shop-b.vn", LEGACY_PW)).cookie)).orgCode, B);
+  // Khoá lại rồi mở lại ⇒ vẫn MỘT dòng (khoá không gỡ dòng; mở khoá idempotent).
+  assert.deepEqual((await asAction(() => setUserActive({ id: ids.khoa2, active: false }), { cookie: quanTri.cookie })).value, { ok: true, id: ids.khoa2 });
+  assert.equal((await identityRows(B, "khoa2@iel-shop-b.vn")).length, 1, "khoá không gỡ dòng chỉ mục");
+  assert.deepEqual((await asAction(() => updateUser({ id: ids.khoa2, name: "Khoá hai", role: "VIEWER", active: true }), { cookie: quanTri.cookie })).value, { ok: true, id: ids.khoa2 });
+  assert.equal((await identityRows(B, "khoa2@iel-shop-b.vn")).length, 1, "mở khoá lần hai không đẻ dòng thứ hai");
 }
 
 export async function testIdentityEmailLogin() {

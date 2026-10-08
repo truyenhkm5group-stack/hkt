@@ -19,7 +19,7 @@ import { accountAuditTrail, accountProvisioningJobs, finalizedStatements, loadCo
 import { productEntitlement, type ProductEntitlement } from "@/lib/saas/entitlements";
 import { COST_CATEGORIES, addCostEntry, listCostEntries, voidCostEntry } from "@/lib/saas/ledger";
 import { ACCOUNT_STATUSES, ACCOUNT_TYPES, BILLING_MODES } from "@/lib/saas/policy";
-import { requestProvisioning, retryJob, type JobRow } from "@/lib/saas/provisioning";
+import { requestProvisioning, retryJob, type CreateCustomerRequest, type JobRow } from "@/lib/saas/provisioning";
 import { isPeriodMonth } from "@/lib/saas/statement";
 
 export const OPERATOR_REASON_MIN = 5;
@@ -134,15 +134,21 @@ export async function createCustomerAsOperator(user: SessionUser, raw: unknown):
   );
   if ("error" in res) return res;
   const job = res.job;
+  // Người nhận liên kết lấy từ ĐẦU VÀO ĐÃ LƯU của job — job chạy theo nó, không theo form vừa gửi (lượt gửi lại cùng khoá mà đầu
+  // vào khác đã bị `requestProvisioning` từ chối; đọc từ job là lớp chặn thứ hai, không tin lại dữ liệu của trình duyệt).
+  const stored = job.input as unknown as Partial<CreateCustomerRequest>;
+  const target = stored.workspace?.code && stored.admin?.email ? { orgCode: stored.workspace.code, email: stored.admin.email.trim().toLowerCase() } : null;
   let activationLink: string | null = null;
   let activationNote = "";
-  if (job.status === "SUCCEEDED") {
+  if (job.status === "SUCCEEDED" && target) {
     // Gửi lại CÙNG khoá (job đã xong từ trước) chỉ phát liên kết khi quản trị CHƯA kích hoạt: liên kết cho người đã vào được là
     // liên kết ĐẶT LẠI mật khẩu, không phải kích hoạt — cùng luật với «Gửi lại liên kết kích hoạt» (`resendActivationAsOperator`).
-    const before = res.reused ? await loadWorkspaceActivation(d.workspace.code) : null;
+    const before = res.reused ? await loadWorkspaceActivation(target.orgCode) : null;
     if (before && !before.canResend) activationNote = ` ${activationRefusal(before.state)}`;
     else {
-      const link = await createResetLinkAsOperator(user, { orgCode: d.workspace.code, email: d.admin.email, reason: `Kích hoạt quản trị khách mới (job ${job.id.slice(0, 8)}): ${d.reason}` }, { purpose: "ACTIVATION" });
+      // Nhật ký nói ĐÚNG việc: lần đầu = kích hoạt quản trị mới; lượt gửi lại form = gửi lại liên kết kích hoạt (cùng purpose).
+      const why = res.reused ? `Gửi lại liên kết kích hoạt — form «Tạo khách» gửi lại cùng yêu cầu (job ${job.id.slice(0, 8)}): ${d.reason}` : `Kích hoạt quản trị khách mới (job ${job.id.slice(0, 8)}): ${d.reason}`;
+      const link = await createResetLinkAsOperator(user, { orgCode: target.orgCode, email: before?.email ?? target.email, reason: why }, { purpose: "ACTIVATION" });
       if ("ok" in link) activationLink = link.link;
     }
   }
@@ -153,7 +159,7 @@ export async function createCustomerAsOperator(user: SessionUser, raw: unknown):
 const resendActivationInput = z.object({ orgCode: z.string().trim().toLowerCase().min(2).max(64), reason });
 
 /**
- * «Gửi lại liên kết kích hoạt» cho quản trị khách (FINISH_LINE 08/10/2026 blocker 5): liên kết kích hoạt dùng một lần, hết hạn sau
+ * «Gửi lại liên kết kích hoạt» cho quản trị khách (báo cáo Finish Line 08/10/2026 — PR #680, blocker 5): liên kết kích hoạt dùng một lần, hết hạn sau
  * 24 giờ và chỉ in MỘT lần trong khung kết quả của form «Tạo khách» — đóng trang là mất. Chỉ khi quản trị CHƯA vào được (liên kết
  * còn hạn mà khách không nhận được · đã hết hạn · không còn liên kết dùng được — lib/saas/activation.ts); người đã kích hoạt thì
  * lối ra là «Đặt lại mật khẩu cho khách». Người nhận = quản trị do MÁY CHỦ tra (job «Tạo khách» / quản trị đầu tiên), không bao

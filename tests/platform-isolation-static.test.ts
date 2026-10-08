@@ -913,6 +913,23 @@ export function testLoiVanHanhHoiTruoc(): number {
   }
   assert.deepEqual(goiSoDu, [], "S21: sổ Số dư AI theo tổ chức chỉ đọc ở chỗ khai (sau cổng người vận hành, hoặc mã tổ chức từ PHIÊN)");
   khongMienTruMoCoi("S21 · sổ Số dư AI", DOC_SO_DU_AI, daDungSoDu);
+
+  // 4c · Trạng thái kích hoạt quản trị khách (`lib/saas/activation.ts`, 08/10/2026) mở CSDL của workspace KHÁC (users + liên kết đặt
+  //      mật khẩu) mà không hỏi người — chỉ gọi ở chỗ khai, sau cổng người vận hành (review #681 L5).
+  const DOC_KICH_HOAT: Record<string, string> = {
+    "lib/saas/console.ts": "loadCustomerDetail · createCustomerAsOperator · resendActivationAsOperator — cả ba hỏi platformOperatorDenial trước lượt đọc đầu tiên (LOI_VAN_HANH).",
+    "lib/saas/activation.ts": "Tệp định nghĩa: loadWorkspaceActivation gọi loadAdminActivations trong cùng tệp, không nơi nào khác.",
+  };
+  const goiKichHoat: string[] = [];
+  const daDungKichHoat = new Set<string>();
+  for (const tep of tepMa(["lib/", "app/", "components/", "scripts/", "chatbot/"])) {
+    const code = ma(tep).replace(/export async function (loadAdminActivations|loadWorkspaceActivation)\(/g, "");
+    if (!/\b(loadAdminActivations|loadWorkspaceActivation)\(/.test(code)) continue;
+    if (DOC_KICH_HOAT[tep]) daDungKichHoat.add(tep);
+    else goiKichHoat.push(tep);
+  }
+  assert.deepEqual(goiKichHoat, [], "S21: trạng thái kích hoạt quản trị khách đọc CSDL workspace khác — chỉ gọi sau cổng người vận hành (lib/saas/console.ts)");
+  khongMienTruMoCoi("S21 · kích hoạt quản trị khách", DOC_KICH_HOAT, daDungKichHoat);
   assert.match(ma("lib/saas/console.ts"), /platformOperatorDenial\(/, "S21: bảng điều khiển SaaS (người gọi loadCommercialSnapshot) hỏi người vận hành");
   const plan = ma("app/(dashboard)/settings/plan/page.tsx");
   assert.ok(!/\b(?:searchParams|params)\b/.test(plan) && /getPlanUsage\(\s*user\.organization\?\.code\s*\)/.test(plan) && /loadOrgAiUsage\(\s*usage\.orgCode\s*\)/.test(plan), "S21: /settings/plan lấy mã tổ chức từ PHIÊN (user.organization) — không từ params / searchParams");

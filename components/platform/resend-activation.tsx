@@ -47,7 +47,7 @@ function detail(a: AdminActivation): string {
 }
 
 /**
- * Kích hoạt của quản trị khách trên `/platform/customers/<mã>` (FINISH_LINE 08/10/2026 blocker 5): trạng thái đọc từ dữ liệu THẬT
+ * Kích hoạt của quản trị khách trên `/platform/customers/<mã>` (Finish Line 08/10/2026 — PR #680, blocker 5): trạng thái đọc từ dữ liệu THẬT
  * của workspace (lib/saas/activation.ts) + «Gửi lại liên kết kích hoạt» khi quản trị chưa vào được. Nút ghi đi qua hộp xác nhận có
  * lý do (vào nhật ký nền tảng); liên kết mới hiện MỘT lần ở đây — tải lại trang là mất, liên kết cũ chưa dùng đã hết hiệu lực.
  */
