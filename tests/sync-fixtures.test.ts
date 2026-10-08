@@ -354,6 +354,7 @@ import { testCompanyOsWarmDb, testCompanyOsWarmPure } from "./company-os-warm.te
 import { testCompanyOsSummaryDb, testCompanyOsSummaryPure } from "./company-os-summary.test";
 import { testOrgSummaryDb, testOrgSummaryPure } from "./org-summary.test";
 import { testOrgAiCutoverApply, testOrgAiCutoverPure } from "./org-ai-cutover.test";
+import { testOrgOffboardDb, testOrgOffboardPure, testWaitForNoConnections } from "./org-offboard.test";
 import { testOrgOrderAuditPure } from "./org-order-audit.test";
 import { testVnAddress } from "./vn-address.test";
 import { testVelocityUnifyDb, testVelocityUnifyPure } from "./velocity-unify.test";
@@ -2237,6 +2238,10 @@ async function main() {
   testOrgAiCutoverPure();
   await testOrgAiCutoverApply();
   await testOrgSummaryDb();
+  // ops org-offboard: xoá workspace TỰ ĐĂNG KÝ (08/10/2026) — chạy thử không ghi, từ chối nhà / người vận hành / có tiền, xoá đúng + idempotent (`ob-*`, tự dọn).
+  testOrgOffboardPure();
+  await testWaitForNoConnections();
+  await testOrgOffboardDb();
   // ops org-order-audit: hội thoại có SĐT ↔ đơn ERP của một ngày (HSLC 05/10/2026: POS 26 vs ERP 23).
   testOrgOrderAuditPure();
   // Chuẩn hoá địa chỉ theo địa giới 01/07/2025 — đơn bot / máy ghi chỉ có một dòng chữ (05/10/2026).

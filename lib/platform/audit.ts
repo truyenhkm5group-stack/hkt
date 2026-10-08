@@ -69,7 +69,10 @@ export type PlatformAuditAction = "MODULE_ENABLE" | "MODULE_DISABLE" | "FEATURE_
   // đặt chính sách model của AI dùng chung (chạy thử canary · áp dụng), hoàn tác về bản trước.
   | "PLATFORM_AI_MODEL_PROBE"
   | "PLATFORM_AI_POLICY_SET"
-  | "PLATFORM_AI_POLICY_ROLLBACK";
+  | "PLATFORM_AI_POLICY_ROLLBACK"
+  // XOÁ một workspace TỰ ĐĂNG KÝ (08/10/2026, lib/platform/offboard.ts · ops `org-offboard`): ghi TRƯỚC khi xoá (`offboard:start`,
+  // số dòng từng bảng — không tên / email / SĐT) và SAU khi xong (`offboard:done`). Nhật ký nền tảng là thứ DUY NHẤT được giữ lại.
+  | "ORG_OFFBOARD";
 export type PlatformAuditSource = "UI" | "SCRIPT" | "MIGRATION" | "TEST";
 export type PlatformActor = { orgCode: string; userId: string; email: string } | null;
 

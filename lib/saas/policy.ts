@@ -97,6 +97,14 @@ export function mergeSuggestible(type: AccountType): boolean {
   return type === "EXTERNAL";
 }
 
+/**
+ * Tài khoản loại này có được XOÁ cùng workspace tự đăng ký không (ops `org-offboard`, lib/platform/offboard.ts). Chỉ khách ngoài:
+ * tài khoản nội bộ là của chính nền tảng. Nhận chuỗi thô từ CSDL — loại lạ / thiếu ⇒ KHÔNG (mọi nhánh lỗi rơi về phía hẹp hơn).
+ */
+export function offboardDeletableAccountType(type: string | null | undefined): boolean {
+  return type === "EXTERNAL";
+}
+
 /** Chứng từ kỳ của tài khoản tên là gì. */
 export function statementLabel(mode: BillingMode): string {
   return mode === "INTERNAL_CHARGEBACK" ? "Bảng kê chargeback nội bộ" : "Bảng kê hoá đơn";
