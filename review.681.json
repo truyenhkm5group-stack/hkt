@@ -1,0 +1,8 @@
+{
+  "pr": 681,
+  "sha": "ea9d513a2a756d8ea91b3c00fcba3536078e4847",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-08T12:09:37.414Z",
+  "note": "Review độc lập chỉ đọc ở fedaa828: không mở đường vào không mật khẩu (OAuth theo email chỉ usedOnly, không có quên mật khẩu tự phục vụ), tenant đạt, đường ghi đủ cho chèn tài khoản + đặt mật khẩu, gửi lại kích hoạt đạt, reconcile xác định + idempotent. ea9d513a = rebase lên 67fc09b1, Integration Lead kiểm ops-vps.yml chỉ thêm identity-reconcile. LOW làm PR sau: L1 nhánh reused dùng email/mã từ job"
+}
