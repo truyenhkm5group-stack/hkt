@@ -260,8 +260,10 @@ function kiemTrang() {
     const m = moduleOfPath(p.url);
     assert.ok(m === null || chotdonModules.has(m), `${p.file} mở trong vỏ nhưng thuộc module ERP «${m}» — khách Chốt Đơn không thuê ERP`);
   }
-  // Mỗi tiền tố cho phép phải trỏ tới ít nhất một trang có thật (tiền tố mồ côi là chỗ hổng chờ trang ERP mới lọt vào).
-  for (const prefix of SALES_AGENT_ALLOWED_PREFIXES) assert.ok(pages.some((p) => p.url === prefix || p.url.startsWith(`${prefix}/`)), `tiền tố cho phép ${prefix} không có trang nào`);
+  // Mỗi tiền tố cho phép phải trỏ tới ít nhất một trang có thật (tiền tố mồ côi là chỗ hổng chờ trang ERP mới lọt vào). Trang có
+  // thể đứng NGOÀI nhóm (dashboard): `/module-disabled` đứng ngoài để layout không chuyển hướng vào chính nó (shell-gate-redirects).
+  const ngoaiNhom = (prefix: string) => existsSync(path.join(goc, "app", ...prefix.split("/").filter(Boolean), "page.tsx"));
+  for (const prefix of SALES_AGENT_ALLOWED_PREFIXES) assert.ok(pages.some((p) => p.url === prefix || p.url.startsWith(`${prefix}/`)) || ngoaiNhom(prefix), `tiền tố cho phép ${prefix} không có trang nào`);
   // Mỗi mục: trang có thật + đòi đúng khoá mục khai (mục không khoá ⇒ trang chỉ `requireUser`).
   for (const it of SALES_AGENT_NAV) {
     const f = pageFileOf(it.href);
