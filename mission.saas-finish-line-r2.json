@@ -1,0 +1,35 @@
+{
+  "schema": 1,
+  "mission_id": "saas-finish-line-r2",
+  "title": "Round 2 finish line: tiêu đề theo menu vỏ (Sản phẩm · Nhân viên · Gói), tỷ lệ hoàn mẫu số 0 in —, nhãn tính năng API/Webhook thành chữ khách hiểu",
+  "business_goal": "",
+  "status": "RUNNING",
+  "priority": "P2",
+  "risk": "MEDIUM",
+  "owner": "DESKTOP-56TH98Y:wt-saas-r2",
+  "worker": null,
+  "worktree": null,
+  "branch": "claude/saas-finish-line-r2",
+  "base_sha": "5c781cd5f4145c5ae77b7a1bd4935256d3045e60",
+  "domains": [],
+  "owned_paths": [
+    "app/(dashboard)/products/page.tsx",
+    "app/(dashboard)/settings/users/page.tsx",
+    "app/(dashboard)/settings/plan/page.tsx",
+    "app/(dashboard)/customers/page.tsx",
+    "lib/pricing/features.ts",
+    "docs/saas/FINISH_LINE_R2_2026-10-08.md"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-08T14:34:44.541Z",
+  "updated_at": "2026-10-08T14:34:44.541Z",
+  "last_heartbeat": "2026-10-08T14:34:44.541Z",
+  "definition_of_done": [],
+  "intake": {
+    "verdict": "MISSING",
+    "evidence": []
+  }
+}
