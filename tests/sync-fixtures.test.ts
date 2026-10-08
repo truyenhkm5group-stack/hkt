@@ -595,6 +595,7 @@ import { testGSched } from "./g-sched.test";
 import { testSaasVnxRuntime } from "./saas-vnx-runtime.test";
 import { testSaasPageGate } from "./saas-page-gate.test";
 import { testSaasShell } from "./saas-shell.test";
+import { testShellLoginLanding } from "./shell-login-landing.test";
 
 async function main() {
   await ensureMigrated();
@@ -2951,6 +2952,9 @@ async function main() {
   // Vỏ app Chốt Đơn Tự Động: workspace Sales Agent thấy đúng 8 mục, route ERP nội bộ chặn ở máy chủ (`/` ⇒ hộp thư), ERP / nhà
   // không đổi; hợp đồng mobile (tổ chức `sa-shell` tự cấp và tự dọn).
   await testSaasShell();
+  // F-01: đăng nhập / đăng ký trong vỏ Chốt Đơn tính đích cuối ngay trong action — không `redirect("/")` mà layout chuyển
+  // hướng (vòng lặp trang trắng); nhà / workspace ERP đúng safeNextPath (tổ chức `dich-dang-nhap` tự cấp và tự dọn).
+  await testShellLoginLanding();
   // Nền tảng · phiên & RBAC (agent C): claim org, cổng module, platform:operate, đăng nhập theo tổ chức. Tự cấp
   // tổ chức `pr-` (CSDL riêng) và tự dọn; đứng cạnh bài ngữ cảnh vì cùng lý do.
   await testPlatformRbac();

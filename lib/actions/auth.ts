@@ -7,7 +7,7 @@ import { audit } from "@/lib/audit";
 import { clientIpFrom } from "@/lib/auth/client-ip";
 import { credentialsMatch, LOGIN_BAD_CREDENTIALS, loginCandidates, verifyLogin } from "@/lib/auth/login";
 import { clearLoginFailures, loginAllowed, loginThrottleKeys, recordLoginFailure } from "@/lib/auth/login-throttle";
-import { safeNextPath } from "@/lib/auth/safe-redirect";
+import { landingAfterSignIn } from "@/lib/saas/shell-landing";
 import { createSession, destroySession, getSession } from "@/lib/auth/session";
 import { OrgContextError } from "@/lib/platform/context";
 import { findOrganization } from "@/lib/platform/organizations";
@@ -77,8 +77,12 @@ export async function loginAction(_prev: LoginState, formData: FormData): Promis
     }
     return { error: verdict.error };
   }
-  // Chỉ đường dẫn NỘI BỘ đã chuẩn hoá (lib/auth/safe-redirect.ts) — `/\evil.com` từng lọt phép kiểm cũ.
-  redirect(safeNextPath(next));
+  /*
+    Chỉ đường dẫn NỘI BỘ đã chuẩn hoá (`safeNextPath` — `/\evil.com` từng lọt phép kiểm cũ), và ĐÍCH CUỐI tính ngay tại đây
+    (lib/saas/shell-landing.ts): người thuộc vỏ Chốt Đơn đi thẳng tới trang nhà của vỏ — `redirect("/")` cho họ từng là trang
+    trắng (F-01). ERP / nhà: đúng `safeNextPath(next)` như cũ.
+  */
+  redirect(await landingAfterSignIn(next));
 }
 
 export async function logoutAction() {

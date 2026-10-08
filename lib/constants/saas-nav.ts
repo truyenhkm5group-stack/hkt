@@ -205,6 +205,16 @@ export function salesAgentRedirectFor(user: ShellUser, rawPath: string): string 
 }
 
 /**
+ * Ngược ĐÚNG của `salesAgentRedirectFor`: bỏ dấu «ngoài gói» để còn lại trang nhà (`salesAgentHomeFor`). Dùng khi lượt gọi bị
+ * cổng vỏ gặp KHÔNG phải một trang bị từ chối — lượt POST đăng nhập / đăng ký tới `/login` · `/start` (lib/saas/shell-landing.ts):
+ * in «Trang này không có trong gói» ngay sau khi vừa đăng nhập là nói sai. `salesAgentHomeFor` không bao giờ trả chuỗi có query.
+ */
+export function salesAgentHomeOfRedirect(target: string): string {
+  const marker = `?${SHELL_BLOCKED_PARAM}=1`;
+  return target.endsWith(marker) ? target.slice(0, -marker.length) : target;
+}
+
+/**
  * Chiều cao một khung «lấp đầy màn hình» (hộp thư) trong vỏ: phần nhìn thấy của viewport trừ mép trên của khung, trừ thanh dưới
  * (đã gồm vùng an toàn iPhone vì nó mang `padding-bottom: env(safe-area-inset-bottom)`), trừ khe thở. Thuần để kiểm được; khung
  * client đo ba số này rồi gọi hàm. Không bao giờ thấp hơn `min` — màn quá thấp thì cuộn trang, không bóp ô soạn tin về 0.
