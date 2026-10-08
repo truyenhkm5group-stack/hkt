@@ -888,3 +888,4 @@
 {"at":"2026-10-08T17:34:27.020Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"OVERLAP_DETECTED","mission":"master-mission-registry","detail":"OVERLAP với tech-cloud-pool: phạm vi docs/tech ↔ docs/tech/cloud-pool/** ⇒ tuần tự hoá (--after=tech-cloud-pool) hoặc khai cách tích hợp (--accept-overlap=\"…\")"}
 {"at":"2026-10-08T17:36:46.726Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"CLAIM","mission":"master-mission-registry","detail":"RUNNING · 2 mẫu phạm vi · MEDIUM"}
 {"at":"2026-10-08T17:41:33.788Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"STATUS","mission":"legal-acceptance","detail":"RUNNING → BLOCKED"}
+{"at":"2026-10-08T17:49:37.061Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"platform-key-project-probe","detail":"#694 @ eff36495e938 → a582a5ad7bc5 (MERGE_NOW · MEDIUM · gates success)"}
