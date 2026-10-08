@@ -1,0 +1,32 @@
+{
+  "schema": 1,
+  "mission_id": "chatbot-security-4",
+  "title": "Bài học bot: tên miền đuôi lạ, dấu chấm che giấu, @ sau dấu câu, ký tự vô hình không lọt; hồ sơ máy tạo thôi làm gợi ý / dự phòng",
+  "business_goal": "",
+  "status": "PLANNING",
+  "priority": "P2",
+  "risk": "MEDIUM",
+  "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "worker": null,
+  "worktree": null,
+  "branch": "fix/chatbot-security-4",
+  "base_sha": "9eea72b5aa14158115a57dc238c19edd56b78f1a",
+  "domains": [],
+  "owned_paths": [
+    "lib/sales-chatbot/lessons-shared.ts",
+    "lib/sales-chatbot/playbook-shared.ts",
+    "lib/sales-chatbot/returning.ts",
+    "lib/sales-chatbot/tools.ts",
+    "tests/self-service-journey.test.ts"
+  ],
+  "dependencies": [
+    "chatbot-security-3"
+  ],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-08T01:42:25.352Z",
+  "updated_at": "2026-10-08T01:42:25.352Z",
+  "last_heartbeat": "2026-10-08T01:42:25.352Z",
+  "definition_of_done": []
+}
