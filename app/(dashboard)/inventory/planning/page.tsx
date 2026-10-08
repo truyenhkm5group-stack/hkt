@@ -81,7 +81,7 @@ export default async function PlanningPage({ searchParams }: { searchParams: Pro
           icon={PackageSearch}
           tone={sm.incomingUnits ? "blue" : "slate"}
         />
-        <MetricCard label="Đề xuất đặt" value={formatNumber(sm.suggestedUnits)} note={`${formatVND(sm.orderCost, { compact: true })} theo giá nhập gần nhất · đủ bán ${used.coverDays} ngày sau khi hàng về`} icon={ShoppingCart} tone="blue"
+        <MetricCard label="Đề xuất đặt" value={formatNumber(sm.suggestedUnits)} note={`${formatVND(sm.orderCost, { compact: true })} theo giá nhập gần nhất${sm.orderCostUnpriced ? ` (${formatNumber(sm.orderCostUnpriced)} mẫu chưa có giá, không cộng)` : ""} · đủ bán ${used.coverDays} ngày sau khi hàng về`} icon={ShoppingCart} tone="blue"
           hint={<>Tốc độ gửi đi × (thời gian sản xuất + {used.coverDays} ngày muốn đủ bán + ngày an toàn) − hàng hoàn của chính các đơn ấy về kịp bán lại (theo GTC của mã; độ trễ hoàn = ĐVVC trả về {used.vtpReturnLagDays === null ? "chưa đo được" : `${formatNumber(used.vtpReturnLagDays)} ngày`} + kho tái nhập {formatNumber(used.restockDays)} ngày) − nguồn cung, trong đó nguồn cung = tồn khả dụng {used.countIncoming ? "+ hàng sắp quay về kho" : "(không tính hàng sắp về)"}. Bấm “Vì sao?” ở từng mẫu mã để xem lời giải từng bước. {formatNumber(sm.variants)} mẫu mã đang theo dõi; mẫu mã chưa có phiếu nhập không được đề xuất.</>} />
       </section>
 
@@ -89,7 +89,7 @@ export default async function PlanningPage({ searchParams }: { searchParams: Pro
         <SectionCard
           key={g.productId}
           title={`${g.productCode ? `${g.productCode} · ` : ""}${g.productName}`}
-          description={`${g.rows.length} mẫu mã · đề xuất đặt ${formatNumber(g.suggested)} sp · ${formatVND(g.orderCost)}`}
+          description={`${g.rows.length} mẫu mã · đề xuất đặt ${formatNumber(g.suggested)} sp · ${formatVND(g.orderCost)}${g.orderCostUnpriced ? ` + ${formatNumber(g.orderCostUnpriced)} mẫu chưa có giá` : ""}`}
           actions={
             <div className="flex items-center gap-2">
               {canWrite ? (
@@ -176,7 +176,7 @@ export default async function PlanningPage({ searchParams }: { searchParams: Pro
                         <span className="text-muted-foreground">0</span>
                       )}
                     </TableCell>
-                    <TableCell className="text-right"><Money value={r.orderCost} className={r.orderCost ? "" : "text-muted-foreground"} /></TableCell>
+                    <TableCell className="text-right" title={r.orderCostKnown === null ? "Chưa có giá nhập — không phải 0 ₫" : undefined}><Money value={r.orderCostKnown} className={r.orderCostKnown ? "" : "text-muted-foreground"} /></TableCell>
                     <TableCell><span className={cn("rounded px-1.5 py-0.5 text-[11px] font-semibold whitespace-nowrap", PLAN_STATUS_TONE[r.status])}>{PLAN_STATUS_LABEL[r.status]}</span></TableCell>
                   </TableRow>
                 ))}
@@ -210,7 +210,7 @@ export default async function PlanningPage({ searchParams }: { searchParams: Pro
                       <TableCell className="text-right tabular-nums">{formatNumber(sum((r) => r.leadTimeDemand))}</TableCell>
                       <TableCell className="text-right tabular-nums">{formatNumber(sum((r) => r.target))}</TableCell>
                       <TableCell className="text-right tabular-nums text-base">{formatNumber(g.suggested)}</TableCell>
-                      <TableCell className="text-right"><Money value={g.orderCost} /></TableCell>
+                      <TableCell className="text-right"><Money value={g.orderCost} />{g.orderCostUnpriced ? <div className="text-[11px] font-normal text-muted-foreground">+{formatNumber(g.orderCostUnpriced)} mẫu chưa có giá</div> : null}</TableCell>
                       <TableCell><span className={cn("rounded px-1.5 py-0.5 text-[11px] font-semibold whitespace-nowrap", PLAN_STATUS_TONE[g.worst])}>{PLAN_STATUS_LABEL[g.worst]}</span></TableCell>
                     </TableRow>
                   );

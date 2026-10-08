@@ -73,7 +73,12 @@ export default async function SaasCustomersPage({ searchParams }: { searchParams
   const mrrKnown = external.filter((c) => c.economics.revenueVnd !== null);
   const mrr = mrrKnown.reduce((a, c) => a + (c.economics.revenueVnd ?? 0), 0);
   const cost = real.reduce((a, c) => a + c.economics.costVnd, 0);
-  const gp = mrrKnown.reduce((a, c) => a + (c.economics.grossProfitVnd ?? 0), 0);
+  // Lãi gộp chỉ cộng khách ĐÃ ĐỦ chi phí (mục 42) — khách còn khoản chi chưa biết số đứng riêng, không cộng như lãi trọn.
+  const gpKnown = mrrKnown.filter((c) => c.economics.grossProfitVnd !== null);
+  const gpUnknown = mrrKnown.length - gpKnown.length;
+  const gp = gpKnown.length ? gpKnown.reduce((a, c) => a + (c.economics.grossProfitVnd as number), 0) : null;
+  const gpRevenue = gpKnown.reduce((a, c) => a + (c.economics.revenueVnd ?? 0), 0);
+  const costIncomplete = real.filter((c) => !c.economics.costComplete).length;
   const balanceRev = mrrKnown.reduce((a, c) => a + c.economics.aiBalanceRevenueVnd, 0);
   const label = periodLabel(data.periodMonth);
   // Đang xem tiền của kỳ khác kỳ hiện tại ⇒ nói rõ sức khoẻ vẫn là của hiện tại.
@@ -121,8 +126,8 @@ export default async function SaasCustomersPage({ searchParams }: { searchParams
         <Tile label="Tài khoản" value={formatNumber(real.length)} sub={`${external.length} ngoài · ${internal.length} nội bộ`} />
         <Tile label="Thuê bao sống" value={formatNumber(statuses.length)} sub={`${statuses.filter((s) => s === "TRIAL").length} dùng thử · ${statuses.filter((s) => s === "PAST_DUE" || s === "EXPIRED").length} quá hạn`} />
         <Tile label="Doanh thu kỳ (khách ngoài)" value={formatVND(mrr)} sub={mrrKnown.length < external.length ? `${external.length - mrrKnown.length} khách có gói không niêm yết giá` : balanceRev ? `gồm Số dư AI ${formatVND(balanceRev)}` : "gói · mua thêm · vượt"} />
-        <Tile label="Chi phí kỳ" value={formatVND(cost)} sub="AI nền tảng trả + phân bổ" />
-        <Tile label="Lãi gộp (khách ngoài)" value={formatVND(gp)} sub={mrr ? formatPercent((gp / mrr) * 100) : "—"} />
+        <Tile label="Chi phí kỳ" value={formatVND(cost)} sub={costIncomplete ? `cận dưới · ${formatNumber(costIncomplete)} khách còn khoản chưa biết số` : "AI nền tảng trả + phân bổ"} />
+        <Tile label="Lãi gộp (khách ngoài)" value={formatVND(gp)} sub={[gp !== null && gpRevenue ? formatPercent((gp / gpRevenue) * 100) : null, gpUnknown ? `${formatNumber(gpUnknown)} khách chưa đủ dữ liệu chi phí, không cộng` : null].filter(Boolean).join(" · ") || "—"} />
       </div>
 
       <SectionCard title="Tài khoản khách" description={filter ? `Đang lọc: ${shown.length}/${customers.length} tài khoản` : "Nặng trước — bấm tên để xem chi tiết"} hint={<HealthColumnsHint />} padded={false}>
@@ -288,7 +293,7 @@ function MoneyCell({ c }: { c: CustomerView }) {
           {unknownCost ? " ⚠" : ""}
         </span>
       }
-      title={[`${e.marginApplicable ? "Doanh thu kỳ" : "Chargeback nội bộ (không phải doanh thu)"}: ${formatVND(e.marginApplicable ? e.revenueVnd : c.statement.totalKnownVnd)}`, `Chi phí kỳ ${formatVND(e.costVnd)} (AI nền tảng trả + phân bổ)`, `Biên gộp: ${e.marginApplicable ? formatPercent(e.marginPct) : NOT_APPLICABLE_TEXT}`, unknownCost ? "⚠ Có lượt AI chưa định giá / khoản phân bổ chưa biết số — chi phí là cận dưới" : null].filter(Boolean).join("\n")}
+      title={[`${e.marginApplicable ? "Doanh thu kỳ" : "Chargeback nội bộ (không phải doanh thu)"}: ${formatVND(e.marginApplicable ? e.revenueVnd : c.statement.totalKnownVnd)}`, `Chi phí kỳ ${formatVND(e.costVnd)} (AI nền tảng trả + phân bổ)`, `Biên gộp: ${e.marginApplicable ? formatPercent(e.marginPct) : NOT_APPLICABLE_TEXT}`, unknownCost ? "⚠ Có lượt AI chưa định giá / khoản phân bổ chưa biết số — chi phí là cận dưới, biên gộp chưa đủ dữ liệu" : null].filter(Boolean).join("\n")}
     />
   );
 }

@@ -18,7 +18,7 @@ import { readCommercialRegistry, type AccountRow, type SubscriptionRow, type Wor
 import { allocateCosts, type AllocatedLine } from "@/lib/saas/allocation";
 import { PRODUCTS, productDef, type ProductDef } from "@/lib/saas/catalog";
 import { costInputs, currentPeriodMonth, readAiByWorkspaceProduct, readProductUsage, usdToVnd, type MetricReading } from "@/lib/saas/ledger";
-import { effectiveSubscriptionStatus, losingMoneyApplies, marginApplicable, subscriptionGrantsUse, type BillingMode, type EffectiveSubscriptionStatus } from "@/lib/saas/policy";
+import { customerEconomicsCore, effectiveSubscriptionStatus, losingMoneyApplies, marginApplicable, subscriptionGrantsUse, type BillingMode, type EffectiveSubscriptionStatus } from "@/lib/saas/policy";
 import { buildStatement, type PlanRef, type Statement, type StatementWorkspace } from "@/lib/saas/statement";
 import { getPlanUsage } from "@/lib/entitlements/check";
 import { readAiCustomerUsage, type AiCustomerReading } from "@/lib/pricing/ai-customer";
@@ -75,7 +75,8 @@ export type CustomerView = {
   products: string[];
   statement: Statement;
   /** `revenueVnd` = bảng kê (gói · mua thêm · vượt CHƯA thu qua số dư) + `aiBalanceRevenueVnd` (Số dư AI: tiền thật đã dùng − khoản đảo). */
-  economics: { revenueVnd: number | null; aiBalanceRevenueVnd: number; costVnd: number; grossProfitVnd: number | null; marginPct: number | null; marginApplicable: boolean; byokUsd: number };
+  /** `costVnd` là CẬN DƯỚI khi `costComplete = false`; khi đó `grossProfitVnd` / `marginPct` là `null` (chưa đủ dữ liệu). */
+  economics: { revenueVnd: number | null; aiBalanceRevenueVnd: number; costVnd: number; costComplete: boolean; grossProfitVnd: number | null; lossCheckGrossProfitVnd: number | null; marginPct: number | null; marginApplicable: boolean; byokUsd: number };
   flags: HealthFlag[];
   /** Job cần người vận hành: hỏng (FAILED) + xong mà CHƯA cài được mẫu (SUCCEEDED + last_error, #682). */
   failedJobs: number;
@@ -257,8 +258,6 @@ export async function loadCommercialSnapshot(opts: { periodMonth?: string; now?:
     const statement = buildStatement({ billingMode: mode, periodMonth, workspaces: stWorkspaces, accountCosts: allocation.byAccount.get(account.id) ?? [] });
     // Kinh tế: doanh thu = phần khách trả (gói · mua thêm · vượt); chi phí = AI nền tảng trả + phân bổ + trực tiếp.
     const aiVnd = workspaces.reduce((a, w) => a + w.aiCost.reduce((b, c) => b + c.platformVnd, 0), 0);
-    const allocKnown = [...workspaces.flatMap((w) => w.allocated), ...(allocation.byAccount.get(account.id) ?? [])].reduce((a, l) => a + (l.amountVnd ?? 0), 0);
-    const costVnd = aiVnd + allocKnown;
     const applicable = marginApplicable(mode);
     const revenueLines = statement.lines.filter((l) => l.kind === "PLAN" || l.kind === "PRODUCT_PLAN" || l.kind === "ADDON" || l.kind === "OVERAGE");
     const revenueKnown = revenueLines.every((l) => l.amountVnd !== null);
@@ -266,16 +265,23 @@ export async function loadCommercialSnapshot(opts: { periodMonth?: string; now?:
     // vào bảng kê là thu hai lần). Thiếu nó thì khách trả phần vượt qua số dư bị gắn «lỗ» oan (review #648 M4).
     const aiBalanceRevenue = workspaces.reduce((a, w) => a + aiBalanceRevenueVnd(balances.get(w.code) ?? null), 0);
     const revenueVnd = applicable ? (revenueKnown ? statement.revenueKnownVnd + aiBalanceRevenue : null) : null;
-    const grossProfitVnd = revenueVnd === null ? null : revenueVnd - costVnd;
-    const marginPct = revenueVnd && grossProfitVnd !== null ? Math.round((grossProfitVnd / revenueVnd) * 1000) / 10 : null;
-    const unknownCost = workspaces.some((w) => w.aiCost.some((c) => c.unpricedCalls > 0) || w.allocated.some((l) => l.amountVnd === null));
+    // Chi phí còn khoản chưa biết (lượt AI chưa định giá · khoản phân bổ chưa có số — CẢ cấp tài khoản) ⇒ lãi gộp / biên `null`,
+    // không trừ như thể đủ (AGENTS.md mục 42). Cờ «Đang lỗ gộp» vẫn bật khi phần chi phí ĐÃ BIẾT đã vượt doanh thu.
+    const core = customerEconomicsCore({
+      revenueVnd,
+      aiCostVnd: aiVnd,
+      unpricedAiCalls: workspaces.reduce((a, w) => a + w.aiCost.reduce((b, c) => b + c.unpricedCalls, 0), 0),
+      allocated: [...workspaces.flatMap((w) => w.allocated), ...(allocation.byAccount.get(account.id) ?? [])],
+    });
+    const { costVnd, grossProfitVnd, marginPct } = core;
+    const unknownCost = !core.costComplete;
     const mine = failed.filter((f) => f.accountId === account.id || workspaces.some((w) => w.code === f.orgCode));
     const failedJobs = mine.reduce((a, f) => a + Number(f.n), 0);
     const templatePendingJobs = mine.reduce((a, f) => a + Number(f.template), 0);
     const statuses = workspaces.flatMap((w) => w.subscriptions.map((s) => s.status));
     const flags: HealthFlag[] = [];
     // Chỉ khách TRẢ TIỀN trong kỳ — cùng vị từ với lý do sức khoẻ (dùng thử lỗ gộp là đúng thiết kế).
-    if (losingMoneyApplies(revenueVnd, grossProfitVnd)) flags.push("LOSING_MONEY");
+    if (losingMoneyApplies(revenueVnd, core.lossCheckGrossProfitVnd)) flags.push("LOSING_MONEY");
     if (statuses.includes("PAST_DUE")) flags.push("PAST_DUE");
     if (statuses.includes("EXPIRED")) flags.push("EXPIRED");
     if (failedJobs) flags.push("PROVISIONING_FAILED");
@@ -285,7 +291,7 @@ export async function loadCommercialSnapshot(opts: { periodMonth?: string; now?:
       workspaces,
       products: [...new Set(workspaces.flatMap((w) => w.subscriptions.filter((s) => subscriptionGrantsUse(s.status)).map((s) => s.productKey)))],
       statement,
-      economics: { revenueVnd, aiBalanceRevenueVnd: aiBalanceRevenue, costVnd, grossProfitVnd, marginPct, marginApplicable: applicable, byokUsd: workspaces.reduce((a, w) => a + w.aiCost.reduce((b, c) => b + c.byokUsd, 0), 0) },
+      economics: { revenueVnd, aiBalanceRevenueVnd: aiBalanceRevenue, costVnd, costComplete: core.costComplete, grossProfitVnd, lossCheckGrossProfitVnd: core.lossCheckGrossProfitVnd, marginPct, marginApplicable: applicable, byokUsd: workspaces.reduce((a, w) => a + w.aiCost.reduce((b, c) => b + c.byokUsd, 0), 0) },
       flags,
       failedJobs,
       templatePendingJobs,

@@ -17,6 +17,7 @@ import { testMetaAdPostPure, testMetaAdPostResolver, testMetaAdPostStoreDb, test
 import { testConsistency } from "./consistency.test";
 import { testDataQuality } from "./data-quality.test";
 import { testInventory } from "./inventory.test";
+import { testUnknownCost } from "./unknown-cost.test";
 import { testVtpImportRecovery } from "./vtp-import-recovery.test";
 import { testCostAllocation } from "./cost-allocation.test";
 import { testBankLedger } from "./bank-ledger.test";
@@ -2197,6 +2198,8 @@ async function main() {
   await testSearch(db);
   await testEntityTimeline(db);
   await testInventory(db);
+  // Giá vốn CHƯA BIẾT không in ra 0 ₫ (mục 42): chi tiết đơn · trang sản phẩm · kế hoạch · kinh tế khách SaaS.
+  await testUnknownCost(db);
   await testInventoryForecast(db);
   testPlanExplain();
   await testSlowMoving(db);

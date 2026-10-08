@@ -627,8 +627,11 @@ export async function getProductDetail(id: string) {
       shortage: ledger && known ? ledger.shortage : null,
       /** Mẫu mã có việc (bán / tồn / chờ xuất / cần đặt) — cùng luật lọc với trang Kế hoạch SX. */
       active: ledger ? isPlanRowActive(ledger) : false,
-      // Giá trị tồn = tồn THỰC TẾ ERP × giá vốn — đúng công thức ô "Giá trị tồn" ở /products.
-      stockValue: ledger && known && ledger.stock > 0 ? ledger.stock * ledger.unitCost : 0,
+      /**
+       * Giá trị tồn = tồn THỰC TẾ ERP × giá vốn. Không còn hàng ⇒ 0 THẬT; chưa biết tồn, hoặc còn hàng
+       * mà CHƯA BIẾT giá vốn ⇒ `null` — bản cũ nhân với 0 nên in "0 ₫" cho một kệ hàng có thật (mục 42).
+       */
+      stockValue: !ledger || !known ? null : ledger.stock <= 0 ? 0 : ledger.unitCostKnown === null ? null : ledger.stock * ledger.unitCostKnown,
     };
   });
   const sumLedger = (pick: (r: NonNullable<(typeof variants)[number]["ledger"]>) => number) => variants.reduce((t, v) => t + (v.ledger ? pick(v.ledger) : 0), 0);
@@ -663,7 +666,10 @@ export async function getProductDetail(id: string) {
     needOrder: needOrder.length,
     /** Hạn đặt sớm nhất trong các mẫu mã cần đặt (YYYY-MM-DD) — quá khứ là đã muộn. */
     reorderBy: reorderDates[0] ?? null,
-    stockValue: variants.reduce((s, v) => s + v.stockValue, 0),
+    /** Giá trị tồn CỦA PHẦN ĐÃ BIẾT GIÁ — luôn in kèm `stockValueUnpriced`, không phải tổng trọn. */
+    stockValue: variants.reduce((s, v) => s + (v.stockValue ?? 0), 0),
+    /** Mẫu mã CÒN HÀNG (đã biết tồn) mà chưa biết giá vốn — giá trị của chúng KHÔNG nằm trong `stockValue`. */
+    stockValueUnpriced: variants.filter((v) => v.erpStock !== null && v.erpStock > 0 && v.stockValue === null).length,
     sold30: Number(sales?.sold30 ?? 0),
     sold90: Number(sales?.sold90 ?? 0),
     revenue90: Number(sales?.revenue90 ?? 0),

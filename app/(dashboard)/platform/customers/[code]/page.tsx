@@ -90,8 +90,8 @@ export default async function SaasCustomerPage({ params, searchParams }: { param
       <SectionCard title="Tổng quan">
         <div className="grid gap-2 sm:grid-cols-3 lg:grid-cols-6">
           <Stat label={c.economics.marginApplicable ? "Doanh thu kỳ" : "Chargeback kỳ"} value={c.economics.marginApplicable ? formatVND(c.economics.revenueVnd) : formatVND(c.statement.totalKnownVnd)} sub={c.statement.unknownLines ? `${c.statement.unknownLines} dòng chưa biết số` : undefined} />
-          <Stat label="Chi phí kỳ" value={formatVND(c.economics.costVnd)} sub="AI nền tảng trả + phân bổ" />
-          <Stat label="Lãi gộp" value={c.economics.marginApplicable ? formatVND(c.economics.grossProfitVnd) : "N/A"} sub={c.economics.marginApplicable ? formatPercent(c.economics.marginPct) : "trung tâm chi phí nội bộ"} />
+          <Stat label="Chi phí kỳ" value={formatVND(c.economics.costVnd)} sub={c.economics.costComplete ? "AI nền tảng trả + phân bổ" : "cận dưới — còn lượt AI chưa định giá / khoản phân bổ chưa biết số"} />
+          <Stat label="Lãi gộp" value={c.economics.marginApplicable ? formatVND(c.economics.grossProfitVnd) : "N/A"} sub={c.economics.marginApplicable ? (c.economics.costComplete ? formatPercent(c.economics.marginPct) : "chưa đủ dữ liệu chi phí") : "trung tâm chi phí nội bộ"} />
           <Stat label="AI khoá riêng (BYOK)" value={`$${c.economics.byokUsd.toFixed(2)}`} sub="tiền của khách, không trừ vào biên" />
           <Stat label="Sản phẩm đang dùng" value={formatNumber(c.products.length)} sub={c.products.map((p) => PRODUCT_LABEL[p] ?? p).join(" · ") || "—"} />
           <Stat label="Workspace" value={formatNumber(c.workspaces.length)} />
