@@ -675,3 +675,4 @@
 {"at":"2026-10-08T07:40:03.301Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DEPLOY_DISPATCHED","detail":"c360b7c662e5 · run 37744823972 https://github.com/truyenhkm5group-stack/hkt/actions/runs/37744823972"}
 {"at":"2026-10-08T07:41:01.158Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"OVERLAP_DETECTED","mission":"order-confirm-rules-0810","detail":"OVERLAP với saas-order-accuracy: phạm vi tests/order-golden/** ⇒ tuần tự hoá (--after=saas-order-accuracy) hoặc khai cách tích hợp (--accept-overlap=\"…\")"}
 {"at":"2026-10-08T07:41:09.206Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"CLAIM","mission":"hslc-prepaid-ai","detail":"RUNNING · 5 mẫu phạm vi · HIGH"}
+{"at":"2026-10-08T07:41:17.695Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"CLAIM","mission":"saas-delete-signup-shops","detail":"RUNNING · 3 mẫu phạm vi · HIGH"}
