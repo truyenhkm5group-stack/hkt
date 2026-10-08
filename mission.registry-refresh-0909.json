@@ -3,7 +3,7 @@
   "mission_id": "registry-refresh-0909",
   "title": "Làm mới sổ sứ mệnh tổng + checkpoint + bảng tốc độ 24 giờ (sau #696–#700)",
   "business_goal": "",
-  "status": "VERIFYING",
+  "status": "DONE",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -23,13 +23,14 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-08T19:35:06.966Z",
-  "updated_at": "2026-10-08T21:14:12.564Z",
-  "last_heartbeat": "2026-10-08T19:35:18.084Z",
+  "updated_at": "2026-10-08T21:17:31.164Z",
+  "last_heartbeat": "2026-10-08T21:17:31.164Z",
   "definition_of_done": [],
   "evidence": {
     "merged": "#702 → d2c6b1d0124d7c4bb5562a9e52d16c728118015d",
     "verify": "PASS c7183395051955e6cff5343a787e9df97d71d12b 2026-10-08T21:14:06.372Z",
-    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/37838226087"
+    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/37838226087",
+    "done": "production c71833950519 · deploy 37838226087 xanh (smoke) · verify ĐẠT"
   },
   "handoff": {
     "branch": "docs/registry-refresh-0909",
