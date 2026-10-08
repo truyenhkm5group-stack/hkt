@@ -71,6 +71,20 @@ function orgAiSettingsOf(settings: unknown): Record<string, unknown> {
   return ai && typeof ai === "object" && !Array.isArray(ai) ? (ai as Record<string, unknown>) : {};
 }
 
+/**
+ * `platform_organizations.settings` ⇒ công tắc + ghi đè AI của tổ chức (THUẦN). Chỉ đúng `true` mới tắt. MỘT luật cho hai người
+ * đọc: `readOrgAiControl` (một tổ chức, có đệm) và màn sức khoẻ khách (`lib/saas/customer-signals.ts`, một câu cho mọi tổ chức).
+ */
+export function orgAiControlFromSettings(settings: unknown): Omit<OrgAiControl, "readError"> {
+  const ai = orgAiSettingsOf(settings);
+  return {
+    disabled: ai.disabled === true,
+    limits: parseAiOverride(ai.limits),
+    updatedAt: typeof ai.updatedAt === "string" ? ai.updatedAt : null,
+    updatedByEmail: typeof ai.updatedByEmail === "string" ? ai.updatedByEmail : null,
+  };
+}
+
 export async function readOrgAiControl(orgCode: string, opts: { now?: number; fresh?: boolean } = {}): Promise<OrgAiControl> {
   const now = opts.now ?? Date.now();
   const hit = cache.orgs.get(orgCode);
@@ -79,14 +93,7 @@ export async function readOrgAiControl(orgCode: string, opts: { now?: number; fr
   try {
     const pdb = await getPlatformDb();
     const [row] = await pdb.select({ settings: schema.platformOrganizations.settings }).from(schema.platformOrganizations).where(eq(schema.platformOrganizations.code, orgCode)).limit(1);
-    const ai = orgAiSettingsOf(row?.settings);
-    value = {
-      disabled: ai.disabled === true,
-      limits: parseAiOverride(ai.limits),
-      updatedAt: typeof ai.updatedAt === "string" ? ai.updatedAt : null,
-      updatedByEmail: typeof ai.updatedByEmail === "string" ? ai.updatedByEmail : null,
-      readError: false,
-    };
+    value = { ...orgAiControlFromSettings(row?.settings), readError: false };
   } catch {
     return { disabled: true, limits: {}, updatedAt: null, updatedByEmail: null, readError: true };
   }

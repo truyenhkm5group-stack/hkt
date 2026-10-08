@@ -406,15 +406,25 @@ export async function setPlatformCostDeclaration(user: SessionUser, raw: { infra
   return { ok: true, message: "Đã lưu chi phí nền tảng — biên lợi nhuận tính lại ngay." };
 }
 
-/** Dòng sổ dùng theo ngày từ `fromDay`, gom theo tổ chức (cho xu hướng tuần của cockpit). */
-export async function readUsageDaily(fromDay: string): Promise<Map<string, UsageDayRow[]>> {
+/** Một ngày của sổ dùng: phần xu hướng của cockpit + tin khách / tin bot / fanpage lúc chụp / mốc chụp (màn sức khoẻ khách). */
+export type UsageDayDetail = UsageDayRow & { customerMessages: number; botMessages: number; fanpagesActive: number | null; capturedAt: Date };
+
+/**
+ * Dòng sổ dùng theo ngày từ `fromDay`, gom theo tổ chức, cũ trước — MỘT câu cho xu hướng tuần của cockpit và sức khoẻ khách
+ * (`lib/saas/customer-signals.ts`). Ngày VẮNG = chưa chụp (chưa đo), không phải 0. `fanpagesActive` `NULL` = chưa đếm được.
+ */
+export async function readUsageDaily(fromDay: string): Promise<Map<string, UsageDayDetail[]>> {
   const pdb = await getPlatformDb();
   const u = schema.platformTenantUsageDaily;
-  const rows = await pdb.select({ orgCode: u.orgCode, day: u.day, conversationsStarted: u.conversationsStarted, aiOrders: u.aiOrders }).from(u).where(gte(u.day, fromDay));
-  const out = new Map<string, UsageDayRow[]>();
+  const rows = await pdb
+    .select({ orgCode: u.orgCode, day: u.day, conversationsStarted: u.conversationsStarted, aiOrders: u.aiOrders, customerMessages: u.customerMessages, botMessages: u.botMessages, fanpagesActive: u.fanpagesActive, capturedAt: u.capturedAt })
+    .from(u)
+    .where(gte(u.day, fromDay))
+    .orderBy(u.day);
+  const out = new Map<string, UsageDayDetail[]>();
   for (const r of rows) {
     if (!out.has(r.orgCode)) out.set(r.orgCode, []);
-    out.get(r.orgCode)!.push({ day: r.day, conversationsStarted: r.conversationsStarted, aiOrders: r.aiOrders });
+    out.get(r.orgCode)!.push({ day: r.day, conversationsStarted: r.conversationsStarted, aiOrders: r.aiOrders, customerMessages: r.customerMessages, botMessages: r.botMessages, fanpagesActive: r.fanpagesActive, capturedAt: r.capturedAt });
   }
   return out;
 }

@@ -16,8 +16,10 @@ import { activationRefusal, loadAdminActivations, loadWorkspaceActivation, resen
 import { finalizeStatement } from "@/lib/saas/billing";
 import { PRODUCT_KEYS, productDef } from "@/lib/saas/catalog";
 import { accountAuditTrail, accountProvisioningJobs, finalizedStatements, loadCommercialSnapshot, moduleDrift, productEconomics, workspaceReach, type CommercialSnapshot, type CustomerView } from "@/lib/saas/customers";
+import type { CustomerHealth } from "@/lib/saas/customer-health";
+import { DEFAULT_SIGNAL_READERS, readCustomerHealth } from "@/lib/saas/customer-signals";
 import { productEntitlement, type ProductEntitlement } from "@/lib/saas/entitlements";
-import { COST_CATEGORIES, addCostEntry, listCostEntries, voidCostEntry } from "@/lib/saas/ledger";
+import { COST_CATEGORIES, addCostEntry, currentPeriodMonth, listCostEntries, voidCostEntry } from "@/lib/saas/ledger";
 import { ACCOUNT_STATUSES, ACCOUNT_TYPES, BILLING_MODES } from "@/lib/saas/policy";
 import { requestProvisioning, retryJob, templateRetryPending, type CreateCustomerRequest, type JobRow, type SubscribeRequest } from "@/lib/saas/provisioning";
 import { isPeriodMonth } from "@/lib/saas/statement";
@@ -39,11 +41,34 @@ const period = z.string().refine(isPeriodMonth, "Kỳ phải có dạng YYYY-MM-
 
 // ─────────────────────────── Đọc ───────────────────────────
 
-export async function loadCustomersConsole(user: SessionUser, periodMonth?: string): Promise<(CommercialSnapshot & { mergeCandidates: { stem: string; accounts: string[] }[] }) | Denied> {
+/**
+ * Sức khoẻ luôn là của HIỆN TẠI: mốc đọc `now` + kỳ chứa `now` — dù trang đang xem tiền của kỳ khác (`?ky=`). Kỳ xem là kỳ hiện tại
+ * ⇒ dùng lại chính ảnh chụp đó; kỳ khác ⇒ thêm MỘT ảnh chụp kỳ hiện tại (chỉ khi người vận hành chọn xem kỳ cũ). Không trộn đồng hồ
+ * khách AI / lỗ gộp của tháng trước với lỗi AI của 15 phút vừa qua thành một mức.
+ */
+async function healthSnapshot(snap: CommercialSnapshot, now: Date): Promise<{ customers: CustomerView[]; periodMonth: string }> {
+  const current = currentPeriodMonth(now);
+  if (snap.periodMonth === current) return { customers: snap.customers, periodMonth: current };
+  return { customers: (await loadCommercialSnapshot({ periodMonth: current, now })).customers, periodMonth: current };
+}
+
+/**
+ * Danh sách khách + SỨC KHOẺ từng khách (mức · lý do · chỗ chưa đo — `lib/saas/customer-health.ts`). Tín hiệu sức khoẻ đọc
+ * bằng vài câu gom ở CSDL nhà cho cả danh sách (`readCustomerHealth`), không mở CSDL tổ chức nào; mốc là LÚC ĐỌC (`healthAt`),
+ * kỳ của đồng hồ khách AI là kỳ hiện tại (`healthPeriodMonth`) — không theo `?ky=`. `opts.now` để bài kiểm ghim MỘT mốc.
+ */
+export async function loadCustomersConsole(
+  user: SessionUser,
+  periodMonth?: string,
+  opts: { now?: Date } = {},
+): Promise<(CommercialSnapshot & { mergeCandidates: { stem: string; accounts: string[] }[]; health: Record<string, CustomerHealth>; healthAt: Date; healthPeriodMonth: string }) | Denied> {
   const denial = platformOperatorDenial(user);
   if (denial) return { error: denial };
-  const snap = await loadCommercialSnapshot({ periodMonth: periodMonth && isPeriodMonth(periodMonth) ? periodMonth : undefined });
-  return { ...snap, mergeCandidates: accountMergeCandidates(snap.customers.map((c) => c.account)) };
+  const now = opts.now ?? new Date();
+  const snap = await loadCommercialSnapshot({ periodMonth: periodMonth && isPeriodMonth(periodMonth) ? periodMonth : undefined, now });
+  const hs = await healthSnapshot(snap, now);
+  const health = await readCustomerHealth(hs.customers, { now, periodMonth: hs.periodMonth });
+  return { ...snap, mergeCandidates: accountMergeCandidates(snap.customers.map((c) => c.account)), health, healthAt: now, healthPeriodMonth: hs.periodMonth };
 }
 
 export type CustomerDetail = {
@@ -60,12 +85,18 @@ export type CustomerDetail = {
   statements: Awaited<ReturnType<typeof finalizedStatements>>;
   costEntries: Awaited<ReturnType<typeof listCostEntries>>;
   accounts: { id: string; code: string; name: string }[];
+  /** Sức khoẻ của khách này — cùng đường đọc + cùng hàm phân loại với danh sách (thêm trạng thái kích hoạt cho lời khuyên). */
+  health: CustomerHealth;
+  healthAt: Date;
+  /** Kỳ của đồng hồ khách AI mà sức khoẻ đọc — kỳ hiện tại, không theo `?ky=`. */
+  healthPeriodMonth: string;
 };
 
-export async function loadCustomerDetail(user: SessionUser, accountCode: string, periodMonth?: string): Promise<CustomerDetail | Denied | null> {
+export async function loadCustomerDetail(user: SessionUser, accountCode: string, periodMonth?: string, opts: { now?: Date } = {}): Promise<CustomerDetail | Denied | null> {
   const denial = platformOperatorDenial(user);
   if (denial) return { error: denial };
-  const snap = await loadCommercialSnapshot({ periodMonth: periodMonth && isPeriodMonth(periodMonth) ? periodMonth : undefined });
+  const now = opts.now ?? new Date();
+  const snap = await loadCommercialSnapshot({ periodMonth: periodMonth && isPeriodMonth(periodMonth) ? periodMonth : undefined, now });
   const customer = snap.customers.find((c) => c.account.code === accountCode);
   if (!customer) return null;
   const codes = customer.workspaces.map((w) => w.code);
@@ -75,9 +106,24 @@ export async function loadCustomerDetail(user: SessionUser, accountCode: string,
     entitlements[w.code] = await Promise.all(w.subscriptions.filter((s) => productDef(s.productKey)).map((s) => productEntitlement(w.code, s.productKey)));
     drift[w.code] = moduleDrift(await productsInUse(w.code).catch(() => []), w.subscriptions);
   }
-  const [reach, activation, audit, jobs, statements, costEntries] = await Promise.all([workspaceReach(codes), loadAdminActivations(customer.workspaces), accountAuditTrail(customer.account, codes), accountProvisioningJobs(customer.account, codes), finalizedStatements(customer.account.id), listCostEntries(snap.periodMonth)]);
+  // Đăng nhập + page đọc MỘT lần, dùng cho cả ô «Đăng nhập» của trang lẫn tín hiệu sức khoẻ; lời khuyên «chưa ai đăng nhập» đọc
+  // trạng thái kích hoạt vừa nạp. Sức khoẻ theo kỳ HIỆN TẠI (healthSnapshot) — khách vắng ở ảnh chụp đó (tạo / xoá giữa hai lượt) ⇒
+  // đọc trên ảnh chụp đang xem và nói đúng kỳ đó.
+  const reachP = workspaceReach(codes);
+  const activationP = loadAdminActivations(customer.workspaces, now);
+  const healthP = (async () => {
+    const hs = await healthSnapshot(snap, now);
+    const hc = hs.customers.find((c) => c.account.id === customer.account.id);
+    const healthPeriodMonth = hc ? hs.periodMonth : snap.periodMonth;
+    const health = await readCustomerHealth([hc ?? customer], { now, periodMonth: healthPeriodMonth, activation: await activationP, readers: { ...DEFAULT_SIGNAL_READERS, reach: () => reachP } });
+    return { health: health[customer.account.id], healthPeriodMonth };
+  })();
+  const [reach, activation, audit, jobs, statements, costEntries, h] = await Promise.all([reachP, activationP, accountAuditTrail(customer.account, codes), accountProvisioningJobs(customer.account, codes), finalizedStatements(customer.account.id), listCostEntries(snap.periodMonth), healthP]);
   return {
     customer,
+    health: h.health,
+    healthAt: now,
+    healthPeriodMonth: h.healthPeriodMonth,
     periodMonth: snap.periodMonth,
     usdToVnd: snap.usdToVnd,
     entitlements,

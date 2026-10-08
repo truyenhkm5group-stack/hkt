@@ -17,7 +17,7 @@ import { readCommercialRegistry, type AccountRow, type SubscriptionRow, type Wor
 import { allocateCosts, type AllocatedLine } from "@/lib/saas/allocation";
 import { PRODUCTS, productDef, type ProductDef } from "@/lib/saas/catalog";
 import { costInputs, currentPeriodMonth, readAiByWorkspaceProduct, readProductUsage, usdToVnd, type MetricReading } from "@/lib/saas/ledger";
-import { effectiveSubscriptionStatus, marginApplicable, subscriptionGrantsUse, type BillingMode, type EffectiveSubscriptionStatus } from "@/lib/saas/policy";
+import { effectiveSubscriptionStatus, losingMoneyApplies, marginApplicable, subscriptionGrantsUse, type BillingMode, type EffectiveSubscriptionStatus } from "@/lib/saas/policy";
 import { buildStatement, type PlanRef, type Statement, type StatementWorkspace } from "@/lib/saas/statement";
 import { getPlanUsage } from "@/lib/entitlements/check";
 import { readAiCustomerUsage, type AiCustomerReading } from "@/lib/pricing/ai-customer";
@@ -47,6 +47,8 @@ export type WorkspaceView = WorkspaceRow & {
   planKey: string;
   pricing: WorkspacePricing;
   standing: BillingStandingKind;
+  /** Workspace đã từng có hoá đơn ĐÃ THU (`readEverPaidOrgs` — cùng tập quyết TRIAL ở `effectiveSubscriptionStatus`). */
+  everPaid: boolean;
   subscriptions: SubscriptionView[];
   endedSubscriptions: SubscriptionRow[];
   aiCost: { productKey: string | null; platformVnd: number; byokUsd: number; requests: number; unpricedCalls: number }[];
@@ -74,7 +76,10 @@ export type CustomerView = {
   /** `revenueVnd` = bảng kê (gói · mua thêm · vượt CHƯA thu qua số dư) + `aiBalanceRevenueVnd` (Số dư AI: tiền thật đã dùng − khoản đảo). */
   economics: { revenueVnd: number | null; aiBalanceRevenueVnd: number; costVnd: number; grossProfitVnd: number | null; marginPct: number | null; marginApplicable: boolean; byokUsd: number };
   flags: HealthFlag[];
+  /** Job cần người vận hành: hỏng (FAILED) + xong mà CHƯA cài được mẫu (SUCCEEDED + last_error, #682). */
   failedJobs: number;
+  /** Phần của `failedJobs` chỉ là «chưa cài được mẫu» — lối ra «Cài lại mẫu», không phải «Chạy lại». */
+  templatePendingJobs: number;
 };
 
 export type CommercialSnapshot = { periodMonth: string; customers: CustomerView[]; orphanWorkspaces: WorkspaceRow[]; plans: PlanInfo[]; usdToVnd: number };
@@ -121,7 +126,13 @@ export async function loadCommercialSnapshot(opts: { periodMonth?: string; now?:
     readProductUsage(periodMonth, catalog),
     costInputs(periodMonth),
     pdb
-      .select({ accountId: schema.platformProvisioningJobs.accountId, orgCode: schema.platformProvisioningJobs.orgCode, n: sql<number>`count(*)::int` })
+      .select({
+        accountId: schema.platformProvisioningJobs.accountId,
+        orgCode: schema.platformProvisioningJobs.orgCode,
+        n: sql<number>`count(*)::int`,
+        // Phần chỉ «chưa cài được mẫu» (job xong + last_error) — lối ra khác job hỏng («Cài lại mẫu» ≠ «Chạy lại»).
+        template: sql<number>`(count(*) filter (where ${schema.platformProvisioningJobs.status} = 'SUCCEEDED'))::int`,
+      })
       .from(schema.platformProvisioningJobs)
       // Job hỏng + job xong mà còn bước không chặn hỏng (bước mẫu — mang `last_error`, review #682): cả hai cần người vận hành.
       .where(sql`(${schema.platformProvisioningJobs.status} = 'FAILED' or (${schema.platformProvisioningJobs.status} = 'SUCCEEDED' and ${schema.platformProvisioningJobs.lastError} is not null))`)
@@ -197,6 +208,7 @@ export async function loadCommercialSnapshot(opts: { periodMonth?: string; now?:
       planKey,
       pricing: { versionKey: version.version?.key ?? null, versionLabel: version.version?.label ?? null, pinned: version.pinned, price, yearlyVnd: price ? yearlyAmountVnd(price) : null, aiCustomers: ac, overage, fairUse },
       standing,
+      everPaid: everPaid.has(w.code),
       subscriptions: live.map((s) => ({
         ...s,
         status: effectiveSubscriptionStatus({ state: s.state as "ACTIVE" | "PAUSED" | "CANCELED", billingMode: mode, standing, hasPaidInvoice: everPaid.has(w.code) }),
@@ -248,10 +260,13 @@ export async function loadCommercialSnapshot(opts: { periodMonth?: string; now?:
     const grossProfitVnd = revenueVnd === null ? null : revenueVnd - costVnd;
     const marginPct = revenueVnd && grossProfitVnd !== null ? Math.round((grossProfitVnd / revenueVnd) * 1000) / 10 : null;
     const unknownCost = workspaces.some((w) => w.aiCost.some((c) => c.unpricedCalls > 0) || w.allocated.some((l) => l.amountVnd === null));
-    const failedJobs = failed.filter((f) => f.accountId === account.id || workspaces.some((w) => w.code === f.orgCode)).reduce((a, f) => a + Number(f.n), 0);
+    const mine = failed.filter((f) => f.accountId === account.id || workspaces.some((w) => w.code === f.orgCode));
+    const failedJobs = mine.reduce((a, f) => a + Number(f.n), 0);
+    const templatePendingJobs = mine.reduce((a, f) => a + Number(f.template), 0);
     const statuses = workspaces.flatMap((w) => w.subscriptions.map((s) => s.status));
     const flags: HealthFlag[] = [];
-    if (grossProfitVnd !== null && grossProfitVnd < 0) flags.push("LOSING_MONEY");
+    // Chỉ khách TRẢ TIỀN trong kỳ — cùng vị từ với lý do sức khoẻ (dùng thử lỗ gộp là đúng thiết kế).
+    if (losingMoneyApplies(revenueVnd, grossProfitVnd)) flags.push("LOSING_MONEY");
     if (statuses.includes("PAST_DUE")) flags.push("PAST_DUE");
     if (statuses.includes("EXPIRED")) flags.push("EXPIRED");
     if (failedJobs) flags.push("PROVISIONING_FAILED");
@@ -264,6 +279,7 @@ export async function loadCommercialSnapshot(opts: { periodMonth?: string; now?:
       economics: { revenueVnd, aiBalanceRevenueVnd: aiBalanceRevenue, costVnd, grossProfitVnd, marginPct, marginApplicable: applicable, byokUsd: workspaces.reduce((a, w) => a + w.aiCost.reduce((b, c) => b + c.byokUsd, 0), 0) },
       flags,
       failedJobs,
+      templatePendingJobs,
     });
   }
   return { periodMonth, customers, orphanWorkspaces: registry.workspaces.filter((w) => !w.accountId || !accountById.has(w.accountId)), plans, usdToVnd: usdToVnd(1) };

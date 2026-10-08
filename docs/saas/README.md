@@ -122,11 +122,22 @@ trung tâm chi phí không có doanh thu thị trường.
 
 ## 6. Operator Console
 
-`/platform/customers` (danh sách: loại, sản phẩm · gói, MRR / chargeback, chi phí, biên, dùng, tình trạng, cờ cảnh báo;
-tạo khách; chi phí cấp nền tảng) → `/platform/customers/[code]` (tổng quan · workspace · sản phẩm + entitlement + thao tác
-· dùng · bảng kê nháp + chốt · chi phí & biên · triển khai · job cấp phát · nhật ký) · `/platform/products` →
-`/platform/products/[key]`. Cảnh báo: lỗ gộp · quá hạn · hết hạn · cấp phát hỏng · chi phí chưa biết · lệch module ↔ thuê
-bao. Kinh tế nền tảng (MRR movement, NRR/GRR, kích hoạt) vẫn ở `/platform/saas`; sức khoẻ CSDL ở `/platform`.
+`/platform/customers` (danh sách: mỗi khách một MỨC SỨC KHOẺ — Nguy cấp · Cần chú ý · Chưa đủ dữ liệu · Khoẻ · Đã dừng — kèm
+LÝ DO cụ thể, lọc nhanh `?muc=`; một dòng mỗi workspace: sản phẩm · gói, đăng nhập · hoạt động, kênh · khách AI, AI 24 giờ, đơn
+AI, khách AI / gói, doanh thu · biên; tạo khách; chi phí cấp nền tảng) → `/platform/customers/[code]` (khối Sức khoẻ · tổng
+quan · workspace · sản phẩm + entitlement + thao tác · dùng · bảng kê nháp + chốt · chi phí & biên · triển khai · job cấp phát
+· nhật ký) · `/platform/products` → `/platform/products/[key]`.
+
+Sức khoẻ khách: hàm phân loại THUẦN `lib/saas/customer-health.ts`, mức · lý do · chỗ chưa đo · ngưỡng khai ở
+`lib/constants/customer-health.ts` (ngưỡng chủ shop đã chốt ở nơi khác thì lấy lại hằng đang chạy — SLO AI bán hàng, trần phiên
+đăng nhập, ngưỡng cảnh báo của phiên bản giá; còn lại là mặc định kỹ thuật, chủ shop đổi được), tín hiệu đọc MỘT lượt gom ở CSDL
+nhà (`lib/saas/customer-signals.ts`, không mở CSDL tổ chức nào — trang một khách đọc thêm trạng thái kích hoạt để lời khuyên
+«chưa ai đăng nhập» nói đúng việc). Mức = lý do NẶNG NHẤT (không điểm tổng có trọng số — spec §7). Tín hiệu bắt buộc không đọc
+được, hoặc đọc được mà chưa đủ để kết luận (nền tin khách ngắn, cửa sổ hoạt động chụp thiếu ngày, mốc kích hoạt không đọc
+được, đồng hồ khách AI chưa đo khi gói có trần) ⇒ «Chưa đủ dữ liệu», KHÔNG BAO GIỜ «Khoẻ». Sức khoẻ luôn của HIỆN TẠI (mốc đọc +
+khách AI kỳ hiện tại) — xem tiền kỳ cũ bằng `?ky=` không đổi mức. Cờ bảng kê ở đầu trang một khách (lỗ gộp — chỉ khách đã trả
+tiền · quá hạn · hết hạn · cấp phát hỏng · chi phí chưa biết · lệch module ↔ thuê bao) giữ nguyên. Kinh tế nền tảng (MRR
+movement, NRR/GRR, kích hoạt) vẫn ở `/platform/saas`; sức khoẻ CSDL ở `/platform`.
 
 ## 7. Cổng khách
 

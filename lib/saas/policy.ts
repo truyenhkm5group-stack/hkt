@@ -60,6 +60,15 @@ export function effectiveSubscriptionStatus(input: { state: SubscriptionState; b
   return "ACTIVE";
 }
 
+/**
+ * «Đang lỗ gộp» chỉ có nghĩa với khách TRẢ TIỀN trong kỳ (doanh thu > 0): dùng thử / miễn phí có doanh thu 0 nên lượt AI nào cũng
+ * thành «lỗ» — đúng thiết kế, không phải việc cần xem. MỘT vị từ cho cờ của bảng kê (`lib/saas/customers.ts`, đầu trang một khách)
+ * và lý do sức khoẻ (`lib/saas/customer-health.ts`) — hai chỗ không được nói hai điều.
+ */
+export function losingMoneyApplies(revenueVnd: number | null, grossProfitVnd: number | null): boolean {
+  return revenueVnd !== null && revenueVnd > 0 && grossProfitVnd !== null && grossProfitVnd < 0;
+}
+
 /** Thuê bao ở tình trạng này có mở năng lực của sản phẩm không. Quá hạn vẫn dùng (đang ân hạn); hết hạn chỉ xem. */
 export function subscriptionGrantsUse(status: EffectiveSubscriptionStatus): boolean {
   return status === "ACTIVE" || status === "TRIAL" || status === "PAST_DUE";

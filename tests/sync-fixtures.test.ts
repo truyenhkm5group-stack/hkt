@@ -558,6 +558,7 @@ import { testAiBalanceEconomics } from "./ai-balance-economics.test";
 import { testOrgPrepaidAi } from "./org-prepaid-ai.test";
 import { testPricingBilling } from "./pricing-billing.test";
 import { testSaasPlatform } from "./saas-platform.test";
+import { testCustomerHealth } from "./customer-health.test";
 import { testPricingV1 } from "./pricing-v1.test";
 import { testSaasV1Migration } from "./saas-v1-migration.test";
 import { testAiCustomerSend } from "./ai-customer-send.test";
@@ -2953,6 +2954,9 @@ async function main() {
   // ba tổ chức THẬT `prc-a` / `prc-b` / `prc-c`, tự cấp, tự dọn; khôi phục cấu hình gói + ngưỡng trong finally.
   await testPricingBilling();
   await testSaasPlatform();
+  // Sức khoẻ khách SaaS (/platform/customers): phân loại thuần + ba tổ chức THẬT `skh-*` (khoẻ · nguy cấp · cần chú ý), tự cấp,
+  // tự dọn; chỉ người vận hành; thiếu dữ liệu không bao giờ ra «Khoẻ».
+  await testCustomerHealth();
   await testPricingV1();
   // Chuyển tổ chức legacy → V1 (ops saas-v1-migration) + phần gồm tính tiền dùng chung — không thu đôi ghế mua thêm (OVERAGE O1).
   await testSaasV1Migration();
