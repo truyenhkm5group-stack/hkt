@@ -1,0 +1,30 @@
+{
+  "schema": 1,
+  "mission_id": "ops-signals-check",
+  "title": "Ops chỉ đọc ops-signals-check: chứng minh 8 tín hiệu O1–O8 chạy trên production",
+  "business_goal": "",
+  "status": "RUNNING",
+  "priority": "P2",
+  "risk": "HIGH",
+  "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "worker": null,
+  "worktree": null,
+  "branch": "feat/ops-signals-check",
+  "base_sha": "9833d9818bd69153a2ef4dc0b8fee63d08916fde",
+  "domains": [],
+  "owned_paths": [
+    "scripts/ops-signals-check.ts",
+    ".github/workflows/ops-vps.yml",
+    "tests/ops-signals-check.test.ts",
+    "tests/sync-fixtures.test.ts",
+    "docs/saas/ACCEPTANCE.md"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-08T21:25:23.233Z",
+  "updated_at": "2026-10-08T21:25:23.233Z",
+  "last_heartbeat": "2026-10-08T21:25:23.233Z",
+  "definition_of_done": []
+}
