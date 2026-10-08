@@ -558,6 +558,7 @@ import { testSaasHideInternal } from "./saas-hide-internal.test";
 import { testPlatformSaas } from "./platform-saas.test";
 import { testTenantAttack } from "./tenant-attack.test";
 import { testAiSalesIsolation } from "./ai-sales-isolation.test";
+import { testPublicChatLimits } from "./public-chat-limits.test";
 import { testPageQueryBudget } from "./page-query-budget.test";
 import { testApprovalsCore } from "./approvals-core.test";
 import { testAiUsage } from "./ai-usage.test";
@@ -2735,6 +2736,9 @@ async function main() {
   await testTenantAttack();
   // AI bán hàng (0180+) — hội thoại, câu mẫu, ảnh, sổ AI: hai tổ chức THẬT `asi-a` / `asi-b` tấn công nhau bằng id.
   await testAiSalesIsolation();
+  // Trần tần suất chat công khai (/chat · /chat/embed): xô thuần + khách thật / bão trên ngưỡng thật, lõi thật trên hai tổ chức
+  // THẬT `pcl-a` / `pcl-b` (tự cấp, tự dọn, provider giả) — vượt trần ⇒ không AI, không ghi; hai shop không chung trần.
+  await testPublicChatLimits();
   // Phase 11 · H2 · ngân sách câu truy vấn: tổ chức THẬT `pqb-a` (tự cấp, tự dọn, client mang bộ đếm) — bảng hệ thống,
   // bảng x_…, kanban, KPI / biểu đồ tổng hợp, cả trang, /o/<khoá>, /o/<khoá>/<id>, getCustomValues: 10 dòng = 200 dòng câu.
   await testPageQueryBudget();

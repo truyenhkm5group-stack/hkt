@@ -156,6 +156,8 @@ vào website của shop»:
   - Caddy chỉ cho đúng `/chat/embed` nằm trong khung trang khác (`frame-ancestors *`); mọi đường khác giữ SAMEORIGIN.
   - Script không đặt cookie, không gọi API trên website của shop; màu / chữ tuỳ chọn không chèn được mã.
   - Cookie khách chat là `SameSite=None; Partitioned` (CHIPS): dùng được trong khung, nhưng khoá theo website đang nhúng.
+  - Cùng cổng trần tần suất với `/chat` (theo khách · IP · shop — `lib/constants/public-chat-limits.ts`): một script nhúng khung
+    rồi xoay cookie không đốt được credit AI của shop; vượt trần thì không gọi AI, không ghi gì.
 
 Mã: `lib/sales-chatbot/widget.ts` · `app/chat/widget.js/route.ts` · `app/chat/embed/page.tsx`.
 

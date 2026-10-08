@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, useTransition } from "react";
 import { Loader2, RotateCcw, Send } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { sendPublicChatAction, startPublicChatAction } from "@/lib/actions/public-chat";
+import { refreshPublicChatAction, sendPublicChatAction, startPublicChatAction } from "@/lib/actions/public-chat";
 import { sendTestChatAction, startTestChatAction } from "@/lib/actions/sales-chatbot";
 import type { ChatView } from "@/lib/sales-chatbot/config";
 import { cn } from "@/lib/utils";
@@ -40,6 +40,8 @@ export function SalesChatPanel({ mode, title, className }: { mode: "test" | "pub
 
   // Trang chat CÔNG KHAI: nhân viên trả lời từ hộp thư ERP (không có kênh đẩy) ⇒ khung chat tự đọc lại hội thoại mỗi 15 giây
   // khi tab đang mở và không có lượt gửi nào đang chạy. Chỉ thay khi CÙNG hội thoại và có thêm tin — không giật khung đang gõ.
+  // ĐỌC LẠI, không MỞ: `startPublicChatAction` tạo một hội thoại mới mỗi lần gọi (mỗi tab đang mở = 4 hội thoại rác / phút, và
+  // tin nhân viên không bao giờ hiện vì id luôn khác) — đọc lại đi qua `refreshPublicChatAction`, chỉ đọc, không qua trần tần suất.
   const viewRef = useRef<ChatView | null>(null);
   viewRef.current = view;
   const pendingRef = useRef(false);
@@ -49,7 +51,7 @@ export function SalesChatPanel({ mode, title, className }: { mode: "test" | "pub
     const id = window.setInterval(async () => {
       const cur = viewRef.current;
       if (!cur || pendingRef.current || document.visibilityState !== "visible") return;
-      const r = await startPublicChatAction();
+      const r = await refreshPublicChatAction(cur.conversationId);
       if ("error" in r || pendingRef.current) return;
       const now = viewRef.current;
       if (now && r.view.conversationId === now.conversationId && (r.view.messages.length > now.messages.length || r.view.status !== now.status)) setView(r.view);
@@ -68,6 +70,12 @@ export function SalesChatPanel({ mode, title, className }: { mode: "test" | "pub
       if ("error" in r) {
         setError(r.error);
         if (r.view) setView(r.view);
+        else if (mode === "public") {
+          // Trang công khai: lỗi KHÔNG kèm hội thoại = tin chưa tới hội thoại (trần tần suất, phiên hết, shop tắt chat). Gỡ bong
+          // bóng vừa thêm và trả chữ về ô nhập để khách gửi lại — không để khách tưởng tin đã đi.
+          setView(view);
+          setText((cur) => cur || t);
+        }
       } else setView(r.view);
     });
   };
