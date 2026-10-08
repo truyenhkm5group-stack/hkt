@@ -3,7 +3,7 @@
   "mission_id": "backup-drive-trash",
   "title": "Sao lưu ngoài máy hết 403 đầy Drive: xoá bản quá hạn KHÔNG qua thùng rác, dọn thùng rác chỉ trong thư mục sao lưu, backup-status đo dung lượng Drive",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -24,9 +24,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-08T12:53:25.193Z",
-  "updated_at": "2026-10-08T14:32:34.675Z",
+  "updated_at": "2026-10-08T14:54:56.583Z",
   "last_heartbeat": "2026-10-08T14:32:07.583Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#689 → b3a8d74e13a673b319fda63b5d410f8ff8c15438"
+  },
   "handoff": {
     "branch": "fix/backup-drive-trash",
     "sha": "54e6574bc663db617b6ec1bc42af81b655f86a28",
