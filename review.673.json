@@ -1,8 +1,8 @@
 {
   "pr": 673,
-  "sha": "e3607efd9bab456d72fa4c7f019e92e90d214f43",
+  "sha": "4b1591f9f2670f4be85f0ef8d1a636895948003b",
   "verdict": "PASS",
   "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
-  "at": "2026-10-08T09:20:32.007Z",
-  "note": "Delta 4d9e48b4..e3607efd do Integration Lead đọc trực tiếp: chỉ thay hai phép so === EXTERNAL bằng vị từ offboardDeletableAccountType trong lib/saas/policy.ts (cùng ngữ nghĩa, loại lạ/null ⇒ false) + một assert; review độc lập PASS ở 4d9e48b4 vẫn áp"
+  "at": "2026-10-08T09:43:05.108Z",
+  "note": "Rebase sau #674 do Integration Lead đọc: diff so với main ở ops-vps.yml chỉ thêm org-offboard (lựa chọn, MA_HOA, DOC_NANG, nhánh case); 9 tệp còn lại giống hệt e3607efd đã PASS"
 }
