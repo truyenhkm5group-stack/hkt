@@ -3,7 +3,7 @@
   "mission_id": "saas-public-chat-limits",
   "title": "Chat công khai / ô chat nhúng có giới hạn tần suất: kẻ xấu không đốt được credit AI của shop và không làm bot im với khách thật",
   "business_goal": "",
-  "status": "RUNNING",
+  "status": "PR_READY",
   "priority": "P0",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -28,11 +28,22 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-08T04:41:59.376Z",
-  "updated_at": "2026-10-08T05:38:53.613Z",
-  "last_heartbeat": "2026-10-08T05:38:53.613Z",
+  "updated_at": "2026-10-08T05:39:19.076Z",
+  "last_heartbeat": "2026-10-08T05:39:19.076Z",
   "definition_of_done": [
     "Mở hội thoại mới và gửi tin ở /chat + /chat/embed có trần theo khách (cookie) · theo IP · theo tổ chức; vượt trần KHÔNG gọi AI, trả câu kinh doanh",
     "Không tin header IP do client tự đặt; dùng lại cách lấy IP của lib/actions/auth.ts",
     "Bài kiểm: hàm giới hạn thuần + lõi sendPublicChat/startPublicChat không gọi AI khi vượt trần + khách thật không bị chặn nhầm"
-  ]
+  ],
+  "handoff": {
+    "branch": "feat/public-chat-limits",
+    "sha": "45a9273bc859a86ae210e3955f5fc900f4d0033e",
+    "at": "2026-10-08T05:39:19.076Z",
+    "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+    "title": "Chat công khai / ô chat nhúng có giới hạn tần suất: kẻ xấu không đốt được credit AI của shop và không làm bot im với khách thật",
+    "summary": "Chat công khai /chat + /chat/embed có trần theo khách · IP · shop cho mở hội thoại và gửi tin (xô lượt thuần lib/rate-limit.ts, kho RAM có trần 20.000 khoá); vượt trần không gọi AI, không ghi dòng nào, câu báo kinh doanh; sửa vòng tự đọc lại 15 giây (#573) đang TẠO hội thoại mới mỗi lượt (4 hội thoại rác / phút / tab, khách web không thấy tin nhân viên) bằng refreshPublicChat chỉ đọc",
+    "tests": [
+      "tsc + eslint sạch; next build đạt; bài mới public-chat-limits (xô thuần đồng hồ dựng, khoá IP, khách thật trên ngưỡng thật, bão, lõi thật 2 tổ chức + provider giả: vượt trần 0 lượt AI / 0 dòng) + chat-widget + login-throttle + ai-sales-isolation + saas-l5-billing-trial + use-server-exports + repo-integrity đạt; static-runner sau commit đạt; đột biến 17/17 bắt; 0 ký tự vô hình"
+    ]
+  }
 }
