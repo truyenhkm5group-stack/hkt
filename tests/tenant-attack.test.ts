@@ -128,7 +128,7 @@ import { WHOLESALE_BLUEPRINT } from "@/lib/blueprints/templates/wholesale";
 import { getBranding, readLogo, saveBrandingCore, uploadLogoCore } from "@/lib/branding/service";
 import { clearMemo } from "@/lib/cache";
 import { ORG_BACKUP_STATUS_SUBDIR, ORG_BACKUP_SUMMARY_FILE } from "@/lib/constants/backup";
-import { loadConnectionsView, openActiveConnection, saveConnection, setConnectionStatus, testOrgConnection } from "@/lib/connectors/service";
+import { loadConnectionsView, openActiveConnection, saveAiConnectionAsOperator, saveConnection, setAiConnectionStatusAsOperator, setConnectionStatus, testAiConnectionAsOperator, testOrgConnection } from "@/lib/connectors/service";
 import { env } from "@/lib/env";
 import { createCustomField } from "@/lib/metadata/fields";
 import type { MetadataActor } from "@/lib/metadata/types";
@@ -160,9 +160,12 @@ import { loadPageEditor } from "@/lib/platform-ui/page-admin";
 import { loadWorkflowEditor } from "@/lib/platform-ui/workflow-admin";
 import { listApprovalRequests } from "@/lib/queries/approvals";
 import { getBackupHealth } from "@/lib/queries/backup-status";
+import { CUSTOMER_AI_CONFIG_MANAGED, CUSTOMER_AI_NOT_READY_LABEL } from "@/lib/saas/visibility";
 import { parseListParams } from "@/lib/search-params";
 import { runWorkflows } from "@/lib/workflow/engine";
 import { saveRule, setRuleMode, setRuleStatus } from "@/lib/workflow/rules";
+
+const OPERATOR_AI_REF = { orgCode: "home", email: "op@nha.local" }; // khoá AI của workspace khách: chỉ người vận hành ghi (lib/saas/visibility.ts)
 
 const A = "ta-a";
 const B = "ta-b";
@@ -704,11 +707,14 @@ export async function testTenantAttack() {
       assert.ok("ok" in (await saveConnection(qtB, { connectorKey: "lark-webhook", settings: {}, secrets: { webhookUrl: LARK_B, signSecret: SIGN_B } })));
       assert.ok("ok" in (await testOrgConnection(qtB, "lark-webhook", { tester: { fetch: larkOk } })));
       assert.ok("ok" in (await setConnectionStatus(qtB, "lark-webhook", "ACTIVE")));
-      // Khoá AI của chính B (BYOK) — kết nối DUY NHẤT có luồng đọc bí mật lúc chạy (AI Builder).
+      // Khoá AI của chính B (BYOK) — kết nối DUY NHẤT có luồng đọc bí mật lúc chạy (AI Builder). Workspace khách KHÔNG tự ghi khoá
+      // AI (lib/saas/visibility.ts): quản trị của B bị lõi từ chối, người vận hành nền tảng ghi hộ.
       const probe = async () => new Response(JSON.stringify({ data: [] }), { status: 200, headers: { "content-type": "application/json" } });
-      assert.ok("ok" in (await saveConnection(qtB, { connectorKey: "anthropic-byok", settings: {}, secrets: { apiKey: AI_KEY_B } })));
-      assert.ok("ok" in (await testOrgConnection(qtB, "anthropic-byok", { tester: { fetch: probe } })));
-      assert.ok("ok" in (await setConnectionStatus(qtB, "anthropic-byok", "ACTIVE")));
+      const selfSave = await saveConnection(qtB, { connectorKey: "anthropic-byok", settings: {}, secrets: { apiKey: AI_KEY_B } });
+      assert.ok("error" in selfSave && selfSave.error === CUSTOMER_AI_CONFIG_MANAGED, `B tự lưu khoá AI ⇒ từ chối: ${JSON.stringify(selfSave)}`);
+      assert.ok("ok" in (await saveAiConnectionAsOperator({ operator: OPERATOR_AI_REF, reason: "kiểm thử", connectorKey: "anthropic-byok", settings: {}, secrets: { apiKey: AI_KEY_B } })));
+      assert.ok("ok" in (await testAiConnectionAsOperator({ connectorKey: "anthropic-byok", operator: OPERATOR_AI_REF, reason: "kiểm thử" }, { tester: { fetch: probe } })));
+      assert.ok("ok" in (await setAiConnectionStatusAsOperator({ connectorKey: "anthropic-byok", status: "ACTIVE", operator: OPERATOR_AI_REF, reason: "kiểm thử" })));
       const own = await openActiveConnection("anthropic-byok");
       assert.ok(own.ok && own.secrets.apiKey === AI_KEY_B, `B mở được khoá AI của chính mình: ${JSON.stringify(own.ok ? "ok" : own.reason)}`);
 
@@ -1105,6 +1111,15 @@ export async function testTenantAttack() {
     await attack(C, "đọc khoá AI đang bật (openActiveConnection anthropic-byok)", () => openActiveConnection("anthropic-byok"));
     await attack(C, "AI Builder của A mượn khoá AI của B (getBuilderAi)", () => getBuilderAi({ fetch: globalThis.fetch }).then((r) => (r.ok ? { ok: true, source: r.ai.source } : { ok: false, error: r.reason })));
     await attack(C, "kiểm tra khoá AI (anthropic-byok của B)", () => testConnectionAction("anthropic-byok"), { path: "/settings/connections" });
+    // Workspace khách KHÔNG tự ghi khoá AI (lib/saas/visibility.ts) — kể cả khoá «của mình», kể cả gọi thẳng action bỏ qua màn hình.
+    for (const [mat, fn] of [
+      ["tự lưu khoá AI qua action (khách)", () => saveConnectionAction({ connectorKey: "anthropic-byok", settings: {}, secrets: { apiKey: "sk-ant-api03-khoa-a-tu-dan-0123456789abcdef" } })],
+      ["tự tắt khoá AI qua action (khách)", () => setConnectionStatusAction({ connectorKey: "gemini-byok", status: "DISABLED" })],
+      ["tự bật khoá AI qua action (khách)", () => setConnectionStatusAction({ connectorKey: "openai-byok", status: "ACTIVE" })],
+    ] as const) {
+      const s = await attack(C, mat, fn, { path: "/settings/connections" });
+      assert.ok(s.ok && serialize(s.value).includes(CUSTOMER_AI_CONFIG_MANAGED), `${mat}: câu từ chối của khách — ${serialize(s.ok ? s.value : s.error).slice(0, 200)}`);
+    }
     await attack(C, "màn Kết nối của A không có dấu vết của B", () => loadConnectionsView(qtA), {
       ownOnly: (v) => {
         const lark = (v as { groups: { rows: { key: string; connection: unknown }[] }[] }).groups.flatMap((g) => g.rows).find((r) => r.key === "lark-webhook");
@@ -1396,7 +1411,10 @@ export async function testTenantAttack() {
       const spyTat = new FakeProvider([() => ({ content: [{ type: "text", text: "không được tới đây" }], stopReason: "end_turn" })]);
       setBuilderAiForTests({ provider: spyTat, source: "ORG_CONNECTION", connectorKey: "anthropic-byok" });
       try {
-        await tuChoiVi(Z, "đối chứng: AI Builder của A khi người vận hành đã tắt AI", () => createAiDraftAction({ mode: "new", prompt: "Dựng ERP bán buôn có CRM và kho." }), new RegExp(AI_DISABLED_BY_OPERATOR), "/settings/ai-builder");
+        // Lý do THẬT nằm ở lõi (`createDraft` — câu gốc cho nhà / nhật ký); action của workspace KHÁCH trả câu của khách
+        // (lib/saas/visibility.ts) — không lộ công tắc của người vận hành.
+        await tuChoiVi(Z, "đối chứng: AI Builder của A khi người vận hành đã tắt AI (lõi)", () => createDraft(qtA, { mode: "new", prompt: "Dựng ERP bán buôn có CRM và kho." }), new RegExp(AI_DISABLED_BY_OPERATOR), "/settings/ai-builder");
+        await tuChoiVi(Z, "đối chứng: AI Builder của A khi người vận hành đã tắt AI (action — câu của khách)", () => createAiDraftAction({ mode: "new", prompt: "Dựng ERP bán buôn có CRM và kho." }), new RegExp(CUSTOMER_AI_NOT_READY_LABEL), "/settings/ai-builder");
       } finally {
         setBuilderAiForTests(undefined);
       }

@@ -206,8 +206,8 @@ export function GoLiveCard({ view }: { view: GoLiveView }) {
           </p>
         ) : !view.canBot ? (
           <p className="text-xs text-muted-foreground">Cần quản trị cửa hàng bật (quyền cấu hình chatbot).</p>
-        ) : view.bot.usesPlatformAi && !view.bot.aiReady ? (
-          <p className="text-xs text-amber-700 dark:text-amber-400">
+        ) : !view.bot.aiReady ? (
+          <p className="text-xs text-amber-700 dark:text-amber-400" data-go-live-ai="not-ready">
             {view.bot.aiReason}{" "}
             <Link href="/ai/sales-chatbot" className="underline">
               Mở cấu hình chatbot
@@ -220,7 +220,7 @@ export function GoLiveCard({ view }: { view: GoLiveView }) {
               Bật chatbot
             </Button>
             <span className="text-xs text-muted-foreground">
-              {view.bot.usesPlatformAi ? "Dùng AI có sẵn trong gói — không cần khoá riêng." : "Dùng khoá AI riêng của shop."} Bot đọc giá / tồn từ sản phẩm trong ERP — nên{" "}
+              AI đã sẵn sàng. Bot đọc giá / tồn từ sản phẩm trong ERP — nên{" "}
               <Link href="/products/import" className="text-primary hover:underline">
                 nhập sản phẩm
               </Link>{" "}

@@ -12,7 +12,7 @@ import { connectionStatusRows } from "@/lib/connectors/service";
 import { SALES_BOT_CONNECTORS, type SalesChatbotConfig } from "@/lib/sales-chatbot/config";
 import { loadChatCostReport, type ChatCostReport } from "@/lib/sales-chatbot/cost-report";
 import { loadProviderHealth } from "@/lib/sales-chatbot/provider-failover";
-import { chatbotEngineConfig, customerAiState, customerChatbotConfig, customerFacing, type ChatbotEngineConfig, type CustomerAiState, type CustomerChatbotConfig, type EngineConnectionView, type ProviderHealthView } from "@/lib/saas/visibility";
+import { chatbotEngineConfig, customerAiState, customerChatbotConfig, customerFacing, customerQuotaExhausted, type ChatbotEngineConfig, type CustomerAiState, type CustomerChatbotConfig, type EngineConnectionView, type ProviderHealthView } from "@/lib/saas/visibility";
 
 export type { EngineConnectionView, ProviderHealthView };
 
@@ -47,7 +47,7 @@ export async function loadChatbotAiView(user: Pick<SessionUser, "organization">,
   if (customerFacing(user.organization)) {
     // «Hết lượt» = trần lượt / credit của GÓI (khách tự xử được ở trang gói) — tách khỏi «Cần cấu hình» (việc của hỗ trợ).
     const quota = orgCode && !aiReady && cfg.connectorKey === "platform" ? await checkAiQuota(orgCode, "PLATFORM", { notify: false }).catch(() => null) : null;
-    const quotaExhausted = Boolean(quota && !quota.ok && quota.reason !== "PLAN_UNREADABLE" && quota.reason !== "NO_PLATFORM_CREDIT");
+    const quotaExhausted = Boolean(quota && !quota.ok && customerQuotaExhausted(quota.reason));
     return { audience: "CUSTOMER", config: customerChatbotConfig(cfg), aiState: customerAiState({ enabled: cfg.enabled, aiReady, quotaExhausted }), aiReady };
   }
   const [health, costReport] = opts.manage ? await Promise.all([providerHealthView(), orgCode ? loadChatCostReport(orgCode).catch(() => null) : Promise.resolve(null)]) : [[], null];

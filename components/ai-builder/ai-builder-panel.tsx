@@ -12,6 +12,7 @@ import { SectionCard } from "@/components/ui-bits";
 import { applyAiDraftAction, createAiDraftAction, discardAiDraftAction, previewAiDraftAction } from "@/lib/actions/ai-builder";
 import { AI_BUILDER_EDIT_EXAMPLES, AI_BUILDER_EXAMPLES, AI_BUILDER_MODE_LABEL, AI_DRAFT_STATUS_LABEL, AI_SOURCE_LABEL, type AiBuilderMode, type AiBuilderView, type AiDraftView } from "@/lib/ai-builder/types";
 import { BLUEPRINT_ITEM_KIND_LABEL, OVERRIDABLE_ACTIONS, PLAN_ACTION_LABEL, stepKey, type ApplyResult, type BlueprintPlan, type PlanAction } from "@/lib/blueprints/types";
+import type { CustomerAiBuilderView, CustomerAiDraftView } from "@/lib/saas/visibility";
 
 const ACTION_TONE: Record<PlanAction, string> = {
   CREATE: "border-emerald-300 bg-emerald-50 text-emerald-800 dark:border-emerald-500/40 dark:bg-emerald-500/10 dark:text-emerald-200",
@@ -36,11 +37,15 @@ function usd(v: number | null): string {
  *
  * Trình duyệt KHÔNG giữ gói cấu hình: nó chỉ gửi mã nháp + danh sách khoá bỏ chọn + lựa chọn ghi đè + `planHash`. Đổi
  * lựa chọn sau khi xem trước ⇒ kế hoạch bị xoá, phải xem trước lại — người bấm Áp dụng chỉ xác nhận thứ đang THẤY.
+ *
+ * Workspace KHÁCH nhận DTO ĐÃ LỌC ở máy chủ (lib/saas/visibility.ts — không nguồn AI / model / token / USD): phần nội bộ chỉ dựng
+ * khi khoá nội bộ CÓ trong DTO, và khách không được bảo đi khai khoá AI (đội ngũ hỗ trợ cấu hình AI cho shop).
  */
-export function AiBuilderPanel({ view, initialDraft }: { view: AiBuilderView; initialDraft: AiDraftView | null }) {
+export function AiBuilderPanel({ view, initialDraft }: { view: AiBuilderView | CustomerAiBuilderView; initialDraft: AiDraftView | CustomerAiDraftView | null }) {
+  const engine = "source" in view.ai ? view.ai : null;
   const [mode, setMode] = useState<AiBuilderMode>(initialDraft?.mode ?? "new");
   const [prompt, setPrompt] = useState("");
-  const [draft, setDraft] = useState<AiDraftView | null>(initialDraft);
+  const [draft, setDraft] = useState<AiDraftView | CustomerAiDraftView | null>(initialDraft);
   const [excluded, setExcluded] = useState<string[]>(initialDraft?.excludedKeys ?? []);
   const [resolutions, setResolutions] = useState<Record<string, "overwrite">>({});
   const [plan, setPlan] = useState<BlueprintPlan | null>(null);
@@ -65,7 +70,7 @@ export function AiBuilderPanel({ view, initialDraft }: { view: AiBuilderView; in
         setResolutions({});
         if (r.value.valid) toast.success("AI đã soạn xong bản nháp — xem lại từng mục rồi bấm Xem trước.");
         else toast.warning("Bản nháp còn lỗi — xem lỗi bên dưới.");
-        if (r.value.quotaWarning) toast.warning(r.value.quotaWarning);
+        if ("quotaWarning" in r.value && r.value.quotaWarning) toast.warning(r.value.quotaWarning);
       } catch {
         setError("Không tạo được bản nháp — thử lại.");
       }
@@ -135,25 +140,42 @@ export function AiBuilderPanel({ view, initialDraft }: { view: AiBuilderView; in
         title="Mô tả cho AI"
         description={
           view.ai.available
-            ? `${view.ai.source ? AI_SOURCE_LABEL[view.ai.source] : ""} · ${view.ai.model ?? ""} · hôm nay đã dùng ${view.usedToday}/${view.limits.maxDraftsPerDay} lượt`
-            : "Chưa có kết nối AI"
+            ? engine
+              ? `${engine.source ? AI_SOURCE_LABEL[engine.source] : ""} · ${engine.model ?? ""} · hôm nay đã dùng ${view.usedToday}/${view.limits.maxDraftsPerDay} lượt`
+              : `Hôm nay đã dùng ${view.usedToday}/${view.limits.maxDraftsPerDay} lượt`
+            : engine
+              ? "Chưa có kết nối AI"
+              : "AI chưa sẵn sàng"
         }
       >
         {!view.ai.available ? (
-          <div className="space-y-2 text-sm">
-            <p className="font-medium">Chưa có kết nối AI cho tổ chức này.</p>
-            <p className="text-muted-foreground">{view.ai.reason}</p>
-            <p>
-              <Link href="/settings/connections" className="font-medium text-primary underline underline-offset-2">
-                Mở Kết nối theo tổ chức
-              </Link>{" "}
-              để khai khoá Anthropic hoặc OpenAI của tổ chức — tổ chức trả tiền token của chính mình. Mẫu cấu hình dựng sẵn vẫn dùng được ở{" "}
-              <Link href="/settings/templates" className="font-medium text-primary underline underline-offset-2">
-                Mẫu cấu hình
-              </Link>
-              .
-            </p>
-          </div>
+          engine ? (
+            <div className="space-y-2 text-sm">
+              <p className="font-medium">Chưa có kết nối AI cho tổ chức này.</p>
+              <p className="text-muted-foreground">{view.ai.reason}</p>
+              <p>
+                <Link href="/settings/connections" className="font-medium text-primary underline underline-offset-2">
+                  Mở Kết nối theo tổ chức
+                </Link>{" "}
+                để khai khoá Anthropic hoặc OpenAI của tổ chức — tổ chức trả tiền token của chính mình. Mẫu cấu hình dựng sẵn vẫn dùng được ở{" "}
+                <Link href="/settings/templates" className="font-medium text-primary underline underline-offset-2">
+                  Mẫu cấu hình
+                </Link>
+                .
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-2 text-sm">
+              <p className="font-medium">{view.ai.reason}</p>
+              <p className="text-muted-foreground">
+                Bộ phận hỗ trợ đang hoàn tất cấu hình AI cho tổ chức. Mẫu cấu hình dựng sẵn vẫn dùng được ở{" "}
+                <Link href="/settings/templates" className="font-medium text-primary underline underline-offset-2">
+                  Mẫu cấu hình
+                </Link>
+                .
+              </p>
+            </div>
+          )
         ) : (
           <div className="space-y-3">
             <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Chế độ">
@@ -199,7 +221,7 @@ export function AiBuilderPanel({ view, initialDraft }: { view: AiBuilderView; in
       {draft ? (
         <SectionCard
           title={draft.name ?? "Bản nháp chưa có gói"}
-          description={`${AI_BUILDER_MODE_LABEL[draft.mode]} · ${AI_DRAFT_STATUS_LABEL[draft.status]} · ${draft.aiCalls} lượt gọi AI · ${draft.inputTokens + draft.outputTokens} token · ${usd(draft.costUsd)}`}
+          description={`${AI_BUILDER_MODE_LABEL[draft.mode]} · ${AI_DRAFT_STATUS_LABEL[draft.status]} · ${draft.aiCalls} lượt gọi AI${"inputTokens" in draft ? ` · ${draft.inputTokens + draft.outputTokens} token · ${usd(draft.costUsd)}` : ""}`}
           actions={
             draft.status === "DRAFT" ? (
               <div className="flex flex-wrap gap-2">

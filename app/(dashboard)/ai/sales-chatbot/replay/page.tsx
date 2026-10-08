@@ -3,6 +3,7 @@ import { PageHeader } from "@/components/page-header";
 import { EmptyState, SectionCard } from "@/components/ui-bits";
 import { can, requirePermission } from "@/lib/auth/session";
 import { formatDateTime, formatPercent, formatVND } from "@/lib/format";
+import { customerFacing, customerReplayDetail } from "@/lib/saas/visibility";
 import { listReplayRuns, loadReplayRun, type ReplayRunRow } from "@/lib/sales-chatbot/replay";
 import { REPLAY_FLAG_LABEL, REPLAY_LIMITS, type ReplayFlag } from "@/lib/sales-chatbot/replay-shared";
 import { SALES_CHATBOT_MANAGE } from "@/lib/sales-chatbot/settings";
@@ -51,7 +52,9 @@ export default async function ReplayPage({ searchParams }: { searchParams: Promi
   const list = await listReplayRuns(user);
   const runs = "ok" in list ? list.runs : [];
   const selected = runId ? await loadReplayRun(user, runId) : runs[0] ? await loadReplayRun(user, runs[0].id) : null;
-  const detail = selected && "ok" in selected ? selected : null;
+  // Workspace KHÁCH (lib/saas/visibility.ts): câu lỗi lượt / điểm qua danh sách cho phép, không tên công cụ bot đã gọi.
+  const customer = customerFacing(user.organization);
+  const detail = selected && "ok" in selected ? (customer ? customerReplayDetail(selected) : selected) : null;
   const s = detail?.run.summary ?? null;
   const manage = can(user, SALES_CHATBOT_MANAGE);
   return (
@@ -64,7 +67,9 @@ export default async function ReplayPage({ searchParams }: { searchParams: Promi
           <div className="space-y-1.5 text-xs leading-5">
             <p>Máy lấy tin KHÁCH THẬT từ hội thoại fanpage / web đã lưu, dựng lại lịch sử tới đúng chỗ đó rồi cho AI (cấu hình, lời nhắc, sổ tay HÔM NAY) trả lời ở kênh THỬ: công cụ chỉ mô phỏng — không tạo khách, đơn, giữ hàng hay tin nào tới khách.</p>
             <p>Chấm bằng luật đọc được: AI hỏng · không trả lời · giá trong câu KHÔNG có căn cứ (không phải giá bảng, không do công cụ trả, không phải phí ship đã khai, không phải số shop đã nói trước đó) · công cụ lỗi · AI chuyển người so với thực tế người trả lời.</p>
-            <p>Mỗi điểm là một lượt AI thật trên khoá của shop. Tỷ lệ dưới {REPLAY_LIMITS.minSample} mẫu in «—». Không có ngưỡng «đạt»: đọc từng câu rồi quyết.</p>
+            <p>
+              {customer ? "Mỗi điểm là một lượt AI thật." : "Mỗi điểm là một lượt AI thật trên khoá của shop."} Tỷ lệ dưới {REPLAY_LIMITS.minSample} mẫu in «—». Không có ngưỡng «đạt»: đọc từng câu rồi quyết.
+            </p>
           </div>
         }
         actions={

@@ -32,7 +32,7 @@ import {
   type ConnectorSpec,
 } from "@/lib/connectors/registry";
 import { SELF_TEST_ORG, SecretsDecryptError, SecretsUnavailableError, openSecrets, sealSecrets, secretsKeyHealth, secretsKeyPublicStatus, secretsKeyState, selfTestSecrets } from "@/lib/connectors/secrets";
-import { aiConnectionAudit, loadConnectionsView, openActiveConnection, saveConnection, setConnectionStatus, testOrgConnection, type RekeyVerdict } from "@/lib/connectors/service";
+import { aiConnectionAudit, loadConnectionsView, openActiveConnection, saveAiConnectionAsOperator, saveConnection, setAiConnectionStatusAsOperator, setConnectionStatus, testAiConnectionAsOperator, testOrgConnection, type RekeyVerdict } from "@/lib/connectors/service";
 import { LARK_HOOK_PATTERN, ORG_CONNECTION_CHAT_DISCOVERY, ORG_CONNECTION_TESTERS, TELEGRAM_CHAT_PATTERN, TELEGRAM_TOKEN_PATTERN, testLarkWebhook, testTelegramBot, testZaloBot, testPancakeFanpage, pancakeVerdict, PANCAKE_TEST_MAX_BYTES } from "@/lib/connectors/testers";
 import { chunkText } from "@/lib/messaging/providers";
 import type { ConnectionsView } from "@/lib/connectors/types";
@@ -44,7 +44,11 @@ import { getHomeOrganization, invalidateOrganizations } from "@/lib/platform/org
 import { runSecretsSelfTest } from "@/lib/platform/secrets-self-test";
 import { provisionOrganization } from "@/lib/platform/provision";
 import { WEBHOOK_BINDINGS } from "@/lib/platform/webhooks";
+import { CUSTOMER_AI_CONFIG_MANAGED } from "@/lib/saas/visibility";
 import { rotateAllOrganizations } from "../scripts/rotate-platform-secrets";
+
+/** Khoá AI của workspace khách: CHỈ người vận hành nền tảng ghi (lib/saas/visibility.ts) — bài kiểm đi đúng đường đó. */
+const OPERATOR_AI_REF = { orgCode: "home", email: "op@nha.local" };
 
 const goc = path.resolve(__dirname, "..");
 const A = "pc-a";
@@ -579,15 +583,15 @@ async function secretsLifecycle(adminA: SessionUser, adminB: SessionUser) {
 
       // ── CẬP NHẬT bí mật của kết nối ĐANG BẬT ⇒ về Nháp, kết quả kiểm tra cũ xoá, lúc chạy KHÔNG đọc được tới khi bật lại ──
       assert.equal((await rowOf("anthropic-byok")).status, "ACTIVE", "tiền đề: khoá AI của A đang bật");
-      const upd = await saveConnection(adminA, { connectorKey: "anthropic-byok", secrets: { apiKey: AI_KEY_2 } });
+      const upd = await saveAiConnectionAsOperator({ operator: OPERATOR_AI_REF, reason: "kiểm thử", connectorKey: "anthropic-byok", secrets: { apiKey: AI_KEY_2 } });
       assert.ok("ok" in upd && upd.status === "DRAFT", JSON.stringify(upd));
       const ai = await rowOf("anthropic-byok");
       assert.ok(ai.status === "DRAFT" && ai.lastTestOk === null && ai.activatedAt === null, "cập nhật ⇒ Nháp, xoá kết quả kiểm tra + mốc bật");
       assert.deepEqual(ai.secretHints, { apiKey: `••••${AI_KEY_2.slice(-4)}` }, "gợi ý theo giá trị MỚI");
       const blocked = await openActiveConnection("anthropic-byok");
       assert.ok(!blocked.ok && !("secrets" in blocked), "chưa kiểm tra lại ⇒ luồng chạy KHÔNG nhận bí mật (cũ lẫn mới)");
-      assert.ok("ok" in (await testOrgConnection(adminA, "anthropic-byok", { tester: { fetch: fakeFetch(() => ({ body: { data: [] } })).fetch } })));
-      assert.ok("ok" in (await setConnectionStatus(adminA, "anthropic-byok", "ACTIVE")));
+      assert.ok("ok" in (await testAiConnectionAsOperator({ connectorKey: "anthropic-byok", operator: OPERATOR_AI_REF, reason: "kiểm thử" }, { tester: { fetch: fakeFetch(() => ({ body: { data: [] } })).fetch } })));
+      assert.ok("ok" in (await setAiConnectionStatusAsOperator({ connectorKey: "anthropic-byok", status: "ACTIVE", operator: OPERATOR_AI_REF, reason: "kiểm thử" })));
       const reopened = await openActiveConnection("anthropic-byok");
       assert.ok(reopened.ok && reopened.secrets.apiKey === AI_KEY_2, "kiểm tra + bật lại ⇒ đọc ra giá trị MỚI");
       // Kiểm khoá cho ops (org-ai-cutover): chỉ DẤU BĂM của khoá rời service — không bao giờ khoá, kể cả một mảnh.
@@ -832,12 +836,23 @@ export async function testConnectionsTwoOrgs() {
 
       // Vòng tròn qua ĐƯỜNG ỨNG DỤNG (không gọi openSecrets trong bài): lưu → kiểm tra → bật → openActiveConnection (đường
       // AI Builder đọc lúc chạy) ra ĐÚNG bản rõ; màn hình / action chỉ trả •••• + 4 ký tự cuối, và mã khoá rút gọn.
-      const aiSaved = await saveConnection(adminA, { connectorKey: "anthropic-byok", secrets: { apiKey: AI_KEY } });
-      assert.ok("ok" in aiSaved, JSON.stringify(aiSaved));
+      // Workspace KHÁCH không tự ghi khoá AI (lib/saas/visibility.ts): Lưu / Kiểm tra / Bật / Tắt của quản trị A đều bị lõi từ
+      // chối bằng câu của khách, KHÔNG dòng nào sinh ra / đổi; người vận hành nền tảng ghi hộ qua đường riêng.
       const aiFetch = fakeFetch(() => ({ body: { data: [] } }));
-      const aiTest = await testOrgConnection(adminA, "anthropic-byok", { tester: { fetch: aiFetch.fetch } });
+      for (const r of [
+        await saveConnection(adminA, { connectorKey: "anthropic-byok", secrets: { apiKey: AI_KEY } }),
+        await testOrgConnection(adminA, "anthropic-byok", { tester: { fetch: aiFetch.fetch } }),
+        await setConnectionStatus(adminA, "anthropic-byok", "ACTIVE"),
+        await setConnectionStatus(adminA, "gemini-byok", "DISABLED"),
+      ])
+        assert.ok("error" in r && r.error === CUSTOMER_AI_CONFIG_MANAGED, `khách ghi khoá AI ⇒ từ chối: ${JSON.stringify(r)}`);
+      assert.equal(aiFetch.calls.length, 0, "khách kiểm tra khoá AI ⇒ không một request nào rời máy");
+      assert.equal((await db.select().from(schema.orgConnections).where(eq(schema.orgConnections.connectorKey, "anthropic-byok"))).length, 0, "khách lưu khoá AI ⇒ không dòng nào");
+      const aiSaved = await saveAiConnectionAsOperator({ operator: OPERATOR_AI_REF, reason: "kiểm thử", connectorKey: "anthropic-byok", secrets: { apiKey: AI_KEY } });
+      assert.ok("ok" in aiSaved, JSON.stringify(aiSaved));
+      const aiTest = await testAiConnectionAsOperator({ connectorKey: "anthropic-byok", operator: OPERATOR_AI_REF, reason: "kiểm thử" }, { tester: { fetch: aiFetch.fetch } });
       assert.ok("ok" in aiTest, JSON.stringify(aiTest));
-      const aiOn = await setConnectionStatus(adminA, "anthropic-byok", "ACTIVE");
+      const aiOn = await setAiConnectionStatusAsOperator({ connectorKey: "anthropic-byok", status: "ACTIVE", operator: OPERATOR_AI_REF, reason: "kiểm thử" });
       assert.ok("ok" in aiOn && aiOn.status === "ACTIVE");
       const opened = await openActiveConnection("anthropic-byok");
       assert.ok(opened.ok && opened.secrets.apiKey === AI_KEY, "lưu → đọc lại qua service ra ĐÚNG bản rõ");

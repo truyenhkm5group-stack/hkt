@@ -238,7 +238,9 @@ async function buocNguon() {
   const { saveAccessRoleCore } = await import("@/lib/auth/access-roles");
   const { hashPassword } = await import("@/lib/auth/password");
   const { saveBrandingCore } = await import("@/lib/branding/service");
-  const { saveConnection, setConnectionStatus, testOrgConnection } = await import("@/lib/connectors/service");
+  const { saveAiConnectionAsOperator, saveConnection, setAiConnectionStatusAsOperator, setConnectionStatus, testAiConnectionAsOperator, testOrgConnection } = await import("@/lib/connectors/service");
+  // Khoá AI của workspace khách chỉ người vận hành ghi (07/10/2026, lib/saas/visibility.ts) — diễn tập đi đúng đường đó.
+  const OPERATOR_AI_REF = { orgCode: "home", email: "restore-drill@nha.local" };
   type PageSchema = import("@/lib/pages/types").PageSchema;
   type FormSchema = import("@/lib/metadata/types").FormSchema;
 
@@ -342,9 +344,9 @@ async function buocNguon() {
     phai(await testOrgConnection(admin, "lark-webhook", { tester: { fetch: larkOk.fetch } }), "Kiểm tra Lark");
     if (larkOk.calls[0] !== bm.larkUrl) throw new Error("Kiểm tra Lark không nhận đúng URL đã giải mã.");
     phai(await setConnectionStatus(admin, "lark-webhook", "ACTIVE"), "Bật Lark");
-    phai(await saveConnection(admin, { connectorKey: "anthropic-byok", secrets: { apiKey: bm.aiKey } }), "Lưu khoá AI");
-    phai(await testOrgConnection(admin, "anthropic-byok", { tester: { fetch: fetchGia({ data: [] }).fetch } }), "Kiểm tra khoá AI");
-    phai(await setConnectionStatus(admin, "anthropic-byok", "ACTIVE"), "Bật khoá AI");
+    phai(await saveAiConnectionAsOperator({ operator: OPERATOR_AI_REF, reason: "kiểm thử", connectorKey: "anthropic-byok", secrets: { apiKey: bm.aiKey } }), "Lưu khoá AI");
+    phai(await testAiConnectionAsOperator({ connectorKey: "anthropic-byok", operator: OPERATOR_AI_REF, reason: "kiểm thử" }, { tester: { fetch: fetchGia({ data: [] }).fetch } }), "Kiểm tra khoá AI");
+    phai(await setAiConnectionStatusAsOperator({ connectorKey: "anthropic-byok", status: "ACTIVE", operator: OPERATOR_AI_REF, reason: "kiểm thử" }), "Bật khoá AI");
 
     // ── Dữ liệu: khách + giá trị field của mẫu, điểm giao, hợp đồng + quan hệ + tệp ──
     const [khach] = await db.insert(dbm.schema.customers).values({ name: TEN_KHACH, phones: ["0900000001"] }).returning({ id: dbm.schema.customers.id });

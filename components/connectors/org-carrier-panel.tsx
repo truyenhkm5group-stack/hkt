@@ -14,13 +14,8 @@ import { webhookUrlToken } from "@/lib/platform/webhooks";
  * nhất là bằng chứng đã nối được — không có nút «Kiểm tra» vì không có API nào để hỏi.
  */
 export async function OrgCarrierPanel({ orgCode }: { orgCode: string }) {
-  if (!(await canUseModule("logistics"))) {
-    return (
-      <SectionCard title="Viettel Post của tổ chức">
-        <p className="text-sm text-muted-foreground">Bật module Giao vận (Hệ thống → Module của tổ chức) để nhận hành trình vận đơn Viettel Post.</p>
-      </SectionCard>
-    );
-  }
+  // Module Giao vận chưa mua / đang tắt ⇒ không dựng khung (như khung GHN · GHTK): màn Kết nối của khách chỉ có thứ shop dùng được.
+  if (!(await canUseModule("logistics"))) return null;
   const token = webhookUrlToken("VIETTELPOST_ORG", orgCode);
   const url = token ? `${env.appUrl.replace(/\/+$/, "")}/api/webhooks/viettelpost-org/${token}` : null;
   const db = await getDb();

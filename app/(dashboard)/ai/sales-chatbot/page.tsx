@@ -36,7 +36,7 @@ import { ModePanel } from "./mode-panel";
 import { loadModeConfig } from "@/lib/sales-chatbot/operating-mode";
 import { ChatCostPanel } from "./cost-panel";
 import { loadChatbotAiView } from "@/lib/saas/visibility-loaders";
-import { CUSTOMER_AI_INCIDENT_LABEL, customerFacing, customerPlaybookRun, customerReadinessChecks } from "@/lib/saas/visibility";
+import { CUSTOMER_AI_INCIDENT_LABEL, customerFacing, customerLessons, customerOrderSyncView, customerPlaybookRun, customerPlaybookState, customerReadinessChecks } from "@/lib/saas/visibility";
 import { SALES_STAGE_LABEL, type SalesStage } from "@/lib/sales-chatbot/stages";
 import { loadReadiness } from "@/lib/sales-chatbot/readiness";
 import { READINESS_VERDICT_LABEL } from "@/lib/sales-chatbot/readiness-shared";
@@ -111,7 +111,7 @@ export default async function SalesChatbotPage() {
       />
       <div className="grid gap-5 xl:grid-cols-[1fr_440px]">
         <div className="space-y-5">
-          {orderSync ? <OrderSyncPanel view={orderSync} manage={manage} /> : null}
+          {orderSync ? <OrderSyncPanel view={customer ? customerOrderSyncView(orderSync) : orderSync} manage={manage} /> : null}
           {readiness ? (
             <SectionCard
               title={`AI đã sẵn sàng tự trả lời khách? — ${READINESS_VERDICT_LABEL[readiness.verdict]}`}
@@ -217,9 +217,9 @@ export default async function SalesChatbotPage() {
           {messengerHistory ? <MessengerHistoryPanel run={messengerHistory.run} pages={messengerHistory.pages} /> : null}
           {costReport ? <ChatCostPanel report={costReport} /> : null}
           {followup ? <FollowupPanel settings={followup} waiting={waitingCount} manage={manage} /> : null}
-          {lessons ? <LessonsPanel key={`${lessons.version}-${lessons.updatedAt ?? ""}`} state={lessons} /> : null}
+          {lessons ? <LessonsPanel key={`${lessons.version}-${lessons.updatedAt ?? ""}`} state={customer ? customerLessons(lessons) : lessons} /> : null}
           {levelScripts && levelPack && levelCountMap ? <LevelScriptsPanel key={JSON.stringify(levelScripts)} scripts={levelScripts} levels={levelsForPack(levelPack)} counts={levelCountMap} /> : null}
-          {playbook && playbookRun ? <PlaybookPanel key={playbook.draft?.createdAt ?? "chua-co-nhap"} state={playbook} run={customer ? customerPlaybookRun(playbookRun) : playbookRun} fanpageReady={fanpage?.status === "ACTIVE"} /> : null}
+          {playbook && playbookRun ? <PlaybookPanel key={playbook.draft?.createdAt ?? "chua-co-nhap"} state={customer ? customerPlaybookState(playbook) : playbook} run={customer ? customerPlaybookRun(playbookRun) : playbookRun} fanpageReady={fanpage?.status === "ACTIVE"} /> : null}
           {manage ? (
             ai.audience === "INTERNAL" ? (
               <ChatbotConfigForm config={ai.config} fields={fields} engine={ai.engine} appointmentsOn={moduleOn(user, "appointments")} />

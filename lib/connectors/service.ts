@@ -22,7 +22,7 @@ import type { ChatDiscoveryResult, ConnectionActionResult, ConnectionSnapshot, C
 import { PLATFORM_MODULES } from "@/lib/constants/platform-modules";
 import { currentOrganization } from "@/lib/platform/context";
 import { findOrganization } from "@/lib/platform/organizations";
-import { customerConnectionsView, customerFacing } from "@/lib/saas/visibility";
+import { CUSTOMER_AI_CONFIG_MANAGED, customerConnectionsView, customerFacing } from "@/lib/saas/visibility";
 
 /**
  * ═══════════ KẾT NỐI THEO TỔ CHỨC — ĐƯỜNG ĐỌC VÀ ĐƯỜNG GHI DUY NHẤT ═══════════
@@ -108,6 +108,11 @@ function guard(user: SessionUser, connectorKey: string): { spec: ConnectorSpec }
   if (!can(user, CONNECTIONS_PERMISSION)) return { error: "Không có quyền cấu hình kết nối (cần «Cấu hình hệ thống khác»)." };
   const spec = findConnector(connectorKey);
   if (!spec) return { error: `Không có connector «${connectorKey}» trong sổ.` };
+  // Workspace KHÁCH không Lưu / Kiểm tra / Bật / Tắt khoá AI (chủ shop 07/10/2026 · lib/saas/visibility.ts): một lượt «lưu» đưa khoá
+  // đang bật về Nháp, một lượt «tắt» đánh sập nguồn AI của bot / Thư viện Media — ẩn khỏi màn Kết nối chưa đủ, action gọi thẳng vẫn
+  // tới đây. Chặn theo LOẠI (mọi connector AI, kể cả loại thêm sau), đứng TRƯỚC các kiểm khác để câu trả lời luôn là câu kinh doanh.
+  // Không đụng dòng đang có. Người vận hành đi đường riêng (`*AiConnectionAsOperator` dưới đây, qua lib/saas/operator-ai.ts).
+  if (spec.kind === "AI" && customerFacing(user.organization)) return { error: CUSTOMER_AI_CONFIG_MANAGED };
   if (!isOrgConfigurable(spec)) {
     return { error: spec.tenancy === "HOME_ONLY" ? `«${spec.label}» dùng credential của tổ chức nhà ở biến môi trường — màn hình này chỉ đọc, không đổi được.` : `«${spec.label}» cấu hình ở chỗ khác: ${spec.config.where}.` };
   }
@@ -712,11 +717,12 @@ export async function disableConnectionAsOperator(input: { connectorKey: string;
 /**
  * ═══ KHOÁ AI CỦA WORKSPACE KHÁCH — NGƯỜI VẬN HÀNH NỀN TẢNG GHI (chủ shop 07/10/2026) ═══
  *
- * Khách không còn thấy / sửa connector AI trên màn Kết nối (lib/saas/visibility.ts): cấu hình AI của workspace khách thuộc
- * người vận hành, ở khối «AI của workspace» trên `/platform/org/<mã>`. Đi qua ĐÚNG lõi Lưu / Kiểm tra / Bật-Tắt của người tổ
- * chức (cùng luật «bật chỉ sau Kiểm tra đạt», cùng mã hoá, cùng nhật ký) — chỉ khác người thực hiện: `userId = null` + nhãn
- * vận hành + lý do. Chạy trong ngữ cảnh tổ chức ĐÍCH; nơi gọi (`lib/saas/operator-ai.ts`) đã kiểm `platformOperatorDenial`,
- * bọc `withOrganization(mã)` và ghi nhật ký nền tảng. CHỈ connector AI theo tổ chức — không thành cửa sau cho kết nối khác.
+ * Khách không còn thấy connector AI trên màn Kết nối (lib/saas/visibility.ts) và `guard()` chặn mọi lượt ghi khoá AI của khách:
+ * cấu hình AI của workspace khách thuộc người vận hành, ở khối «AI của workspace» trên `/platform/org/<mã>`. Đi qua ĐÚNG lõi
+ * Lưu / Kiểm tra / Bật-Tắt của người tổ chức (cùng luật «bật chỉ sau Kiểm tra đạt», cùng mã hoá, cùng nhật ký) — chỉ khác người
+ * thực hiện: `userId = null` + nhãn vận hành + lý do. Chạy trong ngữ cảnh tổ chức ĐÍCH; nơi gọi (`lib/saas/operator-ai.ts`) đã
+ * kiểm `platformOperatorDenial`, bọc `withOrganization(mã)` và ghi nhật ký nền tảng. CHỈ connector AI theo tổ chức — không thành
+ * cửa sau cho kết nối khác.
  */
 export const OPERATOR_AI_CONNECTORS = ["anthropic-byok", "openai-byok", "gemini-byok"] as const;
 export type OperatorAiConnector = (typeof OPERATOR_AI_CONNECTORS)[number];

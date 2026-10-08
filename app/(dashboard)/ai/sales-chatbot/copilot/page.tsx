@@ -3,6 +3,7 @@ import { PageHeader } from "@/components/page-header";
 import { EmptyState, SectionCard } from "@/components/ui-bits";
 import { requirePermission } from "@/lib/auth/session";
 import { formatDateTime, formatPercent } from "@/lib/format";
+import { customerFacing, customerSafeAiError } from "@/lib/saas/visibility";
 import { loadCopilotView } from "@/lib/sales-chatbot/operating-mode";
 import { COPILOT_NO_REPLY_HOURS, COPILOT_SIMILARITY, COPILOT_VERDICT_LABEL, COPILOT_VERDICTS, OPERATING_MODE_LABEL } from "@/lib/sales-chatbot/operating-mode-shared";
 
@@ -17,6 +18,9 @@ const pct = (r: number | null | undefined) => formatPercent(r === null || r === 
 export default async function CopilotPage() {
   const user = await requirePermission("ai_sales:view");
   const r = await loadCopilotView(user);
+  // Gợi ý AI hỏng mang câu lỗi của lượt (nguồn AI · hạn mức USD · lỗi gốc) — workspace KHÁCH đọc câu đã lọc (lib/saas/visibility.ts).
+  const customer = customerFacing(user.organization);
+  const errorText = (e: string | null) => (e === null ? null : customer ? customerSafeAiError(e) : e);
   return (
     <div className="space-y-5">
       <PageHeader
@@ -80,7 +84,7 @@ export default async function CopilotPage() {
                     </div>
                     <div>
                       <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Gợi ý của bot</div>
-                      <p className="whitespace-pre-wrap">{x.suggestion ?? x.error ?? "—"}</p>
+                      <p className="whitespace-pre-wrap">{x.suggestion ?? errorText(x.error) ?? "—"}</p>
                     </div>
                     <div>
                       <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">

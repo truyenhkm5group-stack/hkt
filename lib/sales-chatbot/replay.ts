@@ -9,6 +9,7 @@ import { currentOrganization } from "@/lib/platform/context";
 import { SALES_CHATBOT_MANAGE } from "@/lib/sales-chatbot/settings";
 import { loadSalesChatbotConfig, salesChatProvider } from "@/lib/sales-chatbot/engine";
 import { shadowTurn } from "@/lib/sales-chatbot/shadow";
+import { CUSTOMER_AI_NOT_READY_LABEL, customerFacing, customerQuotaError, customerSafeAiError } from "@/lib/saas/visibility";
 import {
   extractMoneyAmounts,
   judgePoint,
@@ -73,11 +74,14 @@ export async function startReplay(user: SessionUser, raw: { points?: unknown; da
   const days = Number(raw.days);
   if (!(REPLAY_LIMITS.pointChoices as readonly number[]).includes(points)) return { error: "Số điểm không hợp lệ." };
   if (!(REPLAY_LIMITS.dayChoices as readonly number[]).includes(days)) return { error: "Khoảng ngày không hợp lệ." };
+  // Workspace KHÁCH (lib/saas/visibility.ts): câu nguồn AI / hạn mức gốc mang tên khoá, USD, đường cấu hình khoá ⇒ câu của khách;
+  // câu cổng gói (hết lượt dùng thử…) vốn viết cho chủ shop nên giữ nguyên.
+  const customer = customerFacing(user.organization);
   const prov = await salesChatProvider();
-  if (!prov.ok) return { error: prov.error };
+  if (!prov.ok) return { error: customer ? customerSafeAiError(prov.error, CUSTOMER_AI_NOT_READY_LABEL) : prov.error };
   const org = await currentOrganization();
   const quota = await checkAiQuota(org.code, prov.source);
-  if (!quota.ok) return { error: quota.error };
+  if (!quota.ok) return { error: customer ? customerQuotaError(quota.reason) : quota.error };
   const db = await getDb();
   const r = schema.salesReplayRuns;
   const [running] = await db.select({ id: r.id, startedAt: r.startedAt }).from(r).where(eq(r.status, "RUNNING")).orderBy(desc(r.startedAt)).limit(1);
