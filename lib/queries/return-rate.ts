@@ -131,7 +131,7 @@ export const REPORTABLE_ORDER = sql`${o.stage} <> 'NEW'`;
  * đơn hoàn (PKE1508909058) lẫn đơn giao thành công chưa tới kỳ bảng kê (PKE1508909090), nên nó
  * không phân biệt được gì. Dấu hiệu phân biệt thật là REVENUE_EDITED_AFTER_DELIVERY bên dưới.
  */
-const HAS_CASH_EVIDENCE = sql`(coalesce(${s.codCollected}, 0) > 0
+export const HAS_CASH_EVIDENCE = sql`(coalesce(${s.codCollected}, 0) > 0
   or exists (select 1 from cod_statement_lines l where l.shipment_id = ${s.id} and l.cod_reported))`;
 
 /**

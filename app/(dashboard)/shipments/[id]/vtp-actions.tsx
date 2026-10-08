@@ -4,16 +4,18 @@ import { useState, useTransition } from "react";
 import { Loader2, Pencil, Truck } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { vtpEditOrder, vtpOrderAction } from "@/lib/actions/shipments-vtp";
 import { canRequestCarrierAction, type Eligibility } from "@/lib/care/redelivery-eligibility";
+import { codChangeRequiresConfirmation, type VtpEditDefaults } from "@/lib/constants/shipment-edit";
+import { formatVND } from "@/lib/format";
 import type { CarrierActionKey } from "@/lib/constants/care";
 import { VTP_ORDER_ACTIONS, type VtpOrderActionType } from "@/lib/constants/viettelpost";
 
-type Receiver = { name: string; phone: string; address: string; cod: number; note: string };
 
 /**
  * Nút thao tác Viettel Post trên trang vận đơn: phát tiếp, duyệt hoàn, gửi lại, duyệt, huỷ, sửa đơn.
@@ -23,13 +25,16 @@ type Receiver = { name: string; phone: string; address: string; cod: number; not
  * hiện nhưng khoá, tooltip nói vì sao; tài khoản không sở hữu kiện thì nút vẫn bấm được và đi
  * đường làm tay có ghi vết.
  */
-export function VtpActions({ shipmentId, stage, vtpStatus, rawStatus, tracking, trackingCapability, receiver }: { shipmentId: string; stage: string; vtpStatus: number | null; rawStatus: string | null; tracking: string | null; trackingCapability: string; receiver: Receiver }) {
+export function VtpActions({ shipmentId, stage, vtpStatus, rawStatus, tracking, trackingCapability, receiver }: { shipmentId: string; stage: string; vtpStatus: number | null; rawStatus: string | null; tracking: string | null; trackingCapability: string; receiver: VtpEditDefaults }) {
   const [pending, start] = useTransition();
   const [busy, setBusy] = useState<string | null>(null);
   const [editOpen, setEditOpen] = useState(false);
   const [noteFor, setNoteFor] = useState<VtpOrderActionType | null>(null);
   const [note, setNote] = useState("");
   const [form, setForm] = useState(receiver);
+  const [confirmCod, setConfirmCod] = useState(false);
+  // `receiver.cod` là `shipments.cod_amount` lúc dựng trang; máy chủ còn so lại với CSDL lúc gửi.
+  const codChanged = codChangeRequiresConfirmation(receiver.cod, form.cod);
   const facts = { stage, vtpStatus, vtpStatusName: rawStatus, orderNumber: tracking, trackingCapability, configured: true };
   const eligibility = (key: string): Eligibility => canRequestCarrierAction(key as CarrierActionKey, facts);
   const editOk = eligibility("edit");
@@ -89,16 +94,27 @@ export function VtpActions({ shipmentId, stage, vtpStatus, rawStatus, tracking, 
             <div className="space-y-1"><Label>Người nhận</Label><Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></div>
             <div className="space-y-1"><Label>SĐT</Label><Input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} /></div>
             <div className="space-y-1 sm:col-span-2"><Label>Địa chỉ</Label><Input value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} /></div>
-            <div className="space-y-1"><Label>Tiền thu hộ (₫)</Label><Input type="number" min={0} step={1000} value={form.cod} onChange={(e) => setForm({ ...form, cod: Number(e.target.value) || 0 })} /></div>
+            <div className="space-y-1"><Label>Tiền thu hộ (₫)</Label><Input type="number" min={0} step={1000} value={form.cod} onChange={(e) => {
+                    setForm({ ...form, cod: Number(e.target.value) || 0 });
+                    setConfirmCod(false);
+                  }} /></div>
             <div className="space-y-1"><Label>Ghi chú vận đơn</Label><Input value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })} /></div>
+            {codChanged ? (
+              <div className="flex items-start gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm sm:col-span-2 dark:border-amber-900/60 dark:bg-amber-950/40">
+                <Checkbox id="vtp-confirm-cod" checked={confirmCod} onCheckedChange={(v) => setConfirmCod(v === true)} className="mt-0.5" />
+                <Label htmlFor="vtp-confirm-cod" className="font-normal leading-snug">
+                  Tôi xác nhận đổi tiền thu hộ: COD hiện tại {formatVND(receiver.cod)} → mới {formatVND(form.cod)}. Khách sẽ phải trả số mới khi nhận hàng.
+                </Label>
+              </div>
+            ) : null}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setEditOpen(false)}>Đóng</Button>
             <Button
-              disabled={pending}
+              disabled={pending || (codChanged && !confirmCod)}
               onClick={() =>
                 start(async () => {
-                  const r = await vtpEditOrder(shipmentId, { receiverName: form.name, receiverPhone: form.phone.replace(/\D/g, ""), receiverAddress: form.address, moneyCollection: form.cod, note: form.note });
+                  const r = await vtpEditOrder(shipmentId, { receiverName: form.name, receiverPhone: form.phone.replace(/\D/g, ""), receiverAddress: form.address, moneyCollection: form.cod, note: form.note, confirmCodChange: codChanged && confirmCod });
                   if ("error" in r) toast.error(r.error, { duration: 8000 });
                   else {
                     toast.success(r.message);
