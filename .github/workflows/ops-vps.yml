@@ -47,6 +47,7 @@ on:
           - saas-v1-migration    # chuyển tổ chức từ giá cũ (legacy) sang bảng giá V1: mỗi tổ chức đủ điều kiện — số dùng · gói đề xuất · giá cũ → mới · phần vượt dự kiến · trần AI trước / sau · mọi CHẶN — MÃ HOÁ (MẶC ĐỊNH CHỈ ĐỌC; arg: rỗng | "--org=<mã>"; "--apply --org=<mã> --plan=<khoá> --reason=<lý do>" ghim MỘT tổ chức, không bật thu phí / không hoá đơn)
           - identity-reconcile   # chỉ mục đăng nhập email / SĐT ⇒ tổ chức của tài khoản tạo trước bản vá P0 08/10/2026 (quản trị khách do job cấp phát tạo không đăng nhập được bằng email): MẶC ĐỊNH CHẠY THỬ (arg rỗng = mọi tổ chức; "<mã>" = một tổ chức) — đủ điều kiện · đúng · THIẾU · LỆCH · mồ côi; "--apply" ⇒ GHI bù qua đúng đường ghi của ứng dụng, idempotent, nhật ký nền tảng SCRIPT — MÃ HOÁ
           - saas-acceptance      # NGHIỆM THU khách Chốt Đơn trên production, CHỈ workspace THỬ trong sổ khai lib/constants/saas-acceptance.ts — MÃ HOÁ, công khai đúng một dòng [ops:tom-tat] (MẶC ĐỊNH CHỈ ĐỌC: kiểm workspace thử · mở vỏ app · chat công khai; "--apply" GHI: cấp phát qua job «Tạo khách» + kích hoạt + đăng nhập email không mã tổ chức, cuối lượt xoay mật khẩu; "--apply --e2e" thêm chat web → AI → đơn, TỐN AI)
+          - ops-signals-check    # tám tín hiệu vận hành O1–O8 (LAUNCH_GATE §4) tính trên production bằng ĐÚNG hàm của khung «Sự cố 24 giờ / 7 ngày» (/platform/org) cho MỌI tổ chức — MÃ HOÁ; công khai chỉ số tổ chức theo mức + mã lý do của workspace nghiệm thu (CHỈ ĐỌC; không arg)
           - stock-wait-summary   # chờ hàng & GTC theo số ngày chờ, miền, vùng + đơn đang chờ + đề xuất — số tổng hợp (CHỈ ĐỌC; arg "--days=N")
           - company-os-summary   # Company OS đã được dùng tới đâu: sổ mẫu, topic / giá thành / mẫu xưởng / bản thiết kế, "Cần anh quyết", hàng hoàn, yêu cầu duyệt, phiếu nhập — CHỈ SỐ ĐẾM (CHỈ ĐỌC; không arg)
           - platform-secrets-verify # kiểm PLATFORM_SECRETS_KEY trên production (V1–V7): khoá có, canary niêm/giải qua deploy, cô lập tổ chức, CSDL + log không chứa bản rõ — arg rỗng = CHỈ ĐỌC; "seal --apply" niêm canary; "rotate --apply" cập nhật canary
@@ -145,7 +146,7 @@ permissions:
 # Thao tác trong danh sách mà cần cho người vận hành thấy NGAY một con số ("đã đóng 12 case") thì
 # script tự in dòng ấy với tiền tố `[ops:tom-tat] ` — kênh tóm tắt duy nhất ra log (qua che_log).
 env:
-  OPS_THAO_TAC_MA_HOA: "platform-secrets-verify db-query vtp-debug phone-probe vtp-probe vtp-statement-peek payroll-reconcile seed-employees marketing-explain cs-stale check-integrations run-job vtp-replay-explain vtp-manual-verify returns-hmt care-false-reopen care-outcome-before-open fanpage-evidence-backfill cod-statement-audit stock-wait-summary org-summary org-order-audit org-ai-cutover org-catalog org-offboard identity-reconcile confirm-funnel-audit company-os-summary velocity-compare org-prepaid-ai saas-v1-migration saas-acceptance pitr-status pitr-basebackup pitr-mark pitr-drill pitr-pause"
+  OPS_THAO_TAC_MA_HOA: "platform-secrets-verify db-query vtp-debug phone-probe vtp-probe vtp-statement-peek payroll-reconcile seed-employees marketing-explain cs-stale check-integrations run-job vtp-replay-explain vtp-manual-verify returns-hmt care-false-reopen care-outcome-before-open fanpage-evidence-backfill cod-statement-audit stock-wait-summary org-summary org-order-audit org-ai-cutover org-catalog org-offboard identity-reconcile confirm-funnel-audit company-os-summary velocity-compare org-prepaid-ai saas-v1-migration saas-acceptance ops-signals-check pitr-status pitr-basebackup pitr-mark pitr-drill pitr-pause"
 
 # ═══════════ HÀNG ĐỢI NẰM TRÊN MÁY CHỦ, KHÔNG NẰM Ở GITHUB ═══════════
 #
@@ -497,7 +498,7 @@ jobs:
             # ─── PHÂN LOẠI: mặc định là GHI, và cờ ghi đè lên tên ───
             DOC_NHE="status perf disk logs db-query backup-status pitr-status"
             DOC_PROBE="check-integrations vtp-debug vtp-probe vtp-web-probe phone-probe pages-debug meta-id-probe meta-ad-post-probe vtp-capability ads-level-probe"
-            DOC_NANG="platform-secrets-verify verify smoke session-verify perf-probe perf-audit kpi-snapshot explain-stock outcome-explain outcome-parity returns-parity reason-coverage reason-backfill cogs-drift profit-verify marketing-calibrate marketing-explain payroll-reconcile fanpage-evidence-backfill care-false-reopen care-outcome-before-open care-waiting-reconcile cs-rule-update cs-stale sepay-reconcile cod-rebuild cod-status-repair vtp-return-status-repair agent-run-reattach vtp-rebuild-state vtp-replay-files vtp-replay-explain vtp-manual-verify vtp-statement-peek cod-statement-audit stock-wait-summary org-summary company-os-summary velocity-compare confirm-funnel-audit returns-hmt ai-check platform-ai-model-probe platform-ai-bench backup restore-drill restore-drill-org pitr-basebackup pitr-drill org-order-audit org-ai-cutover org-catalog org-offboard org-prepaid-ai saas-v1-migration identity-reconcile saas-acceptance"
+            DOC_NANG="platform-secrets-verify verify smoke session-verify perf-probe perf-audit kpi-snapshot explain-stock outcome-explain outcome-parity returns-parity reason-coverage reason-backfill cogs-drift profit-verify marketing-calibrate marketing-explain payroll-reconcile fanpage-evidence-backfill care-false-reopen care-outcome-before-open care-waiting-reconcile cs-rule-update cs-stale sepay-reconcile cod-rebuild cod-status-repair vtp-return-status-repair agent-run-reattach vtp-rebuild-state vtp-replay-files vtp-replay-explain vtp-manual-verify vtp-statement-peek cod-statement-audit stock-wait-summary org-summary company-os-summary velocity-compare confirm-funnel-audit returns-hmt ai-check platform-ai-model-probe platform-ai-bench backup restore-drill restore-drill-org pitr-basebackup pitr-drill org-order-audit org-ai-cutover org-catalog org-offboard org-prepaid-ai saas-v1-migration identity-reconcile saas-acceptance ops-signals-check"
 
             LOP=GHI
             case "$ARG" in
@@ -954,6 +955,14 @@ jobs:
                 fetch_script saas-acceptance.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/saas-acceptance.ts'
                 kiem_arg
                 ma_hoa_ket_qua chay_voi_arg docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/saas-acceptance.ts ;;
+              ops-signals-check)
+                # TÁM TÍN HIỆU O1–O8 (docs/saas/LAUNCH_GATE.md §4) — CHỈ ĐỌC (script tự đặt ERP_READ_ONLY=1 và hỏi lại Postgres). Gọi
+                # ĐÚNG loadOpsSignalsForOrgs của khung /platform/org (không SQL thứ hai), người vận hành máy lấy từ bộ tính quyền của
+                # phiên (platform:operate của tổ chức nhà). Chi tiết từng tổ chức MÃ HOÁ; [ops:tom-tat] chỉ số đếm theo mức + mã lý do
+                # của workspace nghiệm thu. PASS = tám tín hiệu tính được cho mọi tổ chức. Không arg.
+                fetch_script ops-signals-check.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/ops-signals-check.ts'
+                kiem_arg
+                ma_hoa_ket_qua chay_voi_arg docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/ops-signals-check.ts ;;
               org-summary)
                 # CHỈ ĐỌC (script tự đặt ERP_READ_ONLY=1 trước khi nạp @/db; CSDL tổ chức mở bằng getDbForInspection — máy
                 # chủ ép chỉ đọc, không migrate, không tạo). Không đọc cột mang dữ liệu người, không đọc bí mật kết nối.
