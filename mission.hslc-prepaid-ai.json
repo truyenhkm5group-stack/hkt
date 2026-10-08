@@ -1,0 +1,30 @@
+{
+  "schema": 1,
+  "mission_id": "hslc-prepaid-ai",
+  "title": "HSLC dùng AI dùng chung trả trước: nạp QR như khách, nạp bao nhiêu dùng bấy nhiêu, đồng hồ khách AI như khách",
+  "business_goal": "",
+  "status": "RUNNING",
+  "priority": "P1",
+  "risk": "HIGH",
+  "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "worker": "worker:prepaid-ai",
+  "worktree": null,
+  "branch": "feat/org-prepaid-ai",
+  "base_sha": null,
+  "domains": [],
+  "owned_paths": [
+    "lib/billing/ai-balance*",
+    "lib/saas/prepaid-ai.ts",
+    "scripts/org-prepaid-ai.ts",
+    "tests/org-prepaid-ai.test.ts",
+    "docs/saas/AI_BALANCE_V1.md"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-08T07:41:09.134Z",
+  "updated_at": "2026-10-08T07:41:09.134Z",
+  "last_heartbeat": "2026-10-08T07:41:09.134Z",
+  "definition_of_done": []
+}
