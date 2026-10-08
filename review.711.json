@@ -1,0 +1,8 @@
+{
+  "pr": 711,
+  "sha": "1d0a467aac92745e775db233970c159da996e921",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-08T22:58:59.792Z",
+  "note": "Review Integration Lead: chỉ ghi khi ctx.owned + sổ khai + orgCode khớp; ghi sổ là bằng chứng, không làm B1 hỏng; không chạm lib/auth · lib/actions; danh sách đóng onFailure mở đúng một chỗ có lý do và kèm kiểm acceptanceSummary không đọc reason/detail; ACCEPTANCE §9 cập nhật."
+}
