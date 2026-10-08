@@ -382,12 +382,32 @@ export function platformCandidateModels(set: PlatformAiPolicySet, baseModel: str
 
 /** Vì sao chưa cân được giá — cho MÃ LÝ DO công khai (`refusalTag`); `model` = TÊN model chưa có giá (chỗ phải sửa bảng giá). */
 export type PriceRatioCause = "NO_TOKENS" | "NO_PLATFORM_MODEL" | "UNPRICED_CURRENT_MODEL" | "UNPRICED_PLATFORM_MODEL" | "ZERO_COST";
-export type PriceRatio = { ratio: number | null; reason: string; cause?: PriceRatioCause | null; model?: string | null };
+/** Một model của hỗn hợp 30 ngày CHƯA có trong bảng giá: tên thô ("" = dòng sổ thiếu model) + phần token (0–1) của nó. */
+export type UnpricedModelShare = { model: string; tokenShare: number };
+/**
+ * `unpricedTokenShare` = phần token (0–1) của các model đang chạy CHƯA có giá trong hỗn hợp 30 ngày (null khi chưa tính tới bước đó);
+ * `unpricedModels` = từng model ấy, phần lớn trước. ≤ `UNPRICED_SHARE_MAX` ⇒ đã BỎ khỏi phép cân (tỷ lệ đứng trên phần đã định giá).
+ */
+export type PriceRatio = { ratio: number | null; reason: string; cause?: PriceRatioCause | null; model?: string | null; unpricedTokenShare?: number | null; unpricedModels?: UnpricedModelShare[] };
+
+/** % một chữ số thập phân, dấu phẩy; khác 0 mà làm tròn ra 0 ⇒ «<0,1%» (0% đọc như KHÔNG có). */
+function pctText(share: number): string {
+  const v = Math.round(share * 1000) / 10;
+  return v === 0 && share > 0 ? "<0,1%" : `${String(v).replace(".", ",")}%`;
+}
 
 /**
  * Cơ sở chi đo bằng model ĐANG CHẠY; sau khi chuyển, lượt chạy model của NỀN TẢNG (có thể đắt hơn hàng chục lần). Tỷ lệ = max(1, max
  * qua mọi model nền tảng của (giá nền tảng / giá hiện tại)) trên HỖN HỢP TOKEN vào / ra THẬT của AI Bán hàng 30 ngày trọn. Thiếu giá
- * một bên, hay không có token để cân ⇒ `null` (chưa đo được). HÀM THUẦN, giá tiêm vào.
+ * model nền tảng, hay không có token để cân ⇒ `null` (chưa đo được). HÀM THUẦN, giá tiêm vào.
+ *
+ * Model ĐANG CHẠY chưa có giá (dòng sổ thiếu tên model, tên lạ): production 09/10 — CHỈ MỘT model như vậy trong hỗn hợp là cả phép cân
+ * thất bại ⇒ không credit nào qua được. Nay: phần token của chúng ≤ `UNPRICED_SHARE_MAX` (cùng ngưỡng 20 % mà `effectiveBasis` dùng
+ * cho LƯỢT chưa định giá) ⇒ không chặn nữa, lý do nói rõ bao nhiêu; vượt ngưỡng ⇒ vẫn thất bại `UNPRICED_CURRENT_MODEL` (phần chưa
+ * biết quá lớn để tỷ lệ còn đáng tin). Mẫu số `current` = chi phí phần ĐÃ định giá (đúng thứ `spendBasis` cộng được), còn TỬ SỐ tính
+ * TOÀN BỘ token (`allIn` / `allOut`) theo giá nền tảng — review #699: cân cả hai vế trên phần đã định giá là dự phóng THẤP hơn thật hệ
+ * số 1/(1 − share), ở 20 % đúng bằng CREDIT_MARGIN ⇒ hết biên, bot im cuối tháng. Cách này ước CAO tối đa 25 % nếu cơ sở thật đã có
+ * tiền phần chưa định giá — hướng an toàn.
  */
 export function platformPriceRatio(rows: readonly SalesUsageRow[], now: Date, platformModels: readonly string[], price: (model: string) => { input: number; output: number } | null): PriceRatio {
   const days = new Set(Array.from({ length: 30 }, (_, i) => vnDayKey(new Date(now.getTime() - (i + 1) * DAY_MS))));
@@ -406,26 +426,63 @@ export function platformPriceRatio(rows: readonly SalesUsageRow[], now: Date, pl
   if (!mix.size) return { ratio: null, cause: "NO_TOKENS", reason: "không có token AI Bán hàng trong 30 ngày trọn để cân giá" };
   if (!platformModels.length) return { ratio: null, cause: "NO_PLATFORM_MODEL", reason: "không biết model AI dùng chung (khoá nền tảng chưa sẵn sàng)" };
   let current = 0;
-  let inT = 0;
-  let outT = 0;
+  let allTokens = 0;
+  let allIn = 0;
+  let allOut = 0;
+  const unpriced: { model: string; tokens: number }[] = [];
   for (const [model, m] of mix) {
+    allTokens += m.inT + m.outT;
+    allIn += m.inT;
+    allOut += m.outT;
     const p = model ? price(model) : null;
-    if (!p) return { ratio: null, cause: "UNPRICED_CURRENT_MODEL", model: model || null, reason: `model đang chạy «${model || "(không tên)"}» chưa có trong bảng giá` };
+    if (!p) {
+      unpriced.push({ model, tokens: m.inT + m.outT });
+      continue;
+    }
     current += (m.inT * p.input + m.outT * p.output) / 1e6;
-    inT += m.inT;
-    outT += m.outT;
   }
-  if (!(current > 0)) return { ratio: null, cause: "ZERO_COST", reason: "chi phí hiện tại theo bảng giá bằng 0 — không cân được" };
+  const unpricedTokens = unpriced.reduce((s, u) => s + u.tokens, 0);
+  const unpricedTokenShare = unpricedTokens / allTokens;
+  const unpricedModels: UnpricedModelShare[] = unpriced.map((u) => ({ model: u.model, tokenShare: u.tokens / allTokens })).sort((a, b) => b.tokenShare - a.tokenShare || a.model.localeCompare(b.model));
+  const extra = { unpricedTokenShare, unpricedModels };
+  if (unpricedModels.length && unpricedTokenShare > UNPRICED_SHARE_MAX) {
+    const top = unpricedModels[0].model;
+    return { ratio: null, cause: "UNPRICED_CURRENT_MODEL", model: top || null, ...extra, reason: `model đang chạy chưa có trong bảng giá chiếm ${pctText(unpricedTokenShare)} token 30 ngày (> ${pctText(UNPRICED_SHARE_MAX)}) — lớn nhất «${top || "(không tên)"}»` };
+  }
+  if (!(current > 0)) return { ratio: null, cause: "ZERO_COST", ...extra, reason: "chi phí hiện tại theo bảng giá bằng 0 — không cân được" };
   let worst = 1;
   const parts: string[] = [];
   for (const model of platformModels) {
     const p = price(model);
-    if (!p) return { ratio: null, cause: "UNPRICED_PLATFORM_MODEL", model, reason: `model AI dùng chung «${model}» chưa có trong bảng giá` };
-    const r = (inT * p.input + outT * p.output) / 1e6 / current;
+    if (!p) return { ratio: null, cause: "UNPRICED_PLATFORM_MODEL", model, ...extra, reason: `model AI dùng chung «${model}» chưa có trong bảng giá` };
+    const r = (allIn * p.input + allOut * p.output) / 1e6 / current;
     parts.push(`${model} × ${r.toFixed(2)}`);
     worst = Math.max(worst, r);
   }
-  return { ratio: Math.round(worst * 1000) / 1000, reason: `giá model AI dùng chung / model đang chạy trên hỗn hợp token 30 ngày: ${parts.join(" · ")} ⇒ nhân cơ sở × ${(Math.round(worst * 1000) / 1000).toFixed(3)} (không dưới 1)` };
+  const boQua = unpricedModels.length ? ` · đã bỏ ${pctText(unpricedTokenShare)} token chưa có giá (${unpricedModels.map((u) => `«${u.model || "(không tên)"}» ${pctText(u.tokenShare)}`).join(", ")}) — giá hiện tại đo trên phần đã định giá, tử số tính CẢ phần này theo giá nền tảng (ước cao, phía an toàn)` : "";
+  return { ratio: Math.round(worst * 1000) / 1000, ...extra, reason: `giá model AI dùng chung / model đang chạy trên hỗn hợp token 30 ngày: ${parts.join(" · ")} ⇒ nhân cơ sở × ${(Math.round(worst * 1000) / 1000).toFixed(3)} (không dưới 1)${boQua}` };
+}
+
+/** Trần độ dài của dòng tên model chưa có giá — workflow cắt mỗi dòng tóm tắt ở 300 ký tự (`che_log … cut -c1-300`). */
+export const UNPRICED_MODELS_LINE_MAX = 200;
+
+/**
+ * Dòng `[ops:tom-tat] ` NGẮN riêng: model đang chạy CHƯA có giá trong hỗn hợp 30 ngày + phần token — đặt TRƯỚC dòng phán quyết để
+ * không bị cắt mất khi dòng KHÔNG CHUYỂN dài (production 09/10 mất đúng tên model). Tên qua `publicModelName` (khoá dán nhầm ⇒ «(tên
+ * lạ)»); tên rỗng ⇒ «(không tên — dòng sổ thiếu model)». ≤ `UNPRICED_MODELS_LINE_MAX` ký tự; không có model nào ⇒ `null`.
+ */
+export function unpricedModelsLine(r: Pick<PriceRatio, "unpricedTokenShare" | "unpricedModels">): string | null {
+  const ds = r.unpricedModels ?? [];
+  if (!ds.length) return null;
+  const share = r.unpricedTokenShare ?? 0;
+  const dau = "Model chưa có giá (30 ngày, AI Bán hàng): ";
+  const duoi = share > UNPRICED_SHARE_MAX ? ` — tổng ${pctText(share)} > ${pctText(UNPRICED_SHARE_MAX)}: không cân được giá` : ` — tổng ${pctText(share)}: đã bỏ khỏi phép cân giá`;
+  const muc = ds.map((u) => `${u.model ? publicModelName(u.model) : "(không tên — dòng sổ thiếu model)"} · ${pctText(u.tokenShare)} token`);
+  for (let n = muc.length; n >= 1; n -= 1) {
+    const dong = `${dau}${muc.slice(0, n).join("; ")}${n < muc.length ? "; …" : ""}${duoi}`;
+    if (dong.length <= UNPRICED_MODELS_LINE_MAX) return dong;
+  }
+  return `${dau}${muc.length} model${duoi}`.slice(0, UNPRICED_MODELS_LINE_MAX);
 }
 
 /** Vì sao cơ sở dùng để phán quyết là `null`: chưa có lượt định giá được · lượt chưa định giá quá ngưỡng · chưa cân được giá nền tảng. */
@@ -678,6 +735,9 @@ export async function applyCutover(org: { code: string }, proposed: number | nul
   const ratio = platformPriceRatio(rows, now, await deps.platformModels(now), giaCuaModel);
   const eb = effectiveBasis(basis, ratio);
   console.log(`Giá AI dùng chung: ${ratio.reason}`);
+  // Tên model chưa có giá: dòng tóm tắt NGẮN riêng, TRƯỚC phán quyết — dòng KHÔNG CHUYỂN dài bị workflow cắt ở 300 ký tự.
+  const dongModelChuaGia = unpricedModelsLine(ratio);
+  if (dongModelChuaGia) tomTat(dongModelChuaGia);
   console.log(`Cơ sở dùng để phán quyết: ${eb.reason}`);
   const ghiChuChuaGia = eb.unpricedNote ? " (có lượt chưa định giá — cơ sở có thể thấp)" : "";
   const used = await deps.platformMonthUsed(org.code, now);
@@ -1166,6 +1226,9 @@ async function audit(org: Org): Promise<number> {
   const ratio = platformPriceRatio(rows, now, await platformModelsNow(now), giaCuaModel);
   const eb = effectiveBasis(basis, ratio);
   console.log(`Giá AI dùng chung: ${ratio.reason}`);
+  // Tên model chưa có giá: dòng tóm tắt NGẮN riêng, TRƯỚC phán quyết — dòng KHÔNG CHUYỂN dài bị workflow cắt ở 300 ký tự.
+  const dongModelChuaGia = unpricedModelsLine(ratio);
+  if (dongModelChuaGia) tomTat(dongModelChuaGia);
   console.log(`Cơ sở dùng để phán quyết: ${eb.reason}`);
   const monthUsed = (await sourceUsage(org.code, "PLATFORM", now)).costUsdMonth;
   const daysLeft = daysLeftInMonthVN(now);
