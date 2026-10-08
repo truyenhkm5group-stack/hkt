@@ -40,10 +40,29 @@ export type StepCtx = {
   results: Record<string, unknown>[];
 };
 export type Step = (ctx: StepCtx) => AiBlock[];
-export type GoldenTurn = { say: string; ai: Step[] };
-export type GoldenShop = "food" | "fashion";
+/**
+ * Ngữ cảnh của móc chạy TRONG tổ chức thử (bộ đo đơn vàng v2 — `tests/order-golden`): mã hội thoại THÔ (chưa chuẩn hoá),
+ * bảng SKU ⇒ id, và quản trị của tổ chức để làm thao tác của NGƯỜI giữa hai lượt (tiếp quản · trả lại AI).
+ */
+export type GoldenHookCtx = { conversationId: string; ids: ReadonlyMap<string, string>; admin: () => Promise<SessionUser> };
+/** `before` = việc xảy ra NGOÀI lượt của khách, ngay trước lượt này (nhân viên tiếp quản / trả lại AI). Bộ hội thoại vàng không dùng. */
+export type GoldenTurn = { say: string; ai: Step[]; before?: (ctx: GoldenHookCtx) => Promise<void> };
+/** `order-food` thuộc bộ đo đơn vàng v2 (`tests/order-golden`) — hội thoại vàng (M1) chỉ dùng `food` / `fashion`. */
+export type GoldenShop = "food" | "fashion" | "order-food";
 export type GoldenChannel = "WEB" | "TEST" | "FANPAGE" | "ZALO";
 export type GoldenCase = { key: string; title: string; shop: GoldenShop; channel: GoldenChannel; turns: GoldenTurn[] };
+/**
+ * Tuỳ chọn của một lượt chạy (bộ đo đơn vàng v2). `beforeCase` chạy TRONG tổ chức thử trước khi mở hội thoại (bật công tắc của
+ * tổ chức, gieo hồ sơ khách); `afterCase` chạy TRONG tổ chức thử sau lượt cuối, khi CSDL còn nguyên (đọc đơn, sự kiện).
+ * `orgSuffix` = hậu tố mã tổ chức thử: handle PGlite của tổ chức đã dọn vẫn mở trong tiến trình (`db/index.ts` chỉ đóng theo
+ * LRU), nên cấp lại CÙNG mã trong một tiến trình đọc lại dữ liệu cũ — lượt cần tổ chức mới tinh thì dùng hậu tố riêng.
+ * Bỏ trống mọi thứ ⇒ hành vi và ảnh chụp của hội thoại vàng y như trước.
+ */
+export type GoldenRunOptions = {
+  orgSuffix?: string;
+  beforeCase?: (c: GoldenCase, ctx: Omit<GoldenHookCtx, "conversationId">) => Promise<void>;
+  afterCase?: (c: GoldenCase, ctx: GoldenHookCtx, transcript: GoldenTranscript) => Promise<void>;
+};
 
 let toolSeq = 0;
 export const say = (text: string): AiBlock => ({ type: "text", text });
@@ -53,7 +72,8 @@ export const tool = (name: string, input: unknown): AiBlock => ({ type: "tool_us
 
 type ProductSeed = { name: string; sku: string; price: number; size: string; stock: number };
 
-export const GOLDEN_SHOPS: Record<GoldenShop, { code: string; name: string; templateKey: string; products: ProductSeed[] }> = {
+/** `shippingFee` khai ⇒ đè phí ship của cấu hình bot (mặc định `null` = «nhân viên báo sau»). */
+export const GOLDEN_SHOPS: Record<GoldenShop, { code: string; name: string; templateKey: string; products: ProductSeed[]; shippingFee?: number }> = {
   food: {
     code: "gd-food",
     name: "Hải sản thử vàng",
@@ -69,6 +89,20 @@ export const GOLDEN_SHOPS: Record<GoldenShop, { code: string; name: string; temp
     name: "Thời trang thử vàng",
     templateKey: "fashion-commerce",
     products: [{ name: "Đầm suông linen", sku: "DAM-LINEN-M", price: 459_000, size: "M", stock: 5 }],
+  },
+  // Bộ đo đơn vàng v2: tồn RỘNG (mỗi lượt chạy chốt hàng chục đơn — tồn không được là thứ đổi kết quả), có MỘT sản phẩm hai quy
+  // cách (chọn đúng biến thể), một mẫu mã bán theo gói nhỏ (quy đổi đơn vị), phí ship cố định (tổng = tiền hàng + ship).
+  "order-food": {
+    code: "og-food",
+    name: "Hải sản thử đơn vàng",
+    templateKey: "food-commerce",
+    shippingFee: 30_000,
+    products: [
+      { name: "Chả mực giã tay", sku: "CHA-MUC", price: 400_000, size: "1kg", stock: 1000 },
+      { name: "Chả cá thu", sku: "CHA-CA-500", price: 180_000, size: "500g", stock: 1000 },
+      { name: "Chả cá thu", sku: "CHA-CA-1KG", price: 340_000, size: "1kg", stock: 1000 },
+      { name: "Ruốc bông tôm 100%", sku: "RUOC-TOM", price: 350_000, size: "250g", stock: 1000 },
+    ],
   },
 };
 
@@ -95,14 +129,14 @@ async function adminOf(code: string): Promise<SessionUser> {
   return { id: u.id, email: u.email, name: u.name, role: "ADMIN", permissions: resolvePermissions("ADMIN", null), scope: "ALL", departmentCodes: [], positionId: null, organization: { code, name: code, isHome: false }, modules: [...(await getEnabledModules(code))] };
 }
 
-/** Cấp tổ chức, nạp sản phẩm + tồn, bật bot (khoá riêng — model giả thay thế). Trả bảng SKU ⇒ id mẫu mã. */
-async function setupShop(shop: GoldenShop): Promise<Map<string, string>> {
+/** Cấp tổ chức `code`, nạp sản phẩm + tồn, bật bot (khoá riêng — model giả thay thế). Trả bảng SKU ⇒ id mẫu mã. */
+async function setupShop(shop: GoldenShop, code: string): Promise<Map<string, string>> {
   const spec = GOLDEN_SHOPS[shop];
-  await cleanupOrg(spec.code);
-  await provisionOrganization({ code: spec.code, name: spec.name, plan: "trial", templateKey: spec.templateKey, modules: ["customers", "products", "orders", "inventory", "ai_sales"], admin: { email: ADMIN(spec.code), name: "Chủ shop", password: "HoiThoaiVang@2026!" }, source: "TEST", actor: null });
-  return withOrganization(spec.code, async () => {
+  await cleanupOrg(code);
+  await provisionOrganization({ code, name: spec.name, plan: "trial", templateKey: spec.templateKey, modules: ["customers", "products", "orders", "inventory", "ai_sales"], admin: { email: ADMIN(code), name: "Chủ shop", password: "HoiThoaiVang@2026!" }, source: "TEST", actor: null });
+  return withOrganization(code, async () => {
     const db = await getDb();
-    const admin = await adminOf(spec.code);
+    const admin = await adminOf(code);
     const ids = new Map<string, string>();
     for (const p of spec.products) {
       const r = await createProductCore(admin, { name: p.name, code: p.sku, unit: "cái", retailPrice: p.price, cost: null, variants: [{ sku: p.sku, size: p.size, color: "", retailPrice: p.price, cost: null, selling: true }] });
@@ -111,9 +145,9 @@ async function setupShop(shop: GoldenShop): Promise<Map<string, string>> {
       if (!v) throw new Error(`thiếu mẫu mã ${p.sku}`);
       ids.set(p.sku, v.id);
     }
-    const [rc] = await db.insert(schema.stockReceipts).values({ kind: "RECEIPT", receivedAt: new Date(), reference: `PN-${spec.code}`, totalQuantity: spec.products.reduce((s, p) => s + p.stock, 0), createdBy: ADMIN(spec.code) }).returning({ id: schema.stockReceipts.id });
+    const [rc] = await db.insert(schema.stockReceipts).values({ kind: "RECEIPT", receivedAt: new Date(), reference: `PN-${code}`, totalQuantity: spec.products.reduce((s, p) => s + p.stock, 0), createdBy: ADMIN(code) }).returning({ id: schema.stockReceipts.id });
     await db.insert(schema.stockReceiptItems).values(spec.products.map((p) => ({ receiptId: rc.id, variantId: ids.get(p.sku)!, quantity: p.stock, unitCost: Math.round(p.price / 2) })));
-    await setSettingJson(SALES_CHATBOT_SETTING_KEY, { ...DEFAULT_SALES_CHATBOT_CONFIG, connectorKey: "anthropic-byok", enabled: true, shippingFee: null });
+    await setSettingJson(SALES_CHATBOT_SETTING_KEY, { ...DEFAULT_SALES_CHATBOT_CONFIG, connectorKey: "anthropic-byok", enabled: true, shippingFee: spec.shippingFee ?? null });
     return ids;
   });
 }
@@ -188,8 +222,7 @@ export type GoldenTranscript = {
   };
 };
 
-async function runCase(c: GoldenCase, ids: Map<string, string>): Promise<GoldenTranscript> {
-  const spec = GOLDEN_SHOPS[c.shop];
+async function runCase(c: GoldenCase, ids: Map<string, string>, code: string, hooks: GoldenRunOptions): Promise<GoldenTranscript> {
   const skuOfId = new Map([...ids.entries()].map(([sku, id]) => [id.toLowerCase(), sku]));
   const nowLines = new Set<string>();
   // Ngày VN từ lúc gieo dữ liệu tới lượt cuối — chạy vắt qua nửa đêm thì cả hai ngày đều là «ngày chạy».
@@ -218,17 +251,20 @@ async function runCase(c: GoldenCase, ids: Map<string, string>): Promise<GoldenT
     },
   };
 
-  return withOrganization(spec.code, async () => {
+  return withOrganization(code, async () => {
     const db = await getDb();
+    const admin = () => adminOf(code);
+    if (hooks.beforeCase) await hooks.beforeCase(c, { ids, admin });
     setSalesChatProviderForTests(() => provider);
     try {
       // Web / fanpage là kênh công khai: hội thoại khoá theo mã khách. Fanpage ở đây KHÔNG qua Pancake — chỉ chạy lượt của engine
       // trên kênh FANPAGE / ZALO để khoá các luật riêng của kênh nhắn tin (vd chuyển người thì bot im).
       const visitorKey = c.channel === "TEST" ? null : visitorKeyOf(`hoi-thoai-vang-${c.key}-0123456789abcdef`);
-      const conv = await openConversation(c.channel, c.channel === "TEST" ? { createdBy: ADMIN(spec.code) } : { visitorKey });
+      const conv = await openConversation(c.channel, c.channel === "TEST" ? { createdBy: ADMIN(code) } : { visitorKey });
       const turns: GoldenTranscript["turns"] = [];
       let seen = 0;
       for (const t of c.turns) {
+        if (t.before) await t.before({ conversationId: conv.id, ids, admin });
         steps = t.ai;
         stepIdx = 0;
         rounds = [];
@@ -254,7 +290,7 @@ async function runCase(c: GoldenCase, ids: Map<string, string>): Promise<GoldenT
             }
           : null;
       const u = schema.platformAiUsage;
-      const usageRows = await (await getPlatformDb()).select({ conversationId: u.conversationId }).from(u).where(and(eq(u.orgCode, spec.code), eq(u.ref, conv.id)));
+      const usageRows = await (await getPlatformDb()).select({ conversationId: u.conversationId }).from(u).where(and(eq(u.orgCode, code), eq(u.ref, conv.id)));
       const withConv = usageRows.filter((r) => r.conversationId === conv.id).length;
       const aiUsageConversation = usageRows.length === 0 ? "NO_ROWS" : withConv === usageRows.length ? "ALL" : withConv === 0 ? "NONE" : "SOME";
       let order: GoldenTranscript["final"]["order"] = null;
@@ -283,24 +319,30 @@ async function runCase(c: GoldenCase, ids: Map<string, string>): Promise<GoldenT
           order,
         },
       };
-      return normalizer(nowLines, skuOfId, runDates)(transcript) as GoldenTranscript;
+      const normalized = normalizer(nowLines, skuOfId, runDates)(transcript) as GoldenTranscript;
+      if (hooks.afterCase) await hooks.afterCase(c, { conversationId: conv.id, ids, admin }, normalized);
+      return normalized;
     } finally {
       setSalesChatProviderForTests(null);
     }
   });
 }
 
-/** Chạy mọi hội thoại vàng trên tổ chức thử mới tinh (dọn trước và sau). Trả ảnh chụp đã chuẩn hoá theo khoá. */
-export async function runGoldenCases(cases: readonly GoldenCase[]): Promise<Map<string, GoldenTranscript>> {
+/**
+ * Chạy mọi hội thoại vàng trên tổ chức thử mới tinh (dọn trước và sau). Trả ảnh chụp đã chuẩn hoá theo khoá. `opts` (bộ đo đơn
+ * vàng v2) — hậu tố mã tổ chức + móc quanh từng hội thoại; bỏ trống ⇒ đúng hành vi của hội thoại vàng.
+ */
+export async function runGoldenCases(cases: readonly GoldenCase[], opts: GoldenRunOptions = {}): Promise<Map<string, GoldenTranscript>> {
   const out = new Map<string, GoldenTranscript>();
   const shops = [...new Set(cases.map((c) => c.shop))];
+  const codeOf = (shop: GoldenShop) => `${GOLDEN_SHOPS[shop].code}${opts.orgSuffix ?? ""}`;
   try {
     for (const shop of shops) {
-      const ids = await setupShop(shop);
-      for (const c of cases.filter((x) => x.shop === shop)) out.set(c.key, await runCase(c, ids));
+      const ids = await setupShop(shop, codeOf(shop));
+      for (const c of cases.filter((x) => x.shop === shop)) out.set(c.key, await runCase(c, ids, codeOf(shop), opts));
     }
   } finally {
-    for (const shop of shops) await cleanupOrg(GOLDEN_SHOPS[shop].code);
+    for (const shop of shops) await cleanupOrg(codeOf(shop));
   }
   return out;
 }
