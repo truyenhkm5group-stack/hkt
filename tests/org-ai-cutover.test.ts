@@ -3,7 +3,10 @@
  *
  * Khoá:
  *  · vân tay là 12 ký tự đầu SHA-256, không bao giờ chứa khoá; SAME / DIFFERENT so bằng CHUỖI trong RAM; thiếu một bên ⇒ UNAVAILABLE;
- *  · project / tài khoản Google chỉ qua API Keys Lookup bằng credential quản trị — KHÔNG gọi API nào khác bằng khoá của khách;
+ *  · project / tài khoản Google qua API Keys Lookup bằng credential quản trị; Lookup không ra số ⇒ DÒ bằng ErrorInfo của Google
+ *    (403 SERVICE_DISABLED / API_KEY_SERVICE_BLOCKED ⇒ `metadata.consumer`) — CHỈ khoá của nền tảng / nhà đọc từ env, không bao giờ
+ *    khoá của khách; khoá không lọt vào kết quả / lỗi; dòng tóm tắt chỉ dạng CHE (4 chữ số cuối + độ dài);
+ *  · KHÔNG đủ credit ⇒ dòng tóm tắt mang MÃ LÝ DO (không số tiền) sinh ở đúng nhánh của creditVerdict — người vận hành biết sửa chỗ nào;
  *  · `settings.value` là CHUỖI JSON: ô ĐÃ LƯU đọc được cả chuỗi lẫn đối tượng (hỏng ⇒ không có); động cơ ĐANG CHẠY đúng phép đọc
  *    của bot (mặc định + lược đồ; sai lược đồ ⇒ bot TẮT) + dự phòng HIỆU LỰC — lỗi 08/10/2026 in «bot — · nguồn —»;
  *  · credit theo NHỊP CHI GẦN ĐÂY: cơ sở tháng = max(30 ngày · 7 ngày × 30/7 · ngày trọn gần nhất × 30) — dữ liệu kiểu HSLC (3,12 USD
@@ -31,14 +34,27 @@ import {
   effectiveBasis,
   engineOf,
   engineText,
+  errorInfoOf,
   keyFingerprint,
   limitsLines,
+  maskProjectNumber,
   minimumCredit,
   monthlyBasis,
   parseCutoverArgs,
   platformCandidateModels,
   platformPriceRatio,
   PLATFORM_ENGINE_PATCH,
+  probeKeyProject,
+  probeServerKeyProjects,
+  PROJECT_PROBE_APIS,
+  PROJECT_PROBE_KEY_ENVS,
+  PROJECT_PROBE_TIMEOUT_MS,
+  projectFromGoogleError,
+  projectReportLines,
+  publicModelName,
+  redactKeyish,
+  refusalTag,
+  resolvedProjectNumber,
   runningEngineOf,
   runningEngineText,
   salesConnectorUse,
@@ -47,7 +63,10 @@ import {
   spendLines,
   storedSettingObject,
   UNPRICED_SHARE_MAX,
+  unpricedSalesModels,
   type CutoverDeps,
+  type KeyProjectProbe,
+  type ProbeFetcher,
   type SalesUsageRow,
 } from "@/scripts/org-ai-cutover";
 
@@ -95,6 +114,28 @@ const limitsOf = (credit: number, o: { softOnly?: boolean; hard?: number | null;
   override: o.override === null || o.override === undefined ? {} : { platformCreditUsdPerMonth: o.override },
   fellBack: false,
 });
+
+/** Khoá BỊA đúng dạng khoá API Google (`AIza` + 35 ký tự) — không khoá thật nào trong kho PUBLIC, không gọi mạng thật. */
+const khoaBia = (nhan: string) => `AIza${`SyDUMMY-${nhan}-`.padEnd(35, "0")}`;
+const KHOA_NEN_TANG = khoaBia("nentang");
+const KHOA_NHA = khoaBia("nha");
+const KHOA_BYOK = khoaBia("byok-khach");
+const KHOA_KHAC_DANG = khoaBia("khac");
+/** Câu SERVICE_DISABLED đúng mẫu Google (đường dự phòng khi thân lỗi không có ErrorInfo). */
+const CAU_SERVICE_DISABLED =
+  "Cloud Vision API has not been used in project 555566667777 before or it is disabled. Enable it by visiting https://console.developers.google.com/apis/api/vision.googleapis.com/overview?project=555566667777 then retry.";
+
+/** Tên model có thể xuất hiện trong MÃ LÝ DO của các ca kiểm (được in công khai — tên model không phải số liệu kinh doanh). */
+const MODEL_TRONG_LOG = [MODEL_NAY, "gemini-3.5-flash", "claude-opus-5", "gemini-9-ultra"];
+
+/**
+ * Chữ số còn lại của một dòng tóm tắt sau khi bỏ những gì ĐƯỢC in công khai: tỷ lệ % (đếm lượt), cửa sổ «N ngày», tên model. Phải
+ * rỗng ⇒ dòng không mang một con số tiền nào (USD, credit, cơ sở, mức tối thiểu).
+ */
+function soConLai(s: string, models: readonly string[] = MODEL_TRONG_LOG): string[] {
+  const boModel = [...models].sort((a, b) => b.length - a.length).reduce((t, m) => t.split(m).join(" "), s);
+  return boModel.replace(/\d+(?:,\d+)?%/g, " ").replace(/\b\d+ ngày\b/g, " ").match(/\d/g) ?? [];
+}
 
 /** Mã nguồn bỏ chú thích (khối + dòng), giữ URL `https://`. */
 function maBoChuThich(src: string): string {
@@ -314,12 +355,150 @@ export function testOrgAiCutoverPure() {
   assert.equal(creditVerdict(tran(150), effectiveBasis(co, { ratio: 1, reason: "" }).monthly, 0, left).ok, true, "cùng model ⇒ như cũ: 150 ĐỦ");
   assert.equal(effectiveBasis(co, { ratio: null, reason: "thiếu giá" }).monthly, null, "không cân được giá ⇒ chưa đo được ⇒ KHÔNG");
   assert.equal(effectiveBasis({ ...co, unpriced7d: 201 }, { ratio: 1, reason: "" }).monthly, null, `lượt chưa định giá 7 ngày > ${UNPRICED_SHARE_MAX * 100}% ⇒ KHÔNG`);
-  assert.deepEqual(effectiveBasis({ ...co, unpriced7d: 200 }, { ratio: 1, reason: "" }), { monthly: 93.6, unpricedNote: true, reason: "cơ sở tháng 93.6 × 1 = 93.6 USD" }, "đúng 20% vẫn tính, kèm ghi chú");
+  assert.deepEqual(effectiveBasis({ ...co, unpriced7d: 200 }, { ratio: 1, reason: "" }), { monthly: 93.6, unpricedNote: true, reason: "cơ sở tháng 93.6 × 1 = 93.6 USD", cause: null, unpricedPct: 20, priceCause: null, priceModel: null }, "đúng 20% vẫn tính, kèm ghi chú");
   assert.equal(effectiveBasis({ ...co, monthly: null }, { ratio: 1, reason: "" }).monthly, null);
   // Trần không còn gì (trần 0 với cơ sở 0, hay đã dùng hết) ⇒ KHÔNG trước cả hai vế.
   assert.equal(creditVerdict(tran(150, { hard: 0 }), 0, 0, left).ok, false, "trần tiền 0 với cơ sở 0 ⇒ KHÔNG");
   assert.equal(creditVerdict(tran(20), 0, 20, left).ok, false, "đã dùng hết credit tháng này ⇒ KHÔNG");
   assert.match(creditFloorLine(117, 0, left, tran(150, { softOnly: true, hard: null })), /\(ngân sách mềm — chỉ tham khảo, không chặn\)/, "nhãn theo softOnly, không ghi «trần cứng» cho ngân sách mềm");
+
+  // ── MÃ LÝ DO khi KHÔNG đủ: sinh ở đúng nhánh của creditVerdict (không đọc câu reason) ──
+  const ma = (l: Parameters<typeof creditVerdict>[0], basisUsd: number | null, used = 0) => creditVerdict(l, basisUsd, used, left).code;
+  assert.equal(ma(null, b.monthly), "PLAN_UNREADABLE");
+  assert.equal(ma(tran(0), b.monthly), "NO_PLATFORM_CREDIT");
+  assert.equal(ma(tran(0, { softOnly: true, hard: null }), b.monthly), "NO_PLATFORM_CREDIT");
+  assert.equal(ma(tran(150), null), "BASIS_UNMEASURED");
+  assert.equal(ma(tran(150), b.monthly, 200), "MONTH_EXHAUSTED", "đã dùng 200 > trần 150 ⇒ hết tháng");
+  assert.equal(ma(tran(20), 0, 20), "MONTH_EXHAUSTED", "đã dùng ĐÚNG trần ⇒ hết tháng");
+  assert.equal(ma(tran(500, { hard: 50 }), 40, 60), "COST_HARD_BELOW_NEED", "review #694: trần đang chặn là costUsdHard 50 (< credit 500) và đã dùng 60 ⇒ nâng credit VÔ ÍCH — phải nâng costUsdHard, không phải «hết tháng»");
+  assert.equal(ma(tran(500, { hard: 50 }), 0, 50), "COST_HARD_BELOW_NEED", "dùng ĐÚNG tới costUsdHard ⇒ vẫn là trần tiền chặn");
+  assert.equal(ma(tran(150, { softOnly: true, hard: 50 }), 10, 60), "COST_HARD_BELOW_NEED", "ngân sách mềm: trần duy nhất là costUsdHard ⇒ hết là do trần tiền");
+  assert.equal(ma(tran(150, { hard: 300 }), 40, 150), "MONTH_EXHAUSTED", "credit 150 là trần đang chặn, trần tiền 300 còn dư ⇒ hết tháng (nâng credit là đúng việc)");
+  assert.equal(ma(tran(150, { hard: 0 }), 0), "COST_HARD_BELOW_NEED", "trần tiền 0 mà chưa dùng gì là trần quá thấp, KHÔNG phải «hết tháng»");
+  assert.equal(ma(tran(150, { hard: 100 }), b.monthly), "COST_HARD_BELOW_NEED", "trần tiền 100 < 117 ⇒ --credit không sửa được");
+  assert.equal(ma(tran(100, { hard: 100 }), b.monthly), "COST_HARD_BELOW_NEED", "trần tiền BẰNG credit mà cả hai thiếu ⇒ nâng credit một mình vô ích");
+  assert.equal(ma(tran(150, { softOnly: true, hard: 50 }), b.monthly), "COST_HARD_BELOW_NEED", "ngân sách mềm chỉ chặn ở trần tiền");
+  assert.equal(ma(tran(150, { hard: 200 }), b.monthly, 120), "COST_HARD_BELOW_NEED", "vế phần còn lại: trần tiền 200 − đã dùng 120 = 80 < 93,6 ⇒ trần tiền thiếu");
+  assert.equal(ma(tran(100), b.monthly), "CREDIT_BELOW_NEED", "credit 100 < 117, trần tiền 300 đủ");
+  assert.equal(ma(tran(150), b.monthly, 60), "CREDIT_BELOW_NEED", "vế phần còn lại: trần tiền 300 còn 240 ≥ 93,6 ⇒ thiếu là ở credit");
+  for (const du of [creditVerdict(tran(150), b.monthly, 0, left), creditVerdict(tran(5, { softOnly: true, hard: null }), b.monthly, 999, left)]) assert.deepEqual([du.ok, du.code], [true, null]);
+
+  const ebDu = effectiveBasis(co, { ratio: 1, reason: "" });
+  const tags: [string, string][] = [
+    ["PLAN_UNREADABLE", refusalTag("PLAN_UNREADABLE", ebDu, [], null)],
+    ["NO_PLATFORM_CREDIT", refusalTag("NO_PLATFORM_CREDIT", ebDu, [], null)],
+    ["MONTH_EXHAUSTED", refusalTag("MONTH_EXHAUSTED", ebDu, [], 154)],
+    ["COST_HARD_BELOW_NEED", refusalTag("COST_HARD_BELOW_NEED", ebDu, [], 117)],
+    ["CREDIT_BELOW_NEED", refusalTag("CREDIT_BELOW_NEED", ebDu, [], 117)],
+    ["CREDIT_BELOW_NEED", refusalTag("CREDIT_BELOW_NEED", effectiveBasis({ ...co, unpriced7d: 150 }, { ratio: 1, reason: "" }), [MODEL_NAY], 1721)],
+    ["BASIS_UNMEASURED", refusalTag("BASIS_UNMEASURED", effectiveBasis({ ...co, unpriced7d: 352 }, { ratio: 1, reason: "" }), [MODEL_NAY, "gemini-9-ultra"], null)],
+    ["BASIS_UNMEASURED", refusalTag("BASIS_UNMEASURED", effectiveBasis(co, { ratio: null, reason: "x", cause: "UNPRICED_PLATFORM_MODEL", model: "gemini-9-ultra" }), [], null)],
+    ["BASIS_UNMEASURED", refusalTag("BASIS_UNMEASURED", effectiveBasis(co, { ratio: null, reason: "x", cause: "NO_PLATFORM_MODEL" }), [], null)],
+    ["BASIS_UNMEASURED", refusalTag("BASIS_UNMEASURED", effectiveBasis({ ...co, monthly: null }, { ratio: 1, reason: "" }), [], null)],
+    ["CREDIT_BELOW_NEED", refusalTag("CREDIT_BELOW_NEED", effectiveBasis({ ...co, turns7d: 6345, unpriced7d: 2 }, { ratio: 1, reason: "" }), [MODEL_NAY], 117)],
+  ];
+  for (const [code, tag] of tags) {
+    assert.ok(tag.startsWith(` · mã lý do ${code} (`), tag);
+    assert.deepEqual(soConLai(tag), [], `mã lý do KHÔNG mang con số tiền nào: ${tag}`);
+    assert.ok(!tag.replace(/<USD>/g, "").includes("USD"), `không chữ USD ngoài chỗ giữ <USD>: ${tag}`);
+  }
+  assert.equal(refusalTag(null, ebDu, [MODEL_NAY], 117), "", "ĐỦ ⇒ không có mã lý do");
+  assert.match(tags[4][1], /mức tối thiểu TRONG trần đường ops: chạy lại --apply --credit=<mức tối thiểu ở phần mã hoá>\)$/);
+  assert.match(tags[5][1], /mức tối thiểu VƯỢT trần đường ops: đặt ở \/platform\/org\/<mã>/, `> ${SCRIPT_AI_CREDIT_MAX_USD} ⇒ VƯỢT`);
+  assert.match(tags[5][1], /\) · lượt chưa định giá 7 ngày 15% · model có lượt chưa định giá: gemini-3\.5-flash-lite$/, "có lượt chưa định giá ⇒ in tỷ lệ ĐẾM + tên model");
+  assert.match(tags[3][1], /costUsdHard.*--credit KHÔNG sửa được, nâng ô đó ở \/platform\/org\/<mã>/);
+  assert.match(tags[6][1], /lượt chưa định giá 7 ngày 35,2% > 20% — bổ sung giá model vào bảng giá; nâng credit KHÔNG giải quyết\) · model có lượt chưa định giá: gemini-3\.5-flash-lite, gemini-9-ultra$/);
+  assert.match(tags[7][1], /model AI dùng chung «gemini-9-ultra» chưa có trong bảng giá/, "tên model chưa có giá ⇒ chỗ phải sửa bảng giá");
+  assert.match(tags[8][1], /chưa biết model AI dùng chung \(khoá nền tảng chưa sẵn sàng\)/);
+  assert.match(tags[9][1], /30 ngày trọn không lượt AI Bán hàng nào định giá được/);
+  assert.match(tags[10][1], /lượt chưa định giá 7 ngày <0,1% · /, "2/6345 lượt làm tròn ra 0 ⇒ «<0,1%», không phải «0%»");
+  assert.equal(publicModelName("gemini-3.5-flash-lite"), "gemini-3.5-flash-lite");
+  assert.equal(publicModelName("x <b> 0909123456 a@b.vn"), "(tên lạ)", "chuỗi lạ trong sổ AI không lọt nguyên văn ra log công khai");
+  assert.equal(publicModelName(null), "(không tên)");
+  // Review #694: ô model do người gõ — khoá dán nhầm không bao giờ ra log công khai, kể cả khi đúng «dạng mã model».
+  for (const nham of [KHOA_NEN_TANG, `gemini/${KHOA_BYOK}`, "sk-ant-api03-DUMMY", "sk-proj-abc", "x".repeat(12) + "Ab9_".repeat(8), "AIzaSyNGAN"]) assert.equal(publicModelName(nham), "(tên lạ)", `khoá dán nhầm vào ô model phải thành «(tên lạ)»: ${nham.slice(0, 6)}…`);
+  for (const that of ["gemini-2.5-flash-preview-09-2025", "claude-sonnet-4-5-20250929", "gpt-4.1-mini", "models/gemini-3.5-flash"]) assert.equal(publicModelName(that), that, `tên model thật vẫn in: ${that}`);
+  const tagKhoa = refusalTag("BASIS_UNMEASURED", effectiveBasis({ ...co, unpriced7d: 352 }, { ratio: 1, reason: "" }), [KHOA_NEN_TANG], null);
+  assert.ok(!tagKhoa.includes("AIza") && tagKhoa.endsWith("model có lượt chưa định giá: (tên lạ)"), tagKhoa);
+  assert.ok(refusalTag("BASIS_UNMEASURED", effectiveBasis(co, { ratio: null, reason: "x", cause: "UNPRICED_CURRENT_MODEL", model: "a b;c" }), [], null).includes("«(tên lạ)»"));
+  assert.ok(refusalTag("CREDIT_BELOW_NEED", ebDu, ["a", "b", "c", "d"], 117).endsWith("model có lượt chưa định giá: a, b, c, …"), "tối đa 3 tên, phần còn lại «…» (không đếm số)");
+  // Nguyên nhân có cấu trúc ở effectiveBasis + platformPriceRatio — không phải câu chữ.
+  const ebLo = effectiveBasis({ ...co, unpriced7d: 352 }, { ratio: 1, reason: "" });
+  assert.deepEqual([ebLo.cause, ebLo.unpricedPct, ebLo.monthly], ["UNPRICED_SHARE", 35.2, null]);
+  assert.equal(effectiveBasis({ ...co, monthly: null }, { ratio: 1, reason: "" }).cause, "NO_SPEND");
+  assert.equal(effectiveBasis({ ...co, turns7d: 0, unpriced7d: 0 }, { ratio: 1, reason: "" }).unpricedPct, null, "7 ngày không lượt ⇒ tỷ lệ CHƯA BIẾT, không phải 0%");
+  const ebGia = effectiveBasis(co, platformPriceRatio([dongGia("re", 1000, 100)], NOW, ["khong-gia"], gia));
+  assert.deepEqual([ebGia.cause, ebGia.priceCause, ebGia.priceModel], ["PRICE_UNKNOWN", "UNPRICED_PLATFORM_MODEL", "khong-gia"]);
+  const rLa = platformPriceRatio([dongGia("la", 1000, 100)], NOW, ["re"], gia);
+  assert.deepEqual([rLa.cause, rLa.model], ["UNPRICED_CURRENT_MODEL", "la"]);
+  assert.equal(platformPriceRatio([dongGia("re", 0, 0)], NOW, ["re"], gia).cause, "NO_TOKENS");
+  assert.equal(platformPriceRatio([dongGia("re", 1000, 100)], NOW, [], gia).cause, "NO_PLATFORM_MODEL");
+  assert.deepEqual(unpricedSalesModels(hslcRows(), NOW), [MODEL_NAY], "7 ngày trọn: lượt chưa định giá ngày 06/10 của model đang chạy");
+  assert.deepEqual(
+    unpricedSalesModels(
+      [
+        { day: "2026-10-06", feature: "creative_image", turns: 3, costUsd: null, unknownCost: 3, model: "anh" },
+        { day: "2026-09-20", feature: "sales_chatbot", turns: 3, costUsd: null, unknownCost: 3, model: "cu" },
+        { day: "2026-10-08", feature: "sales_chatbot", turns: 3, costUsd: null, unknownCost: 3, model: "homnay" },
+        { day: "2026-10-05", feature: "sales_playbook", turns: 3, costUsd: null, unknownCost: 1, model: null },
+      ],
+      NOW,
+    ),
+    ["(không tên)"],
+    "chỉ AI Bán hàng, chỉ 7 ngày TRỌN (bỏ Media, ngày cũ, hôm nay)",
+  );
+
+  // ── Số project bằng ErrorInfo của Google (hàm thuần) ──
+  const errInfo = (reason: string, consumer: unknown, message = "x") => ({ error: { code: 403, message, status: "PERMISSION_DENIED", details: [{ "@type": "type.googleapis.com/google.rpc.Help", links: [] }, { "@type": "type.googleapis.com/google.rpc.ErrorInfo", reason, domain: "googleapis.com", metadata: { consumer, service: "translate.googleapis.com" } }] } });
+  assert.deepEqual(projectFromGoogleError(403, errInfo("SERVICE_DISABLED", "projects/123456789012")), { number: "123456789012", via: "ERROR_INFO", reason: "SERVICE_DISABLED" });
+  assert.deepEqual(projectFromGoogleError(403, errInfo("API_KEY_SERVICE_BLOCKED", "projects/987654321")), { number: "987654321", via: "ERROR_INFO", reason: "API_KEY_SERVICE_BLOCKED" });
+  assert.equal(projectFromGoogleError(403, [errInfo("SERVICE_DISABLED", "projects/123456789012")])?.number, "123456789012", "thân bọc trong mảng");
+  assert.deepEqual(projectFromGoogleError(403, { error: { code: 403, message: CAU_SERVICE_DISABLED, status: "PERMISSION_DENIED" } }), { number: "555566667777", via: "MESSAGE", reason: "SERVICE_DISABLED" }, "không ErrorInfo ⇒ đường dự phòng: câu đúng mẫu");
+  const loiLa: [number, unknown, string][] = [
+    [403, errInfo("RATE_LIMIT_EXCEEDED", "projects/123456789012", CAU_SERVICE_DISABLED), "ErrorInfo lý do khác ⇒ KHÔNG đọc câu chữ dù câu đúng mẫu"],
+    [403, errInfo("SERVICE_DISABLED", "projects/abc", CAU_SERVICE_DISABLED), "consumer sai dạng ⇒ không lùi về câu chữ"],
+    [403, errInfo("SERVICE_DISABLED", "projects/123", CAU_SERVICE_DISABLED), "số quá ngắn"],
+    [403, errInfo("SERVICE_DISABLED", 123456789012), "consumer không phải chuỗi"],
+    [403, errInfo("SERVICE_DISABLED", "projects/123456789012/x"), "consumer có đuôi lạ"],
+    [400, { error: { code: 400, message: CAU_SERVICE_DISABLED } }, "câu đúng mẫu nhưng không phải 403"],
+    [403, { error: { code: 403, message: "Project 123456789012 bị khoá vì lý do khác" } }, "câu tự do mang số ⇒ không đọc"],
+    [403, { error: { code: 403, message: "API has not been used in project 12a456789012 before or it is disabled" } }, "số lẫn chữ"],
+    [200, errInfo("SERVICE_DISABLED", "projects/123456789012"), "HTTP thành công ⇒ không có lỗi để đọc"],
+    [403, "không phải JSON", "thân hỏng"],
+    [403, null, "không thân"],
+  ];
+  for (const [st, body, vi] of loiLa) assert.equal(projectFromGoogleError(st, body), null, vi);
+  assert.deepEqual(errorInfoOf(errInfo("SERVICE_DISABLED", "projects/1")), { reason: "SERVICE_DISABLED", consumer: "projects/1" }, "bỏ qua chi tiết không phải ErrorInfo");
+  assert.equal(KHOA_NEN_TANG.length, 39, "khoá bịa đúng dạng khoá API Google");
+  const che = redactKeyish(`API key ${KHOA_NEN_TANG} và ${KHOA_NEN_TANG.slice(0, 20)} và token ${"x".repeat(12)}${"Ab9_".repeat(8)} và project 123456789012`, KHOA_NEN_TANG);
+  assert.ok(!che.includes(KHOA_NEN_TANG) && !che.includes("AIzaSy") && !che.includes("Ab9_Ab9_Ab9_"), che);
+  assert.ok(che.includes("project 123456789012"), "che khoá, không che số project hay chữ thường");
+  assert.equal(redactKeyish(`lỗi ${KHOA_KHAC_DANG}`, KHOA_NEN_TANG).includes("AIzaSy"), false, "che cả khoá Google KHÁC khoá đang dò");
+  assert.deepEqual([maskProjectNumber("123456789012"), maskProjectNumber("12345678"), maskProjectNumber("1234567"), maskProjectNumber(null), maskProjectNumber("12ab5678")], ["project …9012 (12 chữ số)", "project …5678 (8 chữ số)", "project … (7 chữ số)", "project —", "project —"]);
+
+  // Dòng báo cáo: số ĐẦY ĐỦ chỉ ở phần mã hoá; dòng tóm tắt chỉ dạng CHE.
+  const doRa: KeyProjectProbe = { number: "123456789012", api: "Cloud Translation", via: "ERROR_INFO", attempts: ["Cloud Translation: HTTP 403 · SERVICE_DISABLED (ErrorInfo)"], reason: null };
+  const khongRa: KeyProjectProbe = { number: null, api: null, via: null, attempts: ["Cloud Translation: HTTP 200 — API đang bật ở project này, sang API kế"], reason: "UNAVAILABLE — không suy được (không API nào trả project)" };
+  const LY_DO_LOOKUP = "UNAVAILABLE — container không có credential quản trị Google Cloud (service account)";
+  const r1 = projectReportLines("PLATFORM_AI_API_KEY", null, LY_DO_LOOKUP, doRa);
+  assert.equal(r1.pub, "Project PLATFORM_AI_API_KEY: project …9012 (12 chữ số) — nguồn ErrorInfo của Google (không cần credential quản trị)");
+  assert.ok(!/\d{5,}/.test(r1.pub) && !r1.pub.includes("12345678"), `dòng tóm tắt không mang số project đầy đủ: ${r1.pub}`);
+  assert.deepEqual(
+    r1.priv,
+    [`Project của PLATFORM_AI_API_KEY: ${LY_DO_LOOKUP}`, "Project của PLATFORM_AI_API_KEY — dò ErrorInfo của Google (không cần credential quản trị): số 123456789012 · qua Cloud Translation (ErrorInfo) · lượt gọi: Cloud Translation: HTTP 403 · SERVICE_DISABLED (ErrorInfo)"],
+    "số ĐẦY ĐỦ ở phần mã hoá — dòng Lookup cũ giữ nguyên",
+  );
+  const r2 = projectReportLines("GEMINI_API_KEY (nhà)", null, LY_DO_LOOKUP, khongRa);
+  assert.equal(r2.pub, `Project GEMINI_API_KEY (nhà): Lookup ${LY_DO_LOOKUP} · dò ErrorInfo: UNAVAILABLE — không suy được (chi tiết trong phần mã hoá)`);
+  assert.equal(projectReportLines("PLATFORM_AI_API_KEY", null, LY_DO_LOOKUP, null).pub, `Project PLATFORM_AI_API_KEY: Lookup ${LY_DO_LOOKUP}`, "không dò ⇒ đúng dòng cũ");
+  const lookupCo = { number: "111122223333", id: "du-an", name: "Dự án", owners: [] as string[], reason: null };
+  assert.equal(projectReportLines("PLATFORM_AI_API_KEY", lookupCo, null, null).pub, "Project PLATFORM_AI_API_KEY: Lookup CÓ", "Lookup ra số ⇒ giữ nguyên dòng cũ");
+  assert.equal(resolvedProjectNumber(lookupCo, doRa), "111122223333", "Lookup (credential quản trị) đứng trước phép dò");
+  assert.equal(resolvedProjectNumber(null, doRa), "123456789012");
+  assert.equal(resolvedProjectNumber({ ...lookupCo, number: null }, khongRa), null);
+  assert.deepEqual(PROJECT_PROBE_KEY_ENVS.map((x) => x.env), ["PLATFORM_AI_API_KEY", "GEMINI_API_KEY"], "phép dò CHỈ đọc khoá của nền tảng và khoá Gemini của nhà — không biến nào khác (khoá BYOK của khách không bao giờ ở env)");
+  assert.ok(PROJECT_PROBE_APIS.every((a) => /^https:\/\/[a-z]+\.googleapis\.com\//.test(a.url) && !/key/i.test(a.url)), "chỉ API Google, URL không mang khoá");
+  assert.ok(PROJECT_PROBE_APIS.length >= 2 && PROJECT_PROBE_APIS.length <= 3);
 
   // ── Hạn mức AI đang áp (phần mã hoá) ──
   const hm = limitsLines(limitsOf(150, { override: 150 }), { disabled: false, readError: false });
@@ -386,7 +565,17 @@ export function testOrgAiCutoverPure() {
   assert.ok(!/(?:console\.log|tomTat)\([^;]*(?:private_key|access_token|keyString=)/.test(code), "không in credential / URL mang khoá");
   // Hai phép quét dưới đây đọc MÃ NGUỒN THÔ: bỏ chú thích kiểu `//.*$` cũng cắt mất phần sau `https://` của URL.
   assert.ok(!/books\/v1|[?&]key=\$\{/.test(src), "không gọi API nào khác bằng khoá của khách (review #659)");
-  assert.ok((src.match(/fetch\(/g) ?? []).length === (src.match(/redirect: "manual"/g) ?? []).length, "mọi lời gọi Google không theo chuyển hướng");
+  const soGoiMang = (src.match(/\b(?:fetch|fetcher)\(/g) ?? []).length;
+  assert.ok(soGoiMang >= 5 && soGoiMang === (src.match(/redirect: "manual"/g) ?? []).length, "mọi lời gọi Google (kể cả phép dò ErrorInfo qua `fetcher`) không theo chuyển hướng");
+  // Phép dò ErrorInfo: hàm dò chỉ được TRUYỀN cho probeServerKeyProjects (tự đọc khoá từ env theo PROJECT_PROBE_KEY_ENVS) — không lời
+  // gọi trực tiếp nào, nên không đường nào đưa được khoá BYOK của khách (hay bất kỳ khoá nào khác) vào nó.
+  assert.equal((code.match(/\bprobeKeyProject\b/g) ?? []).length, 2, "probeKeyProject chỉ có định nghĩa + MỘT chỗ truyền vào probeServerKeyProjects");
+  assert.match(code, /export async function probeKeyProject\(key: string, fetcher: ProbeFetcher = fetch\)/);
+  assert.match(code, /await probeServerKeyProjects\(\(name\) => process\.env\[name\], probeKeyProject, /, "đọc khoá thẳng từ env của container");
+  assert.equal((code.match(/\bprobeServerKeyProjects\(/g) ?? []).length, 2, "probeServerKeyProjects: định nghĩa + MỘT lời gọi");
+  const thanDo = code.slice(code.indexOf("export async function probeServerKeyProjects("), code.indexOf("export function maskProjectNumber("));
+  assert.ok(thanDo.includes("for (const { env, label } of PROJECT_PROBE_KEY_ENVS)") && thanDo.includes("const k = (readEnv(env) ?? \"\").trim();") && (thanDo.match(/\bprobe\(/g) ?? []).length === 1 && thanDo.includes("probe(k)"), "khoá đưa vào phép dò CHỈ là readEnv(env) của PROJECT_PROBE_KEY_ENVS");
+  assert.match(code, /headers: \{ "Content-Type": "application\/json", "x-goog-api-key": k \}/, "khoá đi ở header, không ở URL");
   assert.ok(!/tomTat\([^;]*(?:fp\.|keyFingerprint|costUsd|platformCreditUsdPerMonth|cost\.usd|owners\.join|\.owners\s*\})/.test(code), "log công khai không mang vân tay / project / số liệu kinh doanh của khách");
   assert.match(src, /if \(CHAY_THANG && !CO_GHI\) process\.env\.ERP_READ_ONLY = "1";/, "mặc định CHỈ ĐỌC");
   assert.match(src, /show default_transaction_read_only/, "hỏi lại Postgres trước khi đọc");
@@ -466,6 +655,7 @@ type Fake = {
   rows?: SalesUsageRow[];
   rereadThrows?: boolean;
   usableThrows?: boolean;
+  planNull?: boolean;
 };
 
 function fakeDeps(o: Fake) {
@@ -477,6 +667,7 @@ function fakeDeps(o: Fake) {
     resolveLimits: async () => {
       calls.resolves += 1;
       if (o.rereadThrows && calls.resolves === 2) throw new Error("CSDL nền tảng chập");
+      if (o.planNull) return null;
       return limitsOf(override ?? o.planCredit ?? 0, { softOnly: o.softOnly, hard: o.hard, override });
     },
     readControl: async () => ({ disabled: false, limits: override === null ? {} : { platformCreditUsdPerMonth: override }, updatedAt: null, updatedByEmail: null, readError: false }),
@@ -531,6 +722,8 @@ async function chay(proposed: number | null, o: Fake) {
   }
   const pub = lines.filter((l) => l.startsWith("[ops:tom-tat] "));
   for (const l of pub) assert.ok(!/\d\s*USD|\b150\b|\b117\b|\b154\b|93[.,]6|3[.,]12|11[.,]07/.test(l), `log công khai mang số tiền / credit: ${l}`);
+  // Dòng KHÔNG CHUYỂN mang mã lý do: ngoài tỷ lệ %, «N ngày» và tên model thì KHÔNG một chữ số nào (không USD, credit, cơ sở, mức tối thiểu).
+  for (const l of pub) if (l.includes("mã lý do")) assert.deepEqual(soConLai(l), [], `dòng tóm tắt mang con số ngoài tỷ lệ / tên model: ${l}`);
   return { rc, calls: f.calls, override: f.override(), pub: pub.join("\n"), priv: lines.filter((l) => !l.startsWith("[ops:tom-tat] ")).join("\n") };
 }
 
@@ -638,5 +831,180 @@ export async function testOrgAiCutoverApply() {
   // Ngân sách mềm (không trần tiền) ⇒ đủ ⇒ chuyển.
   r = await chay(150, { softOnly: true, hard: null });
   assert.deepEqual([r.rc, r.calls.setCredit, r.calls.switches], [0, [150], 1]);
-  console.log("  ✓ ops org-ai-cutover --apply --credit: kiểm credit ĐỀ XUẤT trước khi ghi (100 ⇒ không ghi gì), đặt qua lõi → đọc lại → kiểm lại → chuyển; chuyển hỏng ⇒ hoàn về ghi đè cũ; lỗi giữa chừng mà bot đã / có thể đã sang AI dùng chung ⇒ GIỮ credit; hoàn hỏng nói thẳng; log công khai không mang số tiền");
+
+  // ── MÃ LÝ DO trên dòng tóm tắt CÔNG KHAI khi KHÔNG CHUYỂN (production 08/10: --credit=150 rồi 300 chỉ ra «không đủ», lý do nằm
+  //    trong phần mã hoá mà người vận hành không đọc được). Không con số tiền nào — soConLai trong chay() chặn. ──
+  r = await chay(100, {});
+  assert.match(r.pub, /CHƯA GHI GÌ \(chi tiết trong phần mã hoá\) · mã lý do CREDIT_BELOW_NEED \(credit thấp hơn mức tối thiểu — mức tối thiểu TRONG trần đường ops: chạy lại --apply --credit=<mức tối thiểu ở phần mã hoá>\) · lượt chưa định giá 7 ngày <0,1% · model có lượt chưa định giá: gemini-3\.5-flash-lite$/m);
+  // Kiểu production: model nền tảng đắt hơn (gemini-3.5-flash ≈ × 4,6) ⇒ cần ~537 USD/tháng. Gói có trần tiền 300 ⇒ --credit=300 hay
+  // cao hơn nữa cũng vô ích — mã phải chỉ ra TRẦN TIỀN, không phải credit.
+  r = await chay(300, { platform: [MODEL_NAY, "gemini-3.5-flash"] });
+  assert.deepEqual([r.rc, r.calls.setCredit], [1, []]);
+  assert.match(r.pub, /mã lý do COST_HARD_BELOW_NEED \(/, "trần tiền 300 < mức cần ⇒ nâng ô costUsdHard, không phải nâng --credit");
+  r = await chay(300, { platform: [MODEL_NAY, "gemini-3.5-flash"], hard: null });
+  assert.match(r.pub, /mã lý do CREDIT_BELOW_NEED \(.*TRONG trần đường ops/, "không trần tiền ⇒ thiếu là ở credit, mức tối thiểu đặt được bằng ops");
+  r = await chay(300, { platform: ["claude-opus-5"], hard: null });
+  assert.match(r.pub, /mã lý do CREDIT_BELOW_NEED \(.*VƯỢT trần đường ops: đặt ở \/platform\/org\/<mã>/);
+  r = await chay(150, { hard: 100 });
+  assert.deepEqual([r.rc, r.calls.setCredit], [1, []]);
+  assert.match(r.pub, /mã lý do COST_HARD_BELOW_NEED \(trần tiền tháng \(costUsdHard\) thấp hơn mức cần — --credit KHÔNG sửa được/);
+  r = await chay(150, { used: 200 });
+  assert.match(r.pub, /mã lý do MONTH_EXHAUSTED \(/);
+  r = await chay(null, { planCredit: 0 });
+  assert.match(r.pub, /mã lý do NO_PLATFORM_CREDIT \(/);
+  r = await chay(150, { planNull: true });
+  assert.deepEqual([r.rc, r.calls.setCredit], [1, []]);
+  assert.match(r.pub, /mã lý do PLAN_UNREADABLE \(/);
+  r = await chay(150, { platform: [] });
+  assert.match(r.pub, /mã lý do BASIS_UNMEASURED \(chưa cân được giá model AI dùng chung: chưa biết model AI dùng chung \(khoá nền tảng chưa sẵn sàng\); nâng credit KHÔNG giải quyết\)/);
+  r = await chay(150, { rows: [...hslcRows(), { day: "2026-10-05", feature: "sales_chatbot", turns: 9000, costUsd: null, unknownCost: 9000, model: MODEL_NAY, inputTokens: 0, outputTokens: 0 }] });
+  assert.match(r.pub, /mã lý do BASIS_UNMEASURED \(chưa đo được cơ sở chi: lượt chưa định giá 7 ngày 58,7% > 20% — bổ sung giá model vào bảng giá; nâng credit KHÔNG giải quyết\) · model có lượt chưa định giá: gemini-3\.5-flash-lite$/m);
+  r = await chay(150, { setCredit: "ignored" });
+  assert.match(r.pub, /KHÔNG CHUYỂN: hạn mức ĐANG ÁP sau khi đặt credit vẫn không đủ · mã lý do NO_PLATFORM_CREDIT \(/, "kiểm lại sau khi đặt cũng mang mã lý do");
+  r = await chay(150, {});
+  assert.ok(!r.pub.includes("mã lý do"), "ĐỦ ⇒ không mã lý do");
+
+  console.log("  ✓ ops org-ai-cutover --apply --credit: kiểm credit ĐỀ XUẤT trước khi ghi (100 ⇒ không ghi gì), đặt qua lõi → đọc lại → kiểm lại → chuyển; chuyển hỏng ⇒ hoàn về ghi đè cũ; lỗi giữa chừng mà bot đã / có thể đã sang AI dùng chung ⇒ GIỮ credit; hoàn hỏng nói thẳng; log công khai không mang số tiền; KHÔNG CHUYỂN ⇒ mã lý do (không số tiền)");
+  // Chạy cùng lượt với --apply (sync-fixtures đã gọi hàm này) — phép dò dùng fetcher GIẢ, không gọi mạng thật.
+  await testOrgAiCutoverProjectProbe();
+}
+
+// ═══════════ Số project bằng ErrorInfo — trên fetcher GIẢ (không gọi Google thật, không khoá thật) ═══════════
+
+type CauTraLoi = number | { status: number; body: unknown } | Error;
+
+/** Google giả: trả lần lượt theo `tra`, ghi lại từng lượt gọi để soát khoá đi đâu. */
+function googleGia(tra: readonly CauTraLoi[]) {
+  const goi: { url: string; init: RequestInit }[] = [];
+  const fetcher: ProbeFetcher = async (url, init) => {
+    goi.push({ url, init });
+    const a = tra[goi.length - 1];
+    if (a === undefined) throw new Error("gọi nhiều hơn số câu trả lời đã dựng");
+    if (a instanceof Error) throw a;
+    const { status, body } = typeof a === "number" ? { status: a, body: {} as unknown } : a;
+    return { status, text: async () => (typeof body === "string" ? body : JSON.stringify(body)) };
+  };
+  return { fetcher, goi };
+}
+
+const ei = (reason: string, consumer: string) => ({ status: 403, body: { error: { code: 403, message: "x", status: "PERMISSION_DENIED", details: [{ "@type": "type.googleapis.com/google.rpc.ErrorInfo", reason, domain: "googleapis.com", metadata: { consumer } }] } } });
+
+/** Mọi lượt gọi: POST, khoá CHỈ ở header x-goog-api-key, không ở URL / thân, không theo chuyển hướng, có trần thời gian. */
+function soatLuotGoi(goi: readonly { url: string; init: RequestInit }[], khoa: string) {
+  for (const g of goi) {
+    assert.equal(g.init.method, "POST");
+    assert.equal(g.init.redirect, "manual", "không theo chuyển hướng");
+    assert.ok(g.init.signal instanceof AbortSignal, "mỗi lượt có trần thời gian");
+    assert.equal((g.init.headers as Record<string, string>)["x-goog-api-key"], khoa);
+    assert.ok(!g.url.includes(khoa) && !String(g.init.body).includes(khoa), "khoá không ở URL / thân");
+    assert.ok(PROJECT_PROBE_APIS.some((a) => a.url === g.url), `chỉ gọi API đã khai: ${g.url}`);
+  }
+}
+
+/** Kết quả dò không bao giờ mang khoá (kể cả một mảnh `AIzaSy…`). */
+function khongLoKhoa(kq: unknown, khoa: string) {
+  const s = JSON.stringify(kq);
+  assert.ok(!s.includes(khoa) && !s.includes("AIzaSy") && !s.includes(khoa.slice(4, 24)), `khoá lọt vào kết quả / lỗi: ${s}`);
+}
+
+export async function testOrgAiCutoverProjectProbe() {
+  assert.ok(PROJECT_PROBE_TIMEOUT_MS > 0 && PROJECT_PROBE_TIMEOUT_MS <= 15_000);
+
+  // API đầu tiên đang tắt ⇒ 403 SERVICE_DISABLED ⇒ số từ ErrorInfo, MỘT lượt gọi.
+  let g = googleGia([ei("SERVICE_DISABLED", "projects/123456789012")]);
+  let kq = await probeKeyProject(` ${KHOA_NEN_TANG} `, g.fetcher);
+  assert.deepEqual([kq.number, kq.api, kq.via, kq.reason, g.goi.length], ["123456789012", "Cloud Translation", "ERROR_INFO", null, 1]);
+  soatLuotGoi(g.goi, KHOA_NEN_TANG);
+  khongLoKhoa(kq, KHOA_NEN_TANG);
+
+  // API đang BẬT (thành công / 400 thiếu tham số) ⇒ sang API kế; khoá giới hạn API ⇒ API_KEY_SERVICE_BLOCKED.
+  g = googleGia([200, ei("API_KEY_SERVICE_BLOCKED", "projects/987654321098")]);
+  kq = await probeKeyProject(KHOA_NEN_TANG, g.fetcher);
+  assert.deepEqual([kq.number, kq.api, kq.via, g.goi.length], ["987654321098", "Cloud Natural Language", "ERROR_INFO", 2]);
+  assert.match(kq.attempts[0], /^Cloud Translation: HTTP 200 — API đang bật ở project này, sang API kế$/);
+  soatLuotGoi(g.goi, KHOA_NEN_TANG);
+
+  // Không ErrorInfo ⇒ câu SERVICE_DISABLED đúng mẫu (đường dự phòng); 400 / chuyển hướng ⇒ sang API kế, không theo.
+  g = googleGia([{ status: 400, body: { error: { code: 400, message: "Required Text", status: "INVALID_ARGUMENT" } } }, 302, { status: 403, body: { error: { code: 403, message: CAU_SERVICE_DISABLED, status: "PERMISSION_DENIED" } } }]);
+  kq = await probeKeyProject(KHOA_NEN_TANG, g.fetcher);
+  assert.deepEqual([kq.number, kq.api, kq.via, g.goi.length], ["555566667777", "Cloud Vision", "MESSAGE", 3]);
+  assert.match(kq.attempts[1], /HTTP 302 — chuyển hướng, không theo/);
+
+  // Hết danh sách mà không có project ⇒ UNAVAILABLE; Google LẶP LẠI khoá trong thông điệp ⇒ phải che trước khi giữ.
+  g = googleGia([
+    { status: 400, body: { error: { code: 400, message: `Invalid payload for key ${KHOA_NEN_TANG}`, status: "INVALID_ARGUMENT" } } },
+    { status: 403, body: { error: { code: 403, message: `Permission denied (${KHOA_NEN_TANG}) ${KHOA_KHAC_DANG}`, details: [{ "@type": "type.googleapis.com/google.rpc.ErrorInfo", reason: "ACCESS_TOKEN_SCOPE_INSUFFICIENT", metadata: { consumer: "projects/123456789012" } }] } } },
+    { status: 500, body: `<html>lỗi ${KHOA_NEN_TANG}</html>` },
+  ]);
+  kq = await probeKeyProject(KHOA_NEN_TANG, g.fetcher);
+  assert.deepEqual([kq.number, kq.reason, g.goi.length], [null, "UNAVAILABLE — không suy được (không API nào trả project)", 3]);
+  assert.match(kq.attempts[0], /«Invalid payload for key •••»/, "giữ câu của Google để chẩn đoán — đã che khoá");
+  assert.match(kq.attempts[1], /«Permission denied \(•••\) AIza•••»/, "khoá Google KHÁC trong câu cũng bị che");
+  assert.match(kq.attempts[1], /ACCESS_TOKEN_SCOPE_INSUFFICIENT — không suy được/, "ErrorInfo lý do khác ⇒ không lấy consumer");
+  khongLoKhoa(kq, KHOA_NEN_TANG);
+  khongLoKhoa(kq, KHOA_KHAC_DANG);
+
+  // Lỗi mạng / quá trần thời gian: chỉ TÊN lỗi (thông điệp có thể mang khoá); khoá hỏng ⇒ dừng sớm.
+  const het = new Error(`timeout khi gửi ${KHOA_NEN_TANG}`);
+  het.name = "TimeoutError";
+  g = googleGia([het, { status: 400, body: { error: { code: 400, message: "API key not valid. Please pass a valid API key.", details: [{ "@type": "type.googleapis.com/google.rpc.ErrorInfo", reason: "API_KEY_INVALID", metadata: { service: "language.googleapis.com" } }] } } }]);
+  kq = await probeKeyProject(KHOA_NEN_TANG, g.fetcher);
+  assert.deepEqual([kq.number, kq.reason, g.goi.length], [null, "UNAVAILABLE — Google báo khoá không hợp lệ (API_KEY_INVALID)", 2]);
+  assert.equal(kq.attempts[0], "Cloud Translation: không gọi được (TimeoutError)");
+  khongLoKhoa(kq, KHOA_NEN_TANG);
+
+  // Khoá KHÔNG đúng dạng khoá API Google (vd PLATFORM_AI_PROVIDER=anthropic) ⇒ không gửi sang Google.
+  for (const sai of ["sk-ant-api03-DUMMY0000000000000000000000000000", "", "AIzaNGAN"]) {
+    g = googleGia([ei("SERVICE_DISABLED", "projects/123456789012")]);
+    kq = await probeKeyProject(sai, g.fetcher);
+    assert.deepEqual([kq.number, g.goi.length], [null, 0], `«${sai.slice(0, 6)}…» không được gửi đi`);
+    assert.match(kq.reason ?? "", /không gửi sang Google/);
+  }
+
+  // ── probeServerKeyProjects: CHỈ khoá ở PROJECT_PROBE_KEY_ENVS, đọc từ env; khoá BYOK của khách (dù có trong env giả) không bao giờ tới phép dò ──
+  const env: Record<string, string> = { PLATFORM_AI_API_KEY: ` ${KHOA_NEN_TANG} `, GEMINI_API_KEY: KHOA_NHA, GEMINI_BYOK_API_KEY: KHOA_BYOK, "hslc-hmt-shop/gemini-byok": KHOA_BYOK, OPENAI_API_KEY: KHOA_BYOK };
+  const daGoi: string[] = [];
+  const goiTatCa: { url: string; init: RequestInit }[] = [];
+  const doThat = async (k: string) => {
+    daGoi.push(k);
+    const gg = googleGia([ei("SERVICE_DISABLED", k === KHOA_NEN_TANG ? "projects/111111111111" : "projects/222222222222")]);
+    const out = await probeKeyProject(k, gg.fetcher);
+    goiTatCa.push(...gg.goi);
+    return out;
+  };
+  const kqServer = await probeServerKeyProjects((n) => env[n], doThat);
+  assert.deepEqual(daGoi, [KHOA_NEN_TANG, KHOA_NHA], "đúng hai khoá của nền tảng / nhà, theo thứ tự khai");
+  assert.deepEqual(Object.keys(kqServer), ["PLATFORM_AI_API_KEY", "GEMINI_API_KEY (nhà)"]);
+  assert.deepEqual([kqServer["PLATFORM_AI_API_KEY"]?.number, kqServer["GEMINI_API_KEY (nhà)"]?.number], ["111111111111", "222222222222"]);
+  assert.ok(goiTatCa.every((x) => (x.init.headers as Record<string, string>)["x-goog-api-key"] !== KHOA_BYOK), "khoá BYOK không bao giờ rời máy");
+  assert.equal(compareProjects(resolvedProjectNumber(null, kqServer["PLATFORM_AI_API_KEY"] ?? null), resolvedProjectNumber(null, kqServer["GEMINI_API_KEY (nhà)"] ?? null)), "DIFFERENT_PROJECT");
+  // Hai biến cùng một khoá ⇒ dò MỘT lần; Lookup đã ra số ⇒ bỏ qua; thiếu biến ⇒ null.
+  daGoi.length = 0;
+  const envCung: Record<string, string> = { PLATFORM_AI_API_KEY: KHOA_NEN_TANG, GEMINI_API_KEY: KHOA_NEN_TANG };
+  const cung = await probeServerKeyProjects((n) => envCung[n], doThat);
+  assert.deepEqual([daGoi.length, cung["PLATFORM_AI_API_KEY"]?.number, cung["GEMINI_API_KEY (nhà)"]?.number], [1, "111111111111", "111111111111"]);
+  assert.equal(compareProjects(cung["PLATFORM_AI_API_KEY"]?.number ?? null, cung["GEMINI_API_KEY (nhà)"]?.number ?? null), "SAME_PROJECT");
+  daGoi.length = 0;
+  const boQua = await probeServerKeyProjects((n) => env[n], doThat, (label) => label === "PLATFORM_AI_API_KEY");
+  assert.deepEqual([daGoi, boQua["PLATFORM_AI_API_KEY"]], [[KHOA_NHA], null]);
+  daGoi.length = 0;
+  assert.deepEqual(await probeServerKeyProjects(() => undefined, doThat), { PLATFORM_AI_API_KEY: null, "GEMINI_API_KEY (nhà)": null });
+  assert.equal(daGoi.length, 0);
+  // Phép dò ném ⇒ lượt KIỂM vẫn đi tiếp; câu lỗi chỉ mang TÊN lỗi (thông điệp có khoá).
+  const nem = await probeServerKeyProjects(
+    (n) => env[n],
+    async (k) => {
+      throw new Error(`hỏng với ${k}`);
+    },
+  );
+  assert.equal(nem["PLATFORM_AI_API_KEY"]?.reason, "UNAVAILABLE — lỗi khi dò (Error)");
+  khongLoKhoa(nem, KHOA_NEN_TANG);
+  khongLoKhoa(nem, KHOA_NHA);
+
+  // Từ kết quả dò tới dòng tóm tắt công khai: chỉ dạng CHE, không khoá.
+  const bc = projectReportLines("PLATFORM_AI_API_KEY", null, "UNAVAILABLE — container không có credential quản trị Google Cloud (service account)", kqServer["PLATFORM_AI_API_KEY"] ?? null);
+  assert.equal(bc.pub, "Project PLATFORM_AI_API_KEY: project …1111 (12 chữ số) — nguồn ErrorInfo của Google (không cần credential quản trị)");
+  assert.ok(bc.priv.some((l) => l.includes("số 111111111111")), "số đầy đủ ở phần mã hoá");
+  khongLoKhoa(bc, KHOA_NEN_TANG);
+  console.log("  ✓ ops org-ai-cutover: số project bằng ErrorInfo của Google (SERVICE_DISABLED / API_KEY_SERVICE_BLOCKED ⇒ consumer; câu đúng mẫu là dự phòng; API đang bật ⇒ sang API kế) — chỉ khoá của nền tảng / nhà đọc từ env, khoá ở header, không theo chuyển hướng, khoá không lọt vào kết quả; tóm tắt chỉ dạng che");
 }

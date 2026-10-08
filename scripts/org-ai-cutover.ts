@@ -13,8 +13,17 @@
                                ghi đè · lượt · trần tiền · credit · ngân sách mềm) · credit có đủ cho AI Bán hàng theo NHỊP CHI GẦN ĐÂY
                                không (mục dưới) · VÂN TAY từng khoá (12 ký tự đầu SHA-256 — khoá chỉ nằm trong RAM, KHÔNG BAO GIỜ in) ·
                                SAME_KEY / DIFFERENT_KEY · project Google của từng khoá (API Keys Lookup bằng credential quản trị NẾU
-                               container có; không có ⇒ UNAVAILABLE, không đoán) — KHÔNG gọi API nào khác bằng khoá của khách (review
-                               #659) · ai còn dùng `gemini-byok` · sổ AI 30 ngày theo nguồn tiền × nhà cung cấp × model × loại việc.
+                               container có; Lookup không ra số ⇒ DÒ bằng ErrorInfo của Google — mục dưới; vẫn không ra ⇒ UNAVAILABLE,
+                               không đoán) — KHÔNG gọi API nào khác bằng khoá của khách (review #659) · ai còn dùng `gemini-byok` · sổ AI
+                               30 ngày theo nguồn tiền × nhà cung cấp × model × loại việc.
+
+  SỐ PROJECT BẰNG CHÍNH KHOÁ (08/10/2026, chủ shop hỏi «ID project của token API hệ thống»): container không có credential quản trị
+  Google Cloud nên Lookup luôn UNAVAILABLE. Gọi một API Google nhận API key mà project chỉ-dùng-Gemini thường CHƯA BẬT (Translation ·
+  Natural Language · Vision, thân CỐ Ý rỗng — API đang bật cũng không dịch / phân tích gì nên không phát sinh phí) ⇒ cổng Google trả 403
+  kèm `google.rpc.ErrorInfo` (SERVICE_DISABLED / API_KEY_SERVICE_BLOCKED) mang `metadata.consumer = projects/<số>`. CHỈ cho khoá của
+  NỀN TẢNG và khoá Gemini của NHÀ (`PROJECT_PROBE_KEY_ENVS`, đọc thẳng env của container — hàm dò không nhận khoá từ nơi nào khác), và
+  chỉ khi khoá đúng dạng khoá API Google (khoá Anthropic không bao giờ bị gửi sang Google). Số ĐẦY ĐỦ chỉ ở phần MÃ HOÁ; dòng tóm tắt
+  công khai chỉ mang dạng CHE (4 chữ số cuối + độ dài) và phép so CÙNG / KHÁC project.
    · `<mã> --apply [--credit=<USD>]`
                                CHUYỂN: `connectorKey = platform`, model = mặc định / chính sách của nền tảng, KHÔNG dự phòng — qua ĐÚNG
                                `saveChatbotEngineAsOperator` (lõi của /platform/org/<mã>: bot đang bật mà AI dùng chung chưa dùng được
@@ -34,9 +43,15 @@
   thì không vào cơ sở); chỉ lượt ĐÃ định giá (lượt chưa định giá đếm riêng, in cạnh); 30 ngày không lượt nào định giá được ⇒ CHƯA ĐO
   ĐƯỢC ⇒ KHÔNG đủ (không chuyển mù).
 
+  MÃ LÝ DO (08/10/2026): production chạy `--apply --credit=150` rồi `=300` và cả hai lần chỉ ra «KHÔNG CHUYỂN: credit ĐỀ XUẤT không đủ» —
+  lý do thật nằm trong phần mã hoá mà người vận hành không giải được, nên không biết nên nâng credit hay sửa chỗ khác. Nay credit KHÔNG đủ
+  ⇒ dòng tóm tắt mang `CreditRefusalCode` sinh ở ĐÚNG nhánh của `creditVerdict` (PLAN_UNREADABLE · NO_PLATFORM_CREDIT · BASIS_UNMEASURED ·
+  MONTH_EXHAUSTED · COST_HARD_BELOW_NEED · CREDIT_BELOW_NEED) + việc phải làm — chỉ tỷ lệ % lượt chưa định giá, tên model chưa có giá và
+  cờ TRONG / VƯỢT trần đường ops, KHÔNG một con số tiền nào (`refusalTag`).
+
   Cả lượt chạy trong `ma_hoa_ket_qua`: vân tay, project / tài khoản Google, gói / credit / chi tiêu / sổ AI của khách CHỈ nằm ở phần MÃ
-  HOÁ; dòng `[ops:tom-tat] ` (log công khai — kho PUBLIC) chỉ mang nhãn và phán quyết (SAME / DIFFERENT · ĐỦ / KHÔNG · ĐẠT / CHƯA), không
-  một con số USD nào.
+  HOÁ; dòng `[ops:tom-tat] ` (log công khai — kho PUBLIC) chỉ mang nhãn, phán quyết và mã lý do (SAME / DIFFERENT · ĐỦ / KHÔNG · ĐẠT /
+  CHƯA), không một con số USD nào.
 */
 const ARGS = process.argv.slice(2);
 const CHAY_THANG = Boolean(process.argv[1] && process.argv[1].endsWith("org-ai-cutover.ts"));
@@ -302,6 +317,18 @@ export function spendLines(series: readonly DayCost[], b: SpendBasis): string[] 
 export type CreditLimits = { platformCreditUsdPerMonth: number; softOnly?: boolean; costUsdPerMonth?: { hard: number | null } };
 
 /**
+ * MÃ LÝ DO khi credit KHÔNG đủ — đi ra dòng tóm tắt công khai (không kèm số tiền) để người vận hành biết SỬA CHỖ NÀO mà không cần giải
+ * phần mã hoá. Sinh ở ĐÚNG nhánh của `creditVerdict` (không phân tích câu `reason`):
+ *  · `PLAN_UNREADABLE` không đọc được gói · `NO_PLATFORM_CREDIT` credit 0 ⇒ AI dùng chung không mở;
+ *  · `BASIS_UNMEASURED` chưa đo được cơ sở chi — nâng credit KHÔNG giải quyết (sửa bảng giá / đợi dữ liệu; chi tiết ở `EffectiveBasis.cause`);
+ *  · `MONTH_EXHAUSTED` tháng này đã DÙNG chạm trần nguồn PLATFORM;
+ *  · `COST_HARD_BELOW_NEED` trần TIỀN tháng (costUsdHard) tự nó thấp hơn mức cần ⇒ `--credit` không sửa được, phải nâng ở /platform/org/<mã>;
+ *  · `CREDIT_BELOW_NEED` credit (đề xuất / đang áp) thấp hơn mức tối thiểu.
+ */
+export type CreditRefusalCode = "PLAN_UNREADABLE" | "NO_PLATFORM_CREDIT" | "BASIS_UNMEASURED" | "MONTH_EXHAUSTED" | "COST_HARD_BELOW_NEED" | "CREDIT_BELOW_NEED";
+export type CreditVerdict = { ok: true; reason: string; code: null } | { ok: false; reason: string; code: CreditRefusalCode };
+
+/**
  * Credit AI dùng chung có đủ cho AI Bán hàng không, trên CƠ SỞ THÁNG theo nhịp chi gần đây (`spendBasis().monthly`). Credit 0 ⇒ KHÔNG
  * (AI dùng chung không mở cho tổ chức — `platformChatAi` — kể cả ngân sách mềm). Trần THẬT của nguồn PLATFORM y như `evaluateAiQuota`:
  * ngân sách mềm (`softOnly`) ⇒ chỉ trần tiền tháng nếu có khai (không có ⇒ ĐỦ, vượt chỉ cảnh báo); trần cứng ⇒ min(trần tiền, credit).
@@ -309,23 +336,30 @@ export type CreditLimits = { platformCreditUsdPerMonth: number; softOnly?: boole
  * Chưa đo được (null) ⇒ không kết luận ⇒ KHÔNG đủ (không chuyển mù). Ước tính theo giá model đang chạy — model của nền tảng rẻ / đắt
  * hơn thì lệch; biên an toàn gánh phần ấy.
  */
-export function creditVerdict(limits: CreditLimits | null, monthlyBasisUsd: number | null, monthUsedUsd = 0, daysLeftInMonth = 30): { ok: boolean; reason: string } {
-  if (!limits) return { ok: false, reason: "không đọc được gói của tổ chức" };
+export function creditVerdict(limits: CreditLimits | null, monthlyBasisUsd: number | null, monthUsedUsd = 0, daysLeftInMonth = 30): CreditVerdict {
+  if (!limits) return { ok: false, code: "PLAN_UNREADABLE", reason: "không đọc được gói của tổ chức" };
   const credit = limits.platformCreditUsdPerMonth;
-  if (!(credit > 0)) return { ok: false, reason: "gói không có credit AI dùng chung (0 USD) — AI dùng chung không mở cho tổ chức, bot sẽ không chạy" };
+  if (!(credit > 0)) return { ok: false, code: "NO_PLATFORM_CREDIT", reason: "gói không có credit AI dùng chung (0 USD) — AI dùng chung không mở cho tổ chức, bot sẽ không chạy" };
   const costHard = limits.costUsdPerMonth?.hard ?? null;
   const ceiling = limits.softOnly ? costHard : costHard === null ? credit : Math.min(costHard, credit);
-  if (ceiling === null) return { ok: true, reason: `ngân sách mềm ${credit} USD/tháng — vượt chỉ cảnh báo, không chặn bot` };
+  if (ceiling === null) return { ok: true, code: null, reason: `ngân sách mềm ${credit} USD/tháng — vượt chỉ cảnh báo, không chặn bot` };
   const what = ceiling < credit ? `trần tiền tháng ${ceiling} USD (ô costUsdHard — thấp hơn credit ${credit})` : `trần cứng ${ceiling} USD/tháng`;
-  if (monthlyBasisUsd === null) return { ok: false, reason: `${what} mà chưa đo được nhịp chi AI Bán hàng (30 ngày trọn không lượt nào định giá được) — không chuyển mù` };
+  if (monthlyBasisUsd === null) return { ok: false, code: "BASIS_UNMEASURED", reason: `${what} mà chưa đo được nhịp chi AI Bán hàng (30 ngày trọn không lượt nào định giá được) — không chuyển mù` };
   const needMonth = usd2(monthlyBasisUsd * CREDIT_MARGIN);
   const needRest = usd2((monthlyBasisUsd / 30) * daysLeftInMonth * CREDIT_MARGIN);
   const left = usd2(ceiling - monthUsedUsd);
+  // Trần TIỀN tháng TỰ NÓ có qua được cùng hai vế không: không ⇒ nâng credit bằng --credit cũng vô ích (mã COST_HARD_BELOW_NEED).
+  const costRoom = costHard === null ? null : usd2(costHard - monthUsedUsd);
+  const costHardShort = costHard !== null && costRoom !== null && (costRoom <= 0 || costHard < needMonth || costRoom < needRest);
+  const shortCode: CreditRefusalCode = costHardShort ? "COST_HARD_BELOW_NEED" : "CREDIT_BELOW_NEED";
   const fix = "đặt credit đủ bằng --apply --credit=<USD> (hoặc ghi đè AI ở /platform/org/<mã>), hoặc chuyển ngân sách mềm trước";
-  if (left <= 0) return { ok: false, reason: `${what}: tháng này không còn gì (đã dùng ${usd2(monthUsedUsd)}) — bot bị chặn ngay; ${fix}` };
-  if (ceiling < needMonth) return { ok: false, reason: `${what} < ${needMonth} USD (cơ sở tháng ${monthlyBasisUsd} × ${CREDIT_MARGIN}) — bot sẽ im giữa tháng; ${fix}` };
-  if (left < needRest) return { ok: false, reason: `tháng này còn ${left} USD (đã dùng ${usd2(monthUsedUsd)}) < ${needRest} USD cho ${daysLeftInMonth} ngày còn lại — bot sẽ im trước cuối tháng; ${fix}` };
-  return { ok: true, reason: `${what} ≥ ${needMonth} USD (cơ sở tháng ${monthlyBasisUsd} × ${CREDIT_MARGIN}); tháng này còn ${left} USD ≥ ${needRest} USD cho ${daysLeftInMonth} ngày còn lại` };
+  // Không còn gì: trần TIỀN tháng (costUsdHard) đang chặn ⇒ COST_HARD_BELOW_NEED (nâng credit vô ích, review #694 — credit 500 · costHard 50
+  // · đã dùng 60); «hết tháng» chỉ khi CREDIT là trần đã dùng chạm (nâng credit là đúng việc); trần 0 mà chưa dùng gì là trần quá thấp.
+  const exhaustedCode: CreditRefusalCode = costHardShort ? "COST_HARD_BELOW_NEED" : monthUsedUsd > 0 ? "MONTH_EXHAUSTED" : "CREDIT_BELOW_NEED";
+  if (left <= 0) return { ok: false, code: exhaustedCode, reason: `${what}: tháng này không còn gì (đã dùng ${usd2(monthUsedUsd)}) — bot bị chặn ngay; ${fix}` };
+  if (ceiling < needMonth) return { ok: false, code: shortCode, reason: `${what} < ${needMonth} USD (cơ sở tháng ${monthlyBasisUsd} × ${CREDIT_MARGIN}) — bot sẽ im giữa tháng; ${fix}` };
+  if (left < needRest) return { ok: false, code: shortCode, reason: `tháng này còn ${left} USD (đã dùng ${usd2(monthUsedUsd)}) < ${needRest} USD cho ${daysLeftInMonth} ngày còn lại — bot sẽ im trước cuối tháng; ${fix}` };
+  return { ok: true, code: null, reason: `${what} ≥ ${needMonth} USD (cơ sở tháng ${monthlyBasisUsd} × ${CREDIT_MARGIN}); tháng này còn ${left} USD ≥ ${needRest} USD cho ${daysLeftInMonth} ngày còn lại` };
 }
 
 /** Tỷ lệ lượt chưa định giá trong 7 ngày trọn mà quá ngưỡng này thì cơ sở chi không đáng tin ⇒ KHÔNG kết luận đủ. */
@@ -346,7 +380,9 @@ export function platformCandidateModels(set: PlatformAiPolicySet, baseModel: str
   return [...out].sort();
 }
 
-export type PriceRatio = { ratio: number | null; reason: string };
+/** Vì sao chưa cân được giá — cho MÃ LÝ DO công khai (`refusalTag`); `model` = TÊN model chưa có giá (chỗ phải sửa bảng giá). */
+export type PriceRatioCause = "NO_TOKENS" | "NO_PLATFORM_MODEL" | "UNPRICED_CURRENT_MODEL" | "UNPRICED_PLATFORM_MODEL" | "ZERO_COST";
+export type PriceRatio = { ratio: number | null; reason: string; cause?: PriceRatioCause | null; model?: string | null };
 
 /**
  * Cơ sở chi đo bằng model ĐANG CHẠY; sau khi chuyển, lượt chạy model của NỀN TẢNG (có thể đắt hơn hàng chục lần). Tỷ lệ = max(1, max
@@ -367,24 +403,24 @@ export function platformPriceRatio(rows: readonly SalesUsageRow[], now: Date, pl
     m.outT += outT;
     mix.set(k, m);
   }
-  if (!mix.size) return { ratio: null, reason: "không có token AI Bán hàng trong 30 ngày trọn để cân giá" };
-  if (!platformModels.length) return { ratio: null, reason: "không biết model AI dùng chung (khoá nền tảng chưa sẵn sàng)" };
+  if (!mix.size) return { ratio: null, cause: "NO_TOKENS", reason: "không có token AI Bán hàng trong 30 ngày trọn để cân giá" };
+  if (!platformModels.length) return { ratio: null, cause: "NO_PLATFORM_MODEL", reason: "không biết model AI dùng chung (khoá nền tảng chưa sẵn sàng)" };
   let current = 0;
   let inT = 0;
   let outT = 0;
   for (const [model, m] of mix) {
     const p = model ? price(model) : null;
-    if (!p) return { ratio: null, reason: `model đang chạy «${model || "(không tên)"}» chưa có trong bảng giá` };
+    if (!p) return { ratio: null, cause: "UNPRICED_CURRENT_MODEL", model: model || null, reason: `model đang chạy «${model || "(không tên)"}» chưa có trong bảng giá` };
     current += (m.inT * p.input + m.outT * p.output) / 1e6;
     inT += m.inT;
     outT += m.outT;
   }
-  if (!(current > 0)) return { ratio: null, reason: "chi phí hiện tại theo bảng giá bằng 0 — không cân được" };
+  if (!(current > 0)) return { ratio: null, cause: "ZERO_COST", reason: "chi phí hiện tại theo bảng giá bằng 0 — không cân được" };
   let worst = 1;
   const parts: string[] = [];
   for (const model of platformModels) {
     const p = price(model);
-    if (!p) return { ratio: null, reason: `model AI dùng chung «${model}» chưa có trong bảng giá` };
+    if (!p) return { ratio: null, cause: "UNPRICED_PLATFORM_MODEL", model, reason: `model AI dùng chung «${model}» chưa có trong bảng giá` };
     const r = (inT * p.input + outT * p.output) / 1e6 / current;
     parts.push(`${model} × ${r.toFixed(2)}`);
     worst = Math.max(worst, r);
@@ -392,15 +428,89 @@ export function platformPriceRatio(rows: readonly SalesUsageRow[], now: Date, pl
   return { ratio: Math.round(worst * 1000) / 1000, reason: `giá model AI dùng chung / model đang chạy trên hỗn hợp token 30 ngày: ${parts.join(" · ")} ⇒ nhân cơ sở × ${(Math.round(worst * 1000) / 1000).toFixed(3)} (không dưới 1)` };
 }
 
-export type EffectiveBasis = { monthly: number | null; unpricedNote: boolean; reason: string };
+/** Vì sao cơ sở dùng để phán quyết là `null`: chưa có lượt định giá được · lượt chưa định giá quá ngưỡng · chưa cân được giá nền tảng. */
+export type BasisCause = "NO_SPEND" | "UNPRICED_SHARE" | "PRICE_UNKNOWN";
+/**
+ * `unpricedPct` = % lượt chưa định giá trong 7 ngày trọn (tỷ lệ ĐẾM, không phải tiền — được ra log công khai; 1 chữ số thập phân để
+ * 20,4% không in thành «20% > 20%»); `null` khi 7 ngày không có lượt. `priceCause` / `priceModel` chép từ `PriceRatio` khi giá là nguyên nhân.
+ */
+export type EffectiveBasis = { monthly: number | null; unpricedNote: boolean; reason: string; cause: BasisCause | null; unpricedPct: number | null; priceCause: PriceRatioCause | null; priceModel: string | null };
 
 /** Cơ sở tháng DÙNG ĐỂ PHÁN QUYẾT = cơ sở đo × tỷ lệ giá nền tảng; chưa đo / tỷ lệ chưa biết / lượt chưa định giá 7 ngày > 20% ⇒ `null`. */
 export function effectiveBasis(b: Pick<SpendBasis, "monthly" | "turns7d" | "unpriced7d">, ratio: PriceRatio): EffectiveBasis {
   const unpricedNote = b.unpriced7d > 0;
-  if (b.monthly === null) return { monthly: null, unpricedNote, reason: "chưa đo được nhịp chi" };
-  if (b.turns7d > 0 && b.unpriced7d / b.turns7d > UNPRICED_SHARE_MAX) return { monthly: null, unpricedNote, reason: `lượt chưa định giá 7 ngày ${b.unpriced7d}/${b.turns7d} > ${UNPRICED_SHARE_MAX * 100}% — cơ sở không đáng tin` };
-  if (ratio.ratio === null) return { monthly: null, unpricedNote, reason: `chưa cân được giá model AI dùng chung: ${ratio.reason}` };
-  return { monthly: usd2(b.monthly * ratio.ratio), unpricedNote, reason: `cơ sở tháng ${b.monthly} × ${ratio.ratio} = ${usd2(b.monthly * ratio.ratio)} USD` };
+  const unpricedPct = b.turns7d > 0 ? Math.round((b.unpriced7d / b.turns7d) * 1000) / 10 : null;
+  const base = { unpricedNote, unpricedPct, priceCause: null, priceModel: null };
+  if (b.monthly === null) return { ...base, monthly: null, cause: "NO_SPEND", reason: "chưa đo được nhịp chi" };
+  if (b.turns7d > 0 && b.unpriced7d / b.turns7d > UNPRICED_SHARE_MAX) return { ...base, monthly: null, cause: "UNPRICED_SHARE", reason: `lượt chưa định giá 7 ngày ${b.unpriced7d}/${b.turns7d} > ${UNPRICED_SHARE_MAX * 100}% — cơ sở không đáng tin` };
+  if (ratio.ratio === null) return { ...base, monthly: null, cause: "PRICE_UNKNOWN", priceCause: ratio.cause ?? null, priceModel: ratio.model ?? null, reason: `chưa cân được giá model AI dùng chung: ${ratio.reason}` };
+  return { ...base, monthly: usd2(b.monthly * ratio.ratio), cause: null, reason: `cơ sở tháng ${b.monthly} × ${ratio.ratio} = ${usd2(b.monthly * ratio.ratio)} USD` };
+}
+
+/** Tên model có lượt AI Bán hàng CHƯA định giá trong 7 ngày trọn — chỗ phải bổ sung bảng giá. Không tên ⇒ «(không tên)». HÀM THUẦN. */
+export function unpricedSalesModels(rows: readonly SalesUsageRow[], now: Date): string[] {
+  const days = new Set(Array.from({ length: 7 }, (_, i) => vnDayKey(new Date(now.getTime() - (i + 1) * DAY_MS))));
+  const out = new Set<string>();
+  for (const r of rows) if ((SALES_FEATURES as readonly string[]).includes(r.feature) && days.has(r.day) && r.unknownCost > 0) out.add(r.model || "(không tên)");
+  return [...out].sort();
+}
+
+/** Mảnh khoá API Google (`AIza…`) và chuỗi ngẫu nhiên dài ≥ 30 — MỘT bộ mẫu cho cả `redactKeyish` lẫn `publicModelName`. */
+const GOOGLE_KEY_FRAGMENT_RE = /AIza[0-9A-Za-z_-]{6,}/g;
+const LONG_RANDOM_RUN_RE = /[0-9A-Za-z_-]{30,}/g;
+
+/**
+ * Tên model đưa ra log CÔNG KHAI: chỉ dạng mã model (chữ, số, . _ - : /, ≤ 64 ký tự) — chuỗi lạ trong sổ AI không bao giờ lọt ra
+ * nguyên văn. Ô model do NGƯỜI gõ: khoá dán nhầm (`AIza…`, `sk-…`, hay chuỗi ngẫu nhiên dài) sẽ thành «model chưa định giá» ⇒ cũng
+ * «(tên lạ)», không bao giờ ra log của kho PUBLIC (review #694).
+ */
+export function publicModelName(m: string | null | undefined): string {
+  if (!m) return "(không tên)";
+  if (/AIza|^sk-/i.test(m) || m.search(GOOGLE_KEY_FRAGMENT_RE) >= 0 || m.search(LONG_RANDOM_RUN_RE) >= 0) return "(tên lạ)";
+  return /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,63}$/.test(m) ? m : "(tên lạ)";
+}
+
+/**
+ * Phần MÃ LÝ DO của dòng tóm tắt công khai khi credit KHÔNG đủ: mã + việc phải làm, KHÔNG một con số tiền nào (chỉ tỷ lệ % lượt chưa
+ * định giá, ngưỡng % và tên model). `minimumUsd` chỉ để quyết cờ TRONG / VƯỢT trần đường ops — số không bao giờ được in. Đủ ⇒ "".
+ */
+export function refusalTag(code: CreditRefusalCode | null, eb: EffectiveBasis, unpricedModels: readonly string[], minimumUsd: number | null): string {
+  if (!code) return "";
+  const pct = (v: number) => `${String(v).replace(".", ",")}%`;
+  // Có lượt chưa định giá mà tỷ lệ làm tròn ra 0 ⇒ «<0,1%», không in «0%» (0% đọc như KHÔNG có lượt nào).
+  const pctLuot = (v: number) => (v === 0 && eb.unpricedNote ? "<0,1%" : pct(v));
+  const ten = [...new Set(unpricedModels.map(publicModelName))];
+  const dsModel = ten.length ? ` · model có lượt chưa định giá: ${ten.slice(0, 3).join(", ")}${ten.length > 3 ? ", …" : ""}` : "";
+  const chuaGia = eb.unpricedNote && eb.unpricedPct !== null ? ` · lượt chưa định giá 7 ngày ${pctLuot(eb.unpricedPct)}${dsModel}` : dsModel;
+  let why: string;
+  if (code === "PLAN_UNREADABLE") why = "không đọc được gói của tổ chức — kiểm /platform/org/<mã>";
+  else if (code === "NO_PLATFORM_CREDIT") why = "gói không có credit AI dùng chung — chạy --apply --credit=<USD>";
+  else if (code === "MONTH_EXHAUSTED") why = "tháng này đã dùng chạm trần nguồn PLATFORM — nâng credit (credit tối thiểu ở phần mã hoá đã gồm phần đã dùng)";
+  else if (code === "COST_HARD_BELOW_NEED") why = "trần tiền tháng (costUsdHard) thấp hơn mức cần — --credit KHÔNG sửa được, nâng ô đó ở /platform/org/<mã>";
+  else if (code === "CREDIT_BELOW_NEED")
+    why = `credit thấp hơn mức tối thiểu — mức tối thiểu ${minimumUsd !== null && minimumUsd > SCRIPT_AI_CREDIT_MAX_USD ? "VƯỢT trần đường ops: đặt ở /platform/org/<mã>" : "TRONG trần đường ops: chạy lại --apply --credit=<mức tối thiểu ở phần mã hoá>"}`;
+  else {
+    const fix = "nâng credit KHÔNG giải quyết";
+    if (eb.cause === "UNPRICED_SHARE") why = `chưa đo được cơ sở chi: lượt chưa định giá 7 ngày ${eb.unpricedPct === null ? "—" : pctLuot(eb.unpricedPct)} > ${pct(Math.round(UNPRICED_SHARE_MAX * 1000) / 10)} — bổ sung giá model vào bảng giá; ${fix}`;
+    else if (eb.cause === "PRICE_UNKNOWN") {
+      const p = eb.priceCause;
+      const chiTiet =
+        p === "UNPRICED_CURRENT_MODEL"
+          ? `model đang chạy «${publicModelName(eb.priceModel)}» chưa có trong bảng giá`
+          : p === "UNPRICED_PLATFORM_MODEL"
+            ? `model AI dùng chung «${publicModelName(eb.priceModel)}» chưa có trong bảng giá`
+            : p === "NO_PLATFORM_MODEL"
+              ? "chưa biết model AI dùng chung (khoá nền tảng chưa sẵn sàng)"
+              : p === "NO_TOKENS"
+                ? "không có token AI Bán hàng 30 ngày trọn để cân giá"
+                : p === "ZERO_COST"
+                  ? "chi phí theo bảng giá bằng 0"
+                  : "không rõ";
+      why = `chưa cân được giá model AI dùng chung: ${chiTiet}; ${fix}`;
+    } else why = `chưa đo được cơ sở chi (30 ngày trọn không lượt AI Bán hàng nào định giá được); ${fix}`;
+    return ` · mã lý do ${code} (${why})${eb.cause === "UNPRICED_SHARE" ? dsModel : chuaGia}`;
+  }
+  return ` · mã lý do ${code} (${why})${chuaGia}`;
 }
 
 /** Credit TỐI THIỂU (USD nguyên, làm tròn LÊN) qua được cả hai vế của `creditVerdict` khi trần = credit. Chưa đo được ⇒ `null`. */
@@ -573,12 +683,16 @@ export async function applyCutover(org: { code: string }, proposed: number | nul
   const used = await deps.platformMonthUsed(org.code, now);
   const daysLeft = daysLeftInMonthVN(now);
   const candidate: CreditLimits | null = limits ? (proposed === null ? limits.limits : { ...limits.limits, platformCreditUsdPerMonth: proposed }) : null;
-  console.log(creditFloorLine(minimumCredit(eb.monthly, used, daysLeft), used, daysLeft, candidate));
+  const minimum = minimumCredit(eb.monthly, used, daysLeft);
+  console.log(creditFloorLine(minimum, used, daysLeft, candidate));
   const verdict = creditVerdict(candidate, eb.monthly, used, daysLeft);
   console.log(`Credit${proposed === null ? "" : " ĐỀ XUẤT"}: ${verdict.reason}`);
+  // Mã lý do (không số tiền) ra log công khai — người vận hành biết sửa chỗ nào mà không phải giải phần mã hoá.
+  const unpricedModels = unpricedSalesModels(rows, now);
   if (!verdict.ok) {
-    if (proposed === null) tomTat(`KHÔNG CHUYỂN: credit AI dùng chung không đủ cho AI Bán hàng theo nhịp chi gần đây${ghiChuChuaGia} — chưa ghi gì (credit tối thiểu trong phần mã hoá; đặt bằng --apply --credit=<USD>)`);
-    else tomTat(`KHÔNG CHUYỂN: credit ĐỀ XUẤT không đủ cho AI Bán hàng theo nhịp chi gần đây${ghiChuChuaGia} — CHƯA GHI GÌ (chi tiết trong phần mã hoá)`);
+    const maLyDo = refusalTag(verdict.code, eb, unpricedModels, minimum);
+    if (proposed === null) tomTat(`KHÔNG CHUYỂN: credit AI dùng chung không đủ cho AI Bán hàng theo nhịp chi gần đây${ghiChuChuaGia} — chưa ghi gì (credit tối thiểu trong phần mã hoá; đặt bằng --apply --credit=<USD>)${maLyDo}`);
+    else tomTat(`KHÔNG CHUYỂN: credit ĐỀ XUẤT không đủ cho AI Bán hàng theo nhịp chi gần đây${ghiChuChuaGia} — CHƯA GHI GÌ (chi tiết trong phần mã hoá)${maLyDo}`);
     return 1;
   }
 
@@ -598,7 +712,10 @@ export async function applyCutover(org: { code: string }, proposed: number | nul
       for (const l of limitsLines(after, await deps.readControl(org.code))) console.log(`[sau khi đặt credit] ${l}`);
       const again = creditVerdict(after?.limits ?? null, eb.monthly, used, daysLeft);
       console.log(`Kiểm lại trên hạn mức đang áp: ${again.reason}`);
-      if (!again.ok) return undoCredit(org.code, credit, deps, "hạn mức đang áp sau khi đặt vẫn không đủ");
+      if (!again.ok) {
+        tomTat(`KHÔNG CHUYỂN: hạn mức ĐANG ÁP sau khi đặt credit vẫn không đủ${refusalTag(again.code, eb, unpricedModels, minimum)}`);
+        return undoCredit(org.code, credit, deps, "hạn mức đang áp sau khi đặt vẫn không đủ");
+      }
     } catch (e) {
       console.log(`Đọc lại hạn mức: ${errorText(e)}`);
       tomTat("KHÔNG CHUYỂN: lỗi khi đọc lại hạn mức sau khi đặt credit (chi tiết trong phần mã hoá)");
@@ -721,6 +838,192 @@ async function gcpLookup(apiKey: string, token: string): Promise<GcpProject> {
   return out;
 }
 
+// ─────────────────────────── SỐ PROJECT TỪ ErrorInfo — CHỈ khoá của NỀN TẢNG / NHÀ ───────────────────────────
+
+/**
+ * Biến môi trường DUY NHẤT mà phép dò đọc khoá: khoá của NỀN TẢNG và khoá Gemini của NHÀ, ở `.env` của máy chủ. Khoá BYOK của tổ chức
+ * khách không bao giờ có ở đây (chỉ được giải và băm trong lib/connectors/service.ts) — phép dò gửi khoá sang API mà chủ khoá chưa
+ * từng nhờ gọi, nên với khoá của khách đó là dùng khoá của người khác vào việc họ không giao (review #659).
+ */
+export const PROJECT_PROBE_KEY_ENVS = [
+  { env: PLATFORM_AI_ENV.apiKey, label: "PLATFORM_AI_API_KEY" },
+  { env: "GEMINI_API_KEY", label: "GEMINI_API_KEY (nhà)" },
+] as const;
+
+/**
+ * API Google nhận API key mà project chỉ-dùng-Gemini thường CHƯA BẬT. Thân CỐ Ý rỗng / thiếu ô bắt buộc: API đang tắt ⇒ cổng Google từ
+ * chối (403 + ErrorInfo) TRƯỚC khi đọc thân; API đang bật ⇒ 400 thiếu tham số / 200 rỗng — không một ký tự nào được dịch / phân tích /
+ * nhận dạng, nên không phát sinh phí ở project của chủ khoá. API đang bật ⇒ sang API kế.
+ */
+export const PROJECT_PROBE_APIS = [
+  { label: "Cloud Translation", url: "https://translation.googleapis.com/language/translate/v2", body: "{}" },
+  { label: "Cloud Natural Language", url: "https://language.googleapis.com/v1/documents:analyzeSentiment", body: "{}" },
+  { label: "Cloud Vision", url: "https://vision.googleapis.com/v1/images:annotate", body: '{"requests":[]}' },
+] as const;
+
+/** Trần thời gian của MỖI lượt gọi (cả lúc đọc thân) — lượt quá trần coi như không gọi được, sang API kế. */
+export const PROJECT_PROBE_TIMEOUT_MS = 8_000;
+/** Lý do ErrorInfo mà `metadata.consumer` là project SỞ HỮU khoá (khoá API không kèm `x-goog-user-project` thì consumer = project của khoá). */
+export const PROJECT_ERROR_REASONS = ["SERVICE_DISABLED", "API_KEY_SERVICE_BLOCKED"] as const;
+/** Khoá API Google: `AIza` + 35 ký tự. Khoá không đúng dạng (vd khoá Anthropic của PLATFORM_AI_PROVIDER=anthropic) KHÔNG được gửi sang Google. */
+const GOOGLE_API_KEY_RE = /^AIza[0-9A-Za-z_-]{35}$/;
+const CONSUMER_RE = /^projects\/(\d{6,20})$/;
+/** Đường DỰ PHÒNG khi thân lỗi không có ErrorInfo: đúng câu mẫu của SERVICE_DISABLED, số 6–20 chữ số — không đọc số nào khác trong câu. */
+const SERVICE_DISABLED_MESSAGE_RE = /\bAPI has not been used in project (\d{6,20}) before or it is disabled\b/;
+const ERROR_INFO_TYPE = "type.googleapis.com/google.rpc.ErrorInfo";
+
+/** Đối tượng `error` của thân lỗi Google (đã JSON.parse; vài API bọc trong mảng). Không phải đối tượng ⇒ `null`. */
+function googleErrorOf(body: unknown): Record<string, unknown> | null {
+  const b = Array.isArray(body) ? (body[0] as unknown) : body;
+  if (!b || typeof b !== "object") return null;
+  const e = (b as Record<string, unknown>).error;
+  return e && typeof e === "object" && !Array.isArray(e) ? (e as Record<string, unknown>) : null;
+}
+
+/** `google.rpc.ErrorInfo` ĐẦU TIÊN trong `error.details[]` — chỉ hai ô cần. Không có ⇒ `null`. */
+export function errorInfoOf(body: unknown): { reason: string | null; consumer: string | null } | null {
+  const details = googleErrorOf(body)?.details;
+  if (!Array.isArray(details)) return null;
+  for (const d of details) {
+    if (!d || typeof d !== "object" || (d as Record<string, unknown>)["@type"] !== ERROR_INFO_TYPE) continue;
+    const x = d as { reason?: unknown; metadata?: unknown };
+    const meta = x.metadata && typeof x.metadata === "object" ? (x.metadata as Record<string, unknown>) : {};
+    return { reason: typeof x.reason === "string" ? x.reason : null, consumer: typeof meta.consumer === "string" ? meta.consumer : null };
+  }
+  return null;
+}
+
+export type ProjectFromError = { number: string; via: "ERROR_INFO" | "MESSAGE"; reason: string };
+
+/**
+ * Số project từ MỘT phản hồi lỗi của Google. Có ErrorInfo ⇒ CHỈ tin ErrorInfo: lý do thuộc `PROJECT_ERROR_REASONS` và `consumer` đúng dạng
+ * `projects/<số>`; lý do khác / consumer lạ ⇒ `null` (KHÔNG đọc tới câu chữ). Không có ErrorInfo ⇒ đường dự phòng: HTTP 403 và câu
+ * đúng mẫu SERVICE_DISABLED. Còn lại ⇒ `null`. HÀM THUẦN.
+ */
+export function projectFromGoogleError(status: number, body: unknown): ProjectFromError | null {
+  if (status < 400) return null;
+  const info = errorInfoOf(body);
+  if (info) {
+    if (!info.reason || !(PROJECT_ERROR_REASONS as readonly string[]).includes(info.reason)) return null;
+    const m = CONSUMER_RE.exec(info.consumer ?? "");
+    return m ? { number: m[1], via: "ERROR_INFO", reason: info.reason } : null;
+  }
+  if (status !== 403) return null;
+  const msg = googleErrorOf(body)?.message;
+  const m = typeof msg === "string" ? SERVICE_DISABLED_MESSAGE_RE.exec(msg) : null;
+  return m ? { number: m[1], via: "MESSAGE", reason: "SERVICE_DISABLED" } : null;
+}
+
+/** Che mọi chuỗi giống khoá trong một câu TRƯỚC khi giữ lại: chính khoá đang dò, mọi khoá API Google, mọi chuỗi ngẫu nhiên dài ≥ 30. */
+export function redactKeyish(text: string, key: string): string {
+  const k = key.trim();
+  const t = k ? text.split(k).join("•••") : text;
+  return t.replace(GOOGLE_KEY_FRAGMENT_RE, "AIza•••").replace(LONG_RANDOM_RUN_RE, "•••");
+}
+
+export type KeyProjectProbe = { number: string | null; api: string | null; via: "ERROR_INFO" | "MESSAGE" | null; attempts: string[]; reason: string | null };
+/** Đủ cho phép dò: `fetch` toàn cục khớp kiểu này; bài kiểm tiêm bản giả (không gọi mạng thật). */
+export type ProbeFetcher = (url: string, init: RequestInit) => Promise<{ status: number; text: () => Promise<string> }>;
+
+/**
+ * Dò số project của MỘT khoá API Google bằng ErrorInfo (`PROJECT_PROBE_APIS` lần lượt). Khoá đi ở header `x-goog-api-key` (không ở
+ * URL), không theo chuyển hướng, mỗi lượt có trần thời gian; khoá không bao giờ vào kết quả — câu chữ của Google qua `redactKeyish`
+ * trước khi giữ. Khoá sai dạng ⇒ không gửi gì. API đang bật / lỗi không mang project ⇒ sang API kế; Google báo khoá hỏng ⇒ dừng (API
+ * nào cũng sẽ trả như vậy). Hết danh sách ⇒ UNAVAILABLE — không đoán.
+ */
+export async function probeKeyProject(key: string, fetcher: ProbeFetcher = fetch): Promise<KeyProjectProbe> {
+  const out: KeyProjectProbe = { number: null, api: null, via: null, attempts: [], reason: null };
+  const k = key.trim();
+  if (!GOOGLE_API_KEY_RE.test(k)) return { ...out, reason: "UNAVAILABLE — khoá không đúng dạng khoá API Google (AIza…): không gửi sang Google" };
+  for (const api of PROJECT_PROBE_APIS) {
+    let status: number;
+    let raw = "";
+    try {
+      const r = await fetcher(api.url, { method: "POST", headers: { "Content-Type": "application/json", "x-goog-api-key": k }, body: api.body, redirect: "manual", signal: AbortSignal.timeout(PROJECT_PROBE_TIMEOUT_MS) });
+      status = r.status;
+      if (status >= 400) raw = (await r.text()).slice(0, 20_000);
+    } catch (e) {
+      out.attempts.push(`${api.label}: không gọi được (${e instanceof Error ? e.name : "lỗi"})`);
+      continue;
+    }
+    if (status < 300) {
+      out.attempts.push(`${api.label}: HTTP ${status} — API đang bật ở project này, sang API kế`);
+      continue;
+    }
+    if (status < 400) {
+      out.attempts.push(`${api.label}: HTTP ${status} — chuyển hướng, không theo`);
+      continue;
+    }
+    let body: unknown = null;
+    try {
+      body = JSON.parse(raw) as unknown;
+    } catch {
+      body = null;
+    }
+    const p = projectFromGoogleError(status, body);
+    if (p) {
+      out.attempts.push(`${api.label}: HTTP ${status} · ${p.reason} (${p.via === "ERROR_INFO" ? "ErrorInfo" : "câu SERVICE_DISABLED đúng mẫu"})`);
+      return { ...out, number: p.number, api: api.label, via: p.via };
+    }
+    const info = errorInfoOf(body);
+    const msg = googleErrorOf(body)?.message;
+    const trich = typeof msg === "string" && msg ? redactKeyish(msg, k).slice(0, 160) : "";
+    out.attempts.push(`${api.label}: HTTP ${status} · ${info ? (info.reason ?? "ErrorInfo không lý do") : "không có ErrorInfo"} — không suy được${trich ? ` («${trich}»)` : ""}`);
+    if (info?.reason === "API_KEY_INVALID") return { ...out, reason: "UNAVAILABLE — Google báo khoá không hợp lệ (API_KEY_INVALID)" };
+  }
+  return { ...out, reason: "UNAVAILABLE — không suy được (không API nào trả project)" };
+}
+
+/**
+ * Dò số project cho ĐÚNG các khoá ở `PROJECT_PROBE_KEY_ENVS`, đọc qua `readEnv` — hàm này KHÔNG nhận khoá từ nơi gọi, nên không đường
+ * nào đưa được khoá BYOK của khách vào phép dò. `skip(label)` ⇒ không dò (Lookup đã ra số). Hai biến cùng một khoá ⇒ dò MỘT lần.
+ */
+export async function probeServerKeyProjects(readEnv: (name: string) => string | undefined, probe: (key: string) => Promise<KeyProjectProbe>, skip: (label: string) => boolean = () => false): Promise<Record<string, KeyProjectProbe | null>> {
+  const out: Record<string, KeyProjectProbe | null> = {};
+  const daDo = new Map<string, Promise<KeyProjectProbe>>();
+  for (const { env, label } of PROJECT_PROBE_KEY_ENVS) {
+    const k = (readEnv(env) ?? "").trim();
+    if (!k || skip(label)) {
+      out[label] = null;
+      continue;
+    }
+    let p = daDo.get(k);
+    if (!p) {
+      // Một lượt dò hỏng không được làm hỏng cả lượt KIỂM: ra UNAVAILABLE, câu lỗi chỉ mang TÊN lỗi (không bao giờ thông điệp — có thể mang khoá).
+      p = probe(k).catch((e: unknown): KeyProjectProbe => ({ number: null, api: null, via: null, attempts: [], reason: `UNAVAILABLE — lỗi khi dò (${e instanceof Error ? e.name : "lỗi"})` }));
+      daDo.set(k, p);
+    }
+    out[label] = await p;
+  }
+  return out;
+}
+
+/** Số project ở dạng CHE cho log công khai: 4 chữ số cuối + độ dài (ngắn dưới 8 chữ số ⇒ chỉ độ dài). Không phải chuỗi số ⇒ «project —». */
+export function maskProjectNumber(n: string | null): string {
+  if (!n || !/^\d+$/.test(n)) return "project —";
+  return n.length >= 8 ? `project …${n.slice(-4)} (${n.length} chữ số)` : `project … (${n.length} chữ số)`;
+}
+
+/** Số project ĐÃ BIẾT của một khoá: Lookup (credential quản trị) trước, rồi dò ErrorInfo. */
+export function resolvedProjectNumber(lookup: GcpProject | null, probe: KeyProjectProbe | null): string | null {
+  return lookup?.number ?? probe?.number ?? null;
+}
+
+/**
+ * Dòng in cho project của MỘT khoá ở `.env`: `priv` (phần MÃ HOÁ — số đầy đủ, API, từng lượt gọi đã che khoá) và `pub` (dòng tóm tắt
+ * công khai — chỉ dạng CHE). Lookup ra số ⇒ giữ nguyên dòng «Lookup CÓ» như trước; dò ra số ⇒ dạng che + nguồn; không ra ⇒ UNAVAILABLE.
+ */
+export function projectReportLines(label: string, lookup: GcpProject | null, lookupReason: string | null, probe: KeyProjectProbe | null): { priv: string[]; pub: string } {
+  const priv = [`Project của ${label}: ${lookup ? `số ${lookup.number ?? "—"} · id ${lookup.id ?? "—"} · tên ${lookup.name ?? "—"} · chủ ${lookup.owners ? lookup.owners.join(", ") || "(không có roles/owner)" : "—"}${lookup.reason ? ` · ${lookup.reason}` : ""}` : (lookupReason ?? "—")}`];
+  if (probe) {
+    const ketQua = probe.number ? `số ${probe.number} · qua ${probe.api ?? "—"} (${probe.via === "ERROR_INFO" ? "ErrorInfo" : "câu SERVICE_DISABLED đúng mẫu"})` : (probe.reason ?? "UNAVAILABLE");
+    priv.push(`Project của ${label} — dò ErrorInfo của Google (không cần credential quản trị): ${ketQua}${probe.attempts.length ? ` · lượt gọi: ${probe.attempts.join(" · ")}` : ""}`);
+  }
+  if (lookup?.number) return { priv, pub: `Project ${label}: Lookup CÓ` };
+  if (probe?.number) return { priv, pub: `Project ${label}: ${maskProjectNumber(probe.number)} — nguồn ErrorInfo của Google (không cần credential quản trị)` };
+  return { priv, pub: `Project ${label}: Lookup ${lookup?.reason ?? lookupReason ?? "UNAVAILABLE"}${probe ? " · dò ErrorInfo: UNAVAILABLE — không suy được (chi tiết trong phần mã hoá)" : ""}` };
+}
+
 // ─────────────────────────── ĐỌC CHUNG ───────────────────────────
 
 type Org = { code: string; name: string; isHome: boolean; status: string };
@@ -830,24 +1133,27 @@ async function audit(org: Org): Promise<number> {
   const token = sa.ok ? await gcpAccessToken(sa.sa) : null;
   const lookupReason = !sa.ok ? `UNAVAILABLE — ${sa.reason}` : token && !token.ok ? `UNAVAILABLE — ${token.reason}` : null;
   // Lookup cần CHÍNH khoá ⇒ chỉ chạy cho khoá ở `.env` của máy chủ; khoá của tổ chức không rời lib/connectors/service.ts.
-  const keys = [
-    ["PLATFORM_AI_API_KEY", platformKey],
-    ["GEMINI_API_KEY (nhà)", homeGemini],
-  ] as const;
+  // Cùng MỘT danh sách với phép dò ErrorInfo (PROJECT_PROBE_KEY_ENVS): PLATFORM_AI_API_KEY ⇒ platformKey · GEMINI_API_KEY ⇒ homeGemini.
+  const keys = PROJECT_PROBE_KEY_ENVS.map(({ env, label }) => [label, (process.env[env] ?? "").trim() || null] as const);
   const projects: Record<string, GcpProject | null> = {};
+  for (const [label, key] of keys) projects[label] = key && token && token.ok ? await gcpLookup(key, token.token) : null;
+  // Lookup không ra số ⇒ dò bằng ErrorInfo của Google. Hàm dò tự đọc khoá từ env theo PROJECT_PROBE_KEY_ENVS (khoá của nền tảng / nhà) —
+  // không nhận khoá nào từ đây, nên khoá BYOK của khách không bao giờ tới được nó.
+  const errorInfo = await probeServerKeyProjects((name) => process.env[name], probeKeyProject, (label) => Boolean(projects[label]?.number));
+  const projectNo: Record<string, string | null> = {};
   for (const [label, key] of keys) {
-    const lookup = key && token && token.ok ? await gcpLookup(key, token.token) : null;
-    projects[label] = lookup;
+    const probed = errorInfo[label] ?? null;
+    projectNo[label] = resolvedProjectNumber(projects[label] ?? null, probed);
     if (!key) continue;
-    // Project / chủ project là dữ liệu nhạy cảm ⇒ CHỈ trong phần MÃ HOÁ; dòng tóm tắt chỉ nói có / không.
-    console.log(`Project của ${label}: ${lookup ? `số ${lookup.number ?? "—"} · id ${lookup.id ?? "—"} · tên ${lookup.name ?? "—"} · chủ ${lookup.owners ? lookup.owners.join(", ") || "(không có roles/owner)" : "—"}${lookup.reason ? ` · ${lookup.reason}` : ""}` : (lookupReason ?? "—")}`);
-    tomTat(`Project ${label}: Lookup ${lookup?.number ? "CÓ" : (lookup?.reason ?? lookupReason ?? "UNAVAILABLE")}`);
+    // Project / chủ project là dữ liệu nhạy cảm ⇒ số ĐẦY ĐỦ chỉ trong phần MÃ HOÁ; dòng tóm tắt chỉ có / không, hay dạng CHE.
+    const baoCao = projectReportLines(label, projects[label] ?? null, lookupReason, probed);
+    for (const l of baoCao.priv) console.log(l);
+    tomTat(baoCao.pub);
   }
   if (sa.ok) tomTat(`Credential quản trị Google: biến ${sa.env}`);
   tomTat(`Project ${org.code}/gemini-byok: UNAVAILABLE — Lookup cần chính khoá, mà khoá của tổ chức chỉ được giải trong lib/connectors/service.ts`);
   const P = projects["PLATFORM_AI_API_KEY"];
-  const H = projects["GEMINI_API_KEY (nhà)"];
-  tomTat(`Project nền tảng ↔ BYOK: ${compareProjects(P?.number ?? null, null)} · tài khoản Google nền tảng ↔ BYOK: ${compareAccounts(P?.owners ?? null, null)} · project nền tảng ↔ nhà: ${compareProjects(P?.number ?? null, H?.number ?? null)}`);
+  tomTat(`Project nền tảng ↔ BYOK: ${compareProjects(projectNo["PLATFORM_AI_API_KEY"] ?? null, null)} · tài khoản Google nền tảng ↔ BYOK: ${compareAccounts(P?.owners ?? null, null)} · project nền tảng ↔ nhà: ${compareProjects(projectNo["PLATFORM_AI_API_KEY"] ?? null, projectNo["GEMINI_API_KEY (nhà)"] ?? null)}`);
 
   // Hạn mức AI ĐANG ÁP + credit theo NHỊP CHI GẦN ĐÂY — số liệu chỉ ở phần MÃ HOÁ; log công khai chỉ phán quyết.
   const now = new Date();
@@ -863,12 +1169,14 @@ async function audit(org: Org): Promise<number> {
   console.log(`Cơ sở dùng để phán quyết: ${eb.reason}`);
   const monthUsed = (await sourceUsage(org.code, "PLATFORM", now)).costUsdMonth;
   const daysLeft = daysLeftInMonthVN(now);
-  console.log(creditFloorLine(minimumCredit(eb.monthly, monthUsed, daysLeft), monthUsed, daysLeft, limits?.limits ?? null));
+  const minimum = minimumCredit(eb.monthly, monthUsed, daysLeft);
+  console.log(creditFloorLine(minimum, monthUsed, daysLeft, limits?.limits ?? null));
   const verdict = creditVerdict(limits?.limits ?? null, eb.monthly, monthUsed, daysLeft);
   console.log(`Credit: ${verdict.reason}`);
   const kieuTran = limits ? (limits.limits.softOnly ? "ngân sách mềm" : "trần cứng") : "không đọc được gói";
   const ghiChuChuaGia = eb.unpricedNote ? " (có lượt chưa định giá — cơ sở có thể thấp)" : "";
-  tomTat(`Credit AI dùng chung đủ cho AI Bán hàng (theo nhịp chi gần đây, giá model AI dùng chung): ${verdict.ok ? "ĐỦ" : "KHÔNG"} (${kieuTran})${ghiChuChuaGia}`);
+  const maLyDo = refusalTag(verdict.code, eb, unpricedSalesModels(rows, now), minimum);
+  tomTat(`Credit AI dùng chung đủ cho AI Bán hàng (theo nhịp chi gần đây, giá model AI dùng chung): ${verdict.ok ? "ĐỦ" : "KHÔNG"} (${kieuTran})${ghiChuChuaGia}${maLyDo}`);
   const goiYCredit = !verdict.ok && limits !== null && eb.monthly !== null;
   if (goiYCredit) tomTat("Muốn chuyển: --apply --credit=<USD> (credit tối thiểu đề xuất ở phần mã hoá)");
   const plat = await platformChatAi(org.code).catch((e: unknown) => ({ ok: false as const, reason: `không đọc được (${e instanceof Error ? e.name : "lỗi"})` }));
