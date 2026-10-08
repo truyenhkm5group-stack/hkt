@@ -3,7 +3,7 @@
   "mission_id": "chatbot-security-4",
   "title": "Bài học bot: tên miền đuôi lạ, dấu chấm che giấu, @ sau dấu câu, ký tự vô hình không lọt; hồ sơ máy tạo thôi làm gợi ý / dự phòng",
   "business_goal": "",
-  "status": "PLANNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -26,7 +26,21 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-08T01:42:25.352Z",
-  "updated_at": "2026-10-08T01:42:25.352Z",
-  "last_heartbeat": "2026-10-08T01:42:25.352Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-08T01:43:02.113Z",
+  "last_heartbeat": "2026-10-08T01:43:02.113Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "fix/chatbot-security-4",
+    "sha": "b508e539a708d617dfe093d6e54af01cc3cda5ca",
+    "at": "2026-10-08T01:43:02.113Z",
+    "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+    "title": "Bài học bot: tên miền đuôi lạ, dấu chấm che giấu, @ sau dấu câu, ký tự vô hình không lọt; hồ sơ máy tạo thôi làm gợi ý / dự phòng",
+    "summary": "Vá MEDIUM + LOW của review bảo mật #654: tên miền dạng CHUNG thay danh sách 20 đuôi (.click · .live · .cc … lọt cả bộ lọc bài học lẫn bước che), gỡ che dấu chấm («chấm com» · [.] · « . » · ． · 。), handle @ sau dấu câu / ＠ toàn khổ, ký tự định dạng chen giữa từ, WhatsApp / Viber; hồ sơ do máy tạo không làm gợi ý lookup_customer và không làm tên / địa chỉ dự phòng; bài chủ shop chép lại khác dấu câu không rời bộ.",
+    "tests": [
+      "tests/self-service-journey.test.ts: 17 ca riskyLesson mới (13 bắt · 4 không chặn nhầm) + P.Co Nhue/H.Me Linh + redactForLearning + normalizeLessons (ký tự vô hình · toàn khổ) + screenAiLessons khoá đã gấp + lookup_customer hồ sơ máy tạo + tên/địa chỉ dự phòng",
+      "kiểm đột biến 29: 28 chết, 1 tương đương ⇒ bỏ nhánh thừa",
+      "inbox-advanced · sales-order-sync · chat-cost-report · hội thoại vàng 12/12",
+      "typecheck + eslint + hợp đồng tĩnh (cô lập + vệ sinh) sạch; ký tự vô hình trên dòng thêm: 0"
+    ]
+  }
 }
