@@ -3,7 +3,7 @@
   "mission_id": "saas-identity-followup",
   "title": "Theo sau P0 danh tính: gửi lại form Tạo khách không phát liên kết cho người job chưa tạo; mở khoá tài khoản ghi lại chỉ mục đăng nhập",
   "business_goal": "",
-  "status": "RUNNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -28,7 +28,18 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-08T12:47:23.798Z",
-  "updated_at": "2026-10-08T12:47:23.798Z",
-  "last_heartbeat": "2026-10-08T12:47:23.798Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-08T12:47:35.098Z",
+  "last_heartbeat": "2026-10-08T12:47:35.098Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "fix/identity-followup",
+    "sha": "d227c148adbe70adbf1d8c8593621b41573480a8",
+    "at": "2026-10-08T12:47:35.098Z",
+    "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+    "title": "Theo sau P0 danh tính: gửi lại form Tạo khách không phát liên kết cho người job chưa tạo; mở khoá tài khoản ghi lại chỉ mục đăng nhập",
+    "summary": "L1: Tạo khách cùng khoá mà đầu vào khác ⇒ CREATE_CUSTOMER_KEY_REUSED, người nhận liên kết lấy từ job; L3: mở khoá tài khoản ghi lại chỉ mục danh tính; L2: bộ quét ghi users theo từng hàm; L5: S21 4c khoá nơi gọi loader kích hoạt; chú thích/tài liệu",
+    "tests": [
+      "tsc + eslint sạch; runner access-control, user-invites, identity-email-login, saas-platform đạt trước và sau rebase; hợp đồng tĩnh sau commit đạt (platform-isolation-static 4c, test-hygiene, repo-integrity, migration, test-org-codes, ops-log-leak, ops-concurrency); đột biến 7/7 + 1 bị bắt"
+    ]
+  }
 }
