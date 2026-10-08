@@ -35,7 +35,7 @@ import { AI_BALANCE_FLAG, orgsWithFlag } from "@/lib/platform/org-flags";
 import { EMPTY_AI_BALANCE_PERIOD, type AiBalancePeriod } from "@/lib/billing/ai-balance-rules";
 import { readAiCustomerUsage, type AiCustomerReading } from "@/lib/pricing/ai-customer";
 import { orgPriceVersion, PRICING_MARGIN_KEY, readMarginConfig } from "@/lib/pricing/price-book";
-import { computeOverage, fairUseVerdict, marginBand, parseMarginConfig, usageAlert, type FairUseVerdict, type MarginBand, type MarginConfig, type OverageResult, type UsageAlert } from "@/lib/pricing/versions";
+import { billableIncluded, computeOverage, fairUseVerdict, marginBand, parseMarginConfig, usageAlert, type FairUseVerdict, type MarginBand, type MarginConfig, type OverageResult, type UsageAlert } from "@/lib/pricing/versions";
 
 export type PricingResult = { ok: true; message: string } | { error: string };
 
@@ -413,8 +413,12 @@ export async function loadPricingEconomics(user: SessionUser, now: Date = new Da
     let overage: OverageResult | null = null;
     let fairUse: FairUseVerdict | null = null;
     if (price) {
-      const usersUsed = price.overage.mode === "BILLED" ? await getPlanUsage(o.code).then((u) => u.rows.find((x) => x.kind === "users")?.used ?? null).catch(() => null) : null;
-      overage = computeOverage(price, { aiCustomers: acRead?.value ?? null, aiCustomersCoverage: acRead?.coverage ?? "NOT_MEASURED", fanpages: usage.readings.fanpages_active, users: usersUsed, aiConversations: usage.readings.ai_conversations, aiReplies: usage.readings.outgoing_ai_messages });
+      const planUsage = price.overage.mode === "BILLED" ? await getPlanUsage(o.code).catch(() => null) : null;
+      const usersUsed = planUsage?.rows.find((x) => x.kind === "users")?.used ?? null;
+      // Phần gồm TÍNH TIỀN (OVERAGE O1) — cùng hàm với bảng kê và màn khách: không tính lại ghế đã mua thêm. Không đọc được số
+      // người dùng ⇒ dòng người dùng «chưa biết» (không bao giờ đoán phần gồm thiếu ghế mua thêm rồi tính tiền).
+      const included = billableIncluded(price.included, { quotaOverrides: pricing.row.quotaOverrides, addons: planUsage?.plan?.addons ?? null });
+      overage = computeOverage({ ...price, included }, { aiCustomers: acRead?.value ?? null, aiCustomersCoverage: acRead?.coverage ?? "NOT_MEASURED", fanpages: usage.readings.fanpages_active, users: usersUsed, aiConversations: usage.readings.ai_conversations, aiReplies: usage.readings.outgoing_ai_messages });
       fairUse = fairUseVerdict({ aiConversations: usage.readings.ai_conversations, aiReplies: usage.readings.outgoing_ai_messages }, price.included, version.version?.alerts);
     }
     // Số dư AI (0235): MỘT công thức cho mọi tổ chức — dòng «khách AI vượt» trừ đúng số khách đã thu qua sổ cái (cùng hàm với

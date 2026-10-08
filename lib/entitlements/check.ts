@@ -17,7 +17,7 @@
  *    Luật này áp cho MỌI workspace, kể cả nhà — không có gói ẩn vô hạn nào trong mã (quyết định giá V1, 07/10/2026).
  */
 import { count, eq, gte, isNull, ne, sql } from "drizzle-orm";
-import { getDb, getPlatformDb, schema } from "@/db";
+import { getDb, getPlatformDb, schema, type Db } from "@/db";
 import { forgetMemo, memo } from "@/lib/cache";
 import { currentOrganization, withOrganization } from "@/lib/platform/context";
 import { findOrganization } from "@/lib/platform/organizations";
@@ -95,50 +95,57 @@ export async function resolvePlan(org: Pick<Organization, "isHome" | "plan"> & {
   return { key: row.key, name: row.name, description: row.description, limits, planLimits: parsed.limits, addons, undeclared: parsed.undeclared, fellBack };
 }
 
-// ─── Bộ đếm: ĐẾM THẬT trong CSDL của tổ chức NGỮ CẢNH ───
+// ─── Bộ đếm: ĐẾM THẬT trong CSDL của tổ chức (ngữ cảnh — hoặc handle CHỈ ĐỌC do nơi gọi đưa vào, `countEntitlementUsage`) ───
 
-type Counter = () => Promise<number>;
+type Counter = (db: Db) => Promise<number>;
 
 const COUNTERS: Partial<Record<EntitlementKind, Counter>> = {
-  users: async () => {
-    const db = await getDb();
+  users: async (db) => {
     const [r] = await db.select({ n: count() }).from(schema.users).where(eq(schema.users.active, true));
     return Number(r?.n ?? 0);
   },
-  pages: async () => {
-    const db = await getDb();
+  pages: async (db) => {
     const [r] = await db.select({ n: count() }).from(schema.metaPages).where(ne(schema.metaPages.status, "ARCHIVED"));
     return Number(r?.n ?? 0);
   },
-  workflows: async () => {
-    const db = await getDb();
+  workflows: async (db) => {
     const [r] = await db.select({ n: count() }).from(schema.workflowRules).where(ne(schema.workflowRules.status, "ARCHIVED"));
     return Number(r?.n ?? 0);
   },
-  objects: async () => {
-    const db = await getDb();
+  objects: async (db) => {
     // Đối tượng đã lưu trữ không tính (như trang / luật) — khôi phục thì kiểm lại hạn mức ở `restoreObject`.
     const [r] = await db.select({ n: count() }).from(schema.metaObjects).where(ne(schema.metaObjects.status, "ARCHIVED"));
     return Number(r?.n ?? 0);
   },
-  records: async () => {
-    const db = await getDb();
+  records: async (db) => {
     // Bản ghi còn sống (xoá mềm = `deleted_at` ⇒ không tính), mọi đối tượng tuỳ biến cộng lại.
     const [r] = await db.select({ n: count() }).from(schema.customRecords).where(isNull(schema.customRecords.deletedAt));
     return Number(r?.n ?? 0);
   },
-  aiDraftsPerDay: async () => {
-    const db = await getDb();
+  aiDraftsPerDay: async (db) => {
     // Cùng mốc "hôm nay" với trần kỹ thuật của AI Builder (00:00 giờ Việt Nam) — một ngày, một định nghĩa.
     const [r] = await db.select({ n: count() }).from(schema.aiBlueprintDrafts).where(gte(schema.aiBlueprintDrafts.createdAt, dauNgayVN(new Date())));
     return Number(r?.n ?? 0);
   },
-  storageMb: async () => {
-    const db = await getDb();
+  storageMb: async (db) => {
     const [r] = await db.select({ bytes: sql<string>`coalesce(sum(${schema.customFiles.size}), 0)` }).from(schema.customFiles);
     return Number(r?.bytes ?? 0) / MB;
   },
 };
+
+/**
+ * Số đếm THẬT của mọi loại hạn mức trên một handle CSDL tổ chức do nơi gọi đưa vào — CÙNG bộ đếm với `checkEntitlement`. Dành cho
+ * công cụ CHỈ ĐỌC (`getDbForInspection` — không migrate, không ghi), ví dụ lượt chạy thử chuyển giá V1 (`lib/pricing/migration.ts`).
+ * Loại chưa có bộ đếm ⇒ `null` (chưa biết ≠ 0).
+ */
+export async function countEntitlementUsage(db: Db): Promise<Record<EntitlementKind, number | null>> {
+  const out = {} as Record<EntitlementKind, number | null>;
+  for (const kind of ENTITLEMENT_KINDS) {
+    const counter = COUNTERS[kind];
+    out[kind] = counter ? await counter(db) : null;
+  }
+  return out;
+}
 
 /** Loại này có bộ đếm thật chưa. */
 export function isMeasured(kind: EntitlementKind): boolean {
@@ -169,8 +176,9 @@ export async function checkEntitlement(kind: EntitlementKind, delta = 1, opts: {
   const counter = COUNTERS[kind];
   if (!counter) return { ok: true, kind, planKey: plan.key, used: null, limit };
   return inOrg(org.code, async () => {
-    let used = await memo(`entitlement:${kind}`, CACHE_MS, counter);
-    if (used + delta > limit * FRESH_AT) used = await counter();
+    const countNow = async () => counter(await getDb());
+    let used = await memo(`entitlement:${kind}`, CACHE_MS, countNow);
+    if (used + delta > limit * FRESH_AT) used = await countNow();
     if (used + delta > limit) return { ok: false, kind, planKey: plan.key, planName: plan.name, used, limit, error: overLimitMessage(kind, plan.name, used, limit) };
     await forgetMemo(`entitlement:${kind}`);
     return { ok: true, kind, planKey: plan.key, used, limit };
@@ -194,7 +202,7 @@ export async function getPlanUsage(orgCode?: string): Promise<PlanUsage> {
         kind,
         label: spec.label,
         unit: spec.unit,
-        used: counter ? await counter() : null,
+        used: counter ? await counter(await getDb()) : null,
         limit: plan ? plan.limits[kind] : null,
         measured: Boolean(counter),
         undeclared: plan?.undeclared.includes(kind) ?? false,

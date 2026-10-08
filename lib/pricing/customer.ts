@@ -23,7 +23,7 @@ import { readGuardConfig, resolveOrgPricing, QUOTA_METER, type OrgPricing } from
 import { usagePeriodOf } from "@/lib/pricing/meter";
 import { readAiCustomerUsage } from "@/lib/pricing/ai-customer";
 import { orgPriceVersion } from "@/lib/pricing/price-book";
-import { billNetOfBalance, estimateBill, fairUseVerdict, usageAlert, type BillEstimate, type FairUseVerdict, type MeterCoverage, type UsageAlert } from "@/lib/pricing/versions";
+import { billableIncluded, billNetOfBalance, estimateBill, fairUseVerdict, usageAlert, type BillEstimate, type FairUseVerdict, type MeterCoverage, type UsageAlert } from "@/lib/pricing/versions";
 import { billingLockApplies } from "@/lib/saas/policy";
 
 export type CustomerQuotaRow = QuotaVerdict & { line: string };
@@ -109,14 +109,15 @@ export async function loadCustomerPlan(orgCode: string, now: Date = new Date()):
     const alerts = version.version?.alerts;
     const aiRead = ac.get(org.code) ?? { value: null, coverage: "NOT_MEASURED" as const, note: null };
     const fanpagesUsed = usage.readings.fanpages_active;
-    const inc = price.included;
-    // Hạn mức người dùng / fanpage đọc từ phiên bản giá (ghi đè của người vận hành thắng — `pricing.quotas`).
-    const usersInc = pricing.quotas.users !== undefined ? pricing.quotas.users : inc.users;
-    const fanpagesInc = pricing.quotas.fanpages !== undefined ? pricing.quotas.fanpages : inc.fanpages;
+    // Phần gồm TÍNH TIỀN: dòng giá + ghi đè của người vận hành + ghế đã mua thêm — CÙNG hàm với bảng kê (OVERAGE O1: không thu
+    // đôi ghế đã mua qua hoá đơn ADDON).
+    const inc = billableIncluded(price.included, { quotaOverrides: pricing.row.quotaOverrides, addons: planUsage.plan?.addons ?? null });
+    const usersInc = inc.users;
+    const fanpagesInc = inc.fanpages;
     const fair = fairUseVerdict({ aiConversations: usage.readings.ai_conversations, aiReplies: usage.readings.outgoing_ai_messages }, inc, alerts);
     const trial = price.trialDays !== null;
     const balanceOn = !trial && (await aiBalanceEnabled(org.code).catch(() => false));
-    const estimate = estimateBill({ ...price, included: { ...inc, users: usersInc, fanpages: fanpagesInc } }, { aiCustomers: aiRead.value, aiCustomersCoverage: aiRead.coverage, fanpages: fanpagesUsed, users: usersUsed, aiConversations: usage.readings.ai_conversations, aiReplies: usage.readings.outgoing_ai_messages }, { trial });
+    const estimate = estimateBill({ ...price, included: inc }, { aiCustomers: aiRead.value, aiCustomersCoverage: aiRead.coverage, fanpages: fanpagesUsed, users: usersUsed, aiConversations: usage.readings.ai_conversations, aiReplies: usage.readings.outgoing_ai_messages }, { trial });
     // Khách AI đã thu qua Số dư trong kỳ không vào lại hoá đơn ước tính — đếm theo dòng sổ, không theo cờ (review N2). Đọc sổ hỏng
     // ⇒ dòng khách AI «chưa biết», không in một hoá đơn đoán.
     const charged = trial ? 0 : await readAiCustomerChargedUnits(org.code, period.from, period.to).catch(() => null);

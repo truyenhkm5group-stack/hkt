@@ -15,7 +15,9 @@
  *  · KHÔNG hàm nào ở đây tắt bot: `pauseBot` là hằng `false` trong kiểu trả về.
  */
 import type { AiLimits } from "@/lib/ai-usage/types";
+import type { AddonUnits } from "@/lib/billing/addons";
 import { billedMonths } from "@/lib/billing/rules";
+import { applyQuotaOverrides } from "@/lib/pricing/catalog";
 import { parseFeatureList, type FeatureKey } from "@/lib/pricing/features";
 
 export const PRICE_VERSION_KINDS = ["LEGACY_SNAPSHOT", "CATALOG"] as const;
@@ -393,6 +395,26 @@ function seatLine(key: "fanpages" | "users", used: number | null, included: numb
 }
 
 /**
+ * PHẦN GỒM TÍNH TIỀN của MỘT workspace (docs/saas/OVERAGE.md §10 · O1) — MỘT hàm cho màn khách (`lib/pricing/customer.ts`),
+ * bảng kê (`lib/saas/customers.ts`), khung người vận hành (`lib/pricing/admin.ts`) và lượt chuyển V1 (`lib/pricing/migration.ts`):
+ *
+ *   gồm = dòng giá của phiên bản  →  ghi đè hạn mức của người vận hành (`platform_org_pricing.quota_overrides`, ô có mặt thắng)
+ *         →  + ghế người dùng ĐÃ MUA THÊM (0192, `platform_subscriptions.addons.users`)
+ *
+ * Trước hàm này phép tính vượt dùng phần gồm người dùng của DÒNG GIÁ, không cộng ghế đã mua: khách Starter mua thêm 2 người và dùng
+ * đủ 7 người vừa trả dòng mua thêm, vừa bị tính 2 × «người dùng thêm» — THU ĐÔI. Trần kỹ thuật (`resolvePlan`) đã cộng ghế mua thêm
+ * từ đầu, nên phần gồm tính tiền nay khớp đúng trần người dùng mà khách thấy. Gồm không giới hạn (`null`) / chưa khai (`undefined`)
+ * giữ nguyên. Khoá `pages` của mua thêm là «trang tuỳ biến», KHÔNG phải fanpage — fanpage không có ghế mua thêm. HÀM THUẦN.
+ */
+export function billableIncluded(included: Included, opts: { quotaOverrides?: unknown; addons?: AddonUnits | null } = {}): Included {
+  const o = applyQuotaOverrides({ aiConversations: undefined, aiMessages: undefined, orders: undefined, fanpages: undefined, users: undefined }, opts.quotaOverrides);
+  const users = o.users !== undefined ? o.users : included.users;
+  const fanpages = o.fanpages !== undefined ? o.fanpages : included.fanpages;
+  const bought = opts.addons?.users ?? 0;
+  return { ...included, fanpages, users: typeof users === "number" && bought > 0 ? users + bought : users };
+}
+
+/**
  * PHẦN VƯỢT của một kỳ theo giá gói (phiên bản đã ghim). Khách AI tính theo KHỐI; fanpage / người dùng thêm × đơn giá.
  * Hội thoại, trả lời AI, đơn KHÔNG có dòng nào ở đây. Đồng hồ khách AI đo chưa trọn kỳ ⇒ dòng đó `null` (cận dưới không
  * phải số để thu). Tổng = `null` khi còn dòng chưa biết (`knownVnd` là phần đã biết).
@@ -515,13 +537,15 @@ export type FitResult = { plan: PlanPrice | null; candidates: FitCandidate[]; re
  * kết luận (không gán gói bằng phỏng đoán). Không gói nào vừa ⇒ `null` + đề xuất hợp đồng. HÀM THUẦN — người vận hành
  * quyết định có gán hay không (`scripts/ops/pricing-internal-fit.ts`, mặc định chạy thử).
  */
-export function smallestFittingPlan(usage: FitUsage, prices: readonly PlanPrice[]): FitResult {
+export function smallestFittingPlan(usage: FitUsage, prices: readonly PlanPrice[], opts: { includedOf?: (p: PlanPrice) => Included } = {}): FitResult {
+  // Phần gồm so với số dùng — nơi gọi biết ghi đè / ghế đã mua của tổ chức thì truyền `billableIncluded` (cùng phần gồm tính tiền).
+  const includedOf = opts.includedOf ?? ((p: PlanPrice) => p.included);
   const missing = (["aiCustomers", "fanpages", "users"] as const).filter((k) => usage[k] === null);
   const sellable = prices.filter((p) => isSellable(p) && p.trialDays === null).sort((a, b) => (a.monthlyVnd ?? 0) - (b.monthlyVnd ?? 0) || a.position - b.position);
   const candidates: FitCandidate[] = sellable.map((p) => {
     const why: string[] = [];
     const cap = (k: "aiCustomers" | "fanpages" | "users") => {
-      const inc = p.included[k];
+      const inc = includedOf(p)[k];
       const used = usage[k];
       if (used === null) return;
       if (inc === undefined) why.push(`${INCLUDED_SPEC[k].label}: gói chưa khai`);

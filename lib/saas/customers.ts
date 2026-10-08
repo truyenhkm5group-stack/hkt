@@ -24,7 +24,7 @@ import { readAiCustomerUsage, type AiCustomerReading } from "@/lib/pricing/ai-cu
 import { loadPriceBook } from "@/lib/pricing/price-book";
 import { readAiBalancePeriod } from "@/lib/billing/ai-balance";
 import { aiBalanceRevenueVnd } from "@/lib/billing/ai-balance-rules";
-import { computeOverage, currentCatalogVersion, fairUseVerdict, overageNetOfBalance, priceOf, resolveOrgVersion, yearlyAmountVnd, type FairUseVerdict, type OverageResult, type PlanPrice, type PriceBook } from "@/lib/pricing/versions";
+import { billableIncluded, computeOverage, currentCatalogVersion, fairUseVerdict, overageNetOfBalance, priceOf, resolveOrgVersion, yearlyAmountVnd, type FairUseVerdict, type OverageResult, type PlanPrice, type PriceBook } from "@/lib/pricing/versions";
 import { periodRange } from "@/lib/saas/ledger";
 
 export type PlanInfo = PlanRef & { addonPrices: unknown; productKeys: string[] | null; commercial: unknown };
@@ -133,6 +133,9 @@ export async function loadCommercialSnapshot(opts: { periodMonth?: string; now?:
       .from(schema.platformPricePins),
   ]);
   const pinBy = new Map(pins.map((p) => [p.orgCode, p.versionKey]));
+  // Ghi đè hạn mức của người vận hành (0222) — phần của «phần gồm tính tiền» (`billableIncluded`, OVERAGE O1). Lỗi đọc ⇒ NÉM như
+  // ghim giá: bảng kê không lập trên một phần gồm đoán.
+  const overridesBy = new Map((await pdb.select({ orgCode: schema.platformOrgPricing.orgCode, quotaOverrides: schema.platformOrgPricing.quotaOverrides }).from(schema.platformOrgPricing)).map((r) => [r.orgCode, r.quotaOverrides]));
   // Khách AI (đồng hồ thu chính) kèm độ phủ, cho mọi workspace — đọc sổ dùng chung ở mặt phẳng điều khiển.
   const range = periodRange(periodMonth);
   const aiCustomers = await readAiCustomerUsage(
@@ -179,7 +182,10 @@ export async function loadCommercialSnapshot(opts: { periodMonth?: string; now?:
       const fanpages = await latestFanpages(w.code, range.fromDay, range.toDay);
       const conv = wsUsage.find((u) => u.productKey === "chotdon" && u.metric === "conversations_started")?.value ?? null;
       const replies = wsUsage.find((u) => u.productKey === "chotdon" && u.metric === "bot_messages")?.value ?? null;
-      overage = computeOverage(price, { aiCustomers: ac?.value ?? null, aiCustomersCoverage: ac?.coverage ?? "NOT_MEASURED", fanpages, users: usersUsed, aiConversations: conv, aiReplies: replies });
+      // Phần gồm TÍNH TIỀN = dòng giá + ghi đè của người vận hành + ghế đã mua thêm (0192) — CÙNG hàm với màn khách. Thiếu vế ghế
+      // mua thêm là thu đôi: khách vừa trả dòng «Hạn mức mua thêm» vừa bị tính «Người dùng thêm» cho chính những ghế ấy (O1).
+      const included = billableIncluded(price.included, { quotaOverrides: overridesBy.get(w.code), addons: parseAddonUnits(t?.addons) });
+      overage = computeOverage({ ...price, included }, { aiCustomers: ac?.value ?? null, aiCustomersCoverage: ac?.coverage ?? "NOT_MEASURED", fanpages, users: usersUsed, aiConversations: conv, aiReplies: replies });
       // Số dư AI (0235): khách AI vượt phần gồm đã trừ thẳng vào số dư KHÔNG vào bảng kê kỳ (thu hai lần — bảng kê chốt là bất
       // biến). Đếm theo SỐ DÒNG SỔ của chính kỳ, không theo cờ lúc dựng: bảng kê tháng trước thường chốt SAU mốc đổi cờ (N2).
       overage = overageNetOfBalance(overage, balances.get(w.code)?.aiCustomerUnits ?? 0, price.overage.aiCustomerBlockSize);

@@ -224,8 +224,11 @@ Bất biến mà đường ghi phải giữ, mỗi cái một bài kiểm:
    có cộng (`db/schema.ts:5183-5186` → `lib/entitlements/check.ts`), và bảng kê vẫn in dòng «Hạn mức mua thêm»
    (`lib/saas/statement.ts:86-89`). Ví dụ: khách Starter mua thêm 2 người dùng và dùng đủ 7 người. Khách đó vừa trả dòng mua thêm,
    vừa bị tính 2 × 49.000 ₫ «người dùng thêm». Hôm nay chưa ai bị tính vì 8/8 tổ chức ở legacy, nhưng phải sửa TRƯỚC O3.
+   **Đã sửa (08/10/2026, cùng lượt chuyển V1 — `V1_MIGRATION.md` §7):** `billableIncluded` (`lib/pricing/versions.ts`) là phần gồm
+   tính tiền dùng chung; bài kiểm «không thu đôi ghế» ở `tests/saas-v1-migration.test.ts`.
 2. **Hai đường dựng phần gồm.** Màn khách áp ghi đè của người vận hành (`lib/pricing/customer.ts:114-115`), còn bảng kê thì không.
-   Hai màn có thể nói hai số cho cùng một kỳ. O1 gom về một hàm. Auditor có phép kiểm đối chiếu
+   Hai màn có thể nói hai số cho cùng một kỳ. O1 gom về một hàm (**đã làm** — màn khách, bảng kê, khung người vận hành cùng gọi
+   `billableIncluded`). Auditor có phép kiểm đối chiếu
    (`docs/saas/auditor/DESIGN.md`, A18).
 3. **Một hoá đơn mở mỗi tổ chức** (`db/schema.ts:5258`) cộng với VOID chéo loại (`lib/billing/service.ts:358`). Đã nêu ở §9 bất
    biến 4.
