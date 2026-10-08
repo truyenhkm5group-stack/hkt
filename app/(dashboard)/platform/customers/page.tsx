@@ -5,10 +5,14 @@ import { CostEntryForm, CreateCustomerForm } from "@/components/saas/operator-ac
 import { SaasConsoleNav, StatusPill } from "@/components/saas/console-bits";
 import { EmptyState, SectionCard } from "@/components/ui-bits";
 import { requirePermission } from "@/lib/auth/session";
+import { templateBlueprint } from "@/lib/blueprints/templates";
 import { formatNumber, formatPercent, formatVND } from "@/lib/format";
+import { ORG_BRAND_LABEL, ORG_BRANDS } from "@/lib/platform/org-brand";
 import { platformOperatorDenial } from "@/lib/platform-ui/module-toggle";
+import { loadPriceBook } from "@/lib/pricing/price-book";
 import { PRODUCT_LABEL, PRODUCTS } from "@/lib/saas/catalog";
 import { loadCustomersConsole } from "@/lib/saas/console";
+import { createCustomerPlanOptions, SALES_AGENT_TEMPLATE, templateSummary } from "@/lib/saas/create-customer-rules";
 import { HEALTH_FLAG_LABEL } from "@/lib/saas/customers";
 import { ACCOUNT_STATUS_LABEL, ACCOUNT_TYPE_LABEL, ACCOUNT_TYPE_TONE, SUBSCRIPTION_STATUS_LABEL, type AccountStatus, type AccountType } from "@/lib/saas/policy";
 import { cn } from "@/lib/utils";
@@ -50,6 +54,10 @@ export default async function SaasCustomersPage({ searchParams }: { searchParams
   const balanceRev = mrrKnown.reduce((a, c) => a + c.economics.aiBalanceRevenueVnd, 0);
   const alerts = customers.filter((c) => c.flags.length);
   const label = `${data.periodMonth.slice(5, 7)}/${data.periodMonth.slice(0, 4)}`;
+  // «Tạo khách mới»: gói theo bảng giá ĐANG NIÊM YẾT (sổ giá đã đệm từ ảnh chụp ở trên), mẫu Chốt Đơn kể từ CHÍNH gói mẫu.
+  const createPlans = createCustomerPlanOptions(data.plans, await loadPriceBook(), new Date());
+  const salesBlueprint = SALES_AGENT_TEMPLATE ? templateBlueprint(SALES_AGENT_TEMPLATE.templateKey) : null;
+  const salesTemplate = SALES_AGENT_TEMPLATE && salesBlueprint ? { label: SALES_AGENT_TEMPLATE.label, summary: templateSummary(salesBlueprint) } : null;
 
   return (
     <div className="space-y-5">
@@ -169,7 +177,13 @@ export default async function SaasCustomersPage({ searchParams }: { searchParams
       ) : null}
 
       <SectionCard title="Tạo khách mới" description="Tài khoản → workspace → thuê bao → module → quản trị, qua job cấp phát có vết. Không sửa CSDL tay.">
-        <CreateCustomerForm plans={data.plans.map((p) => ({ key: p.key, name: p.name, priceVnd: p.priceVnd }))} products={PRODUCTS.map((p) => ({ key: p.key, name: p.name }))} accounts={customers.map((c) => ({ id: c.account.id, code: c.account.code, name: c.account.name }))} />
+        <CreateCustomerForm
+          plans={createPlans}
+          products={PRODUCTS.map((p) => ({ key: p.key, name: p.name }))}
+          accounts={customers.map((c) => ({ id: c.account.id, code: c.account.code, name: c.account.name, accountType: c.account.accountType }))}
+          brands={ORG_BRANDS.map((k) => ({ key: k, label: ORG_BRAND_LABEL[k] }))}
+          salesTemplate={salesTemplate}
+        />
       </SectionCard>
 
       <SectionCard title="Chi phí cấp nền tảng / sản phẩm" description="Khoản chi ngoài AI chia theo căn cứ khai (hạ tầng / hỗ trợ nền theo tháng khai ở Kinh tế nền tảng).">

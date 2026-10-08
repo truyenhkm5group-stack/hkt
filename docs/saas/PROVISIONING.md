@@ -3,8 +3,18 @@
 ## Thêm một khách mới (không sửa mã, không sửa CSDL)
 
 1. `/platform/customers` → «Tạo khách»: tài khoản mới (tên, loại INTERNAL/EXTERNAL) hoặc chọn tài khoản có sẵn · mã + tên
-   workspace · gói · thương hiệu · sản phẩm · email quản trị · lý do.
-2. Job `CREATE_CUSTOMER` chạy: `ACCOUNT → WORKSPACE (CSDL + migration + module + quản trị) → ADMIN → SUBSCRIPTIONS → BILLING`.
+   workspace · sản phẩm · gói · thương hiệu · email quản trị · lý do. Luật ở MÁY CHỦ (`lib/saas/create-customer-rules.ts`,
+   `validateRequest` chặn trước khi ghi job — form chỉ phản ánh, kiểm khởi chạy 08/10/2026):
+   - **Gói** = bảng giá CATALOG đang niêm yết + `trial` (mặc định). Gói chỉ còn ở giá cũ (basic · pro · standard) chỉ cho tài
+     khoản NỘI BỘ (luật đang có); khách NGOÀI chọn nó là giá cũ, không dùng thử, trần AI của gói cũ (credit 0 ⇒ bot im).
+     `internal` (không giới hạn) không cấp cho ai — chỉ của workspace nhà.
+   - **Thương hiệu** theo bộ sản phẩm: chỉ Chốt Đơn ⇒ `chotdon` (tự đặt, không đổi được — thiếu nó khách thấy menu ERP và liên kết
+     mời trỏ erp.vnxcommerce.com); có ERP ⇒ người vận hành chọn (gợi ý VNX).
+   - Nút «Tạo khách…» nằm dưới các ô; chưa bấm được thì câu cạnh nút nói còn thiếu gì.
+2. Job `CREATE_CUSTOMER` chạy: `ACCOUNT → WORKSPACE (CSDL + migration + module + quản trị) → ADMIN → SUBSCRIPTIONS → BILLING →
+   TEMPLATE`. TEMPLATE: khách CHỈ thuê Chốt Đơn ⇒ cài mẫu «Chỉ cần AI bán hàng» bằng ĐÚNG bộ cài của `/start`
+   (`lib/saas/provisioning-template.ts`; khách trong vỏ Chốt Đơn không tự mở được `/settings/templates`); đã cài ⇒ SKIPPED; hỏng ⇒
+   bước FAILED kèm câu + nhật ký `ORG_SETUP` · `provisioning-template`, job vẫn xong. Có ERP ⇒ SKIPPED (quản trị tự chọn mẫu ngành).
 3. Màn hình in **liên kết kích hoạt dùng một lần** cho quản trị (mật khẩu quản trị là ngẫu nhiên, không lưu, không hiện).
    Gửi riêng cho khách. Quản trị mời thêm người ở `/settings/users`.
 4. Thu phí khách ngoài: đặt hạn trả / ân hạn ở `/platform/org/<mã>` (đường 0187). Khách tự đăng ký qua `/start` thì

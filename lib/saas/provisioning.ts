@@ -19,10 +19,13 @@ import { setOrganizationModule } from "@/lib/platform/module-config";
 import { findOrganization, getHomeOrganization } from "@/lib/platform/organizations";
 import { provisionOrganization } from "@/lib/platform/provision";
 import { ORGANIZATION_CODE_PATTERN } from "@/lib/platform/types";
+import { loadPriceBook } from "@/lib/pricing/price-book";
 import { accountOfWorkspace, createAccount, findAccountByCode, findAccountById, insertSubscription, liveSubscriptions, setSubscriptionState, type SaasSource } from "@/lib/saas/accounts";
 import { PRODUCTS, SHARED_COMMERCE_CORE, modulesToProvision, productDef, type ProductDef } from "@/lib/saas/catalog";
+import { ADMIN_EMAIL_PATTERN, catalogPlanKeys, createPlanRefusal, createPlanTier, provisioningTemplateFor, resolveCreateBrand } from "@/lib/saas/create-customer-rules";
 import { readPlans } from "@/lib/saas/customers";
 import { ACCOUNT_TYPES, BILLING_MODES, cancelByJobAllowed, type AccountType, type BillingMode } from "@/lib/saas/policy";
+import { installProvisioningTemplate } from "@/lib/saas/provisioning-template";
 
 export type ProvisioningKind = "CREATE_CUSTOMER" | "SUBSCRIBE_PRODUCT" | "CANCEL_SUBSCRIPTION";
 export type JobStatus = "PENDING" | "RUNNING" | "SUCCEEDED" | "FAILED";
@@ -54,6 +57,23 @@ type Ctx = { actor: PlatformActor; email: string | null; source: SaasSource; ide
 
 class StepFailure extends Error {}
 
+/**
+ * Loại tài khoản mà workspace mới SẼ thuộc — tra ĐÚNG như bước ACCOUNT của job tra (theo id; không có thì theo mã đã có; cuối cùng
+ * là loại khai cho tài khoản mới), để một mã tài khoản có sẵn không mượn được loại khai tay. Không tra được ⇒ `null` (phía hẹp).
+ */
+async function createAccountType(req: CreateCustomerRequest): Promise<string | null> {
+  if (req.accountId) return (await findAccountById(req.accountId))?.accountType ?? null;
+  const existing = req.account?.code ? await findAccountByCode(req.account.code) : null;
+  return existing?.accountType ?? req.account?.accountType ?? null;
+}
+
+/** Đầu vào ĐÃ QUYẾT ghi vào job: thương hiệu theo bộ sản phẩm (create-customer-rules) — lượt chạy lại dùng đúng nó, không suy lại. */
+function decidedRequest(req: ProvisioningRequest, catalog: readonly ProductDef[]): ProvisioningRequest {
+  if (req.kind !== "CREATE_CUSTOMER") return req;
+  const brand = resolveCreateBrand(req.products, req.workspace.brand, catalog);
+  return "error" in brand ? req : { ...req, workspace: { ...req.workspace, brand: brand.brand } };
+}
+
 /** Kiểm đầu vào TRƯỚC khi ghi job — đầu vào sai không đáng một dòng FAILED. */
 export async function validateRequest(req: ProvisioningRequest, catalog: readonly ProductDef[] = PRODUCTS): Promise<string | null> {
   if (req.kind === "CREATE_CUSTOMER") {
@@ -61,12 +81,19 @@ export async function validateRequest(req: ProvisioningRequest, catalog: readonl
     if (req.workspace.name.trim().length < 2) return "Tên workspace cần ít nhất 2 ký tự.";
     if (!req.products.length) return "Chọn ít nhất một sản phẩm.";
     for (const p of req.products) if (!productDef(p, catalog)) return `Sản phẩm "${p}" không có trong danh mục.`;
-    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(req.admin.email.trim())) return "Email quản trị không hợp lệ.";
+    if (!ADMIN_EMAIL_PATTERN.test(req.admin.email.trim())) return "Email quản trị không hợp lệ.";
     if (!req.accountId && !req.account) return "Thiếu tài khoản khách (chọn có sẵn hoặc khai mới).";
     if (req.account && !(ACCOUNT_TYPES as readonly string[]).includes(req.account.accountType)) return "Loại tài khoản không hợp lệ.";
     if (req.account?.billingMode && !(BILLING_MODES as readonly string[]).includes(req.account.billingMode)) return "Cách lập chứng từ không hợp lệ.";
-    const plan = (await readPlans()).find((p) => p.key === req.workspace.planKey);
+    // Thương hiệu + gói của workspace MỚI theo lib/saas/create-customer-rules.ts (kiểm khởi chạy 08/10/2026).
+    const brand = resolveCreateBrand(req.products, req.workspace.brand, catalog);
+    if ("error" in brand) return brand.error;
+    const plans = await readPlans();
+    const plan = plans.find((p) => p.key === req.workspace.planKey);
     if (!plan) return `Gói "${req.workspace.planKey}" không có.`;
+    const listed = catalogPlanKeys(await loadPriceBook(), new Date());
+    const refusal = createPlanRefusal({ planName: plan.name, tier: createPlanTier(plan.key, listed), accountType: await createAccountType(req), listed: listed.map((k) => plans.find((p) => p.key === k)?.name ?? k) });
+    if (refusal) return refusal;
     const outside = req.products.filter((p) => plan.productKeys && !plan.productKeys.includes(p));
     if (outside.length) return `Gói «${plan.name}» không phủ sản phẩm: ${outside.join(", ")}.`;
     const existing = await findOrganization(req.workspace.code);
@@ -106,9 +133,10 @@ async function cancelGuard(subscriptionId: string): Promise<string | null> {
 }
 
 /** Gửi một yêu cầu cấp phát. Cùng khoá ⇒ cùng job; job đã xong không chạy lại; job hỏng / treo chạy lại. */
-export async function requestProvisioning(req: ProvisioningRequest, ctx: Ctx): Promise<JobResult | { error: string }> {
-  const invalid = await validateRequest(req, ctx.catalog);
+export async function requestProvisioning(input: ProvisioningRequest, ctx: Ctx): Promise<JobResult | { error: string }> {
+  const invalid = await validateRequest(input, ctx.catalog);
   if (invalid) return { error: invalid };
+  const req = decidedRequest(input, ctx.catalog ?? PRODUCTS);
   const key = ctx.idempotencyKey.trim();
   if (!key || key.length > 200) return { error: "Thiếu khoá idempotent (1–200 ký tự)." };
   const pdb = await getPlatformDb();
@@ -237,6 +265,14 @@ async function runCreateCustomer(req: CreateCustomerRequest, ctx: Ctx, step: Ste
     step("BILLING", billing.status, billing.detail);
   } catch (e) {
     fail(step, "BILLING", `Không khởi tạo được thu phí: ${e instanceof Error ? e.message : String(e)} — chạy lại job (bước idempotent).`);
+  }
+  // 5. Mẫu «Chỉ cần AI bán hàng» cho khách CHỈ thuê Chốt Đơn — CÙNG bộ cài với /start (lib/saas/provisioning-template.ts). Không
+  //    bao giờ làm hỏng job: hỏng ⇒ bước TEMPLATE «FAILED» + nhật ký nền tảng; workspace, quản trị, thuê bao, thu phí đã xong.
+  const template = provisioningTemplateFor(req.products, catalog);
+  if (!template) step("TEMPLATE", "SKIPPED", "bộ sản phẩm không chỉ có Chốt Đơn — mẫu ngành do quản trị tự chọn ở Cài đặt → Mẫu cấu hình, không cài tự động");
+  else {
+    const t = await installProvisioningTemplate({ orgCode: res.organization.code, adminEmail: req.admin.email, template, actor: ctx.actor, auditSource: ctx.source === "TEST" ? "TEST" : ctx.source === "OPERATOR" ? "UI" : "SCRIPT" });
+    step("TEMPLATE", t.status, t.detail);
   }
   return { accountId: account.id, orgCode: res.organization.code };
 }

@@ -317,7 +317,11 @@ export type CreateResult =
   | { ok: true; orgCode: string; created: boolean; loggedIn: boolean; installId: string | null }
   | { error: string; orgCode?: string; setupFailed?: boolean };
 
-async function adminSessionUser(orgCode: string, orgName: string, email: string): Promise<SessionUser | null> {
+/**
+ * Phiên của quản trị đầu tiên — người ĐỨNG TÊN lượt cài mẫu. Dùng chung cho bước INSTALL ở đây và bước TEMPLATE của job «Tạo
+ * khách» (lib/saas/provisioning-template.ts): một mẫu, một bộ cài, một người đứng tên — không dựng phiên thứ hai.
+ */
+export async function adminSessionUser(orgCode: string, orgName: string, email: string): Promise<SessionUser | null> {
   return withOrganization(orgCode, async () => {
     const db = await getDb();
     const u = await db.query.users.findFirst({ where: eq(schema.users.email, email) });

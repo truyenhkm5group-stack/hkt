@@ -7,6 +7,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { confirmBlockedReason, confirmReady } from "@/lib/constants/confirm-reason";
 import { WORKFLOW_CADENCE_DEFAULT_MINUTES } from "@/lib/constants/workflow-cadence";
 import { confirmPilotUatAction, disableOrgConnectionAction, setOrgBrandAction, setOrgPlanAction, setOrgSuspendedAction, setPilotStageAction, setWorkflowsPausedAction } from "@/lib/actions/platform-ops";
 import { PILOT_OVERRIDE_MIN_REASON, PILOT_REASON_MIN, PILOT_STAGE_LABEL, PILOT_STAGES, type PilotStage } from "@/lib/constants/pilot";
@@ -18,6 +19,11 @@ import { PILOT_OVERRIDE_MIN_REASON, PILOT_REASON_MIN, PILOT_STAGE_LABEL, PILOT_S
 
 export type Outcome = { ok: true; message?: string } | { error: string };
 
+/**
+ * Có ô nhập (`children`) ⇒ các ô nhập TRƯỚC, ô lý do + nút SAU (người điền từ trên xuống rồi mới tới nút), và khi nút chưa bấm
+ * được thì cạnh nút có một câu nói đúng thứ còn thiếu (`lib/constants/confirm-reason.ts`) — kiểm khởi chạy 08/10/2026: nút đứng
+ * đầu khung, mờ không lời, làm người mới tưởng bị khoá. Không có ô nhập ⇒ một hàng lý do + nút như cũ (nhãn ô lý do đã nói số ký tự).
+ */
 export function ConfirmWithReason(props: {
   id: string;
   label: string;
@@ -26,7 +32,13 @@ export function ConfirmWithReason(props: {
   minReason: number;
   placeholder: string;
   variant?: "default" | "destructive" | "outline";
+  /** Khoá cả khung (ô lý do lẫn nút). Muốn câu «vì sao» thì khai `disabledReason`. */
   disabled?: boolean;
+  disabledReason?: string;
+  /** Điều kiện còn thiếu do người gọi biết (vd «chọn gói») — nút chưa bấm được nhưng ô lý do vẫn gõ được. */
+  missing?: readonly string[];
+  /** Đầu câu «vì sao» (vd «Chưa thể tạo khách»); mặc định dựng từ nhãn nút. */
+  blockedLead?: string;
   children?: React.ReactNode;
   run: (reason: string) => Promise<Outcome>;
 }) {
@@ -34,7 +46,13 @@ export function ConfirmWithReason(props: {
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
-  const ready = reason.trim().length >= props.minReason;
+  const ready = confirmReady({ minReason: props.minReason, reason, missing: props.missing });
+  const withFields = props.children !== undefined && props.children !== null && props.children !== false;
+  const why =
+    withFields || props.missing?.length
+      ? confirmBlockedReason({ label: props.label, lead: props.blockedLead, minReason: props.minReason, reason, missing: props.missing, disabled: props.disabled, disabledReason: props.disabledReason, pending })
+      : null;
+  const whyId = `${props.id}-why`;
 
   const apply = () =>
     start(async () => {
@@ -51,17 +69,22 @@ export function ConfirmWithReason(props: {
 
   return (
     <div className="space-y-1.5">
+      {withFields ? props.children : null}
       <div className="grid gap-2 sm:grid-cols-[1fr_auto] sm:items-end">
         <div className="space-y-1">
           <Label htmlFor={props.id}>{props.minReason > 0 ? `Lý do (ít nhất ${props.minReason} ký tự — vào nhật ký nền tảng)` : "Ghi chú (không bắt buộc — vào nhật ký nền tảng)"}</Label>
           <Input id={props.id} value={reason} onChange={(e) => setReason(e.target.value)} placeholder={props.placeholder} maxLength={500} disabled={props.disabled || pending} />
         </div>
-        <Button type="button" variant={props.variant ?? "outline"} disabled={props.disabled || pending || !ready} onClick={() => setOpen(true)}>
+        <Button type="button" variant={props.variant ?? "outline"} disabled={props.disabled || pending || !ready} onClick={() => setOpen(true)} aria-describedby={why ? whyId : undefined}>
           {pending ? <Loader2 className="size-4 animate-spin" /> : null}
           {props.label}
         </Button>
       </div>
-      {props.children}
+      {why ? (
+        <p id={whyId} className="text-xs text-amber-700 sm:text-right dark:text-amber-400">
+          {why}
+        </p>
+      ) : null}
       {error ? <p className="text-sm text-destructive">{error}</p> : null}
       <AlertDialog open={open} onOpenChange={(o) => !pending && setOpen(o)}>
         <AlertDialogContent>
@@ -106,6 +129,8 @@ export function OrgPlanControl({ orgCode, orgName, current, plans }: { orgCode: 
       minReason={PILOT_REASON_MIN}
       placeholder="Khách chốt UAT, cần thêm người dùng"
       disabled={planKey === current}
+      blockedLead="Chưa đổi được gói"
+      disabledReason="chọn một gói khác gói đang dùng"
       run={async (reason) => toOutcome(await setOrgPlanAction({ orgCode, planKey, reason }), "Đã đổi gói")}
     >
       <div className="flex items-center gap-2 text-xs">
@@ -139,6 +164,8 @@ export function OrgBrandControl({ orgCode, orgName, current, options }: { orgCod
       minReason={PILOT_REASON_MIN}
       placeholder="Khách đăng ký từ chotdontudong.com ngày 04/10"
       disabled={!brand || brand === current}
+      blockedLead="Chưa đổi được thương hiệu"
+      disabledReason={brand ? "chọn thương hiệu khác thương hiệu đang dùng" : "chọn thương hiệu"}
       run={async (reason) => toOutcome(await setOrgBrandAction({ orgCode, brand, reason }), "Đã đổi thương hiệu")}
     >
       <div className="flex items-center gap-2 text-xs">
@@ -236,6 +263,8 @@ export function PilotStageControls(props: { orgCode: string; stage: PilotStage |
           minReason={blocked && override ? PILOT_OVERRIDE_MIN_REASON : props.stage === null ? PILOT_REASON_MIN : 0}
           placeholder={blocked ? "Khách không dùng trang riêng — chỉ dùng danh sách lõi" : "Ghi chú (không bắt buộc)"}
           disabled={blocked && !override}
+          blockedLead={`Chưa chuyển được sang «${PILOT_STAGE_LABEL[props.next]}»`}
+          disabledReason={`danh sách kiểm chưa đạt (muốn vượt: tick «Ghi đè» rồi ghi lý do ít nhất ${PILOT_OVERRIDE_MIN_REASON} ký tự)`}
           run={async (reason) => toOutcome(await setPilotStageAction({ orgCode: props.orgCode, stage: props.next!, reason, override: blocked && override }), `Đã chuyển sang «${PILOT_STAGE_LABEL[props.next!]}»`)}
         >
           {blocked ? (
