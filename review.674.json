@@ -1,0 +1,8 @@
+{
+  "pr": 674,
+  "sha": "95e2b3f1d5d73848bd4843b17b3817c7a9864b5b",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-08T09:06:42.195Z",
+  "note": "Review lại 08/10 (chỉ đọc): M1 đóng (chặn kích hoạt khi còn RENEWAL giá cũ + applyInvoicePaid giữ ghim trả trước cùng gói); M2 đóng (credit = ngưỡng cảnh báo, trần cứng credit×3, chưa credit ⇒ trần gói; không ảnh hưởng V1/legacy); mọi đường AI nền tảng còn lại có trần. LOW sau: hệ số ×3 chờ chủ shop + câu COST_HARD sai ngữ cảnh trả trước; cảnh báo ngưỡng không nên gửi shop trả trước; bài quét cấm "
+}
