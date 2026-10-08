@@ -353,6 +353,7 @@ import { testCompanyOsEarlyTopicDb, testCompanyOsEarlyTopicPure } from "./compan
 import { testCompanyOsWarmDb, testCompanyOsWarmPure } from "./company-os-warm.test";
 import { testCompanyOsSummaryDb, testCompanyOsSummaryPure } from "./company-os-summary.test";
 import { testOrgSummaryDb, testOrgSummaryPure } from "./org-summary.test";
+import { testOrgAiCutoverPure } from "./org-ai-cutover.test";
 import { testOrgOrderAuditPure } from "./org-order-audit.test";
 import { testVnAddress } from "./vn-address.test";
 import { testVelocityUnifyDb, testVelocityUnifyPure } from "./velocity-unify.test";
@@ -2226,6 +2227,7 @@ async function main() {
   await testCompanyOsSummaryDb(db);
   // ops org-summary: tóm tắt MỘT tổ chức khách, chỉ đọc, không lộ dữ liệu người — tổ chức THẬT `os-sum` (tự cấp, tự dọn).
   testOrgSummaryPure();
+  testOrgAiCutoverPure();
   await testOrgSummaryDb();
   // ops org-order-audit: hội thoại có SĐT ↔ đơn ERP của một ngày (HSLC 05/10/2026: POS 26 vs ERP 23).
   testOrgOrderAuditPure();

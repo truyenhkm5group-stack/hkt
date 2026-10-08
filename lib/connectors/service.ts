@@ -1,4 +1,5 @@
-import { and, eq, sql } from "drizzle-orm";
+import { createHash } from "node:crypto";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { getDb, schema, type Db } from "@/db";
 import { audit } from "@/lib/audit";
 import { can, type SessionUser } from "@/lib/auth/session";
@@ -782,6 +783,40 @@ export async function aiConnectionsForOperator(): Promise<OperatorAiConnectionRo
       plainSettings: row ? Object.fromEntries(Object.entries(asStringMap(row.settings)).filter(([k]) => plain.has(k))) : {},
       fields: (spec?.settings ?? []).map((f) => ({ key: f.key, label: f.label, secret: f.secret, required: f.required, ...(f.hint ? { hint: f.hint } : {}) })),
     };
+  });
+}
+
+export type AiConnectionAuditRow = { connectorKey: OperatorAiConnector; status: ConnectionStatus; lastTestOk: boolean | null; lastTestAt: Date | null; model: string | null; imageModel: string | null; keyDigest: string | null; digestError: string | null };
+
+/**
+ * KIỂM KHOÁ AI của tổ chức `orgCode` cho ops `org-ai-cutover`: trạng thái, model / model vẽ ảnh (không bí mật) và DẤU BĂM SHA-256 ĐẦY
+ * ĐỦ của ô `apiKey` — giải trong RAM NGAY TẠI ĐÂY, băm rồi bỏ: bí mật KHÔNG BAO GIỜ rời tệp này (chỉ service giải mã — lá chắn ở
+ * tests/connectors.test.ts). Nhận `db` để chạy trên kết nối CHỈ ĐỌC (`getDbForInspection` mở CSDL tổ chức không migrate).
+ */
+export async function aiConnectionAudit(db: Db, orgCode: string, deps: { keyState?: SecretsKeyState } = {}): Promise<AiConnectionAuditRow[]> {
+  const c = schema.orgConnections;
+  const rows = await db
+    .select({ connectorKey: c.connectorKey, orgCode: c.orgCode, status: c.status, lastTestOk: c.lastTestOk, lastTestAt: c.lastTestAt, settings: c.settings, secretsEnc: c.secretsEnc, secretsKeyId: c.secretsKeyId })
+    .from(c)
+    .where(inArray(c.connectorKey, [...OPERATOR_AI_CONNECTORS]))
+    .orderBy(c.connectorKey);
+  const state = deps.keyState ?? secretsKeyState();
+  return rows.map((r) => {
+    const st = asStringMap(r.settings);
+    let keyDigest: string | null = null;
+    let digestError: string | null = null;
+    if (r.orgCode !== orgCode) digestError = "dòng kết nối mang mã tổ chức khác";
+    else if (!r.secretsEnc) digestError = "chưa có bí mật";
+    else {
+      try {
+        const key = (openSecrets(r.secretsEnc, { orgCode, connectorKey: r.connectorKey, keyId: r.secretsKeyId }, state).apiKey ?? "").trim();
+        if (key) keyDigest = createHash("sha256").update(key, "utf8").digest("hex");
+        else digestError = "bí mật không có ô apiKey";
+      } catch (e) {
+        digestError = e instanceof Error ? e.name : "không giải được";
+      }
+    }
+    return { connectorKey: r.connectorKey as OperatorAiConnector, status: r.status as ConnectionStatus, lastTestOk: r.lastTestOk, lastTestAt: r.lastTestAt, model: st.model || null, imageModel: st.imageModel || null, keyDigest, digestError };
   });
 }
 

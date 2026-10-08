@@ -16,6 +16,7 @@
  */
 import assert from "node:assert/strict";
 import { execSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { existsSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import path from "node:path";
 import { eq, sql } from "drizzle-orm";
@@ -31,7 +32,7 @@ import {
   type ConnectorSpec,
 } from "@/lib/connectors/registry";
 import { SELF_TEST_ORG, SecretsDecryptError, SecretsUnavailableError, openSecrets, sealSecrets, secretsKeyHealth, secretsKeyPublicStatus, secretsKeyState, selfTestSecrets } from "@/lib/connectors/secrets";
-import { loadConnectionsView, openActiveConnection, saveConnection, setConnectionStatus, testOrgConnection, type RekeyVerdict } from "@/lib/connectors/service";
+import { aiConnectionAudit, loadConnectionsView, openActiveConnection, saveConnection, setConnectionStatus, testOrgConnection, type RekeyVerdict } from "@/lib/connectors/service";
 import { LARK_HOOK_PATTERN, ORG_CONNECTION_CHAT_DISCOVERY, ORG_CONNECTION_TESTERS, TELEGRAM_CHAT_PATTERN, TELEGRAM_TOKEN_PATTERN, testLarkWebhook, testTelegramBot, testZaloBot, testPancakeFanpage, pancakeVerdict, PANCAKE_TEST_MAX_BYTES } from "@/lib/connectors/testers";
 import { chunkText } from "@/lib/messaging/providers";
 import type { ConnectionsView } from "@/lib/connectors/types";
@@ -589,6 +590,11 @@ async function secretsLifecycle(adminA: SessionUser, adminB: SessionUser) {
       assert.ok("ok" in (await setConnectionStatus(adminA, "anthropic-byok", "ACTIVE")));
       const reopened = await openActiveConnection("anthropic-byok");
       assert.ok(reopened.ok && reopened.secrets.apiKey === AI_KEY_2, "kiểm tra + bật lại ⇒ đọc ra giá trị MỚI");
+      // Kiểm khoá cho ops (org-ai-cutover): chỉ DẤU BĂM của khoá rời service — không bao giờ khoá, kể cả một mảnh.
+      const auditRows = await aiConnectionAudit(db, A);
+      assert.equal(auditRows.find((r) => r.connectorKey === "anthropic-byok")?.keyDigest, createHash("sha256").update(AI_KEY_2, "utf8").digest("hex"), "dấu băm = SHA-256 của khoá đang lưu");
+      assert.ok(!JSON.stringify(auditRows).includes(AI_KEY_2.slice(-8)), "kết quả kiểm khoá không mang khoá");
+      assert.equal(auditRows.find((r) => r.connectorKey === "anthropic-byok")?.status, "ACTIVE");
 
       // Cập nhật MỘT ô bí mật: ô kia giữ nguyên (gộp trong bản rõ, không mất webhook khi đổi khoá ký).
       const part = await saveConnection(adminA, { connectorKey: "lark-webhook", secrets: { signSecret: LARK_SIGN_2 } });
