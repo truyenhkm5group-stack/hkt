@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { shellAllows } from "@/lib/constants/saas-nav";
+import { isSalesAgentUser, shellAllows } from "@/lib/constants/saas-nav";
 import { AlertTriangle, Boxes, Download, PackagePlus, PackageX, Plus, ShoppingBag, Upload, Warehouse } from "lucide-react";
 import { ProductsTable } from "@/app/(dashboard)/products/products-table";
 import { DataTableToolbar } from "@/components/data-table/toolbar";
@@ -23,6 +23,8 @@ export default async function ProductsPage({ searchParams }: { searchParams: Pro
   const { user, decision } = await requireResource("INVENTORY", "products:view");
   // Phạm vi hẹp hơn thứ dữ liệu này biểu diễn được ⇒ TỪ CHỐI và nói rõ, không cho xem hết.
   if (decision.allow === "NONE") return <ScopeDenied title="Sản phẩm" reason={decision.reason} fix={decision.fix} />;
+  // Vỏ Chốt Đơn: tiêu đề đúng tên mục menu («Sản phẩm»), không nhãn nhóm «Kho» của ERP (kiểm vỏ khách 08/10/2026, F-10).
+  const shell = isSalesAgentUser(user);
   const raw = await searchParams;
   const params = parseListParams(raw, { defaultSort: "erpStock", defaultDir: "asc", filterKeys: ["stock", "category", "warehouse", "status"], sortable: PRODUCT_SORTABLE, defaultPeriod: "all", defaultPageSize: PRODUCT_LIST_PAGE_SIZE, maxPageSize: PRODUCT_LIST_PAGE_SIZE });
   const [{ rows, total, pageCount }, facets, summary, warehouses, copy, createGate] = await Promise.all([listProducts(params), productFacets(params), productSummary(params), listWarehouses(), getBrandCopy(user), productCreateGate(user)]);
@@ -31,8 +33,8 @@ export default async function ProductsPage({ searchParams }: { searchParams: Pro
   return (
     <div className="space-y-5">
       <PageHeader
-        eyebrow="Kho"
-        title="Sản phẩm & tồn kho"
+        eyebrow={shell ? undefined : "Kho"}
+        title={shell ? "Sản phẩm" : "Sản phẩm & tồn kho"}
         description={`${formatNumber(warehouses.length)} kho`}
         hint={
           <>

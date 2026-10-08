@@ -46,8 +46,8 @@ export const FEATURE_SPEC: Record<FeatureKey, { label: string; value: string; pu
   advanced_analytics: { label: "Báo cáo nâng cao", value: "Chi phí AI trên mỗi đơn, theo fanpage, theo sản phẩm.", publicClaim: false },
   human_handoff: { label: "Chuyển cho nhân viên", value: "Nhân viên nhắn là AI tự im; bấm một nút để trả lại cho AI.", publicClaim: true },
   custom_ai_training: { label: "Dạy AI theo shop", value: "AI học từ hội thoại cũ và câu trả lời mẫu của shop.", publicClaim: true },
-  api: { label: "API", value: "Đọc / ghi dữ liệu từ hệ thống khác.", publicClaim: false },
-  webhook: { label: "Webhook", value: "Đẩy sự kiện (đơn mới, hội thoại) sang hệ thống khác.", publicClaim: false },
+  api: { label: "Kết nối phần mềm khác (API)", value: "Đọc / ghi dữ liệu từ hệ thống khác.", publicClaim: false },
+  webhook: { label: "Tự báo sự kiện sang phần mềm khác", value: "Đẩy sự kiện (đơn mới, hội thoại) sang hệ thống khác.", publicClaim: false },
   multi_user: { label: "Nhiều người dùng", value: "Mời nhân viên, phân quyền theo vai trò.", publicClaim: true },
 };
 
