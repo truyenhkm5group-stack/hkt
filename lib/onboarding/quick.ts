@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { getDb, schema } from "@/db";
-import { recordIdentity } from "@/lib/auth/identities";
+import { indexAccountIdentities, recordIdentity } from "@/lib/auth/identities";
 import { normalizeEmail, normalizePhone } from "@/lib/auth/identity-shared";
 import { OAUTH_IDENTITY_KIND, type SocialProfile } from "@/lib/auth/oauth";
 import type { SessionSubject } from "@/lib/auth/session";
@@ -100,8 +100,9 @@ export async function quickSignup(
     return u?.id ?? null;
   });
   if (adminId) {
-    await recordIdentity("EMAIL", email, code, adminId);
-    await recordIdentity("PHONE", phone, code, adminId);
+    // Cùng đường ghi email / SĐT với mọi lượt tạo tài khoản (lib/auth/identities.ts). Khách vừa vào thẳng ⇒ đây là một lượt
+    // đăng nhập (có mốc dùng); người vận hành tạo hộ ⇒ chỉ chỉ mục, chưa ai đăng nhập.
+    await indexAccountIdentities(code, { id: adminId, email, phone }, { usedAt: r.loggedIn ? new Date() : null });
     if (social) await recordIdentity(OAUTH_IDENTITY_KIND[social.provider], social.subject, code, adminId);
   }
   return { ok: true, orgCode: r.orgCode, loggedIn: r.loggedIn };

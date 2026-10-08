@@ -17,11 +17,13 @@ SILO: một workspace một CSDL, `getDb()` chọn theo ngữ cảnh máy chủ 
   nhận mã workspace từ trình duyệt.
 - Sổ dùng: tài khoản + thuê bao của dòng do máy chủ tra từ workspace.
 - Job cấp phát không lưu bí mật (mật khẩu quản trị ngẫu nhiên, không lưu, không trả); quản trị kích hoạt bằng liên kết
-  dùng một lần (`createResetLinkAsOperator`, có nhật ký).
+  dùng một lần (`createResetLinkAsOperator`, có nhật ký). «Gửi lại liên kết kích hoạt» (`resendActivationAsOperator`) chỉ khi
+  quản trị CHƯA kích hoạt, người nhận do máy chủ tra, liên kết cũ bị thu hồi, CSDL chỉ giữ băm.
 - Bảng `platform_*` mới bị xoá ở CSDL workspace mỗi lần mở (`db/migrate.ts`), khai trong `CONTROL_PLANE_TABLES`.
 
 ## 3. Danh tính — hiện trạng và giới hạn
 
 Một người thuộc hai workspace = hai dòng `users` ở hai CSDL, hai mật khẩu; `platform_identities` chỉ là chỉ mục để đăng
-nhập không cần mã workspace. Không có chuyển workspace trong phiên. Hợp nhất danh tính (một User toàn nền tảng + Membership)
+nhập không cần mã workspace — ghi ngay khi tài khoản dùng được bằng mật khẩu (`IDENTITY.md` §1b), mật khẩu vẫn kiểm trong
+CSDL workspace; Google / Facebook chỉ khớp email của dòng đã từng dùng để đăng nhập. Không có chuyển workspace trong phiên. Hợp nhất danh tính (một User toàn nền tảng + Membership)
 là Phase 3 của `PLAN.md`: phải giữ nguyên tính chất "JWT `org = B`, `sub` của A ⇒ tra trong CSDL B ⇒ không thấy ⇒ từ chối".
