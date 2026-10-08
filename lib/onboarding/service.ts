@@ -7,6 +7,7 @@
  *   gate (cờ / mã mời / trần) → lược đồ (zod, như trình duyệt) → blueprint (mẫu cắt theo module, hoặc trắng)
  *   → kế hoạch (`planBlueprint`, phải ok) + hạn mức gói → `provisionOrganization` (module LÕI, chưa quản trị)
  *   → CSDL mới phải RỖNG → `provisionOrganization` (quản trị đầu tiên) → `installBlueprint` trong `withOrganization`
+ *   → thuê bao sản phẩm theo module mẫu vừa bật (`openSignupSubscriptions`, không làm hỏng lượt dựng — F-02)
  *   → DONE → đăng nhập qua ĐÚNG `verifyLogin` của màn đăng nhập (khách) / không đăng nhập (người vận hành).
  *
  * ─── IDEMPOTENT THEO MÃ TỔ CHỨC ───
@@ -40,6 +41,7 @@ import { findOrganization, getHomeOrganization, invalidateOrganizations } from "
 import { markPilotConfigured, markPilotCreated } from "@/lib/platform/pilot";
 import { provisionOrganization } from "@/lib/platform/provision";
 import { markOrganizationDraft } from "@/lib/platform/publish";
+import { openSignupSubscriptions } from "@/lib/saas/signup-subscriptions";
 import { buildSignupBlueprint, freshOrgState, type SignupBlueprint } from "@/lib/onboarding/blueprint";
 import { claimInvite, lookupInvite, type InviteRow } from "@/lib/onboarding/invites";
 import { checkSignupRate, hashIp, recordAttempt, type AttemptMode } from "@/lib/onboarding/rate";
@@ -104,6 +106,12 @@ export type OnboardingState = {
   error: string | null;
   installId: string | null;
   runs: number;
+  /**
+   * Bước THUÊ BAO SẢN PHẨM của lượt dựng gần nhất (F-02, `lib/saas/signup-subscriptions.ts`): sản phẩm vừa mở, sản phẩm đang
+   * dùng theo module, câu lỗi nếu hỏng. Bước này KHÔNG làm hỏng lượt dựng — đây là vết đọc được của nó. Dòng có từ trước bản vá
+   * không có ô này (`undefined`), không suy ra gì từ đó.
+   */
+  subscriptions?: { at: string; opened: string[]; inUse: string[] | null; error: string | null };
 };
 
 /** Mốc "đang dựng" coi là CHẾT sau từng này (tiến trình sập giữa chừng) — lượt sau được chạy tiếp. Câu SQL của `claimRunning` ghi cùng số: 10 phút. */
@@ -167,10 +175,35 @@ export async function listOnboardingStates(): Promise<Record<string, OnboardingS
 // ═══ MÓC KIỂM THỬ: tiêm lỗi vào một bước ═══
 
 export type SetupStepName = "PROVISION" | "ADMIN" | "INSTALL" | "FINISH";
-let faultHook: ((step: SetupStepName) => void) | null = null;
-/** Chỉ bộ kiểm thử gọi: ném ở bước chỉ định để chứng minh nhánh `SETUP_FAILED`. `null` để gỡ. */
-export function setOnboardingFaultForTests(hook: ((step: SetupStepName) => void) | null) {
+/** Điểm tiêm lỗi: bốn bước làm hỏng lượt dựng + bước thuê bao sản phẩm (KHÔNG làm hỏng lượt dựng — chỉ để lại vết). */
+export type SetupFaultPoint = SetupStepName | "SUBSCRIPTIONS";
+let faultHook: ((step: SetupFaultPoint) => void) | null = null;
+/** Chỉ bộ kiểm thử gọi: ném ở bước chỉ định để chứng minh nhánh `SETUP_FAILED` (hoặc nhánh vết của bước thuê bao). `null` để gỡ. */
+export function setOnboardingFaultForTests(hook: ((step: SetupFaultPoint) => void) | null) {
   faultHook = hook;
+}
+
+const SETUP_SOURCE_LABEL: Record<OnboardingState["source"], string> = { OPEN: "cửa hàng tự đăng ký", INVITE: "khách có mã mời", OPERATOR: "người vận hành dựng hộ" };
+
+/**
+ * Bước THUÊ BAO SẢN PHẨM của lượt dựng (F-02): chạy SAU khi mẫu ngành đã bật module, mở thuê bao cho sản phẩm đang dùng — CÙNG
+ * hàm với lượt sửa bù (`openSignupSubscriptions`). Không bao giờ làm hỏng lượt dựng; kết quả (kể cả câu lỗi) ghi vào trạng thái
+ * dựng để đọc lại được, cạnh dòng nhật ký nền tảng mà hàm đã ghi khi hỏng.
+ */
+async function openSetupSubscriptions(input: SetupInput) {
+  const outcome = await openSignupSubscriptions(input.code, {
+    actor: platformActorOf(input.who),
+    reason: `Mở cùng lượt dựng /start (${SETUP_SOURCE_LABEL[input.source]}) — theo module đang dùng sau khi cài mẫu`,
+    auditSource: "UI",
+    beforeOpen: () => faultHook?.("SUBSCRIPTIONS"),
+  });
+  try {
+    await writeOnboarding(input.code, {
+      subscriptions: outcome.ok ? { at: new Date().toISOString(), opened: outcome.opened, inUse: outcome.inUse, error: null } : { at: new Date().toISOString(), opened: [], inUse: null, error: outcome.error },
+    });
+  } catch (error) {
+    console.warn(`[onboarding] không ghi được vết bước thuê bao của ${input.code}: ${error instanceof Error ? error.message : String(error)}`);
+  }
 }
 
 // ═══ TỪNG BƯỚC (mỗi bước kiểm ở máy chủ) ═══
@@ -389,6 +422,10 @@ async function runSetup(input: SetupInput, step: { current: SetupStepName }): Pr
   const result = await withOrganization(input.code, () => installBlueprint(input.built.bp, subject));
   if (!result.ok) throw new Error(`Cài «${input.built.bp.name}» hỏng: ${result.errors.map((e) => e.message).join(" · ")}`);
   faultHook?.("INSTALL");
+
+  // THUÊ BAO SẢN PHẨM (F-02 · kiểm vỏ khách 08/10/2026): `provisionOrganization` ở bước PROVISION chỉ thấy module lõi nên không
+  // mở được thuê bao nào; mẫu vừa cài mới bật `ai_sales` / module ERP. Chạy cả ở lượt chạy lại (idempotent) — không làm hỏng lượt dựng.
+  await openSetupSubscriptions(input);
 
   step.current = "FINISH";
   await withOrganization(input.code, () =>
