@@ -1,0 +1,39 @@
+{
+  "schema": 1,
+  "mission_id": "billing-sepay-trust",
+  "title": "Tiền thuê bao chỉ tự gia hạn khi SePay ghi vào đúng tài khoản nhận; sao kê / gõ tay chờ người vận hành xác nhận",
+  "business_goal": "",
+  "status": "PLANNING",
+  "priority": "P2",
+  "risk": "HIGH",
+  "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "worker": null,
+  "worktree": null,
+  "branch": "fix/billing-sepay-trust",
+  "base_sha": "9eea72b5aa14158115a57dc238c19edd56b78f1a",
+  "domains": [],
+  "owned_paths": [
+    "app/api/webhooks/sepay/route.ts",
+    "components/billing/operator-billing.tsx",
+    "components/billing/platform-billing-section.tsx",
+    "docs/platform/billing.md",
+    "lib/actions/bank.ts",
+    "lib/actions/billing.ts",
+    "lib/billing/ai-balance-rules.ts",
+    "lib/billing/rules.ts",
+    "lib/billing/service.ts",
+    "tests/platform-billing.test.ts",
+    "tests/platform-isolation-static.test.ts",
+    "tests/sepay-webhook.test.ts"
+  ],
+  "dependencies": [
+    "ai-balance-followup"
+  ],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-08T01:35:26.979Z",
+  "updated_at": "2026-10-08T01:35:26.979Z",
+  "last_heartbeat": "2026-10-08T01:35:26.979Z",
+  "definition_of_done": []
+}
