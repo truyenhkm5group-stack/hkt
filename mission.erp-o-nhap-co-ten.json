@@ -1,0 +1,38 @@
+{
+  "schema": 1,
+  "mission_id": "erp-o-nhap-co-ten",
+  "title": "Ô nhập ở trang chi tiết ERP có tên cho trình đọc màn hình: lô xưởng (36 ô), khách sỉ, gọi khách sỉ điện thoại, topic sản xuất, trạng thái mẫu, góp ý ý tưởng, trình sửa luật tự động",
+  "business_goal": "",
+  "status": "PLANNING",
+  "priority": "P2",
+  "risk": "MEDIUM",
+  "owner": "DESKTOP-56TH98Y:wt-a11y2",
+  "worker": null,
+  "worktree": null,
+  "branch": "claude/erp-o-nhap-co-ten",
+  "base_sha": "2606fcbe950792c259e5959e58461c7fcd74e95f",
+  "domains": [],
+  "owned_paths": [
+    "app/(dashboard)/inventory/workshop/workshop-forms.tsx",
+    "app/(dashboard)/wholesale/leads/*/lead-actions.tsx",
+    "app/(dashboard)/wholesale/mobile/lead/*/mobile-call.tsx",
+    "app/(dashboard)/production/topics/*/topic-controls.tsx",
+    "app/(dashboard)/models/*/model-controls.tsx",
+    "app/(dashboard)/models/*/suggestion-transition.tsx",
+    "app/(dashboard)/ideas/feedback-form.tsx",
+    "components/platform/workflow/rule-editor.tsx",
+    "app/(dashboard)/inventory/planning/orders/*/order-actions.tsx",
+    "tests/erp-form-names.test.ts",
+    "tests/sync-fixtures.test.ts"
+  ],
+  "dependencies": [
+    "erp-chi-tiet-duoi-dai"
+  ],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-08T23:30:49.882Z",
+  "updated_at": "2026-10-08T23:30:49.882Z",
+  "last_heartbeat": "2026-10-08T23:30:49.882Z",
+  "definition_of_done": []
+}
