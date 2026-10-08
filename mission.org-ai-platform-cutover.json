@@ -26,19 +26,18 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-08T03:17:21.525Z",
-  "updated_at": "2026-10-08T03:43:39.802Z",
-  "last_heartbeat": "2026-10-08T03:43:39.802Z",
+  "updated_at": "2026-10-08T04:00:57.502Z",
+  "last_heartbeat": "2026-10-08T04:00:57.502Z",
   "definition_of_done": [],
   "handoff": {
     "branch": "feat/org-ai-cutover",
-    "sha": "e94763a3d700bb0c7ccb5cb28eecb9b7c88b875c",
-    "at": "2026-10-08T03:43:39.802Z",
+    "sha": "b168cab44687b489d8ea1ca98e11d016b8a1ab84",
+    "at": "2026-10-08T04:00:57.502Z",
     "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
     "title": "HSLC: kiểm khoá AI (vân tay · project Google) và chuyển AI Bán hàng sang AI dùng chung của nền tảng — ops org-ai-cutover",
-    "summary": "Thao tác ops org-ai-cutover: kiểm (chỉ đọc) khoá AI của một tổ chức khách — vân tay trong RAM, SAME/DIFFERENT_KEY, project Google qua Lookup nếu có credential quản trị (không thì UNAVAILABLE), credit tháng; --apply chuyển AI Bán hàng sang AI dùng chung qua lõi /platform/org; --apply-probe lượt thử kênh TEST + đếm sổ AI từ mốc. Đã làm các LOW của review bảo mật.",
+    "summary": "ops org-ai-cutover: kiểm (chỉ đọc) — dấu băm khoá (khoá của tổ chức giải + băm trong lib/connectors/service.ts aiConnectionAudit), SAME/DIFFERENT_KEY, project Google cho khoá .env nếu có credential quản trị, credit tháng; --apply chuyển AI Bán hàng sang AI dùng chung qua lõi /platform/org; --apply-probe lượt thử kênh TEST. Mọi số liệu của khách chỉ ở phần mã hoá.",
     "tests": [
-      "tests/org-ai-cutover.test.ts (vân tay · SAME/DIFFERENT · credit tháng + phần còn lại · ngày còn lại VN · phán quyết sau cutover · quét mã nguồn không in khoá / không gọi API khác bằng khoá khách / không theo chuyển hướng / log công khai chỉ phán quyết)",
-      "ops-log-leak · ops-concurrency · repo-integrity · deploy-script · org-summary · org-order-audit · company-os-summary · agent-pr-bridge · agent-dispatch guards · agent-run-reattach guards · backup ops đạt",
+      "tests/org-ai-cutover.test.ts · tests/connectors.test.ts (aiConnectionAudit = SHA-256 khoá đang lưu, không mang mảnh khoá; lá chắn chỉ service giải mã) · ops-log-leak · ops-concurrency · repo-integrity đạt",
       "typecheck + eslint + hợp đồng tĩnh (sau commit) sạch"
     ]
   }
