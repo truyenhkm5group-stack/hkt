@@ -3,7 +3,7 @@
   "mission_id": "trang-chu-su-that-thuong-mai",
   "title": "Trang chủ Chốt Đơn nói đúng sản phẩm: nối Facebook thẳng (Pancake là lựa chọn), bỏ claim tuyệt đối, bỏ «Chi phí AI hiện rõ», FAQ không hứa khoá AI riêng",
   "business_goal": "",
-  "status": "VERIFYING",
+  "status": "DONE",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-pr-a",
@@ -23,8 +23,8 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-08T16:00:52.554Z",
-  "updated_at": "2026-10-08T23:38:17.843Z",
-  "last_heartbeat": "2026-10-08T21:22:35.542Z",
+  "updated_at": "2026-10-08T23:39:55.078Z",
+  "last_heartbeat": "2026-10-08T23:39:55.078Z",
   "definition_of_done": [],
   "intake": {
     "verdict": "MISSING",
@@ -33,7 +33,8 @@
   "evidence": {
     "merged": "#706 → 5374b54fc4be69eea4d252cdce3f0009c7b81567",
     "verify": "PASS dbab68130a7261f6e759148d8ccd4575a2fbe849 2026-10-08T23:38:10.076Z",
-    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/37854562530"
+    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/37854562530",
+    "done": "production dbab68130a72 · deploy 37854562530 xanh (smoke) · verify ĐẠT"
   },
   "handoff": {
     "branch": "claude/trang-chu-su-that-thuong-mai",
