@@ -83,7 +83,7 @@ function TenantTable({ rows }: { rows: TenantRow[] }) {
             <th className="px-3 py-2">Gói · vòng đời</th>
             <th className="px-3 py-2 text-right">MRR</th>
             <th className="px-3 py-2 text-right" title="Chi phí AI do NỀN TẢNG trả trong 30 ngày (BYOK là tiền của khách, không phải giá vốn của nền tảng).">AI nền tảng trả</th>
-            <th className="px-3 py-2 text-right" title="MRR − chi phí AI nền tảng trả. Hạ tầng / hỗ trợ chưa phân bổ về từng tổ chức (chưa có căn cứ).">Đóng góp</th>
+            <th className="px-3 py-2 text-right" title="MRR + doanh thu Số dư AI 30 ngày (tiền thật đã dùng − khoản đảo) − chi phí AI nền tảng trả 30 ngày. Hạ tầng / hỗ trợ chưa phân bổ về từng tổ chức (chưa có căn cứ).">Đóng góp</th>
             <th className="px-3 py-2 text-right" title="Sổ dùng 30 ngày: hội thoại khách mới · hội thoại bot có trả lời · đơn do AI chốt (kênh thử không tính). «—» = chưa có ngày nào trong sổ.">Hội thoại · bot · đơn AI</th>
             <th className="px-3 py-2 text-right">Lượt AI 30 ngày</th>
             <th className="px-3 py-2" title="7 ngày gần nhất so với 7 ngày trước đó; dưới 10 lượt thì không gọi là xu hướng.">Xu hướng</th>
@@ -245,7 +245,7 @@ export default async function OwnerCockpitPage() {
         <SectionCard
           title="Biên lợi nhuận nền tảng"
           description={c.margin.missing.length ? `Chưa khai: ${c.margin.missing.join(", ")}` : `Khai bởi ${c.costs.updatedByEmail ?? "—"} · ${c.costs.updatedAt ? formatDateTime(c.costs.updatedAt) : "—"}`}
-          hint="Doanh thu = MRR hiện tại. Giá vốn = AI do nền tảng trả (30 ngày) + hạ tầng khai tay. Biên đóng góp trừ thêm chi phí hỗ trợ khách. Khoản chưa khai in «—», không coi là 0 — một biên 100% vì quên khai hạ tầng là sai."
+          hint="Doanh thu = MRR hiện tại + doanh thu Số dư AI 30 ngày (tiền thật khách đã dùng AI − khoản đảo; tiền nạp chưa dùng / tiền tặng không tính). Giá vốn = AI do nền tảng trả (30 ngày) + hạ tầng khai tay. Biên đóng góp trừ thêm chi phí hỗ trợ khách. Khoản chưa khai in «—», không coi là 0 — một biên 100% vì quên khai hạ tầng là sai."
         >
           <table className="w-full text-sm">
             <tbody>

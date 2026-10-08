@@ -75,7 +75,7 @@ Chống trùng / an toàn (sửa theo review độc lập 08/10/2026 — bảng 
   đã dùng tháng này, chi trung bình 7 ngày, dự kiến còn N ngày, gợi ý nạp tới cuối tháng, 4 mức chọn sẵn + số khác, mã QR
   (máy tính) / sao chép STK · số tiền · nội dung + lưu ảnh QR (điện thoại), đếm ngược, báo «Đã nhận» ngay khi tiền về, lịch sử
   (dùng AI gộp theo ngày), ngưỡng cảnh báo. Không token / model / chi phí nhà cung cấp. Ở «Gói dịch vụ», khi Số dư AI đang bật,
-  «Hoá đơn ước tính» KHÔNG còn dòng khách AI vượt (đã trừ vào số dư — để lại là báo khách trả hai lần) và câu cuối khung nói đúng
+  «Hoá đơn ước tính» trừ khỏi dòng khách AI vượt ĐÚNG số khách đã thu qua số dư trong kỳ (theo sổ cái, không theo cờ — §5) và câu cuối khung nói đúng
   luật hết số dư thay cho «không bao giờ tự tắt».
 - Người vận hành — `/platform/ai-balance` (vào từ «Số dư AI →» ở /platform/saas): số dư từng tổ chức tách tiền thật / tiền
   tặng, nạp 30 ngày, dùng 30 ngày, khoản cần xem lại, bật / tắt từng tổ chức, tặng · điều chỉnh · hoàn (một lượt một dòng,
@@ -103,7 +103,7 @@ Một chỗ tính, dùng lại khung kinh tế đơn vị sẵn có (`lib/pricin
 |-------|-------|----------------|
 | Thuê bao | MRR của ảnh chụp ngày (`platform_saas_daily`) | Có (như cũ) |
 | Tiền THẬT khách đã dùng AI qua Số dư | Sổ cái — dòng `AI_USAGE` lớp `CASH` trong kỳ (`readAiBalancePeriod`) | **Có** — doanh thu ghi nhận lúc dùng |
-| Đảo một khoản trừ oan | Dòng `ADJUSTMENT` lớp `CASH` nguồn `AI_CUSTOMER` (loại «Đảo khoản trừ AI» ở /platform/ai-balance — trần = tiền thật đã trừ chưa đảo) | **Trừ** khỏi doanh thu (`aiBalanceRevenueVnd`), cộng lại số dư |
+| Đảo một khoản trừ oan | Dòng `ADJUSTMENT` nguồn `AI_CUSTOMER`, `source_ref` = khoá khách AI của khoản trừ — nút «Đảo» trên ĐÚNG một dòng trừ ở /platform/ai-balance (`reverseAiUsageCharge`): số tiền + lớp tiền của khoản ấy, khoá `aic-reverse:<mã dòng>` ⇒ mỗi khoản một lần | Khoản đảo tiền thật **trừ** khỏi doanh thu (`aiBalanceRevenueVnd`), cộng lại số dư |
 | Tiền khách nạp, chưa dùng | Dòng `TOPUP` (nạp QR) · điều chỉnh tiền thật nguồn `OPERATOR` (tiền đưa ngoài QR) · số dư `CASH` | **Không** — tiền giữ để phục vụ, khoản phải hoàn (khung «Số dư AI khách đang giữ» — MỌI tổ chức trừ nhà, kể cả đình chỉ / lưu trữ; số dư âm tách thành «khách đang nợ») |
 | Tiền nền tảng tặng đã dùng | Dòng `AI_USAGE` lớp `PROMO` | **Không** — doanh thu BỎ QUA. Chi phí thật của lượt AI ấy đã nằm ở `platform_ai_usage`; không trừ thêm lần hai |
 | Hoàn tiền | Dòng `REFUND` | Không phải doanh thu âm — giảm tiền đang giữ |
@@ -131,7 +131,7 @@ Một chỗ tính, dùng lại khung kinh tế đơn vị sẵn có (`lib/pricin
 | ~~Trừ số dư cho khách AI VƯỢT phần gồm · cổng hết số dư (chỉ chặn khách MỚI, bình luận theo NGƯỜI bình luận) · cảnh báo số dư thấp / hết~~ | — | Xong trong PR này (`lib/billing/ai-usage-charge.ts`, `aiBalanceGate`, `runAiBalanceAlerts`). |
 | ~~Hoá đơn ước tính + bảng kê kỳ KHÔNG gồm khách AI đã trừ số dư~~ | — | Xong — đếm theo dòng sổ của kỳ, không theo cờ (`overageNetOfBalance`, review N2): bật / tắt cờ giữa tháng, chốt bảng kê sau mốc đổi cờ đều ra đúng số. |
 | Lượt bù khi trừ tiền hỏng (khách đã ghi đồng hồ mà chưa có dòng `aic-charge:`) | Không | Doanh thu KHÔNG còn mất: khách chưa trừ nằm lại dòng vượt của bảng kê (N2). Còn lại là công bằng cho khách — phần ấy tính theo KHỐI thay vì đơn giá từng khách; bù bằng job idempotent theo khoá sẵn có, CHỈ kỳ đang mở và khách ghi SAU mốc bật cờ (bảng kê đã chốt thì không trừ thêm — thu hai lần). |
-| ~~Đảo một khoản trừ oan~~ | — | Xong — loại «Đảo khoản trừ AI» (ADJUSTMENT nguồn `AI_CUSTOMER`), trừ khỏi doanh thu, trần = tiền thật đã trừ chưa đảo. Khách bị trừ oan vẫn KHÔNG bị tính lại ở bảng kê. |
+| ~~Đảo một khoản trừ oan~~ | — | Xong — nút «Đảo» theo ĐÚNG một dòng trừ (`reverseAiUsageCharge`, review #648 vòng 2 MEDIUM-2): không gõ số tiền, truy được khách, mỗi khoản một lần kể cả bấm cùng lúc. Trừ khỏi doanh thu; khách bị trừ oan vẫn KHÔNG bị tính lại ở bảng kê. |
 | Ranh giới «âm tối đa 1 khách» khi NHIỀU khách mới tới cùng lúc | Không | Cổng chỉ hỏi số dư > 0 trước lượt; hai khách mới cùng lúc khi còn 20đ ⇒ âm hai đơn giá. Hiếm; sửa bằng khoá theo tổ chức quanh cổng + lượt ghi. |
 | Tiền tặng lẻ nhỏ hơn một đơn giá | Không | Không bao giờ được trừ (trừ tiền tặng chỉ khi đủ một đơn giá). Chấp nhận ở V1; hạn dùng tiền tặng (§4.5) sẽ dọn phần lẻ. |
 | ~~Kinh tế đơn vị: doanh thu dùng AI · chi phí nhà cung cấp · biên theo tổ chức / tháng~~ | — | Xong (§5). |

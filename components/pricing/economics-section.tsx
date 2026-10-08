@@ -77,7 +77,7 @@ export function PricingEconomicsSection({ data, unitPrices }: { data: PricingEco
       <div className="space-y-5 text-sm" data-unit-economics>
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <Tile label="Chi phí AI nền tảng — tới nay" value={formatVND(t.platformAiCostVnd)} sub={`${est} · chiếu cuối tháng ${formatVND(t.projectedPlatformAiCostVnd)}`} />
-          <Tile label="Lãi gộp (sau AI + hạ tầng)" value={formatVND(t.grossProfitVnd)} sub={t.grossMarginPct === null ? (t.infraVnd === null ? "chưa khai hạ tầng / tháng" : "chưa đủ dữ liệu") : `biên ${formatPercent(t.grossMarginPct)}`} />
+          <Tile label="Lãi gộp (sau AI + hạ tầng)" value={formatVND(t.grossProfitVnd)} sub={t.grossMarginPct === null ? (t.infraVnd === null ? "chưa khai hạ tầng / tháng" : "chưa đủ dữ liệu") : `biên ${formatPercent(t.grossMarginPct)} · trên doanh thu ${formatVND(t.marginRevenueVnd)} (MRR + Số dư AI chiếu)`} />
           <Tile label="ARPU (tổ chức trả tiền)" value={formatVND(t.arpuVnd)} sub={`${t.payingTenants} trả tiền · ${t.trialTenants} dùng thử`} />
           <Tile label="Dùng thử → trả tiền" value={data.trial.rate === null ? "—" : formatPercent(data.trial.rate * 100)} sub={`${data.trial.converted}/${data.trial.trialOrgs} tổ chức${data.trial.note ? ` · ${data.trial.note}` : ""}`} />
           <Tile label="AI / tổ chức có dùng" value={formatVND(t.aiCostPerTenantVnd)} />

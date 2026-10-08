@@ -19,7 +19,7 @@ import { inArray } from "drizzle-orm";
 import { getPlatformDb, schema } from "@/db";
 import { postAiLedgerEntry, readAiBalancePeriod, readAiCustomerChargedUnits } from "@/lib/billing/ai-balance";
 import { aiBalanceRevenueVnd, EMPTY_AI_BALANCE_PERIOD, type AiBalancePeriod, type AiFundsClass, type AiLedgerEntryType, type AiLedgerSource } from "@/lib/billing/ai-balance-rules";
-import { aiBalanceTotals, platformGrossMargin, revenueWithAiBalance } from "@/lib/pricing/economics";
+import { aiBalanceTotals, platformGrossMargin, revenueWithAiBalance, tenantMarginRisk } from "@/lib/pricing/economics";
 import { billNetOfBalance, overageNetOfBalance, type BillEstimate, type OverageLine, type OverageResult } from "@/lib/pricing/versions";
 
 const X = "aibe-x";
@@ -74,6 +74,11 @@ function testNetting() {
   assert.deepEqual([ai(overageNetOfBalance(noPrice, 30, BLOCK)).amountVnd, ai(overageNetOfBalance(noPrice, 130, BLOCK)).amountVnd], [null, 0], "phiên bản chưa khai đơn giá khối: còn khách chưa trừ ⇒ chưa biết; trừ hết ⇒ 0");
   const noAi = overage([line("fanpages", 0), line("users", 0)]);
   assert.equal(overageNetOfBalance(noAi, 130, BLOCK), noAi, "gói không có dòng khách AI ⇒ giữ nguyên");
+  // LOW-2: sổ đọc hỏng mà CHƯA vượt phần gồm ⇒ 0đ vẫn BIẾT (khách trong phần gồm không thấy hoá đơn «—»); ghi chú gốc giữ lại.
+  const within = overage([aiLine(0), line("users", 0)]);
+  assert.equal(overageNetOfBalance(within, null, BLOCK), within, "chưa vượt ⇒ không cần sổ");
+  const noted = overage([{ ...aiLine(130, null), note: "phiên bản giá chưa khai đơn giá khối" }]);
+  assert.match(ai(overageNetOfBalance(noted, 30, BLOCK)).note ?? "", /^phiên bản giá chưa khai đơn giá khối · đã thu qua Số dư AI 30 khách/, "ghi chú gốc không bị đè");
 
   const bill: BillEstimate = { planVnd: 990_000, overage: ov, totalVnd: 990_000 + 198_000, note: null };
   assert.deepEqual([billNetOfBalance(bill, 130, BLOCK).totalVnd, billNetOfBalance(bill, 30, BLOCK).totalVnd, billNetOfBalance(bill, null, BLOCK).totalVnd], [1_090_000, 1_139_000, null]);
@@ -86,6 +91,9 @@ function testRevenue() {
   const none = revenueWithAiBalance({ mrrVnd: 1_490_000, overage: ov, balance: null, blockSize: BLOCK });
   assert.deepEqual([none.realizedVnd, none.projectedVnd, none.overage], [1_490_000, 1_688_000, ov]);
   assert.equal(revenueWithAiBalance({ mrrVnd: 1_490_000, overage: ov, balance: null, blockSize: BLOCK, projection: { elapsedDays: 10, totalDays: 30 } }).projectedVnd, 1_688_000);
+  // LOW-1: chưa dùng Số dư ⇒ ngày 1–2 của tháng vẫn ĐÚNG công thức cũ (0đ chiếu là 0đ, không thành «—»).
+  assert.equal(revenueWithAiBalance({ mrrVnd: 1_490_000, overage: ov, balance: null, blockSize: BLOCK, projection: { elapsedDays: 2, totalDays: 30 } }).projectedVnd, 1_688_000);
+  assert.equal(revenueWithAiBalance({ mrrVnd: 1_490_000, overage: ov, balance: EMPTY_AI_BALANCE_PERIOD, blockSize: BLOCK, projection: { elapsedDays: 1, totalDays: 31 } }).projectedVnd, 1_688_000);
   assert.equal(revenueWithAiBalance({ mrrVnd: 1_490_000, overage: overage([aiLine(null), line("users", 0)]), balance: null, blockSize: BLOCK }).projectedVnd, null, "cũ: dòng khách AI chưa biết ⇒ chiếu —");
 
   // Có Số dư: mọi vế khác 0 và khác nhau. 130 khách vượt đều đã thu qua sổ ⇒ dòng khách AI 0đ; doanh thu Số dư = tiền thật đã
@@ -96,7 +104,24 @@ function testRevenue() {
   const r = revenueWithAiBalance({ mrrVnd: 1_490_000, overage: ov, balance: b, blockSize: BLOCK });
   assert.deepEqual([r.realizedVnd, r.projectedVnd, r.overage?.totalVnd], [1_490_000 + 72_520, 1_490_000 + 100_000 + 72_520, 100_000], "không chiếu: MRR + phần vượt chưa thu + doanh thu Số dư tới nay");
   const rp = revenueWithAiBalance({ mrrVnd: 1_490_000, overage: ov, balance: b, blockSize: BLOCK, projection: { elapsedDays: 10, totalDays: 30 } });
-  assert.deepEqual([rp.realizedVnd, rp.projectedVnd], [1_490_000 + 72_520, 1_490_000 + 100_000 + 217_560], "chiếu: doanh thu Số dư theo nhịp 10/30 ngày, cùng nhịp với chi phí AI chiếu");
+  assert.deepEqual([rp.realizedVnd, rp.projectedVnd], [1_490_000 + 72_520, 1_490_000 + 100_000 + 219_520], "chiếu: phần tiền thật ĐÃ DÙNG theo nhịp 10/30 ngày (73.500 × 3), khoản đảo 980 trừ NGUYÊN (sự kiện một lần)");
+  // LOW-3: doanh thu cho «nguy cơ âm biên» = MRR + doanh thu Số dư CHIẾU (cùng chân trời với chi phí AI chiếu), không gồm phần
+  // vượt ước tính của bảng kê; chưa đủ ngày để chiếu ⇒ tới nay.
+  assert.deepEqual(
+    [rp.riskRevenueVnd, r.riskRevenueVnd, revenueWithAiBalance({ mrrVnd: 1_490_000, overage: ov, balance: b, blockSize: BLOCK, projection: { elapsedDays: 2, totalDays: 30 } }).riskRevenueVnd, none.riskRevenueVnd, revenueWithAiBalance({ mrrVnd: null, overage: ov, balance: b, blockSize: BLOCK }).riskRevenueVnd],
+    [1_490_000 + 219_520, 1_490_000 + 72_520, 1_490_000 + 72_520, 1_490_000, null],
+  );
+  // Review follow-up LOW-2: tháng chỉ có KHOẢN ĐẢO (đảo khoản của tháng trước), chưa dùng gì ⇒ trừ nguyên −30.000, không chiếu thành
+  // −90.000 «cả tháng».
+  assert.equal(revenueWithAiBalance({ mrrVnd: 1_490_000, overage: null, balance: { ...EMPTY_AI_BALANCE_PERIOD, reversalCashVnd: 30_000 }, blockSize: BLOCK, projection: { elapsedDays: 10, totalDays: 30 } }).riskRevenueVnd, 1_460_000);
+  // «Nguy cơ âm biên» so chi phí CHIẾU với doanh thu CHIẾU: MRR 100.000đ + Số dư tới nay 50.000đ (ngày 10/30 ⇒ chiếu 150.000đ),
+  // chi phí AI chiếu 200.000đ ⇒ OK (250.000đ), không phải NEGATIVE như khi so với doanh thu tới nay (150.000đ).
+  const riskRev = revenueWithAiBalance({ mrrVnd: 100_000, overage: null, balance: { ...EMPTY_AI_BALANCE_PERIOD, usageCashVnd: 50_000 }, blockSize: BLOCK, projection: { elapsedDays: 10, totalDays: 30 } });
+  assert.deepEqual([riskRev.realizedVnd, riskRev.riskRevenueVnd], [150_000, 250_000]);
+  assert.deepEqual(
+    [tenantMarginRisk(riskRev, 60_000, 200_000), tenantMarginRisk(riskRev, 60_000, 260_000), tenantMarginRisk(riskRev, 0, 200_000), tenantMarginRisk({ ...riskRev, riskRevenueVnd: null }, 60_000, 200_000)],
+    ["OK", "NEGATIVE", "NO_COST", "UNKNOWN"],
+  );
   assert.equal(revenueWithAiBalance({ mrrVnd: 1_490_000, overage: ov, balance: b, blockSize: BLOCK, projection: { elapsedDays: 2, totalDays: 30 } }).projectedVnd, null, "chưa đủ ngày để chiếu ⇒ —");
   // Bật cờ giữa tháng: 100 khách trước đó chưa trừ ⇒ còn 1 khối trong doanh thu chiếu (bảng kê cũng thu đúng khối ấy).
   assert.equal(revenueWithAiBalance({ mrrVnd: 1_490_000, overage: ov, balance: { ...b, aiCustomerUnits: 30 }, blockSize: BLOCK }).projectedVnd, 1_490_000 + 49_000 + 100_000 + 72_520);
@@ -133,14 +158,17 @@ function testPlatformTotals() {
   }, "dòng tiền kỳ chỉ của tổ chức trong khung; số dư đang giữ của MỌI tổ chức trừ nhà (kể cả đình chỉ); số dư âm là khách đang nợ, không bù trừ");
 
   assert.deepEqual(
-    platformGrossMargin({ mrrPayingVnd: 2_000_000, aiBalanceRevenueToDateVnd: 100_000, elapsedDays: 10, totalDays: 30, projectedAiCostVnd: 500_000, infraVnd: 300_000 }),
+    platformGrossMargin({ mrrPayingVnd: 2_000_000, aiBalanceRevenueToDateVnd: 100_000, aiBalanceReversalToDateVnd: 0, elapsedDays: 10, totalDays: 30, projectedAiCostVnd: 500_000, infraVnd: 300_000 }),
     { marginRevenueVnd: 2_300_000, grossProfitVnd: 1_500_000, grossMarginPct: (1_500_000 / 2_300_000) * 100 },
     "doanh thu = MRR + doanh thu Số dư CHIẾU (100.000 × 30/10); lãi = − AI chiếu − hạ tầng",
   );
-  assert.deepEqual(platformGrossMargin({ mrrPayingVnd: 2_000_000, aiBalanceRevenueToDateVnd: 100_000, elapsedDays: 10, totalDays: 30, projectedAiCostVnd: 500_000, infraVnd: null }), { marginRevenueVnd: 2_300_000, grossProfitVnd: null, grossMarginPct: null }, "chưa khai hạ tầng ⇒ lãi —");
-  assert.deepEqual(platformGrossMargin({ mrrPayingVnd: 2_000_000, aiBalanceRevenueToDateVnd: 0, elapsedDays: 10, totalDays: 30, projectedAiCostVnd: null, infraVnd: 300_000 }).grossProfitVnd, null, "chưa chiếu được chi phí AI ⇒ —");
-  assert.deepEqual(platformGrossMargin({ mrrPayingVnd: 2_000_000, aiBalanceRevenueToDateVnd: 100_000, elapsedDays: 2, totalDays: 30, projectedAiCostVnd: 500_000, infraVnd: 300_000 }), { marginRevenueVnd: null, grossProfitVnd: null, grossMarginPct: null }, "chưa đủ ngày để chiếu ⇒ —");
-  assert.equal(platformGrossMargin({ mrrPayingVnd: 0, aiBalanceRevenueToDateVnd: 0, elapsedDays: 10, totalDays: 30, projectedAiCostVnd: 500_000, infraVnd: 300_000 }).grossProfitVnd, null, "chưa có doanh thu ⇒ không chia cho 0");
+  assert.deepEqual(platformGrossMargin({ mrrPayingVnd: 2_000_000, aiBalanceRevenueToDateVnd: 100_000, aiBalanceReversalToDateVnd: 0, elapsedDays: 10, totalDays: 30, projectedAiCostVnd: 500_000, infraVnd: null }), { marginRevenueVnd: 2_300_000, grossProfitVnd: null, grossMarginPct: null }, "chưa khai hạ tầng ⇒ lãi —");
+  assert.deepEqual(platformGrossMargin({ mrrPayingVnd: 2_000_000, aiBalanceRevenueToDateVnd: 0, aiBalanceReversalToDateVnd: 0, elapsedDays: 10, totalDays: 30, projectedAiCostVnd: null, infraVnd: 300_000 }).grossProfitVnd, null, "chưa chiếu được chi phí AI ⇒ —");
+  assert.deepEqual(platformGrossMargin({ mrrPayingVnd: 2_000_000, aiBalanceRevenueToDateVnd: 100_000, aiBalanceReversalToDateVnd: 0, elapsedDays: 2, totalDays: 30, projectedAiCostVnd: 500_000, infraVnd: 300_000 }), { marginRevenueVnd: null, grossProfitVnd: null, grossMarginPct: null }, "chưa đủ ngày để chiếu ⇒ —");
+  assert.equal(platformGrossMargin({ mrrPayingVnd: 0, aiBalanceRevenueToDateVnd: 0, aiBalanceReversalToDateVnd: 0, elapsedDays: 10, totalDays: 30, projectedAiCostVnd: 500_000, infraVnd: 300_000 }).grossProfitVnd, null, "chưa có doanh thu ⇒ không chia cho 0");
+  assert.equal(platformGrossMargin({ mrrPayingVnd: 2_000_000, aiBalanceRevenueToDateVnd: 0, aiBalanceReversalToDateVnd: 0, elapsedDays: 2, totalDays: 30, projectedAiCostVnd: null, infraVnd: 300_000 }).marginRevenueVnd, 2_000_000, "LOW-1: chưa dùng Số dư ⇒ doanh thu biên = MRR ngay từ ngày đầu tháng");
+  // Review follow-up LOW-2: doanh thu tới nay 70.000 = dùng 100.000 − đảo 30.000 ⇒ chiếu phần DÙNG (300.000) rồi trừ đảo nguyên.
+  assert.equal(platformGrossMargin({ mrrPayingVnd: 2_000_000, aiBalanceRevenueToDateVnd: 70_000, aiBalanceReversalToDateVnd: 30_000, elapsedDays: 10, totalDays: 30, projectedAiCostVnd: 500_000, infraVnd: 300_000 }).marginRevenueVnd, 2_270_000);
 }
 
 // ─────────────────────────── 2 · SỔ ───────────────────────────

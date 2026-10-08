@@ -16,7 +16,7 @@
  */
 import { and, eq, gte, sql } from "drizzle-orm";
 import { getDb, getPlatformDb, schema } from "@/db";
-import { aiBalanceEnabled, postAiLedgerEntry, readAiBalance } from "@/lib/billing/ai-balance";
+import { aiBalanceEnabled, postAiLedgerEntry, readAiBalance, readAiNetSpend } from "@/lib/billing/ai-balance";
 import { balanceForecast, LOW_BALANCE_DEFAULT_VND } from "@/lib/billing/ai-balance-rules";
 import { currentOrganization } from "@/lib/platform/context";
 import { findOrganization } from "@/lib/platform/organizations";
@@ -142,13 +142,7 @@ async function aiCustomersThisPeriod(orgCode: string, now: Date): Promise<number
   return Number(row?.n ?? 0);
 }
 
+/** Chi 7 ngày cho dự báo của chuông «sắp hết» — RÒNG, đúng phép tính của màn khách (khoản đã đảo không làm dự báo bi quan hơn). */
 async function readSpend7d(orgCode: string, now: Date): Promise<number> {
-  const pdb = await getPlatformDb();
-  const e = schema.platformAiLedgerEntries;
-  const since = new Date(now.getTime() - 7 * 86_400_000);
-  const [row] = await pdb
-    .select({ spent: sql<string>`coalesce(sum(-${e.amountVnd}), 0)::bigint` })
-    .from(e)
-    .where(and(eq(e.orgCode, orgCode), eq(e.entryType, "AI_USAGE"), gte(e.occurredAt, since)));
-  return Number(row?.spent ?? 0);
+  return readAiNetSpend(orgCode, new Date(now.getTime() - 7 * 86_400_000));
 }

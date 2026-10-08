@@ -108,6 +108,11 @@ export type BalanceRevenue = {
   projectedVnd: number | null;
   /** Phần vượt SAU khi trừ khách AI đã thu qua Số dư (`overageNetOfBalance`) — cái màn vận hành in, cùng số với bảng kê. */
   overage: OverageResult | null;
+  /**
+   * Doanh thu cho «nguy cơ âm biên» (so với chi phí AI CHIẾU): MRR + doanh thu Số dư CHIẾU — cùng chân trời với chi phí, không
+   * gồm phần vượt ước tính của bảng kê (chưa thu). Chưa đủ ngày để chiếu ⇒ doanh thu Số dư tới nay (review #648 vòng 2, LOW-3).
+   */
+  riskRevenueVnd: number | null;
 };
 
 /**
@@ -127,12 +132,27 @@ export function revenueWithAiBalance(input: {
   const { mrrVnd, overage, balance } = input;
   const used = aiBalanceRevenueVnd(balance);
   const net = overage ? overageNetOfBalance(overage, balance?.aiCustomerUnits ?? 0, input.blockSize) : null;
-  const usedProjected = input.projection ? projectToPeriodEnd(used, input.projection.elapsedDays, input.projection.totalDays) : used;
+  // CHIẾU chỉ phần tiền thật đã dùng; khoản đảo là sự kiện MỘT LẦN nên trừ nguyên — chiếu cả nó là nhân một khoản đảo đầu tháng lên
+  // thành «doanh thu âm cả tháng» (review follow-up LOW-2). 0đ đã dùng chiếu là 0đ: ngày 1–2 của tháng chưa dùng Số dư vẫn ra ĐÚNG
+  // công thức cũ, không thành «—» (review #648 vòng 2, LOW-1).
+  const usageCash = balance?.usageCashVnd ?? 0;
+  const usageProjected = !input.projection || usageCash === 0 ? usageCash : projectToPeriodEnd(usageCash, input.projection.elapsedDays, input.projection.totalDays);
+  const usedProjected = usageProjected === null ? null : usageProjected - (usageCash - used);
   return {
     realizedVnd: mrrVnd === null ? null : mrrVnd + used,
     projectedVnd: mrrVnd === null || !net || net.totalVnd === null || usedProjected === null ? null : mrrVnd + net.totalVnd + Math.round(usedProjected),
     overage: net,
+    riskRevenueVnd: mrrVnd === null ? null : mrrVnd + Math.round(usedProjected ?? used),
   };
+}
+
+/**
+ * «Nguy cơ âm biên» của MỘT tổ chức: chi phí AI CHIẾU so với doanh thu CÙNG chân trời (`riskRevenueVnd` — MRR + Số dư chiếu),
+ * KHÔNG so với doanh thu tới nay (`realizedVnd`): đầu tháng doanh thu Số dư mới vài ngày mà chi phí đã chiếu cả tháng ⇒ báo âm
+ * biên giả (review #648 vòng 2, LOW-3). HÀM THUẦN — màn vận hành gọi đúng hàm này.
+ */
+export function tenantMarginRisk(rev: BalanceRevenue, platformAiCostToDateVnd: number, projectedPlatformAiCostVnd: number | null): MarginRisk {
+  return marginRisk({ revenueVnd: rev.riskRevenueVnd, platformAiCostToDateVnd, projectedPlatformAiCostVnd });
 }
 
 /**
@@ -181,8 +201,13 @@ export function aiBalanceTotals(input: { balances: ReadonlyMap<string, AiBalance
  * (cùng nhịp với chi phí AI chiếu); chi phí = AI nền tảng chiếu + hạ tầng đã khai. Thiếu một vế (chưa đủ ngày để chiếu · chưa
  * khai hạ tầng · chưa có doanh thu) ⇒ `null`, không phải 0. Tiền nạp / tiền tặng không bao giờ ở vế doanh thu.
  */
-export function platformGrossMargin(input: { mrrPayingVnd: number; aiBalanceRevenueToDateVnd: number; elapsedDays: number; totalDays: number; projectedAiCostVnd: number | null; infraVnd: number | null }): { marginRevenueVnd: number | null; grossProfitVnd: number | null; grossMarginPct: number | null } {
-  const aiRev = projectToPeriodEnd(input.aiBalanceRevenueToDateVnd, input.elapsedDays, input.totalDays);
+export function platformGrossMargin(input: { mrrPayingVnd: number; aiBalanceRevenueToDateVnd: number; aiBalanceReversalToDateVnd: number; elapsedDays: number; totalDays: number; projectedAiCostVnd: number | null; infraVnd: number | null }): { marginRevenueVnd: number | null; grossProfitVnd: number | null; grossMarginPct: number | null } {
+  // Chiếu phần đã dùng (doanh thu + khoản đảo), trừ khoản đảo nguyên — cùng luật với `revenueWithAiBalance` (review follow-up LOW-2).
+  // BẮT BUỘC (không mặc định 0): nơi gọi quên truyền thì lặng lẽ quay về cách chiếu cũ (review follow-up, lượt duyệt lại).
+  const reversal = input.aiBalanceReversalToDateVnd;
+  const usedToDate = input.aiBalanceRevenueToDateVnd + reversal;
+  const usedProjected = usedToDate === 0 ? 0 : projectToPeriodEnd(usedToDate, input.elapsedDays, input.totalDays);
+  const aiRev = usedProjected === null ? null : usedProjected - reversal;
   const marginRevenueVnd = aiRev === null ? null : input.mrrPayingVnd + Math.round(aiRev);
   if (marginRevenueVnd === null || marginRevenueVnd <= 0 || input.projectedAiCostVnd === null || input.infraVnd === null) return { marginRevenueVnd, grossProfitVnd: null, grossMarginPct: null };
   const gross = marginRevenueVnd - input.projectedAiCostVnd - input.infraVnd;

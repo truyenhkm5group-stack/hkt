@@ -6,6 +6,8 @@ import { listPlans } from "@/lib/entitlements/check";
 import { env } from "@/lib/env";
 import { listOrganizations } from "@/lib/platform/organizations";
 import { platformOperatorDenial } from "@/lib/platform-ui/module-toggle";
+import { readAiBalancePeriod } from "@/lib/billing/ai-balance";
+import { aiBalanceRevenueVnd } from "@/lib/billing/ai-balance-rules";
 import {
   captureSaasSnapshot,
   readAiUsageByOrg,
@@ -130,7 +132,7 @@ export type OwnerCockpit = {
   };
   thisMonth: { label: string; movement: PeriodMovement };
   lastMonth: { label: string; movement: PeriodMovement };
-  margin: PlatformMargin & { aiComplete: boolean; windowDays: number };
+  margin: PlatformMargin & { aiComplete: boolean; windowDays: number; aiBalanceRevenueVnd: number };
   ai: { requests: number; platformCostVnd: number; byokCostUsd: number; homeCostVnd: number; unpricedRequests: number; errorRate: number | null; tenantsUsingAi: number; conversations: number | null; aiActiveConversations: number | null; aiOrders: number | null; usageDays: number };
   activation: FunnelStep[];
   activationOrgs: number;
@@ -196,7 +198,7 @@ export async function loadOwnerCockpit(user: SessionUser, now: Date = new Date()
   const lastMonth = prevMonthOf(thisMonth);
   const usdToVnd = env.facebook.usdToVnd;
   const windowFrom = new Date(now.getTime() - AI_WINDOW_DAYS * DAY);
-  const [orgs, plans, ledgerSince, daily, milestones, everPaid, ai30, aiRecent, aiPrev, lastLogin, costs] = await Promise.all([
+  const [orgs, plans, ledgerSince, daily, milestones, everPaid, ai30, aiRecent, aiPrev, lastLogin, costs, balances30] = await Promise.all([
     listOrganizations(),
     listPlans(),
     readFirstSnapshotDay(),
@@ -208,7 +210,10 @@ export async function loadOwnerCockpit(user: SessionUser, now: Date = new Date()
     readAiUsageByOrg(new Date(now.getTime() - 14 * DAY), new Date(now.getTime() - 7 * DAY)),
     readLastLoginByOrg(),
     readCostDeclaration(),
+    // Doanh thu Số dư AI của CÙNG cửa sổ với chi phí AI (review #648 vòng 2, MEDIUM-1).
+    readAiBalancePeriod(windowFrom, now),
   ]);
+  const balanceRevenue = (code: string) => aiBalanceRevenueVnd(balances30.get(code) ?? null);
   const usageByOrg = await readUsageTotals(vnDate(windowFrom));
   const usageDaily = await readUsageDaily(vnDate(new Date(now.getTime() - 28 * DAY)));
 
@@ -248,7 +253,7 @@ export async function loadOwnerCockpit(user: SessionUser, now: Date = new Date()
       standing,
       standingLabel: BILLING_STANDING_LABEL[standing],
       lifecycle,
-      economics: tenantEconomics(o.isHome ? null : mrrVnd, usage?.platform ?? { costUsd: 0, requests: 0, unpricedRequests: 0 }, usdToVnd),
+      economics: tenantEconomics(o.isHome ? null : mrrVnd, usage?.platform ?? { costUsd: 0, requests: 0, unpricedRequests: 0 }, usdToVnd, o.isHome ? 0 : balanceRevenue(o.code)),
       byokAiCostUsd: usage?.byok.costUsd ?? 0,
       homeAiCostVnd: aiCostVnd(usage?.home ?? { costUsd: 0, requests: 0, unpricedRequests: 0 }, usdToVnd).vnd,
       aiRequests30d: usage?.requests ?? 0,
@@ -268,6 +273,8 @@ export async function loadOwnerCockpit(user: SessionUser, now: Date = new Date()
   const tenantAi = sumAi([...ai30.entries()].filter(([code]) => !orgs.find((o) => o.code === code)?.isHome).map(([, v]) => v));
   const allAi = sumAi(ai30.values());
   const platformAi = aiCostVnd(tenantAi.platform, usdToVnd);
+  // Cùng tập với chi phí AI của khách (mọi tổ chức trừ nhà) — doanh thu và chi phí nói về cùng một nhóm.
+  const aiBalanceRevenue30d = [...balances30.keys()].filter((code) => !orgs.find((o) => o.code === code)?.isHome).reduce((s, code) => s + balanceRevenue(code), 0);
   const tenantCount = orgs.filter((o) => !o.isHome && o.status !== "ARCHIVED" && o.status !== "SETUP_FAILED").length;
   const tm = monthRange(thisMonth);
   const lm = monthRange(lastMonth);
@@ -282,7 +289,7 @@ export async function loadOwnerCockpit(user: SessionUser, now: Date = new Date()
       headline: { mrrVnd: mrr, arrVnd: mrr * 12, tenants: tenantCount, payingTenants: paying, arpaVnd: paying > 0 ? Math.round(mrr / paying) : null, byLifecycle },
       thisMonth: { label: thisMonth, movement: periodMovement(daily, tm.from, today < tm.to ? today : tm.to) },
       lastMonth: { label: lastMonth, movement: periodMovement(daily, lm.from, lm.to) },
-      margin: { ...platformMargin(mrr, platformAi.vnd, costs), aiComplete: platformAi.complete, windowDays: AI_WINDOW_DAYS },
+      margin: { ...platformMargin(mrr + aiBalanceRevenue30d, platformAi.vnd, costs), aiBalanceRevenueVnd: aiBalanceRevenue30d, aiComplete: platformAi.complete, windowDays: AI_WINDOW_DAYS },
       ai: {
         requests: allAi.requests,
         platformCostVnd: platformAi.vnd,

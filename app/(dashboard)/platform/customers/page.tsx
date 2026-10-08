@@ -93,7 +93,7 @@ export default async function SaasCustomersPage({ searchParams }: { searchParams
                 <tr>
                   <th className={th}>Khách</th>
                   <th className={th}>Sản phẩm · gói</th>
-                  <th className={cn(th, "text-right")}>MRR / chargeback</th>
+                  <th className={cn(th, "text-right")}>Doanh thu kỳ / chargeback</th>
                   <th className={cn(th, "text-right")}>Chi phí</th>
                   <th className={cn(th, "text-right")}>Biên gộp</th>
                   <th className={th}>Dùng</th>
