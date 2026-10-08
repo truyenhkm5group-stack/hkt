@@ -1,0 +1,8 @@
+{
+  "pr": 670,
+  "sha": "10866a689525bc2365060dbc49ad28defa1c4634",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-08T06:53:03.088Z",
+  "note": "Review độc lập chỉ đọc 08/10: dùng đúng openSubscriptionsForProductsInUse, không khởi động dùng thử / thu phí / khoá; idempotent qua chỉ mục live + onConflictDoNothing; DTO khách sạch; script chạy thử không ghi. LOW sau: vết lỗi mở thuê bao không hiện ở danh sách /platform (MODULE_DRIFT không ai gán), hai vị từ «đang dùng thử», script bỏ sót workspace dựng hộ qua /start (brand null), dòng sửa bù m"
+}
