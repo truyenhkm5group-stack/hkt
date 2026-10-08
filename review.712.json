@@ -1,0 +1,8 @@
+{
+  "pr": 712,
+  "sha": "3a6038c6f2a7408702f277a1bd8433cfbf998aa7",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-08T23:01:12.039Z",
+  "note": "Review Integration Lead: sửa lời hứa «Kết nối Facebook» đang chạy trong app (Hướng dẫn · hộp thư rỗng · Kênh kết nối · GoLive). Cổng: người vận hành qua platformOperatorDenial (có sẵn), cờ jsonb platform_settings đọc theo khoá chính ở lib/platform/, lỗi/thiếu/sai kiểu ⇒ ĐÓNG, danh sách mã so khớp chính xác với mã tổ chức của PHIÊN, chỉ boolean xuống client; danh sách đóng các tệp gọi /api/connect/"
+}
