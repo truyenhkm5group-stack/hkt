@@ -152,14 +152,14 @@ export type ResendActivationResult = { ok: true; link: string; expiresAt: string
 
 /**
  * Đường PHÁT liên kết của người gọi: người vận hành (`createResetLinkAsOperator` — đã qua `platformOperatorDenial`) hoặc máy nghiệm thu
- * (`createAcceptanceResetLink` — lá chắn sổ khai `lib/constants/saas-acceptance.ts`). Cả hai đi chung MỘT lõi trong
+ * (`createAcceptanceResetLink` — chỉ tiến trình ops, đúng cặp mã + email của sổ khai, workspace đúng do ops tạo). Cả hai đi chung MỘT lõi trong
  * lib/users/password-reset.ts; chỉ khác người đứng tên trong nhật ký nền tảng.
  */
 export type ActivationLinkIssuer = (input: { orgCode: string; email: string; reason: string }) => Promise<{ ok: true; link: string; expiresAt: Date; email: string } | { error: string }>;
 
 /**
  * LUẬT «GỬI LẠI KÍCH HOẠT» — MỘT bản cho nút của người vận hành (lib/saas/console.ts, SAU `platformOperatorDenial`) và ops nghiệm thu
- * (lib/saas/acceptance.ts, SAU lá chắn sổ khai — máy): chỉ khi quản trị CHƯA vào được; người nhận do MÁY CHỦ tra (job «Tạo khách» /
+ * (lib/saas/acceptance.ts, SAU lá chắn sổ khai + kiểm sở hữu — máy): chỉ khi quản trị CHƯA vào được; người nhận do MÁY CHỦ tra (job «Tạo khách» /
  * quản trị đầu tiên), không bao giờ một email từ người gọi; liên kết phát qua `issue` của chính người gọi. tests/saas-acceptance.test.ts
  * khoá danh sách nơi gọi hàm này.
  */

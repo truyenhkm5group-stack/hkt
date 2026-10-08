@@ -20,6 +20,12 @@ SILO: một workspace một CSDL, `getDb()` chọn theo ngữ cảnh máy chủ 
   dùng một lần (`createResetLinkAsOperator`, có nhật ký). «Gửi lại liên kết kích hoạt» (`resendActivationAsOperator`) chỉ khi
   quản trị CHƯA kích hoạt, người nhận do máy chủ tra, liên kết cũ bị thu hồi, CSDL chỉ giữ băm.
 - Bảng `platform_*` mới bị xoá ở CSDL workspace mỗi lần mở (`db/migrate.ts`), khai trong `CONTROL_PLANE_TABLES`.
+- Đường MÁY phát liên kết đặt lại / kích hoạt (`createAcceptanceResetLink`, chỉ ops `saas-acceptance` — docs/saas/ACCEPTANCE.md)
+  không qua `platformOperatorDenial` (không có người), nên có ba lá chắn riêng, theo thứ tự, trước mọi lượt ghi: (1) chỉ trong
+  tiến trình ops — máy chủ ứng dụng (`NEXT_RUNTIME` có giá trị) bị từ chối; (2) đúng cặp (mã workspace, email quản trị) của sổ
+  khai `lib/constants/saas-acceptance-registry.ts`; (3) workspace mang mã ấy ĐÚNG do ops tạo (job khoá `saas-acceptance:<mã>`
+  + tài khoản đúng sổ — `lib/saas/acceptance-guard.ts`). Sổ khai một mình không đủ: kho mã PUBLIC, mã đã lộ — nên mã + tên
+  miền con của sổ còn được GIỮ CHỖ ở mọi đường tự đăng ký / đặt tên miền. Nhật ký nền tảng `actor = null` nguồn SCRIPT.
 
 ## 3. Danh tính — hiện trạng và giới hạn
 

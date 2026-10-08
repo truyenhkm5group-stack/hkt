@@ -226,7 +226,7 @@ export async function resendActivationAsOperator(user: SessionUser, raw: unknown
   const p = resendActivationInput.safeParse(raw);
   if (!p.success) return { error: firstIssue(p.error) };
   // Luật gửi lại (người nhận do máy chủ tra, chỉ khi CHƯA kích hoạt) sống ở lib/saas/activation.ts — MỘT bản, dùng chung với ops
-  // nghiệm thu (máy, sau lá chắn sổ khai); liên kết phát qua đúng lõi của người vận hành đang bấm.
+  // nghiệm thu (máy, sau lá chắn sổ khai + kiểm sở hữu); liên kết phát qua đúng lõi của người vận hành đang bấm.
   return resendActivation(p.data, (input) => createResetLinkAsOperator(user, input, { purpose: "ACTIVATION" }));
 }
 

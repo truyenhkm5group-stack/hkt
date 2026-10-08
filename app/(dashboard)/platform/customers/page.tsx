@@ -63,19 +63,23 @@ export default async function SaasCustomersPage({ searchParams }: { searchParams
   const periodLabel = (pm: string) => `${pm.slice(5, 7)}/${pm.slice(0, 4)}`;
   const filter: CustomerHealthLevel | null = isCustomerHealthLevel(muc) ? muc : null;
 
-  const external = customers.filter((c) => c.economics.marginApplicable);
-  const internal = customers.filter((c) => !c.economics.marginApplicable);
-  const statuses = customers.flatMap((c) => c.workspaces.flatMap((w) => w.subscriptions.map((s) => s.status)));
+  // Ô đếm / tổng chỉ nói về KHÁCH: tài khoản kiểm thử của ops nghiệm thu vẫn có dòng trong bảng (nhãn «Kiểm thử») nhưng không vào
+  // số tài khoản, tiền, hay ô đếm mức sức khoẻ (Nguy cấp / Cần chú ý…).
+  const real = customers.filter((c) => !c.test);
+  const tests = customers.length - real.length;
+  const external = real.filter((c) => c.economics.marginApplicable);
+  const internal = real.filter((c) => !c.economics.marginApplicable);
+  const statuses = real.flatMap((c) => c.workspaces.flatMap((w) => w.subscriptions.map((s) => s.status)));
   const mrrKnown = external.filter((c) => c.economics.revenueVnd !== null);
   const mrr = mrrKnown.reduce((a, c) => a + (c.economics.revenueVnd ?? 0), 0);
-  const cost = customers.reduce((a, c) => a + c.economics.costVnd, 0);
+  const cost = real.reduce((a, c) => a + c.economics.costVnd, 0);
   const gp = mrrKnown.reduce((a, c) => a + (c.economics.grossProfitVnd ?? 0), 0);
   const balanceRev = mrrKnown.reduce((a, c) => a + c.economics.aiBalanceRevenueVnd, 0);
   const label = periodLabel(data.periodMonth);
   // Đang xem tiền của kỳ khác kỳ hiện tại ⇒ nói rõ sức khoẻ vẫn là của hiện tại.
   const healthNote = data.healthPeriodMonth === data.periodMonth ? `sức khoẻ đọc lúc ${vnShortStamp(now)}` : `sức khoẻ của HIỆN TẠI (đọc lúc ${vnShortStamp(now)}, khách AI kỳ ${periodLabel(data.healthPeriodMonth)}) — không theo kỳ ${label}`;
 
-  const counts = Object.fromEntries(CUSTOMER_HEALTH_LEVELS.map((l) => [l, customers.filter((c) => (health[c.account.id]?.level ?? "UNKNOWN") === l).length])) as Record<CustomerHealthLevel, number>;
+  const counts = Object.fromEntries(CUSTOMER_HEALTH_LEVELS.map((l) => [l, real.filter((c) => (health[c.account.id]?.level ?? "UNKNOWN") === l).length])) as Record<CustomerHealthLevel, number>;
   const hrefOf = Object.fromEntries(
     (["ALL", ...CUSTOMER_HEALTH_LEVELS] as const).map((k) => {
       const q = new URLSearchParams();
@@ -108,13 +112,13 @@ export default async function SaasCustomersPage({ searchParams }: { searchParams
         eyebrow="Hệ thống"
         title="Khách hàng SaaS"
         actions={<SaasConsoleNav active="/platform/customers" />}
-        description={`${customers.length} tài khoản · ${internal.length} nội bộ · tiền kỳ ${label} · ${healthNote}`}
+        description={`${real.length} tài khoản · ${internal.length} nội bộ${tests ? ` · ${tests} kiểm thử (không tính)` : ""} · tiền kỳ ${label} · ${healthNote}`}
       />
 
-      <HealthFilterBar counts={counts} total={customers.length} active={filter} hrefOf={hrefOf} />
+      <HealthFilterBar counts={counts} total={real.length} active={filter} hrefOf={hrefOf} />
 
       <div className="grid gap-2 sm:grid-cols-3 lg:grid-cols-5">
-        <Tile label="Tài khoản" value={formatNumber(customers.length)} sub={`${external.length} ngoài · ${internal.length} nội bộ`} />
+        <Tile label="Tài khoản" value={formatNumber(real.length)} sub={`${external.length} ngoài · ${internal.length} nội bộ`} />
         <Tile label="Thuê bao sống" value={formatNumber(statuses.length)} sub={`${statuses.filter((s) => s === "TRIAL").length} dùng thử · ${statuses.filter((s) => s === "PAST_DUE" || s === "EXPIRED").length} quá hạn`} />
         <Tile label="Doanh thu kỳ (khách ngoài)" value={formatVND(mrr)} sub={mrrKnown.length < external.length ? `${external.length - mrrKnown.length} khách có gói không niêm yết giá` : balanceRev ? `gồm Số dư AI ${formatVND(balanceRev)}` : "gói · mua thêm · vượt"} />
         <Tile label="Chi phí kỳ" value={formatVND(cost)} sub="AI nền tảng trả + phân bổ" />
@@ -176,6 +180,11 @@ export default async function SaasCustomersPage({ searchParams }: { searchParams
                             </Link>
                             <div className="mt-0.5 flex flex-wrap items-center gap-1 text-[11px] text-muted-foreground">
                               <StatusPill tone={ACCOUNT_TYPE_TONE[c.account.accountType as AccountType]}>{ACCOUNT_TYPE_LABEL[c.account.accountType as AccountType]}</StatusPill>
+                              {c.test ? (
+                                <span title="Workspace của ops nghiệm thu — không phải khách, không vào số đếm / phân bổ chi phí / kinh tế sản phẩm / ô mức sức khoẻ" data-customer="test">
+                                  <StatusPill tone="muted">Kiểm thử</StatusPill>
+                                </span>
+                              ) : null}
                               {multi && h ? <HealthPill level={h.level} /> : null}
                             </div>
                           </>

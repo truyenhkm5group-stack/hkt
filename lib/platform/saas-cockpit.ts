@@ -4,6 +4,7 @@ import type { SessionUser } from "@/lib/auth/session";
 import { BILLING_STANDING_LABEL, vnDate, type BillingStandingKind } from "@/lib/billing/rules";
 import { listPlans } from "@/lib/entitlements/check";
 import { env } from "@/lib/env";
+import { acceptanceWorkspaceOf } from "@/lib/constants/saas-acceptance-registry";
 import { listOrganizations } from "@/lib/platform/organizations";
 import { platformOperatorDenial } from "@/lib/platform-ui/module-toggle";
 import { readAiBalancePeriod } from "@/lib/billing/ai-balance";
@@ -139,6 +140,11 @@ export type OwnerCockpit = {
   tenants: TenantRow[];
   costs: PlatformCostDeclaration;
   captureErrors: string[];
+  /**
+   * Workspace KIỂM THỬ của ops nghiệm thu (sổ khai) — KHÔNG vào bất kỳ con số nào ở trên (không phải khách). Chi phí AI của nó là
+   * tiền thật nền tảng trả cho lượt nghiệm thu, nên in RIÊNG ở đây thay vì giấu đi.
+   */
+  testWorkspaces: { codes: string[]; aiRequests: number; platformAiCostVnd: number };
 };
 
 const DAY = 86_400_000;
@@ -198,7 +204,7 @@ export async function loadOwnerCockpit(user: SessionUser, now: Date = new Date()
   const lastMonth = prevMonthOf(thisMonth);
   const usdToVnd = env.facebook.usdToVnd;
   const windowFrom = new Date(now.getTime() - AI_WINDOW_DAYS * DAY);
-  const [orgs, plans, ledgerSince, daily, milestones, everPaid, ai30, aiRecent, aiPrev, lastLogin, costs, balances30] = await Promise.all([
+  const [rawOrgs, plans, ledgerSince, rawDaily, rawMilestones, rawEverPaid, rawAi30, rawAiRecent, rawAiPrev, rawLastLogin, costs, rawBalances30] = await Promise.all([
     listOrganizations(),
     listPlans(),
     readFirstSnapshotDay(),
@@ -213,9 +219,24 @@ export async function loadOwnerCockpit(user: SessionUser, now: Date = new Date()
     // Doanh thu Số dư AI của CÙNG cửa sổ với chi phí AI (review #648 vòng 2, MEDIUM-1).
     readAiBalancePeriod(windowFrom, now),
   ]);
+  // Workspace KIỂM THỬ của ops nghiệm thu (sổ khai lib/constants/saas-acceptance-registry.ts) không phải khách — loại ở MỘT chỗ,
+  // ngay sau lượt đọc, nên mọi con số bên dưới (số khách, vòng đời, phễu kích hoạt, MRR, AI của khách, số dùng) chỉ thấy khách.
+  // Sổ ảnh chụp đã không chụp nó (captureSaasSnapshot); lớp này chặn cả dữ liệu đọc thẳng (sổ AI, đăng nhập) và dòng chụp cũ.
+  const testCodes = new Set(rawOrgs.filter((o) => acceptanceWorkspaceOf(o.code)).map((o) => o.code));
+  const customerOnly = <V>(m: Map<string, V>) => new Map([...m].filter(([code]) => !testCodes.has(code)));
+  const orgs = rawOrgs.filter((o) => !testCodes.has(o.code));
+  const daily = rawDaily.filter((r) => !testCodes.has(r.orgCode));
+  const milestones = customerOnly(rawMilestones);
+  const everPaid = new Set([...rawEverPaid].filter((code) => !testCodes.has(code)));
+  const ai30 = customerOnly(rawAi30);
+  const aiRecent = customerOnly(rawAiRecent);
+  const aiPrev = customerOnly(rawAiPrev);
+  const lastLogin = customerOnly(rawLastLogin);
+  const balances30 = customerOnly(rawBalances30);
+  const testAi = sumAi([...rawAi30].filter(([code]) => testCodes.has(code)).map(([, v]) => v));
   const balanceRevenue = (code: string) => aiBalanceRevenueVnd(balances30.get(code) ?? null);
-  const usageByOrg = await readUsageTotals(vnDate(windowFrom));
-  const usageDaily = await readUsageDaily(vnDate(new Date(now.getTime() - 28 * DAY)));
+  const usageByOrg = customerOnly(await readUsageTotals(vnDate(windowFrom)));
+  const usageDaily = customerOnly(await readUsageDaily(vnDate(new Date(now.getTime() - 28 * DAY))));
 
   const latest = new Map<string, SaasDailyRow>();
   for (const r of daily) if (r.day <= today && (!latest.has(r.orgCode) || latest.get(r.orgCode)!.day < r.day)) latest.set(r.orgCode, r);
@@ -305,6 +326,7 @@ export async function loadOwnerCockpit(user: SessionUser, now: Date = new Date()
       tenants,
       costs,
       captureErrors: captured && "errors" in captured ? captured.errors : [],
+      testWorkspaces: { codes: [...testCodes].sort(), aiRequests: testAi.requests, platformAiCostVnd: aiCostVnd(testAi.platform, usdToVnd).vnd },
     },
   };
 }

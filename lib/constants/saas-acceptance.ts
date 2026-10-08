@@ -8,8 +8,10 @@
  * ─── LÁ CHẮN «KHÔNG DÙNG DỮ LIỆU KHÁCH THẬT THEO CÁCH PHÁ HUỶ» ───
  *
  * Ops này đặt lại mật khẩu, đăng nhập và nhắn bot — trên tài khoản NÓ TỰ TẠO. Nên nó chỉ chạm tổ chức có tên trong
- * `ACCEPTANCE_WORKSPACES` dưới đây: mã ngoài sổ ⇒ TỪ CHỐI trước mọi lượt đọc (`acceptanceWorkspaceOf`), và đường phát liên kết của
- * máy (`createAcceptanceResetLink`) hỏi lại CHÍNH sổ này. Thêm một mục = một quyết định có lý do, không phải một tham số dòng lệnh.
+ * `ACCEPTANCE_WORKSPACES` (tệp lá lib/constants/saas-acceptance-registry.ts): mã ngoài sổ ⇒ TỪ CHỐI trước mọi lượt đọc
+ * (`acceptanceWorkspaceOf`). Đường phát liên kết của máy (`createAcceptanceResetLink`) hỏi lại sổ, hỏi workspace có đúng do
+ * ops tạo không (`lib/saas/acceptance-guard.ts`) và từ chối trong máy chủ ứng dụng. Mã + tên miền con của sổ được GIỮ CHỖ ở mọi
+ * đường tự đăng ký / đặt tên miền. Thêm một mục = một quyết định có lý do, không phải một tham số dòng lệnh.
  *
  * Tệp THUẦN (không CSDL, không mạng): lõi, script, bài kiểm và tài liệu đọc cùng một bản.
  */
@@ -17,57 +19,16 @@ import { RESERVED_ORG_CODES } from "@/lib/onboarding/shared";
 import { domainSlugProblem } from "@/lib/platform/host";
 import { DEFAULT_CHOTDON_DOMAIN, DEFAULT_SITE_DOMAIN } from "@/lib/platform/site-host";
 import { ORGANIZATION_CODE_PATTERN } from "@/lib/platform/types";
+import { ACCEPTANCE_ACTOR_LABEL, ACCEPTANCE_WORKSPACES, type AcceptanceWorkspace } from "@/lib/constants/saas-acceptance-registry";
 
-/** Nhãn của MÁY trong mọi nhật ký ops này ghi (`actor = null` — AGENTS 34: máy làm, khác hẳn «chưa biết ai»). */
-export const ACCEPTANCE_ACTOR_LABEL = "Nghiệm thu tự động";
+// Sổ khai + vị ngữ sống ở tệp LÁ (giữ chỗ / loại trừ đọc được mà không kéo đồ thị phụ thuộc) — xuất lại để mọi nơi đọc một bản.
+export { ACCEPTANCE_ACTOR_LABEL, ACCEPTANCE_RESERVED_MESSAGE, ACCEPTANCE_WORKSPACES, acceptanceReservedName, acceptanceWorkspaceOf, type AcceptanceWorkspace } from "@/lib/constants/saas-acceptance-registry";
 
 /** Câu từ chối khi mã không nằm trong sổ khai — không lặp lại mã đã gõ (nó có thể đi ra kênh tóm tắt công khai). */
 export const ACCEPTANCE_REGISTRY_REFUSAL = "Mã tổ chức không có trong sổ khai nghiệm thu (lib/constants/saas-acceptance.ts) — ops nghiệm thu chỉ chạm workspace THỬ của chính nó.";
 
-export type AcceptanceWorkspace = {
-  /** Mã tổ chức — BẤT BIẾN (nằm trong JWT, tên CSDL). Đúng dạng mã tổ chức, không trùng tên dành riêng. */
-  code: string;
-  /** Tên hiển thị — nói thẳng đây KHÔNG phải khách thật (người vận hành đọc danh sách khách thấy ngay). */
-  name: string;
-  /** Mã tài khoản khách (`platform_accounts.code`) — cố định để lượt chạy lại gắn đúng tài khoản. */
-  accountCode: string;
-  /** Chủ shop yêu cầu đúng «external customer test account»: đi đúng luật của khách NGOÀI (gói niêm yết, dùng thử). */
-  accountType: "EXTERNAL";
-  /** Thương hiệu của workspace — vỏ app Chốt Đơn (lib/constants/saas-nav.ts). */
-  brand: "chotdon";
-  /** Email quản trị — thuộc tên miền CỦA CHÍNH nền tảng, không phải hộp thư của khách nào. Không có thư nào được gửi tới nó. */
-  ownerEmail: string;
-  ownerName: string;
-  /** Tên miền con cố định khi xuất bản (`<slug>.<PLATFORM_BASE_DOMAIN>`). */
-  domainSlug: string;
-  /** Vì sao có workspace này. */
-  reason: string;
-};
-
-export const ACCEPTANCE_WORKSPACES: readonly AcceptanceWorkspace[] = [
-  {
-    code: "cdt-nghiem-thu",
-    name: "Kiểm thử nghiệm thu — không phải khách thật",
-    accountCode: "cdt-nghiem-thu",
-    accountType: "EXTERNAL",
-    brand: "chotdon",
-    ownerEmail: "nghiem-thu@chotdontudong.com",
-    ownerName: ACCEPTANCE_ACTOR_LABEL,
-    domainSlug: "cdt-nghiem-thu",
-    reason:
-      "Launch sprint 08/10/2026: chứng minh trên production một khách Chốt Đơn đi trọn vòng (cấp phát → kích hoạt → đăng nhập email → vỏ app → chat → AI → đơn) sau mỗi deploy chạm vỏ / danh tính / cấp phát / bot / đơn.",
-  },
-];
-
 /** Tên miền mà email quản trị thử được phép thuộc về — tên miền GỐC của hai thương hiệu của chính nền tảng. */
 export const PLATFORM_OWNED_EMAIL_DOMAINS: readonly string[] = [DEFAULT_CHOTDON_DOMAIN, DEFAULT_SITE_DOMAIN];
-
-/** LÁ CHẮN: mục của sổ khai đúng mã này, hoặc `null`. So khớp CHÍNH XÁC (chữ thường, bỏ khoảng trắng) — không tiền tố, không đoán. */
-export function acceptanceWorkspaceOf(code: string | null | undefined): AcceptanceWorkspace | null {
-  const c = String(code ?? "").trim().toLowerCase();
-  if (!c) return null;
-  return ACCEPTANCE_WORKSPACES.find((w) => w.code === c) ?? null;
-}
 
 /** Sổ khai tự kiểm (bài kiểm gọi): mỗi câu là một chỗ sai — rỗng ⇒ sổ hợp lệ. */
 export function acceptanceRegistryProblems(list: readonly AcceptanceWorkspace[] = ACCEPTANCE_WORKSPACES): string[] {
