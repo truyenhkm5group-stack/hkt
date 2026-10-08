@@ -1,0 +1,31 @@
+{
+  "schema": 1,
+  "mission_id": "saas-customer-health",
+  "title": "P1: danh sách / chi tiết khách cho admin thấy sức khoẻ trong < 30 giây (Messenger · AI · đăng nhập · đơn · hạn mức · vấn đề) — chỉ dữ liệu thật",
+  "business_goal": "",
+  "status": "RUNNING",
+  "priority": "P1",
+  "risk": "MEDIUM",
+  "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "worker": "worker:customer-health",
+  "worktree": null,
+  "branch": "feat/customer-health",
+  "base_sha": null,
+  "domains": [],
+  "owned_paths": [
+    "lib/saas/console.ts",
+    "lib/saas/customer-health.ts",
+    "lib/constants/customer-health.ts",
+    "app/(dashboard)/platform/customers/page.tsx",
+    "app/(dashboard)/platform/customers/customers-table.tsx",
+    "tests/customer-health.test.ts"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-08T10:13:22.566Z",
+  "updated_at": "2026-10-08T10:13:22.566Z",
+  "last_heartbeat": "2026-10-08T10:13:22.566Z",
+  "definition_of_done": []
+}
