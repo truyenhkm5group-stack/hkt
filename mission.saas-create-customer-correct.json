@@ -3,7 +3,7 @@
   "mission_id": "saas-create-customer-correct",
   "title": "LAUNCH BLOCKER: Tạo khách mới đúng mặc định — thương hiệu Chốt Đơn tự đặt, chỉ gói đang bán (chặn internal / legacy), nút không khoá im lặng, cài mẫu AI bán hàng như /start",
   "business_goal": "",
-  "status": "RUNNING",
+  "status": "PR_READY",
   "priority": "P0",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -32,7 +32,18 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-08T10:41:59.510Z",
-  "updated_at": "2026-10-08T11:48:25.660Z",
-  "last_heartbeat": "2026-10-08T11:48:25.660Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-08T11:48:36.857Z",
+  "last_heartbeat": "2026-10-08T11:48:36.857Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "fix/create-customer-defaults",
+    "sha": "90f42789c042888500c07a4396471a294af3193f",
+    "at": "2026-10-08T11:48:36.857Z",
+    "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+    "title": "LAUNCH BLOCKER: Tạo khách mới đúng mặc định — thương hiệu Chốt Đơn tự đặt, chỉ gói đang bán (chặn internal / legacy), nút không khoá im lặng, cài mẫu AI bán hàng như /start",
+    "summary": "Tạo khách mới đúng mặc định: luật máy chủ create-customer-rules (chỉ Chốt Đơn ⇒ thương hiệu chotdon tự đặt; gói hợp lệ = gói CATALOG đang niêm yết + trial; giá cũ chỉ tài khoản nội bộ; internal không cấp); job cài mẫu «Chỉ cần AI bán hàng» như /start (bước TEMPLATE, idempotent, hỏng không làm hỏng cấp phát); ConfirmWithReason đưa lý do + nút xuống dưới và nói vì sao nút chưa bấm được",
+    "tests": [
+      "tsc + eslint sạch; npm run build đạt; create-customer-rules, saas-platform, saas-l5-billing-trial, saas-signup-subscription đạt; static + repo-integrity + test-org-codes; dựng HTML 36 chỗ ConfirmWithReason; đột biến 12/12; 0 ký tự vô hình"
+    ]
+  }
 }
