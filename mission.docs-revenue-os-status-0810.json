@@ -1,0 +1,26 @@
+{
+  "schema": 1,
+  "mission_id": "docs-revenue-os-status-0810",
+  "title": "Bản đồ AI Revenue OS cập nhật sau chuỗi 08/10 (tài liệu)",
+  "business_goal": "",
+  "status": "PLANNING",
+  "priority": "P2",
+  "risk": "MEDIUM",
+  "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "worker": null,
+  "worktree": null,
+  "branch": "docs/revenue-os-status-0810",
+  "base_sha": "051f49a55160dd3d650a1259abe9df6b12b89f92",
+  "domains": [],
+  "owned_paths": [
+    "docs/revenue-os/MASTER_MISSION_STATUS.md"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-08T04:28:19.463Z",
+  "updated_at": "2026-10-08T04:28:19.463Z",
+  "last_heartbeat": "2026-10-08T04:28:19.463Z",
+  "definition_of_done": []
+}
