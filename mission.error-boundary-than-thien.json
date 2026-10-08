@@ -1,0 +1,33 @@
+{
+  "schema": 1,
+  "mission_id": "error-boundary-than-thien",
+  "title": "Lỗi thân thiện: error boundary dashboard + gốc không in error.message / DATABASE_URL, chỉ mã tham chiếu, lối ra tải cả trang",
+  "business_goal": "",
+  "status": "RUNNING",
+  "priority": "P2",
+  "risk": "MEDIUM",
+  "owner": "DESKTOP-56TH98Y:wt-pr-c",
+  "worker": null,
+  "worktree": null,
+  "branch": "claude/error-boundary-than-thien",
+  "base_sha": "4dbd864aaf866e197a6e3b6e0b80e1eec7e26e96",
+  "domains": [],
+  "owned_paths": [
+    "app/(dashboard)/error.tsx",
+    "app/error.tsx",
+    "tests/error-boundary.test.ts",
+    "tests/sync-fixtures.test.ts"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-08T15:43:57.021Z",
+  "updated_at": "2026-10-08T15:43:57.021Z",
+  "last_heartbeat": "2026-10-08T15:43:57.021Z",
+  "definition_of_done": [],
+  "intake": {
+    "verdict": "MISSING",
+    "evidence": []
+  }
+}
