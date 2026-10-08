@@ -16,6 +16,8 @@ type Holder = {
   orgs?: Map<string, OrgHandle>;
   /** Handle CHỈ ĐỌC, không migrate, của CSDL tổ chức mở để CHẨN ĐOÁN (`getDbForInspection`). */
   inspect?: Map<string, Promise<Db>>;
+  /** Cách ĐÓNG handle chẩn đoán của từng tổ chức (`releaseOrganizationDb`) — bể / PGlite của `inspect` không nằm ở đâu khác. */
+  inspectClose?: Map<string, () => Promise<void>>;
 };
 type OrgHandle = { db?: Db; pending?: Promise<Db>; pool?: Pool; pglite?: unknown };
 const holder = globalThis as unknown as { __erpDb?: Holder };
@@ -236,6 +238,7 @@ export async function getDbForInspection(org: { code: string; isHome: boolean })
   const live = holder.__erpDb!.orgs?.get(org.code)?.db;
   if (live) return live;
   const cache = (holder.__erpDb!.inspect ??= new Map());
+  const closers = (holder.__erpDb!.inspectClose ??= new Map());
   let pendingDb = cache.get(org.code);
   if (!pendingDb) {
     pendingDb = (async () => {
@@ -245,9 +248,9 @@ export async function getDbForInspection(org: { code: string; isHome: boolean })
         if (dir === "memory" || dir === "") throw new Error(`CSDL của tổ chức "${org.code}" là PGlite trong bộ nhớ — không có gì để đọc ngoài tiến trình đã tạo nó.`);
         const fs = await import("node:fs");
         if (!fs.existsSync(dir)) throw new Error(`Thư mục CSDL của tổ chức "${org.code}" không tồn tại — tổ chức có trong sổ mà chưa được cấp CSDL.`);
-        return createPglite(dir, () => undefined, { readOnly: true });
+        return createPglite(dir, (c) => closers.set(org.code, () => (c as { close(): Promise<void> }).close()), { readOnly: true });
       }
-      return createPg(url, 1, () => undefined, { readOnly: true });
+      return createPg(url, 1, (p) => closers.set(org.code, () => p.end()), { readOnly: true });
     })().catch((error) => {
       cache.delete(org.code);
       throw error;
@@ -255,6 +258,38 @@ export async function getDbForInspection(org: { code: string; isHome: boolean })
     cache.set(org.code, pendingDb);
   }
   return pendingDb;
+}
+
+/**
+ * ═══════ ĐÓNG MỌI HANDLE CỦA TIẾN TRÌNH NÀY TỚI CSDL MỘT TỔ CHỨC ═══════
+ *
+ * Dùng DUY NHẤT trước khi XOÁ CSDL đó (`lib/platform/offboard.ts`): `DROP DATABASE` không chạy được khi chính tiến trình này còn
+ * giữ kết nối, và một bể `pg` bị máy chủ cắt kết nối lúc đang rảnh sẽ phát sự kiện `error` không ai nghe — làm sập tiến trình.
+ * Đóng cả handle ứng dụng (`orgs`) lẫn handle chẩn đoán (`inspect`); `inspectionOnly` ⇒ chỉ handle chẩn đoán (lượt chạy thử đếm xong).
+ * Không có handle nào ⇒ không làm gì. Lần `getDb()` /
+ * `getDbFor()` sau sẽ MỞ LẠI (và migrate lại) — nên nơi gọi phải xoá dòng tổ chức ngay sau, không để ai gọi tới nó nữa.
+ */
+export async function releaseOrganizationDb(code: string, opts: { inspectionOnly?: boolean } = {}): Promise<void> {
+  const h = holder.__erpDb!;
+  const app = opts.inspectionOnly ? undefined : h.orgs?.get(code);
+  if (app) h.orgs?.delete(code);
+  const pendingInspect = h.inspect?.get(code);
+  h.inspect?.delete(code);
+  if (app?.pending) await app.pending.catch(() => undefined);
+  if (pendingInspect) await pendingInspect.catch(() => undefined);
+  const closeInspect = h.inspectClose?.get(code);
+  h.inspectClose?.delete(code);
+  const closers: (() => Promise<void>)[] = [];
+  if (app?.pool) closers.push(() => app.pool!.end());
+  if (app?.pglite) closers.push(() => (app.pglite as { close(): Promise<void> }).close());
+  if (closeInspect) closers.push(closeInspect);
+  for (const close of closers) {
+    try {
+      await close();
+    } catch {
+      // Đã đóng / đang dở ⇒ bỏ qua: handle đã ra khỏi sổ, không ai dùng lại nó nữa.
+    }
+  }
 }
 
 /**

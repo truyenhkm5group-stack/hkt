@@ -42,6 +42,7 @@ on:
           - org-order-audit      # đơn của MỘT tổ chức khách trong MỘT ngày: hội thoại có SĐT ↔ đơn ERP (đủ chưa · vì sao thiếu · trễ bao lâu) — MÃ HOÁ (CHỈ ĐỌC; arg: "<mã tổ chức> [--day=YYYY-MM-DD]")
           - org-ai-cutover       # AI Bán hàng của MỘT tổ chức khách trả tiền ở đâu + chuyển sang AI dùng chung của nền tảng: vân tay khoá (SHA-256 rút gọn, không in khoá) · project Google (Lookup nếu có credential quản trị) · credit — MÃ HOÁ (MẶC ĐỊNH CHỈ ĐỌC; arg: "<mã tổ chức>"; "--apply" chuyển; "--apply-probe --since=<ISO>" lượt thử kênh THỬ + đếm sổ AI từ mốc)
           - org-prepaid-ai       # đưa MỘT tổ chức khách sang AI dùng chung TRẢ TRƯỚC theo khách AI (Số dư AI): kế hoạch + mức dùng quy ra tiền / ngày — MÃ HOÁ (MẶC ĐỊNH CHỈ ĐỌC; arg: "<mã tổ chức>"; "--apply" làm ĐÚNG MỘT bước kế tiếp: mở nạp · kích hoạt cần "--unit=<đ>" khớp đơn giá)
+          - org-offboard         # XOÁ một workspace TỰ ĐĂNG KÝ (quyết định chủ shop 08/10/2026): MẶC ĐỊNH CHẠY THỬ (arg rỗng = mọi tổ chức; "<mã>" = một tổ chức) — loại · chứng cứ · số dòng sẽ xoá · sổ tiền · page Meta · mốc sao lưu; "<mã> --apply --confirm=<mã> --created-before=<ISO> [--allow-active]" xoá MỘT tổ chức (không nhà · brand khác NULL · có chứng cứ tự đăng ký · không tiền thật) — MÃ HOÁ
           - stock-wait-summary   # chờ hàng & GTC theo số ngày chờ, miền, vùng + đơn đang chờ + đề xuất — số tổng hợp (CHỈ ĐỌC; arg "--days=N")
           - company-os-summary   # Company OS đã được dùng tới đâu: sổ mẫu, topic / giá thành / mẫu xưởng / bản thiết kế, "Cần anh quyết", hàng hoàn, yêu cầu duyệt, phiếu nhập — CHỈ SỐ ĐẾM (CHỈ ĐỌC; không arg)
           - platform-secrets-verify # kiểm PLATFORM_SECRETS_KEY trên production (V1–V7): khoá có, canary niêm/giải qua deploy, cô lập tổ chức, CSDL + log không chứa bản rõ — arg rỗng = CHỈ ĐỌC; "seal --apply" niêm canary; "rotate --apply" cập nhật canary
@@ -140,7 +141,7 @@ permissions:
 # Thao tác trong danh sách mà cần cho người vận hành thấy NGAY một con số ("đã đóng 12 case") thì
 # script tự in dòng ấy với tiền tố `[ops:tom-tat] ` — kênh tóm tắt duy nhất ra log (qua che_log).
 env:
-  OPS_THAO_TAC_MA_HOA: "platform-secrets-verify db-query vtp-debug phone-probe vtp-probe vtp-statement-peek payroll-reconcile seed-employees marketing-explain cs-stale check-integrations run-job vtp-replay-explain vtp-manual-verify returns-hmt care-false-reopen care-outcome-before-open fanpage-evidence-backfill cod-statement-audit stock-wait-summary org-summary org-order-audit org-ai-cutover confirm-funnel-audit company-os-summary velocity-compare org-prepaid-ai pitr-status pitr-basebackup pitr-mark pitr-drill pitr-pause"
+  OPS_THAO_TAC_MA_HOA: "platform-secrets-verify db-query vtp-debug phone-probe vtp-probe vtp-statement-peek payroll-reconcile seed-employees marketing-explain cs-stale check-integrations run-job vtp-replay-explain vtp-manual-verify returns-hmt care-false-reopen care-outcome-before-open fanpage-evidence-backfill cod-statement-audit stock-wait-summary org-summary org-order-audit org-ai-cutover org-offboard confirm-funnel-audit company-os-summary velocity-compare org-prepaid-ai pitr-status pitr-basebackup pitr-mark pitr-drill pitr-pause"
 
 # ═══════════ HÀNG ĐỢI NẰM TRÊN MÁY CHỦ, KHÔNG NẰM Ở GITHUB ═══════════
 #
@@ -492,7 +493,7 @@ jobs:
             # ─── PHÂN LOẠI: mặc định là GHI, và cờ ghi đè lên tên ───
             DOC_NHE="status perf disk logs db-query backup-status pitr-status"
             DOC_PROBE="check-integrations vtp-debug vtp-probe vtp-web-probe phone-probe pages-debug meta-id-probe meta-ad-post-probe vtp-capability ads-level-probe"
-            DOC_NANG="platform-secrets-verify verify smoke session-verify perf-probe perf-audit kpi-snapshot explain-stock outcome-explain outcome-parity returns-parity reason-coverage reason-backfill cogs-drift profit-verify marketing-calibrate marketing-explain payroll-reconcile fanpage-evidence-backfill care-false-reopen care-outcome-before-open care-waiting-reconcile cs-rule-update cs-stale sepay-reconcile cod-rebuild cod-status-repair vtp-return-status-repair agent-run-reattach vtp-rebuild-state vtp-replay-files vtp-replay-explain vtp-manual-verify vtp-statement-peek cod-statement-audit stock-wait-summary org-summary company-os-summary velocity-compare confirm-funnel-audit returns-hmt ai-check platform-ai-model-probe platform-ai-bench backup restore-drill restore-drill-org pitr-basebackup pitr-drill org-order-audit org-ai-cutover org-prepaid-ai"
+            DOC_NANG="platform-secrets-verify verify smoke session-verify perf-probe perf-audit kpi-snapshot explain-stock outcome-explain outcome-parity returns-parity reason-coverage reason-backfill cogs-drift profit-verify marketing-calibrate marketing-explain payroll-reconcile fanpage-evidence-backfill care-false-reopen care-outcome-before-open care-waiting-reconcile cs-rule-update cs-stale sepay-reconcile cod-rebuild cod-status-repair vtp-return-status-repair agent-run-reattach vtp-rebuild-state vtp-replay-files vtp-replay-explain vtp-manual-verify vtp-statement-peek cod-statement-audit stock-wait-summary org-summary company-os-summary velocity-compare confirm-funnel-audit returns-hmt ai-check platform-ai-model-probe platform-ai-bench backup restore-drill restore-drill-org pitr-basebackup pitr-drill org-order-audit org-ai-cutover org-offboard org-prepaid-ai"
 
             LOP=GHI
             case "$ARG" in
@@ -899,6 +900,18 @@ jobs:
                 fetch_script org-prepaid-ai.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/org-prepaid-ai.ts'
                 kiem_arg
                 ma_hoa_ket_qua chay_voi_arg docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/org-prepaid-ai.ts ;;
+              org-offboard)
+                # MẶC ĐỊNH CHẠY THỬ (script tự đặt ERP_READ_ONLY=1 và hỏi lại Postgres trước khi đọc; CSDL tổ chức mở bằng
+                # getDbForInspection — máy chủ ép chỉ đọc): arg rỗng = mọi tổ chức, "<mã>" = một tổ chức — loại (nhà · tự đăng ký ·
+                # người vận hành tạo · chưa xác minh), số dòng sẽ xoá / giữ theo bảng platform_*, CSDL, sổ tiền, page Meta, mốc sao
+                # lưu + PITR. "<mã> --apply --confirm=<mã> --created-before=<ISO> [--allow-active]" (cờ --apply ⇒ lớp GHI) xoá ĐÚNG
+                # MỘT tổ chức qua lib/platform/offboard.ts: nhật ký nền tảng ORG_OFFBOARD nguồn SCRIPT TRƯỚC khi xoá, gỡ webhook Meta,
+                # đình chỉ, đếm lại tiền, DROP DATABASE không FORCE (còn kết nối ⇒ dừng 75, chạy lại sau), xoá dòng mặt phẳng điều
+                # khiển trong một giao dịch (khoá dòng tổ chức + đếm lại tiền). Nhà / brand NULL / không chứng cứ tự đăng ký / có tiền
+                # thật / hoá đơn mở / tạo sau mốc ⇒ TỪ CHỐI (65); tiền về giữa chừng ⇒ DỪNG (66). Chi tiết chỉ ở phần MÃ HOÁ.
+                fetch_script org-offboard.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/org-offboard.ts'
+                kiem_arg
+                ma_hoa_ket_qua chay_voi_arg docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/org-offboard.ts ;;
               org-summary)
                 # CHỈ ĐỌC (script tự đặt ERP_READ_ONLY=1 trước khi nạp @/db; CSDL tổ chức mở bằng getDbForInspection — máy
                 # chủ ép chỉ đọc, không migrate, không tạo). Không đọc cột mang dữ liệu người, không đọc bí mật kết nối.

@@ -928,6 +928,49 @@ export async function openChannelPageToken(connectorKey: string, pageId: string,
   }
 }
 
+/**
+ * TOKEN PAGE của MỘT tổ chức đọc qua handle CHỈ ĐỊNH (ops `org-offboard`: gỡ đăng ký webhook Meta trước khi xoá tổ chức — tổ chức có thể
+ * đã ĐÌNH CHỈ nên không đi qua ngữ cảnh / `withOrganization`; handle là `getDbForInspection`, máy chủ ép chỉ đọc). Cùng phép giải với
+ * `openChannelPageToken` (AAD gắn mã tổ chức + kết nối + page), cộng hàng kết nối đơn cũ (page chưa có hàng riêng). Không trả hàng
+ * Instagram (đi theo page cha). Token chỉ nằm trong RAM của lượt gọi; không ghi, không in.
+ */
+export async function pageTokensForOffboard(db: Db, orgCode: string, connectorKey: string, deps: { keyState?: SecretsKeyState } = {}): Promise<{ tokens: Map<string, string>; instagram: Set<string> }> {
+  const state = deps.keyState ?? secretsKeyState();
+  const tokens = new Map<string, string>();
+  const instagram = new Set<string>();
+  const p = schema.orgChannelPages;
+  const rows = await db.select({ pageId: p.pageId, kind: p.kind, orgCode: p.orgCode, secretsEnc: p.secretsEnc, secretsKeyId: p.secretsKeyId }).from(p).where(eq(p.connectorKey, connectorKey));
+  for (const r of rows) {
+    if (r.kind === "INSTAGRAM") {
+      instagram.add(r.pageId);
+      continue;
+    }
+    if (r.orgCode !== orgCode || !r.secretsEnc) continue;
+    try {
+      const token = (openSecrets(r.secretsEnc, { orgCode, connectorKey: pageAad(connectorKey, r.pageId), keyId: r.secretsKeyId }, state).pageAccessToken ?? "").trim();
+      if (token) tokens.set(r.pageId, token);
+    } catch {
+      // Không giải được ⇒ page đó không có token: nơi gọi đếm «cần gỡ tay».
+    }
+  }
+  const c = schema.orgConnections;
+  const [conn] = await db.select({ orgCode: c.orgCode, settings: c.settings, secretsEnc: c.secretsEnc, secretsKeyId: c.secretsKeyId }).from(c).where(eq(c.connectorKey, connectorKey)).limit(1);
+  if (conn && conn.orgCode === orgCode && conn.secretsEnc) {
+    const st = asStringMap(conn.settings);
+    if (st.igAccountId) instagram.add(st.igAccountId);
+    const pageId = (st.pageId ?? "").trim();
+    if (pageId && !tokens.has(pageId)) {
+      try {
+        const token = (openSecrets(conn.secretsEnc, { orgCode, connectorKey, keyId: conn.secretsKeyId }, state).pageAccessToken ?? "").trim();
+        if (token) tokens.set(pageId, token);
+      } catch {
+        // như trên
+      }
+    }
+  }
+  return { tokens, instagram };
+}
+
 /** NGƯỜI đổi trạng thái / AI của MỘT HAY NHIỀU page (thao tác hàng loạt). Page không thuộc kết nối bị bỏ qua, không lỗi cả lượt. */
 export async function setChannelPagesState(user: SessionUser, connectorKey: string, pageIds: readonly string[], patch: { status?: "ACTIVE" | "DISABLED"; aiEnabled?: boolean }): Promise<{ ok: true; message: string; changed: number } | { error: string }> {
   const g = guard(user, connectorKey);
