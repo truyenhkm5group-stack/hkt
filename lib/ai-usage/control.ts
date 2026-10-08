@@ -14,12 +14,14 @@
  *
  * ─── GHI ───
  * Chỉ người vận hành nền tảng (`platformOperatorDenial`), bắt buộc lý do, mọi lượt đổi ghi `platform_audit_log` TRƯỚC
- * khi coi là xong — ghi nhật ký hỏng thì hoàn lại giá trị cũ.
+ * khi coi là xong — ghi nhật ký hỏng thì hoàn lại giá trị cũ. `settings.ai` của một tổ chức chỉ có MỘT đường ghi
+ * (`writeOrgAiControl`): màn hình (`setOrgAiControl`, nguồn UI) và ops (`setOrgAiLimitAsOperator`, nguồn SCRIPT — đúng MỘT
+ * ô credit, hẹp hơn ở mọi chỗ) cùng đi qua nó, nên luật "nhật ký trước, hỏng thì hoàn" không có bản thứ hai.
  */
 import { eq, sql } from "drizzle-orm";
 import { getPlatformDb, schema } from "@/db";
 import type { SessionUser } from "@/lib/auth/session";
-import { platformAudit } from "@/lib/platform/audit";
+import { platformAudit, type PlatformActor } from "@/lib/platform/audit";
 import { findOrganization, getHomeOrganization, invalidateOrganizations } from "@/lib/platform/organizations";
 import { ORGANIZATION_CODE_PATTERN } from "@/lib/platform/types";
 import { platformOperatorDenial } from "@/lib/platform-ui/module-toggle";
@@ -161,6 +163,37 @@ function overrideFromInput(raw: unknown): AiLimitsOverride | { error: string } {
   return parseAiOverride(out);
 }
 
+/** Ai ghi `settings.ai`: người vận hành trên màn hình (`UI`, có tài khoản) hoặc ops (`SCRIPT`, `actor = null` = MÁY — luật 34). */
+type OrgAiWriter = { source: "UI" | "SCRIPT"; actor: PlatformActor; label: string };
+
+/**
+ * ĐƯỜNG GHI DUY NHẤT của `platform_organizations.settings.ai`: không đổi gì ⇒ không ghi, không nhật ký; đổi ⇒ ghi → nhật ký nền
+ * tảng `AI_ORG_CONTROL_SET` TRƯỚC khi coi là xong → nhật ký hỏng ⇒ hoàn ĐÚNG giá trị cũ (kể cả mốc / người sửa cuối) và trả lỗi.
+ * `setOrgAiControl` (màn hình) và `setOrgAiLimitAsOperator` (ops) cùng gọi hàm này — không có bản ghi thứ hai.
+ */
+async function writeOrgAiControl(orgCode: string, before: OrgAiControl, next: { disabled: boolean; limits: AiLimitsOverride }, reason: string, w: OrgAiWriter): Promise<AiControlResult> {
+  if (next.disabled === before.disabled && JSON.stringify(next.limits) === JSON.stringify(before.limits)) return { ok: true, changed: false };
+  const pdb = await getPlatformDb();
+  const t = schema.platformOrganizations;
+  const write = async (value: Record<string, unknown>) =>
+    pdb
+      .update(t)
+      .set({ settings: sql`jsonb_set(coalesce(${t.settings}, '{}'::jsonb), '{ai}', ${JSON.stringify(value)}::jsonb, true)`, updatedAt: new Date() })
+      .where(eq(t.code, orgCode));
+  await write({ ...next, updatedAt: new Date().toISOString(), updatedByEmail: w.label });
+  invalidateAiControl();
+  invalidateOrganizations();
+  try {
+    await platformAudit({ action: "AI_ORG_CONTROL_SET", targetOrgCode: orgCode, subject: "ai", before: { disabled: before.disabled, limits: before.limits }, after: next, reason, source: w.source, actor: w.actor });
+  } catch {
+    await write({ disabled: before.disabled, limits: before.limits, updatedAt: before.updatedAt, updatedByEmail: before.updatedByEmail });
+    invalidateAiControl();
+    invalidateOrganizations();
+    return { error: "Không ghi được nhật ký nền tảng — đã hoàn lại cài đặt cũ, chưa đổi gì." };
+  }
+  return { ok: true, changed: true };
+}
+
 /**
  * Người vận hành đặt công tắc AI + ghi đè hạn mức cho MỘT tổ chức. `disabled` vắng ⇒ giữ nguyên; `limits` vắng ⇒ giữ
  * nguyên, có mặt ⇒ THAY TOÀN BỘ ghi đè bằng các ô có số (ô trống = theo gói).
@@ -182,25 +215,56 @@ export async function setOrgAiControl(user: SessionUser, input: unknown): Promis
   const before = await readOrgAiControl(orgCode, { fresh: true });
   if (before.readError) return { error: "Không đọc được cài đặt AI hiện tại của tổ chức — chưa đổi gì." };
   const next = { disabled: typeof raw.disabled === "boolean" ? raw.disabled : before.disabled, limits: limits ?? before.limits };
-  if (next.disabled === before.disabled && JSON.stringify(next.limits) === JSON.stringify(before.limits)) return { ok: true, changed: false };
-
   const actor = actorOf(user);
-  const pdb = await getPlatformDb();
-  const t = schema.platformOrganizations;
-  const write = async (value: Record<string, unknown>) =>
-    pdb
-      .update(t)
-      .set({ settings: sql`jsonb_set(coalesce(${t.settings}, '{}'::jsonb), '{ai}', ${JSON.stringify(value)}::jsonb, true)`, updatedAt: new Date() })
-      .where(eq(t.code, orgCode));
-  await write({ ...next, updatedAt: new Date().toISOString(), updatedByEmail: actor.email });
-  invalidateAiControl();
-  invalidateOrganizations();
-  try {
-    await platformAudit({ action: "AI_ORG_CONTROL_SET", targetOrgCode: orgCode, subject: "ai", before: { disabled: before.disabled, limits: before.limits }, after: next, reason, source: "UI", actor });
-  } catch {
-    await write({ disabled: before.disabled, limits: before.limits, updatedAt: before.updatedAt, updatedByEmail: before.updatedByEmail });
-    invalidateAiControl();
-    return { error: "Không ghi được nhật ký nền tảng — đã hoàn lại cài đặt cũ, chưa đổi gì." };
+  return writeOrgAiControl(orgCode, before, next, reason, { source: "UI", actor, label: actor.email });
+}
+
+/** Ô ghi đè DUY NHẤT mà đường ops đặt được — mọi ô khác (công tắc, trần lượt, trần tiền) chỉ đặt trên màn hình, có người đăng nhập. */
+export const SCRIPT_AI_LIMIT_KEY = "platformCreditUsdPerMonth" as const;
+/** Trần credit đặt bằng ops (USD / tháng). Lớn hơn là quyết định trên màn hình `/platform/org/<mã>`, có người đăng nhập. */
+export const SCRIPT_AI_CREDIT_MAX_USD = 1000;
+
+export type OrgAiLimitScriptResult = { ok: true; changed: boolean; previous: number | null; value: number | null } | { error: string };
+
+/**
+ * OPS đặt credit AI dùng chung (`platformCreditUsdPerMonth`) của MỘT tổ chức khách — cho lúc không có người vận hành đăng nhập
+ * (`scripts/org-ai-cutover.ts --apply --credit=<USD>`). CÙNG đường ghi + nhật ký với `setOrgAiControl`, HẸP hơn ở mọi chỗ:
+ *  · đúng MỘT khoá (`SCRIPT_AI_LIMIT_KEY`) — khoá khác ⇒ từ chối, không ghi;
+ *  · số > 0 và ≤ `SCRIPT_AI_CREDIT_MAX_USD` (làm tròn tới xu, xét SAU khi làm tròn), hoặc `null` = BỎ ghi đè ô này (về theo gói)
+ *    — chỉ để HOÀN về giá trị cũ khi bước sau hỏng;
+ *  · không tổ chức nhà (nhà không dùng credit nền tảng); tổ chức không có ⇒ từ chối;
+ *  · GIỮ NGUYÊN công tắc `disabled` và mọi ô ghi đè khác;
+ *  · nhật ký `AI_ORG_CONTROL_SET` nguồn `SCRIPT`, người làm = MÁY (`actor = null`); nhật ký hỏng ⇒ hoàn giá trị cũ.
+ * Trả `previous` (ghi đè cũ của ô; `null` = chưa ghi đè) để nơi gọi hoàn lại được. Nơi gọi duy nhất: script ops (bài kiểm quét).
+ */
+export async function setOrgAiLimitAsOperator(input: { orgCode: string; key: string; value: number | null; operator: { orgCode: string; email: string }; reason: string }): Promise<OrgAiLimitScriptResult> {
+  const raw = (input && typeof input === "object" ? input : {}) as { orgCode?: unknown; key?: unknown; value?: unknown; operator?: unknown; reason?: unknown };
+  const orgCode = typeof raw.orgCode === "string" ? raw.orgCode.trim() : "";
+  if (!ORGANIZATION_CODE_PATTERN.test(orgCode)) return { error: "Mã tổ chức không hợp lệ." };
+  if (raw.key !== SCRIPT_AI_LIMIT_KEY) return { error: `Đường ops chỉ đặt được ô «${SCRIPT_AI_LIMIT_KEY}» — ô khác đặt ở /platform/org/<mã>.` };
+  let value: number | null = null;
+  if (raw.value !== null) {
+    if (typeof raw.value !== "number" || !Number.isFinite(raw.value)) return { error: `Credit phải là số > 0 và ≤ ${SCRIPT_AI_CREDIT_MAX_USD} USD / tháng.` };
+    value = Math.round(raw.value * 100) / 100;
+    if (!(value > 0) || value > SCRIPT_AI_CREDIT_MAX_USD) return { error: `Credit phải là số > 0 và ≤ ${SCRIPT_AI_CREDIT_MAX_USD} USD / tháng.` };
   }
-  return { ok: true, changed: true };
+  const op = (raw.operator && typeof raw.operator === "object" ? raw.operator : {}) as { orgCode?: unknown; email?: unknown };
+  const opOrg = typeof op.orgCode === "string" ? op.orgCode.trim() : "";
+  const opLabel = typeof op.email === "string" ? op.email.trim() : "";
+  if (!opOrg || !opLabel || opLabel.length > 200) return { error: "Thiếu nhãn người vận hành (mã tổ chức + nhãn)." };
+  const reason = reasonOf(raw.reason);
+  if (typeof reason !== "string") return reason;
+  const org = await findOrganization(orgCode);
+  if (!org) return { error: `Không có tổ chức "${orgCode}".` };
+  if (org.isHome) return { error: "Tổ chức nhà không dùng credit AI của nền tảng — không có gì để đặt." };
+
+  const before = await readOrgAiControl(orgCode, { fresh: true });
+  if (before.readError) return { error: "Không đọc được cài đặt AI hiện tại của tổ chức — chưa đổi gì." };
+  const previous = typeof before.limits.platformCreditUsdPerMonth === "number" ? before.limits.platformCreditUsdPerMonth : null;
+  const rest: AiLimitsOverride = { ...before.limits };
+  delete rest.platformCreditUsdPerMonth;
+  const limits = parseAiOverride(value === null ? rest : { ...rest, [SCRIPT_AI_LIMIT_KEY]: value });
+  const r = await writeOrgAiControl(orgCode, before, { disabled: before.disabled, limits }, reason, { source: "SCRIPT", actor: null, label: `${opLabel} (vận hành nền tảng · ${opOrg})` });
+  if ("error" in r) return r;
+  return { ok: true, changed: r.changed, previous, value };
 }

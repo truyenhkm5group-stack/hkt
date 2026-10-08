@@ -6,22 +6,37 @@
   `platform` (PLATFORM_AI_API_KEY trong `.env` của máy chủ) — KHÔNG chép khoá nền tảng vào kết nối của tổ chức, KHÔNG tắt kết nối
   BYOK (Media / Săn khách sỉ đọc thẳng kết nối ấy, không qua cấu hình bot).
 
-  Ba chế độ — ô arg chỉ nhận chữ / số / khoảng trắng / = : . _ , / @ + -:
-   · `<mã>`                    KIỂM (CHỈ ĐỌC — Postgres ép, hỏi lại trước khi đọc): động cơ AI của bot · kết nối AI (trạng thái,
-                               KHÔNG bí mật) · khoá nền tảng sẵn sàng chưa · gói có credit AI dùng chung không, trần cứng hay ngân
-                               sách mềm, đủ cho mức dùng 30 ngày không · VÂN TAY từng khoá (12 ký tự đầu SHA-256 — khoá chỉ nằm trong
-                               RAM, KHÔNG BAO GIỜ in) · SAME_KEY / DIFFERENT_KEY · project Google của từng khoá (API Keys Lookup bằng
-                               credential quản trị NẾU container có; không có ⇒ UNAVAILABLE, không đoán)
-                               — KHÔNG gọi API nào khác bằng khoá của khách (review #659) · ai còn dùng `gemini-byok` · sổ AI 30
-                               ngày theo nguồn tiền × nhà cung cấp × model × loại việc.
-   · `<mã> --apply`            CHUYỂN: `connectorKey = platform`, model = mặc định / chính sách của nền tảng, KHÔNG dự phòng — qua
-                               ĐÚNG `saveChatbotEngineAsOperator` (lõi của /platform/org/<mã>: bot đang bật mà AI dùng chung chưa dùng
-                               được cho tổ chức ⇒ tự từ chối) + nhật ký nền tảng `AI_ORG_CONTROL_SET` nguồn SCRIPT. TỪ CHỐI khi credit
-                               là trần cứng nhỏ hơn mức dùng AI Bán hàng của 30 ngày qua (bot sẽ im giữa tháng). In mốc cutover.
+  Ba chế độ — ô arg chỉ nhận chữ / số / khoảng trắng / = : . _ , / @ + -; cờ lạ / thiếu / thừa ⇒ lỗi cách dùng (mã 64), không đoán:
+   · `<mã>`                    KIỂM (CHỈ ĐỌC — Postgres ép, hỏi lại trước khi đọc): động cơ AI của bot — ô ĐÃ LƯU (thô, `settings.value`
+                               là CHUỖI JSON) VÀ động cơ ĐANG CHẠY (đúng phép đọc của bot: `parseSalesChatbotConfig` + dự phòng hiệu
+                               lực) · kết nối AI (trạng thái, KHÔNG bí mật) · khoá nền tảng sẵn sàng chưa · hạn mức AI ĐANG ÁP (gói ·
+                               ghi đè · lượt · trần tiền · credit · ngân sách mềm) · credit có đủ cho AI Bán hàng theo NHỊP CHI GẦN ĐÂY
+                               không (mục dưới) · VÂN TAY từng khoá (12 ký tự đầu SHA-256 — khoá chỉ nằm trong RAM, KHÔNG BAO GIỜ in) ·
+                               SAME_KEY / DIFFERENT_KEY · project Google của từng khoá (API Keys Lookup bằng credential quản trị NẾU
+                               container có; không có ⇒ UNAVAILABLE, không đoán) — KHÔNG gọi API nào khác bằng khoá của khách (review
+                               #659) · ai còn dùng `gemini-byok` · sổ AI 30 ngày theo nguồn tiền × nhà cung cấp × model × loại việc.
+   · `<mã> --apply [--credit=<USD>]`
+                               CHUYỂN: `connectorKey = platform`, model = mặc định / chính sách của nền tảng, KHÔNG dự phòng — qua ĐÚNG
+                               `saveChatbotEngineAsOperator` (lõi của /platform/org/<mã>: bot đang bật mà AI dùng chung chưa dùng được
+                               cho tổ chức ⇒ tự từ chối) + nhật ký nền tảng `AI_ORG_CONTROL_SET` nguồn SCRIPT. TỪ CHỐI khi credit trần
+                               cứng không đủ theo nhịp chi gần đây (bot sẽ im giữa tháng). `--credit=<USD>` (chỉ đi cùng `--apply`):
+                               KIỂM credit ĐỀ XUẤT trước — không đủ ⇒ không ghi gì; đủ ⇒ đặt ghi đè `platformCreditUsdPerMonth` qua lõi
+                               `setOrgAiLimitAsOperator` (lib/ai-usage/control.ts — cùng đường ghi + nhật ký với màn hình, nguồn SCRIPT),
+                               đọc lại hạn mức ĐANG ÁP và kiểm lại, rồi mới chuyển; chuyển không thành ⇒ HOÀN credit về ghi đè cũ (cũng
+                               có nhật ký). In mốc cutover.
    · `<mã> --apply-probe [--since=<ISO>]`  HẬU KIỂM: MỘT lượt ở hội thoại THỬ (kênh TEST — không nhắn khách thật, công cụ mô phỏng)
                                rồi đọc dòng sổ AI của chính lượt ấy; đếm dòng sổ từ mốc cutover theo nguồn tiền × loại việc.
+
+  NHỊP CHI GẦN ĐÂY (08/10/2026): bot HSLC mới chạy đông từ 04/10 — chi phí AI Bán hàng theo ngày VN 0,16 · 0,74 · 1,23 · 1,98 · 2,64 ·
+  3,12 USD (02/10 → 07/10). Tổng 30 ngày (11,07 USD) là trung bình của một tháng mà nửa đầu bot gần như chưa chạy: credit 14 USD
+  qua được phép so cũ rồi cạn sau ~5 ngày ⇒ bot im với khách thật (PLATFORM là trần cứng). Cơ sở tháng nay = LỚN NHẤT của ba: tổng 30
+  ngày trọn · tổng 7 ngày trọn × 30/7 · ngày VN trọn gần nhất × 30; cơ sở ngày = cơ sở tháng / 30. Chỉ ngày TRỌN (hôm nay chưa xong
+  thì không vào cơ sở); chỉ lượt ĐÃ định giá (lượt chưa định giá đếm riêng, in cạnh); 30 ngày không lượt nào định giá được ⇒ CHƯA ĐO
+  ĐƯỢC ⇒ KHÔNG đủ (không chuyển mù).
+
   Cả lượt chạy trong `ma_hoa_ket_qua`: vân tay, project / tài khoản Google, gói / credit / chi tiêu / sổ AI của khách CHỈ nằm ở phần MÃ
-  HOÁ; dòng `[ops:tom-tat] ` (log công khai — kho PUBLIC) chỉ mang nhãn và phán quyết (SAME / DIFFERENT · ĐỦ / KHÔNG · ĐẠT / CHƯA).
+  HOÁ; dòng `[ops:tom-tat] ` (log công khai — kho PUBLIC) chỉ mang nhãn và phán quyết (SAME / DIFFERENT · ĐỦ / KHÔNG · ĐẠT / CHƯA), không
+  một con số USD nào.
 */
 const ARGS = process.argv.slice(2);
 const CHAY_THANG = Boolean(process.argv[1] && process.argv[1].endsWith("org-ai-cutover.ts"));
@@ -31,19 +46,21 @@ if (CHAY_THANG && !CO_GHI) process.env.ERP_READ_ONLY = "1";
 import "dotenv/config";
 import { createHash, createSign } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { and, eq, gte, inArray, sql } from "drizzle-orm";
+import { and, eq, gte, sql } from "drizzle-orm";
 import { getDbForInspection, getPlatformDb, schema } from "@/db";
 import { platformChatAi } from "@/lib/ai-builder/provider";
-import { sourceUsage } from "@/lib/ai-usage/ledger";
+import { readOrgAiControl, SCRIPT_AI_CREDIT_MAX_USD, SCRIPT_AI_LIMIT_KEY, setOrgAiLimitAsOperator, type OrgAiControl, type OrgAiLimitScriptResult } from "@/lib/ai-usage/control";
+import { aiUsageDaily, sourceUsage } from "@/lib/ai-usage/ledger";
 import { PLATFORM_AI_ENV, platformAiConfig } from "@/lib/ai-usage/platform-ai";
 import { probeWithPlatformKey } from "@/lib/ai-usage/platform-ai-admin";
-import { resolveAiLimits } from "@/lib/ai-usage/quota";
+import { resolveAiLimits, type ResolvedAiLimits } from "@/lib/ai-usage/quota";
+import { AI_LIMIT_OVERRIDE_KEYS, vnDayKey } from "@/lib/ai-usage/types";
 import { aiConnectionAudit } from "@/lib/connectors/service";
 import { platformAudit } from "@/lib/platform/audit";
 import { withOrganization } from "@/lib/platform/context";
 import { findOrganization, listOrganizations } from "@/lib/platform/organizations";
-import { SALES_CHATBOT_SETTING_KEY } from "@/lib/sales-chatbot/config";
-import { chatTurn, openConversation } from "@/lib/sales-chatbot/engine";
+import { DEFAULT_SALES_CHATBOT_CONFIG, effectiveFallback, parseSalesChatbotConfig, SALES_CHATBOT_SETTING_KEY, salesChatbotConfigZ, type SalesBotConnector } from "@/lib/sales-chatbot/config";
+import { chatTurn, loadSalesChatbotConfig, openConversation } from "@/lib/sales-chatbot/engine";
 import { saveChatbotEngineAsOperator } from "@/lib/sales-chatbot/settings";
 import { rowsOf } from "@/lib/sql-rows";
 
@@ -51,15 +68,17 @@ const tomTat = (s: string) => console.log(`[ops:tom-tat] ${s}`);
 
 export const SCRIPT_LABEL = "script:org-ai-cutover";
 export const CUTOVER_REASON = "Hạch toán tập trung chi phí AI Bán hàng trên /platform/saas: chuyển sang AI dùng chung của nền tảng (PLATFORM_AI_API_KEY), không dự phòng sang khoá riêng — yêu cầu của chủ shop 08/10/2026";
+export const CREDIT_REASON = "Credit AI dùng chung cho AI Bán hàng, đặt NGAY TRƯỚC lượt chuyển (ops org-ai-cutover --apply --credit): đủ cho cơ sở tháng theo nhịp chi gần đây × biên an toàn — yêu cầu của chủ shop 08/10/2026";
 /** Đúng các ô động cơ đổi khi chuyển: nguồn = AI dùng chung, model = của nền tảng, KHÔNG dự phòng (100% chi phí về PLATFORM). */
 export const PLATFORM_ENGINE_PATCH = { connectorKey: "platform", model: "", fallbackConnectorKey: null, fallbackModel: "" } as const;
 /** Tính năng của AI Bán hàng trên sổ AI — mọi lượt (trả lời · ảnh · trích nhanh · ghi đơn hộ · nhắc · học) đi qua MỘT cấu hình `ai.salesChatbot`. */
 export const SALES_FEATURES = ["sales_chatbot", "sales_playbook"] as const;
 export const AI_CONNECTORS = ["gemini-byok", "openai-byok", "anthropic-byok"] as const;
-/** Biên an toàn khi so credit trần cứng với mức dùng 30 ngày (giá model nền tảng có thể khác, tháng có thể đông khách hơn). */
+/** Biên an toàn khi so credit trần cứng với cơ sở chi (giá model nền tảng có thể khác, tháng có thể đông khách hơn). */
 export const CREDIT_MARGIN = 1.25;
 const PROBE_TEXT = "Shop ơi cho mình hỏi giá sản phẩm bán chạy nhất với ạ";
 const HTTP_TIMEOUT_MS = 15_000;
+const DAY_MS = 86_400_000;
 
 // ─────────────────────────── HÀM THUẦN ───────────────────────────
 
@@ -98,11 +117,28 @@ export function compareAccounts(a: readonly string[] | null, b: readonly string[
   return b.some((x) => s.has(x.toLowerCase())) ? "SAME_GOOGLE_ACCOUNT" : "DIFFERENT_ACCOUNT";
 }
 
+/**
+ * Ô `settings.value` ⇒ đối tượng ĐÃ LƯU. Cột là text và `setSettingJson` lưu CHUỖI JSON (đọc lại bằng `JSON.parse` — y như
+ * `readJsonSetting` của bot); nơi gọi khác có thể đưa sẵn đối tượng. Hỏng / thiếu / không phải đối tượng ⇒ `null` — coi như không có.
+ * Lỗi 08/10/2026: bản cũ chỉ nhận đối tượng nên lượt KIỂM in «bot — · nguồn —» trong khi bot đang chạy `gemini-byok`.
+ */
+export function storedSettingObject(value: unknown): Record<string, unknown> | null {
+  let v: unknown = value;
+  if (typeof v === "string") {
+    try {
+      v = JSON.parse(v) as unknown;
+    } catch {
+      return null;
+    }
+  }
+  return v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : null;
+}
+
 export type EngineView = { enabled: boolean | null; connectorKey: string | null; model: string; fallbackConnectorKey: string | null; fallbackModel: string; failoverEnabled: boolean | null };
 
-/** Động cơ AI của bot đọc từ giá trị ĐÃ LƯU của `ai.salesChatbot` — chỉ các ô động cơ, không bí mật. */
+/** Động cơ AI của bot đọc từ giá trị ĐÃ LƯU của `ai.salesChatbot` (chuỗi JSON hoặc đối tượng) — chỉ các ô động cơ, không bí mật, KHÔNG mặc định. */
 export function engineOf(value: unknown): EngineView {
-  const v = value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+  const v = storedSettingObject(value) ?? {};
   const s = (x: unknown) => (typeof x === "string" ? x : "");
   const b = (x: unknown) => (typeof x === "boolean" ? x : null);
   return { enabled: b(v.enabled), connectorKey: s(v.connectorKey) || null, model: s(v.model), fallbackConnectorKey: s(v.fallbackConnectorKey) || null, fallbackModel: s(v.fallbackModel), failoverEnabled: b(v.failoverEnabled) };
@@ -110,6 +146,64 @@ export function engineOf(value: unknown): EngineView {
 
 export function engineText(e: Pick<EngineView, "connectorKey" | "model" | "fallbackConnectorKey" | "fallbackModel">): string {
   return `nguồn ${e.connectorKey ?? "—"} · model ${e.model || "(mặc định của nguồn)"} · dự phòng ${e.fallbackConnectorKey ? `${e.fallbackConnectorKey}${e.fallbackModel ? ` / ${e.fallbackModel}` : ""}` : "KHÔNG"}`;
+}
+
+/** `MISSING` chưa lưu · `UNREADABLE` ô lưu không đọc được (JSON hỏng / không phải đối tượng) · `INVALID` sai lược đồ · `OK`. */
+export type RunningEngineState = "MISSING" | "UNREADABLE" | "INVALID" | "OK";
+export type RunningEngine = { state: RunningEngineState; enabled: boolean; connectorKey: SalesBotConnector; model: string; fallback: { connectorKey: SalesBotConnector; model: string } | null; issues: string | null };
+
+/**
+ * Động cơ ĐANG CHẠY = ĐÚNG phép đọc của bot: `readJsonSetting` (chuỗi JSON; rỗng / hỏng ⇒ `null`) rồi `parseSalesChatbotConfig` (mặc
+ * định + zod; sai lược đồ ⇒ MẶC ĐỊNH với bot TẮT — hỏng về phía đóng). Dự phòng = `effectiveFallback` (công tắc tắt / trùng nguồn
+ * chính ⇒ không có). `issues` chỉ để in ở phần MÃ HOÁ (thông điệp zod có thể mang giá trị của shop).
+ */
+export function runningEngineOf(value: unknown): RunningEngine {
+  const missing = value === null || value === undefined || value === "";
+  let raw: unknown = null;
+  let unreadable = false;
+  if (!missing) {
+    if (typeof value === "string") {
+      try {
+        raw = JSON.parse(value) as unknown;
+      } catch {
+        unreadable = true;
+      }
+    } else raw = value;
+  }
+  const cfg = parseSalesChatbotConfig(unreadable ? null : raw);
+  let state: RunningEngineState = missing ? "MISSING" : unreadable || !raw || typeof raw !== "object" || Array.isArray(raw) ? "UNREADABLE" : "OK";
+  let issues: string | null = null;
+  if (state === "OK") {
+    const check = salesChatbotConfigZ.safeParse({ ...DEFAULT_SALES_CHATBOT_CONFIG, ...(raw as Record<string, unknown>) });
+    if (!check.success) {
+      state = "INVALID";
+      issues = check.error.issues
+        .slice(0, 5)
+        .map((i) => `${i.path.map(String).join(".") || "cấu hình"}: ${i.message}`)
+        .join(" · ");
+    }
+  }
+  return { state, enabled: cfg.enabled, connectorKey: cfg.connectorKey, model: cfg.model, fallback: effectiveFallback(cfg), issues };
+}
+
+export function runningEngineText(r: RunningEngine): string {
+  const fb = r.fallback ? `${r.fallback.connectorKey}${r.fallback.model ? ` / ${r.fallback.model}` : ""}` : "KHÔNG";
+  const why =
+    r.state === "MISSING"
+      ? " — chưa lưu cấu hình ⇒ mặc định, bot TẮT"
+      : r.state === "UNREADABLE"
+        ? " — ô lưu không đọc được (JSON hỏng / không phải đối tượng) ⇒ mặc định, bot TẮT"
+        : r.state === "INVALID"
+          ? " — cấu hình SAI LƯỢC ĐỒ ⇒ bot chạy MẶC ĐỊNH và bị TẮT (lỗi trong phần mã hoá)"
+          : "";
+  return `bot ${r.enabled ? "BẬT" : "TẮT"} · nguồn ${r.connectorKey} · model ${r.model || "(mặc định của nguồn)"} · dự phòng hiệu lực ${fb}${why}`;
+}
+
+/** AI Bán hàng có đang dùng kết nối `key` không — theo động cơ ĐANG CHẠY: nguồn chính, hay dự phòng HIỆU LỰC. */
+export function salesConnectorUse(r: RunningEngine, key: string): "PRIMARY" | "FALLBACK" | null {
+  if (r.connectorKey === key) return "PRIMARY";
+  if (r.fallback?.connectorKey === key) return "FALLBACK";
+  return null;
 }
 
 /** Số ngày còn lại của tháng theo giờ VN, tính cả hôm nay (≥ 1) — khung của credit tháng (`monthStartVN`). */
@@ -121,25 +215,149 @@ export function daysLeftInMonthVN(now: Date): number {
 
 const usd2 = (v: number) => Math.round(v * 100) / 100;
 
+/** Một dòng của `aiUsageDaily` (ngày VN × nguồn × tính năng × model) — chỉ các ô phép tính cần. */
+export type SalesUsageRow = { day: string; feature: string; turns: number; costUsd: number | null; unknownCost: number };
 /**
- * Credit AI dùng chung có đủ cho AI Bán hàng không. Ngân sách mềm (`softOnly`) không bao giờ chặn ⇒ đủ. Trần cứng ⇒ HAI điều: một tháng
- * đầy ≥ mức dùng 30 ngày × biên, VÀ phần còn lại của tháng này (trừ cái đã dùng nguồn PLATFORM) ≥ mức dùng / ngày × số ngày còn lại ×
- * biên. Chưa đo được mức dùng (null) ⇒ không kết luận ⇒ KHÔNG đủ (không chuyển mù). Ước tính theo giá model đang chạy (BYOK) — model
- * của nền tảng rẻ / đắt hơn thì lệch; lượt chưa định giá không cộng — nơi gọi in số ấy cạnh phán quyết.
+ * Chi phí AI Bán hàng của MỘT ngày VN, mọi nguồn tiền. `usd` = tổng lượt ĐÃ định giá; `null` = có lượt mà không lượt nào định giá được
+ * (CHƯA BIẾT — luật 42); ngày không có dòng sổ nào = 0 lượt, 0 USD THẬT (mọi lượt AI đều ghi sổ). `unpriced` = lượt chưa định giá.
  */
-export function creditVerdict(limits: { platformCreditUsdPerMonth: number; softOnly?: boolean } | null, salesCost30dUsd: number | null, monthUsedUsd = 0, daysLeftInMonth = 30): { ok: boolean; reason: string } {
+export type DayCost = { day: string; usd: number | null; turns: number; unpriced: number };
+
+/** Gom `aiUsageDaily` thành chuỗi theo ngày VN của AI Bán hàng, đủ `days` ngày tới HÔM NAY (cũ → mới). Tính năng khác bị bỏ. */
+export function salesDailySeries(rows: readonly SalesUsageRow[], now: Date, days = 31): DayCost[] {
+  const acc = new Map<string, { usd: number | null; turns: number; unpriced: number }>();
+  for (let i = days - 1; i >= 0; i -= 1) acc.set(vnDayKey(new Date(now.getTime() - i * DAY_MS)), { usd: null, turns: 0, unpriced: 0 });
+  for (const r of rows) {
+    if (!(SALES_FEATURES as readonly string[]).includes(r.feature)) continue;
+    const d = acc.get(r.day);
+    if (!d) continue;
+    d.turns += r.turns;
+    d.unpriced += r.unknownCost;
+    if (r.costUsd !== null && Number.isFinite(r.costUsd)) d.usd = (d.usd ?? 0) + r.costUsd;
+  }
+  return [...acc].map(([day, d]) => ({ day, usd: d.usd !== null ? d.usd : d.turns === 0 ? 0 : null, turns: d.turns, unpriced: d.unpriced }));
+}
+
+export type MonthlyBasis = { fromMonth: number | null; from7d: number | null; fromDay: number | null; monthly: number | null; daily: number | null };
+
+/** Cơ sở tháng = LỚN NHẤT của (tổng 30 ngày · tổng 7 ngày × 30/7 · ngày trọn gần nhất × 30); cơ sở ngày = cơ sở tháng / 30. Không vế nào đo được ⇒ `null`. */
+export function monthlyBasis(c: { total30d: number | null; total7d: number | null; lastDayUsd: number | null }): MonthlyBasis {
+  const fromMonth = c.total30d === null ? null : usd2(c.total30d);
+  const from7d = c.total7d === null ? null : usd2((c.total7d * 30) / 7);
+  const fromDay = c.lastDayUsd === null ? null : usd2(c.lastDayUsd * 30);
+  const known = [fromMonth, from7d, fromDay].filter((v): v is number => v !== null);
+  const monthly = known.length ? Math.max(...known) : null;
+  return { fromMonth, from7d, fromDay, monthly, daily: monthly === null ? null : usd2(monthly / 30) };
+}
+
+export type SpendBasis = MonthlyBasis & { today: string; lastFullDay: string; days7: string[]; total30d: number | null; total7d: number | null; lastDayUsd: number | null; unpriced7d: number; unpriced30d: number };
+
+/**
+ * Ba vế của cơ sở chi trên chuỗi theo ngày (TIÊM VÀO — hàm thuần). Chỉ NGÀY TRỌN: 30 / 7 ngày VN tính lùi từ hôm qua; hôm nay chưa
+ * xong không vào vế nào. Một cửa sổ không có lượt nào định giá được ⇒ vế đó `null` (không đo được — KHÔNG phải 0).
+ */
+export function spendBasis(series: readonly DayCost[], now: Date): SpendBasis {
+  const byDay = new Map(series.map((d) => [d.day, d]));
+  const k30 = Array.from({ length: 30 }, (_, i) => vnDayKey(new Date(now.getTime() - (i + 1) * DAY_MS)));
+  const pick = (ks: readonly string[]) => ks.map((k) => byDay.get(k) ?? { day: k, usd: 0, turns: 0, unpriced: 0 });
+  const sum = (ds: readonly DayCost[]): number | null => (ds.some((d) => d.usd !== null && d.turns > 0) ? usd2(ds.reduce((s, d) => s + (d.usd ?? 0), 0)) : null);
+  const d30 = pick(k30);
+  const d7 = d30.slice(0, 7);
+  const total30d = sum(d30);
+  const total7d = sum(d7);
+  const lastDayUsd = sum(d7.slice(0, 1));
+  return {
+    today: vnDayKey(now),
+    lastFullDay: k30[0],
+    days7: k30.slice(0, 7).reverse(),
+    total30d,
+    total7d,
+    lastDayUsd,
+    ...monthlyBasis({ total30d, total7d, lastDayUsd }),
+    unpriced7d: d7.reduce((s, d) => s + d.unpriced, 0),
+    unpriced30d: d30.reduce((s, d) => s + d.unpriced, 0),
+  };
+}
+
+/** Dòng in phần MÃ HOÁ: chuỗi 7 ngày trọn + hôm nay (không vào cơ sở) + ba cơ sở. */
+export function spendLines(series: readonly DayCost[], b: SpendBasis): string[] {
+  const f = (v: number | null) => (v === null ? "—" : v.toFixed(2));
+  const byDay = new Map(series.map((d) => [d.day, d]));
+  const dayLine = (k: string, tail: string) => {
+    const d = byDay.get(k);
+    return `  ${k}${tail}: ${f(d ? d.usd : 0)} USD · ${d?.turns ?? 0} lượt${d?.unpriced ? ` (+${d.unpriced} chưa định giá, không cộng)` : ""}`;
+  };
+  return [
+    `Chi phí AI Bán hàng theo ngày VN (mọi nguồn tiền, chỉ lượt ĐÃ định giá) — 7 ngày trọn tới ${b.lastFullDay}:`,
+    ...b.days7.map((k) => dayLine(k, "")),
+    dayLine(b.today, " (hôm nay, CHƯA trọn — không vào cơ sở)"),
+    `Ba cơ sở tháng: 30 ngày trọn ${f(b.total30d)} · 7 ngày ${f(b.total7d)} × 30/7 = ${f(b.from7d)} · ngày ${b.lastFullDay} ${f(b.lastDayUsd)} × 30 = ${f(b.fromDay)} ⇒ cơ sở tháng ${f(b.monthly)} USD (lớn nhất) · cơ sở ngày ${f(b.daily)} USD · lượt chưa định giá (không cộng): 7 ngày ${b.unpriced7d} · 30 ngày ${b.unpriced30d}`,
+    ...(b.monthly === null ? ["Cơ sở: CHƯA ĐO ĐƯỢC — 30 ngày trọn không có lượt AI Bán hàng nào định giá được ⇒ không kết luận đủ credit"] : []),
+  ];
+}
+
+export type CreditLimits = { platformCreditUsdPerMonth: number; softOnly?: boolean; costUsdPerMonth?: { hard: number | null } };
+
+/**
+ * Credit AI dùng chung có đủ cho AI Bán hàng không, trên CƠ SỞ THÁNG theo nhịp chi gần đây (`spendBasis().monthly`). Credit 0 ⇒ KHÔNG
+ * (AI dùng chung không mở cho tổ chức — `platformChatAi` — kể cả ngân sách mềm). Trần THẬT của nguồn PLATFORM y như `evaluateAiQuota`:
+ * ngân sách mềm (`softOnly`) ⇒ chỉ trần tiền tháng nếu có khai (không có ⇒ ĐỦ, vượt chỉ cảnh báo); trần cứng ⇒ min(trần tiền, credit).
+ * Có trần ⇒ HAI điều: trần ≥ cơ sở tháng × biên, VÀ (trần − đã dùng PLATFORM tháng này) ≥ cơ sở ngày × số ngày còn lại × biên.
+ * Chưa đo được (null) ⇒ không kết luận ⇒ KHÔNG đủ (không chuyển mù). Ước tính theo giá model đang chạy — model của nền tảng rẻ / đắt
+ * hơn thì lệch; biên an toàn gánh phần ấy.
+ */
+export function creditVerdict(limits: CreditLimits | null, monthlyBasisUsd: number | null, monthUsedUsd = 0, daysLeftInMonth = 30): { ok: boolean; reason: string } {
   if (!limits) return { ok: false, reason: "không đọc được gói của tổ chức" };
-  if (limits.softOnly) return { ok: true, reason: `ngân sách mềm ${limits.platformCreditUsdPerMonth} USD/tháng — vượt chỉ cảnh báo, không chặn bot` };
   const credit = limits.platformCreditUsdPerMonth;
-  if (!(credit > 0)) return { ok: false, reason: "gói không có credit AI dùng chung (0 USD) — bot sẽ không chạy" };
-  if (salesCost30dUsd === null) return { ok: false, reason: `trần cứng ${credit} USD/tháng mà chưa đo được mức dùng 30 ngày — không chuyển mù` };
-  const needMonth = usd2(salesCost30dUsd * CREDIT_MARGIN);
-  const needRest = usd2((salesCost30dUsd / 30) * daysLeftInMonth * CREDIT_MARGIN);
-  const left = usd2(credit - monthUsedUsd);
-  const fix = "nâng hạn mức của tổ chức (ghi đè AI ở /platform) hoặc chuyển ngân sách mềm trước";
-  if (credit < needMonth) return { ok: false, reason: `trần cứng ${credit} USD/tháng < ${needMonth} USD (30 ngày ${salesCost30dUsd} USD × ${CREDIT_MARGIN}) — bot sẽ im giữa tháng; ${fix}` };
-  if (left < needRest) return { ok: false, reason: `tháng này còn ${left} USD (đã dùng ${monthUsedUsd}) < ${needRest} USD cho ${daysLeftInMonth} ngày còn lại — bot sẽ im trước cuối tháng; ${fix}` };
-  return { ok: true, reason: `trần cứng ${credit} USD/tháng ≥ ${needMonth} USD; tháng này còn ${left} USD ≥ ${needRest} USD cho ${daysLeftInMonth} ngày còn lại` };
+  if (!(credit > 0)) return { ok: false, reason: "gói không có credit AI dùng chung (0 USD) — AI dùng chung không mở cho tổ chức, bot sẽ không chạy" };
+  const costHard = limits.costUsdPerMonth?.hard ?? null;
+  const ceiling = limits.softOnly ? costHard : costHard === null ? credit : Math.min(costHard, credit);
+  if (ceiling === null) return { ok: true, reason: `ngân sách mềm ${credit} USD/tháng — vượt chỉ cảnh báo, không chặn bot` };
+  const what = ceiling < credit ? `trần tiền tháng ${ceiling} USD (ô costUsdHard — thấp hơn credit ${credit})` : `trần cứng ${ceiling} USD/tháng`;
+  if (monthlyBasisUsd === null) return { ok: false, reason: `${what} mà chưa đo được nhịp chi AI Bán hàng (30 ngày trọn không lượt nào định giá được) — không chuyển mù` };
+  const needMonth = usd2(monthlyBasisUsd * CREDIT_MARGIN);
+  const needRest = usd2((monthlyBasisUsd / 30) * daysLeftInMonth * CREDIT_MARGIN);
+  const left = usd2(ceiling - monthUsedUsd);
+  const fix = "đặt credit đủ bằng --apply --credit=<USD> (hoặc ghi đè AI ở /platform/org/<mã>), hoặc chuyển ngân sách mềm trước";
+  if (ceiling < needMonth) return { ok: false, reason: `${what} < ${needMonth} USD (cơ sở tháng ${monthlyBasisUsd} × ${CREDIT_MARGIN}) — bot sẽ im giữa tháng; ${fix}` };
+  if (left < needRest) return { ok: false, reason: `tháng này còn ${left} USD (đã dùng ${usd2(monthUsedUsd)}) < ${needRest} USD cho ${daysLeftInMonth} ngày còn lại — bot sẽ im trước cuối tháng; ${fix}` };
+  return { ok: true, reason: `${what} ≥ ${needMonth} USD (cơ sở tháng ${monthlyBasisUsd} × ${CREDIT_MARGIN}); tháng này còn ${left} USD ≥ ${needRest} USD cho ${daysLeftInMonth} ngày còn lại` };
+}
+
+/** Credit TỐI THIỂU (USD nguyên, làm tròn LÊN) qua được cả hai vế của `creditVerdict` khi trần = credit. Chưa đo được ⇒ `null`. */
+export function minimumCredit(monthlyBasisUsd: number | null, monthUsedUsd: number, daysLeftInMonth: number): number | null {
+  if (monthlyBasisUsd === null) return null;
+  const needMonth = monthlyBasisUsd * CREDIT_MARGIN;
+  const needNow = monthUsedUsd + (monthlyBasisUsd / 30) * daysLeftInMonth * CREDIT_MARGIN;
+  return Math.ceil(usd2(Math.max(needMonth, needNow)));
+}
+
+/** Dòng «credit tối thiểu đề xuất» (phần MÃ HOÁ) — nói luôn khi đường ops KHÔNG đủ (vượt trần ops, hay trần tiền tháng thấp hơn). */
+export function creditFloorLine(min: number | null, monthUsedUsd: number, daysLeftInMonth: number, limits: CreditLimits | null): string {
+  if (min === null) return "Credit tối thiểu đề xuất: — (chưa đo được nhịp chi AI Bán hàng)";
+  const costHard = limits?.costUsdPerMonth?.hard ?? null;
+  const tail =
+    min > SCRIPT_AI_CREDIT_MAX_USD
+      ? ` — VƯỢT trần đường ops (${SCRIPT_AI_CREDIT_MAX_USD} USD): đặt ở /platform/org/<mã>`
+      : costHard !== null && !limits?.softOnly && costHard < min
+        ? ` — trần tiền tháng (costUsdHard ${costHard} USD) THẤP hơn mức này: nâng ở /platform/org/<mã> trước (đường ops không đặt ô đó)`
+        : ` — chạy: "<mã> --apply --credit=${min}"`;
+  return `Credit tối thiểu đề xuất (trần cứng): ${min} USD/tháng = max(cơ sở tháng × ${CREDIT_MARGIN}; đã dùng PLATFORM tháng này ${usd2(monthUsedUsd)} + cơ sở ngày × ${daysLeftInMonth} ngày còn lại × ${CREDIT_MARGIN})${tail}`;
+}
+
+/** Hạn mức AI ĐANG ÁP của tổ chức (gói + ghi đè) — phần MÃ HOÁ. */
+export function limitsLines(r: ResolvedAiLimits, control: Pick<OrgAiControl, "disabled" | "readError"> | null): string[] {
+  if (!r) return ["Hạn mức AI đang áp: KHÔNG đọc được gói của tổ chức (lượt AI dùng chung sẽ bị từ chối)"];
+  const l = r.limits;
+  const so = (v: number | null) => (v === null ? "không giới hạn" : String(v));
+  const tien = (v: number | null) => (v === null ? "không giới hạn" : `${v} USD`);
+  const ghiDe = AI_LIMIT_OVERRIDE_KEYS.filter((k) => k in r.override).map((k) => `${k}=${r.override[k] ?? "không giới hạn"}`);
+  return [
+    `Hạn mức AI đang áp — gói ${r.planKey} (${r.planName})${r.fellBack ? " · gói lạ ⇒ theo gói mặc định" : ""}${r.undeclared ? " · gói CHƯA khai hạn mức AI" : ""}`,
+    `  ghi đè của tổ chức: ${ghiDe.length ? ghiDe.join(" · ") : "không"} · công tắc AI của tổ chức: ${control ? (control.readError ? "KHÔNG đọc được (coi như TẮT)" : control.disabled ? "TẮT" : "BẬT") : "—"}`,
+    `  lượt / ngày ${so(l.requestsPerDay)} · lượt / tháng ${so(l.requestsPerMonth)} — AI Bán hàng không tính vào trần lượt (sales_chatbot · sales_playbook): với nó chỉ trần TIỀN chặn`,
+    `  trần tiền tháng: mềm ${tien(l.costUsdPerMonth.soft)} · cứng ${tien(l.costUsdPerMonth.hard)} · credit nền tảng ${l.platformCreditUsdPerMonth} USD/tháng · ${l.softOnly ? "softOnly — NGÂN SÁCH MỀM (vượt chỉ cảnh báo)" : "trần CỨNG cho nguồn PLATFORM = min(trần tiền cứng, credit)"}`,
+  ];
 }
 
 export type UsageGroup = { billingSource: string; feature: string; workload: string | null; n: number };
@@ -155,6 +373,181 @@ export function cutoverVerdict(rows: readonly UsageGroup[]): { salesPlatform: nu
     else if (r.billingSource === "BYOK") out.otherByok += r.n;
   }
   return out;
+}
+
+export type CutoverArgs = { ok: true; code: string; mode: "AUDIT" | "APPLY" | "PROBE"; credit: number | null; since: Date | null } | { ok: false; error: string };
+
+/** Ô arg ⇒ chế độ. Cờ lạ / lặp / sai cặp ⇒ lỗi cách dùng — không đoán ý (gõ nhầm `--credits` mà vẫn chạy `--apply` là chuyển mù). Thông điệp không lặp lại giá trị đã gõ. */
+export function parseCutoverArgs(args: readonly string[]): CutoverArgs {
+  const positional = args.filter((a) => !a.startsWith("--"));
+  const flags = args.filter((a) => a.startsWith("--"));
+  if (positional.length !== 1) return { ok: false, error: positional.length ? "chỉ nhận MỘT mã tổ chức" : "thiếu mã tổ chức" };
+  const known = (f: string) => f === "--apply" || f === "--apply-probe" || f.startsWith("--credit=") || f.startsWith("--since=");
+  if (flags.some((f) => !known(f))) return { ok: false, error: "cờ lạ — chỉ nhận --apply, --credit=<USD>, --apply-probe, --since=<ISO>" };
+  if (new Set(flags.map((f) => f.split("=")[0])).size !== flags.length) return { ok: false, error: "mỗi cờ chỉ một lần" };
+  const apply = flags.includes("--apply");
+  const probe = flags.includes("--apply-probe");
+  if (apply && probe) return { ok: false, error: "chọn MỘT: --apply hoặc --apply-probe" };
+  const creditRaw = flags.find((f) => f.startsWith("--credit="))?.slice("--credit=".length);
+  const sinceRaw = flags.find((f) => f.startsWith("--since="))?.slice("--since=".length);
+  if (creditRaw !== undefined && !apply) return { ok: false, error: "--credit chỉ đi cùng --apply (đặt credit rồi chuyển trong CÙNG một lượt)" };
+  if (sinceRaw !== undefined && !probe) return { ok: false, error: "--since chỉ đi cùng --apply-probe" };
+  let credit: number | null = null;
+  if (creditRaw !== undefined) {
+    if (!/^\d{1,4}(?:\.\d{1,2})?$/.test(creditRaw)) return { ok: false, error: "--credit phải là số USD dạng 150 hoặc 117.5 (dấu chấm, tối đa 2 chữ số thập phân)" };
+    credit = Number(creditRaw);
+    if (!(credit > 0) || credit > SCRIPT_AI_CREDIT_MAX_USD) return { ok: false, error: `--credit phải > 0 và ≤ ${SCRIPT_AI_CREDIT_MAX_USD} USD / tháng (lớn hơn đặt ở /platform/org/<mã>)` };
+  }
+  let since: Date | null = null;
+  if (sinceRaw !== undefined) {
+    since = new Date(sinceRaw);
+    if (!sinceRaw || Number.isNaN(since.getTime())) return { ok: false, error: "--since phải là mốc ISO, ví dụ 2026-10-08T04:00:00Z" };
+  }
+  return { ok: true, code: positional[0], mode: apply ? "APPLY" : probe ? "PROBE" : "AUDIT", credit, since };
+}
+
+const errorText = (e: unknown) => (e instanceof Error ? e.message : String(e)).slice(0, 300);
+
+// ─────────────────────────── CHUYỂN (thứ tự + hoàn — tiêm phụ thuộc để kiểm được) ───────────────────────────
+
+/** Mọi thứ đụng CSDL / mạng của lượt `--apply`. Bản thật ở `realDeps()`; bài kiểm tiêm bản giả để đi hết các nhánh hoàn. */
+export type CutoverDeps = {
+  now: () => Date;
+  platformReady: () => { ready: true } | { ready: false; reason: string };
+  resolveLimits: (orgCode: string) => Promise<ResolvedAiLimits>;
+  readControl: (orgCode: string) => Promise<OrgAiControl | null>;
+  usageDaily: (orgCode: string, now: Date) => Promise<readonly SalesUsageRow[]>;
+  platformMonthUsed: (orgCode: string, now: Date) => Promise<number>;
+  setCredit: (orgCode: string, value: number | null, reason: string) => Promise<OrgAiLimitScriptResult>;
+  platformUsable: (orgCode: string) => Promise<{ ok: true } | { ok: false; reason: string }>;
+  switchEngine: (orgCode: string) => Promise<{ ok: true; before: unknown; after: unknown } | { ok: false; error: string }>;
+  runningConnector: (orgCode: string) => Promise<string | null>;
+  auditSwitch: (orgCode: string, before: unknown, after: unknown, at: string) => Promise<void>;
+};
+
+type CreditChange = { previous: number | null; changed: boolean };
+
+/** Đọc lại nguồn AI ĐANG CHẠY sau một bước hỏng: `PLATFORM` · `OTHER` (chắc chắn chưa ở AI dùng chung) · `UNKNOWN` (không đọc được). */
+async function engineAfterFailure(orgCode: string, deps: CutoverDeps): Promise<"PLATFORM" | "OTHER" | "UNKNOWN"> {
+  const c = await deps.runningConnector(orgCode).catch(() => null);
+  return c === null ? "UNKNOWN" : c === "platform" ? "PLATFORM" : "OTHER";
+}
+
+/**
+ * Hoàn credit về ghi đè CŨ (cũng qua lõi + nhật ký) — CHỈ khi đọc lại CHẮC CHẮN thấy bot chưa ở AI dùng chung. Bot đã (hay có thể
+ * đã) ở đó — lỗi giữa chừng, hay chạy lại sau một lượt chuyển thành công — ⇒ GIỮ credit: credit thừa vô hại, hoàn credit khi bot
+ * đang chạy bằng nó là làm bot im với khách thật.
+ */
+async function undoCredit(orgCode: string, credit: CreditChange | null, deps: CutoverDeps, why: string): Promise<number> {
+  if (!credit) return 1;
+  if (!credit.changed) {
+    tomTat("KHÔNG CHUYỂN — credit không đổi ở lượt này nên không có gì để hoàn");
+    return 1;
+  }
+  const engine = await engineAfterFailure(orgCode, deps);
+  if (engine !== "OTHER") {
+    tomTat(engine === "PLATFORM" ? "CẢNH BÁO: bot ĐANG ở AI dùng chung — GIỮ credit mới (hoàn là làm bot im); chi tiết trong phần mã hoá" : "CẢNH BÁO: không đọc lại được động cơ — GIỮ credit mới (phía an toàn: bot không im); kiểm tay ở /platform/org/<mã>");
+    return 1;
+  }
+  let r: OrgAiLimitScriptResult;
+  try {
+    r = await deps.setCredit(orgCode, credit.previous, `Hoàn credit AI dùng chung về ghi đè cũ (ops org-ai-cutover): ${why}`);
+  } catch (e) {
+    r = { error: errorText(e) };
+  }
+  if ("error" in r) {
+    console.log(`Hoàn credit: ${r.error}`);
+    tomTat("KHÔNG CHUYỂN — và HOÀN CREDIT HỎNG: ghi đè credit mới còn nguyên, sửa tay ở /platform/org/<mã> (lý do trong phần mã hoá)");
+    return 1;
+  }
+  const veTheoGoi = credit.previous === null;
+  tomTat(`KHÔNG CHUYỂN — đã hoàn credit AI dùng chung về ${veTheoGoi ? "theo gói (bỏ ghi đè)" : "ghi đè cũ"} (nhật ký nền tảng nguồn SCRIPT)`);
+  return 1;
+}
+
+/**
+ * `--apply [--credit=<USD>]`. Thứ tự là hợp đồng: (1) khoá nền tảng sẵn sàng; (2) phán quyết credit trên credit ĐỀ XUẤT (hay credit
+ * đang áp) theo nhịp chi — KHÔNG đủ ⇒ dừng, không ghi gì; (3) có `--credit` ⇒ đặt ghi đè qua lõi, đọc lại hạn mức ĐANG ÁP, kiểm lại;
+ * (4) AI dùng chung dùng được cho tổ chức; (5) đổi động cơ qua lõi /platform/org. Hỏng ở (3)–(5) ⇒ hoàn credit (`undoCredit`) — trừ
+ * khi bot đã / có thể đã ở AI dùng chung: khi đó GIỮ (credit thừa vô hại, bot im với khách thì không).
+ */
+export async function applyCutover(org: { code: string }, proposed: number | null, deps: CutoverDeps): Promise<number> {
+  const ready = deps.platformReady();
+  if (!ready.ready) {
+    tomTat(`KHÔNG CHUYỂN: AI dùng chung chưa sẵn sàng — ${ready.reason}`);
+    return 1;
+  }
+  const now = deps.now();
+  const limits = await deps.resolveLimits(org.code);
+  for (const l of limitsLines(limits, await deps.readControl(org.code))) console.log(`[trước] ${l}`);
+  const series = salesDailySeries(await deps.usageDaily(org.code, now), now);
+  const basis = spendBasis(series, now);
+  for (const l of spendLines(series, basis)) console.log(l);
+  const used = await deps.platformMonthUsed(org.code, now);
+  const daysLeft = daysLeftInMonthVN(now);
+  const candidate: CreditLimits | null = limits ? (proposed === null ? limits.limits : { ...limits.limits, platformCreditUsdPerMonth: proposed }) : null;
+  console.log(creditFloorLine(minimumCredit(basis.monthly, used, daysLeft), used, daysLeft, candidate));
+  const verdict = creditVerdict(candidate, basis.monthly, used, daysLeft);
+  console.log(`Credit${proposed === null ? "" : " ĐỀ XUẤT"}: ${verdict.reason}`);
+  if (!verdict.ok) {
+    if (proposed === null) tomTat("KHÔNG CHUYỂN: credit AI dùng chung không đủ cho AI Bán hàng theo nhịp chi gần đây — chưa ghi gì (credit tối thiểu trong phần mã hoá; đặt bằng --apply --credit=<USD>)");
+    else tomTat("KHÔNG CHUYỂN: credit ĐỀ XUẤT không đủ cho AI Bán hàng theo nhịp chi gần đây — CHƯA GHI GÌ (chi tiết trong phần mã hoá)");
+    return 1;
+  }
+
+  let credit: CreditChange | null = null;
+  if (proposed !== null) {
+    const set = await deps.setCredit(org.code, proposed, CREDIT_REASON);
+    if ("error" in set) {
+      console.log(`Đặt credit: ${set.error}`);
+      tomTat("KHÔNG CHUYỂN: không đặt được credit AI dùng chung — chưa đổi gì (lý do trong phần mã hoá)");
+      return 1;
+    }
+    credit = { previous: set.previous, changed: set.changed };
+    tomTat(`Credit AI dùng chung: ${set.changed ? "ĐÃ ĐẶT ghi đè (nhật ký nền tảng nguồn SCRIPT)" : "ghi đè đã đúng mức đề xuất — không đổi"}`);
+    // Đọc lại hạn mức ĐANG ÁP (đúng đường bot đọc) và kiểm lại: ghi đè chưa có hiệu lực ⇒ không chuyển.
+    const after = await deps.resolveLimits(org.code);
+    for (const l of limitsLines(after, await deps.readControl(org.code))) console.log(`[sau khi đặt credit] ${l}`);
+    const again = creditVerdict(after?.limits ?? null, basis.monthly, used, daysLeft);
+    console.log(`Kiểm lại trên hạn mức đang áp: ${again.reason}`);
+    if (!again.ok) return undoCredit(org.code, credit, deps, "hạn mức đang áp sau khi đặt vẫn không đủ");
+  }
+
+  const usable = await deps.platformUsable(org.code);
+  if (!usable.ok) {
+    console.log(`AI dùng chung: ${usable.reason}`);
+    tomTat(`KHÔNG CHUYỂN: AI dùng chung chưa dùng được cho ${org.code} (lý do trong phần mã hoá)`);
+    return undoCredit(org.code, credit, deps, "AI dùng chung chưa dùng được cho tổ chức");
+  }
+
+  let r: Awaited<ReturnType<CutoverDeps["switchEngine"]>>;
+  try {
+    r = await deps.switchEngine(org.code);
+  } catch (e) {
+    // Lỗi GIỮA chừng: cấu hình có thể đã lưu rồi mới hỏng (nhật ký tổ chức) ⇒ đọc lại trước khi quyết có hoàn credit không.
+    console.log(`Đổi động cơ ném lỗi: ${errorText(e)}`);
+    const engine = await engineAfterFailure(org.code, deps);
+    tomTat(`LỖI giữa lượt đổi động cơ (chi tiết trong phần mã hoá) — đọc lại: ${engine === "PLATFORM" ? "bot ĐÃ ở AI dùng chung" : engine === "OTHER" ? "động cơ vẫn là nguồn cũ" : "KHÔNG đọc lại được động cơ"}`);
+    return undoCredit(org.code, credit, deps, "lượt đổi động cơ hỏng giữa chừng");
+  }
+  if (!r.ok) {
+    console.log(`Đổi động cơ: ${r.error}`);
+    tomTat("KHÔNG CHUYỂN: lõi /platform/org từ chối đổi động cơ (lý do trong phần mã hoá)");
+    return undoCredit(org.code, credit, deps, "lõi /platform/org từ chối đổi động cơ");
+  }
+  const at = deps.now().toISOString();
+  let rc = 0;
+  try {
+    await deps.auditSwitch(org.code, r.before, r.after, at);
+  } catch (e) {
+    console.log(`Nhật ký nền tảng của lượt chuyển: ${errorText(e)}`);
+    tomTat("CẢNH BÁO: ĐÃ CHUYỂN nhưng KHÔNG ghi được nhật ký nền tảng của lượt chuyển (nhật ký tổ chức vẫn có)");
+    rc = 1;
+  }
+  tomTat(`ĐÃ CHUYỂN ${org.code} lúc ${at} (mốc cutover): ${engineText(engineOf(r.before))} ⇒ ${engineText(engineOf(r.after))}`);
+  tomTat("Credit AI dùng chung: ĐỦ");
+  console.log(`Mốc cutover ${at} — hậu kiểm: "${org.code} --apply-probe --since=${at}"`);
+  return rc;
 }
 
 // ─────────────────────────── GOOGLE ───────────────────────────
@@ -232,16 +625,6 @@ async function gcpLookup(apiKey: string, token: string): Promise<GcpProject> {
 
 type Org = { code: string; name: string; isHome: boolean; status: string };
 
-async function salesCost30d(orgCode: string): Promise<{ usd: number | null; unpriced: number }> {
-  const pdb = await getPlatformDb();
-  const u = schema.platformAiUsage;
-  const [r] = await pdb
-    .select({ usd: sql<string | null>`sum(${u.costUsd})`, unpriced: sql<number>`count(*) filter (where ${u.costUsd} is null and ${u.status} = 'OK')` })
-    .from(u)
-    .where(and(eq(u.orgCode, orgCode), inArray(u.feature, [...SALES_FEATURES]), gte(u.at, new Date(Date.now() - 30 * 86_400_000))));
-  return { usd: r?.usd === null || r?.usd === undefined ? null : Math.round(Number(r.usd) * 100) / 100, unpriced: Number(r?.unpriced ?? 0) };
-}
-
 async function usageGroups(orgCode: string, since: Date): Promise<(UsageGroup & { provider: string | null; model: string | null; status: string; costUsd: number | null })[]> {
   const pdb = await getPlatformDb();
   const u = schema.platformAiUsage;
@@ -252,6 +635,37 @@ async function usageGroups(orgCode: string, since: Date): Promise<(UsageGroup & 
     .groupBy(u.billingSource, u.provider, u.model, u.feature, u.workload, u.status)
     .orderBy(u.billingSource, u.feature, u.workload);
   return rows.map((r) => ({ billingSource: r.billingSource, provider: r.provider, model: r.model, feature: r.feature, workload: r.workload, status: r.status, n: Number(r.n), costUsd: r.cost === null ? null : Number(r.cost) }));
+}
+
+/** Phụ thuộc THẬT của `--apply`: lõi /platform/org (đổi động cơ), lõi hạn mức AI (credit, nguồn SCRIPT), sổ AI, khoá nền tảng. */
+function realDeps(): CutoverDeps {
+  let operator: { orgCode: string; email: string } | null = null;
+  const operatorOf = async () => {
+    if (!operator) operator = { orgCode: (await listOrganizations()).find((o) => o.isHome)?.code ?? "home", email: SCRIPT_LABEL };
+    return operator;
+  };
+  return {
+    now: () => new Date(),
+    platformReady: () => {
+      const c = platformAiConfig();
+      return c.ready ? { ready: true } : { ready: false, reason: c.reason };
+    },
+    resolveLimits: (code) => resolveAiLimits(code),
+    readControl: (code) => readOrgAiControl(code, { fresh: true }),
+    usageDaily: (code, now) => aiUsageDaily(code, 31, now),
+    platformMonthUsed: async (code, now) => (await sourceUsage(code, "PLATFORM", now)).costUsdMonth,
+    setCredit: async (code, value, reason) => setOrgAiLimitAsOperator({ orgCode: code, key: SCRIPT_AI_LIMIT_KEY, value, operator: await operatorOf(), reason }),
+    platformUsable: async (code) => {
+      const p = await platformChatAi(code);
+      return p.ok ? { ok: true } : { ok: false, reason: p.reason };
+    },
+    switchEngine: async (code) => {
+      const op = await operatorOf();
+      return withOrganization(code, () => saveChatbotEngineAsOperator({ engine: { ...PLATFORM_ENGINE_PATCH }, operator: op, reason: CUTOVER_REASON }));
+    },
+    runningConnector: (code) => withOrganization(code, async () => (await loadSalesChatbotConfig()).connectorKey),
+    auditSwitch: (code, before, after, at) => platformAudit({ action: "AI_ORG_CONTROL_SET", targetOrgCode: code, subject: "sales_chatbot.engine", before, after, reason: `${CUTOVER_REASON} · mốc ${at}`, source: "SCRIPT", actor: null }),
+  };
 }
 
 // ─────────────────────────── BA CHẾ ĐỘ ───────────────────────────
@@ -269,9 +683,14 @@ async function audit(org: Org): Promise<number> {
   console.log(`Tên tổ chức: ${org.name}`);
   tomTat(`KIỂM ${org.code} — CHỈ ĐỌC`);
 
+  // `settings.value` là CHUỖI JSON: in cả ô ĐÃ LƯU (thô) lẫn động cơ ĐANG CHẠY (đúng phép đọc của bot — mặc định + lược đồ).
   const [setting] = await db.select({ value: schema.settings.value }).from(schema.settings).where(eq(schema.settings.key, SALES_CHATBOT_SETTING_KEY)).limit(1);
-  const engine = engineOf(setting?.value);
-  tomTat(`Động cơ AI Bán hàng: bot ${engine.enabled === null ? "—" : engine.enabled ? "BẬT" : "TẮT"} · ${engineText(engine)} · chuyển dự phòng ${engine.failoverEnabled === null ? "—" : engine.failoverEnabled ? "bật" : "tắt"}`);
+  const stored = engineOf(setting?.value);
+  const storedNote = !setting?.value ? " — chưa lưu cấu hình" : storedSettingObject(setting.value) ? "" : " — ô lưu KHÔNG đọc được (JSON hỏng / không phải đối tượng)";
+  tomTat(`Động cơ AI Bán hàng ĐÃ LƯU (ô thô): bot ${stored.enabled === null ? "—" : stored.enabled ? "BẬT" : "TẮT"} · ${engineText(stored)} · chuyển dự phòng ${stored.failoverEnabled === null ? "—" : stored.failoverEnabled ? "bật" : "tắt"}${storedNote}`);
+  const running = runningEngineOf(setting?.value ?? null);
+  tomTat(`Động cơ AI Bán hàng ĐANG CHẠY (mặc định + lược đồ của bot): ${runningEngineText(running)}`);
+  if (running.issues) console.log(`Cấu hình bot sai lược đồ: ${running.issues}`);
 
   // Kết nối AI + DẤU BĂM khoá qua lib/connectors/service.ts — khoá của tổ chức được giải và băm NGAY TRONG service, không tới đây.
   const conns = await aiConnectionAudit(db, org.code);
@@ -322,58 +741,35 @@ async function audit(org: Org): Promise<number> {
   const H = projects["GEMINI_API_KEY (nhà)"];
   tomTat(`Project nền tảng ↔ BYOK: ${compareProjects(P?.number ?? null, null)} · tài khoản Google nền tảng ↔ BYOK: ${compareAccounts(P?.owners ?? null, null)} · project nền tảng ↔ nhà: ${compareProjects(P?.number ?? null, H?.number ?? null)}`);
 
+  // Hạn mức AI ĐANG ÁP + credit theo NHỊP CHI GẦN ĐÂY — số liệu chỉ ở phần MÃ HOÁ; log công khai chỉ phán quyết.
+  const now = new Date();
   const limits = await resolveAiLimits(org.code);
-  const cost = await salesCost30d(org.code);
-  const month = await sourceUsage(org.code, "PLATFORM");
+  for (const l of limitsLines(limits, await readOrgAiControl(org.code))) console.log(l);
+  const series = salesDailySeries(await aiUsageDaily(org.code, 31, now), now);
+  const basis = spendBasis(series, now);
+  for (const l of spendLines(series, basis)) console.log(l);
+  const monthUsed = (await sourceUsage(org.code, "PLATFORM", now)).costUsdMonth;
+  const daysLeft = daysLeftInMonthVN(now);
+  console.log(creditFloorLine(minimumCredit(basis.monthly, monthUsed, daysLeft), monthUsed, daysLeft, limits?.limits ?? null));
+  const verdict = creditVerdict(limits?.limits ?? null, basis.monthly, monthUsed, daysLeft);
+  console.log(`Credit: ${verdict.reason}`);
+  const kieuTran = limits ? (limits.limits.softOnly ? "ngân sách mềm" : "trần cứng") : "không đọc được gói";
+  tomTat(`Credit AI dùng chung đủ cho AI Bán hàng (theo nhịp chi gần đây): ${verdict.ok ? "ĐỦ" : "KHÔNG"} (${kieuTran})`);
+  const goiYCredit = !verdict.ok && limits !== null && basis.monthly !== null;
+  if (goiYCredit) tomTat("Muốn chuyển: --apply --credit=<USD> (credit tối thiểu đề xuất ở phần mã hoá)");
   const plat = await platformChatAi(org.code).catch((e: unknown) => ({ ok: false as const, reason: `không đọc được (${e instanceof Error ? e.name : "lỗi"})` }));
-  const credit = creditVerdict(limits?.limits ?? null, cost.usd, month.costUsdMonth, daysLeftInMonthVN(new Date()));
-  console.log(`Gói ${limits?.planKey ?? "—"}: credit AI dùng chung ${limits ? `${limits.limits.platformCreditUsdPerMonth} USD/tháng · ${limits.limits.softOnly ? "ngân sách mềm" : "trần cứng"}` : "—"} · đã dùng tháng này (PLATFORM) ${month.costUsdMonth} USD · AI Bán hàng 30 ngày ${cost.usd ?? "—"} USD${cost.unpriced ? ` (+${cost.unpriced} lượt chưa định giá, không cộng)` : ""}`);
-  console.log(`Credit: ${credit.reason}`);
-  tomTat(`Credit AI dùng chung đủ cho AI Bán hàng: ${credit.ok ? "ĐỦ" : "KHÔNG"} (${limits ? (limits.limits.softOnly ? "ngân sách mềm" : "trần cứng") : "không đọc được gói"})`);
   if (!plat.ok) console.log(`AI dùng chung: ${plat.reason}`);
   tomTat(`AI dùng chung cho ${org.code} lúc này: ${plat.ok ? "DÙNG ĐƯỢC" : "KHÔNG (lý do trong phần mã hoá)"}`);
 
-  // Ai còn dùng khoá riêng: AI Bán hàng theo cấu hình bot; Media (ảnh / chữ) mở kết nối đầu tiên đang bật (OpenAI rồi Gemini);
+  // Ai còn dùng khoá riêng: AI Bán hàng theo động cơ ĐANG CHẠY; Media (ảnh / chữ) mở kết nối đầu tiên đang bật (OpenAI rồi Gemini);
   // Săn khách sỉ mở thẳng gemini-byok (lib/creative/org-ai.ts · lib/wholesale/outreach.ts).
   const active = (k: string) => conns.some((r) => r.connectorKey === k && r.status === "ACTIVE" && r.lastTestOk === true);
   const gemImage = byok?.imageModel ?? null;
-  tomTat(`Ai dùng gemini-byok: AI Bán hàng ${engine.connectorKey === "gemini-byok" || engine.fallbackConnectorKey === "gemini-byok" ? "CÓ (theo cấu hình bot)" : "không"} · Media viết chữ ${active("openai-byok") ? "không (OpenAI đứng trước)" : active("gemini-byok") ? "CÓ" : "không (chưa bật)"} · Media vẽ ảnh ${active("openai-byok") ? "không (OpenAI đứng trước)" : active("gemini-byok") && typeof gemImage === "string" && gemImage ? "CÓ" : "không (chưa khai model vẽ ảnh)"} · Săn khách sỉ ${active("gemini-byok") ? "CÓ" : "không (chưa bật)"}`);
+  const use = salesConnectorUse(running, "gemini-byok");
+  tomTat(`Ai dùng gemini-byok: AI Bán hàng ${use === "PRIMARY" ? "CÓ (nguồn chính đang chạy)" : use === "FALLBACK" ? "CÓ (dự phòng hiệu lực)" : "không"}${use && !running.enabled ? " — bot đang TẮT" : ""} · Media viết chữ ${active("openai-byok") ? "không (OpenAI đứng trước)" : active("gemini-byok") ? "CÓ" : "không (chưa bật)"} · Media vẽ ảnh ${active("openai-byok") ? "không (OpenAI đứng trước)" : active("gemini-byok") && typeof gemImage === "string" && gemImage ? "CÓ" : "không (chưa khai model vẽ ảnh)"} · Săn khách sỉ ${active("gemini-byok") ? "CÓ" : "không (chưa bật)"}`);
 
   const groups = await usageGroups(org.code, new Date(Date.now() - 30 * 86_400_000));
   for (const g of groups.slice(0, 60)) console.log(`Sổ AI 30 ngày · ${g.billingSource} · ${g.provider ?? "—"} · ${g.model ?? "—"} · ${g.feature}/${g.workload ?? "—"} · ${g.status}: ${g.n} dòng · ${g.costUsd === null ? "—" : g.costUsd.toFixed(4)} USD`);
-  return 0;
-}
-
-async function apply(org: Org): Promise<number> {
-  const pcfg = platformAiConfig();
-  if (!pcfg.ready) {
-    tomTat(`KHÔNG CHUYỂN: AI dùng chung chưa sẵn sàng — ${pcfg.reason}`);
-    return 1;
-  }
-  const plat = await platformChatAi(org.code);
-  if (!plat.ok) {
-    console.log(`AI dùng chung: ${plat.reason}`);
-    tomTat(`KHÔNG CHUYỂN: AI dùng chung chưa dùng được cho ${org.code} (lý do trong phần mã hoá)`);
-    return 1;
-  }
-  const limits = await resolveAiLimits(org.code);
-  const cost = await salesCost30d(org.code);
-  const credit = creditVerdict(limits?.limits ?? null, cost.usd, (await sourceUsage(org.code, "PLATFORM")).costUsdMonth, daysLeftInMonthVN(new Date()));
-  console.log(`Credit: ${credit.reason}`);
-  if (!credit.ok) {
-    tomTat("KHÔNG CHUYỂN: credit AI dùng chung không đủ cho AI Bán hàng (chi tiết trong phần mã hoá)");
-    return 1;
-  }
-  const home = (await listOrganizations()).find((o) => o.isHome);
-  const r = await withOrganization(org.code, () => saveChatbotEngineAsOperator({ engine: { ...PLATFORM_ENGINE_PATCH }, operator: { orgCode: home?.code ?? "home", email: SCRIPT_LABEL }, reason: CUTOVER_REASON }));
-  if (!r.ok) {
-    tomTat(`KHÔNG CHUYỂN: ${r.error}`);
-    return 1;
-  }
-  const at = new Date().toISOString();
-  await platformAudit({ action: "AI_ORG_CONTROL_SET", targetOrgCode: org.code, subject: "sales_chatbot.engine", before: r.before, after: r.after, reason: `${CUTOVER_REASON} · mốc ${at}`, source: "SCRIPT", actor: null });
-  tomTat(`ĐÃ CHUYỂN ${org.code} lúc ${at} (mốc cutover): ${engineText(engineOf(r.before))} ⇒ ${engineText(engineOf(r.after))}`);
-  tomTat("Credit AI dùng chung: ĐỦ");
   return 0;
 }
 
@@ -407,35 +803,22 @@ async function probe(org: Org, since: Date | null): Promise<number> {
 }
 
 async function main(): Promise<number> {
-  const flags = ARGS.filter((a) => a.startsWith("--"));
-  const code = ARGS.find((a) => !a.startsWith("--")) ?? "";
-  if (!code) {
-    tomTat("arg: <mã tổ chức> [--apply | --apply-probe [--since=<ISO>]]");
+  const a = parseCutoverArgs(ARGS);
+  if (!a.ok) {
+    tomTat(`Cách dùng sai: ${a.error} — arg: <mã tổ chức> [--apply [--credit=<USD>] | --apply-probe [--since=<ISO>]]`);
     return 64;
   }
-  const org = await findOrganization(code);
+  const org = await findOrganization(a.code);
   if (!org) {
-    tomTat(`Không có tổ chức mã «${code}»`);
+    tomTat(`Không có tổ chức mã «${a.code}»`);
     return 64;
   }
   if (org.isHome) {
     tomTat("Tổ chức nhà dùng khoá của nhà (HOME) — không có gì để chuyển");
     return 64;
   }
-  if (flags.includes("--apply") && flags.includes("--apply-probe")) {
-    tomTat("Chọn MỘT: --apply hoặc --apply-probe");
-    return 64;
-  }
-  if (flags.includes("--apply")) return apply(org);
-  if (flags.includes("--apply-probe")) {
-    const raw = flags.find((f) => f.startsWith("--since="))?.slice("--since=".length) ?? "";
-    const since = raw ? new Date(raw) : null;
-    if (since && Number.isNaN(since.getTime())) {
-      tomTat("--since phải là mốc ISO, ví dụ 2026-10-08T04:00:00Z");
-      return 64;
-    }
-    return probe(org, since);
-  }
+  if (a.mode === "APPLY") return applyCutover(org, a.credit, realDeps());
+  if (a.mode === "PROBE") return probe(org, a.since);
   return audit(org);
 }
 
@@ -443,7 +826,9 @@ if (CHAY_THANG) {
   main()
     .then((rc) => process.exit(rc))
     .catch((e) => {
-      tomTat(`LỖI: ${e instanceof Error ? e.message.slice(0, 200) : "không rõ"}`);
+      // Câu lỗi có thể mang dữ liệu (câu SQL, số tiền) ⇒ chỉ ở phần MÃ HOÁ; log công khai chỉ biết là có lỗi.
+      console.log(`LỖI: ${errorText(e)}`);
+      tomTat("LỖI — chi tiết trong phần mã hoá");
       process.exit(1);
     });
 }
