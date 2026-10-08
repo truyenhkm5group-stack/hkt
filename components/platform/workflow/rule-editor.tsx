@@ -150,10 +150,10 @@ export function RuleEditor({ ruleId, status, initial, takenKeys, events, objects
       <SectionCard title="Luật" description={creating ? "Luật mới luôn sinh ra ở NHÁP + CHẠY THỬ." : undefined}>
         <div className="grid gap-3 sm:grid-cols-3">
           <Row label="Tên luật" errors={errorsFor(errors, "name")}>
-            <Input value={draft.name} onChange={(e) => setName(e.target.value)} maxLength={120} autoFocus={creating} />
+            <Input aria-label="Tên luật" value={draft.name} onChange={(e) => setName(e.target.value)} maxLength={120} autoFocus={creating} />
           </Row>
           <Row label={creating ? "Khoá (không đổi được sau khi tạo)" : "Khoá (bất biến)"} errors={errorsFor(errors, "key")} hint="Chữ thường không dấu, số và «_». Gợi ý từ tên — sửa được trước khi lưu lần đầu.">
-            <Input
+            <Input aria-label="Khoá luật"
               value={draft.key}
               disabled={!creating}
               className="font-mono"
@@ -165,7 +165,7 @@ export function RuleEditor({ ruleId, status, initial, takenKeys, events, objects
             />
           </Row>
           <Row label="Mô tả (tuỳ chọn)" errors={errorsFor(errors, "description")}>
-            <Input value={draft.description} onChange={(e) => set("description", e.target.value)} maxLength={1000} />
+            <Input aria-label="Mô tả (tuỳ chọn)" value={draft.description} onChange={(e) => set("description", e.target.value)} maxLength={1000} />
           </Row>
         </div>
       </SectionCard>
@@ -188,7 +188,7 @@ export function RuleEditor({ ruleId, status, initial, takenKeys, events, objects
           {draft.triggerKind === "event" ? (
             <div className="grid gap-3 sm:grid-cols-2">
               <Row label="Sự kiện" errors={errorsFor(errors, "trigger.event")} className="max-w-xl">
-                <select className={cn(SELECT_CLASS, "h-9")} value={draft.event} onChange={(e) => set("event", e.target.value)}>
+                <select aria-label="Sự kiện" className={cn(SELECT_CLASS, "h-9")} value={draft.event} onChange={(e) => set("event", e.target.value)}>
                   <option value="">— chọn sự kiện —</option>
                   {events.map((ev) => (
                     <option key={ev.name} value={ev.name}>
@@ -201,7 +201,7 @@ export function RuleEditor({ ruleId, status, initial, takenKeys, events, objects
                 /* Phase 6: sự kiện trên bản ghi (tạo / sửa / xoá bản ghi tuỳ biến) — chọn ĐỐI TƯỢNG để luật chỉ nghe
                    bản ghi của nó và điều kiện đọc được field của nó. */
                 <Row label="Của đối tượng" errors={errorsFor(errors, "trigger.objectKey")}>
-                  <select className={cn(SELECT_CLASS, "h-9")} value={draft.objectKey} onChange={(e) => set("objectKey", e.target.value)}>
+                  <select aria-label="Của đối tượng" className={cn(SELECT_CLASS, "h-9")} value={draft.objectKey} onChange={(e) => set("objectKey", e.target.value)}>
                     <option value="">— mọi đối tượng —</option>
                     {/* `custom_record.*` chỉ phát cho đối tượng tự tạo (P1 #7): không mời chọn đối tượng hệ thống — lựa chọn cũ vẫn hiện để lỗi có chỗ đứng. */}
                     {objects.filter((o) => o.key === draft.objectKey || !recordEventObjectProblem(draft.event, o.key)).map((o) => (
@@ -218,7 +218,7 @@ export function RuleEditor({ ruleId, status, initial, takenKeys, events, objects
           ) : (
             <div className="grid gap-3 sm:grid-cols-2">
               <Row label="Đối tượng" errors={errorsFor(errors, "trigger.objectKey")}>
-                <select className={cn(SELECT_CLASS, "h-9")} value={draft.objectKey} onChange={(e) => setDraft((p) => ({ ...p, objectKey: e.target.value, fieldKey: "", to: [], from: [] }))}>
+                <select aria-label="Đối tượng" className={cn(SELECT_CLASS, "h-9")} value={draft.objectKey} onChange={(e) => setDraft((p) => ({ ...p, objectKey: e.target.value, fieldKey: "", to: [], from: [] }))}>
                   <option value="">— chọn đối tượng —</option>
                   {statusObjects.map((o) => (
                     <option key={o.key} value={o.key}>
@@ -228,7 +228,7 @@ export function RuleEditor({ ruleId, status, initial, takenKeys, events, objects
                 </select>
               </Row>
               <Row label="Field trạng thái" errors={errorsFor(errors, "trigger.fieldKey")}>
-                <select className={cn(SELECT_CLASS, "h-9")} value={draft.fieldKey} disabled={!statusObject} onChange={(e) => setDraft((p) => ({ ...p, fieldKey: e.target.value, to: [], from: [] }))}>
+                <select aria-label="Field trạng thái" className={cn(SELECT_CLASS, "h-9")} value={draft.fieldKey} disabled={!statusObject} onChange={(e) => setDraft((p) => ({ ...p, fieldKey: e.target.value, to: [], from: [] }))}>
                   <option value="">— chọn field —</option>
                   {(statusObject?.statusFields ?? []).map((f) => (
                     <option key={f.key} value={f.key}>
@@ -377,7 +377,7 @@ export function RuleEditor({ ruleId, status, initial, takenKeys, events, objects
           <FieldErrors errors={blockErrors(errors, "gate", ["gate.reason"])} />
           {draft.gateOn ? (
             <Row label="Lý do cần duyệt (người duyệt đọc câu này)" errors={errorsFor(errors, "gate.reason")} className="max-w-xl">
-              <Input value={draft.gateReason} onChange={(e) => set("gateReason", e.target.value)} maxLength={300} />
+              <Input aria-label="Lý do cần duyệt" value={draft.gateReason} onChange={(e) => set("gateReason", e.target.value)} maxLength={300} />
             </Row>
           ) : null}
         </div>
@@ -487,10 +487,10 @@ function ActionFields({ action, index, customFields, errors, onChange }: { actio
       <div className="space-y-2">
         <div className="grid gap-3 sm:grid-cols-4">
           <Row label="Tiêu đề việc" errors={at("title")} className="sm:col-span-2">
-            <Input value={action.title} maxLength={200} onChange={(e) => onChange({ ...action, title: e.target.value })} />
+            <Input aria-label="Tiêu đề việc" value={action.title} maxLength={200} onChange={(e) => onChange({ ...action, title: e.target.value })} />
           </Row>
           <Row label="Phòng nhận việc" errors={at("departmentCode")} hint="Để trống = phòng sở hữu mặc định của nguồn việc luật tự động.">
-            <select className={cn(SELECT_CLASS, "h-9")} value={action.departmentCode} onChange={(e) => onChange({ ...action, departmentCode: e.target.value })}>
+            <select aria-label="Phòng nhận việc" className={cn(SELECT_CLASS, "h-9")} value={action.departmentCode} onChange={(e) => onChange({ ...action, departmentCode: e.target.value })}>
               <option value="">— mặc định —</option>
               {DEPARTMENT_OPTIONS.map((d) => (
                 <option key={d.value} value={d.value}>
@@ -501,7 +501,7 @@ function ActionFields({ action, index, customFields, errors, onChange }: { actio
           </Row>
           <div className="grid grid-cols-2 gap-2">
             <Row label="Ưu tiên" errors={at("priority")}>
-              <select className={cn(SELECT_CLASS, "h-9")} value={action.priority} onChange={(e) => onChange({ ...action, priority: e.target.value as TaskPriority })}>
+              <select aria-label="Ưu tiên" className={cn(SELECT_CLASS, "h-9")} value={action.priority} onChange={(e) => onChange({ ...action, priority: e.target.value as TaskPriority })}>
                 {PRIORITY_OPTIONS.map((p) => (
                   <option key={p.value} value={p.value}>
                     {p.label}
@@ -510,12 +510,12 @@ function ActionFields({ action, index, customFields, errors, onChange }: { actio
               </select>
             </Row>
             <Row label="Hạn (giờ)" errors={at("dueInHours")} hint="Để trống = hạn theo cấu hình SLA của nguồn việc.">
-              <Input inputMode="numeric" value={action.dueInHours} onChange={(e) => onChange({ ...action, dueInHours: e.target.value })} />
+              <Input aria-label="Hạn (giờ)" inputMode="numeric" value={action.dueInHours} onChange={(e) => onChange({ ...action, dueInHours: e.target.value })} />
             </Row>
           </div>
         </div>
         <Row label="Mô tả việc (tuỳ chọn)" errors={at("summary")}>
-          <Textarea rows={2} value={action.summary} maxLength={2000} onChange={(e) => onChange({ ...action, summary: e.target.value })} />
+          <Textarea aria-label="Mô tả việc (tuỳ chọn)" rows={2} value={action.summary} maxLength={2000} onChange={(e) => onChange({ ...action, summary: e.target.value })} />
         </Row>
         <FieldErrors errors={rest} />
       </div>
@@ -525,7 +525,7 @@ function ActionFields({ action, index, customFields, errors, onChange }: { actio
     return (
       <div className="space-y-2">
         <Row label="Nội dung báo" errors={at("message")}>
-          <Textarea rows={2} value={action.message} maxLength={500} onChange={(e) => onChange({ ...action, message: e.target.value })} />
+          <Textarea aria-label="Nội dung báo" rows={2} value={action.message} maxLength={500} onChange={(e) => onChange({ ...action, message: e.target.value })} />
         </Row>
         <FieldErrors errors={rest} />
       </div>
@@ -537,7 +537,7 @@ function ActionFields({ action, index, customFields, errors, onChange }: { actio
       <div className="space-y-2">
         <div className="grid gap-3 sm:grid-cols-2">
           <Row label="Kết nối nhắn tin" errors={at("connectorKey")} hint="Khai và kiểm ở Cài đặt → Kết nối; kết nối phải đang BẬT thì tin mới đi.">
-            <select className={cn(SELECT_CLASS, "h-9")} value={action.connectorKey} onChange={(e) => onChange({ ...action, connectorKey: e.target.value })}>
+            <select aria-label="Kết nối nhắn tin" className={cn(SELECT_CLASS, "h-9")} value={action.connectorKey} onChange={(e) => onChange({ ...action, connectorKey: e.target.value })}>
               <option value="">— chọn kết nối —</option>
               {MESSAGING_CONNECTOR_KEYS.map((k) => (
                 <option key={k} value={k}>
@@ -547,11 +547,11 @@ function ActionFields({ action, index, customFields, errors, onChange }: { actio
             </select>
           </Row>
           <Row label="Nơi nhận (tuỳ chọn)" errors={at("destination")} hint={key ? MESSAGING_DESTINATION_HINT[key] : "Chọn kết nối trước."}>
-            <Input value={action.destination} maxLength={120} disabled={key === "lark-webhook"} onChange={(e) => onChange({ ...action, destination: e.target.value })} />
+            <Input aria-label="Nơi nhận (tuỳ chọn)" value={action.destination} maxLength={120} disabled={key === "lark-webhook"} onChange={(e) => onChange({ ...action, destination: e.target.value })} />
           </Row>
         </div>
         <Row label="Mẫu tin" errors={at("template")} hint="Ô điền dạng {{order_code}}, {{cod}}… — xem danh sách ở Cài đặt → Thông báo nhóm.">
-          <Textarea rows={6} value={action.template} maxLength={2000} onChange={(e) => onChange({ ...action, template: e.target.value })} />
+          <Textarea aria-label="Mẫu tin" rows={6} value={action.template} maxLength={2000} onChange={(e) => onChange({ ...action, template: e.target.value })} />
         </Row>
         <FieldErrors errors={rest} />
       </div>
@@ -562,7 +562,7 @@ function ActionFields({ action, index, customFields, errors, onChange }: { actio
     <div className="space-y-2">
       <div className="grid gap-3 sm:grid-cols-3">
         <Row label="Field tuỳ biến" errors={at("field")}>
-          <select className={cn(SELECT_CLASS, "h-9")} value={action.field} onChange={(e) => onChange({ ...action, field: e.target.value, value: "" })}>
+          <select aria-label="Field tuỳ biến" className={cn(SELECT_CLASS, "h-9")} value={action.field} onChange={(e) => onChange({ ...action, field: e.target.value, value: "" })}>
             <option value="">— chọn field —</option>
             {customFields.map((f) => (
               <option key={f.ref} value={f.ref.slice("custom:".length)}>

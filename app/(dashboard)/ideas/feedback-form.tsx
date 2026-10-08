@@ -40,7 +40,7 @@ export function FeedbackForm({ ideaId, canReview }: { ideaId: string; canReview:
 
   return (
     <div className="space-y-3">
-      <Textarea
+      <Textarea aria-label="Nhận xét"
         value={body}
         onChange={(e) => setBody(e.target.value)}
         rows={3}

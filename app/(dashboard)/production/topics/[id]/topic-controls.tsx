@@ -36,17 +36,17 @@ export function TopicMessageForm({ topicId }: { topicId: string }) {
   return (
     <div className="space-y-2 rounded-xl border bg-muted/30 p-3">
       <div className="flex flex-wrap gap-2">
-        <select value={kind} onChange={(e) => setKind(e.target.value as TopicMessageKind)} className="h-9 rounded-md border bg-background px-2 text-sm">
+        <select aria-label="Loại trao đổi" value={kind} onChange={(e) => setKind(e.target.value as TopicMessageKind)} className="h-9 rounded-md border bg-background px-2 text-sm">
           {TOPIC_MESSAGE_KINDS.map((k) => (
             <option key={k} value={k}>
               {TOPIC_MESSAGE_KIND_LABEL[k]}
             </option>
           ))}
         </select>
-        {kind === "QUOTE" ? <Input className="h-9 w-44" inputMode="numeric" placeholder="Giá xưởng báo (đ/sp)" value={price} onChange={(e) => setPrice(e.target.value.replace(/[^\d]/g, ""))} /> : null}
+        {kind === "QUOTE" ? <Input aria-label="Giá xưởng báo (đ/sp)" className="h-9 w-44" inputMode="numeric" placeholder="Giá xưởng báo (đ/sp)" value={price} onChange={(e) => setPrice(e.target.value.replace(/[^\d]/g, ""))} /> : null}
       </div>
-      <Textarea rows={3} value={body} onChange={(e) => setBody(e.target.value)} placeholder="Nội dung trao đổi với xưởng / nội bộ…" />
-      <Input value={links} onChange={(e) => setLinks(e.target.value)} placeholder="Link ảnh / tài liệu (cách nhau bằng dấu cách)" />
+      <Textarea aria-label="Nội dung trao đổi" rows={3} value={body} onChange={(e) => setBody(e.target.value)} placeholder="Nội dung trao đổi với xưởng / nội bộ…" />
+      <Input aria-label="Link ảnh / tài liệu" value={links} onChange={(e) => setLinks(e.target.value)} placeholder="Link ảnh / tài liệu (cách nhau bằng dấu cách)" />
       <div className="flex justify-end">
         <Button size="sm" onClick={gui} disabled={pending || !body.trim() || (kind === "QUOTE" && !price.trim())}>
           Ghi lượt trao đổi
@@ -86,8 +86,8 @@ export function TopicStatusControl({ topicId, status }: { topicId: string; statu
       </div>
       {to ? (
         <div className="space-y-2 rounded-xl border bg-muted/30 p-3">
-          {to === "SELECTED" ? <Input value={option} onChange={(e) => setOption(e.target.value)} placeholder="Phương án được chọn (bắt buộc)" /> : null}
-          <Textarea rows={2} value={note} onChange={(e) => setNote(e.target.value)} placeholder={status === "CLOSED" ? "Vì sao mở lại (bắt buộc)" : "Ghi chú (tuỳ chọn)"} />
+          {to === "SELECTED" ? <Input aria-label="Phương án được chọn" value={option} onChange={(e) => setOption(e.target.value)} placeholder="Phương án được chọn (bắt buộc)" /> : null}
+          <Textarea aria-label="Ghi chú" rows={2} value={note} onChange={(e) => setNote(e.target.value)} placeholder={status === "CLOSED" ? "Vì sao mở lại (bắt buộc)" : "Ghi chú (tuỳ chọn)"} />
           <div className="flex justify-end">
             <Button size="sm" onClick={doi} disabled={pending}>
               Chuyển sang “{TOPIC_STATUS_LABEL[to]}”
@@ -112,7 +112,7 @@ export function TopicSupplierSelect({ topicId, supplierId, suppliers }: { topicI
       else if (!r.noop) toast.success(v ? "Đã gắn xưởng cho topic" : "Đã bỏ gắn xưởng");
     });
   return (
-    <select value={supplierId ?? ""} onChange={(e) => doi(e.target.value)} disabled={pending} className="h-8 w-full max-w-xs rounded-md border bg-background px-2 text-sm font-normal">
+    <select aria-label="Xưởng của topic" value={supplierId ?? ""} onChange={(e) => doi(e.target.value)} disabled={pending} className="h-8 w-full max-w-xs rounded-md border bg-background px-2 text-sm font-normal">
       <option value="">— Chưa chọn —</option>
       {suppliers.map((x) => (
         <option key={x.id} value={x.id}>

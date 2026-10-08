@@ -174,7 +174,7 @@ export function MobileCall({ lead, nextHref, canWork, zalo }: { lead: MobileLead
             </div>
             {outcome ? (
               <div className="mt-4 space-y-3">
-                <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={3} autoFocus placeholder="Ghi chú nhanh… (bấm micro trên bàn phím để nói)" className="w-full rounded-xl border bg-background p-3 text-base" />
+                <textarea aria-label="Ghi chú cuộc gọi" value={note} onChange={(e) => setNote(e.target.value)} rows={3} autoFocus placeholder="Ghi chú nhanh… (bấm micro trên bàn phím để nói)" className="w-full rounded-xl border bg-background p-3 text-base" />
                 <div className="flex flex-wrap gap-1.5">
                   {QUICK_NOTE_CHIPS.map((c) => (
                     <button key={c} type="button" onClick={() => addChip(c)} className="rounded-full border bg-card px-3 py-1.5 text-sm active:bg-muted">
@@ -192,7 +192,7 @@ export function MobileCall({ lead, nextHref, canWork, zalo }: { lead: MobileLead
                         </button>
                       ))}
                     </div>
-                    {follow === "custom" ? <input type="date" value={custom} onChange={(e) => setCustom(e.target.value)} className="mt-2 h-11 w-full rounded-xl border bg-background px-3 text-base" /> : null}
+                    {follow === "custom" ? <input aria-label="Ngày hẹn gọi lại" type="date" value={custom} onChange={(e) => setCustom(e.target.value)} className="mt-2 h-11 w-full rounded-xl border bg-background px-3 text-base" /> : null}
                     {effect?.followupRequired && follow === "none" ? <p className="mt-1 text-xs text-muted-foreground">Kết quả này cần hẹn gọi lại — không chọn thì máy hẹn {effect.followupDays} ngày nữa lúc 9 giờ.</p> : null}
                   </div>
                 ) : null}

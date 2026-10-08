@@ -146,7 +146,7 @@ export function TransitionControl({
         <div className="min-w-[220px]">
           <Label className="text-xs">{state ? "Chuyển sang" : "Khai trạng thái đầu tiên"}</Label>
           <Select value={to} onValueChange={(v) => setTo(v as ModelState)}>
-            <SelectTrigger className="h-8">
+            <SelectTrigger aria-label={state ? "Chuyển mẫu sang trạng thái" : "Trạng thái đầu tiên của mẫu"} className="h-8">
               <SelectValue placeholder="Chọn trạng thái" />
             </SelectTrigger>
             <SelectContent>
@@ -176,7 +176,7 @@ export function TransitionControl({
           <Label className="text-xs">
             Lý do (bắt buộc, ít nhất {MODEL_REASON_MIN_LENGTH} ký tự) — {theoThucTe ? "cập nhật theo thực tế, ghi vào lịch sử" : state ? "đây là lùi bước hoặc nhảy cóc" : "đây là lần khai đầu tiên của mẫu"}
           </Label>
-          <Textarea rows={2} maxLength={1000} value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Vì sao mẫu đang ở trạng thái này…" />
+          <Textarea aria-label="Lý do đổi trạng thái" rows={2} maxLength={1000} value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Vì sao mẫu đang ở trạng thái này…" />
         </div>
       ) : null}
     </div>
@@ -203,7 +203,7 @@ export function OwnerControl({ modelId, ownerUserId, options }: { modelId: strin
         })
       }
     >
-      <SelectTrigger className="h-8 min-w-[200px]">
+      <SelectTrigger aria-label="Người phụ trách mẫu" className="h-8 min-w-[200px]">
         <SelectValue />
       </SelectTrigger>
       <SelectContent>
