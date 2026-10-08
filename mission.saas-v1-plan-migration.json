@@ -34,18 +34,18 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-08T08:16:54.954Z",
-  "updated_at": "2026-10-08T10:13:44.787Z",
-  "last_heartbeat": "2026-10-08T10:13:44.787Z",
+  "updated_at": "2026-10-08T10:40:45.716Z",
+  "last_heartbeat": "2026-10-08T10:40:45.716Z",
   "definition_of_done": [],
   "handoff": {
     "branch": "feat/v1-plan-migration",
-    "sha": "f10c19b01f7b2087463ef663a48b80cbd9fb0884",
-    "at": "2026-10-08T10:13:44.787Z",
+    "sha": "1edca5fc48a9eddebcd4949a61fc27023119238a",
+    "at": "2026-10-08T10:40:45.716Z",
     "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
     "title": "Chuyển tổ chức từ giá legacy sang bảng giá V1: báo cáo chạy thử theo từng tổ chức + chuyển có nhật ký",
-    "summary": "Rebase sau #673–#675: chỉ giải xung đột ops-vps.yml giữ cả ba thao tác",
+    "summary": "Sửa CI: bài kiểm không gõ literal khoá phiên bản V1 (đọc từ CSDL sau seed / hằng export)",
     "tests": [
-      "rebase lên a8eaa37d; tsc sạch; saas-v1-migration, pricing-billing, pricing-v1, org-prepaid-ai, static đạt"
+      "tsc + eslint; test-org-codes + saas-v1-migration; static sau commit"
     ]
   }
 }
