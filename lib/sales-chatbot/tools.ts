@@ -25,7 +25,7 @@ import { isManualOrderId, manualOrderShortCode, manualOrderTotals } from "@/lib/
 import { vanDonDaiDien } from "@/lib/constants/shipment-pick";
 import { CARRIER_EVENT_SOURCES } from "@/lib/constants/truth";
 import { formatVND } from "@/lib/format";
-import type { PriceListBook } from "@/lib/constants/price-lists";
+import { quoteUnitPrice, type PriceListBook, type PriceSource } from "@/lib/constants/price-lists";
 import { priceBooksFor } from "@/lib/queries/price-lists";
 import { createCustomerAsAgent, normalizeCustomerPhone } from "@/lib/records/customer-create";
 import { activeAppointmentRanges, createAppointmentAsAgent } from "@/lib/records/appointments";
@@ -342,6 +342,19 @@ async function booksForChat(cfg: SalesChatbotConfig, customerId: string | null):
   return cfg.wholesalePricing ? priceBooksFor(customerId) : null;
 }
 
+/**
+ * Khối «giá sỉ» trả về cho AI khi shop BẬT báo giá theo bảng — HÀM THUẦN. Chủ shop HSLC 08/10/2026: «khách hỏi giá sỉ thì lấy
+ * bảng giá sỉ để trả lời, không lấy bảng giá lẻ». `quoteUnitPrice` lùi về GIÁ LẺ khi số lượng chưa tới bậc hay mẫu mã không
+ * có trong bảng — đúng cho tính tiền đơn, nhưng AI từng đọc `price` ấy và báo nó như giá sỉ. Nên nguồn giá phải đi kèm
+ * một câu nói thẳng: chưa có bậc ⇒ KHÔNG có giá sỉ để báo (chuyển người), chưa tới bậc ⇒ nói bậc, không nói giá lẻ.
+ */
+export function wholesaleQuoteView(source: PriceSource | null, tiers: readonly { min_quantity: number; unit_price: number; text: string }[]): { available: boolean; from_quantity: number | null; note: string } {
+  if (tiers.length === 0) return { available: false, from_quantity: null, note: "Mẫu mã này CHƯA CÓ trong bảng giá sỉ — không có giá sỉ để báo. KHÔNG đưa `price` (giá lẻ) ra như giá sỉ; khách hỏi sỉ ⇒ handoff_to_human với reason «Khách sỉ — <món>, chưa có giá sỉ»." };
+  const from = tiers[0].min_quantity;
+  if (source === "RETAIL") return { available: true, from_quantity: from, note: `Số lượng này CHƯA tới bậc sỉ thấp nhất — \`price\` là GIÁ LẺ. Khách hỏi sỉ ⇒ nói các bậc trong \`tiers\` («sỉ từ ${from} trở lên: …»), KHÔNG báo giá lẻ như giá sỉ.` };
+  return { available: true, from_quantity: from, note: "`price` là giá theo bảng giá sỉ cho đúng số lượng này; các bậc khác ở `tiers`." };
+}
+
 /** Đơn giá của MỘT dòng: giá lẻ khi chưa bật bảng giá; bật ⇒ `quoteUnitPrice` — CÙNG hàm với form đơn tay. */
 function unitPriceFor(it: CatalogItem, quantity: number, books: Awaited<ReturnType<typeof booksForChat>>): number | null {
   // MỘT công thức với lõi đơn (lib/commerce/pricing.ts) — lõi tính lại đúng hàm này và từ chối đơn lệch giá.
@@ -525,7 +538,9 @@ export async function executeTool(name: string, rawInput: unknown, ctx: ToolCont
         // Bậc của bảng đang áp cho mẫu mã này: bảng của khách nếu bảng ấy có mẫu mã, không thì bảng mặc định.
         const list = [books.customerList, books.defaultList].find((b) => b?.tiers.some((t) => t.variantId === it.variantId)) ?? null;
         const tiers = (list?.tiers ?? []).filter((t) => t.variantId === it.variantId).sort((a, b) => a.minQuantity - b.minQuantity).map((t) => ({ min_quantity: t.minQuantity, unit_price: t.unitPrice, text: `từ ${t.minQuantity}: ${formatVND(t.unitPrice)}` }));
-        return ok(`Giá ${it.name} × ${quantity}: ${price(unit)}`, { variant_id: it.variantId, name: it.name, quantity, price: unit, price_text: price(unit), retail_price: it.price, tiers, as_of: new Date().toISOString() }, state);
+        const quote = quoteUnitPrice({ variantId: it.variantId, quantity, retailPrice: it.price, customerList: books.customerList, defaultList: books.defaultList });
+        const wholesale = wholesaleQuoteView(quote?.source ?? null, tiers);
+        return ok(`Giá ${it.name} × ${quantity}: ${price(unit)}${wholesale.available ? "" : " · chưa có giá sỉ"}`, { variant_id: it.variantId, name: it.name, quantity, price: unit, price_text: price(unit), price_source: quote?.source ?? null, retail_price: it.price, tiers, wholesale, as_of: new Date().toISOString() }, state);
       }
       return ok(`Chi tiết ${it.name}`, itemView(it), state);
     }

@@ -92,7 +92,7 @@ export async function testSeafoodOs() {
       const priceOf = async (wholesale: boolean, state: ChatState, quantity?: number) => {
         const r = await executeTool("get_current_price", { variant_id: "erp-sf-v", ...(quantity ? { quantity } : {}) }, ctx(wholesale, state));
         assert.ok(!r.isError, r.content);
-        return JSON.parse(r.content) as { price: number | null; tiers?: { min_quantity: number; unit_price: number }[] };
+        return JSON.parse(r.content) as { price: number | null; price_source?: string | null; tiers?: { min_quantity: number; unit_price: number }[]; wholesale?: { available: boolean; from_quantity: number | null; note: string } };
       };
       // Bảng giá RIÊNG chỉ khi danh tính đã XÁC MINH (mã Facebook / hội thoại từng có đơn của hồ sơ) — review bảo mật 08/10/2026:
       // ai gõ SĐT của đại lý cũng nhận ra hồ sơ đại lý, nên hồ sơ khớp qua SĐT gõ tay chỉ được bảng MẶC ĐỊNH.
@@ -102,10 +102,30 @@ export async function testSeafoodOs() {
       // TẮT ⇒ giá lẻ, kể cả khách có bảng riêng và số lượng lớn.
       assert.equal((await priceOf(false, known, 50)).price, 200_000);
       // BẬT, khách chưa nhận ra ⇒ bảng mặc định theo bậc.
-      assert.equal((await priceOf(true, {}, 5)).price, 200_000, "chưa tới bậc thấp nhất của bảng mặc định ⇒ giá lẻ");
+      const duoiBac = await priceOf(true, {}, 5);
+      assert.equal(duoiBac.price, 200_000, "chưa tới bậc thấp nhất của bảng mặc định ⇒ giá lẻ");
+      // Chủ shop HSLC 08/10/2026: hỏi giá sỉ thì trả lời bằng BẢNG GIÁ SỈ, không lấy giá lẻ — `price` lùi về giá lẻ phải đi kèm
+      // nguồn giá + câu nói thẳng, để AI không báo 200k như «giá sỉ».
+      assert.equal(duoiBac.price_source, "RETAIL");
+      assert.deepEqual(duoiBac.wholesale && [duoiBac.wholesale.available, duoiBac.wholesale.from_quantity], [true, 10]);
+      assert.match(duoiBac.wholesale?.note ?? "", /GIÁ LẺ/);
+      assert.match(duoiBac.wholesale?.note ?? "", /KHÔNG báo giá lẻ như giá sỉ/);
       const anon = await priceOf(true, {}, 12);
       assert.equal(anon.price, 170_000);
+      assert.equal(anon.price_source, "DEFAULT_LIST");
+      assert.match(anon.wholesale?.note ?? "", /giá theo bảng giá sỉ/);
       assert.deepEqual(anon.tiers?.map((t) => [t.min_quantity, t.unit_price]), [[10, 170_000]]);
+      // Mẫu mã KHÔNG có trong bảng nào ⇒ không có giá sỉ để báo: công cụ nói thẳng, không để AI lấy giá lẻ thay.
+      await db.insert(schema.productVariants).values({ id: "erp-sf-v0", productId: "erp-sf-prod", sku: "MO-2", size: "0,5kg", retailPrice: 110_000 });
+      const khongBac = await executeTool("get_current_price", { variant_id: "erp-sf-v0", quantity: 30 }, ctx(true, {}));
+      assert.ok(!khongBac.isError, khongBac.content);
+      const kb = JSON.parse(khongBac.content) as { price: number | null; price_source: string | null; tiers: unknown[]; wholesale: { available: boolean; note: string } };
+      assert.equal(kb.price, 110_000, "tiền đơn vẫn là giá lẻ — luật tính tiền không đổi");
+      assert.equal(kb.price_source, "RETAIL");
+      assert.deepEqual([kb.tiers.length, kb.wholesale.available], [0, false]);
+      assert.match(kb.wholesale.note, /CHƯA CÓ trong bảng giá sỉ/);
+      assert.match(kb.wholesale.note, /handoff_to_human/);
+      assert.ok(khongBac.summary.includes("chưa có giá sỉ"), khongBac.summary);
       // BẬT, khách đã gán bảng ⇒ bảng riêng.
       const mine = await priceOf(true, known, 25);
       assert.equal(mine.price, 150_000);
@@ -124,10 +144,11 @@ export async function testSeafoodOs() {
       const on = systemPrompt({ ...parseSalesChatbotConfig(null), wholesalePricing: true }, "Shop", "", "TEST");
       const off = systemPrompt(parseSalesChatbotConfig(null), "Shop", "", "TEST");
       assert.ok(on.includes("ĐÃ BẬT báo giá theo bảng giá") && !on.includes("ERP chỉ có giá LẺ"));
+      assert.ok(on.includes("KHÔNG BAO GIỜ đưa giá lẻ ra như giá sỉ") && on.includes("`wholesale.available` = false"), "lời nhắc BẬT: giá lẻ không bao giờ là giá sỉ; không bậc ⇒ chuyển người");
       assert.ok(off.includes("ERP chỉ có giá LẺ") && !off.includes("ĐÃ BẬT báo giá"));
     });
   } finally {
     await cleanupOrg();
   }
-  console.log("✓ Seafood OS · mẫu hải sản: qua bộ kiểm, đủ module (mua hàng, chatbot), không module connector chỉ-nhà, không số mặc định; cài đúng bộ module; chatbot TẮT ⇒ giá lẻ, BẬT ⇒ bảng mặc định / bảng riêng theo bậc kèm «mua từ», giỏ hàng cùng đơn giá, lời nhắc đổi theo công tắc");
+  console.log("✓ Seafood OS · mẫu hải sản: qua bộ kiểm, đủ module (mua hàng, chatbot), không module connector chỉ-nhà, không số mặc định; cài đúng bộ module; chatbot TẮT ⇒ giá lẻ, BẬT ⇒ bảng mặc định / bảng riêng theo bậc kèm «mua từ» + nguồn giá + khối giá sỉ (không bậc ⇒ chuyển người, dưới bậc ⇒ nói bậc, không báo giá lẻ như giá sỉ), giỏ hàng cùng đơn giá, lời nhắc đổi theo công tắc");
 }
