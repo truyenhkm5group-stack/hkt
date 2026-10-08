@@ -16,6 +16,7 @@
  * Tổ chức thứ hai `ss-other` để chứng minh cô lập. Tự dọn.
  */
 import assert from "node:assert/strict";
+import { imagesAlreadyDescribed } from "@/lib/sales-chatbot/vision";
 import { rmSync } from "node:fs";
 import { and, eq, like, sql } from "drizzle-orm";
 import { getDb, getPlatformDb, organizationDatabaseUrl, schema } from "@/db";
@@ -1145,7 +1146,9 @@ async function testJourney() {
       assert.ok(chatAfterImage.length > 0 && JSON.stringify(chatAfterImage[0].messages).includes("[Khách gửi ảnh: Ảnh chụp một chiếc áo sơ mi trắng"), "chatbot đầy đủ nhận mô tả ảnh như một dòng chữ của khách");
       assert.ok(/ẢNH KHÁCH GỬI/.test(chatAfterImage[0].system), "lời nhắc dặn cách dùng mô tả ảnh (hỏi khách xác nhận, không khẳng định)");
       const [imgRow] = await db.select().from(schema.salesChatInbound).where(eq(schema.salesChatInbound.messageId, "m-img-1"));
-      assert.ok(imgRow.imageUrls === null && imgRow.text.includes("Khách gửi ảnh: Ảnh chụp một chiếc áo sơ mi trắng"), "mô tả ghi vào dòng tin, địa chỉ ảnh xoá — thử lại không tốn tiền đọc lại");
+      // 08/10/2026: địa chỉ ảnh GIỮ LẠI để hộp thư còn hiện ảnh; dấu «đã đọc» là chính dòng mô tả (`imagesAlreadyDescribed`) — thử lại không tốn tiền.
+      assert.ok(imgRow.text.includes("Khách gửi ảnh: Ảnh chụp một chiếc áo sơ mi trắng") && imagesAlreadyDescribed(imgRow.text), "mô tả ghi vào dòng tin — thử lại không tốn tiền đọc lại");
+      assert.deepEqual(imgRow.imageUrls, ["https://scontent.xx.fbcdn.net/v/t1.jpg?x=1"], "địa chỉ ảnh còn nguyên sau khi bot đọc — hộp thư hiện được ảnh");
       const visionUsage = await (await getPlatformDb()).select().from(schema.platformAiUsage).where(and(eq(schema.platformAiUsage.orgCode, ORG), eq(schema.platformAiUsage.feature, "sales_chatbot"), eq(schema.platformAiUsage.inputTokens, 300), eq(schema.platformAiUsage.outputTokens, 20)));
       assert.ok(visionUsage.length >= 1, "đọc ảnh ghi sổ chi phí AI của bot");
       // Ảnh trong hội thoại BÌNH LUẬN qua cổng Số dư AI theo NGƯỜI BÌNH LUẬN — cùng khoá khách với lượt trả lời (review #651): thiếu
