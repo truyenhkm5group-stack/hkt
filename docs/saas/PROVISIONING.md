@@ -15,6 +15,16 @@
 Tự đăng ký (`/start`), người vận hành tạo ở `/platform`, script `platform-provision-org` đều đi qua
 `provisionOrganization` ⇒ bước 6 tạo tài khoản + thuê bao. Không workspace nào thiếu tài khoản.
 
+`/start` cấp workspace với module LÕI rồi mới cài mẫu ngành, nên bước 6 của nó không thấy sản phẩm nào (F-02, kiểm vỏ khách
+08/10/2026 — trước bản vá, cửa hàng tự đăng ký không có thuê bao). Lượt dựng nay mở thuê bao SAU khi cài mẫu
+(`lib/saas/signup-subscriptions.ts::openSignupSubscriptions` — cùng luật «sản phẩm đang dùng theo module», nguồn `SIGNUP`); bước
+này không làm hỏng lượt dựng: hỏng ⇒ vết ở `settings.onboarding.subscriptions` + nhật ký `ORG_SETUP` · `product-subscriptions`.
+
+**Sửa bù workspace tự đăng ký trước bản vá:** `npx tsx scripts/saas-subscription-repair.ts` (CHẠY THỬ, chỉ đọc — liệt kê
+workspace có thương hiệu đang thiếu thuê bao, sản phẩm sẽ mở, tình trạng sẽ hiện, mốc dùng thử đã chụp, hệ quả) →
+`--apply --reason="…"` (đi qua đúng hàm của `/start`; không bật thu phí, không đổi dùng thử, `started_at` = lúc chạy). Chưa nối
+vào `ops-vps.yml`: sửa bù workspace thật là quyết định của chủ shop.
+
 Trên production, `CREATE DATABASE` cần quyền CREATEDB của role ứng dụng (đã có — workspace khách hiện có được tạo như vậy).
 
 ## Thêm một sản phẩm mới
