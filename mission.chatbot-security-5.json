@@ -3,7 +3,7 @@
   "mission_id": "chatbot-security-5",
   "title": "Đơn trong khung chat: hồ sơ chưa xác minh không điền sẵn / không làm dự phòng; bài học bot: LOW review #656 vòng 2",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -29,9 +29,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-08T02:07:54.255Z",
-  "updated_at": "2026-10-08T02:52:04.868Z",
+  "updated_at": "2026-10-08T03:31:44.007Z",
   "last_heartbeat": "2026-10-08T02:52:04.868Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#657 → 8babd7d040243accf2072d3d9735e0668fb1256f"
+  },
   "handoff": {
     "branch": "fix/chatbot-security-5",
     "sha": "b0067c21afcf0ca78c247fce2a165c121acdeaf6",
