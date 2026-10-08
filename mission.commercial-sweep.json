@@ -3,7 +3,7 @@
   "mission_id": "commercial-sweep",
   "title": "Commercial Perfection Sweep — Phase A chỉ đọc: kiểm kê 207 trang + bảng chất lượng thương mại (docs/product)",
   "business_goal": "",
-  "status": "INTEGRATING",
+  "status": "VERIFYING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-sweep",
@@ -23,7 +23,7 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-08T15:31:26.044Z",
-  "updated_at": "2026-10-08T20:06:36.635Z",
+  "updated_at": "2026-10-08T21:12:45.128Z",
   "last_heartbeat": "2026-10-08T19:38:00.405Z",
   "definition_of_done": [],
   "intake": {
@@ -31,7 +31,9 @@
     "evidence": []
   },
   "evidence": {
-    "merged": "#703 → 47f0a0f8e87b3f6913070d63fc8b77b3d0053da6"
+    "merged": "#703 → 47f0a0f8e87b3f6913070d63fc8b77b3d0053da6",
+    "verify": "PASS c7183395051955e6cff5343a787e9df97d71d12b 2026-10-08T21:12:38.914Z",
+    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/37838226087"
   },
   "handoff": {
     "branch": "claude/commercial-sweep",
