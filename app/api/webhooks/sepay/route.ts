@@ -28,7 +28,7 @@ import { withOrganization } from "@/lib/platform/context";
 import { resolveWebhookOrganization } from "@/lib/platform/webhooks";
 import { after } from "next/server";
 import { getDb } from "@/db";
-import { extractTransferCodes } from "@/lib/billing/rules";
+import { extractTransferCodes, sepayReconcilePlan } from "@/lib/billing/rules";
 import { extractTopupCodes } from "@/lib/billing/ai-balance-rules";
 import { reconcileBillingPayments } from "@/lib/billing/service";
 import { staleMemo } from "@/lib/cache";
@@ -148,6 +148,27 @@ async function handlePost(request: NextRequest) {
   await markWebhook(stored.id, status, notes.join(" · ") || null);
 
   // 6 ─ Việc nặng và việc không được phép làm hỏng một gói tin đã ghi xong.
+  // TIỀN THUÊ BAO NỀN TẢNG (0187) + TIỀN NẠP SỐ DƯ AI (0235): chỉ khi nội dung mang mã `ERPHD…` / `ERPNAP…` — mọi giao dịch khác không
+  // tốn thêm câu nào. Hỏng ở đây không mất tiền: khoản vẫn nằm trong sổ ngân hàng, nút «Đối chiếu lại» ở /platform quét lại được, và
+  // màn nạp tiền của khách tự khớp mã của chính phiếu khi hỏi trạng thái. SePay xác nhận một dòng ĐÃ có (sao kê nhập trước) cũng
+  // đối chiếu — đúng mã bút toán ấy — để khoản kẹt được báo ngay (docs/platform/billing.md §4).
+  const plan = sepayReconcilePlan({
+    created: outcome.created,
+    duplicate: outcome.duplicate,
+    resent: stored.duplicate,
+    incoming: parsed.txn.direction === "in",
+    hasCode: extractTransferCodes(parsed.txn.content).length > 0 || extractTopupCodes(parsed.txn.content).length > 0,
+    bankRef: outcome.bankRef,
+  });
+  const reconcile = async () => {
+    if (!plan) return;
+    try {
+      const r = await reconcileBillingPayments(plan);
+      if (r.errors.length) console.error(`[sepay-webhook] đối chiếu thuê bao hỏng: ${r.errors.join(" · ")}`);
+    } catch (error) {
+      console.error(`[sepay-webhook] đối chiếu thuê bao hỏng: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  };
   if (outcome.created) {
     const transactionId = outcome.transactionId;
     after(await bindOrganization(async () => {
@@ -158,18 +179,10 @@ async function handlePost(request: NextRequest) {
       } catch (error) {
         console.error(`[sepay-webhook] gán nhãn hỏng cho ${transactionId}: ${error instanceof Error ? error.message : String(error)}`);
       }
-      // TIỀN THUÊ BAO NỀN TẢNG (0187) + TIỀN NẠP SỐ DƯ AI (0235): chỉ khi nội dung mang mã `ERPHD…` / `ERPNAP…` — mọi giao
-      // dịch khác không tốn thêm câu nào. Hỏng ở đây không mất tiền: khoản vẫn nằm trong sổ ngân hàng, nút «Đối chiếu lại» ở
-      // /platform quét lại được, và màn nạp tiền của khách tự khớp mã của chính phiếu khi hỏi trạng thái.
-      if (parsed.txn.direction === "in" && (extractTransferCodes(parsed.txn.content).length > 0 || extractTopupCodes(parsed.txn.content).length > 0)) {
-        try {
-          const r = await reconcileBillingPayments({ lookbackDays: 3 });
-          if (r.errors.length) console.error(`[sepay-webhook] đối chiếu thuê bao hỏng: ${r.errors.join(" · ")}`);
-        } catch (error) {
-          console.error(`[sepay-webhook] đối chiếu thuê bao hỏng: ${error instanceof Error ? error.message : String(error)}`);
-        }
-      }
+      await reconcile();
     }));
+  } else if (plan) {
+    after(await bindOrganization(reconcile));
   }
 
   return ok({

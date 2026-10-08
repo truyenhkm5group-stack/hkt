@@ -8,6 +8,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ConfirmWithReason } from "@/components/platform/pilot-ops";
 import {
+  confirmBankPaymentAction,
+  dismissBankPaymentAction,
   markInvoicePaidAction,
   markVatIssuedAction,
   reconcileBillingAction,
@@ -131,6 +133,50 @@ export function ResolvePaymentForm({ paymentId, consequence }: { paymentId: stri
       minReason={PILOT_REASON_MIN}
       placeholder="Đã hoàn tiền cho khách / đã xác nhận tay hoá đơn mới"
       run={(reason) => resolveBillingPaymentAction({ paymentId, reason })}
+    />
+  );
+}
+
+/**
+ * XÁC NHẬN một khoản tiền thuê bao KHÔNG do SePay tạo vào đúng tài khoản nhận (sao kê nhập tệp · gõ tay · tài khoản khác): người
+ * vận hành kiểm tiền thật trong ngân hàng rồi mới bấm. Máy chủ đọc lại số tiền của dòng, khoá dùng một lần; trả THIẾU thì phải
+ * chủ động «nhận thiếu».
+ */
+export function ConfirmBankPaymentForm({ invoice, bankRef, amountVnd, accountTail = "" }: { invoice: { id: string; transferCode: string; label: string; amountVnd: number }; bankRef: string; amountVnd: number; accountTail?: string }) {
+  const short = invoice.amountVnd - amountVnd;
+  const [accept, setAccept] = useState(false);
+  return (
+    <ConfirmWithReason
+      id={`confirm-bank-${bankRef}`}
+      label="Đã nhận tiền…"
+      title={`Xác nhận ${formatVND(amountVnd)} là tiền của ${invoice.transferCode}?`}
+      consequence={`Chỉ bấm khi ĐÃ thấy khoản này trong tài khoản ngân hàng (app ngân hàng / sao kê gốc) — dòng này không do SePay tạo vào đúng tài khoản nhận nên máy không tự gia hạn. ${accountTail ? `Tiền vào tài khoản …${accountTail}. ` : ""}Hoá đơn ${invoice.transferCode} (${invoice.label}) được xác nhận đã thu, tham chiếu ${bankRef}; khoản tiền chỉ dùng được MỘT lần.${short > 0 ? ` Khoản này THIẾU ${formatVND(short)} so với hoá đơn.` : ""}`}
+      minReason={PILOT_REASON_MIN}
+      placeholder="Đã kiểm app ngân hàng: tiền vào lúc 10:42"
+      disabled={short > 0 && !accept}
+      run={(reason) => confirmBankPaymentAction({ bankRef, invoiceId: invoice.id, acceptUnderpaid: accept, reason })}
+    >
+      {short > 0 ? (
+        <label className="flex items-center gap-2 text-xs">
+          <input type="checkbox" checked={accept} onChange={(e) => setAccept(e.target.checked)} data-accept-underpaid />
+          Nhận thiếu {formatVND(short)} — vẫn gia hạn trọn kỳ
+        </label>
+      ) : null}
+    </ConfirmWithReason>
+  );
+}
+
+/** «Không phải tiền thuê bao / trùng» — gạt một dòng chờ xác nhận khỏi danh sách (không xoá, có lý do + nhật ký). */
+export function DismissBankPaymentForm({ bankRef }: { bankRef: string }) {
+  return (
+    <ConfirmWithReason
+      id={`dismiss-bank-${bankRef}`}
+      label="Không phải tiền thuê bao…"
+      title="Gạt khoản tiền này khỏi danh sách chờ xác nhận?"
+      consequence="Dùng cho bản trùng của khoản đã thu, tiền chuyển nhầm mã… Khoản tiền KHÔNG bị xoá — dòng và lý do của bạn còn trong nhật ký; nó không còn xác nhận được cho hoá đơn nào nữa."
+      minReason={PILOT_REASON_MIN}
+      placeholder="Bản trùng của khoản đã thu qua SePay lúc 10:42"
+      run={(reason) => dismissBankPaymentAction({ bankRef, reason })}
     />
   );
 }

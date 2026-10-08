@@ -771,6 +771,8 @@ const LOI_VAN_HANH: Record<string, string> = {
   "lib/billing/service.ts::setOrgAddons": "Sửa phần mua thêm hạn mức của một tổ chức (0192).",
   "lib/billing/service.ts::markVatIssued": "Ghi số hoá đơn VAT đã xuất cho một khoản đã thu (0192).",
   "lib/billing/service.ts::resolveBillingPayment": "Đánh dấu đã xử lý một khoản tiền không khớp.",
+  "lib/billing/service.ts::confirmBankPayment": "Xác nhận tay MỘT khoản tiền thuê bao không do SePay tạo — đọc lại dòng sổ ngân hàng của nhà, khoá bank_ref (một dòng trả một hoá đơn), gia hạn.",
+  "lib/billing/service.ts::dismissBankPayment": "Gạt một khoản tiền chờ xác nhận nguồn khỏi danh sách — ghi «đã xử lý» + nhật ký nền tảng, không xoá.",
   "lib/billing/service.ts::loadPlatformBilling": "Bảng thu phí mọi tổ chức ở /platform (MRR, hoá đơn mở, tiền chưa khớp).",
   "lib/billing/service.ts::loadOrgBilling": "Khung thu phí của MỘT tổ chức bất kỳ ở /platform/org/<mã>.",
   // Sổ kinh tế SaaS (0203) — Owner Cockpit /platform/saas.

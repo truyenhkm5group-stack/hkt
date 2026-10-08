@@ -1,6 +1,6 @@
 import { and, desc, eq, gt, gte, inArray, isNotNull, isNull, ne, notInArray, notLike, sql } from "drizzle-orm";
-import { getPlatformDb, schema } from "@/db";
-import type { SessionUser } from "@/lib/auth/session";
+import { getDb, getPlatformDb, schema } from "@/db";
+import { activeUserIdsWhoCan, type SessionUser } from "@/lib/auth/session";
 import {
   BILLING_DEFAULT_GRACE_DAYS,
   BILLING_GRACE_MAX,
@@ -11,6 +11,7 @@ import {
   judgePayment,
   quoteRenewal,
   TRIAL_GRACE_DAYS,
+  TRANSFER_CODE_PREFIX,
   transferCodeFrom,
   trialPaidThrough,
   YEARLY_FREE_MONTHS_MAX,
@@ -48,7 +49,10 @@ import { ENTITLEMENT_SPEC } from "@/lib/entitlements/kinds";
 import { VN_BANK_BY_BIN, bankNameOf } from "@/lib/constants/vn-banks";
 import { BILLING_RECEIVER_KEY, getBillingReceiver, parseReceiver, type BillingReceiverView } from "@/lib/billing/receiver";
 import { creditTopupFromBankRow } from "@/lib/billing/ai-balance";
-import { extractTopupCodes, TOPUP_CODE_PREFIX, TOPUP_PAYMENT_OUTCOMES } from "@/lib/billing/ai-balance-rules";
+import { extractTopupCodes, paymentBankRowTrust, SEPAY_ROW_SOURCES, TOPUP_CODE_PREFIX, TOPUP_PAYMENT_OUTCOMES } from "@/lib/billing/ai-balance-rules";
+import { sendInboxMessages } from "@/lib/inbox/send";
+import { currentOrganization, withOrganization } from "@/lib/platform/context";
+import { normalizeBankRef } from "@/lib/integrations/bank/sepay";
 import { DEFAULT_PLAN_KEY, HOME_PLAN_KEY, listPlans, planKeyOf, type PlanRow } from "@/lib/entitlements/check";
 import { buildVietQrPayload, toTransferText } from "@/lib/payroll/vietqr";
 import { parseCommercial, type PlanCommercial } from "@/lib/pricing/catalog";
@@ -518,7 +522,17 @@ function afterPaidWrite(orgCode: string) {
 
 /** `matched` / `unmatched` chỉ đếm tiền THUÊ BAO; tiền nạp Số dư AI đếm riêng (`topupCredited` · `topupHeld`) — gộp vào «khớp và
  * gia hạn» là để người vận hành tưởng tiền nạp là tiền thuê bao (review 08/10/2026, M1). */
-export type ReconcileSummary = { scanned: number; recorded: number; matched: number; unmatched: number; topupCredited: number; topupHeld: number; errors: string[] };
+export type ReconcileSummary = {
+  scanned: number;
+  recorded: number;
+  matched: number;
+  unmatched: number;
+  /** Tiền mang mã THUÊ BAO mà dòng không do SePay tạo vào đúng tài khoản nhận — không ghi, không gia hạn, chờ người vận hành. */
+  unconfirmed: number;
+  topupCredited: number;
+  topupHeld: number;
+  errors: string[];
+};
 
 /**
  * Đọc sổ ngân hàng của NHÀ, tìm tiền VÀO mang mã `ERPHD…` chưa từng ghi ở `platform_billing_payments`, ghi mỗi khoản ĐÚNG
@@ -527,7 +541,7 @@ export type ReconcileSummary = { scanned: number; recorded: number; matched: num
  */
 export async function reconcileBillingPayments(opts: { bankRefs?: readonly string[]; lookbackDays?: number; now?: Date } = {}): Promise<ReconcileSummary> {
   const now = opts.now ?? new Date();
-  const out: ReconcileSummary = { scanned: 0, recorded: 0, matched: 0, unmatched: 0, topupCredited: 0, topupHeld: 0, errors: [] };
+  const out: ReconcileSummary = { scanned: 0, recorded: 0, matched: 0, unmatched: 0, unconfirmed: 0, topupCredited: 0, topupHeld: 0, errors: [] };
   if (opts.bankRefs && opts.bankRefs.length === 0) return out;
   const pdb = await getPlatformDb();
   const bt = schema.bankTransactions;
@@ -548,6 +562,9 @@ export async function reconcileBillingPayments(opts: { bankRefs?: readonly strin
     )
     .orderBy(bt.txnAt);
   const inv = schema.platformInvoices;
+  // Đọc MỘT lần cho cả lượt. Đọc hỏng / chưa khai ⇒ `null` ⇒ mọi dòng thuê bao chưa đủ căn cứ lượt này (không ghi gì — lượt sau đọc lại).
+  const receiverAccount = (await getBillingReceiver())?.accountNumber ?? null;
+  const unconfirmedCodes: string[] = [];
   for (const row of rows) {
     out.scanned++;
     const codes = extractTransferCodes(row.description);
@@ -564,6 +581,15 @@ export async function reconcileBillingPayments(opts: { bankRefs?: readonly strin
       } catch (error) {
         out.errors.push(`${row.bankRef}: ${error instanceof Error ? error.message : String(error)}`);
       }
+      continue;
+    }
+    // Tiền THUÊ BAO chỉ TỰ gia hạn khi dòng do SePay TẠO (webhook / lượt quét API, mã giao dịch SePay) vào ĐÚNG tài khoản nhận —
+    // cùng luật với tiền nạp Số dư AI. Dòng sao kê nhập tệp / gõ tay mang mã `ERPHD…` (kể cả khi SePay điền mã giao dịch vào SAU:
+    // số tiền + mô tả vẫn là của người nhập) KHÔNG ghi ở đây — ghi là «tiêu» mất dòng — mà nằm ở «Tiền thuê bao chờ xác nhận
+    // nguồn» cho người vận hành kiểm ngân hàng rồi xác nhận tay.
+    if (paymentBankRowTrust(row, receiverAccount) !== "TRUSTED") {
+      out.unconfirmed++;
+      unconfirmedCodes.push(...codes);
       continue;
     }
     try {
@@ -594,7 +620,164 @@ export async function reconcileBillingPayments(opts: { bankRefs?: readonly strin
       out.errors.push(`${row.bankRef}: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
+  // Khoản chờ xác nhận mang mã của một hoá đơn ĐANG MỞ ⇒ khách nhiều khả năng đã trả mà máy không tự gia hạn — báo người vận hành
+  // MỘT tin mỗi ngày (review PR thu phí, MEDIUM-2). Không báo thì khoản ấy nằm im ở /platform tới khi workspace bị khoá. Hỏng báo
+  // không làm hỏng lượt đối chiếu.
+  if (unconfirmedCodes.length) {
+    const open = await pdb.select({ id: inv.id }).from(inv).where(and(inArray(inv.transferCode, [...new Set(unconfirmedCodes)]), eq(inv.status, "OPEN")));
+    if (open.length) await notifyBillingOperators(open.length, now).catch(() => undefined);
+  }
   return out;
+}
+
+/**
+ * Báo người vận hành nền tảng (quyền `platform:operate`, CSDL nhà) qua HỘP THƯ cá nhân, MỘT tin mỗi ngày (khoá theo ngày giờ VN). Không
+ * dùng chuông chung `notifications`: ai trong nhà có quyền xem cảnh báo cũng đọc được chuông, trong khi trang đích chỉ người vận hành mở.
+ */
+async function notifyBillingOperators(count: number, now: Date): Promise<void> {
+  const home = await getHomeOrganization();
+  const day = vnDate(now);
+  const title = "Tiền thuê bao chờ xác nhận nguồn";
+  const body = `${count} hoá đơn đang mở có khoản tiền mang đúng mã nhưng KHÔNG do SePay ghi vào đúng tài khoản nhận (sao kê nhập tệp · gõ tay · tài khoản khác) — máy không tự gia hạn. Kiểm tiền thật trong ngân hàng rồi xác nhận ở /platform.`;
+  const href = "/platform#billing";
+  await withOrganization(home.code, async () => {
+    const db = await getDb();
+    const users = await activeUserIdsWhoCan("platform:operate");
+    await sendInboxMessages(users.map((userId) => ({ userId, kind: "BILLING_PAYMENT", title, body, href, dedupeKey: `billing-unconfirmed:${day}:${userId}` })), db);
+  });
+}
+
+/** Đọc một dòng tiền VÀO mang mã thuê bao mà bộ khớp CHƯA ghi — đầu vào chung của «Đã nhận tiền…» và «Không phải tiền thuê bao». */
+async function pendingBankRow(bankRef: string) {
+  const pdb = await getPlatformDb();
+  const bt = schema.bankTransactions;
+  const [row] = await pdb
+    .select({ bankRef: bt.bankRef, txnAt: bt.txnAt, amount: bt.amount, description: bt.description, provider: bt.provider, providerTxnId: bt.providerTxnId, account: bt.account, source: bt.source })
+    .from(bt)
+    .where(eq(bt.bankRef, bankRef))
+    .limit(1);
+  if (!row || !(row.amount > 0)) return { error: "Không thấy khoản tiền vào mang mã bút toán này." } as const;
+  const codes = extractTransferCodes(row.description);
+  if (!codes.length) return { error: "Nội dung chuyển khoản không mang mã thuê bao." } as const;
+  const [used] = await pdb.select({ id: schema.platformBillingPayments.id }).from(schema.platformBillingPayments).where(eq(schema.platformBillingPayments.bankRef, bankRef)).limit(1);
+  if (used) return { error: "Khoản tiền này đã được dùng (đã khớp / đã xác nhận / đã bỏ qua) — một dòng chỉ xử lý MỘT lần." } as const;
+  if (paymentBankRowTrust(row, (await getBillingReceiver())?.accountNumber ?? null) === "TRUSTED") return { error: "Khoản này do SePay ghi vào đúng tài khoản nhận — bộ khớp tự xử lý (bấm «Đối chiếu lại»), không xác nhận tay." } as const;
+  return { row, codes } as const;
+}
+
+/**
+ * NGƯỜI VẬN HÀNH XÁC NHẬN một khoản tiền thuê bao mà máy không tự khớp (dòng không do SePay tạo vào đúng tài khoản nhận). Máy chủ
+ * đọc lại DÒNG NGÂN HÀNG — không tin số tiền client gửi; mã của hoá đơn phải nằm trong nội dung; áp CÙNG `judgePayment` với bộ
+ * khớp: trả THIẾU ⇒ từ chối, trừ khi người vận hành chủ động «nhận thiếu» kèm lý do. Trong MỘT giao dịch: ghi `platform_billing_
+ * payments` (khoá `bank_ref` ⇒ một dòng chỉ trả MỘT hoá đơn) rồi gia hạn (review PR thu phí, MEDIUM-1).
+ */
+export async function confirmBankPayment(user: SessionUser, raw: { bankRef?: unknown; invoiceId?: unknown; acceptUnderpaid?: unknown; reason?: unknown }): Promise<BillingResult> {
+  const denial = platformOperatorDenial(user);
+  if (denial) return { error: denial };
+  const reason = operatorReason(raw.reason);
+  if (typeof reason !== "string") return reason;
+  const bankRef = typeof raw.bankRef === "string" ? raw.bankRef.trim() : "";
+  const invoiceId = typeof raw.invoiceId === "string" ? raw.invoiceId.trim() : "";
+  if (!bankRef || !invoiceId) return { error: "Thiếu mã bút toán hoặc hoá đơn." };
+  const p = await pendingBankRow(bankRef);
+  if ("error" in p) return { error: p.error ?? "Không đọc được khoản tiền." };
+  const pdb = await getPlatformDb();
+  const inv = schema.platformInvoices;
+  const [invoice] = await pdb.select().from(inv).where(eq(inv.id, invoiceId)).limit(1);
+  if (!invoice) return { error: "Không thấy hoá đơn." };
+  if (!p.codes.includes(invoice.transferCode)) return { error: `Nội dung chuyển khoản không mang mã ${invoice.transferCode}.` };
+  const outcome = judgePayment(p.row.amount, invoice);
+  if (outcome === "INVOICE_NOT_OPEN") return { error: "Hoá đơn không còn mở (đã thu hoặc đã huỷ)." };
+  const underpaid = outcome === "UNDERPAID";
+  if (underpaid && raw.acceptUnderpaid !== true) return { error: `Khoản này THIẾU ${vnd(invoice.amountVnd - p.row.amount)} so với hoá đơn ${invoice.transferCode} — muốn vẫn gia hạn thì đánh dấu «nhận thiếu» và ghi lý do.` };
+  const now = new Date();
+  const note = `${underpaid ? "[NHẬN THIẾU] " : ""}${reason}`;
+  const res = await pdb.transaction(async (tx) => {
+    const ins = await tx
+      .insert(schema.platformBillingPayments)
+      .values({
+        bankRef: p.row.bankRef,
+        txnAt: p.row.txnAt,
+        amountVnd: p.row.amount,
+        description: p.row.description.slice(0, 500),
+        transferCode: invoice.transferCode,
+        invoiceId: invoice.id,
+        orgCode: invoice.orgCode,
+        outcome: underpaid ? "UNDERPAID" : "MATCHED",
+        ...(underpaid ? { resolvedAt: now, resolvedByEmail: user.email, resolvedNote: note } : {}),
+      })
+      .onConflictDoNothing({ target: schema.platformBillingPayments.bankRef })
+      .returning({ id: schema.platformBillingPayments.id });
+    if (!ins.length) return "USED" as const;
+    const applied = await applyInvoicePaid(tx, invoice, { amountVnd: p.row.amount, source: "MANUAL", ref: p.row.bankRef, byEmail: user.email, actor: actorOf(user), reason: note }, now);
+    // Hoá đơn vừa được trả bằng đường khác ⇒ huỷ cả lượt ghi khoản tiền (dòng còn nguyên cho lượt xử lý sau).
+    if (!applied) throw new InvoiceRaceError();
+    return "OK" as const;
+  }).catch((e: unknown) => {
+    if (e instanceof InvoiceRaceError) return "RACE" as const;
+    throw e;
+  });
+  if (res === "USED") return { error: "Khoản tiền này vừa được dùng ở lượt khác — một dòng chỉ trả MỘT hoá đơn." };
+  if (res === "RACE") return { error: "Hoá đơn vừa được trả bằng đường khác — tải lại trang." };
+  afterPaidWrite(invoice.orgCode);
+  return { ok: true, message: `Đã xác nhận ${vnd(p.row.amount)} cho ${invoice.transferCode}${underpaid ? " (nhận thiếu)" : ""}.` };
+}
+
+class InvoiceRaceError extends Error {}
+
+/**
+ * «KHÔNG PHẢI TIỀN THUÊ BAO / TRÙNG» — người vận hành gạt một dòng chờ xác nhận ra khỏi danh sách (vd bản trùng của khoản đã thu, tiền
+ * chuyển nhầm mã). Không xoá gì: ghi `platform_billing_payments` với phán quyết của `judgePayment` + «đã xử lý» kèm lý do, nhật ký
+ * nền tảng. Dòng mang mã của hoá đơn ĐANG MỞ và đủ tiền thì không cho gạt — đó là việc «Đã nhận tiền…» hoặc huỷ hoá đơn trước.
+ */
+export async function dismissBankPayment(user: SessionUser, raw: { bankRef?: unknown; reason?: unknown }): Promise<BillingResult> {
+  const denial = platformOperatorDenial(user);
+  if (denial) return { error: denial };
+  const reason = operatorReason(raw.reason);
+  if (typeof reason !== "string") return reason;
+  const bankRef = typeof raw.bankRef === "string" ? raw.bankRef.trim() : "";
+  if (!bankRef) return { error: "Thiếu mã bút toán." };
+  const p = await pendingBankRow(bankRef);
+  if ("error" in p) return { error: p.error ?? "Không đọc được khoản tiền." };
+  const pdb = await getPlatformDb();
+  const inv = schema.platformInvoices;
+  const candidates = await pdb.select().from(inv).where(inArray(inv.transferCode, p.codes));
+  const invoice = candidates.find((c) => c.status === "OPEN") ?? candidates[0] ?? null;
+  const outcome = judgePayment(p.row.amount, invoice);
+  if (outcome === "MATCHED") return { error: `Hoá đơn ${invoice?.transferCode ?? ""} đang mở và khoản này đủ tiền — kiểm ngân hàng rồi «Đã nhận tiền…»; chắc chắn không phải tiền thuê bao thì huỷ hoá đơn trước.` };
+  // Trả THIẾU cho hoá đơn ĐANG MỞ là tiền thật của khách — gạt đi thì nó biến khỏi mọi danh sách trong khi hoá đơn vẫn mở (lượt duyệt
+  // lại, LOW-3): «Đã nhận tiền…» + «nhận thiếu», hoặc đợi khách chuyển bù.
+  if (outcome === "UNDERPAID" && invoice?.status === "OPEN") return { error: `Khoản này là tiền trả THIẾU cho hoá đơn ${invoice.transferCode} đang mở — xác nhận «nhận thiếu» hoặc đợi khách chuyển bù, không gạt.` };
+  const home = await getHomeOrganization();
+  const now = new Date();
+  const res = await pdb.transaction(async (tx) => {
+    const ins = await tx
+      .insert(schema.platformBillingPayments)
+      .values({ bankRef: p.row.bankRef, txnAt: p.row.txnAt, amountVnd: p.row.amount, description: p.row.description.slice(0, 500), transferCode: invoice?.transferCode ?? p.codes[0], invoiceId: invoice?.id ?? null, orgCode: invoice?.orgCode ?? null, outcome, resolvedAt: now, resolvedByEmail: user.email, resolvedNote: reason })
+      .onConflictDoNothing({ target: schema.platformBillingPayments.bankRef })
+      .returning({ id: schema.platformBillingPayments.id });
+    if (!ins.length) return false;
+    await auditTx(tx, { action: "BILLING_PAYMENT_RESOLVE", targetOrgCode: invoice?.orgCode ?? home.code, subject: `payment:${p.row.bankRef}`, before: { outcome, source: p.row.source }, after: { resolved: true, dismissed: true }, reason, actor: actorOf(user) });
+    return true;
+  });
+  if (!res) return { error: "Khoản tiền này vừa được xử lý ở lượt khác." };
+  return { ok: true, message: "Đã gạt khoản tiền khỏi danh sách chờ xác nhận (không xoá — còn trong nhật ký)." };
+}
+
+/**
+ * Sau khi NHẬP SAO KÊ vào sổ ngân hàng của NHÀ: đối chiếu đúng những dòng mang mã thuê bao / mã nạp (cửa sổ 60 ngày — khôi phục sau sự
+ * cố thường nhập sao kê muộn vài ngày). Dòng sao kê không tự gia hạn, nhưng lượt này BÁO người vận hành khi nó khớp hoá đơn đang mở
+ * (lượt duyệt lại, MEDIUM-A) — không đợi ai tình cờ bấm «Đối chiếu lại». Tổ chức khác ⇒ không làm gì. Không ném.
+ */
+export async function reconcileAfterStatementImport(rows: readonly { bankRef: string; description: string; amount: number }[]): Promise<ReconcileSummary | null> {
+  try {
+    if (!(await currentOrganization()).isHome) return null;
+    const refs = rows.filter((r) => r.amount > 0 && (extractTransferCodes(r.description).length > 0 || extractTopupCodes(r.description).length > 0)).map((r) => r.bankRef);
+    if (!refs.length) return null;
+    return await reconcileBillingPayments({ bankRefs: refs, lookbackDays: BILLING_RECONCILE_LOOKBACK_DAYS });
+  } catch {
+    return null;
+  }
 }
 
 /** Nút «Đối chiếu lại tiền thuê bao» của người vận hành. */
@@ -604,7 +787,8 @@ export async function reconcileBillingAsOperator(user: SessionUser): Promise<Bil
   const r = await reconcileBillingPayments();
   if (r.errors.length) return { error: `Đã ghi ${r.recorded} khoản (${r.matched} khớp); ${r.errors.length} khoản hỏng: ${r.errors.slice(0, 2).join(" · ")}` };
   const topups = r.topupCredited + r.topupHeld ? ` · Số dư AI: ${r.topupCredited} khoản nạp đã cộng, ${r.topupHeld} khoản giữ lại chờ xem (trang Số dư AI)` : "";
-  return { ok: true, message: r.recorded === 0 ? `Không có khoản tiền mới mang mã thanh toán (đã quét ${BILLING_RECONCILE_LOOKBACK_DAYS} ngày).` : `Đã ghi ${r.recorded} khoản: ${r.matched} khớp và gia hạn, ${r.unmatched} cần xem tay${topups}.` };
+  const unconfirmed = r.unconfirmed ? ` · ${r.unconfirmed} khoản mang mã thuê bao KHÔNG do SePay ghi vào đúng tài khoản nhận — không tự gia hạn, xem «Tiền thuê bao chờ xác nhận nguồn»` : "";
+  return { ok: true, message: (r.recorded === 0 ? `Không có khoản tiền mới mang mã thanh toán (đã quét ${BILLING_RECONCILE_LOOKBACK_DAYS} ngày)` : `Đã ghi ${r.recorded} khoản: ${r.matched} khớp và gia hạn, ${r.unmatched} cần xem tay${topups}`) + `${unconfirmed}.` };
 }
 
 // ─────────────────────────── Người vận hành ───────────────────────────
@@ -747,6 +931,49 @@ export async function markInvoicePaidManually(user: SessionUser, raw: { invoiceI
   const ref = typeof raw.ref === "string" && raw.ref.trim() ? raw.ref.trim().slice(0, 120) : null;
   const pdb = await getPlatformDb();
   const now = new Date();
+  // Một khoản tiền chỉ trả MỘT hoá đơn (review PR thu phí, MEDIUM-1 · MEDIUM-B). Tham chiếu so ở dạng GỐC lẫn dạng chuẩn hoá của mã
+  // bút toán (`normalizeBankRef` — viết hoa, bỏ ký tự lạ): «ft26281 abc» và «FT26281ABC» là cùng một bút toán.
+  if (ref) {
+    const refs = [...new Set([ref, normalizeBankRef(ref)].filter((x) => x.length > 0))];
+    const inv = schema.platformInvoices;
+    const pay = schema.platformBillingPayments;
+    const bt = schema.bankTransactions;
+    const [usedByInvoice] = await pdb.select({ id: inv.id }).from(inv).where(and(inArray(inv.paidRef, refs), ne(inv.id, p.invoice.id))).limit(1);
+    if (usedByInvoice) return { error: "Mã chứng từ này đã dùng cho một hoá đơn khác — một khoản tiền chỉ trả MỘT hoá đơn." };
+    const [row] = await pdb.select({ bankRef: bt.bankRef, txnAt: bt.txnAt, amount: bt.amount, description: bt.description }).from(bt).where(inArray(bt.bankRef, refs)).limit(1);
+    if (row) {
+      const [used] = await pdb.select({ id: pay.id }).from(pay).where(eq(pay.bankRef, row.bankRef)).limit(1);
+      if (used) return { error: "Bút toán này đã được dùng (đã khớp / đã xác nhận / đã bỏ qua) — một khoản tiền chỉ trả MỘT hoá đơn." };
+      // Mang mã thuê bao ⇒ đi danh sách chờ; mang mã NẠP Số dư AI ⇒ là tiền của sản phẩm khác — không để một khoản trả hai sản phẩm.
+      if (extractTransferCodes(row.description).length) return { error: "Bút toán này mang mã thanh toán — xác nhận ở «Tiền thuê bao chờ xác nhận nguồn» (máy đọc lại số tiền, mỗi dòng dùng một lần)." };
+      if (extractTopupCodes(row.description).length) return { error: "Bút toán này mang mã nạp Số dư AI (ERPNAP…) — là tiền của Số dư AI, không trả hoá đơn thuê bao." };
+      if (!(row.amount > 0)) return { error: "Bút toán này không phải tiền vào." };
+      if (row.amount !== amount) return { error: `Số tiền nhập (${vnd(amount)}) khác số tiền của bút toán (${vnd(row.amount)}) — nhập đúng số tiền thật nhận.` };
+      // Khách chuyển khoản KHÔNG ghi mã (thường gặp): người vận hành chọn hoá đơn tường minh; bút toán được KHOÁ (ghi bảng đối chiếu)
+      // trong CÙNG giao dịch với lượt gia hạn, số tiền là của bút toán.
+      const underpaid = row.amount < p.invoice.amountVnd;
+      const note = `${underpaid ? "[NHẬN THIẾU] " : ""}${p.reason}`;
+      const res = await pdb
+        .transaction(async (tx) => {
+          const ins = await tx
+            .insert(pay)
+            .values({ bankRef: row.bankRef, txnAt: row.txnAt, amountVnd: row.amount, description: row.description.slice(0, 500), transferCode: p.invoice.transferCode, invoiceId: p.invoice.id, orgCode: p.invoice.orgCode, outcome: underpaid ? "UNDERPAID" : "MATCHED", ...(underpaid ? { resolvedAt: now, resolvedByEmail: user.email, resolvedNote: note } : {}) })
+            .onConflictDoNothing({ target: pay.bankRef })
+            .returning({ id: pay.id });
+          if (!ins.length) return "USED" as const;
+          if (!(await applyInvoicePaid(tx, p.invoice, { amountVnd: row.amount, source: "MANUAL", ref: row.bankRef, byEmail: user.email, actor: actorOf(user), reason: note }, now))) throw new InvoiceRaceError();
+          return "OK" as const;
+        })
+        .catch((e: unknown) => {
+          if (e instanceof InvoiceRaceError) return "RACE" as const;
+          throw e;
+        });
+      if (res === "USED") return { error: "Bút toán này vừa được dùng ở lượt khác." };
+      if (res === "RACE") return { error: "Hoá đơn vừa được trả bằng đường khác — tải lại trang." };
+      afterPaidWrite(p.invoice.orgCode);
+      return { ok: true, message: `Đã xác nhận ${p.invoice.transferCode} bằng bút toán ${row.bankRef}${underpaid ? " (nhận thiếu)" : ""}.` };
+    }
+  }
   const applied = await pdb.transaction((tx) => applyInvoicePaid(tx, p.invoice, { amountVnd: amount, source: "MANUAL", ref, byEmail: user.email, actor: actorOf(user), reason: p.reason }, now));
   if (!applied) return { error: "Hoá đơn vừa được trả bằng đường khác — tải lại trang." };
   afterPaidWrite(p.invoice.orgCode);
@@ -1032,7 +1259,28 @@ export type PlatformBilling = {
   countByStanding: Record<BillingStandingKind, number>;
   openInvoices: InvoiceView[];
   unresolvedPayments: PaymentView[];
+  /** Tiền mang mã thuê bao mà dòng KHÔNG do SePay tạo vào đúng tài khoản nhận (60 ngày) — máy không tự gia hạn. */
+  unconfirmedPayments: UnconfirmedPaymentView[];
   recentPaid: InvoiceView[];
+};
+
+/**
+ * Một khoản tiền mang mã thuê bao CHƯA đủ căn cứ để máy tự gia hạn: `NOT_SEPAY` = sao kê nhập tệp / gõ tay; `OTHER_ACCOUNT` =
+ * SePay ghi nhưng vào tài khoản khác tài khoản nhận. `invoice` = hoá đơn mang mã ấy (mọi trạng thái), để người vận hành xác nhận
+ * đúng hoá đơn với tham chiếu = mã bút toán — xác nhận xong dòng rời danh sách.
+ */
+export type UnconfirmedPaymentView = {
+  bankRef: string;
+  txnAt: string;
+  amountVnd: number;
+  description: string;
+  source: string;
+  reason: "NOT_SEPAY" | "OTHER_ACCOUNT" | "NO_RECEIVER";
+  /** Dòng sao kê / gõ tay mà SePay XÁC NHẬN SAU (điền mã giao dịch vào dòng có sẵn) — căn cứ mạnh nhất để người vận hành xác nhận. */
+  sepayConfirmedLater: boolean;
+  /** 4 số cuối tài khoản tiền vào (đã che) — người vận hành biết tiền vào TÀI KHOẢN NÀO trước khi xác nhận; `""` = sổ không ghi. */
+  accountTail: string;
+  invoice: { id: string; transferCode: string; orgCode: string; status: string; amountVnd: number; label: string } | null;
 };
 
 export async function loadPlatformBilling(user: SessionUser, now: Date = new Date()): Promise<PlatformBilling | { error: string }> {
@@ -1080,6 +1328,7 @@ export async function loadPlatformBilling(user: SessionUser, now: Date = new Dat
     pdb.select().from(pay).where(and(ne(pay.outcome, "MATCHED"), notTopupPayment(pay), isNull(pay.resolvedAt))).orderBy(desc(pay.txnAt)).limit(50),
     pdb.select().from(inv).where(and(eq(inv.status, "PAID"), isNotNull(inv.invoiceInfo), isNull(inv.vatIssuedAt))).orderBy(inv.paidAt).limit(50),
   ]);
+  const unconfirmedPayments = await readUnconfirmedPayments(receiver?.accountNumber ?? null, now, plans);
   return {
     today,
     receiver,
@@ -1101,8 +1350,54 @@ export async function loadPlatformBilling(user: SessionUser, now: Date = new Dat
     countByStanding,
     openInvoices: openRows.map((r) => invoiceView(r, plans)),
     unresolvedPayments: payRows.map(paymentView),
+    unconfirmedPayments,
     recentPaid: paidRows.map((r) => invoiceView(r, plans)),
   };
+}
+
+/** Cửa sổ của danh sách «chờ xác nhận nguồn» — dài hơn lượt đối chiếu để khoản cũ chưa ai xử lý vẫn còn thấy. */
+const UNCONFIRMED_LOOKBACK_DAYS = 60;
+
+async function readUnconfirmedPayments(receiverAccount: string | null, now: Date, plans: PlanRow[]): Promise<UnconfirmedPaymentView[]> {
+  const pdb = await getPlatformDb();
+  const bt = schema.bankTransactions;
+  const rows = await pdb
+    .select({ bankRef: bt.bankRef, txnAt: bt.txnAt, amount: bt.amount, description: bt.description, provider: bt.provider, providerTxnId: bt.providerTxnId, account: bt.account, source: bt.source })
+    .from(bt)
+    .where(
+      and(
+        gt(bt.amount, 0),
+        gte(bt.txnAt, new Date(now.getTime() - UNCONFIRMED_LOOKBACK_DAYS * 86_400_000)),
+        sql`regexp_replace(upper(${bt.description}), '[^A-Z0-9]', '', 'g') like ${`%${TRANSFER_CODE_PREFIX}%`}`,
+        // Chưa ghi ở bảng đối chiếu (dòng SePay đúng tài khoản thì bộ khớp đã ghi) và chưa ai xác nhận tay bằng chính mã bút toán.
+        // Câu con tương quan: tên bảng viết tường minh (bộ nhớ drizzle — cột trần trong exists() bị hiểu sai).
+        sql`not exists (select 1 from platform_billing_payments p where p.bank_ref = "bank_transactions"."bank_ref")`,
+        sql`not exists (select 1 from platform_invoices i where i.paid_ref = "bank_transactions"."bank_ref")`,
+      ),
+    )
+    .orderBy(desc(bt.txnAt))
+    .limit(300);
+  const pending = rows
+    .map((r) => ({ r, codes: extractTransferCodes(r.description), trust: paymentBankRowTrust(r, receiverAccount) }))
+    .filter((x) => x.codes.length > 0 && x.trust !== "TRUSTED");
+  if (!pending.length) return [];
+  const inv = schema.platformInvoices;
+  const invoices = await pdb.select().from(inv).where(inArray(inv.transferCode, [...new Set(pending.flatMap((x) => x.codes))]));
+  return pending.slice(0, 50).map(({ r, codes, trust }) => {
+    const matches = invoices.filter((i) => codes.includes(i.transferCode));
+    const i = matches.find((m) => m.status === "OPEN") ?? matches[0] ?? null;
+    return {
+      bankRef: r.bankRef,
+      txnAt: r.txnAt.toISOString(),
+      amountVnd: r.amount,
+      description: r.description,
+      source: r.source,
+      reason: trust === "UNCONFIRMED" ? "NOT_SEPAY" : receiverAccount === null ? "NO_RECEIVER" : "OTHER_ACCOUNT",
+      accountTail: r.account.replace(/\D/g, "").slice(-4),
+      sepayConfirmedLater: trust === "UNCONFIRMED" && r.provider === "SEPAY" && r.providerTxnId.trim() !== "" && !(SEPAY_ROW_SOURCES as readonly string[]).includes(r.source),
+      invoice: i ? { id: i.id, transferCode: i.transferCode, orgCode: i.orgCode, status: i.status, amountVnd: i.amountVnd, label: invoiceView(i, plans).label } : null,
+    };
+  });
 }
 
 export type OrgBilling = { today: string; terms: SubscriptionTerms | null; standing: BillingStanding; invoices: InvoiceView[]; payments: PaymentView[]; addons: OwnedAddon[]; invoiceInfo: InvoiceInfo | null };

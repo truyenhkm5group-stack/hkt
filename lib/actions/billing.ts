@@ -5,8 +5,10 @@ import { requirePermission } from "@/lib/auth/session";
 import type { AddonQuote, InvoiceInfo } from "@/lib/billing/addons";
 import type { RenewalQuote } from "@/lib/billing/rules";
 import {
+  confirmBankPayment,
   createAddonInvoice,
   createRenewalInvoice,
+  dismissBankPayment,
   markInvoicePaidManually,
   markVatIssued,
   previewAddon,
@@ -134,6 +136,20 @@ export async function reconcileBillingAction(): Promise<BillingResult> {
   const user = await requirePermission("platform:operate");
   const r = await reconcileBillingAsOperator(user);
   refreshOperator();
+  return r;
+}
+
+export async function confirmBankPaymentAction(input: { bankRef: string; invoiceId: string; acceptUnderpaid: boolean; reason: string }): Promise<BillingResult> {
+  const user = await requirePermission("platform:operate");
+  const r = await confirmBankPayment(user, input ?? {});
+  if ("ok" in r) refreshOperator();
+  return r;
+}
+
+export async function dismissBankPaymentAction(input: { bankRef: string; reason: string }): Promise<BillingResult> {
+  const user = await requirePermission("platform:operate");
+  const r = await dismissBankPayment(user, input ?? {});
+  if ("ok" in r) refreshOperator();
   return r;
 }
 
