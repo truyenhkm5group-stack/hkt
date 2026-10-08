@@ -984,3 +984,4 @@
 {"at":"2026-10-08T21:16:20.137Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DONE","mission":"cutover-unpriced-tolerance","detail":"production c71833950519 · deploy 37838226087 xanh (smoke) · verify ĐẠT; HSLC đã chuyển khoá nền tảng (credit 300 USD), bot trả lời qua PLATFORM"}
 {"at":"2026-10-08T21:16:31.744Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DONE","mission":"launch-gate-r2","detail":"production c71833950519 · deploy 37838226087 xanh (smoke) · verify ĐẠT"}
 {"at":"2026-10-08T21:16:43.217Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DONE","mission":"legal-counsel-pack","detail":"production c71833950519 · deploy 37838226087 xanh (smoke) · verify ĐẠT"}
+{"at":"2026-10-08T21:16:55.469Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DONE","mission":"legal-registers","detail":"production c71833950519 · deploy 37838226087 xanh (smoke) · verify ĐẠT"}
