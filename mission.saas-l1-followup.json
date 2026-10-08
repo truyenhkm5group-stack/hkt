@@ -3,7 +3,7 @@
   "mission_id": "saas-l1-followup",
   "title": "Khách không ghi/tắt được khoá AI + che nốt chỗ rò (replay, học, ai-builder, USD, go-live)",
   "business_goal": "Khách không thấy và không đổi được cấu hình AI nội bộ ở bất kỳ màn nào",
-  "status": "RUNNING",
+  "status": "PR_READY",
   "priority": "P0",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -31,11 +31,22 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-07T17:24:03.294Z",
-  "updated_at": "2026-10-08T04:39:49.063Z",
-  "last_heartbeat": "2026-10-08T04:39:49.063Z",
+  "updated_at": "2026-10-08T06:37:06.157Z",
+  "last_heartbeat": "2026-10-08T06:37:06.157Z",
   "definition_of_done": [
     "saveConnection/setConnectionStatus/testConnection chặn khoá AI ở workspace khách (máy chủ)",
     "replay · học · ai-builder · go-live không lộ model/USD/token",
     "Bài kiểm tấn công tenant xanh"
-  ]
+  ],
+  "handoff": {
+    "branch": "feat/saas-l1-followup",
+    "sha": "2c18494334e53d195e3ef0c775470d0d38af5042",
+    "at": "2026-10-08T06:37:06.157Z",
+    "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+    "title": "Khách không ghi/tắt được khoá AI + che nốt chỗ rò (replay, học, ai-builder, USD, go-live)",
+    "summary": "Workspace khách không lưu / kiểm / bật / tắt được khoá AI (chặn trong guard() của connectors, câu kinh doanh; khoá đang có giữ nguyên; đường người vận hành không đổi); customerSafeAiError đổi sang danh sách cho phép; lọc DTO khách ở replay, xem hội thoại, tự học, sổ tay, góp ý, Copilot, rà lỗi, ghi đơn; AI dựng cấu hình bỏ trường nguồn/model/token/USD; go-live dùng loadChatbotAiView; màn Kết nối ẩn connector của module chưa mua; notifySoftOnce nguồn PLATFORM không còn số USD",
+    "tests": [
+      "tsc + eslint sạch; saas-hide-internal, tenant-attack (+3 đòn khách lưu/tắt/bật khoá AI), ai-sales-isolation, platform-isolation, connectors, ai-builder, ai-usage, creative-food-industry, connectors-legacy, go-live, sales-replay, sales-order-sync, inbox-advanced, sales-operating-mode, sales-inbox, saas-l3-inbox, e2e-ai-sales-platform, viettelpost-org, quick-start, self-service-journey đạt; static-runner + repo-integrity sau commit; npm run build đạt; đột biến 10/10; 0 ký tự vô hình"
+    ]
+  }
 }
