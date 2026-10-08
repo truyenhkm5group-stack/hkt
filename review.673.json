@@ -1,8 +1,8 @@
 {
   "pr": 673,
-  "sha": "4d9e48b4b7022dd46555c2124ec85aa914beced1",
+  "sha": "e3607efd9bab456d72fa4c7f019e92e90d214f43",
   "verdict": "PASS",
   "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
-  "at": "2026-10-08T08:50:38.773Z",
-  "note": "Review lại 08/10 (chỉ đọc): MEDIUM-1 đóng (PAID không xoá, đếm lại trước DROP + trong giao dịch, từ chối OPEN/PENDING); giữ thứ tự DROP rồi xoá dòng là đúng (đảo lại sinh CSDL mồ côi bị gắn vào khách đăng ký lại mã cũ); pageTokensForOffboard giữ lá chắn chỉ service giải mã. LOW sau: N1 khoá chính các dòng payment_intents/invoices FOR UPDATE, N2 bài quét giới hạn nơi gọi pageTokensForOffboard, N3 h"
+  "at": "2026-10-08T09:20:32.007Z",
+  "note": "Delta 4d9e48b4..e3607efd do Integration Lead đọc trực tiếp: chỉ thay hai phép so === EXTERNAL bằng vị từ offboardDeletableAccountType trong lib/saas/policy.ts (cùng ngữ nghĩa, loại lạ/null ⇒ false) + một assert; review độc lập PASS ở 4d9e48b4 vẫn áp"
 }
