@@ -42,6 +42,14 @@ Cấu hình bot có công tắc `wholesalePricing`, **mặc định TẮT**.
     «mua từ».
   - `calculate_cart`, đơn nháp và bước chốt đơn tính bằng cùng đơn giá đó.
   - Bot không tự giảm ngoài bảng. Khách đòi giá thấp hơn bảng thì bot chuyển nhân viên.
+  - **Giá lẻ không bao giờ được báo như giá sỉ** (chủ shop HSLC 08/10/2026). `quoteUnitPrice` lùi về giá lẻ khi số lượng
+    chưa tới bậc hay mẫu mã không có trong bảng — đúng cho tính tiền, nhưng AI từng đọc `price` ấy rồi báo nó như giá sỉ.
+    Nên `get_current_price` trả thêm `price_source` (`CUSTOMER_LIST` · `DEFAULT_LIST` · `RETAIL`) và khối `wholesale`
+    (`available`, `from_quantity`, `note` — hàm thuần `wholesaleQuoteView`): chưa tới bậc ⇒ bot nói «giá sỉ áp từ N trở
+    lên»; mẫu mã chưa có trong bảng nào ⇒ không báo giá, chuyển nhân viên «Khách sỉ — <món>, chưa có giá sỉ». Bảng giá sỉ
+    trống thì công tắc BẬT cũng không có gì để báo — chủ shop phải lập bảng ở Sản phẩm → Bảng giá sỉ trước.
+  - Đo đang có gì ở một tổ chức khách (quy cách, giá lẻ, bảng giá sỉ + bậc, câu mẫu, hai công tắc) bằng ops `org-catalog`
+    (chỉ đọc, kết quả mã hoá; `scripts/org-catalog.ts`).
 - Hạn mức nợ áp cho bot y như cho người, vì cùng đi qua `createOrderAsAgent`.
 
 ## S2 — bán theo cân (chưa làm)
@@ -55,3 +63,8 @@ Hàng tươi bán theo cân thật: khách đặt «2kg tôm», lúc đóng hàn
 
 Phạm vi chạm khá rộng: sổ kho, phiếu nhập, đơn, chatbot. Vì vậy cần một khách pilot bán hàng tươi theo cân xác nhận
 quy trình trước khi làm. HSLC hiện bán hàng đóng gói (mẫu thực phẩm, chủ shop chốt 30/09/2026).
+
+**Quy cách lẻ không cần S2.** Khách mua 0,5kg (HSLC 08/10/2026) là một MẪU MÃ riêng («0,5kg») với giá riêng — chủ shop
+thêm ở Sản phẩm → sửa sản phẩm → thêm mẫu mã (SKU mới, quy cách «0,5kg», giá lẻ, khối lượng 500 g). Gói thực phẩm của bot
+(`FOOD_PACK.describeLine`) dặn: số lượng không khớp một quy cách (1,5kg, «nửa ký») thì GHÉP từ các quy cách đang bán, không
+tự chia / nhân giá; không ghép được thì nói các quy cách shop đang bán.

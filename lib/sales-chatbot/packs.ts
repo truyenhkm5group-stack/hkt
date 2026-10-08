@@ -33,7 +33,7 @@ export const FOOD_PACK: SalesPack = {
   key: "food",
   label: "Thực phẩm / hải sản",
   specExample: "(vd 1kg hay 2kg)",
-  describeLine: "  · «nguyên chất», «tươi», «loại ngon», «thật»… là MÔ TẢ, không phải tên sản phẩm khác; «1kí», «1 ký», «1 cân», «1kg» đều là 1kg; «nửa ký» = 0,5kg. Chọn sản phẩm có TÊN khớp món khách nói (vd «chả cá thu») trong kết quả search_products — không kết luận «không có» khi kết quả có sản phẩm cùng tên chính.",
+  describeLine: "  · «nguyên chất», «tươi», «loại ngon», «thật»… là MÔ TẢ, không phải tên sản phẩm khác; «1kí», «1 ký», «1 cân», «1kg» đều là 1kg; «nửa ký» = 0,5kg. Chọn sản phẩm có TÊN khớp món khách nói (vd «chả cá thu») trong kết quả search_products — không kết luận «không có» khi kết quả có sản phẩm cùng tên chính. Mỗi QUY CÁCH (1kg, 0,5kg…) là một mẫu mã riêng với giá riêng: khách nói số lượng không khớp một quy cách (1,5kg, «nửa ký») ⇒ GHÉP từ các quy cách đang bán (vd 1kg + 0,5kg, mỗi dòng đúng mẫu mã của nó); không ghép được ⇒ nói các quy cách shop đang bán, KHÔNG tự chia / nhân giá.",
   answeredExample: "(vd shop hỏi «lấy bao nhiêu kg», khách đáp «lấy lần 20-30 kg»)",
   nudgeExample: "(vd «Dạ mình lấy 1kg ăn thử trước nhé, em lên đơn luôn ạ?»)",
   bulkHint: " (từ 10kg)",
