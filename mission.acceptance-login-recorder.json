@@ -1,0 +1,28 @@
+{
+  "schema": 1,
+  "mission_id": "acceptance-login-recorder",
+  "title": "Nghiệm thu B1: lượt sai mật khẩu đi qua đúng đường ghi platform_auth_failures (chứng minh O1 luồng LOGIN)",
+  "business_goal": "",
+  "status": "RUNNING",
+  "priority": "P2",
+  "risk": "MEDIUM",
+  "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "worker": null,
+  "worktree": null,
+  "branch": "fix/acceptance-login-recorder",
+  "base_sha": "5374b54fc4be69eea4d252cdce3f0009c7b81567",
+  "domains": [],
+  "owned_paths": [
+    "lib/saas/acceptance.ts",
+    "tests/saas-acceptance.test.ts",
+    "tests/sync-fixtures.test.ts"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-08T22:04:49.028Z",
+  "updated_at": "2026-10-08T22:04:49.028Z",
+  "last_heartbeat": "2026-10-08T22:04:49.028Z",
+  "definition_of_done": []
+}
