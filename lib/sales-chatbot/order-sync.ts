@@ -20,7 +20,7 @@
  *
  * Không ném — lỗi của một hội thoại ghi vào nhật ký của hội thoại đó, lượt đi tiếp.
  */
-import { and, desc, eq, gte, isNull, like, lt, ne, sql } from "drizzle-orm";
+import { and, desc, eq, gte, isNull, like, lt, ne, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { getDb, schema } from "@/db";
 import { estimateCostUsd, type AiBlock } from "@/lib/ai/provider";
@@ -59,7 +59,7 @@ import {
   type OrderSyncOutcome,
   type OrderSyncThreadState,
 } from "@/lib/sales-chatbot/order-sync-shared";
-import { fetchPancakeThreadProfile, findReturningCustomer, normalizeVnPhone, RETURNING_LIMITS, type PancakeThreadProfile, type PriorMessage, type ReturningCustomer, type ThreadReadLimits } from "@/lib/sales-chatbot/returning";
+import { fetchPancakeThreadProfile, findReturningCustomer, normalizeVnPhone, type PancakeThreadProfile, type PriorMessage, promptDataText, RETURNING_LIMITS, type ReturningCustomer, type ThreadReadLimits, vouchedOrder } from "@/lib/sales-chatbot/returning";
 import { priceBooksFor } from "@/lib/queries/price-lists";
 import { SALES_CHATBOT_MANAGE } from "@/lib/sales-chatbot/settings";
 import { foldVi } from "@/lib/sales-chatbot/text";
@@ -298,7 +298,7 @@ export function orderSyncPrompt(input: { shop: string; catalog: readonly Catalog
   const catalog = input.catalog.slice(0, ORDER_SYNC_LIMITS.catalog).map((c) => `${c.variantId} | ${c.name}${c.variant ? ` (${c.variant})` : ""} | ${c.price === null ? "chưa có giá" : formatVND(c.price)}`);
   const r = trustedPrevious(input.returning);
   const known = r
-    ? `KHÁCH CŨ: shop đã có thông tin nhận hàng lần trước — người nhận «${r.name.trim().split(/\s+/).pop() ?? ""}», SĐT đuôi ${r.phone.replace(/\D/g, "").slice(-4)}, khu vực «${[r.address, r.province].filter((x) => x.trim()).join(", ").split(",").slice(-2).join(",").trim()}»${r.lastItems.length ? `; lần trước mua: ${r.lastItems.join("; ")}` : ""}.`
+    ? `KHÁCH CŨ: shop đã có thông tin nhận hàng lần trước — người nhận «${promptDataText(r.name.trim().split(/\s+/).pop() ?? "", 60)}», SĐT đuôi ${r.phone.replace(/\D/g, "").slice(-4)}, khu vực «${promptDataText([r.address, r.province].filter((x) => x.trim()).join(", ").split(",").slice(-2).join(",").trim(), 160)}»${r.lastItems.length ? `; lần trước mua: ${r.lastItems.map((x) => promptDataText(x, 80)).join("; ")}` : ""}.`
     : input.returning
       ? "KHÁCH CŨ: SĐT trong hội thoại có trong sổ nhưng CHƯA chứng minh là cùng người — KHÔNG dùng thông tin lần trước (use_previous_address = false)."
       : "KHÁCH CŨ: shop chưa có thông tin nhận hàng của khách này.";
@@ -639,7 +639,7 @@ async function syncThread(a: {
   const returning = await findReturningCustomer({ ...st, customer: known, returning: profile }).catch(() => null);
   // Đơn gần nhất của khách trong ERP (đơn bot · đơn ghi từ hội thoại · đơn nhân viên tạo tay) — lời chốt trước nó đã có đơn.
   const lastErp = returning?.customerId
-    ? (await db.select({ id: o.id, at: o.insertedAt }).from(o).where(and(eq(o.customerId, returning.customerId), ne(o.stage, "DELETED"))).orderBy(desc(o.insertedAt)).limit(1))[0] ?? null
+    ? (await db.select({ id: o.id, at: o.insertedAt }).from(o).where(and(eq(o.customerId, returning.customerId), ne(o.stage, "DELETED"), or(vouchedOrder(o), eq(o.salesConversationId, conv.id)))).orderBy(desc(o.insertedAt)).limit(1))[0] ?? null
     : null;
   const lastSync = prev?.orders[prev.orders.length - 1] ?? null;
   const botDraftAt = st.draft && !st.confirmed ? conv.lastBotAt : null;
@@ -696,7 +696,9 @@ async function syncThread(a: {
   const cust = await createCustomerAsAgent(ORDER_SYNC_AGENT, { name: decision.recipient.name, phone: decision.recipient.phone, address: decision.recipient.address, province: decision.recipient.province });
   if (!cust.ok) return { outcome: "SKIPPED", result: `Không lưu được khách: ${cust.errors.map((e) => e.message).join(" · ") || cust.code}` };
   const guardFrom = new Date(new Date(ag.at).getTime() - ORDER_SYNC_LIMITS.recentOrderGuardMinutes * 60_000);
-  const [recent] = await db.select({ id: o.id, at: o.insertedAt }).from(o).where(and(eq(o.customerId, cust.id), ne(o.stage, "DELETED"), gte(o.insertedAt, guardFrom))).orderBy(desc(o.insertedAt)).limit(1);
+  // Đơn MÁY của hội thoại KHÁC (vd đơn nháp người lạ lên dưới SĐT này) không chặn đơn thật ở đây — chỉ đơn có người đứng sau hoặc
+  // đơn của CHÍNH hội thoại này (review bảo mật #651, L4).
+  const [recent] = await db.select({ id: o.id, at: o.insertedAt }).from(o).where(and(eq(o.customerId, cust.id), ne(o.stage, "DELETED"), gte(o.insertedAt, guardFrom), or(vouchedOrder(o), eq(o.salesConversationId, conv.id)))).orderBy(desc(o.insertedAt)).limit(1);
   if (recent) return { outcome: "SKIPPED", result: `Khách đã có đơn #${manualOrderShortCode(recent.id)} ghi lúc ${formatDateTime(recent.at)} — không ghi thêm` };
   const pricing = orderSyncPricing({ wholesalePricing: a.botCfg.wholesalePricing, custId: cust.id, returning, stateVerifiedId: st.customer?.verifiedIdentity === true ? st.customer.id : null });
   const priced = await priceLines(decision.lines, a.botCfg, pricing.priceCustomerId, [decision.recipient.address, decision.recipient.province].join(", "));

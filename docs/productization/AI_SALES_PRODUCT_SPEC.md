@@ -40,7 +40,7 @@ ERP phía dưới (đơn, khách, sản phẩm, giá, tồn, thanh toán, vận 
 | 13 | **Ghi đơn hộ nhân viên** | Đã có (mặc định tắt) | `order-sync.ts`: hội thoại người chốt yên 10 phút ⇒ AI đọc ⇒ đơn "Mới" |
 | 14 | **Nhắc mua lại** | Đã có | `lib/reorder/*` + tin sáng khách đến hạn vào nhóm |
 | 15 | **Đặt lịch (dịch vụ)** | Đã có | `find_booking_slots`, `book_appointment` theo sức chứa |
-| 16 | **Bot tự học** | Đã có | `lessons.ts` mỗi 6 giờ từ hội thoại đã xong; chủ shop sửa/xoá; `playbook.ts` học từ lịch sử (che số + tên trước khi tới AI) |
+| 16 | **Bot tự học** | Đã có | `lessons.ts` mỗi 6 giờ từ hội thoại đã xong; chủ shop sửa/xoá; `playbook.ts` học từ lịch sử (che số + tên trước khi tới AI); bài AI rút ra (tự học · góp ý) mà nhắc tới tiền / tài khoản / liên kết KHÔNG tự áp — chủ shop tự viết nếu cần (`screenAiLessons`) |
 | 17 | **Trả lời mẫu 0 token** | Đã có | `quick-replies*`, ô `{{giá:SKU}}` lấy giá sống |
 | 18 | **Trả lời bình luận bằng tin riêng** | Đã có | `fanpage.ts`, đọc nội dung bài viết |
 | 19 | **Hiểu ảnh / ghi âm khách gửi** | Chưa (bot đa tổ chức) | Có ở bot nhà (`chatbot/src/vision.js`, `voice*.js`) — rút ra ở M6c / M10 |

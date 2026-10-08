@@ -20,7 +20,7 @@ import { canUseModule } from "@/lib/platform/capabilities";
 import { SALES_CHATBOT_MANAGE } from "@/lib/sales-chatbot/settings";
 import { classifyCustomerLevel, levelScriptPrompt, LEVEL_SCRIPTS_SETTING_KEY, parseLevelScripts, type CustomerLevel, type LevelPack, type LevelScripts } from "@/lib/sales-chatbot/levels-shared";
 import { salesPackFor } from "@/lib/sales-chatbot/packs";
-import { normalizeVnPhone } from "@/lib/sales-chatbot/returning";
+import { normalizeVnPhone, vouchedOrder } from "@/lib/sales-chatbot/returning";
 import type { ChatState } from "@/lib/sales-chatbot/tools";
 
 /** Lượt mua đang xét: tin khách SAU đơn gần nhất của hội thoại, tối đa chừng này ngày. */
@@ -63,7 +63,9 @@ async function computeLevel(c: ConvRow, pack: LevelPack, now: Date): Promise<{ l
   const db = await getDb();
   const st = (c.state ?? {}) as ChatState & { pancakePhones?: unknown };
   const o = schema.orders;
-  const liveOrder = and(or(eq(o.salesConversationId, c.id), c.customerId ? eq(o.customerId, c.customerId) : sql`false`), notInArray(o.stage, ["CANCELLED", "DELETED"]));
+  // Đơn của hồ sơ khách chỉ tính khi có người đứng sau (`vouchedOrder`) — đơn máy của hội thoại KHÁC không nâng mức khách này
+  // (review bảo mật #651, L4). Đơn của CHÍNH hội thoại luôn tính.
+  const liveOrder = and(or(eq(o.salesConversationId, c.id), c.customerId ? and(eq(o.customerId, c.customerId), vouchedOrder(o)) : sql`false`), notInArray(o.stage, ["CANCELLED", "DELETED"]));
   const [lastOrder] = await db.select({ at: o.insertedAt }).from(o).where(liveOrder).orderBy(desc(o.insertedAt)).limit(1);
   const cycleFrom = new Date(Math.max(now.getTime() - CYCLE_DAYS * 86_400_000, lastOrder ? lastOrder.at.getTime() : 0));
   let customerTexts: string[] = [];
