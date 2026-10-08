@@ -10,7 +10,8 @@
  * đều bị từ chối trước bước đó); workspace không qua job (tự đăng ký, tạo trước 0224) ⇒ quản trị ADMIN tạo SỚM NHẤT. Xác định,
  * không đoán: email UNIQUE trong CSDL tổ chức.
  *
- * Mọi hàm đọc ở đây nhìn sang CSDL workspace khác — chỉ gọi SAU `platformOperatorDenial` (lib/saas/console.ts).
+ * Mọi hàm đọc ở đây nhìn sang CSDL workspace khác — chỉ gọi SAU `platformOperatorDenial` (lib/saas/console.ts), hoặc SAU lá chắn sổ
+ * khai nghiệm thu (lib/saas/acceptance.ts — máy, chỉ workspace thử trong `lib/constants/saas-acceptance.ts`).
  */
 import { and, asc, eq, inArray } from "drizzle-orm";
 import { getDb, getPlatformDb, schema } from "@/db";
@@ -144,4 +145,29 @@ export async function loadWorkspaceActivation(orgCode: string, now: Date = new D
   const org = await findOrganization(orgCode);
   if (!org || org.isHome) return null;
   return (await loadAdminActivations([org], now))[org.code] ?? null;
+}
+
+/** Liên kết kích hoạt vừa phát — trả về người gọi MỘT lần (chưa có kênh thư). */
+export type ResendActivationResult = { ok: true; link: string; expiresAt: string; email: string; message: string };
+
+/**
+ * Đường PHÁT liên kết của người gọi: người vận hành (`createResetLinkAsOperator` — đã qua `platformOperatorDenial`) hoặc máy nghiệm thu
+ * (`createAcceptanceResetLink` — lá chắn sổ khai `lib/constants/saas-acceptance.ts`). Cả hai đi chung MỘT lõi trong
+ * lib/users/password-reset.ts; chỉ khác người đứng tên trong nhật ký nền tảng.
+ */
+export type ActivationLinkIssuer = (input: { orgCode: string; email: string; reason: string }) => Promise<{ ok: true; link: string; expiresAt: Date; email: string } | { error: string }>;
+
+/**
+ * LUẬT «GỬI LẠI KÍCH HOẠT» — MỘT bản cho nút của người vận hành (lib/saas/console.ts, SAU `platformOperatorDenial`) và ops nghiệm thu
+ * (lib/saas/acceptance.ts, SAU lá chắn sổ khai — máy): chỉ khi quản trị CHƯA vào được; người nhận do MÁY CHỦ tra (job «Tạo khách» /
+ * quản trị đầu tiên), không bao giờ một email từ người gọi; liên kết phát qua `issue` của chính người gọi. tests/saas-acceptance.test.ts
+ * khoá danh sách nơi gọi hàm này.
+ */
+export async function resendActivation(input: { orgCode: string; reason: string }, issue: ActivationLinkIssuer): Promise<ResendActivationResult | { error: string }> {
+  const act = await loadWorkspaceActivation(input.orgCode);
+  if (!act) return { error: "Chỉ gửi kích hoạt cho quản trị của một workspace khách." };
+  if (!act.canResend || !act.email) return { error: activationRefusal(act.state) };
+  const r = await issue({ orgCode: act.orgCode, email: act.email, reason: `Gửi lại liên kết kích hoạt: ${input.reason}` });
+  if ("error" in r) return r;
+  return { ok: true, link: r.link, expiresAt: r.expiresAt.toISOString(), email: r.email, message: "Đã tạo liên kết kích hoạt mới — liên kết cũ chưa dùng hết hiệu lực." };
 }

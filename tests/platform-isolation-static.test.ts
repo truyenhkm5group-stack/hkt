@@ -293,6 +293,8 @@ const GOI_MANG_KHONG_CREDENTIAL: Record<string, string> = {
     "Tạo / tính phí / huỷ / tải nhãn PDF vận đơn GHTK bằng token của CHÍNH tổ chức (kết nối «ghtk-carrier», token do lib/connectors/service.ts giải mã từ org_connections trong ngữ cảnh tổ chức) — không đọc biến môi trường nào của nhà; chặn bằng assertConnectionOwner TRƯỚC mỗi lượt gửi, đích hằng số services.giaohangtietkiem.vn, không theo chuyển hướng, không giữ token.",
   "lib/integrations/viettelpost/carrier-org.ts":
     "Tạo / huỷ / in vận đơn Viettel Post bằng tài khoản của CHÍNH tổ chức (kết nối «viettelpost-carrier», mật khẩu do lib/connectors/service.ts giải mã từ org_connections trong ngữ cảnh tổ chức) — không đọc biến môi trường nào của nhà; chặn bằng assertConnectionOwner TRƯỚC mỗi lượt gửi, đích hằng số partner.viettelpost.vn, không theo chuyển hướng, không giữ token.",
+  "lib/saas/acceptance.ts":
+    "Ops nghiệm thu `saas-acceptance` (người vận hành chạy qua ops-vps, trong container app như smoke): GET trang chat CÔNG KHAI `https://<slug>.<PLATFORM_BASE_DOMAIN>/chat` của workspace THỬ trong sổ khai lib/constants/saas-acceptance.ts — không gửi khoá / token / cookie nào (đúng một khách lạ mở trang), đích dựng từ sổ khai + miền gốc của nền tảng, không theo chuyển hướng. Lượt mở trang vỏ đi node:http tới chính ứng dụng (127.0.0.1) với phiên của TÀI KHOẢN THỬ, không phải khoá tích hợp nào.",
 };
 
 const GOI_MANG = [/(^|[^.\w$])fetch\(/, /\bfetchJson\(/, /new\s+(?:Anthropic|OpenAI)\s*\(/, /\?\?\s*fetch\b/];

@@ -544,6 +544,7 @@ import { testPush } from "./push.test";
 import { testUserInvites } from "./user-invites.test";
 import { testPasswordReset } from "./password-reset.test";
 import { testIdentityEmailLogin } from "./identity-email-login.test";
+import { testSaasAcceptance } from "./saas-acceptance.test";
 import { testTestOrgCodes } from "./test-org-codes.test";
 import { testHelpGuides } from "./help-guides.test";
 import { testChotDonAssets, testChotDonBrand, testMissedOrdersCalculator, testOrgLinkOrigin, testPublicSiteData, testPublicSiteHost, testPublicSiteSource } from "./public-site.test";
@@ -2914,6 +2915,9 @@ async function main() {
   // ngay lúc cấp phát / tạo hộ / mời / đặt mật khẩu; gửi lại kích hoạt; email trùng hai workspace; đối chiếu dữ liệu cũ. Tổ chức
   // THẬT `iel-*`, tự cấp, tự dọn; loginAction / logoutAction chạy trong phạm vi request dựng tay của Next.
   await testIdentityEmailLogin();
+  // Ops `saas-acceptance` (lượt đi vai KHÁCH Chốt Đơn trên production): lá chắn sổ khai · cấp phát qua job «Tạo khách» (máy) ·
+  // kích hoạt → /reset → /login không mã tổ chức · xoay mật khẩu rồi vứt · không lộ bí mật · E2E chat → AI → đơn với AI giả.
+  await testSaasAcceptance();
   testHelpGuides();
   // Trang giới thiệu: bảng giá đọc thật từ platform_plans, gói khởi điểm không bao giờ in thành 0 ₫.
   await testPublicSiteData();

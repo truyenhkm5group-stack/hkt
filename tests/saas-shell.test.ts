@@ -26,6 +26,7 @@ import { ALL_PERMISSIONS } from "@/lib/auth/permissions";
 import { requireUser, resolveCurrentUser, setRequestPathSourceForTests, signSession } from "@/lib/auth/session";
 import { moduleOfPath } from "@/lib/constants/platform-modules";
 import {
+  ERP_FRAME_HTML_MARKERS,
   isSalesAgentUser,
   SALES_AGENT_ALLOWED_PREFIXES,
   SALES_AGENT_CHANNELS_HREF,
@@ -33,6 +34,7 @@ import {
   SALES_AGENT_INBOX_HREF,
   SALES_AGENT_MOBILE_PRIMARY,
   SALES_AGENT_NAV,
+  SALES_AGENT_SHELL_HTML_MARKER,
   salesAgentActiveKey,
   salesAgentHomeFor,
   salesAgentNavFor,
@@ -325,6 +327,14 @@ function kiemTruocSau() {
   const shellSrc = readFileSync(path.join(goc, "components", "saas-shell.tsx"), "utf8");
   for (const erpNav of ["visibleGroups", "MODULE_GROUPS", "GlobalSearch", "AiCopilot", "allowedNavItems"]) assert.ok(!shellSrc.includes(erpNav), `vỏ không được vẽ / tìm kiếm menu ERP (${erpNav})`);
   assert.match(shellSrc, /salesAgentNavFor\(user\)/, "vỏ đọc mục từ sổ khai, không giữ danh sách thứ hai");
+  // Dấu HTML mà phép đo trang thật (ops saas-acceptance bước C) soi: tệp vẽ ra chúng phải còn mang ĐÚNG dấu ấy — đổi một bên mà quên
+  // hằng số là phép đo mù im lặng (vỏ hỏng vẫn «không lộ ERP», hoặc vỏ đúng bị báo «không dựng vỏ»).
+  assert.ok(shellSrc.includes(SALES_AGENT_SHELL_HTML_MARKER), "components/saas-shell.tsx phải vẽ dấu vỏ SALES_AGENT_SHELL_HTML_MARKER");
+  const erpFrame = ["app-topnav.tsx", "ai-copilot.tsx"].map((f) => readFileSync(path.join(goc, "components", f), "utf8")).join("\n");
+  for (const m of ERP_FRAME_HTML_MARKERS) {
+    assert.ok(erpFrame.includes(m), `khung ERP phải còn vẽ dấu ${m} (ERP_FRAME_HTML_MARKERS)`);
+    assert.ok(!shellSrc.includes(m), `vỏ không được vẽ dấu của khung ERP ${m}`);
+  }
 }
 
 /* ═════════════ 5 · MOBILE (hợp đồng mã nguồn) ═════════════ */
