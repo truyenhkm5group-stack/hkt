@@ -55,7 +55,8 @@ export default async function ProductDetailPage({ params, searchParams }: { para
   const { totals } = product;
   // Ma trận Màu × Size — chỉ dựng khi mã hàng thật sự có nhiều màu/size, mã một biến thể thì rối.
   const matrixPeriod = resolvePeriod({}, "90d");
-  const [matrix, ghiChu, mau] = await Promise.all([getProductMatrix(id, matrixPeriod), listProductNotes(id), can(user, "models:view") ? getModelByProductId(product.id) : Promise.resolve(null)]);
+  // Trang mở được bằng MÃ sản phẩm (getProductDetail khớp cả customId) ⇒ ma trận + ghi chú phải tra theo product.id, không theo đường dẫn.
+  const [matrix, ghiChu, mau] = await Promise.all([getProductMatrix(product.id, matrixPeriod), listProductNotes(product.id), can(user, "models:view") ? getModelByProductId(product.id) : Promise.resolve(null)]);
   const statusLabel = product.isRemoved ? "Đã xoá" : product.isHidden ? "Đang ẩn" : "Đang bán";
   const statusTone = product.isRemoved ? "bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300" : product.isHidden ? "bg-amber-50 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300" : "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300";
   const image = product.image || product.variants.find((v) => v.images[0])?.images[0] || null;

@@ -42,6 +42,7 @@ import { carrierPanel } from "@/lib/carriers/engine";
 import { attemptHoldsOrder } from "@/lib/constants/carrier-vtp";
 import { AttemptActions, CreateShipmentButton } from "@/app/(dashboard)/orders/[id]/carrier-shipment-actions";
 import { OrderQuickDecision, OrderReviewEntries } from "@/components/orders/order-review-quick";
+import { getBrandCopy } from "@/lib/branding/service";
 import { ORDER_REVIEW_LABEL, orderReviewLogOf, orderReviewOf, reconfirmsSinceOpen } from "@/lib/constants/order-review";
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }) {
@@ -54,7 +55,8 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
   const { id } = await params;
   // Hai phép đọc đầu không phụ thuộc nhau; bốn phép đọc sau chỉ cần `order`. Trước đây sáu lượt
   // nối đuôi, mỗi lượt một vòng đi-về CSDL — trang chi tiết đơn là trang mở nhiều nhất sau danh sách.
-  const [order, riskCfg] = await Promise.all([getOrderDetail(id), loadAlertConfig()]);
+  // `copy.isHome` = tổ chức đồng bộ Pancake (nhà). Nơi khác không có Pancake: mọi chỉ dẫn / bộ đếm / dữ liệu gốc Pancake là sai.
+  const [order, riskCfg, copy] = await Promise.all([getOrderDetail(id), loadAlertConfig(), getBrandCopy(user)]);
   if (!order) notFound();
   // Đơn thiếu SĐT / địa chỉ (khách cũ mua lại chỉ nhắn "gửi địa chỉ cũ") → gợi ý lấy lại từ đơn cũ của chính khách
   const thieuThongTin = !order.billPhone || !(order.shipFullAddress || order.shipAddress);
@@ -141,7 +143,7 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
             <OrderStageBadge stage={order.stage} label={pancakeStatusName(order.status)} className="text-xs" />
           </span>
         }
-        description={manual ? `Đơn tạo tay trên ERP · tạo ${formatDateTime(order.insertedAt)}${order.creatorName ? ` bởi ${order.creatorName}` : ""}` : `Tạo ${formatDateTime(order.insertedAt)} · cập nhật Pancake ${formatDateTime(order.updatedAtExternal)} · đồng bộ ${formatDateTime(order.syncedAt)}`}
+        description={manual ? `${copy.isHome ? "Đơn tạo tay trên ERP · tạo" : "Tạo"} ${formatDateTime(order.insertedAt)}${order.creatorName ? ` bởi ${order.creatorName}` : ""}` : `Tạo ${formatDateTime(order.insertedAt)} · cập nhật Pancake ${formatDateTime(order.updatedAtExternal)} · đồng bộ ${formatDateTime(order.syncedAt)}`}
         actions={
           <>
             {manual ? null : <SyncOrderButton orderId={order.id} />}
@@ -310,10 +312,12 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
               <Row label="Giảm giá" value={<Money value={-order.totalDiscount} />} />
               <Row label="Phí ship thu của khách" value={<Money value={order.customerPayFee ? order.shippingFee : 0} />} />
               <Row label="Phụ thu / thuế" value={<Money value={order.surcharge + order.tax} />} />
-              <Row label="Khách đã trả trước" value={<Money value={paid} />} />
-              <Row label="Phí sàn" value={<Money value={order.feeMarketplace} />} />
+              {/* Đơn tay / do bot lên không ghi trả trước · phí sàn · thu hộ (ba ô của Pancake) — in «0 ₫» là khẳng định sai, trái với
+                  khung «Thanh toán» bên dưới (ORDER_OUTCOME mục 11.1: tiền của đơn tay đi theo chứng từ thanh toán). */}
+              {manual ? null : <Row label="Khách đã trả trước" value={<Money value={paid} />} />}
+              {manual ? null : <Row label="Phí sàn" value={<Money value={order.feeMarketplace} />} />}
               <Row label={<span className="font-bold">Tổng đơn</span>} value={<Money value={order.totalPriceAfterDiscount} className="text-base font-bold" />} />
-              <Row label={<span className="font-bold">Thu hộ (COD)</span>} value={<Money value={order.moneyToCollect} className="text-base font-bold text-primary" />} />
+              {manual ? null : <Row label={<span className="font-bold">Thu hộ (COD)</span>} value={<Money value={order.moneyToCollect} className="text-base font-bold text-primary" />} />}
             </div>
             <div className="grid gap-x-8 gap-y-1.5 border-t bg-muted/30 px-5 py-4 text-sm sm:grid-cols-2">
               <Row
@@ -565,7 +569,11 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
           {newPhone ? (
             <div className="rounded-xl border border-sky-300 bg-sky-50 p-3 text-sm text-sky-900 dark:border-sky-900 dark:bg-sky-950/40 dark:text-sky-100">
               <div className="font-semibold">📱 Khách mới tại shop — chưa có đơn nào khác cùng SĐT</div>
-              <div className="mt-0.5 text-xs">Kiểm tra lịch sử SĐT toàn Pancake cạnh số điện thoại trên Pancake: nếu SĐT màu xanh (chưa từng mua ở đâu) thì hỏi khách xác nhận số {order.billPhone} đã đúng chưa và xin số phụ trước khi gửi hàng. Gắn thẻ “SĐT mới” cho đơn trên Pancake để bot ERP tự nhắn.</div>
+              {copy.isHome && !manual ? (
+                <div className="mt-0.5 text-xs">Kiểm tra lịch sử SĐT toàn Pancake cạnh số điện thoại trên Pancake: nếu SĐT màu xanh (chưa từng mua ở đâu) thì hỏi khách xác nhận số {order.billPhone} đã đúng chưa và xin số phụ trước khi gửi hàng. Gắn thẻ “SĐT mới” cho đơn trên Pancake để bot ERP tự nhắn.</div>
+              ) : (
+                <div className="mt-0.5 text-xs">Hỏi khách xác nhận số {order.billPhone} đã đúng chưa và xin thêm một số phụ trước khi gửi hàng.</div>
+              )}
             </div>
           ) : null}
           <SectionCard title="Khách hàng" actions={order.customer ? <Link href={`/customers/${order.customer.id}`} className="text-xs font-semibold text-primary hover:underline">Hồ sơ</Link> : null}>
@@ -581,11 +589,11 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
                       <p className="mt-1">
                         Khách cũ, lấy lại từ đơn{" "}
                         <Link href={`/orders/${prev.orderId}`} className="font-semibold underline">#{prev.systemId ?? ""}</Link> ngày {formatDateTime(prev.insertedAt)}
-                        {prev.matchedBy === "customer" ? " (cùng khách Pancake)" : prev.matchedBy === "conversation" ? " (cùng hội thoại)" : " (trùng SĐT)"}:
+                        {prev.matchedBy === "customer" ? (copy.isHome ? " (cùng khách Pancake)" : " (cùng hồ sơ khách)") : prev.matchedBy === "conversation" ? " (cùng hội thoại)" : " (trùng SĐT)"}:
                       </p>
                       <p className="mt-1 flex items-center gap-2"><Phone className="size-3.5" /><span className="font-medium">{prev.phone}</span> <CopyButton value={prev.phone} what="SĐT" /></p>
                       <p className="mt-0.5 flex items-start gap-2"><MapPin className="mt-0.5 size-3.5 shrink-0" /><span className="font-medium">{prev.address}</span> <CopyButton value={prev.address} what="địa chỉ" /></p>
-                      <p className="mt-1.5 opacity-80">Hỏi khách xác nhận còn đúng địa chỉ này không rồi điền vào đơn trên Pancake (khách có thể đã chuyển nhà).</p>
+                      <p className="mt-1.5 opacity-80">Hỏi khách xác nhận còn đúng địa chỉ này không rồi {manual ? (manualEditable ? "bấm «Sửa đơn» để điền vào đơn" : "điền vào đơn") : "điền vào đơn trên Pancake"} (khách có thể đã chuyển nhà).</p>
                     </>
                   ) : (
                     <p className="mt-1 opacity-80">Không tìm thấy đơn cũ của khách để lấy lại thông tin. Nhắn hỏi khách SĐT và địa chỉ trước khi gửi hàng.</p>
@@ -597,7 +605,8 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
                   ) : null}
                 </div>
               ) : null}
-              {order.customer ? (
+              {/* Ba bộ đếm của Pancake: tổ chức không đồng bộ Pancake không bao giờ cập nhật chúng ⇒ luôn «0 · 0 · 0» dù khách đã mua. */}
+              {order.customer && copy.isHome ? (
                 <div className="grid grid-cols-3 gap-2 border-t pt-3 text-center">
                   <div><p className="numeric text-lg font-bold">{order.customer.orderCount}</p><p className="text-[11px] text-muted-foreground">Đơn</p></div>
                   <div><p className="numeric text-lg font-bold text-success">{order.customer.succeedOrderCount}</p><p className="text-[11px] text-muted-foreground">Thành công</p></div>
@@ -620,7 +629,7 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
                 { label: "Ghi chú", value: order.note || "—" },
                 { label: "Ghi chú in", value: order.notePrint || "—" },
                 { label: "Lý do hoàn", value: order.returnedReason ?? "—" },
-                { label: "Mã Pancake", value: <span className="font-mono text-xs">{order.id}</span> },
+                { label: manual ? "Mã đơn" : "Mã Pancake", value: <span className="font-mono text-xs">{order.id}</span> },
               ]}
             />
           </SectionCard>
@@ -642,7 +651,7 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
             <Truck className="size-3.5" /> Giá trị đơn {formatVND(order.totalPriceAfterDiscount)} · {formatNumber(order.itemsCount)} dòng hàng
           </div>
           <ReverseRelationsCard objectKey="order" recordId={order.id} user={user} />
-          <JsonViewer value={order.raw} />
+          {copy.isHome ? <JsonViewer value={order.raw} /> : null}
         </div>
       </div>
     </div>
