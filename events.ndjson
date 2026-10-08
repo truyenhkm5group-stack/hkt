@@ -857,3 +857,4 @@
 {"at":"2026-10-08T14:47:41.414Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DONE","mission":"saas-identity-followup","detail":"#684 trên production 90fd6fe5 (deploy 37786938351)"}
 {"at":"2026-10-08T14:54:03.365Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"CLAIM","mission":"platform-key-project-probe","detail":"RUNNING · 2 mẫu phạm vi · MEDIUM"}
 {"at":"2026-10-08T14:54:56.840Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"backup-drive-trash","detail":"#689 @ 54e6574bc663 → b3a8d74e13a6 (MERGE_NOW · MEDIUM · gates success)"}
+{"at":"2026-10-08T14:58:15.329Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DEPLOY_DISPATCHED","detail":"b3a8d74e13a6 · run 37796789087 https://github.com/truyenhkm5group-stack/hkt/actions/runs/37796789087"}
