@@ -97,7 +97,8 @@ async function activeEntries(): Promise<QuickReplyEntry[]> {
 
 /**
  * Điền chỗ trống bằng số ĐỌC TỪ ERP ngay lúc gửi — cùng nguồn với công cụ của AI: giá = `retail_price` hiện tại (0 / thiếu ⇒
- * chưa có giá); tồn = KHẢ DỤNG theo sổ kho (chưa có phiếu nhập ⇒ chưa xác nhận); ship = phí ship cố định của cấu hình.
+ * chưa có giá); tồn = KHẢ DỤNG theo sổ kho (chưa có phiếu nhập ⇒ chưa xác nhận; khả dụng ÂM = sổ kho sai ⇒ cũng là thiếu số —
+ * bot không gửi «Còn -2 hộp ạ», như `check_inventory` không bán theo tồn âm); ship = phí ship cố định của cấu hình.
  * Thiếu bất kỳ số nào ⇒ `null`: KHÔNG gửi câu mẫu, để chatbot AI trả lời theo luật của nó (không bao giờ báo «0 ₫»).
  */
 export async function renderQuickAnswer(answer: string, cfg: Pick<SalesChatbotConfig, "shippingFee">): Promise<string | null> {
@@ -130,7 +131,7 @@ export async function renderQuickAnswer(answer: string, cfg: Pick<SalesChatbotCo
     if (h.kind === "price") values.set(h.raw, v.price > 0 ? formatVND(v.price) : null);
     else {
       const s = stock.get(v.id);
-      values.set(h.raw, s?.stockKnown && s.available !== null ? String(s.available) : null);
+      values.set(h.raw, s?.stockKnown && s.available !== null && s.available >= 0 ? String(s.available) : null);
     }
   }
   return fillPlaceholders(answer, values);

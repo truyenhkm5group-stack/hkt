@@ -58,8 +58,11 @@ async function productFieldValues(productIds: string[], allowed: readonly string
   return out;
 }
 
-/** Mọi mẫu mã ĐANG BÁN của tổ chức (trần 2.000) kèm field cho phép. */
-export async function sellableCatalog(allowedFields: readonly string[]): Promise<CatalogItem[]> {
+/**
+ * Mọi mẫu mã ĐANG BÁN của tổ chức (trần 2.000) kèm field cho phép. `only` = chỉ những mã này (vẫn đúng luật «đang bán» + cách
+ * đọc giá ở trên) — ô soạn hộp thư đọc ĐÍCH DANH một mẫu mã lúc bấm thay vì đọc cả danh mục.
+ */
+export async function sellableCatalog(allowedFields: readonly string[], only?: readonly string[]): Promise<CatalogItem[]> {
   const db = await getDb();
   const pv = schema.productVariants;
   const p = schema.products;
@@ -67,7 +70,7 @@ export async function sellableCatalog(allowedFields: readonly string[]): Promise
     .select({ variantId: pv.id, productId: pv.productId, name: p.name, sku: pv.sku, detail: pv.detail, color: pv.color, size: pv.size, price: pv.retailPrice, weight: pv.weight })
     .from(pv)
     .innerJoin(p, eq(p.id, pv.productId))
-    .where(and(eq(pv.isRemoved, false), eq(pv.isHidden, false), eq(p.isRemoved, false)))
+    .where(and(eq(pv.isRemoved, false), eq(pv.isHidden, false), eq(p.isRemoved, false), only ? inArray(pv.id, [...only]) : undefined))
     .orderBy(asc(p.name), asc(pv.sku))
     .limit(MAX_ITEMS);
   const fields = await productFieldValues([...new Set(rows.map((r) => r.productId))], allowedFields);

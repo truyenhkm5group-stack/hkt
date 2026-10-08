@@ -7,7 +7,7 @@ import { setConversationControlCore, setHumanCooldownMinutesCore } from "@/lib/s
 import { setPageConnectionModeCore } from "@/lib/sales-chatbot/channel-ownership";
 import type { ConnectionMode } from "@/lib/sales-chatbot/channel-ownership-shared";
 import type { ConversationControl } from "@/lib/sales-chatbot/conversation-control-shared";
-import { composerProductPick, composerProductSearch, composerQuickReplies, composerQuickReplyText, type ComposerProduct, type ComposerQuickReply } from "@/lib/sales-chatbot/inbox-composer";
+import { composerProductPick, composerProductSearch, composerQuickReplies, composerQuickReplyText, type ComposerProduct, type ComposerProductHit, type ComposerQuickReply } from "@/lib/sales-chatbot/inbox-composer";
 import { submitConversationFeedbackCore } from "@/lib/sales-chatbot/inbox-feedback";
 import { addNoteCore, archiveLabelCore, createLabelCore, deleteNoteCore, setConversationLabelsCore } from "@/lib/sales-chatbot/inbox-labels";
 import { STAFF_IMAGE_MAX_BYTES, STAFF_IMAGES_MAX, type InboxLabel, type InboxNote } from "@/lib/sales-chatbot/inbox-shared";
@@ -75,11 +75,12 @@ export async function suggestReplyAction(conversationId: string): Promise<Out<{ 
 
 // ───────────────────────────── Công cụ ô soạn: câu mẫu · sản phẩm (P0.2) ─────────────────────────────
 // Chỉ ĐỌC (lib/sales-chatbot/inbox-composer.ts): không ghi dòng nào, không làm mới trang — chữ vào ô soạn, người sửa rồi bấm «Gửi».
+// Cả bốn đi qua `replyGate` — cùng cổng với «Gửi» (quyền trả lời + hội thoại có thật, mã ≤ 100 ký tự).
 
-/** Câu mẫu ĐANG BẬT của tổ chức, lọc theo chữ gõ (bỏ dấu). */
-export async function composerQuickRepliesAction(query: string): Promise<Out<{ items: ComposerQuickReply[]; total: number }>> {
+/** Câu mẫu ĐANG BẬT của tổ chức, lọc theo chữ gõ (bỏ dấu) — cho ô soạn của MỘT hội thoại. */
+export async function composerQuickRepliesAction(conversationId: string, query: string): Promise<Out<{ items: ComposerQuickReply[]; total: number }>> {
   const user = await requireUser();
-  const r = await composerQuickReplies(user, query);
+  const r = await composerQuickReplies(user, conversationId, query);
   return r.ok ? r : { error: r.error };
 }
 
@@ -90,8 +91,8 @@ export async function composerQuickReplyTextAction(conversationId: string, quick
   return r.ok ? r : { error: r.error };
 }
 
-/** Tìm mẫu mã đang bán — cùng danh mục, phép tìm và giá với công cụ `search_products` của bot. */
-export async function composerProductSearchAction(conversationId: string, query: string): Promise<Out<{ items: ComposerProduct[]; priceNote: string | null }>> {
+/** Tìm mẫu mã đang bán — cùng danh mục, phép tìm và giá với công cụ `search_products` của bot; tồn chưa đọc (đọc lúc bấm). */
+export async function composerProductSearchAction(conversationId: string, query: string): Promise<Out<{ items: ComposerProductHit[]; priceNote: string | null }>> {
   const user = await requireUser();
   const r = await composerProductSearch(user, conversationId, query);
   return r.ok ? r : { error: r.error };
