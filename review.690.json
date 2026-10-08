@@ -1,0 +1,8 @@
+{
+  "pr": 690,
+  "sha": "f16e1e1352dbc403a8c9f93ff8954a227dc5e0b8",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-08T17:28:39.568Z",
+  "note": "Review bảo mật độc lập PASS: createAcceptanceResetLink chỉ script gọi, lá chắn sổ khai mã+email, đăng nhập không đổi hành vi, bí mật không lộ, không ghi hộ; merge-tree sạch. MEDIUM-1 (chiếm mã cdt-nghiem-thu) + MEDIUM-2 (loại workspace thử khỏi buồng lái) + L1–L4 ⇒ PR theo sau fix/saas-acceptance-hardening, BẮT BUỘC gộp trước lượt --apply đầu tiên"
+}
