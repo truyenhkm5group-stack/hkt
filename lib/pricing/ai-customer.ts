@@ -18,7 +18,7 @@
  *  · Runtime cũ (`chatbot/`, container riêng — bot nhà) KHÔNG đi qua đây ⇒ workspace chỉ chạy runtime cũ đọc ra `null` +
  *    "chưa đo", KHÔNG BAO GIỜ 0.
  */
-import { and, eq, gte, inArray, lt, sql } from "drizzle-orm";
+import { and, eq, gte, inArray, lt, sql, type SQL } from "drizzle-orm";
 import { getDb, getPlatformDb, schema } from "@/db";
 import { canUseFeature, getEnabledModules } from "@/lib/platform/capabilities";
 import { currentOrganization } from "@/lib/platform/context";
@@ -160,6 +160,16 @@ export async function aiCustomerCountedThisPeriod(
   return Boolean(hit);
 }
 
+/**
+ * Vị ngữ CHUNG của dòng đồng hồ khách AI của các tổ chức trong `[from, to)` — đếm (`readAiCustomerCounts`) và chia theo kênh (màn
+ * sức khoẻ khách, `lib/saas/customer-signals.ts`) dùng ĐÚNG một điều kiện (AGENTS 8.12). `sum(quantity)` trên vị ngữ này đếm mỗi
+ * khách chuẩn một lần (bí danh mang số lượng 0).
+ */
+export function aiCustomerEventsWhere(orgCodes: readonly string[], from: Date, to: Date): SQL {
+  const e = schema.platformUsageEvents;
+  return and(inArray(e.orgCode, [...orgCodes]), eq(e.productKey, AI_CUSTOMER_PRODUCT), eq(e.metric, AI_CUSTOMER_METRIC), gte(e.occurredAt, from), lt(e.occurredAt, to)) as SQL;
+}
+
 /** Số khách AI ĐÃ GHI của mỗi tổ chức trong `[from, to)` — đọc thô từ sổ, chưa xét độ phủ. */
 export async function readAiCustomerCounts(orgCodes: readonly string[], from: Date, to: Date): Promise<Map<string, number>> {
   const out = new Map<string, number>();
@@ -169,7 +179,7 @@ export async function readAiCustomerCounts(orgCodes: readonly string[], from: Da
   const rows = await pdb
     .select({ orgCode: e.orgCode, n: sql<number>`coalesce(sum(${e.quantity}), 0)::int` })
     .from(e)
-    .where(and(inArray(e.orgCode, [...orgCodes]), eq(e.productKey, AI_CUSTOMER_PRODUCT), eq(e.metric, AI_CUSTOMER_METRIC), gte(e.occurredAt, from), lt(e.occurredAt, to)))
+    .where(aiCustomerEventsWhere(orgCodes, from, to))
     .groupBy(e.orgCode);
   for (const r of rows) out.set(r.orgCode, Number(r.n));
   return out;
