@@ -1027,3 +1027,4 @@
 {"at":"2026-10-08T22:30:31.206Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"ops-signals-check","detail":"#710 @ 0e52fc045065 → fae0a204f9d4 (MERGE_ISOLATED · HIGH · gates success)"}
 {"at":"2026-10-08T22:36:01.345Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"erp-a11y-bo-cuc","detail":"#708 @ 91e11e9e1d51 → dbab68130a72 (MERGE_NOW · LOW · gates success)"}
 {"at":"2026-10-08T22:37:01.209Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DEPLOY_DISPATCHED","detail":"dbab68130a72 · run 37854562530 https://github.com/truyenhkm5group-stack/hkt/actions/runs/37854562530"}
+{"at":"2026-10-08T22:58:34.559Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"acceptance-login-recorder","detail":"fix/acceptance-login-recorder @ 1d0a467aac92 · 1 lệnh kiểm thử"}
