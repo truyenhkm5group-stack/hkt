@@ -1,0 +1,33 @@
+{
+  "schema": 1,
+  "mission_id": "kenh-dang-chay-trong-app",
+  "title": "Trong app chỉ hướng dẫn kênh đang chạy: bài Hướng dẫn + hộp thư rỗng + Kênh kết nối trống nói Pancake / Zalo OA / ô chat website, nối thẳng Facebook «sắp mở»",
+  "business_goal": "",
+  "status": "RUNNING",
+  "priority": "P2",
+  "risk": "MEDIUM",
+  "owner": "DESKTOP-56TH98Y:wt-pr-h",
+  "worker": null,
+  "worktree": null,
+  "branch": "claude/kenh-dang-chay-trong-app",
+  "base_sha": "9833d9818bd69153a2ef4dc0b8fee63d08916fde",
+  "domains": [],
+  "owned_paths": [
+    "lib/constants/help-guides.ts",
+    "app/(dashboard)/ai/sales-chatbot/inbox/page.tsx",
+    "app/(dashboard)/ai/channels/channels-panel.tsx",
+    "tests/help-guides.test.ts"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-08T21:25:04.431Z",
+  "updated_at": "2026-10-08T21:25:04.431Z",
+  "last_heartbeat": "2026-10-08T21:25:04.431Z",
+  "definition_of_done": [],
+  "intake": {
+    "verdict": "MISSING",
+    "evidence": []
+  }
+}
