@@ -3,7 +3,7 @@
   "mission_id": "saas-shell-polish",
   "title": "Vỏ Chốt Đơn: /login sau đặt mật khẩu đúng thương hiệu, bỏ chữ kỹ thuật còn lộ, /module-disabled có ranh giới lỗi, câu chữ BILLING_LOCKED theo sản phẩm",
   "business_goal": "",
-  "status": "INTEGRATING",
+  "status": "VERIFYING",
   "priority": "P2",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -29,11 +29,13 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-08T15:00:07.905Z",
-  "updated_at": "2026-10-08T18:52:30.171Z",
+  "updated_at": "2026-10-08T21:15:01.500Z",
   "last_heartbeat": "2026-10-08T18:22:41.979Z",
   "definition_of_done": [],
   "evidence": {
-    "merged": "#700 → c2918d7759720c55316c2dd516071e28b5863e7c"
+    "merged": "#700 → c2918d7759720c55316c2dd516071e28b5863e7c",
+    "verify": "PASS c7183395051955e6cff5343a787e9df97d71d12b 2026-10-08T21:14:55.220Z",
+    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/37838226087"
   },
   "handoff": {
     "branch": "fix/saas-shell-polish",
