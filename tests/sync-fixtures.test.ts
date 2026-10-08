@@ -549,6 +549,7 @@ import { testPlatformBilling } from "./platform-billing.test";
 import { testAiBalance } from "./ai-balance.test";
 import { testAiBalanceUsage } from "./ai-balance-usage.test";
 import { testAiBalanceEconomics } from "./ai-balance-economics.test";
+import { testOrgPrepaidAi } from "./org-prepaid-ai.test";
 import { testPricingBilling } from "./pricing-billing.test";
 import { testSaasPlatform } from "./saas-platform.test";
 import { testPricingV1 } from "./pricing-v1.test";
@@ -2916,6 +2917,9 @@ async function main() {
   await testAiBalanceUsage();
   // Số dư AI trong kinh tế đơn vị /platform: tiền thật đã dùng = doanh thu, không cộng hai lần với phần vượt ước tính.
   await testAiBalanceEconomics();
+  // AI dùng chung TRẢ TRƯỚC theo khách AI (AI_BALANCE_V1 §7): phiên bản giá chỉ-ghim, mọi khách AI trừ Số dư, ops một bước một
+  // lượt — hai tổ chức THẬT `pai-*` ở giá cũ, tự dọn; khôi phục tài khoản nhận tiền + mốc đồng hồ trong finally.
+  await testOrgPrepaidAi();
   // Nền móng giá & thu phí (0222): gói cấu hình được, tính năng, hạn mức mềm / cứng, đồng hồ đo, sự kiện trùng, kinh tế đơn vị —
   // ba tổ chức THẬT `prc-a` / `prc-b` / `prc-c`, tự cấp, tự dọn; khôi phục cấu hình gói + ngưỡng trong finally.
   await testPricingBilling();

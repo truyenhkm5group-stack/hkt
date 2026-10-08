@@ -68,7 +68,19 @@ export type AiLimits = {
   costUsdPerMonth: { soft: number | null; hard: number | null };
   platformCreditUsdPerMonth: number;
   softOnly?: boolean;
+  /**
+   * Trả trước theo khách AI (docs/saas/AI_BALANCE_V1.md §7 — `lib/pricing/versions.ts::prepaidAiLimits`): trần tiền CỦA GÓI để
+   * giữ khi CHƯA có credit AI dùng chung (bot còn chạy khoá riêng). Có dấu này thì `applyAiOverride` quyết trần tiền SAU ghi đè.
+   */
+  prepaid?: { planSoftUsd: number | null; planHardUsd: number | null };
 };
+
+/**
+ * Trả trước: trần CỨNG chống lạm dụng = credit × hệ số này (credit = ngưỡng CẢNH BÁO). Cổng tiền là Số dư AI, nhưng các việc
+ * không đi qua cổng số dư (khách đã tính nhắn tiếp, học hội thoại, nhắc khách, Copilot / AI Builder) vẫn tiêu tiền nền tảng khi
+ * số dư ≤ 0 — trần này chặn chúng ở mức có giới hạn. Chạm trần ⇒ chặn CẢ AI Bán hàng (người vận hành nâng credit).
+ */
+export const PREPAID_ABUSE_HARD_MULTIPLIER = 3;
 
 /** Ghi đè THƯA của một tổ chức: ô nào có mặt thì thắng gói; ô vắng = theo gói. */
 export type AiLimitsOverride = {
@@ -133,7 +145,7 @@ export function parseAiOverride(raw: unknown): AiLimitsOverride {
 }
 
 export function applyAiOverride(base: AiLimits, o: AiLimitsOverride): AiLimits {
-  return {
+  const out: AiLimits = {
     requestsPerDay: "requestsPerDay" in o ? (o.requestsPerDay ?? null) : base.requestsPerDay,
     requestsPerMonth: "requestsPerMonth" in o ? (o.requestsPerMonth ?? null) : base.requestsPerMonth,
     costUsdPerMonth: {
@@ -142,6 +154,24 @@ export function applyAiOverride(base: AiLimits, o: AiLimitsOverride): AiLimits {
     },
     platformCreditUsdPerMonth: o.platformCreditUsdPerMonth ?? base.platformCreditUsdPerMonth,
     ...(base.softOnly ? { softOnly: true } : {}),
+  };
+  if (!base.prepaid) return out;
+  // Trả trước: CHƯA có credit (bot còn khoá riêng — credit chỉ đặt cùng lượt org-ai-cutover) ⇒ y như gói cũ: trần tiền của gói,
+  // không softOnly (AI dùng chung đóng). CÓ credit ⇒ softOnly: credit là ngưỡng CẢNH BÁO, trần cứng chống lạm dụng = credit × 3.
+  // Ghi đè tường minh của người vận hành (costUsdSoft / costUsdHard) luôn thắng.
+  const credit = out.platformCreditUsdPerMonth;
+  const live = credit > 0;
+  const round2 = (v: number) => Math.round(v * 100) / 100;
+  return {
+    requestsPerDay: out.requestsPerDay,
+    requestsPerMonth: out.requestsPerMonth,
+    costUsdPerMonth: {
+      soft: "costUsdSoft" in o ? (o.costUsdSoft ?? null) : live ? credit : base.prepaid.planSoftUsd,
+      hard: "costUsdHard" in o ? (o.costUsdHard ?? null) : live ? round2(credit * PREPAID_ABUSE_HARD_MULTIPLIER) : base.prepaid.planHardUsd,
+    },
+    platformCreditUsdPerMonth: credit,
+    ...(live ? { softOnly: true } : {}),
+    prepaid: base.prepaid,
   };
 }
 

@@ -593,8 +593,20 @@ export function aiCustomerCoverage(input: { aiSalesOn: boolean; legacyChatbotOn:
  * không áp; chính sách chi phí / lạm dụng của tổ chức chưa trả tiền là RIÊNG (quyết định 07/10/2026 §5) và đăng ký production mở
  * tự do ⇒ GIỮ trần tiền CỨNG = chính ngân sách dẫn xuất ở trên. Tỷ giá thiếu / ≤ 0 ⇒ ngân sách `null` (không chặn, chỉ báo).
  */
-export function catalogAiLimits(input: { hit: PlanPriceHit | null; versionKind: PriceVersionKind | null; versionPrices: readonly PlanPrice[]; criticalBelowPct: number; usdToVnd: number }): AiLimits | null {
+export function catalogAiLimits(input: {
+  hit: PlanPriceHit | null;
+  versionKind: PriceVersionKind | null;
+  versionPrices: readonly PlanPrice[];
+  criticalBelowPct: number;
+  usdToVnd: number;
+  /** Chỉ cho dòng giá TRẢ TRƯỚC (`isPrepaidAiPrice`): cờ Số dư AI của tổ chức có bật không + trần kỹ thuật của `platform_plans`. */
+  prepaid?: { live: boolean; planLimits: AiLimits } | null;
+}): AiLimits | null {
   const { hit } = input;
+  // Trả trước theo khách AI (AI_BALANCE_V1 §7): cổng là SỐ DƯ, không phải credit — nhưng CHỈ khi cổng ấy đang sống (cờ bật).
+  // Cờ tắt ⇒ không trừ, không chặn khách mới ⇒ trả `null` = trần cũ của gói (credit nền tảng là trần CỨNG): không bao giờ để
+  // một tổ chức dùng AI nền tảng không giới hạn mà không có gì thu tiền.
+  if (hit && hit.source === "VERSION" && isPrepaidAiPrice(hit.price, input.versionKind)) return input.prepaid?.live ? prepaidAiLimits(input.prepaid.planLimits) : null;
   if (!hit || hit.source !== "VERSION" || input.versionKind !== "CATALOG") return null;
   if (!(hit.price.features ?? []).includes("ai_sales")) return null;
   const cheapest = input.versionPrices.filter((p) => isSellable(p) && (p.features ?? []).includes("ai_sales")).reduce<number | null>((m, p) => (m === null || (p.monthlyVnd ?? 0) < m ? p.monthlyVnd : m), null);
@@ -604,4 +616,84 @@ export function catalogAiLimits(input: { hit: PlanPriceHit | null; versionKind: 
   const unpaid = hit.price.monthlyVnd === null && !hit.price.contactSales;
   if (unpaid && budget !== null && budget > 0) return { requestsPerDay: null, requestsPerMonth: null, costUsdPerMonth: { soft: budget, hard: budget }, platformCreditUsdPerMonth: budget };
   return { requestsPerDay: null, requestsPerMonth: null, costUsdPerMonth: { soft: budget !== null && budget > 0 ? budget : null, hard: null }, platformCreditUsdPerMonth: budget ?? 0, softOnly: true };
+}
+
+// ─────────────────────────── Trả trước theo khách AI (docs/saas/AI_BALANCE_V1.md §7) ───────────────────────────
+
+/**
+ * Phiên bản giá «Trả trước theo khách AI» — CHỈ tới bằng GHIM (kind `LEGACY_SNAPSHOT`: không bao giờ thành bảng giá niêm yết,
+ * phủ chỉ GIÁ lên dòng `platform_plans` — hạn mức kỹ thuật, tính năng, tên gói của tổ chức giữ nguyên). Đổi đơn giá về sau =
+ * phiên bản `prepaid-ai-v2`, KHÔNG sửa dòng của v1 (luật «đổi giá = phiên bản mới»).
+ */
+export const PREPAID_AI_VERSION_KEY = "prepaid-ai-v1";
+export const PREPAID_AI_VERSION_LABEL = "Trả trước theo khách AI (V1)";
+
+/**
+ * Dòng giá «trả trước theo khách AI»: gói KHÔNG gồm khách AI nào (`included.aiCustomers = 0`) và khách AI tính tiền theo khối
+ * (`overage BILLED` + khối khách AI) ⇒ MỌI khách AI trừ vào Số dư AI theo đơn giá (`balanceOverageTerms` — không nhánh riêng).
+ * Không dòng giá nào của bảng giá V1 / legacy khớp (Inbox gồm 0 nhưng không có khối khách AI; legacy là `NONE`). HÀM THUẦN.
+ */
+export function isPrepaidAiPrice(p: Pick<PlanPrice, "trialDays" | "included" | "overage">, versionKind: PriceVersionKind | null): boolean {
+  const o = p.overage;
+  // CHỈ phiên bản tới-bằng-ghim: một gói CATALOG tương lai «gồm 0 + khối khách AI» là bảng giá niêm yết, không phải trả trước.
+  return versionKind === "LEGACY_SNAPSHOT" && p.trialDays === null && p.included.aiCustomers === 0 && o.mode === "BILLED" && (o.aiCustomerBlockSize ?? 0) > 0 && (o.aiCustomerBlockVnd ?? 0) > 0;
+}
+
+export type PrepaidAiTerms = { blockSize: number; blockVnd: number; unitPriceVnd: number; fromVersionKey: string; fromPlanKey: string; fromPlanName: string };
+
+/**
+ * Đơn giá một khách AI trả trước = giá VƯỢT của gói AI TỰ MUA RẺ NHẤT trong bảng giá đang niêm yết (V1: Starter 59.000đ / 100
+ * khách ⇒ 590đ) — dẫn xuất, không gõ số. Làm tròn LÊN như `balanceOverageTerms`. Không gói nào đủ điều kiện ⇒ `null`. HÀM THUẦN.
+ */
+export function prepaidAiTerms(catalogPrices: readonly PlanPrice[]): PrepaidAiTerms | null {
+  const p = catalogPrices
+    .filter((x) => isSellable(x) && x.trialDays === null && (x.features ?? []).includes("ai_sales") && x.overage.mode === "BILLED" && (x.overage.aiCustomerBlockSize ?? 0) > 0 && (x.overage.aiCustomerBlockVnd ?? 0) > 0)
+    .sort((a, b) => (a.monthlyVnd ?? 0) - (b.monthlyVnd ?? 0) || a.position - b.position || a.planKey.localeCompare(b.planKey))[0];
+  if (!p) return null;
+  const blockSize = p.overage.aiCustomerBlockSize as number;
+  const blockVnd = p.overage.aiCustomerBlockVnd as number;
+  return { blockSize, blockVnd, unitPriceVnd: Math.ceil(blockVnd / blockSize), fromVersionKey: p.versionKey, fromPlanKey: p.planKey, fromPlanName: p.name };
+}
+
+/**
+ * Dòng giá của phiên bản trả trước, chép từ dòng giá CŨ (legacy) của từng gói: GIỮ giá thuê bao / tặng tháng / mua thêm / tính
+ * năng / hạn mức kỹ thuật (số tiền thuê bao khách đang trả không đổi), chỉ thay phần AI:
+ *  · `included.aiCustomers = 0` + khối khách AI theo `terms` ⇒ mọi khách AI trừ Số dư AI;
+ *  · `included.fanpages / users = null` + không đơn giá ghế ⇒ KHÔNG có phần vượt fanpage / người dùng — đúng luật của giá cũ
+ *    (`overage NONE`); trần người dùng kỹ thuật vẫn ở `platform_plans`;
+ *  · không niêm yết, không nổi bật, không dùng thử. HÀM THUẦN.
+ */
+export function prepaidAiPriceRows(source: readonly PlanPrice[], terms: Pick<PrepaidAiTerms, "blockSize" | "blockVnd">, versionKey: string): PlanPrice[] {
+  return source.map((p) => ({
+    ...p,
+    versionKey,
+    listed: false,
+    highlight: false,
+    trialDays: null,
+    included: { ...p.included, aiCustomers: 0, fanpages: null, users: null },
+    overage: { mode: "BILLED", aiCustomerBlockSize: terms.blockSize, aiCustomerBlockVnd: terms.blockVnd, extraFanpageVnd: null, extraUserVnd: null },
+  }));
+}
+
+/**
+ * Trần AI NỀN của tổ chức trả trước KHI cổng Số dư đang sống (cờ bật): trần LƯỢT của gói giữ nguyên (AI Bán hàng không tính vào
+ * trần lượt), và mang dấu `prepaid` để `applyAiOverride` quyết trần TIỀN sau ghi đè:
+ *  · chưa có credit AI dùng chung (bot còn khoá riêng) ⇒ trần tiền của GÓI, không softOnly — y như trước khi chuyển;
+ *  · có credit (đặt cùng lượt `org-ai-cutover --credit`) ⇒ softOnly: credit = ngưỡng CẢNH BÁO (người vận hành nhận tin, khách nhận
+ *    câu không số USD), trần CỨNG chống lạm dụng = credit × `PREPAID_ABUSE_HARD_MULTIPLIER`. Cổng tiền của khách AI MỚI là Số dư
+ *    AI (`aiBalanceGate`); trần cứng giữ các việc không qua cổng ấy (khách đã tính, học, nhắc, Copilot) khi số dư ≤ 0. HÀM THUẦN.
+ */
+export function prepaidAiLimits(planLimits: AiLimits): AiLimits {
+  return {
+    requestsPerDay: planLimits.requestsPerDay,
+    requestsPerMonth: planLimits.requestsPerMonth,
+    costUsdPerMonth: { ...planLimits.costUsdPerMonth },
+    platformCreditUsdPerMonth: planLimits.platformCreditUsdPerMonth,
+    prepaid: { planSoftUsd: planLimits.costUsdPerMonth.soft, planHardUsd: planLimits.costUsdPerMonth.hard },
+  };
+}
+
+/** Phiên bản giá có phải phiên bản trả trước theo khách AI không (mọi đời: `prepaid-ai-v1`, `-v2` …). */
+export function isPrepaidVersionKey(key: string | null | undefined): boolean {
+  return typeof key === "string" && /^prepaid-ai-v\d+$/.test(key);
 }

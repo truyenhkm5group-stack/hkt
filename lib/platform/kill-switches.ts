@@ -136,6 +136,38 @@ export async function setAiBalanceEnabled(user: SessionUser, input: unknown): Pr
   return { ok: true, changed: true, message: raw.enabled ? `Đã bật Số dư AI cho «${org.name}».` : `Đã tắt Số dư AI của «${org.name}» — tiền đã nạp giữ nguyên.` };
 }
 
+/**
+ * OPS BẬT Số dư AI cho MỘT tổ chức khách khi không có người vận hành đăng nhập (`scripts/org-prepaid-ai.ts --apply`, bước «mở
+ * nạp»). CÙNG đường ghi cờ + nhật ký với `setAiBalanceEnabled`, HẸP hơn: chỉ BẬT (tắt là quyết định trên màn hình, có người
+ * đăng nhập) · không tổ chức nhà · tổ chức phải ACTIVE · bắt buộc lý do · nhật ký `FLAG_SET` nguồn `SCRIPT`, người làm = MÁY
+ * (`actor = null`, nhãn người vận hành ở `updatedBy`) · nhật ký hỏng ⇒ hoàn cờ cũ.
+ */
+export async function enableAiBalanceAsOperator(input: { orgCode: string; operator: { orgCode: string; email: string }; reason: string }): Promise<KillSwitchResult> {
+  const code = typeof input.orgCode === "string" ? input.orgCode.trim() : "";
+  if (!ORGANIZATION_CODE_PATTERN.test(code)) return { error: "Mã tổ chức không hợp lệ." };
+  const reason = typeof input.reason === "string" ? input.reason.trim().slice(0, 500) : "";
+  if (reason.length < KILL_SWITCH_REASON_MIN) return { error: `Ghi lý do (ít nhất ${KILL_SWITCH_REASON_MIN} ký tự).` };
+  const label = typeof input.operator?.email === "string" ? input.operator.email.trim() : "";
+  const opOrg = typeof input.operator?.orgCode === "string" ? input.operator.orgCode.trim() : "";
+  if (!label || !opOrg || label.length > 200) return { error: "Thiếu nhãn người vận hành (mã tổ chức + nhãn)." };
+  const org = await findOrganization(code);
+  if (!org) return { error: `Không có tổ chức mã «${code}».` };
+  if (org.isHome) return { error: "Tổ chức nhà không dùng Số dư AI." };
+  if (org.status !== "ACTIVE") return { error: `Tổ chức đang ${org.status} — không bật Số dư AI.` };
+  const before = await readOrgFlag(org.code, AI_BALANCE_FLAG, { fresh: true });
+  const was = before?.enabled === true;
+  if (was) return { ok: true, changed: false, message: "Số dư AI đã bật sẵn." };
+  const by = `${opOrg}:${label}`.slice(0, 200);
+  await writeOrgFlag(org.id, AI_BALANCE_FLAG, true, by);
+  try {
+    await platformAudit({ action: "FLAG_SET", targetOrgCode: org.code, subject: AI_BALANCE_FLAG, before: { enabled: false }, after: { enabled: true, by }, reason, source: "SCRIPT", actor: null });
+  } catch {
+    await writeOrgFlag(org.id, AI_BALANCE_FLAG, false, before?.updatedBy ?? by);
+    return { error: "Không ghi được nhật ký nền tảng — đã hoàn lại, chưa đổi gì." };
+  }
+  return { ok: true, changed: true, message: `Đã bật Số dư AI cho «${org.name}».` };
+}
+
 /** 3 · Tắt MỘT kết nối của tổ chức, qua đường ghi của sổ kết nối. */
 export async function disableOrgConnection(user: SessionUser, input: unknown): Promise<KillSwitchResult> {
   const raw = (input && typeof input === "object" ? input : {}) as { orgCode?: unknown; reason?: unknown; connectorKey?: unknown };

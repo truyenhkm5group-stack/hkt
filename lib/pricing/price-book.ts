@@ -21,16 +21,22 @@ import { listPlans, type PlanRow } from "@/lib/entitlements/check";
 import { platformAudit, type PlatformActor } from "@/lib/platform/audit";
 import { findOrganization, getHomeOrganization } from "@/lib/platform/organizations";
 import { platformOperatorDenial } from "@/lib/platform-ui/module-toggle";
-import type { AiLimits } from "@/lib/ai-usage/types";
+import { parseAiLimits, type AiLimits } from "@/lib/ai-usage/types";
+import { AI_BALANCE_FLAG, readOrgFlag } from "@/lib/platform/org-flags";
 import { env } from "@/lib/env";
 import {
   catalogAiLimits,
   currentCatalogVersion,
+  isPrepaidAiPrice,
   LEGACY_VERSION_KEY,
   overlayPlanRow,
   parseMarginConfig,
   parsePlanPrice,
   parsePriceVersion,
+  prepaidAiPriceRows,
+  prepaidAiTerms,
+  PREPAID_AI_VERSION_KEY,
+  PREPAID_AI_VERSION_LABEL,
   priceOf,
   resolveOrgVersion,
   DEFAULT_MARGIN_CONFIG,
@@ -38,6 +44,7 @@ import {
   type PlanPrice,
   type PriceBook,
   type PricedPlanRow,
+  type PrepaidAiTerms,
   type PriceVersion,
   type ResolvedVersion,
 } from "@/lib/pricing/versions";
@@ -141,7 +148,13 @@ export async function orgAiLimits(orgCode: string, planKey: string, now: Date = 
   try {
     const [v, margin] = await Promise.all([orgPriceVersion(orgCode, now), readMarginConfig()]);
     const versionPrices = v.version ? v.book.prices.filter((p) => p.versionKey === v.version!.key) : [];
-    const limits = catalogAiLimits({ hit: priceOf(v.book, v.version?.key, planKey), versionKind: v.version?.kind ?? null, versionPrices, criticalBelowPct: margin.criticalBelowPct, usdToVnd: env.facebook.usdToVnd });
+    const hit = priceOf(v.book, v.version?.key, planKey);
+    // Dòng giá trả trước theo khách AI: trần đi theo cờ Số dư AI (cổng tiền có sống không) + trần kỹ thuật hiện hành của gói.
+    const prepaid =
+      hit && hit.source === "VERSION" && isPrepaidAiPrice(hit.price, v.version?.kind ?? null)
+        ? { live: (await readOrgFlag(orgCode, AI_BALANCE_FLAG))?.enabled === true, planLimits: parseAiLimits((await listPlans()).find((p) => p.key === planKey)?.limits).limits }
+        : null;
+    const limits = catalogAiLimits({ hit, versionKind: v.version?.kind ?? null, versionPrices, criticalBelowPct: margin.criticalBelowPct, usdToVnd: env.facebook.usdToVnd, prepaid });
     aiLimitsLastGood.set(memo, limits);
     return limits;
   } catch (e) {
@@ -277,35 +290,98 @@ export async function publishCatalogVersion(input: { planKey: string; patch: Pla
   const pdb = await getPlatformDb();
   await pdb.transaction(async (tx) => {
     await tx.insert(schema.platformPriceVersions).values({ key, label: `${current.label} — sửa ${target.name} (${stamp.slice(6, 8)}/${stamp.slice(4, 6)}/${stamp.slice(0, 4)})`, kind: "CATALOG", effectiveFrom: now, taxMode: current.taxMode, taxNote: current.taxNote, alertThresholds: current.alerts, note: `Chép từ «${current.key}». ${input.reason}`.slice(0, 500), createdByEmail: input.email });
-    await tx.insert(schema.platformPlanPrices).values(
-      rows.map(patched).map((p) => ({
-        versionKey: key,
-        planKey: p.planKey,
-        name: p.name,
-        description: p.description,
-        position: p.position,
-        listed: p.listed,
-        highlight: p.highlight,
-        contactSales: p.contactSales,
-        monthlyVnd: p.monthlyVnd,
-        yearlyVnd: p.yearlyVnd,
-        yearlyFreeMonths: p.yearlyFreeMonths,
-        priceFromVnd: p.priceFromVnd,
-        trialDays: p.trialDays,
-        included: p.included as Record<string, unknown>,
-        overage: rowOverage(p),
-        features: p.features,
-        addonPrices: (p.addonPrices && typeof p.addonPrices === "object" ? p.addonPrices : {}) as Record<string, unknown>,
-        limits: p.limits,
-        commercial: p.commercial,
-      })),
-    );
+    await tx.insert(schema.platformPlanPrices).values(rows.map(patched).map((p) => planPriceInsert(p, key)));
   });
   invalidatePriceBook();
   const home = await getHomeOrganization();
   const after = patched(target);
   await platformAudit({ action: "PRICE_VERSION_PUBLISH", targetOrgCode: home.code, subject: `price-version:${key}`, before: { versionKey: current.key, planKey: target.planKey, monthlyVnd: target.monthlyVnd, yearlyFreeMonths: target.yearlyFreeMonths, addonPrices: target.addonPrices }, after: { versionKey: key, planKey: after.planKey, monthlyVnd: after.monthlyVnd, yearlyFreeMonths: after.yearlyFreeMonths, addonPrices: after.addonPrices }, reason: input.reason, source: input.source ?? "UI", actor: input.actor });
   return { ok: true, versionKey: key };
+}
+
+/** Một dòng `platform_plan_prices` để chèn — cùng hình dạng cho mọi đường phát hành phiên bản. */
+function planPriceInsert(p: PlanPrice, versionKey: string) {
+  return {
+    versionKey,
+    planKey: p.planKey,
+    name: p.name,
+    description: p.description,
+    position: p.position,
+    listed: p.listed,
+    highlight: p.highlight,
+    contactSales: p.contactSales,
+    monthlyVnd: p.monthlyVnd,
+    yearlyVnd: p.yearlyVnd,
+    yearlyFreeMonths: p.yearlyFreeMonths,
+    priceFromVnd: p.priceFromVnd,
+    trialDays: p.trialDays,
+    included: p.included as Record<string, unknown>,
+    overage: rowOverage(p),
+    features: p.features,
+    addonPrices: (p.addonPrices && typeof p.addonPrices === "object" ? p.addonPrices : {}) as Record<string, unknown>,
+    limits: p.limits,
+    commercial: p.commercial,
+  };
+}
+
+export type PrepaidVersionResult = { ok: true; versionKey: string; created: boolean; terms: PrepaidAiTerms } | { error: string };
+
+/**
+ * PHÁT HÀNH phiên bản «Trả trước theo khách AI» (`PREPAID_AI_VERSION_KEY`) — đường tạo phiên bản giá như `publishCatalogVersion`
+ * (luật «đổi giá = phiên bản mới», dòng cũ không bao giờ bị sửa). ĐỀ XUẤT KỸ THUẬT theo «phương án tốt nhất» chủ shop giao
+ * 08/10/2026 (docs/saas/AI_BALANCE_V1.md §7): chép MỌI dòng của phiên bản giá CŨ (legacy) rồi thay phần AI bằng
+ * `prepaidAiPriceRows` — giá thuê bao không đổi, khách AI gồm 0, MỌI khách AI trừ Số dư AI theo đơn giá vượt của gói AI tự mua
+ * rẻ nhất trong bảng giá đang niêm yết (`prepaidAiTerms`). Kind `LEGACY_SNAPSHOT` = chỉ tới bằng ghim, không bao giờ niêm yết.
+ *
+ * ĐÃ CÓ ⇒ dùng nguyên (không chép lại, không vá) và trả đơn giá đọc từ CHÍNH dòng của nó. Không ghim tổ chức nào ở đây — ghim là
+ * một bước riêng có nhật ký (`lib/billing/prepaid-ai.ts`).
+ */
+export async function publishPrepaidAiVersion(input: { reason: string; actor: PlatformActor; email: string | null; now?: Date; source?: "UI" | "SCRIPT" | "TEST" }): Promise<PrepaidVersionResult> {
+  const now = input.now ?? new Date();
+  const book = await loadPriceBook({ fresh: true });
+  const existing = book.versions.find((v) => v.key === PREPAID_AI_VERSION_KEY);
+  if (existing) {
+    const own = book.prices.find((p) => p.versionKey === existing.key && isPrepaidAiPrice(p, existing.kind));
+    if (!own) return { error: `Phiên bản «${existing.key}» đã có nhưng không có dòng giá trả trước nào — người vận hành kiểm sổ giá.` };
+    const size = own.overage.aiCustomerBlockSize as number;
+    const vnd = own.overage.aiCustomerBlockVnd as number;
+    return { ok: true, versionKey: existing.key, created: false, terms: { blockSize: size, blockVnd: vnd, unitPriceVnd: Math.ceil(vnd / size), fromVersionKey: existing.key, fromPlanKey: own.planKey, fromPlanName: own.name } };
+  }
+  const catalog = currentCatalogVersion(book, now);
+  if (!catalog) return { error: "Chưa có bảng giá niêm yết — không dẫn xuất được đơn giá khách AI." };
+  const terms = prepaidAiTerms(book.prices.filter((p) => p.versionKey === catalog.key));
+  if (!terms) return { error: `Bảng giá «${catalog.key}» không có gói AI tự mua nào khai giá vượt khách AI — không dẫn xuất được đơn giá.` };
+  const legacy = book.versions.find((v) => v.key === LEGACY_VERSION_KEY);
+  const source = book.prices.filter((p) => p.versionKey === LEGACY_VERSION_KEY);
+  if (!legacy || !source.length) return { error: "Không có phiên bản giá cũ (legacy) để chép giá thuê bao." };
+  const rows = prepaidAiPriceRows(source, terms, PREPAID_AI_VERSION_KEY);
+  const note = `Đề xuất kỹ thuật (phương án tốt nhất chủ shop giao 08/10/2026): chép giá thuê bao của «${LEGACY_VERSION_KEY}»; khách AI gồm 0; mọi khách AI trừ Số dư AI ${terms.unitPriceVnd.toLocaleString("vi-VN")}đ (= giá vượt ${terms.fromPlanName} của «${terms.fromVersionKey}»: ${terms.blockVnd.toLocaleString("vi-VN")}đ / ${terms.blockSize} khách). ${input.reason}`.slice(0, 500);
+  const pdb = await getPlatformDb();
+  const created = await pdb.transaction(async (tx) => {
+    const ins = await tx
+      .insert(schema.platformPriceVersions)
+      .values({ key: PREPAID_AI_VERSION_KEY, label: PREPAID_AI_VERSION_LABEL, kind: "LEGACY_SNAPSHOT", effectiveFrom: null, taxMode: legacy.taxMode, taxNote: legacy.taxNote, alertThresholds: catalog.alerts, note, createdByEmail: input.email })
+      .onConflictDoNothing({ target: schema.platformPriceVersions.key })
+      .returning({ key: schema.platformPriceVersions.key });
+    if (!ins.length) return false;
+    await tx.insert(schema.platformPlanPrices).values(rows.map((p) => planPriceInsert(p, PREPAID_AI_VERSION_KEY)));
+    return true;
+  });
+  invalidatePriceBook();
+  // Một lượt khác vừa phát hành cùng lúc ⇒ dùng bản của lượt ấy (nhánh «đã có»), không phát hành lần hai.
+  if (!created) return publishPrepaidAiVersion(input);
+  const home = await getHomeOrganization();
+  await platformAudit({
+    action: "PRICE_VERSION_PUBLISH",
+    targetOrgCode: home.code,
+    subject: `price-version:${PREPAID_AI_VERSION_KEY}`,
+    before: { versionKey: LEGACY_VERSION_KEY },
+    after: { versionKey: PREPAID_AI_VERSION_KEY, kind: "LEGACY_SNAPSHOT", plans: rows.length, unitPriceVnd: terms.unitPriceVnd, blockSize: terms.blockSize, blockVnd: terms.blockVnd, from: `${terms.fromVersionKey}:${terms.fromPlanKey}` },
+    reason: input.reason,
+    source: input.source ?? "UI",
+    actor: input.actor,
+  });
+  return { ok: true, versionKey: PREPAID_AI_VERSION_KEY, created: true, terms };
 }
 
 function rowOverage(p: PlanPrice): Record<string, unknown> {

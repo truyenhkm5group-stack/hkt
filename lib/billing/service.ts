@@ -57,7 +57,7 @@ import { DEFAULT_PLAN_KEY, HOME_PLAN_KEY, listPlans, planKeyOf, type PlanRow } f
 import { buildVietQrPayload, toTransferText } from "@/lib/payroll/vietqr";
 import { parseCommercial, type PlanCommercial } from "@/lib/pricing/catalog";
 import { catalogPlans, loadPriceBook, orgPriceVersion, pinOrgPriceVersion, plansForOrg, publishCatalogVersion, readPricePin } from "@/lib/pricing/price-book";
-import { currentCatalogVersion, isSellable, priceOf, renewalPricing, type PlanPrice } from "@/lib/pricing/versions";
+import { currentCatalogVersion, isPrepaidVersionKey, isSellable, LEGACY_VERSION_KEY, priceOf, renewalPricing, type PlanPrice } from "@/lib/pricing/versions";
 import { trialEndFromLastDay } from "@/lib/pricing/ai-entitlement";
 import type { PlatformActor, PlatformAuditAction } from "@/lib/platform/audit";
 import { KILL_SWITCH_REASON_MIN, parseOperatorTarget } from "@/lib/platform/kill-switches";
@@ -500,13 +500,19 @@ async function applyInvoicePaid(tx: Tx, invoice: InvoiceRow, paid: { amountVnd: 
   await tx.update(orgs).set({ plan: invoice.planKey, updatedAt: now }).where(and(eq(orgs.code, invoice.orgCode), eq(orgs.isHome, false)));
   // Ghim phiên bản giá của hoá đơn (0228) TRONG CÙNG giao dịch: kỳ đã trả và giá của nó là một việc. Hoá đơn trước 0228
   // (không mang phiên bản) ⇒ không đổi ghim.
-  const pin = invoice.priceVersionKey ? await pinOrgPriceVersion(invoice.orgCode, invoice.priceVersionKey, { source: "INVOICE_PAID", reason: `Hoá đơn ${invoice.transferCode}`, email: paid.byEmail, tx }) : null;
+  // TRẢ TRƯỚC THEO KHÁCH AI (AI_BALANCE_V1 §7, review #674 M1): hoá đơn gia hạn lập khi tổ chức còn ở giá cũ mà được trả SAU khi
+  // kích hoạt KHÔNG được ghim lùi về giá cũ — ghim lùi là thôi trừ Số dư trong khi AI nền tảng vẫn chạy, không ai hay. Hẹp: chỉ
+  // khi đang ghim phiên bản trả trước + hoá đơn mang giá CŨ + CÙNG gói (giá thuê bao của hai bên là một — dòng trả trước chép
+  // giá cũ). Đổi sang gói khác (vd mua gói V1) vẫn ghim theo hoá đơn như thường.
+  const [curPin] = invoice.priceVersionKey ? await tx.select({ key: schema.platformPricePins.versionKey }).from(schema.platformPricePins).where(eq(schema.platformPricePins.orgCode, invoice.orgCode)).limit(1) : [];
+  const keepPrepaid = isPrepaidVersionKey(curPin?.key) && invoice.priceVersionKey === LEGACY_VERSION_KEY && invoice.planKey === beforeOrg?.plan;
+  const pin = invoice.priceVersionKey && !keepPrepaid ? await pinOrgPriceVersion(invoice.orgCode, invoice.priceVersionKey, { source: "INVOICE_PAID", reason: `Hoá đơn ${invoice.transferCode}`, email: paid.byEmail, tx }) : null;
   await auditTx(tx, {
     action: "INVOICE_PAID",
     targetOrgCode: invoice.orgCode,
     subject: `invoice:${invoice.transferCode}`,
     before: { paidThrough: beforeSub?.paidThrough ?? null, billingEnabled: beforeSub?.billingEnabled ?? false, plan: beforeOrg?.plan ?? null, priceVersionKey: pin?.before ?? null },
-    after: { paidThrough: invoice.periodEnd, billingEnabled: true, plan: invoice.planKey, amountVnd: paid.amountVnd, source: paid.source, ref: paid.ref, priceVersionKey: invoice.priceVersionKey ?? pin?.before ?? null },
+    after: { paidThrough: invoice.periodEnd, billingEnabled: true, plan: invoice.planKey, amountVnd: paid.amountVnd, source: paid.source, ref: paid.ref, priceVersionKey: keepPrepaid ? (curPin?.key ?? null) : (invoice.priceVersionKey ?? pin?.before ?? null), ...(keepPrepaid ? { keptPrepaidPin: true, invoicePriceVersionKey: invoice.priceVersionKey } : {}) },
     reason: paid.reason,
     actor: paid.actor,
   });
