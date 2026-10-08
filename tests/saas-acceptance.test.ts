@@ -207,6 +207,7 @@ async function cleanup() {
     await pdb.delete(schema.platformAccounts).where(inArray(schema.platformAccounts.id, accountIds));
   }
   await pdb.delete(schema.platformAuditLog).where(inArray(schema.platformAuditLog.targetOrgCode, codes));
+  await pdb.delete(schema.platformAuthFailures).where(inArray(schema.platformAuthFailures.orgCode, codes));
   await releaseOrganizationDb(CODE);
   rmSync(organizationDatabaseUrl({ code: CODE, isHome: false }).replace(/^pglite:\/\//, ""), { recursive: true, force: true });
   invalidateOrganizations();
@@ -383,7 +384,7 @@ const CORE_IMPORT_ALLOWLIST: Record<string, readonly string[]> = {
   "@/db": ["getDb", "getPlatformDb", "schema"],
   "@/lib/address/vn-address": ["foldVnText", "resolveRecipientPlace"],
   "@/lib/auth/identities": ["findIdentity"],
-  "@/lib/auth/login": ["matchingLoginOrganizations", "verifyLogin"],
+  "@/lib/auth/login": ["matchingLoginOrganizations", "verifyLogin", "LoginFailureNote"],
   "@/lib/auth/session": ["signSession", "SessionSubject"],
   "@/lib/commerce/stock": ["shortfalls"],
   "@/lib/constants/saas-acceptance": [
@@ -398,6 +399,9 @@ const CORE_IMPORT_ALLOWLIST: Record<string, readonly string[]> = {
   "@/lib/platform/capabilities": ["getEnabledModules", "invalidateCapabilities"],
   "@/lib/platform/context": ["withOrganization"],
   "@/lib/platform/host-org": ["HOST_NOT_FOUND_MESSAGE"],
+  // Ghi DUY NHẤT vào sổ lỗi đăng nhập của nền tảng: lượt mật khẩu SAI của B1 (bằng chứng O1 luồng LOGIN — ghi ở mặt phẳng điều khiển,
+  // KHÔNG ghi vào workspace), chỉ cho workspace nghiệm thu. Tech Lead duyệt 09/10/2026.
+  "@/lib/platform/auth-failures": ["recordAuthFailure"],
   "@/lib/platform/organizations": ["findOrganization", "invalidateOrganizations"],
   "@/lib/platform/publish": ["platformBaseDomain", "publicationOf"],
   "@/lib/platform/site-host": ["CHOTDON_ASSETS", "chotdonAppHost", "SiteEnv"],
@@ -585,6 +589,14 @@ async function testApplyFlow() {
   // ── (6) C phủ đủ tuyến dẫn xuất ──
   assert.match(stepOf(r1, "C").reason, /^10\/10 tuyến của vỏ mở được qua host app\.chotdontudong\.com/);
 
+  // ── O1 luồng LOGIN: lượt mật khẩu SAI của B1 ghi ĐÚNG một dòng sổ lỗi đăng nhập như form /login; lượt ĐÚNG không ghi gì ──
+  const loginRows = await pdb.select().from(schema.platformAuthFailures).where(and(eq(schema.platformAuthFailures.orgCode, CODE), eq(schema.platformAuthFailures.flow, "LOGIN")));
+  assert.equal(loginRows.length, 1, `đúng MỘT dòng LOGIN (lượt sai), không dòng nào cho lượt đăng nhập đúng: ${JSON.stringify(loginRows.map((r) => r.reasonCode))}`);
+  assert.equal(loginRows[0].reasonCode, "BAD_PASSWORD", "lý do lấy từ onFailure của verifyLogin, khác rỗng");
+  assert.ok(loginRows[0].identifierMasked?.includes("***") && !loginRows[0].identifierMasked.includes(ENTRY.ownerEmail) && loginRows[0].ipHash === null, "định danh đã che, máy không có IP");
+  assert.match(stepOf(r1, "B1").detail.join(" | "), /sổ lỗi đăng nhập: ghi 1 dòng LOGIN\/BAD_PASSWORD cho cdt-nghiem-thu/);
+  assert.ok(!/BAD_PASSWORD|sổ lỗi đăng nhập/.test(r1.summary), `lý do đăng nhập KHÔNG ra dòng tóm tắt công khai: ${r1.summary}`);
+
   // ── (2) lần hai: idempotent — cùng job, cùng tài khoản, cùng tổ chức, cùng một dòng chỉ mục; kích hoạt lại bằng «đặt lại» ──
   // Giả lập danh mục / bảng giá đã đổi kể từ lượt tạo (đầu vào ĐÃ LƯU của job khác đầu vào dựng hôm nay): «Tạo khách» gửi lại cùng
   // khoá mà đầu vào khác bị từ chối (#684) — job đã xong thì ops KHÔNG gửi lại, nên A vẫn đạt thay vì báo «thông tin KHÁC».
@@ -707,6 +719,9 @@ export async function testSaasAcceptance() {
   try {
     await cleanup();
     await testGuardAndSquatter();
+    // Workspace trùng mã KHÔNG do ops tạo ⇒ B1 không chạy ⇒ không một dòng sổ lỗi đăng nhập nào mang mã nghiệm thu.
+    const squat = await (await getPlatformDb()).select().from(schema.platformAuthFailures).where(and(eq(schema.platformAuthFailures.orgCode, CODE), eq(schema.platformAuthFailures.flow, "LOGIN")));
+    assert.equal(squat.length, 0, "khách trùng mã: ops không ghi sổ lỗi đăng nhập cho workspace không phải của nó");
     await cleanup();
     await testApplyFlow();
   } catch (error) {

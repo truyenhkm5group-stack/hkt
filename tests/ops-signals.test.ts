@@ -330,7 +330,14 @@ async function testPublicVerdictShape(home: string) {
   // Chỉ loginAction nghe lý do / gọi phép dò có lý do (mã nguồn đã vào kho, không đọc đĩa của phiên khác).
   const files = execFileSync("git", ["ls-files", "lib", "app", "components", "scripts"], { encoding: "utf8" }).split("\n").filter((f) => /\.(ts|tsx|mjs)$/.test(f));
   const callers = (re: RegExp) => files.filter((f) => f !== "lib/auth/login.ts" && re.test(readFileSync(f, "utf8"))).sort();
-  assert.deepEqual(callers(/\bonFailure\s*:/), ["lib/actions/auth.ts"], "chỉ loginAction nghe lý do đăng nhập");
+  // Danh sách ĐÓNG. Khoá này giữ cho lý do NỘI BỘ của một lượt đăng nhập hỏng không bao giờ tới người dùng / client. Ngoài loginAction,
+  // CHỈ lõi ops nghiệm thu (lib/saas/acceptance.ts) được nghe: nó đưa lý do vào ĐÚNG sổ của người vận hành (`platform_auth_failures`,
+  // bằng chứng O1 luồng LOGIN), chỉ cho workspace trong sổ khai nghiệm thu, và không bao giờ trả lý do ra ngoài — dòng tóm tắt công
+  // khai dựng từ trạng thái / khoá bước, không từ lý do hay chi tiết bước (kiểm ngay dưới). Integration Lead duyệt 09/10/2026, sứ mệnh
+  // acceptance-login-recorder. Thêm người nghe thứ ba phải qua duyệt riêng.
+  assert.deepEqual(callers(/\bonFailure\s*:/), ["lib/actions/auth.ts", "lib/saas/acceptance.ts"], "chỉ loginAction và lõi ops nghiệm thu nghe lý do đăng nhập");
+  const acceptanceSummarySrc = /export function acceptanceSummary\([\s\S]*?\n\}/.exec(readFileSync("lib/constants/saas-acceptance.ts", "utf8"))?.[0];
+  assert.ok(acceptanceSummarySrc && !/\.(?:reason|detail)\b/.test(acceptanceSummarySrc), "dòng [ops:tom-tat] của nghiệm thu không mang lý do / chi tiết bước — lý do đăng nhập chỉ ở phần mã hoá");
   assert.deepEqual(callers(/\b(?:credentialsCheck|loginOrganizationsCheck)\(/), ["lib/actions/auth.ts"], "phép dò có lý do chỉ loginAction gọi");
   const loginTs = readFileSync("lib/auth/login.ts", "utf8");
   assert.ok(!/export type LoginVerdictWithReason/.test(loginTs) && !/export async function verifyLoginWithReason/.test(loginTs), "kiểu / hàm có lý do không được export");

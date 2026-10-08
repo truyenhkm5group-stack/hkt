@@ -36,7 +36,7 @@ import { and, eq } from "drizzle-orm";
 import { getDb, getPlatformDb, schema } from "@/db";
 import { foldVnText, resolveRecipientPlace } from "@/lib/address/vn-address";
 import { findIdentity } from "@/lib/auth/identities";
-import { matchingLoginOrganizations, verifyLogin } from "@/lib/auth/login";
+import { matchingLoginOrganizations, verifyLogin, type LoginFailureNote } from "@/lib/auth/login";
 import { signSession, type SessionSubject } from "@/lib/auth/session";
 import { shortfalls } from "@/lib/commerce/stock";
 import {
@@ -70,6 +70,7 @@ import { env } from "@/lib/env";
 import { getEnabledModules, invalidateCapabilities } from "@/lib/platform/capabilities";
 import { withOrganization } from "@/lib/platform/context";
 import { HOST_NOT_FOUND_MESSAGE } from "@/lib/platform/host-org";
+import { recordAuthFailure } from "@/lib/platform/auth-failures";
 import { findOrganization, invalidateOrganizations } from "@/lib/platform/organizations";
 import { platformBaseDomain, publicationOf } from "@/lib/platform/publish";
 import { CHOTDON_ASSETS, chotdonAppHost, type SiteEnv } from "@/lib/platform/site-host";
@@ -385,6 +386,32 @@ async function stepWorkspace(ctx: Ctx): Promise<Outcome> {
 
 // ─────────────────────────── B1 · kích hoạt + đăng nhập ───────────────────────────
 
+/**
+ * BẰNG CHỨNG O1 CHO LUỒNG ĐĂNG NHẬP (LAUNCH_GATE §4): lượt mật khẩu SAI của B1 phải để lại ĐÚNG một dòng `platform_auth_failures`
+ * luồng LOGIN như form `/login` để lại — ops `ops-signals-check` đọc dòng ấy để chứng minh tín hiệu O1 chạy trọn vòng trên production.
+ *
+ * Vì sao chép HÌNH lời gọi thay vì gọi `loginAction`: `loginAction` là server action (đọc `headers()` của request, ký cookie phiên,
+ * chặn dò theo IP) — tiến trình ops không có request. Phép đổi «ghi chú lỗi ⇒ tham số ghi sổ» nằm inline trong `loginAction`, không có
+ * hàm xuất khẩu nào để gọi lại; nên ở đây CHỈ lặp lại đúng hình lời gọi `recordAuthFailure` của nó (luồng LOGIN, lý do + tổ chức của
+ * `onFailure`, định danh = email đã gõ) — vẫn đi qua ĐƯỜNG GHI DUY NHẤT của sổ (băm + che định danh, tổ chức phải có thật). Khác hai
+ * chỗ, có chủ ý: `ip = null` (máy, không có IP người) và `lock = null` (lượt này không qua bộ chặn dò, nên không có cửa sổ khoá).
+ *
+ * Chỉ ghi cho workspace NGHIỆM THU: bước B1 chỉ chạy sau `needOwned` (A đã xác nhận `acceptanceWorkspaceOwned`), và ở đây hỏi lại cả
+ * sổ khai lẫn tổ chức mà `verifyLogin` báo. Ghi sổ là BẰNG CHỨNG, không phải phép kiểm: hỏng ⇒ trả một dòng chi tiết (phần mã hoá),
+ * không làm B1 hỏng. Lượt đăng nhập ĐÚNG không bao giờ tới đây (không truyền `onFailure`, và chỉ gọi khi verdict hỏng).
+ */
+async function recordWrongLoginEvidence(ctx: Ctx, note: LoginFailureNote | null): Promise<string> {
+  const { entry } = ctx;
+  if (!ctx.owned || acceptanceWorkspaceOf(entry.code)?.code !== entry.code) return "sổ lỗi đăng nhập: KHÔNG ghi — workspace không phải workspace nghiệm thu của ops này";
+  if (!note || note.orgCode !== entry.code) return `sổ lỗi đăng nhập: KHÔNG ghi — lượt sai không quy về ${entry.code} (tổ chức ${note?.orgCode ?? "—"})`;
+  try {
+    const ok = await recordAuthFailure({ flow: "LOGIN", reason: note.reason, orgCode: note.orgCode, identifier: entry.ownerEmail, ip: null, lock: null });
+    return ok ? `sổ lỗi đăng nhập: ghi 1 dòng LOGIN/${note.reason} cho ${entry.code} (bằng chứng O1)` : `sổ lỗi đăng nhập: KHÔNG ghi được dòng LOGIN/${note.reason} (recordAuthFailure trả false) — thiếu bằng chứng O1, bước vẫn chấm theo phép kiểm`;
+  } catch (error) {
+    return `sổ lỗi đăng nhập: ghi hỏng (${firstLine(error)}) — thiếu bằng chứng O1, bước vẫn chấm theo phép kiểm`;
+  }
+}
+
 async function stepActivateAndLogin(ctx: Ctx): Promise<Outcome> {
   const { entry, deps } = ctx;
   const detail: string[] = [];
@@ -440,9 +467,16 @@ async function stepActivateAndLogin(ctx: Ctx): Promise<Outcome> {
   const wrong = deps.newPassword();
   ctx.secrets.add(wrong);
   if ((await matchingLoginOrganizations(entry.ownerEmail, wrong)).length) return fail("mật khẩu SAI vẫn khớp một tổ chức", detail);
-  const wrongVerdict = await verifyLogin({ email: entry.ownerEmail, password: wrong, orgCode: entry.code }, async () => {
-    throw new Error("mật khẩu sai mà vẫn mở phiên");
-  });
+  // Lý do NỘI BỘ của lượt sai đi qua `onFailure` — ĐÚNG cách `loginAction` (lib/actions/auth.ts) lấy nó để ghi sổ lỗi đăng nhập.
+  const wrongSeen: { note: LoginFailureNote | null } = { note: null };
+  const wrongVerdict = await verifyLogin(
+    { email: entry.ownerEmail, password: wrong, orgCode: entry.code },
+    async () => {
+      throw new Error("mật khẩu sai mà vẫn mở phiên");
+    },
+    { onFailure: (note) => (wrongSeen.note = note) },
+  );
+  if (!wrongVerdict.ok) detail.push(await recordWrongLoginEvidence(ctx, wrongSeen.note));
   if (wrongVerdict.ok || wrongVerdict.code !== "BAD_CREDENTIALS") return fail("mật khẩu sai không bị từ chối đúng câu «sai mật khẩu»", detail);
   const used = (await findIdentity("EMAIL", entry.ownerEmail, { usedOnly: true })).some((h) => h.orgCode === entry.code);
   if (!used) return fail("đăng nhập xong mà chỉ mục danh tính không ghi mốc dùng", detail);

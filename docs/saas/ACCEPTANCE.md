@@ -113,7 +113,9 @@ Postgres). Nó gọi ĐÚNG `loadOpsSignalsForOrgs` của khung «Sự cố 24 g
 danh tính một tài khoản tổ chức nhà mà bộ tính quyền của phiên nói là có `platform:operate`. Chi tiết từng tổ chức đi phần MÃ HOÁ; log
 công khai chỉ có số tổ chức ở từng mức (OK · WARNING · CRITICAL · UNKNOWN · NA) + số ô tính hỏng của mỗi tín hiệu, và mức + mã lý do
 của `cdt-nghiem-thu`. **PASS** = cả tám tín hiệu tính được cho mọi tổ chức, 0 ô hỏng; UNKNOWN là «chưa biết», đếm riêng, KHÔNG làm
-FAIL. Bằng chứng O1 trọn vòng: chạy `saas-acceptance --apply` rồi `ops-signals-check` — bước B1 cố ý dùng lại liên kết đã dùng nên
-`platform_auth_failures` có dòng `RESET_LINK_USED` (luồng `RESET_LINK`) cho workspace thử, và dòng «O1 bằng chứng cdt-nghiem-thu» phải
-báo «CÓ». Lượt mật khẩu SAI của B1 gọi thẳng `verifyLogin` (không qua `loginAction`) nên KHÔNG vào sổ — O1 cho luồng `LOGIN` chỉ
-chứng minh được bằng một lượt đăng nhập sai thật qua form `/login`.
+FAIL. Bằng chứng O1 trọn vòng cho CẢ HAI luồng: chạy `saas-acceptance --apply` rồi `ops-signals-check`. Bước B1 để lại hai dòng
+`platform_auth_failures` cho workspace thử: (1) cố ý dùng lại liên kết đã dùng ⇒ `RESET_LINK_USED` (luồng `RESET_LINK`); (2) lượt
+mật khẩu SAI lấy lý do qua `onFailure` của `verifyLogin` rồi ghi qua `recordAuthFailure` đúng hình lời gọi của `loginAction` ⇒
+`LOGIN/BAD_PASSWORD` (định danh đã che, không IP — máy). Lượt mật khẩu sai chạy SAU lượt dùng lại liên kết, nên dòng «O1 bằng chứng
+cdt-nghiem-thu» phải báo «CÓ» với 24h ≥ 2 · lý do cuối `BAD_PASSWORD` · luồng `LOGIN`. Lượt đăng nhập ĐÚNG không ghi gì; lý do chỉ
+nằm ở sổ của người vận hành và phần mã hoá, không ra dòng `[ops:tom-tat]` của nghiệm thu.
