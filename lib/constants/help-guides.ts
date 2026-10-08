@@ -14,7 +14,17 @@
  * Client-safe: hằng số thuần + một hàm lọc thuần (không đọc CSDL).
  */
 import type { Permission } from "@/lib/auth/permissions";
+import { SERVICE_COMMITMENTS } from "@/lib/constants/company";
+import { SALES_AGENT_NAV, salesAgentPathAllowed } from "@/lib/constants/saas-nav";
 import { hrefVisible, type ModuleViewer } from "@/lib/platform-ui/module-visibility";
+
+/**
+ * ĐỐI TƯỢNG ĐỌC (docs/saas/HELP_CENTER.md §4): `ERP` = chỉ ngoài vỏ Chốt Đơn (bài gọi menu «Hệ thống → …», dẫn vào trang vỏ
+ * chặn); `CHOTDON` = chỉ trong vỏ (gọi đúng tên menu của vỏ: Hội thoại · AI Sales · Kênh kết nối · Nhân viên · Gói dịch vụ);
+ * `ALL` = cả hai. Bỏ trống ⇒ `ERP`: bài cũ viết cho ERP, không tự lọt vào vỏ khi quên khai. Bài kiểm khoá: mọi đường dẫn của
+ * bài `CHOTDON` / `ALL` phải qua `salesAgentPathAllowed` — cùng hàm với cổng máy chủ, không danh sách thứ hai.
+ */
+export type HelpAudience = "ERP" | "CHOTDON" | "ALL";
 
 export type HelpTopic = "START" | "SELL" | "CUSTOMERS" | "SERVICE" | "AI" | "ACCOUNT";
 
@@ -29,7 +39,32 @@ export const HELP_TOPIC_LABEL: Record<HelpTopic, string> = {
   ACCOUNT: "Tài khoản & thanh toán",
 };
 
-export type HelpStep = { text: string; href?: string };
+/**
+ * Tiêu đề chủ đề khi người đọc ở TRONG vỏ Chốt Đơn: chủ đề AI mang ĐÚNG tên mục menu của vỏ («AI Sales»), đọc thẳng từ
+ * `SALES_AGENT_NAV` — không gõ lại chuỗi thứ hai để hai nơi trôi khỏi nhau. Chủ đề khác giữ nhãn chung.
+ */
+export function helpTopicLabel(topic: HelpTopic, shell: boolean): string {
+  if (shell && topic === "AI") return SALES_AGENT_NAV.find((i) => i.key === "ai")?.label ?? HELP_TOPIC_LABEL.AI;
+  return HELP_TOPIC_LABEL[topic];
+}
+
+export type HelpStep = {
+  text: string;
+  /**
+   * Câu của bước khi người đọc ở TRONG vỏ Chốt Đơn — chỉ cho bài `ALL` mà đường đi khác nhau giữa hai nơi (ERP gọi menu
+   * «Hệ thống → …», vỏ gọi «Cài đặt → …»). Bỏ trống ⇒ `text`. Trang và bài kiểm đọc qua `helpStepText` — một chỗ chọn câu.
+   */
+  shellText?: string;
+  href?: string;
+};
+
+/** Câu người đọc THẤY ở bước này: trong vỏ ⇒ `shellText` nếu có, còn lại `text`. */
+export function helpStepText(step: HelpStep, shell: boolean): string {
+  return shell && step.shellText ? step.shellText : step.text;
+}
+
+/** Câu hạn giữ dữ liệu sau khi hết hạn — đọc từ cam kết của Điều khoản (`SERVICE_COMMITMENTS`), không gõ lại con số. */
+const RETENTION_SENTENCE = `Dữ liệu được giữ ít nhất ${SERVICE_COMMITMENTS.retainAfterExpiryDays} ngày sau khi hết hạn; trước khi xoá, quản trị được báo qua email trước ${SERVICE_COMMITMENTS.deletionNoticeDays} ngày.`;
 
 export type HelpGuide = {
   /** Khoá ổn định (neo `#…` trên trang). */
@@ -42,14 +77,126 @@ export type HelpGuide = {
   href: string;
   /** Quyền mà trang chính đòi ở cổng đầu. Bỏ trống ⇒ mọi tài khoản. */
   permission?: Permission;
-  /** Quyền trang còn đòi THÊM sau cổng đầu (vd tạo đơn tay cần `orders:write`, thiếu thì trang 404). */
+  /**
+   * Quyền mà VIỆC của bài còn đòi THÊM sau cổng đầu của trang (vd tạo đơn tay cần `orders:write`, thiếu thì trang 404; nối kênh
+   * cần `settings:manage`, thiếu thì trang Kênh kết nối không có nút nối) — thiếu thì bài ẩn: không dạy một việc người đọc không
+   * làm được.
+   */
   alsoRequires?: readonly Permission[];
   /** Chỉ tổ chức khách (trang dựng trên đơn tạo tay — tổ chức nhà đồng bộ Pancake nên trang ấy đóng). */
   tenantOnly?: true;
+  /** Ai đọc bài này — xem `HelpAudience`. Bỏ trống ⇒ `ERP`. */
+  audience?: HelpAudience;
   steps: readonly HelpStep[];
 };
 
 export const HELP_GUIDES: readonly HelpGuide[] = [
+  // ───────────────── VỎ CHỐT ĐƠN TỰ ĐỘNG — khách không rành kỹ thuật, gọi đúng tên menu của vỏ ─────────────────
+  {
+    key: "chotdon-connect-facebook",
+    topic: "START",
+    audience: "CHOTDON",
+    title: "Kết nối Facebook để nhận tin khách",
+    summary: "Nối fanpage là bước đầu tiên: tin khách nhắn vào fanpage sẽ hiện ở Hội thoại và AI bắt đầu trả lời.",
+    href: "/ai/channels",
+    permission: "ai_sales:view",
+    // Nút «Kết nối Facebook» và trang Kết nối chỉ mở cho người có quyền cài đặt (cùng cổng với route bắt đầu nối Facebook).
+    alsoRequires: ["settings:manage"],
+    steps: [
+      { text: "Mở Kênh kết nối, bấm «Kết nối Facebook».", href: "/ai/channels" },
+      { text: "Đăng nhập Facebook bằng tài khoản ĐANG QUẢN TRỊ fanpage, rồi chọn các Page muốn dùng và đồng ý cấp quyền." },
+      { text: "Xong khi Page hiện trong danh sách với trạng thái sẵn sàng. Chưa thấy thì bấm «Kiểm tra lại»." },
+      // Vỏ không có mục menu «Cài đặt → Kết nối»: dẫn thẳng tới trang (vỏ mở được — `/settings/connections` nằm dưới mục Kênh kết nối).
+      { text: "Đang dùng Pancake hoặc Zalo OA? Nối ở trang Kết nối — không cần nối lại Facebook.", href: "/settings/connections" },
+    ],
+  },
+  {
+    key: "chotdon-no-messages",
+    topic: "START",
+    audience: "CHOTDON",
+    title: "Vì sao chưa thấy tin khách?",
+    summary: "Ba chỗ cần xem theo thứ tự: đã nối Page chưa · Page có sẵn sàng không · khách có nhắn thật không.",
+    href: "/ai/channels",
+    permission: "ai_sales:view",
+    steps: [
+      { text: "Mở Kênh kết nối: chưa có Page nào ⇒ nối Facebook trước (xem bài Kết nối Facebook để nhận tin khách).", href: "/ai/channels" },
+      { text: "Page có nhưng báo cần nối lại ⇒ bấm «Thêm / nối lại Page» và cấp lại quyền bằng tài khoản quản trị fanpage." },
+      { text: "Page sẵn sàng mà Hội thoại vẫn trống ⇒ nhờ một người nhắn thử vào fanpage; tin phải hiện trong vài giây.", href: "/ai/sales-chatbot/inbox" },
+      { text: "Vẫn không thấy: nhắn hỗ trợ (cuối trang này) kèm tên cửa hàng và tên Page." },
+    ],
+  },
+  {
+    key: "chotdon-products",
+    topic: "SELL",
+    audience: "CHOTDON",
+    title: "Thêm sản phẩm để AI báo giá đúng",
+    summary: "AI chỉ báo giá và hàng còn theo đúng danh sách sản phẩm của cửa hàng — không bao giờ tự nghĩ ra giá.",
+    href: "/products",
+    permission: "products:view",
+    steps: [
+      { text: "Mở Sản phẩm, bấm «Tạo sản phẩm»: tên, giá bán, size / màu nếu có.", href: "/products/new" },
+      { text: "Nhiều sản phẩm một lúc: bấm «Nhập từ tệp», tải tệp Excel / CSV lên, xem trước rồi mới ghi.", href: "/products/import" },
+      { text: "Muốn AI kiểm hàng còn trước khi chốt: khai số lượng ở Nhập hàng & kiểm kê. Chưa khai thì AI không khẳng định còn hàng.", href: "/inventory/receipts" },
+    ],
+  },
+  {
+    key: "chotdon-ai-sales",
+    topic: "AI",
+    audience: "CHOTDON",
+    title: "Thử AI rồi bật cho khách thật",
+    summary: "Chat thử một lượt mua trọn vòng trong khung thử, thấy ổn thì bật — AI trả lời khách trên các Page đã nối.",
+    href: "/ai/sales-chatbot",
+    permission: "ai_sales:view",
+    steps: [
+      { text: "Mở AI Sales, xem bảng «AI đã sẵn sàng tự trả lời khách?»: dòng «Cần làm» là việc phải xong trước khi bật; dòng «Đang chuẩn bị» là phần đội hỗ trợ đang làm cho cửa hàng.", href: "/ai/sales-chatbot" },
+      { text: "Ở phần Cấu hình: chọn giọng điệu, phí giao hàng và ghi chính sách của cửa hàng (đổi trả, thanh toán) vào ô hướng dẫn thêm." },
+      { text: "Chat thử trong khung thử bên phải như một khách thật: hỏi giá, chọn hàng, cho địa chỉ — tới khi AI đọc lại tóm tắt đơn." },
+      { text: "Bấm «Lưu và bật bot». Từ lúc này AI trả lời khách thật; nhân viên vẫn tiếp quản được từng hội thoại ở Hội thoại." },
+    ],
+  },
+  {
+    key: "chotdon-inbox",
+    topic: "AI",
+    audience: "CHOTDON",
+    title: "Trả lời khách và xem đơn AI chốt",
+    summary: "Mọi tin Facebook / Zalo / chat web ở một chỗ; nhân viên tiếp quản khi cần, AI nhường trong lúc người đang trả lời.",
+    href: "/ai/sales-chatbot/inbox",
+    permission: "ai_sales:view",
+    steps: [
+      { text: "Mở Hội thoại. Bộ lọc «Chờ trả lời» xếp khách chờ lâu nhất lên đầu; «Cần người» là ca AI đã chuyển cho nhân viên.", href: "/ai/sales-chatbot/inbox" },
+      { text: "Bấm một hội thoại để đọc. Muốn tự trả lời: bấm «Tiếp quản», gõ tin và gửi — AI tạm nhường cho tới khi bạn trả lại." },
+      { text: "Đơn AI đã chốt hiện ngay trong hội thoại với liên kết tới đơn; sửa đơn ở trang đơn hàng nếu AI ghi sai." },
+    ],
+  },
+  {
+    key: "chotdon-staff",
+    topic: "ACCOUNT",
+    audience: "CHOTDON",
+    title: "Mời nhân viên vào cửa hàng",
+    summary: "Mỗi người một tài khoản riêng — biết ai trả lời khách nào, nghỉ việc thì khoá đúng người.",
+    href: "/settings/users",
+    permission: "users:manage",
+    steps: [
+      { text: "Mở Nhân viên, bấm «Mời người dùng», nhập email, chọn vai trò rồi bấm «Tạo liên kết mời».", href: "/settings/users" },
+      { text: "Sao chép liên kết và gửi qua Zalo / Messenger. Liên kết dùng một lần, hết hạn sau 7 ngày." },
+      { text: "Nhân viên mở liên kết, tự đặt tên và mật khẩu — xong là vào được ngay." },
+    ],
+  },
+  {
+    key: "chotdon-plan",
+    topic: "ACCOUNT",
+    audience: "CHOTDON",
+    title: "Xem gói, lượt AI và gia hạn",
+    summary: "Gói đang dùng, còn bao nhiêu lượt khách AI trong tháng, hạn sử dụng, và gia hạn bằng quét mã QR.",
+    href: "/settings/plan",
+    permission: "settings:manage",
+    steps: [
+      { text: "Mở Gói dịch vụ: hạn sử dụng và số lượt khách AI đã dùng trong tháng nằm ngay đầu trang.", href: "/settings/plan" },
+      { text: "Gia hạn: chọn số tháng, bấm «Tạo mã thanh toán», quét mã bằng app ngân hàng và GIỮ NGUYÊN nội dung chuyển khoản." },
+      { text: `Quá hạn: sau thời gian ân hạn, cửa hàng chuyển sang chỉ xem cho tới khi gia hạn. ${RETENTION_SENTENCE}` },
+    ],
+  },
+
   // ───────────────── BẮT ĐẦU ─────────────────
   {
     key: "invite-staff",
@@ -319,20 +466,30 @@ export const HELP_GUIDES: readonly HelpGuide[] = [
   {
     key: "my-account",
     topic: "ACCOUNT",
+    audience: "ALL",
     title: "Đổi mật khẩu của tôi",
     summary: "Đổi mật khẩu khi nghi lộ; đổi xong, tài khoản bị đăng xuất trên MỌI thiết bị, kể cả máy đang dùng.",
     href: "/settings/profile",
-    steps: [{ text: "Bấm ảnh đại diện góc trên → «Tài khoản của tôi» → «Đổi mật khẩu của tôi».", href: "/settings/profile" }],
+    steps: [
+      {
+        // ERP: ảnh đại diện nằm ở GÓC TRÊN BÊN PHẢI thanh menu. Vỏ: cuối thanh bên trái (máy tính) / góc trên (điện thoại) — gọi
+        // đường menu chung cho cả hai khổ thay vì tả vị trí.
+        text: "Bấm ảnh đại diện ở góc trên bên phải → «Tài khoản của tôi» → «Đổi mật khẩu của tôi».",
+        shellText: "Mở Cài đặt → «Tài khoản của tôi», rồi bấm «Đổi mật khẩu của tôi».",
+        href: "/settings/profile",
+      },
+    ],
   },
   {
     key: "data-export",
     topic: "ACCOUNT",
+    audience: "ALL",
     title: "Tải dữ liệu của cửa hàng ra Excel",
     summary: "Khách hàng, đơn, sản phẩm, phiếu thu, lịch hẹn — tải ra CSV bất cứ lúc nào, kể cả khi gói đã quá hạn.",
     href: "/settings/data-export",
     permission: "settings:manage",
     steps: [
-      { text: "Mở Hệ thống → Xuất dữ liệu.", href: "/settings/data-export" },
+      { text: "Mở Hệ thống → Xuất dữ liệu.", shellText: "Mở Cài đặt → «Xuất dữ liệu».", href: "/settings/data-export" },
       { text: "Bấm «Tải CSV» ở loại cần lấy; mở tệp bằng Excel hoặc Google Sheets. Mỗi tệp là TOÀN BỘ dữ liệu loại đó." },
       { text: "Tệp có tên, số điện thoại, địa chỉ khách — giữ cẩn thận. Mỗi lượt tải được ghi vào nhật ký." },
     ],
@@ -347,25 +504,37 @@ export const HELP_GUIDES: readonly HelpGuide[] = [
     steps: [
       { text: "Mở Hệ thống → Gói & thanh toán.", href: "/settings/plan" },
       { text: "Chọn số tháng, bấm «Tạo mã thanh toán», rồi quét mã bằng app ngân hàng. Giữ nguyên nội dung chuyển khoản — ERP đối chiếu tự động theo đúng mã đó." },
-      { text: "Quá hạn: sau thời gian ân hạn, ERP chuyển sang CHỈ XEM (vẫn xem và xuất được) cho tới khi gia hạn. Không dữ liệu nào bị xoá." },
+      { text: `Quá hạn: sau thời gian ân hạn, ERP chuyển sang CHỈ XEM (vẫn xem và xuất được) cho tới khi gia hạn. ${RETENTION_SENTENCE}` },
     ],
   },
 ];
 
-/** Câu hỏi thường gặp — không gắn trang nào, nên luôn hiện. */
-export const HELP_FAQ: readonly { q: string; a: string }[] = [
+/** Câu hỏi thường gặp — không gắn trang nào, nên luôn hiện (lọc theo đối tượng đọc như bài). */
+export const HELP_FAQ: readonly { q: string; a: string; audience?: HelpAudience }[] = [
   { q: "Bấm lưu mà ERP báo «chỉ xem»?", a: "Gói của cửa hàng đã quá hạn thanh toán. Dữ liệu vẫn còn nguyên; người quản trị gia hạn ở Hệ thống → Gói & thanh toán là ghi lại được ngay." },
   { q: "Không thấy một trang mà đồng nghiệp thấy?", a: "Mỗi vai trò thấy đúng phần việc của mình. Nhờ người quản trị kiểm tra vai trò của bạn ở Hệ thống → Người dùng." },
   { q: "Bấm vào một mục thì ERP báo module chưa bật?", a: "Tính năng đó đang tắt cho cửa hàng. Người quản trị bật ở Hệ thống → Module của tổ chức." },
   { q: "Mời thêm người mà ERP báo vượt hạn mức?", a: "Gói hiện tại có trần số người dùng, kể cả lời mời chưa nhận. Thu hồi lời mời không dùng tới, khoá tài khoản đã nghỉ, hoặc nâng gói." },
-  { q: "Tôi quên mật khẩu?", a: "Nhờ người quản trị cửa hàng gửi liên kết đặt lại mật khẩu. Nếu chính bạn là quản trị, liên hệ bên cung cấp phần mềm." },
+  { q: "Tôi quên mật khẩu?", a: "Nhờ người quản trị cửa hàng gửi liên kết đặt lại mật khẩu. Nếu chính bạn là quản trị, liên hệ bên cung cấp phần mềm.", audience: "ALL" },
+  { q: "Bấm lưu mà ứng dụng báo «chỉ xem»?", a: "Gói của cửa hàng đã quá hạn. Dữ liệu vẫn còn nguyên; người quản trị gia hạn ở Gói dịch vụ là ghi lại được ngay.", audience: "CHOTDON" },
+  { q: "AI không trả lời khách?", a: "Mở AI Sales, xem bảng «AI đã sẵn sàng tự trả lời khách?»: dòng nào «Cần làm» thì làm trước; dòng «Đang chuẩn bị» là đội hỗ trợ đang làm, bạn không cần làm gì. Hết lượt khách AI của tháng thì mua thêm ở Gói dịch vụ. Vẫn không được thì nhắn hỗ trợ.", audience: "CHOTDON" },
+  { q: "Mời thêm người mà ứng dụng báo vượt hạn mức?", a: "Gói hiện tại có trần số người dùng, kể cả lời mời chưa nhận. Thu hồi lời mời không dùng tới, khoá tài khoản đã nghỉ, hoặc nâng gói.", audience: "CHOTDON" },
 ];
+
+/** Bài / câu hỏi này dành cho người đọc đang ở trong vỏ Chốt Đơn (`shell = true`) hay ngoài vỏ. Bỏ trống đối tượng ⇒ `ERP`. */
+export function helpAudienceMatches(audience: HelpAudience | undefined, shell: boolean): boolean {
+  const a = audience ?? "ERP";
+  return a === "ALL" || (shell ? a === "CHOTDON" : a === "ERP");
+}
 
 /**
  * Bài này có hiện cho người xem không: trang chính mở được (module đang bật), đủ quyền, và — bài `tenantOnly` — người xem
  * ở tổ chức khách. Ẩn không phải bảo mật (cổng thật ở trang); ẩn để không ai đọc một bài dẫn tới trang họ không vào được.
  */
-export function helpGuideVisible(guide: HelpGuide, viewer: ModuleViewer & { isHome: boolean }, allowed: (permission: Permission) => boolean): boolean {
+export function helpGuideVisible(guide: HelpGuide, viewer: ModuleViewer & { isHome: boolean; shell?: boolean }, allowed: (permission: Permission) => boolean): boolean {
+  if (!helpAudienceMatches(guide.audience, viewer.shell ?? false)) return false;
+  // Trong vỏ, mọi đường dẫn của bài phải mở được — cùng phép quyết định với cổng máy chủ (không bao giờ dẫn vào trang bị chặn).
+  if (viewer.shell && ![guide.href, ...guide.steps.flatMap((s) => (s.href ? [s.href] : []))].every(salesAgentPathAllowed)) return false;
   if (guide.tenantOnly && viewer.isHome) return false;
   if (guide.permission && !allowed(guide.permission)) return false;
   if (guide.alsoRequires?.some((p) => !allowed(p))) return false;

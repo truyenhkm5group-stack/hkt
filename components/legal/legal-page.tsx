@@ -1,5 +1,4 @@
 import type { ReactNode } from "react";
-import Link from "next/link";
 import { BrandLockup } from "@/components/brand";
 import { COMPANY, PRIVACY_POLICY, TERMS_OF_SERVICE } from "@/lib/constants/company";
 import { hostBrand } from "@/lib/platform/host-brand";
@@ -17,6 +16,9 @@ export function legalBrandName(brand: SiteBrand): string {
  * Mở từ `chotdontudong.com` thì đầu trang mang logo Chốt Đơn Tự Động và một dòng nói rõ đây là sản phẩm của cùng pháp
  * nhân, chạy trên cùng nền tảng — để người đọc không thấy mình bị đưa sang một công ty khác. NỘI DUNG văn bản (có số
  * phiên bản) không đổi theo host: sửa câu chữ của văn bản là việc của phiên bản mới, không phải của giao diện.
+ *
+ * Logo dẫn về `/` bằng `<a>` (tải cả trang), không `<Link>`: trang nằm ngoài nhóm `(dashboard)` và người đã đăng nhập vỏ Chốt
+ * Đơn mở được nó — điều hướng phía client tới `/` lặp trang trắng như #671 (xem `app/not-found.tsx`).
  */
 export async function LegalPage({
   title,
@@ -36,9 +38,10 @@ export async function LegalPage({
     <div className="min-h-screen bg-background">
       <header className="border-b border-border/60">
         <div className="mx-auto flex max-w-3xl items-center justify-between px-4 py-4 sm:px-6">
-          <Link href="/" aria-label={`${legalBrandName(brand)} — trang chủ`}>
+          {/* eslint-disable-next-line @next/next/no-html-link-for-pages -- cố ý tải cả trang (xem chú thích đầu tệp) */}
+          <a href="/" aria-label={`${legalBrandName(brand)} — trang chủ`}>
             <BrandLockup wordmarkClassName="text-base" brand={brand} />
-          </Link>
+          </a>
         </div>
       </header>
       <main className="mx-auto max-w-3xl space-y-8 px-4 py-10 sm:px-6">

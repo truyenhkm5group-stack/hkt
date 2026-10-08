@@ -1,6 +1,6 @@
 import { PageHeader } from "@/components/page-header";
 import { can, requirePermission } from "@/lib/auth/session";
-import { CONNECT_RESULT_PARAMS, connectOutcome, type ConnectParams, type StoredDiagnosticFacts } from "@/lib/channels/overview-shared";
+import { CHANNELS_MANAGE_PERMISSION, CONNECT_RESULT_PARAMS, connectOutcome, type ConnectParams, type StoredDiagnosticFacts } from "@/lib/channels/overview-shared";
 import { loadChannelsOverview } from "@/lib/channels/overview";
 import { loadPendingPages } from "@/lib/integrations/messenger/connect";
 import { env } from "@/lib/env";
@@ -24,7 +24,7 @@ export default async function ChannelsPage({ searchParams }: { searchParams: Pro
   const user = await requirePermission("ai_sales:view");
   const sp = await searchParams;
   const params: ConnectParams = Object.fromEntries(CONNECT_RESULT_PARAMS.map((k) => [k, typeof sp[k] === "string" ? (sp[k] as string).slice(0, 300) : ""]).filter(([, v]) => v));
-  const manage = can(user, "settings:manage");
+  const manage = can(user, CHANNELS_MANAGE_PERMISSION);
   const operator = platformOperatorDenial(user) === null;
   const overview = await loadChannelsOverview({ operator });
   const diag = manage ? await getSettingJson<(StoredDiagnosticFacts & { granted?: unknown; at?: unknown }) | null>("messenger.lastConnectDiagnostic", null) : null;

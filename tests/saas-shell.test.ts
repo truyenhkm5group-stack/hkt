@@ -12,11 +12,16 @@
  *  4. MÁY CHỦ (tổ chức thật trên PGlite, mã `sa-`): route nội bộ ⇒ `SHELL_RESTRICTED` + `requireUser` chuyển về hộp thư; `/` ⇒
  *     hộp thư; trang của vỏ + API ⇒ đi qua; bật một module ERP ⇒ hết vỏ ngay; nhà không đổi.
  *  5. MOBILE — hợp đồng mã nguồn của vỏ: thanh dưới chỉ ở màn hẹp, ô bấm ≥ 44px, `<main>` không tràn ngang.
+ *  6. NGOÀI (dashboard) — trang người vỏ mở được mà nằm ngoài nhóm `(dashboard)` (404 gốc, /pricing, văn bản pháp lý…) không
+ *     điều hướng PHÍA CLIENT tới `/` (`<Link href="/">`, `router.push("/")`), và không tự chuyển hướng người đã đăng nhập thẳng
+ *     tới `/` (`redirect(safeNextPath(…))`, `redirect("/")` — /login dùng `landingAfterSignIn`): lượt RSC ấy dựng layout
+ *     `(dashboard)` từ gốc và layout ném redirect ⇒ vòng trang trắng #671. Tên sản phẩm của 404 gốc theo host như bố cục gốc.
  *
  * Tự dọn: tổ chức `sa-shell` lưu trữ + xoá thư mục CSDL trong `finally`.
  */
-import { CHANNELS_ROUTE } from "@/lib/channels/overview-shared";
+import { CHANNELS_MANAGE_PERMISSION, CHANNELS_ROUTE } from "@/lib/channels/overview-shared";
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import path from "node:path";
 import { and, eq } from "drizzle-orm";
@@ -44,6 +49,9 @@ import {
   shellFitHeight,
 } from "@/lib/constants/saas-nav";
 import { DENY_REASON_MESSAGE, DENY_REASON_PARAM, loginShouldStay } from "@/lib/constants/session-revocation";
+import { hostProductName } from "@/lib/branding/copy";
+import { channelFactsOf } from "@/lib/onboarding/go-live";
+import { anyChannelConnected } from "@/lib/onboarding/go-live-shared";
 import { invalidateCapabilities } from "@/lib/platform/capabilities";
 import { setSessionTokenSourceForTests, withOrganization } from "@/lib/platform/context";
 import { getHomeOrganization, invalidateOrganizations } from "@/lib/platform/organizations";
@@ -297,6 +305,25 @@ function kiemTrang() {
   const shellSrc = readFileSync(path.join(goc, "components", "saas-shell.tsx"), "utf8");
   assert.match(shellSrc, /SHELL_BLOCKED_PARAM/, "vỏ in câu «không có trong gói» khi bị chuyển hướng");
 
+  // HỘP THƯ RỖNG «chưa nối kênh»: hỏi MỌI kênh bằng ĐÚNG hàm của bước onboarding «đã nối kênh» (Pancake · Facebook nối thẳng ·
+  // Zalo OA · chat web), không suy từ danh sách page của hộp thư (shop chỉ nối Zalo / chat web không có page nào); nút nối kênh
+  // theo ĐÚNG quyền nối kênh của màn Kênh kết nối — người không nối được thấy câu «nhờ quản trị».
+  assert.match(inbox, /memo\(`inbox:channel-facts:\$\{orgCode\}`, 60_000, \(\) => loadChannelFacts\(orgCode\)\)/, "hộp thư đọc kênh bằng hàm chung của onboarding, đệm 60 giây theo mã tổ chức (trang tự làm mới 5 giây)");
+  assert.match(inbox, /noChannelYet = channelFacts !== null && !anyChannelConnected\(channelFacts\)/, "đọc kênh hỏng ⇒ không kết luận «chưa nối kênh»");
+  assert.ok(!/noChannelYet = pages\.length === 0/.test(inbox), "không suy «chưa nối kênh» từ danh sách page của hộp thư");
+  assert.match(inbox, /const canConnect = can\(user, CHANNELS_MANAGE_PERMISSION\)/, "nút nối kênh theo quyền nối kênh");
+  assert.match(inbox, /\{canConnect \? \(\s*<Link href=\{SALES_AGENT_CHANNELS_HREF\}/, "nút «Kết nối Facebook» chỉ cho người nối được kênh");
+  assert.match(inbox, /Nhờ quản trị cửa hàng nối kênh/, "người không nối được kênh thấy câu nhờ quản trị");
+  assert.match(readFileSync(pageFileOf(CHANNELS_ROUTE), "utf8"), /const manage = can\(user, CHANNELS_MANAGE_PERMISSION\)/, "màn Kênh kết nối dùng CÙNG hằng quyền");
+  assert.equal(CHANNELS_MANAGE_PERMISSION, "settings:manage");
+  const khongKenh = { pancake: false, messenger: false, zalo: false, webChat: false };
+  assert.equal(anyChannelConnected(khongKenh), false);
+  for (const k of ["pancake", "messenger", "zalo", "webChat"] as const) assert.equal(anyChannelConnected({ ...khongKenh, [k]: true }), true, `chỉ ${k} ⇒ ĐÃ nối kênh`);
+  assert.deepEqual(channelFactsOf({ fanpage: { status: "FAILED" }, messenger: { status: "ACTIVE", page: null }, zalo: { status: "ACTIVE" }, pub: { state: "PUBLISHED" } }), { pancake: false, messenger: false, zalo: true, webChat: true }, "Messenger bật mà chưa có page ⇒ chưa nối; Zalo bật · chat web xuất bản ⇒ nối");
+
+  // Số dư AI khi cờ tắt: trang không đọc trạng thái gói ⇒ không khẳng định gì về gói.
+  assert.ok(!/hoạt động bình thường/.test(readFileSync(pageFileOf("/settings/ai-balance"), "utf8")), "Số dư AI không khẳng định gói «vẫn hoạt động bình thường»");
+
   // Tổng quan: số của shop, KHÔNG chi phí / token / model của nhà cung cấp.
   const ov = readFileSync(pageFileOf("/ai/overview"), "utf8");
   assert.match(ov, /withMoney: false/, "Tổng quan đọc hiệu quả AI KHÔNG kèm tiền AI");
@@ -344,6 +371,47 @@ function kiemMobile() {
     assert.ok(!/min-w-\[(?:[6-9]\d\d|\d{4,})px\]|w-\[(?:[6-9]\d\d|\d{4,})px\]/.test(src), `${href}: không đặt bề rộng cố định lớn hơn màn điện thoại`);
     assert.match(src, /grid-cols-2|sm:grid-cols|divide-y/, `${href}: bố cục đổ cột theo màn hình`);
   }
+}
+
+/* ═════════════ 6 · NGOÀI (dashboard) — KHÔNG ĐIỀU HƯỚNG CLIENT TỚI `/` ═════════════ */
+function kiemNgoaiDashboard() {
+  const tracked = execFileSync("git", ["ls-files", "app", "components"], { cwd: goc, encoding: "utf8" })
+    .split("\n")
+    .filter((f) => f.endsWith(".tsx"));
+  const outside = tracked.filter((f) => f.startsWith("app/") && !f.startsWith("app/(dashboard)/"));
+  assert.ok(outside.includes("app/not-found.tsx") && outside.includes("app/pricing/page.tsx"), `đọc hụt trang ngoài (dashboard) (${outside.length} tệp)`);
+  // Cả thành phần các trang ấy nạp trực tiếp (khung văn bản pháp lý, bảng giá công khai…): lối về `/` nằm trong đó cũng là lối của trang.
+  const files = new Set(outside);
+  for (const f of outside) {
+    for (const m of readFileSync(path.join(goc, f), "utf8").matchAll(/from "@\/(components\/[^"]+)"/g)) {
+      for (const c of [`${m[1]}.tsx`, `${m[1]}/index.tsx`]) if (tracked.includes(c)) files.add(c);
+    }
+  }
+  assert.ok(files.has("components/legal/legal-page.tsx"), "quét cả thành phần trang ngoài nạp");
+  // Bỏ chú thích trước khi quét: chú thích được phép NHẮC TỚI mẫu cấm (để giải thích vì sao), mã thì không.
+  const maKhongChuThich = (f: string) =>
+    readFileSync(path.join(goc, f), "utf8")
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/(^|[^:"'`])\/\/.*$/gm, "$1");
+  const viPham = [...files].filter((f) => {
+    const src = maKhongChuThich(f);
+    return /<Link\b[^>]*?\bhref=(?:"\/"|'\/'|\{\s*["'`]\/["'`]\s*\})/.test(src) || /router\.(?:push|replace)\(\s*["'`]\/["'`]\s*\)/.test(src);
+  });
+  assert.deepEqual(viPham, [], `trang ngoài (dashboard) điều hướng client tới "/" — người vỏ gặp vòng trang trắng #671 (lib/saas/shell-landing.ts): ${viPham.join(" · ")}`);
+  for (const f of ["app/not-found.tsx", "app/pricing/page.tsx", "components/legal/legal-page.tsx"]) assert.match(readFileSync(path.join(goc, f), "utf8"), /<a href="\/"/, `${f}: lối về trang chính tải cả trang`);
+  // Trang ngoài (dashboard) TỰ chuyển hướng người đã đăng nhập (vd /login khi còn phiên) cũng là một lối tới `/`: tới đó bằng
+  // `<Link>` (/start · /join · /reset → «Đăng nhập») là điều hướng client ⇒ cùng vòng #671. Đích phải tính bằng
+  // `landingAfterSignIn` (người vỏ ⇒ trang nhà của vỏ), không `redirect(safeNextPath(…))` / `redirect("/")` trực tiếp.
+  const chuyenThang = outside.filter((f) => /\bredirect\(\s*safeNextPath\(/.test(maKhongChuThich(f)) || /\bredirect\(\s*["'`]\/["'`]\s*\)/.test(maKhongChuThich(f)));
+  assert.deepEqual(chuyenThang, [], `trang ngoài (dashboard) chuyển hướng thẳng tới "/" / safeNextPath — người vỏ đang đăng nhập gặp vòng #671: ${chuyenThang.join(" · ")}`);
+  assert.match(maKhongChuThich("app/login/page.tsx"), /if \(session && !loginShouldStay\(params\.reason\)\) redirect\(await landingAfterSignIn\(params\.next\)\);/, "/login còn phiên ⇒ đích của landingAfterSignIn");
+  // 404 gốc: tên sản phẩm theo host — tên miền con của khách không in «VNXcommerce», tên miền con lạ không in tên nào.
+  assert.equal(hostProductName({ slug: "shop-a", org: { name: "Shop A" } }, "vnx"), "Shop A");
+  assert.equal(hostProductName({ slug: "khong-co", org: null }, "vnx"), null);
+  assert.equal(hostProductName({ slug: null, org: null }, "chotdon"), "Chốt Đơn Tự Động");
+  assert.equal(hostProductName({ slug: null, org: null }, "vnx"), "VNXcommerce");
+  const nf = readFileSync(path.join(goc, "app", "not-found.tsx"), "utf8");
+  assert.ok(nf.includes("hostOrganization()") && nf.includes("hostProductName(host, brand)"), "404 gốc đọc tên theo host như bố cục gốc (app/layout.tsx)");
 }
 
 /* ═════════════ 4 · MÁY CHỦ ═════════════ */
@@ -450,9 +518,10 @@ export async function testSaasShell() {
   kiemTrang();
   kiemTruocSau();
   kiemMobile();
+  kiemNgoaiDashboard();
   await kiemMayChu();
   console.log(
-    `✓ Vỏ app Chốt Đơn: workspace Sales Agent = thương hiệu chotdon + chỉ sản phẩm Chốt Đơn theo module · đúng ${EIGHT.length} mục · ${BLOCKED.length} route nội bộ chặn ở máy chủ (SHELL_RESTRICTED ⇒ hộp thư) · \`/\` ⇒ hộp thư · bật module ERP / bỏ thương hiệu ⇒ menu ERP như cũ · nhà không đổi · thanh dưới điện thoại ≥ 44px`,
+    `✓ Vỏ app Chốt Đơn: workspace Sales Agent = thương hiệu chotdon + chỉ sản phẩm Chốt Đơn theo module · đúng ${EIGHT.length} mục · ${BLOCKED.length} route nội bộ chặn ở máy chủ (SHELL_RESTRICTED ⇒ hộp thư) · \`/\` ⇒ hộp thư · bật module ERP / bỏ thương hiệu ⇒ menu ERP như cũ · nhà không đổi · thanh dưới điện thoại ≥ 44px · trang ngoài (dashboard) không điều hướng client tới \`/\` · hộp thư rỗng hỏi MỌI kênh, nút nối kênh theo quyền nối kênh`,
   );
 }
 

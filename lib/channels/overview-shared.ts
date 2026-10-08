@@ -24,6 +24,12 @@ import { CUSTOMER_WEBHOOK_TEXT, customerDiscoveryIssue, type CustomerIssue } fro
 /** Route của màn — luồng điều hướng (menu) trỏ vào hằng này, không gõ lại chuỗi. */
 export const CHANNELS_ROUTE = "/ai/channels";
 /**
+ * Quyền NỐI kênh (nút «Kết nối Facebook», trang Kết nối, route bắt đầu nối Facebook) — xem màn chỉ cần `ai_sales:view`. Nơi
+ * khác đặt một nút dẫn tới việc nối kênh (trạng thái rỗng của hộp thư) đọc hằng này: người không đủ quyền thấy câu «nhờ quản
+ * trị», không thấy một nút dẫn tới màn không có nút nào cho họ bấm.
+ */
+export const CHANNELS_MANAGE_PERMISSION = "settings:manage" as const;
+/**
  * Cookie đánh dấu «lượt kết nối Facebook bắt đầu từ màn Kênh kết nối» — callback OAuth (không đổi) vẫn quay về trang Messenger
  * như cũ; trang đó thấy cookie thì chuyển tiếp nguyên tham số sang đây. Không mang dữ liệu nào ngoài cờ `1`.
  */

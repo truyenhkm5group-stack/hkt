@@ -76,7 +76,8 @@ export type CustomerAiState = "ACTIVE" | "NEEDS_SETUP" | "PAUSED" | "OUT_OF_QUOT
 
 export const CUSTOMER_AI_STATE_LABEL: Record<CustomerAiState, string> = {
   ACTIVE: "AI đang hoạt động",
-  NEEDS_SETUP: "Cần cấu hình",
+  // Khách không tự cấu hình AI (CUSTOMER_AI_CONFIG_MANAGED) ⇒ không gọi là «Cần cấu hình»: đó là việc của đội hỗ trợ.
+  NEEDS_SETUP: "Đang chuẩn bị",
   PAUSED: "Tạm dừng",
   OUT_OF_QUOTA: "Hết lượt",
 };
@@ -85,7 +86,8 @@ export const CUSTOMER_AI_STATE_HINT: Record<CustomerAiState, string> = {
   ACTIVE: "Bot đang trả lời khách của shop.",
   NEEDS_SETUP: "Bộ phận hỗ trợ đang hoàn tất cấu hình AI cho shop — liên hệ hỗ trợ nếu cần gấp.",
   PAUSED: "Bot đang tắt — bấm «Lưu và bật bot» khi muốn bot trả lời khách.",
-  OUT_OF_QUOTA: "Shop đã dùng hết lượt khách AI xử lý của gói — xem Hệ thống → Gói & thanh toán để mua thêm hoặc nâng gói.",
+  // Đường có THẬT ở mọi cửa hàng khách: «Gói dịch vụ» là tên mục menu của vỏ Chốt Đơn (vỏ không có nhóm «Hệ thống»).
+  OUT_OF_QUOTA: "Shop đã dùng hết lượt khách AI xử lý của gói — mở trang Gói dịch vụ để mua thêm hoặc nâng gói.",
 };
 
 /** Câu DUY NHẤT khách thấy khi AI hỏng (hết tiền · khoá bị từ chối · quá tải · lỗi nhà cung cấp) — không câu lỗi gốc. */
@@ -126,7 +128,8 @@ export function customerQuotaError(reason: AiQuotaBlockReason): string {
  */
 export const CUSTOMER_AI_SOFT_LIMIT_NOTICE = {
   title: "AI sắp chạm hạn mức tháng của gói",
-  body: "AI của shop đã dùng phần lớn hạn mức tháng này của gói — xem Hệ thống → Gói & thanh toán, hoặc liên hệ hỗ trợ nếu cần thêm.",
+  // Cùng đường với `CUSTOMER_AI_STATE_HINT.OUT_OF_QUOTA`: «Gói dịch vụ» có thật trong vỏ khách, «Hệ thống → …» thì không.
+  body: "AI của shop đã dùng phần lớn hạn mức tháng này của gói — xem trang Gói dịch vụ, hoặc liên hệ hỗ trợ nếu cần thêm.",
 } as const;
 
 /** Câu của CHÍNH tệp này + câu cổng gói (`AI_STOP_MESSAGE`, viết sẵn cho chủ shop) — tới khách nguyên văn. */
@@ -232,16 +235,19 @@ export function customerAiState(input: { enabled: boolean; aiReady: boolean; quo
   return "ACTIVE";
 }
 
-/** Bảng kiểm «sẵn sàng tự trả lời» cho khách: dòng AI nói bằng trạng thái khách, không nhắc khoá / kết nối AI. */
+/**
+ * Bảng kiểm «sẵn sàng tự trả lời» cho khách: dòng AI nói bằng trạng thái khách, không nhắc khoá / kết nối AI. Chỉ «hết lượt» là
+ * việc khách TỰ làm được (trang gói) ⇒ `FAIL` («Cần làm»); AI chưa sẵn sàng là việc của đội hỗ trợ (khách không tự cấu hình AI —
+ * `CUSTOMER_AI_CONFIG_MANAGED`) ⇒ `PENDING` («Đang chuẩn bị»), không bao giờ «Cần làm» — bảng không giao cho khách một việc khách
+ * không có nút nào để làm.
+ */
 export function customerReadinessChecks(checks: readonly ReadinessCheck[], state: CustomerAiState): ReadinessCheck[] {
-  const ready = state === "ACTIVE" || state === "PAUSED";
-  return checks.map((c) =>
-    c.key !== "AI_READY"
-      ? c
-      : ready
-        ? { key: c.key, label: "AI sẵn sàng", status: "PASS", detail: "AI của shop dùng được.", href: null }
-        : { key: c.key, label: CUSTOMER_AI_STATE_LABEL[state], status: "FAIL", detail: CUSTOMER_AI_STATE_HINT[state], href: state === "OUT_OF_QUOTA" ? "/settings/plan" : null },
-  );
+  return checks.map((c): ReadinessCheck => {
+    if (c.key !== "AI_READY") return c;
+    if (state === "ACTIVE" || state === "PAUSED") return { key: c.key, label: "AI sẵn sàng", status: "PASS", detail: "AI của shop dùng được.", href: null };
+    if (state === "OUT_OF_QUOTA") return { key: c.key, label: CUSTOMER_AI_STATE_LABEL[state], status: "FAIL", detail: CUSTOMER_AI_STATE_HINT[state], href: "/settings/plan" };
+    return { key: c.key, label: "AI của shop đang được chuẩn bị", status: "PENDING", detail: CUSTOMER_AI_STATE_HINT[state], href: null };
+  });
 }
 
 // ───────────────────────── KHUNG THỬ: không tên / tóm tắt công cụ ─────────────────────────

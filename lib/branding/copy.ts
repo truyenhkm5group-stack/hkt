@@ -168,3 +168,14 @@ export function hostTabMetadata(host: { slug: string | null; org: { name: string
   if (!host.slug) return null;
   return orgTabMetadata({ name: host.org?.name ?? "ERP", logoUrl: null });
 }
+
+/**
+ * Tên in trong CÂU CHỮ của một trang ngoài dashboard (trang 404 gốc) — cùng thứ tự với tiêu đề tab của bố cục gốc
+ * (`app/layout.tsx::generateMetadata`): tên miền con của tổ chức đã xuất bản ⇒ tên tổ chức đó; tên miền con lạ ⇒ `null` (câu
+ * bỏ hẳn vế tên — không bao giờ tên của nhà, và không in chữ «ERP» cho khách); không có tên miền con ⇒ tên sản phẩm theo
+ * thương hiệu của host.
+ */
+export function hostProductName(host: { slug: string | null; org: { name: string } | null }, brand: "vnx" | "chotdon"): string | null {
+  if (host.slug) return host.org?.name ?? null;
+  return brand === "chotdon" ? "Chốt Đơn Tự Động" : "VNXcommerce";
+}

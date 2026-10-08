@@ -116,7 +116,10 @@ export async function testLoginThrottle() {
   assert.equal(safeNextPath("/orders?tab=cho&page=2#dong-3"), "/orders?tab=cho&page=2#dong-3", "đường nội bộ giữ nguyên query + hash");
   assert.equal(safeNextPath("/marketing/creatives"), "/marketing/creatives");
   const trang = readFileSync("app/login/page.tsx", "utf8");
-  assert.ok(trang.includes("safeNextPath(") && !trang.includes('params.next.startsWith("/")'), "trang /login (đã đăng nhập) cũng phải đi qua safeNextPath");
+  // Trang /login khi ĐÃ đăng nhập đi qua ĐÚNG hàm của loginAction: landingAfterSignIn chuẩn hoá `next` bằng safeNextPath trước
+  // tiên (khẳng định ngay dưới), và đưa người vỏ thẳng tới trang nhà của vỏ thay vì `/` — `/` qua điều hướng client từ trang
+  // ngoài (dashboard) là vòng trang trắng #671 (review Finish Line vòng 2).
+  assert.ok(trang.includes("redirect(await landingAfterSignIn(params.next))") && !trang.includes("redirect(safeNextPath(") && !trang.includes('params.next.startsWith("/")'), "trang /login (đã đăng nhập) phải chuyển hướng qua landingAfterSignIn");
   // Đích sau đăng nhập đi qua landingAfterSignIn (lib/saas/shell-landing.ts, F-01) — và hàm đó chuẩn hoá `next` bằng
   // safeNextPath TRƯỚC mọi phép khác, nên ngoài vỏ đích vẫn đúng bằng safeNextPath(next) (tests/shell-login-landing.test.ts).
   assert.ok(auth.includes("redirect(await landingAfterSignIn(next))"), "loginAction phải chuyển hướng qua landingAfterSignIn");
