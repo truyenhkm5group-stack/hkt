@@ -1,0 +1,8 @@
+{
+  "pr": 692,
+  "sha": "9d41af49ca4d75d8c973f2a05a34d86bb7204365",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-08T18:28:11.725Z",
+  "note": "Review độc lập PASS (f20ebde9) + phần chênh PASS (9d41af49): CI sửa đúng bài, MEDIUM-1 khoá báo riêng + cảnh báo treo, MEDIUM-2 phân biệt trước/sau ghi đơn, LOW 1–7, migration 0237, hoà #690 một quyết định đăng nhập; tsc + isolation + migration-journal + login-throttle + identity-email-login + ops-signals + saas-acceptance đạt; merge-tree sạch"
+}
