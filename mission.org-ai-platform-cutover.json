@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "mission_id": "org-ai-platform-cutover",
-  "title": "HSLC: kiểm khoá AI (vân tay · project Google) và chuyển AI Bán hàng sang AI dùng chung của nền tảng — ops org-ai-cutover",
+  "title": "HSLC: kiểm khoá AI (dấu băm · project Google) và chuyển AI Bán hàng sang AI dùng chung của nền tảng — ops org-ai-cutover",
   "business_goal": "",
   "status": "PR_READY",
   "priority": "P2",
@@ -17,7 +17,9 @@
     ".github/workflows/ops-vps.yml",
     "tests/org-ai-cutover.test.ts",
     "tests/sync-fixtures.test.ts",
-    "tests/platform-isolation-static.test.ts"
+    "tests/platform-isolation-static.test.ts",
+    "lib/connectors/service.ts",
+    "tests/connectors.test.ts"
   ],
   "dependencies": [],
   "blocked_by": [],
@@ -26,8 +28,8 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-08T03:17:21.525Z",
-  "updated_at": "2026-10-08T04:00:57.502Z",
-  "last_heartbeat": "2026-10-08T04:00:57.502Z",
+  "updated_at": "2026-10-08T04:01:19.342Z",
+  "last_heartbeat": "2026-10-08T04:01:19.342Z",
   "definition_of_done": [],
   "handoff": {
     "branch": "feat/org-ai-cutover",
