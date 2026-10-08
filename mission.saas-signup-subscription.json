@@ -3,7 +3,7 @@
   "mission_id": "saas-signup-subscription",
   "title": "Cửa hàng tự đăng ký có thuê bao sản phẩm (dùng thử) ngay khi tạo — trang Gói không còn «liên hệ người vận hành»",
   "business_goal": "",
-  "status": "RUNNING",
+  "status": "PR_READY",
   "priority": "P0",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -29,11 +29,22 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-08T05:35:45.169Z",
-  "updated_at": "2026-10-08T06:45:55.943Z",
-  "last_heartbeat": "2026-10-08T06:45:55.943Z",
+  "updated_at": "2026-10-08T06:46:05.949Z",
+  "last_heartbeat": "2026-10-08T06:46:05.949Z",
   "definition_of_done": [
     "/start (và đường đăng ký nhanh) mở thuê bao sản phẩm đúng thương hiệu, idempotent, dùng lại hàm sẵn có",
     "Trang Gói nói bằng ngôn ngữ kinh doanh, không lộ nhãn nội bộ",
     "Script sửa bù mặc định CHẠY THỬ, liệt kê workspace thiếu thuê bao; ghi thật chờ chủ shop"
-  ]
+  ],
+  "handoff": {
+    "branch": "fix/signup-subscription",
+    "sha": "10866a689525bc2365060dbc49ad28defa1c4634",
+    "at": "2026-10-08T06:46:05.949Z",
+    "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+    "title": "Cửa hàng tự đăng ký có thuê bao sản phẩm (dùng thử) ngay khi tạo — trang Gói không còn «liên hệ người vận hành»",
+    "summary": "Cửa hàng tự đăng ký có thuê bao sản phẩm ngay khi /start xong: openSignupSubscriptions dùng lại openSubscriptionsForProductsInUse sau khi cài mẫu (nguồn SIGNUP, nhật ký PRODUCT_SUBSCRIBE, không tự bật thu phí / dùng thử), lỗi không làm hỏng đăng ký mà để dấu vết; trang Gói không còn nhãn nội bộ, câu trống kinh doanh, hiện «Dùng thử — còn N ngày»; script sửa bù mặc định chạy thử (ghi cần --apply --reason)",
+    "tests": [
+      "tsc + eslint cả kho sạch; next build đạt; 12 bộ (onboarding, tenant-attack, self-service-journey, quick-start, pilot-ops, platform-billing, saas-platform, saas-l5-billing-trial, saas-internal-plan, saas-hide-internal, saas-signup-subscription, saas-shell) đạt; hợp đồng tĩnh + repo-integrity sau commit; đột biến (bỏ lời gọi ⇒ đỏ trước bản vá) + 8 đột biến khác đỏ; 0 ký tự vô hình"
+    ]
+  }
 }
