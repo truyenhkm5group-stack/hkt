@@ -3,8 +3,8 @@ import { Bot, Hand, ShieldCheck, TrendingUp, Zap } from "lucide-react";
 import { LoginForm } from "@/app/login/login-form";
 import { BrandGlyph, BrandWordmark, ChotDonGlyph, ChotDonWordmark } from "@/components/brand";
 import { hostBrand } from "@/lib/platform/host-brand";
-import { safeNextPath } from "@/lib/auth/safe-redirect";
 import { getSession } from "@/lib/auth/session";
+import { landingAfterSignIn } from "@/lib/saas/shell-landing";
 import { loginShouldStay } from "@/lib/constants/session-revocation";
 import { integrationStatus } from "@/lib/env";
 import { HOST_NOT_FOUND_MESSAGE, hostOrganization } from "@/lib/platform/host-org";
@@ -47,8 +47,14 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
 
     `loginShouldStay()` giữ MỌI lý do từ chối ở lại trang này. Thêm một lý do mới thì thêm vào
     danh sách ở `lib/constants/session-revocation.ts`, không sửa điều kiện ở đây.
+
+    ĐÍCH LÀ TRANG NHÀ ĐÚNG CỦA NGƯỜI NÀY, KHÔNG PHẢI `/` (review Finish Line vòng 2). Người vỏ Chốt Đơn đang đăng nhập bấm
+    `<Link href="/login">` ở /start · /join · /reset · /login/chon-cua-hang ⇒ lượt điều hướng PHÍA CLIENT tới đây; chuyển tiếp tới
+    `/` thì client xin RSC dựng layout `(dashboard)` từ gốc, layout ném `redirect(hộp thư)` ⇒ vòng trang trắng của #671. Nên dùng
+    ĐÚNG hàm của `loginAction` (`landingAfterSignIn`, lib/saas/shell-landing.ts): người vỏ đi thẳng tới trang nhà của vỏ (hoặc
+    `next` mà vỏ mở được); không thuộc vỏ / phiên bị từ chối vì lý do khác ⇒ y như trước (`safeNextPath`).
   */
-  if (session && !loginShouldStay(params.reason)) redirect(safeNextPath(params.next));
+  if (session && !loginShouldStay(params.reason)) redirect(await landingAfterSignIn(params.next));
   const status = integrationStatus();
   /*
     Ô "Mã tổ chức" chỉ hiện khi nền tảng THẬT SỰ có hơn một tổ chức đang hoạt động. Với một tổ chức

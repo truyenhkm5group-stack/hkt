@@ -6,6 +6,8 @@ import { PageHeader } from "@/components/page-header";
 import { SalesChatPanel } from "@/components/sales-chat/chat-panel";
 import { SectionCard } from "@/components/ui-bits";
 import { can, requirePermission } from "@/lib/auth/session";
+import { COMPANY } from "@/lib/constants/company";
+import { isSalesAgentUser, shellAllows } from "@/lib/constants/saas-nav";
 import { formatDateTime } from "@/lib/format";
 import { publicationOf } from "@/lib/platform/publish";
 import { productCustomFieldOptions } from "@/lib/sales-chatbot/catalog";
@@ -39,7 +41,7 @@ import { loadChatbotAiView } from "@/lib/saas/visibility-loaders";
 import { CUSTOMER_AI_INCIDENT_LABEL, customerFacing, customerLessons, customerOrderSyncView, customerPlaybookRun, customerPlaybookState, customerReadinessChecks } from "@/lib/saas/visibility";
 import { SALES_STAGE_LABEL, type SalesStage } from "@/lib/sales-chatbot/stages";
 import { loadReadiness } from "@/lib/sales-chatbot/readiness";
-import { READINESS_VERDICT_LABEL } from "@/lib/sales-chatbot/readiness-shared";
+import { READINESS_STATUS_LABEL, READINESS_VERDICT_LABEL, readinessVerdict } from "@/lib/sales-chatbot/readiness-shared";
 import { PageRuntimePanel } from "./page-runtime-panel";
 import { pageRuntimeView } from "@/lib/sales-chatbot/page-runtime";
 
@@ -57,6 +59,7 @@ export default async function SalesChatbotPage() {
   const manage = can(user, SALES_CHATBOT_MANAGE);
   // Workspace KHÁCH (chủ shop 07/10/2026): không model / nguồn AI / chi phí / sức khoẻ khoá trong props — lib/saas/visibility.ts.
   const customer = customerFacing(user.organization);
+  const shell = isSalesAgentUser(user);
   const [cfg, fields, conversations, pub] = await Promise.all([loadSalesChatbotConfig(), productCustomFieldOptions(), listConversations(30), publicationOf(user.organization?.code ?? "")]);
   const fanpage = manage && user.organization?.code ? await fanpageSetupView(user.organization.code) : null;
   const zalo = manage && user.organization?.code ? await zaloSetupView(user.organization.code) : null;
@@ -78,12 +81,15 @@ export default async function SalesChatbotPage() {
   const publicUrl = pub.state === "PUBLISHED" && pub.url ? `${pub.url}/chat` : null;
   // Sẵn sàng tự trả lời (P8): chỉ đếm số thật; THÔNG TIN, không chặn đổi chế độ.
   const rawReadiness = manage ? await loadReadiness(cfg, { ready: ai.aiReady, reason: ai.audience === "INTERNAL" ? ai.aiReason : null }) : null;
-  const readiness = rawReadiness && ai.audience === "CUSTOMER" ? { ...rawReadiness, checks: customerReadinessChecks(rawReadiness.checks, ai.aiState) } : rawReadiness;
+  // Khách: dòng AI đổi theo trạng thái khách (hết lượt ⇒ «Cần làm», chưa sẵn sàng ⇒ «Đang chuẩn bị») — kết luận tính lại trên
+  // ĐÚNG các dòng khách thấy, để đầu bảng không nói «sẵn sàng» khi một dòng bên dưới nói ngược lại.
+  const customerChecks = rawReadiness && ai.audience === "CUSTOMER" ? customerReadinessChecks(rawReadiness.checks, ai.aiState) : null;
+  const readiness = rawReadiness && customerChecks ? { verdict: readinessVerdict(customerChecks), checks: customerChecks } : rawReadiness;
   return (
     <div className="space-y-5">
       <PageHeader
-        eyebrow="AI"
-        title="Chatbot bán hàng"
+        eyebrow={shell ? undefined : "AI"}
+        title={shell ? "AI Sales" : "Chatbot bán hàng"}
         description={user.organization?.name}
         hint={
           <div className="space-y-1.5 text-xs leading-5">
@@ -120,11 +126,13 @@ export default async function SalesChatbotPage() {
               <ul className="space-y-1.5 text-sm" data-testid="ai-readiness" data-verdict={readiness.verdict}>
                 {readiness.checks.map((c) => (
                   <li key={c.key} className="flex items-start gap-2">
-                    <span className={`mt-0.5 shrink-0 rounded px-1.5 text-[11px] font-semibold ${c.status === "PASS" ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200" : c.status === "WARN" ? "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-200" : "bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-200"}`}>
-                      {c.status === "PASS" ? "Đạt" : c.status === "WARN" ? "Lưu ý" : "Hỏng"}
+                    {/* Việc CHƯA LÀM không phải lỗi (docs/design-system.md §9): «Cần làm» tô cam, «Nên làm» tô xám, «Xong» tô xanh — không đỏ.
+                        «Đang chuẩn bị» (đội hỗ trợ đang làm, không phải việc của người đọc) tô xám viền đứt — không cam như việc phải làm. */}
+                    <span className={`mt-0.5 shrink-0 rounded px-1.5 text-[11px] font-semibold ${c.status === "PASS" ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200" : c.status === "WARN" ? "bg-muted text-foreground/70" : c.status === "PENDING" ? "border border-dashed border-foreground/25 bg-muted/60 text-muted-foreground" : "bg-amber-100 text-amber-900 dark:bg-amber-950 dark:text-amber-200"}`} data-status={c.status}>
+                      {READINESS_STATUS_LABEL[c.status]}
                     </span>
                     <span className="min-w-0">
-                      {c.href ? (
+                      {c.href && shellAllows(user, c.href) ? (
                         <Link href={c.href} className="font-medium hover:underline">
                           {c.label}
                         </Link>
@@ -136,6 +144,15 @@ export default async function SalesChatbotPage() {
                   </li>
                 ))}
               </ul>
+              {customer && readiness.verdict === "NOT_READY" ? (
+                <p className="mt-3 text-xs text-muted-foreground" data-testid="ai-readiness-support">
+                  Cần người hỗ trợ? Nhắn Zalo{" "}
+                  <a href={COMPANY.zaloHref} target="_blank" rel="noreferrer" className="font-medium text-primary hover:underline">
+                    {COMPANY.zalo}
+                  </a>{" "}
+                  hoặc email <a href={`mailto:${COMPANY.email}`} className="font-medium text-primary hover:underline">{COMPANY.email}</a> — ghi kèm tên cửa hàng.
+                </p>
+              ) : null}
             </SectionCard>
           ) : null}
           {pageRuntime?.isHome ? (

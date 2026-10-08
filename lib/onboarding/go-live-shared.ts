@@ -30,6 +30,11 @@ export const ONBOARDING_STAGE_LABEL: Record<OnboardingStage, string> = {
 
 export type ChannelFacts = { pancake: boolean; messenger: boolean; zalo: boolean; webChat: boolean };
 
+/** Cửa hàng đã nối ÍT NHẤT một kênh nhận tin chưa — mốc «đã nối kênh» của onboarding và trạng thái rỗng của hộp thư. HÀM THUẦN. */
+export function anyChannelConnected(c: ChannelFacts): boolean {
+  return c.pancake || c.messenger || c.zalo || c.webChat;
+}
+
 /** Lối đang dùng, suy từ kết nối thật. Pancake đứng trước: shop đã nối Pancake thì hướng dẫn webhook vẫn phải hiện. HÀM THUẦN. */
 export function goLivePathOf(c: ChannelFacts): GoLivePath | null {
   if (c.pancake) return "PANCAKE";
@@ -47,7 +52,7 @@ export type StageFacts = ChannelFacts & { messagesReceived: number; pricedVarian
 export function onboardingStage(f: StageFacts): { stage: OnboardingStage; done: Record<OnboardingStage, boolean> } {
   const done: Record<OnboardingStage, boolean> = {
     ACCOUNT_CREATED: true,
-    CHANNEL_CONNECTED: f.pancake || f.messenger || f.zalo || f.webChat,
+    CHANNEL_CONNECTED: anyChannelConnected(f),
     MESSAGING_READY: f.messagesReceived > 0,
     CATALOG_READY: f.pricedVariants > 0,
     AI_CONFIGURED: f.aiReady,

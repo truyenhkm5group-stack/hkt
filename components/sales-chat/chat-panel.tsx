@@ -18,7 +18,7 @@ export function SalesChatPanel({ mode, title, className }: { mode: "test" | "pub
   const [error, setError] = useState<string | null>(null);
   const [text, setText] = useState("");
   const [pending, start] = useTransition();
-  const bottom = useRef<HTMLDivElement>(null);
+  const list = useRef<HTMLDivElement>(null);
 
   const open = () =>
     start(async () => {
@@ -34,8 +34,11 @@ export function SalesChatPanel({ mode, title, className }: { mode: "test" | "pub
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Cuộn KHUNG TIN xuống đáy — không `scrollIntoView`: trên điện thoại (một cột) lệnh đó cuộn CẢ TRANG xuống tận cuối ngay khi
+  // mở AI Sales (đo 08/10/2026: scrollY 7.532 / 8.889 px ở 390 px), đẩy bảng «AI đã sẵn sàng…» và cấu hình khuất lên trên.
   useEffect(() => {
-    bottom.current?.scrollIntoView({ block: "end" });
+    const el = list.current;
+    if (el) el.scrollTop = el.scrollHeight;
   }, [view, pending]);
 
   // Trang chat CÔNG KHAI: nhân viên trả lời từ hộp thư ERP (không có kênh đẩy) ⇒ khung chat tự đọc lại hội thoại mỗi 15 giây
@@ -97,7 +100,7 @@ export function SalesChatPanel({ mode, title, className }: { mode: "test" | "pub
           </Button>
         </div>
       </div>
-      <div className="flex-1 space-y-3 overflow-y-auto p-3" data-testid="chat-messages">
+      <div ref={list} className="flex-1 space-y-3 overflow-y-auto p-3" data-testid="chat-messages">
         {view?.messages.map((m, i) => (
           <div key={i} className={cn("flex", m.role === "user" ? "justify-end" : "justify-start")}>
             <div className={cn("max-w-[85%] rounded-2xl px-3 py-2 text-sm leading-6", m.role === "user" ? "bg-primary text-primary-foreground" : "bg-muted")} data-role={m.role}>
@@ -120,7 +123,6 @@ export function SalesChatPanel({ mode, title, className }: { mode: "test" | "pub
             <Loader2 className="size-3.5 animate-spin" /> Đang trả lời…
           </p>
         ) : null}
-        <div ref={bottom} />
       </div>
       {error ? <p className="border-t px-3 py-2 text-xs text-destructive" data-testid="chat-error">{error}</p> : null}
       <form

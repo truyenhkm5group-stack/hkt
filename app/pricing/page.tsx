@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 import { BrandLockup } from "@/components/brand";
 import { PublicPricing } from "@/components/pricing/public-pricing";
@@ -13,6 +12,9 @@ import { getPublicPricing } from "@/lib/queries/public-pricing";
  * TRANG GIÁ CÔNG KHAI `/pricing` (0222) — không cần đăng nhập, không đọc dữ liệu khách nào: chỉ gói cước ở `platform_plans`
  * (giá, hạn mức tháng, tính năng in được) và chế độ đăng ký. Mọi số là số người vận hành đặt ở `/platform` — trang không
  * gõ lại số nào. Đọc lỗi ⇒ không in bảng giá (không bao giờ in một giá đoán).
+ *
+ * Hai lối «về trang chủ» là `<a href="/">` (tải cả trang), không `<Link>`: trang này nằm ngoài nhóm `(dashboard)` và người đã
+ * đăng nhập vỏ Chốt Đơn mở được nó — điều hướng phía client tới `/` lặp trang trắng như #671 (xem `app/not-found.tsx`).
  */
 
 export const dynamic = "force-dynamic";
@@ -41,9 +43,10 @@ export default async function PricingPage() {
     <div className="min-h-screen bg-background text-foreground">
       <header className="sticky top-0 z-30 border-b border-border/60 bg-card/90 backdrop-blur">
         <div className="mx-auto flex h-14 w-full max-w-6xl items-center gap-3 px-4 sm:px-6">
-          <Link href="/" aria-label="Về trang chủ">
+          {/* eslint-disable-next-line @next/next/no-html-link-for-pages -- cố ý tải cả trang (xem chú thích đầu tệp) */}
+          <a href="/" aria-label="Về trang chủ">
             <BrandLockup wordmarkClassName="text-base" brand={brand} />
-          </Link>
+          </a>
           <a href={`${base}/login`} className="ml-auto text-sm font-medium text-muted-foreground hover:text-foreground">
             Đăng nhập
           </a>
@@ -51,9 +54,10 @@ export default async function PricingPage() {
       </header>
 
       <main className="mx-auto w-full max-w-6xl px-4 pt-10 pb-16 sm:px-6 sm:pt-14">
-        <Link href="/" className="inline-flex items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground">
+        {/* eslint-disable-next-line @next/next/no-html-link-for-pages -- cố ý tải cả trang (xem chú thích đầu tệp) */}
+        <a href="/" className="inline-flex items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground">
           <ArrowLeft className="size-3.5" aria-hidden /> Trang chủ
-        </Link>
+        </a>
         <h1 className="mt-3 text-center text-3xl font-extrabold tracking-tight sm:text-4xl">Bảng giá</h1>
         <p className="mx-auto mt-3 max-w-2xl text-center text-base leading-7 text-muted-foreground">
           AI chốt đơn 24/7 trên fanpage — trả lời khách, tự tạo đơn, nhắn lại khách lưỡng lự. Tính theo số KHÁCH được AI trả lời mỗi tháng — một khách nhắn nhiều lần vẫn là một; đơn không giới hạn, không tính phí theo đơn.

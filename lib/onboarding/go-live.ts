@@ -7,10 +7,10 @@ import { FANPAGE_CONNECTOR, fanpageSetupView, PAGE_REPLY, type FanpageSetupView 
 import { SALES_CHATBOT_MANAGE, saveSalesChatbotConfig } from "@/lib/sales-chatbot/settings";
 import { and, eq, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
-import { goLivePathOf, onboardingStage, type GoLivePath, type OnboardingStage } from "@/lib/onboarding/go-live-shared";
-import { publicationOf } from "@/lib/platform/publish";
-import { messengerView } from "@/lib/sales-chatbot/messenger";
-import { zaloSetupView } from "@/lib/sales-chatbot/zalo";
+import { goLivePathOf, onboardingStage, type ChannelFacts, type GoLivePath, type OnboardingStage } from "@/lib/onboarding/go-live-shared";
+import { publicationOf, type Publication } from "@/lib/platform/publish";
+import { messengerView, type MessengerView } from "@/lib/sales-chatbot/messenger";
+import { zaloSetupView, type ZaloSetupView } from "@/lib/sales-chatbot/zalo";
 import { loadTransportFacts, transportOwnerOf } from "@/lib/sales-chatbot/channel-ownership";
 import { CUSTOMER_AI_STATE_HINT } from "@/lib/saas/visibility";
 import { loadChatbotAiView } from "@/lib/saas/visibility-loaders";
@@ -56,6 +56,24 @@ export type GoLiveView = {
   bot: { enabled: boolean; aiReady: boolean; aiReason: string | null };
 };
 
+/**
+ * Kênh nào của cửa hàng đang NỐI — MỘT định nghĩa cho ô «Vào việc ngay», bước onboarding «đã nối kênh» (`onboardingStage`) và
+ * trạng thái rỗng «chưa nối kênh» của hộp thư: Fanpage qua Pancake đang bật · Facebook nối thẳng có page · Zalo OA đang bật ·
+ * ô chat web đã xuất bản. Hai màn hình hỏi cùng một câu thì đọc cùng một hàm, không mỗi nơi một danh sách kênh.
+ */
+export function channelFactsOf(v: { fanpage: Pick<FanpageSetupView, "status">; messenger: Pick<MessengerView, "status" | "page">; zalo: Pick<ZaloSetupView, "status">; pub: Pick<Publication, "state"> }): ChannelFacts {
+  return { pancake: v.fanpage.status === "ACTIVE", messenger: v.messenger.status === "ACTIVE" && v.messenger.page !== null, zalo: v.zalo.status === "ACTIVE", webChat: v.pub.state === "PUBLISHED" };
+}
+
+/**
+ * Đọc `channelFactsOf` cho tổ chức NGỮ CẢNH (mã tổ chức của phiên). Chỉ đọc, và chỉ trả BỐN CỜ: URL nhận tin mang mã của hai
+ * view Pancake / Zalo không rời hàm này — người gọi (vd hộp thư của nhân viên chỉ có `ai_sales:view`) không bao giờ cầm được nó.
+ */
+export async function loadChannelFacts(orgCode: string): Promise<ChannelFacts> {
+  const [fanpage, messenger, zalo, pub] = await Promise.all([fanpageSetupView(orgCode), messengerView(), zaloSetupView(orgCode), publicationOf(orgCode)]);
+  return channelFactsOf({ fanpage, messenger, zalo, pub });
+}
+
 export async function loadGoLive(user: SessionUser): Promise<GoLiveView> {
   const orgCode = user.organization?.code ?? null;
   const canConnect = can(user, CONNECTIONS_PERMISSION);
@@ -92,7 +110,7 @@ export async function loadGoLive(user: SessionUser): Promise<GoLiveView> {
     db.select({ n: sql<number>`count(*)::int` }).from(v).where(and(eq(v.isRemoved, false), sql`${v.retailPrice} > 0`)),
     db.select({ n: sql<number>`count(*)::int` }).from(e).where(and(eq(e.channel, "TEST"), eq(e.type, "order.drafted"))),
   ]);
-  const channels = { pancake: fanpage.status === "ACTIVE", messenger: messenger.status === "ACTIVE" && messenger.page !== null, zalo: zalo.status === "ACTIVE", webChat: pub.state === "PUBLISHED" };
+  const channels = channelFactsOf({ fanpage, messenger, zalo, pub });
   const messagesReceived = Number(inbound?.n ?? 0) + Number(web?.n ?? 0);
   const { stage } = onboardingStage({ ...channels, messagesReceived, pricedVariants: Number(priced?.n ?? 0), aiReady, testDrafts: Number(drafts?.n ?? 0), botEnabled: cfg.enabled });
   return {

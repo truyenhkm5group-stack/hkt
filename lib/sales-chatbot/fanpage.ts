@@ -1462,7 +1462,11 @@ export type FanpageSetupView = {
   counts: FanpageInboundCounts;
 };
 
-/** Khối «Fanpage (qua Pancake)» của trang Chatbot bán hàng — chỉ gọi cho người cấu hình được bot (URL mang token). */
+/**
+ * Khối «Fanpage (qua Pancake)» của trang Chatbot bán hàng. `webhookUrl` MANG TOKEN của tổ chức: chỉ ĐƯA RA giao diện cho người
+ * cấu hình được bot. Nơi khác chỉ được lấy cờ trạng thái — `loadChannelFacts` (lib/onboarding/go-live.ts, hộp thư rỗng của mọi
+ * người xem) đọc `status` rồi bỏ phần còn lại, URL không rời máy chủ.
+ */
 export async function fanpageSetupView(orgCode: string): Promise<FanpageSetupView> {
   const [row] = await messagingConnectionSummaries([FANPAGE_CONNECTOR]);
   const status: FanpageSetupView["status"] = !row ? "NOT_CONFIGURED" : row.lastTestOk === false ? "FAILED" : row.status === "ACTIVE" ? "ACTIVE" : "DRAFT";

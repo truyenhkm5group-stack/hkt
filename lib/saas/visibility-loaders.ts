@@ -45,7 +45,7 @@ export async function loadChatbotAiView(user: Pick<SessionUser, "organization">,
   const selected = connections.find((a) => a.key === cfg.connectorKey);
   const aiReady = Boolean(selected?.ready);
   if (customerFacing(user.organization)) {
-    // «Hết lượt» = trần lượt / credit của GÓI (khách tự xử được ở trang gói) — tách khỏi «Cần cấu hình» (việc của hỗ trợ).
+    // «Hết lượt» = trần lượt / credit của GÓI (khách tự xử được ở trang gói) — tách khỏi «Đang chuẩn bị» (việc của hỗ trợ).
     const quota = orgCode && !aiReady && cfg.connectorKey === "platform" ? await checkAiQuota(orgCode, "PLATFORM", { notify: false }).catch(() => null) : null;
     const quotaExhausted = Boolean(quota && !quota.ok && customerQuotaExhausted(quota.reason));
     return { audience: "CUSTOMER", config: customerChatbotConfig(cfg), aiState: customerAiState({ enabled: cfg.enabled, aiReady, quotaExhausted }), aiReady };

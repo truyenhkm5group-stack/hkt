@@ -6,7 +6,12 @@
  * Bảng này là THÔNG TIN, không chặn chủ shop đổi chế độ: chặn là đổi hành vi với tổ chức đang chạy Tự động.
  */
 
-export type ReadinessStatus = "PASS" | "WARN" | "FAIL";
+/**
+ * `PENDING` = chưa xong nhưng KHÔNG phải việc của người đọc: đội hỗ trợ đang làm (vd AI của cửa hàng khách — khách không tự
+ * cấu hình được AI, `lib/saas/visibility.ts::customerReadinessChecks`). `assessReadiness` không bao giờ tự trả `PENDING`; nó chỉ
+ * sinh ra khi lớp hiển thị cho khách đổi một dòng `FAIL` mà khách không tự làm được.
+ */
+export type ReadinessStatus = "PASS" | "WARN" | "FAIL" | "PENDING";
 export type ReadinessVerdict = "NOT_READY" | "READY_WITH_WARNINGS" | "READY";
 
 export const READINESS_VERDICT_LABEL: Record<ReadinessVerdict, string> = {
@@ -14,6 +19,12 @@ export const READINESS_VERDICT_LABEL: Record<ReadinessVerdict, string> = {
   READY_WITH_WARNINGS: "Sẵn sàng — còn lưu ý",
   READY: "Sẵn sàng",
 };
+
+/**
+ * Nhãn từng dòng — việc CHƯA LÀM gọi là «Cần làm», không gọi là «Hỏng» (HELP_CENTER §6: không đổ lỗi cho người dùng); việc
+ * người khác đang làm cho cửa hàng gọi là «Đang chuẩn bị», không gọi là «Cần làm» (người đọc không có gì để làm ở dòng đó).
+ */
+export const READINESS_STATUS_LABEL: Record<ReadinessStatus, string> = { PASS: "Xong", WARN: "Nên làm", FAIL: "Cần làm", PENDING: "Đang chuẩn bị" };
 
 export type ReadinessCheck = { key: string; label: string; status: ReadinessStatus; detail: string; href: string | null };
 
@@ -45,14 +56,15 @@ export function assessReadiness(i: ReadinessInput): { verdict: ReadinessVerdict;
     i.sellWithoutStockCheck
       ? { key: "STOCK", label: "Bán không kiểm tồn (shop chọn)", status: "WARN", detail: "Bot sẽ nhận đơn kể cả khi kho chưa đủ hàng.", href: null }
       : i.stockReceipts > 0
-        ? { key: "STOCK", label: "Có số tồn kho", status: "PASS", detail: "Bot kiểm tồn trước khi chốt.", href: "/inventory" }
-        : { key: "STOCK", label: "Chưa có phiếu nhập kho", status: "WARN", detail: "Tồn là CHƯA BIẾT — bot sẽ không khẳng định còn hàng.", href: "/inventory" },
+        ? { key: "STOCK", label: "Có số tồn kho", status: "PASS", detail: "Bot kiểm tồn trước khi chốt.", href: "/inventory/receipts" }
+        : { key: "STOCK", label: "Chưa có phiếu nhập kho", status: "WARN", detail: "Tồn là CHƯA BIẾT — bot sẽ không khẳng định còn hàng. Nhập hàng ở trang phiếu kho.", href: "/inventory/receipts" },
+    // Chữ chung cho mọi người đọc (khách vỏ Chốt Đơn cũng thấy bảng này): không «ERP», không tên ứng dụng nhắn tin cụ thể.
     i.notifyGroupOnHandoff
-      ? { key: "HANDOFF", label: "Chuyển người có báo nhóm", status: "PASS", detail: "Khi bot chuyển khách cho người, nhóm Lark / Telegram được báo.", href: null }
-      : { key: "HANDOFF", label: "Chuyển người không báo nhóm", status: "WARN", detail: "Khách bot chuyển sang người chỉ hiện trong ERP — dễ bị bỏ quên. Bật «báo nhóm» ở Cấu hình.", href: null },
+      ? { key: "HANDOFF", label: "Chuyển người có báo nhóm", status: "PASS", detail: "Khi bot chuyển khách cho người, nhóm chat của cửa hàng được báo ngay.", href: null }
+      : { key: "HANDOFF", label: "Chuyển người không báo nhóm", status: "WARN", detail: "Khách bot chuyển sang người chỉ hiện trong hộp thư — dễ bị bỏ quên. Bật «báo nhóm» ở Cấu hình.", href: null },
     i.realConversations30d > 0
       ? { key: "CHANNEL", label: `${i.realConversations30d.toLocaleString("vi-VN")} hội thoại thật trong 30 ngày`, status: "PASS", detail: "Kênh đang nhận tin khách.", href: "/ai/sales-chatbot/performance" }
-      : { key: "CHANNEL", label: "Chưa có tin khách thật nào trong 30 ngày", status: "WARN", detail: "Kiểm tra kênh đã nối (fanpage / Messenger / Zalo / chat web) và webhook.", href: null },
+      : { key: "CHANNEL", label: "Chưa có tin khách thật nào trong 30 ngày", status: "WARN", detail: "Chưa có tin khách nào. Mở «Kênh kết nối» xem đã nối Facebook / Zalo / chat web chưa.", href: "/ai/channels" },
     i.testDrafts30d > 0
       ? { key: "TEST_ORDER", label: "Đã thử lên đơn trong khung thử", status: "PASS", detail: "Ít nhất một lượt thử đi tới đơn nháp trong 30 ngày.", href: null }
       : { key: "TEST_ORDER", label: "Chưa thử lên đơn trong khung thử", status: "WARN", detail: "Chat thử một lượt mua trọn vòng ở khung thử bên phải trước khi để bot tự chốt.", href: null },
@@ -63,6 +75,10 @@ export function assessReadiness(i: ReadinessInput): { verdict: ReadinessVerdict;
       ? { key: "PRICE_ERRORS", label: "Không có lỗi giá đã xác nhận (7 ngày)", status: "PASS", detail: "Theo hàng đợi Rà lỗi AI.", href: "/ai/sales-chatbot/quality" }
       : { key: "PRICE_ERRORS", label: `${i.confirmedPriceErrors7d} lỗi giá đã xác nhận (7 ngày)`, status: "WARN", detail: "Người rà đã xác nhận bot nói giá không có căn cứ — sửa sổ tay / câu mẫu trước khi để bot tự chốt.", href: "/ai/sales-chatbot/quality" },
   ];
-  const verdict: ReadinessVerdict = c.some((x) => x.status === "FAIL") ? "NOT_READY" : c.some((x) => x.status === "WARN") ? "READY_WITH_WARNINGS" : "READY";
-  return { verdict, checks: c };
+  return { verdict: readinessVerdict(c), checks: c };
+}
+
+/** Kết luận của bảng: còn dòng chưa xong mà bot cần (`FAIL`, hoặc `PENDING` — người khác đang làm) ⇒ CHƯA sẵn sàng. */
+export function readinessVerdict(c: readonly Pick<ReadinessCheck, "status">[]): ReadinessVerdict {
+  return c.some((x) => x.status === "FAIL" || x.status === "PENDING") ? "NOT_READY" : c.some((x) => x.status === "WARN") ? "READY_WITH_WARNINGS" : "READY";
 }

@@ -457,7 +457,11 @@ export type ZaloSetupView = {
   counts: { pending: number; done: number; skipped: number; lastSkipReason: string | null };
 };
 
-/** Khối «Zalo OA» của trang Chatbot bán hàng — chỉ gọi cho người cấu hình được bot (URL mang token). */
+/**
+ * Khối «Zalo OA» của trang Chatbot bán hàng. `webhookUrl` MANG TOKEN của tổ chức: chỉ ĐƯA RA giao diện cho người cấu hình được
+ * bot. Nơi khác chỉ được lấy cờ trạng thái — `loadChannelFacts` (lib/onboarding/go-live.ts, hộp thư rỗng của mọi người xem) đọc
+ * `status` rồi bỏ phần còn lại, URL không rời máy chủ.
+ */
 export async function zaloSetupView(orgCode: string): Promise<ZaloSetupView> {
   const [row] = await messagingConnectionSummaries([ZALO_CONNECTOR]);
   const status: ZaloSetupView["status"] = !row ? "NOT_CONFIGURED" : row.lastTestOk === false ? "FAILED" : row.status === "ACTIVE" ? "ACTIVE" : "DRAFT";

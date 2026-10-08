@@ -348,7 +348,20 @@ export function ChannelsPanel({ rows, appReady, botEnabled, manage, operator, ou
         ) : (
           <EmptyState
             title="Chưa có kênh nào"
-            description={manage ? (appReady ? "Bấm «Kết nối Facebook», đăng nhập bằng tài khoản quản trị Page và chọn các Page cần dùng. Đang dùng Pancake hoặc Zalo OA? Nối ở Cài đặt → Kết nối." : "Kết nối Facebook của nền tảng đang được bảo trì. Đang dùng Pancake hoặc Zalo OA? Nối ở Cài đặt → Kết nối.") : "Cần quản trị cửa hàng kết nối Page."}
+            description={
+              manage ? (
+                <>
+                  {appReady ? "Bấm «Kết nối Facebook», đăng nhập bằng tài khoản quản trị Page và chọn các Page cần dùng." : "Kết nối Facebook của nền tảng đang được bảo trì — thử lại sau; kéo dài thì nhắn hỗ trợ."}{" "}
+                  Đang dùng Pancake hoặc Zalo OA?{" "}
+                  <Link href="/settings/connections" className="font-medium text-primary hover:underline">
+                    Nối ở trang Kết nối
+                  </Link>
+                  .
+                </>
+              ) : (
+                "Cần quản trị cửa hàng kết nối Page."
+              )
+            }
             action={manage ? <ConnectButton appReady={appReady} /> : undefined}
           />
         )}
