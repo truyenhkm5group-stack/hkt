@@ -1,0 +1,29 @@
+{
+  "schema": 1,
+  "mission_id": "saas-v1-plan-migration",
+  "title": "Chuyển tổ chức từ giá legacy sang bảng giá V1: báo cáo chạy thử theo từng tổ chức + chuyển có nhật ký",
+  "business_goal": "",
+  "status": "RUNNING",
+  "priority": "P1",
+  "risk": "HIGH",
+  "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "worker": "worker:v1-migration",
+  "worktree": null,
+  "branch": "feat/v1-plan-migration",
+  "base_sha": null,
+  "domains": [],
+  "owned_paths": [
+    "scripts/saas-v1-migration.ts",
+    "lib/pricing/migration.ts",
+    "tests/saas-v1-migration.test.ts",
+    "docs/saas/V1_MIGRATION.md"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-08T08:16:54.954Z",
+  "updated_at": "2026-10-08T08:16:54.954Z",
+  "last_heartbeat": "2026-10-08T08:16:54.954Z",
+  "definition_of_done": []
+}
