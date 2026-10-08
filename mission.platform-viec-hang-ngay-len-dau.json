@@ -3,7 +3,7 @@
   "mission_id": "platform-viec-hang-ngay-len-dau",
   "title": "/platform: tổ chức & sức khoẻ, công tắc khẩn, cổng mở bán lên đầu; khung cấu hình Webhook Meta (một lần) xuống cuối",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-pr-f",
@@ -22,12 +22,15 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-08T18:01:08.808Z",
-  "updated_at": "2026-10-08T23:02:23.897Z",
+  "updated_at": "2026-10-08T23:34:13.506Z",
   "last_heartbeat": "2026-10-08T22:10:54.617Z",
   "definition_of_done": [],
   "intake": {
     "verdict": "MISSING",
     "evidence": []
+  },
+  "evidence": {
+    "merged": "#714 → 5b5509ce2ad924ce46eecbbf20519391bccb3594"
   },
   "handoff": {
     "branch": "claude/platform-viec-hang-ngay-len-dau",
