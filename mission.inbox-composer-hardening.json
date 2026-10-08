@@ -3,7 +3,7 @@
   "mission_id": "inbox-composer-hardening",
   "title": "Ô soạn hộp thư: dùng CHUNG cổng quyền với Gửi, không ghi đè chữ đang gõ, không chèn tồn âm, ghi rõ giá lẻ, tìm nhẹ hơn (LOW của review #661)",
   "business_goal": "",
-  "status": "INTEGRATING",
+  "status": "VERIFYING",
   "priority": "P1",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -32,11 +32,13 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-08T05:00:53.265Z",
-  "updated_at": "2026-10-08T06:40:52.517Z",
+  "updated_at": "2026-10-08T07:38:41.400Z",
   "last_heartbeat": "2026-10-08T06:17:23.407Z",
   "definition_of_done": [],
   "evidence": {
-    "merged": "#666 → 7b9e3fa1d8c6cb65071b055ac89dddc7f1281baf"
+    "merged": "#666 → 7b9e3fa1d8c6cb65071b055ac89dddc7f1281baf",
+    "verify": "PASS 3a28e83e9971e73fec586bbf7fb0f5076c90ff19 2026-10-08T07:38:37.044Z",
+    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/37741568283"
   },
   "handoff": {
     "branch": "feat/inbox-composer-hardening",
