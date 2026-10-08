@@ -1156,6 +1156,11 @@ export const productVariants = pgTable(
     avgImportedPrice: doublePrecision("avg_imported_price").notNull().default(0),
     remainQuantity: integer("remain_quantity").notNull().default(0),
     actualRemainQuantity: integer("actual_remain_quantity").notNull().default(0),
+    /**
+     * CHỈ BÁN KÈM (0238 · chủ shop HSLC 09/10/2026): quy cách nhỏ (vd 0,5kg) không báo giá riêng, không bán riêng — chỉ thêm
+     * khi đơn đã có một mẫu mã chính. Bot đọc cờ này ở `lib/sales-chatbot/catalog.ts` và máy chủ chặn đơn toàn món bán kèm.
+     */
+    addOnOnly: boolean("add_on_only").notNull().default(false),
     isHidden: boolean("is_hidden").notNull().default(false),
     isLocked: boolean("is_locked").notNull().default(false),
     isRemoved: boolean("is_removed").notNull().default(false),

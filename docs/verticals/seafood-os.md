@@ -64,6 +64,11 @@ Hàng tươi bán theo cân thật: khách đặt «2kg tôm», lúc đóng hàn
 Phạm vi chạm khá rộng: sổ kho, phiếu nhập, đơn, chatbot. Vì vậy cần một khách pilot bán hàng tươi theo cân xác nhận
 quy trình trước khi làm. HSLC hiện bán hàng đóng gói (mẫu thực phẩm, chủ shop chốt 30/09/2026).
 
+**Mẫu mã chỉ bán kèm (0238 · chủ shop HSLC 09/10/2026).** Quy cách nhỏ như 0,5kg có thể tick «Chỉ bán kèm» trên form
+sản phẩm. Bot không báo giá nó như giá khởi điểm (giá «từ …» là quy cách chính nhỏ nhất), không chào như món chính, và chỉ
+thêm nó khi đơn đã có một mẫu mã chính — vd 1,5kg = 1kg + 0,5kg, hoặc thêm 0,5kg món khác để ăn thử. Máy chủ chặn giỏ / đơn
+nháp / lượt chốt chỉ gồm mẫu mã bán kèm (`onlyAddOns` trong `lib/sales-chatbot/tools.ts`). Đơn nhân viên lên tay không bị chặn.
+
 **Quy cách lẻ không cần S2.** Khách mua 0,5kg (HSLC 08/10/2026) là một MẪU MÃ riêng («0,5kg») với giá riêng — chủ shop
 thêm ở Sản phẩm → sửa sản phẩm → thêm mẫu mã (SKU mới, quy cách «0,5kg», giá lẻ, khối lượng 500 g). Gói thực phẩm của bot
 (`FOOD_PACK.describeLine`) dặn: số lượng không khớp một quy cách (1,5kg, «nửa ký») thì GHÉP từ các quy cách đang bán, không

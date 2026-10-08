@@ -7,6 +7,7 @@
  *     giá); BẬT ⇒ đơn giá = `quoteUnitPrice` (bảng mặc định cho khách chưa nhận ra, bảng riêng cho khách đã gán), kèm bậc
  *     «mua từ», và giỏ hàng tính bằng cùng đơn giá; lời nhắc của bot đổi theo công tắc.
  */
+import { manualVariantSchema } from "@/lib/validation/products";
 import assert from "node:assert/strict";
 import { rmSync } from "node:fs";
 import { eq } from "drizzle-orm";
@@ -24,7 +25,7 @@ import { provisionOrganization } from "@/lib/platform/provision";
 import { savePriceListCore, setCustomerTermsCore } from "@/lib/records/trade";
 import { parseSalesChatbotConfig } from "@/lib/sales-chatbot/config";
 import { systemPrompt } from "@/lib/sales-chatbot/engine";
-import { executeTool, type ChatState } from "@/lib/sales-chatbot/tools";
+import { executeTool, type ChatState, onlyAddOns } from "@/lib/sales-chatbot/tools";
 
 const ORG = "sf-si";
 
@@ -140,12 +141,38 @@ export async function testSeafoodOs() {
       const cartOff = await executeTool("calculate_cart", { items: [{ variant_id: "erp-sf-v", quantity: 25 }] }, ctx(false, known));
       assert.equal((JSON.parse(cartOff.content) as { lines: { unit_price: number }[] }).lines[0].unit_price, 200_000);
 
+      // ── MẪU MÃ CHỈ BÁN KÈM (0237 · chủ shop HSLC 09/10/2026): 0,5kg không báo giá riêng, không bán riêng ──
+      await db.insert(schema.productVariants).values({ id: "erp-sf-v05", productId: "erp-sf-prod", sku: "MO-05", size: "0,5kg", retailPrice: 105_000, addOnOnly: true });
+      const tim = await executeTool("search_products", { query: "mực ống" }, ctx(false, {}));
+      const kq = JSON.parse(tim.content) as { results: { variant_id: string; add_on_only?: boolean; note?: string }[] };
+      const v05 = kq.results.find((r) => r.variant_id === "erp-sf-v05");
+      assert.ok(v05?.add_on_only === true && /CHỈ BÁN KÈM/.test(v05.note ?? ""), `mẫu mã bán kèm mang cờ + lời dặn: ${tim.content}`);
+      assert.ok(kq.results.findIndex((r) => r.variant_id === "erp-sf-v05") > kq.results.findIndex((r) => r.variant_id === "erp-sf-v"), "mẫu mã chính đứng trước mẫu mã bán kèm");
+      assert.ok(!("add_on_only" in (kq.results.find((r) => r.variant_id === "erp-sf-v") ?? {})), "mẫu mã chính không mang cờ");
+      const chiKem = await executeTool("calculate_cart", { items: [{ variant_id: "erp-sf-v05", quantity: 1 }] }, ctx(false, {}));
+      assert.ok(chiKem.isError && /CHỈ BÁN KÈM/.test(chiKem.content), `giỏ chỉ có 0,5kg ⇒ từ chối: ${chiKem.content}`);
+      const ghep = await executeTool("calculate_cart", { items: [{ variant_id: "erp-sf-v", quantity: 1 }, { variant_id: "erp-sf-v05", quantity: 1 }] }, ctx(false, {}));
+      assert.ok(!ghep.isError, ghep.content);
+      assert.equal((JSON.parse(ghep.content) as { subtotal: number }).subtotal, 305_000, "1kg + 0,5kg bán kèm ⇒ tổng đúng");
+      const khach: ChatState = { customer: { id: null, name: "Khách thử", phone: "0912345678", address: "12 Hàng Bạc, Hoàn Kiếm", province: "Hà Nội", simulated: true } };
+      const nhap = await executeTool("create_draft_order", { items: [{ variant_id: "erp-sf-v05", quantity: 2 }] }, ctx(false, khach));
+      assert.ok(nhap.isError && /CHỈ BÁN KÈM/.test(nhap.content), `đơn nháp chỉ có món bán kèm ⇒ máy chủ chặn: ${nhap.content}`);
+      const nhap2 = await executeTool("create_draft_order", { items: [{ variant_id: "erp-sf-v", quantity: 1 }, { variant_id: "erp-sf-v05", quantity: 1 }] }, ctx(false, khach));
+      assert.ok(!nhap2.isError, nhap2.content);
+      const doiMon = await executeTool("update_draft_order", { items: [{ variant_id: "erp-sf-v05", quantity: 1 }] }, ctx(false, nhap2.state));
+      assert.ok(doiMon.isError && /CHỈ BÁN KÈM/.test(doiMon.content), "sửa đơn bỏ hết món chính ⇒ chặn");
+      assert.equal(onlyAddOns([{ variantId: "a" }, { variantId: "b" }], new Map([["a", { addOnOnly: true }], ["b", {}]])), false);
+      assert.equal(onlyAddOns([{ variantId: "a" }], new Map([["a", { addOnOnly: true }]])), true);
+      assert.equal(onlyAddOns([], new Map()), false, "giỏ rỗng không phải «chỉ bán kèm»");
+      assert.equal(manualVariantSchema.parse({ sku: "X-1" }).addOnOnly, false, "mặc định KHÔNG bán kèm — mẫu mã cũ giữ nguyên hành vi");
+
       // Lời nhắc của bot đổi theo công tắc.
       const on = systemPrompt({ ...parseSalesChatbotConfig(null), wholesalePricing: true }, "Shop", "", "TEST");
       const off = systemPrompt(parseSalesChatbotConfig(null), "Shop", "", "TEST");
       assert.ok(on.includes("ĐÃ BẬT báo giá theo bảng giá") && !on.includes("ERP chỉ có giá LẺ"));
       assert.ok(on.includes("KHÔNG BAO GIỜ đưa giá lẻ ra như giá sỉ") && on.includes("`wholesale.available` = false"), "lời nhắc BẬT: giá lẻ không bao giờ là giá sỉ; không bậc ⇒ chuyển người");
       assert.ok(off.includes("ERP chỉ có giá LẺ") && !off.includes("ĐÃ BẬT báo giá"));
+      assert.ok(off.includes("MẪU MÃ CHỈ BÁN KÈM") && off.includes("MỤC TIÊU") && off.includes("ĐƠN SÁT NGƯỠNG MIỄN SHIP"), "lời nhắc nói mục tiêu đơn / AOV, luật bán kèm và gợi ý ngưỡng miễn ship");
     });
   } finally {
     await cleanupOrg();

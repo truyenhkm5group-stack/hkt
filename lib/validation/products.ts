@@ -26,6 +26,8 @@ export const manualVariantSchema = z.object({
   /** Giá vốn khai tay của mẫu mã; `null` ⇒ lấy giá vốn chung. */
   cost: money,
   selling: z.boolean().default(true),
+  /** Chỉ bán kèm (0238): không báo giá / không bán riêng — chỉ thêm khi đơn có mẫu mã chính. */
+  addOnOnly: z.boolean().default(false),
 });
 
 export const manualProductSchema = z.object({

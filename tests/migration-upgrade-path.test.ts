@@ -185,6 +185,7 @@ const MOI = [
   "0235_ai_balance_ledger",
   "0236_meta_conversion_events",
   "0237_saas_ops_signals",
+  "0238_variant_add_on_only",
 ] as const;
 
 /*

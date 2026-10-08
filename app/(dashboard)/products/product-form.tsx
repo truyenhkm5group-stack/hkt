@@ -17,10 +17,10 @@ import { cn } from "@/lib/utils";
  * `variants.<i>.sku`…). Tiền để trống = CHƯA KHAI, không phải 0 đ.
  */
 
-export type ProductFormVariant = { id?: string; sku: string; size: string; color: string; retailPrice: string; cost: string; selling: boolean };
+export type ProductFormVariant = { id?: string; sku: string; size: string; color: string; retailPrice: string; cost: string; selling: boolean; addOnOnly?: boolean };
 export type ProductFormValues = { name: string; code: string; unit: string; retailPrice: string; cost: string; variants: ProductFormVariant[] };
 
-const EMPTY_VARIANT: ProductFormVariant = { sku: "", size: "", color: "", retailPrice: "", cost: "", selling: true };
+const EMPTY_VARIANT: ProductFormVariant = { sku: "", size: "", color: "", retailPrice: "", cost: "", selling: true, addOnOnly: false };
 
 /** "150.000" / "150000đ" ⇒ 150000; trống ⇒ `null` (chưa khai). */
 function toMoney(v: string): number | null {
@@ -54,6 +54,7 @@ export function ProductForm({ mode, productId, initial }: { mode: "create" | "ed
       retailPrice: toMoney(v.retailPrice),
       cost: toMoney(v.cost),
       selling: v.selling,
+      addOnOnly: Boolean(v.addOnOnly),
     }));
     const payload = { name: values.name, code: values.code, unit: values.unit, retailPrice: toMoney(values.retailPrice), cost: toMoney(values.cost), variants };
     setFormError(null);
@@ -122,6 +123,7 @@ export function ProductForm({ mode, productId, initial }: { mode: "create" | "ed
                 <th className="px-3 py-2 text-right">Giá bán riêng</th>
                 <th className="px-3 py-2 text-right">Giá vốn riêng</th>
                 <th className="px-3 py-2 text-center">Đang bán</th>
+                <th className="px-3 py-2 text-center" title="Không báo giá / không bán riêng — chỉ thêm khi đơn đã có mẫu mã chính (vd 0,5kg)">Chỉ bán kèm</th>
                 <th className="w-10" />
               </tr>
             </thead>
@@ -149,6 +151,9 @@ export function ProductForm({ mode, productId, initial }: { mode: "create" | "ed
                   </td>
                   <td className="px-3 py-1.5 text-center">
                     <input type="checkbox" aria-label={`Đang bán mẫu mã ${i + 1}`} checked={v.selling} onChange={(e) => setVariant(i, { selling: e.target.checked })} className="mt-2" />
+                  </td>
+                  <td className="px-3 py-1.5 text-center">
+                    <input type="checkbox" aria-label={`Chỉ bán kèm mẫu mã ${i + 1}`} checked={Boolean(v.addOnOnly)} onChange={(e) => setVariant(i, { addOnOnly: e.target.checked })} className="mt-2" />
                   </td>
                   <td className="px-1 py-1.5">
                     {!v.id && values.variants.length > 1 ? (

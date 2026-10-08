@@ -1660,6 +1660,13 @@
       "when": 1791400717117,
       "tag": "0237_saas_ops_signals",
       "breakpoints": true
+    },
+    {
+      "idx": 238,
+      "version": "7",
+      "when": 1791400758330,
+      "tag": "0238_variant_add_on_only",
+      "breakpoints": true
     }
   ]
 }
