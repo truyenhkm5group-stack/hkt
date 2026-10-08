@@ -30,18 +30,18 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-08T07:41:51.197Z",
-  "updated_at": "2026-10-08T08:19:03.587Z",
-  "last_heartbeat": "2026-10-08T08:18:46.125Z",
+  "updated_at": "2026-10-08T09:12:40.484Z",
+  "last_heartbeat": "2026-10-08T09:12:40.484Z",
   "definition_of_done": [],
   "handoff": {
     "branch": "feat/order-confirm-rules",
-    "sha": "be387d7f627d62dce013c56da7d0186ac293ee63",
-    "at": "2026-10-08T08:18:46.125Z",
+    "sha": "a81346aed43516e023560c5f7bc8fffb3b5fc91b",
+    "at": "2026-10-08T09:12:40.484Z",
     "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
     "title": "Luật chốt đơn 08/10: khách huỷ / xã chưa ghép ⇒ cần người kiểm + nút nhanh Xác nhận / Huỷ; sửa lời xác nhận chỉ dấu câu, ranh giới từ, SĐT chuẩn hoá",
-    "summary": "Luật chốt đơn 08/10: mark_declined không huỷ đơn mà gắn cờ «khách huỷ» (nguyên văn + mốc) cần người kiểm; chốt khi xã chưa ghép ⇒ cờ cần kiểm; tự xác nhận không nâng đơn có cờ huỷ; nút nhanh Xác nhận / Huỷ ở hộp thư, danh sách và chi tiết đơn + lọc Cần kiểm; lời xác nhận phải ≥ 2 chữ sau gấp dấu + ranh giới từ (một hàm cho 3 chỗ); SĐT chuẩn hoá ở đường ghi. Golden: chốt sai TẮT 4/11 ⇒ 2/10, BẬT 2/5 ⇒ 0/3",
+    "summary": "Sau review #675: nút nhanh gửi dấu vết đã thấy, ghi raw trong giao dịch có khoá và gộp, lý do mới chưa thấy ⇒ CONFLICT; khách huỷ đơn đã xác nhận ⇒ báo người; đơn thiếu chỗ ⇒ không chốt nhanh; lý do huỷ bắt buộc; ORDER_OUTCOME §11.4; SĐT về dạng 0…; đếm Cần kiểm không đệm; khách xác nhận lại ghi vào nhật ký",
     "tests": [
-      "tsc + eslint sạch; npm run build đạt; order-review, order-golden (baseline mới), sales-agent-golden, appointment-booking-bot, bot-order-status, manual-order-outcome, self-service-journey, sales-events, e2e-ai-sales-platform, sales-order-sync đạt; static-runner đạt; đột biến 8/8; 0 ký tự vô hình"
+      "tsc + eslint sạch; npm run build đạt; order-review, order-golden, sales-agent-golden, manual-order-outcome, self-service-journey, sales-order-sync, e2e-ai-sales-platform đạt; static sau commit; đột biến 13/13; 0 ký tự vô hình"
     ]
   }
 }
