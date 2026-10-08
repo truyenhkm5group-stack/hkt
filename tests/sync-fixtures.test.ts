@@ -546,6 +546,7 @@ import { testUserInvites } from "./user-invites.test";
 import { testPasswordReset } from "./password-reset.test";
 import { testIdentityEmailLogin } from "./identity-email-login.test";
 import { testSaasAcceptance } from "./saas-acceptance.test";
+import { testOpsSignals } from "./ops-signals.test";
 import { testTestOrgCodes } from "./test-org-codes.test";
 import { testHelpGuides } from "./help-guides.test";
 import { testChotDonAssets, testChotDonBrand, testMissedOrdersCalculator, testOrgLinkOrigin, testPublicSiteData, testPublicSiteHost, testPublicSiteSource } from "./public-site.test";
@@ -2929,6 +2930,10 @@ async function main() {
   // Ops `saas-acceptance` (lượt đi vai KHÁCH Chốt Đơn trên production): lá chắn sổ khai · cấp phát qua job «Tạo khách» (máy) ·
   // kích hoạt → /reset → /login không mã tổ chức · xoay mật khẩu rồi vứt · không lộ bí mật · E2E chat → AI → đơn với AI giả.
   await testSaasAcceptance();
+  // LAUNCH SPRINT §11 «Observability before sales» (sứ mệnh saas-ops-signals): tám tín hiệu vận hành của MỘT khách — lỗi đăng nhập có
+  // lý do (không lộ cho người dùng, không email / mật khẩu thô, chặn dò không nhân dòng) · ghi đơn hỏng KHÔNG thành «AI hỏng» · AI im
+  // có tên · gương sức khoẻ ở CSDL nhà (job sales-health, hết lỗi ⇒ về OK) · khung chỉ người vận hành đọc được. Tổ chức THẬT `ops-sig*`.
+  await testOpsSignals();
   testHelpGuides();
   // Trang giới thiệu: bảng giá đọc thật từ platform_plans, gói khởi điểm không bao giờ in thành 0 ₫.
   await testPublicSiteData();

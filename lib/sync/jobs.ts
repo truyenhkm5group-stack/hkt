@@ -82,6 +82,9 @@ import { refreshConversationLevels } from "@/lib/sales-chatbot/levels";
 import { sendNewOrderAlerts } from "@/lib/sales-chatbot/new-order-alert";
 import { runFanpageOrderSync } from "@/lib/sales-chatbot/order-sync";
 import { runSalesHealthCheck } from "@/lib/sales-chatbot/health";
+import { mirrorSalesOpsHealth } from "@/lib/sales-chatbot/ops-mirror";
+import { alertStaleOrderWriteHandoffs } from "@/lib/sales-chatbot/alerts";
+import { pruneAuthFailuresForJob } from "@/lib/platform/auth-failures";
 import { runAiCustomerUsageAlerts } from "@/lib/pricing/usage-alerts";
 import { runAiBalanceAlerts } from "@/lib/billing/ai-usage-charge";
 import { reconcileBillingPayments } from "@/lib/billing/service";
@@ -869,13 +872,20 @@ export const JOB_DEFINITIONS: Record<string, JobDefinition> = {
     run: (o) =>
       runSyncJob({ source: "ERP", job: "sales-health", trigger: o.trigger, actor: o.actor, observeOnly: true }, async (ctx) => {
         const r = await runSalesHealthCheck();
+        // GƯƠNG SỨC KHOẺ ở CSDL nhà (sứ mệnh saas-ops-signals · lib/sales-chatbot/ops-mirror.ts): ĐÚNG ảnh chụp vừa đánh giá ⇒ bảy
+        // dòng `platform_org_health` cho /platform/org/<mã> — người vận hành đọc không phải mở CSDL của khách. Không ném.
+        const mirror = await mirrorSalesOpsHealth({ health: r.health, snapshot: r.snapshot });
+        // Khách chờ nhân viên vì GHI ĐƠN hỏng quá ORDER_WRITE_STALE_MINUTES phút ⇒ báo nhóm vận hành + VNX (một tin mỗi sự cố). Lỗi
+        // của lượt canh không làm hỏng job giám sát.
+        const ow = await alertStaleOrderWriteHandoffs().catch((e: unknown) => ({ error: e instanceof Error ? e.message.slice(0, 120) : "lỗi lạ" }));
+        const owText = "error" in ow ? ` · canh ghi đơn hỏng lỗi: ${ow.error}` : ow.alerted ? ` · báo ${ow.alerted} khách chờ vì ghi đơn hỏng` : "";
         // Ngưỡng khách AI 80 · 100 · 120 · 150 (L5 · lib/pricing/usage-alerts.ts) đi CÙNG lịch giám sát — không thêm lịch mới.
         const usage = await runAiCustomerUsageAlerts();
         // Số dư AI thấp / hết (docs/saas/AI_BALANCE_V1.md) — cùng lịch, một chuông mỗi mức mỗi ngày.
         const balance = await runAiBalanceAlerts();
-        ctx.summary.detail = `${r.status} · ${r.alerted} · ${r.health.headline}${usage.sent ? ` · báo ngưỡng khách AI ${usage.sent}` : ""}${balance.sent ? ` · báo số dư AI ${balance.sent}` : ""}`.slice(0, 900);
+        ctx.summary.detail = `${r.status} · ${r.alerted} · ${r.health.headline} · ${mirror}${owText}${usage.sent ? ` · báo ngưỡng khách AI ${usage.sent}` : ""}${balance.sent ? ` · báo số dư AI ${balance.sent}` : ""}`.slice(0, 900);
         if (r.status === "RED") ctx.summary.warning = r.health.headline.slice(0, 500);
-        return r;
+        return { status: r.status, alerted: r.alerted, health: r.health, mirror };
       }),
   },
   /*
@@ -958,13 +968,16 @@ export const JOB_DEFINITIONS: Record<string, JobDefinition> = {
         // Sổ kinh tế SaaS (0199): ké lượt `alerts` của TỔ CHỨC NHÀ để chụp ảnh MRR hôm nay + quét mốc kích hoạt — không thêm
         // lịch chạy nào. Idempotent, tối đa một lượt mỗi 6 giờ; hỏng thì nói trong chi tiết, không chặn cảnh báo.
         const saas = (await currentOrganization()).isHome ? await saasSnapshotForJob() : null;
+        // Hạn giữ sổ lỗi đăng nhập (sứ mệnh saas-ops-signals · 90 ngày): bảng ở CSDL nhà ⇒ chỉ lượt của TỔ CHỨC NHÀ dọn, tối đa một lần
+        // mỗi 6 giờ trong tiến trình. Không ném.
+        const authPrune = (await currentOrganization()).isHome ? await pruneAuthFailuresForJob() : null;
         // Bot lên đơn (container chatbot): đơn kiểm đủ số lần mà vẫn thiếu thông tin → chuông ERP. Máy chưa nối bot
         // (thiếu CHATBOT_ADMIN_TOKEN) thì bỏ qua; hỏi bot hỏng thì nêu trong chi tiết lượt chạy, không chặn cảnh báo khác.
         const botLenDon = chatbotConfig().token ? await syncOrderBotReviewAlerts().catch((e: unknown) => ({ created: 0, resolved: 0, error: e instanceof Error ? e.message : String(e) })) : null;
         ctx.summary.imported = r.created;
         ctx.summary.updated = r.resolved;
         if (r.lark.error || r.telegram.error) ctx.summary.warning = `gửi cảnh báo hỏng: ${[r.lark.error && `Lark ${r.lark.error}`, r.telegram.error && `Telegram ${r.telegram.error}`].filter(Boolean).join(" · ")}`.slice(0, 500);
-        ctx.summary.detail = `mở mới ${r.created} · đóng ${r.resolved} · thôi theo dõi ${r.stale} · đổi loại ${r.reclassified} · đang mở ${r.open} · Lark ${r.lark.sent}${r.lark.error ? ` (lỗi: ${r.lark.error})` : ""} · Telegram ${r.telegram.sent}${r.telegram.error ? ` (lỗi: ${r.telegram.error})` : ""} · gửi lại ${r.delivery.retried}${r.delivery.failed ? ` · chờ gửi lại ${r.delivery.failed}` : ""}${r.delivery.gaveUp ? ` · BỎ CUỘC ${r.delivery.gaveUp}` : ""}${r.approvalSweep.released ? ` · trả lại ${r.approvalSweep.released} lời duyệt kẹt` : ""}${r.approvalSweep.error ? ` · dọn lời duyệt lỗi: ${r.approvalSweep.error}` : ""}${r.workflows.runs || r.workflows.executed ? ` · luật tự động ${r.workflows.runs} lượt / chạy thật ${r.workflows.executed} / chờ duyệt ${r.workflows.waiting}${r.workflows.failed ? ` / hỏng ${r.workflows.failed}` : ""}` : ""}${r.workflows.error ? ` · luật tự động lỗi: ${r.workflows.error}` : ""} · Cần anh quyết ${r.ownerDigest.sent ? `đã gửi (${r.ownerDigest.sent})` : r.ownerDigest.error ? `lỗi: ${r.ownerDigest.error}` : "không gửi"}${botLenDon ? ` · bot lên đơn: báo ${botLenDon.created} / đóng ${botLenDon.resolved}${botLenDon.error ? ` (lỗi: ${botLenDon.error})` : ""}` : ""}${saas ? ` · ${saas}` : ""}`.slice(0, 900);
+        ctx.summary.detail = `mở mới ${r.created} · đóng ${r.resolved} · thôi theo dõi ${r.stale} · đổi loại ${r.reclassified} · đang mở ${r.open} · Lark ${r.lark.sent}${r.lark.error ? ` (lỗi: ${r.lark.error})` : ""} · Telegram ${r.telegram.sent}${r.telegram.error ? ` (lỗi: ${r.telegram.error})` : ""} · gửi lại ${r.delivery.retried}${r.delivery.failed ? ` · chờ gửi lại ${r.delivery.failed}` : ""}${r.delivery.gaveUp ? ` · BỎ CUỘC ${r.delivery.gaveUp}` : ""}${r.approvalSweep.released ? ` · trả lại ${r.approvalSweep.released} lời duyệt kẹt` : ""}${r.approvalSweep.error ? ` · dọn lời duyệt lỗi: ${r.approvalSweep.error}` : ""}${r.workflows.runs || r.workflows.executed ? ` · luật tự động ${r.workflows.runs} lượt / chạy thật ${r.workflows.executed} / chờ duyệt ${r.workflows.waiting}${r.workflows.failed ? ` / hỏng ${r.workflows.failed}` : ""}` : ""}${r.workflows.error ? ` · luật tự động lỗi: ${r.workflows.error}` : ""} · Cần anh quyết ${r.ownerDigest.sent ? `đã gửi (${r.ownerDigest.sent})` : r.ownerDigest.error ? `lỗi: ${r.ownerDigest.error}` : "không gửi"}${botLenDon ? ` · bot lên đơn: báo ${botLenDon.created} / đóng ${botLenDon.resolved}${botLenDon.error ? ` (lỗi: ${botLenDon.error})` : ""}` : ""}${saas ? ` · ${saas}` : ""}${authPrune ? ` · ${authPrune}` : ""}`.slice(0, 900);
         return { ...r, orderBot: botLenDon };
       }),
   },

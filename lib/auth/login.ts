@@ -5,6 +5,7 @@ import { findIdentity, indexAccountIdentities, recordIdentity } from "@/lib/auth
 import { parseLoginIdentifier, type IdentityKind } from "@/lib/auth/identity-shared";
 import { hashPassword, verifyPassword } from "@/lib/auth/password";
 import type { SessionSubject } from "@/lib/auth/session";
+import type { AuthFailureReason } from "@/lib/constants/auth-failures";
 import { OrgContextError, withOrganization } from "@/lib/platform/context";
 import { findOrganization, getHomeOrganization } from "@/lib/platform/organizations";
 
@@ -36,10 +37,35 @@ import { findOrganization, getHomeOrganization } from "@/lib/platform/organizati
 export const LOGIN_BAD_CREDENTIALS = "Email / số điện thoại hoặc mật khẩu không đúng.";
 export const LOGIN_ACCOUNT_DISABLED = "Tài khoản đã bị khoá. Liên hệ quản trị viên.";
 
-export type LoginVerdict =
-  | { ok: true; subject: SessionSubject }
-  /** `BAD_CREDENTIALS` gộp: email sai · mật khẩu sai · mã tổ chức sai / không hoạt động. */
-  | { ok: false; code: "BAD_CREDENTIALS" | "DISABLED"; error: string };
+/**
+ * LÝ DO THẬT của một lượt đăng nhập hỏng (sứ mệnh saas-ops-signals) — CHỈ cho sổ lỗi đăng nhập của người vận hành
+ * (`lib/platform/auth-failures.ts`). Câu trả người dùng (`error`) KHÔNG đổi theo lý do: mọi lý do trừ tài khoản khoá vẫn ra đúng
+ * `LOGIN_BAD_CREDENTIALS`.
+ */
+export type LoginFailureReason = Extract<AuthFailureReason, "NO_IDENTITY" | "BAD_PASSWORD" | "USER_INACTIVE" | "ORG_INACTIVE" | "ORG_NOT_FOUND">;
+
+/**
+ * Kết quả CÔNG KHAI của lõi đăng nhập — ĐÚNG ba trường khi hỏng (`ok` · `code` · `error`), như trước sứ mệnh saas-ops-signals.
+ * `BAD_CREDENTIALS` gộp: email sai · mật khẩu sai · mã tổ chức sai / không hoạt động. Không mang lý do thật hay mã tổ chức: kết quả này
+ * đi qua nhiều nơi gọi (onboarding, lời mời, OAuth, ops nghiệm thu) và một trường thừa lọt tới client là lối dò tài khoản / trạng thái
+ * tổ chức (tests/platform-rbac.test.ts khoá đúng hình này).
+ */
+export type LoginVerdict = { ok: true; subject: SessionSubject } | { ok: false; code: "BAD_CREDENTIALS" | "DISABLED"; error: string };
+
+/**
+ * Kết quả NỘI BỘ — thêm `reason` + `orgCode` (tổ chức CÓ THẬT nơi lượt hỏng xảy ra, `null` khi mã không tồn tại) CHỈ để ghi
+ * `platform_auth_failures`. KHÔNG export và không bao giờ là giá trị trả về của hàm công khai: lý do chỉ ra khỏi tệp này qua lời gọi
+ * lại `onFailure` của `verifyLogin` (chỉ `loginAction` truyền, và nó chỉ trả `{ error }` cho client).
+ */
+type LoginVerdictWithReason = { ok: true; subject: SessionSubject } | { ok: false; code: "BAD_CREDENTIALS" | "DISABLED"; error: string; reason: LoginFailureReason; orgCode: string | null };
+
+/** Lý do nội bộ của một lượt hỏng — đưa cho `onFailure`, không nằm trong kết quả trả về. */
+export type LoginFailureNote = { reason: LoginFailureReason; orgCode: string | null; code: "BAD_CREDENTIALS" | "DISABLED" };
+
+/** Bỏ lý do nội bộ: dựng LẠI đúng ba trường công khai (không spread — trường mới thêm vào kiểu nội bộ không thể lọt ra). */
+function publicVerdict(v: LoginVerdictWithReason): LoginVerdict {
+  return v.ok ? { ok: true, subject: v.subject } : { ok: false, code: v.code, error: v.error };
+}
 
 /** Mã tổ chức gõ trên form ⇒ mã dùng để tra. Bỏ trống ⇒ tổ chức nhà (đăng nhập y như trước nền tảng). */
 export async function loginOrgCode(raw: string | null | undefined): Promise<string> {
@@ -54,7 +80,7 @@ async function burnPasswordCheck(password: string): Promise<void> {
   await verifyPassword(password, await dummyHash);
 }
 
-const badCredentials = (): LoginVerdict => ({ ok: false, code: "BAD_CREDENTIALS", error: LOGIN_BAD_CREDENTIALS });
+const badCredentials = (reason: LoginFailureReason, orgCode: string | null): LoginVerdictWithReason => ({ ok: false, code: "BAD_CREDENTIALS", error: LOGIN_BAD_CREDENTIALS, reason, orgCode });
 
 type UserRow = typeof schema.users.$inferSelect;
 
@@ -67,8 +93,8 @@ async function findUserByIdentifier(raw: string): Promise<UserRow | undefined> {
 }
 
 /** Đã đúng người ⇒ ký phiên, ghi `lastLoginAt` + nhật ký + chỉ mục danh tính. Gọi TRONG `withOrganization(org)`. */
-async function openSession(user: UserRow, orgCode: string, issue: (subject: SessionSubject) => Promise<void>, via: string | null): Promise<LoginVerdict> {
-  if (!user.active) return { ok: false, code: "DISABLED", error: LOGIN_ACCOUNT_DISABLED };
+async function openSession(user: UserRow, orgCode: string, issue: (subject: SessionSubject) => Promise<void>, via: string | null): Promise<LoginVerdictWithReason> {
+  if (!user.active) return { ok: false, code: "DISABLED", error: LOGIN_ACCOUNT_DISABLED, reason: "USER_INACTIVE", orgCode };
   const subject: SessionSubject = { id: user.id, email: user.email, name: user.name, role: user.role, orgCode };
   await issue(subject);
   const db = await getDb();
@@ -83,46 +109,85 @@ async function openSession(user: UserRow, orgCode: string, issue: (subject: Sess
  * Kiểm thông tin đăng nhập TRONG tổ chức `orgCode`, và khi đúng thì gọi `issue` (ký + ghi cookie)
  * rồi ghi `lastLoginAt` + nhật ký — cùng trong ngữ cảnh tổ chức đó. `email` nhận cả SĐT.
  */
-export async function verifyLogin(input: { email: string; password: string; orgCode: string }, issue: (subject: SessionSubject) => Promise<void>): Promise<LoginVerdict> {
+export async function verifyLogin(
+  input: { email: string; password: string; orgCode: string },
+  issue: (subject: SessionSubject) => Promise<void>,
+  opts: { onFailure?: (note: LoginFailureNote) => void } = {},
+): Promise<LoginVerdict> {
+  const v = await verifyLoginWithReason(input, issue);
+  if (!v.ok) opts.onFailure?.({ reason: v.reason, orgCode: v.orgCode, code: v.code });
+  return publicVerdict(v);
+}
+
+async function verifyLoginWithReason(input: { email: string; password: string; orgCode: string }, issue: (subject: SessionSubject) => Promise<void>): Promise<LoginVerdictWithReason> {
   const org = await findOrganization(input.orgCode);
   if (!org || org.status !== "ACTIVE") {
     await burnPasswordCheck(input.password);
-    return badCredentials();
+    return org ? badCredentials("ORG_INACTIVE", org.code) : badCredentials("ORG_NOT_FOUND", null);
   }
   try {
     return await withOrganization(org.code, async () => {
       const user = await findUserByIdentifier(input.email);
       if (!user) {
         await burnPasswordCheck(input.password);
-        return badCredentials();
+        return badCredentials("NO_IDENTITY", org.code);
       }
-      if (!(await verifyPassword(input.password, user.passwordHash))) return badCredentials();
+      if (!(await verifyPassword(input.password, user.passwordHash))) return badCredentials("BAD_PASSWORD", org.code);
       return openSession(user, org.code, issue, null);
     });
   } catch (error) {
     // Tổ chức bị đình chỉ GIỮA lúc tra sổ và lúc vào ngữ cảnh: vẫn là cùng một câu, không lộ gì thêm.
-    if (error instanceof OrgContextError) return badCredentials();
+    if (error instanceof OrgContextError) return badCredentials("ORG_INACTIVE", org.code);
+    throw error;
+  }
+}
+
+export type CredentialsCheck = { ok: true } | { ok: false; reason: LoginFailureReason; orgCode: string | null };
+
+/**
+ * Mật khẩu có khớp tài khoản `email` (hoặc SĐT) ở tổ chức `orgCode` không — KHÔNG mở phiên (bước dò nhiều tổ chức) — kèm LÝ DO khi
+ * không khớp (chỉ cho sổ lỗi đăng nhập). Tài khoản khoá mà mật khẩu ĐÚNG vẫn trả `ok` như trước: `verifyLogin` ngay sau đó nói «khoá».
+ */
+export async function credentialsCheck(input: { email: string; password: string; orgCode: string }): Promise<CredentialsCheck> {
+  const org = await findOrganization(input.orgCode);
+  if (!org) return { ok: false, reason: "ORG_NOT_FOUND", orgCode: null };
+  if (org.status !== "ACTIVE") return { ok: false, reason: "ORG_INACTIVE", orgCode: org.code };
+  try {
+    return await withOrganization(org.code, async (): Promise<CredentialsCheck> => {
+      const user = await findUserByIdentifier(input.email);
+      if (!user) {
+        await burnPasswordCheck(input.password);
+        return { ok: false, reason: "NO_IDENTITY", orgCode: org.code };
+      }
+      return (await verifyPassword(input.password, user.passwordHash)) ? { ok: true } : { ok: false, reason: "BAD_PASSWORD", orgCode: org.code };
+    });
+  } catch (error) {
+    if (error instanceof OrgContextError) return { ok: false, reason: "ORG_INACTIVE", orgCode: org.code };
     throw error;
   }
 }
 
 /** Mật khẩu có khớp tài khoản `email` (hoặc SĐT) ở tổ chức `orgCode` không — KHÔNG mở phiên (bước dò nhiều tổ chức). */
 export async function credentialsMatch(input: { email: string; password: string; orgCode: string }): Promise<boolean> {
-  const org = await findOrganization(input.orgCode);
-  if (!org || org.status !== "ACTIVE") return false;
-  try {
-    return await withOrganization(org.code, async () => {
-      const user = await findUserByIdentifier(input.email);
-      if (!user) {
-        await burnPasswordCheck(input.password);
-        return false;
-      }
-      return verifyPassword(input.password, user.passwordHash);
-    });
-  } catch (error) {
-    if (error instanceof OrgContextError) return false;
-    throw error;
+  return (await credentialsCheck(input)).ok;
+}
+
+const FAILURE_PRIORITY: readonly LoginFailureReason[] = ["BAD_PASSWORD", "USER_INACTIVE", "ORG_INACTIVE", "NO_IDENTITY", "ORG_NOT_FOUND"];
+
+/**
+ * Trang chung dò NHIỀU tổ chức mà không tổ chức nào khớp ⇒ MỘT lý do cho sổ: lý do nói nhiều nhất về chỗ tài khoản thật sự nằm
+ * (sai mật khẩu ở tổ chức có tài khoản > tổ chức đình chỉ > không có tài khoản). «Không có tài khoản» ở tổ chức NHÀ của trang chung
+ * (nhà luôn là ứng viên) KHÔNG quy về nhà — người gõ một email không có ở đâu cả chưa chắc là người của nhà. HÀM THUẦN.
+ */
+export function strongestLoginFailure(fails: readonly { reason: LoginFailureReason; orgCode: string | null }[], homeCode: string): { reason: LoginFailureReason; orgCode: string | null } {
+  const sorted = [...fails].sort((a, b) => FAILURE_PRIORITY.indexOf(a.reason) - FAILURE_PRIORITY.indexOf(b.reason));
+  const top = sorted[0];
+  if (!top) return { reason: "NO_IDENTITY", orgCode: null };
+  if (top.reason === "NO_IDENTITY") {
+    const indexed = sorted.find((f) => f.reason === "NO_IDENTITY" && f.orgCode && f.orgCode !== homeCode);
+    return { reason: "NO_IDENTITY", orgCode: indexed?.orgCode ?? null };
   }
+  return top;
 }
 
 /**
@@ -145,9 +210,26 @@ export async function loginCandidates(identifier: string): Promise<string[]> {
  * của `loginAction`).
  */
 export async function matchingLoginOrganizations(identifier: string, password: string): Promise<string[]> {
+  return (await loginOrganizationsCheck(identifier, password)).matched;
+}
+
+export type LoginOrganizationsCheck = { matched: string[]; fails: { reason: LoginFailureReason; orgCode: string | null }[]; homeCode: string };
+
+/**
+ * CÙNG phép dò của `matchingLoginOrganizations`, kèm LÝ DO của từng tổ chức không khớp (sứ mệnh saas-ops-signals — chỉ cho sổ lỗi
+ * đăng nhập, không bao giờ cho người dùng) và mã tổ chức nhà (`loginCandidates` luôn đặt nhà CUỐI) để `strongestLoginFailure` không
+ * quy «không có tài khoản» về nhà. `loginAction` dùng hàm này; ops nghiệm thu dùng `matchingLoginOrganizations` — một phép dò, hai lối.
+ */
+export async function loginOrganizationsCheck(identifier: string, password: string): Promise<LoginOrganizationsCheck> {
+  const candidates = await loginCandidates(identifier);
   const matched: string[] = [];
-  for (const code of await loginCandidates(identifier)) if (await credentialsMatch({ email: identifier, password, orgCode: code })) matched.push(code);
-  return matched;
+  const fails: { reason: LoginFailureReason; orgCode: string | null }[] = [];
+  for (const code of candidates) {
+    const c = await credentialsCheck({ email: identifier, password, orgCode: code });
+    if (c.ok) matched.push(code);
+    else fails.push(c);
+  }
+  return { matched, fails, homeCode: candidates[candidates.length - 1] ?? "" };
 }
 
 /**
@@ -158,19 +240,27 @@ export async function completeProviderLogin(
   input: { orgCode: string; userId: string; provider: Extract<IdentityKind, "GOOGLE" | "FACEBOOK">; subject: string },
   issue: (subject: SessionSubject) => Promise<void>,
 ): Promise<LoginVerdict> {
+  return publicVerdict(await providerLoginWithReason(input, issue));
+}
+
+async function providerLoginWithReason(
+  input: { orgCode: string; userId: string; provider: Extract<IdentityKind, "GOOGLE" | "FACEBOOK">; subject: string },
+  issue: (subject: SessionSubject) => Promise<void>,
+): Promise<LoginVerdictWithReason> {
   const org = await findOrganization(input.orgCode);
-  if (!org || org.status !== "ACTIVE") return badCredentials();
+  if (!org) return badCredentials("ORG_NOT_FOUND", null);
+  if (org.status !== "ACTIVE") return badCredentials("ORG_INACTIVE", org.code);
   try {
     return await withOrganization(org.code, async () => {
       const db = await getDb();
       const user = await db.query.users.findFirst({ where: eq(schema.users.id, input.userId) });
-      if (!user) return badCredentials();
+      if (!user) return badCredentials("NO_IDENTITY", org.code);
       const v = await openSession(user, org.code, issue, input.provider);
       if (v.ok) await recordIdentity(input.provider, input.subject, org.code, user.id);
       return v;
     });
   } catch (error) {
-    if (error instanceof OrgContextError) return badCredentials();
+    if (error instanceof OrgContextError) return badCredentials("ORG_INACTIVE", org.code);
     throw error;
   }
 }

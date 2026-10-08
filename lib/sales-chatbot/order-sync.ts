@@ -26,6 +26,7 @@ import { getDb, schema } from "@/db";
 import { estimateCostUsd, type AiBlock } from "@/lib/ai/provider";
 import { aiKillSwitchDenial } from "@/lib/ai-usage/control";
 import { recordAiUsage } from "@/lib/ai-usage/ledger";
+import { aiErrorClassOf } from "@/lib/ai-usage/types";
 import { checkAiQuota } from "@/lib/ai-usage/quota";
 import { audit } from "@/lib/audit";
 import { activeUserIdsWhoCan, can, type SessionUser } from "@/lib/auth/session";
@@ -668,7 +669,7 @@ async function syncThread(a: {
     await recordAiUsage({ orgCode: org.code, feature: "sales_chatbot", source: prov.source, provider: prov.provider.name, model: res.model || prov.provider.model, requests: 1, inputTokens: res.usage.inputTokens + res.usage.cacheReadTokens + res.usage.cacheWriteTokens, outputTokens: res.usage.outputTokens, costUsd: estimateCostUsd(res.model || prov.provider.model, res.usage), status: "OK", actorId: null, ref: `order-sync:${conv.id}`, workload: "order_sync", ...usageDetail(res) }).catch(() => undefined);
     reply = parseOrderSyncReply(textOf(res.content));
   } catch (e) {
-    await recordAiUsage({ orgCode: org.code, feature: "sales_chatbot", source: prov.source, provider: prov.provider.name, model: prov.provider.model, requests: 1, inputTokens: null, outputTokens: null, costUsd: null, status: "ERROR", actorId: null, ref: `order-sync:${conv.id}`, workload: "order_sync" }).catch(() => undefined);
+    await recordAiUsage({ orgCode: org.code, feature: "sales_chatbot", source: prov.source, provider: prov.provider.name, model: prov.provider.model, requests: 1, inputTokens: null, outputTokens: null, costUsd: null, status: "ERROR", errorClass: aiErrorClassOf(e), actorId: null, ref: `order-sync:${conv.id}`, workload: "order_sync" }).catch(() => undefined);
     return { retry: true, result: `AI lỗi: ${(e instanceof Error ? e.message : String(e)).slice(0, 160)}` };
   }
   if (!reply) return { outcome: "ERROR", result: "AI trả lời sai định dạng — chưa ghi đơn (lượt sau đọc lại khi có tin mới)" };

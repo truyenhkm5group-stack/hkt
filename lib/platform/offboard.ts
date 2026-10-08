@@ -93,6 +93,8 @@ export const OFFBOARD_TABLES: Readonly<Record<ControlPlaneTable, TableSpec>> = {
   platform_ai_accounts: { disposition: "DELETE", why: "Trạng thái + ngưỡng Số dư AI (không có cột số dư — số dư là tổng sổ cái).", where: byCode },
   platform_ai_ledger_entries: { disposition: "BLOCK", why: "Sổ cái Số dư AI CHỈ GHI THÊM — có dòng (kể cả tặng / trừ) ⇒ từ chối; mã dùng lại sẽ thừa kế số dư.", where: byCode },
   platform_payment_intents: { disposition: "DELETE", why: "Phiếu nạp hết hạn / đã huỷ — phiếu ĐÃ TRẢ là tiền thật (chặn ở MONEY_CHECKS VÀ không bao giờ khớp điều kiện xoá), phiếu PENDING còn hạn ⇒ từ chối.", where: (s) => sql`org_code = ${s.code} and status <> 'PAID'` },
+  platform_org_health: { disposition: "DELETE", why: "Gương sức khoẻ của tổ chức (kết luận job sales-health, khoá theo MÃ) — để lại thì tổ chức đăng ký lại cùng mã thấy sự cố của tổ chức cũ.", where: byCode },
+  platform_auth_failures: { disposition: "DELETE", why: "Lỗi đăng nhập của tổ chức (định danh đã băm + bản che) — dữ liệu người, đi cùng tổ chức; dòng không quy được về tổ chức nào (org_code NULL) không bị đụng.", where: byCode },
 };
 
 /** Thứ tự XOÁ trong giao dịch: bảng con trước, dòng tổ chức rồi mới tới tài khoản (khoá ngoài `platform_organizations.account_id`). */
@@ -102,6 +104,8 @@ export const OFFBOARD_DELETE_ORDER: readonly ControlPlaneTable[] = [
   "platform_messenger_pages",
   "platform_identities",
   "platform_ai_usage",
+  "platform_org_health",
+  "platform_auth_failures",
   "platform_usage_events",
   "platform_saas_daily",
   "platform_org_milestones",

@@ -34,7 +34,8 @@ export const SALES_HEALTH_STATE_KEY = "ai.salesHealth.state";
 /** Mẫu câu lỗi GỬI (Pancake / Meta không nhận tin) mà lượt xử lý ghi vào `note` khi chốt tin. */
 export const SEND_ERROR_NOTE_RE = "(không nhận tin|từ chối|không gọi được|lỗi gửi|HTTP [45][0-9]{2}|timeout|timed out)";
 
-const CUSTOMER_ROW = sql.raw(`coalesce(note, '') not in ('BOT_SENT', 'PAGE_REPLY') and message_id not like 'bot-out:%' and message_id not like 'staff-out:%' and imported_at is null`);
+/** Điều kiện «tin KHÁCH sống» trên `sales_chat_inbound` (cột không tiền tố) — gương sức khoẻ (ops-mirror.ts) đếm cùng một luật. */
+export const CUSTOMER_ROW = sql.raw(`coalesce(note, '') not in ('BOT_SENT', 'PAGE_REPLY') and message_id not like 'bot-out:%' and message_id not like 'staff-out:%' and imported_at is null`);
 
 const iso = (v: unknown): string | null => {
   if (v === null || v === undefined) return null;
@@ -259,7 +260,8 @@ export async function readSalesHealthState(): Promise<StoredState | null> {
   return v && typeof v.status === "string" && Array.isArray(v.bad) ? v : null;
 }
 
-export type SalesHealthRun = { status: SalesHealthStatus; alerted: string; health: SalesHealth };
+/** `snapshot` đi kèm để lượt ghi gương sức khoẻ ở CSDL nhà (ops-mirror.ts) dùng ĐÚNG ảnh chụp vừa đánh giá, không đo lần hai. */
+export type SalesHealthRun = { status: SalesHealthStatus; alerted: string; health: SalesHealth; snapshot: SalesHealthSnapshot };
 
 /** Job `sales-health`: chụp → đánh giá → báo (nếu cần) → lưu trạng thái. KHÔNG ném. */
 export async function runSalesHealthCheck(now: Date = new Date()): Promise<SalesHealthRun> {
@@ -280,5 +282,5 @@ export async function runSalesHealthCheck(now: Date = new Date()): Promise<Sales
   const bad = badCheckKeys(health);
   const since = prev && prev.status === health.status ? prev.since : now.toISOString();
   await setSettingJson(SALES_HEALTH_STATE_KEY, { status: health.status, bad, since, checkedAt: now.toISOString(), headline: health.headline } satisfies StoredState);
-  return { status: health.status, alerted, health };
+  return { status: health.status, alerted, health, snapshot: snap };
 }

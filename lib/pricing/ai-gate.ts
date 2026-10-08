@@ -128,18 +128,26 @@ export type GateConversation = { channel: string; pageId: string | null; threadI
  */
 export async function aiBalanceGate(orgCode: string, conv: GateConversation, now: Date = new Date()): Promise<boolean> {
   try {
-    if (!(await aiBalanceEnabled(orgCode))) return true;
-    const terms = await balanceOverageTerms(orgCode);
-    if (!terms) return true;
-    if (await aiCustomerCountedThisPeriod(orgCode, conv, now)) return true;
-    const org = await findOrganization(orgCode);
-    if (!org) return true;
-    const used = (await readAiCustomerUsage([org.code], usagePeriodOf(now), now)).get(org.code)?.value ?? null;
-    if (used === null || used < terms.included) return true;
-    return (await readAiBalance(orgCode)).totalVnd > 0;
+    return await aiBalanceGateStrict(orgCode, conv, now);
   } catch {
     return true;
   }
+}
+
+/**
+ * CÙNG phép tính với `aiBalanceGate` nhưng NÉM khi đọc lỗi — cho gương sức khoẻ của người vận hành (lib/sales-chatbot/ops-mirror.ts):
+ * với khách, lỗi đọc ⇒ CHO là đúng; với người chẩn đoán, lỗi đọc là CHƯA BIẾT, in «mở» là nói dối. Đường phục vụ khách KHÔNG dùng hàm này.
+ */
+export async function aiBalanceGateStrict(orgCode: string, conv: GateConversation, now: Date = new Date()): Promise<boolean> {
+  if (!(await aiBalanceEnabled(orgCode))) return true;
+  const terms = await balanceOverageTerms(orgCode);
+  if (!terms) return true;
+  if (await aiCustomerCountedThisPeriod(orgCode, conv, now)) return true;
+  const org = await findOrganization(orgCode);
+  if (!org) return true;
+  const used = (await readAiCustomerUsage([org.code], usagePeriodOf(now), now)).get(org.code)?.value ?? null;
+  if (used === null || used < terms.included) return true;
+  return (await readAiBalance(orgCode)).totalVnd > 0;
 }
 
 /** Cổng của RUNTIME (tổ chức ngữ cảnh). Không ném: lỗi ⇒ cho. */

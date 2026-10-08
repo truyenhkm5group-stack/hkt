@@ -10,7 +10,7 @@
  * Người nhận chọn bằng `activeUserIdsWhoCan` — đúng `can()` mà trang dùng, không tính quyền lần thứ hai. Chống gửi trùng ở
  * CSDL (khoá duy nhất `dedupe_key`), nên gọi lại nhiều lần vẫn là MỘT tin mỗi người.
  */
-import { and, desc, eq, isNotNull } from "drizzle-orm";
+import { and, desc, eq, isNotNull, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { activeUserIdsWhoCan } from "@/lib/auth/session";
 import { sendInboxMessages } from "@/lib/inbox/send";
@@ -24,6 +24,7 @@ import { sendTelegram } from "@/lib/alerts/telegram";
 import { currentOrganization, withOrganization } from "@/lib/platform/context";
 import { getHomeOrganization } from "@/lib/platform/organizations";
 import { STATUS_DOT, STATUS_LABEL, type HealthAlertDecision, type SalesHealth, type SalesHealthSnapshot } from "@/lib/sales-chatbot/health-shared";
+import { ORDER_WRITE_HANDOFF_PREFIX, ORDER_WRITE_STALE_MINUTES, ORDER_WRITE_STALE_SCAN_LIMIT } from "@/lib/constants/ops-signals";
 
 /** Cấu hình bot — đọc thẳng settings (engine import tệp này, không import ngược). */
 async function handoffNotifiesGroup(): Promise<boolean> {
@@ -68,11 +69,15 @@ async function fanpageCustomerName(conversationId: string): Promise<string | nul
 }
 
 /** Khách cần nhân viên (bot chuyển, hoặc AI không trả lời được): người ĐỌC được hội thoại chatbot được báo. */
-export async function notifySalesChatHandoff(conversationId: string, reason: string, customer: { name: string; phone: string } | null | undefined, now: Date): Promise<void> {
+/**
+ * `opts.dedupeKey`: khoá chống trùng của MỘT sự cố (mặc định `sales-chat:handoff:<hội thoại>` — vĩnh viễn, một tin mỗi hội thoại). Sự cố
+ * có danh tính riêng (ghi đơn hỏng ở lượt N) truyền khoá riêng, nếu không hội thoại từng chuyển người một lần sẽ không bao giờ báo lại.
+ */
+export async function notifySalesChatHandoff(conversationId: string, reason: string, customer: { name: string; phone: string } | null | undefined, now: Date, opts: { dedupeKey?: string } = {}): Promise<void> {
   const title = "Chatbot chuyển khách cho nhân viên";
   const body = `${reason}${customer ? ` — ${customer.name} · ${customer.phone}` : ""}`;
   const href = `/ai/sales-chatbot/inbox?c=${encodeURIComponent(conversationId)}`;
-  const key = `sales-chat:handoff:${conversationId}`;
+  const key = opts.dedupeKey ?? `sales-chat:handoff:${conversationId}`;
   const db = await getDb();
   await db
     .insert(schema.notifications)
@@ -220,4 +225,81 @@ export async function notifySalesHealth(p: { decision: Exclude<HealthAlertDecisi
   }
   const org = await currentOrganization();
   await notifyPlatformOperator(`${title} — tổ chức ${org.code}`, recovered ? lines : bad.map((c) => `${c.level === "CRITICAL" ? "🔴" : "🟡"} ${c.title}: ${c.detail}`));
+}
+
+/**
+ * KHÁCH CHỜ VÌ GHI ĐƠN HỎNG (sứ mệnh saas-ops-signals, review #692 MEDIUM-1). Chuyển người vì ghi đơn KHÔNG tự hết hạn (bot không tự ghi
+ * lại một đơn chưa ai kiểm) — đúng, nhưng tin chuyển người chỉ tới chuông ERP, nhóm chat chỉ nhận khi shop bật «báo nhóm khi chuyển
+ * người» (Hải Sản Làng Chài tắt từ 03/10), còn gương nền tảng chỉ người vận hành VNX thấy ⇒ khách muốn mua bị im mà không ai biết.
+ *
+ * Job `sales-health` (5 phút / lần) gọi hàm này: hội thoại còn HANDOFF với lý do mở đầu `ORDER_WRITE_HANDOFF_PREFIX`, quá
+ * `ORDER_WRITE_STALE_MINUTES` phút kể từ lúc chuyển, mà CHƯA có tin nhân viên gửi TỪ ERP sau mốc đó (`last_staff_at`) ⇒ báo:
+ *  · chuông + hộp thư người đọc được hội thoại (MỘT tin mỗi sự cố: khoá = hội thoại + mốc chuyển người);
+ *  · nhóm vận hành của shop (Lark / Telegram) — KHÔNG theo công tắc «báo nhóm khi chuyển người»: như tin «bot ngừng trả lời», đây là
+ *    sự cố máy (lõi đơn hỏng), không phải một khách xin người;
+ *  · nhóm VNX — chỉ mã tổ chức + số hội thoại, không tên / SĐT / nội dung (ISO-05).
+ * Nhân viên trả lời thẳng trên Pancake thì ERP không thấy ⇒ có thể báo một hội thoại đã có người lo — chấp nhận (một tin mỗi sự cố); chiều
+ * ngược lại (im lặng khi khách đang chờ) mới là thứ phải chặn. Tin chỉ đi khi dòng `notifications` được ghi MỚI. Không ném.
+ */
+export type StaleOrderWriteRun = { stale: number; alerted: number; group: "SENT" | "NO_CHANNEL" | "FAILED" | "SKIPPED"; operator: OperatorNotifyResult | "SKIPPED" };
+export async function alertStaleOrderWriteHandoffs(now: Date = new Date()): Promise<StaleOrderWriteRun> {
+  const db = await getDb();
+  const c = schema.salesChatConversations;
+  const handoffAt = sql<Date>`case when ${c.state}->'handoff'->>'at' ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T' then (${c.state}->'handoff'->>'at')::timestamptz else ${c.updatedAt} end`;
+  const cutoff = new Date(now.getTime() - ORDER_WRITE_STALE_MINUTES * 60_000);
+  // Không đào lại sự cố quá 7 ngày: hội thoại bị bỏ quên từ lâu đã có tin của chính nó lúc đó.
+  const floor = new Date(now.getTime() - 7 * 86_400_000);
+  const rows = await db
+    .select({ id: c.id, reason: c.handoffReason, at: handoffAt })
+    .from(c)
+    .where(
+      and(
+        eq(c.status, "HANDOFF"),
+        sql`${c.handoffReason} like ${`${ORDER_WRITE_HANDOFF_PREFIX}%`}`,
+        sql`${handoffAt} <= ${cutoff}`,
+        sql`${handoffAt} >= ${floor}`,
+        sql`(${c.lastStaffAt} is null or ${c.lastStaffAt} < ${handoffAt})`,
+      ),
+    )
+    .orderBy(handoffAt)
+    .limit(ORDER_WRITE_STALE_SCAN_LIMIT);
+  const out: StaleOrderWriteRun = { stale: rows.length, alerted: 0, group: "SKIPPED", operator: "SKIPPED" };
+  if (!rows.length) return out;
+  const title = "Khách đang chờ nhân viên — bot ghi đơn hỏng";
+  const fresh: { id: string; key: string; reason: string; waited: number }[] = [];
+  for (const r of rows) {
+    const at = r.at instanceof Date ? r.at : new Date(String(r.at));
+    const key = `sales-chat:order-write-stale:${r.id}:${at.toISOString()}`;
+    const waited = Math.max(0, Math.round((now.getTime() - at.getTime()) / 60_000));
+    const body = `${r.reason ?? ORDER_WRITE_HANDOFF_PREFIX} — khách đã chờ ${waited} phút, chưa có nhân viên trả lời từ ERP.`;
+    const href = `/ai/sales-chatbot/inbox?c=${encodeURIComponent(r.id)}`;
+    const ins = await db
+      .insert(schema.notifications)
+      .values({ kind: "SYSTEM", severity: "critical", title, body, href, entityType: "SALES_CHAT", entityId: r.id, dedupeKey: key, occurredAt: now })
+      .onConflictDoNothing({ target: schema.notifications.dedupeKey })
+      .returning({ id: schema.notifications.id });
+    if (!ins.length) continue;
+    fresh.push({ id: r.id, key, reason: r.reason ?? ORDER_WRITE_HANDOFF_PREFIX, waited });
+    const users = await activeUserIdsWhoCan("ai_sales:view");
+    await sendInboxMessages(users.map((userId) => ({ userId, kind: "SALES_CHAT_HANDOFF", title, body, href, dedupeKey: `${key}:${userId}` })), db);
+  }
+  out.alerted = fresh.length;
+  if (!fresh.length) return out;
+  try {
+    const group = await operationsGroupChannel();
+    if (!group) out.group = "NO_CHANNEL";
+    else {
+      const lines = [`🔴 ${title}: ${fresh.length} hội thoại chờ quá ${ORDER_WRITE_STALE_MINUTES} phút`];
+      for (const f of fresh.slice(0, 10)) lines.push(`· ${(await fanpageCustomerName(f.id)) ?? "Khách"} — chờ ${f.waited} phút — ${f.reason}`);
+      if (fresh.length > 10) lines.push(`· … và ${fresh.length - 10} hội thoại nữa (xem hộp thư chatbot trong ERP)`);
+      lines.push("Bot đã dừng trả lời các hội thoại này — vào Pancake trả lời khách, KIỂM ĐƠN trước khi lên tay.");
+      await deliverMessage({ connectorKey: group.connectorKey, destination: group.destination, title, body: lines.join("\n").slice(0, 3500), dedupeKey: `${fresh[0].key}:group`, event: "sales_chat.order_write_stale", subject: { type: "SALES_CHAT", id: fresh[0].id } });
+      out.group = "SENT";
+    }
+  } catch {
+    out.group = "FAILED";
+  }
+  const org = await currentOrganization();
+  out.operator = await notifyPlatformOperator(`🔴 Ghi đơn hỏng — khách chờ nhân viên — tổ chức ${org.code}`, [`${fresh.length} hội thoại chuyển người vì ghi đơn hỏng đã chờ quá ${ORDER_WRITE_STALE_MINUTES} phút, chưa có nhân viên trả lời từ ERP.`]);
+  return out;
 }

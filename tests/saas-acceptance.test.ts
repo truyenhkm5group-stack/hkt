@@ -440,7 +440,11 @@ function testSource() {
   assert.match(readFileSync(path.join(goc, "lib", "saas", "acceptance-guard.ts"), "utf8"), /nextRuntime: string \| undefined = process\.env\.NEXT_RUNTIME\)/);
   // /login không mã tổ chức: MỘT phép quyết định, form và ops cùng đi qua.
   const auth = readFileSync(path.join(goc, "lib", "actions", "auth.ts"), "utf8");
-  assert.ok(/matchingLoginOrganizations\(email, password\)/.test(auth) && !/credentialsMatch\(/.test(auth), "loginAction dùng matchingLoginOrganizations, không tự lặp lại phép dò");
+  // `loginOrganizationsCheck` là CHÍNH phép dò ấy kèm lý do cho sổ lỗi đăng nhập (sứ mệnh saas-ops-signals) — `matchingLoginOrganizations`
+  // dẫn xuất từ nó; auth.ts vẫn không được tự lặp vòng kiểm mật khẩu (credentialsMatch / credentialsCheck).
+  assert.ok(/(?:matchingLoginOrganizations|loginOrganizationsCheck)\(email, password\)/.test(auth) && !/credentialsMatch\(|credentialsCheck\(/.test(auth), "loginAction dùng phép dò chung, không tự lặp lại phép dò");
+  const loginTs = readFileSync(path.join(goc, "lib", "auth", "login.ts"), "utf8");
+  assert.ok(/matchingLoginOrganizations[\s\S]{0,200}return \(await loginOrganizationsCheck\(identifier, password\)\)\.matched;/.test(loginTs), "matchingLoginOrganizations dẫn xuất từ loginOrganizationsCheck — một phép dò, hai lối");
   // Lõi ops KHÔNG ghi hộ vào workspace (chỉ đạo 08/10/2026): ALLOWLIST import — mỗi tên nhập phải có trong danh sách khai.
   const core = readFileSync(path.join(goc, "lib", "saas", "acceptance.ts"), "utf8");
   const imports = importsOf(core);

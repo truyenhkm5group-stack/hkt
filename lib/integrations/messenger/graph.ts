@@ -112,9 +112,9 @@ type GraphError = { error?: { message?: string; code?: number; error_subcode?: n
 /** Lỗi của MỘT lời gọi Graph: câu (đã che bí mật, kèm việc phải làm) + LOẠI (graph-errors.ts) để nơi gọi biết kết nối có hỏng không. */
 export type GraphFailure = { ok: false; error: string; code: number | null; kind: GraphErrorKind };
 
-async function graph(fetchImpl: Fetch, url: string, init: RequestInit, hide: readonly string[]): Promise<{ ok: true; body: Record<string, unknown> } | GraphFailure> {
+async function graph(fetchImpl: Fetch, url: string, init: RequestInit, hide: readonly string[], timeoutMs: number = TIMEOUT_MS): Promise<{ ok: true; body: Record<string, unknown> } | GraphFailure> {
   try {
-    const res = await fetchImpl(url, { ...init, redirect: "manual", signal: AbortSignal.timeout(TIMEOUT_MS) });
+    const res = await fetchImpl(url, { ...init, redirect: "manual", signal: AbortSignal.timeout(timeoutMs) });
     const body = ((await res.json().catch(() => null)) ?? {}) as Record<string, unknown> & GraphError;
     if (!res.ok || body.error) {
       const msg = body.error?.message ?? `HTTP ${res.status}`;
@@ -259,10 +259,10 @@ const appAccessToken = (app: MessengerApp) => `${app.appId}|${app.appSecret}`;
  * `expires_at` đã qua ⇒ EXPIRED; `expires_at = 0` = không hết hạn. Lỗi gọi ⇒ UNKNOWN (không kết luận). Token của app KHÁC ⇒
  * EXPIRED (không dùng được với app này).
  */
-export async function inspectToken(app: MessengerApp, token: string, fetchImpl: Fetch = fetch, now: Date = new Date()): Promise<TokenCheck> {
+export async function inspectToken(app: MessengerApp, token: string, fetchImpl: Fetch = fetch, now: Date = new Date(), timeoutMs: number = TIMEOUT_MS): Promise<TokenCheck> {
   const appToken = appAccessToken(app);
   const hide = [token, app.appSecret, appToken];
-  const r = await graph(fetchImpl, `${graphBase()}/debug_token?${new URLSearchParams({ input_token: token, access_token: appToken, appsecret_proof: appSecretProof(appToken, app.appSecret) })}`, { method: "GET" }, hide);
+  const r = await graph(fetchImpl, `${graphBase()}/debug_token?${new URLSearchParams({ input_token: token, access_token: appToken, appsecret_proof: appSecretProof(appToken, app.appSecret) })}`, { method: "GET" }, hide, timeoutMs);
   if (!r.ok) return { state: "UNKNOWN", expiresAt: null, why: r.error };
   const data = (r.body.data ?? {}) as { is_valid?: unknown; expires_at?: unknown; app_id?: unknown; error?: { message?: unknown } };
   const exp = typeof data.expires_at === "number" && data.expires_at > 0 ? new Date(data.expires_at * 1000) : null;
@@ -414,12 +414,14 @@ export const WEBHOOK_STATES = ["OK", "NOT_SUBSCRIBED", "MISSING_FIELDS", "TOKEN_
 export type WebhookState = (typeof WEBHOOK_STATES)[number];
 export type PageWebhookCheck = { pageId: string; state: WebhookState; missingFields: string[]; token: TokenCheck; detail: string | null };
 
-export async function checkPageWebhook(app: MessengerApp, pageId: string, pageToken: string, fetchImpl: Fetch = fetch, now: Date = new Date()): Promise<PageWebhookCheck> {
+/** `opts.timeoutMs`: trần chờ mỗi lời gọi Graph (mặc định trần chung) — phép kiểm sức khoẻ chạy trong hàng đợi job dùng chung nên cắt ngắn hơn. */
+export async function checkPageWebhook(app: MessengerApp, pageId: string, pageToken: string, fetchImpl: Fetch = fetch, now: Date = new Date(), opts: { timeoutMs?: number } = {}): Promise<PageWebhookCheck> {
+  const timeoutMs = opts.timeoutMs ?? TIMEOUT_MS;
   const unknownToken: TokenCheck = { state: "UNKNOWN", expiresAt: null, why: null };
   if (!/^\d{5,30}$/.test(pageId)) return { pageId, state: "UNKNOWN", missingFields: [], token: unknownToken, detail: "Mã page không hợp lệ." };
-  const token = await inspectToken(app, pageToken, fetchImpl, now);
+  const token = await inspectToken(app, pageToken, fetchImpl, now, timeoutMs);
   if (token.state === "EXPIRED") return { pageId, state: "TOKEN_EXPIRED", missingFields: [], token, detail: token.why };
-  const r = await graph(fetchImpl, `${graphBase()}/${encodeURIComponent(pageId)}/subscribed_apps?${new URLSearchParams({ fields: "id,name,subscribed_fields", access_token: pageToken, appsecret_proof: appSecretProof(pageToken, app.appSecret) })}`, { method: "GET" }, [pageToken, app.appSecret]);
+  const r = await graph(fetchImpl, `${graphBase()}/${encodeURIComponent(pageId)}/subscribed_apps?${new URLSearchParams({ fields: "id,name,subscribed_fields", access_token: pageToken, appsecret_proof: appSecretProof(pageToken, app.appSecret) })}`, { method: "GET" }, [pageToken, app.appSecret], timeoutMs);
   if (!r.ok) return { pageId, state: r.kind === "TOKEN" ? "TOKEN_EXPIRED" : "UNKNOWN", missingFields: [], token, detail: r.error };
   const rows = Array.isArray(r.body.data) ? (r.body.data as Record<string, unknown>[]) : [];
   const mine = rows.find((x) => String(x.id ?? "") === app.appId);

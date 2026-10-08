@@ -815,6 +815,9 @@ const LOI_VAN_HANH: Record<string, string> = {
   "lib/saas/operator-ai.ts::loadOperatorOrgAiConfig": "Đọc động cơ AI của chatbot + trạng thái khoá AI (không gợi ý, không bản mã) trong CSDL của MỘT tổ chức khách.",
   "lib/saas/operator-ai.ts::saveOrgChatbotEngine": "Đổi nguồn AI / model / dự phòng của chatbot một tổ chức khách — bắt buộc lý do, nhật ký tổ chức + nền tảng AI_ORG_CONTROL_SET.",
   "lib/saas/operator-ai.ts::operateOrgAiConnection": "Lưu / Kiểm tra / Bật / Tắt khoá AI của một tổ chức khách qua lõi sổ kết nối — bắt buộc lý do, nhật ký tổ chức + nền tảng.",
+  // Tín hiệu vận hành (sứ mệnh saas-ops-signals, lib/platform/ops-signals.ts) — CHỈ ĐỌC CSDL nhà, không mở CSDL tổ chức nào.
+  "lib/platform/ops-signals.ts::loadOpsSignalsForOrgs": "Tám tín hiệu vận hành (sự cố 24 giờ / 7 ngày) của NHIỀU tổ chức trong MỘT câu ở CSDL nhà: gương sức khoẻ, sổ lỗi đăng nhập (định danh đã che), sổ AI — cho danh sách khách.",
+  "lib/platform/ops-signals.ts::loadOrgOpsSignals": "Khung «Sự cố 24 giờ / 7 ngày» của MỘT tổ chức ở /platform/org/<mã> — đi qua loadOpsSignalsForOrgs (cùng cổng, cùng câu).",
 };
 
 const DOC_PHIEN = new Set(["requireUser", "requirePermission", "getCurrentUser", "resolveCurrentUser", "getSession"]);

@@ -25,12 +25,15 @@ import { isManualOrderId, manualOrderShortCode, manualOrderTotals } from "@/lib/
 import { vanDonDaiDien } from "@/lib/constants/shipment-pick";
 import { CARRIER_EVENT_SOURCES } from "@/lib/constants/truth";
 import { formatVND } from "@/lib/format";
+import type { OrderValidationReason } from "@/lib/constants/ops-signals";
+import type { MetaFailure } from "@/lib/metadata/errors";
 import { quoteUnitPrice, type PriceListBook, type PriceSource } from "@/lib/constants/price-lists";
 import { priceBooksFor } from "@/lib/queries/price-lists";
 import { createCustomerAsAgent, normalizeCustomerPhone } from "@/lib/records/customer-create";
 import { activeAppointmentRanges, createAppointmentAsAgent } from "@/lib/records/appointments";
 import { createOrderAsAgent, flagOrderForReviewAsAgent, noteCustomerReconfirmAsAgent, updateOrderAsAgent, type AgentOrderOptions, type OrderAgent } from "@/lib/records/order-create";
 import { chatOrderAdId } from "@/lib/sales-chatbot/ad-referral";
+import { markOrderWritten, omsValidationReason, orderSignalToolReason, OrderWriteError, recordOrderValidationFailure, recordOrderWriteFailure, sqlStateOf, type OrderWriteMark } from "@/lib/sales-chatbot/order-signals";
 import { agentUnitPrice } from "@/lib/commerce/pricing";
 import { notifySalesChatBooking, notifySalesChatHandoff } from "@/lib/sales-chatbot/alerts";
 import { freeShipVerdict, variantWeightGrams, type ShipVerdict } from "@/lib/sales-chatbot/shipping";
@@ -126,13 +129,28 @@ export type ToolContext = {
   commentTurn?: boolean;
   /** Dấu lời nhắc của lượt (engine dựng, kèm model của ĐÚNG lần gọi ra lệnh này) — `confirm_order` gắn vào `state.confirmed`. */
   promptStamp?: PromptStamp;
+  /** Do `executeTool` đặt (không phải engine): công cụ đánh dấu NGAY SAU KHI lõi đơn ghi xong ⇒ lỗi ném sau đó là lỗi SAU GHI. */
+  writeMark?: OrderWriteMark;
 };
 
 /**
  * `deliver` = câu mẫu máy chủ GỬI NGUYÊN VĂN cho khách (đã điền số ERP) + ảnh; `requireHuman` = công cụ thấy điều bất thường
  * (giá thiếu, tồn âm) ⇒ engine chuyển hội thoại sang CẦN NGƯỜI XỬ LÝ, không để AI tự quyết.
  */
-export type ToolOutcome = { content: string; isError: boolean; summary: string; state: ChatState; deliver?: { text: string; imageIds: string[]; quickReplyId: string }; requireHuman?: string };
+export type ToolOutcome = {
+  content: string;
+  isError: boolean;
+  summary: string;
+  state: ChatState;
+  deliver?: { text: string; imageIds: string[]; quickReplyId: string };
+  requireHuman?: string;
+  /**
+   * ĐƠN KHÔNG HỢP LỆ (sứ mệnh saas-ops-signals): công cụ / lõi đơn từ chối vì DỮ LIỆU (thiếu SĐT / địa chỉ, mã không có, chưa có giá,
+   * thiếu hàng, hạn mức nợ…) ⇒ `executeTool` ghi `order.validation_failed` (lib/sales-chatbot/order-signals.ts). Từ chối vì TRÌNH TỰ
+   * hội thoại (chưa mời thêm món, khách chưa thấy tóm tắt, chưa có lời xác nhận) KHÔNG phải đơn hỏng — không gắn. Không gửi model.
+   */
+  orderSignal?: { reason: OrderValidationReason; fields?: readonly string[] };
+};
 
 const itemsZ = z.array(z.object({ variant_id: z.string().min(1).max(200), quantity: z.number().int().min(1).max(10_000) }).strict()).min(1).max(30);
 
@@ -328,8 +346,8 @@ function itemView(it: CatalogItem) {
 function ok(summary: string, data: unknown, state: ChatState): ToolOutcome {
   return { content: JSON.stringify(data), isError: false, summary, state };
 }
-function err(summary: string, message: string, state: ChatState): ToolOutcome {
-  return { content: JSON.stringify({ error: message }), isError: true, summary, state };
+function err(summary: string, message: string, state: ChatState, orderSignal?: ToolOutcome["orderSignal"]): ToolOutcome {
+  return { content: JSON.stringify({ error: message }), isError: true, summary, state, ...(orderSignal ? { orderSignal } : {}) };
 }
 
 export type Priced = { ship: ShipVerdict; lines: { variantId: string; name: string; quantity: number; unitPrice: number; lineTotal: number }[]; subtotal: number; shippingFee: number | null; total: number | null; unpriced: string[]; missing: string[] };
@@ -462,7 +480,42 @@ function failureText(r: { errors: { field: string; message: string }[] }): strin
   return r.errors.map((e) => e.message).join(" · ") || "Không ghi được.";
 }
 
+/** Lõi đơn từ chối (`MetaFailure`) ⇒ tín hiệu đơn không hợp lệ: lý do + TÊN trường (không câu lỗi — có thể mang tên / dư nợ khách). */
+function omsSignal(r: { code: MetaFailure["code"]; errors: { field: string; message: string }[] }): NonNullable<ToolOutcome["orderSignal"]> {
+  return { reason: omsValidationReason(r), fields: r.errors.map((e) => e.field) };
+}
+
+/**
+ * Chạy MỘT công cụ. Bọc `executeToolCore` để tách hai loại «ghi đơn không thành» khỏi «AI hỏng» (sứ mệnh saas-ops-signals):
+ *  · công cụ TRẢ VỀ lỗi kèm `orderSignal` ⇒ `order.validation_failed` (đơn không hợp lệ) — kết quả cho model KHÔNG đổi;
+ *  · công cụ chạm lõi đơn (`ORDER_SIGNAL_TOOLS`) NÉM ⇒ `order.create_failed` rồi ném `OrderWriteError` — engine chuyển người với lý do
+ *    ghi đơn, KHÔNG ghi lượt AI là ERROR. Lỗi ném từ công cụ khác đi nguyên như cũ.
+ * Khung THỬ (`TEST`) ghi mô phỏng, không có đơn thật ⇒ không ghi tín hiệu nào.
+ */
 export async function executeTool(name: string, rawInput: unknown, ctx: ToolContext): Promise<ToolOutcome> {
+  const live = ctx.channel !== "TEST";
+  const base = { conversationId: ctx.conversationId, tool: name, channel: ctx.channel, turn: ctx.turn ?? null, agent: ctx.agent };
+  let out: ToolOutcome;
+  const mark: OrderWriteMark = { committed: false, orderId: null };
+  try {
+    out = await executeToolCore(name, rawInput, { ...ctx, writeMark: mark });
+  } catch (error) {
+    const toolReason = orderSignalToolReason(name);
+    if (!toolReason || !live) throw error;
+    const sqlState = sqlStateOf(error);
+    // Ném SAU khi lõi đơn đã ghi (vd chốt CONFIRMED xong, ghi vết «khách xác nhận lại» mới ném) ⇒ đơn có thể ĐÃ có — lý do riêng,
+    // câu báo nhân viên «kiểm trước, KHÔNG lên lần hai». Gộp vào «đơn CHƯA ghi» là mời nhân viên lên đơn hai lần.
+    const postWrite = mark.committed;
+    const reason = postWrite ? "ORDER_POSTWRITE_ERROR" : toolReason;
+    const orderId = (postWrite ? mark.orderId : null) ?? ctx.state.confirmed?.orderId ?? ctx.state.draft?.orderId ?? null;
+    await recordOrderWriteFailure({ ...base, orderId, reason, sqlState });
+    throw new OrderWriteError(reason, name, sqlState, orderId, postWrite);
+  }
+  if (out.orderSignal && live) await recordOrderValidationFailure({ ...base, orderId: out.state.draft?.orderId ?? ctx.state.draft?.orderId ?? null, reason: out.orderSignal.reason, fields: out.orderSignal.fields });
+  return out;
+}
+
+async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext): Promise<ToolOutcome> {
   const state: ChatState = structuredClone(ctx.state);
   const isBooking = (BOOKING_TOOLS as readonly string[]).includes(name);
   if (isBooking ? !ctx.bookingOn : !(ctx.config.allowedTools as readonly string[]).includes(name) && !(PROCESS_TOOLS as readonly string[]).includes(name)) return err(`${name}: không được bật`, `Công cụ «${name}» không được bật cho bot này.`, state);
@@ -591,7 +644,7 @@ export async function executeTool(name: string, rawInput: unknown, ctx: ToolCont
       // Họ tên: AI ghi ⇒ dùng; trống / quá ngắn ⇒ tên Facebook của khách (kênh fanpage) — không bắt khách khai lại tên.
       const typedName = typeof fields.name === "string" && fields.name.trim().length >= 2 ? fields.name : "";
       const v = z.object({ name: z.string().trim().min(2).max(200), phone: z.string().trim().min(8).max(30), address: z.string().trim().min(5).max(500), province: z.string().trim().max(100).optional() }).safeParse({ name: typedName || ctx.customerName || "", phone: fields.phone, address: fields.address, province: fields.province || undefined });
-      if (!v.success) return err("Lưu khách: thiếu thông tin", "Cần họ tên, số điện thoại (8–15 số) và địa chỉ giao đầy đủ.", state);
+      if (!v.success) return err("Lưu khách: thiếu thông tin", "Cần họ tên, số điện thoại (8–15 số) và địa chỉ giao đầy đủ.", state, { reason: "MISSING_CONTACT", fields: v.error.issues.map((i) => i.path.map(String).join(".")) });
       // Giữ mốc lần đầu khi khách sửa tên / địa chỉ mà vẫn cùng SĐT — một SĐT chỉ «để lại» một lần.
       const firstAt = state.customer?.phone === v.data.phone && state.customer.at ? state.customer.at : new Date().toISOString();
       if (simulated) {
@@ -599,7 +652,7 @@ export async function executeTool(name: string, rawInput: unknown, ctx: ToolCont
         return ok(`(Thử) lưu khách ${v.data.name}`, { customer_id: "thu-nghiem", simulated: true, note: "Khung thử: KHÔNG lưu khách thật." }, state);
       }
       const r = await createCustomerAsAgent(ctx.agent, { name: v.data.name, phone: v.data.phone, address: v.data.address, province: v.data.province });
-      if (!r.ok) return err("Lưu khách: lỗi", failureText(r), state);
+      if (!r.ok) return err("Lưu khách: lỗi", failureText(r), state, omsSignal(r));
       // XÁC MINH = hồ sơ chính là hồ sơ khớp mã Facebook của người đang nhắn (FB_ID) — DUY NHẤT. Không đủ: hồ sơ «mới» (khoá theo
       // SĐT — ai gõ trước SĐT của người chưa có hồ sơ thì đơn sau này của chủ SĐT gắn vào hồ sơ ấy, review bảo mật L1), và «hội
       // thoại từng có đơn của hồ sơ» (đặt một đơn ghi SĐT X không chứng minh là chủ SĐT X: kẻ gian tự lên đơn nháp mang SĐT nạn
@@ -618,9 +671,9 @@ export async function executeTool(name: string, rawInput: unknown, ctx: ToolCont
       const v = z
         .object({ items: itemsZ.optional(), recipient_name: z.string().trim().max(120).optional(), recipient_phone: z.string().trim().max(30).optional(), address: z.string().trim().max(300).optional(), delivery_note: z.string().trim().max(500).optional() })
         .safeParse(input);
-      if (!v.success) return err("Đơn nháp: sai đầu vào", "Đầu vào đơn nháp không hợp lệ.", state);
+      if (!v.success) return err("Đơn nháp: sai đầu vào", "Đầu vào đơn nháp không hợp lệ.", state, { reason: "BAD_INPUT", fields: v.error.issues.map((i) => i.path.map(String).join(".")) });
       const existing = state.draft;
-      if (name === "create_draft_order" && !v.data.items) return err("Đơn nháp: thiếu hàng", "Đơn nháp cần items.", state);
+      if (name === "create_draft_order" && !v.data.items) return err("Đơn nháp: thiếu hàng", "Đơn nháp cần items.", state, { reason: "BAD_INPUT", fields: ["items"] });
       if (name === "update_draft_order" && !existing) return err("Sửa đơn: chưa có đơn nháp", "Chưa có đơn nháp — gọi create_draft_order.", state);
       // MỜI THÊM MÓN TRƯỚC KHI LÊN ĐƠN (chủ shop 02/10/2026, ảnh «Nguyễn Nga» / «Xuantra Tâm An»): shop đã chọn câu upsell
       // (kèm ảnh menu) ⇒ khách vừa gửi thông tin nhận hàng là lúc gửi nó, RỒI tóm tắt chốt đơn trong cùng lượt để khách nắm
@@ -634,8 +687,8 @@ export async function executeTool(name: string, rawInput: unknown, ctx: ToolCont
       const lines = v.data.items ? mergeLines(v.data.items.map((i) => ({ variantId: i.variant_id, quantity: i.quantity }))) : existing!.lines;
       const recipient = recipientFrom(v.data, base);
       const priced = await priceLines(lines, ctx.config, verifiedCustomerId(state), [recipient.address, recipient.province].join(", "));
-      if (priced.missing.length) return err("Đơn nháp: mã không có", `Không có mẫu mã: ${priced.missing.join(", ")}.`, state);
-      if (priced.unpriced.length) return { ...err("Đơn nháp: mã chưa có giá", `Chưa có giá: ${priced.unpriced.join(", ")}.`, state), requireHuman: `Giá bất thường: ${priced.unpriced.join(", ")} chưa có giá` };
+      if (priced.missing.length) return err("Đơn nháp: mã không có", `Không có mẫu mã: ${priced.missing.join(", ")}.`, state, { reason: "UNKNOWN_SKU" });
+      if (priced.unpriced.length) return { ...err("Đơn nháp: mã chưa có giá", `Chưa có giá: ${priced.unpriced.join(", ")}.`, state, { reason: "UNPRICED_SKU" }), requireHuman: `Giá bất thường: ${priced.unpriced.join(", ")} chưa có giá` };
       const firstShown = existing?.firstShownTurn ?? existing?.shownTurn ?? ctx.turn;
       const draft = { ...(ctx.turn !== undefined ? { shownTurn: ctx.turn } : {}), ...(firstShown !== undefined ? { firstShownTurn: firstShown } : {}), orderId: existing?.orderId ?? null, lines, unitPrices: Object.fromEntries(priced.lines.map((l) => [l.variantId, l.unitPrice])), recipient, note: v.data.delivery_note ?? existing?.note ?? "", simulated };
       if (!simulated) {
@@ -644,7 +697,8 @@ export async function executeTool(name: string, rawInput: unknown, ctx: ToolCont
         const r = draft.orderId
           ? await updateOrderAsAgent(ctx.agent, draft.orderId, payload, agentOrderOpts(ctx, state, false))
           : await createOrderAsAgent(ctx.agent, payload, { ...agentOrderOpts(ctx, state, true), adId: await chatOrderAdId(ctx.conversationId, now) });
-        if (!r.ok) return err("Đơn nháp: lỗi", failureText(r), state);
+        if (!r.ok) return err("Đơn nháp: lỗi", failureText(r), state, omsSignal(r));
+        markOrderWritten(ctx.writeMark, r.id);
         draft.orderId = r.id;
       }
       state.draft = draft;
@@ -666,9 +720,9 @@ export async function executeTool(name: string, rawInput: unknown, ctx: ToolCont
         return err("Chốt: chưa có lời xác nhận của khách", "customer_confirmation phải là nguyên văn lời đồng ý trong câu CUỐI của khách. Khách chưa xác nhận ⇒ đọc lại tóm tắt và hỏi khách có đồng ý không.", state);
       }
       const d = state.draft;
-      if (!d.recipient.name || !d.recipient.phone || !d.recipient.address) return err("Chốt: thiếu người nhận", "Thiếu tên / SĐT / địa chỉ người nhận.", state);
+      if (!d.recipient.name || !d.recipient.phone || !d.recipient.address) return err("Chốt: thiếu người nhận", "Thiếu tên / SĐT / địa chỉ người nhận.", state, { reason: "MISSING_CONTACT", fields: (["name", "phone", "address"] as const).filter((k) => !d.recipient[k]).map((k) => `recipient.${k}`) });
       const priced = await priceLines(d.lines, ctx.config, verifiedCustomerId(state), [d.recipient.address, d.recipient.province].join(", "));
-      if (priced.missing.length || priced.unpriced.length) return err("Chốt: mã không bán được", "Có mẫu mã không còn bán hoặc chưa có giá — chuyển nhân viên.", state);
+      if (priced.missing.length || priced.unpriced.length) return err("Chốt: mã không bán được", "Có mẫu mã không còn bán hoặc chưa có giá — chuyển nhân viên.", state, { reason: priced.missing.length ? "UNKNOWN_SKU" : "UNPRICED_SKU" });
       const changed = priced.lines.filter((l) => d.unitPrices[l.variantId] !== l.unitPrice);
       if (changed.length) {
         state.draft = { ...d, unitPrices: Object.fromEntries(priced.lines.map((l) => [l.variantId, l.unitPrice])) };
@@ -680,14 +734,15 @@ export async function executeTool(name: string, rawInput: unknown, ctx: ToolCont
         return s?.stockKnown && (s.available ?? 0) < l.quantity;
       });
       const shortNames = short.map((l) => priced.lines.find((p) => p.variantId === l.variantId)?.name ?? l.variantId).join(", ");
-      if (short.length && !ctx.config.sellWithoutStockCheck) return err("Chốt: không đủ hàng", `Không đủ hàng khả dụng cho: ${shortNames}.`, state);
+      if (short.length && !ctx.config.sellWithoutStockCheck) return err("Chốt: không đủ hàng", `Không đủ hàng khả dụng cho: ${shortNames}.`, state, { reason: "STOCK_SHORT" });
       const unknownStock = d.lines.some((l) => !stock.get(l.variantId)?.stockKnown);
       const stockNotes = [unknownStock ? "Tồn chưa xác nhận lúc chốt — kho kiểm trước khi giao." : "", short.length ? `Sổ kho đang thiếu lúc chốt (${shortNames}) — shop bật «chốt không cần kiểm tồn», kho chuẩn bị hàng trước khi giao.` : ""].filter(Boolean);
       let orderId: string | null = null;
       if (!simulated) {
         const payload = orderInput(state, { ...d, note: stockNotes.length ? [d.note, ...stockNotes].filter(Boolean).join("\n") : d.note }, priced, "CONFIRMED", ctx.config, ctx.channel);
         const r = await updateOrderAsAgent(ctx.agent, d.orderId, payload, agentOrderOpts(ctx, state, false));
-        if (!r.ok) return err("Chốt: lỗi", failureText(r), state);
+        if (!r.ok) return err("Chốt: lỗi", failureText(r), state, omsSignal(r));
+        markOrderWritten(ctx.writeMark, r.id);
         orderId = r.id;
         // Khách từng báo huỷ rồi nay đồng ý lại ⇒ một dòng vết «khách xác nhận lại» trên đơn; cờ cần kiểm GIỮ NGUYÊN (người quyết).
         if (state.declined) await noteCustomerReconfirmAsAgent(ctx.agent, r.id, quote.success ? ctx.lastUserText.trim().slice(0, 300) || null : null, now);
@@ -761,6 +816,7 @@ export async function executeTool(name: string, rawInput: unknown, ctx: ToolCont
       for (const id of ids) {
         const r = await flagOrderForReviewAsAgent(ctx.agent, id, { code: "CUSTOMER_CANCELLED", note: state.declined.reason, quote }, now);
         if (!r.ok || !r.flagged) continue;
+        markOrderWritten(ctx.writeMark, id);
         flagged.push(`#${manualOrderShortCode(id)}`);
         // Đơn ĐÃ XÁC NHẬN (đang giữ hàng, nhóm vận hành đã nhận tin đơn) mà khách báo huỷ ⇒ báo người NGAY qua đường chuyển người có
         // sẵn (chuông ERP + hàng đợi; nhóm chat nếu shop bật) — đơn nháp thì cờ trên hàng đợi «Cần kiểm» là đủ (review #675, L1).
