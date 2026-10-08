@@ -1,0 +1,29 @@
+{
+  "schema": 1,
+  "mission_id": "docs-saas-product-design",
+  "title": "Thiết kế sản phẩm SaaS (R0): Inbox V2 + ưu tiên P0–P3 · Order Candidate · Help 3 tầng · kiểm vỏ khách 390px",
+  "business_goal": "",
+  "status": "RUNNING",
+  "priority": "P1",
+  "risk": "MEDIUM",
+  "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "worker": "worker:saas-product-design",
+  "worktree": null,
+  "branch": "docs/saas-product-design",
+  "base_sha": "051f49a55160dd3d650a1259abe9df6b12b89f92",
+  "domains": [],
+  "owned_paths": [
+    "docs/saas/INBOX_V2.md",
+    "docs/saas/ORDER_CANDIDATE.md",
+    "docs/saas/HELP_CENTER.md",
+    "docs/saas/SHELL_AUDIT_2026-10-08.md"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-08T04:40:06.657Z",
+  "updated_at": "2026-10-08T04:40:06.657Z",
+  "last_heartbeat": "2026-10-08T04:40:06.657Z",
+  "definition_of_done": []
+}
