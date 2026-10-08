@@ -1,0 +1,8 @@
+{
+  "pr": 714,
+  "sha": "c41c2a6c2db4c728d056dd87baeb99300cec5b1c",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-08T23:02:58.895Z",
+  "note": "Chỉ đổi thứ tự khối trên /platform: việc hằng ngày lên đầu, khung cấu hình Meta một lần xuống cuối; nội dung khung không đổi (không thêm secret nào lên trang)."
+}
