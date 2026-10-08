@@ -21,7 +21,8 @@
 | `DATA_PROCESSING_REGISTER.md` | 17 tập dữ liệu × 15 cột (chủ thể, vai trò, căn cứ, lưu, xuyên biên giới, xoá, xuất); tra ngược bảng → tập; bảng retention mẫu; khung DPA |
 | `DATA_FLOW_MAP.md` | Dữ liệu đi đâu, qua bước nào, tệp:dòng; điểm chạm xuyên biên giới |
 | `SUBPROCESSOR_REGISTER.md` | 30 bên ngoài mã nguồn gọi tới: pháp nhân, dữ liệu, vùng (UNKNOWN khi chưa đọc điều khoản), đã công bố chưa; TÊN biến bí mật |
-| `TECH_HANDOFF_LEGAL.md` | Mission có biên cho Tech Lead (Phase 2), đánh dấu mission chờ quyết định chủ sở hữu / luật sư |
+| `TECH_HANDOFF_LEGAL.md` | Mission có biên cho Tech Lead (Phase 2), mỗi mission ghi phân loại + tác động chuyển đổi; đánh dấu [CHỜ F] / [CHỜ G] / [DEFER] |
+| `CONVERSION_FIRST_REAUDIT.md` | **OWNER OVERRIDE 08/10**: rà lại mọi mục theo «tuân thủ đúng luật, ma sát thấp nhất» — MANDATORY / COUNSEL / RECOMMENDED / OPTIONAL × tác động chuyển đổi; công bố AI thiết kế lại ở mức tối thiểu; danh sách bỏ / hoãn |
 
 ## Đã công bố
 
