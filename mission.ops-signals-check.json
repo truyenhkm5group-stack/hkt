@@ -3,7 +3,7 @@
   "mission_id": "ops-signals-check",
   "title": "Ops chỉ đọc ops-signals-check: chứng minh 8 tín hiệu O1–O8 chạy trên production",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P2",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -26,9 +26,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-08T21:25:23.233Z",
-  "updated_at": "2026-10-08T22:03:47.942Z",
+  "updated_at": "2026-10-08T22:30:31.177Z",
   "last_heartbeat": "2026-10-08T22:03:26.724Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#710 → fae0a204f9d41d5c4218244747462c8e4a51eaa9"
+  },
   "handoff": {
     "branch": "feat/ops-signals-check",
     "sha": "0e52fc04506531f7c244fb8339aaf33fb298560a",
