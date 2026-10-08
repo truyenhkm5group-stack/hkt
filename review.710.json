@@ -1,0 +1,8 @@
+{
+  "pr": 710,
+  "sha": "0e52fc04506531f7c244fb8339aaf33fb298560a",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-08T22:03:51.537Z",
+  "note": "Review Integration Lead: dùng đúng loadOpsSignalsForOrgs (không SQL thứ hai); người vận hành máy qua activeUserIdsWhoCan + resolvePermissions + platformOperatorDenial, không quyền bịa; ERP_READ_ONLY + platformReadOnlyConfirmed; công khai chỉ số + mã lý do (regex mã), id tài khoản chỉ ở phần mã hoá; đăng ký đủ 4 chỗ ops-vps. Theo sau: B1 của saas-acceptance gọi verifyLogin không onFailure ⇒ lượt sa"
+}
