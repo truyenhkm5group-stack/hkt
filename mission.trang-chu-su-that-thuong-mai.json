@@ -3,7 +3,7 @@
   "mission_id": "trang-chu-su-that-thuong-mai",
   "title": "Trang chủ Chốt Đơn nói đúng sản phẩm: nối Facebook thẳng (Pancake là lựa chọn), bỏ claim tuyệt đối, bỏ «Chi phí AI hiện rõ», FAQ không hứa khoá AI riêng",
   "business_goal": "",
-  "status": "RUNNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-pr-a",
@@ -21,11 +21,25 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-08T16:00:52.554Z",
-  "updated_at": "2026-10-08T16:00:52.554Z",
-  "last_heartbeat": "2026-10-08T16:00:52.554Z",
+  "updated_at": "2026-10-08T20:52:19.763Z",
+  "last_heartbeat": "2026-10-08T20:52:19.763Z",
   "definition_of_done": [],
   "intake": {
     "verdict": "MISSING",
     "evidence": []
+  },
+  "handoff": {
+    "branch": "claude/trang-chu-su-that-thuong-mai",
+    "sha": "308365e11b8720173876ba8f4ea9decd9d1c7a5a",
+    "at": "2026-10-08T20:52:19.763Z",
+    "actor": "DESKTOP-56TH98Y:wt-pr-a",
+    "title": "Trang chủ Chốt Đơn nói đúng sản phẩm: nối Facebook thẳng (Pancake là lựa chọn), bỏ claim tuyệt đối, bỏ «Chi phí AI hiện rõ», FAQ không hứa khoá AI riêng",
+    "summary": "Trang chủ Chốt Đơn nói đúng sản phẩm: nối Facebook thẳng là đường chính (Pancake / Zalo là lựa chọn), FAQ không nêu nhà cung cấp AI / không hứa khoá AI riêng, bỏ «Chi phí AI hiện rõ», thay 5 claim tuyệt đối bằng câu bảo vệ được. Không đổi giá / gói / điều khoản / chế độ đăng ký.",
+    "tests": [
+      "npx tsc --noEmit: 0",
+      "npx eslint: 0",
+      "npm test: TẤT CẢ KIỂM THỬ ĐẠT (Windows, base 0be392ba — gồm khối public-site của #700)",
+      "tests/public-site.test.ts: thêm khoá bước Kết nối fanpage / FAQ / 5 claim tuyệt đối"
+    ]
   }
 }

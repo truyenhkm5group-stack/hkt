@@ -959,3 +959,4 @@
 {"at":"2026-10-08T20:14:37.253Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"legal-counsel-pack","detail":"#704 @ 05990928ea08 → c71833950519 (MERGE_NOW · LOW · gates success)"}
 {"at":"2026-10-08T20:14:52.940Z","actor":"DESKTOP-56TH98Y:wt-pr-c","kind":"HANDOFF","mission":"error-boundary-than-thien","detail":"claude/error-boundary-than-thien @ 69d576e18ee9 · 5 lệnh kiểm thử"}
 {"at":"2026-10-08T20:16:49.894Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DEPLOY_DISPATCHED","detail":"c71833950519 · run 37838226087 https://github.com/truyenhkm5group-stack/hkt/actions/runs/37838226087"}
+{"at":"2026-10-08T20:52:19.796Z","actor":"DESKTOP-56TH98Y:wt-pr-a","kind":"HANDOFF","mission":"trang-chu-su-that-thuong-mai","detail":"claude/trang-chu-su-that-thuong-mai @ 308365e11b87 · 4 lệnh kiểm thử"}
