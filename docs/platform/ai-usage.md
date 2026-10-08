@@ -68,6 +68,11 @@ Job AI khác của VNX (creative, video, CSKH) CHƯA ghi vào sổ này — vẫ
 - Ghi đè THƯA theo tổ chức: `platform_organizations.settings.ai.limits` (`requestsPerDay`, `requestsPerMonth`,
   `costUsdSoft`, `costUsdHard`, `platformCreditUsdPerMonth`) — ô có mặt thắng gói. Người vận hành đặt ở
   `/platform/org/<mã>` → khung «Dùng AI», bắt buộc lý do, nhật ký `AI_ORG_CONTROL_SET`.
+- Đường OPS (`org-ai-cutover <mã> --apply --credit=<USD>`, lõi `setOrgAiLimitAsOperator`) đi CÙNG đường ghi + nhật ký với
+  màn hình (`writeOrgAiControl`: nhật ký trước khi coi là xong, hỏng ⇒ hoàn) nhưng HẸP hơn: chỉ ô `platformCreditUsdPerMonth`,
+  số > 0 và ≤ 1.000 USD (hoặc bỏ ghi đè — chỉ để hoàn), không tổ chức nhà, giữ nguyên công tắc và mọi ô khác; nhật ký nguồn
+  `SCRIPT`, người làm = máy. Script kiểm credit ĐỀ XUẤT theo nhịp chi gần đây (cơ sở tháng = max(30 ngày · 7 ngày × 30/7 ·
+  ngày trọn gần nhất × 30), cần ≥ cơ sở × 1,25) TRƯỚC khi ghi; đổi động cơ không thành ⇒ hoàn credit về ghi đè cũ.
 - Tổ chức nhà: không giới hạn, không đếm vào hạn mức.
 
 **Hạn mức mặc định đề xuất (gieo bằng 0176, chỉ khi gói CHƯA có khoá `ai`):**
