@@ -1,0 +1,8 @@
+{
+  "pr": 684,
+  "sha": "d227c148adbe70adbf1d8c8593621b41573480a8",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-08T13:20:31.792Z",
+  "note": "Review độc lập PASS: người nhận liên kết lấy từ job (đột biến bắt được), dấu vân bắt đổi gói/thương hiệu/sản phẩm/tên/loại TK, L3 mở khoá ghi chỉ mục đúng tổ chức idempotent; tsc + eslint + identity-email-login + user-invites + saas-platform + access-control + platform-isolation-static đạt. M2: PR gộp sau (#682) sửa tests/identity-email-login.test.ts:596 và tính dấu vân trên decidedRequest"
+}
