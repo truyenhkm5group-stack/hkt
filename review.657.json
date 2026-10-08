@@ -1,0 +1,8 @@
+{
+  "pr": 657,
+  "sha": "b0067c21afcf0ca78c247fce2a165c121acdeaf6",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-08T02:52:44.503Z",
+  "note": "Review bảo mật độc lập 2 vòng (cùng người duyệt #652/#654/#656): vòng 1 PASS ở 89be68d9 kèm MEDIUM (b) — chữ máy chủ điền từ đơn cũ (savedAddress) bị coi là chữ khách gõ; đã vá, vòng 2 PASS ở b0067c21, không còn CRITICAL/HIGH/MEDIUM. Hoãn có ghi nhận: LOW khung hộp thư hiện chữ hồ sơ chưa xác minh (PR hộp thư kế tiếp), LOW order-create dự phòng chữ hồ sơ (việc riêng, cách hẹp: đơn đáng tin gần nhấ"
+}
