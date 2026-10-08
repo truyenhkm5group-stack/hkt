@@ -3,7 +3,7 @@
   "mission_id": "erp-a11y-bo-cuc",
   "title": "ERP: màn «không tìm thấy» có h1; công tắc / ô số / nút biểu tượng có tên cho trình đọc màn hình (/work/settings · /alerts · /inventory/shortage); /payroll không tràn ngang 390 px",
   "business_goal": "",
-  "status": "INTEGRATING",
+  "status": "VERIFYING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-pr-g",
@@ -32,7 +32,7 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-08T17:07:59.589Z",
-  "updated_at": "2026-10-08T22:36:01.313Z",
+  "updated_at": "2026-10-08T23:38:45.909Z",
   "last_heartbeat": "2026-10-08T22:07:25.752Z",
   "definition_of_done": [],
   "intake": {
@@ -40,7 +40,9 @@
     "evidence": []
   },
   "evidence": {
-    "merged": "#708 → dbab68130a7261f6e759148d8ccd4575a2fbe849"
+    "merged": "#708 → dbab68130a7261f6e759148d8ccd4575a2fbe849",
+    "verify": "PASS dbab68130a7261f6e759148d8ccd4575a2fbe849 2026-10-08T23:38:38.594Z",
+    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/37854562530"
   },
   "handoff": {
     "branch": "claude/erp-a11y-bo-cuc",
