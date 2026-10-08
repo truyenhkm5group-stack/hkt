@@ -1,10 +1,10 @@
 {
   "name": "integration-lead",
   "holder": "DESKTOP-56TH98Y:wt-tech-lead-v2",
-  "purpose": "Launch sprint lô 2",
+  "purpose": "Deploy lô launch + nghiệm thu",
   "acquired_at": "2026-10-08T09:01:09.377Z",
-  "heartbeat_at": "2026-10-08T17:05:12.935Z",
-  "expires_at": "2026-10-09T03:05:12.935Z",
+  "heartbeat_at": "2026-10-08T19:03:21.210Z",
+  "expires_at": "2026-10-09T05:03:21.210Z",
   "generation": 2,
   "token_hash": "440ac8d69032d6e747824a704dc87e06df377c34582bf745893ff77248fbe25b"
 }
