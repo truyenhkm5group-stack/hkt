@@ -110,6 +110,17 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
       <TodayWorkspace tiles={tiles} />
 
       {/*
+        CẦN ANH QUYẾT (Company OS · Agent H) — đứng TRÊN "Việc cần làm hôm nay": khối dưới là việc của cả
+        shop, khối này chỉ gồm QUYẾT ĐỊNH của người điều hành. Chảy về sau như hai khối trên, và mỗi nguồn
+        có hạn giờ riêng nên một nguồn chậm không giữ cả trang.
+      */}
+      {show.ownerDecisions ? (
+      <Suspense fallback={<Skeleton className="h-40 rounded-2xl" />}>
+        <OwnerDecisionsSection />
+      </Suspense>
+      ) : null}
+
+      {/*
         VIỆC CỤ THỂ ĐỨNG ĐẦU HÀNG ĐỢI — lên ngay dưới dải việc, TRƯỚC các thẻ tiền (chủ shop 09/10/2026: trang chủ là chỗ
         làm việc). Trước đây khối này nằm dưới hai màn cuộn, sau biểu đồ.
       */}
@@ -320,16 +331,6 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
       </Suspense>
       ) : null}
 
-      {/*
-        CẦN ANH QUYẾT (Company OS · Agent H) — đứng TRÊN "Việc cần làm hôm nay": khối dưới là việc của cả
-        shop, khối này chỉ gồm QUYẾT ĐỊNH của người điều hành. Chảy về sau như hai khối trên, và mỗi nguồn
-        có hạn giờ riêng nên một nguồn chậm không giữ cả trang.
-      */}
-      {show.ownerDecisions ? (
-      <Suspense fallback={<Skeleton className="h-40 rounded-2xl" />}>
-        <OwnerDecisionsSection />
-      </Suspense>
-      ) : null}
 
       {/*
         BỐN KHỐI DƯỚI: lưới 12 cột để mỗi khối rộng đúng bằng nội dung của nó — danh sách việc và
