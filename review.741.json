@@ -1,0 +1,8 @@
+{
+  "pr": 741,
+  "sha": "3b447198b85cce1609d5d132889fead97ed11911",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-09T12:55:13.456Z",
+  "note": "Review Integration Lead: chủ shop duyệt 09/10 thêm ĐÚNG ai_sales:reply cho BAN_HANG (cũ + mới). Mẫu ai-sales 1.1.0 chỉ đổi vai trò này; khách cũ qua bộ nâng cấp ba chiều sẵn có (applyBlueprint → saveAccessRoleCore, audit + sổ cài đặt mang mã băm mới) trên bản mẫu thu hẹp chỉ ban_hang + core ⇒ không bật lại module / dựng lại thứ tổ chức đã xoá; lọc BAN_HANG · nền VIEWER · đã tự sửa ⇒ bỏ qua; mặc đị"
+}
