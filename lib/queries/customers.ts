@@ -254,34 +254,74 @@ export async function customerSummary(params: ListParams, extra?: SQL) {
 
 // ───────────────────────── Chi tiết khách hàng ─────────────────────────
 
+const notCancelled = notInArray(o.stage, ["CANCELLED", "DELETED"]);
+
+/**
+ * MỘT câu gom cho mọi đơn của MỘT khách (dùng chỉ mục `orders_customer_idx`) — trang chi tiết khách và khối
+ * «Khách hàng» của trang chi tiết đơn đọc CÙNG câu này, nên hai màn hình không thể nói hai số khác nhau.
+ */
+function customerOrderAggregate(db: Db, customerId: string) {
+  return db
+    .select({
+      orders: sql<number>`count(*) filter (where ${notCancelled})`,
+      allOrders: count(),
+      succeed: sql<number>`count(*) filter (where ${ORDER_OUTCOME_FAST} = 'DELIVERED')`,
+      returned: sql<number>`count(*) filter (where ${ORDER_OUTCOME_FAST} in (${sql.raw(RETURNED_OUTCOMES_SQL)}))`,
+      // CHƯA KẾT THÚC (danh sách sinh từ `OUTCOME_GROUP`, không gõ lại) — đứng NGOÀI mẫu số tỷ lệ.
+      open: sql<number>`count(*) filter (where ${notCancelled} and ${ORDER_OUTCOME_FAST} in (${sql.raw(OPEN_OUTCOMES_SQL)}))`,
+      // "Đang giao" là khẳng định về VỊ TRÍ kiện hàng ⇒ chỉ đúng kết quả `IN_TRANSIT` (đã có chứng từ bàn giao).
+      inTransit: sql<number>`count(*) filter (where ${notCancelled} and ${ORDER_OUTCOME_FAST} = 'IN_TRANSIT')`,
+      cancelled: sql<number>`count(*) filter (where ${o.stage} in ('CANCELLED','DELETED'))`,
+      revenue: sql<number>`coalesce(sum(case when ${notCancelled} then ${o.totalPriceAfterDiscount} else 0 end), 0)`,
+      // Doanh thu thành công chỉ khi "giao" mang chứng cứ tiền — đơn tay giao bằng phiếu đứng ngoài (G-ORDER).
+      successRevenue: sql<number>`coalesce(sum(case when ${ORDER_OUTCOME_FAST} = 'DELIVERED' and ${REVENUE_RECOGNIZED_ON_DELIVERY} then ${o.totalPriceAfterDiscount} else 0 end), 0)`,
+      firstOrderAt: sql<Date | string | null>`min(${o.insertedAt})`,
+      lastOrderAt: sql<Date | string | null>`max(${o.insertedAt})`,
+    })
+    .from(o)
+    // MỖI ĐƠN MỘT DÒNG: đơn nhiều lần gửi không được cộng tiền nhiều lần (xem PRIMARY_ATTEMPT).
+    .leftJoin(schema.shipments, and(eq(schema.shipments.orderId, o.id), PRIMARY_ATTEMPT))
+    .where(eq(o.customerId, customerId));
+}
+
+type CustomerOrderAgg = Awaited<ReturnType<typeof customerOrderAggregate>>[number] | undefined;
+
+/**
+ * Kết quả đơn của khách theo `ORDER_OUTCOME` — số duy nhất được gọi là "thành công / hoàn" (AGENTS §0.2 · §3.1).
+ * Tỷ lệ trên đơn ĐÃ KẾT THÚC; chưa đơn nào kết thúc ⇒ `null` («—»), không phải 0% (AGENTS mục 42).
+ */
+function outcomeStatsOf(agg: CustomerOrderAgg) {
+  const succeed = Number(agg?.succeed ?? 0);
+  const returned = Number(agg?.returned ?? 0);
+  const finished = succeed + returned;
+  return {
+    orders: Number(agg?.orders ?? 0),
+    succeed,
+    returned,
+    finished,
+    open: Number(agg?.open ?? 0),
+    inTransit: Number(agg?.inTransit ?? 0),
+    successRate: pctOrNull(succeed, finished),
+    returnRate: pctOrNull(returned, finished),
+  };
+}
+
+export type CustomerOutcomeStats = ReturnType<typeof outcomeStatsOf>;
+
+/** Số đơn / thành công / hoàn của MỘT khách theo ERP — một câu gom, cho trang chi tiết đơn. */
+export async function customerOutcomeStats(customerId: string): Promise<CustomerOutcomeStats> {
+  const db = await getDb();
+  const [agg] = await customerOrderAggregate(db, customerId);
+  return outcomeStatsOf(agg);
+}
+
 export async function getCustomerDetail(id: string) {
   const db = await getDb();
   const customer = await db.query.customers.findFirst({ where: or(eq(c.id, id), eq(c.pancakeId, id)) });
   if (!customer) return null;
-  const notCancelled = notInArray(o.stage, ["CANCELLED", "DELETED"]);
 
   const [[agg], orders, topProducts] = await Promise.all([
-    db
-      .select({
-        orders: sql<number>`count(*) filter (where ${notCancelled})`,
-        allOrders: count(),
-        succeed: sql<number>`count(*) filter (where ${ORDER_OUTCOME_FAST} = 'DELIVERED')`,
-        returned: sql<number>`count(*) filter (where ${ORDER_OUTCOME_FAST} in (${sql.raw(RETURNED_OUTCOMES_SQL)}))`,
-        // CHƯA KẾT THÚC (danh sách sinh từ `OUTCOME_GROUP`, không gõ lại) — đứng NGOÀI mẫu số tỷ lệ.
-        open: sql<number>`count(*) filter (where ${notCancelled} and ${ORDER_OUTCOME_FAST} in (${sql.raw(OPEN_OUTCOMES_SQL)}))`,
-        // "Đang giao" là khẳng định về VỊ TRÍ kiện hàng ⇒ chỉ đúng kết quả `IN_TRANSIT` (đã có chứng từ bàn giao).
-        inTransit: sql<number>`count(*) filter (where ${notCancelled} and ${ORDER_OUTCOME_FAST} = 'IN_TRANSIT')`,
-        cancelled: sql<number>`count(*) filter (where ${o.stage} in ('CANCELLED','DELETED'))`,
-        revenue: sql<number>`coalesce(sum(case when ${notCancelled} then ${o.totalPriceAfterDiscount} else 0 end), 0)`,
-        // Doanh thu thành công chỉ khi "giao" mang chứng cứ tiền — đơn tay giao bằng phiếu đứng ngoài (G-ORDER).
-        successRevenue: sql<number>`coalesce(sum(case when ${ORDER_OUTCOME_FAST} = 'DELIVERED' and ${REVENUE_RECOGNIZED_ON_DELIVERY} then ${o.totalPriceAfterDiscount} else 0 end), 0)`,
-        firstOrderAt: sql<Date | string | null>`min(${o.insertedAt})`,
-        lastOrderAt: sql<Date | string | null>`max(${o.insertedAt})`,
-      })
-      .from(o)
-      // MỖI ĐƠN MỘT DÒNG: đơn nhiều lần gửi không được cộng tiền nhiều lần (xem PRIMARY_ATTEMPT).
-      .leftJoin(schema.shipments, and(eq(schema.shipments.orderId, o.id), PRIMARY_ATTEMPT))
-      .where(eq(o.customerId, customer.id)),
+    customerOrderAggregate(db, customer.id),
     db.query.orders.findMany({
       where: eq(o.customerId, customer.id),
       orderBy: [desc(o.insertedAt)],
@@ -319,20 +359,11 @@ export async function getCustomerDetail(id: string) {
     đưa vào mẫu số là kéo tỷ lệ của khách vừa đặt đơn thứ hai xuống 50% một cách vô cớ. Chưa đơn nào
     kết thúc ⇒ `null` (in «—»), không phải 0% (AGENTS mục 42).
   */
-  const orderCount = Number(agg?.orders ?? 0);
-  const succeed = Number(agg?.succeed ?? 0);
-  const returned = Number(agg?.returned ?? 0);
-  const finished = succeed + returned;
+  const outcome = outcomeStatsOf(agg);
+  const orderCount = outcome.orders;
   const amount = Number(agg?.revenue ?? 0);
   const stats = {
-    orders: orderCount,
-    succeed,
-    returned,
-    finished,
-    open: Number(agg?.open ?? 0),
-    inTransit: Number(agg?.inTransit ?? 0),
-    successRate: pctOrNull(succeed, finished),
-    returnRate: pctOrNull(returned, finished),
+    ...outcome,
     cancelled: Number(agg?.cancelled ?? 0),
     allOrders: Number(agg?.allOrders ?? 0),
     amount,

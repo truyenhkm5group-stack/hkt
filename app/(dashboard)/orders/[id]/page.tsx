@@ -21,7 +21,8 @@ import { pancakeStatusName } from "@/lib/constants/pancake";
 import { orderGrossMargin } from "@/lib/constants/live-cogs";
 import { COD_STATUS_LABEL, getViettelPostTrackingUrl } from "@/lib/constants/viettelpost";
 import { env } from "@/lib/env";
-import { formatDateTime, formatNumber, formatVND } from "@/lib/format";
+import { formatDateTime, formatNumber, formatPercent, formatVND } from "@/lib/format";
+import { customerOutcomeStats } from "@/lib/queries/customers";
 import { getDb } from "@/db";
 import { chatLinkOf, getOrderDetail, orderChatThreads, salesInboxEnabled } from "@/lib/queries/orders";
 import { previousOrderHint } from "@/lib/queries/order-hints";
@@ -68,7 +69,7 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
     Bỏ luôn lượt truy vấn cho nhóm đó: trang chi tiết đơn là trang mở nhiều nhất sau danh sách.
   */
   const chuaGui = PRE_SHIP_STAGES.includes(order.stage);
-  const [timeline, erpHist, erpOther, prev, soat, nguoiHen] = await Promise.all([
+  const [timeline, erpHist, erpOther, prev, soat, nguoiHen, khach] = await Promise.all([
     getOrderTimeline(order.id),
     erpHistoryByPhone([order.billPhone ?? ""], order.id),
     erpOrderCountByPhone([order.billPhone ?? ""], order.id),
@@ -85,6 +86,8 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
           db.query.users.findFirst({ where: (u, { eq }) => eq(u.id, order.customerPromisedByUserId!), columns: { name: true, email: true } }),
         )
       : Promise.resolve(null),
+    // Khối «Khách hàng»: số đơn / thành công / hoàn theo ORDER_OUTCOME — CÙNG câu gom với trang chi tiết khách (một câu, có chỉ mục).
+    order.customer ? customerOutcomeStats(order.customer.id) : Promise.resolve(null),
   ]);
   const risk = assessCustomerRisk({ succeed: order.customer?.succeedOrderCount ?? 0, returned: order.customer?.returnedOrderCount ?? 0, isBlock: Boolean(order.customer?.isBlock), erpDelivered: erpHist.delivered, erpReturned: erpHist.returned }, riskCfg);
   const newPhone = isNewPhone({ phone: order.billPhone, succeed: order.customer?.succeedOrderCount ?? 0, returned: order.customer?.returnedOrderCount ?? 0, erpOtherOrders: erpOther });
@@ -605,12 +608,26 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
                   ) : null}
                 </div>
               ) : null}
-              {/* Ba bộ đếm của Pancake: tổ chức không đồng bộ Pancake không bao giờ cập nhật chúng ⇒ luôn «0 · 0 · 0» dù khách đã mua. */}
-              {order.customer && copy.isHome ? (
-                <div className="grid grid-cols-3 gap-2 border-t pt-3 text-center">
-                  <div><p className="numeric text-lg font-bold">{order.customer.orderCount}</p><p className="text-[11px] text-muted-foreground">Đơn</p></div>
-                  <div><p className="numeric text-lg font-bold text-success">{order.customer.succeedOrderCount}</p><p className="text-[11px] text-muted-foreground">Thành công</p></div>
-                  <div><p className="numeric text-lg font-bold text-destructive">{order.customer.returnedOrderCount}</p><p className="text-[11px] text-muted-foreground">Hoàn</p></div>
+              {/*
+                Số của ERP theo ORDER_OUTCOME (AGENTS §0.2 · §3.1) — cùng câu gom với trang chi tiết khách, nên mọi tổ chức
+                đều đọc được. Bộ đếm Pancake (bản trước in thẳng ba ô này là «Đơn / Thành công / Hoàn») chỉ còn là một dòng
+                THAM KHẢO ở tổ chức đồng bộ Pancake (nhà); nơi khác chúng luôn «0 · 0 · 0» nên không in.
+              */}
+              {order.customer && khach ? (
+                <div className="border-t pt-3">
+                  <div className="grid grid-cols-3 gap-2 text-center">
+                    <div><p className="numeric text-lg font-bold">{formatNumber(khach.orders)}</p><p className="text-[11px] text-muted-foreground">Đơn</p></div>
+                    <div><p className="numeric text-lg font-bold text-success">{formatNumber(khach.succeed)}</p><p className="text-[11px] text-muted-foreground">Thành công</p></div>
+                    <div><p className="numeric text-lg font-bold text-destructive">{formatNumber(khach.returned)}</p><p className="text-[11px] text-muted-foreground">Hoàn</p></div>
+                  </div>
+                  <p className="mt-1.5 text-center text-[11px] text-muted-foreground">
+                    Tỷ lệ thành công {formatPercent(khach.successRate, 0)} / {formatNumber(khach.finished)} đơn đã kết thúc{khach.open ? ` · ${formatNumber(khach.open)} chưa kết thúc` : ""}
+                  </p>
+                  {copy.isHome ? (
+                    <p className="mt-1 text-center text-[11px] text-muted-foreground">
+                      Pancake ghi nhận (tham khảo): {formatNumber(order.customer.orderCount)} đơn · thành công {formatNumber(order.customer.succeedOrderCount)} · hoàn {formatNumber(order.customer.returnedOrderCount)}
+                    </p>
+                  ) : null}
                 </div>
               ) : null}
             </div>

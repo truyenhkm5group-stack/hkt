@@ -1,9 +1,16 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { inArray } from "drizzle-orm";
 import { type Db, schema } from "@/db";
 import { assessCustomerRisk } from "@/lib/alerts/risk";
 import { noCodPaymentState } from "@/lib/constants/no-cod-payment";
-import { customerFacets, customerSummary, getCustomerDetail, listCustomers } from "@/lib/queries/customers";
+import { customerFacets, customerOutcomeStats, customerSummary, CUSTOMER_SORTABLE, getCustomerDetail, listCustomers } from "@/lib/queries/customers";
+import { customDefaultFilters, listViewDefaultSort } from "@/components/metadata/runtime-core";
+import { CUSTOMER_LIST_REF_COLUMNS } from "@/lib/constants/metadata-list-columns";
+import { objectDef } from "@/lib/constants/object-registry";
+import { listRefProblems, normalizeListView } from "@/lib/metadata/list-schema";
+import type { ListViewSchema } from "@/lib/metadata/types";
 import { parseListParams } from "@/lib/search-params";
 
 /**
@@ -50,7 +57,28 @@ export function testCustomerOutcomeTruthPure() {
   assert.equal(noCodPaymentState({ moneyToCollect: 300_000, prepaid: 0, transferMoney: 0 }), null, "còn COD ⇒ câu hỏi không đặt ra");
   assert.deepEqual(noCodPaymentState({ moneyToCollect: 0, prepaid: 0, transferMoney: 0 }), { kind: "UNVERIFIED" }, "money_to_collect = 0 KHÔNG phải chứng từ tiền");
   assert.deepEqual(noCodPaymentState({ moneyToCollect: 0, prepaid: 200_000, transferMoney: 150_000 }), { kind: "PREPAID", amount: 350_000 }, "trả trước / chuyển khoản là bằng chứng đã khai");
-  console.log("✓ Hồ sơ khách (thuần): rủi ro chấm ERP và Pancake riêng, lý do mang nhãn nguồn · không COD mà không chứng từ ⇒ chưa xác minh");
+  // ── Bộ đếm Pancake trong SỔ ĐỐI TƯỢNG: nhãn nói rõ nguồn, và KHÔNG lọc được theo nó ──
+  const fields = objectDef("customer")!.fields;
+  for (const key of ["order_count", "purchased_amount"]) {
+    const fd = fields.find((x) => x.key === key)!;
+    assert.ok(fd.label.includes("(Pancake)"), `field «${key}» đọc thẳng cột Pancake ⇒ nhãn phải nói «(Pancake)»`);
+    assert.equal(fd.filterable, false, `field «${key}» KHÔNG lọc được — lọc field hệ thống ở khối trang / bản ghi đọc thẳng bộ đếm Pancake`);
+  }
+  // Một danh sách đã lưu thử lọc «Số đơn ≥ 3»: bộ lọc bị BỎ khi chuẩn hoá, bị TỪ CHỐI khi xuất bản, và máy chủ chỉ áp bộ lọc
+  // field custom — nên không đường nào lọc khách theo bộ đếm Pancake. Sắp xếp mặc định theo field ấy thì đi về cột ERP.
+  const saved: ListViewSchema = { version: 1, columns: [{ ref: "system:order_count", visible: true }], defaultSort: { ref: "system:order_count", dir: "desc" }, defaultFilters: [{ ref: "system:order_count", op: "gte", value: 3 }] };
+  assert.deepEqual(normalizeListView(saved, fields, []).defaultFilters, [], "bộ lọc trên bộ đếm Pancake bị bỏ khi chuẩn hoá");
+  assert.ok(listRefProblems(saved, fields, []).some((e) => e.field === "system:order_count" && /không lọc được/.test(e.message)), "xuất bản bộ lọc ấy bị từ chối");
+  assert.deepEqual(customDefaultFilters(saved), [], "máy chủ chỉ áp bộ lọc field custom");
+  assert.deepEqual(listViewDefaultSort(saved, CUSTOMER_LIST_REF_COLUMNS, CUSTOMER_SORTABLE), { sort: "orderCount", dir: "desc" }, "sắp xếp đã lưu theo «Số đơn» đi về cột orderCount = effective() (ERP)");
+
+  // ── Trang chi tiết đơn: ba ô «Đơn / Thành công / Hoàn» KHÔNG đọc bộ đếm Pancake (chỉ dòng «Pancake ghi nhận») ──
+  const orderPage = readFileSync(path.join(process.cwd(), "app/(dashboard)/orders/[id]/page.tsx"), "utf8").split(/\r?\n/);
+  const counterLines = orderPage.filter((l) => /order\.customer\.(orderCount|succeedOrderCount|returnedOrderCount)/.test(l));
+  const offending = counterLines.filter((l) => !l.includes("Pancake ghi nhận") && !l.includes("assessCustomerRisk(") && !l.includes("isNewPhone("));
+  assert.deepEqual(offending, [], "bộ đếm Pancake chỉ được in ở dòng «Pancake ghi nhận (tham khảo)» (rủi ro / SĐT mới chấm riêng, có nhãn)");
+  assert.ok(orderPage.some((l) => l.includes("customerOutcomeStats(order.customer.id)")), "khối khách đọc cùng câu gom với trang chi tiết khách");
+  console.log("✓ Hồ sơ khách (thuần): rủi ro chấm ERP và Pancake riêng, lý do mang nhãn nguồn · không COD mà không chứng từ ⇒ chưa xác minh · field «(Pancake)» không lọc được, sắp xếp đã lưu đi về cột ERP · khối khách trang đơn không in bộ đếm Pancake thành số ERP");
 }
 
 const CUSTOMERS = ["mix", "fresh", "empty"].map((x) => `${P}${x}`);
@@ -113,6 +141,10 @@ export async function testCustomerOutcomeTruthDb(db: Db) {
     const noCod = mix.orders.find((x) => x.id === `${P}mix-new`);
     assert.deepEqual(noCod?.noCodPayment, { kind: "UNVERIFIED" }, "0 phải thu mà không chứng từ ⇒ chưa xác minh, không phải đã thanh toán");
     assert.equal(mix.orders.find((x) => x.id === `${P}mix-del`)?.noCodPayment, null, "đơn còn COD ⇒ không hỏi");
+    // Khối «Khách hàng» của trang chi tiết đơn: CÙNG số với trang chi tiết khách (Pancake 40 ⇒ ERP 1).
+    const viaOrderPage = await customerOutcomeStats(`${P}mix`);
+    assert.deepEqual(viaOrderPage, { orders: mix.stats.orders, succeed: mix.stats.succeed, returned: mix.stats.returned, finished: mix.stats.finished, open: mix.stats.open, inTransit: mix.stats.inTransit, successRate: mix.stats.successRate, returnRate: mix.stats.returnRate }, "trang đơn = trang khách");
+    assert.equal(viaOrderPage.succeed, 1, "khối khách trên trang đơn in ERP 1, không phải bộ đếm Pancake 40");
 
     const fresh = await getCustomerDetail(`${P}fresh`);
     assert.ok(fresh);

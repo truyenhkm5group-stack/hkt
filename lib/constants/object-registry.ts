@@ -123,8 +123,14 @@ export const OBJECT_REGISTRY: readonly ObjectDef[] = [
       f("province", "Tỉnh / thành", "text", "province", { editable: true, filterable: true }),
       // Đếm đơn của MỘT khách (đồng bộ Pancake) — cộng / trung bình được. `purchased_amount` là TIỀN (đồng bộ
       // Pancake, không qua ORDER_OUTCOME) nên KHÔNG khai tổng hợp: cộng nó là một công thức doanh thu thứ hai.
-      f("order_count", "Số đơn", "number", "orderCount", { aggregatable: true }),
-      f("purchased_amount", "Đã mua", "currency", "purchasedAmount"),
+      //
+      // NHÃN MANG «(Pancake)»: field hệ thống là CỘT VẬT LÝ, và mọi đường chung (form hồ sơ, khối trang, bản ghi) đọc
+      // thẳng cột `customers.order_count` / `purchased_amount` — bộ đếm Pancake, không phải số của ERP (AGENTS §0.2 ·
+      // §3.1). Danh sách /customers thì khác: khoá này chỉ là TAY CẦM ẩn/hiện + sắp xếp cột `orderCount` /
+      // `purchasedAmount`, mà cột ấy đọc `effective()` (ERP, ORDER_OUTCOME). KHÔNG khai `filterable`: bộ lọc field hệ
+      // thống ở khối trang / bản ghi lọc thẳng cột vật lý, tức lọc khách theo bộ đếm Pancake.
+      f("order_count", "Số đơn (Pancake)", "number", "orderCount", { aggregatable: true }),
+      f("purchased_amount", "Đã mua (Pancake)", "currency", "purchasedAmount"),
       f("last_order_at", "Đơn gần nhất", "datetime", "lastOrderAt"),
     ],
     why: "Đối tượng MẪU của Phase 2: chưa có đường sửa nào nên field custom + form không đụng luật nghiệp vụ nào; khách của tổ chức dùng Pancake vẫn do đồng bộ tạo.",
