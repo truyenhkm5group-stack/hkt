@@ -24,10 +24,12 @@
     "error-boundary-than-thien"
   ],
   "blocked_by": [],
-  "related_prs": [],
+  "related_prs": [
+    718
+  ],
   "migration_reservations": [],
   "created_at": "2026-10-08T23:03:51.844Z",
-  "updated_at": "2026-10-09T00:31:20.605Z",
+  "updated_at": "2026-10-09T00:32:01.055Z",
   "last_heartbeat": "2026-10-09T00:31:20.605Z",
   "definition_of_done": [],
   "handoff": {
