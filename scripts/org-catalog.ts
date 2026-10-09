@@ -30,6 +30,7 @@ import { isManualRecordId } from "@/lib/constants/manual-products";
 import { orgHasSyncedSource } from "@/lib/platform/capabilities";
 import { findOrganization, listOrganizations } from "@/lib/platform/organizations";
 import { parseSalesChatbotConfig, SALES_CHATBOT_SETTING_KEY } from "@/lib/sales-chatbot/config";
+import { parseQuickReplySettings, QUICK_REPLY_SETTING_KEY } from "@/lib/sales-chatbot/quick-replies-shared";
 import { rowsOf } from "@/lib/sql-rows";
 
 const tomTat = (s: string) => console.log(`[ops:tom-tat] ${s}`);
@@ -47,7 +48,9 @@ export type CatalogReport = {
   profile: string;
   products: CatalogProduct[];
   priceLists: { id: string; name: string; isDefault: boolean; active: boolean; tiers: { variantId: string; variantLabel: string; minQuantity: number; unitPrice: number }[] }[];
-  quickReplies: { title: string; triggers: string[]; answer: string }[];
+  quickReplies: { title: string; triggers: string[]; answer: string; upsell: boolean; images: number }[];
+  /** Cài đặt câu mẫu: bật / tắt; `upsellSet` = đã chọn câu upsell (kèm ảnh menu) cho bước mời thêm món. `null` = không đọc được. */
+  quickReplySettings: { enabled: boolean; upsellSet: boolean } | null;
 };
 
 /** Quy cách của một mẫu mã như bot đọc (`variantText` trong lib/sales-chatbot/catalog.ts). HÀM THUẦN. */
@@ -105,7 +108,10 @@ export async function collectOrgCatalog(org: { code: string; name: string; isHom
   }));
 
   const qr = schema.salesChatQuickReplies;
-  const quickReplies = (await db.select({ title: qr.title, triggers: qr.triggers, answer: qr.answer }).from(qr).where(eq(qr.active, true)).orderBy(asc(qr.title))).map((q) => ({ title: q.title, triggers: q.triggers ?? [], answer: q.answer }));
+  const qs = parseQuickReplySettings(await readJson(db, QUICK_REPLY_SETTING_KEY));
+  const qi = schema.salesChatQuickReplyImages;
+  const imageCounts = new Map((await db.select({ id: qi.quickReplyId, n: sql<number>`count(*)::int` }).from(qi).groupBy(qi.quickReplyId)).map((r) => [r.id, Number(r.n)]));
+  const quickReplies = (await db.select({ id: qr.id, title: qr.title, triggers: qr.triggers, answer: qr.answer }).from(qr).where(eq(qr.active, true)).orderBy(asc(qr.title))).map((q) => ({ title: q.title, triggers: q.triggers ?? [], answer: q.answer, upsell: q.id === qs.upsellReplyId, images: imageCounts.get(q.id) ?? 0 }));
 
   return {
     org: { code: org.code, name: org.name },
@@ -115,6 +121,7 @@ export async function collectOrgCatalog(org: { code: string; name: string; isHom
     products,
     priceLists,
     quickReplies,
+    quickReplySettings: { enabled: qs.enabled, upsellSet: quickReplies.some((q) => q.upsell) },
   };
 }
 
@@ -146,7 +153,8 @@ export function catalogLines(r: CatalogReport): string[] {
   }
   out.push("");
   out.push(`CÂU MẪU ĐANG BẬT (${r.quickReplies.length}):`);
-  for (const q of r.quickReplies) out.push(`· ${q.title} [${q.triggers.join(" / ")}]: ${q.answer.replace(/\s+/g, " ").trim()}`);
+  out.push(r.quickReplySettings ? `Câu mẫu: ${onOff(r.quickReplySettings.enabled)} · câu upsell (mời thêm món kèm ảnh menu): ${r.quickReplySettings.upsellSet ? "ĐÃ CHỌN" : "CHƯA CHỌN — bot sẽ tự gợi ý từng món"}` : "Câu mẫu: — (không đọc được cài đặt)");
+  for (const q of r.quickReplies) out.push(`· ${q.upsell ? "[UPSELL] " : ""}${q.title} (${q.images} ảnh) [${q.triggers.join(" / ")}]: ${q.answer.replace(/\s+/g, " ").trim()}`);
   return out;
 }
 
@@ -158,7 +166,7 @@ export function catalogSummary(r: CatalogReport): string[] {
   const tiers = activeLists.reduce((s, l) => s + l.tiers.length, 0);
   return [
     `Tổ chức ${r.org.code}: ${live.length} sản phẩm · ${variants.length} mẫu mã (${variants.filter((v) => v.price === null).length} chưa có giá · ${variants.filter((v) => v.hidden).length} ẩn) · nguồn ${r.syncedProducts === null ? "—" : r.syncedProducts ? "ĐỒNG BỘ" : "tạo tay"}`,
-    `Bot: ${r.bot ? `${onOff(r.bot.enabled)} · giá sỉ ${onOff(r.bot.wholesalePricing)} · chốt không kiểm tồn ${onOff(r.bot.sellWithoutStockCheck)}` : "— (chưa có cấu hình)"} · bảng giá sỉ đang dùng ${activeLists.length} (${tiers} bậc) · câu mẫu đang bật ${r.quickReplies.length}`,
+    `Bot: ${r.bot ? `${onOff(r.bot.enabled)} · giá sỉ ${onOff(r.bot.wholesalePricing)} · chốt không kiểm tồn ${onOff(r.bot.sellWithoutStockCheck)}` : "— (chưa có cấu hình)"} · bảng giá sỉ đang dùng ${activeLists.length} (${tiers} bậc) · câu mẫu đang bật ${r.quickReplies.length} · câu upsell ${r.quickReplySettings?.upsellSet ? `ĐÃ CHỌN (${r.quickReplies.find((q) => q.upsell)?.images ?? 0} ảnh)` : "CHƯA CHỌN"}`,
   ].map((l) => l.slice(0, SUMMARY_MAX_CHARS));
 }
 
