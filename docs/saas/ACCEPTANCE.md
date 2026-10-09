@@ -16,18 +16,24 @@ trả tiền đầu tiên sẽ đi.
 | P | (`--apply --prep`) Chuẩn bị MỘT lần cho D / E: sản phẩm mẫu `NT-AO-01` 150.000 ₫ (một mẫu mã) · tồn khả dụng ≥ 10 qua phiếu nhập · bot bật (đủ «Tìm sản phẩm» · «Lên đơn nháp» · «Chốt đơn», giờ làm việc luôn mở) · tên miền con `cdt-nghiem-thu` đã xuất bản. Mỗi việc ĐÃ LÀM / CÓ SẴN / BỎ QUA (lý do) / HỎNG (lý do) | `lib/saas/acceptance-prep.ts` — ĐÚNG lõi của nút UI (`createProductCore` · `writeStockReceiptCore` · `saveSalesChatbotConfig` · `setDomainSlug` + `publishOrganization`), đứng tên tài khoản CHỦ của workspace thử |
 | C | Vỏ app 8 mục mở được qua host `app.<CHOTDON_DOMAIN>`: mỗi mục 200, mang dấu vỏ + thương hiệu Chốt Đơn, KHÔNG lộ khung ERP nội bộ, không vòng chuyển hướng, không bị đá về `/login`, không bị cổng quyền / module đưa về trang nhà (`?forbidden=1` · `/module-disabled`); `/` về trang nhà; một tuyến ERP bị chặn về trang nhà | GET thật tới `127.0.0.1:3000` (như smoke) với phiên ký bằng `signSession`; danh sách tuyến DẪN XUẤT từ `salesAgentNavFor` |
 | D | (`--e2e`) Khách web hỏi giá → đặt 2 sản phẩm mẫu kèm SĐT + địa chỉ → đồng ý ⇒ AI trả lời từng lượt, đơn **CONFIRMED** trong OMS đúng SKU · số lượng · SĐT · xã; in chi phí AI của lượt | `openConversation("WEB")` + `chatTurn` — lõi chat công khai gọi sau bước định tuyến; đơn do BOT tạo / chốt |
+| R | (`--apply --e2e-ops`) Sáu hạng mục Launch Gate Khách mà D không phủ, mỗi hạng mục ĐẠT / HỎNG / BỎ QUA (lý do): **C14** khách lưỡng lự sau khi có đơn nháp ⇒ đơn ở lại «Mới» + cờ CẦN NGƯỜI KIỂM `CUSTOMER_CANCELLED`, máy KHÔNG chốt · **C15** nút nhanh «Xác nhận đơn» ⇒ CONFIRMED, lượt kiểm mang khoá tài khoản người bấm · **C17** bấm xác nhận lần hai + phát lại cùng ý định khách ⇒ đúng MỘT đơn, không ghi thêm · **C9** tin nhân viên ở hộp thư lưu với `user_id` người gửi, gửi lại cùng khoá ⇒ cùng tin · **C11** tin nhân viên làm bot NHƯỜNG, rồi «Tiếp quản» ⇒ HUMAN_TAKEOVER, «Trả lại cho AI» ⇒ AI_ACTIVE · **C18** MỘT lượt chat qua đường CÔNG KHAI thật ⇒ đồng hồ khách AI của kỳ +1, trần tần suất không chặn | `lib/saas/acceptance-e2e.ts` — ĐÚNG lõi hộp thư / nút nhanh (`executeTool` cho C14, không gọi model · `confirmOrderReviewCore` · `sendStaffReplyCore` · `setConversationControlCore`), đứng tên tài khoản CHỦ; C18 = hai POST server action (`startPublicChatAction` · `sendPublicChatAction`, mã đọc từ `.next/server/server-reference-manifest.json` của bản dựng đang chạy) tới `127.0.0.1:3000/chat` với Host tên miền con |
 | E | `https://<slug>.<PLATFORM_BASE_DOMAIN>/chat` trả 200 + tên shop, cả qua ứng dụng lẫn qua mạng ngoài (DNS + Caddy + chứng chỉ); in tên miền gốc đang dùng | GET thật |
 
 ## 2. KHÔNG chứng minh được gì
 
 - **Không gửi email thật** — nền tảng chưa có kênh thư; liên kết kích hoạt chỉ sống trong bộ nhớ tiến trình.
 - **Không đi Meta / Messenger / Zalo** — Meta chưa duyệt quyền Page; E2E đi kênh CHAT WEB.
-- **Không bấm giao diện**: B, P và D gọi đúng lõi mà nút / trang gọi, nhưng không qua trình duyệt (không đo JavaScript phía khách, không
-  đo server action qua HTTP). C và E đo HTML thật do máy chủ dựng.
-- **Không đo đồng hồ «khách AI» và trần tần suất của chat công khai** (`lib/sales-chatbot/public.ts` ghi chúng sau bước định tuyến
-  theo host) — lượt nghiệm thu gọi lõi ngay sau bước đó, nên KHÔNG tiêu hạn mức dùng thử và KHÔNG vào bảng kê.
-- **Không xác nhận đơn bằng nút nhanh**: nếu AI không chốt sau lời đồng ý, D báo FAIL và để người bấm «Xác nhận đơn» ở hộp thư —
-  ops không bấm hộ.
+- **Không bấm giao diện**: B, P, D và R gọi đúng lõi mà nút / trang gọi, nhưng không qua trình duyệt (không đo JavaScript phía khách).
+  C và E đo HTML thật do máy chủ dựng; riêng C18 (bước R) đi server action qua HTTP thật, nhưng không đo phần Caddy / IP thật của
+  khách (POST đi thẳng `127.0.0.1:3000`, không có `X-Forwarded-For` ⇒ trần theo IP không áp, trần theo khách + tổ chức vẫn áp).
+- **D không đo đồng hồ «khách AI» và trần tần suất của chat công khai** (`lib/sales-chatbot/public.ts` ghi chúng sau bước định tuyến
+  theo host) — D gọi lõi ngay sau bước đó, nên KHÔNG tiêu hạn mức dùng thử và KHÔNG vào bảng kê. **Bước R (C18) đo phần này**: một lượt
+  qua đường công khai thật tiêu MỘT khách AI của hạn mức dùng thử workspace thử; dùng thử hết ⇒ C18 BỎ QUA, ops không gia hạn.
+- **D không xác nhận đơn bằng nút nhanh**: nếu AI không chốt sau lời đồng ý, D báo FAIL và để người bấm «Xác nhận đơn» ở hộp thư —
+  D không bấm hộ. Bước R (C15) bấm «Xác nhận đơn» trên đơn RIÊNG của nó (đơn C14, hội thoại riêng của lượt), không bao giờ trên đơn của D.
+- **C14 không đi nhánh «địa chỉ chưa ghép xã»**: với nhánh đó luật chủ shop 08/10/2026 là MÁY VẪN CHỐT kèm cờ, nên «máy không chốt» không
+  áp; C14 đi nhánh khách lưỡng lự (`mark_declined` ⇒ cờ `CUSTOMER_CANCELLED`, đơn ở lại «Mới», công tắc «đơn đủ thông tin» không nâng).
+  Công tắc ấy đang BẬT ở workspace thử ⇒ C14 BỎ QUA kèm lý do (ops không đổi công tắc hộ).
 - **Không gia hạn dùng thử**: dùng thử V1 có 7 ngày. Hết hạn ⇒ A báo FAIL kèm việc người vận hành làm (/platform/org/<mã> → «Thu phí
   thuê bao» → «Đã trả tới ngày»); ops không tự gia hạn ngầm.
 
@@ -80,6 +86,7 @@ Actions → «Vận hành ERP trên VPS» → `saas-acceptance`, ô arg:
 | `--apply --e2e` | GHI + TỐN AI — thêm D | xem §5 |
 | `--apply --drills` | GHI — thêm F diễn tập tín hiệu O1–O8 (KHÔNG chạy mặc định, không tốn AI) | xem §10 |
 | `--apply --prep` | GHI — thêm P chuẩn bị MỘT lần cho D / E (KHÔNG chạy mặc định, không tốn AI); đi cùng `--e2e` được | xem §3, §5 |
+| `--apply --e2e-ops` | GHI + TỐN MỘT LƯỢT AI — thêm R (sau D, trước E) vận hành hộp thư C9 · C11 · C14 · C15 · C17 · C18 (KHÔNG chạy mặc định); đi cùng `--prep --e2e` được: A → B1 → P → C → D → R → E → B2 | xem §1, §5 |
 | `--org=<mã>` | chỉ khi sổ khai có nhiều mục | — |
 
 Kết quả MÃ HOÁ như mọi ops trả dữ liệu; log công khai chỉ có ĐÚNG MỘT dòng
@@ -90,7 +97,11 @@ Có FAIL ⇒ mã thoát 1; mã ngoài sổ / arg sai ⇒ 64; chạy thử mà CS
 
 Thứ tự lần đầu trên production: deploy → `--apply` (tạo workspace, kích hoạt, đăng nhập) → `--apply --prep --e2e` (chuẩn bị §3 rồi
 chat → AI → đơn trong CÙNG lượt) → từ đó `(rỗng)` sau mỗi deploy, `--apply --prep --e2e` khi cần bằng chứng trọn vòng (P CÓ SẴN thì
-không ghi gì; mỗi đơn bot chốt giữ 2 cái nên lượt sau bù đúng một phiếu nhỏ).
+không ghi gì; mỗi đơn bot chốt giữ 2 cái nên lượt sau bù đúng một phiếu nhỏ), `--apply --prep --e2e --e2e-ops` khi cần bằng chứng
+Launch Gate Khách (đơn C15 cũng giữ 2 cái ⇒ lượt `--prep` sau bù thêm).
+
+Dòng công khai của lượt có R thêm `vận hành: ĐẠT C14,… · HỎNG … · BỎ QUA …` — CHỈ mã hạng mục; id hội thoại / đơn / tin, SĐT, câu lỗi
+chỉ ở phần MÃ HOÁ. Bước R: có hạng mục HỎNG ⇒ FAIL; mọi hạng mục ĐẠT ⇒ PASS; còn lại ⇒ SKIP (phủ thiếu không phải đạt).
 
 ## 5. Dữ liệu ops ghi (chỉ trên workspace thử)
 
@@ -106,12 +117,17 @@ không ghi gì; mỗi đơn bot chốt giữ 2 cái nên lượt sau bù đúng 
   một lượt lưu cấu hình bot (bật · thêm công cụ thiếu · tắt giờ làm việc), một lượt chọn tên miền con + xuất bản — kèm nhật ký tổ
   chức đứng tên tài khoản CHỦ của workspace thử (và nhật ký nền tảng `ORG_DOMAIN_SET` / `ORG_PUBLISH`). Giữ lại làm vết, không xoá.
 
-Ops KHÔNG ghi: xác nhận đơn tay, gia hạn, thu phí, cấu hình AI nền tảng / «AI của workspace», module, gói; và không ghi gì vào workspace
+- Mỗi `--e2e-ops`: một hội thoại WEB riêng (khoá khách truy cập theo mã lượt chạy) mang một đơn (C14 lên nháp → khách lưỡng lự → C15
+  chủ workspace thử xác nhận), MỘT tin nhân viên đứng tên chủ, hai lượt đổi chế độ (tiếp quản → trả lại AI) kèm nhật ký; và một
+  hội thoại WEB CÔNG KHAI (C18) với một tin khách + câu AI + một dòng `chotdon.ai_customers` + dòng sổ AI. Giữ lại làm vết, không xoá.
+
+Ops KHÔNG ghi: xác nhận đơn tay ngoài đơn của chính bước R, gia hạn, thu phí, cấu hình AI nền tảng / «AI của workspace», module, gói; và không ghi gì vào workspace
 nào ngoài workspace nghiệm thu do chính nó tạo.
 
 ## 6. Chi phí AI mỗi lượt
 
-Chỉ `--e2e` gọi AI (`--prep` không gọi; 3–4 lượt khách, mỗi lượt một vài lời gọi model của AI dùng chung). Số THẬT đọc từ sổ AI theo hội thoại của lượt và
+Chỉ `--e2e` và `--e2e-ops` gọi AI (`--prep` không gọi; `--e2e` 3–4 lượt khách, `--e2e-ops` ĐÚNG MỘT lượt — C18 qua đường công khai;
+C9 · C11 · C14 · C15 · C17 không gọi model; mỗi lượt một vài lời gọi model của AI dùng chung). Số THẬT đọc từ sổ AI theo hội thoại của lượt và
 in ở dòng D + dòng tóm tắt («AI lượt này ≈ … USD»); lượt chưa định giá in «CHƯA ĐỊNH GIÁ», không in 0. Chạy thử / `--apply` không gọi AI.
 
 ## 7. Khi nào chạy

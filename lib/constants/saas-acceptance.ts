@@ -99,13 +99,14 @@ export const PAGE_ERROR_DIGEST = /\\?"digest\\?"\s*:\s*\\?"\d{3,}\\?"/;
 export type AcceptanceMode = "READ" | "APPLY" | "E2E";
 export const ACCEPTANCE_MODE_LABEL: Record<AcceptanceMode, string> = { READ: "CHỈ ĐỌC", APPLY: "GHI", E2E: "GHI + E2E" };
 
-export type AcceptanceArgs = { ok: true; mode: AcceptanceMode; orgCode: string | null; drills: boolean; prep: boolean } | { ok: false; error: string };
+export type AcceptanceArgs = { ok: true; mode: AcceptanceMode; orgCode: string | null; drills: boolean; prep: boolean; e2eOps: boolean } | { ok: false; error: string };
 
 /**
  * `(rỗng)` = CHỈ ĐỌC · `--apply` = thêm cấp phát + kích hoạt + đăng nhập · `--apply --e2e` = thêm chat → AI → đơn · `--apply --drills` =
  * thêm bước F diễn tập tín hiệu vận hành (không bao giờ chạy mặc định) · `--apply --prep` = thêm bước P chuẩn bị MỘT lần cho D / E
- * (sản phẩm mẫu · phiếu nhập · bật bot · xuất bản — quyết định chủ shop 09/10/2026, không bao giờ chạy mặc định) · `--org=<mã>` khi sổ
- * có nhiều mục. Cờ lạ / lặp / sai cặp ⇒ lỗi
+ * (sản phẩm mẫu · phiếu nhập · bật bot · xuất bản — quyết định chủ shop 09/10/2026, không bao giờ chạy mặc định) · `--apply --e2e-ops`
+ * = thêm bước R các hạng mục vận hành hộp thư của Launch Gate Khách (C9 · C11 · C14 · C15 · C17 · C18 — TỐN MỘT lượt AI, không bao
+ * giờ chạy mặc định) · `--org=<mã>` khi sổ có nhiều mục. Cờ lạ / lặp / sai cặp ⇒ lỗi
  * cách dùng (gõ nhầm `--aply` mà vẫn chạy là ghi mù). THUẦN; câu lỗi chỉ nói VỊ TRÍ / LOẠI lỗi, không chép nội dung ô arg (nó đi ra kênh
  * tóm tắt công khai).
  */
@@ -119,12 +120,13 @@ export function parseAcceptanceArgs(args: readonly string[]): AcceptanceArgs {
     if (key === "--org=") {
       orgCode = a.slice("--org=".length).trim().toLowerCase();
       if (!ORGANIZATION_CODE_PATTERN.test(orgCode)) return { ok: false, error: `từ thứ ${i + 1}: mã tổ chức sai dạng` };
-    } else if (key !== "--apply" && key !== "--e2e" && key !== "--drills" && key !== "--prep") return { ok: false, error: `từ thứ ${i + 1}: không phải cờ đã biết (--apply · --e2e · --drills · --prep · --org=<mã>)` };
+    } else if (key !== "--apply" && key !== "--e2e" && key !== "--drills" && key !== "--prep" && key !== "--e2e-ops") return { ok: false, error: `từ thứ ${i + 1}: không phải cờ đã biết (--apply · --e2e · --drills · --prep · --e2e-ops · --org=<mã>)` };
   }
   if (seen.has("--e2e") && !seen.has("--apply")) return { ok: false, error: "--e2e chỉ đi cùng --apply (bước E2E GHI vào workspace thử)" };
   if (seen.has("--drills") && !seen.has("--apply")) return { ok: false, error: "--drills chỉ đi cùng --apply (diễn tập GHI tín hiệu cho workspace thử)" };
   if (seen.has("--prep") && !seen.has("--apply")) return { ok: false, error: "--prep chỉ đi cùng --apply (chuẩn bị GHI sản phẩm / phiếu nhập / bot / xuất bản vào workspace thử)" };
-  return { ok: true, mode: seen.has("--e2e") ? "E2E" : seen.has("--apply") ? "APPLY" : "READ", orgCode, drills: seen.has("--drills"), prep: seen.has("--prep") };
+  if (seen.has("--e2e-ops") && !seen.has("--apply")) return { ok: false, error: "--e2e-ops chỉ đi cùng --apply (vận hành hộp thư GHI tin / đơn vào workspace thử và tốn một lượt AI)" };
+  return { ok: true, mode: seen.has("--e2e") ? "E2E" : seen.has("--apply") ? "APPLY" : "READ", orgCode, drills: seen.has("--drills"), prep: seen.has("--prep"), e2eOps: seen.has("--e2e-ops") };
 }
 
 // ─────────────────────────── Kết quả từng bước + dòng tóm tắt ───────────────────────────
@@ -132,18 +134,19 @@ export function parseAcceptanceArgs(args: readonly string[]): AcceptanceArgs {
 /** Thứ tự CHẠY: A → B1 → C → D → E → B2 (xoay mật khẩu luôn chạy CUỐI, kể cả khi bước giữa hỏng). */
 export const ACCEPTANCE_STEPS = ["A", "B1", "C", "D", "E", "B2"] as const;
 /**
- * Bước P (chuẩn bị, `--prep`) và F (diễn tập tín hiệu, `--drills`) chỉ có mặt khi gõ cờ — lượt thường giữ nguyên sáu bước và nguyên
- * dòng tóm tắt cũ.
+ * Bước P (chuẩn bị, `--prep`), R (vận hành hộp thư, `--e2e-ops`) và F (diễn tập tín hiệu, `--drills`) chỉ có mặt khi gõ cờ — lượt
+ * thường giữ nguyên sáu bước và nguyên dòng tóm tắt cũ.
  */
-export type AcceptanceStepKey = (typeof ACCEPTANCE_STEPS)[number] | "P" | "F";
+export type AcceptanceStepKey = (typeof ACCEPTANCE_STEPS)[number] | "P" | "R" | "F";
 
 /**
  * Thứ tự chạy của MỘT lượt: P chen NGAY SAU B1 (A đã xác nhận workspace là của ops; B1 đã kích hoạt tài khoản chủ mà P đứng tên) và
- * TRƯỚC C / D / E (vỏ có sản phẩm, D có hàng + bot, E có tên miền đã xuất bản); F chen TRƯỚC B2 (xoay mật khẩu vẫn CUỐI). THUẦN.
+ * TRƯỚC C / D / E (vỏ có sản phẩm, D có hàng + bot, E có tên miền đã xuất bản); R chen SAU D, TRƯỚC E (cùng workspace đã chuẩn bị, sau
+ * lượt chat của D); F chen TRƯỚC B2 (xoay mật khẩu vẫn CUỐI). THUẦN.
  */
-export function acceptanceStepsFor(opts: { drills?: boolean; prep?: boolean }): readonly AcceptanceStepKey[] {
-  if (!opts.drills && !opts.prep) return ACCEPTANCE_STEPS;
-  return ["A", "B1", ...(opts.prep ? (["P"] as const) : []), "C", "D", "E", ...(opts.drills ? (["F"] as const) : []), "B2"];
+export function acceptanceStepsFor(opts: { drills?: boolean; prep?: boolean; e2eOps?: boolean }): readonly AcceptanceStepKey[] {
+  if (!opts.drills && !opts.prep && !opts.e2eOps) return ACCEPTANCE_STEPS;
+  return ["A", "B1", ...(opts.prep ? (["P"] as const) : []), "C", "D", ...(opts.e2eOps ? (["R"] as const) : []), "E", ...(opts.drills ? (["F"] as const) : []), "B2"];
 }
 
 export const ACCEPTANCE_STEP_LABEL: Record<AcceptanceStepKey, string> = {
@@ -152,6 +155,7 @@ export const ACCEPTANCE_STEP_LABEL: Record<AcceptanceStepKey, string> = {
   P: "P · chuẩn bị workspace thử",
   C: "C · vỏ app Chốt Đơn",
   D: "D · chat web → AI → đơn",
+  R: "R · vận hành hộp thư (Launch Gate Khách)",
   E: "E · chat công khai theo tên miền con",
   F: "F · diễn tập tín hiệu vận hành",
   B2: "B · xoay mật khẩu rồi vứt",
@@ -194,6 +198,58 @@ export function prepStepStatus(results: readonly PrepItemResult[]): StepStatus {
 export function formatPrepLine(r: PrepItemResult): string {
   return `${PREP_ITEM_LABEL[r.key]}: ${PREP_STATUS_LABEL[r.status]} — ${r.why}`;
 }
+
+// ─────────────────────────── R · vận hành hộp thư (`--apply --e2e-ops`, Launch Gate Khách) ───────────────────────────
+
+/**
+ * Sáu hạng mục Launch Gate Khách mà D (chat → AI → đơn) KHÔNG phủ (ACCEPTANCE.md §2): mỗi hạng mục đi qua ĐÚNG lõi mà hộp thư / nút
+ * nhanh gọi, đứng tên tài khoản CHỦ của workspace thử (lib/saas/acceptance-e2e.ts). Thứ tự = thứ tự chạy (C15 cần đơn của C14, C17
+ * cần lượt xác nhận của C15, C11 đọc cả lượt nhường ngầm do C9 gây ra).
+ */
+export const ACCEPTANCE_OPS_ITEMS = ["C14", "C15", "C17", "C9", "C11", "C18"] as const;
+export type OpsItemKey = (typeof ACCEPTANCE_OPS_ITEMS)[number];
+/** Tên CÔNG KHAI — dòng `[ops:tom-tat]` chỉ mang mã + tên này cùng trạng thái (không id hội thoại / đơn / tin, không SĐT). */
+export const OPS_ITEM_LABEL: Record<OpsItemKey, string> = {
+  C9: "nhân viên trả lời",
+  C11: "tiếp quản / trả lại AI",
+  C14: "dữ liệu mơ hồ cần người",
+  C15: "xác nhận đơn tay",
+  C17: "không trùng đơn",
+  C18: "đồng hồ khách AI",
+};
+export type OpsStatus = "PASS" | "FAIL" | "SKIPPED";
+export const OPS_STATUS_LABEL: Record<OpsStatus, string> = { PASS: "ĐẠT", FAIL: "HỎNG", SKIPPED: "BỎ QUA" };
+/** Một hạng mục: `why` = chi tiết (id, số đếm, câu lỗi của lõi) — CHỈ phần MÃ HOÁ. */
+export type OpsItemResult = { key: OpsItemKey; status: OpsStatus; why: string };
+
+/** Phần vận hành của dòng tóm tắt công khai — CHỈ mã hạng mục theo trạng thái. THUẦN. */
+export function opsSummaryPart(results: readonly OpsItemResult[]): string {
+  const of = (s: OpsStatus) => results.filter((r) => r.status === s).map((r) => r.key);
+  const parts = (["PASS", "FAIL", "SKIPPED"] as const).map((s) => (of(s).length ? `${OPS_STATUS_LABEL[s]} ${of(s).join(",")}` : null)).filter(Boolean);
+  return `vận hành: ${parts.join(" · ") || "—"}`;
+}
+
+/**
+ * Phán quyết bước R: có hạng mục HỎNG ⇒ FAIL; mọi hạng mục ĐẠT ⇒ PASS; còn lại ⇒ SKIP — phủ thiếu một hạng mục KHÔNG phải đạt cả
+ * bước (dòng công khai vẫn in hạng mục nào đạt). THUẦN.
+ */
+export function opsStepStatus(results: readonly OpsItemResult[]): StepStatus {
+  if (!results.length) return "SKIP";
+  if (results.some((r) => r.status === "FAIL")) return "FAIL";
+  return results.every((r) => r.status === "PASS") ? "PASS" : "SKIP";
+}
+
+/** Dòng chi tiết (phần MÃ HOÁ) của một hạng mục. THUẦN. */
+export function formatOpsLine(r: OpsItemResult): string {
+  return `${r.key} ${OPS_ITEM_LABEL[r.key]}: ${OPS_STATUS_LABEL[r.status]} — ${r.why}`;
+}
+
+/** Câu khách LƯỠNG LỰ sau khi đã có đơn nháp (C14) — dữ liệu mơ hồ mà luật #675 giao cho NGƯỜI quyết, không cho máy. */
+export const ACCEPTANCE_AMBIGUOUS_TURN = "Ờ thôi để em hỏi lại nhà em đã, chắc chưa lấy đâu shop ạ.";
+/** Câu nhân viên trả lời ở hộp thư (C9). */
+export const ACCEPTANCE_STAFF_REPLY = "Dạ shop đã nhận thông tin, nhân viên sẽ gọi lại xác nhận đơn cho mình ạ.";
+/** Câu khách gửi qua đường chat CÔNG KHAI thật (C18) — một lượt hỏi giá, đủ để AI sinh MỘT câu trả lời. */
+export const ACCEPTANCE_PUBLIC_TURN = `Chào shop, ${ACCEPTANCE_SAMPLE_PRODUCTS[0].name} giá bao nhiêu ạ?`;
 
 // ─────────────────────────── F · diễn tập tín hiệu vận hành O1–O8 (LAUNCH_GATE §4) ───────────────────────────
 
@@ -264,7 +320,7 @@ export function formatAcceptanceUsd(usd: number): string {
  * DÒNG CÔNG KHAI DUY NHẤT: `saas-acceptance: <PASS|FAIL> <n đạt>/<n> · …` — `n` = số bước ĐÃ CHẠY (đạt + hỏng), bước bỏ qua nêu
  * riêng (bỏ qua không phải đạt). Chỉ mã workspace THỬ, chế độ, tên miền gốc và chi phí AI — không email, không SĐT, không mã đơn.
  */
-export function acceptanceSummary(results: readonly StepResult[], ctx: { mode: AcceptanceMode; orgCode: string | null; baseDomain?: string | null; aiCostUsd?: number | null; note?: string; drills?: string; prep?: string }): string {
+export function acceptanceSummary(results: readonly StepResult[], ctx: { mode: AcceptanceMode; orgCode: string | null; baseDomain?: string | null; aiCostUsd?: number | null; note?: string; drills?: string; prep?: string; ops?: string }): string {
   const ran = results.filter((r) => r.status !== "SKIP");
   const passed = ran.filter((r) => r.status === "PASS").length;
   const failed = ran.filter((r) => r.status === "FAIL").map((r) => r.key);
@@ -279,6 +335,8 @@ export function acceptanceSummary(results: readonly StepResult[], ctx: { mode: A
     ctx.aiCostUsd !== undefined && ctx.aiCostUsd !== null ? `AI lượt này ≈ ${formatAcceptanceUsd(ctx.aiCostUsd)} USD` : null,
     // Chỉ chuỗi đã dựng bằng `prepSummaryPart` (tên việc theo trạng thái) — không id, không SKU, không câu lỗi.
     ctx.prep ?? null,
+    // Chỉ chuỗi đã dựng bằng `opsSummaryPart` (mã hạng mục theo trạng thái) — không id, không SĐT, không câu lỗi.
+    ctx.ops ?? null,
     // Chỉ chuỗi đã dựng bằng `drillSummaryPart` (số hiệu tín hiệu theo trạng thái) — không mã lý do, không id.
     ctx.drills ?? null,
     ctx.note ?? null,

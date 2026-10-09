@@ -3,7 +3,7 @@
  *
  * Smoke sau deploy (`scripts/smoke.ts`) đi vai NGƯỜI NHÀ; lượt này đi vai KHÁCH, trên MỘT workspace thử có tên trong sổ khai
  * `lib/constants/saas-acceptance.ts` (mã ngoài sổ ⇒ từ chối trước mọi lượt đọc). Sáu bước, chạy theo thứ tự A → B1 → C → D → E → B2
- * (`--prep` chen P sau B1, `--drills` chen F trước B2):
+ * (`--prep` chen P sau B1, `--e2e-ops` chen R sau D, `--drills` chen F trước B2):
  *
  *  A  · workspace thử: `--apply` tạo / đảm bảo qua ĐÚNG job «Tạo khách» (`requestProvisioning` — dịch vụ form «Tạo khách mới» gọi),
  *       người thao tác là MÁY (`actor = null`, AGENTS 34); mọi chế độ kiểm: job xong · thuộc ops này · thương hiệu · gói dùng thử của
@@ -18,6 +18,9 @@
  *  D  · (`--e2e`) chat web → AI → đơn: CHỈ ĐỌC phần chuẩn bị (sản phẩm mẫu · bot bật + AI sẵn sàng — bước P làm khi gõ `--prep`, dự
  *       phòng người làm trên UI, ACCEPTANCE.md §3; thiếu ⇒ SKIP có lý do, D không tự ghi), rồi nhắn bằng ĐÚNG lõi chat công khai gọi sau bước định tuyến
  *       (`openConversation("WEB")` · `chatTurn`) — đơn do BOT tạo / chốt là hành vi sản phẩm bình thường. Đọc đơn trong OMS + chi phí AI.
+ *  R  · (`--apply --e2e-ops`) vận hành hộp thư của Launch Gate Khách — C9 nhân viên trả lời · C11 tiếp quản / trả lại AI · C14 dữ liệu
+ *       mơ hồ cần người · C15 xác nhận đơn tay · C17 không trùng đơn · C18 đồng hồ khách AI qua đường chat CÔNG KHAI thật (một POST
+ *       tới server action của `/chat`) — lib/saas/acceptance-e2e.ts, ba lá chắn riêng, đứng tên tài khoản CHỦ. Tốn MỘT lượt AI (C18).
  *  E  · chat công khai: `<slug>.<PLATFORM_BASE_DOMAIN>/chat` (qua ứng dụng với Host đó, và qua mạng ngoài thật) ⇒ 200 + tên shop.
  *       Chưa xuất bản ⇒ SKIP kèm việc cần làm (`--prep`, hoặc người bấm Xuất bản ở /setup) — E không tự xuất bản.
  *  F  · (`--drills`, chen trước B2) diễn tập tín hiệu vận hành O1–O8 qua ĐÚNG đường mã ghi tín hiệu, đầu vào cố ý sai — tín hiệu không
@@ -37,6 +40,7 @@
  * Không in liên kết, không ghi tệp, không ghi log.
  */
 import { randomBytes } from "node:crypto";
+import { readFile } from "node:fs/promises";
 import http from "node:http";
 import https from "node:https";
 import { and, eq } from "drizzle-orm";
@@ -65,9 +69,12 @@ import {
   drillSummaryPart,
   formatAcceptanceUsd,
   formatDrillLine,
+  formatOpsLine,
   formatPrepLine,
   formatStepLine,
   PAGE_ERROR_DIGEST,
+  opsStepStatus,
+  opsSummaryPart,
   PAGE_ERROR_MARKER,
   prepStepStatus,
   prepSummaryPart,
@@ -76,6 +83,7 @@ import {
   type AcceptanceStepKey,
   type AcceptanceWorkspace,
   type DrillResult,
+  type OpsItemResult,
   type PrepItemResult,
   type StepResult,
   type StepStatus,
@@ -100,6 +108,7 @@ import { normalizeCustomerPhone } from "@/lib/records/customer-create";
 import { loadAutoConfirmComplete } from "@/lib/records/order-create";
 import { accountOfWorkspace } from "@/lib/saas/accounts";
 import { acceptanceWorkspaceOwned } from "@/lib/saas/acceptance-guard";
+import { runAcceptanceE2eOps, type PublicChatTransport } from "@/lib/saas/acceptance-e2e";
 import { runAcceptancePrep } from "@/lib/saas/acceptance-prep";
 import { activationRefusal, loadWorkspaceActivation, resendActivation } from "@/lib/saas/activation";
 import { PRODUCTS } from "@/lib/saas/catalog";
@@ -113,6 +122,10 @@ import { completePasswordResetCore, createAcceptanceResetLink, lookupResetToken 
 // ─────────────────────────── Phụ thuộc thay được (bài kiểm: AI giả, HTTP giả, mật khẩu biết trước) ───────────────────────────
 
 export type HttpReply = { status: number; location: string | null; body: string };
+/** Phản hồi POST: thêm các dòng `Set-Cookie` (server action của trang chat công khai đặt cookie khách truy cập). */
+export type HttpPostReply = HttpReply & { setCookies: string[] };
+/** Mã hai server action của trang `/chat` trong BẢN DỰNG đang chạy (mã băm đổi mỗi lần dựng — đọc từ sổ của Next, không gõ cứng). */
+export type PublicChatActionIds = { start: string; send: string };
 
 export type AcceptanceDeps = {
   now: () => Date;
@@ -131,6 +144,10 @@ export type AcceptanceDeps = {
   siteEnv: SiteEnv;
   /** Miền gốc của tên miền con (`PLATFORM_BASE_DOMAIN` của tiến trình) — bước E dựng địa chỉ chat công khai từ đây. */
   baseDomain: string | null;
+  /** POST tới ỨNG DỤNG đang chạy với Host chỉ định — bước R gọi server action của trang chat công khai (C18). */
+  appPost: (path: string, opts: { host: string; headers: Record<string, string>; body: string; timeoutMs: number }) => Promise<HttpPostReply>;
+  /** Mã server action của trang `/chat` trong bản dựng đang chạy — bước R (C18). */
+  publicChatActionIds: () => Promise<PublicChatActionIds | { error: string }>;
 };
 
 /** Trần thân phản hồi giữ lại để soi dấu hiệu — trang vỏ vài trăm kB; quá trần thì phần đầu đã đủ để thấy khung. */
@@ -168,6 +185,119 @@ function appGetOver(baseUrl: string): AcceptanceDeps["appGet"] {
     });
 }
 
+function appPostOver(baseUrl: string): AcceptanceDeps["appPost"] {
+  return (path, opts) =>
+    new Promise<HttpPostReply>((resolve, reject) => {
+      const u = new URL(path, baseUrl);
+      const client = u.protocol === "https:" ? https : http;
+      const body = Buffer.from(opts.body, "utf8");
+      const req = client.request(
+        { protocol: u.protocol, hostname: u.hostname, port: u.port || (u.protocol === "https:" ? 443 : 80), path: `${u.pathname}${u.search}`, method: "POST", headers: { ...opts.headers, host: opts.host, "user-agent": "erp-saas-acceptance", "content-length": String(body.length) } },
+        (res) => {
+          const chunks: Buffer[] = [];
+          let size = 0;
+          res.on("data", (c: Buffer) => {
+            size += c.length;
+            if (size <= MAX_BODY_BYTES) chunks.push(c);
+          });
+          const raw = res.headers["set-cookie"];
+          res.on("end", () => resolve({ status: res.statusCode ?? 0, location: typeof res.headers.location === "string" ? res.headers.location : null, body: Buffer.concat(chunks).toString("utf8"), setCookies: Array.isArray(raw) ? raw : raw ? [raw] : [] }));
+          res.on("error", reject);
+        },
+      );
+      req.setTimeout(opts.timeoutMs, () => req.destroy(new Error(`không trả lời trong ${Math.round(opts.timeoutMs / 1000)}s`)));
+      req.on("error", reject);
+      req.end(body);
+    });
+}
+
+/**
+ * Mã hai server action của trang chat công khai (`startPublicChatAction` · `sendPublicChatAction` ở lib/actions/public-chat.ts) từ sổ
+ * `server-reference-manifest.json` của bản dựng Next. THUẦN theo nội dung sổ. Không thấy ⇒ lỗi nói rõ (bản dựng khác / đổi tên hàm).
+ */
+export function publicChatActionIdsFrom(manifest: unknown): PublicChatActionIds | { error: string } {
+  const node = manifest && typeof manifest === "object" ? (manifest as { node?: unknown }).node : null;
+  if (!node || typeof node !== "object") return { error: "sổ server action của Next không có mục node" };
+  const found: Partial<Record<"start" | "send", string>> = {};
+  for (const [id, raw] of Object.entries(node as Record<string, unknown>)) {
+    const v = raw && typeof raw === "object" ? (raw as { filename?: unknown; exportedName?: unknown }) : {};
+    const file = typeof v.filename === "string" ? v.filename.split("\\").join("/") : "";
+    if (!file.endsWith("lib/actions/public-chat.ts")) continue;
+    if (v.exportedName === "startPublicChatAction") found.start = id;
+    if (v.exportedName === "sendPublicChatAction") found.send = id;
+  }
+  return found.start && found.send ? { start: found.start, send: found.send } : { error: "sổ server action của bản dựng không có startPublicChatAction / sendPublicChatAction (lib/actions/public-chat.ts)" };
+}
+
+/**
+ * Kết quả của MỘT lượt gọi server action từ phản hồi RSC (`text/x-component`): dòng `0:{"a":"$@1",…}` trỏ tới dòng chứa giá trị trả
+ * về; không có tham chiếu thì lấy object đầu tiên mang `ok` / `error`. THUẦN.
+ */
+export function parseActionReply(body: string): Record<string, unknown> | null {
+  const rows = new Map<string, string>();
+  for (const line of body.split("\n")) {
+    const m = /^([0-9a-f]+):(.*)$/.exec(line);
+    if (m) rows.set(m[1], m[2]);
+  }
+  const parse = (t: string | undefined): unknown => {
+    if (t === undefined) return null;
+    try {
+      return JSON.parse(t) as unknown;
+    } catch {
+      return null;
+    }
+  };
+  const isResult = (v: unknown): v is Record<string, unknown> => Boolean(v && typeof v === "object" && !Array.isArray(v) && ("ok" in v || "error" in v));
+  const head = parse(rows.get("0"));
+  const ref = head && typeof head === "object" ? (head as { a?: unknown }).a : undefined;
+  if (isResult(ref)) return ref;
+  if (typeof ref === "string" && ref.startsWith("$@")) {
+    const v = parse(rows.get(ref.slice(2)));
+    if (isResult(v)) return v;
+  }
+  for (const t of rows.values()) {
+    const v = parse(t);
+    if (isResult(v)) return v;
+  }
+  return null;
+}
+
+/**
+ * ĐƯỜNG CHAT CÔNG KHAI THẬT cho C18: hai POST tới server action của trang `/chat` trên ứng dụng đang chạy, Host = tên miền con của
+ * workspace — đúng đường trình duyệt của khách lạ đi (định tuyến theo host · trần tần suất · đồng hồ khách AI). Không cookie phiên,
+ * không khoá nào của nền tảng; cookie khách truy cập là cookie ứng dụng vừa đặt ở lượt mở.
+ */
+export function publicChatOverServerActions(deps: Pick<AcceptanceDeps, "appPost" | "publicChatActionIds">): PublicChatTransport {
+  return async (host, text) => {
+    const ids = await deps.publicChatActionIds();
+    if ("error" in ids) return { ok: false, error: ids.error };
+    const base = { "content-type": "text/plain;charset=UTF-8", accept: "text/x-component", origin: `https://${host}` };
+    const call = async (id: string, args: unknown[], cookie: string | null) => {
+      const r = await deps.appPost("/chat", { host, headers: { ...base, "next-action": id, ...(cookie ? { cookie } : {}) }, body: JSON.stringify(args), timeoutMs: PAGE_TIMEOUT_MS });
+      return { r, value: r.status === 200 ? parseActionReply(r.body) : null };
+    };
+    const opened = await call(ids.start, [], null);
+    if (!opened.value) return { ok: false, error: `mở hội thoại qua server action: HTTP ${opened.r.status}${opened.r.status === 200 ? " — không đọc được kết quả" : ""}` };
+    if (opened.value.ok !== true) return { ok: false, error: String(opened.value.error ?? "mở hội thoại bị từ chối") };
+    const view = opened.value.view as { conversationId?: unknown } | undefined;
+    const conversationId = typeof view?.conversationId === "string" ? view.conversationId : null;
+    const cookie = opened.r.setCookies.map((c) => c.split(";")[0]?.trim() ?? "").find((c) => c.startsWith("erp_chat_v=")) ?? null;
+    if (!conversationId || !cookie) return { ok: false, error: `mở hội thoại không trả ${conversationId ? "cookie khách truy cập" : "mã hội thoại"}` };
+    const sent = await call(ids.send, [conversationId, text], cookie);
+    if (!sent.value) return { ok: false, error: `gửi tin qua server action: HTTP ${sent.r.status}${sent.r.status === 200 ? " — không đọc được kết quả" : ""}` };
+    if (sent.value.ok !== true) return { ok: false, error: String(sent.value.error ?? "gửi tin bị từ chối") };
+    return { ok: true, conversationId };
+  };
+}
+
+async function readPublicChatActionIds(): Promise<PublicChatActionIds | { error: string }> {
+  try {
+    return publicChatActionIdsFrom(JSON.parse(await readFile(`${process.cwd()}/.next/server/server-reference-manifest.json`, "utf8")) as unknown);
+  } catch (error) {
+    return { error: `không đọc được sổ server action của bản dựng (.next/server/server-reference-manifest.json): ${firstLine(error)}` };
+  }
+}
+
 async function publicGetOverFetch(url: string, opts: { timeoutMs: number }): Promise<HttpReply> {
   // Không cookie, không khoá, không tiêu đề nào của nền tảng — đúng một khách lạ mở trang chat công khai.
   const res = await fetch(url, { redirect: "manual", signal: AbortSignal.timeout(opts.timeoutMs), headers: { "user-agent": "erp-saas-acceptance" } });
@@ -187,6 +317,8 @@ export function defaultAcceptanceDeps(opts: { emit: (line: string) => void }): A
     emit: opts.emit,
     siteEnv: { SITE_DOMAIN: process.env.SITE_DOMAIN, CHOTDON_DOMAIN: process.env.CHOTDON_DOMAIN, APP_URL: process.env.APP_URL, CHOTDON_APP_URL: process.env.CHOTDON_APP_URL },
     baseDomain: platformBaseDomain(),
+    appPost: appPostOver(base),
+    publicChatActionIds: readPublicChatActionIds,
   };
 }
 
@@ -269,13 +401,17 @@ type Ctx = {
   prep: boolean;
   /** Kết quả chuẩn bị (bước P) — dòng tóm tắt công khai chỉ đọc tên việc + trạng thái từ đây. */
   prepResults: PrepItemResult[] | null;
+  /** `--e2e-ops`: thêm bước R vận hành hộp thư (sau D, trước E). */
+  e2eOps: boolean;
+  /** Kết quả bước R — dòng tóm tắt công khai chỉ đọc mã hạng mục + trạng thái từ đây. */
+  opsResults: OpsItemResult[] | null;
 };
 
 /**
  * Chạy nghiệm thu. `orgCode` bỏ trống ⇒ mục DUY NHẤT của sổ (sổ nhiều mục ⇒ phải chỉ rõ). Mã ngoài sổ ⇒ `refused`, không một lượt
  * đọc / ghi nào. Không bao giờ ném: mỗi bước tự bắt lỗi của mình thành FAIL.
  */
-export async function runAcceptance(input: { orgCode: string | null; mode: AcceptanceMode; drills?: boolean; prep?: boolean }, deps: AcceptanceDeps): Promise<AcceptanceReport> {
+export async function runAcceptance(input: { orgCode: string | null; mode: AcceptanceMode; drills?: boolean; prep?: boolean; e2eOps?: boolean }, deps: AcceptanceDeps): Promise<AcceptanceReport> {
   const secrets = new Set<string>();
   const say = (line: string) => deps.emit(scrubSecrets(line, secrets));
   const target = input.orgCode ? acceptanceWorkspaceOf(input.orgCode) : ACCEPTANCE_WORKSPACES.length === 1 ? ACCEPTANCE_WORKSPACES[0] : null;
@@ -284,13 +420,15 @@ export async function runAcceptance(input: { orgCode: string | null; mode: Accep
     say(`TỪ CHỐI — ${why}`);
     return { refused: true, results: [], verdict: "FAIL", summary: acceptanceSummary([], { mode: input.mode, orgCode: null, note: why }) };
   }
-  const ctx: Ctx = { entry: target, mode: input.mode, deps, secrets, owned: false, exists: false, knownPassword: null, lastPasswordChangeMs: 0, aiCostUsd: null, baseDomain: deps.baseDomain, drills: input.drills === true && input.mode !== "READ", loginEvidence: null, drillResults: null, prep: input.prep === true && input.mode !== "READ", prepResults: null };
+  const ctx: Ctx = { entry: target, mode: input.mode, deps, secrets, owned: false, exists: false, knownPassword: null, lastPasswordChangeMs: 0, aiCostUsd: null, baseDomain: deps.baseDomain, drills: input.drills === true && input.mode !== "READ", loginEvidence: null, drillResults: null, prep: input.prep === true && input.mode !== "READ", prepResults: null, e2eOps: input.e2eOps === true && input.mode !== "READ", opsResults: null };
   const results: StepResult[] = [];
   const steps: Record<AcceptanceStepKey, () => Promise<Outcome>> = {
     A: () => stepWorkspace(ctx),
     B1: () => (ctx.mode === "READ" ? Promise.resolve(skip("chế độ CHỈ ĐỌC — kích hoạt + đăng nhập ghi mật khẩu / lượt đăng nhập, chỉ chạy với --apply")) : needOwned(ctx, () => stepActivateAndLogin(ctx))),
     // Chỉ có mặt trong lượt `--apply --prep` (acceptanceStepsFor) — và chỉ sau khi A xác nhận workspace là của CHÍNH ops này.
     P: () => needOwned(ctx, () => stepPrep(ctx)),
+    // Chỉ có mặt trong lượt `--apply --e2e-ops` — sau khi A xác nhận workspace là của CHÍNH ops này.
+    R: () => needOwned(ctx, () => stepOps(ctx)),
     C: () => needOwned(ctx, () => stepShell(ctx)),
     D: () => (ctx.mode !== "E2E" ? Promise.resolve(skip("chỉ chạy với --apply --e2e (nhắn bot thật, tốn AI)")) : needOwned(ctx, () => stepE2e(ctx))),
     E: () => needOwned(ctx, () => stepPublicChat(ctx)),
@@ -298,7 +436,7 @@ export async function runAcceptance(input: { orgCode: string | null; mode: Accep
     F: () => needOwned(ctx, () => stepDrills(ctx)),
     B2: () => (ctx.mode === "READ" ? Promise.resolve(skip("chế độ CHỈ ĐỌC — không có mật khẩu nào được đặt")) : stepRotate(ctx)),
   };
-  for (const key of acceptanceStepsFor({ drills: ctx.drills, prep: ctx.prep })) {
+  for (const key of acceptanceStepsFor({ drills: ctx.drills, prep: ctx.prep, e2eOps: ctx.e2eOps })) {
     const started = Date.now();
     let out: Outcome;
     try {
@@ -311,7 +449,7 @@ export async function runAcceptance(input: { orgCode: string | null; mode: Accep
     say(formatStepLine(r));
     for (const d of r.detail) say(`    · ${d}`);
   }
-  const summary = acceptanceSummary(results, { mode: input.mode, orgCode: target.code, baseDomain: ctx.baseDomain, aiCostUsd: ctx.mode === "E2E" ? ctx.aiCostUsd : undefined, prep: ctx.prepResults ? prepSummaryPart(ctx.prepResults) : undefined, drills: ctx.drillResults ? drillSummaryPart(ctx.drillResults) : undefined });
+  const summary = acceptanceSummary(results, { mode: input.mode, orgCode: target.code, baseDomain: ctx.baseDomain, aiCostUsd: ctx.mode === "E2E" || ctx.e2eOps ? ctx.aiCostUsd : undefined, prep: ctx.prepResults ? prepSummaryPart(ctx.prepResults) : undefined, ops: ctx.opsResults ? opsSummaryPart(ctx.opsResults) : undefined, drills: ctx.drillResults ? drillSummaryPart(ctx.drillResults) : undefined });
   return { refused: false, results, verdict: acceptanceVerdict(results), summary: scrubSecrets(summary, secrets) };
 }
 
@@ -560,6 +698,29 @@ async function stepPrep(ctx: Ctx): Promise<Outcome> {
   const status = prepStepStatus(report.items);
   const reason = prepSummaryPart(report.items);
   const detail = report.items.map(formatPrepLine);
+  return status === "FAIL" ? fail(reason, detail) : status === "PASS" ? pass(reason, detail) : skip(reason, detail);
+}
+
+// ─────────────────────────── R · vận hành hộp thư (`--apply --e2e-ops`) ───────────────────────────
+
+/**
+ * Bước R: chỉ sau `needOwned`, hỏi lại sổ khai, rồi giao cho `runAcceptanceE2eOps` — nó tự kiểm lại ba lá chắn trước mọi lượt ghi.
+ * Chi phí AI của lượt chat công khai (C18) đọc từ sổ AI theo hội thoại và CỘNG vào chi phí của lượt (cùng chỗ với D).
+ */
+async function stepOps(ctx: Ctx): Promise<Outcome> {
+  const { entry, deps } = ctx;
+  if (!ctx.owned || acceptanceWorkspaceOf(entry.code)?.code !== entry.code) return skip("workspace không phải workspace nghiệm thu của ops này — không chạy vận hành");
+  const report = await runAcceptanceE2eOps(entry.code, { runId: deps.runId, now: deps.now(), baseDomain: ctx.baseDomain, transport: publicChatOverServerActions(deps) });
+  if ("refused" in report) return skip(`vận hành hộp thư bị từ chối: ${report.refused}`);
+  ctx.opsResults = report.items;
+  const detail = report.items.map(formatOpsLine);
+  if (report.publicConversationId) {
+    const cost = await aiCostOf(entry.code, report.publicConversationId);
+    if (cost.usd !== null) ctx.aiCostUsd = (ctx.aiCostUsd ?? 0) + cost.usd;
+    detail.push(`chi phí AI lượt chat công khai: ${cost.usd === null ? "CHƯA ĐỊNH GIÁ" : `${formatAcceptanceUsd(cost.usd)} USD`} · ${cost.calls} lượt gọi${cost.unpriced ? ` · ${cost.unpriced} dòng chưa định giá` : ""}`);
+  }
+  const status = opsStepStatus(report.items);
+  const reason = opsSummaryPart(report.items);
   return status === "FAIL" ? fail(reason, detail) : status === "PASS" ? pass(reason, detail) : skip(reason, detail);
 }
 

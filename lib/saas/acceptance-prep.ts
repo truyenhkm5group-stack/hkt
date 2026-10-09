@@ -123,7 +123,7 @@ export async function runAcceptancePrep(code: string, opts: { runId: string }): 
  * Người dùng phiên của tài khoản CHỦ workspace thử — đường nhanh của `resolveCurrentUser` (phạm vi ALL, không vai trò tuỳ chỉnh): vai trò
  * + quyền gõ tay + mẫu quyền của tổ chức + ảnh chụp quyền, tổ chức + module bật. Gọi TRONG `withOrganization`.
  */
-async function ownerSessionUser(entry: AcceptanceWorkspace): Promise<{ user: SessionUser } | { error: string }> {
+export async function ownerSessionUser(entry: AcceptanceWorkspace): Promise<{ user: SessionUser } | { error: string }> {
   // Tài khoản chủ: tra qua chỉ mục danh tính (như bước C ký phiên), rồi đọc ĐÚNG dòng users của workspace thử.
   const userId = (await findIdentity("EMAIL", entry.ownerEmail)).find((h) => h.orgCode === entry.code)?.userId ?? null;
   if (!userId) return { error: "không có chỉ mục danh tính của tài khoản chủ workspace thử — chạy --apply (bước A / B1) trước" };

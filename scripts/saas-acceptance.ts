@@ -17,6 +17,9 @@
                          nhập · bật bot · xuất bản tên miền con — qua ĐÚNG lõi của nút UI, đứng tên tài khoản CHỦ của workspace thử
                          (quyết định chủ shop 09/10/2026). Idempotent: có rồi ⇒ «CÓ SẴN». Không AI. Đi cùng --e2e được:
                          `--apply --prep --e2e` = A → B → P → C → D → E → xoay mật khẩu.
+   · `--apply --e2e-ops` GHI + TỐN MỘT LƯỢT AI: thêm R (sau D, trước E) — hạng mục vận hành hộp thư của Launch Gate Khách (C9 nhân viên
+                         trả lời · C11 tiếp quản / trả lại AI · C14 dữ liệu mơ hồ cần người · C15 xác nhận đơn tay · C17 không trùng đơn ·
+                         C18 đồng hồ khách AI qua MỘT POST thật tới server action của /chat), đứng tên tài khoản CHỦ của workspace thử.
    · `--org=<mã>`        chỉ khi sổ khai có nhiều mục.
 
   Mỗi bước in `PASS|FAIL|SKIP <bước> — <lý do> (<ms>)` (phần MÃ HOÁ). Cuối lượt in ĐÚNG MỘT dòng công khai
@@ -41,14 +44,14 @@ const tomTat = (s: string) => console.log(`[ops:tom-tat] ${s}`);
 export async function runAcceptanceCli(args: readonly string[], deps: Partial<AcceptanceDeps> = {}, opts: { readOnlyGuard?: () => Promise<boolean> } = {}): Promise<number> {
   const a = parseAcceptanceArgs(args);
   if (!a.ok) {
-    tomTat(`saas-acceptance: FAIL 0/0 · cách dùng sai: ${a.error} — arg: (rỗng) | --apply | --apply --e2e | --apply --drills | --apply --prep [--org=<mã>]`);
+    tomTat(`saas-acceptance: FAIL 0/0 · cách dùng sai: ${a.error} — arg: (rỗng) | --apply | --apply --e2e | --apply --drills | --apply --prep | --apply --e2e-ops [--org=<mã>]`);
     return 64;
   }
   if (a.mode === "READ" && !(await (opts.readOnlyGuard ?? platformReadOnlyConfirmed)())) {
     tomTat("saas-acceptance: FAIL 0/0 · DỪNG: kết nối CSDL KHÔNG ở chế độ chỉ đọc — lượt CHỈ ĐỌC không đọc gì");
     return 70;
   }
-  const report = await runAcceptance({ orgCode: a.orgCode, mode: a.mode, drills: a.drills, prep: a.prep }, { ...defaultAcceptanceDeps({ emit: (line) => console.log(line) }), ...deps });
+  const report = await runAcceptance({ orgCode: a.orgCode, mode: a.mode, drills: a.drills, prep: a.prep, e2eOps: a.e2eOps }, { ...defaultAcceptanceDeps({ emit: (line) => console.log(line) }), ...deps });
   tomTat(report.summary);
   if (report.refused) return 64;
   return report.verdict === "PASS" ? 0 : 1;
