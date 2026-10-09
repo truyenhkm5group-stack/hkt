@@ -1,0 +1,8 @@
+{
+  "pr": 738,
+  "sha": "df8b9c355e56d8de25b225930eae5cb3dc1fb20e",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-09T11:14:14.636Z",
+  "note": "Review Integration Lead: chỉ thêm việc giữ ấm vào dashboard-warm (cùng tiến trình erp-app qua /api/sync, khoá tổ chức nhà); không đổi TTL, không đổi ADAPTER_TIMEOUT_MS, không đổi logic; bài kiểm so TẬP KHOÁ đọc thật (không gõ tay) + 0 khoá mới sau warm + đầu ra giống hệt nguội/ấm. Theo sau: clearMemo sau audit vẫn làm nguội một lượt."
+}
