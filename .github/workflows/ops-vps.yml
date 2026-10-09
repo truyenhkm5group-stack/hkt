@@ -47,6 +47,7 @@ on:
           - org-catalog          # danh mục (sản phẩm · mẫu mã · giá lẻ · gram) · bảng giá sỉ + bậc · câu mẫu đang bật · công tắc bot (giá sỉ · bán không kiểm tồn) · hồ sơ shop của MỘT tổ chức khách — MÃ HOÁ (CHỈ ĐỌC; arg: mã tổ chức, rỗng = liệt kê tổ chức)
           - saas-v1-migration    # chuyển tổ chức từ giá cũ (legacy) sang bảng giá V1: mỗi tổ chức đủ điều kiện — số dùng · gói đề xuất · giá cũ → mới · phần vượt dự kiến · trần AI trước / sau · mọi CHẶN — MÃ HOÁ (MẶC ĐỊNH CHỈ ĐỌC; arg: rỗng | "--org=<mã>"; "--apply --org=<mã> --plan=<khoá> --reason=<lý do>" ghim MỘT tổ chức, không bật thu phí / không hoá đơn)
           - identity-reconcile   # chỉ mục đăng nhập email / SĐT ⇒ tổ chức của tài khoản tạo trước bản vá P0 08/10/2026 (quản trị khách do job cấp phát tạo không đăng nhập được bằng email): MẶC ĐỊNH CHẠY THỬ (arg rỗng = mọi tổ chức; "<mã>" = một tổ chức) — đủ điều kiện · đúng · THIẾU · LỆCH · mồ côi; "--apply" ⇒ GHI bù qua đúng đường ghi của ứng dụng, idempotent, nhật ký nền tảng SCRIPT — MÃ HOÁ
+          - ban-hang-reply-upgrade # vai trò «Nhân viên bán hàng» (mã BAN_HANG) của tổ chức đã cài mẫu AI bán hàng nhận quyền trả lời khách ai_sales:reply (chủ shop duyệt 09/10/2026): MẶC ĐỊNH CHẠY THỬ (arg rỗng = mọi tổ chức; "<mã>" = một tổ chức) — đếm sẽ nâng · đã có · bỏ qua + lý do; "--apply" ⇒ GHI qua bộ cài mẫu (so ba chiều, saveAccessRoleCore), idempotent; công khai CHỈ số đếm
           - saas-acceptance      # NGHIỆM THU khách Chốt Đơn trên production, CHỈ workspace THỬ trong sổ khai lib/constants/saas-acceptance.ts — MÃ HOÁ, công khai đúng một dòng [ops:tom-tat] (MẶC ĐỊNH CHỈ ĐỌC: kiểm workspace thử · mở vỏ app · chat công khai; "--apply" GHI: cấp phát qua job «Tạo khách» + kích hoạt + đăng nhập email không mã tổ chức, cuối lượt xoay mật khẩu; "--apply --e2e" thêm chat web → AI → đơn, TỐN AI)
           - ops-signals-check    # tám tín hiệu vận hành O1–O8 (LAUNCH_GATE §4) tính trên production bằng ĐÚNG hàm của khung «Sự cố 24 giờ / 7 ngày» (/platform/org) cho MỌI tổ chức — MÃ HOÁ; công khai chỉ số tổ chức theo mức + mã lý do của workspace nghiệm thu (CHỈ ĐỌC; không arg)
           - inbox-perf-probe     # Hộp thư khách mở / chuyển hội thoại mất bao lâu trên workspace khách: bấm giờ ĐÚNG chuỗi hàm máy chủ của /ai/sales-chatbot/inbox (tải: listInbox… · chuyển: loadInboxThread…), nguội / ấm, p50 · p95 · max + SQL — MÃ HOÁ; công khai che tổ chức thành org#i, không đích (CHỈ ĐỌC; arg: "[--org=<mã>] [--samples=1..20]")
@@ -148,7 +149,7 @@ permissions:
 # Thao tác trong danh sách mà cần cho người vận hành thấy NGAY một con số ("đã đóng 12 case") thì
 # script tự in dòng ấy với tiền tố `[ops:tom-tat] ` — kênh tóm tắt duy nhất ra log (qua che_log).
 env:
-  OPS_THAO_TAC_MA_HOA: "platform-secrets-verify db-query vtp-debug phone-probe vtp-probe vtp-statement-peek payroll-reconcile seed-employees marketing-explain cs-stale check-integrations run-job vtp-replay-explain vtp-manual-verify returns-hmt care-false-reopen care-outcome-before-open fanpage-evidence-backfill cod-statement-audit stock-wait-summary org-summary org-order-audit org-ai-cutover org-catalog org-offboard identity-reconcile confirm-funnel-audit company-os-summary velocity-compare org-prepaid-ai saas-v1-migration saas-acceptance ops-signals-check inbox-perf-probe pitr-status pitr-basebackup pitr-mark pitr-drill pitr-pause"
+  OPS_THAO_TAC_MA_HOA: "platform-secrets-verify db-query vtp-debug phone-probe vtp-probe vtp-statement-peek payroll-reconcile seed-employees marketing-explain cs-stale check-integrations run-job vtp-replay-explain vtp-manual-verify returns-hmt care-false-reopen care-outcome-before-open fanpage-evidence-backfill cod-statement-audit stock-wait-summary org-summary org-order-audit org-ai-cutover org-catalog org-offboard identity-reconcile confirm-funnel-audit company-os-summary velocity-compare org-prepaid-ai saas-v1-migration ban-hang-reply-upgrade saas-acceptance ops-signals-check inbox-perf-probe pitr-status pitr-basebackup pitr-mark pitr-drill pitr-pause"
 
 # ═══════════ HÀNG ĐỢI NẰM TRÊN MÁY CHỦ, KHÔNG NẰM Ở GITHUB ═══════════
 #
@@ -500,7 +501,7 @@ jobs:
             # ─── PHÂN LOẠI: mặc định là GHI, và cờ ghi đè lên tên ───
             DOC_NHE="status perf disk logs chatbot-status db-query backup-status pitr-status"
             DOC_PROBE="check-integrations vtp-debug vtp-probe vtp-web-probe phone-probe pages-debug meta-id-probe meta-ad-post-probe vtp-capability ads-level-probe"
-            DOC_NANG="platform-secrets-verify verify smoke session-verify perf-probe perf-audit kpi-snapshot explain-stock outcome-explain outcome-parity returns-parity reason-coverage reason-backfill cogs-drift profit-verify marketing-calibrate marketing-explain payroll-reconcile fanpage-evidence-backfill care-false-reopen care-outcome-before-open care-waiting-reconcile cs-rule-update cs-stale sepay-reconcile cod-rebuild cod-status-repair vtp-return-status-repair agent-run-reattach vtp-rebuild-state vtp-replay-files vtp-replay-explain vtp-manual-verify vtp-statement-peek cod-statement-audit stock-wait-summary org-summary company-os-summary velocity-compare confirm-funnel-audit returns-hmt ai-check platform-ai-model-probe platform-ai-bench backup restore-drill restore-drill-org pitr-basebackup pitr-drill org-order-audit org-ai-cutover org-catalog org-offboard org-prepaid-ai saas-v1-migration identity-reconcile saas-acceptance ops-signals-check inbox-perf-probe"
+            DOC_NANG="platform-secrets-verify verify smoke session-verify perf-probe perf-audit kpi-snapshot explain-stock outcome-explain outcome-parity returns-parity reason-coverage reason-backfill cogs-drift profit-verify marketing-calibrate marketing-explain payroll-reconcile fanpage-evidence-backfill care-false-reopen care-outcome-before-open care-waiting-reconcile cs-rule-update cs-stale sepay-reconcile cod-rebuild cod-status-repair vtp-return-status-repair agent-run-reattach vtp-rebuild-state vtp-replay-files vtp-replay-explain vtp-manual-verify vtp-statement-peek cod-statement-audit stock-wait-summary org-summary company-os-summary velocity-compare confirm-funnel-audit returns-hmt ai-check platform-ai-model-probe platform-ai-bench backup restore-drill restore-drill-org pitr-basebackup pitr-drill org-order-audit org-ai-cutover org-catalog org-offboard org-prepaid-ai saas-v1-migration identity-reconcile ban-hang-reply-upgrade saas-acceptance ops-signals-check inbox-perf-probe"
 
             LOP=GHI
             case "$ARG" in
@@ -949,6 +950,15 @@ jobs:
                 fetch_script identity-reconcile.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/identity-reconcile.ts'
                 kiem_arg
                 ma_hoa_ket_qua chay_voi_arg docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/identity-reconcile.ts ;;
+              ban-hang-reply-upgrade)
+                # MẶC ĐỊNH CHẠY THỬ (không ghi gì — chỉ đọc vai trò + lập kế hoạch của bộ cài mẫu): arg rỗng = mọi tổ chức, "<mã>" = một tổ
+                # chức — vai trò mã BAN_HANG nền VIEWER thiếu ai_sales:reply ⇒ «sẽ nâng»; đã có · không có vai trò · nền khác (mơ hồ) ·
+                # tổ chức đã tự sửa vai trò · vai trò không do mẫu cài ⇒ bỏ qua kèm lý do. "--apply" (⇒ lớp GHI) nâng qua bộ cài mẫu
+                # (lib/blueprints/ban-hang-reply.ts → applyBlueprint → saveAccessRoleCore: nhật ký như màn Vai trò tuỳ chỉnh, sổ cài
+                # ghi băm mới), chạy lại ⇒ 0 tổ chức được nâng. Chủ shop duyệt 09/10/2026. MÃ HOÁ cả lượt như identity-reconcile; [ops:tom-tat] CHỈ số đếm.
+                fetch_script ban-hang-reply-upgrade.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/ban-hang-reply-upgrade.ts'
+                kiem_arg
+                ma_hoa_ket_qua chay_voi_arg docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/ban-hang-reply-upgrade.ts ;;
               saas-acceptance)
                 # NGHIỆM THU KHÁCH CHỐT ĐƠN (docs/saas/ACCEPTANCE.md · lõi lib/saas/acceptance.ts), CHỈ workspace THỬ trong sổ khai
                 # lib/constants/saas-acceptance.ts — mã ngoài sổ ⇒ từ chối trước mọi lượt đọc (mã 64). MẶC ĐỊNH CHỈ ĐỌC (script tự đặt
