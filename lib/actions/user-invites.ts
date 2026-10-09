@@ -4,7 +4,10 @@ import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { clientIpFrom } from "@/lib/auth/client-ip";
-import { createSession, requireUser } from "@/lib/auth/session";
+import { createSession, requireUser, type SessionUser } from "@/lib/auth/session";
+import { salesStaffRoleOf, SHELL_ROLE_REJECTED, shellRoleChoiceOk } from "@/lib/constants/roles";
+import { isSalesAgentUser } from "@/lib/constants/saas-nav";
+import { listAccessRoles } from "@/lib/queries/access";
 import { landingAfterSignIn } from "@/lib/saas/shell-landing";
 import { acceptUserInviteCore, createUserInviteCore, revokeUserInviteCore } from "@/lib/users/invites";
 
@@ -17,8 +20,24 @@ import { acceptUserInviteCore, createUserInviteCore, revokeUserInviteCore } from
  * lõi tự bọc ngữ cảnh tổ chức TƯỜNG MINH theo mã trong đường dẫn.
  */
 
+/**
+ * VỎ CHỐT ĐƠN: chỉ nhận ba lựa chọn Chủ cửa hàng · Nhân viên bán hàng (mã `BAN_HANG`) · Chỉ xem (`lib/constants/roles.ts`).
+ * Chỉ GIỚI HẠN LỰA CHỌN — không đổi quyền nào, cổng `can()` của từng action giữ nguyên. ERP / nhà ⇒ `null`, không đọc gì thêm.
+ */
+async function shellRoleError(user: SessionUser, choice: { role?: unknown; accessRoleCode?: unknown }): Promise<string | null> {
+  if (!isSalesAgentUser(user)) return null;
+  const sales = salesStaffRoleOf(await listAccessRoles());
+  return shellRoleChoiceOk(choice, Boolean(sales)) ? null : SHELL_ROLE_REJECTED;
+}
+
+function pick(input: unknown, key: string): unknown {
+  return input && typeof input === "object" ? (input as Record<string, unknown>)[key] : undefined;
+}
+
 export async function createUserInviteAction(input: unknown): Promise<{ ok: true; id: string; link: string; expiresAt: string; email: string } | { error: string }> {
   const user = await requireUser();
+  const shellError = await shellRoleError(user, { role: pick(input, "role"), accessRoleCode: pick(input, "accessRoleCode") });
+  if (shellError) return { error: shellError };
   const r = await createUserInviteCore(user, input);
   if ("error" in r) return r;
   revalidatePath("/settings/users");

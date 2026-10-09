@@ -5,7 +5,7 @@ import { KeyRound, Link2, Loader2, Lock, LockOpen, LogOut, MoreHorizontal, Penci
 import { toast } from "sonner";
 import { PermissionsDialog } from "@/app/(dashboard)/settings/users/permissions-dialog";
 import { RevokeSessionsDialog } from "@/app/(dashboard)/settings/users/revoke-sessions-dialog";
-import { EditUserDialog, ResetPasswordDialog } from "@/app/(dashboard)/settings/users/user-dialog";
+import { EditUserDialog, ResetPasswordDialog, type ShellRolePicker } from "@/app/(dashboard)/settings/users/user-dialog";
 import { ResetLinkDialog } from "@/app/(dashboard)/settings/users/reset-link-dialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -14,16 +14,39 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSepara
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { setUserActive } from "@/lib/actions/users";
 import { PERMISSION_LABEL, type RolePermissionMap } from "@/lib/auth/permissions";
-import { ROLE_LABEL, ROLE_TONE } from "@/lib/constants/roles";
+import { ROLE_LABEL, ROLE_TONE, SHELL_ROLE_LABEL, shellRoleKeyOf } from "@/lib/constants/roles";
 import { formatDateTime, formatTimeAgo, initials } from "@/lib/format";
 import type { UserRow } from "@/lib/queries/users";
 import { DepartmentCell, type UserDept } from "@/app/(dashboard)/settings/users/department-cell";
 import { AccessCell, type AccessOption, type UserAccessView } from "@/app/(dashboard)/settings/users/access-cell";
 import { cn } from "@/lib/utils";
 
+/** Nhãn vai trò: ERP ⇒ nhãn hệ thống như cũ; vỏ ⇒ nhãn ba lựa chọn (Nhân viên bán hàng nhận ra bằng vai trò mã `BAN_HANG`). */
+function shellLabel(u: UserRow, accessRoleId: string | null | undefined, shellRoles: ShellRolePicker | undefined): string {
+  if (!shellRoles) return ROLE_LABEL[u.role];
+  const key = shellRoleKeyOf(u, accessRoleId, shellRoles.salesRoleId);
+  return key ? SHELL_ROLE_LABEL[key] : ROLE_LABEL[u.role];
+}
+
 const badge = "inline-flex items-center gap-1.5 whitespace-nowrap rounded-md px-2 py-0.5 text-[11.5px] font-semibold leading-5";
 
-function UserRowActions({ user, isSelf, isLastAdmin, templates, appName }: { user: UserRow; isSelf: boolean; isLastAdmin: boolean; templates: RolePermissionMap; appName?: string }) {
+function UserRowActions({
+  user,
+  isSelf,
+  isLastAdmin,
+  templates,
+  appName,
+  shellRoles,
+  access,
+}: {
+  user: UserRow;
+  isSelf: boolean;
+  isLastAdmin: boolean;
+  templates: RolePermissionMap;
+  appName?: string;
+  shellRoles?: ShellRolePicker;
+  access?: UserAccessView;
+}) {
   const [editOpen, setEditOpen] = useState(false);
   const [permOpen, setPermOpen] = useState(false);
   const [resetOpen, setResetOpen] = useState(false);
@@ -81,7 +104,7 @@ function UserRowActions({ user, isSelf, isLastAdmin, templates, appName }: { use
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
-      <EditUserDialog user={user} open={editOpen} onOpenChange={setEditOpen} isSelf={isSelf} />
+      <EditUserDialog user={user} open={editOpen} onOpenChange={setEditOpen} isSelf={isSelf} shell={shellRoles} access={shellRoles && access ? { accessRoleId: access.accessRoleId, positionId: access.positionId, scope: access.scope } : undefined} />
       <PermissionsDialog user={user} templates={templates} open={permOpen} onOpenChange={setPermOpen} />
       <ResetPasswordDialog user={user} open={resetOpen} onOpenChange={setResetOpen} />
       <ResetLinkDialog user={user} open={linkOpen} onOpenChange={setLinkOpen} />
@@ -134,6 +157,7 @@ export function UsersTable({
   positionOptions,
   compact = false,
   appName,
+  shellRoles,
 }: {
   users: UserRow[];
   currentUserId: string;
@@ -151,6 +175,8 @@ export function UsersTable({
   compact?: boolean;
   /** Tên phần mềm trong câu chữ của hộp thoại (mặc định «ERP»). */
   appName?: string;
+  /** Vỏ Chốt Đơn: nhãn vai trò theo ba lựa chọn của vỏ + hộp thoại sửa ba lựa chọn (ERP không truyền). */
+  shellRoles?: ShellRolePicker;
 }) {
   const headers = compact ? ["Nhân viên", "Email", "Vai trò", "Trạng thái", "Đăng nhập gần nhất", "Tạo lúc", ""] : ["Người dùng", "Email", "Vai trò", "Phòng ban", "Quyền & phạm vi", "Trạng thái", "Đăng nhập gần nhất", "Tạo lúc", ""];
   return (
@@ -192,7 +218,7 @@ export function UsersTable({
                 </TableCell>
                 <TableCell className="text-sm">{u.email}</TableCell>
                 <TableCell>
-                  <span className={cn(badge, ROLE_TONE[u.role])}>{ROLE_LABEL[u.role]}</span>
+                  <span className={cn(badge, ROLE_TONE[u.role])}>{shellLabel(u, accessByUser[u.id]?.accessRoleId, shellRoles)}</span>
                   {Array.isArray(u.permissions) ? (
                     <div className="mt-1 max-w-[260px] truncate text-[10.5px] text-muted-foreground" title={u.permissions.map((p) => PERMISSION_LABEL[p] ?? p).join(", ")}>
                       Tuỳ chỉnh · {u.permissions.length} quyền
@@ -254,7 +280,7 @@ export function UsersTable({
                 </TableCell>
                 <TableCell className="text-xs text-muted-foreground">{formatDateTime(u.createdAt)}</TableCell>
                 <TableCell className="text-right">
-                  <UserRowActions user={u} isSelf={isSelf} isLastAdmin={isLastAdmin} templates={templates} appName={appName} />
+                  <UserRowActions user={u} isSelf={isSelf} isLastAdmin={isLastAdmin} templates={templates} appName={appName} shellRoles={shellRoles} access={accessByUser[u.id]} />
                 </TableCell>
               </TableRow>
             );

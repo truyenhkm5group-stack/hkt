@@ -15,8 +15,10 @@ import { departmentCodesOfMany, effectiveAccess, toCustomRole } from "@/lib/auth
 import { saveAccessRoleCore } from "@/lib/auth/access-roles";
 import { can, loadPermissionSnapshots, loadRoleTemplates, requireUser } from "@/lib/auth/session";
 import { normalizeScope } from "@/lib/constants/access-scope";
+import { salesStaffRoleOf, SHELL_ROLE_REJECTED } from "@/lib/constants/roles";
+import { isSalesAgentUser } from "@/lib/constants/saas-nav";
 import { ORG_DEPENDENT_PATHS } from "@/lib/constants/org-surfaces";
-import { effectivePreview } from "@/lib/queries/access";
+import { effectivePreview, listAccessRoles } from "@/lib/queries/access";
 import { savePositionSchema, setUserAccessSchema } from "@/lib/validation/access";
 
 export type AccessResult = { ok: true; id?: string } | { error: string };
@@ -146,6 +148,12 @@ export async function setUserAccess(input: unknown): Promise<AccessResult> {
   const parsed = setUserAccessSchema.safeParse(input);
   if (!parsed.success) return { error: firstIssue(parsed.error) };
   const data = parsed.data;
+  // Vỏ Chốt Đơn: vai trò tuỳ chỉnh DUY NHẤT gán được là «Nhân viên bán hàng» (mã `BAN_HANG`, đang bật) — hoặc bỏ trống.
+  // Chỉ giới hạn lựa chọn (lib/constants/roles.ts); quyền của vai trò không đổi. ERP / nhà không đi qua nhánh này.
+  if (isSalesAgentUser(user) && data.accessRoleId) {
+    const sales = salesStaffRoleOf(await listAccessRoles());
+    if (!sales || sales.id !== data.accessRoleId) return { error: SHELL_ROLE_REJECTED };
+  }
   const db = await getDb();
 
   const target = await db.query.users.findFirst({

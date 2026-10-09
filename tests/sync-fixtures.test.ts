@@ -612,6 +612,7 @@ import { testGSched } from "./g-sched.test";
 import { testSaasVnxRuntime } from "./saas-vnx-runtime.test";
 import { testSaasPageGate } from "./saas-page-gate.test";
 import { testSaasShell } from "./saas-shell.test";
+import { testShellStaffRolesPure, testShellStaffRolesServer } from "./shell-staff-roles.test";
 import { testShellLoginLanding } from "./shell-login-landing.test";
 import { testShellGateRedirects } from "./shell-gate-redirects.test";
 import { testErrorBoundary } from "./error-boundary.test";
@@ -3030,6 +3031,10 @@ async function main() {
   // Vỏ app Chốt Đơn Tự Động: workspace Sales Agent thấy đúng 8 mục, route ERP nội bộ chặn ở máy chủ (`/` ⇒ hộp thư), ERP / nhà
   // không đổi; hợp đồng mobile (tổ chức `sa-shell` tự cấp và tự dọn).
   await testSaasShell();
+  // Vỏ Chốt Đơn: vai trò chỉ ba lựa chọn (Chủ cửa hàng · Nhân viên bán hàng = mã BAN_HANG · Chỉ xem), máy chủ từ chối lựa chọn
+  // ngoài bộ; ERP / nhà không đổi; không quyền / mẫu nào sửa (tổ chức `ssr-shell` tự cấp và tự dọn).
+  testShellStaffRolesPure();
+  await testShellStaffRolesServer();
   // F-01: đăng nhập / đăng ký trong vỏ Chốt Đơn tính đích cuối ngay trong action — không `redirect("/")` mà layout chuyển
   // hướng (vòng lặp trang trắng); nhà / workspace ERP đúng safeNextPath (tổ chức `dich-dang-nhap` tự cấp và tự dọn).
   await testShellLoginLanding();
