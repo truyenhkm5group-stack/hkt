@@ -628,6 +628,7 @@ import { testErpDetailTail } from "./erp-detail-tail.test";
 import { testErpFormNames } from "./erp-form-names.test";
 import { testDetailPagesShell } from "./detail-pages-shell.test";
 import { testShellCopyR3 } from "./shell-copy-r3.test";
+import { testAiSalesSettingsV2 } from "./ai-sales-settings-v2.test";
 
 async function main() {
   await ensureMigrated();
@@ -3080,6 +3081,9 @@ async function main() {
   // Vỏ Chốt Đơn C1 #6 · #7: /login sau redirect() của server action mang thương hiệu của host; chữ kỹ thuật (webhook · token ·
   // ERP · API · TEST · field · connector · module · Viettel) không lộ ở nhánh người vỏ thấy — quét cây cú pháp, miễn trừ có lý do.
   testShellCopyR3();
+  // AI Sales settings V2 (bề mặt 3 của VISIBLE_PRODUCT_FINISH_BOARD): ô trạng thái đầu trang — thiếu dữ kiện ⇒ «Chưa rõ», không «Đang chạy» —
+  // một nút chính qua cổng vỏ; nhánh khách không nhận / không in khoá AI · model · tên hãng · chi phí USD. Thuần + quét mã nguồn.
+  testAiSalesSettingsV2();
   // Nền tảng · phiên & RBAC (agent C): claim org, cổng module, platform:operate, đăng nhập theo tổ chức. Tự cấp
   // tổ chức `pr-` (CSDL riêng) và tự dọn; đứng cạnh bài ngữ cảnh vì cùng lý do.
   await testPlatformRbac();
