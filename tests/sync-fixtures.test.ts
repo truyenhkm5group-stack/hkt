@@ -522,6 +522,7 @@ import { testSalesPacks } from "./sales-packs.test";
 import { testSalesAgentGolden } from "./sales-agent-golden/golden.test";
 import { testOrderGolden } from "./order-golden/order-golden.test";
 import { testOrderReview } from "./order-review.test";
+import { testInboxOrderPanel } from "./inbox-v2-b.test";
 import { testGoLive } from "./go-live.test";
 import { testSalesVision } from "./sales-vision.test";
 import { testChatWidget } from "./chat-widget.test";
@@ -2900,6 +2901,9 @@ async function main() {
   // Đơn cần người kiểm (chủ shop 08/10/2026): khách huỷ ⇒ ghi chú + cờ, xã chưa ghép ⇒ cờ, nút nhanh Xác nhận / Huỷ, lời xác nhận,
   // SĐT chuẩn hoá — tổ chức THẬT `or-rv` (không Pancake; tự cấp, tự dọn).
   await testOrderReview();
+  // Hộp thư V2-B: «Đơn đang chốt» đầu cột phải — đọc đơn bot ghi (một câu SQL), kiểm từng ô bằng validator của lõi, nút xác nhận
+  // = `confirmOrderReviewCore` — tổ chức THẬT `or-ib` (tự cấp, tự dọn).
+  await testInboxOrderPanel();
   await testGoLive();
   await testSalesVision();
   testChatWidget();
