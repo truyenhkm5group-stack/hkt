@@ -1,8 +1,8 @@
 {
   "pr": 748,
-  "sha": "2d9638b8767527f2d6a6399f6a94d4eaa81ddc07",
+  "sha": "ad48fb15a8475461ebc5300419ead0f2f6cee349",
   "verdict": "PASS",
   "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
-  "at": "2026-10-09T19:27:23.583Z",
+  "at": "2026-10-09T19:43:51.686Z",
   "note": "Rebase lên main sau #749 (bom ngày); nội dung Inbox V2-A không đổi logic so với lượt PASS 0505946e (cộng commit đánh bóng giao diện nếu có)."
 }
