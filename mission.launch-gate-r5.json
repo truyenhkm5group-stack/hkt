@@ -3,7 +3,7 @@
   "mission_id": "launch-gate-r5",
   "title": "Launch Gate r5: E2E chat → AI → đơn PASS 7/7 trên production; O6 ✅",
   "business_goal": "",
-  "status": "RUNNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -20,7 +20,18 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-09T13:21:36.746Z",
-  "updated_at": "2026-10-09T13:21:36.746Z",
-  "last_heartbeat": "2026-10-09T13:21:36.746Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-09T13:22:18.120Z",
+  "last_heartbeat": "2026-10-09T13:22:18.120Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "docs/launch-gate-r5",
+    "sha": "5e67f2e4e842ed5a3bf5d3a8689365aa98ca8708",
+    "at": "2026-10-09T13:22:18.120Z",
+    "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+    "title": "Launch Gate r5: E2E chat → AI → đơn PASS 7/7 trên production; O6 ✅",
+    "summary": "E2E PASS 7/7 ⇒ 7 mục Khách + O6 lên ✅",
+    "tests": [
+      "chỉ tài liệu; điểm đếm lại bằng script 29/41 · 18 PROD"
+    ]
+  }
 }
