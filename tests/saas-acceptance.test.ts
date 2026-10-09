@@ -37,21 +37,30 @@ import {
   ACCEPTANCE_RESERVED_MESSAGE,
   ACCEPTANCE_SAMPLE_PRODUCTS,
   ACCEPTANCE_SUMMARY_MAX,
+  ACCEPTANCE_UNMEASURABLE_DRILLS,
   ACCEPTANCE_WORKSPACES,
   acceptanceChatTurns,
   acceptanceIdempotencyKey,
   acceptanceOrderNote,
   acceptanceRegistryProblems,
   acceptanceReservedName,
+  acceptanceStepsFor,
   acceptanceSummary,
   acceptanceWorkspaceOf,
+  drillStepStatus,
+  drillSummaryPart,
+  formatDrillLine,
   formatStepLine,
   PAGE_ERROR_DIGEST,
   PAGE_ERROR_MARKER,
   parseAcceptanceArgs,
   scrubSecrets,
+  type DrillResult,
   type StepResult,
 } from "@/lib/constants/saas-acceptance";
+import { OPS_SIGNAL_KEYS } from "@/lib/constants/ops-signals";
+import { loadOrgOpsSignals } from "@/lib/platform/ops-signals";
+import { resetOrgHealthHotPathForTests } from "@/lib/platform/org-health";
 import { ERP_FRAME_HTML_MARKERS, SALES_AGENT_DENIED_PREFIXES, SALES_AGENT_SHELL_HTML_MARKER, salesAgentNavFor, salesAgentPathAllowed, salesAgentRedirectFor, type ShellUser } from "@/lib/constants/saas-nav";
 import { env } from "@/lib/env";
 import { getEnabledModules, invalidateCapabilities } from "@/lib/platform/capabilities";
@@ -208,6 +217,7 @@ async function cleanup() {
   }
   await pdb.delete(schema.platformAuditLog).where(inArray(schema.platformAuditLog.targetOrgCode, codes));
   await pdb.delete(schema.platformAuthFailures).where(inArray(schema.platformAuthFailures.orgCode, codes));
+  await pdb.delete(schema.platformOrgHealth).where(inArray(schema.platformOrgHealth.orgCode, codes));
   await releaseOrganizationDb(CODE);
   rmSync(organizationDatabaseUrl({ code: CODE, isHome: false }).replace(/^pglite:\/\//, ""), { recursive: true, force: true });
   invalidateOrganizations();
@@ -240,10 +250,23 @@ function testPure() {
   assert.ok(orgStepZ.safeParse({ name: "CDT Nghiem Thu Hai", code: `${CODE}-2` }).success, "chỉ đúng tên giữ chỗ bị chặn, không chặn theo tiền tố");
 
   // Ô arg: chế độ + cờ lạ / lặp / sai cặp.
-  assert.deepEqual(parseAcceptanceArgs([]), { ok: true, mode: "READ", orgCode: null });
-  assert.deepEqual(parseAcceptanceArgs(["--apply"]), { ok: true, mode: "APPLY", orgCode: null });
-  assert.deepEqual(parseAcceptanceArgs(["--apply", "--e2e", `--org=${CODE}`]), { ok: true, mode: "E2E", orgCode: CODE });
-  for (const bad of [["--e2e"], ["--aply"], ["--apply", "--apply"], ["--org=-x"], [CODE], ["--extend-trial"]]) assert.equal(parseAcceptanceArgs(bad).ok, false, JSON.stringify(bad));
+  assert.deepEqual(parseAcceptanceArgs([]), { ok: true, mode: "READ", orgCode: null, drills: false });
+  assert.deepEqual(parseAcceptanceArgs(["--apply"]), { ok: true, mode: "APPLY", orgCode: null, drills: false });
+  assert.deepEqual(parseAcceptanceArgs(["--apply", "--e2e", `--org=${CODE}`]), { ok: true, mode: "E2E", orgCode: CODE, drills: false });
+  assert.deepEqual(parseAcceptanceArgs(["--apply", "--drills"]), { ok: true, mode: "APPLY", orgCode: null, drills: true }, "diễn tập chỉ khi gõ --drills");
+  for (const bad of [["--e2e"], ["--aply"], ["--apply", "--apply"], ["--org=-x"], [CODE], ["--extend-trial"], ["--drills"], ["--apply", "--drills", "--drills"]]) assert.equal(parseAcceptanceArgs(bad).ok, false, JSON.stringify(bad));
+  // Bước F chỉ có trong lượt --drills, chen TRƯỚC B2; lượt thường giữ nguyên sáu bước.
+  assert.deepEqual([...acceptanceStepsFor(false)], ["A", "B1", "C", "D", "E", "B2"]);
+  assert.deepEqual([...acceptanceStepsFor(true)], ["A", "B1", "C", "D", "E", "F", "B2"]);
+  // Diễn tập: dòng công khai chỉ số hiệu tín hiệu theo trạng thái; mọi tín hiệu không diễn tập được có lý do; phán quyết bước F.
+  const drs: DrillResult[] = OPS_SIGNAL_KEYS.map((key) => (key === "LOGIN" ? { key, status: "DRILLED", code: "LOGIN/BAD_PASSWORD", why: "B1" } : key === "ORDER_VALIDATION" ? { key, status: "DRILLED", code: "MISSING_CONTACT · audit bi-mat-id", why: "executeTool" } : { key, status: "UNMEASURABLE", code: null, why: ACCEPTANCE_UNMEASURABLE_DRILLS[key] ?? "" }));
+  assert.equal(drillSummaryPart(drs), "diễn tập: ĐÃ DIỄN TẬP O1,O6 · CHƯA ĐO ĐƯỢC O2,O3,O4,O5,O7,O8");
+  assert.ok(!/BAD_PASSWORD|MISSING_CONTACT|bi-mat-id/.test(drillSummaryPart(drs)), "phần diễn tập công khai không mang mã lý do / id");
+  assert.ok(OPS_SIGNAL_KEYS.filter((k) => k !== "LOGIN" && k !== "ORDER_VALIDATION").every((k) => (ACCEPTANCE_UNMEASURABLE_DRILLS[k] ?? "").length > 30), "mỗi tín hiệu CHƯA ĐO ĐƯỢC khai lý do cụ thể");
+  assert.equal(drillStepStatus(drs), "PASS");
+  assert.equal(drillStepStatus(drs.map((r) => (r.key === "ORDER_VALIDATION" ? { ...r, status: "FAILED" as const } : r))), "FAIL");
+  assert.equal(drillStepStatus(drs.map((r) => (r.status === "DRILLED" ? { ...r, status: "SKIPPED" as const } : r))), "SKIP");
+  assert.match(formatDrillLine(drs[5]), /^O6 ORDER_VALIDATION: ĐÃ DIỄN TẬP \(MISSING_CONTACT/);
 
   // Dòng bước + dòng tóm tắt: n = số bước ĐÃ chạy; bỏ qua nêu riêng; không email / SĐT.
   const rs: StepResult[] = [
@@ -389,6 +412,7 @@ const CORE_IMPORT_ALLOWLIST: Record<string, readonly string[]> = {
   "@/lib/commerce/stock": ["shortfalls"],
   "@/lib/constants/saas-acceptance": [
     "ACCEPTANCE_ACTOR_LABEL", "ACCEPTANCE_NUDGE_TURN", "ACCEPTANCE_ORDER", "ACCEPTANCE_REGISTRY_REFUSAL", "ACCEPTANCE_SAMPLE_PRODUCTS", "ACCEPTANCE_STEPS", "ACCEPTANCE_WORKSPACES",
+    "ACCEPTANCE_DRILL_ID_PREFIX", "ACCEPTANCE_UNMEASURABLE_DRILLS", "acceptanceStepsFor", "drillStepStatus", "drillSummaryPart", "formatDrillLine", "DrillResult",
     "acceptanceChatTurns", "acceptanceIdempotencyKey", "acceptanceSummary", "acceptanceVerdict", "acceptanceWorkspaceOf", "formatAcceptanceUsd", "formatStepLine", "PAGE_ERROR_DIGEST", "PAGE_ERROR_MARKER", "scrubSecrets",
     "AcceptanceMode", "AcceptanceStepKey", "AcceptanceWorkspace", "StepResult", "StepStatus",
   ],
@@ -418,7 +442,11 @@ const CORE_IMPORT_ALLOWLIST: Record<string, readonly string[]> = {
   "@/lib/saas/customers": ["readPlans"],
   "@/lib/saas/provisioning": ["requestProvisioning"],
   "@/lib/sales-chatbot/config": ["withinBusinessHours"],
-  "@/lib/sales-chatbot/engine": ["chatTurn", "conversationView", "EMPTY_REPLY_TEXT", "loadSalesChatbotConfig", "openConversation", "salesChatProvider", "visitorKeyOf"],
+  "@/lib/sales-chatbot/engine": ["chatTurn", "conversationView", "EMPTY_REPLY_TEXT", "loadSalesChatbotConfig", "openConversation", "SALES_AGENT", "salesChatProvider", "visitorKeyOf"],
+  // Diễn tập O6 (bước F, chỉ `--apply --drills`): ĐÚNG bộ chạy công cụ của bot, gọi DUY NHẤT với «Lưu khách» thiếu SĐT — công cụ từ chối
+  // TRƯỚC mọi lượt ghi khách, chỉ còn dòng tín hiệu order.validation_failed (kiểm ở testSource: không công cụ ghi nào khác được gọi).
+  "@/lib/sales-chatbot/tools": ["executeTool"],
+  "@/lib/constants/ops-signals": ["OPS_SIGNAL_KEYS", "ORDER_VALIDATION_FAILED_ACTION"],
   "@/lib/users/password-reset": ["completePasswordResetCore", "createAcceptanceResetLink", "lookupResetToken"],
 };
 
@@ -534,6 +562,14 @@ async function testGuardAndSquatter() {
   const nhatKy = await pdb.select().from(schema.platformAuditLog).where(and(eq(schema.platformAuditLog.targetOrgCode, CODE), eq(schema.platformAuditLog.action, "PASSWORD_RESET_LINK")));
   assert.equal(nhatKy.length, 0, "không một dòng nhật ký phát liên kết nào cho workspace của khách thật");
   assertNoSecrets(squat.out, book, "khách trùng mã");
+  // Diễn tập trên workspace trùng mã: F bỏ qua, không một dòng tín hiệu nào (gương · nhật ký tổ chức) mang mã nghiệm thu.
+  resetOrgHealthHotPathForTests();
+  const squatDrill = await captured(() => runAcceptanceCli(["--apply", "--drills"], deps("nt-squat-drill", book)));
+  assert.equal(squatDrill.value, 1);
+  assert.match(squatDrill.out, /^SKIP F · diễn tập tín hiệu vận hành — workspace mang mã nghiệm thu nhưng KHÔNG do ops nghiệm thu tạo/m);
+  assert.equal((await pdb.select().from(schema.platformOrgHealth).where(eq(schema.platformOrgHealth.orgCode, CODE))).length, 0, "khách trùng mã: gương sức khoẻ không bị diễn tập chạm");
+  const squatAudit = await withOrganization(CODE, async () => (await getDb()).select().from(schema.auditLogs).where(like(schema.auditLogs.correlationId, "nghiem-thu-drill:%")));
+  assert.equal(squatAudit.length, 0, "khách trùng mã: không một dòng nhật ký diễn tập trong CSDL của khách thật");
 }
 
 /** Kịch bản AI giả: tìm → báo giá · lưu khách → lên nháp (kèm ghi chú khách gửi) → tóm tắt · khách đồng ý → chốt. */
@@ -614,6 +650,42 @@ async function testApplyFlow() {
   assert.equal((await pdb.select().from(schema.platformOrganizations).where(eq(schema.platformOrganizations.code, CODE))).length, 1);
   assert.equal((await pdb.select().from(schema.platformIdentities).where(and(eq(schema.platformIdentities.orgCode, CODE), eq(schema.platformIdentities.value, ENTRY.ownerEmail)))).length, 1);
   assert.deepEqual(await matchingLoginOrganizations(ENTRY.ownerEmail, book.issued[3]), [], "mật khẩu của lượt hai cũng đã chết");
+
+  // ── F · diễn tập tín hiệu (`--apply --drills`): O1 (B1) + O6 sáng qua ĐÚNG đường mã; sáu tín hiệu còn lại khai CHƯA ĐO ĐƯỢC ──
+  const homeOrg = await getHomeOrganization();
+  const operator: SessionUser = { id: "nt-op", email: "op@nha.local", name: "Vận hành", role: "ADMIN", permissions: [], scope: "ALL", departmentCodes: [], positionId: null, organization: { code: homeOrg.code, name: homeOrg.name, isHome: true } };
+  const signalOf = async (k: string) => {
+    const r = await loadOrgOpsSignals(operator, CODE, { aiSalesEnabled: true });
+    assert.ok(r.ok, JSON.stringify(r));
+    return r.value.lines.find((l) => l.key === k)!;
+  };
+  const ovBefore = await signalOf("ORDER_VALIDATION");
+  assert.equal(ovBefore.level, "UNKNOWN", `trước diễn tập: chưa có dòng gương ORDER_VALIDATION (${JSON.stringify(ovBefore)})`);
+  const cfgBefore = await withOrganization(CODE, () => getSettingJson(SALES_CHATBOT_SETTING_KEY, null));
+  const customersBefore = (await withOrganization(CODE, async () => (await getDb()).select({ id: schema.customers.id }).from(schema.customers))).length;
+  const aiBefore = (await pdb.select().from(schema.platformAiUsage).where(eq(schema.platformAiUsage.orgCode, CODE))).length;
+  resetOrgHealthHotPathForTests();
+  const drill = await captured(() => runAcceptanceCli(["--apply", "--drills"], deps("nt-drill", book)));
+  assert.equal(drill.value, 0, drill.out);
+  assert.match(drill.out, /^PASS F · diễn tập tín hiệu vận hành — diễn tập: ĐÃ DIỄN TẬP O1,O6 · CHƯA ĐO ĐƯỢC O2,O3,O4,O5,O7,O8/m);
+  assert.match(drill.out, /O1 LOGIN: ĐÃ DIỄN TẬP \(LOGIN\/BAD_PASSWORD\)/);
+  assert.match(drill.out, /O6 ORDER_VALIDATION: ĐÃ DIỄN TẬP \(MISSING_CONTACT · audit \S+\) — executeTool\(create_customer, thiếu SĐT, kênh WEB\) ⇒ order\.validation_failed · gương WARNING/);
+  for (const k of ["FB_CONNECTION", "WEBHOOK", "AI", "SEND", "ORDER_WRITE", "QUOTA"] as const) assert.ok(drill.out.includes(`${k}: CHƯA ĐO ĐƯỢC — ${ACCEPTANCE_UNMEASURABLE_DRILLS[k]}`), `${k}: in CHƯA ĐO ĐƯỢC kèm lý do`);
+  const drillSummary = summaryLine(drill.out);
+  assert.ok(drillSummary.includes("diễn tập: ĐÃ DIỄN TẬP O1,O6 · CHƯA ĐO ĐƯỢC O2,O3,O4,O5,O7,O8") && !/MISSING_CONTACT|BAD_PASSWORD|audit/.test(drillSummary), drillSummary);
+  assertNoSecrets(drill.out, book, "lượt diễn tập");
+  // Mức tín hiệu ĐỔI cho workspace nghiệm thu — đọc qua ĐÚNG hàm của khung /platform/org.
+  const ovAfter = await signalOf("ORDER_VALIDATION");
+  assert.ok(ovAfter.level === "WARNING" && ovAfter.lastReason === "MISSING_CONTACT" && ovAfter.correlationId === "nghiem-thu-drill:nt-drill", `sau diễn tập: O6 CẢNH BÁO đúng lý do + id diễn tập (${JSON.stringify(ovAfter)})`);
+  const loginAfter = await signalOf("LOGIN");
+  assert.equal(loginAfter.level, "WARNING", "O1 vẫn sáng (B1 của lượt diễn tập)");
+  const drillAudit = await withOrganization(CODE, async () => (await getDb()).select().from(schema.auditLogs).where(eq(schema.auditLogs.correlationId, "nghiem-thu-drill:nt-drill")));
+  assert.equal(drillAudit.length, 1, "đúng MỘT dòng order.validation_failed của lượt diễn tập");
+  assert.equal(drillAudit[0].action, "order.validation_failed");
+  // Không đổi gì của workspace: không khách mới (công cụ từ chối trước lượt ghi), cấu hình bot nguyên vẹn, không lượt AI nào.
+  assert.equal((await withOrganization(CODE, async () => (await getDb()).select({ id: schema.customers.id }).from(schema.customers))).length, customersBefore, "diễn tập không tạo khách");
+  assert.deepEqual(await withOrganization(CODE, () => getSettingJson(SALES_CHATBOT_SETTING_KEY, null)), cfgBefore, "diễn tập không đổi cấu hình bot");
+  assert.equal((await pdb.select().from(schema.platformAiUsage).where(eq(schema.platformAiUsage.orgCode, CODE))).length, aiBefore, "diễn tập không gọi AI");
 
   // ── Chạy thử (chỉ đọc) trên workspace có thật: A + C đạt, B bỏ qua ──
   const read = await captured(() => runAcceptanceCli([], deps("nt-read1", book), { readOnlyGuard: async () => true }));

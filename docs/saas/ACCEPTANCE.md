@@ -56,6 +56,7 @@ Actions → «Vận hành ERP trên VPS» → `saas-acceptance`, ô arg:
 | (rỗng) | CHỈ ĐỌC — script đặt `ERP_READ_ONLY=1` và hỏi lại Postgres; A kiểm · C · E | không ghi (các trang được mở như một người dùng mở) |
 | `--apply` | GHI — thêm cấp phát (lần đầu) + B | xem §5 |
 | `--apply --e2e` | GHI + TỐN AI — thêm D | xem §5 |
+| `--apply --drills` | GHI — thêm F diễn tập tín hiệu O1–O8 (KHÔNG chạy mặc định, không tốn AI) | xem §10 |
 | `--org=<mã>` | chỉ khi sổ khai có nhiều mục | — |
 
 Kết quả MÃ HOÁ như mọi ops trả dữ liệu; log công khai chỉ có ĐÚNG MỘT dòng
@@ -119,3 +120,29 @@ mật khẩu SAI lấy lý do qua `onFailure` của `verifyLogin` rồi ghi qua 
 `LOGIN/BAD_PASSWORD` (định danh đã che, không IP — máy). Lượt mật khẩu sai chạy SAU lượt dùng lại liên kết, nên dòng «O1 bằng chứng
 cdt-nghiem-thu» phải báo «CÓ» với 24h ≥ 2 · lý do cuối `BAD_PASSWORD` · luồng `LOGIN`. Lượt đăng nhập ĐÚNG không ghi gì; lý do chỉ
 nằm ở sổ của người vận hành và phần mã hoá, không ra dòng `[ops:tom-tat]` của nghiệm thu.
+
+## 10. Diễn tập tín hiệu O1–O8 — `saas-acceptance --apply --drills`
+
+`ops-signals-check` (§9) chứng minh tám tín hiệu TÍNH ĐƯỢC; bước F chứng minh chúng BẮT ĐƯỢC một sự cố có kiểm soát trên workspace
+thử. Chỉ chạy khi gõ `--drills` (đi cùng `--apply`), chỉ trên workspace trong sổ khai và chỉ sau khi A xác nhận workspace do ops tạo
+(`acceptanceWorkspaceOwned`). Mỗi diễn tập đi qua ĐÚNG đường mã production ghi tín hiệu với đầu vào cố ý sai — không chèn dòng lỗi
+giả, không gọi AI, không gọi dịch vụ ngoài, không đổi cấu hình bot / gói / công tắc. Tín hiệu nào chỉ gây được bằng những cách đó in
+«CHƯA ĐO ĐƯỢC» kèm lý do (`ACCEPTANCE_UNMEASURABLE_DRILLS`), không làm giả.
+
+| Tín hiệu | Diễn tập | Đường mã |
+|---|---|---|
+| O1 LOGIN | ĐÃ DIỄN TẬP (ở B1) | lượt mật khẩu sai: `verifyLogin` + `onFailure` ⇒ `recordAuthFailure` ⇒ `LOGIN/BAD_PASSWORD` |
+| O2 FB_CONNECTION | CHƯA ĐO ĐƯỢC | workspace không nối page Facebook (N/A); gây lỗi token đòi gọi Graph thật |
+| O3 WEBHOOK | CHƯA ĐO ĐƯỢC | đo từ đăng ký webhook page + hàng chờ tin fanpage; chat WEB không đi đường webhook |
+| O4 AI | CHƯA ĐO ĐƯỢC | dòng ERROR chỉ sinh khi gọi AI thật hỏng — cần đổi khoá / công tắc AI thật hoặc tốn tiền AI |
+| O5 SEND | CHƯA ĐO ĐƯỢC | lỗi gửi chỉ có ở kênh nhắn tin (dịch vụ ngoài thật); chat WEB không gửi đi đâu |
+| O6 ORDER_VALIDATION | ĐÃ DIỄN TẬP | `executeTool("create_customer")` (bộ chạy công cụ của bot) THIẾU SĐT, kênh WEB ⇒ `MISSING_CONTACT` ⇒ `order.validation_failed` trong `audit_logs` của workspace + gương `platform_org_health` CẢNH BÁO |
+| O7 ORDER_WRITE | CHƯA ĐO ĐƯỢC | cần lõi đơn NÉM lỗi CSDL; không có đường không phá huỷ |
+| O8 QUOTA | CHƯA ĐO ĐƯỢC | cổng gói chỉ chặn khi dùng thử hết / hết số dư — cần đổi gói / hạn mức thật hoặc tiêu hết lượt AI thật |
+
+O6 bỏ qua bước model chọn công cụ (phần duy nhất tốn tiền) và gọi thẳng bộ chạy công cụ — giống B1 gọi thẳng lõi đăng nhập. Công cụ từ
+chối TRƯỚC mọi lượt ghi khách: không khách, không đơn, không hội thoại mới; id tương quan là `nghiem-thu-drill:<mã lượt chạy>`. Dọn
+dẹp: không có gì để gỡ — mức của tín hiệu tính trên số đếm 24 giờ, nên tự về «Ổn» sau 24 giờ (job `sales-health` đếm lại từ
+`audit_logs`). Dòng công khai thêm `diễn tập: ĐÃ DIỄN TẬP O1,O6 · CHƯA ĐO ĐƯỢC O2,…` — chỉ số hiệu tín hiệu; mã lý do và id dòng
+chỉ ở phần MÃ HOÁ. Kiểm sau lượt chạy: `ops-signals-check` phải in `cdt-nghiem-thu O6 ORDER_VALIDATION: WARNING · … · lý do cuối
+MISSING_CONTACT`.

@@ -11,6 +11,8 @@
    · `--apply`           GHI: A tạo / đảm bảo workspace qua job «Tạo khách» · B kích hoạt + đăng nhập email không mã tổ chức, rồi
                          xoay mật khẩu và vứt (cuối lượt) · C · E.
    · `--apply --e2e`     GHI + TỐN AI: thêm D nhắn bot thật như một khách web → AI → đơn trong OMS (in chi phí AI của lượt).
+   · `--apply --drills`  GHI: thêm F diễn tập tín hiệu vận hành O1–O8 trên workspace thử qua ĐÚNG đường mã ghi tín hiệu (đầu vào cố ý
+                         sai; không AI, không dịch vụ ngoài, không dòng giả) — tín hiệu không diễn tập trung thực được in «CHƯA ĐO ĐƯỢC».
    · `--org=<mã>`        chỉ khi sổ khai có nhiều mục.
 
   Mỗi bước in `PASS|FAIL|SKIP <bước> — <lý do> (<ms>)` (phần MÃ HOÁ). Cuối lượt in ĐÚNG MỘT dòng công khai
@@ -35,14 +37,14 @@ const tomTat = (s: string) => console.log(`[ops:tom-tat] ${s}`);
 export async function runAcceptanceCli(args: readonly string[], deps: Partial<AcceptanceDeps> = {}, opts: { readOnlyGuard?: () => Promise<boolean> } = {}): Promise<number> {
   const a = parseAcceptanceArgs(args);
   if (!a.ok) {
-    tomTat(`saas-acceptance: FAIL 0/0 · cách dùng sai: ${a.error} — arg: (rỗng) | --apply | --apply --e2e [--org=<mã>]`);
+    tomTat(`saas-acceptance: FAIL 0/0 · cách dùng sai: ${a.error} — arg: (rỗng) | --apply | --apply --e2e | --apply --drills [--org=<mã>]`);
     return 64;
   }
   if (a.mode === "READ" && !(await (opts.readOnlyGuard ?? platformReadOnlyConfirmed)())) {
     tomTat("saas-acceptance: FAIL 0/0 · DỪNG: kết nối CSDL KHÔNG ở chế độ chỉ đọc — lượt CHỈ ĐỌC không đọc gì");
     return 70;
   }
-  const report = await runAcceptance({ orgCode: a.orgCode, mode: a.mode }, { ...defaultAcceptanceDeps({ emit: (line) => console.log(line) }), ...deps });
+  const report = await runAcceptance({ orgCode: a.orgCode, mode: a.mode, drills: a.drills }, { ...defaultAcceptanceDeps({ emit: (line) => console.log(line) }), ...deps });
   tomTat(report.summary);
   if (report.refused) return 64;
   return report.verdict === "PASS" ? 0 : 1;

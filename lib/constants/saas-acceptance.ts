@@ -19,6 +19,7 @@ import { RESERVED_ORG_CODES } from "@/lib/onboarding/shared";
 import { domainSlugProblem } from "@/lib/platform/host";
 import { DEFAULT_CHOTDON_DOMAIN, DEFAULT_SITE_DOMAIN } from "@/lib/platform/site-host";
 import { ORGANIZATION_CODE_PATTERN } from "@/lib/platform/types";
+import { OPS_SIGNAL_KEYS, type OpsSignalKey } from "@/lib/constants/ops-signals";
 import { ACCEPTANCE_ACTOR_LABEL, ACCEPTANCE_WORKSPACES, type AcceptanceWorkspace } from "@/lib/constants/saas-acceptance-registry";
 
 // Sổ khai + vị ngữ sống ở tệp LÁ (giữ chỗ / loại trừ đọc được mà không kéo đồ thị phụ thuộc) — xuất lại để mọi nơi đọc một bản.
@@ -95,12 +96,13 @@ export const PAGE_ERROR_DIGEST = /\\?"digest\\?"\s*:\s*\\?"\d{3,}\\?"/;
 export type AcceptanceMode = "READ" | "APPLY" | "E2E";
 export const ACCEPTANCE_MODE_LABEL: Record<AcceptanceMode, string> = { READ: "CHỈ ĐỌC", APPLY: "GHI", E2E: "GHI + E2E" };
 
-export type AcceptanceArgs = { ok: true; mode: AcceptanceMode; orgCode: string | null } | { ok: false; error: string };
+export type AcceptanceArgs = { ok: true; mode: AcceptanceMode; orgCode: string | null; drills: boolean } | { ok: false; error: string };
 
 /**
- * `(rỗng)` = CHỈ ĐỌC · `--apply` = thêm cấp phát + kích hoạt + đăng nhập · `--apply --e2e` = thêm chat → AI → đơn · `--org=<mã>` khi sổ
- * có nhiều mục. Cờ lạ / lặp / sai cặp ⇒ lỗi cách dùng (gõ nhầm `--aply` mà vẫn chạy là ghi mù). THUẦN; câu lỗi chỉ nói VỊ TRÍ / LOẠI
- * lỗi, không chép nội dung ô arg (nó đi ra kênh tóm tắt công khai).
+ * `(rỗng)` = CHỈ ĐỌC · `--apply` = thêm cấp phát + kích hoạt + đăng nhập · `--apply --e2e` = thêm chat → AI → đơn · `--apply --drills` =
+ * thêm bước F diễn tập tín hiệu vận hành (không bao giờ chạy mặc định) · `--org=<mã>` khi sổ có nhiều mục. Cờ lạ / lặp / sai cặp ⇒ lỗi
+ * cách dùng (gõ nhầm `--aply` mà vẫn chạy là ghi mù). THUẦN; câu lỗi chỉ nói VỊ TRÍ / LOẠI lỗi, không chép nội dung ô arg (nó đi ra kênh
+ * tóm tắt công khai).
  */
 export function parseAcceptanceArgs(args: readonly string[]): AcceptanceArgs {
   const seen = new Set<string>();
@@ -112,17 +114,24 @@ export function parseAcceptanceArgs(args: readonly string[]): AcceptanceArgs {
     if (key === "--org=") {
       orgCode = a.slice("--org=".length).trim().toLowerCase();
       if (!ORGANIZATION_CODE_PATTERN.test(orgCode)) return { ok: false, error: `từ thứ ${i + 1}: mã tổ chức sai dạng` };
-    } else if (key !== "--apply" && key !== "--e2e") return { ok: false, error: `từ thứ ${i + 1}: không phải cờ đã biết (--apply · --e2e · --org=<mã>)` };
+    } else if (key !== "--apply" && key !== "--e2e" && key !== "--drills") return { ok: false, error: `từ thứ ${i + 1}: không phải cờ đã biết (--apply · --e2e · --drills · --org=<mã>)` };
   }
   if (seen.has("--e2e") && !seen.has("--apply")) return { ok: false, error: "--e2e chỉ đi cùng --apply (bước E2E GHI vào workspace thử)" };
-  return { ok: true, mode: seen.has("--e2e") ? "E2E" : seen.has("--apply") ? "APPLY" : "READ", orgCode };
+  if (seen.has("--drills") && !seen.has("--apply")) return { ok: false, error: "--drills chỉ đi cùng --apply (diễn tập GHI tín hiệu cho workspace thử)" };
+  return { ok: true, mode: seen.has("--e2e") ? "E2E" : seen.has("--apply") ? "APPLY" : "READ", orgCode, drills: seen.has("--drills") };
 }
 
 // ─────────────────────────── Kết quả từng bước + dòng tóm tắt ───────────────────────────
 
 /** Thứ tự CHẠY: A → B1 → C → D → E → B2 (xoay mật khẩu luôn chạy CUỐI, kể cả khi bước giữa hỏng). */
 export const ACCEPTANCE_STEPS = ["A", "B1", "C", "D", "E", "B2"] as const;
-export type AcceptanceStepKey = (typeof ACCEPTANCE_STEPS)[number];
+/** Bước F (diễn tập tín hiệu) chỉ có mặt khi `--drills` — lượt thường giữ nguyên sáu bước và nguyên dòng tóm tắt cũ. */
+export type AcceptanceStepKey = (typeof ACCEPTANCE_STEPS)[number] | "F";
+
+/** Thứ tự chạy của MỘT lượt: F chen TRƯỚC B2 (xoay mật khẩu vẫn CUỐI). THUẦN. */
+export function acceptanceStepsFor(drills: boolean): readonly AcceptanceStepKey[] {
+  return drills ? ["A", "B1", "C", "D", "E", "F", "B2"] : ACCEPTANCE_STEPS;
+}
 
 export const ACCEPTANCE_STEP_LABEL: Record<AcceptanceStepKey, string> = {
   A: "A · workspace nghiệm thu",
@@ -130,8 +139,54 @@ export const ACCEPTANCE_STEP_LABEL: Record<AcceptanceStepKey, string> = {
   C: "C · vỏ app Chốt Đơn",
   D: "D · chat web → AI → đơn",
   E: "E · chat công khai theo tên miền con",
+  F: "F · diễn tập tín hiệu vận hành",
   B2: "B · xoay mật khẩu rồi vứt",
 };
+
+// ─────────────────────────── F · diễn tập tín hiệu vận hành O1–O8 (LAUNCH_GATE §4) ───────────────────────────
+
+/**
+ * DIỄN TẬP = gây MỘT sự cố có kiểm soát trên workspace nghiệm thu qua ĐÚNG đường mã production ghi tín hiệu (đầu vào cố ý sai), để
+ * ops `ops-signals-check` thấy tín hiệu ấy đổi mức. KHÔNG bao giờ chèn thẳng một dòng lỗi giả: tín hiệu nào chỉ gây được bằng dòng
+ * tổng hợp / bằng gọi dịch vụ ngoài thật / bằng đổi cấu hình thật thì khai «CHƯA ĐO ĐƯỢC» kèm lý do — dưới đây là ĐÚNG lý do đã soi.
+ */
+export type DrillStatus = "DRILLED" | "SKIPPED" | "UNMEASURABLE" | "FAILED";
+export const DRILL_STATUS_LABEL: Record<DrillStatus, string> = { DRILLED: "ĐÃ DIỄN TẬP", SKIPPED: "BỎ QUA", UNMEASURABLE: "CHƯA ĐO ĐƯỢC", FAILED: "HỎNG" };
+/** Một dòng kết quả diễn tập: `code` = mã lý do / id dòng tín hiệu (phần MÃ HOÁ); dòng công khai chỉ dùng `key` + `status`. */
+export type DrillResult = { key: OpsSignalKey; status: DrillStatus; code: string | null; why: string };
+
+/** Tiền tố id tương quan của lượt diễn tập — dòng tín hiệu tự nói nó là diễn tập (không trỏ tới hội thoại nào của khách). */
+export const ACCEPTANCE_DRILL_ID_PREFIX = "nghiem-thu-drill:";
+
+/** Tín hiệu KHÔNG diễn tập được một cách trung thực, kèm lý do — đọc thẳng vào phần mã hoá và tài liệu. */
+export const ACCEPTANCE_UNMEASURABLE_DRILLS: Readonly<Partial<Record<OpsSignalKey, string>>> = {
+  FB_CONNECTION: "workspace nghiệm thu không nối page Facebook nào — tín hiệu là N/A; gây lỗi token đòi gọi Graph thật",
+  WEBHOOK: "đo từ đăng ký webhook page + hàng chờ tin fanpage; chat WEB không đi đường webhook, dead-letter chỉ có ở kênh nhắn tin",
+  AI: "dòng ERROR chỉ sinh khi lượt gọi nhà cung cấp AI thật hỏng — gây được bằng đổi khoá / công tắc AI của workspace (đổi cấu hình thật) hoặc gọi AI thật (tốn tiền)",
+  SEND: "lỗi gửi chỉ có ở kênh nhắn tin (Pancake / Meta / Zalo — dịch vụ ngoài thật); chat WEB lưu câu trả lời, không gửi đi đâu",
+  ORDER_WRITE: "cần lõi đơn NÉM lỗi CSDL; không có đường không phá huỷ — gây được chỉ bằng bịa trạng thái hội thoại (id khách không có) hoặc phá CSDL",
+  QUOTA: "cổng gói chỉ chặn khi dùng thử hết hạn / hết lượt / hết số dư — gây được chỉ bằng đổi gói / hạn mức thật của workspace hoặc tiêu hết lượt AI thật",
+};
+
+const oNum = (k: OpsSignalKey) => `O${OPS_SIGNAL_KEYS.indexOf(k) + 1}`;
+
+/** Phần diễn tập của dòng tóm tắt công khai — CHỈ số hiệu tín hiệu theo trạng thái, không mã lý do / id / câu chữ. THUẦN. */
+export function drillSummaryPart(results: readonly DrillResult[]): string {
+  const of = (s: DrillStatus) => results.filter((r) => r.status === s).map((r) => oNum(r.key));
+  const parts = (["DRILLED", "FAILED", "SKIPPED", "UNMEASURABLE"] as const).map((s) => (of(s).length ? `${DRILL_STATUS_LABEL[s]} ${of(s).join(",")}` : null)).filter(Boolean);
+  return `diễn tập: ${parts.join(" · ") || "—"}`;
+}
+
+/** Phán quyết bước F: có diễn tập HỎNG ⇒ FAIL; có ít nhất một ĐÃ DIỄN TẬP ⇒ PASS; còn lại (thiếu điều kiện) ⇒ SKIP. THUẦN. */
+export function drillStepStatus(results: readonly DrillResult[]): StepStatus {
+  if (results.some((r) => r.status === "FAILED")) return "FAIL";
+  return results.some((r) => r.status === "DRILLED") ? "PASS" : "SKIP";
+}
+
+/** Dòng chi tiết (phần MÃ HOÁ) của một tín hiệu. THUẦN. */
+export function formatDrillLine(r: DrillResult): string {
+  return `${oNum(r.key)} ${r.key}: ${DRILL_STATUS_LABEL[r.status]}${r.code ? ` (${r.code})` : ""} — ${r.why}`;
+}
 
 export type StepStatus = "PASS" | "FAIL" | "SKIP";
 export type StepResult = { key: AcceptanceStepKey; status: StepStatus; reason: string; ms: number; detail: string[] };
@@ -157,7 +212,7 @@ export function formatAcceptanceUsd(usd: number): string {
  * DÒNG CÔNG KHAI DUY NHẤT: `saas-acceptance: <PASS|FAIL> <n đạt>/<n> · …` — `n` = số bước ĐÃ CHẠY (đạt + hỏng), bước bỏ qua nêu
  * riêng (bỏ qua không phải đạt). Chỉ mã workspace THỬ, chế độ, tên miền gốc và chi phí AI — không email, không SĐT, không mã đơn.
  */
-export function acceptanceSummary(results: readonly StepResult[], ctx: { mode: AcceptanceMode; orgCode: string | null; baseDomain?: string | null; aiCostUsd?: number | null; note?: string }): string {
+export function acceptanceSummary(results: readonly StepResult[], ctx: { mode: AcceptanceMode; orgCode: string | null; baseDomain?: string | null; aiCostUsd?: number | null; note?: string; drills?: string }): string {
   const ran = results.filter((r) => r.status !== "SKIP");
   const passed = ran.filter((r) => r.status === "PASS").length;
   const failed = ran.filter((r) => r.status === "FAIL").map((r) => r.key);
@@ -170,6 +225,8 @@ export function acceptanceSummary(results: readonly StepResult[], ctx: { mode: A
     ctx.orgCode ? `workspace ${ctx.orgCode}` : null,
     ctx.baseDomain !== undefined ? `miền chat ${ctx.baseDomain ?? "CHƯA KHAI"}` : null,
     ctx.aiCostUsd !== undefined && ctx.aiCostUsd !== null ? `AI lượt này ≈ ${formatAcceptanceUsd(ctx.aiCostUsd)} USD` : null,
+    // Chỉ chuỗi đã dựng bằng `drillSummaryPart` (số hiệu tín hiệu theo trạng thái) — không mã lý do, không id.
+    ctx.drills ?? null,
     ctx.note ?? null,
   ].filter((s): s is string => Boolean(s));
   return parts.join(" · ").slice(0, ACCEPTANCE_SUMMARY_MAX);
