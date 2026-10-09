@@ -3,7 +3,7 @@
   "mission_id": "products-shell-v2",
   "title": "Sản phẩm cho khách Chốt Đơn: danh sách gọn (giá bán · tồn khả dụng · thiếu gì) thay bảng 15 cột ERP; sửa «0 kho» · «1.62 tỷ» · «8.808 sản phẩm»",
   "business_goal": "",
-  "status": "RUNNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -24,7 +24,18 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-09T22:52:44.080Z",
-  "updated_at": "2026-10-09T22:52:44.080Z",
-  "last_heartbeat": "2026-10-09T22:52:44.080Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-09T23:34:04.951Z",
+  "last_heartbeat": "2026-10-09T23:34:04.951Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "feat/products-shell-v2",
+    "sha": "6108776f33bf01efa6b2a3e39053902eee6bd9ab",
+    "at": "2026-10-09T23:34:04.951Z",
+    "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+    "title": "Sản phẩm cho khách Chốt Đơn: danh sách gọn (giá bán · tồn khả dụng · thiếu gì) thay bảng 15 cột ERP; sửa «0 kho» · «1.62 tỷ» · «8.808 sản phẩm»",
+    "summary": "Sản phẩm cho khách vỏ: bảng 4 cột (sản phẩm · giá bán · tồn khả dụng/«Chưa có phiếu nhập» · thiếu gì để AI bán) + một nút Thêm sản phẩm; ERP giữ nguyên trừ «Chưa khai kho» và «đơn vị hàng»; số gọn dùng dấu phẩy toàn ứng dụng («1,62 tỷ»), Money compact dùng lại formatVND",
+    "tests": [
+      "typecheck sạch · lint sạch · npm test TẤT CẢ KIỂM THỬ ĐẠT · build đạt"
+    ]
+  }
 }
