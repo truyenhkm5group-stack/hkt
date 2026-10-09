@@ -3,7 +3,7 @@
   "mission_id": "erp-chi-tiet-duoi-dai",
   "title": "Trang chi tiết ERP đuôi dài: «%» trên đường dẫn thôi gây lỗi 500 ở 4 trang cài đặt, tiền theo formatVND, mã Google / trường thô ở khách sỉ thành tiếng Việt, đầu trang xuống dòng 390 px, phiếu sản xuất cuộn ngang, lượt nhập VTP hỏng thôi in 9 ô 0",
   "business_goal": "",
-  "status": "INTEGRATING",
+  "status": "VERIFYING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tail",
@@ -35,11 +35,13 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-08T23:24:16.812Z",
-  "updated_at": "2026-10-09T04:03:43.263Z",
+  "updated_at": "2026-10-09T06:11:50.136Z",
   "last_heartbeat": "2026-10-09T03:35:52.594Z",
   "definition_of_done": [],
   "evidence": {
-    "merged": "#721 → f7eae2c267bd14f66a55cedb1a149866cad697b5"
+    "merged": "#721 → f7eae2c267bd14f66a55cedb1a149866cad697b5",
+    "verify": "PASS 50293da6ee8a88d2b254060cb48a9a2e276a6540 2026-10-09T06:11:42.433Z",
+    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/37886395475"
   },
   "handoff": {
     "branch": "claude/erp-chi-tiet-duoi-dai",
