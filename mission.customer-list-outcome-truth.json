@@ -3,7 +3,7 @@
   "mission_id": "customer-list-outcome-truth",
   "title": "Danh sách khách + bộ lọc + cột Đã thanh toán của danh sách đơn thôi trộn bộ đếm Pancake (nối #715)",
   "business_goal": "",
-  "status": "RUNNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -26,7 +26,18 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-09T00:10:09.995Z",
-  "updated_at": "2026-10-09T00:10:09.995Z",
-  "last_heartbeat": "2026-10-09T00:10:09.995Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-09T02:14:15.547Z",
+  "last_heartbeat": "2026-10-09T02:14:15.547Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "fix/customer-list-outcome-truth",
+    "sha": "2b8ebe747fc7824c2ca0e7540f31ab6b37e4b306",
+    "at": "2026-10-09T02:14:15.547Z",
+    "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+    "title": "Danh sách khách + bộ lọc + cột Đã thanh toán của danh sách đơn thôi trộn bộ đếm Pancake (nối #715)",
+    "summary": "Danh sách/nhóm/tổng khách chỉ theo ORDER_OUTCOME; cột đơn không còn Đã thanh toán không chứng từ",
+    "tests": [
+      "npm test TẤT CẢ KIỂM THỬ ĐẠT; typecheck + lint + build sạch; đột biến greatest() ⇒ đỏ; EXPLAIN không đổi kế hoạch"
+    ]
+  }
 }
