@@ -204,7 +204,7 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
             {order.moneyToCollect > 0 ? (
               <>
                 Thu hộ <Money value={order.moneyToCollect} />
-                {s ? ` · ${COD_STATUS_LABEL[s.codStatus] ?? s.codStatus}` : ""}
+                {s && s.codStatus !== "NOT_APPLICABLE" ? ` · ${COD_STATUS_LABEL[s.codStatus] ?? s.codStatus}` : ""}
               </>
             ) : paid > 0 ? (
               <>
@@ -348,8 +348,8 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
         </section>
       ) : null}
 
-      <div className="grid gap-5 xl:grid-cols-[minmax(0,1.5fr)_minmax(320px,0.9fr)]">
-        <div className="space-y-5">
+      <div className="grid grid-cols-[minmax(0,1fr)] gap-5 xl:grid-cols-[minmax(0,1.5fr)_minmax(320px,0.9fr)]">
+        <div className="min-w-0 space-y-5">
           <SectionCard title={`Sản phẩm (${formatNumber(order.totalQuantity)})`} padded={false}>
             <div className="overflow-x-auto">
               <Table className="min-w-[640px]">
@@ -649,7 +649,7 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
           </SectionCard>
         </div>
 
-        <div className="space-y-5">
+        <div className="min-w-0 space-y-5">
           {risk?.risky ? (
             <div className={cn("rounded-xl border p-3 text-sm", risk.severity === "critical" ? "border-rose-300 bg-rose-50 text-rose-900 dark:border-rose-900 dark:bg-rose-950/40 dark:text-rose-100" : "border-amber-300 bg-amber-50 text-amber-900 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-100")}>
               <div className="font-semibold">⚠ Khách rủi ro — nên xin cọc / xác nhận kỹ trước khi gửi ĐVVC</div>
