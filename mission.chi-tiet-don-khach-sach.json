@@ -3,7 +3,7 @@
   "mission_id": "chi-tiet-don-khach-sach",
   "title": "Trang chi tiết đơn / khách / hội thoại không nói Pancake với khách không dùng Pancake, không in 0 ₫ cho tiền đơn tay không có, diễn biến hội thoại bằng tiếng Việt",
   "business_goal": "",
-  "status": "PLANNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-detail",
@@ -27,7 +27,18 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-08T23:12:39.335Z",
-  "updated_at": "2026-10-08T23:17:06.053Z",
-  "last_heartbeat": "2026-10-08T23:17:06.053Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-09T03:34:02.384Z",
+  "last_heartbeat": "2026-10-09T03:34:02.384Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/chi-tiet-don-khach-sach",
+    "sha": "82a303c644901a7cf9558896867d1a5c964f0cf3",
+    "at": "2026-10-09T03:34:02.384Z",
+    "actor": "DESKTOP-56TH98Y:wt-detail",
+    "title": "Trang chi tiết đơn / khách / hội thoại không nói Pancake với khách không dùng Pancake, không in 0 ₫ cho tiền đơn tay không có, diễn biến hội thoại bằng tiếng Việt",
+    "summary": "",
+    "tests": [
+      "tsc + eslint sạch; npm test ĐẦY ĐỦ «TẤT CẢ KIỂM THỬ ĐẠT» EXIT=0 trên 82a303c6 (gốc d8681246, gồm #715 #716 #717; 09/10 10:31); detail-pages-shell: ô Pancake sau đúng điều kiện, tỷ lệ của truy vấn, tên sự kiện, product.id; đột biến manual ? null : / {e.type} ⇒ đỏ"
+    ]
+  }
 }
