@@ -2,7 +2,7 @@
 
 *Phase A — CHỈ ĐỌC. Nguồn: `git ls-files app` trên `origin/main` b3a8d74e (207 `page.tsx`), bề mặt / module / quyền / cổng vỏ đọc bằng chính hàm của mã (`moduleOfPath`, `salesAgentPathAllowed`, `NAV_MODULES`, `SALES_AGENT_NAV`); harness Playwright (Chrome headless riêng) quét 163 route tĩnh bằng persona admin nhà ở 1366 px trên dữ liệu demo (10 sản phẩm · 1.126 đơn), 23 route trọng điểm ở 390 + 1920 px, vỏ khách Chốt Đơn 21 + 17 route (tài khoản khách thật do admin tạo), production chỉ trang công khai (GET). Điểm 0–100 chỉ ghi khi NGƯỜI đã xem (Round 1–2 + sweep); còn lại `UNKNOWN` — không bịa điểm. Ảnh chụp ở máy người đo, không vào kho.*
 
-**Tổng 207 trang** · PUBLIC 13 · CUSTOMER+ERP (vỏ Chốt Đơn mở) 37 · ERP 135 · ADMIN 8 · INTERNAL (/tech) 14 · **đã audit (máy hoặc người) 207** (175 harness + 32 trang động đọc mã 09/10) · **đã chấm điểm bởi người 39**.
+**Tổng 207 trang** · PUBLIC 13 · CUSTOMER+ERP (vỏ Chốt Đơn mở) 37 · ERP 135 · ADMIN 8 · INTERNAL (/tech) 14 · **đã audit (máy hoặc người) 207** (175 harness + 32 trang động đọc mã 09/10) · đối chiếu cuối với `origin/main` 50293da6 (09/10) — bàn giao ở `COMMERCIAL_POLISH_BOARD.md` mục 8 · **đã chấm điểm bởi người 39**.
 
 Ưu tiên: P0 = trang khách trả tiền / công khai / admin · P1 = ERP lưu lượng cao (menu chính) · P2 = ERP trên menu · P3 = chi tiết / nội bộ /tech.
 
@@ -14,12 +14,12 @@
 | /dieu-khoan-su-dung | PUBLIC | A Visitor | - | — | P0 | công khai — prod ✓ | link/URL | - | cao | người + máy | LEGAL REVIEW: có «module», định dạng dài | 80 | — | — | ✓ công khai |
 | /gioi-thieu | PUBLIC | A Visitor | - | — | P0 | công khai — prod ✓ | link/URL | - | cao | người + máy | C1 copy Pancake bắt buộc · claim tuyệt đối · «Chi phí AI hiện rõ»; H1 tốt, 0 tràn, 0 ảnh thiếu alt | 78 | PR A (sweep) | — | ✓ công khai |
 | /join/[org]/[token] | PUBLIC | A Visitor | - | — | P0 | động — chưa quét | chi tiết | - | cao | prod công khai | — | UNKNOWN | — | — | — |
-| /login | PUBLIC | A Visitor | - | — | P0 | công khai — prod ✓ | link/URL | đăng nhập | cao | người + máy | đúng thương hiệu host; VNX sau redirect() của action (saas-shell-polish) | 86 | saas-shell-polish | — | ✓ công khai |
+| /login | PUBLIC | A Visitor | - | — | P0 | công khai — prod ✓ | link/URL | đăng nhập | cao | người + máy | đúng thương hiệu host; VNX sau redirect() của action (saas-shell-polish) | 86 | saas-shell-polish | #700 | ✓ công khai |
 | /login/chon-cua-hang | PUBLIC | A Visitor | - | — | P0 | ✓ 200 | link/URL | - | cao | máy (harness) | — | UNKNOWN | — | — | — |
-| /module-disabled | PUBLIC | A Visitor | - | — | P0 | ✓ 200 | link/URL | đăng nhập | cao | máy (harness) | — | UNKNOWN | saas-shell-polish | — | — |
+| /module-disabled | PUBLIC | A Visitor | - | — | P0 | ✓ 200 | link/URL | đăng nhập | cao | máy (harness) | — | UNKNOWN | saas-shell-polish | #700 | — |
 | /pricing | PUBLIC | A Visitor | - | — | P0 | công khai — prod ✓ | link/URL | - | cao | người + máy | giá đọc từ máy giá, đồng bộ; chip «API · Webhook» (PR r2 sửa) | 88 | saas-finish-line-r2 (5cab7e96) | — | ✓ công khai |
 | /print/production/[id] | PUBLIC | A Visitor | - | — | P0 | động — chưa quét | chi tiết | planning:view | cao | prod công khai | — | UNKNOWN | — | — | — |
-| /reset/[org]/[token] | PUBLIC | A Visitor | - | — | P0 | động — chưa quét | chi tiết | - | cao | người + máy | rõ, một lần; sau đặt mật khẩu rơi vào trang VNX (saas-shell-polish) | 84 | saas-shell-polish | — | — |
+| /reset/[org]/[token] | PUBLIC | A Visitor | - | — | P0 | động — chưa quét | chi tiết | - | cao | người + máy | rõ, một lần; sau đặt mật khẩu rơi vào trang VNX (saas-shell-polish) | 84 | saas-shell-polish | #700 | — |
 | /start | PUBLIC | A Visitor | - | — | P0 | công khai — prod ✓ | link/URL | - | cao | người + máy | một màn, 390 px gọn; mode open — đồng bộ với CTA | 85 | — | — | ✓ công khai |
 | /ai/channels | CUSTOMER+ERP | B/C/D Khách + E/F | ai_sales | Kênh kết nối | P0 | ✓ 200 | menu | ai_sales:view | cao | người + máy | module tắt ở nhà (đúng); rỗng có CTA; Meta chờ | 86 | — | — | — |
 | /ai/overview | CUSTOMER+ERP | B/C/D Khách + E/F | ai_sales | Tổng quan | P0 | ✓ 200 | menu | ai_sales:view | cao | người + máy | module tắt ở nhà (đúng); 8 ô rõ, «—» đúng luật 42 | 88 | — | — | — |
@@ -56,12 +56,12 @@
 | /settings/plan | CUSTOMER+ERP | B/C/D Khách + E/F | core | Gói & thanh toán | P0 | ✓ 200 | menu | settings:manage | cao | người + máy | đồng hồ rõ; chip API/Webhook (PR r2); tiêu đề vỏ (PR r2) | 84 | saas-finish-line-r2 (5cab7e96) | — | — |
 | /settings/profile | CUSTOMER+ERP | B/C/D Khách + E/F | core | Tài khoản của tôi | P0 | ✓ 200 | link/URL | đăng nhập | cao | người + máy | «Cài ERP lên màn hình chính» với khách Chốt Đơn | 85 | — | — | — |
 | /settings/shop | CUSTOMER+ERP | B/C/D Khách + E/F | core | Cài đặt | P0 | ✓ 200 | menu | đăng nhập | cao | người + máy | ngắn, rõ | 90 | — | — | — |
-| /settings/users | CUSTOMER+ERP | B/C/D Khách + E/F | core | Người dùng | P0 | ✓ 200 | menu | users:manage | cao | người + máy | 786 ô bấm < 32 px; 786 ô < 32 px · 4.296 px ở 390 · «webhook·module·ERP·API» — C1 cho khách Chốt Đơn | 55 | saas-shell-polish | — | — |
+| /settings/users | CUSTOMER+ERP | B/C/D Khách + E/F | core | Người dùng | P0 | ✓ 200 | menu | users:manage | cao | người + máy | 786 ô bấm < 32 px; 786 ô < 32 px · 4.296 px ở 390 · «webhook·module·ERP·API» — C1 cho khách Chốt Đơn | 55 | saas-shell-polish | #700 (vỏ ẩn ma trận vai trò) | — |
 | /setup | CUSTOMER+ERP | B/C/D Khách + E/F | core | Thiết lập & xuất bản | P0 | ✓ 200 | menu | - | cao | người + máy | «ERP», tên module nội bộ, link /p bị chặn (F-15) | 66 | saas-shell-polish | — | — |
-| /platform | ADMIN | F Platform admin | core | Vận hành nền tảng | P0 | ✓ 200 | menu | platform:operate | thấp | người + máy | 9 nút không tên · cao 6.223 px; cao 6.223 px; khung Webhook Meta trên cùng; 6.223 px; 9 nút không tên; việc hằng ngày dưới nếp gấp | 70 | — | — | — |
+| /platform | ADMIN | F Platform admin | core | Vận hành nền tảng | P0 | ✓ 200 | menu | platform:operate | thấp | người + máy | 9 nút không tên · cao 6.223 px; cao 6.223 px; khung Webhook Meta trên cùng; 6.223 px; 9 nút không tên; việc hằng ngày dưới nếp gấp | 70 | — | #714 | — |
 | /platform/ai-balance | ADMIN | F Platform admin | core | Số dư AI · vận hành | P0 | ✓ 200 | link/URL | platform:operate | thấp | máy (harness) | — | UNKNOWN | — | — | — |
-| /platform/customers | ADMIN | F Platform admin | core | Khách hàng SaaS | P0 | ✓ 200 | menu | platform:operate | thấp | người + máy | 13 ô nhập không nhãn; thiếu cột Messenger/AI/đăng nhập cuối (#683); nút «Tạo khách…» mờ không lý do; 13 ô không nhãn; «0 dùng thử» sai | 72 | #683 | — | — |
-| /platform/customers/[code] | ADMIN | F Platform admin | core | Khách hàng | P0 | động — chưa quét | menu | platform:operate | thấp | người + máy | đủ 12 khối trừ AI/đơn (ở /platform/org); gửi lại kích hoạt tốt | 80 | #683 | — | — |
+| /platform/customers | ADMIN | F Platform admin | core | Khách hàng SaaS | P0 | ✓ 200 | menu | platform:operate | thấp | người + máy | 13 ô nhập không nhãn; thiếu cột Messenger/AI/đăng nhập cuối (#683); nút «Tạo khách…» mờ không lý do; 13 ô không nhãn; «0 dùng thử» sai | 72 | #683 | #682 · #683 | — |
+| /platform/customers/[code] | ADMIN | F Platform admin | core | Khách hàng | P0 | động — chưa quét | menu | platform:operate | thấp | người + máy | đủ 12 khối trừ AI/đơn (ở /platform/org); gửi lại kích hoạt tốt | 80 | #683 | #683 | — |
 | /platform/org/[code] | ADMIN | F Platform admin | core | Sức khoẻ tổ chức | P0 | động — chưa quét | chi tiết | platform:operate | thấp | người + máy | 5.610 px; Gemini/OpenAI/Anthropic/Field — admin chấp nhận; cần nhảy mục | 74 | — | — | — |
 | /platform/products | ADMIN | F Platform admin | core | Sản phẩm SaaS | P0 | ✓ 200 | menu | platform:operate | thấp | máy (harness) | — | UNKNOWN | — | — | — |
 | /platform/products/[key] | ADMIN | F Platform admin | core | Sản phẩm | P0 | động — chưa quét | menu | platform:operate | thấp | người (đọc mã 09/10) | bảng không cuộn ngang, thiếu trạng thái rỗng (C2); chi phí phân bổ chưa biết = 0 trong biên (bàn giao) | UNKNOWN | — | — | — |
