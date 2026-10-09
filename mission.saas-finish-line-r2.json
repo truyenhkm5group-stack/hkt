@@ -3,7 +3,7 @@
   "mission_id": "saas-finish-line-r2",
   "title": "Round 2 finish line: tiêu đề theo menu vỏ (Sản phẩm · Nhân viên · Gói), tỷ lệ hoàn mẫu số 0 in —, nhãn tính năng API/Webhook thành chữ khách hiểu",
   "business_goal": "",
-  "status": "INTEGRATING",
+  "status": "VERIFYING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-saas-r2",
@@ -27,7 +27,7 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-08T14:34:44.541Z",
-  "updated_at": "2026-10-08T23:28:28.002Z",
+  "updated_at": "2026-10-09T00:48:10.749Z",
   "last_heartbeat": "2026-10-08T23:01:29.997Z",
   "definition_of_done": [],
   "intake": {
@@ -35,7 +35,9 @@
     "evidence": []
   },
   "evidence": {
-    "merged": "#713 → 1a3362d24743c3c62a7ee9251290e09e0ee3f325"
+    "merged": "#713 → 1a3362d24743c3c62a7ee9251290e09e0ee3f325",
+    "verify": "PASS d23c0deb3ce17e61c94d78117b04a9b3c7043183 2026-10-09T00:48:02.400Z",
+    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/37860758200"
   },
   "handoff": {
     "branch": "claude/saas-finish-line-r2",
