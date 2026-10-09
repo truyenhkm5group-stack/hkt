@@ -145,7 +145,7 @@ export default async function ShipmentsPage({ searchParams }: { searchParams: Pr
       {wb ? (
         <StatStrip
           items={[
-            { label: "Kiện cần care", value: formatNumber(wb.counts.care), note: `${formatNumber(wb.counts.waiting)} chờ khách · ${formatNumber(wb.counts.escalated)} cần cấp trên` },
+            { label: "Kiện cần care", value: formatNumber(wb.counts.care), note: `${formatNumber(wb.counts.waiting)} chờ kết quả · ${formatNumber(wb.counts.escalated)} cần cấp trên` },
             { label: "COD đang treo", value: formatVND(wb.moneyAtRisk, { compact: true }), tone: wb.moneyAtRisk > 0 ? "amber" : "muted" },
             { label: "Vỡ hạn xử lý", value: formatNumber(wb.overdue), tone: wb.overdue > 0 ? "rose" : "muted" },
             { label: "Chưa ai nhận", value: formatNumber(wb.unassigned), tone: wb.unassigned > 0 ? "amber" : "muted" },

@@ -122,7 +122,7 @@ export type CareView = (typeof CARE_VIEWS)[number];
 export const CARE_VIEW_LABEL: Record<CareView, string> = {
   care: "Cần care",
   waiting: "Đang chờ kết quả",
-  escalated: "Escalated",
+  escalated: "Cần cấp trên",
   done: "Đã xử lý",
   all: "Tất cả vận đơn",
 };
