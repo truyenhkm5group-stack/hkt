@@ -52,7 +52,8 @@ export function testOrgCatalogPure() {
       { id: "erp-p9", name: "Đã gỡ", code: null, manual: true, removed: true, variants: [] },
     ],
     priceLists: [{ id: "l1", name: "Sỉ chung", isDefault: true, active: true, tiers: [{ variantId: "erp-v1", variantLabel: "Chả cá thu · Size: 1kg", minQuantity: 10, unitPrice: 250_000 }] }, { id: "l2", name: "Cũ", isDefault: false, active: false, tiers: [] }],
-    quickReplies: [{ title: "Bảng giá", triggers: ["giá", "bao nhiêu"], answer: "Chả cá thu 280k/kg\n  ship 25k" }],
+    quickReplies: [{ title: "Bảng giá", triggers: ["giá", "bao nhiêu"], answer: "Chả cá thu 280k/kg\n  ship 25k", upsell: true, images: 1 }],
+    quickReplySettings: { enabled: true, upsellSet: true },
   };
   const lines = catalogLines(r);
   const all = lines.join("\n");
@@ -61,12 +62,13 @@ export function testOrgCatalogPure() {
   assert.ok(all.includes("- erp-v2 · SKU CCT-05 · Size: 0,5kg · giá lẻ — · chưa khai gram · ẨN (thôi bán)"), "chưa có giá in —, mẫu mã ẩn có nhãn");
   assert.ok(all.includes("· Đã gỡ · tạo tay · ĐÃ GỠ"));
   assert.ok(all.includes("· Sỉ chung · MẶC ĐỊNH · 1 bậc") && all.includes("- Chả cá thu · Size: 1kg · từ 10: 250.000 ₫") && all.includes("· Cũ · NGỪNG DÙNG · 0 bậc"));
-  assert.ok(all.includes("· Bảng giá [giá / bao nhiêu]: Chả cá thu 280k/kg ship 25k"), "câu mẫu gộp một dòng");
+  assert.ok(all.includes("· [UPSELL] Bảng giá (1 ảnh) [giá / bao nhiêu]: Chả cá thu 280k/kg ship 25k"), "câu mẫu gộp một dòng, đánh dấu câu upsell + số ảnh");
+  assert.ok(all.includes("câu upsell (mời thêm món kèm ảnh menu): ĐÃ CHỌN"));
   assert.ok(all.includes("Bot: BẬT · báo giá theo bảng giá sỉ TẮT · chốt không kiểm tồn BẬT · field bot đọc: net_weight"));
   assert.ok(all.includes("Hướng dẫn thêm (20 ký tự): Giá sỉ hỏi nhân viên"));
 
   const sum = catalogSummary(r);
-  assert.deepEqual(sum, ["Tổ chức x: 1 sản phẩm · 2 mẫu mã (1 chưa có giá · 1 ẩn) · nguồn tạo tay", "Bot: BẬT · giá sỉ TẮT · chốt không kiểm tồn BẬT · bảng giá sỉ đang dùng 1 (1 bậc) · câu mẫu đang bật 1"]);
+  assert.deepEqual(sum, ["Tổ chức x: 1 sản phẩm · 2 mẫu mã (1 chưa có giá · 1 ẩn) · nguồn tạo tay", "Bot: BẬT · giá sỉ TẮT · chốt không kiểm tồn BẬT · bảng giá sỉ đang dùng 1 (1 bậc) · câu mẫu đang bật 1 · câu upsell ĐÃ CHỌN (1 ảnh)"]);
   for (const s of sum) {
     assert.ok(s.length <= SUMMARY_MAX_CHARS);
     for (const w of ["Chả cá", "280", "250", "Bảng giá [", "Hải sản", "nhân viên"]) assert.ok(!s.includes(w), `kênh tóm tắt không mang tên / giá / chữ của shop: ${w}`);
@@ -125,7 +127,8 @@ export async function testOrgCatalogDb() {
         ["erp-cat-p2", true, [["CM-1", "Size: 1kg", null, null]]],
       ], "mẫu mã đã gỡ không hiện; giá 0 ⇒ null; gram 0 ⇒ null");
       assert.deepEqual(r.priceLists.map((l) => [l.name, l.isDefault, l.tiers.map((t) => [t.variantLabel, t.minQuantity, t.unitPrice])]), [["Sỉ chung", true, [["Chả cá thu · Size: 1kg", 10, 250_000]]]]);
-      assert.deepEqual(r.quickReplies, [{ title: "Bảng giá", triggers: ["giá"], answer: "Chả cá thu 280k/kg" }], "chỉ câu mẫu đang bật");
+      assert.deepEqual(r.quickReplies, [{ title: "Bảng giá", triggers: ["giá"], answer: "Chả cá thu 280k/kg", upsell: false, images: 0 }], "chỉ câu mẫu đang bật");
+      assert.deepEqual(r.quickReplySettings, { enabled: true, upsellSet: false }, "chưa chọn câu upsell ⇒ nói thẳng");
       const all = [...catalogLines(r), ...catalogSummary(r)].join("\n");
       assert.ok(!all.includes(BI_MAT) && !all.includes(SDT), `không dòng nào lộ tên khách / SĐT / câu đã tắt:\n${all}`);
       assert.equal(catalogSummary(r)[0], `Tổ chức ${ORG}: 2 sản phẩm · 2 mẫu mã (1 chưa có giá · 0 ẩn) · nguồn tạo tay`);

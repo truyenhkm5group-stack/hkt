@@ -173,6 +173,10 @@ export async function testSeafoodOs() {
       assert.ok(on.includes("KHÔNG BAO GIỜ đưa giá lẻ ra như giá sỉ") && on.includes("`wholesale.available` = false"), "lời nhắc BẬT: giá lẻ không bao giờ là giá sỉ; không bậc ⇒ chuyển người");
       assert.ok(off.includes("ERP chỉ có giá LẺ") && !off.includes("ĐÃ BẬT báo giá"));
       assert.ok(off.includes("MẪU MÃ CHỈ BÁN KÈM") && off.includes("MỤC TIÊU") && off.includes("ĐƠN SÁT NGƯỠNG MIỄN SHIP"), "lời nhắc nói mục tiêu đơn / AOV, luật bán kèm và gợi ý ngưỡng miễn ship");
+      // Chủ shop HSLC 09/10/2026: có câu upsell (kèm ảnh menu) ⇒ mời thêm món CHỈ bằng câu đó, không chào lẻ từng món.
+      const coUpsell = systemPrompt(parseSalesChatbotConfig(null), "Shop", "", "TEST", "", [{ code: "Q1", title: "Các món bán chạy", upsell: true }]);
+      assert.ok(coUpsell.includes("KHÔNG chào lẻ từng món") && coUpsell.includes("KHÔNG nêu tên món") && !coUpsell.includes("Gợi ý ĐÚNG MỘT món bổ trợ"), "có câu upsell ⇒ chỉ mời bằng câu mẫu + ảnh menu");
+      assert.ok(off.includes("Gợi ý ĐÚNG MỘT món bổ trợ") && !off.includes("KHÔNG chào lẻ từng món"), "chưa có câu upsell ⇒ bot tự gợi ý một món như cũ");
     });
   } finally {
     await cleanupOrg();
