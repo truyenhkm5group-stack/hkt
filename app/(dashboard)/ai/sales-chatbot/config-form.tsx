@@ -84,6 +84,7 @@ export function ChatbotConfigForm({
 
   return (
     <SectionCard
+      id="bot-config"
       title="Cấu hình bot"
       description={`${c.enabled ? "Bot ĐANG BẬT." : "Bot đang TẮT — khung thử vẫn dùng được."} Bật / tắt bot không ảnh hưởng «Đồng bộ đơn từ fanpage» (khung riêng ở trên).`}
       actions={

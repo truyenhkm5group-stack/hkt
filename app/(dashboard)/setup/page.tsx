@@ -13,6 +13,8 @@ import { PUBLISH_PERMISSION, publishChecklist, type PublishCheck, type Publicati
 import { cn } from "@/lib/utils";
 import { isSalesAgentUser, salesAgentHomeFor, salesAgentNavFor, shellAllows } from "@/lib/constants/saas-nav";
 import { and, gt, ne } from "drizzle-orm";
+import { FirstValueChecklist } from "@/components/onboarding/first-value-checklist";
+import { loadFirstValue } from "@/lib/onboarding/go-live";
 import { DomainForm, PublishPanel } from "./setup-client";
 
 export const metadata = { title: "Thiết lập & xuất bản" };
@@ -58,19 +60,23 @@ export default async function SetupPage() {
   }
   const code = user.organization.code;
   const db = await getDb();
-  const [gs, list, branding, pages] = await Promise.all([
+  const shell = isSalesAgentUser(user);
+  const [gs, list, branding, pages, firstValue] = await Promise.all([
     getGettingStarted(user),
     publishChecklist(),
     getBranding(),
     db.select({ slug: schema.metaPages.slug, name: schema.metaPages.name }).from(schema.metaPages).where(and(ne(schema.metaPages.status, "ARCHIVED"), gt(schema.metaPages.publishedVersion, 0))),
+    // Vỏ Chốt Đơn: «Việc cần làm» là ĐÚNG danh sách chín bước của trang Tổng quan (lib/onboarding/go-live-shared.ts) — không
+    // danh sách thứ hai. Đọc hỏng / không hiện ⇒ lùi về danh sách cũ (vẫn đo từ dữ liệu thật).
+    shell ? loadFirstValue(user).catch(() => null) : Promise.resolve(null),
   ]);
+  const shellSteps = firstValue?.show ? firstValue : null;
   const pub = list.publication;
   const modules = (user.modules ?? []) as ModuleKey[];
   // Xem trước menu = ĐÚNG menu người này thấy (`visibleGroups`): cùng luật module, quyền, nguồn số liệu và trang gom của
   // tổ chức khách — không lọc lần thứ hai ở đây (AGENTS.md mục 28).
   // Vỏ app Chốt Đơn: «Xem trước» hiện ĐÚNG thanh tám mục khách thấy, không phải menu ERP (mục ERP bị chặn ở máy chủ).
   // Vỏ Chốt Đơn: câu chữ không «ERP» / «module» (khách không thuê ERP) — chỉ trình bày, luật không đổi.
-  const shell = isSalesAgentUser(user);
   const nav = shell ? [{ label: "Ứng dụng Chốt Đơn", items: salesAgentNavFor(user).map((i) => ({ href: i.href, label: i.label })) }] : visibleGroups(user);
   const erpUrl = pub.state === "PUBLISHED" && pub.url ? `${pub.url}/login` : null;
   const stateLabel = pub.state === "PUBLISHED" ? "ĐÃ XUẤT BẢN" : pub.state === "DRAFT" ? "BẢN NHÁP" : "Đang chạy";
@@ -80,7 +86,7 @@ export default async function SetupPage() {
       <PageHeader
         eyebrow={user.organization?.name ?? "Tổ chức"}
         title="Thiết lập & xuất bản"
-        description={`${stateLabel} · ${gs.done}/${gs.measurable} bước đã xong`}
+        description={`${stateLabel} · ${shellSteps ? `${shellSteps.done}/${shellSteps.total}` : `${gs.done}/${gs.measurable}`} bước đã xong`}
         hint={
           <div className="space-y-1.5 text-xs leading-5">
             <p>{shell ? "Ứng dụng" : "ERP"} bạn đang dùng CHÍNH LÀ bản xem trước: mọi menu, trang, form ở đây là thứ nhân viên sẽ thấy sau khi xuất bản. Bản nháp chỉ khác một điều: chưa có tên miền con riêng và trang chat công khai chưa nhận khách.</p>
@@ -90,6 +96,9 @@ export default async function SetupPage() {
       />
 
       <div className="grid gap-5 xl:grid-cols-2">
+        {shellSteps ? (
+          <FirstValueChecklist view={shellSteps} className="self-start" />
+        ) : (
         <SectionCard title="Việc cần làm" description="Mỗi bước tự đánh dấu xong khi dữ liệu thật xuất hiện." padded={false} contentClassName="p-0">
           <ul className="divide-y divide-hairline" data-setup-steps>
             {gs.steps.map((s) => {
@@ -109,6 +118,7 @@ export default async function SetupPage() {
             })}
           </ul>
         </SectionCard>
+        )}
 
         <SectionCard title={shell ? "Xem trước ứng dụng" : "Xem trước ERP"} description="Đúng thứ người dùng thấy — mở từng mục để thử.">
           <div className="space-y-4 text-sm" data-testid="setup-preview">

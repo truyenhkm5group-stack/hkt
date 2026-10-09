@@ -2,7 +2,9 @@ import Link from "next/link";
 import { PageHeader } from "@/components/page-header";
 import { SectionCard } from "@/components/ui-bits";
 import { can, requirePermission } from "@/lib/auth/session";
-import { SALES_AGENT_CHANNELS_HREF, SALES_AGENT_INBOX_HREF } from "@/lib/constants/saas-nav";
+import { isSalesAgentUser, SALES_AGENT_CHANNELS_HREF, SALES_AGENT_INBOX_HREF } from "@/lib/constants/saas-nav";
+import { FirstValueChecklist } from "@/components/onboarding/first-value-checklist";
+import { loadFirstValue } from "@/lib/onboarding/go-live";
 import { formatDate, formatNumber, formatPercent, formatVND } from "@/lib/format";
 import { METER_COVERAGE_LABEL } from "@/lib/pricing/versions";
 import { readAiCustomerUsage, type AiCustomerReading } from "@/lib/pricing/ai-customer";
@@ -52,12 +54,21 @@ export default async function SalesAgentOverviewPage({ searchParams }: { searchP
   const orgCode = user.organization?.code ?? "";
   const now = new Date();
   const period = usagePeriodOf(now);
-  const [r, basket, inbox, usage] = await Promise.all([
+  // Vỏ Chốt Đơn: MỘT danh sách thiết lập chín bước đứng đầu trang (lib/onboarding/go-live-shared.ts). Đọc hỏng ⇒ không vẽ danh
+  // sách (trang vẫn mở được), không bao giờ vẽ một danh sách «xong» khi chưa đọc được gì.
+  const [r, basket, inbox, usage, firstValue] = await Promise.all([
     loadAiSalesPerformance(orgCode, { days, withMoney: false, now }),
     loadBasketStats({ days, now }),
     listInbox(user, { limit: 50 }, now),
     orgCode ? readAiCustomerUsage([orgCode], period, now) : Promise.resolve(new Map<string, AiCustomerReading>()),
+    isSalesAgentUser(user)
+      ? loadFirstValue(user, now).catch((error: unknown) => {
+          console.warn(`[tong-quan] không đọc được danh sách thiết lập: ${error instanceof Error ? error.message : String(error)}`);
+          return null;
+        })
+      : Promise.resolve(null),
   ]);
+  const setupOpen = Boolean(firstValue?.show && !firstValue.allDone);
   const t = r.cohorts.total;
   const closeRate = rateOrNull(t.confirmed, t.conversations);
   const needsHuman = inbox.ok ? inbox.counts.NEEDS_HUMAN : null;
@@ -81,7 +92,10 @@ export default async function SalesAgentOverviewPage({ searchParams }: { searchP
         }
       />
 
-      {r.measuredSince === null ? (
+      {firstValue ? <FirstValueChecklist view={firstValue} /> : null}
+
+      {/* Lời nhắc «kết nối Facebook» cũ là một thẻ rải rác thứ hai — danh sách thiết lập đang mở thì nó đã nói việc đó. */}
+      {r.measuredSince === null && !setupOpen ? (
         <p className="rounded-2xl bg-card p-4 text-sm text-muted-foreground shadow-[var(--shadow-card)]" data-testid="overview-empty">
           AI chưa trả lời khách nào kể từ khi bật đo lường — số sẽ hiện sau tin khách đầu tiên.{" "}
           <Link href={SALES_AGENT_CHANNELS_HREF} className="font-medium text-primary hover:underline">

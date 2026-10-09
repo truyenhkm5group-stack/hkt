@@ -522,6 +522,7 @@ import { testSalesAgentGolden } from "./sales-agent-golden/golden.test";
 import { testOrderGolden } from "./order-golden/order-golden.test";
 import { testOrderReview } from "./order-review.test";
 import { testGoLive } from "./go-live.test";
+import { testOnboardingV2 } from "./onboarding-v2.test";
 import { testSalesVision } from "./sales-vision.test";
 import { testChatWidget } from "./chat-widget.test";
 import { testWebProductImport } from "./web-product-import.test";
@@ -2898,6 +2899,8 @@ async function main() {
   // SĐT chuẩn hoá — tổ chức THẬT `or-rv` (không Pancake; tự cấp, tự dọn).
   await testOrderReview();
   await testGoLive();
+  // Danh sách «giá trị đầu tiên» chín bước của vỏ Chốt Đơn (chủ shop 10/10/2026) — tổ chức THẬT `fv-shop`, Pancake GIẢ.
+  await testOnboardingV2();
   await testSalesVision();
   testChatWidget();
   await testWebProductImport();
