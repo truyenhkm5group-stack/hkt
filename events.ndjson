@@ -1311,3 +1311,4 @@
 {"at":"2026-10-09T17:11:08.388Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DEPLOY_DISPATCHED","detail":"fa82ece4d79c · run 37964429840 https://github.com/truyenhkm5group-stack/hkt/actions/runs/37964429840"}
 {"at":"2026-10-09T17:11:36.905Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"OVERLAP_DETECTED","mission":"onboarding-v2","detail":"OVERLAP với legal-acceptance: phạm vi lib/onboarding/ ↔ lib/onboarding/service.ts, lib/onboarding/ ↔ lib/onboarding/quick.ts ⇒ tuần tự hoá (--after=legal-acceptance) hoặc khai cách tích hợp (--accept-overlap=\"…\")"}
 {"at":"2026-10-09T17:12:18.233Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"CLAIM","mission":"onboarding-v2","detail":"RUNNING · 8 mẫu phạm vi · MEDIUM"}
+{"at":"2026-10-09T17:45:24.999Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"security-acceptance","detail":"#744 @ a321c491d8bd → 2522e12a9bcc (MERGE_ISOLATED · HIGH · gates success)"}
