@@ -1124,3 +1124,4 @@
 {"at":"2026-10-09T02:15:26.935Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#718 @ e30c16ae48e5 · Rebase lên d8681246: chỉ xung đột đăng ký test (giữ testDirectConnectGate + testShellTypography); nội dung không đổi so với lượt PASS 5ffc5649."}
 {"at":"2026-10-09T02:16:47.006Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"CLAIM","mission":"launch-gate-r4","detail":"RUNNING · 1 mẫu phạm vi · MEDIUM"}
 {"at":"2026-10-09T02:17:14.530Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"launch-gate-r4","detail":"docs/launch-gate-r4 @ 3e544c79c80a · 1 lệnh kiểm thử"}
+{"at":"2026-10-09T02:17:37.469Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"launch-gate-r4","detail":"#723 cho docs/launch-gate-r4 @ 3e544c79c80a"}
