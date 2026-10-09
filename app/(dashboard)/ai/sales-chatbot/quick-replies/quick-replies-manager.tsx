@@ -186,17 +186,24 @@ export function QuickRepliesManager({ manage, settings, rows }: { manage: boolea
                 </div>
                 {manage ? (
                   <div className="flex shrink-0 items-center gap-1">
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      className="h-8 text-xs"
-                      title="Bot gửi câu này (kèm ảnh menu) ở bước upsell / cross-sell — đúng một lần mỗi hội thoại"
-                      disabled={pending || (!r.active && settings.upsellReplyId !== r.id)}
-                      onClick={() => act(() => setUpsellQuickReplyAction(settings.upsellReplyId === r.id ? null : r.id))}
-                    >
-                      {settings.upsellReplyId === r.id ? "Bỏ upsell" : "Dùng làm câu upsell"}
-                    </Button>
-                    <Switch checked={r.active} disabled={pending || (r.needsEdit && !r.active)} onCheckedChange={(v) => act(() => setQuickReplyActiveAction(r.id, v))} aria-label={`Bật câu mẫu ${r.title}`} />
+                    {/*
+                      HAI CÔNG TẮC, MỖI CÁI MỘT NHÃN (chủ shop HSLC 09/10/2026): trước đây chữ bấm «Dùng làm câu upsell» đứng sát
+                      công tắc bật / tắt câu mẫu nên trông như nhãn của nó — gạt công tắc tưởng là chọn upsell, thực ra là bật câu.
+                    */}
+                    <label className="flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs" title="Bot gửi câu này (kèm ảnh menu) ở bước upsell / cross-sell — đúng một lần mỗi hội thoại. Chỉ một câu được chọn.">
+                      <Switch
+                        checked={settings.upsellReplyId === r.id}
+                        disabled={pending || (!r.active && settings.upsellReplyId !== r.id)}
+                        onCheckedChange={(v) => act(() => setUpsellQuickReplyAction(v ? r.id : null))}
+                        aria-label={`Câu upsell: ${r.title}`}
+                        data-testid="upsell-switch"
+                      />
+                      Câu upsell
+                    </label>
+                    <label className="flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs" title="Bật thì bot được dùng câu này để trả lời khách">
+                      <Switch checked={r.active} disabled={pending || (r.needsEdit && !r.active)} onCheckedChange={(v) => act(() => setQuickReplyActiveAction(r.id, v))} aria-label={`Bật câu mẫu ${r.title}`} />
+                      {r.active ? "Đang bật" : "Đang tắt"}
+                    </label>
                     <Button size="icon" variant="ghost" className="size-8" title="Thêm ảnh" disabled={pending || r.images.length >= QUICK_REPLY_LIMITS.images} onClick={() => { setUploadFor(r.id); fileRef.current?.click(); }}>
                       <ImagePlus className="size-4" />
                     </Button>
