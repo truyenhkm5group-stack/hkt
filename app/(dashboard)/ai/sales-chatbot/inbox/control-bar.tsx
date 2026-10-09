@@ -49,6 +49,9 @@ export function ConversationControlBar({
   const [pending, setPending] = useState<ConversationControl | null>(null);
   const [asking, setAsking] = useState(false);
   const [reason, setReason] = useState("");
+  // Lý do AI không trả lời + cách sửa: GẬP mặc định (INBOX-V2-A) — dòng trạng thái đã nói kết luận; chi tiết mở bằng «Vì sao?».
+  // Trước đây khối này luôn mở và chiếm ~160 px phía trên dòng tin, đẩy tin khách xuống dưới.
+  const [why, setWhy] = useState(false);
   const mode: ConversationControl = control?.mode ?? "AUTO";
 
   // Đồng hồ đếm ngược: chỉ chạy sau khi gắn vào trang (bản dựng sẵn ở máy chủ không mang số giây). Lệch = giờ máy chủ − giờ trình
@@ -157,6 +160,11 @@ export function ConversationControlBar({
             ) : null}
             {status}
           </span>
+          {shown.note || blocks.length ? (
+            <button type="button" className="shrink-0 font-medium underline underline-offset-2 opacity-90 hover:opacity-100" aria-expanded={why} onClick={() => setWhy((v) => !v)} data-testid="ai-why-toggle">
+              {why ? "Ẩn chi tiết" : `Vì sao?${blocks.length ? ` (${blocks.length})` : ""}`}
+            </button>
+          ) : null}
         </span>
         {canWork ? (
           <div className="flex flex-wrap items-center gap-1" role="group" aria-label="Ai trả lời khách">
@@ -164,8 +172,8 @@ export function ConversationControlBar({
           </div>
         ) : null}
       </div>
-      {shown.note ? <p className="break-words text-[11px] opacity-90" data-testid="ai-block-note">{shown.note}</p> : null}
-      {blocks.length ? (
+      {why && shown.note ? <p className="break-words text-[11px] opacity-90" data-testid="ai-block-note">{shown.note}</p> : null}
+      {why && blocks.length ? (
         <ul className="flex flex-wrap gap-x-3 gap-y-1 text-[11px]" data-testid="ai-blocks">
           {blocks.map((b) => (
             <li key={b.code} data-code={b.code} className="inline-flex items-center gap-1">

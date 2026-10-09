@@ -2,19 +2,19 @@
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { ArrowDown, ArrowLeft, ImagePlus, Loader2, Send, Sparkles, UserRound, X } from "lucide-react";
+import { ArrowDown, ArrowLeft, Bot, ImagePlus, Loader2, Send, UserRound, X } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { ChatOrderForm } from "@/components/orders/chat-order-form";
 import { OrderQuickDecision, OrderReviewEntries } from "@/components/orders/order-review-quick";
 import { isManualOrderId } from "@/lib/constants/manual-orders";
-import { assignConversationAction, claimConversationAction, releaseConversationAction, sendStaffReplyAction, suggestReplyAction } from "@/lib/actions/sales-inbox";
+import { assignConversationAction, claimConversationAction, releaseConversationAction, sendStaffReplyAction } from "@/lib/actions/sales-inbox";
 import { formatDateTime, formatNumber, vnClock, vnDateKey } from "@/lib/format";
 import { insertIntoDraft } from "@/lib/sales-chatbot/inbox-composer-shared";
-import { STAFF_IMAGE_MAX_BYTES, STAFF_IMAGES_MAX, STAFF_REPLY_MAX, type InboxOrder, type InboxThread, type TimelineItem } from "@/lib/sales-chatbot/inbox-shared";
+import { avatarHrefOf, STAFF_IMAGE_MAX_BYTES, STAFF_IMAGES_MAX, STAFF_REPLY_MAX, type InboxOrder, type InboxThread, type TimelineItem } from "@/lib/sales-chatbot/inbox-shared";
 import { cn } from "@/lib/utils";
 import { ChannelAvatar } from "./avatar";
-import { ComposerTools } from "./composer-tools";
+import { ComposerTools, type ComposerTab } from "./composer-tools";
 import { ConversationControlBar } from "./control-bar";
 import { MessageTraceLine } from "./message-trace";
 import { LabelsPanel } from "./labels-panel";
@@ -33,12 +33,19 @@ function newKey(): string {
   return typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
 }
 
+/**
+ * Bốn phía, bốn mặt bong bóng DỊU (INBOX-V2-A): khách = xám trung tính bên trái; AI = tím nhạt; nhân viên gửi từ đây = xanh lục đặc
+ * (tiếng nói của chính shop); phía page ngoài hệ thống (Pancake / Hộp thư Meta / trả lời tự động) = nền nhạt viền đứt. Tin liền nhau
+ * của cùng người gửi gộp dưới một tên + giờ; bong bóng sau trong nhóm bo góc nhỏ phía người gửi.
+ */
 const BUBBLE: Record<TimelineItem["side"], string> = {
-  CUSTOMER: "bg-muted text-foreground rounded-bl-md",
-  BOT: "bg-violet-600 text-white rounded-br-md dark:bg-violet-700",
-  STAFF: "bg-emerald-600 text-white rounded-br-md dark:bg-emerald-700",
-  PAGE: "bg-sky-600 text-white rounded-br-md dark:bg-sky-700",
+  CUSTOMER: "bg-muted text-foreground",
+  BOT: "bg-violet-50 text-violet-950 ring-1 ring-inset ring-violet-200 dark:bg-violet-950/40 dark:text-violet-50 dark:ring-violet-900",
+  STAFF: "bg-emerald-600 text-white dark:bg-emerald-700",
+  PAGE: "bg-sky-50 text-sky-950 border border-dashed border-sky-300 dark:bg-sky-950/30 dark:text-sky-50 dark:border-sky-800",
 };
+/** Góc «đuôi» của bong bóng đầu nhóm và góc nhỏ của bong bóng tiếp theo — phía khách bên trái, phía shop bên phải. */
+const TAIL = { left: { head: "rounded-tl-md", next: "rounded-l-md" }, right: { head: "rounded-tr-md", next: "rounded-r-md" } } as const;
 const SIDE_LABEL: Record<TimelineItem["side"], string> = { CUSTOMER: "Khách", BOT: "Bot", STAFF: "Nhân viên", PAGE: "Nhân viên / tự động (ngoài ERP)" };
 /** Vỏ Chốt Đơn: cùng bốn phía, chỉ đổi chữ — người dùng vỏ không biết «ERP» là gì. */
 const SHELL_SIDE_LABEL: Record<TimelineItem["side"], string> = { ...SIDE_LABEL, PAGE: "Nhân viên / tự động (ngoài hệ thống)" };
@@ -97,7 +104,9 @@ export function InboxThreadView({
   const [text, setText] = useState("");
   const [requestKey, setRequestKey] = useState(newKey);
   const [confirmPaid, setConfirmPaid] = useState(false);
-  const [pending, setPending] = useState<null | "send" | "suggest" | "claim" | "release" | "assign">(null);
+  const [pending, setPending] = useState<null | "send" | "claim" | "release" | "assign">(null);
+  // Bảng «Câu mẫu · Sản phẩm · AI gợi ý» của ô soạn (composer-tools.tsx) — ô soạn giữ để phím «/» mở được.
+  const [tools, setTools] = useState<ComposerTab | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showOrder, setShowOrder] = useState(false);
   // Dưới 1280 px cột khách / đơn / ghi chú là một lớp PHỦ mở bằng nút trên đầu hội thoại — trước đây nó `hidden` hẳn nên trên
@@ -198,22 +207,11 @@ export function InboxThreadView({
     }
   };
 
-  const suggest = async () => {
-    setPending("suggest");
-    setError(null);
-    try {
-      const r = await suggestReplyAction(thread.id);
-      if ("error" in r) {
-        setError(r.error);
-        return;
-      }
-      setText(r.suggestion);
-      // Câu mới ⇒ lượt gửi mới.
-      setRequestKey(newKey());
-      input.current?.focus();
-    } finally {
-      setPending(null);
-    }
+  /** «Dùng câu này» của thẻ AI gợi ý: thay cả ô soạn (như nút «AI gợi ý» cũ) — câu mới ⇒ lượt gửi mới. */
+  const replaceDraft = (next: string) => {
+    setText(next.slice(0, STAFF_REPLY_MAX));
+    setRequestKey(newKey());
+    requestAnimationFrame(() => input.current?.focus());
   };
 
   /**
@@ -244,6 +242,7 @@ export function InboxThreadView({
   };
 
   const mine = thread.assigneeUserId === me;
+  const avatarHref = avatarHrefOf(thread.customer.id);
   const w = thread.window;
   const rows = layout(thread.items, shell ? SHELL_SIDE_LABEL : SIDE_LABEL);
 
@@ -257,7 +256,14 @@ export function InboxThreadView({
             <Link href={backHref} className="mt-2 text-muted-foreground hover:text-foreground lg:hidden" aria-label="Về danh sách">
               <ArrowLeft className="size-4" />
             </Link>
-            <ChannelAvatar name={thread.customer.name} channel={thread.channel} src={thread.avatarUrl} size="lg" />
+            {/* Ảnh khách mở HỒ SƠ KHÁCH khi đã nối (`avatarHrefOf` — không nguồn nào cho link trang cá nhân Facebook thật; không dựng từ PSID). */}
+            {avatarHref ? (
+              <Link href={avatarHref} className="shrink-0 rounded-full focus-visible:ring-2 focus-visible:ring-primary" title="Mở hồ sơ khách" aria-label={`Mở hồ sơ khách ${thread.customer.name}`} data-testid="inbox-avatar-link">
+                <ChannelAvatar name={thread.customer.name} channel={thread.channel} src={thread.avatarUrl} size="lg" />
+              </Link>
+            ) : (
+              <ChannelAvatar name={thread.customer.name} channel={thread.channel} src={thread.avatarUrl} size="lg" />
+            )}
             <div className="min-w-0 space-y-0.5">
               <p className="truncate text-base font-semibold leading-tight">{thread.customer.name}</p>
               <p className="truncate text-[12px] text-muted-foreground">
@@ -271,7 +277,7 @@ export function InboxThreadView({
           </div>
           <div className="flex max-w-full flex-wrap items-center justify-end gap-1.5">
             <Button size="sm" variant="outline" className="h-8 xl:hidden" onClick={() => setShowSide(true)} aria-label="Khách, đơn và ghi chú" data-testid="inbox-open-side">
-              <UserRound className="size-4" /> Khách · Đơn
+              <UserRound className="size-4" /> <span className="hidden sm:inline">Khách · Đơn</span>
             </Button>
             {!thread.assigneeUserId && thread.canWork ? (
               <Button size="sm" className="h-8" disabled={!!pending} onClick={() => void run("claim", () => claimConversationAction(thread.id), "Đã nhận hội thoại")}>
@@ -311,7 +317,7 @@ export function InboxThreadView({
         <div className="relative min-h-0 flex-1">
           <div
             ref={scroller}
-            className="h-full overflow-y-auto bg-muted/20 px-4 py-3"
+            className="h-full overflow-y-auto bg-card px-4 py-3"
             data-testid="inbox-timeline"
             onScroll={(e) => {
               const el = e.currentTarget;
@@ -322,33 +328,44 @@ export function InboxThreadView({
             {rows.length === 0 ? <p className="py-10 text-center text-sm text-muted-foreground">Chưa có tin nào.</p> : null}
             {rows.map((r) =>
               r.kind === "day" ? (
-                <div key={r.key} className="my-3 flex items-center gap-3 text-[11px] text-muted-foreground">
-                  <span className="h-px flex-1 bg-border" />
-                  {r.label}
-                  <span className="h-px flex-1 bg-border" />
+                <div key={r.key} className="my-3 flex justify-center" data-day>
+                  <span className="rounded-full bg-muted px-2.5 py-0.5 text-[11px] font-medium text-muted-foreground">{r.label}</span>
                 </div>
               ) : (
                 <div key={r.m.key} className={cn("flex flex-col", r.m.side === "CUSTOMER" ? "items-start" : "items-end", r.head ? "mt-3" : "mt-0.5")} data-side={r.m.side}>
                   {r.head ? (
-                    <span className="mb-0.5 px-1 text-[11px] text-muted-foreground">
-                      {r.author} · {vnClock(r.m.at).slice(0, 5)}
+                    <span className="mb-0.5 inline-flex items-center gap-1 px-1 text-[11px] text-muted-foreground/90">
+                      {r.m.side === "BOT" ? <Bot className="size-3 text-violet-500" aria-hidden /> : null}
+                      <span className="font-medium text-foreground/70">{r.author}</span>
+                      <span aria-hidden>·</span>
+                      <time dateTime={r.m.at}>{vnClock(r.m.at).slice(0, 5)}</time>
                     </span>
                   ) : null}
-                  <div className={cn("max-w-[78%] rounded-2xl px-3.5 py-2 text-[14px] leading-relaxed shadow-sm", BUBBLE[r.m.side], r.m.status === "FAILED" && "bg-destructive/90 dark:bg-destructive/80", r.m.status === "SENDING" && "opacity-70")} title={formatDateTime(r.m.at)}>
+                  <div
+                    className={cn(
+                      "max-w-[78%] rounded-2xl px-3.5 py-2 text-[14px] leading-relaxed",
+                      BUBBLE[r.m.side],
+                      TAIL[r.m.side === "CUSTOMER" ? "left" : "right"][r.head ? "head" : "next"],
+                      r.m.status === "FAILED" && "ring-2 ring-destructive/60",
+                      r.m.status === "SENDING" && "opacity-60",
+                    )}
+                    title={formatDateTime(r.m.at)}
+                    data-status={r.m.status}
+                  >
                     {r.m.text ? <div className="whitespace-pre-wrap break-words">{r.m.text}</div> : null}
                     {r.m.images.length ? (
                       <div className={cn("flex flex-wrap gap-1", r.m.text && "mt-1.5")}>
                         {r.m.images.slice(0, 6).map((src) => (
                           <a key={src} href={src} target="_blank" rel="noopener noreferrer">
                             {/* eslint-disable-next-line @next/next/no-img-element -- ảnh khách (CDN của kênh) hoặc ảnh nhân viên trong CSDL qua tuyến có kiểm quyền */}
-                            <img src={src} alt="Ảnh trong hội thoại" className="h-32 w-32 rounded-lg border border-white/30 object-cover" loading="lazy" />
+                            <img src={src} alt="Ảnh trong hội thoại" className="h-32 w-32 rounded-lg border border-foreground/10 object-cover" loading="lazy" />
                           </a>
                         ))}
                       </div>
                     ) : null}
                   </div>
                   {r.m.status === "SENDING" ? <span className="mt-0.5 px-1 text-[11px] text-muted-foreground">Đang gửi…</span> : null}
-                  {r.m.status === "FAILED" ? <span className="mt-0.5 max-w-[78%] px-1 text-right text-[11px] font-medium text-destructive">Gửi hỏng — {r.m.error ?? "thử lại"}</span> : null}
+                  {r.m.status === "FAILED" ? <span className="mt-0.5 max-w-[78%] px-1 text-right text-[11px] text-destructive">Gửi hỏng · {r.m.error ?? "thử lại"}</span> : null}
                   {r.m.trace ? <MessageTraceLine trace={r.m.trace} /> : null}
                 </div>
               ),
@@ -362,7 +379,7 @@ export function InboxThreadView({
         </div>
 
         {/* ── Khung soạn ── */}
-        <footer className="space-y-2 border-t bg-background px-3 py-2">
+        <footer className="space-y-2 border-t bg-card px-3 py-2">
           {w.kind !== "OPEN" || w.note ? (
             <p className={cn("rounded-md px-2 py-1 text-[12px]", w.kind === "OPEN" ? "bg-muted text-muted-foreground" : "bg-amber-50 text-amber-900 dark:bg-amber-950/40 dark:text-amber-200")}>{w.note}</p>
           ) : null}
@@ -407,10 +424,17 @@ export function InboxThreadView({
                   onChange={(e) => setText(e.target.value)}
                   maxLength={STAFF_REPLY_MAX}
                   rows={1}
-                  placeholder="Nhập tin nhắn… (Enter để gửi · Shift + Enter xuống dòng)"
+                  placeholder="Nhập tin nhắn… (gõ / để chèn nhanh)"
+                  title="Enter gửi · Shift + Enter xuống dòng · gõ / khi ô trống để mở Câu mẫu · Sản phẩm · AI gợi ý"
                   aria-label="Tin trả lời"
                   className="max-h-40 min-h-[36px] flex-1 resize-none bg-transparent py-1.5 text-[14px] outline-none"
                   onKeyDown={(e) => {
+                    // «/» khi ô soạn trống ⇒ mở bảng Câu mẫu · Sản phẩm · AI gợi ý (gõ «/» giữa câu vẫn là ký tự thường).
+                    if (e.key === "/" && !e.currentTarget.value && !e.nativeEvent.isComposing) {
+                      e.preventDefault();
+                      setTools("quick");
+                      return;
+                    }
                     if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
                       e.preventDefault();
                       void send();
@@ -421,11 +445,8 @@ export function InboxThreadView({
                   {pending === "send" ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />} Gửi
                 </Button>
               </div>
-              <div className="flex flex-wrap items-center gap-3 px-1 text-[12px]">
-                <button type="button" className="inline-flex items-center gap-1 text-violet-700 hover:underline disabled:opacity-50 dark:text-violet-300" disabled={!!pending} onClick={() => void suggest()}>
-                  {pending === "suggest" ? <Loader2 className="size-3.5 animate-spin" /> : <Sparkles className="size-3.5" />} AI gợi ý câu trả lời
-                </button>
-                <ComposerTools conversationId={thread.id} disabled={!!pending} onInsert={insertSnippet} shell={shell} />
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-0.5 text-[12px]">
+                <ComposerTools conversationId={thread.id} disabled={!!pending} onInsert={insertSnippet} shell={shell} tab={tools} onTabChange={setTools} onReplace={replaceDraft} onClosed={() => input.current?.focus()} />
                 {w.kind === "PAID" ? (
                   <label className="flex items-center gap-1 font-medium text-amber-800 dark:text-amber-200">
                     <input type="checkbox" checked={confirmPaid} onChange={(e) => setConfirmPaid(e.target.checked)} /> Gửi tin tính phí
@@ -443,7 +464,7 @@ export function InboxThreadView({
 
       {/* ── Cột khách (≥ 1280 px: cột cố định · nhỏ hơn: lớp phủ toàn màn hình) ── */}
       <aside
-        className={cn("min-h-0 space-y-3 overflow-y-auto bg-muted/20 p-3 text-[13px] xl:static xl:z-auto xl:block xl:border-l xl:border-foreground/15 xl:bg-muted/20", showSide ? "fixed inset-0 z-50 block bg-background pb-8" : "hidden")}
+        className={cn("min-h-0 space-y-3 overflow-y-auto bg-surface-sunken/40 p-3 text-[13px] xl:static xl:z-auto xl:block xl:border-l xl:border-foreground/10 xl:bg-surface-sunken/40", showSide ? "fixed inset-0 z-50 block bg-background pb-8" : "hidden")}
         data-testid="inbox-side"
         aria-label="Khách, đơn và ghi chú"
       >
@@ -469,6 +490,7 @@ export function InboxThreadView({
             </Link>
           ) : null}
         </div>
+        {/* ── CHỖ CẮM PANEL ĐƠN (INBOX-V2-B · order-panel.tsx): chèn MỘT dòng ngay dưới đây, trước thẻ lịch sử mua. ── */}
         <CustomerHistoryCard history={thread.history} level={thread.level} />
         <div className="space-y-1.5 rounded-lg border bg-background p-3" data-testid="inbox-orders">
           <p className="text-[12px] font-semibold uppercase tracking-wide text-muted-foreground">Đơn của khách</p>

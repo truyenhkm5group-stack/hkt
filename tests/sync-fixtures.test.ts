@@ -488,6 +488,7 @@ import { testSalesOperatingMode } from "./sales-operating-mode.test";
 import { testSalesInbox } from "./sales-inbox.test";
 import { testInboxAdvanced } from "./inbox-advanced.test";
 import { testInboxComposer } from "./inbox-composer.test";
+import { testInboxV2A } from "./inbox-v2-a.test";
 import { testSalesInboxHistory } from "./sales-inbox-history.test";
 import { testE2eAiSalesPlatform } from "./e2e-ai-sales-platform.test";
 import { testSalesExperimentReport } from "./sales-experiment-report.test";
@@ -2854,6 +2855,8 @@ async function main() {
   await testInboxAdvanced();
   // Ô soạn hộp thư: chèn câu mẫu / dòng sản phẩm (giá = giá bot, tồn chỉ khi đọc được), quyền ≡ «Gửi», cô lập — `o-soan-a` / `o-soan-b`.
   await testInboxComposer();
+  // INBOX-V2-A: bộ lọc gọn (14 tham số cũ còn đủ) · chưa đọc trước ở MÁY CHỦ (phân trang ổn định) · hàng đang mở đứng yên · ảnh không link Facebook giả — tổ chức `hop-thu-v2a`.
+  await testInboxV2A();
   // Nhập đủ lịch sử hội thoại vào hộp thư (0221): tổ chức THẬT `hop-thu-lich-su`, Pancake giả, tự cấp, tự dọn.
   await testSalesInboxHistory();
   // E2E trọn vòng: tin khách → AI → đơn → giao → Hiệu quả → mốc kích hoạt → sổ dùng → Owner Cockpit (tổ chức `e2e-shop`).

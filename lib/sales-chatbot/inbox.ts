@@ -252,6 +252,18 @@ function inboundSide(note: string | null, messageId: string): TimelineSide {
   return "CUSTOMER";
 }
 
+/**
+ * THỨ TỰ DANH SÁCH (INBOX-V2-A, chủ shop 09/10/2026) — xếp ở MÁY CHỦ, không xếp lại trên trình duyệt, nên «Xem thêm» (nâng `limit`)
+ * luôn ra ĐÚNG phần nối tiếp của trang trước:
+ *  · «Chờ trả lời»: khách chờ LÂU NHẤT lên đầu (đúng thứ tự phải xử lý).
+ *  · Mọi thẻ khác: CHƯA ĐỌC trước, rồi đã đọc; trong mỗi nhóm tin mới nhất lên đầu.
+ * Khoá cuối là `id` để hai hội thoại cùng mốc không đổi chỗ giữa hai lượt tải (phân trang ổn định).
+ */
+export function inboxOrderBy(filter: InboxFilter): SQL[] {
+  if (filter === "UNANSWERED") return [asc(schema.salesChatConversations.lastCustomerAt), asc(schema.salesChatConversations.id)];
+  return [sql`${UNREAD} desc`, desc(ACTIVITY), desc(schema.salesChatConversations.id)];
+}
+
 /** Danh sách hội thoại của hộp thư (tối đa 100) — lọc theo việc cần làm, kênh, tên / SĐT. Không kéo nội dung tin (chỉ một dòng xem trước). */
 export async function listInbox(user: SessionUser, rawQuery: unknown, now: Date = new Date()): Promise<InboxResult<{ rows: InboxRow[]; counts: Record<InboxFilter, number>; levelCounts: Partial<Record<CustomerLevel, number>>; phoneCount: number; total: number }>> {
   if (!can(user, VIEW)) return { ok: false, error: NO_VIEW };
@@ -321,6 +333,7 @@ export async function listInbox(user: SessionUser, rawQuery: unknown, now: Date 
       threadId: c.threadId,
       customerName: cu.name,
       customerPhone: cu.phone,
+      customerId: c.customerId,
       stateName: sql<string | null>`${c.state}->'customer'->>'name'`,
       statePhone: sql<string | null>`${c.state}->'customer'->>'phone'`,
       inboundName: INBOUND_NAME,
@@ -344,8 +357,7 @@ export async function listInbox(user: SessionUser, rawQuery: unknown, now: Date 
     .leftJoin(cu, eq(cu.id, c.customerId))
     .leftJoin(u, eq(u.id, c.assigneeUserId))
     .where(where)
-    // «Chờ trả lời»: khách chờ LÂU NHẤT lên đầu (đúng thứ tự phải xử lý); còn lại: mới nhất lên đầu.
-    .orderBy(q.filter === "UNANSWERED" ? asc(c.lastCustomerAt) : desc(ACTIVITY))
+    .orderBy(...inboxOrderBy(q.filter))
     .limit(q.limit);
 
   // Một dòng xem trước cho mỗi hội thoại — kênh nhắn tin đọc sổ tin thô của kênh, chat web đọc lịch sử của bot.
@@ -399,6 +411,7 @@ export async function listInbox(user: SessionUser, rawQuery: unknown, now: Date 
         handoffReason: r.handoffReason,
         customerName: r.customerName || r.stateName || r.inboundName || "Khách",
         customerPhone: r.customerPhone || r.statePhone || r.convPhone || null,
+        customerId: r.customerId ?? null,
         preview: (previews.get(r.id)?.text ?? "").slice(0, 140),
         previewSide: previews.get(r.id)?.side ?? null,
         lastActivityAt: iso(r.activity) ?? new Date(0).toISOString(),

@@ -31,6 +31,150 @@ export const INBOX_FILTER_LABEL: Record<InboxFilter, string> = {
   UNASSIGNED: "Chưa ai nhận",
 };
 
+/**
+ * THẺ LỌC NHANH (INBOX-V2-A, chủ shop 09/10/2026): đầu danh sách chỉ giữ ô tìm + ≤ 5 thẻ việc-cần-làm. Mọi bộ lọc còn lại (thẻ
+ * khác của `INBOX_FILTERS`, page, kênh, AI / người, nhân viên, SĐT, level, thời gian, nhãn) nằm trong nút «Lọc ▾» — KHÔNG bộ lọc
+ * nào bị bỏ, chỉ đổi chỗ đứng. URL giữ nguyên tham số cũ (`INBOX_URL_PARAMS`) nên link cũ / nút quay lại vẫn đúng.
+ */
+export const INBOX_QUICK_FILTERS = ["UNREAD", "UNANSWERED", "NEEDS_HUMAN", "MINE"] as const satisfies readonly InboxFilter[];
+/**
+ * Thẻ của `INBOX_FILTERS` KHÔNG nằm ở hàng nhanh — vào ô «Trạng thái» của «Lọc ▾». «Tất cả» không phải một thẻ: bấm lại thẻ nhanh
+ * đang bật là về «Tất cả» (tổng hội thoại in trong ô tìm) — bốn thẻ vừa một hàng ở cột 340 px.
+ */
+export const INBOX_MORE_FILTERS: readonly InboxFilter[] = INBOX_FILTERS.filter((f) => f !== "ALL" && !(INBOX_QUICK_FILTERS as readonly InboxFilter[]).includes(f));
+
+/**
+ * MỌI tham số URL của hộp thư — bản khai duy nhất (bài kiểm `tests/inbox-v2-a.test.ts` so với `page.tsx`, để một lượt dọn giao diện
+ * không lặng lẽ làm mất một bộ lọc). `quick` = đứng ở hàng đầu; `advanced` = trong «Lọc ▾» (đếm vào huy hiệu «Lọc (n)»);
+ * `nav` = không phải bộ lọc (hội thoại đang mở · số dòng đã tải).
+ */
+export const INBOX_URL_PARAMS = {
+  q: { kind: "quick", label: "Tìm tên / SĐT" },
+  f: { kind: "quick", label: "Thẻ lọc (hàng nhanh; thẻ khác ở ô «Trạng thái» của «Lọc»)" },
+  pg: { kind: "advanced", label: "Page" },
+  ch: { kind: "advanced", label: "Kênh" },
+  xl: { kind: "advanced", label: "AI / Người xử lý" },
+  nv: { kind: "advanced", label: "Nhân viên phụ trách" },
+  sdt: { kind: "advanced", label: "Có / chưa SĐT" },
+  lv: { kind: "advanced", label: "Level khách" },
+  tg: { kind: "advanced", label: "Thời gian tin cuối" },
+  tu: { kind: "advanced", label: "Từ ngày" },
+  den: { kind: "advanced", label: "Đến ngày" },
+  lb: { kind: "advanced", label: "Nhãn" },
+  n: { kind: "nav", label: "Số hội thoại đã tải («Xem thêm»)" },
+  c: { kind: "nav", label: "Hội thoại đang mở" },
+} as const;
+export type InboxUrlParam = keyof typeof INBOX_URL_PARAMS;
+
+/** Bộ lọc đang áp (đọc từ URL ở `page.tsx`) — đủ để dựng lại mọi đường dẫn của hộp thư. */
+export type InboxFilterState = {
+  filter: InboxFilter;
+  q: string;
+  page: string | null;
+  channel: InboxChannel | null;
+  handler: InboxHandler | null;
+  assignee: string | null;
+  phone: "HAS" | "NONE" | null;
+  level: CustomerLevel | null;
+  period: InboxPeriod | null;
+  from: string | null;
+  to: string | null;
+  label: string | null;
+  limit: number;
+  selected: string | null;
+};
+
+/** Trạng thái lọc ⇒ tham số URL (ĐÚNG tên tham số cũ). `patch` đè từng khoá; `null` = bỏ. HÀM THUẦN. */
+export function inboxParams(s: InboxFilterState, patch: Partial<Record<InboxUrlParam, string | null>> = {}): URLSearchParams {
+  const cur: Record<InboxUrlParam, string | null> = {
+    f: s.filter === "ALL" ? null : s.filter,
+    ch: s.channel,
+    lb: s.label,
+    pg: s.page,
+    q: s.q || null,
+    sdt: s.phone === "HAS" ? "co" : s.phone === "NONE" ? "khong" : null,
+    lv: s.level,
+    nv: s.assignee,
+    tg: s.period,
+    tu: s.from,
+    den: s.to,
+    n: s.limit > 100 ? String(s.limit) : null,
+    xl: s.handler === "AI" ? "ai" : s.handler === "HUMAN" ? "nguoi" : null,
+    c: s.selected || null,
+    ...patch,
+  };
+  const p = new URLSearchParams();
+  for (const [k, v] of Object.entries(cur)) if (v) p.set(k, v);
+  return p;
+}
+export const INBOX_HREF = "/ai/sales-chatbot/inbox";
+export function inboxHref(s: InboxFilterState, patch: Partial<Record<InboxUrlParam, string | null>> = {}): string {
+  const q = inboxParams(s, patch).toString();
+  return `${INBOX_HREF}${q ? `?${q}` : ""}`;
+}
+
+/**
+ * Số bộ lọc NÂNG CAO đang bật — huy hiệu «Lọc (n)». Thẻ thuộc hàng nhanh không tính (nó đã hiện ngay trên màn hình); khoảng ngày
+ * (`tg` + `tu` / `den`) là MỘT bộ lọc. HÀM THUẦN.
+ */
+export function inboxAdvancedCount(s: Omit<InboxFilterState, "q" | "limit" | "selected">): number {
+  const moreFilter = (INBOX_MORE_FILTERS as readonly string[]).includes(s.filter);
+  return [moreFilter, s.page, s.channel, s.handler, s.assignee, s.phone, s.level, s.period || s.from || s.to, s.label].filter(Boolean).length;
+}
+
+/**
+ * MỘT trạng thái đơn / cần-người trên mỗi hàng (mật độ danh sách): Cần người > Đã chốt > Đơn nháp > không gì. Các huy hiệu khác
+ * (page, nguồn, level, SĐT, người nhận, nhãn) chỉ hiện khi rê chuột (title) — chúng vẫn lọc được ở «Lọc ▾». HÀM THUẦN.
+ */
+export type InboxRowStatus = { kind: "NEEDS_HUMAN" | "CLOSED" | "DRAFT"; label: string } | null;
+export function inboxRowStatus(r: Pick<InboxRow, "status" | "closed" | "hasOrder">): InboxRowStatus {
+  if (r.status === "HANDOFF") return { kind: "NEEDS_HUMAN", label: "Cần người" };
+  if (r.closed) return { kind: "CLOSED", label: "Đã chốt" };
+  if (r.hasOrder) return { kind: "DRAFT", label: "Đơn nháp" };
+  return null;
+}
+
+/**
+ * HỘI THOẠI ĐANG MỞ ĐỨNG YÊN (INBOX-V2-A): mở hội thoại = đánh dấu đã đọc, nên ở lượt tải sau nó chuyển sang nhóm «đã đọc» (thứ tự
+ * chưa-đọc-trước của máy chủ) hoặc rời hẳn thẻ «Chưa đọc». Hàm này giữ RIÊNG hàng đang mở ở đúng vị trí nó có trong bản danh sách
+ * vừa hiện; mọi hàng khác theo đúng thứ tự máy chủ trả (không xếp lại trang). Hàng đã rời bộ lọc thì giữ bản cũ, số chưa đọc về 0.
+ * Không có bản trước / hàng không có trong bản trước ⇒ trả nguyên danh sách mới. HÀM THUẦN.
+ */
+export function keepActiveInPlace(next: readonly InboxRow[], prev: readonly InboxRow[] | null, activeId: string | null): InboxRow[] {
+  if (!activeId || !prev) return [...next];
+  const prevIdx = prev.findIndex((r) => r.id === activeId);
+  if (prevIdx < 0) return [...next];
+  const fresh = next.find((r) => r.id === activeId);
+  const row: InboxRow = fresh ?? { ...prev[prevIdx], unread: false, unreadCount: 0 };
+  const rest = next.filter((r) => r.id !== activeId);
+  rest.splice(Math.min(prevIdx, rest.length), 0, row);
+  return rest;
+}
+
+/** Mốc tin cuối dạng NGẮN cho hàng hội thoại: «vừa xong» · «5 phút» · «3 giờ» · «2 ngày» · «dd/mm» (giờ Việt Nam). HÀM THUẦN. */
+export function compactTimeAgo(iso: string | null, nowMs: number): string {
+  const t = iso ? Date.parse(iso) : NaN;
+  if (!Number.isFinite(t)) return "—";
+  const min = Math.max(0, Math.round((nowMs - t) / 60_000));
+  if (min < 1) return "vừa xong";
+  if (min < 60) return `${min} phút`;
+  if (min < 24 * 60) return `${Math.round(min / 60)} giờ`;
+  if (min < 7 * 24 * 60) return `${Math.round(min / 1440)} ngày`;
+  const vn = new Date(t + 7 * 3_600_000).toISOString();
+  return `${vn.slice(8, 10)}/${vn.slice(5, 7)}`;
+}
+
+/**
+ * Bấm ảnh đại diện khách đi đâu. GIỚI HẠN (đo 09/10/2026): KHÔNG nguồn nào đang lưu đường dẫn TRANG CÁ NHÂN Facebook của khách —
+ * Meta chỉ trả `profile_pic` (ảnh CDN có hạn, `messenger.ts::refreshMessengerProfile`), Pancake chỉ trả ảnh (`pancakeAvatarUrl`).
+ * Mã PSID / mã luồng là mã THEO PAGE, không phải mã hồ sơ: dựng đường dẫn Facebook từ chúng ra một trang lỗi hoặc SAI NGƯỜI, nên
+ * tuyệt đối không dựng (`tests/inbox-v2-a.test.ts` quét mã nguồn). Khi một nguồn trả link hồ sơ THẬT thì thêm nhánh ở đây, đọc ĐÚNG
+ * trường nguồn đó. Hôm nay: khách đã nối hồ sơ khách hàng ⇒ mở hồ sơ; chưa nối ⇒ ảnh không phải link. HÀM THUẦN.
+ */
+export function avatarHrefOf(customerId: string | null | undefined): string | null {
+  return customerId ? `/customers/${encodeURIComponent(customerId)}` : null;
+}
+
 /** Nguồn của hội thoại: Pancake · Meta trực tiếp (Messenger / Instagram) · Zalo OA · chat web. */
 export type InboxSource = "PANCAKE" | "DIRECT" | "ZALO" | "WEB";
 export const INBOX_SOURCE_LABEL: Record<InboxSource, string> = { PANCAKE: "Pancake", DIRECT: "Direct", ZALO: "Zalo", WEB: "Web" };
@@ -91,6 +235,8 @@ export type InboxRow = {
   handoffReason: string | null;
   customerName: string;
   customerPhone: string | null;
+  /** Hồ sơ khách ERP đã nối (`sales_chat_conversations.customer_id`) — ảnh đại diện mở hồ sơ này (`avatarHrefOf`). */
+  customerId: string | null;
   preview: string;
   previewSide: TimelineSide | null;
   lastActivityAt: string;
