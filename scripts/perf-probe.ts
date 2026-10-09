@@ -18,6 +18,8 @@ import { thoiGianThucThi, trungVi } from "@/lib/constants/perf-explain";
 import "dotenv/config";
 import { resolvePeriod } from "@/lib/search-params";
 import { clearMemo } from "@/lib/cache";
+import { sql } from "drizzle-orm";
+import type { WorkSource } from "@/lib/constants/work-sources";
 
 /**
  * ĐẾM THỜI GIAN CSDL RIÊNG VỚI THỜI GIAN ỨNG DỤNG.
@@ -659,6 +661,89 @@ async function main() {
   await timed("/inventory/returns", "listPendingInspections", () => insp.listPendingInspections());
   const uni = await import("@/lib/returns/unidentified");
   await timed("/inventory/returns", "listUnidentifiedReturns", () => uni.listUnidentifiedReturns({}));
+
+  /*
+    ═══ /work — VIỆC CỦA TÔI, TỪNG NGUỒN MỘT (09/10/2026) ═══
+
+    Smoke sau deploy (mỗi lượt một mẫu, tổ chức nhà): `/work` 1.379 · 1.001 ms ở dbab6813 /
+    d23c0deb, rồi 3.122 · 4.653 ms ở ef9b302a / 50293da6 (ops smoke 06:16Z: 4.248 ms, đầu trang
+    651 ms, thân 3,6 s). Dò mã: giữa d23c0deb và ef9b302a, đường dựng `/work` chỉ đổi đúng MỘT
+    biểu thức SQL (`unitCostKnown` trong `planning.ts`, cùng kế hoạch thực thi), và đo trên PGlite
+    hai bản cho cùng thời gian. Nên câu hỏi phải trả lời trên dữ liệu thật: NGUỒN NÀO chậm.
+
+    Hai phép đo, vì hai câu hỏi khác nhau:
+      1. HÀM NỀN của từng nguồn, gọi thẳng — chi phí THẬT, không bị hạn 2,5 s che.
+      2. `collectWorkItems({ sources })` — ĐÚNG đường trang gọi, kèm hạn giờ từng nguồn. Thân trang
+         ≈ 2,5 s + phần còn lại là dấu vân tay của MỘT nguồn quá hạn; cột "quá hạn" nói tên nó.
+    Lượt quá hạn KHÔNG bị huỷ (nó chạy tiếp để làm nóng đệm), nên phép đo 2 chạy SAU phép đo 1 và
+    in số việc từng nguồn: dữ liệu phình (vd. thêm cảnh báo) cũng làm chậm mà không đổi dòng mã nào.
+  */
+  {
+    const wa = await import("@/lib/queries/work-adapters");
+    const wq = await import("@/lib/queries/work");
+    const fb = await import("@/lib/queries/fulfillment-bottleneck");
+    const dup = await import("@/lib/queries/order-duplicate");
+    const disp = await import("@/lib/queries/return-dispositions");
+    const fin = await import("@/lib/queries/finance-ops");
+    const aq = await import("@/lib/queries/action-queue");
+    const plan = await import("@/lib/queries/planning");
+    const appr = await import("@/lib/queries/approvals");
+    const adsW = await import("@/lib/queries/ads-decision");
+
+    await timed("/work (nền)", "getCareQueue", () => care.getCareQueue());
+    await timed("/work (nền)", "getFulfillmentBottleneckQueue", () => fb.getFulfillmentBottleneckQueue());
+    await timed("/work (nền)", "getDuplicateOrderQueue", () => dup.getDuplicateOrderQueue());
+    await timed("/work (nền)", "listDispositionQueue 500", () => disp.listDispositionQueue({ limit: 500 }));
+    await timed("/work (nền)", "unclassifiedBankRows 300", () => fin.unclassifiedBankRows(300, { now: new Date() }));
+    await timed("/work (nền)", "getAdsDecision campaign 30d", () => adsW.getAdsDecision(month, "campaign"));
+    // Nguồn ALERT: hàng đợi cảnh báo gọi `getReplenishmentPlan` (số ngày còn hàng) khi có cảnh báo gắn mẫu mã.
+    await timed("/work (nền)", "getActionQueue 500", () => aq.getActionQueue({ limit: 500 }));
+    await timed("/work (nền)", "getReplenishmentPlan", () => plan.getReplenishmentPlan());
+    await timed("/work (nền)", "listApprovalRequests", () => appr.listApprovalRequests({ includeDecided: false, decidedSince: null }));
+
+    const NGUON: [string, WorkSource[]][] = [
+      ["CS_CASE", ["CS_CASE"]],
+      ["SHIPMENT_CARE", ["SHIPMENT_CARE"]],
+      ["FULFILLMENT_EXCEPTION", ["FULFILLMENT_EXCEPTION"]],
+      ["ORDER_DUPLICATE", ["ORDER_DUPLICATE"]],
+      ["RETURN_DISPOSITION", ["RETURN_DISPOSITION"]],
+      ["BANK_EXCEPTION", ["BANK_EXCEPTION"]],
+      ["ADS_DECISION", ["ADS_DECISION"]],
+      ["ALERT (+COD/kho/kiểm hoàn)", ["ALERT", "COD_EXCEPTION", "INVENTORY_EXCEPTION", "RETURN_INSPECTION"]],
+      ["TECH_TASK", ["TECH_TASK"]],
+      ["APPROVAL", ["APPROVAL"]],
+      ["PRODUCTION_TOPIC", ["PRODUCTION_TOPIC"]],
+      ["SAMPLE_REVIEW", ["SAMPLE_REVIEW"]],
+      ["MANUAL/RECURRING/WORKFLOW", ["MANUAL_TASK", "RECURRING_TASK", "WORKFLOW_TASK"]],
+    ];
+    const tungNguon: { ten: string; ms: number; viec: number; quaHan: string }[] = [];
+    for (const [ten, sources] of NGUON) {
+      clearMemo();
+      const t0 = Date.now();
+      try {
+        const r = await wa.collectWorkItems({ sources });
+        tungNguon.push({ ten, ms: Date.now() - t0, viec: r.items.length, quaHan: r.failed.map((f) => `${f.source}: ${f.error}`).join(" · ") });
+      } catch (e) {
+        tungNguon.push({ ten, ms: Date.now() - t0, viec: 0, quaHan: `LỖI: ${e instanceof Error ? e.message : String(e)}` });
+      }
+    }
+    console.log("\n── /work: TỪNG NGUỒN QUA ĐÚNG ĐƯỜNG TRANG GỌI (đệm rỗng, hạn 2,5 s mỗi nguồn) ──");
+    for (const r of [...tungNguon].sort((a, b) => b.ms - a.ms))
+      console.log(`  ${String(r.ms).padStart(6)}ms  ${String(r.viec).padStart(5)} việc  ${r.ten.padEnd(28)} ${r.quaHan ? `QUÁ HẠN/LỖI — ${r.quaHan}` : ""}`);
+
+    // Toàn trang (phần dữ liệu): đúng lời gọi của app/(dashboard)/work/page.tsx, với một tài khoản quản trị thật.
+    const { getDb: layDb } = await import("@/db");
+    const dbW = await layDb();
+    const ad = (await dbW.execute(sql`select id, name, email from users where role::text = 'ADMIN' and active order by id limit 1`)) as unknown as { rows?: { id: string; name: string; email: string }[] };
+    const me = ad.rows?.[0] ?? { id: "probe", name: "probe", email: "probe@local" };
+    // Nguồn ALERT đọc `notifications` chưa xử lý: một luật cảnh báo đổi cách chấm (vd. rủi ro khách, #715) đổi số dòng ở đây.
+    const tb = (await dbW.execute(sql`select kind::text as kind, count(*)::int as n from notifications where resolved_at is null group by 1 order by 2 desc limit 12`)) as unknown as { rows?: { kind: string; n: number }[] };
+    console.log(`  cảnh báo chưa xử lý theo loại: ${(tb.rows ?? []).map((r) => `${r.kind} ${r.n}`).join(" · ") || "(không có)"}`);
+    await timed("/work", "getMyWork (toàn trang)", async () => {
+      const [my] = await Promise.all([wq.getMyWork(me), wq.departmentsOfUser(me.id)]);
+      return { total: my.total, failed: my.failedSources.map((f) => f.source) };
+    });
+  }
 
   results.sort((a, b) => b.ms - a.ms);
   console.log("\n── THỜI GIAN TỪNG TRUY VẤN (chậm nhất trước) ──");
