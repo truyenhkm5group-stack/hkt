@@ -1214,3 +1214,4 @@
 {"at":"2026-10-09T06:28:21.229Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"commercial-sweep-ban-giao","detail":"#729 @ 29e53a2769b1 → 3d1438093374 (MERGE_NOW · LOW · gates success)"}
 {"at":"2026-10-09T06:36:58.889Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"registry-reconcile-0910","detail":"#730 @ 732b4424a445 → 1668e1b23e16 (MERGE_NOW · LOW · gates success)"}
 {"at":"2026-10-09T06:44:56.362Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"pancake-counters-remaining","detail":"#731 @ 899ca02f79c8 → 1286f96c6f85 (MERGE_NOW · MEDIUM · gates success)"}
+{"at":"2026-10-09T07:26:48.829Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"inbox-perf-probe","detail":"feat/inbox-perf-probe @ 082fa0a2bac7 · 1 lệnh kiểm thử"}
