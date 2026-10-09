@@ -255,7 +255,7 @@ export function EmployeeDialog({
                   <FormItem className="sm:col-span-2">
                     <FormLabel>Họ tên</FormLabel>
                     <FormControl>
-                      <Input placeholder="Trần Anh Quân" {...field} />
+                      <Input placeholder="Vd: Nguyễn Văn A" {...field} />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
