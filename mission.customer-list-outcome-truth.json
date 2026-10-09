@@ -23,10 +23,12 @@
     "customer-outcome-truth"
   ],
   "blocked_by": [],
-  "related_prs": [],
+  "related_prs": [
+    722
+  ],
   "migration_reservations": [],
   "created_at": "2026-10-09T00:10:09.995Z",
-  "updated_at": "2026-10-09T02:14:15.547Z",
+  "updated_at": "2026-10-09T02:14:46.823Z",
   "last_heartbeat": "2026-10-09T02:14:15.547Z",
   "definition_of_done": [],
   "handoff": {
