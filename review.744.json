@@ -1,0 +1,8 @@
+{
+  "pr": 744,
+  "sha": "a321c491d8bd1666a4672e51df4639651bf9199b",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-09T15:05:08.026Z",
+  "note": "Review Integration Lead (MM-SEC-03): chỉ đọc (ERP_READ_ONLY + hỏi lại Postgres, chỉ GET, phiên chỉ trong bộ nhớ); S1 hai chiều, «không biết» = FAIL; S2 quét mẫu + giá trị bí mật thật, chỉ in tên mẫu + số; S3 qua secretsAtRestCells trong lib/connectors/service.ts (getDbForInspection, chỉ SELECT, phân loại phong bì bên trong, không giải mã, byte thô không rời tệp), tổ chức ACTIVE không đọc được = FA"
+}
