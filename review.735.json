@@ -1,0 +1,8 @@
+{
+  "pr": 735,
+  "sha": "2cbbb307d6e55daa6750317f4e030102863036da",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-09T07:34:33.748Z",
+  "note": "Review Integration Lead: chỉ giới hạn lựa chọn + trình bày; không đổi quyền / mẫu / lib/auth (bài quét khoá BAN_HANG đúng 7 quyền). Máy chủ: invite/create/update/setUserAccess khi isSalesAgentUser chỉ ĐỌC listAccessRoles rồi trả { error }, can() giữ nguyên; BAN_HANG nhận bằng mã, thiếu/tắt ⇒ không lùi sang vai trò khác (hỏng về phía hẹp, luật 31). ERP không vào nhánh. LOW: shellRoleError + pick ch"
+}
