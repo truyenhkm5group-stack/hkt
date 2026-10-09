@@ -618,6 +618,7 @@ import { testErrorBoundary } from "./error-boundary.test";
 import { testErpA11y } from "./erp-a11y.test";
 import { testDirectConnectGate } from "./direct-connect-gate.test";
 import { testShellTypography } from "./shell-typography.test";
+import { testErpDetailTail } from "./erp-detail-tail.test";
 
 async function main() {
   await ensureMigrated();
@@ -3041,6 +3042,8 @@ async function main() {
   await testDirectConnectGate();
   // Vỏ Chốt Đơn không có chữ dưới 11 px (docs/design-system.md mục 10 · Commercial Sweep PR B).
   testShellTypography();
+  // Trang chi tiết ERP đuôi dài (Commercial Sweep): «%» lẻ không 500, khách sỉ không mã thô, phiếu sản xuất cuộn ngang, lượt nhập VTP hỏng.
+  testErpDetailTail();
   // Nền tảng · phiên & RBAC (agent C): claim org, cổng module, platform:operate, đăng nhập theo tổ chức. Tự cấp
   // tổ chức `pr-` (CSDL riêng) và tự dọn; đứng cạnh bài ngữ cảnh vì cùng lý do.
   await testPlatformRbac();

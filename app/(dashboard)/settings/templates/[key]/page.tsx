@@ -6,6 +6,7 @@ import { InstallPanel } from "@/components/blueprints/install-panel";
 import { EmptyState, SectionCard } from "@/components/ui-bits";
 import { requirePermission } from "@/lib/auth/session";
 import { previewTemplate } from "@/lib/blueprints/admin";
+import { decodeRouteParam } from "@/lib/route-param";
 
 export const metadata = { title: "Xem trước mẫu" };
 
@@ -16,7 +17,7 @@ export const metadata = { title: "Xem trước mẫu" };
 export default async function TemplatePreviewPage({ params }: { params: Promise<{ key: string }> }) {
   const user = await requirePermission("metadata:manage");
   const { key } = await params;
-  const loaded = await previewTemplate(user, decodeURIComponent(key));
+  const loaded = await previewTemplate(user, decodeRouteParam(key));
   const back = (
     <Link href="/settings/templates" className="inline-flex items-center gap-1 text-sm font-medium text-primary underline-offset-2 hover:underline">
       <ArrowLeft className="size-3.5" /> Mọi mẫu

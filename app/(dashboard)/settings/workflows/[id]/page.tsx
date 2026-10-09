@@ -2,6 +2,7 @@ import { PageHeader } from "@/components/page-header";
 import { requirePermission } from "@/lib/auth/session";
 import { loadWorkflowEditor } from "@/lib/platform-ui/workflow-admin";
 import { BACK_TO_LIST, RULE_EYEBROW, ruleHeader, WorkflowRuleBody } from "../rule-view";
+import { decodeRouteParam } from "@/lib/route-param";
 
 export const metadata = { title: "Luật tự động" };
 
@@ -9,7 +10,7 @@ export const metadata = { title: "Luật tự động" };
 export default async function WorkflowRulePage({ params }: { params: Promise<{ id: string }> }) {
   const user = await requirePermission("workflow:manage");
   const { id } = await params;
-  const loaded = await loadWorkflowEditor(user, decodeURIComponent(id));
+  const loaded = await loadWorkflowEditor(user, decodeRouteParam(id));
   return (
     <div className="space-y-5">
       <PageHeader eyebrow={RULE_EYEBROW} actions={BACK_TO_LIST} {...ruleHeader(loaded, user)} />

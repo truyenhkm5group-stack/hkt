@@ -5,6 +5,7 @@ import { requirePermission } from "@/lib/auth/session";
 import { pageHref } from "@/lib/platform-ui/page-admin-shared";
 import { loadPageBuilder } from "@/lib/platform-ui/page-builder";
 import { BACK_TO_LIST } from "../../page-view";
+import { decodeRouteParam } from "@/lib/route-param";
 
 export const metadata = { title: "Trình dựng trang" };
 
@@ -20,7 +21,7 @@ const HINT = (
 export default async function PageBuilderRoute({ params }: { params: Promise<{ id: string }> }) {
   const user = await requirePermission("metadata:manage");
   const { id } = await params;
-  const loaded = await loadPageBuilder(user, decodeURIComponent(id));
+  const loaded = await loadPageBuilder(user, decodeRouteParam(id));
   if (!loaded.ok || !loaded.value.page) {
     return (
       <div className="space-y-5">

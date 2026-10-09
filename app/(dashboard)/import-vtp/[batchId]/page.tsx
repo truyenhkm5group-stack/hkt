@@ -37,6 +37,11 @@ export default async function ImportBatchPage({ params }: { params: Promise<{ ba
       />
 
       <SectionCard title="Lần nhập này thấy gì" description="Bốn phán quyết không phải lỗi được gọi tên riêng, không gộp thành “bỏ qua”.">
+        {/* Tệp không đọc được (kind ERROR) thì chín ô đếm chưa từng được đo — bộ ghi sổ lưu chúng là 0. In «0» là nói tệp
+            rỗng; nói thẳng là tệp hỏng, câu lỗi đứng ngay dưới. */}
+        {b.kind === "ERROR" ? (
+          <p className="text-sm font-medium text-destructive">Không đọc được tệp này — chưa đếm được dòng nào. Kiểm lại tệp tải từ Viettel Post rồi nhập lại.</p>
+        ) : (
         <div className="grid gap-2 sm:grid-cols-3 lg:grid-cols-5">
           <O nhan="Dòng đọc được" so={b.rows} />
           <O nhan="Ghép được vận đơn" so={b.matched} />
@@ -48,6 +53,7 @@ export default async function ImportBatchPage({ params }: { params: Promise<{ ba
           <O nhan="Trạng thái chưa dịch được" so={b.unknownStatus} phu="chữ gốc vẫn vào sổ đăng ký, không bị ném đi" />
           <O nhan="Dòng hỏng" so={b.invalid} />
         </div>
+        )}
         {b.error ? <p className="mt-3 text-xs text-destructive">{b.error}</p> : null}
       </SectionCard>
 
