@@ -3,7 +3,7 @@
   "mission_id": "ai-sales-settings-v2",
   "title": "Cấu hình AI Sales cho người ít rành máy: ô trạng thái + một nút chính, giấu khoá/model/tên hãng với khách vỏ",
   "business_goal": "",
-  "status": "RUNNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -24,7 +24,18 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-09T22:16:03.663Z",
-  "updated_at": "2026-10-09T22:16:03.663Z",
-  "last_heartbeat": "2026-10-09T22:16:03.663Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-09T23:04:59.979Z",
+  "last_heartbeat": "2026-10-09T23:04:59.979Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "feat/ai-sales-settings-v2",
+    "sha": "42b3ed2a809d5886746d223fca24396efedec43e",
+    "at": "2026-10-09T23:04:59.979Z",
+    "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+    "title": "Cấu hình AI Sales cho người ít rành máy: ô trạng thái + một nút chính, giấu khoá/model/tên hãng với khách vỏ",
+    "summary": "Cấu hình AI Sales: ô trạng thái gộp đầu trang (6 trạng thái, thiếu dữ kiện ⇒ Chưa rõ) + một nút chính; cài đặt chia 4 nhóm theo câu hỏi chủ shop; nguồn AI/model vào khối Nâng cao chỉ ở workspace nhà; thanh Lưu dính đáy; công cụ phụ thu gọn",
+    "tests": [
+      "typecheck sạch · lint sạch · npm test TẤT CẢ KIỂM THỬ ĐẠT · build đạt · đột biến 2/2 đỏ"
+    ]
+  }
 }

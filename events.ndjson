@@ -1371,3 +1371,4 @@
 {"at":"2026-10-09T22:50:46.090Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"onboarding-v2","detail":"feat/onboarding-v2 @ 9dd78fa18c55 · 1 lệnh kiểm thử"}
 {"at":"2026-10-09T22:51:01.665Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#752 @ 9dd78fa18c55 · Cập nhật nhánh lên main (merge commit, không đổi mã của PR); gates xanh lại"}
 {"at":"2026-10-09T22:52:44.173Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"CLAIM","mission":"products-shell-v2","detail":"RUNNING · 5 mẫu phạm vi · MEDIUM"}
+{"at":"2026-10-09T23:05:00.014Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"ai-sales-settings-v2","detail":"feat/ai-sales-settings-v2 @ 42b3ed2a809d · 1 lệnh kiểm thử"}
