@@ -1,8 +1,8 @@
 {
   "pr": 752,
-  "sha": "92ebea37c4bc5cfd0fd1173cdb464e82abb3efd7",
+  "sha": "9dd78fa18c5574e7997eaa75e6796471ab39e784",
   "verdict": "PASS",
   "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
-  "at": "2026-10-09T20:40:42.047Z",
-  "note": "Review Integration Lead: danh sách 9 bước tính từ dữ liệu thật qua hàm sẵn có (loadChannelFacts · channelHealth · stock exprs · loadChatbotAiView · sổ sự kiện TEST), không bước nào DONE khi thiếu chứng cứ; trang mở đầu = Tổng quan khi chưa 9/9 (chủ shop 10/10, Tech Lead chốt), chỉ hỏi ở hai cửa vào, đệm 60 s, lỗi ⇒ hộp thư. session.ts: shellUser chỉ để tính đích chuyển hướng (overview|inbox, cả ha"
+  "at": "2026-10-09T22:50:51.329Z",
+  "note": "Cập nhật nhánh lên main (merge commit, không đổi mã của PR); gates xanh lại"
 }
