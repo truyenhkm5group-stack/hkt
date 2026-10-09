@@ -24,7 +24,8 @@ export type EditorInit = {
   /** `suggested` = gợi ý ĐÃ trừ hàng đặt xưởng chưa về (`openPo`, không kể lệnh đang sửa) — mục 70. */
   detail?: Record<string, { stock: number; available: number; sold30: number; suggested: number; openPo?: number }>;
   images: { color: string; url: string }[];
-  unitCost: number;
+  /** `null` = chưa có giá (ô trống) — gửi lên đúng `null`, không bao giờ 0. */
+  unitCost: number | null;
   supplier: string;
   note: string;
   dueDate: string;
@@ -53,7 +54,7 @@ export function ProductionEditor({ init, supplierOptions = [] }: { init: EditorI
   const [supplier, setSupplier] = useState(init.supplier);
   const [note, setNote] = useState(init.note);
   const [dueDate, setDueDate] = useState(init.dueDate);
-  const [unitCost, setUnitCost] = useState(init.unitCost);
+  const [unitCost, setUnitCost] = useState<number | null>(init.unitCost);
   const [newColor, setNewColor] = useState("");
   const [newSize, setNewSize] = useState("");
   const [designVersionId, setDesignVersionId] = useState(init.designVersionId ?? "");
@@ -177,7 +178,7 @@ export function ProductionEditor({ init, supplierOptions = [] }: { init: EditorI
         <div className="grid gap-3 rounded-xl border bg-card p-4 sm:grid-cols-3">
           <div className="space-y-1"><Label>Xưởng may</Label><Input value={supplier} onChange={(e) => setSupplier(e.target.value)} placeholder="Tên xưởng / người nhận" list="xuong-goi-y" /><datalist id="xuong-goi-y">{supplierOptions.map((n) => <option key={n} value={n} />)}</datalist></div>
           <div className="space-y-1"><Label>Ngày cần hàng</Label><Input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} /></div>
-          <div className="space-y-1"><Label>Giá gia công / nhập (đ/sp)</Label><Input type="number" min={0} value={unitCost || ""} onChange={(e) => setUnitCost(Math.max(0, Number(e.target.value) || 0))} /></div>
+          <div className="space-y-1"><Label>Giá gia công / nhập (đ/sp)</Label><Input type="number" min={1} placeholder="Chưa có giá" value={unitCost ?? ""} onChange={(e) => setUnitCost(e.target.value.trim() === "" ? null : Math.max(0, Math.round(Number(e.target.value)) || 0))} /></div>
           <div className="space-y-1 sm:col-span-3"><Label>Ghi chú cho xưởng</Label><Textarea rows={2} value={note} onChange={(e) => setNote(e.target.value)} placeholder="Chất liệu, yêu cầu may, đóng gói, lịch giao…" /></div>
           <div className="space-y-1 sm:col-span-3">
             <Label>Ảnh mẫu theo màu (URL công khai; để trống màu nào thì không in ảnh màu đó)</Label>

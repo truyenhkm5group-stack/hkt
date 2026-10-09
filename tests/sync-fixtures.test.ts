@@ -18,6 +18,7 @@ import { testConsistency } from "./consistency.test";
 import { testDataQuality } from "./data-quality.test";
 import { testInventory } from "./inventory.test";
 import { testUnknownCost } from "./unknown-cost.test";
+import { testProductionUnpricedApproval } from "./production-unpriced-approval.test";
 import { testVtpImportRecovery } from "./vtp-import-recovery.test";
 import { testCostAllocation } from "./cost-allocation.test";
 import { testBankLedger } from "./bank-ledger.test";
@@ -2715,6 +2716,8 @@ async function main() {
   await testHardeningLifecycleInTx(db);
   await testHardeningSettingsPrimitive(db);
   await testHardeningApprovalExecution(db);
+  // Lệnh đặt xưởng chưa có giá: NULL không phải 0, cổng duyệt dùng giá đã nhập → giá dự tính → bắt duyệt.
+  await testProductionUnpricedApproval(db);
   await testHardeningReceiptLinkedEvent(db);
   await testHardeningTopicTrackSemantics(db);
   // Company OS · N: gửi lại tin Lark hỏng + dọn lời duyệt kẹt (mã `cos-n-`; dòng thông báo tự xoá).

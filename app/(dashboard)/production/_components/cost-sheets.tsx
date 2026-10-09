@@ -12,6 +12,7 @@ import { setEstimatedCost } from "@/lib/actions/estimated-cost";
 import { createCostSheet, finalizeCostSheet, startCostSheetFromTopic, updateCostSheetDraft } from "@/lib/actions/production-costing";
 import { COST_LINE_KIND_LABEL, COST_LINE_KINDS, computeCostSheet, PERCENT_UNIT, type CostLineKind, type CostSheetStatus } from "@/lib/constants/production-os";
 import type { CostV1Prefill, ShortcutState } from "@/lib/constants/production-shortcuts";
+import { costRowsToLines, estimateBlocker, type CostRow } from "@/app/(dashboard)/production/_components/cost-rows";
 import { formatDateTime, formatNumber, formatVND } from "@/lib/format";
 
 export type CostSheetView = {
@@ -34,7 +35,7 @@ export type CostSheetView = {
  */
 export type CostV1View = { topicId: string; state: ShortcutState; source: CostV1Prefill["source"]; note: string; previewUnitCost: number | null };
 
-type Row = { kind: CostLineKind; description: string; qty: string; unit: string; unitCost: string };
+type Row = CostRow;
 
 const EMPTY_ROW: Row = { kind: "FABRIC", description: "", qty: "1", unit: "", unitCost: "" };
 
@@ -42,8 +43,10 @@ function toRows(lines: CostSheetView["lines"]): Row[] {
   return lines.map((l) => ({ kind: (COST_LINE_KINDS as readonly string[]).includes(l.kind) ? (l.kind as CostLineKind) : "OTHER", description: l.description, qty: String(l.qty), unit: l.unit, unitCost: l.unit === PERCENT_UNIT ? "" : String(l.unitCost) }));
 }
 
+// Ô đơn giá trống ⇒ CHƯA BIẾT, không đổi thành 0 ₫ — dòng còn trống thì không lưu (`cost-rows.ts`).
 function toInput(rows: Row[]) {
-  return rows.map((r) => ({ kind: r.kind, description: r.description, qty: Number(r.qty.replace(",", ".")) || 0, unit: r.unit.trim(), unitCost: Math.round(Number(r.unitCost) || 0) }));
+  const kq = costRowsToLines(rows);
+  return "error" in kq ? { error: kq.error } : kq.lines;
 }
 
 /**
@@ -75,7 +78,10 @@ export function CostSheets({
   const [notes, setNotes] = useState("");
   const [open, setOpen] = useState<string | null>(sheets[0]?.id ?? null);
   const [pending, start] = useNavTransition();
-  const tinh = useMemo(() => computeCostSheet(toInput(rows)), [rows]);
+  const tinh = useMemo(() => {
+    const lines = toInput(rows);
+    return "error" in lines ? lines : computeCostSheet(lines);
+  }, [rows]);
 
   const moMoi = (base?: CostSheetView) => {
     setRows(base ? toRows(base.lines) : [EMPTY_ROW]);
@@ -107,15 +113,20 @@ export function CostSheets({
 
   const luu = () =>
     start(async () => {
+      const lines = toInput(rows);
+      if ("error" in lines) {
+        toast.error(lines.error);
+        return;
+      }
       if (editing?.id) {
-        const r = await updateCostSheetDraft({ costSheetId: editing.id, lines: toInput(rows), notes });
+        const r = await updateCostSheetDraft({ costSheetId: editing.id, lines, notes });
         if ("error" in r) {
           toast.error(r.error);
           return;
         }
         toast.success(`Đã lưu · ${formatVND(r.totalUnitCost)}/sp`);
       } else {
-        const r = await createCostSheet({ modelId, topicId, lines: toInput(rows), notes });
+        const r = await createCostSheet({ modelId, topicId, lines, notes });
         if ("error" in r) {
           toast.error(r.error);
           return;
@@ -139,7 +150,7 @@ export function CostSheets({
 
   // ĐƯỜNG DUY NHẤT sang giá ước tính của BCLN: `setEstimatedCost` có sẵn (quyền reports:assumptions).
   const dungLamGiaUocTinh = (s: CostSheetView) => {
-    if (!productId) return;
+    if (!productId || estimateBlocker(s)) return;
     start(async () => {
       const r = await setEstimatedCost({ productId, unitCost: s.totalUnitCost, reason: `Bảng giá thành V${s.version} đã chốt${s.finalizedBy ? ` bởi ${s.finalizedBy}` : ""} (sản xuất · topic/giá thành)` });
       if ("error" in r) toast.error(r.error);
@@ -224,8 +235,8 @@ export function CostSheets({
                         <Button
                           size="sm"
                           variant="outline"
-                          disabled={pending || !productId}
-                          title={productId ? "Ghi tổng này làm giá vốn dự tính (Báo cáo lợi nhuận danh nghĩa) qua đúng đường đặt giá dự tính có sẵn" : "Mẫu chưa có sản phẩm Pancake — chưa có mã hàng để đặt giá dự tính"}
+                          disabled={pending || !productId || estimateBlocker(s) !== null}
+                          title={estimateBlocker(s) ?? (productId ? "Ghi tổng này làm giá vốn dự tính (Báo cáo lợi nhuận danh nghĩa) qua đúng đường đặt giá dự tính có sẵn" : "Mẫu chưa có sản phẩm Pancake — chưa có mã hàng để đặt giá dự tính")}
                           onClick={() => dungLamGiaUocTinh(s)}
                         >
                           <Tag className="size-3.5" /> Dùng làm giá ước tính

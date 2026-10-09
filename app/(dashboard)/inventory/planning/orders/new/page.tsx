@@ -51,6 +51,7 @@ export default async function NewProductionOrderPage({ searchParams }: { searchP
           cells: m.cells,
           detail: m.detail,
           images: m.images,
+          // Chưa mẫu mã nào biết giá ⇒ `null` ⇒ ô trống, không phải 0 ₫.
           unitCost: m.unitCost,
           supplier: tuLoiTat.supplier?.name ?? "",
           note: "",

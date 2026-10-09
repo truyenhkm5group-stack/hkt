@@ -26,7 +26,8 @@ export default async function EditProductionOrderPage({ params }: { params: Prom
           cells: o.cells,
           detail: m?.detail,
           images: o.images,
-          unitCost: o.unitCost ?? 0,
+          // Lệnh cũ ghi 0 khi bỏ trống ô — 0 và NULL đều là CHƯA CÓ GIÁ, mở ra là ô trống (không phải 0 ₫).
+          unitCost: o.unitCost && o.unitCost > 0 ? o.unitCost : null,
           supplier: o.supplier,
           note: o.note,
           dueDate: o.dueDate ? new Date(o.dueDate).toISOString().slice(0, 10) : "",
