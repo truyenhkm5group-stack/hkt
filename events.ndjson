@@ -1352,3 +1352,4 @@
 {"at":"2026-10-09T21:14:51.449Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DEPLOY_DISPATCHED","detail":"5a475bf684eb · run 37992227545 https://github.com/truyenhkm5group-stack/hkt/actions/runs/37992227545"}
 {"at":"2026-10-09T21:17:02.188Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"visible-product-board","detail":"docs/visible-product-board @ a934181ceec3 · 1 lệnh kiểm thử"}
 {"at":"2026-10-09T21:17:17.499Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"inbox-v2-b","detail":"feat/inbox-v2-b @ 17552263d47f · 1 lệnh kiểm thử"}
+{"at":"2026-10-09T21:17:44.067Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"inbox-v2-b","detail":"#753 cho feat/inbox-v2-b @ 17552263d47f"}
