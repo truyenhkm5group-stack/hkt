@@ -199,7 +199,7 @@ function PagePickStep({ pages, connected, operator, onDone }: { pages: { id: str
       await onDone();
     });
   return (
-    <SectionCard title="Chọn các Page cần dùng" description="Tick những Page bạn muốn bot trả lời. ERP lưu Page, đăng ký nhận tin nhắn mới rồi kiểm tra ngay.">
+    <SectionCard title="Chọn các Page cần dùng" description="Tick những Page bạn muốn bot trả lời. Hệ thống lưu Page, đăng ký nhận tin nhắn mới rồi kiểm tra ngay.">
       <div className="space-y-2" data-testid="channels-page-picker">
         <div className="flex flex-wrap items-center gap-2">
           <Input className="h-9 min-w-0 flex-1 basis-48" placeholder="Tìm Page theo tên hoặc mã" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Tìm Page" />

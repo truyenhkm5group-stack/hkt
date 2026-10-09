@@ -204,9 +204,77 @@ export function brandHost(host: string | null | undefined, forwardedHost: string
   return h || null;
 }
 
-/** Thương hiệu của MỘT lượt gọi từ header của nó — luật duy nhất cho middleware lẫn `hostBrand()` khi thiếu header máy chủ. */
-export function brandOfRequest(get: (name: string) => string | null | undefined, env: SiteEnv): SiteBrand {
-  return brandOfHost(brandHost(get("host"), get("x-forwarded-host")), env);
+/** Host (không cổng) của một URL http(s) khai trong biến môi trường; sai dạng ⇒ `null`. */
+function envUrlHost(raw: string | null | undefined): string | null {
+  const v = String(raw ?? "").trim();
+  if (!v) return null;
+  try {
+    const u = new URL(v);
+    return u.protocol === "https:" || u.protocol === "http:" ? bareHost(u.host) : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Host này CHỈ RA một thương hiệu — khác `brandOfHost` ở chỗ host lạ (`localhost:<cổng>`, IP, tên miền chưa khai) trả `null`
+ * thay vì rơi về `vnx`. Biết chắc: mặt tiền của hai thương hiệu (`matchSite`), `app.<CHOTDON_DOMAIN>`, mọi tên miền con của
+ * `SITE_DOMAIN` (`erp.` · tên miền con tổ chức) và host của `APP_URL`. Thương hiệu của host đã biết luôn TRÙNG `brandOfHost`.
+ */
+export function knownBrandOfHost(host: string | null | undefined, env: SiteEnv): SiteBrand | null {
+  const h = bareHost(String(host ?? ""));
+  if (!h) return null;
+  const site = matchSite(h, env);
+  if (site) return site.brand;
+  const appHost = chotdonAppHost(env);
+  if (appHost && h === appHost) return "chotdon";
+  const vnx = siteDomainFrom(env.SITE_DOMAIN);
+  if (vnx && h.endsWith(`.${vnx}`)) return "vnx";
+  const app = envUrlHost(env.APP_URL);
+  return app && h === app ? "vnx" : null;
+}
+
+/**
+ * ═══ GỢI Ý THƯƠNG HIỆU QUA URL — CHỈ KHI HOST KHÔNG NÓI ĐƯỢC GÌ ═══
+ *
+ * C1 #6 (Commercial Polish Board): lượt dựng sau `redirect()` của server action là một `fetch` máy chủ tự gửi tới
+ * `localhost:<cổng>` (xem `brandHost`). `x-forwarded-host` cứu được khi proxy đặt nó; lượt nào thiếu nó thì host còn lại là
+ * `localhost` và trang đăng nhập rơi về VNX. Nên action đưa thương hiệu nó ĐANG ĐỨNG (đọc từ host thật của lượt POST) vào đích
+ * chuyển hướng (`withBrandHint`), và lượt dựng sau đó đọc lại qua middleware.
+ *
+ * Hai rào: (1) DANH SÁCH TRẮNG — chỉ `vnx` / `chotdon`, giá trị khác bị bỏ như không có; (2) HOST THẮNG — host đã nhận ra
+ * thương hiệu (`knownBrandOfHost`) thì gợi ý bị bỏ qua: `erp.vnxcommerce.com/login?brand=chotdon` vẫn là VNX. Chỉ đổi CHỮ và
+ * HÌNH của trang đang xem — không quyết quyền, không quyết tổ chức (`hostSlug` vẫn đọc `host`), không quyết dữ liệu.
+ */
+export const BRAND_HINT_PARAM = "brand";
+
+/** Đọc gợi ý thương hiệu — chỉ hai giá trị đã biết; còn lại ⇒ `null` (không đoán). */
+export function brandHint(raw: string | null | undefined): SiteBrand | null {
+  return raw === "chotdon" || raw === "vnx" ? raw : null;
+}
+
+/**
+ * Đích chuyển hướng mang gợi ý thương hiệu. `vnx` là mặc định nên không thêm gì — URL của VNX giữ nguyên như trước. Chỉ gắn
+ * vào đường dẫn TƯƠNG ĐỐI của chính app (một `/` đứng đầu); đích khác trả nguyên.
+ */
+export function withBrandHint(path: string, brand: SiteBrand): string {
+  if (brand === "vnx" || !path.startsWith("/") || path.startsWith("//")) return path;
+  const hashAt = path.indexOf("#");
+  const base = hashAt >= 0 ? path.slice(0, hashAt) : path;
+  const hash = hashAt >= 0 ? path.slice(hashAt) : "";
+  const queryAt = base.indexOf("?");
+  const pathname = queryAt >= 0 ? base.slice(0, queryAt) : base;
+  const params = new URLSearchParams(queryAt >= 0 ? base.slice(queryAt + 1) : "");
+  params.set(BRAND_HINT_PARAM, brand);
+  return `${pathname}?${params.toString()}${hash}`;
+}
+
+/**
+ * Thương hiệu của MỘT lượt gọi từ header của nó — luật duy nhất cho middleware lẫn `hostBrand()` khi thiếu header máy chủ.
+ * Thứ tự: host đã biết (`x-forwarded-host` trước `host`, như `brandHost`) → gợi ý trong URL (`hint`, danh sách trắng) → `vnx`.
+ */
+export function brandOfRequest(get: (name: string) => string | null | undefined, env: SiteEnv, hint?: string | null): SiteBrand {
+  return knownBrandOfHost(brandHost(get("host"), get("x-forwarded-host")), env) ?? brandHint(hint) ?? "vnx";
 }
 
 /** Biến môi trường của lớp mặt tiền — đọc ở MỖI lượt gọi (middleware chạy ở Edge, không có `lib/env`). */

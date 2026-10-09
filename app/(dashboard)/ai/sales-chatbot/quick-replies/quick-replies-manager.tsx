@@ -55,7 +55,8 @@ const EMPTY: Draft = { id: null, title: "", triggers: "", answer: "", active: tr
  * Danh sách câu mẫu + form thêm / sửa + ảnh + «Thử một câu» (khớp chữ, 0 token). Không `router.refresh()` sau action —
  * action đã `revalidatePath`.
  */
-export function QuickRepliesManager({ manage, settings, rows, autoLearnRun }: { manage: boolean; settings: QuickReplySettings; rows: QuickReplyView[]; autoLearnRun: QuickReplyAutoLearnRun | null }) {
+/** `shell`: vỏ Chốt Đơn — chỉ đổi CHỮ (không «token» / «ERP»), câu của ERP giữ nguyên. */
+export function QuickRepliesManager({ manage, settings, rows, autoLearnRun, shell = false }: { manage: boolean; settings: QuickReplySettings; rows: QuickReplyView[]; autoLearnRun: QuickReplyAutoLearnRun | null; shell?: boolean }) {
   const [pending, start] = useTransition();
   const [draft, setDraft] = useState<Draft | null>(null);
   const [probe, setProbe] = useState("");
@@ -113,7 +114,7 @@ export function QuickRepliesManager({ manage, settings, rows, autoLearnRun }: { 
     <div className="space-y-5">
       <SectionCard
         title="Cách trả lời"
-        hint="Thứ tự mỗi tin khách mà page chưa trả lời: ① khớp chữ với câu mẫu — 0 token; ② không khớp ⇒ AI đọc hiểu, chỉ CHỌN câu mẫu — rẻ; ③ không câu nào hợp, hoặc khách đang chốt đơn ⇒ chatbot AI đầy đủ."
+        hint={`Thứ tự mỗi tin khách mà page chưa trả lời: ① khớp chữ với câu mẫu — ${shell ? "không tốn lượt AI" : "0 token"}; ② không khớp ⇒ AI đọc hiểu, chỉ CHỌN câu mẫu — rẻ; ③ không câu nào hợp, hoặc khách đang chốt đơn ⇒ chatbot AI đầy đủ.`}
       >
         <div className="flex flex-wrap items-center gap-6 text-sm" data-testid="quick-reply-settings">
           <label className="flex items-center gap-2">
@@ -163,7 +164,7 @@ export function QuickRepliesManager({ manage, settings, rows, autoLearnRun }: { 
         ) : null}
       </SectionCard>
 
-      <SectionCard title="Thử một câu" hint="Chỉ khớp chữ — không gọi AI, không tốn token. Câu trả lời hiện ra đúng như bot sẽ gửi (số đã đọc từ ERP).">
+      <SectionCard title="Thử một câu" hint={shell ? "Chỉ khớp chữ — không gọi AI, không tốn lượt AI. Câu trả lời hiện ra đúng như bot sẽ gửi (số đã đọc từ sổ sản phẩm của shop)." : "Chỉ khớp chữ — không gọi AI, không tốn token. Câu trả lời hiện ra đúng như bot sẽ gửi (số đã đọc từ ERP)."}>
         <div className="flex flex-wrap items-start gap-2 text-sm">
           <Input value={probe} onChange={(e) => setProbe(e.target.value)} placeholder="vd: chả mực bao nhiêu 1kg" className="h-8 max-w-md" aria-label="Câu khách thử" />
           <Button
@@ -190,7 +191,7 @@ export function QuickRepliesManager({ manage, settings, rows, autoLearnRun }: { 
 
       <SectionCard
         title={`Câu mẫu (${rows.length}/${QUICK_REPLY_LIMITS.entries})`}
-        hint={`Giá / tồn / phí ship KHÔNG gõ thẳng: dùng {{giá:SKU}} · {{tồn:SKU}} · {{ship}} — bot đọc ERP lúc gửi; thiếu số thì để AI trả lời. Tối đa ${QUICK_REPLY_LIMITS.images} ảnh / câu. Gợi ý «AI học» luôn tạo ở trạng thái tắt.`}
+        hint={`Giá / tồn / phí ship KHÔNG gõ thẳng: dùng {{giá:SKU}} · {{tồn:SKU}} · {{ship}} — bot đọc ${shell ? "sổ sản phẩm" : "ERP"} lúc gửi; thiếu số thì để AI trả lời. Tối đa ${QUICK_REPLY_LIMITS.images} ảnh / câu. Gợi ý «AI học» luôn tạo ở trạng thái tắt.`}
         actions={
           manage ? (
             <Button size="sm" onClick={() => setDraft(EMPTY)} disabled={pending}>

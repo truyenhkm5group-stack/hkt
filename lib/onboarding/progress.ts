@@ -54,13 +54,15 @@ export async function getGettingStarted(user: SessionUser): Promise<GettingStart
   ]);
 
   const steps: GettingStartedStep[] = [];
+  // Vỏ Chốt Đơn (C1 #7): câu chữ không «ERP», và không bước nào dẫn tới trang vỏ chặn (`/p/…`, `/settings/pages`).
+  const shell = isSalesAgentUser(user);
   if (products >= 0) {
     // Tổ chức tự nhập sản phẩm (không đồng bộ Pancake) ⇒ lối vào là «Nhập từ tệp» (0180); tổ chức đồng bộ ⇒ danh sách.
     const canImport = (await productCreateGate(user)).allowed;
     steps.push({
       key: "products",
       label: "Nhập sản phẩm",
-      detail: products > 0 ? `${products.toLocaleString("vi-VN")} sản phẩm đã có` : canImport ? "Chưa có sản phẩm nào — nhập cả danh mục từ tệp CSV / Excel." : "Chưa có sản phẩm nào — sản phẩm vào ERP qua kết nối bán hàng của tổ chức.",
+      detail: products > 0 ? `${products.toLocaleString("vi-VN")} sản phẩm đã có` : canImport ? "Chưa có sản phẩm nào — nhập cả danh mục từ tệp CSV / Excel." : shell ? "Chưa có sản phẩm nào — sản phẩm vào cửa hàng qua kết nối bán hàng." : "Chưa có sản phẩm nào — sản phẩm vào ERP qua kết nối bán hàng của tổ chức.",
       href: canImport ? "/products/import" : "/products",
       cta: canImport ? "Nhập từ tệp" : "Mở danh sách sản phẩm",
       done: products > 0,
@@ -85,21 +87,23 @@ export async function getGettingStarted(user: SessionUser): Promise<GettingStart
     steps.push({ key: "chatbot", label: "Cấu hình chatbot bán hàng", detail: bot.enabled ? `Bot «${bot.botName}» đang bật` : "Chưa bật — dùng AI có sẵn trong gói (hoặc khoá AI riêng), chạy khung thử rồi bật.", href: "/ai/sales-chatbot", cta: "Mở chatbot", done: bot.enabled });
   }
   const liveNotify = (await listRules()).filter((r) => r.status === "ACTIVE" && r.mode === "LIVE" && r.actions.some((a) => a.kind === "send_message")).length;
-  steps.push({ key: "notifications", label: "Báo đơn cho nhóm vận hành", detail: liveNotify > 0 ? `${liveNotify} luật gửi tin nhóm đang chạy` : isSalesAgentUser(user) ? "Chưa có — đơn chốt chỉ báo trong ứng dụng." : "Chưa có — đơn chốt chỉ báo trong ERP.", href: "/settings/notifications", cta: "Cấu hình thông báo", done: liveNotify > 0 });
+  steps.push({ key: "notifications", label: "Báo đơn cho nhóm vận hành", detail: liveNotify > 0 ? `${liveNotify} luật gửi tin nhóm đang chạy` : shell ? "Chưa có — đơn chốt chỉ báo trong ứng dụng." : "Chưa có — đơn chốt chỉ báo trong ERP.", href: "/settings/notifications", cta: "Cấu hình thông báo", done: liveNotify > 0 });
   if (user.organization && !user.organization.isHome) {
     const pub = await publicationOf(user.organization.code);
     if (pub.state !== "UNTRACKED") {
       steps.push({
         key: "publish",
         label: "Chọn tên miền & xuất bản",
-        detail: pub.state === "PUBLISHED" ? `Đã xuất bản${pub.url ? ` — ${pub.url.replace(/^https?:\/\//, "")}` : ""}` : pub.slug ? `Tên miền «${pub.slug}» đã giữ — chưa xuất bản` : "ERP đang là BẢN NHÁP.",
+        detail: pub.state === "PUBLISHED" ? `Đã xuất bản${pub.url ? ` — ${pub.url.replace(/^https?:\/\//, "")}` : ""}` : pub.slug ? `Tên miền «${pub.slug}» đã giữ — chưa xuất bản` : shell ? "Cửa hàng đang là BẢN NHÁP." : "ERP đang là BẢN NHÁP.",
         href: "/setup",
-        cta: pub.state === "PUBLISHED" ? "Mở ERP của tôi" : "Xuất bản",
+        cta: pub.state === "PUBLISHED" ? (shell ? "Mở cửa hàng của tôi" : "Mở ERP của tôi") : "Xuất bản",
         done: pub.state === "PUBLISHED",
       });
     }
   }
-  steps.push({
+  // Trang tuỳ biến (`/p/…`) và trình soạn trang là của ERP — vỏ chặn cả hai, một nút dẫn tới đó là lối cụt. Bước này vốn
+  // không tính vào tiến độ (`done: null`), nên bỏ ở vỏ không đổi con số nào.
+  if (!shell) steps.push({
     key: "pages",
     label: "Xem trang của mẫu",
     detail: pages.length > 0 ? `${pages.length} trang đã xuất bản — ERP không ghi lượt mở trang tuỳ biến nên bước này không tính vào tiến độ.` : "Tổ chức chưa có trang tuỳ biến nào.",

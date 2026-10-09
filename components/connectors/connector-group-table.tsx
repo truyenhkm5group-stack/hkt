@@ -62,7 +62,7 @@ function StatusCell({ row }: { row: ConnectorView }) {
   );
 }
 
-function ConfigForm({ row, secretsReady }: { row: ConnectorView; secretsReady: boolean }) {
+function ConfigForm({ row, secretsReady, plain = false }: { row: ConnectorView; secretsReady: boolean; plain?: boolean }) {
   const [values, setValues] = useState<Record<string, string>>(() => ({ ...(row.connection?.settings ?? {}) }));
   const [secrets, setSecrets] = useState<Record<string, string>>({});
   const [found, setFound] = useState<DiscoveredChatView[] | null>(null);
@@ -173,7 +173,7 @@ function ConfigForm({ row, secretsReady }: { row: ConnectorView; secretsReady: b
           ))}
         </ul>
       ) : null}
-      {row.consumers && row.consumers.length === 0 ? <p className="text-[11px] leading-4 text-amber-700 dark:text-amber-400">Chưa luồng nào của ERP dùng kết nối này — bật lên chưa làm cảnh báo đi qua đây.</p> : null}
+      {row.consumers && row.consumers.length === 0 ? <p className="text-[11px] leading-4 text-amber-700 dark:text-amber-400">{plain ? "Chưa có tính năng nào dùng kết nối này — bật lên chưa có tin nào đi qua đây." : "Chưa luồng nào của ERP dùng kết nối này — bật lên chưa làm cảnh báo đi qua đây."}</p> : null}
     </div>
   );
 }
@@ -183,7 +183,7 @@ function ConfigCell({ row, secretsReady, plain }: { row: ConnectorView; secretsR
   if (row.mode === "CONFIGURABLE") {
     if (!row.moduleEnabled) return <span className="text-xs text-muted-foreground">{plain ? "Chưa có trong gói của cửa hàng." : `Module «${row.moduleLabel}» đang tắt — bật ở Module của tổ chức.`}</span>;
     return open ? (
-      <ConfigForm row={row} secretsReady={secretsReady} />
+      <ConfigForm row={row} secretsReady={secretsReady} plain={plain} />
     ) : (
       <Button size="sm" variant="outline" onClick={() => setOpen(true)}>
         {row.connection ? "Sửa cấu hình" : "Khai kết nối"}

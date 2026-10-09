@@ -9,13 +9,34 @@ import { getBranding } from "@/lib/branding/service";
 import { moduleDef, type ModuleKey } from "@/lib/constants/platform-modules";
 import { env } from "@/lib/env";
 import { getGettingStarted } from "@/lib/onboarding/progress";
-import { PUBLISH_PERMISSION, publishChecklist } from "@/lib/platform/publish";
+import { PUBLISH_PERMISSION, publishChecklist, type PublishCheck, type Publication } from "@/lib/platform/publish";
 import { cn } from "@/lib/utils";
-import { isSalesAgentUser, salesAgentNavFor, shellAllows } from "@/lib/constants/saas-nav";
+import { isSalesAgentUser, salesAgentHomeFor, salesAgentNavFor, shellAllows } from "@/lib/constants/saas-nav";
 import { and, gt, ne } from "drizzle-orm";
 import { DomainForm, PublishPanel } from "./setup-client";
 
 export const metadata = { title: "Thiết lập & xuất bản" };
+
+/**
+ * Câu của một dòng kiểm xuất bản ở vỏ Chốt Đơn (C1 #7). Lõi (`publishChecklist`) viết cho người dựng ERP: «Module», «field ·
+ * form», «ERP vẫn mở được bằng mã tổ chức», và nút «Sửa» trỏ tới trình dựng (`/settings/modules`, `/settings/data-model`…) mà vỏ
+ * chặn. Ở vỏ: cùng kết quả kiểm (`ok`, `blocking` không đổi một bit), chỉ đổi CHỮ, và bỏ nút «Sửa» nào dẫn tới trang vỏ chặn.
+ */
+function shellPublishCheck(c: PublishCheck, pub: Publication, allows: (href: string) => boolean): PublishCheck {
+  const href = c.href && allows(c.href) ? c.href : null;
+  switch (c.key) {
+    case "modules":
+      return { ...c, href, label: "Chức năng của gói", detail: c.ok ? "Đủ chức năng cho cửa hàng." : "Gói còn thiếu chức năng phụ thuộc — báo đội hỗ trợ." };
+    case "metadata":
+      return { ...c, href, label: "Cấu hình dữ liệu", detail: c.ok ? "Hợp lệ." : "Có lỗi cấu hình dữ liệu — báo đội hỗ trợ." };
+    case "domain":
+      return c.ok && !pub.url ? { ...c, href, detail: `«${pub.slug ?? ""}» — tên miền con chưa mở trên hệ thống: cửa hàng vẫn mở được bằng mã cửa hàng.` } : { ...c, href };
+    case "messaging":
+      return c.ok ? { ...c, href } : { ...c, href, detail: "Chưa có luật gửi tin nhóm — đơn chốt chỉ báo trong ứng dụng." };
+    default:
+      return { ...c, href };
+  }
+}
 
 /**
  * THIẾT LẬP & XUẤT BẢN (0180) — bàn của CHỦ tổ chức vừa tạo: việc cần làm (đo từ dữ liệu thật), XEM TRƯỚC (menu, module,
@@ -107,15 +128,19 @@ export default async function SetupPage() {
                 </p>
               </div>
             </div>
-            <div>
-              <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">{shell ? `Chức năng đang dùng (${modules.length})` : `Module đang bật (${modules.length})`}</p>
-              <p className="text-xs leading-5">{modules.map((m) => moduleDef(m)?.label ?? m).join(" · ")}</p>
-              {shellAllows(user, "/settings/modules") ? (
-                <Link href="/settings/modules" className="text-xs text-primary underline underline-offset-2">
-                  Bật / tắt module
-                </Link>
-              ) : null}
-            </div>
+            {/* Vỏ Chốt Đơn: tên module là tên NỘI BỘ của ERP («Nền tảng», «Công việc & mục tiêu»…) — khách thấy đúng tám mục ở
+                khối «Menu» ngay dưới, nên không in thêm danh sách module (C1 #7). */}
+            {shell ? null : (
+              <div>
+                <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">{`Module đang bật (${modules.length})`}</p>
+                <p className="text-xs leading-5">{modules.map((m) => moduleDef(m)?.label ?? m).join(" · ")}</p>
+                {shellAllows(user, "/settings/modules") ? (
+                  <Link href="/settings/modules" className="text-xs text-primary underline underline-offset-2">
+                    Bật / tắt module
+                  </Link>
+                ) : null}
+              </div>
+            )}
             <div>
               <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Menu</p>
               <div className="grid gap-2 sm:grid-cols-2">
@@ -138,7 +163,8 @@ export default async function SetupPage() {
             <div>
               <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Trang & form</p>
               <div className="flex flex-wrap gap-2">
-                <Link href="/" className="rounded-full border px-3 py-1 text-xs hover:bg-muted">
+                {/* `/` là trang vỏ chặn: điều hướng phía client tới đó dựng lại layout và bị chuyển về hộp thư (#671). */}
+                <Link href={shell ? salesAgentHomeFor(user) : "/"} className="rounded-full border px-3 py-1 text-xs hover:bg-muted">
                   Trang chủ
                 </Link>
                 {(shellAllows(user, "/p") ? pages : []).map((p) => (
@@ -172,12 +198,14 @@ export default async function SetupPage() {
       <SectionCard title={pub.state === "PUBLISHED" ? "Đã xuất bản" : "Kiểm trước khi xuất bản"}>
         <PublishPanel
           state={pub.state}
-          checks={list.checks}
+          checks={shell ? list.checks.map((c) => shellPublishCheck(c, pub, (href) => shellAllows(user, href))) : list.checks}
           ready={list.ready}
           erpUrl={erpUrl}
           chatUrl={pub.state === "PUBLISHED" && pub.url ? `${pub.url}/chat` : null}
-          fallbackUrl={`${env.appUrl}/login`}
+          // Vỏ Chốt Đơn: màn đăng nhập trên CHÍNH host đang dùng (`APP_URL` là host của ERP — mở ra trang thương hiệu VNX).
+          fallbackUrl={shell ? "/login" : `${env.appUrl}/login`}
           orgCode={code}
+          shell={shell}
         />
         {erpUrl ? (
           <p className="mt-3 flex items-center gap-1 text-xs text-muted-foreground">

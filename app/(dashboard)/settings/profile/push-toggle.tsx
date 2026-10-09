@@ -25,7 +25,8 @@ async function registration(): Promise<ServiceWorkerRegistration> {
  * Bật thông báo đẩy cho MÁY ĐANG DÙNG (docs/platform/pwa.md). iPhone / iPad chỉ nhận thông báo khi ERP đã được «Thêm vào Màn
  * hình chính» và mở từ biểu tượng đó — nên ở Safari thường, nút nói rõ bước đó thay vì bật một thứ sẽ không bao giờ tới.
  */
-export function PushToggle({ publicKey }: { publicKey: string }) {
+/** `shell`: vỏ Chốt Đơn — chỉ đổi CHỮ («ứng dụng» thay «ERP»). */
+export function PushToggle({ publicKey, shell = false }: { publicKey: string; shell?: boolean }) {
   const [state, setState] = useState<State>("checking");
   const [pending, startTransition] = useTransition();
 
@@ -107,7 +108,7 @@ export function PushToggle({ publicKey }: { publicKey: string }) {
       {state === "unsupported" ? <p className="text-muted-foreground">Trình duyệt này không hỗ trợ thông báo đẩy. Dùng Chrome, Edge, Firefox hoặc Safari bản mới.</p> : null}
       {state === "ios-install" ? (
         <p className="text-muted-foreground">
-          Trên iPhone / iPad: bấm nút <strong>Chia sẻ</strong> của Safari → <strong>Thêm vào Màn hình chính</strong>, mở ERP từ biểu tượng vừa thêm rồi quay lại đây để bật.
+          Trên iPhone / iPad: bấm nút <strong>Chia sẻ</strong> của Safari → <strong>Thêm vào Màn hình chính</strong>, mở {shell ? "ứng dụng" : "ERP"} từ biểu tượng vừa thêm rồi quay lại đây để bật.
         </p>
       ) : null}
       {state === "denied" ? <p className="text-muted-foreground">Bạn đã chặn thông báo cho trang này. Mở cài đặt trang của trình duyệt (biểu tượng ổ khoá cạnh địa chỉ) → cho phép Thông báo.</p> : null}

@@ -2,6 +2,7 @@ import Link from "next/link";
 import { PageHeader } from "@/components/page-header";
 import { SectionCard } from "@/components/ui-bits";
 import { can, requirePermission } from "@/lib/auth/session";
+import { isSalesAgentUser } from "@/lib/constants/saas-nav";
 import { formatDate, formatNumber, formatPercent, formatVND } from "@/lib/format";
 import { loadAiSalesPerformance, type AiSalesPerformance } from "@/lib/sales-chatbot/performance";
 import { AI_SALES_METRICS, PERF_PERIOD_LABEL, PERF_PERIODS, parsePerfPeriod, perfPeriodParams, type FunnelRow } from "@/lib/sales-chatbot/performance-shared";
@@ -57,6 +58,8 @@ function FunnelCells({ row }: { row: FunnelRow }) {
  */
 export default async function AiSalesPerformancePage({ searchParams }: { searchParams: Promise<{ days?: string; from?: string; to?: string; pg?: string }> }) {
   const user = await requirePermission("ai_sales:view");
+  // Vỏ Chốt Đơn (C1 #7): chỉ đổi CHỮ — không tên hằng số nội bộ (`ORDER_OUTCOME`, mã khoá thử nghiệm).
+  const shell = isSalesAgentUser(user);
   const manage = can(user, SALES_CHATBOT_MANAGE);
   const sp = await searchParams;
   const period = parsePerfPeriod(sp);
@@ -187,7 +190,7 @@ export default async function AiSalesPerformancePage({ searchParams }: { searchP
             </div>
           </SectionCard>
 
-          {experiment ? <ExperimentBlock report={experiment} days={days} from={period.custom ? period.from : null} to={period.custom ? period.to : null} /> : null}
+          {experiment ? <ExperimentBlock report={experiment} days={days} from={period.custom ? period.from : null} to={period.custom ? period.to : null} shell={shell} /> : null}
 
           <div className="grid gap-5 lg:grid-cols-2">
             <SectionCard title="Đơn bot chốt — kết cục giao thật">
@@ -231,7 +234,12 @@ export default async function AiSalesPerformancePage({ searchParams }: { searchP
                   <Stat label="khách nhận" value={formatPercent(pctOf(r.upsell.attachRate), 0)} sub={`${formatNumber(r.upsell.accepted)} nhận · ${formatNumber(r.upsell.declined)} không`} />
                   <Stat label="tiền mua thêm" value={formatVND(r.upsell.offered ? r.upsell.revenueVnd : null)} />
                 </div>
-                <div className="grid grid-cols-3 gap-2" data-testid="ai-perf-basket" title="Đơn bot chốt trong kỳ (trừ đơn huỷ, trừ hàng tặng). Giá trị đọc từ dòng hàng, không phải tiền thực thu. «Đã giao» = ORDER_OUTCOME giao thành công; đơn chưa ngã ngũ không tính vào đó.">
+                <div className="grid grid-cols-3 gap-2" data-testid="ai-perf-basket" title={
+                    shell
+                      ? "Đơn bot chốt trong kỳ (trừ đơn huỷ, trừ hàng tặng). Giá trị đọc từ dòng hàng, không phải tiền thực thu. «Đã giao» = giao thành công theo chứng từ đơn vị vận chuyển và tiền thực thu; đơn chưa ngã ngũ không tính vào đó."
+                      : "Đơn bot chốt trong kỳ (trừ đơn huỷ, trừ hàng tặng). Giá trị đọc từ dòng hàng, không phải tiền thực thu. «Đã giao» = ORDER_OUTCOME giao thành công; đơn chưa ngã ngũ không tính vào đó."
+                  }
+                >
                   <Stat label="món / đơn bot chốt" value={basket.booked.itemsPerOrder === null ? "—" : basket.booked.itemsPerOrder.toFixed(1)} sub={`${formatNumber(basket.booked.orders)} đơn`} />
                   <Stat label="đơn có ≥ 2 sản phẩm (bán chéo)" value={formatPercent(pctOf(basket.booked.multiProductRate), 0)} sub={`${formatNumber(basket.booked.multiProductOrders)} đơn · ${formatNumber(basket.delivered.multiProductOrders)} đã giao`} />
                   <Stat label="giá trị bán chéo đã giao" value={formatVND(basket.delivered.orders ? basket.delivered.crossSellValueVnd : null)} sub={`đơn chốt: ${formatVND(basket.booked.orders ? basket.booked.crossSellValueVnd : null)}`} />

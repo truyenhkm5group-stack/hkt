@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { PageHeader } from "@/components/page-header";
 import { SectionCard } from "@/components/ui-bits";
 import { can, requirePermission } from "@/lib/auth/session";
+import { isSalesAgentUser } from "@/lib/constants/saas-nav";
 import { CHANNELS_RETURN_COOKIE, CHANNELS_RETURN_PARAM, CHANNELS_ROUTE, CONNECT_RESULT_PARAMS } from "@/lib/channels/overview-shared";
 import { directConnectFor } from "@/lib/channels/direct-connect";
 import { DIRECT_CONNECT_SOON_LABEL } from "@/lib/channels/direct-connect-shared";
@@ -141,6 +142,8 @@ export default async function MessengerSettingsPage({ searchParams }: { searchPa
   const overrides = canConfig ? await loadPageOverrides() : {};
   const pending = manage && user.organization && one("chon") ? await loadPendingPages(user.organization.code, user.id) : null;
   const operator = platformOperatorDenial(user) === null;
+  // Vỏ Chốt Đơn: chỉ đổi CHỮ (không «webhook» / «token» / «ERP» / tên biến môi trường) — câu của ERP giữ nguyên.
+  const shell = isSalesAgentUser(user);
   const lydo = one("lydo");
   const reasonQ = isReason(lydo) ? lydo : null;
   const ct = one("ct").slice(0, 300);
@@ -202,7 +205,7 @@ export default async function MessengerSettingsPage({ searchParams }: { searchPa
       ) : null}
       <SectionCard title={connected ? `Page đang nối (${activePages.filter((p) => p.kind === "PAGE").length})` : "Page đang nối"} description="Một lần đăng nhập Facebook nối được nhiều page; mỗi page bật / tạm dừng AI riêng, lỗi của page này không làm dừng page khác.">
         {!view.appReady ? (
-          <p className="text-sm text-muted-foreground">Nền tảng chưa cấu hình app Facebook (FACEBOOK_LOGIN_APP_ID / SECRET) — người vận hành cần khai trước.</p>
+          <p className="text-sm text-muted-foreground">{shell ? "Kết nối Facebook chưa mở trên hệ thống — báo đội hỗ trợ." : "Nền tảng chưa cấu hình app Facebook (FACEBOOK_LOGIN_APP_ID / SECRET) — người vận hành cần khai trước."}</p>
         ) : (
           <div className="space-y-3">
             {view.pages.length ? <PageManager pages={view.pages} manage={manage} canConfig={canConfig} overrides={overrides} /> : null}
@@ -218,7 +221,7 @@ export default async function MessengerSettingsPage({ searchParams }: { searchPa
                   </span>
                 )}
                 {connected ? <DisconnectButton /> : null}
-                <span className="text-xs text-muted-foreground">Đăng nhập Facebook bằng tài khoản QUẢN TRỊ page, cho phép quyền nhắn tin, chọn các page. Token page được mã hoá trong ERP; gỡ được bất cứ lúc nào.</span>
+                <span className="text-xs text-muted-foreground">{shell ? "Đăng nhập Facebook bằng tài khoản QUẢN TRỊ page, cho phép quyền nhắn tin, chọn các page. Mã truy cập page được mã hoá trên hệ thống; gỡ được bất cứ lúc nào." : "Đăng nhập Facebook bằng tài khoản QUẢN TRỊ page, cho phép quyền nhắn tin, chọn các page. Token page được mã hoá trong ERP; gỡ được bất cứ lúc nào."}</span>
               </div>
             ) : connected ? null : (
               <p className="text-sm text-muted-foreground">Cần quản trị cửa hàng (quyền Cài đặt) kết nối.</p>
@@ -229,8 +232,11 @@ export default async function MessengerSettingsPage({ searchParams }: { searchPa
       </SectionCard>
 
       {connected && manage ? (
-        <SectionCard title="Webhook theo page" description="Page đã lưu trong ERP chưa chắc đang gửi tin về: Meta có thể gỡ đăng ký sau đó. «Kiểm tra lại» chỉ đọc ở Facebook, không đổi gì.">
-          <WebhookCheckPanel initial={whRows} initialAt={whRows.length ? (whStored?.at ?? null) : null} manage={manage} actorLabel={GUIDE_ACTOR_LABEL} />
+        <SectionCard
+          title={shell ? "Page có đang gửi tin về không" : "Webhook theo page"}
+          description={shell ? "Page đã nối chưa chắc đang gửi tin về: Facebook có thể gỡ đăng ký sau đó. «Kiểm tra lại» chỉ đọc ở Facebook, không đổi gì." : "Page đã lưu trong ERP chưa chắc đang gửi tin về: Meta có thể gỡ đăng ký sau đó. «Kiểm tra lại» chỉ đọc ở Facebook, không đổi gì."}
+        >
+          <WebhookCheckPanel initial={whRows} initialAt={whRows.length ? (whStored?.at ?? null) : null} manage={manage} actorLabel={GUIDE_ACTOR_LABEL} shell={shell} />
         </SectionCard>
       ) : null}
 

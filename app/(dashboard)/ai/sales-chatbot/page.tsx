@@ -190,7 +190,7 @@ export default async function SalesChatbotPage() {
                 ) : null}
                 <ol className="list-decimal space-y-1 pl-5 text-xs leading-5 text-muted-foreground">
                   <li>
-                    <Link href="/settings/connections" className="underline underline-offset-2">{shell ? "Trang Kết nối" : "Cài đặt → Kết nối"}</Link> → «Fanpage qua Pancake»: nhập Page ID và page access token (Pancake → Cài đặt page → Công cụ) → Lưu → Kiểm tra → Bật.
+                    <Link href="/settings/connections" className="underline underline-offset-2">{shell ? "Trang Kết nối" : "Cài đặt → Kết nối"}</Link> → «Fanpage qua Pancake»: {shell ? "nhập mã page và mã truy cập page (lấy ở Pancake → Cài đặt page → Công cụ)" : "nhập Page ID và page access token (Pancake → Cài đặt page → Công cụ)"} → Lưu → Kiểm tra → Bật.
                   </li>
                   <li>{shell ? "Trong Pancake: Cài đặt page → mục «Webhook» (tên mục của Pancake) → bật sự kiện tin nhắn → dán địa chỉ dưới đây." : "Trong Pancake: Cài đặt page → Webhook → bật sự kiện tin nhắn (messaging) → dán URL dưới đây."}</li>
                   <li>Bật bot ở khung Cấu hình bên dưới. Bot trả lời sau khoảng 5 giây (tin đầu của hội thoại mới: tối đa 10 giây để nhường trả lời tự động của Meta); page đã trả lời thì bot không chen; nhân viên trả lời trên fanpage ⇒ bot nhường hội thoại đó 30 phút.</li>
@@ -215,11 +215,19 @@ export default async function SalesChatbotPage() {
                 </p>
                 {zalo.counts.lastSkipReason ? <p className="text-xs text-muted-foreground">Lần bỏ qua gần nhất: {zalo.counts.lastSkipReason}</p> : null}
                 <ol className="list-decimal space-y-1 pl-5 text-xs leading-5 text-muted-foreground">
-                  <li>developers.zalo.me: tạo ứng dụng, liên kết OA của shop, lấy App ID · App Secret · OA Secret Key (mục Webhook); lấy refresh token ở API Explorer (loại OA Access Token).</li>
+                  <li>
+                    {shell
+                      ? "Trang nhà phát triển của Zalo (developers.zalo.me): tạo ứng dụng, liên kết OA của shop, chép ba mã «App ID» · «App Secret» · «OA Secret Key» (mã cuối nằm ở mục «Webhook» — tên mục của Zalo) và mã làm mới quyền truy cập (lấy ở công cụ «API Explorer» của Zalo, chọn loại mã truy cập dành cho OA)."
+                      : "developers.zalo.me: tạo ứng dụng, liên kết OA của shop, lấy App ID · App Secret · OA Secret Key (mục Webhook); lấy refresh token ở API Explorer (loại OA Access Token)."}
+                  </li>
                   <li>
                     <Link href="/settings/connections" className="underline underline-offset-2">{shell ? "Trang Kết nối" : "Cài đặt → Kết nối"}</Link> → «Zalo OA»: nhập đủ các ô → Lưu → Kiểm tra → Bật. {shell ? "Máy tự gia hạn quyền truy cập Zalo." : "Máy tự làm mới token và lưu cặp mới."}
                   </li>
-                  <li>Trong Zalo Developers → Webhook: dán URL dưới đây, bật sự kiện «Người dùng gửi tin nhắn» và «OA gửi tin nhắn» (để bot biết nhân viên đang trả lời).</li>
+                  <li>
+                    {shell
+                      ? "Trong trang nhà phát triển của Zalo → mục «Webhook» (tên mục của Zalo): dán địa chỉ dưới đây, bật sự kiện «Người dùng gửi tin nhắn» và «OA gửi tin nhắn» (để bot biết nhân viên đang trả lời)."
+                      : "Trong Zalo Developers → Webhook: dán URL dưới đây, bật sự kiện «Người dùng gửi tin nhắn» và «OA gửi tin nhắn» (để bot biết nhân viên đang trả lời)."}
+                  </li>
                   <li>Bot chỉ trả lời trong 48 giờ từ tin cuối của khách — ngoài đó Zalo tính phí tin tư vấn nên bot không gửi. Nhân viên trả lời trong OA ⇒ bot nhường hội thoại 30 phút. Ảnh của câu trả lời mẫu chưa gửi được qua Zalo (chỉ phần chữ).</li>
                 </ol>
                 {zalo.webhookUrl ? (
@@ -234,7 +242,7 @@ export default async function SalesChatbotPage() {
             </SectionCard>
           ) : null}
           {inboxHistory ? <InboxHistoryPanel run={inboxHistory.run} fanpageReady={inboxHistory.fanpageReady} shell={shell} /> : null}
-          {messengerHistory ? <MessengerHistoryPanel run={messengerHistory.run} pages={messengerHistory.pages} /> : null}
+          {messengerHistory ? <MessengerHistoryPanel run={messengerHistory.run} pages={messengerHistory.pages} shell={shell} /> : null}
           {costReport ? <ChatCostPanel report={costReport} /> : null}
           {followup ? <FollowupPanel settings={followup} waiting={waitingCount} manage={manage} /> : null}
           {lessons ? <LessonsPanel key={`${lessons.version}-${lessons.updatedAt ?? ""}`} state={customer ? customerLessons(lessons) : lessons} shell={shell} /> : null}

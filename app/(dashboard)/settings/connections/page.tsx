@@ -41,10 +41,17 @@ export default async function ConnectionsPage() {
     );
   }
   const total = view.groups.reduce((n, g) => n + g.rows.length, 0);
-  const configurable = view.groups.flatMap((g) => g.rows).filter((r) => r.mode === "CONFIGURABLE");
-  const active = configurable.filter((r) => r.connection?.status === "ACTIVE").length;
   // Tổ chức khách: Pancake là kết nối CŨ / CHUYỂN ĐỔI (lib/connectors/legacy.ts) — rời bảng chính về mục cuối trang.
   const split = splitLegacyConnectors(view);
+  /*
+    Vỏ Chốt Đơn (C1 #7): bảng chỉ có kết nối THUỘC GÓI của cửa hàng. Dòng mà module chưa bật (Viettel Post · GHN · GHTK · Google
+    Sheet · quảng cáo…) chỉ in được «Chưa có trong gói» — với chủ shop bán qua fanpage nó đọc như một việc phải làm, và lộ những
+    tích hợp vận hành của ERP. Không đổi quyền: dòng ấy vốn không lưu / kiểm tra / bật được (server action từ chối khi module tắt).
+    Đếm «đang bật» trên ĐÚNG các dòng người này thấy.
+  */
+  const groups = shell ? split.groups.map((g) => ({ ...g, rows: g.rows.filter((r) => r.moduleEnabled) })).filter((g) => g.rows.length > 0) : split.groups;
+  const configurable = (shell ? groups : view.groups).flatMap((g) => g.rows).filter((r) => r.mode === "CONFIGURABLE");
+  const active = configurable.filter((r) => r.connection?.status === "ACTIVE").length;
   const directFacebook = !view.organization.isHome && moduleOn(user, "ai_sales");
 
   return (
@@ -88,10 +95,10 @@ export default async function ConnectionsPage() {
       {view.organization.isHome ? null : <OrgCarrierPanel orgCode={view.organization.code} />}
       {view.organization.isHome ? null : <OrgGhnPanel orgCode={view.organization.code} />}
       {view.organization.isHome ? null : <OrgGhtkPanel orgCode={view.organization.code} />}
-      {split.groups.length === 0 ? (
-        <EmptyState title={shell ? "Chưa có kết nối nào" : "Chưa có connector nào trong sổ"} description={shell ? "Không nên xảy ra — báo đội hỗ trợ." : "Sổ connector của mã nguồn rỗng — không nên xảy ra; báo đội kỹ thuật."} />
+      {groups.length === 0 ? (
+        <EmptyState title={shell ? "Chưa có kết nối nào" : "Chưa có connector nào trong sổ"} description={shell ? "Gói hiện tại của cửa hàng chưa có kết nối nào cần khai ở đây." : "Sổ connector của mã nguồn rỗng — không nên xảy ra; báo đội kỹ thuật."} />
       ) : (
-        split.groups.map((g) => (
+        groups.map((g) => (
           <SectionCard key={g.kind} title={g.label} description={shell ? `${g.rows.length} kết nối` : `${g.rows.length} connector`} padded={false} contentClassName="overflow-x-auto p-0">
             <ConnectorGroupTable rows={g.rows} secretsReady={view.secretsReady.ok} plain={shell} />
           </SectionCard>

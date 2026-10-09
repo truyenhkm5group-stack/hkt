@@ -33,7 +33,7 @@ export function InboxHistoryPanel({ run, fanpageReady, shell = false }: { run: H
   return (
     <SectionCard
       title="Đồng bộ lịch sử hộp thư"
-      description={`Đọc TẤT CẢ hội thoại và tin cũ của fanpage (qua Pancake) vào «Hộp thư khách» — kể cả khách nhắn trước lúc nối page với ${shell ? "Chốt Đơn" : "ERP"}. Tin cũ chỉ để xem: bot không trả lời lại, máy ghi đơn không đọc lại, không tính «chưa đọc» / «chờ trả lời».`}
+      description={`Đọc TẤT CẢ hội thoại và tin cũ của fanpage (qua Pancake) vào «Hộp thư khách» — kể cả khách nhắn trước lúc nối page với ${shell ? "hệ thống" : "ERP"}. Tin cũ chỉ để xem: bot không trả lời lại, máy ghi đơn không đọc lại, không tính «chưa đọc» / «chờ trả lời».`}
     >
       <div className="space-y-3 text-sm" data-testid="inbox-history-panel">
         <div className="flex flex-wrap items-center gap-2">
@@ -59,7 +59,7 @@ export function InboxHistoryPanel({ run, fanpageReady, shell = false }: { run: H
             Làm mới
           </Button>
         </div>
-        {!fanpageReady ? <p className="text-xs text-amber-700 dark:text-amber-400">Cần bật kết nối «Fanpage qua Pancake» ({shell ? "trang Kết nối" : "Cài đặt → Kết nối"}) — máy đọc lịch sử bằng page access token của shop.</p> : null}
+        {!fanpageReady ? <p className="text-xs text-amber-700 dark:text-amber-400">Cần bật kết nối «Fanpage qua Pancake» ({shell ? "trang Kết nối" : "Cài đặt → Kết nối"}) — {shell ? "máy đọc lịch sử bằng mã truy cập page của shop." : "máy đọc lịch sử bằng page access token của shop."}</p> : null}
 
         <div className="space-y-1 text-xs" data-testid="inbox-history-status">
           <p>

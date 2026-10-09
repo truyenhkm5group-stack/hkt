@@ -50,7 +50,7 @@ export default async function ProfilePage() {
       </section>
       <section className="grid gap-5 lg:grid-cols-2">
         <SectionCard title="Thông báo trên điện thoại / máy tính" description={shell ? "Cài ứng dụng lên màn hình chính rồi bật để nhận tin ngay cả khi không mở ứng dụng" : "Cài ERP lên màn hình chính rồi bật để nhận tin ngay cả khi không mở ERP"}>
-          <PushToggle publicKey={vapidKeys().publicKey} />
+          <PushToggle publicKey={vapidKeys().publicKey} shell={shell} />
         </SectionCard>
         <SectionCard title="Phiên đăng nhập" description="Thu hồi mọi phiên đang mở mà không đổi mật khẩu">
           <LogoutAllForm />

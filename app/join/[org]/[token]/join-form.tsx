@@ -13,7 +13,8 @@ import { acceptUserInviteSchema } from "@/lib/users/invite-shared";
  * Form nhận lời mời: tên + mật khẩu + nhập lại. Kiểm bằng CÙNG lược đồ với máy chủ (`acceptUserInviteSchema`) để báo
  * lỗi ô nhập ngay; máy chủ vẫn kiểm lại. Thành công ⇒ action chuyển thẳng vào `/` với phiên của tài khoản mới.
  */
-export function JoinForm({ org, token, email }: { org: string; token: string; email: string }) {
+/** `chotdon`: host Chốt Đơn (máy chủ đọc từ host) — chỉ đổi chữ của nút. */
+export function JoinForm({ org, token, email, chotdon = false }: { org: string; token: string; email: string; chotdon?: boolean }) {
   const [name, setName] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -61,7 +62,7 @@ export function JoinForm({ org, token, email }: { org: string; token: string; em
       ) : null}
       <Button type="submit" className="w-full" disabled={pending}>
         {pending ? <Loader2 className="size-4 animate-spin" /> : <UserCheck className="size-4" />}
-        Tạo tài khoản và vào ERP
+        {chotdon ? "Tạo tài khoản và vào ứng dụng" : "Tạo tài khoản và vào ERP"}
       </Button>
     </form>
   );
