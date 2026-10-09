@@ -3,7 +3,7 @@
   "mission_id": "commercial-sweep-ban-giao",
   "title": "Commercial Sweep Round 2 — bàn giao cuối: đối chiếu origin/main, C0 0 · C1 3 (1 đang sửa, 1 quyết định chủ shop, 1 đo production), việc của Tech Lead",
   "business_goal": "",
-  "status": "PLANNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-docs",
@@ -23,7 +23,18 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-09T05:58:00.349Z",
-  "updated_at": "2026-10-09T05:58:00.349Z",
-  "last_heartbeat": "2026-10-09T05:58:00.349Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-09T05:58:31.670Z",
+  "last_heartbeat": "2026-10-09T05:58:31.670Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/commercial-sweep-ban-giao",
+    "sha": "29e53a2769b1ad88d9f52ea5889af7edb962ba5b",
+    "at": "2026-10-09T05:58:31.670Z",
+    "actor": "DESKTOP-56TH98Y:wt-docs",
+    "title": "Commercial Sweep Round 2 — bàn giao cuối: đối chiếu origin/main, C0 0 · C1 3 (1 đang sửa, 1 quyết định chủ shop, 1 đo production), việc của Tech Lead",
+    "summary": "",
+    "tests": [
+      "chỉ tài liệu (2 tệp docs/product/*.md); không bài kiểm nào đọc hai tệp này; mọi đường dẫn / dòng mã nêu ở mục 8.5 đọc lại trên origin/main 50293da6"
+    ]
+  }
 }
