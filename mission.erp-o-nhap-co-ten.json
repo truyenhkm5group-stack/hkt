@@ -3,7 +3,7 @@
   "mission_id": "erp-o-nhap-co-ten",
   "title": "Ô nhập ở trang chi tiết ERP có tên cho trình đọc màn hình: lô xưởng (36 ô), khách sỉ, gọi khách sỉ điện thoại, topic sản xuất, trạng thái mẫu, góp ý ý tưởng, trình sửa luật tự động",
   "business_goal": "",
-  "status": "PLANNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-a11y2",
@@ -32,7 +32,18 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-08T23:30:49.882Z",
-  "updated_at": "2026-10-08T23:30:49.882Z",
-  "last_heartbeat": "2026-10-08T23:30:49.882Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-09T04:08:29.249Z",
+  "last_heartbeat": "2026-10-09T04:08:29.249Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/erp-o-nhap-co-ten",
+    "sha": "180a800829ad6b8839a12f18a5a9f2468cb14f18",
+    "at": "2026-10-09T04:08:29.249Z",
+    "actor": "DESKTOP-56TH98Y:wt-a11y2",
+    "title": "Ô nhập ở trang chi tiết ERP có tên cho trình đọc màn hình: lô xưởng (36 ô), khách sỉ, gọi khách sỉ điện thoại, topic sản xuất, trạng thái mẫu, góp ý ý tưởng, trình sửa luật tự động",
+    "summary": "",
+    "tests": [
+      "tsc + eslint sạch; npm test ĐẦY ĐỦ «TẤT CẢ KIỂM THỬ ĐẠT» EXIT=0 trên 3745fc91 (09/10 11:07; lượt trước đỏ vì ổ C đầy — không phải mã); rebase lên f7eae2c2 (#721 đã vào) → 180a8008 chỉ xung đột thêm-thêm sync-fixtures, giữ cả 4 đăng ký; erp-form-names + erp-detail-tail chạy lại trên SHA mới: đạt; đột biến bỏ aria-label «Tên khách» / Field về div ⇒ đỏ"
+    ]
+  }
 }
