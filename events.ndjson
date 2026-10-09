@@ -1141,3 +1141,4 @@
 {"at":"2026-10-09T03:35:52.626Z","actor":"DESKTOP-56TH98Y:wt-tail","kind":"HANDOFF","mission":"erp-chi-tiet-duoi-dai","detail":"claude/erp-chi-tiet-duoi-dai @ 9ebca5027f4e · 1 lệnh kiểm thử"}
 {"at":"2026-10-09T03:36:26.433Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#721 @ 9ebca5027f4e · Rebase lên ef9b302a: chỉ xung đột đăng ký test (giữ testDirectConnectGate + testShellTypography + testErpDetailTail); nội dung không đổi so với lượt PASS 30ddd0f5."}
 {"at":"2026-10-09T03:50:54.050Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"acceptance-signal-drills","detail":"#724 @ 86955d0568cc → bcad935074ed (MERGE_NOW · MEDIUM · gates success)"}
+{"at":"2026-10-09T04:03:43.293Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"erp-chi-tiet-duoi-dai","detail":"#721 @ 9ebca5027f4e → f7eae2c267bd (MERGE_NOW · MEDIUM · gates success)"}
