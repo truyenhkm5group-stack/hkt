@@ -1149,3 +1149,4 @@
 {"at":"2026-10-09T04:10:51.863Z","actor":"DESKTOP-56TH98Y:wt-docs","kind":"HANDOFF","mission":"commercial-sweep-cap-nhat","detail":"claude/commercial-sweep-cap-nhat @ 0ffe1f745502 · 1 lệnh kiểm thử"}
 {"at":"2026-10-09T04:11:34.166Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"commercial-sweep-cap-nhat","detail":"#727 cho claude/commercial-sweep-cap-nhat @ 0ffe1f745502"}
 {"at":"2026-10-09T04:11:48.013Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#727 @ 0ffe1f745502 · Chỉ tài liệu (kiểm kê 207 trang + bảng C0/C1 + mục 7 phát hiện trang động); không bí mật/SĐT."}
+{"at":"2026-10-09T04:35:51.978Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"erp-o-nhap-co-ten","detail":"#726 @ 180a800829ad → 279a7105aab4 (MERGE_NOW · LOW · gates success)"}
