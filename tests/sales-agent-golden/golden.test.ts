@@ -11,7 +11,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { GOLDEN_CASES } from "./cases";
-import { firstDiff, runGoldenCases, type GoldenTranscript } from "./harness";
+import { firstDiff, normalizer, runGoldenCases, type GoldenTranscript } from "./harness";
 
 export const GOLDEN_SNAPSHOT_DIR = path.join("tests", "sales-agent-golden", "snapshots");
 
@@ -61,7 +61,20 @@ function invariants(t: Map<string, GoldenTranscript>) {
     for (const turn of x.turns) assert.ok(!turn.rounds.some((r) => r.text === "[HẾT KỊCH BẢN]"), `[${x.key}] engine hỏi model nhiều vòng hơn kịch bản ở lượt «${turn.customer}»`);
 }
 
+/**
+ * Hồi quy bom ngày 10/10/2026: ảnh chụp ghi ĐÚNG ngày trùng một ngày cố định trong chữ tĩnh của lời nhắc («MỤC TIÊU (chủ shop
+ * 09/10/2026)») — chữ tĩnh phải giữ nguyên; chỉ ngày ở ngữ cảnh động («gần nhất …») thành nhãn. AGENTS.md mục 50.
+ */
+function testRunDateNormalizer() {
+  const fixed = "09/10/2026";
+  const norm = normalizer(new Set(), new Map(), new Set([fixed])) as (x: unknown) => unknown;
+  assert.equal(norm(`MỤC TIÊU (chủ shop ${fixed}): chốt đơn`), `MỤC TIÊU (chủ shop ${fixed}): chốt đơn`, "ngày cố định trong lời nhắc KHÔNG bị nhãn hoá dù trùng ngày chạy");
+  assert.equal(norm(`Đã mua 1 đơn, gần nhất ${fixed}: Chả mực`), "Đã mua 1 đơn, gần nhất <NGÀY CHẠY>: Chả mực", "ngày động của khối KHÁCH CŨ vẫn thành nhãn");
+  assert.deepEqual(norm({ p: [`(chủ shop ${fixed}) · gần nhất ${fixed}`] }), { p: [`(chủ shop ${fixed}) · gần nhất <NGÀY CHẠY>`] });
+}
+
 export async function testSalesAgentGolden() {
+  testRunDateNormalizer();
   const keys = GOLDEN_CASES.map((c) => c.key);
   assert.equal(new Set(keys).size, keys.length, "khoá hội thoại vàng không trùng");
   const got = await runGoldenCases(GOLDEN_CASES);
