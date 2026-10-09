@@ -48,7 +48,11 @@
 và (với script) đã chạy thật một lượt có vết.
 
 **STATUS** (chỉ dùng các giá trị này): `BACKLOG` · `READY` · `IN_PROGRESS` · `PR_READY` · `IN_REVIEW` · `MERGED` · `DEPLOYED` ·
-`VERIFYING` · `BLOCKED_EXTERNAL` · `BLOCKED_OWNER` · `DEFERRED` · `DONE`.
+`VERIFYING` · `BLOCKED_EXTERNAL` · `BLOCKED_OWNER` · `DEFERRED` · `CODE_DONE_UI_NOT_VERIFIED` · `PARTIAL_IMPLEMENTATION` · `DONE`.
+**Từ 10/10/2026 (chủ shop):** việc hướng tới khách / admin chỉ `DONE` khi đã MỞ TRANG THẬT trên production và có ảnh TRƯỚC / SAU cùng
+trang, cùng khổ màn hình (`docs/product/VISIBLE_PRODUCT_FINISH_BOARD.md`). Mã xong + gộp + deploy mà chưa có ảnh ⇒ `CODE_DONE_UI_NOT_VERIFIED`;
+yêu cầu của chủ shop mới làm một phần ⇒ `PARTIAL_IMPLEMENTATION`. Việc không nhìn thấy được (ops, pháp lý, tài liệu, logic nền) vẫn đóng bằng
+vết production (run ops). «Đã kiểm kê 207/207 trang» KHÔNG phải bằng chứng hoàn tất.
 `DONE` = đã gộp + đã lên production + hậu kiểm có vết. `DEPLOYED` = đã lên production, chưa có hậu kiểm riêng. `MERGED` = trong
 `main`, chưa lên production (hoặc chỉ tài liệu).
 
@@ -65,15 +69,28 @@ Bằng chứng deploy dạng `run <id>` là lượt GitHub Actions «Deploy ERP 
 Việc `SUPERSEDED` / `DUPLICATE` / `NO LONGER NEEDED` được ĐÓNG với `STATUS = DONE`; cột CLASS ghi lý do và việc thay thế.
 Mission đã `DONE` được gom vào bảng gọn của từng nhóm (trường không ghi = «—»); mission CHƯA xong viết thành khối đủ trường.
 
-## 0b. Tổng hợp (đếm bằng script từ tệp này, đối chiếu lại 09/10/2026 ~13:00 VN)
+## 0b. Tổng hợp (đếm bằng script từ tệp này; đối chiếu 09/10 ~13:00 VN, điều chỉnh theo DoD mới 10/10)
 
-- Tổng số mission: **245** (khối đủ trường + dòng bảng gọn). Lần đếm trước (#702, 02:30): 215 — cùng script cho lại đúng 215
-  trên bản cũ, nên chênh lệch là do sửa đổi lượt này: +30 dòng mới (14 mission DONE chưa có trong sổ, 4 đang chạy, 4 PR đã gộp chờ hậu kiểm,
-  8 follow-up / backlog Tech Lead); không xoá mission nào (khối DONE chuyển sang bảng gọn; MM-TECH-04 đổi id thành registry-refresh-0909).
-- Theo STATUS: `BACKLOG` 54 · `READY` 3 · `IN_PROGRESS` 4 · `PR_READY` 1 · `IN_REVIEW` 0 · `MERGED` 0 · `DEPLOYED` 8 · `VERIFYING` 5 · `BLOCKED_EXTERNAL` 7 · `BLOCKED_OWNER` 33 · `DEFERRED` 11 · `DONE` 119.
-- Còn mở (khác `DONE`) theo ưu tiên: P0 **10** · P1 **26** · P2 53 · P3 37.
-- Cách đếm: mỗi khối `#### ` lấy `PRIORITY:` + `STATUS:` đầu tiên; mỗi dòng của bảng có cột đầu `MISSION_ID` lấy cột `P` (cột 3) +
-  `STATUS` (cột 4). Bảng §14 (quyết định) và §15.H (lượt dựng) không tính. Kiểm: không khối nào thiếu trường, không id trùng.
+- Tổng số mission: **245** (không thêm, không xoá). Lượt 10/10 chỉ đổi STATUS của 41 mission hướng tới khách / admin (xem «Đổi trạng thái 10/10»).
+- Theo STATUS: `BACKLOG` 54 · `READY` 3 · `IN_PROGRESS` 4 · `PR_READY` 1 · `IN_REVIEW` 0 · `MERGED` 0 · `DEPLOYED` 3 · `VERIFYING` 5 · `BLOCKED_EXTERNAL` 7 · `BLOCKED_OWNER` 33 · `DEFERRED` 11 · `CODE_DONE_UI_NOT_VERIFIED` **38** · `PARTIAL_IMPLEMENTATION` **3** · `DONE` **83**. (Trước: DONE 119 · DEPLOYED 8.)
+- Còn mở (khác `DONE`) theo ưu tiên: P0 **19** · P1 **44** · P2 61 · P3 38 (= 162). Trong đó 41 mission chờ ảnh UI: P0 9 · P1 19 · P2 12 · P3 1.
+- Cách đếm (state method): mỗi khối `#### ` lấy `PRIORITY:` + `STATUS:` đầu tiên; mỗi dòng bảng có cột đầu `MISSION_ID` lấy cột `P` (cột 3) +
+  `STATUS` (cột 4). Bảng §14 và §15.H không tính. Lượt 10/10 tính theo hiệu: DONE −36, DEPLOYED −5, +38 / +3 hai trạng thái mới; số mở cộng thêm 36
+  (5 mission DEPLOYED vốn đã tính là mở; ưu tiên của chúng: P1 ×1, P2 ×4 trừ khỏi phần cộng).
+
+## Đổi trạng thái 10/10 theo DoD mới
+
+Lý do: không mission nào dưới đây có ảnh TRƯỚC / SAU của trang production. Logic có run ops vẫn được ghi ở PRODUCTION_EVIDENCE, nhưng phần nhìn thấy thì chưa.
+- `PARTIAL_IMPLEMENTATION` (3): saas-l3-inbox · MM-INBOX-00 (Inbox V2-A/B đang làm) · trang-chu-su-that-thuong-mai (CTA đăng ký chờ D2).
+- `CODE_DONE_UI_NOT_VERIFIED` (38) — §1: saas-signup-subscription · saas-identity-followup · saas-create-customer-correct · platform-viec-hang-ngay-len-dau.
+  §2: saas-l1-hide-internal · saas-l2-customer-shell · saas-l1-followup · saas-shell-login-loop · saas-finish-line · saas-shell-gate-redirects ·
+  saas-shell-polish · saas-finish-line-r2 · error-boundary-than-thien · erp-a11y-bo-cuc · kenh-dang-chay-trong-app · commercial-polish-2 ·
+  erp-chi-tiet-duoi-dai · erp-o-nhap-co-ten. §3: hotfix-messenger-discovery · messenger-permission-diag. §4: saas-l4-channels · sales-human-takeover ·
+  inbox-composer-templates · inbox-composer-hardening. §6: ai-balance-v1 · ai-balance-economics · MM-BILL-00. §7: MM-KPI-00 ·
+  conversation-delivered-profit · ai-vs-human-profit · saas-customer-health. §8: MM-ORDER-01 · MM-ORDER-02 · customer-outcome-truth ·
+  customer-list-outcome-truth · unknown-cost-not-zero · vtp-edit-cod-prefill · chi-tiet-don-khach-sach.
+- Giữ nguyên `DONE`: backend / ops / pháp lý / tài liệu / audit (vd saas-identity-email-login, saas-acceptance-*, ops-signals-check, MM-LEGAL-*, commercial-sweep*).
+  Bằng chứng logic: `saas-acceptance` PASS 7/7 run 37935922309 (tạo khách · kích hoạt · đăng nhập · vỏ · chat → AI → đơn).
 
 ---
 
@@ -88,14 +105,14 @@ Mission đã `DONE` được gom vào bảng gọn của từng nhóm (trường
 | saas-handoff-doc | Tài liệu bàn giao Phase A–F (`docs/saas/HANDOFF.md`) | P3 | DONE | DONE | #616 | tài liệu | 2026-10-06 |
 | saas-b-internal-special-cases | Phase B: gỡ nhánh `isHome` thương mại | P3 | DONE | DONE | #622 | run 37557688936, `vnx.plan=internal` | 2026-10-07 |
 | saas-d-pricing-overage | Phase D: bảng giá V1 có phiên bản, đồng hồ khách AI, phần vượt (0228) | P1 | DONE | DONE | #627 | run 37564156345, 8/8 tổ chức ghim legacy | 2026-10-07 |
-| saas-signup-subscription | Cửa hàng tự đăng ký có thuê bao dùng thử ngay (F-02) | P0 | DONE | DONE | #670 | run 37744823972, verify PASS c360b7c6 | 2026-10-08 |
+| saas-signup-subscription | Cửa hàng tự đăng ký có thuê bao dùng thử ngay (F-02) | P0 | CODE_DONE_UI_NOT_VERIFIED | DONE | #670 | run 37744823972, verify PASS c360b7c6 | 2026-10-08 |
 | saas-delete-signup-shops | Xoá cửa hàng tự đăng ký cũ bằng ops có chạy thử + sao lưu | P1 | DONE | DONE | #673 | ops run 37771243600 (xoá `kd`, sao lưu trước) | 2026-10-08 |
 | saas-v1-plan-migration | Công cụ chuyển tổ chức legacy → giá V1 (chạy thử + nhật ký) | P1 | DONE | DONE | #676 | run 37772436572 — công cụ có, CHƯA chuyển tổ chức nào (xem MM-BILL-02) | 2026-10-08 |
 | saas-identity-email-login | P0: khách do admin tạo đăng nhập email + mật khẩu; gửi lại liên kết kích hoạt | P0 | DONE | DONE | #681 | run 37781964748; ops `identity-reconcile` 37786092653 (chạy thử) → 37786400515 (ghi 12, THIẾU 0) | 2026-10-08 |
-| saas-identity-followup | Gửi lại form Tạo khách không phát liên kết sai người; mở khoá ghi lại chỉ mục | P1 | DONE | DONE | #684 | run 37786938351 | 2026-10-08 |
+| saas-identity-followup | Gửi lại form Tạo khách không phát liên kết sai người; mở khoá ghi lại chỉ mục | P1 | CODE_DONE_UI_NOT_VERIFIED | DONE | #684 | run 37786938351 | 2026-10-08 |
 | saas-c-shared-identity | Phase C: thiết kế danh tính toàn nền tảng (`docs/saas/IDENTITY.md`) | P3 | DONE | DONE (phần tài liệu; phần mã = MM-IDENT-01) | #617 | tài liệu, trong production 85faea0b | 2026-10-08 |
-| saas-create-customer-correct | LAUNCH BLOCKER — Tạo khách mới đúng mặc định: thương hiệu Chốt Đơn tự đặt, chỉ gói đang bán, nút không khoá im lặng, cài mẫu AI như `/start` | P0 | DONE | DONE (follow-up MM-FU-682) | #682 | deploy 37829126099 (`6883bfbf`) hậu kiểm ĐẠT; `saas-acceptance --apply` PASS 4/4 bước A (run 37838073371, lặp lại 37860546515 · 37866720324); verify `/tech` 09/10 | 2026-10-09 |
-| platform-viec-hang-ngay-len-dau | `/platform`: tổ chức & sức khoẻ, công tắc khẩn, cổng mở bán lên đầu; khung Webhook Meta (một lần) xuống cuối (Commercial PR F, C1 #10) | P2 | DONE | DONE («9 nút không tên» chưa xác nhận trên DOM) | #714 | deploy 37860758200 (`d23c0deb`) hậu kiểm ĐẠT; verify `/tech` 09/10 | 2026-10-09 |
+| saas-create-customer-correct | LAUNCH BLOCKER — Tạo khách mới đúng mặc định: thương hiệu Chốt Đơn tự đặt, chỉ gói đang bán, nút không khoá im lặng, cài mẫu AI như `/start` | P0 | CODE_DONE_UI_NOT_VERIFIED | DONE (follow-up MM-FU-682) | #682 | deploy 37829126099 (`6883bfbf`) hậu kiểm ĐẠT; `saas-acceptance --apply` PASS 4/4 bước A (run 37838073371, lặp lại 37860546515 · 37866720324); verify `/tech` 09/10 | 2026-10-09 |
+| platform-viec-hang-ngay-len-dau | `/platform`: tổ chức & sức khoẻ, công tắc khẩn, cổng mở bán lên đầu; khung Webhook Meta (một lần) xuống cuối (Commercial PR F, C1 #10) | P2 | CODE_DONE_UI_NOT_VERIFIED | DONE («9 nút không tên» chưa xác nhận trên DOM) | #714 | deploy 37860758200 (`d23c0deb`) hậu kiểm ĐẠT; verify `/tech` 09/10 | 2026-10-09 |
 
 ### 1.2 Đang mở
 
@@ -149,22 +166,22 @@ Mission đã `DONE` được gom vào bảng gọn của từng nhóm (trường
 
 | MISSION_ID | TITLE | P | STATUS | CLASS | PR | PRODUCTION_EVIDENCE | LAST_UPDATED |
 |---|---|---|---|---|---|---|---|
-| saas-l1-hide-internal | Che dữ liệu AI nội bộ khỏi khách (UI + máy chủ) | P0 | DONE | DONE | #639 | run 37654798771 | 2026-10-07 |
-| saas-l2-customer-shell | Vỏ app khách Chốt Đơn: 8 mục, mặc định hộp thư, mobile | P1 | DONE | DONE | #638 | run 37664556049 | 2026-10-07 |
-| saas-l1-followup | Khách không ghi / tắt khoá AI; che replay · học · ai-builder · USD · go-live | P0 | DONE | DONE | #669 | run 37741568283; Launch Gate S4 ✅ PROD | 2026-10-08 |
-| saas-shell-login-loop | Đăng nhập / đăng ký trong vỏ không trang trắng (F-01) | P0 | DONE | DONE | #671 | run 37744823972 | 2026-10-08 |
-| saas-finish-line | Finish Line R1: audit admin + vỏ, quick wins (rỗng · chữ kỹ thuật · help · 404 · AI Sales cuộn) | P1 | DONE | DONE | #680 | run 37781964748 | 2026-10-08 |
-| saas-shell-gate-redirects | Vỏ không trang trắng khi thiếu quyền / module tắt | P1 | DONE | DONE | #686 | trong production 4dbd864a (run 37800951308); verify `/tech` 09/10 | 2026-10-09 |
+| saas-l1-hide-internal | Che dữ liệu AI nội bộ khỏi khách (UI + máy chủ) | P0 | CODE_DONE_UI_NOT_VERIFIED | DONE | #639 | run 37654798771 | 2026-10-07 |
+| saas-l2-customer-shell | Vỏ app khách Chốt Đơn: 8 mục, mặc định hộp thư, mobile | P1 | CODE_DONE_UI_NOT_VERIFIED | DONE | #638 | run 37664556049 | 2026-10-07 |
+| saas-l1-followup | Khách không ghi / tắt khoá AI; che replay · học · ai-builder · USD · go-live | P0 | CODE_DONE_UI_NOT_VERIFIED | DONE | #669 | run 37741568283; Launch Gate S4 ✅ PROD | 2026-10-08 |
+| saas-shell-login-loop | Đăng nhập / đăng ký trong vỏ không trang trắng (F-01) | P0 | CODE_DONE_UI_NOT_VERIFIED | DONE | #671 | run 37744823972 | 2026-10-08 |
+| saas-finish-line | Finish Line R1: audit admin + vỏ, quick wins (rỗng · chữ kỹ thuật · help · 404 · AI Sales cuộn) | P1 | CODE_DONE_UI_NOT_VERIFIED | DONE | #680 | run 37781964748 | 2026-10-08 |
+| saas-shell-gate-redirects | Vỏ không trang trắng khi thiếu quyền / module tắt | P1 | CODE_DONE_UI_NOT_VERIFIED | DONE | #686 | trong production 4dbd864a (run 37800951308); verify `/tech` 09/10 | 2026-10-09 |
 | saas-lowtech-ux | UX cho chủ shop ít rành máy: audit + thiết kế | P2 | DONE | SUPERSEDED — thay bằng `docs/saas/SHELL_AUDIT_2026-10-08.md` (#663) + Finish Line R1/R2 + saas-shell-polish + commercial-sweep; phần mã còn lại nằm ở MM-UX-* | — | — | 2026-10-09 |
-| saas-shell-polish | Vỏ Chốt Đơn: `/login` sau đặt mật khẩu đúng thương hiệu, bỏ chữ kỹ thuật, `/module-disabled` có ranh giới lỗi, câu `BILLING_LOCKED` theo sản phẩm, Nhân viên gọn ở vỏ (ẩn ma trận quyền) | P1 | DONE | DONE — đối chiếu Fable 09/10: đóng C1 #5 (ma trận quyền ẩn ở vỏ) và C1 #6 (thương hiệu sau `redirect()`); chữ kỹ thuật còn lại (C1 #7) = `shell-copy-brand-r3`; follow-up MM-FU-700 | #700 | deploy 37829126099 (`6883bfbf`) hậu kiểm ĐẠT; verify `/tech` 09/10. Chưa có lượt nghiệm thu CÓ ĐĂNG NHẬP xác nhận riêng (§17) | 2026-10-09 |
-| saas-finish-line-r2 | Finish Line R2: tiêu đề theo menu vỏ (Sản phẩm · Nhân viên · Gói), tỷ lệ hoàn mẫu số 0 in «—», nhãn API/Webhook thành chữ khách hiểu | P2 | DONE | DONE | #713 | deploy 37860758200 (`d23c0deb`) hậu kiểm ĐẠT; verify `/tech` 09/10 | 2026-10-09 |
+| saas-shell-polish | Vỏ Chốt Đơn: `/login` sau đặt mật khẩu đúng thương hiệu, bỏ chữ kỹ thuật, `/module-disabled` có ranh giới lỗi, câu `BILLING_LOCKED` theo sản phẩm, Nhân viên gọn ở vỏ (ẩn ma trận quyền) | P1 | CODE_DONE_UI_NOT_VERIFIED | DONE — đối chiếu Fable 09/10: đóng C1 #5 (ma trận quyền ẩn ở vỏ) và C1 #6 (thương hiệu sau `redirect()`); chữ kỹ thuật còn lại (C1 #7) = `shell-copy-brand-r3`; follow-up MM-FU-700 | #700 | deploy 37829126099 (`6883bfbf`) hậu kiểm ĐẠT; verify `/tech` 09/10. Chưa có lượt nghiệm thu CÓ ĐĂNG NHẬP xác nhận riêng (§17) | 2026-10-09 |
+| saas-finish-line-r2 | Finish Line R2: tiêu đề theo menu vỏ (Sản phẩm · Nhân viên · Gói), tỷ lệ hoàn mẫu số 0 in «—», nhãn API/Webhook thành chữ khách hiểu | P2 | CODE_DONE_UI_NOT_VERIFIED | DONE | #713 | deploy 37860758200 (`d23c0deb`) hậu kiểm ĐẠT; verify `/tech` 09/10 | 2026-10-09 |
 | commercial-sweep | Commercial Perfection Sweep Phase A chỉ đọc: kiểm kê 207 trang + bảng chất lượng thương mại | P2 | DONE | DONE (tài liệu) | #703 | tài liệu; verify `/tech` 09/10 | 2026-10-09 |
 | commercial-sweep-cap-nhat | Sweep: 207/207 trang (32 trang động đọc mã) + bảng C0/C1 theo trạng thái đã gộp | P2 | DONE | DONE (tài liệu — quy ước §0; sổ `/tech` đóng sau verify lô `50293da6`). Bàn giao Round 2 cuối (`claude/commercial-sweep-ban-giao`) đi PR riêng | #727 | tài liệu | 2026-10-09 |
-| trang-chu-su-that-thuong-mai | Trang chủ Chốt Đơn nói đúng sản phẩm (Commercial PR A, C1 #1–#3): Pancake là lối chính hôm nay, nối thẳng Facebook «sắp mở», bỏ claim tuyệt đối, bỏ «Chi phí AI hiện rõ» | P1 | DONE | DONE (C1 #4 CTA theo chế độ đăng ký còn chờ D2) | #706 | deploy 37854562530 (`dbab6813`) hậu kiểm ĐẠT; verify `/tech` 09/10 | 2026-10-09 |
-| error-boundary-than-thien | Lỗi thân thiện (Commercial PR C, C1 #11): không in `error.message` / `DATABASE_URL`, chỉ mã tham chiếu | P1 | DONE | DONE | #705 | deploy 37854562530 (`dbab6813`) hậu kiểm ĐẠT; verify `/tech` 09/10 | 2026-10-09 |
-| erp-a11y-bo-cuc | ERP (Commercial PR G, C1 #12 #14 #15): màn «không tìm thấy» có h1; công tắc / ô số / nút biểu tượng có tên; `/payroll` không tràn 390 px | P2 | DONE | DONE | #708 | deploy 37854562530 (`dbab6813`) hậu kiểm ĐẠT; verify `/tech` 09/10 | 2026-10-09 |
-| kenh-dang-chay-trong-app | Trong app chỉ hướng dẫn kênh đang chạy; cổng nối thẳng Facebook: khách thấy «sắp mở», người vận hành thấy nút thật (cờ `meta.direct-connect.open`) | P1 | DONE | DONE — chưa có đường UI / ops bật cờ (MM-FU-712); ngày bật = D20 | #712 | deploy 37860758200 (`d23c0deb`) hậu kiểm ĐẠT; verify `/tech` 09/10 | 2026-10-09 |
-| commercial-polish-2 | Commercial PR B: vỏ Chốt Đơn không có chữ dưới 11 px (token 12 · 13 · 14 + bài chốt) · câu an toàn của màn lỗi | P3 | DONE | DONE (phần còn lại của PR B ở MM-UX-01) | #718 | deploy 37879275359 (`ef9b302a`) hậu kiểm ĐẠT; verify `/tech` 09/10 | 2026-10-09 |
+| trang-chu-su-that-thuong-mai | Trang chủ Chốt Đơn nói đúng sản phẩm (Commercial PR A, C1 #1–#3): Pancake là lối chính hôm nay, nối thẳng Facebook «sắp mở», bỏ claim tuyệt đối, bỏ «Chi phí AI hiện rõ» | P1 | PARTIAL_IMPLEMENTATION | DONE (C1 #4 CTA theo chế độ đăng ký còn chờ D2) | #706 | deploy 37854562530 (`dbab6813`) hậu kiểm ĐẠT; verify `/tech` 09/10 | 2026-10-09 |
+| error-boundary-than-thien | Lỗi thân thiện (Commercial PR C, C1 #11): không in `error.message` / `DATABASE_URL`, chỉ mã tham chiếu | P1 | CODE_DONE_UI_NOT_VERIFIED | DONE | #705 | deploy 37854562530 (`dbab6813`) hậu kiểm ĐẠT; verify `/tech` 09/10 | 2026-10-09 |
+| erp-a11y-bo-cuc | ERP (Commercial PR G, C1 #12 #14 #15): màn «không tìm thấy» có h1; công tắc / ô số / nút biểu tượng có tên; `/payroll` không tràn 390 px | P2 | CODE_DONE_UI_NOT_VERIFIED | DONE | #708 | deploy 37854562530 (`dbab6813`) hậu kiểm ĐẠT; verify `/tech` 09/10 | 2026-10-09 |
+| kenh-dang-chay-trong-app | Trong app chỉ hướng dẫn kênh đang chạy; cổng nối thẳng Facebook: khách thấy «sắp mở», người vận hành thấy nút thật (cờ `meta.direct-connect.open`) | P1 | CODE_DONE_UI_NOT_VERIFIED | DONE — chưa có đường UI / ops bật cờ (MM-FU-712); ngày bật = D20 | #712 | deploy 37860758200 (`d23c0deb`) hậu kiểm ĐẠT; verify `/tech` 09/10 | 2026-10-09 |
+| commercial-polish-2 | Commercial PR B: vỏ Chốt Đơn không có chữ dưới 11 px (token 12 · 13 · 14 + bài chốt) · câu an toàn của màn lỗi | P3 | CODE_DONE_UI_NOT_VERIFIED | DONE (phần còn lại của PR B ở MM-UX-01) | #718 | deploy 37879275359 (`ef9b302a`) hậu kiểm ĐẠT; verify `/tech` 09/10 | 2026-10-09 |
 
 ### 2.2 Đang mở
 
@@ -210,14 +227,14 @@ Mission đã `DONE` được gom vào bảng gọn của từng nhóm (trường
 
 #### erp-chi-tiet-duoi-dai
 - TITLE: Trang chi tiết ERP đuôi dài: «%» trên đường dẫn thôi gây 500 ở 4 trang cài đặt, tiền theo `formatVND`, mã Google / trường thô ở khách sỉ thành tiếng Việt, đầu trang xuống dòng 390 px, phiếu sản xuất cuộn ngang, lượt nhập VTP hỏng thôi in 9 ô 0
-- OWNER: Integration Lead · PRIORITY: P2 · STATUS: DEPLOYED · CLASS: STILL REQUIRED (chờ hậu kiểm)
+- OWNER: Integration Lead · PRIORITY: P2 · STATUS: CODE_DONE_UI_NOT_VERIFIED · CLASS: STILL REQUIRED (chờ hậu kiểm)
 - BRANCH / PR: #721 → `f7eae2c2` · DEPENDENCIES: — · BLOCKERS: —
 - DONE: mã + bài kiểm · REMAINING: hậu kiểm production · ACCEPTANCE_CRITERIA: 4 trang `/settings/…/[id]` không 500 với «%» lẻ
 - PRODUCTION_EVIDENCE: production `50293da6` (deploy 37886395475, `/api/health` khớp) — hậu kiểm riêng CHƯA · NEXT_ACTION: `verify --sha=50293da6` → đóng trong sổ `/tech` · LAST_UPDATED: 2026-10-09
 
 #### erp-o-nhap-co-ten
 - TITLE: Ô nhập ở trang chi tiết ERP có tên cho trình đọc màn hình (lô xưởng 36 ô, khách sỉ, gọi điện, topic, trạng thái mẫu, góp ý ý tưởng, trình sửa luật tự động)
-- OWNER: Integration Lead · PRIORITY: P2 · STATUS: DEPLOYED · CLASS: STILL REQUIRED (chờ hậu kiểm)
+- OWNER: Integration Lead · PRIORITY: P2 · STATUS: CODE_DONE_UI_NOT_VERIFIED · CLASS: STILL REQUIRED (chờ hậu kiểm)
 - BRANCH / PR: #726 → `279a7105` · DONE: mã + `tests/erp-form-names.test.ts` · REMAINING: hậu kiểm
 - PRODUCTION_EVIDENCE: production `50293da6` (deploy 37886395475, `/api/health` khớp) — hậu kiểm riêng CHƯA · NEXT_ACTION: `verify --sha=50293da6` → đóng trong sổ `/tech` · LAST_UPDATED: 2026-10-09
 
@@ -235,8 +252,8 @@ Mission đã `DONE` được gom vào bảng gọn của từng nhóm (trường
 |---|---|---|---|---|---|---|---|
 | master-mission | AI bán hàng nhiều page, đo tiền AI làm ra, Pancake thành tuỳ chọn | P1 | DONE | DONE | #598 | run 37417089563 | 2026-10-06 |
 | pancake-replacement | Thay Pancake bằng Meta/Facebook gốc (ghi đơn, lịch sử, phân trang page) | P1 | DONE | DONE | #602 | run 37431030954 | 2026-10-06 |
-| hotfix-messenger-discovery | Kết nối Facebook nói đúng vì sao 0 page; AI hết tiền báo nhóm vận hành | P0 | DONE | DONE | #603 | run 37431030954; log `PERMISSION_NOT_GRANTED` | 2026-10-06 |
-| messenger-permission-diag | Phân biệt 7 nguyên nhân nối Page; hồ sơ kỹ thuật App Review | P0 | DONE | DONE | #608 | run 37459821433 | 2026-10-06 |
+| hotfix-messenger-discovery | Kết nối Facebook nói đúng vì sao 0 page; AI hết tiền báo nhóm vận hành | P0 | CODE_DONE_UI_NOT_VERIFIED | DONE | #603 | run 37431030954; log `PERMISSION_NOT_GRANTED` | 2026-10-06 |
+| messenger-permission-diag | Phân biệt 7 nguyên nhân nối Page; hồ sơ kỹ thuật App Review | P0 | CODE_DONE_UI_NOT_VERIFIED | DONE | #608 | run 37459821433 | 2026-10-06 |
 | messenger-app-webhook | Webhook nhận gói của app Meta Messenger riêng | P0 | DONE | DONE | #611 | run 37468537396 (GET sai token 403, POST không chữ ký 401) | 2026-10-06 |
 | messenger-app-switch | Nối page đi bằng app Meta Messenger riêng | P0 | DONE | DONE | #614 | run 37483380845 | 2026-10-06 |
 | messenger-oauth-scopes | Sửa «Invalid Scopes» — chỉ xin 5 quyền Page | P0 | DONE | DONE | #628 | run 37566448070 | 2026-10-07 |
@@ -284,13 +301,13 @@ Mission đã `DONE` được gom vào bảng gọn của từng nhóm (trường
 
 | MISSION_ID | TITLE | P | STATUS | CLASS | PR | PRODUCTION_EVIDENCE | LAST_UPDATED |
 |---|---|---|---|---|---|---|---|
-| saas-l4-channels | Kênh kết nối hợp nhất cho khách | P1 | DONE | DONE | #637 | run 37654798771 | 2026-10-07 |
-| saas-l3-inbox | Hộp thư hợp nhất + song song Pancake / Meta Direct (0233) | P1 | DONE | DONE | #641 | run 37667608381 | 2026-10-07 |
-| sales-human-takeover | Tiếp quản / cho AI tiếp tục trong hội thoại (0231) | P1 | DONE | DONE | #633 | run 37614289468 | 2026-10-07 |
+| saas-l4-channels | Kênh kết nối hợp nhất cho khách | P1 | CODE_DONE_UI_NOT_VERIFIED | DONE | #637 | run 37654798771 | 2026-10-07 |
+| saas-l3-inbox | Hộp thư hợp nhất + song song Pancake / Meta Direct (0233) | P1 | PARTIAL_IMPLEMENTATION | DONE | #641 | run 37667608381 | 2026-10-07 |
+| sales-human-takeover | Tiếp quản / cho AI tiếp tục trong hội thoại (0231) | P1 | CODE_DONE_UI_NOT_VERIFIED | DONE | #633 | run 37614289468 | 2026-10-07 |
 | ai-sales-recovery | Cứu hội thoại khách nhắn mà bot chưa trả lời (chỉ đọc) | P1 | DONE | DONE | #613 | run 37493421549 | 2026-10-06 |
-| inbox-composer-templates | Chèn câu mẫu + dòng sản phẩm (giá / tồn ERP) ngay ô soạn | P2 | DONE | DONE | #661 | run 37735795033 | 2026-10-08 |
-| inbox-composer-hardening | Ô soạn dùng chung cổng quyền với Gửi, không chèn tồn âm | P1 | DONE | DONE | #666 | run 37741568283 | 2026-10-08 |
-| MM-INBOX-00 | Hộp thư khách hiện như Pancake: ảnh, nhãn dán, emoji (#679); lọc nâng cao (#595); đủ lịch sử fanpage (#599); dễ nhìn (#577); gửi ảnh + nhãn + ghi chú (#576); hộp thư người (#573) | P1 | DONE | DONE | #573 #576 #577 #595 #599 #679 | đã deploy | 2026-10-08 |
+| inbox-composer-templates | Chèn câu mẫu + dòng sản phẩm (giá / tồn ERP) ngay ô soạn | P2 | CODE_DONE_UI_NOT_VERIFIED | DONE | #661 | run 37735795033 | 2026-10-08 |
+| inbox-composer-hardening | Ô soạn dùng chung cổng quyền với Gửi, không chèn tồn âm | P1 | CODE_DONE_UI_NOT_VERIFIED | DONE | #666 | run 37741568283 | 2026-10-08 |
+| MM-INBOX-00 | Hộp thư khách hiện như Pancake: ảnh, nhãn dán, emoji (#679); lọc nâng cao (#595); đủ lịch sử fanpage (#599); dễ nhìn (#577); gửi ảnh + nhãn + ghi chú (#576); hộp thư người (#573) | P1 | PARTIAL_IMPLEMENTATION | DONE | #573 #576 #577 #595 #599 #679 | đã deploy | 2026-10-08 |
 
 ### 4.2 Đang mở
 
@@ -380,12 +397,12 @@ Mission đã `DONE` được gom vào bảng gọn của từng nhóm (trường
 | MISSION_ID | TITLE | P | STATUS | CLASS | PR | PRODUCTION_EVIDENCE | LAST_UPDATED |
 |---|---|---|---|---|---|---|---|
 | saas-l5-billing-trial | Dùng thử + hết lượt dừng AI, kỳ tính tiền, ngưỡng cảnh báo (0234) | P1 | DONE | DONE | #640 | run 37673293447 | 2026-10-07 |
-| ai-balance-v1 | Số dư AI + nạp QR SePay (ERPNAP), sổ cái chỉ ghi thêm | P1 | DONE | DONE | #644 | run 37697610332 | 2026-10-07 |
-| ai-balance-economics | Doanh thu · chi phí · biên Số dư AI trên /platform | P2 | DONE | DONE | #648 | run 37700846133 | 2026-10-08 |
+| ai-balance-v1 | Số dư AI + nạp QR SePay (ERPNAP), sổ cái chỉ ghi thêm | P1 | CODE_DONE_UI_NOT_VERIFIED | DONE | #644 | run 37697610332 | 2026-10-07 |
+| ai-balance-economics | Doanh thu · chi phí · biên Số dư AI trên /platform | P2 | CODE_DONE_UI_NOT_VERIFIED | DONE | #648 | run 37700846133 | 2026-10-08 |
 | ai-balance-hardening | Sao kê không nạp hộ; báo hết số dư không nuốt nhau | P1 | DONE | DONE | #650 | run 37709225559 | 2026-10-08 |
 | ai-balance-followup | Đảo đúng một khoản trừ; cockpit tính doanh thu Số dư | P2 | DONE | DONE | #653 | run 37714463197 | 2026-10-08 |
 | billing-sepay-trust | Thuê bao chỉ tự gia hạn khi SePay ghi đúng tài khoản nhận | P1 | DONE | DONE | #655 | run 37717239217 | 2026-10-08 |
-| MM-BILL-00 | Gói Dùng thử in «còn N ngày» thay «—» (FINISH_LINE §5) | P2 | DONE | SUPERSEDED — làm trong #670 | #670 | run 37744823972 | 2026-10-08 |
+| MM-BILL-00 | Gói Dùng thử in «còn N ngày» thay «—» (FINISH_LINE §5) | P2 | CODE_DONE_UI_NOT_VERIFIED | SUPERSEDED — làm trong #670 | #670 | run 37744823972 | 2026-10-08 |
 
 ### 6.2 Đang mở
 
@@ -422,11 +439,11 @@ Mission đã `DONE` được gom vào bảng gọn của từng nhóm (trường
 
 | MISSION_ID | TITLE | P | STATUS | CLASS | PR | PRODUCTION_EVIDENCE | LAST_UPDATED |
 |---|---|---|---|---|---|---|---|
-| conversation-delivered-profit | Lãi gộp đã giao theo AI tự bán / AI góp công / Người bán | P2 | DONE | DONE | #646 | run 37684290837 | 2026-10-07 |
-| ai-vs-human-profit | AI vs Người theo lãi gộp đã giao + sau chi phí AI | P2 | DONE | DONE | #658 | run 37727378042 | 2026-10-08 |
-| MM-KPI-00 | Hiệu quả AI lọc «Hôm nay» / khoảng ngày, đếm đơn như Báo cáo danh nghĩa | P2 | DEPLOYED | DONE | #688 | trong production 4dbd864a | 2026-10-08 |
+| conversation-delivered-profit | Lãi gộp đã giao theo AI tự bán / AI góp công / Người bán | P2 | CODE_DONE_UI_NOT_VERIFIED | DONE | #646 | run 37684290837 | 2026-10-07 |
+| ai-vs-human-profit | AI vs Người theo lãi gộp đã giao + sau chi phí AI | P2 | CODE_DONE_UI_NOT_VERIFIED | DONE | #658 | run 37727378042 | 2026-10-08 |
+| MM-KPI-00 | Hiệu quả AI lọc «Hôm nay» / khoảng ngày, đếm đơn như Báo cáo danh nghĩa | P2 | CODE_DONE_UI_NOT_VERIFIED | DONE | #688 | trong production 4dbd864a | 2026-10-08 |
 | MM-KPI-01 | Sổ chỉ số AI Sales (bán chéo, chênh lệch AI − người…) + bán chéo trên đơn đã giao | P2 | DONE | DONE | #563 #564 | đã deploy (04/10) | 2026-10-04 |
-| saas-customer-health | Danh sách / chi tiết khách cho admin thấy sức khoẻ < 30 giây (Launch Gate A7 · A8 · A10; Commercial C1 #8) | P0 | DONE | DONE — trang admin mới có vết smoke 200, chưa có lượt xem có vết từng khối; follow-up MM-FU-683 · MM-FU-692b | #683 | deploy 37829126099 (`6883bfbf`) hậu kiểm ĐẠT; verify `/tech` 09/10 | 2026-10-09 |
+| saas-customer-health | Danh sách / chi tiết khách cho admin thấy sức khoẻ < 30 giây (Launch Gate A7 · A8 · A10; Commercial C1 #8) | P0 | CODE_DONE_UI_NOT_VERIFIED | DONE — trang admin mới có vết smoke 200, chưa có lượt xem có vết từng khối; follow-up MM-FU-683 · MM-FU-692b | #683 | deploy 37829126099 (`6883bfbf`) hậu kiểm ĐẠT; verify `/tech` 09/10 | 2026-10-09 |
 
 ### 7.2 Đang mở
 
@@ -460,12 +477,12 @@ Mission đã `DONE` được gom vào bảng gọn của từng nhóm (trường
 | saas-order-accuracy | Golden replay v2: SKU 29/29 · SL 34/34 · SĐT 28/29 · địa chỉ 87/87 · trùng 0/30 | P1 | DONE | DONE | #664 | run 37741568283 | 2026-10-08 |
 | order-confirm-rules-0810 | Luật chốt 08/10: khách huỷ / xã chưa ghép ⇒ cần người kiểm + nút nhanh; lời xác nhận theo ranh giới từ, SĐT chuẩn hoá (PX-06 · PX-07) | P1 | DONE | DONE | #675 | run 37761350570 | 2026-10-08 |
 | MM-ORDER-00 | Bot không lấy giá lẻ làm giá sỉ, quy cách 0,5 kg + 1 kg; ops `org-catalog` | P1 | DONE | DONE | #677 | đã deploy (08/10) | 2026-10-08 |
-| MM-ORDER-01 | Trang sản phẩm có nút «Thêm mẫu mã» | P2 | DEPLOYED | DONE | #685 | trong production 4dbd864a | 2026-10-08 |
-| MM-ORDER-02 | Nhân viên tạo đơn trong hội thoại (không cộng công bot, chống bấm hai lần); đơn tự ghép tỉnh + xã mới | P1 | DONE | DONE | #565 #583 | đã deploy | 2026-10-05 |
-| vtp-edit-cod-prefill | Sửa đơn VTP thôi điền sẵn COD của đơn cho vận đơn COD 0; đổi tiền thu hộ phải xác nhận; «Đã thu» chưa có chứng từ in «Chưa xác minh» (Commercial C0 duy nhất) | P0 | DONE | DONE — chủ shop tự gộp (CRITICAL: thêm `export` cho `HAS_CASH_EVIDENCE` trong `return-rate.ts`). Chưa mở `/shipments/<id>` của một vận đơn COD 0 trên production (§17) | #717 | deploy 37879275359 (`ef9b302a`) hậu kiểm ĐẠT; verify `/tech` 09/10 | 2026-10-09 |
-| customer-outcome-truth | Trang khách + cảnh báo rủi ro thôi lấy bộ đếm Pancake làm giao thành công (AGENTS 0.1 / 3.2) | P1 | DONE | DONE (phần còn lại = pancake-counters-remaining) | #715 | deploy 37879275359 (`ef9b302a`) hậu kiểm ĐẠT; verify `/tech` 09/10 | 2026-10-09 |
-| customer-list-outcome-truth | Danh sách khách + bộ lọc + cột Đã thanh toán của danh sách đơn thôi trộn bộ đếm Pancake (nối #715) | P1 | DONE | DONE | #722 | deploy 37879275359 (`ef9b302a`) hậu kiểm ĐẠT; verify `/tech` 09/10 | 2026-10-09 |
-| unknown-cost-not-zero | Giá vốn CHƯA BIẾT không in thành 0 ₫ trên trang đơn / sản phẩm (AGENTS 42) | P1 | DONE | DONE | #716 | deploy 37879275359 (`ef9b302a`) hậu kiểm ĐẠT; verify `/tech` 09/10 | 2026-10-09 |
+| MM-ORDER-01 | Trang sản phẩm có nút «Thêm mẫu mã» | P2 | CODE_DONE_UI_NOT_VERIFIED | DONE | #685 | trong production 4dbd864a | 2026-10-08 |
+| MM-ORDER-02 | Nhân viên tạo đơn trong hội thoại (không cộng công bot, chống bấm hai lần); đơn tự ghép tỉnh + xã mới | P1 | CODE_DONE_UI_NOT_VERIFIED | DONE | #565 #583 | đã deploy | 2026-10-05 |
+| vtp-edit-cod-prefill | Sửa đơn VTP thôi điền sẵn COD của đơn cho vận đơn COD 0; đổi tiền thu hộ phải xác nhận; «Đã thu» chưa có chứng từ in «Chưa xác minh» (Commercial C0 duy nhất) | P0 | CODE_DONE_UI_NOT_VERIFIED | DONE — chủ shop tự gộp (CRITICAL: thêm `export` cho `HAS_CASH_EVIDENCE` trong `return-rate.ts`). Chưa mở `/shipments/<id>` của một vận đơn COD 0 trên production (§17) | #717 | deploy 37879275359 (`ef9b302a`) hậu kiểm ĐẠT; verify `/tech` 09/10 | 2026-10-09 |
+| customer-outcome-truth | Trang khách + cảnh báo rủi ro thôi lấy bộ đếm Pancake làm giao thành công (AGENTS 0.1 / 3.2) | P1 | CODE_DONE_UI_NOT_VERIFIED | DONE (phần còn lại = pancake-counters-remaining) | #715 | deploy 37879275359 (`ef9b302a`) hậu kiểm ĐẠT; verify `/tech` 09/10 | 2026-10-09 |
+| customer-list-outcome-truth | Danh sách khách + bộ lọc + cột Đã thanh toán của danh sách đơn thôi trộn bộ đếm Pancake (nối #715) | P1 | CODE_DONE_UI_NOT_VERIFIED | DONE | #722 | deploy 37879275359 (`ef9b302a`) hậu kiểm ĐẠT; verify `/tech` 09/10 | 2026-10-09 |
+| unknown-cost-not-zero | Giá vốn CHƯA BIẾT không in thành 0 ₫ trên trang đơn / sản phẩm (AGENTS 42) | P1 | CODE_DONE_UI_NOT_VERIFIED | DONE | #716 | deploy 37879275359 (`ef9b302a`) hậu kiểm ĐẠT; verify `/tech` 09/10 | 2026-10-09 |
 | production-unpriced-approval | Lệnh đặt xưởng chưa có giá không lọt bước duyệt PURCHASING_LARGE; giá trống không lưu thành 0 | P1 | DONE | DONE | #719 | deploy 37879275359 (`ef9b302a`) hậu kiểm ĐẠT; verify `/tech` 09/10 | 2026-10-09 |
 
 ### 8.2 Đang mở
@@ -482,7 +499,7 @@ Mission đã `DONE` được gom vào bảng gọn của từng nhóm (trường
 
 #### chi-tiet-don-khach-sach
 - TITLE: Trang chi tiết đơn / khách / hội thoại không nói Pancake với khách không dùng Pancake, không in 0 ₫ cho tiền đơn tay không có, diễn biến hội thoại bằng tiếng Việt
-- OWNER: Integration Lead · PRIORITY: P1 · STATUS: DEPLOYED · CLASS: STILL REQUIRED (chờ hậu kiểm)
+- OWNER: Integration Lead · PRIORITY: P1 · STATUS: CODE_DONE_UI_NOT_VERIFIED · CLASS: STILL REQUIRED (chờ hậu kiểm)
 - BRANCH / PR: #725 → `50293da6` · DONE: mã + `tests/detail-pages-shell.test.ts`
 - REMAINING: mở các trang này trên production bằng một tổ chức KHÔNG dùng Pancake (§17)
 - PRODUCTION_EVIDENCE: production `50293da6` (deploy 37886395475, `/api/health` khớp) — hậu kiểm riêng CHƯA · NEXT_ACTION: `verify --sha=50293da6` → đóng trong sổ `/tech` · LAST_UPDATED: 2026-10-09

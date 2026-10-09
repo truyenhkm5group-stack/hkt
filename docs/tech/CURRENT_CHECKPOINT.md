@@ -28,6 +28,21 @@
 
 ---
 
+## VISIBLE PRODUCT DELTA LAST 24H (10/10/2026) — KPI chính từ nay
+
+> Số PR đã gộp KHÔNG còn là KPI chính. Chỉ đếm thứ chủ shop nhìn thấy; chuẩn ở `docs/product/VISIBLE_PRODUCT_FINISH_BOARD.md`.
+
+- **SURFACES IMPROVED: 5** — vỏ khách (#743 chữ kỹ thuật · thương hiệu) · cài chatbot / câu mẫu (#737 #739) · trang Nhân viên (#735 #741) ·
+  khối Khách ở trang đơn (#731) · /work (#734 hiệu năng). Theo `git log` 24 giờ; mới ĐÃ GỘP, chưa xác nhận bằng mở trang.
+- **SURFACES PRODUCTION VERIFIED: 0**
+- **BEFORE/AFTER PAIRS: 0**
+- **CUSTOMER FLOW BLOCKERS CLOSED: 0** (logic cả luồng đã có vết: saas-acceptance PASS 7/7, run 37935922309; chưa có ảnh nên chưa tính đóng)
+- **ADMIN FLOW BLOCKERS CLOSED: 0** (cùng lý do)
+- Đang làm nhìn thấy: INBOX-V2-A / INBOX-V2-B (PARTIAL; ảnh TRƯỚC chờ chủ shop đăng nhập cửa sổ Chrome thử).
+- Registry: 41 mission giao diện hạ từ DONE / DEPLOYED xuống `CODE_DONE_UI_NOT_VERIFIED` (38) / `PARTIAL_IMPLEMENTATION` (3); DONE 119 → 83.
+
+---
+
 ## Checkpoint 2026-10-09 ~13:00 giờ VN (đo lúc 09/10 06:07Z, nhánh `docs/registry-reconcile-0910`)
 
 **MAIN_SHA:** `50293da6` (#725). Từ lần chụp trước (`9833d981`) đã gộp: #705 → #727 (23 PR).
