@@ -1,29 +1,58 @@
 /**
- * Đơn rủi ro: khách có lịch sử hoàn cao (theo số liệu Pancake: giao thành công / hoàn, bị chặn) hoặc theo lịch sử vận đơn trong ERP
- * (cùng SĐT) → cảnh báo cho CSKH xin cọc / xác nhận kỹ trước khi gửi hàng.
+ * Đơn rủi ro: khách có lịch sử hoàn cao → cảnh báo cho CSKH xin cọc / xác nhận kỹ trước khi gửi hàng.
+ *
+ * HAI TÍN HIỆU, KHÔNG TRỘN (AGENTS §0.1 · §0.2 · §3.1):
+ *  · LỊCH SỬ ERP cùng SĐT — giao thành công / hoàn đọc bằng `ORDER_OUTCOME` (`erpHistoryByPhone`).
+ *    Đây là số duy nhất được gọi là "giao thành công" (`succeed` / `returned` / `rate` của kết quả).
+ *  · BỘ ĐẾM PANCAKE của khách (`customers.succeed_order_count` / `returned_order_count`, cờ chặn) — trạng
+ *    thái bán hàng của Pancake, KHÔNG phải chứng từ giao. Vẫn là một tín hiệu cảnh giác hợp lệ, nhưng
+ *    chấm RIÊNG và lý do luôn mang nhãn "Pancake ghi nhận".
+ * Bản trước lấy `Math.max` từng loại giữa hai nguồn rồi in ra là "GTC" — bộ đếm Pancake nâng được số
+ * giao thành công của ERP. Uy tín SĐT toàn mạng Pancake là một tín hiệu khác nữa (`phoneRisk*`), ở `rules.ts`.
  */
 import { and, eq, gte, inArray, ne, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { ORDER_OUTCOME_FAST, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
 import { RETURNED_OUTCOMES_SQL } from "@/lib/constants/truth";
 
+/**
+ * `succeed` / `returned` / `isBlock`: bộ đếm và cờ của PANCAKE (tham khảo).
+ * `erpDelivered` / `erpReturned`: lịch sử cùng SĐT theo `ORDER_OUTCOME` — vắng ⇒ người gọi không tra ERP.
+ */
 export type RiskInput = { succeed: number; returned: number; isBlock: boolean; erpDelivered?: number; erpReturned?: number };
 export type RiskConfig = { riskMinReturned: number; riskReturnRatePct: number };
-export type RiskAssessment = { risky: boolean; severity: "critical" | "warning"; succeed: number; returned: number; rate: number; reasons: string[] };
+export type RiskTally = { succeed: number; returned: number; rate: number | null };
+/** `succeed` / `returned` / `rate`: CHỈ lịch sử ERP (`ORDER_OUTCOME`); `rate = null` khi chưa đơn nào kết thúc. */
+export type RiskAssessment = { risky: boolean; severity: "critical" | "warning"; succeed: number; returned: number; rate: number | null; pancake: RiskTally; reasons: string[] };
 
-/** Gộp số liệu Pancake và ERP (lấy số lớn hơn từng loại) rồi chấm rủi ro */
-export function assessCustomerRisk(input: RiskInput, cfg: RiskConfig): RiskAssessment {
-  const succeed = Math.max(input.succeed, input.erpDelivered ?? 0);
-  const returned = Math.max(input.returned, input.erpReturned ?? 0);
+function tally(succeed: number, returned: number): RiskTally {
   const finished = succeed + returned;
-  const rate = finished ? returned / finished : 0;
+  return { succeed, returned, rate: finished ? returned / finished : null };
+}
+
+/** Lý do (nếu có) của MỘT nguồn — cùng ngưỡng cho cả hai nguồn, nhãn nguồn đứng đầu câu. */
+function tallyReason(t: RiskTally, cfg: RiskConfig, label: string): string | null {
+  const finished = t.succeed + t.returned;
+  if (t.returned >= Math.max(1, cfg.riskMinReturned) && (t.rate ?? 0) * 100 >= cfg.riskReturnRatePct) return `${label} hoàn ${t.returned}/${finished} đơn (${Math.round((t.rate ?? 0) * 100)}%)`;
+  if (t.returned >= Math.max(5, cfg.riskMinReturned * 3)) return `${label} hoàn ${t.returned} đơn`;
+  return null;
+}
+
+const critical = (t: RiskTally) => (t.rate ?? 0) >= 0.7 || t.returned >= 10;
+
+/** Chấm rủi ro: lịch sử ERP và bộ đếm Pancake chấm RIÊNG, mỗi lý do mang nhãn nguồn của nó. */
+export function assessCustomerRisk(input: RiskInput, cfg: RiskConfig): RiskAssessment {
+  const erp = tally(input.erpDelivered ?? 0, input.erpReturned ?? 0);
+  const pancake = tally(input.succeed, input.returned);
   const reasons: string[] = [];
   if (input.isBlock) reasons.push("Pancake đánh dấu chặn");
-  if (returned >= Math.max(1, cfg.riskMinReturned) && rate * 100 >= cfg.riskReturnRatePct) reasons.push(`hoàn ${returned}/${finished} đơn (${Math.round(rate * 100)}%)`);
-  else if (returned >= Math.max(5, cfg.riskMinReturned * 3)) reasons.push(`hoàn ${returned} đơn`);
+  const erpReason = tallyReason(erp, cfg, "lịch sử ERP");
+  const pancakeReason = tallyReason(pancake, cfg, "Pancake ghi nhận");
+  if (erpReason) reasons.push(erpReason);
+  if (pancakeReason) reasons.push(pancakeReason);
   const risky = reasons.length > 0;
-  const severity: RiskAssessment["severity"] = input.isBlock || rate >= 0.7 || returned >= 10 ? "critical" : "warning";
-  return { risky, severity, succeed, returned, rate, reasons };
+  const severity: RiskAssessment["severity"] = input.isBlock || (erpReason !== null && critical(erp)) || (pancakeReason !== null && critical(pancake)) ? "critical" : "warning";
+  return { risky, severity, succeed: erp.succeed, returned: erp.returned, rate: erp.rate, pancake, reasons };
 }
 
 /** Lịch sử vận đơn trong ERP theo SĐT (không tính đơn hiện tại) */

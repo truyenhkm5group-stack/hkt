@@ -141,6 +141,7 @@ import { testStaffPerformance } from "./staff-performance.test";
 import { testConversionFunnel } from "./conversion-funnel.test";
 import { testOrderHourAuditDb, testOrderHourAuditPure } from "./order-hour-audit.test";
 import { testCancelAnalysisDb, testCancelAnalysisPure } from "./cancel-analysis.test";
+import { testCustomerOutcomeTruthDb, testCustomerOutcomeTruthPure } from "./customer-outcome-truth.test";
 import { testPreshipRisk } from "./preship-risk.test";
 import { testReportQueryShape } from "./report-query-shape.test";
 import { testAdsAttribution } from "./ads-attribution.test";
@@ -1155,7 +1156,8 @@ async function main() {
   // Đơn rủi ro: khách hoàn nhiều → xin cọc
   const riskCfg = { riskMinReturned: 2, riskReturnRatePct: 40 };
   const riskHigh = assessCustomerRisk({ succeed: 6, returned: 44, isBlock: false }, riskCfg);
-  assert.ok(riskHigh.risky && riskHigh.severity === "critical" && Math.round(riskHigh.rate * 100) === 88, "GTC 6 / hoàn 44 → rủi ro nghiêm trọng");
+  // Số này là BỘ ĐẾM PANCAKE ⇒ nằm ở `pancake`, lý do mang nhãn Pancake; `rate` của kết quả chỉ là lịch sử ERP (ở đây chưa có).
+  assert.ok(riskHigh.risky && riskHigh.severity === "critical" && Math.round((riskHigh.pancake.rate ?? 0) * 100) === 88 && riskHigh.rate === null, "Pancake GTC 6 / hoàn 44 → rủi ro nghiêm trọng");
   assert.equal(assessCustomerRisk({ succeed: 20, returned: 1, isBlock: false }, riskCfg).risky, false, "khách tốt không cảnh báo");
   assert.ok(assessCustomerRisk({ succeed: 0, returned: 0, isBlock: true }, riskCfg).risky, "bị chặn trên Pancake → rủi ro");
   assert.ok(assessCustomerRisk({ succeed: 0, returned: 0, isBlock: false, erpDelivered: 1, erpReturned: 3 }, riskCfg).risky, "lịch sử ERP cùng SĐT hoàn 3/4 → rủi ro");
@@ -1963,6 +1965,9 @@ async function main() {
   await testOrderHourAuditDb(db);
   testCancelAnalysisPure();
   await testCancelAnalysisDb(db);
+  // Hồ sơ khách: giao thành công / hoàn CHỈ theo ORDER_OUTCOME (bộ đếm Pancake ở ô tham khảo riêng); tự gieo và tự dọn.
+  testCustomerOutcomeTruthPure();
+  await testCustomerOutcomeTruthDb(db);
   await testPreshipRisk(db);
   // Hình dạng câu báo cáo: biểu thức regex đắt tính MỘT lần (trạng thái con ĐVVC · đuôi SĐT của backtest) — đo production 28/09/2026.
   await testReportQueryShape(db);

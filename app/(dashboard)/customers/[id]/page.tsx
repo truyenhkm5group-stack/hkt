@@ -10,7 +10,7 @@ import { ModuleSyncButton } from "@/components/module-sync-button";
 import { DescriptionList, Money, SectionCard } from "@/components/ui-bits";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { formatDate, formatDateTime, formatNumber, formatTimeAgo, formatVND, pct } from "@/lib/format";
+import { formatDate, formatDateTime, formatNumber, formatPercent, formatTimeAgo, formatVND } from "@/lib/format";
 import { getCustomerDetail } from "@/lib/queries/customers";
 import { CUSTOMER_CONVERSATIONS_MAX, customerConversations } from "@/lib/queries/customer-conversations";
 import { CONVERSATION_CONTROL_LABEL } from "@/lib/sales-chatbot/conversation-control-shared";
@@ -102,8 +102,8 @@ export default async function CustomerDetailPage({ params }: { params: Promise<{
   const { stats } = customer;
   const addresses = parseAddresses(customer.addresses);
   const phones = Array.from(new Set([customer.phone, ...customer.phones].filter((p): p is string => Boolean(p))));
-  const successRate = pct(stats.succeed, stats.orders);
-  const returnRate = pct(stats.returned, stats.orders);
+  // Tỷ lệ trên đơn ĐÃ KẾT THÚC theo ORDER_OUTCOME (tính ở truy vấn); chưa đơn nào kết thúc ⇒ «—», không phải 0%.
+  const openNote = [stats.inTransit ? `${formatNumber(stats.inTransit)} đang giao` : null, stats.open > stats.inTransit ? `${formatNumber(stats.open - stats.inTransit)} chưa gửi / chưa rõ` : null].filter(Boolean).join(" · ");
   const fbUrl = customer.fbId ? `https://www.facebook.com/${customer.fbId}` : null;
 
   return (
@@ -133,8 +133,8 @@ export default async function CustomerDetailPage({ params }: { params: Promise<{
 
       <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
         <MetricCard label="Số đơn" value={formatNumber(stats.orders)} note={stats.cancelled ? `${formatNumber(stats.cancelled)} đơn huỷ/xoá không tính` : "Không tính đơn huỷ/xoá"} icon={ShoppingBag} tone="blue" />
-        <MetricCard label="Thành công" value={formatNumber(stats.succeed)} note={`Tỷ lệ ${successRate.toFixed(0)}% · ${formatVND(stats.successRevenue, { compact: true })}`} icon={PackageCheck} tone="green" />
-        {showReturns ? <MetricCard label="Hoàn" value={formatNumber(stats.returned)} note={`Tỷ lệ hoàn ${returnRate.toFixed(0)}%`} icon={RotateCcw} tone={stats.returned > 0 ? "rose" : "slate"} /> : null}
+        <MetricCard label="Thành công" value={formatNumber(stats.succeed)} note={`Tỷ lệ ${formatPercent(stats.successRate, 0)} / ${formatNumber(stats.finished)} đơn đã kết thúc${openNote ? ` · ${openNote}` : ""} · ${formatVND(stats.successRevenue, { compact: true })}`} icon={PackageCheck} tone="green" />
+        {showReturns ? <MetricCard label="Hoàn" value={formatNumber(stats.returned)} note={`Tỷ lệ hoàn ${formatPercent(stats.returnRate, 0)} / ${formatNumber(stats.finished)} đơn đã kết thúc`} icon={RotateCcw} tone={stats.returned > 0 ? "rose" : "slate"} /> : null}
         <MetricCard label="Tổng mua" value={formatVND(stats.amount, { compact: true })} note="Tiền hàng lên đơn, không tính đơn huỷ" icon={CircleDollarSign} tone="primary" />
         <MetricCard label="Trung bình mỗi đơn" value={formatVND(stats.aov, { compact: true })} note={stats.firstOrderAt ? `Mua lần đầu ${formatDate(stats.firstOrderAt)}` : "Chưa có đơn"} icon={Boxes} tone="amber" />
       </section>
@@ -196,7 +196,15 @@ export default async function CustomerDetailPage({ params }: { params: Promise<{
                             </div>
                           ) : (
                             // Đơn tạo tay không có COD nào để đọc: "0 thu hộ" KHÔNG có nghĩa là đã thu (G-ORDER — tiền theo chứng từ).
-                            <div className="mt-0.5 text-[11px] text-muted-foreground">{isManualOrderId(o.id) ? <ManualPaymentStatusText state={payStates.get(o.id)} className="text-[11px]" /> : "Đã thanh toán"}</div>
+                            <div className="mt-0.5 text-[11px] text-muted-foreground">{isManualOrderId(o.id) ? (
+                              <ManualPaymentStatusText state={payStates.get(o.id)} className="text-[11px]" />
+                            ) : o.noCodPayment?.kind === "PREPAID" ? (
+                              // Bằng chứng tiền đã khai ở VERIFIED_MONEY_SOURCES: khách chuyển khoản trước.
+                              <span>Trả trước <Money value={o.noCodPayment.amount} /></span>
+                            ) : (
+                              // Không còn COD mà cũng không có chứng từ tiền ⇒ CHƯA XÁC MINH, không phải "đã thanh toán" (AGENTS §0.1).
+                              <span title="Đơn không còn COD phải thu nhưng ERP chưa thấy chứng từ tiền nào (chuyển khoản trước / bảng kê)">Chưa xác minh</span>
+                            )}</div>
                           )}
                         </TableCell>
                       </TableRow>
@@ -339,7 +347,7 @@ export default async function CustomerDetailPage({ params }: { params: Promise<{
           </SectionCard>
 
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
-            <ShoppingBag className="size-3.5" /> Số liệu Pancake: {formatNumber(customer.orderCount)} đơn · {formatVND(customer.purchasedAmount)} · cập nhật {formatDateTime(customer.updatedAtExternal ?? customer.syncedAt)}
+            <ShoppingBag className="size-3.5" /> Pancake ghi nhận (tham khảo, không tính vào số ERP ở trên): {formatNumber(stats.pancake.orders)} đơn · thành công {formatNumber(stats.pancake.succeed)} · hoàn {formatNumber(stats.pancake.returned)} · {formatVND(stats.pancake.amount)} · cập nhật {formatDateTime(customer.updatedAtExternal ?? customer.syncedAt)}
           </div>
           <JsonViewer value={customer.raw ?? { id: customer.id, pancakeId: customer.pancakeId, name: customer.name, phones: customer.phones }} />
         </div>

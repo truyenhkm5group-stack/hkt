@@ -4,8 +4,8 @@ import { chayKhongJit, getDb, schema, type Db } from "@/db";
 import { vanDonDaiDien } from "@/lib/constants/shipment-pick";
 import { ORDER_OUTCOME_FAST, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
 import { REVENUE_RECOGNIZED_ON_DELIVERY } from "@/lib/queries/manual-order-sql";
-import { RETURNED_OUTCOMES_SQL } from "@/lib/constants/truth";
-import { toDate } from "@/lib/format";
+import { OPEN_OUTCOMES_SQL, RETURNED_OUTCOMES_SQL } from "@/lib/constants/truth";
+import { pctOrNull, toDate } from "@/lib/format";
 import type { ListParams } from "@/lib/search-params";
 
 export const CUSTOMER_SORTABLE = ["orderCount", "purchasedAmount", "lastOrderAt", "name", "insertedAt"];
@@ -241,6 +241,21 @@ export async function customerSummary(params: ListParams, extra?: SQL) {
 
 // ───────────────────────── Chi tiết khách hàng ─────────────────────────
 
+/**
+ * Đơn ĐỒNG BỘ không còn COD phải thu: tiền đã về chưa? Chỉ trả lời "đã trả trước" khi có thứ mà
+ * `VERIFIED_MONEY_SOURCES` (`lib/constants/truth.ts`) đã khai là bằng chứng — `orders.prepaid` /
+ * `orders.transfer_money`. `money_to_collect = 0` tự nó KHÔNG phải chứng từ (ORDER_OUTCOME.md mục 8):
+ * thiếu bằng chứng thì là CHƯA XÁC MINH, không phải "đã thanh toán" (AGENTS §0.1 · §0.3).
+ * `null` ⇒ đơn còn COD, câu hỏi không đặt ra. Đơn tạo tay đi đường chứng từ riêng (`order_payments`).
+ */
+export type NoCodPaymentState = { kind: "PREPAID"; amount: number } | { kind: "UNVERIFIED" };
+
+export function noCodPaymentState(d: { moneyToCollect: number; prepaid: number; transferMoney: number }): NoCodPaymentState | null {
+  if (d.moneyToCollect > 0) return null;
+  const prepaid = d.prepaid + d.transferMoney;
+  return prepaid > 0 ? { kind: "PREPAID", amount: prepaid } : { kind: "UNVERIFIED" };
+}
+
 export async function getCustomerDetail(id: string) {
   const db = await getDb();
   const customer = await db.query.customers.findFirst({ where: or(eq(c.id, id), eq(c.pancakeId, id)) });
@@ -254,6 +269,10 @@ export async function getCustomerDetail(id: string) {
         allOrders: count(),
         succeed: sql<number>`count(*) filter (where ${ORDER_OUTCOME_FAST} = 'DELIVERED')`,
         returned: sql<number>`count(*) filter (where ${ORDER_OUTCOME_FAST} in (${sql.raw(RETURNED_OUTCOMES_SQL)}))`,
+        // CHƯA KẾT THÚC (danh sách sinh từ `OUTCOME_GROUP`, không gõ lại) — đứng NGOÀI mẫu số tỷ lệ.
+        open: sql<number>`count(*) filter (where ${notCancelled} and ${ORDER_OUTCOME_FAST} in (${sql.raw(OPEN_OUTCOMES_SQL)}))`,
+        // "Đang giao" là khẳng định về VỊ TRÍ kiện hàng ⇒ chỉ đúng kết quả `IN_TRANSIT` (đã có chứng từ bàn giao).
+        inTransit: sql<number>`count(*) filter (where ${notCancelled} and ${ORDER_OUTCOME_FAST} = 'IN_TRANSIT')`,
         cancelled: sql<number>`count(*) filter (where ${o.stage} in ('CANCELLED','DELETED'))`,
         revenue: sql<number>`coalesce(sum(case when ${notCancelled} then ${o.totalPriceAfterDiscount} else 0 end), 0)`,
         // Doanh thu thành công chỉ khi "giao" mang chứng cứ tiền — đơn tay giao bằng phiếu đứng ngoài (G-ORDER).
@@ -269,7 +288,7 @@ export async function getCustomerDetail(id: string) {
       where: eq(o.customerId, customer.id),
       orderBy: [desc(o.insertedAt)],
       limit: 100,
-      columns: { id: true, systemId: true, source: true, stage: true, statusName: true, totalPriceAfterDiscount: true, shippingFee: true, moneyToCollect: true, itemsCount: true, totalQuantity: true, insertedAt: true },
+      columns: { id: true, systemId: true, source: true, stage: true, statusName: true, totalPriceAfterDiscount: true, shippingFee: true, moneyToCollect: true, prepaid: true, transferMoney: true, itemsCount: true, totalQuantity: true, insertedAt: true },
       with: { attempts: { columns: { id: true, attemptNo: true, direction: true, createdAt: true, vtpOrderNumber: true, trackingCode: true, stage: true, carrier: true, vtpStatusName: true, codStatus: true } }, items: { columns: { productName: true, variationDetail: true, quantity: true }, limit: 3 } },
     }),
     db
@@ -291,25 +310,48 @@ export async function getCustomerDetail(id: string) {
   ]);
 
   const lastCandidates = [toDate(customer.lastOrderAt), toDate(agg?.lastOrderAt)].filter((d): d is Date => Boolean(d));
+  /*
+    KẾT QUẢ ĐƠN CHỈ ĐI MỘT ĐƯỜNG: `ORDER_OUTCOME` (AGENTS §0.2 · §3.1). Bản trước lấy
+    `Math.max(bộ đếm Pancake, số ERP)` cho số đơn / thành công / hoàn / tổng mua — tức trạng thái
+    Pancake "Đã nhận" NÂNG được số giao thành công lên trên số mà chứng từ ĐVVC + luật tiền chứng
+    minh được, đúng điều đặc tả mục 10 cấm. Bộ đếm Pancake vẫn trả ra, nhưng ở `pancake` riêng để
+    trang in thành dòng "tham khảo" — không bao giờ trộn vào số của ERP.
+
+    Tỷ lệ đặt trên đơn ĐÃ KẾT THÚC (thành công + hoàn): đơn đang giao / chưa gửi chưa có kết quả,
+    đưa vào mẫu số là kéo tỷ lệ của khách vừa đặt đơn thứ hai xuống 50% một cách vô cớ. Chưa đơn nào
+    kết thúc ⇒ `null` (in «—»), không phải 0% (AGENTS mục 42).
+  */
+  const orderCount = Number(agg?.orders ?? 0);
+  const succeed = Number(agg?.succeed ?? 0);
+  const returned = Number(agg?.returned ?? 0);
+  const finished = succeed + returned;
+  const amount = Number(agg?.revenue ?? 0);
   const stats = {
-    orders: Math.max(customer.orderCount, Number(agg?.orders ?? 0)),
-    succeed: Math.max(customer.succeedOrderCount, Number(agg?.succeed ?? 0)),
-    returned: Math.max(customer.returnedOrderCount, Number(agg?.returned ?? 0)),
+    orders: orderCount,
+    succeed,
+    returned,
+    finished,
+    open: Number(agg?.open ?? 0),
+    inTransit: Number(agg?.inTransit ?? 0),
+    successRate: pctOrNull(succeed, finished),
+    returnRate: pctOrNull(returned, finished),
     cancelled: Number(agg?.cancelled ?? 0),
     allOrders: Number(agg?.allOrders ?? 0),
-    amount: Math.max(customer.purchasedAmount, Number(agg?.revenue ?? 0)),
+    amount,
     successRevenue: Number(agg?.successRevenue ?? 0),
     firstOrderAt: toDate(agg?.firstOrderAt),
     lastOrderAt: lastCandidates.length ? new Date(Math.max(...lastCandidates.map((d) => d.getTime()))) : null,
-    aov: 0,
+    // Chưa có đơn (không huỷ) nào ⇒ CHƯA BIẾT, không phải 0 ₫.
+    aov: orderCount > 0 ? Math.round(amount / orderCount) : null,
+    /** Bộ đếm của Pancake — CHỈ để tham khảo, không tham gia phép tính nào ở trên. */
+    pancake: { orders: customer.orderCount, succeed: customer.succeedOrderCount, returned: customer.returnedOrderCount, amount: customer.purchasedAmount },
   };
-  stats.aov = stats.orders ? Math.round(stats.amount / stats.orders) : 0;
 
   return {
     ...customer,
     stats,
     // Một đơn có thể nhiều lần gửi — chọn lần ĐẠI DIỆN bằng đúng luật `PRIMARY_ATTEMPT` mà cột tiền dùng.
-    orders: orders.map((d) => ({ ...d, shipment: vanDonDaiDien(d.attempts) })),
+    orders: orders.map((d) => ({ ...d, shipment: vanDonDaiDien(d.attempts), noCodPayment: noCodPaymentState(d) })),
     topProducts: topProducts.map((p) => ({ ...p, quantity: Number(p.quantity ?? 0), revenue: Number(p.revenue ?? 0), orders: Number(p.orders ?? 0), lastAt: toDate(p.lastAt) })),
   };
 }
