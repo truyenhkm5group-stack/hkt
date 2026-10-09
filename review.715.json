@@ -1,0 +1,8 @@
+{
+  "pr": 715,
+  "sha": "9f576bf05364264f062b40b990f2671e351acbd2",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-09T00:09:32.021Z",
+  "note": "Review Integration Lead: số đơn/thành công/hoàn/tổng mua chỉ theo ORDER_OUTCOME_FAST (không điều kiện stage mới), Pancake tách dòng tham khảo; tỷ lệ trên đơn đã kết thúc, mẫu 0 ⇒ null (luật 42); «Đã thanh toán» chỉ khi có prepaid/transfer_money (VERIFIED_MONEY_SOURCES), không ⇒ Chưa xác minh; rủi ro chấm ERP và Pancake riêng, phoneRisk giữ nguyên. Đột biến Math.max ⇒ đỏ. Theo sau: danh sách /custo"
+}
