@@ -17,6 +17,8 @@
  *       (`openConversation("WEB")` · `chatTurn`) — đơn do BOT tạo / chốt là hành vi sản phẩm bình thường. Đọc đơn trong OMS + chi phí AI.
  *  E  · chat công khai: `<slug>.<PLATFORM_BASE_DOMAIN>/chat` (qua ứng dụng với Host đó, và qua mạng ngoài thật) ⇒ 200 + tên shop.
  *       Chưa xuất bản ⇒ SKIP kèm việc người làm (xuất bản ghi vào workspace dưới danh tính quản trị — không tự làm).
+ *  F  · (`--drills`, chen trước B2) diễn tập tín hiệu vận hành O1–O8 qua ĐÚNG đường mã ghi tín hiệu, đầu vào cố ý sai — tín hiệu không
+ *       diễn tập trung thực được in «CHƯA ĐO ĐƯỢC» kèm lý do (docs/saas/ACCEPTANCE.md §10).
  *  B2 · xoay mật khẩu: đặt một mật khẩu ngẫu nhiên MỚI rồi vứt — mật khẩu của lượt chạy không còn đăng nhập được, mọi phiên bị thu hồi.
  *       Chạy CUỐI và chạy cả khi bước giữa hỏng.
  *
@@ -44,15 +46,20 @@ import {
   ACCEPTANCE_NUDGE_TURN,
   ACCEPTANCE_ORDER,
   ACCEPTANCE_REGISTRY_REFUSAL,
+  ACCEPTANCE_DRILL_ID_PREFIX,
   ACCEPTANCE_SAMPLE_PRODUCTS,
-  ACCEPTANCE_STEPS,
+  ACCEPTANCE_UNMEASURABLE_DRILLS,
   ACCEPTANCE_WORKSPACES,
   acceptanceChatTurns,
   acceptanceIdempotencyKey,
+  acceptanceStepsFor,
   acceptanceSummary,
   acceptanceVerdict,
   acceptanceWorkspaceOf,
+  drillStepStatus,
+  drillSummaryPart,
   formatAcceptanceUsd,
+  formatDrillLine,
   formatStepLine,
   PAGE_ERROR_DIGEST,
   PAGE_ERROR_MARKER,
@@ -60,9 +67,11 @@ import {
   type AcceptanceMode,
   type AcceptanceStepKey,
   type AcceptanceWorkspace,
+  type DrillResult,
   type StepResult,
   type StepStatus,
 } from "@/lib/constants/saas-acceptance";
+import { OPS_SIGNAL_KEYS, ORDER_VALIDATION_FAILED_ACTION } from "@/lib/constants/ops-signals";
 import { ERP_FRAME_HTML_MARKERS, FORBIDDEN_PARAM, isSalesAgentUser, SALES_AGENT_DENIED_PREFIXES, SALES_AGENT_SHELL_HTML_MARKER, SHELL_BLOCKED_PARAM, salesAgentNavFor, salesAgentRedirectFor, type ShellUser } from "@/lib/constants/saas-nav";
 import { SESSION_COOKIE } from "@/lib/constants/session";
 import { revokeMarkFrom } from "@/lib/constants/session-revocation";
@@ -87,7 +96,8 @@ import { PRODUCTS } from "@/lib/saas/catalog";
 import { readPlans } from "@/lib/saas/customers";
 import { requestProvisioning } from "@/lib/saas/provisioning";
 import { withinBusinessHours } from "@/lib/sales-chatbot/config";
-import { chatTurn, conversationView, EMPTY_REPLY_TEXT, loadSalesChatbotConfig, openConversation, salesChatProvider, visitorKeyOf } from "@/lib/sales-chatbot/engine";
+import { chatTurn, conversationView, EMPTY_REPLY_TEXT, loadSalesChatbotConfig, openConversation, SALES_AGENT, salesChatProvider, visitorKeyOf } from "@/lib/sales-chatbot/engine";
+import { executeTool } from "@/lib/sales-chatbot/tools";
 import { completePasswordResetCore, createAcceptanceResetLink, lookupResetToken } from "@/lib/users/password-reset";
 
 // ─────────────────────────── Phụ thuộc thay được (bài kiểm: AI giả, HTTP giả, mật khẩu biết trước) ───────────────────────────
@@ -239,13 +249,19 @@ type Ctx = {
   lastPasswordChangeMs: number;
   aiCostUsd: number | null;
   baseDomain: string | null;
+  /** `--drills`: thêm bước F diễn tập tín hiệu vận hành. */
+  drills: boolean;
+  /** Mã lý do của dòng LOGIN mà B1 vừa ghi được (bằng chứng O1 của lượt này); `null` = lượt này không ghi được. */
+  loginEvidence: string | null;
+  /** Kết quả diễn tập (bước F) — dòng tóm tắt công khai đọc số hiệu tín hiệu theo trạng thái từ đây. */
+  drillResults: DrillResult[] | null;
 };
 
 /**
  * Chạy nghiệm thu. `orgCode` bỏ trống ⇒ mục DUY NHẤT của sổ (sổ nhiều mục ⇒ phải chỉ rõ). Mã ngoài sổ ⇒ `refused`, không một lượt
  * đọc / ghi nào. Không bao giờ ném: mỗi bước tự bắt lỗi của mình thành FAIL.
  */
-export async function runAcceptance(input: { orgCode: string | null; mode: AcceptanceMode }, deps: AcceptanceDeps): Promise<AcceptanceReport> {
+export async function runAcceptance(input: { orgCode: string | null; mode: AcceptanceMode; drills?: boolean }, deps: AcceptanceDeps): Promise<AcceptanceReport> {
   const secrets = new Set<string>();
   const say = (line: string) => deps.emit(scrubSecrets(line, secrets));
   const target = input.orgCode ? acceptanceWorkspaceOf(input.orgCode) : ACCEPTANCE_WORKSPACES.length === 1 ? ACCEPTANCE_WORKSPACES[0] : null;
@@ -254,7 +270,7 @@ export async function runAcceptance(input: { orgCode: string | null; mode: Accep
     say(`TỪ CHỐI — ${why}`);
     return { refused: true, results: [], verdict: "FAIL", summary: acceptanceSummary([], { mode: input.mode, orgCode: null, note: why }) };
   }
-  const ctx: Ctx = { entry: target, mode: input.mode, deps, secrets, owned: false, exists: false, knownPassword: null, lastPasswordChangeMs: 0, aiCostUsd: null, baseDomain: deps.baseDomain };
+  const ctx: Ctx = { entry: target, mode: input.mode, deps, secrets, owned: false, exists: false, knownPassword: null, lastPasswordChangeMs: 0, aiCostUsd: null, baseDomain: deps.baseDomain, drills: input.drills === true && input.mode !== "READ", loginEvidence: null, drillResults: null };
   const results: StepResult[] = [];
   const steps: Record<AcceptanceStepKey, () => Promise<Outcome>> = {
     A: () => stepWorkspace(ctx),
@@ -262,9 +278,11 @@ export async function runAcceptance(input: { orgCode: string | null; mode: Accep
     C: () => needOwned(ctx, () => stepShell(ctx)),
     D: () => (ctx.mode !== "E2E" ? Promise.resolve(skip("chỉ chạy với --apply --e2e (nhắn bot thật, tốn AI)")) : needOwned(ctx, () => stepE2e(ctx))),
     E: () => needOwned(ctx, () => stepPublicChat(ctx)),
+    // Chỉ có mặt trong lượt `--apply --drills` (acceptanceStepsFor) — và chỉ sau khi A xác nhận workspace là của CHÍNH ops này.
+    F: () => needOwned(ctx, () => stepDrills(ctx)),
     B2: () => (ctx.mode === "READ" ? Promise.resolve(skip("chế độ CHỈ ĐỌC — không có mật khẩu nào được đặt")) : stepRotate(ctx)),
   };
-  for (const key of ACCEPTANCE_STEPS) {
+  for (const key of acceptanceStepsFor(ctx.drills)) {
     const started = Date.now();
     let out: Outcome;
     try {
@@ -277,7 +295,7 @@ export async function runAcceptance(input: { orgCode: string | null; mode: Accep
     say(formatStepLine(r));
     for (const d of r.detail) say(`    · ${d}`);
   }
-  const summary = acceptanceSummary(results, { mode: input.mode, orgCode: target.code, baseDomain: ctx.baseDomain, aiCostUsd: ctx.mode === "E2E" ? ctx.aiCostUsd : undefined });
+  const summary = acceptanceSummary(results, { mode: input.mode, orgCode: target.code, baseDomain: ctx.baseDomain, aiCostUsd: ctx.mode === "E2E" ? ctx.aiCostUsd : undefined, drills: ctx.drillResults ? drillSummaryPart(ctx.drillResults) : undefined });
   return { refused: false, results, verdict: acceptanceVerdict(results), summary: scrubSecrets(summary, secrets) };
 }
 
@@ -406,6 +424,7 @@ async function recordWrongLoginEvidence(ctx: Ctx, note: LoginFailureNote | null)
   if (!note || note.orgCode !== entry.code) return `sổ lỗi đăng nhập: KHÔNG ghi — lượt sai không quy về ${entry.code} (tổ chức ${note?.orgCode ?? "—"})`;
   try {
     const ok = await recordAuthFailure({ flow: "LOGIN", reason: note.reason, orgCode: note.orgCode, identifier: entry.ownerEmail, ip: null, lock: null });
+    if (ok) ctx.loginEvidence = note.reason;
     return ok ? `sổ lỗi đăng nhập: ghi 1 dòng LOGIN/${note.reason} cho ${entry.code} (bằng chứng O1)` : `sổ lỗi đăng nhập: KHÔNG ghi được dòng LOGIN/${note.reason} (recordAuthFailure trả false) — thiếu bằng chứng O1, bước vẫn chấm theo phép kiểm`;
   } catch (error) {
     return `sổ lỗi đăng nhập: ghi hỏng (${firstLine(error)}) — thiếu bằng chứng O1, bước vẫn chấm theo phép kiểm`;
@@ -504,6 +523,75 @@ async function stepRotate(ctx: Ctx): Promise<Outcome> {
   ctx.lastPasswordChangeMs = Date.now();
   if ((await matchingLoginOrganizations(entry.ownerEmail, used)).length) return fail("mật khẩu đã dùng trong lượt chạy VẪN đăng nhập được sau khi xoay");
   return pass("mật khẩu của lượt chạy đã bị thay bằng một mật khẩu ngẫu nhiên không lưu ở đâu · mọi phiên của tài khoản thử bị thu hồi · mật khẩu cũ bị từ chối");
+}
+
+// ─────────────────────────── F · diễn tập tín hiệu vận hành (`--apply --drills`) ───────────────────────────
+
+/**
+ * Bước F: mỗi tín hiệu O1–O8 một dòng ĐÃ DIỄN TẬP / BỎ QUA / CHƯA ĐO ĐƯỢC / HỎNG (lib/constants/saas-acceptance.ts). Chỉ chạy sau
+ * `needOwned` (A đã xác nhận `acceptanceWorkspaceOwned`) và hỏi lại sổ khai. KHÔNG gọi nhà cung cấp AI, KHÔNG gọi dịch vụ ngoài, KHÔNG
+ * chèn dòng lỗi giả, KHÔNG đổi cấu hình bot / gói / công tắc: tín hiệu nào chỉ gây được bằng những cách đó là «CHƯA ĐO ĐƯỢC».
+ */
+async function stepDrills(ctx: Ctx): Promise<Outcome> {
+  const { entry } = ctx;
+  if (!ctx.owned || acceptanceWorkspaceOf(entry.code)?.code !== entry.code) return skip("workspace không phải workspace nghiệm thu của ops này — không diễn tập");
+  const results: DrillResult[] = [];
+  for (const key of OPS_SIGNAL_KEYS) {
+    if (key === "LOGIN") {
+      // O1 diễn tập ngay ở B1 (lượt mật khẩu sai qua verifyLogin + recordAuthFailure) — F chỉ đọc lại kết quả của lượt này.
+      results.push(
+        ctx.loginEvidence
+          ? { key, status: "DRILLED", code: `LOGIN/${ctx.loginEvidence}`, why: "bước B1: lượt mật khẩu sai ghi một dòng platform_auth_failures luồng LOGIN" }
+          : { key, status: "SKIPPED", code: null, why: "bước B1 của lượt này không ghi được dòng LOGIN (xem chi tiết B1)" },
+      );
+    } else if (key === "ORDER_VALIDATION") results.push(await drillOrderValidation(ctx));
+    else results.push({ key, status: "UNMEASURABLE", code: null, why: ACCEPTANCE_UNMEASURABLE_DRILLS[key] ?? "chưa có đường diễn tập trung thực" });
+  }
+  ctx.drillResults = results;
+  const status = drillStepStatus(results);
+  const reason = drillSummaryPart(results);
+  const detail = [...results.map(formatDrillLine), "dọn dẹp: không có gì để gỡ — dòng tín hiệu tự hết hạn theo cửa sổ 24 giờ / 7 ngày; không đổi cấu hình bot, gói hay công tắc nào"];
+  return status === "FAIL" ? fail(reason, detail) : status === "PASS" ? pass(reason, detail) : skip(reason, detail);
+}
+
+/**
+ * O6 ĐƠN KHÔNG HỢP LỆ — gọi ĐÚNG `executeTool` (bộ chạy công cụ mà engine gọi sau khi model chọn công cụ) với công cụ «Lưu khách»
+ * THIẾU số điện thoại, kênh WEB, trong ngữ cảnh workspace nghiệm thu. Công cụ từ chối TRƯỚC mọi lượt ghi khách (`MISSING_CONTACT`) ⇒
+ * `executeTool` ghi `order.validation_failed` vào `audit_logs` của workspace + nâng gương `platform_org_health` — đúng đường của một
+ * khách thật để thiếu SĐT. Không gọi AI (bỏ qua bước model chọn công cụ — phần duy nhất tốn tiền), không tạo khách / đơn / hội thoại:
+ * id tương quan mang tiền tố diễn tập. Tự hết hạn: mức của tín hiệu tính trên số đếm 24 giờ.
+ */
+async function drillOrderValidation(ctx: Ctx): Promise<DrillResult> {
+  const key = "ORDER_VALIDATION" as const;
+  const { entry, deps } = ctx;
+  const drillId = `${ACCEPTANCE_DRILL_ID_PREFIX}${deps.runId}`;
+  try {
+    return await withOrganization(entry.code, async (): Promise<DrillResult> => {
+      invalidateCapabilities(entry.code);
+      if (!(await getEnabledModules(entry.code)).has("ai_sales")) return { key, status: "SKIPPED", code: null, why: "module ai_sales của workspace đang tắt — công cụ của bot không chạy" };
+      const cfg = await loadSalesChatbotConfig();
+      if (!cfg.allowedTools.includes("create_customer")) return { key, status: "SKIPPED", code: null, why: "bot của workspace không bật công cụ «Lưu khách» (create_customer) — bật ở AI Sales rồi chạy lại" };
+      const out = await executeTool("create_customer", { name: ACCEPTANCE_ACTOR_LABEL, address: "Diễn tập nghiệm thu — cố ý thiếu số điện thoại" }, { conversationId: drillId, channel: "WEB", config: cfg, state: {}, lastUserText: "", agent: SALES_AGENT, now: deps.now() });
+      if (out.orderSignal?.reason !== "MISSING_CONTACT") return { key, status: "FAILED", code: out.orderSignal?.reason ?? null, why: `công cụ «Lưu khách» thiếu SĐT không trả tín hiệu MISSING_CONTACT (${out.summary})` };
+      const db = await getDb();
+      const [row] = await db
+        .select({ id: schema.auditLogs.id })
+        .from(schema.auditLogs)
+        .where(and(eq(schema.auditLogs.action, ORDER_VALIDATION_FAILED_ACTION), eq(schema.auditLogs.correlationId, drillId)))
+        .limit(1);
+      if (!row) return { key, status: "FAILED", code: "MISSING_CONTACT", why: "công cụ trả tín hiệu nhưng audit_logs của workspace không có dòng order.validation_failed của lượt diễn tập" };
+      const mirror = await (await getPlatformDb()).query.platformOrgHealth.findFirst({ where: and(eq(schema.platformOrgHealth.orgCode, entry.code), eq(schema.platformOrgHealth.checkKey, key)) });
+      const lit = mirror && (mirror.level === "WARNING" || mirror.level === "CRITICAL");
+      return {
+        key,
+        status: "DRILLED",
+        code: `MISSING_CONTACT · audit ${row.id}`,
+        why: `executeTool(create_customer, thiếu SĐT, kênh WEB) ⇒ order.validation_failed · gương ${mirror ? `${mirror.level} (24h ${mirror.count24h ?? "—"})` : "chưa có dòng"}${lit ? "" : " — gương chưa sáng (trần tần suất đường nóng); job sales-health đếm lại từ audit_logs trong 5 phút"}`,
+      };
+    });
+  } catch (error) {
+    return { key, status: "FAILED", code: null, why: `diễn tập ném lỗi: ${firstLine(error)}` };
+  }
 }
 
 // ─────────────────────────── C · vỏ app ───────────────────────────
