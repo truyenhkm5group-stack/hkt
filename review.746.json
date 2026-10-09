@@ -1,0 +1,8 @@
+{
+  "pr": 746,
+  "sha": "a6b74624cdc40b66a55073910f3227eb9d9ca050",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-09T15:18:10.795Z",
+  "note": "Review Integration Lead: --e2e-ops chỉ đi với --apply, ba lá chắn như P, đứng tên chủ workspace thử; mỗi mục qua đúng lõi UI (confirmOrderReviewCore · sendStaffReplyCore · setConversationControlCore · executeTool) — chỉ C18 tốn một lượt AI, đi đường chat công khai thật qua HTTP để đồng hồ khách AI được đo; thất bại trùng đơn / tự chốt dữ liệu mơ hồ / đồng hồ lệch đều FAIL. C14 dùng nhánh mark_decl"
+}
