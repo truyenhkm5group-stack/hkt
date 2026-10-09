@@ -1,0 +1,8 @@
+{
+  "pr": 724,
+  "sha": "86955d0568cc11e1c21e0a99dec593685c313217",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-09T03:23:14.115Z",
+  "note": "Review Integration Lead: chế độ --apply --drills tuỳ chọn, chỉ sau needOwned + sổ khai; O6 qua executeTool(create_customer) thật với thiếu SĐT ⇒ recordOrderValidationFailure (không chèn dòng giả, không gọi model trả tiền, không tạo khách/đơn); sáu tín hiệu còn lại CHƯA ĐO ĐƯỢC kèm lý do (không giả xanh); công khai chỉ số hiệu tín hiệu + trạng thái; khách trùng mã không bị chạm."
+}
