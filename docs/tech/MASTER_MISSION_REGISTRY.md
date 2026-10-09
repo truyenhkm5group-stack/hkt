@@ -1,7 +1,9 @@
 # MASTER MISSION REGISTRY — Chốt Đơn Tự Động / ERP
 
 > **Nguồn sự thật DUY NHẤT về «việc gì từng được giao, đang ở đâu, còn gì».** Không dựa vào trí nhớ chat.
-> Làm mới 09/10/2026 ~02:30 giờ VN (08/10 19:25Z, nhánh `docs/registry-refresh-0909`) theo lệnh EXECUTION COMMANDER.
+> **Đối chiếu lại 09/10/2026 ~13:00 giờ VN (06:00Z, nhánh `docs/registry-reconcile-0910` từ `origin/main` `50293da6`)** theo số đo
+> của Integration Lead (deploy · ops · verify `/tech`), `git log origin/main`, `/api/health` và bàn giao Round 2 của phiên Fable sweep.
+> Làm mới 09/10/2026 ~02:30 giờ VN (08/10 19:25Z, nhánh `docs/registry-refresh-0909`, #702) theo lệnh EXECUTION COMMANDER.
 > Dựng lần đầu 09/10/2026 ~01:00 giờ VN (#698) từ: sổ `/tech` (`origin/ai-control/registry`, 96 tệp `mission.*.json` + `CHECKPOINT.md`),
 > GitHub (PR mở / đã gộp #560–#695, nhánh, lượt CI / deploy), `https://app.chotdontudong.com/api/health`, tài liệu trên `main`
 > (`docs/saas/*`, `docs/legal/*`, `docs/revenue-os/*`, `docs/product-excellence/*`, `docs/platform/*`, `docs/productization/*`,
@@ -63,12 +65,15 @@ Bằng chứng deploy dạng `run <id>` là lượt GitHub Actions «Deploy ERP 
 Việc `SUPERSEDED` / `DUPLICATE` / `NO LONGER NEEDED` được ĐÓNG với `STATUS = DONE`; cột CLASS ghi lý do và việc thay thế.
 Mission đã `DONE` được gom vào bảng gọn của từng nhóm (trường không ghi = «—»); mission CHƯA xong viết thành khối đủ trường.
 
-## 0b. Tổng hợp (đếm tự động từ tệp này, làm mới 09/10/2026 ~02:30 VN)
+## 0b. Tổng hợp (đếm bằng script từ tệp này, đối chiếu lại 09/10/2026 ~13:00 VN)
 
-- Tổng số mission: **215** (khối đủ trường + dòng bảng gọn).
-- Theo STATUS: `BACKLOG` 48 · `READY` 3 · `IN_PROGRESS` 7 · `PR_READY` 2 · `IN_REVIEW` 1 · `MERGED` 6 · `DEPLOYED` 4 · `VERIFYING` 5 · `BLOCKED_EXTERNAL` 6 · `BLOCKED_OWNER` 33 · `DEFERRED` 11 · `DONE` 89.
-- Còn mở (khác `DONE`) theo ưu tiên: P0 **16** · P1 **27** · P2 45 · P3 38.
-- Đếm lại: mỗi khối `#### ` lấy `PRIORITY:` + `STATUS:` đầu tiên; mỗi dòng bảng có cột `MISSION_ID` lấy cột `P` + `STATUS`.
+- Tổng số mission: **245** (khối đủ trường + dòng bảng gọn). Lần đếm trước (#702, 02:30): 215 — cùng script cho lại đúng 215
+  trên bản cũ, nên chênh lệch là do sửa đổi lượt này: +30 dòng mới (14 mission DONE chưa có trong sổ, 4 đang chạy, 4 PR đã gộp chờ hậu kiểm,
+  8 follow-up / backlog Tech Lead); không xoá mission nào (khối DONE chuyển sang bảng gọn; MM-TECH-04 đổi id thành registry-refresh-0909).
+- Theo STATUS: `BACKLOG` 54 · `READY` 3 · `IN_PROGRESS` 4 · `PR_READY` 1 · `IN_REVIEW` 0 · `MERGED` 0 · `DEPLOYED` 8 · `VERIFYING` 5 · `BLOCKED_EXTERNAL` 7 · `BLOCKED_OWNER` 33 · `DEFERRED` 11 · `DONE` 119.
+- Còn mở (khác `DONE`) theo ưu tiên: P0 **10** · P1 **26** · P2 53 · P3 37.
+- Cách đếm: mỗi khối `#### ` lấy `PRIORITY:` + `STATUS:` đầu tiên; mỗi dòng của bảng có cột đầu `MISSION_ID` lấy cột `P` (cột 3) +
+  `STATUS` (cột 4). Bảng §14 (quyết định) và §15.H (lượt dựng) không tính. Kiểm: không khối nào thiếu trường, không id trùng.
 
 ---
 
@@ -89,33 +94,10 @@ Mission đã `DONE` được gom vào bảng gọn của từng nhóm (trường
 | saas-identity-email-login | P0: khách do admin tạo đăng nhập email + mật khẩu; gửi lại liên kết kích hoạt | P0 | DONE | DONE | #681 | run 37781964748; ops `identity-reconcile` 37786092653 (chạy thử) → 37786400515 (ghi 12, THIẾU 0) | 2026-10-08 |
 | saas-identity-followup | Gửi lại form Tạo khách không phát liên kết sai người; mở khoá ghi lại chỉ mục | P1 | DONE | DONE | #684 | run 37786938351 | 2026-10-08 |
 | saas-c-shared-identity | Phase C: thiết kế danh tính toàn nền tảng (`docs/saas/IDENTITY.md`) | P3 | DONE | DONE (phần tài liệu; phần mã = MM-IDENT-01) | #617 | tài liệu, trong production 85faea0b | 2026-10-08 |
+| saas-create-customer-correct | LAUNCH BLOCKER — Tạo khách mới đúng mặc định: thương hiệu Chốt Đơn tự đặt, chỉ gói đang bán, nút không khoá im lặng, cài mẫu AI như `/start` | P0 | DONE | DONE (follow-up MM-FU-682) | #682 | deploy 37829126099 (`6883bfbf`) hậu kiểm ĐẠT; `saas-acceptance --apply` PASS 4/4 bước A (run 37838073371, lặp lại 37860546515 · 37866720324); verify `/tech` 09/10 | 2026-10-09 |
+| platform-viec-hang-ngay-len-dau | `/platform`: tổ chức & sức khoẻ, công tắc khẩn, cổng mở bán lên đầu; khung Webhook Meta (một lần) xuống cuối (Commercial PR F, C1 #10) | P2 | DONE | DONE («9 nút không tên» chưa xác nhận trên DOM) | #714 | deploy 37860758200 (`d23c0deb`) hậu kiểm ĐẠT; verify `/tech` 09/10 | 2026-10-09 |
 
 ### 1.2 Đang mở
-
-#### saas-create-customer-correct
-- TITLE: LAUNCH BLOCKER — Tạo khách mới đúng mặc định: thương hiệu Chốt Đơn tự đặt, chỉ gói đang bán, nút không khoá im lặng, cài mẫu AI bán hàng như `/start`
-- BUSINESS_GOAL: Người vận hành tạo khách trả tiền mà khách không rơi vào vỏ ERP / gói nội bộ / bot im (Launch Gate A1 · A4 · A6)
-- OWNER: Integration Lead · SESSION/AGENT: `wt-create-customer`
-- PRIORITY: P0 · STATUS: MERGED · CLASS: STILL REQUIRED (deploy đang chạy)
-- BRANCH: `fix/create-customer-defaults` · PR: #682 → `67647aae` (gộp 08/10 17:07Z)
-- DEPENDENCIES: — · BLOCKERS: deploy 37829126099 (`6883bfbf`) ĐANG CHẠY lúc làm mới sổ; production còn `1b057829`
-- DONE: luật gói + thương hiệu ở tầng ghi chung cho mọi cửa; cài lại mẫu; nút `ConfirmWithReason` không khoá im lặng
-- REMAINING: deploy xong → smoke tạo khách qua đúng form admin (`saas-acceptance --apply` bước A) → nâng A1/A4/A6 trên Launch Gate; follow-up review ở MM-FU-682
-- ACCEPTANCE_CRITERIA: khách mới tạo từ `/platform/customers` ⇒ thương hiệu `chotdon`, gói CATALOG đang bán, module `ai_sales`, mẫu AI cài xong; cài mẫu hỏng thì job KHÔNG «Xong»
-- PRODUCTION_EVIDENCE: —
-- NEXT_ACTION: chờ deploy 37829126099 → hậu kiểm `/api/health` commit `6883bfbf` → `saas-acceptance`
-- LAST_UPDATED: 2026-10-09
-
-#### platform-viec-hang-ngay-len-dau (Commercial PR F — trước là MM-ADMIN-01)
-- TITLE: `/platform`: tổ chức & sức khoẻ, công tắc khẩn, cổng mở bán lên đầu; khung cấu hình Webhook Meta (một lần) xuống cuối; 9 nút không tên
-- BUSINESS_GOAL: Người vận hành thấy ngay khách nào cần xử lý
-- OWNER: Integration Lead · SESSION/AGENT: `wt-pr-f` (phiên Fable)
-- PRIORITY: P2 · STATUS: IN_PROGRESS · CLASS: STILL REQUIRED
-- BRANCH: `claude/platform-viec-hang-ngay-len-dau` @ `17f57d77` (đã đẩy, 1 commit, sau main 7 commit) · PR: — (chưa mở; sổ `/tech` chưa handoff, nhịp tim cuối 08/10 18:01Z)
-- DEPENDENCIES: #682 (đã gộp) · BLOCKERS: —
-- DONE: commit trên nhánh · REMAINING: rebase, handoff, PR, cổng
-- ACCEPTANCE_CRITERIA: bảng tổ chức & sức khoẻ ở màn đầu; 0 nút không tên (harness commercial sweep)
-- PRODUCTION_EVIDENCE: — · NEXT_ACTION: phiên Fable `handoff` · LAST_UPDATED: 2026-10-09
 
 #### saas-a-vnx-runtime
 - TITLE: Phase A — chuyển runtime chatbot VNX sang Chốt Đơn (gỡ 4 chặn kỹ thuật, rồi bóng từng page)
@@ -172,76 +154,25 @@ Mission đã `DONE` được gom vào bảng gọn của từng nhóm (trường
 | saas-l1-followup | Khách không ghi / tắt khoá AI; che replay · học · ai-builder · USD · go-live | P0 | DONE | DONE | #669 | run 37741568283; Launch Gate S4 ✅ PROD | 2026-10-08 |
 | saas-shell-login-loop | Đăng nhập / đăng ký trong vỏ không trang trắng (F-01) | P0 | DONE | DONE | #671 | run 37744823972 | 2026-10-08 |
 | saas-finish-line | Finish Line R1: audit admin + vỏ, quick wins (rỗng · chữ kỹ thuật · help · 404 · AI Sales cuộn) | P1 | DONE | DONE | #680 | run 37781964748 | 2026-10-08 |
-| saas-shell-gate-redirects | Vỏ không trang trắng khi thiếu quyền / module tắt | P1 | DEPLOYED | DONE (chưa smoke riêng) | #686 | trong production 4dbd864a (run 37800951308) | 2026-10-08 |
+| saas-shell-gate-redirects | Vỏ không trang trắng khi thiếu quyền / module tắt | P1 | DONE | DONE | #686 | trong production 4dbd864a (run 37800951308); verify `/tech` 09/10 | 2026-10-09 |
 | saas-lowtech-ux | UX cho chủ shop ít rành máy: audit + thiết kế | P2 | DONE | SUPERSEDED — thay bằng `docs/saas/SHELL_AUDIT_2026-10-08.md` (#663) + Finish Line R1/R2 + saas-shell-polish + commercial-sweep; phần mã còn lại nằm ở MM-UX-* | — | — | 2026-10-09 |
+| saas-shell-polish | Vỏ Chốt Đơn: `/login` sau đặt mật khẩu đúng thương hiệu, bỏ chữ kỹ thuật, `/module-disabled` có ranh giới lỗi, câu `BILLING_LOCKED` theo sản phẩm, Nhân viên gọn ở vỏ (ẩn ma trận quyền) | P1 | DONE | DONE — đối chiếu Fable 09/10: đóng C1 #5 (ma trận quyền ẩn ở vỏ) và C1 #6 (thương hiệu sau `redirect()`); chữ kỹ thuật còn lại (C1 #7) = `shell-copy-brand-r3`; follow-up MM-FU-700 | #700 | deploy 37829126099 (`6883bfbf`) hậu kiểm ĐẠT; verify `/tech` 09/10. Chưa có lượt nghiệm thu CÓ ĐĂNG NHẬP xác nhận riêng (§17) | 2026-10-09 |
+| saas-finish-line-r2 | Finish Line R2: tiêu đề theo menu vỏ (Sản phẩm · Nhân viên · Gói), tỷ lệ hoàn mẫu số 0 in «—», nhãn API/Webhook thành chữ khách hiểu | P2 | DONE | DONE | #713 | deploy 37860758200 (`d23c0deb`) hậu kiểm ĐẠT; verify `/tech` 09/10 | 2026-10-09 |
+| commercial-sweep | Commercial Perfection Sweep Phase A chỉ đọc: kiểm kê 207 trang + bảng chất lượng thương mại | P2 | DONE | DONE (tài liệu) | #703 | tài liệu; verify `/tech` 09/10 | 2026-10-09 |
+| commercial-sweep-cap-nhat | Sweep: 207/207 trang (32 trang động đọc mã) + bảng C0/C1 theo trạng thái đã gộp | P2 | DONE | DONE (tài liệu — quy ước §0; sổ `/tech` đóng sau verify lô `50293da6`). Bàn giao Round 2 cuối (`claude/commercial-sweep-ban-giao`) đi PR riêng | #727 | tài liệu | 2026-10-09 |
+| trang-chu-su-that-thuong-mai | Trang chủ Chốt Đơn nói đúng sản phẩm (Commercial PR A, C1 #1–#3): Pancake là lối chính hôm nay, nối thẳng Facebook «sắp mở», bỏ claim tuyệt đối, bỏ «Chi phí AI hiện rõ» | P1 | DONE | DONE (C1 #4 CTA theo chế độ đăng ký còn chờ D2) | #706 | deploy 37854562530 (`dbab6813`) hậu kiểm ĐẠT; verify `/tech` 09/10 | 2026-10-09 |
+| error-boundary-than-thien | Lỗi thân thiện (Commercial PR C, C1 #11): không in `error.message` / `DATABASE_URL`, chỉ mã tham chiếu | P1 | DONE | DONE | #705 | deploy 37854562530 (`dbab6813`) hậu kiểm ĐẠT; verify `/tech` 09/10 | 2026-10-09 |
+| erp-a11y-bo-cuc | ERP (Commercial PR G, C1 #12 #14 #15): màn «không tìm thấy» có h1; công tắc / ô số / nút biểu tượng có tên; `/payroll` không tràn 390 px | P2 | DONE | DONE | #708 | deploy 37854562530 (`dbab6813`) hậu kiểm ĐẠT; verify `/tech` 09/10 | 2026-10-09 |
+| kenh-dang-chay-trong-app | Trong app chỉ hướng dẫn kênh đang chạy; cổng nối thẳng Facebook: khách thấy «sắp mở», người vận hành thấy nút thật (cờ `meta.direct-connect.open`) | P1 | DONE | DONE — chưa có đường UI / ops bật cờ (MM-FU-712); ngày bật = D20 | #712 | deploy 37860758200 (`d23c0deb`) hậu kiểm ĐẠT; verify `/tech` 09/10 | 2026-10-09 |
+| commercial-polish-2 | Commercial PR B: vỏ Chốt Đơn không có chữ dưới 11 px (token 12 · 13 · 14 + bài chốt) · câu an toàn của màn lỗi | P3 | DONE | DONE (phần còn lại của PR B ở MM-UX-01) | #718 | deploy 37879275359 (`ef9b302a`) hậu kiểm ĐẠT; verify `/tech` 09/10 | 2026-10-09 |
 
 ### 2.2 Đang mở
 
-#### saas-shell-polish
-- TITLE: Vỏ Chốt Đơn: `/login` sau đặt mật khẩu đúng thương hiệu, bỏ chữ kỹ thuật còn lộ, `/module-disabled` có ranh giới lỗi, câu `BILLING_LOCKED` theo sản phẩm, trang Nhân viên gọn ở vỏ
-- BUSINESS_GOAL: Khách không thấy thương hiệu VNX / chữ kỹ thuật (Launch Gate C3; Commercial C1 #5 #6 #7)
-- OWNER: Integration Lead · SESSION/AGENT: `wt-saas-shell-polish`
-- PRIORITY: P1 · STATUS: MERGED · CLASS: STILL REQUIRED (deploy đang chạy)
-- BRANCH: `fix/saas-shell-polish` · PR: #700 → `c2918d77` (gộp 08/10 18:52Z)
-- DEPENDENCIES: — · BLOCKERS: deploy 37829126099 đang chạy
-- DONE: thương hiệu sau `redirect()` đọc `x-forwarded-host` (chỉ trình bày); chữ kỹ thuật theo `isSalesAgentUser`; Nhân viên gọn ở vỏ; `error.tsx` cho `/module-disabled`; câu BILLING_LOCKED
-- REMAINING: deploy → kiểm trên production; follow-up review ở MM-FU-700
-- ACCEPTANCE_CRITERIA: sau đặt mật khẩu trên host Chốt Đơn, `/login` dựng thương hiệu Chốt Đơn ngay lượt đầu; danh sách chữ cấm = 0 ở AI Sales / Kết nối / Thiết lập / Nhân viên / Gói
-- PRODUCTION_EVIDENCE: — · NEXT_ACTION: hậu kiểm sau deploy · LAST_UPDATED: 2026-10-09
-
-#### saas-finish-line-r2
-- TITLE: Finish Line Round 2: tiêu đề theo menu vỏ (Sản phẩm · Nhân viên · Gói), tỷ lệ hoàn mẫu số 0 in «—», nhãn tính năng API/Webhook thành chữ khách hiểu
-- OWNER: Integration Lead · SESSION/AGENT: phiên Fable `code-erp-a4` (`wt-saas-r2`)
-- PRIORITY: P2 · STATUS: IN_PROGRESS · CLASS: STILL REQUIRED
-- BRANCH: `claude/saas-finish-line-r2` @ `d57cb41b` (đã đẩy, 1 commit, sau main 7 commit) · PR: — (nhịp tim sổ `/tech` cuối 14:34Z)
-- DEPENDENCIES: — · BLOCKERS: chưa `handoff` trong sổ `/tech`; có thể chồng #700 (chữ vỏ) — rebase
-- DONE: F-10, F-16 (`pctOrNull`), nhãn tính năng; `docs/saas/FINISH_LINE_R2_2026-10-08.md`
-- REMAINING: handoff → PR → cổng → gộp; phần «Round 2 Production Acceptance» sau deploy
-- ACCEPTANCE_CRITERIA: tiêu đề trang = tên menu; không «0.0 %» khi mẫu số 0
-- PRODUCTION_EVIDENCE: — · NEXT_ACTION: phiên Fable `npm run ai -- handoff` · LAST_UPDATED: 2026-10-08
-
-#### commercial-sweep
-- TITLE: Commercial Perfection Sweep — Phase A chỉ đọc: kiểm kê 207 trang + bảng chất lượng thương mại
-- OWNER: Integration Lead · SESSION/AGENT: phiên Fable (`wt-sweep`)
-- PRIORITY: P2 · STATUS: PR_READY · CLASS: STILL REQUIRED
-- BRANCH: `claude/commercial-sweep` @ `79d5ca1d` (handoff lại 08/10 17:59Z) · PR: — (chưa mở)
-- DONE: `docs/product/COMMERCIAL_PAGE_INVENTORY.md`, `docs/product/COMMERCIAL_POLISH_BOARD.md`: C0 = 0, C1 14 → 6
-- REMAINING: mở PR tài liệu; các lô sửa PR A / B / C / F / G (xem MM-UX-*)
-- ACCEPTANCE_CRITERIA: bảng có bằng chứng từng dòng · PRODUCTION_EVIDENCE: — (tài liệu)
-- NEXT_ACTION: Integration Lead mở PR · LAST_UPDATED: 2026-10-08
-
-#### trang-chu-su-that-thuong-mai (Commercial PR A)
-- TITLE: Trang chủ Chốt Đơn nói đúng sản phẩm: nối Facebook thẳng (Pancake là lựa chọn), bỏ claim tuyệt đối, bỏ «Chi phí AI hiện rõ», FAQ không hứa khoá AI riêng
-- OWNER: Integration Lead · SESSION/AGENT: `wt-pr-a`
-- PRIORITY: P1 · STATUS: IN_PROGRESS · CLASS: STILL REQUIRED
-- BRANCH: `claude/trang-chu-su-that-thuong-mai` @ `203ac025` (đã đẩy, 1 commit, sau main 7) · PR: — (nhịp tim cuối 16:00Z)
-- DEPENDENCIES: quyết định `PLATFORM_SIGNUP_MODE` (CTA dùng thử phụ thuộc chế độ đăng ký) · BLOCKERS: chưa handoff
-- DONE: sửa `app/gioi-thieu/page.tsx` + `tests/public-site.test.ts` · REMAINING: handoff → PR → deploy
-- ACCEPTANCE_CRITERIA: không claim tuyệt đối; bước nối fanpage nói Facebook trực tiếp; không hứa điều mã không làm
-- PRODUCTION_EVIDENCE: — · NEXT_ACTION: handoff · LAST_UPDATED: 2026-10-09
-
-#### error-boundary-than-thien (Commercial PR C)
-- TITLE: Lỗi thân thiện: error boundary dashboard + gốc không in `error.message` / `DATABASE_URL`, chỉ mã tham chiếu
-- OWNER: Integration Lead · SESSION/AGENT: `wt-pr-c`
-- PRIORITY: P1 · STATUS: IN_PROGRESS · CLASS: STILL REQUIRED (rò thông tin kỹ thuật cho khách)
-- BRANCH: `claude/error-boundary-than-thien` @ `ab580358` (đã đẩy, 1 commit, sau main 7) · PR: — (nhịp tim cuối 15:43Z)
-- DONE: `error.tsx` + `tests/error-boundary.test.ts` · REMAINING: handoff → PR → deploy
-- ACCEPTANCE_CRITERIA: bài kiểm nguồn không in `DATABASE_URL` / `error.message` cho khách
-- PRODUCTION_EVIDENCE: — · NEXT_ACTION: handoff · LAST_UPDATED: 2026-10-09
-
-#### erp-a11y-bo-cuc (Commercial PR G)
-- TITLE: ERP: màn «không tìm thấy» có h1; công tắc / ô số / nút biểu tượng có tên (`/work/settings` · `/alerts` · `/inventory/shortage`); `/payroll` không tràn 390 px
-- OWNER: Integration Lead · SESSION/AGENT: `wt-pr-g`
-- PRIORITY: P2 · STATUS: IN_PROGRESS · CLASS: STILL REQUIRED
-- BRANCH: `claude/erp-a11y-bo-cuc` @ `851c40d0` (đã đẩy, 1 commit, sau main 7) · PR: — (nhịp tim cuối 17:07Z)
-- DONE: commit trên nhánh · REMAINING: handoff, PR, cổng
-- ACCEPTANCE_CRITERIA: `tests/erp-a11y.test.ts` xanh; 0 «nút không tên» ở ba trang
-- PRODUCTION_EVIDENCE: — · NEXT_ACTION: phiên Fable `handoff` · LAST_UPDATED: 2026-10-09
-
-#### MM-UX-01 — Token chữ nhỏ · chiều cao nút · tiền «đ» tay (Commercial PR B)
-- OWNER: Integration Lead · PRIORITY: P3 · STATUS: BACKLOG · CLASS: STILL REQUIRED
-- DONE: số đo ở COMMERCIAL_POLISH_BOARD #16–#18 · REMAINING: ba bậc chữ hợp lệ trong `docs/design-system.md` + bài kiểm cấm `text-[10px]` ở trang khách
-- DEPENDENCIES: — · ACCEPTANCE_CRITERIA: bài kiểm quét mã · NEXT_ACTION: sau Launch Gate · LAST_UPDATED: 2026-10-09
+#### MM-UX-01 — Token chiều cao nút / ô nhập · ô bấm nhỏ · tiền tự định dạng (phần còn lại của Commercial PR B)
+- OWNER: Integration Lead · PRIORITY: P2 · STATUS: BACKLOG · CLASS: STILL REQUIRED (backlog Tech Lead từ bàn giao Fable 09/10)
+- DONE: token chữ 12 · 13 · 14 + bài chốt 0 chữ < 11 px trên tệp CHỈ thuộc vỏ (#718, commercial-polish-2)
+- REMAINING: (C2) token chiều cao nút / ô nhập + ô bấm nhỏ (board #17 · #20); (C2) bảng giá sỉ tự định dạng tiền (`products/price-lists/[id]/page.tsx:35`, board #18); mật độ chữ 10–10,5 px của trang dùng chung ERP ↔ vỏ chờ D21
+- DEPENDENCIES: D21 (chỉ phần mật độ) · ACCEPTANCE_CRITERIA: bài kiểm quét mã · NEXT_ACTION: giao khi có slot · LAST_UPDATED: 2026-10-09
 
 #### MM-UX-02 — Vào việc sau đăng ký + danh sách 10 bước (PX-08, F-03, HELP H4)
 - TITLE: Hộp thư rỗng có bước tiếp theo; một danh sách 10 bước thay 4 danh sách rời
@@ -263,10 +194,32 @@ Mission đã `DONE` được gom vào bảng gọn của từng nhóm (trường
 - BLOCKERS: chủ shop quyết thêm mục menu (FINISH_LINE §5) · DONE: — · REMAINING: sửa `lib/constants/saas-nav.ts`
 - ACCEPTANCE_CRITERIA: đường lạ không ra 404 tiếng Anh · NEXT_ACTION: hỏi chủ shop · LAST_UPDATED: 2026-10-08
 
-#### MM-UX-04 — Trang «Nhân viên» trong vỏ: vai trò rút gọn thay ma trận 776–786 ô (F-09)
-- OWNER: Chủ shop (AGENTS §7 — đổi quyền) · PRIORITY: P1 · STATUS: BLOCKED_OWNER · CLASS: STILL REQUIRED
-- BLOCKERS: chủ shop quyết bộ vai trò (Chủ shop · Nhân viên bán hàng · Chỉ xem) · DONE: một phần chữ kỹ thuật ở saas-shell-polish
-- REMAINING: vai trò rút gọn · ACCEPTANCE_CRITERIA: Launch Gate C19 không còn ghi chú P1 · NEXT_ACTION: hỏi chủ shop · LAST_UPDATED: 2026-10-08
+#### MM-UX-04 — Trang «Nhân viên» trong vỏ: bộ vai trò rút gọn (TUỲ CHỌN) (F-09, Commercial C1 #5)
+- OWNER: Chủ shop (AGENTS §7 — đổi quyền) · PRIORITY: P2 · STATUS: BLOCKED_OWNER · CLASS: STILL REQUIRED (hạ P1 → P2 09/10: đối chiếu Fable đóng C1 #5 vì #700 đã ẩn ma trận quyền ở vỏ)
+- BLOCKERS: D10 — chủ shop quyết có cần bộ vai trò Chốt Đơn (Chủ shop · Nhân viên bán hàng · Chỉ xem) hay không · DONE: #700 ẩn ma trận + bỏ chữ kỹ thuật ở trang Nhân viên
+- REMAINING: chỉ khi chủ shop muốn — vai trò rút gọn · ACCEPTANCE_CRITERIA: Launch Gate C19 không còn ghi chú P1 · NEXT_ACTION: hỏi chủ shop · LAST_UPDATED: 2026-10-09
+
+#### shell-copy-brand-r3
+- TITLE: Vỏ Chốt Đơn Round 3: chữ kỹ thuật còn lộ ở vỏ (Commercial C1 #7) + phần vỏ của MM-FU-700 (lời mời / `hostSlug` sau `redirect()`)
+- OWNER: Integration Lead · SESSION/AGENT: phiên đang chạy (sổ `/tech` RUNNING)
+- PRIORITY: P1 · STATUS: IN_PROGRESS · CLASS: STILL REQUIRED (C1 duy nhất còn mở ở vỏ)
+- BRANCH / PR: — (chưa có PR lúc chụp) · DEPENDENCIES: saas-shell-polish (DONE) · BLOCKERS: —
+- DONE: — · REMAINING: code → PR → cổng → deploy → nghiệm thu có đăng nhập
+- ACCEPTANCE_CRITERIA: danh sách chữ cấm = 0 trên các trang vỏ; C1 #7 đóng trên bảng thương mại
+- PRODUCTION_EVIDENCE: — · NEXT_ACTION: phiên đang cầm mở PR · LAST_UPDATED: 2026-10-09
+
+#### erp-chi-tiet-duoi-dai
+- TITLE: Trang chi tiết ERP đuôi dài: «%» trên đường dẫn thôi gây 500 ở 4 trang cài đặt, tiền theo `formatVND`, mã Google / trường thô ở khách sỉ thành tiếng Việt, đầu trang xuống dòng 390 px, phiếu sản xuất cuộn ngang, lượt nhập VTP hỏng thôi in 9 ô 0
+- OWNER: Integration Lead · PRIORITY: P2 · STATUS: DEPLOYED · CLASS: STILL REQUIRED (chờ hậu kiểm)
+- BRANCH / PR: #721 → `f7eae2c2` · DEPENDENCIES: — · BLOCKERS: —
+- DONE: mã + bài kiểm · REMAINING: hậu kiểm production · ACCEPTANCE_CRITERIA: 4 trang `/settings/…/[id]` không 500 với «%» lẻ
+- PRODUCTION_EVIDENCE: production `50293da6` (deploy 37886395475, `/api/health` khớp) — hậu kiểm riêng CHƯA · NEXT_ACTION: `verify --sha=50293da6` → đóng trong sổ `/tech` · LAST_UPDATED: 2026-10-09
+
+#### erp-o-nhap-co-ten
+- TITLE: Ô nhập ở trang chi tiết ERP có tên cho trình đọc màn hình (lô xưởng 36 ô, khách sỉ, gọi điện, topic, trạng thái mẫu, góp ý ý tưởng, trình sửa luật tự động)
+- OWNER: Integration Lead · PRIORITY: P2 · STATUS: DEPLOYED · CLASS: STILL REQUIRED (chờ hậu kiểm)
+- BRANCH / PR: #726 → `279a7105` · DONE: mã + `tests/erp-form-names.test.ts` · REMAINING: hậu kiểm
+- PRODUCTION_EVIDENCE: production `50293da6` (deploy 37886395475, `/api/health` khớp) — hậu kiểm riêng CHƯA · NEXT_ACTION: `verify --sha=50293da6` → đóng trong sổ `/tech` · LAST_UPDATED: 2026-10-09
 
 #### MM-UX-05 — Biểu tượng thông báo đẩy / `sw.js` / apple-touch-icon theo host (D5, F-16)
 - OWNER: Integration Lead · PRIORITY: P3 · STATUS: BACKLOG · CLASS: STILL REQUIRED
@@ -344,8 +297,18 @@ Mission đã `DONE` được gom vào bảng gọn của từng nhóm (trường
 #### saas-inbox-perf
 - TITLE: Hiệu năng hộp thư — đo nền trước (V2-0 / PX-14), tối ưu sau
 - OWNER: Integration Lead · PRIORITY: P2 · STATUS: BACKLOG · CLASS: STILL REQUIRED
-- DEPENDENCIES: saas-l3-inbox (DONE) · DONE: kế hoạch đo `INBOX_V2.md` §8 · REMAINING: V2-0 số nền p50/p95, rồi V2-7
-- ACCEPTANCE_CRITERIA: có số nền trước mọi sửa · NEXT_ACTION: sau Launch Gate · LAST_UPDATED: 2026-10-07
+- DEPENDENCIES: saas-l3-inbox (DONE); số đo của `inbox-perf-probe` (IN_PROGRESS) · DONE: kế hoạch đo `INBOX_V2.md` §8 · REMAINING: V2-0 số nền p50/p95, rồi V2-7
+- ACCEPTANCE_CRITERIA: có số nền trước mọi sửa · NEXT_ACTION: đọc kết quả `inbox-perf-probe` rồi mới quyết tối ưu · LAST_UPDATED: 2026-10-09
+
+#### inbox-perf-probe
+- TITLE: Đo hiệu năng trên PRODUCTION: hộp thư + các trang chậm của Commercial C1 #13 (`/chatbot` · `/chatbot/ad-bots` · `/cod` · `/reports/returns` · `/reports/target`)
+- BUSINESS_GOAL: đóng C1 #13 bằng số đo production (harness cục bộ trên dữ liệu demo không đại diện)
+- OWNER: Integration Lead · SESSION/AGENT: phiên đang chạy (sổ `/tech`)
+- PRIORITY: P1 · STATUS: IN_PROGRESS · CLASS: STILL REQUIRED
+- BRANCH / PR: — · DEPENDENCIES: — · BLOCKERS: —
+- DONE: — · REMAINING: số p50 / p95 trên production + ops smoke các trang trên; sửa chỉ sau khi có số (MM-REC-22)
+- ACCEPTANCE_CRITERIA: mỗi trang C1 #13 có số đo production 3–5 lượt (median), có vết run
+- PRODUCTION_EVIDENCE: — · NEXT_ACTION: chạy đo chỉ đọc · LAST_UPDATED: 2026-10-09
 
 #### MM-INBOX-01 — Hộp thư V2 (V2-1 → V2-6: tách màn, ưu tiên P0–P3, timeline, lệnh `/`, Copilot 7 khối)
 - OWNER: Integration Lead · PRIORITY: P2 · STATUS: DEFERRED · CLASS: DEFERRED (lý do: đóng băng phạm vi Launch Sprint; mở lại khi Launch Gate ĐẠT và V2-0 có số)
@@ -463,20 +426,9 @@ Mission đã `DONE` được gom vào bảng gọn của từng nhóm (trường
 | ai-vs-human-profit | AI vs Người theo lãi gộp đã giao + sau chi phí AI | P2 | DONE | DONE | #658 | run 37727378042 | 2026-10-08 |
 | MM-KPI-00 | Hiệu quả AI lọc «Hôm nay» / khoảng ngày, đếm đơn như Báo cáo danh nghĩa | P2 | DEPLOYED | DONE | #688 | trong production 4dbd864a | 2026-10-08 |
 | MM-KPI-01 | Sổ chỉ số AI Sales (bán chéo, chênh lệch AI − người…) + bán chéo trên đơn đã giao | P2 | DONE | DONE | #563 #564 | đã deploy (04/10) | 2026-10-04 |
+| saas-customer-health | Danh sách / chi tiết khách cho admin thấy sức khoẻ < 30 giây (Launch Gate A7 · A8 · A10; Commercial C1 #8) | P0 | DONE | DONE — trang admin mới có vết smoke 200, chưa có lượt xem có vết từng khối; follow-up MM-FU-683 · MM-FU-692b | #683 | deploy 37829126099 (`6883bfbf`) hậu kiểm ĐẠT; verify `/tech` 09/10 | 2026-10-09 |
 
 ### 7.2 Đang mở
-
-#### saas-customer-health
-- TITLE: Danh sách / chi tiết khách cho admin thấy sức khoẻ < 30 giây (Messenger · AI · đăng nhập · đơn · hạn mức · vấn đề)
-- BUSINESS_GOAL: Launch Gate A7 · A8 · A10 (3/10 mục Admin)
-- OWNER: Integration Lead · SESSION/AGENT: `wt-customer-health`
-- PRIORITY: P0 · STATUS: MERGED · CLASS: STILL REQUIRED (Launch Gate §7 ghi «LAUNCH SUPPORT», nhưng thiếu nó thì Admin tối đa 70 % < ngưỡng 90 %)
-- BRANCH: `feat/customer-health` · PR: #683 → `de2bc7bb` (gộp 08/10 ~18:22Z, sau rebase lên #682 + F1 `chatOk7d`)
-- DEPENDENCIES: — · BLOCKERS: deploy 37829126099 đang chạy
-- DONE: mức Nguy cấp · Cần chú ý · Chưa đủ dữ liệu · Khoẻ · Đã dừng; thiếu dữ liệu không bao giờ «Khoẻ»; #696 loại workspace thử khỏi ô đếm
-- REMAINING: deploy → xem `/platform/customers` trên production có vết; MỘT nguồn sức khoẻ với saas-ops-signals (MM-FU-692) ; follow-up MM-FU-683
-- ACCEPTANCE_CRITERIA: A7/A8/A10 lên ✅ PROD bằng một lượt xem có vết
-- PRODUCTION_EVIDENCE: — · NEXT_ACTION: hậu kiểm sau deploy · LAST_UPDATED: 2026-10-09
 
 #### MM-METRIC-01 — Đo Time-to-Value đủ chuỗi (PX-13, TV-1 → TV-4)
 - OWNER: Integration Lead · PRIORITY: P2 · STATUS: BACKLOG · CLASS: STILL REQUIRED
@@ -510,8 +462,30 @@ Mission đã `DONE` được gom vào bảng gọn của từng nhóm (trường
 | MM-ORDER-00 | Bot không lấy giá lẻ làm giá sỉ, quy cách 0,5 kg + 1 kg; ops `org-catalog` | P1 | DONE | DONE | #677 | đã deploy (08/10) | 2026-10-08 |
 | MM-ORDER-01 | Trang sản phẩm có nút «Thêm mẫu mã» | P2 | DEPLOYED | DONE | #685 | trong production 4dbd864a | 2026-10-08 |
 | MM-ORDER-02 | Nhân viên tạo đơn trong hội thoại (không cộng công bot, chống bấm hai lần); đơn tự ghép tỉnh + xã mới | P1 | DONE | DONE | #565 #583 | đã deploy | 2026-10-05 |
+| vtp-edit-cod-prefill | Sửa đơn VTP thôi điền sẵn COD của đơn cho vận đơn COD 0; đổi tiền thu hộ phải xác nhận; «Đã thu» chưa có chứng từ in «Chưa xác minh» (Commercial C0 duy nhất) | P0 | DONE | DONE — chủ shop tự gộp (CRITICAL: thêm `export` cho `HAS_CASH_EVIDENCE` trong `return-rate.ts`). Chưa mở `/shipments/<id>` của một vận đơn COD 0 trên production (§17) | #717 | deploy 37879275359 (`ef9b302a`) hậu kiểm ĐẠT; verify `/tech` 09/10 | 2026-10-09 |
+| customer-outcome-truth | Trang khách + cảnh báo rủi ro thôi lấy bộ đếm Pancake làm giao thành công (AGENTS 0.1 / 3.2) | P1 | DONE | DONE (phần còn lại = pancake-counters-remaining) | #715 | deploy 37879275359 (`ef9b302a`) hậu kiểm ĐẠT; verify `/tech` 09/10 | 2026-10-09 |
+| customer-list-outcome-truth | Danh sách khách + bộ lọc + cột Đã thanh toán của danh sách đơn thôi trộn bộ đếm Pancake (nối #715) | P1 | DONE | DONE | #722 | deploy 37879275359 (`ef9b302a`) hậu kiểm ĐẠT; verify `/tech` 09/10 | 2026-10-09 |
+| unknown-cost-not-zero | Giá vốn CHƯA BIẾT không in thành 0 ₫ trên trang đơn / sản phẩm (AGENTS 42) | P1 | DONE | DONE | #716 | deploy 37879275359 (`ef9b302a`) hậu kiểm ĐẠT; verify `/tech` 09/10 | 2026-10-09 |
+| production-unpriced-approval | Lệnh đặt xưởng chưa có giá không lọt bước duyệt PURCHASING_LARGE; giá trống không lưu thành 0 | P1 | DONE | DONE | #719 | deploy 37879275359 (`ef9b302a`) hậu kiểm ĐẠT; verify `/tech` 09/10 | 2026-10-09 |
 
 ### 8.2 Đang mở
+
+#### pancake-counters-remaining
+- TITLE: Phần còn đọc bộ đếm Pancake sau #715 / #722: khối «Khách hàng» trên trang đơn + bộ lọc đã lưu
+- BUSINESS_GOAL: không màn nào kết luận giao thành công / hoàn từ bộ đếm Pancake (AGENTS 0.1, 3.1 — chỉ `ORDER_OUTCOME`)
+- OWNER: Integration Lead · SESSION/AGENT: phiên đang chạy (sổ `/tech`)
+- PRIORITY: P1 · STATUS: IN_PROGRESS · CLASS: STILL REQUIRED
+- BRANCH / PR: — · DEPENDENCIES: customer-outcome-truth, customer-list-outcome-truth (DONE) · BLOCKERS: —
+- DONE: — · REMAINING: khối «Khách hàng» trang đơn + bộ lọc đã lưu → PR → cổng → deploy
+- ACCEPTANCE_CRITERIA: grep không còn bộ đếm Pancake trong đường tính kết quả ở hai chỗ trên; bài kiểm nguồn
+- PRODUCTION_EVIDENCE: — · NEXT_ACTION: phiên đang cầm mở PR · LAST_UPDATED: 2026-10-09
+
+#### chi-tiet-don-khach-sach
+- TITLE: Trang chi tiết đơn / khách / hội thoại không nói Pancake với khách không dùng Pancake, không in 0 ₫ cho tiền đơn tay không có, diễn biến hội thoại bằng tiếng Việt
+- OWNER: Integration Lead · PRIORITY: P1 · STATUS: DEPLOYED · CLASS: STILL REQUIRED (chờ hậu kiểm)
+- BRANCH / PR: #725 → `50293da6` · DONE: mã + `tests/detail-pages-shell.test.ts`
+- REMAINING: mở các trang này trên production bằng một tổ chức KHÔNG dùng Pancake (§17)
+- PRODUCTION_EVIDENCE: production `50293da6` (deploy 37886395475, `/api/health` khớp) — hậu kiểm riêng CHƯA · NEXT_ACTION: `verify --sha=50293da6` → đóng trong sổ `/tech` · LAST_UPDATED: 2026-10-09
 
 #### MM-ORDER-03 — Order Candidate: hàm thuần + bảng bóng + panel (C3a · C3b · C3c)
 - OWNER: Integration Lead · PRIORITY: P2 · STATUS: BACKLOG · CLASS: STILL REQUIRED
@@ -541,42 +515,23 @@ Mission đã `DONE` được gom vào bảng gọn của từng nhóm (trường
 | MISSION_ID | TITLE | P | STATUS | CLASS | PR | PRODUCTION_EVIDENCE | LAST_UPDATED |
 |---|---|---|---|---|---|---|---|
 | backup-drive-trash | Sao lưu ngoài máy: xoá hẳn bản quá hạn, dọn thùng rác chỉ trong thư mục sao lưu, `backup-status` đo Drive | P1 | DONE | DONE (mã chạy đúng: lượt 23:04 dọn 109 MB thùng rác, 7 CSDL tổ chức OK); dung lượng còn lại = MM-OPS-02; phần thấp = MM-FU-689 | #689 | run 37796789087 (b3a8d74e) + lượt sao lưu 23:04 | 2026-10-09 |
+| saas-ops-signals | Người vận hành chẩn đoán 8 loại sự cố của khách (O1–O8), migration 0237; sửa lộ `reason` / `orgCode` ở đăng nhập công khai | P0 | DONE | DONE — O1 chứng minh trọn hai luồng; O2–O8 TÍNH ĐƯỢC nhưng chưa chứng minh PHÁT HIỆN (acceptance-signal-drills · MM-FU-724); follow-up MM-FU-692a / 692b | #692 | deploy 37838226087 (`c71833950519`) hậu kiểm ĐẠT; `ops-signals-check` PASS 9 tổ chức × 8 tín hiệu, 0 ô hỏng (run 37853956678 · 37860619173 · 37867472656); O1 RESET_LINK_USED (37860619173) + LOGIN / BAD_PASSWORD (37867472656) | 2026-10-09 |
+| saas-acceptance-smoke | Smoke nghiệm thu khách Chốt Đơn trên production (ops `saas-acceptance`: A cấp phát · B kích hoạt + đăng nhập email · C vỏ; D · E cần `--e2e`) | P0 | DONE | DONE — D · E (`--e2e`) chờ D19 chủ shop chuẩn bị UI | #690 | `--apply` PASS 4/4 ba lần: run 37838073371 (`6883bfbf`) · 37860546515 (`dbab6813`) · 37866720324 (`d23c0deb`) | 2026-10-09 |
+| saas-acceptance-hardening | Cứng hoá ops `saas-acceptance`: chặn chiếm mã `cdt-nghiem-thu`, loại workspace thử khỏi buồng lái (trước là MM-ACC-01) | P0 | DONE | DONE (follow-up MM-FU-696) | #696 | deploy 37829126099 (`6883bfbf`) hậu kiểm ĐẠT; verify `/tech` 09/10 | 2026-10-09 |
+| ops-signals-check | Ops chỉ đọc `ops-signals-check`: chứng minh 8 tín hiệu O1–O8 chạy trên production | P0 | DONE | DONE (chỉ script, đã chạy thật 3 lượt) | #710 | run 37853956678 · 37860619173 · 37867472656 — PASS 9 × 8, 0 ô hỏng | 2026-10-09 |
+| acceptance-login-recorder | Nghiệm thu B1: lượt sai mật khẩu đi qua đúng đường ghi `platform_auth_failures` (chứng minh O1 luồng LOGIN) | P0 | DONE | DONE | #711 | deploy 37860758200 (`d23c0deb`); `ops-signals-check` run 37867472656 thấy LOGIN / BAD_PASSWORD | 2026-10-09 |
 
 ### 9.2 Đang mở
 
-#### saas-ops-signals
-- TITLE: Người vận hành chẩn đoán 8 loại sự cố của khách (O1–O8): đăng nhập · page mất kết nối · webhook · AI im · gửi tin · đơn không hợp lệ · ghi đơn hỏng · hết hạn mức
-- BUSINESS_GOAL: Launch Gate §4 QUAN SÁT — cổng ĐẠT đòi đủ 8 tín hiệu
-- OWNER: Integration Lead · SESSION/AGENT: `wt-saas-ops-signals`
-- PRIORITY: P0 · STATUS: IN_REVIEW · CLASS: STILL REQUIRED
-- BRANCH: `feat/saas-ops-signals` @ `a9aad1fb` · PR: #692 (review PASS; CI / cổng ĐANG CHẠY run 37829612046; migration 0237)
-- DEPENDENCIES: — · BLOCKERS: chờ cổng xanh
-- DONE: `platform_auth_failures`, gương `platform_org_health`, `error_class` trên sổ AI, ORDER_WRITE_FAILED thay AI_DOWN, khung Sự cố trên `/platform/org`; sửa lộ `reason` / `orgCode` ở kết quả đăng nhập công khai (kết quả chỉ `{ok, code, error}`, lý do nội bộ qua `onFailure`)
-- REMAINING: gộp → deploy (lượt sau lô `6883bfbf`) → kiểm từng tín hiệu trên production; follow-up MM-FU-692
-- ACCEPTANCE_CRITERIA: O1–O8 lên ✅ PROD (mỗi tín hiệu một lượt kiểm có vết)
-- PRODUCTION_EVIDENCE: — · NEXT_ACTION: gộp khi cổng xanh · LAST_UPDATED: 2026-10-09
-
-#### saas-acceptance-smoke
-- TITLE: Smoke nghiệm thu khách Chốt Đơn trên production (ops `saas-acceptance`)
-- OWNER: Integration Lead · SESSION/AGENT: `wt-saas-acceptance`
-- PRIORITY: P0 · STATUS: MERGED · CLASS: STILL REQUIRED (deploy đang chạy, chưa chạy `--apply`)
-- BRANCH: `feat/saas-acceptance-smoke` · PR: #690 → `5ce11027` + cứng hoá #696 → `6883bfbf`
-- DEPENDENCIES: saas-acceptance-hardening (MERGED) · BLOCKERS: deploy 37829126099 đang chạy
-- DONE: bước A cấp phát · B kích hoạt + đăng nhập email · C vỏ · D chat web → AI → đơn (`--e2e`) · E định tuyến chat công khai; chặn chiếm mã + loại workspace thử khỏi buồng lái (#696)
-- REMAINING: deploy → chạy thử (rỗng) → `--apply` → chuẩn bị UI một lần (`docs/saas/ACCEPTANCE.md` §3) → `--apply --e2e`; tiếp quản / hạn mức / Meta chưa có trong ops (phần còn của saas-e2e-customer)
-- ACCEPTANCE_CRITERIA: A–E xanh trên production; Launch Gate A2 · A5 · C1 · C2 · C7–C17 lên ✅ PROD theo bằng chứng
-- PRODUCTION_EVIDENCE: — · NEXT_ACTION: chạy ngay sau hậu kiểm deploy · LAST_UPDATED: 2026-10-09
-
-#### saas-acceptance-hardening (trước là MM-ACC-01)
-- TITLE: Cứng hoá ops `saas-acceptance` sau review #690: chặn chiếm mã `cdt-nghiem-thu`, loại workspace thử khỏi buồng lái
-- OWNER: Integration Lead · SESSION/AGENT: `wt-tech-lead-v2`
-- PRIORITY: P0 · STATUS: MERGED · CLASS: STILL REQUIRED (deploy đang chạy)
-- BRANCH: `fix/saas-acceptance-hardening` · PR: #696 → `6883bfbf` (gộp 08/10 18:59Z)
-- DEPENDENCIES: #690, #683 · BLOCKERS: deploy 37829126099 đang chạy
-- DONE: MEDIUM-1 · MEDIUM-2 · L1–L4; rebase sau #683 (ô đếm sức khoẻ tính trên workspace thật)
-- REMAINING: deploy + hậu kiểm; follow-up MM-FU-696
-- ACCEPTANCE_CRITERIA: mã workspace thử không bị chiếm; chỉ số buồng lái loại workspace thử
-- PRODUCTION_EVIDENCE: — · NEXT_ACTION: hậu kiểm sau deploy · LAST_UPDATED: 2026-10-09
+#### acceptance-signal-drills
+- TITLE: Nghiệm thu dựng sự cố có kiểm soát cho O2–O8 trên workspace thử (chứng minh tín hiệu PHÁT HIỆN đúng)
+- OWNER: Integration Lead · PRIORITY: P0 · STATUS: DEPLOYED · CLASS: STILL REQUIRED (Launch Gate §4)
+- BRANCH / PR: #724 → `bcad9350` (chạm `lib/saas/acceptance.ts` ⇒ cần deploy, không phải chỉ-script)
+- DEPENDENCIES: saas-ops-signals, ops-signals-check (DONE) · BLOCKERS: — (deploy `50293da6` đã lên)
+- DONE: mã + bài kiểm. Giới hạn đã biết: dựng sự cố CHỈ chứng minh được **O6**; O2–O5 · O7 · O8 là **CHƯA ĐO ĐƯỢC** (cần kênh nhắn tin thật / AI trả tiền / thao tác phá huỷ) ⇒ MM-FU-724
+- REMAINING: `saas-acceptance --apply --drills` → O6 lên ✅ trong `LAUNCH_GATE.md`
+- ACCEPTANCE_CRITERIA: run ops có vết cho O6 PHÁT HIỆN đúng sự cố dựng sẵn
+- PRODUCTION_EVIDENCE: production `50293da6` (deploy 37886395475, `/api/health` khớp) — hậu kiểm riêng CHƯA · NEXT_ACTION: `verify --sha=50293da6` → đóng trong sổ `/tech` rồi `--apply --drills` · LAST_UPDATED: 2026-10-09
 
 #### MM-ACC-02 — Tài khoản kiểm thử production
 - TITLE: 1 người vận hành nền tảng kiểm thử (hoặc smoke ký phiên ngắn hạn phía máy chủ) · 1 Page Facebook kiểm thử
@@ -621,21 +576,13 @@ Mission đã `DONE` được gom vào bảng gọn của từng nhóm (trường
 |---|---|---|---|---|---|---|---|
 | MM-LEGAL-00 | Hồ sơ tuân thủ pháp luật VN Phase 1 (`docs/legal/*`) | P0 | DONE | DONE (tài liệu — không cần deploy) | #691 | — (tài liệu) | 2026-10-08 |
 | MM-LEGAL-00b | Cổng pháp lý rà lại «tuân thủ đúng luật, ma sát thấp nhất»: P0 còn 11 mục | P0 | DONE | DONE (tài liệu — không cần deploy) | #693 | — (tài liệu) | 2026-10-08 |
+| legal-registers | Pháp lý L1: sổ phiên bản văn bản · bên xử lý phụ · chuyển xuyên biên giới · khung lưu trữ · sổ AI · cổng pháp lý 5 chiều · quy trình DSR / sự cố | P0 | DONE | DONE (follow-up MM-FU-697a MEDIUM · 697b) | #697 | deploy 37829126099 (`6883bfbf`) hậu kiểm ĐẠT; verify `/tech` 09/10 | 2026-10-09 |
+| legal-counsel-pack | Gói câu hỏi gửi luật sư vào kho (`docs/legal/COUNSEL_PACK.md`): ba câu chặn ra mắt + sự cố log 24/09, mỗi câu có ô YES / NO / CONDITIONS | P0 | DONE | DONE (tài liệu) — thay MM-REC-23 | #704 | tài liệu; verify `/tech` 09/10 | 2026-10-09 |
 
-Readiness pháp lý: `docs/legal/LEGAL_LAUNCH_GATE.md` — LEGAL READY **NOT READY (2,0 / 11 = ~18 %)**, trạng thái chung
+Readiness pháp lý: `docs/legal/LEGAL_LAUNCH_GATE.md` — LEGAL READY **NOT READY (2,5 / 11 = ~23 %, sau #697)**, trạng thái chung
 **WAITING_FOR_LEGAL_COUNSEL**.
 
 ### 10.2 Đang mở
-
-#### legal-registers
-- TITLE: Pháp lý L1 — sổ phiên bản văn bản (băm nội dung) · bên xử lý phụ S1–S30 + NOT_IN_USE · chuyển xuyên biên giới X1–X11 (toàn UNKNOWN) · khung lưu trữ (toàn null) · sổ AI-01…08 · cổng pháp lý 5 chiều + OWNER · quy trình DSR / sự cố (tài liệu)
-- OWNER: Integration Lead · SESSION/AGENT: `wt-legal-registers`
-- PRIORITY: P0 · STATUS: MERGED · CLASS: STILL REQUIRED (bằng chứng cho LEGAL P0-3 · P0-8 · P0-9; chạm trang `/chinh-sach-bao-mat`, `/dieu-khoan-su-dung` ⇒ cần deploy)
-- BRANCH: `feat/legal-registers` · PR: #697 → `ec649287` (gộp 08/10 18:35Z)
-- DEPENDENCIES: — · BLOCKERS: deploy 37829126099 đang chạy
-- REMAINING: deploy + mở hai trang pháp lý trên production; follow-up MM-FU-697 (có MEDIUM)
-- ACCEPTANCE_CRITERIA: mọi ô chưa xác minh in UNKNOWN, không xanh giả; quy trình DSR ghi hạn đúng luật (2 / 10 / 15 / 20 ngày)
-- PRODUCTION_EVIDENCE: — · NEXT_ACTION: hậu kiểm sau deploy · LAST_UPDATED: 2026-10-09
 
 #### legal-acceptance
 - TITLE: Pháp lý L2 — sổ chấp thuận văn bản (phiên bản · băm · mốc · tài khoản · workspace) ghi ở backend lúc đăng ký, không checkbox (M-ACCEPT, LEGAL P1-6)
@@ -692,25 +639,10 @@ Readiness pháp lý: `docs/legal/LEGAL_LAUNCH_GATE.md` — LEGAL READY **NOT REA
 | org-ai-platform-cutover | Ops `org-ai-cutover`: kiểm khoá AI + chuyển AI Bán hàng sang AI dùng chung | P1 | DONE | DONE (công cụ); lượt `--apply` cho HSLC = MM-HSLC-01 (DONE) | #659 #667 | run 37772436572 | 2026-10-08 |
 | cutover-unpriced-tolerance | `org-ai-cutover`: bỏ phần nhỏ token model chưa có giá khỏi phép cân giá, in tên model chưa có giá (tử số tính trên TOÀN BỘ token — phía an toàn) | P1 | DONE | DONE (chỉ script, đã chạy thật) | #699 | ops run 37829090945 (chuyển khoá HSLC thành công) | 2026-10-09 |
 | MM-HSLC-00 | HSLC tự phục vụ: mẫu thực phẩm, nhập SP, chatbot, báo nhóm; đơn tay · GTC · ads; bot im lặng / tin đơn nhanh | P1 | DONE | DONE | #408 #499 #500 #501 #502 #570 #575 | đã deploy | 2026-10-05 |
+| MM-HSLC-01 | Chuyển HSLC sang khoá AI dùng chung (`org-ai-cutover hslc-hmt-shop --apply`): trả trước 590 ₫ / khách AI qua Số dư | P1 | DONE | DONE (cảnh báo trước khi cạn credit nhà cung cấp = MM-REC-14) | #659 #667 #699 | ops run 37799525447 · 37829090945 (chuyển 09/10 02:04 VN) · 37829221110 (dò sau chuyển OK) | 2026-10-09 |
+| platform-key-project-probe | Dò số project Google của khoá AI nền tảng (chỉ đọc, không in khoá) + mã lý do của `org-ai-cutover` | P1 | DONE | DONE (chỉ script; đã chạy thật — phép dò trả UNAVAILABLE ⇒ MM-REC-38) | #694 | ops run 37819643201 | 2026-10-09 |
 
 ### 11.2 Đang mở
-
-#### MM-HSLC-01 — Chuyển HSLC sang khoá AI dùng chung (`org-ai-cutover hslc-hmt-shop --apply`)
-- BUSINESS_GOAL: HSLC chỉ trả một lần (590 ₫ / khách AI qua Số dư), không đồng thời tự trả token khoá riêng; bot không im vì cạn credit khoá riêng (PX-01)
-- OWNER: Integration Lead · PRIORITY: P1 · STATUS: DONE · CLASS: DONE
-- DEPENDENCIES: cutover-unpriced-tolerance (#699, DONE) · BLOCKERS: —
-- DONE: trả trước 590 ₫ (ops run 37799525447); chuyển khoá dùng chung 09/10 02:04 VN, credit 300 (ops run 37829090945); dò sau chuyển OK (ops run 37829221110)
-- REMAINING: — (cảnh báo trước khi cạn credit nhà cung cấp của khoá nền tảng: MM-REC-14)
-- ACCEPTANCE_CRITERIA: AI Bán hàng HSLC chạy trên khoá nền tảng · PRODUCTION_EVIDENCE: ops run 37829090945 + 37829221110
-- NEXT_ACTION: — · LAST_UPDATED: 2026-10-09
-
-#### platform-key-project-probe
-- TITLE: Dò số project Google của khoá AI nền tảng (chỉ đọc, không in khoá) + mã lý do của `org-ai-cutover`
-- OWNER: Integration Lead · SESSION/AGENT: `wt-platform-key-project-probe`
-- PRIORITY: P1 · STATUS: DONE · CLASS: DONE (chỉ script; đã chạy thật)
-- BRANCH: `feat/platform-key-project-probe` · PR: #694 → `a582a5ad`
-- DONE: mã lý do thật `BASIS_UNMEASURED` lộ ra (gỡ bằng #699); phép dò số project trả **UNAVAILABLE** (Google không trả ErrorInfo) ⇒ chủ shop xem ở trang khoá API (MM-REC-38)
-- PRODUCTION_EVIDENCE: ops run 37819643201 · LAST_UPDATED: 2026-10-09
 
 #### MM-HSLC-02 — Cấu hình danh mục HSLC: quy cách 0,5 kg, bảng giá sỉ mặc định, hai công tắc bot
 - OWNER: Chủ shop / HSLC (thao tác trên UI — ops ghi hộ CSDL tổ chức khách bị chặn) · PRIORITY: P3 · STATUS: BLOCKED_OWNER · CLASS: STILL REQUIRED
@@ -745,6 +677,11 @@ Readiness pháp lý: `docs/legal/LEGAL_LAUNCH_GATE.md` — LEGAL READY **NOT REA
 | launch-gate | Launch Gate khách trả tiền đầu tiên (nguồn readiness) | P0 | DONE | DONE | #678 | tài liệu | 2026-10-08 |
 | launch-gate-r2 | Launch Gate: mục Quan sát O1–O8, chấm lại 35 % | P0 | DONE | DONE | #687 | tài liệu (trong 4dbd864a) | 2026-10-08 |
 | saas-e2e-customer | E2E như khách ngoài sau 4 PR SaaS | P0 | DONE | SUPERSEDED — thay bằng `saas-acceptance-smoke` (#690) + saas-acceptance-hardening (#696); phần tiếp quản / hạn mức / kênh Meta chưa có trong ops ⇒ ghi ở REMAINING của saas-acceptance-smoke khi mở rộng | — | — | 2026-10-09 |
+| master-mission-registry | Sổ sứ mệnh tổng + checkpoint bền (tệp này + `CURRENT_CHECKPOINT.md`) | P1 | DONE | DONE (tài liệu) | #698 | tài liệu; verify `/tech` 09/10 | 2026-10-09 |
+| registry-refresh-0909 | Làm mới sổ 09/10 sáng sau lô #682–#700: RECOVERED / LOST WORK + bảng tốc độ (trước là MM-TECH-04) | P1 | DONE | DONE (tài liệu) | #702 | tài liệu; verify `/tech` 09/10 | 2026-10-09 |
+| launch-gate-r3 | Launch Gate r3: bằng chứng production sau nghiệm thu PASS 4/4 (60 %, 9 / 41 PROD) | P0 | DONE | DONE (tài liệu) | #707 | tài liệu; verify `/tech` 09/10 | 2026-10-09 |
+| launch-gate-r4 | Launch Gate r4: O1 ✅ bằng sự cố dựng sẵn hai luồng; O2–O8 tính được trên production — 25 / 41 = 61 %, 10 / 41 PROD, NOT READY | P0 | DONE | DONE (tài liệu) | #723 | tài liệu; verify `/tech` 09/10 | 2026-10-09 |
+| hide-internal-429-flake | Bài kiểm hộp thư khách thôi đỏ ngẫu nhiên vì UUID chứa «429» | P3 | DONE | DONE (chỉ bài kiểm) | #709 | trong production `dbab6813`; verify `/tech` 09/10 | 2026-10-09 |
 
 ### 12.2 Đang mở
 
@@ -756,18 +693,11 @@ Readiness pháp lý: `docs/legal/LEGAL_LAUNCH_GATE.md` — LEGAL READY **NOT REA
 - BLOCKERS: chủ shop gộp; migration 0236 va số với #692 (ai gộp sau thì `npm run migration:renumber`); review mất hiệu lực khi có commit mới
 - NEXT_ACTION: chủ shop quyết · LAST_UPDATED: 2026-10-08
 
-#### master-mission-registry
-- TITLE: Sổ sứ mệnh tổng + checkpoint bền (tệp này + `CURRENT_CHECKPOINT.md`)
-- OWNER: Integration Lead · PRIORITY: P1 · STATUS: DONE · CLASS: DONE (tài liệu)
-- BRANCH: `docs/master-mission-registry` · PR: #698 → `94bb5b0c`
-- LAST_UPDATED: 2026-10-09
-
-#### MM-TECH-04 — Làm mới sổ 09/10 (EXECUTION COMMANDER)
-- TITLE: Đối chiếu lại sổ sau lô #682–#700, thêm mục RECOVERED / LOST WORK và bảng tốc độ
-- OWNER: Integration Lead · SESSION/AGENT: worker docs (`wt-registry-refresh`) — là việc AUDIT duy nhất đang mở
+#### registry-reconcile-0910
+- TITLE: Đối chiếu sổ + checkpoint 09/10 trưa sau lô #705–#727 (nguồn: số đo Integration Lead, `git log origin/main`, `/api/health`, bàn giao Fable Round 2)
+- OWNER: Integration Lead · SESSION/AGENT: worker docs (`wt-registry-reconcile`) — việc AUDIT duy nhất đang mở
 - PRIORITY: P1 · STATUS: PR_READY · CLASS: STILL REQUIRED
-- BRANCH: `docs/registry-refresh-0909` · PR: — (worker không mở PR)
-- NEXT_ACTION: Integration Lead mở PR tài liệu · LAST_UPDATED: 2026-10-09
+- BRANCH: `docs/registry-reconcile-0910` · PR: — (worker không mở PR) · NEXT_ACTION: Integration Lead mở PR tài liệu · LAST_UPDATED: 2026-10-09
 
 #### pipeline-upgrade
 - TITLE: CI theo phạm vi ảnh hưởng · gộp deploy · quan sát · rollback
@@ -829,9 +759,9 @@ gọn; trường không ghi = «—». OWNER «Chủ shop» = việc cần con n
 | MM-REC-19 | Sau ~12/10: liệt kê trang 0 lượt / ít lượt mở, hỏi chủ shop từng trang | P3 | DEFERRED | DEFERRED (điều kiện: đủ dữ liệu từ 28/09, mốc ~12/10) | #338 | ~12/10 |
 | MM-REC-20 | Trạm chuyển Telegram (Cloudflare Worker + biến GitHub) khi VPS bị chặn Telegram | P2 | BLOCKED_OWNER | STILL REQUIRED | #445 | chủ shop tạo Worker |
 | MM-REC-21 | Tiến trình lạ giữ khoá vòng đời VPS ~02:15–02:50 VN | P3 | BACKLOG | STILL REQUIRED (chưa xác minh) | deploy-smoke-giu-khoa | đo log |
-| MM-REC-22 | Chậm cấu trúc: `getBusinessBrief` ~104 truy vấn, `/operations` · `/orders` · `/work/settings` · `/chatbot` (Commercial C1 #13) | P2 | BACKLOG | STILL REQUIRED (đo median 3–5 lượt trước) | do-hieu-nang-erp | sau Launch Gate |
-| MM-REC-23 | `docs/legal/COUNSEL_PACK.md` CHỈ nằm trên đĩa ở `wt-legal-compliance` (chưa commit) | P0 | IN_PROGRESS | STILL REQUIRED (gói câu hỏi gửi luật sư — đầu vào MM-LEGAL-01) | #691 / #693 | commit hoặc chụp `wip/`, đưa vào PR pháp lý kế |
-| MM-REC-24 | Sự cố log Actions 24/09 chưa được đánh giá theo nghĩa vụ báo 72 giờ | P0 | BACKLOG | STILL REQUIRED (LEGAL P0-8) | legal-compliance-phase1 | gộp vào runbook sự cố (legal-registers) |
+| MM-REC-22 | Chậm cấu trúc: `getBusinessBrief` ~104 truy vấn, `/operations` · `/orders` · `/work/settings` · `/chatbot` (Commercial C1 #13) | P2 | BACKLOG | STILL REQUIRED (đo median 3–5 lượt trước — số đo do `inbox-perf-probe` lấy) | do-hieu-nang-erp | sửa sau khi `inbox-perf-probe` có số |
+| MM-REC-23 | `docs/legal/COUNSEL_PACK.md` CHỈ nằm trên đĩa ở `wt-legal-compliance` (chưa commit) | P0 | DONE | NO LONGER NEEDED — đã vào kho ở #704 (legal-counsel-pack) | #704 | — |
+| MM-REC-24 | Sự cố log Actions 24/09 chưa được đánh giá theo nghĩa vụ báo 72 giờ | P0 | BLOCKED_EXTERNAL | STILL REQUIRED (LEGAL P0-8) — câu hỏi đã vào `COUNSEL_PACK.md` (#704), chờ luật sư | legal-compliance-phase1, #704 | chủ shop gửi gói cho luật sư (MM-LEGAL-01) |
 | MM-REC-25 | ĐVVC tự chủ: đăng ký J&T; vận đơn thật đầu tiên mỗi hãng + khổ tem A6/A7; chăm sóc + đối soát COD cho GHN / GHTK | P3 | BLOCKED_OWNER | STILL REQUIRED | #545 #556 #566 | chủ shop |
 | MM-REC-26 | Lọc nhiều đơn POS (`o_c_i`) chưa kiểm; định mức vải chỉ ở localStorage | P3 | VERIFYING | STILL REQUIRED | #369 | — |
 | MM-REC-27 | Ca CSKH chưa có đường giao tự động bằng máy | P3 | BACKLOG | STILL REQUIRED | #332 | — |
@@ -846,7 +776,7 @@ gọn; trường không ghi = «—». OWNER «Chủ shop» = việc cần con n
 | MM-REC-36 | Số ngày dùng thử 7 (mã) vs 14 (README / tài liệu cũ) | P1 | DONE | DUPLICATE — của MM-LEGAL-06 (M-TRIAL-CONSISTENCY) | #512 #541 | — |
 | MM-REC-37 | Cột sổ AI token suy nghĩ / độ trễ / loại việc chờ đánh số lại 0233 | P2 | DONE | NO LONGER NEEDED — đã vào #642 | #642 | — |
 | MM-REC-38 | Phép dò số project của khoá AI nền tảng trả UNAVAILABLE ⇒ chủ shop tự xem project của khoá ở trang quản lý khoá API của Google | P2 | BLOCKED_OWNER | STILL REQUIRED | #694 | chủ shop xem một lần |
-| MM-REC-39 | Nhánh `claude/ban-kem-aov` («Chỉ bán kèm»: bot báo giá từ quy cách chính) — commit 09/10 02:23 VN CHỈ ở cục bộ (`wt-hslc-sku`), chưa đẩy, không có mission `/tech` | P2 | IN_PROGRESS | STILL REQUIRED (phiên khác đang làm — không đụng cây) | — | phiên sở hữu `claim` + đẩy nhánh |
+| MM-REC-39 | «Chỉ bán kèm»: bot báo giá từ quy cách chính (#701) + bot mời thêm món CHỈ bằng câu upsell kèm ảnh menu (#720) | P2 | DEPLOYED | STILL REQUIRED (chưa hậu kiểm riêng; do phiên khác deploy #701 ở `9833d981`, #720 nằm trong production `ef9b302a`) | #701 #720 | phiên sở hữu kiểm một hội thoại thật |
 
 ---
 
@@ -855,15 +785,15 @@ gọn; trường không ghi = «—». OWNER «Chủ shop» = việc cần con n
 | # | Quyết định | Chặn mission | Nguồn |
 |---|---|---|---|
 | D1 | Sao lưu Drive đầy: dọn Drive · Google One · tài khoản riêng · giảm hạn giữ | MM-OPS-02 | CHECKPOINT 09/10 |
-| D2 | `PLATFORM_SIGNUP_MODE=open` — đóng (chỉ mời) tới khi READY? (khuyến nghị: đóng) | trang-chu-su-that-thuong-mai (CTA), Commercial C1 #4 | LAUNCH_GATE §8 |
+| D2 | `PLATFORM_SIGNUP_MODE=open` — đóng (chỉ mời) tới khi READY? (khuyến nghị: đóng) | Commercial C1 #4 (CTA trang chủ; #706 đã gộp phần còn lại) | LAUNCH_GATE §8 |
 | D3 | Xoá cửa hàng `qa` (khuyến nghị); giữ `hs-thien-nga-test` khi còn giữ Page thử Meta | — | CHECKPOINT |
-| D4 | Bộ phân loại quyền chặn giao dịch tiền thật qua ops: chủ shop tự bấm, hoặc thêm quy tắc ở `/permissions` | MM-HSLC-01, MM-BILL-02 | CHECKPOINT |
+| D4 | Bộ phân loại quyền chặn giao dịch tiền thật qua ops: chủ shop tự bấm, hoặc thêm quy tắc ở `/permissions` | MM-BILL-02 (MM-HSLC-01 đã DONE) | CHECKPOINT |
 | D5 | Meta App Dashboard + App Review | meta-messenger-access, MM-META-* | meta-review-guide |
 | D6 | IDENTITY §7 Q1–Q6; sửa OAuth khớp EMAIL | MM-IDENT-01, MM-IDENT-02 | IDENTITY.md |
 | D7 | OVERAGE Q1–Q10; chuyển 8 tổ chức legacy → V1 | MM-BILL-01, MM-BILL-02 | OVERAGE.md |
 | D8 | Order Candidate §11 Q1 / Q3 / Q4 / Q5 | MM-ORDER-05 | ORDER_CANDIDATE.md |
 | D9 | Duyệt page VNX SHADOW → LIVE | saas-a-vnx-runtime, saas-f-legacy-cleanup | OWNERSHIP.md |
-| D10 | Kênh hỗ trợ khách; menu vỏ thêm mục; vai trò rút gọn | saas-help-system (H2), MM-UX-03, MM-UX-04 | FINISH_LINE §5 |
+| D10 | Kênh hỗ trợ khách; menu vỏ thêm mục; bộ vai trò rút gọn cho `/settings/users` (TUỲ CHỌN — C1 #5 đã đóng nhờ #700) | saas-help-system (H2), MM-UX-03, MM-UX-04 | FINISH_LINE §5, bàn giao Fable 09/10 |
 | D11 | Gộp #631 (CRITICAL) | tech-worker-onboarding | CHECKPOINT |
 | D12 | Luật sư (G-1…G-11) · kế toán (HĐĐT) · câu chữ công bố AI · DPA | MM-LEGAL-01 → 05, 08, legal-acceptance | LEGAL_LAUNCH_GATE |
 | D13 | Tài khoản kiểm thử người vận hành / Page thử | MM-ACC-02 | LAUNCH_GATE §6 |
@@ -872,6 +802,10 @@ gọn; trường không ghi = «—». OWNER «Chủ shop» = việc cần con n
 | D16 | Xác nhận V6 — bản sao khoá bí mật nền tảng đã cất ngoài VPS | — | CHECKPOINT `/tech` 09/10 |
 | D17 | Dùng thử 7 ngày (mã) hay 14 (README) | MM-LEGAL-06 | CHECKPOINT `/tech` 09/10 |
 | D18 | Xem số project của khoá AI nền tảng (dò tự động UNAVAILABLE) | MM-REC-38 | ops run 37819643201 |
+| D19 | Chuẩn bị UI một lần cho E2E (`ACCEPTANCE.md` §3): đặt lại mật khẩu khách thử · `NT-AO-01` 150.000 ₫ + nhập ≥ 10 · bật bot · xuất bản `cdt-nghiem-thu` | saas-acceptance-smoke (D · E `--e2e`), Launch Gate C8–C17 | CHECKPOINT 09/10 |
+| D20 | Ngày bật cờ `meta.direct-connect.open` (cần thêm đường bật — MM-FU-712) | kenh-dang-chay-trong-app, MM-FU-712 | bàn giao Fable 09/10 |
+| D21 | Mật độ trang dùng chung ERP ↔ vỏ (chữ 10–10,5 px ở Sản phẩm · Đơn · Khách · Phiếu nhập) | MM-UX-01 (phần mật độ) | bàn giao Fable 09/10 |
+| D22 | Luật sư rà Chính sách bảo mật / Điều khoản (chữ «token · API · Gemini», «module») | MM-LEGAL-01 | COMMERCIAL_POLISH_BOARD §2 |
 
 ---
 
@@ -880,69 +814,72 @@ gọn; trường không ghi = «—». OWNER «Chủ shop» = việc cần con n
 Đo 08/10 19:25Z (09/10 02:25 VN): `git worktree list` (257 cây) so với nhánh trên remote, PR GitHub, sổ `/tech`. **Chỉ ghi
 lại — không đụng cây của phiên khác.** Cây chỉ có tệp tạm / di sản của việc đã gộp không liệt kê từng cái.
 
-### 15.A Nhánh đã đẩy nhưng KHÔNG có PR (và sổ `/tech` chưa handoff)
+### 15.A Nhánh đã đẩy nhưng KHÔNG có PR — ĐÃ GIẢI QUYẾT (09/10 trưa)
 
-| Nhánh | Đầu nhánh | Mission | Ghi chú |
-|---|---|---|---|
-| `claude/platform-viec-hang-ngay-len-dau` | `17f57d77` | platform-viec-hang-ngay-len-dau (PR F) | 1 commit, sau main 7 |
-| `claude/erp-a11y-bo-cuc` | `851c40d0` | erp-a11y-bo-cuc (PR G) | 1 commit, sau main 7 |
-| `claude/error-boundary-than-thien` | `ab580358` | error-boundary-than-thien (PR C) | 1 commit, sau main 7 |
-| `claude/trang-chu-su-that-thuong-mai` | `203ac025` | trang-chu-su-that-thuong-mai (PR A) | 1 commit, sau main 7; CTA phụ thuộc quyết định chế độ đăng ký |
-| `claude/saas-finish-line-r2` | `d57cb41b` | saas-finish-line-r2 | 1 commit, sau main 7; có thể chồng #700 |
-| `claude/commercial-sweep` | `79d5ca1d` | commercial-sweep | sổ `/tech` đã handoff 17:59Z (PR_READY) — chỉ chưa mở PR |
-
-Cả sáu là lô của phiên Fable (00:57–01:17 VN). Việc kế: phiên đó `handoff` từng nhánh → Integration Lead mở PR theo lô.
+Cả sáu nhánh lô Fable đã gộp: platform-viec-hang-ngay-len-dau #714 · erp-a11y-bo-cuc #708 · error-boundary-than-thien #705 ·
+trang-chu-su-that-thuong-mai #706 · saas-finish-line-r2 #713 · commercial-sweep #703. Phiên Fable sweep: **WAITING_FOR_NEXT_PRODUCTION_ROUND**
+(bàn giao Round 2 cuối ở `claude/commercial-sweep-ban-giao`, PR tài liệu riêng).
 
 ### 15.B Cây chỉ có ở cục bộ (commit chưa đẩy / thay đổi chưa commit)
 
 | Cây | Nhánh | Tình trạng | Kết luận |
 |---|---|---|---|
-| `wt-hslc-sku` | `claude/ban-kem-aov` | commit 09/10 02:23 VN chưa có trên remote, không mission | **Việc sống của phiên khác** ⇒ MM-REC-39 |
-| `wt-legal-compliance` | `claude/legal-conversion-first` (đã gộp #693) | `docs/legal/COUNSEL_PACK.md` chưa theo dõi | **Mất được** ⇒ MM-REC-23 |
+| `wt-hslc-sku` | `claude/ban-kem-aov` | commit 09/10 02:23 VN chưa có trên remote, không mission | ĐÃ GỘP #701 (`9833d981`) ⇒ MM-REC-39 DEPLOYED |
+| `wt-legal-compliance` | `claude/legal-conversion-first` (đã gộp #693) | `docs/legal/COUNSEL_PACK.md` chưa theo dõi | ĐÃ VÀO KHO #704 ⇒ MM-REC-23 DONE |
 | `wt-legal-acceptance` | `feat/legal-acceptance` | 12 tệp sửa + 3 tệp mới chưa commit; ảnh chụp `wip/legal-acceptance` @ `43c19ff9` | legal-acceptance (BLOCKED_OWNER) — ảnh chụp có thể cũ hơn đĩa |
 | `wt-saas-l1` · `wt-signup-subscription` | nhánh đã gộp (#639 · #670) | 20 / 3 tệp sửa chưa commit | Di sản sau gộp — chủ cây xác nhận rồi bỏ; không phải việc mở |
 | `wt-ai-sales-reliability` · `wt-ai-tech-room` · `wt-ai-usage` · `wt-hop-thu-lich-su` · `wt-hslc-self-service` · `wt-platform*` (5 cây) · `wt-pos` · `wt-reorder` · `wt-replay` · `wt-roadmap` · `wt-vtp` | nhánh không có trên remote, commit không là tổ tiên của `main` | Phần lớn là nhánh đã tích hợp qua nhánh khác (#408 `claude/hslc-tu-phuc-vu`, #592, #599, #607, #644, Builder Platform) — gộp squash nên không còn là tổ tiên | Kiểm từng nhánh trước khi dọn (MM-TECH-03). Riêng `claude/ai-sales-replay` (+1) gắn MM-REC-10 |
 | `agent-a5c50a8b…` · `wt-marketing-ai` · `wt-saas-finish-line` | +1 commit chưa đẩy trên nhánh đã gộp (#425 · #196 · #680) | Di sản | Không phải việc mở |
 
 ### 15.C PR_READY chưa mở PR
-commercial-sweep (`79d5ca1d`) · MM-TECH-04 (tệp này, `docs/registry-refresh-0909`).
+registry-reconcile-0910 (tệp này, `docs/registry-reconcile-0910`).
 
-### 15.D Mission ACTIVE mà phiên có thể đã mất (nhịp tim sổ `/tech` cũ > 1 giờ lúc đo 19:25Z)
-saas-finish-line-r2 (14:34Z) · error-boundary-than-thien (15:43Z) · trang-chu-su-that-thuong-mai (16:00Z) · erp-a11y-bo-cuc
-(17:07Z) · platform-viec-hang-ngay-len-dau (18:01Z) · tech-worker-onboarding (07/10 11:31Z, chờ chủ shop). Nhánh đã đẩy nên
-không mất mã; thiếu là handoff.
+### 15.D Mission ACTIVE (09/10 trưa)
+pancake-counters-remaining · inbox-perf-probe · shell-copy-brand-r3 · registry-reconcile-0910 (audit). tech-worker-onboarding
+vẫn chờ chủ shop (#631).
 
-### 15.E Đã gộp, chưa deploy (deploy 37829126099 `6883bfbf` ĐANG CHẠY)
-#682 · #683 · #690 · #696 · #697 · #700 (có mã chạy) — #698 tài liệu, #694 · #699 chỉ script (đã chạy thật).
+### 15.E Đã gộp, chưa xác nhận trên production
+Lô `50293da6` (deploy 37886395475): #721 · #724 · #725 · #726 (có mã chạy) — #727 tài liệu. Deploy trước đó 37871032076 cho
+`304bcbcb` HỎNG ở bước release (SSH «Run Command Timeout» khi kéo image; production đứng yên `d23c0deb`, không đổi gì) — đã được
+37879275359 (`ef9b302a`) thay thế.
 
-### 15.F Đã deploy, chưa hậu kiểm
-#695 Meta CAPI (production `1b057829`, deploy 37822211552) · #686 vỏ thiếu quyền (production từ `4dbd864a`) · #685 · #688.
+### 15.F Đã deploy, còn thiếu kiểm production
+#695 Meta CAPI (chưa sự kiện Purchase thật) · #701 / #720 (MM-REC-39) · nghiệm thu CÓ ĐĂNG NHẬP xác nhận #700 / #712 / #718 ·
+#717 mở `/shipments/<id>` của vận đơn COD 0 · #683 xem có vết từng khối của `/platform/customers`.
 
 ### 15.G Follow-up / LOW của các review hôm nay (nay là mission)
 
 | MISSION_ID | Việc | P | STATUS | CLASS | PR nguồn | NEXT_ACTION |
 |---|---|---|---|---|---|---|
-| MM-FU-682 | Bắt buộc trường `commercial` ở mức KIỂU; `moveWorkspaceToAccount` đi qua cùng luật gói / thương hiệu; huỷ thuê bao ERP vẫn giữ workspace `vnx` | P2 | BACKLOG | STILL REQUIRED | #682 | sau deploy lô |
-| MM-FU-696 | `validateRequest` giữ chỗ cho cửa người vận hành; `decideRenewal` không kéo dài phiên ngắn | P2 | BACKLOG | STILL REQUIRED | #696 | sau deploy lô |
+| MM-FU-682 | Bắt buộc trường `commercial` ở mức KIỂU; `moveWorkspaceToAccount` đi qua cùng luật gói / thương hiệu; huỷ thuê bao ERP vẫn giữ workspace `vnx` | P2 | BACKLOG | STILL REQUIRED | #682 | giao khi có slot (#682 đã DONE) |
+| MM-FU-696 | `validateRequest` giữ chỗ cho cửa người vận hành; `decideRenewal` không kéo dài phiên ngắn | P2 | BACKLOG | STILL REQUIRED | #696 | giao khi có slot (#696 đã DONE) |
 | MM-FU-697a | Bài kiểm `:119` / `:122` gõ cứng phiên bản văn bản (MEDIUM — vỡ mỗi lần sửa văn bản, AGENTS §65: dựng kỳ vọng từ cùng nguồn) | P1 | READY | STILL REQUIRED | #697 | giao ngay sau lô |
 | MM-FU-697b | Sổ băm văn bản chỉ ghi thêm; `NOT_NEEDED` đối chiếu cột Loại; `RESERVED_TLDS` thêm `example.*` | P2 | BACKLOG | STILL REQUIRED | #697 | cùng PR với 697a nếu nhỏ |
-| MM-FU-700 | Lời mời ở vỏ gán được vai trò tuỳ chỉnh; miễn trừ Module quá rộng; `hostSlug` sau `redirect()` | P1 | BACKLOG | STILL REQUIRED (lời mời gán vai trò = quyền) | #700 | xem lại phạm vi quyền trước |
+| MM-FU-700 | Lời mời ở vỏ gán được vai trò tuỳ chỉnh; miễn trừ Module quá rộng; `hostSlug` sau `redirect()` | P1 | IN_PROGRESS | STILL REQUIRED (lời mời gán vai trò = quyền) — một phần đang làm trong `shell-copy-brand-r3`; phần quyền vẫn cần xem lại phạm vi | #700 | tách phần quyền khỏi phần chữ khi PR r3 mở |
 | MM-FU-689 | Sàn giữ N bản mới nhất; dọn TRƯỚC khi giữ khoá; che ID thư mục trong tài liệu / `configure-offsite`; dọn qua lớp `gcrypt` | P2 | BACKLOG | STILL REQUIRED (thay MM-REC-16) | #689 | sau MM-OPS-02 |
-| MM-FU-683 | Một tài khoản mang hai lý do cùng mã trên danh sách sức khoẻ | P2 | BACKLOG | STILL REQUIRED | #683 | sau deploy lô |
-| MM-FU-692a | `mark_declined` cần câu POSTWRITE; `ORDER_VALIDATION` nhiễu (quá nhiều tín hiệu không phải lỗi) | P2 | BACKLOG | STILL REQUIRED | #692 | sau gộp #692 |
-| MM-FU-692b | **Hai nguồn sức khoẻ** (#683 danh sách khách vs gương `platform_org_health` của ops-signals) phải về MỘT nguồn — không để hai màn nói hai điều | P1 | BACKLOG | STILL REQUIRED (AGENTS §8.12 «logic chung không copy sang từng page») | #683 · #692 | thiết kế ngay sau gộp #692 |
+| MM-FU-683 | Một tài khoản mang hai lý do cùng mã trên danh sách sức khoẻ | P2 | BACKLOG | STILL REQUIRED | #683 | giao khi có slot (#683 đã DONE) |
+| MM-FU-692a | `mark_declined` cần câu POSTWRITE; `ORDER_VALIDATION` nhiễu (quá nhiều tín hiệu không phải lỗi) | P2 | BACKLOG | STILL REQUIRED | #692 | giao khi có slot (#692 đã DONE) |
+| MM-FU-692b | **Hai nguồn sức khoẻ** (#683 danh sách khách vs gương `platform_org_health` của ops-signals) phải về MỘT nguồn — không để hai màn nói hai điều | P1 | BACKLOG | STILL REQUIRED (AGENTS §8.12 «logic chung không copy sang từng page») | #683 · #692 | cả hai đã DONE trên production ⇒ thiết kế một nguồn là việc P1 kế tiếp |
+| MM-FU-712 | Không có đường UI / ops nào bật cờ `meta.direct-connect.open` — cổng nối thẳng Facebook chỉ mở được bằng sửa CSDL | P2 | BACKLOG | STILL REQUIRED (ngày bật = D20) | #712 | thêm công tắc người vận hành hoặc ops `set-setting` có vết |
+| MM-FU-724 | Dựng sự cố chỉ chứng minh được O6; O2–O5 · O7 · O8 «CHƯA ĐO ĐƯỢC» (cần kênh nhắn tin thật / AI trả tiền / thao tác phá huỷ) ⇒ cần CHUẨN BẰNG CHỨNG từ sự cố thật cho Launch Gate | P2 | BACKLOG | STILL REQUIRED (quyết định cách chấm O2–O8) | #724 | viết chuẩn vào `LAUNCH_GATE.md` §4 |
+| MM-FU-727a | (C2) `/o/[object]/new` gửi định nghĩa trường bị chặn bởi `viewPermission` xuống client (`new/page.tsx:27-44`) | P2 | BACKLOG | STILL REQUIRED | #727 (bàn giao Fable) | — |
+| MM-FU-727b | (C3) `ideas/[id]/page.tsx:25` xác định người đăng bằng email thay vì `users.id` (AGENTS 34) | P2 | BACKLOG | STILL REQUIRED | #727 | — |
+| MM-FU-727c | (C2) Chữ lỗi thô: `models/[id]/blocks.tsx:115` · `components/blueprints/install-panel.tsx:197` · `lib/actions/production-topics.ts:127` · import-vtp | P2 | BACKLOG | STILL REQUIRED | #727 | — |
+| MM-FU-727d | (C2) Bảng không cuộn ngang: `/platform/products/[key]`, Model 360, lô xưởng, phiếu việc | P2 | BACKLOG | STILL REQUIRED | #727 | — |
+| MM-FU-727e | (C3) `/orders/[id]/edit` mở được bằng URL cho đơn đã hoàn (lõi vẫn chặn ghi); `toInt` đọc «1.5» thành 15 | P2 | BACKLOG | STILL REQUIRED | #727 | — |
+| MM-FU-727f | (C3) Mã thô trên `/tech` | P2 | BACKLOG | STILL REQUIRED | #727 | — |
 
 ### 15.H Lượt dựng 09/10 01:00 (L1–L20) — trạng thái hiện tại
 
 | # | Việc | Nay ở |
 |---|---|---|
-| L1 | `fix/saas-acceptance-hardening` từng không tồn tại | ĐÃ GỘP #696 (saas-acceptance-hardening, MERGED) |
-| L2 | Ba nhánh chỉ trên đĩa: `fix/saas-shell-polish`, `feat/legal-registers`, `claude/erp-a11y-bo-cuc` | #700 · #697 đã gộp; erp-a11y đã đẩy `851c40d0` (15.A) |
+| L1 | `fix/saas-acceptance-hardening` từng không tồn tại | ĐÃ GỘP #696 (saas-acceptance-hardening, DONE 09/10) |
+| L2 | Ba nhánh chỉ trên đĩa: `fix/saas-shell-polish`, `feat/legal-registers`, `claude/erp-a11y-bo-cuc` | #700 · #697 · #708 đều DONE (09/10) |
 | L3 | Quét bù Graph · nâng Graph trước 21/01/2027 | MM-META-02, MM-META-03 |
 | L4 | CSP · correlation ID | MM-SEC-01, MM-SEC-02 |
 | L5 | `idempotency_key` UNIQUE | MM-ORDER-04 |
 | L6 | OAuth khớp EMAIL chưa xác minh | MM-IDENT-02 |
-| L7 | `/platform` + 9 nút không tên | platform-viec-hang-ngay-len-dau (IN_PROGRESS) |
+| L7 | `/platform` + 9 nút không tên | platform-viec-hang-ngay-len-dau DONE #714 («9 nút không tên» chưa xác nhận trên DOM) |
 | L8 | Token chữ / nút / tiền | MM-UX-01 |
 | L9 | Đếm khách AI cho tin nhắn lại | MM-INBOX-04 |
 | L10 | Revenue Rescue | MM-INBOX-02 |
@@ -950,42 +887,50 @@ không mất mã; thiếu là handoff.
 | L12 | Ops chỉ đọc theo CSDL tổ chức | MM-METRIC-05 |
 | L13 | S1–S3 chưa có bằng chứng production | MM-SEC-03 |
 | L14 | Đợt kỹ thuật pháp lý | MM-LEGAL-02, MM-LEGAL-06, MM-LEGAL-07 |
-| L15 | `COUNSEL_PACK.md` chỉ trên đĩa | VẪN CHƯA COMMIT — MM-REC-23 |
+| L15 | `COUNSEL_PACK.md` chỉ trên đĩa | ĐÃ VÀO KHO #704 (legal-counsel-pack) — MM-REC-23 DONE |
 | L16 | Sự cố log 24/09 chưa đánh giá | MM-REC-24 |
 | L17 | Tổ chức cũ thương hiệu NULL | MM-REC-01 |
 | L18 | Hai khoá chung tài khoản trả trước | HSLC đã chuyển khoá ⇒ còn vế cảnh báo cạn credit (MM-REC-14) |
 | L19 | App Messenger riêng (`appsecret_proof`, echo) · redirect OAuth | MM-REC-04, MM-REC-05 |
 | L20 | 30+ việc vận hành / ERP / vertical | MM-REC-06 → MM-REC-34 |
 
-## 16. WIP hiện tại (giới hạn 3 engineering + 1 audit)
+## 16. WIP hiện tại (giới hạn 3 engineering + 1 audit) — 09/10 trưa
 
 | Loại | Việc | Trạng thái |
 |---|---|---|
-| ENGINEERING 1 | #692 `saas-ops-signals` | đang gộp — cổng chạy (run 37829612046) |
-| ENGINEERING 2 | Deploy lô `6883bfbf` (#682 #683 #690 #696 #697 #700) | deploy 37829126099 đang chạy |
-| ENGINEERING 3 | Production acceptance `saas-acceptance` | sắp chạy — sau hậu kiểm deploy |
-| AUDIT | MM-TECH-04 làm mới sổ (tệp này) | PR_READY |
-
-Không mở việc engineering thứ tư cho tới khi một trong ba ô trên xong. Lô Fable (15.A) là việc ĐÃ CODE — chỉ còn handoff / PR,
-xếp hàng sau acceptance.
+| ENGINEERING 1 | `pancake-counters-remaining` (khối «Khách hàng» trang đơn + bộ lọc đã lưu) | IN_PROGRESS |
+| ENGINEERING 2 | `inbox-perf-probe` (đo production, C1 #13) | IN_PROGRESS |
+| ENGINEERING 3 | `shell-copy-brand-r3` (C1 #7 + một phần MM-FU-700) | IN_PROGRESS |
+| AUDIT | `registry-reconcile-0910` (tệp này) | PR_READY |
+| (ngoài WIP) | Deploy 37886395475 lô `50293da6` (#721 #724 #725 #726 #727) | DEPLOYED — chờ verify |
 
 ## 17. CRITICAL PATH — P0 còn lại, theo thứ tự
 
-1. **Deploy 37829126099 (`6883bfbf`) xong** → hậu kiểm `/api/health` commit `6883bfbf` + smoke ⇒ #682 · #683 · #690 · #696 · #697 · #700 lên `DEPLOYED`.
-2. **Gộp #692** khi cổng xanh → deploy kế (một lượt) → kiểm O1–O8 trên production.
-3. **`saas-acceptance`** chạy thử → `--apply` → chủ shop chuẩn bị UI một lần (`ACCEPTANCE.md` §3) → `--apply --e2e`; kèm MM-SEC-03 (S1–S3).
-4. **Cập nhật `LAUNCH_GATE.md`** bằng bằng chứng production (A1 · A2 · A4–A8 · A10 · C1–C17 · O1–O8) — chỉ PROD mới tính 1 điểm; các mission MERGED → DONE theo bằng chứng.
-5. **Pháp lý P0**: hậu kiểm legal-registers (#697) · MM-REC-23 `COUNSEL_PACK.md` vào kho · MM-REC-24 đánh giá sự cố 24/09 · MM-LEGAL-02 công bố AI ở giao diện · chủ shop đưa câu hỏi cho luật sư (MM-LEGAL-01) · MM-LEGAL-03 / 04 / 05 chờ chủ shop / luật sư / kế toán.
-6. **Meta**: meta-messenger-access (chủ shop + Meta) → MM-META-01 smoke tài khoản ngoài ⇒ READY FOR FIRST PAYING CUSTOMER.
+1. **Deploy `50293da6` xong** → `/api/health` + smoke + `verify` ⇒ #721 · #724 · #725 · #726 lên DONE; rồi **`saas-acceptance --apply --drills`**
+   ⇒ O6 lên ✅ (acceptance-signal-drills).
+2. **Hiệu năng production** (C1 #13): `inbox-perf-probe` + ops smoke `/chatbot` · `/cod` · `/reports/*`.
+3. **Vỏ**: C1 #7 chữ kỹ thuật (`shell-copy-brand-r3`); C1 #4 CTA chờ D2.
+4. **Kiểm production còn thiếu**: nghiệm thu CÓ ĐĂNG NHẬP xác nhận #700 / #712 / #718 · trang chi tiết của tổ chức KHÔNG dùng Pancake (#725) ·
+   `/shipments/<id>` vận đơn COD 0 (#717).
+5. **E2E D + E**: chủ shop chuẩn bị UI (D19) ⇒ `saas-acceptance --apply --e2e` ⇒ C8–C17. O2–O5 · O7 · O8 cần chuẩn bằng chứng sự cố thật
+   (MM-FU-724). Kèm MM-SEC-03 (S1–S3).
+6. **Pháp lý P0**: chủ shop gửi `COUNSEL_PACK.md` (#704) cho luật sư (MM-LEGAL-01, MM-REC-24) · MM-LEGAL-02 công bố AI ở giao diện ·
+   MM-LEGAL-03 / 04 / 05 chờ chủ shop / luật sư / kế toán.
+7. **Meta**: meta-messenger-access (chủ shop + Meta) → MM-META-01 smoke tài khoản ngoài ⇒ READY FOR FIRST PAYING CUSTOMER.
 
-P1 còn lại (theo tác động thương mại): MM-FU-697a (MEDIUM) · MM-FU-692b (một nguồn sức khoẻ) · MM-FU-700 · saas-shell-polish
-(hậu kiểm) · trang-chu-su-that-thuong-mai · error-boundary-than-thien · MM-BILL-01 / 02 / 03 · MM-OPS-02 · MM-SEC-01 ·
-MM-ORDER-04 · MM-META-02 / 03 · MM-IDENT-02 · MM-UX-04 · MM-ACC-02 · MM-REC-01 · MM-REC-04 · MM-REC-05 · MM-REC-14 ·
-MM-LEGAL-06 / 07 / 08 · legal-acceptance (BLOCKED_OWNER) · MM-TECH-04.
+Readiness (chép nguồn): ENGINEERING **NOT READY — 25 / 41 = 61 %**, **10 / 41** có bằng chứng production (`LAUNCH_GATE.md` 09/10 trưa,
+#723) · LEGAL **NOT READY ~23 %**, WAITING_FOR_LEGAL_COUNSEL.
 
-Commercial Perfection (giữ đủ, không mất): commercial-sweep · trang-chu-su-that-thuong-mai (PR A) · MM-UX-01 (PR B) ·
-error-boundary-than-thien (PR C) · platform-viec-hang-ngay-len-dau (PR F) · erp-a11y-bo-cuc (PR G) · saas-finish-line-r2 ·
-MM-UX-02 → 05 · saas-help-system. Pháp lý (giữ đủ): legal-registers · legal-acceptance · MM-LEGAL-01 → 09 · MM-REC-23 / 24.
+Commercial (bàn giao Fable Round 2, 09/10): **C0 còn 0** (C0 duy nhất đã sửa ở #717). **C1 còn 3**: #7 chữ kỹ thuật vỏ
+(`shell-copy-brand-r3`, RUNNING) · #4 CTA đăng ký (D2) · #13 trang chậm (đo production). Đóng theo đối chiếu: #5 (#700 ẩn ma trận quyền ở
+vỏ) · #6 (#700) · #8 (#683) · #9 (#682) · lệnh đặt xưởng chưa có giá (#719).
+
+P1 còn lại (theo tác động thương mại): MM-FU-692b (một nguồn sức khoẻ) · MM-FU-697a (MEDIUM) · MM-FU-700 · pancake-counters-remaining ·
+inbox-perf-probe · shell-copy-brand-r3 · MM-BILL-01 / 02 / 03 · MM-OPS-02 · MM-SEC-01 · MM-ORDER-04 · MM-META-02 / 03 · MM-IDENT-02 ·
+MM-ACC-02 · MM-REC-01 · MM-REC-04 · MM-REC-05 · MM-REC-14 · MM-LEGAL-06 / 07 / 08 · legal-acceptance (BLOCKED_OWNER) ·
+registry-reconcile-0910.
+
+Pháp lý (giữ đủ): legal-acceptance · MM-LEGAL-01 → 09 · MM-REC-24. Backlog Tech Lead từ sweep: MM-UX-01 · MM-FU-712 · MM-FU-727a → f.
 
 ## 18. Nguồn lệch nhau (đã ghi nhận, Git / PR / production thắng)
 
