@@ -523,6 +523,7 @@ import { testSalesAgentGolden } from "./sales-agent-golden/golden.test";
 import { testOrderGolden } from "./order-golden/order-golden.test";
 import { testOrderReview } from "./order-review.test";
 import { testInboxOrderPanel } from "./inbox-v2-b.test";
+import { testProductsShellV2 } from "./products-shell-v2.test";
 import { testGoLive } from "./go-live.test";
 import { testSalesVision } from "./sales-vision.test";
 import { testChatWidget } from "./chat-widget.test";
@@ -2904,6 +2905,8 @@ async function main() {
   // Hộp thư V2-B: «Đơn đang chốt» đầu cột phải — đọc đơn bot ghi (một câu SQL), kiểm từng ô bằng validator của lõi, nút xác nhận
   // = `confirmOrderReviewCore` — tổ chức THẬT `or-ib` (tự cấp, tự dọn).
   await testInboxOrderPanel();
+  // Trang «Sản phẩm» của khách vỏ: danh sách gọn (tên · SKU · giá · tồn khả dụng · thiếu gì) · số gọn dấu phẩy · «0 kho» — thuần + mã nguồn.
+  await testProductsShellV2();
   await testGoLive();
   await testSalesVision();
   testChatWidget();

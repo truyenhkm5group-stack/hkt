@@ -81,8 +81,12 @@ export function formatVND(value: number | null | undefined, opts: { compact?: bo
   return `${sign}${formatted} ₫`;
 }
 
+/**
+ * Bỏ số 0 thừa sau dấu thập phân rồi đổi sang DẤU PHẨY — tiếng Việt viết «1,62 tỷ», «2,5 tr»; bản cũ in «1.62 tỷ» (dấu chấm là
+ * dấu NGHÌN trong tiếng Việt, nên «1.62 tỷ» đọc như một nghìn sáu trăm hai mươi tỷ). Hộp thư (`compactCount`) đã dùng dấu phẩy.
+ */
 function trimZero(value: string) {
-  return value.replace(/\.0+$/, "").replace(/(\.\d*[1-9])0+$/, "$1");
+  return value.replace(/\.0+$/, "").replace(/(\.\d*[1-9])0+$/, "$1").replace(".", ",");
 }
 
 export function formatNumber(value: number | null | undefined, opts: MissingOpt = {}) {
