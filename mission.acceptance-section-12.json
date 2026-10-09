@@ -1,0 +1,29 @@
+{
+  "schema": 1,
+  "mission_id": "acceptance-section-12",
+  "title": "ACCEPTANCE.md: mục bảo mật S1–S3 thành §12",
+  "business_goal": "",
+  "status": "RUNNING",
+  "priority": "P2",
+  "risk": "HIGH",
+  "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "worker": null,
+  "worktree": null,
+  "branch": "docs/acceptance-section-12",
+  "base_sha": "863aa76aa318174ce6923496fe906c74c2c5f0cd",
+  "domains": [],
+  "owned_paths": [
+    "docs/saas/ACCEPTANCE.md",
+    "lib/constants/security-acceptance.ts",
+    "lib/saas/security-acceptance.ts",
+    ".github/workflows/ops-vps.yml"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-09T19:34:25.124Z",
+  "updated_at": "2026-10-09T19:34:25.124Z",
+  "last_heartbeat": "2026-10-09T19:34:25.124Z",
+  "definition_of_done": []
+}
