@@ -50,7 +50,7 @@ export type CatalogReport = {
   priceLists: { id: string; name: string; isDefault: boolean; active: boolean; tiers: { variantId: string; variantLabel: string; minQuantity: number; unitPrice: number }[] }[];
   quickReplies: { title: string; triggers: string[]; answer: string; upsell: boolean; images: number }[];
   /** Cài đặt câu mẫu: bật / tắt; `upsellSet` = đã chọn câu upsell (kèm ảnh menu) cho bước mời thêm món. `null` = không đọc được. */
-  quickReplySettings: { enabled: boolean; upsellSet: boolean } | null;
+  quickReplySettings: { enabled: boolean; upsellSet: boolean; /** Câu upsell đã chọn mà đang TẮT / đã xoá ⇒ bot coi như chưa có (chỉ đọc câu đang bật). */ upsellStale?: { title: string | null; state: "INACTIVE" | "MISSING" } } | null;
 };
 
 /** Quy cách của một mẫu mã như bot đọc (`variantText` trong lib/sales-chatbot/catalog.ts). HÀM THUẦN. */
@@ -111,6 +111,13 @@ export async function collectOrgCatalog(org: { code: string; name: string; isHom
   const qs = parseQuickReplySettings(await readJson(db, QUICK_REPLY_SETTING_KEY));
   const qi = schema.salesChatQuickReplyImages;
   const imageCounts = new Map((await db.select({ id: qi.quickReplyId, n: sql<number>`count(*)::int` }).from(qi).groupBy(qi.quickReplyId)).map((r) => [r.id, Number(r.n)]));
+  // Câu upsell đã chọn nhưng KHÔNG còn bật (tắt / xoá) — bot chỉ đọc câu đang bật nên coi như chưa chọn; phải nói ra đúng tình huống.
+  let upsellStale: { title: string | null; state: "INACTIVE" | "MISSING" } | null = null;
+  if (qs.upsellReplyId) {
+    const [u] = await db.select({ title: qr.title, active: qr.active }).from(qr).where(eq(qr.id, qs.upsellReplyId)).limit(1);
+    if (!u) upsellStale = { title: null, state: "MISSING" };
+    else if (!u.active) upsellStale = { title: u.title, state: "INACTIVE" };
+  }
   const quickReplies = (await db.select({ id: qr.id, title: qr.title, triggers: qr.triggers, answer: qr.answer }).from(qr).where(eq(qr.active, true)).orderBy(asc(qr.title))).map((q) => ({ title: q.title, triggers: q.triggers ?? [], answer: q.answer, upsell: q.id === qs.upsellReplyId, images: imageCounts.get(q.id) ?? 0 }));
 
   return {
@@ -121,7 +128,7 @@ export async function collectOrgCatalog(org: { code: string; name: string; isHom
     products,
     priceLists,
     quickReplies,
-    quickReplySettings: { enabled: qs.enabled, upsellSet: quickReplies.some((q) => q.upsell) },
+    quickReplySettings: { enabled: qs.enabled, upsellSet: quickReplies.some((q) => q.upsell), ...(upsellStale ? { upsellStale } : {}) },
   };
 }
 
@@ -153,7 +160,7 @@ export function catalogLines(r: CatalogReport): string[] {
   }
   out.push("");
   out.push(`CÂU MẪU ĐANG BẬT (${r.quickReplies.length}):`);
-  out.push(r.quickReplySettings ? `Câu mẫu: ${onOff(r.quickReplySettings.enabled)} · câu upsell (mời thêm món kèm ảnh menu): ${r.quickReplySettings.upsellSet ? "ĐÃ CHỌN" : "CHƯA CHỌN — bot sẽ tự gợi ý từng món"}` : "Câu mẫu: — (không đọc được cài đặt)");
+  out.push(r.quickReplySettings ? `Câu mẫu: ${onOff(r.quickReplySettings.enabled)} · câu upsell (mời thêm món kèm ảnh menu): ${r.quickReplySettings.upsellSet ? "ĐÃ CHỌN" : r.quickReplySettings.upsellStale ? `ĐÃ CHỌN nhưng câu đó ${r.quickReplySettings.upsellStale.state === "INACTIVE" ? `«${r.quickReplySettings.upsellStale.title}» đang TẮT` : "đã bị xoá"} — bot coi như chưa có, sẽ tự gợi ý từng món` : "CHƯA CHỌN — bot sẽ tự gợi ý từng món"}` : "Câu mẫu: — (không đọc được cài đặt)");
   for (const q of r.quickReplies) out.push(`· ${q.upsell ? "[UPSELL] " : ""}${q.title} (${q.images} ảnh) [${q.triggers.join(" / ")}]: ${q.answer.replace(/\s+/g, " ").trim()}`);
   return out;
 }
@@ -166,7 +173,7 @@ export function catalogSummary(r: CatalogReport): string[] {
   const tiers = activeLists.reduce((s, l) => s + l.tiers.length, 0);
   return [
     `Tổ chức ${r.org.code}: ${live.length} sản phẩm · ${variants.length} mẫu mã (${variants.filter((v) => v.price === null).length} chưa có giá · ${variants.filter((v) => v.hidden).length} ẩn · ${variants.filter((v) => v.addOnOnly).length} chỉ bán kèm) · nguồn ${r.syncedProducts === null ? "—" : r.syncedProducts ? "ĐỒNG BỘ" : "tạo tay"}`,
-    `Bot: ${r.bot ? `${onOff(r.bot.enabled)} · giá sỉ ${onOff(r.bot.wholesalePricing)} · chốt không kiểm tồn ${onOff(r.bot.sellWithoutStockCheck)}` : "— (chưa có cấu hình)"} · bảng giá sỉ đang dùng ${activeLists.length} (${tiers} bậc) · câu mẫu đang bật ${r.quickReplies.length} · câu upsell ${r.quickReplySettings?.upsellSet ? `ĐÃ CHỌN (${r.quickReplies.find((q) => q.upsell)?.images ?? 0} ảnh)` : "CHƯA CHỌN"}`,
+    `Bot: ${r.bot ? `${onOff(r.bot.enabled)} · giá sỉ ${onOff(r.bot.wholesalePricing)} · chốt không kiểm tồn ${onOff(r.bot.sellWithoutStockCheck)}` : "— (chưa có cấu hình)"} · bảng giá sỉ đang dùng ${activeLists.length} (${tiers} bậc) · câu mẫu đang bật ${r.quickReplies.length} · câu upsell ${r.quickReplySettings?.upsellSet ? `ĐÃ CHỌN (${r.quickReplies.find((q) => q.upsell)?.images ?? 0} ảnh)` : r.quickReplySettings?.upsellStale ? `TRỎ TỚI CÂU ${r.quickReplySettings.upsellStale.state === "INACTIVE" ? "ĐANG TẮT" : "ĐÃ XOÁ"}` : "CHƯA CHỌN"}`,
   ].map((l) => l.slice(0, SUMMARY_MAX_CHARS));
 }
 
