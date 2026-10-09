@@ -3,7 +3,7 @@
   "mission_id": "visible-product-board",
   "title": "VISIBLE_PRODUCT_FINISH_BOARD + đổi DONE chưa có ảnh production ⇒ CODE_DONE_UI_NOT_VERIFIED + KPI «thay đổi nhìn thấy 24h» (chủ shop 10/10)",
   "business_goal": "",
-  "status": "INTEGRATING",
+  "status": "VERIFYING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -24,11 +24,13 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-09T17:04:58.776Z",
-  "updated_at": "2026-10-09T21:18:47.971Z",
+  "updated_at": "2026-10-09T22:05:53.440Z",
   "last_heartbeat": "2026-10-09T21:17:02.152Z",
   "definition_of_done": [],
   "evidence": {
-    "merged": "#747 → d307dec424c5abf7eb9983ac3f3f1d1a437ab0d3"
+    "merged": "#747 → d307dec424c5abf7eb9983ac3f3f1d1a437ab0d3",
+    "verify": "PASS d307dec424c5abf7eb9983ac3f3f1d1a437ab0d3 2026-10-09T22:05:45.023Z",
+    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/37996038264"
   },
   "handoff": {
     "branch": "docs/visible-product-board",
