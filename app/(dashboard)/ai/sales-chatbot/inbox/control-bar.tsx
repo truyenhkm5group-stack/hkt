@@ -49,6 +49,9 @@ export function ConversationControlBar({
   const [pending, setPending] = useState<ConversationControl | null>(null);
   const [asking, setAsking] = useState(false);
   const [reason, setReason] = useState("");
+  // Lý do AI không trả lời + cách sửa: GẬP mặc định (INBOX-V2-A) — dòng trạng thái đã nói kết luận; chi tiết mở bằng «Vì sao?».
+  // Trước đây khối này luôn mở và chiếm ~160 px phía trên dòng tin, đẩy tin khách xuống dưới.
+  const [why, setWhy] = useState(false);
   const mode: ConversationControl = control?.mode ?? "AUTO";
 
   // Đồng hồ đếm ngược: chỉ chạy sau khi gắn vào trang (bản dựng sẵn ở máy chủ không mang số giây). Lệch = giờ máy chủ − giờ trình
@@ -118,7 +121,7 @@ export function ConversationControlBar({
       disabled={!canWork || pending !== null || active}
       onClick={onClick}
       className={cn(
-        "inline-flex h-7 items-center gap-1 rounded-md border px-2 text-[12px] font-medium transition-colors disabled:cursor-default",
+        "inline-flex h-6 shrink-0 items-center gap-1 whitespace-nowrap rounded-md border px-1.5 text-[12px] font-medium transition-colors disabled:cursor-default",
         active ? "border-transparent bg-foreground text-background" : "bg-background hover:bg-muted disabled:opacity-50",
       )}
     >
@@ -137,7 +140,7 @@ export function ConversationControlBar({
   return (
     <div
       className={cn(
-        "space-y-1.5 border-b px-4 py-1.5 text-[12px]",
+        "space-y-1 border-b px-4 py-1 text-[12px]",
         tone === "rose" && "bg-rose-50 text-rose-900 dark:bg-rose-950/40 dark:text-rose-200",
         tone === "amber" && "bg-amber-50 text-amber-900 dark:bg-amber-950/40 dark:text-amber-200",
         tone === "violet" && "bg-violet-50 text-violet-900 dark:bg-violet-950/40 dark:text-violet-200",
@@ -146,10 +149,14 @@ export function ConversationControlBar({
       data-hold-state={hold.state}
       data-ai-state={shown.state}
     >
-      <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5">
-        <span className="flex min-w-0 items-start gap-1.5">
-          {shown.state === "HUMAN_COOLDOWN" ? <Timer className="mt-0.5 size-3.5 shrink-0" /> : shown.state === "HUMAN_TAKEOVER" ? <Hand className="mt-0.5 size-3.5 shrink-0" /> : shown.state === "AI_BLOCKED" ? <Ban className="mt-0.5 size-3.5 shrink-0" /> : <Bot className="mt-0.5 size-3.5 shrink-0" />}
-          <span className="break-words">
+      {/*
+        MỘT DÒNG (INBOX-V2-A): biểu tượng · kết luận (cắt bớt, đủ câu ở chú thích) · «Vì sao?» · nút điều khiển gọn — chỉ xuống dòng
+        khi màn hẹp. Mở «Vì sao?» thì câu kết luận hiện đủ và chi tiết hiện bên dưới.
+      */}
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+        <span className="flex min-w-[12rem] flex-1 items-center gap-1.5">
+          {shown.state === "HUMAN_COOLDOWN" ? <Timer className="size-3.5 shrink-0" /> : shown.state === "HUMAN_TAKEOVER" ? <Hand className="size-3.5 shrink-0" /> : shown.state === "AI_BLOCKED" ? <Ban className="size-3.5 shrink-0" /> : <Bot className="size-3.5 shrink-0" />}
+          <span className={cn("min-w-0", why ? "break-words" : "truncate")} title={status}>
             {remaining !== null && !lapsed ? (
               <span className="mr-1.5 inline-block rounded bg-amber-200/70 px-1.5 font-mono font-semibold tabular-nums dark:bg-amber-900/60" data-testid="cooldown-countdown" aria-label="Thời gian AI còn nhường">
                 {formatCountdown(remaining)}
@@ -157,15 +164,20 @@ export function ConversationControlBar({
             ) : null}
             {status}
           </span>
+          {shown.note || blocks.length ? (
+            <button type="button" className="shrink-0 font-medium underline underline-offset-2 opacity-90 hover:opacity-100" aria-expanded={why} onClick={() => setWhy((v) => !v)} data-testid="ai-why-toggle">
+              {why ? "Ẩn chi tiết" : `Vì sao?${blocks.length ? ` (${blocks.length})` : ""}`}
+            </button>
+          ) : null}
         </span>
         {canWork ? (
-          <div className="flex flex-wrap items-center gap-1" role="group" aria-label="Ai trả lời khách">
+          <div className="ml-auto flex shrink-0 flex-wrap items-center gap-1" role="group" aria-label="Ai trả lời khách">
             {buttons}
           </div>
         ) : null}
       </div>
-      {shown.note ? <p className="break-words text-[11px] opacity-90" data-testid="ai-block-note">{shown.note}</p> : null}
-      {blocks.length ? (
+      {why && shown.note ? <p className="break-words text-[11px] opacity-90" data-testid="ai-block-note">{shown.note}</p> : null}
+      {why && blocks.length ? (
         <ul className="flex flex-wrap gap-x-3 gap-y-1 text-[11px]" data-testid="ai-blocks">
           {blocks.map((b) => (
             <li key={b.code} data-code={b.code} className="inline-flex items-center gap-1">

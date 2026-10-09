@@ -13,8 +13,12 @@ import { DYNAMIC_PAGE_PREFIX } from "@/lib/pages/nav";
  * nó, nhưng người đang xem MỘT đơn vẫn cần một cú bấm để về danh sách — nên dòng này chỉ hiện ở
  * trang chi tiết (đường dẫn sâu hơn trang có mục menu), và không chiếm chỗ ở mọi trang khác.
  */
-/** Khu vực tự vẽ đường quay lại của chính nó (giao diện điện thoại) — không in dòng vị trí. */
-const OWN_NAV_PREFIXES = ["/wholesale/mobile"];
+/**
+ * Khu vực tự vẽ đường quay lại / lối ra của chính nó — không in dòng vị trí. Hộp thư khách (INBOX-V2-A): màn làm việc cao bằng
+ * màn hình, đầu trang gọn; dòng «Chatbot bán hàng / inbox» in slug tiếng Anh và ăn ~30 px phía trên danh sách hội thoại, còn lối
+ * về cấu hình chatbot đã là nút ⚙ cạnh ô tìm.
+ */
+const OWN_NAV_PREFIXES = ["/wholesale/mobile", "/ai/sales-chatbot/inbox"];
 
 /** `skip`: trang đứng trên thanh tám mục của vỏ app Chốt Đơn — là trang gốc, không phải trang chi tiết, nên không in đường quay lại. */
 export function DetailCrumb({ skip = [] }: { skip?: readonly string[] }) {
