@@ -1,0 +1,8 @@
+{
+  "pr": 748,
+  "sha": "0505946e65cf014f0710cc0ad8d354529c3b8ae1",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-09T18:46:47.616Z",
+  "note": "Review Integration Lead: chưa đọc lên đầu sắp ở MÁY CHỦ (inboxOrderBy, khoá id cuối cho phân trang ổn định), hội thoại đang mở giữ chỗ; bộ lọc gọn — 14 tham số URL cũ giữ nguyên, mọi bộ lọc vào popover (có test liệt kê); không dựng link Facebook từ PSID (quét mã); tách màu bằng token; câu mẫu/sản phẩm/AI gợi ý trong ô soạn dùng action sẵn có. Ảnh AFTER cục bộ 1366×768: 9 hội thoại (trước 1). Theo "
+}
