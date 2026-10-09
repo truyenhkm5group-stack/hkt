@@ -1335,3 +1335,4 @@
 {"at":"2026-10-09T19:44:42.376Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#747 @ a934181ceec3 · Ghép main (có #749) vào nhánh tài liệu; nội dung bảng không đổi so với lượt PASS 32c2d867."}
 {"at":"2026-10-09T20:04:48.963Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"VERIFY_PASS","mission":"golden-date-bomb","detail":"PASS 863aa76aa318174ce6923496fe906c74c2c5f0cd 2026-10-09T20:04:36.391Z"}
 {"at":"2026-10-09T20:05:08.015Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"VERIFY_PASS","mission":"acceptance-e2e-r2","detail":"PASS 863aa76aa318174ce6923496fe906c74c2c5f0cd 2026-10-09T20:04:57.026Z"}
+{"at":"2026-10-09T20:05:26.225Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"VERIFY_PASS","mission":"security-acceptance","detail":"PASS 863aa76aa318174ce6923496fe906c74c2c5f0cd 2026-10-09T20:05:15.316Z"}
