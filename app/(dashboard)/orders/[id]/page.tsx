@@ -181,18 +181,104 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
       />
 
       {/*
+        TÓM TẮT ĐƠN — BỐN CÂU TRẢ LỜI TRONG BA GIÂY (chủ shop 09/10/2026): ai mua · bao nhiêu tiền · hàng đang ở đâu · việc tiếp
+        theo. Chỉ dùng dữ liệu trang đã tải (không truy vấn thêm); chi tiết đầy đủ vẫn ở các khối bên dưới, ô «việc tiếp theo» chỉ
+        dẫn tới đúng khối / trang làm được việc đó — không có nút ghi nào mới ở đây.
+      */}
+      <section className="grid gap-px overflow-hidden rounded-2xl bg-hairline shadow-[var(--shadow-card)] sm:grid-cols-2 xl:grid-cols-4" aria-label="Tóm tắt đơn">
+        <div className="min-w-0 bg-card px-4 py-3">
+          <p className="text-xs font-medium text-muted-foreground">Khách</p>
+          <p className="truncate text-[15px] font-semibold">{order.billFullName || "—"}</p>
+          <p className="truncate text-[13px] text-muted-foreground">
+            {order.billPhone || "Chưa có SĐT"}
+            {order.shipProvince ? ` · ${order.shipProvince}` : ""}
+            {risk ? <span className={cn("ml-1 font-semibold", risk.severity === "critical" ? "text-rose-600" : "text-amber-600")}>· Rủi ro</span> : null}
+          </p>
+        </div>
+        <div className="min-w-0 bg-card px-4 py-3">
+          <p className="text-xs font-medium text-muted-foreground">Tiền</p>
+          <p className="text-[15px] font-semibold">
+            <Money value={order.totalPriceAfterDiscount} />
+          </p>
+          <p className="truncate text-[13px] text-muted-foreground">
+            {order.moneyToCollect > 0 ? (
+              <>
+                Thu hộ <Money value={order.moneyToCollect} />
+                {s ? ` · ${COD_STATUS_LABEL[s.codStatus] ?? s.codStatus}` : ""}
+              </>
+            ) : paid > 0 ? (
+              <>
+                Đã trả trước <Money value={paid} />
+              </>
+            ) : (
+              "Không thu hộ"
+            )}
+          </p>
+        </div>
+        <div className="min-w-0 bg-card px-4 py-3">
+          <p className="text-xs font-medium text-muted-foreground">Hàng đang ở đâu</p>
+          {s ? (
+            <>
+              <div className="mt-0.5">
+                <ShipmentStageBadge stage={s.stage} label={s.vtpStatusName ?? undefined} />
+              </div>
+              <p className="mt-1 truncate text-[13px] text-muted-foreground">
+                {s.carrier}
+                {s.vtpOrderNumber || s.trackingCode ? ` · ${s.vtpOrderNumber ?? s.trackingCode}` : ""}
+                {attempts.length > 1 ? ` · lần gửi ${attempts.length}` : ""}
+              </p>
+            </>
+          ) : manual && delivery?.active ? (
+            <p className="text-[15px] font-semibold">Đã giao (phiếu ký nhận)</p>
+          ) : (
+            <p className="text-[15px] font-semibold text-muted-foreground">{order.stage === "CANCELLED" ? "Đơn đã huỷ" : "Chưa gửi đơn vị vận chuyển"}</p>
+          )}
+        </div>
+        <div className="min-w-0 bg-card px-4 py-3">
+          <p className="text-xs font-medium text-muted-foreground">Việc tiếp theo</p>
+          {(() => {
+            const next: { label: string; href?: string; tone?: "warn" | "ok" } = reviewEntries.length
+              ? { label: "Kiểm đơn rồi xác nhận / huỷ", href: "#can-kiem", tone: "warn" }
+              : order.stage === "CANCELLED" || order.stage === "DELETED"
+                ? { label: "Không còn việc — đơn đã huỷ" }
+                : canDecide && (order.stage === "NEW" || order.stage === "WAITING")
+                  ? { label: "Xác nhận đơn", href: "#can-kiem", tone: "warn" }
+                  : thieuThongTin
+                    ? { label: "Bổ sung SĐT / địa chỉ giao", href: manualEditable ? `/orders/${encodeURIComponent(order.id)}/edit` : "#khach-hang", tone: "warn" }
+                    : soat && soat.report.blockers.length
+                      ? { label: `Sửa ${soat.report.blockers.length} trường trước khi gửi`, href: "#soat-don", tone: "warn" }
+                      : !s && chuaGui && carrier && carrier.carriers.length && !carrier.blockedReason
+                        ? { label: "Tạo vận đơn", href: "#van-chuyen", tone: "warn" }
+                        : s && s.stage !== "DELIVERED" && s.stage !== "RETURNED" && s.stage !== "CANCELLED" && shellAllows(user, "/shipments")
+                          ? { label: "Theo dõi vận chuyển", href: `/shipments/${s.id}` }
+                          : // Chặng ĐVVC đã chốt ⇒ hết việc VẬN CHUYỂN; KHÔNG kết luận «giao thành công» ở đây (AGENTS §3.2 — kết quả đơn
+                            // chỉ do ORDER_OUTCOME quyết, xem khối Vận chuyển & COD bên dưới).
+                            { label: chuaGui ? "Chờ gửi hàng" : "Không còn việc vận chuyển" };
+            const cls = cn("text-[15px] font-semibold", next.tone === "warn" ? "text-amber-700 dark:text-amber-400" : next.tone === "ok" ? "text-success" : "");
+            return next.href ? (
+              <Link href={next.href} className={cn(cls, "inline-flex items-center gap-1 hover:underline")}>
+                {next.label} →
+              </Link>
+            ) : (
+              <p className={cls}>{next.label}</p>
+            );
+          })()}
+        </div>
+      </section>
+
+      {/*
         CẦN NGƯỜI KIỂM ĐỨNG ĐẦU TRANG: máy đã ghi nhận một điều nó không được tự quyết (khách báo huỷ · địa chỉ chưa ghép xã) — đơn
         CHƯA bị huỷ, CHƯA bị bỏ qua. Người đọc lý do + nguyên văn câu khách rồi bấm một trong hai nút. Đơn «Mới» không cờ thì chỉ
         có nút «Xác nhận đơn» nhanh ở đây; huỷ đơn thường vẫn ở nút «Huỷ đơn» trên tiêu đề.
       */}
       {reviewEntries.length ? (
-        <section className="space-y-2 rounded-xl border border-amber-300/70 bg-amber-50/60 px-4 py-3 dark:border-amber-900/60 dark:bg-amber-950/20" data-testid="order-review">
+        <section id="can-kiem" className="scroll-mt-24 space-y-2 rounded-xl border border-amber-300/70 bg-amber-50/60 px-4 py-3 dark:border-amber-900/60 dark:bg-amber-950/20" data-testid="order-review">
           <p className="text-[13px] font-semibold">Cần người kiểm trước khi đi tiếp</p>
           <OrderReviewEntries entries={reviewEntries} reconfirms={reconfirms} />
           {canDecide ? <OrderQuickDecision orderId={order.id} stage={order.stage} entries={reviewEntries} gaps={gaps} /> : <p className="text-[12px] text-muted-foreground">Cần quyền sửa đơn (orders:write) để xác nhận / huỷ.</p>}
         </section>
       ) : canDecide && (order.stage === "NEW" || order.stage === "WAITING") ? (
-        <section className="flex flex-wrap items-center justify-between gap-2 rounded-xl border px-4 py-2.5">
+        <section id="can-kiem" className="flex scroll-mt-24 flex-wrap items-center justify-between gap-2 rounded-xl border px-4 py-2.5">
           <p className="text-[12.5px] text-muted-foreground">Đơn chưa xác nhận — kiểm hàng, người nhận, địa chỉ rồi xác nhận.</p>
           <OrderQuickDecision orderId={order.id} stage={order.stage} entries={[]} gaps={gaps} />
         </section>
@@ -230,8 +316,9 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
       */}
       {soat && soat.report.findings.length > 0 ? (
         <section
+          id="soat-don"
           className={cn(
-            "rounded-xl border px-4 py-3",
+            "scroll-mt-24 rounded-xl border px-4 py-3",
             soat.report.blockers.length
               ? "border-rose-300/70 bg-rose-50/60 dark:border-rose-900/60 dark:bg-rose-950/20"
               : "border-amber-300/70 bg-amber-50/60 dark:border-amber-900/60 dark:bg-amber-950/20",
@@ -453,6 +540,7 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
           ) : null}
 
           <SectionCard
+            id="van-chuyen"
             title={attempts.length > 1 ? `Vận chuyển & COD · ${attempts.length} lần gửi` : "Vận chuyển & COD"}
             description={s ? `${s.carrier} · cập nhật ${formatDateTime(s.vtpStatusDate ?? s.updatedAt)}` : "Đơn chưa được đẩy sang đơn vị vận chuyển"}
             actions={s && shellAllows(user, "/shipments") ? <Link href={`/shipments/${s.id}`} className="text-xs font-semibold text-primary hover:underline">Chi tiết vận đơn</Link> : null}
@@ -579,7 +667,7 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
               )}
             </div>
           ) : null}
-          <SectionCard title="Khách hàng" actions={order.customer ? <Link href={`/customers/${order.customer.id}`} className="text-xs font-semibold text-primary hover:underline">Hồ sơ</Link> : null}>
+          <SectionCard id="khach-hang" title="Khách hàng" actions={order.customer ? <Link href={`/customers/${order.customer.id}`} className="text-xs font-semibold text-primary hover:underline">Hồ sơ</Link> : null}>
             <div className="space-y-3 text-sm">
               <p className="flex items-center gap-2 font-semibold"><User className="size-4 text-muted-foreground" />{order.billFullName || order.shipFullName || "—"}</p>
               <p className="flex items-center gap-2"><Phone className="size-4 text-muted-foreground" />{order.billPhone || "—"} <CopyButton value={order.billPhone} what="SĐT" /></p>
