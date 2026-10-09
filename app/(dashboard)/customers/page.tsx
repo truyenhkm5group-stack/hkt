@@ -3,8 +3,8 @@ import { shellAllows } from "@/lib/constants/saas-nav";
 import { Filter, HeartHandshake, Plus, RotateCcw, UserPlus, Users } from "lucide-react";
 import { CustomersTable } from "@/app/(dashboard)/customers/customers-table";
 import { DataTableToolbar } from "@/components/data-table/toolbar";
-import { MetricCard } from "@/components/metric-card";
 import { PageHeader } from "@/components/page-header";
+import { StatStrip } from "@/components/stat-tile";
 import { ModuleSyncButton } from "@/components/module-sync-button";
 import { Button } from "@/components/ui/button";
 import { formatNumber, formatPercent, formatVND, pctOrNull } from "@/lib/format";
@@ -71,11 +71,15 @@ export default async function CustomersPage({ searchParams }: { searchParams: Pr
         rằng con số thật nằm ở trang Giữ chân khách — tức là một KPI biết mình sai mà vẫn đứng đó.
         Một chỉ số, một định nghĩa (đơn giao thành công), một chỗ: trang Giữ chân khách.
       */}
-      <section className="grid gap-4 sm:grid-cols-3">
-        <MetricCard label="Tổng khách hàng" value={formatNumber(summary.total)} note={`${formatNumber(summary.withOrders)} khách có đơn · ${formatNumber(summary.orders)} đơn`} icon={Users} tone="blue" />
-        <MetricCard label="Khách mới" value={formatNumber(summary.newInPeriod)} note={`Tạo trên ${copy.name("ORDER_SOURCE")} ${summary.newLabel}`} icon={UserPlus} tone="green" />
-        <MetricCard label="Tỷ lệ hoàn" value={formatPercent(returnRate, 1)} note={returnRate === null ? "Chưa có đơn nào đã kết thúc trong bộ lọc — chưa tính được" : `${formatNumber(summary.returned)} đơn hoàn / ${formatNumber(summary.finished)} đơn đã kết thúc`} icon={RotateCcw} tone="amber" />
-      </section>
+      {/* Ba con số gọn một dải (điện thoại 2 cột) thay cho ba thẻ lớn — danh sách khách là thứ người dùng đến đây để tìm. */}
+      <StatStrip
+        columns={3}
+        items={[
+          { label: "Tổng khách hàng", value: formatNumber(summary.total), note: `${formatNumber(summary.withOrders)} khách có đơn · ${formatNumber(summary.orders)} đơn`, icon: Users },
+          { label: "Khách mới", value: formatNumber(summary.newInPeriod), note: `Tạo trên ${copy.name("ORDER_SOURCE")} ${summary.newLabel}`, icon: UserPlus, tone: "green" },
+          { label: "Tỷ lệ hoàn", value: formatPercent(returnRate, 1), note: returnRate === null ? "Chưa có đơn nào đã kết thúc trong bộ lọc — chưa tính được" : `${formatNumber(summary.returned)} đơn hoàn / ${formatNumber(summary.finished)} đơn đã kết thúc`, icon: RotateCcw },
+        ]}
+      />
 
       <DataTableToolbar
         searchPlaceholder="Tên khách, số điện thoại…"
