@@ -1,0 +1,8 @@
+{
+  "pr": 756,
+  "sha": "42b3ed2a809d5886746d223fca24396efedec43e",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-09T23:05:44.492Z",
+  "note": "Đọc diff: hàm thuần settingsStatus (null ⇒ Chưa rõ), dùng lại customerFacing() để che nguồn AI, engine/golden không đổi, không migration/quyền; bảng chân lý 20 ca + đột biến 2/2"
+}
