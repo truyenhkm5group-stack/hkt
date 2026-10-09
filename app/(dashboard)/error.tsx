@@ -28,7 +28,7 @@ export default function DashboardError({ error, reset }: { error: Error & { dige
       </span>
       <div className="max-w-md space-y-1">
         <h2 className="text-lg font-bold">Có lỗi khi tải trang</h2>
-        <p className="text-sm text-muted-foreground">Trang này chưa hiện được. Dữ liệu của bạn vẫn an toàn — chưa có thao tác nào bị mất.</p>
+        <p className="text-sm text-muted-foreground">Trang này chưa hiện được. Dữ liệu đã lưu trước đó vẫn an toàn.</p>
         <p className="text-sm text-muted-foreground">Bấm «Thử lại»; nếu vẫn lỗi, về trang chính rồi mở lại sau một phút. Lỗi kéo dài thì nhắn hỗ trợ kèm mã tham chiếu bên dưới.</p>
         {error.digest ? (
           <p className="pt-1 text-xs text-muted-foreground">

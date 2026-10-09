@@ -109,3 +109,20 @@ một con số. Nó không phải màu trang trí.
 Màu mang nghĩa, không mang cảm xúc: `success` = đã xong / tiền đã về, `warning` = cần người xử lý,
 `destructive` = hỏng hoặc mất tiền, `muted` = chưa có dữ liệu. Một trạng thái **chưa biết** không
 bao giờ được tô như một trạng thái xấu.
+
+## 10. Cỡ chữ — ba bậc chữ nhỏ, không bậc thứ tư
+
+Chữ nhỏ có đúng ba bậc cho chữ **người phải đọc**: **12 px** (`text-xs`) cho nhãn phụ, mốc giờ, chú
+thích; **13 px** (`text-[13px]`) cho dòng phụ trong thẻ, ô bảng dày; **14 px** (`text-sm`) cho thân
+chữ. `11px` / `11.5px` chỉ còn ở bảng ERP dày đặc đang có, và sửa dần theo từng trang — không đổi
+hàng loạt, vì nới chữ là nới cột và bảng phải vừa một màn hình (mục 5).
+
+Dưới 11 px (`text-[9px]`, `text-[10px]`, `text-[10.5px]`…) **không phải chữ để đọc**: chỉ được dùng
+cho một ký tự nằm trong huy hiệu tròn ≤ 16 px (chấm kênh trên ảnh đại diện) và phải khai miễn trừ
+kèm lý do.
+
+Vỏ Chốt Đơn là sản phẩm khách mở trên **điện thoại**: các bề mặt CHỈ thuộc vỏ (Tổng quan, Hội thoại,
+AI Sales, Kênh kết nối, Gói dịch vụ, Cài đặt, Hướng dẫn, thẻ «Vào việc ngay», ô chat) **không có chữ
+dưới 11 px** — `tests/shell-typography.test.ts` quét mã nguồn. Trang dùng chung với ERP (Sản phẩm,
+Đơn hàng, Khách hàng, Phiếu nhập) chưa nằm trong lưới chặn: chúng mang bảng dày của ERP và cần một
+quyết định mật độ riêng cho vỏ, không phải một lượt thay cỡ chữ.

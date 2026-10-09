@@ -55,7 +55,7 @@ function Stat({ label, value, tone }: { label: string; value: number; tone: stri
   return (
     <div className="rounded border border-foreground/10 px-1 py-1">
       <p className={cn("text-[15px] font-bold leading-tight", tone)}>{value}</p>
-      <p className="text-[10.5px] leading-tight text-foreground/60">{label}</p>
+      <p className="text-xs leading-tight text-foreground/60">{label}</p>
     </div>
   );
 }
