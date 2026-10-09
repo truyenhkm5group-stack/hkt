@@ -78,14 +78,14 @@ nhập chỉ trong bộ nhớ tiến trình; lỗi ghi đơn bị ghi NHẦM th�
 
 | # | Tín hiệu | Trạng thái | Hôm nay ghi ở đâu / còn hở |
 |---|---|---|---|
-| O1 | Khách đăng nhập hỏng | 🟡 CODE | #692 (0237 `platform_auth_failures`, lý do đăng nhập hỏng tách khỏi BAD_CREDENTIALS công khai) đã lên production c7183395 — chưa có lượt kiểm trên production |
-| O2 | Facebook mất kết nối | 🟡 CODE | #692 bảng tín hiệu trên `/platform/org` đã lên production c7183395 — chưa kiểm trên production |
-| O3 | Webhook hỏng | 🟡 CODE | #692 đã lên production c7183395 — chưa kiểm trên production |
-| O4 | AI im lặng | 🟡 CODE | #692 (`error_class`) + #683 đã lên production c7183395 — chưa kiểm trên production |
-| O5 | Gửi tin (Send API) hỏng | 🟡 CODE | #692 đã lên production c7183395 — chưa kiểm trên production |
-| O6 | Đơn không hợp lệ | 🟡 CODE | #692 đã lên production c7183395 — chưa kiểm trên production |
-| O7 | Ghi đơn (OMS) hỏng | 🟡 CODE | #692 (`ORDER_POSTWRITE_ERROR` thôi quy kết thành AI lỗi; cảnh báo bàn giao ghi đơn treo 15 phút) đã lên production c7183395 — chưa kiểm trên production |
-| O8 | Hết hạn mức | 🟡 CODE | `/platform/org/<mã>` hiện «Bị chặn» + gói đã dùng / trần; chưa nói giới hạn nào chạm, chưa cờ hết số dư |
+| O1 | Khách đăng nhập hỏng | ✅ PROD | #692 + #711. Vết trọn vòng: `saas-acceptance --apply` cố ý tạo lỗi trên workspace thử ⇒ ops `ops-signals-check` trên production PASS 9 tổ chức × 8 tín hiệu, 0 ô tính hỏng (run 37853956678 · 37860619173 · 37867472656) báo `cdt-nghiem-thu` O1 = WARNING, luồng RESET_LINK / RESET_LINK_USED (run 37860619173) và luồng LOGIN / BAD_PASSWORD (nghiệm thu 37866720324 ⇒ run 37867472656) |
+| O2 | Facebook mất kết nối | 🟡 CODE | ops `ops-signals-check` trên production PASS 9 tổ chức × 8 tín hiệu, 0 ô tính hỏng (run 37853956678 · 37860619173 · 37867472656): 8/9 tổ chức NA (chưa nối Facebook trực tiếp). Tính được trên production; chưa có sự cố dựng sẵn để chứng minh tín hiệu PHÁT HIỆN đúng |
+| O3 | Webhook hỏng | 🟡 CODE | ops `ops-signals-check` trên production PASS 9 tổ chức × 8 tín hiệu, 0 ô tính hỏng (run 37853956678 · 37860619173 · 37867472656): 8/9 UNKNOWN (BASELINE_THIN — nền 14 ngày chưa đủ). Tính được trên production; chưa có sự cố dựng sẵn để chứng minh tín hiệu PHÁT HIỆN đúng |
+| O4 | AI im lặng | 🟡 CODE | ops `ops-signals-check` trên production PASS 9 tổ chức × 8 tín hiệu, 0 ô tính hỏng (run 37853956678 · 37860619173 · 37867472656): 6 OK · 2 WARNING · 1 UNKNOWN — cảnh báo là số thật nhưng CHƯA kiểm đúng / báo nhầm. Tính được trên production; chưa có sự cố dựng sẵn để chứng minh tín hiệu PHÁT HIỆN đúng |
+| O5 | Gửi tin (Send API) hỏng | 🟡 CODE | ops `ops-signals-check` trên production PASS 9 tổ chức × 8 tín hiệu, 0 ô tính hỏng (run 37853956678 · 37860619173 · 37867472656): 8 OK · 1 WARNING — CHƯA kiểm đúng / báo nhầm. Tính được trên production; chưa có sự cố dựng sẵn để chứng minh tín hiệu PHÁT HIỆN đúng |
+| O6 | Đơn không hợp lệ | 🟡 CODE | ops `ops-signals-check` trên production PASS 9 tổ chức × 8 tín hiệu, 0 ô tính hỏng (run 37853956678 · 37860619173 · 37867472656): 9 OK. Tính được trên production; chưa có sự cố dựng sẵn để chứng minh tín hiệu PHÁT HIỆN đúng |
+| O7 | Ghi đơn (OMS) hỏng | 🟡 CODE | ops `ops-signals-check` trên production PASS 9 tổ chức × 8 tín hiệu, 0 ô tính hỏng (run 37853956678 · 37860619173 · 37867472656): 9 OK. Tính được trên production; chưa có sự cố dựng sẵn để chứng minh tín hiệu PHÁT HIỆN đúng |
+| O8 | Hết hạn mức | 🟡 CODE | ops `ops-signals-check` trên production PASS 9 tổ chức × 8 tín hiệu, 0 ô tính hỏng (run 37853956678 · 37860619173 · 37867472656): 9 OK. Tính được trên production; chưa có sự cố dựng sẵn để chứng minh tín hiệu PHÁT HIỆN đúng |
 
 ## 5. Kiểm được khi Meta duyệt (smoke tài khoản NGOÀI)
 
@@ -107,7 +107,7 @@ Không dùng dữ liệu khách thật theo cách phá huỷ.
 | Việc | Loại |
 |---|---|
 | Nghiệm thu E2E production D + E (`saas-acceptance --apply --e2e`): chat web → AI → đơn CONFIRMED trong OMS · miền chat ngoài | LAUNCH BLOCKER (Khách ≥ 90 % cần C8–C17 lên ✅) — chờ chủ shop chuẩn bị UI một lần |
-| Kiểm 8 tín hiệu quan sát trên production (O1–O8) | LAUNCH BLOCKER (§11) |
+| O2–O8: dựng sự cố có kiểm soát trên workspace thử để chứng minh PHÁT HIỆN (như O1) — O1 đã ✅ | LAUNCH BLOCKER (§11) |
 | Round 2 Production Acceptance + Commercial Sweep (phiên Fable: #705 màn lỗi · #706 trang chủ · R2 · G · F) | LAUNCH SUPPORT |
 | Chuyển giá legacy → V1 (#676, đã deploy — công cụ, chưa chuyển ai) | POST-LAUNCH |
 | HSLC trả trước + khoá AI nền tảng (đã chuyển 09/10) · danh mục / giá sỉ (#677, #701) | CUSTOMER-SPECIFIC |
@@ -131,3 +131,4 @@ Không dùng dữ liệu khách thật theo cách phá huỷ.
 | 08/10/2026 | Mở cổng. Admin 3/10 (30 %) · Khách 8/19 (42 %) · Bảo mật 2,5/4 · Tổng 13,5/33 = 41 %. Đã kiểm production thật: 1/33. P0 còn: C2 đăng nhập email. NOT READY |
 | 08/10/2026 tối | #681 (P0 đăng nhập email) + #680 (Finish Line) gộp, deploy 37781964748 thành công (production aa4b69ce); `identity-reconcile` ghi bù 12 chỉ mục, THIẾU 0. Round 2 giao phiên Fable code-erp-a4. Thêm mục 4 QUAN SÁT (8 tín hiệu, §11) — mẫu số 33 → 41. A1 + A4 LÙI về 🔧 vì review #682. Admin 2,5/10 (25 %) · Khách 9/19 (47 %; 9/18 = 50 % bỏ Meta) · Bảo mật 2,5/4 · Quan sát 0,5/8 · Tổng 14,5/41 = 35 %. Đã kiểm production thật: 1/41. P0 còn: A1 / A4 tạo khách đúng mặc định (#682). NOT READY |
 | 09/10/2026 sáng | Deploy 37829126099 (6883bfbf: #682 #683 #690 #694 #696 #697 #698 #699 #700) + 37838226087 (c7183395: #692 #702 #703 #704), hậu kiểm ĐẠT (health · 238 migration · smoke). Nghiệm thu production `saas-acceptance --apply` PASS 4/4 (run 37838073371): A1–A5, C1–C3 lên ✅. A6–A8, A10 + O1–O7 lên 🟡 (đã deploy, chưa đi qua trên production). Admin 7,5/10 (75 %) · Khách 10,5/19 (55 %; 10,5/18 = 58 % bỏ Meta) · Bảo mật 2,5/4 · Quan sát 4/8 · Tổng 24,5/41 = 60 %. Đã kiểm production thật: 9/41. P0 trong cổng: 0 mở; đường tới ĐẠT = E2E D + E (C8–C17) và kiểm O1–O8 trên production. NOT READY |
+| 09/10/2026 trưa | Production `d23c0deb` (#705–#714) rồi lô #715 #716 (sự thật đơn trên trang khách · giá vốn chưa biết in «—»), #717 (Sửa đơn VTP không gửi sai COD — chủ shop gộp vì chạm tệp ORDER_OUTCOME). `ops-signals-check` (#710) chạy trên production: PASS 9 tổ chức × 8 tín hiệu. O1 lên ✅ bằng sự cố dựng sẵn ở hai luồng (RESET_LINK + LOGIN, #711); O2–O8 giữ 🟡 (tính được, chưa chứng minh phát hiện). Admin 7,5/10 · Khách 10,5/19 · Bảo mật 2,5/4 · Quan sát 4,5/8 · Tổng 25/41 = 61 %. Đã kiểm production thật: 10/41. Đường tới ĐẠT: E2E D + E (chờ chủ shop chuẩn bị UI) và chứng minh phát hiện O2–O8. NOT READY |
