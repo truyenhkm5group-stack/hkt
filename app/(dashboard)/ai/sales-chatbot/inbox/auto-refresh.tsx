@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { startTransition, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Bell, BellOff } from "lucide-react";
 
@@ -41,7 +41,7 @@ function chime() {
  * KHÔNG ĐỂ SÓT TIN: hộp thư tự làm mới mỗi 5 giây khi tab đang mở (30 giây khi tab ẩn); tiêu đề tab mang số khách đang CHỜ TRẢ
  * LỜI (thấy cả khi đang ở tab khác); số «chưa đọc» tăng ⇒ một tiếng «ting» (tắt / bật bằng nút chuông, nhớ theo trình duyệt).
  */
-export function InboxAutoRefresh({ waiting, unread, everyMs = 5_000 }: { waiting: number; unread: number; everyMs?: number }) {
+export function InboxAutoRefresh({ waiting, unread, everyMs = 5_000, compact = false }: { waiting: number; unread: number; everyMs?: number; compact?: boolean }) {
   const router = useRouter();
   const [sound, setSound] = useState(true);
   const prevUnread = useRef<number | null>(null);
@@ -52,10 +52,19 @@ export function InboxAutoRefresh({ waiting, unread, everyMs = 5_000 }: { waiting
 
   useEffect(() => {
     // Tab đang mở: mỗi `everyMs`. Tab ẩn: vẫn hỏi, thưa hơn (gấp 6) — để tiêu đề tab và âm báo còn đúng khi nhân viên đang ở màn khác.
+    // Không chồng lượt: lượt làm mới trước chưa xong (máy chủ chậm) thì bỏ nhịp này — chồng lượt là nguồn nháy danh sách.
     let ticks = 0;
+    let busy = false;
     const id = window.setInterval(() => {
       ticks += 1;
-      if (document.visibilityState === "visible" || ticks % 6 === 0) router.refresh();
+      if (busy || !(document.visibilityState === "visible" || ticks % 6 === 0)) return;
+      busy = true;
+      startTransition(() => {
+        router.refresh();
+      });
+      window.setTimeout(() => {
+        busy = false;
+      }, Math.min(everyMs, 4_000));
     }, everyMs);
     return () => window.clearInterval(id);
   }, [router, everyMs]);
@@ -69,8 +78,10 @@ export function InboxAutoRefresh({ waiting, unread, everyMs = 5_000 }: { waiting
   return (
     <button
       type="button"
-      className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[12px] text-muted-foreground hover:bg-muted"
+      className={compact ? "inline-flex size-8 shrink-0 items-center justify-center rounded-md border border-foreground/15 bg-background text-muted-foreground hover:bg-muted" : "inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[12px] text-muted-foreground hover:bg-muted"}
       title={sound ? "Đang bật âm báo tin mới — bấm để tắt" : "Đang tắt âm báo — bấm để bật"}
+      aria-label={sound ? "Âm báo tin mới đang bật — bấm để tắt" : "Âm báo tin mới đang tắt — bấm để bật"}
+      aria-pressed={sound}
       onClick={() => {
         const next = !sound;
         setSound(next);
@@ -82,7 +93,8 @@ export function InboxAutoRefresh({ waiting, unread, everyMs = 5_000 }: { waiting
         if (next) chime();
       }}
     >
-      {sound ? <Bell className="size-3.5" /> : <BellOff className="size-3.5" />} {sound ? "Âm báo bật" : "Âm báo tắt"}
+      {sound ? <Bell className="size-3.5" /> : <BellOff className="size-3.5" />}
+      {compact ? null : sound ? " Âm báo bật" : " Âm báo tắt"}
     </button>
   );
 }

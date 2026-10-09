@@ -488,6 +488,7 @@ import { testSalesOperatingMode } from "./sales-operating-mode.test";
 import { testSalesInbox } from "./sales-inbox.test";
 import { testInboxAdvanced } from "./inbox-advanced.test";
 import { testInboxComposer } from "./inbox-composer.test";
+import { testInboxV2A } from "./inbox-v2-a.test";
 import { testSalesInboxHistory } from "./sales-inbox-history.test";
 import { testE2eAiSalesPlatform } from "./e2e-ai-sales-platform.test";
 import { testSalesExperimentReport } from "./sales-experiment-report.test";
@@ -521,6 +522,7 @@ import { testSalesPacks } from "./sales-packs.test";
 import { testSalesAgentGolden } from "./sales-agent-golden/golden.test";
 import { testOrderGolden } from "./order-golden/order-golden.test";
 import { testOrderReview } from "./order-review.test";
+import { testInboxOrderPanel } from "./inbox-v2-b.test";
 import { testGoLive } from "./go-live.test";
 import { testOnboardingV2 } from "./onboarding-v2.test";
 import { testSalesVision } from "./sales-vision.test";
@@ -2855,6 +2857,8 @@ async function main() {
   await testInboxAdvanced();
   // Ô soạn hộp thư: chèn câu mẫu / dòng sản phẩm (giá = giá bot, tồn chỉ khi đọc được), quyền ≡ «Gửi», cô lập — `o-soan-a` / `o-soan-b`.
   await testInboxComposer();
+  // INBOX-V2-A: bộ lọc gọn (14 tham số cũ còn đủ) · chưa đọc trước ở MÁY CHỦ (phân trang ổn định) · hàng đang mở đứng yên · ảnh không link Facebook giả — tổ chức `hop-thu-v2a`.
+  await testInboxV2A();
   // Nhập đủ lịch sử hội thoại vào hộp thư (0221): tổ chức THẬT `hop-thu-lich-su`, Pancake giả, tự cấp, tự dọn.
   await testSalesInboxHistory();
   // E2E trọn vòng: tin khách → AI → đơn → giao → Hiệu quả → mốc kích hoạt → sổ dùng → Owner Cockpit (tổ chức `e2e-shop`).
@@ -2898,6 +2902,9 @@ async function main() {
   // Đơn cần người kiểm (chủ shop 08/10/2026): khách huỷ ⇒ ghi chú + cờ, xã chưa ghép ⇒ cờ, nút nhanh Xác nhận / Huỷ, lời xác nhận,
   // SĐT chuẩn hoá — tổ chức THẬT `or-rv` (không Pancake; tự cấp, tự dọn).
   await testOrderReview();
+  // Hộp thư V2-B: «Đơn đang chốt» đầu cột phải — đọc đơn bot ghi (một câu SQL), kiểm từng ô bằng validator của lõi, nút xác nhận
+  // = `confirmOrderReviewCore` — tổ chức THẬT `or-ib` (tự cấp, tự dọn).
+  await testInboxOrderPanel();
   await testGoLive();
   // Danh sách «giá trị đầu tiên» chín bước của vỏ Chốt Đơn (chủ shop 10/10/2026) — tổ chức THẬT `fv-shop`, Pancake GIẢ.
   await testOnboardingV2();

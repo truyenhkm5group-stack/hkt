@@ -307,7 +307,8 @@ function kiemTrang() {
   const inbox = readFileSync(pageFileOf(SALES_AGENT_INBOX_HREF), "utf8");
   assert.match(inbox, /shell = isSalesAgentUser\(user\)/);
   assert.match(inbox, /<ShellViewportFit/, "trong vỏ, khung hộp thư đo chiều cao thật");
-  assert.match(inbox, /h-\[calc\(100dvh-13\.5rem\)\] min-h-\[560px\]/, "ngoài vỏ: đúng chiều cao cũ");
+  // INBOX-V2-A: đầu trang hộp thư chỉ còn cho trình đọc màn hình (tiêu đề + mô tả ~190 px không còn) và không in dòng vị trí ⇒ ngoài vỏ khung chỉ chừa 8rem (thanh menu ERP + lề).
+  assert.match(inbox, /h-\[calc\(100dvh-8rem\)\] min-h-\[560px\]/, "ngoài vỏ: khung cao theo đầu trang gọn");
   const fit = readFileSync(path.join(goc, "components", "shell-viewport-fit.tsx"), "utf8");
   assert.match(fit, /sales-agent-bottom-nav/, "khung đo thanh dưới thật của vỏ");
   assert.match(fit, /visualViewport/, "theo dõi bàn phím ảo / đổi cỡ màn");

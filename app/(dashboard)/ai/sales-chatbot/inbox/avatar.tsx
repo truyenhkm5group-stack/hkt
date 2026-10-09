@@ -21,6 +21,8 @@ function initials(name: string): string {
 /**
  * Ảnh đại diện khách + chấm kênh — nhận ra khách và kênh trong một cái liếc. Có ảnh thật (Meta `profile_pic` / Pancake, đã lọc ở
  * máy chủ — `safeAvatarUrl`) ⇒ hiện ảnh; ảnh hỏng / hết hạn (URL CDN của Meta có hạn) ⇒ tự lùi về chữ cái (màu cố định theo tên).
+ * Thành phần này KHÔNG tự làm link: bấm ảnh đi đâu do nơi dùng quyết qua `avatarHrefOf` (inbox-shared.ts) — hôm nay chỉ mở hồ sơ
+ * khách đã nối; không nguồn nào cho link trang cá nhân Facebook thật, và không bao giờ dựng link từ PSID.
  */
 export function ChannelAvatar({ name, channel, src = null, size = "md" }: { name: string; channel: string; src?: string | null; size?: "md" | "lg" }) {
   const [broken, setBroken] = useState(false);
