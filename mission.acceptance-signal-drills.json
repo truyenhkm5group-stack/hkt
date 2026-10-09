@@ -3,7 +3,7 @@
   "mission_id": "acceptance-signal-drills",
   "title": "Nghiệm thu dựng sự cố có kiểm soát cho O2–O8 trên workspace thử (chứng minh tín hiệu PHÁT HIỆN đúng)",
   "business_goal": "",
-  "status": "RUNNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -25,7 +25,18 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-09T02:18:31.481Z",
-  "updated_at": "2026-10-09T02:18:31.481Z",
-  "last_heartbeat": "2026-10-09T02:18:31.481Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-09T03:22:47.478Z",
+  "last_heartbeat": "2026-10-09T03:22:47.478Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "feat/acceptance-signal-drills",
+    "sha": "86955d0568cc11e1c21e0a99dec593685c313217",
+    "at": "2026-10-09T03:22:47.478Z",
+    "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+    "title": "Nghiệm thu dựng sự cố có kiểm soát cho O2–O8 trên workspace thử (chứng minh tín hiệu PHÁT HIỆN đúng)",
+    "summary": "--apply --drills: O1 + O6 diễn tập qua đường mã thật; O2–O5/O7/O8 CHƯA ĐO ĐƯỢC có lý do",
+    "tests": [
+      "npm test TẤT CẢ KIỂM THỬ ĐẠT rc=0; typecheck + lint sạch"
+    ]
+  }
 }
