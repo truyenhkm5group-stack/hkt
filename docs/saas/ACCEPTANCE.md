@@ -202,11 +202,12 @@ HTTP là GET tới `127.0.0.1:3000` với Host chỉ định, như bước C). L
 | S2 bí mật không lộ | Mọi trang vỏ (danh sách bước C) với phiên thử + `/login` của vỏ và ERP nhà + `/` · `/pricing` của hai mặt tiền + `/chat` công khai của workspace thử: HTML + gói RSC quét bằng mẫu khoá (Google · OpenAI/Anthropic · token Facebook · chuỗi Postgres · khoá PEM · gán biến bí mật · JWT) và GIÁ TRỊ THẬT của mọi biến môi trường bí mật. | 0 lần trúng. Chỉ in tên mẫu + số, không bao giờ chỗ khớp. Mẫu «chuỗi ngẫu nhiên dài» CỐ Ý không dùng — băm chunk của Next khớp mọi trang. |
 | S3 token mã hoá | Mọi ô bí mật kết nối (`org_connections` + token từng page `org_channel_pages`) của mọi tổ chức phải đúng phong bì AES-GCM của `lib/connectors/secrets.ts` (phiên bản 1 · ≥ 30 byte · mã khoá 16 hex) — phán quyết `classifyEnvelope`, không giải mã. | 0 ô bản rõ / sai hình. |
 
-**S3 hiện CHƯA ĐO ĐƯỢC trên production**: kho mã khoá việc chạm cột bản mã vào ĐÚNG `lib/connectors/service.ts`
-(`tests/connectors.test.ts`), và hàm đọc sẵn có (`rekeyOrgConnections` chạy thử) mở CSDL tổ chức qua `getDb()` — lần mở đầu chạy
-migrate + dọn bảng `platform_*`, tức là GHI, nên không chạy được trên kết nối chỉ đọc. Lõi đã nhận đường đọc qua `readSecretCells`;
-cần một hàm CHỈ ĐỌC trong `lib/connectors/service.ts` nhận handle `getDbForInspection` (cùng mẫu `aiConnectionAudit(db, orgCode)`) —
-chờ duyệt. Ngoài phạm vi S3 (ghi rõ để không ai tưởng đã đo): `wholesale_campaign_cells.page_token` là con trỏ phân trang của Google
+**Đường đọc S3**: kho mã khoá việc chạm cột bản mã vào ĐÚNG `lib/connectors/service.ts` (`tests/connectors.test.ts`), và hàm
+sẵn có `rekeyOrgConnections` mở CSDL tổ chức qua `getDb()` — lần mở đầu chạy migrate + dọn bảng `platform_*`, tức là GHI, nên chết
+trên kết nối chỉ đọc. Nên S3 đi qua `secretsAtRestCells(db, orgCode)` (Integration Lead duyệt 09/10/2026) trong `service.ts`: nhận
+handle `getDbForInspection` (không migrate, không dọn), chỉ SELECT, phán phong bì NGAY BÊN TRONG và chỉ trả `{loại ô, phán quyết}` —
+không byte nào, không giải mã. Dòng mang mã tổ chức khác (bản sao chép nhầm CSDL) cũng là hỏng. Tổ chức ĐANG HOẠT ĐỘNG không đọc
+được ⇒ S3 hỏng (chưa biết không phải 0); tổ chức không hoạt động không đọc được ⇒ đếm riêng. Ngoài phạm vi S3 (ghi rõ để không ai tưởng đã đo): `wholesale_campaign_cells.page_token` là con trỏ phân trang của Google
 Places (không phải bí mật); `integration_tokens` giữ token của tổ chức NHÀ (Viettel Post…) — X7, credential nhà chưa chuyển vào
 `org_connections`.
 

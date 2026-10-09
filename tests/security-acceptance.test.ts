@@ -11,6 +11,8 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { eq } from "drizzle-orm";
 import { getDb, schema } from "@/db";
+import { secretsAtRestCells } from "@/lib/connectors/service";
+import { getHomeOrganization } from "@/lib/platform/organizations";
 import { sealSecrets, secretsKeyState } from "@/lib/connectors/secrets";
 import {
   classifyEnvelope,
@@ -23,7 +25,7 @@ import {
   type SecurityCheck,
 } from "@/lib/constants/security-acceptance";
 import type { HttpReply } from "@/lib/saas/acceptance";
-import { homeProbes, runProbe, summarizeS1, summarizeS3, type SecretCell } from "@/lib/saas/security-acceptance";
+import { homeProbes, inspectSecretCells, runProbe, summarizeS1, summarizeS3, type SecretCell } from "@/lib/saas/security-acceptance";
 import { homeHostFrom, runSecurityCli } from "@/scripts/security-acceptance";
 
 const PLANT_GOOGLE = `AIza${"Sy0123456789abcdefghijABCDEFGHIJ_-xy".slice(0, 35)}`;
@@ -69,11 +71,13 @@ export function testSecurityAcceptancePure() {
   assert.equal(classifyEnvelope(null, null), "EMPTY");
   assert.equal(classifyEnvelope(Uint8Array.from([7, 0, 1, 2, 3]), null), "MALFORMED");
   const s3 = summarizeS3([
-    { orgCode: "sa-org", category: "ket_noi", bytes: sealed.ciphertext, keyId: sealed.keyId },
-    { orgCode: "sa-org-2", category: "token_page", bytes: Buffer.from(PLANT_FB), keyId: null },
+    { orgCode: "sa-org", category: "ket_noi", verdict: classifyEnvelope(sealed.ciphertext, sealed.keyId) },
+    { orgCode: "sa-org-2", category: "token_page", verdict: classifyEnvelope(Buffer.from(PLANT_FB), null) },
   ]);
   assert.equal(s3.status, "FAIL");
   assert.deepEqual(s3.counts, { "ket_noi:ENCRYPTED": 1, "token_page:PLAINTEXT": 1 });
+  assert.equal(summarizeS3([{ orgCode: "sa-org", category: "ket_noi", verdict: "ENCRYPTED" }, { orgCode: "sa-org", category: "ket_noi", verdict: "EMPTY" }]).status, "PASS", "phong bì + ô trống ⇒ ĐẠT");
+  assert.equal(summarizeS3([{ orgCode: "sa-org", category: "ket_noi", verdict: "FOREIGN_ORG" }]).status, "FAIL", "dòng mang mã tổ chức khác ⇒ hỏng");
 
   // ── Dòng công khai: không dữ liệu ──
   const checks: SecurityCheck[] = [
@@ -99,6 +103,14 @@ export function testSecurityAcceptanceSource() {
     for (const w of ["openSecrets", "secretsEnc", "secrets_enc", "orgConnections", "audit(", "setSetting", "recordAuthFailure", "runJob", "requestProvisioning", "method:", "fetch("]) assert.ok(!code.includes(w), `${f}: không ${w}`);
     assert.ok(!/["'](?:POST|PUT|PATCH|DELETE)["']/.test(code), `${f}: chỉ GET`);
   }
+  // S3: hàm đọc ô bản mã sống ở lib/connectors/service.ts (nơi DUY NHẤT chạm cột ấy), chỉ SELECT, không giải mã, chỉ trả loại ô + phán quyết.
+  const svc = strip("lib/connectors/service.ts");
+  const fn = /export async function secretsAtRestCells\([\s\S]*?\n\}/.exec(svc)?.[0] ?? "";
+  assert.ok(fn.length > 100, "có hàm secretsAtRestCells");
+  assert.ok(!/openSecrets|sealSecrets|\.(insert|update|delete|execute)\s*\(|getDb\(/.test(fn), "secretsAtRestCells: không giải mã, không ghi, không mở CSDL theo ngữ cảnh (nhận handle chỉ đọc)");
+  assert.match(fn, /return \[\.\.\.conns\.map\(\(r\) => \(\{ category: "org_connections" as const, verdict: verdictOf\(r\) \}\)\)/, "chỉ trả loại ô + phán quyết");
+  assert.match(strip("lib/saas/security-acceptance.ts"), /getDbForInspection\(org\)/, "S3 mở CSDL tổ chức bằng getDbForInspection (không migrate)");
+  assert.match(strip("scripts/security-acceptance.ts"), /readSecretCells: inspectSecretCells/, "script nối đường đọc S3 thật");
   assert.match(readFileSync("scripts/security-acceptance.ts", "utf8"), /if \(CHAY_THANG\) process\.env\.ERP_READ_ONLY = "1"/);
   assert.match(strip("scripts/security-acceptance.ts"), /platformReadOnlyConfirmed\)\(\)/);
   const ops = readFileSync(".github/workflows/ops-vps.yml", "utf8");
@@ -133,16 +145,16 @@ export async function testSecurityAcceptanceDb() {
     assert.equal(summarizeS1([blocked]).status, "PASS");
 
     // CLI trọn vòng với ứng dụng GIẢ: trang công khai cài bí mật ⇒ S2 FAIL; ô bí mật bản rõ ⇒ S3 FAIL; công khai không lộ gì.
-    const plainCells: SecretCell[] = [{ orgCode: "sa-org-that", category: "token_page", bytes: Buffer.from(JSON.stringify({ pageAccessToken: PLANT_FB })), keyId: null }];
+    const plainCells: SecretCell[] = [{ orgCode: "sa-org-that", category: "token_page", verdict: "PLAINTEXT" }];
     const out: string[] = [];
-    const leaky = await runSecurityCli([], { appGet: async (p) => (p === "/pricing" ? reply(200, `<p>${PLANT_GOOGLE}</p>`) : reply(200, "<p>sạch</p>")), env: {}, baseDomain: null, homeHost: "erp.test", readSecretCells: async () => plainCells }, { readOnlyGuard: async () => true, emit: (l) => out.push(l) });
+    const leaky = await runSecurityCli([], { appGet: async (p) => (p === "/pricing" ? reply(200, `<p>${PLANT_GOOGLE}</p>`) : reply(200, "<p>sạch</p>")), env: {}, baseDomain: null, homeHost: "erp.test", readSecretCells: async (o) => (o.isHome ? plainCells : []) }, { readOnlyGuard: async () => true, emit: (l) => out.push(l) });
     assert.equal(leaky.code, 1);
     const S2 = leaky.checks.find((c) => c.key === "S2")!;
     const S3 = leaky.checks.find((c) => c.key === "S3")!;
     assert.ok(S2.status === "FAIL" && S2.counts.GOOGLE_API_KEY >= 1, JSON.stringify(S2.counts));
     assert.equal(S3.status, "FAIL");
     const pub = out.filter((l) => l.startsWith("[ops:tom-tat] ")).join("\n");
-    assert.match(pub, /S3 token mã hoá khi nằm yên: FAIL · token_page:PLAINTEXT 1/);
+    assert.match(pub, /S3 token mã hoá khi nằm yên: FAIL · to_chuc \d+ · o 1 · token_page:PLAINTEXT 1 /);
     for (const bad of [PLANT_GOOGLE, PLANT_FB, "sa-org-that", SECRET_NAME, SECRET_PHONE, CUSTOMER_ID]) assert.ok(!pub.includes(bad), `công khai không mang «${bad}»`);
     for (const bad of [PLANT_GOOGLE, PLANT_FB, SECRET_NAME, SECRET_PHONE, CUSTOMER_ID]) assert.ok(!out.join("\n").includes(bad), `cả phần mã hoá cũng không in «${bad}»`);
     assert.ok(out.some((l) => l.includes("sa-org-that: mã hoá 0 · trống 0 · BẢN RÕ 1")), "mã tổ chức chỉ ở phần mã hoá");
@@ -157,10 +169,49 @@ export async function testSecurityAcceptanceDb() {
   console.log("✓ security-acceptance CSDL: khách thật của nhà ⇒ trang dựng bản ghi = RÒ, 404 = CHẶN, bị đá về /login = phiên hỏng · bí mật cài vào trang ⇒ S2 FAIL · ô bản rõ ⇒ S3 FAIL · phần mã hoá không in id / dấu hiệu / bí mật");
 }
 
+/** S3 trên CSDL thật: ô bản rõ ⇒ FAIL, phong bì ⇒ PASS; hàm không trả byte / bản rõ nào. */
+export async function testSecretsAtRestDb() {
+  const db = await getDb();
+  const home = await getHomeOrganization();
+  const KEYS = ["sa-plain-test", "sa-sealed-test", "sa-foreign-test"];
+  const cleanup = async () => {
+    for (const k of KEYS) await db.delete(schema.orgConnections).where(eq(schema.orgConnections.connectorKey, k));
+    await db.delete(schema.orgChannelPages).where(eq(schema.orgChannelPages.connectorKey, "sa-page-test"));
+  };
+  await cleanup();
+  const key = secretsKeyState((n) => (n === "PLATFORM_SECRETS_KEY" ? "khoa-kiem-thu-bao-mat-0123456789abcdefghij" : undefined));
+  const sealed = sealSecrets({ apiKey: PLANT_GOOGLE }, { orgCode: home.code, connectorKey: "sa-sealed-test" }, key);
+  const tally = (cells: { verdict: string }[]) => cells.reduce<Record<string, number>>((m, c) => ((m[c.verdict] = (m[c.verdict] ?? 0) + 1), m), {});
+  const before = tally(await secretsAtRestCells(db, home.code));
+  const delta = (after: Record<string, number>, k: string) => (after[k] ?? 0) - (before[k] ?? 0);
+  try {
+    await db.insert(schema.orgConnections).values({ orgCode: home.code, connectorKey: "sa-sealed-test", secretsEnc: sealed.ciphertext, secretsKeyId: sealed.keyId });
+    await db.insert(schema.orgChannelPages).values({ orgCode: home.code, connectorKey: "sa-page-test", pageId: "123", secretsEnc: sealSecrets({ pageAccessToken: PLANT_FB }, { orgCode: home.code, connectorKey: "sa-page-test#page:123" }, key).ciphertext, secretsKeyId: sealed.keyId });
+    const ok = await secretsAtRestCells(db, home.code);
+    assert.ok(ok.every((c) => Object.keys(c).sort().join(",") === "category,verdict"), `hàm chỉ trả loại ô + phán quyết: ${JSON.stringify(ok[0])}`);
+    assert.ok(!JSON.stringify(ok).includes(PLANT_GOOGLE) && !JSON.stringify(ok).includes(PLANT_FB), "không bản rõ nào rời hàm");
+    assert.equal(delta(tally(ok), "ENCRYPTED"), 2, "hai ô phong bì ⇒ ENCRYPTED");
+    assert.equal(summarizeS3(ok.map((c) => ({ orgCode: home.code, ...c }))).status, "PASS", "chỉ phong bì ⇒ S3 ĐẠT");
+    // Ô BẢN RÕ gieo thẳng vào CSDL (đúng loại lỗi S3 phải bắt) + một dòng mang mã tổ chức khác.
+    await db.insert(schema.orgConnections).values({ orgCode: home.code, connectorKey: "sa-plain-test", secretsEnc: Buffer.from(JSON.stringify({ accessToken: PLANT_FB })), secretsKeyId: null });
+    await db.insert(schema.orgConnections).values({ orgCode: "to-chuc-khac", connectorKey: "sa-foreign-test", secretsEnc: sealed.ciphertext, secretsKeyId: sealed.keyId });
+    const viaReader = await inspectSecretCells({ code: home.code, isHome: true });
+    const t = tally(viaReader);
+    assert.equal(delta(t, "PLAINTEXT"), 1, "ô bản rõ ⇒ PLAINTEXT");
+    assert.equal(delta(t, "FOREIGN_ORG"), 1, "dòng mang mã tổ chức khác ⇒ FOREIGN_ORG");
+    assert.ok(!JSON.stringify(viaReader).includes(PLANT_FB), "không bản rõ nào rời hàm");
+    assert.equal(summarizeS3(viaReader).status, "FAIL", "ô bản rõ ⇒ S3 HỎNG");
+  } finally {
+    await cleanup();
+  }
+  console.log("✓ security-acceptance S3 (CSDL): secretsAtRestCells chỉ SELECT, không giải mã, chỉ trả loại ô + phán quyết · phong bì ⇒ ĐẠT · bản rõ / mã tổ chức khác ⇒ HỎNG");
+}
+
 export async function testSecurityAcceptance() {
   testSecurityAcceptancePure();
   testSecurityAcceptanceSource();
   await testSecurityAcceptanceDb();
+  await testSecretsAtRestDb();
 }
 
 if (/security-acceptance\.test\.ts$/.test(process.argv[1] ?? "")) testSecurityAcceptance().then(() => process.exit(0), (e) => { console.error(e); process.exit(1); });

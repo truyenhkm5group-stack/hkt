@@ -22,7 +22,7 @@ import "dotenv/config";
 import { SECURITY_CHECK_LABEL, securityPublicLines, securityVerdict, type SecurityCheck } from "@/lib/constants/security-acceptance";
 import { platformReadOnlyConfirmed } from "@/lib/pricing/migration";
 import { defaultAcceptanceDeps } from "@/lib/saas/acceptance";
-import { runSecurityAcceptance, type SecurityDeps } from "@/lib/saas/security-acceptance";
+import { inspectSecretCells, runSecurityAcceptance, type SecurityDeps } from "@/lib/saas/security-acceptance";
 
 const tomTat = (s: string) => console.log(`[ops:tom-tat] ${s}`);
 
@@ -55,7 +55,7 @@ export async function runSecurityCli(args: readonly string[], deps: Partial<Secu
     homeHost: homeHostFrom(process.env.APP_URL),
     env: process.env,
     emit,
-    readSecretCells: null,
+    readSecretCells: inspectSecretCells,
     ...deps,
   });
   for (const c of checks) {

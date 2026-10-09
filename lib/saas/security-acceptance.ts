@@ -13,23 +13,23 @@
  *      id hội thoại của workspace nghiệm thu từ sổ AI của nền tảng (`platform_ai_usage.conversation_id` — không mở CSDL của nó) ⇒ mở
  *      bằng phiên nhà. Dấu hiệu nội dung (tên / SĐT của bản ghi) chỉ nằm trong bộ nhớ để so; id chỉ in ở dạng đã thay bằng nhãn.
  * S2 · trang vỏ (cùng danh sách bước C) + trang công khai ⇒ quét bằng `scanForSecrets` (mẫu + GIÁ TRỊ THẬT của biến môi trường bí mật).
- * S3 · cần đọc ô bản mã của từng tổ chức: kho mã khoá việc chạm cột ấy vào ĐÚNG lib/connectors/service.ts (tests/connectors.test.ts),
- *      và hàm đọc sẵn có (`rekeyOrgConnections` chạy thử) đi qua `getDb()` của tổ chức — lần mở đầu chạy migrate + dọn bảng
- *      `platform_*`, tức là GHI, nên chết trên kết nối chỉ đọc. Lõi nhận đường đọc qua `deps.readSecretCells`; thiếu ⇒ CHƯA ĐO ĐƯỢC.
+ * S3 · mỗi tổ chức mở bằng `getDbForInspection` (máy chủ ép chỉ đọc, KHÔNG migrate, KHÔNG dọn bảng `platform_*` — `getDb()` của tổ
+ *      chức thì có, nên không dùng được trên kết nối chỉ đọc) rồi hỏi `secretsAtRestCells` của lib/connectors/service.ts — nơi DUY
+ *      NHẤT được chạm cột bản mã (tests/connectors.test.ts). Hàm ấy phán phong bì ngay bên trong và chỉ trả loại ô + phán quyết:
+ *      không byte nào, không giải mã. Tổ chức nhà dùng chính CSDL nhà. Mã tổ chức chỉ ra phần mã hoá.
  */
 import { and, desc, eq, isNotNull, ne } from "drizzle-orm";
-import { getDb, getPlatformDb, schema } from "@/db";
+import { getDb, getDbForInspection, getPlatformDb, schema } from "@/db";
+import { secretsAtRestCells, type SecretAtRestVerdict } from "@/lib/connectors/service";
 import { findIdentity } from "@/lib/auth/identities";
 import { signSession } from "@/lib/auth/session";
 import { ACCEPTANCE_WORKSPACES, type AcceptanceWorkspace } from "@/lib/constants/saas-acceptance";
 import { isSalesAgentUser, type ShellUser } from "@/lib/constants/saas-nav";
 import {
-  classifyEnvelope,
   classifyIsolationProbe,
   envSecretValues,
   scanForSecrets,
   usableMarkers,
-  type EnvelopeVerdict,
   type ProbeKind,
   type ProbeVerdict,
   type SecurityCheck,
@@ -41,8 +41,14 @@ import { chotdonAppHost, chotdonDomainFrom, siteDomainFrom, type SiteEnv } from 
 import { ACCEPTANCE_SESSION_TTL_SEC, metaRedirectTarget, shellRoutesFor, type AcceptanceDeps, type HttpReply } from "@/lib/saas/acceptance";
 import { acceptanceWorkspaceOwned } from "@/lib/saas/acceptance-guard";
 
-/** Một ô bí mật đọc được (S3) — `category` là tên bảng / loại ô (in ra), `orgCode` chỉ vào phần mã hoá. */
-export type SecretCell = { orgCode: string; category: string; bytes: Uint8Array | null; keyId: string | null };
+/** Một ô bí mật đã phán (S3) — `category` là tên bảng (in ra), `orgCode` chỉ vào phần mã hoá. Không byte nào của ô. */
+export type SecretCell = { orgCode: string; category: string; verdict: SecretAtRestVerdict };
+
+/** Đường đọc S3 của production: CSDL CHỈ ĐỌC của tổ chức ⇒ `secretsAtRestCells` (lib/connectors/service.ts). */
+export async function inspectSecretCells(org: { code: string; isHome: boolean }): Promise<SecretCell[]> {
+  const db = await getDbForInspection(org);
+  return (await secretsAtRestCells(db, org.code)).map((c) => ({ orgCode: org.code, ...c }));
+}
 
 export type SecurityDeps = {
   appGet: AcceptanceDeps["appGet"];
@@ -166,22 +172,23 @@ export function summarizeS1(results: readonly ProbeResult[], skippedDirections: 
 // ─────────────────────────── S3 · ô bản mã ───────────────────────────
 
 /** Gom phán quyết phong bì ⇒ trạng thái + số đếm theo loại ô (KHÔNG mã tổ chức). THUẦN. */
-export function summarizeS3(cells: readonly SecretCell[]): Pick<SecurityCheck, "status" | "counts"> & { byOrg: Record<string, Record<EnvelopeVerdict, number>> } {
+export function summarizeS3(cells: readonly SecretCell[]): Pick<SecurityCheck, "status" | "counts"> & { byOrg: Record<string, Record<SecretAtRestVerdict, number>> } {
   const counts: Record<string, number> = {};
-  const byOrg: Record<string, Record<EnvelopeVerdict, number>> = {};
+  const byOrg: Record<string, Record<SecretAtRestVerdict, number>> = {};
   for (const c of cells) {
-    const v = classifyEnvelope(c.bytes, c.keyId);
+    const v = c.verdict;
     counts[`${c.category}:${v}`] = (counts[`${c.category}:${v}`] ?? 0) + 1;
-    const o = (byOrg[c.orgCode] ??= { ENCRYPTED: 0, EMPTY: 0, PLAINTEXT: 0, MALFORMED: 0 });
+    const o = (byOrg[c.orgCode] ??= { ENCRYPTED: 0, EMPTY: 0, PLAINTEXT: 0, MALFORMED: 0, FOREIGN_ORG: 0 });
     o[v] += 1;
   }
-  const bad = Object.values(byOrg).reduce((n, o) => n + o.PLAINTEXT + o.MALFORMED, 0);
+  // Bản rõ · sai hình · dòng mang mã tổ chức khác (bản sao chép nhầm CSDL) đều là hỏng.
+  const bad = Object.values(byOrg).reduce((n, o) => n + o.PLAINTEXT + o.MALFORMED + o.FOREIGN_ORG, 0);
   return { status: bad ? "FAIL" : "PASS", counts, byOrg };
 }
 
 // ─────────────────────────── Chạy ───────────────────────────
 
-const S3_UNAVAILABLE_NOTE = "chưa có đường đọc ô bản mã CHỈ ĐỌC được phép (chỉ lib/connectors/service.ts chạm cột ấy) — chờ duyệt";
+const S3_UNAVAILABLE_NOTE = "lượt chạy không có đường đọc ô bản mã (readSecretCells) — chưa đo";
 
 export async function runSecurityAcceptance(deps: SecurityDeps): Promise<SecurityCheck[]> {
   const entry = ACCEPTANCE_WORKSPACES[0];
@@ -267,18 +274,24 @@ export async function runSecurityAcceptance(deps: SecurityDeps): Promise<Securit
   else {
     const cells: SecretCell[] = [];
     const s3Detail: string[] = [];
-    let orgFailed = 0;
+    let orgs = 0;
+    let activeFailed = 0;
+    let inactiveFailed = 0;
     for (const o of await listOrganizations()) {
       try {
         cells.push(...(await deps.readSecretCells({ code: o.code, isHome: o.isHome })));
+        orgs += 1;
       } catch (e) {
-        orgFailed += 1;
-        s3Detail.push(`${o.code}: không đọc được — ${firstLine(e)}`);
+        // Tổ chức ĐANG HOẠT ĐỘNG mà không đọc được = CHƯA BIẾT ⇒ không được PASS. Tổ chức không hoạt động (lưu trữ / dựng hỏng) có thể
+        // không còn CSDL — đếm riêng, nói ra, không đánh trượt S3 vì nó.
+        if (o.status === "ACTIVE") activeFailed += 1;
+        else inactiveFailed += 1;
+        s3Detail.push(`${o.code} (${o.status}): không đọc được — ${firstLine(e)}`);
       }
     }
     const sum = summarizeS3(cells);
-    for (const [code, c] of Object.entries(sum.byOrg)) s3Detail.push(`${code}: mã hoá ${c.ENCRYPTED} · trống ${c.EMPTY} · BẢN RÕ ${c.PLAINTEXT} · sai hình ${c.MALFORMED}`);
-    S3 = { key: "S3", status: orgFailed ? "FAIL" : sum.status, counts: { ...sum.counts, to_chuc_khong_doc_duoc: orgFailed }, note: null, detail: s3Detail };
+    for (const [code, c] of Object.entries(sum.byOrg)) s3Detail.push(`${code}: mã hoá ${c.ENCRYPTED} · trống ${c.EMPTY} · BẢN RÕ ${c.PLAINTEXT} · sai hình ${c.MALFORMED} · mang mã tổ chức khác ${c.FOREIGN_ORG}`);
+    S3 = { key: "S3", status: activeFailed ? "FAIL" : sum.status, counts: { to_chuc: orgs, o: cells.length, ...sum.counts, to_chuc_hoat_dong_khong_doc_duoc: activeFailed, to_chuc_ngung_khong_doc_duoc: inactiveFailed }, note: null, detail: s3Detail };
   }
 
   return [{ key: "S1", ...S1, detail: s1Detail }, S2, S3];
