@@ -3,7 +3,7 @@
   "mission_id": "inbox-perf-probe",
   "title": "Đo production chỉ đọc: tải hộp thư + chuyển hội thoại theo tổ chức (ops)",
   "business_goal": "",
-  "status": "INTEGRATING",
+  "status": "VERIFYING",
   "priority": "P2",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -26,11 +26,13 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-09T05:55:58.131Z",
-  "updated_at": "2026-10-09T07:55:21.524Z",
+  "updated_at": "2026-10-09T10:24:24.339Z",
   "last_heartbeat": "2026-10-09T07:26:48.788Z",
   "definition_of_done": [],
   "evidence": {
-    "merged": "#733 → d596be956b304566fffcb5f702bde32c2efb22a4"
+    "merged": "#733 → d596be956b304566fffcb5f702bde32c2efb22a4",
+    "verify": "PASS 394ad4c842973811ebe3d0857de5e294c31893f9 2026-10-09T10:24:12.914Z",
+    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/37916081737"
   },
   "handoff": {
     "branch": "feat/inbox-perf-probe",
