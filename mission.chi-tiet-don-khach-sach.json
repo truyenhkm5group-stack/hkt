@@ -29,18 +29,18 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-08T23:12:39.335Z",
-  "updated_at": "2026-10-09T03:34:35.212Z",
-  "last_heartbeat": "2026-10-09T03:34:02.384Z",
+  "updated_at": "2026-10-09T04:37:07.779Z",
+  "last_heartbeat": "2026-10-09T04:37:07.779Z",
   "definition_of_done": [],
   "handoff": {
     "branch": "claude/chi-tiet-don-khach-sach",
-    "sha": "82a303c644901a7cf9558896867d1a5c964f0cf3",
-    "at": "2026-10-09T03:34:02.384Z",
+    "sha": "13aed5f50bcbc06ba537b2bbad5f9ea9ca50ea00",
+    "at": "2026-10-09T04:37:07.779Z",
     "actor": "DESKTOP-56TH98Y:wt-detail",
     "title": "Trang chi tiết đơn / khách / hội thoại không nói Pancake với khách không dùng Pancake, không in 0 ₫ cho tiền đơn tay không có, diễn biến hội thoại bằng tiếng Việt",
     "summary": "",
     "tests": [
-      "tsc + eslint sạch; npm test ĐẦY ĐỦ «TẤT CẢ KIỂM THỬ ĐẠT» EXIT=0 trên 82a303c6 (gốc d8681246, gồm #715 #716 #717; 09/10 10:31); detail-pages-shell: ô Pancake sau đúng điều kiện, tỷ lệ của truy vấn, tên sự kiện, product.id; đột biến manual ? null : / {e.type} ⇒ đỏ"
+      "npm test ĐẦY ĐỦ «TẤT CẢ KIỂM THỬ ĐẠT» trên 82a303c6 (gốc d8681246); rebase lên 279a7105 (#721 + #726 đã vào) → 13aed5f5 chỉ xung đột thêm-thêm sync-fixtures, giữ đủ 5 đăng ký; detail-pages-shell + erp-form-names chạy lại trên SHA mới: đạt"
     ]
   }
 }
