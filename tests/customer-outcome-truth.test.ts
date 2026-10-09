@@ -2,7 +2,9 @@ import assert from "node:assert/strict";
 import { inArray } from "drizzle-orm";
 import { type Db, schema } from "@/db";
 import { assessCustomerRisk } from "@/lib/alerts/risk";
-import { getCustomerDetail, noCodPaymentState } from "@/lib/queries/customers";
+import { noCodPaymentState } from "@/lib/constants/no-cod-payment";
+import { customerFacets, customerSummary, getCustomerDetail, listCustomers } from "@/lib/queries/customers";
+import { parseListParams } from "@/lib/search-params";
 
 /**
  * ═══════════ HỒ SƠ KHÁCH: SỐ GIAO THÀNH CÔNG CHỈ ĐI MỘT ĐƯỜNG ═══════════
@@ -13,7 +15,9 @@ import { getCustomerDetail, noCodPaymentState } from "@/lib/queries/customers";
  *  2. Tỷ lệ đặt trên đơn ĐÃ KẾT THÚC: đơn đang giao / chưa gửi không vào mẫu số, đếm riêng.
  *  3. Chưa đơn nào kết thúc ⇒ tỷ lệ `null` (in «—»), không phải 0%; chưa có đơn ⇒ AOV `null`.
  *  4. Đơn không còn COD mà không có chứng từ tiền ⇒ CHƯA XÁC MINH, không phải "đã thanh toán".
- * Cộng thêm: cảnh báo khách rủi ro chấm lịch sử ERP và bộ đếm Pancake RIÊNG, lý do mang nhãn nguồn.
+ * Cộng thêm: cảnh báo khách rủi ro chấm lịch sử ERP và bộ đếm Pancake RIÊNG, lý do mang nhãn nguồn;
+ * DANH SÁCH khách (`listCustomers` · `customerFacets` · `customerSummary`) ra ĐÚNG số của trang chi tiết —
+ * nhóm khách, sắp xếp, tỷ lệ hoàn đầu trang đều theo ERP, không `greatest()` với bộ đếm Pancake.
  *
  * Mốc thời gian cố định, không "N giờ trước" (AGENTS mục 50) — truy vấn hồ sơ khách không lọc theo kỳ.
  */
@@ -64,7 +68,7 @@ export async function testCustomerOutcomeTruthDb(db: Db) {
   await db.insert(schema.customers).values([
     // Pancake nói 40 thành công / 50 đơn / 99 triệu — ERP chỉ có 4 đơn và chứng minh được ĐÚNG MỘT lần giao.
     { id: `${P}mix`, name: "Khách kiểm hồ sơ", phone: "0987600001", orderCount: 50, succeedOrderCount: 40, returnedOrderCount: 0, purchasedAmount: 99_000_000 },
-    { id: `${P}fresh`, name: "Khách mới đặt", phone: "0987600002", orderCount: 3, succeedOrderCount: 3 },
+    { id: `${P}fresh`, name: "Khách mới đặt", phone: "0987600002", orderCount: 3, succeedOrderCount: 3, returnedOrderCount: 5 },
     { id: `${P}empty`, name: "Khách chưa đơn", phone: "0987600003", orderCount: 7, succeedOrderCount: 7, purchasedAmount: 5_000_000 },
   ]);
   const order = (id: string, customerId: string, stage: string, extra: Partial<typeof schema.orders.$inferInsert> = {}) => ({
@@ -122,8 +126,38 @@ export async function testCustomerOutcomeTruthDb(db: Db) {
     assert.equal(empty.stats.orders, 0);
     assert.equal(empty.stats.aov, null, "chưa có đơn ⇒ trung bình mỗi đơn là CHƯA BIẾT, không phải 0 ₫");
     assert.equal(empty.stats.succeed, 0, "Pancake ghi 7 thành công nhưng ERP không có đơn nào ⇒ 0 đơn ERP");
+
+    // ── DANH SÁCH: cùng khách, cùng số với trang chi tiết; lọc / sắp xếp / tổng đầu trang theo ERP ──
+    const q = "098760000"; // chung tiền tố SĐT của đúng ba khách kiểm
+    const list = await listCustomers(parseListParams({ q, sort: "orderCount", dir: "desc" }, { defaultPeriod: "all", sortable: ["orderCount", "purchasedAmount", "lastOrderAt", "name", "insertedAt"], filterKeys: ["province", "tier"] }));
+    assert.deepEqual(list.rows.map((r) => r.id), [`${P}mix`, `${P}fresh`, `${P}empty`], "sắp xếp theo số đơn ERP (3 · 1 · 0), không theo Pancake (50 · 3 · 7)");
+    const row = list.rows[0];
+    assert.equal(row.succeedOrderCount, mix.stats.succeed, "danh sách = trang chi tiết: thành công");
+    assert.equal(row.succeedOrderCount, 1, "Pancake 40 ⇒ danh sách in ERP 1");
+    assert.equal(row.returnedOrderCount, mix.stats.returned);
+    assert.equal(row.orderCount, mix.stats.orders, "danh sách = trang chi tiết: số đơn");
+    assert.equal(row.purchasedAmount, mix.stats.amount, "danh sách = trang chi tiết: tổng mua");
+    assert.equal(list.rows[1].returnedOrderCount, 0, "Pancake ghi 5 hoàn cho khách mới — ERP chưa có đơn hoàn nào");
+
+    const facetParams = parseListParams({ q }, { defaultPeriod: "all", filterKeys: ["province", "tier"] });
+    const facets = await customerFacets(facetParams);
+    const tier = (k: string) => facets.tiers.find((t) => t.value === k)?.count;
+    assert.equal(tier("repeat"), 1, "nhóm «Mua ≥3 lần» theo đơn ERP — Pancake (50 · 3 · 7) sẽ ra 3");
+    assert.equal(tier("once"), 1);
+    assert.equal(tier("none"), 1, "khách Pancake ghi 7 đơn mà ERP không có đơn nào ⇒ «Chưa có đơn»");
+    assert.equal(tier("returned"), 0, "nhóm «Có đơn hoàn» theo ORDER_OUTCOME — bộ đếm hoàn Pancake không đẩy khách vào nhóm");
+    const onlyNone = await listCustomers(parseListParams({ q, tier: "none" }, { defaultPeriod: "all", filterKeys: ["province", "tier"] }));
+    assert.deepEqual(onlyNone.rows.map((r) => r.id), [`${P}empty`], "lọc nhóm dùng cùng biểu thức với ô đếm");
+
+    const summary = await customerSummary(facetParams);
+    assert.equal(summary.total, 3);
+    assert.equal(summary.orders, 4, "đơn ERP không huỷ: 3 + 1 + 0");
+    assert.equal(summary.finished, 1, "mẫu số tỷ lệ hoàn đầu trang = đơn đã kết thúc");
+    assert.equal(summary.returned, 0);
+    assert.equal(summary.amount, 1_600_000, "tổng mua ERP, không lấy max với Pancake (99 triệu)");
+    assert.equal(summary.withOrders, 2);
   } finally {
     await cleanup(db);
   }
-  console.log("✓ Hồ sơ khách (CSDL): giao thành công chỉ theo ORDER_OUTCOME (Pancake 40 ⇒ ERP 1) · tỷ lệ trên đơn đã kết thúc · đang giao đếm riêng · chưa kết thúc ⇒ tỷ lệ «—» · không chứng từ ⇒ chưa xác minh");
+  console.log("✓ Hồ sơ khách (CSDL): giao thành công chỉ theo ORDER_OUTCOME (Pancake 40 ⇒ ERP 1) · tỷ lệ trên đơn đã kết thúc · đang giao đếm riêng · chưa kết thúc ⇒ tỷ lệ «—» · không chứng từ ⇒ chưa xác minh · danh sách / nhóm khách / tổng đầu trang ra đúng số trang chi tiết");
 }

@@ -4,7 +4,7 @@ import type { ColumnDef } from "@tanstack/react-table";
 import { RowLink } from "@/components/data-table/data-table";
 import { SourceBadge } from "@/components/status-badge";
 import { Money } from "@/components/ui-bits";
-import { formatDate, formatNumber, formatTimeAgo, pct } from "@/lib/format";
+import { formatDate, formatNumber, formatPercent, formatTimeAgo, pctOrNull } from "@/lib/format";
 import type { CustomerListRow } from "@/lib/queries/customers";
 import { cn } from "@/lib/utils";
 
@@ -60,7 +60,9 @@ export const customerColumns: ColumnDef<CustomerListRow, unknown>[] = [
     meta: { align: "right" },
     cell: ({ row }) => {
       const r = row.original;
-      const rate = pct(r.succeedOrderCount, r.orderCount);
+      // Số của ERP theo ORDER_OUTCOME; tỷ lệ trên đơn ĐÃ KẾT THÚC — chưa đơn nào kết thúc ⇒ «—», không phải 0%.
+      const finished = r.succeedOrderCount + r.returnedOrderCount;
+      const rate = pctOrNull(r.succeedOrderCount, finished);
       return (
         <div className="text-right">
           <div className="numeric text-sm">
@@ -68,7 +70,7 @@ export const customerColumns: ColumnDef<CustomerListRow, unknown>[] = [
             <span className="text-muted-foreground"> / </span>
             <span className={cn("font-semibold", r.returnedOrderCount > 0 ? "text-destructive" : "text-muted-foreground")}>{formatNumber(r.returnedOrderCount)}</span>
           </div>
-          {r.orderCount > 0 ? <div className="text-[10.5px] text-muted-foreground">thành công {rate.toFixed(0)}%</div> : null}
+          {r.orderCount > 0 ? <div className="text-[10.5px] text-muted-foreground" title={`trên ${finished} đơn đã kết thúc`}>thành công {formatPercent(rate, 0)}</div> : null}
         </div>
       );
     },

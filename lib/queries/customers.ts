@@ -6,6 +6,7 @@ import { ORDER_OUTCOME_FAST, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
 import { REVENUE_RECOGNIZED_ON_DELIVERY } from "@/lib/queries/manual-order-sql";
 import { OPEN_OUTCOMES_SQL, RETURNED_OUTCOMES_SQL } from "@/lib/constants/truth";
 import { pctOrNull, toDate } from "@/lib/format";
+import { noCodPaymentState } from "@/lib/constants/no-cod-payment";
 import type { ListParams } from "@/lib/search-params";
 
 export const CUSTOMER_SORTABLE = ["orderCount", "purchasedAmount", "lastOrderAt", "name", "insertedAt"];
@@ -16,7 +17,7 @@ const o = schema.orders;
 /** Ngày tạo khách: theo Pancake, hoặc ngày tạo trong ERP nếu khách được tạo tự động từ đơn */
 const customerCreatedAt = sql<Date>`coalesce(${c.insertedAt}, ${c.createdAt})`;
 
-/** Tổng hợp đơn hàng phía ERP theo khách (bổ sung khi số liệu Pancake chưa cập nhật) */
+/** Tổng hợp đơn hàng phía ERP theo khách — MỘT phép gom, nối MỘT lần (không câu con tương quan theo từng dòng). */
 function orderAggregate(db: Db) {
   return db
     .select({
@@ -38,13 +39,21 @@ function orderAggregate(db: Db) {
 
 type Agg = ReturnType<typeof orderAggregate>;
 
-/** Biểu thức "hiệu lực": lấy giá trị lớn hơn giữa số liệu Pancake và số liệu ERP */
+/**
+ * Biểu thức "hiệu lực" của danh sách khách — CHỈ số của ERP.
+ *
+ * Bản trước lấy `greatest(bộ đếm Pancake, số ERP)` cho số đơn / thành công / hoàn / tổng mua: trạng
+ * thái Pancake "Đã nhận" nâng được số giao thành công lên trên số mà `ORDER_OUTCOME` chứng minh được
+ * (AGENTS §0.2 · §3.1, ORDER_OUTCOME.md mục 10), và nhóm "Có đơn hoàn" lọc theo số hoàn của Pancake.
+ * Nay cùng luật với trang chi tiết (`getCustomerDetail`): bộ đếm Pancake không tham gia số, lọc, sắp xếp.
+ * `lastOrderAt` vẫn lấy mốc muộn hơn — đó là một MỐC THỜI GIAN, không phải kết quả đơn.
+ */
 function effective(agg: Agg) {
   return {
-    orders: sql<number>`greatest(${c.orderCount}, coalesce(${agg.ordersErp}, 0))`,
-    succeed: sql<number>`greatest(${c.succeedOrderCount}, coalesce(${agg.succeedErp}, 0))`,
-    returned: sql<number>`greatest(${c.returnedOrderCount}, coalesce(${agg.returnedErp}, 0))`,
-    amount: sql<number>`greatest(${c.purchasedAmount}, coalesce(${agg.revenueErp}, 0))`,
+    orders: sql<number>`coalesce(${agg.ordersErp}, 0)`,
+    succeed: sql<number>`coalesce(${agg.succeedErp}, 0)`,
+    returned: sql<number>`coalesce(${agg.returnedErp}, 0)`,
+    amount: sql<number>`coalesce(${agg.revenueErp}, 0)`,
     lastOrderAt: sql<Date | string | null>`greatest(${c.lastOrderAt}, ${agg.lastOrderErp})`,
   };
 }
@@ -78,6 +87,7 @@ export function customerListWhere(params: ListParams, agg: Agg, skip: string[] =
   return defined.length ? and(...defined) : undefined;
 }
 
+/** `orderCount` / `succeedOrderCount` / `returnedOrderCount` / `purchasedAmount`: số của ERP (`effective`), KHÔNG phải cột Pancake cùng tên. */
 export type CustomerListRow = {
   id: string;
   name: string;
@@ -222,6 +232,8 @@ export async function customerSummary(params: ListParams, extra?: SQL) {
       withOrders: sql<number>`count(*) filter (where ${eff.orders} >= 1)`,
       orders: sql<number>`coalesce(sum(${eff.orders}), 0)`,
       returned: sql<number>`coalesce(sum(${eff.returned}), 0)`,
+      // Mẫu số tỷ lệ hoàn: đơn ĐÃ KẾT THÚC (thành công + hoàn), không phải mọi đơn đã lên.
+      finished: sql<number>`coalesce(sum(${eff.succeed} + ${eff.returned}), 0)`,
       amount: sql<number>`coalesce(sum(${eff.amount}), 0)`,
     })
     .from(c)
@@ -235,26 +247,12 @@ export async function customerSummary(params: ListParams, extra?: SQL) {
     withOrders: Number(row?.withOrders ?? 0),
     orders: Number(row?.orders ?? 0),
     returned: Number(row?.returned ?? 0),
+    finished: Number(row?.finished ?? 0),
     amount: Number(row?.amount ?? 0),
   };
 }
 
 // ───────────────────────── Chi tiết khách hàng ─────────────────────────
-
-/**
- * Đơn ĐỒNG BỘ không còn COD phải thu: tiền đã về chưa? Chỉ trả lời "đã trả trước" khi có thứ mà
- * `VERIFIED_MONEY_SOURCES` (`lib/constants/truth.ts`) đã khai là bằng chứng — `orders.prepaid` /
- * `orders.transfer_money`. `money_to_collect = 0` tự nó KHÔNG phải chứng từ (ORDER_OUTCOME.md mục 8):
- * thiếu bằng chứng thì là CHƯA XÁC MINH, không phải "đã thanh toán" (AGENTS §0.1 · §0.3).
- * `null` ⇒ đơn còn COD, câu hỏi không đặt ra. Đơn tạo tay đi đường chứng từ riêng (`order_payments`).
- */
-export type NoCodPaymentState = { kind: "PREPAID"; amount: number } | { kind: "UNVERIFIED" };
-
-export function noCodPaymentState(d: { moneyToCollect: number; prepaid: number; transferMoney: number }): NoCodPaymentState | null {
-  if (d.moneyToCollect > 0) return null;
-  const prepaid = d.prepaid + d.transferMoney;
-  return prepaid > 0 ? { kind: "PREPAID", amount: prepaid } : { kind: "UNVERIFIED" };
-}
 
 export async function getCustomerDetail(id: string) {
   const db = await getDb();
