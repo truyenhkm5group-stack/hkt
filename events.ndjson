@@ -1153,3 +1153,4 @@
 {"at":"2026-10-09T04:37:07.807Z","actor":"DESKTOP-56TH98Y:wt-detail","kind":"HANDOFF","mission":"chi-tiet-don-khach-sach","detail":"claude/chi-tiet-don-khach-sach @ 13aed5f50bcb · 1 lệnh kiểm thử"}
 {"at":"2026-10-09T04:37:29.615Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#725 @ 13aed5f50bcb · Rebase lên 279a7105: chỉ xung đột đăng ký test (giữ đủ 5); nội dung không đổi so với lượt PASS 82a303c6."}
 {"at":"2026-10-09T04:39:04.220Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"commercial-sweep-cap-nhat","detail":"#727 @ 0ffe1f745502 → 5676a312b1f8 (MERGE_NOW · LOW · gates success)"}
+{"at":"2026-10-09T04:50:56.304Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"VERIFY_PASS","mission":"customer-outcome-truth","detail":"PASS ef9b302ab11f855e95aab592c738c57e2a9fcc93 2026-10-09T04:50:49.052Z"}
