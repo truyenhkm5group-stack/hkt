@@ -1285,3 +1285,4 @@
 {"at":"2026-10-09T15:03:51.248Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"VERIFY_PASS","mission":"shell-copy-brand-r3","detail":"PASS 2734ae988754148bfc15488783b62d30f3618bef 2026-10-09T15:03:39.217Z"}
 {"at":"2026-10-09T15:04:11.284Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DONE","mission":"launch-gate-r5","detail":"production 2734ae988754 · deploy 37944066623 xanh · verify ĐẠT"}
 {"at":"2026-10-09T15:04:29.028Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"security-acceptance","detail":"feat/security-acceptance @ a321c491d8bd · 1 lệnh kiểm thử"}
+{"at":"2026-10-09T15:05:01.799Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"security-acceptance","detail":"#744 cho feat/security-acceptance @ a321c491d8bd"}
