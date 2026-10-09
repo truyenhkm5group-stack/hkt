@@ -1370,3 +1370,4 @@
 {"at":"2026-10-09T22:50:07.503Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DONE","mission":"inbox-v2-b","detail":"production e21f0ec35b25 · deploy 37998224326 xanh · mở HSLC hộp thư đơn #EAE49464: panel ĐƠN ĐANG CHỐT đủ SKU/biến thể/SL/giá/ship/tổng/SĐT/địa chỉ/tỉnh/xã + trạng thái ĐÃ XÁC NHẬN; ảnh trước/sau 1366 · 1440 · 390 (ngăn Khách, đơn và ghi chú) giữ ngoài kho vì có dữ liệu khách"}
 {"at":"2026-10-09T22:50:46.090Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"onboarding-v2","detail":"feat/onboarding-v2 @ 9dd78fa18c55 · 1 lệnh kiểm thử"}
 {"at":"2026-10-09T22:51:01.665Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#752 @ 9dd78fa18c55 · Cập nhật nhánh lên main (merge commit, không đổi mã của PR); gates xanh lại"}
+{"at":"2026-10-09T22:52:44.173Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"CLAIM","mission":"products-shell-v2","detail":"RUNNING · 5 mẫu phạm vi · MEDIUM"}
