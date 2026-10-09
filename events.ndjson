@@ -1144,3 +1144,4 @@
 {"at":"2026-10-09T04:03:43.293Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"erp-chi-tiet-duoi-dai","detail":"#721 @ 9ebca5027f4e → f7eae2c267bd (MERGE_NOW · MEDIUM · gates success)"}
 {"at":"2026-10-09T04:08:29.278Z","actor":"DESKTOP-56TH98Y:wt-a11y2","kind":"HANDOFF","mission":"erp-o-nhap-co-ten","detail":"claude/erp-o-nhap-co-ten @ 180a800829ad · 1 lệnh kiểm thử"}
 {"at":"2026-10-09T04:09:01.574Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"erp-o-nhap-co-ten","detail":"#726 cho claude/erp-o-nhap-co-ten @ 180a800829ad"}
+{"at":"2026-10-09T04:09:31.610Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#726 @ 180a800829ad · Chỉ trợ năng: hơn 80 ô có tên (bọc label / aria-label đúng chữ nhãn), không đổi hành vi hay bố cục; bài erp-form-names khoá."}

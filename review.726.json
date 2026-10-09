@@ -1,0 +1,8 @@
+{
+  "pr": 726,
+  "sha": "180a800829ad6b8839a12f18a5a9f2468cb14f18",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-09T04:09:24.353Z",
+  "note": "Chỉ trợ năng: hơn 80 ô có tên (bọc label / aria-label đúng chữ nhãn), không đổi hành vi hay bố cục; bài erp-form-names khoá."
+}
