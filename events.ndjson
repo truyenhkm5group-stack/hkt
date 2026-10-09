@@ -1344,3 +1344,4 @@
 {"at":"2026-10-09T20:11:09.426Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"launch-gate-r6","detail":"#751 cho docs/launch-gate-r6 @ a575c951fce2"}
 {"at":"2026-10-09T20:11:24.527Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#751 @ a575c951fce2 · Tài liệu: mỗi ✅ trỏ run production; đếm bằng script."}
 {"at":"2026-10-09T20:12:32.301Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"inbox-v2-a","detail":"feat/inbox-v2-a @ ad48fb15a847 · 1 lệnh kiểm thử"}
+{"at":"2026-10-09T20:13:22.102Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"inbox-v2-a","detail":"#748 @ ad48fb15a847 → cd5d3635691b (MERGE_NOW · MEDIUM · gates success)"}
