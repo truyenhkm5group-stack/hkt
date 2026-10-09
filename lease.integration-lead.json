@@ -1,10 +1,10 @@
 {
   "name": "integration-lead",
   "holder": "DESKTOP-56TH98Y:wt-tech-lead-v2",
-  "purpose": "Lô launch: deploy 50293da6 + nghiệm thu + đo production + C1",
+  "purpose": "Lô launch tiếp: #743 + nâng quyền BAN_HANG + nghiệm thu vòng 2",
   "acquired_at": "2026-10-09T06:00:00.235Z",
-  "heartbeat_at": "2026-10-09T06:00:00.235Z",
-  "expires_at": "2026-10-09T18:00:00.235Z",
+  "heartbeat_at": "2026-10-09T14:19:12.069Z",
+  "expires_at": "2026-10-10T02:19:12.069Z",
   "generation": 3,
   "token_hash": "4ef0195ae21229ce48b4d63f20e70b45ee79d1f2cfc46e5092270fc0089092ce"
 }
