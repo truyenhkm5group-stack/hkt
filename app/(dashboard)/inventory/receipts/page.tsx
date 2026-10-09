@@ -13,7 +13,7 @@ import { getPoReceiptPrefill } from "@/lib/queries/production-shortcuts";
 import { LinkProductionControl } from "@/app/(dashboard)/inventory/receipts/link-production-control";
 import { prefilledOrderId } from "@/lib/constants/evidence-gaps";
 import { listLinkableReceipts } from "@/lib/queries/evidence-gaps";
-import { MetricCard } from "@/components/metric-card";
+import { StatStrip } from "@/components/stat-tile";
 import { PageHeader } from "@/components/page-header";
 import { Money, SectionCard } from "@/components/ui-bits";
 import { Button } from "@/components/ui/button";
@@ -110,19 +110,26 @@ export default async function StockReceiptsPage({ searchParams }: { searchParams
         </p>
       ) : null}
 
-      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <MetricCard label="Tổng đã nhập" value={`+${formatNumber(summary.received)}`} note={`${formatNumber(summary.receipts)} phiếu nhập hàng`} icon={ArrowDownToLine} tone="green" />
-        <MetricCard label="Điều chỉnh kiểm kê" value={`${summary.adjusted > 0 ? "+" : ""}${formatNumber(summary.adjusted)}`} note={`${formatNumber(summary.adjustments)} phiếu điều chỉnh`} icon={ClipboardCheck} tone={summary.adjusted < 0 ? "rose" : "slate"} />
-        <MetricCard label="Giá trị hàng nhập" value={formatVND(summary.cost, { compact: true })} note={khaiGia ? "Theo giá ghi trên phiếu — đơn giá khai trên phiếu nhập" : "Theo giá ghi trên phiếu — phiếu nhập mới lấy giá báo MKT"} icon={Coins} tone="primary" />
-        <MetricCard label={`Mẫu mã trong ${app}`} value={formatNumber(variants.length || 0)} note={`${formatNumber(variants.filter((v) => v.currentStock <= 0).length)} mẫu mã tồn ≤ 0`} icon={ListOrdered} tone="blue" />
-      </section>
+      {/* Bốn con số gọn một dải (điện thoại 2 cột) thay cho bốn thẻ lớn — bảng phiếu kho là thứ người kho đến đây để làm. */}
+      <StatStrip
+        items={[
+          { label: "Tổng đã nhập", value: `+${formatNumber(summary.received)}`, note: `${formatNumber(summary.receipts)} phiếu nhập hàng`, icon: ArrowDownToLine, tone: "green" },
+          { label: "Điều chỉnh kiểm kê", value: `${summary.adjusted > 0 ? "+" : ""}${formatNumber(summary.adjusted)}`, note: `${formatNumber(summary.adjustments)} phiếu điều chỉnh`, icon: ClipboardCheck, tone: summary.adjusted < 0 ? "rose" : "default" },
+          { label: "Giá trị hàng nhập", value: formatVND(summary.cost, { compact: true }), note: khaiGia ? "Theo đơn giá khai trên phiếu" : "Phiếu nhập mới lấy giá báo MKT", icon: Coins },
+          { label: `Mẫu mã trong ${app}`, value: formatNumber(variants.length || 0), note: `${formatNumber(variants.filter((v) => v.currentStock <= 0).length)} mẫu mã tồn ≤ 0`, icon: ListOrdered },
+        ]}
+      />
 
-      <div className="flex items-start gap-3 rounded-xl border bg-muted/40 p-3.5 text-[13px] text-muted-foreground">
-        <Info className="mt-0.5 size-4 shrink-0" />
-        <div>
-          <b className="text-foreground">Cách dùng lần đầu:</b> bấm <b className="text-foreground">Kiểm kê</b>, nhập số đếm thực tế của từng mẫu mã đang có trong kho → {app} tạo phiếu điều chỉnh để tồn khả dụng bằng đúng số đếm (đã tính hàng đang giao). Từ đó về sau, mỗi lần hàng về thì bấm <b className="text-foreground">Nhập hàng</b>. <b className="text-foreground">Tồn thực tế</b> = tổng phiếu kho − hàng đã xuất; <b className="text-foreground">Khả dụng bán</b> = Tồn thực tế − hàng đã chốt đơn chưa xuất. Hàng hoàn <b className="text-foreground">KHÔNG</b> tự về kho: chỉ khi kho lập phiếu <b className="text-foreground">Tái nhập hàng hoàn</b> với số đếm thực tế — đơn vị vận chuyển báo &ldquo;đã hoàn&rdquo; là chưa đủ. Xem tồn tại <Link href="/products" className="font-semibold text-primary hover:underline">Sản phẩm &amp; tồn kho</Link>.
+      {/* Hướng dẫn dùng lần đầu: gập lại — người kho dùng hằng ngày không phải đọc lại đoạn này mỗi lần mở trang. */}
+      <details className="group rounded-xl border bg-muted/40 p-3.5 text-[13px] text-muted-foreground">
+        <summary className="flex cursor-pointer list-none items-center gap-2 font-semibold text-foreground">
+          <Info className="size-4 shrink-0" /> Cách dùng lần đầu · tồn thực tế và khả dụng tính thế nào
+          <span className="ml-auto text-xs font-normal text-muted-foreground group-open:hidden">Mở</span>
+        </summary>
+        <div className="mt-2 pl-6">
+          Bấm <b className="text-foreground">Kiểm kê</b>, nhập số đếm thực tế của từng mẫu mã đang có trong kho → {app} tạo phiếu điều chỉnh để tồn khả dụng bằng đúng số đếm (đã tính hàng đang giao). Từ đó về sau, mỗi lần hàng về thì bấm <b className="text-foreground">Nhập hàng</b>. <b className="text-foreground">Tồn thực tế</b> = tổng phiếu kho − hàng đã xuất; <b className="text-foreground">Khả dụng bán</b> = Tồn thực tế − hàng đã chốt đơn chưa xuất. Hàng hoàn <b className="text-foreground">KHÔNG</b> tự về kho: chỉ khi kho lập phiếu <b className="text-foreground">Tái nhập hàng hoàn</b> với số đếm thực tế — đơn vị vận chuyển báo &ldquo;đã hoàn&rdquo; là chưa đủ. Xem tồn tại <Link href="/products" className="font-semibold text-primary hover:underline">Sản phẩm &amp; tồn kho</Link>.
         </div>
-      </div>
+      </details>
 
       <SectionCard title="Phiếu kho" description="200 phiếu gần nhất · bấm vào phiếu để xem chi tiết" padded={false}>
         <div className="overflow-x-auto">
