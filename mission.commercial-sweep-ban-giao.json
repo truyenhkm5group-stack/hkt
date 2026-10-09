@@ -3,7 +3,7 @@
   "mission_id": "commercial-sweep-ban-giao",
   "title": "Commercial Sweep Round 2 — bàn giao cuối: đối chiếu origin/main, C0 0 · C1 3 (1 đang sửa, 1 quyết định chủ shop, 1 đo production), việc của Tech Lead",
   "business_goal": "",
-  "status": "INTEGRATING",
+  "status": "VERIFYING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-docs",
@@ -25,11 +25,13 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-09T05:58:00.349Z",
-  "updated_at": "2026-10-09T06:28:21.182Z",
+  "updated_at": "2026-10-09T10:08:43.642Z",
   "last_heartbeat": "2026-10-09T05:58:31.670Z",
   "definition_of_done": [],
   "evidence": {
-    "merged": "#729 → 3d143809337425953ddad1b1c97af38fc1646ef1"
+    "merged": "#729 → 3d143809337425953ddad1b1c97af38fc1646ef1",
+    "verify": "PASS 9e681c8ba4bbd03ef9e0f96adfa01bd5cd41af2c 2026-10-09T10:08:34.307Z",
+    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/37896555963"
   },
   "handoff": {
     "branch": "claude/commercial-sweep-ban-giao",
