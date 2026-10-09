@@ -1,0 +1,8 @@
+{
+  "pr": 753,
+  "sha": "17552263d47fbc3c80e370ec7125d3816e7b12e7",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-09T21:17:49.068Z",
+  "note": "Review Integration Lead: khối ĐƠN ĐANG CHỐT đọc đơn của hội thoại bằng MỘT truy vấn (cùng liên kết với chat-order existingOrders), tiền theo đơn đã ghi, chưa biết ⇒ «—»; trạng thái trường dùng lại manualOrderGaps/manualOrderTotals/orderShipNote (không luật thứ hai); nút gọi confirmOrderReviewAction sẵn có, khoá khi THIẾU (test 120 tổ hợp khớp manualOrderGaps); hai đơn đang mở ⇒ CẦN XÁC THỰC thay v"
+}
