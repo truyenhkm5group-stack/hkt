@@ -76,6 +76,9 @@ export function testOrgCatalogPure() {
   const khongCauHinh = catalogSummary({ ...r, bot: null, syncedProducts: null });
   assert.ok(khongCauHinh[0].endsWith("nguồn —") && khongCauHinh[1].startsWith("Bot: — (chưa có cấu hình)"), "chưa đọc được ⇒ —, không phải TẮT");
   assert.ok(catalogLines({ ...r, priceLists: [] }).some((l) => l.includes("chưa có bảng giá nào")), "không bảng giá ⇒ nói thẳng hệ quả");
+  const tat = { ...r, quickReplies: r.quickReplies.map((q) => ({ ...q, upsell: false })), quickReplySettings: { enabled: true, upsellSet: false, upsellStale: { title: "Menu cũ", state: "INACTIVE" as const } } };
+  assert.ok(catalogLines(tat).some((l) => l.includes("ĐÃ CHỌN nhưng câu đó «Menu cũ» đang TẮT")), "câu upsell trỏ tới câu đang tắt ⇒ nói đúng tình huống, không gộp vào «chưa chọn»");
+  assert.ok(catalogSummary(tat)[1].endsWith("câu upsell TRỎ TỚI CÂU ĐANG TẮT"));
 
   const src = readFileSync("scripts/org-catalog.ts", "utf8");
   const code = src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
@@ -129,6 +132,11 @@ export async function testOrgCatalogDb() {
       assert.deepEqual(r.priceLists.map((l) => [l.name, l.isDefault, l.tiers.map((t) => [t.variantLabel, t.minQuantity, t.unitPrice])]), [["Sỉ chung", true, [["Chả cá thu · Size: 1kg", 10, 250_000]]]]);
       assert.deepEqual(r.quickReplies, [{ title: "Bảng giá", triggers: ["giá"], answer: "Chả cá thu 280k/kg", upsell: false, images: 0 }], "chỉ câu mẫu đang bật");
       assert.deepEqual(r.quickReplySettings, { enabled: true, upsellSet: false }, "chưa chọn câu upsell ⇒ nói thẳng");
+      // Đã chọn câu upsell là câu đang TẮT ⇒ báo «trỏ tới câu đang tắt», không phải «chưa chọn».
+      const [tatQr] = await db.select({ id: schema.salesChatQuickReplies.id }).from(schema.salesChatQuickReplies).where(eq(schema.salesChatQuickReplies.title, "Tắt rồi"));
+      await db.insert(schema.settings).values({ key: "ai.salesChatbot.quickReplies", value: JSON.stringify({ enabled: true, aiMatch: true, upsellReplyId: tatQr.id }) });
+      const r2 = await collectOrgCatalog({ code: ORG, name: "Danh mục thử", isHome: false }, view);
+      assert.deepEqual(r2.quickReplySettings, { enabled: true, upsellSet: false, upsellStale: { title: "Tắt rồi", state: "INACTIVE" } });
       const all = [...catalogLines(r), ...catalogSummary(r)].join("\n");
       assert.ok(!all.includes(BI_MAT) && !all.includes(SDT), `không dòng nào lộ tên khách / SĐT / câu đã tắt:\n${all}`);
       assert.equal(catalogSummary(r)[0], `Tổ chức ${ORG}: 2 sản phẩm · 2 mẫu mã (1 chưa có giá · 0 ẩn · 0 chỉ bán kèm) · nguồn tạo tay`);
