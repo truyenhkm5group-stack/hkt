@@ -288,6 +288,16 @@ async function failuresOf(email: string | null, since: Date = startedAt): Promis
     .where(and(email ? eq(t.identifierHash, authIdentifierHash(email)) : sql`${t.identifierHash} is null`, gte(t.at, since)));
 }
 
+/**
+ * Id các dòng ĐÃ CÓ trước một bước. Bước sau chỉ xét dòng có id MỚI, không xét theo mốc giờ: mốc lấy bằng đồng hồ của TIẾN TRÌNH
+ * kiểm thử còn cột `at` do CSDL đóng dấu, hai đồng hồ lệch nhau vài mili giây là dòng của bước trước lọt vào bước sau. CI 09/10/2026
+ * (PR #743, lượt «ẩn danh») đỏ đúng như vậy: bước «hết hạn» thấy cả dòng RESET_LINK_USED của bước liền trước. Luật 50 / 65: bài kiểm
+ * không được phụ thuộc đồng hồ của máy đang chạy.
+ */
+async function failureIds(email: string | null): Promise<Set<string>> {
+  return new Set((await failuresOf(email)).map((r) => r.id));
+}
+
 /** Một lượt đăng nhập hỏng ⇒ đúng một dòng mới mang lý do + tổ chức mong đợi; câu trả người dùng giữ nguyên. */
 async function expectLoginFailure(label: string, input: { email: string; password: string; org?: string }, want: { reason: string; org: string | null; message: string }) {
   const before = (await failuresOf(input.email)).length;
@@ -412,10 +422,10 @@ async function testLinkReasons() {
   // Mỗi bước chỉ xét dòng ghi SAU mốc của chính bước đó: bước chạy tuần tự nên đó đúng là dòng nó sinh ra,
   // và «đúng MỘT dòng» mới là khẳng định thật (không phải «ít nhất một» giữa dòng của bài khác).
   const reset = async (token: string, want: string, who: string | null) => {
-    const mark = new Date();
+    const seen = await failureIds(who);
     const v = await lookupResetToken(A, token, { ip: nextIp() });
     assert.deepEqual(v, { ok: false, error: PASSWORD_RESET_INVALID }, "liên kết hỏng: câu chung không đổi");
-    const rows = (await failuresOf(who, mark)).filter((x) => x.flow === "RESET_LINK");
+    const rows = (await failuresOf(who)).filter((x) => !seen.has(x.id) && x.flow === "RESET_LINK");
     assert.ok(rows.length === 1 && rows[0].reasonCode === want && rows[0].orgCode === A, `${want}: ${JSON.stringify(rows)}`);
   };
   await reset(tok("u"), "RESET_LINK_USED", ADMIN);
@@ -423,18 +433,18 @@ async function testLinkReasons() {
   await reset(tok("r"), "RESET_LINK_REVOKED", ADMIN);
   await reset(tok("z"), "RESET_LINK_INVALID", null);
   const invite = async (token: string, want: string, who: string) => {
-    const mark = new Date();
+    const seen = await failureIds(who);
     const v = await lookupUserInvite(A, token, { ip: nextIp() });
     assert.deepEqual(v, { ok: false, error: USER_INVITE_INVALID });
-    const rows = (await failuresOf(who, mark)).filter((x) => x.flow === "INVITE");
+    const rows = (await failuresOf(who)).filter((x) => !seen.has(x.id) && x.flow === "INVITE");
     assert.ok(rows.length === 1 && rows[0].reasonCode === want && rows[0].orgCode === A, `${want}: ${JSON.stringify(rows)}`);
   };
   await invite(tok("a"), "INVITE_USED", `moi1@${A}.vn`);
   await invite(tok("x"), "INVITE_EXPIRED", `moi2@${A}.vn`);
   // Đường dẫn trỏ tổ chức không tồn tại ⇒ ORG_NOT_FOUND, KHÔNG mang mã gõ bừa.
-  const ghostMark = new Date();
+  const ghostSeen = await failureIds(null);
   await lookupResetToken(GHOST, tok("q"), { ip: nextIp() });
-  const ghost = (await failuresOf(null, ghostMark)).filter((x) => x.flow === "RESET_LINK");
+  const ghost = (await failuresOf(null)).filter((x) => !ghostSeen.has(x.id) && x.flow === "RESET_LINK");
   assert.ok(ghost.length === 1 && ghost[0].reasonCode === "ORG_NOT_FOUND" && ghost[0].orgCode === null, `ORG_NOT_FOUND: ${JSON.stringify(ghost)}`);
   console.log("✓ Liên kết đặt mật khẩu / mời: đã dùng · hết hạn · đã thay · sai · mã tổ chức lạ — câu chung không đổi, lý do riêng trong sổ");
 }
