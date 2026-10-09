@@ -53,8 +53,9 @@ export default async function AdsPage({ searchParams }: { searchParams: Promise<
   return (
     <div className="space-y-5">
       <PageHeader
-        eyebrow="Tài chính"
+        eyebrow="Marketing"
         title="Quảng cáo"
+        description="Chiến dịch nào nên tăng tiền, giữ, theo dõi hay cắt — và vì sao."
         hint={
           <>
             <p>Nên tăng tiền, giữ, theo dõi hay cắt — và vì sao.</p>
