@@ -1377,3 +1377,4 @@
 {"at":"2026-10-09T23:34:04.984Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"products-shell-v2","detail":"feat/products-shell-v2 @ 6108776f33bf · 1 lệnh kiểm thử"}
 {"at":"2026-10-09T23:34:32.102Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"products-shell-v2","detail":"#757 cho feat/products-shell-v2 @ 6108776f33bf"}
 {"at":"2026-10-09T23:34:47.852Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#757 @ 6108776f33bf · Đọc diff: dữ liệu khách vỏ = rows.map(shellProductRow) từ listProducts (không truy vấn/công thức tồn mới), tồn chưa biết ⇒ «Chưa có phiếu nhập»; số gọn qua một hàm chung; tiêu đề cảnh báo đổi chữ không ảnh hưởng chống trùng (dedupeKey)"}
+{"at":"2026-10-09T23:36:45.891Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","detail":"#754 @ d19951719395 → d803ab8bdc2c (MERGE_NOW · MEDIUM · gates success)"}
