@@ -1,0 +1,8 @@
+{
+  "pr": 731,
+  "sha": "899ca02f79c824de77e6edb4de048387f0d7f6eb",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-09T06:10:12.448Z",
+  "note": "Review Integration Lead: khối Khách hàng ở trang đơn dùng customerOutcomeStats (cùng outcomeStatsOf với trang khách, một truy vấn nhóm theo orders_customer_idx), Pancake còn đúng một dòng tham khảo sau copy.isHome; field order_count/purchased_amount giữ khoá (view/trang/form đã lưu vẫn đọc được), đổi nhãn «(Pancake)», vẫn filterable:false (đã khoá bằng test). Sửa khẳng định detail-pages-shell trỏ "
+}
