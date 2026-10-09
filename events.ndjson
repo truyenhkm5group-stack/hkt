@@ -1252,3 +1252,4 @@
 {"at":"2026-10-09T10:36:36.507Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"CLAIM","mission":"acceptance-prep","detail":"RUNNING · 7 mẫu phạm vi · MEDIUM"}
 {"at":"2026-10-09T10:36:36.507Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"OVERLAP_ACCEPTED","mission":"acceptance-prep","detail":"OVERLAP_ACCEPTED với security-acceptance: phạm vi docs/saas/ACCEPTANCE.md — cách tích hợp: security-acceptance chỉ chạm docs/saas/ACCEPTANCE.md ở mục riêng; nhánh vào sau rebase, giữ cả hai"}
 {"at":"2026-10-09T11:13:36.757Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"work-sources-warm","detail":"perf/work-warm @ df8b9c355e56 · 1 lệnh kiểm thử"}
+{"at":"2026-10-09T11:14:09.168Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"work-sources-warm","detail":"#738 cho perf/work-warm @ df8b9c355e56"}
