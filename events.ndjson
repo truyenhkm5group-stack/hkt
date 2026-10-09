@@ -1347,3 +1347,4 @@
 {"at":"2026-10-09T20:13:22.102Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"inbox-v2-a","detail":"#748 @ ad48fb15a847 → cd5d3635691b (MERGE_NOW · MEDIUM · gates success)"}
 {"at":"2026-10-09T20:38:23.774Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"launch-gate-r6","detail":"#751 @ a575c951fce2 → 5a475bf684eb (MERGE_NOW · LOW · gates success)"}
 {"at":"2026-10-09T20:40:09.350Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"onboarding-v2","detail":"feat/onboarding-v2 @ 92ebea37c4bc · 1 lệnh kiểm thử"}
+{"at":"2026-10-09T20:40:36.892Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"onboarding-v2","detail":"#752 cho feat/onboarding-v2 @ 92ebea37c4bc"}
