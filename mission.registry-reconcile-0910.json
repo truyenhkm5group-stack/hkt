@@ -3,7 +3,7 @@
   "mission_id": "registry-reconcile-0910",
   "title": "Đối chiếu sổ sứ mệnh tổng + checkpoint với main 50293da6 / production (lô #705–#727)",
   "business_goal": "",
-  "status": "RUNNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -22,7 +22,18 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-09T05:55:46.008Z",
-  "updated_at": "2026-10-09T05:55:46.008Z",
-  "last_heartbeat": "2026-10-09T05:55:46.008Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-09T06:08:37.955Z",
+  "last_heartbeat": "2026-10-09T06:08:37.955Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "docs/registry-reconcile-0910",
+    "sha": "732b4424a445d3f1d51ee138da19110dc56898ea",
+    "at": "2026-10-09T06:08:37.955Z",
+    "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+    "title": "Đối chiếu sổ sứ mệnh tổng + checkpoint với main 50293da6 / production (lô #705–#727)",
+    "summary": "Sổ + checkpoint khớp main/production 50293da6",
+    "tests": [
+      "chỉ tài liệu; git diff --check sạch; tổng đếm bằng script (245 mission)"
+    ]
+  }
 }

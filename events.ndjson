@@ -1191,3 +1191,4 @@
 {"at":"2026-10-09T06:00:00.268Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"LEASE_TAKEOVER","detail":"integration-lead từ DESKTOP-56TH98Y:wt-tech-lead-v2 (hết hạn 2026-10-09T05:03:21.210Z)"}
 {"at":"2026-10-09T06:00:38.428Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"commercial-sweep-ban-giao","detail":"#729 cho claude/commercial-sweep-ban-giao @ 29e53a2769b1"}
 {"at":"2026-10-09T06:00:52.718Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#729 @ 29e53a2769b1 · Chỉ tài liệu: bàn giao Round 2 (mục 8), C0 0 · C1 3 còn mở, việc Tech Lead mục 8.5."}
+{"at":"2026-10-09T06:08:37.989Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"registry-reconcile-0910","detail":"docs/registry-reconcile-0910 @ 732b4424a445 · 1 lệnh kiểm thử"}
