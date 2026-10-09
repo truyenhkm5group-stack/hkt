@@ -3,7 +3,7 @@
   "mission_id": "work-page-perf",
   "title": "/work chậm từ ef9b302a (1,0–1,4 s ⇒ 3,1–4,7 s): đo từng hàm trên production rồi sửa nguyên nhân",
   "business_goal": "",
-  "status": "RUNNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "CRITICAL",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -26,7 +26,18 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-09T06:18:45.338Z",
-  "updated_at": "2026-10-09T06:18:45.338Z",
-  "last_heartbeat": "2026-10-09T06:18:45.338Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-09T07:29:03.674Z",
+  "last_heartbeat": "2026-10-09T07:29:03.674Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "perf/work-page-regression",
+    "sha": "22ca1bb971131b92d0646d35bb3a5c1a816f5dc5",
+    "at": "2026-10-09T07:29:03.674Z",
+    "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+    "title": "/work chậm từ ef9b302a (1,0–1,4 s ⇒ 3,1–4,7 s): đo từng hàm trên production rồi sửa nguyên nhân",
+    "summary": "Không tái hiện hồi quy /work từ mã; thêm mục đo /work từng nguồn vào perf-probe",
+    "tests": [
+      "npm test TẤT CẢ KIỂM THỬ ĐẠT; typecheck + lint sạch; probe chạy thử PGlite"
+    ]
+  }
 }
