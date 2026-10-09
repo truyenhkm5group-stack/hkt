@@ -3,7 +3,7 @@
   "mission_id": "work-page-perf",
   "title": "/work chậm từ ef9b302a (1,0–1,4 s ⇒ 3,1–4,7 s): đo từng hàm trên production rồi sửa nguyên nhân",
   "business_goal": "",
-  "status": "INTEGRATING",
+  "status": "VERIFYING",
   "priority": "P2",
   "risk": "CRITICAL",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -28,11 +28,13 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-09T06:18:45.338Z",
-  "updated_at": "2026-10-09T07:52:10.046Z",
+  "updated_at": "2026-10-09T10:24:43.346Z",
   "last_heartbeat": "2026-10-09T07:29:03.674Z",
   "definition_of_done": [],
   "evidence": {
-    "merged": "#734 → 78b6b593207588bd860253c0e1f5c3ff0954b69f"
+    "merged": "#734 → 78b6b593207588bd860253c0e1f5c3ff0954b69f",
+    "verify": "PASS 394ad4c842973811ebe3d0857de5e294c31893f9 2026-10-09T10:24:33.185Z",
+    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/37916081737"
   },
   "handoff": {
     "branch": "perf/work-page-regression",
