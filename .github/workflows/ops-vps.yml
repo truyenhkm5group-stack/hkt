@@ -16,6 +16,7 @@ on:
           - disk                # ổ đĩa còn bao nhiêu và ai đang chiếm chỗ (Docker, backup, log)
           - docker-prune        # giải phóng ổ đĩa: gỡ ảnh Docker cũ (KHÔNG đụng dữ liệu, KHÔNG dừng dịch vụ)
           - logs                # 200 dòng log gần nhất của app/scheduler/caddy
+          - chatbot-status      # bot chat theo TỪNG PAGE: bật/tắt, chạy thử, số trả lời, lỗi gần nhất (đã che số, không in nội dung tin) — CHỈ ĐỌC
           - sync-pancake-all    # kho → sản phẩm → đơn (lịch sử) → khách → đổi trả → nhật ký kho
           - sync-pancake-orders # đơn thay đổi gần đây
           - sync-vtp-tracking   # tra cứu trạng thái vận đơn Viettel Post
@@ -496,7 +497,7 @@ jobs:
             }
 
             # ─── PHÂN LOẠI: mặc định là GHI, và cờ ghi đè lên tên ───
-            DOC_NHE="status perf disk logs db-query backup-status pitr-status"
+            DOC_NHE="status perf disk logs chatbot-status db-query backup-status pitr-status"
             DOC_PROBE="check-integrations vtp-debug vtp-probe vtp-web-probe phone-probe pages-debug meta-id-probe meta-ad-post-probe vtp-capability ads-level-probe"
             DOC_NANG="platform-secrets-verify verify smoke session-verify perf-probe perf-audit kpi-snapshot explain-stock outcome-explain outcome-parity returns-parity reason-coverage reason-backfill cogs-drift profit-verify marketing-calibrate marketing-explain payroll-reconcile fanpage-evidence-backfill care-false-reopen care-outcome-before-open care-waiting-reconcile cs-rule-update cs-stale sepay-reconcile cod-rebuild cod-status-repair vtp-return-status-repair agent-run-reattach vtp-rebuild-state vtp-replay-files vtp-replay-explain vtp-manual-verify vtp-statement-peek cod-statement-audit stock-wait-summary org-summary company-os-summary velocity-compare confirm-funnel-audit returns-hmt ai-check platform-ai-model-probe platform-ai-bench backup restore-drill restore-drill-org pitr-basebackup pitr-drill org-order-audit org-ai-cutover org-catalog org-offboard org-prepaid-ai saas-v1-migration identity-reconcile saas-acceptance ops-signals-check"
 
@@ -593,6 +594,9 @@ jobs:
               logs)
                 # Che cả dữ liệu cá nhân (email, IP, SĐT), không chỉ khoá webhook — xem `che_log`.
                 $C logs --tail=200 app scheduler caddy 2>&1 | che_log ;;
+              chatbot-status)
+                # CHỈ ĐỌC: bot tự trả trạng thái qua localhost; script đã che số dài / chuỗi trong ngoặc, rồi qua che_log.
+                docker exec erp-chatbot node scripts/ops-status.js 2>&1 | che_log ;;
               sync-pancake-all)
                 docker exec erp-app npm run --silent sync -- pancake-all --backfill --days="$DAYS" ;;
               sync-pancake-orders)
