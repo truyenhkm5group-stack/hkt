@@ -35,18 +35,18 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-08T23:24:16.812Z",
-  "updated_at": "2026-10-09T02:12:04.576Z",
-  "last_heartbeat": "2026-10-09T02:11:07.245Z",
+  "updated_at": "2026-10-09T03:35:52.594Z",
+  "last_heartbeat": "2026-10-09T03:35:52.594Z",
   "definition_of_done": [],
   "handoff": {
     "branch": "claude/erp-chi-tiet-duoi-dai",
-    "sha": "30ddd0f53d5870d7ce7b3ba9c477b84aa05feaeb",
-    "at": "2026-10-09T02:11:07.245Z",
+    "sha": "9ebca5027f4eba6a9c0656bf4177dae9c03b4ca2",
+    "at": "2026-10-09T03:35:52.594Z",
     "actor": "DESKTOP-56TH98Y:wt-tail",
     "title": "Trang chi tiết ERP đuôi dài: «%» trên đường dẫn thôi gây lỗi 500 ở 4 trang cài đặt, tiền theo formatVND, mã Google / trường thô ở khách sỉ thành tiếng Việt, đầu trang xuống dòng 390 px, phiếu sản xuất cuộn ngang, lượt nhập VTP hỏng thôi in 9 ô 0",
     "summary": "",
     "tests": [
-      "tsc + eslint sạch; npm test ĐẦY ĐỦ «TẤT CẢ KIỂM THỬ ĐẠT» EXIT=0 trên 30ddd0f5 (09/10 09:10); erp-detail-tail: decodeRouteParam + 4 trang cài đặt, khoá staffEditedFields dò từ mã, phiếu sản xuất cuộn ngang, lượt nhập ERROR; đột biến decodeURIComponent / {e.kind} ⇒ đỏ"
+      "npm test ĐẦY ĐỦ «TẤT CẢ KIỂM THỬ ĐẠT» trên 30ddd0f5 (trước rebase); rebase lên ef9b302a chỉ xung đột thêm-thêm ở sync-fixtures (giữ testDirectConnectGate + testShellTypography + testErpDetailTail); erp-detail-tail chạy lại trên SHA mới: đạt"
     ]
   }
 }
