@@ -1221,3 +1221,4 @@
 {"at":"2026-10-09T07:29:29.488Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"work-page-perf","detail":"#734 cho perf/work-page-regression @ 22ca1bb97113"}
 {"at":"2026-10-09T07:29:44.199Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#734 @ 22ca1bb97113 · Chỉ script đo (perf-probe thêm mục /work: từng hàm nền, từng nguồn qua collectWorkItems, cảnh báo theo kind, getMyWork nguội/ấm); không câu ghi; mục cũ giữ nguyên. Kết luận đo PGlite: không hồi quy từ mã d23c0deb..ef9b302a."}
 {"at":"2026-10-09T07:34:04.624Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"shell-staff-roles","detail":"fix/shell-staff-roles @ 2cbbb307d6e5 · 1 lệnh kiểm thử"}
+{"at":"2026-10-09T07:34:29.040Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"shell-staff-roles","detail":"#735 cho fix/shell-staff-roles @ 2cbbb307d6e5"}
