@@ -26,7 +26,8 @@ const afterAiSub = (perConversation: boolean) => (a: ArmStats) =>
   (perConversation ? a.profitAfterAiPerConversationVnd : a.profitAfterAiVnd) === null ? emptyProfitReason(a, { perConversation, needsCost: true }) : aiCostIsLowerBound(a) ? "cận trên (chi phí AI là cận dưới)" : null;
 
 /** Khối «AI vs Người theo nhánh thử nghiệm» của màn Hiệu quả — chỉ hiện khi đã có hội thoại được chia nhánh. */
-export function ExperimentBlock({ report, days, from = null, to = null }: { report: ExperimentReport; days: number; from?: string | null; to?: string | null }) {
+/** `shell`: vỏ Chốt Đơn — chỉ đổi CHỮ (không mã khoá thử nghiệm / «ORDER_OUTCOME» / «ERP»), số và cách tính giữ nguyên. */
+export function ExperimentBlock({ report, days, from = null, to = null, shell = false }: { report: ExperimentReport; days: number; from?: string | null; to?: string | null; shell?: boolean }) {
   const { AI: ai, HUMAN: human } = report.arms;
   // Chênh lệch LÃI đọc từ báo cáo (đã chặn khi thử nghiệm dừng) — không tự tính lại ở đây.
   const grossLift = report.profitLifts.grossProfitPerConversation;
@@ -70,12 +71,12 @@ export function ExperimentBlock({ report, days, from = null, to = null }: { repo
   return (
     <SectionCard
       title="AI vs Người — theo nhánh thử nghiệm"
-      description={`Khoá ${report.key} · ${report.running ? `đang chạy, ${report.aiSharePct}% hội thoại mới cho AI` : "đã dừng"}${report.startedAt ? ` · từ ${formatDateTime(report.startedAt)}` : ""}`}
+      description={`${shell ? "" : `Khoá ${report.key} · `}${report.running ? `đang chạy, ${report.aiSharePct}% hội thoại mới cho AI` : "đã dừng"}${report.startedAt ? ` · từ ${formatDateTime(report.startedAt)}` : ""}`}
       hint={
         <div className="space-y-1.5 text-xs leading-5">
           <p>Hai nhánh chia NGẪU NHIÊN theo hội thoại và được ghim từ lượt đầu, nên so sánh được. Đọc theo ý định điều trị: đơn gắn với hội thoại thuộc nhánh nào tính cho nhánh đó. Toàn bộ thời gian thử nghiệm — không theo bộ lọc kỳ.</p>
-          <p>Nhánh người chỉ có đơn khi «AI ghi đơn hộ nhân viên» bật (fanpage). Tắt ⇒ «chưa đo», không phải 0. Tỷ lệ dưới {MIN_ARM_SAMPLE} hội thoại in «—». Kết cục đơn theo ORDER_OUTCOME.</p>
-          <p>Lãi gộp đã giao = doanh thu đã giao − giá vốn, cùng đường giá vốn với Báo cáo lợi nhuận (giá vốn đã chốt lúc giao). Đơn chưa có giá vốn KHÔNG cộng vào lãi với giá vốn 0 — đếm riêng; còn đơn như vậy thì «lãi / hội thoại» và chênh lệch để trống: lãi chưa đủ thì không chia, không so. Chưa trừ chi phí AI, nhân sự, cước, quảng cáo. Thử nghiệm đã dừng ⇒ không so chênh lệch lãi: ERP chưa lưu lúc dừng nên đơn và tiền AI về sau vẫn cộng vào nhánh — số từng nhánh vẫn in.</p>
+          <p>Nhánh người chỉ có đơn khi «AI ghi đơn hộ nhân viên» bật (fanpage). Tắt ⇒ «chưa đo», không phải 0. Tỷ lệ dưới {MIN_ARM_SAMPLE} hội thoại in «—». {shell ? "Đơn tính là giao thành công / hoàn theo chứng từ của đơn vị vận chuyển và tiền thực thu." : "Kết cục đơn theo ORDER_OUTCOME."}</p>
+          <p>Lãi gộp đã giao = doanh thu đã giao − giá vốn, cùng đường giá vốn với Báo cáo lợi nhuận (giá vốn đã chốt lúc giao). Đơn chưa có giá vốn KHÔNG cộng vào lãi với giá vốn 0 — đếm riêng; còn đơn như vậy thì «lãi / hội thoại» và chênh lệch để trống: lãi chưa đủ thì không chia, không so. Chưa trừ chi phí AI, nhân sự, cước, quảng cáo. Thử nghiệm đã dừng ⇒ không so chênh lệch lãi: {shell ? "hệ thống" : "ERP"} chưa lưu lúc dừng nên đơn và tiền AI về sau vẫn cộng vào nhánh — số từng nhánh vẫn in.</p>
           {report.withMoney ? (
             <p>
               Chi phí AI = token thật × bảng giá model × tỷ giá {formatNumber(report.rateVndPerUsd)} ₫/USD — ƯỚC TÍNH: mọi lượt AI của hội thoại thuộc nhánh (cả lượt AI ghi đơn hộ nhân viên ở nhánh người), tính từ NGÀY hội thoại được chia nhánh. Còn lượt chưa định giá ⇒ chi phí là cận dưới, lãi sau AI là cận trên; lãi gộp chưa đủ thì lãi sau AI cũng để trống. Chưa trừ chi phí nhân sự (xem «tiết kiệm nhân sự» ở khung Chi phí AI & ROI), cước, quảng cáo.

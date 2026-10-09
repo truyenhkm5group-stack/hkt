@@ -462,12 +462,12 @@ const SHELL_COPY_FILES = [
 const SHELL_FORBIDDEN = /\bERP\b|\bAPI\b|\bTEST\b|\bField\b|\b[Mm]odule\b|\b[Ww]ebhook\b|\b[Cc]onnector\b/;
 const SHELL_COPY_EXEMPT: [string, string, string][] = [
   ["app/(dashboard)/ai/sales-chatbot/page.tsx", "mục «Webhook» (tên mục của Pancake)", "Tên MỤC trong Pancake mà chủ shop phải bấm — đổi chữ là hướng dẫn sai."],
-  ["app/(dashboard)/ai/sales-chatbot/page.tsx", "developers.zalo.me:", "Tên mục / công cụ của Zalo Developers (Webhook · API Explorer) mà chủ shop phải bấm."],
-  ["app/(dashboard)/ai/sales-chatbot/page.tsx", "Trong Zalo Developers → Webhook", "Tên mục của Zalo Developers mà chủ shop phải bấm."],
+  ["app/(dashboard)/ai/sales-chatbot/page.tsx", "Trang nhà phát triển của Zalo (developers.zalo.me)", "Tên mục / công cụ của Zalo trong «…» (Webhook · API Explorer) mà chủ shop phải bấm — câu quanh nó đã nói bằng tiếng Việt."],
+  ["app/(dashboard)/ai/sales-chatbot/page.tsx", "mục «Webhook» (tên mục của Zalo)", "Tên mục của Zalo mà chủ shop phải bấm."],
   ["app/(dashboard)/ai/sales-chatbot/page.tsx", "c.channel !== \"TEST\"", "Mã so sánh kênh, không phải chữ hiển thị (bộ quét bắt nhầm đoạn mã giữa hai thẻ)."],
-  ["components/connectors/connector-group-table.tsx", "Chưa luồng nào của ERP dùng kết nối này", "Chỉ dựng khi DTO có `consumers` — DTO của khách bị lọc ở máy chủ (`customerConnectionsView`)."],
   ["components/connectors/connector-group-table.tsx", "{row.webhook ? (", "Đoạn mã trong khối `row.why ?` — `why` / `webhook` chỉ workspace nhà nhận."],
   ["components/connectors/connector-group-table.tsx", "Webhook", "Dòng «Webhook <đường dẫn>» trong khối `row.why ?` — chỉ workspace nhà."],
+  ["app/(dashboard)/setup/page.tsx", "Module đang bật", "Nằm trong `{shell ? null : (…)}` — vỏ thấy tám mục ở khối «Menu», không thấy danh sách module."],
   ["app/(dashboard)/setup/page.tsx", "Bật / tắt module", "Nằm sau `shellAllows(user, \"/settings/modules\")` — vỏ chặn trang ấy nên không bao giờ dựng."],
   ["app/module-disabled/page.tsx", "Module chưa bật", "Tiêu đề tab của ERP; vỏ dùng SHELL_TITLE."],
   ["app/module-disabled/page.tsx", "[module-disabled]", "Nhãn nhật ký máy chủ (console.warn), không hiện ra màn hình."],

@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { jwtVerify, SignJWT } from "jose";
 import { hostSlug } from "@/lib/platform/host";
-import { BRAND_ASSET_PREFIX, brandAppOrigin, brandIconPath, brandOfRequest, ERP_SITE_BRAND_HEADER, matchSite, SITE_LEGAL_PATHS, SITE_PAGE_PATH, siteEnvFromProcess, siteRoute, type SiteEnv } from "@/lib/platform/site-host";
+import { BRAND_ASSET_PREFIX, BRAND_HINT_PARAM, brandAppOrigin, brandIconPath, brandOfRequest, ERP_SITE_BRAND_HEADER, matchSite, SITE_LEGAL_PATHS, SITE_PAGE_PATH, siteEnvFromProcess, siteRoute, type SiteEnv } from "@/lib/platform/site-host";
 import { WIDGET_EMBED_PATH, WIDGET_SCRIPT_PATH } from "@/lib/sales-chatbot/widget";
 import {
   ERP_HEADER_PREFIX,
@@ -118,7 +118,8 @@ function serverHeaders(request: NextRequest, pathname: string): Headers {
   // Thương hiệu của host (vnxcommerce.com ⇒ vnx, chotdontudong.com · www · app ⇒ chotdon) — cùng luật "chỉ máy chủ đặt".
   // `brandOfRequest` đọc `x-forwarded-host` trước `host`: lượt RSC máy chủ tự xin sau `redirect()` của server action đi tới
   // `localhost:<cổng>` (Node bỏ header Host), chỉ `x-forwarded-host` còn giữ host thật — `brandHost` (lib/platform/site-host.ts).
-  headers.set(ERP_SITE_BRAND_HEADER, brandOfRequest((name) => request.headers.get(name), siteEnvFromProcess()));
+  // Lượt ấy thiếu cả `x-forwarded-host` ⇒ gợi ý `?brand=` action gắn vào đích chuyển hướng (danh sách trắng; host đã biết thắng).
+  headers.set(ERP_SITE_BRAND_HEADER, brandOfRequest((name) => request.headers.get(name), siteEnvFromProcess(), request.nextUrl.searchParams.get(BRAND_HINT_PARAM)));
   return headers;
 }
 

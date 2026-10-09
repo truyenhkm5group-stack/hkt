@@ -624,6 +624,7 @@ import { testShellTypography } from "./shell-typography.test";
 import { testErpDetailTail } from "./erp-detail-tail.test";
 import { testErpFormNames } from "./erp-form-names.test";
 import { testDetailPagesShell } from "./detail-pages-shell.test";
+import { testShellCopyR3 } from "./shell-copy-r3.test";
 
 async function main() {
   await ensureMigrated();
@@ -3065,6 +3066,9 @@ async function main() {
   testErpFormNames();
   // Trang chi tiết đơn / khách / hội thoại: không chữ, bộ đếm, ô tiền Pancake ở tổ chức không Pancake (Commercial Sweep P0 động).
   testDetailPagesShell();
+  // Vỏ Chốt Đơn C1 #6 · #7: /login sau redirect() của server action mang thương hiệu của host; chữ kỹ thuật (webhook · token ·
+  // ERP · API · TEST · field · connector · module · Viettel) không lộ ở nhánh người vỏ thấy — quét cây cú pháp, miễn trừ có lý do.
+  testShellCopyR3();
   // Nền tảng · phiên & RBAC (agent C): claim org, cổng module, platform:operate, đăng nhập theo tổ chức. Tự cấp
   // tổ chức `pr-` (CSDL riêng) và tự dọn; đứng cạnh bài ngữ cảnh vì cùng lý do.
   await testPlatformRbac();

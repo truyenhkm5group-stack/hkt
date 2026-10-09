@@ -40,6 +40,8 @@ const BUBBLE: Record<TimelineItem["side"], string> = {
   PAGE: "bg-sky-600 text-white rounded-br-md dark:bg-sky-700",
 };
 const SIDE_LABEL: Record<TimelineItem["side"], string> = { CUSTOMER: "Khách", BOT: "Bot", STAFF: "Nhân viên", PAGE: "Nhân viên / tự động (ngoài ERP)" };
+/** Vỏ Chốt Đơn: cùng bốn phía, chỉ đổi chữ — người dùng vỏ không biết «ERP» là gì. */
+const SHELL_SIDE_LABEL: Record<TimelineItem["side"], string> = { ...SIDE_LABEL, PAGE: "Nhân viên / tự động (ngoài hệ thống)" };
 /** Tin cùng phía cách nhau ít hơn chừng này ⇒ gộp dưới một tên người gửi. */
 const GROUP_GAP_MS = 5 * 60_000;
 
@@ -54,7 +56,7 @@ function dayLabel(key: string): string {
 
 type Row = { kind: "day"; key: string; label: string } | { kind: "msg"; m: TimelineItem; head: boolean; author: string };
 
-function layout(items: readonly TimelineItem[]): Row[] {
+function layout(items: readonly TimelineItem[], sideLabel: Record<TimelineItem["side"], string>): Row[] {
   const out: Row[] = [];
   let lastDay = "";
   let prev: TimelineItem | null = null;
@@ -65,8 +67,8 @@ function layout(items: readonly TimelineItem[]): Row[] {
       lastDay = day;
       prev = null;
     }
-    const author = m.author ?? SIDE_LABEL[m.side];
-    const head = !prev || prev.side !== m.side || (prev.author ?? SIDE_LABEL[prev.side]) !== author || new Date(m.at).getTime() - new Date(prev.at).getTime() > GROUP_GAP_MS;
+    const author = m.author ?? sideLabel[m.side];
+    const head = !prev || prev.side !== m.side || (prev.author ?? sideLabel[prev.side]) !== author || new Date(m.at).getTime() - new Date(prev.at).getTime() > GROUP_GAP_MS;
     out.push({ kind: "msg", m, head, author });
     prev = m;
   }
@@ -80,6 +82,7 @@ export function InboxThreadView({
   backHref,
   ordersSummary,
   canDecideOrders = false,
+  shell = false,
 }: {
   thread: InboxThread;
   me: string;
@@ -88,6 +91,8 @@ export function InboxThreadView({
   ordersSummary: (InboxOrder & { totalText: string })[];
   /** Người này xác nhận / huỷ đơn tay được (cổng sửa đơn — máy chủ tính). */
   canDecideOrders?: boolean;
+  /** Vỏ Chốt Đơn — chỉ đổi CHỮ, không đổi hành vi. */
+  shell?: boolean;
 }) {
   const [text, setText] = useState("");
   const [requestKey, setRequestKey] = useState(newKey);
@@ -240,7 +245,7 @@ export function InboxThreadView({
 
   const mine = thread.assigneeUserId === me;
   const w = thread.window;
-  const rows = layout(thread.items);
+  const rows = layout(thread.items, shell ? SHELL_SIDE_LABEL : SIDE_LABEL);
 
   return (
     // `minmax(0,1fr)` cả khi chỉ có một cột: rãnh `auto` mặc định nở theo nội dung (tin dài, hàng nút) ⇒ tràn ngang trên điện thoại.
@@ -420,7 +425,7 @@ export function InboxThreadView({
                 <button type="button" className="inline-flex items-center gap-1 text-violet-700 hover:underline disabled:opacity-50 dark:text-violet-300" disabled={!!pending} onClick={() => void suggest()}>
                   {pending === "suggest" ? <Loader2 className="size-3.5 animate-spin" /> : <Sparkles className="size-3.5" />} AI gợi ý câu trả lời
                 </button>
-                <ComposerTools conversationId={thread.id} disabled={!!pending} onInsert={insertSnippet} />
+                <ComposerTools conversationId={thread.id} disabled={!!pending} onInsert={insertSnippet} shell={shell} />
                 {w.kind === "PAID" ? (
                   <label className="flex items-center gap-1 font-medium text-amber-800 dark:text-amber-200">
                     <input type="checkbox" checked={confirmPaid} onChange={(e) => setConfirmPaid(e.target.checked)} /> Gửi tin tính phí

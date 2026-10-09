@@ -9,6 +9,8 @@ import { clientIpFrom } from "@/lib/auth/client-ip";
 import { LOGIN_BAD_CREDENTIALS, loginOrganizationsCheck, strongestLoginFailure, verifyLogin, type LoginFailureNote, type LoginFailureReason } from "@/lib/auth/login";
 import { clearLoginFailures, loginAllowed, loginLockOf, loginThrottleKeys, recordLoginFailure } from "@/lib/auth/login-throttle";
 import { landingAfterSignIn } from "@/lib/saas/shell-landing";
+import { hostBrand } from "@/lib/platform/host-brand";
+import { withBrandHint } from "@/lib/platform/site-host";
 import { createSession, destroySession, getSession } from "@/lib/auth/session";
 import { OrgContextError } from "@/lib/platform/context";
 import { findOrganization } from "@/lib/platform/organizations";
@@ -111,5 +113,6 @@ export async function logoutAction() {
     if (!(error instanceof OrgContextError)) throw error;
   }
   await destroySession();
-  redirect("/login");
+  // Đăng xuất trên host Chốt Đơn về màn đăng nhập Chốt Đơn ngay lượt đầu (C1 #6 — `withBrandHint`).
+  redirect(withBrandHint("/login", await hostBrand()));
 }

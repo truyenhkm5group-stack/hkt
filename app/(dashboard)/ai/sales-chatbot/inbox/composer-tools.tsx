@@ -22,7 +22,11 @@ import { cn } from "@/lib/utils";
  * bấm một dòng khác. Mỗi lượt mở / đóng / bấm đánh một số lượt (`pickSeq`) — kết quả về mà số đã đổi thì BỎ, không chèn.
  */
 
-type Props = { conversationId: string; disabled: boolean; onInsert: (snippet: string) => boolean };
+/** `shell`: vỏ Chốt Đơn — chỉ đổi CHỮ («sổ sản phẩm» thay «ERP»), câu của ERP giữ nguyên. */
+type Props = { conversationId: string; disabled: boolean; onInsert: (snippet: string) => boolean; shell?: boolean };
+
+/** Nơi giá / tồn được đọc ra, theo người đọc. */
+const priceSource = (shell: boolean | undefined) => (shell ? "sổ sản phẩm" : "ERP");
 
 /** Gõ xong chừng này mới hỏi máy chủ. */
 const QUICK_DEBOUNCE_MS = 200;
@@ -47,7 +51,7 @@ export function ComposerTools(props: Props) {
   );
 }
 
-function QuickReplyPicker({ conversationId, disabled, onInsert }: Props) {
+function QuickReplyPicker({ conversationId, disabled, onInsert, shell }: Props) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [items, setItems] = useState<ComposerQuickReply[]>([]);
@@ -186,7 +190,7 @@ function QuickReplyPicker({ conversationId, disabled, onInsert }: Props) {
           </CommandList>
           <div className={FOOT}>
             {active?.imageCount ? <p className="text-amber-700 dark:text-amber-300">Câu này có {active.imageCount} ảnh — ảnh KHÔNG đi kèm khi chèn (chỉ chữ). Cần ảnh thì bấm nút ảnh cạnh ô soạn.</p> : null}
-            {active?.needsErp ? <p>Giá / tồn / phí ship trong câu điền từ ERP lúc bấm — ERP chưa có số thì không chèn.</p> : null}
+            {active?.needsErp ? <p>{shell ? "Giá / tồn / phí ship trong câu điền từ sổ sản phẩm của shop lúc bấm — sổ chưa có số thì không chèn." : "Giá / tồn / phí ship trong câu điền từ ERP lúc bấm — ERP chưa có số thì không chèn."}</p> : null}
             <p>Chèn chữ vào ô soạn để sửa rồi bấm Gửi — không tự gửi · Enter chèn · Esc đóng.</p>
           </div>
         </Command>
@@ -195,7 +199,8 @@ function QuickReplyPicker({ conversationId, disabled, onInsert }: Props) {
   );
 }
 
-function ProductPicker({ conversationId, disabled, onInsert }: Props) {
+function ProductPicker({ conversationId, disabled, onInsert, shell }: Props) {
+  const src = priceSource(shell);
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [items, setItems] = useState<ComposerProductHit[]>([]);
@@ -277,7 +282,7 @@ function ProductPicker({ conversationId, disabled, onInsert }: Props) {
       inserted.current = true;
       toggle(false);
       const notes = [
-        r.product.priceText !== p.priceText ? `Giá trong ERP vừa đổi — đã chèn giá mới: ${r.product.priceText ?? "chưa có giá"}.` : r.product.price === null ? "Mẫu mã chưa có giá trong ERP — dòng chèn không kèm giá." : null,
+        r.product.priceText !== p.priceText ? `Giá trong ${src} vừa đổi — đã chèn giá mới: ${r.product.priceText ?? "chưa có giá"}.` : r.product.price === null ? `Mẫu mã chưa có giá trong ${src} — dòng chèn không kèm giá.` : null,
         r.product.stockNote,
       ].filter((x): x is string => Boolean(x));
       if (notes.length) toast.message(notes.join(" "));
@@ -294,7 +299,7 @@ function ProductPicker({ conversationId, disabled, onInsert }: Props) {
   return (
     <Popover open={open} onOpenChange={toggle}>
       <PopoverTrigger asChild>
-        <button type="button" className={TRIGGER} disabled={disabled} aria-label="Chèn dòng sản phẩm (giá đọc từ ERP) vào ô soạn" data-testid="inbox-composer-products">
+        <button type="button" className={TRIGGER} disabled={disabled} aria-label={`Chèn dòng sản phẩm (giá đọc từ ${src}) vào ô soạn`} data-testid="inbox-composer-products">
           <Package className="size-3.5" /> Sản phẩm
         </button>
       </PopoverTrigger>
@@ -338,9 +343,9 @@ function ProductPicker({ conversationId, disabled, onInsert }: Props) {
           </CommandList>
           <div className={FOOT}>
             {active ? <p className="break-words text-foreground">Sẽ chèn: «{active.line}» — tồn (nếu đọc được) thêm lúc bấm.</p> : null}
-            {active && active.price === null ? <p className="text-amber-700 dark:text-amber-300">Mẫu mã chưa có giá trong ERP — dòng chèn không kèm giá.</p> : null}
+            {active && active.price === null ? <p className="text-amber-700 dark:text-amber-300">Mẫu mã chưa có giá trong {src} — dòng chèn không kèm giá.</p> : null}
             {priceNote && items.length ? <p>{priceNote}</p> : null}
-            <p>Giá · tồn đọc lại từ ERP lúc bấm · Enter chèn · Esc đóng.</p>
+            <p>Giá · tồn đọc lại từ {src} lúc bấm · Enter chèn · Esc đóng.</p>
           </div>
         </Command>
       </PopoverContent>

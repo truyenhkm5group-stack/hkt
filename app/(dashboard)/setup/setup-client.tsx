@@ -61,8 +61,11 @@ export function DomainForm({ current, baseDomain, locked }: { current: string | 
   );
 }
 
-/** Danh sách kiểm + nút Xuất bản + «Mở ERP của tôi». Máy chủ kiểm LẠI toàn bộ khi bấm — màn hình chỉ là bản đọc. */
-export function PublishPanel({ state, checks, ready, erpUrl, chatUrl, fallbackUrl, orgCode }: { state: PublishState; checks: PublishCheck[]; ready: boolean; erpUrl: string | null; chatUrl: string | null; fallbackUrl: string; orgCode: string }) {
+/**
+ * Danh sách kiểm + nút Xuất bản + «Mở ERP của tôi». Máy chủ kiểm LẠI toàn bộ khi bấm — màn hình chỉ là bản đọc. `shell` (vỏ Chốt
+ * Đơn): chỉ đổi CHỮ của nút — «cửa hàng» thay «ERP».
+ */
+export function PublishPanel({ state, checks, ready, erpUrl, chatUrl, fallbackUrl, orgCode, shell = false }: { state: PublishState; checks: PublishCheck[]; ready: boolean; erpUrl: string | null; chatUrl: string | null; fallbackUrl: string; orgCode: string; shell?: boolean }) {
   const router = useRouter();
   const [pending, start] = useTransition();
   const [result, setResult] = useState<{ url: string | null; message: string } | null>(null);
@@ -104,13 +107,13 @@ export function PublishPanel({ state, checks, ready, erpUrl, chatUrl, fallbackUr
           {openUrl ? (
             <Button asChild data-testid="open-my-erp">
               <a href={openUrl} target="_blank" rel="noreferrer">
-                <ExternalLink /> MỞ ERP CỦA TÔI
+                <ExternalLink /> {shell ? "MỞ CỬA HÀNG CỦA TÔI" : "MỞ ERP CỦA TÔI"}
               </a>
             </Button>
           ) : (
             <Button asChild variant="outline" data-testid="open-my-erp">
               <a href={fallbackUrl} target="_blank" rel="noreferrer">
-                <ExternalLink /> MỞ ERP CỦA TÔI (mã tổ chức «{orgCode}»)
+                <ExternalLink /> {shell ? "MỞ CỬA HÀNG CỦA TÔI" : "MỞ ERP CỦA TÔI"} ({shell ? "mã cửa hàng" : "mã tổ chức"} «{orgCode}»)
               </a>
             </Button>
           )}

@@ -14,6 +14,7 @@ import { sendSignupOtp, sendTestOtp, setPhoneOtpSetting, type PhoneOtpSetting, t
 import { readOAuthToken, SOCIAL_SIGNUP_COOKIE, type SocialProfile } from "@/lib/auth/oauth";
 import { platformOperatorDenial } from "@/lib/platform-ui/module-toggle";
 import { hostBrand } from "@/lib/platform/host-brand";
+import { withBrandHint } from "@/lib/platform/site-host";
 import { landingAfterSignIn } from "@/lib/saas/shell-landing";
 
 /**
@@ -75,7 +76,7 @@ export async function createOrganizationAction(draft: unknown): Promise<{ ok: tr
   }
   // Đích cuối một bước (lib/saas/shell-landing.ts, F-01): người thuộc vỏ Chốt Đơn vào thẳng trang nhà của vỏ thay vì `/` mà
   // layout chuyển hướng (trang trắng). Không thuộc vỏ ⇒ `/` như cũ.
-  redirect(result.loggedIn ? await landingAfterSignIn("/") : "/login");
+  redirect(result.loggedIn ? await landingAfterSignIn("/") : withBrandHint("/login", brand));
 }
 
 /**
@@ -92,13 +93,14 @@ export async function quickSignupAction(input: unknown): Promise<{ error: string
   if (who.kind === "operator") return { error: "Người vận hành tạo hộ khách bằng trình hướng dẫn đầy đủ (/start?day-du=1)." };
   const store = await cookies();
   const social = await readOAuthToken<SocialProfile>("erp-social-signup", store.get(SOCIAL_SIGNUP_COOKIE)?.value);
-  const r = await quickSignup(input, who, { issue: createSession, social, brand: await hostBrand() });
+  const brand = await hostBrand();
+  const r = await quickSignup(input, who, { issue: createSession, social, brand });
   if ("error" in r) return r;
   // Hồ sơ Google / Facebook đã dùng xong — cho cookie hết hạn (không phải dữ liệu nghiệp vụ).
   store.set(SOCIAL_SIGNUP_COOKIE, "", { path: "/", maxAge: 0 });
   // Đích cuối một bước (lib/saas/shell-landing.ts): cửa hàng Chốt Đơn vào thẳng trang nhà của vỏ — `redirect("/")` cho họ từng
   // là trang trắng (F-01). Không thuộc vỏ ⇒ `/` như cũ.
-  redirect(r.loggedIn ? await landingAfterSignIn("/") : "/login");
+  redirect(r.loggedIn ? await landingAfterSignIn("/") : withBrandHint("/login", brand));
 }
 
 // ─── Người vận hành nền tảng (`/platform`) ───

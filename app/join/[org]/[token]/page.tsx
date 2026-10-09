@@ -5,6 +5,7 @@ import { MailX } from "lucide-react";
 import { JoinForm } from "@/app/join/[org]/[token]/join-form";
 import { clientIpFrom } from "@/lib/auth/client-ip";
 import { formatDateTime } from "@/lib/format";
+import { hostBrand } from "@/lib/platform/host-brand";
 import { lookupUserInvite } from "@/lib/users/invites";
 
 export const dynamic = "force-dynamic";
@@ -44,6 +45,8 @@ export default async function JoinPage({ params }: { params: Promise<{ org: stri
     );
   }
 
+  // Host Chốt Đơn (C1 #7): người được mời là nhân viên của một CỬA HÀNG, không phải người dùng «ERP» — chỉ đổi CHỮ theo host.
+  const chotdon = (await hostBrand()) === "chotdon";
   return (
     <main className="flex min-h-screen items-center justify-center p-4 sm:p-6">
       <div className="w-full max-w-md space-y-5 rounded-2xl border bg-card p-6 shadow-sm">
@@ -51,13 +54,13 @@ export default async function JoinPage({ params }: { params: Promise<{ org: stri
           <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">Lời mời tham gia</p>
           <h1 className="text-xl font-bold">{look.orgName}</h1>
           <p className="text-sm text-muted-foreground">
-            Bạn được mời vào ERP của tổ chức này với email <b className="text-foreground">{look.email}</b>, vai trò <b className="text-foreground">{look.roleLabel}</b>. Đặt tên và mật khẩu để tạo tài khoản — xong là vào thẳng ERP.
+            Bạn được mời vào {chotdon ? "cửa hàng" : "ERP của tổ chức"} này với email <b className="text-foreground">{look.email}</b>, vai trò <b className="text-foreground">{look.roleLabel}</b>. Đặt tên và mật khẩu để tạo tài khoản — xong là vào thẳng {chotdon ? "ứng dụng" : "ERP"}.
           </p>
           <p className="text-xs text-muted-foreground">
-            Liên kết dùng một lần, hết hạn lúc {formatDateTime(look.expiresAt)}. Lần sau đăng nhập bằng email trên, mã tổ chức <span className="font-mono">{look.orgCode}</span>.
+            Liên kết dùng một lần, hết hạn lúc {formatDateTime(look.expiresAt)}. Lần sau đăng nhập bằng email trên, {chotdon ? "mã cửa hàng" : "mã tổ chức"} <span className="font-mono">{look.orgCode}</span>.
           </p>
         </div>
-        <JoinForm org={look.orgCode} token={token} email={look.email} />
+        <JoinForm org={look.orgCode} token={token} email={look.email} chotdon={chotdon} />
         <p className="text-center text-[11px] text-muted-foreground">Không phải bạn? Bỏ qua trang này — không có tài khoản nào được tạo cho tới khi bấm nút.</p>
       </div>
     </main>

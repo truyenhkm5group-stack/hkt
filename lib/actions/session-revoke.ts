@@ -7,6 +7,8 @@ import { getDb, schema } from "@/db";
 import { applySessionRevocation } from "@/lib/auth/session-revoke";
 import { can, destroySession, requireUser } from "@/lib/auth/session";
 import { revokeSessionsSchema } from "@/lib/validation/session-revoke";
+import { hostBrand } from "@/lib/platform/host-brand";
+import { withBrandHint } from "@/lib/platform/site-host";
 
 export type RevokeActionResult = { ok: true } | { error: string };
 
@@ -32,7 +34,7 @@ export async function logoutAllDevices(): Promise<never> {
   // Xoá cookie ngay: không đợi lượt dựng sau. Nếu không, người dùng thấy một lượt chuyển hướng
   // qua `?reason=revoked` — đúng về kỹ thuật, nhưng đọc lên như thể họ vừa bị ai đó đá ra.
   await destroySession();
-  redirect("/login");
+  redirect(withBrandHint("/login", await hostBrand()));
 }
 
 /**

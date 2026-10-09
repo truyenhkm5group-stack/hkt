@@ -66,7 +66,7 @@ export function PlaybookPanel({ state, run, fanpageReady, shell = false }: { sta
             Làm mới
           </Button>
         </div>
-        {!fanpageReady ? <p className="text-xs text-amber-700 dark:text-amber-400">Cần bật kết nối «Fanpage qua Pancake» ({shell ? "trang Kết nối" : "Cài đặt → Kết nối"}) — máy đọc lịch sử bằng page access token của shop.</p> : null}
+        {!fanpageReady ? <p className="text-xs text-amber-700 dark:text-amber-400">Cần bật kết nối «Fanpage qua Pancake» ({shell ? "trang Kết nối" : "Cài đặt → Kết nối"}) — {shell ? "máy đọc lịch sử bằng mã truy cập page của shop." : "máy đọc lịch sử bằng page access token của shop."}</p> : null}
         <p className="text-xs text-muted-foreground" data-testid="playbook-run">
           {run.state === "RUNNING"
             ? `Đang chạy (từ ${formatDateTime(run.startedAt)}): ${run.note} · đã đọc ${run.fetched} hội thoại.`

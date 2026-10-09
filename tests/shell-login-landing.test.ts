@@ -212,7 +212,8 @@ function kiemMaNguon() {
     const i = than.indexOf("landingAfterSignIn(");
     assert.ok(i > 0, `${ten}: phải tính đích bằng landingAfterSignIn`);
     assert.ok(than.indexOf(moPhien) >= 0 && than.indexOf(moPhien) < i, `${ten}: đích tính SAU khi đã mở phiên (${moPhien}) — trước đó cổng vỏ chưa biết người này là ai`);
-    if (coNhanhLogin) assert.match(than, /redirect\(\w+\.loggedIn \? await landingAfterSignIn\("\/"\) : "\/login"\)/, `${ten}: giữ nguyên nhánh «chưa có phiên ⇒ /login»`);
+    // Nhánh /login mang thương hiệu của host qua `withBrandHint` (C1 #6 — lượt dựng sau redirect() đi tới localhost của máy chủ).
+    if (coNhanhLogin) assert.match(than, /redirect\(\w+\.loggedIn \? await landingAfterSignIn\("\/"\) : withBrandHint\("\/login", (?:brand|await hostBrand\(\))\)\)/, `${ten}: giữ nguyên nhánh «chưa có phiên ⇒ /login» (mang thương hiệu của host)`);
   }
   // Không ai gọi móc kiểm thử trong mã sản phẩm của đường này.
   const landing = readFileSync(path.join(goc, "lib", "saas", "shell-landing.ts"), "utf8");

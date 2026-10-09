@@ -102,7 +102,7 @@ export default async function SalesCockpitPage() {
           <tbody>
             <tr className="border-b border-hairline">
               <td className="w-48 py-2 font-medium">Pancake (fanpage)</td>
-              <td className="py-2">{snap.channels.pancake.configured ? `Webhook cuối ${formatTimeAgo(snap.channels.pancake.lastWebhookAt)} (ghi mỗi 5 phút)` : "Chưa nối"}</td>
+              <td className="py-2">{snap.channels.pancake.configured ? `${customer ? "Tin cuối nhận" : "Webhook cuối"} ${formatTimeAgo(snap.channels.pancake.lastWebhookAt)} (ghi mỗi 5 phút)` : "Chưa nối"}</td>
             </tr>
             <tr className="border-b border-hairline">
               <td className="py-2 font-medium">Messenger trực tiếp</td>

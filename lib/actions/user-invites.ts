@@ -9,6 +9,8 @@ import { salesStaffRoleOf, SHELL_ROLE_REJECTED, shellRoleChoiceOk } from "@/lib/
 import { isSalesAgentUser } from "@/lib/constants/saas-nav";
 import { listAccessRoles } from "@/lib/queries/access";
 import { landingAfterSignIn } from "@/lib/saas/shell-landing";
+import { hostBrand } from "@/lib/platform/host-brand";
+import { withBrandHint } from "@/lib/platform/site-host";
 import { acceptUserInviteCore, createUserInviteCore, revokeUserInviteCore } from "@/lib/users/invites";
 
 /**
@@ -62,5 +64,5 @@ export async function acceptUserInviteAction(org: string, token: string, input: 
   if ("error" in r) return { error: r.error };
   // Đích cuối một bước (lib/saas/shell-landing.ts, F-01): người thuộc vỏ Chốt Đơn vào thẳng trang nhà của vỏ thay vì `/` mà
   // layout chuyển hướng (trang trắng). Không thuộc vỏ ⇒ `/` như cũ.
-  redirect(r.loggedIn ? await landingAfterSignIn("/") : "/login");
+  redirect(r.loggedIn ? await landingAfterSignIn("/") : withBrandHint("/login", await hostBrand()));
 }

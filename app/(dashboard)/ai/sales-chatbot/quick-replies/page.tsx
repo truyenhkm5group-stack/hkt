@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { PageHeader } from "@/components/page-header";
 import { can, requirePermission } from "@/lib/auth/session";
+import { isSalesAgentUser } from "@/lib/constants/saas-nav";
 import { formatNumber, pctOrNull } from "@/lib/format";
 import { listQuickReplies, loadQuickReplySettings, quickReplyStats } from "@/lib/sales-chatbot/quick-replies";
 import { loadAutoLearnRun } from "@/lib/sales-chatbot/quick-replies-learn";
@@ -31,6 +32,7 @@ export default async function QuickRepliesPage() {
       />
       <QuickRepliesManager
         manage={manage}
+        shell={isSalesAgentUser(user)}
         settings={settings}
         autoLearnRun={autoLearnRun}
         rows={rows.map((r) => ({ ...r, lastUsedAt: r.lastUsedAt?.toISOString() ?? null, updatedAt: r.updatedAt.toISOString() }))}

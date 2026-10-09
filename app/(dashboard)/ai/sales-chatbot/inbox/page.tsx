@@ -414,6 +414,7 @@ export default async function SalesInboxPage({ searchParams }: { searchParams: P
                 backHref={href({ c: null })}
                 ordersSummary={thread.thread.orders.map((o) => ({ ...o, totalText: formatVND(o.total) }))}
                 canDecideOrders={orderGate.allowed}
+                shell={shell}
               />
             )}
           </section>

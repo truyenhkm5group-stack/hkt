@@ -2,6 +2,7 @@ import Link from "next/link";
 import { PageHeader } from "@/components/page-header";
 import { SectionCard } from "@/components/ui-bits";
 import { requirePermission } from "@/lib/auth/session";
+import { isSalesAgentUser } from "@/lib/constants/saas-nav";
 import { formatDateTime } from "@/lib/format";
 import { loadNotificationSetup, NOTIFICATIONS_PERMISSION } from "@/lib/messaging/presets";
 import { MESSAGING_CONNECTOR_LABEL, ORDER_MESSAGE_VARS } from "@/lib/messaging/types";
@@ -18,6 +19,8 @@ const DELIVERY_STATUS_LABEL: Record<string, string> = { PENDING: "Đang gửi", 
 export default async function NotificationsPage() {
   const user = await requirePermission(NOTIFICATIONS_PERMISSION);
   const setup = await loadNotificationSetup();
+  // Vỏ Chốt Đơn (C1 #7): chỉ đổi CHỮ — không «ERP», không mã trạng thái tiếng Anh, không chỉ tới Luật tự động (trang vỏ chặn).
+  const shell = isSalesAgentUser(user);
   return (
     <div className="space-y-5">
       <PageHeader
@@ -27,19 +30,19 @@ export default async function NotificationsPage() {
         hint={
           <div className="space-y-1.5 text-xs leading-5">
             <p>Chọn kênh nhắn tin, nơi nhận và mẫu tin cho ba lúc: đơn được CHỐT, đơn đã chốt bị SỬA (hàng / địa chỉ / tiền thu), đơn đã chốt bị HUỶ.</p>
-            <p>Lưu = bật luật tự động chạy thật (xem ở Luật tự động). Đơn chốt thì hàng TỰ được giữ ở cột khả dụng của kho — tin nhóm chỉ để đội đóng gói biết.</p>
-            <p>Mỗi lần đơn đổi gửi đúng MỘT tin: bấm lại, chạy lại không đẻ tin thứ hai. Chưa có Lark / Telegram? Dùng «Hộp thử» — tin nằm trong ERP, không gửi ra ngoài.</p>
+            <p>Lưu = bật luật tự động chạy thật{shell ? "" : " (xem ở Luật tự động)"}. Đơn chốt thì hàng TỰ được giữ ở cột khả dụng của kho — tin nhóm chỉ để đội đóng gói biết.</p>
+            <p>Mỗi lần đơn đổi gửi đúng MỘT tin: bấm lại, chạy lại không đẻ tin thứ hai. Chưa có Lark / Telegram? Dùng «Hộp thử» — tin nằm trong {shell ? "ứng dụng" : "ERP"}, không gửi ra ngoài.</p>
           </div>
         }
       />
-      <SectionCard title="Kênh nhắn tin" description={<Link href="/settings/connections" className="underline underline-offset-2">Khai / kiểm tra / bật kênh ở Cài đặt → Kết nối</Link>}>
+      <SectionCard title="Kênh nhắn tin" description={<Link href="/settings/connections" className="underline underline-offset-2">{shell ? "Khai / kiểm tra / bật kênh ở trang Kết nối" : "Khai / kiểm tra / bật kênh ở Cài đặt → Kết nối"}</Link>}>
         <ul className="grid gap-2 sm:grid-cols-3">
           {setup.connections.map((c) => (
             <li key={c.key} className="rounded-lg border p-3 text-sm" data-connector={c.key} data-status={c.status}>
               <p className="font-medium">{MESSAGING_CONNECTOR_LABEL[c.key]}</p>
               <p className="mt-1 text-xs">
                 <span className={c.status === "CONNECTED" ? "font-semibold text-emerald-600" : c.status === "TEST_MODE" ? "font-semibold text-sky-600" : c.status === "FAILED" ? "font-semibold text-destructive" : "text-muted-foreground"}>
-                  {c.status === "CONNECTED" ? "CONNECTED · Đã kết nối" : c.status === "TEST_MODE" ? "TEST MODE · Chế độ thử" : c.status === "FAILED" ? "FAILED · Lỗi" : c.status === "DRAFT" ? "Chưa bật" : "Chưa khai"}
+                  {c.status === "CONNECTED" ? (shell ? "Đã kết nối" : "CONNECTED · Đã kết nối") : c.status === "TEST_MODE" ? (shell ? "Chế độ thử" : "TEST MODE · Chế độ thử") : c.status === "FAILED" ? (shell ? "Lỗi" : "FAILED · Lỗi") : c.status === "DRAFT" ? "Chưa bật" : "Chưa khai"}
                 </span>
                 {c.destination ? <span className="text-muted-foreground"> · {c.destination}</span> : null}
               </p>
@@ -66,7 +69,7 @@ export default async function NotificationsPage() {
                 </p>
                 <pre className="mt-1.5 whitespace-pre-wrap font-sans text-[13px] leading-5">{d.title ? `${d.title}\n` : ""}{d.body}</pre>
                 {d.error ? <p className="mt-1 text-destructive">{d.error}</p> : null}
-                {d.status === "FAILED" && d.nextRetryAt ? <p className="mt-1 font-semibold">ERP sẽ tự gửi lại lúc {formatDateTime(d.nextRetryAt)} (lần thử {d.attempts + 1}).</p> : null}
+                {d.status === "FAILED" && d.nextRetryAt ? <p className="mt-1 font-semibold">{shell ? "Hệ thống" : "ERP"} sẽ tự gửi lại lúc {formatDateTime(d.nextRetryAt)} (lần thử {d.attempts + 1}).</p> : null}
                 {d.status === "SENT" && d.attempts > 1 ? <p className="mt-1 text-muted-foreground">Gửi được ở lần thử thứ {d.attempts} (mạng chập chờn lúc đầu).</p> : null}
               </li>
             ))}

@@ -3,6 +3,7 @@ import { PageHeader } from "@/components/page-header";
 import { EmptyState, SectionCard } from "@/components/ui-bits";
 import { requirePermission } from "@/lib/auth/session";
 import { DATA_EXPORT_ENTRIES } from "@/lib/constants/data-export";
+import { isSalesAgentUser } from "@/lib/constants/saas-nav";
 import { moduleOn } from "@/lib/platform-ui/module-visibility";
 
 export const metadata = { title: "Xuất dữ liệu" };
@@ -25,7 +26,7 @@ export default async function DataExportPage() {
         hint="Dữ liệu của cửa hàng là của cửa hàng: tải ra tệp CSV (mở bằng Excel / Google Sheets) bất cứ lúc nào, kể cả khi gói đã quá hạn. Mỗi lượt tải được ghi vào nhật ký."
       />
       {entries.length === 0 ? (
-        <EmptyState title="Chưa có dữ liệu nào để xuất" description="Tổ chức chưa bật module nào có dữ liệu xuất được." />
+        <EmptyState title="Chưa có dữ liệu nào để xuất" description={isSalesAgentUser(user) ? "Gói hiện tại của cửa hàng chưa có dữ liệu nào xuất được." : "Tổ chức chưa bật module nào có dữ liệu xuất được."} />
       ) : (
         <SectionCard title="Tải về" description="Mỗi tệp là TOÀN BỘ dữ liệu loại đó (không lọc theo kỳ). Tệp có tên, số điện thoại, địa chỉ khách — giữ cẩn thận.">
           <ul className="divide-y">

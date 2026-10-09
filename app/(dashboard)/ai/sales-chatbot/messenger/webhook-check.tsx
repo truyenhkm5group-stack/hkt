@@ -14,7 +14,8 @@ const fmt = (iso: string | null) => (iso ? new Date(iso).toLocaleString("vi-VN",
  * Trạng thái webhook THEO PAGE (graph.ts `checkPageWebhook`): page đã lưu trong ERP chưa chắc đang gửi tin về — Meta có thể gỡ
  * đăng ký sau đó. Nút «Kiểm tra lại» chỉ ĐỌC ở Meta. `initial` là lần kiểm lúc nối page gần nhất (có mốc giờ), không phải bây giờ.
  */
-export function WebhookCheckPanel({ initial, initialAt, manage, actorLabel }: { initial: WebhookRow[]; initialAt: string | null; manage: boolean; actorLabel: Record<string, string> }) {
+/** `shell`: vỏ Chốt Đơn — chỉ đổi CHỮ («mã truy cập» thay «token»), câu của ERP giữ nguyên. */
+export function WebhookCheckPanel({ initial, initialAt, manage, actorLabel, shell = false }: { initial: WebhookRow[]; initialAt: string | null; manage: boolean; actorLabel: Record<string, string>; shell?: boolean }) {
   const [rows, setRows] = useState(initial);
   const [at, setAt] = useState(initialAt);
   const [note, setNote] = useState<string | null>(null);
@@ -49,7 +50,7 @@ export function WebhookCheckPanel({ initial, initialAt, manage, actorLabel }: { 
               <p>
                 <span className="font-semibold">{r.name}</span> <span className="text-xs text-muted-foreground">(Page ID {r.pageId})</span>{" "}
                 <span className={cn("text-xs font-medium", r.tone === "ok" ? "text-emerald-700 dark:text-emerald-400" : r.tone === "bad" ? "text-destructive" : "text-muted-foreground")}>· {r.label}</span>
-                {r.tokenExpiresAt ? <span className="text-xs text-muted-foreground"> · token hết hạn {fmt(r.tokenExpiresAt)}</span> : null}
+                {r.tokenExpiresAt ? <span className="text-xs text-muted-foreground"> · {shell ? "mã truy cập hết hạn" : "token hết hạn"} {fmt(r.tokenExpiresAt)}</span> : null}
               </p>
               {r.detail ? <p className="text-xs text-muted-foreground">{r.detail}</p> : null}
               {r.guide ? (
