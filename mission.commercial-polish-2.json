@@ -3,7 +3,7 @@
   "mission_id": "commercial-polish-2",
   "title": "Commercial Sweep PR B: vỏ Chốt Đơn không có chữ dưới 11 px (token 12·13·14 + bài chốt) · câu an toàn của màn lỗi",
   "business_goal": "",
-  "status": "PLANNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-polish2",
@@ -27,7 +27,18 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-08T23:03:51.844Z",
-  "updated_at": "2026-10-08T23:03:51.844Z",
-  "last_heartbeat": "2026-10-08T23:03:51.844Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-09T00:31:20.605Z",
+  "last_heartbeat": "2026-10-09T00:31:20.605Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/commercial-polish-2",
+    "sha": "5ffc56490452817c888ff8b6c931f95521bf0c32",
+    "at": "2026-10-09T00:31:20.605Z",
+    "actor": "DESKTOP-56TH98Y:wt-polish2",
+    "title": "Commercial Sweep PR B: vỏ Chốt Đơn không có chữ dưới 11 px (token 12·13·14 + bài chốt) · câu an toàn của màn lỗi",
+    "summary": "",
+    "tests": [
+      "tsc + eslint sạch; npm test ĐẦY ĐỦ «TẤT CẢ KIỂM THỬ ĐẠT» EXIT=0 trên 5ffc5649 (09/10 07:30); shell-typography: 80 tệp chỉ thuộc vỏ, 0 chữ < 11 px; đột biến text-[10.5px] ở notes-panel ⇒ đỏ"
+    ]
+  }
 }
