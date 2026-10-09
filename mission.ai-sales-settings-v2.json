@@ -1,0 +1,30 @@
+{
+  "schema": 1,
+  "mission_id": "ai-sales-settings-v2",
+  "title": "Cấu hình AI Sales cho người ít rành máy: ô trạng thái + một nút chính, giấu khoá/model/tên hãng với khách vỏ",
+  "business_goal": "",
+  "status": "RUNNING",
+  "priority": "P2",
+  "risk": "MEDIUM",
+  "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "worker": null,
+  "worktree": null,
+  "branch": "feat/ai-sales-settings-v2",
+  "base_sha": "e21f0ec35b25f6ae4919f486ae26fd201c4e8f76",
+  "domains": [],
+  "owned_paths": [
+    "app/(dashboard)/ai/sales-chatbot/page.tsx",
+    "app/(dashboard)/ai/sales-chatbot/config-form.tsx",
+    "app/(dashboard)/ai/sales-chatbot/cost-panel.tsx",
+    "lib/sales-chatbot/settings-status.ts",
+    "tests/ai-sales-settings-v2.test.ts"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-09T22:16:03.663Z",
+  "updated_at": "2026-10-09T22:16:03.663Z",
+  "last_heartbeat": "2026-10-09T22:16:03.663Z",
+  "definition_of_done": []
+}
