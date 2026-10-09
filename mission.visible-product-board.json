@@ -24,18 +24,18 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-09T17:04:58.776Z",
-  "updated_at": "2026-10-09T17:08:50.077Z",
-  "last_heartbeat": "2026-10-09T17:08:23.292Z",
+  "updated_at": "2026-10-09T21:17:02.152Z",
+  "last_heartbeat": "2026-10-09T21:17:02.152Z",
   "definition_of_done": [],
   "handoff": {
     "branch": "docs/visible-product-board",
-    "sha": "32c2d867bc50e1adede852c875d3c2541c75ce1c",
-    "at": "2026-10-09T17:08:23.292Z",
+    "sha": "a934181ceec3b44c88108d9a0a61819adeb910a0",
+    "at": "2026-10-09T21:17:02.152Z",
     "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
     "title": "VISIBLE_PRODUCT_FINISH_BOARD + đổi DONE chưa có ảnh production ⇒ CODE_DONE_UI_NOT_VERIFIED + KPI «thay đổi nhìn thấy 24h» (chủ shop 10/10)",
-    "summary": "bảng 28 surface, 41 mission UI hạ về chưa kiểm production, KPI thay đổi nhìn thấy",
+    "summary": "bảng sản phẩm nhìn thấy + DoD mới",
     "tests": [
-      "chỉ tài liệu"
+      "chỉ tài liệu; ghép main vào nhánh"
     ]
   }
 }
