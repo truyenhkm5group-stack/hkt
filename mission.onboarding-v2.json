@@ -29,18 +29,18 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-09T17:12:18.102Z",
-  "updated_at": "2026-10-09T20:40:36.854Z",
-  "last_heartbeat": "2026-10-09T20:40:09.306Z",
+  "updated_at": "2026-10-09T22:50:46.049Z",
+  "last_heartbeat": "2026-10-09T22:50:46.049Z",
   "definition_of_done": [],
   "handoff": {
     "branch": "feat/onboarding-v2",
-    "sha": "92ebea37c4bc5cfd0fd1173cdb464e82abb3efd7",
-    "at": "2026-10-09T20:40:09.306Z",
+    "sha": "9dd78fa18c5574e7997eaa75e6796471ab39e784",
+    "at": "2026-10-09T22:50:46.049Z",
     "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
     "title": "Onboarding V2: một checklist 9 bước (DONE/NEEDS_ACTION/ERROR/FIX NOW) + tiến độ + một CTA «Tiếp tục thiết lập» cho khách Chốt Đơn",
-    "summary": "Danh sách thiết lập 9 bước + trang mở đầu = Tổng quan khi chưa xong",
+    "summary": "Onboarding V2: checklist 9 bước ở /ai/overview + khách vỏ chưa xong 9/9 vào thẳng trang hướng dẫn; nhánh đã cập nhật lên main sau #753",
     "tests": [
-      "npm test TẤT CẢ KIỂM THỬ ĐẠT; typecheck + lint + build sạch"
+      "typecheck · lint · npm test (gates xanh trên 9dd78fa1 sau khi cập nhật lên main e21f0ec3)"
     ]
   }
 }
