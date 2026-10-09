@@ -3,7 +3,7 @@
   "mission_id": "pancake-counters-remaining",
   "title": "Khối Khách hàng ở trang đơn + bộ lọc đã lưu order_count/purchased_amount thôi đọc bộ đếm Pancake làm số ERP",
   "business_goal": "",
-  "status": "VERIFYING",
+  "status": "DONE",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -28,13 +28,14 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-09T04:59:36.240Z",
-  "updated_at": "2026-10-09T10:09:17.458Z",
-  "last_heartbeat": "2026-10-09T06:09:44.461Z",
+  "updated_at": "2026-10-09T10:09:34.376Z",
+  "last_heartbeat": "2026-10-09T10:09:34.376Z",
   "definition_of_done": [],
   "evidence": {
     "merged": "#731 → 1286f96c6f85b3589cf14a30d449b2a7980199b1",
     "verify": "PASS 9e681c8ba4bbd03ef9e0f96adfa01bd5cd41af2c 2026-10-09T10:09:06.835Z",
-    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/37896555963"
+    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/37896555963",
+    "done": "production 9e681c8ba4bb · deploy 37896555963 xanh · verify ĐẠT"
   },
   "handoff": {
     "branch": "fix/pancake-counters-remaining",
