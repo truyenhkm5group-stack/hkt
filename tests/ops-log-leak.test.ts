@@ -253,6 +253,7 @@ const KHONG_MA_HOA_DA_RA: Record<string, string> = {
   disk: "dung lượng ổ đĩa, ảnh Docker",
   "docker-prune": "tên ảnh Docker, dung lượng",
   logs: "log ứng dụng đi qua che_log (email, IP, SĐT, token)",
+  "chatbot-status": "chatbot/scripts/ops-status.js: tên page, công tắc, số đếm, dòng cảnh báo đã che dãy số ≥ 5 chữ số + chuỗi trong ngoặc + email, rồi qua che_log; không in nội dung tin / hướng dẫn page / webhook",
   "sync-pancake-all": "scripts/sync.ts: JSON kết quả job pancake-* — chỉ số đếm; lỗi từng đơn vào sync_runs, không in",
   "sync-pancake-orders": "như sync-pancake-all",
   "sync-vtp-tracking": "scripts/sync.ts: số đếm + mã trạng thái VTP chưa dịch",
