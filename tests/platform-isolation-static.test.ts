@@ -434,7 +434,9 @@ const CSDL_CHI_DINH_DUOC_PHEP: Record<string, string> = {
   "lib/entitlements/": "Gói + hạn mức (Phase 10): đọc bảng platform_plans ở CSDL nhà; bộ đếm mức dùng vẫn đi getDb() của tổ chức ngữ cảnh.",
   "lib/billing/": "Thu phí thuê bao (0187): platform_subscriptions / platform_invoices / platform_billing_payments / platform_plans ở mặt phẳng điều khiển, và sổ ngân hàng CỦA TỔ CHỨC NHÀ (nơi tiền thuê bao về) — đọc bằng getPlatformDb() vì tiền về tài khoản của nền tảng, không phải của tổ chức ngữ cảnh; không đọc dữ liệu nghiệp vụ của tổ chức khách nào.",
   "lib/pricing/": "Nền móng giá & thu phí (0222): platform_plans.commercial / platform_org_pricing / platform_settings (ngưỡng Margin Guard, giá đơn vị AI ghi đè) / platform_ai_usage ở mặt phẳng điều khiển (CSDL nhà); số dùng trong CSDL tổ chức đọc qua lib/platform/usage-meter.ts — tệp ở đây không tự mở CSDL tổ chức nào.",
-  "lib/saas/": "SaaS Control Plane (0224, docs/saas/README.md): tài khoản · thuê bao sản phẩm · sổ dùng · sổ chi phí · bảng kê · job cấp phát ở mặt phẳng điều khiển (CSDL nhà). Không tự mở CSDL tổ chức nào: cấp workspace đi qua provisionOrganization + withOrganization; module đi qua setOrganizationModule.",
+  // Khai TRƯỚC khoá thư mục `lib/saas/` (phép dò lấy khoá khớp ĐẦU TIÊN): tệp này là ngoại lệ DUY NHẤT của thư mục được mở CSDL tổ chức.
+  "lib/saas/security-acceptance.ts": "Ops `security-acceptance` · S3 (LAUNCH_GATE §3, Integration Lead duyệt 09/10/2026): mở CSDL của TỪNG tổ chức CHỈ ĐỌC bằng getDbForInspection (máy chủ ép chỉ đọc, không migrate, không dọn bảng platform_*) chỉ để gọi secretsAtRestCells của lib/connectors/service.ts — phán phong bì bản mã, không giải mã, không byte nào ra ngoài; getPlatformDb đọc conversation_id của workspace nghiệm thu từ platform_ai_usage cho S1 (tests/security-acceptance.test.ts).",
+  "lib/saas/": "SaaS Control Plane (0224, docs/saas/README.md): tài khoản · thuê bao sản phẩm · sổ dùng · sổ chi phí · bảng kê · job cấp phát ở mặt phẳng điều khiển (CSDL nhà) — CHỈ getPlatformDb. Không tự mở CSDL tổ chức nào (cấp workspace đi qua provisionOrganization + withOrganization; module đi qua setOrganizationModule); ngoại lệ duy nhất là lib/saas/security-acceptance.ts khai riêng ở trên — testCsdlChiDinhChiONenTang chặn getDbFor / getDbForInspection ở mọi tệp khác của thư mục.",
   "lib/ai-usage/": "Sổ dùng AI + hạn mức AI + công tắc AI (pilot readiness 3): bảng platform_ai_usage / platform_plans / platform_settings / platform_organizations ở mặt phẳng điều khiển (CSDL nhà); mọi dòng khoá theo org_code do MÁY CHỦ lấy từ ngữ cảnh — không đọc dữ liệu nghiệp vụ của tổ chức nào.",
 };
 
@@ -446,6 +448,11 @@ export function testCsdlChiDinhChiONenTang() {
     if (!/\b(?:getPlatformDb|getDbFor|getDbForInspection)\b/.test(ma(tep))) continue;
     dem += 1;
     const khoa = Object.keys(CSDL_CHI_DINH_DUOC_PHEP).find((k) => (k.endsWith("/") ? tep.startsWith(k) : tep === k));
+    // Khoá thư mục `lib/saas/` chỉ phủ getPlatformDb (mặt phẳng điều khiển) — mở CSDL tổ chức phải là một tệp khai RIÊNG kèm lý do.
+    if (khoa === "lib/saas/" && /\b(?:getDbFor|getDbForInspection)\b/.test(ma(tep))) {
+      pham.push(`${tep} (mở CSDL tổ chức dưới khoá thư mục lib/saas/ — khai riêng tệp kèm lý do)`);
+      continue;
+    }
     if (khoa) {
       daDung.add(khoa);
       continue;

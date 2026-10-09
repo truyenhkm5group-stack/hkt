@@ -205,3 +205,27 @@ tài khoản CHỈ XEM của chính workspace (hoặc tài khoản đã chọn b
 in «mẫu nhỏ — chưa kết luận». **Không có ngưỡng đạt / không đạt** (AGENTS 38) — dòng đầu ghi «chưa có đích». Đọc con số cho đúng: chỉ
 là phần máy chủ (không tra phiên, không dựng HTML, không mạng), và bể kết nối của handle chỉ đọc là 1 (app: 2) nên số nghiêng về phía
 CHẬM. Mã thoát 0 = mọi lượt đo được; 1 = có workspace / lượt đo hỏng (câu lỗi ở phần MÃ HOÁ).
+
+## 11. Bằng chứng bảo mật S1–S3 — ops `security-acceptance`
+
+Actions → «Vận hành ERP trên VPS» → `security-acceptance` (ô arg để trống; CHỈ ĐỌC — `ERP_READ_ONLY=1` + hỏi lại Postgres; mọi lượt
+HTTP là GET tới `127.0.0.1:3000` với Host chỉ định, như bước C). Lõi `lib/saas/security-acceptance.ts`, luật thuần
+`lib/constants/security-acceptance.ts`, bài kiểm `tests/security-acceptance.test.ts`.
+
+| S | Đo gì | PASS |
+|---|---|---|
+| S1 cô lập tổ chức | Phiên của tài khoản thử (workspace nghiệm thu, ký như bước C) mở id THẬT của tổ chức nhà: `/orders/<id>` · `/orders/<id>/edit` · `/customers/<id>` · `/ai/sales-chatbot/conversations/<id>` · `/ai/sales-chatbot/inbox?c=<id>` · `/api/ai-sales/inbox-images/<id>`. Chiều ngược: phiên ADMIN nhà (ký như smoke) mở `/ai/sales-chatbot/conversations/<id>` của workspace nghiệm thu (id lấy từ sổ AI của nền tảng). | Mọi lượt dò ra 404 / 403 / «Không tìm thấy dữ liệu» / bị chuyển ra khỏi đường dẫn bản ghi; KHÔNG trang nào mang tên / SĐT của bản ghi tổ chức kia; không bị đá về /login. 200 đúng đường dẫn mà không chứng minh được ⇒ FAIL (không kết luận «an toàn» khi không chứng minh được). |
+| S2 bí mật không lộ | Mọi trang vỏ (danh sách bước C) với phiên thử + `/login` của vỏ và ERP nhà + `/` · `/pricing` của hai mặt tiền + `/chat` công khai của workspace thử: HTML + gói RSC quét bằng mẫu khoá (Google · OpenAI/Anthropic · token Facebook · chuỗi Postgres · khoá PEM · gán biến bí mật · JWT) và GIÁ TRỊ THẬT của mọi biến môi trường bí mật. | 0 lần trúng. Chỉ in tên mẫu + số, không bao giờ chỗ khớp. Mẫu «chuỗi ngẫu nhiên dài» CỐ Ý không dùng — băm chunk của Next khớp mọi trang. |
+| S3 token mã hoá | Mọi ô bí mật kết nối (`org_connections` + token từng page `org_channel_pages`) của mọi tổ chức phải đúng phong bì AES-GCM của `lib/connectors/secrets.ts` (phiên bản 1 · ≥ 30 byte · mã khoá 16 hex) — phán quyết `classifyEnvelope`, không giải mã. | 0 ô bản rõ / sai hình. |
+
+**Đường đọc S3**: kho mã khoá việc chạm cột bản mã vào ĐÚNG `lib/connectors/service.ts` (`tests/connectors.test.ts`), và hàm
+sẵn có `rekeyOrgConnections` mở CSDL tổ chức qua `getDb()` — lần mở đầu chạy migrate + dọn bảng `platform_*`, tức là GHI, nên chết
+trên kết nối chỉ đọc. Nên S3 đi qua `secretsAtRestCells(db, orgCode)` (Integration Lead duyệt 09/10/2026) trong `service.ts`: nhận
+handle `getDbForInspection` (không migrate, không dọn), chỉ SELECT, phán phong bì NGAY BÊN TRONG và chỉ trả `{loại ô, phán quyết}` —
+không byte nào, không giải mã. Dòng mang mã tổ chức khác (bản sao chép nhầm CSDL) cũng là hỏng. Tổ chức ĐANG HOẠT ĐỘNG không đọc
+được ⇒ S3 hỏng (chưa biết không phải 0); tổ chức không hoạt động không đọc được ⇒ đếm riêng. Ngoài phạm vi S3 (ghi rõ để không ai tưởng đã đo): `wholesale_campaign_cells.page_token` là con trỏ phân trang của Google
+Places (không phải bí mật); `integration_tokens` giữ token của tổ chức NHÀ (Viettel Post…) — X7, credential nhà chưa chuyển vào
+`org_connections`.
+
+Công khai: một dòng phán quyết + một dòng mỗi S (trạng thái, tên đếm, số). Chi tiết từng lượt dò / trang / tổ chức ở phần MÃ HOÁ, id
+đã thay bằng nhãn. Mã thoát 0 = không S nào hỏng (S chưa đo được nói rõ ở dòng phán quyết), 1 = có S hỏng.

@@ -552,6 +552,7 @@ import { testIdentityEmailLogin } from "./identity-email-login.test";
 import { testSaasAcceptance } from "./saas-acceptance.test";
 import { testOpsSignals } from "./ops-signals.test";
 import { testOpsSignalsCheck } from "./ops-signals-check.test";
+import { testSecurityAcceptance } from "./security-acceptance.test";
 import { testInboxPerfProbe } from "./inbox-perf-probe.test";
 import { testTestOrgCodes } from "./test-org-codes.test";
 import { testHelpGuides } from "./help-guides.test";
@@ -2965,6 +2966,9 @@ async function main() {
   // Ops `ops-signals-check`: tám tín hiệu O1–O8 tính bằng ĐÚNG hàm của khung cho mọi tổ chức, CHỈ ĐỌC — hỏng ⇒ FAIL nêu đúng tín hiệu,
   // UNKNOWN đếm riêng không FAIL, kênh công khai chỉ mã + số; người vận hành máy qua bộ tính quyền của phiên.
   await testOpsSignalsCheck();
+  // Ops `security-acceptance` (LAUNCH_GATE §3): quét bí mật trong trang · phán quyết dò cô lập (200 dựng bản ghi tổ chức kia = RÒ) ·
+  // phong bì bản mã (bản rõ = FAIL) · CHỈ ĐỌC, chỉ GET, công khai chỉ trạng thái + số.
+  await testSecurityAcceptance();
   // Ops `inbox-perf-probe`: Hộp thư khách — tải / chuyển hội thoại bấm giờ ĐÚNG chuỗi hàm máy chủ của page.tsx, CHỈ ĐỌC (handle chỉ đọc,
   // danh tính chỉ xem không ghi staff_seen_at), công khai che tổ chức thành org#i, mẫu < 3 ⇒ chưa kết luận, không đích. Tổ chức THẬT `ipp-a`.
   await testInboxPerfProbe();
