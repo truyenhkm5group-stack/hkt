@@ -3,7 +3,7 @@
   "mission_id": "commercial-sweep-cap-nhat",
   "title": "Commercial Sweep: kiểm kê 207/207 trang (32 trang động đọc mã) + bảng C0/C1 theo trạng thái đã gộp",
   "business_goal": "",
-  "status": "PLANNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-docs",
@@ -21,7 +21,18 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-09T04:10:15.306Z",
-  "updated_at": "2026-10-09T04:10:15.306Z",
-  "last_heartbeat": "2026-10-09T04:10:15.306Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-09T04:10:51.827Z",
+  "last_heartbeat": "2026-10-09T04:10:51.827Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/commercial-sweep-cap-nhat",
+    "sha": "0ffe1f74550264bfb36ef5923e6f99d0fc3eeb13",
+    "at": "2026-10-09T04:10:51.827Z",
+    "actor": "DESKTOP-56TH98Y:wt-docs",
+    "title": "Commercial Sweep: kiểm kê 207/207 trang (32 trang động đọc mã) + bảng C0/C1 theo trạng thái đã gộp",
+    "summary": "",
+    "tests": [
+      "chỉ tài liệu (2 tệp docs/product/*.md); không bài kiểm nào đọc hai tệp này (grep tests/ scripts/); 32 dòng kiểm kê cập nhật, kiểm bằng script khớp đúng route"
+    ]
+  }
 }

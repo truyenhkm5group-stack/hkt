@@ -1146,3 +1146,4 @@
 {"at":"2026-10-09T04:09:01.574Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"erp-o-nhap-co-ten","detail":"#726 cho claude/erp-o-nhap-co-ten @ 180a800829ad"}
 {"at":"2026-10-09T04:09:31.610Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#726 @ 180a800829ad · Chỉ trợ năng: hơn 80 ô có tên (bọc label / aria-label đúng chữ nhãn), không đổi hành vi hay bố cục; bài erp-form-names khoá."}
 {"at":"2026-10-09T04:10:15.388Z","actor":"DESKTOP-56TH98Y:wt-docs","kind":"CLAIM","mission":"commercial-sweep-cap-nhat","detail":"PLANNING · 2 mẫu phạm vi · MEDIUM"}
+{"at":"2026-10-09T04:10:51.863Z","actor":"DESKTOP-56TH98Y:wt-docs","kind":"HANDOFF","mission":"commercial-sweep-cap-nhat","detail":"claude/commercial-sweep-cap-nhat @ 0ffe1f745502 · 1 lệnh kiểm thử"}
