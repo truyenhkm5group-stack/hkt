@@ -15,7 +15,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { createUserInviteAction, revokeUserInviteAction } from "@/lib/actions/user-invites";
-import { ROLE_HINT, ROLE_LABEL, ROLE_ORDER } from "@/lib/constants/roles";
+import { ROLE_HINT, ROLE_LABEL, ROLE_ORDER, SHELL_ROLE_HINT, SHELL_ROLE_INVITE_CHOICE, SHELL_ROLE_LABEL, SHELL_SALES_STAFF_MISSING_NOTE, shellRoleKeys } from "@/lib/constants/roles";
 import { formatDateTime } from "@/lib/format";
 import { inviteChoiceToInput, USER_INVITE_STATUS_LABEL, USER_INVITE_TTL_DAYS, type UserInviteStatus } from "@/lib/users/invite-shared";
 import { cn } from "@/lib/utils";
@@ -42,7 +42,11 @@ const STATUS_TONE: Record<UserInviteStatus, string> = {
 
 /** Nút + hộp thoại tạo lời mời. Sau khi tạo, hộp thoại chuyển sang hiện liên kết + nút sao chép. */
 /** `appName`: tên phần mềm trong câu chữ — ERP «ERP» (chữ cũ, từng ký tự), vỏ Chốt Đơn «Chốt Đơn». */
-export function InviteUserDialog({ customRoles, appName = "ERP" }: { customRoles: InviteRoleOption[]; appName?: string }) {
+/**
+ * `shell`: vỏ Chốt Đơn — ô chọn ĐÚNG ba lựa chọn (Chủ cửa hàng · Nhân viên bán hàng = vai trò mã `BAN_HANG` · Chỉ xem); thiếu
+ * vai trò bán hàng ⇒ hai lựa chọn + một câu báo. Vai trò tuỳ chỉnh khác KHÔNG hiện. ERP không truyền ⇒ y như cũ.
+ */
+export function InviteUserDialog({ customRoles, appName = "ERP", shell }: { customRoles: InviteRoleOption[]; appName?: string; shell?: { salesInstalled: boolean } }) {
   const [open, setOpen] = useState(false);
   const [email, setEmail] = useState("");
   const [choice, setChoice] = useState<string>("role:VIEWER");
@@ -59,7 +63,13 @@ export function InviteUserDialog({ customRoles, appName = "ERP" }: { customRoles
     }
   }, [open]);
 
-  const hint = choice.startsWith("role:") ? (ROLE_HINT[choice.slice(5) as keyof typeof ROLE_HINT] ?? "") : (customRoles.find((r) => `access:${r.code}` === choice)?.hint ?? "");
+  const shellKeys = shell ? shellRoleKeys(shell.salesInstalled) : [];
+  const shellKey = shellKeys.find((k) => SHELL_ROLE_INVITE_CHOICE[k] === choice);
+  const hint = shell
+    ? (shellKey ? SHELL_ROLE_HINT[shellKey] : "")
+    : choice.startsWith("role:")
+      ? (ROLE_HINT[choice.slice(5) as keyof typeof ROLE_HINT] ?? "")
+      : (customRoles.find((r) => `access:${r.code}` === choice)?.hint ?? "");
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -138,6 +148,15 @@ export function InviteUserDialog({ customRoles, appName = "ERP" }: { customRoles
                 <SelectTrigger className="w-full">
                   <SelectValue placeholder="Chọn vai trò" />
                 </SelectTrigger>
+                {shell ? (
+                  <SelectContent>
+                    {shellKeys.map((k) => (
+                      <SelectItem key={k} value={SHELL_ROLE_INVITE_CHOICE[k]}>
+                        {SHELL_ROLE_LABEL[k]}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                ) : (
                 <SelectContent>
                   <SelectGroup>
                     <SelectLabel>Vai trò hệ thống</SelectLabel>
@@ -158,8 +177,10 @@ export function InviteUserDialog({ customRoles, appName = "ERP" }: { customRoles
                     </SelectGroup>
                   ) : null}
                 </SelectContent>
+                )}
               </Select>
               <p className="text-xs text-muted-foreground">{hint}</p>
+              {shell && !shell.salesInstalled ? <p className="text-xs text-amber-700 dark:text-amber-300">{SHELL_SALES_STAFF_MISSING_NOTE}</p> : null}
             </div>
             <DialogFooter>
               <Button type="button" variant="outline" onClick={() => setOpen(false)} disabled={pending}>

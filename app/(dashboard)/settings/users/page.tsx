@@ -12,7 +12,7 @@ import { RolesPanel } from "@/app/(dashboard)/settings/users/roles-panel";
 import { PositionsPanel } from "@/app/(dashboard)/settings/users/positions-panel";
 import { loadRoleTemplates, requirePermission } from "@/lib/auth/session";
 import { isSalesAgentUser } from "@/lib/constants/saas-nav";
-import { ROLE_LABEL, ROLE_ORDER } from "@/lib/constants/roles";
+import { ROLE_LABEL, ROLE_ORDER, salesStaffRoleOf, SHELL_ROLE_LABEL, SHELL_SALES_STAFF_ROLE_CODE } from "@/lib/constants/roles";
 import { formatNumber } from "@/lib/format";
 import { listUsers } from "@/lib/queries/users";
 import { membershipOf } from "@/lib/org/membership";
@@ -22,6 +22,14 @@ import { listUserInvites } from "@/lib/users/invites";
 import type { UserDept } from "@/app/(dashboard)/settings/users/department-cell";
 
 export const metadata = { title: "Người dùng" };
+
+/** Nhãn vai trò của một lời mời ở vỏ: ba lựa chọn của vỏ; lời mời cũ mang vai trò khác giữ nhãn ERP để người xem nhận ra. */
+function shellInviteLabel(i: { role: keyof typeof ROLE_LABEL; accessRoleCode: string | null }): string {
+  if (i.accessRoleCode) return i.accessRoleCode === SHELL_SALES_STAFF_ROLE_CODE ? SHELL_ROLE_LABEL.SALES : `Vai trò tuỳ chỉnh: ${i.accessRoleCode}`;
+  if (i.role === "ADMIN") return SHELL_ROLE_LABEL.OWNER;
+  if (i.role === "VIEWER") return SHELL_ROLE_LABEL.VIEWER;
+  return ROLE_LABEL[i.role];
+}
 
 /**
  * ─── VỎ CHỐT ĐƠN: «NHÂN VIÊN» ───
@@ -70,7 +78,7 @@ export default async function UsersPage() {
   const inviteRows: InviteRow[] = invites.map((i) => ({
     id: i.id,
     email: i.email,
-    roleLabel: i.accessRoleCode ? `Vai trò tuỳ chỉnh: ${roleNameByCode.get(i.accessRoleCode) ?? i.accessRoleCode}` : ROLE_LABEL[i.role],
+    roleLabel: shell ? shellInviteLabel(i) : i.accessRoleCode ? `Vai trò tuỳ chỉnh: ${roleNameByCode.get(i.accessRoleCode) ?? i.accessRoleCode}` : ROLE_LABEL[i.role],
     invitedByEmail: i.invitedByEmail,
     createdAt: i.createdAt.toISOString(),
     expiresAt: i.expiresAt.toISOString(),
@@ -78,6 +86,9 @@ export default async function UsersPage() {
     status: i.status,
   }));
   const invitesActive = invites.filter((i) => i.status === "ACTIVE").length;
+  // Vỏ Chốt Đơn: vai trò «Nhân viên bán hàng» nhận ra bằng MÃ `BAN_HANG` (đang bật) — thiếu thì vỏ chỉ có hai lựa chọn.
+  const salesRole = shell ? salesStaffRoleOf(accessRoles) : null;
+  const shellRoles = shell ? { salesRoleId: salesRole?.id ?? null } : undefined;
   const inviteRoleOptions = accessRoles.filter((r) => r.active && r.baseRole !== "ADMIN").map((r) => ({ code: r.code, name: r.name, hint: `${r.permissions.length} quyền · nền ${ROLE_LABEL[r.baseRole]}` }));
   const byRole = ROLE_ORDER.map((role) => ({ role, count: rows.filter((u) => u.role === role && u.active).length })).filter((r) => r.count > 0);
 
@@ -99,8 +110,8 @@ export default async function UsersPage() {
                 <KeyRound className="size-4" /> Đổi mật khẩu của tôi
               </Link>
             </Button>
-            <InviteUserDialog customRoles={inviteRoleOptions} appName={shell ? "Chốt Đơn" : undefined} />
-            <CreateUserDialog />
+            <InviteUserDialog customRoles={inviteRoleOptions} appName={shell ? "Chốt Đơn" : undefined} shell={shell ? { salesInstalled: Boolean(salesRole) } : undefined} />
+            <CreateUserDialog shell={shellRoles} />
           </>
         }
       />
@@ -139,6 +150,7 @@ export default async function UsersPage() {
           positionOptions={positionOptions}
           compact={shell}
           appName={shell ? "Chốt Đơn" : undefined}
+          shellRoles={shellRoles}
         />
       </SectionCard>
 

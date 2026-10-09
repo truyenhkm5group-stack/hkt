@@ -7,8 +7,11 @@ import { audit } from "@/lib/audit";
 import { indexAccountInCurrentOrganization } from "@/lib/auth/identities";
 import { hashPassword, verifyPassword } from "@/lib/auth/password";
 import { ALL_PERMISSIONS, USER_PERMISSION_SNAPSHOT_KEY } from "@/lib/auth/permissions";
-import { can, destroySession, loadPermissionSnapshots, requireUser, ROLE_PERMISSIONS_KEY } from "@/lib/auth/session";
+import { can, destroySession, loadPermissionSnapshots, requireUser, ROLE_PERMISSIONS_KEY, type SessionUser } from "@/lib/auth/session";
 import { applySessionRevocation } from "@/lib/auth/session-revoke";
+import { salesStaffRoleOf, SHELL_ROLE_REJECTED, shellRoleChoiceOk } from "@/lib/constants/roles";
+import { isSalesAgentUser } from "@/lib/constants/saas-nav";
+import { listAccessRoles } from "@/lib/queries/access";
 import { setSettingJson } from "@/lib/settings";
 import { createUserCore } from "@/lib/users/create-user";
 import { changePasswordSchema, resetPasswordSchema, rolePermissionsSchema, setUserActiveSchema, updateUserSchema, userPermissionsSchema } from "@/lib/validation/users";
@@ -17,6 +20,20 @@ export type ActionResult = { ok: true; id?: string; signedOut?: boolean } | { er
 
 function firstIssue(error: { issues: { message: string }[] }) {
   return error.issues[0]?.message ?? "Dữ liệu không hợp lệ";
+}
+
+/**
+ * VỎ CHỐT ĐƠN: chỉ nhận ba lựa chọn Chủ cửa hàng · Nhân viên bán hàng (mã `BAN_HANG`) · Chỉ xem (`lib/constants/roles.ts`).
+ * Chỉ GIỚI HẠN LỰA CHỌN — không đổi quyền nào, cổng `can()` của từng action giữ nguyên. ERP / nhà ⇒ `null`, không đọc gì thêm.
+ */
+async function shellRoleError(user: SessionUser, choice: { role?: unknown; accessRoleCode?: unknown }): Promise<string | null> {
+  if (!isSalesAgentUser(user)) return null;
+  const sales = salesStaffRoleOf(await listAccessRoles());
+  return shellRoleChoiceOk(choice, Boolean(sales)) ? null : SHELL_ROLE_REJECTED;
+}
+
+function pick(input: unknown, key: string): unknown {
+  return input && typeof input === "object" ? (input as Record<string, unknown>)[key] : undefined;
 }
 
 /** Số quản trị viên đang hoạt động, trừ người dùng `exceptId` */
@@ -31,6 +48,9 @@ async function otherActiveAdmins(exceptId: string) {
 
 export async function createUser(input: unknown): Promise<ActionResult> {
   const user = await requireUser();
+  // Tạo tài khoản không gán vai trò tuỳ chỉnh ⇒ ở vỏ chỉ ADMIN / VIEWER (Nhân viên bán hàng gán tiếp qua `setUserAccess`).
+  const shellError = await shellRoleError(user, { role: pick(input, "role") });
+  if (shellError) return { error: shellError };
   // Đường ghi DUY NHẤT tạo tài khoản (lib/users/create-user.ts): quyền, lược đồ, email trùng, hạn mức gói (kể cả ghế đã
   // hứa cho lời mời còn hạn), băm mật khẩu, nhật ký — dùng chung với cửa nhận lời mời.
   const result = await createUserCore(user, input);
@@ -42,6 +62,8 @@ export async function createUser(input: unknown): Promise<ActionResult> {
 export async function updateUser(input: unknown): Promise<ActionResult> {
   const user = await requireUser();
   if (!can(user, "users:manage")) return { error: "Không có quyền" };
+  const shellError = await shellRoleError(user, { role: pick(input, "role") });
+  if (shellError) return { error: shellError };
   const parsed = updateUserSchema.safeParse(input);
   if (!parsed.success) return { error: firstIssue(parsed.error) };
   const data = parsed.data;

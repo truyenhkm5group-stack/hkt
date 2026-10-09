@@ -11,8 +11,9 @@ import { Form, FormControl, FormDescription, FormField, FormItem, FormLabel, For
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import { setUserAccess } from "@/lib/actions/access";
 import { createUser, resetUserPassword, updateUser } from "@/lib/actions/users";
-import { ROLE_HINT, ROLE_LABEL, ROLE_ORDER } from "@/lib/constants/roles";
+import { ROLE_HINT, ROLE_LABEL, ROLE_ORDER, SHELL_ROLE_HINT, SHELL_ROLE_LABEL, SHELL_ROLE_SYSTEM_ROLE, SHELL_SALES_STAFF_MISSING_NOTE, shellRoleKeyOf, shellRoleKeys, type ShellRoleKey } from "@/lib/constants/roles";
 import type { UserRow } from "@/lib/queries/users";
 import { createUserSchema, updateUserSchema, type CreateUserInput, type UpdateUserInput } from "@/lib/validation/users";
 import { z } from "zod";
@@ -36,22 +37,72 @@ function RoleSelect({ value, onChange }: { value: string; onChange: (v: string) 
   );
 }
 
+/**
+ * VỎ CHỐT ĐƠN: ô chọn ĐÚNG ba lựa chọn (lib/constants/roles.ts). `salesRoleId` = vai trò `BAN_HANG` đang bật của tổ chức;
+ * `null` ⇒ chỉ Chủ cửa hàng + Chỉ xem kèm một câu báo — không bao giờ thay bằng vai trò khác. ERP không truyền prop này.
+ */
+export type ShellRolePicker = { salesRoleId: string | null };
+
+function ShellRoleSelect({ picker, value, onChange, legacyLabel }: { picker: ShellRolePicker; value: ShellRoleKey | null; onChange: (v: ShellRoleKey) => void; legacyLabel?: string }) {
+  return (
+    <>
+      <Select value={value ?? ""} onValueChange={(v) => onChange(v as ShellRoleKey)}>
+        <SelectTrigger className="w-full" aria-label="Vai trò">
+          <SelectValue placeholder={legacyLabel ? `Vai trò cũ: ${legacyLabel} — chọn lại` : "Chọn vai trò"} />
+        </SelectTrigger>
+        <SelectContent>
+          {shellRoleKeys(Boolean(picker.salesRoleId)).map((k) => (
+            <SelectItem key={k} value={k}>
+              {SHELL_ROLE_LABEL[k]}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      <p className="text-xs text-muted-foreground">{value ? SHELL_ROLE_HINT[value] : ""}</p>
+      {picker.salesRoleId ? null : <p className="text-xs text-amber-700 dark:text-amber-300">{SHELL_SALES_STAFF_MISSING_NOTE}</p>}
+    </>
+  );
+}
+
+/**
+ * Ghi lựa chọn của vỏ bằng HAI action có sẵn, mỗi cái giữ cổng của nó: `users.role` qua `createUser` / `updateUser`, vai trò
+ * tuỳ chỉnh qua `setUserAccess`. Thứ tự tránh hai lời từ chối đã có: quản trị viên không mang vai trò tuỳ chỉnh (gỡ trước khi
+ * lên ADMIN), và quản trị viên cuối cùng không bị hạ (đổi vai trò hệ thống trước khi gán vai trò bán hàng).
+ */
+async function applyShellAccess(userId: string, key: ShellRoleKey, picker: ShellRolePicker, keep: { positionId: string | null; scope: string }): Promise<{ error: string } | null> {
+  const accessRoleId = key === "SALES" ? (picker.salesRoleId ?? "") : "";
+  const r = await setUserAccess({ userId, accessRoleId, positionId: keep.positionId ?? "", scope: key === "OWNER" ? "ALL" : keep.scope });
+  return "error" in r ? { error: r.error } : null;
+}
+
 /** Dialog thêm người dùng (tự quản lý trạng thái, hiện nút “Thêm người dùng”) */
-export function CreateUserDialog() {
+export function CreateUserDialog({ shell }: { shell?: ShellRolePicker } = {}) {
+  const [shellKey, setShellKey] = useState<ShellRoleKey>("VIEWER");
   const [open, setOpen] = useState(false);
   const [pending, startTransition] = useTransition();
   const form = useForm<CreateUserInput>({ resolver: zodResolver(createUserSchema), defaultValues: { name: "", email: "", password: "", role: "VIEWER" } });
 
   useEffect(() => {
-    if (open) form.reset({ name: "", email: "", password: "", role: "VIEWER" });
+    if (open) {
+      form.reset({ name: "", email: "", password: "", role: "VIEWER" });
+      setShellKey("VIEWER");
+    }
   }, [open, form]);
 
   const submit = (values: CreateUserInput) => {
     startTransition(async () => {
-      const result = await createUser(values);
+      const result = await createUser(shell ? { ...values, role: SHELL_ROLE_SYSTEM_ROLE[shellKey] } : values);
       if ("error" in result) {
         toast.error(result.error);
         return;
+      }
+      if (shell && shellKey === "SALES" && result.id) {
+        const access = await applyShellAccess(result.id, "SALES", shell, { positionId: null, scope: "ALL" });
+        if (access) {
+          toast.error(`Đã tạo tài khoản ${values.email} nhưng chưa gán được «${SHELL_ROLE_LABEL.SALES}»: ${access.error}`);
+          setOpen(false);
+          return;
+        }
       }
       toast.success(`Đã tạo tài khoản ${values.email}`);
       setOpen(false);
@@ -111,18 +162,25 @@ export function CreateUserDialog() {
                 </FormItem>
               )}
             />
-            <FormField
-              control={form.control}
-              name="role"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Vai trò</FormLabel>
-                  <RoleSelect value={field.value} onChange={field.onChange} />
-                  <FormDescription className="text-xs">{ROLE_HINT[field.value] ?? ""}</FormDescription>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
+            {shell ? (
+              <div className="space-y-1.5">
+                <p className="text-sm font-medium">Vai trò</p>
+                <ShellRoleSelect picker={shell} value={shellKey} onChange={setShellKey} />
+              </div>
+            ) : (
+              <FormField
+                control={form.control}
+                name="role"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Vai trò</FormLabel>
+                    <RoleSelect value={field.value} onChange={field.onChange} />
+                    <FormDescription className="text-xs">{ROLE_HINT[field.value] ?? ""}</FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            )}
             <DialogFooter>
               <Button type="button" variant="outline" onClick={() => setOpen(false)} disabled={pending}>
                 Huỷ
@@ -140,16 +198,67 @@ export function CreateUserDialog() {
 }
 
 /** Dialog sửa tên / vai trò / trạng thái (điều khiển từ ngoài) */
-export function EditUserDialog({ user, open, onOpenChange, isSelf }: { user: UserRow; open: boolean; onOpenChange: (open: boolean) => void; isSelf: boolean }) {
+export function EditUserDialog({
+  user,
+  open,
+  onOpenChange,
+  isSelf,
+  shell,
+  access,
+}: {
+  user: UserRow;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  isSelf: boolean;
+  /** Vỏ Chốt Đơn: ô vai trò ba lựa chọn (ERP không truyền). */
+  shell?: ShellRolePicker;
+  /** Vai trò tuỳ chỉnh / chức danh / phạm vi hiện tại — vỏ giữ nguyên chức danh + phạm vi khi đổi vai trò. */
+  access?: { accessRoleId: string | null; positionId: string | null; scope: string };
+}) {
   const [pending, startTransition] = useTransition();
+  const currentShellKey = shell ? shellRoleKeyOf(user, access?.accessRoleId, shell.salesRoleId) : null;
+  const [shellKey, setShellKey] = useState<ShellRoleKey | null>(currentShellKey);
   const form = useForm<UpdateUserInput>({ resolver: zodResolver(updateUserSchema), defaultValues: { id: user.id, name: user.name, role: user.role, active: user.active } });
 
   useEffect(() => {
-    if (open) form.reset({ id: user.id, name: user.name, role: user.role, active: user.active });
-  }, [open, user, form]);
+    if (open) {
+      form.reset({ id: user.id, name: user.name, role: user.role, active: user.active });
+      setShellKey(currentShellKey);
+    }
+  }, [open, user, form, currentShellKey]);
 
   const submit = (values: UpdateUserInput) => {
     startTransition(async () => {
+      if (shell) {
+        if (!shellKey) {
+          toast.error("Chọn vai trò");
+          return;
+        }
+        const keep = { positionId: access?.positionId ?? null, scope: access?.scope ?? "ALL" };
+        // Lên Chủ cửa hàng / về Chỉ xem: gỡ vai trò bán hàng TRƯỚC (quản trị viên không mang vai trò tuỳ chỉnh).
+        if (shellKey !== "SALES" && access?.accessRoleId) {
+          const unset = await applyShellAccess(user.id, shellKey, shell, keep);
+          if (unset) {
+            toast.error(unset.error);
+            return;
+          }
+        }
+        const updated = await updateUser({ ...values, role: SHELL_ROLE_SYSTEM_ROLE[shellKey] });
+        if ("error" in updated) {
+          toast.error(updated.error);
+          return;
+        }
+        if (shellKey === "SALES" && access?.accessRoleId !== shell.salesRoleId) {
+          const assign = await applyShellAccess(user.id, "SALES", shell, keep);
+          if (assign) {
+            toast.error(assign.error);
+            return;
+          }
+        }
+        toast.success("Đã cập nhật người dùng");
+        onOpenChange(false);
+        return;
+      }
       const result = await updateUser(values);
       if ("error" in result) {
         toast.error(result.error);
@@ -182,18 +291,26 @@ export function EditUserDialog({ user, open, onOpenChange, isSelf }: { user: Use
                 </FormItem>
               )}
             />
-            <FormField
-              control={form.control}
-              name="role"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Vai trò</FormLabel>
-                  <RoleSelect value={field.value} onChange={field.onChange} />
-                  <FormDescription className="text-xs">{isSelf ? "Bạn không thể tự hạ quyền của chính mình." : ROLE_HINT[field.value] ?? ""}</FormDescription>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
+            {shell ? (
+              <div className="space-y-1.5">
+                <p className="text-sm font-medium">Vai trò</p>
+                <ShellRoleSelect picker={shell} value={shellKey} onChange={setShellKey} legacyLabel={currentShellKey ? undefined : ROLE_LABEL[user.role]} />
+                {isSelf ? <p className="text-xs text-muted-foreground">Bạn không thể tự hạ quyền của chính mình.</p> : null}
+              </div>
+            ) : (
+              <FormField
+                control={form.control}
+                name="role"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Vai trò</FormLabel>
+                    <RoleSelect value={field.value} onChange={field.onChange} />
+                    <FormDescription className="text-xs">{isSelf ? "Bạn không thể tự hạ quyền của chính mình." : ROLE_HINT[field.value] ?? ""}</FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            )}
             <FormField
               control={form.control}
               name="active"
