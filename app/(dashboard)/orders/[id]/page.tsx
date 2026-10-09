@@ -18,6 +18,7 @@ import { DescriptionList, Money, SectionCard } from "@/components/ui-bits";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { pancakeStatusName } from "@/lib/constants/pancake";
+import { orderGrossMargin } from "@/lib/constants/live-cogs";
 import { COD_STATUS_LABEL, getViettelPostTrackingUrl } from "@/lib/constants/viettelpost";
 import { env } from "@/lib/env";
 import { formatDateTime, formatNumber, formatVND } from "@/lib/format";
@@ -120,7 +121,9 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
   // Hội thoại của đơn (chatLinkOf): đơn bot / tạo trong khung chat ⇒ Hộp thư ERP (mọi kênh); đơn đồng bộ ⇒ Pancake như trước.
   const chatThread = manual ? (await orderChatThreads([order.id])).get(order.id) : undefined;
   const chatLink = chatLinkOf(chatThread, chatThread ? await salesInboxEnabled() : false, { pageId: order.pageId, conversationId: order.conversationId });
-  const grossProfit = order.totalPriceAfterDiscount - order.liveCogs - order.partnerFee - order.returnFee;
+  // Giá vốn chưa biết (dù chỉ một dòng) ⇒ lãi gộp `null` ⇒ "—", không tô màu (AGENTS.md mục 42).
+  const grossProfit = orderGrossMargin(order.totalPriceAfterDiscount, order.liveCogs, order.partnerFee, order.returnFee);
+  const cogsCover = order.liveCogsCoverage;
   // CẦN NGƯỜI KIỂM (chủ shop 08/10/2026): lý do đang mở + lượt kiểm gần nhất. Chỉ đơn tay mang cờ này.
   const reviewEntries = manual ? (orderReviewOf(order.raw)?.entries ?? []) : [];
   const lastReview = manual ? (orderReviewLogOf(order.raw).find((r) => r.action !== "CUSTOMER_RECONFIRMED") ?? null) : null;
@@ -296,7 +299,7 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
                       <TableCell className="text-right"><Money value={item.unitPrice} /></TableCell>
                       <TableCell className="text-right text-muted-foreground"><Money value={item.totalDiscount} /></TableCell>
                       <TableCell className="text-right font-semibold"><Money value={item.lineTotal} /></TableCell>
-                      <TableCell className="text-right text-muted-foreground"><Money value={item.liveUnitCost * item.quantity} /></TableCell>
+                      <TableCell className="text-right text-muted-foreground">{item.liveUnitCost === null ? <span className="text-muted-foreground" title="Chưa có giá nhập: không có phiếu nhập ERP, giá vốn Pancake hay giá nhập mẫu mã">—</span> : <Money value={item.liveUnitCost * item.quantity} />}</TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
@@ -313,10 +316,24 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
               <Row label={<span className="font-bold">Thu hộ (COD)</span>} value={<Money value={order.moneyToCollect} className="text-base font-bold text-primary" />} />
             </div>
             <div className="grid gap-x-8 gap-y-1.5 border-t bg-muted/30 px-5 py-4 text-sm sm:grid-cols-2">
-              <Row label="Giá vốn" value={<Money value={order.liveCogs} />} />
+              <Row
+                label="Giá vốn"
+                value={
+                  order.liveCogs === null ? (
+                    <span className="text-right">
+                      <Money value={null} />
+                      <span className="ml-1.5 text-xs text-muted-foreground">
+                        {cogsCover.knownLines > 0 ? `biết giá vốn ${cogsCover.knownLines}/${cogsCover.totalLines} dòng` : "chưa có giá nhập"}
+                      </span>
+                    </span>
+                  ) : (
+                    <Money value={order.liveCogs} />
+                  )
+                }
+              />
               <Row label="Phí ĐVVC" value={<Money value={order.partnerFee} />} />
               <Row label="Phí hoàn" value={<Money value={order.returnFee} />} />
-              <Row label={<span className="font-bold">Lãi gộp ước tính</span>} value={<Money value={grossProfit} className={`font-bold ${grossProfit >= 0 ? "text-success" : "text-destructive"}`} />} />
+              <Row label={<span className="font-bold">Lãi gộp ước tính</span>} value={<Money value={grossProfit} className={grossProfit === null ? "font-bold" : `font-bold ${grossProfit >= 0 ? "text-success" : "text-destructive"}`} />} />
             </div>
           </SectionCard>
 

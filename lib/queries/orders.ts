@@ -3,6 +3,7 @@ import { and, asc, count, desc, eq, exists, gte, ilike, inArray, lte, or, sql, t
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { getDb, schema } from "@/db";
 import { vanDonDaiDien } from "@/lib/constants/shipment-pick";
+import { liveLineUnitCost, liveOrderCogs } from "@/lib/constants/live-cogs";
 import { ORDER_OUTCOME_FAST, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
 import { manualPaymentStates } from "@/lib/queries/order-payments";
 import type { OrderStage } from "@/db/schema";
@@ -342,9 +343,14 @@ export async function getOrderDetail(id: string) {
     : [];
   const lastCost = new Map<string, number>();
   for (const rc of receiptCosts) if (rc.variantId && !lastCost.has(rc.variantId)) lastCost.set(rc.variantId, Number(rc.unitCost));
-  const items = order.items.map((it) => ({ ...it, liveUnitCost: (it.variantId && lastCost.get(it.variantId)) || it.unitCost || it.variant?.lastImportedPrice || 0 }));
-  const liveCogs = items.reduce((sum, it) => sum + it.liveUnitCost * it.quantity, 0);
-  return { ...order, items, liveCogs };
+  // Không nguồn nào ⇒ `liveUnitCost = null` (CHƯA BIẾT) — bản cũ kết thúc bằng `|| 0` nên trang in
+  // "Giá vốn 0 ₫" và lãi gộp = nguyên doanh thu (AGENTS.md mục 42). Luật nằm ở `lib/constants/live-cogs.ts`.
+  const items = order.items.map((it) => {
+    const live = liveLineUnitCost({ receipt: it.variantId ? lastCost.get(it.variantId) : null, orderSnapshot: it.unitCost, variantDefault: it.variant?.lastImportedPrice });
+    return { ...it, liveUnitCost: live.unitCost, liveCostSource: live.source };
+  });
+  const cogs = liveOrderCogs(items.map((it) => ({ unitCost: it.liveUnitCost, quantity: it.quantity })));
+  return { ...order, items, liveCogs: cogs.cogs, liveCogsCoverage: { knownCogs: cogs.knownCogs, knownLines: cogs.knownLines, totalLines: cogs.totalLines } };
 }
 
 export type OrderDetail = NonNullable<Awaited<ReturnType<typeof getOrderDetail>>>;

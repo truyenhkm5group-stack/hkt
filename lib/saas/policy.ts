@@ -69,6 +69,42 @@ export function losingMoneyApplies(revenueVnd: number | null, grossProfitVnd: nu
   return revenueVnd !== null && revenueVnd > 0 && grossProfitVnd !== null && grossProfitVnd < 0;
 }
 
+export type CustomerEconomicsCore = {
+  /** Chi phí ĐÃ BIẾT số (AI nền tảng đã định giá + phân bổ có số). Khi `costComplete = false` đây là CẬN DƯỚI. */
+  costVnd: number;
+  /** Mọi lượt AI đã định giá VÀ mọi khoản phân bổ (workspace lẫn cấp tài khoản) đều có số. */
+  costComplete: boolean;
+  /** Lãi gộp — `null` khi chưa biết doanh thu HOẶC chi phí còn khoản chưa biết (AGENTS.md mục 42: chưa biết không phải 0). */
+  grossProfitVnd: number | null;
+  /** Biên gộp (%) — `null` theo cùng luật với lãi gộp. */
+  marginPct: number | null;
+  /**
+   * Lãi gộp dùng cho phán quyết «Đang lỗ gộp»: số thật khi đủ chi phí; thiếu chi phí thì CHỈ khi phần đã biết đã vượt
+   * doanh thu (chi phí chỉ có thể lớn thêm ⇒ lỗ là chắc chắn, số này là mức lỗ TỐI THIỂU). Còn lại `null`.
+   */
+  lossCheckGrossProfitVnd: number | null;
+};
+
+/**
+ * Kinh tế gộp của MỘT tài khoản khách trong kỳ — hàm THUẦN. Bản cũ (`lib/saas/customers.ts`) cộng khoản phân bổ chưa biết
+ * số bằng `?? 0` rồi trừ ra lãi gộp và biên như thể đủ chi phí: màn vận hành in một biên đẹp hơn thật, đúng hướng dễ chịu.
+ */
+export function customerEconomicsCore(input: {
+  revenueVnd: number | null;
+  aiCostVnd: number;
+  unpricedAiCalls: number;
+  allocated: readonly { amountVnd: number | null }[];
+}): CustomerEconomicsCore {
+  const allocKnown = input.allocated.reduce((a, l) => a + (l.amountVnd ?? 0), 0);
+  const costVnd = input.aiCostVnd + allocKnown;
+  const costComplete = input.unpricedAiCalls === 0 && input.allocated.every((l) => l.amountVnd !== null);
+  const ceiling = input.revenueVnd === null ? null : input.revenueVnd - costVnd;
+  const grossProfitVnd = costComplete ? ceiling : null;
+  const marginPct = input.revenueVnd && grossProfitVnd !== null ? Math.round((grossProfitVnd / input.revenueVnd) * 1000) / 10 : null;
+  const lossCheckGrossProfitVnd = costComplete ? grossProfitVnd : ceiling !== null && ceiling < 0 ? ceiling : null;
+  return { costVnd, costComplete, grossProfitVnd, marginPct, lossCheckGrossProfitVnd };
+}
+
 /** Thuê bao ở tình trạng này có mở năng lực của sản phẩm không. Quá hạn vẫn dùng (đang ân hạn); hết hạn chỉ xem. */
 export function subscriptionGrantsUse(status: EffectiveSubscriptionStatus): boolean {
   return status === "ACTIVE" || status === "TRIAL" || status === "PAST_DUE";

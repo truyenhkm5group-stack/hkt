@@ -125,7 +125,7 @@ export default async function ProductDetailPage({ params, searchParams }: { para
         <MetricCard
           label="Tồn thực tế (sổ kho)"
           value={formatNumber(totals.actual)}
-          note={`Chờ xuất ${formatNumber(totals.committed)} · khả dụng ${formatNumber(totals.available)} · giá trị ${formatVND(totals.stockValue, { compact: true })}${totals.unknownStock ? ` · ${formatNumber(totals.unknownStock)} mẫu mã chưa có phiếu nhập, không cộng vào` : ""}`}
+          note={`Chờ xuất ${formatNumber(totals.committed)} · khả dụng ${formatNumber(totals.available)} · giá trị ${totals.stockValueUnpriced ? "đã biết giá " : ""}${formatVND(totals.stockValue, { compact: true })}${totals.stockValueUnpriced ? ` · ${formatNumber(totals.stockValueUnpriced)} mẫu chưa có giá` : ""}${totals.unknownStock ? ` · ${formatNumber(totals.unknownStock)} mẫu mã chưa có phiếu nhập, không cộng vào` : ""}`}
           icon={Boxes}
           tone={totals.available <= 0 ? "rose" : "blue"}
         />
@@ -570,7 +570,7 @@ function VariantStockSection({ product, user }: { product: ProductDetail; user: 
                     </TableCell>
                     <TableCell className="text-right">
                       <Money value={v.retailPrice} className="font-semibold" />
-                      <div className="text-[11px] text-muted-foreground">vốn <Money value={l?.unitCost ?? v.lastImportedPrice} /></div>
+                      <div className="text-[11px] text-muted-foreground" title={(l ? l.unitCostKnown : v.lastImportedPrice > 0 ? v.lastImportedPrice : null) === null ? "Chưa có giá nhập — không phải vốn 0 ₫" : undefined}>vốn <Money value={l ? l.unitCostKnown : v.lastImportedPrice > 0 ? v.lastImportedPrice : null} /></div>
                       <div className="text-[11px] text-muted-foreground" title="Tồn thực tế ERP × giá vốn">tồn {v.erpStock === null ? "—" : <Money value={v.stockValue} />}</div>
                     </TableCell>
                     {/* NHẬP: phiếu nhập hàng mới là số chính; tái nhập / điều chỉnh / xuất tay là các vế còn lại của tổng phiếu kho. */}
@@ -656,7 +656,8 @@ function VariantStockSection({ product, user }: { product: ProductDetail; user: 
           {totals.unknownStock ? <> · <span className="font-semibold text-foreground">{formatNumber(totals.unknownStock)}</span> mẫu mã chưa có phiếu nhập (không cộng vào tổng){totals.committedUnknown ? <>, đang có <span className="font-semibold text-amber-700 dark:text-amber-400">{formatNumber(totals.committedUnknown)}</span> cái chờ xuất</> : null}</> : null}
         </span>
         <span>
-          Giá trị tồn <span className="numeric font-semibold text-foreground">{formatVND(totals.stockValue)}</span>
+          {totals.stockValueUnpriced ? "Giá trị tồn đã biết giá " : "Giá trị tồn "}<span className="numeric font-semibold text-foreground">{formatVND(totals.stockValue)}</span>
+          {totals.stockValueUnpriced ? <> · <span className="font-semibold text-foreground">{formatNumber(totals.stockValueUnpriced)}</span> mẫu chưa có giá (không cộng vào)</> : null}
         </span>
       </div>
     </SectionCard>

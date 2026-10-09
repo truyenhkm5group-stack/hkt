@@ -214,7 +214,10 @@ export async function readCustomerHealth(
   const out: Record<string, CustomerHealth> = {};
   for (const c of customers) {
     out[c.account.id] = classifyCustomer(
-      { accountStatus: c.account.status, failedJobs: c.failedJobs, templatePendingJobs: c.templatePendingJobs, revenueVnd: c.economics.revenueVnd, grossProfitVnd: c.economics.grossProfitVnd, workspaces: c.workspaces.map((w) => workspaceHealthInput(w, s, opts.activation)) },
+      { accountStatus: c.account.status, failedJobs: c.failedJobs, templatePendingJobs: c.templatePendingJobs, revenueVnd: c.economics.revenueVnd,
+        // Lãi gộp cho phán quyết LỖ: chi phí thiếu thì chỉ còn khi phần đã biết đã vượt doanh thu (lỗ tối thiểu) — `lib/saas/policy.ts`.
+        grossProfitVnd: c.economics.lossCheckGrossProfitVnd,
+        workspaces: c.workspaces.map((w) => workspaceHealthInput(w, s, opts.activation)) },
       now,
       t,
     );

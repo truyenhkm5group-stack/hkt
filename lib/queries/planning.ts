@@ -66,9 +66,18 @@ export type PlanRow = PlanOutput & {
   /** Số lượng bán của ngày mạnh nhất trong cửa sổ — căn cứ nhận ra đột biến. */
   peakDayQty: number;
   leadTimeDays: number;
+  /**
+   * Giá vốn cũ — `0` khi CHƯA BIẾT. Giữ nguyên kiểu cho các nơi đang đọc (quyết định tồn kho, xả hàng,
+   * đứt size… đều đã tự coi `0` là chưa biết). MÀN HÌNH đọc `unitCostKnown`, không đọc ô này.
+   */
   unitCost: number;
+  /** Giá vốn theo mục 3.13: phiếu nhập gần nhất → giá nhập mẫu mã. `null` = CHƯA BIẾT (không phải 0 ₫). */
+  unitCostKnown: number | null;
   retailPrice: number;
+  /** = `suggested × unitCost` — ra 0 khi chưa biết giá. Màn hình đọc `orderCostKnown`. */
   orderCost: number;
+  /** Tiền đặt theo giá đã biết. Không đề xuất đặt ⇒ 0 THẬT; có đề xuất mà chưa biết giá ⇒ `null`. */
+  orderCostKnown: number | null;
   /**
    * ĐÚNG bộ đầu vào đã đưa vào `computePlan` cho dòng này. Lời diễn giải và các kịch bản
    * (`explainPlan`) tính lại từ chính nó — không dựng lại đầu vào ở nơi khác, nếu không lời giải
@@ -95,8 +104,9 @@ export type PlanReport = {
   /** Tham số thực sự đã dùng để tính bảng này. */
   used: { coverDays: number; countIncoming: boolean; returnRecoveryRate: number; shopReturnRate: number; vtpReturnLagDays: number | null; restockDays: number };
   rows: PlanRow[];
-  products: { productId: string; productName: string; productCode: string; image: string | null; rows: PlanRow[]; suggested: number; orderCost: number; worst: PlanStatus }[];
-  summary: { variants: number; out: number; critical: number; low: number; unknown: number; suggestedUnits: number; orderCost: number; incomingUnits: number; byStatus: Record<PlanStatus, number> };
+  /** `orderCost` chỉ cộng mẫu mã ĐÃ BIẾT giá; `orderCostUnpriced` = số mẫu mã có đề xuất đặt mà chưa biết giá (không cộng vào). */
+  products: { productId: string; productName: string; productCode: string; image: string | null; rows: PlanRow[]; suggested: number; orderCost: number; orderCostUnpriced: number; worst: PlanStatus }[];
+  summary: { variants: number; out: number; critical: number; low: number; unknown: number; suggestedUnits: number; orderCost: number; orderCostUnpriced: number; incomingUnits: number; byStatus: Record<PlanStatus, number> };
 };
 
 /**
@@ -209,7 +219,8 @@ export function buildPlanRowsQuery(db: Awaited<ReturnType<typeof getDb>>, a: Pla
       sold30: sql<number>`coalesce(${d30.qty}, 0)`,
       soldInWindow: sql<number>`coalesce(${dw.qty}, 0)`,
       peakDayQty: sql<number>`coalesce(${peak.peak}, 0)`,
-      unitCost: sql<number>`coalesce(${LAST_RECEIPT_COST}, ${pv.lastImportedPrice}, 0)`,
+      // Bậc cuối là NULL (CHƯA BIẾT), không phải 0: giá nhập mẫu mã 0 = chưa khai (mục 3.13, mục 42).
+      unitCostKnown: sql<number | null>`coalesce(${LAST_RECEIPT_COST}, nullif(${pv.lastImportedPrice}, 0))`,
       retailPrice: pv.retailPrice,
     })
     .from(pv)
@@ -306,7 +317,10 @@ function toPlanRow(r: PlanQueryRow, a: PlanningAssumptions, rates: ShopRates, co
   const returnLagDays = rates.vtpReturnLagDays === null ? null : rates.vtpReturnLagDays + Math.max(0, rates.restockDays);
   const input: PlanInput = { stock: Number(r.stock ?? 0), stockKnown: Boolean(r.stockKnown), committed: Number(r.committed ?? 0), soldInWindow: Number(r.soldInWindow ?? 0), windowDays: Math.max(1, a.velocityWindowDays), leadTimeDays, coverDays: a.coverDays, safetyDays: a.safetyDays, roundTo: Math.max(1, a.roundTo), peakDayQty: Number(r.peakDayQty ?? 0), minOrderQty: a.minOrderQtyOverrides?.[r.productId] ?? a.minOrderQty, inTransit: Number(r.inTransit ?? 0), awaitingReturn: Number(r.awaitingReturn ?? 0), returnRate, returnLagDays, returnRecoveryRate: rates.returnRecoveryRate, countIncoming };
   const plan = computePlan(input);
-  const unitCost = Number(r.unitCost ?? 0);
+  // Giá vốn KHÔNG vào `computePlan` (đầu vào ở trên không có ô giá) — nó chỉ để in và nhân ra tiền đặt.
+  const unitCostKnown = r.unitCostKnown === null || r.unitCostKnown === undefined ? null : Number(r.unitCostKnown);
+  // Ô cũ cho các nơi đọc đã tự coi 0 là chưa biết — `?? 0` ở ĐÂY là cố ý, không phải trong hàm định dạng.
+  const unitCost = unitCostKnown ?? 0;
   return {
     ...plan,
     input,
@@ -343,8 +357,10 @@ function toPlanRow(r: PlanQueryRow, a: PlanningAssumptions, rates: ShopRates, co
     peakDayQty: Number(r.peakDayQty ?? 0),
     leadTimeDays,
     unitCost,
+    unitCostKnown,
     retailPrice: Number(r.retailPrice ?? 0),
     orderCost: plan.suggested * unitCost,
+    orderCostKnown: plan.suggested === 0 ? 0 : unitCostKnown === null ? null : plan.suggested * unitCostKnown,
   };
 }
 
@@ -365,10 +381,11 @@ async function getReplenishmentPlanUncached(opt: PlanOptions): Promise<PlanRepor
   const active = planRows.filter(isPlanRowActive);
   const byProduct = new Map<string, PlanReport["products"][number]>();
   for (const r of active) {
-    const g = byProduct.get(r.productId) ?? { productId: r.productId, productName: r.productName, productCode: r.productCode, image: r.image, rows: [], suggested: 0, orderCost: 0, worst: "IDLE" as PlanStatus };
+    const g = byProduct.get(r.productId) ?? { productId: r.productId, productName: r.productName, productCode: r.productCode, image: r.image, rows: [], suggested: 0, orderCost: 0, orderCostUnpriced: 0, worst: "IDLE" as PlanStatus };
     g.rows.push(r);
     g.suggested += r.suggested;
-    g.orderCost += r.orderCost;
+    if (r.orderCostKnown === null) g.orderCostUnpriced += 1;
+    else g.orderCost += r.orderCostKnown;
     if (STATUS_RANK[r.status] < STATUS_RANK[g.worst]) g.worst = r.status;
     byProduct.set(r.productId, g);
   }
@@ -381,7 +398,7 @@ async function getReplenishmentPlanUncached(opt: PlanOptions): Promise<PlanRepor
     used: { coverDays: a.coverDays, countIncoming, returnRecoveryRate, shopReturnRate, vtpReturnLagDays, restockDays: a.restockDays },
     rows: active,
     products,
-    summary: { variants: active.length, out: byStatus.OUT, critical: byStatus.CRITICAL, low: byStatus.LOW, unknown: byStatus.UNKNOWN, suggestedUnits: active.reduce((t, r) => t + r.suggested, 0), orderCost: active.reduce((t, r) => t + r.orderCost, 0), incomingUnits: active.reduce((t, r) => t + r.incoming, 0), byStatus },
+    summary: { variants: active.length, out: byStatus.OUT, critical: byStatus.CRITICAL, low: byStatus.LOW, unknown: byStatus.UNKNOWN, suggestedUnits: active.reduce((t, r) => t + r.suggested, 0), orderCost: active.reduce((t, r) => t + (r.orderCostKnown ?? 0), 0), orderCostUnpriced: active.filter((r) => r.orderCostKnown === null).length, incomingUnits: active.reduce((t, r) => t + r.incoming, 0), byStatus },
   };
 }
 
