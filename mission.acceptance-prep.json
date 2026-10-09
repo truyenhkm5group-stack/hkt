@@ -3,7 +3,7 @@
   "mission_id": "acceptance-prep",
   "title": "Nghiệm thu --prep: dựng sẵn workspace thử cho E2E (sản phẩm NT-AO-01 + tồn + bật bot + xuất bản) qua đúng lõi của UI — chủ shop giao 09/10",
   "business_goal": "",
-  "status": "RUNNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -26,7 +26,18 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-09T10:36:36.315Z",
-  "updated_at": "2026-10-09T10:36:36.315Z",
-  "last_heartbeat": "2026-10-09T10:36:36.315Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-09T12:15:27.347Z",
+  "last_heartbeat": "2026-10-09T12:15:27.347Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "feat/acceptance-prep",
+    "sha": "08e5453e8fe1dfd636ea13d0b7a2755ab08ad944",
+    "at": "2026-10-09T12:15:27.347Z",
+    "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+    "title": "Nghiệm thu --prep: dựng sẵn workspace thử cho E2E (sản phẩm NT-AO-01 + tồn + bật bot + xuất bản) qua đúng lõi của UI — chủ shop giao 09/10",
+    "summary": "saas-acceptance --apply --prep dựng sẵn workspace thử qua đúng lõi UI (chủ shop giao 09/10)",
+    "tests": [
+      "npm test TẤT CẢ KIỂM THỬ ĐẠT; typecheck + lint sạch; đột biến bổ sung tồn ⇒ đỏ"
+    ]
+  }
 }
