@@ -29,10 +29,12 @@
     "erp-chi-tiet-duoi-dai"
   ],
   "blocked_by": [],
-  "related_prs": [],
+  "related_prs": [
+    726
+  ],
   "migration_reservations": [],
   "created_at": "2026-10-08T23:30:49.882Z",
-  "updated_at": "2026-10-09T04:08:29.249Z",
+  "updated_at": "2026-10-09T04:09:01.543Z",
   "last_heartbeat": "2026-10-09T04:08:29.249Z",
   "definition_of_done": [],
   "handoff": {
