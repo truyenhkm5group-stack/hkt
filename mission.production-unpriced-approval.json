@@ -1,0 +1,29 @@
+{
+  "schema": 1,
+  "mission_id": "production-unpriced-approval",
+  "title": "Lệnh đặt xưởng chưa có giá không lọt bước duyệt PURCHASING_LARGE; giá trống không lưu thành 0",
+  "business_goal": "",
+  "status": "RUNNING",
+  "priority": "P2",
+  "risk": "MEDIUM",
+  "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "worker": null,
+  "worktree": null,
+  "branch": "fix/production-unpriced-approval",
+  "base_sha": "d23c0deb3ce17e61c94d78117b04a9b3c7043183",
+  "domains": [],
+  "owned_paths": [
+    "lib/actions/production.ts",
+    "app/(dashboard)/production/",
+    "tests/production-unpriced-approval.test.ts",
+    "tests/sync-fixtures.test.ts"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-09T00:14:11.786Z",
+  "updated_at": "2026-10-09T00:14:11.786Z",
+  "last_heartbeat": "2026-10-09T00:14:11.786Z",
+  "definition_of_done": []
+}
