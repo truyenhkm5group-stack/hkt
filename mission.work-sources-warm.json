@@ -1,0 +1,31 @@
+{
+  "schema": 1,
+  "mission_id": "work-sources-warm",
+  "title": "Giữ ấm 3 nguồn /work (FULFILLMENT_EXCEPTION · ALERT · ADS_DECISION) trong job dashboard-warm",
+  "business_goal": "",
+  "status": "RUNNING",
+  "priority": "P2",
+  "risk": "MEDIUM",
+  "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "worker": null,
+  "worktree": null,
+  "branch": "perf/work-warm",
+  "base_sha": "394ad4c842973811ebe3d0857de5e294c31893f9",
+  "domains": [],
+  "owned_paths": [
+    "lib/sync/jobs.ts",
+    "lib/sync/",
+    "lib/work/",
+    "lib/queries/work-adapters.ts",
+    "tests/work-warm.test.ts",
+    "tests/sync-fixtures.test.ts"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-09T10:10:50.160Z",
+  "updated_at": "2026-10-09T10:10:50.160Z",
+  "last_heartbeat": "2026-10-09T10:10:50.160Z",
+  "definition_of_done": []
+}
