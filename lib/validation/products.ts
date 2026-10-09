@@ -21,6 +21,10 @@ export const manualVariantSchema = z.object({
   sku,
   size: z.string().trim().max(50, "Size tối đa 50 ký tự").default(""),
   color: z.string().trim().max(50, "Màu tối đa 50 ký tự").default(""),
+  /** Quy cách (thực phẩm: «500g/gói») — ghi vào `attributes.spec` + chữ `detail`, KHÔNG vào cột size. Xem experience-profile.ts. */
+  spec: z.string().trim().max(80, "Quy cách tối đa 80 ký tự").default(""),
+  /** Khối lượng một đơn vị bán (gam) — cột `weight` mà phí ship đọc. `null` ⇒ không khai (giữ nguyên số cũ khi sửa). */
+  weight: z.number({ error: "Khối lượng là số gam" }).int("Khối lượng là số nguyên (gam)").min(0, "Khối lượng không được âm").max(1_000_000, "Khối lượng quá lớn").nullable().default(null),
   /** `null` ⇒ lấy giá chung của sản phẩm. */
   retailPrice: money,
   /** Giá vốn khai tay của mẫu mã; `null` ⇒ lấy giá vốn chung. */

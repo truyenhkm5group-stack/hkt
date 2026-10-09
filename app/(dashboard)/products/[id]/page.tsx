@@ -14,6 +14,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { env } from "@/lib/env";
 import { formatDateTime, formatNumber, formatVND } from "@/lib/format";
 import { findProductIdByVariant, getProductDetail, type ProductDetail } from "@/lib/queries/products";
+import { readExperienceProfile } from "@/lib/experience/profile";
+import { specOf } from "@/lib/constants/experience-profile";
 import { getProductMatrix } from "@/lib/queries/product-intelligence";
 import { PLAN_STATUS_LABEL, PLAN_STATUS_TONE, type PlanStatus } from "@/lib/constants/planning";
 import { buildStockSizeMatrix } from "@/lib/inventory/size-matrix";
@@ -53,6 +55,8 @@ export default async function ProductDetailPage({ params, searchParams }: { para
     notFound();
   }
   const { totals } = product;
+  // Hồ sơ ngành: ma trận Màu × Size và cảnh báo "thiếu đúng size" chỉ có nghĩa khi mẫu mã là màu × cỡ (thời trang).
+  const { profile } = await readExperienceProfile();
   // Ma trận Màu × Size — chỉ dựng khi mã hàng thật sự có nhiều màu/size, mã một biến thể thì rối.
   const matrixPeriod = resolvePeriod({}, "90d");
   // Trang mở được bằng MÃ sản phẩm (getProductDetail khớp cả customId) ⇒ ma trận + ghi chú phải tra theo product.id, không theo đường dẫn.
@@ -77,7 +81,7 @@ export default async function ProductDetailPage({ params, searchParams }: { para
             <span className={cn("inline-flex items-center gap-1.5 rounded-md px-2 py-0.5 text-xs font-semibold", statusTone)}>{statusLabel}</span>
           </span>
         }
-        description={`${product.categories.length ? `${product.categories.join(", ")} · ` : ""}${formatNumber(product.variants.length)} mẫu mã (${formatNumber(totals.selling)} đang bán) · ${manual ? `tạo trên ERP ${formatDateTime(product.insertedAt ?? product.createdAt)}${unit ? ` · đơn vị ${unit}` : ""}` : `đồng bộ ${formatDateTime(product.syncedAt)}`}`}
+        description={`${product.categories.length ? `${product.categories.join(", ")} · ` : ""}${formatNumber(product.variants.length)} ${profile.variantTerm.toLowerCase()} (${formatNumber(totals.selling)} đang bán) · ${manual ? `tạo trên ERP ${formatDateTime(product.insertedAt ?? product.createdAt)}${unit ? ` · đơn vị ${unit}` : ""}` : `đồng bộ ${formatDateTime(product.syncedAt)}`}`}
         actions={
           <>
             {mau && shellAllows(user, "/models") ? (
@@ -88,7 +92,7 @@ export default async function ProductDetailPage({ params, searchParams }: { para
             {editable ? (
               <Button asChild size="sm">
                 <Link href="?edit=1#sua-san-pham">
-                  <Plus className="size-4" /> Thêm mẫu mã
+                  <Plus className="size-4" /> Thêm {profile.variantTerm.toLowerCase()}
                 </Link>
               </Button>
             ) : null}
@@ -153,7 +157,7 @@ export default async function ProductDetailPage({ params, searchParams }: { para
         <MetricCard label="Bán 30 ngày" value={formatNumber(totals.sold30)} note={`90 ngày: ${formatNumber(totals.sold90)} sp · ${formatNumber(totals.orders90)} đơn · ${formatVND(totals.revenue90, { compact: true })} tiền hàng (không tính đơn huỷ)`} icon={ShoppingBag} tone="green" />
       </section>
 
-      <VariantStockSection product={product} user={user} />
+      <VariantStockSection product={product} user={user} variantTerm={profile.variantTerm.toLowerCase()} />
 
       <OrderAdviceSection product={product} user={user} />
 
@@ -163,11 +167,11 @@ export default async function ProductDetailPage({ params, searchParams }: { para
             <ProductSalesChart data={product.daily} />
           </SectionCard>
 
-          <SizeBreakNotice variants={product.variants} user={user} />
+          {profile.sizeColorMatrix ? <SizeBreakNotice variants={product.variants} user={user} /> : null}
 
-          <StockSizeMatrix variants={product.variants} />
+          {profile.sizeColorMatrix ? <StockSizeMatrix variants={product.variants} /> : null}
 
-          {matrix ? (
+          {matrix && profile.sizeColorMatrix ? (
             <SectionCard
               title="Hiệu quả theo Màu × Size"
               description={`${matrixPeriod.label} · mỗi ô: số giao thành công / tỷ lệ GTC / số ngày còn đủ hàng`}
@@ -292,7 +296,7 @@ export default async function ProductDetailPage({ params, searchParams }: { para
           </SectionCard>
 
           {editable ? (
-            <SectionCard id="sua-san-pham" title="Sửa sản phẩm" description="Mã tạo trên ERP — sửa tên, mã, đơn vị, giá, thêm mẫu mã (nút «Thêm mẫu mã» ở cuối form)" hint="Mẫu mã đã có không xoá ở đây (xoá là mất dòng phiếu kho của nó): thôi bán thì bỏ ô «Đang bán». Tồn kho đổi bằng phiếu Nhập hàng / Kiểm kê, không đổi ở form này.">
+            <SectionCard id="sua-san-pham" title="Sửa sản phẩm" description={`Mã tạo trên ERP — sửa tên, mã, đơn vị, giá, thêm ${profile.variantTerm.toLowerCase()} (nút ở cuối form)`} hint="Mẫu mã đã có không xoá ở đây (xoá là mất dòng phiếu kho của nó): thôi bán thì bỏ ô «Đang bán». Tồn kho đổi bằng phiếu Nhập hàng / Kiểm kê, không đổi ở form này.">
               <details open={openEdit}>
                 <summary className="cursor-pointer text-sm font-semibold text-primary">Mở form sửa</summary>
                 <div className="mt-4">
@@ -301,13 +305,14 @@ export default async function ProductDetailPage({ params, searchParams }: { para
                     key={product.updatedAt.toISOString()}
                     mode="edit"
                     productId={product.id}
+                    profile={profile}
                     initial={{
                       name: product.name,
                       code: product.customId ?? "",
                       unit: unit ?? "",
                       retailPrice: "",
                       cost: "",
-                      variants: product.variants.map((v) => ({ id: v.id, sku: v.sku, size: v.size, color: v.color, retailPrice: v.retailPrice ? String(v.retailPrice) : "", cost: v.lastImportedPrice ? String(v.lastImportedPrice) : "", selling: !v.isHidden, addOnOnly: v.addOnOnly })),
+                      variants: product.variants.map((v) => ({ id: v.id, sku: v.sku, size: v.size, color: v.color, spec: specOf(v.attributes), weight: v.weight ? String(v.weight) : "", retailPrice: v.retailPrice ? String(v.retailPrice) : "", cost: v.lastImportedPrice ? String(v.lastImportedPrice) : "", selling: !v.isHidden, addOnOnly: v.addOnOnly })),
                     }}
                   />
                 </div>
@@ -502,13 +507,13 @@ function SizeBreakNotice({ variants, user }: { variants: VariantRow[]; user: Ses
  *   Còn thiếu = max(0, −Khả dụng) — đơn đã hứa khách mà kho không đủ hàng để xuất
  *   Cần đặt / hạn đặt = `computePlan`, cùng bộ máy với trang Kế hoạch SX
  */
-function VariantStockSection({ product, user }: { product: ProductDetail; user: SessionUser }) {
+function VariantStockSection({ product, user, variantTerm = "mẫu mã" }: { product: ProductDetail; user: SessionUser; variantTerm?: string }) {
   const { totals } = product;
   const a = product.planning.assumptions;
   const image = product.image || product.variants.find((v) => v.images[0])?.images[0] || null;
   return (
     <SectionCard
-      title={`Tồn kho theo mẫu mã (${formatNumber(product.variants.length)})`}
+      title={`Tồn kho theo ${variantTerm} (${formatNumber(product.variants.length)})`}
       description="Sổ kho ERP: nhập theo phiếu kho, xuất theo vận đơn Viettel Post"
       hint={
         <>

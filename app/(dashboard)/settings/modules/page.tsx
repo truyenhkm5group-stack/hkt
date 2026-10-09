@@ -4,6 +4,8 @@ import { PageUsageTable } from "@/components/platform/page-usage-table";
 import { ModuleConfigTable } from "@/components/platform/module-config-table";
 import { EmptyState, SectionCard } from "@/components/ui-bits";
 import { requirePermission } from "@/lib/auth/session";
+import { ExperiencePresetPicker } from "@/components/experience/preset-picker";
+import { readExperienceProfile } from "@/lib/experience/profile";
 import { OTHER_USAGE_KEY, usageKeysFrom } from "@/lib/constants/page-usage";
 import { hrefVisible } from "@/lib/platform-ui/module-visibility";
 import { getOrganizationModuleView } from "@/lib/queries/platform-modules";
@@ -31,7 +33,7 @@ export default async function OrganizationModulesPage() {
   }
   // Chỉ trang thuộc module ĐANG BẬT: trang của module tắt thì 0 lượt là hiển nhiên, không phải tín hiệu.
   const usageKeys = usageKeysFrom(Object.keys(NAV_TITLES)).filter((k) => hrefVisible(user, k));
-  const [{ organization, view }, usage] = await Promise.all([getOrganizationModuleView(org.code), getPageUsage([...usageKeys, OTHER_USAGE_KEY])]);
+  const [{ organization, view }, usage, experience] = await Promise.all([getOrganizationModuleView(org.code), getPageUsage([...usageKeys, OTHER_USAGE_KEY]), readExperienceProfile()]);
   const depErrors = view.groups.flatMap((g) => g.rows).filter((r) => r.dependencyError).length;
 
   return (
@@ -51,6 +53,15 @@ export default async function OrganizationModulesPage() {
           </div>
         }
       />
+      {/*
+        NGÀNH CỦA TỔ CHỨC (hồ sơ trải nghiệm — lib/constants/experience-profile.ts): ô sản phẩm, thuật ngữ, ma trận Màu × Size.
+        Tổ chức nhà luôn thời trang, không hiện khối chọn.
+      */}
+      {org.isHome ? null : (
+        <SectionCard title="Ngành của cửa hàng" description={`Giao diện sản phẩm theo ngành · ${experience.detail}`}>
+          <ExperiencePresetPicker current={experience.profile.preset} overridden={experience.basis === "OVERRIDE"} />
+        </SectionCard>
+      )}
       <SectionCard
         title="Module theo nhóm"
         description={depErrors ? `⚠ ${depErrors} module khai bật nhưng đang bị coi là tắt vì thiếu phụ thuộc` : "Bấm công tắc để bật / tắt; tính năng chỉ có hiệu lực khi module của nó bật."}
