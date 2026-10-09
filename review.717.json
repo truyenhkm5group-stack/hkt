@@ -1,0 +1,8 @@
+{
+  "pr": 717,
+  "sha": "ec8db14297eab5ed48ab9b95f345e7b52fbd6a75",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-09T00:15:42.045Z",
+  "note": "Review Integration Lead (C0): điền sẵn đúng từ vận đơn (cod_amount NOT NULL, không lùi về COD đơn; địa chỉ receiver_* rồi shipFullAddress); máy chủ từ chối đổi COD thiếu confirmCodChange=true và KHÔNG gọi VTP; có xác nhận thì gửi + audit trước/sau + vẫn ghi dòng nhật ký MANUAL (luật 47); cod_status/cod_collected không chạm (§3.6); «Đã thu» dùng HAS_CASH_EVIDENCE của ORDER_OUTCOME (chỉ thêm export)"
+}
