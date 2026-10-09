@@ -37,7 +37,7 @@ const tomTat = (s: string) => console.log(`[ops:tom-tat] ${s}`);
 /** Trần của kênh tóm tắt (cùng số với các script tóm tắt khác). */
 export const SUMMARY_MAX_CHARS = 300;
 
-export type CatalogVariant = { id: string; sku: string; label: string; price: number | null; weightGrams: number | null; hidden: boolean; manual: boolean };
+export type CatalogVariant = { id: string; sku: string; label: string; price: number | null; weightGrams: number | null; hidden: boolean; manual: boolean; /** Chỉ bán kèm (0238). */ addOnOnly?: boolean };
 export type CatalogProduct = { id: string; name: string; code: string | null; manual: boolean; removed: boolean; variants: CatalogVariant[] };
 export type CatalogReport = {
   org: { code: string; name: string };
@@ -79,7 +79,7 @@ export async function collectOrgCatalog(org: { code: string; name: string; isHom
   const pv = schema.productVariants;
   const prows = await db.select({ id: p.id, name: p.name, code: p.customId, removed: p.isRemoved }).from(p).orderBy(asc(p.name), asc(p.id));
   const vrows = await db
-    .select({ id: pv.id, productId: pv.productId, sku: pv.sku, detail: pv.detail, color: pv.color, size: pv.size, price: pv.retailPrice, weight: pv.weight, hidden: pv.isHidden, removed: pv.isRemoved })
+    .select({ id: pv.id, productId: pv.productId, sku: pv.sku, detail: pv.detail, color: pv.color, size: pv.size, price: pv.retailPrice, weight: pv.weight, hidden: pv.isHidden, removed: pv.isRemoved, addOnOnly: pv.addOnOnly })
     .from(pv)
     .orderBy(asc(pv.sku), asc(pv.id));
   const products: CatalogProduct[] = prows.map((r) => ({
@@ -90,7 +90,7 @@ export async function collectOrgCatalog(org: { code: string; name: string; isHom
     removed: r.removed,
     variants: vrows
       .filter((v) => v.productId === r.id && !v.removed)
-      .map((v) => ({ id: v.id, sku: v.sku, label: variantLabel(v), price: v.price > 0 ? v.price : null, weightGrams: v.weight > 0 ? v.weight : null, hidden: v.hidden, manual: isManualRecordId(v.id) })),
+      .map((v) => ({ id: v.id, sku: v.sku, label: variantLabel(v), price: v.price > 0 ? v.price : null, weightGrams: v.weight > 0 ? v.weight : null, hidden: v.hidden, manual: isManualRecordId(v.id), ...(v.addOnOnly ? { addOnOnly: true } : {}) })),
   }));
   const nameOf = new Map(prows.map((r) => [r.id, r.name]));
   const labelOf = new Map(vrows.map((v) => [v.id, `${nameOf.get(v.productId) ?? v.productId} · ${variantLabel(v)}`]));
@@ -142,7 +142,7 @@ export function catalogLines(r: CatalogReport): string[] {
   for (const p of r.products) {
     out.push(`· ${p.id} · ${p.name}${p.code ? ` · mã ${p.code}` : ""} · ${p.manual ? "tạo tay" : "đồng bộ"}${p.removed ? " · ĐÃ GỠ" : ""}`);
     if (!p.variants.length) out.push("    (không có mẫu mã)");
-    for (const v of p.variants) out.push(`    - ${v.id} · SKU ${v.sku || "(trống)"} · ${v.label} · giá lẻ ${vnd(v.price)} · ${v.weightGrams === null ? "chưa khai gram" : `${v.weightGrams} g`}${v.hidden ? " · ẨN (thôi bán)" : ""}`);
+    for (const v of p.variants) out.push(`    - ${v.id} · SKU ${v.sku || "(trống)"} · ${v.label} · giá lẻ ${vnd(v.price)} · ${v.weightGrams === null ? "chưa khai gram" : `${v.weightGrams} g`}${v.hidden ? " · ẨN (thôi bán)" : ""}${v.addOnOnly ? " · CHỈ BÁN KÈM" : ""}`);
   }
   out.push("");
   out.push(`BẢNG GIÁ SỈ (${r.priceLists.length}):`);
@@ -165,7 +165,7 @@ export function catalogSummary(r: CatalogReport): string[] {
   const activeLists = r.priceLists.filter((l) => l.active);
   const tiers = activeLists.reduce((s, l) => s + l.tiers.length, 0);
   return [
-    `Tổ chức ${r.org.code}: ${live.length} sản phẩm · ${variants.length} mẫu mã (${variants.filter((v) => v.price === null).length} chưa có giá · ${variants.filter((v) => v.hidden).length} ẩn) · nguồn ${r.syncedProducts === null ? "—" : r.syncedProducts ? "ĐỒNG BỘ" : "tạo tay"}`,
+    `Tổ chức ${r.org.code}: ${live.length} sản phẩm · ${variants.length} mẫu mã (${variants.filter((v) => v.price === null).length} chưa có giá · ${variants.filter((v) => v.hidden).length} ẩn · ${variants.filter((v) => v.addOnOnly).length} chỉ bán kèm) · nguồn ${r.syncedProducts === null ? "—" : r.syncedProducts ? "ĐỒNG BỘ" : "tạo tay"}`,
     `Bot: ${r.bot ? `${onOff(r.bot.enabled)} · giá sỉ ${onOff(r.bot.wholesalePricing)} · chốt không kiểm tồn ${onOff(r.bot.sellWithoutStockCheck)}` : "— (chưa có cấu hình)"} · bảng giá sỉ đang dùng ${activeLists.length} (${tiers} bậc) · câu mẫu đang bật ${r.quickReplies.length} · câu upsell ${r.quickReplySettings?.upsellSet ? `ĐÃ CHỌN (${r.quickReplies.find((q) => q.upsell)?.images ?? 0} ảnh)` : "CHƯA CHỌN"}`,
   ].map((l) => l.slice(0, SUMMARY_MAX_CHARS));
 }

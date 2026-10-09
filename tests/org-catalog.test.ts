@@ -48,7 +48,7 @@ export function testOrgCatalogPure() {
     bot: { enabled: true, wholesalePricing: false, sellWithoutStockCheck: true, productFields: ["net_weight"], extraInstructions: "Giá sỉ hỏi nhân viên" },
     profile: "Hải sản",
     products: [
-      { id: "erp-p1", name: "Chả cá thu", code: "CCT", manual: true, removed: false, variants: [{ id: "erp-v1", sku: "CCT-1", label: "Size: 1kg", price: 280_000, weightGrams: 1000, hidden: false, manual: true }, { id: "erp-v2", sku: "CCT-05", label: "Size: 0,5kg", price: null, weightGrams: null, hidden: true, manual: true }] },
+      { id: "erp-p1", name: "Chả cá thu", code: "CCT", manual: true, removed: false, variants: [{ id: "erp-v1", sku: "CCT-1", label: "Size: 1kg", price: 280_000, weightGrams: 1000, hidden: false, manual: true }, { id: "erp-v2", sku: "CCT-05", label: "Size: 0,5kg", price: null, weightGrams: null, hidden: true, manual: true, addOnOnly: true }] },
       { id: "erp-p9", name: "Đã gỡ", code: null, manual: true, removed: true, variants: [] },
     ],
     priceLists: [{ id: "l1", name: "Sỉ chung", isDefault: true, active: true, tiers: [{ variantId: "erp-v1", variantLabel: "Chả cá thu · Size: 1kg", minQuantity: 10, unitPrice: 250_000 }] }, { id: "l2", name: "Cũ", isDefault: false, active: false, tiers: [] }],
@@ -59,7 +59,7 @@ export function testOrgCatalogPure() {
   const all = lines.join("\n");
   assert.ok(all.includes("· erp-p1 · Chả cá thu · mã CCT · tạo tay"), "có id sản phẩm để chọn khi thêm quy cách");
   assert.ok(all.includes("- erp-v1 · SKU CCT-1 · Size: 1kg · giá lẻ 280.000 ₫ · 1000 g"));
-  assert.ok(all.includes("- erp-v2 · SKU CCT-05 · Size: 0,5kg · giá lẻ — · chưa khai gram · ẨN (thôi bán)"), "chưa có giá in —, mẫu mã ẩn có nhãn");
+  assert.ok(all.includes("- erp-v2 · SKU CCT-05 · Size: 0,5kg · giá lẻ — · chưa khai gram · ẨN (thôi bán) · CHỈ BÁN KÈM"), "chưa có giá in —, mẫu mã ẩn / chỉ bán kèm có nhãn");
   assert.ok(all.includes("· Đã gỡ · tạo tay · ĐÃ GỠ"));
   assert.ok(all.includes("· Sỉ chung · MẶC ĐỊNH · 1 bậc") && all.includes("- Chả cá thu · Size: 1kg · từ 10: 250.000 ₫") && all.includes("· Cũ · NGỪNG DÙNG · 0 bậc"));
   assert.ok(all.includes("· [UPSELL] Bảng giá (1 ảnh) [giá / bao nhiêu]: Chả cá thu 280k/kg ship 25k"), "câu mẫu gộp một dòng, đánh dấu câu upsell + số ảnh");
@@ -68,7 +68,7 @@ export function testOrgCatalogPure() {
   assert.ok(all.includes("Hướng dẫn thêm (20 ký tự): Giá sỉ hỏi nhân viên"));
 
   const sum = catalogSummary(r);
-  assert.deepEqual(sum, ["Tổ chức x: 1 sản phẩm · 2 mẫu mã (1 chưa có giá · 1 ẩn) · nguồn tạo tay", "Bot: BẬT · giá sỉ TẮT · chốt không kiểm tồn BẬT · bảng giá sỉ đang dùng 1 (1 bậc) · câu mẫu đang bật 1 · câu upsell ĐÃ CHỌN (1 ảnh)"]);
+  assert.deepEqual(sum, ["Tổ chức x: 1 sản phẩm · 2 mẫu mã (1 chưa có giá · 1 ẩn · 1 chỉ bán kèm) · nguồn tạo tay", "Bot: BẬT · giá sỉ TẮT · chốt không kiểm tồn BẬT · bảng giá sỉ đang dùng 1 (1 bậc) · câu mẫu đang bật 1 · câu upsell ĐÃ CHỌN (1 ảnh)"]);
   for (const s of sum) {
     assert.ok(s.length <= SUMMARY_MAX_CHARS);
     for (const w of ["Chả cá", "280", "250", "Bảng giá [", "Hải sản", "nhân viên"]) assert.ok(!s.includes(w), `kênh tóm tắt không mang tên / giá / chữ của shop: ${w}`);
@@ -131,7 +131,7 @@ export async function testOrgCatalogDb() {
       assert.deepEqual(r.quickReplySettings, { enabled: true, upsellSet: false }, "chưa chọn câu upsell ⇒ nói thẳng");
       const all = [...catalogLines(r), ...catalogSummary(r)].join("\n");
       assert.ok(!all.includes(BI_MAT) && !all.includes(SDT), `không dòng nào lộ tên khách / SĐT / câu đã tắt:\n${all}`);
-      assert.equal(catalogSummary(r)[0], `Tổ chức ${ORG}: 2 sản phẩm · 2 mẫu mã (1 chưa có giá · 0 ẩn) · nguồn tạo tay`);
+      assert.equal(catalogSummary(r)[0], `Tổ chức ${ORG}: 2 sản phẩm · 2 mẫu mã (1 chưa có giá · 0 ẩn · 0 chỉ bán kèm) · nguồn tạo tay`);
     });
   } finally {
     await cleanupOrg();
