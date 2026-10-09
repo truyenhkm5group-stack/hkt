@@ -1,0 +1,8 @@
+{
+  "pr": 749,
+  "sha": "3856122905c08dbe6eca357feb8b8da137738d9f",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-09T19:00:10.218Z",
+  "note": "Review Integration Lead: gốc là bom ngày (luật 50) — chuỗi cố định «chủ shop 09/10/2026» trùng ngày ghi ảnh chụp nên bị thay thành <NGÀY CHẠY>. Sửa ở bộ chuẩn hoá (chỉ thay ngày chạy trong ngữ cảnh động RUN_DATE_CONTEXTS), không đổi prompt; ảnh chụp chỉ đổi đúng 15 chỗ placeholder → ngày cố định (đối chiếu từng byte); bài hồi quy với ngày chạy giả = ngày cố định."
+}
