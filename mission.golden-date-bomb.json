@@ -3,7 +3,7 @@
   "mission_id": "golden-date-bomb",
   "title": "Main đỏ vì bom ngày trong bài hội thoại vàng: chuẩn hoá ngày chạy chỉ ở ngữ cảnh động",
   "business_goal": "",
-  "status": "RUNNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -20,7 +20,18 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-09T18:59:12.160Z",
-  "updated_at": "2026-10-09T18:59:12.160Z",
-  "last_heartbeat": "2026-10-09T18:59:12.160Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-09T18:59:30.632Z",
+  "last_heartbeat": "2026-10-09T18:59:30.632Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "fix/golden-bao-gia-after-746",
+    "sha": "3856122905c08dbe6eca357feb8b8da137738d9f",
+    "at": "2026-10-09T18:59:30.632Z",
+    "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+    "title": "Main đỏ vì bom ngày trong bài hội thoại vàng: chuẩn hoá ngày chạy chỉ ở ngữ cảnh động",
+    "summary": "normalizer chỉ thay ngày chạy trong RUN_DATE_CONTEXTS + bài hồi quy",
+    "tests": [
+      "npm test TẤT CẢ KIỂM THỬ ĐẠT; ảnh chụp chỉ đổi 15 chỗ đã đối chiếu từng byte"
+    ]
+  }
 }
