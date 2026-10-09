@@ -700,7 +700,7 @@ export const JOB_DEFINITIONS: Record<string, JobDefinition> = {
     module: "core",
     fanOut: true,
     description:
-      "Tính sẵn số liệu Tổng quan, Tóm tắt & rủi ro và các bộ máy cả shop của khối \"Cần anh quyết\" (tín hiệu mẫu, quyết định quảng cáo, vốn tồn, lệnh sản xuất) cho kỳ người dùng hay mở, để trang chủ luôn đọc từ bộ nhớ đệm. CHỈ ĐỌC — không đụng dữ liệu nghiệp vụ.",
+      "Tính sẵn số liệu Tổng quan, Tóm tắt & rủi ro và các bộ máy cả shop của khối \"Cần anh quyết\" (tín hiệu mẫu, quyết định quảng cáo, vốn tồn, lệnh sản xuất) cùng sổ thiếu hàng + kế hoạch đặt hàng mà \"Việc của tôi\" đọc, cho kỳ người dùng hay mở, để trang chủ luôn đọc từ bộ nhớ đệm. CHỈ ĐỌC — không đụng dữ liệu nghiệp vụ.",
     // Company OS · G: bọc để có dòng `sync_runs` — CHỈ QUAN SÁT (không làm cũ đệm vừa ấm, không phát `sync`).
     // Kỳ lỗi ghi vào `detail`, không vào `failed`: lỗi giữ ấm không đổi dữ liệu nào, và trạng thái
     // PARTIAL ở đây sẽ bật chuỗi sự cố của một job chỉ-đọc mỗi 4 phút.
