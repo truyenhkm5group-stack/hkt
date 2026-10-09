@@ -2,11 +2,16 @@
 
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { ListTodo, Loader2, Search, ShoppingBag, Shirt, Truck, UserRound, Users } from "lucide-react";
+import { Clock, ListTodo, Loader2, Pin, PinOff, Plus, Search, ShoppingBag, Shirt, Sparkles, Truck, UserRound, Users, Zap } from "lucide-react";
 import { allowedNavItems, type NavUserLike } from "@/components/app-sidebar";
 import { Button } from "@/components/ui/button";
 import { CommandDialog, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
+import { openCopilot } from "@/components/ai-copilot";
+import { useNavMemory } from "@/components/nav-memory";
+import { loadCreateActions } from "@/components/quick-create";
+import { pageSearchText, QUICK_VIEWS, type CreateAction } from "@/lib/constants/command-catalog";
 import { Kbd } from "@/components/kbd";
+import { cn } from "@/lib/utils";
 import { CareDrawer } from "@/app/(dashboard)/shipments/care-drawer";
 import { globalSearch } from "@/lib/actions/search";
 import type { SearchHit, SearchResult } from "@/lib/queries/search";
@@ -35,6 +40,14 @@ export function GlobalSearch({ user }: { user: NavUserLike }) {
     tên trang là tới — danh sách lọc theo đúng quyền của người đang đăng nhập, cùng luật với thanh bên.
   */
   const pages = useMemo(() => allowedNavItems(user), [user]);
+  const pageByHref = useMemo(() => new Map(pages.map((p) => [p.href, p])), [pages]);
+  // LỐI ĐI NHANH chỉ hiện khi trang gốc nằm trong menu đã lọc quyền của người này — sổ lệnh không cấp quyền gì.
+  const quickViews = useMemo(() => QUICK_VIEWS.filter((v) => pageByHref.has(v.base)), [pageByHref]);
+  const { recent, pinned, togglePin } = useNavMemory();
+  const [creates, setCreates] = useState<CreateAction[]>([]);
+  useEffect(() => {
+    if (open) void loadCreateActions().then(setCreates);
+  }, [open]);
   const [query, setQuery] = useState("");
   const [result, setResult] = useState<SearchResult | null>(null);
   /*
@@ -100,22 +113,77 @@ export function GlobalSearch({ user }: { user: NavUserLike }) {
 
   return (
     <>
-      <Button variant="ghost" size="sm" aria-label="Tìm kiếm" className="h-10 w-10 justify-center gap-2 rounded-full bg-muted px-0 text-muted-foreground hover:bg-muted/70 2xl:w-56 2xl:justify-start 2xl:px-4" onClick={() => setOpen(true)}>
+      {/*
+        Ô LỆNH LÀ CỬA CHÍNH, KHÔNG PHẢI NÚT KÍNH LÚP. Từ 1024px nó là một ô rộng có chữ "Tìm hoặc gõ việc cần làm" — người
+        ít rành máy không biết bấm ⌘K, nhưng biết bấm vào một ô tìm kiếm.
+      */}
+      <Button variant="ghost" size="sm" aria-label="Tìm kiếm hoặc gõ việc cần làm" className="h-10 w-10 justify-center gap-2 rounded-full bg-muted px-0 text-muted-foreground hover:bg-muted/70 lg:w-60 lg:justify-start lg:px-4 2xl:w-72" onClick={() => setOpen(true)}>
         <Search className="size-4" />
-        <span className="hidden flex-1 text-left text-xs font-normal 2xl:inline">Tìm đơn, SĐT, mã vận đơn…</span>
-        <Kbd className="hidden 2xl:inline-flex">⌘K</Kbd>
+        <span className="hidden flex-1 truncate text-left text-[13px] font-normal lg:inline">Tìm hoặc gõ việc cần làm…</span>
+        <Kbd className="hidden lg:inline-flex">Ctrl K</Kbd>
       </Button>
-      <CommandDialog open={open} onOpenChange={setOpen} title="Tìm kiếm" description="Tìm nhanh đơn hàng, vận đơn, khách hàng, sản phẩm, công việc, nhân sự">
-        <CommandInput placeholder="Nhập mã đơn, số điện thoại, tên khách, mã vận đơn, tên việc, tên nhân viên…" value={query} onValueChange={setQuery} />
+      <CommandDialog open={open} onOpenChange={setOpen} title="Tìm kiếm" description="Tìm dữ liệu, đi tới trang, tạo mới hoặc hỏi AI">
+        <CommandInput placeholder="Gõ SĐT, mã đơn, tên khách… hoặc việc cần làm: «đơn hoàn», «tạo khách», «bảng lương»" value={query} onValueChange={setQuery} />
         <CommandList>
           {/* Một số điện thoại KHÔNG phải một đơn — nói thẳng khi nó khớp nhiều bản ghi. */}
           {result?.ambiguous ? (
-            <div className="border-b bg-amber-50 px-3 py-2 text-[11px] text-amber-800 dark:bg-amber-950/40 dark:text-amber-300">{result.ambiguous}</div>
+            <div className="border-b bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:bg-amber-950/40 dark:text-amber-300">{result.ambiguous}</div>
           ) : null}
 
           <CommandEmpty>
-            {q.length < 2 ? "Nhập ít nhất 2 ký tự." : pending ? "Đang tìm…" : "Không tìm thấy bản ghi nào khớp."}
+            {q.length < 2 ? "Nhập ít nhất 2 ký tự." : pending ? "Đang tìm…" : "Không tìm thấy. Thử hỏi AI ở dưới, hoặc gõ ít chữ hơn."}
           </CommandEmpty>
+
+          {/* Ô còn trống: hiện thứ người này hay dùng TRƯỚC, không bắt họ nhớ tên trang. */}
+          {!q && pinned.some((h) => pageByHref.has(h)) ? (
+            <CommandGroup heading="Đã ghim">
+              {pinned.filter((h) => pageByHref.has(h)).map((h) => {
+                const p = pageByHref.get(h)!;
+                return (
+                  <CommandItem key={`pin-${h}`} value={`ghim ${p.label} ${h}`} onSelect={() => go(h)}>
+                    <Pin className="size-4 shrink-0 text-primary" />
+                    <span className="min-w-0 flex-1 truncate text-sm">{p.label}</span>
+                    <span className="text-xs text-muted-foreground">{p.group}</span>
+                  </CommandItem>
+                );
+              })}
+            </CommandGroup>
+          ) : null}
+          {!q && recent.some((h) => pageByHref.has(h) && !pinned.includes(h)) ? (
+            <CommandGroup heading="Gần đây">
+              {recent.filter((h) => pageByHref.has(h) && !pinned.includes(h)).map((h) => {
+                const p = pageByHref.get(h)!;
+                return (
+                  <CommandItem key={`recent-${h}`} value={`gần đây ${p.label} ${h}`} onSelect={() => go(h)}>
+                    <Clock className="size-4 shrink-0 text-muted-foreground" />
+                    <span className="min-w-0 flex-1 truncate text-sm">{p.label}</span>
+                    <span className="text-xs text-muted-foreground">{p.group}</span>
+                  </CommandItem>
+                );
+              })}
+            </CommandGroup>
+          ) : null}
+          {quickViews.length ? (
+            <CommandGroup heading="Việc cần xem nhanh">
+              {quickViews.map((v) => (
+                <CommandItem key={v.key} value={`nhanh ${v.label} ${v.hint} ${v.keywords.join(" ")}`} onSelect={() => go(v.href)}>
+                  <Zap className="size-4 shrink-0 text-amber-500" />
+                  <span className="min-w-0 flex-1 truncate text-sm">{v.label}</span>
+                  <span className="truncate text-xs text-muted-foreground">{v.hint}</span>
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          ) : null}
+          {creates.length ? (
+            <CommandGroup heading="Tạo mới">
+              {creates.map((a) => (
+                <CommandItem key={`create-${a.key}`} value={`tạo mới ${a.label} ${a.keywords.join(" ")}`} onSelect={() => go(a.href)}>
+                  <Plus className="size-4 shrink-0 text-primary" />
+                  <span className="min-w-0 flex-1 truncate text-sm">Tạo {a.label.toLowerCase()}</span>
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          ) : null}
 
           {(["ORDER", "SHIPMENT", "CUSTOMER", "PRODUCT", "WORK", "EMPLOYEE"] as const).map((kind) => {
             const hits = grouped(kind);
@@ -140,7 +208,7 @@ export function GlobalSearch({ user }: { user: NavUserLike }) {
                     <Icon className="size-4 shrink-0" />
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-sm">{h.title}</span>
-                      <span className="block truncate text-[11px] text-muted-foreground">{h.subtitle}</span>
+                      <span className="block truncate text-xs text-muted-foreground">{h.subtitle}</span>
                     </span>
                   </CommandItem>
                 ))}
@@ -152,6 +220,23 @@ export function GlobalSearch({ user }: { user: NavUserLike }) {
               </CommandGroup>
             );
           })}
+
+          {q.length >= 2 ? (
+            <CommandGroup heading="Hỏi AI">
+              {/* Câu hỏi về số liệu ("hôm nay bao nhiêu đơn chưa gửi?") — trợ lý trả lời kèm liên kết; thao tác ghi luôn chờ người xác nhận. */}
+              <CommandItem
+                value={`hỏi ai ${q}`}
+                onSelect={() => {
+                  setOpen(false);
+                  setQuery("");
+                  openCopilot({ message: q, send: true });
+                }}
+              >
+                <Sparkles className="size-4 shrink-0 text-primary" />
+                <span className="min-w-0 flex-1 truncate text-sm">Hỏi AI: «{q}»</span>
+              </CommandItem>
+            </CommandGroup>
+          ) : null}
 
           {q ? (
             <CommandGroup heading="Mở danh sách đầy đủ với từ khoá này">
@@ -170,15 +255,32 @@ export function GlobalSearch({ user }: { user: NavUserLike }) {
             </CommandGroup>
           ) : null}
 
-          {/* Mọi trang được phép — gõ tên trang là tới, không cần rê chuột qua bốn nhóm menu. */}
+          {/* Mọi trang được phép — so khớp cả BÍ DANH ("bảng lương", "kết nối page"); ghim bằng nút cuối dòng. */}
           <CommandGroup heading="Đi tới trang">
-            {pages.map((p) => (
-              <CommandItem key={p.href} value={`trang ${p.label} ${p.group} ${p.href}`} onSelect={() => go(p.href)}>
-                <p.icon className="size-4 shrink-0 text-muted-foreground" />
-                <span className="min-w-0 flex-1 truncate text-sm">{p.label}</span>
-                <span className="text-[11px] text-muted-foreground">{p.group}</span>
-              </CommandItem>
-            ))}
+            {pages.map((p) => {
+              const isPinned = pinned.includes(p.href);
+              return (
+                <CommandItem key={p.href} value={`trang ${pageSearchText(p.href, p.label, p.group)} ${p.href}`} onSelect={() => go(p.href)} className="group/page">
+                  <p.icon className="size-4 shrink-0 text-muted-foreground" />
+                  <span className="min-w-0 flex-1 truncate text-sm">{p.label}</span>
+                  <span className="text-xs text-muted-foreground">{p.group}</span>
+                  <button
+                    type="button"
+                    aria-label={isPinned ? `Bỏ ghim ${p.label}` : `Ghim ${p.label}`}
+                    title={isPinned ? "Bỏ ghim" : "Ghim lên đầu"}
+                    className={cn("rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground", isPinned ? "text-primary" : "opacity-0 group-hover/page:opacity-100 group-data-[selected=true]/page:opacity-100 focus-visible:opacity-100")}
+                    onPointerDown={(e) => e.stopPropagation()}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      e.preventDefault();
+                      togglePin(p.href);
+                    }}
+                  >
+                    {isPinned ? <PinOff className="size-3.5" /> : <Pin className="size-3.5" />}
+                  </button>
+                </CommandItem>
+              );
+            })}
           </CommandGroup>
 
           {pending ? (

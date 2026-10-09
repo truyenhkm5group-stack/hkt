@@ -229,6 +229,7 @@ import { testOperatingFunnel } from "./operating-funnel.test";
 import { testMemoInflight } from "./memo-inflight.test";
 import { testCacheSemantics } from "./cache-semantics.test";
 import { testRefreshButton } from "./refresh-button.test";
+import { testCommandCatalog } from "./command-catalog.test";
 import { testReportOverrideLatency } from "./report-override-latency.test";
 import { testActionRefreshOnce } from "./action-refresh-once.test";
 import { testPurchaseValuation } from "./purchase-valuation.test";
@@ -2167,6 +2168,7 @@ async function main() {
   await testMemoInflight();
   await testCacheSemantics();
   await testRefreshButton();
+  testCommandCatalog();
   testReportOverrideLatency();
   testActionRefreshOnce();
   testPurchaseValuation();
