@@ -1,0 +1,8 @@
+{
+  "pr": 743,
+  "sha": "d068fe7fea34c8fd2d094483eab476dc4a363485",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-09T13:24:35.242Z",
+  "note": "Review Integration Lead: C1 #6 — gợi ý ?brand= chỉ nhận vnx|chotdon, host đã biết LUÔN thắng (knownBrandOfHost), chỉ đường dẫn tương đối trong app (chặn //), chỉ đổi chữ/logo — hostSlug/quyền/tổ chức vẫn đọc host; middleware chỉ truyền gợi ý. C1 #7 — chữ kỹ thuật vỏ thay bằng tiếng Việt thường, nhánh ERP giữ nguyên; Kết nối chỉ hiện connector của module trong gói; bài quét AST 73 tệp có ca đối chứ"
+}
