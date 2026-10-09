@@ -3,7 +3,7 @@
   "mission_id": "unknown-cost-not-zero",
   "title": "Giá vốn CHƯA BIẾT không in thành 0 ₫ trên trang đơn / sản phẩm (AGENTS 42)",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -28,9 +28,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-08T23:18:47.320Z",
-  "updated_at": "2026-10-09T00:12:54.156Z",
+  "updated_at": "2026-10-09T01:00:57.696Z",
   "last_heartbeat": "2026-10-09T00:12:24.010Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#716 → 304bcbcb98b534691ee6b2b8310a61c808c03456"
+  },
   "handoff": {
     "branch": "fix/unknown-cost-not-zero",
     "sha": "94333bede954f9f7ad4c8855cb9d1df6f368140a",
