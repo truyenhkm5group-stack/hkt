@@ -20,6 +20,7 @@ import { openSecrets, sealSecrets, secretsKeyPublicStatus, secretsKeyState, type
 import { ORG_CONNECTION_CHAT_DISCOVERY, ORG_CONNECTION_TESTERS, type TesterDeps } from "@/lib/connectors/testers";
 import type { ChatDiscoveryResult, ConnectionActionResult, ConnectionSnapshot, ConnectionsView, ConnectorView } from "@/lib/connectors/types";
 import { PLATFORM_MODULES } from "@/lib/constants/platform-modules";
+import { classifyEnvelope, type EnvelopeVerdict } from "@/lib/constants/security-acceptance";
 import { currentOrganization } from "@/lib/platform/context";
 import { findOrganization } from "@/lib/platform/organizations";
 import { CUSTOMER_AI_CONFIG_MANAGED, customerConnectionsView, customerFacing } from "@/lib/saas/visibility";
@@ -824,6 +825,25 @@ export async function aiConnectionAudit(db: Db, orgCode: string, deps: { keyStat
     }
     return { connectorKey: r.connectorKey as OperatorAiConnector, status: r.status as ConnectionStatus, lastTestOk: r.lastTestOk, lastTestAt: r.lastTestAt, model: st.model || null, imageModel: st.imageModel || null, keyDigest, digestError };
   });
+}
+
+/** Phán quyết MỘT ô bí mật khi nằm yên (ops `security-acceptance` · S3): phong bì của `classifyEnvelope`, cộng dòng mang mã tổ chức khác. */
+export type SecretAtRestVerdict = EnvelopeVerdict | "FOREIGN_ORG";
+export type SecretAtRestCell = { category: "org_connections" | "org_channel_pages"; verdict: SecretAtRestVerdict };
+
+/**
+ * KIỂM BÍ MẬT KHI NẰM YÊN của tổ chức `orgCode` (LAUNCH_GATE §3 · S3): mỗi ô bí mật của `org_connections` và token từng page của
+ * `org_channel_pages` ⇒ MỘT phán quyết phong bì (`classifyEnvelope` — byte phiên bản, độ dài, hình mã khoá). KHÔNG giải mã, KHÔNG trả
+ * byte nào ra ngoài tệp này: bản mã / bản rõ chỉ nằm trong RAM của hàm, kết quả chỉ có loại ô + phán quyết. Nhận `db` để chạy trên
+ * kết nối CHỈ ĐỌC (`getDbForInspection` — không migrate, không dọn bảng `platform_*`); chỉ SELECT.
+ */
+export async function secretsAtRestCells(db: Db, orgCode: string): Promise<SecretAtRestCell[]> {
+  const c = schema.orgConnections;
+  const p = schema.orgChannelPages;
+  const conns = await db.select({ orgCode: c.orgCode, bytes: c.secretsEnc, keyId: c.secretsKeyId }).from(c);
+  const pages = await db.select({ orgCode: p.orgCode, bytes: p.secretsEnc, keyId: p.secretsKeyId }).from(p);
+  const verdictOf = (r: { orgCode: string; bytes: Uint8Array | null; keyId: string | null }): SecretAtRestVerdict => (r.orgCode !== orgCode ? "FOREIGN_ORG" : classifyEnvelope(r.bytes, r.keyId));
+  return [...conns.map((r) => ({ category: "org_connections" as const, verdict: verdictOf(r) })), ...pages.map((r) => ({ category: "org_channel_pages" as const, verdict: verdictOf(r) }))];
 }
 
 /**

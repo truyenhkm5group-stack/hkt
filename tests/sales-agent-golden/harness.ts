@@ -158,6 +158,13 @@ const UUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi
 const ISO_RE = /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z/g;
 const SHORT_CODE_RE = /#[0-9A-F]{8}\b/g;
 
+/**
+ * NGỮ CẢNH mà lời nhắc in NGÀY CHẠY (giờ VN) — ngày chạy chỉ được nhãn hoá ở đúng các chỗ này, không ở mọi chuỗi trùng ngày.
+ * «gần nhất <ngày>»: khối KHÁCH CŨ (lib/sales-chatbot/returning.ts) in ngày đơn cũ vừa gieo = hôm nay. Dòng «bây giờ» đi đường
+ * riêng (`nowLines`). Lời nhắc thêm một chỗ in ngày động mới ⇒ thêm tiền tố ở đây (ảnh chụp sẽ đỏ, chỉ đúng chỗ đó).
+ */
+export const RUN_DATE_CONTEXTS = ["gần nhất "] as const;
+
 /** Ngày theo giờ Việt Nam đúng dạng lời nhắc in («05/10/2026»). */
 const vnDate = (d: Date) => new Intl.DateTimeFormat("vi-VN", { timeZone: "Asia/Ho_Chi_Minh", day: "2-digit", month: "2-digit", year: "numeric" }).format(d);
 
@@ -165,13 +172,16 @@ const vnDate = (d: Date) => new Intl.DateTimeFormat("vi-VN", { timeZone: "Asia/H
  * Thay id / mốc giờ / mã đơn ngắn / dòng «bây giờ» / NGÀY CHẠY bằng nhãn ổn định — cùng một id luôn ra cùng một nhãn trong
  * một hội thoại. Ngày chạy (giờ VN, của chính lượt chạy) phải thành nhãn: khối KHÁCH CŨ in «gần nhất <ngày đơn vừa gieo>», nên
  * ảnh chụp ghi ngày thật thì bài kiểm đỏ lúc 0 giờ hôm sau (05/10/2026 — chặn mọi PR và mọi deploy; AGENTS.md mục 50).
+ *
+ * Ngày chạy CHỈ thay trong `RUN_DATE_CONTEXTS`: ngày CỐ ĐỊNH trong chữ tĩnh của lời nhắc («MỤC TIÊU (chủ shop 09/10/2026)», #701)
+ * trùng ngày ghi ảnh chụp thì bản cũ (thay MỌI chuỗi trùng) nhãn hoá luôn chữ tĩnh ⇒ main đỏ từ 0 giờ hôm sau (10/10/2026).
  */
-function normalizer(nowLines: Set<string>, skuOfId: Map<string, string>, runDates: Set<string>) {
+export function normalizer(nowLines: Set<string>, skuOfId: Map<string, string>, runDates: Set<string>) {
   const ids = new Map<string, string>();
   const str = (s: string): string => {
     let out = s;
     for (const line of nowLines) out = out.split(line).join("<BÂY GIỜ>");
-    for (const d of runDates) out = out.split(d).join("<NGÀY CHẠY>");
+    for (const d of runDates) for (const ctx of RUN_DATE_CONTEXTS) out = out.split(`${ctx}${d}`).join(`${ctx}<NGÀY CHẠY>`);
     // Mã mẫu mã có thể mang tiền tố trước phần UUID — thay NGUYÊN mã trước, rồi mới tới UUID trần.
     for (const [id, sku] of skuOfId) out = out.split(id).join(`<mẫu ${sku}>`);
     out = out.replace(UUID_RE, (m) => {

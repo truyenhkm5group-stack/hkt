@@ -18,6 +18,10 @@
  *     theo sổ kho) + bật bot + xuất bản, qua ĐÚNG lõi của nút UI, đứng tên CHỦ workspace thử, không gọi AI; AI nền tảng chưa sẵn sàng ⇒
  *     bot BỎ QUA kèm đúng phần thiếu; lượt hai ⇒ CÓ SẴN hết; đơn chốt làm tồn hụt ⇒ MỘT phiếu đúng phần chênh; khách trùng mã không bị
  *     chạm; không có --apply ⇒ từ chối; dòng công khai chỉ tên việc + trạng thái.
+ *  9. Bước R (`--apply --e2e-ops`): sáu hạng mục Launch Gate Khách qua ĐÚNG lõi hộp thư, đứng tên CHỦ — C14 đơn mơ hồ ở lại «Mới» + cờ
+ *     cần người · C15 nút «Xác nhận đơn» ⇒ CONFIRMED đứng tên người bấm · C17 gửi đôi + phát lại ý định ⇒ đúng MỘT đơn · C9 tin nhân
+ *     viên mang khoá tài khoản · C11 nhường ngầm rồi tiếp quản ↔ trả lại AI · C18 một lượt qua server action công khai ⇒ đồng hồ khách
+ *     AI +1. Nhánh hỏng của từng phán quyết (trùng đơn ⇒ HỎNG; máy tự chốt dữ liệu mơ hồ ⇒ HỎNG); khách trùng mã không bị chạm.
  *
  * (8 — loại workspace thử khỏi chỉ số buồng lái — CHƯA làm: đụng rộng, xem docs/saas/ACCEPTANCE.md §6.)
  *
@@ -27,7 +31,7 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { readFileSync, rmSync } from "node:fs";
 import path from "node:path";
-import { and, eq, inArray, like } from "drizzle-orm";
+import { and, eq, inArray, like, sql } from "drizzle-orm";
 import { getDb, getPlatformDb, organizationDatabaseUrl, releaseOrganizationDb, schema } from "@/db";
 import type { AiBlock } from "@/lib/ai/provider";
 import { resolveRecipientPlace } from "@/lib/address/vn-address";
@@ -53,8 +57,12 @@ import {
   drillStepStatus,
   drillSummaryPart,
   formatDrillLine,
+  formatOpsLine,
   formatPrepLine,
   formatStepLine,
+  OPS_ITEM_LABEL,
+  opsStepStatus,
+  opsSummaryPart,
   PAGE_ERROR_DIGEST,
   PAGE_ERROR_MARKER,
   parseAcceptanceArgs,
@@ -62,6 +70,7 @@ import {
   prepSummaryPart,
   scrubSecrets,
   type DrillResult,
+  type OpsItemResult,
   type PrepItemResult,
   type StepResult,
 } from "@/lib/constants/saas-acceptance";
@@ -72,7 +81,7 @@ import { ERP_FRAME_HTML_MARKERS, SALES_AGENT_DENIED_PREFIXES, SALES_AGENT_SHELL_
 import { env } from "@/lib/env";
 import { invalidateCapabilities } from "@/lib/platform/capabilities";
 import { withOrganization } from "@/lib/platform/context";
-import { HOST_NOT_FOUND_MESSAGE } from "@/lib/platform/host-org";
+import { HOST_NOT_FOUND_MESSAGE, setRequestHostSlugForTests } from "@/lib/platform/host-org";
 import { freeOrgCode } from "@/lib/onboarding/quick";
 import { orgCodeBase } from "@/lib/onboarding/quick-shared";
 import { orgStepZ } from "@/lib/onboarding/shared";
@@ -85,11 +94,18 @@ import { CHOTDON_ASSETS } from "@/lib/platform/site-host";
 import { shortfalls } from "@/lib/commerce/stock";
 import { ACCEPTANCE_NOT_OWNED_REFUSAL, ACCEPTANCE_RUNTIME_REFUSAL, acceptanceRuntimeRefusal } from "@/lib/saas/acceptance-guard";
 import { ACCEPTANCE_PREP_REGISTRY_REFUSAL, ACCEPTANCE_PREP_REQUIRED_TOOLS, runAcceptancePrep } from "@/lib/saas/acceptance-prep";
-import { ACCEPTANCE_SESSION_TTL_SEC, deniedLanding, metaRedirectTarget, probeShellRoute, publicChatProblem, runAcceptance, shellBodyProblem, shellRoutesFor, type AcceptanceDeps, type AcceptanceReport, type HttpReply } from "@/lib/saas/acceptance";
+import { ACCEPTANCE_OPS_REGISTRY_REFUSAL, judgeAmbiguous, judgeMeter, judgeNoDuplicate, runAcceptanceE2eOps } from "@/lib/saas/acceptance-e2e";
+import { ACCEPTANCE_SESSION_TTL_SEC, deniedLanding, metaRedirectTarget, parseActionReply, probeShellRoute, publicChatActionIdsFrom, publicChatOverServerActions, publicChatProblem, runAcceptance, shellBodyProblem, shellRoutesFor, type AcceptanceDeps, type AcceptanceReport, type HttpPostReply, type HttpReply } from "@/lib/saas/acceptance";
+import { orderReviewLogOf } from "@/lib/constants/order-review";
+import { readAiCustomerCounts, resetAiCustomerSeenForTests } from "@/lib/pricing/ai-customer";
+import { usagePeriodOf } from "@/lib/pricing/meter";
+import { readConversationControl } from "@/lib/sales-chatbot/conversation-control-shared";
+import { sendPublicChat, startPublicChat } from "@/lib/sales-chatbot/public";
+import { resetPublicChatLimitsForTests } from "@/lib/sales-chatbot/public-chat-limits";
 import { loadCommercialSnapshot, productEconomics } from "@/lib/saas/customers";
 import { foldVi } from "@/lib/sales-chatbot/catalog";
 import { SALES_CHATBOT_SETTING_KEY } from "@/lib/sales-chatbot/config";
-import { loadSalesChatbotConfig, setSalesChatProviderForTests } from "@/lib/sales-chatbot/engine";
+import { loadSalesChatbotConfig, setSalesChatProviderForTests, visitorKeyOf } from "@/lib/sales-chatbot/engine";
 import { getSettingJson } from "@/lib/settings";
 import { createAcceptanceResetLink } from "@/lib/users/password-reset";
 import { runAcceptanceCli } from "@/scripts/saas-acceptance";
@@ -156,7 +172,46 @@ function deps(runId: string, book: ReturnType<typeof passwordBook>, over: Partia
     emit: (line) => console.log(line),
     siteEnv: { CHOTDON_DOMAIN: "chotdontudong.com" },
     baseDomain: BASE,
+    appPost: fakePublicChatApp(),
+    publicChatActionIds: async () => FAKE_ACTION_IDS,
     ...over,
+  };
+}
+
+/** Mã server action GIẢ của trang `/chat` (bản dựng thật đọc từ sổ của Next). */
+const FAKE_ACTION_IDS = { start: "nt-start-action", send: "nt-send-action" } as const;
+
+/** Một phản hồi RSC như Next trả cho server action: dòng 0 trỏ tới dòng 1 chứa giá trị. */
+function rscReply(value: unknown, setCookies: string[] = []): HttpPostReply {
+  return { status: 200, location: null, body: `0:{"a":"$@1","f":"","b":"nt-build"}\n1:${JSON.stringify(value)}\n`, setCookies };
+}
+
+/**
+ * Ứng dụng GIẢ cho đường chat CÔNG KHAI (C18): nhận ĐÚNG hình POST server action (Next-Action + JSON đối số + cookie khách truy cập),
+ * định tuyến theo Host như máy chủ thật (`setRequestHostSlugForTests`) rồi gọi ĐÚNG lõi của server action (`startPublicChat` ·
+ * `sendPublicChat` — trần tần suất · AI · đồng hồ khách AI chạy thật).
+ */
+function fakePublicChatApp(seen: { posts: number } = { posts: 0 }): AcceptanceDeps["appPost"] {
+  return async (p, opts) => {
+    seen.posts += 1;
+    const slug = opts.host.endsWith(`.${BASE}`) ? opts.host.slice(0, -(BASE.length + 1)) : null;
+    if (p !== "/chat" || opts.headers.origin !== `https://${opts.host}` || opts.headers["content-type"] !== "text/plain;charset=UTF-8") return { status: 403, location: null, body: "", setCookies: [] };
+    setRequestHostSlugForTests(() => slug);
+    try {
+      const args = JSON.parse(opts.body) as unknown[];
+      if (opts.headers["next-action"] === FAKE_ACTION_IDS.start) {
+        const raw = `ntv${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`.padEnd(32, "x");
+        return rscReply(await startPublicChat(visitorKeyOf(raw), {}), [`erp_chat_v=${raw}; Path=/; HttpOnly; SameSite=lax`]);
+      }
+      if (opts.headers["next-action"] === FAKE_ACTION_IDS.send) {
+        const raw = /(?:^|;\s*)erp_chat_v=([^;]+)/.exec(opts.headers.cookie ?? "")?.[1];
+        if (!raw) return rscReply({ error: "Phiên chat đã hết — tải lại trang để bắt đầu lại." });
+        return rscReply(await sendPublicChat(visitorKeyOf(raw), String(args[0] ?? ""), String(args[1] ?? ""), {}));
+      }
+      return { status: 404, location: null, body: "Server action not found", setCookies: [] };
+    } finally {
+      setRequestHostSlugForTests(null);
+    }
   };
 }
 
@@ -258,18 +313,64 @@ function testPure() {
   assert.ok(orgStepZ.safeParse({ name: "CDT Nghiem Thu Hai", code: `${CODE}-2` }).success, "chỉ đúng tên giữ chỗ bị chặn, không chặn theo tiền tố");
 
   // Ô arg: chế độ + cờ lạ / lặp / sai cặp.
-  assert.deepEqual(parseAcceptanceArgs([]), { ok: true, mode: "READ", orgCode: null, drills: false, prep: false });
-  assert.deepEqual(parseAcceptanceArgs(["--apply"]), { ok: true, mode: "APPLY", orgCode: null, drills: false, prep: false });
-  assert.deepEqual(parseAcceptanceArgs(["--apply", "--e2e", `--org=${CODE}`]), { ok: true, mode: "E2E", orgCode: CODE, drills: false, prep: false });
-  assert.deepEqual(parseAcceptanceArgs(["--apply", "--drills"]), { ok: true, mode: "APPLY", orgCode: null, drills: true, prep: false }, "diễn tập chỉ khi gõ --drills");
-  assert.deepEqual(parseAcceptanceArgs(["--apply", "--prep", "--e2e"]), { ok: true, mode: "E2E", orgCode: null, drills: false, prep: true }, "chuẩn bị chỉ khi gõ --prep");
-  for (const bad of [["--e2e"], ["--aply"], ["--apply", "--apply"], ["--org=-x"], [CODE], ["--extend-trial"], ["--drills"], ["--apply", "--drills", "--drills"], ["--prep"], ["--prep", "--e2e"], ["--apply", "--prep", "--prep"]]) assert.equal(parseAcceptanceArgs(bad).ok, false, JSON.stringify(bad));
+  assert.deepEqual(parseAcceptanceArgs([]), { ok: true, mode: "READ", orgCode: null, drills: false, prep: false, e2eOps: false });
+  assert.deepEqual(parseAcceptanceArgs(["--apply"]), { ok: true, mode: "APPLY", orgCode: null, drills: false, prep: false, e2eOps: false });
+  assert.deepEqual(parseAcceptanceArgs(["--apply", "--e2e", `--org=${CODE}`]), { ok: true, mode: "E2E", orgCode: CODE, drills: false, prep: false, e2eOps: false });
+  assert.deepEqual(parseAcceptanceArgs(["--apply", "--drills"]), { ok: true, mode: "APPLY", orgCode: null, drills: true, prep: false, e2eOps: false }, "diễn tập chỉ khi gõ --drills");
+  assert.deepEqual(parseAcceptanceArgs(["--apply", "--prep", "--e2e"]), { ok: true, mode: "E2E", orgCode: null, drills: false, prep: true, e2eOps: false }, "chuẩn bị chỉ khi gõ --prep");
+  assert.deepEqual(parseAcceptanceArgs(["--apply", "--prep", "--e2e", "--e2e-ops"]), { ok: true, mode: "E2E", orgCode: null, drills: false, prep: true, e2eOps: true }, "vận hành hộp thư chỉ khi gõ --e2e-ops");
+  for (const bad of [["--e2e"], ["--aply"], ["--apply", "--apply"], ["--org=-x"], [CODE], ["--extend-trial"], ["--drills"], ["--apply", "--drills", "--drills"], ["--prep"], ["--prep", "--e2e"], ["--apply", "--prep", "--prep"], ["--e2e-ops"], ["--e2e-ops", "--e2e"], ["--apply", "--e2e-ops", "--e2e-ops"], ["--apply", "--e2eops"]]) assert.equal(parseAcceptanceArgs(bad).ok, false, JSON.stringify(bad));
+  assert.match((parseAcceptanceArgs(["--e2e-ops"]) as { error: string }).error, /--e2e-ops chỉ đi cùng --apply/);
   assert.match((parseAcceptanceArgs(["--prep"]) as { error: string }).error, /--prep chỉ đi cùng --apply/);
   // Bước P chỉ có trong lượt --prep, chen SAU B1 (chủ đã kích hoạt) và TRƯỚC C / D / E; F chen TRƯỚC B2; lượt thường giữ nguyên sáu bước.
   assert.deepEqual([...acceptanceStepsFor({})], ["A", "B1", "C", "D", "E", "B2"]);
   assert.deepEqual([...acceptanceStepsFor({ drills: true })], ["A", "B1", "C", "D", "E", "F", "B2"]);
   assert.deepEqual([...acceptanceStepsFor({ prep: true })], ["A", "B1", "P", "C", "D", "E", "B2"]);
   assert.deepEqual([...acceptanceStepsFor({ prep: true, drills: true })], ["A", "B1", "P", "C", "D", "E", "F", "B2"]);
+  // Bước R chen SAU D, TRƯỚC E; xoay mật khẩu vẫn cuối.
+  assert.deepEqual([...acceptanceStepsFor({ e2eOps: true })], ["A", "B1", "C", "D", "R", "E", "B2"]);
+  assert.deepEqual([...acceptanceStepsFor({ prep: true, e2eOps: true, drills: true })], ["A", "B1", "P", "C", "D", "R", "E", "F", "B2"]);
+  // Vận hành: dòng công khai chỉ MÃ hạng mục theo trạng thái (không id hội thoại / đơn / tin, không SĐT); phán quyết bước R.
+  const ors: OpsItemResult[] = [
+    { key: "C14", status: "PASS", why: "đơn erp-bi-mat ở lại NEW · 0900000001" },
+    { key: "C15", status: "PASS", why: "tài khoản usr-bi-mat" },
+    { key: "C17", status: "PASS", why: "1 đơn" },
+    { key: "C9", status: "PASS", why: "tin msg-bi-mat" },
+    { key: "C11", status: "PASS", why: "HUMAN_TAKEOVER → AI_ACTIVE" },
+    { key: "C18", status: "SKIPPED", why: "AI theo gói đang dừng: dùng thử hết hạn" },
+  ];
+  assert.equal(opsSummaryPart(ors), "vận hành: ĐẠT C14,C15,C17,C9,C11 · BỎ QUA C18");
+  assert.ok(!/bi-mat|0900000001|dùng thử/.test(opsSummaryPart(ors)), "phần vận hành công khai không mang id / SĐT / câu lỗi");
+  assert.equal(opsStepStatus(ors), "SKIP", "phủ thiếu một hạng mục KHÔNG phải đạt cả bước");
+  assert.equal(opsStepStatus(ors.map((r) => ({ ...r, status: "PASS" as const }))), "PASS");
+  assert.equal(opsStepStatus(ors.map((r) => (r.key === "C17" ? { ...r, status: "FAIL" as const } : r))), "FAIL");
+  assert.equal(opsStepStatus([]), "SKIP");
+  assert.equal(formatOpsLine(ors[5]), `C18 ${OPS_ITEM_LABEL.C18}: BỎ QUA — AI theo gói đang dừng: dùng thử hết hạn`);
+  assert.ok(acceptanceSummary([{ key: "R", status: "PASS", reason: "x", ms: 1, detail: [] }], { mode: "APPLY", orgCode: CODE, ops: opsSummaryPart(ors) }).includes("vận hành: ĐẠT C14"));
+  // Phán quyết THUẦN của từng hạng mục — nhánh HỎNG là phần khiến nghiệm thu đáng tin.
+  assert.equal(judgeAmbiguous({ stage: "NEW", reviewCodes: ["CUSTOMER_CANCELLED"] }).status, "PASS");
+  assert.match(judgeAmbiguous({ stage: "CONFIRMED", reviewCodes: ["CUSTOMER_CANCELLED"] }).why, /MÁY tự chốt/, "dữ liệu mơ hồ bị máy tự chốt ⇒ HỎNG");
+  assert.equal(judgeAmbiguous({ stage: "CONFIRMED", reviewCodes: ["CUSTOMER_CANCELLED"] }).status, "FAIL");
+  assert.equal(judgeAmbiguous({ stage: "NEW", reviewCodes: [] }).status, "FAIL", "không cờ cần người kiểm ⇒ HỎNG");
+  assert.equal(judgeAmbiguous(null).status, "FAIL");
+  const okDup = { ordersForIntent: 1, replaySameOrder: true, secondConfirmOk: true, reviewLogGrew: false, stage: "CONFIRMED" };
+  assert.equal(judgeNoDuplicate(okDup).status, "PASS");
+  assert.equal(judgeNoDuplicate({ ...okDup, ordersForIntent: 2 }).status, "FAIL", "trùng đơn ⇒ HỎNG");
+  assert.equal(judgeNoDuplicate({ ...okDup, replaySameOrder: false }).status, "FAIL", "phát lại ra đơn khác ⇒ HỎNG");
+  assert.equal(judgeNoDuplicate({ ...okDup, reviewLogGrew: true }).status, "FAIL", "bấm lần hai ghi thêm ⇒ HỎNG");
+  assert.equal(judgeMeter(4, 5).status, "PASS");
+  for (const [b, a] of [[4, 4], [4, 6], [4, 3]] as const) assert.equal(judgeMeter(b, a).status, "FAIL", `${b} → ${a}`);
+  // Đọc kết quả server action từ phản hồi RSC + mã action từ sổ của Next.
+  assert.deepEqual(parseActionReply('0:{"a":"$@1","f":"","b":"x"}\n1:{"ok":true,"view":{"conversationId":"c1"}}\n'), { ok: true, view: { conversationId: "c1" } });
+  assert.deepEqual(parseActionReply('0:{"a":{"error":"Shop chưa mở chat."},"b":"x"}\n'), { error: "Shop chưa mở chat." });
+  assert.equal(parseActionReply("<html>404</html>"), null);
+  const manifest = { node: {
+    aa1: { filename: "../C:\\x\\lib\\actions\\public-chat.ts", exportedName: "startPublicChatAction" },
+    bb2: { filename: "lib/actions/public-chat.ts", exportedName: "sendPublicChatAction" },
+    cc3: { filename: "lib/actions/other.ts", exportedName: "sendPublicChatAction" },
+  } };
+  assert.deepEqual(publicChatActionIdsFrom(manifest), { start: "aa1", send: "bb2" }, "đường dẫn Windows lẫn Linux; chỉ đúng tệp public-chat.ts");
+  assert.ok("error" in publicChatActionIdsFrom({ node: {} }) && "error" in publicChatActionIdsFrom(null));
   // Chuẩn bị: dòng công khai chỉ tên việc theo trạng thái (không id / SKU / câu lỗi); phán quyết bước P.
   const prs: PrepItemResult[] = [
     { key: "PRODUCT", status: "DONE", why: "sản phẩm erp-bi-mat · mẫu mã erp-v-bi-mat" },
@@ -385,6 +486,29 @@ async function testProbe() {
     assert.ok(!bounced.ok && why.test(bounced.text), `${to}: ${bounced.text}`);
   }
   assert.equal(deniedLanding("/settings/plan"), null);
+
+  // C18 · đường server action công khai: đúng hình POST (Next-Action · Origin = host · JSON đối số · cookie khách truy cập của lượt mở).
+  const sentPosts: { action: string; body: string; cookie: string | null; origin: string }[] = [];
+  const app = (start: HttpPostReply, send: HttpPostReply): AcceptanceDeps["appPost"] => async (_p, o) => {
+    sentPosts.push({ action: o.headers["next-action"] ?? "", body: o.body, cookie: o.headers.cookie ?? null, origin: o.headers.origin ?? "" });
+    return o.headers["next-action"] === FAKE_ACTION_IDS.start ? start : send;
+  };
+  const ids = async () => FAKE_ACTION_IDS;
+  const host = `${ENTRY.domainSlug}.${BASE}`;
+  const okTransport = publicChatOverServerActions({ appPost: app(rscReply({ ok: true, view: { conversationId: "cv-1" } }, ["erp_chat_v=abcXYZ; Path=/; HttpOnly"]), rscReply({ ok: true, view: { conversationId: "cv-1" } })), publicChatActionIds: ids });
+  assert.deepEqual(await okTransport(host, "Chào shop"), { ok: true, conversationId: "cv-1" });
+  assert.deepEqual(sentPosts.map((p) => [p.action, p.body, p.cookie, p.origin]), [
+    [FAKE_ACTION_IDS.start, "[]", null, `https://${host}`],
+    [FAKE_ACTION_IDS.send, JSON.stringify(["cv-1", "Chào shop"]), "erp_chat_v=abcXYZ", `https://${host}`],
+  ]);
+  const limited = publicChatOverServerActions({ appPost: app(rscReply({ ok: true, view: { conversationId: "cv-2" } }, ["erp_chat_v=k; Path=/"]), rscReply({ error: "Bạn gửi nhanh quá — chờ một chút rồi gửi tiếp." })), publicChatActionIds: ids });
+  assert.deepEqual(await limited(host, "x"), { ok: false, error: "Bạn gửi nhanh quá — chờ một chút rồi gửi tiếp." }, "lỗi của server action đi nguyên văn (C18 phân biệt trần tần suất)");
+  const noCookie = publicChatOverServerActions({ appPost: app(rscReply({ ok: true, view: { conversationId: "cv-3" } }), rscReply({ ok: true })), publicChatActionIds: ids });
+  assert.match(JSON.stringify(await noCookie(host, "x")), /cookie khách truy cập/);
+  const missing = publicChatOverServerActions({ appPost: app({ status: 404, location: null, body: "Server action not found", setCookies: [] }, rscReply({})), publicChatActionIds: ids });
+  assert.match(JSON.stringify(await missing(host, "x")), /HTTP 404/);
+  const noManifest = publicChatOverServerActions({ appPost: app(rscReply({}), rscReply({})), publicChatActionIds: async () => ({ error: "không đọc được sổ" }) });
+  assert.deepEqual(await noManifest(host, "x"), { ok: false, error: "không đọc được sổ" });
 }
 
 // ═══════════ 2 · MÃ NGUỒN ═══════════
@@ -428,6 +552,8 @@ function importsOf(src: string): { from: string; names: string[] }[] {
  */
 const CORE_IMPORT_ALLOWLIST: Record<string, readonly string[]> = {
   "node:crypto": ["randomBytes"],
+  // Bước R (C18): đọc sổ server action của BẢN DỰNG đang chạy (.next/server/server-reference-manifest.json) — chỉ đọc.
+  "node:fs/promises": ["readFile"],
   "node:http": ["default"],
   "node:https": ["default"],
   "drizzle-orm": ["and", "eq"],
@@ -441,6 +567,7 @@ const CORE_IMPORT_ALLOWLIST: Record<string, readonly string[]> = {
     "ACCEPTANCE_ACTOR_LABEL", "ACCEPTANCE_NUDGE_TURN", "ACCEPTANCE_ORDER", "ACCEPTANCE_REGISTRY_REFUSAL", "ACCEPTANCE_SAMPLE_PRODUCTS", "ACCEPTANCE_STEPS", "ACCEPTANCE_WORKSPACES",
     "ACCEPTANCE_DRILL_ID_PREFIX", "ACCEPTANCE_UNMEASURABLE_DRILLS", "acceptanceStepsFor", "drillStepStatus", "drillSummaryPart", "formatDrillLine", "DrillResult",
     "formatPrepLine", "prepStepStatus", "prepSummaryPart", "PrepItemResult",
+    "formatOpsLine", "opsStepStatus", "opsSummaryPart", "OpsItemResult",
     "acceptanceChatTurns", "acceptanceIdempotencyKey", "acceptanceSummary", "acceptanceVerdict", "acceptanceWorkspaceOf", "formatAcceptanceUsd", "formatStepLine", "PAGE_ERROR_DIGEST", "PAGE_ERROR_MARKER", "scrubSecrets",
     "AcceptanceMode", "AcceptanceStepKey", "AcceptanceWorkspace", "StepResult", "StepStatus",
   ],
@@ -468,6 +595,8 @@ const CORE_IMPORT_ALLOWLIST: Record<string, readonly string[]> = {
   // Bước P (`--apply --prep`, quyết định chủ shop 09/10/2026): lõi chỉ GỌI tệp chuẩn bị — mọi lõi ghi vào workspace nằm ở tệp đó, sau
   // ba lá chắn của riêng nó (allowlist thứ hai: PREP_IMPORT_ALLOWLIST).
   "@/lib/saas/acceptance-prep": ["runAcceptancePrep"],
+  // Bước R (`--apply --e2e-ops`): lõi chỉ GỌI tệp vận hành — lõi hộp thư / nút nhanh nằm ở tệp đó, sau ba lá chắn (E2E_OPS_IMPORT_ALLOWLIST).
+  "@/lib/saas/acceptance-e2e": ["runAcceptanceE2eOps", "PublicChatTransport"],
   "@/lib/saas/activation": ["activationRefusal", "loadWorkspaceActivation", "resendActivation"],
   "@/lib/saas/catalog": ["PRODUCTS"],
   "@/lib/saas/customers": ["readPlans"],
@@ -518,6 +647,61 @@ const PREP_IMPORT_ALLOWLIST: Record<string, readonly string[]> = {
   "@/lib/validation/stock": ["stockReceiptSchema"],
 };
 
+/**
+ * Tệp vận hành (bước R) — lõi hộp thư / nút nhanh / bộ chạy công cụ, đứng tên chủ workspace thử. Thêm một lõi ghi khác (lưu cài đặt
+ * thẳng, đổi công tắc, cấu hình AI của người vận hành, gia hạn…) là thêm một tên ngoài danh sách ⇒ đỏ.
+ */
+const E2E_OPS_IMPORT_ALLOWLIST: Record<string, readonly string[]> = {
+  "drizzle-orm": ["and", "eq", "sql"],
+  "@/db": ["getDb", "schema"],
+  "@/lib/constants/public-chat-limits": ["PUBLIC_CHAT_LIMIT_MESSAGES"],
+  "@/lib/constants/order-review": ["orderReviewLogOf", "orderReviewOf", "reviewSeenOf"],
+  "@/lib/constants/saas-acceptance": ["ACCEPTANCE_AMBIGUOUS_TURN", "ACCEPTANCE_ORDER", "ACCEPTANCE_PUBLIC_TURN", "ACCEPTANCE_SAMPLE_PRODUCTS", "ACCEPTANCE_STAFF_REPLY", "acceptanceChatTurns", "acceptanceOrderNote", "acceptanceWorkspaceOf", "AcceptanceWorkspace", "OpsItemKey", "OpsItemResult", "OpsStatus"],
+  "@/lib/auth/session": ["SessionUser"],
+  "@/lib/platform/context": ["withOrganization"],
+  "@/lib/platform/organizations": ["findOrganization", "invalidateOrganizations"],
+  "@/lib/platform/publish": ["publicationOf"],
+  "@/lib/pricing/ai-entitlement": ["AI_STOP_MESSAGE"],
+  "@/lib/pricing/ai-customer": ["readAiCustomerCounts"],
+  "@/lib/pricing/ai-gate": ["loadAiEntitlement"],
+  "@/lib/pricing/meter": ["usagePeriodOf"],
+  // C15 / C17: nút nhanh «Xác nhận đơn» của hộp thư.
+  "@/lib/records/order-create": ["confirmOrderReviewCore", "loadAutoConfirmComplete"],
+  "@/lib/saas/acceptance-guard": ["acceptanceRuntimeRefusal", "acceptanceWorkspaceOwned", "ACCEPTANCE_NOT_OWNED_REFUSAL"],
+  // MỘT đường dựng người dùng của tài khoản chủ (bước P).
+  "@/lib/saas/acceptance-prep": ["ownerSessionUser"],
+  "@/lib/sales-chatbot/ai-hold-shared": ["aiHoldOf"],
+  // C11: nút «Tiếp quản» / «Trả lại cho AI».
+  "@/lib/sales-chatbot/conversation-control": ["setConversationControlCore"],
+  "@/lib/sales-chatbot/conversation-control-shared": ["readConversationControl"],
+  "@/lib/sales-chatbot/engine": ["loadSalesChatbotConfig", "openConversation", "SALES_AGENT", "visitorKeyOf"],
+  // C9: ô soạn hộp thư.
+  "@/lib/sales-chatbot/inbox": ["sendStaffReplyCore"],
+  // C14 / C17: bộ chạy công cụ của bot (không gọi model).
+  "@/lib/sales-chatbot/tools": ["executeTool", "ToolContext"],
+};
+
+function testE2eOpsSource() {
+  const src = readFileSync(path.join(goc, "lib", "saas", "acceptance-e2e.ts"), "utf8");
+  const imports = importsOf(src);
+  assert.equal(imports.length, src.match(/^import\s/gm)?.length ?? 0, "đọc được MỌI mệnh đề import của tệp vận hành");
+  const ngoai = imports.flatMap((i) => i.names.filter((n) => !(E2E_OPS_IMPORT_ALLOWLIST[i.from] ?? []).includes(n)).map((n) => `${i.from} → ${n}`));
+  assert.deepEqual(ngoai, [], "tệp vận hành chỉ nhập tên trong E2E_OPS_IMPORT_ALLOWLIST — lõi ghi mới phải qua review");
+  const code = codeOnly(src);
+  assert.ok(!/\brequire\(|\bimport\(/.test(code), "không nạp động (vượt allowlist)");
+  // Không ghi vòng qua lõi; không gọi model (chatTurn) — lượt AI duy nhất đi qua đường công khai thật (transport); không gia hạn / công tắc.
+  for (const cam of [".insert(", ".update(", ".delete(", "setSettingJson", "AsOperator(", "ForTests(", "chatTurn(", "salesChatProvider", "saveAutoConfirmCompleteCore", "setOrgBilling", "setOrgAiControl", "setPlatformAi", "createProductCore", "writeStockReceiptCore"]) {
+    assert.ok(!code.includes(cam), `lib/saas/acceptance-e2e.ts không được dùng ${cam}`);
+  }
+  // Ba lá chắn, theo ĐÚNG thứ tự, TRƯỚC mọi lượt ghi.
+  const fn = code.slice(code.indexOf("export async function runAcceptanceE2eOps("), code.indexOf("class OpsRun"));
+  const at = (needle: string) => fn.indexOf(needle);
+  assert.ok(at("acceptanceRuntimeRefusal()") > 0 && at("acceptanceRuntimeRefusal()") < at("await "), "(1) lá chắn lúc chạy đứng đầu, trước lượt await đầu tiên");
+  assert.ok(at("acceptanceWorkspaceOf(code)") > at("acceptanceRuntimeRefusal()"), "(2) sổ khai — mục do SỔ trả");
+  assert.ok(at("await acceptanceWorkspaceOwned(entry)") > at("acceptanceWorkspaceOf(code)"), "(3) sở hữu");
+  assert.ok(at("new OpsRun(") > at("await acceptanceWorkspaceOwned(entry)"), "hạng mục chỉ chạy sau ba lá chắn");
+}
+
 function testPrepSource() {
   const src = readFileSync(path.join(goc, "lib", "saas", "acceptance-prep.ts"), "utf8");
   const imports = importsOf(src);
@@ -546,6 +730,9 @@ function testSource() {
   assert.ok(files.includes("lib/users/password-reset.ts") && files.includes("tests/saas-acceptance.test.ts"), "đọc được danh sách tệp đã vào kho");
   // MỌI lần nhắc tới định danh trong MÃ (gọi · nhập · xuất lại · đổi tên) trên mọi tệp đã vào kho — không chỉ chuỗi `tên(`.
   const mentions = (id: string) => files.filter((f) => new RegExp(`\\b${id}\\b`).test(codeOnly(readFileSync(path.join(goc, f), "utf8")))).sort();
+  // Bước R: định nghĩa + lõi ops (nơi gọi duy nhất) + bài kiểm này; người dùng của tài khoản chủ chỉ dựng ở bước P, bước R dùng lại.
+  assert.deepEqual(mentions("runAcceptanceE2eOps"), ["lib/saas/acceptance-e2e.ts", "lib/saas/acceptance.ts", "tests/saas-acceptance.test.ts"], "runAcceptanceE2eOps chỉ được nhắc tới ở lõi ops nghiệm thu");
+  assert.deepEqual(mentions("ownerSessionUser"), ["lib/saas/acceptance-e2e.ts", "lib/saas/acceptance-prep.ts", "tests/saas-acceptance.test.ts"], "người dùng của tài khoản chủ: một đường dựng (bước P), bước R dùng lại");
   // Bước P: định nghĩa + lõi ops (nơi gọi duy nhất) + bài kiểm này — không server action / trang nào gọi được.
   assert.deepEqual(mentions("runAcceptancePrep"), ["lib/saas/acceptance-prep.ts", "lib/saas/acceptance.ts", "tests/saas-acceptance.test.ts"], "runAcceptancePrep chỉ được nhắc tới ở lõi ops nghiệm thu");
   // Đường phát liên kết của MÁY: định nghĩa + lõi ops (nơi gọi duy nhất) + bài kiểm này.
@@ -653,6 +840,25 @@ async function testGuardAndSquatter() {
   const nhatKy = await pdb.select().from(schema.platformAuditLog).where(and(eq(schema.platformAuditLog.targetOrgCode, CODE), eq(schema.platformAuditLog.action, "PASSWORD_RESET_LINK")));
   assert.equal(nhatKy.length, 0, "không một dòng nhật ký phát liên kết nào cho workspace của khách thật");
   assertNoSecrets(squat.out, book, "khách trùng mã");
+  // Vận hành hộp thư KHÔNG có --apply ⇒ lỗi cách dùng; tệp vận hành tự từ chối mã ngoài sổ.
+  const opsNoApply = await captured(() => runAcceptanceCli(["--e2e-ops"], deps("nt-guard", book)));
+  assert.equal(opsNoApply.value, 64);
+  assert.ok(!/^(PASS|FAIL|SKIP) /m.test(opsNoApply.out) && /--e2e-ops chỉ đi cùng --apply/.test(summaryLine(opsNoApply.out)), opsNoApply.out);
+  const transportNever = async () => ({ ok: false as const, error: "không được gọi" });
+  assert.deepEqual(await runAcceptanceE2eOps("hslc-hmt-shop", { runId: "nt-guard", now: new Date(), baseDomain: BASE, transport: transportNever }), { refused: ACCEPTANCE_OPS_REGISTRY_REFUSAL }, "tệp vận hành tự từ chối mã ngoài sổ");
+  // Vận hành trên workspace trùng mã: R bỏ qua; gọi thẳng cũng bị từ chối — không tin nhân viên, không đơn, không hội thoại, không POST.
+  assert.deepEqual(await runAcceptanceE2eOps(CODE, { runId: "nt-squat-ops", now: new Date(), baseDomain: BASE, transport: transportNever }), { refused: ACCEPTANCE_NOT_OWNED_REFUSAL }, "khách trùng mã: tệp vận hành từ chối ngay cả khi gọi thẳng");
+  const squatPosts = { posts: 0 };
+  const squatOps = await captured(() => runAcceptanceCli(["--apply", "--e2e-ops"], deps("nt-squat-ops", book, { appPost: fakePublicChatApp(squatPosts) })));
+  assert.equal(squatOps.value, 1);
+  assert.match(squatOps.out, /^SKIP R · vận hành hộp thư \(Launch Gate Khách\) — workspace mang mã nghiệm thu nhưng KHÔNG do ops nghiệm thu tạo/m);
+  assert.equal(squatPosts.posts, 0, "khách trùng mã: không một POST nào tới chat công khai");
+  const squatOpsData = await withOrganization(CODE, async () => {
+    const db = await getDb();
+    return { staff: (await db.select().from(schema.salesChatStaffMessages)).length, orders: (await db.select().from(schema.orders)).length, convs: (await db.select().from(schema.salesChatConversations)).length };
+  });
+  assert.deepEqual(squatOpsData, { staff: 0, orders: 0, convs: 0 }, "khách trùng mã: không tin nhân viên, không đơn, không hội thoại");
+  assertNoSecrets(squatOps.out, book, "khách trùng mã + vận hành");
   // Chuẩn bị trên workspace trùng mã: P bỏ qua; gọi thẳng tệp chuẩn bị cũng bị từ chối — không sản phẩm, không phiếu, bot + xuất bản nguyên.
   assert.deepEqual(await runAcceptancePrep(CODE, { runId: "nt-squat-prep" }), { refused: ACCEPTANCE_NOT_OWNED_REFUSAL }, "khách trùng mã: tệp chuẩn bị từ chối ngay cả khi gọi thẳng");
   const squatPrep = await captured(() => runAcceptanceCli(["--apply", "--prep", "--e2e"], deps("nt-squat-prep", book)));
@@ -927,6 +1133,53 @@ async function testApplyFlow() {
     assert.deepEqual(s4.receipts.map((r) => r.total).sort((a, b) => (a ?? 0) - (b ?? 0)), [ACCEPTANCE_ORDER.quantity, sample.minStock], "phiếu thứ hai = đúng phần chênh");
     assert.equal(await availableNow(vid), sample.minStock, "khả dụng về lại mức tối thiểu");
     assert.equal(await aiRows(), aiBeforePrep + usage.length, "chuẩn bị KHÔNG gọi AI — chỉ lượt chat của D vào sổ AI");
+
+    // (e) R · vận hành hộp thư (`--apply --e2e-ops`): C14 → C15 → C17 → C9 → C11 qua ĐÚNG lõi hộp thư / nút nhanh / bộ chạy công cụ,
+    //     đứng tên CHỦ; C18 qua đúng hình POST server action công khai (ứng dụng giả gọi lõi public.ts với Host tên miền con).
+    resetPublicChatLimitsForTests();
+    resetAiCustomerSeenForTests();
+    invalidateOrganizations();
+    const opsRun = "nt-ops-1";
+    setSalesChatProviderForTests(() => fakeProvider(acceptanceShopScript(vid, opsRun)));
+    const period = usagePeriodOf(new Date());
+    const meterNow = async () => (await readAiCustomerCounts([CODE], period.from, period.to)).get(CODE) ?? 0;
+    const meterBefore = await meterNow();
+    const ordersCount = () => withOrganization(CODE, async () => (await (await getDb()).select({ id: schema.orders.id }).from(schema.orders)).length);
+    const ordersBefore = await ordersCount();
+    const posts = { posts: 0 };
+    const ops = await captured(() => runAcceptanceCli(["--apply", "--e2e-ops"], deps(opsRun, book, { appPost: fakePublicChatApp(posts) })));
+    setSalesChatProviderForTests(null);
+    assert.equal(ops.value, 0, ops.out);
+    assert.deepEqual(stepLines(ops.out), ["A", "B", "C", "D", "R", "E", "B"], "thứ tự --apply --e2e-ops: A → B1 → C → D → R → E → B2");
+    assert.match(ops.out, /^PASS R · vận hành hộp thư \(Launch Gate Khách\) — vận hành: ĐẠT C14,C15,C17,C9,C11,C18 \(\d+ms\)$/m);
+    for (const k of ["C14", "C15", "C17", "C9", "C11", "C18"] as const) assert.ok(ops.out.includes(`${k} ${OPS_ITEM_LABEL[k]}: ĐẠT`), `${k} ĐẠT`);
+    assert.match(ops.out, /C11 tiếp quản \/ trả lại AI: ĐẠT — sau tin nhân viên: HUMAN_(COOLDOWN|TAKEOVER) → «Tiếp quản» ⇒ HUMAN_TAKEOVER → «Trả lại cho AI» ⇒ AI_ACTIVE/);
+    assert.match(ops.out, /chi phí AI lượt chat công khai: /);
+    assert.equal(posts.posts, 2, "C18: đúng hai POST (mở hội thoại + MỘT tin)");
+    const opsConvId = await withOrganization(CODE, async () => (await (await getDb()).select({ id: schema.salesChatConversations.id }).from(schema.salesChatConversations).where(eq(schema.salesChatConversations.visitorKey, visitorKeyOf(`saas-acceptance-ops:${opsRun}`))))[0]?.id ?? "");
+    assert.ok(opsConvId, "R mở hội thoại WEB riêng của lượt");
+    const lo = PRIVATE(ops.out, [opsConvId, ownerId]);
+    assert.ok(lo.startsWith("saas-acceptance: PASS 6/6 · bỏ qua D · chế độ GHI") && lo.includes("vận hành: ĐẠT C14,C15,C17,C9,C11,C18") && lo.includes("AI lượt này ≈"), lo);
+    assert.ok(!lo.includes(ACCEPTANCE_ORDER.phone), "dòng công khai không mang SĐT");
+    assertNoSecrets(ops.out, book, "vận hành hộp thư");
+    const r = await withOrganization(CODE, async () => {
+      const db = await getDb();
+      const staff = await db.select({ userId: schema.salesChatStaffMessages.userId, status: schema.salesChatStaffMessages.status }).from(schema.salesChatStaffMessages).where(eq(schema.salesChatStaffMessages.conversationId, opsConvId));
+      const [conv] = await db.select({ status: schema.salesChatConversations.status, state: schema.salesChatConversations.state }).from(schema.salesChatConversations).where(eq(schema.salesChatConversations.id, opsConvId));
+      const orders = await db.select({ id: schema.orders.id, stage: schema.orders.stage, raw: schema.orders.raw }).from(schema.orders).where(like(sql`${schema.orders.raw}->>'agentKey'`, `sales-chat:${opsConvId}:%`));
+      const controls = await db.select({ userId: schema.auditLogs.userId }).from(schema.auditLogs).where(and(eq(schema.auditLogs.action, "SALES_CHAT_CONTROL_SET"), eq(schema.auditLogs.entityId, opsConvId)));
+      return { staff, conv, orders, controls };
+    });
+    assert.deepEqual(r.staff, [{ userId: ownerId, status: "SENT" }], "C9: ĐÚNG một tin nhân viên, tác giả = khoá tài khoản chủ (AGENTS 34)");
+    assert.ok(r.conv && readConversationControl(r.conv.state) === null && r.conv.status !== "HANDOFF", "C11: cuối lượt hội thoại đã trả lại cho AI");
+    assert.ok(r.controls.length >= 2 && r.controls.every((c) => c.userId === ownerId), "C11: tiếp quản + trả lại đứng tên chủ");
+    assert.equal(r.orders.length, 1, "C17: đúng MỘT đơn cho ý định khách của hội thoại vận hành");
+    assert.equal(r.orders[0].stage, "CONFIRMED", "C15: đơn đã xác nhận");
+    const log = orderReviewLogOf(r.orders[0].raw);
+    assert.deepEqual(log.map((l) => [l.action, l.byUserId]), [["CONFIRMED", ownerId]], "C15: MỘT lượt kiểm đứng tên người bấm; bấm lần hai không ghi thêm");
+    assert.equal(log[0].entries[0]?.code, "CUSTOMER_CANCELLED", "C14: đơn từng mang cờ «khách huỷ» (lưỡng lự) — người đã quyết");
+    assert.equal(await ordersCount(), ordersBefore + 1, "R tạo đúng MỘT đơn (C14); lượt chat công khai không lên đơn");
+    assert.equal(await meterNow(), meterBefore + 1, "C18: đồng hồ khách AI của kỳ +1");
   } finally {
     setSalesChatProviderForTests(null);
     for (const k of AI_ENV) {
@@ -967,6 +1220,7 @@ export async function testSaasAcceptance() {
   await testProbe();
   testSource();
   testPrepSource();
+  testE2eOpsSource();
   let failure: unknown = null;
   try {
     await cleanup();
