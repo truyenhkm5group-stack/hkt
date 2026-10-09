@@ -1,0 +1,8 @@
+{
+  "pr": 722,
+  "sha": "2b8ebe747fc7824c2ca0e7540f31ab6b37e4b306",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-09T02:14:51.529Z",
+  "note": "Review Integration Lead: effective() bỏ greatest(Pancake, ERP) — số đơn/thành công/hoàn/tổng mua chỉ từ nhóm ERP ORDER_OUTCOME đã có; lastOrderAt vẫn lấy mốc muộn (là ngày, không phải kết quả); tỷ lệ trên đơn đã kết thúc, «—» khi 0; CUSTOMER_SORTABLE khớp cột; noCodPaymentState dời sang lib/constants (client-safe); orders.ts chỉ thêm cột prepaid/transferMoney. EXPLAIN 3.000 khách: cùng kế hoạch. T"
+}
