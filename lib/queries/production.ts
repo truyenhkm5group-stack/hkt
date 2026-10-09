@@ -33,7 +33,10 @@ export async function buildMatrixForProduct(productId: string, plan: PlanOptions
     const v = variants.find((x) => x.color.trim() === color && x.images?.length);
     return { color, url: v?.images?.[0] ?? product.image ?? "" };
   }).filter((i) => i.url);
-  const unitCost = Math.round(rows.reduce((s, r) => s + r.unitCost, 0) / Math.max(1, rows.length));
+  // Giá gợi ý = trung bình CHỈ trên mẫu mã đã biết giá (`unitCostKnown`). Bản cũ cộng cả mẫu chưa biết như 0
+  // nên mã biết giá một nửa ra giá gợi ý thấp đi một nửa; không mẫu nào biết giá ⇒ `null` (AGENTS.md mục 42).
+  const knownCosts = rows.flatMap((r) => (r.unitCostKnown === null ? [] : [r.unitCostKnown]));
+  const unitCost = knownCosts.length ? Math.round(knownCosts.reduce((s, c) => s + c, 0) / knownCosts.length) : null;
   return { product: { id: product.id, name: product.name, code: product.customId ?? "" }, colors, sizes, cells, detail, images, unitCost, leadTimeDays: rows[0]?.leadTimeDays ?? plan_.assumptions.leadTimeDays, coverDays: plan_.used.coverDays, countIncoming: plan_.used.countIncoming };
 }
 
