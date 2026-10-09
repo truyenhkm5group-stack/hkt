@@ -1,8 +1,8 @@
 {
   "pr": 748,
-  "sha": "0505946e65cf014f0710cc0ad8d354529c3b8ae1",
+  "sha": "2d9638b8767527f2d6a6399f6a94d4eaa81ddc07",
   "verdict": "PASS",
   "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
-  "at": "2026-10-09T18:46:47.616Z",
-  "note": "Review Integration Lead: chưa đọc lên đầu sắp ở MÁY CHỦ (inboxOrderBy, khoá id cuối cho phân trang ổn định), hội thoại đang mở giữ chỗ; bộ lọc gọn — 14 tham số URL cũ giữ nguyên, mọi bộ lọc vào popover (có test liệt kê); không dựng link Facebook từ PSID (quét mã); tách màu bằng token; câu mẫu/sản phẩm/AI gợi ý trong ô soạn dùng action sẵn có. Ảnh AFTER cục bộ 1366×768: 9 hội thoại (trước 1). Theo "
+  "at": "2026-10-09T19:27:23.583Z",
+  "note": "Rebase lên main sau #749 (bom ngày); nội dung Inbox V2-A không đổi logic so với lượt PASS 0505946e (cộng commit đánh bóng giao diện nếu có)."
 }
