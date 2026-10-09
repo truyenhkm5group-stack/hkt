@@ -3,7 +3,7 @@
   "mission_id": "launch-gate-r4",
   "title": "Launch Gate r4: O1 ✅ bằng sự cố dựng sẵn hai luồng; O2–O8 tính được trên production",
   "business_goal": "",
-  "status": "INTEGRATING",
+  "status": "VERIFYING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -22,11 +22,13 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-09T02:16:46.916Z",
-  "updated_at": "2026-10-09T02:50:58.400Z",
+  "updated_at": "2026-10-09T04:53:34.717Z",
   "last_heartbeat": "2026-10-09T02:17:14.484Z",
   "definition_of_done": [],
   "evidence": {
-    "merged": "#723 → 71dd5b1e6061c260f6442e79a1a687f187ac5b9a"
+    "merged": "#723 → 71dd5b1e6061c260f6442e79a1a687f187ac5b9a",
+    "verify": "PASS ef9b302ab11f855e95aab592c738c57e2a9fcc93 2026-10-09T04:53:27.452Z",
+    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/37879275359"
   },
   "handoff": {
     "branch": "docs/launch-gate-r4",
