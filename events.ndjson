@@ -1236,3 +1236,4 @@
 {"at":"2026-10-09T10:10:09.623Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DONE","mission":"registry-reconcile-0910","detail":"production 9e681c8ba4bb · deploy 37896555963 xanh · verify ĐẠT"}
 {"at":"2026-10-09T10:10:50.278Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"CLAIM","mission":"work-sources-warm","detail":"RUNNING · 6 mẫu phạm vi · MEDIUM"}
 {"at":"2026-10-09T10:10:50.278Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"OVERLAP_ACCEPTED","mission":"work-sources-warm","detail":"OVERLAP_ACCEPTED với work-page-perf: phạm vi lib/work/, lib/queries/work-adapters.ts, lib/queries/work-adapters.ts ↔ lib/queries/ — cách tích hợp: work-page-perf đã đóng (chỉ script)"}
+{"at":"2026-10-09T10:11:58.616Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DEPLOY_DISPATCHED","detail":"394ad4c84297 · run 37916081737 https://github.com/truyenhkm5group-stack/hkt/actions/runs/37916081737"}
