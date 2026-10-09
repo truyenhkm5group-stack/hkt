@@ -1,0 +1,8 @@
+{
+  "pr": 718,
+  "sha": "5ffc56490452817c888ff8b6c931f95521bf0c32",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-09T00:32:13.776Z",
+  "note": "Chữ vỏ ≥ 12px (10,5px ⇒ text-xs ở hộp thư), bài chốt quét 80 tệp vỏ có một miễn trừ kèm lý do; câu #705 sửa đúng góp ý LOW. Không đổi logic."
+}
