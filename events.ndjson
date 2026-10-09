@@ -1375,3 +1375,4 @@
 {"at":"2026-10-09T23:05:30.403Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"ai-sales-settings-v2","detail":"#756 cho feat/ai-sales-settings-v2 @ 42b3ed2a809d"}
 {"at":"2026-10-09T23:05:54.111Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#756 @ 42b3ed2a809d · Đọc diff: hàm thuần settingsStatus (null ⇒ Chưa rõ), dùng lại customerFacing() để che nguồn AI, engine/golden không đổi, không migration/quyền; bảng chân lý 20 ca + đột biến 2/2"}
 {"at":"2026-10-09T23:34:04.984Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"products-shell-v2","detail":"feat/products-shell-v2 @ 6108776f33bf · 1 lệnh kiểm thử"}
+{"at":"2026-10-09T23:34:32.102Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"products-shell-v2","detail":"#757 cho feat/products-shell-v2 @ 6108776f33bf"}
