@@ -1,0 +1,32 @@
+{
+  "schema": 1,
+  "mission_id": "work-page-perf",
+  "title": "/work chậm từ ef9b302a (1,0–1,4 s ⇒ 3,1–4,7 s): đo từng hàm trên production rồi sửa nguyên nhân",
+  "business_goal": "",
+  "status": "RUNNING",
+  "priority": "P2",
+  "risk": "CRITICAL",
+  "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "worker": null,
+  "worktree": null,
+  "branch": "perf/work-page-regression",
+  "base_sha": "50293da6ee8a88d2b254060cb48a9a2e276a6540",
+  "domains": [],
+  "owned_paths": [
+    "scripts/perf-probe.ts",
+    "lib/work/",
+    "lib/queries/work-adapters.ts",
+    "lib/queries/",
+    "app/(dashboard)/work/",
+    "tests/work-perf.test.ts",
+    "tests/sync-fixtures.test.ts"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-09T06:18:45.338Z",
+  "updated_at": "2026-10-09T06:18:45.338Z",
+  "last_heartbeat": "2026-10-09T06:18:45.338Z",
+  "definition_of_done": []
+}
