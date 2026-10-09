@@ -3,7 +3,7 @@
   "mission_id": "vtp-edit-cod-prefill",
   "title": "C0: form Sửa đơn VTP không điền sẵn COD/địa chỉ sai; máy chủ đòi xác nhận khi COD đổi",
   "business_goal": "",
-  "status": "RUNNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -23,7 +23,18 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-08T23:23:09.937Z",
-  "updated_at": "2026-10-08T23:23:09.937Z",
-  "last_heartbeat": "2026-10-08T23:23:09.937Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-09T00:15:14.402Z",
+  "last_heartbeat": "2026-10-09T00:15:14.402Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "fix/vtp-edit-cod-prefill",
+    "sha": "ec8db14297eab5ed48ab9b95f345e7b52fbd6a75",
+    "at": "2026-10-09T00:15:14.402Z",
+    "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+    "title": "C0: form Sửa đơn VTP không điền sẵn COD/địa chỉ sai; máy chủ đòi xác nhận khi COD đổi",
+    "summary": "Sửa đơn VTP điền từ vận đơn, đổi COD phải xác nhận, Đã thu chưa xác minh không in 0",
+    "tests": [
+      "npm test TẤT CẢ KIỂM THỬ ĐẠT; typecheck + lint + build sạch; 2 đột biến đỏ"
+    ]
+  }
 }
