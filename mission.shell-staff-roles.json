@@ -3,7 +3,7 @@
   "mission_id": "shell-staff-roles",
   "title": "Trang Nhân viên vỏ Chốt Đơn: chỉ chọn vai trò hệ thống có sẵn phù hợp bán hàng, lời mời không gán vai trò tuỳ chỉnh (không đổi quyền)",
   "business_goal": "",
-  "status": "VERIFYING",
+  "status": "DONE",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -26,13 +26,14 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-09T06:10:57.065Z",
-  "updated_at": "2026-10-09T10:25:00.694Z",
-  "last_heartbeat": "2026-10-09T07:34:04.591Z",
+  "updated_at": "2026-10-09T10:25:52.450Z",
+  "last_heartbeat": "2026-10-09T10:25:52.450Z",
   "definition_of_done": [],
   "evidence": {
     "merged": "#735 → 394ad4c842973811ebe3d0857de5e294c31893f9",
     "verify": "PASS 394ad4c842973811ebe3d0857de5e294c31893f9 2026-10-09T10:24:50.593Z",
-    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/37916081737"
+    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/37916081737",
+    "done": "production 394ad4c84297 · deploy 37916081737 xanh · verify ĐẠT"
   },
   "handoff": {
     "branch": "fix/shell-staff-roles",
