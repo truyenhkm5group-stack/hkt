@@ -1,0 +1,29 @@
+{
+  "schema": 1,
+  "mission_id": "commercial-sweep-ban-giao",
+  "title": "Commercial Sweep Round 2 — bàn giao cuối: đối chiếu origin/main, C0 0 · C1 3 (1 đang sửa, 1 quyết định chủ shop, 1 đo production), việc của Tech Lead",
+  "business_goal": "",
+  "status": "PLANNING",
+  "priority": "P2",
+  "risk": "MEDIUM",
+  "owner": "DESKTOP-56TH98Y:wt-docs",
+  "worker": null,
+  "worktree": null,
+  "branch": "claude/commercial-sweep-ban-giao",
+  "base_sha": "50293da6ee8a88d2b254060cb48a9a2e276a6540",
+  "domains": [],
+  "owned_paths": [
+    "docs/product/COMMERCIAL_POLISH_BOARD.md",
+    "docs/product/COMMERCIAL_PAGE_INVENTORY.md"
+  ],
+  "dependencies": [
+    "commercial-sweep-cap-nhat"
+  ],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-09T05:58:00.349Z",
+  "updated_at": "2026-10-09T05:58:00.349Z",
+  "last_heartbeat": "2026-10-09T05:58:00.349Z",
+  "definition_of_done": []
+}
