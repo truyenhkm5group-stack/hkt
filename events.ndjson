@@ -1272,3 +1272,4 @@
 {"at":"2026-10-09T13:22:43.567Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"OVERLAP_ACCEPTED","mission":"acceptance-e2e-r2","detail":"OVERLAP_ACCEPTED với security-acceptance: phạm vi docs/saas/ACCEPTANCE.md — cách tích hợp: security-acceptance chỉ thêm mục riêng ở ACCEPTANCE.md; nhánh vào sau rebase giữ cả hai"}
 {"at":"2026-10-09T13:23:01.183Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"launch-gate-r5","detail":"#742 cho docs/launch-gate-r5 @ 5e67f2e4e842"}
 {"at":"2026-10-09T13:23:15.794Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#742 @ 5e67f2e4e842 · Tài liệu: mỗi ✅ trỏ run; mục E2E không phủ ghi rõ CHƯA; điểm đếm bằng script."}
+{"at":"2026-10-09T13:23:38.453Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"shell-copy-brand-r3","detail":"fix/shell-copy-brand-r3 @ d068fe7fea34 · 1 lệnh kiểm thử"}

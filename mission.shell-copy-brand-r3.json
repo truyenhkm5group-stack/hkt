@@ -3,7 +3,7 @@
   "mission_id": "shell-copy-brand-r3",
   "title": "Vỏ Chốt Đơn: chữ kỹ thuật còn sót (AI Sales · Kết nối · Thiết lập · Tài khoản) + thương hiệu VNX sau redirect",
   "business_goal": "",
-  "status": "RUNNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -28,7 +28,18 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-09T05:56:11.749Z",
-  "updated_at": "2026-10-09T05:56:11.749Z",
-  "last_heartbeat": "2026-10-09T05:56:11.749Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-09T13:23:38.413Z",
+  "last_heartbeat": "2026-10-09T13:23:38.413Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "fix/shell-copy-brand-r3",
+    "sha": "d068fe7fea34c8fd2d094483eab476dc4a363485",
+    "at": "2026-10-09T13:23:38.413Z",
+    "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+    "title": "Vỏ Chốt Đơn: chữ kỹ thuật còn sót (AI Sales · Kết nối · Thiết lập · Tài khoản) + thương hiệu VNX sau redirect",
+    "summary": "C1 #6 thương hiệu sau redirect (gợi ý ?brand= có danh sách trắng, host đã biết thắng) + C1 #7 chữ kỹ thuật vỏ",
+    "tests": [
+      "npm test TẤT CẢ KIỂM THỬ ĐẠT; typecheck + lint + build sạch; quét 73 tệp vỏ"
+    ]
+  }
 }
