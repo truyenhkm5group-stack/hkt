@@ -3,7 +3,7 @@
   "mission_id": "work-sources-warm",
   "title": "Giữ ấm 3 nguồn /work (FULFILLMENT_EXCEPTION · ALERT · ADS_DECISION) trong job dashboard-warm",
   "business_goal": "",
-  "status": "RUNNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -25,7 +25,18 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-09T10:10:50.160Z",
-  "updated_at": "2026-10-09T10:10:50.160Z",
-  "last_heartbeat": "2026-10-09T10:10:50.160Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-09T11:13:36.697Z",
+  "last_heartbeat": "2026-10-09T11:13:36.697Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "perf/work-warm",
+    "sha": "df8b9c355e56d8de25b225930eae5cb3dc1fb20e",
+    "at": "2026-10-09T11:13:36.697Z",
+    "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+    "title": "Giữ ấm 3 nguồn /work (FULFILLMENT_EXCEPTION · ALERT · ADS_DECISION) trong job dashboard-warm",
+    "summary": "dashboard-warm giữ ấm getStockShortage + getReplenishmentPlan + getWorkConfig (khoá trùng khoá /work đọc)",
+    "tests": [
+      "npm test TẤT CẢ KIỂM THỬ ĐẠT; typecheck + lint sạch; đột biến bỏ task stock-shortage ⇒ đỏ; 39 mục giống hệt nguội/ấm"
+    ]
+  }
 }
