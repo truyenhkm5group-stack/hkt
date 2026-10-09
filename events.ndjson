@@ -1126,3 +1126,4 @@
 {"at":"2026-10-09T02:17:14.530Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"launch-gate-r4","detail":"docs/launch-gate-r4 @ 3e544c79c80a · 1 lệnh kiểm thử"}
 {"at":"2026-10-09T02:17:37.469Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"launch-gate-r4","detail":"#723 cho docs/launch-gate-r4 @ 3e544c79c80a"}
 {"at":"2026-10-09T02:17:49.243Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#723 @ 3e544c79c80a · Tài liệu: O1 ✅ trỏ ba run; O2–O8 giữ 🟡 với số đo thật."}
+{"at":"2026-10-09T02:18:31.579Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"CLAIM","mission":"acceptance-signal-drills","detail":"RUNNING · 6 mẫu phạm vi · MEDIUM"}
