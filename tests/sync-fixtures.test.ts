@@ -614,6 +614,7 @@ import { testSaasVnxRuntime } from "./saas-vnx-runtime.test";
 import { testSaasPageGate } from "./saas-page-gate.test";
 import { testSaasShell } from "./saas-shell.test";
 import { testShellStaffRolesPure, testShellStaffRolesServer } from "./shell-staff-roles.test";
+import { testBanHangReplyPure, testBanHangReplyServer } from "./ban-hang-reply.test";
 import { testShellLoginLanding } from "./shell-login-landing.test";
 import { testShellGateRedirects } from "./shell-gate-redirects.test";
 import { testErrorBoundary } from "./error-boundary.test";
@@ -3040,6 +3041,10 @@ async function main() {
   // ngoài bộ; ERP / nhà không đổi; không quyền / mẫu nào sửa (tổ chức `ssr-shell` tự cấp và tự dọn).
   testShellStaffRolesPure();
   await testShellStaffRolesServer();
+  // Vai trò «Nhân viên bán hàng» (BAN_HANG) nhận ai_sales:reply — chủ shop duyệt 09/10/2026: mẫu 1.1.0 + ops nâng tổ chức cũ qua
+  // bộ cài mẫu (chạy thử không ghi · idempotent · đã tự sửa / nền khác ⇒ bỏ qua). Tổ chức `bhr-*` tự cấp và tự dọn.
+  testBanHangReplyPure();
+  await testBanHangReplyServer();
   // F-01: đăng nhập / đăng ký trong vỏ Chốt Đơn tính đích cuối ngay trong action — không `redirect("/")` mà layout chuyển
   // hướng (vòng lặp trang trắng); nhà / workspace ERP đúng safeNextPath (tổ chức `dich-dang-nhap` tự cấp và tự dọn).
   await testShellLoginLanding();

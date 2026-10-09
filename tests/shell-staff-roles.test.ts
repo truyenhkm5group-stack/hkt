@@ -10,8 +10,9 @@
  *  1. THUẦN — bộ ba của vỏ; thiếu / tắt `BAN_HANG` ⇒ chỉ hai lựa chọn + câu báo, không lùi sang vai trò khác; nhận ra vai trò
  *     bán hàng bằng MÃ (một vai trò khác MANG TÊN «Nhân viên bán hàng» không lọt); mã khớp mẫu thật.
  *  2. ERP KHÔNG ĐỔI — tám vai trò, nhãn, mô tả y nguyên; hộp thoại ERP vẫn liệt kê ROLE_ORDER + vai trò tuỳ chỉnh.
- *  3. QUÉT MÃ NGUỒN — không quyền / mẫu vai trò nào bị sửa: vai trò `BAN_HANG` của mẫu giữ đúng bảy quyền (KHÔNG có
- *     `ai_sales:reply` — quyết định của chủ shop), tệp hằng của vỏ không đụng tới bộ máy quyền.
+ *  3. QUÉT MÃ NGUỒN — không quyền / mẫu vai trò nào bị sửa ngoài ý chủ shop: vai trò `BAN_HANG` của mẫu giữ ĐÚNG tám quyền
+ *     (thứ tám `ai_sales:reply` do chủ shop duyệt 09/10/2026 — mọi thay đổi khác phải qua chủ shop), tệp hằng của vỏ không đụng
+ *     tới bộ máy quyền.
  *  4. MÁY CHỦ (tổ chức THẬT mã `ssr-shell`, thương hiệu chotdon) — mời / tạo / sửa / gán vai trò ngoài bộ ⇒ `{ error }`;
  *     trong bộ ⇒ đi qua; thiếu `BAN_HANG` ⇒ mời bán hàng bị từ chối. Nhà (ERP) mời «Quản lý» vẫn được.
  */
@@ -62,8 +63,8 @@ export function testShellStaffRolesPure() {
   assert.equal(tmpl!.base, "VIEWER", "vai trò bán hàng có nền VIEWER");
   assert.deepEqual(
     [...tmpl!.permissions].sort(),
-    ["ai_sales:view", "customers:view", "customers:write", "dashboard:view", "orders:read", "orders:write", "products:view"],
-    "bảy quyền của vai trò bán hàng KHÔNG đổi — thêm `ai_sales:reply` là quyết định của chủ shop, không phải của bản này",
+    ["ai_sales:reply", "ai_sales:view", "customers:view", "customers:write", "dashboard:view", "orders:read", "orders:write", "products:view"],
+    "tám quyền của vai trò bán hàng — `ai_sales:reply` chủ shop duyệt 09/10/2026; thêm / bớt quyền nào khác là quyết định của chủ shop, không phải của một bản vá",
   );
 
   assert.deepEqual(shellRoleKeys(true), ["OWNER", "SALES", "VIEWER"], "vỏ: đúng ba lựa chọn, đúng thứ tự");

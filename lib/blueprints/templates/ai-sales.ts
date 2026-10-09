@@ -13,7 +13,9 @@ export const AI_SALES_BLUEPRINT: Blueprint = {
   format: "erp-blueprint",
   formatVersion: 1,
   key: "ai-sales",
-  version: "1.0.0",
+  // 1.1.0 (09/10/2026): vai trò `ban_hang` thêm `ai_sales:reply` — chủ shop duyệt; thay đổi DUY NHẤT so với 1.0.0. Tổ chức đã cài
+  // nhận qua ops `ban-hang-reply-upgrade` (lib/blueprints/ban-hang-reply.ts, so ba chiều của bộ cài).
+  version: "1.1.0",
   name: "Chỉ cần AI bán hàng",
   description: "Chatbot AI trả lời khách trên fanpage / Messenger / website 24/7: tư vấn, báo giá đúng giá shop, lấy SĐT, chốt và lên đơn, chuyển nhân viên khi cần. Kèm đúng phần bot cần: khách, sản phẩm, đơn, kho. Không giao vận, tài chính, quảng cáo hay lương — cần thì bật ở Module của tổ chức.",
   industry: null,
@@ -24,7 +26,7 @@ export const AI_SALES_BLUEPRINT: Blueprint = {
       label: "Nhân viên bán hàng",
       description: "Nhận khách bot chuyển sang, đọc hội thoại bot đã chat, tạo / sửa khách và đơn, xem sản phẩm & tồn. Không sửa cấu hình bot.",
       base: "VIEWER",
-      permissions: ["dashboard:view", "orders:read", "orders:write", "customers:view", "customers:write", "products:view", "ai_sales:view"],
+      permissions: ["dashboard:view", "orders:read", "orders:write", "customers:view", "customers:write", "products:view", "ai_sales:view", "ai_sales:reply"],
       defaultScope: "ALL",
     },
   ],

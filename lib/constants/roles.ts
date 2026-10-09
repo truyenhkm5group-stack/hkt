@@ -61,10 +61,10 @@ export const SHELL_ROLE_LABEL: Record<ShellRoleKey, string> = {
   VIEWER: "Chỉ xem",
 };
 
-/** Một câu mỗi lựa chọn — nói đúng điều vai trò làm được (vai trò bán hàng CHƯA trả lời được khách trong hộp thư). */
+/** Một câu mỗi lựa chọn — nói đúng điều vai trò làm được (trả lời khách trong hộp thư: chủ shop duyệt 09/10/2026). */
 export const SHELL_ROLE_HINT: Record<ShellRoleKey, string> = {
   OWNER: "Toàn quyền: nhân viên, kênh kết nối, gói dịch vụ, cấu hình bot.",
-  SALES: "Đọc hội thoại bot đã chat, tạo / sửa khách và đơn, xem sản phẩm & tồn — không sửa cấu hình.",
+  SALES: "Đọc và trả lời hội thoại, tạo / sửa khách và đơn, xem sản phẩm & tồn — không sửa cấu hình.",
   VIEWER: "Chỉ xem, không sửa được gì.",
 };
 
