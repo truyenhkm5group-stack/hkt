@@ -22,7 +22,8 @@ import { and, eq, like, sql } from "drizzle-orm";
 import { getDb, getPlatformDb, organizationDatabaseUrl, schema } from "@/db";
 import type { AiBlock, AiProvider, AiRequest, AiResponse } from "@/lib/ai/provider";
 import { ByokOpenAiProvider } from "@/lib/ai-builder/providers";
-import { addQuickReplyImages, listQuickReplies, saveLearnedQuickReplies, saveQuickReply, saveQuickReplySettings, setQuickReplyActive } from "@/lib/sales-chatbot/quick-replies";
+import { addQuickReplyImages, bulkQuickReplies, insertLearned, listQuickReplies, loadQuickReplySettings, saveLearnedQuickReplies, saveQuickReply, saveQuickReplySettings, setQuickReplyActive } from "@/lib/sales-chatbot/quick-replies";
+import { autoLearnQuickReplies, loadAutoLearnRun } from "@/lib/sales-chatbot/quick-replies-learn";
 import { executeTool, maskAddress, PROCESS_TOOLS, toolDefsFor, type ChatState } from "@/lib/sales-chatbot/tools";
 import { freeShipPolicyText, freeShipVerdict, inFreeShipArea, variantWeightGrams } from "@/lib/sales-chatbot/shipping";
 import { publicView } from "@/lib/sales-chatbot/public";
@@ -30,7 +31,7 @@ import { findReturningCustomer, normalizeVnPhone, promptDataText, parsePancakeTh
 import { followupStepsLabel, nextFollowupAt, validateFollowupSteps, withinMessagingWindow } from "@/lib/sales-chatbot/followup-shared";
 import { followupSystemPrompt, runSalesFollowups } from "@/lib/sales-chatbot/followup";
 import { saveFollowupSettings } from "@/lib/sales-chatbot/followup-settings";
-import { fillPlaceholders, isMultiPart, looksLikeOrdering, looksWholesale, matchQuickReplyByKeyword, parseLearnedQuickReplies, repeatsRecent, validateQuickReply } from "@/lib/sales-chatbot/quick-replies-shared";
+import { fillPlaceholders, isMultiPart, looksLikeOrdering, looksWholesale, matchQuickReplyByKeyword, mergeTriggers, mineUnansweredQuestions, parseAutoLearnPlan, parseLearnedQuickReplies, parseQuickReplySettings, rankQuickReplies, repeatsRecent, validateQuickReply } from "@/lib/sales-chatbot/quick-replies-shared";
 import { aiUsageByRef, sourceUsage } from "@/lib/ai-usage/ledger";
 import { resolvePermissions } from "@/lib/auth/permissions";
 import { activeUserIdsWhoCan, type SessionUser } from "@/lib/auth/session";
@@ -257,6 +258,33 @@ function testPure() {
   assert.ok(validateQuickReply({ title: "x", triggers: "giá\ngiá\n", answer: "Dạ {{giá:A}} ạ" }).ok);
   assert.deepEqual(parseLearnedQuickReplies('```json\n[{"title":"Ship","triggers":["ship không"],"answer":"Dạ có ạ"},{"title":""}]\n```'), [{ title: "Ship", triggers: ["ship không"], answer: "Dạ có ạ" }]);
   assert.deepEqual(parseLearnedQuickReplies("không phải JSON"), []);
+  // TỰ NẠP CÂU MẪU (09/10/2026) — phần thuần: công tắc mặc định TẮT; xếp ứng viên theo độ gần; gom câu khách chưa có câu mẫu.
+  assert.deepEqual([parseQuickReplySettings(null).autoLearn, parseQuickReplySettings(null).autoActivate], [false, false], "tự nạp + tự bật mặc định tắt");
+  assert.equal(parseQuickReplySettings({ upsellReplyId: "u", autoLearn: true }).upsellReplyId, "u", "bật tự nạp không làm mất câu upsell");
+  const many = Array.from({ length: 70 }, (_, k) => ({ id: `m${k}`, title: `Câu ${k}`, triggers: [`hỏi chuyện ${k}`], answer: "x" }));
+  assert.equal(rankQuickReplies("bảo quản để được bao lâu", [...many, qB], 60)[0].id, "b", "hơn 60 câu ⇒ câu GẦN tin khách lên đầu, không bị cắt mất");
+  assert.equal(rankQuickReplies("x", [qA, qB], 60).length, 2, "dưới trần ⇒ giữ nguyên");
+  const mined = mineUnansweredQuestions(
+    [
+      { text: "Ship về Hà Nội mất mấy ngày ạ", thread: "t1" },
+      { text: "ship về hà nội mất mấy ngày", thread: "t2" },
+      { text: "ship ve ha noi mat may ngay shop oi", thread: "t2" },
+      { text: "Có giao hoả tốc không", thread: "t3" },
+      { text: "chả mực bao nhiêu", thread: "t4" },
+      { text: "chị lấy 2 hộp sđt 0912345678", thread: "t5" },
+      { text: "dạ\nship không", thread: "t6" },
+      { text: "ok", thread: "t7" },
+      { text: "xem https://shop.vn/a nhé", thread: "t8" },
+    ],
+    [qA, qB],
+    10,
+  );
+  assert.deepEqual(mined.map((q) => [q.threads, q.samples.length]), [[2, 3], [1, 1]], "gộp câu trùng sau bỏ dấu + từ đệm, đếm HỘI THOẠI; bỏ câu đã có câu mẫu · đặt hàng · nhiều dòng · một từ · liên kết");
+  const plan = parseAutoLearnPlan('Đây: {"extend":[{"code":"q1","triggers":["chả mực loại nào ngon"]},{"code":"Q9","triggers":["x"]}],"new":[{"title":"Ship","triggers":["ship mấy ngày"],"answer":"Dạ 1–2 ngày ạ"}]}', new Map([["Q1", "a"]]));
+  assert.deepEqual(plan.extend, [{ id: "a", triggers: ["chả mực loại nào ngon"] }], "mã câu mẫu lạ bị bỏ");
+  assert.equal(plan.added.length, 1);
+  assert.deepEqual(parseAutoLearnPlan("hỏng", new Map()), { added: [], extend: [] });
+  assert.deepEqual(mergeTriggers(["giá chả mực"], ["Giá chả mực", "chả mực loại nào ngon", "lấy sỉ 20kg chả mực", "chốt 2 hộp", "a", "b", "c"], 2), ["giá chả mực", "chả mực loại nào ngon", "a"], "bỏ trùng · câu sỉ · câu đặt hàng; tối đa 2 câu mới mỗi lượt");
   // Quy trình bán 5 bước + cần người xử lý + câu mẫu trong lời nhắc; địa chỉ khách cũ chỉ lộ hai phần cuối.
   assert.equal(maskAddress("Xóm 8, thôn Văn Tảo, xã Hà Nam, Thành phố Hải Phòng"), "…, xã Hà Nam, Thành phố Hải Phòng");
   assert.equal(maskAddress("5 Lý Thường Kiệt"), "…");
@@ -1108,6 +1136,94 @@ async function testJourney() {
       assert.ok("error" in (await setQuickReplyActive(admin, ruoc.id, true)), "còn [giá lấy từ ERP] ⇒ không bật được");
       assert.equal(await saveLearnedQuickReplies([], ADMIN_EMAIL), 0);
       assert.equal((await listQuickReplies()).filter((r) => r.source === "LEARNED").length, 0, "lượt học mới thay gợi ý cũ chưa ai bật / chưa dùng");
+      // ═══ TỰ NẠP CÂU MẪU (09/10/2026): câu khách hỏi chưa câu mẫu nào khớp ⇒ AI thêm cách hỏi vào câu cũ + soạn câu mới ═══
+      {
+        assert.equal((await autoLearnQuickReplies()).status, "NOT_DUE", "công tắc tắt ⇒ không gọi AI");
+        const chaMucQr = (await listQuickReplies()).find((r) => r.id === savedQr.id)!;
+        const L = "page-qr-learn";
+        const asks: [string, string][] = [
+          ["l1", "Ship về Hà Nội mất mấy ngày ạ"],
+          ["l2", "ship về hà nội mất mấy ngày"],
+          ["l3", "Ship về Hà Nội mất mấy ngày shop"],
+          ["l4", "bảo quản được bao lâu vậy"],
+          ["l5", "có giao hoả tốc không"],
+          ["l6", "chả mực bên mình loại nào ngon"],
+          ["l7", "thanh toán khi nhận hàng được không"],
+          ["l8", "mua nhiều có được giảm không"],
+        ];
+        await db.insert(schema.salesChatInbound).values([
+          ...asks.map(([t, text], k) => ({ pageId: L, threadId: t, messageId: `qrl-${k}`, text, status: "DONE" })),
+          { pageId: L, threadId: "l1", messageId: "qrl-bot", text: "Dạ bên em giao toàn quốc ạ, mình cần hỏi thêm gì không", status: "DONE", note: "BOT_SENT" },
+          { pageId: L, threadId: "l2", messageId: "qrl-order", text: "chốt 2kg sđt 0912345678", status: "DONE" },
+        ]);
+        const learnCalls: AiRequest[] = [];
+        setSalesChatProviderForTests(() => ({
+          ...baseBot,
+          complete: async (req: AiRequest) => {
+            learnCalls.push(req);
+            const user = (req.messages[0].content[0] as { text: string }).text;
+            const code = /(Q\d+): Hỏi giá chả mực/.exec(user)?.[1] ?? "Q0";
+            const text = JSON.stringify({
+              extend: [{ code, triggers: ["chả mực bên mình loại nào ngon", "lấy sỉ 20kg chả mực"] }],
+              new: [
+                { title: "Ship Hà Nội", triggers: ["ship về hà nội mất mấy ngày"], answer: "Dạ ship Hà Nội nhanh lắm ạ, phí {{ship}}. Mình lấy mấy kg để em lên đơn luôn ạ?" },
+                { title: "Hỏi giá chả cá", triggers: ["chả cá bao nhiêu"], answer: "Dạ chả cá 250k/kg ạ" },
+                { title: "SKU lạ", triggers: ["giá ruốc tôm"], answer: "Dạ {{giá:KHONG-CO}} ạ" },
+                { title: "hỏi giá chả mực", triggers: ["chả mực giá"], answer: "Dạ {{giá:CHA-MUC-GIA-TAY}} ạ" },
+              ],
+            });
+            return { content: [{ type: "text", text }], stopReason: "end_turn", usage: { inputTokens: 900, outputTokens: 300, cacheReadTokens: 0, cacheWriteTokens: 0 }, model: "claude-sonnet-5", latencyMs: 1 };
+          },
+        }));
+        assert.ok("ok" in (await saveQuickReplySettings(admin, { autoLearn: true })));
+        const run = await autoLearnQuickReplies({ force: true, actor: { id: admin.id, email: ADMIN_EMAIL } });
+        assert.equal(run.status, "OK", JSON.stringify(run));
+        assert.equal(learnCalls.length, 1, "MỘT lời gọi AI cho cả lượt");
+        const prompt = (learnCalls[0].messages[0].content[0] as { text: string }).text;
+        assert.ok(/3 × Ship về Hà Nội/.test(prompt) && !prompt.includes("0912345678") && !prompt.includes("giao toàn quốc"), "đưa vào AI câu KHÁCH chưa có câu mẫu, đếm theo hội thoại; bỏ tin bot + tin đặt hàng");
+        assert.ok(/CHA-MUC-GIA-TAY/.test(prompt), "AI nhận danh sách SKU để viết {{giá:SKU}}");
+        const after = await listQuickReplies();
+        const chaMucAfter = after.find((r) => r.id === savedQr.id)!;
+        assert.ok(chaMucAfter.triggers.includes("chả mực bên mình loại nào ngon") && !chaMucAfter.triggers.includes("lấy sỉ 20kg chả mực"), "thêm cách hỏi vào câu mẫu đã có — câu hỏi sỉ không bao giờ vào câu báo giá lẻ");
+        const auto = after.filter((r) => r.source === "LEARNED");
+        assert.deepEqual(auto.map((r) => r.title).sort(), ["Hỏi giá chả cá", "Ship Hà Nội"], "SKU lạ ⇒ bỏ; trùng tên câu đang có ⇒ bỏ");
+        assert.ok(auto.every((r) => !r.active), "tự bật đang tắt ⇒ câu mới chờ duyệt");
+        assert.ok(auto.find((r) => r.title === "Hỏi giá chả cá")!.needsEdit, "giá gõ thẳng ⇒ «[giá lấy từ ERP]»");
+        assert.equal((await loadAutoLearnRun())?.added, 2);
+        assert.equal((await autoLearnQuickReplies()).status, "NOT_DUE", "24 giờ một lượt");
+        // Câu khách nay đã có câu mẫu (kể cả câu còn TẮT chờ duyệt) ⇒ không đưa lại vào AI; AI trả lại y hệt ⇒ không đẻ thêm câu.
+        const again = await autoLearnQuickReplies({ force: true });
+        if (again.status === "OK") {
+          const p2 = (learnCalls[1].messages[0].content[0] as { text: string }).text.split("CÂU KHÁCH HỎI GẦN ĐÂY")[1] ?? "";
+          assert.ok(!/Ship về Hà Nội/.test(p2) && !/loại nào ngon/.test(p2), "câu đã có câu mẫu không vào lời gọi lần hai");
+          assert.deepEqual([again.added, again.extended], [0, 0], "chạy lại ⇒ không trùng câu, không trùng cách hỏi");
+        } else assert.equal(again.status, "SKIPPED", JSON.stringify(again));
+        // Thao tác HÀNG LOẠT: bật bỏ qua câu còn «[giá lấy từ ERP]»; xoá câu upsell ⇒ bỏ chọn câu upsell.
+        const ids = auto.map((r) => r.id);
+        assert.ok("error" in (await bulkQuickReplies(admin, [], "ACTIVATE")), "chưa chọn ⇒ báo");
+        assert.deepEqual(await bulkQuickReplies(admin, ids, "ACTIVATE"), { ok: true, changed: 1, skipped: 1 });
+        const ship = auto.find((r) => r.title === "Ship Hà Nội")!;
+        assert.ok("ok" in (await saveQuickReplySettings(admin, { upsellReplyId: ship.id })));
+        assert.deepEqual(await bulkQuickReplies(admin, ids, "DEACTIVATE"), { ok: true, changed: 1, skipped: 0 });
+        assert.deepEqual(await bulkQuickReplies(admin, [...ids, "khong-co"], "DELETE"), { ok: true, changed: 2, skipped: 0 });
+        assert.equal((await loadQuickReplySettings()).upsellReplyId, null, "xoá câu upsell ⇒ bỏ chọn");
+        assert.equal((await listQuickReplies()).filter((r) => r.source === "LEARNED").length, 0);
+        // Tự bật: câu sạch bật ngay, câu còn «[giá lấy từ ERP]» vẫn tắt.
+        assert.equal(await insertLearned([{ title: "COD", triggers: ["thanh toán khi nhận hàng"], answer: "Dạ có COD ạ" }, { title: "Giá ruốc", triggers: ["ruốc giá"], answer: "Dạ [giá lấy từ ERP] ạ" }], { actorEmail: null, active: true }), 2);
+        const autoOn = (await listQuickReplies()).filter((r) => r.source === "LEARNED");
+        assert.deepEqual(autoOn.map((r) => [r.title, r.active]).sort(), [["COD", true], ["Giá ruốc", false]]);
+        // Dọn: trả fixture về như cũ cho các khối sau.
+        assert.ok("ok" in (await bulkQuickReplies(admin, autoOn.map((r) => r.id), "DELETE")));
+        await db.update(schema.salesChatQuickReplies).set({ triggers: chaMucQr.triggers }).where(eq(schema.salesChatQuickReplies.id, savedQr.id));
+        await db.delete(schema.salesChatInbound).where(eq(schema.salesChatInbound.pageId, L));
+        await db.delete(schema.settings).where(eq(schema.settings.key, "ai.salesChatbot.quickReplies.autoLearnRun"));
+        // Sổ dùng AI: lượt tự nạp ghi «sales_playbook» (cùng nhóm chi phí học của bot) — xoá để khối «Học từ hội thoại cũ» đếm đúng của nó.
+        const qlUsage = await (await getPlatformDb()).select().from(schema.platformAiUsage).where(and(eq(schema.platformAiUsage.orgCode, ORG), eq(schema.platformAiUsage.ref, "quick-replies")));
+        assert.equal(qlUsage.length, learnCalls.length, "mỗi lời gọi AI của lượt tự nạp một dòng sổ dùng AI (tính vào chi phí của shop)");
+        await (await getPlatformDb()).delete(schema.platformAiUsage).where(and(eq(schema.platformAiUsage.orgCode, ORG), eq(schema.platformAiUsage.ref, "quick-replies")));
+        assert.ok("ok" in (await saveQuickReplySettings(admin, { autoLearn: false })));
+        setSalesChatProviderForTests(() => baseBot);
+      }
       // ═══ ẢNH KHÁCH GỬI (0195 · lib/sales-chatbot/vision.ts): trước đây tin chỉ có ảnh bị bỏ qua «để nhân viên xem» ═══
       const visionCalls: AiRequest[] = [];
       const chatAfterImage: AiRequest[] = [];

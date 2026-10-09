@@ -3,6 +3,7 @@ import { PageHeader } from "@/components/page-header";
 import { can, requirePermission } from "@/lib/auth/session";
 import { formatNumber, pctOrNull } from "@/lib/format";
 import { listQuickReplies, loadQuickReplySettings, quickReplyStats } from "@/lib/sales-chatbot/quick-replies";
+import { loadAutoLearnRun } from "@/lib/sales-chatbot/quick-replies-learn";
 import { SALES_CHATBOT_MANAGE } from "@/lib/sales-chatbot/settings";
 import { QuickRepliesManager } from "./quick-replies-manager";
 
@@ -15,7 +16,7 @@ export const metadata = { title: "Câu trả lời mẫu" };
 export default async function QuickRepliesPage() {
   const user = await requirePermission("ai_sales:view");
   const manage = can(user, SALES_CHATBOT_MANAGE);
-  const [rows, settings, stats] = await Promise.all([listQuickReplies(), loadQuickReplySettings(), quickReplyStats()]);
+  const [rows, settings, stats, autoLearnRun] = await Promise.all([listQuickReplies(), loadQuickReplySettings(), quickReplyStats(), loadAutoLearnRun()]);
   const share = pctOrNull(stats.quickTurns, stats.totalTurns);
   return (
     <div className="space-y-5">
@@ -31,6 +32,7 @@ export default async function QuickRepliesPage() {
       <QuickRepliesManager
         manage={manage}
         settings={settings}
+        autoLearnRun={autoLearnRun}
         rows={rows.map((r) => ({ ...r, lastUsedAt: r.lastUsedAt?.toISOString() ?? null, updatedAt: r.updatedAt.toISOString() }))}
       />
     </div>

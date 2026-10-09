@@ -26,6 +26,7 @@ import {
   parsePlaceholders,
   parseQuickReplySettings,
   QUICK_REPLY_LIMITS,
+  rankQuickReplies,
   QUICK_REPLY_SETTING_KEY,
   repeatsRecent,
   validateQuickReply,
@@ -34,6 +35,7 @@ import {
   type QuickReplySettings,
 } from "@/lib/sales-chatbot/quick-replies-shared";
 import { SALES_CHATBOT_MANAGE } from "@/lib/sales-chatbot/settings";
+import { foldVi } from "@/lib/sales-chatbot/text";
 import { setSettingJson } from "@/lib/settings";
 
 const qr = schema.salesChatQuickReplies;
@@ -65,7 +67,7 @@ export type QuickReplyRow = {
   needsEdit: boolean;
 };
 
-const NEEDS_EDIT = "[giá lấy từ ERP]";
+export const NEEDS_EDIT = "[giá lấy từ ERP]";
 
 /** Mọi câu mẫu (màn hình quản lý) — đang bật trước, dùng nhiều trước. */
 export async function listQuickReplies(): Promise<QuickReplyRow[]> {
@@ -89,7 +91,7 @@ export async function listQuickReplies(): Promise<QuickReplyRow[]> {
   }));
 }
 
-async function activeEntries(): Promise<QuickReplyEntry[]> {
+export async function activeEntries(): Promise<QuickReplyEntry[]> {
   const db = await getDb();
   const rows = await db.select({ id: qr.id, title: qr.title, triggers: qr.triggers, answer: qr.answer }).from(qr).where(eq(qr.active, true)).orderBy(desc(qr.uses), asc(qr.title)).limit(QUICK_REPLY_LIMITS.entries);
   return rows.map((r) => ({ id: r.id, title: r.title, triggers: r.triggers ?? [], answer: r.answer }));
@@ -172,7 +174,8 @@ export async function quickReplyByKeyword(text: string, opts: { ordering: boolea
     return { kind: "SKIP", reason: "Câu mẫu khớp nhưng thiếu số từ ERP" };
   }
   if (text.trim().split(/\s+/).length > QUICK_REPLY_LIMITS.maxMessageWords) return { kind: "SKIP", reason: "Tin nhiều ý" };
-  return { kind: "NO_MATCH", candidates: (m.kind === "AMBIGUOUS" ? m.entries : entries).slice(0, QUICK_REPLY_LIMITS.aiCandidates) };
+  // Shop có nhiều hơn `aiCandidates` câu mẫu ⇒ AI đọc hiểu nhận các câu GẦN tin khách nhất, không phải 60 câu dùng nhiều nhất.
+  return { kind: "NO_MATCH", candidates: m.kind === "AMBIGUOUS" ? m.entries.slice(0, QUICK_REPLY_LIMITS.aiCandidates) : rankQuickReplies(text, entries, QUICK_REPLY_LIMITS.aiCandidates) };
 }
 
 const PICK_SYSTEM = [
@@ -212,7 +215,11 @@ export async function quickReplyByAi(
 export async function quickReplyCatalog(): Promise<{ code: string; id: string; title: string; upsell: boolean }[]> {
   const settings = await loadQuickReplySettings();
   if (!settings.enabled) return [];
-  return (await activeEntries()).slice(0, QUICK_REPLY_LIMITS.aiCandidates).map((e, i) => ({ code: `Q${i + 1}`, id: e.id, title: e.title, upsell: e.id === settings.upsellReplyId }));
+  const all = await activeEntries();
+  const top = all.slice(0, QUICK_REPLY_LIMITS.aiCandidates);
+  // Câu upsell luôn có mặt dù ít được dùng — bước UPSELL của quy trình bán cần đúng câu đó.
+  const upsell = settings.upsellReplyId && !top.some((e) => e.id === settings.upsellReplyId) ? all.find((e) => e.id === settings.upsellReplyId) : undefined;
+  return (upsell ? [...top.slice(0, -1), upsell] : top).map((e, i) => ({ code: `Q${i + 1}`, id: e.id, title: e.title, upsell: e.id === settings.upsellReplyId }));
 }
 
 /** Một câu mẫu ĐANG BẬT, đã điền số ERP, kèm ảnh — để gửi nguyên văn. `null` = không còn / thiếu số. */
@@ -244,14 +251,15 @@ export async function rememberPancakeContent(imageId: string, pageId: string, co
 
 type Gate = { ok: true } | { ok: false; error: string };
 
-async function gate(user: SessionUser): Promise<Gate> {
+/** Module AI bán hàng bật + quyền `ai_sales:manage` — mọi bước người của câu mẫu (cả «Nạp ngay») đi qua đây. */
+export async function gate(user: SessionUser): Promise<Gate> {
   if (!(await canUseModule("ai_sales"))) return { ok: false, error: "Module AI bán hàng chưa bật." };
   if (!can(user, SALES_CHATBOT_MANAGE)) return { ok: false, error: "Bạn không có quyền cấu hình chatbot bán hàng (ai_sales:manage)." };
   return { ok: true };
 }
 
 /** SKU trong chỗ trống phải là mẫu mã ĐANG BÁN — gõ sai thì báo ngay, không đợi tới lúc khách hỏi mới lặng lẽ rơi về AI. */
-async function unknownSkus(answer: string): Promise<string[]> {
+export async function unknownSkus(answer: string): Promise<string[]> {
   const skus = [...new Set(parsePlaceholders(answer).filter((h) => h.kind !== "ship").map((h) => h.sku))];
   if (skus.length === 0) return [];
   const db = await getDb();
@@ -303,6 +311,44 @@ export async function deleteQuickReply(user: SessionUser, id: string): Promise<{
   if (!row) return { error: "Không còn câu mẫu này." };
   await audit({ userId: user.id, userEmail: user.email, action: "SALES_QUICK_REPLY_DELETE", entity: "SALES_QUICK_REPLY", entityId: id, before: { title: row.title } });
   return { ok: true };
+}
+
+export type BulkQuickReplyOp = "ACTIVATE" | "DEACTIVATE" | "DELETE";
+
+/**
+ * THAO TÁC HÀNG LOẠT («Chọn tất cả» trên màn hình quản lý): bật · tắt · xoá nhiều câu mẫu một lần, MỘT dòng nhật ký. Bật bỏ
+ * qua câu còn «[giá lấy từ ERP]» (đếm riêng, không bật nửa vời); xoá câu đang là câu upsell thì bỏ chọn câu upsell.
+ */
+export async function bulkQuickReplies(user: SessionUser, rawIds: readonly string[], op: BulkQuickReplyOp): Promise<{ ok: true; changed: number; skipped: number } | { error: string }> {
+  const g = await gate(user);
+  if (!g.ok) return { error: g.error };
+  const ids = [...new Set(rawIds.map((x) => String(x ?? "").trim()).filter(Boolean))];
+  if (ids.length === 0) return { error: "Chưa chọn câu mẫu nào." };
+  if (ids.length > QUICK_REPLY_LIMITS.bulk) return { error: `Mỗi lần tối đa ${QUICK_REPLY_LIMITS.bulk} câu mẫu.` };
+  const db = await getDb();
+  const rows = await db.select({ id: qr.id, title: qr.title, answer: qr.answer, active: qr.active }).from(qr).where(inArray(qr.id, ids));
+  if (rows.length === 0) return { error: "Không còn câu mẫu nào trong số đã chọn." };
+  let changed = 0;
+  let skipped = 0;
+  if (op === "DELETE") {
+    changed = (await db.delete(qr).where(inArray(qr.id, rows.map((r) => r.id))).returning({ id: qr.id })).length;
+    const settings = await loadQuickReplySettings();
+    if (settings.upsellReplyId && rows.some((r) => r.id === settings.upsellReplyId)) await setSettingJson(QUICK_REPLY_SETTING_KEY, { ...settings, upsellReplyId: null });
+  } else {
+    const active = op === "ACTIVATE";
+    const blocked = active ? rows.filter((r) => r.answer.includes(NEEDS_EDIT)) : [];
+    skipped = blocked.length;
+    const target = rows.filter((r) => r.active !== active && !blocked.includes(r)).map((r) => r.id);
+    if (target.length) changed = (await db.update(qr).set({ active }).where(inArray(qr.id, target)).returning({ id: qr.id })).length;
+  }
+  await audit({
+    userId: user.id,
+    userEmail: user.email,
+    action: op === "DELETE" ? "SALES_QUICK_REPLY_BULK_DELETE" : op === "ACTIVATE" ? "SALES_QUICK_REPLY_BULK_ACTIVATE" : "SALES_QUICK_REPLY_BULK_DEACTIVATE",
+    entity: "SALES_QUICK_REPLY",
+    after: { requested: ids.length, found: rows.length, changed, skipped },
+  });
+  return { ok: true, changed, skipped };
 }
 
 export async function addQuickReplyImages(user: SessionUser, id: string, files: readonly Uint8Array[]): Promise<{ ok: true; added: number } | { error: string }> {
@@ -377,9 +423,25 @@ export async function saveLearnedQuickReplies(items: readonly QuickReplyDraft[],
     clean.push({ ...v.value, answer: v.value.answer.replace(/GIA_CHO/g, NEEDS_EDIT) });
   }
   await db.delete(qr).where(and(eq(qr.source, "LEARNED"), eq(qr.active, false), eq(qr.uses, 0)));
+  return insertLearned(clean, { actorEmail, active: false });
+}
+
+/**
+ * Ghi câu mẫu AI soạn (đã làm sạch) — KHÔNG xoá gì, bỏ câu trùng TÊN (bỏ dấu) với câu đang có, giữ trần `entries`. `active`
+ * chỉ áp cho câu không còn «[giá lấy từ ERP]». Trả số câu đã ghi.
+ */
+export async function insertLearned(clean: readonly QuickReplyDraft[], opts: { actorEmail: string | null; active: boolean }): Promise<number> {
+  const db = await getDb();
+  const existing = new Set((await db.select({ title: qr.title }).from(qr)).map((r) => foldVi(r.title)));
+  const fresh = clean.filter((c) => {
+    const k = foldVi(c.title);
+    if (!k || existing.has(k)) return false;
+    existing.add(k);
+    return true;
+  });
   const [{ n }] = await db.select({ n: sql<number>`count(*)::int` }).from(qr);
   const room = Math.max(0, QUICK_REPLY_LIMITS.entries - Number(n));
-  const rows = clean.slice(0, room).map((c) => ({ ...c, active: false, source: "LEARNED" as const, createdBy: actorEmail }));
+  const rows = fresh.slice(0, room).map((c) => ({ ...c, active: opts.active && !c.answer.includes(NEEDS_EDIT), source: "LEARNED" as const, createdBy: opts.actorEmail }));
   if (rows.length) await db.insert(qr).values(rows);
   return rows.length;
 }
