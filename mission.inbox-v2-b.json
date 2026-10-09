@@ -3,7 +3,7 @@
   "mission_id": "inbox-v2-b",
   "title": "Inbox V2-B: cột phải «ĐƠN ĐANG CHỐT» (SKU · biến thể · SL · giá · ship · tổng) + trường có cấu trúc + trạng thái đơn theo trường",
   "business_goal": "",
-  "status": "RUNNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -25,7 +25,18 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-09T16:59:56.703Z",
-  "updated_at": "2026-10-09T16:59:56.703Z",
-  "last_heartbeat": "2026-10-09T16:59:56.703Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-09T21:17:17.465Z",
+  "last_heartbeat": "2026-10-09T21:17:17.465Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "feat/inbox-v2-b",
+    "sha": "17552263d47fbc3c80e370ec7125d3816e7b12e7",
+    "at": "2026-10-09T21:17:17.465Z",
+    "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+    "title": "Inbox V2-B: cột phải «ĐƠN ĐANG CHỐT» (SKU · biến thể · SL · giá · ship · tổng) + trường có cấu trúc + trạng thái đơn theo trường",
+    "summary": "Khối ĐƠN ĐANG CHỐT + trạng thái từng trường + nút Xác nhận & tạo đơn (lõi sẵn có)",
+    "tests": [
+      "npm test TẤT CẢ KIỂM THỬ ĐẠT; typecheck + lint + build sạch; 4 đột biến đỏ"
+    ]
+  }
 }
