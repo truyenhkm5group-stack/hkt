@@ -3,7 +3,7 @@
   "mission_id": "commercial-polish-2",
   "title": "Commercial Sweep PR B: vỏ Chốt Đơn không có chữ dưới 11 px (token 12·13·14 + bài chốt) · câu an toàn của màn lỗi",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-polish2",
@@ -29,9 +29,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-08T23:03:51.844Z",
-  "updated_at": "2026-10-09T02:14:32.966Z",
+  "updated_at": "2026-10-09T02:43:09.641Z",
   "last_heartbeat": "2026-10-09T02:14:32.966Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#718 → 58761923fd952358cbf8754ade98d7514c938cf1"
+  },
   "handoff": {
     "branch": "claude/commercial-polish-2",
     "sha": "e30c16ae48e5413923c784239284b598431582d5",
