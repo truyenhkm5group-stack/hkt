@@ -3,7 +3,7 @@
   "mission_id": "pancake-counters-remaining",
   "title": "Khối Khách hàng ở trang đơn + bộ lọc đã lưu order_count/purchased_amount thôi đọc bộ đếm Pancake làm số ERP",
   "business_goal": "",
-  "status": "RUNNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -26,7 +26,18 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-09T04:59:36.240Z",
-  "updated_at": "2026-10-09T04:59:36.240Z",
-  "last_heartbeat": "2026-10-09T04:59:36.240Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-09T06:09:44.461Z",
+  "last_heartbeat": "2026-10-09T06:09:44.461Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "fix/pancake-counters-remaining",
+    "sha": "899ca02f79c824de77e6edb4de048387f0d7f6eb",
+    "at": "2026-10-09T06:09:44.461Z",
+    "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+    "title": "Khối Khách hàng ở trang đơn + bộ lọc đã lưu order_count/purchased_amount thôi đọc bộ đếm Pancake làm số ERP",
+    "summary": "Khối Khách hàng trang đơn theo ERP (customerOutcomeStats chung); field order_count/purchased_amount ghi (Pancake)",
+    "tests": [
+      "npm test TẤT CẢ KIỂM THỬ ĐẠT; typecheck + lint + build sạch; 3 đột biến đỏ"
+    ]
+  }
 }

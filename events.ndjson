@@ -1194,3 +1194,4 @@
 {"at":"2026-10-09T06:08:37.989Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"registry-reconcile-0910","detail":"docs/registry-reconcile-0910 @ 732b4424a445 · 1 lệnh kiểm thử"}
 {"at":"2026-10-09T06:09:00.485Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"registry-reconcile-0910","detail":"#730 cho docs/registry-reconcile-0910 @ 732b4424a445"}
 {"at":"2026-10-09T06:09:14.291Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#730 @ 732b4424a445 · Tài liệu: sổ 245 mission đếm bằng script (khớp 215 trên bản cũ), 33 DONE kèm run, backlog Fable 8.5, checkpoint production 50293da6; không chạm bảng điều phối thương mại."}
+{"at":"2026-10-09T06:09:44.491Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"pancake-counters-remaining","detail":"fix/pancake-counters-remaining @ 899ca02f79c8 · 1 lệnh kiểm thử"}
