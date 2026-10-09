@@ -5,8 +5,11 @@ import { getDashboardData } from "@/lib/queries/dashboard";
 import { getInventoryDecisionReport } from "@/lib/queries/inventory-decision";
 import { getModelSignalsBatch } from "@/lib/queries/model-signal";
 import { ownerDecisionAdsPeriod } from "@/lib/queries/owner-decisions";
+import { getReplenishmentPlan } from "@/lib/queries/planning";
 import { getPurchasingReport } from "@/lib/queries/purchasing";
 import { loadReturnsPage, returnsPageParams } from "@/lib/queries/returns-report-page";
+import { getStockShortage } from "@/lib/queries/stock-shortage";
+import { getWorkConfig } from "@/lib/queries/work-config";
 import { resolvePeriod } from "@/lib/search-params";
 
 /**
@@ -152,8 +155,49 @@ export function reportWarmTasks(): WarmTask[] {
   return [{ key: "reports:returns", everyMinutes: 10, run: () => loadReturnsPage(returnsPageParams({})) }];
 }
 
+/**
+ * ═══════ "VIỆC CỦA TÔI" (/work) — LÀM ẤM BỘ MÁY CÓ ĐỆM MÀ BA NGUỒN CHẬM NHẤT ĐỌC ═══════
+ *
+ * ĐO production 09/10/2026 (`perf-probe`, đệm rỗng, hai lượt): qua đúng đường trang gọi, ba nguồn chạm
+ * hạn 2,5 s mỗi nguồn (`ADAPTER_TIMEOUT_MS`) và bị in "Chưa đọc được": FULFILLMENT_EXCEPTION 2.556 ms ·
+ * ALERT 2.512 ms · ADS_DECISION 2.511 ms; `getMyWork` toàn trang 5.542 / 7.624 ms. Thời gian nằm phần
+ * lớn ở ỨNG DỤNG, không ở CSDL — tức ở các bộ máy dùng chung mà nguồn gọi vào:
+ *
+ *  · FULFILLMENT_EXCEPTION → `getFulfillmentBottleneckQueue` → `getStockShortage()` (đệm 60 s). Đo
+ *    PGlite: hàng đợi 1.239 ms khi sổ thiếu hàng nguội, **6 ms** khi sổ đã ấm — toàn bộ chi phí là nó.
+ *  · ALERT → `getActionQueue` → số ngày còn hàng → `getReplenishmentPlan()` (đệm 120 s). Production:
+ *    kế hoạch 2.113–2.206 ms trên tổng 2.180–2.604 ms của hàng đợi.
+ *  · ADS_DECISION → `getAdsDecision(30 ngày, "campaign")` — ĐÃ được mục `cockpit:ads-campaign` làm ấm
+ *    (kỳ `ownerDecisionAdsPeriod()` = đúng `resolvePeriod({ period: "30d" }, "30d")` của adapter); bài
+ *    kiểm so TẬP KHOÁ để hai nơi không lệch nhau, nên không thêm mục thứ hai ở đây.
+ *
+ * Hai hàng đợi `getFulfillmentBottleneckQueue` / `getActionQueue` CỐ Ý KHÔNG đệm (người vừa bấm "Tôi
+ * nhận" phải thấy ngay) — nên làm ấm PHẦN có đệm bên dưới chúng, đúng lời gọi MẶC ĐỊNH mà chúng gọi,
+ * và không đổi một con số nào: cùng hàm, cùng khoá, chỉ khác AI trả giá lượt tính nguội.
+ *
+ * Nhịp: chạy mỗi lượt job (4 phút). TTL của hai đệm (60 s / 120 s) ngắn hơn nhịp, nhưng `memo` còn trả
+ * số cũ NGAY tới 15 phút sau khi hết hạn rồi tự làm mới phía sau (`NGUONG_QUA_CU`, lib/cache.ts) — nên
+ * với nhịp 4 phút người mở /work không bao giờ rơi vào lượt tính nguội. Không nâng TTL: hai đệm này
+ * còn phục vụ /inventory/shortage, /inventory/planning, /alerts — đổi độ tươi của họ là đổi kết quả.
+ *
+ * CÙNG TIẾN TRÌNH: scheduler (container riêng) chỉ POST `ERP_INTERNAL_URL/api/sync/dashboard-warm`;
+ * job chạy TRONG tiến trình `next start` của erp-app — chính tiến trình dựng trang — và đệm sống ở
+ * `globalThis.__erpMemo` của tiến trình đó.
+ */
+export function workWarmTasks(): WarmTask[] {
+  return [
+    // Nguồn FULFILLMENT_EXCEPTION: sổ thiếu hàng, ĐÚNG lời gọi không tham số trong fulfillment-bottleneck.ts.
+    { key: "work:stock-shortage", run: () => getStockShortage() },
+    // Nguồn ALERT: kế hoạch đặt hàng mặc định, ĐÚNG lời gọi không tham số trong action-queue.ts.
+    { key: "work:replenishment-plan", run: () => getReplenishmentPlan() },
+    // Cấu hình hạn / phòng (một dòng `settings`, rẻ) — `collectWorkItems` đọc nó TRƯỚC mọi nguồn; làm ấm để
+    // lượt mở /work sau một lượt job không tự tính một khoá có đệm nào (bài kiểm so tập khoá, không ngoại lệ).
+    { key: "work:config", run: () => getWorkConfig() },
+  ];
+}
+
 export async function warmDashboard(): Promise<WarmResult> {
-  return runWarms([...dashboardWarmTasks(), ...cockpitWarmTasks(), ...reportWarmTasks()]);
+  return runWarms([...dashboardWarmTasks(), ...cockpitWarmTasks(), ...workWarmTasks(), ...reportWarmTasks()]);
 }
 
 /** Một dòng cho `sync_runs.detail`: mỗi mục kèm thời gian, mục hỏng kèm câu lỗi. */

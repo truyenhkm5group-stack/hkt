@@ -354,7 +354,7 @@ import { testCompanyOsSignalBatchDb, testCompanyOsSignalBatchSource } from "./co
 import { testCompanyOsStockFeedbackDb, testCompanyOsStockFeedbackPure } from "./company-os-stock-feedback.test";
 import { testCompanyOsOwnerDigestDb, testCompanyOsOwnerDigestPure } from "./company-os-owner-digest.test";
 import { testCompanyOsEarlyTopicDb, testCompanyOsEarlyTopicPure } from "./company-os-early-topic.test";
-import { testCompanyOsWarmDb, testCompanyOsWarmPure } from "./company-os-warm.test";
+import { testCompanyOsWarmDb, testCompanyOsWarmPure, testWorkWarmDb } from "./company-os-warm.test";
 import { testCompanyOsSummaryDb, testCompanyOsSummaryPure } from "./company-os-summary.test";
 import { testOrgSummaryDb, testOrgSummaryPure } from "./org-summary.test";
 import { testOrgAiCutoverApply, testOrgAiCutoverPure } from "./org-ai-cutover.test";
@@ -2261,6 +2261,7 @@ async function main() {
   // Company OS · Agent W: job giữ ấm phủ khoá đệm của "Cần anh quyết" (so TẬP KHOÁ, không gõ tên) + ops company-os-summary (mã `cos-w-` / `COSW`, tự dọn, trả lại `owner.digest`).
   await testCompanyOsWarmPure();
   await testCompanyOsWarmDb();
+  await testWorkWarmDb();
   testCompanyOsSummaryPure();
   await testCompanyOsSummaryDb(db);
   // ops org-summary: tóm tắt MỘT tổ chức khách, chỉ đọc, không lộ dữ liệu người — tổ chức THẬT `os-sum` (tự cấp, tự dọn).

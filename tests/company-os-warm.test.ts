@@ -5,7 +5,11 @@ import type { SessionUser } from "@/lib/auth/session";
 import { clearMemo, memoKeys } from "@/lib/cache";
 import { getModelSignalsBatch } from "@/lib/queries/model-signal";
 import { getOwnerDecisionQueue } from "@/lib/queries/owner-decisions";
-import { cockpitWarmTasks, reportWarmTasks, runWarms, warmCockpit, warmDashboard, warmDetail, type WarmTask } from "@/lib/queries/warm";
+import { cockpitWarmTasks, reportWarmTasks, runWarms, warmCockpit, warmDashboard, warmDetail, workWarmTasks, type WarmTask } from "@/lib/queries/warm";
+import { collectWorkItems } from "@/lib/queries/work-adapters";
+import { getStockShortage } from "@/lib/queries/stock-shortage";
+import { getReplenishmentPlan } from "@/lib/queries/planning";
+import type { WorkSource } from "@/lib/constants/work-sources";
 import { loadReturnsPage, returnsPageParams } from "@/lib/queries/returns-report-page";
 import { getReturnReasonReport } from "@/lib/queries/return-reason-report";
 import { resolvePeriod } from "@/lib/search-params";
@@ -203,4 +207,61 @@ export async function testCompanyOsWarmDb() {
   assert.equal(memoKeys().filter((k) => k.startsWith("return-reason-report:")).length, sauLoc + 1, "mốc lọc phải nằm trong khoá đệm");
   clearMemo();
   console.log(`✓ Company OS · W: job giữ ấm phủ ${trangDoc.length} khoá đệm trang chủ "Cần anh quyết" đọc (0 khoá thiếu) + tín hiệu mẫu kỳ mặc định · /reports/returns mặc định: 0 khoá thiếu`);
+}
+
+/**
+ * ═══════════ /work — JOB GIỮ ẤM PHỦ ĐÚNG KHOÁ ĐỆM MÀ BA NGUỒN CHẬM NHẤT ĐỌC ═══════════
+ *
+ * Production 09/10/2026 (perf-probe, đệm rỗng): FULFILLMENT_EXCEPTION · ALERT · ADS_DECISION đều chạm hạn
+ * 2,5 s mỗi nguồn. Ba nguồn ấy đọc ba bộ máy có đệm — sổ thiếu hàng, kế hoạch đặt hàng, quyết định quảng
+ * cáo 30 ngày — qua hai hàng đợi CỐ Ý không đệm. Khoá:
+ *  1. Đường gọi trong mã nguồn là lời gọi MẶC ĐỊNH (không tham số) — đúng lời gọi job làm ấm.
+ *  2. Tập khoá có đệm mà ba nguồn đọc khi nguội NẰM TRONG tập khoá job để lại (so tập khoá, không gõ tên).
+ *  3. Sau một lượt job, chạy lại ba nguồn KHÔNG sinh khoá mới (mọi lượt đọc trúng đệm).
+ *  4. KẾT QUẢ KHÔNG ĐỔI: việc của ba nguồn khi đệm nguội = khi đệm đã ấm (cùng khoá, cùng tiền, cùng trạng thái).
+ */
+const NGUON_CHAM: WorkSource[] = ["FULFILLMENT_EXCEPTION", "ALERT", "COD_EXCEPTION", "INVENTORY_EXCEPTION", "RETURN_INSPECTION", "ADS_DECISION"];
+
+export async function testWorkWarmDb() {
+  // (1) Mã nguồn: hai hàng đợi gọi đúng lời gọi mặc định mà job làm ấm.
+  const boChuThich = (f: string) => readFileSync(path.join(process.cwd(), f), "utf8").replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, "");
+  assert.ok(/await getStockShortage\(\)/.test(boChuThich("lib/queries/fulfillment-bottleneck.ts")), "hàng đợi nút thắt phải đọc sổ thiếu hàng bằng lời gọi MẶC ĐỊNH (khoá đệm job làm ấm)");
+  assert.ok(/await getReplenishmentPlan\(\)/.test(boChuThich("lib/queries/action-queue.ts")), "hàng đợi cảnh báo phải đọc kế hoạch bằng lời gọi MẶC ĐỊNH (khoá đệm job làm ấm)");
+  assert.ok(/getAdsDecision\(period, "campaign"\)/.test(boChuThich("lib/queries/work-adapters.ts")), "nguồn ADS_DECISION đọc quyết định chiều chiến dịch");
+  assert.ok(!/ADAPTER_TIMEOUT_MS = (?!2_500;)/.test(boChuThich("lib/queries/work-adapters.ts")), "không nâng hạn giờ của từng nguồn để che chỗ chậm");
+
+  // (2) Nguội: tập khoá có đệm mà ba nguồn chậm đọc.
+  clearMemo();
+  const nguoi = await collectWorkItems({ sources: NGUON_CHAM });
+  assert.deepEqual(nguoi.failed, [], `ba nguồn chậm phải đọc được trên CSDL kiểm thử: ${JSON.stringify(nguoi.failed)}`);
+  const khoaDoc = memoKeys();
+  assert.ok(khoaDoc.some((k) => k.startsWith("adsDecision:") && k.endsWith(":campaign")), "nguồn ADS_DECISION đọc đệm quyết định quảng cáo chiều chiến dịch");
+  assert.ok(khoaDoc.includes("work-config"), "phép chiếu đọc cấu hình hạn / phòng qua đệm");
+
+  // (3) Job: chỉ các mục buồng lái + /work (đúng các mục /work dựa vào), rồi so tập khoá.
+  clearMemo();
+  const am = await runWarms([...cockpitWarmTasks(), ...workWarmTasks()]);
+  assert.deepEqual(am.failed, [], `làm ấm /work hỏng: ${JSON.stringify(am.failed)}`);
+  const daAm = new Set(memoKeys());
+  for (const k of ["getStockShortage:", "getReplenishmentPlan:mac-dinh:tinh-hoan", "work-config"]) assert.ok([...daAm].some((x) => x.startsWith(k)), `job phải để lại khoá ${k}`);
+  const thieu = khoaDoc.filter((k) => !daAm.has(k));
+  assert.deepEqual(thieu, [], `khoá /work đọc mà job KHÔNG làm ấm (người mở /work sẽ tự tính nguội): ${thieu.join(", ")}`);
+
+  // Lời gọi mặc định của hai bộ máy (đúng lời gọi trong hàng đợi) sau job: trúng đệm, không khoá mới.
+  await getStockShortage();
+  await getReplenishmentPlan();
+  const am2 = await collectWorkItems({ sources: NGUON_CHAM });
+  const moi = memoKeys().filter((k) => !daAm.has(k));
+  assert.deepEqual(moi, [], `sau job, /work vẫn sinh khoá đệm mới: ${moi.join(", ")}`);
+
+  // (4) Kết quả không đổi: cùng việc, cùng tiền, cùng trạng thái — làm ấm chỉ đổi AI trả giá lượt tính.
+  const anh = (items: typeof nguoi.items) =>
+    items.map((i) => ({ key: i.key, sourceType: i.sourceType, status: i.status, money: i.money })).sort((a, b) => a.key.localeCompare(b.key));
+  assert.deepEqual(anh(am2.items), anh(nguoi.items), "việc của ba nguồn khi đệm ấm phải y hệt khi đệm nguội");
+
+  // (5) Job thật mang các mục /work.
+  const tenMuc = (await warmDashboard()).timings.map((t) => t.key);
+  for (const k of workWarmTasks().map((t) => t.key)) assert.ok(tenMuc.includes(k), `warmDashboard thiếu mục ${k}`);
+  clearMemo();
+  console.log(`✓ /work giữ ấm: ${khoaDoc.length} khoá đệm ba nguồn chậm đọc (FULFILLMENT · ALERT · ADS) đều do dashboard-warm để lại, 0 khoá mới sau job · ${nguoi.items.length} việc y hệt nguội ↔ ấm`);
 }
