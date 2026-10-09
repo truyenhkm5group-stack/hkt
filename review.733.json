@@ -1,0 +1,8 @@
+{
+  "pr": 733,
+  "sha": "082fa0a2bac7859caca0c2bea4bb59bdcbf7a44e",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-09T07:27:20.430Z",
+  "note": "Review Integration Lead: gọi ĐÚNG hàm của page.tsx (bài quét khoá chống trôi); ERP_READ_ONLY + platformReadOnlyConfirmed + handle getDbForInspection chỉ đọc; danh tính thu hẹp (bỏ reply/send, ADMIN⇒VIEWER, kiểm lại can()) — không bao giờ nới; công khai che org#i, không PII; không ngưỡng đạt/hỏng (luật 38). Lưu ý: gắn handle vào globalThis.__erpDb.orgs là chạm nội bộ db/index.ts — chỉ trong tiến tr"
+}
