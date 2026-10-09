@@ -46,6 +46,7 @@ import { testPayrollAuthorization } from "./payroll-authorization.test";
 import { testCodPaymentStatement, testCodStatusMeaning, testStatementDedupAcrossFilenames, testStatementIdentityByCash, testVtpCodPaymentColumn, testStatementDetailMatching, testStatementLedgerOrderIndependent, testVtpFileDetection, testVtpImportLimits, testVtpImportTruth, testVtpStatementFromMail } from "./vtp-import-truth.test";
 import { testVtpHealth } from "./vtp-health.test";
 import { testVtpCapability } from "./vtp-capability.test";
+import { testVtpEditCodGuardDb, testVtpEditDefaultsPure } from "./vtp-edit-cod.test";
 import { testCareWorkbench } from "./care-workbench.test";
 import { testCareClosedAssign } from "./care-closed-assign.test";
 import { testCareAutoAssign } from "./care-auto-assign.test";
@@ -2356,6 +2357,9 @@ async function main() {
   await testLogisticsPerformance(db);
   await testVtpHealth(db);
   await testVtpCapability(db);
+  // Sửa đơn VTP: tự dọn mọi dòng đã gieo (đơn, vận đơn, bảng kê, nhật ký) nên không đổi tổng bài nào khác.
+  testVtpEditDefaultsPure();
+  await testVtpEditCodGuardDb(db);
   await testCareWorkbench(db);
   await testCareClosedAssign(db);
   await testCareAutoAssign(db);

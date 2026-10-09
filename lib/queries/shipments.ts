@@ -2,7 +2,7 @@ import { listKey, memo } from "@/lib/cache";
 import { and, count, desc, eq, exists, gte, ilike, inArray, isNotNull, isNull, lte, or, sql, type SQL } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { getDb, schema } from "@/db";
-import { ORDER_OUTCOME, SHIPMENT_DELIVERED, SHIPMENT_RETURNED } from "@/lib/queries/return-rate";
+import { HAS_CASH_EVIDENCE, ORDER_OUTCOME, SHIPMENT_DELIVERED, SHIPMENT_RETURNED } from "@/lib/queries/return-rate";
 import type { CodStatus, ShipmentStage } from "@/db/schema";
 import { COD_STATUS_LABEL, SHIPMENT_STAGE_LABEL, SHIPMENT_STAGE_ORDER } from "@/lib/constants/viettelpost";
 import { CARE_STATUS_LABEL } from "@/lib/constants/care";
@@ -390,6 +390,21 @@ export async function outcomeOfShipment(id: string) {
     .where(eq(schema.shipments.id, id))
     .limit(1);
   return row?.outcome ?? null;
+}
+
+/**
+ * Vận đơn đã có BẰNG CHỨNG TIỀN chưa — đúng mệnh đề `HAS_CASH_EVIDENCE` mà `ORDER_OUTCOME` dùng
+ * (số thực thu > 0, hoặc có dòng chi tiết bảng kê phần COD). Trang chi tiết dùng nó để quyết in
+ * «Đã thu» bằng số hay bằng chữ «Chưa xác minh» (AGENTS luật 42) — không dựng luật thứ hai.
+ */
+export async function shipmentHasCashEvidence(id: string): Promise<boolean> {
+  const db = await getDb();
+  const [row] = await db
+    .select({ has: sql<boolean>`${HAS_CASH_EVIDENCE}` })
+    .from(schema.shipments)
+    .where(eq(schema.shipments.id, id))
+    .limit(1);
+  return row?.has === true;
 }
 
 export async function getShipmentDetail(id: string) {

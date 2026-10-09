@@ -17,7 +17,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { PANCAKE_PARTNER_STATUS } from "@/lib/constants/pancake";
 import { COD_STATUS_LABEL, getViettelPostTrackingUrl, VTP_REASON_CODES } from "@/lib/constants/viettelpost";
 import { formatDateTime, formatNumber, formatTimeAgo } from "@/lib/format";
-import { getShipmentDetail, outcomeOfShipment } from "@/lib/queries/shipments";
+import { getShipmentDetail, outcomeOfShipment, shipmentHasCashEvidence } from "@/lib/queries/shipments";
+import { collectedCodShown, COD_UNVERIFIED_TEXT, vtpEditDefaults } from "@/lib/constants/shipment-edit";
 import { reasonsForShipments } from "@/lib/queries/return-reason";
 import { getShipmentDwell } from "@/lib/queries/shipment-status-age";
 import { getShipmentTimeline } from "@/lib/queries/shipment-timeline";
@@ -26,9 +27,14 @@ import { DWELL_BASIS_LABEL, DWELL_LEVEL_LABEL, DWELL_LEVEL_TONE, DWELL_UNRATED_H
 import { ageLabel } from "@/lib/constants/action-queue";
 import { MISSING_TEXT } from "@/lib/format";
 import { cn } from "@/lib/utils";
-import { can, requirePermission } from "@/lib/auth/session";
+import { can, getCurrentUser, requirePermission } from "@/lib/auth/session";
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }) {
+  // QUYỀN TRƯỚC, ĐỌC SAU: tiêu đề tab mang mã vận đơn — người không có quyền xem vận đơn chỉ nhận
+  // tiêu đề chung, và CSDL không bị đọc thay cho họ. Không `requirePermission` ở đây: chuyển hướng
+  // là việc của trang, metadata chỉ cần im lặng.
+  const user = await getCurrentUser();
+  if (!user || !can(user, "shipments:view")) return { title: "Vận đơn" };
   const { id } = await params;
   const shipment = await getShipmentDetail(id);
   return { title: `Vận đơn ${shipment?.vtpOrderNumber ?? shipment?.trackingCode ?? id}` };
@@ -50,7 +56,9 @@ export default async function ShipmentDetailPage({ params }: { params: Promise<{
     `stage` là chặng của hãng vận, và `RETURNED_BY_RULE` (hoàn theo luật tiền) không có mặt ở đó
     chút nào. Đặc tả mục 6 gộp `RETURNED` và `RETURNED_BY_RULE` là hoàn.
   */
-  const [outcome, dwell, nhatKy] = await Promise.all([outcomeOfShipment(s.id), getShipmentDwell(s.id), getShipmentTimeline(s.id)]);
+  const [outcome, dwell, nhatKy, hasCashEvidence] = await Promise.all([outcomeOfShipment(s.id), getShipmentDwell(s.id), getShipmentTimeline(s.id), shipmentHasCashEvidence(s.id)]);
+  // «Đã thu» chỉ in số khi có bằng chứng tiền — `cod_collected` mặc định 0 nên 0 trần là CHƯA BIẾT.
+  const codCollectedShown = collectedCodShown(s.codCollected, hasCashEvidence);
   const daHoan = outcome === "RETURNED" || outcome === "RETURNED_BY_RULE";
   const lyDo = daHoan ? (await reasonsForShipments([s.id])).get(s.id) : undefined;
   const number = s.vtpOrderNumber ?? s.trackingCode;
@@ -88,8 +96,9 @@ export default async function ShipmentDetailPage({ params }: { params: Promise<{
         actions={
           <>
             {isVtp ? <SyncOrderButton orderId={s.orderId ?? undefined} shipmentId={s.id} label="Cập nhật trạng thái" /> : null}
-            {isVtp ? <RepushButton shipmentId={s.id} /> : null}
-            {isVtp && canManage ? <VtpActions shipmentId={s.id} stage={s.stage} vtpStatus={s.vtpStatus} rawStatus={s.vtpStatusName} tracking={number} trackingCapability={s.trackingCapability} receiver={{ name: s.order?.shipFullName || s.order?.billFullName || "", phone: s.order?.shipPhone || s.order?.billPhone || "", address: s.order?.shipAddress || "", cod: s.codAmount || s.order?.cod || 0, note: s.order?.note || "" }} /> : null}
+            {/* API đã chặn 403 khi thiếu `shipments:manage`; nút cũng ẩn để không mời người ta bấm vào một lần từ chối. */}
+            {isVtp && canManage ? <RepushButton shipmentId={s.id} /> : null}
+            {isVtp && canManage ? <VtpActions shipmentId={s.id} stage={s.stage} vtpStatus={s.vtpStatus} rawStatus={s.vtpStatusName} tracking={number} trackingCapability={s.trackingCapability} receiver={vtpEditDefaults(s)} /> : null}
             {vtpUrl ? (
               <Button asChild variant="outline" size="sm">
                 <a href={vtpUrl} target="_blank" rel="noreferrer">
@@ -335,7 +344,7 @@ export default async function ShipmentDetailPage({ params }: { params: Promise<{
               columns={2}
               items={[
                 { label: "Tiền thu hộ", value: <Money value={s.codAmount} className="font-bold" /> },
-                { label: "Đã thu", value: <Money value={s.codCollected} /> },
+                { label: "Đã thu", value: codCollectedShown === null ? <span className="text-muted-foreground" title="Chưa có số thực thu hay dòng bảng kê COD nào cho vận đơn này — không phải 0 ₫">{COD_UNVERIFIED_TEXT}</span> : <Money value={codCollectedShown} /> },
                 { label: "Phí COD", value: <Money value={s.codFee} /> },
                 { label: "Phí vận chuyển", value: <Money value={s.shippingFee} /> },
                 { label: "Trạng thái COD", value: COD_STATUS_LABEL[s.codStatus] },
