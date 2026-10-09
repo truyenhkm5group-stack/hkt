@@ -1,9 +1,23 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { after } from "next/server";
 import { can, requireUser } from "@/lib/auth/session";
+import { bindOrganization } from "@/lib/platform/background";
 import { loadSalesChatbotConfig } from "@/lib/sales-chatbot/engine";
-import { addQuickReplyImages, deleteQuickReply, quickReplyByKeyword, removeQuickReplyImage, saveQuickReply, saveQuickReplySettings, setQuickReplyActive } from "@/lib/sales-chatbot/quick-replies";
+import {
+  addQuickReplyImages,
+  bulkQuickReplies,
+  deleteQuickReply,
+  gate,
+  quickReplyByKeyword,
+  removeQuickReplyImage,
+  saveQuickReply,
+  saveQuickReplySettings,
+  setQuickReplyActive,
+  type BulkQuickReplyOp,
+} from "@/lib/sales-chatbot/quick-replies";
+import { autoLearnQuickReplies } from "@/lib/sales-chatbot/quick-replies-learn";
 import { QUICK_REPLY_LIMITS } from "@/lib/sales-chatbot/quick-replies-shared";
 import { SALES_CHATBOT_MANAGE } from "@/lib/sales-chatbot/settings";
 
@@ -66,6 +80,40 @@ export async function saveQuickReplySettingsAction(input: { enabled: boolean; ai
   if ("error" in r) return r;
   revalidatePath(PATH);
   return { ok: true, message: "Đã lưu cách trả lời" };
+}
+
+/** Bật · tắt · xoá nhiều câu mẫu một lần («Chọn tất cả» trên màn hình quản lý). */
+export async function bulkQuickRepliesAction(ids: string[], op: BulkQuickReplyOp): Promise<Result> {
+  const user = await requireUser();
+  if (op !== "ACTIVATE" && op !== "DEACTIVATE" && op !== "DELETE") return { error: "Thao tác không hợp lệ." };
+  const r = await bulkQuickReplies(user, Array.isArray(ids) ? ids.map(String) : [], op);
+  if ("error" in r) return r;
+  revalidatePath(PATH);
+  const verb = op === "ACTIVATE" ? "Đã bật" : op === "DEACTIVATE" ? "Đã tắt" : "Đã xoá";
+  return { ok: true, message: `${verb} ${r.changed} câu mẫu${r.skipped ? ` · bỏ qua ${r.skipped} câu còn «[giá lấy từ ERP]» (sửa giá rồi mới bật)` : ""}` };
+}
+
+/** Công tắc TỰ NẠP câu mẫu mỗi ngày (dùng AI) + tự bật câu mẫu AI soạn. */
+export async function saveQuickReplyAutoLearnAction(input: { autoLearn: boolean; autoActivate: boolean }): Promise<Result> {
+  const user = await requireUser();
+  const r = await saveQuickReplySettings(user, { autoLearn: Boolean(input?.autoLearn), autoActivate: Boolean(input?.autoActivate) });
+  if ("error" in r) return r;
+  revalidatePath(PATH);
+  return { ok: true, message: input?.autoLearn ? "Đã bật tự nạp câu mẫu" : "Đã tắt tự nạp câu mẫu" };
+}
+
+/** «Nạp ngay»: kiểm quyền rồi chạy một lượt tự nạp SAU phản hồi, trong đúng ngữ cảnh tổ chức. */
+export async function autoLearnQuickRepliesNowAction(): Promise<Result> {
+  const user = await requireUser();
+  const g = await gate(user);
+  if (!g.ok) return { error: g.error };
+  after(
+    await bindOrganization(async () => {
+      await autoLearnQuickReplies({ force: true, actor: { id: user.id, email: user.email } });
+      revalidatePath(PATH);
+    }),
+  );
+  return { ok: true, message: "Đang nạp câu mẫu từ câu khách hỏi gần đây — tải lại trang sau khoảng một phút." };
 }
 
 /** Chọn (hoặc bỏ) câu mẫu bot gửi ở bước UPSELL / CROSS-SELL của quy trình bán. */

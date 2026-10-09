@@ -78,6 +78,7 @@ import { runSalesFollowups } from "@/lib/sales-chatbot/followup";
 import { resumeInboxHistory } from "@/lib/sales-chatbot/history";
 import { sendReorderDigest } from "@/lib/reorder/digest";
 import { learnLessons } from "@/lib/sales-chatbot/lessons";
+import { autoLearnQuickReplies } from "@/lib/sales-chatbot/quick-replies-learn";
 import { refreshConversationLevels } from "@/lib/sales-chatbot/levels";
 import { sendNewOrderAlerts } from "@/lib/sales-chatbot/new-order-alert";
 import { runFanpageOrderSync } from "@/lib/sales-chatbot/order-sync";
@@ -838,6 +839,9 @@ export const JOB_DEFINITIONS: Record<string, JobDefinition> = {
         const rd = await sendReorderDigest();
         // Bot TỰ HỌC từ hội thoại đã xong (lib/sales-chatbot/lessons.ts) — chỉ thật sự gọi AI mỗi 6 giờ khi có đủ hội thoại mới. Không ném.
         const ls = await learnLessons();
+        // Tự nạp CÂU TRẢ LỜI MẪU từ câu khách hỏi mà chưa câu mẫu nào khớp (lib/sales-chatbot/quick-replies-learn.ts) — công tắc
+        // riêng, mặc định tắt, gọi AI mỗi 24 giờ. Không ném.
+        const ql = await autoLearnQuickReplies().catch((e: unknown) => ({ status: "ERROR" as const, note: e instanceof Error ? e.message : String(e) }));
         // Đơn «Mới» đủ SĐT + địa chỉ + hàng mà chưa xác nhận ⇒ một tin vào nhóm báo đơn (lib/sales-chatbot/new-order-alert.ts). Không ném.
         const no = await sendNewOrderAlerts();
         // Level khách + SĐT của hội thoại (lọc hộp thư · kịch bản theo level) — hội thoại có hoạt động mới + lấp dần. Không ném.
@@ -849,7 +853,7 @@ export const JOB_DEFINITIONS: Record<string, JobDefinition> = {
         ctx.summary.skipped = r.stopped + r.deferred;
         if (r.errors) ctx.summary.warning = r.detail.filter((d) => /lỗi|:/.test(d)).slice(0, 5).join(" · ").slice(0, 500);
         const cuText = (rq.detail ? `${rq.detail} · ` : "") + (cu.threads ? `quét lại ${cu.threads} hội thoại (nhận ${cu.queued} · mở lại ${cu.reopened} · trả lời ${cu.replies}) — ${cu.detail.slice(0, 3).join(" · ")} · ` : "") + (ms ? `Messenger: trả lời bù ${ms} hội thoại · ` : "");
-        const rdText = (rd.sent ? `tin sáng khách đến hạn mua lại: ${rd.due} khách · ` : "") + (ls.status === "NOT_DUE" ? "" : `tự học: ${ls.note} · `) + (no.sent ? `báo nhóm ${no.sent} đơn mới chưa xác nhận · ` : "") + (lv.refreshed || lv.errors ? `level khách: ${lv.refreshed} hội thoại${lv.errors ? ` · lỗi ${lv.errors}` : ""} · ` : "") + (hs ? `${hs} · ` : "");
+        const rdText = (rd.sent ? `tin sáng khách đến hạn mua lại: ${rd.due} khách · ` : "") + (ls.status === "NOT_DUE" ? "" : `tự học: ${ls.note} · `) + (ql.status === "NOT_DUE" ? "" : `câu mẫu: ${ql.note} · `) + (no.sent ? `báo nhóm ${no.sent} đơn mới chưa xác nhận · ` : "") + (lv.refreshed || lv.errors ? `level khách: ${lv.refreshed} hội thoại${lv.errors ? ` · lỗi ${lv.errors}` : ""} · ` : "") + (hs ? `${hs} · ` : "");
         const osText = os.checked ? `ghi đơn: đọc ${os.checked} hội thoại · lên ${os.created} đơn · sửa ${os.changes} · bỏ qua ${os.skipped} · lỗi ${os.errors}${os.detail.length ? ` (${os.detail.slice(0, 3).join(" · ")})` : ""} · ` : "";
         ctx.summary.detail = `${osText}${rdText}${cuText}${r.due} tới mốc · gửi ${r.sent} · dừng ${r.stopped} · hoãn ${r.deferred} · lỗi ${r.errors}${r.detail.length ? ` — ${r.detail.slice(0, 6).join(" · ")}` : ""}`.slice(0, 900);
         return r;

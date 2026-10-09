@@ -19,7 +19,8 @@ import { foldVi } from "@/lib/sales-chatbot/text";
 export const QUICK_REPLY_SETTING_KEY = "ai.salesChatbot.quickReplies";
 
 export const QUICK_REPLY_LIMITS = {
-  entries: 80,
+  /** 09/10/2026: 80 ⇒ 300 — chủ shop HSLC muốn nạp liên tục câu mẫu để khách hỏi trúng câu có sẵn thì không tốn token. */
+  entries: 300,
   titleChars: 80,
   triggers: 20,
   triggerChars: 120,
@@ -31,12 +32,40 @@ export const QUICK_REPLY_LIMITS = {
   /** Số câu mẫu tối đa đưa vào lời gọi AI đọc hiểu. */
   aiCandidates: 60,
   /** Gợi ý AI rút ra từ hội thoại cũ mỗi lượt học. */
-  learnedMax: 15,
+  learnedMax: 30,
+  /** Một thao tác hàng loạt («Chọn tất cả») tối đa chừng này câu — bằng trần câu mẫu. */
+  bulk: 300,
 } as const;
 
-/** `upsellReplyId` = câu mẫu (kèm ảnh menu) bot gửi ở bước UPSELL / CROSS-SELL của quy trình bán — `null` khi chưa chọn. */
-export type QuickReplySettings = { enabled: boolean; aiMatch: boolean; upsellReplyId: string | null };
-export const DEFAULT_QUICK_REPLY_SETTINGS: QuickReplySettings = { enabled: true, aiMatch: true, upsellReplyId: null };
+/**
+ * TỰ NẠP CÂU MẪU (09/10/2026): mỗi `everyMs`, gom câu khách hỏi trong `lookbackDays` ngày mà KHÔNG câu mẫu đang bật nào
+ * khớp chữ (tức là mỗi câu đó đã tốn một lượt AI), rồi MỘT lời gọi AI soạn câu mẫu mới (TẮT, chờ người duyệt — trừ khi shop
+ * bật «tự bật») và thêm cách hỏi mới vào câu mẫu đã có. Dưới `minQuestions` câu thì không gọi AI.
+ */
+export const QUICK_REPLY_AUTO_LEARN = {
+  everyMs: 24 * 3_600_000,
+  lookbackDays: 14,
+  minQuestions: 5,
+  /** Câu khách tối đa đưa vào lời gọi AI (đã gộp câu trùng). */
+  maxQuestions: 150,
+  /** Câu mẫu mới tối đa mỗi lượt. */
+  maxNew: 12,
+  /** Cách hỏi mới tối đa thêm vào MỘT câu mẫu đã có mỗi lượt. */
+  maxExtendPerEntry: 5,
+  /** Mẫu mã đưa vào lời gọi để AI viết `{{giá:SKU}}` đúng mã. */
+  maxSkus: 80,
+  /** Lượt RUNNING cũ hơn chừng này coi như đã chết (máy chủ khởi động lại giữa chừng). */
+  staleMs: 15 * 60_000,
+} as const;
+export const QUICK_REPLY_AUTO_LEARN_RUN_KEY = "ai.salesChatbot.quickReplies.autoLearnRun";
+
+/**
+ * `upsellReplyId` = câu mẫu (kèm ảnh menu) bot gửi ở bước UPSELL / CROSS-SELL của quy trình bán — `null` khi chưa chọn.
+ * `autoLearn` = tự nạp câu mẫu mỗi ngày (dùng AI, MẶC ĐỊNH TẮT). `autoActivate` = câu mẫu tự nạp được BẬT NGAY (mặc định
+ * tắt: nằm chờ người duyệt); câu còn «[giá lấy từ ERP]» không bao giờ tự bật.
+ */
+export type QuickReplySettings = { enabled: boolean; aiMatch: boolean; upsellReplyId: string | null; autoLearn: boolean; autoActivate: boolean };
+export const DEFAULT_QUICK_REPLY_SETTINGS: QuickReplySettings = { enabled: true, aiMatch: true, upsellReplyId: null, autoLearn: false, autoActivate: false };
 
 export function parseQuickReplySettings(v: unknown): QuickReplySettings {
   const o = (v && typeof v === "object" ? v : {}) as Partial<Record<keyof QuickReplySettings, unknown>>;
@@ -44,7 +73,19 @@ export function parseQuickReplySettings(v: unknown): QuickReplySettings {
     enabled: typeof o.enabled === "boolean" ? o.enabled : DEFAULT_QUICK_REPLY_SETTINGS.enabled,
     aiMatch: typeof o.aiMatch === "boolean" ? o.aiMatch : DEFAULT_QUICK_REPLY_SETTINGS.aiMatch,
     upsellReplyId: typeof o.upsellReplyId === "string" && o.upsellReplyId.trim() ? o.upsellReplyId.trim() : null,
+    autoLearn: typeof o.autoLearn === "boolean" ? o.autoLearn : DEFAULT_QUICK_REPLY_SETTINGS.autoLearn,
+    autoActivate: typeof o.autoActivate === "boolean" ? o.autoActivate : DEFAULT_QUICK_REPLY_SETTINGS.autoActivate,
   };
+}
+
+/** Kết quả lượt tự nạp gần nhất (màn hình quản lý in ra). */
+export type QuickReplyAutoLearnRun = { at: string; status: "RUNNING" | "OK" | "SKIPPED" | "ERROR"; note: string; questions: number; added: number; extended: number };
+
+export function parseAutoLearnRun(v: unknown): QuickReplyAutoLearnRun | null {
+  const o = (v && typeof v === "object" ? v : null) as Partial<Record<keyof QuickReplyAutoLearnRun, unknown>> | null;
+  if (!o || typeof o.at !== "string" || !["RUNNING", "OK", "SKIPPED", "ERROR"].includes(String(o.status))) return null;
+  const n = (x: unknown) => (typeof x === "number" && Number.isFinite(x) ? x : 0);
+  return { at: o.at, status: o.status as QuickReplyAutoLearnRun["status"], note: typeof o.note === "string" ? o.note : "", questions: n(o.questions), added: n(o.added), extended: n(o.extended) };
 }
 
 export type QuickReplyEntry = { id: string; title: string; triggers: readonly string[]; answer: string };
@@ -93,6 +134,102 @@ export function matchQuickReplyByKeyword(text: string, entries: readonly QuickRe
   if (top.length === 1) return { kind: "MATCH", entry: top[0].entry, trigger: top[0].trigger };
   if (top.length > 1) return { kind: "AMBIGUOUS", entries: top.map((x) => x.entry) };
   return { kind: "NONE" };
+}
+
+/**
+ * Xếp câu mẫu theo độ GẦN với tin khách (số từ chung với tên + cách hỏi, bỏ dấu) — để bước AI đọc hiểu nhận đúng các câu mẫu
+ * đáng xét khi shop có nhiều hơn `limit` câu. Bằng điểm ⇒ giữ thứ tự vào (dùng nhiều trước). HÀM THUẦN.
+ */
+export function rankQuickReplies(text: string, entries: readonly QuickReplyEntry[], limit: number): QuickReplyEntry[] {
+  if (entries.length <= limit) return [...entries];
+  const words = new Set(foldVi(text).split(" ").filter((w) => w.length > 1));
+  const scored = entries.map((e, i) => {
+    const bag = new Set(foldVi([e.title, ...e.triggers].join(" ")).split(" "));
+    let score = 0;
+    for (const w of words) if (bag.has(w)) score += 1;
+    return { e, i, score };
+  });
+  scored.sort((a, b) => b.score - a.score || a.i - b.i);
+  return scored.slice(0, limit).map((x) => x.e);
+}
+
+/** Từ đệm khách hay gõ — bỏ khi gộp câu trùng («giá chả cá ạ» = «giá chả cá shop ơi»). */
+const FILLER = new Set(["a", "ad", "ak", "ah", "shop", "sop", "oi", "nhe", "nha", "vay", "the", "ha", "z", "e", "em", "chi", "anh", "ban", "minh", "ac", "nhi"]);
+
+export type FrequentQuestion = { key: string; samples: string[]; threads: number };
+
+/**
+ * Câu khách hỏi mà KHÔNG câu mẫu nào khớp chữ — ứng viên cho câu mẫu mới. Bỏ câu đặt hàng (SĐT, «chốt»…), câu nhiều dòng,
+ * câu có liên kết, câu một từ, câu quá dài; gộp câu trùng sau khi bỏ dấu + từ đệm; đếm số HỘI THOẠI khác nhau (một khách hỏi
+ * năm lần vẫn là một). Xếp hỏi nhiều trước. HÀM THUẦN.
+ */
+export function mineUnansweredQuestions(rows: readonly { text: string; thread: string }[], entries: readonly QuickReplyEntry[], max: number): FrequentQuestion[] {
+  const groups = new Map<string, { samples: string[]; threads: Set<string> }>();
+  for (const r of rows) {
+    const text = r.text.trim();
+    if (!text || isMultiPart(text) || looksLikeOrdering(text) || /https?:\/\//i.test(text)) continue;
+    const words = foldVi(text).split(" ").filter(Boolean);
+    if (words.length < 2 || words.length > QUICK_REPLY_LIMITS.maxMessageWords) continue;
+    if (matchQuickReplyByKeyword(text, entries).kind === "MATCH") continue;
+    const key = words.filter((w) => !FILLER.has(w)).join(" ");
+    if (!key.includes(" ")) continue;
+    const g = groups.get(key) ?? { samples: [], threads: new Set<string>() };
+    const sample = text.slice(0, QUICK_REPLY_LIMITS.triggerChars);
+    if (g.samples.length < 3 && !g.samples.includes(sample)) g.samples.push(sample);
+    g.threads.add(r.thread);
+    groups.set(key, g);
+  }
+  return [...groups.entries()]
+    .map(([key, g]) => ({ key, samples: g.samples, threads: g.threads.size }))
+    .sort((a, b) => b.threads - a.threads || a.key.localeCompare(b.key))
+    .slice(0, max);
+}
+
+export type AutoLearnPlan = { added: QuickReplyDraft[]; extend: { id: string; triggers: string[] }[] };
+
+/**
+ * Đọc kết quả AI của lượt tự nạp: `{"new": [{title, triggers, answer}], "extend": [{"code": "Q3", "triggers": [...]}]}`.
+ * `code` ⇒ mã câu mẫu thật qua `codes` (mã lạ bị bỏ). Hỏng ⇒ kế hoạch rỗng. HÀM THUẦN.
+ */
+export function parseAutoLearnPlan(text: string, codes: ReadonlyMap<string, string>): AutoLearnPlan {
+  const start = text.indexOf("{");
+  const end = text.lastIndexOf("}");
+  if (start < 0 || end <= start) return { added: [], extend: [] };
+  try {
+    const o = JSON.parse(text.slice(start, end + 1)) as Record<string, unknown>;
+    const added = Array.isArray(o.new) ? parseLearnedQuickReplies(JSON.stringify(o.new)) : [];
+    const extend: AutoLearnPlan["extend"] = [];
+    for (const x of Array.isArray(o.extend) ? o.extend : []) {
+      if (!x || typeof x !== "object") continue;
+      const r = x as Record<string, unknown>;
+      const id = codes.get(String(r.code ?? "").trim().toUpperCase());
+      const triggers = Array.isArray(r.triggers) ? r.triggers.filter((t): t is string => typeof t === "string" && Boolean(t.trim())) : [];
+      if (id && triggers.length) extend.push({ id, triggers });
+    }
+    return { added, extend };
+  } catch {
+    return { added: [], extend: [] };
+  }
+}
+
+/**
+ * Cách hỏi mới cho một câu mẫu ĐÃ CÓ: bỏ trùng (bỏ dấu), bỏ câu đặt hàng và câu hỏi SỈ (câu mẫu báo giá lẻ không được trả
+ * lời câu sỉ), giữ trần `triggers` của câu mẫu và `maxNew` mỗi lượt. HÀM THUẦN.
+ */
+export function mergeTriggers(current: readonly string[], proposed: readonly string[], maxNew: number): string[] {
+  const seen = new Set(current.map((t) => foldVi(t)));
+  const out = [...current];
+  let added = 0;
+  for (const raw of proposed) {
+    const t = raw.trim().slice(0, QUICK_REPLY_LIMITS.triggerChars);
+    const k = foldVi(t);
+    if (!k || seen.has(k) || looksLikeOrdering(t) || looksWholesale(t)) continue;
+    if (out.length >= QUICK_REPLY_LIMITS.triggers || added >= maxNew) break;
+    seen.add(k);
+    out.push(t);
+    added += 1;
+  }
+  return out;
 }
 
 /** Câu khách cho thấy đang ĐẶT HÀNG (SĐT, «chốt», «địa chỉ», «đồng ý»…) ⇒ câu mẫu đứng ngoài, AI chốt đơn bằng công cụ. */
