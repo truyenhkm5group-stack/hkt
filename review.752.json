@@ -1,0 +1,8 @@
+{
+  "pr": 752,
+  "sha": "92ebea37c4bc5cfd0fd1173cdb464e82abb3efd7",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-09T20:40:42.047Z",
+  "note": "Review Integration Lead: danh sách 9 bước tính từ dữ liệu thật qua hàm sẵn có (loadChannelFacts · channelHealth · stock exprs · loadChatbotAiView · sổ sự kiện TEST), không bước nào DONE khi thiếu chứng cứ; trang mở đầu = Tổng quan khi chưa 9/9 (chủ shop 10/10, Tech Lead chốt), chỉ hỏi ở hai cửa vào, đệm 60 s, lỗi ⇒ hộp thư. session.ts: shellUser chỉ để tính đích chuyển hướng (overview|inbox, cả ha"
+}
