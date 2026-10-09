@@ -28,83 +28,108 @@
 
 ---
 
-## Checkpoint 2026-10-09 ~04:25 giờ VN (đo lúc 08/10 21:21Z)
+## Checkpoint 2026-10-09 ~13:00 giờ VN (đo lúc 09/10 06:07Z, nhánh `docs/registry-reconcile-0910`)
 
-**MAIN_SHA:** `9833d981` (#701 HSLC «Chỉ bán kèm», chưa deploy). Từ lần chụp trước đã gộp: #692 · #701 · #702 · #703 · #704.
+**MAIN_SHA:** `50293da6` (#725). Từ lần chụp trước (`9833d981`) đã gộp: #705 → #727 (23 PR).
 
-**PRODUCTION_SHA:** `c71833950519` — deploy 37838226087 xanh (smoke), `/api/health` khớp, 238 migration. Trước đó deploy 37829126099
-(`6883bfbf`) xanh. `npm run ai -- verify --sha=c71833950519` ĐẠT ⇒ 16 mission đóng DONE ở sổ `/tech` (saas-create-customer-correct ·
-saas-customer-health · saas-shell-gate-redirects · saas-shell-polish · saas-ops-signals · saas-acceptance-smoke ·
-saas-acceptance-hardening · backup-drive-trash · cutover-unpriced-tolerance · platform-key-project-probe · legal-registers ·
-legal-counsel-pack · commercial-sweep · master-mission-registry · registry-refresh-0909 · launch-gate-r2).
+**PRODUCTION_SHA:** `50293da6` — deploy 37886395475, `/api/health` khớp (239 migration) lúc chụp; hậu kiểm / `verify` CHƯA chạy. Trước đó `ef9b302ab11f` (deploy 37879275359, hậu kiểm ĐẠT).
 
-**PRODUCTION ACCEPTANCE (lần đầu có vết):** `saas-acceptance` chỉ đọc FAIL 0/1 (run 37837987556 — workspace chưa tồn tại, đúng kỳ vọng)
-→ `--apply` **PASS 4/4** (run 37838073371): A tạo khách qua đường admin · B1 kích hoạt + đăng nhập email KHÔNG mã tổ chức · C vỏ 8 mục
-· B2 xoay mật khẩu. D · E (`--e2e`) bỏ qua — chờ chủ shop chuẩn bị UI một lần (`docs/saas/ACCEPTANCE.md` §3).
+Chuỗi deploy 09/10 (mọi lượt xanh đều hậu kiểm ĐẠT: `/api/health` khớp · 239 migration · smoke):
+- `c71833950519` — deploy 37838226087: #692 #702 #703 #704, trên lô 37829126099 (`6883bfbf`: #682 #683 #690 #694 #696 #697 #698 #699 #700).
+- `9833d981` — #701 (phiên khác deploy).
+- `dbab68130a72` — deploy 37854562530: #705 #706 #707 #708 #709 #710.
+- `d23c0deb3ce1` — deploy 37860758200: #711 #712 #713 #714.
+- deploy 37871032076 cho `304bcbcb` **HỎNG ở bước release** (SSH «Run Command Timeout» khi kéo image) — production đứng yên `d23c0deb`,
+  không đổi gì; đã được lượt sau thay thế.
+- `ef9b302ab11f` — deploy 37879275359: #715 #716 #717 (chủ shop tự gộp — CRITICAL vì thêm `export` cho `HAS_CASH_EVIDENCE` trong
+  `return-rate.ts`) #718 #719 #720 #722 #723.
+- `50293da6` — deploy 37886395475: #721 #724 #725 #726 #727 — **DEPLOYED** (`/api/health` khớp; verify CHỜ).
+
+**BẰNG CHỨNG PRODUCTION**
+- `saas-acceptance --apply` **PASS 4/4 ba lần**: run 37838073371 (`6883bfbf`) · 37860546515 (`dbab6813`) · 37866720324 (`d23c0deb`).
+- `ops-signals-check` (#710) **PASS 9 tổ chức × 8 tín hiệu, 0 ô hỏng**: run 37853956678 · 37860619173 · 37867472656. **O1 chứng minh trọn**:
+  RESET_LINK_USED (37860619173) + LOGIN / BAD_PASSWORD (37867472656). O2–O8 TÍNH ĐƯỢC nhưng chưa chứng minh PHÁT HIỆN; dựng sự cố (#724)
+  chỉ chứng minh được O6 — O2–O5 · O7 · O8 là **CHƯA ĐO ĐƯỢC** (cần kênh nhắn tin thật / AI trả tiền / thao tác phá huỷ).
+- 33 mission đóng DONE ở sổ `/tech` sau verify (danh sách đầy đủ trong registry, cột LAST_UPDATED 2026-10-09).
 
 **LAUNCH_READINESS** (chép từ nguồn, không tự chấm):
-- ENGINEERING: **NOT READY — 60 %** (24,5 / 41; **9 / 41** có bằng chứng production) — `LAUNCH_GATE.md` nhật ký 09/10 sáng.
-- LEGAL: **NOT READY — ~23 %**, **WAITING_FOR_LEGAL_COUNSEL** — `LEGAL_LAUNCH_GATE.md`.
-- META: **⛔ NGOÀI**. COMMERCIAL READY: **NOT READY**.
+- ENGINEERING: **NOT READY — 61 %** (25 / 41; **10 / 41** có bằng chứng production) — `LAUNCH_GATE.md` nhật ký 09/10 trưa (#723).
+- LEGAL: **NOT READY — ~23 %** (2,5 / 11), **WAITING_FOR_LEGAL_COUNSEL** — `LEGAL_LAUNCH_GATE.md`.
+- META: **⛔ NGOÀI**. COMMERCIAL: C0 **0** · C1 **3** (bàn giao Fable Round 2) — **NOT READY**.
 
-### Bảng tốc độ (GitHub API + `events.ndjson` của sổ `/tech`; cửa sổ kết thúc 08/10 21:21Z)
+### Bảng tốc độ (cửa sổ 08/10 05:57Z → 09/10 05:57Z)
 
 **LAST 24H**
 
 | Chỉ số | Số | Cách đếm |
 |---|---|---|
-| PR MERGED | **59** | `/pulls?state=closed` lọc `merged_at` trong 24 giờ |
-| PR DEPLOYED | **58** | commit gộp là tổ tiên của production `c71833950519`; chưa lên: #701 |
-| Lượt deploy | 24 thành công · 1 hỏng | workflow «Deploy ERP to VPS» |
-| MISSION DONE | **53** | sự kiện `DONE` của sổ `/tech` |
-| PRODUCTION TESTS PASSED | **56** `VERIFY_PASS` + nghiệm thu production PASS 4/4 | `events.ndjson` + ops run 37838073371 |
-| NEW BLOCKERS | **1** | #706 trang chủ hứa «Kết nối Facebook» thẳng trong khi `meta-messenger-access` BLOCKED_EXTERNAL ⇒ review FAIL, trả phiên Fable |
-| REGRESSIONS | **0** trên production | không có `VERIFY_FAIL` trong 24 giờ |
+| PR MERGED | **66** | `git log --since=… --first-parent origin/main`: 66 commit, 66 mang số PR (63 squash «(#n)» + 3 merge commit «Merge pull request #n»); `--merges` một mình chỉ ra 3 vì repo gộp squash là chính |
+| PR DEPLOYED | **61** | commit trong cửa sổ là tổ tiên của production `ef9b302a` (`git merge-base --is-ancestor`); chưa lên: #721 #724 #725 #726 #727 |
+| Lượt deploy (biết được, từ 08/10 18:00Z) | 6 xanh · 1 hỏng (37871032076, nhất thời) · 1 đang chạy | danh sách trên; không đếm lại toàn cửa sổ bằng API lượt này |
+| P0 / P1 CLOSED | **13 / 14** (33 mission DONE: 13 P0 · 14 P1 · 4 P2 · 2 P3) | ưu tiên theo registry của 33 mission `/tech` đóng sau verify 09/10 |
+| PRODUCTION TESTS PASSED | 6 deploy hậu kiểm ĐẠT · `saas-acceptance --apply` 3 / 3 PASS · `ops-signals-check` 3 / 3 PASS | run nêu trên |
+| NEW BLOCKERS | **2** | MM-FU-724 (O2–O5 · O7 · O8 không dựng sự cố được ⇒ cần chuẩn bằng chứng sự cố thật) · MM-FU-712 (không đường nào bật `meta.direct-connect.open`) |
+| REGRESSIONS | **0** trên production | lượt deploy hỏng không đổi production; không có `VERIFY_FAIL` trong số đo của Integration Lead |
 
-**TOTAL**
+**TOTAL** (registry sau lượt này — đếm bằng script, cách đếm ở registry §0b)
 
 | Chỉ số | Số |
 |---|---|
-| MISSIONS TOTAL (registry #702) | **215** |
-| DONE | registry 89 (chưa chép 16 mission đóng lượt này — sổ `/tech` là nguồn: **82** mission có sự kiện `DONE` từ 06/10) |
-| P0 REMAINING | **16** theo registry; trong Launch Gate: **0 P0 mở** — đường tới ĐẠT là E2E D + E và kiểm O1–O8 trên production |
-| ACTIVE | 3 RUNNING lô Fable (R2 · G · F) + #705 (PASS, chờ cổng) + #706 (FAIL) |
-| BLOCKED_OWNER / BLOCKED_EXTERNAL | 33 / 6 (registry) |
+| MISSIONS TOTAL | **245** (215 → +30 dòng mới, không xoá) |
+| DONE | **119** |
+| P0 REMAINING | **10** — 7 chờ bên ngoài / chủ shop (Meta ×2 · luật sư ×3 gồm MM-REC-24 · chủ shop / kế toán ×2: câu chữ công bố AI, hoá đơn) · acceptance-signal-drills (DEPLOYED, chờ `--drills`) · MM-SEC-03 (VERIFYING) · MM-LEGAL-02 (READY) |
+| ACTIVE | 4 IN_PROGRESS · 1 PR_READY · 4 DEPLOYED chờ hậu kiểm (#721 #724 #725 #726) |
+| BLOCKED_OWNER / BLOCKED_EXTERNAL | 33 / 7 |
 
 **VELOCITY**
 
 | Chỉ số | Số |
 |---|---|
-| DONE LAST 24H | **53** mission · 59 PR gộp |
-| DONE LAST 7D | **82** mission (nhật ký `/tech` từ 06/10 05:09Z — ít hơn 7 ngày) · **256** PR gộp |
-| CURRENT BOTTLENECK | **E2E trên production** (C8–C17 = 10 mục Khách chỉ lên ✅ bằng `--e2e`) cần chủ shop chuẩn bị UI một lần; rồi kiểm O1–O8 |
+| DONE LAST 24H | **33** mission · 66 PR gộp |
+| DONE LAST 7D | **275** PR gộp (cùng cách đếm, 02/10 05:57Z → 09/10 05:57Z); số mission 7 ngày chưa đo lượt này (cần `events.ndjson` của `/tech`) |
+| CURRENT BOTTLENECK | Chứng minh PHÁT HIỆN O2–O8 + E2E D · E (chờ chủ shop chuẩn bị UI) — kỹ thuật đã xong phần mình làm được |
 
 ### WIP hiện tại (giới hạn 3 engineering + 1 audit)
 
 | Loại | Việc | Trạng thái |
 |---|---|---|
-| ENGINEERING 1 | #705 màn hình lỗi thân thiện (Fable) | review PASS — chờ cổng rồi gộp |
-| ENGINEERING 2 | #706 trang chủ đúng sản phẩm (Fable) | review FAIL (hứa nối Facebook thẳng) — phiên Fable sửa |
-| ENGINEERING 3 | Round 2 Production Acceptance + Commercial Sweep (phiên Fable code-erp-71: R2 · G · F) | RUNNING |
-| AUDIT | `launch-gate-r3` (tệp này + `LAUNCH_GATE.md`) | PR |
+| ENGINEERING 1 | `pancake-counters-remaining` — khối «Khách hàng» trang đơn + bộ lọc đã lưu còn đọc bộ đếm Pancake | IN_PROGRESS |
+| ENGINEERING 2 | `inbox-perf-probe` — số đo production cho C1 #13 | IN_PROGRESS |
+| ENGINEERING 3 | `shell-copy-brand-r3` — C1 #7 chữ kỹ thuật vỏ (+ một phần MM-FU-700) | IN_PROGRESS (RUNNING) |
+| AUDIT | `registry-reconcile-0910` (tệp này + registry) | PR_READY |
 
-### OWNER_DECISIONS (đang chặn việc)
-1. **Chuẩn bị UI một lần cho E2E** (`ACCEPTANCE.md` §3): đặt lại mật khẩu khách thử · tạo `NT-AO-01` 150.000 ₫ + nhập ≥ 10 · bật bot
-   · xuất bản `cdt-nghiem-thu`. Ops không ghi hộ vào workspace (chỉ đạo 08/10).
-2. Sao lưu CSDL nhà: dọn Drive · Google One · tài khoản Google riêng · giảm hạn giữ.
-3. `PLATFORM_SIGNUP_MODE=open` — đóng tới READY? · Xoá cửa hàng `qa`? · Quy tắc giao dịch tiền thật qua ops · V6 · dùng thử 7 / 14
-   ngày · Meta App Review · luật sư (đầy đủ: registry §14).
+Phiên Fable sweep: **WAITING_FOR_NEXT_PRODUCTION_ROUND** (bàn giao Round 2 cuối ở `claude/commercial-sweep-ban-giao`, PR tài liệu riêng).
+
+### BLOCKED
+- **O2–O5 · O7 · O8**: không dựng sự cố được trên workspace thử ⇒ cần chuẩn bằng chứng từ sự cố thật (MM-FU-724).
+- **E2E D · E** (`--e2e`, Launch Gate C8–C17): chờ chủ shop chuẩn bị UI (D19).
+- **C1 #4** CTA đăng ký: chờ D2. **Meta Direct**: Meta chưa cấp quyền Page (meta-messenger-access).
+- **Pháp lý P0**: chờ luật sư (`COUNSEL_PACK.md` #704 đã vào kho — chủ shop gửi đi).
+
+### OWNER_DECISIONS (đang chặn việc — đầy đủ ở registry §14)
+1. `PLATFORM_SIGNUP_MODE` mở hay chỉ mời tới khi READY (chặn C1 #4) — D2.
+2. Chuẩn bị UI một lần cho E2E (`ACCEPTANCE.md` §3) — D19.
+3. Sao lưu CSDL nhà lên Drive (dọn Drive · Google One · tài khoản riêng · giảm hạn giữ) — D1.
+4. Xoá cửa hàng `qa` — D3.
+5. Quy tắc giao dịch tiền thật qua ops — D4.
+6. V6: bản sao khoá bí mật ngoài VPS — D16.
+7. Dùng thử 7 hay 14 ngày — D17.
+8. Bộ vai trò Chốt Đơn cho `/settings/users` — nay là TUỲ CHỌN (C1 #5 đã đóng nhờ #700 ẩn ma trận quyền) — D10.
+9. Ngày bật `meta.direct-connect.open` — D20.
+10. Mật độ trang dùng chung ERP ↔ vỏ (chữ 10–10,5 px ở Sản phẩm · Đơn · Khách · Phiếu nhập) — D21.
+11. Luật sư rà Chính sách bảo mật / Điều khoản — D22.
 
 ### NEXT_3_ACTIONS
-1. Gộp #705 (+ #706 sau sửa, R2 · G · F khi handoff) → MỘT lượt deploy cho lô (cùng #701) → `verify --record` → `close`.
-2. Chủ shop chuẩn bị UI ⇒ `saas-acceptance --apply --e2e` (kỳ vọng PASS 6/6) ⇒ C8–C17 lên ✅ trong `LAUNCH_GATE.md`.
-3. Kiểm O1–O8 trên production bằng `/platform/org` (tín hiệu #692) và chép 16 mission đóng lượt này vào registry.
+1. Deploy `50293da6` xong → hậu kiểm + `verify` → `saas-acceptance --apply --drills` ⇒ O6 lên ✅ trong `LAUNCH_GATE.md`.
+2. Hiệu năng production: `inbox-perf-probe` + ops smoke cho `/chatbot` · `/cod` · `/reports/*` (đóng hoặc định lượng C1 #13).
+3. C1 #6 / #7 chữ vỏ (`shell-copy-brand-r3`) + C1 #5 trang Nhân viên (tuỳ chọn, chờ D10). Kèm các kiểm production còn thiếu: nghiệm thu CÓ
+   ĐĂNG NHẬP xác nhận #700 / #712 / #718 · trang chi tiết tổ chức không Pancake (#725) · `/shipments/<id>` vận đơn COD 0 (#717).
 
 ---
 
 ## Lệch nguồn (đã ghi nhận — Git / PR / production thắng)
 
-Dòng 1–15: lượt dựng 09/10 01:00 (nay phần lớn đã được Git giải quyết — giữ làm vết). Dòng 16–18: lượt làm mới 02:30.
+Dòng 1–15: lượt dựng 09/10 01:00 (nay phần lớn đã được Git giải quyết — giữ làm vết). Dòng 16–18: lượt làm mới 02:30. Dòng 19–22: lượt đối chiếu 09/10 trưa.
 
 | # | Lệch | Kết luận theo sự thật |
 |---|---|---|
@@ -126,3 +151,7 @@ Dòng 1–15: lượt dựng 09/10 01:00 (nay phần lớn đã được Git gi�
 | 16 | Sổ `/tech` vẫn ghi `INTEGRATING` cho #683 #690 #694 #696 #697 #698 #699 #700, `PR_READY` cho saas-ops-signals, `RUNNING` cho 5 mission lô Fable | Theo Git: đã gộp (MERGED / DONE như registry); lô Fable đã đẩy nhánh nhưng chưa handoff |
 | 17 | CHECKPOINT `/tech` và lệnh điều phối ghi lượt sao lưu «09/10 23:04» | Lúc đo là 09/10 02:25 VN ⇒ mốc đó chưa tới; hiểu là 08/10 23:04 VN. Ghi «lượt 23:04 gần nhất» |
 | 18 | `LEGAL_LAUNCH_GATE.md` §2 nay 2,5 / 11 (~23 %) sau #697; lần chụp trước 18 % | Lấy 23 % |
+| 19 | Lệnh điều phối đầu lượt ghi C1 #5 «BLOCKED chờ quyết định vai trò», #6 IN_PROGRESS, #9 READY | Bàn giao Fable Round 2 (sau đó): #5 · #6 (#700), #9 (#682) đóng theo đối chiếu; C1 còn 3 (#4 · #7 · #13). Registry theo bản sau; bộ vai trò rút gọn thành TUỲ CHỌN (D10) |
+| 20 | `COMMERCIAL_POLISH_BOARD.md` trên `main` (#727) còn ghi «C1 MỞ 6» gồm #8 #683 và lệnh đặt xưởng | #683 đã DEPLOYED, #719 DONE. Bảng do PR bàn giao Fable (`claude/commercial-sweep-ban-giao`) sửa — lượt này KHÔNG chạm tệp đó |
+| 21 | Sổ `/tech` liệt #727 vào «đã gộp chờ verify» | #727 chỉ tài liệu ⇒ registry ghi DONE theo quy ước §0 (ngoại lệ tài liệu); sổ `/tech` đóng khi verify lô `50293da6` |
+| 22 | `git log --merges` trong 24 giờ chỉ ra 3 | Repo gộp squash là chính ⇒ đếm PR bằng commit first-parent mang số PR: 66 |
