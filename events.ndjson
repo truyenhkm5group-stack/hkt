@@ -1306,3 +1306,4 @@
 {"at":"2026-10-09T17:04:58.870Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"CLAIM","mission":"visible-product-board","detail":"RUNNING · 3 mẫu phạm vi · MEDIUM"}
 {"at":"2026-10-09T17:08:23.331Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"visible-product-board","detail":"docs/visible-product-board @ 32c2d867bc50 · 1 lệnh kiểm thử"}
 {"at":"2026-10-09T17:08:50.110Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"visible-product-board","detail":"#747 cho docs/visible-product-board @ 32c2d867bc50"}
+{"at":"2026-10-09T17:09:06.348Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#747 @ 32c2d867bc50 · Tài liệu theo DoD chủ shop 10/10: không surface nào ghi PRODUCTION_VERIFIED khi chưa có ảnh; 41 mission UI hạ về CODE_DONE_UI_NOT_VERIFIED/PARTIAL; tổng tính bằng hiệu số (ghi rõ)."}

@@ -1,0 +1,8 @@
+{
+  "pr": 747,
+  "sha": "32c2d867bc50e1adede852c875d3c2541c75ce1c",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-09T17:08:55.909Z",
+  "note": "Tài liệu theo DoD chủ shop 10/10: không surface nào ghi PRODUCTION_VERIFIED khi chưa có ảnh; 41 mission UI hạ về CODE_DONE_UI_NOT_VERIFIED/PARTIAL; tổng tính bằng hiệu số (ghi rõ)."
+}
