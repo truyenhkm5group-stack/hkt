@@ -1332,3 +1332,4 @@
 {"at":"2026-10-09T19:35:12.217Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"acceptance-section-12","detail":"#750 cho docs/acceptance-section-12 @ 76a28f78f21c"}
 {"at":"2026-10-09T19:35:29.292Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#750 @ 76a28f78f21c · Chỉ đổi số tiêu đề tài liệu và 3 chú thích."}
 {"at":"2026-10-09T19:44:02.620Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#748 @ ad48fb15a847 · Rebase lên main sau #749 (bom ngày); nội dung Inbox V2-A không đổi logic so với lượt PASS 0505946e (cộng commit đánh bóng giao diện nếu có)."}
+{"at":"2026-10-09T19:44:42.376Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#747 @ a934181ceec3 · Ghép main (có #749) vào nhánh tài liệu; nội dung bảng không đổi so với lượt PASS 32c2d867."}
