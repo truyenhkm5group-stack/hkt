@@ -3,7 +3,7 @@
   "mission_id": "inbox-v2-b",
   "title": "Inbox V2-B: cột phải «ĐƠN ĐANG CHỐT» (SKU · biến thể · SL · giá · ship · tổng) + trường có cấu trúc + trạng thái đơn theo trường",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -27,9 +27,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-09T16:59:56.703Z",
-  "updated_at": "2026-10-09T21:17:44.033Z",
+  "updated_at": "2026-10-09T22:15:01.701Z",
   "last_heartbeat": "2026-10-09T21:17:17.465Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#753 → e21f0ec35b25f6ae4919f486ae26fd201c4e8f76"
+  },
   "handoff": {
     "branch": "feat/inbox-v2-b",
     "sha": "17552263d47fbc3c80e370ec7125d3816e7b12e7",
