@@ -28,6 +28,7 @@ import {
   isSalesAgentUser,
   SALES_AGENT_ALLOWED_PREFIXES,
   SALES_AGENT_INBOX_HREF,
+  SALES_AGENT_OVERVIEW_HREF,
   salesAgentHomeFor,
   salesAgentHomeOfRedirect,
   salesAgentPathAllowed,
@@ -132,17 +133,21 @@ async function kiemMayChu() {
     // Lượt POST đăng nhập / đăng ký: cổng vỏ trả SHELL_RESTRICTED (đường không phải trang vỏ) — hàm đọc đúng trang nhà, bỏ dấu.
     // Mọi lượt POST mở phiên rồi chuyển hướng: /login (loginAction), /start (quickSignup + trình hướng dẫn đầy đủ),
     // /join/<tổ chức>/<mã> (nhận lời mời), /login/chon-cua-hang (chọn cửa hàng sau Google / Facebook).
+    // CỬA HÀNG MỚI = CHƯA THIẾT LẬP XONG ⇒ trang nhà của chủ shop là «Tổng quan» có danh sách thiết lập, không phải hộp thư (chủ
+    // shop 10/10/2026: «một khách low-tech sau đăng nhập phải thấy đúng một danh sách thiết lập» — lib/saas/shell-setup.ts). Xong
+    // đủ chín bước ⇒ hộp thư như #638 (tests/onboarding-v2.test.ts đi cả hai chiều).
+    const NHA_CHU = SALES_AGENT_OVERVIEW_HREF;
     for (const reqPath of ["/login", "/start", `/join/${ORG}/ma-moi-gia`, "/login/chon-cua-hang"]) {
       const ket = await asRequest(tokChu, reqPath, () => resolveCurrentUser());
       assert.ok("denied" in ket && ket.denied === "SHELL_RESTRICTED", `${reqPath}: lượt POST của người vỏ phải gặp cổng vỏ (nhánh cần kiểm), nhận ${JSON.stringify(ket)}`);
-      assert.equal(await asRequest(tokChu, reqPath, () => shellHomeOfSession()), SALES_AGENT_INBOX_HREF, `${reqPath}: chủ shop ⇒ hộp thư, KHÔNG kèm «ngoài gói»`);
-      assert.equal(await asRequest(tokChu, reqPath, () => landingAfterSignIn("/")), SALES_AGENT_INBOX_HREF, `${reqPath}: next=/ ⇒ hộp thư một bước`);
-      assert.equal(await asRequest(tokChu, reqPath, () => landingAfterSignIn(undefined)), SALES_AGENT_INBOX_HREF);
-      for (const n of [...TAN_CONG, ...VO_CHAN]) assert.equal(await asRequest(tokChu, reqPath, () => landingAfterSignIn(n)), SALES_AGENT_INBOX_HREF, `${reqPath}: next=${JSON.stringify(n)} ⇒ hộp thư`);
+      assert.equal(await asRequest(tokChu, reqPath, () => shellHomeOfSession()), NHA_CHU, `${reqPath}: chủ shop cửa hàng mới ⇒ «Tổng quan», KHÔNG kèm «ngoài gói»`);
+      assert.equal(await asRequest(tokChu, reqPath, () => landingAfterSignIn("/")), NHA_CHU, `${reqPath}: next=/ ⇒ trang nhà một bước`);
+      assert.equal(await asRequest(tokChu, reqPath, () => landingAfterSignIn(undefined)), NHA_CHU);
+      for (const n of [...TAN_CONG, ...VO_CHAN]) assert.equal(await asRequest(tokChu, reqPath, () => landingAfterSignIn(n)), NHA_CHU, `${reqPath}: next=${JSON.stringify(n)} ⇒ trang nhà`);
       for (const n of VO_MO) assert.equal(await asRequest(tokChu, reqPath, () => landingAfterSignIn(n)), safeNextPath(n), `${reqPath}: ${n} ⇒ giữ`);
     }
     // Nhánh người dùng đi qua cổng (đường của vỏ): cùng câu trả lời.
-    assert.equal(await asRequest(tokChu, "/ai/overview", () => shellHomeOfSession()), SALES_AGENT_INBOX_HREF, "nhánh { user } cho cùng trang nhà");
+    assert.equal(await asRequest(tokChu, "/ai/overview", () => shellHomeOfSession()), NHA_CHU, "nhánh { user } cho cùng trang nhà");
 
     // Nhân viên không đọc được hộp thư: trang nhà là mục đầu tiên họ còn thấy — đúng hàm cổng vỏ dùng, không bao giờ hộp thư.
     const quaCong = await asRequest(tokKho, "/products", () => resolveCurrentUser());

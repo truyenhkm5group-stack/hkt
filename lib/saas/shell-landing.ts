@@ -1,6 +1,7 @@
 import { safeNextPath } from "@/lib/auth/safe-redirect";
 import { resolveCurrentUser } from "@/lib/auth/session";
-import { isSalesAgentUser, SALES_AGENT_INBOX_HREF, salesAgentHomeFor, salesAgentHomeOfRedirect, salesAgentPathAllowed } from "@/lib/constants/saas-nav";
+import { isSalesAgentUser, SALES_AGENT_INBOX_HREF, salesAgentHomeOfRedirect, salesAgentPathAllowed } from "@/lib/constants/saas-nav";
+import { shellLandingFor } from "@/lib/saas/shell-setup";
 
 /**
  * ═══════════ ĐÍCH SAU ĐĂNG NHẬP / ĐĂNG KÝ — MỘT BƯỚC, TỚI TRANG DỰNG ĐƯỢC ═══════════
@@ -45,8 +46,10 @@ export function landingPath(rawNext: unknown, shellHome: string | null): string 
  */
 export async function shellHomeOfSession(): Promise<string | null> {
   const ket = await resolveCurrentUser();
-  if ("user" in ket) return isSalesAgentUser(ket.user) ? salesAgentHomeFor(ket.user) : null;
-  return ket.denied === "SHELL_RESTRICTED" ? salesAgentHomeOfRedirect(ket.home ?? SALES_AGENT_INBOX_HREF) : null;
+  // Cửa hàng chưa thiết lập xong ⇒ «Tổng quan» có danh sách thiết lập (chủ shop 10/10/2026, lib/saas/shell-setup.ts).
+  if ("user" in ket) return isSalesAgentUser(ket.user) ? shellLandingFor(ket.user) : null;
+  if (ket.denied !== "SHELL_RESTRICTED") return null;
+  return ket.shellUser ? shellLandingFor(ket.shellUser) : salesAgentHomeOfRedirect(ket.home ?? SALES_AGENT_INBOX_HREF);
 }
 
 /** Đích chuyển hướng sau đăng nhập / đăng ký. Đọc vỏ hỏng ⇒ đi đích cũ (`safeNextPath`) — không bao giờ làm hỏng lượt đăng nhập. */

@@ -42,7 +42,7 @@ import { credentialsMatch, LOGIN_BAD_CREDENTIALS, loginCandidates } from "@/lib/
 import { hashPassword } from "@/lib/auth/password";
 import { resolveCurrentUser, signSession, type SessionUser } from "@/lib/auth/session";
 import { resolveSocial } from "@/lib/auth/social";
-import { SALES_AGENT_INBOX_HREF } from "@/lib/constants/saas-nav";
+import { SALES_AGENT_OVERVIEW_HREF } from "@/lib/constants/saas-nav";
 import { SESSION_COOKIE } from "@/lib/constants/session";
 import { invalidateCapabilities } from "@/lib/platform/capabilities";
 import { currentOrganization, setSessionTokenSourceForTests, withOrganization } from "@/lib/platform/context";
@@ -428,7 +428,9 @@ async function testCustomerFlow(op: SessionUser, home: { code: string }) {
   await waitPastRevocation(A, ADMIN_EMAIL);
   const d = await login("Chu@IEL-Shop-A.vn", PW1);
   assert.equal(d.value, undefined, `đăng nhập không mã tổ chức phải vào được — nhận ${JSON.stringify(d.value)}`);
-  assert.equal(d.redirectTo, SALES_AGENT_INBOX_HREF, "khách Chốt Đơn vào thẳng vỏ khách");
+  // Trang nhà của vỏ cho cửa hàng MỚI là «Tổng quan» có danh sách thiết lập (chủ shop 10/10/2026: «một khách low-tech sau đăng nhập
+  // phải thấy đúng một danh sách thiết lập» — lib/saas/shell-setup.ts); xong đủ 9 bước mới là hộp thư (tests/onboarding-v2.test.ts).
+  assert.equal(d.redirectTo, SALES_AGENT_OVERVIEW_HREF, "khách Chốt Đơn vào thẳng vỏ khách (cửa hàng mới ⇒ danh sách thiết lập)");
   assert.ok(d.cookie, "cookie phiên được ghi");
   const usedRow = (await identityRows(A, ADMIN_EMAIL))[0];
   assert.ok(usedRow.lastUsedAt, "đăng nhập ghi mốc dùng");
@@ -597,7 +599,8 @@ async function testResend(op: SessionUser, home: { code: string; name: string })
   const r = await login(R_ADMIN, PW1);
   // Chỉ thuê Chốt Đơn mà không khai thương hiệu ⇒ máy chủ tự đặt Chốt Đơn, kể cả tài khoản nội bộ (review #682 — trước đó NULL ⇒ menu
   // ERP) ⇒ vào thẳng vỏ khách. Đích cũ của workspace KHÔNG thuộc vỏ: tests/shell-login-landing.test.ts.
-  assert.equal(r.redirectTo, SALES_AGENT_INBOX_HREF, "chỉ Chốt Đơn ⇒ thương hiệu tự đặt ⇒ vỏ khách");
+  // Cửa hàng mới chưa thiết lập xong ⇒ «Tổng quan» (chủ shop 10/10/2026, lib/saas/shell-setup.ts).
+  assert.equal(r.redirectTo, SALES_AGENT_OVERVIEW_HREF, "chỉ Chốt Đơn ⇒ thương hiệu tự đặt ⇒ vỏ khách");
   assert.equal((await whoIs(r.cookie)).orgCode, R);
 }
 

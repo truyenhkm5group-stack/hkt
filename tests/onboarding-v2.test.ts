@@ -29,6 +29,8 @@ import { provisionOrganization } from "@/lib/platform/provision";
 import { CUSTOMER_AI_STATE_HINT } from "@/lib/saas/visibility";
 import { loadSalesChatbotConfig } from "@/lib/sales-chatbot/engine";
 import { saveSalesChatbotConfig } from "@/lib/sales-chatbot/settings";
+import { SALES_AGENT_INBOX_HREF, SALES_AGENT_OVERVIEW_HREF, salesAgentHomeFor } from "@/lib/constants/saas-nav";
+import { firstValueSetupOpen, shellLandingFor } from "@/lib/saas/shell-setup";
 
 const goc = path.resolve(__dirname, "..");
 const src = (f: string) => readFileSync(path.join(goc, f), "utf8");
@@ -284,6 +286,26 @@ function testPlacement() {
   assert.ok(src("app/(dashboard)/ai/sales-chatbot/config-form.tsx").includes('id="bot-config"'), "neo Cấu hình bot");
 }
 
+// ─────────────────────────────── TRANG NHÀ SAU ĐĂNG NHẬP (chủ shop 10/10/2026) ───────────────────────────────
+
+function testLandingPure() {
+  const owner = { role: "ADMIN", permissions: [] as string[] };
+  // Chưa xong ⇒ «Tổng quan» (nơi đứng danh sách); xong ⇒ hộp thư như #638; không truyền gì ⇒ y như cũ.
+  assert.equal(salesAgentHomeFor(owner, { setupOpen: true }), SALES_AGENT_OVERVIEW_HREF);
+  assert.equal(salesAgentHomeFor(owner, { setupOpen: false }), SALES_AGENT_INBOX_HREF);
+  assert.equal(salesAgentHomeFor(owner), SALES_AGENT_INBOX_HREF);
+  // Người không thấy «Tổng quan» không bao giờ bị đưa tới đó (trang ấy sẽ đá họ về — vòng chuyển hướng).
+  const kho = { role: "VIEWER", permissions: ["products:view"] };
+  assert.equal(salesAgentHomeFor(kho, { setupOpen: true }), salesAgentHomeFor(kho));
+  assert.deepEqual([firstValueSetupOpen(null), firstValueSetupOpen({ show: false, allDone: false }), firstValueSetupOpen({ show: true, allDone: true }), firstValueSetupOpen({ show: true, allDone: false })], [false, false, false, true]);
+  // Chỉ HAI cửa vào hỏi trạng thái thiết lập: sau đăng nhập (shellHomeOfSession) và mở `/` (requireUser, đích không kèm «ngoài gói»).
+  assert.match(src("lib/saas/shell-landing.ts"), /isSalesAgentUser\(ket\.user\) \? shellLandingFor\(ket\.user\)/);
+  assert.match(src("lib/saas/shell-landing.ts"), /ket\.shellUser \? shellLandingFor\(ket\.shellUser\)/);
+  assert.match(src("lib/auth/session.ts"), /ket\.shellUser && ket\.home && !ket\.home\.includes\("\?"\) \? await shellLandingFor\(ket\.shellUser\)/);
+  assert.equal((src("lib/auth/session.ts").match(/shellLandingFor\(/g) ?? []).length, 1, "session.ts hỏi đúng một chỗ (cửa `/`), không ở mỗi lượt điều hướng");
+  assert.ok(!["@/lib/onboarding", "@/lib/saas/shell-setup", "@/lib/auth/session"].some((m) => src("lib/constants/saas-nav.ts").includes(`from "${m}`)), "saas-nav.ts vẫn thuần (không nạp mã máy chủ)");
+}
+
 // ─────────────────────────────── DỮ LIỆU THẬT (PGlite) ───────────────────────────────
 
 const ORG = "fv-shop";
@@ -334,6 +356,9 @@ async function testRealData() {
       assert.equal(stepOf(v0, "AI_CONFIG").detail, CUSTOMER_AI_STATE_HINT.NEEDS_SETUP);
       assert.deepEqual([v0.next?.key, v0.next?.href], ["CHANNEL", FIRST_VALUE_HREF.connections], "nối thẳng Facebook còn đóng ⇒ lối Pancake");
       assert.equal((await loadFirstValue(staff)).show, false, "nhân viên chỉ xem không thấy danh sách thiết lập");
+      // Trang nhà: chủ shop cửa hàng mới ⇒ «Tổng quan»; nhân viên không thấy danh sách ⇒ hộp thư.
+      assert.equal(await shellLandingFor(admin, { cacheMs: 0 }), SALES_AGENT_OVERVIEW_HREF, "chưa thiết lập xong ⇒ «Tổng quan»");
+      assert.equal(await shellLandingFor(staff, { cacheMs: 0 }), SALES_AGENT_INBOX_HREF, "nhân viên ⇒ hộp thư như cũ");
 
       // Kiểm tra kết nối HỎNG ⇒ «Kết nối Facebook» là LỖI, lý do là câu khách của màn Kênh kết nối.
       await quickConnectFanpage(admin, { pageId: PAGE, pageAccessToken: TOKEN }, { tester: { fetch: fakePancake(false) } });
@@ -413,6 +438,7 @@ async function testRealData() {
       invalidateOrganizations();
       const v10 = await loadFirstValue(admin);
       assert.ok(v10.allDone && v10.done === 9 && v10.next === null, JSON.stringify(v10.steps.filter((s) => s.status !== "DONE")));
+      assert.equal(await shellLandingFor(admin, { cacheMs: 0 }), SALES_AGENT_INBOX_HREF, "đủ chín bước ⇒ hộp thư như #638");
       const html = renderToStaticMarkup(createElement(FirstValueChecklist, { view: v10 }));
       assert.match(html, /Đã sẵn sàng bán/);
     });
@@ -430,8 +456,9 @@ export async function testOnboardingV2() {
   testCopy(seen);
   testRender();
   testPlacement();
+  testLandingPure();
   await testRealData();
   console.log(
-    "✓ Thiết lập giá trị đầu tiên (vỏ Chốt Đơn): chín bước MỘT danh sách — mỗi bước đủ ba nhánh xong / cần làm / cần sửa từ dữ liệu thật (kiểm tra kết nối hỏng · hết hàng theo sổ kho · AI chưa dùng được), không bước nào xong khi thiếu chứng cứ; nút «Tiếp tục thiết lập» tới bước chưa xong đầu tiên người xem làm được; đủ chín ⇒ thẻ «Đã sẵn sàng bán»; không thuật ngữ kỹ thuật; trang chủ ERP không đổi",
+    "✓ Thiết lập giá trị đầu tiên (vỏ Chốt Đơn): chín bước MỘT danh sách — mỗi bước đủ ba nhánh xong / cần làm / cần sửa từ dữ liệu thật (kiểm tra kết nối hỏng · hết hàng theo sổ kho · AI chưa dùng được), không bước nào xong khi thiếu chứng cứ; nút «Tiếp tục thiết lập» tới bước chưa xong đầu tiên người xem làm được; đủ chín ⇒ thẻ «Đã sẵn sàng bán»; sau đăng nhập / mở «/»: chưa xong ⇒ «Tổng quan», xong ⇒ hộp thư; không thuật ngữ kỹ thuật; trang chủ ERP không đổi",
   );
 }
