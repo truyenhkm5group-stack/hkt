@@ -20,7 +20,7 @@ export function OrderActions({ id, status, text, canWrite }: { id: string; statu
       {canWrite && status === "DRAFT" ? <Button size="sm" onClick={() => set("SENT")} disabled={pending}><Send className="size-4" /> Đánh dấu đã gửi xưởng</Button> : null}
       {canWrite && status === "SENT" ? <Button size="sm" variant="outline" onClick={() => set("RECEIVED")} disabled={pending}>Đã nhận hàng về</Button> : null}
       {canWrite && status !== "CANCELLED" && status !== "RECEIVED" ? <Button size="sm" variant="ghost" onClick={() => set("CANCELLED")} disabled={pending}>Huỷ bảng</Button> : null}
-      {canWrite && status === "DRAFT" ? <Button size="sm" variant="ghost" className="text-destructive" onClick={() => { if (confirm("Xoá bảng nháp này?")) startTransition(async () => { const r = await deleteProductionOrder(id); if ("error" in r) toast.error(r.error); else router.push("/inventory/planning/orders"); }); }} disabled={pending}><Trash2 className="size-4" /></Button> : null}
+      {canWrite && status === "DRAFT" ? <Button size="sm" variant="ghost" className="text-destructive" aria-label="Xoá bảng nháp" title="Xoá bảng nháp" onClick={() => { if (confirm("Xoá bảng nháp này?")) startTransition(async () => { const r = await deleteProductionOrder(id); if ("error" in r) toast.error(r.error); else router.push("/inventory/planning/orders"); }); }} disabled={pending}><Trash2 className="size-4" /></Button> : null}
     </div>
   );
 }

@@ -38,7 +38,7 @@ export function SuggestedTransition({ modelId, to, reason }: { modelId: string; 
   }
   return (
     <div className="w-full space-y-1.5">
-      <Textarea rows={2} maxLength={1000} value={text} onChange={(e) => setText(e.target.value)} />
+      <Textarea aria-label="Lý do chuyển trạng thái" rows={2} maxLength={1000} value={text} onChange={(e) => setText(e.target.value)} />
       <div className="flex flex-wrap items-center gap-2">
         <Button size="sm" className="h-7" disabled={pending || !reasonIsEnough(text)} onClick={luu}>
           {pending ? "Đang lưu…" : `Xác nhận chuyển sang ${MODEL_STATE_LABELS[to]}`}

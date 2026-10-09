@@ -72,11 +72,18 @@ function useRun() {
   return { pending, run };
 }
 
+/**
+ * Nhãn BỌC ô nhập (một `<label>` thật) để trình đọc màn hình đọc được tên của cả 36 ô trên trang lô xưởng — `<Label>` đứng cạnh
+ * mà không có `htmlFor` thì ô không có tên. Mỗi `Field` bọc đúng MỘT điều khiển (đã đếm 09/10/2026); gợi ý đứng ngoài nhãn để
+ * không bị đọc thành một phần của tên.
+ */
 function Field({ label, children, hint }: { label: string; children: React.ReactNode; hint?: React.ReactNode }) {
   return (
     <div className="space-y-1.5">
-      <Label className="text-xs">{label}</Label>
-      {children}
+      <label className="block space-y-1.5">
+        <span className="block text-xs leading-none font-medium select-none">{label}</span>
+        {children}
+      </label>
       {hint ? <p className="text-[11px] text-muted-foreground">{hint}</p> : null}
     </div>
   );
@@ -370,7 +377,7 @@ export function BatchDialog({ options, suppliers, batch }: { options: WorkshopFo
               <CellsMatrix variants={variants} values={cellValues} onChange={setCellValues} />
             ) : (
               <div className="grid gap-3 sm:grid-cols-3">
-                <Input inputMode="numeric" value={f.orderedQty} onChange={(e) => set({ orderedQty: digits(e.target.value) })} placeholder="SL đặt hàng *" />
+                <Input aria-label="Số lượng đặt hàng" inputMode="numeric" value={f.orderedQty} onChange={(e) => set({ orderedQty: digits(e.target.value) })} placeholder="SL đặt hàng *" />
                 <p className="text-[11px] text-muted-foreground sm:col-span-2">Ghi dạng tổng thì trang Thiếu hàng KHÔNG trừ được lô này vào mẫu nào — chia theo màu/size để ERP tự thôi nhắc khi đã đặt đủ.</p>
               </div>
             )}

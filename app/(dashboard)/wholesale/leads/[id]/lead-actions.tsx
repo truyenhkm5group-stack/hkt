@@ -164,10 +164,10 @@ export function LeadActions({ lead, canWork, users, handoff }: { lead: LeadInfo;
               </option>
             ))}
           </select>
-          <Textarea rows={3} placeholder="Khách nói gì / đang nhập hàng ở đâu / cần gì" value={note} onChange={(e) => setNote(e.target.value)} />
+          <Textarea aria-label="Ghi chú cuộc gọi" rows={3} placeholder="Khách nói gì / đang nhập hàng ở đâu / cần gì" value={note} onChange={(e) => setNote(e.target.value)} />
           <label className="block text-xs text-muted-foreground">
             Hẹn gọi lại
-            <Input type="date" value={followup} onChange={(e) => setFollowup(e.target.value)} />
+            <Input aria-label="Ngày hẹn gọi lại" type="date" value={followup} onChange={(e) => setFollowup(e.target.value)} />
           </label>
           {(outcome === "ANSWERED" || outcome === "CALLBACK") && !lead.ownAddress && lead.address ? (
             <label className="flex items-start gap-2 text-xs">
@@ -190,11 +190,11 @@ export function LeadActions({ lead, canWork, users, handoff }: { lead: LeadInfo;
 
       {panel === "note" ? (
         <div className="space-y-2 rounded-md border p-2">
-          <Textarea rows={3} placeholder="Ghi chú bán hàng" value={note} onChange={(e) => setNote(e.target.value)} />
-          <Input placeholder="Việc tiếp theo (vd gửi catalog qua Zalo)" value={nextAction} onChange={(e) => setNextAction(e.target.value)} />
+          <Textarea aria-label="Ghi chú bán hàng" rows={3} placeholder="Ghi chú bán hàng" value={note} onChange={(e) => setNote(e.target.value)} />
+          <Input aria-label="Việc tiếp theo" placeholder="Việc tiếp theo (vd gửi catalog qua Zalo)" value={nextAction} onChange={(e) => setNextAction(e.target.value)} />
           <label className="block text-xs text-muted-foreground">
             Hẹn gọi lại
-            <Input type="date" value={followup} onChange={(e) => setFollowup(e.target.value)} />
+            <Input aria-label="Ngày hẹn gọi lại" type="date" value={followup} onChange={(e) => setFollowup(e.target.value)} />
           </label>
           <Button size="sm" disabled={pending || !note.trim()} onClick={() => run(() => addLeadNoteAction(lead.id, { note, nextFollowupAt: followupIso, nextAction }), "Đã thêm ghi chú")}>
             Lưu ghi chú
@@ -211,8 +211,8 @@ export function LeadActions({ lead, canWork, users, handoff }: { lead: LeadInfo;
               </option>
             ))}
           </select>
-          {status === "LOST" ? <Input placeholder="Lý do mất (bắt buộc)" value={lostReason} onChange={(e) => setLostReason(e.target.value)} /> : null}
-          <Textarea rows={2} placeholder={status === "DO_NOT_CONTACT" ? "Lý do khách từ chối liên hệ (bắt buộc)" : "Ghi chú (không bắt buộc)"} value={note} onChange={(e) => setNote(e.target.value)} />
+          {status === "LOST" ? <Input aria-label="Lý do mất khách" placeholder="Lý do mất (bắt buộc)" value={lostReason} onChange={(e) => setLostReason(e.target.value)} /> : null}
+          <Textarea aria-label="Ghi chú" rows={2} placeholder={status === "DO_NOT_CONTACT" ? "Lý do khách từ chối liên hệ (bắt buộc)" : "Ghi chú (không bắt buộc)"} value={note} onChange={(e) => setNote(e.target.value)} />
           <Button size="sm" disabled={pending} onClick={() => run(() => updateLeadStatusAction(lead.id, { status, note, lostReason }), `Đã chuyển sang «${LEAD_STATUS_LABEL[status]}»`)}>
             Lưu trạng thái
           </Button>
@@ -221,8 +221,8 @@ export function LeadActions({ lead, canWork, users, handoff }: { lead: LeadInfo;
 
       {panel === "opportunity" ? (
         <div className="space-y-2 rounded-md border p-2">
-          <Input inputMode="numeric" placeholder="Giá trị ước tính mỗi tháng (₫) — để trống nếu chưa biết" value={value} onChange={(e) => setValue(e.target.value.replace(/[^\d]/g, ""))} />
-          <Textarea rows={3} placeholder="Khách quan tâm mặt hàng gì, số lượng, tần suất nhập" value={note} onChange={(e) => setNote(e.target.value)} />
+          <Input aria-label="Giá trị ước tính mỗi tháng" inputMode="numeric" placeholder="Giá trị ước tính mỗi tháng (₫) — để trống nếu chưa biết" value={value} onChange={(e) => setValue(e.target.value.replace(/[^\d]/g, ""))} />
+          <Textarea aria-label="Nhu cầu của khách" rows={3} placeholder="Khách quan tâm mặt hàng gì, số lượng, tần suất nhập" value={note} onChange={(e) => setNote(e.target.value)} />
           <Button size="sm" disabled={pending} onClick={() => run(() => saveOpportunityAction(lead.id, { value: value ? Number(value) : null, note }), "Đã lưu cơ hội bán sỉ")}>
             Lưu cơ hội
           </Button>
@@ -232,9 +232,9 @@ export function LeadActions({ lead, canWork, users, handoff }: { lead: LeadInfo;
       {panel === "convert" ? (
         <div className="space-y-2 rounded-md border p-2">
           <p className="text-xs text-muted-foreground">Tạo khách hàng ERP từ lead (đúng lõi tạo khách có sẵn). Khách cùng SĐT đã có ⇒ nối vào khách đó, không tạo bản thứ hai. Lead chuyển «Chốt được».</p>
-          <Input placeholder="Tên khách" value={conv.name} onChange={(e) => setConv({ ...conv, name: e.target.value })} />
-          <Input placeholder="SĐT khách xác nhận" value={conv.phone} onChange={(e) => setConv({ ...conv, phone: e.target.value })} />
-          <Input placeholder="Địa chỉ giao hàng" value={conv.address} onChange={(e) => setConv({ ...conv, address: e.target.value })} />
+          <Input aria-label="Tên khách" placeholder="Tên khách" value={conv.name} onChange={(e) => setConv({ ...conv, name: e.target.value })} />
+          <Input aria-label="SĐT khách xác nhận" placeholder="SĐT khách xác nhận" value={conv.phone} onChange={(e) => setConv({ ...conv, phone: e.target.value })} />
+          <Input aria-label="Địa chỉ giao hàng" placeholder="Địa chỉ giao hàng" value={conv.address} onChange={(e) => setConv({ ...conv, address: e.target.value })} />
           <Button
             size="sm"
             disabled={pending}
@@ -248,7 +248,7 @@ export function LeadActions({ lead, canWork, users, handoff }: { lead: LeadInfo;
       {panel === "dnc" ? (
         <div className="space-y-2 rounded-md border border-destructive/40 p-2">
           <p className="text-xs text-muted-foreground">SĐT, website và địa điểm này vào danh sách KHÔNG LIÊN HỆ: mọi lời chào đang chờ bị huỷ, không chiến dịch nào đưa lại vào hàng đợi.</p>
-          <Textarea rows={2} placeholder="Khách nói gì (bắt buộc)" value={note} onChange={(e) => setNote(e.target.value)} />
+          <Textarea aria-label="Khách nói gì" rows={2} placeholder="Khách nói gì (bắt buộc)" value={note} onChange={(e) => setNote(e.target.value)} />
           <Button size="sm" variant="destructive" disabled={pending} onClick={() => run(() => updateLeadStatusAction(lead.id, { status: "DO_NOT_CONTACT", note }), "Đã đưa vào danh sách không liên hệ")}>
             Xác nhận không liên hệ
           </Button>
