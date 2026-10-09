@@ -17,6 +17,7 @@ import { FileUp } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { LinkPending, NavLink, StaleWhileRefreshing } from "@/components/nav-progress";
 import { PageHeader } from "@/components/page-header";
+import { StatStrip } from "@/components/stat-tile";
 import { ModuleSyncButton } from "@/components/module-sync-button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { assignableUsers } from "@/lib/actions/alerts";
@@ -84,12 +85,12 @@ export default async function ShipmentsPage({ searchParams }: { searchParams: Pr
     <NavLink
       href={key === "care" ? "/shipments" : `/shipments?view=${key}`}
       className={cn(
-        "inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[12.5px] font-medium transition-colors",
+        "inline-flex items-center gap-1.5 whitespace-nowrap rounded-md px-3 py-1.5 text-[13.5px] font-medium transition-colors",
         view === key ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
       )}
     >
       {label}
-      {count !== undefined ? <span className={cn("numeric rounded px-1 text-[10.5px]", view === key ? "bg-muted" : "bg-muted/60")}>{formatNumber(count)}</span> : null}
+      {count !== undefined ? <span className={cn("numeric rounded px-1 text-xs", view === key ? "bg-muted" : "bg-muted/60")}>{formatNumber(count)}</span> : null}
       {/*
         PHẢN HỒI TẠI CHỖ, KHÔNG CHỈ Ở THANH TRÊN ĐỈNH. Đổi tab là một lượt dựng lại trên máy chủ:
         người dùng bấm, màn hình đứng im, và họ bấm lại lần hai. Thanh tiến trình mảnh trên đỉnh
@@ -106,7 +107,7 @@ export default async function ShipmentsPage({ searchParams }: { searchParams: Pr
         eyebrow="Giao vận"
         title="Vận đơn & care"
         hint="Chiều ĐVVC (Viettel Post báo gì) và chiều care (đội đã làm tới đâu) là hai cột riêng, không suy ra lẫn nhau. Kiện rời hàng đợi khi điều kiện cần care hết; lịch sử giữ nguyên trong ngăn kéo và nhật ký."
-        description={wb ? `${formatNumber(wb.counts.care)} kiện cần care · COD treo ${formatVND(wb.moneyAtRisk, { compact: true })} · ${formatNumber(wb.overdue)} vỡ SLA · ${formatNumber(wb.unassigned)} chưa ai nhận` : undefined}
+        description="Kiện cần gọi khách, chờ khách hẹn, cần cấp trên — xử lý từ trên xuống."
         actions={
           <>
             {canAssign && wb ? <AutoAssignButton department="LOGISTICS" unassigned={wb.unassigned} label="Chia case chưa ai nhận" /> : null}
@@ -136,17 +137,35 @@ export default async function ShipmentsPage({ searchParams }: { searchParams: Pr
           </>
         }
       />
+      {/*
+        BỐN CON SỐ CỦA HÀNG ĐỢI, ĐỌC BẰNG MẮT LƯỚT (chủ shop 09/10/2026). Trước đây cả bốn nằm trong một câu chữ xám dưới tiêu
+        đề — «12 kiện cần care · COD treo … · 3 vỡ SLA · 5 chưa ai nhận» — muốn lấy một số phải đọc cả câu. Cùng số của
+        `getCareWorkbench`, không tính lại.
+      */}
+      {wb ? (
+        <StatStrip
+          items={[
+            { label: "Kiện cần care", value: formatNumber(wb.counts.care), note: `${formatNumber(wb.counts.waiting)} chờ khách · ${formatNumber(wb.counts.escalated)} cần cấp trên` },
+            { label: "COD đang treo", value: formatVND(wb.moneyAtRisk, { compact: true }), tone: wb.moneyAtRisk > 0 ? "amber" : "muted" },
+            { label: "Vỡ hạn xử lý", value: formatNumber(wb.overdue), tone: wb.overdue > 0 ? "rose" : "muted" },
+            { label: "Chưa ai nhận", value: formatNumber(wb.unassigned), tone: wb.unassigned > 0 ? "amber" : "muted" },
+          ]}
+        />
+      ) : null}
       <Suspense fallback={null}>
         <DataFreshnessStrip />
       </Suspense>
 
       <div className="flex flex-wrap items-center gap-2">
-        <div className="inline-flex flex-wrap items-center gap-0.5 rounded-lg bg-muted p-0.5">
+        {/* Điện thoại: một hàng tab cuộn ngang thay vì gãy hai hàng. */}
+        <div className="-mx-3 max-w-[calc(100%+1.5rem)] overflow-x-auto px-3 [scrollbar-width:none] sm:mx-0 sm:max-w-full sm:px-0 [&::-webkit-scrollbar]:hidden">
+        <div className="inline-flex items-center gap-0.5 rounded-lg bg-muted p-0.5 [&>*]:shrink-0">
           {tab("care", CARE_VIEW_LABEL.care, counts.care)}
           {tab("waiting", CARE_VIEW_LABEL.waiting, counts.waiting)}
           {tab("escalated", CARE_VIEW_LABEL.escalated, counts.escalated)}
           {tab("done", CARE_VIEW_LABEL.done, counts.done)}
           {tab("all", CARE_VIEW_LABEL.all)}
+        </div>
         </div>
         <InfoHint>
           {view === "report"
