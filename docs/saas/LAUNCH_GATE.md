@@ -45,20 +45,20 @@ production vẫn là 🟡. Mục từng 🟡 mà review tìm ra lỗi chặn th�
 | C2 | Đăng nhập email + mật khẩu | ✅ PROD | #681 + `identity-reconcile` (THIẾU 0). nghiệm thu production `saas-acceptance --apply` PASS 4/4 (run 37838073371, production 6883bfbf → c7183395) bước B1: đăng nhập email + mật khẩu KHÔNG mã tổ chức ra đúng workspace; mật khẩu sai bị từ chối |
 | C3 | Vỏ không lộ nội bộ | ✅ PROD | #669 · #680 · #700 (câu `BILLING_LOCKED` theo sản phẩm, thương hiệu sau redirect) đã lên production. nghiệm thu production `saas-acceptance --apply` PASS 4/4 (run 37838073371, production 6883bfbf → c7183395) bước C: 8 mục vỏ qua host app Chốt Đơn đều 200, mang dấu vỏ + thương hiệu Chốt Đơn, KHÔNG lộ khung ERP, không vòng chuyển hướng; tuyến ERP bị chặn về trang nhà |
 | C4 | Hướng dẫn bước tiếp theo | 🟡 CODE | #680 (trạng thái rỗng · Hướng dẫn · 404 · `/login` khi còn phiên không còn vòng trắng: 6.007 → 2 lần điều hướng) |
-| C5 | Thiết lập sản phẩm | 🟡 CODE | Nhập sản phẩm / mẫu ngành |
+| C5 | Thiết lập sản phẩm | ✅ PROD | nghiệm thu production `saas-acceptance --apply --prep --e2e` PASS 7/7 (run 37935922309, production a951f77a) bước P: sản phẩm mẫu `NT-AO-01` 150.000 ₫ tạo qua `createProductCore` (lõi của Sản phẩm → Tạo sản phẩm) + phiếu NHẬP HÀNG qua `writeStockReceiptCore` — đi lõi, không bấm trình duyệt (ACCEPTANCE §2) |
 | C6 | Nối Facebook | ⛔ NGOÀI | Meta chưa cấp quyền Page — `docs/meta-app-review/HUONG_DAN_CHU_SHOP.md` |
-| C7 | Hộp thư mở được | 🟡 CODE | F-01 trang trắng sau đăng nhập đã hết (#671) |
-| C8 | Tin khách vào hộp thư | 🟡 CODE | Kênh thay thế lúc chờ Meta: chat web `<tên>.erp.vnxcommerce.com/chat` (DNS wildcard trỏ VPS — đo 08/10), Pancake, Zalo |
-| C9 | Nhân viên trả lời | 🟡 CODE | `sendStaffReplyCore`; #661 / #666 |
-| C10 | AI trả lời | 🟡 CODE | Bot HSLC chạy thật hằng ngày (bằng chứng vận hành, không phải smoke khách mới) |
-| C11 | Tiếp quản / trả lại AI | 🟡 CODE | #633 |
-| C12 | Tạo đơn nháp từ hội thoại | 🟡 CODE | Golden v2 (#664) |
-| C13 | SKU / SL / SĐT / địa chỉ đúng | 🟡 CODE | Golden v2: SKU 29/29 · SL 34/34 · SĐT 28/29 · địa chỉ 87/87 |
-| C14 | Dữ liệu mơ hồ ⇒ cần người kiểm | 🟡 CODE | #675 |
-| C15 | Xác nhận tay | 🟡 CODE | #675 nút nhanh Xác nhận / Huỷ |
-| C16 | Đơn hợp lệ vào OMS | 🟡 CODE | Đơn ERP |
-| C17 | Không đơn trùng | 🟡 CODE | Golden v2: đơn trùng 0/30 |
-| C18 | Đồng hồ dùng / hạn mức đúng | 🟡 CODE | AI_CUSTOMER (0228) |
+| C7 | Hộp thư mở được | ✅ PROD | nghiệm thu production `saas-acceptance --apply --prep --e2e` PASS 7/7 (run 37935922309, production a951f77a) bước C: 8 mục vỏ (gồm Hộp thư) 200 qua host app Chốt Đơn bằng phiên khách thử |
+| C8 | Tin khách vào hộp thư | ✅ PROD | nghiệm thu production `saas-acceptance --apply --prep --e2e` PASS 7/7 (run 37935922309, production a951f77a) bước D: tin khách vào qua kênh CHAT WEB (`openConversation("WEB")` + `chatTurn`) — kênh thay thế lúc chờ Meta; fanpage / Zalo chưa đi (ACCEPTANCE §2) |
+| C9 | Nhân viên trả lời | 🟡 CODE | `sendStaffReplyCore`; #661 / #666 · CHƯA đi qua trên production: E2E 09/10 không phủ mục này (ACCEPTANCE §2) |
+| C10 | AI trả lời | ✅ PROD | nghiệm thu production `saas-acceptance --apply --prep --e2e` PASS 7/7 (run 37935922309, production a951f77a) bước D: AI trả lời từng lượt (AI dùng chung, ≈ 0,0153 USD cả lượt) |
+| C11 | Tiếp quản / trả lại AI | 🟡 CODE | #633 · CHƯA đi qua trên production: E2E 09/10 không phủ mục này (ACCEPTANCE §2) |
+| C12 | Tạo đơn nháp từ hội thoại | ✅ PROD | nghiệm thu production `saas-acceptance --apply --prep --e2e` PASS 7/7 (run 37935922309, production a951f77a) bước D: bot lên đơn nháp từ hội thoại rồi chốt khi khách đồng ý |
+| C13 | SKU / SL / SĐT / địa chỉ đúng | ✅ PROD | nghiệm thu production `saas-acceptance --apply --prep --e2e` PASS 7/7 (run 37935922309, production a951f77a) bước D: đơn khớp đúng SKU · số lượng · SĐT · xã |
+| C14 | Dữ liệu mơ hồ ⇒ cần người kiểm | 🟡 CODE | #675 · CHƯA đi qua trên production: E2E 09/10 không phủ mục này (ACCEPTANCE §2) |
+| C15 | Xác nhận tay | 🟡 CODE | #675 nút nhanh Xác nhận / Huỷ · CHƯA đi qua trên production: E2E 09/10 không phủ mục này (ACCEPTANCE §2) |
+| C16 | Đơn hợp lệ vào OMS | ✅ PROD | nghiệm thu production `saas-acceptance --apply --prep --e2e` PASS 7/7 (run 37935922309, production a951f77a) bước D: đơn **CONFIRMED** trong OMS của workspace thử |
+| C17 | Không đơn trùng | 🟡 CODE | Golden v2: đơn trùng 0/30 · CHƯA đi qua trên production: E2E 09/10 không phủ mục này (ACCEPTANCE §2) |
+| C18 | Đồng hồ dùng / hạn mức đúng | 🟡 CODE | AI_CUSTOMER (0228) · CHƯA đi qua trên production: E2E 09/10 không phủ mục này (ACCEPTANCE §2) |
 | C19 | Luồng chính dùng được trên điện thoại | 🟡 CODE | Vỏ 390 px (SHELL_AUDIT); `/settings/users` nhiều phần tử nhỏ — P1 |
 
 ## 3. BẢO MẬT
@@ -83,7 +83,7 @@ nhập chỉ trong bộ nhớ tiến trình; lỗi ghi đơn bị ghi NHẦM th�
 | O3 | Webhook hỏng | 🟡 CODE | ops `ops-signals-check` trên production PASS 9 tổ chức × 8 tín hiệu, 0 ô tính hỏng (run 37853956678 · 37860619173 · 37867472656): 8/9 UNKNOWN (BASELINE_THIN — nền 14 ngày chưa đủ). Tính được trên production; chưa có sự cố dựng sẵn để chứng minh tín hiệu PHÁT HIỆN đúng |
 | O4 | AI im lặng | 🟡 CODE | ops `ops-signals-check` trên production PASS 9 tổ chức × 8 tín hiệu, 0 ô tính hỏng (run 37853956678 · 37860619173 · 37867472656): 6 OK · 2 WARNING · 1 UNKNOWN — cảnh báo là số thật nhưng CHƯA kiểm đúng / báo nhầm. Tính được trên production; chưa có sự cố dựng sẵn để chứng minh tín hiệu PHÁT HIỆN đúng |
 | O5 | Gửi tin (Send API) hỏng | 🟡 CODE | ops `ops-signals-check` trên production PASS 9 tổ chức × 8 tín hiệu, 0 ô tính hỏng (run 37853956678 · 37860619173 · 37867472656): 8 OK · 1 WARNING — CHƯA kiểm đúng / báo nhầm. Tính được trên production; chưa có sự cố dựng sẵn để chứng minh tín hiệu PHÁT HIỆN đúng |
-| O6 | Đơn không hợp lệ | 🟡 CODE | ops `ops-signals-check` trên production PASS 9 tổ chức × 8 tín hiệu, 0 ô tính hỏng (run 37853956678 · 37860619173 · 37867472656): 9 OK. Tính được trên production; chưa có sự cố dựng sẵn để chứng minh tín hiệu PHÁT HIỆN đúng |
+| O6 | Đơn không hợp lệ | ✅ PROD | `saas-acceptance --apply --drills` (run 37892162094) cố ý gọi bộ chạy công cụ bot THIẾU SĐT ⇒ `ops-signals-check` (run 37892240945) báo `cdt-nghiem-thu` O6 = WARNING · `MISSING_CONTACT` — sự cố dựng sẵn bị phát hiện |
 | O7 | Ghi đơn (OMS) hỏng | 🟡 CODE | ops `ops-signals-check` trên production PASS 9 tổ chức × 8 tín hiệu, 0 ô tính hỏng (run 37853956678 · 37860619173 · 37867472656): 9 OK. Tính được trên production; chưa có sự cố dựng sẵn để chứng minh tín hiệu PHÁT HIỆN đúng |
 | O8 | Hết hạn mức | 🟡 CODE | ops `ops-signals-check` trên production PASS 9 tổ chức × 8 tín hiệu, 0 ô tính hỏng (run 37853956678 · 37860619173 · 37867472656): 9 OK. Tính được trên production; chưa có sự cố dựng sẵn để chứng minh tín hiệu PHÁT HIỆN đúng |
 
@@ -132,3 +132,4 @@ Không dùng dữ liệu khách thật theo cách phá huỷ.
 | 08/10/2026 tối | #681 (P0 đăng nhập email) + #680 (Finish Line) gộp, deploy 37781964748 thành công (production aa4b69ce); `identity-reconcile` ghi bù 12 chỉ mục, THIẾU 0. Round 2 giao phiên Fable code-erp-a4. Thêm mục 4 QUAN SÁT (8 tín hiệu, §11) — mẫu số 33 → 41. A1 + A4 LÙI về 🔧 vì review #682. Admin 2,5/10 (25 %) · Khách 9/19 (47 %; 9/18 = 50 % bỏ Meta) · Bảo mật 2,5/4 · Quan sát 0,5/8 · Tổng 14,5/41 = 35 %. Đã kiểm production thật: 1/41. P0 còn: A1 / A4 tạo khách đúng mặc định (#682). NOT READY |
 | 09/10/2026 sáng | Deploy 37829126099 (6883bfbf: #682 #683 #690 #694 #696 #697 #698 #699 #700) + 37838226087 (c7183395: #692 #702 #703 #704), hậu kiểm ĐẠT (health · 238 migration · smoke). Nghiệm thu production `saas-acceptance --apply` PASS 4/4 (run 37838073371): A1–A5, C1–C3 lên ✅. A6–A8, A10 + O1–O7 lên 🟡 (đã deploy, chưa đi qua trên production). Admin 7,5/10 (75 %) · Khách 10,5/19 (55 %; 10,5/18 = 58 % bỏ Meta) · Bảo mật 2,5/4 · Quan sát 4/8 · Tổng 24,5/41 = 60 %. Đã kiểm production thật: 9/41. P0 trong cổng: 0 mở; đường tới ĐẠT = E2E D + E (C8–C17) và kiểm O1–O8 trên production. NOT READY |
 | 09/10/2026 trưa | Production `d23c0deb` (#705–#714) rồi lô #715 #716 (sự thật đơn trên trang khách · giá vốn chưa biết in «—»), #717 (Sửa đơn VTP không gửi sai COD — chủ shop gộp vì chạm tệp ORDER_OUTCOME). `ops-signals-check` (#710) chạy trên production: PASS 9 tổ chức × 8 tín hiệu. O1 lên ✅ bằng sự cố dựng sẵn ở hai luồng (RESET_LINK + LOGIN, #711); O2–O8 giữ 🟡 (tính được, chưa chứng minh phát hiện). Admin 7,5/10 · Khách 10,5/19 · Bảo mật 2,5/4 · Quan sát 4,5/8 · Tổng 25/41 = 61 %. Đã kiểm production thật: 10/41. Đường tới ĐẠT: E2E D + E (chờ chủ shop chuẩn bị UI) và chứng minh phát hiện O2–O8. NOT READY |
+| 09/10/2026 tối | Lần đầu đi trọn chat → AI → đơn trên production: `saas-acceptance --apply --prep --e2e` PASS 7/7 (run 37935922309, production a951f77a; bước P tự dựng workspace thử theo quyết định chủ shop 09/10). C5 · C7 · C8 · C10 · C12 · C13 · C16 lên ✅; O6 lên ✅ (diễn tập 37892162094 ⇒ tín hiệu 37892240945). Không phủ: kênh fanpage / Zalo, nhân viên trả lời, tiếp quản, dữ liệu mơ hồ, xác nhận tay, đơn trùng, đồng hồ khách AI, điện thoại. Chủ shop 09/10: GIỮ đăng ký mở (C1 #4 đóng); «Nhân viên bán hàng» được quyền trả lời (#741). Admin 7,5/10 · Khách 14/19 (74 %) · Bảo mật 2,5/4 · Quan sát 5/8 · Tổng 29/41 = 71 %. Đã kiểm production thật: 18/41. NOT READY |
