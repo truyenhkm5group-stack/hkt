@@ -1,0 +1,26 @@
+{
+  "schema": 1,
+  "mission_id": "launch-gate-r6",
+  "title": "Launch Gate r6: bảo mật S1–S3 + C9 C11 C14 C15 C17 C18 lên ✅ bằng production",
+  "business_goal": "",
+  "status": "RUNNING",
+  "priority": "P2",
+  "risk": "MEDIUM",
+  "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "worker": null,
+  "worktree": null,
+  "branch": "docs/launch-gate-r6",
+  "base_sha": "863aa76aa318174ce6923496fe906c74c2c5f0cd",
+  "domains": [],
+  "owned_paths": [
+    "docs/saas/LAUNCH_GATE.md"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-09T20:10:08.617Z",
+  "updated_at": "2026-10-09T20:10:08.617Z",
+  "last_heartbeat": "2026-10-09T20:10:08.617Z",
+  "definition_of_done": []
+}
