@@ -3,7 +3,7 @@
   "mission_id": "registry-reconcile-0910",
   "title": "Đối chiếu sổ sứ mệnh tổng + checkpoint với main 50293da6 / production (lô #705–#727)",
   "business_goal": "",
-  "status": "VERIFYING",
+  "status": "DONE",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -24,13 +24,14 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-09T05:55:46.008Z",
-  "updated_at": "2026-10-09T10:09:53.656Z",
-  "last_heartbeat": "2026-10-09T06:08:37.955Z",
+  "updated_at": "2026-10-09T10:10:09.578Z",
+  "last_heartbeat": "2026-10-09T10:10:09.578Z",
   "definition_of_done": [],
   "evidence": {
     "merged": "#730 → 1668e1b23e1672d509f599c2aa2b139e15c7b722",
     "verify": "PASS 9e681c8ba4bbd03ef9e0f96adfa01bd5cd41af2c 2026-10-09T10:09:41.900Z",
-    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/37896555963"
+    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/37896555963",
+    "done": "production 9e681c8ba4bb · deploy 37896555963 xanh · verify ĐẠT"
   },
   "handoff": {
     "branch": "docs/registry-reconcile-0910",
