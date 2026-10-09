@@ -3,7 +3,7 @@
   "mission_id": "security-acceptance",
   "title": "MM-SEC-03: bằng chứng production cho S1 cô lập tổ chức · S2 bí mật ẩn · S3 token page mã hoá (ops chỉ đọc)",
   "business_goal": "",
-  "status": "RUNNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -26,7 +26,18 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-09T10:12:57.072Z",
-  "updated_at": "2026-10-09T10:12:57.072Z",
-  "last_heartbeat": "2026-10-09T10:12:57.072Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-09T15:04:28.991Z",
+  "last_heartbeat": "2026-10-09T15:04:28.991Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "feat/security-acceptance",
+    "sha": "a321c491d8bd1666a4672e51df4639651bf9199b",
+    "at": "2026-10-09T15:04:28.991Z",
+    "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+    "title": "MM-SEC-03: bằng chứng production cho S1 cô lập tổ chức · S2 bí mật ẩn · S3 token page mã hoá (ops chỉ đọc)",
+    "summary": "ops security-acceptance chỉ đọc: S1 cô lập (GET hai chiều) · S2 quét bí mật · S3 phong bì token (secretsAtRestCells)",
+    "tests": [
+      "npm test TẤT CẢ KIỂM THỬ ĐẠT rc=0 trên a321c491; typecheck + lint sạch"
+    ]
+  }
 }
