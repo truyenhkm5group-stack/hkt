@@ -107,10 +107,12 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
       <DataTableToolbar
         searchPlaceholder="Mã đơn, SĐT, tên khách, mã vận đơn, SKU…"
         period={{ defaultKey: "30d" }}
+        /*
+          THỨ TỰ = ƯU TIÊN (chủ shop 09/10/2026: bộ lọc nhanh ≤ 4–5). Bốn bộ lọc đầu đứng ngoài; phần còn lại vào ngăn kéo
+          «Bộ lọc khác», trên điện thoại tất cả vào một nút «Bộ lọc». Không bộ lọc nào bị bỏ.
+        */
         facets={[
           { key: "stage", label: "Trạng thái", options: stageFacet },
-          { key: "source", label: "Kênh bán", options: facets.sources },
-          { key: "carrier", label: "ĐVVC", options: facets.carriers },
           /*
             HAI BỘ LỌC TRẠNG THÁI ĐỨNG CẠNH NHAU, CÓ CHỦ ĐÍCH.
 
@@ -118,13 +120,15 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
             từ ĐVVC. Chênh lệch giữa hai cột chính là việc tồn đọng của khâu bàn giao, và nó chỉ
             nhìn thấy được khi cả hai cùng có mặt.
           */
-          { key: "fulfillment", label: "Hàng đang ở đâu (ĐVVC)", options: FULFILLMENT_BUCKET_ORDER.map((b) => ({ value: b, label: FULFILLMENT_BUCKET_LABEL[b] })) },
-          { key: "payment", label: "Thanh toán", options: [{ value: "cod", label: "Thu hộ COD" }, { value: "prepaid", label: "Đã thanh toán trước" }], single: true },
+          { key: "fulfillment", label: "Hàng đang ở đâu", options: FULFILLMENT_BUCKET_ORDER.map((b) => ({ value: b, label: FULFILLMENT_BUCKET_LABEL[b] })) },
           /*
             ĐƠN CẦN NGƯỜI KIỂM (chủ shop 08/10/2026): khách báo huỷ trong hội thoại · máy chốt khi địa chỉ chưa ghép được xã. Máy
             không tự huỷ / không tự bỏ qua — đơn nằm đây chờ người bấm «Xác nhận đơn» hoặc «Huỷ đơn».
           */
           ...(createGate.allowed || needsReview > 0 ? [{ key: "review", label: "Cần kiểm", options: [{ value: "flagged", label: `Cần người kiểm (${formatNumber(needsReview)})` }], single: true }] : []),
+          { key: "payment", label: "Thanh toán", options: [{ value: "cod", label: "Thu hộ COD" }, { value: "prepaid", label: "Đã thanh toán trước" }], single: true },
+          { key: "source", label: "Kênh bán", options: facets.sources },
+          { key: "carrier", label: "Đơn vị vận chuyển", options: facets.carriers },
           { key: "address", label: "Địa chỉ", options: [{ value: "unnormalized", label: `Chưa chuẩn hoá · không giao được (${formatNumber(summary.unnormalizedAddress)})` }, { value: "normalized", label: "Đã chuẩn hoá" }], single: true },
           ...(facets.sellers.length ? [{ key: "seller", label: "Nhân viên", options: facets.sellers }] : []),
         ]}

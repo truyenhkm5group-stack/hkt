@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import { parseAsArrayOf, parseAsString, useQueryState, useQueryStates } from "nuqs";
-import { CalendarDays, Check, ListFilter, Loader2, Search, X } from "lucide-react";
+import { CalendarDays, Check, ListFilter, Loader2, Search, SlidersHorizontal, X } from "lucide-react";
 import { PERIOD_OPTIONS, type PeriodKey } from "@/lib/search-params";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
@@ -12,6 +12,7 @@ import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
+import { Sheet, SheetClose as SheetPrimitiveClose, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { useNavTransition } from "@/components/nav-progress";
 
 export type FacetOption = { value: string; label: string; count?: number; icon?: React.ReactNode };
@@ -49,7 +50,7 @@ export function SearchInput({ placeholder = "Tìm kiếm…", className }: { pla
   return (
     <div className={cn("relative", className)}>
       <Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
-      <Input value={value} onChange={(e) => setValue(e.target.value)} placeholder={placeholder} className="h-8 w-full pl-8 sm:w-64" />
+      <Input value={value} onChange={(e) => setValue(e.target.value)} placeholder={placeholder} className="h-8 w-full pl-8 sm:w-72" />
       {value ? (
         <button type="button" className="absolute top-1/2 right-2 -translate-y-1/2 text-muted-foreground hover:text-foreground" onClick={() => setValue("")} aria-label="Xoá tìm kiếm">
           <X className="size-3.5" />
@@ -59,7 +60,11 @@ export function SearchInput({ placeholder = "Tìm kiếm…", className }: { pla
   );
 }
 
-export function FacetFilter({ facet }: { facet: FacetDef }) {
+/**
+ * Một bộ lọc nhiều lựa chọn đọc / ghi đúng một khoá URL. Dùng chung cho nút bộ lọc nhanh (popover) và
+ * khu «Bộ lọc khác» (ngăn kéo) — hai chỗ vẽ, MỘT cách ghi, nên chọn ở đâu thì URL cũng ra cùng một dạng.
+ */
+function useFacetSelection(facet: FacetDef) {
   const { options } = useShallowOff();
   const [selected, setSelected] = useQueryState(facet.key, parseAsArrayOf(parseAsString, ",").withDefault([]).withOptions(options));
   const [, setPage] = useQueryState("page", parseAsString.withOptions(options));
@@ -74,10 +79,19 @@ export function FacetFilter({ facet }: { facet: FacetDef }) {
     void setSelected(next.size ? [...next] : null);
     void setPage(null);
   };
+  const clear = () => {
+    void setSelected(null);
+    void setPage(null);
+  };
+  return { set, toggle, clear };
+}
+
+export function FacetFilter({ facet, className }: { facet: FacetDef; className?: string }) {
+  const { set, toggle, clear } = useFacetSelection(facet);
   return (
     <Popover>
       <PopoverTrigger asChild>
-        <Button variant="outline" size="sm" className="h-8 border-dashed">
+        <Button variant="outline" size="sm" className={cn("h-8", set.size > 0 ? "border-primary/40 bg-primary/5" : "border-dashed", className)}>
           <ListFilter className="size-3.5" />
           {facet.label}
           {set.size > 0 ? (
@@ -102,7 +116,7 @@ export function FacetFilter({ facet }: { facet: FacetDef }) {
           ) : null}
         </Button>
       </PopoverTrigger>
-      <PopoverContent className="w-[220px] p-0" align="start">
+      <PopoverContent className="w-[240px] p-0" align="start">
         <Command>
           {facet.options.length > 8 ? <CommandInput placeholder={facet.label} /> : null}
           <CommandList>
@@ -126,13 +140,7 @@ export function FacetFilter({ facet }: { facet: FacetDef }) {
               <>
                 <CommandSeparator />
                 <CommandGroup>
-                  <CommandItem
-                    onSelect={() => {
-                      void setSelected(null);
-                      void setPage(null);
-                    }}
-                    className="justify-center text-center"
-                  >
+                  <CommandItem onSelect={clear} className="justify-center text-center">
                     Bỏ lọc
                   </CommandItem>
                 </CommandGroup>
@@ -204,12 +212,106 @@ export function PeriodFilter({ defaultKey = "all", options = PERIOD_OPTIONS }: {
 export function ResetFilters({ keys }: { keys: string[] }) {
   const { options: shallowOffTx } = useShallowOff();
   const [state, setState] = useQueryStates(Object.fromEntries(keys.map((k) => [k, parseAsString])), shallowOffTx);
-  const active = Object.values(state).some((v) => v);
-  if (!active) return null;
+  // Đếm BỘ LỌC đang bật (không đếm số trang): nút nói "Xoá 3 bộ lọc" thì người dùng biết mình đang xem một tập đơn hẹp.
+  const count = Object.entries(state).filter(([k, v]) => v && k !== "page" && k !== "from" && k !== "to").length;
+  if (!count) return null;
   return (
-    <Button variant="ghost" size="sm" className="h-8 px-2" onClick={() => void setState(Object.fromEntries(keys.map((k) => [k, null])))}>
-      Xoá lọc <X className="size-3.5" />
+    <Button variant="ghost" size="sm" className="h-8 px-2 text-muted-foreground hover:text-foreground" onClick={() => void setState(Object.fromEntries(keys.map((k) => [k, null])))}>
+      Xoá lọc{count > 1 ? ` (${count})` : ""} <X className="size-3.5" />
     </Button>
+  );
+}
+
+/** Một nhóm lựa chọn trong ngăn kéo «Bộ lọc khác»: nút chữ to, bấm thẳng — không popover lồng trong ngăn kéo. */
+function FacetSection({ facet }: { facet: FacetDef }) {
+  const { set, toggle, clear } = useFacetSelection(facet);
+  return (
+    <fieldset className="space-y-2">
+      <div className="flex items-center justify-between gap-2">
+        <legend className="text-sm font-semibold">{facet.label}</legend>
+        {set.size > 0 ? (
+          <button type="button" className="text-xs font-medium text-muted-foreground hover:text-foreground" onClick={clear}>
+            Bỏ chọn
+          </button>
+        ) : null}
+      </div>
+      <div className="flex flex-wrap gap-1.5">
+        {facet.options.map((option) => {
+          const active = set.has(option.value);
+          return (
+            <button
+              key={option.value}
+              type="button"
+              aria-pressed={active}
+              onClick={() => toggle(option.value)}
+              className={cn(
+                "inline-flex min-h-8 items-center gap-1.5 rounded-full border px-3 py-1 text-[13px] transition-colors",
+                active ? "border-primary bg-primary text-primary-foreground" : "bg-card hover:bg-muted",
+              )}
+            >
+              {active ? <Check className="size-3.5" /> : null}
+              {option.label}
+              {typeof option.count === "number" ? <span className={cn("font-mono text-xs", active ? "opacity-80" : "text-muted-foreground")}>{option.count}</span> : null}
+            </button>
+          );
+        })}
+      </div>
+    </fieldset>
+  );
+}
+
+/** Số bộ lọc đang bật trong một tập facet — để nút mở ngăn kéo nói được "đang lọc 2" mà không cần mở ra xem. */
+function useActiveCount(facets: FacetDef[]) {
+  const [state] = useQueryStates(Object.fromEntries(facets.map((f) => [f.key, parseAsString])));
+  return facets.filter((f) => state[f.key]).length;
+}
+
+/**
+ * ═══════ BỘ LỌC KHÁC — NGĂN KÉO ═══════
+ *
+ * Trang danh sách lớn từng xếp 8–9 nút lọc thành hai, ba hàng; trên điện thoại chúng chiếm cả màn hình đầu và bảng
+ * bị đẩy xuống dưới nếp gấp. Bộ lọc dùng hằng ngày đứng ngoài (tối đa `quickCount`), phần còn lại vào ngăn kéo này.
+ * Trên điện thoại MỌI bộ lọc vào ngăn kéo — một nút "Bộ lọc" thay cho cả bức tường nút.
+ */
+function MoreFilters({ facets, label, className, side }: { facets: FacetDef[]; label: string; className?: string; side: "right" | "bottom" }) {
+  const active = useActiveCount(facets);
+  if (!facets.length) return null;
+  return (
+    <Sheet>
+      <SheetTrigger asChild>
+        <Button variant="outline" size="sm" className={cn("h-8", active > 0 && "border-primary/40 bg-primary/5", className)}>
+          <SlidersHorizontal className="size-3.5" />
+          {label}
+          {active > 0 ? (
+            <Badge className="ml-0.5 h-5 min-w-5 rounded-full px-1.5 text-[11px]" aria-label={`${active} bộ lọc đang bật`}>
+              {active}
+            </Badge>
+          ) : null}
+        </Button>
+      </SheetTrigger>
+      <SheetContent side={side} className={cn("gap-0", side === "bottom" ? "max-h-[85dvh] rounded-t-2xl" : "w-full sm:max-w-md")}>
+        <SheetHeader className="border-b">
+          <SheetTitle>{label}</SheetTitle>
+          <SheetDescription>Chọn xong là danh sách tự lọc lại.</SheetDescription>
+        </SheetHeader>
+        <div className="flex-1 space-y-5 overflow-y-auto p-4">
+          {facets.map((facet) => (
+            <FacetSection key={facet.key} facet={facet} />
+          ))}
+        </div>
+        <SheetFooter className="border-t">
+          <SheetCloseButton />
+        </SheetFooter>
+      </SheetContent>
+    </Sheet>
+  );
+}
+
+function SheetCloseButton() {
+  return (
+    <SheetPrimitiveClose asChild>
+      <Button className="w-full">Xem kết quả</Button>
+    </SheetPrimitiveClose>
   );
 }
 
@@ -220,6 +322,7 @@ export function DataTableToolbar({
   children,
   resultLabel,
   extraResetKeys = [],
+  quickCount = 4,
 }: {
   searchPlaceholder?: string;
   facets?: FacetDef[];
@@ -232,16 +335,27 @@ export function DataTableToolbar({
    * quên mất mình đang bật, rồi đọc con số của một tập đơn khác.
    */
   extraResetKeys?: string[];
+  /** Số bộ lọc đứng ngoài trên máy tính; phần còn lại vào ngăn kéo «Bộ lọc khác». Thứ tự `facets` = thứ tự ưu tiên. */
+  quickCount?: number;
 }) {
   const resetKeys = ["q", "page", ...facets.map((f) => f.key), ...extraResetKeys, ...(period ? ["period", "from", "to"] : [])];
+  /*
+    BỘ LỌC NHANH ≤ quickCount. Chỉ tách khi phần dư từ HAI bộ lọc trở lên — một nút "Bộ lọc khác" chứa đúng một bộ lọc
+    là thêm một cú bấm mà không bớt được chỗ nào.
+  */
+  const split = facets.length > quickCount + 1;
+  const quick = split ? facets.slice(0, quickCount) : facets;
+  const more = split ? facets.slice(quickCount) : [];
   return (
     <div className="flex flex-col gap-2">
       <div className="flex flex-wrap items-center gap-2">
-        {searchPlaceholder ? <SearchInput placeholder={searchPlaceholder} /> : null}
+        {searchPlaceholder ? <SearchInput placeholder={searchPlaceholder} className="w-full sm:w-auto" /> : null}
         {period ? <PeriodFilter defaultKey={period.defaultKey} /> : null}
-        {facets.map((facet) => (
-          <FacetFilter key={facet.key} facet={facet} />
+        {quick.map((facet) => (
+          <FacetFilter key={facet.key} facet={facet} className="hidden sm:inline-flex" />
         ))}
+        <MoreFilters facets={more} label="Bộ lọc khác" side="right" className="hidden sm:inline-flex" />
+        <MoreFilters facets={facets} label="Bộ lọc" side="bottom" className="sm:hidden" />
         <ResetFilters keys={resetKeys} />
         {children ? <div className="ml-auto flex items-center gap-2">{children}</div> : null}
       </div>

@@ -58,7 +58,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
   */
   const mainContent = (
     <StaleWhileRefreshing asChild>
-      <main className={cn("w-full min-w-0 flex-1 space-y-6 px-3 pt-3 sm:px-5 lg:px-6 2xl:px-8", shell ? "overflow-x-clip pb-24 lg:pb-10 lg:pt-6" : "pb-10")}>
+      <main className={cn("w-full min-w-0 flex-1 space-y-6 px-3 pt-3 sm:px-5 lg:px-6 2xl:px-8", shell ? "overflow-x-clip pb-24 lg:pb-10 lg:pt-6" : "pb-24 md:pb-10")}>
         {draft ? (
           <p className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-200" data-testid="draft-banner">
             BẢN NHÁP — {shell ? "cửa hàng" : "ERP này"} chưa xuất bản: chưa có tên miền riêng, trang chat công khai chưa nhận khách.{" "}
