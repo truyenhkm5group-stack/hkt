@@ -2,7 +2,8 @@
  * ═══════════ NGHIỆM THU KHÁCH CHỐT ĐƠN TRÊN PRODUCTION — LÕI CỦA OPS `saas-acceptance` (docs/saas/ACCEPTANCE.md) ═══════════
  *
  * Smoke sau deploy (`scripts/smoke.ts`) đi vai NGƯỜI NHÀ; lượt này đi vai KHÁCH, trên MỘT workspace thử có tên trong sổ khai
- * `lib/constants/saas-acceptance.ts` (mã ngoài sổ ⇒ từ chối trước mọi lượt đọc). Sáu bước, chạy theo thứ tự A → B1 → C → D → E → B2:
+ * `lib/constants/saas-acceptance.ts` (mã ngoài sổ ⇒ từ chối trước mọi lượt đọc). Sáu bước, chạy theo thứ tự A → B1 → C → D → E → B2
+ * (`--prep` chen P sau B1, `--drills` chen F trước B2):
  *
  *  A  · workspace thử: `--apply` tạo / đảm bảo qua ĐÚNG job «Tạo khách» (`requestProvisioning` — dịch vụ form «Tạo khách mới» gọi),
  *       người thao tác là MÁY (`actor = null`, AGENTS 34); mọi chế độ kiểm: job xong · thuộc ops này · thương hiệu · gói dùng thử của
@@ -10,22 +11,26 @@
  *  B1 · kích hoạt + đăng nhập: liên kết qua ĐÚNG hàm của nút «Gửi lại kích hoạt» (`resendActivation`, phát bằng đường của máy
  *       `createAcceptanceResetLink`) → hàm của trang `/reset/<mã>/<token>` → lõi của form `/login` KHÔNG mã tổ chức
  *       (`matchingLoginOrganizations` + `verifyLogin`) ⇒ đúng workspace thử; mật khẩu sai ⇒ từ chối. Mật khẩu SINH TRONG BỘ NHỚ.
+ *  P  · (`--apply --prep`, quyết định chủ shop 09/10/2026) chuẩn bị MỘT lần cho D / E — sản phẩm mẫu · phiếu nhập · bật bot · xuất bản —
+ *       qua ĐÚNG lõi của nút UI, đứng tên tài khoản CHỦ của workspace thử (lib/saas/acceptance-prep.ts). Idempotent; không AI.
  *  C  · vỏ app: phiên ký như smoke ký cho người nhà (`signSession` — cùng hàm của lượt đăng nhập), GET thật mọi mục của vỏ (danh sách
  *       DẪN XUẤT từ `salesAgentNavFor`) + `/` + một tuyến ERP vỏ phải chặn, qua host của thương hiệu Chốt Đơn.
- *  D  · (`--e2e`) chat web → AI → đơn: CHỈ ĐỌC phần chuẩn bị (sản phẩm mẫu · bot bật + AI sẵn sàng — người làm MỘT lần trên UI,
- *       ACCEPTANCE.md §3; thiếu ⇒ SKIP có lý do, KHÔNG tự ghi), rồi nhắn bằng ĐÚNG lõi chat công khai gọi sau bước định tuyến
+ *  D  · (`--e2e`) chat web → AI → đơn: CHỈ ĐỌC phần chuẩn bị (sản phẩm mẫu · bot bật + AI sẵn sàng — bước P làm khi gõ `--prep`, dự
+ *       phòng người làm trên UI, ACCEPTANCE.md §3; thiếu ⇒ SKIP có lý do, D không tự ghi), rồi nhắn bằng ĐÚNG lõi chat công khai gọi sau bước định tuyến
  *       (`openConversation("WEB")` · `chatTurn`) — đơn do BOT tạo / chốt là hành vi sản phẩm bình thường. Đọc đơn trong OMS + chi phí AI.
  *  E  · chat công khai: `<slug>.<PLATFORM_BASE_DOMAIN>/chat` (qua ứng dụng với Host đó, và qua mạng ngoài thật) ⇒ 200 + tên shop.
- *       Chưa xuất bản ⇒ SKIP kèm việc người làm (xuất bản ghi vào workspace dưới danh tính quản trị — không tự làm).
+ *       Chưa xuất bản ⇒ SKIP kèm việc cần làm (`--prep`, hoặc người bấm Xuất bản ở /setup) — E không tự xuất bản.
  *  F  · (`--drills`, chen trước B2) diễn tập tín hiệu vận hành O1–O8 qua ĐÚNG đường mã ghi tín hiệu, đầu vào cố ý sai — tín hiệu không
  *       diễn tập trung thực được in «CHƯA ĐO ĐƯỢC» kèm lý do (docs/saas/ACCEPTANCE.md §10).
  *  B2 · xoay mật khẩu: đặt một mật khẩu ngẫu nhiên MỚI rồi vứt — mật khẩu của lượt chạy không còn đăng nhập được, mọi phiên bị thu hồi.
  *       Chạy CUỐI và chạy cả khi bước giữa hỏng.
  *
- * ─── KHÔNG GHI HỘ VÀO WORKSPACE (chỉ đạo 08/10/2026) ───
- * Ops này KHÔNG có lõi «ghi thay quản trị khách» nào: không tạo sản phẩm, không bật bot, không xuất bản, không bấm xác nhận đơn hộ ai.
- * Ghi duy nhất của nó: job cấp phát (mặt phẳng điều khiển), liên kết kích hoạt / đặt lại + mật khẩu + lượt đăng nhập của CHÍNH tài
- * khoản thử, và các lượt nhắn của khách vào bot (đường công khai, không cần quyền).
+ * ─── TỆP NÀY KHÔNG GHI HỘ VÀO WORKSPACE (chỉ đạo 08/10/2026; ngoại lệ có tên 09/10/2026) ───
+ * Tệp này KHÔNG nhập lõi «ghi thay quản trị khách» nào: không tạo sản phẩm, không bật bot, không xuất bản, không bấm xác nhận đơn hộ ai.
+ * Ghi của nó: job cấp phát (mặt phẳng điều khiển), liên kết kích hoạt / đặt lại + mật khẩu + lượt đăng nhập của CHÍNH tài khoản thử,
+ * và các lượt nhắn của khách vào bot (đường công khai, không cần quyền). Ngoại lệ DUY NHẤT — chủ shop quyết định 09/10/2026, CHỈ khi gõ
+ * `--prep`, CHỈ workspace nghiệm thu — là bước P, sống RIÊNG ở lib/saas/acceptance-prep.ts (có ba lá chắn của riêng nó); tệp này chỉ
+ * gọi `runAcceptancePrep`. Không bao giờ bấm xác nhận đơn hộ, không gia hạn, không thu phí.
  *
  * ─── BÍ MẬT ───
  * Mật khẩu, mã liên kết, phiên ký chỉ sống trong bộ nhớ của tiến trình; mọi dòng in ra (kể cả phần mã hoá) đi qua `scrubSecrets`.
@@ -60,14 +65,18 @@ import {
   drillSummaryPart,
   formatAcceptanceUsd,
   formatDrillLine,
+  formatPrepLine,
   formatStepLine,
   PAGE_ERROR_DIGEST,
   PAGE_ERROR_MARKER,
+  prepStepStatus,
+  prepSummaryPart,
   scrubSecrets,
   type AcceptanceMode,
   type AcceptanceStepKey,
   type AcceptanceWorkspace,
   type DrillResult,
+  type PrepItemResult,
   type StepResult,
   type StepStatus,
 } from "@/lib/constants/saas-acceptance";
@@ -91,6 +100,7 @@ import { normalizeCustomerPhone } from "@/lib/records/customer-create";
 import { loadAutoConfirmComplete } from "@/lib/records/order-create";
 import { accountOfWorkspace } from "@/lib/saas/accounts";
 import { acceptanceWorkspaceOwned } from "@/lib/saas/acceptance-guard";
+import { runAcceptancePrep } from "@/lib/saas/acceptance-prep";
 import { activationRefusal, loadWorkspaceActivation, resendActivation } from "@/lib/saas/activation";
 import { PRODUCTS } from "@/lib/saas/catalog";
 import { readPlans } from "@/lib/saas/customers";
@@ -255,13 +265,17 @@ type Ctx = {
   loginEvidence: string | null;
   /** Kết quả diễn tập (bước F) — dòng tóm tắt công khai đọc số hiệu tín hiệu theo trạng thái từ đây. */
   drillResults: DrillResult[] | null;
+  /** `--prep`: thêm bước P chuẩn bị workspace thử (sau B1, trước C / D / E). */
+  prep: boolean;
+  /** Kết quả chuẩn bị (bước P) — dòng tóm tắt công khai chỉ đọc tên việc + trạng thái từ đây. */
+  prepResults: PrepItemResult[] | null;
 };
 
 /**
  * Chạy nghiệm thu. `orgCode` bỏ trống ⇒ mục DUY NHẤT của sổ (sổ nhiều mục ⇒ phải chỉ rõ). Mã ngoài sổ ⇒ `refused`, không một lượt
  * đọc / ghi nào. Không bao giờ ném: mỗi bước tự bắt lỗi của mình thành FAIL.
  */
-export async function runAcceptance(input: { orgCode: string | null; mode: AcceptanceMode; drills?: boolean }, deps: AcceptanceDeps): Promise<AcceptanceReport> {
+export async function runAcceptance(input: { orgCode: string | null; mode: AcceptanceMode; drills?: boolean; prep?: boolean }, deps: AcceptanceDeps): Promise<AcceptanceReport> {
   const secrets = new Set<string>();
   const say = (line: string) => deps.emit(scrubSecrets(line, secrets));
   const target = input.orgCode ? acceptanceWorkspaceOf(input.orgCode) : ACCEPTANCE_WORKSPACES.length === 1 ? ACCEPTANCE_WORKSPACES[0] : null;
@@ -270,11 +284,13 @@ export async function runAcceptance(input: { orgCode: string | null; mode: Accep
     say(`TỪ CHỐI — ${why}`);
     return { refused: true, results: [], verdict: "FAIL", summary: acceptanceSummary([], { mode: input.mode, orgCode: null, note: why }) };
   }
-  const ctx: Ctx = { entry: target, mode: input.mode, deps, secrets, owned: false, exists: false, knownPassword: null, lastPasswordChangeMs: 0, aiCostUsd: null, baseDomain: deps.baseDomain, drills: input.drills === true && input.mode !== "READ", loginEvidence: null, drillResults: null };
+  const ctx: Ctx = { entry: target, mode: input.mode, deps, secrets, owned: false, exists: false, knownPassword: null, lastPasswordChangeMs: 0, aiCostUsd: null, baseDomain: deps.baseDomain, drills: input.drills === true && input.mode !== "READ", loginEvidence: null, drillResults: null, prep: input.prep === true && input.mode !== "READ", prepResults: null };
   const results: StepResult[] = [];
   const steps: Record<AcceptanceStepKey, () => Promise<Outcome>> = {
     A: () => stepWorkspace(ctx),
     B1: () => (ctx.mode === "READ" ? Promise.resolve(skip("chế độ CHỈ ĐỌC — kích hoạt + đăng nhập ghi mật khẩu / lượt đăng nhập, chỉ chạy với --apply")) : needOwned(ctx, () => stepActivateAndLogin(ctx))),
+    // Chỉ có mặt trong lượt `--apply --prep` (acceptanceStepsFor) — và chỉ sau khi A xác nhận workspace là của CHÍNH ops này.
+    P: () => needOwned(ctx, () => stepPrep(ctx)),
     C: () => needOwned(ctx, () => stepShell(ctx)),
     D: () => (ctx.mode !== "E2E" ? Promise.resolve(skip("chỉ chạy với --apply --e2e (nhắn bot thật, tốn AI)")) : needOwned(ctx, () => stepE2e(ctx))),
     E: () => needOwned(ctx, () => stepPublicChat(ctx)),
@@ -282,7 +298,7 @@ export async function runAcceptance(input: { orgCode: string | null; mode: Accep
     F: () => needOwned(ctx, () => stepDrills(ctx)),
     B2: () => (ctx.mode === "READ" ? Promise.resolve(skip("chế độ CHỈ ĐỌC — không có mật khẩu nào được đặt")) : stepRotate(ctx)),
   };
-  for (const key of acceptanceStepsFor(ctx.drills)) {
+  for (const key of acceptanceStepsFor({ drills: ctx.drills, prep: ctx.prep })) {
     const started = Date.now();
     let out: Outcome;
     try {
@@ -295,7 +311,7 @@ export async function runAcceptance(input: { orgCode: string | null; mode: Accep
     say(formatStepLine(r));
     for (const d of r.detail) say(`    · ${d}`);
   }
-  const summary = acceptanceSummary(results, { mode: input.mode, orgCode: target.code, baseDomain: ctx.baseDomain, aiCostUsd: ctx.mode === "E2E" ? ctx.aiCostUsd : undefined, drills: ctx.drillResults ? drillSummaryPart(ctx.drillResults) : undefined });
+  const summary = acceptanceSummary(results, { mode: input.mode, orgCode: target.code, baseDomain: ctx.baseDomain, aiCostUsd: ctx.mode === "E2E" ? ctx.aiCostUsd : undefined, prep: ctx.prepResults ? prepSummaryPart(ctx.prepResults) : undefined, drills: ctx.drillResults ? drillSummaryPart(ctx.drillResults) : undefined });
   return { refused: false, results, verdict: acceptanceVerdict(results), summary: scrubSecrets(summary, secrets) };
 }
 
@@ -525,6 +541,28 @@ async function stepRotate(ctx: Ctx): Promise<Outcome> {
   return pass("mật khẩu của lượt chạy đã bị thay bằng một mật khẩu ngẫu nhiên không lưu ở đâu · mọi phiên của tài khoản thử bị thu hồi · mật khẩu cũ bị từ chối");
 }
 
+// ─────────────────────────── P · chuẩn bị workspace thử (`--apply --prep`) ───────────────────────────
+
+/**
+ * Bước P: chỉ chạy sau `needOwned` (A đã xác nhận `acceptanceWorkspaceOwned`), hỏi lại sổ khai, rồi giao cho
+ * `runAcceptancePrep` — nó tự kiểm lại ba lá chắn (lúc chạy · sổ khai · sở hữu) trước mọi lượt ghi. Chi tiết từng việc (id, số
+ * lượng, câu lỗi) chỉ ở phần MÃ HOÁ; dòng công khai chỉ tên việc + trạng thái.
+ */
+async function stepPrep(ctx: Ctx): Promise<Outcome> {
+  const { entry, deps } = ctx;
+  if (!ctx.owned || acceptanceWorkspaceOf(entry.code)?.code !== entry.code) return skip("workspace không phải workspace nghiệm thu của ops này — không chuẩn bị");
+  const report = await runAcceptancePrep(entry.code, { runId: deps.runId });
+  if ("refused" in report) return skip(`chuẩn bị bị từ chối: ${report.refused}`);
+  ctx.prepResults = report.items;
+  // Đệm sổ tổ chức / module: bước xuất bản vừa đổi trạng thái — C / E đọc lại bản mới.
+  invalidateOrganizations();
+  invalidateCapabilities(entry.code);
+  const status = prepStepStatus(report.items);
+  const reason = prepSummaryPart(report.items);
+  const detail = report.items.map(formatPrepLine);
+  return status === "FAIL" ? fail(reason, detail) : status === "PASS" ? pass(reason, detail) : skip(reason, detail);
+}
+
 // ─────────────────────────── F · diễn tập tín hiệu vận hành (`--apply --drills`) ───────────────────────────
 
 /**
@@ -737,7 +775,7 @@ async function stepE2e(ctx: Ctx): Promise<Outcome> {
   return withOrganization(entry.code, async () => {
     const now = deps.now();
     const prep = await readE2ePrep(entry.code, now);
-    if (!prep.ok) return skip(`chuẩn bị E2E chưa đủ — người làm MỘT lần trên UI (docs/saas/ACCEPTANCE.md §3), ops không ghi hộ: ${prep.missing.join(" · ")}`.slice(0, 600));
+    if (!prep.ok) return skip(`chuẩn bị E2E chưa đủ — chạy --apply --prep (hoặc người làm MỘT lần trên UI, docs/saas/ACCEPTANCE.md §3); bước D không tự ghi: ${prep.missing.join(" · ")}`.slice(0, 600));
     const detail: string[] = [`chuẩn bị: sản phẩm mẫu ${ACCEPTANCE_SAMPLE_PRODUCTS[0].sku} · bot «${prep.botName}» bật · AI sẵn sàng · công tắc «đơn đủ thông tin = đã xác nhận» ${prep.autoConfirm ? "BẬT" : "tắt"}`];
     // ĐÚNG lõi chat công khai gọi sau bước định tuyến: hội thoại WEB của một khách truy cập (khoá theo mã lượt chạy).
     const visitorKey = visitorKeyOf(`saas-acceptance:${deps.runId}`);
@@ -808,7 +846,7 @@ async function stepPublicChat(ctx: Ctx): Promise<Outcome> {
   if (!base) return fail("PLATFORM_BASE_DOMAIN chưa khai — không có địa chỉ chat công khai nào cho khách");
   const pub = await publicationOf(entry.code);
   const org = await findOrganization(entry.code);
-  if (pub.state !== "PUBLISHED" || !pub.slug) return skip(`chưa xuất bản (${pub.state}${pub.slug ? `, tên miền giữ chỗ ${pub.slug}` : ""}) — người làm MỘT lần: đăng nhập tài khoản thử → /setup → tên miền «${entry.domainSlug}» → Xuất bản (ops không xuất bản hộ) · miền gốc đang dùng ${base}`);
+  if (pub.state !== "PUBLISHED" || !pub.slug) return skip(`chưa xuất bản (${pub.state}${pub.slug ? `, tên miền giữ chỗ ${pub.slug}` : ""}) — chạy --apply --prep, hoặc người làm MỘT lần: đăng nhập tài khoản thử → /setup → tên miền «${entry.domainSlug}» → Xuất bản (bước E không tự xuất bản) · miền gốc đang dùng ${base}`);
   if (pub.slug !== entry.domainSlug) return fail(`tên miền con đang là ${pub.slug}, sổ khai là ${entry.domainSlug}`);
   const host = `${pub.slug}.${base}`;
   const detail: string[] = [`miền gốc đang dùng: ${base} — khách Chốt Đơn nhận địa chỉ chat dạng https://<tên>.${base}/chat`];

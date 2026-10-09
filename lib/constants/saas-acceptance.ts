@@ -59,7 +59,10 @@ export function acceptanceIdempotencyKey(code: string): string {
 
 // ─────────────────────────── Dữ liệu MẪU cho bước E2E (chuẩn bị một lần trên UI — ACCEPTANCE.md §3) ───────────────────────────
 
-/** Sản phẩm MẪU: tên tiền tố «Mẫu ·», SKU + giá cố định. Người làm MỘT lần ở vỏ app (Sản phẩm → Tạo sản phẩm, rồi Nhập hàng). */
+/**
+ * Sản phẩm MẪU: tên tiền tố «Mẫu ·», SKU + giá cố định, MỘT mẫu mã, tồn khả dụng tối thiểu `minStock`. `--apply --prep` tạo / bù đúng
+ * các giá trị này (lib/saas/acceptance-prep.ts); dự phòng: người làm ở vỏ app (Sản phẩm → Tạo sản phẩm, rồi Nhập hàng).
+ */
 export const ACCEPTANCE_SAMPLE_PRODUCTS = [{ sku: "NT-AO-01", name: "Mẫu · Áo thun nghiệm thu", priceVnd: 150_000, minStock: 10 }] as const;
 
 /** Đơn thử: SĐT dạng thử (đầu số hợp lệ, không phải số của ai), địa chỉ ghép được tới cấp xã (`normalizeVnAddress` ⇒ MATCHED). */
@@ -96,11 +99,13 @@ export const PAGE_ERROR_DIGEST = /\\?"digest\\?"\s*:\s*\\?"\d{3,}\\?"/;
 export type AcceptanceMode = "READ" | "APPLY" | "E2E";
 export const ACCEPTANCE_MODE_LABEL: Record<AcceptanceMode, string> = { READ: "CHỈ ĐỌC", APPLY: "GHI", E2E: "GHI + E2E" };
 
-export type AcceptanceArgs = { ok: true; mode: AcceptanceMode; orgCode: string | null; drills: boolean } | { ok: false; error: string };
+export type AcceptanceArgs = { ok: true; mode: AcceptanceMode; orgCode: string | null; drills: boolean; prep: boolean } | { ok: false; error: string };
 
 /**
  * `(rỗng)` = CHỈ ĐỌC · `--apply` = thêm cấp phát + kích hoạt + đăng nhập · `--apply --e2e` = thêm chat → AI → đơn · `--apply --drills` =
- * thêm bước F diễn tập tín hiệu vận hành (không bao giờ chạy mặc định) · `--org=<mã>` khi sổ có nhiều mục. Cờ lạ / lặp / sai cặp ⇒ lỗi
+ * thêm bước F diễn tập tín hiệu vận hành (không bao giờ chạy mặc định) · `--apply --prep` = thêm bước P chuẩn bị MỘT lần cho D / E
+ * (sản phẩm mẫu · phiếu nhập · bật bot · xuất bản — quyết định chủ shop 09/10/2026, không bao giờ chạy mặc định) · `--org=<mã>` khi sổ
+ * có nhiều mục. Cờ lạ / lặp / sai cặp ⇒ lỗi
  * cách dùng (gõ nhầm `--aply` mà vẫn chạy là ghi mù). THUẦN; câu lỗi chỉ nói VỊ TRÍ / LOẠI lỗi, không chép nội dung ô arg (nó đi ra kênh
  * tóm tắt công khai).
  */
@@ -114,34 +119,81 @@ export function parseAcceptanceArgs(args: readonly string[]): AcceptanceArgs {
     if (key === "--org=") {
       orgCode = a.slice("--org=".length).trim().toLowerCase();
       if (!ORGANIZATION_CODE_PATTERN.test(orgCode)) return { ok: false, error: `từ thứ ${i + 1}: mã tổ chức sai dạng` };
-    } else if (key !== "--apply" && key !== "--e2e" && key !== "--drills") return { ok: false, error: `từ thứ ${i + 1}: không phải cờ đã biết (--apply · --e2e · --drills · --org=<mã>)` };
+    } else if (key !== "--apply" && key !== "--e2e" && key !== "--drills" && key !== "--prep") return { ok: false, error: `từ thứ ${i + 1}: không phải cờ đã biết (--apply · --e2e · --drills · --prep · --org=<mã>)` };
   }
   if (seen.has("--e2e") && !seen.has("--apply")) return { ok: false, error: "--e2e chỉ đi cùng --apply (bước E2E GHI vào workspace thử)" };
   if (seen.has("--drills") && !seen.has("--apply")) return { ok: false, error: "--drills chỉ đi cùng --apply (diễn tập GHI tín hiệu cho workspace thử)" };
-  return { ok: true, mode: seen.has("--e2e") ? "E2E" : seen.has("--apply") ? "APPLY" : "READ", orgCode, drills: seen.has("--drills") };
+  if (seen.has("--prep") && !seen.has("--apply")) return { ok: false, error: "--prep chỉ đi cùng --apply (chuẩn bị GHI sản phẩm / phiếu nhập / bot / xuất bản vào workspace thử)" };
+  return { ok: true, mode: seen.has("--e2e") ? "E2E" : seen.has("--apply") ? "APPLY" : "READ", orgCode, drills: seen.has("--drills"), prep: seen.has("--prep") };
 }
 
 // ─────────────────────────── Kết quả từng bước + dòng tóm tắt ───────────────────────────
 
 /** Thứ tự CHẠY: A → B1 → C → D → E → B2 (xoay mật khẩu luôn chạy CUỐI, kể cả khi bước giữa hỏng). */
 export const ACCEPTANCE_STEPS = ["A", "B1", "C", "D", "E", "B2"] as const;
-/** Bước F (diễn tập tín hiệu) chỉ có mặt khi `--drills` — lượt thường giữ nguyên sáu bước và nguyên dòng tóm tắt cũ. */
-export type AcceptanceStepKey = (typeof ACCEPTANCE_STEPS)[number] | "F";
+/**
+ * Bước P (chuẩn bị, `--prep`) và F (diễn tập tín hiệu, `--drills`) chỉ có mặt khi gõ cờ — lượt thường giữ nguyên sáu bước và nguyên
+ * dòng tóm tắt cũ.
+ */
+export type AcceptanceStepKey = (typeof ACCEPTANCE_STEPS)[number] | "P" | "F";
 
-/** Thứ tự chạy của MỘT lượt: F chen TRƯỚC B2 (xoay mật khẩu vẫn CUỐI). THUẦN. */
-export function acceptanceStepsFor(drills: boolean): readonly AcceptanceStepKey[] {
-  return drills ? ["A", "B1", "C", "D", "E", "F", "B2"] : ACCEPTANCE_STEPS;
+/**
+ * Thứ tự chạy của MỘT lượt: P chen NGAY SAU B1 (A đã xác nhận workspace là của ops; B1 đã kích hoạt tài khoản chủ mà P đứng tên) và
+ * TRƯỚC C / D / E (vỏ có sản phẩm, D có hàng + bot, E có tên miền đã xuất bản); F chen TRƯỚC B2 (xoay mật khẩu vẫn CUỐI). THUẦN.
+ */
+export function acceptanceStepsFor(opts: { drills?: boolean; prep?: boolean }): readonly AcceptanceStepKey[] {
+  if (!opts.drills && !opts.prep) return ACCEPTANCE_STEPS;
+  return ["A", "B1", ...(opts.prep ? (["P"] as const) : []), "C", "D", "E", ...(opts.drills ? (["F"] as const) : []), "B2"];
 }
 
 export const ACCEPTANCE_STEP_LABEL: Record<AcceptanceStepKey, string> = {
   A: "A · workspace nghiệm thu",
   B1: "B · kích hoạt + đăng nhập email",
+  P: "P · chuẩn bị workspace thử",
   C: "C · vỏ app Chốt Đơn",
   D: "D · chat web → AI → đơn",
   E: "E · chat công khai theo tên miền con",
   F: "F · diễn tập tín hiệu vận hành",
   B2: "B · xoay mật khẩu rồi vứt",
 };
+
+// ─────────────────────────── P · chuẩn bị workspace thử (`--apply --prep`, ACCEPTANCE.md §3) ───────────────────────────
+
+/**
+ * Bốn việc chuẩn bị MỘT lần cho D / E — trước 09/10/2026 là việc NGƯỜI làm trên UI; chủ shop quyết định 09/10/2026 («Giao diện thế
+ * nào bạn cứ làm theo phương án tốt nhất») cho ops làm hộ, CHỈ trên workspace nghiệm thu của sổ khai, đứng tên tài khoản CHỦ của chính
+ * workspace ấy và đi qua ĐÚNG lõi mà nút trên UI gọi (lib/saas/acceptance-prep.ts). Thứ tự = thứ tự chạy (phiếu nhập cần mẫu mã).
+ */
+export const ACCEPTANCE_PREP_ITEMS = ["PRODUCT", "STOCK", "BOT", "PUBLISH"] as const;
+export type PrepItemKey = (typeof ACCEPTANCE_PREP_ITEMS)[number];
+/** Tên CÔNG KHAI của từng việc — dòng `[ops:tom-tat]` chỉ mang tên này + trạng thái (không id, không SKU, không số lượng). */
+export const PREP_ITEM_LABEL: Record<PrepItemKey, string> = { PRODUCT: "sản phẩm mẫu", STOCK: "phiếu nhập", BOT: "bot", PUBLISH: "xuất bản" };
+export type PrepStatus = "DONE" | "ALREADY" | "SKIPPED" | "FAILED";
+export const PREP_STATUS_LABEL: Record<PrepStatus, string> = { DONE: "ĐÃ LÀM", ALREADY: "CÓ SẴN", SKIPPED: "BỎ QUA", FAILED: "HỎNG" };
+/** Một việc chuẩn bị: `why` = chi tiết (id, số lượng, câu lỗi của lõi) — CHỈ phần MÃ HOÁ. */
+export type PrepItemResult = { key: PrepItemKey; status: PrepStatus; why: string };
+
+/** Phần chuẩn bị của dòng tóm tắt công khai — CHỈ tên việc theo trạng thái. THUẦN. */
+export function prepSummaryPart(results: readonly PrepItemResult[]): string {
+  const of = (s: PrepStatus) => results.filter((r) => r.status === s).map((r) => PREP_ITEM_LABEL[r.key]);
+  const parts = (["DONE", "ALREADY", "FAILED", "SKIPPED"] as const).map((s) => (of(s).length ? `${PREP_STATUS_LABEL[s]} ${of(s).join(",")}` : null)).filter(Boolean);
+  return `chuẩn bị: ${parts.join(" · ") || "—"}`;
+}
+
+/**
+ * Phán quyết bước P: có việc HỎNG ⇒ FAIL; mọi việc ĐÃ LÀM / CÓ SẴN ⇒ PASS; còn lại (thiếu điều kiện — vd AI nền tảng chưa sẵn sàng)
+ * ⇒ SKIP: chuẩn bị chưa trọn KHÔNG phải đạt. THUẦN.
+ */
+export function prepStepStatus(results: readonly PrepItemResult[]): StepStatus {
+  if (!results.length) return "SKIP";
+  if (results.some((r) => r.status === "FAILED")) return "FAIL";
+  return results.every((r) => r.status === "DONE" || r.status === "ALREADY") ? "PASS" : "SKIP";
+}
+
+/** Dòng chi tiết (phần MÃ HOÁ) của một việc chuẩn bị. THUẦN. */
+export function formatPrepLine(r: PrepItemResult): string {
+  return `${PREP_ITEM_LABEL[r.key]}: ${PREP_STATUS_LABEL[r.status]} — ${r.why}`;
+}
 
 // ─────────────────────────── F · diễn tập tín hiệu vận hành O1–O8 (LAUNCH_GATE §4) ───────────────────────────
 
@@ -212,7 +264,7 @@ export function formatAcceptanceUsd(usd: number): string {
  * DÒNG CÔNG KHAI DUY NHẤT: `saas-acceptance: <PASS|FAIL> <n đạt>/<n> · …` — `n` = số bước ĐÃ CHẠY (đạt + hỏng), bước bỏ qua nêu
  * riêng (bỏ qua không phải đạt). Chỉ mã workspace THỬ, chế độ, tên miền gốc và chi phí AI — không email, không SĐT, không mã đơn.
  */
-export function acceptanceSummary(results: readonly StepResult[], ctx: { mode: AcceptanceMode; orgCode: string | null; baseDomain?: string | null; aiCostUsd?: number | null; note?: string; drills?: string }): string {
+export function acceptanceSummary(results: readonly StepResult[], ctx: { mode: AcceptanceMode; orgCode: string | null; baseDomain?: string | null; aiCostUsd?: number | null; note?: string; drills?: string; prep?: string }): string {
   const ran = results.filter((r) => r.status !== "SKIP");
   const passed = ran.filter((r) => r.status === "PASS").length;
   const failed = ran.filter((r) => r.status === "FAIL").map((r) => r.key);
@@ -225,6 +277,8 @@ export function acceptanceSummary(results: readonly StepResult[], ctx: { mode: A
     ctx.orgCode ? `workspace ${ctx.orgCode}` : null,
     ctx.baseDomain !== undefined ? `miền chat ${ctx.baseDomain ?? "CHƯA KHAI"}` : null,
     ctx.aiCostUsd !== undefined && ctx.aiCostUsd !== null ? `AI lượt này ≈ ${formatAcceptanceUsd(ctx.aiCostUsd)} USD` : null,
+    // Chỉ chuỗi đã dựng bằng `prepSummaryPart` (tên việc theo trạng thái) — không id, không SKU, không câu lỗi.
+    ctx.prep ?? null,
     // Chỉ chuỗi đã dựng bằng `drillSummaryPart` (số hiệu tín hiệu theo trạng thái) — không mã lý do, không id.
     ctx.drills ?? null,
     ctx.note ?? null,

@@ -13,6 +13,7 @@ trả tiền đầu tiên sẽ đi.
 |---|---|---|
 | A | Workspace thử tồn tại và đúng cấu hình: job «Tạo khách» xong, tài khoản EXTERNAL, thương hiệu `chotdon`, gói dùng thử của bảng giá CATALOG đang hiệu lực + ghim giá V1, module `ai_sales` bật, mẫu «Chỉ cần AI bán hàng» (khi job có bước đó), chỉ mục đăng nhập email ⇒ workspace, AI theo gói còn được trả lời (dùng thử chưa hết hạn) | `--apply`: `requestProvisioning` — ĐÚNG job mà form «Tạo khách mới» gọi; người thao tác là MÁY (`actor = null`, «Nghiệm thu tự động», AGENTS 34) |
 | B | Kích hoạt → trang `/reset` → đăng nhập bằng **email + mật khẩu, KHÔNG mã tổ chức** ra đúng workspace thử; liên kết dùng một lần; mật khẩu sai bị từ chối; cuối lượt mật khẩu bị xoay sang một mật khẩu ngẫu nhiên rồi vứt | `resendActivation` (luật của nút «Gửi lại kích hoạt») / «Đặt lại mật khẩu cho khách» khi đã kích hoạt · `lookupResetToken` + `completePasswordResetCore` (hai hàm của trang `/reset`) · `matchingLoginOrganizations` + `verifyLogin` (lõi của form `/login`) |
+| P | (`--apply --prep`) Chuẩn bị MỘT lần cho D / E: sản phẩm mẫu `NT-AO-01` 150.000 ₫ (một mẫu mã) · tồn khả dụng ≥ 10 qua phiếu nhập · bot bật (đủ «Tìm sản phẩm» · «Lên đơn nháp» · «Chốt đơn», giờ làm việc luôn mở) · tên miền con `cdt-nghiem-thu` đã xuất bản. Mỗi việc ĐÃ LÀM / CÓ SẴN / BỎ QUA (lý do) / HỎNG (lý do) | `lib/saas/acceptance-prep.ts` — ĐÚNG lõi của nút UI (`createProductCore` · `writeStockReceiptCore` · `saveSalesChatbotConfig` · `setDomainSlug` + `publishOrganization`), đứng tên tài khoản CHỦ của workspace thử |
 | C | Vỏ app 8 mục mở được qua host `app.<CHOTDON_DOMAIN>`: mỗi mục 200, mang dấu vỏ + thương hiệu Chốt Đơn, KHÔNG lộ khung ERP nội bộ, không vòng chuyển hướng, không bị đá về `/login`, không bị cổng quyền / module đưa về trang nhà (`?forbidden=1` · `/module-disabled`); `/` về trang nhà; một tuyến ERP bị chặn về trang nhà | GET thật tới `127.0.0.1:3000` (như smoke) với phiên ký bằng `signSession`; danh sách tuyến DẪN XUẤT từ `salesAgentNavFor` |
 | D | (`--e2e`) Khách web hỏi giá → đặt 2 sản phẩm mẫu kèm SĐT + địa chỉ → đồng ý ⇒ AI trả lời từng lượt, đơn **CONFIRMED** trong OMS đúng SKU · số lượng · SĐT · xã; in chi phí AI của lượt | `openConversation("WEB")` + `chatTurn` — lõi chat công khai gọi sau bước định tuyến; đơn do BOT tạo / chốt |
 | E | `https://<slug>.<PLATFORM_BASE_DOMAIN>/chat` trả 200 + tên shop, cả qua ứng dụng lẫn qua mạng ngoài (DNS + Caddy + chứng chỉ); in tên miền gốc đang dùng | GET thật |
@@ -21,7 +22,7 @@ trả tiền đầu tiên sẽ đi.
 
 - **Không gửi email thật** — nền tảng chưa có kênh thư; liên kết kích hoạt chỉ sống trong bộ nhớ tiến trình.
 - **Không đi Meta / Messenger / Zalo** — Meta chưa duyệt quyền Page; E2E đi kênh CHAT WEB.
-- **Không bấm giao diện**: B và D gọi đúng lõi mà nút / trang gọi, nhưng không qua trình duyệt (không đo JavaScript phía khách, không
+- **Không bấm giao diện**: B, P và D gọi đúng lõi mà nút / trang gọi, nhưng không qua trình duyệt (không đo JavaScript phía khách, không
   đo server action qua HTTP). C và E đo HTML thật do máy chủ dựng.
 - **Không đo đồng hồ «khách AI» và trần tần suất của chat công khai** (`lib/sales-chatbot/public.ts` ghi chúng sau bước định tuyến
   theo host) — lượt nghiệm thu gọi lõi ngay sau bước đó, nên KHÔNG tiêu hạn mức dùng thử và KHÔNG vào bảng kê.
@@ -30,10 +31,31 @@ trả tiền đầu tiên sẽ đi.
 - **Không gia hạn dùng thử**: dùng thử V1 có 7 ngày. Hết hạn ⇒ A báo FAIL kèm việc người vận hành làm (/platform/org/<mã> → «Thu phí
   thuê bao» → «Đã trả tới ngày»); ops không tự gia hạn ngầm.
 
-## 3. Chuẩn bị MỘT lần trên UI (cho D và E)
+## 3. Chuẩn bị MỘT lần (cho D và E) — tự động bằng `--apply --prep`
 
-Ops **không ghi hộ** vào workspace (chỉ đạo 08/10/2026): tạo sản phẩm, bật bot, xuất bản là việc của NGƯỜI, đăng nhập bằng chính tài
-khoản thử. Thiếu phần nào thì D / E báo **SKIP** kèm đúng phần thiếu.
+**Quyết định chủ shop 09/10/2026** («Giao diện thế nào bạn cứ làm theo phương án tốt nhất»): phần chuẩn bị nay do ops làm, bằng cờ
+`--prep` (chỉ đi cùng `--apply`, KHÔNG BAO GIỜ chạy mặc định). Chỉ đạo 08/10 «ops không ghi hộ vào workspace» được nới **CHỈ cho
+workspace nghiệm thu này** — không bao giờ cho một workspace khách thật.
+
+Bước **P** (`lib/saas/acceptance-prep.ts`) chạy SAU A + B1 (A xác nhận workspace do ops tạo, B1 kích hoạt tài khoản chủ) và TRƯỚC
+C / D / E, nên `--apply --prep --e2e` = A → B1 → P → C → D → E → B2 (xoay mật khẩu vẫn CUỐI). Nó tự kiểm lại ba lá chắn trước mọi lượt
+ghi — tiến trình ops (không phải máy chủ ứng dụng) · mã thuộc sổ khai · workspace đúng do ops tạo (`acceptanceWorkspaceOwned`) — và
+đứng tên tài khoản CHỦ của workspace thử (email trong sổ khai, tra qua chỉ mục danh tính; quyền dựng bằng đúng đường nhanh của phiên
+đăng nhập), không phải người vận hành nền tảng, không phải khách thật. Mỗi việc đi qua ĐÚNG lõi mà nút trên UI gọi:
+
+| Việc | Lõi | Idempotent |
+|---|---|---|
+| Sản phẩm mẫu `Mẫu · Áo thun nghiệm thu` · SKU `NT-AO-01` · 150.000 ₫ · một mẫu mã | `createProductCore` (Sản phẩm → Tạo sản phẩm) | SKU đã có ⇒ CÓ SẴN, không tạo bản hai; có mà giá lệch / ẩn / trùng ⇒ HỎNG kèm lý do, KHÔNG sửa dữ liệu đã có |
+| Tồn khả dụng ≥ 10 | `writeStockReceiptCore` (lõi của «Nhập hàng» và «tồn đầu» khi nhập từ tệp) — phiếu NHẬP HÀNG, định giá theo chế độ giá nhập của tổ chức; khai tay ⇒ đơn giá bỏ trống = CHƯA BIẾT, không bịa giá vốn | khả dụng (đúng biểu thức sổ kho, đã trừ đơn chốt chưa xuất) ≥ 10 ⇒ CÓ SẴN; thiếu ⇒ MỘT phiếu đúng phần chênh |
+| Bot bật · đủ «Tìm sản phẩm» · «Lên đơn nháp» · «Chốt đơn» · giờ làm việc luôn mở | `saveSalesChatbotConfig` với đúng hình đầu vào của form KHÁCH (không ô động cơ AI — nguồn AI / model là của người vận hành) | đã bật đủ ⇒ CÓ SẴN. AI theo gói chưa sẵn sàng ⇒ BỎ QUA kèm đúng phần thiếu (phần mã hoá); P KHÔNG đổi cấu hình AI nền tảng — người vận hành cấu hình «AI của workspace» ở /platform/org/cdt-nghiem-thu |
+| Tên miền con `cdt-nghiem-thu` → Xuất bản | `setDomainSlug` + `publishOrganization` (/setup) | đã xuất bản đúng tên ⇒ CÓ SẴN; đã xuất bản tên khác ⇒ HỎNG (tên miền khoá sau xuất bản) |
+
+P không gọi AI. Chi tiết từng việc (id sản phẩm / mẫu mã / phiếu, số lượng, câu lỗi của lõi) chỉ ở phần MÃ HOÁ; dòng `[ops:tom-tat]` chỉ
+thêm `chuẩn bị: ĐÃ LÀM … · CÓ SẴN … · BỎ QUA … · HỎNG …` với TÊN việc. Bước P: có việc HỎNG ⇒ FAIL; mọi việc ĐÃ LÀM / CÓ SẴN ⇒ PASS;
+còn lại ⇒ SKIP (chuẩn bị chưa trọn không phải đạt). Workspace trùng mã không do ops tạo ⇒ P bỏ qua, không một dòng nào được ghi.
+
+**Dự phòng: làm tay trên UI** (khi P báo BỎ QUA / HỎNG, hoặc muốn tự kiểm giao diện). Thiếu phần nào thì D / E báo **SKIP** kèm đúng
+phần thiếu.
 
 1. Người vận hành: /platform/customers → khách «Kiểm thử nghiệm thu» → «Đặt lại mật khẩu cho khách» (email `nghiem-thu@chotdontudong.com`)
    → mở liên kết, đặt mật khẩu, đăng nhập (không cần mã tổ chức). Lượt `--apply` kế tiếp sẽ xoay mật khẩu này — muốn quay lại UI
@@ -57,6 +79,7 @@ Actions → «Vận hành ERP trên VPS» → `saas-acceptance`, ô arg:
 | `--apply` | GHI — thêm cấp phát (lần đầu) + B | xem §5 |
 | `--apply --e2e` | GHI + TỐN AI — thêm D | xem §5 |
 | `--apply --drills` | GHI — thêm F diễn tập tín hiệu O1–O8 (KHÔNG chạy mặc định, không tốn AI) | xem §10 |
+| `--apply --prep` | GHI — thêm P chuẩn bị MỘT lần cho D / E (KHÔNG chạy mặc định, không tốn AI); đi cùng `--e2e` được | xem §3, §5 |
 | `--org=<mã>` | chỉ khi sổ khai có nhiều mục | — |
 
 Kết quả MÃ HOÁ như mọi ops trả dữ liệu; log công khai chỉ có ĐÚNG MỘT dòng
@@ -65,8 +88,9 @@ Có FAIL ⇒ mã thoát 1; mã ngoài sổ / arg sai ⇒ 64; chạy thử mà CS
 
 **Hiệu lực**: ops lấy SCRIPT từ `main` nhưng `lib/` từ IMAGE đang chạy — chỉ chạy được sau lượt deploy mang `lib/saas/acceptance.ts`.
 
-Thứ tự lần đầu trên production: deploy → `--apply` (tạo workspace, kích hoạt, đăng nhập) → người làm §3 → `--apply --e2e` → từ đó
-`(rỗng)` sau mỗi deploy, `--apply --e2e` khi cần bằng chứng trọn vòng.
+Thứ tự lần đầu trên production: deploy → `--apply` (tạo workspace, kích hoạt, đăng nhập) → `--apply --prep --e2e` (chuẩn bị §3 rồi
+chat → AI → đơn trong CÙNG lượt) → từ đó `(rỗng)` sau mỗi deploy, `--apply --prep --e2e` khi cần bằng chứng trọn vòng (P CÓ SẴN thì
+không ghi gì; mỗi đơn bot chốt giữ 2 cái nên lượt sau bù đúng một phiếu nhỏ).
 
 ## 5. Dữ liệu ops ghi (chỉ trên workspace thử)
 
@@ -78,11 +102,16 @@ Thứ tự lần đầu trên production: deploy → `--apply` (tạo workspace,
 - Mỗi `--e2e`: một hội thoại WEB (khoá khách truy cập theo mã lượt chạy), các tin + dòng sổ AI, một khách (SĐT thử `0900000001`) và
   một đơn do bot tạo / chốt — giữ lại làm vết, không xoá.
 
-Ops KHÔNG ghi: sản phẩm, cấu hình bot, xuất bản, xác nhận đơn tay, gia hạn, thu phí.
+- Mỗi `--prep` (chỉ phần còn thiếu): một sản phẩm + một mẫu mã mẫu (lần đầu), một phiếu NHẬP HÀNG đúng phần chênh tới 10 khả dụng,
+  một lượt lưu cấu hình bot (bật · thêm công cụ thiếu · tắt giờ làm việc), một lượt chọn tên miền con + xuất bản — kèm nhật ký tổ
+  chức đứng tên tài khoản CHỦ của workspace thử (và nhật ký nền tảng `ORG_DOMAIN_SET` / `ORG_PUBLISH`). Giữ lại làm vết, không xoá.
+
+Ops KHÔNG ghi: xác nhận đơn tay, gia hạn, thu phí, cấu hình AI nền tảng / «AI của workspace», module, gói; và không ghi gì vào workspace
+nào ngoài workspace nghiệm thu do chính nó tạo.
 
 ## 6. Chi phí AI mỗi lượt
 
-Chỉ `--e2e` gọi AI (3–4 lượt khách, mỗi lượt một vài lời gọi model của AI dùng chung). Số THẬT đọc từ sổ AI theo hội thoại của lượt và
+Chỉ `--e2e` gọi AI (`--prep` không gọi; 3–4 lượt khách, mỗi lượt một vài lời gọi model của AI dùng chung). Số THẬT đọc từ sổ AI theo hội thoại của lượt và
 in ở dòng D + dòng tóm tắt («AI lượt này ≈ … USD»); lượt chưa định giá in «CHƯA ĐỊNH GIÁ», không in 0. Chạy thử / `--apply` không gọi AI.
 
 ## 7. Khi nào chạy
