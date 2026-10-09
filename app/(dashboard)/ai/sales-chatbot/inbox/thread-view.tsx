@@ -20,6 +20,7 @@ import { MessageTraceLine } from "./message-trace";
 import { LabelsPanel } from "./labels-panel";
 import { NotesPanel } from "./notes-panel";
 import { CustomerHistoryCard, FeedbackPanel } from "./customer-insight";
+import { InboxOrderPanel } from "./order-panel";
 
 /**
  * MỘT HỘI THOẠI CỦA HỘP THƯ (M8): dòng thời gian (vạch ngày, gộp tin liền nhau, khách bên trái — shop bên phải) + khung soạn luôn
@@ -474,6 +475,8 @@ export function InboxThreadView({
             <X className="size-4" /> Đóng
           </Button>
         </div>
+        {/* «Đơn đang chốt» (INBOX-V2-B · order-panel.tsx) — khối ĐẦU cột phải, trên thẻ khách; cùng bề mặt phụ với các thẻ bên dưới; tải lười khi cột / ngăn kéo hiện. */}
+        <InboxOrderPanel conversationId={thread.id} orders={thread.orders} canDecide={canDecideOrders} />
         <div className="space-y-1 rounded-lg border bg-background p-3">
           <p className="text-[12px] font-semibold uppercase tracking-wide text-muted-foreground">Khách</p>
           <p className="font-medium">{thread.customer.name}</p>
@@ -490,7 +493,6 @@ export function InboxThreadView({
             </Link>
           ) : null}
         </div>
-        {/* ── CHỖ CẮM PANEL ĐƠN (INBOX-V2-B · order-panel.tsx): chèn MỘT dòng ngay dưới đây, trước thẻ lịch sử mua. ── */}
         <CustomerHistoryCard history={thread.history} level={thread.level} />
         <div className="space-y-1.5 rounded-lg border bg-background p-3" data-testid="inbox-orders">
           <p className="text-[12px] font-semibold uppercase tracking-wide text-muted-foreground">Đơn của khách</p>
