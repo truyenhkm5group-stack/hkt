@@ -237,6 +237,8 @@ const DOC_MOI_TRUONG_DA_KHAI: Record<string, string> = {
     "Đặt OPENAI_API_KEY giả và xoá AI_PROVIDER để kiểm cách chọn nhà cung cấp. Khoá là chuỗi bịa, không phải khoá thật của máy.",
   "tests/page-query-budget.test.ts":
     "ĐẶT ERP_PERF_PROBE=1 quanh ĐÚNG lượt cấp tổ chức thử `pqb-a` để client CSDL của tổ chức ấy mang bộ đếm câu có sẵn của db/index.ts, rồi trả lại nguyên trạng trong finally. Đó là dựng DỤNG CỤ ĐO; kết luận (10 dòng = 200 dòng cùng số câu) không rẽ theo giá trị sẵn có của máy.",
+  "tests/inbox-perf-probe.test.ts":
+    "ĐẶT ERP_PERF_PROBE=1 quanh ĐÚNG lượt cấp tổ chức thử `ipp-a` để client CSDL của tổ chức ấy mang bộ đếm câu có sẵn của db/index.ts (cùng cách page-query-budget) — script ops bật đúng cờ ấy trên production, nên đây là dựng DỤNG CỤ ĐO; trả lại nguyên trạng trong finally, không khẳng định nào rẽ theo giá trị sẵn có của máy.",
   "tests/memo-inflight.test.ts":
     "Đặt MEMO_INFLIGHT_TIMEOUT_MS = 40ms để cửa sổ gộp lời gọi đo được trong một bài kiểm; giữ giá trị cũ và trả lại sau.",
   "tests/tech-cto-proposal.test.ts":

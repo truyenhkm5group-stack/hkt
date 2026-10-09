@@ -146,3 +146,17 @@ dẹp: không có gì để gỡ — mức của tín hiệu tính trên số đ
 `audit_logs`). Dòng công khai thêm `diễn tập: ĐÃ DIỄN TẬP O1,O6 · CHƯA ĐO ĐƯỢC O2,…` — chỉ số hiệu tín hiệu; mã lý do và id dòng
 chỉ ở phần MÃ HOÁ. Kiểm sau lượt chạy: `ops-signals-check` phải in `cdt-nghiem-thu O6 ORDER_VALIDATION: WARNING · … · lý do cuối
 MISSING_CONTACT`.
+
+## 11. Hộp thư khách mở / chuyển hội thoại mất bao lâu — ops `inbox-perf-probe`
+
+Actions → «Vận hành ERP trên VPS» → `inbox-perf-probe` (arg trống = mọi workspace ACTIVE, không phải nhà, đang bật `ai_sales`, tối
+đa 10, `cdt-nghiem-thu` trước; `--org=<mã>` đo một workspace; `--samples=<n>` 1–20, mặc định 5; arg khác ⇒ mã 64). CHỈ ĐỌC: script đặt
+`ERP_READ_ONLY=1`, hỏi lại Postgres ở CSDL nhà và CSDL từng tổ chức, và mở CSDL tổ chức bằng handle chẩn đoán (không migrate). Nó bấm
+giờ ĐÚNG chuỗi hàm máy chủ mà `app/(dashboard)/ai/sales-chatbot/inbox/page.tsx` chạy — **tải** = mở hộp thư (`listLabels` →
+`inboxPages` → `listInbox` cùng sáu lời gọi song song), **chuyển** = bấm một hội thoại (`?c=<id>`: thêm `loadInboxThread` trước
+Promise.all) trên N hội thoại đầu danh sách — mỗi phép đo «nguội» (xoá `memo`) và «ấm», kèm tổng ms + số câu SQL. Danh tính là một
+tài khoản CHỈ XEM của chính workspace (hoặc tài khoản đã chọn bị THU HẸP — bỏ quyền gửi tin), nên lượt mở hội thoại không xoá dấu «chưa
+đọc» của shop. Log công khai che workspace thành `org#i` (bản đồ ở phần MÃ HOÁ), in p50 · p95 · max (ms) + cỡ mẫu; dưới 3 quan sát
+in «mẫu nhỏ — chưa kết luận». **Không có ngưỡng đạt / không đạt** (AGENTS 38) — dòng đầu ghi «chưa có đích». Đọc con số cho đúng: chỉ
+là phần máy chủ (không tra phiên, không dựng HTML, không mạng), và bể kết nối của handle chỉ đọc là 1 (app: 2) nên số nghiêng về phía
+CHẬM. Mã thoát 0 = mọi lượt đo được; 1 = có workspace / lượt đo hỏng (câu lỗi ở phần MÃ HOÁ).
