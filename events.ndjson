@@ -1115,3 +1115,4 @@
 {"at":"2026-10-09T02:11:07.352Z","actor":"DESKTOP-56TH98Y:wt-tail","kind":"HANDOFF","mission":"erp-chi-tiet-duoi-dai","detail":"claude/erp-chi-tiet-duoi-dai @ 30ddd0f53d58 · 1 lệnh kiểm thử"}
 {"at":"2026-10-09T02:12:04.650Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"erp-chi-tiet-duoi-dai","detail":"#721 cho claude/erp-chi-tiet-duoi-dai @ 30ddd0f53d58"}
 {"at":"2026-10-09T02:12:30.601Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#721 @ 30ddd0f53d58 · Chỉ hiển thị: decodeRouteParam (decodeURIComponent lỗi «%» ⇒ giữ nguyên chuỗi thay vì 500), nhãn tiếng Việt cho mã enum khách sỉ (mã lạ ⇒ Chưa rõ), tệp VTP hỏng không in 0 dòng (luật 42), xuống dòng 390px. Không đổi logic dữ liệu."}
+{"at":"2026-10-09T02:13:24.085Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"production-unpriced-approval","detail":"fix/production-unpriced-approval @ dff3d330a8fd · 1 lệnh kiểm thử"}

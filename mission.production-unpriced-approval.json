@@ -25,18 +25,18 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-09T00:14:11.786Z",
-  "updated_at": "2026-10-09T00:58:41.316Z",
-  "last_heartbeat": "2026-10-09T00:58:17.450Z",
+  "updated_at": "2026-10-09T02:13:24.048Z",
+  "last_heartbeat": "2026-10-09T02:13:24.048Z",
   "definition_of_done": [],
   "handoff": {
     "branch": "fix/production-unpriced-approval",
-    "sha": "b6a25aafd0e11768abc6889cee5aacb388702f52",
-    "at": "2026-10-09T00:58:17.450Z",
+    "sha": "dff3d330a8fde5f633cf794ffc3d6e78861a2475",
+    "at": "2026-10-09T02:13:24.048Z",
     "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
     "title": "Lệnh đặt xưởng chưa có giá không lọt bước duyệt PURCHASING_LARGE; giá trống không lưu thành 0",
-    "summary": "Lệnh đặt xưởng chưa giá lưu NULL; cổng duyệt: đã nhập → dự tính (giá báo MKT) → bắt duyệt",
+    "summary": "rebase lên 304bcbcb + giá gợi ý chỉ trung bình mẫu mã biết giá (unitCostKnown)",
     "tests": [
-      "npm test TẤT CẢ KIỂM THỬ ĐẠT; typecheck + lint + build sạch; 3 đột biến đỏ"
+      "npm test TẤT CẢ KIỂM THỬ ĐẠT trên dff3d330; typecheck + lint sạch"
     ]
   }
 }
