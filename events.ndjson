@@ -1078,3 +1078,4 @@
 {"at":"2026-10-08T23:40:49.150Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DONE","mission":"ops-signals-check","detail":"production dbab68130a72 · deploy 37854562530 xanh (smoke) · verify ĐẠT; ops-signals-check chạy trên production PASS 9 tổ chức × 8 tín hiệu, 0 ô hỏng (run 37853956678)"}
 {"at":"2026-10-08T23:41:01.280Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DEPLOY_DISPATCHED","detail":"d23c0deb3ce1 · run 37860758200 https://github.com/truyenhkm5group-stack/hkt/actions/runs/37860758200"}
 {"at":"2026-10-09T00:08:48.836Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"customer-outcome-truth","detail":"fix/customer-outcome-truth @ 9f576bf05364 · 1 lệnh kiểm thử"}
+{"at":"2026-10-09T00:09:14.742Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"customer-outcome-truth","detail":"#715 cho fix/customer-outcome-truth @ 9f576bf05364"}
