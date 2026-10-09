@@ -9,6 +9,7 @@ import { manualPaymentStates } from "@/lib/queries/order-payments";
 import type { OrderStage } from "@/db/schema";
 import { ORDER_STAGE_LABEL, ORDER_STAGE_ORDER, pancakeConversationUrl } from "@/lib/constants/pancake";
 import { isManualOrderId, MANUAL_ORDER_ID_PREFIX, manualOrderGaps } from "@/lib/constants/manual-orders";
+import { noCodPaymentState } from "@/lib/constants/no-cod-payment";
 import { reviewFromValue } from "@/lib/constants/order-review";
 import { canUseModule } from "@/lib/platform/capabilities";
 import type { ListParams } from "@/lib/search-params";
@@ -113,6 +114,8 @@ export async function listOrders(params: ListParams) {
         totalPriceAfterDiscount: true,
         shippingFee: true,
         moneyToCollect: true,
+        prepaid: true,
+        transferMoney: true,
         cogs: true,
         itemsCount: true,
         totalQuantity: true,
@@ -162,7 +165,7 @@ export async function listOrders(params: ListParams) {
     const chat = chatLinkOf(chats.get(r.id), inboxOn, { pageId: r.pageId, conversationId: r.conversationId });
     // Chỗ còn thiếu của đơn tay — nút nhanh «Xác nhận đơn» không chốt đơn thiếu xã / SĐT / địa chỉ, dẫn sang sửa đơn (review #675, L2).
     const gaps = isManualOrderId(r.id) ? manualOrderGaps({ phone: r.shipPhone, address: r.shipAddress, province: r.shipProvince, ward: r.shipCommune }, r.itemsCount) : [];
-    return { ...r, review: reviewFromValue(r.review)?.entries ?? [], gaps, shipment: vanDonDaiDien(r.attempts), risk: risk?.risky ? { severity: risk.severity, reasons: risk.reasons } : null, payment: payStates.get(r.id) ?? null, chatUrl: chat?.href ?? null, chatInternal: chat?.internal ?? false };
+    return { ...r, review: reviewFromValue(r.review)?.entries ?? [], gaps, shipment: vanDonDaiDien(r.attempts), risk: risk?.risky ? { severity: risk.severity, reasons: risk.reasons } : null, payment: payStates.get(r.id) ?? null, noCodPayment: noCodPaymentState(r), chatUrl: chat?.href ?? null, chatInternal: chat?.internal ?? false };
   });
 
   return { rows, total: Number(total), pageCount: Math.max(1, Math.ceil(Number(total) / params.pageSize)) };

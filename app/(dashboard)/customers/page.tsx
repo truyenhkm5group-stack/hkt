@@ -39,15 +39,16 @@ export default async function CustomersPage({ searchParams }: { searchParams: Pr
   const filterText = meta?.filters.map((f) => describeListFilter(f, meta.customFields.find((d) => `custom:${d.key}` === f.ref))) ?? [];
   const toggleQuery = new URLSearchParams(Object.entries(raw).flatMap(([k, v]) => (k === META_FILTER_OFF || k === "page" ? [] : Array.isArray(v) ? v.map((x) => [k, x]) : v ? [[k, v]] : [])));
   if (!filtersOff) toggleQuery.set(META_FILTER_OFF, "off");
-  // Mẫu số 0 ⇒ CHƯA CÓ MẪU SỐ ⇒ «—», không phải «0.0%» (luật 42). Không tô màu theo ngưỡng viết cứng (luật 38): đích nằm ở metric_targets.
-  const returnRate = pctOrNull(summary.returned, summary.orders);
+  // Mẫu số = đơn ĐÃ KẾT THÚC theo ORDER_OUTCOME; chưa đơn nào kết thúc ⇒ «—», không phải 0% (luật 42).
+  // Không tô màu theo ngưỡng viết cứng (luật 38): đích nằm ở metric_targets.
+  const returnRate = pctOrNull(summary.returned, summary.finished);
 
   return (
     <div className="space-y-5">
       <PageHeader
         eyebrow="Vận hành"
         title="Khách hàng"
-        description={`${formatNumber(summary.total)} khách · ${formatNumber(summary.withOrders)} khách đã mua · tổng mua ${formatVND(summary.amount, { compact: true })} · số liệu ${copy.name("ORDER_SOURCE")} kết hợp đơn hàng trong ERP`}
+        description={`${formatNumber(summary.total)} khách · ${formatNumber(summary.withOrders)} khách đã mua · tổng mua ${formatVND(summary.amount, { compact: true })} · số đơn và kết quả theo đơn hàng trong ERP`}
         actions={
           <div className="flex flex-wrap items-center gap-2">
             {createGate.allowed ? (
@@ -73,7 +74,7 @@ export default async function CustomersPage({ searchParams }: { searchParams: Pr
       <section className="grid gap-4 sm:grid-cols-3">
         <MetricCard label="Tổng khách hàng" value={formatNumber(summary.total)} note={`${formatNumber(summary.withOrders)} khách có đơn · ${formatNumber(summary.orders)} đơn`} icon={Users} tone="blue" />
         <MetricCard label="Khách mới" value={formatNumber(summary.newInPeriod)} note={`Tạo trên ${copy.name("ORDER_SOURCE")} ${summary.newLabel}`} icon={UserPlus} tone="green" />
-        <MetricCard label="Tỷ lệ hoàn" value={formatPercent(returnRate, 1)} note={returnRate === null ? "Chưa có đơn nào trong bộ lọc — chưa tính được" : `${formatNumber(summary.returned)} đơn hoàn / ${formatNumber(summary.orders)} đơn`} icon={RotateCcw} tone="amber" />
+        <MetricCard label="Tỷ lệ hoàn" value={formatPercent(returnRate, 1)} note={returnRate === null ? "Chưa có đơn nào đã kết thúc trong bộ lọc — chưa tính được" : `${formatNumber(summary.returned)} đơn hoàn / ${formatNumber(summary.finished)} đơn đã kết thúc`} icon={RotateCcw} tone="amber" />
       </section>
 
       <DataTableToolbar

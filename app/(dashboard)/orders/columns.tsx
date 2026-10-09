@@ -10,6 +10,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { formatDateTime, formatTimeAgo } from "@/lib/format";
 import type { OrderListRow } from "@/lib/queries/orders";
 import { isManualOrderId, manualOrderShortCode } from "@/lib/constants/manual-orders";
+import { NO_COD_UNVERIFIED_HINT } from "@/lib/constants/no-cod-payment";
 import { ManualPaymentStatusText } from "@/app/(dashboard)/orders/payment-status";
 
 export const orderColumns: ColumnDef<OrderListRow, unknown>[] = [
@@ -143,7 +144,15 @@ export const orderColumns: ColumnDef<OrderListRow, unknown>[] = [
     cell: ({ row }) => (
       <div className="text-right">
         <Money value={row.original.totalPriceAfterDiscount} className="font-bold" />
-        <div className="mt-0.5 flex justify-end">{row.original.moneyToCollect > 0 && row.original.shipment ? <CodStatusBadge status={row.original.shipment.codStatus} className="px-1.5 text-[10px]" /> : isManualOrderId(row.original.id) ? <ManualPaymentStatusText state={row.original.payment} /> : <span className="text-[10.5px] text-muted-foreground">{row.original.moneyToCollect > 0 ? "COD" : "Đã thanh toán"}</span>}</div>
+        <div className="mt-0.5 flex justify-end">{row.original.moneyToCollect > 0 && row.original.shipment ? <CodStatusBadge status={row.original.shipment.codStatus} className="px-1.5 text-[10px]" /> : isManualOrderId(row.original.id) ? <ManualPaymentStatusText state={row.original.payment} /> : row.original.moneyToCollect > 0 ? (
+            <span className="text-[10.5px] text-muted-foreground">COD</span>
+          ) : row.original.noCodPayment?.kind === "PREPAID" ? (
+            // Bằng chứng tiền đã khai ở VERIFIED_MONEY_SOURCES: khách chuyển khoản trước.
+            <span className="text-[10.5px] text-muted-foreground">Trả trước <Money value={row.original.noCodPayment.amount} /></span>
+          ) : (
+            // 0 phải thu mà không chứng từ tiền ⇒ CHƯA XÁC MINH, không phải "đã thanh toán" (AGENTS §0.1 · ORDER_OUTCOME.md mục 8).
+            <span className="text-[10.5px] text-muted-foreground" title={NO_COD_UNVERIFIED_HINT}>Chưa xác minh</span>
+          )}</div>
       </div>
     ),
   },

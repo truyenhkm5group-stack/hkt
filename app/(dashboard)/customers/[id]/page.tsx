@@ -22,6 +22,7 @@ import { objectDef } from "@/lib/constants/object-registry";
 import { isManualOrderId } from "@/lib/constants/manual-orders";
 import { manualPaymentStates } from "@/lib/queries/order-payments";
 import { ManualPaymentStatusText } from "@/app/(dashboard)/orders/payment-status";
+import { NO_COD_UNVERIFIED_HINT } from "@/lib/constants/no-cod-payment";
 import { MetadataError } from "@/lib/metadata/errors";
 import { listFields } from "@/lib/metadata/fields";
 import { getPublishedForm } from "@/lib/metadata/forms";
@@ -203,7 +204,7 @@ export default async function CustomerDetailPage({ params }: { params: Promise<{
                               <span>Trả trước <Money value={o.noCodPayment.amount} /></span>
                             ) : (
                               // Không còn COD mà cũng không có chứng từ tiền ⇒ CHƯA XÁC MINH, không phải "đã thanh toán" (AGENTS §0.1).
-                              <span title="Đơn không còn COD phải thu nhưng ERP chưa thấy chứng từ tiền nào (chuyển khoản trước / bảng kê)">Chưa xác minh</span>
+                              <span title={NO_COD_UNVERIFIED_HINT}>Chưa xác minh</span>
                             )}</div>
                           )}
                         </TableCell>
