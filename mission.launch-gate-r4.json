@@ -3,7 +3,7 @@
   "mission_id": "launch-gate-r4",
   "title": "Launch Gate r4: O1 ✅ bằng sự cố dựng sẵn hai luồng; O2–O8 tính được trên production",
   "business_goal": "",
-  "status": "RUNNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -20,7 +20,18 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-09T02:16:46.916Z",
-  "updated_at": "2026-10-09T02:16:46.916Z",
-  "last_heartbeat": "2026-10-09T02:16:46.916Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-09T02:17:14.484Z",
+  "last_heartbeat": "2026-10-09T02:17:14.484Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "docs/launch-gate-r4",
+    "sha": "3e544c79c80a8d9014eee479b6c538ec45628750",
+    "at": "2026-10-09T02:17:14.484Z",
+    "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+    "title": "Launch Gate r4: O1 ✅ bằng sự cố dựng sẵn hai luồng; O2–O8 tính được trên production",
+    "summary": "O1 ✅, O2–O8 số đo thật",
+    "tests": [
+      "chỉ tài liệu; điểm đếm lại bằng script 25/41"
+    ]
+  }
 }
