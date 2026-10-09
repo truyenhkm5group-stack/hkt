@@ -1113,3 +1113,4 @@
 {"at":"2026-10-09T01:00:57.735Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"unknown-cost-not-zero","detail":"#716 @ 94333bede954 → 304bcbcb98b5 (MERGE_NOW · MEDIUM · gates success)"}
 {"at":"2026-10-09T01:42:12.767Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DEPLOY_DISPATCHED","detail":"304bcbcb98b5 · run 37871032076 https://github.com/truyenhkm5group-stack/hkt/actions/runs/37871032076"}
 {"at":"2026-10-09T02:11:07.352Z","actor":"DESKTOP-56TH98Y:wt-tail","kind":"HANDOFF","mission":"erp-chi-tiet-duoi-dai","detail":"claude/erp-chi-tiet-duoi-dai @ 30ddd0f53d58 · 1 lệnh kiểm thử"}
+{"at":"2026-10-09T02:12:04.650Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"erp-chi-tiet-duoi-dai","detail":"#721 cho claude/erp-chi-tiet-duoi-dai @ 30ddd0f53d58"}
