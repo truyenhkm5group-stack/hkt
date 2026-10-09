@@ -1,0 +1,8 @@
+{
+  "pr": 740,
+  "sha": "08e5453e8fe1dfd636ea13d0b7a2755ab08ad944",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-09T12:16:10.331Z",
+  "note": "Review Integration Lead: chủ shop giao 09/10 tự động hoá chuẩn bị UI CHỈ cho workspace thử; --prep chỉ đi với --apply; ba lớp chặn (runtime ops · sổ khai · do ops tạo) trước mọi lần ghi; danh tính = tài khoản chủ của chính workspace thử, không người vận hành, không khách thật; lõi đúng của UI (createProductCore · writeStockReceiptCore · saveSalesChatbotConfig · setDomainSlug/publishOrganization), "
+}
