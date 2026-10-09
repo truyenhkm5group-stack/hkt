@@ -1292,3 +1292,4 @@
 {"at":"2026-10-09T15:10:10.600Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"ops-signals-test-clock","detail":"#745 cho fix/ops-signals-test-clock @ d414c3a2593f"}
 {"at":"2026-10-09T15:10:26.971Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#745 @ d414c3a2593f · Chỉ bài kiểm: thay lọc theo mốc giờ tiến trình bằng tập id có trước mỗi bước; khẳng định nghiệp vụ giữ nguyên (đúng một dòng, đúng lý do, đúng tổ chức). Không phải contract test."}
 {"at":"2026-10-09T15:17:39.917Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"acceptance-e2e-r2","detail":"feat/acceptance-e2e-r2 @ a6b74624cdc4 · 1 lệnh kiểm thử"}
+{"at":"2026-10-09T15:18:05.440Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"acceptance-e2e-r2","detail":"#746 cho feat/acceptance-e2e-r2 @ a6b74624cdc4"}
