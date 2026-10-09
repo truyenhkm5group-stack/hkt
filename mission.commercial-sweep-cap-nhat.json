@@ -3,7 +3,7 @@
   "mission_id": "commercial-sweep-cap-nhat",
   "title": "Commercial Sweep: kiểm kê 207/207 trang (32 trang động đọc mã) + bảng C0/C1 theo trạng thái đã gộp",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-docs",
@@ -23,9 +23,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-09T04:10:15.306Z",
-  "updated_at": "2026-10-09T04:11:34.138Z",
+  "updated_at": "2026-10-09T04:39:04.190Z",
   "last_heartbeat": "2026-10-09T04:10:51.827Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#727 → 5676a312b1f867b0bf87c455a10963b73e0112ef"
+  },
   "handoff": {
     "branch": "claude/commercial-sweep-cap-nhat",
     "sha": "0ffe1f74550264bfb36ef5923e6f99d0fc3eeb13",
