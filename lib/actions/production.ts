@@ -4,7 +4,6 @@ import { and, eq, sql } from "drizzle-orm";
 import { guardSecondApproval } from "@/lib/actions/approvals";
 import { withApprovalExecution } from "@/lib/approvals/execution";
 import { revalidatePath } from "next/cache";
-import { z } from "zod";
 import { getDb, schema } from "@/db";
 import { audit } from "@/lib/audit";
 import { can, requireUser } from "@/lib/auth/session";
@@ -16,32 +15,11 @@ import { describeFollow } from "@/lib/production/lifecycle";
 import { buildMatrixForProduct } from "@/lib/queries/production";
 import { requireApprovedDesignFlag } from "@/lib/queries/production-os";
 import { supplierCatalog } from "@/lib/queries/suppliers";
+import { poApprovalPrice, poApprovalSummary, PO_PRICE_BASIS_LABEL } from "@/lib/production/po-approval-price";
+import { productionOrderInputSchema } from "@/lib/validation/production-order";
 
 type Result<T = object> = ({ ok: true } & T) | { error: string };
 
-const inputSchema = z.object({
-  productId: z.string().min(1),
-  productCode: z.string().trim().max(50).default(""),
-  productName: z.string().trim().max(200),
-  colors: z.array(z.string().trim().min(1).max(40)).min(1, "Cần ít nhất một màu").max(20),
-  sizes: z.array(z.string().trim().min(1).max(20)).min(1, "Cần ít nhất một size").max(20),
-  cells: z.record(z.string(), z.number().int().min(0).max(100000)),
-  images: z.array(z.object({ color: z.string().max(40), url: z.string().trim().url().max(600) })).max(20).default([]),
-  unitCost: z.number().int().min(0).default(0),
-  supplier: z.string().trim().max(120).default(""),
-  note: z.string().trim().max(1000).default(""),
-  dueDate: z.string().trim().optional().nullable(),
-  /*
-    Company OS · Agent C. `designVersionId`: `undefined` = nơi gọi không nói gì (giữ bản duyệt đang có),
-    `null` = bỏ trỏ. `fromSuggestion`: người vừa "điền theo đề xuất" (hoặc mở bảng mới — ô khởi tạo LÀ
-    đề xuất) ⇒ máy chủ TÍNH LẠI gợi ý theo đúng căn cứ kế hoạch rồi lưu ảnh chụp; không nhận gợi ý từ
-    trình duyệt. `overrideReason`: bắt buộc khi số chốt khác gợi ý dù một ô (không ngưỡng — luật 38).
-  */
-  designVersionId: z.string().trim().min(1).nullable().optional(),
-  fromSuggestion: z.boolean().default(false),
-  suggestionBasis: z.object({ coverDays: z.number().int().min(0).max(3650).optional(), countIncoming: z.boolean().optional() }).optional(),
-  overrideReason: z.string().trim().max(1000).default(""),
-});
 
 async function nextCode() {
   const db = await getDb();
@@ -54,7 +32,7 @@ export async function saveProductionOrder(input: unknown, id?: string): Promise<
   return withApprovalExecution(async () => {
     const user = await requireUser();
     if (!can(user, "planning:write")) return { error: "Không có quyền tạo bảng đặt hàng" };
-    const parsed = inputSchema.safeParse(input);
+    const parsed = productionOrderInputSchema.safeParse(input);
     if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dữ liệu không hợp lệ" };
     const d = parsed.data;
     const totals = matrixTotals(d.colors, d.sizes, d.cells);
@@ -83,6 +61,9 @@ export async function saveProductionOrder(input: unknown, id?: string): Promise<
     const designVersionId = d.designVersionId === undefined ? (existing?.designVersionId ?? null) : d.designVersionId;
     const ke = await validatePoPlan(db, { productId: d.productId, designVersionId, suggestion, finalCells, overrideReason: d.overrideReason });
     if ("error" in ke) return { error: ke.error };
+    // Số tiền đứng trên căn cứ nào: giá đã nhập → giá dự tính → CHƯA BIẾT (`null` ⇒ cổng coi như vượt
+    // ngưỡng). Không bao giờ `số món × 0` (lib/production/po-approval-price.ts).
+    const gia = await poApprovalPrice({ productId: d.productId, qty: totals.total, unitCost: d.unitCost });
     {
       // Đặt hàng vượt ngưỡng khoá vốn của shop trong nhiều tháng nếu quyết sai. Dưới ngưỡng thì cổng
       // tự cho qua — bắt duyệt mọi lệnh nhỏ chỉ tạo thói quen bấm cho xong.
@@ -91,12 +72,13 @@ export async function saveProductionOrder(input: unknown, id?: string): Promise<
         action: "production.save",
         entity: "PRODUCTION_ORDER",
         entityId: id ?? "",
-        summary: `Đặt xưởng ${d.productName} · ${totals.total} món · ${totals.total * d.unitCost}đ${d.supplier ? ` · ${d.supplier}` : ""}`,
-        amount: totals.total * d.unitCost,
-        payload: d,
+        summary: poApprovalSummary({ productName: d.productName, qty: totals.total, supplier: d.supplier, price: gia }),
+        amount: gia.amount,
+        payload: { ...d, priceBasis: gia.basis, approvalUnitPrice: gia.unitPrice },
       });
-      if (cong.mode === "NEEDS_APPROVAL") return { error: `Việc này cần người thứ hai duyệt (${cong.reason}). Đã gửi yêu cầu — xem ở trang Cần xử lý.` };
-      if (cong.mode === "BLOCKED_NO_APPROVER") return { error: `Việc này cần người thứ hai duyệt (${cong.reason}), nhưng chưa có ai khác đủ tư cách duyệt.` };
+      const vi = gia.basis === "UNPRICED_FORCED" ? ` · ${PO_PRICE_BASIS_LABEL.UNPRICED_FORCED}` : "";
+      if (cong.mode === "NEEDS_APPROVAL") return { error: `Việc này cần người thứ hai duyệt (${cong.reason}${vi}). Đã gửi yêu cầu — xem ở trang Cần xử lý.` };
+      if (cong.mode === "BLOCKED_NO_APPROVER") return { error: `Việc này cần người thứ hai duyệt (${cong.reason}${vi}), nhưng chưa có ai khác đủ tư cách duyệt.` };
     }
     /*
       XƯỞNG: chữ gõ khớp ĐÚNG MỘT xưởng trong danh mục ⇒ ghi khoá `supplier_id` và dùng TÊN CHUẨN do máy
@@ -144,7 +126,8 @@ export async function saveProductionOrder(input: unknown, id?: string): Promise<
       action: id ? "PRODUCTION_ORDER_UPDATE" : "PRODUCTION_ORDER_CREATE",
       entity: "PRODUCTION_ORDER",
       entityId: ghi.rowId,
-      detail: { code, total: totals.total, designVersionId: ke.plan.designVersion?.id ?? null, overriddenCells: ke.plan.diff.length, lifecycle },
+      // Căn cứ giá của cổng duyệt (KNOWN / ESTIMATED / UNPRICED_FORCED) — để biết lệnh qua cổng bằng con số nào.
+      detail: { code, total: totals.total, designVersionId: ke.plan.designVersion?.id ?? null, overriddenCells: ke.plan.diff.length, lifecycle, approvalPrice: { basis: gia.basis, unitPrice: gia.unitPrice, amount: gia.amount, estimateSource: gia.estimateSource } },
       reason: ke.plan.overrideReason ?? undefined,
     });
     revalidatePath("/inventory/planning");
