@@ -3,7 +3,7 @@
   "mission_id": "ops-signals-test-clock",
   "title": "Bài kiểm lý do liên kết (ops-signals) thôi đỏ ngẫu nhiên vì lệch đồng hồ tiến trình ↔ CSDL",
   "business_goal": "",
-  "status": "RUNNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -20,7 +20,18 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-09T15:07:17.320Z",
-  "updated_at": "2026-10-09T15:07:17.320Z",
-  "last_heartbeat": "2026-10-09T15:07:17.320Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-09T15:09:40.066Z",
+  "last_heartbeat": "2026-10-09T15:09:40.066Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "fix/ops-signals-test-clock",
+    "sha": "d414c3a2593fd8b6ec13c37ca30756e02e623837",
+    "at": "2026-10-09T15:09:40.066Z",
+    "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+    "title": "Bài kiểm lý do liên kết (ops-signals) thôi đỏ ngẫu nhiên vì lệch đồng hồ tiến trình ↔ CSDL",
+    "summary": "lọc theo id mới thay mốc giờ",
+    "tests": [
+      "tsc + eslint sạch; CI chạy bài trên CSDL thử hai lượt"
+    ]
+  }
 }
