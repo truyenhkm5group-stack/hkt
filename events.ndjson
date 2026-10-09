@@ -1273,3 +1273,4 @@
 {"at":"2026-10-09T13:23:01.183Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"launch-gate-r5","detail":"#742 cho docs/launch-gate-r5 @ 5e67f2e4e842"}
 {"at":"2026-10-09T13:23:15.794Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#742 @ 5e67f2e4e842 · Tài liệu: mỗi ✅ trỏ run; mục E2E không phủ ghi rõ CHƯA; điểm đếm bằng script."}
 {"at":"2026-10-09T13:23:38.453Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"shell-copy-brand-r3","detail":"fix/shell-copy-brand-r3 @ d068fe7fea34 · 1 lệnh kiểm thử"}
+{"at":"2026-10-09T13:24:03.651Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"ban-hang-reply","detail":"#741 @ 3b447198b85c → 2fe12901625c (MERGE_ISOLATED · HIGH · gates success)"}

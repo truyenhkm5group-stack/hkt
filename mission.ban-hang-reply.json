@@ -3,7 +3,7 @@
   "mission_id": "ban-hang-reply",
   "title": "Vai trò BAN_HANG (Nhân viên bán hàng) được ai_sales:reply — khách mới qua mẫu, khách cũ qua đường nâng cấp có vết (chủ shop duyệt 09/10)",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P2",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -28,9 +28,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-09T10:35:41.130Z",
-  "updated_at": "2026-10-09T12:55:08.457Z",
+  "updated_at": "2026-10-09T13:24:03.601Z",
   "last_heartbeat": "2026-10-09T12:54:39.621Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#741 → 2fe12901625c7f055e4bd110e0f6d4cf8693d56a"
+  },
   "handoff": {
     "branch": "feat/ban-hang-reply",
     "sha": "3b447198b85cce1609d5d132889fead97ed11911",
