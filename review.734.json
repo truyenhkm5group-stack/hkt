@@ -1,0 +1,8 @@
+{
+  "pr": 734,
+  "sha": "22ca1bb971131b92d0646d35bb3a5c1a816f5dc5",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-09T07:29:34.490Z",
+  "note": "Chỉ script đo (perf-probe thêm mục /work: từng hàm nền, từng nguồn qua collectWorkItems, cảnh báo theo kind, getMyWork nguội/ấm); không câu ghi; mục cũ giữ nguyên. Kết luận đo PGlite: không hồi quy từ mã d23c0deb..ef9b302a."
+}
