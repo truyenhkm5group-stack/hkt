@@ -1,0 +1,8 @@
+{
+  "pr": 721,
+  "sha": "30ddd0f53d5870d7ce7b3ba9c477b84aa05feaeb",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-09T02:12:22.508Z",
+  "note": "Chỉ hiển thị: decodeRouteParam (decodeURIComponent lỗi «%» ⇒ giữ nguyên chuỗi thay vì 500), nhãn tiếng Việt cho mã enum khách sỉ (mã lạ ⇒ Chưa rõ), tệp VTP hỏng không in 0 dòng (luật 42), xuống dòng 390px. Không đổi logic dữ liệu."
+}
