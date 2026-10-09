@@ -214,12 +214,12 @@ export default async function CustomerDetailPage({ params }: { params: Promise<{
                 </Table>
               </div>
             ) : (
-              <p className="px-5 py-4 text-sm text-muted-foreground">Khách hàng chưa có đơn nào trong ERP.</p>
+              <p className="px-5 py-4 text-sm text-muted-foreground">Khách hàng chưa có đơn nào.</p>
             )}
           </SectionCard>
 
           {showChats ? (
-            <SectionCard title={`Hội thoại (${formatNumber(chats.length)}${chats.length >= CUSTOMER_CONVERSATIONS_MAX ? "+" : ""})`} description="Mọi kênh · nối bằng khoá cứng (khách gắn vào hội thoại hoặc đơn của khách sinh ra từ hội thoại), không ghép theo tên" padded={false}>
+            <SectionCard title={`Hội thoại (${formatNumber(chats.length)}${chats.length >= CUSTOMER_CONVERSATIONS_MAX ? "+" : ""})`} description={copy.isHome ? "Mọi kênh · nối bằng khoá cứng (khách gắn vào hội thoại hoặc đơn của khách sinh ra từ hội thoại), không ghép theo tên" : "Mọi kênh khách đã nhắn với shop"} padded={false}>
               {chats.length ? (
                 <ul className="divide-y" data-testid="customer-conversations">
                   {chats.map((ch) => (
@@ -227,7 +227,7 @@ export default async function CustomerDetailPage({ params }: { params: Promise<{
                       <Link href={`/ai/sales-chatbot/inbox?c=${encodeURIComponent(ch.id)}`} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 px-5 py-2.5 text-sm hover:bg-muted/50">
                         <span className="min-w-0">
                           <span className="font-medium">{INBOX_CHANNEL_LABEL[ch.channel as keyof typeof INBOX_CHANNEL_LABEL] ?? ch.channel}</span>
-                          {ch.pageId ? <span className="text-muted-foreground"> · page {ch.pageId}</span> : null}
+                          {ch.pageId && copy.isHome ? <span className="text-muted-foreground"> · page {ch.pageId}</span> : null}
                           {ch.orders ? <span className="text-muted-foreground"> · {formatNumber(ch.orders)} đơn</span> : null}
                         </span>
                         <span className="flex items-center gap-2 text-xs text-muted-foreground">
@@ -298,13 +298,14 @@ export default async function CustomerDetailPage({ params }: { params: Promise<{
                 { label: "Giới tính", value: customer.gender ? (GENDER_LABEL[customer.gender.toLowerCase()] ?? customer.gender) : "—" },
                 { label: "Ngày sinh", value: formatDate(customer.dateOfBirth) },
                 { label: "Hạng khách", value: customer.level || "—" },
-                { label: "Điểm thưởng", value: formatNumber(customer.rewardPoint) },
                 { label: "Tỉnh/TP", value: customer.province || "—" },
                 { label: "Thẻ", value: customer.tags.length ? <span className="flex flex-wrap gap-1">{customer.tags.map((t) => <span key={t} className="rounded bg-muted px-1.5 py-0.5 text-xs">{t}</span>)}</span> : "—", span: true },
-                // Bốn dòng Pancake + Facebook/hội thoại là của tổ chức NHÀ (connector HOME_ONLY): tổ chức khác thấy mốc tạo /
+                // Các dòng Pancake + Facebook/hội thoại là của tổ chức NHÀ (connector HOME_ONLY): tổ chức khác thấy mốc tạo /
                 // sửa trên ERP thay vì năm ô "—" mang tên một hệ thống họ không dùng.
                 ...(copy.isHome
                   ? [
+                      // Điểm thưởng là ô của Pancake — tổ chức không đồng bộ Pancake không bao giờ có số, in «0» là nói sai.
+                      { label: "Điểm thưởng", value: formatNumber(customer.rewardPoint) },
                       { label: "Facebook", value: fbUrl ? <a href={fbUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-primary hover:underline">{customer.fbId}<ExternalLink className="size-3" /></a> : "—" },
                       { label: "Hội thoại", value: customer.conversationLink ? <a href={customer.conversationLink} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-primary hover:underline">Mở trên Pancake<ExternalLink className="size-3" /></a> : "—" },
                       { label: "Mã Pancake", value: <span className="font-mono text-xs">{customer.pancakeId ?? "—"}</span> },
@@ -313,7 +314,7 @@ export default async function CustomerDetailPage({ params }: { params: Promise<{
                       { label: "Cập nhật Pancake", value: formatDateTime(customer.updatedAtExternal) },
                     ]
                   : [
-                      { label: "Tạo trên ERP", value: formatDateTime(customer.createdAt) },
+                      { label: "Tạo lúc", value: formatDateTime(customer.createdAt) },
                       { label: "Sửa lần cuối", value: formatDateTime(customer.updatedAt) },
                     ]),
               ]}
@@ -347,10 +348,15 @@ export default async function CustomerDetailPage({ params }: { params: Promise<{
             )}
           </SectionCard>
 
-          <div className="flex items-center gap-2 text-xs text-muted-foreground">
-            <ShoppingBag className="size-3.5" /> Pancake ghi nhận (tham khảo, không tính vào số ERP ở trên): {formatNumber(stats.pancake.orders)} đơn · thành công {formatNumber(stats.pancake.succeed)} · hoàn {formatNumber(stats.pancake.returned)} · {formatVND(stats.pancake.amount)} · cập nhật {formatDateTime(customer.updatedAtExternal ?? customer.syncedAt)}
-          </div>
-          <JsonViewer value={customer.raw ?? { id: customer.id, pancakeId: customer.pancakeId, name: customer.name, phones: customer.phones }} />
+          {/* Bộ đếm Pancake + dữ liệu gốc chỉ có ở tổ chức đồng bộ Pancake (nhà): nơi khác dòng này luôn «0 đơn», mang tên một hệ thống họ không dùng. */}
+          {copy.isHome ? (
+            <>
+              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                <ShoppingBag className="size-3.5" /> Pancake ghi nhận (tham khảo, không tính vào số ERP ở trên): {formatNumber(stats.pancake.orders)} đơn · thành công {formatNumber(stats.pancake.succeed)} · hoàn {formatNumber(stats.pancake.returned)} · {formatVND(stats.pancake.amount)} · cập nhật {formatDateTime(customer.updatedAtExternal ?? customer.syncedAt)}
+              </div>
+              <JsonViewer value={customer.raw ?? { id: customer.id, pancakeId: customer.pancakeId, name: customer.name, phones: customer.phones }} />
+            </>
+          ) : null}
         </div>
       </div>
     </div>

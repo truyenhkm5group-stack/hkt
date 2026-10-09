@@ -279,7 +279,7 @@ export function ManualOrderForm({
         ) : (
           <p className="text-muted-foreground">Điền đủ mẫu mã, số lượng và đơn giá để xem tổng tiền.</p>
         )}
-        <p className="mt-2 text-[11px] text-muted-foreground">Tạo đơn KHÔNG trừ tồn thực tế: xuất hàng bằng phiếu xuất kho ở trang đơn. Kết quả giao / thu tiền của đơn không qua đơn vị vận chuyển chưa được ERP kết luận.</p>
+        <p className="mt-2 text-[11px] text-muted-foreground">Tạo đơn chưa trừ tồn: hàng chỉ trừ kho khi đã rời kho — xác nhận giao bằng phiếu giao ở trang đơn, hoặc khi đơn vị vận chuyển lấy hàng. Tiền chỉ tính là đã thu khi có chứng từ thanh toán.</p>
       </div>
 
       {formError ? <p className="text-sm font-medium text-destructive">{formError}</p> : null}

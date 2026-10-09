@@ -620,6 +620,7 @@ import { testDirectConnectGate } from "./direct-connect-gate.test";
 import { testShellTypography } from "./shell-typography.test";
 import { testErpDetailTail } from "./erp-detail-tail.test";
 import { testErpFormNames } from "./erp-form-names.test";
+import { testDetailPagesShell } from "./detail-pages-shell.test";
 
 async function main() {
   await ensureMigrated();
@@ -3047,6 +3048,8 @@ async function main() {
   testErpDetailTail();
   // Ô nhập ở trang chi tiết ERP có tên cho trình đọc màn hình (Commercial Sweep — lô xưởng, khách sỉ, topic, mẫu, luật tự động).
   testErpFormNames();
+  // Trang chi tiết đơn / khách / hội thoại: không chữ, bộ đếm, ô tiền Pancake ở tổ chức không Pancake (Commercial Sweep P0 động).
+  testDetailPagesShell();
   // Nền tảng · phiên & RBAC (agent C): claim org, cổng module, platform:operate, đăng nhập theo tổ chức. Tự cấp
   // tổ chức `pr-` (CSDL riêng) và tự dọn; đứng cạnh bài ngữ cảnh vì cùng lý do.
   await testPlatformRbac();

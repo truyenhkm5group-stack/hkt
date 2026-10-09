@@ -42,6 +42,28 @@ export const SALES_EVENT_TYPES = [
 ] as const;
 export type SalesEventType = (typeof SALES_EVENT_TYPES)[number];
 
+/** Tên tiếng Việt của từng loại sự kiện cho màn hình — `Record` đủ khoá nên thêm loại mới mà quên tên là lỗi biên dịch. */
+export const SALES_EVENT_LABEL: Record<SalesEventType, string> = {
+  "conversation.opened": "Mở hội thoại",
+  "message.received": "Khách nhắn",
+  "ai.replied": "AI trả lời",
+  "stage.changed": "Chuyển bước bán hàng",
+  "quote.given": "Báo giá",
+  "customer.identified": "Có SĐT khách",
+  "upsell.offered": "Mời mua thêm",
+  "upsell.accepted": "Khách mua thêm",
+  "upsell.declined": "Khách không mua thêm",
+  "order.drafted": "Lên đơn nháp",
+  "order.confirmed": "Chốt đơn",
+  "appointment.booked": "Đặt lịch hẹn",
+  "handoff.requested": "Chuyển cho nhân viên",
+  "human.took_over": "Nhân viên nhận hội thoại",
+  "human.replied": "Nhân viên trả lời",
+  "ai.resumed": "AI trả lời lại",
+  "followup.sent": "Nhắn lại khách",
+  "conversation.declined": "Khách không mua",
+};
+
 export const SALES_EVENT_ACTORS = ["CUSTOMER", "AI", "HUMAN", "SYSTEM"] as const;
 export type SalesEventActor = (typeof SALES_EVENT_ACTORS)[number];
 

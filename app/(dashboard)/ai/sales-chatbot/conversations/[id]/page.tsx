@@ -6,7 +6,7 @@ import { requirePermission } from "@/lib/auth/session";
 import { formatDateTime } from "@/lib/format";
 import { customerChatView, customerFacing } from "@/lib/saas/visibility";
 import { CHAT_CHANNEL_LABEL, type ChatChannel } from "@/lib/sales-chatbot/config";
-import { HANDOFF_REASON_LABEL, type HandoffReasonCode } from "@/lib/sales-chatbot/events-shared";
+import { HANDOFF_REASON_LABEL, SALES_EVENT_LABEL, type HandoffReasonCode, type SalesEventType } from "@/lib/sales-chatbot/events-shared";
 import { loadConversationReview } from "@/lib/sales-chatbot/experiment-report";
 import { maskPhones } from "@/lib/sales-chatbot/experiment-shared";
 import { cn } from "@/lib/utils";
@@ -22,13 +22,15 @@ export default async function ConversationReviewPage({ params }: { params: Promi
   const r = await loadConversationReview(user, decodeURIComponent(id));
   if ("error" in r) notFound();
   // Workspace KHÁCH (lib/saas/visibility.ts): không tên / tóm tắt công cụ bot đã gọi — lọc trước khi dựng.
-  const v = customerFacing(user.organization) ? { ...r.value, view: customerChatView(r.value.view) } : r.value;
+  // Nhánh thử nghiệm AI / người là việc đo của nền tảng — khách không cần biết hội thoại của mình nằm ở nhánh nào.
+  const khach = customerFacing(user.organization);
+  const v = khach ? { ...r.value, view: customerChatView(r.value.view) } : r.value;
   return (
     <div className="space-y-5">
       <PageHeader
         eyebrow="AI"
         title="Xem lại hội thoại"
-        description={`${CHAT_CHANNEL_LABEL[v.channel as ChatChannel] ?? v.channel} · mở ${formatDateTime(v.createdAt)}${v.arm ? ` · nhánh thử nghiệm ${v.arm === "AI" ? "AI" : "người"}` : ""}${v.handoffReason ? ` · ${v.handoffReason}` : ""}`}
+        description={`${CHAT_CHANNEL_LABEL[v.channel as ChatChannel] ?? "Kênh khác"} · mở ${formatDateTime(v.createdAt)}${v.arm && !khach ? ` · nhánh thử nghiệm ${v.arm === "AI" ? "AI" : "người"}` : ""}${v.handoffReason ? ` · ${v.handoffReason}` : ""}`}
         actions={
           <Link href="/ai/sales-chatbot/conversations" className="text-sm font-medium text-primary hover:underline">
             ← Danh sách
@@ -46,19 +48,19 @@ export default async function ConversationReviewPage({ params }: { params: Promi
             ))}
           </div>
         </SectionCard>
-        <SectionCard title="Sổ sự kiện" padded={false}>
+        <SectionCard title="Diễn biến hội thoại" padded={false}>
           {v.events.length === 0 ? (
-            <p className="p-4 text-sm text-muted-foreground">Hội thoại có từ trước khi bật sổ sự kiện.</p>
+            <p className="p-4 text-sm text-muted-foreground">Hội thoại này có từ trước khi hệ thống ghi diễn biến.</p>
           ) : (
             <ul className="divide-y text-xs">
               {v.events.map((e, i) => (
                 <li key={i} className="flex justify-between gap-2 px-3 py-1.5">
                   <span>
-                    {e.type}
+                    {SALES_EVENT_LABEL[e.type as SalesEventType] ?? "Sự kiện khác"}
                     {e.reason ? ` · ${HANDOFF_REASON_LABEL[e.reason as HandoffReasonCode] ?? e.reason}` : ""}
                   </span>
                   <span className="text-muted-foreground">
-                    {ACTOR_LABEL[e.actor] ?? e.actor} · {formatDateTime(e.at)}
+                    {ACTOR_LABEL[e.actor] ?? "Khác"} · {formatDateTime(e.at)}
                   </span>
                 </li>
               ))}
