@@ -1,0 +1,8 @@
+{
+  "pr": 719,
+  "sha": "b6a25aafd0e11768abc6889cee5aacb388702f52",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-09T00:58:46.175Z",
+  "note": "Review Integration Lead: theo quyết định Tech Lead 09/10 — giá trống lưu NULL (cột cho phép), 0 gõ tay bị từ chối; cổng PURCHASING_LARGE dùng giá đã nhập → giá dự tính getEstimatedCosts (giá báo MKT 26/09) → UNPRICED_FORCED (amount null ⇒ overThreshold ⇒ bắt duyệt); giá dự tính chỉ dùng để quyết duyệt, không ghi vào unit_cost; audit ghi priceBasis. Bảng giá thành: ô trống không thành 0, chặn lưu. "
+}
