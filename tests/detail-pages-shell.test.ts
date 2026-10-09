@@ -46,7 +46,8 @@ export function testDetailPagesShell() {
   guarded(don, "copy.isHome && !manual ?", "Gắn thẻ “SĐT mới” cho đơn trên Pancake", 400, "chỉ dẫn Pancake cho khách mới");
   guarded(don, "copy.isHome ?", " (cùng khách Pancake)", 20, "đơn cũ cùng khách");
   guarded(don, "manual ?", "điền vào đơn trên Pancake", 120, "lời nhắc điền địa chỉ");
-  guarded(don, "order.customer && copy.isHome ?", "succeedOrderCount}</p>", 400, "bộ đếm Pancake của khách");
+  // Ba ô «Đơn / Thành công / Hoàn» nay là số ERP (ORDER_OUTCOME, mọi tổ chức); bộ đếm Pancake chỉ còn dòng tham khảo ở nhà.
+  guarded(don, "copy.isHome ?", "Pancake ghi nhận (tham khảo): {formatNumber(order.customer.orderCount)}", 200, "bộ đếm Pancake của khách");
   guarded(don, "copy.isHome ?", "<JsonViewer value={order.raw} />", 20, "dữ liệu gốc Pancake của đơn");
 
   // 1b + 2. Trang khách.
