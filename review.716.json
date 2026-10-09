@@ -1,0 +1,8 @@
+{
+  "pr": 716,
+  "sha": "94333bede954f9f7ad4c8855cb9d1df6f368140a",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-09T00:13:01.186Z",
+  "note": "Review Integration Lead: giá vốn CHƯA BIẾT ⇒ null («—», không tô màu) theo luật 42; thứ tự nguồn §3.13 giữ nguyên, 0 = chưa định giá (đúng canonical-outcome); một dòng chưa biết ⇒ cả đơn null kèm độ phủ x/y; computePlan/PlanInput không đổi (kiểm deep-equal), PlanRow.unitCost cũ giữ cho các nơi tiêu thụ; kinh tế khách SaaS: thiếu số phân bổ ⇒ lãi gộp null, chi phí ghi «cận dưới». Phạm vi rộng hơn k"
+}
