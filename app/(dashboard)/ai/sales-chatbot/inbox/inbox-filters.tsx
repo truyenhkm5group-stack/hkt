@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { ChevronDown, Search, SlidersHorizontal, X } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
+  compactCount,
   INBOX_CHANNEL_LABEL,
   INBOX_CHANNELS,
   INBOX_FILTER_LABEL,
@@ -22,6 +23,7 @@ import {
   type InboxLabel,
 } from "@/lib/sales-chatbot/inbox-shared";
 import { CUSTOMER_LEVEL_LABEL, type CustomerLevel } from "@/lib/sales-chatbot/levels-shared";
+import { formatNumber } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
 /**
@@ -90,7 +92,7 @@ export function InboxFilters({ state, counts, phoneCount, levelCounts, levels, p
   };
 
   return (
-    <div className="space-y-1.5 border-b border-foreground/10 px-2 py-2" data-testid="inbox-filters">
+    <div className="space-y-1.5 border-b border-foreground/10 px-1.5 py-2" data-testid="inbox-filters">
       <div className="flex items-center gap-1.5">
         <form
           role="search"
@@ -253,7 +255,7 @@ export function InboxFilters({ state, counts, phoneCount, levelCounts, levels, p
         </Popover>
         {tools}
       </div>
-      <div className="flex items-center gap-1 overflow-x-auto [scrollbar-width:none]" data-testid="inbox-quick-filters">
+      <div className="flex items-center gap-0.5 overflow-x-auto [scrollbar-width:none]" data-testid="inbox-quick-filters" data-quick-row>
         {INBOX_QUICK_FILTERS.map((f) => {
           const on = f === state.filter;
           const hot = !on && (f === "UNREAD" || f === "UNANSWERED" || f === "NEEDS_HUMAN") && counts[f] > 0;
@@ -262,12 +264,16 @@ export function InboxFilters({ state, counts, phoneCount, levelCounts, levels, p
               key={f}
               // Bấm lại thẻ đang bật ⇒ về «Tất cả».
               href={inboxHref(state, { f: on ? null : f, c: null, n: null })}
-              className={cn("inline-flex h-7 shrink-0 items-center gap-1 whitespace-nowrap rounded-full border px-2.5 text-[12px]", on ? "border-foreground bg-foreground font-semibold text-background" : "border-foreground/15 bg-card hover:bg-muted", hot && "font-semibold text-foreground")}
-              aria-pressed={on}
+              className={cn("inline-flex h-7 shrink-0 items-center gap-0.5 whitespace-nowrap rounded-full border px-[5px] text-[12px]", on ? "border-foreground bg-foreground font-medium text-background" : "border-foreground/15 bg-card hover:bg-muted", hot && "text-foreground")}
+              aria-current={on ? "true" : undefined}
+              title={`${INBOX_FILTER_LABEL[f]}: ${formatNumber(counts[f])} hội thoại`}
               data-filter={f}
             >
               {INBOX_FILTER_LABEL[f]}
-              <span className={cn("tabular-nums", on ? "opacity-80" : hot ? "text-primary" : "text-muted-foreground")}>{counts[f]}</span>
+              {/* Số gọn («2,1k») để bốn thẻ vừa cột 360 px ở 1366×768 với số cỡ HSLC (2,1k · 219); số đủ ở chú thích. */}
+              <span className={cn("text-[11.5px] tabular-nums", on ? "opacity-80" : hot ? "font-semibold text-primary" : "text-muted-foreground")} data-count={counts[f]}>
+                {compactCount(counts[f])}
+              </span>
             </Link>
           );
         })}

@@ -30,12 +30,12 @@ import { loadChannelFacts } from "@/lib/onboarding/go-live";
  * (`ShellViewportFit`) — thanh dưới cố định của vỏ + vùng an toàn iPhone làm `100dvh - 13.5rem` đẩy ô soạn tin xuống dưới nó.
  */
 function InboxFrame({ shell, children }: { shell: boolean; children: React.ReactNode }) {
-  // INBOX-V2-A: đầu trang chỉ còn cho trình đọc màn hình (13.5rem cũ chừa cho tiêu đề + mô tả ~190 px) ⇒ khung cao thêm 3 rem, vừa
-  // khít dưới thanh menu ERP mà trang không cuộn (đáy `pb-10` của khung chính). `grid-cols-[minmax(0,1fr)]`: một cột trên điện thoại
+  // INBOX-V2-A: tiêu đề chỉ còn cho trình đọc màn hình và hộp thư không in dòng vị trí «… / inbox» (components/detail-crumb.tsx) ⇒
+  // 13.5rem cũ (chừa cho tiêu đề + mô tả ~190 px) còn 8rem (thanh menu + lề), vừa khít dưới thanh menu ERP mà trang không cuộn (đáy `pb-10` của khung chính). `grid-cols-[minmax(0,1fr)]`: một cột trên điện thoại
   // không được nở theo nội dung (hàng thẻ lọc cuộn ngang) mà tràn khỏi màn hình.
-  if (!shell) return <div className="grid h-[calc(100dvh-10.5rem)] min-h-[560px] grid-cols-[minmax(0,1fr)] overflow-hidden rounded-xl border border-foreground/15 bg-card lg:grid-cols-[340px_minmax(0,1fr)]">{children}</div>;
+  if (!shell) return <div className="grid h-[calc(100dvh-8rem)] min-h-[560px] grid-cols-[minmax(0,1fr)] overflow-hidden rounded-xl border border-foreground/15 bg-card lg:grid-cols-[360px_minmax(0,1fr)]">{children}</div>;
   return (
-    <ShellViewportFit testId="inbox-frame" className="grid grid-cols-[minmax(0,1fr)] overflow-hidden rounded-xl border border-foreground/15 bg-card lg:grid-cols-[340px_minmax(0,1fr)]" fallbackClassName="h-[calc(100dvh-15rem-env(safe-area-inset-bottom))] lg:h-[calc(100dvh-9rem)]">
+    <ShellViewportFit testId="inbox-frame" className="grid grid-cols-[minmax(0,1fr)] overflow-hidden rounded-xl border border-foreground/15 bg-card lg:grid-cols-[360px_minmax(0,1fr)]" fallbackClassName="h-[calc(100dvh-15rem-env(safe-area-inset-bottom))] lg:h-[calc(100dvh-9rem)]">
       {children}
     </ShellViewportFit>
   );

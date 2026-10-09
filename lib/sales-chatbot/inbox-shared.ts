@@ -39,7 +39,7 @@ export const INBOX_FILTER_LABEL: Record<InboxFilter, string> = {
 export const INBOX_QUICK_FILTERS = ["UNREAD", "UNANSWERED", "NEEDS_HUMAN", "MINE"] as const satisfies readonly InboxFilter[];
 /**
  * Thẻ của `INBOX_FILTERS` KHÔNG nằm ở hàng nhanh — vào ô «Trạng thái» của «Lọc ▾». «Tất cả» không phải một thẻ: bấm lại thẻ nhanh
- * đang bật là về «Tất cả» (tổng hội thoại in trong ô tìm) — bốn thẻ vừa một hàng ở cột 340 px.
+ * đang bật là về «Tất cả» (tổng hội thoại in trong ô tìm) — bốn thẻ vừa một hàng ở cột 360 px (số gọn `compactCount`).
  */
 export const INBOX_MORE_FILTERS: readonly InboxFilter[] = INBOX_FILTERS.filter((f) => f !== "ALL" && !(INBOX_QUICK_FILTERS as readonly InboxFilter[]).includes(f));
 
@@ -149,6 +149,24 @@ export function keepActiveInPlace(next: readonly InboxRow[], prev: readonly Inbo
   const rest = next.filter((r) => r.id !== activeId);
   rest.splice(Math.min(prevIdx, rest.length), 0, row);
   return rest;
+}
+
+/**
+ * Số trên thẻ lọc nhanh dạng GỌN, kiểu Việt Nam (dấu phẩy thập phân): 0–999 nguyên văn · 1.000–9.999 ⇒ «2,1k» (CẮT, không làm tròn
+ * lên — 2.199 in «2,1k» chứ không «2,2k», để số in ra không bao giờ lớn hơn số thật) · 10.000–999.999 ⇒ «21k» · từ 1 triệu ⇒ «1,2tr».
+ * Số đủ nằm ở chú thích của thẻ. Âm / không hữu hạn ⇒ «0». HÀM THUẦN.
+ */
+export function compactCount(n: number): string {
+  const v = Number.isFinite(n) ? Math.max(0, Math.floor(n)) : 0;
+  // Số nguyên suốt (không nhân / chia số thực) để không có lỗi làm tròn dấu phẩy động.
+  const cut = (unit: number, suffix: string) => {
+    const tenths = Math.floor(v / (unit / 10));
+    if (tenths >= 100) return `${Math.floor(tenths / 10)}${suffix}`;
+    return `${Math.floor(tenths / 10)}${tenths % 10 ? `,${tenths % 10}` : ""}${suffix}`;
+  };
+  if (v < 1_000) return String(v);
+  if (v < 1_000_000) return cut(1_000, "k");
+  return cut(1_000_000, "tr");
 }
 
 /** Mốc tin cuối dạng NGẮN cho hàng hội thoại: «vừa xong» · «5 phút» · «3 giờ» · «2 ngày» · «dd/mm» (giờ Việt Nam). HÀM THUẦN. */

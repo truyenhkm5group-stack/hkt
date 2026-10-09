@@ -21,6 +21,7 @@ import { fanpageVisitorKey } from "@/lib/sales-chatbot/fanpage";
 import { listInbox } from "@/lib/sales-chatbot/inbox";
 import {
   avatarHrefOf,
+  compactCount,
   compactTimeAgo,
   INBOX_FILTERS,
   INBOX_MORE_FILTERS,
@@ -114,6 +115,13 @@ function testRowHelpers() {
   assert.equal(compactTimeAgo(new Date(now - 2 * 86_400_000).toISOString(), now), "2 ngày");
   assert.equal(compactTimeAgo("2026-09-20T18:00:00Z", now), "21/09", "quá 7 ngày ⇒ ngày giờ Việt Nam");
   assert.equal(compactTimeAgo(null, now), "—");
+
+  // Số gọn trên thẻ nhanh (cỡ HSLC: 2146 / 219) — cắt, không làm tròn lên; số đủ ở chú thích.
+  const cc: [number, string][] = [[0, "0"], [219, "219"], [999, "999"], [1000, "1k"], [2146, "2,1k"], [2199, "2,1k"], [9999, "9,9k"], [10500, "10k"], [999_999, "999k"], [1_250_000, "1,2tr"], [-5, "0"], [Number.NaN, "0"]];
+  for (const [n, out] of cc) assert.equal(compactCount(n), out, `compactCount(${n})`);
+  const filters = readFileSync(`${DIR}/inbox-filters.tsx`, "utf8");
+  assert.match(filters, /\{compactCount\(counts\[f\]\)\}/, "thẻ nhanh in số gọn");
+  assert.match(readFileSync("components/detail-crumb.tsx", "utf8"), /OWN_NAV_PREFIXES = \[[^\]]*"\/ai\/sales-chatbot\/inbox"/, "hộp thư không in dòng vị trí «… / inbox»");
   console.log("  ✓ hàng gọn: hội thoại đang mở đứng yên · một trạng thái / hàng · giờ ngắn");
 }
 
