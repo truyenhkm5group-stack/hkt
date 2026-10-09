@@ -1099,3 +1099,4 @@
 {"at":"2026-10-09T00:32:01.118Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"commercial-polish-2","detail":"#718 cho claude/commercial-polish-2 @ 5ffc56490452"}
 {"at":"2026-10-09T00:32:22.227Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#718 @ 5ffc56490452 · Chữ vỏ ≥ 12px (10,5px ⇒ text-xs ở hộp thư), bài chốt quét 80 tệp vỏ có một miễn trừ kèm lý do; câu #705 sửa đúng góp ý LOW. Không đổi logic."}
 {"at":"2026-10-09T00:47:06.901Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"VERIFY_PASS","mission":"acceptance-login-recorder","detail":"PASS d23c0deb3ce17e61c94d78117b04a9b3c7043183 2026-10-09T00:46:58.357Z"}
+{"at":"2026-10-09T00:47:21.592Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DONE","mission":"acceptance-login-recorder","detail":"production d23c0deb3ce1 · deploy 37860758200 xanh (smoke) · verify ĐẠT"}
