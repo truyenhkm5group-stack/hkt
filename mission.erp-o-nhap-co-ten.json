@@ -3,7 +3,7 @@
   "mission_id": "erp-o-nhap-co-ten",
   "title": "Ô nhập ở trang chi tiết ERP có tên cho trình đọc màn hình: lô xưởng (36 ô), khách sỉ, gọi khách sỉ điện thoại, topic sản xuất, trạng thái mẫu, góp ý ý tưởng, trình sửa luật tự động",
   "business_goal": "",
-  "status": "INTEGRATING",
+  "status": "VERIFYING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-a11y2",
@@ -34,11 +34,13 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-08T23:30:49.882Z",
-  "updated_at": "2026-10-09T04:35:51.949Z",
+  "updated_at": "2026-10-09T06:13:15.039Z",
   "last_heartbeat": "2026-10-09T04:08:29.249Z",
   "definition_of_done": [],
   "evidence": {
-    "merged": "#726 → 279a7105aab4df56ca3df8c6b01e2a258ec2cd76"
+    "merged": "#726 → 279a7105aab4df56ca3df8c6b01e2a258ec2cd76",
+    "verify": "PASS 50293da6ee8a88d2b254060cb48a9a2e276a6540 2026-10-09T06:13:07.132Z",
+    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/37886395475"
   },
   "handoff": {
     "branch": "claude/erp-o-nhap-co-ten",
