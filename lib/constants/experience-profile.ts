@@ -61,6 +61,9 @@ export type ExperienceProfile = {
 
 const SIZE: VariantField = { storage: "size", label: "Size", placeholder: "S, M, L…" };
 const COLOR: VariantField = { storage: "color", label: "Màu", placeholder: "Đen, Trắng…" };
+/** Ô cũ khi hồ sơ không có nhưng lối gọi máy vẫn gửi giá trị — ghi lại đúng như trước (chữ `detail` «Size: …» / «Màu: …»). */
+export const LEGACY_SIZE_FIELD = SIZE;
+export const LEGACY_COLOR_FIELD = COLOR;
 
 export const EXPERIENCE_PROFILES: Record<ExperiencePreset, ExperienceProfile> = {
   GENERIC_COMMERCE: {

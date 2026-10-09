@@ -46,6 +46,9 @@ export function testExperienceProfile() {
   // ── đường ghi chỉ ghi ô của hồ sơ: sửa mẫu mã ở shop thực phẩm không xoá trắng size / color cũ ──
   const core = readFileSync("lib/records/product-create.ts", "utf8");
   assert.match(core, /has\("size"\) \? \{ size: v\.size \}/);
+  // Lối gọi máy gửi size cho tổ chức thực phẩm ⇒ vẫn ghi, không vứt (hội thoại vàng «bao-gia» gieo «1kg» qua đúng đường này).
+  assert.match(core, /if \(v\.size && !fields\.some\(\(f\) => f\.storage === "size"\)\) effective\.push\(LEGACY_SIZE_FIELD\)/);
+  assert.equal(variantDetailText([...food.variantFields, EXPERIENCE_PROFILES.FASHION.variantFields[0]], { size: "1kg" }), "Size: 1kg");
   assert.match(core, /has\("color"\) \? \{ color: v\.color \}/);
 
   // ── (4) không rẽ nhánh theo mã tổ chức trong các tệp giao diện / hồ sơ ──

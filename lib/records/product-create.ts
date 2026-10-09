@@ -24,7 +24,7 @@ import { audit } from "@/lib/audit";
 import { can, type SessionUser } from "@/lib/auth/session";
 import { duplicateSkus, isManualRecordId, MANUAL_PRODUCT_ORIGIN, newManualId, skuKey, type ManualProductRaw } from "@/lib/constants/manual-products";
 import { objectDef } from "@/lib/constants/object-registry";
-import { specOf, variantDetailText, type VariantField } from "@/lib/constants/experience-profile";
+import { LEGACY_COLOR_FIELD, LEGACY_SIZE_FIELD, specOf, variantDetailText, type VariantField } from "@/lib/constants/experience-profile";
 import { readExperienceProfile } from "@/lib/experience/profile";
 import { fail, type MetaFailure } from "@/lib/metadata/errors";
 import type { FieldError } from "@/lib/metadata/types";
@@ -89,8 +89,8 @@ async function conflicts(db: DbLike, data: ManualProductInput, self: { productId
 }
 
 /**
- * Ô mẫu mã đi theo HỒ SƠ NGÀNH của tổ chức (`lib/constants/experience-profile.ts`): ô hồ sơ không có thì KHÔNG ghi — sửa
- * một mẫu mã ở shop thực phẩm không xoá trắng cột size / color cũ của nó (dữ liệu cũ giữ an toàn, chỉ ẩn khỏi giao diện).
+ * Ô mẫu mã đi theo HỒ SƠ NGÀNH của tổ chức (`lib/constants/experience-profile.ts`): ô hồ sơ không có và đầu vào để trống thì
+ * KHÔNG ghi — sửa một mẫu mã ở shop thực phẩm không xoá trắng cột size / color cũ của nó (dữ liệu cũ giữ an toàn, chỉ ẩn).
  */
 function withSpec(prev: unknown, spec: string): Record<string, unknown> | null {
   const base: Record<string, unknown> = prev && typeof prev === "object" && !Array.isArray(prev) ? { ...(prev as Record<string, unknown>) } : {};
@@ -102,8 +102,15 @@ function withSpec(prev: unknown, spec: string): Record<string, unknown> | null {
 function variantValues(data: ManualProductInput, v: ManualProductInput["variants"][number], fields: readonly VariantField[], prevAttributes: unknown = null) {
   const retail = v.retailPrice ?? data.retailPrice;
   const cost = v.cost ?? data.cost;
-  const has = (s: VariantField["storage"]) => fields.some((f) => f.storage === s);
-  const detail = variantDetailText(fields, v);
+  /*
+    Hồ sơ quyết định ô nào HIỆN, không quyết định dữ liệu nào bị VỨT: lối gọi không qua form (gieo dữ liệu, công cụ máy, nhập
+    tệp) vẫn có thể gửi size / color cho tổ chức thực phẩm — giá trị khác rỗng thì vẫn ghi, kèm vào chữ `detail` như cũ.
+  */
+  const effective: VariantField[] = [...fields];
+  if (v.size && !fields.some((f) => f.storage === "size")) effective.push(LEGACY_SIZE_FIELD);
+  if (v.color && !fields.some((f) => f.storage === "color")) effective.push(LEGACY_COLOR_FIELD);
+  const has = (s: VariantField["storage"]) => effective.some((f) => f.storage === s);
+  const detail = variantDetailText(effective, v);
   return {
     sku: v.sku,
     ...(has("size") ? { size: v.size } : {}),
