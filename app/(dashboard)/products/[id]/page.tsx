@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
-import { AlertTriangle, Boxes, ExternalLink, Plus, Shirt, ShoppingBag, Warehouse } from "lucide-react";
+import { AlertTriangle, Boxes, ExternalLink, Package, Plus, ShoppingBag, Warehouse } from "lucide-react";
 import { ProductSalesChart } from "@/components/charts/product-sales-chart";
 import { MetricCard } from "@/components/metric-card";
 import { JsonViewer } from "@/components/misc";
@@ -269,7 +269,7 @@ export default async function ProductDetailPage({ params, searchParams }: { para
                 // eslint-disable-next-line @next/next/no-img-element
                 <img src={image} alt={product.name} className="h-56 w-full rounded-lg border object-cover" />
               ) : (
-                <div className="flex h-40 w-full items-center justify-center rounded-lg border bg-muted text-muted-foreground"><Shirt className="size-8" /></div>
+                <div className="flex h-40 w-full items-center justify-center rounded-lg border bg-muted text-muted-foreground"><Package className="size-8" /></div>
               )}
               <DescriptionList
                 columns={2}
@@ -537,7 +537,7 @@ function VariantStockSection({ product, user, variantTerm = "mẫu mã" }: { pro
         <Table className="min-w-[1040px]">
           <TableHeader>
             <TableRow>
-              <TableHead>Mẫu mã</TableHead>
+              <TableHead>{variantTerm.charAt(0).toUpperCase() + variantTerm.slice(1)}</TableHead>
               <TableHead className="text-right">Giá bán · vốn · trị giá tồn</TableHead>
               <TableHead className="text-right">Nhập kho</TableHead>
               <TableHead className="text-right">Đã xuất</TableHead>
@@ -563,7 +563,7 @@ function VariantStockSection({ product, user, variantTerm = "mẫu mã" }: { pro
                           // eslint-disable-next-line @next/next/no-img-element
                           <img src={v.images[0] || image || ""} alt="" className="size-9 shrink-0 rounded-md border object-cover" />
                         ) : (
-                          <span className="flex size-9 shrink-0 items-center justify-center rounded-md border bg-muted text-muted-foreground"><Shirt className="size-4" /></span>
+                          <span className="flex size-9 shrink-0 items-center justify-center rounded-md border bg-muted text-muted-foreground"><Package className="size-4" /></span>
                         )}
                         <div className="min-w-0">
                           <p className="font-mono text-xs font-semibold">
