@@ -3,7 +3,7 @@
   "mission_id": "shell-copy-brand-r3",
   "title": "Vỏ Chốt Đơn: chữ kỹ thuật còn sót (AI Sales · Kết nối · Thiết lập · Tài khoản) + thương hiệu VNX sau redirect",
   "business_goal": "",
-  "status": "VERIFYING",
+  "status": "DONE",
   "priority": "P2",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -30,13 +30,14 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-09T05:56:11.749Z",
-  "updated_at": "2026-10-09T16:39:53.697Z",
-  "last_heartbeat": "2026-10-09T13:23:38.413Z",
+  "updated_at": "2026-10-09T16:40:27.774Z",
+  "last_heartbeat": "2026-10-09T16:40:27.774Z",
   "definition_of_done": [],
   "evidence": {
     "verify": "PASS 7deb3d89f31353a8bd43332e7ba1dfdc3b0e4b13 2026-10-09T16:39:43.135Z",
     "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/37953247841",
-    "merged": "#743 → 7deb3d89f31353a8bd43332e7ba1dfdc3b0e4b13"
+    "merged": "#743 → 7deb3d89f31353a8bd43332e7ba1dfdc3b0e4b13",
+    "done": "production 7deb3d89f313 · deploy 37953247841 xanh · verify ĐẠT"
   },
   "handoff": {
     "branch": "fix/shell-copy-brand-r3",
