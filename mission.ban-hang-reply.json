@@ -3,7 +3,7 @@
   "mission_id": "ban-hang-reply",
   "title": "Vai trò BAN_HANG (Nhân viên bán hàng) được ai_sales:reply — khách mới qua mẫu, khách cũ qua đường nâng cấp có vết (chủ shop duyệt 09/10)",
   "business_goal": "",
-  "status": "VERIFYING",
+  "status": "DONE",
   "priority": "P2",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -28,13 +28,14 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-09T10:35:41.130Z",
-  "updated_at": "2026-10-09T14:18:54.855Z",
-  "last_heartbeat": "2026-10-09T12:54:39.621Z",
+  "updated_at": "2026-10-09T14:23:22.701Z",
+  "last_heartbeat": "2026-10-09T14:23:22.701Z",
   "definition_of_done": [],
   "evidence": {
     "merged": "#741 → 2fe12901625c7f055e4bd110e0f6d4cf8693d56a",
     "verify": "PASS 2fe12901625c7f055e4bd110e0f6d4cf8693d56a 2026-10-09T14:18:45.315Z",
-    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/37936749241"
+    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/37936749241",
+    "done": "production 2fe12901 · deploy 37936749241 xanh · verify ĐẠT; ops ban-hang-reply-upgrade chạy thử 37943324849 rồi --apply 37943578053: thêm ai_sales:reply cho 2 tổ chức · 3 không có BAN_HANG · 3 bỏ qua (vai trò cùng mã không do mẫu cài) · 1 nhà"
   },
   "handoff": {
     "branch": "feat/ban-hang-reply",
