@@ -1,8 +1,8 @@
 {
   "pr": 777,
-  "sha": "289255368db23c7c0773fd52911d38619cdfbd51",
+  "sha": "fbeceb094400820dbb67555bd08637d1f5a9107a",
   "verdict": "PASS",
   "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
-  "at": "2026-10-10T10:24:49.588Z",
-  "note": "Đọc diff: lõi thuần avatar-profile (5 trạng thái, không bao giờ dựng facebook.com/<PSID>, bỏ link sai ở hồ sơ khách); ghi ảnh Pancake trong cùng UPDATE của noteCustomerArrived (không thêm lượt CSDL vào đường trả lời); backfill Messenger chạy tay; script ops chỉ in số đếm"
+  "at": "2026-10-10T13:51:14.556Z",
+  "note": "Cập nhật lên main sau #775 #778: xung đột chỉ ở dòng đăng ký bài kiểm (giữ cả hai), typecheck sạch, inbox-avatar-profile đạt"
 }
