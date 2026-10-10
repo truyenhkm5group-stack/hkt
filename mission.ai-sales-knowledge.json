@@ -3,7 +3,7 @@
   "mission_id": "ai-sales-knowledge",
   "title": "AI Sales: ô FAQ · chính sách · khuyến mãi có cấu trúc, bot trích đúng, không bịa",
   "business_goal": "",
-  "status": "VERIFYING",
+  "status": "DONE",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -27,13 +27,14 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-10T14:11:07.724Z",
-  "updated_at": "2026-10-10T18:04:03.033Z",
-  "last_heartbeat": "2026-10-10T15:32:55.145Z",
+  "updated_at": "2026-10-10T18:04:23.229Z",
+  "last_heartbeat": "2026-10-10T18:04:23.229Z",
   "definition_of_done": [],
   "evidence": {
     "merged": "#782 → 521b81325e28ad95ea0e9373ebfed3094bad1782",
     "verify": "PASS 521b81325e28ad95ea0e9373ebfed3094bad1782 2026-10-10T18:03:47.662Z",
-    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/38070021673"
+    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/38070021673",
+    "done": "production 521b81325e28 · deploy 38070021673 xanh · verify ĐẠT"
   },
   "handoff": {
     "branch": "feat/ai-sales-knowledge",
