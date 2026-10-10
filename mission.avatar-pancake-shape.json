@@ -3,7 +3,7 @@
   "mission_id": "avatar-pancake-shape",
   "title": "Ops chỉ-đọc pancake-avatar-shape: in dáng khoá (không giá trị) của danh sách hội thoại Pancake để tìm chỗ ảnh khách thật",
   "business_goal": "",
-  "status": "RUNNING",
+  "status": "PR_READY",
   "priority": "P1",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -22,7 +22,18 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-10T21:25:41.842Z",
-  "updated_at": "2026-10-10T21:25:41.842Z",
-  "last_heartbeat": "2026-10-10T21:25:41.842Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-10T21:26:01.182Z",
+  "last_heartbeat": "2026-10-10T21:26:01.182Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "fix/avatar-pancake-shape",
+    "sha": "e244baf96af943daaa4b71980ae773ad100ecc7b",
+    "at": "2026-10-10T21:26:01.182Z",
+    "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+    "title": "Ops chỉ-đọc pancake-avatar-shape: in dáng khoá (không giá trị) của danh sách hội thoại Pancake để tìm chỗ ảnh khách thật",
+    "summary": "Script ops chỉ đọc, chỉ GET Pancake, in đường khoá + kiểu + host, không in giá trị; không cần deploy",
+    "tests": [
+      "tsc · eslint · pancake-avatar-shape (không giá trị nào lọt: tên/SĐT/PSID/mã page/email/token) · test-hygiene · repo-integrity · platform-isolation-static · ops-log-leak · ops-concurrency · npm test đầy đủ để CI"
+    ]
+  }
 }
