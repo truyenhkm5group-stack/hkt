@@ -1828,3 +1828,4 @@
 {"at":"2026-10-10T20:00:28.061Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#787 @ 08131c631944 · Chỉ commit gộp main; sync-fixtures giữ cả hai bài"}
 {"at":"2026-10-10T20:00:53.138Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#791 @ 71e9ff016fb6 · Chỉ commit gộp main do GitHub update-branch, không xung đột; nội dung đã review trước"}
 {"at":"2026-10-10T20:01:43.000Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"sync-runner-lock","detail":"fix/sync-runner-lock @ 835870fa130c · 1 lệnh kiểm thử"}
+{"at":"2026-10-10T20:02:03.349Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"forgot-password","detail":"feat/forgot-password @ def44da7566d · 1 lệnh kiểm thử"}
