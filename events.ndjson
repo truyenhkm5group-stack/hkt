@@ -1442,3 +1442,4 @@
 {"at":"2026-10-10T07:43:10.929Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DONE","mission":"acceptance-shell-landing","detail":"saas-acceptance --apply --prep --e2e --e2e-ops PASS 8/8 trên production 6487e652 (run 38035198098); bước C nay đọc trang nhà / theo shellLandingFor (#752)"}
 {"at":"2026-10-10T07:45:37.713Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"CLAIM","mission":"board-r2","detail":"RUNNING · 2 mẫu phạm vi · MEDIUM"}
 {"at":"2026-10-10T07:45:53.291Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"board-r2","detail":"docs/board-r2 @ a920f3fd8951 · 1 lệnh kiểm thử"}
+{"at":"2026-10-10T07:46:23.427Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"board-r2","detail":"#772 cho docs/board-r2 @ a920f3fd8951"}
