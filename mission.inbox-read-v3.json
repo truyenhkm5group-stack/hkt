@@ -36,18 +36,18 @@
     "0239": "2026-10-10T14:33:08.566Z"
   },
   "created_at": "2026-10-10T14:32:07.175Z",
-  "updated_at": "2026-10-10T16:53:00.971Z",
-  "last_heartbeat": "2026-10-10T16:52:21.629Z",
+  "updated_at": "2026-10-10T17:00:53.947Z",
+  "last_heartbeat": "2026-10-10T17:00:53.947Z",
   "definition_of_done": [],
   "handoff": {
     "branch": "feat/inbox-read-v3",
-    "sha": "55ebde9ba369d84916a6f146e7a438e0980f77d1",
-    "at": "2026-10-10T16:52:21.629Z",
+    "sha": "264492b6346d33be9ad2fbbeb98070ca76249f7e",
+    "at": "2026-10-10T17:00:53.947Z",
     "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
     "title": "Hộp thư V3 P0: tin khách chưa đọc có bằng chứng, preview đúng phía, đọc theo con trỏ tin, A→B không dòng cũ, chưa đọc theo từng người",
-    "summary": "Tin khách chưa đọc theo con trỏ từng người (sales_chat_reads, 0239), đánh dấu đọc tới tin khách cuối trong payload (không now), client vá dòng/bộ đếm theo xác nhận, preview tin khách chưa đọc, avatar dòng link riêng, ops inbox-read-audit",
+    "summary": "Hộp thư V3 P0 (không đổi mã nghiệp vụ so với 55ebde9b)",
     "tests": [
-      "typecheck · lint · build sạch · 20 bài hộp thư/migration/ops chạy riêng đạt · inbox-read-v3 9 ca + 2 người · FALSE-UNREAD=0 · npm test hết giờ 58′ không lỗi (CI chạy đủ)"
+      "như lượt trước; gộp main (#779 org-volume-discount, #780, #782) — xung đột chỉ ở danh sách DOC_NANG ops-vps, giữ cả hai action"
     ]
   }
 }
