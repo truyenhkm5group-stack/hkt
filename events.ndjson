@@ -1403,3 +1403,4 @@
 {"at":"2026-10-10T03:12:02.752Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","detail":"#765 @ 8644fe4a447a → b3cc7eb6b821 (MERGE_NOW · LOW · gates success)"}
 {"at":"2026-10-10T03:12:45.730Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","detail":"#767 @ 269f18b28274 → c5988e501db3 (MERGE_NOW · LOW · gates success)"}
 {"at":"2026-10-10T03:15:31.390Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DEPLOY_DISPATCHED","detail":"c5988e501db3 · run 38019906888 https://github.com/truyenhkm5group-stack/hkt/actions/runs/38019906888"}
+{"at":"2026-10-10T03:40:36.362Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"ai-sales-settings-v2","detail":"feat/ai-sales-settings-v2 @ 220c4d7e21cc · 1 lệnh kiểm thử"}
