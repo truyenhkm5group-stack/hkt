@@ -3,7 +3,7 @@
   "mission_id": "ai-fallback-tenant",
   "title": "Bộ đệm lùi model AI theo tổ chức + kết nối (Team Premium F2)",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -23,9 +23,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-10T09:06:06.651Z",
-  "updated_at": "2026-10-10T20:00:05.907Z",
+  "updated_at": "2026-10-10T21:49:50.584Z",
   "last_heartbeat": "2026-10-10T20:00:05.907Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#787 → dcd36724b258d311e9fa34deaae133d689a69d88"
+  },
   "handoff": {
     "branch": "fix/ai-fallback-tenant",
     "sha": "08131c6319442409caabb5f687c38f71775d25cf",
