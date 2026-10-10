@@ -3,7 +3,7 @@
   "mission_id": "products-shell-v2",
   "title": "Sản phẩm cho khách Chốt Đơn: danh sách gọn (giá bán · tồn khả dụng · thiếu gì) thay bảng 15 cột ERP; sửa «0 kho» · «1.62 tỷ» · «8.808 sản phẩm»",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -26,9 +26,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-09T22:52:44.080Z",
-  "updated_at": "2026-10-10T03:41:49.062Z",
+  "updated_at": "2026-10-10T03:42:40.383Z",
   "last_heartbeat": "2026-10-10T03:41:49.062Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#757 → cd8ec77871b319b3eadae0f798f6973cf52313f9"
+  },
   "handoff": {
     "branch": "feat/products-shell-v2",
     "sha": "f570ae3aeee19a42fac7de143727f0ee1916c7b1",
