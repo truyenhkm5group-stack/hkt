@@ -4,10 +4,12 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { Bot, Hourglass, Sparkles, UserRound } from "lucide-react";
 import { AI_HOLD_LABEL } from "@/lib/sales-chatbot/ai-hold-shared";
-import { compactTimeAgo, HUMAN_HANDLING_LABEL, INBOX_HANDLING_LABEL, INBOX_SOURCE_LABEL, inboxHref, inboxRowStatus, keepActiveInPlace, unreadBadge, type InboxFilterState, type InboxRow } from "@/lib/sales-chatbot/inbox-shared";
+import { avatarHrefOf, compactTimeAgo, HUMAN_HANDLING_LABEL, INBOX_HANDLING_LABEL, INBOX_SOURCE_LABEL, inboxHref, inboxRowStatus, unreadBadge, type InboxFilterState, type InboxRow } from "@/lib/sales-chatbot/inbox-shared";
+import { inboxDisplayRows } from "@/lib/sales-chatbot/inbox-read-shared";
 import { CUSTOMER_LEVEL_LABEL } from "@/lib/sales-chatbot/levels-shared";
 import { cn } from "@/lib/utils";
-import { ChannelAvatar } from "./avatar";
+import { AvatarLinkWrap, ChannelAvatar } from "./avatar";
+import { useInboxReads } from "./read-store";
 import { openConversationInPlace, useSelectedConversation } from "./thread-pane";
 
 /**
@@ -18,9 +20,18 @@ import { openConversationInPlace, useSelectedConversation } from "./thread-pane"
  * nay ≈ 56 px. Thông tin phụ KHÔNG mất: rê chuột lên hàng thấy page · nguồn · level · SĐT · người nhận · nhãn (title), và mọi thứ
  * đó vẫn LỌC được ở «Lọc ▾». Chấm màu cạnh tên = nhãn (tên nhãn ở title).
  *
- * THỨ TỰ do máy chủ quyết (`inboxOrderBy`: chưa đọc trước, mới nhất trước). Trang chỉ làm MỘT việc: hội thoại ĐANG MỞ đứng yên tại
- * chỗ người vừa bấm (`keepActiveInPlace`) — mở hội thoại là đánh dấu đã đọc, nên ở lượt tải sau nó thuộc nhóm «đã đọc» (hoặc rời
- * thẻ «Chưa đọc»); không giữ thì hàng vừa bấm nhảy khỏi tầm mắt. Bấm hội thoại khác ⇒ hội thoại cũ về đúng chỗ của nó.
+ * THỨ TỰ do máy chủ quyết (`inboxOrderBy`: chưa đọc trước, mới nhất trước). Trang vá đúng hai thứ (`inboxDisplayRows`,
+ * inbox-read-shared.ts): hội thoại ĐANG MỞ đứng yên tại chỗ người vừa bấm và hiện đã đọc ngay; và XÁC NHẬN ĐỌC của máy chủ thắng mọi bản
+ * danh sách dựng trước lượt đọc — rời A ở thẻ «Tin khách chưa đọc» ⇒ A rời danh sách NGAY (trừ khi có tin khách mới hơn lượt đọc), ở
+ * thẻ khác A về nhóm đã đọc đúng chỗ. Bản danh sách mới hơn lượt đọc thì máy chủ thắng.
+ *
+ * XEM TRƯỚC (P0.2): hội thoại chưa đọc in TIN KHÁCH chưa đọc mới nhất (không tiền tố) + dòng phụ «AI đã trả lời …» nếu sau nó đã có
+ * câu trả lời — không bao giờ in tin AI cạnh huy hiệu chưa đọc.
+ *
+ * ẢNH ĐẠI DIỆN (P1 avatar): hàng KHÔNG còn là một thẻ `<a>` bọc tất cả. Hàng là một khung `relative`; một `Link` phủ kín (lớp dưới) mở
+ * hội thoại; nội dung nằm trên và để chuột đi xuyên (`pointer-events-none`); RIÊNG ảnh đại diện nhận chuột (`pointer-events-auto`
+ * · `z-10`) và là link ANH EM của link hàng (`avatarHrefOf`: trang Facebook thật ⇒ tab mới; không có ⇒ hồ sơ khách nội bộ; chưa nối
+ * hồ sơ ⇒ ảnh trơn, bấm vào là mở hội thoại). Không bao giờ `<a>` trong `<a>`.
  */
 
 const WAIT_URGENT_MIN = 15;
@@ -83,28 +94,43 @@ function metaOf(r: InboxRow, showPage: boolean): string {
     .join(" · ");
 }
 
+const AFTER_LABEL: Record<string, string> = { BOT: "AI đã trả lời", STAFF: "Bạn đã trả lời", PAGE: "Page đã trả lời" };
+
 function Row({ r, href, active, showPage, nowMs }: { r: InboxRow; href: string; active: boolean; showPage: boolean; nowMs: number }) {
   const wait = waitMinutes(r.waitingSince, nowMs);
   const status = inboxRowStatus(r);
+  const avatarLink = avatarHrefOf(r.customerId);
   return (
-    <Link
-      href={href}
-      prefetch={false}
-      onClick={(e) => openConversationInPlace(e, href)}
-      title={metaOf(r, showPage)}
-      aria-current={active ? "true" : undefined}
+    <div
       className={cn(
-        "flex items-center gap-2.5 border-l-[3px] px-2.5 py-2 transition-colors",
+        "relative flex items-center gap-2.5 border-l-[3px] px-2.5 py-2 transition-colors",
         active ? "border-l-primary bg-card shadow-[var(--shadow-card)]" : r.unread ? "border-l-primary/60 hover:bg-card/70" : "border-l-transparent hover:bg-card/70",
       )}
+      title={metaOf(r, showPage)}
       data-conversation={r.id}
       data-unread={r.unread ? "1" : "0"}
+      data-preview-side={r.previewSide ?? undefined}
       data-closed={r.closed ? "1" : "0"}
       data-source={r.source}
       data-page={r.pageId ?? undefined}
     >
-      <ChannelAvatar name={r.customerName} channel={r.channel} src={r.avatarUrl} />
-      <div className="min-w-0 flex-1">
+      {/* Lớp dưới: cả hàng là MỘT link mở hội thoại. Nội dung phía trên để chuột đi xuyên xuống link này. */}
+      <Link
+        href={href}
+        prefetch={false}
+        onClick={(e) => openConversationInPlace(e, href)}
+        aria-current={active ? "true" : undefined}
+        aria-label={`Mở hội thoại với ${r.customerName}${r.unread ? ` — ${r.unreadCount} tin khách chưa đọc` : ""}`}
+        className="absolute inset-0 z-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary"
+        data-row-link
+      />
+      {/* Ảnh đại diện: link ANH EM của link hàng, nhận chuột riêng (không lồng trong link hàng); không có đích ⇒ chuột đi xuyên, mở hội thoại. */}
+      <span className={cn("relative z-10 inline-flex shrink-0", avatarLink.href ? "pointer-events-auto" : "pointer-events-none")} data-avatar-slot>
+        <AvatarLinkWrap link={avatarLink} name={r.customerName}>
+          <ChannelAvatar name={r.customerName} channel={r.channel} src={r.avatarUrl} />
+        </AvatarLinkWrap>
+      </span>
+      <div className="pointer-events-none relative min-w-0 flex-1">
         <div className="flex items-center gap-1.5">
           <span className={cn("min-w-0 truncate text-[14px] leading-5 text-foreground", r.unread ? "font-bold" : "font-medium")}>{r.customerName}</span>
           {r.labels.length ? (
@@ -129,18 +155,24 @@ function Row({ r, href, active, showPage, nowMs }: { r: InboxRow; href: string; 
         </div>
         <div className="mt-0.5 flex items-center gap-1.5">
           <HandlingIcon r={r} />
-          <p className={cn("min-w-0 flex-1 truncate text-[13px] leading-[18px]", r.unread ? "font-medium text-foreground" : "text-muted-foreground")}>
+          <p className={cn("min-w-0 flex-1 truncate text-[13px] leading-[18px]", r.unread ? "font-medium text-foreground" : "text-muted-foreground")} data-preview>
             {r.previewSide ? SIDE_PREFIX[r.previewSide] : ""}
             {r.preview || "—"}
           </p>
           {r.unreadCount > 0 ? (
-            <span className="inline-flex h-[18px] min-w-[18px] shrink-0 items-center justify-center rounded-full bg-primary px-1 text-[11px] font-bold text-primary-foreground" aria-label={`${r.unreadCount} tin chưa đọc`} data-unread-count={r.unreadCount}>
+            <span className="inline-flex h-[18px] min-w-[18px] shrink-0 items-center justify-center rounded-full bg-primary px-1 text-[11px] font-bold text-primary-foreground" aria-label={`${r.unreadCount} tin khách chưa đọc`} data-unread-count={r.unreadCount}>
               {unreadBadge(r.unreadCount)}
             </span>
           ) : null}
         </div>
+        {r.unread && r.afterPreview ? (
+          // Dòng phụ: tin khách chưa đọc đã được trả lời (AI · bạn · page) — để nhân viên biết khách không bị bỏ im.
+          <p className="mt-0.5 truncate pl-5 text-[11px] leading-[14px] text-muted-foreground" data-after-preview={r.afterPreview.side} suppressHydrationWarning>
+            {AFTER_LABEL[r.afterPreview.side]} · {compactTimeAgo(r.afterPreview.at, nowMs)}
+          </p>
+        ) : null}
       </div>
-    </Link>
+    </div>
   );
 }
 
@@ -150,7 +182,9 @@ export function ConversationRows({ rows, state, showPage }: { rows: InboxRow[]; 
   // Bản danh sách ĐÃ HIỆN lần trước — để giữ hội thoại đang mở đứng yên (xem chú thích đầu tệp). Mở hội thoại = đã đọc: hàng đang
   // mở thôi in đậm / số chưa đọc ngay, không đợi lượt làm mới.
   const shown = useRef<InboxRow[] | null>(null);
-  const display = keepActiveInPlace(rows, shown.current, activeId).map((r) => (r.id === activeId && r.unread ? { ...r, unread: false, unreadCount: 0 } : r));
+  // Xác nhận đọc của máy chủ (khung chat ghi vào read-store) thắng mọi bản danh sách dựng TRƯỚC lượt đọc.
+  const reads = useInboxReads();
+  const display = inboxDisplayRows(rows, shown.current, { activeId, filter: state.filter, reads });
   useEffect(() => {
     shown.current = display;
   });

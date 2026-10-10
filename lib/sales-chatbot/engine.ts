@@ -57,11 +57,12 @@ import { loadQuickReplySettings, markQuickReplyUsed, quickReplyByAi, quickReplyB
 import { repeatsRecent } from "@/lib/sales-chatbot/quick-replies-shared";
 import { findReturningCustomer, returningCustomerPrompt } from "@/lib/sales-chatbot/returning";
 import { freeShipPolicyText } from "@/lib/sales-chatbot/shipping";
+import { knowledgePrompt } from "@/lib/sales-chatbot/knowledge";
 import { volumeDiscountPolicyText } from "@/lib/sales-chatbot/volume-discount";
 import { formatVND } from "@/lib/format";
 import { withTurnEvents } from "@/lib/sales-chatbot/events";
 import { FOOD_PACK, salesPackFor, type SalesPack } from "@/lib/sales-chatbot/packs";
-import { executeTool, orderTotalsOf, toolDefsFor, type ChatState } from "@/lib/sales-chatbot/tools";
+import { executeTool, orderTotalsOf, toolDefsFor, TOOLS_HOLDING_TEXT, type ChatState } from "@/lib/sales-chatbot/tools";
 import { allowedImageUrl, describeImages, fetchCustomerImage, IMAGE_PROMPT_RULE, imageLine, VISION_LIMITS } from "@/lib/sales-chatbot/vision";
 import { vnDayOffset, WEEKDAY_LABEL } from "@/lib/constants/booking";
 
@@ -188,7 +189,9 @@ export function systemPrompt(cfg: SalesChatbotConfig, shopName: string, profile:
       ? "  ĐƠN SÁT NGƯỠNG MIỄN SHIP (chính sách ship của shop / «Hướng dẫn thêm» có ngưỡng): đơn chỉ thiếu ít là đạt ⇒ trong tin tóm tắt nói ĐÚNG MỘT câu «mình chọn thêm một món trong menu là được miễn ship ạ» — KHÔNG nêu tên món. Không nói khi đơn đã đạt hoặc còn thiếu nhiều."
       : "  ĐƠN SÁT NGƯỠNG MIỄN SHIP (chính sách ship của shop / «Hướng dẫn thêm» có ngưỡng): đơn chỉ thiếu ít là đạt ⇒ trong tin tóm tắt nói ĐÚNG MỘT câu «thêm … là được miễn ship» với món / quy cách cụ thể. Không nói khi đơn đã đạt hoặc còn thiếu nhiều.",
     "  B5 CONFIRM — create_draft_order ⇒ TÓM TẮT NGẮN, tối đa 3 dòng: món × SL + tổng tiền hàng · ship (theo shipping_text) · giao tới địa chỉ + SĐT; KHÔNG ghi «Người nhận», mã đơn, đơn giá từng dòng khi chỉ 1–2 món; kết bằng «Mình lấy thêm gì không, không thì em giao luôn ạ?». Khách thêm món ⇒ update_draft_order rồi gửi lại tóm tắt; khách đồng ý ⇒ confirm_order.",
-    "  Khách hẹn ngày / giờ giao ⇒ ghi vào delivery_note, KHÔNG cần chuyển người. Khách TỪ CHỐI RÕ RÀNG ⇒ mark_declined, chào lịch sự, không nài.",
+    "  Khách hẹn ngày / giờ giao ⇒ ghi vào delivery_note, KHÔNG cần chuyển người. Khách TỪ CHỐI RÕ RÀNG khi CHƯA có đơn ⇒ mark_declined, chào lịch sự, không nài.",
+    // HUỶ ĐƠN (chủ shop 10/10/2026 — sự cố #189A435E: AI «đồng ý huỷ» mà đơn vẫn «Đã xác nhận»). Câu «đã huỷ» chỉ đúng khi lõi đơn GHI xong.
+    "  Khách muốn HUỶ ĐƠN ĐÃ ĐẶT ⇒ cancel_order decision CANCEL (KHÔNG viết chữ nào trong cùng tin gọi công cụ). Kết quả step RESCUE ⇒ giữ đơn ĐÚNG MỘT lần (hỏi lý do, đề nghị đổi món / ngày giao). Khách vẫn huỷ ⇒ cancel_order CANCEL lần nữa; khách đồng ý giữ ⇒ cancel_order KEEP. CHỈ nói «đơn đã huỷ» khi kết quả công cụ có cancelled = true. cancelled = false (đang giữ đơn, chuyển nhân viên, lỗi) ⇒ TUYỆT ĐỐI KHÔNG nói đã huỷ / sẽ huỷ / em huỷ cho mình — nói shop đã ghi nhận, nhân viên xử lý.",
     "  Khách hỏi ĐƠN ĐÃ ĐẶT tới đâu / bao giờ nhận / đã gửi chưa ⇒ get_order_status rồi nói ĐÚNG «status» trả về — KHÔNG hứa ngày giao, KHÔNG tự đoán, KHÔNG nêu số tiền. Đơn có needs_staff ⇒ nói đúng «status» rồi HỎI khách có cần nhân viên shop hỗ trợ không — khách cần ⇒ handoff_to_human; KHÔNG tự hứa nhân viên sẽ gọi / sẽ kiểm tra. Không thấy đơn ⇒ máy chủ tự chuyển nhân viên. KHÔNG xin SĐT, KHÔNG gọi lookup_customer / create_customer để tìm đơn.",
     "HIỂU KHÁCH:",
     "  · Tin bắt đầu bằng «[Shop đã nhắn]» là của nhân viên / trả lời tự động của page — khách đang nói tiếp về đúng món, đúng giá trong đó. KHÔNG hỏi lại khách muốn món gì nếu lịch sử đã rõ.",
@@ -214,6 +217,8 @@ export function systemPrompt(cfg: SalesChatbotConfig, shopName: string, profile:
       : "",
     channel === "TEST" ? "(Đây là KHUNG THỬ của chủ shop: công cụ ghi chỉ mô phỏng — vẫn làm đúng quy trình như với khách thật.)" : "",
     cfg.extraInstructions ? `Hướng dẫn thêm của shop (không được trái các luật trên): ${cfg.extraInstructions}` : "",
+    // KIẾN THỨC CỦA SHOP (sổ AIS-05): rỗng ⇒ "" ⇒ lời nhắc giống hệt trước. Khuyến mãi hết hạn lọc theo ngày giờ VN của lượt này.
+    knowledgePrompt(cfg, now ?? new Date()),
     playbook ? `SỔ TAY BÁN HÀNG của shop (chủ shop đã duyệt — học giọng điệu và cách xử lý; KHÔNG được trái các luật trên: giá / tồn / phí ship vẫn CHỈ từ công cụ):\n${playbook}` : "",
     `Lời chào mở đầu mẫu: «${cfg.greeting}»`,
   ]
@@ -950,11 +955,15 @@ async function chatTurnCore(
         // CHỮ GỬI KHÁCH QUA BỘ LỌC SUY LUẬN (03/10/2026, «Phuoc Ha»): model viết lẩm bẩm vào câu trả lời — tên công cụ, «Khách
         // vừa nhắn…», «Ta đáp:» — và cả đoạn đã tới khách. Lọc ở máy chủ, không trông vào lời dặn.
         const content: AiBlock[] = [];
+        // HUỶ ĐƠN (10/10/2026, sự cố #189A435E): chữ model viết CÙNG tin với lời gọi `cancel_order` / `mark_declined` được viết TRƯỚC khi
+        // thấy kết quả («Dạ em huỷ đơn cho chị rồi ạ» trong khi lõi đơn chưa ghi gì) ⇒ KHÔNG gửi khách; vòng sau model nói theo kết quả.
+        const holdText = raw.some((b) => b.type === "tool_use" && TOOLS_HOLDING_TEXT.has(b.name));
         for (const b of raw) {
           if (b.type !== "text") {
             content.push(b);
             continue;
           }
+          if (holdText) continue;
           const g = customerFacingText(b.text);
           if (g.leaked) leaks += 1;
           if (g.text) {

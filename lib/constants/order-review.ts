@@ -14,24 +14,38 @@
  * «người xem trước khi đi tiếp». Danh sách đơn lọc được «Cần người kiểm»; hộp thư và trang đơn hiện lý do + nút nhanh.
  */
 
-export const ORDER_REVIEW_CODES = ["CUSTOMER_CANCELLED", "ADDRESS_UNRESOLVED"] as const;
+/**
+ * `CANCEL_BLOCKED` (chủ shop 10/10/2026 — `lib/constants/order-cancel.ts`): khách đã chốt huỷ sau lượt giữ đơn nhưng máy KHÔNG tự
+ * huỷ được (đã bàn giao ĐVVC · hãng từ chối / không trả lời · ghi hỏng …) — lý do nằm ở `note`, người xử lý tiếp.
+ */
+export const ORDER_REVIEW_CODES = ["CUSTOMER_CANCELLED", "ADDRESS_UNRESOLVED", "CANCEL_BLOCKED"] as const;
 export type OrderReviewCode = (typeof ORDER_REVIEW_CODES)[number];
 
 export const ORDER_REVIEW_LABEL: Record<OrderReviewCode, string> = {
   CUSTOMER_CANCELLED: "Khách báo huỷ trong hội thoại",
   ADDRESS_UNRESOLVED: "Địa chỉ chưa ghép được xã / phường",
+  CANCEL_BLOCKED: "Khách chốt huỷ — máy không tự huỷ được",
+};
+
+/** Nhãn NGẮN (dòng lý do của khung đơn hộp thư). */
+export const ORDER_REVIEW_SHORT_LABEL: Record<OrderReviewCode, string> = {
+  CUSTOMER_CANCELLED: "khách báo huỷ",
+  ADDRESS_UNRESOLVED: "địa chỉ chưa ghép",
+  CANCEL_BLOCKED: "khách chốt huỷ, máy chưa huỷ được",
 };
 
 /** Việc người phải làm với từng lý do — in cạnh lý do để người đọc biết bấm gì. */
 export const ORDER_REVIEW_HINT: Record<OrderReviewCode, string> = {
   CUSTOMER_CANCELLED: "Gọi / nhắn lại khách: khách huỷ thật ⇒ «Huỷ đơn»; cứu được ⇒ «Xác nhận đơn».",
   ADDRESS_UNRESOLVED: "Hỏi lại khách xã / phường mới, sửa đơn chọn xã rồi «Xác nhận đơn».",
+  CANCEL_BLOCKED: "Đọc lý do: hãng đã lấy hàng ⇒ chặn giao / chờ hoàn; hãng lỗi ⇒ huỷ vận đơn trên trang hãng rồi «Huỷ đơn».",
 };
 
 /** Câu lý do mặc định khi huỷ bằng nút nhanh (người sửa được trước khi bấm). */
 export const ORDER_REVIEW_CANCEL_REASON: Record<OrderReviewCode, string> = {
   CUSTOMER_CANCELLED: "Khách huỷ (theo hội thoại)",
   ADDRESS_UNRESOLVED: "Không xác định được địa chỉ giao",
+  CANCEL_BLOCKED: "Khách huỷ (theo hội thoại)",
 };
 
 /** Một lý do cần kiểm. `quote` = NGUYÊN VĂN câu khách (khách huỷ); `by` = tên máy / người ghi; `at` = mốc ISO. */
@@ -95,7 +109,8 @@ export function orderReviewLogOf(raw: unknown): OrderReviewResolution[] {
 export function withReviewEntry(raw: Record<string, unknown>, entry: OrderReviewEntry): { raw: Record<string, unknown>; changed: boolean } {
   const clean: OrderReviewEntry = { ...entry, note: entry.note.trim().slice(0, ORDER_REVIEW_LIMITS.noteMax), quote: entry.quote ? entry.quote.trim().slice(0, ORDER_REVIEW_LIMITS.quoteMax) || null : null };
   const current = orderReviewOf(raw)?.entries ?? [];
-  const dup = current.some((e) => e.code === clean.code && (clean.code === "ADDRESS_UNRESOLVED" || (e.quote ?? "") === (clean.quote ?? "")));
+  // «địa chỉ chưa ghép» một dòng; «máy không tự huỷ được» một dòng mỗi LÝ DO (note); «khách huỷ» một dòng mỗi câu khách.
+  const dup = current.some((e) => e.code === clean.code && (clean.code === "ADDRESS_UNRESOLVED" || (clean.code === "CANCEL_BLOCKED" ? e.note === clean.note : (e.quote ?? "") === (clean.quote ?? ""))));
   if (dup) return { raw, changed: false };
   const entries = [...current, clean].slice(-ORDER_REVIEW_LIMITS.entries);
   return { raw: { ...raw, review: { entries } }, changed: true };
@@ -117,7 +132,7 @@ export function withReviewResolved(raw: Record<string, unknown>, by: { action: "
  */
 export function withCustomerReconfirm(raw: Record<string, unknown>, note: { at: string; byName: string; quote: string | null }): { raw: Record<string, unknown>; changed: boolean } {
   const open = orderReviewOf(raw);
-  if (!open?.entries.some((e) => e.code === "CUSTOMER_CANCELLED")) return { raw, changed: false };
+  if (!open?.entries.some((e) => e.code === "CUSTOMER_CANCELLED" || e.code === "CANCEL_BLOCKED")) return { raw, changed: false };
   const quote = note.quote ? note.quote.trim().slice(0, ORDER_REVIEW_LIMITS.quoteMax) || null : null;
   const prior = Array.isArray(raw.reviewLog) ? (raw.reviewLog as unknown[]) : [];
   if (orderReviewLogOf(raw).some((r) => r.action === "CUSTOMER_RECONFIRMED" && (r.quote ?? null) === quote && r.at >= (open.entries[open.entries.length - 1]?.at ?? ""))) return { raw, changed: false };
@@ -152,7 +167,7 @@ export function unseenReviewEntries(current: OrderReview | null, seen: ReviewSee
 
 /** Câu từ chối khi có lý do mới chưa thấy. */
 export function reviewConflictMessage(unseen: readonly OrderReviewEntry[]): string {
-  return unseen.some((e) => e.code === "CUSTOMER_CANCELLED") ? "Khách vừa báo huỷ — tải lại để xem rồi quyết." : "Đơn vừa có lý do cần kiểm mới — tải lại để xem rồi quyết.";
+  return unseen.some((e) => e.code === "CUSTOMER_CANCELLED" || e.code === "CANCEL_BLOCKED") ? "Khách vừa báo huỷ — tải lại để xem rồi quyết." : "Đơn vừa có lý do cần kiểm mới — tải lại để xem rồi quyết.";
 }
 
 /** Mã lý do đang mở (sắp xếp, không trùng) — bộ đo và màn hình đọc chung. HÀM THUẦN. */

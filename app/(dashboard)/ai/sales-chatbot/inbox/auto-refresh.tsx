@@ -3,6 +3,8 @@
 import { startTransition, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Bell, BellOff } from "lucide-react";
+import { patchUnreadCount } from "@/lib/sales-chatbot/inbox-read-shared";
+import { useInboxReads } from "./read-store";
 
 const SOUND_KEY = "inbox.sound";
 
@@ -41,8 +43,11 @@ function chime() {
  * KHÔNG ĐỂ SÓT TIN: hộp thư tự làm mới mỗi 5 giây khi tab đang mở (30 giây khi tab ẩn); tiêu đề tab mang số khách đang CHỜ TRẢ
  * LỜI (thấy cả khi đang ở tab khác); số «chưa đọc» tăng ⇒ một tiếng «ting» (tắt / bật bằng nút chuông, nhớ theo trình duyệt).
  */
-export function InboxAutoRefresh({ waiting, unread, everyMs = 5_000, compact = false }: { waiting: number; unread: number; everyMs?: number; compact?: boolean }) {
+export function InboxAutoRefresh({ waiting, unread: serverUnread, unreadStamp = null, everyMs = 5_000, compact = false }: { waiting: number; unread: number; unreadStamp?: string | null; everyMs?: number; compact?: boolean }) {
   const router = useRouter();
+  // Âm báo theo số ĐÃ VÁ (cùng số trên thẻ) — đọc xong một hội thoại không được kêu «ting» khi bản đếm cũ về tới.
+  const reads = useInboxReads();
+  const unread = patchUnreadCount(serverUnread, unreadStamp, reads.values());
   const [sound, setSound] = useState(true);
   const prevUnread = useRef<number | null>(null);
 

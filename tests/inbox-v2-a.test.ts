@@ -86,7 +86,7 @@ function testFilterContract() {
 }
 
 function row(id: string, over: Partial<InboxRow> = {}): InboxRow {
-  return { id, channel: "FANPAGE", pageId: "p", pageName: null, status: "OPEN", handoffReason: null, customerName: id, customerPhone: null, customerId: null, preview: "", previewSide: null, lastActivityAt: new Date(0).toISOString(), waitingSince: null, unread: true, unreadCount: 1, avatarUrl: null, aiHold: "AI_ACTIVE", handling: "AI", needsHuman: null, humanHandling: null, closed: false, source: "PANCAKE", assigneeUserId: null, assigneeName: null, hasOrder: false, labels: [], level: null, ...over };
+  return { id, channel: "FANPAGE", pageId: "p", pageName: null, status: "OPEN", handoffReason: null, customerName: id, customerPhone: null, customerId: null, preview: "", previewSide: null, previewAt: null, afterPreview: null, latestPreview: "", latestSide: null, latestAt: null, newestCustomerAt: null, readCursorAt: null, lastActivityAt: new Date(0).toISOString(), waitingSince: null, unread: true, unreadCount: 1, avatarUrl: null, aiHold: "AI_ACTIVE", handling: "AI", needsHuman: null, humanHandling: null, closed: false, source: "PANCAKE", assigneeUserId: null, assigneeName: null, hasOrder: false, labels: [], level: null, ...over };
 }
 
 function testRowHelpers() {
@@ -173,6 +173,12 @@ async function testUnreadFirstOrder() {
         return { channel: "FANPAGE", status: "OPEN", visitorKey: fanpageVisitorKey(PAGE, `t${i}`), pageId: PAGE, threadId: `t${i}`, lastCustomerAt: at, lastBotAt: i % 2 ? new Date(at.getTime() + 30_000) : null, staffSeenAt: read ? new Date(at.getTime() + 60_000) : null, customerId: i === 5 ? "khach-5" : null, createdAt: new Date(at.getTime() - 3_600_000) };
       });
       await db.insert(c).values(values);
+      // Bằng chứng của «chưa đọc» (P0 10/10/2026 tối): mỗi hội thoại có ĐÚNG tin khách ở mốc `last_customer_at` (+ câu bot khi có) —
+      // chưa đọc giờ đọc từ TIN KHÁCH THẬT sau con trỏ, không từ cột mốc (bản trước dựng hội thoại «chưa đọc» không có tin nào).
+      await db.insert(schema.salesChatInbound).values(values.flatMap((v, i) => [
+        { pageId: PAGE, threadId: v.threadId, messageId: `v2a-c-${i}`, text: "Xin giá", status: "DONE", createdAt: v.lastCustomerAt },
+        ...(v.lastBotAt ? [{ pageId: PAGE, threadId: v.threadId, messageId: `v2a-b-${i}`, text: "Dạ giá 280k ạ", note: "BOT_SENT", status: "DONE", createdAt: v.lastBotAt }] : []),
+      ]));
 
       const ids = (r: Awaited<ReturnType<typeof listInbox>>) => (r.ok ? r.rows : []);
       const p1 = ids(await listInbox(admin, { limit: 50 }));
