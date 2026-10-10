@@ -1612,3 +1612,4 @@
 {"at":"2026-10-10T15:24:26.889Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"STATUS","mission":"commercial-polish-2","detail":"DONE → VERIFYING"}
 {"at":"2026-10-10T15:24:48.097Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"STATUS","mission":"error-boundary-than-thien","detail":"DONE → VERIFYING"}
 {"at":"2026-10-10T15:25:06.612Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"sync-runner-lock","detail":"fix/sync-runner-lock @ 54638353b308 · 1 lệnh kiểm thử"}
+{"at":"2026-10-10T15:25:45.488Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"sync-runner-lock","detail":"#781 cho fix/sync-runner-lock @ 54638353b308"}
