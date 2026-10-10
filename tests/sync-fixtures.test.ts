@@ -532,6 +532,7 @@ import { testSalesPacks } from "./sales-packs.test";
 import { testSalesAgentGolden } from "./sales-agent-golden/golden.test";
 import { testOrderGolden } from "./order-golden/order-golden.test";
 import { testOrderReview } from "./order-review.test";
+import { testOrderCancelConsistency } from "./order-cancel-consistency.test";
 import { testInboxOrderPanel } from "./inbox-v2-b.test";
 import { testProductsShellV2 } from "./products-shell-v2.test";
 import { testGoLive } from "./go-live.test";
@@ -2940,6 +2941,10 @@ async function main() {
   // Đơn cần người kiểm (chủ shop 08/10/2026): khách huỷ ⇒ ghi chú + cờ, xã chưa ghép ⇒ cờ, nút nhanh Xác nhận / Huỷ, lời xác nhận,
   // SĐT chuẩn hoá — tổ chức THẬT `or-rv` (không Pancake; tự cấp, tự dọn).
   await testOrderReview();
+  // Khách huỷ đơn (sự cố #189A435E, chủ shop 10/10/2026 — thay luật 08/10): giữ đơn một lần ⇒ khách vẫn huỷ ⇒ tự «Đã huỷ» theo vòng
+  // đời vận đơn (hãng xác nhận mới huỷ; đã lấy / hãng lỗi ⇒ hàng ngoại lệ + cảnh báo), trùng = một lần, ghi hỏng ⇒ không nói đã huỷ,
+  // đối soát chạy thử — tổ chức THẬT `oc-cx` + `gd-food-oc` (tự cấp, tự dọn), hãng giả.
+  await testOrderCancelConsistency();
   // Hộp thư V2-B: «Đơn đang chốt» đầu cột phải — đọc đơn bot ghi (một câu SQL), kiểm từng ô bằng validator của lõi, nút xác nhận
   // = `confirmOrderReviewCore` — tổ chức THẬT `or-ib` (tự cấp, tự dọn).
   await testInboxOrderPanel();
