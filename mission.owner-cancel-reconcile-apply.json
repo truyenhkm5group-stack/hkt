@@ -1,0 +1,30 @@
+{
+  "schema": 1,
+  "mission_id": "owner-cancel-reconcile-apply",
+  "title": "QUYẾT ĐỊNH CHỦ SHOP: huỷ 3 đơn HSLC mà AI đã đồng ý huỷ nhưng đơn còn ĐÃ XÁC NHẬN",
+  "business_goal": "",
+  "status": "BLOCKED",
+  "priority": "P2",
+  "risk": "MEDIUM",
+  "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "worker": null,
+  "worktree": null,
+  "branch": "decision/owner-cancel-reconcile-apply",
+  "base_sha": null,
+  "domains": [],
+  "owned_paths": [
+    "scripts/order-cancel-reconcile.ts"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-10T20:13:56.085Z",
+  "updated_at": "2026-10-10T20:13:56.085Z",
+  "last_heartbeat": "2026-10-10T20:13:56.085Z",
+  "definition_of_done": [],
+  "needs_owner": {
+    "category": "APPROVAL_REQUIRED",
+    "action": "Chạy thử 10/10 trên HSLC (30 ngày): 3 đơn khách đã xin huỷ, AI đã đồng ý, nhưng đơn vẫn ĐÃ XÁC NHẬN (giống #189A435E). Cả 3 chưa tạo vận đơn ⇒ huỷ ngay được, tồn tự trả lại, rời doanh thu/KPI. Duyệt thì Tech Lead chạy ops order-cancel-reconcile 'hslc-hmt-shop --days=30 --apply' (tác nhân = job, có nhật ký), rồi chạy thử lại để xác nhận còn 0. Không duyệt thì 3 đơn giữ nguyên, nhân viên tự xử ở bộ lọc Cần người kiểm."
+  }
+}
