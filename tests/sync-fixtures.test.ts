@@ -562,6 +562,7 @@ import { testMessengerMultiPage } from "./messenger-multipage.test";
 import { testPush } from "./push.test";
 import { testUserInvites } from "./user-invites.test";
 import { testPasswordReset } from "./password-reset.test";
+import { testForgotPassword } from "./forgot-password.test";
 import { testIdentityEmailLogin } from "./identity-email-login.test";
 import { testSaasAcceptance } from "./saas-acceptance.test";
 import { testOpsSignals } from "./ops-signals.test";
@@ -3004,6 +3005,9 @@ async function main() {
   await testUserInvites();
   testTestOrgCodes();
   await testPasswordReset();
+  // PUB-07: «Quên mật khẩu» tự phục vụ — OTP Zalo (lõi phone-otp) ⇒ phiếu qua lõi password-reset; OTP tắt ⇒ một yêu cầu hỗ trợ. Tổ chức
+  // THẬT `fq-*`, tự cấp, tự dọn; Zalo là hàm giả.
+  await testForgotPassword();
   // P0 08/10/2026: khách do admin tạo (job cấp phát) đăng nhập bằng email + mật khẩu KHÔNG cần mã tổ chức — chỉ mục danh tính ghi
   // ngay lúc cấp phát / tạo hộ / mời / đặt mật khẩu; gửi lại kích hoạt; email trùng hai workspace; đối chiếu dữ liệu cũ. Tổ chức
   // THẬT `iel-*`, tự cấp, tự dọn; loginAction / logoutAction chạy trong phạm vi request dựng tay của Next.

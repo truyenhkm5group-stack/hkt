@@ -84,8 +84,8 @@ const badCredentials = (reason: LoginFailureReason, orgCode: string | null): Log
 
 type UserRow = typeof schema.users.$inferSelect;
 
-/** Tra tài khoản theo email hoặc SĐT TRONG ngữ cảnh tổ chức hiện tại. */
-async function findUserByIdentifier(raw: string): Promise<UserRow | undefined> {
+/** Tra tài khoản theo email hoặc SĐT TRONG ngữ cảnh tổ chức hiện tại — một luật tra cho đăng nhập VÀ «Quên mật khẩu» (lib/users/forgot-password.ts). */
+export async function findUserByIdentifier(raw: string): Promise<UserRow | undefined> {
   const id = parseLoginIdentifier(raw);
   if (!id) return undefined;
   const db = await getDb();

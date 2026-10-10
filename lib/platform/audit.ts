@@ -42,6 +42,11 @@ export type PlatformAuditAction = "MODULE_ENABLE" | "MODULE_DISABLE" | "FEATURE_
   | "AI_BALANCE_ADJUST"
   // Người vận hành tạo liên kết đặt lại mật khẩu cho tài khoản của tổ chức khách (0191, lib/users/password-reset.ts).
   | "PASSWORD_RESET_LINK"
+  // Trang «Quên mật khẩu» (PUB-07, lib/users/forgot-password.ts): có người xin đặt lại cho một tài khoản của tổ chức này mà KHÔNG
+  // tự đặt được bằng mã Zalo (OTP tắt · tài khoản không có SĐT · bấm «Không nhận được mã»). Người gửi CHƯA xác minh (`actor = null`,
+  // nguồn UI) — người vận hành đọc ở «Nhật ký» của /platform/customers/<mã> rồi phát liên kết bằng nút có sẵn. Tối đa một dòng
+  // mỗi tài khoản mỗi ngày.
+  | "PASSWORD_RESET_REQUEST"
   // Chủ nền tảng khai chi phí hạ tầng / hỗ trợ khách theo tháng (0203, lib/platform/saas-ledger.ts) — mẫu số biên lợi nhuận.
   | "PLATFORM_COSTS_SET"
   // Nền móng giá & thu phí (0222, lib/pricing/admin.ts): sửa phần thương mại của gói (tên · hạn mức tháng · tính năng ·

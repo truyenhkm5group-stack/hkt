@@ -6,6 +6,8 @@
  *  · Quản trị tổ chức (`users:manage`) tạo cho một tài khoản trong CHÍNH tổ chức mình (/settings/users).
  *  · Người vận hành nền tảng tạo cho một tài khoản của tổ chức khách (/platform/org/<mã>) — lối ra khi chính quản trị
  *    của khách quên mật khẩu. Bắt buộc lý do, ghi nhật ký nền tảng.
+ *  · CHÍNH người dùng ở `/forgot` («Quên mật khẩu», PUB-07): sau khi nhập đúng mã OTP Zalo gửi tới SĐT của tài khoản
+ *    (`issueSelfResetAfterPhoneOtp`, gọi từ lib/users/forgot-password.ts) — phiếu sống 30 phút, người dùng được chuyển thẳng tới trang đặt lại.
  * Người được đặt lại TỰ chọn mật khẩu mới: không ai khác biết nó (khác lối «Đặt lại mật khẩu» cũ, nơi quản trị gõ hộ).
  *
  * ─── MÃ ─── 32 byte ngẫu nhiên base64url; CSDL chỉ giữ `sha256`. Dùng MỘT lần (câu `UPDATE … WHERE used_at IS NULL AND
@@ -141,18 +143,63 @@ async function noteResetFailure(orgCode: string, ip: string, why: { reason: Auth
 
 export type CreatedResetLink = { ok: true; link: string; expiresAt: Date; email: string };
 
+/**
+ * Ai phát liên kết: quản trị tổ chức · người vận hành nền tảng · CHÍNH người dùng sau khi chứng minh giữ SĐT của tài khoản bằng mã
+ * OTP Zalo («Quên mật khẩu», `lib/users/forgot-password.ts`).
+ *
+ * Cột `created_via` có CHECK đóng (`ORG_ADMIN`,`PLATFORM` — 0191) và đổi nó là một migration; nên `SELF_PHONE_OTP` được LƯU là
+ * `PLATFORM` (nền tảng phát, không phải quản trị tổ chức) với `created_by_email = SELF_PHONE_OTP_ISSUER` và `created_by_user_id` =
+ * chính người dùng — hai cột ấy phân biệt được nó với nút của người vận hành (luôn `NULL` + `platform:<email>`). Nhật ký ghi đúng
+ * `via: "SELF_PHONE_OTP"`.
+ */
+type ResetIssuer = "ORG_ADMIN" | "PLATFORM" | "SELF_PHONE_OTP";
+export const SELF_PHONE_OTP_ISSUER = "self:phone-otp";
+/** Liên kết phát cho chính người dùng sau OTP sống NGẮN: họ được chuyển thẳng tới trang đặt lại, không ai phải mở nó hôm sau. */
+export const SELF_RESET_TTL_MINUTES = 30;
+
 /** Trong ngữ cảnh tổ chức đích: thu hồi liên kết cũ chưa dùng của người đó rồi phát một liên kết mới. */
-async function issueInContext(target: { id: string; email: string }, via: "ORG_ADMIN" | "PLATFORM", by: { id: string | null; email: string }) {
+async function issueInContext(target: { id: string; email: string }, via: ResetIssuer, by: { id: string | null; email: string }, ttlMs: number = PASSWORD_RESET_TTL_HOURS * 3_600_000) {
   const db = await getDb();
   const t = schema.passwordResetTokens;
   const token = generateResetToken();
-  const expiresAt = new Date(Date.now() + PASSWORD_RESET_TTL_HOURS * 3_600_000);
+  const expiresAt = new Date(Date.now() + ttlMs);
+  const stored = via === "SELF_PHONE_OTP" ? "PLATFORM" : via;
   await db.transaction(async (tx) => {
     await tx.update(t).set({ revokedAt: new Date() }).where(and(eq(t.userId, target.id), isNull(t.usedAt), isNull(t.revokedAt)));
-    await tx.insert(t).values({ userId: target.id, tokenHash: hashResetToken(token), createdVia: via, createdByUserId: by.id, createdByEmail: by.email, expiresAt });
+    await tx.insert(t).values({ userId: target.id, tokenHash: hashResetToken(token), createdVia: stored, createdByUserId: by.id, createdByEmail: via === "SELF_PHONE_OTP" ? SELF_PHONE_OTP_ISSUER : by.email, expiresAt });
   });
-  await audit({ userId: by.id, userEmail: by.email, action: "PASSWORD_RESET_LINK", entity: "USER", entityId: target.id, after: { email: target.email, via, expiresAt: expiresAt.toISOString() }, reason: "Tạo liên kết đặt lại mật khẩu dùng một lần" });
+  await audit({
+    userId: by.id,
+    userEmail: by.email,
+    action: "PASSWORD_RESET_LINK",
+    entity: "USER",
+    entityId: target.id,
+    after: { email: target.email, via, expiresAt: expiresAt.toISOString() },
+    reason: via === "SELF_PHONE_OTP" ? "Người dùng tự xin đặt lại mật khẩu — đã nhập đúng mã OTP Zalo gửi tới SĐT của tài khoản" : "Tạo liên kết đặt lại mật khẩu dùng một lần",
+  });
   return { token, expiresAt };
+}
+
+/**
+ * «QUÊN MẬT KHẨU» QUA OTP ZALO — chỉ `lib/users/forgot-password.ts` gọi, SAU khi `verifySignupOtp` nói mã đúng cho SĐT của ĐÚNG tài
+ * khoản này. Cùng lõi phát (thu hồi liên kết cũ, chỉ băm trong CSDL, dùng một lần) và cùng trang `/reset/<tổ chức>/<mã>` với hai
+ * đường kia — không có đường đặt mật khẩu thứ hai. Nhật ký: người thao tác = CHÍNH người dùng (họ vừa chứng minh giữ SĐT).
+ */
+export async function issueSelfResetAfterPhoneOtp(orgCode: string, userId: string): Promise<{ ok: true; path: string; expiresAt: Date } | { error: string }> {
+  const org = await activeOrg(orgCode);
+  if (!org) return { error: PASSWORD_RESET_INVALID };
+  try {
+    return await withOrganization(org.code, async () => {
+      const db = await getDb();
+      const [target] = await db.select({ id: schema.users.id, email: schema.users.email, active: schema.users.active }).from(schema.users).where(eq(schema.users.id, userId)).limit(1);
+      if (!target || !target.active) return { error: PASSWORD_RESET_INVALID };
+      const { token, expiresAt } = await issueInContext(target, "SELF_PHONE_OTP", { id: target.id, email: target.email }, SELF_RESET_TTL_MINUTES * 60_000);
+      return { ok: true as const, path: `${PASSWORD_RESET_PATH}/${encodeURIComponent(org.code)}/${encodeURIComponent(token)}`, expiresAt };
+    });
+  } catch (error) {
+    if (error instanceof OrgContextError) return { error: PASSWORD_RESET_INVALID };
+    throw error;
+  }
 }
 
 /** Quản trị tổ chức tạo liên kết cho một tài khoản ĐANG HOẠT ĐỘNG trong chính tổ chức của phiên. */
