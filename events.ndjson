@@ -1885,3 +1885,4 @@
 {"at":"2026-10-10T23:10:35.480Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"tech-mission-control","detail":"#788 @ 2707e4928b85 → 1fdf4b9f8265 (MERGE_ISOLATED · HIGH · gates success)"}
 {"at":"2026-10-10T23:14:53.868Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"inbox-unread-perf","detail":"fix/inbox-unread-perf @ b14abfd3bbb1 · 1 lệnh kiểm thử"}
 {"at":"2026-10-10T23:15:14.852Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#792 @ b14abfd3bbb1 · Chỉ commit gộp main + đổi số 0240→0241 (journal liên tục, when tăng), tham chiếu cập nhật"}
+{"at":"2026-10-10T23:15:38.294Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MIGRATION_RESERVED","mission":"inbox-unread-perf","detail":"0244"}
