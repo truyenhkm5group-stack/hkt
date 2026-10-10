@@ -526,6 +526,7 @@ import { testSalesAgentGolden } from "./sales-agent-golden/golden.test";
 import { testOrderGolden } from "./order-golden/order-golden.test";
 import { testOrderReview } from "./order-review.test";
 import { testInboxOrderPanel } from "./inbox-v2-b.test";
+import { testProductsShellV2 } from "./products-shell-v2.test";
 import { testGoLive } from "./go-live.test";
 import { testOnboardingV2 } from "./onboarding-v2.test";
 import { testSalesVision } from "./sales-vision.test";
@@ -632,6 +633,7 @@ import { testErpDetailTail } from "./erp-detail-tail.test";
 import { testErpFormNames } from "./erp-form-names.test";
 import { testDetailPagesShell } from "./detail-pages-shell.test";
 import { testShellCopyR3 } from "./shell-copy-r3.test";
+import { testAiSalesSettingsV2 } from "./ai-sales-settings-v2.test";
 
 async function main() {
   await ensureMigrated();
@@ -2911,6 +2913,8 @@ async function main() {
   // Hộp thư V2-B: «Đơn đang chốt» đầu cột phải — đọc đơn bot ghi (một câu SQL), kiểm từng ô bằng validator của lõi, nút xác nhận
   // = `confirmOrderReviewCore` — tổ chức THẬT `or-ib` (tự cấp, tự dọn).
   await testInboxOrderPanel();
+  // Trang «Sản phẩm» của khách vỏ: danh sách gọn (tên · SKU · giá · tồn khả dụng · thiếu gì) · số gọn dấu phẩy · «0 kho» — thuần + mã nguồn.
+  await testProductsShellV2();
   await testGoLive();
   // Danh sách «giá trị đầu tiên» chín bước của vỏ Chốt Đơn (chủ shop 10/10/2026) — tổ chức THẬT `fv-shop`, Pancake GIẢ.
   await testOnboardingV2();
@@ -3089,6 +3093,9 @@ async function main() {
   // Vỏ Chốt Đơn C1 #6 · #7: /login sau redirect() của server action mang thương hiệu của host; chữ kỹ thuật (webhook · token ·
   // ERP · API · TEST · field · connector · module · Viettel) không lộ ở nhánh người vỏ thấy — quét cây cú pháp, miễn trừ có lý do.
   testShellCopyR3();
+  // AI Sales settings V2 (bề mặt 3 của VISIBLE_PRODUCT_FINISH_BOARD): ô trạng thái đầu trang — thiếu dữ kiện ⇒ «Chưa rõ», không «Đang chạy» —
+  // một nút chính qua cổng vỏ; nhánh khách không nhận / không in khoá AI · model · tên hãng · chi phí USD. Thuần + quét mã nguồn.
+  testAiSalesSettingsV2();
   // Nền tảng · phiên & RBAC (agent C): claim org, cổng module, platform:operate, đăng nhập theo tổ chức. Tự cấp
   // tổ chức `pr-` (CSDL riêng) và tự dọn; đứng cạnh bài ngữ cảnh vì cùng lý do.
   await testPlatformRbac();

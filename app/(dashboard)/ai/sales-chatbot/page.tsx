@@ -44,6 +44,8 @@ import { SALES_STAGE_LABEL, type SalesStage } from "@/lib/sales-chatbot/stages";
 import { loadReadiness } from "@/lib/sales-chatbot/readiness";
 import { READINESS_STATUS_LABEL, READINESS_VERDICT_LABEL, readinessVerdict } from "@/lib/sales-chatbot/readiness-shared";
 import { PageRuntimePanel } from "./page-runtime-panel";
+import { SettingsStatusCard } from "./settings-status-card";
+import { channelLinkOf, settingsStatus } from "@/lib/sales-chatbot/settings-status";
 import { pageRuntimeView } from "@/lib/sales-chatbot/page-runtime";
 
 export const metadata = { title: "Chatbot bán hàng" };
@@ -88,6 +90,24 @@ export default async function SalesChatbotPage() {
   // ĐÚNG các dòng khách thấy, để đầu bảng không nói «sẵn sàng» khi một dòng bên dưới nói ngược lại.
   const customerChecks = rawReadiness && ai.audience === "CUSTOMER" ? customerReadinessChecks(rawReadiness.checks, ai.aiState) : null;
   const readiness = rawReadiness && customerChecks ? { verdict: readinessVerdict(customerChecks), checks: customerChecks } : rawReadiness;
+  const readinessTodo = readiness ? [[readiness.checks.filter((c) => c.status === "FAIL").length, "việc cần làm"] as const, [readiness.checks.filter((c) => c.status === "WARN").length, "việc nên làm"] as const].filter(([n]) => n > 0).map(([n, t]) => `${n} ${t}`).join(" · ") : "";
+  // Ô trạng thái đầu trang (lib/sales-chatbot/settings-status.ts): CHỈ dữ kiện trang đã nạp ở trên. Người xem không cấu hình được bot
+  // thì trang không đọc kênh / sản phẩm ⇒ `null` ⇒ «Chưa rõ», không bao giờ «Đang chạy» dựng trên chỗ trống (luật 42).
+  const pricedCheck = rawReadiness?.checks.find((c) => c.key === "PRICES");
+  const status = settingsStatus(
+    {
+      audience: ai.audience,
+      botEnabled: cfg.enabled,
+      aiReady: ai.aiReady,
+      quotaExhausted: ai.audience === "CUSTOMER" && ai.aiState === "OUT_OF_QUOTA",
+      mode: modeConfig?.mode ?? null,
+      channels: manage ? { fanpage: fanpage ? channelLinkOf(fanpage.status) : null, zalo: zalo ? channelLinkOf(zalo.status) : null, messengerPages: messengerHistory?.pages ?? 0, webChat: publicUrl !== null } : null,
+      hasPricedProducts: pricedCheck ? pricedCheck.status === "PASS" : null,
+      aiReason: ai.audience === "INTERNAL" ? ai.aiReason : null,
+    },
+    { allows: (href) => shellAllows(user, href), supportHref: customer ? COMPANY.zaloHref : null },
+  );
+  const hasTools = Boolean(followup || lessons || (levelScripts && levelPack && levelCountMap) || (playbook && playbookRun) || inboxHistory || messengerHistory || costReport);
   return (
     <div className="space-y-5">
       <PageHeader
@@ -118,14 +138,15 @@ export default async function SalesChatbotPage() {
           </>
         }
       />
-      <div className="grid gap-5 xl:grid-cols-[1fr_440px]">
-        <div className="space-y-5">
-          {orderSync ? <OrderSyncPanel view={customer ? customerOrderSyncView(orderSync) : orderSync} manage={manage} shell={shell} /> : null}
-          {readiness ? (
-            <SectionCard
-              title={`AI đã sẵn sàng tự trả lời khách? — ${READINESS_VERDICT_LABEL[readiness.verdict]}`}
-              description="Đọc từ dữ liệu thật của shop. Đây là bảng kiểm, không chặn bạn đổi chế độ."
-            >
+      <SettingsStatusCard status={status}>
+        {readiness ? (
+          <details className="group" data-testid="ai-readiness-details">
+            <summary className="cursor-pointer text-sm font-medium">
+              Bảng kiểm «AI đã sẵn sàng tự trả lời khách?» — {READINESS_VERDICT_LABEL[readiness.verdict]}
+              {readinessTodo ? <span className="text-muted-foreground"> · {readinessTodo}</span> : null}
+            </summary>
+            <p className="mt-2 text-xs text-muted-foreground">Đọc từ dữ liệu thật của shop. Đây là bảng kiểm, không chặn bạn đổi chế độ.</p>
+            <div className="mt-2">
               <ul className="space-y-1.5 text-sm" data-testid="ai-readiness" data-verdict={readiness.verdict}>
                 {readiness.checks.map((c) => (
                   <li key={c.key} className="flex items-start gap-2">
@@ -156,25 +177,37 @@ export default async function SalesChatbotPage() {
                   hoặc email <a href={`mailto:${COMPANY.email}`} className="font-medium text-primary hover:underline">{COMPANY.email}</a> — ghi kèm tên cửa hàng.
                 </p>
               ) : null}
-            </SectionCard>
-          ) : null}
+            </div>
+          </details>
+        ) : null}
+      </SettingsStatusCard>
+      <div className="grid gap-5 xl:grid-cols-[1fr_440px]">
+        <div className="space-y-5">
           {pageRuntime?.isHome ? (
             <SectionCard id="page-runtime" title="Bot Chốt Đơn theo page (workspace nhà)" description="Mặc định mọi page TẮT. Bóng = bot soạn câu để so, không gửi. Chạy thật là quyết định của chủ shop.">
               <PageRuntimePanel pages={pageRuntime.pages} manage={manage} />
             </SectionCard>
           ) : null}
+          {manage ? (
+            ai.audience === "INTERNAL" ? (
+              <ChatbotConfigForm config={ai.config} fields={fields} engine={ai.engine} appointmentsOn={moduleOn(user, "appointments")} />
+            ) : (
+              <ChatbotConfigForm config={ai.config} fields={fields} appointmentsOn={moduleOn(user, "appointments")} shell={shell} />
+            )
+          ) : (
+            <SectionCard id="bot-config" title="Cấu hình">
+              <p className="text-sm text-muted-foreground">Bạn xem được hội thoại; cấu hình bot cần quyền «AI bán hàng: cấu hình & xuất bản chatbot».</p>
+            </SectionCard>
+          )}
           {modeConfig ? (
             <SectionCard id="operating-mode" title="Chế độ vận hành" description="Quan sát → Copilot → Thử nghiệm AI vs Người → Tự động: đo người trước, rồi mới để AI tự trả lời.">
               <ModePanel config={modeConfig} manage={manage} />
             </SectionCard>
           ) : null}
-          {manage ? (
-            <SectionCard title="Messenger trực tiếp (không cần Pancake)" description={directConnect ? "Nối fanpage thẳng với bot bằng một nút cấp quyền của Facebook — cho shop không dùng Pancake." : "Sắp mở — đang chờ Facebook duyệt quyền. Hôm nay nối fanpage qua thẻ «Fanpage (qua Pancake)» bên trên."}>
-              <Link href="/ai/sales-chatbot/messenger" className="text-sm font-medium text-primary underline underline-offset-2" data-testid="messenger-link">
-                Mở cài đặt Messenger trực tiếp
-              </Link>
-            </SectionCard>
-          ) : null}
+          <div className="pt-2">
+            <h2 className="text-base font-semibold">Kênh chat</h2>
+            <p className="text-xs text-muted-foreground">Nơi bot nhận tin khách. Chỉ cần một kênh đang bật là bot làm việc được.</p>
+          </div>
           {fanpage ? (
             <SectionCard title="Fanpage (qua Pancake)" description="Bot trả lời tin nhắn khách gửi vào fanpage của shop — cùng cấu hình, cùng giá / tồn, cùng luật chốt đơn với trang chat web.">
               <div className="space-y-2 text-sm" data-testid="fanpage-setup">
@@ -193,7 +226,7 @@ export default async function SalesChatbotPage() {
                     <Link href="/settings/connections" className="underline underline-offset-2">{shell ? "Trang Kết nối" : "Cài đặt → Kết nối"}</Link> → «Fanpage qua Pancake»: {shell ? "nhập mã page và mã truy cập page (lấy ở Pancake → Cài đặt page → Công cụ)" : "nhập Page ID và page access token (Pancake → Cài đặt page → Công cụ)"} → Lưu → Kiểm tra → Bật.
                   </li>
                   <li>{shell ? "Trong Pancake: Cài đặt page → mục «Webhook» (tên mục của Pancake) → bật sự kiện tin nhắn → dán địa chỉ dưới đây." : "Trong Pancake: Cài đặt page → Webhook → bật sự kiện tin nhắn (messaging) → dán URL dưới đây."}</li>
-                  <li>Bật bot ở khung Cấu hình bên dưới. Bot trả lời sau khoảng 5 giây (tin đầu của hội thoại mới: tối đa 10 giây để nhường trả lời tự động của Meta); page đã trả lời thì bot không chen; nhân viên trả lời trên fanpage ⇒ bot nhường hội thoại đó 30 phút.</li>
+                  <li>Bật bot ở khung «Cấu hình bot». Bot trả lời sau khoảng 5 giây (tin đầu của hội thoại mới: tối đa 10 giây để nhường trả lời tự động của Meta); page đã trả lời thì bot không chen; nhân viên trả lời trên fanpage ⇒ bot nhường hội thoại đó 30 phút.</li>
                 </ol>
                 {fanpage.webhookUrl ? (
                   <div className="space-y-1">
@@ -204,6 +237,14 @@ export default async function SalesChatbotPage() {
                   <p className="text-xs text-amber-700 dark:text-amber-400">{shell ? "Chưa tạo được địa chỉ nhận tin của shop — báo đội hỗ trợ." : "Máy chủ chưa có khoá bí mật nền tảng — chưa dựng được URL webhook. Báo người vận hành nền tảng."}</p>
                 )}
               </div>
+            </SectionCard>
+          ) : null}
+          {orderSync ? <OrderSyncPanel view={customer ? customerOrderSyncView(orderSync) : orderSync} manage={manage} shell={shell} /> : null}
+          {manage ? (
+            <SectionCard title="Messenger trực tiếp (không cần Pancake)" description={directConnect ? "Nối fanpage thẳng với bot bằng một nút cấp quyền của Facebook — cho shop không dùng Pancake." : "Sắp mở — đang chờ Facebook duyệt quyền. Hôm nay nối fanpage qua thẻ «Fanpage (qua Pancake)» bên trên."}>
+              <Link href="/ai/sales-chatbot/messenger" className="text-sm font-medium text-primary underline underline-offset-2" data-testid="messenger-link">
+                Mở cài đặt Messenger trực tiếp
+              </Link>
             </SectionCard>
           ) : null}
           {zalo ? (
@@ -241,24 +282,6 @@ export default async function SalesChatbotPage() {
               </div>
             </SectionCard>
           ) : null}
-          {inboxHistory ? <InboxHistoryPanel run={inboxHistory.run} fanpageReady={inboxHistory.fanpageReady} shell={shell} /> : null}
-          {messengerHistory ? <MessengerHistoryPanel run={messengerHistory.run} pages={messengerHistory.pages} shell={shell} /> : null}
-          {costReport ? <ChatCostPanel report={costReport} /> : null}
-          {followup ? <FollowupPanel settings={followup} waiting={waitingCount} manage={manage} /> : null}
-          {lessons ? <LessonsPanel key={`${lessons.version}-${lessons.updatedAt ?? ""}`} state={customer ? customerLessons(lessons) : lessons} shell={shell} /> : null}
-          {levelScripts && levelPack && levelCountMap ? <LevelScriptsPanel key={JSON.stringify(levelScripts)} scripts={levelScripts} levels={levelsForPack(levelPack)} counts={levelCountMap} /> : null}
-          {playbook && playbookRun ? <PlaybookPanel key={playbook.draft?.createdAt ?? "chua-co-nhap"} state={customer ? customerPlaybookState(playbook) : playbook} run={customer ? customerPlaybookRun(playbookRun) : playbookRun} fanpageReady={fanpage?.status === "ACTIVE"} shell={shell} /> : null}
-          {manage ? (
-            ai.audience === "INTERNAL" ? (
-              <ChatbotConfigForm config={ai.config} fields={fields} engine={ai.engine} appointmentsOn={moduleOn(user, "appointments")} />
-            ) : (
-              <ChatbotConfigForm config={ai.config} fields={fields} aiState={ai.aiState} appointmentsOn={moduleOn(user, "appointments")} shell={shell} />
-            )
-          ) : (
-            <SectionCard id="bot-config" title="Cấu hình">
-              <p className="text-sm text-muted-foreground">Bạn xem được hội thoại; cấu hình bot cần quyền «AI bán hàng: cấu hình & xuất bản chatbot».</p>
-            </SectionCard>
-          )}
           <SectionCard title="Trang chat công khai">
             {publicUrl ? (
               <p className="text-sm">
@@ -317,6 +340,23 @@ export default async function SalesChatbotPage() {
               </ul>
             )}
           </SectionCard>
+          {hasTools ? (
+            <details className="group rounded-2xl bg-card shadow-[var(--shadow-card)]" data-testid="ai-settings-more">
+              <summary className="cursor-pointer px-5 py-3.5 text-sm font-semibold">
+                Công cụ thêm
+                <span className="block text-xs font-normal text-muted-foreground">Nhắc lại khách · học từ hội thoại cũ · kịch bản theo mức khách · sổ tay bán hàng · nhập lịch sử tin nhắn{costReport ? " · chi phí AI" : ""}</span>
+              </summary>
+              <div className="space-y-5 p-3 pt-0 sm:p-5 sm:pt-0">
+                {followup ? <FollowupPanel settings={followup} waiting={waitingCount} manage={manage} /> : null}
+                {lessons ? <LessonsPanel key={`${lessons.version}-${lessons.updatedAt ?? ""}`} state={customer ? customerLessons(lessons) : lessons} shell={shell} /> : null}
+                {levelScripts && levelPack && levelCountMap ? <LevelScriptsPanel key={JSON.stringify(levelScripts)} scripts={levelScripts} levels={levelsForPack(levelPack)} counts={levelCountMap} /> : null}
+                {playbook && playbookRun ? <PlaybookPanel key={playbook.draft?.createdAt ?? "chua-co-nhap"} state={customer ? customerPlaybookState(playbook) : playbook} run={customer ? customerPlaybookRun(playbookRun) : playbookRun} fanpageReady={fanpage?.status === "ACTIVE"} shell={shell} /> : null}
+                {inboxHistory ? <InboxHistoryPanel run={inboxHistory.run} fanpageReady={inboxHistory.fanpageReady} shell={shell} /> : null}
+                {messengerHistory ? <MessengerHistoryPanel run={messengerHistory.run} pages={messengerHistory.pages} shell={shell} /> : null}
+                {costReport ? <ChatCostPanel report={costReport} /> : null}
+              </div>
+            </details>
+          ) : null}
         </div>
         {manage ? (
           <div id="khung-thu" className="scroll-mt-24 space-y-2">

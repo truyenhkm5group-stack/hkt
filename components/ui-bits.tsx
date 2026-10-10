@@ -1,6 +1,6 @@
 import type { LucideIcon } from "lucide-react";
 import { InfoHint } from "@/components/info-hint";
-import { MISSING_HINT, MISSING_TEXT } from "@/lib/format";
+import { formatVND, MISSING_HINT, MISSING_TEXT } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
 /** Khối thông tin nhãn/giá trị dùng trong trang chi tiết */
@@ -75,15 +75,9 @@ export function Money({ value, className, compact, sign }: { value: number | nul
       </span>
     );
   }
+  // Dạng gọn đi qua ĐÚNG bộ định dạng chung (dấu phẩy thập phân «1,62 tỷ») — bản chép riêng ở đây từng in «1.62 tỷ».
   const formatted = compact
-    ? (() => {
-        const abs = Math.abs(n);
-        const s = n < 0 ? "-" : sign && n > 0 ? "+" : "";
-        if (abs >= 1_000_000_000) return `${s}${(abs / 1_000_000_000).toFixed(2).replace(/\.?0+$/, "")} tỷ`;
-        if (abs >= 1_000_000) return `${s}${(abs / 1_000_000).toFixed(1).replace(/\.0$/, "")} tr`;
-        if (abs >= 1_000) return `${s}${Math.round(abs / 1_000)}k`;
-        return `${s}${abs}`;
-      })()
+    ? formatVND(n, { compact: true, sign })
     : `${n < 0 ? "-" : sign && n > 0 ? "+" : ""}${new Intl.NumberFormat("vi-VN").format(Math.abs(n))} ₫`;
   return <span className={cn("numeric", className)}>{formatted}</span>;
 }

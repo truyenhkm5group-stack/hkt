@@ -45,8 +45,8 @@ export function testFormatNullSafety() {
 
   // ───────── SỐ LỚN ─────────
   assert.equal(formatVND(1_234_567_890), "1.234.567.890 ₫", "tiền VND in đủ chữ số, không rút gọn ngầm");
-  assert.equal(formatVND(1_234_567_890, { compact: true }), "1.23 tỷ", "bản rút gọn của số tỷ");
-  assert.equal(formatVND(2_500_000, { compact: true }), "2.5 tr", "bản rút gọn của số triệu");
+  assert.equal(formatVND(1_234_567_890, { compact: true }), "1,23 tỷ", "bản rút gọn của số tỷ — dấu PHẨY thập phân");
+  assert.equal(formatVND(2_500_000, { compact: true }), "2,5 tr", "bản rút gọn của số triệu — dấu PHẨY thập phân");
   assert.equal(formatNumber(9_876_543), "9.876.543", "số lượng lớn vẫn có dấu phân cách nghìn");
   assert.equal(formatVND(Number.MAX_SAFE_INTEGER), "9.007.199.254.740.991 ₫", "số nguyên lớn nhất vẫn là số hữu hạn");
 
