@@ -143,7 +143,9 @@ export function replyGaps(rows: readonly ReplyRow[], from: Date, to: Date, now: 
     list.forEach((m, i) => {
       if (NOT_CUSTOMER_NOTES.has(m.note ?? "") || m.at < from || m.at >= to) return;
       out.customer += 1;
-      const reply = list.slice(i + 1).find((x) => OUT_NOTES.has(x.note ?? ""));
+      // Tin DEAD (gửi hỏng): bot ghi dòng BOT_SENT TRƯỚC khi gửi, nên dòng ấy có thể là câu KHÔNG BAO GIỜ tới khách — chỉ tin phía page
+      // (nhân viên / Meta) mới chứng minh có người trả lời.
+      const reply = list.slice(i + 1).find((x) => OUT_NOTES.has(x.note ?? "") && !(m.status === "DEAD" && x.note === "BOT_SENT"));
       if (reply) {
         const lag = Math.round(((reply.at.getTime() - m.at.getTime()) / 60_000) * 10) / 10;
         (reply.note === "BOT_SENT" ? out.answeredLags.bot : out.answeredLags.page).push(lag);

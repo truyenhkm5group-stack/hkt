@@ -179,7 +179,16 @@ async function testUnreadFirstOrder() {
       const firstRead = p2.findIndex((r) => !r.unread);
       assert.ok(firstRead > 0, "có cả hai nhóm");
       assert.ok(p2.slice(firstRead).every((r) => !r.unread), "CHƯA ĐỌC luôn đứng trước ĐÃ ĐỌC (qua cả hai trang)");
-      assert.equal(firstRead, 46, "46 hội thoại chưa đọc / 70");
+      // Chủ shop HSLC 10/10/2026: «chưa đọc» chỉ cho TIN KHÁCH chưa ai xem — hội thoại bot đã trả lời sau tin khách cuối (i lẻ)
+      // KHÔNG chưa đọc dù nhân viên chưa mở. 70 hội thoại: 46 nhân viên chưa mở, trong đó 23 bot đã trả lời ⇒ 23 chưa đọc.
+      assert.equal(firstRead, 23, "23 hội thoại chưa đọc / 70 (tin cuối của khách, nhân viên chưa mở)");
+      const idOf = new Map((await db.select({ id: c.id, threadId: c.threadId }).from(c).where(eq(c.pageId, PAGE))).map((r) => [r.threadId, r.id]));
+      const rowOf = (thread: string) => p2.find((r) => r.id === idOf.get(thread))!;
+      assert.equal(rowOf("t1").unread, false, "t1: nhân viên chưa mở nhưng BOT đã trả lời sau tin khách ⇒ không chưa đọc");
+      assert.equal(rowOf("t1").unreadCount, 0);
+      assert.equal(rowOf("t2").unread, true, "t2: tin cuối là của khách, chưa ai trả lời, chưa ai mở ⇒ chưa đọc");
+      assert.equal(rowOf("t3").unread, false, "t3: nhân viên đã mở sau tin khách");
+      assert.ok(p2.every((r) => r.unread === (r.unreadCount > 0)), "số chưa đọc trên hàng khớp cờ chưa đọc");
       for (const group of [p2.slice(0, firstRead), p2.slice(firstRead)]) {
         for (let i = 1; i < group.length; i++) assert.ok(group[i - 1].lastActivityAt >= group[i].lastActivityAt, `trong nhóm: tin mới nhất trước (${group[i - 1].id} ≥ ${group[i].id})`);
       }

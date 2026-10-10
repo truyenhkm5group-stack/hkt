@@ -52,12 +52,13 @@ export function testOrgOrderAuditPure() {
       r("d", "23:59", null, "PENDING"),
       r("e", "11:00", "BOT_SENT"), r("e", "11:05", null, "PENDING"),
       r("f", "11:55", null, "PENDING"),
+      r("g", "08:00", "Gửi hỏng — Pancake không nhận tin: Too many requests", "DEAD"), r("g", "08:00", "BOT_SENT"),
     ],
     at("00:00"), at("23:58"), at("12:00"),
   );
-  assert.equal(rep.customer, 5, "tin bot / page / lịch sử không phải tin khách; tin ngoài cửa sổ không đếm");
+  assert.equal(rep.customer, 6, "tin bot / page / lịch sử không phải tin khách; tin ngoài cửa sổ không đếm");
   assert.deepEqual(rep.answeredLags, { bot: [1], page: [3] });
-  assert.deepEqual(rep.gaps.map((g) => `${g.threadId}:${g.status}`), ["c:DEAD", "e:PENDING"], "lời bot TRƯỚC tin khách không phải câu trả lời của nó; tin < 10 phút là còn mới");
+  assert.deepEqual(rep.gaps.map((g) => `${g.threadId}:${g.status}`), ["c:DEAD", "e:PENDING", "g:DEAD"], "lời bot TRƯỚC tin khách không phải câu trả lời của nó; tin < 10 phút là còn mới");
   assert.equal(rep.fresh, 1);
 
   const src = readFileSync("scripts/org-order-audit.ts", "utf8");

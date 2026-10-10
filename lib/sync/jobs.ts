@@ -72,7 +72,7 @@ import { DEFAULT_OPTIMIZE_DEPS, maybeOptimize } from "@/lib/video-scale/optimize
 import { MUSIC_MOOD_KEYS, generateMusicLibrary } from "@/lib/video-scale/music-gen";
 import { runPayrollAutopilot } from "@/lib/payroll/autopilot";
 import { modelRegistryFollowUp, runModelRegistryJob } from "@/lib/models/registry-job";
-import { catchUpFanpage } from "@/lib/sales-chatbot/fanpage";
+import { catchUpFanpage, resendPendingFanpageReplies } from "@/lib/sales-chatbot/fanpage";
 import { sweepStaleMessengerThreads } from "@/lib/sales-chatbot/messenger";
 import { runSalesFollowups } from "@/lib/sales-chatbot/followup";
 import { resumeInboxHistory } from "@/lib/sales-chatbot/history";
@@ -827,6 +827,8 @@ export const JOB_DEFINITIONS: Record<string, JobDefinition> = {
       runSyncJob({ source: "ERP", job: "sales-followup", trigger: o.trigger, actor: o.actor, observeOnly: true }, async (ctx) => {
         // Quét lại tin khách bị rơi (webhook mất lúc deploy / bị bỏ qua oan) TRƯỚC follow-up — `catchUpFanpage` không ném.
         const cu = await catchUpFanpage();
+        // Câu trả lời bot đã soạn mà Pancake trả 429 (10/10/2026) ⇒ gửi bù đúng câu đó, không gọi AI lại. Không ném.
+        const rs = await resendPendingFanpageReplies();
         // Tin khách DEAD vì AI hỏng (sự cố 06/10/2026): provider đã hồi phục, tin còn trong 30 phút, chưa ai trả lời ⇒ thử lại
         // có lùi dần 2 · 4 · 8 phút, tối đa 3 lượt (lib/sales-chatbot/inbound-retry.ts). Không ném.
         const rq = await retryAiDownMessages();
@@ -852,7 +854,7 @@ export const JOB_DEFINITIONS: Record<string, JobDefinition> = {
         ctx.summary.imported = r.sent;
         ctx.summary.skipped = r.stopped + r.deferred;
         if (r.errors) ctx.summary.warning = r.detail.filter((d) => /lỗi|:/.test(d)).slice(0, 5).join(" · ").slice(0, 500);
-        const cuText = (rq.detail ? `${rq.detail} · ` : "") + (cu.threads ? `quét lại ${cu.threads} hội thoại (nhận ${cu.queued} · mở lại ${cu.reopened} · trả lời ${cu.replies}) — ${cu.detail.slice(0, 3).join(" · ")} · ` : "") + (ms ? `Messenger: trả lời bù ${ms} hội thoại · ` : "");
+        const cuText = (rs.checked ? `gửi bù sau 429: xét ${rs.checked} · gửi ${rs.sent} · bỏ ${rs.dropped}${rs.detail.length ? ` (${rs.detail.slice(0, 2).join(" · ")})` : ""} · ` : "") + (rq.detail ? `${rq.detail} · ` : "") + (cu.threads ? `quét lại ${cu.threads} hội thoại (nhận ${cu.queued} · mở lại ${cu.reopened} · trả lời ${cu.replies}) — ${cu.detail.slice(0, 3).join(" · ")} · ` : "") + (ms ? `Messenger: trả lời bù ${ms} hội thoại · ` : "");
         const rdText = (rd.sent ? `tin sáng khách đến hạn mua lại: ${rd.due} khách · ` : "") + (ls.status === "NOT_DUE" ? "" : `tự học: ${ls.note} · `) + (ql.status === "NOT_DUE" ? "" : `câu mẫu: ${ql.note} · `) + (no.sent ? `báo nhóm ${no.sent} đơn mới chưa xác nhận · ` : "") + (lv.refreshed || lv.errors ? `level khách: ${lv.refreshed} hội thoại${lv.errors ? ` · lỗi ${lv.errors}` : ""} · ` : "") + (hs ? `${hs} · ` : "");
         const osText = os.checked ? `ghi đơn: đọc ${os.checked} hội thoại · lên ${os.created} đơn · sửa ${os.changes} · bỏ qua ${os.skipped} · lỗi ${os.errors}${os.detail.length ? ` (${os.detail.slice(0, 3).join(" · ")})` : ""} · ` : "";
         ctx.summary.detail = `${osText}${rdText}${cuText}${r.due} tới mốc · gửi ${r.sent} · dừng ${r.stopped} · hoãn ${r.deferred} · lỗi ${r.errors}${r.detail.length ? ` — ${r.detail.slice(0, 6).join(" · ")}` : ""}`.slice(0, 900);

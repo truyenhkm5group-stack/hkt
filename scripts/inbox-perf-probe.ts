@@ -8,9 +8,10 @@
    · TẢI (mở /ai/sales-chatbot/inbox, không ?c=): `listLabels` → `inboxPages` → Promise.all[`listInbox` (bộ lọc mặc định, 100 dòng),
      `assignableUsers`, `inboxAssignees`, `organizationLevelPack`, `listPageRoutes` (chỉ khi `ai_sales:manage`), `humanCooldownMinutes`,
      `manualOrderGate`]. Đồng hồ riêng cho `listInbox` (bộ nạp danh sách).
-   · CHUYỂN (bấm một hội thoại = điều hướng tới ?c=<id>, Server Component dựng lại): `listLabels` → `inboxPages` → `loadInboxThread`
-     (+ `customerInboxThread` khi workspace khách) → CÙNG Promise.all như trên. Đồng hồ riêng cho `loadInboxThread`. Hội thoại đo là N
-     hội thoại ĐẦU danh sách mặc định (mới nhất — đúng thứ người dùng thấy đầu tiên).
+   · CHUYỂN (bấm một hội thoại — từ 10/10/2026 KHÔNG dựng lại trang: đổi `?c=` tại chỗ + `GET /api/ai-sales/inbox-thread`):
+     CHỈ `inboxThreadPayload` (đọc hội thoại + lọc chữ nội bộ của workspace khách). Trước đó mỗi cú bấm chạy lại cả lượt TẢI
+     (đo HSLC 10/10: listInbox 350–800 ms / cú bấm). Mở bằng đường dẫn có `?c=` vẫn là lượt TẢI + `inboxThreadPayload`. Hội thoại
+     đo là N hội thoại ĐẦU danh sách mặc định (mới nhất — đúng thứ người dùng thấy đầu tiên).
   KHÔNG đo: tra phiên (`requirePermission`), dựng HTML / RSC, mạng tới trình duyệt, nhánh hộp thư rỗng (`loadChannelFacts`, đệm 60 giây).
 
   DANH TÍNH: một tài khoản ĐANG BẬT của chính tổ chức mà bộ tính quyền của phiên (`activeUserIdsWhoCan`) nói là xem được hộp thư,
@@ -62,10 +63,10 @@ import { withOrganization } from "@/lib/platform/context";
 import { findOrganization, listOrganizations } from "@/lib/platform/organizations";
 import { platformReadOnlyConfirmed } from "@/lib/pricing/migration";
 import { manualOrderGate } from "@/lib/records/order-create";
-import { customerFacing, customerInboxThread } from "@/lib/saas/visibility";
 import { listPageRoutes } from "@/lib/sales-chatbot/channel-ownership";
 import { humanCooldownMinutes } from "@/lib/sales-chatbot/conversation-control";
-import { assignableUsers, inboxAssignees, inboxPages, listInbox, loadInboxThread } from "@/lib/sales-chatbot/inbox";
+import { assignableUsers, inboxAssignees, inboxPages, listInbox } from "@/lib/sales-chatbot/inbox";
+import { inboxThreadPayload } from "@/lib/sales-chatbot/inbox-thread-payload";
 import { listLabels } from "@/lib/sales-chatbot/inbox-labels";
 import { organizationLevelPack } from "@/lib/sales-chatbot/levels";
 import { rowsOf } from "@/lib/sql-rows";
@@ -284,10 +285,10 @@ export async function renderInboxServerPath(user: SessionUser, selected: string 
         await inboxPages();
         if (selected) {
           const ts = performance.now();
-          const loaded = await loadInboxThread(user, selected);
+          const loaded = await inboxThreadPayload(user, selected);
           threadMs = performance.now() - ts;
-          if (loaded.ok) items = (customerFacing(user.organization) ? customerInboxThread(loaded.thread) : loaded.thread).items.length;
-          else error = `loadInboxThread: ${loaded.error}`;
+          if (loaded.ok) items = loaded.thread.items.length;
+          else error = `inboxThreadPayload: ${loaded.error}`;
         }
         const canManage = can(user, "ai_sales:manage");
         const timedList = (async () => {
@@ -314,6 +315,28 @@ export async function renderInboxServerPath(user: SessionUser, selected: string 
   return { sample, ids };
 }
 
+/** ĐÚNG lời gọi máy chủ của route `/api/ai-sales/inbox-thread` khi người bấm sang hội thoại `id` (không dựng lại danh sách). */
+export async function switchConversationPath(user: SessionUser, id: string): Promise<RenderSample> {
+  const t0 = performance.now();
+  let items: number | null = null;
+  let error: string | null = null;
+  const { stats } = await probe(
+    "inbox-perf-probe",
+    async () => {
+      try {
+        const loaded = await inboxThreadPayload(user, id);
+        if (loaded.ok) items = loaded.thread.items.length;
+        else error = `inboxThreadPayload: ${loaded.error}`;
+      } catch (e) {
+        error = errText(e);
+      }
+    },
+    { top: 0 },
+  );
+  const ms = performance.now() - t0;
+  return { ms, listMs: null, threadMs: ms, sqlMs: stats.queries > 0 ? stats.dbMs : null, queries: stats.queries > 0 ? stats.queries : null, rows: null, total: null, items, error };
+}
+
 /** Lượt đo của MỘT tổ chức — chạy BÊN TRONG `withOrganization(code)`. Không ném: lỗi của từng lượt nằm trong `error` của lượt đó. */
 export async function measureInbox(user: SessionUser, samples: number): Promise<{ load: { cold: RenderSample[]; warm: RenderSample[] }; switchTo: { cold: RenderSample[]; warm: RenderSample[] }; conversations: number }> {
   // Lượt mồi (không tính): mở kết nối, nạp mô-đun lười — chi phí một lần của tiến trình, không phải của người dùng.
@@ -331,8 +354,8 @@ export async function measureInbox(user: SessionUser, samples: number): Promise<
   const switchTo = { cold: [] as RenderSample[], warm: [] as RenderSample[] };
   for (const id of pick) {
     clearMemo();
-    switchTo.cold.push((await renderInboxServerPath(user, id)).sample);
-    switchTo.warm.push((await renderInboxServerPath(user, id)).sample);
+    switchTo.cold.push(await switchConversationPath(user, id));
+    switchTo.warm.push(await switchConversationPath(user, id));
   }
   return { load, switchTo, conversations: pick.length };
 }

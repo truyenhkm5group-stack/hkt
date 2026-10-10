@@ -218,7 +218,7 @@ async function kiemNha() {
       assert.equal(sentTo("pg-off"), 1, "tin nhân viên từ hộp thư ERP không qua cổng");
       // (e2) gọi THẲNG các hàm gửi nội bộ của đường bot — chốt nằm trong chính chúng, không chỉ ở nơi gọi.
       const callsDirect = pancake.calls.length;
-      assert.deepEqual(await fanpageBotSendersForTests.sendInbox(PAGE, "pg-off", "Chị ơi", pancake.fetch, "BOT"), { ok: false, error: PAGE_NOT_LIVE_SEND_ERROR });
+      assert.deepEqual(await fanpageBotSendersForTests.sendInbox(PAGE, "pg-off", "Chị ơi", pancake.fetch, "BOT"), { ok: false, error: PAGE_NOT_LIVE_SEND_ERROR, sentParts: 0, rateLimited: false });
       assert.deepEqual(await fanpageBotSendersForTests.sendImages(PAGE, "pg-off", ["c1"], pancake.fetch), { ok: false, error: PAGE_NOT_LIVE_SEND_ERROR, ids: [] });
       const cr = await fanpageBotSendersForTests.deliverCommentReply({ pageId: PAGE, threadId: "pg-off", commentId: "cmt-1", postId: "post-1", fromId: "cust-1", text: "Dạ em nhắn riêng ạ", imageIds: [], conversationId: "khong-co" }, { fetch: pancake.fetch });
       assert.deepEqual(cr, { kind: "FAILED", reason: PAGE_NOT_LIVE_SEND_ERROR });

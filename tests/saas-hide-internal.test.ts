@@ -569,7 +569,10 @@ export function testHideInternalStatic() {
   assert.ok(/customerConnectionsView\(full\)/.test(read("lib/connectors/service.ts")), "danh mục kết nối lọc DTO ở máy chủ");
   assert.ok(/keepStoredEngineFields\(before, raw\)/.test(read("lib/sales-chatbot/settings.ts")), "đường lưu cấu hình bot giữ động cơ AI của khách");
   const actions = read("lib/actions/sales-chatbot.ts");
-  assert.ok(read("app/(dashboard)/ai/sales-chatbot/inbox/page.tsx").includes('const thread = loaded && "thread" in loaded && customerFacing(user.organization) ? { ...loaded, thread: customerInboxThread(loaded.thread) } : loaded;'), "hộp thư: hội thoại của khách lọc ở máy chủ trước khi vào props");
+  // Hộp thư (10/10/2026): hai lối mở hội thoại — trang (đường dẫn / tự làm mới) và route chuyển hội thoại — đi CHUNG một lõi lọc.
+  assert.ok(read("lib/sales-chatbot/inbox-thread-payload.ts").includes("const thread = customerFacing(user.organization) ? customerInboxThread(loaded.thread) : loaded.thread;"), "hộp thư: hội thoại của khách lọc ở máy chủ trước khi vào props");
+  assert.ok(read("app/(dashboard)/ai/sales-chatbot/inbox/page.tsx").includes("await inboxThreadPayload(user, selected)") && !read("app/(dashboard)/ai/sales-chatbot/inbox/page.tsx").includes("loadInboxThread("), "trang mở hội thoại qua lõi lọc, không gọi thẳng loadInboxThread");
+  assert.ok(read("app/api/ai-sales/inbox-thread/route.ts").includes("await inboxThreadPayload(user, id)") && !read("app/api/ai-sales/inbox-thread/route.ts").includes("loadInboxThread("), "route chuyển hội thoại cũng qua lõi lọc");
   assert.equal((actions.match(/testView\(user,/g) ?? []).length, 3, "cả hai action khung thử trả view qua bộ lọc của khách");
 
   // Review #639 · kiểm kê 08/10: phát lại · xem lại hội thoại · Copilot · tự học · sổ tay · ghi đơn · AI dựng cấu hình · vào việc ngay.

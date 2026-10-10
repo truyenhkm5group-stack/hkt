@@ -99,14 +99,19 @@ const C = "sales_chat_conversations";
  * Tin khách CHƯA ai trả lời: mới hơn tin bot, tin nhân viên ERP, và mọi tin phía page ngoài ERP. Tên cột viết TƯỜNG MINH (câu con tương quan).
  * Tin khách NHẬP TỪ LỊCH SỬ (`history_until`, lib/sales-chatbot/history.ts) không phải việc chờ — chỉ tin SỐNG tới sau mốc đó mới là.
  */
-const NEEDS_REPLY = sql<boolean>`("${sql.raw(C)}"."last_customer_at" is not null
-  and "${sql.raw(C)}"."last_customer_at" > coalesce("${sql.raw(C)}"."history_until", 'epoch'::timestamptz)
+const LAST_IS_CUSTOMER = sql<boolean>`("${sql.raw(C)}"."last_customer_at" is not null
   and "${sql.raw(C)}"."last_customer_at" > coalesce("${sql.raw(C)}"."last_bot_at", 'epoch'::timestamptz)
   and "${sql.raw(C)}"."last_customer_at" > coalesce("${sql.raw(C)}"."last_staff_at", 'epoch'::timestamptz)
   and not exists (select 1 from "sales_chat_inbound" i where i.page_id = "${sql.raw(C)}"."page_id" and i.thread_id = "${sql.raw(C)}"."thread_id"
     and i.note = ${PAGE_REPLY} and i.created_at > "${sql.raw(C)}"."last_customer_at"))`;
-/** Chưa đọc: tin khách mới hơn lần cuối một NHÂN VIÊN mở hội thoại trong hộp thư. */
-const UNREAD = sql<boolean>`("${sql.raw(C)}"."last_customer_at" is not null and "${sql.raw(C)}"."last_customer_at" > coalesce("${sql.raw(C)}"."staff_seen_at", 'epoch'::timestamptz))`;
+const NEEDS_REPLY = sql<boolean>`(${LAST_IS_CUSTOMER} and "${sql.raw(C)}"."last_customer_at" > coalesce("${sql.raw(C)}"."history_until", 'epoch'::timestamptz))`;
+/**
+ * CHƯA ĐỌC = TIN KHÁCH chưa ai xem (chủ shop HSLC 10/10/2026: «chỉ đánh dấu chưa đọc với tin khách gửi mà chưa đọc, không phải tin
+ * nhân viên hay bot gửi»): tin cuối của hội thoại là của KHÁCH (sau nó chưa có câu bot / nhân viên ERP / tin phía page ngoài ERP —
+ * CÙNG mệnh đề với «Chờ trả lời») VÀ nhân viên chưa mở hội thoại từ lúc đó. Trước đây chỉ so với lần nhân viên mở, nên mọi hội
+ * thoại bot đã trả lời xong mà chưa ai mở đều «chưa đọc» (2,1k / 2,48k hội thoại) và hàng in đậm cạnh câu «AI: …».
+ */
+const UNREAD = sql<boolean>`(${LAST_IS_CUSTOMER} and "${sql.raw(C)}"."last_customer_at" > coalesce("${sql.raw(C)}"."staff_seen_at", 'epoch'::timestamptz))`;
 /**
  * Mốc TIN cuối (khách · bot · nhân viên ERP · tin nhập từ lịch sử), không phải `updated_at` — mở / gắn nhãn / nhận hội thoại không được
  * đẩy nó lên đầu. Hội thoại do LƯỢT NHẬP LỊCH SỬ tạo không lấy giờ nhập làm mốc (không nhảy lên đầu như tin mới).
@@ -140,13 +145,17 @@ export function inboxHumanSql(now: Date, orgCopilot: boolean): SQL<boolean> {
 }
 /** Đã chốt: đơn ERP thật của hội thoại (không tính đơn nháp) hoặc level khách «Đã chốt đơn» (job level). */
 const CLOSED = sql<boolean>`("${sql.raw(C)}"."order_id" is not null or coalesce("${sql.raw(C)}"."customer_level", '') = 'ORDERED' or exists (select 1 from "orders" o where o.sales_conversation_id = "${sql.raw(C)}"."id"))`;
-/** SỐ tin khách chưa đọc (trần 100 — hàng in «99+»): tin KHÁCH sống mới hơn lần cuối nhân viên mở hội thoại. */
+/**
+ * SỐ tin khách chưa đọc (trần 100 — hàng in «99+»): tin KHÁCH sống mới hơn lần cuối nhân viên mở hội thoại VÀ mới hơn câu trả lời
+ * cuối (bot · nhân viên ERP · tin phía page) — khách hỏi 3 câu, bot trả lời, khách hỏi thêm 1 ⇒ «1», không phải «4».
+ */
 const UNREAD_COUNT = sql<number>`(case when "${sql.raw(C)}"."page_id" is not null and "${sql.raw(C)}"."thread_id" is not null
   then (select count(*)::int from (select 1 from "sales_chat_inbound" i where i.page_id = "${sql.raw(C)}"."page_id" and i.thread_id = "${sql.raw(C)}"."thread_id"
     and i.kind = 'INBOX' and i.imported_at is null and coalesce(i.note, '') not in ('BOT_SENT', ${PAGE_REPLY})
-    and i.created_at > coalesce("${sql.raw(C)}"."staff_seen_at", 'epoch'::timestamptz) limit 100) x)
+    and i.created_at > greatest(coalesce("${sql.raw(C)}"."staff_seen_at", 'epoch'::timestamptz), coalesce("${sql.raw(C)}"."last_bot_at", 'epoch'::timestamptz), coalesce("${sql.raw(C)}"."last_staff_at", 'epoch'::timestamptz))
+    and not exists (select 1 from "sales_chat_inbound" p where p.page_id = i.page_id and p.thread_id = i.thread_id and p.note = ${PAGE_REPLY} and p.created_at > i.created_at) limit 100) x)
   else (select count(*)::int from (select 1 from "sales_chat_messages" m where m.conversation_id = "${sql.raw(C)}"."id" and m.role = 'user'
-    and m.created_at > coalesce("${sql.raw(C)}"."staff_seen_at", 'epoch'::timestamptz) limit 100) y) end)`;
+    and m.created_at > greatest(coalesce("${sql.raw(C)}"."staff_seen_at", 'epoch'::timestamptz), coalesce("${sql.raw(C)}"."last_bot_at", 'epoch'::timestamptz), coalesce("${sql.raw(C)}"."last_staff_at", 'epoch'::timestamptz)) limit 100) y) end)`;
 /** Đường đã ghi tin khách gần nhất của luồng (0233) — `NULL` ở dòng cũ ⇒ đường canonical hiện tại của page. */
 const THREAD_TRANSPORT = sql<string | null>`(select i.transport from "sales_chat_inbound" i where i.page_id = "${sql.raw(C)}"."page_id" and i.thread_id = "${sql.raw(C)}"."thread_id" and i.transport is not null order by i.created_at desc limit 1)`;
 
