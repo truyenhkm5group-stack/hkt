@@ -1,0 +1,8 @@
+{
+  "pr": 782,
+  "sha": "23840099e176c24a2f6d3412e2e114ab925fc823",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-10T15:33:43.158Z",
+  "note": "Cấu hình rỗng ⇒ lời nhắc y hệt (12 golden không đổi); khuyến mãi không vào phép tính tiền (quét mã nguồn); không chạm withModelFallback; form vẫn 4 nhóm"
+}
