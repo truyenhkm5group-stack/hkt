@@ -1747,3 +1747,4 @@
 {"at":"2026-10-10T18:19:48.562Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"tech-mission-control","detail":"#788 cho feat/tech-mission-control @ a05285a46073"}
 {"at":"2026-10-10T18:20:07.482Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#788 @ a05285a46073 · GitHub chỉ GET (ETag/tree/raw theo SHA, kiểm SHA blob); không đường nào ghi ai-control/registry (bài quét); Lark chỉ webhook Quản lý, thiếu thì bỏ qua; migration chỉ cộng thêm, sứ mệnh biến khỏi sổ không xoá; job không có lịch (chờ chủ shop)"}
 {"at":"2026-10-10T18:20:38.342Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"sales-claim-guard","detail":"fix/sales-claim-guard @ 4e79fc00f5cc · 1 lệnh kiểm thử"}
+{"at":"2026-10-10T18:21:12.599Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"sales-claim-guard","detail":"#789 cho fix/sales-claim-guard @ 4e79fc00f5cc"}
