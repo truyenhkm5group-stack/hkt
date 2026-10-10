@@ -3,7 +3,7 @@
   "mission_id": "board-r2",
   "title": "Launch Gate r7 + bảng Visible Product sau Commercial Launch",
   "business_goal": "",
-  "status": "INTEGRATING",
+  "status": "DONE",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -23,11 +23,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-10T07:45:37.591Z",
-  "updated_at": "2026-10-10T08:38:51.706Z",
-  "last_heartbeat": "2026-10-10T07:45:53.255Z",
+  "updated_at": "2026-10-10T14:41:48.128Z",
+  "last_heartbeat": "2026-10-10T14:41:48.128Z",
   "definition_of_done": [],
   "evidence": {
-    "merged": "#772 → 3cb886ca8e384a0bebaebc8183fc910ebf12cf9c"
+    "merged": "#772 → 3cb886ca8e384a0bebaebc8183fc910ebf12cf9c",
+    "done": "không đổi mã chạy · #772 gộp 3cb886ca, tài liệu (Launch Gate r7 87 % + bảng Visible Product), có trong production 7935fbd4"
   },
   "handoff": {
     "branch": "docs/board-r2",
