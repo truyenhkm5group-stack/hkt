@@ -562,7 +562,7 @@ async function resolveConnector(cfg: SalesChatbotConfig, key: SalesChatbotConfig
   if (!model) return { ok: true, provider, source };
   const fallback = make(null);
   if (fallback.model === provider.model) return { ok: true, provider, source };
-  return { ok: true, provider: withModelFallback(provider, fallback, (bad) => void notifySalesChatModelFallback(bad, fallback.model, new Date()).catch(() => undefined)), source };
+  return { ok: true, provider: withModelFallback(provider, fallback, (bad) => void notifySalesChatModelFallback(bad, fallback.model, new Date()).catch(() => undefined), Date.now, { orgCode: org.code, connector: key }), source };
 }
 
 /**
@@ -616,18 +616,34 @@ export function isModelUnavailableError(message: string): boolean {
   return MODEL_UNAVAILABLE_RE.test(message);
 }
 
-/** Model bị nhà cung cấp từ chối gần đây ⇒ đi thẳng model mặc định, khỏi tốn một lời gọi hỏng mỗi tin (tối đa 1 giờ). */
+/**
+ * Model bị nhà cung cấp từ chối gần đây ⇒ đi thẳng model mặc định, khỏi tốn một lời gọi hỏng mỗi tin (tối đa 1 giờ).
+ * Khoá: `modelFallbackKey` — lỗi «không có model» là lỗi CỦA MỘT KHOÁ, nên dấu hỏng thuộc về đúng (tổ chức, kết nối).
+ */
 const unavailableModels = new Map<string, number>();
 const MODEL_RETRY_MS = 3_600_000;
+
+/**
+ * Phạm vi của dấu «model không dùng được»: tổ chức + kết nối (nguồn khoá) đang gọi. BẮT BUỘC — trước 10/10/2026 khoá chỉ là
+ * `provider:model` ở mức cả tiến trình, nên khoá BYOK hỏng của MỘT shop làm mọi shop khác cùng nhà cung cấp + model bị lùi IM
+ * LẶNG về model mặc định trong 1 giờ, và chỉ shop đầu được báo (Team Premium F2).
+ */
+export type ModelFallbackScope = { orgCode: string; connector: string };
+
+/** Khoá bộ đệm lỗi model — HÀM THUẦN: `tổ chức:kết nối:nhà cung cấp:model`. */
+export function modelFallbackKey(scope: ModelFallbackScope, provider: Pick<AiProvider, "name" | "model">): string {
+  return `${scope.orgCode}:${scope.connector}:${provider.name}:${provider.model}`;
+}
 
 /**
  * MODEL KHAI KHÔNG DÙNG ĐƯỢC ⇒ TỰ LÙI VỀ MODEL MẶC ĐỊNH (03/10/2026, Hải Sản Làng Chài: 21:02 ô model đổi sang
  * «gemini-2.5-flash-lite» — khoá Gemini mới không gọi được dòng 2.5 — và MỌI tin khách từ đó tới nửa đêm thành «AI tạm không
  * trả lời được», 108 lượt lỗi, 0 lượt thành công). Chỉ lỗi «không có model» mới lùi; lỗi khoá / hết tiền / quá tải vẫn ném
- * như cũ. Chủ shop được báo để sửa ô model (`onFallback`).
+ * như cũ. Chủ shop được báo để sửa ô model (`onFallback`). Dấu hỏng nhớ theo `scope` (tổ chức + kết nối): mỗi shop tự tốn
+ * đúng MỘT lời gọi hỏng mỗi giờ và được báo lỗi của chính mình; khoá của shop khác không bị kéo theo.
  */
-export function withModelFallback(primary: AiProvider, fallback: AiProvider, onFallback: (badModel: string) => void, nowMs: () => number = Date.now): AiProvider {
-  const key = `${primary.name}:${primary.model}`;
+export function withModelFallback(primary: AiProvider, fallback: AiProvider, onFallback: (badModel: string) => void, nowMs: () => number, scope: ModelFallbackScope): AiProvider {
+  const key = modelFallbackKey(scope, primary);
   return {
     name: primary.name,
     model: primary.model,

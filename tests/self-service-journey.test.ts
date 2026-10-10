@@ -2376,7 +2376,7 @@ async function testJourney() {
         const fb: AiProvider = { name: "gemini-mf", model: "gemini-3.5-flash-lite", schemaDialect: "openai", complete: async () => { fallbackCalls += 1; return okRes("gemini-3.5-flash-lite"); } };
         const told: string[] = [];
         let clock = 1_000_000;
-        const wrapped = withModelFallback(primary, fb, (m) => told.push(m), () => clock);
+        const wrapped = withModelFallback(primary, fb, (m) => told.push(m), () => clock, { orgCode: "ssj", connector: "gemini-byok" });
         const req: AiRequest = { system: "s", messages: [{ role: "user", content: [{ type: "text", text: "giá?" }] }], tools: [] };
         assert.equal((await wrapped.complete(req)).model, "gemini-3.5-flash-lite", "model khai hỏng ⇒ khách vẫn được trả lời bằng model mặc định");
         assert.deepEqual(told, ["gemini-2.5-flash-lite"], "báo chủ shop");
