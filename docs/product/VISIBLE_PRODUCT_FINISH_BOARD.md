@@ -9,10 +9,27 @@ Logic không nhìn thấy được ⇒ bằng chứng production (chạy ops) th
 **≠ DONE**. «Đã kiểm kê 207/207 trang» không phải bằng chứng hoàn tất.
 
 **STATUS:** `NOT_STARTED` · `PARTIAL` · `PR_READY` · `DEPLOYED_NOT_VERIFIED` · `PRODUCTION_VERIFIED` · `DONE`.
-Hiện **chưa bề mặt nào có ảnh trước / sau** ⇒ **không dòng nào PRODUCTION_VERIFIED / DONE**. Logic đã có run ops (vd `saas-acceptance` PASS 7/7,
-run 37935922309: tạo khách · kích hoạt · đăng nhập · vỏ · chat → AI → đơn) chỉ nâng phần logic; phần nhìn thấy vẫn «chưa có ảnh» ⇒ tối đa
-`DEPLOYED_NOT_VERIFIED`. Cột PR chỉ ghi PR đã gộp; «đã deploy» chưa được xác nhận bằng cách mở trang nên ghi `—` ở cột SHA.
-Ảnh: `docs/product/evidence/<bề-mặt>/<before|after>-<khổ>.png` (sẽ thêm sau; khổ: 1366x768 · 390).
+Bề mặt đã có ảnh trước / sau trên production: **Inbox** (V2-A + V2-B) · **Cấu hình AI Sales** · **Sản phẩm (phía ERP)** — production `6487e6526d04`, 10/10/2026. Các dòng còn lại chưa có
+ảnh ⇒ chưa dòng nào khác PRODUCTION_VERIFIED. Logic đã có run ops (vd `saas-acceptance` PASS 7/7, run 37935922309: tạo khách · kích hoạt ·
+đăng nhập · vỏ · chat → AI → đơn) chỉ nâng phần logic; phần nhìn thấy vẫn «chưa có ảnh» ⇒ tối đa `DEPLOYED_NOT_VERIFIED`. Cột PR chỉ ghi
+PR đã gộp; «đã deploy» chưa được xác nhận bằng cách mở trang nên ghi `—` ở cột SHA.
+
+**Ảnh:** ảnh chụp workspace khách thật (HSLC) có tên · SĐT · địa chỉ khách ⇒ **KHÔNG đưa vào kho** (kho PUBLIC). Bảng ghi SỐ ĐO cùng tên
+tệp ảnh giữ ngoài kho (`.playwright-mcp/<tên>.png` trên máy Tech Lead); chỉ ảnh của workspace thử / dữ liệu mẫu mới được đưa vào
+`docs/product/evidence/<bề-mặt>/<before|after>-<khổ>.png`. Khổ chuẩn: 1366×768 · 1440×900 · 390×844.
+
+## Bằng chứng production
+
+| Bề mặt | Production | Đo trước → sau | Ảnh (ngoài kho) |
+|---|---|---|---|
+| Inbox V2-A — mật độ | `d307dec424c5` (#748) | Dòng hội thoại đầu tiên ở y=502 → **172**; số dòng thấy được: 1366×768 **3 → 10** · 1440×900 **4 → 12** · 390×844 **4 → 11**; cao một dòng 87 → 56 px; không cuộn ngang ở cả ba khổ | `inbox-before-*` · `inbox-after-*` |
+| Inbox V2-A — chưa đọc lên đầu | `d307dec424c5` | **PASS.** Trang đầu toàn tin chưa đọc (≈2,1k chưa đọc) nên không tự chứng minh; tìm «Ngân» (9 hội thoại) rồi mở hội thoại chưa đọc MỚI NHẤT (11 giờ) ⇒ tải lại nó đứng SAU các hội thoại chưa đọc 3–4 ngày. «Chờ trả lời» cố ý xếp khách chờ lâu nhất trước (`inboxOrderBy`) | `inbox-after-unread-first-proof-1366x768` |
+| Inbox V2-A — lọc gọn | `d307dec424c5` | **PASS.** Tìm kiếm + 4 nút nhanh (Chưa đọc 2,1k · Chờ trả lời · Cần người · Của tôi) + «Lọc ▾»; bảng lọc nâng cao mở được ở 390 (trạng thái · kênh · AI/người · nhân viên · SĐT · level) | `inbox-after-1366x768` · `inbox-after-filter-popover-390x844` |
+| Inbox V2-B — «ĐƠN ĐANG CHỐT» | `e21f0ec35b25` (#753) | Trước: cột phải chỉ có khách + lịch sử + danh sách đơn. Sau: khung đơn đầu cột phải — SKU · biến thể · SL × giá · tiền hàng · phí ship («0 ₫ nếu đúng khu vực») · tổng · tên · SĐT · địa chỉ · tỉnh · xã · 5 ô kiểm (SĐT/Địa chỉ/SKU/SL OK · Giá CẦN KIỂM vì miễn ship có điều kiện, lý do in ngay dưới) + trạng thái «ĐÃ XÁC NHẬN». 390: mở bằng nút «Khách, đơn và ghi chú», không cuộn ngang | `inbox-v2b-before-*` · `inbox-v2b-after-*` |
+| Cấu hình AI Sales | `6487e6526d04` (#756 #768) | Trước: trang mở đầu bằng thẻ đồng bộ đơn, không câu «bot có đang chạy không», dài 8.097 px. Sau: ô «**Đang chạy** — Bot đang trả lời khách · đang nhận tin từ Fanpage, Trang chat» + MỘT nút «Mở hộp thư»; 4 nhóm cài đặt; không tên hãng / model / USD; dài **5.483 px**. 390: trước 622 px tràn ngang → **382 px** (#768) | `ai-settings-before-*` · `ai-settings-after-1366x768` · `ai-settings-after-390x844-fixed` |
+| Sản phẩm (phía ERP) | `6487e6526d04` (#757) | «0 kho» → «Chưa khai kho — tồn tính chung theo phiếu kho»; «1.62 tỷ» → «**1,62 tỷ**»; «8.808 sản phẩm» → «8.808 **đơn vị hàng**»; giá bán 120.000 / 150.000 / 250.000 / 350.000 ₫ và giá vốn giữ nguyên | `products-before-*` · `products-after-1366x768` |
+| Hộp thư — không thoái lui | `6487e6526d04` | 11 dòng thấy được ở 1366, 4 nút nhanh, khung «ĐƠN ĐANG CHỐT» đọc lại đơn 0,9 s (cửa sổ Chrome thử ẩn ⇒ IntersectionObserver không chạy — không phải lỗi) | — |
+| Hành trình khách (ops) | `6487e6526d04` | `saas-acceptance --apply --prep --e2e --e2e-ops` **PASS 8/8** (run 38035198098): đăng nhập · vỏ · sản phẩm · chat → AI → đơn · nhân viên trả lời / tiếp quản · cờ cần kiểm · xác nhận tay → CONFIRMED · không trùng đơn · đồng hồ khách AI | — |
 
 ## Thứ tự ưu tiên
 1 Inbox · 2 onboarding / dùng lần đầu · 3 cấu hình AI Sales · 4 xác nhận đơn / sự thật đơn · 5 sản phẩm / SKU · 6 quản lý khách (platform) ·
@@ -54,11 +71,11 @@ Cột: **Y/c** yêu cầu chủ shop · **Hiện tại** đang chạy (PR) · **
 | Bề mặt | Y/c | Hiện tại | Thiếu | Đổi nhìn thấy | PR | SHA | Trước | Sau | STATUS |
 |---|---|---|---|---|---|---|---|---|---|
 | Trang chủ / dashboard | Một việc nên làm tiếp | Vỏ 8 mục; #743 bỏ chữ kỹ thuật | Ảnh | Trước / sau | #743 | — | chưa có | chưa có | DEPLOYED_NOT_VERIFIED |
-| Onboarding / dùng lần đầu | Tự cài xong không cần hỏi | `/start` + trợ giúp | Chưa đo luồng đến Inbox | Từng bước | — | — | chưa có | chưa có | PARTIAL |
+| Onboarding / dùng lần đầu | Tự cài xong không cần hỏi | #752: danh sách 9 bước ở «Tổng quan», khách vỏ chưa xong 9/9 mở «/» về đó (nghiệm thu bước C xác nhận đường chuyển hướng, run 38035198098) | Ảnh: danh sách chỉ hiện với khách vỏ — trên production chỉ workspace thử là vỏ và nó không có đường đăng nhập cho người ⇒ chờ chủ shop chọn cách | Danh sách 9 bước 1366 + 390 | #752 | `6487e6526d04` | có (HSLC «Tổng quan», ngoài kho) | chưa có | DEPLOYED_NOT_VERIFIED |
 | Nối Messenger | Nói đúng «sắp mở» / nối thẳng | #712 (cờ); Meta chưa cấp quyền Page | Phụ thuộc Meta | Trang kết nối | #712 | — | chưa có | chưa có | PARTIAL |
-| Inbox | Lọc gọn, chưa đọc lên đầu, mật độ, bong bóng, câu nhanh; khung tóm tắt đơn, trạng thái trường, xác nhận | ĐANG LÀM: INBOX-V2-A (lọc gọn · chưa đọc · mật độ · bề mặt · bong bóng · câu nhanh) và INBOX-V2-B (khung đơn · trạng thái trường · xác nhận) | Chưa gộp; ảnh TRƯỚC chờ chủ shop đăng nhập cửa sổ Chrome thử | Hộp thư mới 1366 + 390 | V2-A · V2-B (mở) | — | chờ chủ shop đăng nhập | chưa có | PARTIAL |
-| Cài chatbot | Câu mẫu dễ dùng | #737 #739 (công tắc có nhãn, hàng loạt, tự nạp) | Ảnh | Màn câu mẫu | #739 | — | chưa có | chưa có | DEPLOYED_NOT_VERIFIED |
-| Sản phẩm / SKU | «Thêm mẫu mã»; giá vốn chưa biết ≠ 0 | #685 #716 | Ảnh | Trang sản phẩm | #716 | — | chưa có | chưa có | DEPLOYED_NOT_VERIFIED |
+| Inbox | Lọc gọn, chưa đọc lên đầu, mật độ, bong bóng, câu nhanh; khung tóm tắt đơn, trạng thái trường, xác nhận | V2-A (lọc gọn · chưa đọc lên đầu · mật độ · bề mặt · bong bóng · câu nhanh) + V2-B (khung «ĐƠN ĐANG CHỐT» · trạng thái từng trường · nút xác nhận) | Nhiều đơn mở trong một hội thoại · ghi lại sau lỗi · địa chỉ có cấu trúc (chuyển sang «Xác nhận đơn / sự thật đơn») | Xem «Bằng chứng production» | #748 #753 | `e21f0ec35b25` | có (ngoài kho) | có (ngoài kho) | PRODUCTION_VERIFIED |
+| Cài chatbot | Câu mẫu dễ dùng; người ít rành máy cài được | #756 ô trạng thái gộp + một nút chính, 4 nhóm cài đặt, nguồn AI / model chỉ ở workspace nhà; #768 không tràn ngang 390 | Ô FAQ / chính sách / khuyến mãi có cấu trúc (cần đổi prompt — việc riêng) | Xem «Bằng chứng production» | #756 #768 | `6487e6526d04` | có (ngoài kho) | có (ngoài kho) | PRODUCTION_VERIFIED |
+| Sản phẩm / SKU | «Thêm mẫu mã»; giá vốn chưa biết ≠ 0; khách vỏ thấy danh sách gọn | #757: phía ERP «Chưa khai kho — tồn tính chung theo phiếu kho» · «1,62 tỷ» · «8.808 đơn vị hàng», giá bán / giá vốn / tồn HSLC giữ nguyên; số gọn dùng dấu phẩy toàn ứng dụng | Ảnh danh sách gọn của khách vỏ (cùng lý do Onboarding) | Trang sản phẩm 1366 | #757 | `6487e6526d04` | có (ngoài kho) | có — phía ERP (ngoài kho) | PARTIAL |
 | Đơn hàng | Đơn đúng sự thật, xác nhận được | #725 #731 | Ảnh; E2E UI chờ D19 | Chi tiết đơn | #725 #731 | — | chưa có | chưa có | DEPLOYED_NOT_VERIFIED |
 | Nhân viên | Chỉ vai trò bán hàng hợp lệ | #735 #741 | Ảnh; D10 | Trang nhân viên | #735 | — | chưa có | chưa có | DEPLOYED_NOT_VERIFIED |
 | Mức dùng / hạn mức | Hiểu «còn bao nhiêu» | mission ai-balance-v1 + MM-BILL-00 | Ảnh | Khối mức dùng | — | — | chưa có | chưa có | DEPLOYED_NOT_VERIFIED |
