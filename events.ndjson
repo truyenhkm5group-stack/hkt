@@ -1464,3 +1464,4 @@
 {"at":"2026-10-10T09:06:28.451Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"CLAIM","mission":"sync-runner-lock","detail":"BACKLOG · 2 mẫu phạm vi · MEDIUM"}
 {"at":"2026-10-10T09:06:50.195Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"CLAIM","mission":"ai-cost-caps","detail":"BACKLOG · 2 mẫu phạm vi · MEDIUM"}
 {"at":"2026-10-10T09:07:12.964Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"OVERLAP_DETECTED","mission":"pipeline-env-agent-creds","detail":"OVERLAP với acceptance-section-12: điểm nóng SERIAL .github/ ⇒ tuần tự hoá (--after=acceptance-section-12) hoặc khai cách tích hợp (--accept-overlap=\"…\")"}
+{"at":"2026-10-10T09:07:34.940Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"CLAIM","mission":"db-role-per-tenant","detail":"BACKLOG · 3 mẫu phạm vi · HIGH"}

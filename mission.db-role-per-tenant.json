@@ -1,0 +1,28 @@
+{
+  "schema": 1,
+  "mission_id": "db-role-per-tenant",
+  "title": "Mỗi CSDL tổ chức một role Postgres riêng, bỏ mặc định erp_secret (Team Premium F9) — cần diễn tập khôi phục",
+  "business_goal": "",
+  "status": "BACKLOG",
+  "priority": "P2",
+  "risk": "HIGH",
+  "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "worker": null,
+  "worktree": null,
+  "branch": "feat/db-role-per-tenant",
+  "base_sha": null,
+  "domains": [],
+  "owned_paths": [
+    "db/index.ts",
+    "lib/platform/provision.ts",
+    "docker-compose.prod.yml"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-10T09:07:34.789Z",
+  "updated_at": "2026-10-10T09:07:34.789Z",
+  "last_heartbeat": "2026-10-10T09:07:34.789Z",
+  "definition_of_done": []
+}
