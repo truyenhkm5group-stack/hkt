@@ -114,7 +114,7 @@ export const PLATFORM_PERMISSION_KEYS = ["modules:manage", "platform:operate", "
  *  · `/robots.txt`, `/sitemap.xml`: chỉ trả nội dung ở mặt tiền (lib/site/seo.ts), host khác 404 — không dữ liệu tổ chức.
  *  · `/pricing` (0222): trang giá công khai — người đọc chưa có tổ chức; chỉ đọc gói cước + chế độ đăng ký của nền tảng.
  */
-export const MODULE_FREE_PATH_PREFIXES = ["/api/webhooks", "/api/sync", "/login", "/start", "/join", "/reset", "/chat", "/api/platform/domain-allowed", "/gioi-thieu", "/chinh-sach-bao-mat", "/dieu-khoan-su-dung", "/_next", "/robots.txt", "/sitemap.xml", "/pricing"] as const;
+export const MODULE_FREE_PATH_PREFIXES = ["/api/webhooks", "/api/sync", "/login", "/start", "/join", "/reset", "/forgot", "/chat", "/api/platform/domain-allowed", "/gioi-thieu", "/chinh-sach-bao-mat", "/dieu-khoan-su-dung", "/_next", "/robots.txt", "/sitemap.xml", "/pricing"] as const;
 
 export const PLATFORM_MODULES: readonly ModuleDef[] = [
   {

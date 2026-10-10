@@ -25,6 +25,8 @@ import type { SignupActor } from "@/lib/onboarding/service";
  *  · Mỗi tin ZNS là tiền thật ⇒ ba trần đếm từ bảng (không từ bộ nhớ): theo SĐT, theo IP (băm), toàn nền tảng mỗi ngày; và
  *    chờ giữa hai lần gửi. Mã 6 số sống 5 phút, sai quá 5 lần ⇒ phải xin mã mới. Mã và IP chỉ lưu BĂM.
  *  · Người vận hành tạo hộ khách (`operator`) không cần mã.
+ *  · «Quên mật khẩu» (`lib/users/forgot-password.ts`, PUB-07) dùng LẠI đúng lõi gửi (`issuePhoneOtp`) + lõi kiểm/tiêu mã — cùng
+ *    công tắc, cùng ba trần, cùng bảng; không có đường gửi mã thứ hai.
  */
 
 export const PHONE_OTP_SETTING_KEY = "platform.signup.phoneOtp";
@@ -123,8 +125,27 @@ export async function sendSignupOtp(rawPhone: unknown, who: SignupActor, deps: {
   if (!setting.enabled || !setting.templateId) return { error: "Đăng ký hiện không cần mã xác minh." };
   const phone = normalizePhone(rawPhone);
   if (!phone) return { error: "Số điện thoại di động không hợp lệ (vd 0912 345 678)." };
+  const r = await issuePhoneOtp(phone, who.ip, setting, deps);
+  return "error" in r ? { error: r.error, ...(r.retryAfterSeconds !== undefined ? { retryAfterSeconds: r.retryAfterSeconds } : {}) } : r;
+}
+
+/** Vì sao một lượt gửi mã không đi: chờ giữa hai lần · chạm trần (SĐT / IP / nền tảng) · Zalo từ chối (phía số / phía nền tảng). */
+export type PhoneOtpRefusal = "COOLDOWN" | "LIMIT_PHONE" | "LIMIT_IP" | "LIMIT_PLATFORM" | "SEND_PHONE_SIDE" | "SEND_FAILED";
+
+/**
+ * LÕI GỬI MÃ DÙNG CHUNG — đăng ký (`sendSignupOtp`) và «Quên mật khẩu» (`lib/users/forgot-password.ts`) đi CÙNG đường này: cùng chờ
+ * giữa hai lần gửi, cùng ba trần đếm từ bảng (SĐT · IP băm · toàn nền tảng), cùng bảng mã chỉ giữ băm. Nơi gọi đã kiểm công tắc +
+ * mẫu ZNS (`setting`) và chuẩn hoá SĐT. `refusal` là lý do MÁY đọc (nơi gọi công khai không được in nó cho người lạ — «Quên mật khẩu»
+ * gộp mọi lý do thành một câu để không lộ tài khoản có tồn tại hay không).
+ */
+export async function issuePhoneOtp(
+  phone: string,
+  ip: string,
+  setting: Pick<PhoneOtpSetting, "templateId" | "param">,
+  deps: { send?: OtpSender; now?: Date } = {},
+): Promise<{ ok: true; sentTo: string; resendAfterSeconds: number; expiresInMinutes: number } | { error: string; refusal: PhoneOtpRefusal; retryAfterSeconds?: number }> {
   const now = deps.now ?? new Date();
-  const ipHash = hashIp(who.ip);
+  const ipHash = hashIp(ip);
   const pdb = await getPlatformDb();
   const t = schema.platformPhoneOtps;
   const hourAgo = new Date(now.getTime() - 3600_000);
@@ -133,14 +154,14 @@ export async function sendSignupOtp(rawPhone: unknown, who: SignupActor, deps: {
   const since = last ? (now.getTime() - last.at.getTime()) / 1000 : Infinity;
   if (since < PHONE_OTP_LIMITS.resendCooldownSeconds) {
     const wait = Math.ceil(PHONE_OTP_LIMITS.resendCooldownSeconds - since);
-    return { error: `Mã vừa được gửi — đợi ${wait} giây rồi gửi lại.`, retryAfterSeconds: wait };
+    return { error: `Mã vừa được gửi — đợi ${wait} giây rồi gửi lại.`, refusal: "COOLDOWN", retryAfterSeconds: wait };
   }
   const [byPhone] = await pdb.select({ n: count() }).from(t).where(and(eq(t.phone, phone), gt(t.createdAt, hourAgo)));
-  if (Number(byPhone?.n ?? 0) >= PHONE_OTP_LIMITS.perPhonePerHour) return { error: "Số này đã nhận đủ số mã cho một giờ — thử lại sau." };
+  if (Number(byPhone?.n ?? 0) >= PHONE_OTP_LIMITS.perPhonePerHour) return { error: "Số này đã nhận đủ số mã cho một giờ — thử lại sau.", refusal: "LIMIT_PHONE" };
   const [byIp] = await pdb.select({ n: count() }).from(t).where(and(eq(t.ipHash, ipHash), gt(t.createdAt, hourAgo)));
-  if (Number(byIp?.n ?? 0) >= PHONE_OTP_LIMITS.perIpPerHour) return { error: "Máy này đã xin quá nhiều mã trong một giờ — thử lại sau." };
+  if (Number(byIp?.n ?? 0) >= PHONE_OTP_LIMITS.perIpPerHour) return { error: "Máy này đã xin quá nhiều mã trong một giờ — thử lại sau.", refusal: "LIMIT_IP" };
   const [day] = await pdb.select({ n: count() }).from(t).where(gt(t.createdAt, new Date(now.getTime() - 86_400_000)));
-  if (Number(day?.n ?? 0) >= PHONE_OTP_LIMITS.platformPerDay) return { error: "Hệ thống đã gửi đủ số mã cho hôm nay — thử lại ngày mai hoặc liên hệ hỗ trợ." };
+  if (Number(day?.n ?? 0) >= PHONE_OTP_LIMITS.platformPerDay) return { error: "Hệ thống đã gửi đủ số mã cho hôm nay — thử lại ngày mai hoặc liên hệ hỗ trợ.", refusal: "LIMIT_PLATFORM" };
 
   const code = String(randomInt(0, 1_000_000)).padStart(6, "0");
   const id = randomUUID();
@@ -156,9 +177,9 @@ export async function sendSignupOtp(rawPhone: unknown, who: SignupActor, deps: {
     error: sent.ok ? null : sent.error.slice(0, 300),
   });
   if (!sent.ok) {
-    if (sent.phoneSide) return { error: "Zalo không gửi được tới số này — số có dùng Zalo không? Kiểm tra lại số hoặc liên hệ hỗ trợ." };
+    if (sent.phoneSide) return { error: "Zalo không gửi được tới số này — số có dùng Zalo không? Kiểm tra lại số hoặc liên hệ hỗ trợ.", refusal: "SEND_PHONE_SIDE" };
     console.error(`[phone-otp] gửi ZNS hỏng: ${sent.error}`);
-    return { error: "Chưa gửi được mã xác minh — thử lại sau ít phút." };
+    return { error: "Chưa gửi được mã xác minh — thử lại sau ít phút.", refusal: "SEND_FAILED" };
   }
   return { ok: true, sentTo: displayPhone(phone), resendAfterSeconds: PHONE_OTP_LIMITS.resendCooldownSeconds, expiresInMinutes: PHONE_OTP_LIMITS.codeTtlMinutes };
 }
