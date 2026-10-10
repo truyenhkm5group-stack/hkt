@@ -27,18 +27,18 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-10T17:15:47.925Z",
-  "updated_at": "2026-10-10T20:03:07.078Z",
-  "last_heartbeat": "2026-10-10T20:03:07.078Z",
+  "updated_at": "2026-10-10T21:34:26.952Z",
+  "last_heartbeat": "2026-10-10T21:34:26.952Z",
   "definition_of_done": [],
   "handoff": {
     "branch": "feat/saas-value-core",
-    "sha": "cd0f82c8d9ae7f7771c64629063310fcd1d8aaff",
-    "at": "2026-10-10T20:03:07.078Z",
+    "sha": "8ca933d322b091e12b6eb05dd9984402820bd2a4",
+    "at": "2026-10-10T21:34:26.952Z",
     "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
     "title": "Trung tâm giá trị SaaS PR-1: sổ chỉ số tổ chức + hàm thuần giá trị/kinh tế/sức khoẻ/rủi ro rời bỏ + quyết định mặc định tạm",
-    "summary": "cập nhật nhánh theo main",
+    "summary": "PR-1 nối lên PR-2: fixture đủ recovered/upsell; ai_upsell_orders + phần bán thêm đã giao thành MEASURED; thu hồi đọc recovered (không gồm đơn người bán); bất biến overlaysWithinAiLabels",
     "tests": [
-      "như lượt trước; GitHub update-branch gộp main (#784/#786) — không xung đột"
+      "npm test đầy đủ trên 8ca933d3 (gồm PR-2): EXIT 0 · tsc · lint · saas-value-center · order-attribution · test-hygiene · repo-integrity · dang-ky-bai-kiem · 2 đột biến mới đỏ"
     ]
   }
 }
