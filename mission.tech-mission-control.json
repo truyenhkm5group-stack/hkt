@@ -1,0 +1,32 @@
+{
+  "schema": 1,
+  "mission_id": "tech-mission-control",
+  "title": "/tech Mission Control: đọc sổ Tech Room (ai-control/registry) vào /tech — danh sách mission, lọc, tìm, liên kết PR/CI/deploy, lịch sử, STALE, Decision Inbox, báo Lark",
+  "business_goal": "",
+  "status": "RUNNING",
+  "priority": "P2",
+  "risk": "HIGH",
+  "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "worker": null,
+  "worktree": null,
+  "branch": "feat/tech-mission-control",
+  "base_sha": "889d6e559c7fd8c10081120adeafc71822f38685",
+  "domains": [],
+  "owned_paths": [
+    "app/(dashboard)/tech/",
+    "lib/tech/",
+    "lib/queries/tech-mission-control.ts",
+    "lib/sync/jobs.ts",
+    "db/schema.ts",
+    "drizzle/",
+    "tests/tech-mission-control.test.ts"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-10T14:50:30.112Z",
+  "updated_at": "2026-10-10T14:50:30.112Z",
+  "last_heartbeat": "2026-10-10T14:50:30.112Z",
+  "definition_of_done": []
+}
