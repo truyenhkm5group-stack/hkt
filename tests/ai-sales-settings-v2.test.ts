@@ -99,7 +99,9 @@ function testSourceContract() {
   // 2. Trang: ô trạng thái đứng TRƯỚC lưới khung; MỘT nút chính.
   const page = read(`${DIR}/page.tsx`);
   const iCard = page.indexOf("<SettingsStatusCard status={status}>");
-  assert.ok(iCard > 0 && iCard < page.indexOf('<div className="grid gap-5 xl:grid-cols-[1fr_440px]">'), "ô trạng thái đứng đầu, trước mọi khung");
+  const iGrid = page.indexOf('<div className="grid grid-cols-[minmax(0,1fr)] gap-5 xl:grid-cols-[minmax(0,1fr)_440px]">');
+  assert.ok(iGrid > 0, "lưới khung dùng cột minmax(0,1fr): không có thì mã nhúng ô chat đẩy trang tràn ngang ở 390 px (đo production 10/10: 622 px)");
+  assert.ok(iCard > 0 && iCard < iGrid, "ô trạng thái đứng đầu, trước mọi khung");
   assert.ok(/settingsStatus\(\s*\{/.test(page), "trang dựng trạng thái bằng hàm chung, không tự suy");
   assert.equal((read(`${DIR}/settings-status-card.tsx`).match(/data-testid="ai-settings-primary"/g) ?? []).length, 2, "ô trạng thái có ĐÚNG một nút chính (một nhánh liên kết ngoài, một nhánh trong app — loại trừ nhau)");
   assert.ok(page.includes("allows: (href) => shellAllows(user, href)"), "nút chính đi qua cổng của vỏ");
