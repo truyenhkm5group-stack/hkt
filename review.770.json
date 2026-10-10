@@ -1,0 +1,8 @@
+{
+  "pr": 770,
+  "sha": "b9700c1a5fec6642a28f612b3d4e96f0c29c7549",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-10T05:56:40.850Z",
+  "note": "Đọc diff: thử lại khi Pancake 429 (pancake-send-pressure), bỏ khối KHÁCH CŨ trong prompt cho khách chưa từng mua (3 golden đổi có chủ đích), khung hội thoại tải qua route riêng; không migration"
+}
