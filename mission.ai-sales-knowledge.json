@@ -3,7 +3,7 @@
   "mission_id": "ai-sales-knowledge",
   "title": "AI Sales: ô FAQ · chính sách · khuyến mãi có cấu trúc, bot trích đúng, không bịa",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -27,9 +27,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-10T14:11:07.724Z",
-  "updated_at": "2026-10-10T15:33:35.901Z",
+  "updated_at": "2026-10-10T16:59:58.544Z",
   "last_heartbeat": "2026-10-10T15:32:55.145Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#782 → 521b81325e28ad95ea0e9373ebfed3094bad1782"
+  },
   "handoff": {
     "branch": "feat/ai-sales-knowledge",
     "sha": "23840099e176c24a2f6d3412e2e114ab925fc823",
