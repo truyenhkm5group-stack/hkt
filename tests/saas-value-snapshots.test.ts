@@ -33,6 +33,7 @@ import { captureTenantValue, flatColumns, otherVariableFor, spendFor, tenantValu
 import { tenantHealthRuleVersion, writableDay, writeTenantHealthDay } from "@/lib/saas/tenant-health-daily";
 import { buildTenantValue, tenantValueFormulaVersion, type TenantValue } from "@/lib/saas/tenant-value";
 import type { SaasDailyRow } from "@/lib/platform/saas-metrics";
+import { captureTimingOf, parseSnapshotCheckArgs, sourceCodeOf, summarizeSnapshots } from "@/scripts/saas-value-snapshot-check";
 
 const A = "tvs-a";
 const B = "tvs-b";
@@ -339,9 +340,54 @@ function testSource() {
   console.log("  ✓ ảnh giá trị (mã nguồn): mỗi bảng một tệp ghi · chỉ captureSaasSnapshot (nhánh JOB) gọi lượt chụp · không trang nào chạm · bảng khai đủ ba chỗ · không tự kết luận giao thành công");
 }
 
+// ═══════════ 4 · OPS `saas-value-snapshot-check` (CHỈ ĐỌC) ═══════════
+
+function testOpsScript() {
+  assert.deepEqual(parseSnapshotCheckArgs([]), { ok: true, days: 3 });
+  assert.deepEqual(parseSnapshotCheckArgs(["--days=7"]), { ok: true, days: 7 });
+  assert.equal(parseSnapshotCheckArgs(["--days=0"]).ok, false);
+  assert.equal(parseSnapshotCheckArgs(["--org=abc"]).ok, false, "arg lạ bị từ chối");
+  assert.equal(sourceCodeOf("AI_USAGE (30 ngày): sổ AI hỏng"), "AI_USAGE");
+  assert.equal(sourceCodeOf("30d ATTRIBUTION: x"), "ATTRIBUTION");
+  assert.equal(sourceCodeOf("tvs-a: lỗi tự do"), "(khác)", "chuỗi lạ không in nguyên văn");
+  const detail = "mở mới 0 · đóng 0 · sổ SaaS 2026-10-11: 5 tổ chức, MRR 0 ₫, +0 mốc · ảnh giá trị CAPTURED: 3/4 tổ chức, 812 ms (sổ nhà 90 ms, chậm nhất 400 ms), lỗi nguồn 1 (lỗi: [tvs-a] x)";
+  assert.equal(captureTimingOf(detail), "ảnh giá trị CAPTURED: 3/4 tổ chức, 812 ms (sổ nhà 90 ms, chậm nhất 400 ms), lỗi nguồn 1", "chỉ đoạn thời gian — câu lỗi mang mã tổ chức không đi tiếp");
+  // Chuỗi mà saasSnapshotForJob dựng phải khớp đúng bộ đọc của script (một bên đổi chữ thì bên kia mù).
+  const cockpit = readFileSync(path.join(goc, "lib/platform/saas-cockpit.ts"), "utf8");
+  assert.ok(cockpit.includes("` · ảnh giá trị ${tv.status}: ${tv.orgs.length}/${tv.targets} tổ chức, ${tv.totalMs} ms (sổ nhà ${tv.homeMs} ms${slowest ? `, chậm nhất ${slowest.ms} ms` : \"\"})"), "chuỗi thời gian của job khớp bộ đọc của ops");
+  const today = "2026-10-11";
+  const lines = summarizeSnapshots({
+    today,
+    rows: [
+      { capturedDay: today, orgCode: "kh-1", windowDays: 30, customerSpendVnd: null, variableCogsVnd: 10, platformGrossProfitVnd: null, aiCreditedGrossProfitVnd: null, valueMultipleMilli: null, ordersPending: 0, formulaVersion: "tv1.attr1", sourceErrors: ["AI_USAGE (30 ngày): x"] },
+      { capturedDay: today, orgCode: "kh-2", windowDays: 30, customerSpendVnd: 5, variableCogsVnd: 0, platformGrossProfitVnd: 5, aiCreditedGrossProfitVnd: 0, valueMultipleMilli: null, ordersPending: 1, formulaVersion: "tv1.attr1", sourceErrors: [] },
+    ],
+    health: [{ day: today, orgCode: "kh-1", level: "UNKNOWN", churnRisk: "UNKNOWN" }],
+    timings: [],
+  });
+  assert.match(lines[0], /CÓ ẢNH HÔM NAY/);
+  assert.ok(lines.some((l) => l.includes("30 ngày · 2 tổ chức") && l.includes("customerSpendVnd=1") && l.includes("dòng có nguồn hỏng 1")));
+  assert.ok(lines.some((l) => l.includes("nguồn hỏng (số dòng): AI_USAGE 1")));
+  assert.ok(lines.every((l) => !/kh-1|kh-2/.test(l)), "kênh công khai không in mã tổ chức");
+  assert.match(summarizeSnapshots({ today, rows: [], health: [], timings: [] })[0], /CHƯA CÓ ẢNH HÔM NAY/);
+  // Script CHỈ ĐỌC: tự ép ERP_READ_ONLY trước khi nạp @/db, hỏi lại Postgres, không câu ghi nào.
+  const sc = readFileSync(path.join(goc, "scripts/saas-value-snapshot-check.ts"), "utf8");
+  const epChiDoc = sc.search(/process\.env\.ERP_READ_ONLY = "1"/);
+  assert.ok(epChiDoc > 0 && epChiDoc < sc.indexOf('from "@/db"'), "ép chỉ đọc TRƯỚC khi nạp @/db");
+  assert.ok(/platformReadOnlyConfirmed\(\)/.test(sc), "hỏi lại Postgres");
+  assert.ok(!/\.(?:insert|update|delete)\(|insert\s+into|delete\s+from|captureTenantValue\(|captureSaasSnapshot\(/i.test(boChuThich(sc)), "không một câu ghi, không chạy lượt chụp");
+  const ops = readFileSync(path.join(goc, ".github/workflows/ops-vps.yml"), "utf8");
+  assert.match(ops, /- saas-value-snapshot-check\s+#/, "ops-vps khai lựa chọn");
+  assert.match(ops, /OPS_THAO_TAC_MA_HOA: "[^"]*\bsaas-value-snapshot-check\b/, "kết quả MÃ HOÁ");
+  assert.match(ops, /DOC_NANG="[^"]*\bsaas-value-snapshot-check\b/, "làn ĐỌC nặng");
+  assert.match(ops, /saas-value-snapshot-check\)\n[\s\S]*?scripts\/saas-value-snapshot-check\.ts ;;/, "nhánh chạy");
+  console.log("  ✓ ảnh giá trị (ops saas-value-snapshot-check): chỉ đọc · arg soát · kênh công khai chỉ số đếm · thời gian chụp đọc đúng chuỗi của job · khai đủ ở ops-vps");
+}
+
 export async function testSaasValueSnapshots() {
   testPure();
   testSource();
+  testOpsScript();
   await cleanup();
   try {
     await testDb();
