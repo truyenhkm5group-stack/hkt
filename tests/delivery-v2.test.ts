@@ -145,8 +145,9 @@ function testDeployDungLaiBangChung() {
   const rel = /\n {2}release:\n {4}needs: \[bang_chung, gates, build_image\]\n(?: {4}#.*\n)* {4}if: \$\{\{ (.+) \}\}\n/.exec(d);
   assert.ok(rel, "release phải khai needs + if tường minh");
   const expr = rel[1];
-  const evalIf = (v: { cancelled: boolean; build: string; gates: string; bang: string; reuse: string }) => {
+  const evalIf = (v: { ref: string; cancelled: boolean; build: string; gates: string; bang: string; reuse: string }) => {
     const js = expr
+      .replace(/github\.ref\b/g, JSON.stringify(v.ref))
       .replace(/!cancelled\(\)/g, String(!v.cancelled))
       .replace(/needs\.build_image\.result/g, JSON.stringify(v.build))
       .replace(/needs\.gates\.result/g, JSON.stringify(v.gates))
@@ -160,18 +161,21 @@ function testDeployDungLaiBangChung() {
   };
   const KQ = ["success", "failure", "cancelled", "skipped"];
   let soToHop = 0;
+  // Team Premium F7: ref là một chiều của bảng chân lý — chỉ `refs/heads/main` mới tới được máy chủ.
+  for (const ref of ["refs/heads/main", "refs/heads/fix/x", "refs/tags/v1", "refs/heads/main-cu"])
   for (const cancelled of [false, true])
     for (const build of KQ)
       for (const gates of KQ)
         for (const bang of ["success", "failure", "skipped"])
           for (const reuse of ["true", "false", ""]) {
             soToHop++;
-            const chay = evalIf({ cancelled, build, gates, bang, reuse });
-            const dung = !cancelled && build === "success" && (gates === "success" || (gates === "skipped" && bang === "success" && reuse === "true"));
-            assert.equal(chay, dung, `release ${chay ? "CHẠY" : "không chạy"} sai với build=${build} gates=${gates} bang_chung=${bang} reuse=${reuse} huỷ=${cancelled}`);
+            const chay = evalIf({ ref, cancelled, build, gates, bang, reuse });
+            const dung = ref === "refs/heads/main" && !cancelled && build === "success" && (gates === "success" || (gates === "skipped" && bang === "success" && reuse === "true"));
+            assert.equal(chay, dung, `release ${chay ? "CHẠY" : "không chạy"} sai với ref=${ref} build=${build} gates=${gates} bang_chung=${bang} reuse=${reuse} huỷ=${cancelled}`);
+            if (ref !== "refs/heads/main") assert.equal(chay, false, "ref khác main ⇒ KHÔNG BAO GIỜ chạm máy chủ");
             if (gates !== "success" && reuse !== "true") assert.equal(chay, false, "không cổng xanh, không bằng chứng ⇒ KHÔNG BAO GIỜ chạm máy chủ");
           }
-  assert.equal(soToHop, 2 * 4 * 4 * 3 * 3);
+  assert.equal(soToHop, 4 * 2 * 4 * 4 * 3 * 3);
 
   // Bằng chứng phải là LƯỢT CHẠY WORKFLOW ci.yml trên push vào main của đúng SHA — thứ GitHub ghi, không giả được bằng một check run.
   const bc = d.slice(d.indexOf("\n  bang_chung:\n"), d.indexOf("\n  gates:\n", d.indexOf("\n  bang_chung:\n")));

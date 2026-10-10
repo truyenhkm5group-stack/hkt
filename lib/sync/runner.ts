@@ -92,8 +92,15 @@ const ORPHAN_RUN_AFTER_MS = 30 * 60_000;
  */
 const JOB_WATCHDOG_MS = 30 * 60_000;
 
-/** Nhả khoá và huỷ đồng hồ canh của một job. */
-function releaseJob(key: string) {
+/**
+ * Nhả khoá và huỷ đồng hồ canh của một job — CHỈ khi khoá đang ở tay đúng lượt này (`lock`).
+ *
+ * Đồng hồ canh có thể đã nhả khoá của một lượt treo và một lượt mới đã giữ lại khoá ấy; khi lượt
+ * treo cuối cùng cũng kết thúc, nhả theo TÊN khoá sẽ xoá khoá của lượt mới và mở đường cho lượt
+ * thứ ba chạy chồng. Nên nhả theo DANH TÍNH của lần giữ.
+ */
+function releaseJob(key: string, lock: Promise<unknown>) {
+  if (runningJobs.get(key) !== lock) return;
   runningJobs.delete(key);
   const timer = jobWatchdogs.get(key);
   if (timer) clearTimeout(timer);
@@ -144,18 +151,66 @@ export async function runSyncJob<T>(
     };
   }
 
-  const db = await getDb();
-  await db
-    .update(schema.syncRuns)
-    .set({ status: "FAILED", error: "Không kết thúc — tiến trình bị dừng giữa chừng (deploy hoặc khởi động lại).", finishedAt: new Date() })
-    .where(and(eq(schema.syncRuns.status, "RUNNING"), lt(schema.syncRuns.startedAt, new Date(Date.now() - ORPHAN_RUN_AFTER_MS))))
-    .catch(() => undefined);
+  /*
+    GIỮ KHOÁ NGAY, TRƯỚC LƯỢT `await` ĐẦU TIÊN (Team Premium F3).
+
+    Trước đây khoá chỉ được đặt SAU hai lượt chờ CSDL (dọn dòng RUNNING mồ côi + chèn `sync_runs`),
+    nên hai lời gọi bắt đầu trong cùng một nhịp — lượt lịch và một cú bấm tay — đều thấy "chưa ai
+    chạy" và cùng chạy thân job (ghi đơn / tiền / care hai lần). Kiểm và giữ nay nằm liền nhau
+    trong cùng một đoạn đồng bộ, nên không lượt nào chen vào giữa được.
+
+    Giữ sớm thì phải nhả ở MỌI nhánh: chèn `sync_runs` ném (hay `getDb()` ném) mà không nhả thì job
+    kẹt tới khi khởi động lại. Đồng hồ canh cũng bật ngay từ lúc giữ, để cả phần chuẩn bị bị treo
+    cũng không giữ khoá mãi.
+  */
+  let releaseHeld!: () => void;
+  const lock: Promise<unknown> = new Promise<void>((resolve) => (releaseHeld = resolve));
+  runningJobs.set(key, lock);
+  const release = () => {
+    releaseJob(key, lock);
+    releaseHeld();
+  };
+  let runId: string | null = null;
+
+  let db: Awaited<ReturnType<typeof getDb>>;
+  // Nhả khoá sau ngưỡng canh, kể cả khi job không bao giờ kết thúc.
+  const watchdog = setTimeout(() => {
+    if (runningJobs.get(key) !== lock) return;
+    release();
+    if (!runId) return;
+    void db
+      .update(schema.syncRuns)
+      .set({
+        status: "FAILED",
+        error: `Job chạy quá ${Math.round(JOB_WATCHDOG_MS / 60_000)} phút mà không kết thúc — đã nhả khoá để lần chạy sau không bị chặn.`,
+        finishedAt: new Date(),
+      })
+      .where(and(eq(schema.syncRuns.id, runId), eq(schema.syncRuns.status, "RUNNING")))
+      .catch(() => undefined);
+  }, JOB_WATCHDOG_MS);
+  // `unref` để đồng hồ canh không giữ tiến trình sống (quan trọng với script chạy một lần).
+  watchdog.unref?.();
+  jobWatchdogs.set(key, watchdog);
+
   const summary: SyncSummary = { imported: 0, updated: 0, skipped: 0, failed: 0, detail: "" };
   const logs: string[] = [];
-  const [run] = await db
-    .insert(schema.syncRuns)
-    .values({ source: options.source, job: options.job, trigger: options.trigger ?? "MANUAL", actor: options.actor ?? "system", status: "RUNNING" })
-    .returning({ id: schema.syncRuns.id });
+  let run: { id: string };
+  try {
+    db = await getDb();
+    await db
+      .update(schema.syncRuns)
+      .set({ status: "FAILED", error: "Không kết thúc — tiến trình bị dừng giữa chừng (deploy hoặc khởi động lại).", finishedAt: new Date() })
+      .where(and(eq(schema.syncRuns.status, "RUNNING"), lt(schema.syncRuns.startedAt, new Date(Date.now() - ORPHAN_RUN_AFTER_MS))))
+      .catch(() => undefined);
+    [run] = await db
+      .insert(schema.syncRuns)
+      .values({ source: options.source, job: options.job, trigger: options.trigger ?? "MANUAL", actor: options.actor ?? "system", status: "RUNNING" })
+      .returning({ id: schema.syncRuns.id });
+    runId = run.id;
+  } catch (error) {
+    release();
+    throw error;
+  }
 
   let lastProgressAt = 0;
   const ctx: SyncContext = {
@@ -216,29 +271,10 @@ export async function runSyncJob<T>(
         mới bằng sự kiện `memo` khi lượt tính lại xong (xem lib/cache.ts).
       */
       if (!options.observeOnly) staleMemo();
-      releaseJob(key);
+      release();
     }
   })();
 
-  runningJobs.set(key, promise);
-  // Nhả khoá sau ngưỡng canh, kể cả khi job không bao giờ kết thúc.
-  const watchdog = setTimeout(() => {
-    if (!runningJobs.has(key)) return;
-    runningJobs.delete(key);
-    jobWatchdogs.delete(key);
-    void db
-      .update(schema.syncRuns)
-      .set({
-        status: "FAILED",
-        error: `Job chạy quá ${Math.round(JOB_WATCHDOG_MS / 60_000)} phút mà không kết thúc — đã nhả khoá để lần chạy sau không bị chặn.`,
-        finishedAt: new Date(),
-      })
-      .where(and(eq(schema.syncRuns.id, run.id), eq(schema.syncRuns.status, "RUNNING")))
-      .catch(() => undefined);
-  }, JOB_WATCHDOG_MS);
-  // `unref` để đồng hồ canh không giữ tiến trình sống (quan trọng với script chạy một lần).
-  watchdog.unref?.();
-  jobWatchdogs.set(key, watchdog);
   return promise;
 }
 

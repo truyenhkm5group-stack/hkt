@@ -276,6 +276,10 @@ const DOC_MOI_TRUONG_DA_KHAI: Record<string, string> = {
   "tests/session-revocation.test.ts":
     "Cùng lý do với session-renewal; nhánh production trả chuỗi rỗng đúng như lib/env.ts, nên bài kiểm không bao giờ ký bằng một khoá mà mã sản xuất không dùng.",
 
+  /* ───── HÀNG RÀO an toàn, không phải nhánh kết luận ───── */
+  "tests/sync-runner-concurrent-start.test.ts":
+    "Đọc DATABASE_URL chỉ để TỪ CHỐI chạy khi nó không phải PGlite (bài kiểm ghi sync_runs — không bao giờ được chạm Postgres thật); chạy riêng mà chưa đặt thì dựng pglite:memory làm ĐẦU VÀO. Không khẳng định nào rẽ nhánh theo giá trị của máy: trên mọi máy nó hoặc đo cùng một hợp đồng khoá, hoặc dừng hẳn.",
+
   /* ───── KHÔNG đọc biến nào cả — chỉ TÌM chuỗi đó trong mã nguồn ───── */
   "tests/ads-write.test.ts":
     "Không đọc biến nào: nó QUÉT MÃ NGUỒN của lib/env.ts để đòi chốt ngoài cùng đọc THẲNG process.env và chỉ nhận đúng chuỗi \"true\". Chuỗi `process.env.ADS_WRITE_ENABLED` nằm trong dấu nháy của một phép so chuỗi, không phải một lời đọc môi trường — bộ gác không tách được nên khai ở đây.",

@@ -214,7 +214,15 @@ jobs:
     # Chạy khi và CHỈ khi: ảnh đã dựng xong VÀ (cổng vừa chạy XANH, HOẶC cổng được bỏ qua vì có bằng
     # chứng XANH của đúng SHA này). `gates` bị bỏ qua vì `bang_chung` đỏ ⇒ vế hai sai ⇒ không deploy.
     # Không có tổ hợp nào mà cổng đỏ / bị huỷ / không có bằng chứng lại tới được máy chủ.
-    if: ${{ !cancelled() && needs.build_image.result == 'success' && (needs.gates.result == 'success' || (needs.gates.result == 'skipped' && needs.bang_chung.result == 'success' && needs.bang_chung.outputs.reuse == 'true')) }}
+    #
+    # VÀ CHỈ TỪ `main` (Team Premium F7): workflow_dispatch chọn được BẤT KỲ nhánh nào, và trước
+    # đây nhánh ấy qua cổng là lên production — mã chưa qua PR/ruleset chạm máy chủ bán hàng. Ref
+    # khác `main` vẫn chạy cổng (bang_chung · gates · build_image) như cũ, chỉ `release` bị bỏ qua.
+    if: ${{ github.ref == 'refs/heads/main' && !cancelled() && needs.build_image.result == 'success' && (needs.gates.result == 'success' || (needs.gates.result == 'skipped' && needs.bang_chung.result == 'success' && needs.bang_chung.outputs.reuse == 'true')) }}
+    # Environment `production`: chỗ để NGƯỜI đặt luật bảo vệ (chỉ nhánh `main`, người duyệt) trên
+    # GitHub. Chưa tồn tại thì GitHub TỰ TẠO lúc job chạy lần đầu — rỗng, không luật — nên deploy
+    # hợp lệ không bị chặn; điều kiện ref ở dòng trên là hàng rào thứ hai không phụ thuộc cài đặt.
+    environment: production
     runs-on: ubuntu-latest
     timeout-minutes: 40
     # KHÔNG có `concurrency` ở đây nữa. PR #15 dùng nhóm `vps-mutating` của GitHub làm hàng đợi,

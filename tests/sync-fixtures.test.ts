@@ -180,6 +180,7 @@ import { testMigrationUpgradePath } from "./migration-upgrade-path.test";
 import { testMigrationNumberUnique, testMigrationAppendOnly, testRepoIntegrity } from "./repo-integrity.test";
 import { testAiTechRoom } from "./ai-tech-room.test";
 import { testDeliveryV2 } from "./delivery-v2.test";
+import { testWorkflowHardening } from "./workflow-hardening.test";
 import { testChatbotDeployShape, testChatbotImportGuards, testChatbotNoSecretsInRepo } from "./chatbot.test";
 import { testChatbotAdBots } from "./chatbot-ad-bots.test";
 import { testChatbotVoice } from "./chatbot-voice.test";
@@ -228,6 +229,7 @@ import { testLogisticsFreshness } from "./logistics-freshness.test";
 import { testOperatingFunnel } from "./operating-funnel.test";
 import { testMemoInflight } from "./memo-inflight.test";
 import { testCacheSemantics } from "./cache-semantics.test";
+import { testSyncRunnerConcurrentStart } from "./sync-runner-concurrent-start.test";
 import { testRefreshButton } from "./refresh-button.test";
 import { testCommandCatalog } from "./command-catalog.test";
 import { testExperienceProfile } from "./experience-profile.test";
@@ -2185,6 +2187,12 @@ async function main() {
   testPromisedDeliveryPure();
   await testMemoInflight();
   await testCacheSemantics();
+  // Team Premium F3: khoá «một job một lượt» của runSyncJob giữ TRƯỚC lượt await đầu — hai lượt cùng nhịp chỉ chạy thân job một lần;
+  // chèn sync_runs ném thì khoá vẫn được nhả (không kẹt job tới khi khởi động lại).
+  {
+    const r = await testSyncRunnerConcurrentStart();
+    assert.deepEqual(r.failed, [], `sync-runner-concurrent-start: ${r.failed.join(" · ")}`);
+  }
   await testRefreshButton();
   testCommandCatalog();
   testExperienceProfile();
@@ -2729,6 +2737,9 @@ async function main() {
   await testAiTechRoom();
   // Điều phối V2: cổng song song · deploy dùng lại bằng chứng cổng · sổ xuyên sứ mệnh · khoá Integration Lead · giữ chỗ migration (docs/ai-tech-room/delivery-v2.md).
   await testDeliveryV2();
+  // Team Premium F7/F8: job chạm VPS chỉ chạy từ main + Environment production; checkout của workflow agent / có quyền GHI
+  // không giữ credential; agent-run không dán đầu ra bước vào shell, token GHI chỉ ở bước đẩy nhánh.
+  testWorkflowHardening();
   // Nền tảng đa tổ chức: máy quét cô lập mức tiến trình (thuần, không CSDL) — cạnh các bài quét mã nguồn khác.
   testPlatformIsolationStatic();
   // Hồi quy 27/09: script trên GitHub Actions (không CSDL) vẫn phân giải được tổ chức nhà.
