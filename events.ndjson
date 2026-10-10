@@ -1858,3 +1858,4 @@
 {"at":"2026-10-10T21:25:41.959Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"OVERLAP_ACCEPTED","mission":"avatar-pancake-shape","detail":"OVERLAP_ACCEPTED với sync-runner-lock: điểm nóng SERIAL .github/ — cách tích hợp: chỉ thêm một action ops vào danh sách (giải hợp nếu va)"}
 {"at":"2026-10-10T21:26:01.227Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"avatar-pancake-shape","detail":"fix/avatar-pancake-shape @ e244baf96af9 · 1 lệnh kiểm thử"}
 {"at":"2026-10-10T21:26:36.313Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"avatar-pancake-shape","detail":"#793 cho fix/avatar-pancake-shape @ e244baf96af9"}
+{"at":"2026-10-10T21:26:55.338Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#793 @ e244baf96af9 · Chỉ script ops + bài kiểm + khai ops-vps; CSDL chỉ đọc, Pancake chỉ GET, không Graph/facebook.com; bài kiểm chứng minh không giá trị nào lọt ra dòng in"}
