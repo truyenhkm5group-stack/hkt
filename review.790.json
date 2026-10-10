@@ -1,8 +1,8 @@
 {
   "pr": 790,
-  "sha": "cd0f82c8d9ae7f7771c64629063310fcd1d8aaff",
+  "sha": "8ca933d322b091e12b6eb05dd9984402820bd2a4",
   "verdict": "PASS",
   "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
-  "at": "2026-10-10T19:58:54.423Z",
-  "note": "Chỉ commit gộp main do GitHub update-branch, không xung đột; nội dung đã review trước"
+  "at": "2026-10-10T21:34:30.585Z",
+  "note": "Nối PR-2 không xung đột; chồng vẫn là tập con (bài kiểm khoá tổng/nhãn/quy công/bội số không đổi khi đổi số chồng); null≠0 cho tiền bán thêm thiếu. Phải gộp SAU #785"
 }
