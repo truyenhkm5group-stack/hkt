@@ -89,7 +89,7 @@ import {
   type StepStatus,
 } from "@/lib/constants/saas-acceptance";
 import { OPS_SIGNAL_KEYS, ORDER_VALIDATION_FAILED_ACTION } from "@/lib/constants/ops-signals";
-import { ERP_FRAME_HTML_MARKERS, FORBIDDEN_PARAM, isSalesAgentUser, SALES_AGENT_DENIED_PREFIXES, SALES_AGENT_SHELL_HTML_MARKER, SHELL_BLOCKED_PARAM, salesAgentNavFor, salesAgentRedirectFor, type ShellUser } from "@/lib/constants/saas-nav";
+import { ERP_FRAME_HTML_MARKERS, FORBIDDEN_PARAM, isSalesAgentUser, SALES_AGENT_DENIED_PREFIXES, SALES_AGENT_SHELL_HTML_MARKER, SHELL_BLOCKED_PARAM, salesAgentHomeFor, salesAgentNavFor, salesAgentRedirectFor, type ShellUser } from "@/lib/constants/saas-nav";
 import { SESSION_COOKIE } from "@/lib/constants/session";
 import { revokeMarkFrom } from "@/lib/constants/session-revocation";
 import { env } from "@/lib/env";
@@ -109,7 +109,8 @@ import { loadAutoConfirmComplete } from "@/lib/records/order-create";
 import { accountOfWorkspace } from "@/lib/saas/accounts";
 import { acceptanceWorkspaceOwned } from "@/lib/saas/acceptance-guard";
 import { runAcceptanceE2eOps, type PublicChatTransport } from "@/lib/saas/acceptance-e2e";
-import { runAcceptancePrep } from "@/lib/saas/acceptance-prep";
+import { ownerSessionUser, runAcceptancePrep } from "@/lib/saas/acceptance-prep";
+import { shellSetupOpen } from "@/lib/saas/shell-setup";
 import { activationRefusal, loadWorkspaceActivation, resendActivation } from "@/lib/saas/activation";
 import { PRODUCTS } from "@/lib/saas/catalog";
 import { readPlans } from "@/lib/saas/customers";
@@ -797,11 +798,17 @@ async function drillOrderValidation(ctx: Ctx): Promise<DrillResult> {
 
 export type RouteCheck = { path: string; expect: string | null };
 
-/** Tuyến vỏ phải mở được — DẪN XUẤT từ sổ khai của vỏ (không danh sách thứ hai): mọi mục người này thấy + `/` + một tuyến ERP bị chặn. */
-export function shellRoutesFor(user: ShellUser): RouteCheck[] {
+/**
+ * Tuyến vỏ phải mở được — DẪN XUẤT từ sổ khai của vỏ (không danh sách thứ hai): mọi mục người này thấy + `/` + một tuyến ERP bị chặn.
+ *
+ * `/` về trang nhà theo ĐÚNG luật máy chủ dùng (`shellLandingFor` · #752): danh sách thiết lập chưa đủ 9/9 ⇒ «Tổng quan», đủ ⇒ hộp
+ * thư. `setupOpen` do người gọi đọc bằng chính `shellSetupOpen` — bản cũ luôn đòi hộp thư nên workspace thử (chưa nối Facebook ⇒
+ * thiết lập còn mở) bị chấm hỏng bước C trên production 10/10/2026 dù vỏ chạy đúng.
+ */
+export function shellRoutesFor(user: ShellUser, opts: { setupOpen?: boolean } = {}): RouteCheck[] {
   const items = salesAgentNavFor(user).map((i) => ({ path: i.href, expect: null }));
   const blocked = SALES_AGENT_DENIED_PREFIXES[0];
-  return [...items, { path: "/", expect: salesAgentRedirectFor(user, "/") }, ...(blocked ? [{ path: blocked, expect: salesAgentRedirectFor(user, blocked) }] : [])];
+  return [...items, { path: "/", expect: salesAgentHomeFor(user, { setupOpen: opts.setupOpen }) }, ...(blocked ? [{ path: blocked, expect: salesAgentRedirectFor(user, blocked) }] : [])];
 }
 
 /** Soi thân một trang 200 của vỏ: `null` = đạt, chuỗi = vì sao hỏng. THUẦN. */
@@ -867,7 +874,11 @@ async function stepShell(ctx: Ctx): Promise<Outcome> {
   const modules = [...(await getEnabledModules(entry.code))];
   const user: ShellUser = { role: "ADMIN", permissions: [], organization: { isHome: false, brand: org?.brand ?? null }, modules };
   if (!isSalesAgentUser(user)) return fail(`workspace KHÔNG mang vỏ Chốt Đơn (thương hiệu ${org?.brand ?? "NULL"} · module ${modules.join(",")}) — khách sẽ thấy menu ERP nội bộ`);
-  const routes = shellRoutesFor(user);
+  // Trang nhà của `/` hỏi ĐÚNG hàm máy chủ hỏi (không đệm: bước P vừa có thể đổi trạng thái thiết lập).
+  const owner = await withOrganization(entry.code, () => ownerSessionUser(entry));
+  if ("error" in owner) return fail(`không dựng được người dùng chủ để đọc trạng thái thiết lập: ${owner.error}`);
+  const setupOpen = await shellSetupOpen(owner.user, { cacheMs: 0 });
+  const routes = shellRoutesFor(user, { setupOpen });
   // Phiên ký như lượt đăng nhập ký (cùng `signSession`) — SAU mốc thu hồi của lượt đổi mật khẩu gần nhất (làm tròn LÊN giây).
   const wait = ctx.lastPasswordChangeMs ? revokeMarkFrom(ctx.lastPasswordChangeMs) + 50 - Date.now() : 0;
   if (wait > 0) await deps.sleep(wait);
@@ -886,7 +897,7 @@ async function stepShell(ctx: Ctx): Promise<Outcome> {
   const detail = lines.map((l) => `${l.ok ? "✓" : "✗"} ${l.text}`);
   const bad = lines.filter((l) => !l.ok);
   if (bad.length) return fail(`${bad.length}/${routes.length} tuyến hỏng: ${bad.map((l) => l.text).join(" · ").slice(0, 400)}`, detail);
-  return pass(`${routes.length}/${routes.length} tuyến của vỏ mở được qua host ${host} (${routes.length - 2} mục + \`/\` + tuyến ERP bị chặn về nhà) · không lộ khung ERP`, detail);
+  return pass(`${routes.length}/${routes.length} tuyến của vỏ mở được qua host ${host} (${routes.length - 2} mục + \`/\` về ${setupOpen ? "Tổng quan (thiết lập chưa xong)" : "hộp thư"} + tuyến ERP bị chặn về nhà) · không lộ khung ERP`, detail);
 }
 
 // ─────────────────────────── D · chat web → AI → đơn ───────────────────────────
