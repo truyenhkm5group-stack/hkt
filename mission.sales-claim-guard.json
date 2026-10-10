@@ -3,7 +3,7 @@
   "mission_id": "sales-claim-guard",
   "title": "P0 L0+L1 vòng đời khách: máy chủ chặn AI khẳng định «đã nhận tiền» / «đã chốt» khi nguồn chưa xác nhận, ảnh chuyển khoản ⇒ CHƯA XÁC MINH + chuyển người; script ops đếm mẫu lỗi (ca HSLC Thiên Lý)",
   "business_goal": "",
-  "status": "RUNNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -25,7 +25,18 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-10T16:13:05.521Z",
-  "updated_at": "2026-10-10T16:13:05.521Z",
-  "last_heartbeat": "2026-10-10T16:13:05.521Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-10T18:20:38.299Z",
+  "last_heartbeat": "2026-10-10T18:20:38.299Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "fix/sales-claim-guard",
+    "sha": "4e79fc00f5cca0ff97274f6d9421fb5bfb973c38",
+    "at": "2026-10-10T18:20:38.299Z",
+    "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+    "title": "P0 L0+L1 vòng đời khách: máy chủ chặn AI khẳng định «đã nhận tiền» / «đã chốt» khi nguồn chưa xác nhận, ảnh chuyển khoản ⇒ CHƯA XÁC MINH + chuyển người; script ops đếm mẫu lỗi (ca HSLC Thiên Lý)",
+    "summary": "L0+L1 ca Thiên Lý: bot không được khẳng định đã nhận tiền / đã chốt đơn khi chưa có căn cứ ERP (claim-guard trên mọi đường chữ bot), khách báo đã chuyển khoản ⇒ chuyển người ngay, ảnh chuyển khoản nhãn CHƯA XÁC MINH, ops sales-lifecycle-audit",
+    "tests": [
+      "npm test đầy đủ: TẤT CẢ KIỂM THỬ ĐẠT (EXIT 0) · typecheck · lint sạch · sales-claim-guard (bảng chân lý tiền/đơn × căn cứ, câu dương/âm, quét mọi đường chữ bot qua guard, ops trên PGlite không in SĐT/tên) · 6 golden mới · đột biến bỏ guard ⇒ golden đỏ · CHƯA PHỦ followup.ts (L6)"
+    ]
+  }
 }
