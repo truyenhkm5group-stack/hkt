@@ -972,7 +972,7 @@ jobs:
                 kiem_arg
                 ma_hoa_ket_qua chay_voi_arg docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/saas-acceptance.ts ;;
               security-acceptance)
-                # BẰNG CHỨNG LAUNCH_GATE §3 (docs/saas/ACCEPTANCE.md §11) — CHỈ ĐỌC (script tự đặt ERP_READ_ONLY=1 và hỏi lại Postgres). Mọi
+                # BẰNG CHỨNG LAUNCH_GATE §3 (docs/saas/ACCEPTANCE.md §12) — CHỈ ĐỌC (script tự đặt ERP_READ_ONLY=1 và hỏi lại Postgres). Mọi
                 # lượt HTTP là GET tới 127.0.0.1:3000 với Host chỉ định (như bước C của saas-acceptance); phiên vỏ = tài khoản thử của workspace
                 # nghiệm thu, phiên nhà = một ADMIN nhà như smoke — chỉ trong bộ nhớ. Chi tiết MÃ HOÁ; [ops:tom-tat] chỉ trạng thái + số đếm.
                 fetch_script security-acceptance.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/security-acceptance.ts'

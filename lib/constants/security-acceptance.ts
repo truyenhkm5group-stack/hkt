@@ -1,5 +1,5 @@
 /**
- * ═══════════ NGHIỆM THU BẢO MẬT TRÊN PRODUCTION — LUẬT THUẦN (LAUNCH_GATE §3 · S1 / S2 / S3 · docs/saas/ACCEPTANCE.md §11) ═══════════
+ * ═══════════ NGHIỆM THU BẢO MẬT TRÊN PRODUCTION — LUẬT THUẦN (LAUNCH_GATE §3 · S1 / S2 / S3 · docs/saas/ACCEPTANCE.md §12) ═══════════
  *
  * Ops `security-acceptance` (lõi lib/saas/security-acceptance.ts) đi tìm BẰNG CHỨNG production cho ba dòng của cổng ra mắt:
  *  · S1 CÔ LẬP TỔ CHỨC — phiên của workspace nghiệm thu mở id bản ghi của tổ chức NHÀ (và ngược lại) qua HTTP thật: chỉ được ra

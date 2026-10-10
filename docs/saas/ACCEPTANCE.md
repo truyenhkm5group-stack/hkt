@@ -206,7 +206,7 @@ in «mẫu nhỏ — chưa kết luận». **Không có ngưỡng đạt / khôn
 là phần máy chủ (không tra phiên, không dựng HTML, không mạng), và bể kết nối của handle chỉ đọc là 1 (app: 2) nên số nghiêng về phía
 CHẬM. Mã thoát 0 = mọi lượt đo được; 1 = có workspace / lượt đo hỏng (câu lỗi ở phần MÃ HOÁ).
 
-## 11. Bằng chứng bảo mật S1–S3 — ops `security-acceptance`
+## 12. Bằng chứng bảo mật S1–S3 — ops `security-acceptance`
 
 Actions → «Vận hành ERP trên VPS» → `security-acceptance` (ô arg để trống; CHỈ ĐỌC — `ERP_READ_ONLY=1` + hỏi lại Postgres; mọi lượt
 HTTP là GET tới `127.0.0.1:3000` với Host chỉ định, như bước C). Lõi `lib/saas/security-acceptance.ts`, luật thuần
