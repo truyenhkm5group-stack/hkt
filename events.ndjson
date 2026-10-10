@@ -1745,3 +1745,4 @@
 {"at":"2026-10-10T18:15:07.531Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#786 @ 8dfe430976f8 · Chỉ thêm commit gộp main; hai danh sách ops giải bằng hợp, tsc sạch"}
 {"at":"2026-10-10T18:19:14.359Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"tech-mission-control","detail":"feat/tech-mission-control @ a05285a46073 · 1 lệnh kiểm thử"}
 {"at":"2026-10-10T18:19:48.562Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"tech-mission-control","detail":"#788 cho feat/tech-mission-control @ a05285a46073"}
+{"at":"2026-10-10T18:20:07.482Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#788 @ a05285a46073 · GitHub chỉ GET (ETag/tree/raw theo SHA, kiểm SHA blob); không đường nào ghi ai-control/registry (bài quét); Lark chỉ webhook Quản lý, thiếu thì bỏ qua; migration chỉ cộng thêm, sứ mệnh biến khỏi sổ không xoá; job không có lịch (chờ chủ shop)"}
