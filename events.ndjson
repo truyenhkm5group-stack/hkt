@@ -1886,3 +1886,5 @@
 {"at":"2026-10-10T23:14:53.868Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"inbox-unread-perf","detail":"fix/inbox-unread-perf @ b14abfd3bbb1 · 1 lệnh kiểm thử"}
 {"at":"2026-10-10T23:15:14.852Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#792 @ b14abfd3bbb1 · Chỉ commit gộp main + đổi số 0240→0241 (journal liên tục, when tăng), tham chiếu cập nhật"}
 {"at":"2026-10-10T23:15:38.294Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MIGRATION_RESERVED","mission":"inbox-unread-perf","detail":"0244"}
+{"at":"2026-10-10T23:17:25.714Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"CLAIM","mission":"avatar-pancake-shape2","detail":"RUNNING · 2 mẫu phạm vi · MEDIUM"}
+{"at":"2026-10-10T23:17:25.714Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"OVERLAP_ACCEPTED","mission":"avatar-pancake-shape2","detail":"OVERLAP_ACCEPTED với avatar-pancake-shape: phạm vi scripts/pancake-avatar-shape.ts, tests/pancake-avatar-shape.test.ts — cách tích hợp: lượt 2 của cùng script, lượt 1 đã gộp"}
