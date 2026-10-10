@@ -9,6 +9,7 @@ import {
   compactCount,
   INBOX_CHANNEL_LABEL,
   INBOX_CHANNELS,
+  INBOX_FILTER_HINT,
   INBOX_FILTER_LABEL,
   INBOX_HANDLER_LABEL,
   INBOX_HREF,
@@ -49,12 +50,14 @@ type Props = {
   tools?: ReactNode;
   /** Phần quản lý (đường nhận tin & AI nhường) — chỉ người quản lý; nằm cuối bảng «Lọc». */
   manage?: ReactNode;
+  /** «Trả tất cả cho AI» — một dòng dưới hàng thẻ, chỉ khi có quyền và có hội thoại đang do người xử lý (máy chủ quyết). */
+  bulk?: ReactNode;
 };
 
 const SELECT = "h-9 w-full min-w-0 rounded-md border border-foreground/15 bg-card px-2 text-[13px]";
 const FIELD = "space-y-1 text-[12px] font-medium text-muted-foreground";
 
-export function InboxFilters({ state, counts, phoneCount, levelCounts, levels, pages, labels, users, tools, manage }: Props) {
+export function InboxFilters({ state, counts, phoneCount, levelCounts, levels, pages, labels, users, tools, manage, bulk }: Props) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const advanced = inboxAdvancedCount(state);
@@ -135,9 +138,11 @@ export function InboxFilters({ state, counts, phoneCount, levelCounts, levels, p
                   {/* Thẻ nhanh đang chọn là lựa chọn «mặc định» của ô này — chọn trạng thái khác thay thế nó (một thẻ một lúc, như cũ). */}
                   <select name="f" defaultValue={state.filter === "ALL" ? "" : state.filter} className={SELECT} aria-label="Trạng thái hội thoại">
                     <option value="">{`Tất cả (${counts.ALL})`}</option>
-                    {quickActive ? <option value={state.filter}>{`${INBOX_FILTER_LABEL[state.filter]} (${counts[state.filter]})`}</option> : null}
+                    {quickActive ? (
+                      <option value={state.filter} title={INBOX_FILTER_HINT[state.filter]}>{`${INBOX_FILTER_LABEL[state.filter]} (${counts[state.filter]})`}</option>
+                    ) : null}
                     {INBOX_MORE_FILTERS.map((f) => (
-                      <option key={f} value={f}>{`${INBOX_FILTER_LABEL[f]} (${counts[f]})`}</option>
+                      <option key={f} value={f} title={INBOX_FILTER_HINT[f]}>{`${INBOX_FILTER_LABEL[f]} (${counts[f]})`}</option>
                     ))}
                   </select>
                 </label>
@@ -169,8 +174,8 @@ export function InboxFilters({ state, counts, phoneCount, levelCounts, levels, p
                   <span>AI / Người</span>
                   <select name="xl" defaultValue={state.handler === "AI" ? "ai" : state.handler === "HUMAN" ? "nguoi" : ""} className={SELECT} aria-label="AI hay người đang xử lý">
                     <option value="">AI hoặc người</option>
-                    <option value="ai">{INBOX_HANDLER_LABEL.AI}</option>
-                    <option value="nguoi">{INBOX_HANDLER_LABEL.HUMAN}</option>
+                    <option value="ai" title={INBOX_FILTER_HINT.AI}>{INBOX_HANDLER_LABEL.AI}</option>
+                    <option value="nguoi" title={INBOX_FILTER_HINT.HUMAN}>{INBOX_HANDLER_LABEL.HUMAN}</option>
                   </select>
                 </label>
                 <label className={FIELD}>
@@ -266,7 +271,7 @@ export function InboxFilters({ state, counts, phoneCount, levelCounts, levels, p
               href={inboxHref(state, { f: on ? null : f, c: null, n: null })}
               className={cn("inline-flex h-7 shrink-0 items-center gap-0.5 whitespace-nowrap rounded-full border px-[5px] text-[12px]", on ? "border-foreground bg-foreground font-medium text-background" : "border-foreground/15 bg-card hover:bg-muted", hot && "text-foreground")}
               aria-current={on ? "true" : undefined}
-              title={`${INBOX_FILTER_LABEL[f]}: ${formatNumber(counts[f])} hội thoại`}
+              title={`${INBOX_FILTER_LABEL[f]}: ${formatNumber(counts[f])} hội thoại — ${INBOX_FILTER_HINT[f]}`}
               data-filter={f}
             >
               {INBOX_FILTER_LABEL[f]}
@@ -283,6 +288,7 @@ export function InboxFilters({ state, counts, phoneCount, levelCounts, levels, p
           </Link>
         ) : null}
       </div>
+      {bulk}
     </div>
   );
 }

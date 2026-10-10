@@ -5,23 +5,26 @@
  */
 import type { AiHoldState, AiHoldView } from "@/lib/sales-chatbot/ai-hold-shared";
 import type { AiBlock, MessageTrace } from "@/lib/sales-chatbot/ai-status-shared";
-import { readConversationControl, type ControlStamp } from "@/lib/sales-chatbot/conversation-control-shared";
+import type { ControlStamp } from "@/lib/sales-chatbot/conversation-control-shared";
+import type { HumanHandling, NeedsHumanCode } from "@/lib/sales-chatbot/inbox-states";
 
 import type { CustomerLevel } from "@/lib/sales-chatbot/levels-shared";
 import type { OrderReviewEntry, OrderReviewResolution } from "@/lib/constants/order-review";
 
 /**
- * Thẻ lọc của hộp thư (chủ shop 07/10/2026): Tất cả · Chưa đọc · AI đang xử lý · Người đang xử lý · Cần người · Đã chốt · Chưa chốt
- * (+ Chờ trả lời · Của tôi · Chưa ai nhận). «AI / Người đang xử lý» đọc ĐÚNG `aiHoldOf` (ai-hold-shared.ts — một nguồn với huy hiệu
- * trên từng hàng và thanh điều khiển trong luồng tin): AI = AI_ACTIVE; Người = HUMAN_COOLDOWN + HUMAN_TAKEOVER. «Đã chốt» = hội
- * thoại có đơn ERP thật (không tính đơn nháp) hoặc level khách «Đã chốt đơn»; «Chưa chốt» là phần bù — hai thẻ phủ kín.
+ * Thẻ lọc của hộp thư (chủ shop 07/10/2026): Tất cả · Chưa đọc · AI đang trả lời · Người đang xử lý · Cần người · Đã chốt · Chưa chốt
+ * (+ Chờ trả lời · Của tôi · Chưa ai nhận). NGHĨA của từng thẻ khai ở MỘT nơi — `inbox-states.ts` (chủ shop 10/10/2026): «Chưa đọc» =
+ * khách nhắn sau lần cuối NGƯỜI thấy hội thoại (AI trả lời không xoá); «Chờ trả lời» = lượt cuối của khách chưa ai trả lời; «Cần
+ * người» = có lý do thật cần người quyết (AI xin người · AI hỏng · đơn cần kiểm) — KHÔNG gồm hội thoại chỉ đang có nhân viên trả
+ * lời; «Người đang xử lý» = tiếp quản · AI nhường sau câu tay · AI gợi ý. «Đã chốt» = hội thoại có đơn ERP thật (không tính đơn
+ * nháp) hoặc level khách «Đã chốt đơn»; «Chưa chốt» là phần bù — hai thẻ phủ kín.
  */
 export const INBOX_FILTERS = ["ALL", "UNREAD", "AI", "HUMAN", "NEEDS_HUMAN", "ORDERED", "NOT_ORDERED", "UNANSWERED", "MINE", "UNASSIGNED"] as const;
 export type InboxFilter = (typeof INBOX_FILTERS)[number];
 export const INBOX_FILTER_LABEL: Record<InboxFilter, string> = {
   ALL: "Tất cả",
   UNREAD: "Chưa đọc",
-  AI: "AI đang xử lý",
+  AI: "AI đang trả lời",
   HUMAN: "Người đang xử lý",
   NEEDS_HUMAN: "Cần người",
   ORDERED: "Đã chốt",
@@ -29,6 +32,19 @@ export const INBOX_FILTER_LABEL: Record<InboxFilter, string> = {
   UNANSWERED: "Chờ trả lời",
   MINE: "Của tôi",
   UNASSIGNED: "Chưa ai nhận",
+};
+/** Nghĩa của từng thẻ — chú thích trên thẻ / ô chọn (một câu, đúng điều kiện ở `inbox-states.ts`). */
+export const INBOX_FILTER_HINT: Record<InboxFilter, string> = {
+  ALL: "Mọi hội thoại",
+  UNREAD: "Khách đã nhắn sau lần cuối nhân viên mở hội thoại — AI trả lời rồi vẫn là chưa đọc",
+  AI: "AI đang tự trả lời khách",
+  HUMAN: "Nhân viên tiếp quản · AI đang nhường sau câu nhân viên gửi tay · AI gợi ý, người gửi",
+  NEEDS_HUMAN: "Có lý do thật cần người: AI đã chuyển người · AI đang lỗi · đơn cần người kiểm (khách báo huỷ, địa chỉ chưa ghép xã). Không gồm hội thoại nhân viên đang trả lời",
+  ORDERED: "Có đơn ERP thật hoặc level «Đã chốt đơn»",
+  NOT_ORDERED: "Chưa có đơn ERP thật",
+  UNANSWERED: "Tin cuối là của khách và chưa ai trả lời — khách chờ lâu nhất lên đầu",
+  MINE: "Hội thoại bạn đang phụ trách",
+  UNASSIGNED: "Chưa ai nhận mà đang cần người hoặc khách đang chờ trả lời",
 };
 
 /**
@@ -123,12 +139,23 @@ export function inboxAdvancedCount(s: Omit<InboxFilterState, "q" | "limit" | "se
 }
 
 /**
- * MỘT trạng thái đơn / cần-người trên mỗi hàng (mật độ danh sách): Cần người > Đã chốt > Đơn nháp > không gì. Các huy hiệu khác
- * (page, nguồn, level, SĐT, người nhận, nhãn) chỉ hiện khi rê chuột (title) — chúng vẫn lọc được ở «Lọc ▾». HÀM THUẦN.
+ * MỘT trạng thái đơn / cần-người trên mỗi hàng (mật độ danh sách): Cần người > Đã chốt > Đơn nháp > không gì. «Cần người» đọc ĐÚNG
+ * lý do của bộ lọc «Cần người» (`needsHuman` — `classifyInboxState`), không đọc `status = HANDOFF` (nhân viên đang trả lời / tiếp
+ * quản KHÔNG phải cần người). Các huy hiệu khác (page, nguồn, level, SĐT, người nhận, nhãn) chỉ hiện khi rê chuột (title) — chúng vẫn
+ * lọc được ở «Lọc ▾». HÀM THUẦN.
  */
-export type InboxRowStatus = { kind: "NEEDS_HUMAN" | "CLOSED" | "DRAFT"; label: string } | null;
-export function inboxRowStatus(r: Pick<InboxRow, "status" | "closed" | "hasOrder">): InboxRowStatus {
-  if (r.status === "HANDOFF") return { kind: "NEEDS_HUMAN", label: "Cần người" };
+export type InboxRowStatus = { kind: "NEEDS_HUMAN" | "CLOSED" | "DRAFT"; label: string; hint?: string } | null;
+/** Nhãn ngắn trên hàng + câu giải thích của từng lý do cần người. */
+export const NEEDS_HUMAN_LABEL: Record<NeedsHumanCode, string> = { AI_HANDOFF: "Cần người", AI_DOWN: "AI lỗi", ORDER_REVIEW: "Kiểm đơn" };
+export const NEEDS_HUMAN_HINT: Record<NeedsHumanCode, string> = {
+  AI_HANDOFF: "AI đã chuyển hội thoại cho người (khách đòi gặp người, khách nhắn sau khi chốt đơn…) — tiếp quản hoặc trả lại AI",
+  AI_DOWN: "AI tạm không trả lời được — nhân viên liên hệ lại khách",
+  ORDER_REVIEW: "Đơn của hội thoại cần người kiểm (khách báo huỷ · địa chỉ chưa ghép xã / phường)",
+};
+/** Người đang cầm hội thoại — nhãn cho huy hiệu và bộ lọc. */
+export const HUMAN_HANDLING_LABEL: Record<HumanHandling, string> = { MANUAL_TAKEOVER: "Nhân viên tiếp quản", STAFF_COOLDOWN: "AI đang nhường nhân viên", COPILOT: "AI gợi ý · người gửi" };
+export function inboxRowStatus(r: Pick<InboxRow, "needsHuman" | "closed" | "hasOrder" | "handoffReason">): InboxRowStatus {
+  if (r.needsHuman) return { kind: "NEEDS_HUMAN", label: NEEDS_HUMAN_LABEL[r.needsHuman], hint: r.needsHuman === "AI_HANDOFF" && r.handoffReason ? `${NEEDS_HUMAN_HINT.AI_HANDOFF} · Lý do: ${r.handoffReason}` : NEEDS_HUMAN_HINT[r.needsHuman] };
   if (r.closed) return { kind: "CLOSED", label: "Đã chốt" };
   if (r.hasOrder) return { kind: "DRAFT", label: "Đơn nháp" };
   return null;
@@ -209,28 +236,18 @@ export function safeAvatarUrl(v: unknown): string | null {
 }
 
 /**
- * Ai đang trả lời khách — lớp PHÂN LOẠI của hộp thư (`inboxHandlingOf`): AI = bot tự trả lời và gửi (`aiHoldOf` = AI_ACTIVE, không ở
- * chế độ AI gợi ý); HUMAN = đang nhường người · Tiếp quản · cần người · AI GỢI Ý (bot soạn, NGƯỜI gửi — của hội thoại hoặc chế độ
- * vận hành của cả tổ chức). Quyết định sản phẩm 07/10/2026: AI gợi ý thuộc nhóm NGƯỜI để nhân viên không bỏ sót khách đang chờ;
- * `aiHoldOf` của đường xử lý KHÔNG đổi (bot vẫn soạn gợi ý). Hai nhóm phủ kín, không giao nhau.
+ * Ai đang trả lời khách — lớp PHÂN LOẠI của hộp thư (`inbox-states.ts::classifyInboxState`, chủ shop 10/10/2026): AI = bot tự trả
+ * lời và gửi; HUMAN = «Người đang xử lý» (tiếp quản · AI nhường sau câu tay của nhân viên · AI GỢI Ý — bot soạn, NGƯỜI gửi, của hội
+ * thoại hoặc của cả tổ chức). Hội thoại AI đã DỪNG vì cần người mà chưa ai cầm KHÔNG thuộc nhóm nào trong hai nhóm này — nó nằm ở
+ * thẻ «Cần người» (huy hiệu «Chờ người»). AI + Người + Chờ người phủ kín, không giao nhau.
  */
 export const INBOX_HANDLERS = ["AI", "HUMAN"] as const;
 export type InboxHandler = (typeof INBOX_HANDLERS)[number];
 export const INBOX_HANDLER_LABEL: Record<InboxHandler, string> = { AI: "AI đang trả lời", HUMAN: "Người đang xử lý" };
 
-/** Phân loại trên từng hàng: AI · AI gợi ý (người gửi — thuộc nhóm NGƯỜI) · Người. */
-export type InboxHandling = "AI" | "COPILOT" | "HUMAN";
-export const INBOX_HANDLING_LABEL: Record<InboxHandling, string> = { AI: "AI", COPILOT: "AI gợi ý · người gửi", HUMAN: "Người" };
-
-/**
- * Hộp thư xếp hội thoại vào nhóm nào: AI đang nhường / bị tiếp quản ⇒ HUMAN; AI gợi ý (của hội thoại, hoặc tổ chức đang ở chế độ
- * Copilot) ⇒ COPILOT; còn lại ⇒ AI. HÀM THUẦN — điều kiện SQL của thẻ lọc (`inboxHumanSql`) là bản tương đương, bài kiểm so hai bên.
- */
-export function inboxHandlingOf(hold: AiHoldState, state: unknown, orgCopilot: boolean): InboxHandling {
-  if (hold !== "AI_ACTIVE") return "HUMAN";
-  if (orgCopilot || readConversationControl(state)?.mode === "COPILOT") return "COPILOT";
-  return "AI";
-}
+/** Phân loại trên từng hàng: AI · AI gợi ý (người gửi) · Người (tiếp quản / AI nhường) · Chờ người (AI dừng, chưa ai cầm). */
+export type InboxHandling = "AI" | "COPILOT" | "HUMAN" | "WAITING";
+export const INBOX_HANDLING_LABEL: Record<InboxHandling, string> = { AI: "AI", COPILOT: "AI gợi ý · người gửi", HUMAN: "Người", WAITING: "Chờ người — AI đã dừng, chưa ai nhận" };
 
 /** Lọc theo mốc TIN cuối của hội thoại (giờ Việt Nam). `CUSTOM` = khoảng ngày người chọn. */
 export const INBOX_PERIODS = ["TODAY", "YESTERDAY", "7D", "30D", "CUSTOM"] as const;
@@ -260,7 +277,7 @@ export type InboxRow = {
   lastActivityAt: string;
   /** Tin khách CHƯA ai trả lời (bot, nhân viên ERP, hay người ngoài ERP) — mốc tin khách đó; `null` = đã được trả lời. */
   waitingSince: string | null;
-  /** Tin khách mới hơn lần cuối một nhân viên mở hội thoại. */
+  /** NGƯỜI chưa đọc: khách nhắn sau lần cuối nhân viên mở / trả lời hội thoại — AI trả lời KHÔNG xoá (`HUMAN_UNREAD_SQL`). */
   unread: boolean;
   /** SỐ tin khách chưa đọc (≥ 1 khi `unread`, 0 khi đã đọc). */
   unreadCount: number;
@@ -268,8 +285,12 @@ export type InboxRow = {
   avatarUrl: string | null;
   /** Trạng thái AI của hội thoại — `aiHoldOf` (đường xử lý). */
   aiHold: AiHoldState;
-  /** Nhóm trên hộp thư (`inboxHandlingOf`) — một nguồn với thẻ lọc «AI / Người đang xử lý». */
+  /** Nhóm trên hộp thư (`inboxHandlingFrom(classifyInboxState(…))`) — một nguồn với thẻ lọc «AI / Người đang xử lý». */
   handling: InboxHandling;
+  /** Lý do CẦN NGƯỜI thật — một nguồn với thẻ «Cần người»; `null` = không. */
+  needsHuman: NeedsHumanCode | null;
+  /** Người đang cầm (tiếp quản · AI nhường · AI gợi ý) — một nguồn với thẻ «Người đang xử lý»; `null` = không. */
+  humanHandling: HumanHandling | null;
   /** Đã chốt đơn (đơn ERP thật hoặc level «Đã chốt đơn») — cùng định nghĩa với thẻ «Đã chốt». */
   closed: boolean;
   source: InboxSource;

@@ -38,13 +38,22 @@ const MANAGE = "ai_sales:manage";
 
 export type ControlResult = { ok: true; mode: ConversationControl; changed: boolean } | { ok: false; error: string };
 
-/** Người trả lời khách (cùng khoá với hộp thư) hoặc người quản lý chatbot. */
-function canControl(user: SessionUser): boolean {
+/**
+ * Người trả lời khách (cùng khoá với hộp thư) hoặc người quản lý chatbot. MỘT cổng cho nút đổi chế độ của một hội thoại VÀ nút
+ * «Trả tất cả cho AI» (`bulk-return-ai.ts`) — siết / nới ở đây là siết / nới cho cả hai.
+ */
+export function canControlConversation(user: SessionUser): boolean {
   return can(user, VIEW) && (can(user, "ai_sales:reply") || can(user, "outreach:send") || can(user, MANAGE));
 }
+export const NO_CONTROL_PERMISSION = "Bạn không có quyền đổi chế độ AI của hội thoại (ai_sales:reply).";
+export const CONTROL_CHANGED_MEANWHILE = "Hội thoại vừa được người khác đổi chế độ — tải lại để xem chế độ hiện tại.";
 
-export async function setConversationControlCore(user: SessionUser, conversationId: unknown, rawMode: unknown, rawReason?: unknown): Promise<ControlResult> {
-  if (!canControl(user)) return { ok: false, error: "Bạn không có quyền đổi chế độ AI của hội thoại (ai_sales:reply)." };
+/**
+ * `expect` (chỉ «Trả tất cả cho AI»): trạng thái + lý do chuyển người mà lượt phân loại đã THẤY. Ghi có thêm điều kiện ấy — giữa lúc
+ * xem trước và lúc ghi mà AI vừa xin người / đơn vừa chuyển người thì hội thoại KHÔNG bị trả về AI lặng lẽ.
+ */
+export async function setConversationControlCore(user: SessionUser, conversationId: unknown, rawMode: unknown, rawReason?: unknown, opts: { expect?: { status: string; handoffReason: string | null } } = {}): Promise<ControlResult> {
+  if (!canControlConversation(user)) return { ok: false, error: NO_CONTROL_PERMISSION };
   if (typeof conversationId !== "string" || !conversationId || conversationId.length > 100) return { ok: false, error: "Không có hội thoại này." };
   const mode = (CONVERSATION_CONTROLS as readonly string[]).includes(String(rawMode)) ? (rawMode as ConversationControl) : null;
   if (!mode) return { ok: false, error: "Chế độ không hợp lệ." };
@@ -57,6 +66,7 @@ export async function setConversationControlCore(user: SessionUser, conversation
     .where(eq(c.id, conversationId))
     .limit(1);
   if (!conv || conv.channel === "TEST") return { ok: false, error: "Không có hội thoại này." };
+  if (opts.expect && (conv.status !== opts.expect.status || conv.handoffReason !== opts.expect.handoffReason)) return { ok: false, error: CONTROL_CHANGED_MEANWHILE };
   // Chat web không có hội thoại bóng cho Copilot (bot trả lời ngay trong khung chat của khách).
   if (mode === "COPILOT" && conv.channel === "WEB") return { ok: false, error: "Chat web chưa hỗ trợ chế độ AI gợi ý — chọn «Người xử lý» hoặc «AI tự trả lời»." };
 
@@ -72,7 +82,11 @@ export async function setConversationControlCore(user: SessionUser, conversation
   const before = aiHoldOf(conv, at);
   const stamp: ControlStamp | null = mode === "AUTO" ? null : { mode, byUserId: user.id, byName: me?.name ?? user.email, at: at.toISOString(), reason };
   // Ghi CÓ ĐIỀU KIỆN: ảnh chụp chế độ chưa đổi kể từ lúc đọc (mốc `at` của ảnh chụp là định danh của nó).
-  const unchanged = and(eq(c.id, conv.id), sql`coalesce(${c.state}->'control'->>'at', '') = ${prev?.at ?? ""}`);
+  const unchanged = and(
+    eq(c.id, conv.id),
+    sql`coalesce(${c.state}->'control'->>'at', '') = ${prev?.at ?? ""}`,
+    ...(opts.expect ? [eq(c.status, opts.expect.status), opts.expect.handoffReason === null ? isNull(c.handoffReason) : eq(c.handoffReason, opts.expect.handoffReason)] : []),
+  );
   const base = sql`coalesce(${c.state}, '{}'::jsonb)`;
   const set =
     mode === "HUMAN"
@@ -93,7 +107,7 @@ export async function setConversationControlCore(user: SessionUser, conversation
         : // «Cho AI tiếp tục ngay» (đang nhường) / «Trả lại cho AI» (đang tiếp quản / cần người): XOÁ mốc nhường ⇒ AI_ACTIVE ngay.
           { state: sql`${base} - 'control' - 'handoff'`, status: sql`case when ${c.status} = 'HANDOFF' then 'OPEN' else ${c.status} end`, handoffReason: null, humanCooldownUntil: null, updatedAt: at };
   const [row] = await db.update(c).set(set).where(unchanged).returning({ status: c.status });
-  if (!row) return { ok: false, error: "Hội thoại vừa được người khác đổi chế độ — tải lại để xem chế độ hiện tại." };
+  if (!row) return { ok: false, error: CONTROL_CHANGED_MEANWHILE };
 
   // Lần nhường đã hết hạn mà chưa ai dọn (chưa có tin khách nào tới sau hạn) ⇒ ghi nốt mốc kết thúc của nó (MÁY).
   await recordCooldownExpired(conv.id, before);

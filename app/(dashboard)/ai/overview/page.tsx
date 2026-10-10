@@ -111,7 +111,7 @@ export default async function SalesAgentOverviewPage({ searchParams }: { searchP
         <Tile testId="ov-revenue" label="Doanh thu AI tạo ra" value={formatVND(r.orders.deliveredRevenueVnd)} sub={`${formatNumber(r.orders.delivered)} đơn giao thành công · ${formatNumber(r.orders.pending)} đang giao`} />
         <Tile testId="ov-response" label="Thời gian phản hồi" value={duration(r.response.medianMs)} sub={r.response.medianMs === null ? "chưa đủ mẫu" : `trung vị · ${formatNumber(r.response.samples)} lượt`} />
         <Tile testId="ov-upsell" label="Mua thêm · bán chéo" value={formatVND(r.upsell.offered ? r.upsell.revenueVnd : null)} sub={`nhận lời mời ${formatPercent(pctOf(r.upsell.attachRate), 0)} · đơn ≥ 2 sản phẩm ${formatPercent(pctOf(basket.booked.multiProductRate), 0)}`} />
-        <Tile testId="ov-needs-human" label="Hội thoại cần người" value={formatNumber(needsHuman)} sub="AI đã chuyển cho nhân viên" href={`${SALES_AGENT_INBOX_HREF}?f=NEEDS_HUMAN`} />
+        <Tile testId="ov-needs-human" label="Hội thoại cần người" value={formatNumber(needsHuman)} sub="AI dừng vì cần người · AI lỗi · đơn cần kiểm" href={`${SALES_AGENT_INBOX_HREF}?f=NEEDS_HUMAN`} />
         <Tile
           testId="ov-usage"
           label={`Khách AI tháng ${period.label}`}
