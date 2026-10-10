@@ -1,0 +1,28 @@
+{
+  "schema": 1,
+  "mission_id": "inbox-unread-gate",
+  "title": "Hộp thư: cổng last_customer_at (từ #784) có thể GIẤU tin khách thật khi cột mốc cũ hơn tin > 1 ngày — đo số hội thoại bị giấu trên HSLC (audit FALSE-READ) rồi bỏ cổng khi đã có last_inbound_message_at",
+  "business_goal": "",
+  "status": "BACKLOG",
+  "priority": "P1",
+  "risk": "MEDIUM",
+  "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "worker": null,
+  "worktree": null,
+  "branch": "fix/inbox-unread-gate",
+  "base_sha": null,
+  "domains": [],
+  "owned_paths": [
+    "scripts/inbox-read-audit.ts"
+  ],
+  "dependencies": [
+    "inbox-unread-perf"
+  ],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-10T21:17:21.711Z",
+  "updated_at": "2026-10-10T21:17:21.711Z",
+  "last_heartbeat": "2026-10-10T21:17:21.711Z",
+  "definition_of_done": []
+}
