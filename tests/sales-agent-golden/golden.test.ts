@@ -57,6 +57,18 @@ function invariants(t: Map<string, GoldenTranscript>) {
   assert.ok(fashion.prompts.length > 0 && fashion.prompts.every((p) => !SEAFOOD.test(p)), "shop thời trang: lời nhắc không có chữ hải sản");
   assert.ok(quote.prompts.some((p) => SEAFOOD.test(p)), "shop thực phẩm: lời nhắc dùng gói thực phẩm");
 
+  // KIẾN THỨC CỦA SHOP (sổ AIS-05): chỉ hội thoại có khai mới mang khối; khuyến mãi hết hạn / chưa tới ngày không vào lời nhắc;
+  // số tiền vẫn từ calculate_cart (khuyến mãi chữ không trừ đồng nào); chính sách chưa khai ⇒ chuyển người «Ngoài chính sách».
+  const KNOW = "KIẾN THỨC CỦA SHOP";
+  const know = get("kien-thuc-chinh-sach-khuyen-mai");
+  assert.ok(know.prompts.length > 0 && know.prompts.every((p) => p.includes(KNOW) && p.includes("H: Shop có giao hoả tốc không?") && p.includes("Mua 2 tặng ruốc") && p.includes("Chưa khai riêng: bảo hành.")), "có kiến thức ⇒ khối kiến thức trong lời nhắc");
+  assert.ok(know.prompts.every((p) => !p.includes("Khuyến mãi đã hết") && !p.includes("Khuyến mãi chưa tới")), "khuyến mãi hết hạn / chưa tới ngày KHÔNG vào lời nhắc");
+  assert.match(know.turns[1].shown.join(" "), /800\.000 ₫/, "khuyến mãi chữ không đổi số tiền: 2 × 400.000 từ calculate_cart");
+  const unknownPolicy = get("kien-thuc-chua-khai-chuyen-nguoi");
+  assert.equal(unknownPolicy.final.status, "HANDOFF");
+  assert.match(unknownPolicy.final.handoffReason ?? "", /^Ngoài chính sách/, "chính sách chưa khai ⇒ chuyển người, không tự đặt");
+  for (const x of t.values()) if (x.key !== know.key && x.key !== unknownPolicy.key) assert.ok(x.prompts.every((p) => !p.includes(KNOW)), `[${x.key}] không khai kiến thức ⇒ lời nhắc không có khối kiến thức`);
+
   for (const x of t.values())
     for (const turn of x.turns) assert.ok(!turn.rounds.some((r) => r.text === "[HẾT KỊCH BẢN]"), `[${x.key}] engine hỏi model nhiều vòng hơn kịch bản ở lượt «${turn.customer}»`);
 }
@@ -98,5 +110,5 @@ export async function testSalesAgentGolden() {
     );
   }
   assert.deepEqual(missing, [], "thiếu ảnh chụp — chạy npx tsx tests/sales-agent-golden/update.ts rồi đọc kỹ trước khi đưa vào kho");
-  console.log(`  ✓ hội thoại vàng: ${GOLDEN_CASES.length} hội thoại phát lại qua chatTurn khớp ảnh chụp (lời nhắc · chuỗi công cụ · kết quả máy chủ · trạng thái cuối); giá từ ERP, chặn chốt khi chưa đồng ý, chuyển người im model, web không im khách / fanpage chuyển người thì im, khung thử không ghi, lọc chữ nội bộ, gói ngành đúng`);
+  console.log(`  ✓ hội thoại vàng: ${GOLDEN_CASES.length} hội thoại phát lại qua chatTurn khớp ảnh chụp (lời nhắc · chuỗi công cụ · kết quả máy chủ · trạng thái cuối); giá từ ERP, chặn chốt khi chưa đồng ý, chuyển người im model, web không im khách / fanpage chuyển người thì im, khung thử không ghi, lọc chữ nội bộ, gói ngành đúng, kiến thức của shop (chính sách · câu thường gặp · khuyến mãi còn hạn) đúng chỗ, chưa khai thì chuyển người`);
 }
