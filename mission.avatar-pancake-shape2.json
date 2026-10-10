@@ -3,7 +3,7 @@
   "mission_id": "avatar-pancake-shape2",
   "title": "Ops pancake-avatar-shape lượt dò 2: accept */* + JSON, thử mọi mã khách trong payload × 6 biến thể điểm cuối, in khoá khách trong phản hồi tin",
   "business_goal": "",
-  "status": "RUNNING",
+  "status": "PR_READY",
   "priority": "P1",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -21,7 +21,18 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-10T23:17:25.609Z",
-  "updated_at": "2026-10-10T23:17:25.609Z",
-  "last_heartbeat": "2026-10-10T23:17:25.609Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-10T23:17:46.072Z",
+  "last_heartbeat": "2026-10-10T23:17:46.072Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "fix/avatar-pancake-shape2",
+    "sha": "16a42812978c57a9300b16866c11a53e2245dd50",
+    "at": "2026-10-10T23:17:46.072Z",
+    "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+    "title": "Ops pancake-avatar-shape lượt dò 2: accept */* + JSON, thử mọi mã khách trong payload × 6 biến thể điểm cuối, in khoá khách trong phản hồi tin",
+    "summary": "Lượt dò 2 dáng ảnh Pancake, chỉ GET, không in giá trị",
+    "tests": [
+      "tsc · eslint · pancake-avatar-shape (thân lỗi che token/mã page/PSID/SĐT/email) · test-hygiene · repo-integrity · platform-isolation-static · ops-log-leak · npm test để CI"
+    ]
+  }
 }
