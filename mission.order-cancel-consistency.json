@@ -3,7 +3,7 @@
   "mission_id": "order-cancel-consistency",
   "title": "P0 huỷ đơn nhất quán: khách huỷ sau rescue thất bại ⇒ CANCELLED thật (theo vòng đời vận đơn), AI chỉ báo đã huỷ sau khi ghi thành công, retry idempotent + hàng ngoại lệ, đối soát đơn bất nhất (case HSLC #189A435E)",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P2",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -35,9 +35,12 @@
     "0241": "2026-10-10T15:54:15.479Z"
   },
   "created_at": "2026-10-10T15:53:45.955Z",
-  "updated_at": "2026-10-10T18:53:39.324Z",
+  "updated_at": "2026-10-10T19:23:12.600Z",
   "last_heartbeat": "2026-10-10T18:53:39.324Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#786 → f63b9fa282c95a1fd49a85e1091685eeafeb2888"
+  },
   "handoff": {
     "branch": "fix/order-cancel-consistency",
     "sha": "ee21f87d136a33883a508ba304d7cd7627e00e1b",
