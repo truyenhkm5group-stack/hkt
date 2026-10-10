@@ -3,8 +3,8 @@
   "mission_id": "saas-value-center",
   "title": "/platform/saas thành trung tâm Giá trị khách · Kinh tế đơn vị · Giữ chân · Tối ưu: chi của khách ≠ giá vốn AI ≠ giá trị tạo ra; quy kết đơn AI; sức khoẻ + rủi ro rời bỏ có lý do; khuyến nghị + canary (V1 trước)",
   "business_goal": "",
-  "status": "BACKLOG",
-  "priority": "P2",
+  "status": "RUNNING",
+  "priority": "P1",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
   "worker": null,
@@ -14,9 +14,8 @@
   "domains": [],
   "owned_paths": [
     "app/(dashboard)/platform/saas/",
-    "lib/saas/tenant-value.ts",
-    "lib/saas/tenant-health-daily.ts",
-    "tests/saas-value-center.test.ts"
+    "lib/saas/tenant-value-capture.ts",
+    "lib/saas/tenant-value-read.ts"
   ],
   "dependencies": [
     "customer-lifecycle"
@@ -25,7 +24,13 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-10T16:51:40.518Z",
-  "updated_at": "2026-10-10T16:51:40.518Z",
-  "last_heartbeat": "2026-10-10T16:51:40.518Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-10T17:16:40.172Z",
+  "last_heartbeat": "2026-10-10T17:16:40.172Z",
+  "definition_of_done": [
+    "PR-1 sổ chỉ số + hàm thuần",
+    "PR-2 bộ đọc quy kết",
+    "PR-3 migration + chụp ngày",
+    "PR-4 UI /platform/saas đọc ảnh chụp",
+    "production: ảnh trước/sau + ops đo một lượt chụp"
+  ]
 }
