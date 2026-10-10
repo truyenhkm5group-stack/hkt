@@ -1,8 +1,8 @@
 {
   "pr": 756,
-  "sha": "42b3ed2a809d5886746d223fca24396efedec43e",
+  "sha": "449049c4042af1f6bacc81887e547a3c462333d5",
   "verdict": "PASS",
   "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
-  "at": "2026-10-09T23:05:44.492Z",
-  "note": "Đọc diff: hàm thuần settingsStatus (null ⇒ Chưa rõ), dùng lại customerFacing() để che nguồn AI, engine/golden không đổi, không migration/quyền; bảng chân lý 20 ca + đột biến 2/2"
+  "at": "2026-10-10T02:40:54.760Z",
+  "note": "Cập nhật nhánh lên main, mã không đổi; gates xanh lại"
 }
