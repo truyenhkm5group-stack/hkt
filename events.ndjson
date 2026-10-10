@@ -1615,3 +1615,4 @@
 {"at":"2026-10-10T15:25:45.488Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"sync-runner-lock","detail":"#781 cho fix/sync-runner-lock @ 54638353b308"}
 {"at":"2026-10-10T15:26:05.742Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#781 @ 54638353b308 · Đọc báo cáo + diff: khoá giữ đồng bộ trước await, releaseJob theo danh tính; release chỉ main + environment; agent-run không giữ token, mã việc qua env kiểm dạng; còn rủi ro GITHUB_ENV trước bước đẩy (ghi lại, việc sau)"}
 {"at":"2026-10-10T15:32:55.196Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"ai-sales-knowledge","detail":"feat/ai-sales-knowledge @ 23840099e176 · 1 lệnh kiểm thử"}
+{"at":"2026-10-10T15:33:35.961Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"ai-sales-knowledge","detail":"#782 cho feat/ai-sales-knowledge @ 23840099e176"}
