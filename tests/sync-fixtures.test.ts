@@ -581,6 +581,7 @@ import { testOrgPrepaidAi } from "./org-prepaid-ai.test";
 import { testPricingBilling } from "./pricing-billing.test";
 import { testSaasPlatform } from "./saas-platform.test";
 import { testCustomerHealth } from "./customer-health.test";
+import { testSaasValueCenter } from "./saas-value-center.test";
 import { testPricingV1 } from "./pricing-v1.test";
 import { testSaasV1Migration } from "./saas-v1-migration.test";
 import { testAiCustomerSend } from "./ai-customer-send.test";
@@ -3051,6 +3052,8 @@ async function main() {
   // Sức khoẻ khách SaaS (/platform/customers): phân loại thuần + ba tổ chức THẬT `skh-*` (khoẻ · nguy cấp · cần chú ý), tự cấp,
   // tự dọn; chỉ người vận hành; thiếu dữ liệu không bao giờ ra «Khoẻ».
   await testCustomerHealth();
+  // Trung tâm giá trị SaaS PR-1 (thuần): sổ chỉ số theo tổ chức, bốn nhãn quy kết, null ≠ 0, sức khoẻ / rủi ro rời bỏ có mã lý do.
+  await testSaasValueCenter();
   await testPricingV1();
   // Chuyển tổ chức legacy → V1 (ops saas-v1-migration) + phần gồm tính tiền dùng chung — không thu đôi ghế mua thêm (OVERAGE O1).
   await testSaasV1Migration();
