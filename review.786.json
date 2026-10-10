@@ -1,0 +1,8 @@
+{
+  "pr": 786,
+  "sha": "943bfbce8ae31981690e7a402396cbc5cf68c318",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-10T17:57:48.451Z",
+  "note": "Đọc customerCancelPlan: đã bàn giao/xuất kho tay/vận đơn lạ/lượt tạo chưa rõ/nhiều lần gửi ⇒ người; chỉ huỷ sau phong bì hãng OK; lượt giữ đơn trước khi huỷ đúng luật 10/10; ORDER_OUTCOME/tồn không đổi công thức; đối soát --apply cần chủ shop duyệt"
+}
