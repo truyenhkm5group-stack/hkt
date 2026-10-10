@@ -61,12 +61,12 @@ function HealthCell({ h }: { h: HealthView | null }) {
   const churn = h.churn.reasons.map((r) => `${r.code}: ${r.text}`).join("\n");
   const gapHint = h.churn.risk === "UNKNOWN" && h.gaps.length ? `\nThiếu: ${h.gaps.map((g) => g.label).join(" · ")}` : "";
   return (
-    <div className="space-y-0.5 leading-tight">
-      <div className="flex flex-wrap items-center gap-1" title={reasons}>
+    <div className="max-w-[170px] space-y-0.5 leading-tight">
+      <div className="flex min-w-0 items-center gap-1" title={reasons}>
         <span className={cn("inline-flex items-center whitespace-nowrap rounded-full border px-1.5 py-px text-[11px] font-semibold", LEVEL_TONE[h.level])}>{h.levelLabel}</span>
         <span className="truncate text-[11px] text-muted-foreground">{h.reasons[0]?.code ?? ""}</span>
       </div>
-      <div className="text-[11.5px]" title={`${churn}${gapHint}`}>
+      <div className="truncate text-[11.5px]" title={`${churn}${gapHint}`}>
         <span className="text-muted-foreground">Rời bỏ:</span> <b className="font-semibold">{h.churn.label}</b>
         <span className="text-muted-foreground"> · {h.churn.reasons[0]?.code ?? ""}</span>
       </div>
@@ -79,7 +79,7 @@ function TopIssueCell({ h }: { h: HealthView | null }) {
   const t = h?.topIssue ?? null;
   if (!t) return <span className="text-xs text-muted-foreground" title={h ? "Không vấn đề nào có chứng cứ trong ảnh sức khoẻ." : "Chưa có ảnh sức khoẻ."}>{h ? "Không có" : "—"}</span>;
   return (
-    <div className="leading-tight">
+    <div className="max-w-[210px] whitespace-normal leading-tight">
       <div className="text-[12.5px] font-medium" title={t.explanation}>
         {t.label}
       </div>
@@ -94,7 +94,7 @@ function TopIssueCell({ h }: { h: HealthView | null }) {
 
 function OrgCell({ r }: { r: TenantValueBoardRow }) {
   return (
-    <div className="min-w-0 leading-tight">
+    <div className="min-w-0 max-w-[150px] leading-tight">
       <Link href={r.href} data-no-row-link className="block truncate font-semibold hover:underline" title={r.orgName}>
         {r.orgName}
       </Link>
