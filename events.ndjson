@@ -1476,3 +1476,4 @@
 {"at":"2026-10-10T10:18:23.075Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"industry-terms","detail":"fix/industry-terms @ 70ca5cd6afbc · 1 lệnh kiểm thử"}
 {"at":"2026-10-10T10:18:58.546Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"industry-terms","detail":"#775 cho fix/industry-terms @ 70ca5cd6afbc"}
 {"at":"2026-10-10T10:19:17.551Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#775 @ 70ca5cd6afbc · Chỉ đổi NHÃN thuộc tính theo hồ sơ ngành ở lớp hiển thị, giá trị và khoá dữ liệu giữ nguyên; client nhận nhãn dạng chuỗi (không truyền hàm); đọc hồ sơ lỗi ⇒ in chữ cũ; không chạm inbox/ và các tệp của phiên bot"}
+{"at":"2026-10-10T10:23:06.485Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"inbox-avatar-profile","detail":"feat/inbox-avatar-profile @ 289255368db2 · 1 lệnh kiểm thử"}
