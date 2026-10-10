@@ -1,0 +1,8 @@
+{
+  "pr": 776,
+  "sha": "4354aea3e9732044cc90352f12f162ec38c71ba4",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-10T10:25:07.411Z",
+  "note": "Phiên bot đối chiếu 4 ràng buộc: fieldset trong nhóm Bán hàng, giảm giá đọc từ cấu hình đã lưu và tính ở priceLines, golden không đổi (mặc định TẮT), discount vào total_discount, không hard-code ngưỡng"
+}
