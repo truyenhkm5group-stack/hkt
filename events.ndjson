@@ -1844,3 +1844,4 @@
 {"at":"2026-10-10T21:11:00.544Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#789 @ 5b3acc94efd4 · Đọc phần hợp engine: thứ tự giữ chữ khoá bằng bài quét; ORDER_CANCELLED căn cứ từ state.cancelledOrders (#786 chỉ ghi sau khi lõi huỷ xong); ops danh sách lấy hợp; golden main không đổi"}
 {"at":"2026-10-10T21:13:53.732Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"STATUS","mission":"avatar-proxy","detail":"INTEGRATING → VERIFYING"}
 {"at":"2026-10-10T21:15:08.530Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"inbox-unread-perf","detail":"fix/inbox-unread-perf @ c92513531e3a · 1 lệnh kiểm thử"}
+{"at":"2026-10-10T21:15:44.041Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"inbox-unread-perf","detail":"#792 cho fix/inbox-unread-perf @ c92513531e3a"}
