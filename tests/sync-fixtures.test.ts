@@ -539,6 +539,7 @@ import { testProductsShellV2 } from "./products-shell-v2.test";
 import { testGoLive } from "./go-live.test";
 import { testOnboardingV2 } from "./onboarding-v2.test";
 import { testSalesVision } from "./sales-vision.test";
+import { testSalesClaimGuard } from "./sales-claim-guard.test";
 import { testChatWidget } from "./chat-widget.test";
 import { testWebProductImport } from "./web-product-import.test";
 import { testMessenger } from "./messenger.test";
@@ -585,6 +586,7 @@ import { testOrgPrepaidAi } from "./org-prepaid-ai.test";
 import { testPricingBilling } from "./pricing-billing.test";
 import { testSaasPlatform } from "./saas-platform.test";
 import { testCustomerHealth } from "./customer-health.test";
+import { testSaasValueCenter } from "./saas-value-center.test";
 import { testPricingV1 } from "./pricing-v1.test";
 import { testSaasV1Migration } from "./saas-v1-migration.test";
 import { testAiCustomerSend } from "./ai-customer-send.test";
@@ -648,6 +650,7 @@ import { testDetailPagesShell } from "./detail-pages-shell.test";
 import { testShellCopyR3 } from "./shell-copy-r3.test";
 import { testAiSalesSettingsV2 } from "./ai-sales-settings-v2.test";
 import { testAiSalesKnowledge } from "./ai-sales-knowledge.test";
+import { testSalesModelFallbackTenant } from "./sales-model-fallback-tenant.test";
 
 async function main() {
   await ensureMigrated();
@@ -2942,6 +2945,9 @@ async function main() {
   // Bộ đo đơn vàng v2 (sứ mệnh saas-order-accuracy): dataset hội thoại có nhãn × 2 biến thể công tắc tự xác nhận qua chatTurn
   // thật, bộ đo thuần, số đo hiện trạng khớp tests/order-golden/BASELINE.md — tổ chức THẬT `og-food-off` / `og-food-on`.
   await testOrderGolden();
+  // P0 10/10/2026 — AI không khẳng định điều chưa xác minh («đã nhận tiền» / «đã chốt đơn»): bảng chân lý thuần, quét mã nguồn
+  // mọi đường chữ bot, tổ chức THẬT `gd-food-cg` (bot tắt · chứng từ thu đủ số · đơn nháp · nối cùng luồng page + hội thoại).
+  await testSalesClaimGuard();
   // Đơn cần người kiểm (chủ shop 08/10/2026): khách huỷ ⇒ ghi chú + cờ, xã chưa ghép ⇒ cờ, nút nhanh Xác nhận / Huỷ, lời xác nhận,
   // SĐT chuẩn hoá — tổ chức THẬT `or-rv` (không Pancake; tự cấp, tự dọn).
   await testOrderReview();
@@ -3066,6 +3072,8 @@ async function main() {
   // Sức khoẻ khách SaaS (/platform/customers): phân loại thuần + ba tổ chức THẬT `skh-*` (khoẻ · nguy cấp · cần chú ý), tự cấp,
   // tự dọn; chỉ người vận hành; thiếu dữ liệu không bao giờ ra «Khoẻ».
   await testCustomerHealth();
+  // Trung tâm giá trị SaaS PR-1 (thuần): sổ chỉ số theo tổ chức, bốn nhãn quy kết, null ≠ 0, sức khoẻ / rủi ro rời bỏ có mã lý do.
+  await testSaasValueCenter();
   await testPricingV1();
   // Chuyển tổ chức legacy → V1 (ops saas-v1-migration) + phần gồm tính tiền dùng chung — không thu đôi ghế mua thêm (OVERAGE O1).
   await testSaasV1Migration();
@@ -3141,6 +3149,12 @@ async function main() {
   // Kiến thức của shop cho chatbot (sổ AIS-05): câu thường gặp · chính sách · khuyến mãi — zod, hạn theo giờ VN, rỗng ⇒ lời nhắc giống hệt,
   // ô khuyến mãi không vào phép tính tiền (quét mã nguồn).
   testAiSalesKnowledge();
+  // Team Premium F2: dấu «model không dùng được» nhớ theo tổ chức + kết nối — khoá BYOK hỏng của shop A không lùi IM LẶNG
+  // model của shop B (hay của khoá nền tảng cùng tổ chức) về model mặc định; mỗi shop được báo lỗi của chính mình. Provider giả.
+  {
+    const r = await testSalesModelFallbackTenant();
+    assert.deepEqual(r.failed, [], `sales-model-fallback-tenant: ${r.failed.join(" · ")}`);
+  }
   // Nền tảng · phiên & RBAC (agent C): claim org, cổng module, platform:operate, đăng nhập theo tổ chức. Tự cấp
   // tổ chức `pr-` (CSDL riêng) và tự dọn; đứng cạnh bài ngữ cảnh vì cùng lý do.
   await testPlatformRbac();

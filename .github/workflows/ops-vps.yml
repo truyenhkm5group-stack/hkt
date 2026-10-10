@@ -57,6 +57,7 @@ on:
           - inbox-avatar-audit   # ảnh đại diện + link Facebook của hộp thư khách trên N hội thoại gần nhất của MỘT tổ chức: có ảnh · trạng thái PROFILE_* + lý do · mã lỗi Graph · payload Pancake nói gì về ảnh · bấm ảnh mở Facebook / hồ sơ nội bộ theo lý do · DẠNG fb_id / conversation_link (không in giá trị) — MÃ HOÁ (CHỈ ĐỌC; arg: "<mã tổ chức> [--limit=1..3000]")
           - pancake-avatar-shape # ảnh khách nằm ở KHOÁ nào trong payload API Pancake của MỘT tổ chức: gọi đúng API danh sách hội thoại của lượt quét lại (≤ 5) + tin (≤ 2), in ĐƯỜNG DẪN KHOÁ + kiểu + dạng (host · có tham số khoá · độ dài) — không giá trị/tên/SĐT/mã; thử điểm cuối ảnh Pancake (mã HTTP · kiểu · host chuyển hướng) — MÃ HOÁ (CHỈ ĐỌC; arg: "<mã tổ chức> [--limit=1..5]")
           - inbox-read-audit   # «chưa đọc» của hộp thư khách có bằng chứng không, trên N hội thoại gần nhất (hoặc một hội thoại) của MỘT tổ chức: mốc khách / bot / NV · con trỏ chung + số người có con trỏ riêng · số tin khách sau con trỏ · phía + mốc tin xem trước · TỔNG FALSE-UNREAD luật cũ / mới — MÃ HOÁ (CHỈ ĐỌC; arg: "<mã tổ chức> [--limit=1..3000] [--conversation=<mã>]")
+          - sales-lifecycle-audit # AI bán hàng có khẳng định điều chưa xác minh không, trên MỘT tổ chức: --conv đường trả lời từng tin bot (AI / câu mẫu / hệ thống / nhắn lại) + câu khẳng định tiền / chốt · công cụ OK / lỗi · đơn nối theo từng phép nối · đuôi SĐT có ở nguồn nào (đúng/sai); --days đếm mẫu lỗi A–F — MÃ HOÁ, chỉ số đếm (CHỈ ĐỌC; arg: "<mã tổ chức> [--conv=<uuid>] [--phone-tail=NNN] [--days=1..60]")
           - stock-wait-summary   # chờ hàng & GTC theo số ngày chờ, miền, vùng + đơn đang chờ + đề xuất — số tổng hợp (CHỈ ĐỌC; arg "--days=N")
           - company-os-summary   # Company OS đã được dùng tới đâu: sổ mẫu, topic / giá thành / mẫu xưởng / bản thiết kế, "Cần anh quyết", hàng hoàn, yêu cầu duyệt, phiếu nhập — CHỈ SỐ ĐẾM (CHỈ ĐỌC; không arg)
           - platform-secrets-verify # kiểm PLATFORM_SECRETS_KEY trên production (V1–V7): khoá có, canary niêm/giải qua deploy, cô lập tổ chức, CSDL + log không chứa bản rõ — arg rỗng = CHỈ ĐỌC; "seal --apply" niêm canary; "rotate --apply" cập nhật canary
@@ -155,7 +156,7 @@ permissions:
 # Thao tác trong danh sách mà cần cho người vận hành thấy NGAY một con số ("đã đóng 12 case") thì
 # script tự in dòng ấy với tiền tố `[ops:tom-tat] ` — kênh tóm tắt duy nhất ra log (qua che_log).
 env:
-  OPS_THAO_TAC_MA_HOA: "platform-secrets-verify db-query vtp-debug phone-probe vtp-probe vtp-statement-peek payroll-reconcile seed-employees marketing-explain cs-stale check-integrations run-job vtp-replay-explain vtp-manual-verify returns-hmt care-false-reopen care-outcome-before-open fanpage-evidence-backfill cod-statement-audit stock-wait-summary org-summary org-order-audit org-ai-cutover org-catalog org-offboard identity-reconcile confirm-funnel-audit company-os-summary velocity-compare org-prepaid-ai saas-v1-migration ban-hang-reply-upgrade saas-acceptance ops-signals-check security-acceptance inbox-perf-probe inbox-avatar-audit pancake-avatar-shape inbox-read-audit pitr-status pitr-basebackup pitr-mark pitr-drill pitr-pause order-cancel-reconcile"
+  OPS_THAO_TAC_MA_HOA: "platform-secrets-verify db-query vtp-debug phone-probe vtp-probe vtp-statement-peek payroll-reconcile seed-employees marketing-explain cs-stale check-integrations run-job vtp-replay-explain vtp-manual-verify returns-hmt care-false-reopen care-outcome-before-open fanpage-evidence-backfill cod-statement-audit stock-wait-summary org-summary org-order-audit org-ai-cutover org-catalog org-offboard identity-reconcile confirm-funnel-audit company-os-summary velocity-compare org-prepaid-ai saas-v1-migration ban-hang-reply-upgrade saas-acceptance ops-signals-check security-acceptance inbox-perf-probe inbox-avatar-audit inbox-read-audit pitr-status pitr-basebackup pitr-mark pitr-drill pitr-pause order-cancel-reconcile sales-lifecycle-audit pancake-avatar-shape"
 
 # ═══════════ HÀNG ĐỢI NẰM TRÊN MÁY CHỦ, KHÔNG NẰM Ở GITHUB ═══════════
 #
@@ -507,7 +508,7 @@ jobs:
             # ─── PHÂN LOẠI: mặc định là GHI, và cờ ghi đè lên tên ───
             DOC_NHE="status perf disk logs chatbot-status db-query backup-status pitr-status"
             DOC_PROBE="check-integrations vtp-debug vtp-probe vtp-web-probe phone-probe pages-debug meta-id-probe meta-ad-post-probe vtp-capability ads-level-probe"
-            DOC_NANG="platform-secrets-verify verify smoke session-verify perf-probe perf-audit kpi-snapshot explain-stock outcome-explain outcome-parity returns-parity reason-coverage reason-backfill cogs-drift profit-verify marketing-calibrate marketing-explain payroll-reconcile fanpage-evidence-backfill care-false-reopen care-outcome-before-open care-waiting-reconcile cs-rule-update cs-stale sepay-reconcile cod-rebuild cod-status-repair vtp-return-status-repair agent-run-reattach vtp-rebuild-state vtp-replay-files vtp-replay-explain vtp-manual-verify vtp-statement-peek cod-statement-audit stock-wait-summary org-summary company-os-summary velocity-compare confirm-funnel-audit returns-hmt ai-check platform-ai-model-probe platform-ai-bench backup restore-drill restore-drill-org pitr-basebackup pitr-drill org-order-audit org-ai-cutover org-catalog org-offboard org-prepaid-ai org-volume-discount saas-v1-migration identity-reconcile ban-hang-reply-upgrade saas-acceptance ops-signals-check security-acceptance inbox-perf-probe inbox-avatar-audit pancake-avatar-shape inbox-read-audit order-cancel-reconcile"
+            DOC_NANG="platform-secrets-verify verify smoke session-verify perf-probe perf-audit kpi-snapshot explain-stock outcome-explain outcome-parity returns-parity reason-coverage reason-backfill cogs-drift profit-verify marketing-calibrate marketing-explain payroll-reconcile fanpage-evidence-backfill care-false-reopen care-outcome-before-open care-waiting-reconcile cs-rule-update cs-stale sepay-reconcile cod-rebuild cod-status-repair vtp-return-status-repair agent-run-reattach vtp-rebuild-state vtp-replay-files vtp-replay-explain vtp-manual-verify vtp-statement-peek cod-statement-audit stock-wait-summary org-summary company-os-summary velocity-compare confirm-funnel-audit returns-hmt ai-check platform-ai-model-probe platform-ai-bench backup restore-drill restore-drill-org pitr-basebackup pitr-drill org-order-audit org-ai-cutover org-catalog org-offboard org-prepaid-ai org-volume-discount saas-v1-migration identity-reconcile ban-hang-reply-upgrade saas-acceptance ops-signals-check security-acceptance inbox-perf-probe inbox-avatar-audit inbox-read-audit order-cancel-reconcile sales-lifecycle-audit pancake-avatar-shape"
 
             LOP=GHI
             case "$ARG" in
@@ -1021,6 +1022,15 @@ jobs:
                 fetch_script inbox-avatar-audit.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/inbox-avatar-audit.ts'
                 kiem_arg
                 ma_hoa_ket_qua chay_voi_arg docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/inbox-avatar-audit.ts ;;
+              sales-lifecycle-audit)
+                # AI BÁN HÀNG KHẲNG ĐỊNH ĐIỀU CHƯA XÁC MINH? (scripts/sales-lifecycle-audit.ts — kiểm toán lifecycle 10/10/2026, PR-L0) —
+                # CHỈ ĐỌC (script tự đặt ERP_READ_ONLY=1 trước khi nạp @/db và hỏi lại Postgres; CSDL tổ chức mở bằng getDbForInspection —
+                # không migrate, không tạo). Chỉ in SỐ ĐẾM / ĐÚNG-SAI: đường trả lời của tin bot · câu khẳng định tiền / chốt (cùng
+                # detectClaims của claim-guard.ts) · công cụ OK / lỗi · đơn theo phép nối · đuôi SĐT ở nguồn nào — không tên, SĐT, chữ
+                # tin. Vẫn MÃ HOÁ cả lượt. arg: "<mã tổ chức> [--conv=<uuid>] [--phone-tail=NNN] [--days=1..60]" (script soát).
+                fetch_script sales-lifecycle-audit.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/sales-lifecycle-audit.ts'
+                kiem_arg
+                ma_hoa_ket_qua chay_voi_arg docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/sales-lifecycle-audit.ts ;;
               pancake-avatar-shape)
                 # ẢNH KHÁCH NẰM Ở KHOÁ NÀO TRONG PAYLOAD API PANCAKE (scripts/pancake-avatar-shape.ts) — CHỈ ĐỌC (script tự đặt
                 # ERP_READ_ONLY=1 trước khi nạp @/db và hỏi lại Postgres; CSDL tổ chức mở bằng getDbForInspection, token page đọc bằng

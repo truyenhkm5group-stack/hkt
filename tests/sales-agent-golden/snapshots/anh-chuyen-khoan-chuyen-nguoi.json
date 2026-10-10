@@ -1,0 +1,28 @@
+{
+  "key": "anh-chuyen-khoan-chuyen-nguoi",
+  "title": "Khách gửi ảnh chuyển khoản ⇒ máy chủ chuyển người NGAY, không gọi model, không câu «đã nhận tiền»",
+  "shop": "food",
+  "channel": "WEB",
+  "prompts": [],
+  "turns": [
+    {
+      "customer": "[Khách gửi ảnh: ẢNH CHUYỂN KHOẢN — CHƯA XÁC MINH (ảnh khách gửi, shop chưa đối soát): Ảnh chụp màn hình chuyển khoản (ảnh ghi «thành công» — chưa xác minh) số tiền 280,000 VND]",
+      "rounds": [],
+      "shown": [
+        "Dạ em đã nhận ảnh anh/chị gửi, em chuyển nhân viên kiểm tra giúp mình ngay ạ."
+      ],
+      "status": "HANDOFF"
+    }
+  ],
+  "final": {
+    "status": "HANDOFF",
+    "handoffReason": "Khách báo đã chuyển khoản — gửi ảnh chuyển khoản, cần nhân viên đối soát (bot không xác nhận tiền)",
+    "stage": null,
+    "customer": null,
+    "draft": null,
+    "confirmed": null,
+    "declined": null,
+    "aiUsageConversation": "NO_ROWS",
+    "order": null
+  }
+}

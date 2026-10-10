@@ -64,6 +64,7 @@ import { withTurnEvents } from "@/lib/sales-chatbot/events";
 import { FOOD_PACK, salesPackFor, type SalesPack } from "@/lib/sales-chatbot/packs";
 import { executeTool, orderTotalsOf, toolDefsFor, TOOLS_HOLDING_TEXT, type ChatState } from "@/lib/sales-chatbot/tools";
 import { allowedImageUrl, describeImages, fetchCustomerImage, IMAGE_PROMPT_RULE, imageLine, VISION_LIMITS } from "@/lib/sales-chatbot/vision";
+import { claimFactsLoader, guardOutgoing, paymentSignalHandoff, paymentSignalInCustomerText, type ClaimVerdict } from "@/lib/sales-chatbot/claim-guard";
 import { vnDayOffset, WEEKDAY_LABEL } from "@/lib/constants/booking";
 
 export const SALES_AGENT = { name: "Chatbot bán hàng", source: "lib/sales-chatbot/engine.ts" } as const;
@@ -562,7 +563,7 @@ async function resolveConnector(cfg: SalesChatbotConfig, key: SalesChatbotConfig
   if (!model) return { ok: true, provider, source };
   const fallback = make(null);
   if (fallback.model === provider.model) return { ok: true, provider, source };
-  return { ok: true, provider: withModelFallback(provider, fallback, (bad) => void notifySalesChatModelFallback(bad, fallback.model, new Date()).catch(() => undefined)), source };
+  return { ok: true, provider: withModelFallback(provider, fallback, (bad) => void notifySalesChatModelFallback(bad, fallback.model, new Date()).catch(() => undefined), Date.now, { orgCode: org.code, connector: key }), source };
 }
 
 /**
@@ -616,18 +617,34 @@ export function isModelUnavailableError(message: string): boolean {
   return MODEL_UNAVAILABLE_RE.test(message);
 }
 
-/** Model bị nhà cung cấp từ chối gần đây ⇒ đi thẳng model mặc định, khỏi tốn một lời gọi hỏng mỗi tin (tối đa 1 giờ). */
+/**
+ * Model bị nhà cung cấp từ chối gần đây ⇒ đi thẳng model mặc định, khỏi tốn một lời gọi hỏng mỗi tin (tối đa 1 giờ).
+ * Khoá: `modelFallbackKey` — lỗi «không có model» là lỗi CỦA MỘT KHOÁ, nên dấu hỏng thuộc về đúng (tổ chức, kết nối).
+ */
 const unavailableModels = new Map<string, number>();
 const MODEL_RETRY_MS = 3_600_000;
+
+/**
+ * Phạm vi của dấu «model không dùng được»: tổ chức + kết nối (nguồn khoá) đang gọi. BẮT BUỘC — trước 10/10/2026 khoá chỉ là
+ * `provider:model` ở mức cả tiến trình, nên khoá BYOK hỏng của MỘT shop làm mọi shop khác cùng nhà cung cấp + model bị lùi IM
+ * LẶNG về model mặc định trong 1 giờ, và chỉ shop đầu được báo (Team Premium F2).
+ */
+export type ModelFallbackScope = { orgCode: string; connector: string };
+
+/** Khoá bộ đệm lỗi model — HÀM THUẦN: `tổ chức:kết nối:nhà cung cấp:model`. */
+export function modelFallbackKey(scope: ModelFallbackScope, provider: Pick<AiProvider, "name" | "model">): string {
+  return `${scope.orgCode}:${scope.connector}:${provider.name}:${provider.model}`;
+}
 
 /**
  * MODEL KHAI KHÔNG DÙNG ĐƯỢC ⇒ TỰ LÙI VỀ MODEL MẶC ĐỊNH (03/10/2026, Hải Sản Làng Chài: 21:02 ô model đổi sang
  * «gemini-2.5-flash-lite» — khoá Gemini mới không gọi được dòng 2.5 — và MỌI tin khách từ đó tới nửa đêm thành «AI tạm không
  * trả lời được», 108 lượt lỗi, 0 lượt thành công). Chỉ lỗi «không có model» mới lùi; lỗi khoá / hết tiền / quá tải vẫn ném
- * như cũ. Chủ shop được báo để sửa ô model (`onFallback`).
+ * như cũ. Chủ shop được báo để sửa ô model (`onFallback`). Dấu hỏng nhớ theo `scope` (tổ chức + kết nối): mỗi shop tự tốn
+ * đúng MỘT lời gọi hỏng mỗi giờ và được báo lỗi của chính mình; khoá của shop khác không bị kéo theo.
  */
-export function withModelFallback(primary: AiProvider, fallback: AiProvider, onFallback: (badModel: string) => void, nowMs: () => number = Date.now): AiProvider {
-  const key = `${primary.name}:${primary.model}`;
+export function withModelFallback(primary: AiProvider, fallback: AiProvider, onFallback: (badModel: string) => void, nowMs: () => number, scope: ModelFallbackScope): AiProvider {
+  const key = modelFallbackKey(scope, primary);
   return {
     name: primary.name,
     model: primary.model,
@@ -828,10 +845,39 @@ async function chatTurnCore(
       conv.state = fresh as Record<string, unknown>;
       st0 = fresh;
     }
+    // KHÁCH BÁO ĐÃ TRẢ TIỀN (P0 10/10/2026 — claim-guard.ts): ảnh chuyển khoản / «ck rồi» là LỜI KHÁCH, không phải chứng từ.
+    // MÁY CHỦ chuyển người ngay — không câu mẫu, không lượt AI. Trước đây chỉ có một câu trong lời nhắc dặn model gọi handoff,
+    // và câu «đã nhận được tiền» đã tới khách. Kênh nhắn tin chuyển người thì bot IM (luật kênh); kênh khác nhận câu an toàn.
+    const paidSignal = paymentSignalInCustomerText(text);
+    if (paidSignal) {
+      const { safeText, reason } = paymentSignalHandoff(paidSignal);
+      const st = { ...st0, handoff: { reason, at: now.toISOString() } };
+      if (!isMessagingChannel(opts.channel)) await reply(conv, seq, safeText);
+      await bump({ status: "HANDOFF", handoffReason: reason, state: st as Record<string, unknown>, turns: conv.turns + 1 });
+      if (isPublicChannel(opts.channel)) await notifySalesChatHandoff(conv.id, reason, st.customer, now, { dedupeKey: `sales-chat:payment-claim:${conv.id}:${turnSeq}` }).catch(() => undefined);
+      return { ok: true, view: (await conversationView(conv.id))! };
+    }
+    // HÀNG RÀO KHẲNG ĐỊNH (claim-guard.ts): MỌI chữ bot sắp gửi — câu mẫu, câu mẫu AI gửi qua công cụ, chữ model — qua
+    // `guardOutgoing`. «Đã nhận tiền» khi chưa có chứng từ thu, «đã chốt đơn» khi chưa có đơn ERP ⇒ câu KHÔNG được ghi / gửi;
+    // chuyển người, ghi lý do (`handoffReason` ⇒ sự kiện `handoff.requested` + `lastError`). Căn cứ chỉ đọc khi câu có khẳng định.
+    const claimFacts = claimFactsLoader({ id: conv.id, orderId: conv.orderId, pageId: conv.pageId, threadId: conv.threadId });
+    const claimBlock = async (v: Extract<ClaimVerdict, { ok: false }>, st: ChatState): Promise<{ state: ChatState; safe: string | null }> => {
+      if (st.handoff) return { state: st, safe: isMessagingChannel(opts.channel) ? null : v.safeText };
+      const next: ChatState = { ...st, handoff: { reason: v.handoffReason, at: now.toISOString() } };
+      if (isPublicChannel(opts.channel)) await notifySalesChatHandoff(conv.id, v.handoffReason, next.customer, now, { dedupeKey: `sales-chat:claim-guard:${conv.id}:${turnSeq}` }).catch(() => undefined);
+      return { state: next, safe: isMessagingChannel(opts.channel) ? null : v.safeText };
+    };
     // Câu bot / page vừa nói — câu mẫu TRÙNG một câu trong số này thì không gửi lại (khách đang trả lời nó).
     const recentSaid = recentShopTexts(msgs, 4);
     const quick: QuickReplyStep = opts.context ? { kind: "SKIP", reason: "Có ngữ cảnh bài viết — AI đọc cùng ngữ cảnh" } : qrSettings.enabled ? await quickReplyByKeyword(text, { ordering: Boolean(st0.draft && !st0.confirmed), cfg, recent: recentSaid }) : { kind: "SKIP", reason: "Câu mẫu đang tắt" };
     const sendQuick = async (pick: QuickReplyPick, ai: { calls: number; inTok: number; outTok: number } | null): Promise<TurnResult> => {
+      const verdict = await guardOutgoing(pick.text, () => claimFacts(st0));
+      if (!verdict.ok) {
+        const b = await claimBlock(verdict, st0);
+        if (b.safe) await reply(conv, seq, b.safe);
+        await bump({ status: "HANDOFF", handoffReason: b.state.handoff?.reason ?? verdict.handoffReason, state: b.state as Record<string, unknown>, turns: conv.turns + 1, lastError: verdict.note, ...(ai ? { aiCalls: conv.aiCalls + ai.calls, inputTokens: conv.inputTokens + ai.inTok, outputTokens: conv.outputTokens + ai.outTok } : {}) });
+        return { ok: true, view: (await conversationView(conv.id))! };
+      }
       await reply(conv, seq, pick.text);
       await markQuickReplyUsed(pick.entry.id, now).catch(() => undefined);
       await bump({
@@ -955,9 +1001,15 @@ async function chatTurnCore(
         // CHỮ GỬI KHÁCH QUA BỘ LỌC SUY LUẬN (03/10/2026, «Phuoc Ha»): model viết lẩm bẩm vào câu trả lời — tên công cụ, «Khách
         // vừa nhắn…», «Ta đáp:» — và cả đoạn đã tới khách. Lọc ở máy chủ, không trông vào lời dặn.
         const content: AiBlock[] = [];
-        // HUỶ ĐƠN (10/10/2026, sự cố #189A435E): chữ model viết CÙNG tin với lời gọi `cancel_order` / `mark_declined` được viết TRƯỚC khi
-        // thấy kết quả («Dạ em huỷ đơn cho chị rồi ạ» trong khi lõi đơn chưa ghi gì) ⇒ KHÔNG gửi khách; vòng sau model nói theo kết quả.
+        // HAI CƠ CHẾ GIỮ CHỮ, MỘT ĐƯỜNG (claim-guard.ts + #786). Model viết chữ CÙNG tin với lời gọi công cụ TRƯỚC khi thấy kết quả:
+        //  · cùng tin với `cancel_order` / `mark_declined` (TOOLS_HOLDING_TEXT — sự cố #189A435E): chữ BỎ HẲN, vòng sau model nói theo
+        //    kết quả («đã huỷ» chỉ đúng khi lõi đơn ghi xong);
+        //  · cùng tin với `confirm_order`: câu «đã chốt / đã lên đơn» GIỮ LẠI, công cụ chốt THÀNH CÔNG mới ghi / gửi, không ⇒ chặn;
+        //  · mọi chữ còn lại qua `guardOutgoing` SAU bộ lọc suy luận — bị chặn ⇒ câu an toàn thay chỗ, chuyển người.
         const holdText = raw.some((b) => b.type === "tool_use" && TOOLS_HOLDING_TEXT.has(b.name));
+        const confirmingNow = raw.some((b) => b.type === "tool_use" && b.name === "confirm_order");
+        let held: string | null = null;
+        const modelOut: string[] = [];
         for (const b of raw) {
           if (b.type !== "text") {
             content.push(b);
@@ -967,14 +1019,32 @@ async function chatTurnCore(
           const g = customerFacingText(b.text);
           if (g.leaked) leaks += 1;
           if (g.text) {
-            content.push({ ...b, text: plainForMessenger(g.text) });
+            const out = plainForMessenger(g.text);
+            const verdict = await guardOutgoing(out, () => claimFacts(state));
+            if (!verdict.ok && verdict.claim === "ORDER_CONFIRMED" && confirmingNow && held === null) {
+              held = out;
+              continue;
+            }
+            if (!verdict.ok) {
+              const blk = await claimBlock(verdict, state);
+              state = blk.state;
+              lastError = lastError ?? verdict.note;
+              if (blk.safe && !content.some((x) => x.type === "text" && x.text === blk.safe)) {
+                content.push({ type: "text", text: blk.safe });
+                spoke = true;
+              }
+              continue;
+            }
+            content.push({ ...b, text: out });
+            modelOut.push(out);
             spoke = true;
             modelSpoke = true;
           }
         }
-        history.push({ role: "assistant", content });
+        history.push({ role: "assistant", content: held === null ? content : [{ type: "text", text: held }, ...content] });
         await appendMessage(conv.id, seq++, "assistant", content);
-        const modelText = textOf(content);
+        // Câu an toàn của máy chủ KHÔNG phải câu AI (đồng hồ khách AI chỉ đếm chữ model sinh) — tin chỉ có câu an toàn không vào.
+        const modelText = modelOut.length ? textOf(content) : "";
         if (modelText) aiTexts.push(modelText);
         const uses = content.filter((b): b is Extract<AiBlock, { type: "tool_use" }> => b.type === "tool_use");
         if (uses.length === 0) break;
@@ -982,12 +1052,19 @@ async function chatTurnCore(
         for (const u of uses) {
           const r = await executeTool(u.name, u.input, { conversationId: conv.id, channel: opts.channel, config: cfg, state, lastUserText: text, agent: SALES_AGENT, customerName: opts.customerName ?? null, quickReplies: quickCatalog, returning, recentSaid, turn: turnSeq, bookingOn, now, commentTurn: opts.aiCustomer?.threadKind === "COMMENT", promptStamp: { ...stampBase, model: res.model || prov.provider.model } });
           state = r.state;
-          if (r.deliver) {
-            deliveredImages.push(...r.deliver.imageIds);
-            deliveredReplyId = r.deliver.quickReplyId;
-            deliveredText = r.deliver.text;
+          // Câu mẫu AI gửi qua công cụ cũng qua hàng rào khẳng định — bị chặn ⇒ không gửi, chuyển người như chữ model.
+          const deliverVerdict = r.deliver ? await guardOutgoing(r.deliver.text, () => claimFacts(state)) : null;
+          const deliver = deliverVerdict?.ok ? r.deliver : undefined;
+          if (deliverVerdict && !deliverVerdict.ok) {
+            state = (await claimBlock(deliverVerdict, state)).state;
+            lastError = lastError ?? deliverVerdict.note;
+          }
+          if (deliver) {
+            deliveredImages.push(...deliver.imageIds);
+            deliveredReplyId = deliver.quickReplyId;
+            deliveredText = deliver.text;
             spoke = true;
-            await markQuickReplyUsed(r.deliver.quickReplyId, now).catch(() => undefined);
+            await markQuickReplyUsed(deliver.quickReplyId, now).catch(() => undefined);
           }
           // Công cụ thấy điều bất thường (giá thiếu, tồn âm) ⇒ CẦN NGƯỜI XỬ LÝ — không để AI tự quyết bán tiếp.
           if (r.requireHuman && !state.handoff) {
@@ -996,7 +1073,7 @@ async function chatTurnCore(
           }
           const payload = (() => {
             try {
-              return JSON.stringify({ ...(JSON.parse(r.content) as Record<string, unknown>), __summary: r.summary, ...(r.deliver ? { __deliver: r.deliver.text } : {}) });
+              return JSON.stringify({ ...(JSON.parse(r.content) as Record<string, unknown>), __summary: r.summary, ...(deliver ? { __deliver: deliver.text } : {}) });
             } catch {
               return r.content;
             }
@@ -1005,6 +1082,24 @@ async function chatTurnCore(
         }
         history.push({ role: "user", content: results });
         await appendMessage(conv.id, seq++, "user", results);
+        // Câu «đã chốt» giữ lại ở trên: công cụ chốt THÀNH CÔNG ⇒ giờ mới ghi / gửi; không ⇒ chặn, câu an toàn, chuyển người.
+        if (held !== null) {
+          const v = await guardOutgoing(held, () => claimFacts(state));
+          if (v.ok) {
+            await appendMessage(conv.id, seq++, "assistant", [{ type: "text", text: held }]);
+            aiTexts.push(held);
+            spoke = true;
+            modelSpoke = true;
+          } else {
+            const blk = await claimBlock(v, state);
+            state = blk.state;
+            lastError = lastError ?? v.note;
+            if (blk.safe) {
+              await appendMessage(conv.id, seq++, "assistant", [{ type: "text", text: blk.safe }]);
+              spoke = true;
+            }
+          }
+        }
         await bump({ state: state as Record<string, unknown> });
         if (state.handoff) break;
         if (round === SALES_CHATBOT_LIMITS.toolRounds - 1) {
