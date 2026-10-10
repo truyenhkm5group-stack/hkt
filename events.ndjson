@@ -1736,3 +1736,4 @@
 {"at":"2026-10-10T17:58:30.544Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"ai-fallback-tenant","detail":"fix/ai-fallback-tenant @ 1a9e4095e566 · 1 lệnh kiểm thử"}
 {"at":"2026-10-10T17:59:05.923Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"ai-fallback-tenant","detail":"#787 cho fix/ai-fallback-tenant @ 1a9e4095e566"}
 {"at":"2026-10-10T17:59:32.702Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#787 @ 1a9e4095e566 · Diff nhỏ: khoá bộ đệm lỗi model = tổ chức:kết nối:nhà cung cấp:model, scope bắt buộc (thiếu là lỗi biên dịch), chỗ gọi duy nhất truyền org.code + key; không đổi hành vi khi không lỗi"}
+{"at":"2026-10-10T18:04:03.074Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"VERIFY_PASS","mission":"ai-sales-knowledge","detail":"PASS 521b81325e28ad95ea0e9373ebfed3094bad1782 2026-10-10T18:03:47.662Z"}
