@@ -3,7 +3,7 @@
   "mission_id": "owner-requirements-ledger",
   "title": "Sổ yêu cầu chủ shop: mỗi yêu cầu nguyên tử có PR · SHA · bằng chứng production · trạng thái thật",
   "business_goal": "",
-  "status": "INTEGRATING",
+  "status": "DONE",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -22,11 +22,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-10T08:14:09.783Z",
-  "updated_at": "2026-10-10T10:05:13.824Z",
-  "last_heartbeat": "2026-10-10T08:31:47.427Z",
+  "updated_at": "2026-10-10T14:42:11.189Z",
+  "last_heartbeat": "2026-10-10T14:42:11.189Z",
   "definition_of_done": [],
   "evidence": {
-    "merged": "#773 → 7935fbd4e4b32236d0d7fbaf3f45ebd38152c14c"
+    "merged": "#773 → 7935fbd4e4b32236d0d7fbaf3f45ebd38152c14c",
+    "done": "không đổi mã chạy · #773 gộp 7935fbd4, sổ 127 yêu cầu (39 PV) — làm mới ở ledger-r2"
   },
   "handoff": {
     "branch": "docs/owner-requirements-ledger",
