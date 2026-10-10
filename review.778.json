@@ -1,0 +1,8 @@
+{
+  "pr": 778,
+  "sha": "0b56fb7d185890e363035b7cd368aa548d6fd7bf",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-10T10:27:34.360Z",
+  "note": "Một nơi khai điều kiện (inbox-states.ts), bộ đếm và lọc cùng điều kiện; bulk dùng lại setConversationControlCore + expect (không đè trạng thái đã đổi), cổng quyền chung canControlConversation, audit đứng tên; bài kiểm cũ chỉ sửa chỗ mã hoá nghĩa sai theo yêu cầu 10/10"
+}
