@@ -492,6 +492,7 @@ import { testSalesInbox } from "./sales-inbox.test";
 import { testInboxAdvanced } from "./inbox-advanced.test";
 import { testInboxComposer } from "./inbox-composer.test";
 import { testInboxV2A } from "./inbox-v2-a.test";
+import { testInboxAvatarProfile } from "./inbox-avatar-profile.test";
 import { testSalesInboxHistory } from "./sales-inbox-history.test";
 import { testE2eAiSalesPlatform } from "./e2e-ai-sales-platform.test";
 import { testSalesExperimentReport } from "./sales-experiment-report.test";
@@ -2873,6 +2874,9 @@ async function main() {
   await testInboxComposer();
   // INBOX-V2-A: bộ lọc gọn (14 tham số cũ còn đủ) · chưa đọc trước ở MÁY CHỦ (phân trang ổn định) · hàng đang mở đứng yên · ảnh không link Facebook giả — tổ chức `hop-thu-v2a`.
   await testInboxV2A();
+  // Ảnh đại diện khách + bấm ảnh mở trang Facebook (chủ shop 10/10/2026 mục E · F): PSID / fb_id không bao giờ thành link Facebook,
+  // năm trạng thái PROFILE_*, đường ghi Pancake dùng chung một lõi, ops inbox-avatar-audit chỉ đọc. Thuần + quét mã nguồn.
+  await testInboxAvatarProfile();
   // Nhập đủ lịch sử hội thoại vào hộp thư (0221): tổ chức THẬT `hop-thu-lich-su`, Pancake giả, tự cấp, tự dọn.
   await testSalesInboxHistory();
   // E2E trọn vòng: tin khách → AI → đơn → giao → Hiệu quả → mốc kích hoạt → sổ dùng → Owner Cockpit (tổ chức `e2e-shop`).

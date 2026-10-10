@@ -15,6 +15,7 @@ import { getCustomerDetail } from "@/lib/queries/customers";
 import { CUSTOMER_CONVERSATIONS_MAX, customerConversations } from "@/lib/queries/customer-conversations";
 import { CONVERSATION_CONTROL_LABEL } from "@/lib/sales-chatbot/conversation-control-shared";
 import { INBOX_CHANNEL_LABEL } from "@/lib/sales-chatbot/inbox-shared";
+import { FACEBOOK_HREF_REASON_LABEL, facebookProfileHrefOf } from "@/lib/sales-chatbot/avatar-profile";
 import { cn } from "@/lib/utils";
 import { can, requirePermission, type SessionUser } from "@/lib/auth/session";
 import { CustomerProfileForm } from "@/app/(dashboard)/customers/[id]/customer-profile-form";
@@ -105,7 +106,9 @@ export default async function CustomerDetailPage({ params }: { params: Promise<{
   const phones = Array.from(new Set([customer.phone, ...customer.phones].filter((p): p is string => Boolean(p))));
   // Tỷ lệ trên đơn ĐÃ KẾT THÚC theo ORDER_OUTCOME (tính ở truy vấn); chưa đơn nào kết thúc ⇒ «—», không phải 0%.
   const openNote = [stats.inTransit ? `${formatNumber(stats.inTransit)} đang giao` : null, stats.open > stats.inTransit ? `${formatNumber(stats.open - stats.inTransit)} chưa gửi / chưa rõ` : null].filter(Boolean).join(" · ");
-  const fbUrl = customer.fbId ? `https://www.facebook.com/${customer.fbId}` : null;
+  // `fb_id` của Pancake là PSID — mã THEO PAGE (sổ nghĩa `FACEBOOK_ID_SOURCES`): dựng `facebook.com/<fb_id>` mở ra trang lỗi hoặc SAI
+  // NGƯỜI (chủ shop 10/10/2026, mục F). Chỉ có link khi nguồn chứng minh được mã công khai; không thì in mã + lý do.
+  const fb = facebookProfileHrefOf({ ids: [{ value: customer.fbId, source: "PANCAKE_CUSTOMER_FB_ID" }] });
 
   return (
     <div className="space-y-5">
@@ -306,7 +309,7 @@ export default async function CustomerDetailPage({ params }: { params: Promise<{
                   ? [
                       // Điểm thưởng là ô của Pancake — tổ chức không đồng bộ Pancake không bao giờ có số, in «0» là nói sai.
                       { label: "Điểm thưởng", value: formatNumber(customer.rewardPoint) },
-                      { label: "Facebook", value: fbUrl ? <a href={fbUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-primary hover:underline">{customer.fbId}<ExternalLink className="size-3" /></a> : "—" },
+                      { label: "Facebook", value: fb.href ? <a href={fb.href} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-primary hover:underline">{customer.fbId}<ExternalLink className="size-3" /></a> : customer.fbId ? <span className="font-mono text-xs" title={FACEBOOK_HREF_REASON_LABEL[fb.reason]}>{customer.fbId} <span className="font-sans text-muted-foreground">(mã theo page)</span></span> : "—" },
                       { label: "Hội thoại", value: customer.conversationLink ? <a href={customer.conversationLink} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-primary hover:underline">Mở trên Pancake<ExternalLink className="size-3" /></a> : "—" },
                       { label: "Mã Pancake", value: <span className="font-mono text-xs">{customer.pancakeId ?? "—"}</span> },
                       { label: "Đồng bộ", value: formatDateTime(customer.syncedAt) },

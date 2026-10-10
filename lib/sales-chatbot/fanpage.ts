@@ -52,6 +52,7 @@ import { recordConversationAd } from "@/lib/sales-chatbot/ad-referral";
 import { botSendAllowed, inboundPageGate, pageRuntimeMode } from "@/lib/sales-chatbot/page-runtime";
 import { noteSendRateLimited, sendRecentlyLimited } from "@/lib/sales-chatbot/pancake-send-pressure";
 import { PAGE_NOT_LIVE_SEND_ERROR, PAGE_OFF_NOTE } from "@/lib/sales-chatbot/page-runtime-shared";
+import { mergePancakeAvatarFacts, pancakeAvatarFactsOf, pancakeAvatarPatch, type PancakeAvatarFacts } from "@/lib/sales-chatbot/avatar-profile";
 
 export const FANPAGE_CONNECTOR = "pancake-fanpage";
 /** Nhân viên thật vừa trả lời trên fanpage ⇒ bot im lặng chừng này phút cho hội thoại đó. */
@@ -264,6 +265,11 @@ export type FanpageEvent = {
    * `lib/integrations/pancake/pages.ts`) — khoá khử trùng với đường Meta trực tiếp. Thiếu ⇒ chỉ chống trùng theo mã tin.
    */
   senderId?: string;
+  /**
+   * Ảnh đại diện KHÁCH trong gói Pancake (`avatar-profile.ts::pancakeAvatarFactsOf` — cùng luật với lượt nhập lịch sử) + vì sao
+   * không có. Tin phía page ⇒ không có (ảnh trong gói đó là của page). Ghi vào hội thoại ở `noteCustomerArrived`, cùng câu UPDATE.
+   */
+  avatar?: PancakeAvatarFacts | null;
 };
 
 const str = (v: unknown) => (typeof v === "string" ? v : typeof v === "number" ? String(v) : "");
@@ -314,7 +320,8 @@ export function parsePancakeWebhook(payload: unknown): FanpageEvent | null {
   const automated = fromPage && Boolean(from.ai_generated || from.is_automated);
   const adReferral = fromPage ? null : adReferralFromPancake(payload);
   const senderId = fromPage ? "" : str(conv?.from_psid) || str(from.id);
-  return { pageId, threadId, messageId, text, customerName: fromPage ? "" : customerName, fromPage, humanStaff, automated, inbox, comment, imageUrls, stickerUrls, adReferral, senderId };
+  const avatar = fromPage || !inbox ? null : mergePancakeAvatarFacts([pancakeAvatarFactsOf(conv, "WEBHOOK"), pancakeAvatarFactsOf(msg, "WEBHOOK")]);
+  return { pageId, threadId, messageId, text, customerName: fromPage ? "" : customerName, fromPage, humanStaff, automated, inbox, comment, imageUrls, stickerUrls, adReferral, senderId, avatar };
 }
 
 /** Khoá hội thoại fanpage (cột `visitor_key`, UNIQUE cho kênh FANPAGE): băm (page, hội thoại Pancake). */
@@ -501,7 +508,7 @@ export async function receiveFanpageEvent(ev: FanpageEvent, now: Date = new Date
       const stickers = (ev.stickerUrls ?? []).slice(0, 3);
       const media = await insertCustomerInbound({ pageId: ev.pageId, threadId: ev.threadId, messageId: ev.messageId, text: stickers.length ? "" : MEDIA_ONLY_TEXT, ...(stickers.length ? { imageUrls: stickers } : {}), customerName: ev.customerName || null, status: "DONE", processedAt: now, note: MEDIA_ONLY_NOTE, transport: "PANCAKE", senderId: ev.senderId ?? null }, now, { canonical: verdict === "CANONICAL" });
       if (media.duplicate) return { queued: false, reason: DUPLICATE_SOURCE_REASON };
-      await noteCustomerArrived(ev.pageId, ev.threadId, now);
+      await noteCustomerArrived(ev.pageId, ev.threadId, now, ev.avatar);
     }
     return { queued: false, reason: "Tin không có chữ hay ảnh (nhãn dán / ghi âm / video) — để nhân viên xem" };
   }
@@ -524,7 +531,7 @@ export async function receiveFanpageEvent(ev: FanpageEvent, now: Date = new Date
     { canonical: !skipped },
   );
   if (ins.duplicate) return { queued: false, reason: DUPLICATE_SOURCE_REASON };
-  if (ins.inserted) await noteCustomerArrived(ev.pageId, ev.threadId, now);
+  if (ins.inserted) await noteCustomerArrived(ev.pageId, ev.threadId, now, ev.avatar);
   if (ins.inserted && skipped) return { queued: false, reason: NON_CANONICAL_NOTE };
   return ins.inserted ? { queued: true, reason: "Đã nhận" } : { queued: false, reason: "Tin trùng — đã nhận trước đó" };
 }
@@ -584,14 +591,20 @@ export const MEDIA_ONLY_TEXT = "[Khách gửi nhãn dán / ghi âm / video / t�
  * Khách vừa nhắn ⇒ hội thoại PHẢI có trong hộp thư NGAY, không đợi bot tới lượt. Trước đây hội thoại chỉ được mở khi bot xử lý
  * tin — page đã trả lời trước (nhân viên trên Pancake, Meta tự động) hay bot đang tắt thì khách nhắn mà hộp thư trống. Mở (hoặc
  * lấy) hội thoại + đẩy mốc tin cuối của khách. Đường phụ: lỗi ở đây KHÔNG làm hỏng lượt nhận (tin đã nằm trong sổ tin thô).
+ * `avatar` (gói Pancake của khách): ảnh + lý do không có ảnh vào `state` TRONG CÙNG câu UPDATE — không thêm lượt gọi CSDL nào vào
+ * đường nhận tin, nên lượt trả lời của bot không chậm đi; không cần ghi (`pancakeAvatarPatch` ⇒ `null`) thì câu UPDATE như cũ.
  */
-export async function noteCustomerArrived(pageId: string, threadId: string, at: Date): Promise<void> {
+export async function noteCustomerArrived(pageId: string, threadId: string, at: Date, avatar?: PancakeAvatarFacts | null): Promise<void> {
   try {
     const conv = await conversationFor(pageId, threadId);
     if (!conv) return;
     const db = await getDb();
     const c = schema.salesChatConversations;
-    await db.update(c).set({ lastCustomerAt: sql`greatest(coalesce(${c.lastCustomerAt}, ${at}), ${at})` }).where(eq(c.id, conv.id));
+    const avatarPatch = avatar ? pancakeAvatarPatch(conv.state, avatar, at) : null;
+    await db
+      .update(c)
+      .set({ lastCustomerAt: sql`greatest(coalesce(${c.lastCustomerAt}, ${at}), ${at})`, ...(avatarPatch ? { state: sql`${c.state} || ${JSON.stringify(avatarPatch)}::jsonb` } : {}) })
+      .where(eq(c.id, conv.id));
     publish({ type: "chat", conversationId: conv.id });
   } catch (error) {
     console.error(`[hộp thư] không mở được hội thoại ${pageId}/${threadId}: ${error instanceof Error ? error.message : String(error)}`);
@@ -1563,7 +1576,7 @@ export async function catchUpFanpage(deps: FanpageDeps = {}): Promise<CatchUpRes
     const customerName = str((c.from as { name?: unknown } | undefined)?.name) || str(((c.customers as { name?: unknown }[] | undefined) ?? [])[0]?.name);
     let touched = 0;
     for (const m of waiting) {
-      const r = await receiveFanpageEvent({ pageId, threadId, messageId: m.id, text: m.text, customerName, fromPage: false, humanStaff: false, inbox: true, comment: null, imageUrls: [] }, now());
+      const r = await receiveFanpageEvent({ pageId, threadId, messageId: m.id, text: m.text, customerName, fromPage: false, humanStaff: false, inbox: true, comment: null, imageUrls: [], avatar: pancakeAvatarFactsOf(c, "POLL") }, now());
       if (r.queued) {
         out.queued += 1;
         touched += 1;

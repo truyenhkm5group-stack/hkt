@@ -1,6 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import Link from "next/link";
+import { useState, type ReactNode } from "react";
+import { avatarLinkTitle, type AvatarLink } from "@/lib/sales-chatbot/avatar-profile";
 import { cn } from "@/lib/utils";
 
 const CHANNEL_DOT: Record<string, { label: string; className: string }> = {
@@ -21,8 +23,8 @@ function initials(name: string): string {
 /**
  * Ảnh đại diện khách + chấm kênh — nhận ra khách và kênh trong một cái liếc. Có ảnh thật (Meta `profile_pic` / Pancake, đã lọc ở
  * máy chủ — `safeAvatarUrl`) ⇒ hiện ảnh; ảnh hỏng / hết hạn (URL CDN của Meta có hạn) ⇒ tự lùi về chữ cái (màu cố định theo tên).
- * Thành phần này KHÔNG tự làm link: bấm ảnh đi đâu do nơi dùng quyết qua `avatarHrefOf` (inbox-shared.ts) — hôm nay chỉ mở hồ sơ
- * khách đã nối; không nguồn nào cho link trang cá nhân Facebook thật, và không bao giờ dựng link từ PSID.
+ * Thành phần này KHÔNG tự làm link: bấm ảnh đi đâu do nơi dùng quyết qua `avatarHrefOf` (inbox-shared.ts) và bọc bằng
+ * `AvatarLinkWrap` bên dưới. Không bao giờ dựng link Facebook từ PSID (avatar-profile.ts).
  */
 export function ChannelAvatar({ name, channel, src = null, size = "md" }: { name: string; channel: string; src?: string | null; size?: "md" | "lg" }) {
   const [broken, setBroken] = useState(false);
@@ -40,5 +42,28 @@ export function ChannelAvatar({ name, channel, src = null, size = "md" }: { name
       )}
       {dot ? <span className={cn("absolute -bottom-0.5 -right-0.5 inline-flex size-4 items-center justify-center rounded-full border-2 border-background text-[9px] font-bold", dot.className)}>{dot.label}</span> : null}
     </span>
+  );
+}
+
+/**
+ * Bọc ảnh đại diện bằng ĐÚNG đích của `avatarHrefOf`: trang Facebook THẬT ⇒ thẻ `<a>` mở tab mới (`noopener noreferrer` — trang
+ * ngoài không với ngược được cửa sổ ERP, không nhận địa chỉ trang hộp thư); hồ sơ khách nội bộ ⇒ `Link`, câu rê chuột nói rõ vì sao
+ * chưa có link Facebook; không đích ⇒ ảnh trơn.
+ */
+export function AvatarLinkWrap({ link, name, children }: { link: AvatarLink; name: string; children: ReactNode }) {
+  if (!link.href) return <>{children}</>;
+  const title = avatarLinkTitle(link);
+  const cls = "shrink-0 rounded-full focus-visible:ring-2 focus-visible:ring-primary";
+  if (link.external) {
+    return (
+      <a href={link.href} target="_blank" rel="noopener noreferrer" className={cls} title={title} aria-label={`Mở trang Facebook của ${name} (tab mới)`} data-testid="inbox-avatar-link" data-avatar-link="facebook">
+        {children}
+      </a>
+    );
+  }
+  return (
+    <Link href={link.href} className={cls} title={title} aria-label={`Mở hồ sơ khách ${name}`} data-testid="inbox-avatar-link" data-avatar-link="customer" data-avatar-link-reason={link.reason}>
+      {children}
+    </Link>
   );
 }

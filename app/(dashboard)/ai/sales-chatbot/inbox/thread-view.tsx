@@ -13,7 +13,7 @@ import { formatDateTime, formatNumber, vnClock, vnDateKey } from "@/lib/format";
 import { insertIntoDraft } from "@/lib/sales-chatbot/inbox-composer-shared";
 import { avatarHrefOf, STAFF_IMAGE_MAX_BYTES, STAFF_IMAGES_MAX, STAFF_REPLY_MAX, type InboxOrder, type InboxThread, type TimelineItem } from "@/lib/sales-chatbot/inbox-shared";
 import { cn } from "@/lib/utils";
-import { ChannelAvatar } from "./avatar";
+import { AvatarLinkWrap, ChannelAvatar } from "./avatar";
 import { ComposerTools, type ComposerTab } from "./composer-tools";
 import { ConversationControlBar } from "./control-bar";
 import { MessageTraceLine } from "./message-trace";
@@ -257,14 +257,10 @@ export function InboxThreadView({
             <Link href={backHref} className="mt-2 text-muted-foreground hover:text-foreground lg:hidden" aria-label="Về danh sách">
               <ArrowLeft className="size-4" />
             </Link>
-            {/* Ảnh khách mở HỒ SƠ KHÁCH khi đã nối (`avatarHrefOf` — không nguồn nào cho link trang cá nhân Facebook thật; không dựng từ PSID). */}
-            {avatarHref ? (
-              <Link href={avatarHref} className="shrink-0 rounded-full focus-visible:ring-2 focus-visible:ring-primary" title="Mở hồ sơ khách" aria-label={`Mở hồ sơ khách ${thread.customer.name}`} data-testid="inbox-avatar-link">
-                <ChannelAvatar name={thread.customer.name} channel={thread.channel} src={thread.avatarUrl} size="lg" />
-              </Link>
-            ) : (
+            {/* Ảnh khách: trang Facebook THẬT (tab mới) khi nguồn cho, không thì hồ sơ khách — `avatarHrefOf`; không dựng từ PSID. */}
+            <AvatarLinkWrap link={avatarHref} name={thread.customer.name}>
               <ChannelAvatar name={thread.customer.name} channel={thread.channel} src={thread.avatarUrl} size="lg" />
-            )}
+            </AvatarLinkWrap>
             <div className="min-w-0 space-y-0.5">
               <p className="truncate text-base font-semibold leading-tight">{thread.customer.name}</p>
               <p className="truncate text-[12px] text-muted-foreground">

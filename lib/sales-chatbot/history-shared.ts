@@ -4,6 +4,7 @@
  * Phần máy chủ: `lib/sales-chatbot/history.ts`. Tệp này giữ hằng số, kiểu trạng thái lượt nhập (lưu ở `settings`) và câu tiến độ
  * cho màn hình — không đọc CSDL, không gọi mạng.
  */
+import { isPancakeAvatarOutcome, type PancakeAvatarOutcome } from "@/lib/sales-chatbot/avatar-profile";
 
 /** Khoá `settings` giữ trạng thái + CON TRỎ của lượt nhập — mỗi tổ chức một CSDL nên một khoá là một lượt của một tổ chức. */
 export const HISTORY_SETTING_KEY = "ai_sales.inbox_history";
@@ -73,7 +74,8 @@ export type HistoryCounts = {
   errors: number;
 };
 
-export type PendingThread = { id: string; name: string; phones: string[]; avatarUrl: string | null; updatedAt: string | null };
+/** `avatarOutcome`: payload Pancake nói gì về ảnh khách (`avatar-profile.ts`) — thiếu ⇒ không biết (lượt cũ / nguồn không phải Pancake). */
+export type PendingThread = { id: string; name: string; phones: string[]; avatarUrl: string | null; avatarOutcome?: PancakeAvatarOutcome; updatedAt: string | null };
 export type ThreadProgress = { id: string; count: number; pages: number; lastIds: string[]; phones: string[] };
 
 export type HistoryRun = {
@@ -162,7 +164,7 @@ export function parseHistoryRun(raw: unknown): HistoryRun {
     listDone: r.listDone === true,
     pending: (Array.isArray(r.pending) ? r.pending : [])
       .filter((p): p is Record<string, unknown> => Boolean(p) && typeof p === "object" && typeof (p as Record<string, unknown>).id === "string")
-      .map((p) => ({ id: String(p.id), name: s(p.name) ?? "", phones: strs(p.phones), avatarUrl: s(p.avatarUrl), updatedAt: s(p.updatedAt) })),
+      .map((p) => ({ id: String(p.id), name: s(p.name) ?? "", phones: strs(p.phones), avatarUrl: s(p.avatarUrl), ...(isPancakeAvatarOutcome(p.avatarOutcome) ? { avatarOutcome: p.avatarOutcome } : {}), updatedAt: s(p.updatedAt) })),
     thread: th && typeof th.id === "string" ? { id: th.id, count: n(th.count), pages: n(th.pages), lastIds: strs(th.lastIds), phones: strs(th.phones) } : null,
     oldestReached: s(r.oldestReached),
     localStartedAt: s(r.localStartedAt),

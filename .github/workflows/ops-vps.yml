@@ -52,6 +52,7 @@ on:
           - security-acceptance  # bằng chứng production LAUNCH_GATE §3: S1 cô lập tổ chức (GET id bản ghi của tổ chức kia bằng phiên workspace nghiệm thu / phiên ADMIN nhà) · S2 quét bí mật trong trang vỏ + trang công khai · S3 phong bì bản mã — MÃ HOÁ; công khai chỉ trạng thái + số đếm (CHỈ ĐỌC; không arg)
           - ops-signals-check    # tám tín hiệu vận hành O1–O8 (LAUNCH_GATE §4) tính trên production bằng ĐÚNG hàm của khung «Sự cố 24 giờ / 7 ngày» (/platform/org) cho MỌI tổ chức — MÃ HOÁ; công khai chỉ số tổ chức theo mức + mã lý do của workspace nghiệm thu (CHỈ ĐỌC; không arg)
           - inbox-perf-probe     # Hộp thư khách mở / chuyển hội thoại mất bao lâu trên workspace khách: bấm giờ ĐÚNG chuỗi hàm máy chủ của /ai/sales-chatbot/inbox (tải: listInbox… · chuyển: loadInboxThread…), nguội / ấm, p50 · p95 · max + SQL — MÃ HOÁ; công khai che tổ chức thành org#i, không đích (CHỈ ĐỌC; arg: "[--org=<mã>] [--samples=1..20]")
+          - inbox-avatar-audit   # ảnh đại diện + link Facebook của hộp thư khách trên N hội thoại gần nhất của MỘT tổ chức: có ảnh · trạng thái PROFILE_* + lý do · mã lỗi Graph · payload Pancake nói gì về ảnh · bấm ảnh mở Facebook / hồ sơ nội bộ theo lý do · DẠNG fb_id / conversation_link (không in giá trị) — MÃ HOÁ (CHỈ ĐỌC; arg: "<mã tổ chức> [--limit=1..3000]")
           - stock-wait-summary   # chờ hàng & GTC theo số ngày chờ, miền, vùng + đơn đang chờ + đề xuất — số tổng hợp (CHỈ ĐỌC; arg "--days=N")
           - company-os-summary   # Company OS đã được dùng tới đâu: sổ mẫu, topic / giá thành / mẫu xưởng / bản thiết kế, "Cần anh quyết", hàng hoàn, yêu cầu duyệt, phiếu nhập — CHỈ SỐ ĐẾM (CHỈ ĐỌC; không arg)
           - platform-secrets-verify # kiểm PLATFORM_SECRETS_KEY trên production (V1–V7): khoá có, canary niêm/giải qua deploy, cô lập tổ chức, CSDL + log không chứa bản rõ — arg rỗng = CHỈ ĐỌC; "seal --apply" niêm canary; "rotate --apply" cập nhật canary
@@ -150,7 +151,7 @@ permissions:
 # Thao tác trong danh sách mà cần cho người vận hành thấy NGAY một con số ("đã đóng 12 case") thì
 # script tự in dòng ấy với tiền tố `[ops:tom-tat] ` — kênh tóm tắt duy nhất ra log (qua che_log).
 env:
-  OPS_THAO_TAC_MA_HOA: "platform-secrets-verify db-query vtp-debug phone-probe vtp-probe vtp-statement-peek payroll-reconcile seed-employees marketing-explain cs-stale check-integrations run-job vtp-replay-explain vtp-manual-verify returns-hmt care-false-reopen care-outcome-before-open fanpage-evidence-backfill cod-statement-audit stock-wait-summary org-summary org-order-audit org-ai-cutover org-catalog org-offboard identity-reconcile confirm-funnel-audit company-os-summary velocity-compare org-prepaid-ai saas-v1-migration ban-hang-reply-upgrade saas-acceptance ops-signals-check security-acceptance inbox-perf-probe pitr-status pitr-basebackup pitr-mark pitr-drill pitr-pause"
+  OPS_THAO_TAC_MA_HOA: "platform-secrets-verify db-query vtp-debug phone-probe vtp-probe vtp-statement-peek payroll-reconcile seed-employees marketing-explain cs-stale check-integrations run-job vtp-replay-explain vtp-manual-verify returns-hmt care-false-reopen care-outcome-before-open fanpage-evidence-backfill cod-statement-audit stock-wait-summary org-summary org-order-audit org-ai-cutover org-catalog org-offboard identity-reconcile confirm-funnel-audit company-os-summary velocity-compare org-prepaid-ai saas-v1-migration ban-hang-reply-upgrade saas-acceptance ops-signals-check security-acceptance inbox-perf-probe inbox-avatar-audit pitr-status pitr-basebackup pitr-mark pitr-drill pitr-pause"
 
 # ═══════════ HÀNG ĐỢI NẰM TRÊN MÁY CHỦ, KHÔNG NẰM Ở GITHUB ═══════════
 #
@@ -502,7 +503,7 @@ jobs:
             # ─── PHÂN LOẠI: mặc định là GHI, và cờ ghi đè lên tên ───
             DOC_NHE="status perf disk logs chatbot-status db-query backup-status pitr-status"
             DOC_PROBE="check-integrations vtp-debug vtp-probe vtp-web-probe phone-probe pages-debug meta-id-probe meta-ad-post-probe vtp-capability ads-level-probe"
-            DOC_NANG="platform-secrets-verify verify smoke session-verify perf-probe perf-audit kpi-snapshot explain-stock outcome-explain outcome-parity returns-parity reason-coverage reason-backfill cogs-drift profit-verify marketing-calibrate marketing-explain payroll-reconcile fanpage-evidence-backfill care-false-reopen care-outcome-before-open care-waiting-reconcile cs-rule-update cs-stale sepay-reconcile cod-rebuild cod-status-repair vtp-return-status-repair agent-run-reattach vtp-rebuild-state vtp-replay-files vtp-replay-explain vtp-manual-verify vtp-statement-peek cod-statement-audit stock-wait-summary org-summary company-os-summary velocity-compare confirm-funnel-audit returns-hmt ai-check platform-ai-model-probe platform-ai-bench backup restore-drill restore-drill-org pitr-basebackup pitr-drill org-order-audit org-ai-cutover org-catalog org-offboard org-prepaid-ai saas-v1-migration identity-reconcile ban-hang-reply-upgrade saas-acceptance ops-signals-check security-acceptance inbox-perf-probe"
+            DOC_NANG="platform-secrets-verify verify smoke session-verify perf-probe perf-audit kpi-snapshot explain-stock outcome-explain outcome-parity returns-parity reason-coverage reason-backfill cogs-drift profit-verify marketing-calibrate marketing-explain payroll-reconcile fanpage-evidence-backfill care-false-reopen care-outcome-before-open care-waiting-reconcile cs-rule-update cs-stale sepay-reconcile cod-rebuild cod-status-repair vtp-return-status-repair agent-run-reattach vtp-rebuild-state vtp-replay-files vtp-replay-explain vtp-manual-verify vtp-statement-peek cod-statement-audit stock-wait-summary org-summary company-os-summary velocity-compare confirm-funnel-audit returns-hmt ai-check platform-ai-model-probe platform-ai-bench backup restore-drill restore-drill-org pitr-basebackup pitr-drill org-order-audit org-ai-cutover org-catalog org-offboard org-prepaid-ai saas-v1-migration identity-reconcile ban-hang-reply-upgrade saas-acceptance ops-signals-check security-acceptance inbox-perf-probe inbox-avatar-audit"
 
             LOP=GHI
             case "$ARG" in
@@ -995,6 +996,14 @@ jobs:
                 fetch_script inbox-perf-probe.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/inbox-perf-probe.ts'
                 kiem_arg
                 ma_hoa_ket_qua chay_voi_arg docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/inbox-perf-probe.ts ;;
+              inbox-avatar-audit)
+                # ẢNH ĐẠI DIỆN + LINK FACEBOOK CỦA HỘP THƯ KHÁCH (scripts/inbox-avatar-audit.ts) — CHỈ ĐỌC (script tự đặt ERP_READ_ONLY=1
+                # trước khi nạp @/db và hỏi lại Postgres; CSDL tổ chức mở bằng getDbForInspection — không migrate, không tạo). Chỉ in SỐ
+                # ĐẾM: trạng thái PROFILE_* · mã lỗi Graph · DẠNG fb_id / conversation_link · TÊN khoá payload — không tên, SĐT, mã,
+                # URL. Vẫn MÃ HOÁ cả lượt. arg: "<mã tổ chức> [--limit=1..3000]" (script soát).
+                fetch_script inbox-avatar-audit.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/inbox-avatar-audit.ts'
+                kiem_arg
+                ma_hoa_ket_qua chay_voi_arg docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/inbox-avatar-audit.ts ;;
               org-summary)
                 # CHỈ ĐỌC (script tự đặt ERP_READ_ONLY=1 trước khi nạp @/db; CSDL tổ chức mở bằng getDbForInspection — máy
                 # chủ ép chỉ đọc, không migrate, không tạo). Không đọc cột mang dữ liệu người, không đọc bí mật kết nối.

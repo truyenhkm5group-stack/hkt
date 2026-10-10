@@ -3,6 +3,7 @@
  *
  * Tệp THUẦN (không CSDL): trang hộp thư (client) chỉ được `import` từ đây; lõi đọc / ghi ở `lib/sales-chatbot/inbox.ts`.
  */
+import { avatarLinkOf, type AvatarLink, type FacebookIdInput } from "@/lib/sales-chatbot/avatar-profile";
 import type { AiHoldState, AiHoldView } from "@/lib/sales-chatbot/ai-hold-shared";
 import type { AiBlock, MessageTrace } from "@/lib/sales-chatbot/ai-status-shared";
 import { readConversationControl, type ControlStamp } from "@/lib/sales-chatbot/conversation-control-shared";
@@ -183,14 +184,14 @@ export function compactTimeAgo(iso: string | null, nowMs: number): string {
 }
 
 /**
- * Bấm ảnh đại diện khách đi đâu. GIỚI HẠN (đo 09/10/2026): KHÔNG nguồn nào đang lưu đường dẫn TRANG CÁ NHÂN Facebook của khách —
- * Meta chỉ trả `profile_pic` (ảnh CDN có hạn, `messenger.ts::refreshMessengerProfile`), Pancake chỉ trả ảnh (`pancakeAvatarUrl`).
- * Mã PSID / mã luồng là mã THEO PAGE, không phải mã hồ sơ: dựng đường dẫn Facebook từ chúng ra một trang lỗi hoặc SAI NGƯỜI, nên
- * tuyệt đối không dựng (`tests/inbox-v2-a.test.ts` quét mã nguồn). Khi một nguồn trả link hồ sơ THẬT thì thêm nhánh ở đây, đọc ĐÚNG
- * trường nguồn đó. Hôm nay: khách đã nối hồ sơ khách hàng ⇒ mở hồ sơ; chưa nối ⇒ ảnh không phải link. HÀM THUẦN.
+ * Bấm ảnh đại diện khách đi đâu — `{ href, external, reason }` (`avatar-profile.ts::avatarLinkOf`, chủ shop 10/10/2026 mục F):
+ * link trang Facebook THẬT do nguồn cung cấp / mã công khai đã xác minh ⇒ mở trang Facebook ở tab mới; không có ⇒ hồ sơ khách nội
+ * bộ khi đã nối, `reason` nói vì sao không có link Facebook; chưa nối ⇒ ảnh không phải link. PSID / mã luồng / `customers.fb_id` là
+ * mã THEO PAGE — không bao giờ thành đường dẫn Facebook (sổ nghĩa `FACEBOOK_ID_SOURCES`). Hôm nay không nguồn nào trả link hồ sơ
+ * thật nên `source` để trống ở mọi nơi gọi; nguồn nào trả thì truyền ĐÚNG trường của nguồn đó vào đây. HÀM THUẦN.
  */
-export function avatarHrefOf(customerId: string | null | undefined): string | null {
-  return customerId ? `/customers/${encodeURIComponent(customerId)}` : null;
+export function avatarHrefOf(customerId: string | null | undefined, source: { sourceProfileUrl?: string | null; ids?: readonly FacebookIdInput[] } = {}): AvatarLink {
+  return avatarLinkOf({ customerId, ...source });
 }
 
 /** Nguồn của hội thoại: Pancake · Meta trực tiếp (Messenger / Instagram) · Zalo OA · chat web. */
