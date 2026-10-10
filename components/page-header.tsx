@@ -20,7 +20,7 @@ export function PageHeader({ title, description, hint, eyebrow, actions, refresh
   return (
     <div className={cn("flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between", className)}>
       <div className="min-w-0">
-        {eyebrow ? <p className="mb-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-primary">{eyebrow}</p> : null}
+        {eyebrow ? <p className="mb-1 text-xs font-semibold uppercase tracking-[0.12em] text-primary">{eyebrow}</p> : null}
         <div className="flex min-w-0 items-center gap-1.5">
           <h1 className="truncate text-2xl font-extrabold tracking-[-0.02em] sm:text-[30px] sm:leading-9">{title}</h1>
           {hint ? <InfoHint>{hint}</InfoHint> : null}
@@ -30,7 +30,11 @@ export function PageHeader({ title, description, hint, eyebrow, actions, refresh
         {description ? <p className="mt-1 text-sm text-muted-foreground">{description}</p> : null}
       </div>
       {refresh || actions ? (
-        <div className="flex shrink-0 flex-wrap items-center gap-2">
+        /*
+          Điện thoại: cụm nút là MỘT hàng cuộn ngang thay vì hai, ba hàng xếp chồng — màn hình đầu tiên phải còn chỗ cho nội
+          dung. Máy tính: như cũ.
+        */
+        <div className="-mx-3 flex shrink-0 items-center gap-2 overflow-x-auto px-3 pb-0.5 [scrollbar-width:none] sm:mx-0 sm:flex-wrap sm:overflow-visible sm:px-0 sm:pb-0 [&::-webkit-scrollbar]:hidden [&>*]:shrink-0">
           {refresh ? <RefreshButton /> : null}
           {actions}
         </div>

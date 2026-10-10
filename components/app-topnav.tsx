@@ -2,10 +2,13 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Suspense, useState } from "react";
-import { ChevronDown, Menu } from "lucide-react";
+import { Suspense, useEffect, useMemo, useState } from "react";
+import { ChevronDown, LayoutGrid, Menu } from "lucide-react";
 import type { Role } from "@/db/schema";
-import { bellShowsSharedQueue, iconOf, menuActiveHref, visibleGroups, type NavZone } from "@/components/app-sidebar";
+import { allowedNavItems, bellShowsSharedQueue, iconOf, menuActiveHref, visibleGroups, type NavZone } from "@/components/app-sidebar";
+import { rememberVisit } from "@/components/nav-memory";
+import { QuickCreate } from "@/components/quick-create";
+import { PRIMARY_NAV_LABEL, primaryNavFor } from "@/lib/constants/command-catalog";
 import { AiCopilot } from "@/components/ai-copilot";
 import { BrandGlyph, BrandWordmark } from "@/components/brand";
 import { GlobalSearch } from "@/components/global-search";
@@ -13,7 +16,7 @@ import { LinkPending, LinkProgressReporter } from "@/components/nav-progress";
 import { NavUser } from "@/components/nav-user";
 import { NotificationBell } from "@/components/notification-bell";
 import { RealtimeIndicator } from "@/components/realtime-provider";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import type { DynamicNavItem } from "@/lib/pages/nav";
 import { cn } from "@/lib/utils";
@@ -78,8 +81,25 @@ export function AppTopNav({ user, brand = null }: { user: TopNavUser; brand?: To
   const activeHref = menuActiveHref(pathname, user);
   const groups = visibleGroups(user);
   const [sheetOpen, setSheetOpen] = useState(false);
+  /*
+    MỤC CHÍNH THEO VAI TRÒ (chủ shop 09/10/2026): ≤ 6 trang dùng hằng ngày đứng thẳng trên thanh — MỘT cú bấm, không
+    thả xuống. Mọi trang khác vẫn ở "Tất cả chức năng" (hai cú bấm) và ô lệnh. Vai trò chỉ sắp xếp; danh sách đi qua
+    đúng bộ lọc quyền của menu nên không ai thấy mục mình không vào được.
+  */
+  const navItems = useMemo(() => allowedNavItems(user), [user]);
+  const labelOf = useMemo(() => new Map(navItems.map((i) => [i.href, i.label])), [navItems]);
+  const primary = useMemo(() => primaryNavFor(user.role, new Set(labelOf.keys())).map((href) => ({ href, label: PRIMARY_NAV_LABEL[href] ?? labelOf.get(href) ?? href })), [user.role, labelOf]);
+  const inPrimary = primary.some((p) => p.href === activeHref);
+  // "Hệ thống" là cấu hình / quản trị, không phải việc hằng ngày — đứng riêng ở cuối bảng "Tất cả chức năng".
+  const workGroups = groups.filter((g) => g.zone !== "SYSTEM");
+  const adminGroups = groups.filter((g) => g.zone === "SYSTEM");
+  // "Gần đây" của ô lệnh: chỉ ghi trang có trong menu (không ghi trang chi tiết, không ghi dữ liệu khách).
+  useEffect(() => {
+    if (activeHref) rememberVisit(activeHref);
+  }, [activeHref]);
 
   return (
+    <>
     <header className="sticky top-0 z-30 bg-background/85 px-3 pb-2 pt-3 backdrop-blur-md supports-[backdrop-filter]:bg-background/70 sm:px-5 lg:px-6 2xl:px-8 print:hidden">
       <div className="flex h-14 items-center gap-1 rounded-full bg-card pl-2 pr-1.5 shadow-[var(--shadow-card)]">
         <Sheet open={sheetOpen} onOpenChange={setSheetOpen}>
@@ -94,9 +114,21 @@ export function AppTopNav({ user, brand = null }: { user: TopNavUser; brand?: To
               <SheetDescription className="sr-only">Mọi trang bạn được vào, xếp theo phòng ban</SheetDescription>
             </SheetHeader>
             <nav aria-label="Điều hướng chính" className="space-y-4">
+              {primary.length ? (
+                <div>
+                  <p className="px-2.5 pb-1 text-xs font-semibold uppercase tracking-[0.12em] text-primary">Dùng hằng ngày</p>
+                  <div className="space-y-0.5">
+                    {primary.map((item) => (
+                      <Link key={item.href} href={item.href} onClick={() => setSheetOpen(false)} aria-current={item.href === activeHref ? "page" : undefined} className={itemClass(item.href === activeHref)}>
+                        <ItemInner href={item.href} label={item.label} active={item.href === activeHref} />
+                      </Link>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
               {groups.map((group) => (
                 <div key={group.zone}>
-                  <p className="px-2.5 pb-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground" title={group.hint}>
+                  <p className="px-2.5 pb-1 text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground" title={group.hint}>
                     {group.label}
                   </p>
                   <div className="space-y-0.5">
@@ -134,39 +166,30 @@ export function AppTopNav({ user, brand = null }: { user: TopNavUser; brand?: To
         )}
 
         <nav aria-label="Điều hướng chính" className="hidden min-w-0 items-center gap-0.5 overflow-x-auto [scrollbar-width:none] xl:flex [&::-webkit-scrollbar]:hidden">
-          {groups.map((group) => {
-            const holdsActive = group.items.some((i) => i.href === activeHref);
-            const label = PILL_LABEL[group.zone] ?? group.label;
-            const pill = cn(
-              "flex h-10 shrink-0 items-center gap-1 whitespace-nowrap rounded-full px-3 text-[13.5px] 2xl:px-3.5 outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring",
-              holdsActive ? "bg-ink font-semibold text-ink-foreground" : "font-medium text-muted-foreground hover:bg-muted hover:text-foreground data-[state=open]:bg-muted data-[state=open]:text-foreground",
-            );
+          {primary.map((item) => {
+            const active = item.href === activeHref;
             return (
-              <DropdownMenu key={group.zone}>
-                <DropdownMenuTrigger className={pill}>
-                  {label}
-                  <ChevronDown className="size-3.5 opacity-60" aria-hidden />
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="start" sideOffset={10} className="w-72 rounded-2xl p-2">
-                  <DropdownMenuLabel className="px-2.5 pb-1.5 pt-1">
-                    <span className="block text-[13px] font-bold">{group.label}</span>
-                    <span className="block text-[11.5px] font-normal leading-4 text-muted-foreground">{group.hint}</span>
-                  </DropdownMenuLabel>
-                  {group.items.map((item) => (
-                    <DropdownMenuItem key={item.href} asChild className={itemClass(item.href === activeHref)}>
-                      <Link href={item.href} aria-current={item.href === activeHref ? "page" : undefined}>
-                        <ItemInner href={item.href} label={item.label} active={item.href === activeHref} />
-                      </Link>
-                    </DropdownMenuItem>
-                  ))}
-                </DropdownMenuContent>
-              </DropdownMenu>
+              <Link
+                key={item.href}
+                href={item.href}
+                aria-current={active ? "page" : undefined}
+                className={cn(
+                  "relative flex h-10 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full px-3 text-[14px] outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring 2xl:px-3.5",
+                  active ? "bg-ink font-semibold text-ink-foreground" : "font-medium text-muted-foreground hover:bg-muted hover:text-foreground",
+                )}
+              >
+                {item.label}
+                <LinkPending />
+                <LinkProgressReporter />
+              </Link>
             );
           })}
+          <AllFeaturesMenu workGroups={workGroups} adminGroups={adminGroups} activeHref={activeHref} highlight={!inPrimary && Boolean(activeHref)} />
         </nav>
 
         <div className="ml-auto flex shrink-0 items-center gap-1">
           <GlobalSearch user={user} />
+          <QuickCreate />
           <Suspense fallback={null}>
             <AiCopilot />
           </Suspense>
@@ -176,5 +199,87 @@ export function AppTopNav({ user, brand = null }: { user: TopNavUser; brand?: To
         </div>
       </div>
     </header>
+    {/*
+      THANH DƯỚI TRÊN ĐIỆN THOẠI — không phải menu máy tính thu nhỏ. Bốn mục chính của vai trò + "Thêm" (mở cùng ngăn kéo
+      menu), nằm trong vùng ngón cái. Đặt NGOÀI <header>: header có backdrop-blur, mà phần tử `fixed` bên trong một phần tử
+      có bộ lọc sẽ bám theo phần tử đó thay vì theo màn hình.
+    */}
+    {primary.length ? (
+      <nav aria-label="Điều hướng nhanh" className="fixed inset-x-0 bottom-0 z-30 border-t bg-card/95 pb-[env(safe-area-inset-bottom)] backdrop-blur md:hidden print:hidden">
+        <div className="grid grid-cols-5">
+          {primary.slice(0, 4).map((item) => {
+            const Icon = iconOf(item.href);
+            const active = item.href === activeHref;
+            return (
+              <Link key={item.href} href={item.href} aria-current={active ? "page" : undefined} className={cn("flex min-h-14 flex-col items-center justify-center gap-0.5 px-1 text-[11.5px]", active ? "font-semibold text-primary" : "text-muted-foreground")}>
+                <Icon className="size-5" aria-hidden />
+                <span className="max-w-full truncate">{item.label}</span>
+              </Link>
+            );
+          })}
+          <button type="button" onClick={() => setSheetOpen(true)} className={cn("flex min-h-14 flex-col items-center justify-center gap-0.5 px-1 text-[11.5px]", !inPrimary && activeHref ? "font-semibold text-primary" : "text-muted-foreground")}>
+            <LayoutGrid className="size-5" aria-hidden />
+            Thêm
+          </button>
+        </div>
+      </nav>
+    ) : null}
+    </>
+  );
+}
+
+type MenuGroup = ReturnType<typeof visibleGroups>[number];
+
+/**
+ * TẤT CẢ CHỨC NĂNG — một bảng, mọi phòng ban cạnh nhau, hai cú bấm tới bất kỳ trang nào. Thay cho chín viên thả xuống
+ * mà người dùng phải đoán đúng viên nào chứa trang mình cần. "Quản trị & cài đặt" tách riêng ở cuối.
+ */
+function AllFeaturesMenu({ workGroups, adminGroups, activeHref, highlight }: { workGroups: MenuGroup[]; adminGroups: MenuGroup[]; activeHref?: string; highlight: boolean }) {
+  const column = (group: MenuGroup) => (
+    <div key={group.zone} className="min-w-0">
+      <p className="px-2.5 pb-1 text-xs font-bold" title={group.hint}>
+        {PILL_LABEL[group.zone] ?? group.label}
+      </p>
+      <div className="space-y-0.5">
+        {group.items.map((item) => (
+          <DropdownMenuItem key={item.href} asChild className={cn(itemClass(item.href === activeHref), "py-1.5 text-[13.5px]")}>
+            <Link href={item.href} aria-current={item.href === activeHref ? "page" : undefined}>
+              <ItemInner href={item.href} label={item.label} active={item.href === activeHref} />
+            </Link>
+          </DropdownMenuItem>
+        ))}
+      </div>
+    </div>
+  );
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        className={cn(
+          "flex h-10 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full px-3 text-[14px] outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring",
+          highlight ? "bg-ink font-semibold text-ink-foreground" : "font-medium text-muted-foreground hover:bg-muted hover:text-foreground data-[state=open]:bg-muted data-[state=open]:text-foreground",
+        )}
+      >
+        <LayoutGrid className="size-4" aria-hidden />
+        Tất cả
+        <ChevronDown className="size-3.5 opacity-60" aria-hidden />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" sideOffset={10} className="max-h-[min(80vh,720px)] w-[min(1040px,calc(100vw-3rem))] overflow-y-auto rounded-2xl p-3">
+        <div className="grid grid-cols-2 gap-x-3 gap-y-4 lg:grid-cols-4">{workGroups.map(column)}</div>
+        {adminGroups.length ? (
+          <div className="mt-4 border-t pt-3">
+            <p className="px-2.5 pb-1 text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">Quản trị & cài đặt</p>
+            <div className="grid grid-cols-2 gap-x-3 lg:grid-cols-4">
+              {adminGroups.flatMap((g) => g.items).map((item) => (
+                <DropdownMenuItem key={item.href} asChild className={cn(itemClass(item.href === activeHref), "py-1.5 text-[13px]")}>
+                  <Link href={item.href} aria-current={item.href === activeHref ? "page" : undefined}>
+                    <ItemInner href={item.href} label={item.label} active={item.href === activeHref} />
+                  </Link>
+                </DropdownMenuItem>
+              ))}
+            </div>
+          </div>
+        ) : null}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }

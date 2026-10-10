@@ -35,7 +35,8 @@ export type StatTileProps = {
 };
 
 export function StatStrip({ items, className, columns = 4 }: { items: StatTileProps[]; className?: string; columns?: 2 | 3 | 4 | 5 }) {
-  const cols = { 2: "sm:grid-cols-2", 3: "sm:grid-cols-2 lg:grid-cols-3", 4: "sm:grid-cols-2 lg:grid-cols-4", 5: "sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5" }[columns];
+  // Điện thoại: HAI cột, không xếp một cột — bốn con số chồng nhau đã chiếm trọn màn hình đầu của trang Đơn hàng.
+  const cols = { 2: "grid-cols-2", 3: "grid-cols-2 lg:grid-cols-3", 4: "grid-cols-2 lg:grid-cols-4", 5: "grid-cols-2 lg:grid-cols-3 xl:grid-cols-5" }[columns];
   /*
     ĐƯỜNG KẺ LÀ KHE HỞ 1px, KHÔNG PHẢI VIỀN CỦA TỪNG Ô.
     Lưới này đổi số cột theo bề rộng màn hình. Nếu mỗi ô tự vẽ viền trái thì ô đầu của hàng thứ
@@ -55,16 +56,16 @@ export function StatStrip({ items, className, columns = 4 }: { items: StatTilePr
 export function StatTile({ label, value, note, hint, icon: Icon, tone = "default", href, className }: StatTileProps & { className?: string }) {
   const body = (
     <>
-      <p className="flex items-center gap-1.5 text-[11.5px] font-medium text-muted-foreground">
+      <p className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
         {Icon ? <Icon className="size-3.5 shrink-0 opacity-70" aria-hidden /> : null}
         <span className="truncate">{label}</span>
         {hint ? <InfoHint>{hint}</InfoHint> : null}
       </p>
-      <p className={cn("numeric mt-1 text-[20px] font-extrabold leading-6 tracking-[-0.02em]", valueTones[tone])}>{value}</p>
-      {note ? <p className="mt-0.5 truncate text-[11px] text-muted-foreground">{note}</p> : null}
+      <p className={cn("numeric mt-1 text-[18px] font-extrabold leading-6 tracking-[-0.02em] sm:text-[20px]", valueTones[tone])}>{value}</p>
+      {note ? <p className="mt-0.5 truncate text-xs text-muted-foreground">{note}</p> : null}
     </>
   );
-  const shell = cn("min-w-0 px-5 py-3.5", className);
+  const shell = cn("min-w-0 px-4 py-3 sm:px-5 sm:py-3.5", className);
   if (!href) return <div className={shell}>{body}</div>;
   return (
     <Link href={href} className={cn(shell, "block transition-colors hover:bg-row-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring")}>
