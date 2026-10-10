@@ -1837,3 +1837,4 @@
 {"at":"2026-10-10T20:13:56.229Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"CLAIM","mission":"owner-cancel-reconcile-apply","detail":"BLOCKED · 1 mẫu phạm vi · MEDIUM"}
 {"at":"2026-10-10T20:13:56.229Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"OVERLAP_ACCEPTED","mission":"owner-cancel-reconcile-apply","detail":"OVERLAP_ACCEPTED với order-cancel-consistency: phạm vi scripts/order-cancel-reconcile.ts — cách tích hợp: sứ mệnh quyết định, không sửa mã"}
 {"at":"2026-10-10T20:25:49.345Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"avatar-proxy","detail":"#791 @ 71e9ff016fb6 → f07514f74b18 (MERGE_NOW · MEDIUM · gates success)"}
+{"at":"2026-10-10T20:26:54.358Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DEPLOY_DISPATCHED","detail":"f07514f74b18 · run 38083762009 https://github.com/truyenhkm5group-stack/hkt/actions/runs/38083762009"}
