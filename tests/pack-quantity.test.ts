@@ -7,6 +7,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { gramsMentioned, packQuantityMistake, QUANTITY_HINT } from "@/lib/sales-chatbot/tools";
+import { DEFAULT_VOLUME_DISCOUNT, toUnitPacks, volumeDiscountFor, volumeDiscountPolicyText } from "@/lib/sales-chatbot/volume-discount";
 
 export function testPackQuantity() {
   assert.deepEqual(gramsMentioned("A lấy thử 2kg trc. Sđt 0903648768"), [2000]);
@@ -27,8 +28,26 @@ export function testPackQuantity() {
   assert.equal(packQuantityMistake([{ name: "Nước mắm", quantity: 2, weightGrams: null }], viet), null, "mẫu mã không rõ khối lượng ⇒ không đoán");
   assert.ok(/KHÔNG BAO GIỜ 2kg × 2/.test(QUANTITY_HINT));
 
+  // Luật gói đơn vị + giảm theo khối lượng (chủ shop 10/10/2026) — phần thuần.
+  const on = { enabled: true, unitGrams: 1000, minWeightGrams: 2000, amount: 20_000, mode: "ONCE" as const };
+  assert.deepEqual([1000, 2000, 3000, 4000, 5000].map((g) => volumeDiscountFor(g, on)), [0, 20_000, 20_000, 20_000, 20_000]);
+  assert.deepEqual([1000, 2000, 3000, 4000, 5000].map((g) => volumeDiscountFor(g, { ...on, mode: "PER_STEP" })), [0, 20_000, 20_000, 40_000, 40_000]);
+  assert.equal(volumeDiscountFor(null, on), 0, "không rõ khối lượng ⇒ không giảm (không đoán)");
+  assert.equal(volumeDiscountFor(4000, DEFAULT_VOLUME_DISCOUNT), 0, "mặc định TẮT");
+  const cat = [
+    { variantId: "1kg", productId: "cct", price: 280_000, weightGrams: 1000 },
+    { variantId: "2kg", productId: "cct", price: 540_000, weightGrams: 2000 },
+    { variantId: "05kg", productId: "cct", price: 140_000, weightGrams: 500, addOnOnly: true },
+    { variantId: "muc2", productId: "muc", price: 780_000, weightGrams: 2000 },
+  ];
+  assert.deepEqual(toUnitPacks([{ variantId: "2kg", quantity: 2 }, { variantId: "1kg", quantity: 1 }], cat, on), [{ variantId: "1kg", quantity: 5 }]);
+  assert.deepEqual(toUnitPacks([{ variantId: "05kg", quantity: 1 }], cat, on), [{ variantId: "05kg", quantity: 1 }], "gói 0,5kg bán kèm giữ nguyên");
+  assert.deepEqual(toUnitPacks([{ variantId: "muc2", quantity: 1 }], cat, on), [{ variantId: "muc2", quantity: 1 }], "món không có gói 1kg ⇒ giữ nguyên, không bịa mẫu mã");
+  assert.deepEqual(toUnitPacks([{ variantId: "2kg", quantity: 1 }], cat, { ...on, enabled: false }), [{ variantId: "2kg", quantity: 1 }], "luật tắt ⇒ không đổi gì");
+  assert.match(volumeDiscountPolicyText(on, (n) => `${n.toLocaleString("vi-VN")} ₫`), /từ 2kg .*20\.000 ₫/);
+
   const src = readFileSync("lib/sales-chatbot/tools.ts", "utf8");
-  assert.match(src, /const packMistake = v\.data\.items \? packQuantityMistake\(priced\.lines, ctx\.lastUserText\) : null;/, "lên / sửa đơn nháp đi qua phép kiểm");
+  assert.match(src, /const packMistake = v\.data\.items \? packQuantityMistake\(priced.asked, ctx\.lastUserText\) : null;/, "lên / sửa đơn nháp đi qua phép kiểm");
   assert.equal((src.match(/quantity: \{ type: "integer", minimum: 1, description: QUANTITY_HINT \}/g) ?? []).length, 2, "lược đồ create + update mô tả nghĩa của quantity");
   console.log("✓ Quy cách ≠ số lượng: «lấy 2kg» + mẫu mã 2kg ⇒ không bao giờ × 2 · «4kg» / «2 túi» / «x2» vẫn lên được · không rõ khối lượng ⇒ không đoán");
 }
