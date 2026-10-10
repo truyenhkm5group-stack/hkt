@@ -3,6 +3,7 @@ import Link from "next/link";
 import { isSalesAgentUser, shellAllows } from "@/lib/constants/saas-nav";
 import { AlertTriangle, Boxes, Download, PackagePlus, PackageX, Plus, ShoppingBag, Upload, Warehouse } from "lucide-react";
 import { ProductsTable } from "@/app/(dashboard)/products/products-table";
+import { ShellProductList } from "@/app/(dashboard)/products/shell-product-list";
 import { DataTableToolbar } from "@/components/data-table/toolbar";
 import { MetricCard } from "@/components/metric-card";
 import { PageHeader } from "@/components/page-header";
@@ -10,6 +11,7 @@ import { StatStrip } from "@/components/stat-tile";
 import { ModuleSyncButton } from "@/components/module-sync-button";
 import { Button } from "@/components/ui/button";
 import { PRODUCT_LIST_PAGE_SIZE } from "@/lib/constants/inventory";
+import { shellProductRow, warehouseHeadline } from "@/lib/constants/products-shell";
 import { formatNumber, formatVND } from "@/lib/format";
 import { listProducts, listWarehouses, productFacets, productSummary, PRODUCT_SORTABLE } from "@/lib/queries/products";
 import { parseListParams, type SearchParams } from "@/lib/search-params";
@@ -31,12 +33,86 @@ export default async function ProductsPage({ searchParams }: { searchParams: Pro
   const [{ rows, total, pageCount }, facets, summary, warehouses, copy, createGate, { profile }] = await Promise.all([listProducts(params), productFacets(params), productSummary(params), listWarehouses(), getBrandCopy(user), productCreateGate(user), readExperienceProfile()]);
   const exportQuery = new URLSearchParams(Object.entries(raw).flatMap(([k, v]) => (Array.isArray(v) ? v.map((x) => [k, x]) : v ? [[k, v]] : []))).toString();
 
+  /*
+    KHÁCH VỎ CHỐT ĐƠN: một danh sách gọn thay cho sổ kho 15 cột + 6 thẻ chỉ số kho. Cùng truy vấn, cùng con số (tồn khả
+    dụng của `listProducts()`); chỉ bỏ những gì người bán nhỏ không dùng để quyết định. «Nhập từ tệp» và «Nhập hàng /
+    kiểm kê» KHÔNG bị ẩn — xuống hàng phụ, vẫn theo đúng cổng quyền như bản ERP.
+  */
+  if (shell) {
+    const canImportFile = createGate.allowed && shellAllows(user, "/products/import");
+    const canReceipt = shellAllows(user, "/inventory/receipts");
+    return (
+      <div className="space-y-5">
+        <PageHeader
+          title="Sản phẩm"
+          description={`${formatNumber(summary.products)} sản phẩm · ${formatNumber(summary.selling)} mẫu mã đang bán`}
+          hint={
+            <>
+              <b>Tồn khả dụng</b> = hàng đã nhập kho − hàng đã gửi đi − đơn đã chốt chưa gửi. Mẫu mã chưa có phiếu nhập
+              hiện &ldquo;Chưa có phiếu nhập&rdquo; — chưa biết còn bao nhiêu, không phải hết hàng. Hàng hoàn chỉ cộng lại
+              vào tồn khi kho lập phiếu tái nhập.
+            </>
+          }
+          actions={
+            createGate.allowed && shellAllows(user, "/products/new") ? (
+              <Button asChild size="sm">
+                <Link href="/products/new">
+                  <Plus className="size-4" /> Thêm sản phẩm
+                </Link>
+              </Button>
+            ) : null
+          }
+        />
+        <div className="flex flex-wrap items-center gap-2">
+          {canImportFile ? (
+            <Button asChild variant="ghost" size="sm">
+              <Link href="/products/import">
+                <Upload className="size-4" /> Nhập từ tệp
+              </Link>
+            </Button>
+          ) : null}
+          {canReceipt ? (
+            <Button asChild variant="ghost" size="sm">
+              <Link href="/inventory/receipts">
+                <PackagePlus className="size-4" /> Nhập hàng / kiểm kê
+              </Link>
+            </Button>
+          ) : null}
+          <Button asChild variant="ghost" size="sm">
+            <a href={`/api/export/products?${exportQuery}`}>
+              <Download className="size-4" /> Xuất CSV
+            </a>
+          </Button>
+          <ModuleSyncButton viewer={user} job="pancake-products" label="Đồng bộ sản phẩm" />
+        </div>
+        <StatStrip
+          columns={3}
+          items={[
+            { label: "Mẫu mã đang bán", value: formatNumber(summary.selling), note: `trong ${formatNumber(summary.products)} sản phẩm`, icon: Boxes, href: "/products?status=selling" },
+            { label: "Hết hàng", value: formatNumber(summary.out), note: "đang bán mà tồn khả dụng ≤ 0", icon: PackageX, tone: summary.out ? ("rose" as const) : ("muted" as const), href: "/products?stock=out" },
+            { label: "Chưa có phiếu nhập", value: formatNumber(summary.unknownStock), note: "chưa biết tồn — nhập hàng để AI biết còn hay hết", icon: AlertTriangle, tone: summary.unknownStock ? ("amber" as const) : ("muted" as const) },
+          ]}
+        />
+        <DataTableToolbar
+          searchPlaceholder="Tên sản phẩm, SKU, màu, size…"
+          period={false}
+          facets={[
+            { key: "stock", label: "Tồn kho", options: facets.stock, single: true },
+            { key: "status", label: "Trạng thái", options: facets.status, single: true },
+          ]}
+          resultLabel={`${formatNumber(total)} mẫu mã phù hợp`}
+        />
+        <ShellProductList rows={rows.map(shellProductRow)} pageCount={pageCount} total={total} emptyDescription={copy.text("products.emptyList")} />
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-5">
       <PageHeader
-        eyebrow={shell ? undefined : "Kho"}
-        title={shell ? "Sản phẩm" : "Sản phẩm & tồn kho"}
-        description={`${formatNumber(warehouses.length)} kho`}
+        eyebrow="Kho"
+        title="Sản phẩm & tồn kho"
+        description={warehouseHeadline(warehouses.length)}
         hint={
           <>
             <b>SỔ KHO.</b> <b>Tồn thực tế</b> = Nhập mới + Tái nhập + Điều chỉnh − Xuất tay −{" "}
@@ -113,7 +189,7 @@ export default async function ProductsPage({ searchParams }: { searchParams: Pro
           size="lg"
           label="Giá trị tồn kho"
           value={formatVND(summary.stockValue, { compact: true })}
-          note={`${formatNumber(summary.stockUnits)} sản phẩm × giá nhập gần nhất`}
+          note={`${formatNumber(summary.stockUnits)} đơn vị hàng × giá nhập gần nhất`}
           hint="Vốn đang nằm trong kho, tính theo giá nhập gần nhất của từng mẫu mã. Không gồm hàng hoàn đang trên đường về vì hàng đó chưa được kho đếm."
           icon={Warehouse}
           tone="primary"

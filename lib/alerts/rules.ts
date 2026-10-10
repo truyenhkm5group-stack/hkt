@@ -717,7 +717,8 @@ export async function collectCandidates(): Promise<{ candidates: Candidate[]; ac
         */
         const vonTonDong = rest.reduce((t, r) => t + Number(r.goodsCost ?? 0), 0);
         const quaHan = rest.filter((r) => Date.now() - new Date(r.returnedAt ?? cutoff).getTime() >= cfg.returnInspectionDays * 86_400_000).length;
-        const trieu = (n: number) => `${(n / 1_000_000).toFixed(1).replace(/\.0$/, "")} triệu`;
+        // Dạng gọn qua bộ định dạng chung (dấu phẩy thập phân «77,5 tr») — bản tự ghép cũ in «77.5 triệu».
+        const trieu = (n: number) => formatVND(n, { compact: true });
         candidates.push({
           kind: "RETURN_PENDING_INSPECTION",
           severity: "warning",
