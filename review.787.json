@@ -1,0 +1,8 @@
+{
+  "pr": 787,
+  "sha": "1a9e4095e5667014ce8ed77725a989d94c66441f",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-10T17:59:19.238Z",
+  "note": "Diff nhỏ: khoá bộ đệm lỗi model = tổ chức:kết nối:nhà cung cấp:model, scope bắt buộc (thiếu là lỗi biên dịch), chỗ gọi duy nhất truyền org.code + key; không đổi hành vi khi không lỗi"
+}
