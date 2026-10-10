@@ -115,7 +115,7 @@ export function pendingThreadOf(conv: unknown): PendingThread | null {
   const name = str((c.from as { name?: unknown } | undefined)?.name) || str(customers[0]?.name);
   const updated = pancakeTime(c.updated_at);
   const avatar = pancakeAvatarFactsOf(c);
-  return { id, name: name.slice(0, 200), phones: pancakePhonesOf(c), avatarUrl: avatar.url, avatarOutcome: avatar.outcome, updatedAt: updated ? updated.toISOString() : null };
+  return { id, name: name.slice(0, 200), phones: pancakePhonesOf(c), avatarUrl: avatar.url, avatarOutcome: avatar.outcome, ...(avatar.ref ? { avatarRef: avatar.ref } : {}), updatedAt: updated ? updated.toISOString() : null };
 }
 
 export type PlannedHistoryMessage = { messageId: string; side: "CUSTOMER" | "PAGE"; text: string; at: Date; imageUrls: string[]; customerName: string | null };
@@ -312,7 +312,7 @@ export async function finishThread(pageId: string, thread: PendingThread, phones
   // Ảnh + lý do không có ảnh (`state.pancakeAvatar`) — cùng bản vá với đường webhook (`avatar-profile.ts::pancakeAvatarPatch`).
   // Luồng không mang dữ kiện Pancake (nhập lịch sử Meta trực tiếp) ⇒ không ghi gì: thiếu dữ kiện không phải «Pancake không có ảnh».
   const outcome = thread.avatarUrl ? "URL" : thread.avatarOutcome;
-  const avatarPatch = outcome ? pancakeAvatarPatch(st, { url: thread.avatarUrl, outcome, via: "HISTORY" }, now) : null;
+  const avatarPatch = outcome ? pancakeAvatarPatch(st, { url: thread.avatarUrl, outcome, via: "HISTORY", ...(thread.avatarRef ? { ref: thread.avatarRef } : {}) }, now) : null;
   if (avatarPatch) Object.assign(patch, avatarPatch);
   await db
     .update(c)
