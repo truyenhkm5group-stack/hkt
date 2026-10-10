@@ -1,0 +1,28 @@
+{
+  "schema": 1,
+  "mission_id": "saas-value-attribution",
+  "title": "Trung tâm giá trị SaaS PR-2: bộ đọc quy kết thêm thuộc tính chồng thu hồi/upsell đã giao + danh sách đơn↔hội thoại",
+  "business_goal": "",
+  "status": "RUNNING",
+  "priority": "P1",
+  "risk": "MEDIUM",
+  "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "worker": null,
+  "worktree": null,
+  "branch": "feat/saas-value-attribution",
+  "base_sha": "521b81325e28ad95ea0e9373ebfed3094bad1782",
+  "domains": [],
+  "owned_paths": [
+    "lib/sales-chatbot/attribution.ts",
+    "lib/sales-chatbot/attribution-shared.ts",
+    "tests/order-attribution.test.ts"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-10T17:16:09.419Z",
+  "updated_at": "2026-10-10T17:16:09.419Z",
+  "last_heartbeat": "2026-10-10T17:16:09.419Z",
+  "definition_of_done": []
+}
