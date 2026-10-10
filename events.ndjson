@@ -1863,3 +1863,4 @@
 {"at":"2026-10-10T21:34:43.453Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#790 @ 8ca933d322b0 · Nối PR-2 không xung đột; chồng vẫn là tập con (bài kiểm khoá tổng/nhãn/quy công/bội số không đổi khi đổi số chồng); null≠0 cho tiền bán thêm thiếu. Phải gộp SAU #785"}
 {"at":"2026-10-10T21:44:39.100Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"saas-value-attribution","detail":"#785 @ 0f9a38d78bf8 → f392bdbbced8 (MERGE_NOW · MEDIUM · gates success)"}
 {"at":"2026-10-10T21:49:50.621Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"ai-fallback-tenant","detail":"#787 @ 08131c631944 → dcd36724b258 (MERGE_NOW · MEDIUM · gates success)"}
+{"at":"2026-10-10T21:50:10.102Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"ai-fallback-tenant","detail":"#787 @ 08131c631944 → dcd36724b258 (MERGE_NOW · MEDIUM · gates success)"}
