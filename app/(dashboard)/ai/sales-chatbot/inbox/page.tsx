@@ -46,8 +46,8 @@ export const metadata = { title: "Hộp thư khách" };
 /**
  * HỘP THƯ KHÁCH (M8) — mọi tin Facebook / Instagram / Zalo OA / chat web ở MỘT chỗ; nhân viên đọc và trả lời ngay trong ERP.
  * Bố cục ba cột cao bằng màn hình (danh sách · khung chat · thông tin khách), mỗi cột tự cuộn. Không bỏ sót khách: hội thoại có
- * mặt NGAY khi khách nhắn (kể cả bot tắt / nhân viên đã trả lời ngoài ERP / tin nhãn dán · ghi âm), «Chưa đọc» = khách nhắn sau
- * lần cuối NHÂN VIÊN mở / trả lời hội thoại — AI trả lời KHÔNG xoá (chủ shop 10/10/2026; nghĩa của mọi thẻ ở
+ * mặt NGAY khi khách nhắn (kể cả bot tắt / nhân viên đã trả lời ngoài ERP / tin nhãn dán · ghi âm), «Tin khách chưa đọc» = có tin
+ * KHÁCH thật sau con trỏ đọc của CHÍNH người xem — AI trả lời KHÔNG xoá, tin AI / NV / page không tạo (chủ shop 10/10/2026; nghĩa của mọi thẻ ở
  * `lib/sales-chatbot/inbox-states.ts`), «Chờ trả lời» xếp khách chờ lâu nhất lên đầu, tiêu đề tab đếm khách đang chờ + âm báo khi
  * có tin mới, tự làm mới.
  */
@@ -75,9 +75,10 @@ export default async function SalesInboxPage({ searchParams }: { searchParams: P
   // NHIỀU PAGE: một hộp thư chung cho mọi page; chọn một page là LỌC trên cùng hội thoại, không phải một hộp thư thứ hai.
   const pages = await inboxPages();
   const page = pages.some((p) => p.id === one("pg")) ? one("pg") : null;
-  // Mở hội thoại TRƯỚC (đánh dấu đã đọc) rồi mới đọc danh sách — không thì hội thoại đang mở vẫn hiện «chưa đọc».
-  // Workspace KHÁCH: lý do AI không trả lời + dấu vết từng tin lọc ở MÁY CHỦ trước khi vào props (lib/saas/visibility.ts).
+  // Nạp hội thoại KHÔNG đánh dấu đọc (P0.3, 10/10/2026 tối): khung chat hiện xong mới gửi tin khách cuối cùng nó đã hiện về
+  // `/api/ai-sales/inbox-read`; danh sách vá theo xác nhận đó (inbox-read-shared.ts). Workspace KHÁCH: lý do AI không trả lời + dấu vết từng tin lọc ở MÁY CHỦ trước khi vào props (lib/saas/visibility.ts).
   // Bấm sang hội thoại khác KHÔNG đi qua đây (thread-pane.tsx — chỉ tải hội thoại); đây là lối mở bằng đường dẫn / tự làm mới.
+  // «Chưa đọc» trên trang là của NGƯỜI ĐANG XEM (`personalUnreadSql`, con trỏ riêng — inbox-states.ts).
   const thread = selected ? await inboxThreadPayload(user, selected) : null;
   const canManage = can(user, "ai_sales:manage");
   const [list, users, assignees, pack, routes, cooldown, orderGate, bulkCount] = await Promise.all([
@@ -130,6 +131,7 @@ export default async function SalesInboxPage({ searchParams }: { searchParams: P
             <InboxFilters
               state={state}
               counts={list.counts}
+              unreadStamp={list.unreadStamp}
               phoneCount={list.phoneCount}
               levelCounts={list.levelCounts}
               levels={levels}
@@ -138,7 +140,7 @@ export default async function SalesInboxPage({ searchParams }: { searchParams: P
               users={users.length ? users : assignees}
               tools={
                 <>
-                  <InboxAutoRefresh waiting={list.counts.UNANSWERED} unread={list.counts.UNREAD} compact />
+                  <InboxAutoRefresh waiting={list.counts.UNANSWERED} unread={list.counts.UNREAD} unreadStamp={list.unreadStamp} compact />
                   <Link href="/ai/sales-chatbot" className="inline-flex size-8 shrink-0 items-center justify-center rounded-md border border-foreground/15 bg-background text-muted-foreground hover:bg-muted hover:text-foreground" title={`Cấu hình chatbot — ${description}`} aria-label="Cấu hình chatbot">
                     <Settings2 className="size-4" />
                   </Link>
