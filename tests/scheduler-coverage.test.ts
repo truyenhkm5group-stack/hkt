@@ -38,6 +38,7 @@ const KHONG_CAN_LICH: Record<string, string> = {
   "pancake-org": "Pancake POS của tổ chức KHÁCH (F1): dữ liệu về tức thời qua webhook theo tổ chức; job chỉ là nút «Đồng bộ ngay». Lịch định kỳ cho mọi tổ chức khách là đổi bộ lập lịch trên máy 2 nhân — quyết định hạ tầng của chủ nền tảng (AGENTS.md mục 7, docs/platform/scale-plan.md)",
   "canonical-backfill": "dựng lại trạng thái vận đơn hàng loạt, mặc định chạy thử; ghi thật phải có người quyết",
   "messenger-profile-backfill": "lấp dần ảnh đại diện Messenger trực tiếp (gọi Graph, có trần tốc độ) — chạy tay qua ops run-job / nút đồng bộ. Đưa vào lịch là đổi bộ lập lịch và thêm lượt gọi Meta định kỳ cho mọi tổ chức — việc chủ shop duyệt (AGENTS.md mục 7)",
+  "tech-registry-sync": "chiếu sổ Tech Room (ai-control/registry) vào /tech — chạy tay bằng nút «Đọc lại sổ» trên /tech/missions và /tech/needs-owner hoặc ops run-job. Lịch 10 phút là đổi lịch scheduler, việc chủ shop duyệt (AGENTS.md §7)",
   // Chạy LỒNG trong job khác — có người chạy, chỉ là không trực tiếp trong bộ lập lịch.
   "model-registry": "chạy lồng cuối `pancake-products` (lib/sync/jobs.ts → modelRegistryFollowUp), mỗi 30 phút; nút trên /models vẫn chạy tay. Lịch RIÊNG là đổi lịch scheduler — việc chủ shop duyệt (AGENTS.md mục 7)",
   "failed-delivery": "chạy lồng trong `alerts` (lib/alerts/rules.ts), mỗi 10 phút",

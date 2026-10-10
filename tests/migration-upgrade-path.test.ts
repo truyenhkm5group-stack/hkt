@@ -187,6 +187,7 @@ const MOI = [
   "0237_saas_ops_signals",
   "0238_variant_add_on_only",
   "0239_sales_chat_reads",
+  "0240_tech_registry_projection",
 ] as const;
 
 /*
