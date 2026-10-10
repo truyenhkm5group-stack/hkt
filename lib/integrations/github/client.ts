@@ -34,6 +34,7 @@ import { DISPATCHABLE_WORKFLOWS } from "@/lib/constants/agent-dispatch";
 import { assertHomeCredentials } from "@/lib/platform/credentials";
 
 const API = "https://api.github.com";
+const RAW = "https://raw.githubusercontent.com";
 const TIMEOUT_MS = 20_000;
 
 type FetchLike = typeof fetch;
@@ -155,11 +156,24 @@ function rateLimited(res: { status: number; headers: { get(name: string): string
 }
 
 async function get<T>(path: string): Promise<T> {
+  const res = await request(`/repos/{repo}${path}`, {});
+  return (await res.json()) as T;
+}
+
+/**
+ * MỘT lượt `GET` tới GitHub — nơi DUY NHẤT quyết định chế độ xác thực, hạn chờ và cách đọc lỗi. `url` bắt đầu bằng
+ * `/` là đường của api.github.com (`{repo}` được thay bằng tên kho); bắt đầu bằng `https://raw.githubusercontent.com/`
+ * là tệp thô của kho. `etag` gửi kèm `If-None-Match`: GitHub trả 304 (không tốn hạn mức) khi không có gì mới — 304
+ * KHÔNG phải lỗi và được trả về cho nơi gọi.
+ */
+async function request(url: string, opts: { etag?: string | null; accept?: string; notFoundHint?: string }): Promise<Awaited<ReturnType<FetchLike>>> {
   // Token GitHub là của NGƯỜI VẬN HÀNH NỀN TẢNG, chỉ hợp lệ trong ngữ cảnh tổ chức nhà (integration-inventory §2.2).
   await assertHomeCredentials("github");
   const t = token();
   const r = repo();
   if (!r) throw new GithubError("NOT_CONFIGURED", githubConfig().reason ?? "Chưa cấu hình GitHub.");
+  const full = url.startsWith("/") ? `${API}${url.replace("{repo}", r)}` : url.replace("{repo}", r);
+  if (!full.startsWith(`${API}/`) && !full.startsWith(`${RAW}/`)) throw new GithubError("HTTP", "Từ chối gọi ra ngoài GitHub.");
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
@@ -169,19 +183,21 @@ async function get<T>(path: string): Promise<T> {
       không phải là "gọi ẩn danh", GitHub trả 401 cho nó. Đây là chỗ duy nhất quyết định chế độ.
     */
     const headers: Record<string, string> = {
-      Accept: "application/vnd.github+json",
+      Accept: opts.accept ?? "application/vnd.github+json",
       "X-GitHub-Api-Version": "2022-11-28",
       "User-Agent": "vnxcommerce-erp",
     };
     if (t) headers.Authorization = `Bearer ${t}`;
+    if (opts.etag) headers["If-None-Match"] = opts.etag;
 
     let res: Awaited<ReturnType<FetchLike>>;
     try {
-      res = await (fetchImpl ?? fetch)(`${API}/repos/${r}${path}`, { method: "GET", headers, signal: controller.signal, cache: "no-store" });
+      res = await (fetchImpl ?? fetch)(full, { method: "GET", headers, signal: controller.signal, cache: "no-store" });
     } catch (e) {
       const m = e instanceof Error ? e.message : String(e);
       throw new GithubError("NETWORK", controller.signal.aborted ? `Hết ${TIMEOUT_MS / 1000} giây chờ GitHub trả lời.` : `Không gọi được GitHub: ${m}`);
     }
+    if (res.status === 304 && opts.etag) return res;
     if (!res.ok) {
       const body = await res.text().catch(() => "");
       /*
@@ -216,13 +232,13 @@ async function get<T>(path: string): Promise<T> {
       if (res.status === 404) {
         throw new GithubError(
           "NOT_FOUND",
-          `GitHub không thấy \`${r}\` hoặc tệp workflow \`${deployWorkflowFile()}\` (404). Kiểm tra ERP_GITHUB_REPO và ERP_GITHUB_DEPLOY_WORKFLOW${t ? "" : " — nếu kho là PRIVATE thì lượt gọi ẩn danh luôn thấy 404, lúc đó mới cần token"}.`,
+          `GitHub không thấy ${opts.notFoundHint ?? `\`${r}\` hoặc tệp workflow \`${deployWorkflowFile()}\``} (404). Kiểm tra ERP_GITHUB_REPO${opts.notFoundHint ? "" : " và ERP_GITHUB_DEPLOY_WORKFLOW"}${t ? "" : " — nếu kho là PRIVATE thì lượt gọi ẩn danh luôn thấy 404, lúc đó mới cần token"}.`,
           404,
         );
       }
       throw new GithubError("HTTP", `GitHub trả ${res.status}${message ? `: ${message.slice(0, 200)}` : ""}`, res.status);
     }
-    return (await res.json()) as T;
+    return res;
   } finally {
     clearTimeout(timer);
   }
@@ -448,4 +464,48 @@ export async function listPullReviews(number: number): Promise<GithubReview[]> {
     state: (r.state ?? "").toUpperCase(),
     submittedAt: r.submitted_at ? new Date(r.submitted_at) : null,
   }));
+}
+
+/* ═════════════════════ SỔ ĐIỀU PHỐI (`ai-control/registry`) — VẪN CHỈ ĐỌC ═════════════════════ */
+
+/**
+ * Ba lượt đọc cho phép chiếu sổ Tech Room (`lib/tech/registry-sync.ts`), tiết kiệm hạn mức theo thứ tự:
+ *
+ *  1. `readBranchHead` — SHA commit đầu nhánh, gửi `If-None-Match`. Sổ không đổi ⇒ 304, không tốn hạn mức, dừng.
+ *  2. `readTreeAt` — liệt kê cây PHẲNG của ĐÚNG commit đó (mỗi tệp kèm SHA blob). Một lượt gọi.
+ *  3. `readRawFile` — tải nội dung tệp ĐÃ ĐỔI qua raw.githubusercontent.com theo SHA COMMIT (bất biến, không bị
+ *     CDN trả bản cũ) — đường này không ăn vào hạn mức REST, nên lượt nạp đầu (≈160 tệp) không đốt sạch 60 lượt/giờ.
+ *
+ * Tên nhánh / đường dẫn tệp đi vào URL ⇒ kiểm dạng chặt, không nhận `..`.
+ */
+const REF_SAFE = /^(?!.*\.\.)[A-Za-z0-9._/-]{1,120}$/;
+const SHA40 = /^[0-9a-f]{40}$/;
+
+export type GithubBranchHead = { notModified: true } | { notModified: false; sha: string; etag: string | null };
+
+export async function readBranchHead(branch: string, etag: string | null): Promise<GithubBranchHead> {
+  if (!REF_SAFE.test(branch)) throw new GithubError("HTTP", "Tên nhánh không hợp lệ.");
+  const res = await request(`/repos/{repo}/commits/${branch}`, { etag, accept: "application/vnd.github.sha", notFoundHint: `nhánh \`${branch}\`` });
+  if (res.status === 304) return { notModified: true };
+  const sha = (await res.text()).trim();
+  if (!SHA40.test(sha)) throw new GithubError("HTTP", "GitHub trả SHA commit sai dạng.");
+  return { notModified: false, sha, etag: res.headers.get("etag") };
+}
+
+export type GithubTreeEntry = { path: string; type: string; sha: string; size: number | null };
+
+export async function readTreeAt(commitSha: string): Promise<{ entries: GithubTreeEntry[]; truncated: boolean }> {
+  if (!SHA40.test(commitSha)) throw new GithubError("HTTP", "SHA commit không hợp lệ.");
+  const res = await request(`/repos/{repo}/git/trees/${commitSha}`, { notFoundHint: `cây của commit ${commitSha.slice(0, 7)}` });
+  const data = (await res.json()) as { tree?: { path?: string; type?: string; sha?: string; size?: number }[]; truncated?: boolean };
+  return {
+    entries: (data.tree ?? []).map((e) => ({ path: e.path ?? "", type: e.type ?? "", sha: e.sha ?? "", size: typeof e.size === "number" ? e.size : null })),
+    truncated: data.truncated === true,
+  };
+}
+
+export async function readRawFile(commitSha: string, filePath: string): Promise<string> {
+  if (!SHA40.test(commitSha) || !REF_SAFE.test(filePath)) throw new GithubError("HTTP", "Đường dẫn tệp không hợp lệ.");
+  const res = await request(`${RAW}/{repo}/${commitSha}/${filePath}`, { accept: "text/plain", notFoundHint: `tệp \`${filePath}\`` });
+  return res.text();
 }

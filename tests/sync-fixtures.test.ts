@@ -75,6 +75,7 @@ import { testTechControlPlaneGoalsDb, testTechControlPlaneVocabulary } from "./t
 import { testTechWorkerDb, testTechWorkerPure } from "./tech-worker.test";
 import { testTechDeliveryDb, testTechDeliveryPure } from "./tech-delivery.test";
 import { testTechPolicyDb, testTechPolicyPure } from "./tech-policy.test";
+import { testTechMissionControlDb, testTechMissionControlPure, testTechMissionControlSourceGuards } from "./tech-mission-control.test";
 import { testAgentRunner, testAgentSandbox, testGithubDeploymentSync, testPhase2aBarriers, testPhase2aSourceGuards, testTechWorkProjection } from "./tech-phase2a.test";
 import { cleanupPrProjectionFixtures, testGithubPrSync, testPrPureMappers, testSyncIncidentPure, testSyncIncidentWatch } from "./tech-pr-projection.test";
 import { cleanupAgentIngestFixtures, testAgentIngestDb, testAgentIngestPure, testAgentIngestSourceGuards } from "./agent-run-ingest.test";
@@ -2515,6 +2516,8 @@ async function main() {
   await testTechWorkerDb();
   await testTechDeliveryDb();
   await testTechPolicyDb();
+  // Mission Control: phép chiếu sổ Tech Room (GitHub giả, không mạng) — tự dọn hai bảng tech_registry_* của nó.
+  await testTechMissionControlDb();
   /*
     PHASE 2A. Chạy ngay sau mặt phẳng điều khiển và tự dọn bằng tiền tố `p2a-`. Ba khối đầu đụng
     CSDL; khối runner còn dựng KHO GIT TẠM và chạy tiến trình con thật (`npm run typecheck` trong
@@ -2719,6 +2722,8 @@ async function main() {
   testTechWorkerPure();
   testTechDeliveryPure();
   testTechPolicyPure();
+  testTechMissionControlPure();
+  testTechMissionControlSourceGuards();
   testTechPermissions();
   testTechHealthParsing();
   testRepoIntegrity();
