@@ -1,0 +1,31 @@
+{
+  "schema": 1,
+  "mission_id": "sales-claim-guard",
+  "title": "P0 L0+L1 vòng đời khách: máy chủ chặn AI khẳng định «đã nhận tiền» / «đã chốt» khi nguồn chưa xác nhận, ảnh chuyển khoản ⇒ CHƯA XÁC MINH + chuyển người; script ops đếm mẫu lỗi (ca HSLC Thiên Lý)",
+  "business_goal": "",
+  "status": "RUNNING",
+  "priority": "P2",
+  "risk": "MEDIUM",
+  "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "worker": null,
+  "worktree": null,
+  "branch": "fix/sales-claim-guard",
+  "base_sha": "889d6e559c7fd8c10081120adeafc71822f38685",
+  "domains": [],
+  "owned_paths": [
+    "lib/sales-chatbot/claim-guard.ts",
+    "lib/sales-chatbot/vision.ts",
+    "lib/sales-chatbot/quick-replies.ts",
+    "lib/sales-chatbot/engine.ts",
+    "scripts/sales-lifecycle-audit.ts",
+    "tests/sales-claim-guard.test.ts"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-10T16:13:05.521Z",
+  "updated_at": "2026-10-10T16:13:05.521Z",
+  "last_heartbeat": "2026-10-10T16:13:05.521Z",
+  "definition_of_done": []
+}
