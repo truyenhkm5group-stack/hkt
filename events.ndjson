@@ -1444,3 +1444,4 @@
 {"at":"2026-10-10T07:45:53.291Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"board-r2","detail":"docs/board-r2 @ a920f3fd8951 · 1 lệnh kiểm thử"}
 {"at":"2026-10-10T07:46:23.427Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"board-r2","detail":"#772 cho docs/board-r2 @ a920f3fd8951"}
 {"at":"2026-10-10T07:46:47.960Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#772 @ a920f3fd8951 · Chỉ tài liệu: điểm Launch Gate khớp bằng chứng (E2E 38035198098, ảnh production ngoài kho), không ảnh dữ liệu khách vào kho"}
+{"at":"2026-10-10T08:03:46.694Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DEPLOY_DISPATCHED","detail":"3e853bd4433a · run 38036559866 https://github.com/truyenhkm5group-stack/hkt/actions/runs/38036559866"}
