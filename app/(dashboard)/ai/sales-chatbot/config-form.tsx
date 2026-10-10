@@ -51,6 +51,11 @@ export function ChatbotConfigForm({
   const [freeMin, setFreeMin] = useState(config.freeShipping.minSubtotal === null ? "" : String(config.freeShipping.minSubtotal));
   const [freeKg, setFreeKg] = useState(config.freeShipping.minWeightGrams === null ? "" : String(config.freeShipping.minWeightGrams / 1000).replace(".", ","));
   const [freeAreas, setFreeAreas] = useState(config.freeShipping.areas.join("\n"));
+  // Giảm theo khối lượng: nhập kg / đồng dạng chữ, đổi sang số lúc lưu.
+  const kgStr = (g: number) => String(g / 1000).replace(".", ",");
+  const [vdUnit, setVdUnit] = useState(kgStr(config.volumeDiscount.unitGrams));
+  const [vdMin, setVdMin] = useState(kgStr(config.volumeDiscount.minWeightGrams));
+  const [vdAmount, setVdAmount] = useState(config.volumeDiscount.amount ? String(config.volumeDiscount.amount) : "");
   const [pending, start] = useTransition();
   const set = <K extends keyof CustomerChatbotConfig>(k: K, v: CustomerChatbotConfig[K]) => setC((s) => ({ ...s, [k]: v }));
   const setBooking = (patch: Partial<SalesChatbotConfig["booking"]>) => set("booking", { ...c.booking, ...patch });
@@ -71,8 +76,16 @@ export function ChatbotConfigForm({
       }
       const areas = [...new Set(freeAreas.split(/[\n,;]/).map((x) => x.trim()).filter(Boolean))];
       const freeShipping = { ...c.freeShipping, minSubtotal, minWeightGrams: kg === null ? null : Math.round(kg * 1000), areas };
+      const unitKg = Number(vdUnit.trim().replace(",", "."));
+      const minKg = Number(vdMin.trim().replace(",", "."));
+      const amount = vdAmount.trim() === "" ? 0 : Number(vdAmount.replace(/[.,\s]/g, ""));
+      if (c.volumeDiscount.enabled && (!(Number.isFinite(unitKg) && unitKg > 0) || !(Number.isFinite(minKg) && minKg > 0) || !(Number.isSafeInteger(amount) && amount > 0))) {
+        toast.error("Giảm theo khối lượng: gói đơn vị và ngưỡng là số kg lớn hơn 0, số tiền giảm là số đồng nguyên lớn hơn 0.");
+        return;
+      }
+      const volumeDiscount = { ...c.volumeDiscount, unitGrams: Number.isFinite(unitKg) && unitKg > 0 ? Math.round(unitKg * 1000) : c.volumeDiscount.unitGrams, minWeightGrams: Number.isFinite(minKg) && minKg > 0 ? Math.round(minKg * 1000) : c.volumeDiscount.minWeightGrams, amount: Number.isSafeInteger(amount) && amount >= 0 ? amount : 0 };
       // Khách: không gửi ô động cơ AI nào — máy chủ giữ nguyên giá trị đang lưu.
-      const r = await saveSalesChatbotConfigAction({ ...c, ...(engineCfg ?? {}), shippingFee: ship, freeShipping, enabled: enabled ?? c.enabled });
+      const r = await saveSalesChatbotConfigAction({ ...c, ...(engineCfg ?? {}), shippingFee: ship, freeShipping, volumeDiscount, enabled: enabled ?? c.enabled });
       if ("error" in r) toast.error(r.error);
       else {
         if (enabled !== undefined) set("enabled", enabled);
@@ -179,6 +192,34 @@ export function ChatbotConfigForm({
               </div>
             </div>
             <p className="text-xs text-muted-foreground">Đạt MỘT trong hai ngưỡng VÀ địa chỉ có một tên trong danh sách ⇒ tóm tắt và đơn ghi «Miễn phí ship» (0 ₫). Chưa có / chưa khớp địa chỉ ⇒ bot nói «miễn ship nếu giao trong …». Khối lượng lấy từ khối lượng mẫu mã, chưa nhập thì đọc quy cách trong tên («Size 1kg», «500g»). Để trống khu vực = mọi nơi.</p>
+          </fieldset>
+          <fieldset className="space-y-2 rounded-md border p-3 sm:col-span-2" data-volume-discount>
+            <label className="flex items-center gap-2 text-sm font-medium">
+              <input type="checkbox" checked={c.volumeDiscount.enabled} onChange={(e) => set("volumeDiscount", { ...c.volumeDiscount, enabled: e.target.checked })} />
+              Bán theo gói đơn vị + giảm theo khối lượng
+            </label>
+            <div className="grid gap-2 sm:grid-cols-4">
+              <div className="space-y-1">
+                <Label htmlFor="cb-vd-unit" className="text-xs">Gói đơn vị (kg)</Label>
+                <Input id="cb-vd-unit" inputMode="decimal" value={vdUnit} placeholder="vd 1" onChange={(e) => setVdUnit(e.target.value)} />
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="cb-vd-min" className="text-xs">Cùng một món từ (kg)</Label>
+                <Input id="cb-vd-min" inputMode="decimal" value={vdMin} placeholder="vd 2" onChange={(e) => setVdMin(e.target.value)} />
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="cb-vd-amount" className="text-xs">Giảm (đồng)</Label>
+                <Input id="cb-vd-amount" inputMode="numeric" value={vdAmount} placeholder="vd 20000" onChange={(e) => setVdAmount(e.target.value)} />
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="cb-vd-mode" className="text-xs">Cách giảm</Label>
+                <select id="cb-vd-mode" className="h-9 w-full rounded-md border bg-background px-2 text-sm" value={c.volumeDiscount.mode} onChange={(e) => set("volumeDiscount", { ...c.volumeDiscount, mode: e.target.value === "PER_STEP" ? "PER_STEP" : "ONCE" })}>
+                  <option value="ONCE">Giảm một lần khi đạt ngưỡng</option>
+                  <option value="PER_STEP">Mỗi lần đủ ngưỡng giảm thêm</option>
+                </select>
+              </div>
+            </div>
+            <p className="text-xs text-muted-foreground">Bật: khách lấy N kg ⇒ bot lên N × gói đơn vị (gói lớn như «2kg» tự quy về 2 × gói 1kg), món nào đạt ngưỡng thì máy trừ tiền ngay trên đơn. Ví dụ gói 1kg 280.000 ₫, từ 2kg giảm 20.000 ₫: 2kg = 540.000 ₫; 4kg = 1.100.000 ₫ (giảm một lần) hoặc 1.080.000 ₫ (mỗi 2kg giảm thêm). Đang báo giá theo Bảng giá sỉ thì không giảm thêm.</p>
           </fieldset>
           <label className="flex items-start gap-2 rounded-lg border p-3 text-sm">
             <input type="checkbox" className="mt-1" checked={c.sellWithoutStockCheck} onChange={(e) => set("sellWithoutStockCheck", e.target.checked)} />

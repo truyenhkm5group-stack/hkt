@@ -1582,6 +1582,45 @@ async function testJourney() {
       const bnDraft = await executeTool("create_draft_order", { items: [{ variant_id: chaMuc, quantity: 1 }] }, shipCtx({ customer: { ...hn, address: "Số 31 Phố Thị Chung, TP Bắc Ninh" }, upsellSent: true }));
       assert.ok(/nếu giao trong/.test(bnDraft.content) && (JSON.parse(bnDraft.content) as { cod_total: number | null }).cod_total === null, `địa chỉ ngoài danh sách ⇒ không khẳng định miễn ship: ${bnDraft.content}`);
       assert.ok(/nhân viên sẽ báo sau/.test(JSON.parse((await executeTool("calculate_cart", { items: [{ variant_id: chaMuc, quantity: 1 }] }, rctx({}, "ok"))).content).shipping_text), "luật tắt ⇒ như cũ");
+      // BÁN THEO GÓI ĐƠN VỊ + GIẢM THEO KHỐI LƯỢNG (chủ shop HSLC 10/10/2026): danh mục thật của HSLC có chả cá thu 1kg = 280k và gói
+      // 2kg = 540k; bot từng lên «2kg × 2» = 1.080.000 ₫ («Việt Phệ») và «1kg × 2» = 560.000 ₫ đã báo 540k («Lê Long»). Luật bật ⇒
+      // MÁY CHỦ quy mọi gói lớn về N × 1kg và tự trừ 20k khi một món từ 2kg — AI chọn gói nào thì tiền vẫn đúng.
+      const cct = await createProductCore(admin, { name: "Chả cá thu", code: "CHA-CA-THU", unit: "gói", retailPrice: 280_000, cost: null, variants: [{ sku: "CCT-1KG", size: "1kg", color: "", retailPrice: 280_000, cost: null, selling: true }, { sku: "CCT-2KG", size: "2kg", color: "", retailPrice: 540_000, cost: null, selling: true }] });
+      assert.ok(cct.ok, JSON.stringify(cct));
+      const cctVs = await db.select({ id: schema.productVariants.id, sku: schema.productVariants.sku }).from(schema.productVariants).where(eq(schema.productVariants.productId, cct.id));
+      const cct1 = cctVs.find((x) => x.sku === "CCT-1KG")!.id;
+      const cct2 = cctVs.find((x) => x.sku === "CCT-2KG")!.id;
+      const vd = (mode: "ONCE" | "PER_STEP") => ({ ...parseSalesChatbotConfig(null), volumeDiscount: { enabled: true, unitGrams: 1000, minWeightGrams: 2000, amount: 20_000, mode } });
+      type CartV = { lines: { variant_id: string; quantity: number; discount?: number; line_total: number }[]; subtotal: number };
+      const cart = async (items: { variant_id: string; quantity: number }[], cfg: ReturnType<typeof parseSalesChatbotConfig>) => {
+        const r = await executeTool("calculate_cart", { items }, { ...rctx({}, "ok"), config: cfg });
+        assert.ok(!r.isError, r.content);
+        return JSON.parse(r.content) as CartV;
+      };
+      for (const [items, kg, once, step] of [
+        [[{ variant_id: cct2, quantity: 1 }], 2, 540_000, 540_000],
+        [[{ variant_id: cct1, quantity: 2 }], 2, 540_000, 540_000],
+        [[{ variant_id: cct1, quantity: 1 }, { variant_id: cct2, quantity: 1 }], 3, 820_000, 820_000],
+        [[{ variant_id: cct2, quantity: 2 }], 4, 1_100_000, 1_080_000],
+        [[{ variant_id: cct1, quantity: 1 }], 1, 280_000, 280_000],
+      ] as const) {
+        const a = await cart([...items], vd("ONCE"));
+        assert.deepEqual(a.lines.map((l) => [l.variant_id, l.quantity]), [[cct1, kg]], `${kg}kg ⇒ ĐÚNG ${kg} × gói 1kg: ${JSON.stringify(a.lines)}`);
+        assert.equal(a.subtotal, once, `${kg}kg, giảm một lần`);
+        assert.equal((await cart([...items], vd("PER_STEP"))).subtotal, step, `${kg}kg, mỗi 2kg giảm thêm`);
+      }
+      const mixed = await cart([{ variant_id: cct2, quantity: 1 }, { variant_id: chaMuc, quantity: 1 }], vd("ONCE"));
+      assert.equal(mixed.subtotal, 540_000 + 400_000, "chỉ món đạt 2kg được giảm — 1kg chả mực không");
+      assert.equal((await cart([{ variant_id: cct2, quantity: 1 }], parseSalesChatbotConfig(null))).subtotal, 540_000, "luật tắt ⇒ gói 2kg như cũ");
+      // Lên đơn: «lấy 2kg» mà AI gửi gói 2kg × 2 ⇒ chặn (không bao giờ thành 4kg); AI gửi gói 2kg × 1 ⇒ đơn ghi 2 × 1kg − 20.000.
+      const vdCtx = (last: string) => ({ ...rctx({ customer: hn, upsellSent: true }, last), config: vd("ONCE") });
+      const dbl = await executeTool("create_draft_order", { items: [{ variant_id: cct2, quantity: 2 }] }, vdCtx("2/363 Trần đại Nghĩa phường Tương Mai Hà Nội 2kg đt 0976797166"));
+      assert.ok(dbl.isError && /quantity = 1/.test(dbl.content), `«Lê Long» 2kg ⇒ không lên 2 gói 2kg: ${dbl.content}`);
+      const vdGood = await executeTool("create_draft_order", { items: [{ variant_id: cct2, quantity: 1 }] }, vdCtx("A lấy thử 2kg trc"));
+      const goodV = JSON.parse(vdGood.content) as CartV;
+      assert.ok(!vdGood.isError && goodV.subtotal === 540_000 && vdGood.state.draft?.lines.length === 1 && vdGood.state.draft.lines[0].variantId === cct1 && vdGood.state.draft.lines[0].quantity === 2, `đơn nháp ghi 2 × 1kg, 540.000 ₫: ${vdGood.content}`);
+      const four = await executeTool("create_draft_order", { items: [{ variant_id: cct2, quantity: 2 }] }, vdCtx("cho a 4kg nhé"));
+      assert.ok(!four.isError && (JSON.parse(four.content) as CartV).subtotal === 1_100_000, `khách nói 4kg ⇒ 4 × 1kg − 20k: ${four.content}`);
       assert.ok(!(await executeTool("create_draft_order", { items: [{ variant_id: chaMuc, quantity: 1 }] }, { ...rctx(savedC.state, "ok em"), quickReplies: [] })).isError, "shop chưa chọn câu upsell ⇒ không chặn");
       const savedDraft = await executeTool("create_draft_order", { items: [{ variant_id: chaMuc, quantity: 1 }] }, rctx({ ...savedC.state, upsellSent: true }, "ok em"));
       assert.ok(!savedDraft.isError && savedDraft.state.draft?.recipient.address === "Số 12 ngõ 5 Lê Lợi, phường Hà Đông", "đơn mang địa chỉ ĐẦY ĐỦ");

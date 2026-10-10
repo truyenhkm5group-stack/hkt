@@ -57,6 +57,7 @@ import { loadQuickReplySettings, markQuickReplyUsed, quickReplyByAi, quickReplyB
 import { repeatsRecent } from "@/lib/sales-chatbot/quick-replies-shared";
 import { findReturningCustomer, returningCustomerPrompt } from "@/lib/sales-chatbot/returning";
 import { freeShipPolicyText } from "@/lib/sales-chatbot/shipping";
+import { volumeDiscountPolicyText } from "@/lib/sales-chatbot/volume-discount";
 import { formatVND } from "@/lib/format";
 import { withTurnEvents } from "@/lib/sales-chatbot/events";
 import { FOOD_PACK, salesPackFor, type SalesPack } from "@/lib/sales-chatbot/packs";
@@ -149,7 +150,10 @@ export function messageTimeTag(at: Date): string {
 export function systemPrompt(cfg: SalesChatbotConfig, shopName: string, profile: string, channel: ChatChannel, playbook: string = "", quick: readonly PromptQuickReply[] = [], returning: string = "", booking: string = "", now: Date | null = null, pack: SalesPack = FOOD_PACK): string {
   const upsell = quick.find((q) => q.upsell);
   const freeShip = freeShipPolicyText(cfg.freeShipping, formatVND);
+  const volume = volumeDiscountPolicyText(cfg.volumeDiscount, formatVND);
   const shipping = [
+    // GIẢM THEO KHỐI LƯỢNG (10/10/2026): máy chủ quy gói lớn về N × gói đơn vị và tự trừ tiền — AI chỉ đọc lại số của công cụ.
+    volume ? `CHÍNH SÁCH GIẢM THEO KHỐI LƯỢNG của shop: ${volume}. Khách lấy N kg ⇒ lên N × gói ${cfg.volumeDiscount.unitGrams % 1000 === 0 ? `${cfg.volumeDiscount.unitGrams / 1000}kg` : `${cfg.volumeDiscount.unitGrams}g`} (máy chủ tự quy gói lớn và tự trừ tiền). Báo tổng tiền cho bất kỳ khối lượng nào: gọi calculate_cart rồi đọc ĐÚNG subtotal_text — KHÔNG tự nhân / cộng giá gói.` : "",
     freeShip ? `CHÍNH SÁCH MIỄN SHIP của shop (nói được khi khách hỏi ship / giao hàng): ${freeShip}. Miễn ship của MỘT đơn: đọc ĐÚNG shipping_text của calculate_cart / đơn nháp — không tự hứa khi công cụ chưa nói.` : "",
     cfg.shippingFee === null ? `Shop CHƯA khai phí ship cố định: đơn không được miễn ship ⇒ nói «phí ship nhân viên sẽ báo sau», KHÔNG tự đặt số.${freeShip ? " KHÔNG nói câu này với đơn đủ điều kiện miễn ship." : ""}` : "Phí ship theo chính sách shop — lấy đúng số trong kết quả calculate_cart / đơn nháp, không tự đặt.",
   ]

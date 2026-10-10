@@ -718,7 +718,7 @@ async function syncThread(a: {
   const created = await createOrderAsAgent(ORDER_SYNC_AGENT, {
     customerId: cust.id,
     stage: "NEW",
-    lines: priced.lines.map((l) => ({ variantId: l.variantId, quantity: l.quantity, unitPrice: l.unitPrice, discount: 0 })),
+    lines: priced.lines.map((l) => ({ variantId: l.variantId, quantity: l.quantity, unitPrice: l.unitPrice, discount: l.discount })),
     orderDiscount: 0,
     shippingFee: priced.shippingFee ?? 0,
     note: notes.join("\n").slice(0, 2000),

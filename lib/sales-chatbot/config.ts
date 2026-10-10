@@ -13,6 +13,7 @@ import type { AiBillingSource } from "@/lib/ai-usage/types";
 import { AI_CLASSES_CAN_NGUOI, classifyAiError, type AiErrorClass, type AiFailureClass } from "@/lib/constants/ai-incidents";
 import { bookingConfigZ, DEFAULT_BOOKING_CONFIG } from "@/lib/constants/booking";
 import { DEFAULT_FREE_SHIPPING } from "@/lib/sales-chatbot/shipping";
+import { DEFAULT_VOLUME_DISCOUNT } from "@/lib/sales-chatbot/volume-discount";
 
 export const SALES_CHATBOT_SETTING_KEY = "ai.salesChatbot";
 
@@ -177,6 +178,20 @@ export const salesChatbotConfigZ = z
       })
       .strict()
       .default(DEFAULT_FREE_SHIPPING),
+    /**
+     * BÁN THEO GÓI ĐƠN VỊ + GIẢM THEO KHỐI LƯỢNG (10/10/2026, lib/sales-chatbot/volume-discount.ts): gói lớn quy về N × gói đơn vị,
+     * đạt ngưỡng khối lượng của một món ⇒ máy chủ trừ tiền vào dòng hàng. Mặc định TẮT — chính sách giá là quyết định của chủ shop.
+     */
+    volumeDiscount: z
+      .object({
+        enabled: z.boolean(),
+        unitGrams: z.number().int().min(1).max(1_000_000),
+        minWeightGrams: z.number().int().min(1).max(1_000_000),
+        amount: z.number().int().min(0).max(100_000_000),
+        mode: z.enum(["ONCE", "PER_STEP"]),
+      })
+      .strict()
+      .default(DEFAULT_VOLUME_DISCOUNT),
     allowedTools: z.array(z.enum(SALES_TOOLS)).max(SALES_TOOLS.length),
     /** Khoá field tuỳ biến của SẢN PHẨM mà bot được đọc (quy cách, bảo quản…). Field không có ở đây bot không biết tới. */
     productFields: z.array(z.string().regex(/^[a-z][a-z0-9_]{1,40}$/)).max(30).default([]),
@@ -220,6 +235,7 @@ export const DEFAULT_SALES_CHATBOT_CONFIG: SalesChatbotConfig = {
   confirmation: "RECAP_AND_WAIT",
   shippingFee: null,
   freeShipping: DEFAULT_FREE_SHIPPING,
+  volumeDiscount: DEFAULT_VOLUME_DISCOUNT,
   allowedTools: [...SALES_TOOLS],
   productFields: ["package_size", "net_weight", "selling_unit", "food_category", "storage_instruction", "usage_instruction"],
   extraInstructions: "",
