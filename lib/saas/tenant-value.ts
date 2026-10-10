@@ -121,6 +121,8 @@ export type TenantValue = {
   checks: {
     /** Bốn nhãn cộng = đếm độc lập. `null` = không có đếm độc lập để so. */
     attributionSumMatches: boolean | null;
+    /** Thu hồi / bán thêm ⊂ AI tự chốt + góp công (số đơn và doanh thu đã giao). `null` = thiếu nguồn để so. */
+    overlaysWithinAiLabels: boolean | null;
   };
 };
 
@@ -263,7 +265,8 @@ export function buildTenantValue(input: TenantValueInput): TenantValue {
   // ───── GIÁ TRỊ KHÁCH NHẬN ─────
   const at = input.attribution;
   const t = at?.table ?? null;
-  const fu = at?.followup ?? null;
+  const rec = at?.recovered ?? null;
+  const up = at?.upsell ?? null;
   const c = d.assistedCredit;
   const auto = t?.AI_ONLY ?? null;
   const assisted = t?.AI_ASSISTED ?? null;
@@ -276,10 +279,18 @@ export function buildTenantValue(input: TenantValueInput): TenantValue {
   const sumMatches = total === null || indep === null ? null : total === indep;
   set("attributed_orders_total", { value: total, note: sumMatches === false ? `Lệch với đếm độc lập (${indep} đơn chốt) — quy kết đang sót / thừa đơn.` : undefined });
   const influencedOrders = auto && assisted ? auto.orders + assisted.orders : null;
+  const influencedRevenueAll = auto && assisted ? auto.deliveredRevenueVnd + assisted.deliveredRevenueVnd : null;
+  /** Thuộc tính chồng phải nằm TRONG nhãn AI (attributionOverlays chỉ gắn khi nhãn chính là AI) — lệch ⇒ báo, không im lặng. */
+  const overlaysWithinAiLabels = influencedOrders === null || influencedRevenueAll === null || !rec || !up ? null : rec.orders <= influencedOrders && up.orders <= influencedOrders && rec.deliveredRevenueVnd <= influencedRevenueAll;
   set("ai_influenced_orders", { value: influencedOrders, note: "AI tác động — không phải công của AI." });
-  set("ai_recovered_orders", { value: fu?.recoveredOrders ?? null, note: "Thuộc tính chồng — tập con của bốn nhãn, không cộng vào tổng." });
-  set("ai_upsell_orders", {});
-  set("incremental_upsell_revenue_delivered", {});
+  const overlayNote = "Thuộc tính chồng — tập con của nhãn AI, không cộng vào tổng.";
+  set("ai_recovered_orders", { value: rec?.orders ?? null, note: rec && rec.outsideAiLabels > 0 ? `${overlayNote} ${rec.outsideAiLabels} đơn thu hồi khác mang nhãn người bán — không tính công cho AI.` : overlayNote });
+  set("ai_upsell_orders", { value: up?.orders ?? null, note: overlayNote });
+  set("incremental_upsell_revenue_delivered", {
+    value: up?.deliveredAmountVnd ?? null,
+    numerator: up?.deliveredOrders ?? null,
+    note: up && up.deliveredAmountVnd === null ? `${up.deliveredAmountUnknown} đơn đã giao thiếu số tiền bán thêm — chưa biết, không cộng như 0.` : "Tập con của doanh thu quy cho AI — không cộng thêm.",
+  });
 
   set("ai_auto_closed_delivered_revenue", { value: auto?.deliveredRevenueVnd ?? null });
   set("ai_assisted_delivered_revenue", { value: assisted?.deliveredRevenueVnd ?? null });
@@ -289,7 +300,7 @@ export function buildTenantValue(input: TenantValueInput): TenantValue {
   const creditedNote = c === null ? "Chỉ AI tự chốt — AI góp công in riêng, chưa cộng (D2 chưa quyết)." : `AI tự chốt + ${c} × AI góp công (D2).`;
   const creditedRevenue = auto && part ? Math.round(auto.deliveredRevenueVnd + part.deliveredRevenueVnd) : null;
   set("ai_credited_delivered_revenue", { value: creditedRevenue, note: creditedNote });
-  set("ai_recovered_delivered_revenue", { value: fu?.recoveredDeliveredRevenueVnd ?? null, note: "Tập con của doanh thu quy kết — không cộng thêm." });
+  set("ai_recovered_delivered_revenue", { value: rec?.deliveredRevenueVnd ?? null, note: "Tập con của doanh thu quy cho AI — không cộng thêm." });
 
   const creditedDeliveredRevenue = auto && part ? auto.deliveredRevenueVnd + part.deliveredRevenueVnd : null;
   const creditedCosted = auto && part ? auto.costedRevenueVnd + part.costedRevenueVnd : null;
@@ -356,7 +367,7 @@ export function buildTenantValue(input: TenantValueInput): TenantValue {
   set("cost_per_conversation", { value: pf?.economics.aiCostPerConversationVnd ?? null, numerator: selling, denominator: pf?.cohorts.total.conversations ?? null, bound: pf?.economics.costIsLowerBound ? "LOWER" : "EXACT" });
   perUnit("cost_per_qualified_lead", pf ? pf.cohorts.total.identified : null);
   perUnit("cost_per_order", influencedOrders);
-  perUnit("cost_per_recovered_order", fu?.recoveredOrders ?? null);
+  perUnit("cost_per_recovered_order", rec?.orders ?? null);
   set("revenue_per_ai_cost", { value: creditedRevenue !== null && selling !== null && selling > 0 ? creditedRevenue / selling : null, numerator: creditedRevenue, denominator: selling, bound: sellingLower ? "UPPER" : "EXACT", provisional: isProv("D2") });
   set("gross_profit_per_ai_cost", { value: creditedGp !== null && selling !== null && selling > 0 ? creditedGp / selling : null, numerator: creditedGp, denominator: selling, bound: sellingLower ? "UPPER" : "EXACT", provisional: isProv("D2", "D3"), note: creditedGpRaw !== null && creditedGp === null ? coverageNote : undefined });
 
@@ -385,7 +396,7 @@ export function buildTenantValue(input: TenantValueInput): TenantValue {
     decisions: d,
     provisionalDecisions: provisional,
     metrics,
-    checks: { attributionSumMatches: sumMatches },
+    checks: { attributionSumMatches: sumMatches, overlaysWithinAiLabels },
   };
 }
 

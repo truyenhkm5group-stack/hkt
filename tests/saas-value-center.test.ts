@@ -43,7 +43,8 @@ function row(p: Partial<AttributionRow> = {}): AttributionRow {
 }
 
 /** AI tự chốt 12 đơn (10 giao, 5.000.000 ₫, giá vốn đủ 90% → lãi gộp 1.800.000), góp công 6 đơn (4 giao, 2.000.000 ₫), người 7, chưa quy kết 3. */
-function attribution(over: { table?: Partial<AttributionTable>; recovered?: number; recoveredRevenue?: number } = {}): OrderAttributionReport {
+/** Thuộc tính chồng (PR-2): 2 đơn AI thu hồi (800.000 ₫ đã giao), 3 đơn AI bán thêm (phần tăng đã giao 450.000 ₫) — đều ⊂ nhãn AI. */
+function attribution(over: { table?: Partial<AttributionTable>; recovered?: number; recoveredRevenue?: number; upsell?: number; upsellAmount?: number | null } = {}): OrderAttributionReport {
   const table: AttributionTable = {
     AI_ONLY: row({ orders: 12, valueVnd: 6_000_000, delivered: 10, deliveredRevenueVnd: 5_000_000, costedRevenueVnd: 4_500_000, grossProfitVnd: 1_800_000, cogsUnknown: 1, cogsUnknownRevenueVnd: 500_000 }),
     AI_ASSISTED: row({ orders: 6, valueVnd: 2_400_000, delivered: 4, deliveredRevenueVnd: 2_000_000, costedRevenueVnd: 2_000_000, grossProfitVnd: 700_000 }),
@@ -53,7 +54,9 @@ function attribution(over: { table?: Partial<AttributionTable>; recovered?: numb
   };
   return {
     table,
-    followup: { conversations: 20, replied: 8, replyRate: 0.4, recoveredOrders: over.recovered ?? 2, recoveredValueVnd: 900_000, recoveredDelivered: 2, recoveredDeliveredRevenueVnd: over.recoveredRevenue ?? 800_000 },
+    followup: { conversations: 20, replied: 8, replyRate: 0.4, recoveredOrders: (over.recovered ?? 2) + 1, recoveredValueVnd: 900_000, recoveredDelivered: 2, recoveredDeliveredRevenueVnd: over.recoveredRevenue ?? 800_000 },
+    recovered: { orders: over.recovered ?? 2, deliveredOrders: over.recovered ?? 2, pending: 0, outsideAiLabels: 1, deliveredRevenueVnd: over.recoveredRevenue ?? 800_000 },
+    upsell: { orders: over.upsell ?? 3, deliveredOrders: 2, pending: 1, outsideAiLabels: 0, deliveredAmountVnd: over.upsellAmount === undefined ? 450_000 : over.upsellAmount, deliveredAmountUnknown: over.upsellAmount === null ? 1 : 0 },
   };
 }
 
@@ -142,7 +145,10 @@ function testRegistry() {
   const inc = TENANT_VALUE_METRIC_BY_KEY.ai_incremental_profit;
   assert.equal(inc.availability, "UNAVAILABLE");
   assert.match(inc.missingWhat ?? "", /đối chứng/, "lợi nhuận tăng thêm cần nhóm đối chứng");
-  for (const m of TENANT_VALUE_METRICS) if (/tăng thêm|incremental/i.test(`${m.key} ${m.label}`)) assert.equal(m.availability, "UNAVAILABLE", `${m.key}: «tăng thêm» chưa đo được ở V1`);
+  // `incremental_upsell_revenue_delivered` (khoá đã ghim, không đổi tên được) là PHẦN TĂNG của đơn khi khách nhận lời mời mua
+  // thêm — một số đo trên chính đơn, không phải phần lợi nhuận AI làm tăng so với không có AI; nhãn của nó không được nói «tăng thêm».
+  for (const m of TENANT_VALUE_METRICS) if (/incremental_profit|lợi nhuận tăng thêm|tăng thêm do AI/i.test(`${m.key} ${m.label}`)) assert.equal(m.availability, "UNAVAILABLE", `${m.key}: «lợi nhuận tăng thêm» chưa đo được ở V1`);
+  assert.ok(!/tăng thêm/i.test(TENANT_VALUE_METRIC_BY_KEY.incremental_upsell_revenue_delivered.label), "phần bán thêm không được gọi là «tăng thêm»");
   // Chất lượng đứng cạnh chi phí (luật 9 của chủ shop: không tối ưu token bằng tỷ lệ chốt).
   for (const k of ["conversion_rate", "human_intervention_rate", "ai_error_rate"] as const) assert.equal(TENANT_VALUE_METRIC_BY_KEY[k].group, "QUALITY", `${k} có trong nhóm chất lượng`);
 
@@ -188,16 +194,32 @@ function testFourLabels() {
 
   // Thuộc tính chồng: đổi số thu hồi KHÔNG đổi tổng / AI tác động / doanh thu.
   const a = buildTenantValue(input({ attribution: attribution({ recovered: 0, recoveredRevenue: 0 }) })).metrics;
-  const b = buildTenantValue(input({ attribution: attribution({ recovered: 9, recoveredRevenue: 4_000_000 }) })).metrics;
-  for (const k of ["attributed_orders_total", "ai_influenced_orders", "ai_influenced_delivered_revenue", "ai_credited_delivered_revenue", "ai_credited_gross_profit"] as const) {
-    assert.equal(a[k].value, b[k].value, `${k}: thuộc tính chồng (thu hồi) không bao giờ cộng vào tổng`);
+  const b = buildTenantValue(input({ attribution: attribution({ recovered: 9, recoveredRevenue: 4_000_000, upsell: 15, upsellAmount: 3_000_000 }) })).metrics;
+  for (const k of ["attributed_orders_total", "ai_auto_closed_orders", "ai_assisted_orders", "human_only_orders", "unattributed_orders", "ai_influenced_orders", "ai_influenced_delivered_revenue", "ai_credited_delivered_revenue", "ai_credited_gross_profit", "customer_value_multiple", "revenue_per_ai_cost"] as const) {
+    assert.equal(a[k].value, b[k].value, `${k}: thuộc tính chồng (thu hồi / bán thêm) không bao giờ cộng vào tổng hay doanh thu quy công`);
   }
   assert.equal(b.ai_recovered_orders.value, 9);
   assert.equal(b.ai_recovered_delivered_revenue.value, 4_000_000);
-  // Upsell ở mức đơn chưa có ⇒ null, không phải 0.
-  assert.equal(m.ai_upsell_orders.value, null);
-  assert.equal(m.ai_upsell_orders.availability, "UNAVAILABLE");
-  assert.equal(m.incremental_upsell_revenue_delivered.value, null);
+  assert.equal(b.ai_upsell_orders.value, 15);
+  assert.equal(b.incremental_upsell_revenue_delivered.value, 3_000_000);
+  // Nguồn là thuộc tính chồng AI_RECOVERED (⊂ nhãn AI), KHÔNG phải followup.recoveredOrders (gồm cả thu hồi mang nhãn người bán).
+  assert.equal(m.ai_recovered_orders.value, 2, "đơn AI thu hồi đọc recovered.orders, không đọc followup (3)");
+  assert.match(m.ai_recovered_orders.note ?? "", /nhãn người bán/, "thu hồi nằm ngoài nhãn AI được nói ra, không giấu");
+  assert.equal(m.cost_per_recovered_order.value, 300_000, "chi phí / đơn AI thu hồi chia cho recovered.orders");
+  assert.equal(m.ai_upsell_orders.value, 3);
+  assert.equal(m.ai_upsell_orders.availability, "MEASURED");
+  assert.equal(m.incremental_upsell_revenue_delivered.value, 450_000);
+  assert.equal(m.incremental_upsell_revenue_delivered.availability, "MEASURED");
+  // Thiếu số tiền bán thêm ⇒ null (CHƯA BIẾT), không cộng như 0.
+  const unk = buildTenantValue(input({ attribution: attribution({ upsellAmount: null }) })).metrics;
+  assert.equal(unk.incremental_upsell_revenue_delivered.value, null);
+  assert.equal(unk.incremental_upsell_revenue_delivered.state, "UNKNOWN");
+  assert.match(unk.incremental_upsell_revenue_delivered.note ?? "", /thiếu số tiền/);
+  // Bất biến ⊂ nhãn AI.
+  assert.equal(buildTenantValue(input()).checks.overlaysWithinAiLabels, true);
+  assert.equal(buildTenantValue(input({ attribution: attribution({ upsell: 40 }) })).checks.overlaysWithinAiLabels, false, "chồng vượt nhãn AI ⇒ cờ false, không im lặng");
+  assert.equal(buildTenantValue(input({ attribution: attribution({ recovered: 1, recoveredRevenue: 9_000_000 }) })).checks.overlaysWithinAiLabels, false, "doanh thu thu hồi vượt doanh thu AI ⇒ cờ false");
+  assert.equal(buildTenantValue(ALL_NULL).checks.overlaysWithinAiLabels, null);
   for (const meta of TENANT_VALUE_METRICS) if ("overlay" in meta && meta.overlay) assert.ok(!["attributed_orders_total"].includes(meta.key), "khoá chồng không phải khoá tổng");
 }
 

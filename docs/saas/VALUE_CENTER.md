@@ -20,7 +20,7 @@ Luật đọc kèm: `docs/business-rules/ORDER_OUTCOME.md` (kết cục đơn �
 | # | Câu hỏi | Khoá trả lời | Ghi chú |
 |---|---|---|---|
 | 1 | Khách trả ChotDonTuDong bao nhiêu? | `customer_spend_recognized` (ghi nhận) · `customer_spend_cash` (tiền đã thu) · thành phần: `saas_subscription_revenue`, `ai_balance_revenue`, `ai_overage_billed`, `ai_balance_topup_cash`, `ai_balance_promo_used` | Bốn dòng tiền không trộn — §2 |
-| 2 | AI tạo / tác động bao nhiêu đơn & doanh thu? | `ai_auto_closed_orders`, `ai_assisted_orders`, `ai_influenced_orders`, `ai_auto_closed_delivered_revenue`, `ai_assisted_delivered_revenue`, `ai_influenced_delivered_revenue`, `ai_credited_delivered_revenue`; chồng: `ai_recovered_orders`, `ai_recovered_delivered_revenue` | «Tác động» ≠ «công» — §3 |
+| 2 | AI tạo / tác động bao nhiêu đơn & doanh thu? | `ai_auto_closed_orders`, `ai_assisted_orders`, `ai_influenced_orders`, `ai_auto_closed_delivered_revenue`, `ai_assisted_delivered_revenue`, `ai_influenced_delivered_revenue`, `ai_credited_delivered_revenue`; chồng: `ai_recovered_orders`, `ai_recovered_delivered_revenue`, `ai_upsell_orders`, `incremental_upsell_revenue_delivered` | «Tác động» ≠ «công» — §3 |
 | 3 | Giá trị kinh tế khách nhận? | `ai_credited_gross_profit` + `ai_credited_cogs_coverage`; riêng: `staff_cost_saved`, `staff_hours_saved` | Tiết kiệm nhân sự in RIÊNG (D4) |
 | 4 | Khách nhận giá trị tốt hay kém? | `customer_value_multiple`, `customer_roi` (+ chất lượng: `conversion_rate`, `human_intervention_rate`, `response_p50_ms`) | Ước tính; độ phủ giá vốn < 80% ⇒ `null` (D3); chỉ ở cửa sổ 90 ngày (D12) |
 | 5 | CDTĐ lãi bao nhiêu trên khách? | `platform_contribution` (đóng góp sau chi phí AI — spec 11 §6), `platform_gross_profit` + `platform_gross_profit_ceiling`, `platform_gross_margin`, `actual_ai_cogs`, `variable_cogs_known` | Chỉ người vận hành. Phí thanh toán chưa khai (D6) ⇒ lãi gộp `null`, in cận trên |
@@ -66,9 +66,21 @@ Bốn nhãn CHÍNH loại trừ nhau (định nghĩa giữ nguyên ở `attribut
 **Bất biến kiểm thử:** bốn số cộng = `attributed_orders_total` = số đơn có `order.confirmed` trong kỳ. Lượt chụp truyền thêm
 đếm độc lập (`confirmedOrdersInPeriod`) ⇒ `checks.attributionSumMatches` báo lệch thay vì im lặng.
 
-**Thuộc tính chồng** (`overlay: true`) — tập con của bốn nhãn, KHÔNG BAO GIỜ cộng vào tổng: `ai_recovered_orders`,
-`ai_recovered_delivered_revenue`, `ai_upsell_orders` (UNAVAILABLE tới PR-2), `incremental_upsell_revenue_delivered`
-(UNAVAILABLE tới PR-2 — hiện bộ đọc cộng cả lời nhận của đơn huỷ / hoàn).
+**Thuộc tính chồng** (`overlay: true`) — `AI_RECOVERED` · `AI_UPSELL` của `attributionOverlays` (PR-2,
+lib/sales-chatbot/attribution-shared.ts), chỉ gắn khi nhãn chính là AI tự chốt / góp công, nên luôn là TẬP CON của nhãn AI.
+KHÔNG BAO GIỜ cộng vào tổng, KHÔNG cộng doanh thu của nó vào doanh thu quy công lần thứ hai (bài kiểm đổi số chồng mà tổng,
+doanh thu quy công, bội số, tỷ số trên chi phí AI phải đứng yên):
+
+| Khoá | Đọc từ `loadOrderAttribution()` | Ghi chú |
+|---|---|---|
+| `ai_recovered_orders` | `recovered.orders` | KHÔNG phải `followup.recoveredOrders` — thu hồi mà nhãn chính là người bán (`recovered.outsideAiLabels`) không tính công cho AI, nhưng được nói ra trong `note` |
+| `ai_recovered_delivered_revenue` | `recovered.deliveredRevenueVnd` | |
+| `ai_upsell_orders` | `upsell.orders` | |
+| `incremental_upsell_revenue_delivered` | `upsell.deliveredAmountVnd` | Chỉ đơn đã giao + ghi nhận doanh thu; có đơn thiếu số tiền ⇒ `null` (CHƯA BIẾT). Khác `upsell.revenueVnd` của màn «Hiệu quả». Tên khoá đã ghim — đây là PHẦN TĂNG của đơn, không phải «lợi nhuận tăng thêm do AI» |
+| `cost_per_recovered_order` | mẫu số `recovered.orders` | |
+
+Bất biến thứ hai: `checks.overlaysWithinAiLabels` — số đơn thu hồi / bán thêm ≤ đơn AI tác động, và doanh thu thu hồi ≤ doanh
+thu AI tác động; lệch ⇒ `false`, thiếu nguồn ⇒ `null`.
 
 **AI tác động ≠ công của AI:**
 
@@ -196,7 +208,7 @@ buildTenantValue({
   fx: { rateVndPerUsd: env.facebook.usdToVnd, source: "ENV_FACEBOOK_USD_VND" },
   spend: { mrrAccrualVnd, mrrDaysMissing, aiBalanceRevenueVnd, overageBilledVnd, cashInvoicesVnd, cashTopupVnd, promoUsedVnd } | null,
   cogs: { aiPlatformVnd, aiUnpricedCalls, aiVisionVnd, otherVariableVnd, paymentFeeVnd } | null,
-  attribution: await loadOrderAttribution({ days, now }) | null,        // trong withOrganization(code, …)
+  attribution: await loadOrderAttribution({ days, now }) | null,        // trong withOrganization(code, …) — gồm table · followup · recovered · upsell (PR-2)
   confirmedOrdersInPeriod,                                               // đếm độc lập order.confirmed trong kỳ (tuỳ chọn)
   perf: await loadAiSalesPerformance(code, { days, now, withMoney: true }) | null,
   aiCalls: { total, errors, modelLatencyP50Ms } | null,
@@ -209,5 +221,7 @@ buildTenantValue({
 - `otherVariableVnd` = Σ khoản khai DIRECT; không khoản nào ⇒ 0; có khoản chưa biết số ⇒ `null`.
 - `overageBilledVnd`: bảng kê theo tháng lịch — cửa sổ 7/30 không cắt được thì truyền `null` (khách trả ghi nhận `null`), khách
   trả trước ⇒ 0 thật.
+- Thuộc tính chồng đọc thẳng `attribution.recovered` / `attribution.upsell`; lưu kèm `checks.overlaysWithinAiLabels` cạnh
+  `checks.attributionSumMatches` để thấy ngay ảnh chụp nào có quy kết lệch.
 - Lưu `formulaVersion` (`tv<n>.attr<n>`) và `CHURN_RULE_VERSION` vào ảnh chụp; hai ảnh khác phiên bản không so (luật 40).
 - Ảnh giá trị là số CHÍN DẦN — không dùng làm số của kỳ đã chốt (luật 21).
