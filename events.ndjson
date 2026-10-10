@@ -1414,3 +1414,4 @@
 {"at":"2026-10-10T04:10:30.297Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DEPLOY_DISPATCHED","detail":"cd8ec77871b3 · run 38023115062 https://github.com/truyenhkm5group-stack/hkt/actions/runs/38023115062"}
 {"at":"2026-10-10T04:29:31.064Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"onboarding-v2","detail":"feat/onboarding-v2 @ d233947710c7 · 1 lệnh kiểm thử"}
 {"at":"2026-10-10T04:29:50.085Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#752 @ d233947710c7 · Giải xung đột tối thiểu ở config-form.tsx (cả hai nhánh cùng thêm id=bot-config; giữ thêm className=overflow-visible của #756); typecheck sạch, bài ai-sales-settings-v2 đạt trên cây gộp; gates xanh"}
+{"at":"2026-10-10T04:37:04.417Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"onboarding-v2","detail":"#752 @ d233947710c7 → 9ee6c6a19bbc (MERGE_ISOLATED · HIGH · gates success)"}

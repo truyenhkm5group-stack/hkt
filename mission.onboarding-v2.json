@@ -3,7 +3,7 @@
   "mission_id": "onboarding-v2",
   "title": "Onboarding V2: một checklist 9 bước (DONE/NEEDS_ACTION/ERROR/FIX NOW) + tiến độ + một CTA «Tiếp tục thiết lập» cho khách Chốt Đơn",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -29,9 +29,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-09T17:12:18.102Z",
-  "updated_at": "2026-10-10T04:29:31.023Z",
+  "updated_at": "2026-10-10T04:37:04.383Z",
   "last_heartbeat": "2026-10-10T04:29:31.023Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#752 → 9ee6c6a19bbc6d504a044b93bd6c451fe9e6bf74"
+  },
   "handoff": {
     "branch": "feat/onboarding-v2",
     "sha": "d233947710c73b3ac1c0db6766052402e3590262",
