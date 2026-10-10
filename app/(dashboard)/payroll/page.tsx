@@ -163,15 +163,15 @@ export default async function PayrollPage({
   return (
     <div className="space-y-5">
       <PageHeader
-        eyebrow="Tài chính"
+        eyebrow="Kế toán"
         title="Lương & hoa hồng"
         description={`${period.label} · ${PAYROLL_BASIS_NAME[basis]} (${PAYROLL_BASIS_LABEL[basis].toLowerCase()}) · ${formatNumber(lines.length)} nhân sự đang làm việc`}
         hint={
           <p>
-            Ví dụ cơ chế: Trần Anh Quân 35% lợi nhuận tổng → nhập <b>% lợi nhuận tổng = 35</b>. Hồ Minh Hiếu 30% lợi nhuận cá nhân →{" "}
-            <b>% lợi nhuận cá nhân = 30</b>, bí danh <span className="font-mono">HIEU, HIEU_HM</span>, tài khoản QC mặc định{" "}
-            <span className="font-mono">HIEU.HM 01</span>. Lê Việt Nhật 25% → <span className="font-mono">NHAT_LV, NHAT</span>, tài khoản{" "}
-            <span className="font-mono">Nhật LV</span>.
+            {/* Ví dụ TRUNG TÍNH — câu cũ in tên và tỷ lệ hoa hồng của nhân viên thật, mọi tổ chức (kể cả tổ chức khách) đều đọc được. */}
+            Ví dụ cơ chế: nhân viên A hưởng 35% lợi nhuận tổng → nhập <b>% lợi nhuận tổng = 35</b>. Nhân viên B hưởng 30% lợi nhuận cá nhân →{" "}
+            <b>% lợi nhuận cá nhân = 30</b>, bí danh <span className="font-mono">NVB, NVB_2</span> (chữ có trong tên chiến dịch), tài khoản QC mặc định{" "}
+            <span className="font-mono">NVB 01</span>.
           </p>
         }
         actions={

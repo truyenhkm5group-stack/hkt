@@ -76,8 +76,9 @@ export default async function FinancePage({ searchParams }: { searchParams: Prom
   return (
     <div className="space-y-5">
       <PageHeader
-        eyebrow="Tài chính"
+        eyebrow="Kế toán"
         title="Tổng quan tài chính"
+        description="Còn bao nhiêu tiền, tiền đang nằm ở đâu, và việc gì cần xử lý ngay."
         hint={
           <>
             <p>Còn bao nhiêu tiền, tiền đang nằm ở đâu, và việc gì cần xử lý ngay.</p>
@@ -142,7 +143,7 @@ export default async function FinancePage({ searchParams }: { searchParams: Prom
             </Link>
           </p>
         ) : (
-          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4 [&>*]:border-border/70 [&>*]:shadow-none">
             <MetricCard
               label="Tiền vào"
               value={<Money value={statement.moneyIn} />}
@@ -216,7 +217,7 @@ export default async function FinancePage({ searchParams }: { searchParams: Prom
           </Link>
         }
       >
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4 [&>*]:border-border/70 [&>*]:shadow-none">
           <MetricCard
             label="Doanh thu giao thành công"
             value={<Money value={truth.revenue.delivered} />}
@@ -268,7 +269,7 @@ export default async function FinancePage({ searchParams }: { searchParams: Prom
           </Link>
         }
       >
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4 [&>*]:border-border/70 [&>*]:shadow-none">
           <MetricCard
             label="Phải thu"
             value={<Money value={cod.phaiThu.amount} />}
