@@ -1,0 +1,26 @@
+{
+  "schema": 1,
+  "mission_id": "owner-shell-login-path",
+  "title": "QUYẾT ĐỊNH CHỦ SHOP: cách xem giao diện khách vỏ trên production: anh tự đăng ký tài khoản thử, hoặc cho phép lệnh ops phát liên kết đăng nhập dùng một lần (kết quả mã hoá) cho workspace thử",
+  "business_goal": "",
+  "status": "BLOCKED",
+  "priority": "P2",
+  "risk": "MEDIUM",
+  "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "worker": null,
+  "worktree": null,
+  "branch": "decision/owner-shell-login-path",
+  "base_sha": null,
+  "domains": [],
+  "owned_paths": [
+    "docs/decisions/owner-shell-login-path.md"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-10T14:53:19.699Z",
+  "updated_at": "2026-10-10T14:53:19.699Z",
+  "last_heartbeat": "2026-10-10T14:53:19.699Z",
+  "definition_of_done": []
+}
