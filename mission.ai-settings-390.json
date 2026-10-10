@@ -1,0 +1,27 @@
+{
+  "schema": 1,
+  "mission_id": "ai-settings-390",
+  "title": "Cấu hình AI Sales thôi tràn ngang ở 390 px",
+  "business_goal": "",
+  "status": "RUNNING",
+  "priority": "P2",
+  "risk": "MEDIUM",
+  "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "worker": null,
+  "worktree": null,
+  "branch": "fix/ai-settings-390",
+  "base_sha": "9ee6c6a19bbc6d504a044b93bd6c451fe9e6bf74",
+  "domains": [],
+  "owned_paths": [
+    "app/(dashboard)/ai/sales-chatbot/page.tsx",
+    "tests/ai-sales-settings-v2.test.ts"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-10T04:43:25.025Z",
+  "updated_at": "2026-10-10T04:43:25.025Z",
+  "last_heartbeat": "2026-10-10T04:43:25.025Z",
+  "definition_of_done": []
+}
