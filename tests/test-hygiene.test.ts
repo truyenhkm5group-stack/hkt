@@ -116,6 +116,8 @@ export function testKhongSoBangMocDocLaiDongHo() {
 
 /** Miễn trừ — mỗi dòng nói RÕ vì sao đọc môi trường ở đó là đo MÃ NGUỒN chứ không đo máy. */
 const DOC_MOI_TRUONG_DA_KHAI: Record<string, string> = {
+  "tests/tech-mission-control.test.ts":
+    "ĐẶT ERP_GITHUB_REPO = «owner/repo» (BỊA) để client GitHub dựng URL cho bản fetch giả, và ERP_COMMIT = SHA BỊA để phép «production có chứa commit gộp không» có vế production — cả hai là ĐẦU VÀO của phép kiểm, trả lại nguyên trạng trong finally. Trần hỏi deploy truyền TƯỜNG MINH (`deployBudget`) nên kết luận không rẽ nhánh theo máy có GITHUB_TOKEN hay không.",
   "tests/saas-hide-internal.test.ts":
     "ĐẶT PLATFORM_SECRETS_KEY = giá trị BỊA để người vận hành lưu khoá AI (bịa) của workspace khách qua lõi sổ kết nối — đó là ĐẦU VÀO của phép kiểm (cùng cách self-service-journey), trả lại nguyên trạng trong finally; kết luận không đổi theo máy.",
   "tests/zalo-oa.test.ts":

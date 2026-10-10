@@ -9068,6 +9068,82 @@ export const techBudgets = pgTable(
   ],
 );
 
+/* ═══════════ PHÉP CHIẾU SỔ TECH ROOM (0240) — `lib/tech/registry-sync.ts`, `lib/constants/tech-registry.ts` ═══════════
+
+   Sổ điều phối kỹ thuật là nhánh git `ai-control/registry` (CLI `scripts/ai-tech.ts`). Hai bảng dưới đây là ẢNH
+   CHỤP CHỈ ĐỌC của sổ đó để `/tech` hiện được trên điện thoại — KHÔNG phải sổ thứ hai: ERP không ghi ngược vào sổ,
+   không có màn hình nào sửa các dòng này, và job đồng bộ là đường ghi DUY NHẤT (AGENTS.md luật 19).
+   Sứ mệnh biến khỏi sổ ⇒ `in_registry = false` + `removed_at` (không xoá lịch sử). */
+
+export const techRegistryMissions = pgTable(
+  "tech_registry_missions",
+  {
+    id: id(),
+    /** `mission_id` trong sổ — khoá tự nhiên của phép chiếu. */
+    registryId: text("registry_id").notNull(),
+    title: text("title").notNull().default(""),
+    /** Trạng thái NGUYÊN VĂN của sổ (`REGISTRY_MISSION_STATES`). */
+    status: text("status").notNull(),
+    /** Trạng thái chủ shop lúc đọc sổ lần cuối (`missionControlState`) — để nhận ra một lần CHUYỂN; màn hình tính lại lúc đọc. */
+    controlState: text("control_state").notNull(),
+    /** Lúc phép chiếu thấy `control_state` hiện tại lần đầu. */
+    stateSince: ts("state_since").notNull().defaultNow(),
+    priority: text("priority").notNull().default("P2"),
+    risk: text("risk").notNull().default("MEDIUM"),
+    owner: text("owner").notNull().default(""),
+    branch: text("branch").notNull().default(""),
+    /** Dòng sổ đã kiểm hình dạng (`RegistryEntry`) — nguyên vẹn để trang chi tiết đọc. */
+    entry: jsonb("entry").$type<Record<string, unknown>>().notNull(),
+    /** SHA blob git của tệp `mission.<id>.json` đã đọc — trùng SHA trong cây ⇒ không tải lại. */
+    blobSha: text("blob_sha").notNull().default(""),
+    srcUpdatedAt: ts("src_updated_at"),
+    lastHeartbeatAt: ts("last_heartbeat_at"),
+    /** ERP tự hỏi GitHub: commit production có chứa commit gộp không. '' = chưa hỏi / không hỏi được. */
+    deployCheck: text("deploy_check").notNull().default(""),
+    deployCheckedCommit: text("deploy_checked_commit").notNull().default(""),
+    deployCheckedAt: ts("deploy_checked_at"),
+    /** Khoá lần chuyển trạng thái đã báo Lark (`registryNotifyKey`) — cùng khoá ⇒ không báo lại. */
+    notifiedKey: text("notified_key").notNull().default(""),
+    notifiedAt: ts("notified_at"),
+    inRegistry: boolean("in_registry").notNull().default(true),
+    removedAt: ts("removed_at"),
+    syncedAt: ts("synced_at").notNull().defaultNow(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex("tech_registry_missions_registry_uq").on(t.registryId),
+    index("tech_registry_missions_state_idx").on(t.controlState),
+    check(
+      "tech_registry_missions_state_check",
+      sql`${t.controlState} IN ('QUEUED','RUNNING','BLOCKED','WAITING_APPROVAL','COMPLETED','DONE_UNVERIFIED','FAILED','CANCELLED','UNKNOWN')`,
+    ),
+    check("tech_registry_missions_deploy_check", sql`${t.deployCheck} IN ('','CONTAINED','NOT_CONTAINED')`),
+    check("tech_registry_missions_removed_check", sql`${t.inRegistry} = (${t.removedAt} IS NULL)`),
+  ],
+);
+
+/** `events.ndjson` của sổ — chỉ thêm; khoá dòng là băm nội dung nên đọc lại không nhân đôi. */
+export const techRegistryEvents = pgTable(
+  "tech_registry_events",
+  {
+    id: id(),
+    lineKey: text("line_key").notNull(),
+    seq: integer("seq").notNull(),
+    at: timestamp("at", { withTimezone: true }).notNull(),
+    kind: text("kind").notNull(),
+    actor: text("actor").notNull().default(""),
+    /** Mã sứ mệnh trong sổ ('' = sự kiện không gắn sứ mệnh: khoá, review PR…). */
+    missionId: text("mission_id").notNull().default(""),
+    detail: text("detail").notNull().default(""),
+    syncedAt: ts("synced_at").notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("tech_registry_events_line_uq").on(t.lineKey),
+    index("tech_registry_events_mission_idx").on(t.missionId, t.at),
+  ],
+);
+
 export const techWorkersRelations = relations(techWorkers, ({ many }) => ({
   runs: many(techAgentRuns),
 }));
