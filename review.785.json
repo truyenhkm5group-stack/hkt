@@ -1,0 +1,8 @@
+{
+  "pr": 785,
+  "sha": "7c8ff757cf223a010278ab7a564fd7cbc439dade",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-10T17:43:55.780Z",
+  "note": "Đọc diff: upsell.accepted thêm vào câu đọc nhưng không nằm trong AI_CONTRIBUTION_EVENTS/HUMAN_TOUCH_EVENTS/followupRecovery ⇒ nhãn chính không đổi (bài deepEqual trước/sau); overlay chỉ khi nhãn AI; đã giao qua orderFactsOf/ORDER_OUTCOME; null≠0 cho tiền upsell thiếu; số upsell cũ của màn Hiệu quả không đụng"
+}
