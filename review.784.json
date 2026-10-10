@@ -1,8 +1,8 @@
 {
   "pr": 784,
-  "sha": "55ebde9ba369d84916a6f146e7a438e0980f77d1",
+  "sha": "264492b6346d33be9ad2fbbeb98070ca76249f7e",
   "verdict": "PASS",
   "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
-  "at": "2026-10-10T16:53:07.696Z",
-  "note": "Đọc báo cáo + diff: điều kiện chưa đọc từ tin khách thật sau con trỏ người xem, mốc đọc lấy từ CSDL theo mã tin (không nhận mốc client, không now), con trỏ chỉ tiến; migration chỉ cộng thêm; fallback mốc chung cho người chưa có con trỏ (ghi rõ)"
+  "at": "2026-10-10T17:00:59.454Z",
+  "note": "Chỉ thêm commit gộp main; xung đột ops-vps giải giữ cả org-volume-discount lẫn inbox-read-audit; migration 0239 vẫn cuối sổ"
 }

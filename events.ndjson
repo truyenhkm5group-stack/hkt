@@ -1682,3 +1682,4 @@
 {"at":"2026-10-10T16:59:58.610Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"ai-sales-knowledge","detail":"#782 @ 23840099e176 → 521b81325e28 (MERGE_NOW · MEDIUM · gates success)"}
 {"at":"2026-10-10T17:00:54.038Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"inbox-read-v3","detail":"feat/inbox-read-v3 @ 264492b6346d · 1 lệnh kiểm thử"}
 {"at":"2026-10-10T17:01:40.392Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DEPLOY_DISPATCHED","detail":"521b81325e28 · run 38070021673 https://github.com/truyenhkm5group-stack/hkt/actions/runs/38070021673"}
+{"at":"2026-10-10T17:02:17.623Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#784 @ 264492b6346d · Chỉ thêm commit gộp main; xung đột ops-vps giải giữ cả org-volume-discount lẫn inbox-read-audit; migration 0239 vẫn cuối sổ"}
