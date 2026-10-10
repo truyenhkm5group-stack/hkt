@@ -1,0 +1,26 @@
+{
+  "schema": 1,
+  "mission_id": "ledger-r2",
+  "title": "Sổ yêu cầu chủ shop sau đợt deploy 10/10 tối",
+  "business_goal": "",
+  "status": "RUNNING",
+  "priority": "P2",
+  "risk": "MEDIUM",
+  "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "worker": null,
+  "worktree": null,
+  "branch": "docs/ledger-r2",
+  "base_sha": "33f3b13bd9614601e92658e3e5f1cbc5cf6204dc",
+  "domains": [],
+  "owned_paths": [
+    "docs/product/OWNER_REQUIREMENTS_LEDGER.md"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-10T14:42:33.955Z",
+  "updated_at": "2026-10-10T14:42:33.955Z",
+  "last_heartbeat": "2026-10-10T14:42:33.955Z",
+  "definition_of_done": []
+}
