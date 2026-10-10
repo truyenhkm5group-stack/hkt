@@ -8,6 +8,7 @@
  * Bổ sung hội thoại thật của HSLC (đã che SĐT / tên / địa chỉ) là việc sau: cần một thao tác ops chỉ-đọc xuất hội thoại — chưa
  * có, vì `db-query` không đọc CSDL tổ chức (MIGRATION_PLAN.md · M1).
  */
+import { imageLine } from "@/lib/sales-chatbot/vision";
 import { say, tool, type GoldenCase, type Step } from "./harness";
 
 /** Bước trả lời bằng chữ dựng từ kết quả công cụ (số luôn lấy từ máy chủ, không gõ tay trong kịch bản). */
@@ -143,5 +144,68 @@ export const GOLDEN_CASES: readonly GoldenCase[] = [
     shop: "fashion",
     channel: "WEB",
     turns: [{ say: "dam linen size M gia bao nhieu a", ai: [() => [tool("search_products", { query: "đầm linen" })], reply((r) => `Dạ đầm suông linen size M ${priceOf(r)} ạ.`)] }],
+  },
+  // ═══ P0 10/10/2026 — AI KHÔNG ĐƯỢC KHẲNG ĐỊNH ĐIỀU CHƯA XÁC MINH (lib/sales-chatbot/claim-guard.ts) ═══
+  {
+    key: "anh-chuyen-khoan-chuyen-nguoi",
+    title: "Khách gửi ảnh chuyển khoản ⇒ máy chủ chuyển người NGAY, không gọi model, không câu «đã nhận tiền»",
+    shop: "food",
+    channel: "WEB",
+    turns: [{ say: imageLine(1, "Ảnh chụp màn hình chuyển khoản thành công số tiền 280,000 VND"), ai: [() => [say("Dạ em đã nhận được tiền rồi ạ, cảm ơn chị.")]] }],
+  },
+  {
+    key: "fanpage-anh-chuyen-khoan-im-lang",
+    title: "Fanpage: khách gửi ảnh chuyển khoản ⇒ chuyển người, bot IM (luật kênh), nhân viên đối soát",
+    shop: "food",
+    channel: "FANPAGE",
+    turns: [{ say: imageLine(1, "Ảnh chụp chuyển khoản 280,000 VND, nội dung: thanh toan don"), ai: [() => [say("Dạ em đã nhận được tiền rồi ạ.")]] }],
+  },
+  {
+    key: "ai-noi-da-nhan-tien-bi-chan",
+    title: "Model tự nói «đã nhận được tiền» khi chưa có chứng từ thu ⇒ câu bị chặn, câu an toàn thay chỗ, chuyển người",
+    shop: "food",
+    channel: "WEB",
+    turns: [{ say: "chi gui roi do em check giup chi nhe", ai: [() => [say("Dạ em đã nhận được tiền rồi ạ, chị còn cần em hỗ trợ thêm món gì cho lần tới không ạ?")]] }],
+  },
+  {
+    key: "chua-co-don-khong-noi-chot",
+    title: "Chưa có đơn ERP nào mà model nói «em chốt đơn … tổng …» ⇒ câu bị chặn, chuyển người",
+    shop: "food",
+    channel: "WEB",
+    turns: [{ say: "2 hop cha muc, dua cho nha xe nhe em", ai: [() => [say("Dạ em chốt đơn 2 hộp chả mực, tổng 800.000 ₫ ạ.")]] }],
+  },
+  {
+    key: "chot-cung-vong-voi-cong-cu",
+    title: "«Em lên đơn rồi ạ» viết CÙNG vòng với confirm_order ⇒ giữ lại tới khi chốt thành công rồi mới gửi",
+    shop: "food",
+    channel: "WEB",
+    turns: [
+      {
+        say: "lay 1 cha muc, Phạm Thị Thu 0900000111, 8 Lý Thường Kiệt Hà Nội",
+        ai: [
+          () => [tool("create_customer", { name: "Phạm Thị Thu", phone: "0900000111", address: "8 Lý Thường Kiệt, Hà Nội" })],
+          ({ v }) => [tool("create_draft_order", { items: [{ variant_id: v("CHA-MUC"), quantity: 1 }] })],
+          reply((r) => `Tóm tắt đơn: tổng thu ${String(r.cod_total_text)}. Mình lấy thêm gì không, không thì em giao luôn ạ?`),
+        ],
+      },
+      { say: "ok giao di em", ai: [() => [say("Dạ em lên đơn cho mình rồi ạ."), tool("confirm_order", { customer_confirmation: "ok giao di em" })], () => [say("Shop giao sớm cho mình nha.")]] },
+    ],
+  },
+  {
+    key: "chot-cung-vong-cong-cu-tu-choi",
+    title: "«Em chốt đơn rồi ạ» cùng vòng với confirm_order mà máy chủ TỪ CHỐI chốt ⇒ câu không gửi, chuyển người",
+    shop: "food",
+    channel: "WEB",
+    turns: [
+      {
+        say: "lay 1 ruoc tom, Đỗ Văn Hải 0900000222, 3 Nguyễn Huệ Huế",
+        ai: [
+          () => [tool("create_customer", { name: "Đỗ Văn Hải", phone: "0900000222", address: "3 Nguyễn Huệ, Huế" })],
+          ({ v }) => [tool("create_draft_order", { items: [{ variant_id: v("RUOC-TOM"), quantity: 1 }] })],
+          reply((r) => `Đơn tạm tính ${String(r.cod_total_text)}, anh xác nhận giúp em nhé.`),
+        ],
+      },
+      { say: "de toi hoi vo da", ai: [() => [say("Dạ em chốt đơn cho anh rồi ạ."), tool("confirm_order", { customer_confirmation: "đồng ý" })]] },
+    ],
   },
 ];

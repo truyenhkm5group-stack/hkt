@@ -15,6 +15,7 @@ import { sha256Hex, sniffImageType } from "@/lib/creative/images";
 import { formatVND } from "@/lib/format";
 import { canUseModule } from "@/lib/platform/capabilities";
 import { stockFor } from "@/lib/sales-chatbot/catalog";
+import { paymentSignalInCustomerText } from "@/lib/sales-chatbot/claim-guard";
 import { PUBLIC_CHAT_CHANNELS, type SalesChatbotConfig } from "@/lib/sales-chatbot/config";
 import { stripPrices } from "@/lib/sales-chatbot/playbook-shared";
 import {
@@ -155,11 +156,15 @@ async function pickOf(entry: QuickReplyEntry, method: QuickReplyPick["method"], 
 }
 
 /**
- * BƯỚC 1 (0 token): đang đặt hàng ⇒ `SKIP`; khớp chữ thắng rõ ⇒ `ANSWER`; còn lại ⇒ `NO_MATCH` kèm ứng viên cho bước AI
+ * BƯỚC 1 (0 token): đang đặt hàng / khách báo đã chuyển khoản ⇒ `SKIP`; khớp chữ thắng rõ ⇒ `ANSWER`; còn lại ⇒ `NO_MATCH` kèm ứng viên cho bước AI
  * đọc hiểu (hai câu ngang điểm ⇒ chỉ hai câu đó; không khớp ⇒ mọi câu đang bật).
  */
 export async function quickReplyByKeyword(text: string, opts: { ordering: boolean; cfg: Pick<SalesChatbotConfig, "shippingFee">; recent?: readonly string[] }): Promise<QuickReplyStep> {
   if (opts.ordering) return { kind: "SKIP", reason: "Khách đang đặt hàng" };
+  // KHÁCH BÁO ĐÃ TRẢ TIỀN (P0 10/10/2026 — claim-guard.ts): ảnh chuyển khoản / «ck rồi» ⇒ KHÔNG câu mẫu nào được trả lời —
+  // câu mẫu không biết gì về đơn hay tiền, và một câu «khách báo đã CK» học từ nhân viên (đã đối soát) gửi nguyên văn thành
+  // «shop đã nhận tiền». Máy chủ chuyển người (engine.ts); bước AI chọn mã cũng không chạy vì đây là SKIP.
+  if (paymentSignalInCustomerText(text)) return { kind: "SKIP", reason: "Khách báo đã chuyển khoản — nhân viên đối soát" };
   if (looksLikeOrdering(text)) return { kind: "SKIP", reason: "Câu khách có dấu hiệu chốt đơn" };
   // Nhiều tin liên tiếp ⇒ một câu mẫu chỉ trả lời được một ý — chatbot đầy đủ trả lời ĐỦ từng câu (vẫn dùng câu mẫu được).
   if (isMultiPart(text)) return { kind: "SKIP", reason: "Khách nhắn nhiều câu liên tiếp" };

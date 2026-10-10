@@ -115,6 +115,10 @@ export const HANDOFF_REASON_CODES = [
   "STAFF_REPLIED",
   /** Nhân viên bấm «Tiếp quản» trong hộp thư — bot im tới khi người trả lại (conversation-control-shared.ts). */
   "STAFF_TOOK_OVER",
+  /** Khách gửi ảnh chuyển khoản / báo «ck rồi» ⇒ máy chủ chuyển người để nhân viên đối soát (claim-guard.ts, P0 10/10/2026). */
+  "PAYMENT_REVIEW",
+  /** Bot định khẳng định «đã nhận tiền» / «đã chốt đơn» khi chưa có căn cứ ⇒ câu bị chặn, chuyển người (claim-guard.ts). */
+  "UNVERIFIED_CLAIM",
   "OTHER",
 ] as const;
 export type HandoffReasonCode = (typeof HANDOFF_REASON_CODES)[number];
@@ -135,6 +139,8 @@ export const HANDOFF_REASON_LABEL: Record<HandoffReasonCode, string> = {
   TOOL_REQUIRES_HUMAN: "Công cụ thấy bất thường",
   STAFF_REPLIED: "Nhân viên đang trả lời",
   STAFF_TOOK_OVER: "Nhân viên tiếp quản",
+  PAYMENT_REVIEW: "Khách báo đã chuyển khoản — cần đối soát",
+  UNVERIFIED_CLAIM: "Chặn câu AI khẳng định chưa xác minh",
   OTHER: "Khác",
 };
 
@@ -162,6 +168,8 @@ export function classifyHandoffReason(reason: string | null | undefined): Handof
   if (r.startsWith("nhan vien dang tra loi")) return "STAFF_REPLIED";
   if (r.startsWith("nhan vien tiep quan")) return "STAFF_TOOK_OVER";
   if (r.startsWith("can nguoi xu ly")) return "TOOL_REQUIRES_HUMAN";
+  if (r.startsWith("khach bao da chuyen khoan")) return "PAYMENT_REVIEW";
+  if (r.startsWith("ai dinh khang dinh")) return "UNVERIFIED_CLAIM";
   if (r.startsWith("khach si")) return "WHOLESALE";
   if (r.startsWith("ngoai chinh sach")) return "OUT_OF_POLICY";
   if (r.startsWith("khieu nai")) return "COMPLAINT";

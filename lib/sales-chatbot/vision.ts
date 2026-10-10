@@ -1,5 +1,6 @@
 import type { AiImage, AiImageMime } from "@/lib/ai/images";
 import type { AiProvider, AiResponse } from "@/lib/ai/provider";
+import { labelPaymentImageDescription } from "@/lib/sales-chatbot/claim-guard";
 
 /**
  * ═══════════ BOT ĐỌC ẢNH KHÁCH GỬI (docs/platform/quick-start.md §8) ═══════════
@@ -162,7 +163,7 @@ export const VISION_SYSTEM = [
   "Bạn mô tả ảnh khách hàng gửi cho một shop bán hàng online, để nhân viên bán hàng (không nhìn thấy ảnh) hiểu khách muốn gì.",
   "Viết tiếng Việt, tối đa 2 câu ngắn, KHÔNG chào hỏi, KHÔNG đoán giá, KHÔNG đoán tên thương hiệu nếu không đọc được chữ trên ảnh.",
   "Ưu tiên: đây là sản phẩm gì, màu, kiểu dáng / chất liệu / kích cỡ nhìn thấy, và MỌI CHỮ đọc được trên ảnh (tên mẫu, mã, size, giá in trên ảnh).",
-  "Ảnh chụp màn hình chuyển khoản / hoá đơn ⇒ nói rõ «ảnh chụp chuyển khoản», chép số tiền và nội dung chuyển khoản đọc được.",
+  "Ảnh chụp màn hình chuyển khoản / hoá đơn / biên lai ⇒ mở đầu bằng «ảnh chụp chuyển khoản», chép số tiền và nội dung chuyển khoản đọc được. KHÔNG viết «thành công», «đã nhận», «đã thanh toán» như một sự thật — ảnh có thể sửa, máy không xác minh được giao dịch.",
   "Ảnh chụp tin nhắn / bài đăng / địa chỉ / số điện thoại ⇒ chép lại phần chữ chính.",
   "Ảnh không rõ / không liên quan mua bán ⇒ nói ngắn đó là ảnh gì.",
 ].join("\n");
@@ -186,10 +187,16 @@ export async function describeImages(provider: AiProvider, images: readonly AiIm
   return { text, res };
 }
 
-/** Dòng chữ đưa vào lượt của khách. `description` rỗng / `null` ⇒ nói thẳng là chưa xem được. HÀM THUẦN. */
+/**
+ * Dòng chữ đưa vào lượt của khách. `description` rỗng / `null` ⇒ nói thẳng là chưa xem được. HÀM THUẦN.
+ *
+ * ẢNH CHUYỂN KHOẢN (P0 10/10/2026 — claim-guard.ts): mô tả «Ảnh chụp màn hình chuyển khoản thành công 280,000 VND» từng tới
+ * model như một DỮ KIỆN và bot đáp «đã nhận được tiền». Nay dòng mang nhãn «CHƯA XÁC MINH — ảnh khách gửi» và chữ «thành
+ * công» thành lời trích của ảnh; máy chủ chuyển người khi thấy dòng này (`paymentSignalInCustomerText`), không chỉ dặn model.
+ */
 export function imageLine(count: number, description: string | null): string {
   const n = Math.max(1, count);
-  const d = (description ?? "").replace(/[[\]]/g, "").trim();
+  const d = labelPaymentImageDescription((description ?? "").replace(/[[\]]/g, "").trim());
   if (d) return `[Khách gửi ${n > 1 ? `${n} ảnh` : "ảnh"}: ${d}]`;
   return `[Khách gửi ${n > 1 ? `${n} ảnh` : "ảnh"} — bot chưa xem được ảnh]`;
 }

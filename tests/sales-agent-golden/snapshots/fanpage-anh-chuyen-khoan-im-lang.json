@@ -1,0 +1,26 @@
+{
+  "key": "fanpage-anh-chuyen-khoan-im-lang",
+  "title": "Fanpage: khách gửi ảnh chuyển khoản ⇒ chuyển người, bot IM (luật kênh), nhân viên đối soát",
+  "shop": "food",
+  "channel": "FANPAGE",
+  "prompts": [],
+  "turns": [
+    {
+      "customer": "[Khách gửi ảnh: ẢNH CHUYỂN KHOẢN — CHƯA XÁC MINH (ảnh khách gửi, shop chưa đối soát): Ảnh chụp chuyển khoản 280,000 VND, nội dung: thanh toan don]",
+      "rounds": [],
+      "shown": [],
+      "status": "HANDOFF"
+    }
+  ],
+  "final": {
+    "status": "HANDOFF",
+    "handoffReason": "Khách báo đã chuyển khoản — gửi ảnh chuyển khoản, cần nhân viên đối soát (bot không xác nhận tiền)",
+    "stage": null,
+    "customer": null,
+    "draft": null,
+    "confirmed": null,
+    "declined": null,
+    "aiUsageConversation": "NO_ROWS",
+    "order": null
+  }
+}

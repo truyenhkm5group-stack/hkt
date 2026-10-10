@@ -57,6 +57,30 @@ function invariants(t: Map<string, GoldenTranscript>) {
   assert.ok(fashion.prompts.length > 0 && fashion.prompts.every((p) => !SEAFOOD.test(p)), "shop thời trang: lời nhắc không có chữ hải sản");
   assert.ok(quote.prompts.some((p) => SEAFOOD.test(p)), "shop thực phẩm: lời nhắc dùng gói thực phẩm");
 
+  // P0 10/10/2026 (claim-guard.ts): ảnh chuyển khoản ⇒ chuyển người, KHÔNG gọi model, không câu «đã nhận tiền»; chưa có đơn ⇒
+  // không câu «đã chốt»; câu «đã lên đơn» viết cùng vòng confirm_order chỉ tới khách khi chốt THÀNH CÔNG.
+  const RECEIVED = /nhận được tiền|đã nhận tiền|thanh toán thành công/i;
+  const img = get("anh-chuyen-khoan-chuyen-nguoi");
+  assert.equal(img.final.status, "HANDOFF");
+  assert.equal(img.turns[0].rounds.length, 0, "ảnh chuyển khoản ⇒ máy chủ chuyển người, không gọi model");
+  assert.ok(img.turns[0].shown.length > 0 && !img.turns[0].shown.some((s) => RECEIVED.test(s)), "web: khách nhận câu «đã nhận ảnh, chuyển nhân viên» — không câu đã nhận tiền");
+  const imgFb = get("fanpage-anh-chuyen-khoan-im-lang");
+  assert.equal(imgFb.final.status, "HANDOFF");
+  assert.deepEqual(imgFb.turns[0].shown, [], "fanpage: ảnh chuyển khoản ⇒ chuyển người, bot im");
+  const said = get("ai-noi-da-nhan-tien-bi-chan");
+  assert.equal(said.final.status, "HANDOFF");
+  assert.ok(!said.turns[0].shown.some((s) => RECEIVED.test(s)), "model nói «đã nhận được tiền» ⇒ câu KHÔNG tới khách");
+  const noOrder = get("chua-co-don-khong-noi-chot");
+  assert.equal(noOrder.final.status, "HANDOFF");
+  assert.ok(!noOrder.turns[0].shown.some((s) => /chốt đơn/i.test(s)), "chưa có đơn ⇒ không câu «em chốt đơn»");
+  const sameRound = get("chot-cung-vong-voi-cong-cu");
+  assert.equal(sameRound.final.order?.stage, "CONFIRMED");
+  assert.deepEqual(sameRound.turns[1].shown, ["Dạ em lên đơn cho mình rồi ạ.", "Shop giao sớm cho mình nha."], "câu giữ lại tới khách SAU khi chốt thành công, đúng thứ tự");
+  const refused = get("chot-cung-vong-cong-cu-tu-choi");
+  assert.notEqual(refused.final.order?.stage, "CONFIRMED");
+  assert.equal(refused.final.status, "HANDOFF");
+  assert.ok(!refused.turns[1].shown.some((s) => /chốt đơn/i.test(s)), "máy chủ từ chối chốt ⇒ câu «em chốt đơn rồi» không tới khách");
+
   for (const x of t.values())
     for (const turn of x.turns) assert.ok(!turn.rounds.some((r) => r.text === "[HẾT KỊCH BẢN]"), `[${x.key}] engine hỏi model nhiều vòng hơn kịch bản ở lượt «${turn.customer}»`);
 }
