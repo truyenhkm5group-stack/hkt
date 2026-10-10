@@ -433,6 +433,47 @@ export async function cancelShipmentCore(user: SessionUser, shipmentId: unknown,
   return { ok: true, message: `${adapter.label} đã nhận lệnh huỷ ${view.trackingCode}. Đơn tạo được lần gửi mới; trạng thái «Đã huỷ» về theo webhook.` };
 }
 
+/** Kết quả huỷ vận đơn THEO YÊU CẦU HUỶ ĐƠN CỦA KHÁCH — năm khả năng, mỗi cái một cách xử lý ở `lib/records/order-cancel.ts`. */
+export type CarrierCancelOutcome =
+  | { kind: "ACCEPTED"; message: string; trackingCode: string; carrier: CarrierKey }
+  | { kind: "REJECTED" | "UNKNOWN" | "UNAVAILABLE" | "NOT_CANCELLABLE"; message: string };
+
+/**
+ * MÁY huỷ vận đơn vì KHÁCH đã chốt huỷ đơn (chủ shop 10/10/2026). Cùng luật với nút của người (`cancelShipmentCore`): chỉ lần gửi
+ * ERP tạo, có mã, hãng CHƯA cầm hàng (`attemptView.canCancel` — `cancellable` của chính hãng), và CHỈ coi là huỷ khi hãng trả lời
+ * OK trong phong bì phản hồi (adapter đọc `error` / `status`, không tin HTTP status — AGENTS mục 5). Hãng từ chối ⇒ `REJECTED`;
+ * không có câu trả lời đọc được ⇒ `UNKNOWN` (KHÔNG BIẾT hãng đã huỷ chưa — không gửi lại mù); chưa mở được kết nối ⇒ `UNAVAILABLE`.
+ * Đã nhận lệnh huỷ từ trước (`raw.carrierCancel`) ⇒ `ACCEPTED` mà KHÔNG gọi hãng lần hai (tin trùng / thử lại). Ghi
+ * `raw.carrierCancel` với `by = null` (MÁY — luật 34) + nhật ký `SHIPMENT_CARRIER_CANCEL` tác nhân MÁY. Không tự đặt «Đã huỷ»:
+ * mã huỷ trên webhook mới là chứng từ logistics.
+ */
+export async function cancelShipmentForOrderCancel(shipmentId: unknown, reason: string, actor: { name: string; source: string }, deps: CarrierDeps = {}): Promise<CarrierCancelOutcome> {
+  const loaded = await loadAttempt(shipmentId);
+  if (!loaded.ok) return { kind: "NOT_CANCELLABLE", message: loaded.error };
+  const { row, adapter } = loaded;
+  const code = trackingOf(row);
+  const prior = carrierCancelOf(row.raw);
+  if (prior && code) return { kind: "ACCEPTED", message: prior.message, trackingCode: code, carrier: adapter.key };
+  const view = attemptView(row);
+  if (!view?.canCancel || !view.trackingCode) return { kind: "NOT_CANCELLABLE", message: "Vận đơn không huỷ được nữa — hãng đã nhận hàng, đã huỷ, hoặc chưa có mã vận đơn." };
+  const opened = await openSession(adapter, deps);
+  if (!opened.ok) return { kind: "UNAVAILABLE", message: opened.error };
+  const why = reason.trim().slice(0, 150) || "Khách huỷ đơn";
+  let res: Awaited<ReturnType<CarrierSession["cancel"]>>;
+  try {
+    res = await opened.session.cancel(view.trackingCode, why);
+  } catch (error) {
+    return { kind: "UNKNOWN", message: error instanceof Error ? error.message.slice(0, 200) : "lỗi không rõ" };
+  }
+  if (res.kind === "REJECTED") return { kind: "REJECTED", message: res.message };
+  if (res.kind === "UNKNOWN") return { kind: "UNKNOWN", message: res.message };
+  const cancel: CarrierCancelRaw = { state: "ACCEPTED", by: null, at: new Date().toISOString(), reason: why, message: res.value.message };
+  const db = await getDb();
+  await db.update(schema.shipments).set({ raw: { ...((row.raw as Record<string, unknown>) ?? {}), carrierCancel: cancel }, updatedAt: new Date() }).where(eq(schema.shipments.id, row.id));
+  await audit({ userId: null, userEmail: `agent:${actor.source}`, actorKind: "AGENT", action: "SHIPMENT_CARRIER_CANCEL", entity: "SHIPMENT", entityId: row.id, before: { carrier: adapter.key, trackingCode: view.trackingCode, stage: row.stage }, after: { carrierCancel: cancel, by: actor.name }, reason: why });
+  return { kind: "ACCEPTED", message: res.value.message, trackingCode: view.trackingCode, carrier: adapter.key };
+}
+
 /** Bỏ một lượt tạo KHÔNG CÓ mã vận đơn (lượt đứt mạng, hoặc treo quá 5 phút) — người đã tra trên trang hãng và chắc không có. */
 export async function discardCreateCore(user: SessionUser, shipmentId: unknown): Promise<CarrierResult> {
   if (!can(user, PERMISSION)) return { ok: false, error: NO_PERMISSION };

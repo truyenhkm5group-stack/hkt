@@ -19,12 +19,34 @@ import { can, type SessionUser } from "@/lib/auth/session";
 import { attemptHoldsOrder } from "@/lib/constants/carrier-vtp";
 import { displayVariationText } from "@/lib/constants/experience-profile";
 import { isManualOrderId, manualOrderShortCode, orderShipNote } from "@/lib/constants/manual-orders";
+import { cancellationLine, orderCancellationOf } from "@/lib/constants/order-cancel";
 import { reconfirmsSinceOpen, reviewFromValue } from "@/lib/constants/order-review";
 import { ORDER_STAGE_LABEL } from "@/lib/constants/pancake";
 import { readDisplayProfile } from "@/lib/experience/profile";
-import type { ConversationOrderSummary, OrderSummaryLine } from "@/lib/sales-chatbot/order-verification-shared";
+import type { ConversationCancelledOrder, ConversationOrderSummary, OrderSummaryLine } from "@/lib/sales-chatbot/order-verification-shared";
 
-export type OrderSummaryResult = { ok: true; summary: ConversationOrderSummary | null } | { ok: false; error: string };
+/** `cancelled` = đơn ĐÃ HUỶ gần nhất của hội thoại — chỉ đọc khi KHÔNG còn đơn đang mở (`summary = null`). */
+export type OrderSummaryResult = { ok: true; summary: ConversationOrderSummary | null; cancelled?: ConversationCancelledOrder | null } | { ok: false; error: string };
+
+/**
+ * Đơn «Đã huỷ» mới nhất gắn với hội thoại (cùng phép nối với đơn đang mở) — dòng «ĐÃ HUỶ» của khung đơn khi không còn đơn sống. Lời
+ * khai huỷ (`raw.cancellation`) cho câu «ai yêu cầu · ai ghi · lý do»; đơn huỷ trước 10/10/2026 không có ⇒ chỉ «Đã huỷ».
+ */
+async function lastCancelledOrder(conversationId: string): Promise<ConversationCancelledOrder | null> {
+  const db = await getDb();
+  const o = schema.orders;
+  const c = schema.salesChatConversations;
+  const [r] = await db
+    .select({ id: o.id, at: o.lastUpdateStatusAt, cancellation: sql<unknown>`${o.raw}->'cancellation'` })
+    .from(c)
+    .innerJoin(o, and(or(eq(o.salesConversationId, c.id), eq(o.id, c.orderId), eq(o.id, c.draftOrderId)), eq(o.stage, "CANCELLED")))
+    .where(eq(c.id, conversationId))
+    .orderBy(sql`${o.lastUpdateStatusAt} desc nulls last`, sql`${o.id} desc`)
+    .limit(1);
+  if (!r) return null;
+  const view = orderCancellationOf({ cancellation: r.cancellation });
+  return { orderId: r.id, shortCode: manualOrderShortCode(r.id), cancelledAt: view?.cancelledAt ?? r.at?.toISOString() ?? null, line: cancellationLine(view) ?? "Đã huỷ" };
+}
 
 const DEAD_STAGES = ["CANCELLED", "DELETED"] as const;
 
@@ -114,7 +136,7 @@ export async function loadConversationOrderSummary(user: SessionUser, conversati
   const profile = await profileRead;
   const r = rows[0];
   if (!r) return { ok: false, error: "Không có hội thoại này." };
-  if (!r.id || !r.stage || !r.insertedAt) return { ok: true, summary: null };
+  if (!r.id || !r.stage || !r.insertedAt) return { ok: true, summary: null, cancelled: await lastCancelledOrder(conversationId) };
   const manual = isManualOrderId(r.id);
   const lines = asArray(r.items)
     .map(itemFromJson)
