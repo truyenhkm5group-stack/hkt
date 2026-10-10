@@ -3,7 +3,7 @@
   "mission_id": "inbox-avatar-profile",
   "title": "Ảnh đại diện khách thật (Meta backfill + Pancake) và bấm avatar mở đúng trang Facebook khi nguồn cho phép",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -27,9 +27,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-10T08:13:52.335Z",
-  "updated_at": "2026-10-10T12:02:22.461Z",
+  "updated_at": "2026-10-10T13:52:04.450Z",
   "last_heartbeat": "2026-10-10T12:02:22.461Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#777 → 33f3b13bd9614601e92658e3e5f1cbc5cf6204dc"
+  },
   "handoff": {
     "branch": "feat/inbox-avatar-profile",
     "sha": "fbeceb094400820dbb67555bd08637d1f5a9107a",
