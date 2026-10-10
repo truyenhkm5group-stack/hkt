@@ -58,6 +58,7 @@ import { botMaySend, captureSendSnapshot, holdGate, startHumanCooldown } from "@
 import { noteMessengerGraphFailure } from "@/lib/sales-chatbot/messenger-health";
 import { botSendAllowed, inboundPageGate } from "@/lib/sales-chatbot/page-runtime";
 import { PAGE_NOT_LIVE_SEND_ERROR } from "@/lib/sales-chatbot/page-runtime-shared";
+import { metaProfileErrorKind, PROFILE_REFRESH_MS, PROFILE_TRANSIENT_RETRY_MS, profileRefreshDue, type StoredMetaProfile } from "@/lib/sales-chatbot/avatar-profile";
 
 /**
  * ═══════════ MESSENGER TRỰC TIẾP — BOT FANPAGE KHÔNG CẦN PANCAKE (0207 · docs/platform/messenger.md) ═══════════
@@ -819,46 +820,126 @@ export async function processMessengerThreadDebounced(pageId: string, psid: stri
   return last;
 }
 
-/** Ảnh đại diện Meta là URL CDN có hạn — đọc lại sau chừng này. */
-export const PROFILE_REFRESH_MS = 3 * 24 * 3_600_000;
+/** Ảnh đại diện Meta là URL CDN có hạn — đọc lại sau chừng này (hằng số sống ở `avatar-profile.ts`, xuất lại cho nơi cũ). */
+export { PROFILE_REFRESH_MS };
+
+/** Kết quả một lượt hỏi hồ sơ. `RATE_LIMITED` = Meta bảo chậm lại ⇒ lượt lấp dần DỪNG, không hỏi tiếp người kế. */
+export type ProfileRefreshResult = "FETCHED" | "FRESH" | "FAILED" | "RATE_LIMITED" | "SKIPPED";
 
 /**
  * ẢNH ĐẠI DIỆN KHÁCH MESSENGER cho hộp thư (0233): `GET /{PSID}?fields=profile_pic` bằng token của page. Meta chỉ trả khi app có
  * quyền đọc hồ sơ người dùng (Business Asset User Profile Access) — không có ⇒ ghi lỗi, hộp thư hiện chữ cái. Ghi vào
- * `state.messengerProfile` `{ pic, at, error }` (không đẩy `updated_at` — đồng hồ nhường không đọc cột đó nhưng màn khác thì có);
- * đọc lại sau `PROFILE_REFRESH_MS`. Không bao giờ lưu token; câu lỗi đã che bí mật. Không mở hội thoại mới.
+ * `state.messengerProfile` `{ pic, at, error, code, subcode, http }` (mã lỗi Graph từ 10/10/2026 — để chẩn đoán QUYỀN / KHÔNG CÓ /
+ * HẾT HẠN ở `avatar-profile.ts::avatarStatusOf`, không phải đoán từ câu chữ). Không đẩy `updated_at`. Hỏi lại theo
+ * `profileRefreshDue` (có ảnh: 3 ngày hoặc khi URL CDN báo hết hạn · thiếu quyền: 1 ngày · lỗi mạng / giới hạn: 1 giờ). Không bao
+ * giờ lưu token; câu lỗi đã che bí mật. Không mở hội thoại mới. KHÔNG nằm trong đường trả lời: gọi SAU lượt trả lời
+ * (`processMessengerThreadDebounced`) hoặc từ lượt lấp dần (`backfillMessengerProfiles`).
  */
-export async function refreshMessengerProfile(pageId: string, psid: string, deps: FanpageDeps = {}): Promise<"FETCHED" | "FRESH" | "FAILED" | "SKIPPED"> {
+export async function refreshMessengerProfile(pageId: string, psid: string, deps: FanpageDeps = {}): Promise<ProfileRefreshResult> {
   if (!/^\d{5,30}$/.test(psid)) return "SKIPPED";
   const now = (deps.now ?? (() => new Date()))();
   const db = await getDb();
   const c = schema.salesChatConversations;
   const [row] = await db.select({ id: c.id, state: c.state }).from(c).where(and(eq(c.channel, "FANPAGE"), eq(c.visitorKey, fanpageKey(pageId, psid)))).limit(1);
   if (!row) return "SKIPPED";
-  const prev = (row.state as Record<string, unknown> | null)?.messengerProfile as { at?: unknown } | undefined;
-  const prevAt = typeof prev?.at === "string" ? Date.parse(prev.at) : NaN;
-  if (Number.isFinite(prevAt) && now.getTime() - prevAt < PROFILE_REFRESH_MS) return "FRESH";
+  const prev = (row.state as Record<string, unknown> | null)?.messengerProfile as StoredMetaProfile | undefined;
+  if (!profileRefreshDue(prev, now)) return "FRESH";
   const app = messengerApp();
   const tk = await messengerTokenFor(pageId);
   if (!app || !tk.ok) return "SKIPPED";
   let pic: string | null = null;
   let error: string | null = null;
+  let code: number | null = null;
+  let subcode: number | null = null;
+  let http: number | null = null;
+  const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : typeof v === "string" && /^\d{1,7}$/.test(v) ? Number(v) : null);
   try {
     const url = `${graphBase()}/${encodeURIComponent(psid)}?${new URLSearchParams({ fields: "profile_pic", access_token: tk.token, appsecret_proof: appSecretProof(tk.token, app.appSecret) })}`;
     const res = await (deps.fetch ?? fetch)(url, { method: "GET", redirect: "manual", signal: AbortSignal.timeout(5_000) });
-    const body = ((await res.json().catch(() => null)) ?? {}) as { profile_pic?: unknown; error?: { message?: unknown } };
+    http = res.status;
+    const body = ((await res.json().catch(() => null)) ?? {}) as { profile_pic?: unknown; error?: { message?: unknown; code?: unknown; error_subcode?: unknown } };
     const raw = typeof body.profile_pic === "string" ? body.profile_pic.trim() : "";
     if (res.ok && /^https:\/\/[^\s]+$/i.test(raw) && raw.length <= 2000) pic = raw;
-    else error = (typeof body.error?.message === "string" ? body.error.message : `HTTP ${res.status}`).split(tk.token).join("…").split(app.appSecret).join("…").slice(0, 200);
+    else if (!res.ok || body.error) {
+      error = (typeof body.error?.message === "string" ? body.error.message : `HTTP ${res.status}`).split(tk.token).join("…").split(app.appSecret).join("…").slice(0, 200);
+      code = num(body.error?.code);
+      subcode = num(body.error?.error_subcode);
+    }
   } catch (e) {
     error = (e instanceof Error ? e.message : String(e)).split(tk.token).join("…").slice(0, 200);
   }
-  const stamp = { messengerProfile: { pic, at: now.toISOString(), error } };
+  const stamp = { messengerProfile: { pic, at: now.toISOString(), error, code, subcode, http } };
   await db
     .update(c)
     .set({ state: sql`${c.state} || ${JSON.stringify(stamp)}::jsonb`, updatedAt: sql`${c.updatedAt}` })
     .where(eq(c.id, row.id));
-  return pic ? "FETCHED" : "FAILED";
+  if (pic) return "FETCHED";
+  return error && metaProfileErrorKind(stamp.messengerProfile) === "RATE_LIMITED" ? "RATE_LIMITED" : "FAILED";
+}
+
+/** Trần của một lượt lấp dần ảnh đại diện Meta: số hội thoại · nghỉ giữa hai lượt hỏi · trần thời gian · chỉ hội thoại còn sống. */
+export const PROFILE_BACKFILL_LIMITS = { perRun: 40, gapMs: 400, budgetMs: 60_000, activeDays: 30 } as const;
+
+export type ProfileBackfillResult = { pages: number; candidates: number; checked: number; fetched: number; failed: number; fresh: number; skipped: number; stoppedBy: "RATE_LIMITED" | "BUDGET" | null };
+
+/**
+ * LẤP DẦN ẢNH ĐẠI DIỆN cho hội thoại Messenger trực tiếp ĐÃ CÓ (mục E, 10/10/2026): `refreshMessengerProfile` chỉ chạy SAU một lượt
+ * trả lời, nên khách đã nhắn trước bản 0233 (hoặc chưa nhắn lại) mãi là chữ cái. Lượt này:
+ *  · chỉ page đang nối Meta trực tiếp (`messengerOwnedPageIds`) — page qua Pancake không có token Graph, không hỏi;
+ *  · hội thoại ĐANG CHẠY / MỚI trước: chưa đóng trước, rồi tin khách mới nhất trước; chỉ hội thoại có hoạt động trong
+ *    `activeDays` ngày;
+ *  · bỏ hội thoại có ảnh còn hạn / vừa hỏi hỏng chưa tới hạn hỏi lại (`profileRefreshDue` — cùng luật với đường sau lượt trả lời);
+ *  · trần `perRun` hội thoại, nghỉ `gapMs` giữa hai lượt hỏi, trần `budgetMs`; Meta báo giới hạn tốc độ ⇒ DỪNG ngay;
+ *  · ghi lý do hỏng (mã lỗi Graph) vào `state.messengerProfile` để chẩn đoán.
+ * KHÔNG BAO GIỜ gọi từ đường trả lời của bot. Chạy tay: job `messenger-profile-backfill` (lib/sync/jobs.ts — KHÔNG có lịch).
+ */
+export async function backfillMessengerProfiles(deps: FanpageDeps & { limits?: Partial<typeof PROFILE_BACKFILL_LIMITS> } = {}): Promise<ProfileBackfillResult> {
+  const lim = { ...PROFILE_BACKFILL_LIMITS, ...deps.limits };
+  const now = deps.now ?? (() => new Date());
+  const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+  const out: ProfileBackfillResult = { pages: 0, candidates: 0, checked: 0, fetched: 0, failed: 0, fresh: 0, skipped: 0, stoppedBy: null };
+  const pageIds = await messengerOwnedPageIds();
+  out.pages = pageIds.length;
+  if (!pageIds.length) return out;
+  const started = now().getTime();
+  const db = await getDb();
+  const c = schema.salesChatConversations;
+  // Lọc thô ở SQL (mốc hỏi cuối cũ hơn khoảng thử lại NGẮN nhất — chuỗi ISO so được theo thứ tự chữ), luật đầy đủ ở TypeScript.
+  const minRetryIso = new Date(started - PROFILE_TRANSIENT_RETRY_MS).toISOString();
+  const rows = await db
+    .select({ pageId: c.pageId, threadId: c.threadId, state: c.state })
+    .from(c)
+    .where(
+      and(
+        eq(c.channel, "FANPAGE"),
+        inArray(c.pageId, pageIds),
+        isNotNull(c.threadId),
+        gte(sql`coalesce(${c.lastCustomerAt}, ${c.updatedAt})`, new Date(started - lim.activeDays * 86_400_000)),
+        sql`coalesce(${c.state}->'messengerProfile'->>'at', '') < ${minRetryIso}`,
+      ),
+    )
+    .orderBy(sql`case when ${c.status} = 'CLOSED' then 1 else 0 end`, sql`coalesce(${c.lastCustomerAt}, ${c.updatedAt}) desc`)
+    .limit(lim.perRun * 3);
+  const due = rows.filter((r) => r.pageId && r.threadId && profileRefreshDue((r.state as Record<string, unknown> | null)?.messengerProfile as StoredMetaProfile | undefined, new Date(started))).slice(0, lim.perRun);
+  out.candidates = due.length;
+  for (const [i, r] of due.entries()) {
+    if (now().getTime() - started > lim.budgetMs) {
+      out.stoppedBy = "BUDGET";
+      break;
+    }
+    if (i > 0) await sleep(lim.gapMs);
+    const res: ProfileRefreshResult = await refreshMessengerProfile(r.pageId as string, r.threadId as string, deps).catch(() => "FAILED" as const);
+    out.checked += 1;
+    if (res === "FETCHED") out.fetched += 1;
+    else if (res === "FRESH") out.fresh += 1;
+    else if (res === "SKIPPED") out.skipped += 1;
+    else out.failed += 1;
+    if (res === "RATE_LIMITED") {
+      out.stoppedBy = "RATE_LIMITED";
+      break;
+    }
+  }
+  return out;
 }
 
 /**

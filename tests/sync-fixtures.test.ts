@@ -494,6 +494,7 @@ import { testSalesInbox } from "./sales-inbox.test";
 import { testInboxAdvanced } from "./inbox-advanced.test";
 import { testInboxComposer } from "./inbox-composer.test";
 import { testInboxV2A } from "./inbox-v2-a.test";
+import { testInboxAvatarProfile } from "./inbox-avatar-profile.test";
 import { testInboxSemanticsV3 } from "./inbox-semantics-v3.test";
 import { testInboxBulkAi } from "./inbox-bulk-ai.test";
 import { testSalesInboxHistory } from "./sales-inbox-history.test";
@@ -2879,6 +2880,9 @@ async function main() {
   await testInboxComposer();
   // INBOX-V2-A: bộ lọc gọn (14 tham số cũ còn đủ) · chưa đọc trước ở MÁY CHỦ (phân trang ổn định) · hàng đang mở đứng yên · ảnh không link Facebook giả — tổ chức `hop-thu-v2a`.
   await testInboxV2A();
+  // Ảnh đại diện khách + bấm ảnh mở trang Facebook (chủ shop 10/10/2026 mục E · F): PSID / fb_id không bao giờ thành link Facebook,
+  // năm trạng thái PROFILE_*, đường ghi Pancake dùng chung một lõi, ops inbox-avatar-audit chỉ đọc. Thuần + quét mã nguồn.
+  await testInboxAvatarProfile();
   // INBOX-SEMANTICS-V3 (chủ shop 10/10/2026): bốn khái niệm tách riêng — chưa đọc (AI trả lời không xoá) · chờ trả lời · cần người thật · người đang xử lý; ma trận 20 hội thoại × mọi bộ lọc — tổ chức `hop-thu-sem-v3`.
   await testInboxSemanticsV3();
   // «Trả tất cả cho AI» (chủ shop 10/10/2026, mục D): quyền · cách ly tổ chức · trả được / bị chặn theo lý do · sự kiện + nhật ký người bấm · chạy lại 0 dòng mới — `hop-thu-bulk-a` / `hop-thu-bulk-b`.

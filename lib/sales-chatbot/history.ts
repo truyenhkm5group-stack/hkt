@@ -33,6 +33,7 @@
  * hội thoại — giới hạn của Meta), dùng chung `writeThreadPage` / `finishThread` ở đây. Zalo OA CHƯA nhập lịch sử.
  */
 import { and, asc, count, eq, gt, gte, isNotNull, isNull, like, lt, lte, or, sql } from "drizzle-orm";
+import { pancakeAvatarFactsOf, pancakeAvatarPatch } from "@/lib/sales-chatbot/avatar-profile";
 import { getDb, schema } from "@/db";
 import { audit } from "@/lib/audit";
 import { can, type SessionUser } from "@/lib/auth/session";
@@ -97,17 +98,11 @@ export function pancakePhonesOf(obj: unknown): string[] {
 
 /**
  * Ảnh đại diện khách NẾU Pancake trả sẵn một địa chỉ https KHÔNG mang khoá. Đường ảnh đại diện riêng của Pancake đòi
- * `page_access_token` trong URL — không bao giờ lưu (kho mã PUBLIC, CSDL không phải chỗ cất khoá). HÀM THUẦN.
+ * `page_access_token` trong URL — không bao giờ lưu (kho mã PUBLIC, CSDL không phải chỗ cất khoá). Luật nằm ở
+ * `avatar-profile.ts::pancakeAvatarFactsOf` — webhook / quét lại / nhập lịch sử dùng CÙNG một hàm. HÀM THUẦN.
  */
 export function pancakeAvatarOf(conv: unknown): string | null {
-  const c = (conv && typeof conv === "object" ? conv : {}) as Record<string, unknown>;
-  const from = (c.from && typeof c.from === "object" ? c.from : {}) as Record<string, unknown>;
-  const cust = (Array.isArray(c.customers) && c.customers[0] && typeof c.customers[0] === "object" ? c.customers[0] : {}) as Record<string, unknown>;
-  for (const v of [c.avatar_url, c.avatar, from.avatar_url, from.avatar, from.picture, cust.avatar_url, cust.avatar, cust.picture]) {
-    const url = str(v).trim();
-    if (/^https:\/\/[^\s]+$/i.test(url) && url.length <= 1000 && !/token|access|secret|key=/i.test(url)) return url;
-  }
-  return null;
+  return pancakeAvatarFactsOf(conv).url;
 }
 
 /** Một hội thoại của danh sách Pancake ⇒ việc phải đọc; không phải hộp thư (bình luận) / thiếu mã ⇒ `null`. HÀM THUẦN. */
@@ -119,7 +114,8 @@ export function pendingThreadOf(conv: unknown): PendingThread | null {
   const customers = Array.isArray(c.customers) ? (c.customers as Record<string, unknown>[]) : [];
   const name = str((c.from as { name?: unknown } | undefined)?.name) || str(customers[0]?.name);
   const updated = pancakeTime(c.updated_at);
-  return { id, name: name.slice(0, 200), phones: pancakePhonesOf(c), avatarUrl: pancakeAvatarOf(c), updatedAt: updated ? updated.toISOString() : null };
+  const avatar = pancakeAvatarFactsOf(c);
+  return { id, name: name.slice(0, 200), phones: pancakePhonesOf(c), avatarUrl: avatar.url, avatarOutcome: avatar.outcome, updatedAt: updated ? updated.toISOString() : null };
 }
 
 export type PlannedHistoryMessage = { messageId: string; side: "CUSTOMER" | "PAGE"; text: string; at: Date; imageUrls: string[]; customerName: string | null };
@@ -313,7 +309,11 @@ export async function finishThread(pageId: string, thread: PendingThread, phones
   const merged = [...new Set([...phones, ...thread.phones, ...prev])].slice(0, HISTORY_LIMITS.phones);
   const patch: Record<string, unknown> = {};
   if (merged.length && merged.join() !== prev.join()) patch.pancakePhones = merged;
-  if (thread.avatarUrl) patch.pancakeAvatarUrl = thread.avatarUrl;
+  // Ảnh + lý do không có ảnh (`state.pancakeAvatar`) — cùng bản vá với đường webhook (`avatar-profile.ts::pancakeAvatarPatch`).
+  // Luồng không mang dữ kiện Pancake (nhập lịch sử Meta trực tiếp) ⇒ không ghi gì: thiếu dữ kiện không phải «Pancake không có ảnh».
+  const outcome = thread.avatarUrl ? "URL" : thread.avatarOutcome;
+  const avatarPatch = outcome ? pancakeAvatarPatch(st, { url: thread.avatarUrl, outcome, via: "HISTORY" }, now) : null;
+  if (avatarPatch) Object.assign(patch, avatarPatch);
   await db
     .update(c)
     .set({ historyImportedAt: now, ...(Object.keys(patch).length ? { state: sql`${c.state} || ${JSON.stringify(patch)}::jsonb` } : {}), updatedAt: sql`${c.updatedAt}` })

@@ -73,7 +73,7 @@ import { MUSIC_MOOD_KEYS, generateMusicLibrary } from "@/lib/video-scale/music-g
 import { runPayrollAutopilot } from "@/lib/payroll/autopilot";
 import { modelRegistryFollowUp, runModelRegistryJob } from "@/lib/models/registry-job";
 import { catchUpFanpage, resendPendingFanpageReplies } from "@/lib/sales-chatbot/fanpage";
-import { sweepStaleMessengerThreads } from "@/lib/sales-chatbot/messenger";
+import { backfillMessengerProfiles, PROFILE_BACKFILL_LIMITS, sweepStaleMessengerThreads } from "@/lib/sales-chatbot/messenger";
 import { runSalesFollowups } from "@/lib/sales-chatbot/followup";
 import { resumeInboxHistory } from "@/lib/sales-chatbot/history";
 import { sendReorderDigest } from "@/lib/reorder/digest";
@@ -858,6 +858,30 @@ export const JOB_DEFINITIONS: Record<string, JobDefinition> = {
         const rdText = (rd.sent ? `tin sáng khách đến hạn mua lại: ${rd.due} khách · ` : "") + (ls.status === "NOT_DUE" ? "" : `tự học: ${ls.note} · `) + (ql.status === "NOT_DUE" ? "" : `câu mẫu: ${ql.note} · `) + (no.sent ? `báo nhóm ${no.sent} đơn mới chưa xác nhận · ` : "") + (lv.refreshed || lv.errors ? `level khách: ${lv.refreshed} hội thoại${lv.errors ? ` · lỗi ${lv.errors}` : ""} · ` : "") + (hs ? `${hs} · ` : "");
         const osText = os.checked ? `ghi đơn: đọc ${os.checked} hội thoại · lên ${os.created} đơn · sửa ${os.changes} · bỏ qua ${os.skipped} · lỗi ${os.errors}${os.detail.length ? ` (${os.detail.slice(0, 3).join(" · ")})` : ""} · ` : "";
         ctx.summary.detail = `${osText}${rdText}${cuText}${r.due} tới mốc · gửi ${r.sent} · dừng ${r.stopped} · hoãn ${r.deferred} · lỗi ${r.errors}${r.detail.length ? ` — ${r.detail.slice(0, 6).join(" · ")}` : ""}`.slice(0, 900);
+        return r;
+      }),
+  },
+  /*
+    LẤP DẦN ẢNH ĐẠI DIỆN KHÁCH MESSENGER TRỰC TIẾP (chủ shop 10/10/2026, mục E): hội thoại Meta trực tiếp đã có mà chưa có ảnh /
+    ảnh đã hết hạn ⇒ hỏi Graph `profile_pic` có trần tốc độ, hội thoại đang chạy trước (lib/sales-chatbot/messenger.ts ::
+    backfillMessengerProfiles). CHẠY TAY — KHÔNG có lịch, KHÔNG fan-out: đưa vào lịch là đổi bộ lập lịch, việc chủ shop duyệt
+    (AGENTS.md §7). Không nằm trong đường trả lời của bot. Tổ chức không nối Meta trực tiếp ⇒ 0 page, không gọi gì.
+  */
+  "messenger-profile-backfill": {
+    label: "Lấp dần ảnh đại diện khách Messenger (chạy tay)",
+    source: "ALL",
+    module: "ai_sales",
+    description:
+      `Hội thoại Messenger trực tiếp (page nối thẳng Meta) có hoạt động trong ${PROFILE_BACKFILL_LIMITS.activeDays} ngày mà chưa có ảnh đại diện / ảnh đã hết hạn ⇒ hỏi Graph profile_pic bằng token của page: ` +
+      `tối đa ${PROFILE_BACKFILL_LIMITS.perRun} hội thoại mỗi lượt, nghỉ ${PROFILE_BACKFILL_LIMITS.gapMs} ms giữa hai lượt hỏi, hội thoại đang mở / tin mới trước; Meta báo giới hạn tốc độ ⇒ dừng. ` +
+      "Lỗi quyền (Business Asset User Profile Access) / không có ảnh / token sai ghi vào hội thoại để chẩn đoán. Page qua Pancake không có token Graph — không hỏi.",
+    run: (o) =>
+      runSyncJob({ source: "ERP", job: "messenger-profile-backfill", trigger: o.trigger, actor: o.actor, observeOnly: true }, async (ctx) => {
+        const r = await backfillMessengerProfiles();
+        ctx.summary.updated = r.fetched;
+        ctx.summary.skipped = r.fresh + r.skipped;
+        ctx.summary.failed = r.failed;
+        ctx.summary.detail = `${r.pages} page Meta trực tiếp · ${r.candidates} hội thoại tới hạn · hỏi ${r.checked} · có ảnh ${r.fetched} · hỏng ${r.failed} · còn hạn ${r.fresh} · bỏ qua ${r.skipped}${r.stoppedBy ? ` · DỪNG: ${r.stoppedBy === "RATE_LIMITED" ? "Meta giới hạn tốc độ" : "hết trần thời gian"}` : ""}`;
         return r;
       }),
   },

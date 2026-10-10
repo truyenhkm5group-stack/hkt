@@ -130,8 +130,8 @@ function testRowHelpers() {
 }
 
 function testAvatarNoFakeLink() {
-  assert.equal(avatarHrefOf(null), null, "chưa nối hồ sơ ⇒ ảnh không phải link");
-  assert.equal(avatarHrefOf("cus 1"), "/customers/cus%201");
+  assert.equal(avatarHrefOf(null).href, null, "chưa nối hồ sơ ⇒ ảnh không phải link");
+  assert.deepEqual(avatarHrefOf("cus 1"), { href: "/customers/cus%201", external: false, reason: "NO_SOURCE_URL" }, "không link Facebook ⇒ hồ sơ khách nội bộ, kèm lý do");
   // Không dựng đường dẫn Facebook ở hộp thư: PSID / mã luồng là mã THEO PAGE, không phải hồ sơ (inbox-shared.ts::avatarHrefOf).
   const files = [...readdirSync(DIR).filter((f) => f.endsWith(".tsx")).map((f) => `${DIR}/${f}`), "lib/sales-chatbot/inbox.ts", "lib/sales-chatbot/inbox-shared.ts"];
   const bad = files.filter((f) => /facebook\.com|fb\.com\/|\bm\.me\//i.test(strip(readFileSync(f, "utf8"))));
