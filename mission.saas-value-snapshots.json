@@ -3,7 +3,7 @@
   "mission_id": "saas-value-snapshots",
   "title": "Trung tâm giá trị SaaS PR-3: hai bảng ảnh chụp ngày (giá trị theo tổ chức 7/30/90 + sức khoẻ/rủi ro rời bỏ) + lượt chụp mỗi ngày VN ở đường job",
   "business_goal": "",
-  "status": "RUNNING",
+  "status": "PR_READY",
   "priority": "P1",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -32,7 +32,18 @@
     "0242": "2026-10-10T18:42:40.247Z"
   },
   "created_at": "2026-10-10T18:42:21.906Z",
-  "updated_at": "2026-10-10T18:42:40.247Z",
-  "last_heartbeat": "2026-10-10T18:42:21.906Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-10T22:34:42.615Z",
+  "last_heartbeat": "2026-10-10T22:34:42.615Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "feat/saas-value-snapshots",
+    "sha": "194c977f59f24227b96df03c2d27c484129a58e2",
+    "at": "2026-10-10T22:34:42.615Z",
+    "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+    "title": "Trung tâm giá trị SaaS PR-3: hai bảng ảnh chụp ngày (giá trị theo tổ chức 7/30/90 + sức khoẻ/rủi ro rời bỏ) + lượt chụp mỗi ngày VN ở đường job",
+    "summary": "PR-3: hai bảng ảnh chụp ngày (giá trị 7/30/90 + sức khoẻ/rủi ro rời bỏ), chụp mỗi ngày VN ở đường JOB (một lời gọi trong captureSaasSnapshot), ngày cũ không ghi được, lỗi từng nguồn ⇒ chỉ ô đó NULL; ops chỉ đọc saas-value-snapshot-check",
+    "tests": [
+      "npm test đầy đủ trên bản worker: TẤT CẢ KIỂM THỬ ĐẠT · cherry-pick lên main (PR-1/PR-2 đã gộp): tsc sạch · migration-journal · saas-value-center đạt · bài CSDL saas-value-snapshots chạy trong CI"
+    ]
+  }
 }
