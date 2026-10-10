@@ -19,6 +19,8 @@ import { ACCOUNT_STATUS_LABEL, ACCOUNT_TYPE_LABEL, ACCOUNT_TYPE_TONE, BILLING_MO
 import { JOB_KIND_LABEL, jobView, type JobStep, type ProvisioningKind } from "@/lib/saas/provisioning";
 import { STATEMENT_LINE_LABEL } from "@/lib/saas/statement";
 import { CustomerHealthPanel } from "@/components/saas/customer-health";
+import { TenantValueDetailSection } from "@/components/platform/tenant-value-detail";
+import { loadTenantValueDetail } from "@/lib/saas/tenant-value-read";
 import { runningVersion } from "@/lib/version";
 import { cn } from "@/lib/utils";
 
@@ -61,6 +63,8 @@ export default async function SaasCustomerPage({ params, searchParams }: { param
   // Gói riêng của thuê bao: chỉ gói ĐẶT được cho loại tài khoản này (lib/saas/create-customer-rules.ts) — máy chủ kiểm lại khi thuê.
   const planList = plansForAccountType(createCustomerPlanOptions(await readPlans(), await loadPriceBook(), new Date()), a.accountType).map((p) => ({ key: p.key, name: p.name }));
   const label = `${d.periodMonth.slice(5, 7)}/${d.periodMonth.slice(0, 4)}`;
+  // Giá trị & kinh tế đơn vị — ĐỌC ẢNH CHỤP ở CSDL nhà (không mở CSDL của khách); danh sách đơn đọc sống ở tuyến riêng khi bấm.
+  const value = await loadTenantValueDetail(user, c.workspaces.map((w) => w.code));
 
   return (
     <div className="space-y-5">
@@ -85,6 +89,8 @@ export default async function SaasCustomerPage({ params, searchParams }: { param
 
       {/* Sức khoẻ — cùng đường đọc + cùng hàm phân loại với danh sách khách */}
       <CustomerHealthPanel health={d.health} now={d.healthAt} periodMonth={d.healthPeriodMonth} />
+
+      {value.ok && c.workspaces.length ? <TenantValueDetailSection detail={value.value} accountCode={a.code} workspaces={c.workspaces.map((w) => ({ code: w.code, name: w.name }))} /> : null}
 
       {/* Tổng quan */}
       <SectionCard title="Tổng quan">

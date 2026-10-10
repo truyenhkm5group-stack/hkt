@@ -1,9 +1,14 @@
+import { Suspense } from "react";
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { InfoHint } from "@/components/info-hint";
 import { PageHeader } from "@/components/page-header";
 import { PlatformCostForm } from "@/components/platform/saas-cost-form";
+import { TenantValueSection } from "@/components/platform/tenant-value-section";
+import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState, SectionCard } from "@/components/ui-bits";
-import { requirePermission } from "@/lib/auth/session";
+import { requirePermission, type SessionUser } from "@/lib/auth/session";
+import { TENANT_VALUE_BOARD_PAGE_SIZE, TENANT_VALUE_DEFAULT_SORT, TENANT_VALUE_SORTABLE, parseValueWindow } from "@/lib/constants/tenant-value-board";
 import { formatDate, formatDateTime, formatNumber, formatPercent, formatVND } from "@/lib/format";
 import { loadOwnerCockpit, type TenantRow } from "@/lib/platform/saas-cockpit";
 import { MRR_MOVEMENT_LABEL, TENANT_LIFECYCLE_LABEL, TENANT_LIFECYCLES, TREND_LABEL, type PeriodMovement } from "@/lib/platform/saas-metrics";
@@ -13,6 +18,8 @@ import { PlatformAiModelControlSection } from "@/components/platform/ai-model-co
 import { loadPlatformAiControl } from "@/lib/ai-usage/platform-ai-admin";
 import { loadPlatformModelAb } from "@/lib/ai-usage/platform-ai-ab";
 import { loadPricingAdmin, loadPricingEconomics } from "@/lib/pricing/admin";
+import { loadTenantValueBoard } from "@/lib/saas/tenant-value-read";
+import { parseListParams, type PageSearchParams } from "@/lib/search-params";
 import { cn } from "@/lib/utils";
 
 export const metadata = { title: "Kinh tế nền tảng" };
@@ -152,31 +159,24 @@ function TenantTable({ rows }: { rows: TenantRow[] }) {
 /**
  * OWNER COCKPIT — kinh tế của CHÍNH nền tảng (không phải của một cửa hàng): MRR, biến động, giữ chân, biên lợi nhuận,
  * chi phí AI, kích hoạt. Chỉ người của tổ chức nhà có `platform:operate`; lõi `loadOwnerCockpit` hỏi lại.
+ *
+ * Thứ tự dựng (PR-4 Trung tâm giá trị): khối «Giá trị khách hàng» ĐỌC ẢNH CHỤP và hiện NGAY — nó không mở CSDL của khách nào và
+ * không chụp ảnh. Các khối cũ còn mở CSDL từng tổ chức (cockpit chụp ảnh MRR khi ảnh cũ · Platform AI Model Control · A/B · Kinh tế
+ * đơn vị) dời xuống sau ranh giới `Suspense`: chúng vẫn chạy như trước, chỉ không còn chặn khối giá trị.
  */
-export default async function OwnerCockpitPage() {
+export default async function OwnerCockpitPage({ searchParams }: { searchParams: PageSearchParams }) {
   const user = await requirePermission("platform:operate");
   if (platformOperatorDenial(user)) redirect("/?forbidden=1");
-  const r = await loadOwnerCockpit(user);
-  if (!r.ok) redirect("/?forbidden=1");
-  const c = r.value;
-  // Kinh tế đơn vị + Margin Guard (0222) — đọc SAU cockpit (cockpit đã chụp ảnh MRR hôm nay). Lỗi ⇒ khung nói lỗi, trang vẫn dựng.
-  const now = new Date();
-  const [econ, admin, aiModel, aiAb] = await Promise.all([loadPricingEconomics(user), loadPricingAdmin(user), loadPlatformAiControl(user, now), loadPlatformModelAb(user, now).catch((e: unknown) => ({ ok: false as const, error: e instanceof Error ? e.message : String(e) }))]);
-  const h = c.headline;
+  const sp = await searchParams;
+  const lp = parseListParams(sp, { defaultSort: TENANT_VALUE_DEFAULT_SORT, defaultDir: "desc", defaultPageSize: TENANT_VALUE_BOARD_PAGE_SIZE, sortable: [...TENANT_VALUE_SORTABLE] });
+  const value = await loadTenantValueBoard(user, { window: parseValueWindow(sp.w), page: lp.page, pageSize: lp.pageSize, sort: lp.sort, dir: lp.dir });
+  if (!value.ok) redirect("/?forbidden=1");
   return (
     <div className="space-y-5">
       <PageHeader
         eyebrow="Hệ thống"
         title="Kinh tế nền tảng"
-        description={`${h.tenants} tổ chức khách · sổ MRR từ ${c.ledgerSince ? formatDate(c.ledgerSince) : "—"} · đo lúc ${formatDateTime(c.generatedAt)}`}
-        hint={
-          <div className="space-y-1.5 text-xs leading-5">
-            <p>MRR cùng công thức với bảng thu phí ở «Vận hành nền tảng»: giá tháng của gói + phần mua thêm, ở tổ chức đang chạy, đang thu phí, chưa bị khoá. Gói dùng thử không có giá nên không vào MRR.</p>
-            <p>Biến động (Mới · Mở rộng · Thu hẹp · Rời bỏ · Quay lại) so ẢNH CHỤP hằng ngày — gói và hạn trả là trạng thái đổi được, nên không suy ngược được tháng trước. Sổ bắt đầu từ ngày deploy; kỳ trước đó in «—».</p>
-            <p>Tiền AI quy đổi theo tỷ giá nền tảng {formatNumber(c.usdToVnd)} ₫/USD. Chỉ AI do NỀN TẢNG trả là giá vốn; AI tự mang khoá (BYOK) là tiền của khách.</p>
-            <p>Không có điểm «sức khoẻ» tổng: chưa có dữ liệu để kiểm chứng trọng số. Phiên bản công thức {c.version}.</p>
-          </div>
-        }
+        description="Giá trị từng khách (ảnh chụp mỗi ngày) ở đầu trang · MRR, biên, kích hoạt, model AI bên dưới"
         actions={
           <div className="flex flex-wrap items-center gap-3">
             <Link href="/platform/ai-balance" className="text-sm font-medium text-primary hover:underline" data-link-ai-balance>
@@ -188,6 +188,38 @@ export default async function OwnerCockpitPage() {
           </div>
         }
       />
+
+      <TenantValueSection board={value.value} />
+
+      <Suspense fallback={<Skeleton className="h-[520px] rounded-xl" />}>
+        <CockpitBlocks user={user} />
+      </Suspense>
+    </div>
+  );
+}
+
+/** Khối cũ của cockpit — `loadOwnerCockpit` vẫn chụp ảnh MRR hôm nay khi ảnh cũ (mở CSDL từng tổ chức), nên nằm sau `Suspense`. */
+async function CockpitBlocks({ user }: { user: SessionUser }) {
+  const r = await loadOwnerCockpit(user);
+  if (!r.ok) return <EmptyState title="Chưa đọc được kinh tế nền tảng" description={r.error} />;
+  const c = r.value;
+  const h = c.headline;
+  return (
+    <div className="space-y-5" data-cockpit="legacy">
+      <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground" data-cockpit="stamp">
+        <b className="text-sm text-foreground">MRR · biên · kích hoạt</b>
+        <span>
+          {h.tenants} tổ chức khách · sổ MRR từ {c.ledgerSince ? formatDate(c.ledgerSince) : "—"} · đo lúc {formatDateTime(c.generatedAt)}
+        </span>
+        <InfoHint>
+          <div className="space-y-1.5 text-xs leading-5">
+            <p>MRR cùng công thức với bảng thu phí ở «Vận hành nền tảng»: giá tháng của gói + phần mua thêm, ở tổ chức đang chạy, đang thu phí, chưa bị khoá. Gói dùng thử không có giá nên không vào MRR.</p>
+            <p>Biến động (Mới · Mở rộng · Thu hẹp · Rời bỏ · Quay lại) so ẢNH CHỤP hằng ngày — gói và hạn trả là trạng thái đổi được, nên không suy ngược được tháng trước. Sổ bắt đầu từ ngày deploy; kỳ trước đó in «—».</p>
+            <p>Tiền AI quy đổi theo tỷ giá nền tảng {formatNumber(c.usdToVnd)} ₫/USD. Chỉ AI do NỀN TẢNG trả là giá vốn; AI tự mang khoá (BYOK) là tiền của khách.</p>
+            <p>Không có điểm «sức khoẻ» tổng: chưa có dữ liệu để kiểm chứng trọng số. Phiên bản công thức {c.version}.</p>
+          </div>
+        </InfoHint>
+      </div>
 
       {c.captureErrors.length ? (
         <div role="alert" className="rounded-xl border border-amber-500/40 bg-amber-500/5 px-4 py-2.5 text-xs">
@@ -321,13 +353,30 @@ export default async function OwnerCockpitPage() {
         {c.tenants.length === 0 ? <EmptyState title="Chưa có tổ chức nào" className="m-4" /> : <TenantTable rows={c.tenants} />}
       </SectionCard>
 
-      {aiModel.ok ? <PlatformAiModelControlSection data={aiModel.value} usdToVnd={c.usdToVnd} now={now} ab={aiAb.ok ? aiAb.value : null} /> : <EmptyState title="Chưa đọc được Platform AI Model Control" description={aiModel.error} />}
+
+      <Suspense fallback={<Skeleton className="h-72 rounded-xl" />}>
+        <HeavyBlocks user={user} usdToVnd={c.usdToVnd} />
+      </Suspense>
+    </div>
+  );
+}
+
+/**
+ * Platform AI Model Control · A/B · Kinh tế đơn vị / Margin Guard — mở CSDL từng tổ chức, đọc SAU cockpit (cockpit đã chụp ảnh MRR
+ * hôm nay). Lỗi ⇒ khung nói lỗi, trang vẫn dựng.
+ */
+async function HeavyBlocks({ user, usdToVnd }: { user: SessionUser; usdToVnd: number }) {
+  const now = new Date();
+  const [econ, admin, aiModel, aiAb] = await Promise.all([loadPricingEconomics(user), loadPricingAdmin(user), loadPlatformAiControl(user, now), loadPlatformModelAb(user, now).catch((e: unknown) => ({ ok: false as const, error: e instanceof Error ? e.message : String(e) }))]);
+  return (
+    <>
+      {aiModel.ok ? <PlatformAiModelControlSection data={aiModel.value} usdToVnd={usdToVnd} now={now} ab={aiAb.ok ? aiAb.value : null} /> : <EmptyState title="Chưa đọc được Platform AI Model Control" description={aiModel.error} />}
 
       {econ.ok && admin.ok ? (
         <PricingEconomicsSection data={econ.value} unitPrices={admin.value.unitPrices} />
       ) : (
         <EmptyState title="Chưa đọc được kinh tế đơn vị" description={!econ.ok ? econ.error : !admin.ok ? admin.error : undefined} />
       )}
-    </div>
+    </>
   );
 }

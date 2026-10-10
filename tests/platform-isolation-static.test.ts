@@ -799,6 +799,10 @@ const LOI_VAN_HANH: Record<string, string> = {
   "lib/billing/service.ts::loadOrgBilling": "Khung thu phí của MỘT tổ chức bất kỳ ở /platform/org/<mã>.",
   // Sổ kinh tế SaaS (0203) — Owner Cockpit /platform/saas.
   "lib/platform/saas-cockpit.ts::loadOwnerCockpit": "Owner Cockpit: MRR / biến động / biên lợi nhuận / kích hoạt của MỌI tổ chức — chụp ảnh hôm nay (mở CSDL từng tổ chức khách để đọc mốc kích hoạt) rồi đọc sổ.",
+  // Trung tâm giá trị SaaS PR-4 — màn đọc ẢNH CHỤP (0240) ở CSDL nhà; drill-down đơn là lối DUY NHẤT đọc sống CSDL tổ chức, chỉ khi bấm.
+  "lib/saas/tenant-value-read.ts::loadTenantValueBoard": "Khối «Giá trị khách hàng» /platform/saas: ảnh giá trị mới nhất + sức khoẻ ngày gần nhất của MỌI tổ chức — chỉ đọc mặt phẳng điều khiển (platform_tenant_value_snapshots · platform_tenant_health_daily), không mở CSDL tổ chức.",
+  "lib/saas/tenant-value-read.ts::loadTenantValueDetail": "Khối «Giá trị & kinh tế đơn vị» ở trang một khách: ba cửa sổ ảnh giá trị + dải 30 ngày sức khoẻ của các workspace của khách — chỉ đọc mặt phẳng điều khiển.",
+  "lib/saas/tenant-value-drill.ts::loadAttributedOrdersAsOperator": "Drill-down đơn ↔ hội thoại của MỘT workspace thuộc tài khoản trên đường dẫn (kiểm sở hữu ở CSDL nhà) — withOrganization + listAttributedOrders, phân trang, không PII; chỉ chạy khi người vận hành bấm sang tuyến attributed-orders.",
   "lib/platform/saas-ledger.ts::setPlatformCostDeclaration": "Khai chi phí hạ tầng / hỗ trợ khách theo tháng của nền tảng — mẫu số biên lợi nhuận; bắt buộc căn cứ, nhật ký nền tảng.",
   // Nền móng giá & thu phí (0222) — cấu hình gói, ghi đè theo tổ chức, Margin Guard, kinh tế đơn vị.
   "lib/pricing/admin.ts::setPlanCommercial": "Sửa tên / hạn mức tháng / tính năng / chính sách vượt của một gói — bắt buộc lý do, nhật ký PLAN_COMMERCIAL_SET.",
