@@ -86,7 +86,7 @@ function testFilterContract() {
 }
 
 function row(id: string, over: Partial<InboxRow> = {}): InboxRow {
-  return { id, channel: "FANPAGE", pageId: "p", pageName: null, status: "OPEN", handoffReason: null, customerName: id, customerPhone: null, customerId: null, preview: "", previewSide: null, lastActivityAt: new Date(0).toISOString(), waitingSince: null, unread: true, unreadCount: 1, avatarUrl: null, aiHold: "AI_ACTIVE", handling: "AI", closed: false, source: "PANCAKE", assigneeUserId: null, assigneeName: null, hasOrder: false, labels: [], level: null, ...over };
+  return { id, channel: "FANPAGE", pageId: "p", pageName: null, status: "OPEN", handoffReason: null, customerName: id, customerPhone: null, customerId: null, preview: "", previewSide: null, lastActivityAt: new Date(0).toISOString(), waitingSince: null, unread: true, unreadCount: 1, avatarUrl: null, aiHold: "AI_ACTIVE", handling: "AI", needsHuman: null, humanHandling: null, closed: false, source: "PANCAKE", assigneeUserId: null, assigneeName: null, hasOrder: false, labels: [], level: null, ...over };
 }
 
 function testRowHelpers() {
@@ -102,8 +102,12 @@ function testRowHelpers() {
   assert.deepEqual(keepActiveInPlace(next, prev, null).map((r) => r.id), ["a", "c", "b", "d"], "không mở gì ⇒ đúng thứ tự máy chủ");
   assert.deepEqual(keepActiveInPlace([row("x")], prev, "x").map((r) => r.id), ["x"], "hàng chưa từng hiện ⇒ không đoán chỗ");
 
-  // MỘT trạng thái trên hàng.
-  assert.deepEqual(inboxRowStatus(row("a", { status: "HANDOFF", closed: true })), { kind: "NEEDS_HUMAN", label: "Cần người" });
+  // MỘT trạng thái trên hàng. «Cần người» đọc LÝ DO cần người (chủ shop 10/10/2026), không đọc `status = HANDOFF`: hội thoại AI
+  // đang nhường nhân viên / bị tiếp quản là «Người đang xử lý», không phải «Cần người».
+  assert.equal(inboxRowStatus(row("a", { needsHuman: "AI_HANDOFF", closed: true }))?.kind, "NEEDS_HUMAN");
+  assert.equal(inboxRowStatus(row("a", { needsHuman: "AI_HANDOFF", handoffReason: "Khách đòi gặp người" }))?.hint?.includes("Khách đòi gặp người"), true, "lý do AI chuyển người hiện ở chú thích");
+  assert.equal(inboxRowStatus(row("a", { needsHuman: "ORDER_REVIEW" }))?.label, "Kiểm đơn");
+  assert.equal(inboxRowStatus(row("a", { status: "HANDOFF", humanHandling: "STAFF_COOLDOWN", handling: "HUMAN" })), null, "AI nhường nhân viên ≠ cần người");
   assert.equal(inboxRowStatus(row("a", { closed: true, hasOrder: true }))?.kind, "CLOSED");
   assert.equal(inboxRowStatus(row("a", { hasOrder: true }))?.kind, "DRAFT");
   assert.equal(inboxRowStatus(row("a")), null);
@@ -179,13 +183,14 @@ async function testUnreadFirstOrder() {
       const firstRead = p2.findIndex((r) => !r.unread);
       assert.ok(firstRead > 0, "có cả hai nhóm");
       assert.ok(p2.slice(firstRead).every((r) => !r.unread), "CHƯA ĐỌC luôn đứng trước ĐÃ ĐỌC (qua cả hai trang)");
-      // Chủ shop HSLC 10/10/2026: «chưa đọc» chỉ cho TIN KHÁCH chưa ai xem — hội thoại bot đã trả lời sau tin khách cuối (i lẻ)
-      // KHÔNG chưa đọc dù nhân viên chưa mở. 70 hội thoại: 46 nhân viên chưa mở, trong đó 23 bot đã trả lời ⇒ 23 chưa đọc.
-      assert.equal(firstRead, 23, "23 hội thoại chưa đọc / 70 (tin cuối của khách, nhân viên chưa mở)");
+      // Chủ shop 10/10/2026 (mục B1, SỬA khẳng định cũ cùng ngày): «chưa đọc» = NGƯỜI chưa mở tin của khách, BẤT KỂ AI đã trả lời
+      // hay chưa. Bản trước coi hội thoại bot đã trả lời (i lẻ) là «đã đọc» dù chưa ai mở — đúng cái chủ shop báo sai: khách
+      // «xin giá» → AI «Dạ giá 280k…», nhân viên chưa mở ⇒ VẪN chưa đọc. 70 hội thoại: 46 nhân viên chưa mở ⇒ 46 chưa đọc.
+      assert.equal(firstRead, 46, "46 hội thoại chưa đọc / 70 (nhân viên chưa mở từ tin khách cuối, kể cả khi bot đã trả lời)");
       const idOf = new Map((await db.select({ id: c.id, threadId: c.threadId }).from(c).where(eq(c.pageId, PAGE))).map((r) => [r.threadId, r.id]));
       const rowOf = (thread: string) => p2.find((r) => r.id === idOf.get(thread))!;
-      assert.equal(rowOf("t1").unread, false, "t1: nhân viên chưa mở nhưng BOT đã trả lời sau tin khách ⇒ không chưa đọc");
-      assert.equal(rowOf("t1").unreadCount, 0);
+      assert.equal(rowOf("t1").unread, true, "t1: BOT đã trả lời sau tin khách nhưng nhân viên chưa mở ⇒ VẪN chưa đọc");
+      assert.ok(rowOf("t1").unreadCount >= 1);
       assert.equal(rowOf("t2").unread, true, "t2: tin cuối là của khách, chưa ai trả lời, chưa ai mở ⇒ chưa đọc");
       assert.equal(rowOf("t3").unread, false, "t3: nhân viên đã mở sau tin khách");
       assert.ok(p2.every((r) => r.unread === (r.unreadCount > 0)), "số chưa đọc trên hàng khớp cờ chưa đọc");

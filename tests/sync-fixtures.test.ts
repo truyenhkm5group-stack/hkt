@@ -231,6 +231,7 @@ import { testCacheSemantics } from "./cache-semantics.test";
 import { testRefreshButton } from "./refresh-button.test";
 import { testCommandCatalog } from "./command-catalog.test";
 import { testExperienceProfile } from "./experience-profile.test";
+import { testIndustryTerms } from "./industry-terms.test";
 import { testDetailCrumb } from "./detail-crumb.test";
 import { testReportOverrideLatency } from "./report-override-latency.test";
 import { testActionRefreshOnce } from "./action-refresh-once.test";
@@ -400,6 +401,7 @@ import { testReportingParity } from "./reporting-parity.test";
 import { testEstimatedCost } from "./estimated-cost.test";
 import { testLoginThrottle } from "./login-throttle.test";
 import { testWebhookHardening } from "./webhook-hardening.test";
+import { testWebhookLogRedaction } from "./webhook-log-redaction.test";
 import { testXlsxReader } from "./xlsx-reader.test";
 import { testProjectedDeliveryV3 } from "./projected-delivery.test";
 import { testAgentGithubIdentityModule } from "./agent-identity.test";
@@ -493,6 +495,8 @@ import { testInboxAdvanced } from "./inbox-advanced.test";
 import { testInboxComposer } from "./inbox-composer.test";
 import { testInboxV2A } from "./inbox-v2-a.test";
 import { testInboxAvatarProfile } from "./inbox-avatar-profile.test";
+import { testInboxSemanticsV3 } from "./inbox-semantics-v3.test";
+import { testInboxBulkAi } from "./inbox-bulk-ai.test";
 import { testSalesInboxHistory } from "./sales-inbox-history.test";
 import { testE2eAiSalesPlatform } from "./e2e-ai-sales-platform.test";
 import { testSalesExperimentReport } from "./sales-experiment-report.test";
@@ -2180,6 +2184,7 @@ async function main() {
   await testRefreshButton();
   testCommandCatalog();
   testExperienceProfile();
+  testIndustryTerms();
   testDetailCrumb();
   testReportOverrideLatency();
   testActionRefreshOnce();
@@ -2459,6 +2464,7 @@ async function main() {
   await testEstimatedCost(db);
   await testLoginThrottle();
   await testWebhookHardening();
+  testWebhookLogRedaction();
   testXlsxReader();
   await testProjectedDeliveryV3(db);
   // Chạy CUỐI CÙNG: thêm đơn/vận đơn riêng cho đúng bốn tình huống của nút thắt fulfillment, đặt
@@ -2877,6 +2883,10 @@ async function main() {
   // Ảnh đại diện khách + bấm ảnh mở trang Facebook (chủ shop 10/10/2026 mục E · F): PSID / fb_id không bao giờ thành link Facebook,
   // năm trạng thái PROFILE_*, đường ghi Pancake dùng chung một lõi, ops inbox-avatar-audit chỉ đọc. Thuần + quét mã nguồn.
   await testInboxAvatarProfile();
+  // INBOX-SEMANTICS-V3 (chủ shop 10/10/2026): bốn khái niệm tách riêng — chưa đọc (AI trả lời không xoá) · chờ trả lời · cần người thật · người đang xử lý; ma trận 20 hội thoại × mọi bộ lọc — tổ chức `hop-thu-sem-v3`.
+  await testInboxSemanticsV3();
+  // «Trả tất cả cho AI» (chủ shop 10/10/2026, mục D): quyền · cách ly tổ chức · trả được / bị chặn theo lý do · sự kiện + nhật ký người bấm · chạy lại 0 dòng mới — `hop-thu-bulk-a` / `hop-thu-bulk-b`.
+  await testInboxBulkAi();
   // Nhập đủ lịch sử hội thoại vào hộp thư (0221): tổ chức THẬT `hop-thu-lich-su`, Pancake giả, tự cấp, tự dọn.
   await testSalesInboxHistory();
   // E2E trọn vòng: tin khách → AI → đơn → giao → Hiệu quả → mốc kích hoạt → sổ dùng → Owner Cockpit (tổ chức `e2e-shop`).

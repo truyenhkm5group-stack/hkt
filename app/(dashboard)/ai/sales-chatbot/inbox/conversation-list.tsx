@@ -2,9 +2,9 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { Bot, Sparkles, UserRound } from "lucide-react";
+import { Bot, Hourglass, Sparkles, UserRound } from "lucide-react";
 import { AI_HOLD_LABEL } from "@/lib/sales-chatbot/ai-hold-shared";
-import { compactTimeAgo, INBOX_HANDLING_LABEL, INBOX_SOURCE_LABEL, inboxHref, inboxRowStatus, keepActiveInPlace, unreadBadge, type InboxFilterState, type InboxRow } from "@/lib/sales-chatbot/inbox-shared";
+import { compactTimeAgo, HUMAN_HANDLING_LABEL, INBOX_HANDLING_LABEL, INBOX_SOURCE_LABEL, inboxHref, inboxRowStatus, keepActiveInPlace, unreadBadge, type InboxFilterState, type InboxRow } from "@/lib/sales-chatbot/inbox-shared";
 import { CUSTOMER_LEVEL_LABEL } from "@/lib/sales-chatbot/levels-shared";
 import { cn } from "@/lib/utils";
 import { ChannelAvatar } from "./avatar";
@@ -52,11 +52,20 @@ const LABEL_DOT: Record<string, string> = {
 const SIDE_PREFIX: Record<string, string> = { CUSTOMER: "", BOT: "AI: ", STAFF: "Bạn: ", PAGE: "Page: " };
 
 function HandlingIcon({ r }: { r: InboxRow }) {
-  const label = `${INBOX_HANDLING_LABEL[r.handling]} — ${AI_HOLD_LABEL[r.aiHold]}`;
+  // Huy hiệu do máy chủ phân loại (`classifyInboxState` — cùng tệp với điều kiện thẻ lọc), trang chỉ vẽ.
+  const label = `${r.humanHandling ? HUMAN_HANDLING_LABEL[r.humanHandling] : INBOX_HANDLING_LABEL[r.handling]} — ${AI_HOLD_LABEL[r.aiHold]}`;
   const cls = "size-3.5 shrink-0";
   return (
-    <span title={label} aria-label={label} data-handler={r.handling === "AI" ? "AI" : "HUMAN"} data-handling={r.handling} className="inline-flex">
-      {r.handling === "AI" ? <Bot className={cn(cls, "text-violet-600 dark:text-violet-400")} /> : r.handling === "COPILOT" ? <Sparkles className={cn(cls, "text-amber-600 dark:text-amber-400")} /> : <UserRound className={cn(cls, "text-orange-600 dark:text-orange-400")} />}
+    <span title={label} aria-label={label} data-handler={r.handling === "AI" ? "AI" : r.handling === "WAITING" ? "WAITING" : "HUMAN"} data-handling={r.handling} data-human-handling={r.humanHandling ?? undefined} className="inline-flex">
+      {r.handling === "AI" ? (
+        <Bot className={cn(cls, "text-violet-600 dark:text-violet-400")} />
+      ) : r.handling === "COPILOT" ? (
+        <Sparkles className={cn(cls, "text-amber-600 dark:text-amber-400")} />
+      ) : r.handling === "WAITING" ? (
+        <Hourglass className={cn(cls, "text-rose-600 dark:text-rose-400")} />
+      ) : (
+        <UserRound className={cn(cls, "text-orange-600 dark:text-orange-400")} />
+      )}
     </span>
   );
 }
@@ -106,7 +115,7 @@ function Row({ r, href, active, showPage, nowMs }: { r: InboxRow; href: string; 
             </span>
           ) : null}
           {status ? (
-            <span className={cn("shrink-0 rounded px-1.5 text-[11px] font-medium leading-[18px]", STATUS_CLASS[status.kind])} data-status={status.kind}>
+            <span className={cn("shrink-0 rounded px-1.5 text-[11px] font-medium leading-[18px]", STATUS_CLASS[status.kind])} data-status={status.kind} data-needs-human={r.needsHuman ?? undefined} title={status.hint}>
               {status.label}
             </span>
           ) : null}

@@ -1,5 +1,6 @@
 "use client";
 
+import { legacyAttributeLabels } from "@/lib/constants/experience-profile";
 import * as React from "react";
 import { ArrowDownWideNarrow, ArrowUpNarrowWide, Barcode, Check, ChevronLeft, ChevronRight, FilterX, Layers, Loader2, PackageX, ScanLine, Trash2, TriangleAlert } from "lucide-react";
 import { toast } from "sonner";
@@ -95,11 +96,14 @@ export function InspectionStation({
   rows: initial,
   canWrite,
   total,
+  attrLabels = legacyAttributeLabels(null),
 }: {
   rows: Row[];
   canWrite: boolean;
   /** TỔNG THẬT của hàng đợi phía máy chủ — để biết phần đang tải có phải toàn bộ hay không. */
   total: number;
+  /** Nhãn hai bộ lọc theo hồ sơ ngành (`legacyAttributeLabels`, Server Component tính rồi truyền dạng CHUỖI). Khoá lọc giữ nguyên. */
+  attrLabels?: { size: string; color: string };
 }) {
   const [rows, setRows] = React.useState<Row[]>(initial);
   const [chon, setChon] = React.useState<Set<string>>(new Set());
@@ -365,8 +369,8 @@ export function InspectionStation({
             spellCheck={false}
           />
           <FacetPicker label="Mã hàng" facets={oChon.skus} value={loc.sku} onChange={(v) => setLoc((f) => ({ ...f, sku: v }))} />
-          <FacetPicker label="Màu" facets={oChon.colors} value={loc.color} onChange={(v) => setLoc((f) => ({ ...f, color: v }))} />
-          <FacetPicker label="Size" facets={oChon.sizes} value={loc.size} onChange={(v) => setLoc((f) => ({ ...f, size: v }))} />
+          <FacetPicker label={attrLabels.color} facets={oChon.colors} value={loc.color} onChange={(v) => setLoc((f) => ({ ...f, color: v }))} />
+          <FacetPicker label={attrLabels.size} facets={oChon.sizes} value={loc.size} onChange={(v) => setLoc((f) => ({ ...f, size: v }))} />
           {/* Nguồn ghi nhận chỉ đáng một ô lọc khi thực sự có nhiều nguồn: lượt đối soát sổ giấy
               phải tách được khỏi kiện người kho tự bấm, nhưng một kho một người thì ô này là rác. */}
           {oChon.receivers.length > 1 ? (

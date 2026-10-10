@@ -62,6 +62,8 @@ import { param, type SearchParams } from "@/lib/search-params";
 import { DispositionSection } from "@/app/(dashboard)/inventory/returns/disposition-section";
 import { listDispositionQueue, listRecentDispositions, unidentifiedIdsInLedger } from "@/lib/queries/return-dispositions";
 import { getDb } from "@/db";
+import { legacyAttributeLabels } from "@/lib/constants/experience-profile";
+import { readDisplayProfile } from "@/lib/experience/profile";
 
 export const metadata = { title: "Kiểm đếm hàng hoàn · kho" };
 
@@ -173,6 +175,8 @@ export default async function ReturnInspectionPage({
     listRecentDispositions(30),
   ]);
   // Món không nhãn đã có dòng ở sổ kết cục (Agent R): bàn không nhãn ẩn nút tái nhập nguyên món / đổi kết luận.
+  // Nhãn bộ lọc Màu / Size của trạm đếm theo hồ sơ ngành (shop thực phẩm: «Quy cách») — truyền xuống dạng CHUỖI.
+  const attrLabels = legacyAttributeLabels(await readDisplayProfile());
   const trongSo = await unidentifiedIdsInLedger(await getDb(), khongMa.map((r) => r.id));
   /*
     CHỈ ĐƯA **META** XUỐNG TRÌNH DUYỆT.
@@ -423,6 +427,7 @@ export default async function ReturnInspectionPage({
               rows={pending.map(toStationRow)}
               canWrite={canWrite}
               total={bang.pendingInspection}
+              attrLabels={attrLabels}
             />
           </div>
         </SectionCard>

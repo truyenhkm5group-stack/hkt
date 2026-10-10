@@ -23,6 +23,8 @@ import { objectDef } from "@/lib/constants/object-registry";
 import { getListMetadata, getSystemStatusOptions, listCustomValuesFor } from "@/lib/queries/metadata-lists";
 import { getBrandCopy } from "@/lib/branding/service";
 import { bulkCarriers } from "@/lib/carriers/engine";
+import { withDisplayVariation } from "@/lib/constants/experience-profile";
+import { readDisplayProfile } from "@/lib/experience/profile";
 
 export const metadata = { title: "Đơn hàng" };
 
@@ -37,7 +39,10 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
     ẩn-khỏi-bộ-lọc của `orders.stage`. Truy vấn nghiệp vụ, ORDER_OUTCOME và bộ lọc giữ nguyên — danh sách
     đơn KHÔNG nhận bộ lọc custom mặc định ở Phase 2.
   */
-  const [{ rows, total, pageCount }, facets, summary, meta, stageOptions, , createGate, needsReview] = await Promise.all([listOrders(params), orderFacets(params), orderSummary(params), getListMetadata("order", "default", user), getSystemStatusOptions("order", "stage"), getBrandCopy(user), manualOrderGate(user), orderNeedsReviewCount(params)]);
+  const [{ rows, total, pageCount }, facets, summary, meta, stageOptions, , createGate, needsReview, displayProfile] = await Promise.all([listOrders(params), orderFacets(params), orderSummary(params), getListMetadata("order", "default", user), getSystemStatusOptions("order", "stage"), getBrandCopy(user), manualOrderGate(user), orderNeedsReviewCount(params), readDisplayProfile()]);
+  // Hồ sơ ngành chỉ để đổi NHÃN chữ biến thể (shop thực phẩm: «Size: 1kg» ⇒ «Quy cách: 1kg») — đổi trên DỮ LIỆU ở đây rồi mới
+  // truyền xuống bảng client, không truyền hàm qua ranh giới; lỗi đọc hồ sơ ⇒ in nguyên chữ đã lưu.
+  const tableRows = rows.map((r) => ({ ...r, items: withDisplayVariation(r.items, displayProfile) }));
   // Phí giao đồng giá: chỉ tổ chức tạo đơn tay + người cấu hình được.
   const deliveryFee = createGate.allowed && can(user, "settings:manage") ? { fee: await loadManualDeliveryFee(), autoConfirm: await loadAutoConfirmComplete() } : null;
   // Tạo / in vận đơn hàng loạt (POS tự chủ): chỉ tổ chức tạo đơn tay + quyền vận đơn + hãng có kết nối đang bật.
@@ -134,7 +139,7 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
         ]}
         resultLabel={total === summary.orders + summary.cancelled ? undefined : `${formatNumber(total)} đơn phù hợp`}
       />
-      <OrdersTable rows={rows} pageCount={pageCount} total={total} stageLabels={stageLabels} carrierBulk={carrierBulk} canDecide={createGate.allowed} meta={meta ? { listView: meta.schema, customFields: meta.customFields, customValues, userNames } : undefined} />
+      <OrdersTable rows={tableRows} pageCount={pageCount} total={total} stageLabels={stageLabels} carrierBulk={carrierBulk} canDecide={createGate.allowed} meta={meta ? { listView: meta.schema, customFields: meta.customFields, customValues, userNames } : undefined} />
     </div>
   );
 }

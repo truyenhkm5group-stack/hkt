@@ -1,6 +1,6 @@
 import { eq } from "drizzle-orm";
 import { getDb, schema } from "@/db";
-import { EXPERIENCE_PRESET_SETTING_KEY, resolveExperienceProfile, type ExperienceResolution } from "@/lib/constants/experience-profile";
+import { EXPERIENCE_PRESET_SETTING_KEY, resolveExperienceProfile, type ExperienceProfile, type ExperienceResolution } from "@/lib/constants/experience-profile";
 import { currentOrganization } from "@/lib/platform/context";
 import { findOrganization } from "@/lib/platform/organizations";
 
@@ -26,4 +26,16 @@ export async function readExperienceProfile(): Promise<ExperienceResolution> {
     }
   }
   return resolveExperienceProfile({ isHome: false, templateKey: row?.templateKey ?? null, override });
+}
+
+/**
+ * Hồ sơ dùng cho việc ĐỔI NHÃN khi in (chữ biến thể «Size:» ⇒ «Quy cách:»…). Lỗi đọc ⇒ `null` và nơi gọi in NGUYÊN chữ đã lưu:
+ * một nhãn chưa đẹp tốt hơn một trang đơn / một tin báo nhóm sập vì không đọc được hồ sơ.
+ */
+export async function readDisplayProfile(): Promise<ExperienceProfile | null> {
+  try {
+    return (await readExperienceProfile()).profile;
+  } catch {
+    return null;
+  }
 }

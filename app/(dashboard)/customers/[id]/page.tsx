@@ -30,6 +30,8 @@ import { getPublishedForm } from "@/lib/metadata/forms";
 import { canEditField, customFileNames, getCustomValues } from "@/lib/metadata/values";
 import { userPickOptions } from "@/lib/queries/users";
 import { getBrandCopy } from "@/lib/branding/service";
+import { displayVariationText } from "@/lib/constants/experience-profile";
+import { readDisplayProfile } from "@/lib/experience/profile";
 import { moduleOn } from "@/lib/platform-ui/module-visibility";
 import { customerBasicsGate } from "@/lib/records/customer-create";
 import { manualOrderOrgGate } from "@/lib/records/order-create";
@@ -91,7 +93,9 @@ export default async function CustomerDetailPage({ params }: { params: Promise<{
   const customer = await getCustomerDetail(id);
   if (!customer) notFound();
   // Thông tin cơ bản sửa được khi khách TẠO TAY ở tổ chức không bật Pancake (cùng cổng với action — pilot P1 #11).
-  const [basics, copy] = await Promise.all([customerBasicsGate(user, customer), getBrandCopy(user)]);
+  const [basics, copy, displayProfile] = await Promise.all([customerBasicsGate(user, customer), getBrandCopy(user), readDisplayProfile()]);
+  // Hồ sơ ngành chỉ để đổi NHÃN chữ biến thể khi in (shop thực phẩm: «Size: 1kg» ⇒ «Quy cách: 1kg»); lỗi ⇒ in nguyên chữ đã lưu.
+  const variationOf = (text: string) => displayVariationText(text, displayProfile);
   // Trạng thái thanh toán của đơn TẠO TAY theo chứng từ (order_payments) — khách chỉ có đơn đồng bộ ⇒ không chạy câu nào.
   const [profile, payStates] = await Promise.all([loadProfileBlock(user, customer, basics.allowed), manualPaymentStates(customer.orders)]);
   // Số đo "Hoàn / tỷ lệ hoàn" thuộc module Hàng hoàn — tổ chức không bật module ấy không thấy một ô 0% vô nghĩa.
@@ -171,8 +175,8 @@ export default async function CustomerDetailPage({ params }: { params: Promise<{
                           <div className="mt-0.5"><SourceBadge source={o.source} className="px-1.5 text-[10px]" /></div>
                         </TableCell>
                         <TableCell className="max-w-[200px] text-xs text-muted-foreground">
-                          <span className="block truncate" title={o.items.map((i) => `${i.productName}${i.variationDetail ? ` (${i.variationDetail})` : ""} ×${i.quantity}`).join(", ")}>
-                            {o.items.map((i) => `${i.productName}${i.variationDetail ? ` (${i.variationDetail})` : ""} ×${i.quantity}`).join(", ") || "—"}
+                          <span className="block truncate" title={o.items.map((i) => `${i.productName}${i.variationDetail ? ` (${variationOf(i.variationDetail)})` : ""} ×${i.quantity}`).join(", ")}>
+                            {o.items.map((i) => `${i.productName}${i.variationDetail ? ` (${variationOf(i.variationDetail)})` : ""} ×${i.quantity}`).join(", ") || "—"}
                             {o.itemsCount > o.items.length ? ` +${o.itemsCount - o.items.length}` : ""}
                           </span>
                           <span className="block text-[11px]">{formatNumber(o.totalQuantity)} sản phẩm</span>

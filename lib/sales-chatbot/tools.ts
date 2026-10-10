@@ -38,6 +38,7 @@ import { agentUnitPrice } from "@/lib/commerce/pricing";
 import { notifySalesChatBooking, notifySalesChatHandoff } from "@/lib/sales-chatbot/alerts";
 import { freeShipVerdict, variantWeightGrams, type ShipVerdict } from "@/lib/sales-chatbot/shipping";
 import { foldVi } from "@/lib/sales-chatbot/text";
+import { toUnitPacks, volumeDiscountFor } from "@/lib/sales-chatbot/volume-discount";
 import { searchCatalog, sellableCatalog, stockFor, type CatalogItem } from "@/lib/sales-chatbot/catalog";
 import { quotedInText } from "@/lib/sales-chatbot/text";
 import { isMessagingChannel, type ChatChannel, type SalesChatbotConfig, type SalesTool } from "@/lib/sales-chatbot/config";
@@ -361,7 +362,12 @@ function err(summary: string, message: string, state: ChatState, orderSignal?: T
   return { content: JSON.stringify({ error: message }), isError: true, summary, state, ...(orderSignal ? { orderSignal } : {}) };
 }
 
-export type Priced = { ship: ShipVerdict; lines: { variantId: string; name: string; quantity: number; unitPrice: number; lineTotal: number; /** Khối lượng MỘT đơn vị mẫu mã (gram) — `null` khi không biết. */ weightGrams?: number | null }[]; subtotal: number; shippingFee: number | null; total: number | null; unpriced: string[]; missing: string[]; /** Mọi dòng là mẫu mã chỉ bán kèm (0238). */ addOnOnly?: boolean };
+export type Priced = {
+  ship: ShipVerdict;
+  /** Dòng hàng SAU khi quy về gói đơn vị (`toUnitPacks`) — đúng những dòng ghi vào đơn. `lineTotal` = đơn giá × SL − `discount`. */
+  lines: { variantId: string; name: string; quantity: number; unitPrice: number; lineTotal: number; /** Tiền giảm của cả dòng (luật giảm theo khối lượng). */ discount: number; /** Khối lượng MỘT đơn vị mẫu mã (gram) — `null` khi không biết. */ weightGrams?: number | null }[];
+  /** Dòng hàng AI GỬI LÊN (trước khi quy gói) — để bắt nhầm quy cách thành số lượng trên đúng thứ AI chọn. */
+  asked: { name: string; quantity: number; weightGrams: number | null }[]; subtotal: number; shippingFee: number | null; total: number | null; unpriced: string[]; missing: string[]; /** Mọi dòng là mẫu mã chỉ bán kèm (0238). */ addOnOnly?: boolean };
 
 /**
  * Bảng giá áp cho khách của hội thoại khi shop BẬT báo giá sỉ (`wholesalePricing`); TẮT ⇒ `null` = giá lẻ như trước. Khách
@@ -402,19 +408,44 @@ function agentOrderOpts(ctx: ToolContext, state: ChatState, creating: boolean): 
 
 /** `address` = địa chỉ giao (đơn nháp / khách đã lưu) — cho luật miễn ship theo khu vực; `null` khi chưa biết. */
 export async function priceLines(lines: readonly CartLine[], cfg: SalesChatbotConfig, customerId: string | null = null, address: string | null = null): Promise<Priced> {
-  // Hai field quy cách của mẫu thực phẩm — nguồn khối lượng cho luật miễn ship khi cột weight chưa nhập.
-  const catalog = await sellableCatalog(cfg.freeShipping.enabled ? ["net_weight", "package_size"] : []);
+  // Hai field quy cách của mẫu thực phẩm — nguồn khối lượng cho luật miễn ship / giảm theo khối lượng khi cột weight chưa nhập.
+  const catalog = await sellableCatalog(cfg.freeShipping.enabled || cfg.volumeDiscount.enabled ? ["net_weight", "package_size"] : []);
   const books = await booksForChat(cfg, customerId);
   const byId = new Map(catalog.map((c) => [c.variantId, c]));
+  const weightOf = (it: CatalogItem) => variantWeightGrams(it.weightGrams, it.variant, it.name, it.fields.net_weight ?? "", it.fields.package_size ?? "");
+  const label = (it: CatalogItem) => `${it.name}${it.variant ? ` (${it.variant})` : ""}`;
+  const asked = lines.map((l) => {
+    const it = byId.get(l.variantId);
+    return { name: it ? label(it) : l.variantId, quantity: l.quantity, weightGrams: it ? weightOf(it) : null };
+  });
+  // BÁN THEO GÓI ĐƠN VỊ (10/10/2026, volume-discount.ts): AI chọn gói lớn ⇒ máy chủ quy về N × gói đơn vị của cùng sản phẩm.
+  const effective = toUnitPacks(lines, catalog.map((c) => ({ variantId: c.variantId, productId: c.productId, price: c.price, weightGrams: weightOf(c), ...(c.addOnOnly ? { addOnOnly: true } : {}) })), cfg.volumeDiscount);
   const out: Priced["lines"] = [];
   const unpriced: string[] = [];
   const missing: string[] = [];
-  for (const l of lines) {
+  for (const l of effective) {
     const it = byId.get(l.variantId);
     const unit = it ? unitPriceFor(it, l.quantity, books) : null;
     if (!it) missing.push(l.variantId);
     else if (unit === null) unpriced.push(it.name);
-    else out.push({ variantId: l.variantId, name: `${it.name}${it.variant ? ` (${it.variant})` : ""}`, quantity: l.quantity, unitPrice: unit, lineTotal: unit * l.quantity, weightGrams: variantWeightGrams(it.weightGrams, it.variant, it.name, it.fields.net_weight ?? "", it.fields.package_size ?? "") });
+    else out.push({ variantId: l.variantId, name: label(it), quantity: l.quantity, unitPrice: unit, lineTotal: unit * l.quantity, discount: 0, weightGrams: weightOf(it) });
+  }
+  // GIẢM THEO KHỐI LƯỢNG — từng SẢN PHẨM; tiền giảm đặt vào dòng lớn nhất của sản phẩm (không vượt tiền dòng). Đang báo giá theo
+  // bảng giá sỉ ⇒ KHÔNG cộng thêm (bậc sỉ đã là giá theo số lượng — cộng là giảm hai lần).
+  if (!books) {
+    const byProduct = new Map<string, Priced["lines"]>();
+    for (const l of out) {
+      const pid = byId.get(l.variantId)!.productId;
+      byProduct.set(pid, [...(byProduct.get(pid) ?? []), l]);
+    }
+    for (const group of byProduct.values()) {
+      const grams = group.every((l) => l.weightGrams != null) ? group.reduce((g, l) => g + l.weightGrams! * l.quantity, 0) : null;
+      const d = volumeDiscountFor(grams, cfg.volumeDiscount);
+      if (!d) continue;
+      const top = group.reduce((a, b) => (b.lineTotal > a.lineTotal ? b : a));
+      top.discount = Math.min(d, top.lineTotal);
+      top.lineTotal -= top.discount;
+    }
   }
   const subtotal = out.reduce((s, l) => s + l.lineTotal, 0);
   // Khối lượng đơn: một dòng không biết khối lượng ⇒ cả đơn KHÔNG xét ngưỡng khối lượng (không đoán).
@@ -426,7 +457,7 @@ export async function priceLines(lines: readonly CartLine[], cfg: SalesChatbotCo
   }
   const ship = freeShipVerdict(cfg.freeShipping, subtotal, weight, address, formatVND);
   const shippingFee = ship.kind === "FREE" ? 0 : cfg.shippingFee;
-  return { ship, lines: out, subtotal, shippingFee, total: shippingFee === null ? null : subtotal + shippingFee, unpriced, missing, ...(onlyAddOns(lines, byId) ? { addOnOnly: true } : {}) };
+  return { ship, lines: out, asked, subtotal, shippingFee, total: shippingFee === null ? null : subtotal + shippingFee, unpriced, missing, ...(onlyAddOns(lines, byId) ? { addOnOnly: true } : {}) };
 }
 
 /** Mọi khối lượng khách nói trong câu, quy ra gram («2kg», «0,5 kg», «2 ký», «500g»). HÀM THUẦN. */
@@ -469,7 +500,7 @@ export function mergeLines(lines: readonly CartLine[]): CartLine[] {
 
 function cartView(p: Priced) {
   return {
-    lines: p.lines.map((l) => ({ variant_id: l.variantId, name: l.name, quantity: l.quantity, unit_price: l.unitPrice, line_total: l.lineTotal, text: `${l.name}: ${l.quantity} × ${formatVND(l.unitPrice)} = ${formatVND(l.lineTotal)}` })),
+    lines: p.lines.map((l) => ({ variant_id: l.variantId, name: l.name, quantity: l.quantity, unit_price: l.unitPrice, ...(l.discount ? { discount: l.discount } : {}), line_total: l.lineTotal, text: l.discount ? `${l.name}: ${l.quantity} × ${formatVND(l.unitPrice)} − giảm ${formatVND(l.discount)} = ${formatVND(l.lineTotal)}` : `${l.name}: ${l.quantity} × ${formatVND(l.unitPrice)} = ${formatVND(l.lineTotal)}` })),
     subtotal: p.subtotal,
     subtotal_text: formatVND(p.subtotal),
     shipping_fee: p.shippingFee,
@@ -492,7 +523,7 @@ function orderInput(state: ChatState, draft: NonNullable<ChatState["draft"]>, pr
   return {
     customerId: state.customer?.id ?? "",
     stage,
-    lines: priced.lines.map((l) => ({ variantId: l.variantId, quantity: l.quantity, unitPrice: l.unitPrice, discount: 0 })),
+    lines: priced.lines.map((l) => ({ variantId: l.variantId, quantity: l.quantity, unitPrice: l.unitPrice, discount: l.discount })),
     orderDiscount: 0,
     shippingFee: priced.shippingFee ?? 0,
     note: notes.join("\n").slice(0, 2000),
@@ -735,10 +766,11 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
       if (priced.unpriced.length) return { ...err("Đơn nháp: mã chưa có giá", `Chưa có giá: ${priced.unpriced.join(", ")}.`, state, { reason: "UNPRICED_SKU" }), requireHuman: `Giá bất thường: ${priced.unpriced.join(", ")} chưa có giá` };
       if (priced.addOnOnly) return err("Đơn nháp: chỉ có món bán kèm", ADD_ON_ONLY_ERROR, state);
       // Số lượng chỉ xét khi lượt này GỬI items (sửa người nhận / ghi chú không kiểm lại số lượng đã lên).
-      const packMistake = v.data.items ? packQuantityMistake(priced.lines, ctx.lastUserText) : null;
+      const packMistake = v.data.items ? packQuantityMistake(priced.asked, ctx.lastUserText) : null;
       if (packMistake) return err("Đơn nháp: nhầm quy cách thành số lượng", packMistake, state, { reason: "BAD_INPUT", fields: ["items.quantity"] });
       const firstShown = existing?.firstShownTurn ?? existing?.shownTurn ?? ctx.turn;
-      const draft = { ...(ctx.turn !== undefined ? { shownTurn: ctx.turn } : {}), ...(firstShown !== undefined ? { firstShownTurn: firstShown } : {}), orderId: existing?.orderId ?? null, lines, unitPrices: Object.fromEntries(priced.lines.map((l) => [l.variantId, l.unitPrice])), recipient, note: v.data.delivery_note ?? existing?.note ?? "", simulated };
+      // Đơn nháp giữ dòng ĐÃ QUY GÓI (đúng những dòng ghi vào đơn) — chốt đơn tính lại trên chính chúng.
+      const draft = { ...(ctx.turn !== undefined ? { shownTurn: ctx.turn } : {}), ...(firstShown !== undefined ? { firstShownTurn: firstShown } : {}), orderId: existing?.orderId ?? null, lines: priced.lines.map((l) => ({ variantId: l.variantId, quantity: l.quantity })), unitPrices: Object.fromEntries(priced.lines.map((l) => [l.variantId, l.unitPrice])), recipient, note: v.data.delivery_note ?? existing?.note ?? "", simulated };
       if (!simulated) {
         const payload = orderInput(state, draft, priced, "NEW", ctx.config, ctx.channel);
         // Đơn MỚI mang mã quảng cáo đã dẫn khách vào hội thoại (trong cửa sổ quy kết — máy chủ quyết); sửa đơn KHÔNG đổi nó.
