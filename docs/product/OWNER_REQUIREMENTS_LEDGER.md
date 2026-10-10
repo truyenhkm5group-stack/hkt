@@ -57,13 +57,13 @@ Theo bề mặt:
 
 | Bề mặt | Tổng | PV/DONE | PARTIAL | CODE_DONE_NOT_VERIFIED | NOT_STARTED | BLOCKED_OWNER | BLOCKED_EXTERNAL |
 |---|---|---|---|---|---|---|---|
-| Khách SaaS | 67 | 23 | 9 | 23 | 7 | 4 | 1 |
+| Khách SaaS | 67 | 24 | 9 | 22 | 7 | 4 | 1 |
 | Admin nền tảng | 21 | 9 | 0 | 11 | 0 | 1 | 0 |
 | Nền tảng chung (bảo mật · pháp lý · vận hành) | 6 | 3 | 0 | 1 | 0 | 1 | 1 |
 | Công khai | 9 | 2 | 0 | 5 | 1 | 0 | 1 |
 | ERP lưu lượng cao | 18 | 0 | 1 | 17 | 0 | 0 | 0 |
 | Bot HSLC | 6 | 1 | 0 | 3 | 1 | 0 | 1 |
-| **Tổng** | **127** | **38** | **10** | **60** | **9** | **6** | **4** |
+| **Tổng** | **127** | **39** | **10** | **59** | **9** | **6** | **4** |
 
 Đếm bằng script trên cột STATUS của mọi bảng §2–§6 (không tự chấm). Yêu cầu «nhiều đơn mở trong một hội thoại · ghi lại sau
 lỗi · địa chỉ có cấu trúc» chỉ đếm MỘT lần ở `ORD-05` (bảng Visible xếp nó dưới Inbox).
