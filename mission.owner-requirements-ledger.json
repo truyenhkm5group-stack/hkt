@@ -3,7 +3,7 @@
   "mission_id": "owner-requirements-ledger",
   "title": "Sổ yêu cầu chủ shop: mỗi yêu cầu nguyên tử có PR · SHA · bằng chứng production · trạng thái thật",
   "business_goal": "",
-  "status": "RUNNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -20,7 +20,18 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-10T08:14:09.783Z",
-  "updated_at": "2026-10-10T08:14:09.783Z",
-  "last_heartbeat": "2026-10-10T08:14:09.783Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-10T08:30:22.580Z",
+  "last_heartbeat": "2026-10-10T08:30:22.580Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "docs/owner-requirements-ledger",
+    "sha": "17450e56fb315475d2463b4f332c9c071f9f0f56",
+    "at": "2026-10-10T08:30:22.580Z",
+    "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+    "title": "Sổ yêu cầu chủ shop: mỗi yêu cầu nguyên tử có PR · SHA · bằng chứng production · trạng thái thật",
+    "summary": "Sổ yêu cầu chủ shop 127 yêu cầu (39 PV · 10 PARTIAL · 59 CODE_DONE · 9 NOT_STARTED · 6 BLOCKED_OWNER · 4 BLOCKED_EXTERNAL), 9 trạng thái cũ đã sửa, TOP 10 khoảng trống",
+    "tests": [
+      "chỉ tài liệu; bảng tổng đếm bằng script trên cột STATUS"
+    ]
+  }
 }
