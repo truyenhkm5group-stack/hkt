@@ -1,0 +1,8 @@
+{
+  "pr": 774,
+  "sha": "645f9a45c4ef4c3245cf082504351457a707e737",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-10T09:12:46.959Z",
+  "note": "Một dòng regex Caddyfile (thêm ghn-org/ ghtk-org/) + bài kiểm dẫn xuất từ cây route; deploy tự caddy validate rồi reload, tệp sai thì Caddy cũ chạy tiếp"
+}
