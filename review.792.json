@@ -1,0 +1,8 @@
+{
+  "pr": 792,
+  "sha": "c92513531e3adc7220003ffff9361eefcbdc6ec8",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-10T21:15:49.173Z",
+  "note": "Migration chỉ cộng thêm + dẫn xuất tất định max(created_at) tin khách, trigger trước dẫn xuất trong cùng giao dịch; NULL ⇒ lùi phép dò cũ (không coi là đã đọc); kết quả trùng main từng byte trên fixture; không đường TS nào ghi cột. Lúc tích hợp phải renumber 0240 (va #788/PR-3)"
+}
