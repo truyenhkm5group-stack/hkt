@@ -3,7 +3,7 @@
   "mission_id": "ledger-r2",
   "title": "Sổ yêu cầu chủ shop sau đợt deploy 10/10 tối",
   "business_goal": "",
-  "status": "RUNNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -20,7 +20,18 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-10T14:42:33.955Z",
-  "updated_at": "2026-10-10T14:42:33.955Z",
-  "last_heartbeat": "2026-10-10T14:42:33.955Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-10T14:42:57.913Z",
+  "last_heartbeat": "2026-10-10T14:42:57.913Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "docs/ledger-r2",
+    "sha": "8dc4a924f94c48d9a668902037b2928ad075a87a",
+    "at": "2026-10-10T14:42:57.913Z",
+    "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+    "title": "Sổ yêu cầu chủ shop sau đợt deploy 10/10 tối",
+    "summary": "143 yêu cầu: 47 PV · 9 PARTIAL · 56 CODE_DONE · 21 NOT_STARTED · 6 BLOCKED_OWNER · 4 BLOCKED_EXTERNAL",
+    "tests": [
+      "chỉ tài liệu; đếm lại bằng script trên cột STATUS"
+    ]
+  }
 }

@@ -1523,3 +1523,4 @@
 {"at":"2026-10-10T14:41:48.202Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DONE","mission":"board-r2","detail":"#772 gộp 3cb886ca, tài liệu (Launch Gate r7 87 % + bảng Visible Product), có trong production 7935fbd4"}
 {"at":"2026-10-10T14:42:11.253Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DONE","mission":"owner-requirements-ledger","detail":"#773 gộp 7935fbd4, sổ 127 yêu cầu (39 PV) — làm mới ở ledger-r2"}
 {"at":"2026-10-10T14:42:34.152Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"CLAIM","mission":"ledger-r2","detail":"RUNNING · 1 mẫu phạm vi · MEDIUM"}
+{"at":"2026-10-10T14:42:57.959Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"ledger-r2","detail":"docs/ledger-r2 @ 8dc4a924f94c · 1 lệnh kiểm thử"}
