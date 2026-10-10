@@ -3,7 +3,7 @@
   "mission_id": "inbox-semantics-v3",
   "title": "Hộp thư: Chưa đọc ≠ Chờ trả lời ≠ Cần người ≠ Người đang xử lý; chưa đọc lên đầu đúng nghĩa; «Trả tất cả cho AI»",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -29,9 +29,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-10T08:13:35.444Z",
-  "updated_at": "2026-10-10T10:27:28.850Z",
+  "updated_at": "2026-10-10T11:54:30.251Z",
   "last_heartbeat": "2026-10-10T10:27:00.336Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#778 → 7af2bca43d6c7982fcee0e6a71e4aa54b6c469d5"
+  },
   "handoff": {
     "branch": "feat/inbox-semantics-v3",
     "sha": "0b56fb7d185890e363035b7cd368aa548d6fd7bf",

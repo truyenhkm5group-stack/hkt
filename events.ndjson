@@ -1489,3 +1489,4 @@
 {"at":"2026-10-10T11:47:25.616Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"industry-terms","detail":"#775 @ 70ca5cd6afbc → b85aba58670f (MERGE_NOW · MEDIUM · gates success)"}
 {"at":"2026-10-10T11:48:06.026Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"VERIFY_PASS","mission":"sec-caddy-ghn-ghtk","detail":"PASS 8232c50e7d43be6e16ad64c8de5ad6b5b54722ff 2026-10-10T11:47:54.624Z"}
 {"at":"2026-10-10T11:48:21.968Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DONE","mission":"sec-caddy-ghn-ghtk","detail":"production 8232c50e · deploy run 38048305155 xanh, log «Caddy đã nạp Caddyfile mới»; webhook-log-redaction 7/7 route che token. Còn: xoay token GHN/GHTK — chờ chủ shop duyệt"}
+{"at":"2026-10-10T11:54:30.284Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"inbox-semantics-v3","detail":"#778 @ 0b56fb7d1858 → 7af2bca43d6c (MERGE_NOW · MEDIUM · gates success)"}
