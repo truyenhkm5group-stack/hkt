@@ -3,7 +3,7 @@
   "mission_id": "inbox-semantics-v3",
   "title": "Hộp thư: Chưa đọc ≠ Chờ trả lời ≠ Cần người ≠ Người đang xử lý; chưa đọc lên đầu đúng nghĩa; «Trả tất cả cho AI»",
   "business_goal": "",
-  "status": "VERIFYING",
+  "status": "DONE",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -29,13 +29,14 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-10T08:13:35.444Z",
-  "updated_at": "2026-10-10T13:50:02.419Z",
-  "last_heartbeat": "2026-10-10T10:27:00.336Z",
+  "updated_at": "2026-10-10T13:50:37.287Z",
+  "last_heartbeat": "2026-10-10T13:50:37.287Z",
   "definition_of_done": [],
   "evidence": {
     "merged": "#778 → 7af2bca43d6c7982fcee0e6a71e4aa54b6c469d5",
     "verify": "PASS 7af2bca43d6c7982fcee0e6a71e4aa54b6c469d5 2026-10-10T13:49:51.112Z",
-    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/38055529025"
+    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/38055529025",
+    "done": "production 7af2bca4 · HSLC: Chưa đọc 179→2.433 (AI trả lời không xoá chưa đọc; trang đầu có hội thoại tin cuối AI), Chờ trả lời 243→251 (chờ lâu nhất trước), Cần người 680→98 (chỉ lý do thật), Người đang xử lý 82→1; «Trả tất cả cho AI» xem trước «Trả 1 · chặn 0» (không bấm trả trên dữ liệu thật); ma trận 16 lọc/tổ hợp: 0 trùng, chưa đọc trước, tập con khớp"
   },
   "handoff": {
     "branch": "feat/inbox-semantics-v3",
