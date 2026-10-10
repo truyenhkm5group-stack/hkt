@@ -3,7 +3,7 @@
   "mission_id": "avatar-pancake-shape2",
   "title": "Ops pancake-avatar-shape lượt dò 2: accept */* + JSON, thử mọi mã khách trong payload × 6 biến thể điểm cuối, in khoá khách trong phản hồi tin",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P1",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -23,9 +23,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-10T23:17:25.609Z",
-  "updated_at": "2026-10-10T23:18:20.282Z",
+  "updated_at": "2026-10-10T23:47:28.447Z",
   "last_heartbeat": "2026-10-10T23:17:46.072Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#795 → 16300a2607ac45bd863f31b375b55b69462c895f"
+  },
   "handoff": {
     "branch": "fix/avatar-pancake-shape2",
     "sha": "16a42812978c57a9300b16866c11a53e2245dd50",
