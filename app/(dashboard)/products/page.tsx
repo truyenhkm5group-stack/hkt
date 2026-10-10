@@ -1,3 +1,4 @@
+import { readExperienceProfile } from "@/lib/experience/profile";
 import Link from "next/link";
 import { isSalesAgentUser, shellAllows } from "@/lib/constants/saas-nav";
 import { AlertTriangle, Boxes, Download, PackagePlus, PackageX, Plus, ShoppingBag, Upload, Warehouse } from "lucide-react";
@@ -27,7 +28,7 @@ export default async function ProductsPage({ searchParams }: { searchParams: Pro
   const shell = isSalesAgentUser(user);
   const raw = await searchParams;
   const params = parseListParams(raw, { defaultSort: "erpStock", defaultDir: "asc", filterKeys: ["stock", "category", "warehouse", "status"], sortable: PRODUCT_SORTABLE, defaultPeriod: "all", defaultPageSize: PRODUCT_LIST_PAGE_SIZE, maxPageSize: PRODUCT_LIST_PAGE_SIZE });
-  const [{ rows, total, pageCount }, facets, summary, warehouses, copy, createGate] = await Promise.all([listProducts(params), productFacets(params), productSummary(params), listWarehouses(), getBrandCopy(user), productCreateGate(user)]);
+  const [{ rows, total, pageCount }, facets, summary, warehouses, copy, createGate, { profile }] = await Promise.all([listProducts(params), productFacets(params), productSummary(params), listWarehouses(), getBrandCopy(user), productCreateGate(user), readExperienceProfile()]);
   const exportQuery = new URLSearchParams(Object.entries(raw).flatMap(([k, v]) => (Array.isArray(v) ? v.map((x) => [k, x]) : v ? [[k, v]] : []))).toString();
 
   return (
@@ -143,7 +144,7 @@ export default async function ProductsPage({ searchParams }: { searchParams: Pro
       />
 
       <DataTableToolbar
-        searchPlaceholder="Tên sản phẩm, SKU, barcode, màu, size…"
+        searchPlaceholder={profile.sizeColorMatrix ? "Tên sản phẩm, SKU, barcode, màu, size…" : "Tên sản phẩm, SKU, barcode, quy cách…"}
         period={false}
         facets={[
           { key: "stock", label: "Tồn kho", options: facets.stock, single: true },
@@ -153,7 +154,7 @@ export default async function ProductsPage({ searchParams }: { searchParams: Pro
         ]}
         resultLabel={`${formatNumber(total)} mẫu mã phù hợp`}
       />
-      <ProductsTable rows={rows} pageCount={pageCount} total={total} warehouses={warehouses} emptyDescription={copy.text("products.emptyList")} />
+      <ProductsTable rows={rows} pageCount={pageCount} total={total} warehouses={warehouses} emptyDescription={copy.text("products.emptyList")} variantTerm={profile.variantTerm.toLowerCase()} sizeColor={profile.sizeColorMatrix} />
     </div>
   );
 }

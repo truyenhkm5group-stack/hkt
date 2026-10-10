@@ -102,7 +102,7 @@ export function ProductNotes({ productId, variants, notes, canWrite }: { product
             ) : null}
             <p className="flex-1 text-[11px] text-muted-foreground">{NOTE_CATEGORY_HINT[category]}</p>
           </div>
-          <Textarea rows={2} maxLength={NOTE_MAX_LENGTH} value={body} onChange={(e) => setBody(e.target.value)} placeholder="Lô tháng 8 vải mỏng hơn mẫu, khách đổi 3 cái…" />
+          <Textarea rows={2} maxLength={NOTE_MAX_LENGTH} value={body} onChange={(e) => setBody(e.target.value)} placeholder="Vd: lô tháng 8 khác mẫu, khách đổi 3 cái…" />
           <div className="flex items-center justify-between">
             <span className="text-[11px] text-muted-foreground">
               Ghi chú là bối cảnh cho người đọc — KHÔNG ảnh hưởng tới tồn kho, giá vốn hay bất kỳ báo cáo nào.

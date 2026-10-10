@@ -24,6 +24,8 @@ import { audit } from "@/lib/audit";
 import { can, type SessionUser } from "@/lib/auth/session";
 import { duplicateSkus, isManualRecordId, MANUAL_PRODUCT_ORIGIN, newManualId, skuKey, type ManualProductRaw } from "@/lib/constants/manual-products";
 import { objectDef } from "@/lib/constants/object-registry";
+import { LEGACY_COLOR_FIELD, LEGACY_SIZE_FIELD, specOf, variantDetailText, type VariantField } from "@/lib/constants/experience-profile";
+import { readExperienceProfile } from "@/lib/experience/profile";
 import { fail, type MetaFailure } from "@/lib/metadata/errors";
 import type { FieldError } from "@/lib/metadata/types";
 import { canUseModule, orgHasSyncedSource } from "@/lib/platform/capabilities";
@@ -86,14 +88,36 @@ async function conflicts(db: DbLike, data: ManualProductInput, self: { productId
   return errors;
 }
 
-function variantValues(data: ManualProductInput, v: ManualProductInput["variants"][number]) {
+/**
+ * Ô mẫu mã đi theo HỒ SƠ NGÀNH của tổ chức (`lib/constants/experience-profile.ts`): ô hồ sơ không có và đầu vào để trống thì
+ * KHÔNG ghi — sửa một mẫu mã ở shop thực phẩm không xoá trắng cột size / color cũ của nó (dữ liệu cũ giữ an toàn, chỉ ẩn).
+ */
+function withSpec(prev: unknown, spec: string): Record<string, unknown> | null {
+  const base: Record<string, unknown> = prev && typeof prev === "object" && !Array.isArray(prev) ? { ...(prev as Record<string, unknown>) } : {};
+  if (spec) base.spec = spec;
+  else delete base.spec;
+  return Object.keys(base).length ? base : null;
+}
+
+function variantValues(data: ManualProductInput, v: ManualProductInput["variants"][number], fields: readonly VariantField[], prevAttributes: unknown = null) {
   const retail = v.retailPrice ?? data.retailPrice;
   const cost = v.cost ?? data.cost;
-  const detail = [v.color && `Màu: ${v.color}`, v.size && `Size: ${v.size}`].filter(Boolean).join(", ");
+  /*
+    Hồ sơ quyết định ô nào HIỆN, không quyết định dữ liệu nào bị VỨT: lối gọi không qua form (gieo dữ liệu, công cụ máy, nhập
+    tệp) vẫn có thể gửi size / color cho tổ chức thực phẩm — giá trị khác rỗng thì vẫn ghi, kèm vào chữ `detail` như cũ.
+  */
+  const effective: VariantField[] = [...fields];
+  if (v.size && !fields.some((f) => f.storage === "size")) effective.push(LEGACY_SIZE_FIELD);
+  if (v.color && !fields.some((f) => f.storage === "color")) effective.push(LEGACY_COLOR_FIELD);
+  const has = (s: VariantField["storage"]) => effective.some((f) => f.storage === s);
+  const detail = variantDetailText(effective, v);
   return {
     sku: v.sku,
-    size: v.size,
-    color: v.color,
+    ...(has("size") ? { size: v.size } : {}),
+    ...(has("color") ? { color: v.color } : {}),
+    // `attributes` có thể mang khoá khác (đồng bộ, tuỳ biến) — chỉ thay đúng khoá `spec`, giữ nguyên phần còn lại.
+    ...(has("spec") ? { attributes: withSpec(prevAttributes, v.spec) } : {}),
+    ...(has("weight") && v.weight !== null ? { weight: v.weight } : {}),
     detail,
     // Cột tiền `NOT NULL DEFAULT 0`: "chưa khai" lưu 0 — thang giá vốn đọc 0 là "chưa có" (`nullif`), nhật ký giữ `null`.
     retailPrice: retail ?? 0,
@@ -113,6 +137,7 @@ export async function createProductCore(user: SessionUser, rawInput: unknown): P
   if (data.variants.some((v) => v.id)) return fail("INVALID", "Sản phẩm mới không mang mẫu mã có sẵn.", "variants");
 
   const db = await getDb();
+  const fields = (await readExperienceProfile()).profile.variantFields;
   const productId = newManualId();
   const raw: ManualProductRaw = { origin: MANUAL_PRODUCT_ORIGIN, unit: data.unit };
   const result = await db.transaction(async (tx) => {
@@ -120,7 +145,7 @@ export async function createProductCore(user: SessionUser, rawInput: unknown): P
     if (errors.length) return { ok: false as const, errors };
     const now = new Date();
     await tx.insert(schema.products).values({ id: productId, name: data.name, customId: data.code, raw, insertedAt: now });
-    const variants = data.variants.map((v) => ({ id: newManualId(), productId, insertedAt: now, ...variantValues(data, v) }));
+    const variants = data.variants.map((v) => ({ id: newManualId(), productId, insertedAt: now, ...variantValues(data, v, fields) }));
     await tx.insert(schema.productVariants).values(variants);
     return { ok: true as const, variantIds: variants.map((v) => v.id) };
   });
@@ -148,6 +173,7 @@ export async function updateProductCore(user: SessionUser, productId: string, ra
   const data = parsed.data;
 
   const db = await getDb();
+  const fields = (await readExperienceProfile()).profile.variantFields;
   const before = await db.query.products.findFirst({ where: eq(schema.products.id, productId), with: { variants: true } });
   if (!before) return fail("NOT_FOUND", "Không tìm thấy sản phẩm trong tổ chức này.");
   const own = new Map(before.variants.map((v) => [v.id, v]));
@@ -169,11 +195,11 @@ export async function updateProductCore(user: SessionUser, productId: string, ra
     await tx.update(schema.products).set({ name: data.name, customId: data.code, raw, updatedAt: now }).where(eq(schema.products.id, productId));
     const added: string[] = [];
     for (const v of data.variants) {
-      if (v.id) await tx.update(schema.productVariants).set({ ...variantValues(data, v), updatedAt: now }).where(and(eq(schema.productVariants.id, v.id), eq(schema.productVariants.productId, productId)));
+      if (v.id) await tx.update(schema.productVariants).set({ ...variantValues(data, v, fields, own.get(v.id)?.attributes ?? null), updatedAt: now }).where(and(eq(schema.productVariants.id, v.id), eq(schema.productVariants.productId, productId)));
       else {
         const id = newManualId();
         added.push(id);
-        await tx.insert(schema.productVariants).values({ id, productId, insertedAt: now, ...variantValues(data, v) });
+        await tx.insert(schema.productVariants).values({ id, productId, insertedAt: now, ...variantValues(data, v, fields) });
       }
     }
     return { ok: true as const, added };
@@ -186,7 +212,7 @@ export async function updateProductCore(user: SessionUser, productId: string, ra
     action: "PRODUCT_UPDATE",
     entity: "PRODUCT",
     entityId: productId,
-    before: { name: before.name, code: before.customId, raw: before.raw, variants: before.variants.map((v) => ({ id: v.id, sku: v.sku, size: v.size, color: v.color, retailPrice: v.retailPrice, cost: v.lastImportedPrice, selling: !v.isHidden, addOnOnly: v.addOnOnly })) },
+    before: { name: before.name, code: before.customId, raw: before.raw, variants: before.variants.map((v) => ({ id: v.id, sku: v.sku, size: v.size, color: v.color, spec: specOf(v.attributes), weight: v.weight, retailPrice: v.retailPrice, cost: v.lastImportedPrice, selling: !v.isHidden, addOnOnly: v.addOnOnly })) },
     after: { ...data, addedVariantIds: result.added },
     reason: "Sửa sản phẩm tạo tay trên ERP",
   });
