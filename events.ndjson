@@ -1424,3 +1424,4 @@
 {"at":"2026-10-10T04:44:12.404Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"ai-settings-390","detail":"#768 cho fix/ai-settings-390 @ a5377c4c60ae"}
 {"at":"2026-10-10T04:44:38.372Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#768 @ a5377c4c60ae · Một dòng lớp CSS lưới + khẳng định trong bài kiểm; đã thử trên production 622→382 px"}
 {"at":"2026-10-10T05:21:19.377Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"CLAIM","mission":"acceptance-shell-landing","detail":"RUNNING · 2 mẫu phạm vi · MEDIUM"}
+{"at":"2026-10-10T05:21:35.016Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"acceptance-shell-landing","detail":"fix/acceptance-shell-landing @ 657fc02d91e7 · 1 lệnh kiểm thử"}
