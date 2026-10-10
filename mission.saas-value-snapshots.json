@@ -1,0 +1,33 @@
+{
+  "schema": 1,
+  "mission_id": "saas-value-snapshots",
+  "title": "Trung tâm giá trị SaaS PR-3: hai bảng ảnh chụp ngày (giá trị theo tổ chức 7/30/90 + sức khoẻ/rủi ro rời bỏ) + lượt chụp mỗi ngày VN ở đường job",
+  "business_goal": "",
+  "status": "RUNNING",
+  "priority": "P1",
+  "risk": "HIGH",
+  "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "worker": null,
+  "worktree": null,
+  "branch": "feat/saas-value-snapshots",
+  "base_sha": "2840b5b578820108de27227ff4f6181596be84df",
+  "domains": [],
+  "owned_paths": [
+    "db/schema.ts",
+    "drizzle/",
+    "lib/saas/tenant-value-capture.ts",
+    "lib/saas/tenant-health-daily.ts",
+    "lib/platform/saas-ledger.ts",
+    "tests/saas-value-snapshots.test.ts"
+  ],
+  "dependencies": [
+    "saas-value-core"
+  ],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-10T18:42:21.906Z",
+  "updated_at": "2026-10-10T18:42:21.906Z",
+  "last_heartbeat": "2026-10-10T18:42:21.906Z",
+  "definition_of_done": []
+}
