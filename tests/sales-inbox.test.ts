@@ -28,6 +28,7 @@ import { conversationView } from "@/lib/sales-chatbot/engine";
 import { fanpageVisitorKey, MEDIA_ONLY_TEXT, mirrorFanpageContext, PAGE_REPLY, receiveFanpageEvent, STAFF_REASON } from "@/lib/sales-chatbot/fanpage";
 import { subscribe } from "@/lib/realtime/bus";
 import { assignConversationCore, checkStaffImages, claimConversationCore, handBackToAiCore, listInbox, loadInboxThread, releaseConversationCore, sendStaffReplyCore, sendWindowOf, WEB_STAFF_REASON } from "@/lib/sales-chatbot/inbox";
+import { markInboxReadCore } from "@/lib/sales-chatbot/inbox-read";
 import { addNoteCore, archiveLabelCore, createLabelCore, deleteNoteCore, listLabels, setConversationLabelsCore } from "@/lib/sales-chatbot/inbox-labels";
 
 const ORG = "hop-thu-nguoi";
@@ -278,6 +279,8 @@ export async function testSalesInbox() {
       assert.ok(unreadList.ok && unreadList.rows.some((r) => r.id === mc.id && r.unread), "tin mới ⇒ chưa đọc");
       const tm = await loadInboxThread(lan, mc.id);
       assert.ok(tm.ok && tm.thread.items.length === 1 && tm.thread.items[0].side === "CUSTOMER" && tm.thread.items[0].text === MEDIA_ONLY_TEXT, JSON.stringify(tm.ok && tm.thread.items));
+      // Đọc tách khỏi nạp (P0.3, 10/10/2026 tối): khung chat hiện xong mới đánh dấu đọc tới tin khách cuối cùng của payload.
+      assert.ok(tm.ok && tm.thread.readThrough && (await markInboxReadCore(lan, mc.id, tm.thread.readThrough.id)).ok, "đánh dấu đọc tới tin khách đã hiện");
       assert.ok(tm.ok && !tm.thread.items.some((i) => i.side === "BOT"), "lời chào mặc định CHƯA gửi tới khách ⇒ không hiện là tin bot");
       const readList = await listInbox(lan, { filter: "UNREAD" });
       assert.ok(readList.ok && !readList.rows.some((r) => r.id === mc.id), "nhân viên mở hội thoại ⇒ hết chưa đọc");

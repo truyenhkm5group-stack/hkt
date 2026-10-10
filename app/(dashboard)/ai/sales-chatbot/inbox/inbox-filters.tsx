@@ -23,9 +23,11 @@ import {
   type InboxFilterState,
   type InboxLabel,
 } from "@/lib/sales-chatbot/inbox-shared";
+import { patchUnreadCount } from "@/lib/sales-chatbot/inbox-read-shared";
 import { CUSTOMER_LEVEL_LABEL, type CustomerLevel } from "@/lib/sales-chatbot/levels-shared";
 import { formatNumber } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import { useInboxReads } from "./read-store";
 
 /**
  * ═══════════ BỘ LỌC GỌN CỦA HỘP THƯ (INBOX-V2-A, chủ shop 09/10/2026) ═══════════
@@ -40,6 +42,8 @@ import { cn } from "@/lib/utils";
 type Props = {
   state: InboxFilterState;
   counts: Record<InboxFilter, number>;
+  /** Dấu con trỏ đọc mới nhất của người xem trong CÙNG câu đếm (`listInbox().unreadStamp`) — để vá số «Tin khách chưa đọc» ngay khi đọc. */
+  unreadStamp?: string | null;
   phoneCount: number;
   levelCounts: Partial<Record<CustomerLevel, number>>;
   levels: readonly CustomerLevel[];
@@ -57,8 +61,11 @@ type Props = {
 const SELECT = "h-9 w-full min-w-0 rounded-md border border-foreground/15 bg-card px-2 text-[13px]";
 const FIELD = "space-y-1 text-[12px] font-medium text-muted-foreground";
 
-export function InboxFilters({ state, counts, phoneCount, levelCounts, levels, pages, labels, users, tools, manage, bulk }: Props) {
+export function InboxFilters({ state, counts: serverCounts, unreadStamp = null, phoneCount, levelCounts, levels, pages, labels, users, tools, manage, bulk }: Props) {
   const router = useRouter();
+  // Số «Tin khách chưa đọc» trừ ngay các hội thoại vừa đọc mà bản đếm của máy chủ chưa thấy (inbox-read-shared.ts) — không đợi làm mới.
+  const reads = useInboxReads();
+  const counts: Record<InboxFilter, number> = { ...serverCounts, UNREAD: patchUnreadCount(serverCounts.UNREAD, unreadStamp, reads.values()) };
   const [open, setOpen] = useState(false);
   const advanced = inboxAdvancedCount(state);
   const quickActive = (INBOX_QUICK_FILTERS as readonly InboxFilter[]).includes(state.filter);

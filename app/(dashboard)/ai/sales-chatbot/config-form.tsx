@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Loader2 } from "lucide-react";
+import { Loader2, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -13,6 +13,7 @@ import { SectionCard } from "@/components/ui-bits";
 import { AiEngineFields } from "@/components/ai-usage/ai-engine-fields";
 import { saveSalesChatbotConfigAction } from "@/lib/actions/sales-chatbot";
 import { SALES_TONE_LABEL, SALES_TONES, SALES_TOOL_LABEL, SALES_TOOLS, type SalesChatbotConfig, type SalesTool } from "@/lib/sales-chatbot/config";
+import { promotionState, SALES_KNOWLEDGE_LIMITS as KL, SALES_POLICY_KEYS, SALES_POLICY_LABEL, type SalesFaqItem, type SalesPromotion } from "@/lib/sales-chatbot/knowledge";
 import type { ChatbotEngineConfig, CustomerChatbotConfig, EngineConnectionView, ProviderHealthView } from "@/lib/saas/visibility";
 
 const DAY_LABEL = ["CN", "T2", "T3", "T4", "T5", "T6", "T7"];
@@ -60,6 +61,10 @@ export function ChatbotConfigForm({
   const set = <K extends keyof CustomerChatbotConfig>(k: K, v: CustomerChatbotConfig[K]) => setC((s) => ({ ...s, [k]: v }));
   const setBooking = (patch: Partial<SalesChatbotConfig["booking"]>) => set("booking", { ...c.booking, ...patch });
   const num = (raw: string, fallback: number) => (/^\d+$/.test(raw.trim()) ? Number(raw.trim()) : fallback);
+  // Kiến thức của shop: sửa một dòng hỏi–đáp / khuyến mãi theo chỉ số. Ngày hôm nay chụp MỘT lần để nhãn «đã hết hạn» ổn định.
+  const [today] = useState(() => new Date());
+  const setFaq = (i: number, patch: Partial<SalesFaqItem>) => set("faq", c.faq.map((f, j) => (j === i ? { ...f, ...patch } : f)));
+  const setPromo = (i: number, patch: Partial<SalesPromotion>) => set("promotions", c.promotions.map((p, j) => (j === i ? { ...p, ...patch } : p)));
 
   const save = (enabled?: boolean) =>
     start(async () => {
@@ -84,8 +89,23 @@ export function ChatbotConfigForm({
         return;
       }
       const volumeDiscount = { ...c.volumeDiscount, unitGrams: Number.isFinite(unitKg) && unitKg > 0 ? Math.round(unitKg * 1000) : c.volumeDiscount.unitGrams, minWeightGrams: Number.isFinite(minKg) && minKg > 0 ? Math.round(minKg * 1000) : c.volumeDiscount.minWeightGrams, amount: Number.isSafeInteger(amount) && amount >= 0 ? amount : 0 };
+      // Dòng trống hẳn bỏ đi; dòng điền dở thì báo, không lưu nửa câu.
+      const faq = c.faq.map((f) => ({ q: f.q.trim(), a: f.a.trim() })).filter((f) => f.q || f.a);
+      if (faq.some((f) => !f.q || !f.a)) {
+        toast.error("Câu hỏi thường gặp: mỗi dòng cần cả câu hỏi lẫn câu trả lời — hoặc xoá dòng đó.");
+        return;
+      }
+      const promotions = c.promotions.map((p) => ({ title: p.title.trim(), content: p.content.trim(), from: p.from || null, to: p.to || null })).filter((p) => p.title || p.content || p.from || p.to);
+      if (promotions.some((p) => !p.title || !p.content)) {
+        toast.error("Khuyến mãi: mỗi khuyến mãi cần tên và nội dung — hoặc xoá khuyến mãi đó.");
+        return;
+      }
+      if (promotions.some((p) => p.from && p.to && p.from > p.to)) {
+        toast.error("Khuyến mãi: «Từ ngày» phải trước hoặc bằng «Đến ngày».");
+        return;
+      }
       // Khách: không gửi ô động cơ AI nào — máy chủ giữ nguyên giá trị đang lưu.
-      const r = await saveSalesChatbotConfigAction({ ...c, ...(engineCfg ?? {}), shippingFee: ship, freeShipping, volumeDiscount, enabled: enabled ?? c.enabled });
+      const r = await saveSalesChatbotConfigAction({ ...c, ...(engineCfg ?? {}), shippingFee: ship, freeShipping, volumeDiscount, faq, promotions, enabled: enabled ?? c.enabled });
       if ("error" in r) toast.error(r.error);
       else {
         if (enabled !== undefined) set("enabled", enabled);
@@ -284,7 +304,74 @@ export function ChatbotConfigForm({
             </fieldset>
           ) : null}
         </FormGroup>
-        <FormGroup title="Bot được biết và được làm gì" hint="Thông tin sản phẩm bot đọc được và việc bot được phép làm.">
+        <FormGroup title="Bot được biết và được làm gì" hint="Chính sách, câu hỏi thường gặp, khuyến mãi và thông tin sản phẩm bot được nói; việc bot được phép làm.">
+          <fieldset className="min-w-0 space-y-2 rounded-lg border p-3 sm:col-span-2" data-knowledge-policies>
+            <legend className="px-1 text-sm font-medium">Chính sách của shop</legend>
+            <div className="grid gap-3 sm:grid-cols-2">
+              {SALES_POLICY_KEYS.map((k) => (
+                <div key={k} className="min-w-0 space-y-1">
+                  <Label htmlFor={`cb-policy-${k}`} className="text-xs">
+                    {SALES_POLICY_LABEL[k]}
+                  </Label>
+                  <Textarea id={`cb-policy-${k}`} rows={2} maxLength={KL.policy} value={c.policies[k]} placeholder="Để trống nếu shop chưa có" onChange={(e) => set("policies", { ...c.policies, [k]: e.target.value })} />
+                </div>
+              ))}
+            </div>
+            <p className="text-xs text-muted-foreground">Bot trả lời đúng theo chữ ở đây, không thêm điều shop chưa hứa. Mục để trống ⇒ khách hỏi tới, bot nói chưa có thông tin và chuyển nhân viên.</p>
+          </fieldset>
+          <fieldset className="min-w-0 space-y-2 rounded-lg border p-3 sm:col-span-2" data-knowledge-faq>
+            <legend className="px-1 text-sm font-medium">Câu hỏi thường gặp</legend>
+            {c.faq.length === 0 ? <p className="text-xs text-muted-foreground">Chưa có câu nào.</p> : null}
+            {c.faq.map((f, i) => (
+              <div key={i} className="min-w-0 space-y-1.5 rounded-md border bg-muted/20 p-2">
+                <div className="flex items-start gap-2">
+                  <Input className="min-w-0 flex-1" aria-label={`Câu hỏi ${i + 1}`} maxLength={KL.faqQuestion} value={f.q} placeholder="vd Shop có giao hoả tốc không?" onChange={(e) => setFaq(i, { q: e.target.value })} />
+                  <Button type="button" size="sm" variant="ghost" aria-label={`Xoá câu hỏi ${i + 1}`} onClick={() => set("faq", c.faq.filter((_, j) => j !== i))}>
+                    <Trash2 className="size-4" />
+                  </Button>
+                </div>
+                <Textarea rows={2} aria-label={`Câu trả lời ${i + 1}`} maxLength={KL.faqAnswer} value={f.a} placeholder="Câu trả lời của shop" onChange={(e) => setFaq(i, { a: e.target.value })} />
+              </div>
+            ))}
+            <Button type="button" size="sm" variant="outline" disabled={c.faq.length >= KL.faqItems} onClick={() => set("faq", [...c.faq, { q: "", a: "" }])}>
+              <Plus className="size-4" /> Thêm câu hỏi
+            </Button>
+            <p className="text-xs text-muted-foreground">Khách hỏi cùng ý (dù khác chữ) ⇒ bot trả lời theo câu trả lời ở đây. Tối đa {KL.faqItems} câu.</p>
+          </fieldset>
+          <fieldset className="min-w-0 space-y-2 rounded-lg border p-3 sm:col-span-2" data-knowledge-promotions>
+            <legend className="px-1 text-sm font-medium">Khuyến mãi đang chạy</legend>
+            {c.promotions.length === 0 ? <p className="text-xs text-muted-foreground">Chưa có khuyến mãi nào.</p> : null}
+            {c.promotions.map((p, i) => {
+              const state = p.from && p.to && p.from > p.to ? null : promotionState({ from: p.from || null, to: p.to || null }, today);
+              return (
+                <div key={i} className="min-w-0 space-y-1.5 rounded-md border bg-muted/20 p-2">
+                  <div className="flex items-start gap-2">
+                    <Input className="min-w-0 flex-1" aria-label={`Tên khuyến mãi ${i + 1}`} maxLength={KL.promoTitle} value={p.title} placeholder="vd Tuần lễ chả mực" onChange={(e) => setPromo(i, { title: e.target.value })} />
+                    <Button type="button" size="sm" variant="ghost" aria-label={`Xoá khuyến mãi ${i + 1}`} onClick={() => set("promotions", c.promotions.filter((_, j) => j !== i))}>
+                      <Trash2 className="size-4" />
+                    </Button>
+                  </div>
+                  <Textarea rows={2} aria-label={`Nội dung khuyến mãi ${i + 1}`} maxLength={KL.promoContent} value={p.content} placeholder="vd Mua 2 gói tặng 1 gói ruốc 100g" onChange={(e) => setPromo(i, { content: e.target.value })} />
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    <label className="min-w-0 space-y-1 text-xs">
+                      <span className="block text-muted-foreground">Từ ngày (để trống = ngay bây giờ)</span>
+                      <Input type="date" className="h-8 min-w-0" value={p.from ?? ""} onChange={(e) => setPromo(i, { from: e.target.value || null })} />
+                    </label>
+                    <label className="min-w-0 space-y-1 text-xs">
+                      <span className="block text-muted-foreground">Đến hết ngày (để trống = chưa hẹn ngày kết thúc)</span>
+                      <Input type="date" className="h-8 min-w-0" value={p.to ?? ""} onChange={(e) => setPromo(i, { to: e.target.value || null })} />
+                    </label>
+                  </div>
+                  {state === "EXPIRED" ? <p className="text-xs font-medium text-amber-700 dark:text-amber-400">Đã hết hạn — bot không nhắc nữa.</p> : null}
+                  {state === "UPCOMING" ? <p className="text-xs text-muted-foreground">Chưa tới ngày bắt đầu — bot chưa nhắc.</p> : null}
+                </div>
+              );
+            })}
+            <Button type="button" size="sm" variant="outline" disabled={c.promotions.length >= KL.promotions} onClick={() => set("promotions", [...c.promotions, { title: "", content: "", from: null, to: null }])}>
+              <Plus className="size-4" /> Thêm khuyến mãi
+            </Button>
+            <p className="text-xs text-muted-foreground">Chỉ là lời giới thiệu bot nói với khách. Số tiền trên đơn vẫn do giá sản phẩm, miễn ship và «giảm theo khối lượng» ở trên quyết định — bot không tự trừ tiền theo chữ ở đây. Hết ngày kết thúc (giờ Việt Nam) ⇒ bot tự thôi nhắc.</p>
+          </fieldset>
           <fieldset className="space-y-1.5 rounded-lg border p-3">
             <legend className="px-1 text-sm font-medium">Thông tin sản phẩm bot được đọc</legend>
             {fields.length === 0 ? <p className="text-xs text-muted-foreground">{shell ? "Sản phẩm chưa có thông tin bổ sung nào (mẫu «Thực phẩm đóng gói» có sẵn quy cách, bảo quản…)." : "Sản phẩm chưa có field tuỳ biến nào (mẫu «Thực phẩm đóng gói» có sẵn quy cách, bảo quản…)."}</p> : null}

@@ -186,6 +186,7 @@ const MOI = [
   "0236_meta_conversion_events",
   "0237_saas_ops_signals",
   "0238_variant_add_on_only",
+  "0239_sales_chat_reads",
 ] as const;
 
 /*
@@ -384,6 +385,16 @@ export async function testMigrationUpgradePath() {
     await client.query(`insert into platform_org_health (org_code, check_key, level) values ('up-o', 'SEND', 'OK')`);
     await assert.rejects(client.query(`insert into platform_org_health (org_code, check_key, level) values ('up-o', 'SEND', 'WARNING')`), "bước 2: 0237 — một dòng mỗi (tổ chức, kiểm)");
     await client.query(`delete from platform_org_health where org_code = 'up-o'`);
+
+    // 0239 (con trỏ đọc theo người của hộp thư): bảng mới RỖNG (không backfill — chưa có dòng ⇒ hộp thư lùi về mốc chung cũ); một
+    // dòng mỗi (hội thoại, người); xoá hội thoại thì con trỏ đi theo.
+    assert.equal(await dem("select count(*)::int as n from sales_chat_reads"), 0, "bước 2: 0239 không gieo con trỏ đọc nào");
+    assert.equal(await dem("select count(*)::int as n from pg_indexes where indexname = 'sales_chat_inbound_thread_created_idx'"), 1, "bước 2: 0239 thêm chỉ mục (luồng, mốc) cho tin khách sau con trỏ");
+    await client.query(`insert into sales_chat_conversations (id, channel) values ('up-scr', 'WEB')`);
+    await client.query(`insert into sales_chat_reads (conversation_id, user_id, read_through_at) values ('up-scr', 'u1', now())`);
+    await assert.rejects(client.query(`insert into sales_chat_reads (conversation_id, user_id, read_through_at) values ('up-scr', 'u1', now())`), "bước 2: 0239 — một con trỏ mỗi (hội thoại, người)");
+    await client.query(`delete from sales_chat_conversations where id = 'up-scr'`);
+    assert.equal(await dem("select count(*)::int as n from sales_chat_reads"), 0, "bước 2: 0239 — xoá hội thoại thì con trỏ đi theo");
 
     // 0178 (G-ORDER — phiếu giao có ký nhận của đơn tạo tay): bảng mới RỖNG (không đoán đơn nào "đã giao" — mục 8.8, 35);
     // CHECK chỉ nhận đơn `erp-`, bắt buộc tên người ký, huỷ phải có lý do; một phiếu còn hiệu lực mỗi đơn.

@@ -89,6 +89,7 @@ import { additionalNeed, lockVariants, shortfalls, type StockTx } from "@/lib/co
 import { getSettingJson, setSettingJson } from "@/lib/settings";
 import { normalizeCustomerPhone } from "@/lib/records/customer-create";
 import { normalizePhone as pancakePhone } from "@/lib/integrations/http";
+import { orderCancellationOf, withCancelOutcome, type CancelActor, type CancelRequester, type RescueResult } from "@/lib/constants/order-cancel";
 import { canFlagOrderForReview, orderReviewOf, reviewConflictMessage, unseenReviewEntries, withCustomerReconfirm, withReviewEntry, withReviewResolved, type OrderReviewEntry, type OrderReviewResolution, type ReviewSeen } from "@/lib/constants/order-review";
 
 export type OrderGate = { allowed: true } | { allowed: false; code: "FORBIDDEN" | "NOT_SUPPORTED" | "MODULE_DISABLED"; reason: string };
@@ -728,7 +729,31 @@ export async function cancelManualOrderCore(user: SessionUser, orderId: unknown,
   return cancelOrder(userWriter(user), orderId, rawInput);
 }
 
-async function cancelOrder(w: Writer, orderId: unknown, rawInput: unknown): Promise<ManualOrderResult> {
+/**
+ * MÁY huỷ đơn khi KHÁCH đã chốt huỷ sau lượt giữ đơn (chủ shop 10/10/2026 — `lib/records/order-cancel.ts` quyết ĐƯỢC huỷ chưa theo
+ * vòng đời vận đơn; hàm này chỉ GHI). Cùng lõi với nút «Huỷ đơn» của người: cổng tổ chức, chặn đơn còn lần gửi giữ đơn, một giao
+ * dịch (stage + lịch sử + `order.cancelled`), nhật ký `ORDER_MANUAL_CANCEL` mang tác nhân MÁY (luật 36). `cancellation` = lời khai
+ * huỷ (yêu cầu, lượt giữ đơn) đã có trên đơn được GIỮ và ghi thêm kết cục. Đơn vừa bị huỷ bởi lượt khác ⇒ `reused: true`, không
+ * ghi gì thêm (tin / webhook trùng).
+ */
+export async function cancelOrderAsAgent(agent: OrderAgent, orderId: unknown, rawInput: unknown, cancellation: { actorKind: "AI" | "SYSTEM"; requestedBy: CancelRequester; conversationId?: string | null; quote?: string | null; rescue?: RescueResult }): Promise<ManualOrderResult> {
+  const gate = await manualOrderOrgGate();
+  if (!gate.allowed) return fail(gate.code, gate.reason);
+  return cancelOrder(agentWriter(agent), orderId, rawInput, cancellation);
+}
+
+/** Đơn đã ở «Đã huỷ» lúc khoá dòng — lượt khác vừa huỷ xong. Ném để thoát giao dịch, trả `reused`. */
+class AlreadyCancelledError extends Error {}
+/** Lần gửi vừa được tạo giữa lúc kiểm và lúc ghi ⇒ không huỷ đơn đang có vận đơn (CONFLICT như `loadEditable`). */
+class AttemptAppearedError extends Error {}
+
+async function cancelOrder(w: Writer, orderId: unknown, rawInput: unknown, agentCancel?: { actorKind: "AI" | "SYSTEM"; requestedBy: CancelRequester; conversationId?: string | null; quote?: string | null; rescue?: RescueResult }): Promise<ManualOrderResult> {
+  // Bấm hai lần / tin trùng: đơn đã huỷ ⇒ không ghi gì (mục 61). Người bấm vẫn nhận câu cũ «Đơn đã huỷ».
+  if (agentCancel && typeof orderId === "string") {
+    const db0 = await getDb();
+    const [st] = await db0.select({ stage: schema.orders.stage }).from(schema.orders).where(eq(schema.orders.id, orderId)).limit(1);
+    if (st?.stage === "CANCELLED") return { ok: true, id: orderId, reused: true };
+  }
   const existing = await loadEditable(orderId);
   if (!existing.ok) return existing;
   const parsed = cancelZ.safeParse(rawInput);
@@ -739,13 +764,37 @@ async function cancelOrder(w: Writer, orderId: unknown, rawInput: unknown): Prom
   // Đơn đang mang cờ CẦN NGƯỜI KIỂM (khách báo huỷ · địa chỉ chưa ghép) ⇒ lượt huỷ này CHÍNH LÀ quyết định của người: gỡ cờ, ghi vết.
   // Dựng từ dòng ĐÃ KHOÁ — cờ gắn sau lúc người mở trang vẫn vào vết, không biến mất.
   let resolved: { raw: Record<string, unknown>; changed: boolean; resolved: OrderReviewEntry[] } = { raw: {}, changed: false, resolved: [] };
-  await db.transaction(async (tx) => {
-    resolved = withReviewResolved(await lockOrderRaw(tx, row.id), { action: "CANCELLED", at: now.toISOString(), byUserId: w.userId, byName: w.name });
-    await tx.update(schema.orders).set({ stage: "CANCELLED", status: MANUAL_ORDER_STATUS_CODE.CANCELLED, statusName: manualOrderStageLabel("CANCELLED"), ...(resolved.changed ? { raw: resolved.raw } : {}), lastUpdateStatusAt: now, updatedAt: now }).where(eq(schema.orders.id, row.id));
-    await tx.insert(schema.orderStatusHistory).values({ orderId: row.id, status: MANUAL_ORDER_STATUS_CODE.CANCELLED, oldStatus: row.status, editorName: w.name, updatedAt: now });
-    await emitOrderEvent(tx, w, "order.cancelled", row.id, `order.cancelled:${row.id}`, { stage: "CANCELLED", wasConfirmed: row.stage === "CONFIRMED", changes: ["stage"], reason: parsed.data.reason });
-  });
-  await audit({ userId: w.userId, userEmail: w.email, actorKind: w.actorKind === "AGENT" ? "AGENT" : undefined, action: "ORDER_MANUAL_CANCEL", entity: "ORDER", entityId: row.id, before: { stage: row.stage }, after: { stage: "CANCELLED" }, reason: parsed.data.reason });
+  const actor: CancelActor = agentCancel ? { kind: agentCancel.actorKind, userId: null, name: w.name } : { kind: "HUMAN", userId: w.userId, name: w.name };
+  try {
+    await db.transaction(async (tx) => {
+      // KHOÁ dòng rồi đọc lại stage: hai lượt huỷ song song (tin trùng, webhook trùng, bấm hai lần) ⇒ lượt sau thấy «Đã huỷ».
+      const [locked] = await tx.select({ stage: schema.orders.stage, raw: schema.orders.raw }).from(schema.orders).where(eq(schema.orders.id, row.id)).limit(1).for("update");
+      if (!locked || locked.stage === "CANCELLED") throw new AlreadyCancelledError();
+      // Lần gửi tạo giữa lúc `loadEditable` đọc và lúc này (job tự tạo vận đơn) ⇒ không huỷ đơn đang có vận đơn.
+      const attempts = await tx.select({ stage: schema.shipments.stage, raw: schema.shipments.raw }).from(schema.shipments).where(eq(schema.shipments.orderId, row.id));
+      if (attempts.some((a) => attemptHoldsOrder(a))) throw new AttemptAppearedError();
+      const lockedRaw = (locked.raw ?? {}) as Record<string, unknown>;
+      const hadCustomerFlag = orderReviewOf(lockedRaw)?.entries.some((e) => e.code === "CUSTOMER_CANCELLED" || e.code === "CANCEL_BLOCKED") ?? false;
+      resolved = withReviewResolved(lockedRaw, { action: "CANCELLED", at: now.toISOString(), byUserId: w.userId, byName: w.name });
+      // LỜI KHAI HUỶ (10/10/2026): ai yêu cầu · ai ghi · lý do · mốc — giữ yêu cầu / lượt giữ đơn đã có, thêm kết cục.
+      const withOutcome = withCancelOutcome(resolved.raw, {
+        status: "CANCELLED",
+        at: now.toISOString(),
+        actor,
+        fallback: { requestedBy: agentCancel?.requestedBy ?? (hadCustomerFlag ? "CUSTOMER" : "HUMAN"), reason: parsed.data.reason, quote: agentCancel?.quote ?? null, conversationId: agentCancel?.conversationId ?? null, rescue: agentCancel?.rescue ?? "NOT_ATTEMPTED" },
+      });
+      const nextRaw = withOutcome.raw;
+      await tx.update(schema.orders).set({ stage: "CANCELLED", status: MANUAL_ORDER_STATUS_CODE.CANCELLED, statusName: manualOrderStageLabel("CANCELLED"), raw: nextRaw, lastUpdateStatusAt: now, updatedAt: now }).where(eq(schema.orders.id, row.id));
+      await tx.insert(schema.orderStatusHistory).values({ orderId: row.id, status: MANUAL_ORDER_STATUS_CODE.CANCELLED, oldStatus: row.status, editorName: w.name, updatedAt: now });
+      await emitOrderEvent(tx, w, "order.cancelled", row.id, `order.cancelled:${row.id}`, { stage: "CANCELLED", wasConfirmed: locked.stage === "CONFIRMED", changes: ["stage"], reason: parsed.data.reason, requestedBy: orderCancellationOf(nextRaw)?.requestedBy ?? null, actorKind: actor.kind });
+    });
+  } catch (error) {
+    if (error instanceof AlreadyCancelledError) return { ok: true, id: row.id, reused: true };
+    if (error instanceof AttemptAppearedError) return fail("CONFLICT", "Đơn vừa có vận đơn đang chạy ở đơn vị vận chuyển — huỷ vận đơn trước rồi mới huỷ đơn.");
+    throw error;
+  }
+  const c = orderCancellationOf((await db.select({ raw: schema.orders.raw }).from(schema.orders).where(eq(schema.orders.id, row.id)).limit(1))[0]?.raw);
+  await audit({ userId: w.userId, userEmail: w.email, actorKind: w.actorKind === "AGENT" ? "AGENT" : undefined, action: "ORDER_MANUAL_CANCEL", entity: "ORDER", entityId: row.id, before: { stage: row.stage }, after: { stage: "CANCELLED", cancellation: c }, reason: parsed.data.reason });
   if (resolved.changed) await auditReview(w, row.id, "RESOLVE", { entries: resolved.resolved, action: "CANCELLED" });
   await kickWorkflows();
   announceOrder(row.id, "updated");

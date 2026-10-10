@@ -51,25 +51,30 @@ import { setSettingJson } from "@/lib/settings";
 import { auditConversation, auditPatterns, hasPaymentImage, hasTail, isCustomerMessage, LIFECYCLE_DEFAULT_DAYS, parseLifecycleArgs, phonesLoose, phonesStrict, routeOf } from "@/scripts/sales-lifecycle-audit";
 import { runGoldenCases, say, tool, type GoldenCase } from "./sales-agent-golden/harness";
 
-const NO = { paymentVerified: false, orderConfirmed: false };
-const ALL = { paymentVerified: true, orderConfirmed: true };
+const NO = { paymentVerified: false, orderConfirmed: false, orderCancelled: false };
+const ALL = { paymentVerified: true, orderConfirmed: true, orderCancelled: true };
 
 function testTruthTable() {
-  const kinds: ClaimKind[][] = [[], ["PAYMENT_RECEIVED"], ["ORDER_CONFIRMED"], ["PAYMENT_RECEIVED", "ORDER_CONFIRMED"]];
+  const all: ClaimKind[] = ["PAYMENT_RECEIVED", "ORDER_CONFIRMED", "ORDER_CANCELLED"];
+  const kinds: ClaimKind[][] = [[], ...all.map((k) => [k]), ["PAYMENT_RECEIVED", "ORDER_CONFIRMED"], all];
+  const SAFE: Record<ClaimKind, string> = { PAYMENT_RECEIVED: CLAIM_SAFE_TEXT.PAYMENT, ORDER_CONFIRMED: CLAIM_SAFE_TEXT.ORDER, ORDER_CANCELLED: CLAIM_SAFE_TEXT.CANCEL };
   for (const claims of kinds)
     for (const paymentVerified of [false, true])
-      for (const orderConfirmed of [false, true]) {
-        const v = claimVerdict(claims, { paymentVerified, orderConfirmed });
-        const shouldPass = (!claims.includes("PAYMENT_RECEIVED") || paymentVerified) && (!claims.includes("ORDER_CONFIRMED") || orderConfirmed);
-        assert.equal(v.ok, shouldPass, `khẳng định ${JSON.stringify(claims)} · tiền ${paymentVerified} · đơn ${orderConfirmed}`);
-        if (!v.ok) {
-          assert.equal(v.safeText, v.claim === "PAYMENT_RECEIVED" ? CLAIM_SAFE_TEXT.PAYMENT : CLAIM_SAFE_TEXT.ORDER);
-          assert.equal(v.handoffReason, CLAIM_HANDOFF_REASON[v.claim]);
+      for (const orderConfirmed of [false, true])
+        for (const orderCancelled of [false, true]) {
+          const v = claimVerdict(claims, { paymentVerified, orderConfirmed, orderCancelled });
+          const shouldPass = (!claims.includes("PAYMENT_RECEIVED") || paymentVerified) && (!claims.includes("ORDER_CONFIRMED") || orderConfirmed) && (!claims.includes("ORDER_CANCELLED") || orderCancelled);
+          assert.equal(v.ok, shouldPass, `khẳng định ${JSON.stringify(claims)} · tiền ${paymentVerified} · đơn ${orderConfirmed} · huỷ ${orderCancelled}`);
+          if (!v.ok) {
+            assert.equal(v.safeText, SAFE[v.claim]);
+            assert.equal(v.handoffReason, CLAIM_HANDOFF_REASON[v.claim]);
+          }
         }
-      }
   // Có đơn KHÔNG mở khoá câu tiền: chiều tiền và chiều đơn không suy ra nhau (AGENTS 0.1).
-  assert.equal(guardClaims("Dạ shop đã nhận được tiền của chị rồi ạ", { paymentVerified: false, orderConfirmed: true }).ok, false, "có đơn ≠ đã nhận tiền");
-  assert.equal(guardClaims("Dạ em chốt đơn cho chị rồi ạ", { paymentVerified: true, orderConfirmed: false }).ok, false, "có tiền ≠ có đơn");
+  assert.equal(guardClaims("Dạ shop đã nhận được tiền của chị rồi ạ", { ...NO, orderConfirmed: true }).ok, false, "có đơn ≠ đã nhận tiền");
+  assert.equal(guardClaims("Dạ em chốt đơn cho chị rồi ạ", { ...NO, paymentVerified: true }).ok, false, "có tiền ≠ có đơn");
+  assert.equal(guardClaims("Dạ shop đã huỷ đơn theo yêu cầu của chị ạ", { ...NO, orderConfirmed: true }).ok, false, "có đơn ≠ đã huỷ: chỉ cancel_order cancelled = true mở câu «đã huỷ»");
+  assert.equal(guardClaims("Dạ shop đã huỷ đơn theo yêu cầu của chị ạ", { ...NO, orderCancelled: true }).ok, true);
 }
 
 function testDetect() {
@@ -93,6 +98,8 @@ function testDetect() {
     "Em đã chốt đơn cho mình rồi nhé",
   ];
   for (const s of order) assert.deepEqual(detectClaims(s), ["ORDER_CONFIRMED"], `phải nhận ra khẳng định ĐƠN: «${s}»`);
+  for (const s of ["Dạ em huỷ đơn cho chị rồi ạ", "Dạ shop đã huỷ đơn theo yêu cầu của chị ạ", "Đơn của chị đã được hủy rồi ạ", "da huy don roi nha chi"])
+    assert.deepEqual(detectClaims(s), ["ORDER_CANCELLED"], `phải nhận ra khẳng định HUỶ: «${s}»`);
   const none = [
     "Em chốt đơn cho mình nhé?",
     "Em chốt đơn cho mình nhé",
@@ -113,13 +120,17 @@ function testDetect() {
     "Dạ đơn của mình: Chả mực × 2. Ship 30k. Tổng thu 830k. Mình lấy thêm gì không, không thì em giao luôn ạ?",
     "Dạ mình xác nhận giúp em là chốt đơn này để em giao nhé?",
     "Dạ em chuyển anh sang nhân viên phụ trách khách sỉ ạ.",
+    "Em huỷ đơn cho chị nhé?",
+    "Dạ chị muốn huỷ đơn ạ, chị cho em hỏi lý do được không?",
+    "ĐƠN CHƯA HUỶ, chị cho em hỏi lý do ạ",
+    "Dạ shop ghi nhận, nhân viên sẽ xử lý ạ.",
     ...Object.values(CLAIM_SAFE_TEXT),
   ];
   for (const s of none) assert.deepEqual(detectClaims(s), [], `KHÔNG được coi là khẳng định: «${s}»`);
   // Câu khác không bị chặn nhầm ngay cả khi chưa có căn cứ nào.
   assert.equal(guardClaims("Dạ em đã nhận được thông tin của chị", NO).ok, true);
   // «shop đã nhận đơn từ hôm qua» khi CÓ đơn ⇒ qua.
-  assert.equal(guardClaims("Shop đã nhận đơn từ hôm qua ạ", { paymentVerified: false, orderConfirmed: true }).ok, true);
+  assert.equal(guardClaims("Shop đã nhận đơn từ hôm qua ạ", { ...NO, orderConfirmed: true }).ok, true);
   assert.equal(guardClaims("Dạ shop đã nhận được tiền rồi ạ", ALL).ok, true, "chứng từ thu đủ ⇒ câu tiền qua");
 }
 
@@ -141,6 +152,7 @@ async function testCustomerSignal() {
   assert.equal(classifyHandoffReason(CLAIM_HANDOFF_REASON.PAYMENT_TEXT), "PAYMENT_REVIEW");
   assert.equal(classifyHandoffReason(CLAIM_HANDOFF_REASON.PAYMENT_RECEIVED), "UNVERIFIED_CLAIM");
   assert.equal(classifyHandoffReason(CLAIM_HANDOFF_REASON.ORDER_CONFIRMED), "UNVERIFIED_CLAIM");
+  assert.equal(classifyHandoffReason(CLAIM_HANDOFF_REASON.ORDER_CANCELLED), "UNVERIFIED_CLAIM");
   // Câu mẫu KHÔNG chạy khi khách báo đã trả (trả SKIP trước khi đọc câu mẫu nào ⇒ bước AI chọn mã cũng không chạy).
   for (const s of [line, "chị ck rồi nhé"]) {
     const q = await quickReplyByKeyword(s, { ordering: false, cfg: { shippingFee: null } });
@@ -218,6 +230,10 @@ function testSourceScan() {
   // (c) Chữ model qua hàng rào SAU bộ lọc suy luận, TRƯỚC khi ghi.
   const loop = core.slice(core.indexOf("const g = customerFacingText(b.text);"), core.indexOf('history.push({ role: "assistant"'));
   assert.ok(loop.includes("guardOutgoing(out"), "chữ model qua guardOutgoing trước khi ghi");
+  // Hai cơ chế giữ chữ là MỘT đường: chữ cùng tin với cancel_order / mark_declined bỏ hẳn (#786) TRƯỚC hàng rào, mọi chữ còn lại qua hàng rào.
+  const loopFull = core.slice(core.indexOf("const holdText = "), core.indexOf('history.push({ role: "assistant"'));
+  const holdAt = loopFull.indexOf("if (holdText) continue;");
+  assert.ok(holdAt > 0 && holdAt < loopFull.indexOf("guardOutgoing(out"), "chữ kèm lời gọi huỷ bị giữ TRƯỚC hàng rào khẳng định, trong cùng vòng lặp");
   // (d) Câu mẫu gửi qua công cụ `send_quick_reply`.
   const dl = core.slice(core.indexOf("state = r.state;"), core.indexOf("deliveredText = deliver.text"));
   assert.ok(dl.includes("guardOutgoing(r.deliver.text"), "câu mẫu qua công cụ qua guardOutgoing");
@@ -376,7 +392,7 @@ async function testIntegration() {
       assert.deepEqual(transcript.turns[1].shown, ["Dạ em lên đơn cho mình rồi ạ."], "câu «đã lên đơn» SAU khi chốt thành công được gửi");
       const orderId = row.orderId!;
       const f0 = await claimFactsLoader(conv)(state);
-      assert.deepEqual(f0, { paymentVerified: false, orderConfirmed: true }, "đơn chốt ⇒ có đơn; CHƯA có chứng từ thu ⇒ tiền chưa xác minh");
+      assert.deepEqual(f0, { paymentVerified: false, orderConfirmed: true, orderCancelled: false }, "đơn chốt ⇒ có đơn; CHƯA có chứng từ thu ⇒ tiền chưa xác minh");
       assert.equal((await guardOutgoing("Dạ shop đã nhận được tiền của chị rồi ạ", () => claimFactsLoader(conv)(state))).ok, false, "chưa có chứng từ ⇒ chặn câu tiền");
       assert.equal((await guardOutgoing("Shop đã nhận đơn từ hôm qua ạ", () => claimFactsLoader(conv)(state))).ok, true, "có đơn ⇒ «đã nhận đơn» qua");
       const [o] = await db.select().from(schema.orders).where(eq(schema.orders.id, orderId));
@@ -388,7 +404,7 @@ async function testIntegration() {
       assert.equal((await claimFactsLoader(conv)(state)).paymentVerified, false, "thu một phần ⇒ chưa xác minh");
       const rest = await recordManualPaymentCore(admin, orderId, { kind: "RECEIPT", method: "BANK_TRANSFER", amount: due - Math.floor(due / 2), paidAt: new Date().toISOString() });
       assert.ok(rest.ok, JSON.stringify(rest));
-      assert.deepEqual(await claimFactsLoader(conv)(state), ALL, "chứng từ thu đủ số (nhân viên ghi) ⇒ tiền đã xác minh");
+      assert.deepEqual(await claimFactsLoader(conv)(state), { ...ALL, orderCancelled: false }, "chứng từ thu đủ số (nhân viên ghi) ⇒ tiền đã xác minh");
       assert.equal((await guardOutgoing("Dạ shop đã nhận được tiền của chị rồi ạ", () => claimFactsLoader(conv)(state))).ok, true, "đủ chứng từ ⇒ câu tiền qua");
       // Ops PR-L0 chạy được trên CSDL tổ chức thật (câu SQL đúng) và chỉ in số đếm / đúng-sai.
       const printed: string[] = [];

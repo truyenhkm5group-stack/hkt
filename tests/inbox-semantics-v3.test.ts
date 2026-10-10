@@ -25,6 +25,7 @@ import { TAKEOVER_REASON } from "@/lib/sales-chatbot/conversation-control-shared
 import { fanpageVisitorKey, PAGE_REPLY } from "@/lib/sales-chatbot/fanpage";
 import { HISTORY_CREATED_BY } from "@/lib/sales-chatbot/history-shared";
 import { assignConversationCore, claimConversationCore, inboxPeriodRange, listInbox, loadInboxThread } from "@/lib/sales-chatbot/inbox";
+import { markInboxReadCore } from "@/lib/sales-chatbot/inbox-read";
 import { createLabelCore, setConversationLabelsCore } from "@/lib/sales-chatbot/inbox-labels";
 import { INBOX_FILTERS, inboxRowStatus, type InboxFilter, type InboxPeriod, type InboxRow } from "@/lib/sales-chatbot/inbox-shared";
 import { classifyInboxState, inboxHandlingFrom, ORDER_UNDER_REVIEW_SQL, PAGE_REPLY_AFTER_CUSTOMER_SQL, WEB_STAFF_REASON, type HumanHandling, type InboxReplying, type NeedsHumanCode } from "@/lib/sales-chatbot/inbox-states";
@@ -230,7 +231,9 @@ export async function testInboxSemanticsV3() {
       const s01 = await rowOf("s01");
       assert.ok(s01.unread && s01.unreadCount === 1, `AI trả lời thêm ⇒ VẪN chưa đọc, bộ đếm giữ nguyên: ${JSON.stringify({ u: s01.unread, n: s01.unreadCount })}`);
       const opened = await loadInboxThread(admin, "s01", now);
-      assert.ok(opened.ok);
+      assert.ok(opened.ok && opened.thread.readThrough, "khung chat mang tin khách cuối cùng để đánh dấu đọc");
+      assert.equal((await rowOf("s01")).unread, true, "NẠP khung chat không đánh dấu đọc (P0.3 — đọc tách khỏi nạp)");
+      assert.ok((await markInboxReadCore(admin, "s01", opened.thread.readThrough.id)).ok, "đánh dấu đọc tới đúng tin khách đã hiện");
       const s01b = await rowOf("s01");
       assert.ok(!s01b.unread && s01b.unreadCount === 0, "mở hội thoại ⇒ đã đọc, bộ đếm 0");
       const after = await orderNow();

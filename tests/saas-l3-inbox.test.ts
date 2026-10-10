@@ -55,6 +55,7 @@ import { humanCooldownMinutes, setHumanCooldownMinutesCore } from "@/lib/sales-c
 import { setSalesChatProviderForTests } from "@/lib/sales-chatbot/engine";
 import { catchUpFanpage, parsePancakeWebhook, processFanpageThread, receiveFanpageEvent, type FanpageEvent } from "@/lib/sales-chatbot/fanpage";
 import { inboxSourceOf, listInbox, loadInboxThread, sendStaffReplyCore } from "@/lib/sales-chatbot/inbox";
+import { markInboxReadCore } from "@/lib/sales-chatbot/inbox-read";
 import { INBOX_FILTERS, safeAvatarUrl, unreadBadge } from "@/lib/sales-chatbot/inbox-shared";
 import { classifyInboxState, inboxHandlingFrom, type InboxStateInput } from "@/lib/sales-chatbot/inbox-states";
 import { OPERATING_MODE_SETTING_KEY } from "@/lib/sales-chatbot/operating-mode-shared";
@@ -596,7 +597,10 @@ async function testFlow(backfillStmts: readonly string[]) {
       };
       let ru = await rowU();
       assert.ok(ru.unread && ru.unreadCount === 3 && ru.source === "DIRECT" && ru.pageId === PAGE_M, `ba tin chưa đọc: ${JSON.stringify({ u: ru.unread, n: ru.unreadCount, s: ru.source })}`);
-      assert.ok((await loadInboxThread(lan, convU)).ok);
+      // Đọc tách khỏi nạp (P0.3, 10/10/2026 tối): nhân viên trả lời được đánh dấu đọc ⇒ con trỏ riêng của họ + mốc chung (chỗ lùi của
+      // người chưa có con trỏ riêng — chủ shop ở đây) tới ĐÚNG tin khách cuối cùng đã hiện.
+      const openedU = await loadInboxThread(lan, convU);
+      assert.ok(openedU.ok && openedU.thread.readThrough && (await markInboxReadCore(lan, convU, openedU.thread.readThrough.id)).ok);
       ru = await rowU();
       assert.ok(!ru.unread && ru.unreadCount === 0, "mở hội thoại ⇒ 0");
       await receiveMessengerEvent(mev(sU, "u.3", "Shop ơi"));

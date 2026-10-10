@@ -10,8 +10,8 @@
  *  1. `paymentSignalInCustomerText` — tin KHÁCH có dấu hiệu đã trả tiền (dòng ảnh chuyển khoản do máy đọc ảnh ghi, hoặc
  *     «ck rồi» / «đã chuyển khoản»). Đó là LỜI KHÁCH, không bao giờ là bằng chứng tiền đã về (AGENTS 0.1 — tiền đi theo
  *     chứng từ). Máy chủ chuyển người ngay, không đợi model tự gọi `handoff_to_human`; câu mẫu không chạy.
- *  2. `detectClaims` / `guardClaims` — câu của BOT khẳng định «đã nhận tiền / thanh toán xong» hoặc «đã chốt đơn / đơn đã xác
- *     nhận». Chỉ bắt câu KHẲNG ĐỊNH: câu hỏi, câu đề nghị («em chốt đơn cho mình nhé?»), câu phủ định / điều kiện («khi nhận
+ *  2. `detectClaims` / `guardClaims` — câu của BOT khẳng định «đã nhận tiền / thanh toán xong», «đã chốt đơn / đơn đã xác
+ *     nhận» hoặc «đã huỷ đơn» (căn cứ: cancel_order trả cancelled = true). Chỉ bắt câu KHẲNG ĐỊNH: câu hỏi, câu đề nghị («em chốt đơn cho mình nhé?»), câu phủ định / điều kiện («khi nhận
  *     được tiền em báo») đi qua — chặn quá tay thì bot im giữa lúc bán.
  *  3. `claimFactsLoader` — đọc ERP để quyết câu khẳng định có căn cứ không:
  *       · TIỀN đã xác minh ⇔ đơn tạo tay nối với hội thoại có chứng từ thu `order_payments` CONFIRMED đủ số
@@ -45,6 +45,8 @@ export const CLAIM_SAFE_TEXT = {
   PAYMENT: "Dạ em ghi nhận thông tin anh/chị gửi, em chuyển nhân viên kiểm tra giúp mình ngay ạ.",
   /** Bot định nói đã chốt đơn mà chưa có đơn. */
   ORDER: "Dạ em đang hoàn tất đơn, anh/chị chờ em xác nhận lại nhé.",
+  /** Bot định nói đã huỷ đơn mà lõi đơn chưa huỷ (cancel_order chưa trả cancelled = true). */
+  CANCEL: "Dạ em ghi nhận yêu cầu của mình, em chuyển nhân viên kiểm tra đơn giúp mình ngay ạ.",
 } as const;
 
 /** Lý do chuyển người — tiền tố `classifyHandoffReason` đọc (events-shared.ts) để đếm theo nhóm. */
@@ -53,13 +55,15 @@ export const CLAIM_HANDOFF_REASON = {
   PAYMENT_TEXT: "Khách báo đã chuyển khoản — cần nhân viên đối soát (bot không xác nhận tiền)",
   PAYMENT_RECEIVED: "AI định khẳng định đã nhận tiền khi chưa có chứng từ thu — đã chặn câu, nhân viên đối soát",
   ORDER_CONFIRMED: "AI định khẳng định đã chốt đơn khi chưa có đơn ERP — đã chặn câu, nhân viên kiểm đơn",
+  ORDER_CANCELLED: "AI định khẳng định đã huỷ đơn khi lõi đơn chưa huỷ — đã chặn câu, nhân viên kiểm đơn",
 } as const;
 
 // ═══ PHẦN THUẦN ═══
 
 export type PaymentSignal = "IMAGE" | "TEXT";
-export type ClaimKind = "PAYMENT_RECEIVED" | "ORDER_CONFIRMED";
-export type ClaimFacts = { paymentVerified: boolean; orderConfirmed: boolean };
+export type ClaimKind = "PAYMENT_RECEIVED" | "ORDER_CONFIRMED" | "ORDER_CANCELLED";
+/** `orderCancelled` = công cụ `cancel_order` đã trả cancelled = true trong hội thoại (`state.cancelledOrders`, ghi SAU khi lõi đơn huỷ xong — #786). */
+export type ClaimFacts = { paymentVerified: boolean; orderConfirmed: boolean; orderCancelled: boolean };
 export type ClaimVerdict = { ok: true } | { ok: false; claim: ClaimKind; safeText: string; handoffReason: string; note: string };
 
 /** Ảnh có dấu hiệu chứng từ thanh toán — đọc trên MÔ TẢ của máy đọc ảnh (đã bỏ dấu). */
@@ -142,6 +146,10 @@ const CLAIM_RULES: readonly ClaimRule[] = [
   { kind: "ORDER_CONFIRMED", re: /\bdon(?:\s+hang)?(?:\s+cua\s+(?:minh|chi|anh|ban|em|c|a))?\s+(?:da\s+|vua\s+)?(?:duoc\s+)?(?:chot|xac nhan|len|tao|ghi nhan)\b/, needsDone: true, allowProposal: false },
   // «em đã xác nhận đơn» — chỉ khi đã xong («em xác nhận lại đơn: …» là đọc tóm tắt)
   { kind: "ORDER_CONFIRMED", re: /\bxac nhan\s+(?:lai\s+)?don\b/, needsDone: true, allowProposal: true },
+  // «em / shop đã huỷ đơn» · «đơn của chị đã được huỷ» — chỉ khi đã xong («em huỷ đơn cho chị nhé» là đề nghị; «ĐƠN CHƯA HUỶ» bị
+  // phủ định chặn). Căn cứ duy nhất: cancel_order trả cancelled = true (#786 — «đã huỷ» chỉ đúng khi lõi đơn ghi xong).
+  { kind: "ORDER_CANCELLED", re: /\b(?:(?:em|shop|ben em|ben shop)\s+(?:da\s+|vua\s+)?huy\s+(?:don|giup|cho)|(?:da|vua)\s+huy\s+don)\b/, needsDone: true, allowProposal: true },
+  { kind: "ORDER_CANCELLED", re: /\bdon(?:\s+hang)?(?:\s+cua\s+(?:minh|chi|anh|ban|em|c|a))?\s+(?:da\s+|vua\s+)?(?:duoc\s+)?huy\b/, needsDone: true, allowProposal: false },
   // «shop đã nhận đơn / em nhận được đơn của chị» — «shop nhận đơn tới 17h» là chính sách, không phải khẳng định
   { kind: "ORDER_CONFIRMED", re: /\b(?:em|shop|ben em|ben shop)\s+(?:da\s+)?nhan\s+(duoc\s+)?don\b/, needsDone: (m) => !m[1], allowProposal: true },
 ];
@@ -178,6 +186,9 @@ export function claimVerdict(claims: readonly ClaimKind[], facts: ClaimFacts): C
   if (claims.includes("ORDER_CONFIRMED") && !facts.orderConfirmed) {
     return { ok: false, claim: "ORDER_CONFIRMED", safeText: CLAIM_SAFE_TEXT.ORDER, handoffReason: CLAIM_HANDOFF_REASON.ORDER_CONFIRMED, note: "Đã chặn câu AI khẳng định đã chốt đơn — chưa có đơn ERP" };
   }
+  if (claims.includes("ORDER_CANCELLED") && !facts.orderCancelled) {
+    return { ok: false, claim: "ORDER_CANCELLED", safeText: CLAIM_SAFE_TEXT.CANCEL, handoffReason: CLAIM_HANDOFF_REASON.ORDER_CANCELLED, note: "Đã chặn câu AI khẳng định đã huỷ đơn — lõi đơn chưa huỷ" };
+  }
   return { ok: true };
 }
 
@@ -192,7 +203,7 @@ export function guardClaims(text: string, facts: ClaimFacts): ClaimVerdict {
 export async function guardOutgoing(text: string, facts: () => Promise<ClaimFacts>): Promise<ClaimVerdict> {
   const claims = detectClaims(text);
   if (!claims.length) return { ok: true };
-  const f = await facts().catch((): ClaimFacts => ({ paymentVerified: false, orderConfirmed: false }));
+  const f = await facts().catch((): ClaimFacts => ({ paymentVerified: false, orderConfirmed: false, orderCancelled: false }));
   return claimVerdict(claims, f);
 }
 
@@ -250,7 +261,7 @@ export function claimFactsLoader(conv: ClaimConversation): (state: ChatState) =>
     const r = await db;
     const botDraft = !state.confirmed ? (state.draft?.orderId ?? null) : null;
     const liveOrders = r.orders.filter((o) => !(o.id === botDraft && o.stage === "NEW"));
-    return { paymentVerified: liveOrders.some((o) => r.paidOrderIds.has(o.id)), orderConfirmed: Boolean(state.confirmed) || liveOrders.length > 0 };
+    return { paymentVerified: liveOrders.some((o) => r.paidOrderIds.has(o.id)), orderConfirmed: Boolean(state.confirmed) || liveOrders.length > 0, orderCancelled: Boolean(state.cancelledOrders?.length) };
   };
 }
 

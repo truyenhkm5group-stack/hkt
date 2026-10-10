@@ -140,8 +140,10 @@ async function classifyCandidates(deps: BulkDeps): Promise<{ list: Candidate[]; 
     const name = customerName || (typeof st.customer?.name === "string" && st.customer.name) || "Khách";
     const blocks: Candidate["blocks"] = [];
     if (orgCopilot) blocks.push({ code: "ORG_COPILOT", detail: null });
-    if (codes?.has("CUSTOMER_CANCELLED")) blocks.push({ code: "CUSTOMER_CANCELLED", detail: null });
-    if (codes && [...codes].some((x) => x !== "CUSTOMER_CANCELLED")) blocks.push({ code: "ORDER_NEEDS_VERIFICATION", detail: null });
+    // «Máy không tự huỷ được» (CANCEL_BLOCKED, 10/10/2026) cũng là KHÁCH HUỶ — người quyết, không phải xác minh dữ liệu đơn.
+    const cancelCodes = new Set(["CUSTOMER_CANCELLED", "CANCEL_BLOCKED"]);
+    if (codes && [...codes].some((x) => cancelCodes.has(x))) blocks.push({ code: "CUSTOMER_CANCELLED", detail: null });
+    if (codes && [...codes].some((x) => !cancelCodes.has(x))) blocks.push({ code: "ORDER_NEEDS_VERIFICATION", detail: null });
     if (cls.needsHuman === "AI_HANDOFF") blocks.push({ code: "AI_HANDOFF", detail: row.handoffReason });
     if (cls.needsHuman === "AI_DOWN") blocks.push({ code: "AI_UNAVAILABLE", detail: row.handoffReason });
     // Cổng của đường xử lý (một phần đọc theo tổ chức, có đệm) — chỉ hỏi khi chưa có lý do chặn nào: thêm lý do không đổi kết luận.
