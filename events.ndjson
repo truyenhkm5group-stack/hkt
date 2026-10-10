@@ -1816,3 +1816,4 @@
 {"at":"2026-10-10T19:11:11.680Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MIGRATION_RESERVED","mission":"inbox-unread-perf","detail":"0243"}
 {"at":"2026-10-10T19:23:12.661Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"order-cancel-consistency","detail":"#786 @ ee21f87d136a → f63b9fa282c9 (MERGE_ISOLATED · HIGH · gates success)"}
 {"at":"2026-10-10T19:24:18.065Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DEPLOY_DISPATCHED","detail":"f63b9fa282c9 · run 38079641741 https://github.com/truyenhkm5group-stack/hkt/actions/runs/38079641741"}
+{"at":"2026-10-10T19:48:48.097Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"avatar-proxy","detail":"feat/avatar-proxy @ 896274d2573b · 1 lệnh kiểm thử"}
