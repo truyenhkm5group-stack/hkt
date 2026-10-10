@@ -642,6 +642,7 @@ import { testErpFormNames } from "./erp-form-names.test";
 import { testDetailPagesShell } from "./detail-pages-shell.test";
 import { testShellCopyR3 } from "./shell-copy-r3.test";
 import { testAiSalesSettingsV2 } from "./ai-sales-settings-v2.test";
+import { testSalesModelFallbackTenant } from "./sales-model-fallback-tenant.test";
 
 async function main() {
   await ensureMigrated();
@@ -3119,6 +3120,12 @@ async function main() {
   // AI Sales settings V2 (bề mặt 3 của VISIBLE_PRODUCT_FINISH_BOARD): ô trạng thái đầu trang — thiếu dữ kiện ⇒ «Chưa rõ», không «Đang chạy» —
   // một nút chính qua cổng vỏ; nhánh khách không nhận / không in khoá AI · model · tên hãng · chi phí USD. Thuần + quét mã nguồn.
   testAiSalesSettingsV2();
+  // Team Premium F2: dấu «model không dùng được» nhớ theo tổ chức + kết nối — khoá BYOK hỏng của shop A không lùi IM LẶNG
+  // model của shop B (hay của khoá nền tảng cùng tổ chức) về model mặc định; mỗi shop được báo lỗi của chính mình. Provider giả.
+  {
+    const r = await testSalesModelFallbackTenant();
+    assert.deepEqual(r.failed, [], `sales-model-fallback-tenant: ${r.failed.join(" · ")}`);
+  }
   // Nền tảng · phiên & RBAC (agent C): claim org, cổng module, platform:operate, đăng nhập theo tổ chức. Tự cấp
   // tổ chức `pr-` (CSDL riêng) và tự dọn; đứng cạnh bài ngữ cảnh vì cùng lý do.
   await testPlatformRbac();
