@@ -20,11 +20,11 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-10T17:09:38.547Z",
-  "updated_at": "2026-10-10T17:09:38.547Z",
-  "last_heartbeat": "2026-10-10T17:09:38.547Z",
+  "updated_at": "2026-10-10T17:18:45.493Z",
+  "last_heartbeat": "2026-10-10T17:18:45.493Z",
   "definition_of_done": [],
   "needs_owner": {
     "category": "APPROVAL_REQUIRED",
-    "action": "Chốt D1 chi của khách = ghi nhận hay tiền về · D2 AI_ASSISTED được bao nhiêu % công · D3 lãi gộp AI khi thiếu giá vốn · D4 tử số giá trị khách nhận · D5 giá trị giờ công · D6 phí thanh toán · D7 lead đủ điều kiện · D8 ngưỡng rủi ro rời bỏ · D9 cho phép điểm /100 không · D10 phân bổ hạ tầng · D11 tỷ giá giá vốn AI · D12 cửa sổ mặc định. V1 PR-1..PR-4 không cần chờ."
+    "action": "12 định nghĩa Trung tâm giá trị — hệ thống ĐANG CHẠY theo MẶC ĐỊNH TẠM, chủ shop chỉ cần đổi nếu không đồng ý. [CAO · hạn 13/10] D1 chi của khách = doanh thu ghi nhận (tiền về in cạnh) · D2 công AI_ASSISTED = chưa tính (in riêng, không cộng) · D3 thiếu giá vốn = UNKNOWN, cần độ phủ ≥80% mới in lãi gộp/bội số · D4 giá trị khách nhận = lãi gộp quy cho AI, tiết kiệm nhân sự in riêng. [TB · hạn 20/10] D5 giờ công = tổ chức tự khai (chưa khai ⇒ chưa đo) · D6 phí thanh toán = chưa đo (không đoán) · D7 lead đủ điều kiện = khách để lại SĐT · D8 rủi ro rời bỏ = bảng mã lý do, giảm sử dụng ≥50%. [THẤP · hạn 31/10] D9 không điểm /100, dùng mức + lý do · D10 không phân bổ hạ tầng về từng khách · D11 tỷ giá = nguồn hiện tại có ghi nhãn · D12 cửa sổ 30 ngày (90 cho bội số). Chi tiết: docs/saas/VALUE_CENTER.md (PR-1)."
   }
 }
