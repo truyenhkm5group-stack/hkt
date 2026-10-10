@@ -1738,3 +1738,4 @@
 {"at":"2026-10-10T17:59:32.702Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#787 @ 1a9e4095e566 · Diff nhỏ: khoá bộ đệm lỗi model = tổ chức:kết nối:nhà cung cấp:model, scope bắt buộc (thiếu là lỗi biên dịch), chỗ gọi duy nhất truyền org.code + key; không đổi hành vi khi không lỗi"}
 {"at":"2026-10-10T18:04:03.074Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"VERIFY_PASS","mission":"ai-sales-knowledge","detail":"PASS 521b81325e28ad95ea0e9373ebfed3094bad1782 2026-10-10T18:03:47.662Z"}
 {"at":"2026-10-10T18:04:23.276Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DONE","mission":"ai-sales-knowledge","detail":"production 521b81325e28 · deploy 38070021673 xanh · verify ĐẠT"}
+{"at":"2026-10-10T18:05:04.248Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"STATUS","mission":"ai-sales-knowledge","detail":"DONE → VERIFYING"}
