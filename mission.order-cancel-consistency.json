@@ -35,18 +35,18 @@
     "0241": "2026-10-10T15:54:15.479Z"
   },
   "created_at": "2026-10-10T15:53:45.955Z",
-  "updated_at": "2026-10-10T17:57:43.243Z",
-  "last_heartbeat": "2026-10-10T17:57:07.435Z",
+  "updated_at": "2026-10-10T18:14:49.044Z",
+  "last_heartbeat": "2026-10-10T18:14:49.044Z",
   "definition_of_done": [],
   "handoff": {
     "branch": "fix/order-cancel-consistency",
-    "sha": "943bfbce8ae31981690e7a402396cbc5cf68c318",
-    "at": "2026-10-10T17:57:07.435Z",
+    "sha": "8dfe430976f814e66814a279f0c986b2a8558d3a",
+    "at": "2026-10-10T18:14:49.044Z",
     "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
     "title": "P0 huỷ đơn nhất quán: khách huỷ sau rescue thất bại ⇒ CANCELLED thật (theo vòng đời vận đơn), AI chỉ báo đã huỷ sau khi ghi thành công, retry idempotent + hàng ngoại lệ, đối soát đơn bất nhất (case HSLC #189A435E)",
-    "summary": "Khách huỷ: công cụ cancel_order (giữ đơn trước, huỷ ở lượt sau), quyết định theo vòng đời vận đơn customerCancelPlan, AI chỉ nói đã huỷ khi cancelled=true, giữ chữ cùng tin với công cụ huỷ, ghi hỏng ⇒ ngoại lệ CANCEL_BLOCKED + cảnh báo, raw.cancellation + nhật ký, ops order-cancel-reconcile (chạy thử mặc định); không cần migration 0241",
+    "summary": "Khách huỷ theo vòng đời vận đơn (không đổi so với 943bfbce)",
     "tests": [
-      "npm test đầy đủ: TẤT CẢ KIỂM THỬ ĐẠT (EXIT 0) · tsc sạch · eslint các tệp sửa sạch · contract-order-outcome xanh không đổi kỳ vọng · order-cancel-consistency (chưa vận đơn/hãng xác nhận/từ chối/đứt mạng/đã lấy/giữ đơn được/thất bại/trùng-song song/ghi hỏng/ca #189A435E) · đột biến giữ chữ đỏ"
+      "như lượt trước + gộp main (#784 hộp thư V3): xung đột chỉ ở danh sách ops (giữ cả order-cancel-reconcile lẫn inbox-read-audit) · tsc sạch sau gộp"
     ]
   }
 }
