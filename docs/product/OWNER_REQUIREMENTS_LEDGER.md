@@ -45,9 +45,9 @@ thương mại đầu tiên HSLC). Mã đã cấp **không đổi**; yêu cầu 
 |---|---|
 | **TOTAL** | **127** |
 | DONE | 0 |
-| PRODUCTION_VERIFIED | 38 |
+| PRODUCTION_VERIFIED | 39 |
 | PARTIAL | 10 |
-| CODE_DONE_NOT_VERIFIED | 60 |
+| CODE_DONE_NOT_VERIFIED | 59 |
 | NOT_STARTED | 9 |
 | BLOCKED_OWNER | 6 |
 | BLOCKED_EXTERNAL | 4 |
@@ -178,7 +178,7 @@ lỗi · địa chỉ có cấu trúc» chỉ đếm MỘT lần ở `ORD-05` (b
 | IND-01 | Thuộc tính ngành | Thời trang → Size / Màu | Tổ chức thời trang (và nhà) giữ Size / Màu, ma trận Màu × Size | Nhà luôn `FASHION`; mẫu `fashion-commerce` ⇒ FASHION | Chưa ảnh production | #755 | trong `6487e652` | Ảnh cục bộ `docs/product/evidence/erp-ux-profile/` (không phải production) | CODE_DONE_NOT_VERIFIED | Chụp VNX `/products/new` |
 | IND-02 | Thuộc tính ngành | Thực phẩm: Quy cách · Khối lượng · Đơn vị bán · đóng gói | Form: Quy cách · Khối lượng (g) · đơn vị «gói»; «500g» không vào cột size | `FOOD_SEAFOOD`: ô Quy cách (`attributes.spec`) + Khối lượng (`weight`), `defaultUnit: "gói"` | Chưa mở form HSLC | #755 | trong `6487e652` | Ảnh cục bộ tổ chức thử (không phải production) | CODE_DONE_NOT_VERIFIED | Tech Lead mở form sản phẩm HSLC |
 | IND-03 | Thuộc tính ngành | Không chỉ form — cả điều hướng · bộ lọc · thuật ngữ (J) | Mọi màn có size / màu đọc hồ sơ ngành | Chỉ 5 tệp đọc hồ sơ: `products/page` · `new` · `[id]` · `product-form` · `products-table` | Còn cố định thời trang: `/inventory/shortage` («Màu \ Size», `pending-matrix-section.tsx:210`), `/inventory/decisions`, `/inventory/returns` (nhận diện mẫu mã), `/inventory/workshop/[id]`, `/products/performance`, `/production/topics/[id]`, cột «Size» ở `lib/constants/stock-shortage.ts:766` + `landing.ts` | #755 | trong `6487e652` | — | PARTIAL | Đưa `readExperienceProfile` vào các màn trên (hoặc ẩn khi `sizeColorMatrix = false`) + bài kiểm quét mã |
-| IND-04 | Thuộc tính ngành | HSLC (FOOD_SEAFOOD) không mặc định Size / Màu | HSLC tự nhận hồ sơ thực phẩm | Tự nhận chỉ khi mẫu ngành là `food-commerce` / `seafood-commerce`; còn lại `GENERIC_COMMERCE` = Size / Màu tới khi quản trị chọn ở Hệ thống → Module | `templateKey` của HSLC trên production CHƯA đo | #755 | trong `6487e652` | — | CODE_DONE_NOT_VERIFIED | Đo mẫu ngành HSLC; nếu không phải food thì HSLC chọn «Thực phẩm / hải sản» (thao tác UI) |
+| IND-04 | Thuộc tính ngành | HSLC (FOOD_SEAFOOD) không mặc định Size / Màu | HSLC tự nhận hồ sơ thực phẩm | Tự nhận chỉ khi mẫu ngành là `food-commerce` / `seafood-commerce`; còn lại `GENERIC_COMMERCE` = Size / Màu tới khi quản trị chọn ở Hệ thống → Module | Form tạo sản phẩm HSLC đã theo hồ sơ thực phẩm; lịch sử bán / khung đơn / bộ lọc vẫn in «Size» (IND-03) | #755 | trong `6487e652` | Tech Lead mở `/products/new` HSLC trên production 6487e652 (10/10): «QUY CÁCH · KHỐI LƯỢNG (G)», không Size / Màu | PRODUCTION_VERIFIED | Phần còn lại theo IND-03 (sứ mệnh industry-terms) |
 
 ### 2.6 Xác nhận đơn · sự thật đơn
 
@@ -201,7 +201,7 @@ lỗi · địa chỉ có cấu trúc» chỉ đếm MỘT lần ở `ORD-05` (b
 | BIL-01 | Thanh toán | Nạp tiền AI bằng QR | Nạp VietQR, trừ đúng mỗi khách AI | Số dư AI + SePay | — | #644 #674 | `6487e652` | HSLC nạp 500.000 ₫ (08/10), trừ 590 ₫/khách AI (`/platform/ai-balance`) | PRODUCTION_VERIFIED | — |
 | BIL-02 | Mức dùng | Đồng hồ khách AI đúng | Mỗi khách AI +1 đúng một đơn vị | Chạy | — | #746 | `863aa76a` | E2E PASS 8/8 bước R (run 37984880718) | PRODUCTION_VERIFIED | — |
 | BIL-03 | Mức dùng | Hiểu «còn bao nhiêu» | Gói dùng thử «còn N ngày»; mức dùng / hạn mức dễ đọc | #670 + Số dư AI | Chưa mở trang vỏ khách | #670 | trong `6487e652` | — | CODE_DONE_NOT_VERIFIED | Mở «Gói dịch vụ» workspace thử |
-| BIL-04 | Gói | Khách tự gia hạn / đổi gói | Tạo mã QR gia hạn / đổi gói, tiền về thì tự mở | `/settings/plan` có khung «Gia hạn hoặc đổi gói» (hoá đơn QR); cổng tự phục vụ đầy đủ (Phase E) DEFERRED | Tech Lead ghi «khách tự đổi gói chưa có» ⇒ chưa ai đi qua trên production; khung chỉ hiện khi `planPageFrame` cho phép | #655 | trong `6487e652` | — | PARTIAL | Mở `/settings/plan` workspace thử, phân xử khung có hiện không |
+| BIL-04 | Gói | Khách tự gia hạn / đổi gói | Tạo mã QR gia hạn / đổi gói, tiền về thì tự mở | `/settings/plan` có khung «Gia hạn hoặc đổi gói» (hoá đơn QR); cổng tự phục vụ đầy đủ (Phase E) DEFERRED | Tech Lead ghi «khách tự đổi gói chưa có» ⇒ chưa ai đi qua trên production; khung chỉ hiện khi `planPageFrame` cho phép | #655 | trong `6487e652` | Tech Lead mở `/settings/plan` HSLC trên production 6487e652 (10/10): khung gia hạn / đổi gói CÓ hiện; chưa khách nào trả tiền qua khung này | PARTIAL | Đi trọn một lượt gia hạn bằng QR trên workspace thử khi có đường đăng nhập (ONB-03) |
 | BIL-05 | Thanh toán | Thu phần vượt gói | Hoá đơn vượt gói phát hành + thu QR, không thu hai lần với Số dư AI | Thiết kế (#662) | O2–O5 chờ quyết định | — | — | — | BLOCKED_OWNER | Chủ shop trả lời `OVERAGE.md` Q2–Q10 |
 | HLP-01 | Trợ giúp | Chỉ hướng dẫn kênh đang chạy | Không hướng dẫn kênh chưa mở | #712 | Chưa mở trang | #712 | trong `6487e652` | — | CODE_DONE_NOT_VERIFIED | Mở trang Hướng dẫn vỏ khách |
 | HLP-02 | Trợ giúp | Trợ giúp theo màn + nhắn hỗ trợ | H1–H5 (`docs/saas/HELP_CENTER.md`) | Thiết kế + #680 sửa link | Không có kênh hỗ trợ ⇒ không làm được «Nhắn hỗ trợ» | #680 | trong `6487e652` | — | BLOCKED_OWNER | D10: chủ shop chọn kênh hỗ trợ |
@@ -334,4 +334,4 @@ Xếp theo ảnh hưởng tới **thời gian tới khách trả tiền đầu t
 
 | Lúc | Thay đổi |
 |---|---|
-| 10/10/2026 chiều | Lập sổ: 127 yêu cầu nguyên tử · 0 DONE · 38 PRODUCTION_VERIFIED · 10 PARTIAL · 60 CODE_DONE_NOT_VERIFIED · 9 NOT_STARTED · 6 BLOCKED_OWNER · 4 BLOCKED_EXTERNAL; 9 dòng sổ cũ ghi cao hơn sự thật (§1.1). Đối chiếu `origin/main` `3e853bd4`, production `6487e652`. |
+| 10/10/2026 chiều | Lập sổ: 127 yêu cầu nguyên tử · 0 DONE · 39 PRODUCTION_VERIFIED · 10 PARTIAL · 60 CODE_DONE_NOT_VERIFIED · 9 NOT_STARTED · 6 BLOCKED_OWNER · 4 BLOCKED_EXTERNAL; 9 dòng sổ cũ ghi cao hơn sự thật (§1.1). Đối chiếu `origin/main` `3e853bd4`, production `6487e652`. |
