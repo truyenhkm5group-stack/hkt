@@ -496,6 +496,7 @@ import { testInboxComposer } from "./inbox-composer.test";
 import { testInboxV2A } from "./inbox-v2-a.test";
 import { testInboxAvatarProfile } from "./inbox-avatar-profile.test";
 import { testInboxSemanticsV3 } from "./inbox-semantics-v3.test";
+import { testInboxReadV3 } from "./inbox-read-v3.test";
 import { testInboxBulkAi } from "./inbox-bulk-ai.test";
 import { testSalesInboxHistory } from "./sales-inbox-history.test";
 import { testE2eAiSalesPlatform } from "./e2e-ai-sales-platform.test";
@@ -530,6 +531,7 @@ import { testSalesPacks } from "./sales-packs.test";
 import { testSalesAgentGolden } from "./sales-agent-golden/golden.test";
 import { testOrderGolden } from "./order-golden/order-golden.test";
 import { testOrderReview } from "./order-review.test";
+import { testOrderCancelConsistency } from "./order-cancel-consistency.test";
 import { testInboxOrderPanel } from "./inbox-v2-b.test";
 import { testProductsShellV2 } from "./products-shell-v2.test";
 import { testGoLive } from "./go-live.test";
@@ -642,6 +644,7 @@ import { testErpFormNames } from "./erp-form-names.test";
 import { testDetailPagesShell } from "./detail-pages-shell.test";
 import { testShellCopyR3 } from "./shell-copy-r3.test";
 import { testAiSalesSettingsV2 } from "./ai-sales-settings-v2.test";
+import { testAiSalesKnowledge } from "./ai-sales-knowledge.test";
 import { testSalesModelFallbackTenant } from "./sales-model-fallback-tenant.test";
 
 async function main() {
@@ -2889,6 +2892,8 @@ async function main() {
   await testInboxAvatarProfile();
   // INBOX-SEMANTICS-V3 (chủ shop 10/10/2026): bốn khái niệm tách riêng — chưa đọc (AI trả lời không xoá) · chờ trả lời · cần người thật · người đang xử lý; ma trận 20 hội thoại × mọi bộ lọc — tổ chức `hop-thu-sem-v3`.
   await testInboxSemanticsV3();
+  // INBOX READ V3 (chủ shop 10/10/2026 tối, P0): «chưa đọc» = có tin KHÁCH thật sau con trỏ đọc CỦA NGƯỜI XEM (0239); nạp khung chat ≠ đọc; con trỏ = tin khách cuối của payload, chỉ tiến; xem trước tin khách khi chưa đọc; danh sách vá theo xác nhận đọc; audit FALSE-UNREAD = 0 — tổ chức `hop-thu-doc-v3`.
+  await testInboxReadV3();
   // «Trả tất cả cho AI» (chủ shop 10/10/2026, mục D): quyền · cách ly tổ chức · trả được / bị chặn theo lý do · sự kiện + nhật ký người bấm · chạy lại 0 dòng mới — `hop-thu-bulk-a` / `hop-thu-bulk-b`.
   await testInboxBulkAi();
   // Nhập đủ lịch sử hội thoại vào hộp thư (0221): tổ chức THẬT `hop-thu-lich-su`, Pancake giả, tự cấp, tự dọn.
@@ -2934,6 +2939,10 @@ async function main() {
   // Đơn cần người kiểm (chủ shop 08/10/2026): khách huỷ ⇒ ghi chú + cờ, xã chưa ghép ⇒ cờ, nút nhanh Xác nhận / Huỷ, lời xác nhận,
   // SĐT chuẩn hoá — tổ chức THẬT `or-rv` (không Pancake; tự cấp, tự dọn).
   await testOrderReview();
+  // Khách huỷ đơn (sự cố #189A435E, chủ shop 10/10/2026 — thay luật 08/10): giữ đơn một lần ⇒ khách vẫn huỷ ⇒ tự «Đã huỷ» theo vòng
+  // đời vận đơn (hãng xác nhận mới huỷ; đã lấy / hãng lỗi ⇒ hàng ngoại lệ + cảnh báo), trùng = một lần, ghi hỏng ⇒ không nói đã huỷ,
+  // đối soát chạy thử — tổ chức THẬT `oc-cx` + `gd-food-oc` (tự cấp, tự dọn), hãng giả.
+  await testOrderCancelConsistency();
   // Hộp thư V2-B: «Đơn đang chốt» đầu cột phải — đọc đơn bot ghi (một câu SQL), kiểm từng ô bằng validator của lõi, nút xác nhận
   // = `confirmOrderReviewCore` — tổ chức THẬT `or-ib` (tự cấp, tự dọn).
   await testInboxOrderPanel();
@@ -3120,6 +3129,9 @@ async function main() {
   // AI Sales settings V2 (bề mặt 3 của VISIBLE_PRODUCT_FINISH_BOARD): ô trạng thái đầu trang — thiếu dữ kiện ⇒ «Chưa rõ», không «Đang chạy» —
   // một nút chính qua cổng vỏ; nhánh khách không nhận / không in khoá AI · model · tên hãng · chi phí USD. Thuần + quét mã nguồn.
   testAiSalesSettingsV2();
+  // Kiến thức của shop cho chatbot (sổ AIS-05): câu thường gặp · chính sách · khuyến mãi — zod, hạn theo giờ VN, rỗng ⇒ lời nhắc giống hệt,
+  // ô khuyến mãi không vào phép tính tiền (quét mã nguồn).
+  testAiSalesKnowledge();
   // Team Premium F2: dấu «model không dùng được» nhớ theo tổ chức + kết nối — khoá BYOK hỏng của shop A không lùi IM LẶNG
   // model của shop B (hay của khoá nền tảng cùng tổ chức) về model mặc định; mỗi shop được báo lỗi của chính mình. Provider giả.
   {

@@ -28,6 +28,7 @@ export const ORDER_SIGNAL_TOOLS: Readonly<Record<string, Exclude<OrderWriteReaso
   update_draft_order: "ORDER_DRAFT_ERROR",
   confirm_order: "ORDER_CONFIRM_ERROR",
   mark_declined: "ORDER_FLAG_ERROR",
+  cancel_order: "ORDER_FLAG_ERROR",
 };
 
 /** Lý do «ghi đơn hỏng» của MỘT công cụ — `Object.hasOwn`: tên công cụ do model gửi, «constructor» / «toString» không phải công cụ. */

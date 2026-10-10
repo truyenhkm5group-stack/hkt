@@ -24,7 +24,7 @@ export const INBOX_FILTERS = ["ALL", "UNREAD", "AI", "HUMAN", "NEEDS_HUMAN", "OR
 export type InboxFilter = (typeof INBOX_FILTERS)[number];
 export const INBOX_FILTER_LABEL: Record<InboxFilter, string> = {
   ALL: "Tất cả",
-  UNREAD: "Chưa đọc",
+  UNREAD: "Tin khách chưa đọc",
   AI: "AI đang trả lời",
   HUMAN: "Người đang xử lý",
   NEEDS_HUMAN: "Cần người",
@@ -37,7 +37,7 @@ export const INBOX_FILTER_LABEL: Record<InboxFilter, string> = {
 /** Nghĩa của từng thẻ — chú thích trên thẻ / ô chọn (một câu, đúng điều kiện ở `inbox-states.ts`). */
 export const INBOX_FILTER_HINT: Record<InboxFilter, string> = {
   ALL: "Mọi hội thoại",
-  UNREAD: "Khách đã nhắn sau lần cuối nhân viên mở hội thoại — AI trả lời rồi vẫn là chưa đọc",
+  UNREAD: "Khách có tin nhắn bạn chưa xem — AI trả lời rồi vẫn là chưa đọc; tin AI / nhân viên / page gửi đi không bao giờ tính là chưa đọc",
   AI: "AI đang tự trả lời khách",
   HUMAN: "Nhân viên tiếp quản · AI đang nhường sau câu nhân viên gửi tay · AI gợi ý, người gửi",
   NEEDS_HUMAN: "Có lý do thật cần người: AI đã chuyển người · AI đang lỗi · đơn cần người kiểm (khách báo huỷ, địa chỉ chưa ghép xã). Không gồm hội thoại nhân viên đang trả lời",
@@ -175,7 +175,12 @@ export function keepActiveInPlace(next: readonly InboxRow[], prev: readonly Inbo
   const fresh = next.find((r) => r.id === activeId);
   const row: InboxRow = fresh ?? { ...prev[prevIdx], unread: false, unreadCount: 0 };
   const rest = next.filter((r) => r.id !== activeId);
-  rest.splice(Math.min(prevIdx, rest.length), 0, row);
+  // Đứng yên ở ĐÚNG vị trí đang hiện, trừ đi số hàng phía trên nó đã RỜI danh sách (vd. vừa đọc xong ở thẻ «Tin khách chưa đọc») —
+  // không thì hàng phía dưới nhảy vượt lên trên hàng đang mở.
+  const present = new Set(rest.map((r) => r.id));
+  const gone = prev.slice(0, prevIdx).filter((r) => !present.has(r.id)).length;
+  const at = Math.min(Math.max(0, prevIdx - gone), rest.length);
+  rest.splice(at, 0, row);
   return rest;
 }
 
@@ -273,14 +278,30 @@ export type InboxRow = {
   customerPhone: string | null;
   /** Hồ sơ khách ERP đã nối (`sales_chat_conversations.customer_id`) — ảnh đại diện mở hồ sơ này (`avatarHrefOf`). */
   customerId: string | null;
+  /**
+   * Dòng xem trước: có tin khách chưa đọc ⇒ tin KHÁCH chưa đọc MỚI NHẤT (không bao giờ là tin AI kèm huy hiệu — chủ shop 10/10/2026
+   * P0.2); không ⇒ tin mới nhất của hội thoại (khách · AI · nhân viên · page).
+   */
   preview: string;
   previewSide: TimelineSide | null;
+  /** Mốc của tin đang xem trước. */
+  previewAt: string | null;
+  /** Đang xem trước tin khách chưa đọc mà sau nó đã có câu trả lời (AI · nhân viên · page) — dòng phụ «AI đã trả lời …». */
+  afterPreview: { side: Exclude<TimelineSide, "CUSTOMER">; at: string } | null;
+  /** Tin mới nhất của hội thoại (mọi phía) — xem trước khi đã đọc; trình duyệt dùng khi vá hàng thành đã đọc (`inbox-read-shared.ts`). */
+  latestPreview: string;
+  latestSide: TimelineSide | null;
+  latestAt: string | null;
+  /** Mốc tin KHÁCH thật mới nhất — bản danh sách cũ có tin khách mới hơn lượt đọc đã xác nhận thì hàng vẫn chưa đọc. */
+  newestCustomerAt: string | null;
+  /** Con trỏ đọc của NGƯỜI XEM mà máy chủ dùng khi tính hàng này (riêng, hoặc mốc chung khi chưa có con trỏ riêng). */
+  readCursorAt: string | null;
   lastActivityAt: string;
   /** Tin khách CHƯA ai trả lời (bot, nhân viên ERP, hay người ngoài ERP) — mốc tin khách đó; `null` = đã được trả lời. */
   waitingSince: string | null;
-  /** NGƯỜI chưa đọc: khách nhắn sau lần cuối nhân viên mở / trả lời hội thoại — AI trả lời KHÔNG xoá (`HUMAN_UNREAD_SQL`). */
+  /** NGƯỜI XEM chưa đọc: có tin KHÁCH thật mới hơn con trỏ đọc của chính họ — AI trả lời KHÔNG xoá (`personalUnreadSql`). */
   unread: boolean;
-  /** SỐ tin khách chưa đọc (≥ 1 khi `unread`, 0 khi đã đọc). */
+  /** SỐ tin khách chưa đọc — cùng điều kiện với `unread` (chưa đọc ⇔ số ≥ 1; trần 100). */
   unreadCount: number;
   /** Ảnh đại diện thật (Meta `profile_pic` / Pancake) — `null` ⇒ chữ cái. */
   avatarUrl: string | null;
@@ -399,6 +420,11 @@ export type InboxThread = {
   level: CustomerLevel | null;
   history: InboxCustomerHistory | null;
   feedback: InboxFeedback[];
+  /**
+   * Tin KHÁCH thật CUỐI CÙNG có trong khung chat này (mã dòng sổ tin / lịch sử + mốc) — trình duyệt đánh dấu đọc TỚI ĐÚNG tin này sau
+   * khi hiện khung chat (`POST /api/ai-sales/inbox-read`), không tới «giờ bấm». `null` = khung chat không có tin khách nào.
+   */
+  readThrough: { id: string; at: string } | null;
 };
 
 /** Nhãn kết quả đơn theo `ORDER_OUTCOME` (lib/queries/return-rate.ts) — chỉ để HIỆN, không tính gì. */
