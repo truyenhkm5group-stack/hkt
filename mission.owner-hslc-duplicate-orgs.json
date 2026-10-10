@@ -1,0 +1,26 @@
+{
+  "schema": 1,
+  "mission_id": "owner-hslc-duplicate-orgs",
+  "title": "QUYẾT ĐỊNH CHỦ SHOP: gộp hay giữ hai tổ chức HSLC trùng không hoạt động (hslc-hmt, hslc-vgcnj) — /platform/customers đã nêu «có thể cùng một khách»",
+  "business_goal": "",
+  "status": "BLOCKED",
+  "priority": "P2",
+  "risk": "MEDIUM",
+  "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "worker": null,
+  "worktree": null,
+  "branch": "decision/owner-hslc-duplicate-orgs",
+  "base_sha": null,
+  "domains": [],
+  "owned_paths": [
+    "docs/decisions/owner-hslc-duplicate-orgs.md"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-10T14:53:57.110Z",
+  "updated_at": "2026-10-10T14:53:57.110Z",
+  "last_heartbeat": "2026-10-10T14:53:57.110Z",
+  "definition_of_done": []
+}
