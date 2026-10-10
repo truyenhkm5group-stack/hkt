@@ -1,8 +1,8 @@
 {
   "pr": 791,
-  "sha": "896274d2573b4212d4169f7a4f8880335bee26db",
+  "sha": "71e9ff016fb6e33599b2f9e8b1cfce8808c08ea1",
   "verdict": "PASS",
   "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
-  "at": "2026-10-10T19:49:29.830Z",
-  "note": "Đọc route + lõi: apiGuard + ai_sales:view, hội thoại tra bằng getDb() tổ chức ngữ cảnh (khác tổ chức ⇒ 404), token chỉ gắn phía máy chủ cho host Pancake đúng page, mọi bước chuyển hướng kiểm host + không mang token, redirect manual tối đa 3, chỉ ảnh raster ≤1MB, lỗi ⇒ 404 không thân, phản hồi không có URL/token; state chỉ giữ URL đã bỏ token + TÊN tham số"
+  "at": "2026-10-10T19:59:56.360Z",
+  "note": "Chỉ commit gộp main do GitHub update-branch, không xung đột; nội dung đã review trước"
 }
