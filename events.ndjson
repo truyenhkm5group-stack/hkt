@@ -1500,3 +1500,4 @@
 {"at":"2026-10-10T13:51:26.162Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#777 @ fbeceb094400 · Cập nhật lên main sau #775 #778: xung đột chỉ ở dòng đăng ký bài kiểm (giữ cả hai), typecheck sạch, inbox-avatar-profile đạt"}
 {"at":"2026-10-10T13:52:04.487Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"inbox-avatar-profile","detail":"#777 @ fbeceb094400 → 33f3b13bd961 (MERGE_ISOLATED · HIGH · gates success)"}
 {"at":"2026-10-10T14:06:40.195Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DEPLOY_DISPATCHED","detail":"33f3b13bd961 · run 38058299571 https://github.com/truyenhkm5group-stack/hkt/actions/runs/38058299571"}
+{"at":"2026-10-10T14:09:41.464Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"CLAIM","mission":"forgot-password","detail":"RUNNING · 7 mẫu phạm vi · MEDIUM"}
