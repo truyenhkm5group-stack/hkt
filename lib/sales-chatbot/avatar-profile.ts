@@ -8,6 +8,7 @@
  *    `sales_chat_conversations.state`, không cột mới, không backfill:
  *      · `state.messengerProfile` `{ pic, at, error, code, subcode, http }` — Graph `GET /{PSID}?fields=profile_pic` (messenger.ts);
  *      · `state.pancakeAvatarUrl` — ảnh Pancake trả sẵn KHÔNG mang khoá;
+ *      · `state.pancakeAvatarRef` `{ url, tokenParams }` — ảnh Pancake MANG khoá đã BỎ khoá, tải qua proxy ERP (mục 1b, 11/10/2026);
  *      · `state.pancakeAvatar` `{ at, outcome, via }` — lần gần nhất ERP thấy payload Pancake của khách, và payload đó nói gì về ảnh
  *        (`URL` · `TOKENIZED_URL` · `INVALID_URL` · `NO_AVATAR_FIELD`). Không có dòng này thì chẩn đoán KHÔNG đoán là "Pancake không
  *        có ảnh" — nó là CHƯA LẤY.
@@ -49,6 +50,7 @@ export const AVATAR_STATUS_LABEL: Record<AvatarStatus, string> = {
 export type AvatarReason =
   | "META_PIC"
   | "PANCAKE_URL"
+  | "PANCAKE_PROXY"
   | "META_PIC_URL_EXPIRED"
   | "META_PIC_STALE"
   | "PANCAKE_URL_EXPIRED"
@@ -75,7 +77,7 @@ export function isPancakeAvatarOutcome(v: unknown): v is PancakeAvatarOutcome {
 }
 export type PancakeAvatarVia = "WEBHOOK" | "POLL" | "HISTORY";
 /** Payload Pancake nói gì về ảnh của khách. `url` chỉ có khi `outcome = URL`. */
-export type PancakeAvatarFacts = { url: string | null; outcome: PancakeAvatarOutcome; via?: PancakeAvatarVia };
+export type PancakeAvatarFacts = { url: string | null; outcome: PancakeAvatarOutcome; via?: PancakeAvatarVia; ref?: PancakeAvatarRef };
 
 const str = (v: unknown) => (typeof v === "string" ? v : typeof v === "number" ? String(v) : "");
 const rec = (v: unknown) => (v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : {});
@@ -83,6 +85,105 @@ const rec = (v: unknown) => (v && typeof v === "object" && !Array.isArray(v) ? (
 /** URL ảnh Pancake dùng được: https, ≤ 1000 ký tự, KHÔNG mang khoá. Luật của `history.ts::pancakeAvatarOf` từ 0221, giữ nguyên. */
 function pancakeUrlOk(url: string): boolean {
   return /^https:\/\/[^\s]+$/i.test(url) && url.length <= 1000 && !/token|access|secret|key=/i.test(url);
+}
+
+// ─────────────────────────── 1b. ẢNH PANCAKE MANG KHOÁ ⇒ ĐI QUA PROXY CỦA ERP ───────────────────────────
+//
+// Đo HSLC 10/10/2026: ~0/300 hội thoại có ảnh. Webhook Pancake KHÔNG có trường ảnh; danh sách hội thoại của API Pancake CÓ, nhưng
+// URL đó đòi `page_access_token` ⇒ trước đây chỉ ghi lý do `TOKENIZED_URL` và bỏ ảnh. Nay ERP BỎ mọi tham số khoá, cất bản KHÔNG
+// khoá (`state.pancakeAvatarRef`) và trình duyệt tải ảnh qua `GET /api/ai-sales/avatar/<mã hội thoại>` — máy chủ gắn token page lúc
+// tải (lib/sales-chatbot/avatar-proxy.ts). Token không bao giờ vào CSDL ở chỗ mới, không bao giờ tới trình duyệt.
+
+/**
+ * Host ảnh proxy được phép tải — MỘT chỗ (chặn SSRF). So khớp: đúng tên, hoặc tên con của mục (`a.fbcdn.net` khớp `fbcdn.net`).
+ * Bước chuyển hướng (Pancake chuyển sang CDN Facebook) cũng phải nằm trong danh sách này, không thì dừng.
+ */
+export const AVATAR_PROXY_HOSTS = ["pages.fm", "pancake.vn", "fbcdn.net", "platform-lookaside.fbsbx.com"] as const;
+/** Host được GẮN token page — chỉ Pancake. CDN Facebook không bao giờ nhận token của shop, kể cả khi URL gốc có tham số khoá. */
+export const AVATAR_TOKEN_HOSTS = ["pages.fm", "pancake.vn"] as const;
+
+const hostIn = (host: string, list: readonly string[]) => {
+  const h = host.toLowerCase().replace(/\.$/, "");
+  return list.some((d) => h === d || h.endsWith(`.${d}`));
+};
+/** Host thuộc danh sách ảnh được phép. HÀM THUẦN. */
+export const isAllowedAvatarHost = (host: string) => hostIn(host, AVATAR_PROXY_HOSTS);
+/** Host được gắn token page (Pancake). HÀM THUẦN. */
+export const isAvatarTokenHost = (host: string) => hostIn(host, AVATAR_TOKEN_HOSTS);
+
+/** Tên tham số mang khoá: `access_token` · `page_access_token` · `token` · `secret` · `api_key` · `key` · `signature`… */
+const TOKEN_PARAM_RE = /token|secret|passw|access|api[-_]?key|^key$|^sig$|signature|^auth/i;
+/** Còn dấu khoá ở BẤT KỲ đâu trong URL (đường dẫn, tham số lạ) ⇒ không cất. Cùng tinh thần `pancakeUrlOk` / `goodHttps`. */
+const TOKEN_ANYWHERE_RE = /access_token|token=|secret|[?&](key|sig|signature|auth)=/i;
+
+function parseHttps(raw: string): URL | null {
+  let u: URL;
+  try {
+    u = new URL(raw.trim());
+  } catch {
+    return null;
+  }
+  return u.protocol === "https:" && !u.username && !u.password && !u.port && u.hostname ? u : null;
+}
+
+/**
+ * URL ảnh ⇒ bản KHÔNG khoá: bỏ mọi tham số có tên mang khoá (`TOKEN_PARAM_RE`), bỏ phần `#…`; không phải https / có tài khoản trong
+ * URL / còn dấu khoá ở chỗ khác (đường dẫn) / dài quá 1000 ký tự ⇒ `null` (không cất gì). HÀM THUẦN.
+ */
+export function stripAvatarToken(url: unknown): string | null {
+  const u = parseHttps(str(url));
+  if (!u) return null;
+  for (const name of [...new Set(u.searchParams.keys())]) if (TOKEN_PARAM_RE.test(name)) u.searchParams.delete(name);
+  u.hash = "";
+  const out = u.toString();
+  return out.length <= 1000 && !TOKEN_ANYWHERE_RE.test(out) && !/\s/.test(out) ? out : null;
+}
+
+/** Tên các tham số khoá trong URL gốc (chỉ TÊN, không giá trị) — máy chủ gắn token page vào đúng các tên đó lúc tải. HÀM THUẦN. */
+export function avatarTokenParamNames(url: unknown): string[] {
+  const u = parseHttps(str(url));
+  if (!u) return [];
+  return [...new Set(u.searchParams.keys())].filter((k) => TOKEN_PARAM_RE.test(k) && /^[a-z_]{1,40}$/i.test(k)).slice(0, 3);
+}
+
+/** Bản cất trong `state.pancakeAvatarRef`: URL ảnh KHÔNG khoá + TÊN tham số khoá cần gắn lại. Không bao giờ có giá trị khoá. */
+export type PancakeAvatarRef = { url: string; tokenParams: string[] };
+
+/** URL ảnh mang khoá của Pancake ⇒ ref proxy (host trong danh sách, bỏ được khoá) hoặc `null`. HÀM THUẦN. */
+export function avatarProxyRefFrom(rawUrl: unknown): PancakeAvatarRef | null {
+  const url = stripAvatarToken(rawUrl);
+  if (!url || !isAllowedAvatarHost(new URL(url).hostname)) return null;
+  return { url, tokenParams: avatarTokenParamNames(rawUrl) };
+}
+
+/**
+ * Ref đã lưu (`state.pancakeAvatarRef`, hoặc một giá trị đọc từ `settings`) ⇒ ref dùng được, kiểm LẠI từ đầu (dòng cũ / dòng bị sửa
+ * tay không lọt qua): URL phải đúng là bản đã bỏ khoá của chính nó, host trong danh sách, tên tham số hợp lệ. HÀM THUẦN.
+ */
+export function pancakeAvatarRefOf(v: unknown): PancakeAvatarRef | null {
+  const r = rec(v);
+  const url = str(r.url);
+  if (!url || stripAvatarToken(url) !== url || !isAllowedAvatarHost(new URL(url).hostname)) return null;
+  const tokenParams = (Array.isArray(r.tokenParams) ? r.tokenParams : []).filter((k): k is string => typeof k === "string" && TOKEN_PARAM_RE.test(k) && /^[a-z_]{1,40}$/i.test(k)).slice(0, 3);
+  return { url, tokenParams };
+}
+
+/** Ref proxy của một hội thoại từ `state`. HÀM THUẦN. */
+export const avatarProxyRefOfState = (state: unknown): PancakeAvatarRef | null => pancakeAvatarRefOf(rec(state).pancakeAvatarRef);
+
+/** Băm ngắn (FNV-1a 32 bit, hệ 36) của URL không khoá — tham số `?v=` để trình duyệt tải lại khi khách đổi ảnh. HÀM THUẦN. */
+export function avatarRefVersion(ref: PancakeAvatarRef): string {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < ref.url.length; i += 1) {
+    h ^= ref.url.charCodeAt(i);
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  return h.toString(36);
+}
+
+/** Đường dẫn TƯƠNG ĐỐI của ảnh qua proxy — thứ duy nhất trình duyệt thấy. HÀM THUẦN. */
+export function avatarProxyHref(conversationId: string, ref: PancakeAvatarRef): string {
+  return `/api/ai-sales/avatar/${encodeURIComponent(conversationId)}?v=${avatarRefVersion(ref)}`;
 }
 
 /**
@@ -95,25 +196,30 @@ export function pancakeAvatarFactsOf(obj: unknown, via?: PancakeAvatarVia): Panc
   const from = rec(c.from);
   const cust = rec(Array.isArray(c.customers) ? c.customers[0] : null);
   let outcome: PancakeAvatarOutcome = "NO_AVATAR_FIELD";
+  let ref: PancakeAvatarRef | null = null;
   for (const v of [c.avatar_url, c.avatar, from.avatar_url, from.avatar, from.picture, cust.avatar_url, cust.avatar, cust.picture]) {
     const url = str(v).trim();
     if (!url) continue;
     if (pancakeUrlOk(url)) return { url, outcome: "URL", ...(via ? { via } : {}) };
-    if (/token|access|secret|key=/i.test(url)) outcome = "TOKENIZED_URL";
-    else if (outcome === "NO_AVATAR_FIELD") outcome = "INVALID_URL";
+    if (/token|access|secret|key=/i.test(url)) {
+      outcome = "TOKENIZED_URL";
+      // Bản KHÔNG khoá cho proxy (mục 1b) — URL gốc mang khoá vẫn KHÔNG BAO GIỜ rời hàm này.
+      ref ??= avatarProxyRefFrom(url);
+    } else if (outcome === "NO_AVATAR_FIELD") outcome = "INVALID_URL";
   }
-  return { url: null, outcome, ...(via ? { via } : {}) };
+  return { url: null, outcome, ...(via ? { via } : {}), ...(outcome === "TOKENIZED_URL" && ref ? { ref } : {}) };
 }
 
 const OUTCOME_RANK: Record<PancakeAvatarOutcome, number> = { URL: 3, TOKENIZED_URL: 2, INVALID_URL: 1, NO_AVATAR_FIELD: 0 };
-/** Nhiều đối tượng của CÙNG một gói (hội thoại + tin) ⇒ một kết luận: có ảnh thắng, rồi lý do mạnh nhất. HÀM THUẦN. */
+/** Nhiều đối tượng của CÙNG một gói (hội thoại + tin) ⇒ một kết luận: có ảnh thắng, rồi lý do mạnh nhất (cùng lý do: bản có ref proxy thắng). HÀM THUẦN. */
 export function mergePancakeAvatarFacts(list: readonly PancakeAvatarFacts[]): PancakeAvatarFacts {
-  return list.reduce<PancakeAvatarFacts>((best, f) => (OUTCOME_RANK[f.outcome] > OUTCOME_RANK[best.outcome] ? f : best), { url: null, outcome: "NO_AVATAR_FIELD", ...(list[0]?.via ? { via: list[0].via } : {}) });
+  return list.reduce<PancakeAvatarFacts>((best, f) => (OUTCOME_RANK[f.outcome] > OUTCOME_RANK[best.outcome] || (f.outcome === best.outcome && f.ref && !best.ref) ? f : best), { url: null, outcome: "NO_AVATAR_FIELD", ...(list[0]?.via ? { via: list[0].via } : {}) });
 }
 
 /**
  * Bản vá `state` của hội thoại sau khi thấy một payload Pancake của khách — `null` = không cần ghi. Luật:
  *  · có ảnh mới ⇒ ghi ảnh + dấu; cùng ảnh ⇒ chỉ đóng lại dấu khi dấu cũ quá `PANCAKE_AVATAR_RESTAMP_MS`;
+ *  · ảnh mang khoá có bản không khoá (`facts.ref`) ⇒ ghi `pancakeAvatarRef` (URL KHÔNG khoá + tên tham số) khi khác ref cũ;
  *  · không có ảnh ⇒ KHÔNG xoá ảnh đã có (một gói thiếu trường không phải bằng chứng khách bỏ ảnh), chỉ ghi lý do khi khác lý do cũ
  *    hoặc dấu cũ đã quá hạn.
  * Dùng chung cho webhook / quét lại (`fanpage.ts::noteCustomerArrived`) và nhập lịch sử (`history.ts::finishThread`). HÀM THUẦN.
@@ -128,6 +234,9 @@ export function pancakeAvatarPatch(state: unknown, facts: PancakeAvatarFacts, no
     if (facts.url !== st.pancakeAvatarUrl) return { pancakeAvatarUrl: facts.url, ...stamp };
     return prev.outcome !== "URL" || stale ? stamp : null;
   }
+  // Ảnh mang khoá có bản KHÔNG khoá ⇒ cất ref proxy (mục 1b). Cùng ref ⇒ như cũ (chỉ đóng lại dấu khi cần).
+  const ref = facts.outcome === "TOKENIZED_URL" && facts.ref ? pancakeAvatarRefOf(facts.ref) : null;
+  if (ref && ref.url !== pancakeAvatarRefOf(st.pancakeAvatarRef)?.url) return { pancakeAvatarRef: ref, ...stamp };
   return prev.outcome !== facts.outcome || stale ? stamp : null;
 }
 
@@ -215,6 +324,8 @@ export function avatarStatusOf(state: unknown, now: Date): AvatarDiagnosis {
     if (expired(pancakeUrl)) expiredHit ??= { status: "PROFILE_EXPIRED", source: "PANCAKE", reason: "PANCAKE_URL_EXPIRED" };
     else return { status: "PROFILE_AVAILABLE", source: "PANCAKE", reason: "PANCAKE_URL" };
   }
+  // Ảnh Pancake qua proxy (mục 1b): hộp thư hiện đúng đường dẫn proxy này (`inbox.ts::avatarOf`) — chẩn đoán trùng thứ nhân viên thấy.
+  if (!metaPic && avatarProxyRefOfState(st)) return { status: "PROFILE_AVAILABLE", source: "PANCAKE", reason: "PANCAKE_PROXY" };
   if (expiredHit) return expiredHit;
   if (Number.isFinite(metaAt) && str(meta.error)) {
     const kind = metaProfileErrorKind(meta);

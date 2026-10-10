@@ -15,6 +15,7 @@ import { ORDER_OUTCOME } from "@/lib/queries/return-rate";
 import { appendContextMessages, resumeConversationToAi, SHOP_SAID } from "@/lib/sales-chatbot/engine";
 import { recordConversationEvent } from "@/lib/sales-chatbot/events";
 import { aiHoldOf, aiHoldView, humanResumeReason } from "@/lib/sales-chatbot/ai-hold-shared";
+import { avatarProxyHref, avatarProxyRefOfState } from "@/lib/sales-chatbot/avatar-profile";
 import {
   aiReplyingSql,
   classifyInboxState,
@@ -208,11 +209,16 @@ function textOf(blocks: readonly AiBlock[] | null | undefined): string {
     .trim();
 }
 
-/** Ảnh đại diện khách: Meta `profile_pic` (đọc sau lượt trả lời — messenger.ts) rồi ảnh Pancake (lượt nhập lịch sử). */
-function avatarOf(state: unknown): string | null {
+/**
+ * Ảnh đại diện khách: Meta `profile_pic` (đọc sau lượt trả lời — messenger.ts) rồi ảnh Pancake không khoá (lượt nhập lịch sử), rồi
+ * ảnh Pancake MANG KHOÁ đi qua proxy của ERP (`state.pancakeAvatarRef` ⇒ đường dẫn TƯƠNG ĐỐI `/api/ai-sales/avatar/<mã>` — máy chủ gắn
+ * token lúc tải, avatar-profile.ts mục 1b). Không có gì ⇒ `null` ⇒ chữ cái.
+ */
+function avatarOf(state: unknown, conversationId: string): string | null {
   const st = (state && typeof state === "object" ? state : {}) as Record<string, unknown>;
   const meta = st.messengerProfile && typeof st.messengerProfile === "object" ? (st.messengerProfile as Record<string, unknown>).pic : null;
-  return safeAvatarUrl(meta) ?? safeAvatarUrl(st.pancakeAvatarUrl);
+  const ref = avatarProxyRefOfState(st);
+  return safeAvatarUrl(meta) ?? safeAvatarUrl(st.pancakeAvatarUrl) ?? (ref ? avatarProxyHref(conversationId, ref) : null);
 }
 
 /** Phía của một dòng sổ tin thô (khách · bot · nhân viên ERP · phía page ngoài ERP). HÀM THUẦN — hộp thư và ops audit dùng chung. */
@@ -450,7 +456,7 @@ export async function listInbox(
         // Bất biến: chưa đọc ⇔ số tin khách sau con trỏ ≥ 1 — KHÔNG còn `max(1, …)` (nó in «1» cho hội thoại không có tin khách nào).
         unread: st.humanUnread,
         unreadCount: unreadN,
-        avatarUrl: avatarOf(r.state),
+        avatarUrl: avatarOf(r.state, r.id),
         aiHold: hold,
         handling: inboxHandlingFrom(st),
         needsHuman: st.needsHuman,
@@ -662,7 +668,7 @@ export async function loadInboxThread(user: SessionUser, conversationId: unknown
       handoffReason: conv.handoffReason,
       botYields: conv.status === "HANDOFF",
       aiHold: aiHoldView(conv, now),
-      avatarUrl: avatarOf(conv.state),
+      avatarUrl: avatarOf(conv.state, conv.id),
       cooldownMinutes: await humanCooldownMinutes(),
       // Lý do AI KHÔNG trả lời — hỏi đúng các cổng của đường xử lý (ai-status.ts). Không rỗng ⇒ màn hình không được nói «AI đang trả lời».
       aiBlocks: await conversationAiBlocks(conv),

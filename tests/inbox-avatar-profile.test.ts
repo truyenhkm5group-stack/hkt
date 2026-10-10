@@ -133,7 +133,8 @@ function testAvatarStatus() {
 
 function testPancakeWritePath() {
   const tokenized = { from: { avatar_url: "https://pages.fm/api/v1/pages/1/avatar/2?page_access_token=BI_MAT" } };
-  assert.deepEqual(pancakeAvatarFactsOf(tokenized), { url: null, outcome: "TOKENIZED_URL" });
+  // URL mang khoá: không lưu URL; bản ĐÃ BỎ khoá đi làm ref proxy (tests/avatar-proxy.test.ts).
+  assert.deepEqual(pancakeAvatarFactsOf(tokenized), { url: null, outcome: "TOKENIZED_URL", ref: { url: "https://pages.fm/api/v1/pages/1/avatar/2", tokenParams: ["page_access_token"] } });
   assert.deepEqual(pancakeAvatarFactsOf({ customers: [{ avatar: "https://cdn.example.vn/u/1.jpg" }] }, "POLL"), { url: "https://cdn.example.vn/u/1.jpg", outcome: "URL", via: "POLL" });
   assert.deepEqual(pancakeAvatarFactsOf({ from: { avatar: "http://cdn.example.vn/1.jpg" } }), { url: null, outcome: "INVALID_URL" });
   assert.deepEqual(pancakeAvatarFactsOf({ from: { name: "Lan" } }), { url: null, outcome: "NO_AVATAR_FIELD" });
@@ -144,7 +145,7 @@ function testPancakeWritePath() {
   // Webhook: tin KHÁCH mang ảnh của khách; tin PAGE không.
   const base = { event_type: "messaging", page_id: "P" };
   const cust = parsePancakeWebhook({ ...base, data: { conversation: { id: "P_4100", type: "INBOX", from_psid: "4100", from: { name: "Lan", avatar_url: "https://pages.fm/x/avatar?page_access_token=t" } }, message: { id: "m1", type: "INBOX", message: "Chào shop", from: { id: "4100", name: "Lan" } } } });
-  assert.deepEqual(cust?.avatar, { url: null, outcome: "TOKENIZED_URL", via: "WEBHOOK" }, "ảnh mang khoá ⇒ lý do, không URL");
+  assert.deepEqual(cust?.avatar, { url: null, outcome: "TOKENIZED_URL", via: "WEBHOOK", ref: { url: "https://pages.fm/x/avatar", tokenParams: ["page_access_token"] } }, "ảnh mang khoá ⇒ lý do + ref KHÔNG khoá, không URL");
   const custOk = parsePancakeWebhook({ ...base, data: { conversation: { id: "P_4100", type: "INBOX", customers: [{ avatar: "https://cdn.example.vn/a.jpg" }] }, message: { id: "m2", type: "INBOX", message: "Hi", from: { id: "4100" } } } });
   assert.equal(custOk?.avatar?.url, "https://cdn.example.vn/a.jpg");
   const page = parsePancakeWebhook({ ...base, data: { conversation: { id: "P_4100", type: "INBOX", customers: [{ avatar: "https://cdn.example.vn/a.jpg" }] }, message: { id: "m3", type: "INBOX", message: "Dạ", from: { id: "P", name: "Shop", avatar_url: "https://cdn.example.vn/page.jpg" } } } });
