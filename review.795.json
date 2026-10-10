@@ -1,0 +1,8 @@
+{
+  "pr": 795,
+  "sha": "16a42812978c57a9300b16866c11a53e2245dd50",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-10T23:18:25.670Z",
+  "note": "Chỉ script ops + bài kiểm; chỉ GET Pancake; thân lỗi chỉ in bản đã che (bài kiểm chứng minh)"
+}

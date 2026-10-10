@@ -1890,3 +1890,4 @@
 {"at":"2026-10-10T23:17:25.714Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"OVERLAP_ACCEPTED","mission":"avatar-pancake-shape2","detail":"OVERLAP_ACCEPTED với avatar-pancake-shape: phạm vi scripts/pancake-avatar-shape.ts, tests/pancake-avatar-shape.test.ts — cách tích hợp: lượt 2 của cùng script, lượt 1 đã gộp"}
 {"at":"2026-10-10T23:17:46.115Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"avatar-pancake-shape2","detail":"fix/avatar-pancake-shape2 @ 16a42812978c · 1 lệnh kiểm thử"}
 {"at":"2026-10-10T23:18:20.326Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"avatar-pancake-shape2","detail":"#795 cho fix/avatar-pancake-shape2 @ 16a42812978c"}
+{"at":"2026-10-10T23:18:39.272Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#795 @ 16a42812978c · Chỉ script ops + bài kiểm; chỉ GET Pancake; thân lỗi chỉ in bản đã che (bài kiểm chứng minh)"}
