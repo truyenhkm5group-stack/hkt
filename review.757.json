@@ -1,8 +1,8 @@
 {
   "pr": 757,
-  "sha": "6108776f33bf01efa6b2a3e39053902eee6bd9ab",
+  "sha": "747635ee20475fc35e7ff7a62a48db100ffa5c5e",
   "verdict": "PASS",
   "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
-  "at": "2026-10-09T23:34:37.684Z",
-  "note": "Đọc diff: dữ liệu khách vỏ = rows.map(shellProductRow) từ listProducts (không truy vấn/công thức tồn mới), tồn chưa biết ⇒ «Chưa có phiếu nhập»; số gọn qua một hàm chung; tiêu đề cảnh báo đổi chữ không ảnh hưởng chống trùng (dedupeKey)"
+  "at": "2026-10-10T02:58:02.427Z",
+  "note": "Cập nhật nhánh lên main, mã không đổi; gates xanh lại"
 }
