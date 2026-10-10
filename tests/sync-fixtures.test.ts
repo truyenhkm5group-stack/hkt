@@ -400,6 +400,7 @@ import { testReportingParity } from "./reporting-parity.test";
 import { testEstimatedCost } from "./estimated-cost.test";
 import { testLoginThrottle } from "./login-throttle.test";
 import { testWebhookHardening } from "./webhook-hardening.test";
+import { testWebhookLogRedaction } from "./webhook-log-redaction.test";
 import { testXlsxReader } from "./xlsx-reader.test";
 import { testProjectedDeliveryV3 } from "./projected-delivery.test";
 import { testAgentGithubIdentityModule } from "./agent-identity.test";
@@ -2458,6 +2459,7 @@ async function main() {
   await testEstimatedCost(db);
   await testLoginThrottle();
   await testWebhookHardening();
+  testWebhookLogRedaction();
   testXlsxReader();
   await testProjectedDeliveryV3(db);
   // Chạy CUỐI CÙNG: thêm đơn/vận đơn riêng cho đúng bốn tình huống của nút thắt fulfillment, đặt
