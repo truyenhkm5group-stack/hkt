@@ -3,7 +3,7 @@
   "mission_id": "ai-fallback-tenant",
   "title": "Bộ đệm lùi model AI theo tổ chức + kết nối (Team Premium F2)",
   "business_goal": "",
-  "status": "RUNNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -21,7 +21,18 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-10T09:06:06.651Z",
-  "updated_at": "2026-10-10T15:34:48.055Z",
-  "last_heartbeat": "2026-10-10T15:34:48.055Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-10T17:58:30.503Z",
+  "last_heartbeat": "2026-10-10T17:58:30.503Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "fix/ai-fallback-tenant",
+    "sha": "1a9e4095e5667014ce8ed77725a989d94c66441f",
+    "at": "2026-10-10T17:58:30.503Z",
+    "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+    "title": "Bộ đệm lùi model AI theo tổ chức + kết nối (Team Premium F2)",
+    "summary": "F2: nhớ model không dùng được theo khoá tổ chức:kết nối:nhà cung cấp:model — khoá BYOK hỏng của shop A không còn làm shop khác lùi im lặng về model mặc định",
+    "tests": [
+      "npm test đầy đủ: TẤT CẢ KIỂM THỬ ĐẠT (exit 0) · typecheck · lint sạch · sales-model-fallback-tenant 7/7 (HEAD gốc 1 đạt 2 đỏ) · 4 đột biến đỏ"
+    ]
+  }
 }
