@@ -55,7 +55,8 @@ import { humanCooldownMinutes, setHumanCooldownMinutesCore } from "@/lib/sales-c
 import { setSalesChatProviderForTests } from "@/lib/sales-chatbot/engine";
 import { catchUpFanpage, parsePancakeWebhook, processFanpageThread, receiveFanpageEvent, type FanpageEvent } from "@/lib/sales-chatbot/fanpage";
 import { inboxSourceOf, listInbox, loadInboxThread, sendStaffReplyCore } from "@/lib/sales-chatbot/inbox";
-import { INBOX_FILTERS, inboxHandlingOf, safeAvatarUrl, unreadBadge } from "@/lib/sales-chatbot/inbox-shared";
+import { INBOX_FILTERS, safeAvatarUrl, unreadBadge } from "@/lib/sales-chatbot/inbox-shared";
+import { classifyInboxState, inboxHandlingFrom, type InboxStateInput } from "@/lib/sales-chatbot/inbox-states";
 import { OPERATING_MODE_SETTING_KEY } from "@/lib/sales-chatbot/operating-mode-shared";
 import { connectMessengerPage, disconnectMessengerPage, processMessengerThread, receiveMessengerEvent, refreshMessengerProfile } from "@/lib/sales-chatbot/messenger";
 
@@ -123,12 +124,18 @@ function testPure() {
   assert.equal(pk2?.senderId, "4101", "thiếu from_psid ⇒ mã người gửi của tin");
   assert.ok(INBOX_FILTERS.includes("AI") && INBOX_FILTERS.includes("HUMAN") && INBOX_FILTERS.includes("ORDERED") && INBOX_FILTERS.includes("NOT_ORDERED"));
   // AI gợi ý (bot soạn, NGƯỜI gửi) thuộc nhóm NGƯỜI trên hộp thư — quyết định sản phẩm 07/10/2026: nhân viên không bỏ sót khách.
-  const copilot = { control: { mode: "COPILOT", byUserId: "u1", byName: "Lan", at: new Date().toISOString(), reason: null } };
-  assert.equal(inboxHandlingOf("AI_ACTIVE", null, false), "AI");
-  assert.equal(inboxHandlingOf("AI_ACTIVE", copilot, false), "COPILOT", "hội thoại AI gợi ý ⇒ nhóm người");
-  assert.equal(inboxHandlingOf("AI_ACTIVE", null, true), "COPILOT", "tổ chức ở chế độ Copilot ⇒ nhóm người");
-  assert.equal(inboxHandlingOf("HUMAN_COOLDOWN", copilot, true), "HUMAN");
-  assert.equal(inboxHandlingOf("HUMAN_TAKEOVER", null, false), "HUMAN");
+  // Phân loại đọc từ `classifyInboxState` (inbox-states.ts, chủ shop 10/10/2026) thay cho `inboxHandlingOf(aiHold)` cũ.
+  const tNow = new Date();
+  const copilot = { control: { mode: "COPILOT", byUserId: "u1", byName: "Lan", at: tNow.toISOString(), reason: null } };
+  const human = { control: { mode: "HUMAN", byUserId: "u1", byName: "Lan", at: tNow.toISOString(), reason: null } };
+  const cv = (over: Partial<InboxStateInput>): InboxStateInput => ({ status: "OPEN", handoffReason: null, state: {}, updatedAt: tNow, humanCooldownUntil: null, lastCustomerAt: null, lastBotAt: null, lastStaffAt: null, staffSeenAt: null, historyUntil: null, pageReplyAfterCustomer: false, orderUnderReview: false, ...over });
+  const hd = (over: Partial<InboxStateInput>, org = false) => inboxHandlingFrom(classifyInboxState(cv(over), tNow, org));
+  assert.equal(hd({}), "AI");
+  assert.equal(hd({ state: copilot }), "COPILOT", "hội thoại AI gợi ý ⇒ nhóm người");
+  assert.equal(hd({}, true), "COPILOT", "tổ chức ở chế độ Copilot ⇒ nhóm người");
+  assert.equal(hd({ status: "HANDOFF", handoffReason: FANPAGE_STAFF_REASON, humanCooldownUntil: new Date(tNow.getTime() + 60_000), state: copilot }, true), "HUMAN", "nhường thắng AI gợi ý");
+  assert.equal(hd({ state: human }), "HUMAN");
+  assert.equal(hd({ status: "HANDOFF", handoffReason: "Khách đòi gặp người" }), "WAITING", "AI xin người, chưa ai cầm ⇒ chờ người (không phải «Người đang xử lý»)");
   // Câu trạng thái nói ĐÚNG số phút nhường workspace đã khai; thiếu ⇒ mặc định.
   const bar = (cooldownMinutes?: number) =>
     controlBarStatus({ hold: { state: "AI_ACTIVE", cause: null, until: null, serverNow: new Date().toISOString() }, blocks: [], mode: "AUTO", handoffReason: null, control: null, lapsed: false, formatAt: (s) => s, cooldownMinutes }).text;
@@ -544,7 +551,8 @@ async function testFlow(backfillStmts: readonly string[]) {
       const ordered = await listInbox(admin, { filter: "ORDERED", limit: 500 }, now);
       const notOrdered = await listInbox(admin, { filter: "NOT_ORDERED", limit: 500 }, now);
       assert.ok(human.ok && aiF.ok && ordered.ok && notOrdered.ok);
-      assert.equal(all.counts.AI + all.counts.HUMAN, all.counts.ALL, "AI + Người phủ kín");
+      const waitingN = all.rows.filter((r) => r.handling === "WAITING").length;
+      assert.equal(all.counts.AI + all.counts.HUMAN + waitingN, all.counts.ALL, "AI + Người + Chờ người (AI dừng, chưa ai cầm) phủ kín");
       assert.equal(all.counts.ORDERED + all.counts.NOT_ORDERED, all.counts.ALL, "Đã chốt + Chưa chốt phủ kín");
       const humanIds = new Set(human.rows.map((r) => r.id));
       const dbRows = await db.select().from(c).where(inArray(c.id, all.rows.map((r) => r.id)));
@@ -553,11 +561,18 @@ async function testFlow(backfillStmts: readonly string[]) {
         const d = byId.get(r.id)!;
         const st = aiHoldOf(d, now).state;
         assert.equal(r.aiHold, st, `trạng thái AI của hàng = aiHoldOf (${r.id})`);
-        assert.equal(r.handling, inboxHandlingOf(st, d.state, false), `huy hiệu = inboxHandlingOf (${r.id})`);
-        assert.equal(humanIds.has(r.id), r.handling !== "AI", `thẻ «Người đang xử lý» ≡ huy hiệu cho ${matrix.find((m) => ids[m.name] === r.id)?.name ?? r.id}: ${r.handling}`);
+        const cls = classifyInboxState({ ...d, pageReplyAfterCustomer: false, orderUnderReview: false }, now, false);
+        assert.equal(r.handling, inboxHandlingFrom(cls), `huy hiệu = classifyInboxState (${r.id})`);
+        assert.equal(humanIds.has(r.id), cls.humanHandling !== null, `thẻ «Người đang xử lý» ≡ huy hiệu cho ${matrix.find((m) => ids[m.name] === r.id)?.name ?? r.id}: ${r.handling}`);
       }
-      const expectHuman = ["nhường còn hạn", "nhường cũ không mốc — còn hạn", "AI hỏng — còn hạn", "cần người (lý do khác)", "cần người (không lý do)", "tiếp quản", "AI gợi ý"];
-      for (const m of matrix) assert.equal(humanIds.has(ids[m.name]), expectHuman.includes(m.name), `ma trận: «${m.name}»`);
+      // Chủ shop 10/10/2026 (mục B3, SỬA ma trận cũ): «Người đang xử lý» = tiếp quản · AI nhường · AI gợi ý. AI xin người / AI hỏng mà
+      // chưa ai cầm là «Cần người» (chờ người), KHÔNG phải «Người đang xử lý» — bản cũ gộp chúng vào nhóm người.
+      const expectHuman = ["nhường còn hạn", "nhường cũ không mốc — còn hạn", "tiếp quản", "AI gợi ý"];
+      const expectWaiting = ["AI hỏng — còn hạn", "cần người (lý do khác)", "cần người (không lý do)"];
+      for (const m of matrix) {
+        assert.equal(humanIds.has(ids[m.name]), expectHuman.includes(m.name), `ma trận Người: «${m.name}»`);
+        assert.equal(all.rows.find((r) => r.id === ids[m.name])?.handling === "WAITING", expectWaiting.includes(m.name), `ma trận Chờ người: «${m.name}»`);
+      }
       const cp = all.rows.find((r) => r.id === ids["AI gợi ý"]);
       assert.ok(cp && cp.aiHold === "AI_ACTIVE" && cp.handling === "COPILOT", "AI gợi ý: đường xử lý KHÔNG đổi (bot vẫn soạn gợi ý), hộp thư xếp vào nhóm người");
       // Cả tổ chức ở chế độ Copilot ⇒ không hội thoại nào ở nhóm «AI đang trả lời» (bot không gửi gì cho ai).

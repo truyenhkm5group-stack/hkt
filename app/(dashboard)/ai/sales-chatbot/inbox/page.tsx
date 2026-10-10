@@ -44,9 +44,10 @@ export const metadata = { title: "Hộp thư khách" };
 /**
  * HỘP THƯ KHÁCH (M8) — mọi tin Facebook / Instagram / Zalo OA / chat web ở MỘT chỗ; nhân viên đọc và trả lời ngay trong ERP.
  * Bố cục ba cột cao bằng màn hình (danh sách · khung chat · thông tin khách), mỗi cột tự cuộn. Không bỏ sót khách: hội thoại có
- * mặt NGAY khi khách nhắn (kể cả bot tắt / nhân viên đã trả lời ngoài ERP / tin nhãn dán · ghi âm), «Chưa đọc» = tin cuối là của
- * KHÁCH và nhân viên chưa mở từ lúc đó (tin bot / nhân viên không bao giờ làm hội thoại «chưa đọc»), «Chờ trả lời» xếp khách chờ
- * lâu nhất lên đầu, tiêu đề tab đếm khách đang chờ + âm báo khi có tin mới, tự làm mới.
+ * mặt NGAY khi khách nhắn (kể cả bot tắt / nhân viên đã trả lời ngoài ERP / tin nhãn dán · ghi âm), «Chưa đọc» = khách nhắn sau
+ * lần cuối NHÂN VIÊN mở / trả lời hội thoại — AI trả lời KHÔNG xoá (chủ shop 10/10/2026; nghĩa của mọi thẻ ở
+ * `lib/sales-chatbot/inbox-states.ts`), «Chờ trả lời» xếp khách chờ lâu nhất lên đầu, tiêu đề tab đếm khách đang chờ + âm báo khi
+ * có tin mới, tự làm mới.
  */
 export default async function SalesInboxPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const user = await requirePermission("ai_sales:view");
