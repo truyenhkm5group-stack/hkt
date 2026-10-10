@@ -1,0 +1,30 @@
+{
+  "schema": 1,
+  "mission_id": "customer-lifecycle",
+  "title": "P0 vòng đời khách + chăm sóc sau mua: AI không nói «đã nhận tiền» từ ảnh CK, không «chốt» khi chưa có đơn, không upsell khách đã trả tiền; Payment Truth; nối đơn ↔ hội thoại (ca HSLC Thiên Lý 08–10/10)",
+  "business_goal": "",
+  "status": "BACKLOG",
+  "priority": "P2",
+  "risk": "MEDIUM",
+  "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "worker": null,
+  "worktree": null,
+  "branch": "feat/customer-lifecycle",
+  "base_sha": null,
+  "domains": [],
+  "owned_paths": [
+    "lib/sales-chatbot/lifecycle.ts",
+    "lib/sales-chatbot/payment-truth.ts",
+    "tests/customer-lifecycle.test.ts"
+  ],
+  "dependencies": [
+    "order-cancel-consistency"
+  ],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-10T15:59:51.139Z",
+  "updated_at": "2026-10-10T15:59:51.139Z",
+  "last_heartbeat": "2026-10-10T15:59:51.139Z",
+  "definition_of_done": []
+}
