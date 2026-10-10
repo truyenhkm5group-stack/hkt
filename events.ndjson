@@ -1471,3 +1471,4 @@
 {"at":"2026-10-10T09:11:49.801Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"sec-caddy-ghn-ghtk","detail":"fix/caddy-redact-ghn-ghtk @ 645f9a45c4ef · 1 lệnh kiểm thử"}
 {"at":"2026-10-10T09:12:31.231Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"sec-caddy-ghn-ghtk","detail":"#774 cho fix/caddy-redact-ghn-ghtk @ 645f9a45c4ef"}
 {"at":"2026-10-10T09:13:04.711Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#774 @ 645f9a45c4ef · Một dòng regex Caddyfile (thêm ghn-org/ ghtk-org/) + bài kiểm dẫn xuất từ cây route; deploy tự caddy validate rồi reload, tệp sai thì Caddy cũ chạy tiếp"}
+{"at":"2026-10-10T10:05:13.881Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"owner-requirements-ledger","detail":"#773 @ 8a407bec06df → 7935fbd4e4b3 (MERGE_NOW · LOW · gates success)"}
