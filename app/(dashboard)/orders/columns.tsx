@@ -21,7 +21,7 @@ export const orderColumns: ColumnDef<OrderListRow, unknown>[] = [
     cell: ({ row }) => (
       <div className="min-w-[72px]">
         <RowLink href={`/orders/${row.original.id}`}>#{row.original.systemId ?? manualOrderShortCode(row.original.id)}</RowLink>
-        {row.original.tags.length ? <div className="mt-0.5 flex flex-wrap gap-1">{row.original.tags.slice(0, 2).map((t) => <span key={t} className="rounded bg-muted px-1 text-[10px] text-muted-foreground">{t}</span>)}</div> : null}
+        {row.original.tags.length ? <div className="mt-0.5 flex flex-wrap gap-1">{row.original.tags.slice(0, 2).map((t) => <span key={t} className="rounded bg-muted px-1 text-[11px] text-muted-foreground">{t}</span>)}</div> : null}
       </div>
     ),
     size: 96,
@@ -92,7 +92,7 @@ export const orderColumns: ColumnDef<OrderListRow, unknown>[] = [
             href={row.original.chatUrl}
             {...(row.original.chatInternal ? {} : { target: "_blank", rel: "noreferrer" })}
             title={row.original.chatInternal ? "Mở hội thoại của khách trong Hộp thư ERP" : "Mở hội thoại của khách trên Pancake"}
-            className="inline-flex items-center gap-0.5 rounded border px-1.5 py-0.5 text-[10.5px] font-medium text-muted-foreground hover:bg-muted hover:text-primary"
+            className="inline-flex items-center gap-0.5 rounded border px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground hover:bg-muted hover:text-primary"
           >
             Chat <ExternalLink className="size-2.5" />
           </a>
@@ -107,7 +107,7 @@ export const orderColumns: ColumnDef<OrderListRow, unknown>[] = [
     cell: ({ row }) => (
       <div className="space-y-1">
         <OrderStageBadge stage={row.original.stage} label={row.original.statusName || undefined} />
-        {row.original.lastUpdateStatusAt ? <div className="text-[10.5px] text-muted-foreground">{formatTimeAgo(row.original.lastUpdateStatusAt)}</div> : null}
+        {row.original.lastUpdateStatusAt ? <div className="text-[11px] text-muted-foreground">{formatTimeAgo(row.original.lastUpdateStatusAt)}</div> : null}
       </div>
     ),
   },
@@ -128,7 +128,7 @@ export const orderColumns: ColumnDef<OrderListRow, unknown>[] = [
           <div className="flex items-center gap-1.5">
             <ShipmentStageBadge stage={s.stage} label={s.vtpStatusName ?? undefined} />
             {/* Mở kiện hàng ngay trên danh sách (khách, ĐVVC nói gì, ai đã chăm) — không rời trang. */}
-            <CareDrawer shipmentId={s.id} className="rounded border px-1.5 py-px text-[10.5px] font-medium text-muted-foreground hover:bg-accent hover:no-underline">
+            <CareDrawer shipmentId={s.id} className="rounded border px-1.5 py-px text-[11px] font-medium text-muted-foreground hover:bg-accent hover:no-underline">
               Tra nhanh
             </CareDrawer>
           </div>
@@ -144,14 +144,14 @@ export const orderColumns: ColumnDef<OrderListRow, unknown>[] = [
     cell: ({ row }) => (
       <div className="text-right">
         <Money value={row.original.totalPriceAfterDiscount} className="font-bold" />
-        <div className="mt-0.5 flex justify-end">{row.original.moneyToCollect > 0 && row.original.shipment ? <CodStatusBadge status={row.original.shipment.codStatus} className="px-1.5 text-[10px]" /> : isManualOrderId(row.original.id) ? <ManualPaymentStatusText state={row.original.payment} /> : row.original.moneyToCollect > 0 ? (
-            <span className="text-[10.5px] text-muted-foreground">COD</span>
+        <div className="mt-0.5 flex justify-end">{row.original.moneyToCollect > 0 && row.original.shipment ? <CodStatusBadge status={row.original.shipment.codStatus} className="px-1.5 text-[11px]" /> : isManualOrderId(row.original.id) ? <ManualPaymentStatusText state={row.original.payment} /> : row.original.moneyToCollect > 0 ? (
+            <span className="text-[11px] text-muted-foreground">COD</span>
           ) : row.original.noCodPayment?.kind === "PREPAID" ? (
             // Bằng chứng tiền đã khai ở VERIFIED_MONEY_SOURCES: khách chuyển khoản trước.
-            <span className="text-[10.5px] text-muted-foreground">Trả trước <Money value={row.original.noCodPayment.amount} /></span>
+            <span className="text-[11px] text-muted-foreground">Trả trước <Money value={row.original.noCodPayment.amount} /></span>
           ) : (
             // 0 phải thu mà không chứng từ tiền ⇒ CHƯA XÁC MINH, không phải "đã thanh toán" (AGENTS §0.1 · ORDER_OUTCOME.md mục 8).
-            <span className="text-[10.5px] text-muted-foreground" title={NO_COD_UNVERIFIED_HINT}>Chưa xác minh</span>
+            <span className="text-[11px] text-muted-foreground" title={NO_COD_UNVERIFIED_HINT}>Chưa xác minh</span>
           )}</div>
       </div>
     ),

@@ -5,14 +5,15 @@ import type { ColumnDef } from "@tanstack/react-table";
 import { orderColumns } from "@/app/(dashboard)/orders/columns";
 import { DataTable } from "@/components/data-table/data-table";
 import { columnsWithListView, type ListMetadataProps } from "@/components/metadata/custom-columns";
-import { OrderStageBadge } from "@/components/status-badge";
+import { OrderStageBadge, ShipmentStageBadge } from "@/components/status-badge";
+import { Money } from "@/components/ui-bits";
 import { ORDER_LIST_REF_COLUMNS } from "@/lib/constants/metadata-list-columns";
 import { formatTimeAgo } from "@/lib/format";
 import type { OrderListRow } from "@/lib/queries/orders";
 import type { CarrierKey } from "@/lib/carriers/types";
 import { CarrierBulkActions } from "@/app/(dashboard)/orders/carrier-bulk-actions";
 import { OrderQuickDecision, OrderReviewEntries } from "@/components/orders/order-review-quick";
-import { isManualOrderId } from "@/lib/constants/manual-orders";
+import { isManualOrderId, manualOrderShortCode } from "@/lib/constants/manual-orders";
 
 /**
  * `meta` / `stageLabels` vắng mặt ⇒ y hệt trước Phase 2. `stageLabels`: nhãn tổ chức đặt cho trạng
@@ -36,7 +37,7 @@ export function OrdersTable({ rows, pageCount, total, meta, stageLabels, carrier
             cell: ({ row }) => (
               <div className="space-y-1">
                 <OrderStageBadge stage={row.original.stage} label={(relabel ? stageLabels?.[row.original.stage] : undefined) ?? (row.original.statusName || undefined)} />
-                {row.original.lastUpdateStatusAt ? <div className="text-[10.5px] text-muted-foreground">{formatTimeAgo(row.original.lastUpdateStatusAt)}</div> : null}
+                {row.original.lastUpdateStatusAt ? <div className="text-xs text-muted-foreground">{formatTimeAgo(row.original.lastUpdateStatusAt)}</div> : null}
                 <OrderReviewEntries entries={row.original.review} compact />
                 {canDecide && isManualOrderId(row.original.id) ? <OrderQuickDecision orderId={row.original.id} stage={row.original.stage} entries={row.original.review} gaps={row.original.gaps} size="xs" /> : null}
               </div>
@@ -56,8 +57,39 @@ export function OrdersTable({ rows, pageCount, total, meta, stageLabels, carrier
       getRowId={(row) => row.id}
       selectable={carrierBulk.length > 0}
       bulkActions={carrierBulk.length ? (selected, clear) => <CarrierBulkActions carriers={carrierBulk} orderIds={selected.map((r) => r.id)} clear={clear} /> : undefined}
+      mobileCard={(row) => <OrderMobileCard row={row} stageLabel={(stageLabels && Object.keys(stageLabels).length ? stageLabels[row.stage] : undefined) ?? (row.statusName || undefined)} canDecide={canDecide} />}
       emptyTitle="Không có đơn hàng"
       emptyDescription="Thử đổi khoảng thời gian hoặc bộ lọc. Nếu chưa đồng bộ, bấm “Đồng bộ đơn”."
     />
+  );
+}
+
+/**
+ * Một đơn trên điện thoại: đọc trong 3 giây — AI mua · trạng thái · bao nhiêu tiền · hàng đang ở đâu. Cùng dữ liệu và
+ * cùng huy hiệu với bảng máy tính; không có số nào được tính lại ở đây.
+ */
+function OrderMobileCard({ row, stageLabel, canDecide }: { row: OrderListRow; stageLabel?: string; canDecide: boolean }) {
+  const items = row.items.map((i) => `${i.productName}${i.variationDetail ? ` (${i.variationDetail})` : ""} ×${i.quantity}`).join(", ");
+  return (
+    <div className="space-y-1.5">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="truncate text-[15px] font-semibold">{row.billFullName || "—"}</p>
+          <p className="truncate text-[13px] text-muted-foreground">
+            #{row.systemId ?? manualOrderShortCode(row.id)} · {row.billPhone}
+            {row.shipProvince ? ` · ${row.shipProvince}` : ""}
+          </p>
+        </div>
+        <Money value={row.totalPriceAfterDiscount} className="shrink-0 text-[15px] font-bold" />
+      </div>
+      {items ? <p className="line-clamp-1 text-[13px] text-muted-foreground">{items}</p> : null}
+      <div className="flex flex-wrap items-center gap-1.5">
+        <OrderStageBadge stage={row.stage} label={stageLabel} />
+        {row.shipment ? <ShipmentStageBadge stage={row.shipment.stage} label={row.shipment.vtpStatusName ?? undefined} /> : <span className="text-xs text-muted-foreground">Chưa gửi ĐVVC</span>}
+        {row.lastUpdateStatusAt ? <span className="ml-auto text-xs text-muted-foreground">{formatTimeAgo(row.lastUpdateStatusAt)}</span> : null}
+      </div>
+      <OrderReviewEntries entries={row.review} compact />
+      {canDecide && isManualOrderId(row.id) ? <OrderQuickDecision orderId={row.id} stage={row.stage} entries={row.review} gaps={row.gaps} size="xs" /> : null}
+    </div>
   );
 }
