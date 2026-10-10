@@ -1,8 +1,8 @@
 {
   "pr": 793,
-  "sha": "e244baf96af943daaa4b71980ae773ad100ecc7b",
+  "sha": "f01435033084fd7917fa0238184afa35f02f60d3",
   "verdict": "PASS",
   "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
-  "at": "2026-10-10T21:26:41.419Z",
-  "note": "Chỉ script ops + bài kiểm + khai ops-vps; CSDL chỉ đọc, Pancake chỉ GET, không Graph/facebook.com; bài kiểm chứng minh không giá trị nào lọt ra dòng in"
+  "at": "2026-10-10T22:31:13.715Z",
+  "note": "Chỉ commit gộp main + tách mục khai; giữ cả sales-lifecycle-audit lẫn pancake-avatar-shape"
 }

@@ -1870,3 +1870,4 @@
 {"at":"2026-10-10T22:20:36.099Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DEPLOY_DISPATCHED","detail":"9d696116a649 · run 38091020384 https://github.com/truyenhkm5group-stack/hkt/actions/runs/38091020384"}
 {"at":"2026-10-10T22:21:27.710Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"sales-claim-guard","detail":"#789 @ 5b3acc94efd4 → e473ade84c19 (MERGE_ISOLATED · HIGH · gates success)"}
 {"at":"2026-10-10T22:31:10.348Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"avatar-pancake-shape","detail":"fix/avatar-pancake-shape @ f01435033084 · 1 lệnh kiểm thử"}
+{"at":"2026-10-10T22:31:25.663Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#793 @ f01435033084 · Chỉ commit gộp main + tách mục khai; giữ cả sales-lifecycle-audit lẫn pancake-avatar-shape"}
