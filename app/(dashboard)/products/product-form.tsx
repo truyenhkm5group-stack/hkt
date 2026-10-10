@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { createProductAction, updateProductAction } from "@/lib/actions/manual-products";
 import { PRODUCT_UNIT_SUGGESTIONS } from "@/lib/constants/manual-products";
+import { EXPERIENCE_PROFILES, type ExperienceProfile, type VariantField } from "@/lib/constants/experience-profile";
 import { cn } from "@/lib/utils";
 
 /**
@@ -17,20 +18,30 @@ import { cn } from "@/lib/utils";
  * `variants.<i>.sku`…). Tiền để trống = CHƯA KHAI, không phải 0 đ.
  */
 
-export type ProductFormVariant = { id?: string; sku: string; size: string; color: string; retailPrice: string; cost: string; selling: boolean; addOnOnly?: boolean };
+export type ProductFormVariant = { id?: string; sku: string; size: string; color: string; spec?: string; weight?: string; retailPrice: string; cost: string; selling: boolean; addOnOnly?: boolean };
 export type ProductFormValues = { name: string; code: string; unit: string; retailPrice: string; cost: string; variants: ProductFormVariant[] };
 
-const EMPTY_VARIANT: ProductFormVariant = { sku: "", size: "", color: "", retailPrice: "", cost: "", selling: true, addOnOnly: false };
+const EMPTY_VARIANT: ProductFormVariant = { sku: "", size: "", color: "", spec: "", weight: "", retailPrice: "", cost: "", selling: true, addOnOnly: false };
 
 /** "150.000" / "150000đ" ⇒ 150000; trống ⇒ `null` (chưa khai). */
+function fieldValue(v: ProductFormVariant, f: VariantField): string {
+  return (f.storage === "size" ? v.size : f.storage === "color" ? v.color : f.storage === "spec" ? v.spec : v.weight) ?? "";
+}
+
 function toMoney(v: string): number | null {
   const digits = v.replace(/[^\d]/g, "");
   return digits ? Number(digits) : null;
 }
 
-export function ProductForm({ mode, productId, initial }: { mode: "create" | "edit"; productId?: string; initial?: ProductFormValues }) {
+/**
+ * `profile` — hồ sơ ngành của tổ chức (`lib/constants/experience-profile.ts`), máy chủ đọc rồi truyền xuống: quyết định ô
+ * nào của mẫu mã hiện ra và gọi là gì (thời trang: Size / Màu · thực phẩm: Quy cách / Khối lượng). Vắng ⇒ bộ chung.
+ */
+export function ProductForm({ mode, productId, initial, profile = EXPERIENCE_PROFILES.GENERIC_COMMERCE }: { mode: "create" | "edit"; productId?: string; initial?: ProductFormValues; profile?: ExperienceProfile }) {
   const router = useRouter();
-  const [values, setValues] = useState<ProductFormValues>(initial ?? { name: "", code: "", unit: "cái", retailPrice: "", cost: "", variants: [{ ...EMPTY_VARIANT }] });
+  const fields = profile.variantFields;
+  const term = profile.variantTerm;
+  const [values, setValues] = useState<ProductFormValues>(initial ?? { name: "", code: "", unit: profile.defaultUnit, retailPrice: "", cost: "", variants: [{ ...EMPTY_VARIANT }] });
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [formError, setFormError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
@@ -51,6 +62,8 @@ export function ProductForm({ mode, productId, initial }: { mode: "create" | "ed
       sku: v.sku.trim() || (values.variants.length === 1 && i === 0 ? values.code.trim() : ""),
       size: v.size,
       color: v.color,
+      spec: v.spec ?? "",
+      weight: v.weight ? toMoney(v.weight) : null,
       retailPrice: toMoney(v.retailPrice),
       cost: toMoney(v.cost),
       selling: v.selling,
@@ -78,12 +91,12 @@ export function ProductForm({ mode, productId, initial }: { mode: "create" | "ed
       <div className="grid gap-4 sm:grid-cols-2">
         <div className="space-y-1 sm:col-span-2">
           <Label htmlFor="pf-name">Tên sản phẩm *</Label>
-          <Input id="pf-name" value={values.name} onChange={(e) => set("name", e.target.value)} placeholder="Vd: Nước suối 500ml" />
+          <Input id="pf-name" value={values.name} onChange={(e) => set("name", e.target.value)} placeholder={profile.examples.productName} />
           {err("name")}
         </div>
         <div className="space-y-1">
           <Label htmlFor="pf-code">Mã sản phẩm (SKU gốc) *</Label>
-          <Input id="pf-code" value={values.code} onChange={(e) => set("code", e.target.value)} placeholder="Vd: NS-500" className="font-mono" />
+          <Input id="pf-code" value={values.code} onChange={(e) => set("code", e.target.value)} placeholder={profile.examples.code} className="font-mono" />
           {err("code")}
           <p className="text-[11px] text-muted-foreground">Duy nhất trong tổ chức. Chữ/số Latin và . _ - /, không dấu cách.</p>
         </div>
@@ -99,7 +112,7 @@ export function ProductForm({ mode, productId, initial }: { mode: "create" | "ed
         </div>
         <div className="space-y-1">
           <Label htmlFor="pf-price">Giá bán (₫)</Label>
-          <Input id="pf-price" inputMode="numeric" value={values.retailPrice} onChange={(e) => set("retailPrice", e.target.value)} placeholder="Áp cho mẫu mã không khai giá riêng" className="numeric" />
+          <Input id="pf-price" inputMode="numeric" value={values.retailPrice} onChange={(e) => set("retailPrice", e.target.value)} placeholder={`Áp cho ${term.toLowerCase()} không khai giá riêng`} className="numeric" />
           {err("retailPrice")}
         </div>
         <div className="space-y-1">
@@ -111,15 +124,18 @@ export function ProductForm({ mode, productId, initial }: { mode: "create" | "ed
       </div>
 
       <fieldset className="space-y-2">
-        <legend className="mb-1 text-xs font-semibold tracking-wide text-muted-foreground uppercase">Mẫu mã ({values.variants.length})</legend>
+        <legend className="mb-1 text-xs font-semibold tracking-wide text-muted-foreground uppercase">{term} ({values.variants.length})</legend>
         {err("variants")}
         <div className="overflow-x-auto rounded-lg border">
           <table className="w-full min-w-[720px] text-sm">
             <thead className="bg-muted/40 text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">
               <tr>
                 <th className="px-3 py-2 text-left">SKU *</th>
-                <th className="px-3 py-2 text-left">Size</th>
-                <th className="px-3 py-2 text-left">Màu</th>
+                {fields.map((f) => (
+                  <th key={f.storage} className={cn("px-3 py-2", f.storage === "weight" ? "text-right" : "text-left")}>
+                    {f.label}
+                  </th>
+                ))}
                 <th className="px-3 py-2 text-right">Giá bán riêng</th>
                 <th className="px-3 py-2 text-right">Giá vốn riêng</th>
                 <th className="px-3 py-2 text-center">Đang bán</th>
@@ -135,12 +151,19 @@ export function ProductForm({ mode, productId, initial }: { mode: "create" | "ed
                     {err(`variants.${i}.sku`)}
                     {err(`variants.${i}.id`)}
                   </td>
-                  <td className="px-3 py-1.5">
-                    <Input aria-label={`Size mẫu mã ${i + 1}`} value={v.size} onChange={(e) => setVariant(i, { size: e.target.value })} className="h-8" />
-                  </td>
-                  <td className="px-3 py-1.5">
-                    <Input aria-label={`Màu mẫu mã ${i + 1}`} value={v.color} onChange={(e) => setVariant(i, { color: e.target.value })} className="h-8" />
-                  </td>
+                  {fields.map((f) => (
+                    <td key={f.storage} className="px-3 py-1.5">
+                      <Input
+                        aria-label={`${f.label} ${term.toLowerCase()} ${i + 1}`}
+                        value={fieldValue(v, f)}
+                        onChange={(e) => setVariant(i, { [f.storage]: e.target.value })}
+                        placeholder={f.placeholder}
+                        inputMode={f.storage === "weight" ? "numeric" : undefined}
+                        className={cn("h-8", f.storage === "weight" && "numeric text-right")}
+                      />
+                      {err(`variants.${i}.${f.storage}`)}
+                    </td>
+                  ))}
                   <td className="px-3 py-1.5">
                     <Input aria-label={`Giá bán mẫu mã ${i + 1}`} inputMode="numeric" value={v.retailPrice} onChange={(e) => setVariant(i, { retailPrice: e.target.value })} placeholder="giá chung" className="numeric h-8 text-right" />
                     {err(`variants.${i}.retailPrice`)}
@@ -168,7 +191,7 @@ export function ProductForm({ mode, productId, initial }: { mode: "create" | "ed
           </table>
         </div>
         <Button type="button" variant="outline" size="sm" onClick={addVariant}>
-          <Plus className="size-4" /> Thêm mẫu mã
+          <Plus className="size-4" /> Thêm {term.toLowerCase()}
         </Button>
         <p className="text-[11px] text-muted-foreground">Tồn kho KHÔNG nhập ở đây: sau khi tạo, lập phiếu Nhập hàng (hoặc Kiểm kê) để sổ kho có số — chưa có phiếu nhập thì ERP ghi «Chưa có phiếu nhập», không hiện số bịa.</p>
       </fieldset>
