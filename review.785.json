@@ -1,8 +1,8 @@
 {
   "pr": 785,
-  "sha": "7c8ff757cf223a010278ab7a564fd7cbc439dade",
+  "sha": "0f9a38d78bf88741ce3f14197c7c725424e9558b",
   "verdict": "PASS",
   "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
-  "at": "2026-10-10T17:43:55.780Z",
-  "note": "Đọc diff: upsell.accepted thêm vào câu đọc nhưng không nằm trong AI_CONTRIBUTION_EVENTS/HUMAN_TOUCH_EVENTS/followupRecovery ⇒ nhãn chính không đổi (bài deepEqual trước/sau); overlay chỉ khi nhãn AI; đã giao qua orderFactsOf/ORDER_OUTCOME; null≠0 cho tiền upsell thiếu; số upsell cũ của màn Hiệu quả không đụng"
+  "at": "2026-10-10T19:57:05.180Z",
+  "note": "Chỉ commit gộp main do GitHub update-branch, không xung đột; nội dung đã review trước"
 }
