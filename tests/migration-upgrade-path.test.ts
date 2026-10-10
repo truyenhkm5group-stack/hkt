@@ -187,6 +187,7 @@ const MOI = [
   "0237_saas_ops_signals",
   "0238_variant_add_on_only",
   "0239_sales_chat_reads",
+  "0240_tenant_value_snapshots",
 ] as const;
 
 /*
@@ -395,6 +396,18 @@ export async function testMigrationUpgradePath() {
     await assert.rejects(client.query(`insert into sales_chat_reads (conversation_id, user_id, read_through_at) values ('up-scr', 'u1', now())`), "bước 2: 0239 — một con trỏ mỗi (hội thoại, người)");
     await client.query(`delete from sales_chat_conversations where id = 'up-scr'`);
     assert.equal(await dem("select count(*)::int as n from sales_chat_reads"), 0, "bước 2: 0239 — xoá hội thoại thì con trỏ đi theo");
+
+    // 0240 (ảnh giá trị theo tổ chức + sức khoẻ theo ngày — sứ mệnh saas-value-snapshots): hai bảng mới RỖNG (không gieo, không
+    // backfill — ngày trước lượt chụp đầu tiên là CHƯA ĐO); CHECK chặn cửa sổ lạ, chi âm, phiên bản rỗng, mã lý do sai dạng / thiếu mã.
+    assert.equal(await dem("select count(*)::int as n from platform_tenant_value_snapshots"), 0, "bước 2: 0240 không gieo ảnh giá trị nào");
+    assert.equal(await dem("select count(*)::int as n from platform_tenant_health_daily"), 0, "bước 2: 0240 không gieo dòng sức khoẻ nào");
+    await client.query(`insert into platform_tenant_value_snapshots (captured_day, org_code, window_days, window_from, window_to, metrics, formula_version) values (current_date, 'up-tv', 30, now() - interval '29 days', now(), '{}'::jsonb, 'tv1.attr1')`);
+    await assert.rejects(client.query(`insert into platform_tenant_value_snapshots (captured_day, org_code, window_days, window_from, window_to, metrics, formula_version) values (current_date, 'up-tv', 30, now() - interval '29 days', now(), '{}'::jsonb, 'tv1.attr1')`), "bước 2: 0240 — một ảnh mỗi (ngày, tổ chức, cửa sổ)");
+    await assert.rejects(client.query(`insert into platform_tenant_value_snapshots (captured_day, org_code, window_days, window_from, window_to, metrics, formula_version) values (current_date, 'up-tv', 14, now() - interval '13 days', now(), '{}'::jsonb, 'tv1.attr1')`), "bước 2: 0240 — cửa sổ chỉ 7 / 30 / 90");
+    await assert.rejects(client.query(`insert into platform_tenant_value_snapshots (captured_day, org_code, window_days, window_from, window_to, metrics, formula_version, customer_spend_vnd) values (current_date, 'up-tv', 7, now() - interval '6 days', now(), '{}'::jsonb, 'tv1.attr1', -1)`), "bước 2: 0240 — khách trả không âm");
+    await assert.rejects(client.query(`insert into platform_tenant_health_daily (day, org_code, level, churn_risk, reason_codes, churn_reason_codes, rule_version) values (current_date, 'up-tv', 'HEALTHY', 'LOW', '{}'::text[], array['NO_RISK_SIGNAL']::text[], 'v1')`), "bước 2: 0240 — mọi mức có ít nhất một mã lý do");
+    await assert.rejects(client.query(`insert into platform_tenant_health_daily (day, org_code, level, churn_risk, reason_codes, churn_reason_codes, rule_version) values (current_date, 'up-tv', 'TOT', 'LOW', array['ALL_SIGNALS_OK']::text[], array['NO_RISK_SIGNAL']::text[], 'v1')`), "bước 2: 0240 — mức trong danh sách đóng");
+    await client.query(`delete from platform_tenant_value_snapshots where org_code = 'up-tv'`);
 
     // 0178 (G-ORDER — phiếu giao có ký nhận của đơn tạo tay): bảng mới RỖNG (không đoán đơn nào "đã giao" — mục 8.8, 35);
     // CHECK chỉ nhận đơn `erp-`, bắt buộc tên người ký, huỷ phải có lý do; một phiếu còn hiệu lực mỗi đơn.

@@ -917,9 +917,10 @@ export function testLoiVanHanhHoiTruoc(): number {
   const DOC_SO_DU_AI: Record<string, string> = {
     "lib/pricing/admin.ts": "loadPricingEconomics — sau platformOperatorDenial.",
     "lib/platform/saas-cockpit.ts": "loadOwnerCockpit — sau platformOperatorDenial (doanh thu Số dư AI 30 ngày của cockpit).",
-    "lib/saas/customers.ts": "loadCommercialSnapshot — chỉ lib/saas/console.ts (sau cổng vận hành) và finalizeStatement (lõi chốt bảng kê của người vận hành) gọi.",
+    "lib/saas/customers.ts": "loadCommercialSnapshot — chỉ lib/saas/console.ts (sau cổng vận hành), finalizeStatement (lõi chốt bảng kê của người vận hành) và lượt chụp sức khoẻ theo ngày của JOB nhà (lib/saas/tenant-health-daily.ts, không người dùng, không trang nào gọi) gọi.",
     "lib/pricing/customer.ts": "loadCustomerPlan(mã) — readAiCustomerChargedUnits với mã từ PHIÊN (/settings/plan: usage.orgCode của user.organization).",
     "lib/billing/prepaid-ai.ts": "planPrepaidAi(mã) — readAiCustomerChargedUnits của MỘT tổ chức cho kế hoạch trả trước; chỉ script ops org-prepaid-ai (người vận hành nền tảng chạy qua ops-vps, kết quả MÃ HOÁ) gọi — không server action / trang nào (tests/org-prepaid-ai.test.ts quét).",
+    "lib/saas/tenant-value-capture.ts": "captureTenantValue — lượt chụp ảnh giá trị theo tổ chức (0240) của JOB nhà, không có người dùng: chỉ captureSaasSnapshot (nhánh source JOB) gọi, không trang / action nào (tests/saas-value-snapshots.test.ts quét); kết quả chỉ ghi vào CSDL nhà cho người vận hành đọc.",
   };
   const goiSoDu: string[] = [];
   const daDungSoDu = new Set<string>();

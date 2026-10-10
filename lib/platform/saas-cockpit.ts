@@ -66,20 +66,29 @@ export const AI_WINDOW_DAYS = 30;
  * Chụp ảnh hôm nay nếu chưa có hoặc đã cũ — idempotent, an toàn khi gọi dồn (job `alerts` 10 phút/lần, lượt mở trang).
  * Trả `null` khi ảnh chụp còn mới.
  */
-export async function ensureSaasSnapshot(now: Date = new Date(), maxAgeMs: number = SNAPSHOT_REFRESH_MS) {
+export async function ensureSaasSnapshot(now: Date = new Date(), maxAgeMs: number = SNAPSHOT_REFRESH_MS, source: "JOB" | "PAGE" = "PAGE") {
   const pdb = await getPlatformDb();
   const t = schema.platformSaasDaily;
   const [last] = await pdb.select({ at: t.capturedAt }).from(t).where(eq(t.day, vnDate(now))).orderBy(desc(t.capturedAt)).limit(1);
-  if (last && now.getTime() - last.at.getTime() < maxAgeMs) return null;
-  return captureSaasSnapshot(now);
+  if (last && now.getTime() - last.at.getTime() < maxAgeMs) {
+    // Ảnh MRR còn mới (lượt mở trang vừa chụp) nhưng ảnh GIÁ TRỊ hôm nay chưa có ⇒ đường job vẫn chạy: không thì một người vận hành mở
+    // trang đều tay sẽ giữ ảnh MRR luôn "mới" và job không bao giờ tới lượt chụp giá trị (0240).
+    if (source !== "JOB") return null;
+    const { tenantValueDue } = await import("@/lib/saas/tenant-value-capture");
+    if (!(await tenantValueDue(await listOrganizations(), now))) return null;
+  }
+  return captureSaasSnapshot(now, { source });
 }
 
 /** Lượt ké job `alerts` của nhà: một câu cho chi tiết lượt chạy, `null` khi ảnh chụp còn mới. Không bao giờ ném. */
 export async function saasSnapshotForJob(now: Date = new Date()): Promise<string | null> {
   try {
-    const r = await ensureSaasSnapshot(now, SAAS_SNAPSHOT_JOB_EVERY_MS);
+    const r = await ensureSaasSnapshot(now, SAAS_SNAPSHOT_JOB_EVERY_MS, "JOB");
     if (!r) return null;
-    return `sổ SaaS ${r.day}: ${r.orgs} tổ chức, MRR ${r.mrrVnd.toLocaleString("vi-VN")} ₫, +${r.milestonesAdded} mốc${r.errors.length ? ` (lỗi: ${r.errors.slice(0, 2).join(" | ")})` : ""}`;
+    const tv = r.tenantValue;
+    const slowest = tv?.orgs.reduce<{ orgCode: string; ms: number } | null>((m, o) => (!m || o.ms > m.ms ? o : m), null) ?? null;
+    const value = tv ? ` · ảnh giá trị ${tv.status}: ${tv.orgs.length}/${tv.targets} tổ chức, ${tv.totalMs} ms (sổ nhà ${tv.homeMs} ms${slowest ? `, chậm nhất ${slowest.ms} ms` : ""})${tv.errors.length ? `, lỗi nguồn ${tv.errors.length}` : ""}` : "";
+    return `sổ SaaS ${r.day}: ${r.orgs} tổ chức, MRR ${r.mrrVnd.toLocaleString("vi-VN")} ₫, +${r.milestonesAdded} mốc${value}${r.errors.length ? ` (lỗi: ${r.errors.slice(0, 2).join(" | ")})` : ""}`;
   } catch (e) {
     return `sổ SaaS hỏng: ${e instanceof Error ? e.message.slice(0, 200) : String(e).slice(0, 200)}`;
   }

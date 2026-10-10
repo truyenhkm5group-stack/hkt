@@ -1674,6 +1674,13 @@
       "when": 1791400818330,
       "tag": "0239_sales_chat_reads",
       "breakpoints": true
+    },
+    {
+      "idx": 240,
+      "version": "7",
+      "when": 1791400878330,
+      "tag": "0240_tenant_value_snapshots",
+      "breakpoints": true
     }
   ]
 }

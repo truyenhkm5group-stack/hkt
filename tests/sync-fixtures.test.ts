@@ -591,6 +591,7 @@ import { testSaasHideInternal } from "./saas-hide-internal.test";
 import { testSaasSignupSubscription } from "./saas-signup-subscription.test";
 import { testCreateCustomerRules } from "./create-customer-rules.test";
 import { testPlatformSaas } from "./platform-saas.test";
+import { testSaasValueSnapshots } from "./saas-value-snapshots.test";
 import { testTenantAttack } from "./tenant-attack.test";
 import { testAiSalesIsolation } from "./ai-sales-isolation.test";
 import { testPublicChatLimits } from "./public-chat-limits.test";
@@ -3074,6 +3075,9 @@ async function main() {
   await testCreateCustomerRules();
   // Sổ kinh tế SaaS + Owner Cockpit (0203): hai tổ chức THẬT `saas-a` / `saas-b`, tự cấp, tự dọn.
   await testPlatformSaas();
+  // Trung tâm giá trị SaaS PR-3 (0240): ảnh giá trị theo tổ chức + sức khoẻ theo ngày — một lần mỗi ngày VN, chỉ đường JOB, nguồn hỏng ⇒
+  // chỉ ô của nó null + source_errors, ngày cũ không bị ghi. Hai tổ chức THẬT `tvs-a` / `tvs-b`, tự cấp, tự dọn.
+  await testSaasValueSnapshots();
   await testPlatformUi();
   // Nền tảng đa tổ chức: hai tổ chức THẬT trong một tiến trình (mã `pi-`, tự cấp và tự dọn) — đệm, bus,
   // credential, khoá job, hẹn giờ, webhook. Đứng ngay trước bài ngữ cảnh để mọi bài phía trên không thấy tổ chức nào khác.
