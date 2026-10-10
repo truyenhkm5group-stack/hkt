@@ -26,18 +26,18 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-10T09:06:28.308Z",
-  "updated_at": "2026-10-10T15:25:45.443Z",
-  "last_heartbeat": "2026-10-10T15:25:06.564Z",
+  "updated_at": "2026-10-10T20:01:42.939Z",
+  "last_heartbeat": "2026-10-10T20:01:42.939Z",
   "definition_of_done": [],
   "handoff": {
     "branch": "fix/sync-runner-lock",
-    "sha": "54638353b308e825316124165ff75d717dc84463",
-    "at": "2026-10-10T15:25:06.564Z",
+    "sha": "835870fa130c96101c9b62d26e27d251be8eaaa1",
+    "at": "2026-10-10T20:01:42.939Z",
     "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
     "title": "runSyncJob giữ khoá trước await đầu tiên (F3) + deploy chỉ từ main qua Environment, agent-run không giữ token ghi (F7 F8)",
-    "summary": "F3 runSyncJob giữ khoá trước await đầu, nhả ở mọi nhánh, nhả theo danh tính; F7 release chỉ từ main + environment production; F8 agent-run persist-credentials false, mã việc qua env có kiểm dạng, token chỉ ở bước đẩy (Team Premium F3/F7/F8)",
+    "summary": "cập nhật nhánh theo main",
     "tests": [
-      "typecheck · lint sạch · npm test TẤT CẢ KIỂM THỬ ĐẠT · F3 5/5 (mã cũ 2 đỏ) · workflow-hardening đột biến 8/8 đỏ"
+      "như lượt trước; GitHub update-branch gộp main (#784/#786) — không xung đột"
     ]
   }
 }
