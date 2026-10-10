@@ -3,7 +3,7 @@
   "mission_id": "sales-claim-guard",
   "title": "P0 L0+L1 vòng đời khách: máy chủ chặn AI khẳng định «đã nhận tiền» / «đã chốt» khi nguồn chưa xác nhận, ảnh chuyển khoản ⇒ CHƯA XÁC MINH + chuyển người; script ops đếm mẫu lỗi (ca HSLC Thiên Lý)",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -27,9 +27,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-10T16:13:05.521Z",
-  "updated_at": "2026-10-10T21:10:42.569Z",
+  "updated_at": "2026-10-10T22:21:27.675Z",
   "last_heartbeat": "2026-10-10T21:10:42.569Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#789 → e473ade84c19be6532fe0b01a606942c0d60b9b9"
+  },
   "handoff": {
     "branch": "fix/sales-claim-guard",
     "sha": "5b3acc94efd43f8648f081ea99df9f643b929334",
