@@ -1431,3 +1431,4 @@
 {"at":"2026-10-10T05:58:30.460Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DEPLOY_DISPATCHED","detail":"7f45750da021 · run 38029306611 https://github.com/truyenhkm5group-stack/hkt/actions/runs/38029306611"}
 {"at":"2026-10-10T06:28:22.981Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"acceptance-shell-landing","detail":"fix/acceptance-shell-landing @ d4fe6b402dba · 1 lệnh kiểm thử"}
 {"at":"2026-10-10T06:29:00.583Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"ai-settings-390","detail":"#768 @ a5377c4c60ae → 56cd33ef2552 (MERGE_NOW · LOW · gates success)"}
+{"at":"2026-10-10T06:52:11.473Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#769 @ d4fe6b402dba · Ứng dụng giả của bài kiểm theo shellLandingFor; gates xanh"}
