@@ -17,9 +17,11 @@ import { and, eq, ne, notInArray, or, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { can, type SessionUser } from "@/lib/auth/session";
 import { attemptHoldsOrder } from "@/lib/constants/carrier-vtp";
+import { displayVariationText, type ExperienceProfile } from "@/lib/constants/experience-profile";
 import { isManualOrderId, manualOrderShortCode, orderShipNote } from "@/lib/constants/manual-orders";
 import { reconfirmsSinceOpen, reviewFromValue } from "@/lib/constants/order-review";
 import { ORDER_STAGE_LABEL } from "@/lib/constants/pancake";
+import { readExperienceProfile } from "@/lib/experience/profile";
 import type { ConversationOrderSummary, OrderSummaryLine } from "@/lib/sales-chatbot/order-verification-shared";
 
 export type OrderSummaryResult = { ok: true; summary: ConversationOrderSummary | null } | { ok: false; error: string };
@@ -73,6 +75,11 @@ export async function loadConversationOrderSummary(user: SessionUser, conversati
   // Lần gửi của đơn: chỉ chặng + phần `carrierCancel` của lời khai gốc — đủ cho `attemptHoldsOrder`, không kéo cả `raw` của vận đơn.
   const attempts = sql<unknown>`(select coalesce(json_agg(json_build_object('stage', s."stage", 'raw', json_build_object('carrierCancel', s."raw"->'carrierCancel'))), '[]'::json)
     from "shipments" s where s."order_id" = "orders"."id")`;
+  // Hồ sơ ngành chỉ để ĐỔI NHÃN chữ biến thể khi in (shop thực phẩm: «Size: 1kg» ⇒ «Quy cách: 1kg» — xem `displayVariationText`).
+  // Chạy song song với câu SQL; đọc hồ sơ lỗi ⇒ in nguyên chữ đã lưu, không bao giờ làm hỏng khung đơn.
+  const profileRead = readExperienceProfile()
+    .then((x): ExperienceProfile | null => x.profile)
+    .catch(() => null);
   // Hội thoại LEFT JOIN đơn sống: một dòng dù chưa có đơn (đơn = null) ⇒ «không có hội thoại» và «chưa có đơn» cùng một câu.
   const rows = await db
     .select({
@@ -106,11 +113,14 @@ export async function loadConversationOrderSummary(user: SessionUser, conversati
     .where(and(eq(c.id, conversationId), ne(c.channel, "TEST")))
     .orderBy(sql`${o.insertedAt} desc nulls last`, sql`${o.id} desc nulls last`)
     .limit(1);
+  const profile = await profileRead;
   const r = rows[0];
   if (!r) return { ok: false, error: "Không có hội thoại này." };
   if (!r.id || !r.stage || !r.insertedAt) return { ok: true, summary: null };
   const manual = isManualOrderId(r.id);
-  const lines = asArray(r.items).map(itemFromJson);
+  const lines = asArray(r.items)
+    .map(itemFromJson)
+    .map((l) => (profile ? { ...l, variation: displayVariationText(l.variation, profile) } : l));
   const shippingNote = orderShipNote(r.note);
   const shipping = shippingNote === "UNKNOWN" ? null : (r.shippingFee ?? 0);
   const review = manual ? (reviewFromValue(r.review)?.entries ?? []) : [];

@@ -7,11 +7,13 @@ import { Money, SectionCard } from "@/components/ui-bits";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { requireResource } from "@/lib/auth/scope-guard";
 import { ScopeDenied } from "@/components/scope-denied";
+import { legacyAttributeLabels, variantColumnLabel } from "@/lib/constants/experience-profile";
 import { VERDICT_LABEL, VERDICT_RULES, VERDICT_TONE, classifyProduct, type ProductVerdict } from "@/lib/constants/product-verdict";
 import { formatNumber, formatPercent } from "@/lib/format";
 import { adSpendByProduct, getProductIntelligence } from "@/lib/queries/product-intelligence";
 import { ORDER_SOURCE_LABEL, type OrderSourceKey } from "@/lib/queries/order-source";
 import { parseListParams, type SearchParams } from "@/lib/search-params";
+import { readExperienceProfile } from "@/lib/experience/profile";
 import { cn } from "@/lib/utils";
 
 export const metadata = { title: "Hiệu quả mẫu mã" };
@@ -34,10 +36,15 @@ export default async function ProductPerformancePage({ searchParams }: { searchP
   const size = params.filters.size?.[0];
   const verdictFilter = params.filters.verdict?.[0] as ProductVerdict | undefined;
 
-  const [rows, adSpend] = await Promise.all([
+  const [rows, adSpend, { profile }] = await Promise.all([
     getProductIntelligence({ period: params.period, q: params.q, channel, color, size, limit: 300 }),
     adSpendByProduct(params.period),
+    readExperienceProfile(),
   ]);
+  // Nhãn theo hồ sơ ngành: shop thực phẩm thì cột `size` cũ đang giữ QUY CÁCH (dữ liệu trước #755) ⇒ bộ lọc / cột gọi nó là
+  // «Quy cách», không phải «Size». Chỉ đổi NHÃN — khoá lọc `size` / `color` và giá trị giữ nguyên.
+  const attrLabel = legacyAttributeLabels(profile);
+  const variantLabel = variantColumnLabel(profile);
 
   const judged = rows.map((row) => ({
     row,
@@ -64,7 +71,7 @@ export default async function ProductPerformancePage({ searchParams }: { searchP
     <div className="space-y-5">
       <PageHeader
         eyebrow="Sản phẩm"
-        title="Hiệu quả mẫu mã × màu × size"
+        title={profile.sizeColorMatrix ? "Hiệu quả mẫu mã × màu × size" : `Hiệu quả mẫu mã × ${profile.variantTerm.toLowerCase()}`}
         hint="Mẫu nào đáng nhân bản, mẫu nào đang lỗ — xét trên sáu chiều, không chỉ số bán. 'Bán chạy' theo số LÊN ĐƠN là con số đánh lừa: một mẫu bán 100 cái mà hoàn 60 kém hơn hẳn mẫu bán 50 hoàn 5. Nhãn 'Đáng nhân bản' đòi ĐỦ CẢ SÁU chiều — sản lượng, tỷ lệ giao thành công, doanh thu, biên lợi nhuận góp, chi quảng cáo và sức khoẻ tồn kho. Thiếu dữ liệu chiều nào thì KHÔNG phán, vì gắn nhãn bán chạy dựa trên vài chiều rồi để đặt sản xuất hàng nghìn cái là thiệt hại lớn nhất một báo cáo có thể gây ra."
       />
 
@@ -74,8 +81,8 @@ export default async function ProductPerformancePage({ searchParams }: { searchP
         facets={[
           { key: "channel", label: "Kênh", options: CHANNELS.map((c) => ({ value: c, label: ORDER_SOURCE_LABEL[c] })) },
           { key: "verdict", label: "Phân loại", options: (Object.keys(VERDICT_LABEL) as ProductVerdict[]).map((v) => ({ value: v, label: `${VERDICT_LABEL[v]} (${count(v)})` })) },
-          ...(colors.length > 1 ? [{ key: "color", label: "Màu", options: colors.map((c) => ({ value: c, label: c })) }] : []),
-          ...(sizes.length > 1 ? [{ key: "size", label: "Size", options: sizes.map((s) => ({ value: s, label: s })) }] : []),
+          ...(colors.length > 1 ? [{ key: "color", label: attrLabel.color, options: colors.map((c) => ({ value: c, label: c })) }] : []),
+          ...(sizes.length > 1 ? [{ key: "size", label: attrLabel.size, options: sizes.map((s) => ({ value: s, label: s })) }] : []),
         ]}
       />
 
@@ -103,7 +110,7 @@ export default async function ProductPerformancePage({ searchParams }: { searchP
             <TableHeader>
               <TableRow>
                 <TableHead>Mẫu mã</TableHead>
-                <TableHead>Màu / Size</TableHead>
+                <TableHead>{variantLabel}</TableHead>
                 <TableHead className="text-right">Giao TC</TableHead>
                 <TableHead className="text-right">GTC</TableHead>
                 <TableHead className="text-right">Hoàn</TableHead>
