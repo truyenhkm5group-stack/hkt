@@ -1540,3 +1540,4 @@
 {"at":"2026-10-10T14:53:57.234Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"CLAIM","mission":"owner-hslc-duplicate-orgs","detail":"BLOCKED · 1 mẫu phạm vi · MEDIUM"}
 {"at":"2026-10-10T14:54:17.284Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"CLAIM","mission":"owner-backup-drive-full","detail":"BLOCKED · 1 mẫu phạm vi · MEDIUM"}
 {"at":"2026-10-10T14:54:36.145Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"CLAIM","mission":"owner-billing-overage","detail":"BLOCKED · 1 mẫu phạm vi · MEDIUM"}
+{"at":"2026-10-10T14:54:54.289Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"CLAIM","mission":"owner-enable-shell-zns","detail":"BLOCKED · 1 mẫu phạm vi · MEDIUM"}
