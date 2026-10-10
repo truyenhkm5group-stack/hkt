@@ -1,27 +1,30 @@
 {
   "schema": 1,
   "mission_id": "sync-runner-lock",
-  "title": "runSyncJob giữ khoá trước await đầu tiên — hai lượt cùng job không chạy song song (Team Premium F3)",
+  "title": "runSyncJob giữ khoá trước await đầu tiên (F3) + deploy chỉ từ main qua Environment, agent-run không giữ token ghi (F7 F8)",
   "business_goal": "",
-  "status": "BACKLOG",
+  "status": "RUNNING",
   "priority": "P2",
-  "risk": "MEDIUM",
+  "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
   "worker": null,
   "worktree": null,
   "branch": "fix/sync-runner-lock",
-  "base_sha": null,
+  "base_sha": "33f3b13bd9614601e92658e3e5f1cbc5cf6204dc",
   "domains": [],
   "owned_paths": [
     "lib/sync/runner.ts",
-    "tests/sync-runner-concurrent-start.test.ts"
+    "tests/sync-runner-concurrent-start.test.ts",
+    ".github/workflows/deploy-vps.yml",
+    ".github/workflows/agent-run.yml",
+    "tests/workflow-hardening.test.ts"
   ],
   "dependencies": [],
   "blocked_by": [],
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-10T09:06:28.308Z",
-  "updated_at": "2026-10-10T09:06:28.308Z",
-  "last_heartbeat": "2026-10-10T09:06:28.308Z",
+  "updated_at": "2026-10-10T14:10:13.571Z",
+  "last_heartbeat": "2026-10-10T14:10:13.571Z",
   "definition_of_done": []
 }
