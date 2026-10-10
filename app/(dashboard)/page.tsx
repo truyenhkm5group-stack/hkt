@@ -8,6 +8,9 @@ import { FULFILLMENT_BUCKET_HINT, FULFILLMENT_BUCKET_LABEL, FULFILLMENT_BUCKET_O
 import { tongRoDayDu } from "@/lib/queries/fulfillment-buckets";
 import { StatStrip } from "@/components/stat-tile";
 import { TopActions } from "@/app/(dashboard)/top-actions";
+import { TodayWorkspace, WORKSPACE_ICONS, type WorkspaceTile } from "@/app/(dashboard)/today-workspace";
+import { orderNeedsReviewCount } from "@/lib/queries/orders";
+import { parseListParams } from "@/lib/search-params";
 import { BusinessBriefSection } from "@/app/(dashboard)/business-brief";
 import { DataFreshnessStrip } from "@/app/(dashboard)/data-freshness";
 import { OwnerDecisionsSection } from "@/app/(dashboard)/owner-decisions";
@@ -62,7 +65,9 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
   const show = visibleBlocks(user, DASHBOARD_BLOCKS);
   const params = await searchParams;
   const period = resolvePeriod(params, "30d");
-  const data = await getDashboardData(period);
+  // Đếm "đơn cần người kiểm" bằng ĐÚNG hàm của trang Đơn hàng (bộ lọc `review=flagged`), cùng kỳ mặc định 30 ngày của
+  // trang đó — ô và danh sách nó mở ra không được nói hai số khác nhau.
+  const [data, needsReview] = await Promise.all([getDashboardData(period), hrefVisible(user, "/orders") ? orderNeedsReviewCount(parseListParams({}, { defaultSort: "insertedAt", defaultPeriod: "30d" })).catch(() => null) : Promise.resolve(null)]);
   const status = integrationStatus();
   // GTC dùng CHUNG định nghĩa với báo cáo Tỷ lệ giao thành công (giao TC ÷ đơn đã kết thúc).
   // Trước đây chia cho TỔNG đơn nên Tổng quan luôn báo tỷ lệ thấp hơn báo cáo cho cùng một kỳ.
@@ -72,6 +77,21 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
   const maxFulfillment = Math.max(1, ...FULFILLMENT_BUCKET_ORDER.map((b) => data.fulfillment.counts[b]));
   const buckedCheck = tongRoDayDu(data.fulfillment);
   const maxChannel = Math.max(1, ...data.channels.map((c) => c.revenue));
+  const periodQuery = period.key === "30d" ? "" : `&period=${period.key}`;
+  /*
+    DẢI VIỆC CẦN LÀM NGAY — mỗi ô mở đúng danh sách ĐÃ LỌC (tham số là của chính trang đích). Ô chỉ hiện khi người xem vào
+    được trang đích và module nguồn đang bật — một ô dẫn tới 403 hay /module-disabled là một lời hứa sai.
+  */
+  const tiles: WorkspaceTile[] = [
+    ...(needsReview !== null ? [{ key: "review", label: "Đơn cần người kiểm", count: needsReview, href: "/orders?review=flagged", action: "Kiểm", icon: WORKSPACE_ICONS.review, urgent: true }] : []),
+    ...(show.orderFlow && hrefVisible(user, "/orders") ? [{ key: "new", label: "Đơn mới chờ xác nhận", count: data.attention.newOrders, href: "/orders?stage=NEW", action: "Xác nhận", icon: WORKSPACE_ICONS.newOrders }] : []),
+    ...(show.fulfillment && hrefVisible(user, "/orders") ? [{ key: "notShipped", label: "Đơn chưa gửi ĐVVC", count: data.fulfillment.counts.NOT_SHIPPED, href: `/orders?fulfillment=NOT_SHIPPED${periodQuery}`, action: "Gửi hàng", icon: WORKSPACE_ICONS.notShipped }] : []),
+    ...(show.fulfillment && hrefVisible(user, "/shipments") ? [{ key: "failed", label: "Giao thất bại / đang hoàn", count: data.attention.failedDelivery, href: "/shipments", action: "Gọi khách", icon: WORKSPACE_ICONS.failed, urgent: true }] : []),
+    ...(show.fulfillment && hrefVisible(user, "/shipments") ? [{ key: "stale", label: "Vận đơn treo lâu", count: data.attention.staleShipments, href: "/shipments?view=all", action: "Tra", icon: WORKSPACE_ICONS.stale }] : []),
+    // Tồn âm là SAI LỆCH cần kiểm, không phải kho nợ hàng — chỉ hiện khi có.
+    ...(hrefVisible(user, "/inventory/planning") && data.attention.negativeStockRows ? [{ key: "negative", label: "Mẫu mã âm sổ — cần kiểm", count: data.attention.negativeStockRows, href: "/inventory/planning", action: "Kiểm kho", icon: WORKSPACE_ICONS.stock, urgent: true }] : []),
+    ...(hrefVisible(user, "/inventory/planning") ? [{ key: "stock", label: "Mẫu mã cần đặt gấp", count: data.attention.lowStock, href: "/inventory/planning", action: "Đặt hàng", icon: WORKSPACE_ICONS.stock }] : []),
+  ];
 
   return (
     <div className="space-y-5">
@@ -86,6 +106,36 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
           </>
         }
       />
+
+      <TodayWorkspace tiles={tiles} />
+
+      {/*
+        CẦN ANH QUYẾT (Company OS · Agent H) — đứng TRÊN "Việc cần làm hôm nay": khối dưới là việc của cả
+        shop, khối này chỉ gồm QUYẾT ĐỊNH của người điều hành. Chảy về sau như hai khối trên, và mỗi nguồn
+        có hạn giờ riêng nên một nguồn chậm không giữ cả trang.
+      */}
+      {show.ownerDecisions ? (
+      <Suspense fallback={<Skeleton className="h-40 rounded-2xl" />}>
+        <OwnerDecisionsSection />
+      </Suspense>
+      ) : null}
+
+      {/*
+        VIỆC CỤ THỂ ĐỨNG ĐẦU HÀNG ĐỢI — lên ngay dưới dải việc, TRƯỚC các thẻ tiền (chủ shop 09/10/2026: trang chủ là chỗ
+        làm việc). Trước đây khối này nằm dưới hai màn cuộn, sau biểu đồ.
+      */}
+      {show.todayActions ? (
+        <SectionCard
+          title="Bắt đầu từ việc này"
+          hint="Những việc cụ thể đứng đầu hàng đợi, xếp theo cùng công thức ưu tiên của toàn ERP — kèm vì sao gấp, bao nhiêu tiền đang treo, ai đang cầm và đã trễ hạn chưa."
+          actions={<Link href="/alerts" className="text-xs font-semibold text-primary hover:underline">Hàng đợi việc</Link>}
+          padded={false}
+        >
+          <Suspense fallback={<div className="space-y-2 p-5">{Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-9 rounded-lg" />)}</div>}>
+            <TopActions viewer={user} limit={4} />
+          </Suspense>
+        </SectionCard>
+      ) : null}
 
       {!show.pancakeSync ? null : !status.pancake ? (
         <div className="flex items-center gap-2 rounded-xl border border-warning/40 bg-warning/10 px-4 py-2.5 text-sm">
@@ -281,63 +331,13 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
       </Suspense>
       ) : null}
 
-      {/*
-        CẦN ANH QUYẾT (Company OS · Agent H) — đứng TRÊN "Việc cần làm hôm nay": khối dưới là việc của cả
-        shop, khối này chỉ gồm QUYẾT ĐỊNH của người điều hành. Chảy về sau như hai khối trên, và mỗi nguồn
-        có hạn giờ riêng nên một nguồn chậm không giữ cả trang.
-      */}
-      {show.ownerDecisions ? (
-      <Suspense fallback={<Skeleton className="h-40 rounded-2xl" />}>
-        <OwnerDecisionsSection />
-      </Suspense>
-      ) : null}
 
       {/*
         BỐN KHỐI DƯỚI: lưới 12 cột để mỗi khối rộng đúng bằng nội dung của nó — danh sách việc và
         thanh "hàng đang ở đâu" cần chỗ cho nhãn dài, kênh bán chỉ cần một cột hẹp.
       */}
       <section className="grid gap-4 lg:grid-cols-2 xl:grid-cols-12">
-        {show.todayActions ? (
-        <SectionCard
-          className="xl:col-span-7"
-          title="Việc cần làm hôm nay"
-          hint={
-            <>
-              <p>Xếp theo cùng công thức ưu tiên của toàn ERP.</p>
-              <p className="mt-1.5">Trước đây ô này liệt kê các NHÓM việc kèm số đếm; đọc xong vẫn phải mở từng trang để biết bắt đầu từ đâu. Nay hiện đúng những việc cụ thể đứng đầu hàng đợi, kèm vì sao gấp, bao nhiêu tiền đang treo, ai đang cầm và đã trễ hạn chưa.</p>
-            </>
-          }
-          actions={<Link href="/alerts" className="text-xs font-semibold text-primary hover:underline">Hàng đợi việc</Link>}
-          padded={false}
-        >
-          <Suspense fallback={<div className="space-y-2 p-5">{Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-9 rounded-lg" />)}</div>}>
-            <TopActions viewer={user} />
-          </Suspense>
-          {/* Số đếm theo nhóm giữ lại ở dạng gọn: nó trả lời "tình hình chung thế nào", còn danh
-              sách trên trả lời "bắt đầu từ đâu". Hai câu hỏi khác nhau. */}
-          <div className="border-t px-5 py-2.5 text-[11px] text-muted-foreground">
-            {/* Mỗi vế chỉ hiện khi module nguồn của nó bật — cùng câu chữ, cùng thứ tự như trước. */}
-            {[
-              show.orderFlow ? `${formatNumber(data.attention.newOrders)} đơn mới` : null,
-              show.fulfillment ? `${formatNumber(data.attention.failedDelivery)} giao thất bại/đang hoàn` : null,
-              show.fulfillment ? `${formatNumber(data.attention.staleShipments)} treo lâu` : null,
-              show.carrierHolding ? `${formatVND(data.attention.codWaiting.amount, { compact: true })} COD chờ về` : null,
-              hrefVisible(user, "/inventory/planning") ? `${data.attention.lowStock === null ? "đang tính" : formatNumber(data.attention.lowStock)} mẫu mã cần sản xuất gấp` : null,
-            ]
-              .filter(Boolean)
-              .join(" · ")}
-            {/* Tồn âm là SAI LỆCH cần kiểm, không phải kho nợ hàng — đứng riêng, không trừ vào tổng tồn. */}
-            {data.attention.negativeStockRows && hrefVisible(user, "/inventory/planning") ? (
-              <>
-                {" · "}
-                <Link href="/inventory/planning" className="font-semibold text-rose-600 hover:underline">
-                  {formatNumber(data.attention.negativeStockRows)} mẫu mã âm sổ — cần kiểm
-                </Link>
-              </>
-            ) : null}
-          </div>
-        </SectionCard>
-        ) : null}
+        {/* «Việc cần làm hôm nay» đã lên đầu trang (dải «Việc cần làm ngay» + «Bắt đầu từ việc này»). */}
 
         {/*
           BA KHỐI, KHÔNG PHẢI NĂM. Trước đây trang còn "Vận đơn & COD" (bản chép của tháp Giao vận và
@@ -355,7 +355,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
         */}
         {show.fulfillment ? (
         <SectionCard
-          className="xl:col-span-5"
+          className="xl:col-span-6"
           title="Hàng đang ở đâu"
           hint={
             <>
@@ -415,7 +415,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
         ) : null}
         {show.orderFlow ? (
         <SectionCard
-          className="xl:col-span-5"
+          className="xl:col-span-6"
           title="Luồng đơn hàng"
           hint={
             <>
@@ -442,7 +442,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
         </SectionCard>
         ) : null}
         {show.channels ? (
-        <SectionCard className="xl:col-span-3" title="Hiệu quả theo kênh bán" hint="Doanh thu lên đơn theo nguồn (không tính đơn huỷ)">
+        <SectionCard className="xl:col-span-5" title="Hiệu quả theo kênh bán" hint="Doanh thu lên đơn theo nguồn (không tính đơn huỷ)">
           {data.channels.length ? (
             <div className="space-y-4">
               {data.channels.slice(0, 6).map((channel, index) => (
@@ -469,7 +469,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
         </SectionCard>
         ) : null}
         {show.topProducts ? (
-        <SectionCard className="lg:col-span-2 xl:col-span-4" title="Sản phẩm bán chạy" hint="Theo số lượng bán trong kỳ" actions={<Link href="/products" className="text-xs font-semibold text-primary hover:underline">Xem kho</Link>}>
+        <SectionCard className="lg:col-span-2 xl:col-span-7" title="Sản phẩm bán chạy" hint="Theo số lượng bán trong kỳ" actions={<Link href="/products" className="text-xs font-semibold text-primary hover:underline">Xem kho</Link>}>
           {data.topProducts.length ? (
             <ul className="divide-y">
               {data.topProducts.map((p, i) => (

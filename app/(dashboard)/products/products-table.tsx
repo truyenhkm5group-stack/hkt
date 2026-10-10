@@ -7,7 +7,7 @@ import { PRODUCT_LIST_PAGE_SIZE } from "@/lib/constants/inventory";
 import type { ProductListRow } from "@/lib/queries/products";
 
 /** `emptyDescription`: chữ của trang lõi theo tổ chức (`lib/branding/copy.ts` · `products.emptyList`) — nhà giữ nguyên câu cũ. */
-export function ProductsTable({ rows, pageCount, total, warehouses, emptyDescription }: { rows: ProductListRow[]; pageCount: number; total: number; warehouses: { id: string; name: string }[]; emptyDescription: string }) {
+export function ProductsTable({ rows, pageCount, total, warehouses, emptyDescription, variantTerm = "mẫu mã", sizeColor = true }: { rows: ProductListRow[]; pageCount: number; total: number; warehouses: { id: string; name: string }[]; emptyDescription: string; variantTerm?: string; sizeColor?: boolean }) {
   const columns = useMemo(() => buildProductColumns(warehouses), [warehouses]);
   return (
     <DataTable
@@ -40,7 +40,8 @@ export function ProductsTable({ rows, pageCount, total, warehouses, emptyDescrip
             sku: rows[0].productName,
             color: "",
             size: "",
-            detail: `${rows.length} mẫu mã · ${[...new Set(rows.map((r) => r.color).filter(Boolean))].length} màu · ${[...new Set(rows.map((r) => r.size).filter(Boolean))].length} size`,
+            // Hồ sơ ngành: đếm màu / size chỉ khi mẫu mã là màu × cỡ — shop thực phẩm thấy «3 quy cách», không «0 màu · 0 size».
+            detail: sizeColor ? `${rows.length} ${variantTerm} · ${[...new Set(rows.map((r) => r.color).filter(Boolean))].length} màu · ${[...new Set(rows.map((r) => r.size).filter(Boolean))].length} size` : `${rows.length} ${variantTerm}`,
             retailPrice: Math.max(...rows.map((r) => r.retailPrice)),
             lastImportedPrice: rows.some((r) => r.lastImportedPrice) ? Math.round(sum((r) => r.lastImportedPrice) / rows.filter((r) => r.lastImportedPrice).length) : 0,
             avgImportedPrice: rows.some((r) => r.avgImportedPrice) ? sum((r) => r.avgImportedPrice) / rows.filter((r) => r.avgImportedPrice).length : 0,
