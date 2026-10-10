@@ -1,0 +1,26 @@
+{
+  "schema": 1,
+  "mission_id": "owner-github-env-protection",
+  "title": "QUYẾT ĐỊNH CHỦ SHOP: đặt luật bảo vệ cho GitHub Environment production (người làm trong Settings → Environments) — bước F7",
+  "business_goal": "",
+  "status": "BLOCKED",
+  "priority": "P2",
+  "risk": "MEDIUM",
+  "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "worker": null,
+  "worktree": null,
+  "branch": "decision/owner-github-env-protection",
+  "base_sha": null,
+  "domains": [],
+  "owned_paths": [
+    "docs/decisions/owner-github-env-protection.md"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-10T14:53:00.717Z",
+  "updated_at": "2026-10-10T14:53:00.717Z",
+  "last_heartbeat": "2026-10-10T14:53:00.717Z",
+  "definition_of_done": []
+}
