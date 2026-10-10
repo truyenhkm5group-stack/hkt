@@ -287,6 +287,7 @@ const KHONG_MA_HOA_DA_RA: Record<string, string> = {
   "profit-verify": "tổng lợi nhuận toàn shop ở 3 kỳ",
   "marketing-calibrate": "bảng theo NGÀY toàn shop; `--explain` (từng đơn + tên người chốt) bị TỪ CHỐI — dùng marketing-explain",
   "set-setting": "khoá + số trường; JSON không in (ô arg đã che)",
+  "org-volume-discount": "mã tổ chức + luật giá (gói · ngưỡng kg · số tiền giảm · cách giảm) trước / sau — không tên, SĐT, đơn hay nội dung chat",
   "meta-id-probe": "mã Meta, tên chiến dịch / nhóm QC (đối tượng kinh doanh), số đơn",
   "meta-ad-post-probe": "mã Ad / creative / page / post ĐÃ CHE (4 số cuối), trạng thái + nguồn + có/không — không tên quảng cáo, tên fanpage hay permalink",
   "ads-level-probe": "tên tài khoản QC + chi tiêu theo ngày",

@@ -628,6 +628,7 @@ import { testSaasVnxRuntime } from "./saas-vnx-runtime.test";
 import { testSaasPageGate } from "./saas-page-gate.test";
 import { testPancakeSendRetry } from "./pancake-send-retry.test";
 import { testPackQuantity } from "./pack-quantity.test";
+import { testOrgVolumeDiscount } from "./org-volume-discount.test";
 import { testSaasShell } from "./saas-shell.test";
 import { testShellStaffRolesPure, testShellStaffRolesServer } from "./shell-staff-roles.test";
 import { testBanHangReplyPure, testBanHangReplyServer } from "./ban-hang-reply.test";
@@ -2302,6 +2303,8 @@ async function main() {
   await testPancakeSendRetry();
   // Bot HSLC tính sai tiền (10/10/2026, «Việt Phệ»): «lấy 2kg» + mẫu mã 2kg ⇒ không bao giờ 2kg × 2.
   testPackQuantity();
+  // ops org-volume-discount: cài luật giá gói đơn vị cho một tổ chức (chủ shop HSLC 10/10/2026).
+  await testOrgVolumeDiscount();
   // Sự kiện Purchase gửi Meta khi chốt đơn (0236 — chủ shop HSLC 08/10/2026) — tổ chức THẬT `capi-hslc` (tự cấp, tự dọn), Graph giả.
   testMetaCapiPure();
   await testMetaCapiDb();
