@@ -93,7 +93,8 @@ import { captureSaasSnapshot } from "@/lib/platform/saas-ledger";
 import { CHOTDON_ASSETS } from "@/lib/platform/site-host";
 import { shortfalls } from "@/lib/commerce/stock";
 import { ACCEPTANCE_NOT_OWNED_REFUSAL, ACCEPTANCE_RUNTIME_REFUSAL, acceptanceRuntimeRefusal } from "@/lib/saas/acceptance-guard";
-import { ACCEPTANCE_PREP_REGISTRY_REFUSAL, ACCEPTANCE_PREP_REQUIRED_TOOLS, runAcceptancePrep } from "@/lib/saas/acceptance-prep";
+import { ACCEPTANCE_PREP_REGISTRY_REFUSAL, ACCEPTANCE_PREP_REQUIRED_TOOLS, ownerSessionUser, runAcceptancePrep } from "@/lib/saas/acceptance-prep";
+import { shellLandingFor } from "@/lib/saas/shell-setup";
 import { ACCEPTANCE_OPS_REGISTRY_REFUSAL, judgeAmbiguous, judgeMeter, judgeNoDuplicate, runAcceptanceE2eOps } from "@/lib/saas/acceptance-e2e";
 import { ACCEPTANCE_SESSION_TTL_SEC, deniedLanding, metaRedirectTarget, parseActionReply, probeShellRoute, publicChatActionIdsFrom, publicChatOverServerActions, publicChatProblem, runAcceptance, shellBodyProblem, shellRoutesFor, type AcceptanceDeps, type AcceptanceReport, type HttpPostReply, type HttpReply } from "@/lib/saas/acceptance";
 import { orderReviewLogOf } from "@/lib/constants/order-review";
@@ -142,6 +143,11 @@ function fakeApp(opts: { userId: () => Promise<string | null>; shopName: string;
     }
     if (!who || who.id !== (await opts.userId())) return reply(307, "/login?reason=expired", "");
     const user: ShellUser = { role: "ADMIN", permissions: [], organization: { isHome: false, brand: "chotdon" }, modules: ["core", "customers", "products", "orders", "inventory", "ai_sales"] };
+    if (pathname === "/") {
+      // Như `requireUser` của máy chủ: `/` về trang nhà theo `shellLandingFor` (#752) — cùng hàm, cùng người dùng chủ.
+      const owner = await withOrganization(CODE, () => ownerSessionUser(ENTRY));
+      return reply(307, "user" in owner ? await shellLandingFor(owner.user, { cacheMs: 0 }) : salesAgentRedirectFor(user, pathname), "");
+    }
     if (!salesAgentPathAllowed(pathname)) return reply(307, salesAgentRedirectFor(user, pathname), "");
     const frame = opts.leakErp ? '<a aria-label="VNXcommerce — về trang tổng quan" href="/">ERP</a>' : `<div class="flex min-h-screen" ${SALES_AGENT_SHELL_HTML_MARKER}>`;
     return reply(200, null, `<html><head><link rel="manifest" href="${CHOTDON_ASSETS.manifest}"/></head><body>${frame}<main>${pathname}</main></div></body></html>`);
