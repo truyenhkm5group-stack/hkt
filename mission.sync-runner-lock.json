@@ -3,7 +3,7 @@
   "mission_id": "sync-runner-lock",
   "title": "runSyncJob giữ khoá trước await đầu tiên (F3) + deploy chỉ từ main qua Environment, agent-run không giữ token ghi (F7 F8)",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P2",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -26,9 +26,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-10T09:06:28.308Z",
-  "updated_at": "2026-10-10T20:01:42.939Z",
+  "updated_at": "2026-10-10T22:48:21.724Z",
   "last_heartbeat": "2026-10-10T20:01:42.939Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#781 → 2a2197f91282f9b4d53aa5662001f35ee0adec24"
+  },
   "handoff": {
     "branch": "fix/sync-runner-lock",
     "sha": "835870fa130c96101c9b62d26e27d251be8eaaa1",
