@@ -1,0 +1,27 @@
+{
+  "schema": 1,
+  "mission_id": "pipeline-env-agent-creds",
+  "title": "Deploy chỉ từ main qua GitHub Environment + agent-run không giữ token ghi (Team Premium F7 F8)",
+  "business_goal": "",
+  "status": "BACKLOG",
+  "priority": "P2",
+  "risk": "HIGH",
+  "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "worker": null,
+  "worktree": null,
+  "branch": "fix/pipeline-env-agent-creds",
+  "base_sha": null,
+  "domains": [],
+  "owned_paths": [
+    ".github/workflows/deploy-vps.yml",
+    ".github/workflows/agent-run.yml"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-10T09:08:45.416Z",
+  "updated_at": "2026-10-10T09:08:45.416Z",
+  "last_heartbeat": "2026-10-10T09:08:45.416Z",
+  "definition_of_done": []
+}
