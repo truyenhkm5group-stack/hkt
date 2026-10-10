@@ -11150,6 +11150,27 @@ export const salesChatConversationLabels = pgTable(
 );
 
 /**
+ * CON TRỎ ĐỌC THEO NGƯỜI (0239 · lib/sales-chatbot/inbox-read.ts — chủ shop 10/10/2026, P0.5): MỘT dòng cho mỗi (hội thoại, người).
+ * `read_through_at` = mốc của tin KHÁCH CUỐI CÙNG có trong khung chat đã trả về cho người đó — KHÔNG phải giờ bấm (tin khách tới giữa
+ * lúc đọc dòng và lúc ghi phải còn «chưa đọc»). Chỉ TIẾN (`greatest`), không lùi. «Chưa đọc» của người = tồn tại tin khách thật mới hơn
+ * con trỏ của CHÍNH người đó; chưa có dòng ⇒ lùi về mốc chung cũ (`staff_seen_at` / `last_staff_at`) — tương thích ngược, không backfill.
+ */
+export const salesChatReads = pgTable(
+  "sales_chat_reads",
+  {
+    conversationId: text("conversation_id")
+      .notNull()
+      .references(() => salesChatConversations.id, { onDelete: "cascade" }),
+    userId: text("user_id").notNull(),
+    readThroughAt: timestamp("read_through_at", { withTimezone: true }).notNull(),
+    /** Mã dòng tin khách đã đọc tới (`sales_chat_inbound.id` / `sales_chat_messages.id`) — để truy nguyên, không vào phép so. */
+    readThroughMessageId: text("read_through_message_id"),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ name: "sales_chat_reads_pk", columns: [t.conversationId, t.userId] }), index("sales_chat_reads_user_idx").on(t.userId, t.updatedAt)],
+);
+
+/**
  * GHI CHÚ NỘI BỘ của hội thoại (0211): nhân viên ghi cho nhau — KHÔNG gửi khách, KHÔNG vào lịch sử của bot, KHÔNG phép tính nào
  * đọc. Mang khoá tài khoản + ảnh chụp tên do máy chủ đọc (luật 34). Xoá = đánh dấu (`deleted_at`), không xoá dòng.
  */
@@ -11286,6 +11307,8 @@ export const salesChatInbound = pgTable(
     index("sales_chat_inbound_sender_idx").on(t.pageId, t.senderId, t.createdAt).where(sql`${t.senderId} is not null`),
     check("sales_chat_inbound_transport_check", sql`${t.transport} IS NULL OR ${t.transport} IN ('PANCAKE','MESSENGER')`),
     index("sales_chat_inbound_thread_idx").on(t.pageId, t.threadId, t.status),
+    // 0239: tin mới nhất / tin khách sau con trỏ đọc của một luồng (hộp thư: chưa đọc theo người · dòng xem trước).
+    index("sales_chat_inbound_thread_created_idx").on(t.pageId, t.threadId, t.createdAt),
     index("sales_chat_inbound_created_idx").on(t.createdAt),
     check("sales_chat_inbound_status_check", sql`${t.status} IN ('PENDING','DONE','SKIPPED','DEAD')`),
     check("sales_chat_inbound_kind_check", sql`${t.kind} IN ('INBOX','COMMENT')`),

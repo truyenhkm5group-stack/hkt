@@ -25,7 +25,7 @@ import { withOrganization } from "@/lib/platform/context";
 import { invalidateOrganizations } from "@/lib/platform/organizations";
 import { provisionOrganization } from "@/lib/platform/provision";
 import { createProductCore } from "@/lib/records/product-create";
-import { DEFAULT_SALES_CHATBOT_CONFIG, SALES_CHATBOT_SETTING_KEY } from "@/lib/sales-chatbot/config";
+import { DEFAULT_SALES_CHATBOT_CONFIG, SALES_CHATBOT_SETTING_KEY, type SalesChatbotConfig } from "@/lib/sales-chatbot/config";
 import { chatTurn, nowPromptLine, openConversation, setSalesChatProviderForTests, visitorKeyOf } from "@/lib/sales-chatbot/engine";
 import { promptStampOf, type PromptStamp } from "@/lib/sales-chatbot/prompt-stamp";
 import type { ChatState } from "@/lib/sales-chatbot/tools";
@@ -50,7 +50,11 @@ export type GoldenTurn = { say: string; ai: Step[]; before?: (ctx: GoldenHookCtx
 /** `order-food` thuộc bộ đo đơn vàng v2 (`tests/order-golden`) — hội thoại vàng (M1) chỉ dùng `food` / `fashion`. */
 export type GoldenShop = "food" | "fashion" | "order-food";
 export type GoldenChannel = "WEB" | "TEST" | "FANPAGE" | "ZALO";
-export type GoldenCase = { key: string; title: string; shop: GoldenShop; channel: GoldenChannel; turns: GoldenTurn[] };
+/**
+ * `config` = phần ĐÈ lên cấu hình bot của cửa hàng thử CHỈ trong hội thoại này (vd kiến thức của shop — sổ AIS-05); trả lại
+ * cấu hình gốc ngay sau hội thoại, nên hội thoại khác của cùng cửa hàng không bị ảnh hưởng. Bỏ trống ⇒ như trước.
+ */
+export type GoldenCase = { key: string; title: string; shop: GoldenShop; channel: GoldenChannel; turns: GoldenTurn[]; config?: Partial<SalesChatbotConfig> };
 /**
  * Tuỳ chọn của một lượt chạy (bộ đo đơn vàng v2). `beforeCase` chạy TRONG tổ chức thử trước khi mở hội thoại (bật công tắc của
  * tổ chức, gieo hồ sơ khách); `afterCase` chạy TRONG tổ chức thử sau lượt cuối, khi CSDL còn nguyên (đọc đơn, sự kiện).
@@ -129,6 +133,11 @@ async function adminOf(code: string): Promise<SessionUser> {
   return { id: u.id, email: u.email, name: u.name, role: "ADMIN", permissions: resolvePermissions("ADMIN", null), scope: "ALL", departmentCodes: [], positionId: null, organization: { code, name: code, isHome: false }, modules: [...(await getEnabledModules(code))] };
 }
 
+/** Cấu hình bot gốc của cửa hàng thử (bật, khoá riêng — model giả thay thế). */
+function shopBotConfig(shop: GoldenShop): SalesChatbotConfig {
+  return { ...DEFAULT_SALES_CHATBOT_CONFIG, connectorKey: "anthropic-byok", enabled: true, shippingFee: GOLDEN_SHOPS[shop].shippingFee ?? null };
+}
+
 /** Cấp tổ chức `code`, nạp sản phẩm + tồn, bật bot (khoá riêng — model giả thay thế). Trả bảng SKU ⇒ id mẫu mã. */
 async function setupShop(shop: GoldenShop, code: string): Promise<Map<string, string>> {
   const spec = GOLDEN_SHOPS[shop];
@@ -147,7 +156,7 @@ async function setupShop(shop: GoldenShop, code: string): Promise<Map<string, st
     }
     const [rc] = await db.insert(schema.stockReceipts).values({ kind: "RECEIPT", receivedAt: new Date(), reference: `PN-${code}`, totalQuantity: spec.products.reduce((s, p) => s + p.stock, 0), createdBy: ADMIN(code) }).returning({ id: schema.stockReceipts.id });
     await db.insert(schema.stockReceiptItems).values(spec.products.map((p) => ({ receiptId: rc.id, variantId: ids.get(p.sku)!, quantity: p.stock, unitCost: Math.round(p.price / 2) })));
-    await setSettingJson(SALES_CHATBOT_SETTING_KEY, { ...DEFAULT_SALES_CHATBOT_CONFIG, connectorKey: "anthropic-byok", enabled: true, shippingFee: spec.shippingFee ?? null });
+    await setSettingJson(SALES_CHATBOT_SETTING_KEY, shopBotConfig(shop));
     return ids;
   });
 }
@@ -265,6 +274,7 @@ async function runCase(c: GoldenCase, ids: Map<string, string>, code: string, ho
     const db = await getDb();
     const admin = () => adminOf(code);
     if (hooks.beforeCase) await hooks.beforeCase(c, { ids, admin });
+    if (c.config) await setSettingJson(SALES_CHATBOT_SETTING_KEY, { ...shopBotConfig(c.shop), ...c.config });
     setSalesChatProviderForTests(() => provider);
     try {
       // Web / fanpage là kênh công khai: hội thoại khoá theo mã khách. Fanpage ở đây KHÔNG qua Pancake — chỉ chạy lượt của engine
@@ -334,6 +344,7 @@ async function runCase(c: GoldenCase, ids: Map<string, string>, code: string, ho
       return normalized;
     } finally {
       setSalesChatProviderForTests(null);
+      if (c.config) await setSettingJson(SALES_CHATBOT_SETTING_KEY, shopBotConfig(c.shop));
     }
   });
 }

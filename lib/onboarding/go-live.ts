@@ -257,7 +257,7 @@ export async function loadFirstValue(user: SessionUser, now: Date = new Date()):
     stockKnownVariants: Number(stockRows[0]?.known ?? 0),
     sellableVariants: Number(stockRows[0]?.sellable ?? 0),
     sellWithoutStockCheck: cfg.sellWithoutStockCheck,
-    policySet: cfg.shippingFee !== null || cfg.freeShipping.enabled || cfg.extraInstructions.trim().length > 0,
+    policySet: cfg.shippingFee !== null || cfg.freeShipping.enabled || cfg.extraInstructions.trim().length > 0 || Object.values(cfg.policies).some((p) => p.trim().length > 0),
     aiReady: ai.aiReady,
     aiProblem: ai.aiReady ? null : ai.audience === "CUSTOMER" ? CUSTOMER_AI_STATE_HINT[ai.aiState] : CUSTOMER_AI_STATE_HINT.NEEDS_SETUP,
     aiFix: ai.audience === "CUSTOMER" && ai.aiState === "OUT_OF_QUOTA" ? "PLAN" : "CONFIG",

@@ -1669,6 +1669,13 @@
       "breakpoints": true
     },
     {
+      "idx": 239,
+      "version": "7",
+      "when": 1791400818330,
+      "tag": "0239_sales_chat_reads",
+      "breakpoints": true
+    },
+    {
       "idx": 240,
       "version": "7",
       "when": 1791401000000,
