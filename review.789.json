@@ -1,0 +1,8 @@
+{
+  "pr": 789,
+  "sha": "4e79fc00f5cca0ff97274f6d9421fb5bfb973c38",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-10T18:21:31.927Z",
+  "note": "Đọc claim-guard: chỉ câu KHẲNG ĐỊNH (bỏ câu hỏi/đề nghị/phủ định/điều kiện), tiền cần chứng từ thu đủ, đơn cần đơn ERP sống (nháp không tính), lỗi đọc căn cứ ⇒ chặn; câu không khẳng định 0 truy vấn; followup.ts chưa phủ (L6, bài kiểm in CHƯA PHỦ). Xung đột engine.ts dự kiến với #786 — gộp sau #786"
+}
