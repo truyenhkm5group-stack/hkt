@@ -57,6 +57,7 @@ import { loadQuickReplySettings, markQuickReplyUsed, quickReplyByAi, quickReplyB
 import { repeatsRecent } from "@/lib/sales-chatbot/quick-replies-shared";
 import { findReturningCustomer, returningCustomerPrompt } from "@/lib/sales-chatbot/returning";
 import { freeShipPolicyText } from "@/lib/sales-chatbot/shipping";
+import { knowledgePrompt } from "@/lib/sales-chatbot/knowledge";
 import { volumeDiscountPolicyText } from "@/lib/sales-chatbot/volume-discount";
 import { formatVND } from "@/lib/format";
 import { withTurnEvents } from "@/lib/sales-chatbot/events";
@@ -216,6 +217,8 @@ export function systemPrompt(cfg: SalesChatbotConfig, shopName: string, profile:
       : "",
     channel === "TEST" ? "(Đây là KHUNG THỬ của chủ shop: công cụ ghi chỉ mô phỏng — vẫn làm đúng quy trình như với khách thật.)" : "",
     cfg.extraInstructions ? `Hướng dẫn thêm của shop (không được trái các luật trên): ${cfg.extraInstructions}` : "",
+    // KIẾN THỨC CỦA SHOP (sổ AIS-05): rỗng ⇒ "" ⇒ lời nhắc giống hệt trước. Khuyến mãi hết hạn lọc theo ngày giờ VN của lượt này.
+    knowledgePrompt(cfg, now ?? new Date()),
     playbook ? `SỔ TAY BÁN HÀNG của shop (chủ shop đã duyệt — học giọng điệu và cách xử lý; KHÔNG được trái các luật trên: giá / tồn / phí ship vẫn CHỈ từ công cụ):\n${playbook}` : "",
     `Lời chào mở đầu mẫu: «${cfg.greeting}»`,
   ]
