@@ -1,8 +1,8 @@
 {
   "pr": 788,
-  "sha": "a05285a46073e4c0b9ab0a18247e5decb690f217",
+  "sha": "2707e4928b855408635020cf0db86c2e8a5f5bd9",
   "verdict": "PASS",
   "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
-  "at": "2026-10-10T18:19:53.642Z",
-  "note": "GitHub chỉ GET (ETag/tree/raw theo SHA, kiểm SHA blob); không đường nào ghi ai-control/registry (bài quét); Lark chỉ webhook Quản lý, thiếu thì bỏ qua; migration chỉ cộng thêm, sứ mệnh biến khỏi sổ không xoá; job không có lịch (chờ chủ shop)"
+  "at": "2026-10-10T19:57:51.128Z",
+  "note": "Chỉ commit gộp main do GitHub update-branch, không xung đột; nội dung đã review trước"
 }
