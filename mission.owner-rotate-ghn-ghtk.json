@@ -1,0 +1,26 @@
+{
+  "schema": 1,
+  "mission_id": "owner-rotate-ghn-ghtk",
+  "title": "QUYẾT ĐỊNH CHỦ SHOP: duyệt xoay token webhook GHN/GHTK của tổ chức đã cấu hình — log Caddy cũ có thể đã chứa token (#774 đã che từ 8232c50e)",
+  "business_goal": "",
+  "status": "BLOCKED",
+  "priority": "P2",
+  "risk": "MEDIUM",
+  "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "worker": null,
+  "worktree": null,
+  "branch": "decision/owner-rotate-ghn-ghtk",
+  "base_sha": null,
+  "domains": [],
+  "owned_paths": [
+    "docs/decisions/owner-rotate-ghn-ghtk.md"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-10T14:52:41.289Z",
+  "updated_at": "2026-10-10T14:52:41.289Z",
+  "last_heartbeat": "2026-10-10T14:52:41.289Z",
+  "definition_of_done": []
+}
