@@ -39,6 +39,7 @@ import {
   SALES_AGENT_INBOX_HREF,
   SALES_AGENT_MOBILE_PRIMARY,
   SALES_AGENT_NAV,
+  SALES_AGENT_OVERVIEW_HREF,
   SALES_AGENT_SHELL_HTML_MARKER,
   salesAgentActiveKey,
   salesAgentHomeFor,
@@ -559,7 +560,10 @@ async function kiemMayChu() {
       assert.equal(ket.home, dich, "về hộp thư KÈM tham số để vỏ nói «không có trong gói», không im lặng");
       assert.equal(await asRequest(token, p, () => redirectTarget(() => requireUser())), dich, `${p}: requireUser chuyển về hộp thư, không về /login`);
     }
-    assert.equal(await asRequest(token, "/", () => redirectTarget(() => requireUser())), SALES_AGENT_INBOX_HREF, "`/` ⇒ hộp thư");
+    // `/` là cửa vào: cửa hàng MỚI chưa thiết lập xong ⇒ «Tổng quan» có danh sách thiết lập (chủ shop 10/10/2026: «một khách low-tech
+    // sau đăng nhập phải thấy đúng một danh sách thiết lập» — lib/saas/shell-setup.ts); xong đủ chín bước ⇒ hộp thư như #638
+    // (tests/onboarding-v2.test.ts). Trang ERP bị chặn ở trên vẫn về hộp thư kèm «ngoài gói» — không hỏi trạng thái thiết lập.
+    assert.equal(await asRequest(token, "/", () => redirectTarget(() => requireUser())), SALES_AGENT_OVERVIEW_HREF, "`/` của cửa hàng mới ⇒ «Tổng quan»");
     for (const p of ["/ai/overview", "/ai/sales-chatbot", "/products", "/inventory/receipts", "/orders/123", "/customers/abc", "/settings/users", "/settings/plan", "/settings/shop", "/api/events", "/api/notifications"]) {
       const ket = await asRequest(token, p, () => resolveCurrentUser());
       assert.ok("user" in ket, `${p} phải đi qua cổng vỏ, nhận ${JSON.stringify(ket)}`);

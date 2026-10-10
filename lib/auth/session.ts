@@ -22,6 +22,7 @@ import { billingWriteDenied } from "@/lib/billing/rules";
 import { orgBillingStanding } from "@/lib/billing/standing";
 import { billingLockApplies } from "@/lib/saas/policy";
 import { forbiddenRedirectFor, isSalesAgentUser, salesAgentPathAllowed, salesAgentRedirectFor, SALES_AGENT_INBOX_HREF } from "@/lib/constants/saas-nav";
+import { shellLandingFor } from "@/lib/saas/shell-setup";
 
 export const ROLE_PERMISSIONS_KEY = "auth.rolePermissions";
 
@@ -246,6 +247,11 @@ export type ResolvedUser =
       module?: ModuleKey;
       /** Chỉ khi `SHELL_RESTRICTED`: trang nhà của vỏ cho ĐÚNG người này. */
       home?: string;
+      /**
+       * Chỉ khi `SHELL_RESTRICTED`: người dùng ĐÃ qua mọi kiểm danh tính — CHỈ để tính trang nhà ở hai cửa vào (sau đăng nhập · mở
+       * `/`, lib/saas/shell-setup.ts), KHÔNG BAO GIỜ là giấy vào trang vừa bị chặn.
+       */
+      shellUser?: SessionUser;
       /** Chỉ khi `BILLING_LOCKED`: phiên thuộc vỏ Chốt Đơn — CHỈ để câu chữ chỉ đúng chỗ gia hạn của sản phẩm, không quyết gì. */
       shell?: boolean;
     };
@@ -292,7 +298,7 @@ export const resolveCurrentUser = cache(async (): Promise<ResolvedUser> => {
     liên hệ quản trị» (khách không có ai để liên hệ, và họ không cần module đó). Phép quyết định chỉ đọc phiên đã có (thương hiệu
     + module), không tốn thêm câu truy vấn nào.
   */
-  if (path && isSalesAgentUser(ket.user) && !salesAgentPathAllowed(path)) return { denied: "SHELL_RESTRICTED", home: salesAgentRedirectFor(ket.user, path) };
+  if (path && isSalesAgentUser(ket.user) && !salesAgentPathAllowed(path)) return { denied: "SHELL_RESTRICTED", home: salesAgentRedirectFor(ket.user, path), shellUser: ket.user };
   const pathModule = path ? moduleOfPath(path) : null;
   if (pathModule && !(ket.user.modules ?? []).includes(pathModule)) return { denied: "MODULE_DISABLED", module: pathModule };
   /*
@@ -446,7 +452,9 @@ export async function requireUser(roles?: Role[]): Promise<SessionUser> {
     // Quá hạn thanh toán: phiên hợp lệ, chỉ lượt GHI bị chặn ⇒ trang giải thích, không phải `/login`.
     if (ket.denied === "BILLING_LOCKED") redirect(BILLING_LOCKED_PATH);
     // Trang ERP ngoài vỏ app Chốt Đơn: phiên hợp lệ ⇒ về trang nhà của vỏ (hộp thư), không về `/login`.
-    if (ket.denied === "SHELL_RESTRICTED") redirect(ket.home ?? SALES_AGENT_INBOX_HREF);
+    // Mở `/` (đích không kèm «ngoài gói») là một trong hai cửa vào: cửa hàng chưa thiết lập xong ⇒ «Tổng quan» có danh sách
+    // thiết lập (chủ shop 10/10/2026, lib/saas/shell-setup.ts); trang bị chặn khác ⇒ trang nhà như cũ, không hỏi gì thêm.
+    if (ket.denied === "SHELL_RESTRICTED") redirect(ket.shellUser && ket.home && !ket.home.includes("?") ? await shellLandingFor(ket.shellUser) : (ket.home ?? SALES_AGENT_INBOX_HREF));
     redirect(`/login?reason=${DENY_REASON_PARAM[ket.denied]}`);
   }
   const user = ket.user;

@@ -2,13 +2,19 @@ import { can, type SessionUser } from "@/lib/auth/session";
 import { CONNECTIONS_PERMISSION, saveConnection, setConnectionStatus, testOrgConnection } from "@/lib/connectors/service";
 import type { TesterDeps } from "@/lib/connectors/testers";
 import { canUseModule } from "@/lib/platform/capabilities";
-import { loadSalesChatbotConfig } from "@/lib/sales-chatbot/engine";
+import { loadSalesChatbotConfig, readJsonSetting } from "@/lib/sales-chatbot/engine";
 import { FANPAGE_CONNECTOR, fanpageSetupView, PAGE_REPLY, type FanpageSetupView } from "@/lib/sales-chatbot/fanpage";
 import { SALES_CHATBOT_MANAGE, saveSalesChatbotConfig } from "@/lib/sales-chatbot/settings";
-import { and, eq, sql } from "drizzle-orm";
+import { and, count, eq, inArray, ne, or, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
-import { goLivePathOf, onboardingStage, type ChannelFacts, type GoLivePath, type OnboardingStage } from "@/lib/onboarding/go-live-shared";
-import { publicationOf, type Publication } from "@/lib/platform/publish";
+import { anyChannelConnected, firstValueSteps, firstValueSummary, goLivePathOf, onboardingStage, type ChannelFacts, type FirstValueFacts, type FirstValueStep, type FirstValueSummary, type GoLivePath, type OnboardingStage } from "@/lib/onboarding/go-live-shared";
+import { PUBLISH_PERMISSION, publicationOf, type Publication } from "@/lib/platform/publish";
+import { loadChannelsOverview } from "@/lib/channels/overview";
+import { aiControlOf, channelHealth } from "@/lib/channels/overview-shared";
+import { directConnectFor } from "@/lib/channels/direct-connect";
+import { availableStockExpr, stockKnownExpr, variantReceiptsSubquery, variantSalesSubquery } from "@/lib/queries/stock";
+import { productCreateGate } from "@/lib/records/product-create";
+import { SALES_CHATBOT_SETTING_KEY } from "@/lib/sales-chatbot/config";
 import { messengerView, type MessengerView } from "@/lib/sales-chatbot/messenger";
 import { zaloSetupView, type ZaloSetupView } from "@/lib/sales-chatbot/zalo";
 import { loadTransportFacts, transportOwnerOf } from "@/lib/sales-chatbot/channel-ownership";
@@ -151,4 +157,124 @@ export async function quickEnableBot(user: SessionUser): Promise<{ ok: true; mes
   if (cfg.enabled) return { ok: true, message: "Chatbot đang bật." };
   const r = await saveSalesChatbotConfig(user, { ...cfg, enabled: true });
   return r.ok ? { ok: true, message: r.message } : { error: r.error };
+}
+
+// ─────────────────────────── «GIÁ TRỊ ĐẦU TIÊN» — CHÍN BƯỚC CỦA VỎ CHỐT ĐƠN (luật ở go-live-shared.ts) ───────────────────────────
+
+export type FirstValueView = { show: boolean; steps: FirstValueStep[] } & FirstValueSummary;
+
+const iso = (v: unknown): string | null => {
+  if (v === null || v === undefined) return null;
+  const d = v instanceof Date ? v : new Date(String(v));
+  return Number.isNaN(d.getTime()) ? null : d.toISOString();
+};
+const issueText = (i: { title: string; action: string } | null): string | null => (i ? `${i.title.replace(/[.\s]+$/, "")}. ${i.action}` : null);
+
+/**
+ * Gom SỰ THẬT cho chín bước từ đúng các hàm đang có — CHỈ ĐỌC, không ghi gì:
+ *  · kênh đã nối = `loadChannelFacts` (cùng định nghĩa với hộp thư rỗng và mốc onboarding);
+ *  · Page = `loadChannelsOverview` + `channelHealth` / `aiControlOf` của màn Kênh kết nối (câu lỗi là câu khách của màn đó);
+ *  · AI = `loadChatbotAiView` (cùng loader với trang AI Sales và ô «Vào việc ngay»);
+ *  · tồn khả dụng = công thức sổ kho (`stockKnownExpr` / `availableStockExpr` — cùng công thức bot dùng khi kiểm tồn);
+ *  · nhắn thử / AI trả lời thử / đơn thử = sổ sự kiện hội thoại, kênh Khung thử (cùng sổ mà bảng «AI đã sẵn sàng» đọc);
+ *  · đơn thật tạo trong ứng dụng = nhật ký `ORDER_MANUAL_CREATE` (đường tạo đơn tay / bot duy nhất ghi nó).
+ * Không hiện cho tổ chức nhà, khi chức năng AI bán hàng tắt, hoặc khi người xem không nối kênh được lẫn không cấu hình bot được.
+ */
+export async function loadFirstValue(user: SessionUser, now: Date = new Date()): Promise<FirstValueView> {
+  const hidden: FirstValueView = { show: false, steps: [], done: 0, total: 0, allDone: false, next: null };
+  const orgCode = user.organization?.code ?? null;
+  const canConnect = can(user, CONNECTIONS_PERMISSION);
+  const canBot = can(user, SALES_CHATBOT_MANAGE);
+  if (!orgCode || user.organization?.isHome || !(canConnect || canBot) || !(await canUseModule("ai_sales"))) return hidden;
+  const on = (m: string) => !user.modules || user.modules.includes(m);
+
+  const db = await getDb();
+  const v = schema.productVariants;
+  const e = schema.salesConversationEvents;
+  const priced = and(eq(v.isRemoved, false), sql`${v.retailPrice} > 0`);
+  const sales = variantSalesSubquery(db);
+  const receipts = variantReceiptsSubquery(db);
+  const known = stockKnownExpr(receipts);
+  const ORDER_EVENTS = ["order.drafted", "order.confirmed"];
+
+  const [channels, overview, cfg, rawCfg, pub, directConnect, productGate, productRows, pricedRows, stockRows, testRows, realBotRows, manualRows] = await Promise.all([
+    loadChannelFacts(orgCode),
+    loadChannelsOverview({ operator: false }, now),
+    loadSalesChatbotConfig(),
+    readJsonSetting(SALES_CHATBOT_SETTING_KEY),
+    publicationOf(orgCode),
+    directConnectFor(user),
+    productCreateGate(user),
+    on("products") ? db.select({ n: count() }).from(schema.products) : Promise.resolve(null),
+    db.select({ n: count() }).from(v).where(priced),
+    db
+      .select({
+        known: sql<number>`(count(*) filter (where ${known}))::int`,
+        sellable: sql<number>`(count(*) filter (where ${known} and ${availableStockExpr(sales, receipts)} > 0))::int`,
+      })
+      .from(v)
+      .leftJoin(sales, eq(sales.variantId, v.id))
+      .leftJoin(receipts, eq(receipts.variantId, v.id))
+      .where(priced),
+    db
+      .select({ type: e.type, n: sql<number>`count(*)::int`, first: sql<string | Date | null>`min(${e.occurredAt})` })
+      .from(e)
+      .where(and(eq(e.channel, "TEST"), or(eq(e.type, "message.received"), and(eq(e.type, "ai.replied"), eq(e.actorKind, "AI")), inArray(e.type, ORDER_EVENTS))))
+      .groupBy(e.type),
+    db.select({ n: count() }).from(e).where(and(ne(e.channel, "TEST"), inArray(e.type, ORDER_EVENTS))),
+    db.select({ n: count() }).from(schema.auditLogs).where(eq(schema.auditLogs.action, "ORDER_MANUAL_CREATE")),
+  ]);
+  const ai = await loadChatbotAiView(user, cfg, { manage: false });
+
+  // Kênh: chưa nối được kênh nào mà đã có lần thử hỏng ⇒ lý do của màn Kênh kết nối (câu khách, không thuật ngữ).
+  const rows = overview.rows.map((row) => ({ row, health: channelHealth(row, row.webhook, overview.appReady) }));
+  // Kết nối kiểm tra HỎNG thì còn ở nháp, và `channelHealth` xét «chưa bật» TRƯỚC «kiểm tra không đạt» — với khách, lý do thật là
+  // lần kiểm tra, nên hỏi lại ĐÚNG hàm đó như thể kết nối đã bật để lấy câu «không đạt» của chính màn Kênh kết nối.
+  const testFailure = (row: (typeof overview.rows)[number]) =>
+    row.pancake?.lastTestOk === false
+      ? channelHealth({ ...row, owner: "PANCAKE", pancake: { ...row.pancake, status: "ACTIVE" } }, null, overview.appReady).issue
+      : row.zalo?.lastTestOk === false
+        ? channelHealth({ ...row, owner: "ZALO", zalo: { ...row.zalo, status: "ACTIVE" } }, null, overview.appReady).issue
+        : null;
+  const failedAttempt = rows.map(({ row, health }) => testFailure(row) ?? (health.level === "DISCONNECTED" && row.direct !== null && row.direct.status !== "DISABLED" ? health.issue : null)).find((x) => x !== null) ?? null;
+  const live = rows.filter(({ row }) => row.owner !== null);
+  const usable = live.filter(({ row, health }) => health.level !== "DISCONNECTED" && aiControlOf(row).on !== false);
+  const broken = live.find(({ health }) => health.level === "DISCONNECTED");
+
+  const byType = new Map(testRows.map((r) => [r.type, { n: Number(r.n ?? 0), first: iso(r.first) }]));
+  const drafted = byType.get("order.drafted");
+  const confirmed = byType.get("order.confirmed");
+  const firstOrderAt = [drafted?.first, confirmed?.first].filter((x): x is string => Boolean(x)).sort()[0] ?? null;
+
+  const facts: FirstValueFacts = {
+    channels,
+    channelProblem: anyChannelConnected(channels) ? null : issueText(failedAttempt),
+    directConnect,
+    pages: { ready: usable.length, problem: issueText(broken?.health.issue ?? null), aiOff: live.filter(({ row }) => aiControlOf(row).on === false).length },
+    products: productRows ? Number(productRows[0]?.n ?? 0) : null,
+    canImportProducts: productGate.allowed,
+    pricedVariants: Number(pricedRows[0]?.n ?? 0),
+    stockKnownVariants: Number(stockRows[0]?.known ?? 0),
+    sellableVariants: Number(stockRows[0]?.sellable ?? 0),
+    sellWithoutStockCheck: cfg.sellWithoutStockCheck,
+    policySet: cfg.shippingFee !== null || cfg.freeShipping.enabled || cfg.extraInstructions.trim().length > 0,
+    aiReady: ai.aiReady,
+    aiProblem: ai.aiReady ? null : ai.audience === "CUSTOMER" ? CUSTOMER_AI_STATE_HINT[ai.aiState] : CUSTOMER_AI_STATE_HINT.NEEDS_SETUP,
+    aiFix: ai.audience === "CUSTOMER" && ai.aiState === "OUT_OF_QUOTA" ? "PLAN" : "CONFIG",
+    configSaved: rawCfg !== null,
+    botName: cfg.botName,
+    testMessages: byType.get("message.received")?.n ?? 0,
+    testReplies: byType.get("ai.replied")?.n ?? 0,
+    testOrders: Math.max(drafted?.n ?? 0, confirmed?.n ?? 0),
+    // Một đơn bot lên trên kênh thật ghi CẢ sự kiện lẫn nhật ký tạo đơn ⇒ lấy số lớn hơn, không cộng hai lần.
+    realOrders: Math.max(Number(realBotRows[0]?.n ?? 0), Number(manualRows[0]?.n ?? 0)),
+    botEnabled: cfg.enabled,
+    published: pub.state === "UNTRACKED" ? null : pub.state === "PUBLISHED",
+    canConnect,
+    canBot,
+    canPublish: can(user, PUBLISH_PERMISSION),
+    firstAt: { testMessage: byType.get("message.received")?.first ?? null, testReply: byType.get("ai.replied")?.first ?? null, testOrder: firstOrderAt },
+  };
+  const steps = firstValueSteps(facts);
+  return { show: true, steps, ...firstValueSummary(steps) };
 }

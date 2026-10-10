@@ -359,7 +359,7 @@ export default async function SalesChatbotPage() {
           ) : null}
         </div>
         {manage ? (
-          <div className="space-y-2">
+          <div id="khung-thu" className="scroll-mt-24 space-y-2">
             <p className="text-sm font-semibold">{shell ? "Khung thử" : "Khung thử (TEST)"}</p>
             <SalesChatPanel mode="test" title={`${cfg.botName} · thử`} />
           </div>

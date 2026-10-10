@@ -102,9 +102,19 @@ export function salesAgentNavFor(user: ShellUser): SalesAgentNavItem[] {
  * Trang về nhà của người này trong vỏ: hộp thư nếu mở được, rồi mục đầu tiên còn thấy, cuối cùng là trang tài khoản (chỉ cần
  * đăng nhập). Không bao giờ trả một trang mà người này sẽ bị `requirePermission` đá về `/` — đá về `/` thì `/` lại chuyển về
  * đây, và đó là vòng lặp chuyển hướng.
+ *
+ * `setupOpen` — CỬA HÀNG CHƯA THIẾT LẬP XONG (chủ shop 10/10/2026: «khách low-tech sau đăng nhập phải thấy đúng một danh sách
+ * thiết lập»): trang nhà là «Tổng quan», nơi đứng danh sách chín bước (lib/onboarding/go-live-shared.ts). Xong đủ chín bước ⇒ hộp
+ * thư như #638. Hàm vẫn THUẦN: câu hỏi «đã xong chưa» do máy chủ trả lời (`shellLandingFor`, lib/saas/shell-setup.ts) và chỉ hỏi ở
+ * hai cửa vào — sau đăng nhập và khi mở `/`; mọi lời gọi khác (đích từ chối quyền, thương hiệu trên thanh vỏ) giữ hộp thư.
+ * Người không thấy «Tổng quan» (thiếu quyền) ⇒ y như cũ.
  */
-export function salesAgentHomeFor(user: ShellUser): string {
+export function salesAgentHomeFor(user: ShellUser, opts: { setupOpen?: boolean } = {}): string {
   const items = salesAgentNavFor(user);
+  if (opts.setupOpen) {
+    const overview = items.find((i) => i.key === "overview");
+    if (overview) return overview.href;
+  }
   return items.find((i) => i.key === "inbox")?.href ?? items[0]?.href ?? SALES_AGENT_FALLBACK_HREF;
 }
 
