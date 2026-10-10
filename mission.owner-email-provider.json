@@ -1,0 +1,26 @@
+{
+  "schema": 1,
+  "mission_id": "owner-email-provider",
+  "title": "QUYẾT ĐỊNH CHỦ SHOP: chọn nhà cung cấp email (dịch vụ ngoài mới, AGENTS §7) cho Quên mật khẩu qua email — hiện chỉ có OTP Zalo ZNS (đang TẮT) và yêu cầu hỗ trợ",
+  "business_goal": "",
+  "status": "BLOCKED",
+  "priority": "P2",
+  "risk": "MEDIUM",
+  "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "worker": null,
+  "worktree": null,
+  "branch": "decision/owner-email-provider",
+  "base_sha": null,
+  "domains": [],
+  "owned_paths": [
+    "docs/decisions/owner-email-provider.md"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-10T14:53:37.352Z",
+  "updated_at": "2026-10-10T14:53:37.352Z",
+  "last_heartbeat": "2026-10-10T14:53:37.352Z",
+  "definition_of_done": []
+}
