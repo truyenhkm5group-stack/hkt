@@ -1380,3 +1380,4 @@
 {"at":"2026-10-09T23:36:45.891Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","detail":"#754 @ d19951719395 → d803ab8bdc2c (MERGE_NOW · MEDIUM · gates success)"}
 {"at":"2026-10-09T23:37:38.053Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DEPLOY_DISPATCHED","detail":"d803ab8bdc2c · run 38005322118 https://github.com/truyenhkm5group-stack/hkt/actions/runs/38005322118"}
 {"at":"2026-10-10T00:33:59.293Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"onboarding-v2","detail":"feat/onboarding-v2 @ 01fd01c71f9c · 1 lệnh kiểm thử"}
+{"at":"2026-10-10T00:34:12.349Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#752 @ 01fd01c71f9c · Cập nhật nhánh lên main, mã không đổi; gates xanh lại"}
