@@ -35,18 +35,18 @@
     "0241": "2026-10-10T15:54:15.479Z"
   },
   "created_at": "2026-10-10T15:53:45.955Z",
-  "updated_at": "2026-10-10T18:14:49.044Z",
-  "last_heartbeat": "2026-10-10T18:14:49.044Z",
+  "updated_at": "2026-10-10T18:53:39.324Z",
+  "last_heartbeat": "2026-10-10T18:53:39.324Z",
   "definition_of_done": [],
   "handoff": {
     "branch": "fix/order-cancel-consistency",
-    "sha": "8dfe430976f814e66814a279f0c986b2a8558d3a",
-    "at": "2026-10-10T18:14:49.044Z",
+    "sha": "ee21f87d136a33883a508ba304d7cd7627e00e1b",
+    "at": "2026-10-10T18:53:39.324Z",
     "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
     "title": "P0 huỷ đơn nhất quán: khách huỷ sau rescue thất bại ⇒ CANCELLED thật (theo vòng đời vận đơn), AI chỉ báo đã huỷ sau khi ghi thành công, retry idempotent + hàng ngoại lệ, đối soát đơn bất nhất (case HSLC #189A435E)",
-    "summary": "Khách huỷ theo vòng đời vận đơn (không đổi so với 943bfbce)",
+    "summary": "Khách huỷ theo vòng đời vận đơn + cập nhật 2 ảnh chụp vàng",
     "tests": [
-      "như lượt trước + gộp main (#784 hộp thư V3): xung đột chỉ ở danh sách ops (giữ cả order-cancel-reconcile lẫn inbox-read-audit) · tsc sạch sau gộp"
+      "gates đỏ ở golden kien-thuc-* (ảnh chụp của #782 mang lời nhắc cũ) ⇒ chạy update.ts, diff chỉ hai dòng luật huỷ"
     ]
   }
 }
