@@ -7,7 +7,7 @@
  */
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { auditMatch, orderLagMinutes, phonesIn, quantile, vnDayWindow, type AuditOrder, type AuditThread } from "@/scripts/org-order-audit";
+import { auditMatch, orderLagMinutes, phonesIn, quantile, replyGaps, vnDayWindow, type AuditOrder, type AuditThread, type ReplyRow } from "@/scripts/org-order-audit";
 
 export function testOrgOrderAuditPure() {
   const w = vnDayWindow("2026-10-05");
@@ -41,6 +41,24 @@ export function testOrgOrderAuditPure() {
   assert.equal(orderLagMinutes(at("08:00"), [at("09:00")]), null, "không có tin trước đơn ⇒ chưa biết, không phải 0");
   assert.equal(quantile([], 0.5), null);
   assert.equal(quantile([5, 1, 3], 0.5), 3);
+
+  // --replies: tin khách không có câu trả lời nào sau nó, gom theo bước đã xử lý nó.
+  const r = (threadId: string, hm: string, note: string | null, status = "DONE"): ReplyRow => ({ threadId, at: at(hm), note, status });
+  const rep = replyGaps(
+    [
+      r("a", "09:00", null), r("a", "09:01", "BOT_SENT"),
+      r("b", "09:00", "Page đã trả lời — bot không chen", "SKIPPED"), r("b", "09:03", "PAGE_REPLY"),
+      r("c", "10:00", "AI hỏng", "DEAD"), r("c", "10:00", "HISTORY"),
+      r("d", "23:59", null, "PENDING"),
+      r("e", "11:00", "BOT_SENT"), r("e", "11:05", null, "PENDING"),
+      r("f", "11:55", null, "PENDING"),
+    ],
+    at("00:00"), at("23:58"), at("12:00"),
+  );
+  assert.equal(rep.customer, 5, "tin bot / page / lịch sử không phải tin khách; tin ngoài cửa sổ không đếm");
+  assert.deepEqual(rep.answeredLags, { bot: [1], page: [3] });
+  assert.deepEqual(rep.gaps.map((g) => `${g.threadId}:${g.status}`), ["c:DEAD", "e:PENDING"], "lời bot TRƯỚC tin khách không phải câu trả lời của nó; tin < 10 phút là còn mới");
+  assert.equal(rep.fresh, 1);
 
   const src = readFileSync("scripts/org-order-audit.ts", "utf8");
   const code = src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
