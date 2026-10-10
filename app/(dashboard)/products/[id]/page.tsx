@@ -15,7 +15,7 @@ import { env } from "@/lib/env";
 import { formatDateTime, formatNumber, formatVND } from "@/lib/format";
 import { findProductIdByVariant, getProductDetail, type ProductDetail } from "@/lib/queries/products";
 import { readExperienceProfile } from "@/lib/experience/profile";
-import { specOf } from "@/lib/constants/experience-profile";
+import { displayVariationText, specOf } from "@/lib/constants/experience-profile";
 import { getProductMatrix } from "@/lib/queries/product-intelligence";
 import { PLAN_STATUS_LABEL, PLAN_STATUS_TONE, type PlanStatus } from "@/lib/constants/planning";
 import { buildStockSizeMatrix } from "@/lib/inventory/size-matrix";
@@ -240,8 +240,8 @@ export default async function ProductDetailPage({ params, searchParams }: { para
                             {o.billFullName || "—"}
                             {o.billPhone ? <span className="ml-2 font-mono text-xs font-normal text-muted-foreground">{o.billPhone}</span> : null}
                           </div>
-                          <div className="truncate text-xs text-muted-foreground" title={o.items.map((i) => `${i.variationDetail || i.sku || i.productName} ×${i.quantity}`).join(", ")}>
-                            {o.items.map((i) => `${i.variationDetail || i.sku || i.productName} ×${i.quantity}`).join(", ") || "—"}
+                          <div className="truncate text-xs text-muted-foreground" title={o.items.map((i) => `${displayVariationText(i.variationDetail, profile) || i.sku || i.productName} ×${i.quantity}`).join(", ")}>
+                            {o.items.map((i) => `${displayVariationText(i.variationDetail, profile) || i.sku || i.productName} ×${i.quantity}`).join(", ") || "—"}
                           </div>
                         </TableCell>
                         <TableCell>

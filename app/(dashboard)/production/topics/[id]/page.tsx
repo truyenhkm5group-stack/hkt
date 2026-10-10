@@ -13,6 +13,8 @@ import { describeTopicOpenContext } from "@/lib/constants/early-topic";
 import { MODEL_STATE_LABELS, MODEL_STATE_UNDECLARED_LABEL } from "@/lib/constants/model-lifecycle";
 import { MODEL_SIGNAL_LABEL } from "@/lib/constants/model-signal";
 import { EMPTY_REQUIREMENTS, TOPIC_MESSAGE_KIND_LABEL, type TopicEvidenceSnapshot, type TopicMessageKind, type TopicRequirements } from "@/lib/constants/production-os";
+import { legacyAttributeLabels } from "@/lib/constants/experience-profile";
+import { readDisplayProfile } from "@/lib/experience/profile";
 import { formatDate, formatDateTime, formatNumber, formatVND } from "@/lib/format";
 import { getTopicFileStorage, listTopicFiles } from "@/lib/queries/production-files";
 import { loadTopicAccess } from "@/lib/production/topic-access";
@@ -65,6 +67,8 @@ export default async function TopicPage({ params }: { params: Promise<{ id: stri
     note: v1Prefill.note,
     previewUnitCost: v1Prefill.lines[0]?.unitCost ?? null,
   };
+  // Nhãn Màu / Size theo hồ sơ ngành (shop thực phẩm: «Quy cách») — chỉ đổi NHÃN, giá trị yêu cầu giữ nguyên.
+  const attr = legacyAttributeLabels(await readDisplayProfile());
   const poShortcuts = await loadDesignPoShortcuts({ productId: d.model?.productId ?? null, designIds: d.designVersions.map((x) => x.id), canWrite: can(user, "planning:write") });
 
   return (
@@ -120,8 +124,8 @@ export default async function TopicPage({ params }: { params: Promise<{ id: stri
                   value: acc.setStatus ? <TopicSupplierSelect topicId={d.topic.id} supplierId={d.topic.supplierId} suppliers={suppliers} /> : (d.topic.supplierName ?? "—"),
                 },
                 ...(req.trims ? [{ label: "Phụ liệu", value: req.trims }] : []),
-                ...(req.colors.length ? [{ label: "Màu", value: req.colors.join(", ") }] : []),
-                ...(req.sizes.length ? [{ label: "Size", value: req.sizes.join(", ") }] : []),
+                ...(req.colors.length ? [{ label: attr.color, value: req.colors.join(", ") }] : []),
+                ...(req.sizes.length ? [{ label: attr.size, value: req.sizes.join(", ") }] : []),
                 ...(req.expectedQty !== null ? [{ label: "Số lượng dự kiến", value: formatNumber(req.expectedQty) }] : []),
                 ...(req.deadline ? [{ label: "Hạn cần hàng", value: formatDate(req.deadline) }] : []),
                 ...(d.topic.selectedOption ? [{ label: "Phương án đã chốt", value: d.topic.selectedOption }] : []),

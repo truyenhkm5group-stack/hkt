@@ -44,6 +44,8 @@ import { attemptHoldsOrder } from "@/lib/constants/carrier-vtp";
 import { AttemptActions, CreateShipmentButton } from "@/app/(dashboard)/orders/[id]/carrier-shipment-actions";
 import { OrderQuickDecision, OrderReviewEntries } from "@/components/orders/order-review-quick";
 import { getBrandCopy } from "@/lib/branding/service";
+import { displayVariationText } from "@/lib/constants/experience-profile";
+import { readDisplayProfile } from "@/lib/experience/profile";
 import { ORDER_REVIEW_LABEL, orderReviewLogOf, orderReviewOf, reconfirmsSinceOpen } from "@/lib/constants/order-review";
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }) {
@@ -57,7 +59,8 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
   // Hai phép đọc đầu không phụ thuộc nhau; bốn phép đọc sau chỉ cần `order`. Trước đây sáu lượt
   // nối đuôi, mỗi lượt một vòng đi-về CSDL — trang chi tiết đơn là trang mở nhiều nhất sau danh sách.
   // `copy.isHome` = tổ chức đồng bộ Pancake (nhà). Nơi khác không có Pancake: mọi chỉ dẫn / bộ đếm / dữ liệu gốc Pancake là sai.
-  const [order, riskCfg, copy] = await Promise.all([getOrderDetail(id), loadAlertConfig(), getBrandCopy(user)]);
+  // Hồ sơ ngành chỉ để đổi NHÃN chữ biến thể khi in (shop thực phẩm: «Size: 1kg» ⇒ «Quy cách: 1kg»); lỗi ⇒ in nguyên chữ đã lưu.
+  const [order, riskCfg, copy, displayProfile] = await Promise.all([getOrderDetail(id), loadAlertConfig(), getBrandCopy(user), readDisplayProfile()]);
   if (!order) notFound();
   // Đơn thiếu SĐT / địa chỉ (khách cũ mua lại chỉ nhắn "gửi địa chỉ cũ") → gợi ý lấy lại từ đơn cũ của chính khách
   const thieuThongTin = !order.billPhone || !(order.shipFullAddress || order.shipAddress);
@@ -380,7 +383,7 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
                               {item.isBonus ? <span className="ml-2 rounded bg-emerald-50 px-1.5 text-[10px] font-semibold text-emerald-700">Tặng kèm</span> : null}
                             </p>
                             <p className="text-xs text-muted-foreground">
-                              {item.variationDetail || "—"}
+                              {displayVariationText(item.variationDetail, displayProfile) || "—"}
                               {item.sku ? <span className="ml-2 font-mono">{item.sku}</span> : null}
                               {item.returnQuantity ? <span className="ml-2 text-rose-600">· hoàn {item.returnQuantity}</span> : null}
                             </p>
