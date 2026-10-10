@@ -6,7 +6,7 @@ import { TechPriorityBadge } from "@/app/(dashboard)/tech/badges";
 import { DeliveryBadge, LivenessBadge, MissionControlBadge, RegistryRiskBadge } from "@/app/(dashboard)/tech/missions/registry-badges";
 import { DataTable } from "@/components/data-table/data-table";
 import type { TechPriority } from "@/lib/constants/tech";
-import { MISSION_CONTROL_SORTABLE } from "@/lib/constants/tech-registry";
+import { MISSION_CONTROL_PAGE_SIZE, MISSION_CONTROL_SORTABLE } from "@/lib/constants/tech-registry";
 import { formatDateTime, formatTimeAgo } from "@/lib/format";
 import type { MissionControlRow } from "@/lib/queries/tech-registry";
 
@@ -61,7 +61,7 @@ function columns(repo: string | null): ColumnDef<MissionControlRow, unknown>[] {
       id: "code",
       header: "Sứ mệnh",
       cell: ({ row }) => (
-        <div className="min-w-[240px] max-w-[420px]">
+        <div className="min-w-[220px] max-w-[340px] whitespace-normal">
           <div className="flex flex-wrap items-center gap-1.5">
             <span className="font-mono text-[11px] font-semibold text-muted-foreground">{row.original.code}</span>
             {row.original.source === "ERP" ? <span className="text-[10.5px] text-muted-foreground">· tạo tay trong /tech</span> : null}
@@ -77,7 +77,7 @@ function columns(repo: string | null): ColumnDef<MissionControlRow, unknown>[] {
       id: "state",
       header: "Trạng thái",
       cell: ({ row }) => (
-        <div className="flex min-w-[150px] flex-col items-start gap-1">
+        <div className="flex flex-col items-start gap-1">
           <MissionControlBadge state={row.original.state} />
           {row.original.phaseLabel && row.original.state === "RUNNING" ? <span className="text-[10.5px] text-muted-foreground">{row.original.phaseLabel}</span> : null}
           <LivenessBadge liveness={row.original.liveness} />
@@ -99,7 +99,7 @@ function columns(repo: string | null): ColumnDef<MissionControlRow, unknown>[] {
       header: "Phụ trách",
       enableSorting: false,
       cell: ({ row }) => (
-        <div className="max-w-[160px] text-xs" title={row.original.owner}>
+        <div className="max-w-[140px] text-xs" title={row.original.owner}>
           <div className="truncate">{row.original.owner ? shortOwner(row.original.owner) : "—"}</div>
           <div className="truncate font-mono text-[10.5px] text-muted-foreground">{row.original.branch || "—"}</div>
         </div>
@@ -122,8 +122,8 @@ function columns(repo: string | null): ColumnDef<MissionControlRow, unknown>[] {
       enableSorting: false,
       cell: ({ row }) =>
         row.original.delivery ? (
-          <div className="flex min-w-[170px] flex-col items-start gap-0.5 text-[10.5px]">
-            <DeliveryBadge level={row.original.delivery} />
+          <div className="flex flex-col items-start gap-0.5 text-[10.5px]">
+            <DeliveryBadge level={row.original.delivery} short />
             {deployLabel(row.original)}
           </div>
         ) : (
@@ -157,7 +157,7 @@ function MobileCard({ row }: { row: MissionControlRow }) {
         {row.phaseLabel && row.state === "RUNNING" ? <span>{row.phaseLabel}</span> : null}
         {row.owner ? <span>· {shortOwner(row.owner)}</span> : null}
         {row.prs.length ? <span>· PR {row.prs.map((n) => `#${n}`).join(" ")}</span> : null}
-        {row.delivery ? <DeliveryBadge level={row.delivery} /> : null}
+        {row.delivery ? <DeliveryBadge level={row.delivery} short /> : null}
         <span>· {formatTimeAgo(row.updatedAt)}</span>
       </div>
     </div>
@@ -175,6 +175,7 @@ export function MissionControlTable({ rows, pageCount, total, repo }: { rows: Mi
       rowHref={(r) => r.href}
       defaultSort="updatedAt"
       sortable={MISSION_CONTROL_SORTABLE}
+      defaultPageSize={MISSION_CONTROL_PAGE_SIZE}
       dense
       mobileCard={(r) => <MobileCard row={r} />}
       emptyTitle="Không có sứ mệnh nào khớp bộ lọc"

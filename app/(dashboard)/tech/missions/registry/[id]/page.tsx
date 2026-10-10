@@ -34,6 +34,7 @@ export default async function RegistryMissionPage({ params }: { params: Promise<
   const { entry, evidence: done } = view;
   const v = view.row;
   const ev = entry.evidence ?? {};
+  const choTu = row.srcUpdatedAt && row.srcUpdatedAt < row.stateSince ? row.srcUpdatedAt : row.stateSince;
   const prLink = (n: number) =>
     repo ? (
       <a key={n} href={`https://github.com/${repo}/pull/${n}`} target="_blank" rel="noreferrer" className="font-semibold text-primary hover:underline">
@@ -77,7 +78,7 @@ export default async function RegistryMissionPage({ params }: { params: Promise<
         <div className="rounded-xl border-2 border-fuchsia-200 bg-card p-4 dark:border-fuchsia-900">
           <p className="text-xs font-bold uppercase tracking-wide text-fuchsia-700 dark:text-fuchsia-300">{ownerEscalationLabel(entry.needsOwner?.category)}</p>
           <p className="mt-1 text-base font-semibold leading-snug">{entry.needsOwner?.action || entry.title}</p>
-          <p className="mt-1 text-xs text-muted-foreground">Chờ từ {formatDateTime(row.stateSince)} ({formatTimeAgo(row.stateSince)})</p>
+          <p className="mt-1 text-xs text-muted-foreground">Chờ từ {formatDateTime(choTu)} ({formatTimeAgo(choTu)})</p>
         </div>
       ) : null}
 

@@ -252,7 +252,7 @@ export function classifyDoneEvidence(text: string | null | undefined): EvidenceC
   const product = PRODUCT_MARKERS.find((m) => m.re.test(t));
   if (product && !partial) return { kind: "PRODUCT_VERIFIED", reason: product.reason };
   if (DEPLOY_MARKERS.some((re) => re.test(t))) {
-    return { kind: "DEPLOY_ONLY", reason: partial ? "câu bằng chứng tự nói còn phần CHƯA đo / chưa kiểm" : "chỉ có health / phiên bản / deploy xanh — chưa thấy số đo hành vi trên production" };
+    return { kind: "DEPLOY_ONLY", reason: partial ? "câu bằng chứng tự nói còn phần CHƯA đo / chưa kiểm" : "chưa thấy số đo hành vi nào trên production" };
   }
   return { kind: "UNRECOGNIZED", reason: "không thấy dấu hiệu kiểm production nào nhận ra được" };
 }
@@ -266,6 +266,14 @@ export const DELIVERY_LEVEL_LABEL: Record<DeliveryLevel, string> = {
   CODE_DONE: "Đã gộp (CODE_DONE)",
   DEPLOYED: "Đã lên production (DEPLOYED)",
   PRODUCT_VERIFIED: "Đã kiểm sản phẩm (PRODUCT_VERIFIED)",
+};
+
+/** Nhãn NGẮN cho ô bảng (bảng phải vừa một màn hình) — trang chi tiết dùng nhãn đầy đủ. */
+export const DELIVERY_LEVEL_SHORT: Record<DeliveryLevel, string> = {
+  NONE: "Chưa gộp",
+  CODE_DONE: "Đã gộp",
+  DEPLOYED: "Đã lên production",
+  PRODUCT_VERIFIED: "Đã kiểm sản phẩm",
 };
 
 /** Kết quả ERP tự hỏi GitHub «commit production có chứa commit gộp không». Rỗng = chưa hỏi / không hỏi được. */
@@ -341,7 +349,7 @@ export const REGISTRY_PROJECTS = [
   { key: "saas", label: "SaaS Platform" },
   { key: "hslc", label: "HSLC" },
   { key: "chotdon", label: "Chốt Đơn AI" },
-  { key: "tech", label: "Điều phối kỹ thuật" },
+  { key: "tech", label: "Hạ tầng · điều phối" },
   { key: "erp", label: "VNXCommerce ERP" },
 ] as const;
 export type RegistryProjectKey = (typeof REGISTRY_PROJECTS)[number]["key"];
@@ -387,4 +395,6 @@ export function registryNotifyKey(state: MissionControlState, stateSince: Date):
 
 /** Cột sắp được của `/tech/missions` — `id` cột trùng khoá ở đây (AGENTS.md §2). */
 export const MISSION_CONTROL_SORTABLE = ["updatedAt", "priority", "code", "state"];
+/** Cỡ trang mặc định — máy chủ (`parseListParams`) và bảng (`DataTable`) đọc CÙNG số, lệch là phân trang sai. */
+export const MISSION_CONTROL_PAGE_SIZE = 50;
 export const MISSION_CONTROL_FILTER_KEYS = ["state", "project", "owner", "priority", "source"];

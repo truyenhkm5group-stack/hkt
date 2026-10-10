@@ -9,6 +9,7 @@ import { can, requirePermission } from "@/lib/auth/session";
 import {
   MISSION_CONTROL_FILTER_KEYS,
   MISSION_CONTROL_LABEL,
+  MISSION_CONTROL_PAGE_SIZE,
   MISSION_CONTROL_SORTABLE,
   REGISTRY_STALE_HOURS,
   TECH_REGISTRY_BRANCH,
@@ -32,7 +33,7 @@ export default async function TechMissionsPage({ searchParams }: { searchParams:
   const raw = await searchParams;
   const user = await requirePermission("tech:view");
   const canManage = can(user, "tech:manage");
-  const params = parseListParams(raw, { defaultSort: "updatedAt", filterKeys: MISSION_CONTROL_FILTER_KEYS, sortable: MISSION_CONTROL_SORTABLE, defaultPageSize: 50 });
+  const params = parseListParams(raw, { defaultSort: "updatedAt", filterKeys: MISSION_CONTROL_FILTER_KEYS, sortable: MISSION_CONTROL_SORTABLE, defaultPageSize: MISSION_CONTROL_PAGE_SIZE });
   const now = new Date();
   const [list, sync, projects] = await Promise.all([listMissionControl(params, now), registrySyncInfo(), listTechProjects()]);
   const activeProjects = projects.filter((p) => p.active).map((p) => ({ key: p.key, name: p.name }));

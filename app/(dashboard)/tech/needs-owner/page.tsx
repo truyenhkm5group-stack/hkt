@@ -56,7 +56,7 @@ export default async function TechNeedsOwnerPage() {
               <div className="mt-2 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
                 <span className="break-all font-mono font-semibold">{d.registryId}</span>
                 <TechPriorityBadge priority={d.priority as TechPriority} />
-                <span>· chờ {formatTimeAgo(d.waitingSince)}</span>
+                <span>· chờ từ {formatTimeAgo(d.waitingSince)}</span>
               </div>
             </Link>
           ))}

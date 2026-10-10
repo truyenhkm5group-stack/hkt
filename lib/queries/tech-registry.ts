@@ -296,7 +296,8 @@ export async function registryDecisionQueue() {
       priority: entry.priority,
       risk: entry.risk,
       phase: entry.status,
-      waitingSince: r.stateSince,
+      // Mốc phép chiếu THẤY trạng thái (lần đọc đầu = lúc đọc) muộn hơn sự thật; mốc sổ cập nhật cuối thì sớm hơn hoặc bằng — lấy cái sớm hơn.
+      waitingSince: r.srcUpdatedAt && r.srcUpdatedAt < r.stateSince ? r.srcUpdatedAt : r.stateSince,
       updatedAt: r.srcUpdatedAt,
     }))
     .sort((a, b) => (PRIO_RANK[a.priority] ?? 9) - (PRIO_RANK[b.priority] ?? 9) || a.waitingSince.getTime() - b.waitingSince.getTime());

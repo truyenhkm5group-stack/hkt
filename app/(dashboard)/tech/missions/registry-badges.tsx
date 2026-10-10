@@ -1,5 +1,6 @@
 import {
   DELIVERY_LEVEL_LABEL,
+  DELIVERY_LEVEL_SHORT,
   MISSION_CONTROL_LABEL,
   MISSION_CONTROL_TONE,
   REGISTRY_LIVENESS_LABEL,
@@ -41,6 +42,10 @@ const DELIVERY_TONE: Record<DeliveryLevel, string> = {
   PRODUCT_VERIFIED: "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300",
 };
 
-export function DeliveryBadge({ level, className }: { level: DeliveryLevel; className?: string }) {
-  return <span className={cn(base, DELIVERY_TONE[level], className)}>{DELIVERY_LEVEL_LABEL[level]}</span>;
+export function DeliveryBadge({ level, short, className }: { level: DeliveryLevel; short?: boolean; className?: string }) {
+  return (
+    <span className={cn(base, DELIVERY_TONE[level], className)} title={DELIVERY_LEVEL_LABEL[level]}>
+      {short ? DELIVERY_LEVEL_SHORT[level] : DELIVERY_LEVEL_LABEL[level]}
+    </span>
+  );
 }
