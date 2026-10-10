@@ -82,13 +82,13 @@ export function MetricCard({
           {hint ? <InfoHint>{hint}</InfoHint> : null}
         </p>
         {Icon ? (
-          <span className={cn("flex shrink-0 items-center justify-center rounded-xl", tones[tone], size === "lg" ? "size-10" : "size-9")}>
-            <Icon className={size === "lg" ? "size-5" : "size-[18px]"} />
+          <span className={cn("flex shrink-0 items-center justify-center rounded-xl", tones[tone], size === "lg" ? "size-9 sm:size-10" : "size-8 sm:size-9")}>
+            <Icon className={size === "lg" ? "size-5" : "size-4 sm:size-[18px]"} />
           </span>
         ) : null}
       </div>
-      <p className={cn("numeric mt-2 font-extrabold tracking-[-0.025em]", size === "lg" ? "text-[30px] leading-9 sm:text-[34px]" : "text-2xl sm:text-[27px]")}>{value}</p>
-      <div className={cn("mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs", soft)}>
+      <p className={cn("numeric mt-1 font-extrabold tracking-[-0.025em] sm:mt-2", size === "lg" ? "text-[28px] leading-9 sm:text-[34px]" : "text-[22px] leading-7 sm:text-[27px]")}>{value}</p>
+      <div className={cn("mt-1.5 flex sm:mt-2 flex-wrap items-center gap-x-2 gap-y-1 text-xs", soft)}>
         {hasChange ? (
           <span className={cn("inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 font-semibold", goodWhen === "neutral" ? "bg-muted text-muted-foreground" : (goodWhen === "up" ? change >= 0 : change <= 0) ? "bg-success/10 text-success" : "bg-destructive/10 text-destructive")}>
             {change >= 0 ? <TrendingUp className="size-3" /> : <TrendingDown className="size-3" />}
@@ -105,7 +105,8 @@ export function MetricCard({
   const shell = cn(
     "group/metric relative flex h-full flex-col rounded-2xl border border-transparent shadow-[var(--shadow-card)]",
     emphasis ? "bg-ink text-ink-foreground" : "bg-card text-card-foreground",
-    size === "lg" ? "p-5 sm:p-6" : "p-5",
+    // Điện thoại: đệm 16px thay 20px, số nhỏ một bậc — trang Tài chính có 13 thẻ xếp một cột, mỗi thẻ ngắn đi ~30%.
+    size === "lg" ? "p-4 sm:p-6" : "p-4 sm:p-5",
     className,
   );
 
