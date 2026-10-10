@@ -643,6 +643,7 @@ import { testErpFormNames } from "./erp-form-names.test";
 import { testDetailPagesShell } from "./detail-pages-shell.test";
 import { testShellCopyR3 } from "./shell-copy-r3.test";
 import { testAiSalesSettingsV2 } from "./ai-sales-settings-v2.test";
+import { testAiSalesKnowledge } from "./ai-sales-knowledge.test";
 
 async function main() {
   await ensureMigrated();
@@ -3122,6 +3123,9 @@ async function main() {
   // AI Sales settings V2 (bề mặt 3 của VISIBLE_PRODUCT_FINISH_BOARD): ô trạng thái đầu trang — thiếu dữ kiện ⇒ «Chưa rõ», không «Đang chạy» —
   // một nút chính qua cổng vỏ; nhánh khách không nhận / không in khoá AI · model · tên hãng · chi phí USD. Thuần + quét mã nguồn.
   testAiSalesSettingsV2();
+  // Kiến thức của shop cho chatbot (sổ AIS-05): câu thường gặp · chính sách · khuyến mãi — zod, hạn theo giờ VN, rỗng ⇒ lời nhắc giống hệt,
+  // ô khuyến mãi không vào phép tính tiền (quét mã nguồn).
+  testAiSalesKnowledge();
   // Nền tảng · phiên & RBAC (agent C): claim org, cổng module, platform:operate, đăng nhập theo tổ chức. Tự cấp
   // tổ chức `pr-` (CSDL riêng) và tự dọn; đứng cạnh bài ngữ cảnh vì cùng lý do.
   await testPlatformRbac();

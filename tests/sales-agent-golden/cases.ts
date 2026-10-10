@@ -8,6 +8,7 @@
  * Bổ sung hội thoại thật của HSLC (đã che SĐT / tên / địa chỉ) là việc sau: cần một thao tác ops chỉ-đọc xuất hội thoại — chưa
  * có, vì `db-query` không đọc CSDL tổ chức (MIGRATION_PLAN.md · M1).
  */
+import { addDays, todayVN } from "@/lib/format";
 import { say, tool, type GoldenCase, type Step } from "./harness";
 
 /** Bước trả lời bằng chữ dựng từ kết quả công cụ (số luôn lấy từ máy chủ, không gõ tay trong kịch bản). */
@@ -16,6 +17,26 @@ const reply =
   ({ results }) => [say(f(results[0] ?? {}))];
 
 const priceOf = (r: Record<string, unknown>) => String(((r.results as { price_text?: string }[] | undefined) ?? [])[0]?.price_text ?? "?");
+
+/**
+ * KIẾN THỨC CỦA SHOP (sổ AIS-05) dùng cho hai hội thoại vàng bên dưới. Khuyến mãi ĐANG CHẠY không mang ngày (ảnh chụp không phụ
+ * thuộc ngày chạy — AGENTS.md mục 50); hai khuyến mãi hết hạn / chưa tới ngày dựng TỪ ĐỒNG HỒ THẬT nên luôn ngoài lời nhắc.
+ * Bảo hành CỐ Ý để trống: khách hỏi tới thì bot phải chuyển người, không tự đặt chính sách.
+ */
+export const GOLDEN_KNOWLEDGE = {
+  faq: [{ q: "Shop có giao hoả tốc không?", a: "Nội thành Hà Nội giao trong 2 giờ qua ứng dụng giao hàng, phí theo ứng dụng." }],
+  policies: {
+    returns: "Đổi trong 3 ngày nếu hàng lỗi hoặc giao sai; khách quay video lúc mở hàng.",
+    warranty: "",
+    shipping: "Giao toàn quốc 2–4 ngày.",
+    payment: "Thanh toán khi nhận hàng (COD) hoặc chuyển khoản.",
+  },
+  promotions: [
+    { title: "Mua 2 tặng ruốc", content: "Mua từ 2 gói chả mực tặng 1 gói ruốc 100g.", from: null, to: null },
+    { title: "Khuyến mãi đã hết", content: "Giảm 50% toàn shop.", from: addDays(todayVN(), -20), to: addDays(todayVN(), -10) },
+    { title: "Khuyến mãi chưa tới", content: "Đồng giá 99K.", from: addDays(todayVN(), 10), to: null },
+  ],
+};
 
 export const GOLDEN_CASES: readonly GoldenCase[] = [
   {
@@ -143,5 +164,27 @@ export const GOLDEN_CASES: readonly GoldenCase[] = [
     shop: "fashion",
     channel: "WEB",
     turns: [{ say: "dam linen size M gia bao nhieu a", ai: [() => [tool("search_products", { query: "đầm linen" })], reply((r) => `Dạ đầm suông linen size M ${priceOf(r)} ạ.`)] }],
+  },
+  {
+    key: "kien-thuc-chinh-sach-khuyen-mai",
+    title: "Kiến thức của shop: hỏi đổi trả ⇒ trả lời theo chính sách shop khai; hỏi khuyến mãi ⇒ mô tả khuyến mãi đang chạy, số tiền vẫn từ calculate_cart",
+    shop: "food",
+    channel: "WEB",
+    config: GOLDEN_KNOWLEDGE,
+    turns: [
+      { say: "shop co cho doi tra ko", ai: [() => [say("Dạ shop đổi trong 3 ngày nếu hàng lỗi hoặc giao sai, mình quay video lúc mở hàng giúp em ạ.")]] },
+      {
+        say: "dang co khuyen mai gi ko, lay 2 goi cha muc het bao nhieu",
+        ai: [({ v }) => [tool("calculate_cart", { items: [{ variant_id: v("CHA-MUC"), quantity: 2 }] })], reply((r) => `Dạ shop đang có «Mua 2 tặng ruốc»: mua từ 2 gói chả mực tặng 1 gói ruốc 100g. 2 gói chả mực ${String(r.subtotal_text)} ạ.`)],
+      },
+    ],
+  },
+  {
+    key: "kien-thuc-chua-khai-chuyen-nguoi",
+    title: "Kiến thức của shop: hỏi chính sách shop CHƯA khai (bảo hành) ⇒ không tự đặt, chuyển người «Ngoài chính sách»",
+    shop: "food",
+    channel: "WEB",
+    config: GOLDEN_KNOWLEDGE,
+    turns: [{ say: "bao hanh the nao shop", ai: [() => [tool("handoff_to_human", { reason: "Ngoài chính sách — bảo hành" })], reply(() => "Dạ phần bảo hành em chưa có thông tin, em chuyển nhân viên báo mình ngay ạ.")] }],
   },
 ];
