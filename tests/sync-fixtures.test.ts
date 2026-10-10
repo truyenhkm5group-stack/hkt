@@ -620,6 +620,7 @@ import { testPlatformJobs } from "./platform-jobs.test";
 import { testGSched } from "./g-sched.test";
 import { testSaasVnxRuntime } from "./saas-vnx-runtime.test";
 import { testSaasPageGate } from "./saas-page-gate.test";
+import { testPancakeSendRetry } from "./pancake-send-retry.test";
 import { testSaasShell } from "./saas-shell.test";
 import { testShellStaffRolesPure, testShellStaffRolesServer } from "./shell-staff-roles.test";
 import { testBanHangReplyPure, testBanHangReplyServer } from "./ban-hang-reply.test";
@@ -2289,6 +2290,8 @@ async function main() {
   await testOrgOffboardDb();
   // ops org-order-audit: hội thoại có SĐT ↔ đơn ERP của một ngày (HSLC 05/10/2026: POS 26 vs ERP 23).
   testOrgOrderAuditPure();
+  // Bot HSLC sót tin vì Pancake 429 lúc gửi (10/10/2026): gửi lại đoạn bị từ chối · nhập lịch sử nhường · gửi bù có điều kiện.
+  await testPancakeSendRetry();
   // Sự kiện Purchase gửi Meta khi chốt đơn (0236 — chủ shop HSLC 08/10/2026) — tổ chức THẬT `capi-hslc` (tự cấp, tự dọn), Graph giả.
   testMetaCapiPure();
   await testMetaCapiDb();

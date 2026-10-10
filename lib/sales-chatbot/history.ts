@@ -57,6 +57,7 @@ import {
   type PendingThread,
 } from "@/lib/sales-chatbot/history-shared";
 import { normalizeVnPhone } from "@/lib/sales-chatbot/returning";
+import { SEND_PRIORITY_MS, sendRecentlyLimited } from "@/lib/sales-chatbot/pancake-send-pressure";
 import { SALES_CHATBOT_MANAGE } from "@/lib/sales-chatbot/settings";
 import { pancakeImageUrls, pancakeStickerUrls } from "@/lib/sales-chatbot/vision";
 import { getSettingJson, setSettingJson } from "@/lib/settings";
@@ -187,6 +188,8 @@ export async function loadHistoryRun(): Promise<HistoryRun> {
 
 // ─────────────────────────── PANCAKE ───────────────────────────
 
+/** Lượt nhập dừng nhường lời gửi của bot (Pancake vừa 429 khi bot gửi) — hẹn lại sau `SEND_PRIORITY_MS`. */
+export const YIELD_TO_BOT_NOTE = "Bot đang bị Pancake giới hạn tốc độ khi trả lời khách — nhập lịch sử tạm nhường, đọc tiếp sau ít phút";
 type PancakeGet = { ok: true; body: Record<string, unknown> } | { ok: false; kind: "RATE_LIMIT" | "TRANSIENT" | "REJECTED"; error: string; retryAfterMs: number | null };
 
 /** GET Pancake MỘT lần — không tự thử lại: lượt nhập tự hẹn lại theo loại lỗi (429 ⇒ nghỉ; mạng / 5xx ⇒ lùi dần). */
@@ -403,6 +406,9 @@ export async function runHistoryTick(deps: HistoryDeps = {}): Promise<HistoryTic
     return null;
   };
 
+  /** Bot vừa bị Pancake 429 khi GỬI tin ⇒ nhập lịch sử nhường hạn mức của page cho lời trả lời khách (pancake-send-pressure.ts). */
+  const yieldToBot = () => (sendRecentlyLimited(pageId, now().getTime()) ? onError({ ok: false, kind: "RATE_LIMIT", error: YIELD_TO_BOT_NOTE, retryAfterMs: SEND_PRIORITY_MS }, false) : null);
+
   for (;;) {
     if (out.requests >= maxRequests || now().getTime() - start >= budget) break;
 
@@ -416,6 +422,8 @@ export async function runHistoryTick(deps: HistoryDeps = {}): Promise<HistoryTic
         continue;
       }
       if (out.requests) await sleep(HISTORY_LIMITS.requestGapMs);
+      const yielded = await yieldToBot();
+      if (yielded) return yielded;
       const r = await pancakeGet(`${PANCAKE_PAGES_API}/v2/pages/${encodeURIComponent(pageId)}/conversations?${q}&type=INBOX&order_by=updated_at${run.listCursor ? `&last_conversation_id=${encodeURIComponent(run.listCursor)}` : ""}`, token, fetchImpl);
       out.requests += 1;
       run.counts.requests += 1;
@@ -462,6 +470,8 @@ export async function runHistoryTick(deps: HistoryDeps = {}): Promise<HistoryTic
       if (run.phase === "LOCAL" && run.localRemaining !== null) run.localRemaining = Math.max(0, run.localRemaining - 1);
     };
     if (out.requests) await sleep(HISTORY_LIMITS.requestGapMs);
+    const yielded = await yieldToBot();
+    if (yielded) return yielded;
     const r = await pancakeGet(`${PANCAKE_PAGES_API}/v1/pages/${encodeURIComponent(pageId)}/conversations/${encodeURIComponent(cur.id)}/messages?${q}${th.count ? `&current_count=${th.count}` : ""}`, token, fetchImpl);
     out.requests += 1;
     run.counts.requests += 1;

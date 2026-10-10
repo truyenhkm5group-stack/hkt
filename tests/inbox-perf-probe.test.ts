@@ -122,13 +122,19 @@ export function testInboxPerfProbeSource() {
   assert.match(code, /getDbForInspection\(org\)/, "CSDL tổ chức mở bằng handle chỉ đọc, không migrate");
   // Script gọi ĐÚNG các hàm của trang — và trang VẪN gọi chúng (trang đổi mà script không đổi ⇒ đỏ ở đây).
   const page = readFileSync("app/(dashboard)/ai/sales-chatbot/inbox/page.tsx", "utf8");
-  for (const fn of ["listLabels()", "inboxPages()", "loadInboxThread(user, selected)", "assignableUsers(user)", "inboxAssignees(user)", "organizationLevelPack()", "listPageRoutes().catch(() => [])", "humanCooldownMinutes()", "manualOrderGate(user)", "customerInboxThread(loaded.thread)"]) {
+  for (const fn of ["listLabels()", "inboxPages()", "inboxThreadPayload(user, selected)", "assignableUsers(user)", "inboxAssignees(user)", "organizationLevelPack()", "listPageRoutes().catch(() => [])", "humanCooldownMinutes()", "manualOrderGate(user)"]) {
     assert.ok(page.includes(fn), `page.tsx còn gọi ${fn}`);
   }
   assert.match(page, /listInbox\(user, \{ filter, channel, q, label, page, phone, level, assignee, period, from, to, limit, handler \}\)/, "page.tsx gọi listInbox với đúng bộ khoá script dựng mặc định");
-  for (const fn of ["await listLabels();", "await inboxPages();", "await loadInboxThread(user, selected)", "listInbox(user, DEFAULT_LIST_QUERY)", "assignableUsers(user)", "inboxAssignees(user)", "organizationLevelPack()", "listPageRoutes().catch(() => [])", "humanCooldownMinutes()", "manualOrderGate(user)", "customerInboxThread(loaded.thread)"]) {
+  for (const fn of ["await listLabels();", "await inboxPages();", "await inboxThreadPayload(user, selected)", "listInbox(user, DEFAULT_LIST_QUERY)", "assignableUsers(user)", "inboxAssignees(user)", "organizationLevelPack()", "listPageRoutes().catch(() => [])", "humanCooldownMinutes()", "manualOrderGate(user)"]) {
     assert.ok(code.includes(fn), `script gọi ${fn} như trang`);
   }
+  // CHUYỂN hội thoại (10/10/2026) = route chỉ đọc hội thoại — script đo ĐÚNG lời gọi của route, không dựng lại danh sách.
+  const route = readFileSync("app/api/ai-sales/inbox-thread/route.ts", "utf8");
+  assert.ok(route.includes("await inboxThreadPayload(user, id)") && code.includes("await inboxThreadPayload(user, id)"), "route và script cùng gọi inboxThreadPayload");
+  assert.ok(!/listInbox/.test(route), "route chuyển hội thoại không chạy lại danh sách");
+  assert.match(code, /switchTo\.cold\.push\(await switchConversationPath\(user, id\)\)/, "lượt CHUYỂN đo đường route");
+  assert.ok(readFileSync("app/(dashboard)/ai/sales-chatbot/inbox/conversation-list.tsx", "utf8").includes("onClick={(e) => openConversationInPlace(e, href)}"), "bấm hàng đổi ?c= tại chỗ, không điều hướng dựng lại trang");
   assert.match(code, /filter: "ALL", channel: null, q: "", label: null, page: null, phone: null, level: null, assignee: null, period: null, from: null, to: null, limit: 100, handler: null/, "bộ lọc mặc định của trang");
 
   const ops = readFileSync(".github/workflows/ops-vps.yml", "utf8");
@@ -201,12 +207,18 @@ export async function testInboxPerfProbeDb() {
     assert.equal(r1.identity?.role, "VIEWER", "ADMIN qua mọi can() ⇒ phải hạ vai trò mới không gửi được");
     const res = r1.result;
     assert.equal(res.conversations, 3);
-    for (const s of [...res.load.cold, ...res.load.warm, ...res.switchTo.cold, ...res.switchTo.warm]) {
+    for (const s of [...res.load.cold, ...res.load.warm]) {
       assert.equal(s.error, null, `lượt đo không hỏng: ${s.error}`);
       assert.ok(s.ms > 0 && s.listMs !== null && s.listMs > 0);
       assert.equal(s.rows, 5, "4 hội thoại page + 1 chat web; khung TEST không vào hộp thư");
       assert.equal(s.total, 5);
       assert.ok(s.sqlMs !== null && s.queries !== null && s.queries > 5, `SQL tách riêng được: ${s.queries} câu`);
+    }
+    // CHUYỂN hội thoại (10/10/2026) = route chỉ đọc hội thoại: KHÔNG chạy lại danh sách.
+    for (const s of [...res.switchTo.cold, ...res.switchTo.warm]) {
+      assert.equal(s.error, null, `lượt đo không hỏng: ${s.error}`);
+      assert.ok(s.ms > 0 && s.listMs === null && s.rows === null, "lượt chuyển không dựng lại danh sách");
+      assert.ok(s.sqlMs !== null && s.queries !== null && s.queries >= 1, `SQL tách riêng được: ${s.queries} câu`);
     }
     assert.equal(res.load.cold.length, 3);
     assert.equal(res.load.warm.length, 3);

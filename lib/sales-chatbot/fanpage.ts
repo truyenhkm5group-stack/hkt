@@ -50,6 +50,7 @@ import { imagesAlreadyDescribed, pancakeImageUrls, pancakeStickerUrls } from "@/
 import { adReferralFromPancake, isPancakePageSide, type AdReferral } from "@/lib/sales-chatbot/ad-referral-shared";
 import { recordConversationAd } from "@/lib/sales-chatbot/ad-referral";
 import { botSendAllowed, inboundPageGate, pageRuntimeMode } from "@/lib/sales-chatbot/page-runtime";
+import { noteSendRateLimited, sendRecentlyLimited } from "@/lib/sales-chatbot/pancake-send-pressure";
 import { PAGE_NOT_LIVE_SEND_ERROR, PAGE_OFF_NOTE } from "@/lib/sales-chatbot/page-runtime-shared";
 
 export const FANPAGE_CONNECTOR = "pancake-fanpage";
@@ -667,20 +668,45 @@ async function sendImages(pageId: string, threadId: string, token: string, conte
   }
 }
 
-async function sendInbox(pageId: string, threadId: string, token: string, text: string, fetchImpl: typeof fetch, who: Sender): Promise<{ ok: true; ids: string[] } | { ok: false; error: string }> {
-  if (who === "BOT" && !(await botSendAllowed(pageId))) return { ok: false, error: PAGE_NOT_LIVE_SEND_ERROR };
+/**
+ * Pancake từ chối vì gọi quá nhiều (HTTP 429 hoặc phong bì «Too many requests»). Lời gọi bị TỪ CHỐI ⇒ tin CHẮC CHẮN chưa tới khách,
+ * nên gửi lại là an toàn — khác hẳn lỗi mạng / hết giờ (lời gọi có thể đã tới nơi ⇒ KHÔNG tự gửi lại). HÀM THUẦN.
+ */
+export function isPancakeRateLimited(status: number, message: string): boolean {
+  return status === 429 || /too many requests|rate.?limit/i.test(message);
+}
+/** Chờ trước mỗi lần gửi lại sau 429 — `Retry-After` của Pancake thắng (trần 20 giây). Tổng ≤ ~26 giây, vẫn trong lượt trả lời. */
+export const SEND_RATE_LIMIT_WAITS_MS = [3_000, 8_000, 15_000] as const;
+export type SendResult = { ok: true; ids: string[] } | { ok: false; error: string; sentParts: number; rateLimited: boolean };
+const realSleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+async function sendInbox(pageId: string, threadId: string, token: string, text: string, fetchImpl: typeof fetch, who: Sender, sleep: (ms: number) => Promise<void> = realSleep): Promise<SendResult> {
+  if (who === "BOT" && !(await botSendAllowed(pageId))) return { ok: false, error: PAGE_NOT_LIVE_SEND_ERROR, sentParts: 0, rateLimited: false };
   const ids: string[] = [];
   const url = `${PANCAKE_PAGES_API}/v1/pages/${encodeURIComponent(pageId)}/conversations/${encodeURIComponent(threadId)}/messages?page_access_token=${encodeURIComponent(token)}`;
+  let sentParts = 0;
   try {
     for (const part of chunkText(text, TEXT_MAX)) {
-      const res = await fetchImpl(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "reply_inbox", message: part }), redirect: "manual", signal: AbortSignal.timeout(15_000) });
-      const body = (await res.json().catch(() => null)) as { success?: boolean; id?: unknown; message?: unknown } | null;
-      if (!res.ok || body?.success === false) return { ok: false, error: scrubSecrets(`Pancake không nhận tin: ${str(body?.message) || `HTTP ${res.status}`}`, [token]) };
-      if (str(body?.id)) ids.push(str(body?.id));
+      for (let attempt = 0; ; attempt++) {
+        const res = await fetchImpl(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "reply_inbox", message: part }), redirect: "manual", signal: AbortSignal.timeout(15_000) });
+        const body = (await res.json().catch(() => null)) as { success?: boolean; id?: unknown; message?: unknown } | null;
+        if (res.ok && body?.success !== false) {
+          if (str(body?.id)) ids.push(str(body?.id));
+          sentParts += 1;
+          break;
+        }
+        const error = scrubSecrets(`Pancake không nhận tin: ${str(body?.message) || `HTTP ${res.status}`}`, [token]);
+        if (!isPancakeRateLimited(res.status, str(body?.message))) return { ok: false, error, sentParts, rateLimited: false };
+        // 429: báo cho đường đọc nền nhường (nhập lịch sử…) rồi gửi lại ĐÚNG đoạn này sau một nhịp.
+        noteSendRateLimited(pageId);
+        if (attempt >= SEND_RATE_LIMIT_WAITS_MS.length) return { ok: false, error, sentParts, rateLimited: true };
+        const ra = Number(res.headers?.get?.("retry-after"));
+        await sleep(Number.isFinite(ra) && ra > 0 ? Math.min(ra, 20) * 1000 : SEND_RATE_LIMIT_WAITS_MS[attempt]);
+      }
     }
     return { ok: true, ids };
   } catch (e) {
-    return { ok: false, error: scrubSecrets(isNetworkFailure(e) ? `Không gọi được Pancake: ${describeNetworkFailure(e, "pages.fm")}` : `Không gọi được Pancake: ${e instanceof Error ? e.message : String(e)}`, [token]) };
+    return { ok: false, error: scrubSecrets(isNetworkFailure(e) ? `Không gọi được Pancake: ${describeNetworkFailure(e, "pages.fm")}` : `Không gọi được Pancake: ${e instanceof Error ? e.message : String(e)}`, [token]), sentParts, rateLimited: false };
   }
 }
 
@@ -743,9 +769,11 @@ export async function sendFanpageText(pageId: string, threadId: string, text: st
     .insert(t)
     .values(parts.map((part, i) => ({ pageId, threadId, messageId: preIds[i], text: normalizeEcho(part), status: "DONE", processedAt: now(), note: mark ? PAGE_REPLY : "BOT_SENT" })))
     .onConflictDoNothing({ target: t.messageId });
-  const sent = await sendInbox(pageId, threadId, token, text, deps.fetch ?? fetch, mark ? "STAFF" : "BOT");
+  const sent = await sendInbox(pageId, threadId, token, text, deps.fetch ?? fetch, mark ? "STAFF" : "BOT", deps.sleep);
   if (!sent.ok) {
-    if (mark) await db.delete(t).where(inArray(t.messageId, preIds));
+    // Đoạn CHƯA tới khách ⇒ xoá dòng ghi sẵn (cả tin bot): hộp thư không được hiện một câu khách chưa nhận.
+    const unsent = mark ? preIds : preIds.slice(sent.sentParts);
+    if (unsent.length) await db.delete(t).where(inArray(t.messageId, unsent));
     return { ok: false, error: sent.error };
   }
   // Tin nhân viên: MỘT dòng cho mỗi đoạn (dòng ghi sẵn) — ghi thêm dòng theo mã Pancake là chép tin vào lịch sử bot hai lần.
@@ -756,7 +784,7 @@ export async function sendFanpageText(pageId: string, threadId: string, text: st
 
 /** Ba hàm gửi NỘI BỘ của đường bot — chỉ để bài kiểm gọi thẳng (tests/saas-page-gate.test.ts), không dùng ở mã chạy. */
 export const fanpageBotSendersForTests = {
-  sendInbox: (pageId: string, threadId: string, text: string, fetchImpl: typeof fetch, who: Sender) => sendInbox(pageId, threadId, PAGE_TOKEN_FOR_TESTS, text, fetchImpl, who),
+  sendInbox: (pageId: string, threadId: string, text: string, fetchImpl: typeof fetch, who: Sender, sleep?: (ms: number) => Promise<void>) => sendInbox(pageId, threadId, PAGE_TOKEN_FOR_TESTS, text, fetchImpl, who, sleep),
   sendImages: (pageId: string, threadId: string, contentIds: readonly string[], fetchImpl: typeof fetch) => sendImages(pageId, threadId, PAGE_TOKEN_FOR_TESTS, contentIds, fetchImpl, "BOT"),
   deliverCommentReply: (input: Omit<CommentReplyInput, "token">, deps: FanpageDeps) => deliverCommentReply({ ...input, token: PAGE_TOKEN_FOR_TESTS }, deps),
 };
@@ -1179,7 +1207,9 @@ export async function processFanpageThread(pageId: string, threadId: string, dep
       }
       if (!sendError && up.errors.length) sendError = up.errors[0];
     };
-    for (const r of replies) {
+    // Phần câu trả lời CHƯA tới khách vì Pancake 429 (đã thử lại trong lượt) ⇒ hàng GỬI BÙ (`resendPendingFanpageReplies`).
+    let unsent: string[] = [];
+    for (const [ri, r] of replies.entries()) {
       // Người vừa trả lời / tiếp quản trong lúc bot soạn ⇒ dừng, KHÔNG gửi phần còn lại (kể cả ảnh).
       const may = await botMaySend(conv.id, sendGuard);
       if (!may.ok) {
@@ -1188,13 +1218,20 @@ export async function processFanpageThread(pageId: string, threadId: string, dep
         break;
       }
       // Ghi TRƯỚC khi gửi từng đoạn (đúng cách chia của sendInbox): tiếng vọng có thể tới trước khi lời gọi gửi trả mã tin.
+      const parts = chunkText(r.text, TEXT_MAX);
+      const preIds = parts.map(() => `bot-out:${randomUUID()}`);
       await db
         .insert(t)
-        .values(chunkText(r.text, TEXT_MAX).map((part) => ({ pageId, threadId, messageId: `bot-out:${randomUUID()}`, text: normalizeEcho(part), status: "DONE", processedAt: now(), note: "BOT_SENT" })))
+        .values(parts.map((part, i) => ({ pageId, threadId, messageId: preIds[i], text: normalizeEcho(part), status: "DONE", processedAt: now(), note: "BOT_SENT" })))
         .onConflictDoNothing({ target: t.messageId });
-      const sent = await sendInbox(pageId, threadId, token, r.text, deps.fetch ?? fetch, "BOT");
+      const sent = await sendInbox(pageId, threadId, token, r.text, deps.fetch ?? fetch, "BOT", deps.sleep);
       if (!sent.ok) {
         sendError = sent.error;
+        // Đoạn chưa tới khách: xoá dòng ghi sẵn — trước đây hộp thư hiện bong bóng «Bot» cho câu khách không bao giờ nhận
+        // (10/10/2026, «Cương Vu»), và nhân viên tưởng khách đã được trả lời.
+        if (sent.sentParts < preIds.length) await db.delete(t).where(inArray(t.messageId, preIds.slice(sent.sentParts)));
+        if (sent.rateLimited) unsent = [...parts.slice(sent.sentParts), ...replies.slice(ri + 1).map((x) => x.text)];
+        mediaDone = true;
         break;
       }
       out.replies += 1;
@@ -1213,8 +1250,10 @@ export async function processFanpageThread(pageId: string, threadId: string, dep
     }
     if (!sendError && !yielded && !mediaDone) await sendMedia();
     // Gửi hỏng ⇒ DEAD-LETTER (khách chưa nhận đủ câu trả lời — việc của người). KHÔNG tự gửi lại: lời gọi gửi có thể đã tới nơi.
-    if (sendError) await deadLetter(db, ids, claim, `${DEAD_SEND_NOTE_PREFIX}${sendError}`, sendError, now());
-    else await finish("DONE", yielded);
+    if (sendError) {
+      await deadLetter(db, ids, claim, `${DEAD_SEND_NOTE_PREFIX}${sendError}${unsent.length ? RESEND_QUEUED_SUFFIX : ""}`, sendError, now());
+      if (unsent.length) await queuePendingSend(conv.id, { texts: unsent, inboundIds: ids, at: now().toISOString(), tries: 0 });
+    } else await finish("DONE", yielded);
     // Lượt có bình luận mà thiếu người bình luận (đi đường tin nhắn) ⇒ vẫn là hội thoại bình luận: không suy PSID từ mã hội thoại.
     if (aiSent > 0) await noteAiCustomerReply(conv.id, now(), claimed.some((r) => r.kind === "COMMENT") ? { threadKind: "COMMENT", commenterId: null } : undefined);
     if (!sendError && out.replies > 0) await markWaitingForCustomer(conv.id, now());
@@ -1261,7 +1300,137 @@ export async function sweepStaleFanpageThreads(deps: FanpageDeps = {}): Promise<
     .orderBy(asc(t.pageId))
     .limit(5);
   for (const s of stale) await processFanpageThread(s.pageId, s.threadId, deps);
+  // Câu trả lời đang chờ gửi bù (Pancake 429) — webhook tới là dấu hiệu Pancake đang thông.
+  await resendPendingFanpageReplies(deps);
   return stale.length;
+}
+
+/**
+ * ═══ GỬI BÙ CÂU TRẢ LỜI BỊ PANCAKE 429 (10/10/2026) ═══
+ *
+ * Câu bot đã soạn mà Pancake vẫn trả 429 sau ba lần thử trong lượt ⇒ phần chưa gửi nằm ở `state.pendingSend` của hội thoại (tin
+ * khách vẫn `DEAD` — hộp thư thấy ngay). Lượt gửi bù chạy theo job `sales-followup` (5 phút) và sau mỗi webhook: GIÀNH bằng một
+ * câu UPDATE có điều kiện (hai lượt cùng lúc không gửi hai lần), gửi đúng các câu đã soạn — KHÔNG gọi AI lại (lịch sử của bot đã
+ * có các câu đó). Bỏ (không gửi) khi: quá `RESEND_WINDOW_MS` (hội thoại nguội), hết `RESEND_MAX_TRIES`, khách đã nhắn thêm (lượt
+ * mới trả lời theo ngữ cảnh mới), page / nhân viên đã trả lời, hay hội thoại đang ở tay người.
+ */
+export const RESEND_WINDOW_MS = 30 * 60_000;
+export const RESEND_MAX_TRIES = 4;
+export const RESEND_QUEUED_SUFFIX = " — đã xếp gửi bù";
+export const RESENT_NOTE = "Đã gửi bù câu trả lời sau khi Pancake giới hạn tốc độ";
+export type PendingSend = { texts: string[]; inboundIds: string[]; at: string; tries: number };
+
+/** Đọc `state.pendingSend` — dạng lạ ⇒ `null`. HÀM THUẦN. */
+export function pendingSendOf(state: unknown): PendingSend | null {
+  const p = ((state && typeof state === "object" ? state : {}) as Record<string, unknown>).pendingSend as Record<string, unknown> | undefined;
+  if (!p || typeof p !== "object") return null;
+  const texts = Array.isArray(p.texts) ? p.texts.filter((x): x is string => typeof x === "string" && x.trim() !== "") : [];
+  const inboundIds = Array.isArray(p.inboundIds) ? p.inboundIds.filter((x): x is string => typeof x === "string") : [];
+  const at = typeof p.at === "string" && Number.isFinite(Date.parse(p.at)) ? p.at : null;
+  if (!texts.length || !at) return null;
+  return { texts, inboundIds, at, tries: typeof p.tries === "number" && p.tries > 0 ? Math.trunc(p.tries) : 0 };
+}
+
+export type ResendVerdict = "SEND" | "STALE" | "TRIES" | "SUPERSEDED" | "ANSWERED" | "HUMAN";
+/** Gửi bù hay bỏ. HÀM THUẦN. */
+export function resendVerdict(p: PendingSend, nowMs: number, f: { newerCustomer: boolean; pageReplied: boolean; humanHolds: boolean }): ResendVerdict {
+  if (nowMs - Date.parse(p.at) > RESEND_WINDOW_MS) return "STALE";
+  if (p.tries >= RESEND_MAX_TRIES) return "TRIES";
+  if (f.newerCustomer) return "SUPERSEDED";
+  if (f.pageReplied) return "ANSWERED";
+  if (f.humanHolds) return "HUMAN";
+  return "SEND";
+}
+
+async function queuePendingSend(conversationId: string, p: PendingSend): Promise<void> {
+  const db = await getDb();
+  const c = schema.salesChatConversations;
+  await db.update(c).set({ state: sql`${c.state} || jsonb_build_object('pendingSend', ${JSON.stringify(p)}::jsonb)` }).where(eq(c.id, conversationId));
+}
+
+export type ResendRun = { checked: number; sent: number; dropped: number; detail: string[] };
+
+/** Một lượt gửi bù cho tổ chức NGỮ CẢNH (page Pancake của kết nối đang bật). Không ném. */
+export async function resendPendingFanpageReplies(deps: FanpageDeps = {}): Promise<ResendRun> {
+  const out: ResendRun = { checked: 0, sent: 0, dropped: 0, detail: [] };
+  try {
+    const now = deps.now ?? (() => new Date());
+    const conn = await openActiveConnection(FANPAGE_CONNECTOR);
+    const pageId = conn.ok ? (conn.settings.pageId ?? "").trim() : "";
+    const token = conn.ok ? (conn.secrets.pageAccessToken ?? "").trim() : "";
+    if (!pageId || !token) return out;
+    const db = await getDb();
+    const c = schema.salesChatConversations;
+    const t = schema.salesChatInbound;
+    const rows = await db
+      .select({ id: c.id, threadId: c.threadId, status: c.status, state: c.state, pending: sql<string>`(${c.state}->'pendingSend')::text` })
+      .from(c)
+      .where(and(eq(c.channel, "FANPAGE"), eq(c.pageId, pageId), isNotNull(c.threadId), sql`${c.state} ? 'pendingSend'`))
+      .limit(20);
+    for (const row of rows) {
+      out.checked += 1;
+      const threadId = row.threadId!;
+      const p = pendingSendOf(row.state);
+      // GIÀNH: chỉ lượt xoá được ĐÚNG bản đang thấy mới được gửi — hai lượt cùng lúc không gửi hai lần.
+      const [took] = await db
+        .update(c)
+        .set({ state: sql`${c.state} - 'pendingSend'` })
+        .where(and(eq(c.id, row.id), sql`(${c.state}->'pendingSend')::text = ${row.pending}`))
+        .returning({ id: c.id });
+      if (!took || !p) continue;
+      const since = new Date(p.at);
+      const [newer] = await db
+        .select({ id: t.id })
+        .from(t)
+        .where(and(eq(t.pageId, pageId), eq(t.threadId, threadId), gte(t.createdAt, since), sql`coalesce(${t.note}, '') not in ('BOT_SENT', ${PAGE_REPLY}, 'HISTORY')`, p.inboundIds.length ? sql`not (${inArray(t.id, p.inboundIds)})` : sql`true`))
+        .limit(1);
+      const [replied] = await db.select({ id: t.id }).from(t).where(and(eq(t.pageId, pageId), eq(t.threadId, threadId), eq(t.note, PAGE_REPLY), gte(t.createdAt, since))).limit(1);
+      const verdict = resendVerdict(p, now().getTime(), { newerCustomer: Boolean(newer), pageReplied: Boolean(replied), humanHolds: row.status === "HANDOFF" || controlOf(row.state) === "HUMAN" });
+      if (verdict !== "SEND") {
+        out.dropped += 1;
+        out.detail.push(`${threadId.slice(-6)}: bỏ gửi bù (${verdict})`);
+        continue;
+      }
+      // Pancake vẫn đang chặn ⇒ để lượt sau, KHÔNG tính lượt thử.
+      if (sendRecentlyLimited(pageId, now().getTime(), 60_000)) {
+        await queuePendingSend(row.id, p);
+        out.detail.push(`${threadId.slice(-6)}: Pancake còn giới hạn — đợi lượt sau`);
+        continue;
+      }
+      let remaining = p.texts;
+      let error: string | null = null;
+      while (remaining.length) {
+        const text = remaining[0];
+        const parts = chunkText(text, TEXT_MAX);
+        const preIds = parts.map(() => `bot-out:${randomUUID()}`);
+        await db
+          .insert(t)
+          .values(parts.map((part, i) => ({ pageId, threadId, messageId: preIds[i], text: normalizeEcho(part), status: "DONE", processedAt: now(), note: "BOT_SENT" })))
+          .onConflictDoNothing({ target: t.messageId });
+        const sent = await sendInbox(pageId, threadId, token, text, deps.fetch ?? fetch, "BOT", deps.sleep);
+        if (!sent.ok) {
+          if (sent.sentParts < preIds.length) await db.delete(t).where(inArray(t.messageId, preIds.slice(sent.sentParts)));
+          error = sent.error;
+          remaining = [...parts.slice(sent.sentParts), ...remaining.slice(1)];
+          break;
+        }
+        if (sent.ids.length) await db.insert(t).values(sent.ids.map((id) => ({ pageId, threadId, messageId: id, text: text.slice(0, TEXT_MAX), status: "DONE", processedAt: now(), note: "BOT_SENT" }))).onConflictDoNothing({ target: t.messageId });
+        remaining = remaining.slice(1);
+      }
+      if (error) {
+        await queuePendingSend(row.id, { ...p, texts: remaining, tries: p.tries + 1 });
+        out.detail.push(`${threadId.slice(-6)}: gửi bù hỏng — ${error.slice(0, 80)}`);
+        continue;
+      }
+      if (p.inboundIds.length) await db.update(t).set({ status: "DONE", note: RESENT_NOTE, processedAt: now() }).where(and(inArray(t.id, p.inboundIds), eq(t.status, "DEAD")));
+      await markWaitingForCustomer(row.id, now());
+      publish({ type: "chat", conversationId: row.id });
+      out.sent += 1;
+    }
+  } catch (e) {
+    out.detail.push(`gửi bù: lỗi ${e instanceof Error ? e.message.slice(0, 120) : String(e).slice(0, 120)}`);
+  }
+  return out;
 }
 
 /**

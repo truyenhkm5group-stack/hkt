@@ -8,6 +8,7 @@ import { compactTimeAgo, INBOX_HANDLING_LABEL, INBOX_SOURCE_LABEL, inboxHref, in
 import { CUSTOMER_LEVEL_LABEL } from "@/lib/sales-chatbot/levels-shared";
 import { cn } from "@/lib/utils";
 import { ChannelAvatar } from "./avatar";
+import { openConversationInPlace, useSelectedConversation } from "./thread-pane";
 
 /**
  * ═══════════ DANH SÁCH HỘI THOẠI (INBOX-V2-A) — MỘT HÀNG HAI DÒNG ═══════════
@@ -80,6 +81,7 @@ function Row({ r, href, active, showPage, nowMs }: { r: InboxRow; href: string; 
     <Link
       href={href}
       prefetch={false}
+      onClick={(e) => openConversationInPlace(e, href)}
       title={metaOf(r, showPage)}
       aria-current={active ? "true" : undefined}
       className={cn(
@@ -133,10 +135,13 @@ function Row({ r, href, active, showPage, nowMs }: { r: InboxRow; href: string; 
   );
 }
 
-export function ConversationRows({ rows, activeId, state, showPage }: { rows: InboxRow[]; activeId: string | null; state: InboxFilterState; showPage: boolean }) {
-  // Bản danh sách ĐÃ HIỆN lần trước — để giữ hội thoại đang mở đứng yên (xem chú thích đầu tệp).
+export function ConversationRows({ rows, state, showPage }: { rows: InboxRow[]; state: InboxFilterState; showPage: boolean }) {
+  // Hội thoại đang mở theo URL — bấm hàng đổi `?c=` tại chỗ (thread-pane.tsx), danh sách không dựng lại nên đọc thẳng URL.
+  const activeId = useSelectedConversation();
+  // Bản danh sách ĐÃ HIỆN lần trước — để giữ hội thoại đang mở đứng yên (xem chú thích đầu tệp). Mở hội thoại = đã đọc: hàng đang
+  // mở thôi in đậm / số chưa đọc ngay, không đợi lượt làm mới.
   const shown = useRef<InboxRow[] | null>(null);
-  const display = keepActiveInPlace(rows, shown.current, activeId);
+  const display = keepActiveInPlace(rows, shown.current, activeId).map((r) => (r.id === activeId && r.unread ? { ...r, unread: false, unreadCount: 0 } : r));
   useEffect(() => {
     shown.current = display;
   });

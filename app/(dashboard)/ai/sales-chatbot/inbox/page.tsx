@@ -2,21 +2,19 @@ import Link from "next/link";
 import { Settings2 } from "lucide-react";
 import { PageHeader } from "@/components/page-header";
 import { can, requirePermission } from "@/lib/auth/session";
-import { formatVND } from "@/lib/format";
-import { assignableUsers, inboxAssignees, inboxPages, listInbox, loadInboxThread } from "@/lib/sales-chatbot/inbox";
-import { customerFacing, customerInboxThread } from "@/lib/saas/visibility";
+import { assignableUsers, inboxAssignees, inboxPages, listInbox } from "@/lib/sales-chatbot/inbox";
+import { inboxThreadPayload } from "@/lib/sales-chatbot/inbox-thread-payload";
 import { listLabels } from "@/lib/sales-chatbot/inbox-labels";
 import { INBOX_CHANNELS, INBOX_FILTERS, INBOX_LIST_MAX, INBOX_PERIODS, inboxHref, type InboxChannel, type InboxFilter, type InboxFilterState, type InboxHandler, type InboxPeriod } from "@/lib/sales-chatbot/inbox-shared";
 import { listPageRoutes } from "@/lib/sales-chatbot/channel-ownership";
 import { humanCooldownMinutes } from "@/lib/sales-chatbot/conversation-control";
 import { organizationLevelPack } from "@/lib/sales-chatbot/levels";
 import { CUSTOMER_LEVELS, levelsForPack, type CustomerLevel } from "@/lib/sales-chatbot/levels-shared";
-import { cn } from "@/lib/utils";
 import { InboxAutoRefresh } from "./auto-refresh";
 import { ConversationRows } from "./conversation-list";
 import { InboxFilters } from "./inbox-filters";
 import { PageRoutesPanel } from "./page-routes";
-import { InboxThreadView } from "./thread-view";
+import { InboxColumn, InboxThreadPane } from "./thread-pane";
 import { ShellViewportFit } from "@/components/shell-viewport-fit";
 import { isSalesAgentUser, SALES_AGENT_CHANNELS_HREF } from "@/lib/constants/saas-nav";
 import { manualOrderGate } from "@/lib/records/order-create";
@@ -46,8 +44,9 @@ export const metadata = { title: "Hộp thư khách" };
 /**
  * HỘP THƯ KHÁCH (M8) — mọi tin Facebook / Instagram / Zalo OA / chat web ở MỘT chỗ; nhân viên đọc và trả lời ngay trong ERP.
  * Bố cục ba cột cao bằng màn hình (danh sách · khung chat · thông tin khách), mỗi cột tự cuộn. Không bỏ sót khách: hội thoại có
- * mặt NGAY khi khách nhắn (kể cả bot tắt / nhân viên đã trả lời ngoài ERP / tin nhãn dán · ghi âm), «Chưa đọc» theo lần cuối nhân
- * viên mở, «Chờ trả lời» xếp khách chờ lâu nhất lên đầu, tiêu đề tab đếm khách đang chờ + âm báo khi có tin mới, tự làm mới.
+ * mặt NGAY khi khách nhắn (kể cả bot tắt / nhân viên đã trả lời ngoài ERP / tin nhãn dán · ghi âm), «Chưa đọc» = tin cuối là của
+ * KHÁCH và nhân viên chưa mở từ lúc đó (tin bot / nhân viên không bao giờ làm hội thoại «chưa đọc»), «Chờ trả lời» xếp khách chờ
+ * lâu nhất lên đầu, tiêu đề tab đếm khách đang chờ + âm báo khi có tin mới, tự làm mới.
  */
 export default async function SalesInboxPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const user = await requirePermission("ai_sales:view");
@@ -75,8 +74,8 @@ export default async function SalesInboxPage({ searchParams }: { searchParams: P
   const page = pages.some((p) => p.id === one("pg")) ? one("pg") : null;
   // Mở hội thoại TRƯỚC (đánh dấu đã đọc) rồi mới đọc danh sách — không thì hội thoại đang mở vẫn hiện «chưa đọc».
   // Workspace KHÁCH: lý do AI không trả lời + dấu vết từng tin lọc ở MÁY CHỦ trước khi vào props (lib/saas/visibility.ts).
-  const loaded = selected ? await loadInboxThread(user, selected) : null;
-  const thread = loaded && "thread" in loaded && customerFacing(user.organization) ? { ...loaded, thread: customerInboxThread(loaded.thread) } : loaded;
+  // Bấm sang hội thoại khác KHÔNG đi qua đây (thread-pane.tsx — chỉ tải hội thoại); đây là lối mở bằng đường dẫn / tự làm mới.
+  const thread = selected ? await inboxThreadPayload(user, selected) : null;
   const canManage = can(user, "ai_sales:manage");
   const [list, users, assignees, pack, routes, cooldown, orderGate] = await Promise.all([
     listInbox(user, { filter, channel, q, label, page, phone, level, assignee, period, from, to, limit, handler }),
@@ -122,7 +121,7 @@ export default async function SalesInboxPage({ searchParams }: { searchParams: P
         <p className="text-sm text-destructive">{list.error}</p>
       ) : (
         <InboxFrame shell={shell}>
-          <aside className={cn("min-h-0 min-w-0 flex-col border-r border-foreground/10 bg-surface-sunken/60", selected ? "hidden lg:flex" : "flex")} data-testid="inbox-list-column">
+          <InboxColumn side="list" className="min-h-0 min-w-0 flex-col border-r border-foreground/10 bg-surface-sunken/60" testId="inbox-list-column">
             <InboxFilters
               state={state}
               counts={list.counts}
@@ -167,7 +166,7 @@ export default async function SalesInboxPage({ searchParams }: { searchParams: P
                   <li className="p-6 text-center text-sm text-muted-foreground">Không có hội thoại nào ở bộ lọc này.</li>
                 )
               ) : null}
-              <ConversationRows rows={list.rows} activeId={selected || null} state={state} showPage={pages.length > 1 && !page} />
+              <ConversationRows rows={list.rows} state={state} showPage={pages.length > 1 && !page} />
               {list.rows.length >= limit && limit < INBOX_LIST_MAX ? (
                 <li className="p-2 text-center">
                   <Link href={href({ n: String(Math.min(INBOX_LIST_MAX, limit + 100)) })} className="text-[13px] font-medium text-primary hover:underline">
@@ -176,30 +175,25 @@ export default async function SalesInboxPage({ searchParams }: { searchParams: P
                 </li>
               ) : null}
             </ul>
-          </aside>
-          <section className={cn("min-h-0", selected ? "block" : "hidden lg:block")}>
-            {!selected ? (
-              <div className="flex h-full flex-col items-center justify-center gap-1 p-8 text-center text-sm text-muted-foreground">
-                <p className="text-base font-medium text-foreground">Chọn một hội thoại để trả lời</p>
-                <p>
-                  {list.counts.UNANSWERED > 0 ? `${list.counts.UNANSWERED} khách đang chờ trả lời — mở bộ lọc «Chờ trả lời» để xử lý khách chờ lâu nhất trước.` : "Không có khách nào đang chờ trả lời."}
-                </p>
-              </div>
-            ) : !thread || !thread.ok ? (
-              <div className="p-6 text-sm text-destructive">{thread && !thread.ok ? thread.error : "Không mở được hội thoại."}</div>
-            ) : (
-              <InboxThreadView
-                key={thread.thread.id}
-                thread={thread.thread}
-                me={user.id}
-                users={users}
-                backHref={href({ c: null })}
-                ordersSummary={thread.thread.orders.map((o) => ({ ...o, totalText: formatVND(o.total) }))}
-                canDecideOrders={orderGate.allowed}
-                shell={shell}
-              />
-            )}
-          </section>
+          </InboxColumn>
+          <InboxColumn side="thread" className="min-h-0">
+            <InboxThreadPane
+              serverSelected={selected || null}
+              serverPayload={thread}
+              me={user.id}
+              users={users}
+              canDecideOrders={orderGate.allowed}
+              shell={shell}
+              empty={
+                <div className="flex h-full flex-col items-center justify-center gap-1 p-8 text-center text-sm text-muted-foreground">
+                  <p className="text-base font-medium text-foreground">Chọn một hội thoại để trả lời</p>
+                  <p>
+                    {list.counts.UNANSWERED > 0 ? `${list.counts.UNANSWERED} khách đang chờ trả lời — mở bộ lọc «Chờ trả lời» để xử lý khách chờ lâu nhất trước.` : "Không có khách nào đang chờ trả lời."}
+                  </p>
+                </div>
+              }
+            />
+          </InboxColumn>
         </InboxFrame>
       )}
     </div>

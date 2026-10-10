@@ -16,7 +16,8 @@ export const HISTORY_SYNC_JOB = "sales-inbox-history";
 
 /**
  * TRẦN TỐC ĐỘ (chủ shop: «không bão request»). Một lượt (một dòng `sync_runs`) chạy tối đa `tickBudgetMs` và `requestsPerTick`
- * lời gọi, cách nhau ít nhất `requestGapMs` (≤ 2,5 lời gọi / giây cho một tổ chức). Pancake trả 429 ⇒ dừng lượt, hẹn lại sau
+ * lời gọi, cách nhau ít nhất `requestGapMs` (≤ 1 lời gọi / giây cho một tổ chức — 10/10/2026 hạ từ 2,5: nhập lịch sử dùng CHUNG
+ * hạn mức Pancake của page với lời gửi tin của bot, và 39 câu trả lời sáng hôm đó rơi vì 429). Pancake trả 429 ⇒ dừng lượt, hẹn lại sau
  * `rateLimitWaitMs` (hoặc `Retry-After` nếu dài hơn). Lỗi mạng / 5xx liền `maxFailures` lượt ⇒ dừng hẳn, báo lỗi.
  * Tin mới hơn `freshMinutes` KHÔNG nhập: đó là việc của webhook / lượt quét lại (`catchUpFanpage` 30 phút) — nhập nó là
  * «ĐÃ XONG» một tin khách mà bot còn phải trả lời.
@@ -24,7 +25,7 @@ export const HISTORY_SYNC_JOB = "sales-inbox-history";
 export const HISTORY_LIMITS = {
   tickBudgetMs: 120_000,
   requestsPerTick: 250,
-  requestGapMs: 400,
+  requestGapMs: 1_000,
   rateLimitWaitMs: 60_000,
   transientWaitMs: 30_000,
   maxFailures: 6,

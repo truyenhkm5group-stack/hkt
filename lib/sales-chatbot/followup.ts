@@ -24,7 +24,7 @@ import { pageRuntimeMode } from "@/lib/sales-chatbot/page-runtime";
 import { nextFollowupAt, withinMessagingWindow } from "@/lib/sales-chatbot/followup-shared";
 import { loadFollowupSettings } from "@/lib/sales-chatbot/followup-settings";
 import { publishedPlaybookText } from "@/lib/sales-chatbot/playbook";
-import { findReturningCustomer, returningCustomerPrompt } from "@/lib/sales-chatbot/returning";
+import { findReturningCustomer, isRepeatBuyer, returningCustomerPrompt } from "@/lib/sales-chatbot/returning";
 import { stripPrices } from "@/lib/sales-chatbot/playbook-shared";
 import { SALES_STAGE_LABEL } from "@/lib/sales-chatbot/stages";
 import type { ChatState } from "@/lib/sales-chatbot/tools";
@@ -43,7 +43,7 @@ export function followupSendPermanent(error: string): boolean {
 
 export type FollowupRunResult = { due: number; sent: number; stopped: number; deferred: number; errors: number; detail: string[] };
 
-export function followupSystemPrompt(cfg: Pick<SalesChatbotConfig, "botName" | "tone">, shop: string, stage: string, attempt: number, total: number, hasDraft: boolean, playbook: string, returning: string = ""): string {
+export function followupSystemPrompt(cfg: Pick<SalesChatbotConfig, "botName" | "tone">, shop: string, stage: string, attempt: number, total: number, hasDraft: boolean, playbook: string, returning: string = "", repeatBuyer: boolean = false): string {
   const step =
     attempt >= total
       ? "Đây là lần nhắc CUỐI: hỏi lịch sự khách có muốn tiếp tục không / cần tư vấn thêm gì; không nài, không gây áp lực."
@@ -56,8 +56,11 @@ export function followupSystemPrompt(cfg: Pick<SalesChatbotConfig, "botName" | "
     `Khách đang dừng ở bước: ${stage}.${hasDraft ? " Khách ĐÃ CÓ đơn nháp chưa xác nhận — nhắc khách xác nhận đơn." : ""}`,
     `Lần nhắc ${attempt}/${total}. ${step}`,
     "TUYỆT ĐỐI không nêu giá, số tiền, khuyến mãi, thời gian giao; không bịa thông tin; không nhắc rằng mình là AI hay tin tự động.",
-    // Khách cũ (03/10/2026): nhắc ĐẶT LẠI cụ thể như lần trước thay vì «còn băn khoăn gì không».
-    returning ? `${returning}\nTin nhắc cho KHÁCH CŨ: đề xuất ĐẶT LẠI cụ thể như lần trước (món, giao về địa chỉ cũ), MỘT câu hỏi có / không; vẫn KHÔNG nêu giá.` : "",
+    // Khách cũ (03/10/2026): nhắc ĐẶT LẠI cụ thể như lần trước thay vì «còn băn khoăn gì không». CHỈ khách ĐÃ TỪNG MUA (10/10/2026,
+    // «Trần Thanh Hà»: khách mới từ quảng cáo nhận «lần này em gửi chị 1kg về địa chỉ cũ nhé?» — lời chào quảng cáo của page đã
+    // đủ dựng khối thông tin khách và câu này được thêm vô điều kiện).
+    returning && repeatBuyer ? `${returning}\nTin nhắc cho KHÁCH CŨ: đề xuất ĐẶT LẠI cụ thể như lần trước (món, giao về địa chỉ cũ), MỘT câu hỏi có / không; vẫn KHÔNG nêu giá.` : returning,
+    repeatBuyer ? "" : "Khách CHƯA từng mua hàng của shop: KHÔNG nói «lần trước», «địa chỉ cũ», «như cũ», «đặt lại».",
     playbook ? `Sổ tay giọng điệu của shop:\n${playbook.slice(0, 1500)}` : "",
     "Chỉ trả về nội dung tin nhắn.",
   ]
@@ -159,6 +162,7 @@ export async function runSalesFollowups(deps: FanpageDeps = {}): Promise<Followu
         .where(eq(c.id, row.id));
     };
     try {
+      const known = await findReturningCustomer(st).catch(() => null);
       const view = await conversationView(row.id);
       const transcript = (view?.messages ?? [])
         .slice(-12)
@@ -166,7 +170,7 @@ export async function runSalesFollowups(deps: FanpageDeps = {}): Promise<Followu
         .join("\n");
       const stage = st.stage && st.stage in SALES_STAGE_LABEL ? SALES_STAGE_LABEL[st.stage] : "Đang tư vấn";
       const res = await prov.provider.complete({
-        system: followupSystemPrompt(cfg, shop, stage, attempt, fs.stepsMinutes.length, Boolean(st.draft), playbook, returningCustomerPrompt(await findReturningCustomer(st).catch(() => null), st.returning)),
+        system: followupSystemPrompt(cfg, shop, stage, attempt, fs.stepsMinutes.length, Boolean(st.draft), playbook, returningCustomerPrompt(known, st.returning), isRepeatBuyer(known)),
         messages: [{ role: "user", content: [{ type: "text", text: `HỘI THOẠI:\n${transcript}` }] }],
         tools: [],
         maxTokens: 1500,

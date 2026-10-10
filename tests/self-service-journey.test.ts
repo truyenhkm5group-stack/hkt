@@ -27,7 +27,7 @@ import { autoLearnQuickReplies, loadAutoLearnRun } from "@/lib/sales-chatbot/qui
 import { executeTool, maskAddress, PROCESS_TOOLS, toolDefsFor, type ChatState } from "@/lib/sales-chatbot/tools";
 import { freeShipPolicyText, freeShipVerdict, inFreeShipArea, variantWeightGrams } from "@/lib/sales-chatbot/shipping";
 import { publicView } from "@/lib/sales-chatbot/public";
-import { findReturningCustomer, normalizeVnPhone, promptDataText, parsePancakeThreadProfile, returningCustomerPrompt, threadProfileStale, type ReturningCustomer } from "@/lib/sales-chatbot/returning";
+import { findReturningCustomer, isRepeatBuyer, normalizeVnPhone, promptDataText, parsePancakeThreadProfile, returningCustomerPrompt, threadProfileStale, type ReturningCustomer } from "@/lib/sales-chatbot/returning";
 import { followupStepsLabel, nextFollowupAt, validateFollowupSteps, withinMessagingWindow } from "@/lib/sales-chatbot/followup-shared";
 import { followupSystemPrompt, runSalesFollowups } from "@/lib/sales-chatbot/followup";
 import { saveFollowupSettings } from "@/lib/sales-chatbot/followup-settings";
@@ -571,9 +571,22 @@ function testPure() {
   assert.ok(/CHỐT KHÁCH CŨ/.test(wbBlock) && /KHÔNG chào tạm biệt/.test(wbBlock) && /MỘT câu có \/ không/.test(wbBlock) && /SĐT đuôi/.test(wbBlock), wbBlock);
   assert.ok(!/SĐT đuôi …/.test(returningCustomerPrompt({ ...old, trust: "PHONE" }, undefined)), "mức PHONE: không gợi ý nêu SĐT / khu vực");
   assert.ok(/không phải tạm biệt/.test(systemPrompt(parseSalesChatbotConfig(null), "Shop", "", "FANPAGE")), "cảm ơn sau báo giá = lưng chừng, không tạm biệt");
-  const fpOld = followupSystemPrompt({ botName: "Bé Mực", tone: "FRIENDLY" }, "Shop", "Báo giá", 1, 3, false, "", wbBlock);
+  const fpOld = followupSystemPrompt({ botName: "Bé Mực", tone: "FRIENDLY" }, "Shop", "Báo giá", 1, 3, false, "", wbBlock, true);
   assert.ok(/KHÁCH CŨ/.test(fpOld) && /ĐẶT LẠI cụ thể như lần trước/.test(fpOld) && /KHÔNG nêu giá/.test(fpOld), "follow-up khách cũ đề xuất đặt lại");
   assert.ok(!/KHÁCH CŨ/.test(fp), "khách mới ⇒ follow-up như cũ");
+  // KHÁCH MỚI TỪ QUẢNG CÁO không phải khách cũ (10/10/2026, HSLC «Trần Thanh Hà»: «Tôi đã mua gì đâu mà shop gửi về địa chỉ cũ?»).
+  // Tin trước khi bot vào CHỈ có lời phía page (chào quảng cáo + dòng Pancake tự chèn) ⇒ không có khối nào, follow-up cấm «địa chỉ cũ».
+  const adOnly = { fetchedAt: "2026-10-10T03:00:00Z", phones: [], fbIds: ["fb-ha"], prior: [{ from: "shop" as const, text: "Trần Thanh Hà đã trả lời một quảng cáo.", at: "2026-10-10T02:55:00Z" }, { from: "shop" as const, text: "CHẢ CÁ THU NGUYÊN CHẤT 100% NGON KHÁC BIỆT!!!", at: "2026-10-10T02:55:01Z" }] };
+  assert.equal(returningCustomerPrompt(null, adOnly), "", "chỉ lời chào quảng cáo ⇒ KHÔNG có khối khách cũ");
+  const fpAd = followupSystemPrompt({ botName: "Bé Mực", tone: "FRIENDLY" }, "Shop", "Báo giá", 2, 3, false, "", returningCustomerPrompt(null, adOnly), isRepeatBuyer(null));
+  assert.ok(!/ĐẶT LẠI|giao về địa chỉ cũ|CHỐT KHÁCH CŨ/.test(fpAd) && /CHƯA từng mua/.test(fpAd), fpAd);
+  // Có tin cũ của KHÁCH nhưng không có đơn ⇒ đọc lại thông tin được, KHÔNG «khách cũ» / «địa chỉ cũ».
+  const custPrior = returningCustomerPrompt(null, { ...adOnly, prior: [...adOnly.prior, { from: "customer" as const, text: "Ship về 12 Lý Thái Tổ nhé", at: "2026-10-09T02:00:00Z" }] });
+  assert.ok(/12 Lý Thái Tổ/.test(custPrior) && !/^KHÁCH CŨ/.test(custPrior) && !/CHỐT KHÁCH CŨ/.test(custPrior) && /CHƯA từng mua/.test(custPrior), custPrior);
+  // Khách vừa cho SĐT + địa chỉ NGAY trong hội thoại (chưa có đơn) ⇒ không phải «lần trước».
+  const fresh = returningCustomerPrompt({ ...old, trust: "THREAD", orders: null, lastOrderAt: null, lastItems: [], repeat: false }, undefined);
+  assert.ok(!/như lần trước|nhận hàng lần trước|món khác lần trước|CHỐT KHÁCH CŨ/.test(fresh) && /Thông tin nhận hàng khách đã cho/.test(fresh), fresh);
+  assert.ok(isRepeatBuyer({ ...old, repeat: undefined }) === ((old.orders ?? 0) > 0) && !isRepeatBuyer({ ...old, repeat: false }) && !isRepeatBuyer(null));
   // Gửi lại tin nhóm hỏng vì mạng (0186): chỉ lỗi TRƯỚC KHI yêu cầu rời máy; lịch 2 · 5 · 15 · 30 · 60 · 120 phút trong 6 giờ.
   const netErr = (code: string) => Object.assign(new TypeError("fetch failed"), { cause: Object.assign(new Error(code), { code }) });
   assert.ok(failedBeforeSending(netErr("ETIMEDOUT")) && failedBeforeSending(netErr("UND_ERR_CONNECT_TIMEOUT")) && failedBeforeSending(netErr("ENOTFOUND")));
