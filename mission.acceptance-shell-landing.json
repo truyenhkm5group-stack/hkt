@@ -3,7 +3,7 @@
   "mission_id": "acceptance-shell-landing",
   "title": "Nghiệm thu bước C theo luật trang nhà #752 (Tổng quan khi thiết lập chưa xong)",
   "business_goal": "",
-  "status": "VERIFYING",
+  "status": "DONE",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -23,13 +23,14 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-10T05:21:19.267Z",
-  "updated_at": "2026-10-10T07:42:21.534Z",
-  "last_heartbeat": "2026-10-10T06:28:22.947Z",
+  "updated_at": "2026-10-10T07:43:10.886Z",
+  "last_heartbeat": "2026-10-10T07:43:10.886Z",
   "definition_of_done": [],
   "evidence": {
     "merged": "#769 → 6487e6526d04bb3caf532f7712b19c623782060a",
     "verify": "PASS 6487e6526d04bb3caf532f7712b19c623782060a 2026-10-10T07:42:10.468Z",
-    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/38032504015"
+    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/38032504015",
+    "done": "saas-acceptance --apply --prep --e2e --e2e-ops PASS 8/8 trên production 6487e652 (run 38035198098); bước C nay đọc trang nhà / theo shellLandingFor (#752)"
   },
   "handoff": {
     "branch": "fix/acceptance-shell-landing",
