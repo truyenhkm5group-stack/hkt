@@ -1,8 +1,8 @@
 {
   "pr": 781,
-  "sha": "54638353b308e825316124165ff75d717dc84463",
+  "sha": "835870fa130c96101c9b62d26e27d251be8eaaa1",
   "verdict": "PASS",
   "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
-  "at": "2026-10-10T15:25:52.284Z",
-  "note": "Đọc báo cáo + diff: khoá giữ đồng bộ trước await, releaseJob theo danh tính; release chỉ main + environment; agent-run không giữ token, mã việc qua env kiểm dạng; còn rủi ro GITHUB_ENV trước bước đẩy (ghi lại, việc sau)"
+  "at": "2026-10-10T19:55:27.171Z",
+  "note": "Chỉ commit gộp main do GitHub update-branch, không xung đột; nội dung đã review trước"
 }
