@@ -3,7 +3,7 @@
   "mission_id": "inbox-unread-perf",
   "title": "Hộp thư V3: tải danh sách chậm lại 510→824 ms p50 sau khi chưa đọc theo con trỏ người — đưa về ≤ mức cũ mà không đổi nghĩa chưa đọc",
   "business_goal": "",
-  "status": "RUNNING",
+  "status": "PR_READY",
   "priority": "P0",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -30,7 +30,18 @@
     "0243": "2026-10-10T19:11:11.641Z"
   },
   "created_at": "2026-10-10T19:10:52.513Z",
-  "updated_at": "2026-10-10T19:11:11.641Z",
-  "last_heartbeat": "2026-10-10T19:10:52.513Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-10T21:15:08.491Z",
+  "last_heartbeat": "2026-10-10T21:15:08.491Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "fix/inbox-unread-perf",
+    "sha": "c92513531e3adc7220003ffff9361eefcbdc6ec8",
+    "at": "2026-10-10T21:15:08.491Z",
+    "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+    "title": "Hộp thư V3: tải danh sách chậm lại 510→824 ms p50 sau khi chưa đọc theo con trỏ người — đưa về ≤ mức cũ mà không đổi nghĩa chưa đọc",
+    "summary": "Chưa đọc = một phép so trên dòng: cột last_inbound_message_at do trigger CSDL giữ (tin khách thật, chỉ tiến; sửa/xoá tính lại), migration dẫn xuất tất định từ sổ tin; xem trước một câu LATERAL; audit lệch cột. Fixture: SQL tải hộp thư 388→255 ms (trước #784: 264)",
+    "tests": [
+      "npm test đầy đủ trên c9251353: TẤT CẢ KIỂM THỬ ĐẠT · typecheck · eslint · build · inbox-unread-perf (3.000 hội thoại hạt cố định: cờ/số/thứ tự/thẻ/huy hiệu/xem trước = bản dò sổ; cột = max tin khách sau mọi đường ghi; đua) + 14 bài inbox/migration/cô lập · 5 đột biến đỏ"
+    ]
+  }
 }
