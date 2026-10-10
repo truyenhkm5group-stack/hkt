@@ -228,6 +228,7 @@ import { testLogisticsFreshness } from "./logistics-freshness.test";
 import { testOperatingFunnel } from "./operating-funnel.test";
 import { testMemoInflight } from "./memo-inflight.test";
 import { testCacheSemantics } from "./cache-semantics.test";
+import { testSyncRunnerConcurrentStart } from "./sync-runner-concurrent-start.test";
 import { testRefreshButton } from "./refresh-button.test";
 import { testCommandCatalog } from "./command-catalog.test";
 import { testExperienceProfile } from "./experience-profile.test";
@@ -2181,6 +2182,12 @@ async function main() {
   testPromisedDeliveryPure();
   await testMemoInflight();
   await testCacheSemantics();
+  // Team Premium F3: khoá «một job một lượt» của runSyncJob giữ TRƯỚC lượt await đầu — hai lượt cùng nhịp chỉ chạy thân job một lần;
+  // chèn sync_runs ném thì khoá vẫn được nhả (không kẹt job tới khi khởi động lại).
+  {
+    const r = await testSyncRunnerConcurrentStart();
+    assert.deepEqual(r.failed, [], `sync-runner-concurrent-start: ${r.failed.join(" · ")}`);
+  }
   await testRefreshButton();
   testCommandCatalog();
   testExperienceProfile();
