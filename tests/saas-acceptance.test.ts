@@ -77,7 +77,7 @@ import {
 import { OPS_SIGNAL_KEYS } from "@/lib/constants/ops-signals";
 import { loadOrgOpsSignals } from "@/lib/platform/ops-signals";
 import { resetOrgHealthHotPathForTests } from "@/lib/platform/org-health";
-import { ERP_FRAME_HTML_MARKERS, SALES_AGENT_DENIED_PREFIXES, SALES_AGENT_SHELL_HTML_MARKER, salesAgentNavFor, salesAgentPathAllowed, salesAgentRedirectFor, type ShellUser } from "@/lib/constants/saas-nav";
+import { ERP_FRAME_HTML_MARKERS, SALES_AGENT_DENIED_PREFIXES, SALES_AGENT_SHELL_HTML_MARKER, salesAgentHomeFor, salesAgentNavFor, salesAgentPathAllowed, salesAgentRedirectFor, type ShellUser } from "@/lib/constants/saas-nav";
 import { env } from "@/lib/env";
 import { invalidateCapabilities } from "@/lib/platform/capabilities";
 import { withOrganization } from "@/lib/platform/context";
@@ -93,7 +93,8 @@ import { captureSaasSnapshot } from "@/lib/platform/saas-ledger";
 import { CHOTDON_ASSETS } from "@/lib/platform/site-host";
 import { shortfalls } from "@/lib/commerce/stock";
 import { ACCEPTANCE_NOT_OWNED_REFUSAL, ACCEPTANCE_RUNTIME_REFUSAL, acceptanceRuntimeRefusal } from "@/lib/saas/acceptance-guard";
-import { ACCEPTANCE_PREP_REGISTRY_REFUSAL, ACCEPTANCE_PREP_REQUIRED_TOOLS, runAcceptancePrep } from "@/lib/saas/acceptance-prep";
+import { ACCEPTANCE_PREP_REGISTRY_REFUSAL, ACCEPTANCE_PREP_REQUIRED_TOOLS, ownerSessionUser, runAcceptancePrep } from "@/lib/saas/acceptance-prep";
+import { shellLandingFor } from "@/lib/saas/shell-setup";
 import { ACCEPTANCE_OPS_REGISTRY_REFUSAL, judgeAmbiguous, judgeMeter, judgeNoDuplicate, runAcceptanceE2eOps } from "@/lib/saas/acceptance-e2e";
 import { ACCEPTANCE_SESSION_TTL_SEC, deniedLanding, metaRedirectTarget, parseActionReply, probeShellRoute, publicChatActionIdsFrom, publicChatOverServerActions, publicChatProblem, runAcceptance, shellBodyProblem, shellRoutesFor, type AcceptanceDeps, type AcceptanceReport, type HttpPostReply, type HttpReply } from "@/lib/saas/acceptance";
 import { orderReviewLogOf } from "@/lib/constants/order-review";
@@ -142,6 +143,11 @@ function fakeApp(opts: { userId: () => Promise<string | null>; shopName: string;
     }
     if (!who || who.id !== (await opts.userId())) return reply(307, "/login?reason=expired", "");
     const user: ShellUser = { role: "ADMIN", permissions: [], organization: { isHome: false, brand: "chotdon" }, modules: ["core", "customers", "products", "orders", "inventory", "ai_sales"] };
+    if (pathname === "/") {
+      // Như `requireUser` của máy chủ: `/` về trang nhà theo `shellLandingFor` (#752) — cùng hàm, cùng người dùng chủ.
+      const owner = await withOrganization(CODE, () => ownerSessionUser(ENTRY));
+      return reply(307, "user" in owner ? await shellLandingFor(owner.user, { cacheMs: 0 }) : salesAgentRedirectFor(user, pathname), "");
+    }
     if (!salesAgentPathAllowed(pathname)) return reply(307, salesAgentRedirectFor(user, pathname), "");
     const frame = opts.leakErp ? '<a aria-label="VNXcommerce — về trang tổng quan" href="/">ERP</a>' : `<div class="flex min-h-screen" ${SALES_AGENT_SHELL_HTML_MARKER}>`;
     return reply(200, null, `<html><head><link rel="manifest" href="${CHOTDON_ASSETS.manifest}"/></head><body>${frame}<main>${pathname}</main></div></body></html>`);
@@ -427,6 +433,10 @@ function testPure() {
     { path: SALES_AGENT_DENIED_PREFIXES[0], expect: salesAgentRedirectFor(admin, SALES_AGENT_DENIED_PREFIXES[0]) },
   ]);
   assert.ok(!salesAgentPathAllowed(SALES_AGENT_DENIED_PREFIXES[0]), "tuyến ERP thử phải là tuyến vỏ chặn");
+  // `/` theo luật trang nhà của máy chủ (#752): thiết lập còn mở ⇒ «Tổng quan», không phải hộp thư.
+  const open = shellRoutesFor(admin, { setupOpen: true }).find((r) => r.path === "/");
+  assert.equal(open?.expect, salesAgentHomeFor(admin, { setupOpen: true }), "thiết lập chưa xong ⇒ `/` phải về Tổng quan");
+  assert.notEqual(open?.expect, salesAgentRedirectFor(admin, "/"), "Tổng quan ≠ hộp thư (nếu bằng nhau bài này không đo gì)");
 
   // Soi thân trang của vỏ.
   const tot = `<head><link rel="manifest" href="${CHOTDON_ASSETS.manifest}"/></head><div ${SALES_AGENT_SHELL_HTML_MARKER}>x</div>`;
@@ -571,7 +581,7 @@ const CORE_IMPORT_ALLOWLIST: Record<string, readonly string[]> = {
     "acceptanceChatTurns", "acceptanceIdempotencyKey", "acceptanceSummary", "acceptanceVerdict", "acceptanceWorkspaceOf", "formatAcceptanceUsd", "formatStepLine", "PAGE_ERROR_DIGEST", "PAGE_ERROR_MARKER", "scrubSecrets",
     "AcceptanceMode", "AcceptanceStepKey", "AcceptanceWorkspace", "StepResult", "StepStatus",
   ],
-  "@/lib/constants/saas-nav": ["ERP_FRAME_HTML_MARKERS", "FORBIDDEN_PARAM", "isSalesAgentUser", "SALES_AGENT_DENIED_PREFIXES", "SALES_AGENT_SHELL_HTML_MARKER", "SHELL_BLOCKED_PARAM", "salesAgentNavFor", "salesAgentRedirectFor", "ShellUser"],
+  "@/lib/constants/saas-nav": ["ERP_FRAME_HTML_MARKERS", "FORBIDDEN_PARAM", "isSalesAgentUser", "SALES_AGENT_DENIED_PREFIXES", "SALES_AGENT_SHELL_HTML_MARKER", "SHELL_BLOCKED_PARAM", "salesAgentHomeFor", "salesAgentNavFor", "salesAgentRedirectFor", "ShellUser"],
   "@/lib/constants/session": ["SESSION_COOKIE"],
   "@/lib/constants/session-revocation": ["revokeMarkFrom"],
   "@/lib/env": ["env"],
@@ -594,7 +604,9 @@ const CORE_IMPORT_ALLOWLIST: Record<string, readonly string[]> = {
   "@/lib/saas/acceptance-guard": ["acceptanceWorkspaceOwned"],
   // Bước P (`--apply --prep`, quyết định chủ shop 09/10/2026): lõi chỉ GỌI tệp chuẩn bị — mọi lõi ghi vào workspace nằm ở tệp đó, sau
   // ba lá chắn của riêng nó (allowlist thứ hai: PREP_IMPORT_ALLOWLIST).
-  "@/lib/saas/acceptance-prep": ["runAcceptancePrep"],
+  // `ownerSessionUser` · `shellSetupOpen`: CHỈ ĐỌC — bước C hỏi trang nhà của `/` theo đúng luật máy chủ (#752).
+  "@/lib/saas/acceptance-prep": ["ownerSessionUser", "runAcceptancePrep"],
+  "@/lib/saas/shell-setup": ["shellSetupOpen"],
   // Bước R (`--apply --e2e-ops`): lõi chỉ GỌI tệp vận hành — lõi hộp thư / nút nhanh nằm ở tệp đó, sau ba lá chắn (E2E_OPS_IMPORT_ALLOWLIST).
   "@/lib/saas/acceptance-e2e": ["runAcceptanceE2eOps", "PublicChatTransport"],
   "@/lib/saas/activation": ["activationRefusal", "loadWorkspaceActivation", "resendActivation"],
@@ -732,7 +744,8 @@ function testSource() {
   const mentions = (id: string) => files.filter((f) => new RegExp(`\\b${id}\\b`).test(codeOnly(readFileSync(path.join(goc, f), "utf8")))).sort();
   // Bước R: định nghĩa + lõi ops (nơi gọi duy nhất) + bài kiểm này; người dùng của tài khoản chủ chỉ dựng ở bước P, bước R dùng lại.
   assert.deepEqual(mentions("runAcceptanceE2eOps"), ["lib/saas/acceptance-e2e.ts", "lib/saas/acceptance.ts", "tests/saas-acceptance.test.ts"], "runAcceptanceE2eOps chỉ được nhắc tới ở lõi ops nghiệm thu");
-  assert.deepEqual(mentions("ownerSessionUser"), ["lib/saas/acceptance-e2e.ts", "lib/saas/acceptance-prep.ts", "tests/saas-acceptance.test.ts"], "người dùng của tài khoản chủ: một đường dựng (bước P), bước R dùng lại");
+  // Bước C dùng lại cùng người dùng ấy để hỏi `shellSetupOpen` — trang nhà của `/` theo luật máy chủ (#752), không dựng bản thứ hai.
+  assert.deepEqual(mentions("ownerSessionUser"), ["lib/saas/acceptance-e2e.ts", "lib/saas/acceptance-prep.ts", "lib/saas/acceptance.ts", "tests/saas-acceptance.test.ts"], "người dùng của tài khoản chủ: một đường dựng (bước P), bước C và R dùng lại");
   // Bước P: định nghĩa + lõi ops (nơi gọi duy nhất) + bài kiểm này — không server action / trang nào gọi được.
   assert.deepEqual(mentions("runAcceptancePrep"), ["lib/saas/acceptance-prep.ts", "lib/saas/acceptance.ts", "tests/saas-acceptance.test.ts"], "runAcceptancePrep chỉ được nhắc tới ở lõi ops nghiệm thu");
   // Đường phát liên kết của MÁY: định nghĩa + lõi ops (nơi gọi duy nhất) + bài kiểm này.
