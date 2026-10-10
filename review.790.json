@@ -1,8 +1,8 @@
 {
   "pr": 790,
-  "sha": "6ebbe26a41811b62e99e627cdfd65cbb84222a99",
+  "sha": "cd0f82c8d9ae7f7771c64629063310fcd1d8aaff",
   "verdict": "PASS",
   "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
-  "at": "2026-10-10T18:41:21.881Z",
-  "note": "Thuần, không DB/đồng hồ; khách chỉ thấy chi tiêu + giá trị + giá vốn hàng của CHÍNH họ; giá vốn nền tảng/biên/model/lỗi nhà cung cấp chặn bằng bài kiểm; quyết định tạm đọc một chỗ, cấm gõ lại số; chưa có đường production nào gọi ⇒ không đổi số liệu"
+  "at": "2026-10-10T19:58:54.423Z",
+  "note": "Chỉ commit gộp main do GitHub update-branch, không xung đột; nội dung đã review trước"
 }
