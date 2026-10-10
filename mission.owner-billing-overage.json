@@ -1,0 +1,26 @@
+{
+  "schema": 1,
+  "mission_id": "owner-billing-overage",
+  "title": "QUYẾT ĐỊNH CHỦ SHOP: trả lời Q2–Q10 về hoá đơn phần vượt gói (sổ yêu cầu BIL-05)",
+  "business_goal": "",
+  "status": "BLOCKED",
+  "priority": "P2",
+  "risk": "MEDIUM",
+  "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "worker": null,
+  "worktree": null,
+  "branch": "decision/owner-billing-overage",
+  "base_sha": null,
+  "domains": [],
+  "owned_paths": [
+    "docs/decisions/owner-billing-overage.md"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-10T14:54:35.961Z",
+  "updated_at": "2026-10-10T14:54:35.961Z",
+  "last_heartbeat": "2026-10-10T14:54:35.961Z",
+  "definition_of_done": []
+}
