@@ -1678,3 +1678,4 @@
 {"at":"2026-10-10T16:52:21.678Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"inbox-read-v3","detail":"feat/inbox-read-v3 @ 55ebde9ba369 · 1 lệnh kiểm thử"}
 {"at":"2026-10-10T16:53:01.013Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"inbox-read-v3","detail":"#784 cho feat/inbox-read-v3 @ 55ebde9ba369"}
 {"at":"2026-10-10T16:53:23.569Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#784 @ 55ebde9ba369 · Đọc báo cáo + diff: điều kiện chưa đọc từ tin khách thật sau con trỏ người xem, mốc đọc lấy từ CSDL theo mã tin (không nhận mốc client, không now), con trỏ chỉ tiến; migration chỉ cộng thêm; fallback mốc chung cho người chưa có con trỏ (ghi rõ)"}
+{"at":"2026-10-10T16:58:41.933Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"ledger-r2","detail":"#780 @ 8dc4a924f94c → 72c7b77a5ddf (MERGE_NOW · LOW · gates success)"}

@@ -3,7 +3,7 @@
   "mission_id": "ledger-r2",
   "title": "Sổ yêu cầu chủ shop sau đợt deploy 10/10 tối",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -22,9 +22,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-10T14:42:33.955Z",
-  "updated_at": "2026-10-10T14:44:43.034Z",
+  "updated_at": "2026-10-10T16:58:41.881Z",
   "last_heartbeat": "2026-10-10T14:42:57.913Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#780 → 72c7b77a5ddf8aae33c931f66ff7d7e78650f606"
+  },
   "handoff": {
     "branch": "docs/ledger-r2",
     "sha": "8dc4a924f94c48d9a668902037b2928ad075a87a",
