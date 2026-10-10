@@ -1,8 +1,8 @@
 {
   "pr": 786,
-  "sha": "8dfe430976f814e66814a279f0c986b2a8558d3a",
+  "sha": "ee21f87d136a33883a508ba304d7cd7627e00e1b",
   "verdict": "PASS",
   "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
-  "at": "2026-10-10T18:14:53.495Z",
-  "note": "Chỉ thêm commit gộp main; hai danh sách ops giải bằng hợp, tsc sạch"
+  "at": "2026-10-10T18:53:43.121Z",
+  "note": "Commit mới chỉ đổi 2 ảnh chụp vàng; diff ngữ nghĩa đúng hai dòng luật huỷ"
 }
