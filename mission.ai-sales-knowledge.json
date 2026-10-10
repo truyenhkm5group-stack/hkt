@@ -3,7 +3,7 @@
   "mission_id": "ai-sales-knowledge",
   "title": "AI Sales: ô FAQ · chính sách · khuyến mãi có cấu trúc, bot trích đúng, không bịa",
   "business_goal": "",
-  "status": "RUNNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -25,7 +25,18 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-10T14:11:07.724Z",
-  "updated_at": "2026-10-10T14:11:07.724Z",
-  "last_heartbeat": "2026-10-10T14:11:07.724Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-10T15:32:55.145Z",
+  "last_heartbeat": "2026-10-10T15:32:55.145Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "feat/ai-sales-knowledge",
+    "sha": "23840099e176c24a2f6d3412e2e114ab925fc823",
+    "at": "2026-10-10T15:32:55.145Z",
+    "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+    "title": "AI Sales: ô FAQ · chính sách · khuyến mãi có cấu trúc, bot trích đúng, không bịa",
+    "summary": "Ô có cấu trúc FAQ · chính sách (4 loại) · khuyến mãi có ngày; khối KIẾN THỨC CỦA SHOP chỉ khi có dữ liệu; chưa khai ⇒ chuyển người «Ngoài chính sách»; tiền chỉ từ calculate_cart",
+    "tests": [
+      "typecheck · lint sạch · npm test TẤT CẢ KIỂM THỬ ĐẠT · 12 golden cũ không đổi · 2 golden mới · build biên dịch + 7/7 trang tĩnh (bước cuối hết giờ, CI xác nhận)"
+    ]
+  }
 }
