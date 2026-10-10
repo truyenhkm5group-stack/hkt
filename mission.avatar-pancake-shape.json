@@ -1,0 +1,28 @@
+{
+  "schema": 1,
+  "mission_id": "avatar-pancake-shape",
+  "title": "Ops chỉ-đọc pancake-avatar-shape: in dáng khoá (không giá trị) của danh sách hội thoại Pancake để tìm chỗ ảnh khách thật",
+  "business_goal": "",
+  "status": "RUNNING",
+  "priority": "P1",
+  "risk": "HIGH",
+  "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "worker": null,
+  "worktree": null,
+  "branch": "fix/avatar-pancake-shape",
+  "base_sha": "04ed5c91ba67961ff5ea96befa1f9a3102c967e6",
+  "domains": [],
+  "owned_paths": [
+    "scripts/pancake-avatar-shape.ts",
+    "tests/pancake-avatar-shape.test.ts",
+    ".github/workflows/ops-vps.yml"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-10T21:25:41.842Z",
+  "updated_at": "2026-10-10T21:25:41.842Z",
+  "last_heartbeat": "2026-10-10T21:25:41.842Z",
+  "definition_of_done": []
+}
