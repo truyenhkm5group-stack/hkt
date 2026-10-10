@@ -27,18 +27,18 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-10T08:13:52.335Z",
-  "updated_at": "2026-10-10T10:23:39.022Z",
-  "last_heartbeat": "2026-10-10T10:23:06.433Z",
+  "updated_at": "2026-10-10T12:02:22.461Z",
+  "last_heartbeat": "2026-10-10T12:02:22.461Z",
   "definition_of_done": [],
   "handoff": {
     "branch": "feat/inbox-avatar-profile",
-    "sha": "289255368db23c7c0773fd52911d38619cdfbd51",
-    "at": "2026-10-10T10:23:06.433Z",
+    "sha": "fbeceb094400820dbb67555bd08637d1f5a9107a",
+    "at": "2026-10-10T12:02:22.461Z",
     "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
     "title": "Ảnh đại diện khách thật (Meta backfill + Pancake) và bấm avatar mở đúng trang Facebook khi nguồn cho phép",
-    "summary": "Ảnh khách Pancake ghi từ webhook + 5 trạng thái chẩn đoán; bấm ảnh không bao giờ dựng facebook.com/<PSID>; backfill Messenger chạy tay; ops inbox-avatar-audit chỉ đọc",
+    "summary": "Cập nhật lên main",
     "tests": [
-      "typecheck · lint sạch · build đạt · inbox-avatar-profile + 7 bài liên quan đạt · npm test: phần sau dòng 2989 đạt khi chạy riêng (lượt đầy đủ hết giờ ở máy chậm, không lỗi)"
+      "gộp main (sau #775 #778): xung đột chỉ ở dòng đăng ký bài kiểm, giữ cả hai; typecheck sạch; inbox-avatar-profile đạt"
     ]
   }
 }

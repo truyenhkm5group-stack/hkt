@@ -1491,3 +1491,4 @@
 {"at":"2026-10-10T11:48:21.968Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DONE","mission":"sec-caddy-ghn-ghtk","detail":"production 8232c50e · deploy run 38048305155 xanh, log «Caddy đã nạp Caddyfile mới»; webhook-log-redaction 7/7 route che token. Còn: xoay token GHN/GHTK — chờ chủ shop duyệt"}
 {"at":"2026-10-10T11:54:30.284Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"inbox-semantics-v3","detail":"#778 @ 0b56fb7d1858 → 7af2bca43d6c (MERGE_NOW · MEDIUM · gates success)"}
 {"at":"2026-10-10T12:00:38.247Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DEPLOY_DISPATCHED","detail":"7af2bca43d6c · run 38050390193 https://github.com/truyenhkm5group-stack/hkt/actions/runs/38050390193"}
+{"at":"2026-10-10T12:02:22.494Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"inbox-avatar-profile","detail":"feat/inbox-avatar-profile @ fbeceb094400 · 1 lệnh kiểm thử"}
