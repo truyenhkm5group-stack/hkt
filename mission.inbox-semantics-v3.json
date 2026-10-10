@@ -1,0 +1,33 @@
+{
+  "schema": 1,
+  "mission_id": "inbox-semantics-v3",
+  "title": "Hộp thư: Chưa đọc ≠ Chờ trả lời ≠ Cần người ≠ Người đang xử lý; chưa đọc lên đầu đúng nghĩa; «Trả tất cả cho AI»",
+  "business_goal": "",
+  "status": "RUNNING",
+  "priority": "P2",
+  "risk": "MEDIUM",
+  "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "worker": null,
+  "worktree": null,
+  "branch": "feat/inbox-semantics-v3",
+  "base_sha": "3e853bd4433a110200beb93e737f3e989e3b49d6",
+  "domains": [],
+  "owned_paths": [
+    "lib/sales-chatbot/inbox.ts",
+    "lib/sales-chatbot/inbox-shared.ts",
+    "lib/sales-chatbot/inbox-states.ts",
+    "app/(dashboard)/ai/sales-chatbot/inbox/",
+    "lib/actions/inbox-bulk-ai.ts",
+    "lib/sales-chatbot/bulk-return-ai.ts",
+    "tests/inbox-semantics-v3.test.ts",
+    "tests/inbox-bulk-ai.test.ts"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-10T08:13:35.444Z",
+  "updated_at": "2026-10-10T08:13:35.444Z",
+  "last_heartbeat": "2026-10-10T08:13:35.444Z",
+  "definition_of_done": []
+}
