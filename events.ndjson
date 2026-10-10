@@ -1842,3 +1842,4 @@
 {"at":"2026-10-10T21:09:59.112Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DEPLOY_DISPATCHED","detail":"04ed5c91ba67 · run 38086547488 https://github.com/truyenhkm5group-stack/hkt/actions/runs/38086547488"}
 {"at":"2026-10-10T21:10:42.620Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"sales-claim-guard","detail":"fix/sales-claim-guard @ 5b3acc94efd4 · 1 lệnh kiểm thử"}
 {"at":"2026-10-10T21:11:00.544Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#789 @ 5b3acc94efd4 · Đọc phần hợp engine: thứ tự giữ chữ khoá bằng bài quét; ORDER_CANCELLED căn cứ từ state.cancelledOrders (#786 chỉ ghi sau khi lõi huỷ xong); ops danh sách lấy hợp; golden main không đổi"}
+{"at":"2026-10-10T21:13:53.732Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"STATUS","mission":"avatar-proxy","detail":"INTEGRATING → VERIFYING"}
