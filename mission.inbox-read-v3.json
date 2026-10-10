@@ -3,7 +3,7 @@
   "mission_id": "inbox-read-v3",
   "title": "Hộp thư V3 P0: tin khách chưa đọc có bằng chứng, preview đúng phía, đọc theo con trỏ tin, A→B không dòng cũ, chưa đọc theo từng người",
   "business_goal": "",
-  "status": "INTEGRATING",
+  "status": "VERIFYING",
   "priority": "P2",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -36,11 +36,13 @@
     "0239": "2026-10-10T14:33:08.566Z"
   },
   "created_at": "2026-10-10T14:32:07.175Z",
-  "updated_at": "2026-10-10T18:10:51.062Z",
+  "updated_at": "2026-10-10T18:45:30.864Z",
   "last_heartbeat": "2026-10-10T17:00:53.947Z",
   "definition_of_done": [],
   "evidence": {
-    "merged": "#784 → 2840b5b578820108de27227ff4f6181596be84df"
+    "merged": "#784 → 2840b5b578820108de27227ff4f6181596be84df",
+    "verify": "PASS 2840b5b578820108de27227ff4f6181596be84df 2026-10-10T18:45:17.130Z",
+    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/38074783253"
   },
   "handoff": {
     "branch": "feat/inbox-read-v3",
