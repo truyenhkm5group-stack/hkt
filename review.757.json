@@ -1,8 +1,8 @@
 {
   "pr": 757,
-  "sha": "747635ee20475fc35e7ff7a62a48db100ffa5c5e",
+  "sha": "f570ae3aeee19a42fac7de143727f0ee1916c7b1",
   "verdict": "PASS",
   "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
-  "at": "2026-10-10T03:07:02.396Z",
+  "at": "2026-10-10T03:41:53.012Z",
   "note": "Cập nhật nhánh lên main, mã không đổi; gates xanh lại"
 }
