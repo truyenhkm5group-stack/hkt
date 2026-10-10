@@ -1742,3 +1742,4 @@
 {"at":"2026-10-10T18:10:51.108Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"inbox-read-v3","detail":"#784 @ 264492b6346d → 2840b5b57882 (MERGE_ISOLATED · HIGH · gates success)"}
 {"at":"2026-10-10T18:11:54.669Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DEPLOY_DISPATCHED","detail":"2840b5b57882 · run 38074783253 https://github.com/truyenhkm5group-stack/hkt/actions/runs/38074783253"}
 {"at":"2026-10-10T18:14:49.097Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"order-cancel-consistency","detail":"fix/order-cancel-consistency @ 8dfe430976f8 · 1 lệnh kiểm thử"}
+{"at":"2026-10-10T18:15:07.531Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#786 @ 8dfe430976f8 · Chỉ thêm commit gộp main; hai danh sách ops giải bằng hợp, tsc sạch"}
