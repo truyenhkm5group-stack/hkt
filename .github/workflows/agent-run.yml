@@ -90,9 +90,16 @@ jobs:
     steps:
       # `fetch-depth: 0` là bắt buộc: runner dựng cây làm việc bằng `git worktree add` từ một SHA
       # ĐÃ VÀO KHO. Bản checkout nông không có object đó và lượt chạy chết ở bước đầu tiên.
+      #
+      # `persist-credentials: false` (Team Premium F8): job này CHẠY MÃ DO AGENT VIẾT (cổng
+      # typecheck/lint/test/build), mà credential mặc định nằm trong `.git/config` — tức là mọi lệnh
+      # cổng đọc được một token có `contents: write`. Bốn workflow agent khác đã bỏ từ lâu. Kho
+      # PUBLIC nên mọi lần fetch đều đi được không cần token; token GHI chỉ được cấp ở ĐÚNG bước
+      # đẩy nhánh bên dưới, và chỉ trong lệnh `git push` ấy.
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - uses: actions/setup-node@v4
         with:
@@ -164,6 +171,11 @@ jobs:
           fi
           TASK_CODE="$(grep -oE '^TASK_CODE=.+' setup.log | tail -1 | cut -d= -f2)"
           if [ -z "$TASK_CODE" ]; then echo "::error::Không lấy được mã việc."; exit 1; fi
+          # Hình dạng ĐÓNG, cùng mẫu với `MA_VIEC_DISPATCH` (lib/constants/agent-dispatch.ts): mã việc
+          # đi tiếp vào mọi bước sau, nên chữ lạ dừng ở ĐÂY chứ không đi xa hơn một bước nào.
+          if ! [[ "$TASK_CODE" =~ ^[A-Z][A-Z0-9]{1,11}-[0-9]{1,9}$ ]]; then
+            echo "::error::Mã việc sai hình dạng (phải như TECH-12)."; exit 1
+          fi
           echo "task_code=$TASK_CODE" >> "$GITHUB_OUTPUT"
 
           # ═══ VAI ĐI THEO VIỆC, KHÔNG PHẢI MỘT HẰNG SỐ Ở ĐÂY ═══
@@ -221,20 +233,25 @@ jobs:
           FEEDBACK: ${{ inputs.feedback }}
           CONG: ${{ inputs.gates }}
           NGUOI_BAM: ${{ github.actor }}
+          # Đầu ra của bước trước cũng đi qua `env:` (Team Premium F8): `${{ }}` nội suy TRƯỚC khi
+          # shell đọc script, nên một giá trị mang dấu nháy sẽ thành lệnh thứ hai. Hai giá trị này
+          # đã kiểm hình dạng đóng ở bước lấy việc.
+          TASK_CODE: ${{ steps.setup.outputs.task_code }}
+          AGENT_KEY: ${{ steps.setup.outputs.agent_key }}
         run: |
           if [ -n "${RERUN_BRANCH:-}" ]; then
             printenv FEEDBACK > agent-feedback.txt || : > agent-feedback.txt
             npm run --silent agent:run -- \
-              --task "${{ steps.setup.outputs.task_code }}" \
-              --agent "${{ steps.setup.outputs.agent_key }}" \
+              --task "$TASK_CODE" \
+              --agent "$AGENT_KEY" \
               --gates "$CONG" \
               --rerun-branch "$RERUN_BRANCH" \
               --feedback-file agent-feedback.txt \
               --feedback-author "github:$NGUOI_BAM"
           else
             npm run --silent agent:run -- \
-              --task "${{ steps.setup.outputs.task_code }}" \
-              --agent "${{ steps.setup.outputs.agent_key }}" \
+              --task "$TASK_CODE" \
+              --agent "$AGENT_KEY" \
               --gates "$CONG"
           fi
 
@@ -247,7 +264,8 @@ jobs:
         if: always() && steps.setup.outputs.task_code != ''
         env:
           DATABASE_URL: pglite://./data/agent-ci-db
-        run: npm run --silent agent:proof-report -- --task "${{ steps.setup.outputs.task_code }}"
+          TASK_CODE: ${{ steps.setup.outputs.task_code }}
+        run: npm run --silent agent:proof-report -- --task "$TASK_CODE"
 
       # ═══ CHÉP SỔ VỀ PRODUCTION (phương án B) ═══
       #
@@ -272,7 +290,9 @@ jobs:
           ERP_DOMAIN: ${{ vars.ERP_DOMAIN || 'erp.vnxcommerce.com' }}
           ERP_BASE_URL: ${{ vars.ERP_BASE_URL }}
           AGENT_INGEST_SECRET: ${{ secrets.AGENT_INGEST_SECRET }}
-        run: npm run --silent agent:report -- --task "${{ steps.setup.outputs.task_code }}" --prod-task "${{ steps.setup.outputs.prod_task_code }}"
+          TASK_CODE: ${{ steps.setup.outputs.task_code }}
+          PROD_TASK_CODE: ${{ steps.setup.outputs.prod_task_code }}
+        run: npm run --silent agent:report -- --task "$TASK_CODE" --prod-task "$PROD_TASK_CODE"
 
       # Nhánh phải sống sót sau khi máy Actions bị xoá, nếu không bằng chứng biến mất cùng nó.
       # Chỉ đẩy nhánh mang đúng tiền tố; mọi tên khác bị từ chối trước khi `git push` chạy.
@@ -283,6 +303,8 @@ jobs:
           RERUN_BRANCH: ${{ inputs.rerun_branch }}
           CO_VIEC: ${{ inputs.task }}
           VAI: ${{ steps.setup.outputs.agent_key }}
+          # Token GHI cấp RÕ RÀNG cho đúng bước này (checkout không giữ credential — xem bước đầu).
+          DAY_TOKEN: ${{ github.token }}
         run: |
           # Lượt chạy lại đẩy ĐÚNG nhánh được yêu cầu; `git branch --list` chỉ là đường của lượt mới.
           BR="${RERUN_BRANCH:-$(git branch --list "ai/$VAI/*" --format '%(refname:short)' | head -1)}"
@@ -291,7 +313,15 @@ jobs:
             "ai/$VAI/"*) : ;;
             *) echo "::error::Từ chối đẩy nhánh ngoài phạm vi: $BR"; exit 1 ;;
           esac
-          git push origin "refs/heads/$BR:refs/heads/$BR"
+          # Token chỉ sống trong MỘT lệnh: đi qua biến cấu hình git của riêng tiến trình `git push`
+          # (không ghi vào `.git/config`, không vào argv), và tắt hooks — mã của agent đã chạy trên
+          # cây này, một `pre-push` cài sẵn sẽ đọc được token.
+          AUTH="$(printf 'x-access-token:%s' "$DAY_TOKEN" | base64 -w0)"
+          echo "::add-mask::$AUTH"
+          GIT_CONFIG_COUNT=2 \
+            GIT_CONFIG_KEY_0="http.https://github.com/.extraheader" GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $AUTH" \
+            GIT_CONFIG_KEY_1="core.hooksPath" GIT_CONFIG_VALUE_1="/dev/null" \
+            git push origin "refs/heads/$BR:refs/heads/$BR"
           echo "Đã đẩy $BR — CHƯA merge, CHƯA deploy. Người xem rồi quyết."
 
           # ═══ BỐN ĐIỀU KIỆN MỚI MỞ PR, VÀ MỖI ĐIỀU KIỆN CHẶN MỘT KIỂU RÁC KHÁC ═══
@@ -317,7 +347,8 @@ jobs:
         if: steps.day.outputs.nhanh_pr != ''
         env:
           DATABASE_URL: pglite://./data/agent-ci-db
-        run: npm run --silent agent:pr-text -- --task "${{ steps.setup.outputs.task_code }}"
+          TASK_CODE: ${{ steps.setup.outputs.task_code }}
+        run: npm run --silent agent:pr-text -- --task "$TASK_CODE"
 
       - uses: actions/upload-artifact@v4
         if: always()
