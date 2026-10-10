@@ -1864,3 +1864,4 @@
 {"at":"2026-10-10T21:44:39.100Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"saas-value-attribution","detail":"#785 @ 0f9a38d78bf8 → f392bdbbced8 (MERGE_NOW · MEDIUM · gates success)"}
 {"at":"2026-10-10T21:49:50.621Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"ai-fallback-tenant","detail":"#787 @ 08131c631944 → dcd36724b258 (MERGE_NOW · MEDIUM · gates success)"}
 {"at":"2026-10-10T21:50:10.102Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"ai-fallback-tenant","detail":"#787 @ 08131c631944 → dcd36724b258 (MERGE_NOW · MEDIUM · gates success)"}
+{"at":"2026-10-10T21:50:48.114Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DEPLOY_DISPATCHED","detail":"dcd36724b258 · run 38089156248 https://github.com/truyenhkm5group-stack/hkt/actions/runs/38089156248"}
