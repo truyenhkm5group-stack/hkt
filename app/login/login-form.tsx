@@ -87,7 +87,13 @@ export function LoginForm({
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="password">Mật khẩu</Label>
+              <div className="flex items-center justify-between gap-2">
+                <Label htmlFor="password">Mật khẩu</Label>
+                {/* PUB-07: người quên mật khẩu từng không có nút nào để bấm — /forgot gửi mã Zalo hoặc chuyển yêu cầu tới quản trị. */}
+                <Link href="/forgot" className="text-xs font-medium text-primary hover:underline" data-login-forgot>
+                  Quên mật khẩu?
+                </Link>
+              </div>
               <Input id="password" name="password" type="password" autoComplete="current-password" required value={password} onChange={(e) => setPassword(e.target.value)} />
             </div>
             {state?.choose ? (

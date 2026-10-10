@@ -54,6 +54,9 @@ import {
  * `/join/` (mời người dùng qua liên kết): người được mời CHƯA có tài khoản. Trang chỉ đọc; cổng của nó là mã mời
  * 256 bit trong đường dẫn, tra trong CSDL của tổ chức ghi trong đường dẫn bằng `withOrganization` tường minh
  * (lib/users/invites.ts). Khai kèm dấu `/` cuối: chỉ mở đúng nhánh `/join/<tổ chức>/<mã>`.
+ *
+ * `/forgot` («Quên mật khẩu», PUB-07 — khai ở `PUBLIC_EXACT`): người quên mật khẩu không có phiên. Cổng của nó nằm trong lõi
+ * (lib/users/forgot-password.ts): chặn dò theo định danh + máy, câu trả lời không lộ tài khoản, phiếu đặt lại chỉ phát sau mã OTP đúng.
  */
 const PUBLIC_PREFIXES = ["/login", "/start", SITE_PAGE_PATH, ...SITE_LEGAL_PATHS, "/join/", "/reset/", "/api/webhooks", "/api/health", "/api/sync", "/api/tech/agent-run", "/api/tech/agent-task", "/api/tech/worker/", "/api/video-scale/public/", "/api/ical/", "/_next", "/favicon", "/icon", "/apple-icon", "/apple-touch-icon", "/manifest", "/robots", "/sitemap", BRAND_ASSET_PREFIX];
 
@@ -68,7 +71,7 @@ const PUBLIC_PREFIXES = ["/login", "/start", SITE_PAGE_PATH, ...SITE_LEGAL_PATHS
  *    miền con của tổ chức đã xuất bản, không lộ gì khác.
  *  · `/pricing` — trang giá công khai (0222): chỉ đọc gói cước ở `platform_plans` + chế độ đăng ký, không dữ liệu khách nào.
  */
-const PUBLIC_EXACT = ["/chat", WIDGET_EMBED_PATH, WIDGET_SCRIPT_PATH, "/api/platform/domain-allowed", "/sw.js", "/pricing"];
+const PUBLIC_EXACT = ["/chat", WIDGET_EMBED_PATH, WIDGET_SCRIPT_PATH, "/api/platform/domain-allowed", "/sw.js", "/pricing", "/forgot"];
 const COOKIE = SESSION_COOKIE;
 
 /**
