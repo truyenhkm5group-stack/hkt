@@ -2,8 +2,10 @@
 
 import { startTransition, useEffect, useRef, useState, type ReactNode } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import type { InboxReadConfirmation } from "@/lib/sales-chatbot/inbox-read-shared";
 import type { InboxThreadPayload } from "@/lib/sales-chatbot/inbox-thread-payload";
 import { cn } from "@/lib/utils";
+import { recordInboxRead } from "./read-store";
 import { InboxThreadView } from "./thread-view";
 
 /**
@@ -17,11 +19,17 @@ import { InboxThreadView } from "./thread-view";
  *
  * Nguồn của khung chat: bản MỚI NHẤT trong hai — bản trang dựng (mở bằng đường dẫn, lượt tự làm mới, sau khi gửi tin) hoặc bản vừa
  * tải bằng route. Hội thoại đang mở không có bản nào ⇒ chữ «Đang mở…», danh sách vẫn đứng yên.
+ *
+ * ĐỌC (P0.3, 10/10/2026 tối): khung chat ĐÃ HIỆN một payload có tin khách ⇒ gửi `POST /api/ai-sales/inbox-read` với mã tin KHÁCH cuối
+ * cùng của CHÍNH payload đó (`readThrough`) — không phải «giờ bấm». Mỗi (hội thoại, tin) gửi một lần; tin khách mới tới (lượt tự làm
+ * mới mang payload có `readThrough` mới) ⇒ gửi tiếp. Xác nhận của máy chủ vào `read-store` ⇒ danh sách + bộ đếm vá NGAY; không còn
+ * phụ thuộc lượt làm mới 1,5 giây cho trạng thái đọc (lượt đó vẫn chạy, chỉ còn là đối soát nền).
  */
 
 type Stamped = { at: number; payload: InboxThreadPayload };
 
 export const THREAD_ROUTE = "/api/ai-sales/inbox-thread";
+export const READ_ROUTE = "/api/ai-sales/inbox-read";
 /** Làm mới nền sau khi người DỪNG bấm chừng này — không chạy lại danh sách cho từng cú bấm khi lướt nhanh qua nhiều khách. */
 const SETTLE_REFRESH_MS = 1_500;
 
@@ -107,10 +115,41 @@ export function InboxThreadPane({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selected]);
 
-  if (!selected) return <>{empty}</>;
-  const a = fromServer.id === selected ? fromServer.s : null;
-  const b = fetched.get(selected) ?? null;
+  const a = selected && fromServer.id === selected ? fromServer.s : null;
+  const b = selected ? (fetched.get(selected) ?? null) : null;
   const best = a && b ? (a.at >= b.at ? a : b) : (a ?? b);
+  const shownThread = best?.payload.ok ? best.payload.thread : null;
+  const shownId = shownThread?.id ?? null;
+  const throughId = shownThread?.readThrough?.id ?? null;
+  // (hội thoại, tin) đã gửi đánh dấu đọc — không gửi lại cho từng lượt tự làm mới mang cùng payload.
+  const marked = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (!shownId || !throughId) return;
+    const key = `${shownId}:${throughId}`;
+    const send = () => {
+      if (marked.current.has(key)) return;
+      marked.current.add(key);
+      void fetch(READ_ROUTE, { method: "POST", headers: { "content-type": "application/json" }, cache: "no-store", body: JSON.stringify({ c: shownId, through: throughId }) })
+        .then(async (res) => (await res.json().catch(() => null)) as { ok: true; read: InboxReadConfirmation } | { ok: false; error: string } | null)
+        .then((r) => {
+          if (r?.ok) recordInboxRead(r.read);
+          else marked.current.delete(key);
+        })
+        .catch(() => marked.current.delete(key));
+    };
+    // Tab đang ẨN (lượt tự làm mới 30 giây vẫn nạp khung chat mới) KHÔNG phải là đã đọc — đợi người quay lại tab rồi mới đánh dấu.
+    if (document.visibilityState === "visible") {
+      send();
+      return;
+    }
+    const onVisible = () => {
+      if (document.visibilityState === "visible") send();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+  }, [shownId, throughId]);
+
+  if (!selected) return <>{empty}</>;
   if (!best) return <div className="flex h-full items-center justify-center p-6 text-sm text-muted-foreground" data-testid="inbox-thread-loading">Đang mở hội thoại…</div>;
   if (!best.payload.ok) return <div className="p-6 text-sm text-destructive">{best.payload.error}</div>;
   const back = new URLSearchParams(params.toString());

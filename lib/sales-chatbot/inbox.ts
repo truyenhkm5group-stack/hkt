@@ -1,4 +1,5 @@
 import { and, asc, desc, eq, inArray, isNotNull, isNull, ne, or, sql, type SQL } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import { z } from "zod";
 import { getDb, schema } from "@/db";
 import { listChannelPages } from "@/lib/connectors/service";
@@ -17,14 +18,18 @@ import { aiHoldOf, aiHoldView, humanResumeReason } from "@/lib/sales-chatbot/ai-
 import {
   aiReplyingSql,
   classifyInboxState,
-  HUMAN_UNREAD_COUNT_SQL,
-  HUMAN_UNREAD_SQL,
   humanHandlingSql,
   INBOX_ACTIVITY_SQL,
   inboxHandlingFrom,
   needsHumanSql,
   ORDER_UNDER_REVIEW_SQL,
+  customerInboundRowSql,
+  customerMessageRowSql,
   PAGE_REPLY_AFTER_CUSTOMER_SQL,
+  personalUnreadCountSql,
+  personalUnreadSql,
+  readCursorSql,
+  VIEWER_READ_ALIAS,
   WAITING_REPLY_SQL,
   WEB_STAFF_REASON,
 } from "@/lib/sales-chatbot/inbox-states";
@@ -99,7 +104,7 @@ const NO_CONVERSATION = "Không có hội thoại này.";
  * Trả lời khách = GỬI TIN cho khách. Khoá riêng `ai_sales:reply` (module AI bán hàng — tổ chức chỉ mua AI bán hàng vẫn có);
  * `outreach:send` («Chăm sóc & bán chéo: gửi tin») cũng đủ — vai trò đã lưu quyền ở tổ chức nhà không mất việc trả lời.
  */
-function canReplyTo(user: SessionUser): boolean {
+export function canReplyTo(user: SessionUser): boolean {
   return can(user, "ai_sales:reply") || can(user, "outreach:send");
 }
 export { WEB_STAFF_REASON };
@@ -210,29 +215,39 @@ function avatarOf(state: unknown): string | null {
   return safeAvatarUrl(meta) ?? safeAvatarUrl(st.pancakeAvatarUrl);
 }
 
-function inboundSide(note: string | null, messageId: string): TimelineSide {
+/** Phía của một dòng sổ tin thô (khách · bot · nhân viên ERP · phía page ngoài ERP). HÀM THUẦN — hộp thư và ops audit dùng chung. */
+export function inboundSide(note: string | null, messageId: string): TimelineSide {
   if (note === "BOT_SENT") return "BOT";
   if (note === PAGE_REPLY) return messageId.startsWith(STAFF_OUT_PREFIX) ? "STAFF" : "PAGE";
   return "CUSTOMER";
+}
+
+/** Phía của một dòng lịch sử chat web (`sales_chat_messages`): vai `user` = khách; câu `[Shop đã nhắn]` = nhân viên; còn lại = bot. HÀM THUẦN. */
+export function webSideOf(role: string, text: string): TimelineSide {
+  return role === "user" ? "CUSTOMER" : text.startsWith(SHOP_SAID) ? "STAFF" : "BOT";
 }
 
 /**
  * THỨ TỰ DANH SÁCH (INBOX-V2-A 09/10 · chủ shop 10/10/2026 mục C) — xếp ở MÁY CHỦ, không xếp lại trên trình duyệt, nên «Xem thêm»
  * (nâng `limit`) luôn ra ĐÚNG phần nối tiếp của trang trước:
  *  · «Chờ trả lời»: khách chờ LÂU NHẤT lên đầu (đúng thứ tự phải xử lý).
- *  · Mọi thẻ khác: NGƯỜI CHƯA ĐỌC trước (`HUMAN_UNREAD_SQL` — AI trả lời không làm hội thoại thành «đã đọc»), rồi đã đọc; trong
+ *  · Mọi thẻ khác: NGƯỜI XEM CHƯA ĐỌC trước (`personalUnreadSql` — AI trả lời không làm hội thoại thành «đã đọc»), rồi đã đọc; trong
  *    mỗi nhóm TIN CÓ NGHĨA mới nhất lên đầu (`INBOX_ACTIVITY_SQL` — không cột siêu dữ liệu nào: nhãn / người phụ trách / hồ sơ khách
  *    không đổi chỗ hội thoại).
  * Khoá cuối là `id` để hai hội thoại cùng mốc không đổi chỗ giữa hai lượt tải (phân trang ổn định). Hội thoại ĐANG MỞ thành «đã
  * đọc» không nhảy chỗ khi đang đọc: trình duyệt giữ nó tại chỗ (`keepActiveInPlace`), chuyển hội thoại khác thì nó về vị trí này.
  */
-export function inboxOrderBy(filter: InboxFilter): SQL[] {
+export function inboxOrderBy(filter: InboxFilter, unread: SQL<boolean>): SQL[] {
   if (filter === "UNANSWERED") return [asc(schema.salesChatConversations.lastCustomerAt), asc(schema.salesChatConversations.id)];
-  return [sql`${HUMAN_UNREAD_SQL} desc`, desc(INBOX_ACTIVITY_SQL), desc(schema.salesChatConversations.id)];
+  return [sql`${unread} desc`, desc(INBOX_ACTIVITY_SQL), desc(schema.salesChatConversations.id)];
 }
 
 /** Danh sách hội thoại của hộp thư (tối đa 100) — lọc theo việc cần làm, kênh, tên / SĐT. Không kéo nội dung tin (chỉ một dòng xem trước). */
-export async function listInbox(user: SessionUser, rawQuery: unknown, now: Date = new Date()): Promise<InboxResult<{ rows: InboxRow[]; counts: Record<InboxFilter, number>; levelCounts: Partial<Record<CustomerLevel, number>>; phoneCount: number; total: number }>> {
+export async function listInbox(
+  user: SessionUser,
+  rawQuery: unknown,
+  now: Date = new Date(),
+): Promise<InboxResult<{ rows: InboxRow[]; counts: Record<InboxFilter, number>; levelCounts: Partial<Record<CustomerLevel, number>>; phoneCount: number; total: number; unreadStamp: string | null }>> {
   if (!can(user, VIEW)) return { ok: false, error: NO_VIEW };
   const q = listZ.parse(rawQuery ?? {});
   const db = await getDb();
@@ -263,9 +278,14 @@ export async function listInbox(user: SessionUser, rawQuery: unknown, now: Date 
   if (range?.to) base.push(sql`${INBOX_ACTIVITY_SQL} < ${range.to}`);
   // Bộ lọc level đứng RIÊNG: số đếm theo level tính trên các bộ lọc khác (chip level không tự triệt tiêu nhau).
   const levelCond = q.level ? eq(c.customerLevel, q.level) : undefined;
+  // «Tin khách chưa đọc» là của NGƯỜI XEM (con trỏ đọc riêng — inbox-states.ts); mọi thẻ khác là trạng thái chung của cửa hàng.
+  // Con trỏ của người xem nối MỘT lần (LEFT JOIN theo khoá chính) cho cả ba câu — không phải một câu con mỗi lần nhắc tới.
+  const scr = alias(schema.salesChatReads, VIEWER_READ_ALIAS);
+  const viewerRead = and(eq(scr.conversationId, c.id), eq(scr.userId, user.id));
+  const personalUnread = personalUnreadSql(user.id, true);
   const byFilter: Record<InboxFilter, SQL | undefined> = {
     ALL: undefined,
-    UNREAD: HUMAN_UNREAD_SQL,
+    UNREAD: personalUnread,
     UNANSWERED: WAITING_REPLY_SQL,
     NEEDS_HUMAN: needsHuman,
     MINE: eq(c.assigneeUserId, user.id),
@@ -278,16 +298,20 @@ export async function listInbox(user: SessionUser, rawQuery: unknown, now: Date 
   };
   // MỘT câu đếm cho mọi thẻ (trước đây sáu câu cho mỗi lượt làm mới 5 giây).
   const countCols = Object.fromEntries(INBOX_FILTERS.map((f) => [f, byFilter[f] ? sql<number>`count(*) filter (where ${byFilter[f]})::int` : sql<number>`count(*)::int`])) as Record<InboxFilter, SQL<number>>;
+  // `unreadStamp`: dấu con trỏ đọc MỚI NHẤT của người xem, đọc trong CÙNG câu (cùng ảnh chụp) với số «chưa đọc» — trình duyệt so nó
+  // với xác nhận đọc để biết bản đếm này đã thấy lượt đọc vừa rồi chưa (inbox-read-shared.ts::patchUnreadCount).
   const [countRow] = await db
-    .select({ ...countCols, phone: sql<number>`count(*) filter (where ${HAS_PHONE})::int` })
+    .select({ ...countCols, phone: sql<number>`count(*) filter (where ${HAS_PHONE})::int`, unreadStamp: sql<string | null>`(select max(r.updated_at) from "sales_chat_reads" r where r.user_id = ${user.id})` })
     .from(c)
     .leftJoin(cu, eq(cu.id, c.customerId))
+    .leftJoin(scr, viewerRead)
     .where(and(...base, ...(levelCond ? [levelCond] : [])));
   const counts = Object.fromEntries(INBOX_FILTERS.map((f) => [f, Number((countRow as Record<string, unknown> | undefined)?.[f] ?? 0)])) as Record<InboxFilter, number>;
   const levelRows = await db
     .select({ level: c.customerLevel, n: sql<number>`count(*)::int` })
     .from(c)
     .leftJoin(cu, eq(cu.id, c.customerId))
+    .leftJoin(scr, viewerRead)
     .where(and(...base, ...(byFilter[q.filter] ? [byFilter[q.filter]!] : [])))
     .groupBy(c.customerLevel);
   const levelCounts: Partial<Record<CustomerLevel, number>> = {};
@@ -315,9 +339,10 @@ export async function listInbox(user: SessionUser, rawQuery: unknown, now: Date 
       pageReplyAfterCustomer: PAGE_REPLY_AFTER_CUSTOMER_SQL,
       orderUnderReview: ORDER_UNDER_REVIEW_SQL,
       activity: INBOX_ACTIVITY_SQL,
-      // Cờ chưa đọc / chờ trả lời: ĐÚNG biểu thức của bộ lọc và khoá xếp (một hàng không bao giờ đứng sai nhóm).
+      // Cờ chờ trả lời: ĐÚNG biểu thức của bộ lọc. «Chưa đọc» = SỐ tin khách sau con trỏ của người xem ≥ 1 (cùng điều kiện với bộ lọc
+      // và khoá xếp — một hàng không bao giờ đứng sai nhóm, và không bao giờ «chưa đọc» mà số 0).
       needsReply: WAITING_REPLY_SQL,
-      unread: HUMAN_UNREAD_SQL,
+      readCursor: readCursorSql(user.id, true),
       assigneeUserId: c.assigneeUserId,
       assigneeName: u.name,
       hasOrder: HAS_ORDER,
@@ -326,46 +351,59 @@ export async function listInbox(user: SessionUser, rawQuery: unknown, now: Date 
       state: c.state,
       updatedAt: c.updatedAt,
       humanCooldownUntil: c.humanCooldownUntil,
-      unreadN: HUMAN_UNREAD_COUNT_SQL,
+      unreadN: personalUnreadCountSql(user.id, true),
       closed: CLOSED,
       transport: THREAD_TRANSPORT,
     })
     .from(c)
     .leftJoin(cu, eq(cu.id, c.customerId))
     .leftJoin(u, eq(u.id, c.assigneeUserId))
+    .leftJoin(scr, viewerRead)
     .where(where)
-    .orderBy(...inboxOrderBy(q.filter))
+    .orderBy(...inboxOrderBy(q.filter, personalUnread))
     .limit(q.limit);
 
-  // Một dòng xem trước cho mỗi hội thoại — kênh nhắn tin đọc sổ tin thô của kênh, chat web đọc lịch sử của bot.
-  const previews = new Map<string, { text: string; side: TimelineSide }>();
+  /*
+    DÒNG XEM TRƯỚC (chủ shop 10/10/2026 tối, P0.2): hai tin mỗi hội thoại — tin MỚI NHẤT (mọi phía) và tin KHÁCH thật mới nhất. Hội
+    thoại người xem chưa đọc ⇒ xem trước TIN KHÁCH (đó chính là tin chưa đọc mới nhất: chưa đọc ⇔ có tin khách sau con trỏ), kèm dòng
+    phụ «AI đã trả lời …» nếu sau nó đã có câu trả lời; đã đọc ⇒ tin mới nhất như cũ. Trước đây luôn là tin mới nhất ⇒ «AI: Dạ giá
+    280k… [1]» — huy hiệu của tin khách đứng cạnh chữ của AI. Hai câu DISTINCT ON trên ≤ 500 luồng của trang, chỉ mục (luồng, mốc) 0239.
+  */
+  type Pv = { text: string; side: TimelineSide; at: Date };
+  const latest = new Map<string, Pv>();
+  const newestCustomer = new Map<string, Pv>();
+  const inboundText = (l: { text: string; imageUrls: unknown; kind?: string | null }) => {
+    const body = l.text.trim() || (Array.isArray(l.imageUrls) && l.imageUrls.length ? "[Ảnh]" : "[Tin không có chữ]");
+    return l.kind === "COMMENT" ? `[Bình luận] ${body}` : body;
+  };
   const messaging = rows.filter((r) => r.pageId && r.threadId);
   if (messaging.length) {
     const t = schema.salesChatInbound;
     const pairs = messaging.map((r) => and(eq(t.pageId, r.pageId!), eq(t.threadId, r.threadId!))!);
-    const last = await db
-      .selectDistinctOn([t.pageId, t.threadId], { pageId: t.pageId, threadId: t.threadId, text: t.text, note: t.note, messageId: t.messageId, imageUrls: t.imageUrls })
-      .from(t)
-      .where(and(or(...pairs), eq(t.kind, "INBOX")))
-      .orderBy(t.pageId, t.threadId, desc(t.createdAt));
-    const byKey = new Map(last.map((l) => [`${l.pageId}\u0000${l.threadId}`, l]));
+    const cols = { pageId: t.pageId, threadId: t.threadId, text: t.text, note: t.note, messageId: t.messageId, imageUrls: t.imageUrls, kind: t.kind, createdAt: t.createdAt };
+    const last = await db.selectDistinctOn([t.pageId, t.threadId], cols).from(t).where(and(or(...pairs), eq(t.kind, "INBOX"))).orderBy(t.pageId, t.threadId, desc(t.createdAt));
+    const cust = await db.selectDistinctOn([t.pageId, t.threadId], cols).from(t).where(and(or(...pairs), customerInboundRowSql(`"sales_chat_inbound"`))).orderBy(t.pageId, t.threadId, desc(t.createdAt));
+    const key = (pageId: string, threadId: string) => `${pageId}\u0000${threadId}`;
+    const byKey = new Map(last.map((l) => [key(l.pageId, l.threadId), l]));
+    const custByKey = new Map(cust.map((l) => [key(l.pageId, l.threadId), l]));
     for (const r of messaging) {
-      const l = byKey.get(`${r.pageId}\u0000${r.threadId}`);
-      if (l) previews.set(r.id, { text: l.text.trim() || ((l.imageUrls as string[] | null)?.length ? "[Ảnh]" : "[Tin không có chữ]"), side: inboundSide(l.note, l.messageId) });
+      const l = byKey.get(key(r.pageId!, r.threadId!));
+      if (l) latest.set(r.id, { text: inboundText({ ...l, kind: null }), side: inboundSide(l.note, l.messageId), at: l.createdAt });
+      const k = custByKey.get(key(r.pageId!, r.threadId!));
+      if (k) newestCustomer.set(r.id, { text: inboundText(k), side: "CUSTOMER", at: k.createdAt });
     }
   }
   const web = rows.filter((r) => !(r.pageId && r.threadId));
   if (web.length) {
     const m = schema.salesChatMessages;
-    const last = await db
-      .selectDistinctOn([m.conversationId], { conversationId: m.conversationId, role: m.role, content: m.content })
-      .from(m)
-      .where(inArray(m.conversationId, web.map((r) => r.id)))
-      .orderBy(m.conversationId, desc(m.seq));
+    const cols = { conversationId: m.conversationId, role: m.role, content: m.content, createdAt: m.createdAt };
+    const last = await db.selectDistinctOn([m.conversationId], cols).from(m).where(inArray(m.conversationId, web.map((r) => r.id))).orderBy(m.conversationId, desc(m.seq));
     for (const l of last) {
       const text = textOf(l.content as AiBlock[]);
-      previews.set(l.conversationId, { text: text.replace(SHOP_SAID, "").trim(), side: l.role === "user" ? "CUSTOMER" : text.startsWith(SHOP_SAID) ? "STAFF" : "BOT" });
+      latest.set(l.conversationId, { text: text.replace(SHOP_SAID, "").trim(), side: webSideOf(l.role, text), at: l.createdAt });
     }
+    const cust = await db.selectDistinctOn([m.conversationId], cols).from(m).where(and(inArray(m.conversationId, web.map((r) => r.id)), customerMessageRowSql(`"sales_chat_messages"`))).orderBy(m.conversationId, desc(m.seq));
+    for (const l of cust) newestCustomer.set(l.conversationId, { text: textOf(l.content as AiBlock[]), side: "CUSTOMER", at: l.createdAt });
   }
 
   const labels = await labelsFor(rows.map((r) => r.id));
@@ -377,10 +415,17 @@ export async function listInbox(user: SessionUser, rawQuery: unknown, now: Date 
     levelCounts,
     phoneCount: Number(countRow?.phone ?? 0),
     total: counts[q.filter],
+    unreadStamp: iso((countRow as { unreadStamp?: Date | string | null } | undefined)?.unreadStamp ?? null),
     rows: rows.map((r) => {
       const hold = aiHoldOf({ status: r.status, handoffReason: r.handoffReason, state: r.state, updatedAt: r.updatedAt, humanCooldownUntil: r.humanCooldownUntil }, now).state;
       // Huy hiệu AI / người + lý do cần người: hàm THUẦN cùng tệp với điều kiện lọc (inbox-states.ts).
-      const st = classifyInboxState({ ...r, pageReplyAfterCustomer: Boolean(r.pageReplyAfterCustomer), orderUnderReview: Boolean(r.orderUnderReview) }, now, orgCopilot);
+      const unreadN = Math.max(0, Number(r.unreadN ?? 0));
+      const st = classifyInboxState({ ...r, pageReplyAfterCustomer: Boolean(r.pageReplyAfterCustomer), orderUnderReview: Boolean(r.orderUnderReview), customerUnread: unreadN }, now, orgCopilot);
+      const lt = latest.get(r.id) ?? null;
+      const nc = newestCustomer.get(r.id) ?? null;
+      // Chưa đọc ⇒ xem trước tin KHÁCH chưa đọc mới nhất; câu trả lời sau nó (AI · nhân viên · page) thành dòng phụ.
+      const pv = st.humanUnread && nc ? nc : lt;
+      const after = st.humanUnread && nc && lt && lt.side !== "CUSTOMER" && lt.at > nc.at ? { side: lt.side as Exclude<TimelineSide, "CUSTOMER">, at: lt.at.toISOString() } : null;
       return {
         id: r.id,
         channel: r.channel,
@@ -391,12 +436,20 @@ export async function listInbox(user: SessionUser, rawQuery: unknown, now: Date 
         customerName: r.customerName || r.stateName || r.inboundName || "Khách",
         customerPhone: r.customerPhone || r.statePhone || r.convPhone || null,
         customerId: r.customerId ?? null,
-        preview: (previews.get(r.id)?.text ?? "").slice(0, 140),
-        previewSide: previews.get(r.id)?.side ?? null,
+        preview: (pv?.text ?? "").slice(0, 140),
+        previewSide: pv?.side ?? null,
+        previewAt: iso(pv?.at),
+        afterPreview: after,
+        latestPreview: (lt?.text ?? "").slice(0, 140),
+        latestSide: lt?.side ?? null,
+        latestAt: iso(lt?.at),
+        newestCustomerAt: iso(nc?.at),
+        readCursorAt: iso(r.readCursor),
         lastActivityAt: iso(r.activity) ?? new Date(0).toISOString(),
         waitingSince: r.needsReply ? iso(r.lastCustomerAt) : null,
-        unread: Boolean(r.unread),
-        unreadCount: r.unread ? Math.max(1, Number(r.unreadN ?? 0)) : 0,
+        // Bất biến: chưa đọc ⇔ số tin khách sau con trỏ ≥ 1 — KHÔNG còn `max(1, …)` (nó in «1» cho hội thoại không có tin khách nào).
+        unread: st.humanUnread,
+        unreadCount: unreadN,
         avatarUrl: avatarOf(r.state),
         aiHold: hold,
         handling: inboxHandlingFrom(st),
@@ -499,6 +552,8 @@ export async function loadInboxThread(user: SessionUser, conversationId: unknown
   if (!conv) return { ok: false, error: "Không có hội thoại này." };
   const db = await getDb();
   const items: TimelineItem[] = [];
+  // Tin KHÁCH thật cuối cùng trong khung chat này — mốc trình duyệt đánh dấu đọc tới (inbox-read.ts), KHÔNG phải giờ mở.
+  let readThrough: { id: string; at: Date } | null = null;
 
   /*
     Hộp thư hiện ĐÚNG thứ khách đã nhận. Chat web: lịch sử hội thoại chính là thứ khách thấy. Kênh nhắn tin (Facebook / Zalo):
@@ -508,7 +563,10 @@ export async function loadInboxThread(user: SessionUser, conversationId: unknown
   const messaging = Boolean(conv.pageId && conv.threadId);
   if (!messaging) {
     const m = schema.salesChatMessages;
-    const msgs = await db.select({ seq: m.seq, role: m.role, content: m.content, createdAt: m.createdAt }).from(m).where(eq(m.conversationId, conv.id)).orderBy(desc(m.seq)).limit(TIMELINE_MAX);
+    const msgs = await db.select({ id: m.id, seq: m.seq, role: m.role, content: m.content, createdAt: m.createdAt }).from(m).where(eq(m.conversationId, conv.id)).orderBy(desc(m.seq)).limit(TIMELINE_MAX);
+    // `customerMessageRowSql`: vai `user` CÓ khối chữ (dòng kết quả công cụ cũng mang vai `user`).
+    const firstCustomer = msgs.find((r) => r.role === "user" && (r.content as AiBlock[] | null)?.some((b) => b.type === "text"));
+    if (firstCustomer) readThrough = { id: firstCustomer.id, at: firstCustomer.createdAt };
     for (const r of msgs) {
       const text = textOf(r.content as AiBlock[]);
       // Dòng «[Shop đã nhắn]» = tin nhân viên — đã có ở bảng tin nhân viên (có tên người gửi).
@@ -524,6 +582,9 @@ export async function loadInboxThread(user: SessionUser, conversationId: unknown
       .where(and(eq(t.pageId, conv.pageId!), eq(t.threadId, conv.threadId!)))
       .orderBy(desc(t.createdAt))
       .limit(TIMELINE_MAX);
+    // `customerInboundRowSql`: phía khách (`inboundSide`) và không phải tin nhập lịch sử. `rows` xếp mới nhất trước.
+    const lastCustomer = rows.find((r) => !r.importedAt && inboundSide(r.note, r.messageId) === "CUSTOMER");
+    if (lastCustomer) readThrough = { id: lastCustomer.id, at: lastCustomer.createdAt };
     // DẤU VẾT TỪNG TIN KHÁCH (ai-status.ts): dữ liệu ĐÃ CÓ — dòng tin, sổ AI của hội thoại, mốc các dòng BOT_SENT của thread.
     // Sổ AI chỉ đọc từ tin CŨ NHẤT đang hiện (trừ 1 phút) — không quét cả đời hội thoại mỗi lượt làm mới.
     const oldest = rows.length ? rows[rows.length - 1].createdAt : now;
@@ -586,8 +647,8 @@ export async function loadInboxThread(user: SessionUser, conversationId: unknown
   if (conv.assigneeUserId) assigneeName = (await db.select({ name: schema.users.name }).from(schema.users).where(eq(schema.users.id, conv.assigneeUserId)).limit(1))[0]?.name ?? null;
   const window = sendWindowOf(conv, now);
   const canReply = canReplyTo(user);
-  // Nhân viên (người trả lời được) đang mở hội thoại ⇒ đã đọc tới đây. Người chỉ xem không làm mất dấu «chưa đọc» của đội.
-  if (canReply) await db.update(schema.salesChatConversations).set({ staffSeenAt: now }).where(eq(schema.salesChatConversations.id, conv.id));
+  // KHÔNG đánh dấu đọc ở đây (trước 10/10/2026 tối: `staff_seen_at = now` — tin khách tới giữa câu đọc trên và câu ghi này bị coi là đã
+  // đọc). Nạp khung chat chỉ ĐỌC; trình duyệt hiện xong mới gửi `readThrough` về `markInboxReadCore` (inbox-read.ts).
   const phoneForHistory = cust?.phone ?? st.customer?.phone ?? conv.customerPhone ?? null;
   const [labelMap, allLabels, notes, history, feedback] = await Promise.all([labelsFor([conv.id]), listLabels(), notesFor(user, conv.id), customerHistory(cust?.id ?? null, phoneForHistory).catch(() => null), feedbackFor(conv.id).catch(() => [])]);
   return {
@@ -624,6 +685,7 @@ export async function loadInboxThread(user: SessionUser, conversationId: unknown
       level: parseCustomerLevel(conv.customerLevel),
       history,
       feedback,
+      readThrough: readThrough ? { id: readThrough.id, at: readThrough.at.toISOString() } : null,
     },
   };
 }

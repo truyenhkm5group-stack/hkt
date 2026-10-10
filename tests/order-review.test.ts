@@ -115,8 +115,10 @@ function testSourceContract() {
   const tools = readFileSync("lib/sales-chatbot/tools.ts", "utf8").replace(/\r\n/g, "\n");
   const ds = tools.indexOf('case "mark_declined"');
   const declined = tools.slice(ds, tools.indexOf("\n    }\n", ds));
-  assert.ok(declined.includes("flagOrderForReviewAsAgent") && !/cancelManualOrder|cancelOrder\(/.test(declined), "mark_declined ghi cờ, không gọi đường huỷ");
-  assert.equal((tools.match(/quotedInText\(/g) ?? []).length, 3, "ba chỗ kiểm lời trích dùng chung một hàm");
+  // Luật 10/10/2026: mark_declined khi đã có đơn MỞ LƯỢT GIỮ ĐƠN (cờ «khách huỷ» + yêu cầu huỷ) — huỷ thật chỉ ở `cancel_order`.
+  assert.ok(declined.includes("openCancelRequest") && !/cancelManualOrder|cancelOrder\(|cancelOrderAsAgent|executeCustomerCancel/.test(declined), "mark_declined mở lượt giữ đơn, không gọi đường huỷ");
+  assert.ok(tools.includes("const r = await flagOrderForReviewAsAgent(ctx.agent, id, { code: \"CUSTOMER_CANCELLED\""), "cờ «khách huỷ» vẫn qua MỘT đường gắn cờ");
+  assert.equal((tools.match(/quotedInText\(/g) ?? []).length, 4, "bốn chỗ kiểm lời trích (chốt · khách cũ · đặt lịch · huỷ đơn) dùng chung một hàm");
   assert.ok(!/foldVi\(ctx\.lastUserText\)\.includes/.test(tools), "không còn phép so chuỗi con cũ");
 }
 

@@ -32,6 +32,8 @@ import { priceBooksFor } from "@/lib/queries/price-lists";
 import { createCustomerAsAgent, normalizeCustomerPhone } from "@/lib/records/customer-create";
 import { activeAppointmentRanges, createAppointmentAsAgent } from "@/lib/records/appointments";
 import { createOrderAsAgent, flagOrderForReviewAsAgent, noteCustomerReconfirmAsAgent, updateOrderAsAgent, type AgentOrderOptions, type OrderAgent } from "@/lib/records/order-create";
+import { conversationCancelTargets, executeCustomerCancel, raiseCancelException, recordCustomerCancelRequest, recordCustomerKeptOrder } from "@/lib/records/order-cancel";
+import { CANCEL_BLOCK_LABEL } from "@/lib/constants/order-cancel";
 import { chatOrderAdId } from "@/lib/sales-chatbot/ad-referral";
 import { markOrderWritten, omsValidationReason, orderSignalToolReason, OrderWriteError, recordOrderValidationFailure, recordOrderWriteFailure, sqlStateOf, type OrderWriteMark } from "@/lib/sales-chatbot/order-signals";
 import { agentUnitPrice } from "@/lib/commerce/pricing";
@@ -83,6 +85,13 @@ export type ChatState = {
   /** Câu upsell không gửi được (thiếu số ERP) — không chặn lên đơn mãi vì nó. */
   upsellUnavailable?: boolean;
   declined?: { reason: string; at: string };
+  /**
+   * KHÁCH XIN HUỶ ĐƠN ĐÃ CÓ (chủ shop 10/10/2026 — `lib/constants/order-cancel.ts`): lượt GIỮ ĐƠN đang mở. `turn` = lượt khách xin huỷ
+   * lần đầu — huỷ thật chỉ ở một lượt SAU (khách đã nghe lời giữ đơn mà vẫn huỷ). `orderIds` = đơn đang mở lúc khách xin huỷ.
+   */
+  cancelRequest?: { orderIds: string[]; at: string; turn: number | null; quote: string | null; reason: string };
+  /** Đơn ĐÃ HUỶ theo yêu cầu khách trong hội thoại — chỉ ghi SAU KHI lõi đơn ghi «Đã huỷ» xong. */
+  cancelledOrders?: { orderId: string | null; at: string; simulated: boolean }[];
   /** Lịch hẹn bot đã đặt trong hội thoại này (một hội thoại một lịch — đổi / huỷ là việc của người). */
   appointment?: { id: string | null; service: string; startsAt: string; name: string; phone: string; simulated: boolean; at: string };
   /** Mốc tin fanpage (page / khách bị bỏ qua) đã chép vào lịch sử của bot — `appendContextMessages`. */
@@ -98,7 +107,7 @@ export type ChatState = {
 };
 
 /** Công cụ QUY TRÌNH — luôn bật (không nằm trong `allowedTools` đã lưu của tổ chức, nên công cụ mới tới được mọi tổ chức). */
-export const PROCESS_TOOLS = ["send_quick_reply", "set_sales_stage", "lookup_customer", "mark_declined", "get_order_status"] as const;
+export const PROCESS_TOOLS = ["send_quick_reply", "set_sales_stage", "lookup_customer", "mark_declined", "get_order_status", "cancel_order"] as const;
 export type ProcessTool = (typeof PROCESS_TOOLS)[number];
 
 /** Công cụ ĐẶT LỊCH — chỉ khi shop bật «Nhận đặt lịch qua chat» VÀ tổ chức bật module Lịch hẹn (`ToolContext.bookingOn`). */
@@ -277,11 +286,33 @@ const PROCESS_DEFS: Record<ProcessTool, AiToolDef> = {
   mark_declined: {
     name: "mark_declined",
     description:
-      "Ghi nhận khách TỪ CHỐI RÕ RÀNG không mua (vd «thôi không lấy nữa», «không mua đâu»). Bot sẽ thôi nhắn follow-up. Không dùng khi khách chỉ phân vân / chê đắt. Đã có đơn trong hội thoại ⇒ máy chủ KHÔNG huỷ đơn: ghi chú «khách huỷ» lên đơn để nhân viên kiểm (người huỷ hoặc xác nhận lại).",
+      "Ghi nhận khách TỪ CHỐI RÕ RÀNG không mua khi CHƯA có đơn (vd «thôi không lấy nữa», «không mua đâu»). Bot sẽ thôi nhắn follow-up. Không dùng khi khách chỉ phân vân / chê đắt. Khách muốn HUỶ ĐƠN ĐÃ ĐẶT ⇒ dùng cancel_order. Gọi công cụ này khi hội thoại đã có đơn ⇒ máy chủ KHÔNG huỷ đơn — chỉ ghi yêu cầu huỷ và mở lượt giữ đơn.",
     inputSchema: { type: "object", properties: { reason: { type: "string" } }, required: ["reason"], additionalProperties: false },
     kind: "write",
   },
+  cancel_order: {
+    name: "cancel_order",
+    description:
+      "Khách muốn HUỶ ĐƠN ĐÃ ĐẶT trong hội thoại này (đơn nháp hoặc đã chốt). decision = CANCEL khi câu cuối của khách đòi huỷ; KEEP khi khách đồng ý giữ đơn sau lời giữ đơn. customer_words = NGUYÊN VĂN lời khách trong câu cuối. Lần CANCEL đầu tiên máy chủ KHÔNG huỷ: nó trả step RESCUE ⇒ giữ đơn ĐÚNG MỘT lần (hỏi lý do / đề nghị đổi món, đổi ngày giao) rồi đợi khách trả lời. Khách vẫn huỷ ở tin SAU ⇒ gọi lại CANCEL. CHỈ nói «đơn đã huỷ» khi kết quả có cancelled = true; cancelled = false ⇒ KHÔNG BAO GIỜ nói đã huỷ. Khi gọi công cụ này KHÔNG viết chữ nào cho khách trong cùng tin — đọc kết quả trước.",
+    inputSchema: {
+      type: "object",
+      properties: { decision: { type: "string", enum: ["CANCEL", "KEEP"] }, customer_words: { type: "string" }, reason: { type: "string", description: "Lý do khách nói (ngắn)" } },
+      required: ["decision", "customer_words"],
+      additionalProperties: false,
+    },
+    kind: "write",
+  },
 };
+
+/**
+ * Công cụ mà CHỮ model viết KÈM trong cùng tin KHÔNG được gửi khách (engine giữ lại): kết quả của chúng quyết câu được nói — «đã
+ * huỷ» chỉ đúng khi lõi đơn GHI xong, và model viết câu đó TRƯỚC khi thấy kết quả (sự cố #189A435E, 10/10/2026).
+ */
+export const TOOLS_HOLDING_TEXT: ReadonlySet<string> = new Set(["cancel_order", "mark_declined"]);
+
+/** Lời dặn model ở bước giữ đơn — một chỗ, công cụ nào mở lượt giữ đơn cũng trả đúng câu này. */
+const RESCUE_INSTRUCTION =
+  "ĐƠN CHƯA HUỶ. Giữ đơn ĐÚNG MỘT lần: hỏi ngắn lý do và đề nghị một phương án (đổi món / số lượng / ngày giao) — KHÔNG nói đã huỷ, KHÔNG nài. Khách vẫn muốn huỷ ở tin SAU ⇒ gọi cancel_order decision CANCEL; khách đồng ý giữ ⇒ cancel_order decision KEEP.";
 
 const BOOKING_DEFS: Record<BookingTool, AiToolDef> = {
   find_booking_slots: {
@@ -827,7 +858,10 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
         orderId = r.id;
         // Khách từng báo huỷ rồi nay đồng ý lại ⇒ một dòng vết «khách xác nhận lại» trên đơn; cờ cần kiểm GIỮ NGUYÊN (người quyết).
         if (state.declined) await noteCustomerReconfirmAsAgent(ctx.agent, r.id, quote.success ? ctx.lastUserText.trim().slice(0, 300) || null : null, now);
+        // Khách đang được giữ đơn (đã xin huỷ) mà nay chốt lại ⇒ lượt giữ đơn THÀNH CÔNG (10/10/2026).
+        if (state.cancelRequest?.orderIds.includes(r.id)) await recordCustomerKeptOrder(ctx.agent, r.id, ctx.lastUserText.trim().slice(0, 300) || null, now);
       }
+      delete state.cancelRequest;
       state.confirmed = { orderId, simulated, total: priced.total ?? priced.subtotal, at: new Date().toISOString(), ...(ctx.promptStamp ? { stamp: ctx.promptStamp } : {}) };
       state.stage = "DONE";
       return ok(`${simulated ? "(Thử) " : ""}Đã chốt đơn · ${formatVND(priced.subtotal)}`, {
@@ -888,23 +922,81 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
       const reason = z.string().trim().min(2).max(300).safeParse(input.reason);
       state.declined = { reason: reason.success ? reason.data : "Khách từ chối", at: new Date().toISOString() };
       state.stage = "DECLINED";
-      // KHÁCH HUỶ SAU KHI ĐÃ CÓ ĐƠN (chủ shop 08/10/2026): KHÔNG tự huỷ — ghi chú «khách huỷ» (nguyên văn câu khách + mốc) lên đơn
-      // của CHÍNH hội thoại (nháp / đã chốt của lượt mua hiện tại) và gắn cờ CẦN NGƯỜI KIỂM; người huỷ, cứu được thì xác nhận lại.
-      // Khung thử không ghi gì. Đơn của các lượt mua TRƯỚC (`pastOrders`) không bị gắn — câu «thôi không lấy» nói về lần mua này.
-      const ids = simulated ? [] : [...new Set([state.confirmed?.orderId, state.draft?.orderId].filter((x): x is string => typeof x === "string" && x.length > 0))];
-      const flagged: string[] = [];
+      // KHÁCH TỪ CHỐI KHI ĐÃ CÓ ĐƠN = YÊU CẦU HUỶ (chủ shop 10/10/2026, thay luật 08/10): KHÔNG huỷ ở đây — ghi yêu cầu (nguyên văn +
+      // mốc) lên MỌI đơn đang mở của hội thoại (đơn bot chốt, đơn nháp, đơn nhân viên / bộ ghi đơn lên cho hội thoại — sự cố #189A435E:
+      // đơn không nằm trong `state` thì bản cũ không gắn gì và trả «khách từ chối» trơn), gắn cờ «khách huỷ», mở lượt GIỮ ĐƠN. Huỷ thật
+      // chỉ qua `cancel_order` ở lượt sau. Khung thử không ghi gì.
+      if (simulated) return ok("Khách từ chối — thôi follow-up", { declined: true }, state);
+      const targets = await conversationCancelTargets(ctx.conversationId, [state.confirmed?.orderId, state.draft?.orderId]);
+      if (!targets.length) return ok("Khách từ chối — thôi follow-up", { declined: true }, state);
+      const flagged = await openCancelRequest(ctx, state, targets.map((t) => t.id), state.declined.reason, now);
+      return ok(`Khách huỷ — đơn ${flagged.join(", ") || targets.map((t) => `#${manualOrderShortCode(t.id)}`).join(", ")} đang giữ đơn`, { declined: true, cancelled: false, order_flagged: flagged, step: "RESCUE", instruction: RESCUE_INSTRUCTION }, state);
+    }
+    case "cancel_order": {
+      // KHÁCH HUỶ ĐƠN ĐÃ ĐẶT (chủ shop 10/10/2026): bước 1 giữ đơn · bước 2 (lượt SAU, khách vẫn huỷ) huỷ theo vòng đời vận đơn
+      // (`lib/records/order-cancel.ts`). Model chỉ được nói «đã huỷ» khi kết quả có cancelled = true — kết quả đọc từ CSDL sau khi ghi.
+      const decision = z.enum(["CANCEL", "KEEP"]).safeParse(input.decision);
+      if (!decision.success) return err("Huỷ đơn: sai quyết định", "decision phải là CANCEL hoặc KEEP.", state);
+      const words = z.string().trim().min(2).max(300).safeParse(input.customer_words);
+      if (!words.success || !quotedInText(words.data, ctx.lastUserText)) return err("Huỷ đơn: chưa có lời khách", "customer_words phải là NGUYÊN VĂN lời khách trong câu CUỐI. Chưa rõ khách muốn huỷ hay giữ ⇒ hỏi lại khách — KHÔNG nói đơn đã huỷ.", state);
+      const why = z.string().trim().min(2).max(300).safeParse(input.reason);
+      const reason = why.success ? why.data : "Khách huỷ đơn";
       const quote = ctx.lastUserText.trim().slice(0, 300) || null;
-      for (const id of ids) {
-        const r = await flagOrderForReviewAsAgent(ctx.agent, id, { code: "CUSTOMER_CANCELLED", note: state.declined.reason, quote }, now);
-        if (!r.ok || !r.flagged) continue;
-        markOrderWritten(ctx.writeMark, id);
-        flagged.push(`#${manualOrderShortCode(id)}`);
-        // Đơn ĐÃ XÁC NHẬN (đang giữ hàng, nhóm vận hành đã nhận tin đơn) mà khách báo huỷ ⇒ báo người NGAY qua đường chuyển người có
-        // sẵn (chuông ERP + hàng đợi; nhóm chat nếu shop bật) — đơn nháp thì cờ trên hàng đợi «Cần kiểm» là đủ (review #675, L1).
-        if (r.stage === "CONFIRMED") await notifySalesChatHandoff(ctx.conversationId, `Khách báo huỷ đơn ĐÃ XÁC NHẬN #${manualOrderShortCode(id)}${quote ? ` — «${quote.slice(0, 120)}»` : ""}`, state.customer, now).catch(() => undefined);
+      const sameTurn = (r: NonNullable<ChatState["cancelRequest"]>) => ctx.turn !== undefined && r.turn === ctx.turn;
+      if (simulated) {
+        if (decision.data === "KEEP") {
+          delete state.cancelRequest;
+          return ok("(Thử) Khách giữ đơn", { cancelled: false, kept: true, simulated: true }, state);
+        }
+        if (!state.cancelRequest || sameTurn(state.cancelRequest)) {
+          state.cancelRequest ??= { orderIds: [], at: now.toISOString(), turn: ctx.turn ?? null, quote, reason };
+          return ok("(Thử) Khách muốn huỷ — giữ đơn một lần", { cancelled: false, step: "RESCUE", simulated: true, instruction: RESCUE_INSTRUCTION }, state);
+        }
+        delete state.cancelRequest;
+        state.cancelledOrders = [...(state.cancelledOrders ?? []), { orderId: null, at: now.toISOString(), simulated: true }];
+        state.declined = { reason, at: now.toISOString() };
+        state.stage = "DECLINED";
+        return ok("(Thử) Huỷ đơn — mô phỏng", { cancelled: true, simulated: true, note: "Khung thử: không có đơn thật nào bị huỷ." }, state);
       }
-      if (!flagged.length) return ok("Khách từ chối — thôi follow-up", { declined: true }, state);
-      return ok(`Khách huỷ — đơn ${flagged.join(", ")} chờ nhân viên kiểm`, { declined: true, order_flagged: flagged, note: "Đơn KHÔNG bị huỷ tự động — đã ghi chú «khách huỷ» để nhân viên kiểm. Nói ngắn với khách: shop đã ghi nhận, không hứa đã huỷ đơn." }, state);
+      const targets = await conversationCancelTargets(ctx.conversationId, [state.confirmed?.orderId, state.draft?.orderId]);
+      if (!targets.length) return ok("Huỷ đơn: hội thoại không có đơn đang mở", { cancelled: false, no_open_order: true, instruction: "Hội thoại không có đơn đang mở để huỷ — khách không mua nữa thì gọi mark_declined. KHÔNG nói «đã huỷ đơn»." }, state);
+      const ids = targets.map((t) => t.id);
+      const codes = ids.map((id) => `#${manualOrderShortCode(id)}`);
+      const pending = state.cancelRequest && state.cancelRequest.orderIds.some((id) => ids.includes(id)) ? state.cancelRequest : undefined;
+      if (decision.data === "KEEP") {
+        if (!pending) return ok("Không có yêu cầu huỷ đang chờ", { cancelled: false, kept: true }, state);
+        for (const id of pending.orderIds.filter((x) => ids.includes(x))) {
+          if (await recordCustomerKeptOrder(ctx.agent, id, quote, now)) markOrderWritten(ctx.writeMark, id);
+          await noteCustomerReconfirmAsAgent(ctx.agent, id, quote, now);
+        }
+        delete state.cancelRequest;
+        delete state.declined;
+        return ok(`Khách giữ đơn ${codes.join(", ")} — không huỷ`, { cancelled: false, kept: true, order_codes: codes, instruction: "Đơn VẪN GIỮ NGUYÊN, không huỷ. Cảm ơn khách một câu ngắn." }, state);
+      }
+      // Bước 1 — chưa có lượt giữ đơn (hoặc model gọi lại ngay trong CÙNG lượt để bỏ qua bước giữ) ⇒ ghi yêu cầu, giữ đơn.
+      if (!pending || sameTurn(pending)) {
+        if (!pending) await openCancelRequest(ctx, state, ids, reason, now);
+        return ok(`Khách muốn huỷ ${codes.join(", ")} — giữ đơn một lần`, { cancelled: false, step: "RESCUE", order_codes: codes, instruction: RESCUE_INSTRUCTION }, state);
+      }
+      // Bước 2 — đã giữ ở lượt trước, khách vẫn huỷ. Nhiều đơn đang mở ⇒ không đoán đơn nào: người xác định.
+      if (ids.length > 1) {
+        for (const id of ids) await raiseCancelException(id, "AMBIGUOUS_ORDER", `${ids.length} đơn đang mở`, { agent: ctx.agent, actor: { kind: "AI", userId: null, name: ctx.agent.name }, conversationId: ctx.conversationId, quote, reason, rescue: "FAILED", now });
+        return { ...ok("Huỷ đơn chưa xong — nhiều đơn đang mở, chuyển nhân viên", { cancelled: false, handed_to_staff: true, reason: CANCEL_BLOCK_LABEL.AMBIGUOUS_ORDER, instruction: CANCEL_NOT_DONE }, state), requireHuman: `Khách huỷ đơn — ${CANCEL_BLOCK_LABEL.AMBIGUOUS_ORDER}` };
+      }
+      const r = await executeCustomerCancel({ orderId: ids[0], agent: ctx.agent, actorKind: "AI", conversationId: ctx.conversationId, quote, reason: pending.reason || reason, rescue: "FAILED", now });
+      if (r.status === "EXCEPTION") {
+        return {
+          ...ok(`Huỷ đơn #${r.shortCode} chưa xong — chuyển nhân viên`, { cancelled: false, handed_to_staff: true, reason: CANCEL_BLOCK_LABEL[r.code], instruction: CANCEL_NOT_DONE }, state),
+          requireHuman: `Khách huỷ đơn #${r.shortCode} — ${CANCEL_BLOCK_LABEL[r.code]}`,
+        };
+      }
+      markOrderWritten(ctx.writeMark, r.orderId);
+      delete state.cancelRequest;
+      state.declined = { reason: pending.reason || reason, at: now.toISOString() };
+      state.stage = "DECLINED";
+      if (!state.cancelledOrders?.some((x) => x.orderId === r.orderId)) state.cancelledOrders = [...(state.cancelledOrders ?? []), { orderId: r.orderId, at: now.toISOString(), simulated: false }];
+      if (state.draft?.orderId === r.orderId) delete state.draft;
+      return ok(`Đã huỷ đơn #${r.shortCode}`, { cancelled: true, order_code: `#${r.shortCode}`, carrier_cancelled: r.carrier ? true : undefined, instruction: "Đơn ĐÃ HUỶ trong hệ thống. Báo khách MỘT câu ngắn: shop đã huỷ đơn theo yêu cầu." }, state);
     }
     case "handoff_to_human": {
       const reason = z.string().trim().min(2).max(300).safeParse(input.reason);
@@ -916,6 +1008,29 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
     }
   }
   return err(`${name}: không có`, `Không có công cụ «${name}».`, state);
+}
+
+/** Câu dặn model khi huỷ CHƯA xong — một chỗ. */
+const CANCEL_NOT_DONE = "ĐƠN CHƯA HUỶ. TUYỆT ĐỐI KHÔNG nói đã huỷ. Nói ngắn: shop đã ghi nhận yêu cầu huỷ, nhân viên sẽ xử lý và báo lại.";
+
+/**
+ * Mở lượt GIỮ ĐƠN cho các đơn khách vừa xin huỷ: gắn cờ «khách huỷ» (một đường gắn cờ — `flagOrderForReviewAsAgent`) + ghi yêu cầu
+ * huỷ lên `raw.cancellation` + nhớ trong `state.cancelRequest`. Đơn ĐÃ XÁC NHẬN (đang giữ hàng, nhóm vận hành đã nhận tin đơn) ⇒ báo
+ * người ngay (review #675, L1) — kho có thể đang đóng gói. Trả mã đơn đã gắn cờ.
+ */
+async function openCancelRequest(ctx: ToolContext, state: ChatState, ids: readonly string[], reason: string, now: Date): Promise<string[]> {
+  const quote = ctx.lastUserText.trim().slice(0, 300) || null;
+  const flagged: string[] = [];
+  for (const id of ids) {
+    const r = await flagOrderForReviewAsAgent(ctx.agent, id, { code: "CUSTOMER_CANCELLED", note: reason, quote }, now);
+    const req = await recordCustomerCancelRequest(ctx.agent, id, { quote, reason, conversationId: ctx.conversationId }, now);
+    if ((r.ok && r.flagged) || req.changed) markOrderWritten(ctx.writeMark, id);
+    if (!r.ok || !r.flagged) continue;
+    flagged.push(`#${manualOrderShortCode(id)}`);
+    if (r.stage === "CONFIRMED") await notifySalesChatHandoff(ctx.conversationId, `Khách báo huỷ đơn ĐÃ XÁC NHẬN #${manualOrderShortCode(id)}${quote ? ` — «${quote.slice(0, 120)}»` : ""} (bot đang giữ đơn)`, state.customer, now).catch(() => undefined);
+  }
+  state.cancelRequest = { orderIds: [...ids], at: now.toISOString(), turn: ctx.turn ?? null, quote, reason };
+  return flagged;
 }
 
 const ORDER_STATUS_MAX = 3;

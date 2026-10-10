@@ -77,7 +77,10 @@ export const ORDER_UNDER_REVIEW_SQL = sql<boolean>`exists (select 1 from "orders
 /** Mốc NGƯỜI thấy hội thoại lần cuối: mở hội thoại hoặc trả lời khách từ ERP (`greatest` bỏ qua NULL). KHÔNG BAO GIỜ tính tin bot. */
 const HUMAN_SEEN = sql`coalesce(greatest(${col("staff_seen_at")}, ${col("last_staff_at")}), ${EPOCH})`;
 
-/** HUMAN_UNREAD — khách gửi tin SAU lần cuối người thấy, bất kể AI đã trả lời hay chưa. */
+/**
+ * HUMAN_UNREAD (BẢN CŨ, mốc chung) — khách gửi tin SAU lần cuối người thấy, bất kể AI đã trả lời hay chưa. Hộp thư KHÔNG còn lọc / đếm
+ * bằng nó (xem `personalUnreadSql` bên dưới); giữ để audit đo được số «chưa đọc giả» của luật cũ trên dữ liệu thật.
+ */
 export const HUMAN_UNREAD_SQL: SQL<boolean> = safe(sql`${col("last_customer_at")} is not null and ${col("last_customer_at")} > ${HUMAN_SEEN} and ${col("last_customer_at")} > ${ts("history_until")}`);
 
 /** WAITING_REPLY — tin cuối là của khách, chưa câu trả lời nào sau nó (bot · nhân viên ERP · phía page), và là tin SỐNG. */
@@ -96,6 +99,91 @@ export const HUMAN_UNREAD_COUNT_SQL = sql<number>`(case when ${col("page_id")} i
     and i.created_at > ${HUMAN_SEEN} limit 100) x)
   else (select count(*)::int from (select 1 from "sales_chat_messages" m where m.conversation_id = ${col("id")} and m.role = 'user'
     and m.created_at > ${HUMAN_SEEN} limit 100) y) end)`;
+
+/*
+ * ═══════════ CHƯA ĐỌC THEO NGƯỜI (P0 10/10/2026 tối — thay HUMAN_UNREAD ở hộp thư) ═══════════
+ *
+ * Bản trên (`HUMAN_UNREAD_SQL`) suy «chưa đọc» từ CỘT MỐC `last_customer_at` so với MỘT mốc chung `staff_seen_at` — ba lỗi:
+ *  (1) cột mốc không phải bằng chứng: `last_customer_at` còn được đẩy bằng giờ xử lý (`stopFollowups(now)` · `noteCustomerArrived`)
+ *      nên có hội thoại «chưa đọc» mà không có tin khách nào sau lần người mở; hàng khi đó in huy hiệu `max(1, 0) = 1` cạnh tin AI;
+ *  (2) `staff_seen_at` ghi bằng GIỜ MỞ (`now`) ⇒ tin khách tới giữa lúc nạp khung chat và lúc ghi bị coi là đã đọc;
+ *  (3) một mốc cho cả cửa hàng ⇒ người này mở thì người kia mất dấu chưa đọc.
+ * Bản này: chưa đọc ⇔ TỒN TẠI một tin KHÁCH thật (không phải tin bot · nhân viên ERP · phía page · tin nhập lịch sử) mới hơn CON TRỎ
+ * ĐỌC CỦA NGƯỜI XEM (`sales_chat_reads`). Chưa có con trỏ riêng ⇒ lùi về mốc chung cũ `greatest(staff_seen_at, last_staff_at)` — hành
+ * vi hôm nay, để không ai thấy cả hộp thư bỗng «chưa đọc» lúc vừa triển khai. SỐ chưa đọc đếm ĐÚNG điều kiện đó, nên `chưa đọc ⇔ số ≥ 1`
+ * là bất biến của dữ liệu, không phải của mã vẽ. «Chờ trả lời» và «Cần người» vẫn là trạng thái CHUNG của cửa hàng (không đổi).
+ */
+
+/**
+ * «Dòng sổ tin thô này là tin KHÁCH thật» — CÙNG phía `CUSTOMER` của `inboundSide` (inbox.ts), trừ tin nhập lịch sử. `a` = tên / bí
+ * danh bảng `sales_chat_inbound` trong câu gọi (mặc định `i`; câu drizzle trên bảng gốc truyền `"sales_chat_inbound"`).
+ */
+export function customerInboundRowSql(a = "i"): SQL {
+  const t = sql.raw(a);
+  return sql`(${t}.imported_at is null and coalesce(${t}.note, '') not in ('BOT_SENT', ${PAGE_REPLY}))`;
+}
+/** Chat web: tin khách = dòng `user` có ít nhất một khối chữ (dòng kết quả công cụ cũng mang vai `user` — không phải khách). */
+export function customerMessageRowSql(a = "m"): SQL {
+  const t = sql.raw(a);
+  return sql`(${t}.role = 'user' and ${t}.content @> '[{"type":"text"}]'::jsonb)`;
+}
+export const CUSTOMER_INBOUND_ROW_SQL = customerInboundRowSql("i");
+export const CUSTOMER_MESSAGE_ROW_SQL = customerMessageRowSql("m");
+
+/** Mốc chung CŨ: lần cuối có người mở / trả lời từ ERP. Chỉ còn là chỗ LÙI khi người xem chưa có con trỏ riêng. */
+export const SHARED_SEEN_SQL = sql<Date>`coalesce(greatest(${col("staff_seen_at")}, ${col("last_staff_at")}), ${EPOCH})`;
+
+/**
+ * Bí danh của `sales_chat_reads` khi câu gọi đã LEFT JOIN con trỏ của người xem (`listInbox`: một lần nối thay vì một câu con cho mỗi
+ * lần nhắc tới con trỏ trong bộ lọc · khoá xếp · bộ đếm).
+ */
+export const VIEWER_READ_ALIAS = "scr_viewer";
+
+/**
+ * Con trỏ đọc HIỆU LỰC của một người trên hội thoại: con trỏ riêng (`sales_chat_reads`), chưa có ⇒ mốc chung cũ. `joined` = câu gọi đã
+ * nối `sales_chat_reads` bí danh `VIEWER_READ_ALIAS` theo (hội thoại, người xem).
+ */
+export function readCursorSql(userId: string, joined = false): SQL<Date> {
+  if (joined) return sql<Date>`coalesce(${sql.raw(`"${VIEWER_READ_ALIAS}"."read_through_at"`)}, ${SHARED_SEEN_SQL})`;
+  return sql<Date>`coalesce((select r.read_through_at from "sales_chat_reads" r where r.conversation_id = ${col("id")} and r.user_id = ${userId}), ${SHARED_SEEN_SQL})`;
+}
+
+/**
+ * Cổng RẺ trước phép dò bằng chứng ở kênh nhắn tin. Mọi đường ghi tin khách SỐNG (webhook Pancake / Meta, quét lại, Zalo) đẩy
+ * `last_customer_at` tới ≈ giờ nhận (`noteCustomerArrived` · `touchCustomer` · lượt bot giành tin), nên tin khách mới hơn con trỏ luôn
+ * kéo `last_customer_at` lên gần hoặc sau con trỏ. Cổng chỉ LOẠI hội thoại có mốc khách cuối CŨ HƠN con trỏ quá một ngày — chỗ không
+ * thể có tin khách mới — để danh sách không phải dò chỉ mục cho từng hội thoại đã đọc (đo PGlite 3.000 hội thoại: dò hết làm
+ * `listInbox` chậm gấp đôi). Cổng KHÔNG BAO GIỜ tạo «chưa đọc»: điều kiện vẫn là tồn tại tin khách thật. Áp CÙNG cho cờ và số đếm
+ * để `chưa đọc ⇔ số ≥ 1` giữ nguyên.
+ */
+const CUSTOMER_GATE_SLACK = sql.raw(`interval '1 day'`);
+const gate = (cursor: SQL) => sql`coalesce(${col("last_customer_at")} > ${cursor} - ${CUSTOMER_GATE_SLACK}, false)`;
+
+/** SỐ tin khách thật của hội thoại mới hơn `cursor` (trần 100 — hàng in «99+»). Kênh nhắn tin đọc sổ tin thô, chat web đọc lịch sử bot. */
+export function customerCountAfterSql(cursor: SQL): SQL<number> {
+  return sql<number>`(case when ${col("page_id")} is not null and ${col("thread_id")} is not null
+  then (case when ${gate(cursor)} then (select count(*)::int from (select 1 from "sales_chat_inbound" i where i.page_id = ${col("page_id")} and i.thread_id = ${col("thread_id")}
+    and ${CUSTOMER_INBOUND_ROW_SQL} and i.created_at > ${cursor} limit 100) x) else 0 end)
+  else (select count(*)::int from (select 1 from "sales_chat_messages" m where m.conversation_id = ${col("id")} and ${CUSTOMER_MESSAGE_ROW_SQL}
+    and m.created_at > ${cursor} limit 100) y) end)`;
+}
+
+/** Có ≥ 1 tin khách thật mới hơn `cursor` — `exists`, dừng ở dòng đầu (bộ lọc / bộ đếm / khoá xếp). */
+export function customerExistsAfterSql(cursor: SQL): SQL<boolean> {
+  return safe(sql`(case when ${col("page_id")} is not null and ${col("thread_id")} is not null
+  then ${gate(cursor)} and exists (select 1 from "sales_chat_inbound" i where i.page_id = ${col("page_id")} and i.thread_id = ${col("thread_id")} and ${CUSTOMER_INBOUND_ROW_SQL} and i.created_at > ${cursor})
+  else exists (select 1 from "sales_chat_messages" m where m.conversation_id = ${col("id")} and ${CUSTOMER_MESSAGE_ROW_SQL} and m.created_at > ${cursor}) end)`);
+}
+
+/** PERSONAL_UNREAD — người xem có ≥ 1 tin khách thật mới hơn con trỏ đọc của CHÍNH họ (AI trả lời không xoá; tin bot / NV / page không tạo). */
+export function personalUnreadSql(userId: string, joined = false): SQL<boolean> {
+  return customerExistsAfterSql(readCursorSql(userId, joined));
+}
+
+/** Số tin khách chưa đọc của người xem — CÙNG điều kiện với `personalUnreadSql` (chưa đọc ⇔ số ≥ 1). */
+export function personalUnreadCountSql(userId: string, joined = false): SQL<number> {
+  return sql<number>`coalesce(${customerCountAfterSql(readCursorSql(userId, joined))}, 0)`;
+}
 
 const MANUAL_TAKEOVER_SQL = sql`(${MODE} = 'HUMAN' or (${IS_HANDOFF} and ${REASON} = ${TAKEOVER_REASON}))`;
 function staffCooldownCore(now: Date): SQL {
@@ -167,6 +255,11 @@ export type InboxStateInput = {
   pageReplyAfterCustomer: boolean;
   /** `ORDER_UNDER_REVIEW_SQL` của hội thoại. */
   orderUnderReview: boolean;
+  /**
+   * Số tin khách chưa đọc của NGƯỜI XEM (`personalUnreadCountSql`) khi máy chủ đã đếm — có thì «chưa đọc» = số ≥ 1 (bằng chứng), vắng
+   * thì lùi về luật cũ theo cột mốc (chỉ còn cho nơi gọi không có người xem, vd. bài kiểm hàm thuần).
+   */
+  customerUnread?: number;
 };
 
 export type InboxStates = {
@@ -183,7 +276,7 @@ const ms = (d: Date | null | undefined) => (d ? d.getTime() : 0);
 export function classifyInboxState(r: InboxStateInput, now: Date, orgCopilot: boolean): InboxStates {
   const t = now.getTime();
   const cust = r.lastCustomerAt ? r.lastCustomerAt.getTime() : null;
-  const humanUnread = cust !== null && cust > Math.max(ms(r.staffSeenAt), ms(r.lastStaffAt)) && cust > ms(r.historyUntil);
+  const humanUnread = r.customerUnread !== undefined ? r.customerUnread > 0 : cust !== null && cust > Math.max(ms(r.staffSeenAt), ms(r.lastStaffAt)) && cust > ms(r.historyUntil);
   const waitingReply = cust !== null && cust > ms(r.lastBotAt) && cust > ms(r.lastStaffAt) && cust > ms(r.historyUntil) && !r.pageReplyAfterCustomer;
 
   const mode = readConversationControl(r.state)?.mode ?? "AUTO";
