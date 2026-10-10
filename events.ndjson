@@ -1383,3 +1383,4 @@
 {"at":"2026-10-10T00:34:12.349Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#752 @ 01fd01c71f9c · Cập nhật nhánh lên main, mã không đổi; gates xanh lại"}
 {"at":"2026-10-10T00:36:56.577Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","detail":"#758 @ b21154fb2710 → a74ddeeac55e (MERGE_NOW · LOW · gates success)"}
 {"at":"2026-10-10T00:37:45.692Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","detail":"#759 @ cdea09c169ac → 78feffc72721 (MERGE_NOW · LOW · gates success)"}
+{"at":"2026-10-10T00:44:24.768Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","detail":"#760 @ a9cf7b669077 → b910aacd92bb (MERGE_NOW · LOW · gates success)"}
