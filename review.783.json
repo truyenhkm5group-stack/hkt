@@ -1,0 +1,8 @@
+{
+  "pr": 783,
+  "sha": "f02e87c9b9583e8821c7a808bcb670ea3dfa01b0",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-10T16:10:34.551Z",
+  "note": "Dùng lại lõi phone-otp và password-reset (không đường đặt lại thứ hai); câu trả lời không lộ tài khoản; cửa công khai mới khai trong platform-isolation-static; không migration"
+}
