@@ -18,7 +18,7 @@
  * Bốn trạng thái của đơn — KHÔNG đoán: thiếu căn cứ ⇒ `CẦN XÁC THỰC`, không bao giờ `ĐỦ THÔNG TIN`.
  */
 import { manualOrderGaps, manualOrderTotals } from "@/lib/constants/manual-orders";
-import { quickConfirmKind, type OrderReviewEntry, type OrderReviewResolution } from "@/lib/constants/order-review";
+import { ORDER_REVIEW_SHORT_LABEL, quickConfirmKind, type OrderReviewEntry, type OrderReviewResolution } from "@/lib/constants/order-review";
 
 export const ORDER_VERIFICATION_STATES = ["ĐỦ THÔNG TIN", "CẦN XÁC THỰC", "ĐÃ XÁC NHẬN", "ĐÃ TẠO ĐƠN"] as const;
 export type OrderVerificationState = (typeof ORDER_VERIFICATION_STATES)[number];
@@ -80,6 +80,14 @@ export type ConversationOrderSummary = {
   /** Số đơn còn sống KHÁC của cùng hội thoại — > 0 thì «đơn đang chốt» là đơn nào chưa chắc. */
   otherActive: number;
 };
+
+/**
+ * ĐƠN ĐÃ HUỶ gần nhất của hội thoại (chủ shop 10/10/2026 — sự cố #189A435E): khi hội thoại không còn đơn đang mở, khung đơn hộp thư
+ * in MỘT dòng «ĐÃ HUỶ» (ai yêu cầu · ai ghi · lý do — `cancellationLine`) thay vì im lặng, để người trực thấy lượt huỷ đã GHI XONG.
+ * Không phải một trạng thái kiểm của `orderVerification` (đơn huỷ không còn ô nào để kiểm).
+ */
+export type ConversationCancelledOrder = { orderId: string; shortCode: string; cancelledAt: string | null; line: string };
+export const ORDER_CANCELLED_LABEL = "ĐÃ HUỶ";
 
 export type OrderVerificationInput = Pick<ConversationOrderSummary, "manual" | "stage" | "hasShipment" | "recipient" | "lines" | "itemsCount" | "money" | "review" | "otherActive">;
 export type OrderVerification = { state: OrderVerificationState; fields: Record<VerifiedField, FieldCheck>; reasons: string[] };
@@ -152,7 +160,7 @@ export function orderVerification(i: OrderVerificationInput): OrderVerification 
 
   const fields: Record<VerifiedField, FieldCheck> = { phone, address, sku, qty, price };
   const fieldReasons = VERIFIED_FIELDS.flatMap((k) => (fields[k].state === "OK" ? [] : [fields[k].reason ?? fields[k].state]));
-  const reasons = [...(i.review.length ? [`Cần người kiểm: ${[...new Set(i.review.map((e) => e.code === "CUSTOMER_CANCELLED" ? "khách báo huỷ" : "địa chỉ chưa ghép"))].join(", ")}`] : []), ...(i.otherActive > 0 ? [`Hội thoại còn ${i.otherActive} đơn khác đang mở`] : []), ...fieldReasons];
+  const reasons = [...(i.review.length ? [`Cần người kiểm: ${[...new Set(i.review.map((e) => ORDER_REVIEW_SHORT_LABEL[e.code]))].join(", ")}`] : []), ...(i.otherActive > 0 ? [`Hội thoại còn ${i.otherActive} đơn khác đang mở`] : []), ...fieldReasons];
 
   let state: OrderVerificationState;
   if (!i.manual || i.hasShipment || FULFILLMENT_STAGES.has(i.stage)) state = "ĐÃ TẠO ĐƠN";
