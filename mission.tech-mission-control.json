@@ -3,7 +3,7 @@
   "mission_id": "tech-mission-control",
   "title": "/tech Mission Control: đọc sổ Tech Room (ai-control/registry) vào /tech — danh sách mission, lọc, tìm, liên kết PR/CI/deploy, lịch sử, STALE, Decision Inbox, báo Lark",
   "business_goal": "",
-  "status": "RUNNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -31,7 +31,18 @@
     "0240": "2026-10-10T14:50:55.622Z"
   },
   "created_at": "2026-10-10T14:50:30.112Z",
-  "updated_at": "2026-10-10T14:50:55.622Z",
-  "last_heartbeat": "2026-10-10T14:50:30.112Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-10T18:19:14.318Z",
+  "last_heartbeat": "2026-10-10T18:19:14.318Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "feat/tech-mission-control",
+    "sha": "a05285a46073e4c0b9ab0a18247e5decb690f217",
+    "at": "2026-10-10T18:19:14.318Z",
+    "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+    "title": "/tech Mission Control: đọc sổ Tech Room (ai-control/registry) vào /tech — danh sách mission, lọc, tìm, liên kết PR/CI/deploy, lịch sử, STALE, Decision Inbox, báo Lark",
+    "summary": "/tech Mission Control PR1–3: phép chiếu sổ Tech Room (tech_registry_missions/events, 0240), trạng thái chuẩn QUEUED/RUNNING/BLOCKED/WAITING_APPROVAL/COMPLETED/DONE_UNVERIFIED, STALE 6 giờ tính lúc đọc, Decision Inbox trên /tech/needs-owner, Lark nhóm Quản lý một tin/lượt; job tech-registry-sync chạy tay (nút Đọc lại sổ)",
+    "tests": [
+      "tsc · eslint sạch · build đạt · tech-mission-control (thuần + quét không ghi sổ + CSDL với GitHub giả) · scheduler-coverage · migration-journal/upgrade-path (sau gộp main 0239→0240) · test-hygiene · repo-integrity · platform-isolation-static · 2 đột biến đỏ · chạy thật trên sổ: 170 sứ mệnh/1.628 sự kiện/0 dòng sai dạng · npm test đầy đủ để CI"
+    ]
+  }
 }
