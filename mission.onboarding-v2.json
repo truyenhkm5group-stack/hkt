@@ -29,18 +29,18 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-09T17:12:18.102Z",
-  "updated_at": "2026-10-10T00:33:59.261Z",
-  "last_heartbeat": "2026-10-10T00:33:59.261Z",
+  "updated_at": "2026-10-10T04:29:31.023Z",
+  "last_heartbeat": "2026-10-10T04:29:31.023Z",
   "definition_of_done": [],
   "handoff": {
     "branch": "feat/onboarding-v2",
-    "sha": "01fd01c71f9c684276301df3651955d85938a9ea",
-    "at": "2026-10-10T00:33:59.261Z",
+    "sha": "d233947710c73b3ac1c0db6766052402e3590262",
+    "at": "2026-10-10T04:29:31.023Z",
     "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
     "title": "Onboarding V2: một checklist 9 bước (DONE/NEEDS_ACTION/ERROR/FIX NOW) + tiến độ + một CTA «Tiếp tục thiết lập» cho khách Chốt Đơn",
-    "summary": "cập nhật nhánh lên main (merge commit, mã của PR không đổi)",
+    "summary": "Giải xung đột với #756 ở config-form.tsx (giữ id=bot-config + className của main); mã onboarding không đổi",
     "tests": [
-      "gates xanh sau cập nhật nhánh lên main"
+      "gates xanh trên d2339477 (gồm onboarding-v2 + ai-sales-settings-v2 trên cây đã gộp)"
     ]
   }
 }
