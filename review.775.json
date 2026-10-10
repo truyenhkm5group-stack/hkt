@@ -1,0 +1,8 @@
+{
+  "pr": 775,
+  "sha": "70ca5cd6afbc80086c4d347b61d124e7de5d12aa",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-10T10:19:04.398Z",
+  "note": "Chỉ đổi NHÃN thuộc tính theo hồ sơ ngành ở lớp hiển thị, giá trị và khoá dữ liệu giữ nguyên; client nhận nhãn dạng chuỗi (không truyền hàm); đọc hồ sơ lỗi ⇒ in chữ cũ; không chạm inbox/ và các tệp của phiên bot"
+}
