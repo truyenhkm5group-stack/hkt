@@ -1525,3 +1525,4 @@
 {"at":"2026-10-10T14:42:34.152Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"CLAIM","mission":"ledger-r2","detail":"RUNNING · 1 mẫu phạm vi · MEDIUM"}
 {"at":"2026-10-10T14:42:57.959Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"ledger-r2","detail":"docs/ledger-r2 @ 8dc4a924f94c · 1 lệnh kiểm thử"}
 {"at":"2026-10-10T14:43:56.265Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"LEASE_TAKEOVER","detail":"integration-lead từ DESKTOP-56TH98Y:wt-tech-lead-v2 (hết hạn 2026-10-10T14:40:22.872Z)"}
+{"at":"2026-10-10T14:44:43.088Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"ledger-r2","detail":"#780 cho docs/ledger-r2 @ 8dc4a924f94c"}
