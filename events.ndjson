@@ -1681,3 +1681,4 @@
 {"at":"2026-10-10T16:58:41.933Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"ledger-r2","detail":"#780 @ 8dc4a924f94c → 72c7b77a5ddf (MERGE_NOW · LOW · gates success)"}
 {"at":"2026-10-10T16:59:58.610Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"ai-sales-knowledge","detail":"#782 @ 23840099e176 → 521b81325e28 (MERGE_NOW · MEDIUM · gates success)"}
 {"at":"2026-10-10T17:00:54.038Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"inbox-read-v3","detail":"feat/inbox-read-v3 @ 264492b6346d · 1 lệnh kiểm thử"}
+{"at":"2026-10-10T17:01:40.392Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DEPLOY_DISPATCHED","detail":"521b81325e28 · run 38070021673 https://github.com/truyenhkm5group-stack/hkt/actions/runs/38070021673"}
