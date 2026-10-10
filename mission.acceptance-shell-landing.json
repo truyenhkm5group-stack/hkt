@@ -23,18 +23,18 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-10T05:21:19.267Z",
-  "updated_at": "2026-10-10T05:22:06.292Z",
-  "last_heartbeat": "2026-10-10T05:21:34.977Z",
+  "updated_at": "2026-10-10T06:28:22.947Z",
+  "last_heartbeat": "2026-10-10T06:28:22.947Z",
   "definition_of_done": [],
   "handoff": {
     "branch": "fix/acceptance-shell-landing",
-    "sha": "657fc02d91e77b7415265065f41789e5dd07d32a",
-    "at": "2026-10-10T05:21:34.977Z",
+    "sha": "d4fe6b402dbaff97ca7db170262837d904fd6f52",
+    "at": "2026-10-10T06:28:22.947Z",
     "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
     "title": "Nghiệm thu bước C theo luật trang nhà #752 (Tổng quan khi thiết lập chưa xong)",
-    "summary": "Bước C tính đích của / bằng shellSetupOpen + salesAgentHomeFor như máy chủ; hết FAIL giả 7/8",
+    "summary": "Bước C + ứng dụng giả của bài kiểm cùng theo luật trang nhà #752",
     "tests": [
-      "typecheck sạch · eslint sạch · saas-acceptance phần quét mã nguồn đạt (phần PGlite chạy ở CI)"
+      "typecheck sạch · eslint sạch · sửa ứng dụng giả theo shellLandingFor (CI bản trước đỏ đúng chỗ này)"
     ]
   }
 }
