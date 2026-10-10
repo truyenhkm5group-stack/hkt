@@ -37,6 +37,7 @@ import { markOrderWritten, omsValidationReason, orderSignalToolReason, OrderWrit
 import { agentUnitPrice } from "@/lib/commerce/pricing";
 import { notifySalesChatBooking, notifySalesChatHandoff } from "@/lib/sales-chatbot/alerts";
 import { freeShipVerdict, variantWeightGrams, type ShipVerdict } from "@/lib/sales-chatbot/shipping";
+import { foldVi } from "@/lib/sales-chatbot/text";
 import { searchCatalog, sellableCatalog, stockFor, type CatalogItem } from "@/lib/sales-chatbot/catalog";
 import { quotedInText } from "@/lib/sales-chatbot/text";
 import { isMessagingChannel, type ChatChannel, type SalesChatbotConfig, type SalesTool } from "@/lib/sales-chatbot/config";
@@ -101,6 +102,8 @@ export type ProcessTool = (typeof PROCESS_TOOLS)[number];
 
 /** Công cụ ĐẶT LỊCH — chỉ khi shop bật «Nhận đặt lịch qua chat» VÀ tổ chức bật module Lịch hẹn (`ToolContext.bookingOn`). */
 export const BOOKING_TOOLS = ["find_booking_slots", "book_appointment"] as const;
+/** Nghĩa của `quantity` trên đơn — mẫu mã đã mang quy cách (vd «2kg») thì một đơn vị là CẢ gói đó (`packQuantityMistake`). */
+export const QUANTITY_HINT = "Số GÓI / đơn vị của ĐÚNG mẫu mã này, KHÔNG phải số kg: mẫu mã «2kg» × 1 = 2kg; khách nói «2kg» ⇒ mẫu mã 2kg × 1 (hoặc 1kg × 2), KHÔNG BAO GIỜ 2kg × 2.";
 export type BookingTool = (typeof BOOKING_TOOLS)[number];
 
 export type ToolContext = {
@@ -203,7 +206,7 @@ const DEFS: Record<SalesTool, AiToolDef> = {
     inputSchema: {
       type: "object",
       properties: {
-        items: { type: "array", items: { type: "object", properties: { variant_id: { type: "string" }, quantity: { type: "integer", minimum: 1 } }, required: ["variant_id", "quantity"], additionalProperties: false } },
+        items: { type: "array", items: { type: "object", properties: { variant_id: { type: "string" }, quantity: { type: "integer", minimum: 1, description: QUANTITY_HINT } }, required: ["variant_id", "quantity"], additionalProperties: false } },
         recipient_name: { type: "string" },
         recipient_phone: { type: "string" },
         address: { type: "string" },
@@ -220,7 +223,7 @@ const DEFS: Record<SalesTool, AiToolDef> = {
     inputSchema: {
       type: "object",
       properties: {
-        items: { type: "array", items: { type: "object", properties: { variant_id: { type: "string" }, quantity: { type: "integer", minimum: 1 } }, required: ["variant_id", "quantity"], additionalProperties: false } },
+        items: { type: "array", items: { type: "object", properties: { variant_id: { type: "string" }, quantity: { type: "integer", minimum: 1, description: QUANTITY_HINT } }, required: ["variant_id", "quantity"], additionalProperties: false } },
         recipient_name: { type: "string" },
         recipient_phone: { type: "string" },
         address: { type: "string" },
@@ -358,7 +361,7 @@ function err(summary: string, message: string, state: ChatState, orderSignal?: T
   return { content: JSON.stringify({ error: message }), isError: true, summary, state, ...(orderSignal ? { orderSignal } : {}) };
 }
 
-export type Priced = { ship: ShipVerdict; lines: { variantId: string; name: string; quantity: number; unitPrice: number; lineTotal: number }[]; subtotal: number; shippingFee: number | null; total: number | null; unpriced: string[]; missing: string[]; /** Mọi dòng là mẫu mã chỉ bán kèm (0238). */ addOnOnly?: boolean };
+export type Priced = { ship: ShipVerdict; lines: { variantId: string; name: string; quantity: number; unitPrice: number; lineTotal: number; /** Khối lượng MỘT đơn vị mẫu mã (gram) — `null` khi không biết. */ weightGrams?: number | null }[]; subtotal: number; shippingFee: number | null; total: number | null; unpriced: string[]; missing: string[]; /** Mọi dòng là mẫu mã chỉ bán kèm (0238). */ addOnOnly?: boolean };
 
 /**
  * Bảng giá áp cho khách của hội thoại khi shop BẬT báo giá sỉ (`wholesalePricing`); TẮT ⇒ `null` = giá lẻ như trước. Khách
@@ -411,7 +414,7 @@ export async function priceLines(lines: readonly CartLine[], cfg: SalesChatbotCo
     const unit = it ? unitPriceFor(it, l.quantity, books) : null;
     if (!it) missing.push(l.variantId);
     else if (unit === null) unpriced.push(it.name);
-    else out.push({ variantId: l.variantId, name: `${it.name}${it.variant ? ` (${it.variant})` : ""}`, quantity: l.quantity, unitPrice: unit, lineTotal: unit * l.quantity });
+    else out.push({ variantId: l.variantId, name: `${it.name}${it.variant ? ` (${it.variant})` : ""}`, quantity: l.quantity, unitPrice: unit, lineTotal: unit * l.quantity, weightGrams: variantWeightGrams(it.weightGrams, it.variant, it.name, it.fields.net_weight ?? "", it.fields.package_size ?? "") });
   }
   const subtotal = out.reduce((s, l) => s + l.lineTotal, 0);
   // Khối lượng đơn: một dòng không biết khối lượng ⇒ cả đơn KHÔNG xét ngưỡng khối lượng (không đoán).
@@ -424,6 +427,38 @@ export async function priceLines(lines: readonly CartLine[], cfg: SalesChatbotCo
   const ship = freeShipVerdict(cfg.freeShipping, subtotal, weight, address, formatVND);
   const shippingFee = ship.kind === "FREE" ? 0 : cfg.shippingFee;
   return { ship, lines: out, subtotal, shippingFee, total: shippingFee === null ? null : subtotal + shippingFee, unpriced, missing, ...(onlyAddOns(lines, byId) ? { addOnOnly: true } : {}) };
+}
+
+/** Mọi khối lượng khách nói trong câu, quy ra gram («2kg», «0,5 kg», «2 ký», «500g»). HÀM THUẦN. */
+export function gramsMentioned(text: string): number[] {
+  const out: number[] = [];
+  for (const m of text.matchAll(/(\d+(?:[.,]\d+)?)\s*(kg|kí|ký|ki|ky|cân|can|gram|gr|g)(?![\p{L}])/giu)) {
+    const n = Number(m[1].replace(",", "."));
+    if (!Number.isFinite(n) || n <= 0) continue;
+    out.push(Math.round(/^(?:gram|gr|g)$/i.test(m[2]) ? n : n * 1000));
+  }
+  return out;
+}
+
+/**
+ * QUY CÁCH ≠ SỐ LƯỢNG (10/10/2026, HSLC «Việt Phệ»: khách «A lấy thử 2kg», danh mục có mẫu mã «2kg» = 540.000 ₫ ⇒ bot lên mẫu mã
+ * 2kg × 2 = 1.080.000 ₫ và báo khách «2kg chả cá thu: 1.080.000 đ» — thật ra là 4kg, gấp đôi tiền). Bắt đúng mẫu lỗi đó: mẫu mã đã
+ * mang khối lượng W, số lượng q ≥ 2, khách nói ĐÚNG W mà KHÔNG nói tổng q × W, cũng không nói rõ số gói («2 túi», «x2», «2 hộp»…)
+ * ⇒ trả câu sửa cho model (quantity là SỐ GÓI của mẫu mã). Không bắt được thì `null` — không đoán ý khách. HÀM THUẦN.
+ */
+export function packQuantityMistake(lines: readonly { name: string; quantity: number; weightGrams?: number | null }[], customerText: string): string | null {
+  const said = gramsMentioned(customerText);
+  if (!said.length) return null;
+  const folded = foldVi(customerText);
+  const kg = (g: number) => (g % 1000 === 0 ? `${g / 1000}kg` : `${(g / 1000).toLocaleString("vi-VN")}kg`);
+  for (const l of lines) {
+    const w = l.weightGrams ?? null;
+    if (!w || l.quantity < 2 || !said.includes(w) || said.includes(w * l.quantity)) continue;
+    const packs = new RegExp(`(?:^|[^\\d])${l.quantity}\\s*(?:tui|goi|hop|set|phan|bich|khay|combo|suat|cai|hu|lo)(?![a-z])|x\\s*${l.quantity}(?!\\d)`);
+    if (packs.test(folded)) continue;
+    return `«${l.name}» đã là gói ${kg(w)} — khách nói ${kg(w)} nên quantity = 1, KHÔNG phải ${l.quantity} (${l.quantity} gói = ${kg(w * l.quantity)}, gấp ${l.quantity} lần tiền). quantity là SỐ GÓI của mẫu mã, không phải số kg. Sửa quantity rồi gọi lại; khách thật sự muốn ${kg(w * l.quantity)} thì hỏi lại khách trước.`;
+  }
+  return null;
 }
 
 export function mergeLines(lines: readonly CartLine[]): CartLine[] {
@@ -699,6 +734,9 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
       if (priced.missing.length) return err("Đơn nháp: mã không có", `Không có mẫu mã: ${priced.missing.join(", ")}.`, state, { reason: "UNKNOWN_SKU" });
       if (priced.unpriced.length) return { ...err("Đơn nháp: mã chưa có giá", `Chưa có giá: ${priced.unpriced.join(", ")}.`, state, { reason: "UNPRICED_SKU" }), requireHuman: `Giá bất thường: ${priced.unpriced.join(", ")} chưa có giá` };
       if (priced.addOnOnly) return err("Đơn nháp: chỉ có món bán kèm", ADD_ON_ONLY_ERROR, state);
+      // Số lượng chỉ xét khi lượt này GỬI items (sửa người nhận / ghi chú không kiểm lại số lượng đã lên).
+      const packMistake = v.data.items ? packQuantityMistake(priced.lines, ctx.lastUserText) : null;
+      if (packMistake) return err("Đơn nháp: nhầm quy cách thành số lượng", packMistake, state, { reason: "BAD_INPUT", fields: ["items.quantity"] });
       const firstShown = existing?.firstShownTurn ?? existing?.shownTurn ?? ctx.turn;
       const draft = { ...(ctx.turn !== undefined ? { shownTurn: ctx.turn } : {}), ...(firstShown !== undefined ? { firstShownTurn: firstShown } : {}), orderId: existing?.orderId ?? null, lines, unitPrices: Object.fromEntries(priced.lines.map((l) => [l.variantId, l.unitPrice])), recipient, note: v.data.delivery_note ?? existing?.note ?? "", simulated };
       if (!simulated) {
