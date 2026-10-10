@@ -1426,3 +1426,4 @@
 {"at":"2026-10-10T05:21:19.377Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"CLAIM","mission":"acceptance-shell-landing","detail":"RUNNING · 2 mẫu phạm vi · MEDIUM"}
 {"at":"2026-10-10T05:21:35.016Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"acceptance-shell-landing","detail":"fix/acceptance-shell-landing @ 657fc02d91e7 · 1 lệnh kiểm thử"}
 {"at":"2026-10-10T05:22:06.353Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"acceptance-shell-landing","detail":"#769 cho fix/acceptance-shell-landing @ 657fc02d91e7"}
+{"at":"2026-10-10T05:22:31.151Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#769 @ 657fc02d91e7 · Bước C dùng đúng hàm máy chủ (shellSetupOpen + salesAgentHomeFor) cho đích của /; ba tên nhập mới đều chỉ đọc; không đổi hành vi sản phẩm"}
