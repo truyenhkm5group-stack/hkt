@@ -1,0 +1,31 @@
+{
+  "schema": 1,
+  "mission_id": "inbox-unread-perf",
+  "title": "Hộp thư V3: tải danh sách chậm lại 510→824 ms p50 sau khi chưa đọc theo con trỏ người — đưa về ≤ mức cũ mà không đổi nghĩa chưa đọc",
+  "business_goal": "",
+  "status": "RUNNING",
+  "priority": "P0",
+  "risk": "HIGH",
+  "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "worker": null,
+  "worktree": null,
+  "branch": "fix/inbox-unread-perf",
+  "base_sha": "2840b5b578820108de27227ff4f6181596be84df",
+  "domains": [],
+  "owned_paths": [
+    "lib/sales-chatbot/inbox-states.ts",
+    "lib/sales-chatbot/inbox.ts",
+    "lib/sales-chatbot/inbox-read.ts",
+    "db/schema.ts",
+    "drizzle/",
+    "tests/inbox-unread-perf.test.ts"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-10T19:10:52.513Z",
+  "updated_at": "2026-10-10T19:10:52.513Z",
+  "last_heartbeat": "2026-10-10T19:10:52.513Z",
+  "definition_of_done": []
+}
