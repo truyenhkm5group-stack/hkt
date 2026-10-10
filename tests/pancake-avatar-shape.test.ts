@@ -8,7 +8,7 @@
  */
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { avatarishLines, describeProbe, describeString, maskKey, maskUrlPath, parseShapeArgs, shapeLines, walkShape, type Shape } from "@/scripts/pancake-avatar-shape";
+import { avatarishLines, chunkJoin, describeProbe, describeString, groupProbes, maskBodySnippet, maskKey, maskUrlPath, parseShapeArgs, pathsUnder, probeTargets, shapeLines, walkShape, type Shape } from "@/scripts/pancake-avatar-shape";
 
 const TOKEN = "PAGE_TOKEN_BI_MAT_ABCDEF123456";
 const NAME = "Nguyễn Thị Lan";
@@ -55,6 +55,39 @@ export function testPancakeAvatarShape() {
 
   assert.equal(describeProbe(302, "text/html; charset=utf-8", `https://scontent.xx.fbcdn.net/v/a.jpg?oh=${TOKEN}`, "https://pages.fm/a"), "HTTP 302 · kiểu=text/html → chuyển hướng tới host=scontent.xx.fbcdn.net");
   assert.equal(describeProbe(200, "image/jpeg", null, "https://pages.fm/a"), "HTTP 200 · kiểu=image/jpeg");
+  // LƯỢT DÒ 2: thân lỗi đã che · biến thể điểm cuối · gộp kết quả · khoá khách trong phản hồi tin.
+  const html = `<html><head><style>x{}</style></head><body><h1>406 Not Acceptable</h1><p>page ${PAGE} customer ${PSID} token ${TOKEN} mail lan@example.com sđt ${PHONE} key abcdef0123456789abcdef01</p></body></html>`;
+  const snip = maskBodySnippet(html, [TOKEN, PAGE]);
+  assert.ok(snip.startsWith("406 Not Acceptable"), snip);
+  for (const secret of [TOKEN, PAGE, PSID, PHONE, "lan@example.com", "abcdef0123456789abcdef01"]) assert.ok(!snip.includes(secret), `thân đã che «${secret.slice(0, 6)}…»: ${snip}`);
+  assert.ok(maskBodySnippet("x".repeat(500)).length <= 120, "trần 120 ký tự");
+  assert.equal(maskBodySnippet('{"success":false,"message":"Not found"}'), '{"success":false,"message":"Not found"}');
+  const targets = probeTargets(PAGE, PSID, `page_access_token=${TOKEN}`);
+  assert.deepEqual(
+    targets.map((t) => `${t.label}|${t.kind}`),
+    [
+      "api/v1 /pages/<page>/avatar/<id>|image",
+      "api/v1 /pages/<page>/customers/<id>/avatar|image",
+      "api/v1 /pages/<page>/page_customers/<id>|json",
+      "public_api/v1 /pages/<page>/avatar/<id>|image",
+      "public_api/v1 /pages/<page>/customers/<id>/avatar|image",
+      "public_api/v1 /pages/<page>/page_customers/<id>|json",
+    ],
+  );
+  assert.ok(targets.every((t) => /^https:\/\/pages\.fm\/api\/(v1|public_api\/v1)\/pages\//.test(t.url)), "chỉ hai gốc API của Pancake");
+  assert.ok(targets.every((t) => !t.label.includes(PSID) && !t.label.includes(PAGE)), "nhãn không mang mã");
+  assert.deepEqual(groupProbes(["a [*/*]: HTTP 406 · kiểu=text/html", "b [json]: HTTP 406 · kiểu=text/html", "c [*/*]: HTTP 302 · kiểu=— → chuyển hướng tới host=scontent.xx.fbcdn.net", "d: cùng giá trị với a — không thử lại"]), [
+    "HTTP 406 · kiểu=text/html ×2 ← a [*/*] | b [json]",
+    "HTTP 302 · kiểu=— → chuyển hướng tới host=scontent.xx.fbcdn.net ×1 ← c [*/*]",
+    "d: cùng giá trị với a — không thử lại",
+  ]);
+  assert.deepEqual(chunkJoin(["aaaa", "bbbb", "cccc"], 10), ["aaaa, bbbb", "cccc"]);
+  const msg: Shape = new Map();
+  for (const [k, v] of Object.entries({ conv_customers: [{ fb_id: PSID, name: NAME, avatar: "https://content.pancake.vn/x/a.jpg" }], conv_from: { id: PSID, name: NAME }, customers: [{ id: "x" }], conversation_id: "y" })) walkShape(v, maskKey(k), msg);
+  assert.deepEqual(pathsUnder(msg, "conv_customers"), ["conv_customers", "conv_customers[]", "conv_customers[].avatar", "conv_customers[].fb_id", "conv_customers[].name"]);
+  assert.deepEqual(pathsUnder(msg, "conv_from"), ["conv_from", "conv_from.id", "conv_from.name"]);
+  assert.ok(!pathsUnder(msg, "customers").some((p) => p.startsWith("conv_")), "tiền tố khớp đúng khoá, không khớp lẫn");
+
   assert.deepEqual(parseShapeArgs(["hslc-hmt-shop"]), { code: "hslc-hmt-shop", limit: 5 });
   assert.ok("error" in parseShapeArgs(["hslc", "--limit=6"]) && "error" in parseShapeArgs([]) && "error" in parseShapeArgs(["HSLC"]));
 
@@ -64,6 +97,9 @@ export function testPancakeAvatarShape() {
   assert.match(sc, /show default_transaction_read_only/);
   assert.doesNotMatch(sc, /\.(insert|update|delete)\(|\binsert into\b|\bupdate \w+ set\b/i, "script không câu ghi");
   assert.doesNotMatch(sc, /method: "(POST|PUT|PATCH|DELETE)"/, "chỉ GET");
+  assert.match(sc, /accept: kind === "json" \? "application\/json" : "\*\/\*"/, "lượt dò 2 không gửi accept: image/* (406 ở lượt 1)");
+  assert.match(sc, /maskBodySnippet\(text, secrets\)/, "thân lỗi chỉ in bản đã che");
+  assert.match(sc, /const secrets = \[token, pageId\]/);
   const code = sc.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
   assert.doesNotMatch(code, /graph\.facebook|facebook\.com/, "không Graph, không dựng facebook.com");
   assert.doesNotMatch(sc, /tomTat\([^\n]*\$\{(token|q|secrets|pageId|e\.message)\b/, "tóm tắt không bao giờ nhận token / mã page / câu lỗi");
