@@ -1,0 +1,30 @@
+{
+  "schema": 1,
+  "mission_id": "owner-tech-sync-schedule",
+  "title": "QUYẾT ĐỊNH CHỦ SHOP: lịch 10 phút cho tech-registry-sync + nhóm sứ mệnh chỉ-tài-liệu",
+  "business_goal": "",
+  "status": "BLOCKED",
+  "priority": "P2",
+  "risk": "MEDIUM",
+  "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "worker": null,
+  "worktree": null,
+  "branch": "decision/owner-tech-sync-schedule",
+  "base_sha": null,
+  "domains": [],
+  "owned_paths": [
+    "scripts/scheduler.mjs"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-10T17:10:04.270Z",
+  "updated_at": "2026-10-10T17:10:04.270Z",
+  "last_heartbeat": "2026-10-10T17:10:04.270Z",
+  "definition_of_done": [],
+  "needs_owner": {
+    "category": "APPROVAL_REQUIRED",
+    "action": "(1) Cho job tech-registry-sync chạy tự động 10 phút/lần (đổi scripts/scheduler.mjs, AGENTS §7)? Hiện chạy tay bằng nút Đọc lại sổ. (2) Sứ mệnh chỉ sửa tài liệu có được coi là xong không, hay giữ DONE_UNVERIFIED?"
+  }
+}
