@@ -3,14 +3,14 @@
   "mission_id": "avatar-proxy",
   "title": "Ảnh khách Pancake qua proxy máy chủ: lưu URL ảnh đã bỏ token, route có kiểm quyền gắn token khi tải, đệm ảnh — webhook không gửi ảnh (5/5 NO_AVATAR_FIELD, run 38062393041)",
   "business_goal": "",
-  "status": "BACKLOG",
-  "priority": "P2",
+  "status": "RUNNING",
+  "priority": "P1",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
   "worker": null,
   "worktree": null,
   "branch": "feat/avatar-proxy",
-  "base_sha": null,
+  "base_sha": "2840b5b578820108de27227ff4f6181596be84df",
   "domains": [],
   "owned_paths": [
     "lib/sales-chatbot/avatar-profile.ts",
@@ -26,7 +26,7 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-10T15:13:16.459Z",
-  "updated_at": "2026-10-10T15:13:16.459Z",
-  "last_heartbeat": "2026-10-10T15:13:16.459Z",
+  "updated_at": "2026-10-10T18:23:06.556Z",
+  "last_heartbeat": "2026-10-10T18:23:06.556Z",
   "definition_of_done": []
 }
