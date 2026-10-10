@@ -11,7 +11,12 @@
    2. In CHỈ đường dẫn khoá + kiểu + (với chuỗi) DẠNG: mốc thời gian · URL (host · có/không tham số khoá · độ dài · đường dẫn đã che
       mọi đoạn có số / dài) · chuỗi(độ dài). KHÔNG in giá trị, tên, SĐT, mã, chữ tin. Khoá trông như mã (số dài) bị che thành `<mã>`.
    3. Thử vài điểm cuối ảnh / khách của PANCAKE (mã khách lấy từ CHÍNH payload Pancake): in mã HTTP + content-type + có chuyển hướng
-      không và tới HOST nào. Không dựng facebook.com/<PSID>, không gọi Graph.
+      không và tới HOST nào. Không dựng facebook.com/<PSID>, không gọi Graph. LƯỢT DÒ 2 (run 38093664102: cả 7 lần thử đều «406
+      text/html», kể cả điểm cuối JSON ⇒ nghi header `accept` chỉ nhận ảnh): gửi `accept` mọi kiểu (JSON thì `application/json`); thử mọi mã khách của
+      payload (`page_customer.psid/global_id/id` · `customers[0].fb_id/id` · `from.id` · `customer_id`) × `/pages/<page>/avatar/<id>` ·
+      `/pages/<page>/customers/<id>/avatar` · `/pages/<page>/page_customers/<id>` ở cả `api/v1` lẫn `public_api/v1`; lỗi ⇒ in ≤ 120 ký
+      tự đầu thân ĐÃ CHE (`maskBodySnippet`); JSON thành công ⇒ chỉ dáng khoá, không thân. Phản hồi TIN: in đủ khoá gốc và khoá của
+      `conv_customers` · `conv_from` · `customers`.
    4. Kết luận lõi hiện tại: `pancakeAvatarFactsOf` cho mỗi hội thoại ra outcome nào.
 
   Cả lượt MÃ HOÁ (ops-vps `OPS_THAO_TAC_MA_HOA`); dòng [ops:tom-tat] chỉ mang đường dẫn khoá đã che + kiểu + host + số đếm — không
@@ -147,6 +152,77 @@ export function describeProbe(status: number, contentType: string | null, locati
   return `HTTP ${status} · kiểu=${(contentType ?? "—").split(";")[0].trim() || "—"}${to}`;
 }
 
+/**
+ * ≤ 120 ký tự ĐẦU của thân phản hồi LỖI, đã che — chỉ để thấy câu lỗi của Pancake (406 «Not Acceptable» vì header hay vì thiếu tham
+ * số?). Bỏ thẻ HTML, che: chuỗi bí mật truyền vào (token) · email · dãy ≥ 5 chữ số (mã khách / page / SĐT) · chuỗi chữ-số dài ≥ 20
+ * (token khác). HÀM THUẦN.
+ */
+export function maskBodySnippet(text: string, secrets: readonly string[] = []): string {
+  let s = text.replace(/<script[\s\S]*?<\/script>|<style[\s\S]*?<\/style>/gi, " ").replace(/<[^>]*>/g, " ");
+  for (const x of secrets) if (x) s = s.split(x).join("<khoá>");
+  s = s
+    .replace(/[\w.+-]+@[\w-]+(\.[\w-]+)+/g, "<email>")
+    .replace(/[A-Za-z0-9_-]{20,}/g, (m) => (/\d/.test(m) ? "<chuỗi>" : m))
+    .replace(/\+?\d[\d .-]{3,}\d/g, (m) => (m.replace(/\D/g, "").length >= 5 ? "<số>" : m))
+    .replace(/\s+/g, " ")
+    .trim();
+  return s.slice(0, 120);
+}
+
+/** Gộp danh sách thành các dòng ≤ `max` ký tự (dòng tóm tắt có trần 300). HÀM THUẦN. */
+export function chunkJoin(items: readonly string[], max = 260): string[] {
+  const out: string[] = [];
+  let chunk = "";
+  for (const it of items) {
+    if (chunk && (chunk + ", " + it).length > max) {
+      out.push(chunk);
+      chunk = it;
+    } else chunk = chunk ? `${chunk}, ${it}` : it;
+  }
+  if (chunk) out.push(chunk);
+  return out;
+}
+
+/**
+ * Gộp các lần thử cùng KẾT QUẢ (mã HTTP · kiểu · thân đã che) thành một dòng `kết quả ← nhãn | nhãn` — kênh tóm tắt có trần 60 dòng,
+ * 40 lần thử cùng ra 406 không được chiếm hết chỗ. Dòng không theo dạng `nhãn [..]: kết quả` giữ nguyên. HÀM THUẦN.
+ */
+export function groupProbes(lines: readonly string[]): string[] {
+  const groups = new Map<string, string[]>();
+  const loose: string[] = [];
+  for (const l of lines) {
+    const i = l.indexOf("]: ");
+    if (i < 0) {
+      loose.push(l);
+      continue;
+    }
+    const result = l.slice(i + 3);
+    groups.set(result, [...(groups.get(result) ?? []), l.slice(0, i + 1)]);
+  }
+  return [...[...groups.entries()].map(([result, labels]) => `${result} ×${labels.length} ← ${labels.join(" | ")}`), ...loose];
+}
+
+/** Đường khoá của `shape` bắt đầu bằng `prefix` (không kiểu, không dạng). HÀM THUẦN. */
+export function pathsUnder(shape: Shape, prefix: string): string[] {
+  return [...shape.keys()].filter((p) => p === prefix || p.startsWith(`${prefix}.`) || p.startsWith(`${prefix}[]`)).sort();
+}
+
+export type ProbeKind = "image" | "json";
+/** Các biến thể điểm cuối ảnh / khách cho MỘT mã (lấy từ chính payload Pancake) trên hai gốc API của Pancake. HÀM THUẦN. */
+export function probeTargets(pageId: string, id: string, q: string): { label: string; url: string; kind: ProbeKind }[] {
+  const p = encodeURIComponent(pageId);
+  const i = encodeURIComponent(id);
+  const bases: [string, string][] = [
+    ["api/v1", "https://pages.fm/api/v1"],
+    ["public_api/v1", "https://pages.fm/api/public_api/v1"],
+  ];
+  return bases.flatMap(([name, b]) => [
+    { label: `${name} /pages/<page>/avatar/<id>`, url: `${b}/pages/${p}/avatar/${i}?${q}`, kind: "image" as const },
+    { label: `${name} /pages/<page>/customers/<id>/avatar`, url: `${b}/pages/${p}/customers/${i}/avatar?${q}`, kind: "image" as const },
+    { label: `${name} /pages/<page>/page_customers/<id>`, url: `${b}/pages/${p}/page_customers/${i}?${q}`, kind: "json" as const },
+  ]);
+}
+
 // ─────────────────────────── ĐỌC ───────────────────────────
 
 const str = (v: unknown) => (typeof v === "string" ? v : typeof v === "number" ? String(v) : "");
@@ -176,7 +252,7 @@ async function main() {
     process.exit(0);
   }
   const [pageId, token] = pages[0];
-  const secrets = [token];
+  const secrets = [token, pageId];
   const q = `page_access_token=${encodeURIComponent(token)}`;
   const getJson = async (label: string, url: string): Promise<Record<string, unknown> | null> => {
     try {
@@ -189,11 +265,25 @@ async function main() {
       return null;
     }
   };
-  const probe = async (label: string, url: string): Promise<string> => {
+  const probe = async (label: string, url: string, kind: ProbeKind = "image"): Promise<string> => {
     try {
-      const res = await fetch(url, { method: "GET", redirect: "manual", headers: { accept: "image/*" }, signal: AbortSignal.timeout(10_000) });
-      await res.body?.cancel().catch(() => undefined);
-      return `${label}: ${describeProbe(res.status, res.headers.get("content-type"), res.headers.get("location"), url)}`;
+      // Lượt dò 1 (run 38093664102) gửi `accept: image/*` và nhận 406 ở MỌI điểm cuối, kể cả JSON ⇒ lượt 2 gửi `*/*` / JSON.
+      const res = await fetch(url, { method: "GET", redirect: "manual", headers: { accept: kind === "json" ? "application/json" : "*/*" }, signal: AbortSignal.timeout(10_000) });
+      const head = `${label} [${kind === "json" ? "json" : "*/*"}]: ${describeProbe(res.status, res.headers.get("content-type"), res.headers.get("location"), url)}`;
+      const type = (res.headers.get("content-type") ?? "").toLowerCase();
+      if (res.status >= 200 && res.status < 300 && type.includes("json")) {
+        // Thành công dạng JSON có thể là hồ sơ khách ⇒ KHÔNG in thân, chỉ dáng khoá (có ★ nếu có ảnh).
+        const body = (await res.json().catch(() => null)) as unknown;
+        const sh = walkShape(body, "", new Map());
+        const star = avatarishLines(sh).map((l) => l.replace(/^★ /, ""));
+        return `${head} · khoá: ${sh.size ? [...sh.keys()].slice(0, 25).join(", ") : "—"}${star.length ? ` · ★ ${star.slice(0, 3).join(" ; ")}` : ""}`;
+      }
+      if (res.status >= 200 && res.status < 400) {
+        await res.body?.cancel().catch(() => undefined);
+        return head;
+      }
+      const text = (await res.text().catch(() => "")).slice(0, 4000);
+      return `${head} · thân: «${maskBodySnippet(text, secrets)}»`;
     } catch (e) {
       // Dòng này lên TÓM TẮT công khai ⇒ chỉ tên lỗi + mã hệ thống, không câu lỗi (câu lỗi của Node có thể chứa URL).
       const code = e instanceof Error && e.cause && typeof e.cause === "object" ? str((e.cause as { code?: unknown }).code) : "";
@@ -239,22 +329,30 @@ async function main() {
   if (first) {
     const from = rec(first.from);
     const cust = rec(Array.isArray(first.customers) ? first.customers[0] : null);
+    const pc = rec(first.page_customer);
+    // Mọi mã khách Pancake trả trong CHÍNH payload (lượt dò 1 thấy `page_customer.{psid,global_id,id}`) — trùng giá trị thì thử một lần.
     const ids: [string, string][] = [
-      ["from.id", str(from.id)],
+      ["page_customer.psid", str(pc.psid)],
+      ["page_customer.global_id", str(pc.global_id)],
+      ["page_customer.id", str(pc.id)],
       ["customers[0].fb_id", str(cust.fb_id)],
       ["customers[0].id", str(cust.id)],
+      ["from.id", str(from.id)],
+      ["customer_id", str(first.customer_id)],
     ];
-    const seen = new Set<string>();
+    const seen = new Map<string, string>();
     for (const [src, id] of ids) {
-      if (!id || seen.has(id)) continue;
-      seen.add(id);
-      const enc = encodeURIComponent(id);
-      const p = encodeURIComponent(pageId);
-      probes.push(await probe(`public_api/v1 avatar theo ${src}`, `${PANCAKE_PAGES_API}/v1/pages/${p}/avatar/${enc}?${q}`));
-      probes.push(await probe(`api/v1 avatar theo ${src}`, `https://pages.fm/api/v1/pages/${p}/avatar/${enc}?${q}`));
-      probes.push(await probe(`public_api/v1 page_customers/${src}`, `${PANCAKE_PAGES_API}/v1/pages/${p}/page_customers/${enc}?${q}`));
+      if (!id) continue;
+      if (seen.has(id)) {
+        probes.push(`${src}: cùng giá trị với ${seen.get(id)} — không thử lại`);
+        continue;
+      }
+      seen.set(id, src);
+      for (const t of probeTargets(pageId, id, q)) probes.push(await probe(`${t.label} theo ${src}`, t.url, t.kind));
     }
-    probes.push(await probe("public_api/v1 page_customers (danh sách)", `${PANCAKE_PAGES_API}/v1/pages/${encodeURIComponent(pageId)}/page_customers?${q}&page_size=1`));
+    for (const [name, b] of [["api/v1", "https://pages.fm/api/v1"], ["public_api/v1", `${PANCAKE_PAGES_API}/v1`]] as const) {
+      probes.push(await probe(`${name} page_customers (danh sách)`, `${b}/pages/${encodeURIComponent(pageId)}/page_customers?${q}&page_size=1`, "json"));
+    }
   }
   // URL dáng ảnh có sẵn trong payload (nếu có) — gọi NGUYÊN như Pancake trả, chỉ in mã HTTP / kiểu / host chuyển hướng.
   const urlish = convs.flatMap((c) => {
@@ -272,26 +370,34 @@ async function main() {
   console.log("Điểm cuối ảnh / khách:");
   for (const l of probes) console.log(`  ${l}`);
 
-  // ── TÓM TẮT (đường dẫn khoá đã che + kiểu + host — không giá trị) ──
+  // ── TÓM TẮT (đường dẫn khoá đã che + kiểu + host — không giá trị). Kênh có trần 60 dòng ⇒ phần MỚI của lượt dò lên trước. ──
   tomTat(`pancake-avatar-shape ${org.code}: ${pages.length} page · ${convs.length} hội thoại · lõi hiện tại: ${Object.entries(outcomes).map(([k, n]) => `${k} ${n}`).join(" · ") || "—"}`);
-  tomTat(`Khoá gốc danh sách: ${topKeys}`);
+  // 1) Điểm cuối ảnh / khách — gộp theo kết quả.
+  for (const g of groupProbes(probes)) {
+    const k = g.indexOf(" ← ");
+    if (k < 0) {
+      tomTat(`ĐIỂM CUỐI ${g}`);
+      continue;
+    }
+    tomTat(`ĐIỂM CUỐI ${g.slice(0, k)}`);
+    for (const l of chunkJoin(g.slice(k + 3).split(" | ")).slice(0, 3)) tomTat(`  ← ${l}`);
+  }
+  // 2) Khách trong phản hồi TIN — chỗ ảnh có thể nằm (lượt dò 1 bị cắt ở «glob…»).
+  const msgStar = avatarishLines(msgShape);
+  tomTat(`Phản hồi tin: dáng ảnh/URL ${msgStar.length}`);
+  for (const prefix of ["conv_customers", "conv_from", "customers", "from", "page_customer", "global_id", "profile_updated_at"]) {
+    const under = pathsUnder(msgShape, prefix);
+    if (under.length) for (const l of chunkJoin(under).slice(0, 3)) tomTat(`TIN ${prefix}: ${l}`);
+  }
+  for (const l of chunkJoin(msgTop ? msgTop.split(", ") : ["—"]).slice(0, 4)) tomTat(`TIN khoá gốc: ${l}`);
+  for (const l of msgStar.slice(0, 6)) tomTat(`TIN ${l}`);
+  // 3) Danh sách hội thoại (lượt dò 1 đã có — in gọn).
   const convLines = shapeLines(convShape);
   const star = avatarishLines(convShape);
-  tomTat(`Hội thoại: ${convLines.length} đường khoá · dáng ảnh/URL ${star.length}`);
-  for (const l of star.slice(0, 10)) tomTat(`HT ${l}`);
-  // Mọi đường khoá của hội thoại (không giá trị) — gộp từng cụm để người đọc thấy trường ảnh có thể mang tên lạ.
+  tomTat(`Hội thoại: ${convLines.length} đường khoá · dáng ảnh/URL ${star.length} · khoá gốc danh sách: ${topKeys}`);
+  for (const l of star.slice(0, 5)) tomTat(`HT ${l}`);
   const paths = convLines.map((l) => l.replace(/^★ /, "").split(" · ")[0]);
-  for (let i = 0, chunk = ""; i <= paths.length; i += 1) {
-    const p = paths[i];
-    if (p !== undefined && (chunk + p).length < 270) chunk += (chunk ? ", " : "") + p;
-    else {
-      if (chunk) tomTat(`HT khoá: ${chunk}`);
-      chunk = p ?? "";
-    }
-  }
-  tomTat(`Khoá gốc tin: ${msgTop || "—"} · dáng ảnh/URL ${avatarishLines(msgShape).length}`);
-  for (const l of avatarishLines(msgShape).slice(0, 6)) tomTat(`TIN ${l}`);
-  for (const l of probes) tomTat(`ĐIỂM CUỐI ${l}`);
+  for (const l of chunkJoin(paths).slice(0, 4)) tomTat(`HT khoá: ${l}`);
   process.exit(0);
 }
 
