@@ -1,0 +1,30 @@
+{
+  "schema": 1,
+  "mission_id": "owner-saas-value-defs",
+  "title": "QUYẾT ĐỊNH CHỦ SHOP: định nghĩa Trung tâm giá trị SaaS (D1–D12)",
+  "business_goal": "",
+  "status": "BLOCKED",
+  "priority": "P2",
+  "risk": "MEDIUM",
+  "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "worker": null,
+  "worktree": null,
+  "branch": "decision/owner-saas-value-defs",
+  "base_sha": null,
+  "domains": [],
+  "owned_paths": [
+    "docs/saas/VALUE_DECISIONS.md"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-10T17:09:38.547Z",
+  "updated_at": "2026-10-10T17:09:38.547Z",
+  "last_heartbeat": "2026-10-10T17:09:38.547Z",
+  "definition_of_done": [],
+  "needs_owner": {
+    "category": "APPROVAL_REQUIRED",
+    "action": "Chốt D1 chi của khách = ghi nhận hay tiền về · D2 AI_ASSISTED được bao nhiêu % công · D3 lãi gộp AI khi thiếu giá vốn · D4 tử số giá trị khách nhận · D5 giá trị giờ công · D6 phí thanh toán · D7 lead đủ điều kiện · D8 ngưỡng rủi ro rời bỏ · D9 cho phép điểm /100 không · D10 phân bổ hạ tầng · D11 tỷ giá giá vốn AI · D12 cửa sổ mặc định. V1 PR-1..PR-4 không cần chờ."
+  }
+}
