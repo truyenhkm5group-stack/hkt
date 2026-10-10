@@ -1,0 +1,32 @@
+{
+  "schema": 1,
+  "mission_id": "saas-value-ui",
+  "title": "Trung tâm giá trị SaaS PR-4: /platform/saas + chi tiết khách đọc ảnh chụp (Customer Spend · Customer Value · Platform Economics · Customer Health), không mở CSDL từng tổ chức lúc mở trang",
+  "business_goal": "",
+  "status": "RUNNING",
+  "priority": "P1",
+  "risk": "MEDIUM",
+  "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "worker": null,
+  "worktree": null,
+  "branch": "feat/saas-value-ui",
+  "base_sha": "e473ade84c19be6532fe0b01a606942c0d60b9b9",
+  "domains": [],
+  "owned_paths": [
+    "app/(dashboard)/platform/saas/",
+    "app/(dashboard)/platform/customers/",
+    "components/platform/tenant-value-table.tsx",
+    "lib/saas/tenant-value-read.ts",
+    "tests/saas-value-ui.test.ts"
+  ],
+  "dependencies": [
+    "saas-value-snapshots"
+  ],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-10T22:35:49.991Z",
+  "updated_at": "2026-10-10T22:35:49.991Z",
+  "last_heartbeat": "2026-10-10T22:35:49.991Z",
+  "definition_of_done": []
+}
