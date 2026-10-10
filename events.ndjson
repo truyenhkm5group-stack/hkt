@@ -1422,3 +1422,4 @@
 {"at":"2026-10-10T04:43:25.143Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"OVERLAP_ACCEPTED","mission":"ai-settings-390","detail":"OVERLAP_ACCEPTED với ai-sales-settings-v2: phạm vi app/(dashboard)/ai/sales-chatbot/page.tsx, tests/ai-sales-settings-v2.test.ts — cách tích hợp: sửa tiếp của ai-sales-settings-v2 (đã gộp + deploy cd8ec778); lỗi lộ ra khi kiểm production"}
 {"at":"2026-10-10T04:43:41.652Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"ai-settings-390","detail":"fix/ai-settings-390 @ a5377c4c60ae · 1 lệnh kiểm thử"}
 {"at":"2026-10-10T04:44:12.404Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"ai-settings-390","detail":"#768 cho fix/ai-settings-390 @ a5377c4c60ae"}
+{"at":"2026-10-10T04:44:38.372Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#768 @ a5377c4c60ae · Một dòng lớp CSS lưới + khẳng định trong bài kiểm; đã thử trên production 622→382 px"}
