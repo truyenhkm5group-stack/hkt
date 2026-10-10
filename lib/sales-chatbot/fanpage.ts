@@ -1498,6 +1498,41 @@ export function unansweredCustomerMessages(msgs: readonly PancakeThreadMessage[]
 
 export type CatchUpResult = { scanned: number; threads: number; queued: number; reopened: number; replies: number; detail: string[] };
 
+/**
+ * ẢNH KHÁCH TỪ DANH SÁCH HỘI THOẠI của lượt quét lại (`catchUpFanpage` — đường đồng bộ ĐÃ CÓ, không job mới, không lịch mới). Webhook
+ * Pancake không mang trường ảnh (đo 10/10/2026: 5/5 `NO_AVATAR_FIELD`); danh sách hội thoại thì có, nhưng URL mang khoá ⇒ cùng lõi
+ * `pancakeAvatarFactsOf` (bỏ khoá ⇒ ref proxy) + `pancakeAvatarPatch` ghi vào `state` của hội thoại ĐÃ CÓ trong ERP — không mở hội
+ * thoại mới, không chạm `updated_at` (đồng hồ «nhân viên đang trả lời» của bot). Bản vá `null` (cùng ảnh, dấu còn hạn) ⇒ không ghi.
+ * Đường PHỤ: lỗi chỉ ghi nhật ký (KHÔNG in URL), lượt quét lại đi tiếp. Trả số hội thoại đã ghi.
+ */
+export async function noteListedAvatars(pageId: string, convs: readonly Record<string, unknown>[], at: Date): Promise<number> {
+  try {
+    const byKey = new Map<string, PancakeAvatarFacts>();
+    for (const conv of convs) {
+      const threadId = str(conv.id);
+      const type = str(conv.type).toUpperCase();
+      if (!threadId || (type && type !== "INBOX")) continue;
+      byKey.set(fanpageVisitorKey(pageId, threadId), pancakeAvatarFactsOf(conv, "POLL"));
+    }
+    if (!byKey.size) return 0;
+    const db = await getDb();
+    const c = schema.salesChatConversations;
+    const rows = await db.select({ id: c.id, visitorKey: c.visitorKey, state: c.state }).from(c).where(and(eq(c.channel, "FANPAGE"), inArray(c.visitorKey, [...byKey.keys()])));
+    let written = 0;
+    for (const r of rows) {
+      const facts = r.visitorKey ? byKey.get(r.visitorKey) : undefined;
+      const patch = facts ? pancakeAvatarPatch(r.state, facts, at) : null;
+      if (!patch) continue;
+      await db.update(c).set({ state: sql`${c.state} || ${JSON.stringify(patch)}::jsonb`, updatedAt: sql`${c.updatedAt}` }).where(eq(c.id, r.id));
+      written += 1;
+    }
+    return written;
+  } catch (error) {
+    console.error(`[hộp thư] không ghi được ảnh khách từ danh sách hội thoại của page ${pageId}: ${error instanceof Error ? error.name : "lỗi"}`);
+    return 0;
+  }
+}
+
 /** Một lượt quét lại cho tổ chức NGỮ CẢNH. Không ném. */
 export async function catchUpFanpage(deps: FanpageDeps = {}): Promise<CatchUpResult> {
   const out: CatchUpResult = { scanned: 0, threads: 0, queued: 0, reopened: 0, replies: 0, detail: [] };
@@ -1561,6 +1596,8 @@ export async function catchUpFanpage(deps: FanpageDeps = {}): Promise<CatchUpRes
     .sort((a, b) => (updatedOf(a) ?? 0) - (updatedOf(b) ?? 0));
   const maxAgeMs = CATCH_UP_LIMITS.maxAgeMinutes * 60_000;
   out.scanned = convs.length;
+  // Ảnh khách (ref proxy, không khoá) cho hội thoại đã có — đọc từ CHÍNH danh sách vừa tải, không thêm lượt gọi Pancake nào.
+  await noteListedAvatars(pageId, listed, now());
   const db = await getDb();
   const t = schema.salesChatInbound;
   const batch = candidates.slice(0, decision.threadBudget);
