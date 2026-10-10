@@ -1872,3 +1872,4 @@
 {"at":"2026-10-10T22:31:10.348Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"avatar-pancake-shape","detail":"fix/avatar-pancake-shape @ f01435033084 · 1 lệnh kiểm thử"}
 {"at":"2026-10-10T22:31:25.663Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#793 @ f01435033084 · Chỉ commit gộp main + tách mục khai; giữ cả sales-lifecycle-audit lẫn pancake-avatar-shape"}
 {"at":"2026-10-10T22:34:42.649Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"saas-value-snapshots","detail":"feat/saas-value-snapshots @ 194c977f59f2 · 1 lệnh kiểm thử"}
+{"at":"2026-10-10T22:35:14.422Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"saas-value-snapshots","detail":"#794 cho feat/saas-value-snapshots @ 194c977f59f2"}
