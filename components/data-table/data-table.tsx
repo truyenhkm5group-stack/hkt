@@ -62,6 +62,11 @@ export type DataTableProps<T> = {
    * `parseListParams`, nếu không máy chủ trả N dòng còn thanh phân trang tính theo 25.
    */
   defaultPageSize?: number;
+  /**
+   * Điện thoại (< 768px): vẽ mỗi dòng thành một THẺ thay cho bảng nhiều cột cuộn ngang. Bảng không khai ⇒ giữ bảng như
+   * cũ. Thẻ cả khối bấm được (đi `rowHref`); nút / liên kết bên trong vẫn chạy riêng như trên bảng.
+   */
+  mobileCard?: (row: T) => React.ReactNode;
 };
 
 export const tableParsers = {
@@ -98,7 +103,7 @@ function sortParsers(defaultSort: string, defaultDir: "asc" | "desc", defaultPag
   };
 }
 
-export function DataTable<T>({ columns, data, pageCount, total, rowHref, getRowId, emptyTitle = "Không có dữ liệu", emptyDescription, selectable, bulkActions, className, dense, footer, group, defaultSort = "", defaultDir = "desc", sortable, defaultPageSize = 25 }: DataTableProps<T>) {
+export function DataTable<T>({ columns, data, pageCount, total, rowHref, getRowId, emptyTitle = "Không có dữ liệu", emptyDescription, selectable, bulkActions, className, dense, footer, group, defaultSort = "", defaultDir = "desc", sortable, defaultPageSize = 25, mobileCard }: DataTableProps<T>) {
   const router = useRouter();
   const [expanded, setExpanded] = React.useState<Record<string, boolean>>({});
   const [allOpen, setAllOpen] = React.useState<boolean | null>(null);
@@ -217,6 +222,37 @@ export function DataTable<T>({ columns, data, pageCount, total, rowHref, getRowI
         hai dòng đầu (xem giải thích ở table-ux.ts).
       */}
       <div className={cn("overflow-hidden rounded-xl border bg-card shadow-[var(--shadow-card)] transition-opacity", dangTai && "pointer-events-none opacity-60")} aria-busy={dangTai}>
+          {mobileCard ? (
+            <ul className="divide-y md:hidden" aria-label="Danh sách">
+              {data.length ? (
+                data.map((row, i) => {
+                  const href = rowHref?.(row);
+                  return (
+                    <li
+                      key={getRowId ? getRowId(row) : i}
+                      className={cn("px-4 py-3", href && "cursor-pointer active:bg-row-hover")}
+                      onClick={(e) => {
+                        if (!href) return;
+                        if ((e.target as HTMLElement).closest("a,button,input,[role=checkbox],[data-no-row-link]")) return;
+                        router.push(href);
+                      }}
+                    >
+                      {mobileCard(row)}
+                    </li>
+                  );
+                })
+              ) : (
+                <li className="flex flex-col items-center gap-2 px-4 py-10 text-center">
+                  <span className="flex size-10 items-center justify-center rounded-full bg-muted text-muted-foreground">
+                    <Inbox className="size-5" />
+                  </span>
+                  <p className="text-sm font-semibold">{emptyTitle}</p>
+                  {emptyDescription ? <div className="max-w-sm text-xs text-muted-foreground">{emptyDescription}</div> : null}
+                </li>
+              )}
+            </ul>
+          ) : null}
+          <div className={cn(mobileCard && "max-md:hidden")}>
           <Table className={cn(dense && "[&_td]:py-1.5")}>
             <TableHeader>
               {table.getHeaderGroups().map((headerGroup) => (
@@ -338,6 +374,7 @@ export function DataTable<T>({ columns, data, pageCount, total, rowHref, getRowI
               )}
             </TableBody>
           </Table>
+          </div>
         {footer}
         <DataTablePagination page={params.page} pageSize={params.pageSize} pageCount={pageCount} total={total} onPageChange={(page) => void setParams({ page })} onPageSizeChange={(pageSize) => void setParams({ pageSize, page: 1 })} extraSizes={[defaultPageSize]} />
       </div>
