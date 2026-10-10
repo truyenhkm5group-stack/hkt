@@ -231,6 +231,7 @@ import { testCacheSemantics } from "./cache-semantics.test";
 import { testRefreshButton } from "./refresh-button.test";
 import { testCommandCatalog } from "./command-catalog.test";
 import { testExperienceProfile } from "./experience-profile.test";
+import { testDetailCrumb } from "./detail-crumb.test";
 import { testReportOverrideLatency } from "./report-override-latency.test";
 import { testActionRefreshOnce } from "./action-refresh-once.test";
 import { testPurchaseValuation } from "./purchase-valuation.test";
@@ -2174,6 +2175,7 @@ async function main() {
   await testRefreshButton();
   testCommandCatalog();
   testExperienceProfile();
+  testDetailCrumb();
   testReportOverrideLatency();
   testActionRefreshOnce();
   testPurchaseValuation();

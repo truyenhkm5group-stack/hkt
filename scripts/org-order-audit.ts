@@ -110,6 +110,55 @@ export function quantile(xs: readonly number[], q: number): number | null {
   return s[Math.min(s.length - 1, Math.floor(q * (s.length - 1) + 0.5))];
 }
 
+/**
+ * ═══ `--replies`: TIN KHÁCH NÀO KHÔNG ĐƯỢC AI TRẢ LỜI, VÀ BỎ Ở BƯỚC NÀO (10/10/2026) ═══
+ *
+ * Chủ shop HSLC báo «bot sót tin không trả lời». Mỗi tin khách vào `sales_chat_inbound` mang `status` + `note` của bước đã xử
+ * lý nó (bỏ qua vì page đã trả lời · nhường nhân viên · AI hỏng · gửi hỏng…), còn tin bot / page gửi ra là dòng `BOT_SENT` /
+ * `PAGE_REPLY` của cùng hội thoại. Tin khách KHÔNG có dòng trả lời nào sau nó (tới hết cửa sổ đọc) = khách đang bị bỏ — gom
+ * theo (status · note) để thấy bước nào nuốt tin, thay vì đoán từ mã.
+ */
+export type ReplyRow = { threadId: string; at: Date; note: string | null; status: string };
+const OUT_NOTES = new Set(["BOT_SENT", "PAGE_REPLY"]);
+/** Dòng không phải tin khách mới: lời bot / page, lịch sử chép lại. */
+const NOT_CUSTOMER_NOTES = new Set([...OUT_NOTES, "HISTORY"]);
+
+export type ReplyGap = { threadId: string; at: Date; status: string; note: string | null };
+export type ReplyGapReport = {
+  customer: number;
+  /** Tin khách có câu trả lời (bot hoặc page) sau nó — độ trễ phút tới câu đầu tiên. */
+  answeredLags: { bot: number[]; page: number[] };
+  /** Tin khách CHƯA có câu trả lời nào sau nó (bỏ tin trong `freshMs` cuối — lượt webhook còn đang lo). */
+  gaps: ReplyGap[];
+  fresh: number;
+};
+
+/** HÀM THUẦN. `rows` của MỘT hoặc nhiều hội thoại, chỉ tính tin khách trong [from, to). */
+export function replyGaps(rows: readonly ReplyRow[], from: Date, to: Date, now: Date, freshMs = 10 * 60_000): ReplyGapReport {
+  const out: ReplyGapReport = { customer: 0, answeredLags: { bot: [], page: [] }, gaps: [], fresh: 0 };
+  const byThread = new Map<string, ReplyRow[]>();
+  for (const r of rows) byThread.set(r.threadId, [...(byThread.get(r.threadId) ?? []), r]);
+  for (const list of byThread.values()) {
+    list.sort((a, b) => a.at.getTime() - b.at.getTime());
+    list.forEach((m, i) => {
+      if (NOT_CUSTOMER_NOTES.has(m.note ?? "") || m.at < from || m.at >= to) return;
+      out.customer += 1;
+      const reply = list.slice(i + 1).find((x) => OUT_NOTES.has(x.note ?? ""));
+      if (reply) {
+        const lag = Math.round(((reply.at.getTime() - m.at.getTime()) / 60_000) * 10) / 10;
+        (reply.note === "BOT_SENT" ? out.answeredLags.bot : out.answeredLags.page).push(lag);
+        return;
+      }
+      if (now.getTime() - m.at.getTime() < freshMs) {
+        out.fresh += 1;
+        return;
+      }
+      out.gaps.push({ threadId: m.threadId, at: m.at, status: m.status, note: m.note });
+    });
+  }
+  return out;
+}
+
 // ─────────────────────────── ĐỌC DỮ LIỆU ───────────────────────────
 
 const vnTime = (d: Date | null | undefined) => (d ? new Date(d.getTime() + VN_OFFSET_MS).toISOString().slice(11, 16) : "—");
@@ -136,6 +185,10 @@ async function main() {
   }
   const { day, from, to } = vnDayWindow(dayArg);
   console.log(`Tổ chức ${org.code} (${org.name}) · ngày ${day} (giờ VN) · ${from.toISOString()} → ${to.toISOString()}`);
+  if (args.includes("--replies")) {
+    await repliesReport(db, org.code, day, from, to);
+    process.exit(0);
+  }
 
   // 1. Đơn ERP trong ngày + 7 ngày trước.
   const o = schema.orders;
@@ -266,6 +319,60 @@ async function main() {
   for (const [src, xs] of lagBySource) tomTat(`Trễ (phút, tin khách cuối → đơn) «${src}»: n=${xs.length} · trung vị ${quantile(xs, 0.5) ?? "—"} · p90 ${quantile(xs, 0.9) ?? "—"} · max ${Math.max(...xs)}`);
   tomTat(`Job sales-followup: ${runs.length} lượt · ${failed} lỗi · khoảng hở lớn nhất ${Math.round(maxGap)} phút · ${errKinds.size} loại lỗi (chi tiết trong phần mã hoá)`);
   process.exit(0);
+}
+
+async function repliesReport(db: Db, code: string, day: string, from: Date, to: Date) {
+  const now = new Date();
+  const t = schema.salesChatInbound;
+  // Đọc thêm 6 giờ sau cửa sổ: tin khách 23:58 được trả lời 00:03 vẫn là ĐÃ trả lời.
+  const rows = await db
+    .select({ threadId: t.threadId, at: t.createdAt, note: t.note, status: t.status, text: t.text, name: t.customerName, kind: t.kind, transport: t.transport, attempts: t.attempts, lastError: t.lastError })
+    .from(t)
+    .where(and(gte(t.createdAt, new Date(from.getTime() - 6 * 3_600_000)), lt(t.createdAt, new Date(to.getTime() + 6 * 3_600_000))))
+    .orderBy(t.createdAt);
+  const rep = replyGaps(rows.map((r) => ({ threadId: r.threadId, at: new Date(r.at), note: r.note, status: r.status })), from, to, now);
+
+  // Mọi tin khách trong ngày theo (status · note) — bức tranh chung, không chỉ phần bị bỏ.
+  const all = new Map<string, number>();
+  for (const r of rows) {
+    const at = new Date(r.at);
+    if (NOT_CUSTOMER_NOTES.has(r.note ?? "") || at < from || at >= to) continue;
+    const k = `${r.status} · ${(r.note ?? "—").slice(0, 90)}`;
+    all.set(k, (all.get(k) ?? 0) + 1);
+  }
+  const gapKinds = new Map<string, number>();
+  for (const g of rep.gaps) {
+    const k = `${g.status} · ${(g.note ?? "—").slice(0, 90)}`;
+    gapKinds.set(k, (gapKinds.get(k) ?? 0) + 1);
+  }
+  const c = schema.salesChatConversations;
+  const gapThreads = [...new Set(rep.gaps.map((g) => g.threadId))];
+  const convs = gapThreads.length
+    ? await db
+        .select({ threadId: c.threadId, status: c.status, handoff: c.handoffReason, cooldown: c.humanCooldownUntil, lastError: c.lastError, lastBotAt: c.lastBotAt, lastStaffAt: c.lastStaffAt, state: c.state })
+        .from(c)
+        .where(sql`${c.threadId} in (${sql.join(gapThreads.map((x) => sql`${x}`), sql`, `)})`)
+    : [];
+  const convOf = new Map(convs.map((x) => [x.threadId ?? "", x]));
+
+  console.log(`\n══ TIN KHÁCH TRONG NGÀY THEO BƯỚC XỬ LÝ (status · note): ${rep.customer} ══`);
+  for (const [k, n] of [...all].sort((a, b) => b[1] - a[1])) console.log(`${n} · ${k}`);
+  console.log(`\n══ TIN KHÁCH KHÔNG CÓ CÂU TRẢ LỜI NÀO SAU NÓ: ${rep.gaps.length} tin · ${gapThreads.length} hội thoại ══`);
+  for (const [k, n] of [...gapKinds].sort((a, b) => b[1] - a[1])) console.log(`${n} · ${k}`);
+  for (const th of gapThreads) {
+    const cv = convOf.get(th);
+    const st = (cv?.state ?? {}) as Record<string, unknown>;
+    const control = st.control ? JSON.stringify(st.control).slice(0, 120) : "—";
+    console.log(`\n…${th.slice(-10)} · hội thoại ${cv ? `${cv.status}${cv.handoff ? ` (${cv.handoff.slice(0, 70)})` : ""} · nhường tới ${vnDateTime(cv.cooldown)} · bot nhắn cuối ${vnDateTime(cv.lastBotAt)} · nhân viên cuối ${vnDateTime(cv.lastStaffAt)} · điều khiển ${control}${cv.lastError ? ` · lỗi «${cv.lastError.slice(0, 120)}»` : ""}` : "CHƯA mở trong ERP"}`);
+    for (const m of rows.filter((r) => r.threadId === th).slice(-10)) {
+      const who = m.note === "BOT_SENT" ? "BOT" : m.note === "PAGE_REPLY" ? "PAGE" : m.note === "HISTORY" ? "LỊCH SỬ" : "KHÁCH";
+      const meta = who === "KHÁCH" ? ` [${m.status}${m.note ? ` · ${m.note.slice(0, 70)}` : ""}${m.attempts ? ` · thử ${m.attempts}` : ""}${m.lastError ? ` · lỗi ${m.lastError.slice(0, 80)}` : ""}${m.transport ? ` · ${m.transport}` : ""}${m.kind !== "INBOX" ? ` · ${m.kind}` : ""}]` : "";
+      console.log(`    ${vnDateTime(new Date(m.at))} ${who}${meta}: ${m.text.replace(/\s+/g, " ").slice(0, 140)}`);
+    }
+  }
+  const med = (xs: number[]) => quantile(xs, 0.5) ?? "—";
+  tomTat(`Tổ chức ${code} · ngày ${day}: tin khách ${rep.customer} · bot trả lời ${rep.answeredLags.bot.length} (trung vị ${med(rep.answeredLags.bot)} phút · p90 ${quantile(rep.answeredLags.bot, 0.9) ?? "—"}) · page/người trả lời ${rep.answeredLags.page.length} · KHÔNG ai trả lời ${rep.gaps.length} tin / ${gapThreads.length} hội thoại · còn mới ${rep.fresh}`);
+  for (const [k, n] of [...gapKinds].sort((a, b) => b[1] - a[1]).slice(0, 8)) tomTat(`Không trả lời — ${n} · ${k}`);
 }
 
 // Chỉ chạy khi được gọi THẲNG từ dòng lệnh — `import` từ bài kiểm không được kéo theo `process.exit`.
