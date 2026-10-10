@@ -14,6 +14,7 @@ import { AI_CLASSES_CAN_NGUOI, classifyAiError, type AiErrorClass, type AiFailur
 import { bookingConfigZ, DEFAULT_BOOKING_CONFIG } from "@/lib/constants/booking";
 import { DEFAULT_FREE_SHIPPING } from "@/lib/sales-chatbot/shipping";
 import { DEFAULT_VOLUME_DISCOUNT } from "@/lib/sales-chatbot/volume-discount";
+import { DEFAULT_SALES_POLICIES, SALES_KNOWLEDGE_LIMITS as KL } from "@/lib/sales-chatbot/knowledge";
 
 export const SALES_CHATBOT_SETTING_KEY = "ai.salesChatbot";
 
@@ -104,6 +105,28 @@ export const SALES_BOT_FAILURE_LABEL: Record<AiFailureClass, string> = {
 export const SALES_CHATBOT_LIMITS = { toolRounds: 10, historyMessages: 40, turnsPerConversation: 60, webMessagesPerVisitorPer10Min: 20, messageMax: 1000 } as const;
 
 const timeZ = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "Giờ dạng HH:MM");
+
+/** Ngày YYYY-MM-DD có thật (không nhận 2026-02-30). */
+const dateKeyZ = z
+  .string()
+  .regex(/^\d{4}-\d{2}-\d{2}$/, "Ngày dạng YYYY-MM-DD")
+  .refine((d) => {
+    const t = new Date(`${d}T00:00:00Z`);
+    return !Number.isNaN(t.getTime()) && t.toISOString().slice(0, 10) === d;
+  }, "Ngày không có thật");
+
+/** KIẾN THỨC CỦA SHOP (sổ AIS-05, lib/sales-chatbot/knowledge.ts): ba ô có cấu trúc — mặc định RỖNG. */
+const faqItemZ = z.object({ q: z.string().trim().min(2, "Câu hỏi ít nhất 2 ký tự").max(KL.faqQuestion), a: z.string().trim().min(1, "Câu đáp không được trống").max(KL.faqAnswer) }).strict();
+const policyTextZ = z.string().trim().max(KL.policy);
+const promotionZ = z
+  .object({
+    title: z.string().trim().min(2, "Tên khuyến mãi ít nhất 2 ký tự").max(KL.promoTitle),
+    content: z.string().trim().min(2, "Nội dung khuyến mãi ít nhất 2 ký tự").max(KL.promoContent),
+    from: dateKeyZ.nullable(),
+    to: dateKeyZ.nullable(),
+  })
+  .strict()
+  .refine((p) => !p.from || !p.to || p.from <= p.to, { message: "«Từ ngày» phải trước hoặc bằng «Đến ngày»", path: ["to"] });
 
 export const salesChatbotConfigZ = z
   .object({
@@ -197,6 +220,13 @@ export const salesChatbotConfigZ = z
     productFields: z.array(z.string().regex(/^[a-z][a-z0-9_]{1,40}$/)).max(30).default([]),
     extraInstructions: z.string().trim().max(1500).default(""),
     /**
+     * KIẾN THỨC CỦA SHOP (sổ AIS-05): bot CHỈ trả lời câu thường gặp / chính sách / khuyến mãi theo đúng chữ ở đây, không có thì
+     * chuyển người. Khuyến mãi chữ là MÔ TẢ — số tiền giảm vẫn chỉ từ công cụ tính giỏ; hết hạn (giờ VN) tự không vào lời nhắc.
+     */
+    faq: z.array(faqItemZ).max(KL.faqItems).default([]),
+    policies: z.object({ returns: policyTextZ, warranty: policyTextZ, shipping: policyTextZ, payment: policyTextZ }).strict().default(DEFAULT_SALES_POLICIES),
+    promotions: z.array(promotionZ).max(KL.promotions).default([]),
+    /**
      * BÁO GIÁ THEO BẢNG GIÁ SỈ (0188, docs/verticals/seafood-os.md). TẮT ⇒ bot chỉ có giá LẺ và chuyển người với mọi
      * câu hỏi sỉ (như trước). BẬT ⇒ đơn giá của bot = `quoteUnitPrice` (bảng của khách → bảng mặc định → giá lẻ) — CÙNG
      * hàm với form đơn tay; bot nói được bậc «mua từ N». Mặc định TẮT: cho bot tự báo giá sỉ là quyết định của chủ shop.
@@ -239,6 +269,9 @@ export const DEFAULT_SALES_CHATBOT_CONFIG: SalesChatbotConfig = {
   allowedTools: [...SALES_TOOLS],
   productFields: ["package_size", "net_weight", "selling_unit", "food_category", "storage_instruction", "usage_instruction"],
   extraInstructions: "",
+  faq: [],
+  policies: DEFAULT_SALES_POLICIES,
+  promotions: [],
   wholesalePricing: false,
   sellWithoutStockCheck: false,
   booking: DEFAULT_BOOKING_CONFIG,
