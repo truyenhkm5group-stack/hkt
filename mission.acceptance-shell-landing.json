@@ -1,0 +1,27 @@
+{
+  "schema": 1,
+  "mission_id": "acceptance-shell-landing",
+  "title": "Nghiệm thu bước C theo luật trang nhà #752 (Tổng quan khi thiết lập chưa xong)",
+  "business_goal": "",
+  "status": "RUNNING",
+  "priority": "P2",
+  "risk": "MEDIUM",
+  "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "worker": null,
+  "worktree": null,
+  "branch": "fix/acceptance-shell-landing",
+  "base_sha": "9ee6c6a19bbc6d504a044b93bd6c451fe9e6bf74",
+  "domains": [],
+  "owned_paths": [
+    "lib/saas/acceptance.ts",
+    "tests/saas-acceptance.test.ts"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-10T05:21:19.267Z",
+  "updated_at": "2026-10-10T05:21:19.267Z",
+  "last_heartbeat": "2026-10-10T05:21:19.267Z",
+  "definition_of_done": []
+}
