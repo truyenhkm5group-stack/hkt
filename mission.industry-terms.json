@@ -3,7 +3,7 @@
   "mission_id": "industry-terms",
   "title": "Ngành thực phẩm/hải sản không thấy Size/Màu ở lịch sử bán · khung đơn · bộ lọc — nhãn theo hồ sơ ngành",
   "business_goal": "",
-  "status": "RUNNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -24,7 +24,18 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-10T08:19:08.839Z",
-  "updated_at": "2026-10-10T08:19:08.839Z",
-  "last_heartbeat": "2026-10-10T08:19:08.839Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-10T10:18:23.032Z",
+  "last_heartbeat": "2026-10-10T10:18:23.032Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "fix/industry-terms",
+    "sha": "70ca5cd6afbc80086c4d347b61d124e7de5d12aa",
+    "at": "2026-10-10T10:18:23.032Z",
+    "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+    "title": "Ngành thực phẩm/hải sản không thấy Size/Màu ở lịch sử bán · khung đơn · bộ lọc — nhãn theo hồ sơ ngành",
+    "summary": "Shop thực phẩm thấy «Quy cách» thay «Size» ở dòng đơn trang sản phẩm, khung Đơn đang chốt, bộ lọc hiệu quả mẫu mã, danh sách/chi tiết đơn, khách, vận đơn, báo cáo hoàn, phiếu đổi trả, tin báo nhóm, trạm đếm hàng hoàn, CSV; chỉ đổi nhãn, giữ giá trị",
+    "tests": [
+      "typecheck · lint sạch · npm test TẤT CẢ KIỂM THỬ ĐẠT · build đạt · industry-terms + experience-profile đạt"
+    ]
+  }
 }
