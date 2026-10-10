@@ -493,6 +493,7 @@ import { testInboxAdvanced } from "./inbox-advanced.test";
 import { testInboxComposer } from "./inbox-composer.test";
 import { testInboxV2A } from "./inbox-v2-a.test";
 import { testInboxSemanticsV3 } from "./inbox-semantics-v3.test";
+import { testInboxBulkAi } from "./inbox-bulk-ai.test";
 import { testSalesInboxHistory } from "./sales-inbox-history.test";
 import { testE2eAiSalesPlatform } from "./e2e-ai-sales-platform.test";
 import { testSalesExperimentReport } from "./sales-experiment-report.test";
@@ -2876,6 +2877,8 @@ async function main() {
   await testInboxV2A();
   // INBOX-SEMANTICS-V3 (chủ shop 10/10/2026): bốn khái niệm tách riêng — chưa đọc (AI trả lời không xoá) · chờ trả lời · cần người thật · người đang xử lý; ma trận 20 hội thoại × mọi bộ lọc — tổ chức `hop-thu-sem-v3`.
   await testInboxSemanticsV3();
+  // «Trả tất cả cho AI» (chủ shop 10/10/2026, mục D): quyền · cách ly tổ chức · trả được / bị chặn theo lý do · sự kiện + nhật ký người bấm · chạy lại 0 dòng mới — `hop-thu-bulk-a` / `hop-thu-bulk-b`.
+  await testInboxBulkAi();
   // Nhập đủ lịch sử hội thoại vào hộp thư (0221): tổ chức THẬT `hop-thu-lich-su`, Pancake giả, tự cấp, tự dọn.
   await testSalesInboxHistory();
   // E2E trọn vòng: tin khách → AI → đơn → giao → Hiệu quả → mốc kích hoạt → sổ dùng → Owner Cockpit (tổ chức `e2e-shop`).

@@ -4,6 +4,7 @@ import { PageHeader } from "@/components/page-header";
 import { can, requirePermission } from "@/lib/auth/session";
 import { assignableUsers, inboxAssignees, inboxPages, listInbox } from "@/lib/sales-chatbot/inbox";
 import { inboxThreadPayload } from "@/lib/sales-chatbot/inbox-thread-payload";
+import { countHumanHandled } from "@/lib/sales-chatbot/bulk-return-ai";
 import { listLabels } from "@/lib/sales-chatbot/inbox-labels";
 import { INBOX_CHANNELS, INBOX_FILTERS, INBOX_LIST_MAX, INBOX_PERIODS, inboxHref, type InboxChannel, type InboxFilter, type InboxFilterState, type InboxHandler, type InboxPeriod } from "@/lib/sales-chatbot/inbox-shared";
 import { listPageRoutes } from "@/lib/sales-chatbot/channel-ownership";
@@ -11,6 +12,7 @@ import { humanCooldownMinutes } from "@/lib/sales-chatbot/conversation-control";
 import { organizationLevelPack } from "@/lib/sales-chatbot/levels";
 import { CUSTOMER_LEVELS, levelsForPack, type CustomerLevel } from "@/lib/sales-chatbot/levels-shared";
 import { InboxAutoRefresh } from "./auto-refresh";
+import { BulkReturnToAi } from "./bulk-return-ai";
 import { ConversationRows } from "./conversation-list";
 import { InboxFilters } from "./inbox-filters";
 import { PageRoutesPanel } from "./page-routes";
@@ -78,7 +80,7 @@ export default async function SalesInboxPage({ searchParams }: { searchParams: P
   // Bấm sang hội thoại khác KHÔNG đi qua đây (thread-pane.tsx — chỉ tải hội thoại); đây là lối mở bằng đường dẫn / tự làm mới.
   const thread = selected ? await inboxThreadPayload(user, selected) : null;
   const canManage = can(user, "ai_sales:manage");
-  const [list, users, assignees, pack, routes, cooldown, orderGate] = await Promise.all([
+  const [list, users, assignees, pack, routes, cooldown, orderGate, bulkCount] = await Promise.all([
     listInbox(user, { filter, channel, q, label, page, phone, level, assignee, period, from, to, limit, handler }),
     assignableUsers(user),
     inboxAssignees(user),
@@ -87,6 +89,8 @@ export default async function SalesInboxPage({ searchParams }: { searchParams: P
     humanCooldownMinutes(),
     // Nút nhanh «Xác nhận đơn» / «Huỷ đơn» trong panel đơn: CÙNG cổng với sửa đơn tay (`orders:write`, tổ chức không đồng bộ đơn).
     manualOrderGate(user),
+    // «Trả tất cả cho AI» (chủ shop 10/10/2026): số hội thoại đang do người xử lý — `null` khi người xem không có quyền trả cho AI.
+    countHumanHandled(user).catch(() => null),
   ]);
   const levels = levelsForPack(pack);
   const advanced = Boolean(channel || label || assignee || period || phone === "NONE");
@@ -140,6 +144,7 @@ export default async function SalesInboxPage({ searchParams }: { searchParams: P
                   </Link>
                 </>
               }
+              bulk={bulkCount ? <BulkReturnToAi count={bulkCount} /> : null}
               manage={canManage ? <PageRoutesPanel routes={routes} pageNames={Object.fromEntries(pages.map((p) => [p.id, p.name]))} cooldownMinutes={cooldown} canManage={canManage} /> : null}
             />
             <ul className="min-h-0 flex-1 divide-y divide-foreground/[0.06] overflow-y-auto overscroll-contain" data-testid="inbox-list">

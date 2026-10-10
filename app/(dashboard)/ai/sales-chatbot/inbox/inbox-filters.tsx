@@ -50,12 +50,14 @@ type Props = {
   tools?: ReactNode;
   /** Phần quản lý (đường nhận tin & AI nhường) — chỉ người quản lý; nằm cuối bảng «Lọc». */
   manage?: ReactNode;
+  /** «Trả tất cả cho AI» — một dòng dưới hàng thẻ, chỉ khi có quyền và có hội thoại đang do người xử lý (máy chủ quyết). */
+  bulk?: ReactNode;
 };
 
 const SELECT = "h-9 w-full min-w-0 rounded-md border border-foreground/15 bg-card px-2 text-[13px]";
 const FIELD = "space-y-1 text-[12px] font-medium text-muted-foreground";
 
-export function InboxFilters({ state, counts, phoneCount, levelCounts, levels, pages, labels, users, tools, manage }: Props) {
+export function InboxFilters({ state, counts, phoneCount, levelCounts, levels, pages, labels, users, tools, manage, bulk }: Props) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const advanced = inboxAdvancedCount(state);
@@ -286,6 +288,7 @@ export function InboxFilters({ state, counts, phoneCount, levelCounts, levels, p
           </Link>
         ) : null}
       </div>
+      {bulk}
     </div>
   );
 }
