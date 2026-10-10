@@ -1,16 +1,16 @@
 {
   "schema": 1,
   "mission_id": "ai-fallback-tenant",
-  "title": "Bộ đệm lùi model AI theo tổ chức + kết nối (Team Premium F2) — sau nhánh giá gói của phiên bot vì cùng engine.ts",
+  "title": "Bộ đệm lùi model AI theo tổ chức + kết nối (Team Premium F2)",
   "business_goal": "",
-  "status": "BACKLOG",
+  "status": "RUNNING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
   "worker": null,
   "worktree": null,
   "branch": "fix/ai-fallback-tenant",
-  "base_sha": null,
+  "base_sha": "889d6e559c7fd8c10081120adeafc71822f38685",
   "domains": [],
   "owned_paths": [
     "lib/sales-chatbot/engine.ts",
@@ -21,7 +21,7 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-10T09:06:06.651Z",
-  "updated_at": "2026-10-10T09:06:06.651Z",
-  "last_heartbeat": "2026-10-10T09:06:06.651Z",
+  "updated_at": "2026-10-10T15:34:48.055Z",
+  "last_heartbeat": "2026-10-10T15:34:48.055Z",
   "definition_of_done": []
 }
