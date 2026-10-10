@@ -1,74 +1,126 @@
 import Link from "next/link";
-import { ExecutionBadge, ExecutionProgress, MissionStatusBadge } from "@/app/(dashboard)/tech/control-plane-bits";
+import { MissionControlTable } from "@/app/(dashboard)/tech/missions/mission-control-table";
 import { MissionForm } from "@/app/(dashboard)/tech/missions/mission-form";
 import { TechNav } from "@/app/(dashboard)/tech/tech-nav";
-import { TechPriorityBadge } from "@/app/(dashboard)/tech/badges";
+import { DataTableToolbar } from "@/components/data-table/toolbar";
 import { PageHeader } from "@/components/page-header";
-import { EmptyState } from "@/components/ui-bits";
+import { SyncButton } from "@/components/sync-button";
 import { can, requirePermission } from "@/lib/auth/session";
-import type { TechPriority } from "@/lib/constants/tech";
-import type { TechMissionStatus } from "@/lib/constants/tech-control-plane";
-import { formatTimeAgo } from "@/lib/format";
-import { listTechMissions, listTechProjects } from "@/lib/queries/tech-control-plane";
+import {
+  MISSION_CONTROL_FILTER_KEYS,
+  MISSION_CONTROL_LABEL,
+  MISSION_CONTROL_SORTABLE,
+  REGISTRY_STALE_HOURS,
+  TECH_REGISTRY_BRANCH,
+  registryProjectLabel,
+} from "@/lib/constants/tech-registry";
+import { formatDateTime, formatNumber, formatTimeAgo } from "@/lib/format";
+import { listTechProjects } from "@/lib/queries/tech-control-plane";
+import { listMissionControl, registrySyncInfo, shortOwner } from "@/lib/queries/tech-registry";
+import { parseListParams, type SearchParams } from "@/lib/search-params";
 
 export const metadata = { title: "Sứ mệnh · Phòng Tech AI" };
 
-export default async function TechMissionsPage({ searchParams }: { searchParams: Promise<Record<string, string | undefined>> }) {
+/** Sổ đọc tay ⇒ quá chừng này phút là in cảnh báo «sổ có thể đã cũ» ngay đầu trang. */
+const REGISTRY_READ_STALE_MINUTES = 30;
+
+/**
+ * MISSION CONTROL — mọi sứ mệnh ở MỘT chỗ: sổ Tech Room (nguồn sự thật điều phối, chiếu chỉ đọc) + sứ mệnh tạo tay
+ * trong `/tech`. Trạng thái theo bộ chuẩn của chủ shop; «xong» chỉ khi có bằng chứng kiểm hành vi trên production.
+ */
+export default async function TechMissionsPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
+  const raw = await searchParams;
   const user = await requirePermission("tech:view");
   const canManage = can(user, "tech:manage");
-  const sp = await searchParams;
-  const includeClosed = sp.all === "1";
-  const [missions, projects] = await Promise.all([listTechMissions({ includeClosed }), listTechProjects()]);
+  const params = parseListParams(raw, { defaultSort: "updatedAt", filterKeys: MISSION_CONTROL_FILTER_KEYS, sortable: MISSION_CONTROL_SORTABLE, defaultPageSize: 50 });
+  const now = new Date();
+  const [list, sync, projects] = await Promise.all([listMissionControl(params, now), registrySyncInfo(), listTechProjects()]);
   const activeProjects = projects.filter((p) => p.active).map((p) => ({ key: p.key, name: p.name }));
+  const f = list.facets;
+  const count = (k: string) => f.state.find(([s]) => s === k)?.[1] ?? 0;
+  const soCu = !sync.lastAt || now.getTime() - sync.lastAt.getTime() > REGISTRY_READ_STALE_MINUTES * 60_000;
 
   return (
     <div className="space-y-5">
       <PageHeader
         eyebrow="Phòng Tech AI"
         title="Sứ mệnh"
-        description="Nhóm việc giao được, mỗi sứ mệnh có định nghĩa XONG kiểm được"
+        description={`${formatNumber(list.totalAll)} sứ mệnh · ${count("RUNNING")} đang chạy · ${count("WAITING_APPROVAL")} chờ anh quyết · ${count("COMPLETED")} xong đã kiểm production · ${count("DONE_UNVERIFIED")} DONE chưa kiểm production`}
+        actions={
+          <div className="flex flex-wrap gap-2">
+            {canManage && sync.configured ? <SyncButton job="tech-registry-sync" label="Đọc lại sổ" wait /> : null}
+            {canManage ? <MissionForm projects={activeProjects} /> : null}
+          </div>
+        }
         hint={
           <>
-            Sứ mệnh chỉ lưu QUYẾT ĐỊNH (lập kế hoạch · đang chạy · tạm dừng · xong · huỷ). Trạng thái thi hành
-            tính lại từ các việc mỗi lần mở trang, ưu tiên điều bạn cần biết nhất: chờ chủ shop &gt; có việc đỏ &gt;
-            bị chặn &gt; đang chạy. Tạm dừng là cái phanh: worker thôi nhận việc mới của sứ mệnh đó.
+            Nguồn sự thật là <b>sổ Tech Room</b> (nhánh <code>{TECH_REGISTRY_BRANCH}</code>, ghi bằng <code>npm run ai -- …</code>).
+            Trang này CHỈ ĐỌC sổ — muốn đổi trạng thái thì đổi ở sổ rồi bấm «Đọc lại sổ». <b>Xong</b> chỉ khi có bằng
+            chứng kiểm hành vi thật trên production; sổ ghi DONE mà chỉ có health / phiên bản thì hiện «DONE (chưa kiểm
+            production)». «Đứng im» = đang chạy mà không có nhịp / cập nhật quá {REGISTRY_STALE_HOURS} giờ (tính lúc mở
+            trang). Dự án suy từ tiền tố mã sứ mệnh — sổ chưa có trường dự án.
           </>
         }
-        actions={canManage ? <MissionForm projects={activeProjects} /> : null}
       />
       <TechNav />
 
-      <div className="flex items-center justify-end text-xs">
-        <Link href={includeClosed ? "/tech/missions" : "/tech/missions?all=1"} className="font-semibold text-primary hover:underline">
-          {includeClosed ? "Chỉ sứ mệnh đang mở" : "Xem cả sứ mệnh đã đóng"}
-        </Link>
+      <div className={`rounded-xl border px-3 py-2 text-xs ${soCu ? "border-amber-300 bg-amber-50 text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200" : "bg-card text-muted-foreground"}`}>
+        {!sync.configured ? (
+          <>Chưa đọc được sổ: {sync.reason}</>
+        ) : sync.lastAt ? (
+          <>
+            Đọc sổ lần cuối <b>{formatTimeAgo(sync.lastAt)}</b> ({formatDateTime(sync.lastAt)})
+            {sync.commitSha ? (
+              <>
+                {" "}
+                · commit sổ <span className="font-mono">{sync.commitSha.slice(0, 7)}</span>
+              </>
+            ) : null}{" "}
+            · {sync.repo}
+            {soCu ? <> — sổ đọc TAY (chưa có lịch tự động), số trên trang có thể đã cũ. Bấm «Đọc lại sổ».</> : null}
+          </>
+        ) : (
+          <>Chưa đọc sổ lần nào — bảng dưới chỉ có sứ mệnh tạo tay. Bấm «Đọc lại sổ» để nạp {sync.repo ? `sổ của ${sync.repo}` : "sổ"}.</>
+        )}
       </div>
 
-      {missions.length === 0 ? (
-        <EmptyState title="Chưa có sứ mệnh nào" description="Tạo sứ mệnh từ một mục tiêu, hoặc tạo sứ mệnh lẻ cho việc kỹ thuật không thuộc mục tiêu nào." />
-      ) : (
-        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-          {missions.map((m) => (
-            <Link key={m.id} href={`/tech/missions/${m.id}`} className="block rounded-xl border bg-card p-4 shadow-[var(--shadow-card)] transition-colors hover:bg-muted/40">
-              <div className="flex flex-wrap items-center gap-1.5">
-                <span className="text-xs font-semibold text-muted-foreground">{m.code}</span>
-                <MissionStatusBadge status={m.status as TechMissionStatus} />
-                <TechPriorityBadge priority={m.priority as TechPriority} />
-              </div>
-              <p className="mt-1.5 font-semibold leading-snug">{m.title}</p>
-              <p className="mt-0.5 text-xs text-muted-foreground">
-                {m.goal ? `${m.goal.code} · ${m.goal.title}` : "Sứ mệnh lẻ"} · {m.project?.name ?? "chưa gắn dự án"} · {formatTimeAgo(m.updatedAt)}
-              </p>
-              <div className="mt-2">
-                <ExecutionBadge state={m.execution.state} />
-              </div>
-              <div className="mt-2">
-                <ExecutionProgress execution={m.execution} />
-              </div>
-            </Link>
-          ))}
-        </div>
-      )}
+      <DataTableToolbar
+        searchPlaceholder="Mã, tiêu đề, nhánh…"
+        period={false}
+        quickCount={3}
+        facets={[
+          {
+            key: "state",
+            label: "Trạng thái",
+            options: [
+              ...f.state.map(([s, n]) => ({ value: s, label: MISSION_CONTROL_LABEL[s], count: n })),
+              ...(f.stale ? [{ value: "STALE", label: "Đứng im (đang chạy, không nhịp)", count: f.stale }] : []),
+            ],
+          },
+          { key: "project", label: "Dự án", options: f.project.map(([p, n]) => ({ value: p, label: registryProjectLabel(p), count: n })) },
+          { key: "priority", label: "Ưu tiên", options: f.priority.map(([p, n]) => ({ value: p, label: p, count: n })) },
+          { key: "owner", label: "Phụ trách", options: f.owner.map(([o, n]) => ({ value: o, label: o ? shortOwner(o) : "—", count: n })) },
+          {
+            key: "source",
+            label: "Nguồn",
+            options: [
+              ...f.source.map(([s, n]) => ({ value: s, label: s === "REGISTRY" ? "Sổ Tech Room" : "Tạo tay trong /tech", count: n })),
+              { value: "REMOVED", label: "Gồm cả sứ mệnh đã biến khỏi sổ" },
+            ],
+          },
+        ]}
+        resultLabel={`${formatNumber(list.total)} sứ mệnh`}
+      />
+
+      <MissionControlTable rows={list.rows} pageCount={list.pageCount} total={list.total} repo={sync.repo} />
+
+      <p className="text-[11px] text-muted-foreground">
+        Mục chờ anh quyết cũng hiện ở{" "}
+        <Link href="/tech/needs-owner" className="font-semibold text-primary hover:underline">
+          Cần chủ shop
+        </Link>
+        .
+      </p>
     </div>
   );
 }
