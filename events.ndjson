@@ -1486,3 +1486,4 @@
 {"at":"2026-10-10T10:39:15.644Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"sec-caddy-ghn-ghtk","detail":"#774 @ 645f9a45c4ef → bc5dacbff629 (MERGE_ISOLATED · HIGH · gates success)"}
 {"at":"2026-10-10T10:40:08.040Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DEPLOY_DISPATCHED","detail":"bc5dacbff629 · run 38045682266 https://github.com/truyenhkm5group-stack/hkt/actions/runs/38045682266"}
 {"at":"2026-10-10T11:24:53.507Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DEPLOY_DISPATCHED","detail":"8232c50e7d43 · run 38048305155 https://github.com/truyenhkm5group-stack/hkt/actions/runs/38048305155"}
+{"at":"2026-10-10T11:47:25.616Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"industry-terms","detail":"#775 @ 70ca5cd6afbc → b85aba58670f (MERGE_NOW · MEDIUM · gates success)"}
