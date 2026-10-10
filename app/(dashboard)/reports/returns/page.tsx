@@ -30,6 +30,8 @@ import { cn } from "@/lib/utils";
 import { requireResource } from "@/lib/auth/scope-guard";
 import { loadReturnsPage, returnsPageParams, withDefaultReturnsBasis } from "@/lib/queries/returns-report-page";
 import { ScopeDenied } from "@/components/scope-denied";
+import { displayVariationText, withDisplayVariation } from "@/lib/constants/experience-profile";
+import { readDisplayProfile } from "@/lib/experience/profile";
 
 export const metadata = { title: "Tỷ lệ giao thành công theo mã hàng" };
 
@@ -66,6 +68,9 @@ export default async function ReturnRatePage({ searchParams }: { searchParams: P
   const thamSo = returnsPageParams(raw);
   const { params, minShipped, variantKey, giaTriDon, dangLocGiaTri, basis, codes, marketerIds, openReason, openGroup, openProduct, reasonFilter } = thamSo;
   const { rows, total, pageCount, all, productRows, loiBang, summary, variantOrders, theoNguon, reasonReport, danhMucMa, danhSachMarketer, logistics, intel, theoBacGia } = await loadReturnsPage(thamSo);
+  // Hồ sơ ngành chỉ để đổi NHÃN chữ biến thể (shop thực phẩm: «Size: 1kg» ⇒ «Quy cách: 1kg») — đổi trên DỮ LIỆU trước khi truyền
+  // xuống bảng client; KHÔNG đổi trong `loadReturnsPage` vì khoá đệm của nó dùng chung với job giữ ấm.
+  const displayProfile = await readDisplayProfile();
 
   const selected = variantKey ? all.find((r) => r.key === variantKey) : null;
 
@@ -343,12 +348,12 @@ export default async function ReturnRatePage({ searchParams }: { searchParams: P
       ) : null}
 
       {/* ═════════ B. GTC THEO MÃ HÀNG ═════════ */}
-      <ReturnRateTable rows={rows} productRows={productRows} pageCount={pageCount} total={total} baseQuery={baseQuery} probabilities={probabilities} />
+      <ReturnRateTable rows={withDisplayVariation(rows, displayProfile)} productRows={productRows} pageCount={pageCount} total={total} baseQuery={baseQuery} probabilities={probabilities} />
 
       {variantKey ? (
         <div id="chi-tiet">
           <SectionCard
-            title={selected ? `Đơn của ${selected.sku || selected.productName}${selected.variationDetail ? ` · ${selected.variationDetail}` : ""}` : "Đơn của mã hàng đã chọn"}
+            title={selected ? `Đơn của ${selected.sku || selected.productName}${selected.variationDetail ? ` · ${displayVariationText(selected.variationDetail, displayProfile)}` : ""}` : "Đơn của mã hàng đã chọn"}
             description={
               selected
                 ? `${formatNumber(selected.delivered)} giao thành công · ${formatNumber(selected.returned)} không thành công · ${formatNumber(selected.inTransit)} chưa kết thúc · ${params.period.label.toLowerCase()} (tối đa 300 đơn, đơn không thành công xếp trước)`

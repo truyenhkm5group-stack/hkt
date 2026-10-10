@@ -150,14 +150,15 @@ export function specOf(attributes: unknown): string {
 /** Nhãn của hai cột cũ `size` / `color` theo hồ sơ. Ngành không có ô Size thì cột `size` cũ đang giữ QUY CÁCH (dữ liệu trước
  *  #755) ⇒ gọi nó bằng nhãn ô quy cách của hồ sơ. Cột `color` không có ô tương đương ⇒ giữ nhãn cũ (nếu có giá trị thì đó là
  *  dữ liệu thật). Hàm THUẦN. */
-export function legacyAttributeLabels(profile: Pick<ExperienceProfile, "variantFields">): { size: string; color: string } {
-  const by = (s: VariantFieldStorage) => profile.variantFields.find((f) => f.storage === s)?.label;
+export function legacyAttributeLabels(profile: Pick<ExperienceProfile, "variantFields"> | null | undefined): { size: string; color: string } {
+  // Chưa đọc được hồ sơ ⇒ nhãn cũ (Size / Màu) — giao diện như trước, không đoán ngành.
+  const by = (s: VariantFieldStorage) => profile?.variantFields.find((f) => f.storage === s)?.label;
   return { size: by("size") ?? by("spec") ?? SIZE.label, color: by("color") ?? COLOR.label };
 }
 
 /** Tên cột «mẫu mã» của một bảng: thời trang «Màu / Size», ngành khác dùng tên gọi mẫu mã của hồ sơ («Quy cách»). */
-export function variantColumnLabel(profile: Pick<ExperienceProfile, "sizeColorMatrix" | "variantTerm">): string {
-  return profile.sizeColorMatrix ? `${COLOR.label} / ${SIZE.label}` : profile.variantTerm;
+export function variantColumnLabel(profile: Pick<ExperienceProfile, "sizeColorMatrix" | "variantTerm"> | null | undefined): string {
+  return !profile || profile.sizeColorMatrix ? `${COLOR.label} / ${SIZE.label}` : profile.variantTerm;
 }
 
 /** Tên thuộc tính trong chữ biến thể mà ngành không có ô Size phải gọi lại. Nhóm bắt TIỀN TỐ (đầu chuỗi hoặc sau dấu phân
@@ -165,13 +166,32 @@ export function variantColumnLabel(profile: Pick<ExperienceProfile, "sizeColorMa
 const SIZE_ATTRIBUTE_NAME = /(^|[,;|]\s*)(?:size|kích cỡ|cỡ)\s*:/giu;
 
 /**
- * Chữ biến thể của một dòng đơn / mẫu mã để IN RA, theo hồ sơ ngành. Hồ sơ có ô Size (thời trang, bán lẻ chung) ⇒ trả
- * NGUYÊN chuỗi. Hồ sơ không có ô Size (thực phẩm) ⇒ đổi đúng phần TÊN thuộc tính «Size:» thành nhãn quy cách — giá trị
- * phía sau giữ nguyên từng ký tự («Size: 1kg (2 túi 0,5kg)» ⇒ «Quy cách: 1kg (2 túi 0,5kg)»; dấu phẩy trong «0,5kg» không
- * bị coi là ranh giới vì sau nó không có tên thuộc tính). Hàm THUẦN — không ghi gì.
+ * Nhãn phải thay cho tên thuộc tính «Size» trong chữ biến thể đã lưu — `null` khi hồ sơ CÓ ô Size (thời trang, bán lẻ chung:
+ * in nguyên chuỗi) hoặc chưa đọc được hồ sơ. Đây là thứ Server Component truyền xuống client component dưới dạng DỮ LIỆU
+ * (một chuỗi), không truyền hàm (docs/CONVENTIONS.md). Hàm THUẦN.
  */
-export function displayVariationText(text: string, profile: Pick<ExperienceProfile, "variantFields">): string {
-  if (!text || profile.variantFields.some((f) => f.storage === "size")) return text;
-  const label = legacyAttributeLabels(profile).size;
-  return text.replace(SIZE_ATTRIBUTE_NAME, (_m, prefix: string) => `${prefix}${label}:`);
+export function variationSizeLabel(profile: Pick<ExperienceProfile, "variantFields"> | null | undefined): string | null {
+  if (!profile || profile.variantFields.some((f) => f.storage === "size")) return null;
+  return legacyAttributeLabels(profile).size;
+}
+
+/**
+ * Đổi đúng phần TÊN thuộc tính «Size:» thành `sizeLabel` — giá trị phía sau giữ nguyên từng ký tự («Size: 1kg (2 túi 0,5kg)»
+ * ⇒ «Quy cách: 1kg (2 túi 0,5kg)»; dấu phẩy trong «0,5kg» không bị coi là ranh giới vì sau nó không có tên thuộc tính).
+ * `sizeLabel` rỗng / `null` ⇒ trả NGUYÊN chuỗi. Hàm THUẦN — client component dùng được, không ghi gì.
+ */
+export function relabelVariation(text: string, sizeLabel: string | null | undefined): string {
+  if (!text || !sizeLabel) return text;
+  return text.replace(SIZE_ATTRIBUTE_NAME, (_m, prefix: string) => `${prefix}${sizeLabel}:`);
+}
+
+/** Chữ biến thể của một dòng đơn / mẫu mã để IN RA, theo hồ sơ ngành (`null` = chưa đọc được hồ sơ ⇒ in nguyên chữ đã lưu). */
+export function displayVariationText(text: string, profile: Pick<ExperienceProfile, "variantFields"> | null | undefined): string {
+  return relabelVariation(text, variationSizeLabel(profile));
+}
+
+/** Cùng phép trên cho cả danh sách dòng hàng (`variationDetail`) — dùng ở Server Component trước khi truyền dữ liệu xuống bảng. */
+export function withDisplayVariation<T extends { variationDetail: string }>(items: readonly T[], profile: Pick<ExperienceProfile, "variantFields"> | null | undefined): T[] {
+  const label = variationSizeLabel(profile);
+  return label ? items.map((i) => ({ ...i, variationDetail: relabelVariation(i.variationDetail, label) })) : [...items];
 }

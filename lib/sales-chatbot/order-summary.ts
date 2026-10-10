@@ -17,11 +17,11 @@ import { and, eq, ne, notInArray, or, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { can, type SessionUser } from "@/lib/auth/session";
 import { attemptHoldsOrder } from "@/lib/constants/carrier-vtp";
-import { displayVariationText, type ExperienceProfile } from "@/lib/constants/experience-profile";
+import { displayVariationText } from "@/lib/constants/experience-profile";
 import { isManualOrderId, manualOrderShortCode, orderShipNote } from "@/lib/constants/manual-orders";
 import { reconfirmsSinceOpen, reviewFromValue } from "@/lib/constants/order-review";
 import { ORDER_STAGE_LABEL } from "@/lib/constants/pancake";
-import { readExperienceProfile } from "@/lib/experience/profile";
+import { readDisplayProfile } from "@/lib/experience/profile";
 import type { ConversationOrderSummary, OrderSummaryLine } from "@/lib/sales-chatbot/order-verification-shared";
 
 export type OrderSummaryResult = { ok: true; summary: ConversationOrderSummary | null } | { ok: false; error: string };
@@ -77,9 +77,7 @@ export async function loadConversationOrderSummary(user: SessionUser, conversati
     from "shipments" s where s."order_id" = "orders"."id")`;
   // Hồ sơ ngành chỉ để ĐỔI NHÃN chữ biến thể khi in (shop thực phẩm: «Size: 1kg» ⇒ «Quy cách: 1kg» — xem `displayVariationText`).
   // Chạy song song với câu SQL; đọc hồ sơ lỗi ⇒ in nguyên chữ đã lưu, không bao giờ làm hỏng khung đơn.
-  const profileRead = readExperienceProfile()
-    .then((x): ExperienceProfile | null => x.profile)
-    .catch(() => null);
+  const profileRead = readDisplayProfile();
   // Hội thoại LEFT JOIN đơn sống: một dòng dù chưa có đơn (đơn = null) ⇒ «không có hội thoại» và «chưa có đơn» cùng một câu.
   const rows = await db
     .select({
@@ -120,7 +118,7 @@ export async function loadConversationOrderSummary(user: SessionUser, conversati
   const manual = isManualOrderId(r.id);
   const lines = asArray(r.items)
     .map(itemFromJson)
-    .map((l) => (profile ? { ...l, variation: displayVariationText(l.variation, profile) } : l));
+    .map((l) => ({ ...l, variation: displayVariationText(l.variation, profile) }));
   const shippingNote = orderShipNote(r.note);
   const shipping = shippingNote === "UNKNOWN" ? null : (r.shippingFee ?? 0);
   const review = manual ? (reviewFromValue(r.review)?.entries ?? []) : [];

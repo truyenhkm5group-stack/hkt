@@ -12,7 +12,7 @@
  */
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { displayVariationText, EXPERIENCE_PROFILES, legacyAttributeLabels, variantColumnLabel } from "@/lib/constants/experience-profile";
+import { displayVariationText, EXPERIENCE_PROFILES, legacyAttributeLabels, relabelVariation, variantColumnLabel, variationSizeLabel, withDisplayVariation } from "@/lib/constants/experience-profile";
 
 const stripComments = (src: string) => src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
 
@@ -41,6 +41,21 @@ export function testIndustryTerms() {
     assert.equal(variantColumnLabel(p), "Màu / Size");
   }
 
+  // ── chưa đọc được hồ sơ (null) ⇒ in NGUYÊN chữ đã lưu, nhãn cũ — không đoán ngành ──
+  assert.equal(displayVariationText("Size: 1kg", null), "Size: 1kg");
+  assert.equal(variationSizeLabel(null), null);
+  assert.deepEqual(legacyAttributeLabels(null), { size: "Size", color: "Màu" });
+  assert.equal(variantColumnLabel(null), "Màu / Size");
+  // nhãn truyền xuống client là CHUỖI: thực phẩm «Quy cách», thời trang null (in nguyên)
+  assert.equal(variationSizeLabel(food), "Quy cách");
+  assert.equal(variationSizeLabel(fashion), null);
+  assert.equal(relabelVariation("Size: Hộp 10 cái", "Quy cách"), "Quy cách: Hộp 10 cái");
+  assert.equal(relabelVariation("Size: M", null), "Size: M");
+  const items = [{ variationDetail: "Size: 1kg", quantity: 2 }, { variationDetail: "", quantity: 1 }];
+  assert.deepEqual(withDisplayVariation(items, food), [{ variationDetail: "Quy cách: 1kg", quantity: 2 }, { variationDetail: "", quantity: 1 }]);
+  assert.deepEqual(withDisplayVariation(items, fashion), items);
+  assert.equal(items[0].variationDetail, "Size: 1kg", "không sửa mảng gốc");
+
   // ── (3) quét mã nguồn các chỗ đã sửa ──
   const detail = stripComments(readFileSync("app/(dashboard)/products/[id]/page.tsx", "utf8"));
   assert.doesNotMatch(detail, /\$\{i\.variationDetail \|\|/, "trang chi tiết sản phẩm: dòng đơn phải qua displayVariationText");
@@ -52,6 +67,36 @@ export function testIndustryTerms() {
 
   const summary = stripComments(readFileSync("lib/sales-chatbot/order-summary.ts", "utf8"));
   assert.match(summary, /displayVariationText\(l\.variation, profile\)/, "khung «Đơn đang chốt»: chữ biến thể qua hồ sơ ngành");
+
+  // Mọi màn in chữ biến thể của dòng đơn phải đi qua hồ sơ ngành (đổi trên dữ liệu ở Server Component hoặc nhận nhãn dạng chuỗi).
+  const VARIATION_SCREENS: Record<string, RegExp> = {
+    "app/(dashboard)/orders/page.tsx": /withDisplayVariation\(r\.items, displayProfile\)/,
+    "app/(dashboard)/orders/[id]/page.tsx": /displayVariationText\(item\.variationDetail, displayProfile\)/,
+    "app/(dashboard)/customers/[id]/page.tsx": /variationOf\(i\.variationDetail\)/,
+    "app/(dashboard)/shipments/[id]/page.tsx": /displayVariationText\(item\.variationDetail, displayProfile\)/,
+    "app/(dashboard)/reports/returns/page.tsx": /withDisplayVariation\(rows, displayProfile\)/,
+    "app/(dashboard)/returns/columns.tsx": /relabelVariation\(i\.detail, variationLabel\)/,
+    "app/(dashboard)/returns/page.tsx": /variationLabel=\{variationSizeLabel\(displayProfile\)\}/,
+    "lib/sales-chatbot/new-order-alert.ts": /displayVariationText\(x\.variation, displayProfile\)/,
+  };
+  for (const [f, re] of Object.entries(VARIATION_SCREENS)) assert.match(stripComments(readFileSync(f, "utf8")), re, `${f}: chữ biến thể phải qua hồ sơ ngành`);
+  for (const f of ["app/(dashboard)/orders/[id]/page.tsx", "app/(dashboard)/shipments/[id]/page.tsx"]) {
+    assert.doesNotMatch(stripComments(readFileSync(f, "utf8")), /\{item\.variationDetail \|\| "—"\}/, `${f}: không in thẳng variationDetail`);
+  }
+  assert.doesNotMatch(stripComments(readFileSync("app/(dashboard)/customers/[id]/page.tsx", "utf8")), /` \(\$\{i\.variationDetail\}\)`/, "trang khách: không in thẳng variationDetail");
+
+  // Nhãn Màu / Size ghi cứng đã chuyển sang hồ sơ ngành (khoá dữ liệu size / color giữ nguyên).
+  const LABEL_SCREENS = [
+    "app/(dashboard)/inventory/returns/inspection-station.tsx",
+    "app/(dashboard)/production/topics/[id]/page.tsx",
+    "app/api/export/products/route.ts",
+    "app/api/export/planning/route.ts",
+  ];
+  for (const f of LABEL_SCREENS) {
+    const src = stripComments(readFileSync(f, "utf8"));
+    assert.doesNotMatch(src, /"Size"|label="Màu"|label: "Màu"|"Màu", "Size"/, `${f}: nhãn Màu / Size phải theo hồ sơ ngành`);
+    assert.match(src, /legacyAttributeLabels\(/, `${f}: dùng legacyAttributeLabels`);
+  }
 
   // Nhìn-ngược trong tệp mà client component nạp làm sập trang trên Safari < 16.4.
   const profileSrc = readFileSync("lib/constants/experience-profile.ts", "utf8");

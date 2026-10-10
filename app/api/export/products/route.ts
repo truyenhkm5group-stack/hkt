@@ -1,6 +1,8 @@
 import type { NextRequest } from "next/server";
 import { apiGuard } from "@/lib/auth/api-guard";
 import { can } from "@/lib/auth/session";
+import { legacyAttributeLabels } from "@/lib/constants/experience-profile";
+import { readDisplayProfile } from "@/lib/experience/profile";
 import { formatDateTime } from "@/lib/format";
 import { listProducts, listWarehouses, PRODUCT_SORTABLE } from "@/lib/queries/products";
 import { parseListParams, type SearchParams } from "@/lib/search-params";
@@ -24,8 +26,10 @@ export async function GET(request: NextRequest) {
     sp[key] = existing ? [...(Array.isArray(existing) ? existing : [existing]), value] : value;
   });
   const params = parseListParams(sp, { defaultSort: "sku", defaultDir: "asc", filterKeys: ["stock", "category", "warehouse", "status"], sortable: PRODUCT_SORTABLE, defaultPeriod: "all" });
-  const [{ rows }, warehouses] = await Promise.all([listProducts(params, 20000), listWarehouses()]);
-  const header = ["Sản phẩm", "Mã SP", "SKU", "Barcode", "Màu", "Size", "Danh mục", "Trạng thái", "Giá bán", "Giá vốn (ERP)", "Giá nhập Pancake", "Giá vốn TB Pancake", "Nhập mới", "Tái nhập hàng hoàn", "Điều chỉnh", "Xuất tay", "Đã xuất (ĐVVC)", "Đang ở ngoài", "Hoàn chờ nhận", "Hụt", "Chờ xuất", "Tồn thực tế (ERP)", "Khả dụng bán (ERP)", "Tồn Pancake", "Tồn thực tế Pancake", ...warehouses.map((w) => `Tồn ${w.name} (Pancake)`), "Bán 30 ngày", "Giá trị tồn (ERP)", "Cập nhật Pancake"];
+  // Nhãn hai cột cũ theo hồ sơ ngành (shop thực phẩm: cột size giữ QUY CÁCH ⇒ tiêu đề «Quy cách»); chỉ đổi TIÊU ĐỀ, giá trị giữ nguyên.
+  const [{ rows }, warehouses, displayProfile] = await Promise.all([listProducts(params, 20000), listWarehouses(), readDisplayProfile()]);
+  const attr = legacyAttributeLabels(displayProfile);
+  const header = ["Sản phẩm", "Mã SP", "SKU", "Barcode", attr.color, attr.size, "Danh mục", "Trạng thái", "Giá bán", "Giá vốn (ERP)", "Giá nhập Pancake", "Giá vốn TB Pancake", "Nhập mới", "Tái nhập hàng hoàn", "Điều chỉnh", "Xuất tay", "Đã xuất (ĐVVC)", "Đang ở ngoài", "Hoàn chờ nhận", "Hụt", "Chờ xuất", "Tồn thực tế (ERP)", "Khả dụng bán (ERP)", "Tồn Pancake", "Tồn thực tế Pancake", ...warehouses.map((w) => `Tồn ${w.name} (Pancake)`), "Bán 30 ngày", "Giá trị tồn (ERP)", "Cập nhật Pancake"];
   const lines = [header.map(csvCell).join(",")];
   for (const r of rows) {
     lines.push(

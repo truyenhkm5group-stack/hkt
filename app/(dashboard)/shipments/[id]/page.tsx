@@ -27,6 +27,8 @@ import { DWELL_BASIS_LABEL, DWELL_LEVEL_LABEL, DWELL_LEVEL_TONE, DWELL_UNRATED_H
 import { ageLabel } from "@/lib/constants/action-queue";
 import { MISSING_TEXT } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import { displayVariationText } from "@/lib/constants/experience-profile";
+import { readDisplayProfile } from "@/lib/experience/profile";
 import { can, getCurrentUser, requirePermission } from "@/lib/auth/session";
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }) {
@@ -56,7 +58,8 @@ export default async function ShipmentDetailPage({ params }: { params: Promise<{
     `stage` là chặng của hãng vận, và `RETURNED_BY_RULE` (hoàn theo luật tiền) không có mặt ở đó
     chút nào. Đặc tả mục 6 gộp `RETURNED` và `RETURNED_BY_RULE` là hoàn.
   */
-  const [outcome, dwell, nhatKy, hasCashEvidence] = await Promise.all([outcomeOfShipment(s.id), getShipmentDwell(s.id), getShipmentTimeline(s.id), shipmentHasCashEvidence(s.id)]);
+  // Hồ sơ ngành chỉ để đổi NHÃN chữ biến thể khi in (shop thực phẩm: «Size: 1kg» ⇒ «Quy cách: 1kg»); lỗi ⇒ in nguyên chữ đã lưu.
+  const [outcome, dwell, nhatKy, hasCashEvidence, displayProfile] = await Promise.all([outcomeOfShipment(s.id), getShipmentDwell(s.id), getShipmentTimeline(s.id), shipmentHasCashEvidence(s.id), readDisplayProfile()]);
   // «Đã thu» chỉ in số khi có bằng chứng tiền — `cod_collected` mặc định 0 nên 0 trần là CHƯA BIẾT.
   const codCollectedShown = collectedCodShown(s.codCollected, hasCashEvidence);
   const daHoan = outcome === "RETURNED" || outcome === "RETURNED_BY_RULE";
@@ -256,7 +259,7 @@ export default async function ShipmentDetailPage({ params }: { params: Promise<{
                               <div className="min-w-0">
                                 <p className="truncate font-semibold">{item.productName}</p>
                                 <p className="text-xs text-muted-foreground">
-                                  {item.variationDetail || "—"}
+                                  {displayVariationText(item.variationDetail, displayProfile) || "—"}
                                   {item.sku ? <span className="ml-2 font-mono">{item.sku}</span> : null}
                                   {item.returnQuantity ? <span className="ml-2 text-rose-600">· hoàn {item.returnQuantity}</span> : null}
                                 </p>

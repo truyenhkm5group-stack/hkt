@@ -12,7 +12,9 @@
  */
 import { and, asc, eq, gte, inArray, lte, ne } from "drizzle-orm";
 import { getDb, schema } from "@/db";
+import { displayVariationText } from "@/lib/constants/experience-profile";
 import { manualOrderRaw, orderNoteForGroup } from "@/lib/constants/manual-orders";
+import { readDisplayProfile } from "@/lib/experience/profile";
 import { formatVND } from "@/lib/format";
 import { deliverMessage } from "@/lib/messaging/service";
 import { operationsGroupChannel } from "@/lib/sales-chatbot/alerts";
@@ -82,11 +84,14 @@ export async function sendNewOrderAlerts(now: Date = new Date()): Promise<NewOrd
           .orderBy(asc(it.id))
       : [];
     const rule = (await loadSalesChatbotConfig()).freeShipping;
+    // Hồ sơ ngành chỉ đổi NHÃN chữ biến thể trong tin (shop thực phẩm: «Size: 1kg» ⇒ «Quy cách: 1kg»); khối lượng vẫn dò từ chữ
+    // ĐÃ LƯU. Lỗi đọc hồ sơ ⇒ in nguyên chữ — không bao giờ làm rơi tin báo đơn.
+    const displayProfile = await readDisplayProfile();
     let sent = 0;
     for (const r of todo) {
       const lines = items
         .filter((x) => x.orderId === r.id)
-        .map((x) => ({ name: x.variation ? `${x.name} (${x.variation})` : x.name, quantity: x.quantity, unitPrice: x.unitPrice, lineTotal: x.lineTotal, weight: variantWeightGrams(x.weight, x.name, x.variation ?? "") }));
+        .map((x) => ({ name: x.variation ? `${x.name} (${displayVariationText(x.variation, displayProfile)})` : x.name, quantity: x.quantity, unitPrice: x.unitPrice, lineTotal: x.lineTotal, weight: variantWeightGrams(x.weight, x.name, x.variation ?? "") }));
       if (!lines.length) continue;
       const body = newOrderAlertText({ shippingFee: r.shippingFee, name: r.shipFullName || r.billFullName || "—", phone: (r.shipPhone || r.billPhone || "").trim(), address: (r.shipFullAddress || r.shipAddress || "").trim(), note: r.note, province: r.shipProvince ?? "", ward: r.shipCommune ?? "" }, lines, rule);
       await deliverMessage({ connectorKey: group.connectorKey, destination: group.destination, title: "Đơn mới chưa xác nhận", body, dedupeKey: dedupeKeyOf(r.id), event: "order.new", subject: { type: "ORDER", id: r.id } });

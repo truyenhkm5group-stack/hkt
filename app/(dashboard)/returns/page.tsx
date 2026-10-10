@@ -12,6 +12,8 @@ import type { Metadata } from "next";
 import { ScopeDenied } from "@/components/scope-denied";
 import { getCurrentUser } from "@/lib/auth/session";
 import { getBrandCopy } from "@/lib/branding/service";
+import { variationSizeLabel } from "@/lib/constants/experience-profile";
+import { readDisplayProfile } from "@/lib/experience/profile";
 
 export async function generateMetadata(): Promise<Metadata> {
   return { title: (await getBrandCopy(await getCurrentUser())).text("returns.title") };
@@ -24,7 +26,8 @@ export default async function ReturnsPage({ searchParams }: { searchParams: Prom
   if (decision.allow === "NONE") return <ScopeDenied title={copy.text("returns.title")} reason={decision.reason} fix={decision.fix} />;
   const raw = await searchParams;
   const params = parseListParams(raw, { defaultSort: "insertedAt", filterKeys: ["type"], sortable: RETURN_SORTABLE, defaultPeriod: "30d" });
-  const [{ rows, total, pageCount }, facets, summary] = await Promise.all([listReturns(params), returnFacets(params), returnSummary(params)]);
+  // Hồ sơ ngành chỉ để đổi NHÃN chữ biến thể; truyền xuống bảng client dạng CHUỖI (không truyền hàm). Lỗi ⇒ in nguyên chữ.
+  const [{ rows, total, pageCount }, facets, summary, displayProfile] = await Promise.all([listReturns(params), returnFacets(params), returnSummary(params), readDisplayProfile()]);
 
   return (
     <div className="space-y-5">
@@ -47,7 +50,7 @@ export default async function ReturnsPage({ searchParams }: { searchParams: Prom
         facets={[{ key: "type", label: "Loại", options: facets.types, single: true }]}
         resultLabel={`${formatNumber(total)} phiếu phù hợp · phí hoàn ${formatVND(summary.returnedFee)}`}
       />
-      <ReturnsTable rows={rows} pageCount={pageCount} total={total} />
+      <ReturnsTable rows={rows} pageCount={pageCount} total={total} variationLabel={variationSizeLabel(displayProfile)} />
     </div>
   );
 }
