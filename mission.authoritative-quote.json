@@ -26,18 +26,18 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-11T01:58:45.182Z",
-  "updated_at": "2026-10-11T10:39:03.392Z",
-  "last_heartbeat": "2026-10-11T10:39:03.392Z",
+  "updated_at": "2026-10-11T10:41:55.407Z",
+  "last_heartbeat": "2026-10-11T10:41:55.407Z",
   "definition_of_done": [],
   "handoff": {
     "branch": "fix/authoritative-quote",
-    "sha": "3f29d35c19d6360ef857e8622149ccc78b2c8478",
-    "at": "2026-10-11T10:39:03.392Z",
+    "sha": "9342f3a8126623c5b7aff2477f43267d5c4480c6",
+    "at": "2026-10-11T10:41:55.407Z",
     "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
     "title": "P0: báo giá từ máy chủ có phiên bản (giá tin nhắn = báo giá đã xác thực = tổng đơn), giá chưa xác thực ⇒ chuyển người, câu «đã lên đơn» chỉ khi đơn tạo + qua kiểm, trạng thái đơn tách 8 bước",
-    "summary": "P0 giá: giảm khối lượng nằm trong if(!books) nên bật báo giá sỉ là mọi khách mất giảm (2kg 560k) — nay áp theo nguồn giá từng dòng (lẻ ⇒ giảm; sỉ ⇒ book, không cộng dồn); báo giá máy chủ một nơi cho chữ AI/giỏ/đơn/lõi; ops price-mismatch-scan chỉ đọc",
+    "summary": "P0 giá (không đổi so với 3f29d35c)",
     "tests": [
-      "npm test đầy đủ trên 3f29d35c: TẤT CẢ KIỂM THỬ ĐẠT · build · typecheck · lint · sales-quote-integrity (sỉ BẬT + giảm BẬT: khách lẻ 1/2/3/4kg = 280k/540k/820k/1.080k, Phạm Minh Ái 940k, đủ bậc sỉ không giảm hai lần, khách sỉ theo book; tổ chức thật: calculate_cart 940k, đơn 940k, raw.quote 940k) · đột biến if(books) ⇒ đỏ"
+      "như 3f29d35c + gộp main (#801): ops-vps giải hợp · tsc sạch · CI chạy đủ"
     ]
   }
 }
