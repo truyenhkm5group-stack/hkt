@@ -8,7 +8,14 @@
      con trỏ RIÊNG (`sales_chat_reads`, 0239) · số tin khách sau con trỏ chung · huy hiệu theo LUẬT CŨ (cột mốc + `max(1, …)`) · phía +
      mốc của tin xem trước theo luật cũ (tin mới nhất) và luật mới (tin khách chưa đọc khi có);
    · TỔNG: FALSE-UNREAD (huy hiệu > 0 mà không có tin khách nào sau con trỏ) và «xem trước phía AI / NV / page mà vẫn chưa đọc» — theo
-     luật CŨ (đúng thứ production đang hiện trước khi triển khai) và theo luật MỚI (phải bằng 0); cặp (hội thoại, người) có con trỏ riêng.
+     luật CŨ (đúng thứ production đang hiện trước khi triển khai) và theo luật MỚI (phải bằng 0); cặp (hội thoại, người) có con trỏ riêng;
+   · «CHƯA ĐỌC» LƯU SẴN 0245 trên MỌI hội thoại: số dòng `turn_unhandled` lệch định nghĩa #803 tính trực tiếp (+ mốc đọc lệch) — phải 0;
+   · CHƯA ĐỌC VẬN HÀNH (chủ shop 11/10/2026, OWNER CORRECTION): «chưa đọc» = LƯỢT KHÁCH MỚI NHẤT CHƯA XỬ LÝ — MỘT định nghĩa của
+     response-ownership (#803). UNREAD_COUNT_BEFORE = số hội thoại luật V3 đang báo chưa đọc (người xem chưa có con trỏ riêng — đúng thứ
+     production hiện); UNREAD_COUNT_AFTER = định nghĩa #803 trên MỌI hội thoại. FALSE_UNREAD = hội thoại
+     báo chưa đọc mà bản TS của #803 (`latestTurnStateOf`, đọc sổ độc lập) nói lượt khách mới nhất ĐÃ xử lý — TRƯỚC theo luật V3, SAU
+     theo câu SQL của hộp thư (phải 0); kèm số «bỏ sót» (TS chưa xử lý mà SQL nói đã). CẦN bản triển khai có #803 + 0245: ops lấy script
+     từ main nhưng lib/ từ image đang chạy.
   Luật dùng ĐÚNG các biểu thức của ứng dụng (`inbox-states.ts`, `inbox.ts::inboundSide / webSideOf`) — không viết luật thứ hai.
 
   Không in tên, SĐT, chữ tin, mã tin hay mã người. Mốc thời gian + số đếm + mã hội thoại (UUID nội bộ — chỉ ở phần MÃ HOÁ). Vẫn MÃ HOÁ
@@ -27,7 +34,17 @@ import { getDbForInspection, schema, type Db } from "@/db";
 import { findOrganization } from "@/lib/platform/organizations";
 import type { AiBlock } from "@/lib/ai/provider";
 import { inboundSide, webSideOf } from "@/lib/sales-chatbot/inbox";
-import { customerCountAfterSql, HUMAN_UNREAD_COUNT_SQL, HUMAN_UNREAD_SQL, INBOX_ACTIVITY_SQL, SHARED_SEEN_SQL, customerInboundRowSql, customerMessageRowSql } from "@/lib/sales-chatbot/inbox-states";
+import {
+  customerCountAfterSql,
+  customerInboundRowSql,
+  customerMessageRowSql,
+  HUMAN_UNREAD_COUNT_SQL,
+  HUMAN_UNREAD_SQL,
+  INBOX_ACTIVITY_SQL,
+  SHARED_SEEN_SQL,
+} from "@/lib/sales-chatbot/inbox-states";
+import { INBOX_UNREAD_SQL } from "@/lib/sales-chatbot/inbox-unread";
+import { latestCustomerTurnUnhandledSql, latestTurnStateOf } from "@/lib/sales-chatbot/response-ownership-ledger";
 import type { TimelineSide } from "@/lib/sales-chatbot/inbox-shared";
 import { rowsOf } from "@/lib/sql-rows";
 
@@ -69,6 +86,13 @@ export type ReadAuditRow = {
   newestCustomerAt: Date | null;
   latestSide: TimelineSide | null;
   latestAt: Date | null;
+  /**
+   * Luật VẬN HÀNH (#803): cờ chưa đọc của hộp thư (`INBOX_UNREAD_SQL` — kết quả lưu sẵn 0245) và kết luận của bản TS (`latestTurnStateOf` — lượt khách mới
+   * nhất đã xử lý chưa, bởi ai). `undefined` = chưa đo (CSDL chưa có 0245 / không phải kênh nhắn tin ⇒ TS không áp dụng).
+   */
+  unreadSql?: boolean | null;
+  turnHandled?: boolean | null;
+  turnBy?: string | null;
 };
 
 export type ReadAuditTotals = {
@@ -76,6 +100,11 @@ export type ReadAuditTotals = {
   legacy: { unread: number; falseUnread: number; aiPreviewUnread: number };
   current: { unread: number; falseUnread: number; aiPreviewUnread: number };
   readers: { pairs: number; unread: number; falseUnread: number };
+  /**
+   * Chưa đọc VẬN HÀNH trên các dòng đã đo: TRƯỚC (luật V3) `v3Unread` · `v3FalseUnread` (V3 báo chưa đọc mà #803 nói đã xử lý — chia theo
+   * `byReply` / `byRead`); SAU (câu SQL hộp thư) `unread` · `falseUnread` (phải 0) · `missed` (TS chưa xử lý mà SQL nói đã — phải 0).
+   */
+  attention: { measured: boolean; v3Unread: number; v3FalseUnread: number; byReply: number; byRead: number; unread: number; falseUnread: number; missed: number };
 };
 
 /** Phía + mốc của tin xem trước theo luật MỚI (`listInbox`): chưa đọc ⇒ tin khách chưa đọc mới nhất; không ⇒ tin mới nhất. HÀM THUẦN. */
@@ -85,7 +114,13 @@ export function currentPreviewOf(r: ReadAuditRow): { side: TimelineSide | null; 
 
 /** Tổng của bất biến «chưa đọc ⇒ có tin khách sau con trỏ», luật cũ và luật mới. HÀM THUẦN. */
 export function auditReadRows(rows: readonly ReadAuditRow[]): ReadAuditTotals {
-  const t: ReadAuditTotals = { rows: rows.length, legacy: { unread: 0, falseUnread: 0, aiPreviewUnread: 0 }, current: { unread: 0, falseUnread: 0, aiPreviewUnread: 0 }, readers: { pairs: 0, unread: 0, falseUnread: 0 } };
+  const t: ReadAuditTotals = {
+    rows: rows.length,
+    legacy: { unread: 0, falseUnread: 0, aiPreviewUnread: 0 },
+    current: { unread: 0, falseUnread: 0, aiPreviewUnread: 0 },
+    readers: { pairs: 0, unread: 0, falseUnread: 0 },
+    attention: { measured: false, v3Unread: 0, v3FalseUnread: 0, byReply: 0, byRead: 0, unread: 0, falseUnread: 0, missed: 0 },
+  };
   for (const r of rows) {
     if (r.legacyUnread) {
       t.legacy.unread += 1;
@@ -103,6 +138,20 @@ export function auditReadRows(rows: readonly ReadAuditRow[]): ReadAuditTotals {
     t.readers.pairs += r.readers;
     t.readers.unread += r.readersUnread;
     t.readers.falseUnread += r.readersFalseUnread;
+    if (r.unreadSql === undefined || r.unreadSql === null || r.turnHandled === undefined || r.turnHandled === null) continue;
+    t.attention.measured = true;
+    if (r.customerAfterShared > 0) {
+      t.attention.v3Unread += 1;
+      if (r.turnHandled) {
+        t.attention.v3FalseUnread += 1;
+        if (r.turnBy === "HUMAN_READ") t.attention.byRead += 1;
+        else t.attention.byReply += 1;
+      }
+    }
+    if (r.unreadSql) {
+      t.attention.unread += 1;
+      if (r.turnHandled) t.attention.falseUnread += 1;
+    } else if (!r.turnHandled) t.attention.missed += 1;
   }
   return t;
 }
@@ -123,6 +172,7 @@ export function readAuditLine(i: number, r: ReadAuditRow): string {
     `tin khách sau con trỏ chung ${r.customerAfterShared}`,
     `huy hiệu cũ ${legacyBadge} / mới ${r.customerAfterShared}`,
     `xem trước cũ ${r.latestSide ?? "—"} ${isoOr(r.latestAt)} / mới ${cur.side ?? "—"} ${isoOr(cur.at)}`,
+    `vận hành: SQL ${r.unreadSql === undefined || r.unreadSql === null ? "—" : r.unreadSql ? "chưa đọc" : "đã xử lý"} · TS ${r.turnHandled === undefined || r.turnHandled === null ? "—" : r.turnHandled ? `đã xử lý (${r.turnBy ?? "—"})` : "chưa xử lý"}`,
   ].join(" · ");
 }
 
@@ -134,10 +184,23 @@ const toDate = (v: unknown): Date | null => {
   return Number.isFinite(d.getTime()) ? d : null;
 };
 
-export async function collectReadAudit(db: Db, opts: { limit: number; conversation: string | null }): Promise<{ rows: ReadAuditRow[]; ids: string[]; hasReadsTable: boolean }> {
+/**
+ * `measureAttention` (mặc định: tự dò — có cột 0245 và bảng con trỏ đọc) đo thêm luật VẬN HÀNH: cờ SQL của hộp thư + bản TS của #803 cho
+ * từng hội thoại kênh nhắn tin (chat web: #803 không xét lượt khách ⇒ đã xử lý). `now` = mốc chung cho cả hai dạng.
+ */
+export async function collectReadAudit(db: Db, opts: { limit: number; conversation: string | null; now?: Date; measureAttention?: boolean }): Promise<{ rows: ReadAuditRow[]; ids: string[]; hasReadsTable: boolean; attentionMeasured: boolean }> {
   const [reg] = rowsOf<{ ok: boolean }>(await db.execute(sql`select to_regclass('public.sales_chat_reads') is not null as ok`));
   const hasReadsTable = Boolean(reg?.ok);
+  const [col0245] = rowsOf<{ n: number }>(await db.execute(sql`select count(*)::int as n from information_schema.columns where table_name = 'sales_chat_conversations' and column_name in ('turn_unhandled', 'last_read_at')`));
+  const measureAttention = opts.measureAttention ?? (hasReadsTable && Number(col0245?.n) === 2);
+  opts = { ...opts, measureAttention };
   const c = schema.salesChatConversations;
+  // Cột của hội thoại trong câu con TƯƠNG QUAN phải ghi đủ tên bảng: drizzle in `${c.id}` thành `"id"` trần, và trong câu con trên
+  // `sales_chat_messages m` / `sales_chat_inbound i` tên trần trỏ vào CỘT CỦA CHÍNH câu con (m.id · i.page_id) — so dòng với chính nó.
+  // Bản trước (0239) dính đúng lỗi này: «tin khách mới nhất» của chat web luôn NULL, của kênh nhắn tin là max của MỌI luồng.
+  const CP = sql.raw(`"sales_chat_conversations"."page_id"`);
+  const CT = sql.raw(`"sales_chat_conversations"."thread_id"`);
+  const CI = sql.raw(`"sales_chat_conversations"."id"`);
   const base = await db
     .select({
       id: c.id,
@@ -151,9 +214,10 @@ export async function collectReadAudit(db: Db, opts: { limit: number; conversati
       legacyUnread: HUMAN_UNREAD_SQL,
       legacyCount: HUMAN_UNREAD_COUNT_SQL,
       customerAfterShared: customerCountAfterSql(SHARED_SEEN_SQL),
-      newestCustomerAt: sql<Date | null>`(case when ${c.pageId} is not null and ${c.threadId} is not null
-        then (select max(i.created_at) from "sales_chat_inbound" i where i.page_id = ${c.pageId} and i.thread_id = ${c.threadId} and ${customerInboundRowSql("i")})
-        else (select max(m.created_at) from "sales_chat_messages" m where m.conversation_id = ${c.id} and ${customerMessageRowSql("m")}) end)`,
+      newestCustomerAt: sql<Date | null>`(case when ${CP} is not null and ${CT} is not null
+        then (select max(i.created_at) from "sales_chat_inbound" i where i.page_id = ${CP} and i.thread_id = ${CT} and ${customerInboundRowSql("i")})
+        else (select max(m.created_at) from "sales_chat_messages" m where m.conversation_id = ${CI} and ${customerMessageRowSql("m")}) end)`,
+      unreadSql: opts.measureAttention ? INBOX_UNREAD_SQL : sql<boolean | null>`null::boolean`,
     })
     .from(c)
     .where(opts.conversation ? eq(c.id, opts.conversation) : ne(c.channel, "TEST"))
@@ -203,8 +267,17 @@ export async function collectReadAudit(db: Db, opts: { limit: number; conversati
     }
   }
 
+  // Bản TS của #803 cho từng hội thoại kênh nhắn tin — đọc sổ độc lập với câu SQL (kiểm chéo hai dạng của MỘT định nghĩa).
+  const turn = new Map<string, { handled: boolean; by: string | null }>();
+  if (measureAttention) {
+    for (const r of base) {
+      const st = await latestTurnStateOf(r.id, opts.now ?? new Date());
+      turn.set(r.id, { handled: st ? st.handled : true, by: st?.by ?? null });
+    }
+  }
   return {
     hasReadsTable,
+    attentionMeasured: measureAttention,
     ids: base.map((r) => r.id),
     rows: base.map((r) => {
       const rd = readers.get(r.id);
@@ -224,8 +297,40 @@ export async function collectReadAudit(db: Db, opts: { limit: number; conversati
         newestCustomerAt: toDate(r.newestCustomerAt),
         latestSide: lt?.side ?? null,
         latestAt: lt?.at ?? null,
+        unreadSql: r.unreadSql === null || r.unreadSql === undefined ? null : Boolean(r.unreadSql),
+        turnHandled: turn.get(r.id)?.handled ?? null,
+        turnBy: turn.get(r.id)?.by ?? null,
       };
     }),
+  };
+}
+
+/**
+ * 0245 — «chưa đọc» LƯU SẴN (`turn_unhandled`, trigger CSDL giữ) có đúng bằng định nghĩa #803 tính TRỰC TIẾP không, đo trên MỌI hội thoại
+ * (không theo --limit), kèm mốc đọc `last_read_at` so với max con trỏ. Kèm UNREAD_COUNT TRƯỚC (luật V3) / SAU (#803). Cột chưa có (chưa
+ * triển khai 0245) ⇒ `hasColumn = false`.
+ */
+export async function measureLastInboundDrift(db: Db): Promise<{ hasColumn: boolean; conversations: number; withCustomer: number; drift: number; readDrift: number; unreadCount: number | null; v3UnreadCount: number }> {
+  const [col] = rowsOf<{ n: number }>(
+    await db.execute(sql`select count(*)::int as n from information_schema.columns where table_name = 'sales_chat_conversations' and column_name in ('turn_unhandled', 'last_read_at')`),
+  );
+  const [v3] = rowsOf<{ n: number }>(await db.execute(sql`select count(*) filter (where ${customerCountAfterSql(SHARED_SEEN_SQL)} > 0)::int as n from "sales_chat_conversations" where "sales_chat_conversations"."channel" <> 'TEST'`));
+  if (Number(col?.n) !== 2) return { hasColumn: false, conversations: 0, withCustomer: 0, drift: 0, readDrift: 0, unreadCount: null, v3UnreadCount: Number(v3?.n ?? 0) };
+  const [r] = rowsOf<{ total: number; unread: number; drift: number; read_drift: number }>(
+    await db.execute(sql`select count(*)::int as total, count(*) filter (where x.live)::int as unread,
+        count(*) filter (where x.cached is distinct from x.live)::int as drift, count(*) filter (where x.dcol is distinct from x.dtruth)::int as read_drift
+      from (select "sales_chat_conversations"."turn_unhandled" as cached, ${latestCustomerTurnUnhandledSql()} as live, "sales_chat_conversations"."last_read_at" as dcol,
+        (select max(rd.read_through_at) from "sales_chat_reads" rd where rd.conversation_id = "sales_chat_conversations"."id") as dtruth
+      from "sales_chat_conversations" where "sales_chat_conversations"."channel" <> 'TEST') x`),
+  );
+  return {
+    hasColumn: true,
+    conversations: Number(r?.total ?? 0),
+    withCustomer: Number(r?.unread ?? 0),
+    drift: Number(r?.drift ?? 0),
+    readDrift: Number(r?.read_drift ?? 0),
+    unreadCount: Number(r?.unread ?? 0),
+    v3UnreadCount: Number(v3?.n ?? 0),
   };
 }
 
@@ -249,6 +354,7 @@ async function main() {
   const now = new Date();
   const { rows, ids, hasReadsTable } = await collectReadAudit(db, args);
   const tot = auditReadRows(rows);
+  const li = await measureLastInboundDrift(db);
 
   // ── CHI TIẾT (phần MÃ HOÁ — mốc + số đếm + mã hội thoại nội bộ) ──
   console.log(`Tổ chức ${org.code} · ${rows.length} hội thoại${args.conversation ? " (chỉ định)" : ` gần nhất (trần ${args.limit})`} · lúc ${now.toISOString()} · bảng con trỏ riêng 0239 ${hasReadsTable ? "CÓ" : "CHƯA CÓ"}`);
@@ -257,9 +363,21 @@ async function main() {
   // ── TÓM TẮT (số đếm, ra log công khai) ──
   tomTat(`inbox-read-audit ${org.code}: ${tot.rows} hội thoại${args.conversation ? " (chỉ định)" : ""} · bảng con trỏ riêng ${hasReadsTable ? "có" : "CHƯA có (chưa triển khai 0239)"}`);
   tomTat(`LUẬT CŨ (cột mốc + mốc chung): chưa đọc ${tot.legacy.unread} · FALSE-UNREAD ${tot.legacy.falseUnread} · xem trước AI/NV/page mà vẫn chưa đọc ${tot.legacy.aiPreviewUnread}`);
-  tomTat(`LUẬT MỚI (tin khách sau con trỏ, người chưa có con trỏ riêng): chưa đọc ${tot.current.unread} · FALSE-UNREAD ${tot.current.falseUnread} · xem trước AI/NV/page mà vẫn chưa đọc ${tot.current.aiPreviewUnread}`);
+  tomTat(`LUẬT V3 (tin khách sau con trỏ, người chưa có con trỏ riêng — đã bỏ 11/10): chưa đọc ${tot.current.unread} · FALSE-UNREAD ${tot.current.falseUnread} · xem trước AI/NV/page mà vẫn chưa đọc ${tot.current.aiPreviewUnread}`);
   tomTat(`Con trỏ riêng: ${tot.readers.pairs} cặp (hội thoại, người) · còn chưa đọc ${tot.readers.unread} · FALSE-UNREAD ${tot.readers.falseUnread}`);
-  process.exit(tot.current.falseUnread + tot.readers.falseUnread > 0 ? 2 : 0);
+  const at = tot.attention;
+  tomTat(`UNREAD_COUNT (mọi hội thoại): TRƯỚC (luật V3, người chưa có con trỏ riêng) ${li.v3UnreadCount} · SAU (lượt khách mới nhất chưa xử lý — #803) ${li.unreadCount ?? "chưa đo (chưa triển khai 0245)"}`);
+  tomTat(
+    at.measured
+      ? `FALSE_UNREAD (${tot.rows} hội thoại đã đo, TS #803 làm chuẩn): TRƯỚC ${at.v3FalseUnread}/${at.v3Unread} (đã trả lời ${at.byReply} · đã đọc ${at.byRead}) · SAU ${at.falseUnread}/${at.unread} (phải 0) · bỏ sót ${at.missed} (phải 0)`
+      : "FALSE_UNREAD: chưa đo (CSDL chưa có 0245 / bảng con trỏ đọc — cần bản triển khai có #803 + 0245)",
+  );
+  tomTat(
+    li.hasColumn
+      ? `«Chưa đọc» lưu sẵn 0245 (mọi hội thoại): ${li.conversations} hội thoại · LỆCH so với định nghĩa #803 tính trực tiếp ${li.drift} · mốc đọc lệch ${li.readDrift} (phải 0)`
+      : "«Chưa đọc» lưu sẵn 0245: cột CHƯA có (chưa triển khai 0245)",
+  );
+  process.exit(at.falseUnread + at.missed + li.drift + li.readDrift > 0 ? 2 : 0);
 }
 
 // Chỉ chạy khi được gọi THẲNG từ dòng lệnh — `import` từ bài kiểm không được kéo theo `process.exit`.

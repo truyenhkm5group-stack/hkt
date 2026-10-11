@@ -505,6 +505,7 @@ import { testAvatarProxy } from "./avatar-proxy.test";
 import { testInboxSemanticsV3 } from "./inbox-semantics-v3.test";
 import { testHandoffOwnership } from "./handoff-ownership.test";
 import { testInboxReadV3 } from "./inbox-read-v3.test";
+import { testInboxUnreadPerf } from "./inbox-unread-perf.test";
 import { testInboxSearch } from "./inbox-search.test";
 import { testInboxBulkAi } from "./inbox-bulk-ai.test";
 import { testSalesInboxHistory } from "./sales-inbox-history.test";
@@ -2934,6 +2935,8 @@ async function main() {
   await testHandoffOwnership();
   // INBOX READ V3 (chủ shop 10/10/2026 tối, P0): «chưa đọc» = có tin KHÁCH thật sau con trỏ đọc CỦA NGƯỜI XEM (0239); nạp khung chat ≠ đọc; con trỏ = tin khách cuối của payload, chỉ tiến; xem trước tin khách khi chưa đọc; danh sách vá theo xác nhận đọc; audit FALSE-UNREAD = 0 — tổ chức `hop-thu-doc-v3`.
   await testInboxReadV3();
+  // INBOX UNREAD PERF (chủ shop 11/10/2026, OWNER CORRECTION): «tin khách chưa đọc» = lượt khách mới nhất chưa xử lý — hàm của response-ownership (#803) sau cổng rẻ 0245 (trigger CSDL); ma trận chủ shop qua listInbox · A→B · parity cổng + hàm ≡ hàm trần ≡ bản TS trên 3.000 hội thoại · cổng đúng sau mọi đường ghi · audit TRƯỚC/SAU — tổ chức `hop-thu-unread-perf`.
+  await testInboxUnreadPerf();
   // TÌM KIẾM HỘP THƯ (P0 inbox-search, chủ shop 11/10/2026): SĐT chuẩn hoá 0/+84/khoảng trắng · SĐT trong tin / đơn / Pancake / web · tên bỏ dấu + khoảng trắng · mã đơn · tìm × bộ lọc × phân trang · UNREAD rỗng ⇒ gợi ý «Tất cả» đúng số · danh sách mới không mang hội thoại cũ · 3.000 hội thoại — `tim-hop-thu-a` / `tim-hop-thu-b`.
   await testInboxSearch();
   // «Trả tất cả cho AI» (chủ shop 10/10/2026, mục D): quyền · cách ly tổ chức · trả được / bị chặn theo lý do · sự kiện + nhật ký người bấm · chạy lại 0 dòng mới — `hop-thu-bulk-a` / `hop-thu-bulk-b`.

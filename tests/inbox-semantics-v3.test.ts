@@ -8,7 +8,8 @@
  *
  *  · Kỳ vọng của từng hội thoại viết TAY (đặc tả), rồi so với cả hàm thuần (`classifyInboxState`) lẫn điều kiện SQL (`listInbox`).
  *  · Mốc thời gian đi theo đồng hồ THẬT (AGENTS mục 50) — bộ lọc ngày tính kỳ vọng từ chính dữ liệu bằng `inboxPeriodRange`.
- *  · Đổi nhãn / đổi người phụ trách / đổi chế độ AI KHÔNG đổi thứ tự; AI trả lời KHÔNG xoá «chưa đọc»; MỞ hội thoại mới xoá.
+ *  · Đổi nhãn / đổi người phụ trách / đổi chế độ AI KHÔNG đổi thứ tự. «Chưa đọc» (chủ shop 11/10/2026, P0-D — thay luật «AI trả lời
+ *    KHÔNG xoá»): tin khách CHƯA ĐƯỢC XỬ LÝ — AI / nhân viên / page trả lời hợp lệ hoặc người mở đều xoá; tin khách MỚI tạo lại.
  */
 import assert from "node:assert/strict";
 import { rmSync } from "node:fs";
@@ -38,7 +39,7 @@ const MIN = 60_000;
 const DAY = 86_400_000;
 
 type Expect = { unread: boolean; waiting: boolean; needs: NeedsHumanCode | null; human: HumanHandling | null; replying: InboxReplying; phone: boolean; page: string | null; unreadN: number };
-type Spec = { id: string; note: string; v: Partial<typeof schema.salesChatConversations.$inferInsert>; inbound?: { at: number; note?: string; text?: string; imported?: boolean }[]; order?: { stage: "NEW" | "CANCELLED"; review: boolean }; e: Expect };
+type Spec = { id: string; note: string; v: Partial<typeof schema.salesChatConversations.$inferInsert>; inbound?: { at: number; note?: string; text?: string; imported?: boolean }[]; order?: { stage: "NEW" | "CANCELLED"; review: boolean }; read?: number; e: Expect };
 
 async function cleanup() {
   const pdb = await getPlatformDb();
@@ -70,26 +71,26 @@ export async function testInboxSemanticsV3() {
 
       // ═══ MA TRẬN — mỗi hội thoại một tình huống; kỳ vọng viết tay ═══
       const specs: Spec[] = [
-        { id: "s01", note: "khách «xin giá» → AI «Dạ giá 280k…», chưa ai mở", v: { pageId: PA, lastCustomerAt: at(10 * MIN), lastBotAt: at(9 * MIN) }, inbound: [{ at: 10 * MIN }, { at: 9 * MIN, note: "BOT_SENT" }], e: E({ page: PA, unread: true, unreadN: 1 }) },
-        { id: "s02", note: "khách nhắn, người đã mở, chưa ai trả lời", v: { pageId: PA, lastCustomerAt: at(20 * MIN), staffSeenAt: at(19 * MIN) }, inbound: [{ at: 20 * MIN }], e: E({ page: PA, waiting: true }) },
-        { id: "s03", note: "khách nhắn nối SAU câu AI, chưa ai mở, có SĐT", v: { pageId: PA, lastCustomerAt: at(5 * MIN), lastBotAt: at(32 * MIN), customerPhone: "0912000003" }, inbound: [{ at: 35 * MIN }, { at: 32 * MIN, note: "BOT_SENT" }, { at: 5 * MIN }], e: E({ page: PA, unread: true, waiting: true, phone: true, unreadN: 2 }) },
+        { id: "s01", note: "khách «xin giá» → AI «Dạ giá 280k…», chưa ai mở (AI trả lời = đã xử lý)", v: { pageId: PA, lastCustomerAt: at(10 * MIN), lastBotAt: at(9 * MIN) }, inbound: [{ at: 10 * MIN }, { at: 9 * MIN, note: "BOT_SENT" }], e: E({ page: PA }) },
+        { id: "s02", note: "khách nhắn, người đã mở (con trỏ đọc tới tin khách), chưa ai trả lời", v: { pageId: PA, lastCustomerAt: at(20 * MIN), staffSeenAt: at(19 * MIN) }, inbound: [{ at: 20 * MIN }], read: 20 * MIN, e: E({ page: PA, waiting: true }) },
+        { id: "s03", note: "khách nhắn nối SAU câu AI, chưa ai mở, có SĐT", v: { pageId: PA, lastCustomerAt: at(5 * MIN), lastBotAt: at(32 * MIN), customerPhone: "0912000003" }, inbound: [{ at: 35 * MIN }, { at: 32 * MIN, note: "BOT_SENT" }, { at: 5 * MIN }], e: E({ page: PA, unread: true, waiting: true, phone: true, unreadN: 1 }) },
         { id: "s04", note: "nhân viên TIẾP QUẢN, đã trả lời", v: { pageId: PB, status: "HANDOFF", handoffReason: TAKEOVER_REASON, state: ctl("HUMAN"), lastCustomerAt: at(40 * MIN), staffSeenAt: at(39 * MIN), lastStaffAt: at(38 * MIN) }, e: E({ page: PB, human: "MANUAL_TAKEOVER", replying: "HUMAN" }) },
         { id: "s05", note: "AI NHƯỜNG sau câu tay (còn hạn)", v: { pageId: PB, status: "HANDOFF", handoffReason: FANPAGE_STAFF_REASON, humanCooldownUntil: at(-20 * MIN), lastCustomerAt: at(12 * MIN), lastStaffAt: at(10 * MIN) }, e: E({ page: PB, human: "STAFF_COOLDOWN", replying: "HUMAN" }) },
-        { id: "s06", note: "AI nhường, khách nhắn tiếp SAU câu nhân viên", v: { pageId: PA, status: "HANDOFF", handoffReason: FANPAGE_STAFF_REASON, humanCooldownUntil: at(-25 * MIN), lastStaffAt: at(5 * MIN), lastCustomerAt: at(2 * MIN) }, inbound: [{ at: 6 * MIN }, { at: 2 * MIN }], e: E({ page: PA, unread: true, waiting: true, human: "STAFF_COOLDOWN", replying: "HUMAN", unreadN: 1 }) },
+        { id: "s06", note: "AI nhường, khách nhắn tiếp SAU câu nhân viên", v: { pageId: PA, status: "HANDOFF", handoffReason: FANPAGE_STAFF_REASON, humanCooldownUntil: at(-25 * MIN), lastStaffAt: at(5 * MIN), lastCustomerAt: at(2 * MIN) }, inbound: [{ at: 6 * MIN }, { at: 2 * MIN }], e: E({ page: PA, unread: true, waiting: true, human: "STAFF_COOLDOWN", replying: "HUMAN", unreadN: 2 }) },
         { id: "s07", note: "AI nhường đã HẾT HẠN (chưa dọn) ⇒ AI", v: { pageId: PA, status: "HANDOFF", handoffReason: FANPAGE_STAFF_REASON, humanCooldownUntil: at(MIN), lastStaffAt: at(60 * MIN), lastCustomerAt: at(50 * MIN), staffSeenAt: at(45 * MIN) }, e: E({ page: PA, waiting: true }) },
         { id: "s08", note: "AI GỢI Ý (copilot), chưa ai mở", v: { pageId: PB, state: ctl("COPILOT"), lastCustomerAt: at(15 * MIN) }, inbound: [{ at: 15 * MIN }], e: E({ page: PB, unread: true, waiting: true, human: "COPILOT", replying: "HUMAN", unreadN: 1 }) },
         { id: "s09", note: "AI HỎNG (đang chờ thử lại) ⇒ cần người, không ai cầm", v: { pageId: PA, status: "HANDOFF", handoffReason: AI_DOWN_HANDOFF_REASON, updatedAt: at(5 * MIN), lastCustomerAt: at(6 * MIN) }, inbound: [{ at: 6 * MIN }], e: E({ page: PA, unread: true, waiting: true, needs: "AI_DOWN", replying: "NOBODY", unreadN: 1 }) },
         { id: "s10", note: "AI hỏng đã quá khoảng chờ ⇒ AI tự thử lại", v: { pageId: PB, status: "HANDOFF", handoffReason: AI_DOWN_HANDOFF_REASON, updatedAt: at(40 * MIN), lastCustomerAt: at(41 * MIN), staffSeenAt: at(40 * MIN) }, e: E({ page: PB, waiting: true }) },
-        { id: "s11", note: "AI XIN NGƯỜI (khách đòi gặp người), có SĐT, chưa ai cầm", v: { pageId: PB, status: "HANDOFF", handoffReason: "Khách đòi gặp người", lastCustomerAt: at(25 * MIN), lastBotAt: at(24 * MIN), customerPhone: "0912000011" }, inbound: [{ at: 25 * MIN }], e: E({ page: PB, unread: true, needs: "AI_HANDOFF", replying: "NOBODY", phone: true, unreadN: 1 }) },
+        { id: "s11", note: "AI XIN NGƯỜI (khách đòi gặp người), có SĐT, chưa ai cầm", v: { pageId: PB, status: "HANDOFF", handoffReason: "Khách đòi gặp người", lastCustomerAt: at(25 * MIN), lastBotAt: at(24 * MIN), customerPhone: "0912000011" }, inbound: [{ at: 25 * MIN }, { at: 24 * MIN, note: "BOT_SENT" }], e: E({ page: PB, needs: "AI_HANDOFF", replying: "NOBODY", phone: true }) },
         { id: "s12", note: "AI xin người, nhân viên ĐÃ trả lời (nhường còn hạn) — vẫn cần người quyết, người đang cầm", v: { pageId: PA, status: "HANDOFF", handoffReason: "Khách nhắn sau khi đã chốt đơn — nhân viên xử lý", humanCooldownUntil: at(-10 * MIN), lastStaffAt: at(3 * MIN), lastCustomerAt: at(8 * MIN), staffSeenAt: at(3 * MIN), orderId: "erp-sem-12" }, e: E({ page: PA, needs: "AI_HANDOFF", human: "STAFF_COOLDOWN", replying: "HUMAN" }) },
         { id: "s13", note: "đơn của hội thoại mang cờ CẦN NGƯỜI KIỂM (khách báo huỷ), AI vẫn chạy", v: { pageId: PA, lastCustomerAt: at(60 * MIN), lastBotAt: at(59 * MIN), staffSeenAt: at(58 * MIN) }, order: { stage: "NEW", review: true }, e: E({ page: PA, needs: "ORDER_REVIEW" }) },
         { id: "s14", note: "cờ cần kiểm trên đơn ĐÃ HUỶ ⇒ không còn việc", v: { pageId: PB, lastCustomerAt: at(70 * MIN), staffSeenAt: at(69 * MIN) }, order: { stage: "CANCELLED", review: true }, e: E({ page: PB, waiting: true }) },
         { id: "s15", note: "đã chốt (đơn ERP + level) hai ngày trước, đã xem", v: { pageId: PA, orderId: "erp-sem-15", customerLevel: "ORDERED", lastCustomerAt: at(2 * DAY), lastBotAt: at(2 * DAY - MIN), staffSeenAt: at(2 * DAY - 2 * MIN), customerPhone: "0912000015" }, e: E({ page: PA, phone: true }) },
         { id: "s16", note: "chỉ có LỊCH SỬ nhập (ba ngày trước)", v: { pageId: PB, createdBy: HISTORY_CREATED_BY, historyUntil: at(3 * DAY), lastCustomerAt: at(3 * DAY), staffSeenAt: at(3 * DAY) }, inbound: [{ at: 3 * DAY, imported: true }], e: E({ page: PB }) },
-        { id: "s17", note: "nhân viên trả lời trên PANCAKE (tin phía page) ⇒ AI nhường; người trong ERP chưa mở", v: { pageId: PB, status: "HANDOFF", handoffReason: FANPAGE_STAFF_REASON, humanCooldownUntil: at(-12 * MIN), lastCustomerAt: at(18 * MIN) }, inbound: [{ at: 18 * MIN }, { at: 17 * MIN, note: PAGE_REPLY }], e: E({ page: PB, unread: true, human: "STAFF_COOLDOWN", replying: "HUMAN", unreadN: 1 }) },
+        { id: "s17", note: "nhân viên trả lời trên PANCAKE (tin phía page) ⇒ AI nhường; page trả lời = đã xử lý", v: { pageId: PB, status: "HANDOFF", handoffReason: FANPAGE_STAFF_REASON, humanCooldownUntil: at(-12 * MIN), lastCustomerAt: at(18 * MIN) }, inbound: [{ at: 18 * MIN }, { at: 13 * MIN, note: PAGE_REPLY }], e: E({ page: PB, human: "STAFF_COOLDOWN", replying: "HUMAN" }) },
         { id: "s18", note: "chat WEB, nhân viên đang trả lời (chờ người trả lại)", v: { channel: "WEB", status: "HANDOFF", handoffReason: WEB_STAFF_REASON, lastCustomerAt: at(33 * MIN), lastStaffAt: at(32 * MIN) }, e: E({ page: null, human: "STAFF_COOLDOWN", replying: "HUMAN" }) },
         { id: "s19", note: "HANDOFF không lý do (AI / công cụ xin người)", v: { pageId: PA, status: "HANDOFF", handoffReason: null, lastCustomerAt: at(7 * MIN) }, inbound: [{ at: 7 * MIN }], e: E({ page: PA, unread: true, waiting: true, needs: "AI_HANDOFF", replying: "NOBODY", unreadN: 1 }) },
-        { id: "s20", note: "hôm qua: khách nhắn, AI trả lời, chưa ai mở", v: { pageId: PB, lastCustomerAt: at(DAY + 30 * MIN), lastBotAt: at(DAY + 29 * MIN) }, inbound: [{ at: DAY + 30 * MIN }, { at: DAY + 29 * MIN, note: "BOT_SENT" }], e: E({ page: PB, unread: true, unreadN: 1 }) },
+        { id: "s20", note: "hôm qua: khách nhắn, AI trả lời (đã xử lý), chưa ai mở", v: { pageId: PB, lastCustomerAt: at(DAY + 30 * MIN), lastBotAt: at(DAY + 29 * MIN) }, inbound: [{ at: DAY + 30 * MIN }, { at: DAY + 29 * MIN, note: "BOT_SENT" }], e: E({ page: PB }) },
       ];
 
       for (const s of specs) {
@@ -99,6 +100,8 @@ export async function testInboxSemanticsV3() {
         for (const [i, m] of (s.inbound ?? []).entries()) {
           await db.insert(schema.salesChatInbound).values({ pageId: String(s.v.pageId), threadId: thread!, messageId: `${s.id}-${i}`, text: m.note === "BOT_SENT" ? "Dạ giá 280k ạ" : m.note === PAGE_REPLY ? "Dạ em kiểm hàng" : "Xin giá", note: m.note ?? null, customerName: `Khách ${s.id}`, status: "DONE", processedAt: at(m.at), createdAt: at(m.at), importedAt: m.imported ? at(m.at) : null });
         }
+        // Người mở = con trỏ đọc (`sales_chat_reads`) — vế «người đọc» của #803 (mốc chung cũ `staff_seen_at` không còn là bằng chứng).
+        if (s.read !== undefined) await db.insert(schema.salesChatReads).values({ conversationId: s.id, userId: admin.id, readThroughAt: at(s.read) });
         if (s.order) {
           const review = s.order.review ? { entries: [{ code: "CUSTOMER_CANCELLED", note: "Khách báo huỷ", quote: "thôi em không lấy nữa", at: at(61 * MIN).toISOString(), by: "Bot" }] } : null;
           await db.insert(schema.orders).values({ id: `erp-sem-${s.id}`, stage: s.order.stage, status: s.order.stage === "CANCELLED" ? 6 : 0, salesConversationId: s.id, insertedAt: at(62 * MIN), raw: review ? { review } : {} });
@@ -220,27 +223,32 @@ export async function testInboxSemanticsV3() {
       await db.update(schema.customers).set({ name: "Đổi tên hồ sơ" }).where(eq(schema.customers.id, cus.id));
       assert.deepEqual(await orderNow(), before, "nhãn / người phụ trách / siêu dữ liệu KHÔNG đổi chỗ hội thoại");
 
-      // ═══ 4. AI trả lời KHÔNG xoá chưa đọc; MỞ hội thoại mới xoá ═══
+      // ═══ 4. AI trả lời XOÁ chưa đọc (P0-D); tin khách MỚI tạo lại; NẠP khung chat chưa phải đọc; MỞ (đánh dấu đọc) xoá ═══
       const rowOf = async (id: string): Promise<InboxRow> => {
         const r = await listInbox(admin, { limit: 500 }, now);
         assert.ok(r.ok);
         return r.rows.find((x) => x.id === id)!;
       };
-      await db.insert(schema.salesChatInbound).values({ pageId: PA, threadId: "t-s01", messageId: "s01-bot2", text: "Dạ chị cần size nào ạ?", note: "BOT_SENT", status: "DONE", processedAt: at(MIN), createdAt: at(MIN) });
-      await db.update(c).set({ lastBotAt: at(MIN) }).where(eq(c.id, "s01"));
-      const s01 = await rowOf("s01");
-      assert.ok(s01.unread && s01.unreadCount === 1, `AI trả lời thêm ⇒ VẪN chưa đọc, bộ đếm giữ nguyên: ${JSON.stringify({ u: s01.unread, n: s01.unreadCount })}`);
-      const opened = await loadInboxThread(admin, "s01", now);
+      assert.equal((await rowOf("s19")).unread, true, "s19: khách nhắn, chưa ai xử lý");
+      await db.insert(schema.salesChatInbound).values({ pageId: PA, threadId: "t-s19", messageId: "s19-bot", text: "Dạ em chuyển nhân viên ạ", note: "BOT_SENT", status: "DONE", processedAt: at(2 * MIN), createdAt: at(2 * MIN) });
+      const s19a = await rowOf("s19");
+      assert.ok(!s19a.unread && s19a.unreadCount === 0, `AI trả lời ⇒ đã xử lý: ${JSON.stringify({ u: s19a.unread, n: s19a.unreadCount })}`);
+      await db.insert(schema.salesChatInbound).values({ pageId: PA, threadId: "t-s19", messageId: "s19-c2", text: "Gặp người thật được không?", customerName: "Khách s19", status: "DONE", processedAt: at(MIN), createdAt: at(MIN) });
+      const s19b = await rowOf("s19");
+      assert.ok(s19b.unread && s19b.unreadCount === 1, "tin khách MỚI sau câu AI ⇒ chưa đọc lại, đúng 1");
+      const opened = await loadInboxThread(admin, "s19", now);
       assert.ok(opened.ok && opened.thread.readThrough, "khung chat mang tin khách cuối cùng để đánh dấu đọc");
-      assert.equal((await rowOf("s01")).unread, true, "NẠP khung chat không đánh dấu đọc (P0.3 — đọc tách khỏi nạp)");
-      assert.ok((await markInboxReadCore(admin, "s01", opened.thread.readThrough.id)).ok, "đánh dấu đọc tới đúng tin khách đã hiện");
-      const s01b = await rowOf("s01");
-      assert.ok(!s01b.unread && s01b.unreadCount === 0, "mở hội thoại ⇒ đã đọc, bộ đếm 0");
+      assert.equal((await rowOf("s19")).unread, true, "NẠP khung chat không đánh dấu đọc (P0.3 — đọc tách khỏi nạp)");
+      assert.ok((await markInboxReadCore(admin, "s19", opened.thread.readThrough.id)).ok, "đánh dấu đọc tới đúng tin khách đã hiện");
+      const s19c = await rowOf("s19");
+      assert.ok(!s19c.unread && s19c.unreadCount === 0, "mở hội thoại ⇒ đã đọc, bộ đếm 0");
       const after = await orderNow();
       const unreadNow = await listInbox(admin, { filter: "UNREAD", limit: 500 }, now);
-      assert.ok(unreadNow.ok && !unreadNow.rows.some((r) => r.id === "s01") && unreadNow.counts.UNREAD === all.counts.UNREAD - 1, "thẻ «Chưa đọc» bớt đúng một");
-      assert.ok(after.indexOf("s01") >= unreadNow.counts.UNREAD, "đã đọc ⇒ máy chủ xếp nó vào nhóm đã đọc (trình duyệt giữ hàng ĐANG MỞ tại chỗ — keepActiveInPlace — tới khi chuyển hội thoại)");
+      assert.ok(unreadNow.ok && !unreadNow.rows.some((r) => r.id === "s19") && unreadNow.counts.UNREAD === all.counts.UNREAD - 1, "thẻ «Chưa đọc» bớt đúng một");
+      assert.ok(after.indexOf("s19") >= unreadNow.counts.UNREAD, "đã đọc ⇒ máy chủ xếp nó vào nhóm đã đọc (trình duyệt giữ hàng ĐANG MỞ tại chỗ — keepActiveInPlace — tới khi chuyển hội thoại)");
       // Nhân viên trả lời từ ERP = đã thấy: tiếp quản rồi trả lời ⇒ s03 hết chưa đọc.
+      // Câu nhân viên gửi từ hộp thư ERP = dòng `staff-out:` trong sổ (bằng chứng của #803) + mốc `last_staff_at`.
+      await db.insert(schema.salesChatInbound).values({ pageId: PA, threadId: "t-s03", messageId: "staff-out:s03-r:0", text: "Dạ em gửi ạ", note: PAGE_REPLY, status: "DONE", createdAt: new Date(T0 - 30_000) });
       await db.update(c).set({ lastStaffAt: new Date(T0 - 30_000) }).where(eq(c.id, "s03"));
       assert.equal((await rowOf("s03")).unread, false, "nhân viên đã trả lời sau tin khách ⇒ đã thấy");
 
@@ -251,7 +259,7 @@ export async function testInboxSemanticsV3() {
       assert.ok((await setConversationControlCore(admin, "s11", "AUTO")).ok);
       const s11b = await rowOf("s11");
       assert.ok(s11b.needsHuman === null && s11b.humanHandling === null && s11b.handling === "AI", "trả lại AI ⇒ AI");
-      assert.deepEqual((await orderNow()).filter((id) => id !== "s01" && id !== "s03"), after.filter((id) => id !== "s01" && id !== "s03"), "đổi chế độ AI không đổi thứ tự");
+      assert.deepEqual((await orderNow()).filter((id) => id !== "s19" && id !== "s03"), after.filter((id) => id !== "s19" && id !== "s03"), "đổi chế độ AI không đổi thứ tự");
 
       // ═══ 6. Tổ chức ở chế độ AI gợi ý ⇒ mọi hội thoại «Người đang xử lý», «Cần người» không đổi ═══
       const copilotMode = JSON.stringify({ mode: "COPILOT", aiSharePct: 50 });

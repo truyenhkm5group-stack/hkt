@@ -2,7 +2,8 @@ import { and, eq, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { can, type SessionUser } from "@/lib/auth/session";
 import { canReplyTo } from "@/lib/sales-chatbot/inbox";
-import { CUSTOMER_INBOUND_ROW_SQL, CUSTOMER_MESSAGE_ROW_SQL, personalUnreadCountSql } from "@/lib/sales-chatbot/inbox-states";
+import { CUSTOMER_INBOUND_ROW_SQL, CUSTOMER_MESSAGE_ROW_SQL } from "@/lib/sales-chatbot/inbox-states";
+import { loadInboxUnreadSql } from "@/lib/sales-chatbot/inbox-unread";
 import type { InboxReadConfirmation } from "@/lib/sales-chatbot/inbox-read-shared";
 
 /**
@@ -18,8 +19,12 @@ import type { InboxReadConfirmation } from "@/lib/sales-chatbot/inbox-read-share
  *  · chỉ TIẾN (`setWhere read_through_at < mốc mới`) — bấm lại hội thoại cũ / lượt trả lời đến trễ không kéo con trỏ lùi;
  *  · idempotent — gọi hai lần cùng tin không đổi gì (mốc `updated_at` giữ nguyên);
  *  · tin khách tới sau mốc ⇒ VẪN chưa đọc (điều kiện là `created_at > con trỏ`, không phải `> giờ bấm`).
- * `staff_seen_at` (mốc chung cũ) vẫn được đẩy tới CÙNG mốc tin khách — các chỗ đang đọc nó và người xem chưa có con trỏ riêng (chỗ lùi
- * của `readCursorSql`) giữ nguyên nghĩa. Chỉ người TRẢ LỜI được mới đẩy mốc chung (người chỉ xem không xoá dấu của đội) — như cũ.
+ * `staff_seen_at` (mốc chung cũ) vẫn được đẩy tới CÙNG mốc tin khách — các chỗ đang đọc nó giữ nguyên nghĩa. Chỉ người TRẢ LỜI được mới đẩy mốc chung (người chỉ xem không xoá dấu của đội) — như cũ.
+ *
+ * CHƯA ĐỌC VẬN HÀNH (chủ shop 11/10/2026 — response-ownership #803): «người mở / đọc» = con trỏ LỚN NHẤT của mọi người ≥ tin khách
+ * cuối, nên MỘT nhân viên bất kỳ mở / đọc là lượt khách đó đã xử lý với cả cửa hàng (tin khách mới hơn mốc đọc ⇒ lượt mới, chưa đọc).
+ * Con trỏ riêng vẫn ghi (audit); trigger 0245 tính lại «chưa đọc» lưu sẵn ngay trong lượt ghi. Số trước / sau trong xác nhận là số
+ * chưa đọc VẬN HÀNH (`loadInboxUnreadSql().count` — cùng công tắc lùi với hộp thư).
  *
  * Trả về XÁC NHẬN để danh sách vá ngay (không đợi làm mới cả trang): số chưa đọc của NGƯỜI NÀY trước / sau lượt ghi và `stamp`
  * (`updated_at` của con trỏ) — trình duyệt so `stamp` với dấu của bản danh sách để biết bản nào cũ hơn lượt đọc.
@@ -49,8 +54,9 @@ export async function markInboxReadCore(user: SessionUser, conversationId: unkno
   const throughAt = messaging
     ? sql<Date>`(select i.created_at from "sales_chat_inbound" i where i.id = ${throughId} and i.page_id = ${conv.pageId} and i.thread_id = ${conv.threadId} and ${CUSTOMER_INBOUND_ROW_SQL})`
     : sql<Date>`(select m.created_at from "sales_chat_messages" m where m.id = ${throughId} and m.conversation_id = ${conv.id} and ${CUSTOMER_MESSAGE_ROW_SQL})`;
+  const unreadCount = (await loadInboxUnreadSql()).count;
   const unreadOf = async () => {
-    const [r] = await db.select({ n: personalUnreadCountSql(user.id), ok: sql<boolean>`${throughAt} is not null` }).from(c).where(eq(c.id, conv.id));
+    const [r] = await db.select({ n: unreadCount, ok: sql<boolean>`${throughAt} is not null` }).from(c).where(eq(c.id, conv.id));
     return { n: Number(r?.n ?? 0), ok: Boolean(r?.ok) };
   };
   const before = await unreadOf();

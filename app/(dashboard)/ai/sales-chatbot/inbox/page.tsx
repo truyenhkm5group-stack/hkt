@@ -79,7 +79,7 @@ export default async function SalesInboxPage({ searchParams }: { searchParams: P
   // Nạp hội thoại KHÔNG đánh dấu đọc (P0.3, 10/10/2026 tối): khung chat hiện xong mới gửi tin khách cuối cùng nó đã hiện về
   // `/api/ai-sales/inbox-read`; danh sách vá theo xác nhận đó (inbox-read-shared.ts). Workspace KHÁCH: lý do AI không trả lời + dấu vết từng tin lọc ở MÁY CHỦ trước khi vào props (lib/saas/visibility.ts).
   // Bấm sang hội thoại khác KHÔNG đi qua đây (thread-pane.tsx — chỉ tải hội thoại); đây là lối mở bằng đường dẫn / tự làm mới.
-  // «Chưa đọc» trên trang là của NGƯỜI ĐANG XEM (`personalUnreadSql`, con trỏ riêng — inbox-states.ts).
+  // «Chưa đọc» = tin khách CHƯA ĐƯỢC XỬ LÝ — trạng thái của cửa hàng (`loadInboxUnreadSql`, inbox-unread.ts; chủ shop 11/10/2026).
   const thread = selected ? await inboxThreadPayload(user, selected) : null;
   const canManage = can(user, "ai_sales:manage");
   const [list, users, assignees, pack, routes, cooldown, orderGate, bulkCount] = await Promise.all([

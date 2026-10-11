@@ -295,12 +295,12 @@ export type InboxRow = {
   latestAt: string | null;
   /** Mốc tin KHÁCH thật mới nhất — bản danh sách cũ có tin khách mới hơn lượt đọc đã xác nhận thì hàng vẫn chưa đọc. */
   newestCustomerAt: string | null;
-  /** Con trỏ đọc của NGƯỜI XEM mà máy chủ dùng khi tính hàng này (riêng, hoặc mốc chung khi chưa có con trỏ riêng). */
+  /** MỐC XỬ LÝ máy chủ dùng khi tính hàng này: trả lời hợp lệ / đọc mới nhất của cửa hàng (`HANDLED_AT_SQL`) — so với xác nhận đọc. */
   readCursorAt: string | null;
   lastActivityAt: string;
   /** Tin khách CHƯA ai trả lời (bot, nhân viên ERP, hay người ngoài ERP) — mốc tin khách đó; `null` = đã được trả lời. */
   waitingSince: string | null;
-  /** NGƯỜI XEM chưa đọc: có tin KHÁCH thật mới hơn con trỏ đọc của chính họ — AI trả lời KHÔNG xoá (`personalUnreadSql`). */
+  /** Chưa đọc vận hành: có tin KHÁCH thật mới hơn MỌI mốc xử lý (đọc · AI / nhân viên / page trả lời) — `loadInboxUnreadSql` (inbox-unread.ts). */
   unread: boolean;
   /** SỐ tin khách chưa đọc — cùng điều kiện với `unread` (chưa đọc ⇔ số ≥ 1; trần 100). */
   unreadCount: number;
