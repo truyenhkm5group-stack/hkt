@@ -1,8 +1,8 @@
 {
   "pr": 792,
-  "sha": "b222a779c0c4232243ac7f3cfe49717a4752068f",
+  "sha": "6d99c3a8c90f951ff13fa12edcb72be680de2ea1",
   "verdict": "PASS",
   "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
-  "at": "2026-10-11T10:19:48.589Z",
-  "note": "Một định nghĩa (#803), lưu sẵn có kiểm parity + kiểm thân hàm từng ký tự; NULL = chưa biết (rơi về hàm trực tiếp); migration chỉ cộng thêm + dẫn xuất tất định — vẫn cần chủ shop duyệt UPDATE (owner-approve-792); gộp sau #803 và sau khi P0 giá PASS"
+  "at": "2026-10-11T19:27:53.188Z",
+  "note": "Dựng lại trên main sau #803: chỉ phần riêng #792 (0245 cột lưu sẵn + trigger + truy vấn hộp thư + công tắc lùi inbox.unread.materialized + audit/tests). Thân hàm CSDL trùng từng ký tự với SQL #803 (bài kiểm so chuỗi). Ma trận e1–e7/x7–x9 qua trigger thật. SET LOCAL lock_timeout 10s / statement_timeout 600s trong giao dịch migrate. Dry-run production: HSLC 2439→616 chưa đọc, true→false 1897, false→"
 }
