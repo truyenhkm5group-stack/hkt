@@ -2087,3 +2087,4 @@
 {"at":"2026-10-11T09:29:04.972Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"OVERLAP_DETECTED","mission":"authoritative-quote","detail":"OVERLAP với sales-claim-guard: phạm vi lib/sales-chatbot/claim-guard.ts, lib/sales-chatbot/engine.ts ⇒ tuần tự hoá (--after=sales-claim-guard) hoặc khai cách tích hợp (--accept-overlap=\"…\")"}
 {"at":"2026-10-11T09:29:35.715Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"STATUS","mission":"authoritative-quote","detail":"PR_READY → RUNNING"}
 {"at":"2026-10-11T09:36:23.002Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"response-ownership","detail":"fix/response-ownership @ 27d9b2c7cc52 · 1 lệnh kiểm thử"}
+{"at":"2026-10-11T09:36:42.586Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#803 @ 27d9b2c7cc52 · Ba lỗ phủ vá đúng hướng (không bỏ sót khách), vẫn một định nghĩa, đối chiếu TS≡SQL mở rộng; chờ P0 giá xong mới gộp (0244)"}

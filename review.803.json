@@ -1,8 +1,8 @@
 {
   "pr": 803,
-  "sha": "2db170241646f0a71c6cdcd92a4f3881961a2f05",
+  "sha": "27d9b2c7cc52516502668c93cb957b209769d4c1",
   "verdict": "PASS",
   "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
-  "at": "2026-10-11T08:04:50.519Z",
-  "note": "Một định nghĩa, hai dạng, có bài đối chiếu; tin tự động/hệ thống/gửi hỏng không là xử lý; con trỏ đọc bất kỳ người = xử lý; sửa kèm lỗi khoá câu mẫu SQL. Gộp sau #801, đổi migration 0244"
+  "at": "2026-10-11T09:36:26.921Z",
+  "note": "Ba lỗ phủ vá đúng hướng (không bỏ sót khách), vẫn một định nghĩa, đối chiếu TS≡SQL mở rộng; chờ P0 giá xong mới gộp (0244)"
 }
