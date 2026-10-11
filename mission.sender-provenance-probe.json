@@ -3,7 +3,7 @@
   "mission_id": "sender-provenance-probe",
   "title": "Ops chỉ đọc sender-provenance-probe: đo tỷ lệ tin phía page không mang dấu người/app (sẽ thành UNKNOWN sau #803) trước khi deploy",
   "business_goal": "",
-  "status": "RUNNING",
+  "status": "PR_READY",
   "priority": "P0",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -21,7 +21,18 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-11T05:58:55.490Z",
-  "updated_at": "2026-10-11T05:58:55.490Z",
-  "last_heartbeat": "2026-10-11T05:58:55.490Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-11T05:59:13.737Z",
+  "last_heartbeat": "2026-10-11T05:59:13.737Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "fix/sender-provenance-probe",
+    "sha": "049146b4cc0b32189e8ecda98ddf73e31ede4f2e",
+    "at": "2026-10-11T05:59:13.737Z",
+    "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+    "title": "Ops chỉ đọc sender-provenance-probe: đo tỷ lệ tin phía page không mang dấu người/app (sẽ thành UNKNOWN sau #803) trước khi deploy",
+    "summary": "Ops chỉ đọc đo nguồn gốc tin phía page (10 nhóm) + nhóm không dấu giữa chuỗi người",
+    "tests": [
+      "tsc · eslint · sender-provenance-probe · repo-integrity · test-hygiene · ops-concurrency · ops-log-leak · pancake-avatar-shape · npm test để CI"
+    ]
+  }
 }

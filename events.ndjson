@@ -2024,3 +2024,4 @@
 {"at":"2026-10-11T05:48:08.481Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"customer-360","detail":"#804 cho fix/customer-360 @ a4a10b98dcda"}
 {"at":"2026-10-11T05:48:26.303Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#804 @ a4a10b98dcda · Theo tenant; địa chỉ chỉ GỢI Ý, máy chủ kiểm lời đồng ý mới điền (§3.12); đơn hoàn/huỷ/nháp/chưa ghép không bao giờ đề xuất; SĐT trùng ⇒ AMBIGUOUS; mức PHONE che địa chỉ; Pancake PAID không coi là đã giao. Gộp sau #802 (tools.ts) và trước authoritative-quote"}
 {"at":"2026-10-11T05:58:55.595Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"CLAIM","mission":"sender-provenance-probe","detail":"RUNNING · 2 mẫu phạm vi · MEDIUM"}
+{"at":"2026-10-11T05:59:13.772Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"sender-provenance-probe","detail":"fix/sender-provenance-probe @ 049146b4cc0b · 1 lệnh kiểm thử"}
