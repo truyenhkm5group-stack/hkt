@@ -1,0 +1,8 @@
+{
+  "pr": 797,
+  "sha": "91f1375fcc07eedd993d81a453237d9c899420f1",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-11T03:49:13.291Z",
+  "note": "Chỉ đọc: ERP_READ_ONLY + hỏi lại read-only, getDbForInspection; lib thuần không CSDL/đồng hồ; kênh tóm tắt chỉ số đếm (bài kiểm chặn PII); khai ops bốn chỗ; không đổi hành vi production"
+}
