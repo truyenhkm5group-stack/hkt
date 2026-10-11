@@ -3,7 +3,7 @@
   "mission_id": "avatar-accept-header",
   "title": "Ảnh khách hộp thư: bước 1 gọi điểm cuối ảnh Pancake gửi accept */* (image/* bị 406 — đo production 5/5)",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P1",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -23,9 +23,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-11T06:11:23.542Z",
-  "updated_at": "2026-10-11T06:12:17.493Z",
+  "updated_at": "2026-10-11T06:41:59.410Z",
   "last_heartbeat": "2026-10-11T06:11:41.309Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#806 → 90f56278201bcd2aa810d23f66af1ca927a8c611"
+  },
   "handoff": {
     "branch": "fix/avatar-accept-header",
     "sha": "ee8e5fb4df2f1f5733d69b98810b22c4f88a11dc",
