@@ -499,6 +499,7 @@ import { testInboxComposer } from "./inbox-composer.test";
 import { testInboxV2A } from "./inbox-v2-a.test";
 import { testInboxAvatarProfile } from "./inbox-avatar-profile.test";
 import { testPancakeAvatarShape } from "./pancake-avatar-shape.test";
+import { testSenderProvenanceProbe } from "./sender-provenance-probe.test";
 import { testAvatarProxy } from "./avatar-proxy.test";
 import { testInboxSemanticsV3 } from "./inbox-semantics-v3.test";
 import { testInboxReadV3 } from "./inbox-read-v3.test";
@@ -2916,6 +2917,8 @@ async function main() {
   await testInboxAvatarProfile();
   // Ops pancake-avatar-shape (11/10/2026): dáng payload Pancake để tìm khoá ảnh thật — chỉ in đường khoá + kiểu + dạng, không giá trị. Thuần + quét mã nguồn.
   testPancakeAvatarShape();
+  // Ops sender-provenance-probe (11/10/2026): tin phía page mang dấu người gửi gì — đo rủi ro AI chen vào cuộc chat người trước deploy P0. Thuần + quét mã nguồn.
+  testSenderProvenanceProbe();
   // Ảnh khách qua proxy ERP (11/10/2026): URL Pancake mang khoá ⇒ cất bản KHÔNG khoá, máy chủ gắn token lúc tải; chặn SSRF, đệm LRU, quyền theo tổ chức — tổ chức `anh-dai-dien-proxy`, fetch giả.
   await testAvatarProxy();
   // INBOX-SEMANTICS-V3 (chủ shop 10/10/2026): bốn khái niệm tách riêng — chưa đọc (AI trả lời không xoá) · chờ trả lời · cần người thật · người đang xử lý; ma trận 20 hội thoại × mọi bộ lọc — tổ chức `hop-thu-sem-v3`.
