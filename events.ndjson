@@ -1990,3 +1990,4 @@
 {"at":"2026-10-11T03:58:44.895Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#798 @ f7cc1167f3f2 · Điều kiện tìm một chỗ, chạy trên CSDL tổ chức ngữ cảnh (bài kiểm tenant A↔B); không migration; chuẩn hoá SĐT dùng lại hàm có sẵn; inbox.ts chỉ đổi điểm nối; UI gợi ý dùng counts.ALL sẵn có. Rủi ro hiệu năng quét tin (không pg_trgm) — đo lại production sau deploy"}
 {"at":"2026-10-11T04:11:34.216Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"CLAIM","mission":"avatar-proxy-check","detail":"RUNNING · 2 mẫu phạm vi · MEDIUM"}
 {"at":"2026-10-11T04:11:56.662Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"avatar-proxy-check","detail":"fix/avatar-proxy-check @ 69c84c29eb46 · 1 lệnh kiểm thử"}
+{"at":"2026-10-11T04:12:40.836Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"avatar-proxy-check","detail":"#799 cho fix/avatar-proxy-check @ 69c84c29eb46"}
