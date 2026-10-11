@@ -34,18 +34,18 @@
     "0241": "2026-10-11T01:15:37.380Z"
   },
   "created_at": "2026-10-10T18:42:21.906Z",
-  "updated_at": "2026-10-11T01:15:37.380Z",
-  "last_heartbeat": "2026-10-10T22:34:42.615Z",
+  "updated_at": "2026-10-11T01:19:04.767Z",
+  "last_heartbeat": "2026-10-11T01:19:04.767Z",
   "definition_of_done": [],
   "handoff": {
     "branch": "feat/saas-value-snapshots",
-    "sha": "194c977f59f24227b96df03c2d27c484129a58e2",
-    "at": "2026-10-10T22:34:42.615Z",
+    "sha": "7f5f3a5294756fc3ae9bd99547bc21ba676c912f",
+    "at": "2026-10-11T01:19:04.767Z",
     "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
     "title": "Trung tâm giá trị SaaS PR-3: hai bảng ảnh chụp ngày (giá trị theo tổ chức 7/30/90 + sức khoẻ/rủi ro rời bỏ) + lượt chụp mỗi ngày VN ở đường job",
-    "summary": "PR-3: hai bảng ảnh chụp ngày (giá trị 7/30/90 + sức khoẻ/rủi ro rời bỏ), chụp mỗi ngày VN ở đường JOB (một lời gọi trong captureSaasSnapshot), ngày cũ không ghi được, lỗi từng nguồn ⇒ chỉ ô đó NULL; ops chỉ đọc saas-value-snapshot-check",
+    "summary": "PR-3 ảnh chụp ngày (migration 0241, chỉ thêm hai bảng)",
     "tests": [
-      "npm test đầy đủ trên bản worker: TẤT CẢ KIỂM THỬ ĐẠT · cherry-pick lên main (PR-1/PR-2 đã gộp): tsc sạch · migration-journal · saas-value-center đạt · bài CSDL saas-value-snapshots chạy trong CI"
+      "npm test đầy đủ (bản worker) đạt · gộp main + đổi migration 0241: tsc sạch · migration-journal đạt · bài CSDL chạy trong CI"
     ]
   }
 }
