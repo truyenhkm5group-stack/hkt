@@ -2043,3 +2043,4 @@
 {"at":"2026-10-11T06:43:03.449Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DEPLOY_DISPATCHED","detail":"90f56278201b · run 38118946171 https://github.com/truyenhkm5group-stack/hkt/actions/runs/38118946171"}
 {"at":"2026-10-11T06:48:51.876Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"handoff-ownership","detail":"fix/handoff-ownership @ 099823bced8a · 1 lệnh kiểm thử"}
 {"at":"2026-10-11T06:49:09.023Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#800 @ 099823bced8a · Bài chuông giữ ý định luật 03/10, kiểm chặt hơn theo khoá đợt; gộp main không xung đột"}
+{"at":"2026-10-11T07:03:50.939Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#805 @ 049146b4cc0b · Chỉ commit gộp main; danh sách ops giải hợp (giữ avatar-proxy-check + sender-provenance-probe)"}
