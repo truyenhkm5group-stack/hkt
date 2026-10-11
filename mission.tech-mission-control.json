@@ -3,7 +3,7 @@
   "mission_id": "tech-mission-control",
   "title": "/tech Mission Control: đọc sổ Tech Room (ai-control/registry) vào /tech — danh sách mission, lọc, tìm, liên kết PR/CI/deploy, lịch sử, STALE, Decision Inbox, báo Lark",
   "business_goal": "",
-  "status": "VERIFYING",
+  "status": "DONE",
   "priority": "P2",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -33,13 +33,14 @@
     "0240": "2026-10-10T14:50:55.622Z"
   },
   "created_at": "2026-10-10T14:50:30.112Z",
-  "updated_at": "2026-10-11T00:41:07.750Z",
-  "last_heartbeat": "2026-10-10T20:02:45.091Z",
+  "updated_at": "2026-10-11T00:41:27.261Z",
+  "last_heartbeat": "2026-10-11T00:41:27.261Z",
   "definition_of_done": [],
   "evidence": {
     "merged": "#788 → 1fdf4b9f8265daa7bbda338e3de36c4c95c84fd6",
     "verify": "PASS 1fdf4b9f8265daa7bbda338e3de36c4c95c84fd6 2026-10-11T00:40:38.334Z",
-    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/38095327711"
+    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/38095327711",
+    "done": "Production 1fdf4b9f (deploy PASS, 0240 đã áp). Nghiệm thu production app.chotdontudong.com: /tech/missions trước khi đọc sổ «0 sứ mệnh»; bấm Đọc lại sổ ⇒ «185 sứ mệnh · 81 đang chạy · 13 chờ anh quyết · 10 xong đã kiểm production · 63 DONE chưa kiểm production», dòng có PR/CI/giao hàng («đã gộp · chưa có trong production 1fdf4b9»); /tech/needs-owner «13 quyết định từ sổ Tech Room» kèm ưu tiên + chờ bao lâu. Ảnh mc-before-sync/mc-after-sync/mc-needs-owner. Lịch tự động 10 phút chờ chủ shop (owner-tech-sync-schedule)."
   },
   "handoff": {
     "branch": "feat/tech-mission-control",
