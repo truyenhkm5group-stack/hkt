@@ -1,0 +1,30 @@
+{
+  "schema": 1,
+  "mission_id": "owner-hslc-2kg-price",
+  "title": "QUYẾT ĐỊNH CHỦ SHOP: «2kg» chả cá thu đang có HAI giá trong danh mục HSLC (gói 2kg 540k vs 2 × 1kg 560k)",
+  "business_goal": "",
+  "status": "BLOCKED",
+  "priority": "P2",
+  "risk": "MEDIUM",
+  "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "worker": null,
+  "worktree": null,
+  "branch": "decision/owner-hslc-2kg-price",
+  "base_sha": null,
+  "domains": [],
+  "owned_paths": [
+    "docs/ops/owner-actions.md"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-11T09:17:07.754Z",
+  "updated_at": "2026-10-11T09:17:07.754Z",
+  "last_heartbeat": "2026-10-11T09:17:07.754Z",
+  "definition_of_done": [],
+  "needs_owner": {
+    "category": "APPROVAL_REQUIRED",
+    "action": "Danh mục HSLC: CHA-CA-THU 1kg 280.000 · CHA-CA-THU-2KG 540.000; luật giảm theo khối lượng hiện không áp ⇒ «2kg» ra 540k hay 560k tuỳ đường (gốc của 3 ca Thủy/Hoàn/KimThu). Sau PR báo giá: bot dùng gói 2kg (540k) khi khách nói «2kg»; nếu khách đòi «2 gói riêng 1kg» mà danh mục chưa nói giá gói có áp không thì máy CHUYỂN NGƯỜI (không đoán). Anh chọn một: (a) bật luật giảm 20k mỗi bước (PER_STEP) + mẫu mã 1kg khai khối lượng 1kg, hoặc gỡ/ẩn gói 2kg ⇒ một cách tính duy nhất; (b) thêm cấu hình «giá gói áp cả khi đóng tách» (nhân viên đã trả lời Chị Hoàn «540K» cho 2 gói riêng). Đồng thời: tự chốt khi đủ đơn (P0-A) đang theo công tắc «đơn đủ thông tin = đã xác nhận» — HSLC đang BẬT; có áp cho mọi shop SaaS không (mặc định: chỉ shop bật công tắc)."
+  }
+}
