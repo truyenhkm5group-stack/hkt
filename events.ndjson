@@ -2041,3 +2041,4 @@
 {"at":"2026-10-11T06:28:16.364Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"CLAIM","mission":"owner-fix-order-b8e4e551","detail":"BLOCKED · 1 mẫu phạm vi · MEDIUM"}
 {"at":"2026-10-11T06:41:59.471Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"avatar-accept-header","detail":"#806 @ ee8e5fb4df2f → 90f56278201b (MERGE_NOW · MEDIUM · gates success)"}
 {"at":"2026-10-11T06:43:03.449Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DEPLOY_DISPATCHED","detail":"90f56278201b · run 38118946171 https://github.com/truyenhkm5group-stack/hkt/actions/runs/38118946171"}
+{"at":"2026-10-11T06:48:51.876Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"handoff-ownership","detail":"fix/handoff-ownership @ 099823bced8a · 1 lệnh kiểm thử"}
