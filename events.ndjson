@@ -2003,3 +2003,4 @@
 {"at":"2026-10-11T04:29:28.851Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"CLAIM","mission":"owner-handoff-team","detail":"BLOCKED · 1 mẫu phạm vi · MEDIUM"}
 {"at":"2026-10-11T05:11:57.548Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MIGRATION_RELEASED","mission":"inbox-unread-perf","detail":"0243 — followup-lifecycle (chỉ nới CHECK) lấy 0243 sau handoff 0242; #792 chờ chủ shop chuyển 0244"}
 {"at":"2026-10-11T05:12:17.528Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MIGRATION_RESERVED","mission":"followup-lifecycle","detail":"0243"}
+{"at":"2026-10-11T05:12:37.284Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MIGRATION_RESERVED","mission":"inbox-unread-perf","detail":"0244"}
