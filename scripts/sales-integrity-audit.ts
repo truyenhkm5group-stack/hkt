@@ -19,6 +19,9 @@
    e  địa chỉ có chữ mà chưa ghép tỉnh / xã, theo lý do (bộ chuẩn hoá địa giới 2025 của lõi ghi đơn);
    f  mất doanh thu sau lỗi (ESTIMATED);
    h  tin nhắc gửi khách SAU khi đơn đã chốt, theo nguồn gửi (job nhắc của ERP · AI chủ động · phía page).
+   i  lượt khách bị CHẶN vì «page / nhân viên đã trả lời» / «nhường người» mà KHÔNG có câu trả lời hợp lệ SAU tin trong
+      5 / 30 / 120 phút (bot · nhân viên ERP · chữ page không phải chữ hệ thống trả lời bình luận / tin mẫu tự động);
+   ii ý định mua («lấy / chốt / đặt / mua» + số lượng, SĐT, dòng địa chỉ) rơi vào (i): có đơn sau đó hay không (ESTIMATED).
 
   arg: `<mã tổ chức> [--days=1..60] [--find-name=<chuỗi>[,<chuỗi>]] [--conv=<uuid>]`. Ô arg của ops chỉ nhận chữ không dấu và
   tách theo khoảng trắng ⇒ viết tên bằng `_` hoặc `.` («--find-name=nguyen_thanh_thuy,kimthu_le»); từ rời sau cờ cũng được nối vào.
@@ -34,12 +37,14 @@ import { getDbForInspection, schema, type Db } from "@/db";
 import { manualOrderShortCode } from "@/lib/constants/manual-orders";
 import { orderReviewLogOf, orderReviewOf } from "@/lib/constants/order-review";
 import { findOrganization } from "@/lib/platform/organizations";
+import { classifyInboundNote } from "@/lib/sales-chatbot/ai-status";
 import { detectClaims } from "@/lib/sales-chatbot/claim-guard";
 import { MEDIA_ONLY_NOTE, PAGE_REPLY } from "@/lib/sales-chatbot/fanpage";
 import {
   ADDRESS_ISSUE_GAP,
   ADDRESS_ISSUE_LABEL,
   classifyAddress,
+  classifyPageText,
   compareQuoteToOrder,
   currentFix,
   extractVndAmounts,
@@ -47,9 +52,12 @@ import {
   gapsOf,
   handoffBuckets,
   handoffResponseAt,
+  hasBuyIntent,
   isConfirmNudge,
+  isSuppressionCode,
   lineGrams,
   lostSaleOf,
+  nextValidReplyAt,
   nameMatches,
   OWNER_CASE_AMOUNTS,
   orderMoneyOf,
@@ -60,6 +68,9 @@ import {
   priceDrifts,
   quotePoints,
   rateText,
+  suppressionBuckets,
+  suppressionTrigger,
+  templateKeys,
   vndText,
   type AddressIssue,
   type BotText,
@@ -68,7 +79,9 @@ import {
   type OrderFact,
   type OrderMoney,
   type OutboundMsg,
+  type PageMsgKind,
   type QuoteVsOrder,
+  type ReplyKind,
   type ReviewSpan,
   type WeightShape,
 } from "@/lib/sales-chatbot/integrity-audit";
@@ -157,7 +170,7 @@ const kg = (g: number) => `${String(g / 1000).replace(".", ",")}kg`;
 type ConvRow = typeof schema.salesChatConversations.$inferSelect;
 type Msg = { seq: number; role: string; content: unknown; at: Date };
 type Ev = { type: string; actor: string; at: Date; orderId: string | null; amount: number | null; reason: string | null; payload: Record<string, unknown> };
-type Inb = { at: Date; note: string | null; text: string; name: string | null };
+type Inb = { at: Date; note: string | null; status: string; text: string; name: string | null };
 type OrderRow = {
   id: string;
   at: Date;
@@ -266,12 +279,12 @@ export async function loadBundles(db: Db, convs: readonly ConvRow[], from: Date)
   const inb = schema.salesChatInbound;
   for (const part of chunk(pairs, 200)) {
     const rows = await db
-      .select({ pageId: inb.pageId, threadId: inb.threadId, at: inb.createdAt, note: inb.note, text: inb.text, name: inb.customerName })
+      .select({ pageId: inb.pageId, threadId: inb.threadId, at: inb.createdAt, note: inb.note, status: inb.status, text: inb.text, name: inb.customerName })
       .from(inb)
       .where(and(sql`(${inb.pageId}, ${inb.threadId}) in (${sql.join(part.map((c) => sql`(${c.pageId}, ${c.threadId})`), sql`, `)})`, gte(inb.createdAt, from)));
     for (const r of rows) {
       const id = byThread.get(`${r.pageId}|${r.threadId}`);
-      if (id) inbound.set(id, [...(inbound.get(id) ?? []), { at: r.at, note: r.note, text: r.text, name: r.name }]);
+      if (id) inbound.set(id, [...(inbound.get(id) ?? []), { at: r.at, note: r.note, status: r.status, text: r.text, name: r.name }]);
     }
   }
   // Đơn nối được.
@@ -390,10 +403,36 @@ function handoffEvidenceOf(b: ConvBundle): HandoffEvidence[] {
   return out;
 }
 
+/** Tin khách (dòng `sales_chat_inbound` không phải tin page / bot / lịch sử) bị chặn vì «đã có người / page trả lời». */
+export type SuppressedTurn = { at: Date; code: string; trigger: PageMsgKind | null; nextAt: Date | null; intent: boolean };
+
+/** Lượt khách bị chặn của một hội thoại + câu trả lời hợp lệ đầu tiên sau mỗi lượt (bot · nhân viên ERP · chữ page không phải hệ thống / mẫu). */
+export function suppressedTurnsOf(b: ConvBundle, templates: ReadonlySet<string>): SuppressedTurn[] {
+  const page = b.inbound.filter((x) => x.note === PAGE_REPLY).map((x) => ({ at: x.at, kind: classifyPageText(x.text, templates) }));
+  const replies: { at: Date; kind: ReplyKind }[] = [
+    ...botTexts(b).map((x) => ({ at: x.at, kind: "BOT" as const })),
+    ...b.inbound.filter((x) => x.note === "BOT_SENT").map((x) => ({ at: x.at, kind: "BOT" as const })),
+    ...b.staffSentAts.map((at) => ({ at, kind: "STAFF_ERP" as const })),
+    ...page.filter((x) => x.kind === "TEXT").map((x) => ({ at: x.at, kind: "PAGE_TEXT" as const })),
+  ];
+  const out: SuppressedTurn[] = [];
+  for (const x of b.inbound) {
+    if (x.note === PAGE_REPLY || x.note === "BOT_SENT" || x.note === "HISTORY") continue;
+    const v = classifyInboundNote(x.note, { status: x.status, lastError: null, transport: "PANCAKE" });
+    if (!v || !isSuppressionCode(v.code)) continue;
+    out.push({ at: x.at, code: v.code, trigger: suppressionTrigger(x.at, page), nextAt: nextValidReplyAt(x.at, replies), intent: hasBuyIntent(x.text, phonesIn(x.text).length > 0) });
+  }
+  return out;
+}
+
+const pageTemplatesOf = (bundles: readonly ConvBundle[]) => templateKeys(bundles.flatMap((b) => b.inbound.filter((x) => x.note === PAGE_REPLY).map((x) => ({ thread: b.conv.id, text: x.text }))));
+/** Cửa sổ dùng để kết luận «không ai trả lời» cho thước đo i / ii (phút). */
+const SUPPRESSION_VERDICT_MIN = 30;
+
 // ─────────────────────────── ĐO CỬA SỔ ───────────────────────────
 
-type FaultLetter = "a" | "b" | "c" | "c2" | "d" | "e" | "f" | "h";
-const FAULT_OF: Partial<Record<FaultLetter, FaultKind>> = { a: "PRICE_MISMATCH", b: "PRICE_DRIFT", c: "FALSE_CONFIRM", d: "HANDOFF_UNANSWERED", e: "ADDRESS_FAIL", h: "FOLLOWUP_AFTER_ORDER" };
+type FaultLetter = "a" | "b" | "c" | "c2" | "d" | "e" | "f" | "h" | "i" | "ii";
+const FAULT_OF: Partial<Record<FaultLetter, FaultKind>> = { a: "PRICE_MISMATCH", b: "PRICE_DRIFT", c: "FALSE_CONFIRM", d: "HANDOFF_UNANSWERED", e: "ADDRESS_FAIL", h: "FOLLOWUP_AFTER_ORDER", i: "SUPPRESSED_UNANSWERED" };
 
 /** `scope` chỉ để bài kiểm giới hạn tập đo trên CSDL dùng chung (ops không truyền): hội thoại theo mã · đơn tay theo tiền tố mã. */
 export async function auditWindow(db: Db, days: number, now: Date, scope: { convIds?: readonly string[]; manualOrderPrefix?: string } = {}) {
@@ -407,7 +446,7 @@ export async function auditWindow(db: Db, days: number, now: Date, scope: { conv
     .limit(INTEGRITY_MAX_CONVERSATIONS + 1);
   const capped = convRows.length > INTEGRITY_MAX_CONVERSATIONS;
   const bundles = await loadBundles(db, convRows.slice(-INTEGRITY_MAX_CONVERSATIONS), from);
-  const affected: Record<FaultLetter, Set<string>> = { a: new Set(), b: new Set(), c: new Set(), c2: new Set(), d: new Set(), e: new Set(), f: new Set(), h: new Set() };
+  const affected: Record<FaultLetter, Set<string>> = { a: new Set(), b: new Set(), c: new Set(), c2: new Set(), d: new Set(), e: new Set(), f: new Set(), h: new Set(), i: new Set(), ii: new Set() };
   const firstFault = new Map<string, Date>();
   const markFault = (letter: FaultLetter, convId: string, at: Date) => {
     affected[letter].add(convId);
@@ -433,6 +472,11 @@ export async function auditWindow(db: Db, days: number, now: Date, scope: { conv
   const addrSeen = new Set<string>();
   // h
   const H = { convs: 0, msgs: 0, bySource: {} as Record<string, number>, nudges: 0, confidence: {} as Record<string, number>, convsWithOrder: 0 };
+  // i + ii
+  const templates = pageTemplatesOf(bundles);
+  const suppressed: SuppressedTurn[] = [];
+  const I = { byCode: {} as Record<string, number>, unansweredByCode: {} as Record<string, number>, unansweredByTrigger: {} as Record<string, number> };
+  const II = { msgs: 0, convs: 0, orderedAfter: 0, notOrdered: 0, lostQuote: 0, lostNoQuote: 0 };
   // f
   const F = { convs: 0, outcome: {} as Record<string, number>, orderAmount: 0, quoteAmount: 0, noAmount: 0 };
 
@@ -566,6 +610,35 @@ export async function auditWindow(db: Db, days: number, now: Date, scope: { conv
       }
     }
 
+    // i + ii — lượt khách bị chặn mà không có câu trả lời hợp lệ trong 30 phút.
+    const sup = suppressedTurnsOf(b, templates);
+    suppressed.push(...sup);
+    let intentMissed: Date | null = null;
+    for (const t of sup) {
+      bump(I.byCode, t.code);
+      if (now.getTime() - t.at.getTime() < SUPPRESSION_VERDICT_MIN * 60_000) continue;
+      if (t.nextAt && t.nextAt.getTime() - t.at.getTime() <= SUPPRESSION_VERDICT_MIN * 60_000) continue;
+      bump(I.unansweredByCode, t.code);
+      bump(I.unansweredByTrigger, t.trigger ?? "KHÔNG THẤY TIN PAGE");
+      markFault("i", id, new Date(t.at.getTime() + SUPPRESSION_VERDICT_MIN * 60_000));
+      if (t.intent) {
+        II.msgs += 1;
+        intentMissed = intentMissed ?? t.at;
+      }
+    }
+    if (intentMissed) {
+      II.convs += 1;
+      affected.ii.add(id);
+      const after = b.orders.some((o) => o.stage !== "CANCELLED" && o.stage !== "DELETED" && o.at > intentMissed!);
+      if (after) II.orderedAfter += 1;
+      else {
+        II.notOrdered += 1;
+        const q = bots.flatMap((x) => quotePoints(x.text).map((p) => p.amount));
+        if (q.length) II.lostQuote += Math.max(...q);
+        else II.lostNoQuote += 1;
+      }
+    }
+
     // f
     const ff = firstFault.get(id) ?? null;
     const live = b.orders.filter((o) => o.stage !== "CANCELLED" && o.stage !== "DELETED");
@@ -607,6 +680,7 @@ export async function auditWindow(db: Db, days: number, now: Date, scope: { conv
     bump(E.byOrigin, r.origin ?? "khác");
   }
 
+  const iBuckets = suppressionBuckets(suppressed.map((t) => ({ at: t.at, nextAt: t.nextAt })), now);
   const dBuckets = handoffBuckets(handoffs.map((h) => ({ at: h.at, responseAt: h.strict })), now);
   const dLoose = handoffBuckets(handoffs.map((h) => ({ at: h.at, responseAt: h.loose })), now);
   const eFail = Object.values(E.issue).reduce((s, n) => s + n, 0);
@@ -628,8 +702,12 @@ export async function auditWindow(db: Db, days: number, now: Date, scope: { conv
   tomTat(`e ĐỊA CHỈ chưa ghép: ${rateText(eFail, E.withAddress)} đơn tay có dòng địa chỉ (${looseIssues} đơn không nối hội thoại) · lý do ${fmt(E.issue)}`);
   tomTat(`e theo loại chỗ trống: ${fmt(E.gap)} · theo nguồn đơn ${fmt(E.byOrigin)}`);
   tomTat(`h NHẮC SAU KHI ĐƠN ĐÃ CHỐT: ${rateText(H.convs, H.convsWithOrder)} hội thoại có đơn chốt · ${H.msgs} tin · nguồn ${fmt(H.bySource)} · câu nhắc chốt ${H.nudges} · mốc chốt ${fmt(H.confidence)}`);
+  tomTat(`i LƯỢT KHÁCH BỊ CHẶN («đã có người / page trả lời», «nhường người»): ${suppressed.length} tin · theo lý do ${fmt(I.byCode)}`);
+  tomTat(`i không có câu trả lời hợp lệ SAU tin trong: ${iBuckets.map((x) => `${x.windowMin} phút ${rateText(x.unanswered, x.eligible)}`).join(" · ")} (MEASURED — mốc tin; tin page hệ thống / mẫu không tính là trả lời)`);
+  tomTat(`i không ai trả lời 30 phút — theo lý do ${fmt(I.unansweredByCode)} · tin page gây chặn ${fmt(I.unansweredByTrigger)}`);
+  tomTat(`ii Ý ĐỊNH MUA BỊ BỎ LỠ (ESTIMATED — ý định đọc từ chữ): ${II.msgs} tin · ${II.convs} hội thoại · có đơn sau đó ${II.orderedAfter} · không có đơn ${II.notOrdered} · tiền bot đã báo của nhóm không đơn (ước) ${vndText(II.lostQuote)}${II.lostNoQuote ? ` + ${II.lostNoQuote} hội thoại chưa báo giá (tiền CHƯA ĐO ĐƯỢC)` : ""}`);
   tomTat(`f MẤT DOANH THU sau lỗi (ESTIMATED — lỗi xảy ra trước kết cục, không chứng minh nhân quả): ${F.convs} hội thoại · ${fmt(F.outcome)} · tiền đơn huỷ ${vndText(F.orderAmount)} · tiền bot báo (ước) ${vndText(F.quoteAmount)} · không rõ tiền ${F.noAmount}`);
-  tomTat(`KHÁCH (hội thoại) BỊ ẢNH HƯỞNG: ${(Object.keys(affected) as FaultLetter[]).map((k) => `${k} ${affected[k].size}`).join(" · ")} · bất kỳ lỗi a–h ${new Set(Object.values(affected).flatMap((s) => [...s])).size} — mã hội thoại ở phần MÃ HOÁ`);
+  tomTat(`KHÁCH (hội thoại) BỊ ẢNH HƯỞNG: ${(Object.keys(affected) as FaultLetter[]).map((k) => `${k} ${affected[k].size}`).join(" · ")} · bất kỳ lỗi a–ii ${new Set(Object.values(affected).flatMap((s) => [...s])).size} — mã hội thoại ở phần MÃ HOÁ`);
   for (const k of Object.keys(affected) as FaultLetter[]) console.log(`  lỗi ${k} (${affected[k].size} hội thoại, in ≤ ${INTEGRITY_LIST_CAP}): ${[...affected[k]].slice(0, INTEGRITY_LIST_CAP).join(" ") || "—"}`);
   return { affected };
 }
@@ -711,7 +789,10 @@ export async function conversationTimeline(db: Db, conv: ConvRow) {
   }
   for (const e of b.events) if (e.type !== "ai.replied") rows.push({ at: e.at, line: `SỰ KIỆN ${e.type} · ${e.actor}${e.amount !== null ? ` · ${vndText(e.amount)}` : ""}${e.reason ? ` · ${e.reason}` : ""}${e.orderId ? ` · đơn ${orderCode(e.orderId)}` : ""}` });
   for (const at of b.staffSentAts) rows.push({ at, line: "NHÂN VIÊN gửi từ hộp thư ERP" });
-  for (const x of b.inbound) if (x.note === PAGE_REPLY) rows.push({ at: x.at, line: `PHÍA PAGE (Pancake / Meta) · ${x.text.length} ký tự · tiền [${extractVndAmounts(x.text).map((m) => vndText(m.value)).join(", ")}]` });
+  const templates = pageTemplatesOf([b]);
+  for (const x of b.inbound) if (x.note === PAGE_REPLY) rows.push({ at: x.at, line: `PHÍA PAGE (Pancake / Meta) ${classifyPageText(x.text, templates)} · ${x.text.length} ký tự · tiền [${extractVndAmounts(x.text).map((m) => vndText(m.value)).join(", ")}]` });
+  const sup = suppressedTurnsOf(b, templates);
+  for (const t of sup) rows.push({ at: t.at, line: `TIN KHÁCH BỊ CHẶN ${t.code} · tin page gây chặn ${t.trigger ?? "—"} · trả lời hợp lệ kế tiếp ${t.nextAt ? `sau ${Math.round((t.nextAt.getTime() - t.at.getTime()) / 60_000)} phút` : "CHƯA CÓ"}${t.intent ? " · CÓ Ý ĐỊNH MUA" : ""}` });
   for (const o of b.orders) {
     const lines = b.lines.get(o.id) ?? [];
     const money = moneyOf(o, lines);
@@ -732,6 +813,7 @@ export async function conversationTimeline(db: Db, conv: ConvRow) {
   tomTat(`sales-integrity-audit hội thoại: ${conv.channel} · ${conv.status} · tin bot ${bots.length} · đơn nối ${b.orders.length} · công cụ OK ${tools.ok} / lỗi ${tools.err}`);
   tomTat(`giá tự đổi ${drifts.length} cụm (${drifts.map((d) => `${kg(d.grams)}: ${d.amounts.map((a) => vndText(a)).join(" / ")}`).join(" · ") || "—"}) · đơn: ${b.orders.map((o) => compareQuoteToOrder(bots, o.at, moneyOf(o, b.lines.get(o.id) ?? [])).verdict).join(",") || "—"}`);
   tomTat(`câu «đã chốt» ${claims} · không căn cứ ${falseClaims} · chuyển người ${hs.length} (chưa ai đáp — bản chặt ${hs.filter((h) => !handoffResponseAt(h.at, ev, true)).length}) · tin chủ động sau đơn chốt ${late.length} (${late.map((x) => x.source).join(",") || "—"})`);
+  tomTat(`tin khách bị chặn ${sup.length} (${sup.map((t) => t.code).join(",") || "—"}) · chưa có trả lời hợp lệ ${sup.filter((t) => !t.nextAt).length} · có ý định mua ${sup.filter((t) => t.intent).length}`);
 }
 
 async function main() {

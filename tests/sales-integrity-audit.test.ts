@@ -17,8 +17,11 @@ import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { inArray } from "drizzle-orm";
 import { getDb, schema } from "@/db";
+import { FANPAGE_STAFF_REASON } from "@/lib/sales-chatbot/ai-hold-shared";
+import { PAGE_REPLIED_REASON, PAGE_REPLY } from "@/lib/sales-chatbot/fanpage";
 import {
   classifyAddress,
+  classifyPageText,
   compareQuoteToOrder,
   currentFix,
   extractVndAmounts,
@@ -26,9 +29,11 @@ import {
   falseConfirmKind,
   handoffBuckets,
   handoffResponseAt,
+  hasBuyIntent,
   isConfirmNudge,
   lineGrams,
   lostSaleOf,
+  nextValidReplyAt,
   nameMatches,
   orderMoneyOf,
   orderStateAt,
@@ -37,6 +42,9 @@ import {
   priceDrifts,
   quotePoints,
   rateText,
+  suppressionBuckets,
+  suppressionTrigger,
+  templateKeys,
   vndText,
   type OrderFact,
 } from "@/lib/sales-chatbot/integrity-audit";
@@ -169,6 +177,25 @@ function testAddressLostAndText() {
   assert.deepEqual(spans.map((s) => [s.code, s.resolvedAt?.toISOString() ?? null]), [["ADDRESS_UNRESOLVED", null], ["CUSTOMER_CANCELLED", "2026-10-10T11:00:00.000Z"]], "cờ mở + cờ đã gỡ mang mốc gỡ");
 }
 
+function testSuppression() {
+  const COMMENT = "Bạn đang phản hồi bình luận của người dùng về bài viết trên Trang của mình. Xem bình luận.";
+  const GREET = "CHẢ CÁ THU NGUYÊN CHẤT — Chả cá đánh bắt tại Quảng Ninh gửi đường bay vào sg ạ";
+  const tpl = templateKeys([{ thread: "t1", text: GREET }, { thread: "t2", text: GREET }, { thread: "t3", text: GREET }, { thread: "t1", text: "Dạ vâng ạ, em gửi chị ngay" }, { thread: "t2", text: "Dạ" }, { thread: "t3", text: "Dạ" }, { thread: "t4", text: "Dạ" }]);
+  assert.equal(classifyPageText(COMMENT, tpl), "META_COMMENT_SYSTEM", "chữ hệ thống Meta trả lời bình luận (ca Lê Bạch Nguyên)");
+  assert.equal(classifyPageText(GREET, tpl), "AUTO_TEMPLATE", "cùng chữ ở ≥ 3 hội thoại ⇒ tin mẫu (ca Uyen Tran)");
+  assert.equal(classifyPageText("Dạ", tpl), "TEXT", "câu ngắn nhân viên gõ ở mọi nơi không phải tin mẫu");
+  assert.equal(classifyPageText("Dạ vâng ạ, em gửi chị ngay", tpl), "TEXT");
+  const t = Date.now() - 3 * 3_600_000;
+  assert.equal(suppressionTrigger(at(t), [{ at: at(t + 20_000), kind: "AUTO_TEMPLATE" }]), "AUTO_TEMPLATE", "lời chào tới sau tin khách vài giây vẫn là thứ gây chặn");
+  assert.equal(suppressionTrigger(at(t), [{ at: at(t - 40 * 60_000), kind: "TEXT" }]), null);
+  const replies = [{ at: at(t - 60_000), kind: "PAGE_TEXT" as const }, { at: at(t + 10 * 60_000), kind: "BOT" as const }];
+  assert.equal(nextValidReplyAt(at(t), replies)?.getTime(), t + 10 * 60_000, "tin gửi ra CŨ hơn tin khách không bao giờ là câu trả lời của nó");
+  const b = suppressionBuckets([{ at: at(t), nextAt: at(t + 10 * 60_000) }, { at: at(t), nextAt: null }, { at: at(Date.now() - 60_000), nextAt: null }], new Date());
+  assert.deepEqual(b.map((x) => [x.windowMin, x.eligible, x.unanswered]), [[5, 2, 2], [30, 2, 1], [120, 2, 1]], "tin chưa đủ tuổi chưa xét; trả lời sau 10 phút là trễ với mốc 5 phút");
+  assert.ok(hasBuyIntent("Lấy 1kg", false) && hasBuyIntent("chốt 2 hộp nhé", false) && hasBuyIntent("ok", true) && hasBuyIntent("số 12 ngõ 5 phường Láng Hạ", false));
+  assert.ok(!hasBuyIntent("Cho mình xin giá nhen", false) && !hasBuyIntent("mua ở đâu vậy shop", false), "hỏi giá / hỏi chung không phải ý định mua");
+}
+
 function testSource() {
   const src = readFileSync("scripts/sales-integrity-audit.ts", "utf8");
   const code = src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
@@ -207,6 +234,8 @@ async function capture(fn: () => Promise<unknown>): Promise<string[]> {
 async function testDb() {
   const db = await getDb();
   const convId = randomUUID();
+  const conv2 = randomUUID();
+  const thread2 = `th-ia-${conv2.slice(0, 8)}`;
   const orderId = `erp-ia-${convId.slice(0, 8)}`;
   const looseId = `erp-ia-l${convId.slice(0, 7)}`;
   const now = Date.now();
@@ -232,6 +261,17 @@ async function testDb() {
       ev("followup.sent", "AI", new Date(now - 7 * 3_600_000), { payload: { attempt: 1 } }),
       ev("handoff.requested", "SYSTEM", new Date(now - 6 * 3_600_000), { reasonCode: "OTHER" }),
     ]);
+    // Hội thoại 2 (ca Lê Bạch Nguyên): AI báo giá; chữ hệ thống trả lời bình luận ⇒ «Lấy 1kg» bị nhường 30 phút, không ai trả lời.
+    // Tin sau đó bị chặn «page đã trả lời» nhưng bot trả lời trong 2 phút ⇒ KHÔNG phải lượt bỏ rơi.
+    await db.insert(schema.salesChatConversations).values({ id: conv2, channel: "FANPAGE", visitorKey: `vk-ia-${conv2}`, pageId: "pg-ia", threadId: thread2, status: "OPEN" });
+    await db.insert(schema.salesChatMessages).values({ conversationId: conv2, seq: 1, role: "assistant", content: txt("Dạ 1kg giá 280.000 ₫ - 2kg giảm còn 540.000 ₫ ạ"), createdAt: new Date(now - 3 * 3_600_000 - 300_000) });
+    const inb = (k: string, ms: number, note: string, text: string) => ({ pageId: "pg-ia", threadId: thread2, messageId: `ia-${conv2}-${k}`, text, note, status: "DONE", createdAt: new Date(ms) });
+    await db.insert(schema.salesChatInbound).values([
+      inb("p1", now - 3 * 3_600_000, PAGE_REPLY, "Bạn đang phản hồi bình luận của người dùng về bài viết trên Trang của mình. Xem bình luận."),
+      inb("c1", now - 3 * 3_600_000 + 60_000, FANPAGE_STAFF_REASON, "Lấy 1kg"),
+      inb("c2", now - 2 * 3_600_000, PAGE_REPLIED_REASON, "giao chiều nay được không"),
+      inb("b1", now - 2 * 3_600_000 + 120_000, "BOT_SENT", "Dạ được ạ"),
+    ]);
     const raw = { origin: "AI_AGENT", review: { entries: [{ code: "ADDRESS_UNRESOLVED", note: "Máy chốt khi địa chỉ chưa ghép được", quote: null, at: m(5.5).toISOString(), by: "Bot" }] } };
     await db.insert(schema.orders).values([
       { id: orderId, stage: "CONFIRMED", origin: "AI_AGENT", salesConversationId: convId, billFullName: NAME, shipFullName: NAME, shipPhone: PHONE, shipAddress: ADDRESS, shipProvince: "Thành phố Hà Nội", shipCommune: "", totalPrice: 560_000, totalPriceAfterDiscount: 560_000, itemsCount: 1, insertedAt: m(5.5), raw },
@@ -242,7 +282,7 @@ async function testDb() {
       { id: `${looseId}-1`, orderId: looseId, sku: "CHA-CA-THU-2KG", productName: "Chả cá thu", variationDetail: "Quy cách 2kg (4 túi 0,5kg)", quantity: 1, unitPrice: 540_000 },
     ]);
 
-    const printed = await capture(() => auditWindow(db, 30, new Date(), { convIds: [convId], manualOrderPrefix: "erp-ia-" }));
+    const printed = await capture(() => auditWindow(db, 30, new Date(), { convIds: [convId, conv2], manualOrderPrefix: "erp-ia-" }));
     const sum = printed.filter((l) => l.startsWith("[ops:tom-tat]"));
     const line = (prefix: string) => sum.find((l) => l.startsWith(`[ops:tom-tat] ${prefix}`)) ?? "";
     const all = sum.join("\n");
@@ -250,11 +290,11 @@ async function testDb() {
     assert.match(line("a GIÁ BOT"), /tổng \|chênh\| 20\.000 ₫/, all);
     assert.match(line("a2 đơn 2kg"), /MULTI_UNIT 1/, `a2: 2 × 1kg\n${all}`);
     assert.match(line("a2 bot báo"), /bot 540\.000 ₫ ⇒ đơn 560\.000 ₫ 1/, all);
-    assert.match(line("b GIÁ TỰ ĐỔI"), /1\/1 \(100,0%\) · mẫu nhỏ hội thoại/, `b: 540k rồi 560k cho 2kg\n${all}`);
+    assert.match(line("b GIÁ TỰ ĐỔI"), /1\/2 \(50,0%\) · mẫu nhỏ hội thoại/, `b: 540k rồi 560k cho 2kg (hội thoại 2 báo giá một lần)\n${all}`);
     assert.match(line("b GIÁ TỰ ĐỔI"), /2kg 1/, all);
     assert.match(line("c XÁC NHẬN GIẢ"), /1\/1 câu .* 1 hội thoại · loại FLAGGED_AT_TIME 1/, `c: «đã lên đơn» khi đơn có cờ cần kiểm\n${all}`);
     assert.match(line("c hôm nay"), /OPEN 1 · tiền đơn liên quan 560\.000 ₫/, all);
-    assert.match(line("c2 SĐT"), /1\/1 \(100,0%\)/, `c2: SĐT trong tin mà hồ sơ không có\n${all}`);
+    assert.match(line("c2 SĐT"), /1\/2 \(50,0%\)/, `c2: SĐT trong tin mà hồ sơ không có\n${all}`);
     assert.match(line("d CHUYỂN NGƯỜI"), /1 lượt · >1h 1\/1 .*chưa ai 1\) · >4h 1\/1 .* >24h CHƯA ĐO ĐƯỢC/, `d: chuyển người 6 giờ trước, chưa ai nhận; mốc 24h chưa đủ tuổi\n${all}`);
     assert.match(line("d đang treo"), /: 1 · có tin khách sau lượt chuyển 1 · lâu nhất 6 giờ/, all);
     assert.match(line("e ĐỊA CHỈ"), /2\/2 \(100,0%\) · mẫu nhỏ đơn tay có dòng địa chỉ \(1 đơn không nối hội thoại\)/, `e\n${all}`);
@@ -262,10 +302,14 @@ async function testDb() {
     assert.match(line("e ĐỊA CHỈ"), /thiếu tỉnh 1/, all);
     assert.match(line("h NHẮC SAU"), /1\/1 \(100,0%\) · mẫu nhỏ hội thoại có đơn chốt · 1 tin · nguồn ERP_FOLLOWUP 1 · câu nhắc chốt 1 · mốc chốt MEASURED 1/, `h: nhắc «xác nhận đơn» sau khi đã chốt\n${all}`);
     assert.match(line("f MẤT DOANH THU"), /: 0 hội thoại/, "còn đơn sống ⇒ không quy mất doanh thu");
-    assert.match(line("KHÁCH (hội thoại)"), /a 1 · b 1 · c 1 · c2 1 · d 1 · e 1 · f 0 · h 1 · bất kỳ lỗi a–h 1/, all);
-    assert.ok(!all.includes(convId), "kênh tóm tắt chế độ cửa sổ không in mã hội thoại");
+    assert.match(line("KHÁCH (hội thoại)"), /a 1 · b 1 · c 1 · c2 1 · d 1 · e 1 · f 0 · h 1 · i 1 · ii 1 · bất kỳ lỗi a–ii 2/, all);
+    assert.match(line("i LƯỢT KHÁCH BỊ CHẶN"), /: 2 tin · theo lý do AI_SKIPPED_HUMAN_COOLDOWN 1 · AI_SKIPPED_PAGE_ANSWERED 1/, `i\n${all}`);
+    assert.match(line("i không có câu trả lời"), /5 phút 1\/2 .* 30 phút 1\/2 .* 120 phút 0\/2/, `i: tin bot trả lời sau 2 phút không bị đếm; câu bot 61 phút sau «Lấy 1kg» là câu trả lời trong mốc 120 phút\n${all}`);
+    assert.match(line("i không ai trả lời 30 phút"), /AI_SKIPPED_HUMAN_COOLDOWN 1 · tin page gây chặn META_COMMENT_SYSTEM 1/, `i: chữ hệ thống Meta gây nhường người\n${all}`);
+    assert.match(line("ii Ý ĐỊNH MUA"), /1 tin · 1 hội thoại · có đơn sau đó 0 · không có đơn 1 · tiền bot đã báo của nhóm không đơn \(ước\) 540\.000 ₫/, `ii: «Lấy 1kg» bị bỏ\n${all}`);
+    assert.ok(!all.includes(convId) && !all.includes(conv2), "kênh tóm tắt chế độ cửa sổ không in mã hội thoại");
     assert.ok(printed.some((l) => !l.startsWith("[ops:tom-tat]") && l.includes(convId)), "mã hội thoại theo lỗi nằm ở phần MÃ HOÁ");
-    for (const p of printed) assert.ok(!p.includes(PHONE) && !p.includes("Thanh") && !p.includes("Nhuế") && !p.includes("Lê Đức Thọ"), `không lọt tên / SĐT / địa chỉ: ${p}`);
+    for (const p of printed) assert.ok(!p.includes(PHONE) && !p.includes("Thanh") && !p.includes("Nhuế") && !p.includes("Lê Đức Thọ") && !p.includes("Lấy 1kg") && !p.includes("bình luận của người dùng"), `không lọt tên / SĐT / địa chỉ / chữ tin: ${p}`);
 
     const found = await capture(() => findByName(db, ["nguyen thanh thuy"], 30, new Date()));
     const fsum = found.filter((l) => l.startsWith("[ops:tom-tat]"));
@@ -284,7 +328,9 @@ async function testDb() {
     await db.delete(schema.orders).where(inArray(schema.orders.id, [orderId, looseId]));
     await db.delete(schema.salesConversationEvents).where(inArray(schema.salesConversationEvents.conversationId, [convId]));
     await db.delete(schema.salesChatMessages).where(inArray(schema.salesChatMessages.conversationId, [convId]));
-    await db.delete(schema.salesChatConversations).where(inArray(schema.salesChatConversations.id, [convId]));
+    await db.delete(schema.salesChatInbound).where(inArray(schema.salesChatInbound.threadId, [thread2]));
+    await db.delete(schema.salesChatMessages).where(inArray(schema.salesChatMessages.conversationId, [conv2]));
+    await db.delete(schema.salesChatConversations).where(inArray(schema.salesChatConversations.id, [convId, conv2]));
   }
 }
 
@@ -293,7 +339,8 @@ export async function testSalesIntegrityAudit() {
   testQuoteAndDrift();
   testStateAndHandoff();
   testAddressLostAndText();
+  testSuppression();
   testSource();
   await testDb();
-  console.log("  ✓ ops sales-integrity-audit: trích tiền (không SĐT / số lượng) · giá bot ≠ giá đơn · giá tự đổi «2kg» · xác nhận giả trên đơn có cờ cần kiểm · chuyển người không ai nhận 1h/4h/24h · địa chỉ chưa ghép theo lý do · nhắc sau đơn chốt theo nguồn · tóm tắt không lọt PII · chỉ đọc, khai đủ bốn chỗ");
+  console.log("  ✓ ops sales-integrity-audit: trích tiền (không SĐT / số lượng) · giá bot ≠ giá đơn · giá tự đổi «2kg» · xác nhận giả trên đơn có cờ cần kiểm · chuyển người không ai nhận 1h/4h/24h · địa chỉ chưa ghép theo lý do · nhắc sau đơn chốt theo nguồn · lượt khách bị chặn không ai trả lời 5/30/120 phút + ý định mua bị bỏ lỡ · tóm tắt không lọt PII · chỉ đọc, khai đủ bốn chỗ");
 }

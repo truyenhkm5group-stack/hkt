@@ -402,9 +402,93 @@ export function orderWeightShape(lines: readonly OrderLineWeight[]): { grams: nu
   return { grams, shape: paid[0].quantity === 1 ? "PACK" : "MULTI_UNIT" };
 }
 
+// ─────────────────────────── (i) LƯỢT KHÁCH BỊ CHẶN MÀ KHÔNG AI TRẢ LỜI · (ii) Ý ĐỊNH MUA BỊ BỎ LỠ ───────────────────────────
+
+/** Cửa sổ chờ một câu trả lời HỢP LỆ sau tin khách bị chặn (phút). */
+export const SUPPRESSION_WINDOWS_MIN = [5, 30, 120] as const;
+/**
+ * Mã chặn (ánh xạ ghi chú tin của `ai-status.ts::classifyInboundNote`) mà lý do là «đã có người / page trả lời» — đúng lớp lỗi ca
+ * Uyen Tran (page trả lời TRƯỚC, tin khách MỚI bị coi là đã trả lời) và Lê Bạch Nguyên (chữ hệ thống trả lời bình luận ⇒ nhường 30 phút).
+ */
+export const SUPPRESSION_CODES = ["AI_SKIPPED_PAGE_ANSWERED", "AI_SKIPPED_HUMAN_COOLDOWN", "AI_SKIPPED_HUMAN_TAKEOVER", "AI_SKIPPED_ALREADY_REPLIED", "AI_YIELDED_TO_HUMAN"] as const;
+export type SuppressionCode = (typeof SUPPRESSION_CODES)[number];
+export const isSuppressionCode = (c: string | null | undefined): c is SuppressionCode => typeof c === "string" && (SUPPRESSION_CODES as readonly string[]).includes(c);
+
+/** Tin phía page: chữ HỆ THỐNG Meta khi trả lời bình luận · tin mẫu tự động (cùng chữ ở nhiều hội thoại) · chữ thường (có thể là người). */
+export type PageMsgKind = "META_COMMENT_SYSTEM" | "AUTO_TEMPLATE" | "TEXT";
+const META_COMMENT_RE = /\bban dang phan hoi binh luan\b/;
+/** Tin mẫu phải đủ dài và xuất hiện ở ít nhất chừng này hội thoại khác nhau (câu ngắn «Dạ» nhân viên gõ ở đâu cũng có). */
+export const TEMPLATE_MIN_THREADS = 3;
+export const TEMPLATE_MIN_LENGTH = 40;
+
+/** Khoá so chữ tin mẫu: bỏ dấu, gộp khoảng trắng. HÀM THUẦN. */
+export const templateKey = (text: string) => foldVi(text);
+
+/** Loại một tin phía page. `templates` = khoá các chữ đã xuất hiện ở ≥ `TEMPLATE_MIN_THREADS` hội thoại (nơi gọi đếm). HÀM THUẦN. */
+export function classifyPageText(text: string, templates: ReadonlySet<string>): PageMsgKind {
+  const k = templateKey(text);
+  if (META_COMMENT_RE.test(k)) return "META_COMMENT_SYSTEM";
+  if (templates.has(k)) return "AUTO_TEMPLATE";
+  return "TEXT";
+}
+
+/** Khoá tin mẫu từ các cặp (hội thoại, chữ page): chữ ≥ `TEMPLATE_MIN_LENGTH` ký tự xuất hiện ở ≥ `TEMPLATE_MIN_THREADS` hội thoại. HÀM THUẦN. */
+export function templateKeys(rows: readonly { thread: string; text: string }[]): Set<string> {
+  const by = new Map<string, Set<string>>();
+  for (const r of rows) {
+    const k = templateKey(r.text);
+    if (k.length < TEMPLATE_MIN_LENGTH) continue;
+    by.set(k, (by.get(k) ?? new Set()).add(r.thread));
+  }
+  return new Set([...by].filter(([, s]) => s.size >= TEMPLATE_MIN_THREADS).map(([k]) => k));
+}
+
+export type ReplyKind = "BOT" | "STAFF_ERP" | "PAGE_TEXT";
+/** Câu trả lời HỢP LỆ đầu tiên SAU tin khách (tin gửi ra CŨ hơn không bao giờ tính). `null` = chưa có. HÀM THUẦN. */
+export function nextValidReplyAt(msgAt: Date, replies: readonly { at: Date; kind: ReplyKind }[]): Date | null {
+  let best: Date | null = null;
+  for (const r of replies) if (r.at.getTime() > msgAt.getTime() && (!best || r.at.getTime() < best.getTime())) best = r.at;
+  return best;
+}
+
+/**
+ * Tin phía page GÂY ra lượt chặn: tin page gần nhất trong [mốc tin − 30 phút, mốc tin + 2 phút] (lời chào quảng cáo tới cùng phút,
+ * có khi sau tin khách vài giây). `null` = không thấy tin page nào quanh đó. HÀM THUẦN.
+ */
+export function suppressionTrigger(msgAt: Date, pageMsgs: readonly { at: Date; kind: PageMsgKind }[]): PageMsgKind | null {
+  const t = msgAt.getTime();
+  const near = pageMsgs.filter((p) => p.at.getTime() >= t - 30 * 60_000 && p.at.getTime() <= t + 120_000).sort((a, b) => b.at.getTime() - a.at.getTime());
+  return near[0]?.kind ?? null;
+}
+
+export type SuppressionBucket = { windowMin: number; eligible: number; unanswered: number };
+/** Mỗi cửa sổ N phút: tin bị chặn đã đủ N phút tuổi · trong đó không có câu trả lời hợp lệ nào trong N phút. HÀM THUẦN. */
+export function suppressionBuckets(rows: readonly { at: Date; nextAt: Date | null }[], now: Date, windows: readonly number[] = SUPPRESSION_WINDOWS_MIN): SuppressionBucket[] {
+  return windows.map((w) => {
+    const ms = w * 60_000;
+    const old = rows.filter((r) => now.getTime() - r.at.getTime() >= ms);
+    return { windowMin: w, eligible: old.length, unanswered: old.filter((r) => r.nextAt === null || r.nextAt.getTime() - r.at.getTime() > ms).length };
+  });
+}
+
+const BUY_VERB_RE = /\b(?:lay|chot|dat|mua|order|ship cho|gui cho|giao cho)\b/;
+const QTY_RE = /\b(?:\d+(?:[.,]\d+)?\s*(?:kg|ki|ky|can|g|gr|goi|hop|tui|hu|lo|phan|cai|bich|set|combo)?|mot|hai|ba|bon|nam|chuc)\b/;
+const ADDRESS_RE = /\b(?:so nha|sn|duong|pho|ngo|ngach|hem|kiet|thon|xom|ap|phuong|xa|quan|huyen|thi xa|tinh|thanh pho|tp)\b/;
+
+/**
+ * Tin khách có Ý ĐỊNH MUA: động từ mua («lấy», «chốt», «đặt», «mua»…) KÈM số lượng trong cùng tin, hoặc khách gửi SĐT, hoặc gửi
+ * một dòng giống địa chỉ (từ chỉ đường / phường / quận KÈM chữ số, ≥ 4 từ). Đọc từ chữ ⇒ ESTIMATED. HÀM THUẦN.
+ */
+export function hasBuyIntent(text: string, hasPhone: boolean): boolean {
+  if (hasPhone) return true;
+  const f = foldVi(text);
+  if (BUY_VERB_RE.test(f) && QTY_RE.test(f)) return true;
+  return ADDRESS_RE.test(f) && /\d/.test(f) && f.split(" ").length >= 4;
+}
+
 // ─────────────────────────── (f) MẤT DOANH THU ───────────────────────────
 
-export type FaultKind = "PRICE_MISMATCH" | "PRICE_DRIFT" | "FALSE_CONFIRM" | "HANDOFF_UNANSWERED" | "ADDRESS_FAIL" | "FOLLOWUP_AFTER_ORDER";
+export type FaultKind = "PRICE_MISMATCH" | "PRICE_DRIFT" | "FALSE_CONFIRM" | "HANDOFF_UNANSWERED" | "ADDRESS_FAIL" | "FOLLOWUP_AFTER_ORDER" | "SUPPRESSED_UNANSWERED";
 export type LostOutcome = "CANCELLED_AFTER_FAULT" | "SILENT_NO_ORDER" | "DECLINED";
 export type LostSale = { outcome: LostOutcome; amount: number | null; amountSource: "ORDER" | "QUOTE" | null };
 
