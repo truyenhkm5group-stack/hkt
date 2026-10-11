@@ -2126,3 +2126,4 @@
 {"at":"2026-10-11T10:41:55.439Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"authoritative-quote","detail":"fix/authoritative-quote @ 9342f3a81266 · 1 lệnh kiểm thử"}
 {"at":"2026-10-11T10:42:13.505Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#807 @ 9342f3a81266 · Chỉ commit gộp main (#801); danh sách ops giải hợp"}
 {"at":"2026-10-11T11:13:51.057Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"authoritative-quote","detail":"#807 @ 9342f3a81266 → 4e49e9f9fc2d (MERGE_ISOLATED · HIGH · gates success)"}
+{"at":"2026-10-11T11:14:50.895Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DEPLOY_DISPATCHED","detail":"4e49e9f9fc2d · run 38134834876 https://github.com/truyenhkm5group-stack/hkt/actions/runs/38134834876"}
