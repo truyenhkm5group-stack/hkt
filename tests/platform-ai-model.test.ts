@@ -379,6 +379,9 @@ async function testLedger() {
       const db = await getDb();
       const v = JSON.stringify({ ...DEFAULT_SALES_CHATBOT_CONFIG, enabled: true, connectorKey: "gemini-byok" });
       await db.insert(schema.settings).values({ key: SALES_CHATBOT_SETTING_KEY, value: v }).onConflictDoUpdate({ target: schema.settings.key, set: { value: v } });
+      // Giá model giả nói phải là giá CÓ THẬT trong danh mục — hàng rào số tiền (P0 authoritative-quote 11/10/2026) chặn số bịa.
+      await db.insert(schema.products).values({ id: "pam-p", name: "Chả mực giã tay" }).onConflictDoNothing();
+      await db.insert(schema.productVariants).values({ id: "pam-v", productId: "pam-p", sku: "PAM-1", retailPrice: 400_000 }).onConflictDoNothing();
       const vk = visitorKeyOf("pam-ledger-0123456789abcdef");
       const w = await openConversation("WEB", { visitorKey: vk });
       const r = await chatTurn(w.id, "Chả mực bao nhiêu?", { channel: "WEB", visitorKey: vk });

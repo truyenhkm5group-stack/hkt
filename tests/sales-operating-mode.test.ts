@@ -129,6 +129,9 @@ export async function testSalesOperatingMode() {
       const admin: SessionUser = { id: u.id, email: u.email, name: u.name, role: "ADMIN", permissions: [], scope: "ALL", departmentCodes: [], positionId: null, organization: { code: ORG, name: ORG, isHome: false } };
       const viewer: SessionUser = { ...admin, id: "om-viewer", role: "VIEWER", permissions: ["ai_sales:view"] };
       await setSettingJson(SALES_CHATBOT_SETTING_KEY, { ...DEFAULT_SALES_CHATBOT_CONFIG, connectorKey: "anthropic-byok", enabled: true, shippingFee: 30_000 });
+      // Giá model giả nói («250.000đ») phải là giá CÓ THẬT trong danh mục — hàng rào số tiền (P0 authoritative-quote 11/10/2026) chặn số bịa.
+      await db.insert(schema.products).values({ id: "om-p1", name: "Chả mực Hạ Long" });
+      await db.insert(schema.productVariants).values({ id: "om-v1", productId: "om-p1", sku: "OM-CM1", retailPrice: 250_000 });
       const pancake = fakePancake();
       assert.ok("ok" in (await saveConnection(admin, { connectorKey: "pancake-fanpage", settings: { pageId: PAGE }, secrets: { pageAccessToken: PAGE_TOKEN } })));
       assert.ok("ok" in (await testOrgConnection(admin, "pancake-fanpage", { tester: { fetch: pancake.fetch } })));

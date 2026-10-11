@@ -86,6 +86,9 @@ async function run() {
     const db = await getDb();
     const admin = await adminOf();
     await setSettingJson(SALES_CHATBOT_SETTING_KEY, { ...DEFAULT_SALES_CHATBOT_CONFIG, enabled: true });
+    // Giá model giả nói phải là giá CÓ THẬT trong danh mục — hàng rào số tiền (P0 authoritative-quote 11/10/2026) chặn số bịa.
+    await db.insert(schema.products).values({ id: "acs-p", name: "Chả mực giã tay" }).onConflictDoNothing();
+    await db.insert(schema.productVariants).values({ id: "acs-v", productId: "acs-p", sku: "ACS-1", retailPrice: 280_000 }).onConflictDoNothing();
     await setSettingJson(QUICK_REPLY_SETTING_KEY, { enabled: true, aiMatch: false });
     await db.insert(schema.salesChatQuickReplies).values({ title: "Giờ mở cửa", triggers: ["mở cửa mấy giờ", "giờ mở cửa"], answer: "Dạ shop mở cửa từ 8h đến 22h hằng ngày ạ.", active: true });
     const posts: string[] = [];

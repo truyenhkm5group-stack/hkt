@@ -26,6 +26,23 @@ export function agentUnitPrice(input: { variantId: string; quantity: number; ret
   return quoteUnitPrice({ variantId: input.variantId, quantity: input.quantity, retailPrice: retail, customerList: input.books.customerList, defaultList: input.books.defaultList })?.unitPrice ?? null;
 }
 
+/**
+ * Đơn giá + NGUỒN của MỘT dòng — HÀM THUẦN, cùng phép tính với `agentUnitPrice`. `source = "RETAIL"` cả khi chế độ bảng giá lùi về giá
+ * lẻ (mẫu mã không có trong bảng / chưa tới bậc): dòng đó là GIÁ LẺ thật, nên luật giảm theo khối lượng của tổ chức VẪN áp (P0 11/10/2026,
+ * ca «Phạm Minh Ái»). `CUSTOMER_LIST` / `DEFAULT_LIST` = giá bảng — bậc sỉ đã là giá theo số lượng, không cộng thêm giảm khối lượng.
+ */
+export function agentUnitQuote(input: { variantId: string; quantity: number; retailPrice: number | null; books: PriceBooks }): { unitPrice: number; source: "RETAIL" | "CUSTOMER_LIST" | "DEFAULT_LIST" } | null {
+  const retail = input.retailPrice !== null && input.retailPrice > 0 ? input.retailPrice : null;
+  if (!input.books) return retail === null ? null : { unitPrice: retail, source: "RETAIL" };
+  const q = quoteUnitPrice({ variantId: input.variantId, quantity: input.quantity, retailPrice: retail, customerList: input.books.customerList, defaultList: input.books.defaultList });
+  return q ? { unitPrice: q.unitPrice, source: q.source } : null;
+}
+
+/** Mẫu mã có dòng nào trong bảng giá đang dùng (riêng của khách / mặc định) — HÀM THUẦN. */
+export function bookListsVariant(books: PriceBooks, variantId: string): boolean {
+  return Boolean(books && [books.customerList, books.defaultList].some((b) => b?.tiers.some((t) => t.variantId === variantId)));
+}
+
 /** Bảng giá cần cho một chế độ — `null` ở chế độ giá lẻ (không đọc CSDL). */
 export async function priceBooksForMode(mode: AgentPricingMode, customerId: string | null): Promise<PriceBooks> {
   return mode === "PRICE_BOOK" ? priceBooksFor(customerId) : mode === "DEFAULT_BOOK" ? priceBooksFor(null) : null;
@@ -49,13 +66,17 @@ export async function agentUnitPrices(lines: readonly { variantId: string; quant
 }
 
 /**
- * So giá agent gửi với giá máy chủ tính — HÀM THUẦN. Trả danh sách lỗi theo dòng (rỗng = khớp). Đường agent KHÔNG được mang
- * chiết khấu (dòng / đơn): giảm giá ngoài bảng là quyết định của người, không của máy.
+ * So giá agent gửi với giá máy chủ tính — HÀM THUẦN. Trả danh sách lỗi theo dòng (rỗng = khớp). Đường agent KHÔNG được tự chiết khấu
+ * (dòng / đơn): giảm giá ngoài bảng là quyết định của người, không của máy. NGOẠI LỆ DUY NHẤT: tiền giảm theo khối lượng mà chính
+ * MÁY CHỦ tính lại từ cấu hình của tổ chức (`expectedDiscounts`, theo chỉ số dòng — `verifyAgentQuote` ở quote.ts) — dòng mang tiền
+ * giảm khác số đó, hoặc không có báo giá máy chủ đi kèm, vẫn bị từ chối (P0 11/10/2026: trước đây luật giảm bật thì MỌI đơn ≥ 2kg của
+ * bot bị lõi từ chối «Máy không được tự chiết khấu dòng hàng»).
  */
 export function agentPriceProblems(
   lines: readonly { variantId: string; quantity: number; unitPrice: number; discount: number }[],
   expected: ReadonlyMap<string, number | null>,
   orderDiscount: number,
+  expectedDiscounts?: ReadonlyMap<string, number>,
 ): { field: string; message: string }[] {
   const out: { field: string; message: string }[] = [];
   lines.forEach((l, i) => {
@@ -63,7 +84,8 @@ export function agentPriceProblems(
     if (want === undefined) return; // mẫu mã không tồn tại — `prepare()` đã báo lỗi riêng.
     if (want === null) out.push({ field: `lines.${i}.unitPrice`, message: "Mẫu mã chưa có giá bán — máy không được tự đặt giá." });
     else if (l.unitPrice !== want) out.push({ field: `lines.${i}.unitPrice`, message: `Giá vừa đổi: đơn giá đúng là ${want.toLocaleString("vi-VN")} ₫ (gửi lên ${l.unitPrice.toLocaleString("vi-VN")} ₫).` });
-    if (l.discount !== 0) out.push({ field: `lines.${i}.discount`, message: "Máy không được tự chiết khấu dòng hàng." });
+    const allowed = expectedDiscounts?.get(`${i}`) ?? 0;
+    if (l.discount !== allowed) out.push({ field: `lines.${i}.discount`, message: allowed ? `Tiền giảm của dòng phải đúng giảm theo khối lượng máy chủ tính (${allowed.toLocaleString("vi-VN")} ₫).` : "Máy không được tự chiết khấu dòng hàng." });
   });
   if (orderDiscount !== 0) out.push({ field: "orderDiscount", message: "Máy không được tự chiết khấu đơn." });
   return out;

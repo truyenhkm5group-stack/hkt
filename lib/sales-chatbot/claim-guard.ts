@@ -29,7 +29,10 @@
  */
 import { and, eq, inArray, notInArray, or, sql, type SQL } from "drizzle-orm";
 import { getDb, schema } from "@/db";
+import { isManualOrderId, manualOrderGaps } from "@/lib/constants/manual-orders";
 import { manualOrderAmountDue, manualPaymentStatus, sumConfirmedPayments } from "@/lib/constants/order-payments";
+import { orderReviewOf } from "@/lib/constants/order-review";
+import { PRICE_UNVERIFIED_PREFIX } from "@/lib/sales-chatbot/quote-shared";
 import { foldVi } from "@/lib/sales-chatbot/text";
 import type { ChatState } from "@/lib/sales-chatbot/tools";
 
@@ -47,6 +50,14 @@ export const CLAIM_SAFE_TEXT = {
   ORDER: "Dạ em đang hoàn tất đơn, anh/chị chờ em xác nhận lại nhé.",
   /** Bot định nói đã huỷ đơn mà lõi đơn chưa huỷ (cancel_order chưa trả cancelled = true). */
   CANCEL: "Dạ em ghi nhận yêu cầu của mình, em chuyển nhân viên kiểm tra đơn giúp mình ngay ạ.",
+  /** Đơn ĐÃ TẠO nhưng địa chỉ chưa chuẩn hoá được (xã / phường / tỉnh) — đơn chờ nhân viên xác nhận, chưa phải «đã lên đơn». */
+  ORDER_PENDING_ADDRESS: "Dạ em đã ghi nhận đơn của mình, nhân viên sẽ xác nhận lại địa chỉ giúp mình ngay ạ.",
+  /** Đơn ĐÃ TẠO nhưng còn ô cần kiểm (giá · SĐT · cờ cần người kiểm). */
+  ORDER_PENDING_CHECK: "Dạ em đã ghi nhận đơn của mình, nhân viên sẽ kiểm tra và xác nhận lại đơn giúp mình ngay ạ.",
+  /** Bot định nói một số tiền không khớp báo giá máy chủ đã xác thực. */
+  PRICE: "Dạ em kiểm lại giá chính xác và báo mình ngay ạ.",
+  /** Khách phản đối giá mà máy chủ không xác minh được số khách nói ⇒ nhân viên kiểm. */
+  PRICE_DISPUTE: "Dạ em ghi nhận ý mình về giá, em chuyển nhân viên kiểm tra lại giá chính xác và báo mình ngay ạ.",
 } as const;
 
 /** Lý do chuyển người — tiền tố `classifyHandoffReason` đọc (events-shared.ts) để đếm theo nhóm. */
@@ -56,15 +67,26 @@ export const CLAIM_HANDOFF_REASON = {
   PAYMENT_RECEIVED: "AI định khẳng định đã nhận tiền khi chưa có chứng từ thu — đã chặn câu, nhân viên đối soát",
   ORDER_CONFIRMED: "AI định khẳng định đã chốt đơn khi chưa có đơn ERP — đã chặn câu, nhân viên kiểm đơn",
   ORDER_CANCELLED: "AI định khẳng định đã huỷ đơn khi lõi đơn chưa huỷ — đã chặn câu, nhân viên kiểm đơn",
+  /** Đơn có nhưng chưa qua kiểm — KHÔNG chuyển người (đơn đã nằm trong hàng «Cần người kiểm»); chỉ ghi lý do vào nhật ký. */
+  ORDER_PENDING: "AI định khẳng định đã lên đơn khi đơn còn cần kiểm (địa chỉ / giá / SĐT) — đã thay câu, đơn chờ nhân viên xác nhận",
+  PRICE_UNVERIFIED: `${PRICE_UNVERIFIED_PREFIX}: AI định báo số tiền không khớp báo giá máy chủ đã xác thực — đã chặn câu, nhân viên xác minh giá`,
+  PRICE_DISPUTED: "Giá / tồn bất thường — PRICE_DISPUTED: khách phản đối giá đã báo, máy chủ không xác minh được số khách nói — nhân viên kiểm giá, KHÔNG chốt đơn",
 } as const;
 
 // ═══ PHẦN THUẦN ═══
 
 export type PaymentSignal = "IMAGE" | "TEXT";
-export type ClaimKind = "PAYMENT_RECEIVED" | "ORDER_CONFIRMED" | "ORDER_CANCELLED";
-/** `orderCancelled` = công cụ `cancel_order` đã trả cancelled = true trong hội thoại (`state.cancelledOrders`, ghi SAU khi lõi đơn huỷ xong — #786). */
-export type ClaimFacts = { paymentVerified: boolean; orderConfirmed: boolean; orderCancelled: boolean };
-export type ClaimVerdict = { ok: true } | { ok: false; claim: ClaimKind; safeText: string; handoffReason: string; note: string };
+export type ClaimKind = "PAYMENT_RECEIVED" | "ORDER_CONFIRMED" | "ORDER_CANCELLED" | "PRICE_UNVERIFIED";
+/**
+ * `orderCancelled` = công cụ `cancel_order` đã trả cancelled = true trong hội thoại (`state.cancelledOrders`, ghi SAU khi lõi đơn huỷ xong — #786).
+ * `orderConfirmed` = có đơn ĐÃ TẠO **và** QUA KIỂM (P0 11/10/2026 — `orderValidityOf`): đơn «CẦN XÁC THỰC» (địa chỉ chưa ghép, tổng lệch báo
+ * giá, thiếu SĐT, cờ cần người kiểm) KHÔNG đủ cho câu «đã lên đơn». `orderPending` = có đơn đã tạo nhưng chưa qua kiểm — vì sao.
+ * `allowedAmounts` = mọi số tiền máy chủ đã xác thực cho hội thoại (báo giá gần nhất · giá công cụ đã trả · tập tham chiếu của danh mục);
+ * KHÔNG khai ⇒ không kiểm số tiền (bài kiểm cũ / người gọi chưa cấp).
+ */
+export type ClaimFacts = { paymentVerified: boolean; orderConfirmed: boolean; orderCancelled: boolean; orderPending?: "ADDRESS" | "CHECK" | null; allowedAmounts?: ReadonlySet<number> };
+/** `handoff = false` ⇒ thay câu nhưng KHÔNG chuyển người (câu an toàn vẫn gửi trên mọi kênh). */
+export type ClaimVerdict = { ok: true } | { ok: false; claim: ClaimKind; safeText: string; handoffReason: string; note: string; handoff: boolean; amounts?: number[] };
 
 /** Ảnh có dấu hiệu chứng từ thanh toán — đọc trên MÔ TẢ của máy đọc ảnh (đã bỏ dấu). */
 const PAYMENT_IMAGE_RE =
@@ -178,33 +200,113 @@ export function detectClaims(text: string): ClaimKind[] {
   return [...found];
 }
 
-/** Bảng chân lý: khẳng định nào cần căn cứ nào. Không khẳng định ⇒ luôn qua. HÀM THUẦN. */
-export function claimVerdict(claims: readonly ClaimKind[], facts: ClaimFacts): ClaimVerdict {
+// ═══ SỐ TIỀN TRONG CHỮ BOT (P0 authoritative-quote 11/10/2026) ═══
+
+/** «1tr2» = 1.200.000 · «1tr250» = 1.250.000. */
+const MILLION_SPLIT_RE = /(^|[^\d.,])(\d{1,3})\s*(?:tr|triệu|trieu|củ)(\d{1,3})(?![\d\p{L}])/giu;
+/** «280k» · «20K» · «1,5 triệu» · «300 nghìn» — đơn vị bắt buộc; «2kg» không phải tiền (sau «k» là chữ). */
+const UNIT_AMOUNT_RE = /(^|[^\d.,])(\d+(?:[.,]\d+)?)\s*(k|nghìn|nghin|ngàn|ngan|tr|triệu|trieu|củ)(?![\p{L}\d])/giu;
+/** «540.000» · «1.080.000 ₫» · «560,000đ» — dấu tách nghìn đủ nhóm ba chữ số; số dính trong chuỗi số dài hơn (SĐT có chấm) không tính. */
+const GROUPED_AMOUNT_RE = /(^|[^\d.,])(\d{1,3}(?:[.,]\d{3})+)(?![\d]|[.,]\d)/gu;
+/** «540000đ» · «0đ» · «30000 vnđ» — số trơn chỉ là tiền khi có ký hiệu tiền ngay sau. */
+const PLAIN_CURRENCY_RE = /(^|[^\d.,])(\d+)\s*(?:đ|₫|vnđ|vnd|đồng|dong)(?![\p{L}\d])/giu;
+
+/**
+ * Mọi số tiền VND trong một câu (đồng, số nguyên). Số trơn không đơn vị, không tách nghìn (SĐT, số lượng, mã) KHÔNG tính; khối lượng
+ * («2kg», «500g»), «x2», giờ giấc cũng không. Mỗi đoạn chỉ đọc MỘT lần (đọc xong thì xoá khỏi chuỗi trước luật sau). HÀM THUẦN.
+ */
+export function extractVndAmounts(text: string): number[] {
+  const out: number[] = [];
+  let rest = text.normalize("NFC");
+  const take = (re: RegExp, value: (m: string[]) => number) => {
+    rest = rest.replace(re, (...args: unknown[]) => {
+      const m = args.slice(0, -2).map((x) => (typeof x === "string" ? x : ""));
+      const v = value(m);
+      if (Number.isFinite(v)) out.push(Math.round(v));
+      return `${m[1]} `;
+    });
+  };
+  take(MILLION_SPLIT_RE, (m) => Number(m[2]) * 1_000_000 + Number(m[3]) * 10 ** (6 - m[3].length));
+  take(UNIT_AMOUNT_RE, (m) => Number(m[2].replace(",", ".")) * (m[3].toLowerCase() === "k" || m[3].toLowerCase().startsWith("ng") ? 1000 : 1_000_000));
+  take(GROUPED_AMOUNT_RE, (m) => Number(m[2].replace(/[.,]/g, "")));
+  take(PLAIN_CURRENCY_RE, (m) => Number(m[2]));
+  return out;
+}
+
+/**
+ * Cụm khách PHẢN ĐỐI giá (đã bỏ dấu): «… chứ», «sao lại …», «tưởng …», «bảo là …», «tính sai / nhầm», «đắt thế», «không phải …».
+ * «chứ» chỉ tính khi đứng cuối mệnh đề (đuôi phản bác), không tính «chứ không» giữa câu.
+ */
+const DISPUTE_PHRASE_RE = /\b(?:sao lai|sao gia|sao tinh|tuong la|tuong gia|bao la|bao gia la|niem yet|dat the|dat vay|dat qua|nham|sai gia|sai tien|tinh sai|tinh nham|khong phai|ko phai|k phai|ma sao|tinh lai)\b|\bchu\s*(?:a|ah|ak|nhi|nha|em|shop|e|c|chi)?\s*[.!?]*\s*$/;
+/** Cụm hoàn toàn khẳng định sai giá — không cần số tiền để biết khách đang khiếu nại giá. */
+const DISPUTE_STRONG_RE = /\b(?:sai gia|sai tien|tinh sai|tinh nham|nham gia)\b/;
+
+export type PriceDispute = { amounts: number[]; phrase: boolean };
+
+/**
+ * Khách PHẢN ĐỐI giá đã báo (PRICE_DISPUTED — chủ shop 11/10/2026, ca «Chị Hoàn»: bot báo 560.000 ₫, khách «2 ký giá 540đ chứ», bot vẫn
+ * để đơn «ĐÃ XÁC NHẬN»). HÀM THUẦN. Chỉ xét khi hội thoại ĐÃ có báo giá. Phản đối = (a) khách nói số tiền KHÁC mọi số của báo giá gần nhất
+ * (hoặc nhắc lại chính số đã báo) kèm cụm phản bác, hoặc (b) cụm khẳng định sai giá («tính sai», «sai giá»). Khách hay gõ «540đ» / «540» cho 540.000 ₫ ⇒ số < 10.000
+ * nhân 1.000. Khách nói đúng số của báo giá («ok 560 nhé») hay chỉ hỏi chung («ship bao nhiêu») ⇒ không phải phản đối.
+ */
+export function detectPriceDispute(customerText: string, quote: { amounts: readonly number[]; total: number | null; subtotal: number } | null | undefined): PriceDispute | null {
+  if (!quote) return null;
+  const folded = foldClaim(customerText).trim();
+  const amounts = [...new Set(extractVndAmounts(customerText).map((n) => (n > 0 && n < 10_000 ? n * 1000 : n)).filter((n) => n > 0))];
+  const quoted = new Set<number>([...quote.amounts, quote.subtotal, ...(quote.total !== null ? [quote.total] : [])]);
+  const differs = amounts.filter((n) => !quoted.has(n));
+  const phrase = DISPUTE_PHRASE_RE.test(folded);
+  if (phrase && amounts.length) return { amounts: differs, phrase };
+  if (DISPUTE_STRONG_RE.test(folded)) return { amounts: differs, phrase: true };
+  return null;
+}
+
+/** Số tiền trong câu KHÔNG thuộc tập đã xác thực (0 luôn hợp lệ — «0 ₫», miễn ship). HÀM THUẦN. */
+export function unverifiedAmounts(amounts: readonly number[], allowed: ReadonlySet<number>): number[] {
+  return [...new Set(amounts.filter((a) => a !== 0 && !allowed.has(a)))];
+}
+
+/** Bảng chân lý: khẳng định nào cần căn cứ nào. Không khẳng định ⇒ luôn qua. `amounts` = số tiền trong câu (khi có tập xác thực). HÀM THUẦN. */
+export function claimVerdict(claims: readonly ClaimKind[], facts: ClaimFacts, amounts: readonly number[] = []): ClaimVerdict {
   if (claims.includes("PAYMENT_RECEIVED") && !facts.paymentVerified) {
-    return { ok: false, claim: "PAYMENT_RECEIVED", safeText: CLAIM_SAFE_TEXT.PAYMENT, handoffReason: CLAIM_HANDOFF_REASON.PAYMENT_RECEIVED, note: "Đã chặn câu AI khẳng định đã nhận tiền — chưa có chứng từ thu" };
+    return { ok: false, claim: "PAYMENT_RECEIVED", safeText: CLAIM_SAFE_TEXT.PAYMENT, handoffReason: CLAIM_HANDOFF_REASON.PAYMENT_RECEIVED, note: "Đã chặn câu AI khẳng định đã nhận tiền — chưa có chứng từ thu", handoff: true };
   }
   if (claims.includes("ORDER_CONFIRMED") && !facts.orderConfirmed) {
-    return { ok: false, claim: "ORDER_CONFIRMED", safeText: CLAIM_SAFE_TEXT.ORDER, handoffReason: CLAIM_HANDOFF_REASON.ORDER_CONFIRMED, note: "Đã chặn câu AI khẳng định đã chốt đơn — chưa có đơn ERP" };
+    // Đơn ĐÃ TẠO nhưng chưa qua kiểm (#463DEBAE: «Máy chốt khi địa chỉ chưa ghép được») ⇒ nói đúng sự thật, không chuyển người:
+    // đơn đã nằm trong hàng «Cần người kiểm» với lý do của nó.
+    if (facts.orderPending) {
+      const safeText = facts.orderPending === "ADDRESS" ? CLAIM_SAFE_TEXT.ORDER_PENDING_ADDRESS : CLAIM_SAFE_TEXT.ORDER_PENDING_CHECK;
+      return { ok: false, claim: "ORDER_CONFIRMED", safeText, handoffReason: CLAIM_HANDOFF_REASON.ORDER_PENDING, note: `Đã thay câu AI «đã lên đơn» — đơn còn cần kiểm (${facts.orderPending === "ADDRESS" ? "địa chỉ chưa chuẩn hoá" : "giá / SĐT / cờ cần kiểm"})`, handoff: false };
+    }
+    return { ok: false, claim: "ORDER_CONFIRMED", safeText: CLAIM_SAFE_TEXT.ORDER, handoffReason: CLAIM_HANDOFF_REASON.ORDER_CONFIRMED, note: "Đã chặn câu AI khẳng định đã chốt đơn — chưa có đơn ERP", handoff: true };
   }
   if (claims.includes("ORDER_CANCELLED") && !facts.orderCancelled) {
-    return { ok: false, claim: "ORDER_CANCELLED", safeText: CLAIM_SAFE_TEXT.CANCEL, handoffReason: CLAIM_HANDOFF_REASON.ORDER_CANCELLED, note: "Đã chặn câu AI khẳng định đã huỷ đơn — lõi đơn chưa huỷ" };
+    return { ok: false, claim: "ORDER_CANCELLED", safeText: CLAIM_SAFE_TEXT.CANCEL, handoffReason: CLAIM_HANDOFF_REASON.ORDER_CANCELLED, note: "Đã chặn câu AI khẳng định đã huỷ đơn — lõi đơn chưa huỷ", handoff: true };
+  }
+  if (facts.allowedAmounts && amounts.length) {
+    const bad = unverifiedAmounts(amounts, facts.allowedAmounts);
+    if (bad.length) {
+      return { ok: false, claim: "PRICE_UNVERIFIED", safeText: CLAIM_SAFE_TEXT.PRICE, handoffReason: CLAIM_HANDOFF_REASON.PRICE_UNVERIFIED, note: `Đã chặn câu AI báo số tiền chưa xác thực: ${bad.map((n) => n.toLocaleString("vi-VN")).join(", ")} ₫`, handoff: true, amounts: bad };
+    }
   }
   return { ok: true };
 }
 
 /** `detectClaims` + `claimVerdict`. HÀM THUẦN. */
 export function guardClaims(text: string, facts: ClaimFacts): ClaimVerdict {
-  return claimVerdict(detectClaims(text), facts);
+  return claimVerdict(detectClaims(text), facts, extractVndAmounts(text));
 }
 
 /**
- * Bản dùng trong lượt bot: chỉ ĐỌC ERP khi câu thật sự có khẳng định (đa số câu không có ⇒ 0 truy vấn). Lỗi đọc ⇒ chặn.
+ * Bản dùng trong lượt bot: chỉ ĐỌC ERP khi câu thật sự có khẳng định hoặc có SỐ TIỀN (câu thường ⇒ 0 truy vấn). Lỗi đọc ⇒ chặn:
+ * căn cứ rỗng và tập số tiền chỉ còn 0 — mọi nhánh lỗi rơi về phía HẸP.
  */
 export async function guardOutgoing(text: string, facts: () => Promise<ClaimFacts>): Promise<ClaimVerdict> {
   const claims = detectClaims(text);
-  if (!claims.length) return { ok: true };
-  const f = await facts().catch((): ClaimFacts => ({ paymentVerified: false, orderConfirmed: false, orderCancelled: false }));
-  return claimVerdict(claims, f);
+  const amounts = extractVndAmounts(text);
+  if (!claims.length && !amounts.length) return { ok: true };
+  const f = await facts().catch((): ClaimFacts => ({ paymentVerified: false, orderConfirmed: false, orderCancelled: false, allowedAmounts: new Set([0]) }));
+  return claimVerdict(claims, f, amounts);
 }
 
 /** Lời khách «đã chuyển khoản» gõ tay (đã bỏ dấu) — chỉ cụm nói về TIỀN, không bắt «đã chuyển địa chỉ». */
@@ -254,25 +356,68 @@ export type ClaimConversation = { id: string; orderId: string | null; pageId: st
  * Bộ đọc căn cứ cho MỘT lượt: phần CSDL đọc một lần (lười — chỉ khi có câu khẳng định), phần `state` đọc lúc hỏi (công cụ
  * `confirm_order` có thể vừa chốt ở vòng trước của chính lượt này).
  */
-export function claimFactsLoader(conv: ClaimConversation): (state: ChatState) => Promise<ClaimFacts> {
-  let db: Promise<{ orders: { id: string; stage: string }[]; paidOrderIds: Set<string> }> | null = null;
+/**
+ * Đơn ĐÃ TẠO có QUA KIỂM không (P0 11/10/2026, yêu cầu 6–7 của chủ shop). HÀM THUẦN. Đơn đồng bộ từ nguồn (Pancake) = nhân viên đã
+ * tạo ở nguồn ⇒ qua. Đơn ERP (`erp-`): đủ SĐT / địa chỉ / tỉnh / xã / hàng (`manualOrderGaps` — cùng hàm lõi dùng để từ chối «Xác nhận
+ * đơn»), không cờ CẦN NGƯỜI KIỂM đang mở, và tổng đơn = tổng của báo giá đã lưu (`raw.quote`) nếu có.
+ */
+export type OrderValidity = { valid: boolean; pending: "ADDRESS" | "CHECK" | null; reasons: string[] };
+export function orderValidityOf(o: { id: string; raw: unknown; phone: string; address: string; province: string; ward: string; itemsCount: number; total: number; shippingFee: number }): OrderValidity {
+  if (!isManualOrderId(o.id)) return { valid: true, pending: null, reasons: [] };
+  const gaps = manualOrderGaps({ phone: o.phone, address: o.address, province: o.province, ward: o.ward }, o.itemsCount);
+  const review = orderReviewOf(o.raw)?.entries ?? [];
+  const reasons: string[] = [...gaps.map((g) => `thiếu ${g}`), ...review.map((e) => e.code)];
+  const q = o.raw && typeof o.raw === "object" ? (o.raw as Record<string, unknown>).quote : null;
+  const qTotal = q && typeof q === "object" ? (q as Record<string, unknown>).total : null;
+  if (typeof qTotal === "number" && qTotal !== o.total + o.shippingFee) reasons.push("tổng đơn lệch báo giá");
+  if (!reasons.length) return { valid: true, pending: null, reasons };
+  const address = gaps.some((g) => g === "địa chỉ" || g === "tỉnh / thành" || g === "xã / phường") || review.some((e) => e.code === "ADDRESS_UNRESOLVED");
+  return { valid: false, pending: address ? "ADDRESS" : "CHECK", reasons };
+}
+
+/**
+ * Bộ đọc căn cứ cho MỘT lượt: phần CSDL đọc một lần (lười — chỉ khi có câu khẳng định / số tiền), phần `state` đọc lúc hỏi (công cụ
+ * `confirm_order` có thể vừa chốt ở vòng trước của chính lượt này). `reference` = tập số tham chiếu của danh mục (`quote.ts`) —
+ * thiếu ⇒ tập số tiền chỉ gồm báo giá của hội thoại.
+ */
+export function claimFactsLoader(conv: ClaimConversation, opts: { reference?: () => Promise<ReadonlySet<number>> } = {}): (state: ChatState) => Promise<ClaimFacts> {
+  let db: Promise<LinkedFacts> | null = null;
+  let ref: Promise<ReadonlySet<number>> | null = null;
   return async (state) => {
-    if (!db) db = linkedOrderFacts(conv);
-    const r = await db;
+    if (!db) db = linkedOrderFacts(conv, [state.confirmed?.orderId, state.draft?.orderId]);
+    if (!ref) ref = opts.reference ? opts.reference().catch((): ReadonlySet<number> => new Set<number>([0])) : Promise.resolve(new Set<number>([0]));
+    const [r, reference] = await Promise.all([db, ref]);
     const botDraft = !state.confirmed ? (state.draft?.orderId ?? null) : null;
     const liveOrders = r.orders.filter((o) => !(o.id === botDraft && o.stage === "NEW"));
-    return { paymentVerified: liveOrders.some((o) => r.paidOrderIds.has(o.id)), orderConfirmed: Boolean(state.confirmed) || liveOrders.length > 0, orderCancelled: Boolean(state.cancelledOrders?.length) };
+    const validDb = liveOrders.filter((o) => o.validity.valid);
+    const pendingDb = liveOrders.find((o) => !o.validity.valid)?.validity.pending ?? null;
+    // Đơn bot chốt TRONG hội thoại: kết quả kiểm ghi ngay sau lượt ghi (`state.confirmed.valid`) — mới hơn lượt đọc CSDL đầu lượt.
+    // Đơn chốt trước bản này (không có `valid`) ⇒ đọc CSDL như trước. Khung THỬ (mô phỏng) không có đơn để kiểm ⇒ qua.
+    const c = state.confirmed;
+    let orderConfirmed: boolean;
+    let orderPending: "ADDRESS" | "CHECK" | null;
+    if (c && (c.simulated || c.valid === true)) [orderConfirmed, orderPending] = [true, null];
+    else if (c && c.valid === false) [orderConfirmed, orderPending] = [false, c.pending ?? "CHECK"];
+    else [orderConfirmed, orderPending] = [validDb.length > 0, validDb.length ? null : pendingDb];
+    const allowed = new Set<number>(reference);
+    if (state.quote?.verified) for (const n of state.quote.amounts) allowed.add(n);
+    for (const n of state.priceFacts ?? []) allowed.add(n);
+    return { paymentVerified: liveOrders.some((o) => r.paidOrderIds.has(o.id)), orderConfirmed, orderPending, orderCancelled: Boolean(state.cancelledOrders?.length), allowedAmounts: allowed };
   };
 }
 
-async function linkedOrderFacts(conv: ClaimConversation): Promise<{ orders: { id: string; stage: string }[]; paidOrderIds: Set<string> }> {
+type LinkedFacts = { orders: { id: string; stage: string; validity: OrderValidity }[]; paidOrderIds: Set<string> };
+
+async function linkedOrderFacts(conv: ClaimConversation, stateOrderIds: readonly (string | null | undefined)[] = []): Promise<LinkedFacts> {
   const d = await getDb();
   const o = schema.orders;
   const links: SQL[] = [eq(o.salesConversationId, conv.id)];
   if (conv.orderId) links.push(eq(o.id, conv.orderId));
   if (conv.pageId && conv.threadId) links.push(and(eq(o.pageId, conv.pageId), eq(o.conversationId, conv.threadId))!);
+  const own = stateOrderIds.filter((x): x is string => typeof x === "string" && x.length > 0);
+  if (own.length) links.push(inArray(o.id, own));
   const orders = await d
-    .select({ id: o.id, stage: sql<string>`${o.stage}::text`, total: o.totalPriceAfterDiscount, ship: o.shippingFee })
+    .select({ id: o.id, stage: sql<string>`${o.stage}::text`, total: o.totalPriceAfterDiscount, ship: o.shippingFee, raw: o.raw, phone: o.shipPhone, address: o.shipAddress, province: o.shipProvince, ward: o.shipCommune, itemsCount: o.itemsCount })
     .from(o)
     .where(and(or(...links), notInArray(o.stage, ["CANCELLED", "DELETED"])))
     .limit(20);
@@ -286,5 +431,8 @@ async function linkedOrderFacts(conv: ClaimConversation): Promise<{ orders: { id
       if (manualPaymentStatus(sums, manualOrderAmountDue({ totalPriceAfterDiscount: Number(x.total ?? 0), shippingFee: Number(x.ship ?? 0) })).status === "PAID") paidOrderIds.add(x.id);
     }
   }
-  return { orders: orders.map((x) => ({ id: x.id, stage: x.stage })), paidOrderIds };
+  return {
+    orders: orders.map((x) => ({ id: x.id, stage: x.stage, validity: orderValidityOf({ id: x.id, raw: x.raw, phone: x.phone ?? "", address: x.address ?? "", province: x.province ?? "", ward: x.ward ?? "", itemsCount: Number(x.itemsCount ?? 0), total: Number(x.total ?? 0), shippingFee: Number(x.ship ?? 0) }) })),
+    paidOrderIds,
+  };
 }

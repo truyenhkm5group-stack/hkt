@@ -233,7 +233,11 @@ async function testOrderGoldenBaseline() {
       const def = ORDER_GOLDEN_CASES.find((x) => x.key === c.key);
       assert.ok(def);
       assert.deepEqual(c.scriptIssues, [], `[${run.variant}] ${c.key}: engine hỏi model lệch số vòng kịch bản — kịch bản không còn đi đúng đường đã định`);
-      assert.deepEqual(c.toolErrors, def.expectToolErrors ?? [], `[${run.variant}] ${c.key}: máy chủ từ chối công cụ khác với kịch bản định`);
+      // Đơn đã TỰ CHỐT từ lượt lên đơn (P0-A) ⇒ confirm_order về sau trả «đã chốt từ trước», không còn là lượt bị từ chối của kịch bản cũ.
+      // Khách gửi lặp sau khi đơn đã tự chốt ⇒ create_draft_order bị từ chối «đơn đã chốt» — đúng là chặn đơn trùng, không phải lệch kịch bản.
+      const expected = (def.expectToolErrors ?? []).filter((n) => !(c.autoConfirmed && n === "confirm_order"));
+      const actual = c.toolErrors.filter((n) => !(c.autoConfirmed && n === "create_draft_order"));
+      assert.deepEqual(actual, expected, `[${run.variant}] ${c.key}: máy chủ từ chối công cụ khác với kịch bản định`);
     }
     // Bất biến AN TOÀN đang đúng hôm nay — khẳng định thẳng (không chỉ qua baseline), để một lần cập nhật baseline ẩu không «hợp
     // thức hoá» được đơn trùng hay giá không từ ERP.

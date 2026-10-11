@@ -84,6 +84,8 @@ export const ORDER_VALIDATION_REASONS = [
   "BAD_INPUT",
   "UNKNOWN_SKU",
   "UNPRICED_SKU",
+  /** Báo giá máy chủ CHƯA XÁC THỰC (catalog mâu thuẫn với luật giảm theo khối lượng · thiếu khối lượng) — P0 11/10/2026. */
+  "PRICE_UNVERIFIED",
   "STOCK_SHORT",
   "CREDIT_LIMIT",
   "OMS_INVALID",

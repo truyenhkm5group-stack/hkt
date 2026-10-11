@@ -501,7 +501,7 @@
           "review": [
             []
           ],
-          "status": "HANDOFF",
+          "status": "OPEN",
           "toolErrors": []
         },
         "webhook-trung": {
@@ -511,8 +511,8 @@
           "review": [
             []
           ],
-          "status": "HANDOFF",
-          "toolErrors": []
+          "status": "OPEN",
+          "toolErrors": ["create_draft_order"]
         },
         "tiep-quan-nguoi": {
           "orders": ["CONFIRMED"],
@@ -580,7 +580,7 @@
             []
           ],
           "status": "OPEN",
-          "toolErrors": ["confirm_order"]
+          "toolErrors": []
         },
         "ok-de-hoi-chong": {
           "orders": ["CONFIRMED"],
@@ -610,7 +610,7 @@
             []
           ],
           "status": "OPEN",
-          "toolErrors": ["confirm_order"]
+          "toolErrors": []
         },
         "hoi-gia-roi-thoi": {
           "orders": [],
@@ -676,7 +676,7 @@
             []
           ],
           "status": "OPEN",
-          "toolErrors": []
+          "toolErrors": ["create_draft_order"]
         },
         "xac-nhan-chi-dau-cau": {
           "orders": ["CONFIRMED"],
@@ -686,7 +686,7 @@
             []
           ],
           "status": "OPEN",
-          "toolErrors": ["confirm_order"]
+          "toolErrors": []
         },
         "dia-chi-cu-viet-tat": {
           "orders": ["CONFIRMED"],
