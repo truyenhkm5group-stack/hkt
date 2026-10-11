@@ -62,6 +62,7 @@ import { foldVi, queryKeywords, searchCatalog, stockFor, type CatalogItem } from
 import { DEFAULT_SALES_CHATBOT_CONFIG, SALES_BOT_ERROR_LABEL, SALES_CHATBOT_SETTING_KEY, salesBotError, withinBusinessHours, parseSalesChatbotConfig } from "@/lib/sales-chatbot/config";
 import { getSettingJson, setSettingJson } from "@/lib/settings";
 import { notifySalesChatHandoff } from "@/lib/sales-chatbot/alerts";
+import { handoffEpisodeKey } from "@/lib/sales-chatbot/handoff-routing-shared";
 import { AI_DOWN_HANDOFF_REASON, isModelUnavailableError, loadSalesChatbotConfig, withModelFallback, chatTurn, conversationView, customerFacingText, customerNamePrompt, plainForMessenger, historyForModel, listConversations, messageTimeTag, nowPromptLine, openConversation, recentShopTexts, resumeConversationToAi, setSalesChatProviderForTests, systemPrompt, visitorKeyOf } from "@/lib/sales-chatbot/engine";
 import { saveSalesChatbotConfig } from "@/lib/sales-chatbot/settings";
 import { reorderDigestText, sendReorderDigest, type DigestRow } from "@/lib/reorder/digest";
@@ -1316,7 +1317,10 @@ async function testJourney() {
       // (03/10/2026) Chủ shop: «chỉ cần thông báo khi có đơn mới» ⇒ mặc định nhóm KHÔNG nhận tin chuyển người (chuông ERP vẫn có).
       const hoGroupOff = await db.select().from(schema.messagingDeliveries).where(and(eq(schema.messagingDeliveries.event, "sales_chat.handoff"), eq(schema.messagingDeliveries.subjectId, hoConv.id)));
       assert.equal(hoGroupOff.length, 0, "mặc định không báo nhóm khi chuyển người");
-      assert.ok((await db.select().from(schema.notifications).where(eq(schema.notifications.dedupeKey, `sales-chat:handoff:${hoConv.id}`))).length === 1, "chuông ERP vẫn có");
+      // Khoá chuông theo ĐỢT chờ người (mốc vào hàng đợi) — dựng bằng chính hàm của đường ghi, không gõ lại chuỗi.
+      assert.ok(hoConv.handoffQueuedAt, "chuyển người ⇒ hội thoại vào hàng đợi (có mốc đợt)");
+      assert.equal((await db.select().from(schema.notifications).where(eq(schema.notifications.dedupeKey, handoffEpisodeKey(hoConv.id, hoConv.handoffQueuedAt)))).length, 1, "chuông ERP vẫn có — đúng MỘT chuông cho đợt này");
+      assert.equal((await db.select().from(schema.notifications).where(and(like(schema.notifications.dedupeKey, "sales-chat:handoff:%"), eq(schema.notifications.entityId, hoConv.id)))).length, 1, "không chuông chuyển người thứ hai cho cùng đợt");
       // (02/10/2026 · ảnh «Lê Quyền») shop BẬT công tắc ⇒ nhóm «báo nhóm vận hành» nhận MỘT tin có TÊN khách trên fanpage.
       const cfgHo = await loadSalesChatbotConfig();
       await setSettingJson(SALES_CHATBOT_SETTING_KEY, { ...cfgHo, handoff: { ...cfgHo.handoff, notifyGroup: true } });
