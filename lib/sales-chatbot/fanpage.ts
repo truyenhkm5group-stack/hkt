@@ -320,7 +320,7 @@ export function parsePancakeWebhook(payload: unknown): FanpageEvent | null {
   const automated = fromPage && Boolean(from.ai_generated || from.is_automated);
   const adReferral = fromPage ? null : adReferralFromPancake(payload);
   const senderId = fromPage ? "" : str(conv?.from_psid) || str(from.id);
-  const avatar = fromPage || !inbox ? null : mergePancakeAvatarFacts([pancakeAvatarFactsOf(conv, "WEBHOOK"), pancakeAvatarFactsOf(msg, "WEBHOOK")]);
+  const avatar = fromPage || !inbox ? null : mergePancakeAvatarFacts([pancakeAvatarFactsOf(conv, "WEBHOOK", pageId), pancakeAvatarFactsOf(msg, "WEBHOOK", pageId)]);
   return { pageId, threadId, messageId, text, customerName: fromPage ? "" : customerName, fromPage, humanStaff, automated, inbox, comment, imageUrls, stickerUrls, adReferral, senderId, avatar };
 }
 
@@ -1512,7 +1512,7 @@ export async function noteListedAvatars(pageId: string, convs: readonly Record<s
       const threadId = str(conv.id);
       const type = str(conv.type).toUpperCase();
       if (!threadId || (type && type !== "INBOX")) continue;
-      byKey.set(fanpageVisitorKey(pageId, threadId), pancakeAvatarFactsOf(conv, "POLL"));
+      byKey.set(fanpageVisitorKey(pageId, threadId), pancakeAvatarFactsOf(conv, "POLL", pageId));
     }
     if (!byKey.size) return 0;
     const db = await getDb();
@@ -1613,7 +1613,7 @@ export async function catchUpFanpage(deps: FanpageDeps = {}): Promise<CatchUpRes
     const customerName = str((c.from as { name?: unknown } | undefined)?.name) || str(((c.customers as { name?: unknown }[] | undefined) ?? [])[0]?.name);
     let touched = 0;
     for (const m of waiting) {
-      const r = await receiveFanpageEvent({ pageId, threadId, messageId: m.id, text: m.text, customerName, fromPage: false, humanStaff: false, inbox: true, comment: null, imageUrls: [], avatar: pancakeAvatarFactsOf(c, "POLL") }, now());
+      const r = await receiveFanpageEvent({ pageId, threadId, messageId: m.id, text: m.text, customerName, fromPage: false, humanStaff: false, inbox: true, comment: null, imageUrls: [], avatar: pancakeAvatarFactsOf(c, "POLL", pageId) }, now());
       if (r.queued) {
         out.queued += 1;
         touched += 1;
