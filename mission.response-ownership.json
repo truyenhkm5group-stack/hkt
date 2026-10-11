@@ -3,7 +3,7 @@
   "mission_id": "response-ownership",
   "title": "P0: lượt khách chỉ «đã trả lời» khi có phản hồi hợp lệ SAU nó; máy trạng thái chủ trả lời AI_ACTIVE/HUMAN_ACTIVE/TEMPORARY_AI_PAUSE/HANDOFF_PENDING/RESOLVED; chống trùng theo lượt khách; nhiều bên cùng nối Page",
   "business_goal": "",
-  "status": "RUNNING",
+  "status": "PR_READY",
   "priority": "P0",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -26,7 +26,18 @@
     "0244": "2026-10-11T05:45:27.878Z"
   },
   "created_at": "2026-10-11T02:24:49.854Z",
-  "updated_at": "2026-10-11T05:45:27.878Z",
-  "last_heartbeat": "2026-10-11T02:24:49.854Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-11T05:46:04.045Z",
+  "last_heartbeat": "2026-10-11T05:46:04.045Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "fix/response-ownership",
+    "sha": "3fbcfbd3ce3af234f94a6501bf1e9b1b0a2d12a8",
+    "at": "2026-10-11T05:46:04.045Z",
+    "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+    "title": "P0: lượt khách chỉ «đã trả lời» khi có phản hồi hợp lệ SAU nó; máy trạng thái chủ trả lời AI_ACTIVE/HUMAN_ACTIVE/TEMPORARY_AI_PAUSE/HANDOFF_PENDING/RESOLVED; chống trùng theo lượt khách; nhiều bên cùng nối Page",
+    "summary": "Nguồn gốc người gửi 6 giá trị; lượt khách chỉ đã trả lời khi có tin ra hợp lệ chắc chắn SAU tin khách cuối; tin mẫu/chữ hệ thống không khoá AI; chỉ người đã xác minh mới nhường; ý định mua lúc nhường ⇒ báo người hoặc AI tiếp; hết nhường đánh giá lại một lần; máy trạng thái chủ trả lời 5 trạng thái; migration thêm sender_kind/source_at/sender_app",
+    "tests": [
+      "npm test đầy đủ (trước amend): TẤT CẢ KIỂM THỬ ĐẠT · sau amend tsc + eslint + 7 bộ liên quan đạt · build · 8 đột biến"
+    ]
+  }
 }
