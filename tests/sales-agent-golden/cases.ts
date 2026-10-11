@@ -202,9 +202,9 @@ export const GOLDEN_CASES: readonly GoldenCase[] = [
     channel: "WEB",
     turns: [
       {
-        say: "lay 1 cha muc, Phạm Thị Thu 0900000111, 8 Lý Thường Kiệt Hà Nội",
+        say: "lay 1 cha muc, Phạm Thị Thu 0900000111, 8 Lý Thường Kiệt Phường Cửa Nam Hà Nội",
         ai: [
-          () => [tool("create_customer", { name: "Phạm Thị Thu", phone: "0900000111", address: "8 Lý Thường Kiệt, Hà Nội" })],
+          () => [tool("create_customer", { name: "Phạm Thị Thu", phone: "0900000111", address: "8 Lý Thường Kiệt, Phường Cửa Nam, Hà Nội" })],
           ({ v }) => [tool("create_draft_order", { items: [{ variant_id: v("CHA-MUC"), quantity: 1 }] })],
           reply((r) => `Tóm tắt đơn: tổng thu ${String(r.cod_total_text)}. Mình lấy thêm gì không, không thì em giao luôn ạ?`),
         ],

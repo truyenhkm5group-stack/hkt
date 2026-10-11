@@ -49,13 +49,17 @@ export async function agentUnitPrices(lines: readonly { variantId: string; quant
 }
 
 /**
- * So giá agent gửi với giá máy chủ tính — HÀM THUẦN. Trả danh sách lỗi theo dòng (rỗng = khớp). Đường agent KHÔNG được mang
- * chiết khấu (dòng / đơn): giảm giá ngoài bảng là quyết định của người, không của máy.
+ * So giá agent gửi với giá máy chủ tính — HÀM THUẦN. Trả danh sách lỗi theo dòng (rỗng = khớp). Đường agent KHÔNG được tự chiết khấu
+ * (dòng / đơn): giảm giá ngoài bảng là quyết định của người, không của máy. NGOẠI LỆ DUY NHẤT: tiền giảm theo khối lượng mà chính
+ * MÁY CHỦ tính lại từ cấu hình của tổ chức (`expectedDiscounts`, theo chỉ số dòng — `verifyAgentQuote` ở quote.ts) — dòng mang tiền
+ * giảm khác số đó, hoặc không có báo giá máy chủ đi kèm, vẫn bị từ chối (P0 11/10/2026: trước đây luật giảm bật thì MỌI đơn ≥ 2kg của
+ * bot bị lõi từ chối «Máy không được tự chiết khấu dòng hàng»).
  */
 export function agentPriceProblems(
   lines: readonly { variantId: string; quantity: number; unitPrice: number; discount: number }[],
   expected: ReadonlyMap<string, number | null>,
   orderDiscount: number,
+  expectedDiscounts?: ReadonlyMap<string, number>,
 ): { field: string; message: string }[] {
   const out: { field: string; message: string }[] = [];
   lines.forEach((l, i) => {
@@ -63,7 +67,8 @@ export function agentPriceProblems(
     if (want === undefined) return; // mẫu mã không tồn tại — `prepare()` đã báo lỗi riêng.
     if (want === null) out.push({ field: `lines.${i}.unitPrice`, message: "Mẫu mã chưa có giá bán — máy không được tự đặt giá." });
     else if (l.unitPrice !== want) out.push({ field: `lines.${i}.unitPrice`, message: `Giá vừa đổi: đơn giá đúng là ${want.toLocaleString("vi-VN")} ₫ (gửi lên ${l.unitPrice.toLocaleString("vi-VN")} ₫).` });
-    if (l.discount !== 0) out.push({ field: `lines.${i}.discount`, message: "Máy không được tự chiết khấu dòng hàng." });
+    const allowed = expectedDiscounts?.get(`${i}`) ?? 0;
+    if (l.discount !== allowed) out.push({ field: `lines.${i}.discount`, message: allowed ? `Tiền giảm của dòng phải đúng giảm theo khối lượng máy chủ tính (${allowed.toLocaleString("vi-VN")} ₫).` : "Máy không được tự chiết khấu dòng hàng." });
   });
   if (orderDiscount !== 0) out.push({ field: "orderDiscount", message: "Máy không được tự chiết khấu đơn." });
   return out;

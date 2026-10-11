@@ -85,6 +85,7 @@ import { canUseModule, orgHasSyncedSource } from "@/lib/platform/capabilities";
 import { runWorkflows } from "@/lib/workflow/engine";
 import { currentOrganization } from "@/lib/platform/context";
 import { agentPriceProblems, agentUnitPrices, type AgentPricingMode } from "@/lib/commerce/pricing";
+import type { AgentQuoteClaim } from "@/lib/sales-chatbot/quote";
 import { additionalNeed, lockVariants, shortfalls, type StockTx } from "@/lib/commerce/stock";
 import { getSettingJson, setSettingJson } from "@/lib/settings";
 import { normalizeCustomerPhone } from "@/lib/records/customer-create";
@@ -136,6 +137,12 @@ export type AgentOrderOptions = {
    * nhận từ client hay từ AI.
    */
   adId?: string | null;
+  /**
+   * BÁO GIÁ MÁY CHỦ mà khách đã nghe (P0 11/10/2026 — `lib/sales-chatbot/quote.ts`). Có ⇒ lõi TÍNH LẠI phần hàng bằng chính hàm báo giá
+   * (đơn giá + giảm theo khối lượng của tổ chức), từ chối nếu lệch / chưa xác thực, và lưu mã + phiên bản giá + tổng vào `raw.quote`.
+   * Không có ⇒ như cũ: máy không được mang chiết khấu nào.
+   */
+  quote?: AgentQuoteClaim;
 };
 
 /** Người hay máy đang ghi — MỘT hình cho ba lượt ghi, để nhật ký / sự kiện / lời khai gốc nói cùng một điều. */
@@ -270,9 +277,9 @@ function variationText(v: { detail: string; color: string; size: string }): stri
   return v.detail.trim() || [v.color, v.size].filter((x) => x.trim()).join(" · ");
 }
 
-function orderColumns(p: Prepared, w: Writer, extraRaw: { agentKey?: string } = {}) {
+function orderColumns(p: Prepared, w: Writer, extraRaw: { agentKey?: string; quote?: StoredQuote } = {}) {
   const t = p.totals;
-  const raw: ManualOrderRaw & { agent?: string; agentKey?: string } = { origin: MANUAL_ORDER_ORIGIN, orderDiscount: p.orderDiscount, createdBy: w.userId, ...(w.agent ? { agent: w.agent } : {}), ...extraRaw };
+  const raw: ManualOrderRaw & { agent?: string; agentKey?: string; quote?: StoredQuote } = { origin: MANUAL_ORDER_ORIGIN, orderDiscount: p.orderDiscount, createdBy: w.userId, ...(w.agent ? { agent: w.agent } : {}), ...extraRaw };
   return {
     status: MANUAL_ORDER_STATUS_CODE[p.stage],
     statusName: manualOrderStageLabel(p.stage),
@@ -417,11 +424,28 @@ async function auditReview(w: Writer, orderId: string, kind: "FLAG" | "RESOLVE",
   });
 }
 
-/** Đơn giá máy gửi phải đúng giá máy chủ tính theo chế độ đã khai; máy không chiết khấu. */
-async function agentPriceGate(p: Prepared, mode: AgentPricingMode): Promise<MetaFailure | null> {
+/** Lời khai báo giá lưu vào `orders.raw.quote` — mã, phiên bản giá, tiền hàng, tổng, lúc ghi. */
+type StoredQuote = { id: string; priceVersion: string; subtotal: number; total: number | null; at: string };
+
+/**
+ * Đơn giá máy gửi phải đúng giá máy chủ tính theo chế độ đã khai; máy không chiết khấu — trừ tiền giảm theo khối lượng do CHÍNH báo giá
+ * máy chủ tính lại (`verifyAgentQuote`, nạp động: quote.ts đọc danh mục của chatbot, lõi đơn không nạp tĩnh tầng đó). Trả báo giá cần
+ * lưu khi đơn mang báo giá.
+ */
+async function agentPriceGate(p: Prepared, agentOpts: AgentOrderOptions, now: Date): Promise<{ failure: MetaFailure } | { failure: null; quote: StoredQuote | null }> {
   const lines = p.totals.lines;
-  const problems = agentPriceProblems(lines, await agentUnitPrices(lines, p.customer.id, mode), p.orderDiscount);
-  return problems.length ? fail("CONFLICT", problems) : null;
+  let expectedDiscounts: Map<string, number> | undefined;
+  let stored: StoredQuote | null = null;
+  if (agentOpts.quote) {
+    const { verifyAgentQuote } = await import("@/lib/sales-chatbot/quote");
+    const customerId = agentOpts.pricing === "PRICE_BOOK" ? p.customer.id : null;
+    const v = await verifyAgentQuote({ lines, mode: agentOpts.pricing, customerId, shippingFee: p.totals.shippingFee, quote: agentOpts.quote });
+    if (!v.ok) return { failure: fail("CONFLICT", [{ field: "quote", message: v.message }]) };
+    expectedDiscounts = v.discounts;
+    stored = { id: agentOpts.quote.id, priceVersion: v.priceVersion, subtotal: agentOpts.quote.subtotal, total: agentOpts.quote.total, at: now.toISOString() };
+  }
+  const problems = agentPriceProblems(lines, await agentUnitPrices(lines, p.customer.id, agentOpts.pricing), p.orderDiscount, expectedDiscounts);
+  return problems.length ? { failure: fail("CONFLICT", problems) } : { failure: null, quote: stored };
 }
 
 /** Thiếu hàng giữa chừng giao dịch ⇒ ném để huỷ giao dịch, rồi trả lỗi đọc được ở ngoài. */
@@ -527,9 +551,11 @@ async function autoConfirmComplete(p: Prepared, existingOrderId?: string, existi
 async function createOrder(w: Writer, rawInput: unknown, agentOpts?: AgentOrderOptions, userKey?: string | null): Promise<ManualOrderResult> {
   const prep = await prepare(rawInput);
   if (!prep.ok) return prep;
+  let quote: StoredQuote | null = null;
   if (agentOpts) {
-    const priceBad = await agentPriceGate(prep.p, agentOpts.pricing);
-    if (priceBad) return priceBad;
+    const gate = await agentPriceGate(prep.p, agentOpts, new Date());
+    if (gate.failure) return gate.failure;
+    quote = gate.quote;
   }
   let p = await autoConfirmComplete(prep.p);
   // Máy chỉ LƯU NHÁP mà công tắc tự nâng lên «Đã xác nhận»: thiếu hàng ⇒ giữ «Mới» (cùng tinh thần hạn mức nợ ở trên) —
@@ -555,7 +581,7 @@ async function createOrder(w: Writer, rawInput: unknown, agentOpts?: AgentOrderO
         }
       }
       if (agentOpts && !agentOpts.allowShortStock && p.stage === "CONFIRMED") await assertAgentStock(tx, p, []);
-      const cols = orderColumns(p, w, key ? { agentKey: key } : {});
+      const cols = orderColumns(p, w, { ...(key ? { agentKey: key } : {}), ...(quote ? { quote } : {}) });
       const flagged = addressReview(w, p, cols.raw, now);
       createdReview = flagged.changed ? (orderReviewOf(flagged.raw)?.entries ?? []) : [];
       await tx.insert(schema.orders).values({ id, ...cols, raw: flagged.raw, ...(agentOpts?.adId ? { adId: agentOpts.adId } : {}), insertedAt: now, lastUpdateStatusAt: now, syncedAt: now });
@@ -636,9 +662,11 @@ async function updateOrder(w: Writer, orderId: unknown, rawInput: unknown, agent
   if (!existing.ok) return existing;
   const prep = await prepare(rawInput);
   if (!prep.ok) return prep;
+  let quote: StoredQuote | null = null;
   if (agentOpts) {
-    const priceBad = await agentPriceGate(prep.p, agentOpts.pricing);
-    if (priceBad) return priceBad;
+    const gate = await agentPriceGate(prep.p, agentOpts, new Date());
+    if (gate.failure) return gate.failure;
+    quote = gate.quote;
   }
   const row = existing.row;
   let p = await autoConfirmComplete(prep.p, row.id, row.raw);
@@ -684,7 +712,10 @@ async function updateOrder(w: Writer, orderId: unknown, rawInput: unknown, agent
       }
       // Công tắc tự nâng một đơn mà khách vừa báo huỷ (cờ gắn sau lượt đọc ở trên) ⇒ phía an toàn: không ghi gì.
       if (promoted && openNow?.entries.some((e) => e.code === "CUSTOMER_CANCELLED")) throw new ReviewConflictError(fail("CONFLICT", reviewConflictMessage(openNow.entries)));
-      const baseRaw: Record<string, unknown> = { ...lockedRaw, ...(manualOrderRaw(lockedRaw) as ManualOrderRaw), orderDiscount: p.orderDiscount };
+      // Báo giá mới (máy chủ đã tính lại) THAY báo giá cũ; lượt sửa không mang báo giá (người sửa tay) ⇒ báo giá cũ chuyển sang
+      // `quotePrev` (vết, không xoá) — tổng đơn không còn là tổng máy đã báo khách, giữ ở `quote` là để `orderValidityOf` báo «lệch» oan.
+      const { quote: oldQuote, ...lockedRest } = lockedRaw;
+      const baseRaw: Record<string, unknown> = { ...lockedRest, ...(manualOrderRaw(lockedRaw) as ManualOrderRaw), orderDiscount: p.orderDiscount, ...(quote ? { quote } : oldQuote ? { quotePrev: oldQuote } : {}) };
       flagged = addressReview(w, p, baseRaw, now);
       const r = opts.resolveReview && p.stage === "CONFIRMED" ? withReviewResolved(flagged.raw, { action: "CONFIRMED", at: now.toISOString(), byUserId: w.userId, byName: w.name }) : { raw: flagged.raw, changed: false, resolved: [] as OrderReviewEntry[] };
       resolved = r;

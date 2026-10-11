@@ -183,6 +183,8 @@ export function classifyHandoffReason(reason: string | null | undefined): Handof
 /** Giá trị đơn nháp = Σ đơn giá × số lượng (tiền hàng, chưa ship). `null` khi thiếu đơn giá của dòng nào đó. HÀM THUẦN. */
 export function draftValue(draft: ChatState["draft"] | undefined): number | null {
   if (!draft) return null;
+  // Đơn nháp mang báo giá máy chủ (P0 11/10/2026) ⇒ tiền hàng SAU giảm theo khối lượng — đơn giá × SL bỏ mất phần giảm.
+  if (draft.quote && Number.isFinite(draft.quote.subtotal)) return draft.quote.subtotal;
   let sum = 0;
   for (const l of draft.lines) {
     const p = draft.unitPrices[l.variantId];
