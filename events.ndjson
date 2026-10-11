@@ -2002,3 +2002,4 @@
 {"at":"2026-10-11T04:28:46.371Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#800 @ 07c1e0574147 · Đúng luật 19/22/25/26: phép chiếu /work, hạn/phòng lấy lại từ hằng đang chạy + ghi đè settings, phân việc mặc định TẮT không giật việc, leo thang tính lúc đọc 1 tin/phòng/ngày; migration chỉ ADD COLUMN; không chạm engine.ts"}
 {"at":"2026-10-11T04:29:28.851Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"CLAIM","mission":"owner-handoff-team","detail":"BLOCKED · 1 mẫu phạm vi · MEDIUM"}
 {"at":"2026-10-11T05:11:57.548Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MIGRATION_RELEASED","mission":"inbox-unread-perf","detail":"0243 — followup-lifecycle (chỉ nới CHECK) lấy 0243 sau handoff 0242; #792 chờ chủ shop chuyển 0244"}
+{"at":"2026-10-11T05:12:17.528Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MIGRATION_RESERVED","mission":"followup-lifecycle","detail":"0243"}
