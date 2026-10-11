@@ -1,0 +1,8 @@
+{
+  "pr": 809,
+  "sha": "df266a6efdd3872f5d82ac30d3b02cb5a1ebec61",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-11T19:04:42.618Z",
+  "note": "Script ops CHỈ ĐỌC (ERP_READ_ONLY + hỏi lại phiên, getDbForInspection), chỉ in số đếm/thời gian, MÃ HOÁ; mục ops theo khuôn inbox-read-audit; chỉ nhập lib đã có trong image ce84f77d"
+}
