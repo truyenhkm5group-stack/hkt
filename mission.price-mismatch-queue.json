@@ -3,7 +3,7 @@
   "mission_id": "price-mismatch-queue",
   "title": "P0 giá: price-mismatch-scan --since (chứng minh lệch MỚI = 0) + --flag gắn cờ PRICE_MISMATCH vào hàng «Cần người kiểm» cho đơn cũ lệch (không đổi giá)",
   "business_goal": "",
-  "status": "RUNNING",
+  "status": "PR_READY",
   "priority": "P0",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -22,7 +22,18 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-11T13:20:26.862Z",
-  "updated_at": "2026-10-11T13:20:26.862Z",
-  "last_heartbeat": "2026-10-11T13:20:26.862Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-11T13:20:43.295Z",
+  "last_heartbeat": "2026-10-11T13:20:43.295Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "fix/price-mismatch-queue",
+    "sha": "9bb3fc18f07c865dde0b1721883ea28527c8e0af",
+    "at": "2026-10-11T13:20:43.295Z",
+    "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+    "title": "P0 giá: price-mismatch-scan --since (chứng minh lệch MỚI = 0) + --flag gắn cờ PRICE_MISMATCH vào hàng «Cần người kiểm» cho đơn cũ lệch (không đổi giá)",
+    "summary": "Script quét lệch giá: --since + --flag/--apply gắn cờ PRICE_MISMATCH qua lõi đơn (không đổi giá, không gửi tin, idempotent)",
+    "tests": [
+      "npm test đầy đủ: TẤT CẢ KIỂM THỬ ĐẠT · build · typecheck · lint · sales-quote-integrity (since, chạy thử không ghi, apply gắn cờ giữ tổng, ALREADY_FLAGGED, ALREADY_REVIEWED, STAGE_LOCKED, parse arg) · 2 đột biến"
+    ]
+  }
 }

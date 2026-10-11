@@ -2131,3 +2131,4 @@
 {"at":"2026-10-11T12:25:54.232Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"VERIFY_PASS","mission":"authoritative-quote","detail":"PASS 4e49e9f9fc2d0622519c9d2422d0c68ae9f22c00 2026-10-11T12:25:42.549Z"}
 {"at":"2026-10-11T13:20:26.952Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"CLAIM","mission":"price-mismatch-queue","detail":"RUNNING · 3 mẫu phạm vi · MEDIUM"}
 {"at":"2026-10-11T13:20:26.952Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"OVERLAP_ACCEPTED","mission":"price-mismatch-queue","detail":"OVERLAP_ACCEPTED với authoritative-quote: phạm vi tests/sales-quote-integrity.test.ts — cách tích hợp: tiếp authoritative-quote (#807 đã gộp)"}
+{"at":"2026-10-11T13:20:43.329Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"price-mismatch-queue","detail":"fix/price-mismatch-queue @ 9bb3fc18f07c · 1 lệnh kiểm thử"}
