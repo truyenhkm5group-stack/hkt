@@ -18,8 +18,13 @@ import {
   conversationFor,
   COPILOT_NOTE,
   erpStaffEchoCond,
+  AUTOMATION_REASON,
+  META_SYSTEM_REASON,
+  OTHER_APP_REASON,
+  heldByVerifiedHuman,
+  INHERITED_PAUSE_APP,
+  UNKNOWN_SENDER_REASON,
   fanpageVisitorKey,
-  FIRST_CONTACT_LOOKBACK_MS,
   FIRST_CONTACT_WAIT_MS,
   FOLLOWUP_WAIT_MS,
   GRACE_SLACK_MS,
@@ -58,6 +63,8 @@ import { botMaySend, captureSendSnapshot, holdGate, startHumanCooldown } from "@
 import { noteMessengerGraphFailure } from "@/lib/sales-chatbot/messenger-health";
 import { botSendAllowed, inboundPageGate } from "@/lib/sales-chatbot/page-runtime";
 import { PAGE_NOT_LIVE_SEND_ERROR } from "@/lib/sales-chatbot/page-runtime-shared";
+import { buildCustomerTurns, classifyOutbound, partitionPending } from "@/lib/sales-chatbot/response-ownership";
+import { loadThreadLedger, templateTexts } from "@/lib/sales-chatbot/response-ownership-ledger";
 import { metaProfileErrorKind, PROFILE_REFRESH_MS, PROFILE_TRANSIENT_RETRY_MS, profileRefreshDue, type StoredMetaProfile } from "@/lib/sales-chatbot/avatar-profile";
 
 /**
@@ -354,21 +361,39 @@ export async function receiveMessengerEvent(ev: MessengerEvent, now: Date = new 
       await db.insert(t).values({ pageId: ev.pageId, threadId: ev.psid, messageId: ev.mid, text: ev.text.slice(0, TEXT_MAX), status: "DONE", processedAt: now, note: "BOT_SENT" }).onConflictDoNothing({ target: t.messageId });
       return { queued: false, reason: "Tin của chính bot" };
     }
-    // Tin page gửi đi KHÔNG qua app nền tảng: người trong Hộp thư Meta, hoặc trả lời tự động của Meta.
-    await db.insert(t).values({ pageId: ev.pageId, threadId: ev.psid, messageId: ev.mid, text: ev.text.slice(0, TEXT_MAX), status: "DONE", processedAt: now, note: PAGE_REPLY }).onConflictDoNothing({ target: t.messageId });
+    // Tin page gửi đi KHÔNG qua app nền tảng. NGUỒN GỐC (response-ownership.ts::classifyOutbound — P0 11/10/2026): ứng dụng Hộp thư
+    // Page / Meta Business Suite ⇒ NGƯỜI ĐÃ XÁC MINH; chữ hệ thống ⇒ META_SYSTEM; tin mẫu ⇒ tự động; ứng dụng khác ⇒ OTHER_APP; không
+    // mã ứng dụng (Instagram, trả lời tự động của Meta) ⇒ KHÔNG RÕ. Chỉ người đã xác minh mới làm AI nhường.
+    const text = ev.text.slice(0, TEXT_MAX);
+    const { pageTemplates } = await templateTexts(ev.pageId, ev.psid, [], [text], now).catch(() => ({ pageTemplates: new Set<string>() }));
+    const origin = classifyOutbound({ text, botEcho: false, erpStaff: false, pancakeStaffAccount: false, automatedFlag: false, metaAppId: ev.appId, ownAppIds: messengerBotAppIds(), templateText: pageTemplates.has(text) });
+    await db.insert(t).values({ pageId: ev.pageId, threadId: ev.psid, messageId: ev.mid, text, status: "DONE", processedAt: now, note: PAGE_REPLY, senderKind: origin, sourceAt: ev.at ?? null, senderApp: ev.appId }).onConflictDoNothing({ target: t.messageId });
+    if (origin === "META_SYSTEM") return { queued: false, reason: META_SYSTEM_REASON };
     await stopFollowups(ev.pageId, ev.psid, now, false);
+    if (origin === "PANCAKE_AUTOMATION") return { queued: false, reason: AUTOMATION_REASON };
     const c = schema.salesChatConversations;
     const key = fanpageKey(ev.pageId, ev.psid);
-    // Đang trò chuyện với bot mà page lên tiếng ⇒ là người ⇒ nhường như nhân viên. Đầu hội thoại ⇒ trả lời tự động của Meta.
-    const [active] = await db
-      .select({ id: c.id, status: c.status })
-      .from(c)
-      .where(and(eq(c.channel, "FANPAGE"), eq(c.visitorKey, key), pageSideIsStaffCond(now)))
-      .limit(1);
-    if (!active) return { queued: false, reason: "Trả lời tự động của page — bot không chen" };
-    // Nhường 30 phút + sự kiện «bắt đầu nhường» — CÙNG đường với Pancake (`startHumanCooldown`). Thiếu sự kiện thì hội thoại nhân
-    // viên đã cầm trong Hộp thư Meta bị đếm vào nhóm «AI tự làm» ở màn «Hiệu quả».
-    await startHumanCooldown(active.id, { reason: STAFF_REASON, at: now, actorUserId: null, key: `staff:${ev.mid}`, via: "MESSENGER" });
+    if (origin === "UNKNOWN" || origin === "OTHER_APP") {
+      // Giữa cuộc chat mà một người ĐÃ XÁC MINH đang cầm ⇒ câu này là phần tiếp của người đó (vd. nhân viên gõ trên Pancake của một page
+      // nối Meta trực tiếp — tiếng vọng mang mã app của Pancake) ⇒ gia hạn nhường, vết ghi là KẾ THỪA.
+      const held = await heldByVerifiedHuman(ev.pageId, ev.psid, now);
+      if (held) {
+        await startHumanCooldown(held, { reason: STAFF_REASON, at: now, actorUserId: null, key: `staff:${ev.mid}`, via: "MESSENGER", origin: "VERIFIED_HUMAN", triggerMessageId: ev.mid, sourceApp: INHERITED_PAUSE_APP });
+        return { queued: false, reason: "Nhân viên đang trả lời — bot nhường" };
+      }
+    }
+    if (origin !== "VERIFIED_HUMAN") {
+      const [active] = await db
+        .select({ id: c.id })
+        .from(c)
+        .where(and(eq(c.channel, "FANPAGE"), eq(c.visitorKey, key), pageSideIsStaffCond(now)))
+        .limit(1);
+      return { queued: false, reason: origin === "OTHER_APP" ? OTHER_APP_REASON : active ? UNKNOWN_SENDER_REASON : "Trả lời tự động của page — bot không chen" };
+    }
+    const [conv] = await db.select({ id: c.id }).from(c).where(and(eq(c.channel, "FANPAGE"), eq(c.visitorKey, key))).limit(1);
+    if (!conv) return { queued: false, reason: "Nhân viên đang trả lời — bot nhường" };
+    // Nhường 30 phút + sự kiện «bắt đầu nhường» — CÙNG đường với Pancake (`startHumanCooldown`), kèm vết nguồn gốc / tin / ứng dụng.
+    await startHumanCooldown(conv.id, { reason: STAFF_REASON, at: now, actorUserId: null, key: `staff:${ev.mid}`, via: "MESSENGER", origin, triggerMessageId: ev.mid, sourceApp: ev.appId });
     return { queued: false, reason: "Nhân viên đang trả lời — bot nhường" };
   }
   // BÌNH LUẬN dưới bài viết (trường `feed`): một hàng chờ riêng mỗi bình luận (`threadId` = «comment:<mã>») — bot trả lời bằng
@@ -560,15 +585,14 @@ export async function processMessengerThread(pageId: string, psid: string, deps:
       .where(and(eq(t.pageId, pageId), eq(t.threadId, psid), lt(t.createdAt, oldest), sql`coalesce(${t.note}, '') <> ${PAGE_REPLY}`))
       .limit(1);
     const firstContact = !prior;
-    // Messenger gửi tiếng vọng kèm mã app ⇒ «page đã trả lời» là sự thật, không phải suy đoán theo thứ tự tới.
-    const pageRepliedSince = async () => {
-      const [r] = await db
-        .select({ id: t.id })
-        .from(t)
-        .where(and(eq(t.pageId, pageId), eq(t.threadId, psid), eq(t.note, PAGE_REPLY), gte(t.createdAt, firstContact ? new Date(oldest.getTime() - FIRST_CONTACT_LOOKBACK_MS) : oldest)))
-        .limit(1);
-      return Boolean(r);
+    // LƯỢT KHÁCH CÒN MỞ KHÔNG — cùng luật với đường Pancake (response-ownership.ts): chỉ câu trả lời HỢP LỆ tạo SAU tin khách cuối
+    // của lượt mới đóng lượt (mốc Meta `timestamp` là mốc nguồn). Trước 11/10/2026 MỌI tiếng vọng page trong 60 giây TRƯỚC tin khách
+    // đầu cũng tính là «đã trả lời» — lời chào quảng cáo chặn đúng câu hỏi thật của khách.
+    const pendingAnswered = async (rows?: readonly { messageId: string }[]) => {
+      const pendingIds = rows ? rows.map((r) => r.messageId) : (await db.select({ messageId: t.messageId }).from(t).where(and(eq(t.pageId, pageId), eq(t.threadId, psid), eq(t.status, "PENDING"))).limit(50)).map((r) => r.messageId);
+      return partitionPending(pendingIds, buildCustomerTurns(await loadThreadLedger(pageId, psid, now())));
     };
+    const pageRepliedSince = async () => (await pendingAnswered()).open.length === 0;
     if (!deps.catchUp && new Date(pend.newest).getTime() > now().getTime() - (firstContact ? FIRST_CONTACT_WAIT_MS : FOLLOWUP_WAIT_MS) && !(await pageRepliedSince())) return { ...out, skipped: WAITING };
     const claim = randomUUID();
     const staleBefore = new Date(now().getTime() - CLAIM_STALE_MS);
@@ -593,7 +617,7 @@ export async function processMessengerThread(pageId: string, psid: string, deps:
       const done = new Set(repliedIds);
       for (let i = claimed.length - 1; i >= 0; i--) if (done.has(claimed[i].id)) claimed.splice(i, 1);
     }
-    const ids = claimed.map((r) => r.id);
+    let ids = claimed.map((r) => r.id);
     const finish = (status: "DONE" | "SKIPPED" | "PENDING", note: string | null) =>
       db
         .update(t)
@@ -608,11 +632,19 @@ export async function processMessengerThread(pageId: string, psid: string, deps:
       out.skipped = pageGate;
       continue;
     }
-    if (await pageRepliedSince()) {
-      await finish("SKIPPED", PAGE_REPLIED_REASON);
-      out.processed += ids.length;
-      out.skipped = PAGE_REPLIED_REASON;
-      continue;
+    {
+      // Tin chờ nằm TRƯỚC một câu trả lời hợp lệ ⇒ chốt; tin thuộc lượt MỞ ⇒ đi tiếp (một câu trả lời cho cả lượt).
+      const part = await pendingAnswered(claimed);
+      if (part.answered.length) {
+        const done = new Set(part.answered);
+        const doneIds = claimed.filter((r) => done.has(r.messageId)).map((r) => r.id);
+        if (doneIds.length) await db.update(t).set({ status: "SKIPPED", processedAt: now(), note: PAGE_REPLIED_REASON }).where(and(inArray(t.id, doneIds), eq(t.claimId, claim)));
+        out.processed += doneIds.length;
+        out.skipped = PAGE_REPLIED_REASON;
+        for (let i = claimed.length - 1; i >= 0; i--) if (done.has(claimed[i].messageId)) claimed.splice(i, 1);
+        ids = claimed.map((r) => r.id);
+      }
+      if (!claimed.length) continue;
     }
     const conv = await conversationFor(pageId, psid);
     if (!conv) {

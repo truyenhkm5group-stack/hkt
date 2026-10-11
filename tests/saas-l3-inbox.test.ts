@@ -53,7 +53,7 @@ import { controlBarStatus } from "@/lib/sales-chatbot/ai-status-shared";
 import { DEFAULT_SALES_CHATBOT_CONFIG, SALES_CHATBOT_SETTING_KEY } from "@/lib/sales-chatbot/config";
 import { humanCooldownMinutes, setHumanCooldownMinutesCore } from "@/lib/sales-chatbot/conversation-control";
 import { setSalesChatProviderForTests } from "@/lib/sales-chatbot/engine";
-import { catchUpFanpage, parsePancakeWebhook, processFanpageThread, receiveFanpageEvent, type FanpageEvent } from "@/lib/sales-chatbot/fanpage";
+import { catchUpFanpage, OTHER_APP_REASON, parsePancakeWebhook, processFanpageThread, receiveFanpageEvent, UNKNOWN_SENDER_REASON, type FanpageEvent } from "@/lib/sales-chatbot/fanpage";
 import { inboxSourceOf, listInbox, loadInboxThread, sendStaffReplyCore } from "@/lib/sales-chatbot/inbox";
 import { markInboxReadCore } from "@/lib/sales-chatbot/inbox-read";
 import { INBOX_FILTERS, safeAvatarUrl, unreadBadge } from "@/lib/sales-chatbot/inbox-shared";
@@ -471,8 +471,12 @@ async function testFlow(backfillStmts: readonly string[]) {
       const sE3 = "4100000000203";
       const cE3 = await openM(sE3);
       assert.equal((await receiveFanpageEvent(pev(PAGE_M, `${PAGE_M}_${sE3}`, "e3.pk", "Dạ em gửi ảnh chị xem", { fromPage: true, humanStaff: true }))).reason, MESSENGER_OWNS_PAGE_REASON);
-      assert.match((await receiveMessengerEvent(mev(sE3, "e3.echo", "Dạ em gửi ảnh chị xem", { isEcho: true, appId: PANCAKE_APP_ID }))).reason, /bot nhường/);
-      await silentAfter(cE3, () => receiveMessengerEvent(mev(sE3, "e3.2", "Ok em")), () => processMessengerThread(PAGE_M, sE3, { fetch: g.fetch, now: at(5 * MIN) }));
+      // Tiếng vọng mang mã app của PANCAKE: có thể là nhân viên gõ trên Pancake, có thể là tự động của Pancake — không phải người ĐÃ XÁC
+      // MINH (P0 11/10/2026, response-ownership.ts) ⇒ OTHER_APP: tính là đã trả lời lượt trước (không trả lời đôi), KHÔNG nhường mù;
+      // lượt khách kế tiếp AI trả lời. Khi một người đã xác minh ĐANG cầm, cùng tiếng vọng ấy là phần tiếp của người đó ⇒ gia hạn nhường.
+      assert.equal((await receiveMessengerEvent(mev(sE3, "e3.echo", "Dạ em gửi ảnh chị xem", { isEcho: true, appId: PANCAKE_APP_ID }))).reason, OTHER_APP_REASON);
+      assert.notEqual((await db.select({ status: schema.salesChatConversations.status }).from(schema.salesChatConversations).where(eq(schema.salesChatConversations.id, cE3)))[0]?.status, "HANDOFF", "ứng dụng khác ⇒ không nhường mù");
+      assert.match((await receiveMessengerEvent(mev(sE2, "e2.pk", "Dạ em gửi thêm ảnh", { isEcho: true, appId: PANCAKE_APP_ID }))).reason, /bot nhường/, "đang có người đã xác minh cầm ⇒ kế thừa nhường");
 
       // ═══ E'. BA nguồn — chế độ PANCAKE_WEBHOOK (PAGE_P) ═══
       await setPancakePage(PAGE_P);
@@ -493,10 +497,16 @@ async function testFlow(backfillStmts: readonly string[]) {
       const cE5 = await openP("p-e5");
       assert.match((await receiveFanpageEvent(pev(PAGE_P, "p-e5", "e5.staff", "Dạ em kiểm hàng", { fromPage: true, humanStaff: true }))).reason, /bot nhường/);
       await silentAfter(cE5, () => receiveFanpageEvent(pev(PAGE_P, "p-e5", "e5.2", "Nhanh nha em")), procP("p-e5"));
-      // E6. Hộp thư Meta: Pancake nhận câu của page KHÔNG uid giữa lúc bot đang trò chuyện ⇒ người.
+      // E6. Pancake nhận câu của page KHÔNG uid giữa lúc bot đang trò chuyện. Bản cũ coi là NGƯỜI và nhường 30 phút — chính luật ấy
+      // làm mất đơn ca «Lê Bạch Nguyên» 11/10/2026 (chữ hệ thống trả lời bình luận). Nay: KHÔNG RÕ người gửi ⇒ không nhường mù
+      // (UNKNOWN_SENDER, có vết ở `sender_kind`), lượt khách kế tiếp AI trả lời.
       const cE6 = await openP("p-e6");
-      assert.match((await receiveFanpageEvent(pev(PAGE_P, "p-e6", "e6.meta", "Dạ chị cho em xin địa chỉ", { fromPage: true, humanStaff: false }))).reason, /bot nhường/);
-      await silentAfter(cE6, () => receiveFanpageEvent(pev(PAGE_P, "p-e6", "e6.2", "Số 5 Lê Lợi")), procP("p-e6"));
+      assert.equal((await receiveFanpageEvent(pev(PAGE_P, "p-e6", "e6.meta", "Dạ chị cho em xin địa chỉ", { fromPage: true, humanStaff: false }))).reason, UNKNOWN_SENDER_REASON);
+      assert.notEqual((await db.select({ status: schema.salesChatConversations.status }).from(schema.salesChatConversations).where(eq(schema.salesChatConversations.id, cE6)))[0]?.status, "HANDOFF");
+      await receiveFanpageEvent(pev(PAGE_P, "p-e6", "e6.2", "Số 5 Lê Lợi"));
+      const aE6 = aiCalls;
+      const rE6 = await procP("p-e6")();
+      assert.ok(rE6.replies >= 1 && aiCalls > aE6, `không rõ người gửi ⇒ lượt kế tiếp AI trả lời: ${JSON.stringify(rE6)}`);
 
       // ═══ F. Số phút nhường CẤU HÌNH ĐƯỢC theo workspace ═══
       assert.equal(await humanCooldownMinutes(), 30, "chưa khai ⇒ 30 phút như cũ");

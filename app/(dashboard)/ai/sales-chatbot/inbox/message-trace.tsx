@@ -31,6 +31,11 @@ export function MessageTraceLine({ trace }: { trace: MessageTrace }) {
             )}
           </>
         ) : null}
+        {trace.ownership ? (
+          <span className="block font-medium" data-testid="message-trace-ownership">
+            {trace.ownership}
+          </span>
+        ) : null}
       </summary>
       <ol className="mt-1 space-y-0.5 rounded-md border bg-background/80 p-1.5 text-muted-foreground">
         {trace.steps.map((s) => (

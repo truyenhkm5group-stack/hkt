@@ -555,6 +555,7 @@ import { testWebProductImport } from "./web-product-import.test";
 import { testMessenger } from "./messenger.test";
 import { testConversationControl } from "./conversation-control.test";
 import { testSalesHumanTakeover } from "./sales-human-takeover.test";
+import { testResponseOwnership } from "./response-ownership.test";
 import { testSaasL3Inbox } from "./saas-l3-inbox.test";
 import { testBotOrderStatus } from "./bot-order-status.test";
 import { testOrderTruthStamp } from "./order-truth-stamp.test";
@@ -3014,6 +3015,9 @@ async function main() {
   // AI nhường người: AI_ACTIVE · HUMAN_COOLDOWN (đếm ngược, «Cho AI tiếp tục ngay») · HUMAN_TAKEOVER («Trả lại cho AI») — tổ chức
   // THẬT `nhuong-nguoi` (+ `nhuong-nguoi-khac` cho cô lập), Messenger trực tiếp + fanpage Pancake giả, đồng hồ nhường tường minh.
   await testSalesHumanTakeover();
+  // P0 11/10/2026 — lượt khách & chủ trả lời: tin chào / tự động / chữ hệ thống không còn là «đã trả lời» hay «người»; chỉ người đã
+  // xác minh làm AI nhường; hết nhường ⇒ đánh giá lại tồn một lần; câu đếm + hàng đợi cứu đơn — tổ chức THẬT `tra-loi-dung-luot`.
+  await testResponseOwnership();
   // Hộp thư hợp nhất + song song Pancake / Meta trực tiếp (0233): đường canonical theo page + backfill giữ đường hôm nay, khử
   // trùng hai nguồn, đường phụ không kích AI, người trả lời ba nguồn ⇒ nhường, số phút nhường theo workspace, thẻ lọc ≡ aiHoldOf —
   // tổ chức THẬT `l3-hop-thu` (+ `l3-hop-thu-khac` cho cô lập), Graph + Pancake giả.

@@ -73,7 +73,7 @@ import { DEFAULT_OPTIMIZE_DEPS, maybeOptimize } from "@/lib/video-scale/optimize
 import { MUSIC_MOOD_KEYS, generateMusicLibrary } from "@/lib/video-scale/music-gen";
 import { runPayrollAutopilot } from "@/lib/payroll/autopilot";
 import { modelRegistryFollowUp, runModelRegistryJob } from "@/lib/models/registry-job";
-import { catchUpFanpage, resendPendingFanpageReplies } from "@/lib/sales-chatbot/fanpage";
+import { catchUpFanpage, resendPendingFanpageReplies, resumeFanpageAfterPause } from "@/lib/sales-chatbot/fanpage";
 import { backfillMessengerProfiles, PROFILE_BACKFILL_LIMITS, sweepStaleMessengerThreads } from "@/lib/sales-chatbot/messenger";
 import { runSalesFollowups } from "@/lib/sales-chatbot/followup";
 import { resumeInboxHistory } from "@/lib/sales-chatbot/history";
@@ -842,6 +842,9 @@ export const JOB_DEFINITIONS: Record<string, JobDefinition> = {
         const cu = await catchUpFanpage();
         // Câu trả lời bot đã soạn mà Pancake trả 429 (10/10/2026) ⇒ gửi bù đúng câu đó, không gọi AI lại. Không ném.
         const rs = await resendPendingFanpageReplies();
+        // Hết nhường ⇒ đánh giá lại lượt khách MỚI NHẤT còn chưa ai trả lời — MỘT câu cho cả lượt, một lần mỗi lượt (P0 11/10/2026,
+        // lib/sales-chatbot/response-ownership.ts::resumeDecision). Không ném.
+        const ra = await resumeFanpageAfterPause();
         // Tin khách DEAD vì AI hỏng (sự cố 06/10/2026): provider đã hồi phục, tin còn trong 30 phút, chưa ai trả lời ⇒ thử lại
         // có lùi dần 2 · 4 · 8 phút, tối đa 3 lượt (lib/sales-chatbot/inbound-retry.ts). Không ném.
         const rq = await retryAiDownMessages();
@@ -867,7 +870,8 @@ export const JOB_DEFINITIONS: Record<string, JobDefinition> = {
         ctx.summary.imported = r.sent;
         ctx.summary.skipped = r.stopped + r.deferred;
         if (r.errors) ctx.summary.warning = r.detail.filter((d) => /lỗi|:/.test(d)).slice(0, 5).join(" · ").slice(0, 500);
-        const cuText = (rs.checked ? `gửi bù sau 429: xét ${rs.checked} · gửi ${rs.sent} · bỏ ${rs.dropped}${rs.detail.length ? ` (${rs.detail.slice(0, 2).join(" · ")})` : ""} · ` : "") + (rq.detail ? `${rq.detail} · ` : "") + (cu.threads ? `quét lại ${cu.threads} hội thoại (nhận ${cu.queued} · mở lại ${cu.reopened} · trả lời ${cu.replies}) — ${cu.detail.slice(0, 3).join(" · ")} · ` : "") + (ms ? `Messenger: trả lời bù ${ms} hội thoại · ` : "");
+        const raText = ra.resumed ? `hết nhường — đánh giá lại ${ra.checked} hội thoại, trả lời lại ${ra.resumed} lượt khách (${ra.detail.slice(0, 2).join(" · ")}) · ` : "";
+        const cuText = raText + (rs.checked ? `gửi bù sau 429: xét ${rs.checked} · gửi ${rs.sent} · bỏ ${rs.dropped}${rs.detail.length ? ` (${rs.detail.slice(0, 2).join(" · ")})` : ""} · ` : "") + (rq.detail ? `${rq.detail} · ` : "") + (cu.threads ? `quét lại ${cu.threads} hội thoại (nhận ${cu.queued} · mở lại ${cu.reopened} · trả lời ${cu.replies}) — ${cu.detail.slice(0, 3).join(" · ")} · ` : "") + (ms ? `Messenger: trả lời bù ${ms} hội thoại · ` : "");
         const rdText = (rd.sent ? `tin sáng khách đến hạn mua lại: ${rd.due} khách · ` : "") + (ls.status === "NOT_DUE" ? "" : `tự học: ${ls.note} · `) + (ql.status === "NOT_DUE" ? "" : `câu mẫu: ${ql.note} · `) + (no.sent ? `báo nhóm ${no.sent} đơn mới chưa xác nhận · ` : "") + (lv.refreshed || lv.errors ? `level khách: ${lv.refreshed} hội thoại${lv.errors ? ` · lỗi ${lv.errors}` : ""} · ` : "") + (hs ? `${hs} · ` : "");
         const osText = os.checked ? `ghi đơn: đọc ${os.checked} hội thoại · lên ${os.created} đơn · sửa ${os.changes} · bỏ qua ${os.skipped} · lỗi ${os.errors}${os.detail.length ? ` (${os.detail.slice(0, 3).join(" · ")})` : ""} · ` : "";
         ctx.summary.detail = `${osText}${rdText}${cuText}${r.due} tới mốc · gửi ${r.sent} · dừng ${r.stopped} · hoãn ${r.deferred} · lỗi ${r.errors}${r.detail.length ? ` — ${r.detail.slice(0, 6).join(" · ")}` : ""}`.slice(0, 900);

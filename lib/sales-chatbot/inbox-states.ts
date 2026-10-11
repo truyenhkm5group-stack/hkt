@@ -66,9 +66,13 @@ export type InboxReplying = "AI" | "HUMAN" | "NOBODY";
 
 // ─────────────────────────── Điều kiện SQL ───────────────────────────
 
-/** Có tin phía page (ngoài ERP: nhân viên trên Pancake / Hộp thư Meta, tự động của page) SAU tin khách cuối. */
+/**
+ * Có câu trả lời phía page (ngoài ERP: nhân viên trên Pancake / Hộp thư Meta, ứng dụng khác, phía page chưa rõ) SAU tin khách cuối. Tin
+ * TỰ ĐỘNG của page và chữ HỆ THỐNG (P0 11/10/2026 — `sales_chat_inbound.sender_kind`) KHÔNG phải câu trả lời: khách hỏi xong mà chỉ có
+ * tin chào quảng cáo theo sau thì hội thoại vẫn «Chờ trả lời».
+ */
 export const PAGE_REPLY_AFTER_CUSTOMER_SQL = sql<boolean>`exists (select 1 from "sales_chat_inbound" i where i.page_id = ${col("page_id")} and i.thread_id = ${col("thread_id")}
-    and i.note = ${PAGE_REPLY} and i.created_at > ${col("last_customer_at")})`;
+    and i.note = ${PAGE_REPLY} and coalesce(i.sender_kind, '') not in ('PANCAKE_AUTOMATION', 'META_SYSTEM') and i.created_at > ${col("last_customer_at")})`;
 
 /** Đơn của hội thoại đang mang cờ CẦN NGƯỜI KIỂM — ĐÚNG biểu thức của bộ lọc «Cần người kiểm» ở trang Đơn (`ORDER_NEEDS_REVIEW`). */
 export const ORDER_UNDER_REVIEW_SQL = sql<boolean>`exists (select 1 from "orders" where "orders"."sales_conversation_id" = ${col("id")}

@@ -69,7 +69,7 @@ import { reorderDigestText, sendReorderDigest, type DigestRow } from "@/lib/reor
 import { newOrderAlertText, sendNewOrderAlerts } from "@/lib/sales-chatbot/new-order-alert";
 import { loadPollState, markPancakeWebhook, PANCAKE_POLL_SETTING_KEY, savePollState } from "@/lib/sales-chatbot/pancake-poll";
 import { EMPTY_POLL_STATE } from "@/lib/sales-chatbot/pancake-poll-shared";
-import { catchUpFanpage, fanpageInboundCounts, fanpageVisitorKey, normalizeThreadMessages, unansweredCustomerMessages, pancakeCreatedAfterVerdict, pageAnsweredVerdict, postContextPrompt, postTextFromPancake, FIRST_CONTACT_WAIT_MS, FOLLOWUP_WAIT_MS, parsePancakeWebhook, processFanpageThread, processFanpageThreadDebounced, receiveFanpageEvent } from "@/lib/sales-chatbot/fanpage";
+import { catchUpFanpage, fanpageInboundCounts, fanpageVisitorKey, normalizeThreadMessages, unansweredCustomerMessages, pancakeCreatedAfterVerdict, pageAnsweredVerdict, postContextPrompt, postTextFromPancake, FIRST_CONTACT_WAIT_MS, FOLLOWUP_WAIT_MS, parsePancakeWebhook, processFanpageThread, processFanpageThreadDebounced, receiveFanpageEvent, UNKNOWN_SENDER_REASON } from "@/lib/sales-chatbot/fanpage";
 import { loadChatCostReport } from "@/lib/sales-chatbot/cost-report";
 import { learnLessons, loadLessons, rollbackLessons, saveLessons, setLessonsEnabled } from "@/lib/sales-chatbot/lessons";
 import { droppedLessonsText, lessonsPrompt, lessonTranscript, normalizeLessons, parseLessonsFromAi, parseLessonsState, riskyLesson, screenAiLessons } from "@/lib/sales-chatbot/lessons-shared";
@@ -1026,14 +1026,13 @@ async function testJourney() {
       const later = new Date(Date.now() + 31 * 60_000);
       const r3 = await processFanpageThread(PAGE, "t-900", { fetch: pancake.fetch, now: () => later });
       assert.ok(r3.replies >= 1, `hết ${30} phút ⇒ bot trả lời lại: ${JSON.stringify(r3)}`);
-      // Trả lời TỰ ĐỘNG của Meta (tin phía page, không uid) tới sau tin khách ⇒ bot không chen; tin khách sau đó mà page im
-      // vài giây ⇒ bot trả lời. Tin bot vừa gửi KHÔNG bị coi là «page đã trả lời».
+      // Trả lời TỰ ĐỘNG của Meta (tin phía page, không uid) tới ngay sau câu khách TỰ GÕ. Bản cũ coi là «page đã trả lời» và im; chủ
+      // shop 11/10/2026 (ca «Uyen Tran», response-ownership.ts): tin chào / tự động gửi trước hoặc CÙNG LÚC không trả lời câu hỏi ⇒ bot
+      // trả lời. Tin khách sau đó cũng được trả lời; tin bot vừa gửi KHÔNG bị coi là «page đã trả lời».
       await receiveFanpageEvent(ev("m-q1", "Shop ơi còn hàng không?", { id: "cust-2", name: "Anh Ba" }, "t-901"));
       assert.match((await receiveFanpageEvent(ev("m-auto-1", "Cảm ơn anh đã nhắn tin, shop sẽ trả lời ngay ạ", { id: PAGE }, "t-901"))).reason, /tự động/);
-      const sentAuto = pancake.calls.filter((c) => c.init?.method !== "GET").length;
       const ra = await processFanpageThread(PAGE, "t-901", { fetch: pancake.fetch, now: in31s });
-      assert.ok(ra.replies === 0 && ra.processed === 1 && /Page đã trả lời/.test(ra.skipped ?? ""), JSON.stringify(ra));
-      assert.equal(pancake.calls.filter((c) => c.init?.method !== "GET").length, sentAuto, "page đã trả lời ⇒ không gửi gì (chỉ đọc mốc tạo tin)");
+      assert.ok(ra.replies >= 1 && ra.processed === 1 && !/Page đã trả lời/.test(ra.skipped ?? ""), JSON.stringify(ra));
       await new Promise((r) => setTimeout(r, 5));
       await receiveFanpageEvent(ev("m-q2", "Chả mực bao nhiêu?", { id: "cust-2", name: "Anh Ba" }, "t-901"));
       const rb = await processFanpageThread(PAGE, "t-901", { fetch: pancake.fetch, now: in31s });
@@ -1803,10 +1802,12 @@ async function testJourney() {
       const rearm = (extra: Partial<typeof schema.salesChatConversations.$inferInsert> = {}) =>
         db.update(schema.salesChatConversations).set({ status: "WAITING", nextFollowupAt: fc.nextFollowupAt, waitingSince: fc.waitingSince, lastBotAt: fc.lastBotAt, lastCustomerAt: fc.lastCustomerAt, ...extra }).where(eq(schema.salesChatConversations.id, fc.id));
       await rearm({ lastBotAt: new Date(Date.now() - 10 * 60_000) });
-      // (03/10/2026 · «Đỗ Là») tin phía page không uid tới GIỮA lúc bot đang trò chuyện ⇒ là NHÂN VIÊN ⇒ bot nhường.
-      assert.match((await receiveFanpageEvent(ev("m-fu-staff", "Vâng ah, nay e giao tiếp ạ", { id: PAGE }, "t-fu"))).reason, /bot nhường/);
+      // (03/10/2026 · «Đỗ Là») tin phía page KHÔNG uid tới GIỮA lúc bot đang trò chuyện. Bản cũ coi là NHÂN VIÊN và nhường 30 phút —
+      // đúng luật đó làm mất đơn ca «Lê Bạch Nguyên» 11/10/2026 (chữ hệ thống trả lời bình luận bị coi là người). Luật mới (chủ shop
+      // 11/10): KHÔNG RÕ người gửi ⇒ không nhường mù (UNKNOWN_SENDER), nhưng vẫn hết lịch nhắc (có ai đó phía page lên tiếng).
+      assert.equal((await receiveFanpageEvent(ev("m-fu-staff", "Vâng ah, nay e giao tiếp ạ", { id: PAGE }, "t-fu"))).reason, UNKNOWN_SENDER_REASON);
       let fs2 = await fuConv();
-      assert.ok(fs2.status === "HANDOFF" && fs2.nextFollowupAt === null && fs2.waitingSince === null, `tin phía page sau bot ⇒ hết lịch nhắc, nhân viên cầm: ${JSON.stringify({ s: fs2.status, n: fs2.nextFollowupAt })}`);
+      assert.ok(fs2.status !== "HANDOFF" && fs2.nextFollowupAt === null && fs2.waitingSince === null, `tin phía page chưa rõ người gửi ⇒ hết lịch nhắc, KHÔNG nhường mù: ${JSON.stringify({ s: fs2.status, n: fs2.nextFollowupAt })}`);
       // Bot lâu không nhắn (quá 3 giờ) ⇒ tin phía page không uid vẫn là trả lời tự động (lời chào quảng cáo / Meta), không nhường.
       await db.update(schema.salesChatConversations).set({ status: "OPEN", lastBotAt: new Date(Date.now() - 5 * 3_600_000) }).where(eq(schema.salesChatConversations.id, fc.id));
       assert.match((await receiveFanpageEvent(ev("m-fu-greet", "CHẢ CÁ THU NGUYÊN CHẤT 100%", { id: PAGE }, "t-fu"))).reason, /tự động/);
@@ -1948,9 +1949,19 @@ async function testJourney() {
           return { content: [{ type: "text", text: "Dạ chị cho em xin SĐT và địa chỉ nhận hàng ạ" }], stopReason: "end_turn", usage: { inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0 }, model: "claude-sonnet-5", latencyMs: 1 };
         },
       }));
+      // «Báo giá chả cá thu?» là câu MẪU của quảng cáo (khách ở hội thoại khác bấm cùng câu) ⇒ trả lời tự động của page SAU nó là đúng
+      // việc tự động được cài để làm — bot không chen (response-ownership.ts · ca «Dư Thị Liên»). Câu khách TỰ GÕ thì khác (ca t-981).
+      for (const other of ["t-ctx-seed-1", "t-ctx-seed-2"]) await db.insert(schema.salesChatInbound).values({ pageId: PAGE, threadId: other, messageId: `${other}.q`, text: "Báo giá chả cá thu?", status: "DONE", processedAt: new Date() });
       await receiveFanpageEvent(ev("m-ctx-1", "Báo giá chả cá thu?", { id: "cust-ctx", name: "Thu Vân" }, "t-ctx"));
       await receiveFanpageEvent(ev("m-ctx-auto", "Dạ em chào anh/chị! Chả cá thu bên em hiện đang có giá 1kg / 2kg ạ", { id: PAGE }, "t-ctx"));
-      const ctxFetch = fakeFetchCalls(() => ({ success: true, id: `m-${Math.random().toString(36).slice(2)}` }));
+      // Mốc TẠO của Pancake: trả lời tự động tạo 1 giây SAU câu mẫu (thiếu mốc nguồn thì thứ tự mơ hồ ⇒ bot trả lời — một câu trùng còn
+      // hơn không ai trả lời).
+      const ctxIso = (msAgo: number) => new Date(Date.now() - msAgo).toISOString().replace("Z", "");
+      const ctxMsgs = [
+        { id: "m-ctx-1", inserted_at: ctxIso(2_000), from: { id: "cust-ctx" }, message: "Báo giá chả cá thu?" },
+        { id: "m-ctx-auto", inserted_at: ctxIso(1_000), from: { id: PAGE }, message: "Dạ em chào anh/chị! Chả cá thu bên em hiện đang có giá 1kg / 2kg ạ" },
+      ];
+      const ctxFetch = fakeFetchCalls((url, init) => (init?.method === "GET" && url.includes("/conversations/t-ctx/messages") ? { success: true, messages: ctxMsgs } : { success: true, id: `m-${Math.random().toString(36).slice(2)}` }));
       assert.match((await processFanpageThread(PAGE, "t-ctx", { fetch: ctxFetch.fetch, now: in31s })).skipped ?? "", /Page đã trả lời/);
       await new Promise((r) => setTimeout(r, 5));
       await receiveFanpageEvent(ev("m-ctx-2", "Ship c 1kí", { id: "cust-ctx", name: "Thu Vân" }, "t-ctx"));
@@ -1986,15 +1997,14 @@ async function testJourney() {
       // Pancake giả trả MỐC TẠO tin (inserted_at, giờ UTC không múi giờ như Pancake thật) cho lượt hỏi «tin page tạo trước hay sau».
       const timed = (msgs: { id: string; at: string }[]) =>
         fakeFetchCalls((url, init) => (init?.method === "GET" && url.includes("/messages") ? { success: true, messages: msgs.map((m) => ({ id: m.id, inserted_at: m.at })) } : { success: true, id: `m-${Math.random().toString(36).slice(2)}` }));
-      // Trả lời tự động của Meta tới TRƯỚC tin đầu (ngược thứ tự) nhưng TẠO SAU nó ⇒ page đã trả lời, bỏ qua ngay
-      // (03/10/2026 · «Thủy Nguyễn» nhận hai câu báo giá khi khoảng nhìn lùi bị bỏ hẳn).
+      // Trả lời tự động của Meta tới TRƯỚC tin đầu (ngược thứ tự), TẠO SAU nó. Bản cũ coi là «page đã trả lời» và im; chủ shop 11/10/2026
+      // (ca «Uyen Tran»): tin chào / tự động gửi trước hoặc CÙNG LÚC KHÔNG trả lời câu khách tự gõ ⇒ bot trả lời.
       await receiveFanpageEvent(ev("m-fast-auto", "Cảm ơn chị đã nhắn tin ạ", { id: PAGE }, "t-981"));
       await new Promise((r) => setTimeout(r, 5));
       await receiveFanpageEvent(ev("m-fast-3", "Shop ơi", { id: "cust-9", name: "Anh Chín" }, "t-981"));
       const metaFetch = timed([{ id: "m-fast-3", at: "2026-10-03T06:00:00.100000" }, { id: "m-fast-auto", at: "2026-10-03T06:00:00.900000" }]);
-      const f3 = await processFanpageThread(PAGE, "t-981", { fetch: metaFetch.fetch });
-      assert.ok(f3.replies === 0 && /Page đã trả lời/.test(f3.skipped ?? ""), `Meta trả lời tạo SAU tin đầu (tới ngược thứ tự) ⇒ bỏ qua NGAY: ${JSON.stringify(f3)}`);
-      assert.equal(metaFetch.calls.filter((c) => c.init?.method === "GET").length, 1, "ca mơ hồ hỏi Pancake MỘT lần");
+      const f3 = await processFanpageThread(PAGE, "t-981", { fetch: metaFetch.fetch, now: inMs(FIRST_CONTACT_WAIT_MS + 1000) });
+      assert.ok(f3.replies >= 1 && !/Page đã trả lời/.test(f3.skipped ?? ""), `tin chào tự động tạo ngay sau tin khách ⇒ KHÔNG phải câu trả lời, bot trả lời: ${JSON.stringify(f3)}`);
       // (02/10/2026 · «Nguyễn Oanh») LỜI CHÀO QUẢNG CÁO tới trước tin đầu VÀ TẠO TRƯỚC nó (hội thoại cũ quay lại qua quảng cáo —
       // Meta không tự trả lời) ⇒ KHÔNG phải «page đã trả lời»: vẫn đợi như tin đầu, đủ 10 giây không ai trả lời thì bot trả lời.
       await receiveFanpageEvent(ev("m-ad-greet", "CHẢ CÁ THU NGUYÊN CHẤT 100% NGON KHÁC BIỆT!!! KHÔNG ĂN LÀ THIỆT", { id: PAGE }, "t-982"));
@@ -2020,13 +2030,14 @@ async function testJourney() {
       const newFetch = timed([{ id: "m-new-greet", at: "2026-10-03T12:47:00.000000" }, { id: "m-new-q", at: "2026-10-03T12:47:03.000000" }]);
       const fNew = await processFanpageThread(PAGE, "t-986", { fetch: newFetch.fetch, now: inMs(FIRST_CONTACT_WAIT_MS + 1000) });
       assert.ok(fNew.replies >= 1 && fNew.processed === 1, `lời chào quảng cáo tới SAU nhưng tạo TRƯỚC tin khách ⇒ bot trả lời: ${JSON.stringify(fNew)}`);
-      // Cùng ca nhưng là trả lời tự động THẬT (tạo SAU tin khách) ⇒ vẫn nhường.
+      // Cùng ca nhưng trả lời tự động tạo SAU câu khách TỰ GÕ («Cảm ơn bạn đã nhắn tin…») — câu ấy không trả lời giá ⇒ bot trả lời
+      // (chủ shop 11/10/2026; bản cũ nhường và khách chờ mãi câu «shop sẽ trả lời ngay»).
       await receiveFanpageEvent(ev("m-new2-q", "Xin giá chả cá", { id: "cust-moscow2", name: "Khách Mới" }, "t-987"));
       await new Promise((r) => setTimeout(r, 5));
       await receiveFanpageEvent(ev("m-new2-auto", "Cảm ơn bạn đã nhắn tin, shop sẽ trả lời ngay ạ", { id: PAGE }, "t-987"));
       const autoFetch = timed([{ id: "m-new2-q", at: "2026-10-03T12:47:00.000000" }, { id: "m-new2-auto", at: "2026-10-03T12:47:01.000000" }]);
       const fAuto = await processFanpageThread(PAGE, "t-987", { fetch: autoFetch.fetch, now: inMs(FIRST_CONTACT_WAIT_MS + 1000) });
-      assert.ok(fAuto.replies === 0 && /Page đã trả lời/.test(fAuto.skipped ?? ""), `trả lời tự động tạo sau tin khách ⇒ nhường: ${JSON.stringify(fAuto)}`);
+      assert.ok(fAuto.replies >= 1 && !/Page đã trả lời/.test(fAuto.skipped ?? ""), `trả lời tự động sau câu khách tự gõ ⇒ bot vẫn trả lời: ${JSON.stringify(fAuto)}`);
       // (05/10/2026 · «Dư Thị Liên») khách bấm quảng cáo hỏi giá, page tự trả lời HAI tin (lời chào + bảng giá) ngay sau đó nhưng
       // WEBHOOK của chúng chưa tới ⇒ Pancake đã có ⇒ bot KHÔNG gọi AI, không nhắn thêm bảng giá thứ hai.
       await receiveFanpageEvent(ev("m-lien-q", "Báo giá chả cá thu?", { id: "cust-lien", name: "Dư Thị Liên" }, "t-989"));
