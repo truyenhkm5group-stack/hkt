@@ -19,10 +19,13 @@
  * huỷ được (đã bàn giao ĐVVC · hãng từ chối / không trả lời · ghi hỏng …) — lý do nằm ở `note`, người xử lý tiếp.
  */
 /**
+ * `PRICE_MISMATCH` (P0 11/10/2026, ca «Phạm Minh Ái»): ops `price-mismatch-scan --flag --apply` gắn cho đơn của bot có tiền hàng khác
+ * báo giá máy chủ tính lại (thường là thiếu giảm theo khối lượng khi bật giá sỉ). Chỉ là CỜ + ghi chú số đúng — không đổi giá đơn.
+ *
  * `PRICE_DISPUTED` (P0 11/10/2026, ca «Chị Hoàn»): khách phản đối giá đã báo («2 ký giá 540 chứ») — đơn KHÔNG được coi là xác nhận cho tới
  * khi người kiểm giá; máy không tự đổi giá đơn khi cấu hình không có căn cứ.
  */
-export const ORDER_REVIEW_CODES = ["CUSTOMER_CANCELLED", "ADDRESS_UNRESOLVED", "CANCEL_BLOCKED", "PRICE_DISPUTED"] as const;
+export const ORDER_REVIEW_CODES = ["CUSTOMER_CANCELLED", "ADDRESS_UNRESOLVED", "CANCEL_BLOCKED", "PRICE_DISPUTED", "PRICE_MISMATCH"] as const;
 export type OrderReviewCode = (typeof ORDER_REVIEW_CODES)[number];
 
 export const ORDER_REVIEW_LABEL: Record<OrderReviewCode, string> = {
@@ -30,6 +33,7 @@ export const ORDER_REVIEW_LABEL: Record<OrderReviewCode, string> = {
   ADDRESS_UNRESOLVED: "Địa chỉ chưa ghép được xã / phường",
   CANCEL_BLOCKED: "Khách chốt huỷ — máy không tự huỷ được",
   PRICE_DISPUTED: "Khách phản đối giá — cần kiểm giá",
+  PRICE_MISMATCH: "Tiền hàng lệch báo giá máy chủ — cần kiểm giá",
 };
 
 /** Nhãn NGẮN (dòng lý do của khung đơn hộp thư). */
@@ -38,6 +42,7 @@ export const ORDER_REVIEW_SHORT_LABEL: Record<OrderReviewCode, string> = {
   ADDRESS_UNRESOLVED: "địa chỉ chưa ghép",
   CANCEL_BLOCKED: "khách chốt huỷ, máy chưa huỷ được",
   PRICE_DISPUTED: "khách phản đối giá",
+  PRICE_MISMATCH: "giá lệch báo giá",
 };
 
 /** Việc người phải làm với từng lý do — in cạnh lý do để người đọc biết bấm gì. */
@@ -46,6 +51,7 @@ export const ORDER_REVIEW_HINT: Record<OrderReviewCode, string> = {
   ADDRESS_UNRESOLVED: "Hỏi lại khách xã / phường mới, sửa đơn chọn xã rồi «Xác nhận đơn».",
   CANCEL_BLOCKED: "Đọc lý do: hãng đã lấy hàng ⇒ chặn giao / chờ hoàn; hãng lỗi ⇒ huỷ vận đơn trên trang hãng rồi «Huỷ đơn».",
   PRICE_DISPUTED: "Đối chiếu bảng giá (SKU · gói · giảm theo khối lượng) với số khách nói, báo lại khách giá đúng, sửa đơn nếu cần rồi «Xác nhận đơn».",
+  PRICE_MISMATCH: "Ghi chú có số tiền ĐÚNG theo báo giá máy chủ: sửa dòng đơn (thường là thiếu giảm theo khối lượng), báo khách nếu tổng đổi, rồi «Xác nhận đơn».",
 };
 
 /** Câu lý do mặc định khi huỷ bằng nút nhanh (người sửa được trước khi bấm). */
@@ -54,6 +60,7 @@ export const ORDER_REVIEW_CANCEL_REASON: Record<OrderReviewCode, string> = {
   ADDRESS_UNRESOLVED: "Không xác định được địa chỉ giao",
   CANCEL_BLOCKED: "Khách huỷ (theo hội thoại)",
   PRICE_DISPUTED: "Khách không đồng ý giá",
+  PRICE_MISMATCH: "Giá đơn sai — huỷ để lên lại",
 };
 
 /** Một lý do cần kiểm. `quote` = NGUYÊN VĂN câu khách (khách huỷ); `by` = tên máy / người ghi; `at` = mốc ISO. */
