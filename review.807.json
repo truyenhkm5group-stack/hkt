@@ -1,8 +1,8 @@
 {
   "pr": 807,
-  "sha": "e296495d654402671ae05bcbc0d3719a0c0c405a",
+  "sha": "3f29d35c19d6360ef857e8622149ccc78b2c8478",
   "verdict": "PASS",
   "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
-  "at": "2026-10-11T09:16:35.634Z",
-  "note": "Nguyên nhân gốc tệp:dòng khớp ca thật; một hàm tính tiền; bất biến số tiền + «đã lên đơn» ở máy chủ, không phải lời nhắc; catalog mâu thuẫn ⇒ chưa xác thực + chuyển người (không đoán); P0-A gắn công tắc tổ chức (không đổi tenant khác). Gộp sau #803/#802/#804"
+  "at": "2026-10-11T10:39:07.628Z",
+  "note": "Nguyên nhân gốc xác định đúng tệp:dòng (if(!books) + booksForChat luôn trả book khi bật sỉ); sửa theo nguồn giá dòng, không giảm hai lần; một computePriced cho mọi đường; bài kiểm có tổ chức thật sỉ+giảm cùng bật. P0 TUYỆT ĐỐI — gộp trước mọi PR"
 }
