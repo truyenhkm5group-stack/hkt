@@ -1919,3 +1919,4 @@
 {"at":"2026-10-11T01:14:13.640Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MIGRATION_RELEASED","mission":"saas-value-snapshots","detail":"0242 — đổi chỗ: PR-3 lấy 0241 (chỉ thêm bảng, không cần duyệt) để không kẹt sau #792 đang chờ chủ shop"}
 {"at":"2026-10-11T01:14:45.907Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MIGRATION_RELEASED","mission":"inbox-unread-perf","detail":"0243 — đổi sang 0242"}
 {"at":"2026-10-11T01:15:18.345Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MIGRATION_RELEASED","mission":"inbox-unread-perf","detail":"0244 — giữ thừa"}
+{"at":"2026-10-11T01:15:37.420Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MIGRATION_RESERVED","mission":"saas-value-snapshots","detail":"0241"}
