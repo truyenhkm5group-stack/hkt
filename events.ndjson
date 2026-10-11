@@ -2135,3 +2135,4 @@
 {"at":"2026-10-11T13:21:14.402Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"price-mismatch-queue","detail":"#808 cho fix/price-mismatch-queue @ 9bb3fc18f07c"}
 {"at":"2026-10-11T13:21:32.328Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#808 @ 9bb3fc18f07c · Cờ đi qua lõi đơn có nhật ký, không đổi giá/không gửi tin, chạy thử mặc định, idempotent; P0 giá"}
 {"at":"2026-10-11T13:53:27.052Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"price-mismatch-queue","detail":"#808 @ 9bb3fc18f07c → 3f8ee3bb632b (MERGE_ISOLATED · HIGH · gates success)"}
+{"at":"2026-10-11T13:54:27.220Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DEPLOY_DISPATCHED","detail":"3f8ee3bb632b · run 38145017561 https://github.com/truyenhkm5group-stack/hkt/actions/runs/38145017561"}
