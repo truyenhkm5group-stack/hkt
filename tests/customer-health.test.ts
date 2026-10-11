@@ -414,10 +414,12 @@ function testSource() {
   const goiSoAiGom: string[] = [];
   for (const tep of tepMa()) {
     const m = ma(tep);
-    if (/\breadCustomerHealth\(/.test(m.replace(/export async function readCustomerHealth\(/, "")) && tep !== "lib/saas/console.ts") goiDocSucKhoe.push(tep);
+    // Ngoại lệ DUY NHẤT ngoài console.ts: lượt chụp sức khoẻ theo ngày của JOB nhà (0240, lib/saas/tenant-health-daily.ts) — không có
+    // người dùng, không trang / action nào gọi nó (tests/saas-value-snapshots.test.ts quét mã), chỉ ghi mức + MÃ lý do vào CSDL nhà.
+    if (/\breadCustomerHealth\(/.test(m.replace(/export async function readCustomerHealth\(/, "")) && !["lib/saas/console.ts", "lib/saas/tenant-health-daily.ts"].includes(tep)) goiDocSucKhoe.push(tep);
     if (/\bsalesAiUsageHealthByOrg\(/.test(m.replace(/export async function salesAiUsageHealthByOrg\(/, "")) && !["lib/saas/customer-signals.ts", "lib/ai-usage/sales-health.ts"].includes(tep)) goiSoAiGom.push(tep);
   }
-  assert.deepEqual(goiDocSucKhoe, [], "readCustomerHealth nhìn xuyên mọi tổ chức — chỉ lib/saas/console.ts (sau platformOperatorDenial) được gọi");
+  assert.deepEqual(goiDocSucKhoe, [], "readCustomerHealth nhìn xuyên mọi tổ chức — chỉ lib/saas/console.ts (sau platformOperatorDenial) và lượt chụp của job (lib/saas/tenant-health-daily.ts) được gọi");
   assert.deepEqual(goiSoAiGom, [], "sổ AI gom theo tổ chức chỉ đọc ở đường sức khoẻ khách");
   const consoleSrc = ma("lib/saas/console.ts");
   for (const fn of ["loadCustomersConsole", "loadCustomerDetail"]) {

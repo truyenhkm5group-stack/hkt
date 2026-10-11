@@ -11,6 +11,7 @@ import { getHomeOrganization, listOrganizations } from "@/lib/platform/organizat
 import { acceptanceWorkspaceOf } from "@/lib/constants/saas-acceptance-registry";
 import { plansForOrg } from "@/lib/pricing/price-book";
 import type { Organization } from "@/lib/platform/types";
+import type { TenantValueCaptureResult } from "@/lib/saas/tenant-value-capture";
 import { platformOperatorDenial } from "@/lib/platform-ui/module-toggle";
 import { ORDER_OUTCOME, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
 import { HISTORY_CREATED_BY } from "@/lib/sales-chatbot/history-shared";
@@ -51,9 +52,22 @@ function snapshotRow(org: Organization, plans: PlanRow[], sub: { billingEnabled:
   return { day, orgCode: org.code, orgStatus: org.status, isHome: org.isHome, planKey, billingEnabled: sub?.billingEnabled ?? false, standing, paying: c.paying, mrrVnd: c.mrrVnd, mrrNote: c.note };
 }
 
-export type SnapshotResult = { day: string; orgs: number; mrrVnd: number; milestonesAdded: number; usageRows: number; errors: string[] };
+export type SnapshotResult = {
+  day: string;
+  orgs: number;
+  mrrVnd: number;
+  milestonesAdded: number;
+  usageRows: number;
+  errors: string[];
+  /** Lượt chụp giá trị theo tổ chức (0240) — CHỈ đường JOB; `null` ở lượt mở trang. */
+  tenantValue: TenantValueCaptureResult | null;
+};
 
-export async function captureSaasSnapshot(now: Date = new Date()): Promise<SnapshotResult> {
+/**
+ * `source`: `JOB` = lượt ké job `alerts` của nhà (`saasSnapshotForJob`) — chỉ ở đây mới chạy thêm lượt chụp GIÁ TRỊ theo tổ chức
+ * (mở CSDL từng khách, một lần mỗi ngày VN). Mặc định `PAGE` (lượt mở trang / bài kiểm): chỉ MRR + mốc + sổ dùng như trước.
+ */
+export async function captureSaasSnapshot(now: Date = new Date(), opts: { source?: "JOB" | "PAGE" } = {}): Promise<SnapshotResult> {
   const day = vnDate(now);
   // Workspace KIỂM THỬ của ops nghiệm thu (sổ khai lib/constants/saas-acceptance-registry.ts) không phải khách: không ảnh chụp MRR,
   // không mốc kích hoạt, không số dùng — mọi người đọc sổ này (buồng lái, phễu kích hoạt, chuyển đổi dùng thử) loại nó ở MỘT chỗ.
@@ -80,7 +94,18 @@ export async function captureSaasSnapshot(now: Date = new Date()): Promise<Snaps
   }
   const milestonesAdded = await scanMilestones(orgs, errors);
   const usageRows = await captureUsage(orgs, now, errors);
-  return { day, orgs: rows.length, mrrVnd: rows.reduce((s, r) => s + (r.mrrVnd ?? 0), 0), milestonesAdded, usageRows, errors };
+  // Ảnh GIÁ TRỊ theo tổ chức (0240): CHỈ đường JOB — sau MRR + sổ dùng hôm nay (nó đọc lại hai sổ đó). Nạp trễ: lượt mở trang không
+  // kéo bộ đọc quy kết / hiệu quả AI vào. Hỏng thì nói trong `errors`, không làm hỏng ảnh MRR đã ghi.
+  let tenantValue: TenantValueCaptureResult | null = null;
+  if (opts.source === "JOB") {
+    try {
+      const { captureTenantValue } = await import("@/lib/saas/tenant-value-capture");
+      tenantValue = await captureTenantValue(orgs, now, { source: "JOB" });
+    } catch (e) {
+      errors.push(`ảnh giá trị: ${e instanceof Error ? e.message.slice(0, 160) : String(e).slice(0, 160)}`);
+    }
+  }
+  return { day, orgs: rows.length, mrrVnd: rows.reduce((s, r) => s + (r.mrrVnd ?? 0), 0), milestonesAdded, usageRows, errors, tenantValue };
 }
 
 // ─────────────────────────── Sổ dùng theo ngày (0204) ───────────────────────────

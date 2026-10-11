@@ -115,4 +115,7 @@ export async function migrateOrganizationDb(db: Db, opts: { pool?: Pool }) {
   // 0237 · tín hiệu vận hành (gương sức khoẻ tổ chức + lỗi đăng nhập có lý do) — chỉ bản ở CSDL nhà là thật.
   await db.execute(sql`delete from platform_org_health`);
   await db.execute(sql`delete from platform_auth_failures`);
+  // 0240 · ảnh giá trị theo tổ chức + sức khoẻ theo ngày (Trung tâm giá trị SaaS) — chỉ bản ở CSDL nhà là thật.
+  await db.execute(sql`delete from platform_tenant_value_snapshots`);
+  await db.execute(sql`delete from platform_tenant_health_daily`);
 }

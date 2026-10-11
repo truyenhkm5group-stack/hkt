@@ -5579,6 +5579,84 @@ export const platformTenantUsageDaily = pgTable(
 );
 
 /**
+ * ẢNH GIÁ TRỊ THEO TỔ CHỨC (0240 · docs/saas/VALUE_CENTER.md §8 · sứ mệnh saas-value-snapshots) — mặt phẳng điều khiển, chỉ thật ở
+ * CSDL NHÀ. MỘT dòng mỗi (ngày VN của lượt chụp, tổ chức, cửa sổ 7/30/90): `metrics` là ĐÚNG ô trả về của `buildTenantValue`
+ * (lib/saas/tenant-value.ts — giá trị · tử · mẫu · độ phủ · cận · trạng thái); các cột phẳng chỉ để SẮP XẾP / LỌC, `NULL` = CHƯA
+ * BIẾT (luật 42), khác 0. Số CHÍN DẦN theo kết cục đơn — không phải số của kỳ đã chốt (luật 21).
+ *  · Ghi DUY NHẤT qua `lib/saas/tenant-value-capture.ts`, chỉ ở đường JOB, một lần mỗi ngày VN; dòng hôm nay ghi lại được (ảnh cuối
+ *    ngày thắng), ngày đã qua không có đường mã nào ghi (tests/saas-value-snapshots.test.ts quét mã).
+ *  · `formula_version` = `tv<n>.attr<n>` — hai dòng khác chuỗi này không so được (luật 40).
+ *  · `source_errors` = nguồn nào hỏng trong lượt chụp (mã nguồn + câu ngắn, không PII) — chỉ ô của nguồn đó `NULL`.
+ */
+export const platformTenantValueSnapshots = pgTable(
+  "platform_tenant_value_snapshots",
+  {
+    capturedDay: date("captured_day", { mode: "string" }).notNull(),
+    orgCode: text("org_code").notNull(),
+    windowDays: integer("window_days").notNull(),
+    /** Cửa sổ THẬT đã đọc: [đầu ngày VN của ngày đầu, lúc chụp]. */
+    windowFrom: ts("window_from").notNull(),
+    windowTo: ts("window_to").notNull(),
+    metrics: jsonb("metrics").$type<Record<string, unknown>>().notNull(),
+    customerSpendVnd: bigint("customer_spend_vnd", { mode: "number" }),
+    variableCogsVnd: bigint("variable_cogs_vnd", { mode: "number" }),
+    platformGrossProfitVnd: bigint("platform_gross_profit_vnd", { mode: "number" }),
+    aiCreditedGrossProfitVnd: bigint("ai_credited_gross_profit_vnd", { mode: "number" }),
+    /** Bội số giá trị × 1000 (tránh số thực trong cột sắp xếp). */
+    valueMultipleMilli: integer("value_multiple_milli"),
+    /** Đơn chưa ngã ngũ trong tập — độ chín của ảnh. */
+    ordersPending: integer("orders_pending"),
+    formulaVersion: text("formula_version").notNull(),
+    sourceErrors: text("source_errors").array().notNull().default(sql`'{}'::text[]`),
+    capturedAt: ts("captured_at").notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ name: "platform_tenant_value_snapshots_pkey", columns: [t.capturedDay, t.orgCode, t.windowDays] }),
+    index("platform_tenant_value_snapshots_org_idx").on(t.orgCode, t.windowDays, t.capturedDay.desc()),
+    check("platform_tenant_value_snapshots_window_check", sql`${t.windowDays} IN (7, 30, 90)`),
+    check("platform_tenant_value_snapshots_version_check", sql`length(btrim(${t.formulaVersion})) > 0`),
+    check("platform_tenant_value_snapshots_nonneg_check", sql`(${t.customerSpendVnd} IS NULL OR ${t.customerSpendVnd} >= 0) AND (${t.variableCogsVnd} IS NULL OR ${t.variableCogsVnd} >= 0) AND (${t.ordersPending} IS NULL OR ${t.ordersPending} >= 0)`),
+    check("platform_tenant_value_snapshots_range_check", sql`${t.windowFrom} < ${t.windowTo}`),
+    check("platform_tenant_value_snapshots_metrics_check", sql`jsonb_typeof(${t.metrics}) = 'object'`),
+  ],
+);
+
+/**
+ * SỨC KHOẺ THEO NGÀY (0240 · docs/saas/VALUE_CENTER.md §4) — mặt phẳng điều khiển, chỉ thật ở CSDL NHÀ. MỘT dòng mỗi (ngày VN, tổ
+ * chức): mức sức khoẻ V1 (`healthOf`), rủi ro rời bỏ (`churnRiskOf`) và MÃ LÝ DO của cả hai — không điểm /100 (D9), mọi mức có ít
+ * nhất một mã (CHECK). `top_issue` = vấn đề lớn nhất hôm nay (`topIssueOf`), `NULL` khi không có gì để làm.
+ *  · Ghi DUY NHẤT qua `lib/saas/tenant-health-daily.ts`, ké lượt chụp giá trị; hôm nay ghi lại được, ngày cũ đóng băng.
+ *  · `rule_version` gói phiên bản luật rủi ro + công thức giá trị — hai ngày khác chuỗi không so trực tiếp (luật 40).
+ */
+export const platformTenantHealthDaily = pgTable(
+  "platform_tenant_health_daily",
+  {
+    day: date("day", { mode: "string" }).notNull(),
+    orgCode: text("org_code").notNull(),
+    level: text("level").notNull(),
+    churnRisk: text("churn_risk").notNull(),
+    reasonCodes: text("reason_codes").array().notNull(),
+    gapCodes: text("gap_codes").array().notNull().default(sql`'{}'::text[]`),
+    churnReasonCodes: text("churn_reason_codes").array().notNull(),
+    topIssue: jsonb("top_issue").$type<Record<string, unknown>>(),
+    ruleVersion: text("rule_version").notNull(),
+    capturedAt: ts("captured_at").notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ name: "platform_tenant_health_daily_pkey", columns: [t.day, t.orgCode] }),
+    index("platform_tenant_health_daily_org_day_idx").on(t.orgCode, t.day),
+    check("platform_tenant_health_daily_level_check", sql`${t.level} IN ('CRITICAL','NEEDS_ATTENTION','UNKNOWN','HEALTHY','INACTIVE')`),
+    check("platform_tenant_health_daily_churn_check", sql`${t.churnRisk} IN ('CRITICAL','HIGH','MEDIUM','LOW','UNKNOWN')`),
+    check(
+      "platform_tenant_health_daily_codes_check",
+      sql`cardinality(${t.reasonCodes}) >= 1 AND cardinality(${t.churnReasonCodes}) >= 1 AND array_position(${t.reasonCodes}, NULL) IS NULL AND array_position(${t.gapCodes}, NULL) IS NULL AND array_position(${t.churnReasonCodes}, NULL) IS NULL AND array_to_string(${t.reasonCodes}, ',') ~ '^[A-Z][A-Z0-9_]{1,40}(,[A-Z][A-Z0-9_]{1,40})*$' AND (cardinality(${t.gapCodes}) = 0 OR array_to_string(${t.gapCodes}, ',') ~ '^[A-Z][A-Z0-9_]{1,40}(,[A-Z][A-Z0-9_]{1,40})*$') AND array_to_string(${t.churnReasonCodes}, ',') ~ '^[A-Z][A-Z0-9_]{1,40}(,[A-Z][A-Z0-9_]{1,40})*$'`,
+    ),
+    check("platform_tenant_health_daily_version_check", sql`length(btrim(${t.ruleVersion})) > 0`),
+    check("platform_tenant_health_daily_issue_check", sql`${t.topIssue} IS NULL OR jsonb_typeof(${t.topIssue}) = 'object'`),
+  ],
+);
+
+/**
  * GHI ĐÈ GIÁ / TÍNH NĂNG / MỨC ÁP THEO TỔ CHỨC (0222 · lib/pricing/entitlements.ts) — mặt phẳng điều khiển, chỉ thật ở CSDL NHÀ.
  *  · `grandfathered` — tổ chức có từ trước 0222: giữ ĐỦ tính năng bất kể gói khai gì (không ai mất tính năng vì một deploy).
  *  · `feature_overrides` `{ <tính năng>: boolean }` · `quota_overrides` `{ <hạn mức>: số | null }` — ô có mặt thì thắng gói.

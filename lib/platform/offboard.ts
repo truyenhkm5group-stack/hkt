@@ -95,6 +95,8 @@ export const OFFBOARD_TABLES: Readonly<Record<ControlPlaneTable, TableSpec>> = {
   platform_payment_intents: { disposition: "DELETE", why: "Phiếu nạp hết hạn / đã huỷ — phiếu ĐÃ TRẢ là tiền thật (chặn ở MONEY_CHECKS VÀ không bao giờ khớp điều kiện xoá), phiếu PENDING còn hạn ⇒ từ chối.", where: (s) => sql`org_code = ${s.code} and status <> 'PAID'` },
   platform_org_health: { disposition: "DELETE", why: "Gương sức khoẻ của tổ chức (kết luận job sales-health, khoá theo MÃ) — để lại thì tổ chức đăng ký lại cùng mã thấy sự cố của tổ chức cũ.", where: byCode },
   platform_auth_failures: { disposition: "DELETE", why: "Lỗi đăng nhập của tổ chức (định danh đã băm + bản che) — dữ liệu người, đi cùng tổ chức; dòng không quy được về tổ chức nào (org_code NULL) không bị đụng.", where: byCode },
+  platform_tenant_value_snapshots: { disposition: "DELETE", why: "Ảnh giá trị theo ngày, khoá theo MÃ (số đếm + tiền, không dữ liệu người) — để lại thì tổ chức đăng ký lại cùng mã thừa kế lịch sử giá trị của tổ chức cũ.", where: byCode },
+  platform_tenant_health_daily: { disposition: "DELETE", why: "Sức khoẻ / rủi ro rời bỏ theo ngày, khoá theo MÃ (chỉ mã lý do) — mã được dùng lại.", where: byCode },
 };
 
 /** Thứ tự XOÁ trong giao dịch: bảng con trước, dòng tổ chức rồi mới tới tài khoản (khoá ngoài `platform_organizations.account_id`). */
@@ -110,6 +112,8 @@ export const OFFBOARD_DELETE_ORDER: readonly ControlPlaneTable[] = [
   "platform_saas_daily",
   "platform_org_milestones",
   "platform_tenant_usage_daily",
+  "platform_tenant_value_snapshots",
+  "platform_tenant_health_daily",
   "platform_org_pricing",
   "platform_price_pins",
   "platform_subscriptions",
