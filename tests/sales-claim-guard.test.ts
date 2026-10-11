@@ -181,7 +181,7 @@ const SEND_PATHS: Record<string, { covered: boolean; why: string }> = {
   "lib/sales-chatbot/zalo.ts": { covered: true, why: "Zalo OA: gửi chữ của chatTurn (đã qua claim-guard); sendZaloText là ống gửi chung" },
   "lib/sales-chatbot/inbox.ts": { covered: true, why: "NHÂN VIÊN gõ trong hộp thư — chữ của người, không phải khẳng định của AI (nhãn cho gợi ý AI: PR-L5)" },
   "lib/sales-chatbot/order-sync.ts": { covered: true, why: "tin xác nhận mua lại gửi SAU khi đơn ERP đã ghi — khẳng định có đơn thật" },
-  "lib/sales-chatbot/followup.ts": { covered: false, why: "nhắn lại khách do AI soạn, gửi TRƯỚC khi ghi — cổng lifecycle cho follow-up là PR-L6 (kiểm toán 10/10/2026 mục 3.9); tệp giữ cho PR sau" },
+  "lib/sales-chatbot/followup.ts": { covered: true, why: "nhắn lại khách do AI soạn: cổng vòng đời (lifecycle.ts) đọc lại ngay trước khi gửi, rồi guardOutgoing TRƯỚC sendBotText (mission followup-lifecycle, 11/10/2026)" },
 };
 const SEND_PRIMITIVE = /\b(?:sendBotText|sendFanpageText|sendMessengerPageText|sendMessengerText|sendZaloText|zaloSendText|appendBotMessage|sendInbox)\(/;
 const SEND_DEFINITION = /function\s+(?:sendBotText|sendFanpageText|sendMessengerPageText|sendMessengerText|sendZaloText|zaloSendText|appendBotMessage|sendInbox)\(/;
@@ -266,6 +266,14 @@ function testSourceScan() {
     const lines = read(rel).split("\n");
     if (lines.some((l) => SEND_PRIMITIVE.test(l) && !SEND_DEFINITION.test(l))) callers.add(rel);
   }
+  // (h) Follow-up: chữ AI soạn qua guardOutgoing TRƯỚC khi gửi, và khoá gửi giành TRƯỚC lời gọi gửi (mission followup-lifecycle).
+  const fu = read("lib/sales-chatbot/followup.ts");
+  const fuRun = fu.slice(fu.indexOf("export async function runSalesFollowups("));
+  const fuGuard = fuRun.indexOf("guardOutgoing(text");
+  const fuLock = fuRun.indexOf("claimConversationEvent(");
+  const fuSend = fuRun.indexOf("sendBotText(row.pageId");
+  assert.ok(fuGuard > 0 && fuLock > fuGuard && fuSend > fuLock, "follow-up: guardOutgoing → giành khoá gửi → sendBotText");
+  assert.equal((fuRun.match(/sendBotText\(/g) ?? []).length, 1, "follow-up chỉ một chỗ gửi");
   for (const c of callers) assert.ok(SEND_PATHS[c], `${c} gọi ống gửi tin ra khách mà chưa khai trong SEND_PATHS (đi qua claim-guard chưa?)`);
   for (const k of Object.keys(SEND_PATHS)) assert.ok(callers.has(k), `SEND_PATHS khai ${k} nhưng tệp không còn gửi tin — xoá dòng khai`);
   return Object.entries(SEND_PATHS).filter(([, v]) => !v.covered).map(([k, v]) => `${k} (${v.why})`);

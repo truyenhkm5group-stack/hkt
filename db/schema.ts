@@ -11456,7 +11456,7 @@ export const salesConversationEvents = pgTable(
     index("sales_conversation_events_type_idx").on(t.type, t.occurredAt),
     check(
       "sales_conversation_events_type_check",
-      sql`${t.type} IN ('conversation.opened','message.received','ai.replied','stage.changed','quote.given','customer.identified','upsell.offered','upsell.accepted','upsell.declined','order.drafted','order.confirmed','appointment.booked','handoff.requested','human.took_over','human.replied','ai.resumed','followup.sent','conversation.declined')`,
+      sql`${t.type} IN ('conversation.opened','message.received','ai.replied','stage.changed','quote.given','customer.identified','upsell.offered','upsell.accepted','upsell.declined','order.drafted','order.confirmed','appointment.booked','handoff.requested','human.took_over','human.replied','ai.resumed','followup.sent','conversation.declined','followup.decided')`,
     ),
     check("sales_conversation_events_actor_check", sql`${t.actorKind} IN ('CUSTOMER','AI','HUMAN','SYSTEM')`),
     check("sales_conversation_events_channel_check", sql`${t.channel} ~ '^[A-Z_]{2,20}$'`),
