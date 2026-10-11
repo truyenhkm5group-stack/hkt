@@ -44,7 +44,7 @@ import {
   pancakeAvatarRefOf,
   stripAvatarToken,
 } from "@/lib/sales-chatbot/avatar-profile";
-import { AVATAR_FETCH, AvatarLru, avatarFetchUrl, avatarHopAllowed, avatarProxyCore, fetchAvatarImage } from "@/lib/sales-chatbot/avatar-proxy";
+import { AVATAR_FETCH, AvatarLru, avatarAcceptFor, avatarFetchUrl, avatarHopAllowed, avatarProxyCore, fetchAvatarImage } from "@/lib/sales-chatbot/avatar-proxy";
 import { fanpageVisitorKey, noteListedAvatars } from "@/lib/sales-chatbot/fanpage";
 import { parseHistoryRun } from "@/lib/sales-chatbot/history-shared";
 import { pendingThreadOf } from "@/lib/sales-chatbot/history";
@@ -57,12 +57,12 @@ const TOK_URL = (psid: string) => `https://pages.fm/api/v1/pages/${PAGE}/avatar/
 const JPEG = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3, 4, 5, 6]);
 
 type Call = { url: string; init: RequestInit | undefined };
-function fakeFetch(routes: (url: string) => Response | Promise<Response>): { fetch: typeof fetch; calls: Call[] } {
+function fakeFetch(routes: (url: string, init?: RequestInit) => Response | Promise<Response>): { fetch: typeof fetch; calls: Call[] } {
   const calls: Call[] = [];
   const f = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
     calls.push({ url, init });
-    return routes(url);
+    return routes(url, init);
   }) as typeof fetch;
   return { fetch: f, calls };
 }
@@ -401,7 +401,9 @@ function testEndpointPure() {
 }
 
 const endpointFetch = () =>
-  fakeFetch((url) => {
+  fakeFetch((url, init) => {
+    // Như production (run 38115995755): điểm cuối Pancake từ chối accept=image/* bằng 406.
+    if (url.startsWith("https://pages.fm/") && new Headers(init?.headers).get("accept") === "image/*") return new Response("Not Acceptable", { status: 406, headers: { "content-type": "text/html" } });
     if (url.startsWith(`https://pages.fm/api/v1/pages/${PAGE}/avatar/${PSID_E}?`)) return new Response(null, { status: 301, headers: { location: `https://content.pancake.vn/2.1-25/avatars/ab/cd.jpg?page_access_token=${TOKEN}&w=100` } });
     if (url.startsWith(`https://pages.fm/api/v1/pages/${PAGE}/avatar/25000000000000888?`)) return new Response("<!doctype html><html>SPA</html>", { status: 200, headers: { "content-type": "text/html" } });
     if (url.startsWith(`https://pages.fm/api/v1/pages/${PAGE}/avatar/25000000000000999?`)) return redirect("https://169.254.169.254/latest/meta-data");
@@ -420,7 +422,25 @@ async function testEndpointFetch() {
   const evil = endpointFetch();
   assert.equal(await fetchAvatarImage(avatarFetchUrl(pancakeEndpointRef(PAGE, "25000000000000999")!, PAGE, TOKEN)!, evil.fetch), null, "chuyển hướng tới host lạ ⇒ dừng");
   assert.equal(evil.calls.length, 1);
-  console.log("  ✓ tải từ điểm cuối Pancake: 301 ⇒ content.pancake.vn ảnh · bước 2 không token · 200 text/html ⇒ không · host lạ ⇒ dừng");
+  // HEADER BƯỚC 1 (đo production run 38115995755): Pancake trả 406 khi accept=image/*, 301 khi accept mọi kiểu; CDN trả ảnh với image/*.
+  const strictCalls: { url: string; accept: string }[] = [];
+  const strictFetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+    const accept = new Headers(init?.headers).get("accept") ?? "";
+    strictCalls.push({ url, accept });
+    if (url.startsWith("https://pages.fm/")) {
+      if (accept !== "*/*") return new Response("Not Acceptable", { status: 406, headers: { "content-type": "text/html" } });
+      return new Response(null, { status: 301, headers: { location: "https://content.pancake.vn/2.1-25/avatars/ab/cd.jpg" } });
+    }
+    if (url.startsWith("https://content.pancake.vn/")) return img();
+    return new Response("không", { status: 404 });
+  }) as typeof fetch;
+  assert.equal(avatarAcceptFor(0), "*/*", "bước 1 nhận mọi kiểu (Pancake 406 với image/*)");
+  assert.equal(avatarAcceptFor(1), "image/*", "bước CDN giữ image/* (đã đo 200)");
+  const strictGot = await fetchAvatarImage(avatarFetchUrl(pancakeEndpointRef(PAGE, PSID_E)!, PAGE, TOKEN)!, strictFetch);
+  assert.ok(strictGot && strictGot.contentType === "image/jpeg", "Pancake chỉ chịu accept mọi kiểu ở bước 1 ⇒ đường thật VẪN ra ảnh");
+  assert.deepEqual(strictCalls.map((x) => x.accept), ["*/*", "image/*"], "header theo bước: bước 1 mọi kiểu, bước CDN image/*");
+  console.log("  ✓ tải từ điểm cuối Pancake: 301 ⇒ content.pancake.vn ảnh · bước 2 không token · 200 text/html ⇒ không · host lạ ⇒ dừng · bước 1 accept mọi kiểu (Pancake 406 với image/*)");
 }
 
 type ConvMaker = (thread: string, state: Record<string, unknown>) => Promise<string>;

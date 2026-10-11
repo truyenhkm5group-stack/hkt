@@ -178,13 +178,23 @@ async function readCapped(res: Response, max: number): Promise<Uint8Array | null
   return out;
 }
 
+/**
+ * Header `accept` theo bước — ĐO trên production (ops avatar-proxy-check, run 38115995755, HSLC 5/5 hội thoại): điểm cuối ảnh Pancake
+ * trả **406** với `accept: image/*` và **301** sang CDN với accept MỌI KIỂU; bước CDN ảnh của Pancake trả 200 image/jpeg với
+ * `image/*`. Nên bước đầu nhận mọi kiểu, bước chuyển hướng giữ `image/*` (đã đo chạy) — và bước cuối VẪN phải là ảnh raster
+ * (`IMAGE_TYPES`), nên nới header bước đầu không làm proxy nhận HTML. HÀM THUẦN.
+ */
+export function avatarAcceptFor(hop: number): string {
+  return hop === 0 ? "*/*" : "image/*";
+}
+
 /** Tải ảnh: tự đi chuyển hướng (không để `fetch` tự theo), kiểm host từng bước, bước sau KHÔNG mang token. Không ném. */
 export async function fetchAvatarImage(firstUrl: string, fetchImpl: typeof fetch): Promise<{ body: Uint8Array; contentType: string } | null> {
   let url = firstUrl;
   try {
     for (let hop = 0; hop <= AVATAR_FETCH.maxRedirects; hop += 1) {
       if (!avatarHopAllowed(url, hop)) return null;
-      const res = await fetchImpl(url, { method: "GET", redirect: "manual", headers: { accept: "image/*" }, signal: AbortSignal.timeout(AVATAR_FETCH.timeoutMs) });
+      const res = await fetchImpl(url, { method: "GET", redirect: "manual", headers: { accept: avatarAcceptFor(hop) }, signal: AbortSignal.timeout(AVATAR_FETCH.timeoutMs) });
       if (res.status >= 300 && res.status < 400) {
         const loc = res.headers.get("location");
         if (!loc) return null;
