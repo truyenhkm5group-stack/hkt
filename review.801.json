@@ -1,8 +1,8 @@
 {
   "pr": 801,
-  "sha": "d2c76ce8307f677232d2dfd2e5346d296a167ff2",
+  "sha": "4cc1148270a2feb0e17a7a2d7b2c097029155649",
   "verdict": "PASS",
   "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
-  "at": "2026-10-11T08:00:29.055Z",
-  "note": "Phần P0-B/C: confirmed-settle dùng chiều order của lifecycle (không định nghĩa lại), idempotent, không đụng đơn/không gửi tin; quét mọi đường gửi khai luật sau-xác-nhận; repair chạy thử mặc định. Gộp main + 0243"
+  "at": "2026-10-11T09:07:47.175Z",
+  "note": "Chỉ commit gộp main; danh sách ops giải hợp"
 }
