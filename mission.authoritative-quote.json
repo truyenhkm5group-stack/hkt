@@ -3,7 +3,7 @@
   "mission_id": "authoritative-quote",
   "title": "P0: báo giá từ máy chủ có phiên bản (giá tin nhắn = báo giá đã xác thực = tổng đơn), giá chưa xác thực ⇒ chuyển người, câu «đã lên đơn» chỉ khi đơn tạo + qua kiểm, trạng thái đơn tách 8 bước",
   "business_goal": "",
-  "status": "RUNNING",
+  "status": "PR_READY",
   "priority": "P0",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -24,7 +24,18 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-11T01:58:45.182Z",
-  "updated_at": "2026-10-11T01:58:45.182Z",
-  "last_heartbeat": "2026-10-11T01:58:45.182Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-11T09:15:54.505Z",
+  "last_heartbeat": "2026-10-11T09:15:54.505Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "fix/authoritative-quote",
+    "sha": "e296495d654402671ae05bcbc0d3719a0c0c405a",
+    "at": "2026-10-11T09:15:54.505Z",
+    "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+    "title": "P0: báo giá từ máy chủ có phiên bản (giá tin nhắn = báo giá đã xác thực = tổng đơn), giá chưa xác thực ⇒ chuyển người, câu «đã lên đơn» chỉ khi đơn tạo + qua kiểm, trạng thái đơn tách 8 bước",
+    "summary": "Báo giá máy chủ một nơi (quote.ts) cho mọi đường; số tiền trong chữ bot phải thuộc báo giá xác thực (claim-guard PRICE_UNVERIFIED); «đã lên đơn» chỉ khi đơn tạo + qua kiểm; PRICE_DISPUTED; đổi số lượng xin xác nhận; lõi đơn tính lại theo quote, lưu raw.quote; tự chốt khi đủ 6 điều kiện (theo công tắc tổ chức autoConfirmComplete), bỏ câu B5",
+    "tests": [
+      "npm test đầy đủ trên e296495d: TẤT CẢ KIỂM THỬ ĐẠT · typecheck · lint · build (3070f19b) · sales-quote-integrity (5 tổ chức WEB thật: 2kg báo giá = tổng đơn, dáng ca 540→560, câu mẫu/lời chào lệch giá bị chặn, giá chưa xác thực không tạo đơn, cần kiểm địa chỉ, tổng ≠ báo giá lõi không ghi, phản đối giá có/không căn cứ, đổi số lượng, 2 gói riêng, Kiều Văn Lệ, thiếu một trường, khách hoãn, đơn thật thắng state) · 12 đột biến · bộ đo đơn vàng v2 không đổi"
+    ]
+  }
 }
