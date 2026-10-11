@@ -213,6 +213,13 @@ export type StaffReplyNote = {
   via: "ERP_INBOX" | "PANCAKE" | "MESSENGER" | "ZALO";
   /** Chỉ hộp thư ERP: người gửi cầm hội thoại (nếu chưa ai cầm) + mốc tin nhân viên + dừng nhắc khách. */
   inbox?: { userId: string };
+  /**
+   * P0 11/10/2026 (response-ownership): VẾT của lần nhường — nguồn gốc người gửi (`OUTBOUND_ORIGINS`), mã tin kích hoạt, tài khoản /
+   * ứng dụng gửi. Thiếu ⇒ hộp thư ERP / Zalo / Messenger (người đăng nhập hoặc kênh có danh tính) coi là VERIFIED_HUMAN.
+   */
+  origin?: string | null;
+  triggerMessageId?: string | null;
+  sourceApp?: string | null;
 };
 
 /**
@@ -230,10 +237,14 @@ export async function startHumanCooldown(conversationId: string, note: StaffRepl
   const before = aiHoldOf(row, note.at);
   const until = cooldownUntilFrom(note.at, await humanCooldownMinutes());
   await recordCooldownExpired(row.id, before);
+  // Dấu của LẦN NHƯỜNG ĐANG CÓ (`state.pause`): ai / tin nào / ứng dụng nào / lý do / hạn. `pauseVerified` (response-ownership-ledger.ts)
+  // chỉ tin dấu khớp ĐÚNG mốc hết hạn đang lưu — dấu cũ của lần nhường trước không bao giờ xác minh hộ lần sau.
+  const pause = { origin: note.origin ?? "VERIFIED_HUMAN", triggerMessageId: note.triggerMessageId ?? null, sourceApp: note.sourceApp ?? null, actorUserId: note.actorUserId, via: note.via, reason: note.reason, at: note.at.toISOString(), until: until.toISOString() };
   await db
     .update(c)
     .set({
       status: "HANDOFF",
+      state: sql`coalesce(${c.state}, '{}'::jsonb) || ${JSON.stringify({ pause })}::jsonb`,
       handoffReason: sql`case when ${c.status} = 'HANDOFF' and ${c.handoffReason} is not null and ${c.handoffReason} <> ${note.reason} then ${c.handoffReason} else ${note.reason} end`,
       humanCooldownUntil: until,
       updatedAt: note.at,
@@ -243,7 +254,7 @@ export async function startHumanCooldown(conversationId: string, note: StaffRepl
     })
     .where(eq(c.id, row.id));
   if (before.state === "AI_ACTIVE") {
-    await recordConversationEvent(row.id, { type: "human.took_over", actorKind: "HUMAN", actorUserId: note.actorUserId, occurredAt: note.at, reasonCode: "STAFF_REPLIED", payload: { via: note.via, cooldownUntil: until.toISOString() }, key: note.key });
+    await recordConversationEvent(row.id, { type: "human.took_over", actorKind: "HUMAN", actorUserId: note.actorUserId, occurredAt: note.at, reasonCode: "STAFF_REPLIED", payload: { via: note.via, cooldownUntil: until.toISOString(), origin: pause.origin, triggerMessageId: pause.triggerMessageId, sourceApp: pause.sourceApp }, key: note.key });
   }
   publish({ type: "chat", conversationId: row.id });
   return before;

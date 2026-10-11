@@ -403,8 +403,9 @@ function kiemMaNguon() {
   };
   // Ba hàm xử lý tin hỏi cổng ngay sau lượt giành, TRƯỚC mọi bước bỏ qua vì page / nhân viên đã trả lời và trước lượt AI.
   const cases: [string, string, string][] = [
-    ["lib/sales-chatbot/fanpage.ts", "export async function processFanpageThread(", "if (await pageRepliedSince()) {\n      await finish"],
-    ["lib/sales-chatbot/messenger.ts", "export async function processMessengerThread(", "if (await pageRepliedSince()) {\n      await finish"],
+    // Bước bỏ qua «đã có câu trả lời hợp lệ» từ P0 11/10/2026 là phép chia lượt khách (response-ownership.ts) — `settle` / `pendingAnswered`.
+    ["lib/sales-chatbot/fanpage.ts", "export async function processFanpageThread(", "await settle();\n    if (!claimed.length) continue;"],
+    ["lib/sales-chatbot/messenger.ts", "export async function processMessengerThread(", "const part = await pendingAnswered(claimed);"],
     ["lib/sales-chatbot/zalo.ts", "export async function processZaloThread(", "const [staff] = await db"],
   ];
   for (const [file, start, firstSkip] of cases) {

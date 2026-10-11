@@ -129,6 +129,11 @@ export type MessageTrace = {
   /** Ghi chú / lỗi gốc đã lưu — để người đọc tự đối chiếu. */
   detail: string | null;
   outcome: "SENT" | "STOPPED" | "IN_PROGRESS" | "UNKNOWN";
+  /**
+   * P0 11/10/2026 (response-ownership.ts::turnTraceNote): lượt khách của tin này đã có câu trả lời hợp lệ chưa; chưa ⇒ ai đang cầm /
+   * «AI tiếp lúc HH:MM»; ghi chú cũ «page đã trả lời» mà sổ không thấy câu trả lời ⇒ «Ghi nhầm». `null` / thiếu = không cần câu phụ.
+   */
+  ownership?: string | null;
 };
 
 /** Nhãn tiếng Việt của mã dấu vết (mã lạ ⇒ hiện nguyên mã). */

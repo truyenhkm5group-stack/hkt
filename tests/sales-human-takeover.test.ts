@@ -277,7 +277,8 @@ async function testFlow() {
       const B = "8100000000002";
       const convB = await opened(B);
       const TB = new Date();
-      const echo = await receiveMessengerEvent({ ...msg(B, "b.staff", "Dạ chị đợi em chút ạ"), isEcho: true, appId: "55555000" }, TB);
+      // Hộp thư Page / Meta Business Suite mang mã app 263902037430900 ⇒ NGƯỜI ĐÃ XÁC MINH (P0 11/10/2026: app LẠ ⇒ OTHER_APP, không nhường).
+      const echo = await receiveMessengerEvent({ ...msg(B, "b.staff", "Dạ chị đợi em chút ạ"), isEcho: true, appId: "263902037430900" }, TB);
       assert.match(echo.reason, /bot nhường/, JSON.stringify(echo));
       assert.equal((await convOf(B)).humanCooldownUntil?.getTime(), TB.getTime() + 30 * MIN);
       const startB = (await eventsOf(convB)).find((e) => e.type === "human.took_over");

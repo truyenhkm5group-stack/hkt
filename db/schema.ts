@@ -11378,10 +11378,19 @@ export const salesChatInbound = pgTable(
      */
     transport: text("transport"),
     senderId: text("sender_id"),
+    /**
+     * 0242 — NGUỒN GỐC NGƯỜI GỬI của tin phía page ngoài ERP (lib/sales-chatbot/response-ownership.ts::OUTBOUND_ORIGINS: AI_AGENT ·
+     * VERIFIED_HUMAN · PANCAKE_AUTOMATION · META_SYSTEM · OTHER_APP · UNKNOWN), mốc TẠO tin ở nguồn (Pancake `inserted_at` / Meta
+     * `timestamp`) và mã ứng dụng / tài khoản gửi trong payload. NULL ở dòng cũ = chưa biết (không backfill — luật 35).
+     */
+    senderKind: text("sender_kind"),
+    sourceAt: timestamp("source_at", { withTimezone: true }),
+    senderApp: text("sender_app"),
     createdAt: createdAt(),
   },
   (t) => [
     uniqueIndex("sales_chat_inbound_message_key").on(t.messageId),
+    check("sales_chat_inbound_sender_kind_check", sql`${t.senderKind} IS NULL OR ${t.senderKind} IN ('AI_AGENT','VERIFIED_HUMAN','PANCAKE_AUTOMATION','META_SYSTEM','OTHER_APP','UNKNOWN')`),
     index("sales_chat_inbound_sender_idx").on(t.pageId, t.senderId, t.createdAt).where(sql`${t.senderId} is not null`),
     check("sales_chat_inbound_transport_check", sql`${t.transport} IS NULL OR ${t.transport} IN ('PANCAKE','MESSENGER')`),
     index("sales_chat_inbound_thread_idx").on(t.pageId, t.threadId, t.status),

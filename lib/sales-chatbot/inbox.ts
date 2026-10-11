@@ -37,6 +37,8 @@ import {
 import { humanCooldownMinutes, startHumanCooldown } from "@/lib/sales-chatbot/conversation-control";
 import { buildMessageTrace, conversationAiBlocks, loadAiUsageForConversation, transportOfConversation } from "@/lib/sales-chatbot/ai-status";
 import { readConversationControl } from "@/lib/sales-chatbot/conversation-control-shared";
+import { buildCustomerTurns, pageAuthorLabel, parseOrigin, turnTraceNote } from "@/lib/sales-chatbot/response-ownership";
+import { ledgerFromRows, ownerOfConversation } from "@/lib/sales-chatbot/response-ownership-ledger";
 import { labelsFor, listLabels, notesFor } from "@/lib/sales-chatbot/inbox-labels";
 import { PAGE_REPLY, STAFF_OUT_PREFIX, STAFF_REASON, type FanpageDeps } from "@/lib/sales-chatbot/fanpage";
 import { MESSAGING_WINDOW_MS } from "@/lib/sales-chatbot/followup-shared";
@@ -583,7 +585,7 @@ export async function loadInboxThread(user: SessionUser, conversationId: unknown
   if (messaging) {
     const t = schema.salesChatInbound;
     const rows = await db
-      .select({ id: t.id, messageId: t.messageId, text: t.text, note: t.note, imageUrls: t.imageUrls, kind: t.kind, createdAt: t.createdAt, status: t.status, attempts: t.attempts, lastError: t.lastError, claimId: t.claimId, claimedAt: t.claimedAt, processedAt: t.processedAt, nextAttemptAt: t.nextAttemptAt, importedAt: t.importedAt })
+      .select({ id: t.id, messageId: t.messageId, text: t.text, note: t.note, imageUrls: t.imageUrls, kind: t.kind, createdAt: t.createdAt, status: t.status, attempts: t.attempts, lastError: t.lastError, claimId: t.claimId, claimedAt: t.claimedAt, processedAt: t.processedAt, nextAttemptAt: t.nextAttemptAt, importedAt: t.importedAt, sourceAt: t.sourceAt, senderKind: t.senderKind })
       .from(t)
       .where(and(eq(t.pageId, conv.pageId!), eq(t.threadId, conv.threadId!)))
       .orderBy(desc(t.createdAt))
@@ -595,6 +597,24 @@ export async function loadInboxThread(user: SessionUser, conversationId: unknown
     // Sổ AI chỉ đọc từ tin CŨ NHẤT đang hiện (trừ 1 phút) — không quét cả đời hội thoại mỗi lượt làm mới.
     const oldest = rows.length ? rows[rows.length - 1].createdAt : now;
     const traceEv = { transport: await transportOfConversation(conv), aiUsage: await loadAiUsageForConversation(conv.id, new Date(oldest.getTime() - 60_000)), botSentAt: rows.filter((r) => r.note === "BOT_SENT").map((r) => r.createdAt) };
+    // LƯỢT KHÁCH ĐÃ CÓ CÂU TRẢ LỜI HỢP LỆ CHƯA (P0 11/10/2026 — response-ownership.ts): cùng hàm thuần mà đường xử lý tin dùng. Dấu
+    // vết của tin khách mang thêm câu phụ: «Ghi nhầm "đã trả lời"» khi ghi chú cũ nói page đã trả lời mà sổ không thấy câu trả lời hợp
+    // lệ nào; nhường / tiếp quản ⇒ lý do + «AI tiếp lúc HH:MM». Đọc hỏng ⇒ không câu phụ (dấu vết cũ vẫn hiện nguyên).
+    const ownership = await (async () => {
+      try {
+        const ledger = await ledgerFromRows(conv.pageId!, conv.threadId!, rows, now);
+        const turns = buildCustomerTurns(ledger);
+        return { turns, owner: ownerOfConversation(conv, ledger, now), openId: turns.length && !turns[turns.length - 1].answered ? turns[turns.length - 1].id : null };
+      } catch {
+        return null;
+      }
+    })();
+    const ownershipNote = (messageId: string, code: string | null): string | null => {
+      if (!ownership) return null;
+      const turn = ownership.turns.find((x) => x.messageIds.includes(messageId));
+      if (!turn) return null;
+      return turnTraceNote({ answered: turn.answered, isOpenTurn: turn.id === ownership.openId, code, owner: ownership.owner, answeredBy: turn.answeredBy?.origin ?? null });
+    };
     // Một tin bot có thể có HAI dòng BOT_SENT (dòng ghi sẵn `bot-out:` trước khi gửi + dòng mang mã kênh trả về) — giữ một.
     const botSeen: { text: string; at: number }[] = [];
     for (const r of [...rows].reverse()) {
@@ -612,7 +632,9 @@ export async function loadInboxThread(user: SessionUser, conversationId: unknown
       }
       const images = Array.isArray(r.imageUrls) ? (r.imageUrls as string[]).filter((x) => typeof x === "string") : [];
       if (!r.text.trim() && !images.length) continue;
-      items.push({ key: `i:${r.id}`, at: r.createdAt.toISOString(), side, text: r.kind === "COMMENT" ? `[Bình luận] ${r.text}` : r.text, images, author: side === "PAGE" ? "Phía page (ngoài ERP)" : null, ...(side === "CUSTOMER" && !r.importedAt ? { trace: buildMessageTrace(r, traceEv, now) } : {}) });
+      const trace = side === "CUSTOMER" && !r.importedAt ? buildMessageTrace(r, traceEv, now) : null;
+      if (trace) trace.ownership = ownershipNote(r.messageId, trace.code);
+      items.push({ key: `i:${r.id}`, at: r.createdAt.toISOString(), side, text: r.kind === "COMMENT" ? `[Bình luận] ${r.text}` : r.text, images, author: side === "PAGE" ? pageAuthorLabel(parseOrigin(r.senderKind)) : null, ...(trace ? { trace } : {}) });
     }
   }
   const s = schema.salesChatStaffMessages;
