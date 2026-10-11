@@ -3,7 +3,7 @@
   "mission_id": "response-ownership",
   "title": "P0: lượt khách chỉ «đã trả lời» khi có phản hồi hợp lệ SAU nó; máy trạng thái chủ trả lời AI_ACTIVE/HUMAN_ACTIVE/TEMPORARY_AI_PAUSE/HANDOFF_PENDING/RESOLVED; chống trùng theo lượt khách; nhiều bên cùng nối Page",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P0",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -28,9 +28,12 @@
     "0244": "2026-10-11T05:45:27.878Z"
   },
   "created_at": "2026-10-11T02:24:49.854Z",
-  "updated_at": "2026-10-11T15:17:46.368Z",
+  "updated_at": "2026-10-11T15:44:07.000Z",
   "last_heartbeat": "2026-10-11T15:17:46.368Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#803 → ce84f77d57bd6374a476161e896b742bb5903886"
+  },
   "handoff": {
     "branch": "fix/response-ownership",
     "sha": "74c4da487205f4b97f91c3a6d37469cdb335e4eb",
