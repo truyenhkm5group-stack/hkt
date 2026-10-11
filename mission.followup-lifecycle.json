@@ -3,7 +3,7 @@
   "mission_id": "followup-lifecycle",
   "title": "P0 vòng đời khách dùng chung + follow-up an toàn: kiểm lại trạng thái mới nhất ngay trước khi gửi, không «tiếp tục chốt» khi đơn đã tạo, chống trùng, decision trace, câu follow-up qua claim-guard (L6)",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P0",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -29,9 +29,12 @@
     "0243": "2026-10-11T05:12:17.480Z"
   },
   "created_at": "2026-10-11T02:05:34.188Z",
-  "updated_at": "2026-10-11T09:07:43.628Z",
+  "updated_at": "2026-10-11T09:40:04.239Z",
   "last_heartbeat": "2026-10-11T09:07:43.628Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#801 → 20e03918d4ce6c14f198f5aadc1eac3d353f7477"
+  },
   "handoff": {
     "branch": "fix/followup-lifecycle",
     "sha": "4cc1148270a2feb0e17a7a2d7b2c097029155649",
