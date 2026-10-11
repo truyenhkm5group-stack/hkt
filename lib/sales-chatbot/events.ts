@@ -150,3 +150,28 @@ export async function recordConversationEvent(
     logFailure(ev.type, conversationId, error);
   }
 }
+
+type EventInput = Parameters<typeof recordConversationEvent>[1];
+
+/**
+ * GIÀNH một sự việc bằng chính khoá chống trùng của sổ (follow-up · 0242): `true` = dòng này vừa được chèn (lượt này là lượt
+ * DUY NHẤT); `false` = khoá đã có (một lượt khác đã quyết sự việc này). KHÁC `recordConversationEvent`: lỗi CSDL được NÉM — người
+ * gọi dùng kết quả làm khoá gửi tin nên không biết = không gửi (thà thiếu còn hơn trùng).
+ */
+export async function claimConversationEvent(conversationId: string, channel: string, state: ChatState, ev: EventInput): Promise<boolean> {
+  return (await insertSalesEvents(conversationId, channel, purchaseCycle(state), [ev])) > 0;
+}
+
+/** Nối thêm khoá vào `payload` của MỘT sự kiện đã ghi (vd kết quả gửi của dòng `followup.decided`). Không bao giờ ném. */
+export async function patchConversationEventPayload(conversationId: string, key: string, patch: Record<string, unknown>): Promise<void> {
+  try {
+    const db = await getDb();
+    const e = schema.salesConversationEvents;
+    await db
+      .update(e)
+      .set({ payload: sql`${e.payload} || ${JSON.stringify(patch)}::jsonb` })
+      .where(eq(e.dedupeKey, `${conversationId}:${key}`));
+  } catch (error) {
+    logFailure(`vá payload ${key}`, conversationId, error);
+  }
+}

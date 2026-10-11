@@ -96,8 +96,8 @@ async function bestSellers(limit = 6) {
   return rows.filter((r) => r.productId).map((r) => ({ id: r.productId as string, name: r.name ?? "" }));
 }
 
-/** Khách (theo hội thoại / SĐT) đã có đơn chưa huỷ trong 30 ngày? */
-async function hasRecentOrder(conversationId: string, phones: string[]) {
+/** Khách (theo hội thoại / SĐT) đã có đơn chưa huỷ trong 30 ngày? Dùng chung cho lúc dựng, lúc rà và NGAY TRƯỚC KHI GỬI (send.ts). */
+export async function hasRecentOrder(conversationId: string, phones: string[]) {
   const db = await getDb();
   const clean = phones.map((p) => p.replace(/\D/g, "")).filter((p) => p.length >= 9);
   const row = await db.query.orders.findFirst({
