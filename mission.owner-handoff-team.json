@@ -4,7 +4,7 @@
   "title": "QUYẾT ĐỊNH CHỦ SHOP: ai nhận hội thoại chatbot chuyển người ở HSLC (phòng + hạn + phân việc tự động)",
   "business_goal": "",
   "status": "BLOCKED",
-  "priority": "P2",
+  "priority": "P0",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
   "worker": null,
@@ -20,11 +20,11 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-11T04:29:28.726Z",
-  "updated_at": "2026-10-11T04:29:28.726Z",
-  "last_heartbeat": "2026-10-11T04:29:28.726Z",
+  "updated_at": "2026-10-11T08:10:29.383Z",
+  "last_heartbeat": "2026-10-11T08:10:29.383Z",
   "definition_of_done": [],
   "needs_owner": {
     "category": "APPROVAL_REQUIRED",
-    "action": "Sau #800, mọi hội thoại chatbot chuyển người vào hàng đợi phòng «Kinh doanh & CSKH» với hạn 4 giờ (mượn hạn case CSKH). Cần anh: (1) XẾP NGƯỜI vào phòng đó cho HSLC (Cài đặt → Phòng ban) — phòng trống thì ca bị đếm «không chủ» và tin rơi về mọi người xem hộp thư; hoặc đổi phòng ở work.ownership khoá SALES_CHAT_HANDOFF; (2) đặt HẠN riêng cho hội thoại chatbot chờ người ở work.sla khoá SALES_CHAT_HANDOFF (đề xuất 30–60 phút vì khách đang chờ mua; tối thiểu 1 giờ theo bộ kiểm hiện tại); (3) có bật «Phân việc tự động» cho phòng đó không (mặc định TẮT)."
+    "action": "[ĐÃ ĐO PRODUCTION SAU #800] 78/100 hội thoại «Cần người» ở HSLC hiện «Phụ trách: KHÔNG CHỦ — Phòng phụ trách chưa có ai xem được hộp thư» (lâu nhất chờ 4.117 phút). Việc của anh (không cần deploy): (1) Cài đặt → Phòng ban → phòng «Kinh doanh & CSKH» → thêm nhân viên trực hộp thư (người có quyền xem AI bán hàng); hoặc đổi phòng ở work.ownership khoá SALES_CHAT_HANDOFF; (2) đặt hạn riêng ở work.sla khoá SALES_CHAT_HANDOFF (đề xuất 30–60 phút); (3) bật «Phân việc tự động» cho phòng nếu muốn máy chia ca. Xếp người xong, dòng đổi từ KHÔNG CHỦ sang tên phòng/người và thông báo tới đúng người."
   }
 }
