@@ -1,0 +1,8 @@
+{
+  "pr": 807,
+  "sha": "e296495d654402671ae05bcbc0d3719a0c0c405a",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-11T09:16:35.634Z",
+  "note": "Nguyên nhân gốc tệp:dòng khớp ca thật; một hàm tính tiền; bất biến số tiền + «đã lên đơn» ở máy chủ, không phải lời nhắc; catalog mâu thuẫn ⇒ chưa xác thực + chuyển người (không đoán); P0-A gắn công tắc tổ chức (không đổi tenant khác). Gộp sau #803/#802/#804"
+}
