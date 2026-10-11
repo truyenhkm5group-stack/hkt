@@ -20,8 +20,8 @@ import { FULFILLMENT_BUCKETS, type FulfillmentBucket } from "@/lib/constants/ful
  * nơi nó không có sẵn. `translate()` là hàm lõi, có ở mọi bản Postgres, và với bảng chữ cái tiếng
  * Việt thì nó cho đúng kết quả như `boDau()` bên TypeScript — cùng 67 ký tự, cùng thứ tự.
  */
-const NGUYEN_AM_CO_DAU = "áàảãạăắằẳẵặâấầẩẫậéèẻẽẹêếềểễệíìỉĩịóòỏõọôốồổỗộơớờởỡợúùủũụưứừửữựýỳỷỹỵđ";
-const NGUYEN_AM_KHONG_DAU = "aaaaaaaaaaaaaaaaaeeeeeeeeeeeiiiiiooooooooooooooooouuuuuuuuuuuyyyyyd";
+export const NGUYEN_AM_CO_DAU = "áàảãạăắằẳẵặâấầẩẫậéèẻẽẹêếềểễệíìỉĩịóòỏõọôốồổỗộơớờởỡợúùủũụưứừửữựýỳỷỹỵđ";
+export const NGUYEN_AM_KHONG_DAU = "aaaaaaaaaaaaaaaaaeeeeeeeeeeeiiiiiooooooooooooooooouuuuuuuuuuuyyyyyd";
 
 export function boDauSql(bieuThuc: SQL | SQL.Aliased): SQL {
   return sql`translate(lower(coalesce(${bieuThuc}, '')), ${NGUYEN_AM_CO_DAU}, ${NGUYEN_AM_KHONG_DAU})`;
