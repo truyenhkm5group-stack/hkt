@@ -28,18 +28,18 @@
     "0244": "2026-10-11T05:45:27.878Z"
   },
   "created_at": "2026-10-11T02:24:49.854Z",
-  "updated_at": "2026-10-11T05:46:39.587Z",
-  "last_heartbeat": "2026-10-11T05:46:04.045Z",
+  "updated_at": "2026-10-11T08:04:46.167Z",
+  "last_heartbeat": "2026-10-11T08:04:46.167Z",
   "definition_of_done": [],
   "handoff": {
     "branch": "fix/response-ownership",
-    "sha": "3fbcfbd3ce3af234f94a6501bf1e9b1b0a2d12a8",
-    "at": "2026-10-11T05:46:04.045Z",
+    "sha": "2db170241646f0a71c6cdcd92a4f3881961a2f05",
+    "at": "2026-10-11T08:04:46.167Z",
     "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
     "title": "P0: lượt khách chỉ «đã trả lời» khi có phản hồi hợp lệ SAU nó; máy trạng thái chủ trả lời AI_ACTIVE/HUMAN_ACTIVE/TEMPORARY_AI_PAUSE/HANDOFF_PENDING/RESOLVED; chống trùng theo lượt khách; nhiều bên cùng nối Page",
-    "summary": "Nguồn gốc người gửi 6 giá trị; lượt khách chỉ đã trả lời khi có tin ra hợp lệ chắc chắn SAU tin khách cuối; tin mẫu/chữ hệ thống không khoá AI; chỉ người đã xác minh mới nhường; ý định mua lúc nhường ⇒ báo người hoặc AI tiếp; hết nhường đánh giá lại một lần; máy trạng thái chủ trả lời 5 trạng thái; migration thêm sender_kind/source_at/sender_app",
+    "summary": "Nguồn sự thật «lượt khách đã xử lý» (AI đã gửi/nhân viên SENT/page hợp lệ/người mở) ở hai dạng TS+SQL có đối chiếu; nguồn gốc người gửi 6 giá trị; chỉ người xác minh mới nhường",
     "tests": [
-      "npm test đầy đủ (trước amend): TẤT CẢ KIỂM THỬ ĐẠT · sau amend tsc + eslint + 7 bộ liên quan đạt · build · 8 đột biến"
+      "tsc · eslint · response-ownership (ma trận chủ shop 10 dòng + đối chiếu TS↔SQL 27 hội thoại PGlite) · self-service-journey · sales-human-takeover · saas-l3-inbox · inbox-semantics-v3 · sales-inbox · messenger · repo-integrity · test-hygiene · npm test đầy đủ trên 3fbcfbd3 đạt"
     ]
   }
 }
