@@ -28,8 +28,9 @@ import { classifyHandoffReason } from "@/lib/sales-chatbot/events-shared";
 import { buildQuote, catalogReferenceAmounts, computePriced, packChoiceMistake, packingIssues, packingRequestOf, pricingContextOf, referenceAmounts, type PricingConfig } from "@/lib/sales-chatbot/quote";
 import { quoteFactOf, quoteSnapshotOf } from "@/lib/sales-chatbot/quote-shared";
 import { renderQuickAnswer } from "@/lib/sales-chatbot/quick-replies";
-import type { ChatState } from "@/lib/sales-chatbot/tools";
-import { getSettingJson } from "@/lib/settings";
+import { autoConfirmBlocker, autoConfirmText, type ChatState } from "@/lib/sales-chatbot/tools";
+import { AUTO_CONFIRM_COMPLETE_SETTING_KEY } from "@/lib/constants/manual-orders";
+import { getSettingJson, setSettingJson } from "@/lib/settings";
 import { resolveRecipientPlace } from "@/lib/address/vn-address";
 import { runGoldenCases, say, tool, type GoldenCase, type GoldenHookCtx } from "./sales-agent-golden/harness";
 
@@ -425,8 +426,9 @@ function testDisputePure() {
   // Tách gói có còn giá gói không: gói 2kg 540k vs 2 × 1kg 560k ⇒ quyết định của shop ⇒ vấn đề báo giá; luật bật và gói khớp ⇒ không.
   const off = pricingContextOf([item("v1", "1kg", 280_000), item("v2", "2kg", 540_000)], cfgOf({ volumeDiscount: { ...RULE_ON, enabled: false } }), null);
   assert.equal(packingIssues(computePriced([{ variantId: "v1", quantity: 2 }], off))[0]?.code, "PACK_PRICE_CONFLICT");
+  assert.equal(packingIssues(computePriced([{ variantId: "v2", quantity: 1 }], off))[0]?.code, "PACK_PRICE_CONFLICT", "ca «Chị Hoàn» #B8E4E551: AI chọn gói 2kg mà khách đòi 2 gói riêng ⇒ vẫn là quyết định của shop (chưa có cấu hình «giá gói áp cả khi đóng tách»)");
   const on = pricingContextOf([item("v1", "1kg", 280_000), item("v2", "2kg", 540_000)], cfgOf(), null);
-  assert.deepEqual(packingIssues(computePriced([{ variantId: "v2", quantity: 1 }], on)), [], "luật bật: 2 × 1kg − 20k = gói 2kg ⇒ tách gói không đổi giá");
+  assert.deepEqual(packingIssues(computePriced([{ variantId: "v2", quantity: 1 }], on), true), [], "luật bật: 2 × 1kg − 20k = gói 2kg ⇒ tách gói không đổi giá");
   assert.deepEqual(packingIssues(computePriced([{ variantId: "v1", quantity: 1 }], off)), [], "1 gói 1kg ⇒ không có gói nào để so");
 
   const snap = quoteSnapshotOf(buildQuote(computePriced([{ variantId: "v1", quantity: 2 }], on), on), new Date());
@@ -589,16 +591,153 @@ async function testDisputeCases() {
   assert.deepEqual([...seen].sort(), [...PACK_CASES, ...DISPUTE_UNKNOWN_CASES].map((c) => c.key).sort());
 }
 
+// ═══ TỰ CHỐT KHI ĐỦ ĐƠN (chủ shop ghi đè 11/10/2026, P0-A) ═══
+
+function testAutoConfirmPure() {
+  const draft = { orderId: null, lines: [{ variantId: "v1", quantity: 2 }], unitPrices: { v1: 280_000 }, recipient: { name: "Lệ", phone: "0981234567", address: "9 Hai Bà Trưng, Phường Hoàn Kiếm, Hà Nội", province: "" }, note: "", simulated: false, quote: { id: "q1-x", priceVersion: "pv1-x", subtotal: 540_000, total: 570_000 } };
+  const st: ChatState = { customer: { id: "c", name: "Lệ", phone: "0981234567", address: draft.recipient.address, province: "", simulated: false }, draft };
+  assert.equal(autoConfirmBlocker(st, { lastUserText: "Chị lấy 2kg, 0981234567, 9 Hai Bà Trưng Hoàn Kiếm Hà Nội", turn: 3 }), null, "đủ sáu điều kiện ⇒ tự chốt");
+  assert.match(autoConfirmBlocker(st, { lastUserText: "để chị hỏi chồng đã nhé", turn: 3 }) ?? "", /chưa quyết mua/);
+  assert.match(autoConfirmBlocker(st, { lastUserText: "chưa chốt đâu em", turn: 3 }) ?? "", /chưa quyết mua/);
+  assert.match(autoConfirmBlocker({ ...st, draft: { ...draft, recipient: { ...draft.recipient, phone: "09812" } } }, { lastUserText: "ok", turn: 3 }) ?? "", /SĐT/);
+  assert.match(autoConfirmBlocker({ ...st, draft: { ...draft, recipient: { ...draft.recipient, address: "nhà chị ở gần chợ" } } }, { lastUserText: "ok", turn: 3 }) ?? "", /Địa chỉ chưa đủ/);
+  assert.match(autoConfirmBlocker({ ...st, priceDispute: { at: "", amounts: [540_000], quoteId: "q", turn: 3, open: true } }, { lastUserText: "ok", turn: 3 }) ?? "", /phản đối giá/);
+  assert.match(autoConfirmBlocker({ ...st, upsellTurn: 3 }, { lastUserText: "ok", turn: 3 }) ?? "", /mời thêm món/);
+  assert.equal(autoConfirmBlocker({ ...st, upsellTurn: 2 }, { lastUserText: "ok", turn: 3 }), null);
+  assert.match(autoConfirmBlocker({ ...st, customer: undefined }, { lastUserText: "ok", turn: 3 }) ?? "", /SĐT \+ địa chỉ/);
+  assert.equal(autoConfirmText([{ name: "Chả cá thu (1kg)", quantity: 2 }]), "Dạ em lên đơn 2 × Chả cá thu (1kg) cho mình rồi ạ, shop giao theo thông tin mình vừa gửi nhé.");
+}
+
+const LE_TEXT = "Dạ em lên đơn 2kg chả cá thu cho mình rồi ạ, shop giao theo thông tin mình vừa gửi nhé.";
+const AUTO_CASES: GoldenCase[] = [
+  {
+    key: "qi-tu-chot-kieu-van-le",
+    title: "Ca Kiều Văn Lệ: khách nói 2kg + SĐT + địa chỉ ⇒ máy chủ TỰ CHỐT ngay (không hỏi «lấy thêm gì không»), một câu ngắn",
+    shop: "food",
+    channel: "WEB",
+    config: ON,
+    turns: [
+      {
+        say: `Chị lấy 2kg chả cá thu, Kiều Văn Lệ 0981234567, ${GOOD_ADDRESS}`,
+        ai: [
+          () => [tool("create_customer", { name: "Kiều Văn Lệ", phone: "0981234567", address: GOOD_ADDRESS })],
+          ({ v }) => [tool("create_draft_order", { items: [{ variant_id: v("CCT-2KG"), quantity: 1 }] })],
+          () => [say(LE_TEXT)],
+        ],
+      },
+    ],
+  },
+  {
+    key: "qi-tu-chot-thieu-dia-chi",
+    title: "Thiếu đúng địa chỉ ⇒ không lên đơn, công cụ chỉ báo trường địa chỉ",
+    shop: "food",
+    channel: "WEB",
+    config: ON,
+    turns: [
+      {
+        say: "Chị lấy 1kg chả cá thu, Lan 0961112223",
+        ai: [() => [tool("create_customer", { name: "Lan", phone: "0961112223" })], () => [say("Dạ mình cho em xin địa chỉ giao hàng ạ.")]],
+      },
+    ],
+  },
+  {
+    key: "qi-tu-chot-can-kiem",
+    title: "Đủ đơn nhưng địa chỉ chưa ghép xã / phường ⇒ đơn tự chốt kèm cờ cần kiểm, câu ghi nhận — không «đã lên đơn», không bắt khách xác nhận, không chuyển người",
+    shop: "food",
+    channel: "WEB",
+    config: ON,
+    turns: [
+      {
+        say: `lấy 1kg chả cá thu, Hằng 0962223334, ${BAD_ADDRESS}`,
+        ai: [
+          () => [tool("create_customer", { name: "Hằng", phone: "0962223334", address: BAD_ADDRESS })],
+          ({ v }) => [tool("create_draft_order", { items: [{ variant_id: v("CCT-1KG"), quantity: 1 }] })],
+          () => [say("Dạ em lên đơn cho mình rồi ạ, shop giao sớm cho mình nha ❤️")],
+        ],
+      },
+    ],
+  },
+  {
+    key: "qi-tu-chot-hoan",
+    title: "Khách cho đủ thông tin nhưng còn hoãn («để chị hỏi chồng đã») ⇒ chỉ lên nháp, không tự chốt",
+    shop: "food",
+    channel: "WEB",
+    config: ON,
+    turns: [
+      {
+        say: `1kg chả cá thu, Hà 0971112223, ${GOOD_ADDRESS}, để chị hỏi chồng đã nhé`,
+        ai: [
+          () => [tool("create_customer", { name: "Hà", phone: "0971112223", address: GOOD_ADDRESS })],
+          ({ v }) => [tool("create_draft_order", { items: [{ variant_id: v("CCT-1KG"), quantity: 1 }] })],
+          () => [say("Dạ vâng, chị hỏi xong nhắn em nhé.")],
+        ],
+      },
+    ],
+  },
+];
+
+async function testAutoConfirmCases() {
+  const seen = new Set<string>();
+  await runGoldenCases(AUTO_CASES, {
+    orgSuffix: "-qi5",
+    beforeCase: async (c, ctx) => {
+      await setSettingJson(AUTO_CONFIRM_COMPLETE_SETTING_KEY, { enabled: true });
+      if (!ctx.ids.has("CCT-1KG")) await seedCct(ctx, 280_000, 540_000);
+    },
+    afterCase: async (c, ctx, transcript) => {
+      seen.add(c.key);
+      const { state, order, items } = await orderOfConversation(ctx.conversationId);
+      const results = JSON.stringify(transcript.turns.flatMap((t) => t.rounds.map((r) => r.results)));
+      const shown = transcript.turns.flatMap((t) => t.shown);
+      assert.ok(!shown.some((x) => /lấy thêm gì không|có chốt không|xác nhận giúp em|gửi đơn nhé/i.test(x)), `không câu xin xác nhận chung: ${JSON.stringify(shown)}`);
+      if (c.key === "qi-tu-chot-kieu-van-le") {
+        assert.ok(order, "có đơn");
+        assert.equal(order.stage, "CONFIRMED", "đủ sáu điều kiện ⇒ đơn tự chốt ngay trong lượt");
+        assert.equal(order.totalPriceAfterDiscount, 540_000, "tổng = báo giá máy chủ (2 × 1kg − 20k)");
+        assert.deepEqual(items.map((i) => [i.quantity, Number(i.unitPrice), Number(i.totalDiscount)]), [[2, 280_000, 20_000]]);
+        assert.ok(/"auto_confirmed":true/.test(results), results.slice(0, 400));
+        assert.equal(state.confirmed?.valid, true);
+        assert.equal(state.stage, "DONE");
+        assert.deepEqual(transcript.turns[0].shown, [LE_TEXT], "một câu chốt ngắn — câu giữ lại được gửi SAU khi chốt thành công");
+        assert.notEqual(transcript.final.status, "HANDOFF");
+        return;
+      }
+      if (c.key === "qi-tu-chot-thieu-dia-chi") {
+        assert.equal(order, null, "thiếu địa chỉ ⇒ chưa lên đơn");
+        assert.ok(/"error"/.test(results) && /địa chỉ/.test(results), results.slice(0, 300));
+        assert.deepEqual(transcript.turns[0].shown, ["Dạ mình cho em xin địa chỉ giao hàng ạ."]);
+        return;
+      }
+      if (c.key === "qi-tu-chot-can-kiem") {
+        assert.ok(order && order.stage === "CONFIRMED", "đơn VẪN được ghi (tự chốt) để vào hàng đợi nhân viên");
+        const review = (order.raw as { review?: { entries: { code: string }[] } | null }).review;
+        assert.ok(review?.entries.some((e) => e.code === "ADDRESS_UNRESOLVED"), "cờ cần kiểm địa chỉ");
+        assert.equal(state.confirmed?.valid, false);
+        assert.deepEqual(transcript.turns[0].shown, [CLAIM_SAFE_TEXT.ORDER_PENDING_ADDRESS], "câu ghi nhận — KHÔNG «đã lên đơn»");
+        assert.notEqual(transcript.final.status, "HANDOFF", "không chuyển người — đơn nằm trong hàng «Cần người kiểm»");
+        return;
+      }
+      // qi-tu-chot-hoan
+      assert.ok(order && order.stage === "NEW", "khách còn hoãn ⇒ chỉ lên nháp");
+      assert.equal(state.confirmed, undefined);
+      assert.ok(/"auto_confirm":false/.test(results) && /chưa quyết mua/.test(results), results.slice(0, 400));
+    },
+  });
+  assert.deepEqual([...seen].sort(), AUTO_CASES.map((c) => c.key).sort());
+}
+
 export async function testSalesQuoteIntegrity() {
   testExtract();
   testQuotePure();
   testVerdictPure();
   testDisputePure();
+  testAutoConfirmPure();
   // Tiền đề của hai hội thoại địa chỉ: địa chỉ «tốt» ghép được xã / phường, địa chỉ «xấu» thì không.
   assert.ok(resolveRecipientPlace({ address: GOOD_ADDRESS, province: "" }).ward, `địa chỉ tốt phải ghép được xã: ${JSON.stringify(resolveRecipientPlace({ address: GOOD_ADDRESS, province: "" }))}`);
   assert.equal(resolveRecipientPlace({ address: BAD_ADDRESS, province: "" }).ward, "", "địa chỉ xấu không ghép được xã");
   await testRuleOn();
   await testRuleOff();
   await testDisputeCases();
+  await testAutoConfirmCases();
   console.log("  ✓ báo giá máy chủ (quote.ts): một phép tính cho giỏ · đơn · lõi; 2kg = 2 × 1kg − giảm, cùng mã báo giá; catalog mâu thuẫn / thiếu khối lượng ⇒ chưa xác thực (tái hiện 540 / 560); số tiền trong chữ bot phải thuộc báo giá đã xác thực — 540k khi báo giá 560k bị chặn + PRICE_UNVERIFIED; câu mẫu / lời chào lệch giá bị chặn; giá chưa xác thực ⇒ không tạo đơn; khách phản đối giá ⇒ có căn cứ thì báo lại + xin xác nhận, không thì chuyển người (PRICE_DISPUTED), đơn mang cờ; đổi số lượng ⇒ xin xác nhận tổng mới; đóng gói riêng đổi giá ⇒ shop quyết; đơn cần kiểm địa chỉ ⇒ «đã lên đơn» bị thay, không chuyển người; tổng đơn ≠ báo giá ⇒ lõi không ghi; mã + phiên bản giá lưu vào đơn");
 }

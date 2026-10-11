@@ -143,6 +143,11 @@ export type AgentOrderOptions = {
    * Không có ⇒ như cũ: máy không được mang chiết khấu nào.
    */
   quote?: AgentQuoteClaim;
+  /**
+   * GIỮ «MỚI» (P0-A 11/10/2026): bot quyết KHÔNG tự chốt đơn này (khách còn hoãn · đang phản đối giá · vừa được mời thêm món…) ⇒ công
+   * tắc «đơn đủ thông tin = đã xác nhận» KHÔNG được nâng nó lên «Đã xác nhận» — nếu không ERP nói đã xác nhận còn bot nói chưa.
+   */
+  holdNew?: boolean;
 };
 
 /** Người hay máy đang ghi — MỘT hình cho ba lượt ghi, để nhật ký / sự kiện / lời khai gốc nói cùng một điều. */
@@ -557,7 +562,7 @@ async function createOrder(w: Writer, rawInput: unknown, agentOpts?: AgentOrderO
     if (gate.failure) return gate.failure;
     quote = gate.quote;
   }
-  let p = await autoConfirmComplete(prep.p);
+  let p = agentOpts?.holdNew ? prep.p : await autoConfirmComplete(prep.p);
   // Máy chỉ LƯU NHÁP mà công tắc tự nâng lên «Đã xác nhận»: thiếu hàng ⇒ giữ «Mới» (cùng tinh thần hạn mức nợ ở trên) —
   // chỉ lượt máy CHỦ ĐỘNG chốt mới bị từ chối vì thiếu hàng.
   if (agentOpts && !agentOpts.allowShortStock && p !== prep.p && (await agentStockFailure(await getDb(), p, [], false))) p = prep.p;
@@ -669,7 +674,7 @@ async function updateOrder(w: Writer, orderId: unknown, rawInput: unknown, agent
     quote = gate.quote;
   }
   const row = existing.row;
-  let p = await autoConfirmComplete(prep.p, row.id, row.raw);
+  let p = agentOpts?.holdNew ? prep.p : await autoConfirmComplete(prep.p, row.id, row.raw);
   // Như lượt tạo: công tắc tự nâng đơn NHÁP của máy mà thiếu hàng ⇒ giữ «Mới» (đơn tự nâng chỉ đi từ «Mới» ⇒ chưa giữ hàng).
   if (agentOpts && !agentOpts.allowShortStock && p !== prep.p && (await agentStockFailure(await getDb(), p, [], false))) p = prep.p;
   const credit = await creditGate(p, row.id);

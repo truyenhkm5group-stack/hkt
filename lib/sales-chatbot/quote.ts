@@ -273,11 +273,14 @@ export function packingRequestOf(customerText: string): string | null {
 }
 
 /**
- * Đóng gói riêng có đổi giá không — HÀM THUẦN. Giỏ có một sản phẩm mà danh mục có GÓI đúng tổng khối lượng với giá KHÁC tiền giỏ đang
- * tính (vd 2 × 1kg = 560k vs gói 2kg 540k) và khách đòi đóng riêng ⇒ «tách gói có còn giá gói không» là QUYẾT ĐỊNH CỦA SHOP; cấu hình
- * chưa khai ⇒ báo giá CHƯA XÁC THỰC (`PACK_PRICE_CONFLICT`), không đoán.
+ * Đóng gói riêng có đổi giá không — HÀM THUẦN. Khách đòi đóng riêng («2kg, 2 gói riêng») mà cùng khối lượng có HAI giá trong danh mục —
+ * gói lớn (2kg 540k) và N × gói nhỏ (2 × 1kg 560k) — thì «tách gói có còn giá gói không» là QUYẾT ĐỊNH CỦA SHOP (ca «Chị Hoàn»
+ * #B8E4E551: nhân viên trả lời 540k). Xét CẢ HAI chiều: AI chọn gói lớn hay chọn N × gói nhỏ đều mơ hồ. Cấu hình chưa khai ⇒ báo giá
+ * CHƯA XÁC THỰC (`PACK_PRICE_CONFLICT`), không đoán. Luật giảm theo khối lượng BẬT ⇒ gói đơn vị đã là biểu diễn duy nhất (các túi vốn
+ * tách) — mâu thuẫn giá gói đã bắt ở `catalogConflicts`, không xét ở đây.
  */
-export function packingIssues(priced: Pick<Priced, "lines" | "packOptions">): QuoteIssue[] {
+export function packingIssues(priced: Pick<Priced, "lines" | "packOptions">, ruleEnabled = false): QuoteIssue[] {
+  if (ruleEnabled) return [];
   const out: QuoteIssue[] = [];
   const byVariant = new Map(priced.packOptions.map((p) => [p.variantId, p]));
   const groups = new Map<string, Priced["lines"]>();
@@ -289,8 +292,12 @@ export function packingIssues(priced: Pick<Priced, "lines" | "packOptions">): Qu
     if (g.some((l) => l.weightGrams == null)) continue;
     const grams = g.reduce((s, l) => s + l.weightGrams! * l.quantity, 0);
     const total = g.reduce((s, l) => s + l.lineTotal, 0);
-    const pack = priced.packOptions.find((p) => p.productId === pid && p.weightGrams === grams && !p.addOnOnly && p.price !== null && p.price > 0 && !(g.length === 1 && g[0].variantId === p.variantId && g[0].quantity === 1));
-    if (pack && pack.price !== total) out.push({ code: "PACK_PRICE_CONFLICT", detail: `Khách đòi đóng gói riêng: «${pack.name}» ${formatVND(pack.price)} ≠ tách gói ${formatVND(total)} — shop chưa khai tách gói có còn giá gói không` });
+    const sellable = priced.packOptions.filter((p) => p.productId === pid && p.weightGrams !== null && !p.addOnOnly && p.price !== null && p.price > 0);
+    const pack = sellable.find((p) => p.weightGrams === grams);
+    // Mọi cách ghép đúng khối lượng đó bằng N × một gói nhỏ hơn.
+    const splits = sellable.filter((p) => p.weightGrams! < grams && grams % p.weightGrams! === 0).map((p) => ({ name: p.name, price: (grams / p.weightGrams!) * p.price! }));
+    const prices = new Set([...(pack ? [pack.price!] : []), ...splits.map((x) => x.price), total]);
+    if (pack && prices.size > 1) out.push({ code: "PACK_PRICE_CONFLICT", detail: `Khách đòi đóng gói riêng: «${pack.name}» ${formatVND(pack.price)} ≠ tách gói ${splits.map((x) => formatVND(x.price)).join(" / ") || formatVND(total)} — shop chưa khai tách gói có còn giá gói không` });
   }
   return out;
 }

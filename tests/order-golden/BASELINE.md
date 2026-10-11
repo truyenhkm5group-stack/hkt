@@ -1,7 +1,7 @@
 # Bộ đo đơn vàng v2 — số đo hiện trạng (BASELINE)
 
 <!-- NỀN ĐO -->
-> Đo lúc 08/10/2026 (giờ Việt Nam) trên SHA nền `c360b7c6` — `npx tsx tests/order-golden/update-baseline.ts`.
+> Đo lúc 11/10/2026 (giờ Việt Nam) trên SHA nền `31315ebf` — `npx tsx tests/order-golden/update-baseline.ts`.
 <!-- HẾT NỀN ĐO -->
 
 Sứ mệnh `saas-order-accuracy`, lát C1 (bộ đo) + lát `order-confirm-rules` (luật chủ shop 08/10/2026 + sửa lỗi thuần mã). Tài liệu
