@@ -2061,3 +2061,4 @@
 {"at":"2026-10-11T08:09:50.563Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"VERIFY_PASS","mission":"handoff-ownership","detail":"PASS f9657f4fa1b0d05c3f9de95747d4b9c46fb62998 2026-10-11T08:09:36.177Z"}
 {"at":"2026-10-11T08:10:29.554Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"UPDATE","mission":"owner-handoff-team","detail":"BLOCKED → BLOCKED · 1 mẫu phạm vi · MEDIUM"}
 {"at":"2026-10-11T08:16:01.618Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"sender-provenance-probe","detail":"fix/sender-provenance-probe @ 3b8232e8d16d · 1 lệnh kiểm thử"}
+{"at":"2026-10-11T08:17:07.236Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"sender-provenance-probe","detail":"#805 @ 3b8232e8d16d → 08379378f2dc (MERGE_ISOLATED · HIGH · gates success)"}

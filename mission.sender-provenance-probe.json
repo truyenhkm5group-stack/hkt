@@ -3,7 +3,7 @@
   "mission_id": "sender-provenance-probe",
   "title": "Ops chỉ đọc sender-provenance-probe: đo tỷ lệ tin phía page không mang dấu người/app (sẽ thành UNKNOWN sau #803) trước khi deploy",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P0",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -23,9 +23,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-11T05:58:55.490Z",
-  "updated_at": "2026-10-11T08:16:01.562Z",
+  "updated_at": "2026-10-11T08:17:07.189Z",
   "last_heartbeat": "2026-10-11T08:16:01.562Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#805 → 08379378f2dcee707c18167c9984442070a62aa1"
+  },
   "handoff": {
     "branch": "fix/sender-provenance-probe",
     "sha": "3b8232e8d16d9cc4d1e1b7c4eb58e49afe35fddd",
