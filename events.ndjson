@@ -1920,3 +1920,4 @@
 {"at":"2026-10-11T01:14:45.907Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MIGRATION_RELEASED","mission":"inbox-unread-perf","detail":"0243 — đổi sang 0242"}
 {"at":"2026-10-11T01:15:18.345Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MIGRATION_RELEASED","mission":"inbox-unread-perf","detail":"0244 — giữ thừa"}
 {"at":"2026-10-11T01:15:37.420Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MIGRATION_RESERVED","mission":"saas-value-snapshots","detail":"0241"}
+{"at":"2026-10-11T01:15:55.240Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MIGRATION_RESERVED","mission":"inbox-unread-perf","detail":"0242"}
