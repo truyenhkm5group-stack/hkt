@@ -8,7 +8,7 @@
  */
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { readFileSync, rmSync } from "node:fs";
+import { readdirSync, readFileSync, rmSync } from "node:fs";
 import { and, asc, eq } from "drizzle-orm";
 import { getDb, getPlatformDb, organizationDatabaseUrl, schema } from "@/db";
 import type { AiBlock, AiProvider, AiRequest, AiResponse } from "@/lib/ai/provider";
@@ -52,7 +52,12 @@ const draft = (lines: [string, number, number][], orderId: string | null = "erp-
 function testPure() {
   // Danh sách loại trong mã = danh sách trong CHECK của CSDL (hai bản khai, phải khớp từng chữ).
   const schemaSrc = readFileSync("db/schema.ts", "utf8");
-  const migration = readFileSync("drizzle/0202_sales_conversation_events.sql", "utf8");
+  // Migration MỚI NHẤT khai lại CHECK này (0202 tạo bảng; 0242 thêm `followup.decided`) — đọc bản cuối theo số, không ghim tên.
+  const checkMigration = readdirSync("drizzle")
+    .filter((f) => /^\d{4}_.*\.sql$/.test(f) && readFileSync(`drizzle/${f}`, "utf8").includes("sales_conversation_events_type_check"))
+    .sort()
+    .at(-1)!;
+  const migration = readFileSync(`drizzle/${checkMigration}`, "utf8");
   const list = SALES_EVENT_TYPES.map((t) => `'${t}'`).join(",");
   assert.ok(schemaSrc.includes(list), "CHECK loại sự kiện trong db/schema.ts phải khớp SALES_EVENT_TYPES");
   assert.ok(migration.includes(list), "CHECK loại sự kiện trong migration phải khớp SALES_EVENT_TYPES");

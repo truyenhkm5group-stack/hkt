@@ -39,6 +39,8 @@ export const SALES_EVENT_TYPES = [
   "ai.resumed",
   "followup.sent",
   "conversation.declined",
+  /** Vết quyết định của MỘT lượt follow-up (gửi / chặn + mã lý do + ảnh chụp vòng đời) — dòng GỬI cũng là khoá chống trùng (0242). */
+  "followup.decided",
 ] as const;
 export type SalesEventType = (typeof SALES_EVENT_TYPES)[number];
 
@@ -62,6 +64,7 @@ export const SALES_EVENT_LABEL: Record<SalesEventType, string> = {
   "ai.resumed": "AI trả lời lại",
   "followup.sent": "Nhắn lại khách",
   "conversation.declined": "Khách không mua",
+  "followup.decided": "Quyết định nhắn lại",
 };
 
 export const SALES_EVENT_ACTORS = ["CUSTOMER", "AI", "HUMAN", "SYSTEM"] as const;

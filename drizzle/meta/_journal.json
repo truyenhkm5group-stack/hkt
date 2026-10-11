@@ -1688,6 +1688,13 @@
       "when": 1791401100000,
       "tag": "0241_tenant_value_snapshots",
       "breakpoints": true
+    },
+    {
+      "idx": 242,
+      "version": "7",
+      "when": 1791401187331,
+      "tag": "0242_followup_decided_event",
+      "breakpoints": true
     }
   ]
 }
