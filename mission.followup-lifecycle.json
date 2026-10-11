@@ -29,18 +29,18 @@
     "0243": "2026-10-11T05:12:17.480Z"
   },
   "created_at": "2026-10-11T02:05:34.188Z",
-  "updated_at": "2026-10-11T08:00:25.518Z",
-  "last_heartbeat": "2026-10-11T08:00:25.518Z",
+  "updated_at": "2026-10-11T09:07:43.628Z",
+  "last_heartbeat": "2026-10-11T09:07:43.628Z",
   "definition_of_done": [],
   "handoff": {
     "branch": "fix/followup-lifecycle",
-    "sha": "d2c76ce8307f677232d2dfd2e5346d296a167ff2",
-    "at": "2026-10-11T08:00:25.518Z",
+    "sha": "4cc1148270a2feb0e17a7a2d7b2c097029155649",
+    "at": "2026-10-11T09:07:43.628Z",
     "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
     "title": "P0 vòng đời khách dùng chung + follow-up an toàn: kiểm lại trạng thái mới nhất ngay trước khi gửi, không «tiếp tục chốt» khi đơn đã tạo, chống trùng, decision trace, câu follow-up qua claim-guard (L6)",
-    "summary": "Vòng đời khách + follow-up an toàn + đơn DB thắng state (huỷ lịch, stage DONE) + chặn kịch bản băn khoăn lúc gửi + script sales-stale-confirmed-repair (chạy thử mặc định); migration 0243 chỉ nới CHECK",
+    "summary": "Follow-up an toàn + đơn DB thắng state + repair (0243)",
     "tests": [
-      "npm test đầy đủ trên 714280d7: TẤT CẢ KIỂM THỬ ĐẠT · 8 đột biến · gộp main (#800) + đổi 0242→0243: tsc sạch · migration-journal đạt"
+      "như lượt trước + gộp main (#805): ops-vps giải hợp · tsc sạch"
     ]
   }
 }

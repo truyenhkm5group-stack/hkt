@@ -2063,3 +2063,4 @@
 {"at":"2026-10-11T08:16:01.618Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"sender-provenance-probe","detail":"fix/sender-provenance-probe @ 3b8232e8d16d · 1 lệnh kiểm thử"}
 {"at":"2026-10-11T08:17:07.236Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"sender-provenance-probe","detail":"#805 @ 3b8232e8d16d → 08379378f2dc (MERGE_ISOLATED · HIGH · gates success)"}
 {"at":"2026-10-11T08:32:47.182Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DEPLOY_DISPATCHED","detail":"08379378f2dc · run 38125161230 https://github.com/truyenhkm5group-stack/hkt/actions/runs/38125161230"}
+{"at":"2026-10-11T09:07:43.667Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"followup-lifecycle","detail":"fix/followup-lifecycle @ 4cc1148270a2 · 1 lệnh kiểm thử"}
