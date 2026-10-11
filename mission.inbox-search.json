@@ -3,7 +3,7 @@
   "mission_id": "inbox-search",
   "title": "P0 hộp thư: tìm theo SĐT chuẩn hoá (0/+84/khoảng trắng) trong hồ sơ · lịch sử tin · đơn/khách, tên bỏ khoảng trắng, mã đơn; gợi ý «có ở Tất cả» khi bộ lọc rỗng; mở kết quả không nhầm hội thoại",
   "business_goal": "",
-  "status": "VERIFYING",
+  "status": "DONE",
   "priority": "P0",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -23,13 +23,14 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-11T02:05:15.527Z",
-  "updated_at": "2026-10-11T06:27:40.238Z",
-  "last_heartbeat": "2026-10-11T03:57:23.022Z",
+  "updated_at": "2026-10-11T06:27:59.274Z",
+  "last_heartbeat": "2026-10-11T06:27:59.274Z",
   "definition_of_done": [],
   "evidence": {
     "merged": "#798 → 8539ead78771dcdb7d849409a1c907bd1de92189",
     "verify": "PASS 8539ead78771dcdb7d849409a1c907bd1de92189 2026-10-11T06:27:26.833Z",
-    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/38114687437"
+    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/38114687437",
+    "done": "Production 8539ead7 (deploy PASS). HSLC: tìm «+84832106422» và «0832 106 422» ⇒ ra KimThu Le (trước: không ra); «Kim Thu» ⇒ 4 kết quả (trước: không ra KimThu); «#71B31FE3» ⇒ KimThu Le; «B8E4E551» ⇒ hội thoại Chị Hoàn (trước: tìm mã đơn không có). Ảnh search-after-798.png. Gợi ý «Có N ở Tất cả» phủ bằng bài kiểm (chưa gặp ca rỗng trên production lúc đo)."
   },
   "handoff": {
     "branch": "fix/inbox-search",
