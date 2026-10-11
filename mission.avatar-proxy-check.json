@@ -3,7 +3,7 @@
   "mission_id": "avatar-proxy-check",
   "title": "Ops chỉ đọc avatar-proxy-check: đi lại từng bước proxy ảnh (ref, token, bước 1 image/* vs */*, bước 2, kiểu nội dung) để biết vì sao /api/ai-sales/avatar trả 404",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P1",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -23,9 +23,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-11T04:11:34.067Z",
-  "updated_at": "2026-10-11T05:16:55.485Z",
+  "updated_at": "2026-10-11T05:47:05.275Z",
   "last_heartbeat": "2026-10-11T05:16:55.485Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#799 → 58ac17ac0a05472ddf26f00fe7afb83b40de3184"
+  },
   "handoff": {
     "branch": "fix/avatar-proxy-check",
     "sha": "53ad79a314c700da237d111b2b8e6f0370447937",
