@@ -18,7 +18,9 @@
   ],
   "dependencies": [],
   "blocked_by": [],
-  "related_prs": [],
+  "related_prs": [
+    803
+  ],
   "migration_reservations": [
     "0244"
   ],
@@ -26,7 +28,7 @@
     "0244": "2026-10-11T05:45:27.878Z"
   },
   "created_at": "2026-10-11T02:24:49.854Z",
-  "updated_at": "2026-10-11T05:46:04.045Z",
+  "updated_at": "2026-10-11T05:46:39.587Z",
   "last_heartbeat": "2026-10-11T05:46:04.045Z",
   "definition_of_done": [],
   "handoff": {
