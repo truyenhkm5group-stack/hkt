@@ -499,9 +499,12 @@ import { testInboxComposer } from "./inbox-composer.test";
 import { testInboxV2A } from "./inbox-v2-a.test";
 import { testInboxAvatarProfile } from "./inbox-avatar-profile.test";
 import { testPancakeAvatarShape } from "./pancake-avatar-shape.test";
+import { testAvatarProxyCheck } from "./avatar-proxy-check.test";
 import { testAvatarProxy } from "./avatar-proxy.test";
 import { testInboxSemanticsV3 } from "./inbox-semantics-v3.test";
+import { testHandoffOwnership } from "./handoff-ownership.test";
 import { testInboxReadV3 } from "./inbox-read-v3.test";
+import { testInboxSearch } from "./inbox-search.test";
 import { testInboxBulkAi } from "./inbox-bulk-ai.test";
 import { testSalesInboxHistory } from "./sales-inbox-history.test";
 import { testE2eAiSalesPlatform } from "./e2e-ai-sales-platform.test";
@@ -543,6 +546,7 @@ import { testGoLive } from "./go-live.test";
 import { testOnboardingV2 } from "./onboarding-v2.test";
 import { testSalesVision } from "./sales-vision.test";
 import { testSalesClaimGuard } from "./sales-claim-guard.test";
+import { testSalesIntegrityAudit } from "./sales-integrity-audit.test";
 import { testFollowupLifecycle } from "./followup-lifecycle.test";
 import { testChatWidget } from "./chat-widget.test";
 import { testWebProductImport } from "./web-product-import.test";
@@ -2915,12 +2919,18 @@ async function main() {
   await testInboxAvatarProfile();
   // Ops pancake-avatar-shape (11/10/2026): dáng payload Pancake để tìm khoá ảnh thật — chỉ in đường khoá + kiểu + dạng, không giá trị. Thuần + quét mã nguồn.
   testPancakeAvatarShape();
+  // Ops avatar-proxy-check (11/10/2026): ảnh qua proxy hỏng ở bước nào — đi lại từng bước bằng chính lib, chỉ in mã bước. Thuần + quét mã nguồn.
+  testAvatarProxyCheck();
   // Ảnh khách qua proxy ERP (11/10/2026): URL Pancake mang khoá ⇒ cất bản KHÔNG khoá, máy chủ gắn token lúc tải; chặn SSRF, đệm LRU, quyền theo tổ chức — tổ chức `anh-dai-dien-proxy`, fetch giả.
   await testAvatarProxy();
   // INBOX-SEMANTICS-V3 (chủ shop 10/10/2026): bốn khái niệm tách riêng — chưa đọc (AI trả lời không xoá) · chờ trả lời · cần người thật · người đang xử lý; ma trận 20 hội thoại × mọi bộ lọc — tổ chức `hop-thu-sem-v3`.
   await testInboxSemanticsV3();
+  // AI IM THÌ PHẢI CÓ CHỦ (P0 11/10/2026, yêu cầu 9): chuyển người ⇒ hàng đợi phòng (work.ownership) + hạn (work.sla) · một tin mỗi đợt · tin khách mới ⇒ một thông báo · trả AI xoá hạn · phân việc bật ⇒ người còn chỗ · câu đếm «không chủ» = 0 — tổ chức `chuyen-nguoi-co-chu`.
+  await testHandoffOwnership();
   // INBOX READ V3 (chủ shop 10/10/2026 tối, P0): «chưa đọc» = có tin KHÁCH thật sau con trỏ đọc CỦA NGƯỜI XEM (0239); nạp khung chat ≠ đọc; con trỏ = tin khách cuối của payload, chỉ tiến; xem trước tin khách khi chưa đọc; danh sách vá theo xác nhận đọc; audit FALSE-UNREAD = 0 — tổ chức `hop-thu-doc-v3`.
   await testInboxReadV3();
+  // TÌM KIẾM HỘP THƯ (P0 inbox-search, chủ shop 11/10/2026): SĐT chuẩn hoá 0/+84/khoảng trắng · SĐT trong tin / đơn / Pancake / web · tên bỏ dấu + khoảng trắng · mã đơn · tìm × bộ lọc × phân trang · UNREAD rỗng ⇒ gợi ý «Tất cả» đúng số · danh sách mới không mang hội thoại cũ · 3.000 hội thoại — `tim-hop-thu-a` / `tim-hop-thu-b`.
+  await testInboxSearch();
   // «Trả tất cả cho AI» (chủ shop 10/10/2026, mục D): quyền · cách ly tổ chức · trả được / bị chặn theo lý do · sự kiện + nhật ký người bấm · chạy lại 0 dòng mới — `hop-thu-bulk-a` / `hop-thu-bulk-b`.
   await testInboxBulkAi();
   // Nhập đủ lịch sử hội thoại vào hộp thư (0221): tổ chức THẬT `hop-thu-lich-su`, Pancake giả, tự cấp, tự dọn.
@@ -2966,6 +2976,9 @@ async function main() {
   // P0 10/10/2026 — AI không khẳng định điều chưa xác minh («đã nhận tiền» / «đã chốt đơn»): bảng chân lý thuần, quét mã nguồn
   // mọi đường chữ bot, tổ chức THẬT `gd-food-cg` (bot tắt · chứng từ thu đủ số · đơn nháp · nối cùng luồng page + hội thoại).
   await testSalesClaimGuard();
+  // P0 11/10/2026 — ops sales-integrity-audit: giá bot ≠ giá đơn · giá tự đổi · xác nhận giả · chuyển người không ai nhận ·
+  // địa chỉ chưa ghép · nhắc sau đơn chốt — thuần + CSDL thật (mã `erp-ia-`, tự dọn), tóm tắt không lọt PII.
+  await testSalesIntegrityAudit();
   // P0 11/10/2026 (KimThu Le) — vòng đời khách dùng chung + follow-up đọc lại ngay trước khi gửi (đơn thật · chứng từ thu ·
   // từ chối nhận tin · người / nguồn khác vừa nhắn), khoá gửi chống trùng, vết quyết định — tổ chức THẬT `fu-life` (tự cấp, tự dọn).
   await testFollowupLifecycle();

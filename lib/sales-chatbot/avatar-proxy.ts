@@ -2,9 +2,9 @@ import { createHash } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { can, type SessionUser } from "@/lib/auth/session";
-import { openActiveConnection } from "@/lib/connectors/service";
+import { openActiveConnection, openChannelPageToken } from "@/lib/connectors/service";
 import { currentOrganization } from "@/lib/platform/context";
-import { avatarProxyRefOfState, avatarRefVersion, isAllowedAvatarHost, isAvatarTokenHost, type PancakeAvatarRef } from "@/lib/sales-chatbot/avatar-profile";
+import { avatarProxyRefFor, avatarRefVersion, isAllowedAvatarHost, isAvatarCdnHost, isAvatarTokenHost, isEndpointAvatarRef, pancakeAvatarEndpointUrl, stripAvatarToken, type PancakeAvatarRef } from "@/lib/sales-chatbot/avatar-profile";
 import { FANPAGE_CONNECTOR } from "@/lib/sales-chatbot/fanpage";
 
 /**
@@ -18,8 +18,12 @@ import { FANPAGE_CONNECTOR } from "@/lib/sales-chatbot/fanpage";
  *  2. TOKEN: đọc lúc tải từ kết nối «Fanpage qua Pancake» của tổ chức (`openActiveConnection`), CHỈ khi page của hội thoại đúng là
  *     page của kết nối, CHỈ gắn vào host Pancake (`AVATAR_TOKEN_HOSTS`) và — nếu đường dẫn có `/pages/<id>/` — chỉ khi id đó là page
  *     của hội thoại. Token không trả về trình duyệt, không ghi CSDL, không vào nhật ký (nhật ký không bao giờ in URL).
- *  3. SSRF: mọi bước (kể cả chuyển hướng, tối đa `AVATAR_FETCH.maxRedirects`) phải là https tới host trong `AVATAR_PROXY_HOSTS`; bước
- *     chuyển hướng KHÔNG mang token. Hết giờ / quá cỡ / không phải ảnh raster ⇒ dừng.
+ *  3. SSRF: bước đầu phải là https tới host trong `AVATAR_PROXY_HOSTS`; bước chuyển hướng (tối đa `AVATAR_FETCH.maxRedirects`) chỉ
+ *     tới CDN ảnh `AVATAR_CDN_HOSTS` và KHÔNG BAO GIỜ mang token (máy chủ bỏ mọi tham số khoá, kể cả khi Pancake chép token vào
+ *     `Location`). Hết giờ / quá cỡ / không phải ảnh raster (200 text/html là trang SPA của Pancake) ⇒ dừng.
+ *
+ * Hai dạng ref (avatar-profile.ts): URL đã bỏ khoá (mục 1b) và ĐIỂM CUỐI ẢNH PANCAKE `PANCAKE_AVATAR_ENDPOINT_BASE/pages/<page>/avatar/<psid>`
+ * (mục 1c — nguồn duy nhất đo được trả ảnh, 11/10/2026: 301 ⇒ CDN ảnh của Pancake). Ref lấy LÚC ĐỌC bằng `avatarProxyRefFor`.
  *  4. ĐỆM: LRU trong bộ nhớ có trần số mục + trần byte, theo (tổ chức, hội thoại, phiên bản ref); lỗi đệm ngắn hơn để không hỏi
  *     Pancake mỗi lần mở trang mà cũng không kẹt mãi. Trình duyệt giữ `private, max-age=86400` + ETag.
  *
@@ -97,9 +101,12 @@ export type AvatarProxyResult =
   | { status: 304; etag: string }
   | { status: 403 | 404; reason: "NO_PERMISSION" | "NO_CONVERSATION" | "NO_REF" | "NO_TOKEN" | "FETCH_FAILED" | "CACHED_FAILURE" };
 
-/** Token của kết nối Pancake — chỉ khi kết nối đang bật VÀ đúng page. Không ném. */
+/** Token Pancake của ĐÚNG page: hàng page riêng (đang bật) trước, chưa có hàng thì kết nối đơn cũ khi đúng page. Không ném. */
 async function defaultPageToken(pageId: string): Promise<string | null> {
   try {
+    const own = await openChannelPageToken(FANPAGE_CONNECTOR, pageId);
+    if (own.ok) return own.token;
+    if (own.known) return null;
     const conn = await openActiveConnection(FANPAGE_CONNECTOR);
     if (!conn.ok || (conn.settings.pageId ?? "").trim() !== pageId) return null;
     return (conn.secrets.pageAccessToken ?? "").trim() || null;
@@ -110,6 +117,14 @@ async function defaultPageToken(pageId: string): Promise<string | null> {
 
 /** URL tải lần đầu: gắn token (nếu ref đòi) CHỈ cho host Pancake + đúng page. `null` ⇒ không được gọi. HÀM THUẦN. */
 export function avatarFetchUrl(ref: PancakeAvatarRef, pageId: string | null, token: string | null): string | null {
+  if (isEndpointAvatarRef(ref)) {
+    // Điểm cuối ảnh Pancake: ĐÚNG page của hội thoại, có token — không thì không gọi.
+    if (!pageId || ref.pageId !== pageId || !token) return null;
+    const e = new URL(pancakeAvatarEndpointUrl(ref));
+    if (!isAvatarTokenHost(e.hostname)) return null;
+    e.searchParams.set("page_access_token", token);
+    return e.toString();
+  }
   const u = new URL(ref.url);
   if (!isAllowedAvatarHost(u.hostname)) return null;
   if (!ref.tokenParams.length) return u.toString();
@@ -120,15 +135,18 @@ export function avatarFetchUrl(ref: PancakeAvatarRef, pageId: string | null, tok
   return u.toString();
 }
 
-/** Một URL ở BẤT KỲ bước nào có được phép gọi không: https, không tài khoản / cổng lạ, host trong danh sách. HÀM THUẦN. */
-export function avatarHopAllowed(raw: string): boolean {
+/**
+ * Một URL có được phép gọi ở bước `hop` không: https, không tài khoản / cổng lạ; bước 0 host trong `AVATAR_PROXY_HOSTS`, bước chuyển
+ * hướng chỉ CDN ảnh (`AVATAR_CDN_HOSTS`). HÀM THUẦN.
+ */
+export function avatarHopAllowed(raw: string, hop = 0): boolean {
   let u: URL;
   try {
     u = new URL(raw);
   } catch {
     return false;
   }
-  return u.protocol === "https:" && !u.username && !u.password && !u.port && isAllowedAvatarHost(u.hostname);
+  return u.protocol === "https:" && !u.username && !u.password && !u.port && (hop === 0 ? isAllowedAvatarHost(u.hostname) : isAvatarCdnHost(u.hostname));
 }
 
 async function readCapped(res: Response, max: number): Promise<Uint8Array | null> {
@@ -160,17 +178,30 @@ async function readCapped(res: Response, max: number): Promise<Uint8Array | null
   return out;
 }
 
+/**
+ * Header `accept` theo bước — ĐO trên production (ops avatar-proxy-check, run 38115995755, HSLC 5/5 hội thoại): điểm cuối ảnh Pancake
+ * trả **406** với `accept: image/*` và **301** sang CDN với accept MỌI KIỂU; bước CDN ảnh của Pancake trả 200 image/jpeg với
+ * `image/*`. Nên bước đầu nhận mọi kiểu, bước chuyển hướng giữ `image/*` (đã đo chạy) — và bước cuối VẪN phải là ảnh raster
+ * (`IMAGE_TYPES`), nên nới header bước đầu không làm proxy nhận HTML. HÀM THUẦN.
+ */
+export function avatarAcceptFor(hop: number): string {
+  return hop === 0 ? "*/*" : "image/*";
+}
+
 /** Tải ảnh: tự đi chuyển hướng (không để `fetch` tự theo), kiểm host từng bước, bước sau KHÔNG mang token. Không ném. */
 export async function fetchAvatarImage(firstUrl: string, fetchImpl: typeof fetch): Promise<{ body: Uint8Array; contentType: string } | null> {
   let url = firstUrl;
   try {
     for (let hop = 0; hop <= AVATAR_FETCH.maxRedirects; hop += 1) {
-      if (!avatarHopAllowed(url)) return null;
-      const res = await fetchImpl(url, { method: "GET", redirect: "manual", headers: { accept: "image/*" }, signal: AbortSignal.timeout(AVATAR_FETCH.timeoutMs) });
+      if (!avatarHopAllowed(url, hop)) return null;
+      const res = await fetchImpl(url, { method: "GET", redirect: "manual", headers: { accept: avatarAcceptFor(hop) }, signal: AbortSignal.timeout(AVATAR_FETCH.timeoutMs) });
       if (res.status >= 300 && res.status < 400) {
         const loc = res.headers.get("location");
         if (!loc) return null;
-        url = new URL(loc, url).toString();
+        // Bước sau KHÔNG mang token: bỏ mọi tham số khoá (Pancake có thể chép token vào Location); bỏ không được ⇒ dừng.
+        const next = stripAvatarToken(new URL(loc, url).toString());
+        if (!next) return null;
+        url = next;
         continue;
       }
       if (res.status !== 200) return null;
@@ -202,9 +233,9 @@ export async function avatarProxyCore(user: SessionUser, conversationId: unknown
   if (typeof conversationId !== "string" || !/^[0-9a-f-]{36}$/i.test(conversationId)) return { status: 404, reason: "NO_CONVERSATION" };
   const db = await getDb();
   const c = schema.salesChatConversations;
-  const [conv] = await db.select({ id: c.id, channel: c.channel, pageId: c.pageId, state: c.state }).from(c).where(eq(c.id, conversationId)).limit(1);
+  const [conv] = await db.select({ id: c.id, channel: c.channel, pageId: c.pageId, threadId: c.threadId, state: c.state }).from(c).where(eq(c.id, conversationId)).limit(1);
   if (!conv || conv.channel === "TEST") return { status: 404, reason: "NO_CONVERSATION" };
-  const ref = avatarProxyRefOfState(conv.state);
+  const ref = avatarProxyRefFor(conv.state, conv)?.ref;
   if (!ref) return { status: 404, reason: "NO_REF" };
 
   const now = (deps.now ?? Date.now)();
@@ -216,7 +247,8 @@ export async function avatarProxyCore(user: SessionUser, conversationId: unknown
     return etagMatches(ifNoneMatch, hit.etag) ? { status: 304, etag: hit.etag } : { status: 200, body: hit.body, contentType: hit.contentType, etag: hit.etag };
   }
 
-  const token = ref.tokenParams.length && conv.pageId ? await (deps.pageToken ?? defaultPageToken)(conv.pageId) : null;
+  const needsToken = isEndpointAvatarRef(ref) || ref.tokenParams.length > 0;
+  const token = needsToken && conv.pageId ? await (deps.pageToken ?? defaultPageToken)(conv.pageId) : null;
   const first = avatarFetchUrl(ref, conv.pageId, token);
   if (!first) {
     cache.set(key, { at: now, ok: false });

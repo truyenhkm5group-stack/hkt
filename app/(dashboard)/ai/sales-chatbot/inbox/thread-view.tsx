@@ -11,6 +11,7 @@ import { isManualOrderId } from "@/lib/constants/manual-orders";
 import { assignConversationAction, claimConversationAction, releaseConversationAction, sendStaffReplyAction } from "@/lib/actions/sales-inbox";
 import { formatDateTime, formatNumber, vnClock, vnDateKey } from "@/lib/format";
 import { insertIntoDraft } from "@/lib/sales-chatbot/inbox-composer-shared";
+import { handoffQueueLine } from "@/lib/sales-chatbot/handoff-routing-shared";
 import { avatarHrefOf, STAFF_IMAGE_MAX_BYTES, STAFF_IMAGES_MAX, STAFF_REPLY_MAX, type InboxOrder, type InboxThread, type TimelineItem } from "@/lib/sales-chatbot/inbox-shared";
 import { cn } from "@/lib/utils";
 import { AvatarLinkWrap, ChannelAvatar } from "./avatar";
@@ -269,6 +270,16 @@ export function InboxThreadView({
                 {" · "}
                 {thread.assigneeName ? `Người nhận: ${thread.assigneeName}` : "Chưa ai nhận"}
               </p>
+              {thread.handoffQueue ? (
+                <p
+                  className={cn("truncate text-[12px]", thread.handoffQueue.unowned || thread.handoffQueue.slaState === "BREACHED" ? "font-semibold text-red-600 dark:text-red-400" : "text-amber-700 dark:text-amber-300")}
+                  data-testid="inbox-handoff-queue"
+                  data-handoff-owner={thread.handoffQueue.ownerKind}
+                  suppressHydrationWarning
+                >
+                  AI đã dừng · {handoffQueueLine(thread.handoffQueue, Date.now())}
+                </p>
+              ) : null}
               <LabelsPanel key={thread.labels.map((l) => l.id).join()} conversationId={thread.id} labels={thread.labels} allLabels={thread.allLabels} canEdit={thread.canWork} canManage={thread.canManage} />
             </div>
           </div>

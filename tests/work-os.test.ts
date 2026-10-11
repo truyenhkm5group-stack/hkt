@@ -263,7 +263,7 @@ export async function testWorkOs(db: Db) {
     một con người (AGENTS.md mục 36), nên phép chiếu lên `/work` để ô người phụ trách RỖNG và gắn
     nhãn "máy đang cầm" — nếu không, mọi thẻ điểm nhân sự sẽ đếm việc của máy thành việc của người.
   */
-  assert.deepEqual([...ASSIGNEE_OWNED_BY_SOURCE].sort(), ["CS_CASE", "SHIPMENT_CARE", "TECH_TASK"], "ba nguồn có cột người/agent phụ trách trong bảng nghiệp vụ");
+  assert.deepEqual([...ASSIGNEE_OWNED_BY_SOURCE].sort(), ["CS_CASE", "SALES_CHAT_HANDOFF", "SHIPMENT_CARE", "TECH_TASK"], "bốn nguồn có cột người/agent phụ trách trong bảng nghiệp vụ (hội thoại chatbot: sales_chat_conversations.assignee_user_id — P0 11/10/2026)");
   const giaoOverlay = await assignWork(csKey, `${P}u-linh`, mai);
   assert.ok("error" in giaoOverlay, "lớp công việc KHÔNG được ghi người phụ trách cho case CSKH — đó là sự thật thứ hai");
   assert.match(giaoOverlay.error, /miền nghiệp vụ/, "lời từ chối phải chỉ sang đúng nơi giữ người phụ trách");

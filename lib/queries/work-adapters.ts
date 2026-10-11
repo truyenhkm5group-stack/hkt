@@ -280,6 +280,17 @@ export async function adaptCsCases(now: Date, closedSince: Date | null = null): 
   return items;
 }
 
+/* ═══════════════════ 1b · HỘI THOẠI AI BÁN HÀNG CHỜ NGƯỜI ═══════════════════ */
+
+/**
+ * Nguồn: `sales_chat_conversations` đang AI im (chuyển người · AI hỏng · tiếp quản) — ĐÚNG truy vấn của hộp thư và câu đếm «chuyển người
+ * không chủ» (`lib/sales-chatbot/handoff-routing.ts`). Tệp này chỉ gọi lại; nạp muộn vì đường chatbot kéo theo cả bộ máy kênh nhắn tin.
+ */
+export async function adaptSalesChatHandoffs(now: Date): Promise<WorkItem[]> {
+  const { handoffWorkItems } = await import("@/lib/sales-chatbot/handoff-routing");
+  return handoffWorkItems(now);
+}
+
 /* ═══════════════════ 2 · CARE VẬN ĐƠN ═══════════════════ */
 
 export async function adaptShipmentCare(now: Date, closedSince: Date | null = null): Promise<WorkItem[]> {
@@ -1227,6 +1238,7 @@ export async function collectWorkItems(opts: CollectOptions = {}): Promise<{ ite
 
   const groups = await Promise.all([
     want("CS_CASE") ? guard("CS_CASE", () => adaptCsCases(now, closedSince)) : [],
+    want("SALES_CHAT_HANDOFF") ? guard("SALES_CHAT_HANDOFF", () => adaptSalesChatHandoffs(now)) : [],
     want("SHIPMENT_CARE") ? guard("SHIPMENT_CARE", () => adaptShipmentCare(now, closedSince)) : [],
     want("FULFILLMENT_EXCEPTION") ? guard("FULFILLMENT_EXCEPTION", () => adaptFulfillment()) : [],
     want("ORDER_DUPLICATE") ? guard("ORDER_DUPLICATE", () => adaptDuplicateOrders(now)) : [],

@@ -28,7 +28,7 @@ import "dotenv/config";
 import { inArray, isNotNull, sql } from "drizzle-orm";
 import { getDbForInspection, schema, type Db } from "@/db";
 import { findOrganization } from "@/lib/platform/organizations";
-import { AVATAR_PROXY_HOSTS, avatarLinkOf, avatarProxyRefOfState, avatarStatusOf, type AvatarLinkReason, type AvatarStatus, type FacebookIdInput } from "@/lib/sales-chatbot/avatar-profile";
+import { AVATAR_PROXY_HOSTS, avatarLinkOf, avatarProxyRefFor, avatarStatusOf, isEndpointAvatarRef, pancakeThreadPsidOf, type AvatarLinkReason, type AvatarStatus, type FacebookIdInput } from "@/lib/sales-chatbot/avatar-profile";
 import { safeAvatarUrl } from "@/lib/sales-chatbot/inbox-shared";
 import { rowsOf } from "@/lib/sql-rows";
 
@@ -65,11 +65,7 @@ export function idShapeOf(v: unknown): IdShape {
 
 /** Phần PSID của mã hội thoại Pancake INBOX `<page>_<PSID>` — không đúng dạng ⇒ `null`. HÀM THUẦN. */
 export function pancakeThreadPsid(threadId: string | null | undefined, pageId: string | null | undefined): string | null {
-  const t = (threadId ?? "").trim();
-  const p = (pageId ?? "").trim();
-  if (!p || !t.startsWith(`${p}_`)) return null;
-  const rest = t.slice(p.length + 1);
-  return /^\d{5,30}$/.test(rest) ? rest : null;
+  return pancakeThreadPsidOf(threadId, pageId);
 }
 
 export type AuditConversation = { channel: string; pageId: string | null; threadId: string | null; customerId: string | null; transport: string | null; state: unknown };
@@ -81,8 +77,10 @@ export type AvatarAuditReport = {
   withAvatarUrl: number;
   /** Hội thoại có ref ảnh Pancake đã bỏ khoá (proxy ERP) — chỉ đếm, không URL. */
   withProxyRef: number;
-  /** Ref proxy theo HỌ host đã khai (`AVATAR_PROXY_HOSTS`) + số ref cần gắn token page lúc tải. */
+  /** Ref proxy theo HỌ host đã khai (`AVATAR_PROXY_HOSTS`, chỉ ref dạng URL) + số ref cần gắn token page lúc tải. */
   proxyRefHost: Record<string, number>;
+  /** Ref theo DẠNG + NGUỒN: `URL` · `ENDPOINT_STORED` (lượt đồng bộ ghi) · `ENDPOINT_DERIVED` (dẫn xuất lúc đọc từ `<page>_<PSID>`). */
+  proxyRefKind: Record<string, number>;
   proxyNeedsToken: number;
   /** Hộp thư SẼ hiện ảnh (URL trực tiếp hoặc proxy) — cùng thứ tự `inbox.ts::avatarOf`. */
   shown: number;
@@ -117,6 +115,7 @@ export function auditAvatars(convs: readonly AuditConversation[], customers: Rea
     withAvatarUrl: 0,
     withProxyRef: 0,
     proxyRefHost: {},
+    proxyRefKind: {},
     proxyNeedsToken: 0,
     shown: 0,
     pancakeVia: {},
@@ -137,15 +136,22 @@ export function auditAvatars(convs: readonly AuditConversation[], customers: Rea
     const meta = (st.messengerProfile && typeof st.messengerProfile === "object" ? st.messengerProfile : {}) as Record<string, unknown>;
     const direct = Boolean(safeAvatarUrl(meta.pic) ?? safeAvatarUrl(st.pancakeAvatarUrl));
     if (direct) r.withAvatarUrl += 1;
-    const ref = avatarProxyRefOfState(st);
-    if (ref) {
+    const found = avatarProxyRefFor(st, c);
+    const ref = found?.ref ?? null;
+    if (found && ref) {
       r.withProxyRef += 1;
-      const host = new URL(ref.url).hostname.toLowerCase();
-      bump(r.proxyRefHost, AVATAR_PROXY_HOSTS.find((d) => host === d || host.endsWith(`.${d}`)) ?? "khác");
-      if (ref.tokenParams.length) r.proxyNeedsToken += 1;
+      if (isEndpointAvatarRef(ref)) {
+        bump(r.proxyRefKind, found.source === "STORED" ? "ENDPOINT_STORED" : "ENDPOINT_DERIVED");
+        r.proxyNeedsToken += 1;
+      } else {
+        bump(r.proxyRefKind, "URL");
+        const host = new URL(ref.url).hostname.toLowerCase();
+        bump(r.proxyRefHost, AVATAR_PROXY_HOSTS.find((d) => host === d || host.endsWith(`.${d}`)) ?? "khác");
+        if (ref.tokenParams.length) r.proxyNeedsToken += 1;
+      }
     }
     if (direct || ref) r.shown += 1;
-    const d = avatarStatusOf(st, now);
+    const d = avatarStatusOf(st, now, c);
     r.byStatus[d.status] += 1;
     bump(r.byReason, d.reason);
     if (typeof meta.at === "string" && meta.error) bump(r.metaErrorCodes, meta.code === null || meta.code === undefined ? "không mã (dòng trước 10/10)" : `#${String(meta.code)}${meta.subcode ? `/${String(meta.subcode)}` : ""}`);
@@ -274,7 +280,7 @@ async function main() {
   console.log(`Lý do ảnh: ${fmt(rep.byReason)}`);
   console.log(`Graph lỗi theo mã: ${fmt(rep.metaErrorCodes)}`);
   console.log(`Payload Pancake nói về ảnh: ${fmt(rep.pancakeOutcome)} · theo đường ${fmt(rep.pancakeVia)}`);
-  console.log(`Ảnh qua proxy: ref ${rep.withProxyRef} (host ${fmt(rep.proxyRefHost)} · cần token ${rep.proxyNeedsToken}) · hộp thư sẽ hiện ảnh ${rep.shown}/${rep.conversations}`);
+  console.log(`Ảnh qua proxy: ref ${rep.withProxyRef} (dạng ${fmt(rep.proxyRefKind)} · host URL ${fmt(rep.proxyRefHost)} · cần token ${rep.proxyNeedsToken}) · hộp thư sẽ hiện ảnh ${rep.shown}/${rep.conversations}`);
   console.log(`Link: Facebook ${rep.link.facebook} · hồ sơ nội bộ ${rep.link.internal} · không link ${rep.link.none} · lý do ${fmt(rep.link.byReason as Record<string, number>)}`);
   console.log(`Khách đã nối ${rep.linkedCustomers}: fb_id ${fmt(rep.linkedFbId)} · conversation_link ${fmt(rep.linkedConversationLink)}`);
   console.log(`fb_id so với PSID trong mã hội thoại Pancake: trùng ${rep.fbIdVsThreadPsid.equal} · khác ${rep.fbIdVsThreadPsid.different} · mã hội thoại không dạng <page>_<PSID> ${rep.fbIdVsThreadPsid.threadNotPsidShaped}`);
@@ -287,7 +293,7 @@ async function main() {
   tomTat(`Trạng thái ảnh: AVAILABLE ${s.PROFILE_AVAILABLE} · PERMISSION_DENIED ${s.PROFILE_PERMISSION_DENIED} · NOT_AVAILABLE ${s.PROFILE_NOT_AVAILABLE} · EXPIRED ${s.PROFILE_EXPIRED} · NOT_FETCHED ${s.PROFILE_NOT_FETCHED}`);
   tomTat(`Lý do ảnh: ${fmt(rep.byReason)}`);
   tomTat(`Graph lỗi theo mã: ${fmt(rep.metaErrorCodes)} · payload Pancake: ${fmt(rep.pancakeOutcome)} · theo đường ${fmt(rep.pancakeVia)}`);
-  tomTat(`Ảnh qua proxy: ref ${rep.withProxyRef} (host ${fmt(rep.proxyRefHost)} · cần token ${rep.proxyNeedsToken}) · hộp thư sẽ hiện ảnh ${rep.shown}/${rep.conversations}`);
+  tomTat(`Ảnh qua proxy: ref ${rep.withProxyRef} (dạng ${fmt(rep.proxyRefKind)} · host URL ${fmt(rep.proxyRefHost)} · cần token ${rep.proxyNeedsToken}) · hộp thư sẽ hiện ảnh ${rep.shown}/${rep.conversations}`);
   tomTat(`Bấm ảnh: trang Facebook hợp lệ ${rep.link.facebook} · hồ sơ nội bộ ${rep.link.internal} · không link ${rep.link.none} · lý do ${fmt(rep.link.byReason as Record<string, number>)}`);
   tomTat(`Khách đã nối ${rep.linkedCustomers}: fb_id ${fmt(rep.linkedFbId)} · conversation_link ${fmt(rep.linkedConversationLink)} · fb_id = PSID mã hội thoại: trùng ${rep.fbIdVsThreadPsid.equal} / khác ${rep.fbIdVsThreadPsid.different} / không dạng ${rep.fbIdVsThreadPsid.threadNotPsidShaped}`);
   tomTat(`Cả bảng khách ${scan.length}${capped ? "+" : ""}: fb_id ${fmt(allFb)} · conversation_link ${fmt(allLink)}`);

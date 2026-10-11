@@ -242,7 +242,7 @@ function testSource() {
   // Đường ghi Pancake: cùng một lõi, cùng câu UPDATE của noteCustomerArrived.
   const fp = readFileSync("lib/sales-chatbot/fanpage.ts", "utf8");
   assert.match(fp, /noteCustomerArrived\(ev\.pageId, ev\.threadId, now, ev\.avatar\)/);
-  assert.match(fp, /pancakeAvatarFactsOf\(c, "POLL"\)/, "lượt quét lại mang ảnh của danh sách hội thoại");
+  assert.match(fp, /pancakeAvatarFactsOf\(c, "POLL", pageId\)/, "lượt quét lại mang ảnh của danh sách hội thoại (kèm page cho điểm cuối ảnh)");
   const hs = readFileSync("lib/sales-chatbot/history.ts", "utf8");
   assert.match(hs, /return pancakeAvatarFactsOf\(conv\)\.url;/, "lượt nhập lịch sử dùng CÙNG lõi");
   assert.match(hs, /pancakeAvatarPatch\(st, /);

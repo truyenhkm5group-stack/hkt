@@ -15,7 +15,8 @@ import { ORDER_OUTCOME } from "@/lib/queries/return-rate";
 import { appendContextMessages, resumeConversationToAi, SHOP_SAID } from "@/lib/sales-chatbot/engine";
 import { recordConversationEvent } from "@/lib/sales-chatbot/events";
 import { aiHoldOf, aiHoldView, humanResumeReason } from "@/lib/sales-chatbot/ai-hold-shared";
-import { avatarProxyHref, avatarProxyRefOfState } from "@/lib/sales-chatbot/avatar-profile";
+import { aiSilentSql, clearHandoffQueue, handoffViewContext, handoffViewOf, notifyHandoffAssignee } from "@/lib/sales-chatbot/handoff-routing";
+import { avatarProxyHref, avatarProxyRefFor, type AvatarConvContext } from "@/lib/sales-chatbot/avatar-profile";
 import {
   aiReplyingSql,
   classifyInboxState,
@@ -70,6 +71,7 @@ type StaffImageType = (typeof STAFF_IMAGE_TYPES)[number];
 import { sendBotText, sendPageImages } from "@/lib/sales-chatbot/messenger";
 import { draftCopilotSuggestion, loadModeConfig } from "@/lib/sales-chatbot/operating-mode";
 import { feedbackFor } from "@/lib/sales-chatbot/inbox-feedback";
+import { inboxSearchCondition } from "@/lib/sales-chatbot/inbox-search";
 import { CUSTOMER_LEVELS, parseCustomerLevel, type CustomerLevel } from "@/lib/sales-chatbot/levels-shared";
 import type { ChatState } from "@/lib/sales-chatbot/tools";
 import { assessCustomerRisk } from "@/lib/alerts/risk";
@@ -211,13 +213,14 @@ function textOf(blocks: readonly AiBlock[] | null | undefined): string {
 
 /**
  * Ảnh đại diện khách: Meta `profile_pic` (đọc sau lượt trả lời — messenger.ts) rồi ảnh Pancake không khoá (lượt nhập lịch sử), rồi
- * ảnh Pancake MANG KHOÁ đi qua proxy của ERP (`state.pancakeAvatarRef` ⇒ đường dẫn TƯƠNG ĐỐI `/api/ai-sales/avatar/<mã>` — máy chủ gắn
- * token lúc tải, avatar-profile.ts mục 1b). Không có gì ⇒ `null` ⇒ chữ cái.
+ * ảnh Pancake qua proxy của ERP (đường dẫn TƯƠNG ĐỐI `/api/ai-sales/avatar/<mã>` — máy chủ gắn token lúc tải): ref đã lưu, hoặc điểm
+ * cuối ảnh Pancake dẫn xuất từ CHÍNH hội thoại `<page>_<PSID>` (`avatarProxyRefFor`, avatar-profile.ts mục 1b · 1c). Không có gì ⇒
+ * `null` ⇒ chữ cái.
  */
-function avatarOf(state: unknown, conversationId: string): string | null {
+function avatarOf(state: unknown, conversationId: string, conv: AvatarConvContext): string | null {
   const st = (state && typeof state === "object" ? state : {}) as Record<string, unknown>;
   const meta = st.messengerProfile && typeof st.messengerProfile === "object" ? (st.messengerProfile as Record<string, unknown>).pic : null;
-  const ref = avatarProxyRefOfState(st);
+  const ref = avatarProxyRefFor(st, conv)?.ref;
   return safeAvatarUrl(meta) ?? safeAvatarUrl(st.pancakeAvatarUrl) ?? (ref ? avatarProxyHref(conversationId, ref) : null);
 }
 
@@ -264,10 +267,9 @@ export async function listInbox(
   if (q.channel) base.push(eq(c.channel, q.channel));
   if (q.page) base.push(eq(c.pageId, q.page));
   if (q.label) base.push(sql`exists (select 1 from "sales_chat_conversation_labels" cl where cl.conversation_id = "${sql.raw(C)}"."id" and cl.label_id = ${q.label})`);
-  if (q.q) {
-    const like = `%${q.q.replace(/[%_\\]/g, (m) => `\\${m}`)}%`;
-    base.push(or(sql`${cu.name} ilike ${like}`, sql`${cu.phone} ilike ${like}`, sql`${c.customerPhone} ilike ${like}`, sql`${c.state}->'customer'->>'name' ilike ${like}`, sql`${c.state}->'customer'->>'phone' ilike ${like}`, sql`${INBOUND_NAME} ilike ${like}`)!);
-  }
+  // Ô tìm: SĐT chuẩn hoá · tên bỏ dấu / khoảng trắng · tin khách · đơn · mã đơn — MỘT chỗ dựng (inbox-search.ts).
+  const searchCond = await inboxSearchCondition(q.q);
+  if (searchCond) base.push(searchCond);
   if (q.phone === "HAS") base.push(HAS_PHONE);
   if (q.phone === "NONE") base.push(sql`not ${HAS_PHONE}`);
   // Ai đang trả lời (INBOX_HANDLERS) — CÙNG điều kiện với huy hiệu trên hàng (`classifyInboxState`, inbox-states.ts — một nguồn).
@@ -360,6 +362,10 @@ export async function listInbox(
       unreadN: personalUnreadCountSql(user.id, true),
       closed: CLOSED,
       transport: THREAD_TRANSPORT,
+      // Hàng đợi người khi AI im (P0 11/10/2026 — handoff-routing.ts): «chờ X phút · phụ trách · hạn» của hàng.
+      aiSilent: aiSilentSql(now),
+      handoffQueuedAt: c.handoffQueuedAt,
+      assigneeActive: u.active,
     })
     .from(c)
     .leftJoin(cu, eq(cu.id, c.customerId))
@@ -415,6 +421,7 @@ export async function listInbox(
   const labels = await labelsFor(rows.map((r) => r.id));
   const pageNames = new Map((await inboxPages()).map((p) => [p.id, p.name]));
   const facts = rows.some((r) => r.channel === "FANPAGE" && !r.transport) ? await loadTransportFacts().catch(() => null) : null;
+  const handoffCtx = rows.some((r) => r.aiSilent) ? await handoffViewContext() : null;
   return {
     ok: true,
     counts,
@@ -456,7 +463,7 @@ export async function listInbox(
         // Bất biến: chưa đọc ⇔ số tin khách sau con trỏ ≥ 1 — KHÔNG còn `max(1, …)` (nó in «1» cho hội thoại không có tin khách nào).
         unread: st.humanUnread,
         unreadCount: unreadN,
-        avatarUrl: avatarOf(r.state, r.id),
+        avatarUrl: avatarOf(r.state, r.id, r),
         aiHold: hold,
         handling: inboxHandlingFrom(st),
         needsHuman: st.needsHuman,
@@ -468,6 +475,9 @@ export async function listInbox(
         hasOrder: Boolean(r.hasOrder),
         labels: labels.get(r.id) ?? [],
         level: parseCustomerLevel(r.level),
+        handoffQueue: handoffCtx
+          ? handoffViewOf({ id: r.id, silent: Boolean(r.aiSilent), queuedAt: r.handoffQueuedAt, assigneeUserId: r.assigneeUserId, assigneeName: r.assigneeName, assigneeActive: Boolean(r.assigneeActive), lastStaffAt: r.lastStaffAt, waitingSince: r.needsReply ? r.lastCustomerAt : null }, handoffCtx, now)
+          : null,
       };
     }),
   };
@@ -650,7 +660,17 @@ export async function loadInboxThread(user: SessionUser, conversationId: unknown
   }
 
   let assigneeName: string | null = null;
-  if (conv.assigneeUserId) assigneeName = (await db.select({ name: schema.users.name }).from(schema.users).where(eq(schema.users.id, conv.assigneeUserId)).limit(1))[0]?.name ?? null;
+  let assigneeActive = false;
+  if (conv.assigneeUserId) {
+    const [a] = await db.select({ name: schema.users.name, active: schema.users.active }).from(schema.users).where(eq(schema.users.id, conv.assigneeUserId)).limit(1);
+    assigneeName = a?.name ?? null;
+    assigneeActive = Boolean(a?.active);
+  }
+  // Hàng đợi người khi AI im — cùng hàm với dòng danh sách (handoff-routing.ts).
+  const [silentRow] = await db.select({ silent: aiSilentSql(now), waiting: WAITING_REPLY_SQL }).from(schema.salesChatConversations).where(eq(schema.salesChatConversations.id, conv.id)).limit(1);
+  const handoffQueue = silentRow?.silent
+    ? handoffViewOf({ id: conv.id, silent: true, queuedAt: conv.handoffQueuedAt, assigneeUserId: conv.assigneeUserId, assigneeName, assigneeActive, lastStaffAt: conv.lastStaffAt, waitingSince: silentRow.waiting ? conv.lastCustomerAt : null }, await handoffViewContext(), now)
+    : null;
   const window = sendWindowOf(conv, now);
   const canReply = canReplyTo(user);
   // KHÔNG đánh dấu đọc ở đây (trước 10/10/2026 tối: `staff_seen_at = now` — tin khách tới giữa câu đọc trên và câu ghi này bị coi là đã
@@ -668,7 +688,7 @@ export async function loadInboxThread(user: SessionUser, conversationId: unknown
       handoffReason: conv.handoffReason,
       botYields: conv.status === "HANDOFF",
       aiHold: aiHoldView(conv, now),
-      avatarUrl: avatarOf(conv.state, conv.id),
+      avatarUrl: avatarOf(conv.state, conv.id, conv),
       cooldownMinutes: await humanCooldownMinutes(),
       // Lý do AI KHÔNG trả lời — hỏi đúng các cổng của đường xử lý (ai-status.ts). Không rỗng ⇒ màn hình không được nói «AI đang trả lời».
       aiBlocks: await conversationAiBlocks(conv),
@@ -678,6 +698,7 @@ export async function loadInboxThread(user: SessionUser, conversationId: unknown
         : { id: null, name: st.customer?.name || channelName || "Khách", phone: st.customer?.phone ?? null, address: st.customer?.address ?? null, province: null },
       assigneeUserId: conv.assigneeUserId,
       assigneeName,
+      handoffQueue,
       window,
       items: items.slice(-TIMELINE_MAX),
       orders,
@@ -870,6 +891,8 @@ export async function assignConversationCore(user: SessionUser, conversationId: 
   const [target] = await db.select({ id: schema.users.id, active: schema.users.active }).from(schema.users).where(eq(schema.users.id, assigneeUserId)).limit(1);
   if (!target?.active) return { ok: false, error: "Tài khoản không tồn tại hoặc đã khoá." };
   await db.update(schema.salesChatConversations).set({ assigneeUserId: target.id, assignedAt: new Date() }).where(eq(schema.salesChatConversations.id, conv.id));
+  // Giao một hội thoại đang chờ người ⇒ người được giao biết ngay (một tin mỗi đợt) — không phải tự mở hộp thư mới thấy.
+  if (target.id !== user.id) await notifyHandoffAssignee(conv.id, target.id).catch(() => false);
   await audit({ userId: user.id, userEmail: user.email, action: "SALES_INBOX_ASSIGN", entity: "SALES_CONVERSATION", entityId: conv.id, before: { assignee: conv.assigneeUserId }, after: { assignee: target.id }, reason: "Giao hội thoại ở hộp thư" });
   return { ok: true };
 }
@@ -906,6 +929,8 @@ export async function handBackToAiCore(user: SessionUser, conversationId: unknow
   const before = aiHoldOf(conv, at);
   const resumed = await resumeConversationToAi(conv.id);
   if (!resumed) return { ok: false, error: "Không trả lại được — hội thoại vừa đổi trạng thái." };
+  // AI nhận lại ⇒ rời hàng đợi người: xoá mốc vào hàng đợi ⇒ hết hạn (handoff-routing.ts). Chỉ khi hội thoại đã thật sự về `OPEN`.
+  await clearHandoffQueue(conv.id);
   const resumeReason = humanResumeReason(before) ?? "RETURNED";
   await recordConversationEvent(conv.id, { type: "ai.resumed", actorKind: "HUMAN", actorUserId: user.id, occurredAt: at, reasonCode: resumeReason, payload: { from: before.state, cause: before.cause }, key: `resume:inbox:${conv.id}:${at.getTime()}` });
   // Cùng mã nhật ký với thanh điều khiển: cho AI tiếp tục NGAY trong lúc nhường ≠ trả lại sau tiếp quản / cần người.
