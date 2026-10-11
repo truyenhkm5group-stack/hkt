@@ -15,16 +15,18 @@ const TOKEN = "PAGE_TOKEN_BI_MAT_ABCDEF123456";
 
 export function testAvatarProxyCheck() {
   console.log("Ops avatar-proxy-check (ảnh qua proxy hỏng ở bước nào):");
-  const legacy = { orgCode: ORG, status: "ACTIVE", lastTestOk: true, pageId: PAGE, hasSecrets: true };
-  assert.deepEqual(tokenVerdict(ORG, PAGE, { orgCode: ORG, status: "ACTIVE", hasSecrets: true }, legacy, true), { found: true, source: "HÀNG_PAGE_RIÊNG", why: "OK" });
-  assert.deepEqual(tokenVerdict(ORG, PAGE, { orgCode: ORG, status: "DISABLED", hasSecrets: true }, legacy, true), { found: false, source: "KHÔNG", why: "HÀNG_PAGE_DISABLED" }, "hàng page tắt ⇒ route DỪNG, không lùi về kết nối cũ");
-  assert.deepEqual(tokenVerdict(ORG, PAGE, { orgCode: ORG, status: "ACTIVE", hasSecrets: false }, legacy, true), { found: true, source: "KẾT_NỐI_ĐƠN_CŨ", why: "OK" }, "hàng page không token riêng ⇒ kết nối cũ");
-  assert.deepEqual(tokenVerdict(ORG, PAGE, null, legacy, true), { found: true, source: "KẾT_NỐI_ĐƠN_CŨ", why: "OK" });
-  assert.equal(tokenVerdict(ORG, PAGE, null, { ...legacy, lastTestOk: false }, true).why, "KẾT_NỐI_ACTIVE_CHƯA_KIỂM_ĐẠT");
-  assert.equal(tokenVerdict(ORG, PAGE, null, { ...legacy, pageId: "999" }, true).why, "KẾT_NỐI_KHÁC_PAGE");
-  assert.equal(tokenVerdict(ORG, PAGE, null, legacy, false).why, "KẾT_NỐI_KHÔNG_GIẢI_MÃ_ĐƯỢC");
-  assert.equal(tokenVerdict(ORG, PAGE, null, null, false).why, "KHÔNG_CÓ_HÀNG_PAGE · KHÔNG_CÓ_KẾT_NỐI");
-  assert.equal(tokenVerdict(ORG, PAGE, { orgCode: "khac", status: "ACTIVE", hasSecrets: true }, legacy, true).why, "HÀNG_PAGE_KHÁC_TỔ_CHỨC");
+  const legacy = { orgCode: ORG, status: "ACTIVE", lastTestOk: true };
+  const own = { orgCode: ORG, status: "ACTIVE" };
+  assert.deepEqual(tokenVerdict(ORG, own, legacy, true), { found: "CÓ", source: "HÀNG_PAGE_HOẶC_KẾT_NỐI_CŨ", why: "OK" });
+  assert.deepEqual(tokenVerdict(ORG, { ...own, status: "DISABLED" }, legacy, true), { found: "KHÔNG", source: "—", why: "HÀNG_PAGE_DISABLED" }, "hàng page tắt ⇒ route DỪNG, không lùi về kết nối cũ");
+  assert.deepEqual(tokenVerdict(ORG, own, { ...legacy, status: "DRAFT" }, true), { found: "CHƯA_CHẮC", source: "HÀNG_PAGE_HOẶC_KẾT_NỐI_CŨ", why: "HÀNG_PAGE_ACTIVE · KẾT_NỐI_DRAFT" }, "không phân định được nguồn ⇒ CHƯA_CHẮC, không đoán");
+  assert.equal(tokenVerdict(ORG, own, legacy, false).why, "KHÔNG_GIẢI_ĐƯỢC_TOKEN_CHO_PAGE");
+  assert.deepEqual(tokenVerdict(ORG, null, legacy, true), { found: "CÓ", source: "KẾT_NỐI_ĐƠN_CŨ", why: "OK" });
+  assert.equal(tokenVerdict(ORG, null, { ...legacy, lastTestOk: false }, true).why, "KHÔNG_CÓ_HÀNG_PAGE · KẾT_NỐI_ACTIVE_CHƯA_KIỂM_ĐẠT");
+  assert.equal(tokenVerdict(ORG, null, legacy, false).why, "KẾT_NỐI_KHÁC_PAGE_HOẶC_KHÔNG_GIẢI_ĐƯỢC");
+  assert.equal(tokenVerdict(ORG, null, null, false).why, "KHÔNG_CÓ_HÀNG_PAGE · KHÔNG_CÓ_KẾT_NỐI");
+  assert.equal(tokenVerdict(ORG, { orgCode: "khac", status: "ACTIVE" }, legacy, true).why, "HÀNG_PAGE_KHÁC_TỔ_CHỨC");
+  assert.equal(tokenVerdict(ORG, null, { ...legacy, orgCode: "khac" }, true).why, "KHÔNG_CÓ_HÀNG_PAGE · KẾT_NỐI_KHÁC_TỔ_CHỨC");
 
   const s301 = describeStep(301, "text/html; charset=utf-8", `https://content.pancake.vn/2.1-25/avatars/a.jpg?page_access_token=${TOKEN}`, `https://pages.fm/api/v1/pages/${PAGE}/avatar/1`);
   assert.equal(s301, "HTTP 301 · kiểu=text/html · Location=có host=content.pancake.vn https=có bước-sau=được");
@@ -43,6 +45,9 @@ export function testAvatarProxyCheck() {
   assert.match(code, /avatarProxyRefFor\(r\.state, r\)/, "ref bằng CÙNG hàm với hộp thư / route");
   assert.match(code, /avatarFetchUrl\(ref, r\.pageId, token\)/, "URL bằng CÙNG hàm với route");
   assert.match(code, /fetchAvatarImage\(first, fetch\)/, "đường thật = lib nguyên vẹn");
+  assert.doesNotMatch(code, /\bsecretsEnc\b|secrets_enc|\borgConnections\b|openSecrets/, "không chạm bản mã / bảng kết nối — chỉ qua hàm service");
+  assert.match(code, /pageTokensForOffboard\(db, org\.code, FANPAGE_CONNECTOR\)/);
+  assert.match(code, /connectionStatusRows\(db\)/);
   assert.doesNotMatch(code, /tomTat\([^\n]*\$\{(token|first|next|loc|r\.id|r\.threadId|pageId)\b/, "tóm tắt không nhận token / URL / mã");
   const ops = readFileSync(".github/workflows/ops-vps.yml", "utf8");
   assert.match(ops, /- avatar-proxy-check\s+#/);
