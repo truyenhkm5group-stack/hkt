@@ -330,7 +330,8 @@ function testSource() {
   assert.doesNotMatch(rowSrc, /<\/Link>|<a\b/, "không thẻ a / Link nào mở trong hàng ngoài link anh em");
   assert.match(rowSrc, /<AvatarLinkWrap link=\{avatarLink\}/, "ảnh đại diện có đích riêng (avatarHrefOf)");
   assert.match(rowSrc, /avatarHrefOf\(r\.customerId\)/, "đích ảnh = avatarHrefOf — không dựng facebook.com/<PSID>");
-  assert.match(list, /inboxDisplayRows\(rows, shown\.current, \{ activeId, filter: state\.filter, reads \}\)/, "danh sách vẽ qua hàm vá theo xác nhận đọc");
+  // Bản đã hiện có thể đi qua `shownForList` (P0 inbox-search: chỉ dùng khi CÙNG danh sách) — vẫn là ĐÚNG hàm vá theo xác nhận đọc.
+  assert.match(list, /inboxDisplayRows\(rows, (?:shown\.current|shownForList\(shown\.current, listKey\)), \{ activeId, filter: state\.filter, reads \}\)/, "danh sách vẽ qua hàm vá theo xác nhận đọc");
 
   // Nhãn mới, khoá lọc + tham số URL cũ giữ nguyên.
   assert.equal(INBOX_FILTER_LABEL.UNREAD, "Tin khách chưa đọc");
