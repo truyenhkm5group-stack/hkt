@@ -3,7 +3,7 @@
   "mission_id": "avatar-accept-header",
   "title": "Ảnh khách hộp thư: bước 1 gọi điểm cuối ảnh Pancake gửi accept */* (image/* bị 406 — đo production 5/5)",
   "business_goal": "",
-  "status": "VERIFYING",
+  "status": "DONE",
   "priority": "P1",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -23,13 +23,14 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-11T06:11:23.542Z",
-  "updated_at": "2026-10-11T07:47:42.364Z",
-  "last_heartbeat": "2026-10-11T06:11:41.309Z",
+  "updated_at": "2026-10-11T07:48:03.270Z",
+  "last_heartbeat": "2026-10-11T07:48:03.270Z",
   "definition_of_done": [],
   "evidence": {
     "merged": "#806 → 90f56278201bcd2aa810d23f66af1ca927a8c611",
     "verify": "PASS 90f56278201bcd2aa810d23f66af1ca927a8c611 2026-10-11T07:47:27.544Z",
-    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/38118946171"
+    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/38118946171",
+    "done": "Production 90f56278201b. ops avatar-proxy-check HSLC: «Kết luận: OK 5» (đường thật ĐƯỢC image/jpeg 2,9–4,6 KB; trước #806: FETCH_FAILED 5 vì accept image/* ⇒ 406). Trình duyệt hộp thư HSLC: 40/40 /api/ai-sales/avatar trả 200 image/*, ảnh khách thật hiện trên dòng danh sách (ảnh avatar-after-806.png). inbox-avatar-audit trước đó: ref 264/300. Trước chuỗi PR: 0/300 có ảnh."
   },
   "handoff": {
     "branch": "fix/avatar-accept-header",
