@@ -3,7 +3,7 @@
   "mission_id": "inbox-search",
   "title": "P0 hộp thư: tìm theo SĐT chuẩn hoá (0/+84/khoảng trắng) trong hồ sơ · lịch sử tin · đơn/khách, tên bỏ khoảng trắng, mã đơn; gợi ý «có ở Tất cả» khi bộ lọc rỗng; mở kết quả không nhầm hội thoại",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P0",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -23,9 +23,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-11T02:05:15.527Z",
-  "updated_at": "2026-10-11T03:58:10.690Z",
+  "updated_at": "2026-10-11T05:23:50.603Z",
   "last_heartbeat": "2026-10-11T03:57:23.022Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#798 → 8539ead78771dcdb7d849409a1c907bd1de92189"
+  },
   "handoff": {
     "branch": "fix/inbox-search",
     "sha": "f7cc1167f3f2cb6f17b1373da08b7baccac4cd35",
