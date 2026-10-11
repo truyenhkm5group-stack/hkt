@@ -1,0 +1,28 @@
+{
+  "schema": 1,
+  "mission_id": "sales-reliability-metrics",
+  "title": "/platform/saas: Financial Accuracy + Order Integrity + Response Reliability (sai giá · lệch báo giá/đơn · xác nhận giả · địa chỉ hỏng · handoff không chủ · lượt khách bị bỏ · chặn theo lý do · mất doanh thu do lỗi kỹ thuật)",
+  "business_goal": "",
+  "status": "BACKLOG",
+  "priority": "P1",
+  "risk": "MEDIUM",
+  "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "worker": null,
+  "worktree": null,
+  "branch": "feat/sales-reliability-metrics",
+  "base_sha": null,
+  "domains": [],
+  "owned_paths": [
+    "lib/saas/reliability-metrics.ts"
+  ],
+  "dependencies": [
+    "sales-integrity-audit"
+  ],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-11T02:25:22.100Z",
+  "updated_at": "2026-10-11T02:25:22.100Z",
+  "last_heartbeat": "2026-10-11T02:25:22.100Z",
+  "definition_of_done": []
+}
