@@ -2129,3 +2129,5 @@
 {"at":"2026-10-11T11:14:50.895Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DEPLOY_DISPATCHED","detail":"4e49e9f9fc2d · run 38134834876 https://github.com/truyenhkm5group-stack/hkt/actions/runs/38134834876"}
 {"at":"2026-10-11T11:16:33.325Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"VERIFY_PASS","mission":"followup-lifecycle","detail":"PASS 20e03918d4ce6c14f198f5aadc1eac3d353f7477 2026-10-11T11:16:21.505Z"}
 {"at":"2026-10-11T12:25:54.232Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"VERIFY_PASS","mission":"authoritative-quote","detail":"PASS 4e49e9f9fc2d0622519c9d2422d0c68ae9f22c00 2026-10-11T12:25:42.549Z"}
+{"at":"2026-10-11T13:20:26.952Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"CLAIM","mission":"price-mismatch-queue","detail":"RUNNING · 3 mẫu phạm vi · MEDIUM"}
+{"at":"2026-10-11T13:20:26.952Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"OVERLAP_ACCEPTED","mission":"price-mismatch-queue","detail":"OVERLAP_ACCEPTED với authoritative-quote: phạm vi tests/sales-quote-integrity.test.ts — cách tích hợp: tiếp authoritative-quote (#807 đã gộp)"}

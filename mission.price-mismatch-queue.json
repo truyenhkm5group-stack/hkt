@@ -1,0 +1,28 @@
+{
+  "schema": 1,
+  "mission_id": "price-mismatch-queue",
+  "title": "P0 giá: price-mismatch-scan --since (chứng minh lệch MỚI = 0) + --flag gắn cờ PRICE_MISMATCH vào hàng «Cần người kiểm» cho đơn cũ lệch (không đổi giá)",
+  "business_goal": "",
+  "status": "RUNNING",
+  "priority": "P0",
+  "risk": "MEDIUM",
+  "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "worker": null,
+  "worktree": null,
+  "branch": "fix/price-mismatch-queue",
+  "base_sha": "4e49e9f9fc2d0622519c9d2422d0c68ae9f22c00",
+  "domains": [],
+  "owned_paths": [
+    "scripts/price-mismatch-scan.ts",
+    "lib/constants/order-review.ts",
+    "tests/sales-quote-integrity.test.ts"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-11T13:20:26.862Z",
+  "updated_at": "2026-10-11T13:20:26.862Z",
+  "last_heartbeat": "2026-10-11T13:20:26.862Z",
+  "definition_of_done": []
+}
