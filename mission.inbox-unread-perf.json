@@ -32,18 +32,18 @@
     "0245": "2026-10-11T05:45:46.144Z"
   },
   "created_at": "2026-10-10T19:10:52.513Z",
-  "updated_at": "2026-10-11T05:45:46.144Z",
-  "last_heartbeat": "2026-10-11T01:22:06.333Z",
+  "updated_at": "2026-10-11T10:19:43.760Z",
+  "last_heartbeat": "2026-10-11T10:19:43.760Z",
   "definition_of_done": [],
   "handoff": {
     "branch": "fix/inbox-unread-perf",
-    "sha": "59b160288db8a36c31b1ada77b37e55dd50da67e",
-    "at": "2026-10-11T01:22:06.333Z",
+    "sha": "b222a779c0c4232243ac7f3cfe49717a4752068f",
+    "at": "2026-10-11T10:19:43.760Z",
     "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
     "title": "Hộp thư V3: tải danh sách chậm lại 510→824 ms p50 sau khi chưa đọc theo con trỏ người — đưa về ≤ mức cũ mà không đổi nghĩa chưa đọc",
-    "summary": "Chưa đọc = một phép so trên dòng, migration 0242",
+    "summary": "Hộp thư «Tin khách chưa đọc» = lượt khách mới nhất chưa xử lý theo ĐÚNG định nghĩa #803, lưu kết quả bằng cột turn_unhandled + trigger (thân hàm = câu SQL dựng từ TS, kiểm từng ký tự); fixture: SQL Tất cả 112 ms (trước #784 117, main 169), Chưa đọc 189 ms; FALSE_UNREAD 1.222 → 0",
     "tests": [
-      "đổi số 0241→0242 (chờ PR-3 0241 vào main rồi cập nhật nhánh)"
+      "typecheck · eslint · build · inbox-unread-perf (ma trận chủ shop qua listInbox + parity lưu sẵn≡hàm #803≡TS trên 3.019 hội thoại + trigger sau mọi đường ghi) · sales-inbox · inbox-* · response-ownership · migration-upgrade-path · repo-integrity · test-hygiene · platform-isolation-static · 5 đột biến · journal đỏ do khoảng số (hết khi gộp sau #803)"
     ]
   }
 }

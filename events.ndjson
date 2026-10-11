@@ -2090,3 +2090,4 @@
 {"at":"2026-10-11T09:36:42.586Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#803 @ 27d9b2c7cc52 · Ba lỗ phủ vá đúng hướng (không bỏ sót khách), vẫn một định nghĩa, đối chiếu TS≡SQL mở rộng; chờ P0 giá xong mới gộp (0244)"}
 {"at":"2026-10-11T09:40:04.278Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"followup-lifecycle","detail":"#801 @ 4cc1148270a2 → 20e03918d4ce (MERGE_ISOLATED · HIGH · gates success)"}
 {"at":"2026-10-11T09:41:11.669Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DEPLOY_DISPATCHED","detail":"20e03918d4ce · run 38129229911 https://github.com/truyenhkm5group-stack/hkt/actions/runs/38129229911"}
+{"at":"2026-10-11T10:19:43.804Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"inbox-unread-perf","detail":"fix/inbox-unread-perf @ b222a779c0c4 · 1 lệnh kiểm thử"}
