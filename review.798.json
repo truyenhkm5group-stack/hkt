@@ -1,0 +1,8 @@
+{
+  "pr": 798,
+  "sha": "f7cc1167f3f2cb6f17b1373da08b7baccac4cd35",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-11T03:58:19.649Z",
+  "note": "Điều kiện tìm một chỗ, chạy trên CSDL tổ chức ngữ cảnh (bài kiểm tenant A↔B); không migration; chuẩn hoá SĐT dùng lại hàm có sẵn; inbox.ts chỉ đổi điểm nối; UI gợi ý dùng counts.ALL sẵn có. Rủi ro hiệu năng quét tin (không pg_trgm) — đo lại production sau deploy"
+}
