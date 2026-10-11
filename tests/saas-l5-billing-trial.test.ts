@@ -291,7 +291,13 @@ async function run() {
   assert.ok((await pdb.query.platformSubscriptions.findFirst({ where: eq(schema.platformSubscriptions.orgCode, W) }))?.trialEndsAt, "khách mới có mốc hết dùng thử");
 
   // ── C · DÙNG THỬ HẾT LƯỢT ⇒ AI dừng; hộp thư + gửi tay vẫn chạy.
-  await withOrganization(T, () => setSettingJson(SALES_CHATBOT_SETTING_KEY, { ...DEFAULT_SALES_CHATBOT_CONFIG, enabled: true }));
+  await withOrganization(T, async () => {
+    await setSettingJson(SALES_CHATBOT_SETTING_KEY, { ...DEFAULT_SALES_CHATBOT_CONFIG, enabled: true });
+    const db = await getDb();
+    // Giá model giả nói phải là giá CÓ THẬT trong danh mục — hàng rào số tiền (P0 authoritative-quote 11/10/2026) chặn số bịa.
+    await db.insert(schema.products).values({ id: "l5t-p", name: "Chả mực giã tay" }).onConflictDoNothing();
+    await db.insert(schema.productVariants).values({ id: "l5t-v", productId: "l5t-p", sku: "L5T-1", retailPrice: 280_000 }).onConflictDoNothing();
+  });
   invalidateAiEntitlement();
   assert.equal((await loadAiEntitlement(T, { fresh: true })).allowed, true, "dùng thử mới ⇒ AI chạy");
   await seedAiCustomers(T, trialIncluded - 1, now, "t");
@@ -429,6 +435,9 @@ async function run() {
   await withOrganization(L, async () => {
     // HSLC chạy khoá AI riêng của shop (gói cũ không có credit AI dùng chung).
     await setSettingJson(SALES_CHATBOT_SETTING_KEY, { ...DEFAULT_SALES_CHATBOT_CONFIG, connectorKey: "anthropic-byok", enabled: true });
+    // Giá model giả nói phải là giá CÓ THẬT trong danh mục — hàng rào số tiền (P0 authoritative-quote 11/10/2026) chặn số bịa.
+    await (await getDb()).insert(schema.products).values({ id: "l5l-p", name: "Chả mực giã tay" }).onConflictDoNothing();
+    await (await getDb()).insert(schema.productVariants).values({ id: "l5l-v", productId: "l5l-p", sku: "L5L-1", retailPrice: 280_000 }).onConflictDoNothing();
     const callsBefore = calls.n;
     const test = await openConversation("TEST");
     const r = await chatTurn(test.id, "Có giao Hải Phòng không?", { channel: "TEST", actorId: null });
@@ -470,7 +479,13 @@ async function run() {
   // ── H · CHAT WEB ghi đồng hồ ở điểm trả câu AI (đường công khai thật).
   await pdb.update(schema.platformOrganizations).set({ publishState: "PUBLISHED", domainSlug: "l5-paid-shop" }).where(eq(schema.platformOrganizations.code, P));
   invalidateOrganizations();
-  await withOrganization(P, () => setSettingJson(SALES_CHATBOT_SETTING_KEY, { ...DEFAULT_SALES_CHATBOT_CONFIG, enabled: true }));
+  await withOrganization(P, async () => {
+    await setSettingJson(SALES_CHATBOT_SETTING_KEY, { ...DEFAULT_SALES_CHATBOT_CONFIG, enabled: true });
+    const db = await getDb();
+    // Giá model giả nói phải là giá CÓ THẬT trong danh mục — hàng rào số tiền (P0 authoritative-quote 11/10/2026) chặn số bịa.
+    await db.insert(schema.products).values({ id: "l5p-p", name: "Chả mực giã tay" }).onConflictDoNothing();
+    await db.insert(schema.productVariants).values({ id: "l5p-v", productId: "l5p-p", sku: "L5P-1", retailPrice: 280_000 }).onConflictDoNothing();
+  });
   setRequestHostSlugForTests(() => "l5-paid-shop");
   try {
     resetAiCustomerSeenForTests();

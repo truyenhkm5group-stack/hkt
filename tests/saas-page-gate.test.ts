@@ -169,6 +169,9 @@ async function kiemNha() {
       const pancake = fakePancake();
       await connectPancake(admin, PAGE, pancake);
       await setSettingJson(SALES_CHATBOT_SETTING_KEY, { ...DEFAULT_SALES_CHATBOT_CONFIG, connectorKey: "anthropic-byok", enabled: true, shippingFee: 30_000 });
+      // Giá model giả nói phải là giá CÓ THẬT trong danh mục — hàng rào số tiền (P0 authoritative-quote 11/10/2026) chặn số bịa.
+      await db.insert(schema.products).values({ id: "pgh-p", name: "Chả mực giã tay" }).onConflictDoNothing();
+      await db.insert(schema.productVariants).values({ id: "pgh-v", productId: "pgh-p", sku: "PGH-1", retailPrice: 250_000 }).onConflictDoNothing();
       await db.delete(st).where(inArray(st.key, [PAGE_RUNTIME_SETTING_KEY, OPERATING_MODE_SETTING_KEY, FOLLOWUP_SETTING_KEY, ORDER_SYNC_SETTING_KEY, LESSONS_SETTING_KEY]));
       const sentTo = (thread: string) => pancake.sent().filter((c) => c.url.includes(`/conversations/${thread}/messages`)).length;
       const rowsOf = (thread: string) => db.select().from(t).where(and(eq(t.pageId, PAGE), eq(t.threadId, thread)));
@@ -379,6 +382,9 @@ async function kiemKhach() {
     const pancake = fakePancake();
     await connectPancake(admin, KHACH_PAGE, pancake);
     await setSettingJson(SALES_CHATBOT_SETTING_KEY, { ...DEFAULT_SALES_CHATBOT_CONFIG, connectorKey: "anthropic-byok", enabled: true, shippingFee: 30_000 });
+    // Giá model giả nói phải là giá CÓ THẬT trong danh mục — hàng rào số tiền (P0 authoritative-quote 11/10/2026) chặn số bịa.
+    await db.insert(schema.products).values({ id: "pgk-p", name: "Chả mực giã tay" }).onConflictDoNothing();
+    await db.insert(schema.productVariants).values({ id: "pgk-v", productId: "pgk-p", sku: "PGK-1", retailPrice: 250_000 }).onConflictDoNothing();
     // Một danh sách lạc vào CSDL khách (ví dụ chép cấu hình) — vẫn không đổi gì.
     await setSettingJson(PAGE_RUNTIME_SETTING_KEY, { [KHACH_PAGE]: { mode: "OFF" } });
     assert.ok((await receiveFanpageEvent(ev(KHACH_PAGE, "pk-1", "Chả mực bao nhiêu?", "pk-t1"))).queued);

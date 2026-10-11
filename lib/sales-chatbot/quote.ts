@@ -323,6 +323,9 @@ export function referenceAmounts(ctx: PricingContext): Set<number> {
       const priced = computePriced([{ variantId: it.variantId, quantity: n }], ctx);
       const q = buildQuote(priced, ctx);
       if (!q.verified) continue;
+      // Luật tắt: N × gói nhỏ đúng khối lượng một gói lớn có giá khác (2 × 1kg = 560k vs gói 2kg 540k) ⇒ gói lớn là biểu diễn của khối
+      // lượng đó; tổng N × gói nhỏ không phải giá tham chiếu (chỉ hợp lệ khi giỏ của khách nói rõ số túi — số của báo giá giỏ).
+      if (packChoiceMistake(priced, cfg, "")) continue;
       for (const l of q.lines) {
         out.add(l.unitPrice);
         out.add(l.lineTotal);

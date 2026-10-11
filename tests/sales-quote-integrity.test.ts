@@ -125,6 +125,11 @@ function testQuotePure() {
   const refConflict = referenceAmounts(conflict);
   assert.ok(refConflict.has(280_000) && !refConflict.has(500_000) && !refConflict.has(540_000), "gói mâu thuẫn ⇒ cả 500k lẫn 540k đều chưa xác thực");
 
+  // Luật TẮT: «2kg» có MỘT biểu diễn tham chiếu — gói 2kg 540k; 2 × 1kg = 560k không phải giá tham chiếu (ca Nguyễn Thanh Thủy #DC0444F2:
+  // bot báo 540k rồi tóm tắt 560k).
+  const refOff = referenceAmounts(off);
+  assert.ok(refOff.has(280_000) && refOff.has(540_000) && !refOff.has(560_000), "luật tắt: 540k là giá «2kg», 560k không");
+
   // Dữ kiện báo giá cho vòng đời.
   assert.deepEqual(quoteFactOf(undefined).state, "NONE");
   assert.equal(quoteFactOf(quoteSnapshotOf(viaPack, new Date())).state, "VERIFIED");
