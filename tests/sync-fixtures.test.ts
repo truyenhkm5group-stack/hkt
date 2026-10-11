@@ -544,6 +544,7 @@ import { testGoLive } from "./go-live.test";
 import { testOnboardingV2 } from "./onboarding-v2.test";
 import { testSalesVision } from "./sales-vision.test";
 import { testSalesClaimGuard } from "./sales-claim-guard.test";
+import { testSalesIntegrityAudit } from "./sales-integrity-audit.test";
 import { testChatWidget } from "./chat-widget.test";
 import { testWebProductImport } from "./web-product-import.test";
 import { testMessenger } from "./messenger.test";
@@ -2968,6 +2969,9 @@ async function main() {
   // P0 10/10/2026 — AI không khẳng định điều chưa xác minh («đã nhận tiền» / «đã chốt đơn»): bảng chân lý thuần, quét mã nguồn
   // mọi đường chữ bot, tổ chức THẬT `gd-food-cg` (bot tắt · chứng từ thu đủ số · đơn nháp · nối cùng luồng page + hội thoại).
   await testSalesClaimGuard();
+  // P0 11/10/2026 — ops sales-integrity-audit: giá bot ≠ giá đơn · giá tự đổi · xác nhận giả · chuyển người không ai nhận ·
+  // địa chỉ chưa ghép · nhắc sau đơn chốt — thuần + CSDL thật (mã `erp-ia-`, tự dọn), tóm tắt không lọt PII.
+  await testSalesIntegrityAudit();
   // Đơn cần người kiểm (chủ shop 08/10/2026): khách huỷ ⇒ ghi chú + cờ, xã chưa ghép ⇒ cờ, nút nhanh Xác nhận / Huỷ, lời xác nhận,
   // SĐT chuẩn hoá — tổ chức THẬT `or-rv` (không Pancake; tự cấp, tự dọn).
   await testOrderReview();
