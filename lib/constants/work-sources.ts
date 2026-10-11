@@ -32,6 +32,8 @@ import type { WorkStatus } from "@/lib/constants/work";
 
 export const WORK_SOURCES = [
   "CS_CASE",
+  // P0 11/10/2026 — hội thoại AI bán hàng đang chờ người (AI chuyển người · AI hỏng · tiếp quản) — lib/sales-chatbot/handoff-routing.ts.
+  "SALES_CHAT_HANDOFF",
   "SHIPMENT_CARE",
   "RETURN_INSPECTION",
   // Company OS · Agent E — hàng hoàn đã kiểm, không tái nhập, chưa có kết cục cuối.
@@ -112,6 +114,33 @@ export const WORK_SOURCE_SPEC: Record<WorkSource, WorkSourceSpec> = {
     slaHours: CASE_SLA_HOURS.CS_CASE,
     outcomeAttributable: true,
     actions: ["CS_CHAT", "CS_OPEN_POS", "CS_CLAIM", "CS_CONTACTED", "CS_SNOOZE", "CS_DONE", "OPEN_ORDER"],
+  },
+  /*
+    ═══ HỘI THOẠI AI BÁN HÀNG CHỜ NGƯỜI — PHÉP CHIẾU (P0 11/10/2026) ═══
+
+    `sales_chat_conversations` là MIỀN và giữ cả trạng thái (`status = 'HANDOFF'` / chế độ tiếp quản) lẫn người phụ trách
+    (`assignee_user_id`, nút «Nhận hội thoại / Giao cho…» của hộp thư). Việc rời hàng đợi khi AI nhận lại hội thoại («Trả cho AI» —
+    Server Action của hộp thư); không có nút «xong» nào ở đây (luật 19).
+
+    PHÒNG và HẠN LẤY LẠI từ case CSKH đang chạy (luật 22): cùng câu hỏi «có một khách thật đang chờ trả lời» — nhóm việc `CS` →
+    phòng của nó, `CASE_SLA_HOURS.CS_CASE` giờ. Chủ shop đổi được ở `work.ownership` / `work.sla`, khoá `SALES_CHAT_HANDOFF`.
+
+    KHÔNG trùng độ mịn với cảnh báo nào: hội thoại chatbot không đi qua `notifications` dạng cảnh báo vận hành (tin «chatbot chuyển
+    khách» là `SYSTEM`, không phải `CaseType`) và không sinh `cs_cases` ⇒ `ALERT_KINDS_OWNED_ELSEWHERE` không cần thêm gì.
+  */
+  SALES_CHAT_HANDOFF: {
+    key: "SALES_CHAT_HANDOFF",
+    label: "Hội thoại AI bán hàng chờ người",
+    why: "AI đã dừng trả lời và đang chờ người: không ai nhận là khách im lặng đi mua chỗ khác.",
+    statusAuthority: "SOURCE",
+    assigneeAuthority: "SOURCE",
+    department: TEAM_DEPARTMENT[CASE_TEAM.CS_CASE],
+    businessEntity: "CONVERSATION",
+    slaHours: CASE_SLA_HOURS.CS_CASE,
+    outcomeAttributable: true,
+    // CHỈ NÚT MỞ: trả lời khách / trả cho AI nằm ở hộp thư, nơi người đọc được cả hội thoại. Nhận / giao việc đi qua nút chung
+    // của hàng đợi ⇒ `lib/work/assign.ts` dẫn về đúng đường ghi của hộp thư.
+    actions: ["OPEN_SOURCE"],
   },
   SHIPMENT_CARE: {
     key: "SHIPMENT_CARE",

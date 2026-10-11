@@ -7,6 +7,7 @@ import { AI_HOLD_LABEL } from "@/lib/sales-chatbot/ai-hold-shared";
 import { avatarHrefOf, compactTimeAgo, HUMAN_HANDLING_LABEL, INBOX_HANDLING_LABEL, INBOX_SOURCE_LABEL, inboxHref, inboxRowStatus, unreadBadge, type InboxFilterState, type InboxRow } from "@/lib/sales-chatbot/inbox-shared";
 import { inboxDisplayRows } from "@/lib/sales-chatbot/inbox-read-shared";
 import { CUSTOMER_LEVEL_LABEL } from "@/lib/sales-chatbot/levels-shared";
+import { handoffQueueLine } from "@/lib/sales-chatbot/handoff-routing-shared";
 import { cn } from "@/lib/utils";
 import { AvatarLinkWrap, ChannelAvatar } from "./avatar";
 import { useInboxReads } from "./read-store";
@@ -165,6 +166,20 @@ function Row({ r, href, active, showPage, nowMs }: { r: InboxRow; href: string; 
             </span>
           ) : null}
         </div>
+        {r.handoffQueue ? (
+          // AI đang im: hàng LUÔN nói khách chờ bao lâu, ai phụ trách, hạn tới đâu (P0 11/10/2026 — không còn «AI im mà không ai nhận»).
+          <p
+            className={cn(
+              "mt-0.5 truncate pl-5 text-[11px] leading-[14px]",
+              r.handoffQueue.unowned || r.handoffQueue.slaState === "BREACHED" ? "font-semibold text-red-600 dark:text-red-400" : r.handoffQueue.ownerKind === "DEPARTMENT" ? "text-amber-700 dark:text-amber-300" : "text-muted-foreground",
+            )}
+            data-handoff-owner={r.handoffQueue.ownerKind}
+            data-handoff-sla={r.handoffQueue.slaState}
+            suppressHydrationWarning
+          >
+            {handoffQueueLine(r.handoffQueue, nowMs)}
+          </p>
+        ) : null}
         {r.unread && r.afterPreview ? (
           // Dòng phụ: tin khách chưa đọc đã được trả lời (AI · bạn · page) — để nhân viên biết khách không bị bỏ im.
           <p className="mt-0.5 truncate pl-5 text-[11px] leading-[14px] text-muted-foreground" data-after-preview={r.afterPreview.side} suppressHydrationWarning>

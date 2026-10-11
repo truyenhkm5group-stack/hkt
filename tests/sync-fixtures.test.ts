@@ -501,6 +501,7 @@ import { testInboxAvatarProfile } from "./inbox-avatar-profile.test";
 import { testPancakeAvatarShape } from "./pancake-avatar-shape.test";
 import { testAvatarProxy } from "./avatar-proxy.test";
 import { testInboxSemanticsV3 } from "./inbox-semantics-v3.test";
+import { testHandoffOwnership } from "./handoff-ownership.test";
 import { testInboxReadV3 } from "./inbox-read-v3.test";
 import { testInboxBulkAi } from "./inbox-bulk-ai.test";
 import { testSalesInboxHistory } from "./sales-inbox-history.test";
@@ -2918,6 +2919,8 @@ async function main() {
   await testAvatarProxy();
   // INBOX-SEMANTICS-V3 (chủ shop 10/10/2026): bốn khái niệm tách riêng — chưa đọc (AI trả lời không xoá) · chờ trả lời · cần người thật · người đang xử lý; ma trận 20 hội thoại × mọi bộ lọc — tổ chức `hop-thu-sem-v3`.
   await testInboxSemanticsV3();
+  // AI IM THÌ PHẢI CÓ CHỦ (P0 11/10/2026, yêu cầu 9): chuyển người ⇒ hàng đợi phòng (work.ownership) + hạn (work.sla) · một tin mỗi đợt · tin khách mới ⇒ một thông báo · trả AI xoá hạn · phân việc bật ⇒ người còn chỗ · câu đếm «không chủ» = 0 — tổ chức `chuyen-nguoi-co-chu`.
+  await testHandoffOwnership();
   // INBOX READ V3 (chủ shop 10/10/2026 tối, P0): «chưa đọc» = có tin KHÁCH thật sau con trỏ đọc CỦA NGƯỜI XEM (0239); nạp khung chat ≠ đọc; con trỏ = tin khách cuối của payload, chỉ tiến; xem trước tin khách khi chưa đọc; danh sách vá theo xác nhận đọc; audit FALSE-UNREAD = 0 — tổ chức `hop-thu-doc-v3`.
   await testInboxReadV3();
   // «Trả tất cả cho AI» (chủ shop 10/10/2026, mục D): quyền · cách ly tổ chức · trả được / bị chặn theo lý do · sự kiện + nhật ký người bấm · chạy lại 0 dòng mới — `hop-thu-bulk-a` / `hop-thu-bulk-b`.

@@ -8,6 +8,7 @@ import type { AiHoldState, AiHoldView } from "@/lib/sales-chatbot/ai-hold-shared
 import type { AiBlock, MessageTrace } from "@/lib/sales-chatbot/ai-status-shared";
 import type { ControlStamp } from "@/lib/sales-chatbot/conversation-control-shared";
 import type { HumanHandling, NeedsHumanCode } from "@/lib/sales-chatbot/inbox-states";
+import type { HandoffQueueView } from "@/lib/sales-chatbot/handoff-routing-shared";
 
 import type { CustomerLevel } from "@/lib/sales-chatbot/levels-shared";
 import type { OrderReviewEntry, OrderReviewResolution } from "@/lib/constants/order-review";
@@ -322,6 +323,8 @@ export type InboxRow = {
   labels: InboxLabel[];
   /** Level khách (job tính — `levels-shared.ts`); `null` = chưa tính. */
   level: CustomerLevel | null;
+  /** AI đang im ⇒ «chờ X phút · phụ trách · hạn» (handoff-routing-shared.ts); `null` / vắng = AI đang trả lời. */
+  handoffQueue?: HandoffQueueView | null;
 };
 
 /** Ai nói: KHÁCH · BOT · NHÂN VIÊN qua hộp thư ERP (có tên) · PHÍA PAGE ngoài ERP (nhân viên trên Pancake / Hộp thư Meta / Zalo OA, hoặc trả lời tự động). */
@@ -404,6 +407,8 @@ export type InboxThread = {
   customer: { id: string | null; name: string; phone: string | null; address: string | null; province: string | null };
   assigneeUserId: string | null;
   assigneeName: string | null;
+  /** AI đang im ⇒ chờ bao lâu · ai phụ trách · hạn — cùng hàm với dòng danh sách; `null` = AI đang trả lời. */
+  handoffQueue: HandoffQueueView | null;
   window: SendWindow;
   items: TimelineItem[];
   orders: InboxOrder[];
