@@ -1998,3 +1998,4 @@
 {"at":"2026-10-11T04:26:58.767Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MIGRATION_RESERVED","mission":"handoff-ownership","detail":"0242"}
 {"at":"2026-10-11T04:27:23.159Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MIGRATION_RESERVED","mission":"inbox-unread-perf","detail":"0243"}
 {"at":"2026-10-11T04:27:43.952Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"handoff-ownership","detail":"fix/handoff-ownership @ 07c1e0574147 · 1 lệnh kiểm thử"}
+{"at":"2026-10-11T04:28:25.540Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"handoff-ownership","detail":"#800 cho fix/handoff-ownership @ 07c1e0574147"}
