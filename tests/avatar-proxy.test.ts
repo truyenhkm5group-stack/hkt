@@ -29,6 +29,11 @@ import { provisionOrganization } from "@/lib/platform/provision";
 import {
   AVATAR_PROXY_HOSTS,
   avatarProxyHref,
+  avatarProxyRefFor,
+  avatarRefKey,
+  pancakeEndpointRef,
+  pancakePsidOf,
+  pancakeThreadPsidOf,
   avatarProxyRefFrom,
   avatarProxyRefOfState,
   avatarStatusOf,
@@ -39,7 +44,7 @@ import {
   pancakeAvatarRefOf,
   stripAvatarToken,
 } from "@/lib/sales-chatbot/avatar-profile";
-import { AVATAR_FETCH, AvatarLru, avatarFetchUrl, avatarHopAllowed, avatarProxyCore, fetchAvatarImage } from "@/lib/sales-chatbot/avatar-proxy";
+import { AVATAR_FETCH, AvatarLru, avatarAcceptFor, avatarFetchUrl, avatarHopAllowed, avatarProxyCore, fetchAvatarImage } from "@/lib/sales-chatbot/avatar-proxy";
 import { fanpageVisitorKey, noteListedAvatars } from "@/lib/sales-chatbot/fanpage";
 import { parseHistoryRun } from "@/lib/sales-chatbot/history-shared";
 import { pendingThreadOf } from "@/lib/sales-chatbot/history";
@@ -52,12 +57,12 @@ const TOK_URL = (psid: string) => `https://pages.fm/api/v1/pages/${PAGE}/avatar/
 const JPEG = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3, 4, 5, 6]);
 
 type Call = { url: string; init: RequestInit | undefined };
-function fakeFetch(routes: (url: string) => Response | Promise<Response>): { fetch: typeof fetch; calls: Call[] } {
+function fakeFetch(routes: (url: string, init?: RequestInit) => Response | Promise<Response>): { fetch: typeof fetch; calls: Call[] } {
   const calls: Call[] = [];
   const f = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
     calls.push({ url, init });
-    return routes(url);
+    return routes(url, init);
   }) as typeof fetch;
   return { fetch: f, calls };
 }
@@ -90,14 +95,14 @@ function testPure() {
   assert.deepEqual(pancakeAvatarRefOf(ref), ref);
   assert.equal(pancakeAvatarRefOf({ url: TOK_URL("42"), tokenParams: [] }), null, "ref còn khoá (dòng bị sửa tay) ⇒ bỏ");
   assert.equal(pancakeAvatarRefOf({ url: "https://evil.vn/a.jpg", tokenParams: [] }), null, "ref host lạ ⇒ bỏ");
-  assert.deepEqual(pancakeAvatarRefOf({ url: "https://pages.fm/a", tokenParams: ["page_access_token", "width", "x;y", 1] })?.tokenParams, ["page_access_token"], "chỉ nhận TÊN tham số khoá hợp lệ");
+  assert.deepEqual(pancakeAvatarRefOf({ url: "https://pages.fm/a", tokenParams: ["page_access_token", "width", "x;y", 1] }), { url: "https://pages.fm/a", tokenParams: ["page_access_token"] }, "chỉ nhận TÊN tham số khoá hợp lệ");
   assert.equal(pancakeAvatarRefOf(null), null);
 
   // Lõi Pancake: URL mang khoá ⇒ lý do TOKENIZED_URL + ref không khoá; gộp gói: bản có ref thắng.
   const facts = pancakeAvatarFactsOf({ from: { avatar_url: TOK_URL("42") } }, "POLL");
   assert.deepEqual(facts, { url: null, outcome: "TOKENIZED_URL", via: "POLL", ref });
   assert.deepEqual(pancakeAvatarFactsOf({ from: { avatar_url: "https://evil.vn/a?access_token=x" } }), { url: null, outcome: "TOKENIZED_URL" }, "host lạ ⇒ chỉ lý do, không ref");
-  assert.equal(mergePancakeAvatarFacts([{ url: null, outcome: "TOKENIZED_URL" }, facts]).ref?.url, ref!.url, "cùng lý do: bản có ref thắng");
+  assert.deepEqual(mergePancakeAvatarFacts([{ url: null, outcome: "TOKENIZED_URL" }, facts]).ref, ref, "cùng lý do: bản có ref thắng");
 
   // Bản vá state: ghi ref; cùng ref ⇒ không ghi lại; ref mới ⇒ ghi; KHÔNG BAO GIỜ có giá trị khoá.
   const now = new Date();
@@ -116,7 +121,7 @@ function testPure() {
   // Chẩn đoán «có ảnh» = đúng thứ hộp thư hiện.
   assert.deepEqual(avatarStatusOf({ pancakeAvatarRef: ref, pancakeAvatar: { at: now.toISOString(), outcome: "TOKENIZED_URL" } }, now), { status: "PROFILE_AVAILABLE", source: "PANCAKE", reason: "PANCAKE_PROXY" });
   assert.equal(avatarStatusOf({ pancakeAvatarRef: { url: TOK_URL("1"), tokenParams: [] }, pancakeAvatar: { at: now.toISOString(), outcome: "TOKENIZED_URL" } }, now).reason, "PANCAKE_URL_REQUIRES_TOKEN", "ref hỏng ⇒ như chưa có");
-  assert.equal(avatarProxyRefOfState({ pancakeAvatarRef: ref })?.url, ref!.url);
+  assert.deepEqual(avatarProxyRefOfState({ pancakeAvatarRef: ref }), ref);
 
   // Đường dẫn cho trình duyệt: TƯƠNG ĐỐI, không token, không URL nguồn.
   const href = avatarProxyHref("1b9d6bcd-bbfd-4b2d-9b5d-ab8dfbbd4bed", ref!);
@@ -170,9 +175,13 @@ async function testFetch() {
   assert.equal(await fetchAvatarImage("https://evil.vn/a.jpg", none.fetch), null);
   assert.equal(none.calls.length, 0);
   // Vòng chuyển hướng ⇒ dừng ở trần.
-  const loop = fakeFetch(() => redirect("https://pages.fm/loop"));
+  const loop = fakeFetch(() => redirect("https://content.pancake.vn/loop"));
   assert.equal(await fetchAvatarImage("https://pages.fm/loop", loop.fetch), null);
   assert.equal(loop.calls.length, AVATAR_FETCH.maxRedirects + 1);
+  // Bước chuyển hướng chỉ tới CDN ảnh: quay lại API Pancake (pages.fm) ở bước sau ⇒ dừng.
+  const back = fakeFetch(() => redirect("https://pages.fm/api/v1/x"));
+  assert.equal(await fetchAvatarImage("https://pages.fm/a", back.fetch), null);
+  assert.equal(back.calls.length, 1, "bước chuyển hướng không được quay về API");
 
   // Không phải ảnh raster ⇒ chặn.
   for (const type of ["text/html", "image/svg+xml", "application/json", ""]) {
@@ -302,7 +311,7 @@ async function testDb() {
       assert.equal(await noteListedAvatars(PAGE, listed, new Date()), 1, "chỉ hội thoại ĐÃ CÓ được ghi");
       assert.equal((await db.select({ id: c.id }).from(c)).length, countBefore, "không mở hội thoại mới");
       const [st] = await db.select({ state: c.state }).from(c).where(eq(c.id, fresh));
-      assert.equal(avatarProxyRefOfState(st.state)?.url, `https://pages.fm/api/v1/pages/${PAGE}/avatar/55?width=100`);
+      assert.deepEqual(avatarProxyRefOfState(st.state), { url: `https://pages.fm/api/v1/pages/${PAGE}/avatar/55?width=100`, tokenParams: ["page_access_token"] });
       assert.equal(((st.state as Record<string, unknown>).pancakeAvatar as { via?: string }).via, "POLL");
       assert.ok(!JSON.stringify(st.state).includes(TOKEN), "ref ghi từ danh sách không mang token");
       assert.equal(await noteListedAvatars(PAGE, listed, new Date()), 0, "lần hai cùng ảnh ⇒ không ghi lại");
@@ -318,6 +327,8 @@ async function testDb() {
       assert.equal(rep.proxyNeedsToken, 4);
       assert.deepEqual(rep.proxyRefHost, { "pages.fm": 4 });
       assert.ok(!JSON.stringify(rep).includes("pages.fm/api"), "audit không in URL");
+
+      await testEndpointDb(db, admin, conv);
     });
     console.log("  ✓ lõi route (CSDL tổ chức thật): thiếu quyền 403 · tổ chức khác 404 · không ref 404 · ảnh + ETag · đệm trúng không gọi lại · 304 · thiếu token / HTML ⇒ 404 có đệm · state không token");
     console.log("  ✓ đường ghi: danh sách hội thoại quét lại ghi ref KHÔNG khoá cho hội thoại đã có, không mở hội thoại mới, lần hai không ghi · audit đếm ref theo host");
@@ -325,6 +336,145 @@ async function testDb() {
     await home.delete(hc).where(eq(hc.id, homeConv.id));
     await cleanup();
   }
+}
+
+// ─────────────────────────── 4b. ĐIỂM CUỐI ẢNH PANCAKE (đo 11/10/2026, run 38097603051) ───────────────────────────
+
+const PSID_E = "25000000000000777";
+/** Dáng THẬT của một hội thoại trong danh sách Pancake (lượt dò 1: 59 khoá, KHÔNG URL ảnh nào) — giá trị bịa, khoá thật. */
+const REAL_SHAPE_CONV = {
+  id: `${PAGE}_${PSID_E}`,
+  type: "INBOX",
+  page_id: PAGE,
+  customer_id: "c-0f1e2d3c",
+  customers: [{ fb_id: PSID_E, id: "c-0f1e2d3c", name: "Khách" }],
+  from: { email: null, id: PSID_E, name: "Khách" },
+  page_customer: { birthday: null, customer_id: "c-0f1e2d3c", gender: "female", global_id: "100012345678901", id: "pc-1", inserted_at: "2026-10-11T03:00:00", name: "Khách", notes: [], psid: PSID_E, recent_orders: [] },
+  snippet: "Cho em xin giá",
+  updated_at: "2026-10-11T03:00:00",
+  has_phone: false,
+  seen: false,
+  tags: [],
+};
+
+function testEndpointPure() {
+  const ref = pancakeEndpointRef(PAGE, PSID_E)!;
+  assert.deepEqual(ref, { kind: "PANCAKE_AVATAR_ENDPOINT", pageId: PAGE, psid: PSID_E });
+  assert.equal(pancakeEndpointRef("abc", PSID_E), null, "mã page không phải số ⇒ không");
+  assert.equal(pancakeEndpointRef(PAGE, "12/34"), null, "PSID lạ ⇒ không");
+  // Dáng thật: không URL ảnh, có page_customer.psid ⇒ ref điểm cuối, outcome AVATAR_ENDPOINT.
+  assert.deepEqual(pancakeAvatarFactsOf(REAL_SHAPE_CONV, "POLL"), { url: null, outcome: "AVATAR_ENDPOINT", via: "POLL", ref });
+  assert.equal(pancakePsidOf(REAL_SHAPE_CONV), PSID_E);
+  assert.equal(pancakePsidOf({ from: { id: PSID_E }, customers: [{ fb_id: PSID_E }] }), PSID_E, "vắng page_customer ⇒ from.id KHI trùng customers[0].fb_id");
+  assert.equal(pancakePsidOf({ from: { id: PSID_E }, customers: [{ fb_id: "25000000000000999" }] }), null, "hai trường nói hai mã ⇒ không đoán");
+  assert.equal(pancakePsidOf({ from: { id: PSID_E } }), null);
+  assert.deepEqual(pancakeAvatarFactsOf({ ...REAL_SHAPE_CONV, page_id: undefined }, "WEBHOOK", PAGE).ref, ref, "gói không mang page_id ⇒ dùng page của sự kiện");
+  assert.equal(pancakeAvatarFactsOf({ ...REAL_SHAPE_CONV, page_id: undefined }).outcome, "NO_AVATAR_FIELD", "không biết page ⇒ không dựng ref");
+  // URL dùng thẳng được vẫn thắng.
+  assert.equal(pancakeAvatarFactsOf({ ...REAL_SHAPE_CONV, avatar_url: "https://content.pancake.vn/a.jpg" }).outcome, "URL");
+  // Bản vá: ghi ref, không URL, không token; cùng ref ⇒ không ghi lại; đổi PSID ⇒ ghi.
+  const now = new Date();
+  const p1 = pancakeAvatarPatch({}, pancakeAvatarFactsOf(REAL_SHAPE_CONV, "POLL"), now)!;
+  assert.deepEqual(p1.pancakeAvatarRef, ref);
+  assert.equal((p1.pancakeAvatar as { outcome: string }).outcome, "AVATAR_ENDPOINT");
+  assert.ok(!/https?:|token/i.test(JSON.stringify(p1)), "state không mang URL / token");
+  assert.equal(pancakeAvatarPatch({ ...p1 }, pancakeAvatarFactsOf(REAL_SHAPE_CONV, "POLL"), new Date(now.getTime() + 60_000)), null);
+  // Ref đọc lại: kiểm từ đầu.
+  assert.deepEqual(pancakeAvatarRefOf({ kind: "PANCAKE_AVATAR_ENDPOINT", pageId: PAGE, psid: PSID_E, url: "https://evil.vn" }), ref, "chỉ lấy mã page + PSID");
+  assert.equal(pancakeAvatarRefOf({ kind: "PANCAKE_AVATAR_ENDPOINT", pageId: PAGE, psid: "x" }), null);
+  assert.equal(pancakeAvatarRefOf({ kind: "LA", url: "https://pages.fm/a" }), null, "dạng lạ ⇒ bỏ");
+  // Dẫn xuất LÚC ĐỌC từ chính hội thoại Pancake `<page>_<PSID>`; Messenger trực tiếp / Zalo / web ⇒ không.
+  assert.deepEqual(avatarProxyRefFor({}, { channel: "FANPAGE", pageId: PAGE, threadId: `${PAGE}_${PSID_E}` }), { ref, source: "DERIVED_THREAD" });
+  assert.equal(avatarProxyRefFor({}, { channel: "FANPAGE", pageId: PAGE, threadId: PSID_E }), null, "Messenger trực tiếp: mã hội thoại = PSID trơn ⇒ không");
+  assert.equal(avatarProxyRefFor({}, { channel: "ZALO", pageId: PAGE, threadId: `${PAGE}_${PSID_E}` }), null);
+  assert.equal(avatarProxyRefFor({ pancakeAvatarRef: ref }, null)?.source, "STORED", "ref đã lưu thắng");
+  assert.equal(pancakeThreadPsidOf(`${PAGE}_${PSID_E}`, PAGE), PSID_E);
+  assert.deepEqual(avatarStatusOf({}, now, { channel: "FANPAGE", pageId: PAGE, threadId: `${PAGE}_${PSID_E}` }), { status: "PROFILE_AVAILABLE", source: "PANCAKE", reason: "PANCAKE_PROXY" });
+  assert.notEqual(avatarProxyHref("1b9d6bcd-bbfd-4b2d-9b5d-ab8dfbbd4bed", ref), avatarProxyHref("1b9d6bcd-bbfd-4b2d-9b5d-ab8dfbbd4bed", pancakeEndpointRef(PAGE, "25000000000000778")!), "khách khác ⇒ phiên bản khác");
+  assert.ok(!avatarProxyHref("1b9d6bcd-bbfd-4b2d-9b5d-ab8dfbbd4bed", ref).includes(PSID_E), "đường dẫn cho trình duyệt không mang PSID");
+  assert.equal(avatarRefKey(ref), `endpoint:${PAGE}:${PSID_E}`);
+  // Gắn token: chỉ đúng page.
+  assert.equal(avatarFetchUrl(ref, PAGE, TOKEN), `https://pages.fm/api/v1/pages/${PAGE}/avatar/${PSID_E}?page_access_token=${TOKEN}`);
+  assert.equal(avatarFetchUrl(ref, "9999999", TOKEN), null, "page khác ⇒ không gọi");
+  assert.equal(avatarFetchUrl(ref, PAGE, null), null, "không token ⇒ không gọi");
+  console.log("  ✓ điểm cuối ảnh Pancake: dáng thật (page_customer.psid, không URL) ⇒ ref {page, psid} · from.id chỉ khi trùng fb_id · dẫn xuất lúc đọc từ <page>_<PSID>, Messenger trực tiếp không · state không URL / token");
+}
+
+const endpointFetch = () =>
+  fakeFetch((url, init) => {
+    // Như production (run 38115995755): điểm cuối Pancake từ chối accept=image/* bằng 406.
+    if (url.startsWith("https://pages.fm/") && new Headers(init?.headers).get("accept") === "image/*") return new Response("Not Acceptable", { status: 406, headers: { "content-type": "text/html" } });
+    if (url.startsWith(`https://pages.fm/api/v1/pages/${PAGE}/avatar/${PSID_E}?`)) return new Response(null, { status: 301, headers: { location: `https://content.pancake.vn/2.1-25/avatars/ab/cd.jpg?page_access_token=${TOKEN}&w=100` } });
+    if (url.startsWith(`https://pages.fm/api/v1/pages/${PAGE}/avatar/25000000000000888?`)) return new Response("<!doctype html><html>SPA</html>", { status: 200, headers: { "content-type": "text/html" } });
+    if (url.startsWith(`https://pages.fm/api/v1/pages/${PAGE}/avatar/25000000000000999?`)) return redirect("https://169.254.169.254/latest/meta-data");
+    if (url.startsWith("https://content.pancake.vn/")) return img();
+    return new Response("không", { status: 404 });
+  });
+
+async function testEndpointFetch() {
+  const f = endpointFetch();
+  const got = await fetchAvatarImage(avatarFetchUrl(pancakeEndpointRef(PAGE, PSID_E)!, PAGE, TOKEN)!, f.fetch);
+  assert.ok(got && got.contentType === "image/jpeg", "pages.fm 301 ⇒ content.pancake.vn image/jpeg ⇒ ảnh");
+  assert.equal(f.calls.length, 2);
+  assert.ok(f.calls[0].url.includes(TOKEN), "bước 1 (pages.fm) mang token");
+  assert.ok(f.calls[1].url.startsWith("https://content.pancake.vn/") && !f.calls[1].url.includes(TOKEN) && !/access_token/.test(f.calls[1].url), "bước 2 KHÔNG mang token, kể cả khi Location chép token");
+  assert.equal(await fetchAvatarImage(avatarFetchUrl(pancakeEndpointRef(PAGE, "25000000000000888")!, PAGE, TOKEN)!, endpointFetch().fetch), null, "200 text/html (trang SPA) ⇒ không phải ảnh");
+  const evil = endpointFetch();
+  assert.equal(await fetchAvatarImage(avatarFetchUrl(pancakeEndpointRef(PAGE, "25000000000000999")!, PAGE, TOKEN)!, evil.fetch), null, "chuyển hướng tới host lạ ⇒ dừng");
+  assert.equal(evil.calls.length, 1);
+  // HEADER BƯỚC 1 (đo production run 38115995755): Pancake trả 406 khi accept=image/*, 301 khi accept mọi kiểu; CDN trả ảnh với image/*.
+  const strictCalls: { url: string; accept: string }[] = [];
+  const strictFetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+    const accept = new Headers(init?.headers).get("accept") ?? "";
+    strictCalls.push({ url, accept });
+    if (url.startsWith("https://pages.fm/")) {
+      if (accept !== "*/*") return new Response("Not Acceptable", { status: 406, headers: { "content-type": "text/html" } });
+      return new Response(null, { status: 301, headers: { location: "https://content.pancake.vn/2.1-25/avatars/ab/cd.jpg" } });
+    }
+    if (url.startsWith("https://content.pancake.vn/")) return img();
+    return new Response("không", { status: 404 });
+  }) as typeof fetch;
+  assert.equal(avatarAcceptFor(0), "*/*", "bước 1 nhận mọi kiểu (Pancake 406 với image/*)");
+  assert.equal(avatarAcceptFor(1), "image/*", "bước CDN giữ image/* (đã đo 200)");
+  const strictGot = await fetchAvatarImage(avatarFetchUrl(pancakeEndpointRef(PAGE, PSID_E)!, PAGE, TOKEN)!, strictFetch);
+  assert.ok(strictGot && strictGot.contentType === "image/jpeg", "Pancake chỉ chịu accept mọi kiểu ở bước 1 ⇒ đường thật VẪN ra ảnh");
+  assert.deepEqual(strictCalls.map((x) => x.accept), ["*/*", "image/*"], "header theo bước: bước 1 mọi kiểu, bước CDN image/*");
+  console.log("  ✓ tải từ điểm cuối Pancake: 301 ⇒ content.pancake.vn ảnh · bước 2 không token · 200 text/html ⇒ không · host lạ ⇒ dừng · bước 1 accept mọi kiểu (Pancake 406 với image/*)");
+}
+
+type ConvMaker = (thread: string, state: Record<string, unknown>) => Promise<string>;
+async function testEndpointDb(db: Awaited<ReturnType<typeof getDb>>, admin: SessionUser, conv: ConvMaker) {
+  const c = schema.salesChatConversations;
+  const cache = new AvatarLru();
+  const f = endpointFetch();
+  const deps = { fetch: f.fetch, cache, pageToken: async (pageId: string) => (pageId === PAGE ? TOKEN : null) };
+  // (a) dẫn xuất lúc đọc: hội thoại Pancake `<page>_<PSID>` chưa có ref trong state.
+  const derived = await conv(`${PAGE}_${PSID_E}`, {});
+  const r1 = await avatarProxyCore(admin, derived, null, deps);
+  assert.ok(r1.status === 200 && r1.contentType === "image/jpeg", `dẫn xuất lúc đọc ⇒ ảnh (${JSON.stringify({ ...r1, body: undefined })})`);
+  assert.ok(f.calls.every((x, i) => i === 0 || !x.url.includes(TOKEN)));
+  // (b) SPA 200 text/html ⇒ 404; (c) host lạ ⇒ 404.
+  const spa = await conv(`${PAGE}_25000000000000888`, {});
+  assert.deepEqual(await avatarProxyCore(admin, spa, null, deps), { status: 404, reason: "FETCH_FAILED" });
+  const evil = await conv(`${PAGE}_25000000000000999`, {});
+  assert.deepEqual(await avatarProxyCore(admin, evil, null, deps), { status: 404, reason: "FETCH_FAILED" });
+  // (d) ref đã lưu trỏ page KHÁC page của hội thoại ⇒ không gửi token sang page đó.
+  const other = await conv(`${PAGE}_25000000000000555`, { pancakeAvatarRef: { kind: "PANCAKE_AVATAR_ENDPOINT", pageId: "2200000000002", psid: "25000000000000555" } });
+  assert.deepEqual(await avatarProxyCore(admin, other, null, deps), { status: 404, reason: "NO_TOKEN" });
+  // Không token / URL nào trong state.
+  const rows = await db.select({ state: c.state }).from(c);
+  assert.ok(!JSON.stringify(rows).includes(TOKEN));
+  // Audit đếm ref theo dạng + nguồn.
+  const rep = auditAvatars(
+    (await db.select({ channel: c.channel, pageId: c.pageId, threadId: c.threadId, customerId: c.customerId, state: c.state }).from(c)).map((r) => ({ ...r, transport: "PANCAKE" })),
+    new Map(),
+    new Date(),
+  );
+  assert.deepEqual(rep.proxyRefKind, { URL: 4, ENDPOINT_DERIVED: 3, ENDPOINT_STORED: 1 });
+  assert.equal(rep.withProxyRef, 8);
+  assert.ok(!JSON.stringify(rep).includes(PSID_E), "audit không in PSID");
+  console.log("  ✓ lõi route với điểm cuối Pancake (CSDL tổ chức thật): dẫn xuất lúc đọc ⇒ ảnh · SPA text/html ⇒ 404 · host lạ ⇒ 404 · ref page khác ⇒ không token · audit đếm dạng ref");
 }
 
 // ─────────────────────────── 5. MÃ NGUỒN ───────────────────────────
@@ -345,28 +495,41 @@ function testSource() {
   assert.doesNotMatch(core, /redirect: "follow"|fbcdn|pages\.fm|pancake\.vn/, "không tự theo chuyển hướng · không tự khai danh sách host (một chỗ: avatar-profile.ts)");
   assert.match(core, /redirect: "manual"/);
   assert.match(core, /isAllowedAvatarHost\(u\.hostname\)/);
+  assert.match(core, /hop === 0 \? isAllowedAvatarHost\(u\.hostname\) : isAvatarCdnHost\(u\.hostname\)/, "bước chuyển hướng chỉ tới CDN ảnh");
+  assert.match(core, /const next = stripAvatarToken\(new URL\(loc, url\)\.toString\(\)\);/, "bước chuyển hướng bỏ mọi tham số khoá");
+  assert.match(core, /avatarProxyRefFor\(conv\.state, conv\)/, "route lấy ref bằng CÙNG hàm với hộp thư");
 
   const profile = readFileSync("lib/sales-chatbot/avatar-profile.ts", "utf8");
   assert.equal((profile.match(/export const AVATAR_PROXY_HOSTS = /g) ?? []).length, 1);
+  assert.equal((profile.match(/export const PANCAKE_AVATAR_ENDPOINT_BASE = "https:\/\/pages\.fm\/api\/v1";/g) ?? []).length, 1, "điểm cuối ảnh Pancake khai một chỗ");
+  // Không dựng facebook.com/<PSID>, không gọi Graph ở bất kỳ tệp nào của đường ảnh proxy.
+  for (const f of ["lib/sales-chatbot/avatar-proxy.ts", "app/api/ai-sales/avatar/[conversationId]/route.ts"]) {
+    assert.doesNotMatch(readFileSync(f, "utf8"), /facebook\.com|graph\.facebook/, `${f} không chạm Facebook`);
+  }
+  const profileCode = profile.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+  assert.doesNotMatch(profileCode, /graph\.facebook/, "lõi ảnh không gọi Graph");
 
   const inbox = readFileSync("lib/sales-chatbot/inbox.ts", "utf8");
   assert.match(inbox, /avatarProxyHref\(conversationId, ref\)/, "hộp thư dựng ảnh proxy bằng hàm chung");
-  assert.match(inbox, /avatarUrl: avatarOf\(r\.state, r\.id\)/, "dòng danh sách");
-  assert.match(inbox, /avatarUrl: avatarOf\(conv\.state, conv\.id\)/, "khung hội thoại");
+  assert.match(inbox, /const ref = avatarProxyRefFor\(st, conv\)\?\.ref;/, "hộp thư lấy ref bằng CÙNG hàm với route");
+  assert.match(inbox, /avatarUrl: avatarOf\(r\.state, r\.id, r\)/, "dòng danh sách");
+  assert.match(inbox, /avatarUrl: avatarOf\(conv\.state, conv\.id, conv\)/, "khung hội thoại");
   // Avatar trong dòng vẫn là link riêng (sibling của link dòng) — không lồng <a> trong <a> (#784).
   const list = readFileSync("app/(dashboard)/ai/sales-chatbot/inbox/conversation-list.tsx", "utf8");
   assert.match(list, /<ChannelAvatar name=\{r\.customerName\} channel=\{r\.channel\} src=\{r\.avatarUrl\} \/>/);
   const fp = readFileSync("lib/sales-chatbot/fanpage.ts", "utf8");
   assert.match(fp, /await noteListedAvatars\(pageId, listed, now\(\)\);/, "lượt quét lại ghi ảnh từ CHÍNH danh sách vừa tải");
   const sc = readFileSync("scripts/inbox-avatar-audit.ts", "utf8");
-  assert.match(sc, /avatarProxyRefOfState\(st\)/, "ops audit đếm ref proxy");
+  assert.match(sc, /avatarProxyRefFor\(st, c\)/, "ops audit đếm ref proxy bằng CÙNG hàm với hộp thư");
   console.log("  ✓ mã nguồn: route qua apiGuard + ai_sales:view · lõi không ghi CSDL / không log · một danh sách host · hộp thư dùng avatarProxyHref · quét lại ghi ảnh");
 }
 
 export async function testAvatarProxy() {
   console.log("Ảnh đại diện khách qua proxy ERP (avatar-proxy):");
   testPure();
+  testEndpointPure();
   await testFetch();
+  await testEndpointFetch();
   await testDb();
   testSource();
 }

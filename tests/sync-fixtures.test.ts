@@ -499,9 +499,13 @@ import { testInboxComposer } from "./inbox-composer.test";
 import { testInboxV2A } from "./inbox-v2-a.test";
 import { testInboxAvatarProfile } from "./inbox-avatar-profile.test";
 import { testPancakeAvatarShape } from "./pancake-avatar-shape.test";
+import { testAvatarProxyCheck } from "./avatar-proxy-check.test";
+import { testSenderProvenanceProbe } from "./sender-provenance-probe.test";
 import { testAvatarProxy } from "./avatar-proxy.test";
 import { testInboxSemanticsV3 } from "./inbox-semantics-v3.test";
+import { testHandoffOwnership } from "./handoff-ownership.test";
 import { testInboxReadV3 } from "./inbox-read-v3.test";
+import { testInboxSearch } from "./inbox-search.test";
 import { testInboxBulkAi } from "./inbox-bulk-ai.test";
 import { testSalesInboxHistory } from "./sales-inbox-history.test";
 import { testE2eAiSalesPlatform } from "./e2e-ai-sales-platform.test";
@@ -544,6 +548,7 @@ import { testOnboardingV2 } from "./onboarding-v2.test";
 import { testSalesVision } from "./sales-vision.test";
 import { testSalesClaimGuard } from "./sales-claim-guard.test";
 import { testSalesQuoteIntegrity } from "./sales-quote-integrity.test";
+import { testSalesIntegrityAudit } from "./sales-integrity-audit.test";
 import { testChatWidget } from "./chat-widget.test";
 import { testWebProductImport } from "./web-product-import.test";
 import { testMessenger } from "./messenger.test";
@@ -2915,12 +2920,20 @@ async function main() {
   await testInboxAvatarProfile();
   // Ops pancake-avatar-shape (11/10/2026): dáng payload Pancake để tìm khoá ảnh thật — chỉ in đường khoá + kiểu + dạng, không giá trị. Thuần + quét mã nguồn.
   testPancakeAvatarShape();
+  // Ops avatar-proxy-check (11/10/2026): ảnh qua proxy hỏng ở bước nào — đi lại từng bước bằng chính lib, chỉ in mã bước. Thuần + quét mã nguồn.
+  testAvatarProxyCheck();
+  // Ops sender-provenance-probe (11/10/2026): tin phía page mang dấu người gửi gì — đo rủi ro AI chen vào cuộc chat người trước deploy P0. Thuần + quét mã nguồn.
+  testSenderProvenanceProbe();
   // Ảnh khách qua proxy ERP (11/10/2026): URL Pancake mang khoá ⇒ cất bản KHÔNG khoá, máy chủ gắn token lúc tải; chặn SSRF, đệm LRU, quyền theo tổ chức — tổ chức `anh-dai-dien-proxy`, fetch giả.
   await testAvatarProxy();
   // INBOX-SEMANTICS-V3 (chủ shop 10/10/2026): bốn khái niệm tách riêng — chưa đọc (AI trả lời không xoá) · chờ trả lời · cần người thật · người đang xử lý; ma trận 20 hội thoại × mọi bộ lọc — tổ chức `hop-thu-sem-v3`.
   await testInboxSemanticsV3();
+  // AI IM THÌ PHẢI CÓ CHỦ (P0 11/10/2026, yêu cầu 9): chuyển người ⇒ hàng đợi phòng (work.ownership) + hạn (work.sla) · một tin mỗi đợt · tin khách mới ⇒ một thông báo · trả AI xoá hạn · phân việc bật ⇒ người còn chỗ · câu đếm «không chủ» = 0 — tổ chức `chuyen-nguoi-co-chu`.
+  await testHandoffOwnership();
   // INBOX READ V3 (chủ shop 10/10/2026 tối, P0): «chưa đọc» = có tin KHÁCH thật sau con trỏ đọc CỦA NGƯỜI XEM (0239); nạp khung chat ≠ đọc; con trỏ = tin khách cuối của payload, chỉ tiến; xem trước tin khách khi chưa đọc; danh sách vá theo xác nhận đọc; audit FALSE-UNREAD = 0 — tổ chức `hop-thu-doc-v3`.
   await testInboxReadV3();
+  // TÌM KIẾM HỘP THƯ (P0 inbox-search, chủ shop 11/10/2026): SĐT chuẩn hoá 0/+84/khoảng trắng · SĐT trong tin / đơn / Pancake / web · tên bỏ dấu + khoảng trắng · mã đơn · tìm × bộ lọc × phân trang · UNREAD rỗng ⇒ gợi ý «Tất cả» đúng số · danh sách mới không mang hội thoại cũ · 3.000 hội thoại — `tim-hop-thu-a` / `tim-hop-thu-b`.
+  await testInboxSearch();
   // «Trả tất cả cho AI» (chủ shop 10/10/2026, mục D): quyền · cách ly tổ chức · trả được / bị chặn theo lý do · sự kiện + nhật ký người bấm · chạy lại 0 dòng mới — `hop-thu-bulk-a` / `hop-thu-bulk-b`.
   await testInboxBulkAi();
   // Nhập đủ lịch sử hội thoại vào hộp thư (0221): tổ chức THẬT `hop-thu-lich-su`, Pancake giả, tự cấp, tự dọn.
@@ -2969,6 +2982,9 @@ async function main() {
   // P0 11/10/2026 — báo giá do MÁY CHỦ quyết (quote.ts): 2kg = 2 × 1kg − giảm, catalog mâu thuẫn ⇒ chưa xác thực, số tiền trong chữ bot
   // phải thuộc báo giá đã xác thực, «đã lên đơn» chỉ khi đơn qua kiểm — tổ chức THẬT `gd-food-qi1` / `gd-food-qi2`.
   await testSalesQuoteIntegrity();
+  // P0 11/10/2026 — ops sales-integrity-audit: giá bot ≠ giá đơn · giá tự đổi · xác nhận giả · chuyển người không ai nhận ·
+  // địa chỉ chưa ghép · nhắc sau đơn chốt — thuần + CSDL thật (mã `erp-ia-`, tự dọn), tóm tắt không lọt PII.
+  await testSalesIntegrityAudit();
   // Đơn cần người kiểm (chủ shop 08/10/2026): khách huỷ ⇒ ghi chú + cờ, xã chưa ghép ⇒ cờ, nút nhanh Xác nhận / Huỷ, lời xác nhận,
   // SĐT chuẩn hoá — tổ chức THẬT `or-rv` (không Pancake; tự cấp, tự dọn).
   await testOrderReview();

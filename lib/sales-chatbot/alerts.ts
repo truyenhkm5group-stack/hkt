@@ -25,6 +25,7 @@ import { currentOrganization, withOrganization } from "@/lib/platform/context";
 import { getHomeOrganization } from "@/lib/platform/organizations";
 import { STATUS_DOT, STATUS_LABEL, type HealthAlertDecision, type SalesHealth, type SalesHealthSnapshot } from "@/lib/sales-chatbot/health-shared";
 import { ORDER_WRITE_HANDOFF_PREFIX, ORDER_WRITE_STALE_MINUTES, ORDER_WRITE_STALE_SCAN_LIMIT } from "@/lib/constants/ops-signals";
+import { AI_DOWN_HANDOFF_REASON } from "@/lib/sales-chatbot/ai-hold-shared";
 
 /** Cấu hình bot — đọc thẳng settings (engine import tệp này, không import ngược). */
 async function handoffNotifiesGroup(): Promise<boolean> {
@@ -68,23 +69,22 @@ async function fanpageCustomerName(conversationId: string): Promise<string | nul
   return row?.name?.trim() || null;
 }
 
-/** Khách cần nhân viên (bot chuyển, hoặc AI không trả lời được): người ĐỌC được hội thoại chatbot được báo. */
 /**
- * `opts.dedupeKey`: khoá chống trùng của MỘT sự cố (mặc định `sales-chat:handoff:<hội thoại>` — vĩnh viễn, một tin mỗi hội thoại). Sự cố
- * có danh tính riêng (ghi đơn hỏng ở lượt N) truyền khoá riêng, nếu không hội thoại từng chuyển người một lần sẽ không bao giờ báo lại.
+ * Khách cần nhân viên (bot chuyển, hoặc AI không trả lời được). P0 11/10/2026 («AI chuyển người nhưng không ai nhận»): hội thoại VÀO HÀNG
+ * ĐỢI NGƯỜI (mốc + phòng phụ trách + hạn — `handoff-routing.ts`) và tin đi tới ĐÚNG người: người đang cầm → người của phòng xem được hộp
+ * thư → (phòng trống) mọi người xem hộp thư. Trước đây: mọi người xem hộp thư, và khoá chống trùng VĨNH VIỄN theo hội thoại ⇒ lần chuyển
+ * người thứ hai của cùng hội thoại không báo ai.
+ *
+ * `opts.dedupeKey`: khoá của MỘT sự cố có danh tính riêng (ghi đơn hỏng ở lượt N) — thắng khoá mặc định. Mặc định = MỘT tin mỗi ĐỢT chờ
+ * người (khoá theo mốc vào hàng đợi); AI hỏng = một tin mỗi hội thoại mỗi ngày (đợt AI hỏng lặp lại theo nhịp thử lại suốt sự cố).
  */
 export async function notifySalesChatHandoff(conversationId: string, reason: string, customer: { name: string; phone: string } | null | undefined, now: Date, opts: { dedupeKey?: string } = {}): Promise<void> {
   const title = "Chatbot chuyển khách cho nhân viên";
   const body = `${reason}${customer ? ` — ${customer.name} · ${customer.phone}` : ""}`;
-  const href = `/ai/sales-chatbot/inbox?c=${encodeURIComponent(conversationId)}`;
-  const key = opts.dedupeKey ?? `sales-chat:handoff:${conversationId}`;
-  const db = await getDb();
-  await db
-    .insert(schema.notifications)
-    .values({ kind: "SYSTEM", severity: "warning", title, body, href, entityType: "SALES_CHAT", entityId: conversationId, dedupeKey: key, occurredAt: now })
-    .onConflictDoNothing({ target: schema.notifications.dedupeKey });
-  const users = await activeUserIdsWhoCan("ai_sales:view");
-  await sendInboxMessages(users.map((userId) => ({ userId, kind: "SALES_CHAT_HANDOFF", title, body, href, dedupeKey: `${key}:${userId}` })), db);
+  const day = new Date(now.getTime() + 7 * 3_600_000).toISOString().slice(0, 10);
+  // Nạp muộn: handoff-routing.ts → inbox-states.ts → fanpage.ts → engine.ts → tệp này (vòng phụ thuộc nếu nạp tĩnh).
+  const { notifyHandoffEpisode } = await import("@/lib/sales-chatbot/handoff-routing");
+  const { key } = await notifyHandoffEpisode({ conversationId, title, body, now, dedupeKey: opts.dedupeKey ?? (reason === AI_DOWN_HANDOFF_REASON ? `sales-chat:handoff:${conversationId}:ai-down:${day}` : undefined) });
   // NHÓM CHAT (chủ shop 02/10/2026, ảnh «Lê Quyền»): trên fanpage bot IM LẶNG khi chuyển người, còn chuông ERP thì nhân viên
   // đang làm trên Pancake không thấy ⇒ khách chờ hơn 5 phút. Gửi MỘT tin vào đúng nhóm «báo nhóm vận hành» của shop; mỗi lần
   // chuyển một tin (khoá theo 10 phút — gọi lặp trong cùng lượt không nhân đôi). Lỗi gửi không chặn lượt chat.

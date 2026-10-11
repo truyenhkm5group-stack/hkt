@@ -50,6 +50,12 @@ export async function assignByAuthority(key: string, assigneeId: string | null, 
       const skipped = r.data.skipped[0];
       return skipped ? { error: skipped.reason } : { ok: true };
     }
+    case "SALES_CHAT_HANDOFF": {
+      // Đúng ba nút của hộp thư: nhận về mình · giao cho người khác (người quản lý chatbot) · bỏ nhận. Quyền nằm ở đó.
+      const inbox = await import("@/lib/sales-chatbot/inbox");
+      const r = assigneeId === null ? await inbox.releaseConversationCore(user, parsed.sourceKey) : assigneeId === user.id ? await inbox.claimConversationCore(user, parsed.sourceKey) : await inbox.assignConversationCore(user, parsed.sourceKey, assigneeId);
+      return r.ok ? { ok: true } : { error: r.error };
+    }
     default:
       return { error: `${WORK_SOURCE_SPEC[source].label}: nguồn giữ người phụ trách nhưng chưa nối hành động giao việc` };
   }
@@ -69,7 +75,7 @@ export const MACHINE_ASSIGNER = { email: "job:work-auto-assign", name: "Máy ph�
 
 /** Nguồn máy tự giao được. Job lọc TRƯỚC khi dựng kế hoạch, để việc giao không nổi không chiếm chỗ của ai. */
 export function machineAssignable(source: string): boolean {
-  return isWorkSource(source) && (assigneeAuthorityOf(source as WorkSource) === "WORK" || source === "SHIPMENT_CARE");
+  return isWorkSource(source) && (assigneeAuthorityOf(source as WorkSource) === "WORK" || source === "SHIPMENT_CARE" || source === "SALES_CHAT_HANDOFF");
 }
 
 export async function assignByMachine(key: string, assigneeId: string): Promise<AssignRouteResult> {
@@ -90,6 +96,11 @@ export async function assignByMachine(key: string, assigneeId: string): Promise<
       if ("error" in r) return { error: r.error };
       const skipped = r.data.skipped[0];
       return skipped ? { error: skipped.reason } : { ok: true };
+    }
+    case "SALES_CHAT_HANDOFF": {
+      // Chỉ hội thoại CHƯA AI CẦM và còn AI im (luật 25) — đường ghi của miền chatbot, người thao tác là MÁY.
+      const { assignHandoffByMachine } = await import("@/lib/sales-chatbot/handoff-routing");
+      return assignHandoffByMachine(parsed.sourceKey, assigneeId);
     }
     default:
       // Case CSKH: đường ghi của miền (`lib/actions/cs.ts`) còn gắn với phiên đăng nhập. Chưa nối thì

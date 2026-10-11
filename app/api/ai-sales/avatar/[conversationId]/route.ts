@@ -20,6 +20,8 @@ export async function GET(request: Request, ctx: { params: Promise<{ conversatio
   const r = await avatarProxyCore(user, conversationId, request.headers.get("if-none-match"));
   const base = { "x-content-type-options": "nosniff", "content-security-policy": "sandbox; default-src 'none'" };
   if (r.status === 304) return new NextResponse(null, { status: 304, headers: { ...base, etag: r.etag, "cache-control": "private, max-age=86400" } });
+  // 404 cũng được trình duyệt giữ 10 phút (bằng đệm lỗi của máy chủ): hộp thư tự làm mới 5 giây/lần không được hỏi lại mỗi lượt.
+  if (r.status === 404) return new NextResponse(null, { status: 404, headers: { ...base, "cache-control": "private, max-age=600" } });
   if (r.status !== 200) return new NextResponse(null, { status: r.status, headers: { ...base, "cache-control": "private, no-store" } });
   return new NextResponse(new Uint8Array(r.body), {
     status: 200,
