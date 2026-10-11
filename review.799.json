@@ -1,8 +1,8 @@
 {
   "pr": 799,
-  "sha": "69c84c29eb46d852533d6cb3c102c12c659c5aec",
+  "sha": "53ad79a314c700da237d111b2b8e6f0370447937",
   "verdict": "PASS",
   "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
-  "at": "2026-10-11T04:12:48.452Z",
-  "note": "Chỉ script ops + bài kiểm; chỉ đọc, chỉ GET; không in id/URL/token"
+  "at": "2026-10-11T05:17:00.166Z",
+  "note": "Bỏ mọi tham chiếu secretsEnc/orgConnections; chỉ dùng hàm công khai của service; bài kiểm chặn ở mức mã nguồn"
 }
