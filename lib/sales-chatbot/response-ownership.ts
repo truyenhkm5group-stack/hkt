@@ -66,7 +66,7 @@ export const GREETING_WINDOW_MS = 60_000;
 export const SESSION_GAP_MS = 24 * 3_600_000;
 /**
  * Khoá so câu mẫu: gộp khoảng trắng, bỏ đầu / cuối (Pancake trả cùng một tin mẫu với xuống dòng / khoảng trắng khác nhau giữa các hội
- * thoại). Bản SQL tương đương ở `response-ownership-ledger.ts` (`regexp_replace(btrim(…), '[[:space:]]+', ' ', 'g')`). HÀM THUẦN.
+ * thoại). Bản SQL tương đương ở `response-ownership-ledger.ts` (`btrim(regexp_replace(…, '[[:space:]]+', ' ', 'g'))`). HÀM THUẦN.
  */
 export function templateKeyOf(text: string): string {
   return text.replace(/\s+/g, " ").trim();
@@ -87,6 +87,13 @@ export const LOST_AFTER_MS = 2 * 3_600_000;
  */
 export const META_SYSTEM_TEXT_RE =
   /bạn đang phản hồi bình luận|you(?:'|’)?re replying to (?:a )?comment|replied to (?:a|your) comment|đã trả lời (?:về )?một (?:quảng cáo|bài viết)|nhãn tự động|đánh dấu trạng thái đơn|đặt giai đoạn của khách hàng/i;
+
+/**
+ * Bản SQL (Postgres `~*`) của `META_SYSTEM_TEXT_RE` — điều kiện «Tin khách chưa đọc» chạy ở máy chủ CSDL. Bài kiểm đối chiếu hai bản trên
+ * cùng các câu mẫu.
+ */
+export const META_SYSTEM_TEXT_SQL_RE =
+  "(bạn đang phản hồi bình luận|you('|’)?re replying to (a )?comment|replied to (a|your) comment|đã trả lời (về )?một (quảng cáo|bài viết)|nhãn tự động|đánh dấu trạng thái đơn|đặt giai đoạn của khách hàng)";
 
 /** Ứng dụng của Meta mà nhân viên dùng để nhắn tay từ Hộp thư Page / Meta Business Suite (tiếng vọng mang `app_id` này). */
 export const META_HUMAN_INBOX_APP_IDS: readonly string[] = ["263902037430900"];
@@ -294,6 +301,53 @@ export function buildCustomerTurns(ms: readonly LedgerMessage[], opts: { handled
     }
   }
   return turns;
+}
+
+/**
+ * ═══ «TIN KHÁCH CHƯA ĐỌC» CỦA HỘP THƯ = LƯỢT KHÁCH MỚI NHẤT CHƯA ĐƯỢC XỬ LÝ (chủ shop 11/10/2026 — OWNER CORRECTION) ═══
+ *
+ * MỘT định nghĩa, hai dạng: hàm thuần này (TS) và `latestCustomerTurnUnhandledSql` (response-ownership-ledger.ts — điều kiện SQL cho
+ * listInbox / bộ đếm). `tests/response-ownership.test.ts` chạy CẢ HAI trên cùng một bộ dữ liệu PGlite và so từng hội thoại.
+ *
+ * Lượt khách mới nhất ĐÃ XỬ LÝ khi tin khách CUỐI (theo thứ tự nguồn) có, đứng SAU nó, một trong:
+ *  (1) câu bot đã gửi (dòng `BOT_SENT` — dòng ghi sẵn bị XOÁ khi gửi hỏng) mà bot đã THẤY tin khách đó (không còn PENDING);
+ *  (2) câu nhân viên hợp lệ: hộp thư ERP (`staff-out:` — tin nhân viên chưa `SENT` không tính) hoặc người đã xác minh phía page;
+ *  (3) câu phía page hợp lệ: ứng dụng khác / chưa rõ người gửi (không phải tin chào đầu phiên), chắc chắn tạo sau (`definitelyAfter`);
+ *  (4) một NGƯỜI mở / đọc tường minh lượt đó — con trỏ đọc của BẤT KỲ người dùng (`sales_chat_reads.read_through_at`) ≥ tin khách cuối.
+ * Tin tự động của page (kể cả trả lời câu mẫu quảng cáo) và chữ hệ thống KHÔNG BAO GIỜ là xử lý — khác đường quyết định của AI (ở đó
+ * tin tự động trả lời lượt TOÀN câu mẫu để bot không báo giá đôi), vì hàng đợi của NGƯỜI phải thấy khách mà chưa NGƯỜI / AI nào đáp.
+ * Không có tin khách nào ⇒ không có gì chưa xử lý. Dùng chung `effectiveOrigins` · `answers` · `definitelyAfter` với đường quyết định.
+ */
+export type LatestTurnState = {
+  hasCustomer: boolean;
+  /** `true` = không nằm trong «Tin khách chưa đọc». */
+  handled: boolean;
+  /** Ai xử lý: nguồn gốc câu trả lời, hoặc `HUMAN_READ` (người mở / đọc). `null` = chưa xử lý / không có lượt. */
+  by: OutboundOrigin | "HUMAN_READ" | null;
+  turnId: string | null;
+  lastCustomerId: string | null;
+  /** Mốc tin khách cuối (thứ tự nguồn), ms. */
+  lastCustomerAt: number | null;
+};
+
+export function latestTurnHandled(ledger: readonly LedgerMessage[], opts: { readThroughAt?: number | null } = {}): LatestTurnState {
+  const origins = effectiveOrigins(ledger);
+  const ordered = orderLedger(ledger);
+  let lastIdx = -1;
+  ordered.forEach((m, i) => {
+    if (m.sender === "CUSTOMER") lastIdx = i;
+  });
+  if (lastIdx < 0) return { hasCustomer: false, handled: true, by: null, turnId: null, lastCustomerId: null, lastCustomerAt: null };
+  const c = ordered[lastIdx];
+  const base = { hasCustomer: true, turnId: buildCustomerTurns(ledger).at(-1)?.id ?? turnIdOf(c.id), lastCustomerId: c.id, lastCustomerAt: keyOf(c) };
+  for (const o of ordered.slice(lastIdx + 1)) {
+    const origin = origins.get(o.id) ?? o.sender;
+    if (origin === "CUSTOMER" || !answers(origin, false)) continue;
+    if (definitelyAfter(o, c)) return { ...base, handled: true, by: origin };
+  }
+  const h = opts.readThroughAt ?? null;
+  if (h !== null && c.arrivedAt <= h) return { ...base, handled: true, by: "HUMAN_READ" };
+  return { ...base, handled: false, by: null };
 }
 
 /** API theo yêu cầu: một lượt + các tin TỚI SAU nó ⇒ đã trả lời chưa, bởi ai. HÀM THUẦN. */

@@ -13,7 +13,7 @@
  */
 import assert from "node:assert/strict";
 import { rmSync } from "node:fs";
-import { and, eq, like } from "drizzle-orm";
+import { and, eq, inArray, like, sql } from "drizzle-orm";
 import { getDb, getPlatformDb, organizationDatabaseUrl, schema } from "@/db";
 import type { AiProvider, AiRequest, AiResponse } from "@/lib/ai/provider";
 import type { SessionUser } from "@/lib/auth/session";
@@ -46,6 +46,9 @@ import {
   resumeDecision,
   senderOfRow,
   STAFF_OUT_ID_PREFIX,
+  latestTurnHandled,
+  META_SYSTEM_TEXT_RE,
+  META_SYSTEM_TEXT_SQL_RE,
   turnAnswered,
   templateKeyOf,
   turnTraceNote,
@@ -53,7 +56,7 @@ import {
   type LedgerMessage,
   type OutboundFacts,
 } from "@/lib/sales-chatbot/response-ownership";
-import { loadRescueQueue, loadResponseOwnershipMetrics } from "@/lib/sales-chatbot/response-ownership-ledger";
+import { latestCustomerTurnUnhandledSql, latestTurnStateOf, loadRescueQueue, loadResponseOwnershipMetrics } from "@/lib/sales-chatbot/response-ownership-ledger";
 
 const ORG = "tra-loi-dung-luot";
 const PAGE = "5544332211";
@@ -62,6 +65,8 @@ const BOT_TEXT = "Dạ chả cá thu bên em là cá đánh bắt ở vùng bi�
 const MIN = 60_000;
 const GREETING = "CHẢ CÁ THU NGUYÊN CHẤT 100% - Chả cá đánh bắt tại Quảng Ninh gửi đường bay vào sg ạ";
 const META_NOTICE = "Bạn đang phản hồi bình luận của người dùng về bài viết trên Trang của mình. Xem bình luận.";
+const TPL_PARITY = "Dạ em chào anh/chị! Chả cá thu nguyên chất, 1kg giá 280k, 2kg còn 540k, em miễn ship toàn quốc ạ";
+const rowsOfPg = (r: unknown): Record<string, unknown>[] => (Array.isArray(r) ? r : ((r as { rows?: Record<string, unknown>[] }).rows ?? []));
 
 // ─────────────────────────── Phần thuần ───────────────────────────
 
@@ -182,6 +187,25 @@ function testPure() {
   assert.equal(buyIntentDuringPause({ intent: true, owner: "TEMPORARY_AI_PAUSE", pauseVerified: false }), "AI_CONTINUES");
   assert.equal(buyIntentDuringPause({ intent: true, owner: "HUMAN_ACTIVE", pauseVerified: true }), "NOTIFY_HOLDER");
   assert.equal(buyIntentDuringPause({ intent: false, owner: "TEMPORARY_AI_PAUSE", pauseVerified: false }), "NONE");
+
+  // 9b. «Tin khách chưa đọc» = lượt khách mới nhất CHƯA xử lý — ma trận chủ shop (11/10/2026, OWNER CORRECTION).
+  const unread = (ms: LedgerMessage[], readThroughAt: number | null = null) => !latestTurnHandled(ms, { readThroughAt }).handled;
+  const P0 = [cust("o0", T - 3 * 60 * MIN), out("ob0", "AI_AGENT", T - 3 * 60 * MIN + 5_000)];
+  assert.equal(unread([...P0, cust("c", T)]), true, "CUSTOMER ⇒ YES");
+  assert.equal(unread([...P0, cust("c", T), out("b", "AI_AGENT", T + 5_000)]), false, "CUSTOMER→AI_VALID ⇒ NO");
+  assert.equal(unread([...P0, cust("c", T), out("s", "VERIFIED_HUMAN", T + 5_000)]), false, "CUSTOMER→STAFF_VALID ⇒ NO");
+  assert.equal(unread([...P0, cust("c", T), out("p", "UNKNOWN", T + 2 * MIN)]), false, "CUSTOMER→PAGE_VALID ⇒ NO");
+  assert.equal(unread([...P0, cust("c", T)], T + MIN), false, "CUSTOMER→HUMAN_OPEN ⇒ NO");
+  assert.equal(unread([...P0, cust("c", T), out("b", "AI_AGENT", T + 5_000), cust("c2", T + MIN)]), true, "CUSTOMER→AI_VALID→CUSTOMER_NEW ⇒ YES");
+  assert.equal(unread([...P0, cust("c", T), out("s", "VERIFIED_HUMAN", T + 5_000), cust("c2", T + MIN)]), true, "CUSTOMER→STAFF→CUSTOMER_NEW ⇒ YES");
+  assert.equal(unread([out("b", "AI_AGENT", T)]), false, "chỉ BOT ⇒ NO");
+  assert.equal(unread([out("s", "VERIFIED_HUMAN", T)]), false, "chỉ STAFF ⇒ NO");
+  assert.equal(unread([out("p", "UNKNOWN", T)]), false, "chỉ PAGE ⇒ NO");
+  assert.equal(unread([...P0, cust("c", T), out("a", "PANCAKE_AUTOMATION", T + 5_000), out("m", "META_SYSTEM", T + 6_000)]), true, "tin tự động / hệ thống không phải xử lý");
+  assert.equal(unread([cust("t", T, { template: true }), out("a", "PANCAKE_AUTOMATION", T + 1_000)]), true, "hộp thư: kể cả câu mẫu được trả lời tự động — chưa NGƯỜI / AI nào đáp");
+  assert.equal(unread([...P0, cust("c", T, { status: "PENDING" }), out("b", "AI_AGENT", T + 5_000)]), true, "câu bot chưa thấy tin (PENDING) ⇒ chưa xử lý");
+  assert.equal(unread([...P0, cust("c", T)], T - MIN), true, "con trỏ đọc CŨ hơn tin khách ⇒ chưa xử lý");
+  assert.equal(latestTurnHandled([...P0, cust("c", T)], { readThroughAt: T }).by, "HUMAN_READ");
 
   // 10. Đếm + hàng đợi cứu đơn.
   const th = (id: string, ledger: LedgerMessage[], extra: Partial<Parameters<typeof rescueCandidates>[0][number]> = {}) => ({ conversationId: id, ledger, owner: "AI_ACTIVE" as const, ...extra });
@@ -440,6 +464,76 @@ async function testFlow() {
       mark = pancake.calls.length;
       const rL = await processFanpageThread(PAGE, L, { fetch: pancake.fetch, now: at(31_000) });
       assert.ok(rL.replies >= 1 && pancake.sends(mark, L).length >= 1 && (await rowOf("l.q")).note !== PAGE_REPLIED_REASON, `câu hỏi trước tin mẫu vẫn được AI trả lời: ${JSON.stringify(rL)}`);
+
+      // ═══ M. «Tin khách chưa đọc»: MỘT định nghĩa, HAI dạng — TS `latestTurnHandled` ≡ SQL `latestCustomerTurnUnhandledSql` trên cùng dữ liệu ═══
+      {
+        const cv = schema.salesChatConversations;
+        const sm = schema.salesChatStaffMessages;
+        const T0 = new Date(Date.now() - 3 * 60 * MIN).getTime();
+        const at2 = (ms: number) => new Date(T0 + ms);
+        type Row = { id: string; kind: "C" | "BOT" | "STAFF" | "PAGE"; at: number; src?: number | null; sender?: string | null; text?: string; status?: string; staff?: string };
+        const cases: { name: string; rows: Row[]; read?: number | null; expect: boolean }[] = [];
+        const prior: Row[] = [{ id: "p0", kind: "C", at: -60 * MIN }, { id: "pb", kind: "BOT", at: -60 * MIN + 5_000 }];
+        const add = (name: string, expect: boolean, rows: Row[], read: number | null = null) => cases.push({ name, rows, read, expect });
+        add("customer", true, [...prior, { id: "c", kind: "C", at: 0 }]);
+        add("ai-valid", false, [...prior, { id: "c", kind: "C", at: 0 }, { id: "b", kind: "BOT", at: 5_000 }]);
+        add("staff-valid", false, [...prior, { id: "c", kind: "C", at: 0 }, { id: "s", kind: "STAFF", at: 5_000, staff: "SENT" }]);
+        add("page-valid", false, [...prior, { id: "c", kind: "C", at: 0 }, { id: "pg", kind: "PAGE", at: 2 * MIN, sender: "UNKNOWN" }]);
+        add("human-open", false, [...prior, { id: "c", kind: "C", at: 0 }], MIN);
+        add("ai-then-new", true, [...prior, { id: "c", kind: "C", at: 0 }, { id: "b", kind: "BOT", at: 5_000 }, { id: "c2", kind: "C", at: MIN }]);
+        add("staff-then-new", true, [...prior, { id: "c", kind: "C", at: 0 }, { id: "s", kind: "STAFF", at: 5_000, staff: "SENT" }, { id: "c2", kind: "C", at: MIN }]);
+        add("only-bot", false, [{ id: "b", kind: "BOT", at: 0 }]);
+        add("only-staff", false, [{ id: "s", kind: "STAFF", at: 0, staff: "SENT" }]);
+        add("only-page", false, [{ id: "pg", kind: "PAGE", at: 0, sender: "UNKNOWN" }]);
+        add("staff-failed", true, [...prior, { id: "c", kind: "C", at: 0 }, { id: "s", kind: "STAFF", at: 5_000, staff: "FAILED" }]);
+        add("staff-sending", true, [...prior, { id: "c", kind: "C", at: 0 }, { id: "s", kind: "STAFF", at: 5_000, staff: "SENDING" }]);
+        add("bot-unseen", true, [...prior, { id: "c", kind: "C", at: 0, status: "PENDING" }, { id: "b", kind: "BOT", at: 5_000 }]);
+        add("greeting", true, [{ id: "c", kind: "C", at: 0 }, { id: "g", kind: "PAGE", at: 10_000, sender: "UNKNOWN" }]);
+        add("automation", true, [...prior, { id: "c", kind: "C", at: 0 }, { id: "a", kind: "PAGE", at: 5_000, sender: "PANCAKE_AUTOMATION" }]);
+        add("legacy-meta-system", true, [...prior, { id: "c", kind: "C", at: 0 }, { id: "m", kind: "PAGE", at: 5 * MIN, sender: null, text: `${META_NOTICE} (link)` }]);
+        add("legacy-template", true, [...prior, { id: "c", kind: "C", at: 0 }, { id: "lt", kind: "PAGE", at: 5 * MIN, sender: null, text: `${TPL_PARITY}\n` }]);
+        add("legacy-text", false, [...prior, { id: "c", kind: "C", at: 0 }, { id: "lx", kind: "PAGE", at: 5 * MIN, sender: null, text: "Dạ em kiểm hàng rồi báo chị ngay ạ" }]);
+        add("ambiguous-30s", true, [...prior, { id: "c", kind: "C", at: 0 }, { id: "u", kind: "PAGE", at: 30_000, sender: "UNKNOWN" }]);
+        add("source-after", false, [...prior, { id: "c", kind: "C", at: 0, src: 0 }, { id: "u", kind: "PAGE", at: 3_000, src: 1_000, sender: "UNKNOWN" }]);
+        add("read-old", true, [...prior, { id: "c", kind: "C", at: 0 }], -MIN);
+        add("other-app", false, [...prior, { id: "c", kind: "C", at: 0, src: 0 }, { id: "oa", kind: "PAGE", at: 5_000, src: 2_000, sender: "OTHER_APP" }]);
+        add("other-app-ambiguous", true, [...prior, { id: "c", kind: "C", at: 0 }, { id: "oa", kind: "PAGE", at: 5_000, sender: "OTHER_APP" }]);
+        add("verified-source-before", true, [...prior, { id: "c", kind: "C", at: 0, src: 0 }, { id: "v", kind: "PAGE", at: 90_000, src: -1_000, sender: "VERIFIED_HUMAN" }]);
+        add("meta-system", true, [...prior, { id: "c", kind: "C", at: 0 }, { id: "ms", kind: "PAGE", at: 5 * MIN, sender: "META_SYSTEM" }]);
+        add("media-only-not-turn", false, [...prior, { id: "c", kind: "C", at: 0 }, { id: "b", kind: "BOT", at: 5_000 }, { id: "st", kind: "C", at: MIN, status: "DONE", text: "" }]);
+        // Tin mẫu cũ: cùng khoá ở một hội thoại KHÁC trong 7 ngày.
+        await db.insert(t).values({ pageId: PAGE, threadId: "u-tpl-other", messageId: "u-tpl-other.p", text: TPL_PARITY, status: "DONE", processedAt: new Date(), note: PAGE_REPLY });
+        const ids: string[] = [];
+        for (const k of cases) {
+          const thread = `u-${k.name}`;
+          const [conv] = await db.insert(cv).values({ channel: "FANPAGE", pageId: PAGE, threadId: thread, visitorKey: `vk-${thread}` }).returning({ id: cv.id });
+          ids.push(conv.id);
+          for (const r of k.rows) {
+            const mid = `${thread}.${r.id}`;
+            const base = { pageId: PAGE, threadId: thread, createdAt: at2(r.at), sourceAt: r.src === undefined || r.src === null ? null : at2(r.src), processedAt: at2(r.at) };
+            if (r.kind === "C") await db.insert(t).values({ ...base, messageId: mid, text: r.text ?? "Shop ơi", status: r.status ?? "DONE", note: r.text === "" ? "MEDIA_ONLY" : null });
+            else if (r.kind === "BOT") await db.insert(t).values({ ...base, messageId: mid, text: "Dạ em đây ạ", status: "DONE", note: "BOT_SENT" });
+            else if (r.kind === "STAFF") {
+              const [st] = await db.insert(sm).values({ conversationId: conv.id, requestKey: `rk-${mid}`, userId: admin.id, channel: "FANPAGE", text: "Dạ em báo chị", status: r.staff ?? "SENT" }).returning({ id: sm.id });
+              await db.insert(t).values({ ...base, messageId: `${STAFF_OUT_PREFIX}${st.id}:0`, text: "Dạ em báo chị", status: "DONE", note: PAGE_REPLY });
+            } else await db.insert(t).values({ ...base, messageId: mid, text: r.text ?? "Dạ chị chờ em chút", status: "DONE", note: PAGE_REPLY, senderKind: r.sender ?? null });
+          }
+          if (k.read !== null && k.read !== undefined) await db.insert(schema.salesChatReads).values({ conversationId: conv.id, userId: admin.id, readThroughAt: at2(k.read) });
+        }
+        const nowP = new Date();
+        const sqlRows = await db.select({ id: cv.id, unread: latestCustomerTurnUnhandledSql(nowP) }).from(cv).where(inArray(cv.id, ids));
+        const sqlOf = new Map(sqlRows.map((r) => [r.id, Boolean(r.unread)]));
+        for (const [i, k] of cases.entries()) {
+          const ts = await latestTurnStateOf(ids[i], PAGE, `u-${k.name}`, nowP);
+          assert.equal(!ts.handled, k.expect, `TS «${k.name}»: ${JSON.stringify(ts)}`);
+          assert.equal(sqlOf.get(ids[i]), k.expect, `SQL «${k.name}» phải bằng TS`);
+        }
+        // Chữ hệ thống: bản SQL của mẫu khớp bản JS trên cùng các câu.
+        for (const txt of [META_NOTICE, "You're replying to a comment on your Page", "Dư Thị Liên đã trả lời một quảng cáo.", "Đã thêm nhãn tự động: …", "Dạ em gửi chị bảng giá", "Chị cho em xin địa chỉ"]) {
+          const [r] = rowsOfPg(await db.execute(sql`select (${txt} ~* ${META_SYSTEM_TEXT_SQL_RE}) as hit`));
+          assert.equal(Boolean(r?.hit), META_SYSTEM_TEXT_RE.test(txt), `mẫu chữ hệ thống JS ≡ SQL: «${txt}»`);
+        }
+      }
 
       // ═══ K. Câu đếm bảng điều khiển + hàng đợi cứu đơn trên dữ liệu thật của tổ chức ═══
       const K = "t-cuu-don";

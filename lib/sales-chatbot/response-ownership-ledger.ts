@@ -7,7 +7,7 @@
  * Cùng tệp: câu đếm cho bảng điều khiển (`loadResponseOwnershipMetrics`) và HÀNG ĐỢI CỨU ĐƠN (`loadRescueQueue`) — đọc sổ tin thô
  * của các hội thoại có tin khách trong kỳ rồi gọi CHÍNH hàm thuần mà đường xử lý tin dùng, nên con số và quyết định không lệch nhau.
  */
-import { and, desc, eq, gte, inArray, isNull, lt, ne, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, isNull, lt, ne, sql, type SQL } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { aiHoldOf } from "@/lib/sales-chatbot/ai-hold-shared";
 import { readConversationControl } from "@/lib/sales-chatbot/conversation-control-shared";
@@ -22,6 +22,9 @@ import {
   senderOfRow,
   STAFF_OUT_ID_PREFIX,
   templateKeyOf,
+  latestTurnHandled,
+  META_SYSTEM_TEXT_SQL_RE,
+  type LatestTurnState,
   buildCustomerTurns,
   openTurnOf,
   type LedgerMessage,
@@ -50,7 +53,15 @@ export type LedgerRow = {
   senderKind: string | null;
   importedAt: Date | null;
   imageUrls?: unknown;
+  /** Dòng `staff-out:` — trạng thái tin nhân viên gốc (`sales_chat_staff_messages.status`). Khác `SENT` ⇒ KHÔNG phải câu trả lời. */
+  staffStatus?: string | null;
 };
+
+/** Mã tin nhân viên ERP trong mã dòng `staff-out:<id>:<đoạn>`. HÀM THUẦN. */
+export function staffMessageIdOf(messageId: string): string | null {
+  if (!messageId.startsWith(STAFF_OUT_ID_PREFIX)) return null;
+  return messageId.slice(STAFF_OUT_ID_PREFIX.length).split(":")[0] || null;
+}
 
 /** Dòng sổ tin thô ⇒ dòng sổ thuần (`null` = không tham gia phép tính lượt). HÀM THUẦN. */
 export function ledgerMessageOf(r: LedgerRow, flags: { customerTemplates: ReadonlySet<string>; pageTemplates: ReadonlySet<string> }): LedgerMessage | null {
@@ -60,7 +71,10 @@ export function ledgerMessageOf(r: LedgerRow, flags: { customerTemplates: Readon
     if (r.note === LEDGER_MEDIA_ONLY_NOTE) return null;
     const hasImage = Array.isArray(r.imageUrls) && r.imageUrls.length > 0;
     if (!r.text.trim() && !hasImage) return null;
-  } else if (r.note === PAGE_REPLY_NOTE && !r.messageId.startsWith(STAFF_OUT_ID_PREFIX)) {
+  } else if (r.note === PAGE_REPLY_NOTE && r.messageId.startsWith(STAFF_OUT_ID_PREFIX)) {
+    // Tin nhân viên gửi từ hộp thư ERP mà chưa / không tới khách (SENDING · FAILED) KHÔNG phải câu trả lời.
+    if (r.staffStatus && r.staffStatus !== "SENT") return null;
+  } else if (r.note === PAGE_REPLY_NOTE) {
     // Ảnh / nhãn dán phía page không chữ: ghi để người thấy, KHÔNG tính là trả lời (luật có từ 08/10/2026).
     if (r.text === LEDGER_PAGE_IMAGE_TEXT || !r.text.trim()) return null;
     if (sender === "UNKNOWN" && parseOrigin(r.senderKind) === null && flags.pageTemplates.has(r.text)) sender = "PANCAKE_AUTOMATION";
@@ -100,7 +114,7 @@ export async function templateTexts(pageId: string, threadId: string, customerTe
   const pageKeys = [...pageOf.keys()].slice(0, 30);
   const customerTemplates = new Set<string>();
   const pageTemplates = new Set<string>();
-  const key = sql<string>`regexp_replace(btrim(${t.text}), '[[:space:]]+', ' ', 'g')`;
+  const key = sql<string>`btrim(regexp_replace(${t.text}, '[[:space:]]+', ' ', 'g'))`;
   if (custKeys.length) {
     const rows = await db
       .select({ k: key, n: sql<number>`count(distinct ${t.threadId})::int` })
@@ -138,7 +152,110 @@ export async function ledgerFromRows(pageId: string, threadId: string, rows: rea
   const customerTexts = rows.filter((r) => !r.importedAt && r.note !== BOT_SENT_NOTE && r.note !== PAGE_REPLY_NOTE).slice(0, 30).map((r) => r.text);
   const pageTexts = rows.filter((r) => r.note === PAGE_REPLY_NOTE && !r.messageId.startsWith(STAFF_OUT_ID_PREFIX) && parseOrigin(r.senderKind) === null).map((r) => r.text);
   const flags = await templateTexts(pageId, threadId, customerTexts, pageTexts, now).catch(() => ({ customerTemplates: new Set<string>(), pageTemplates: new Set<string>() }));
-  return rows.map((r) => ledgerMessageOf(r, flags)).filter((m): m is LedgerMessage => m !== null);
+  const staffIds = [...new Set(rows.map((r) => (r.staffStatus === undefined ? staffMessageIdOf(r.messageId) : null)).filter((x): x is string => Boolean(x)))];
+  const statusOf = new Map<string, string>();
+  if (staffIds.length) {
+    const db = await getDb();
+    const sm = schema.salesChatStaffMessages;
+    for (const s of await db.select({ id: sm.id, status: sm.status }).from(sm).where(inArray(sm.id, staffIds))) statusOf.set(s.id, s.status);
+  }
+  return rows
+    .map((r) => ledgerMessageOf(r.staffStatus === undefined && staffMessageIdOf(r.messageId) ? { ...r, staffStatus: statusOf.get(staffMessageIdOf(r.messageId)!) ?? null } : r, flags))
+    .filter((m): m is LedgerMessage => m !== null);
+}
+
+// ─────────────────────────── «Tin khách chưa đọc» = lượt khách mới nhất chưa xử lý ───────────────────────────
+
+/** Sổ cho hộp thư: 200 dòng mới nhất của luồng (không giới hạn ngày — khách chờ từ tuần trước vẫn là chờ). */
+const INBOX_LEDGER_ROWS = 200;
+
+/**
+ * Lượt khách mới nhất của MỘT hội thoại đã được xử lý chưa (`latestTurnHandled` — bản TS của định nghĩa). Con trỏ đọc: lớn nhất của
+ * MỌI người dùng (con trỏ cá nhân vẫn ở `sales_chat_reads` cho audit).
+ */
+export async function latestTurnStateOf(conversationId: string, pageId: string, threadId: string, now: Date = new Date()): Promise<LatestTurnState> {
+  const db = await getDb();
+  const t = schema.salesChatInbound;
+  const rows: LedgerRow[] = await db
+    .select({ id: t.id, messageId: t.messageId, text: t.text, note: t.note, status: t.status, createdAt: t.createdAt, sourceAt: t.sourceAt, senderKind: t.senderKind, importedAt: t.importedAt, imageUrls: t.imageUrls })
+    .from(t)
+    .where(and(eq(t.pageId, pageId), eq(t.threadId, threadId)))
+    .orderBy(desc(t.createdAt))
+    .limit(INBOX_LEDGER_ROWS);
+  const r = schema.salesChatReads;
+  const [read] = await db.select({ at: sql<Date | string | null>`max(${r.readThroughAt})` }).from(r).where(eq(r.conversationId, conversationId));
+  return latestTurnHandled(await ledgerFromRows(pageId, threadId, rows, now), { readThroughAt: read?.at ? new Date(read.at).getTime() : null });
+}
+
+/*
+ * BẢN SQL CỦA CÙNG ĐỊNH NGHĨA (`latestTurnHandled`). Từng vế ánh xạ một-một — đổi một bên phải đổi bên kia, bài kiểm đối chiếu chạy cả
+ * hai trên cùng dữ liệu:
+ *  · mốc so = `date_trunc('milliseconds', …)` (TS cầm mốc ở mili giây); khoá thứ tự = (coalesce(source_at, created_at), created_at, message_id);
+ *  · tin khách = dòng không nhập lịch sử, ghi chú khác BOT_SENT / PAGE_REPLY / MEDIA_ONLY, có chữ hoặc có ảnh;
+ *  · bot: dòng BOT_SENT, tin khách cuối không còn PENDING, mốc gửi > mốc nhận tin khách;
+ *  · nhân viên ERP: dòng staff-out mà tin nhân viên gốc (nếu tìm thấy) đã SENT; người đã xác minh phía page: cột sender_kind;
+ *  · phía page khác: nguồn gốc = sender_kind; dòng cũ không cột ⇒ chữ hệ thống (META_SYSTEM_TEXT_SQL_RE) / tin mẫu (khoá gộp khoảng trắng
+ *    ≥ 40 ký tự, có ở hội thoại khác trong 7 ngày) / UNKNOWN; tự động & hệ thống không bao giờ xử lý; UNKNOWN đầu phiên (±60 giây quanh tin
+ *    khách mở phiên — không hoạt động nào trong 24 giờ trước) là tin chào;
+ *  · «chắc chắn sau»: người xác minh không mốc nguồn ⇒ mốc tới; hai mốc nguồn ⇒ so nguồn; còn lại ⇒ tới sau ≥ 60 giây;
+ *  · người đọc: max(read_through_at) mọi người dùng ≥ mốc nhận tin khách cuối.
+ */
+const ms = (e: SQL) => sql`date_trunc('milliseconds', ${e})`;
+function rowAlias(a: string) {
+  const c = (n: string) => sql.raw(`${a}."${n}"`);
+  const key = ms(sql`coalesce(${c("source_at")}, ${c("created_at")})`);
+  const created = ms(c("created_at"));
+  const order = sql`(${key}, ${created}, ${c("message_id")})`;
+  const customer = sql`(${c("imported_at")} is null and coalesce(${c("note")}, '') not in (${BOT_SENT_NOTE}, ${PAGE_REPLY_NOTE}, ${LEDGER_MEDIA_ONLY_NOTE})
+    and (${c("text")} ~ '[^[:space:]]' or (jsonb_typeof(${c("image_urls")}) = 'array' and jsonb_array_length(${c("image_urls")}) > 0)))`;
+  const staffOut = sql`(${c("imported_at")} is null and ${c("note")} = ${PAGE_REPLY_NOTE} and ${c("message_id")} like ${`${STAFF_OUT_ID_PREFIX}%`}
+    and not exists (select 1 from "sales_chat_staff_messages" sm where sm.id = split_part(substr(${c("message_id")}, ${STAFF_OUT_ID_PREFIX.length + 1}), ':', 1) and sm.status <> 'SENT'))`;
+  const pageOther = sql`(${c("imported_at")} is null and ${c("note")} = ${PAGE_REPLY_NOTE} and ${c("message_id")} not like ${`${STAFF_OUT_ID_PREFIX}%`}
+    and ${c("text")} <> ${LEDGER_PAGE_IMAGE_TEXT} and ${c("text")} ~ '[^[:space:]]')`;
+  const bot = sql`(${c("imported_at")} is null and ${c("note")} = ${BOT_SENT_NOTE})`;
+  const tplKey = sql`btrim(regexp_replace(${c("text")}, '[[:space:]]+', ' ', 'g'))`;
+  return { c, key, created, order, customer, staffOut, pageOther, bot, tplKey };
+}
+
+/**
+ * «Lượt khách mới nhất của luồng (page, thread) CHƯA được xử lý» — điều kiện SQL. `convId` = mã hội thoại (con trỏ đọc). `now` = mốc của
+ * cửa sổ 7 ngày nhận dạng tin mẫu (cùng `now` mà bản TS dùng).
+ */
+export function latestCustomerTurnUnhandledFor(pageId: SQL, threadId: SQL, convId: SQL, now: Date): SQL<boolean> {
+  const L = rowAlias("lc");
+  const O = rowAlias("o");
+  const S = rowAlias("s");
+  const R = rowAlias("r");
+  const P = rowAlias("p");
+  const since = new Date(now.getTime() - 7 * 86_400_000);
+  const legacyTemplate = sql`(char_length(${O.tplKey}) >= 40 and exists (select 1 from "sales_chat_inbound" p where p.page_id = ${O.c("page_id")} and p.thread_id <> ${O.c("thread_id")}
+    and p.note = ${PAGE_REPLY_NOTE} and p.created_at >= ${since} and ${P.tplKey} = ${O.tplKey}))`;
+  // Nguồn gốc HIỆU LỰC của dòng phía page khác (không phải staff-out).
+  const origin = sql`(case when ${O.c("sender_kind")} is not null then ${O.c("sender_kind")}
+    when ${O.c("text")} ~* ${META_SYSTEM_TEXT_SQL_RE} then 'META_SYSTEM'
+    when ${legacyTemplate} then 'PANCAKE_AUTOMATION' else 'UNKNOWN' end)`;
+  const activity = sql`(${R.customer} or ${R.bot} or ${R.staffOut} or (${R.pageOther} and ${R.c("sender_kind")} in ('VERIFIED_HUMAN', 'AI_AGENT')))`;
+  const greeting = sql`exists (select 1 from "sales_chat_inbound" s where s.page_id = ${pageId} and s.thread_id = ${threadId} and ${S.customer}
+    and ${O.key} between ${S.key} - interval '60 seconds' and ${S.key} + interval '60 seconds'
+    and not exists (select 1 from "sales_chat_inbound" r where r.page_id = ${pageId} and r.thread_id = ${threadId} and ${activity}
+      and ${R.order} < ${S.order} and ${R.key} > ${S.key} - interval '24 hours'))`;
+  const generic = sql`(case when ${O.c("source_at")} is not null and ${L.c("source_at")} is not null then ${ms(O.c("source_at"))} > ${ms(L.c("source_at"))}
+    else ${O.created} - ${L.created} >= interval '60 seconds' end)`;
+  const verifiedAfter = sql`(case when ${O.c("source_at")} is null then ${O.created} > ${L.created} else ${generic} end)`;
+  const answered = sql`exists (select 1 from "sales_chat_inbound" o where o.page_id = ${pageId} and o.thread_id = ${threadId} and ${O.order} > ${L.order} and (
+      ((${O.bot} or (${O.pageOther} and ${O.c("sender_kind")} = 'AI_AGENT')) and ${L.c("status")} <> 'PENDING' and ${O.created} > ${L.created})
+      or ((${O.staffOut} or (${O.pageOther} and ${O.c("sender_kind")} = 'VERIFIED_HUMAN')) and ${verifiedAfter})
+      or (${O.pageOther} and ${origin} = 'OTHER_APP' and ${generic})
+      or (${O.pageOther} and ${origin} = 'UNKNOWN' and ${generic} and not ${greeting})))`;
+  const read = sql`coalesce(${L.created} <= (select ${ms(sql`max(rd.read_through_at)`)} from "sales_chat_reads" rd where rd.conversation_id = ${convId}), false)`;
+  return sql<boolean>`coalesce((select (not ${answered} and not ${read}) from (select * from "sales_chat_inbound" lc where lc.page_id = ${pageId} and lc.thread_id = ${threadId} and ${L.customer}
+    order by ${L.key} desc, ${L.created} desc, lc.message_id desc limit 1) lc), false)`;
+}
+
+/** Cùng điều kiện cho câu gọi trên bảng `sales_chat_conversations` (listInbox · bộ đếm · huy hiệu). */
+export function latestCustomerTurnUnhandledSql(now: Date): SQL<boolean> {
+  const col = (n: string) => sql.raw(`"sales_chat_conversations"."${n}"`);
+  return sql<boolean>`(${col("page_id")} is not null and ${col("thread_id")} is not null and ${latestCustomerTurnUnhandledFor(col("page_id"), col("thread_id"), col("id"), now)})`;
 }
 
 /** Hội thoại đủ trường để dựng trạng thái chủ trả lời. */

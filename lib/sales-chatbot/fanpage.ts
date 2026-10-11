@@ -193,7 +193,7 @@ async function isPageTemplate(ev: FanpageEvent, now: Date): Promise<boolean> {
     .select({ id: t.id })
     .from(t)
     // Khoá câu mẫu gộp khoảng trắng (`templateKeyOf`) — cùng tin mẫu với xuống dòng khác nhau giữa các hội thoại vẫn là một.
-    .where(and(eq(t.pageId, ev.pageId), ne(t.threadId, ev.threadId), eq(t.note, PAGE_REPLY), sql`regexp_replace(btrim(${t.text}), '[[:space:]]+', ' ', 'g') = ${templateKeyOf(ev.text)}`, gte(t.createdAt, new Date(now.getTime() - TEMPLATE_LOOKBACK_MS))))
+    .where(and(eq(t.pageId, ev.pageId), ne(t.threadId, ev.threadId), eq(t.note, PAGE_REPLY), sql`btrim(regexp_replace(${t.text}, '[[:space:]]+', ' ', 'g')) = ${templateKeyOf(ev.text)}`, gte(t.createdAt, new Date(now.getTime() - TEMPLATE_LOOKBACK_MS))))
     .limit(1);
   return Boolean(seen);
 }
