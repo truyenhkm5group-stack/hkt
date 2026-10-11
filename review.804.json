@@ -1,0 +1,8 @@
+{
+  "pr": 804,
+  "sha": "a4a10b98dcda5abd8c16eb98f027119c59dbecd2",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-11T05:48:12.905Z",
+  "note": "Theo tenant; địa chỉ chỉ GỢI Ý, máy chủ kiểm lời đồng ý mới điền (§3.12); đơn hoàn/huỷ/nháp/chưa ghép không bao giờ đề xuất; SĐT trùng ⇒ AMBIGUOUS; mức PHONE che địa chỉ; Pancake PAID không coi là đã giao. Gộp sau #802 (tools.ts) và trước authoritative-quote"
+}
