@@ -45,6 +45,8 @@ import { nextFollowupAt } from "@/lib/sales-chatbot/followup-shared";
 import { fetchPancakeThreadProfile, threadProfileStale } from "@/lib/sales-chatbot/returning";
 import { noteAiCustomerReply } from "@/lib/pricing/ai-customer";
 import { loadFollowupSettings } from "@/lib/sales-chatbot/followup-settings";
+import { confirmedStaleness, settleConfirmedConversation } from "@/lib/sales-chatbot/confirmed-settle";
+import { loadLifecycle } from "@/lib/sales-chatbot/lifecycle";
 import type { ChatState } from "@/lib/sales-chatbot/tools";
 import { imagesAlreadyDescribed, pancakeImageUrls, pancakeStickerUrls } from "@/lib/sales-chatbot/vision";
 import { adReferralFromPancake, isPancakePageSide, type AdReferral } from "@/lib/sales-chatbot/ad-referral-shared";
@@ -752,6 +754,17 @@ export async function markWaitingForCustomer(conversationId: string, now: Date, 
   if (!row) return;
   const st = (row.state ?? {}) as ChatState;
   const done = row.status === "HANDOFF" || Boolean(st.confirmed) || Boolean(st.declined) || Boolean(st.handoff);
+  // ĐƠN ĐÃ XÁC NHẬN THẮNG SỔ CŨ (chủ shop 11/10/2026 · P0-B): `state.confirmed` chỉ do `confirm_order` ghi — đơn tự xác nhận ở lõi
+  // đơn (công tắc «đơn đủ thông tin = đã xác nhận») hay do người xác nhận thì sổ vẫn trống. Đọc ĐƠN THẬT trước khi xếp lịch: đã
+  // xác nhận ⇒ không xếp, dọn lịch cũ + bước DONE ngay tại đây. Đọc lỗi ⇒ xếp như cũ (cổng của job đọc lại và chặn ở phía hẹp).
+  if (!done) {
+    const loaded = await loadLifecycle(conversationId, now).catch(() => null);
+    if (loaded && confirmedStaleness(loaded.conv, loaded.snapshot).confirmed) {
+      await db.update(c).set({ lastBotAt: now, ...(threadId ? { threadId } : {}) }).where(eq(c.id, conversationId));
+      await settleConfirmedConversation(loaded.conv, loaded.snapshot, now, "SCHEDULE").catch(() => undefined);
+      return;
+    }
+  }
   const fs = await loadFollowupSettings();
   await db
     .update(c)

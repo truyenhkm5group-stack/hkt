@@ -2,7 +2,7 @@ import { and, eq, gte, inArray, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { nurtureNextAt, renderTemplate, shortName } from "@/lib/constants/outreach";
 import { conversationVerdict, timesFromMessages } from "@/lib/constants/outreach-broadcast";
-import { loadOutreachConfig, nurtureVars } from "@/lib/outreach/build";
+import { hasRecentOrder, loadOutreachConfig, nurtureVars } from "@/lib/outreach/build";
 import { getPancakePagesClient, type PancakePagesClient } from "@/lib/integrations/pancake/pages";
 import { classifyOutreachError } from "@/lib/constants/outreach-errors";
 
@@ -75,6 +75,22 @@ export async function sendOutreachTargets(ids: string[], actor: string, options:
       await traLai(row.id);
       skipped += 1;
       continue;
+    }
+    // ── KỊCH BẢN BĂN KHOĂN CHỈ CHO KHÁCH CHƯA MUA (chủ shop 11/10/2026 · P0-C): đọc lại ĐƠN ngay trước khi gửi từng bước. Trước
+    // đây chỉ lúc dựng / lúc rà mới hỏi, nên khách chốt đơn giữa hai bước vẫn nhận «chị còn băn khoăn gì…». Đọc lỗi ⇒ KHÔNG gửi
+    // lượt này (trả về PENDING — phía hẹp), không đoán là chưa mua.
+    if (row.segment === "NURTURE") {
+      const orderId = await hasRecentOrder(row.conversationId, [row.phone]).catch(() => undefined);
+      if (orderId === undefined) {
+        await traLai(row.id);
+        skipped += 1;
+        continue;
+      }
+      if (orderId) {
+        await db.update(t).set({ status: "CONVERTED", orderId, error: "", nextAt: null, updatedAt: new Date() }).where(eq(t.id, row.id));
+        skipped += 1;
+        continue;
+      }
     }
     // ── Kiểm lại bằng tin nhắn thật (chỉ khi có mã khách — API đọc tin đòi nó) ──
     let lastCustomerAt: Date | null = row.segment === "NURTURE" ? row.lastActivityAt : null;

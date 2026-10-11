@@ -39,6 +39,7 @@ import { claimFactsLoader, guardOutgoing, type ClaimKind } from "@/lib/sales-cha
 import { SALES_TONE_LABEL, type SalesChatbotConfig, salesBotBillingSource } from "@/lib/sales-chatbot/config";
 import { appendBotMessage, conversationView, loadSalesChatbotConfig, salesChatProvider } from "@/lib/sales-chatbot/engine";
 import { claimConversationEvent, patchConversationEventPayload, recordConversationEvent } from "@/lib/sales-chatbot/events";
+import { settleConfirmedConversation } from "@/lib/sales-chatbot/confirmed-settle";
 import { PAGE_REPLY, type FanpageDeps } from "@/lib/sales-chatbot/fanpage";
 import { sendBotText } from "@/lib/sales-chatbot/messenger";
 import { pageRuntimeMode } from "@/lib/sales-chatbot/page-runtime";
@@ -230,6 +231,8 @@ export async function runSalesFollowups(deps: FanpageDeps = {}): Promise<Followu
     const pre = await followupGate(row, claimed, now);
     if (!pre.decision.send) {
       await stop(pre.decision.reason, "PRE_AI", { lc: pre.lifecycle, script: pre.script, checks: pre.checks });
+      // Đơn ĐÃ XÁC NHẬN (P0-B 11/10/2026): ngoài chặn gửi, dọn luôn sổ hội thoại — huỷ lịch còn lại, WAITING ⇒ OPEN, bước DONE.
+      if (pre.conv) await settleConfirmedConversation(pre.conv, pre.lifecycle, now, "FOLLOWUP_JOB").catch(() => undefined);
       continue;
     }
     const putBack = async (why: string) => {
@@ -292,6 +295,8 @@ export async function runSalesFollowups(deps: FanpageDeps = {}): Promise<Followu
       const fin = await followupGate(row, claimed, now);
       if (!fin.decision.send || !fin.conv) {
         await stop(fin.decision.send ? "LIFECYCLE_UNKNOWN" : fin.decision.reason, "PRE_SEND", { lc: fin.lifecycle, script: fin.script, checks: fin.checks, model, promptHash });
+        // Đơn vừa được xác nhận trong lúc AI soạn ⇒ dọn sổ ngay (P0-B).
+        if (fin.conv) await settleConfirmedConversation(fin.conv, fin.lifecycle, now, "FOLLOWUP_JOB").catch(() => undefined);
         continue;
       }
       // Hàng rào khẳng định (#789): câu nhắc nói «đã lên đơn / đã chốt / đã nhận tiền» mà ERP chưa có căn cứ ⇒ KHÔNG gửi, bỏ lần này.

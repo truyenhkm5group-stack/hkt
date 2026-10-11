@@ -15,8 +15,9 @@
  *     vết quyết định đủ trường, không PII · câu «đã lên đơn» khi đơn chưa xác nhận ⇒ claim-guard chặn.
  */
 import assert from "node:assert/strict";
-import { rmSync } from "node:fs";
-import { and, eq } from "drizzle-orm";
+import { readdirSync, readFileSync, rmSync, statSync } from "node:fs";
+import path from "node:path";
+import { and, eq, inArray } from "drizzle-orm";
 import { getDb, getPlatformDb, organizationDatabaseUrl, schema } from "@/db";
 import type { AiBlock, AiProvider, AiRequest, AiResponse } from "@/lib/ai/provider";
 import { resolvePermissions } from "@/lib/auth/permissions";
@@ -38,6 +39,9 @@ import { runSalesFollowups } from "@/lib/sales-chatbot/followup";
 import { decideFollowup, FOLLOWUP_REASON_LABEL, followupScriptOf, followupSlotKey, type FollowupConvSnap, type FollowupGateInput } from "@/lib/sales-chatbot/followup-shared";
 import { deriveLifecycle, LIFECYCLE_SHOP_SAID_PREFIX, optOutInCustomerText, orderStateOf, type LifecycleFacts, type LinkedOrderFact } from "@/lib/sales-chatbot/lifecycle";
 import { executeTool, type ChatState } from "@/lib/sales-chatbot/tools";
+import { confirmedStaleness, repairStaleConfirmed, staleRepairSummaryLines } from "@/lib/sales-chatbot/confirmed-settle";
+import { sendOutreachTargets } from "@/lib/outreach/send";
+import { parseStaleRepairArgs } from "@/scripts/sales-stale-confirmed-repair";
 import { setSettingJson } from "@/lib/settings";
 
 const ORG = "fu-life";
@@ -334,11 +338,18 @@ export async function testFollowupLifecycleDb() {
       await linkAgentOrder(kOrder, k, "AI_AGENT");
       assert.equal((await db.select({ s: schema.orders.stage }).from(schema.orders).where(eq(schema.orders.id, kOrder)))[0].s, "CONFIRMED", "công tắc bật ⇒ nháp của bot ghi thẳng «Đã xác nhận»");
       assert.ok(tk.state.draft && !tk.state.confirmed && !tk.state.declined && !tk.state.handoff, "GỐC: sổ bot không có confirmed ⇒ cổng cũ (st.confirmed || declined || handoff) cho qua");
-      await db.update(c).set({ state: tk.state }).where(eq(c.id, k));
+      await db.update(c).set({ state: { ...tk.state, stage: "CONFIRM" } }).where(eq(c.id, k));
+      // P0-B (chủ shop 11/10/2026): lúc XẾP LỊCH đọc đơn THẬT ⇒ không xếp; lịch cũ huỷ, WAITING ⇒ OPEN, bước DONE, một dòng vết.
       await markWaitingForCustomer(k, new Date());
-      const [kw] = await db.select({ status: c.status, next: c.nextFollowupAt, ws: c.waitingSince }).from(c).where(eq(c.id, k));
-      assert.ok(kw.status === "WAITING" && kw.next && kw.next.getTime() - kw.ws!.getTime() === 60 * 60_000, "GỐC: lịch 1 giờ vẫn được xếp cho hội thoại đã có đơn xác nhận");
-      await db.update(c).set({ nextFollowupAt: new Date(Date.now() - 60_000), lastCustomerAt: new Date(Date.now() - 2 * 60_000) }).where(eq(c.id, k));
+      const [kw] = await db.select({ status: c.status, next: c.nextFollowupAt, ws: c.waitingSince, state: c.state, lastBotAt: c.lastBotAt }).from(c).where(eq(c.id, k));
+      assert.deepEqual([kw.status, kw.next, kw.ws, (kw.state as ChatState).stage], ["OPEN", null, null, "DONE"], `đơn đã xác nhận ⇒ không xếp lịch, bước DONE: ${JSON.stringify(kw)}`);
+      assert.ok(kw.lastBotAt && Date.now() - kw.lastBotAt.getTime() < 60_000, "mốc tin cuối của bot vẫn ghi");
+      const settledK = await db.select({ payload: e.payload, orderId: e.orderId, actor: e.actorKind }).from(e).where(and(eq(e.conversationId, k), eq(e.type, "stage.changed")));
+      assert.equal(settledK.length, 1, "một dòng vết dọn sổ");
+      const sk = settledK[0].payload as Record<string, unknown>;
+      assert.deepEqual([settledK[0].actor, settledK[0].orderId, sk.via, sk.reason, sk.from, sk.to], ["SYSTEM", kOrder, "SCHEDULE", "CONFIRMED_ORDER", "CONFIRM", "DONE"]);
+      // Dòng ĐÃ KẸT từ trước bản vá (lịch còn, WAITING, bước CONFIRM) ⇒ job chặn gửi VÀ dọn sổ ngay lúc chạy.
+      await db.update(c).set({ status: "WAITING", state: { ...tk.state, stage: "CONFIRM" }, waitingSince: new Date(Date.now() - 61 * 60_000), nextFollowupAt: new Date(Date.now() - 60_000), lastCustomerAt: new Date(Date.now() - 2 * 60_000) }).where(eq(c.id, k));
       const nk = prompts.length;
       const rk = await run();
       assert.equal(pancake.sentTo("th-k").length, 0, `KimThu: không gửi «em xác nhận để gửi đi luôn nhé ạ?»: ${JSON.stringify(rk)}`);
@@ -348,6 +359,29 @@ export async function testFollowupLifecycleDb() {
       assert.equal(dk.orderId, kOrder, "vết mang mã đơn liên quan");
       const lk = (dk.payload as Record<string, unknown>).lifecycle as Record<string, unknown>;
       assert.deepEqual([lk.order, lk.salesStage], ["CONFIRMED", "AWAITING_CONFIRMATION"]);
+      const [kj] = await db.select({ status: c.status, next: c.nextFollowupAt, state: c.state }).from(c).where(eq(c.id, k));
+      assert.deepEqual([kj.status, kj.next, (kj.state as ChatState).stage], ["OPEN", null, "DONE"], "job: đơn đã xác nhận ⇒ huỷ lịch + bước DONE ngay lúc chạy");
+      const viaJob = (await db.select({ payload: e.payload }).from(e).where(and(eq(e.conversationId, k), eq(e.type, "stage.changed")))).map((r) => String((r.payload as Record<string, unknown>).via)).sort();
+      assert.deepEqual(viaJob, ["FOLLOWUP_JOB", "SCHEDULE"], "mỗi nơi phát hiện một dòng vết");
+
+      // ⑭ NGHIỆM THU — CA KIỀU VĂN LỆ: khách nói 2kg, gửi SĐT + địa chỉ, SKU khớp, khung đơn «ĐÃ XÁC NHẬN» ⇒ sau lượt bot trả lời
+      //    KHÔNG có lịch nhắc, bước DONE, job chạy bao nhiêu lần cũng KHÔNG một tin «có muốn tiếp tục chốt đơn không».
+      const lv = await conv("th-kvl", state0, { status: "OPEN", nextFollowupAt: null, waitingSince: null });
+      const tv = await executeTool("create_draft_order", { items: [{ variant_id: "erp-fu-var", quantity: 1 }] }, { conversationId: lv, channel: "FANPAGE", config: cfg, state: state0, lastUserText: "cho chị 2kg chả cá thu nhé", agent: AGENT, turn: 4 });
+      assert.ok(!tv.isError, tv.content);
+      const lvOrder = tv.state.draft!.orderId!;
+      await linkAgentOrder(lvOrder, lv, "AI_AGENT");
+      assert.equal((await db.select({ s: schema.orders.stage }).from(schema.orders).where(eq(schema.orders.id, lvOrder)))[0].s, "CONFIRMED", "Kiều Văn Lệ: khung đơn ĐÃ XÁC NHẬN");
+      await db.update(c).set({ state: { ...tv.state, stage: "CONFIRM" } }).where(eq(c.id, lv));
+      await markWaitingForCustomer(lv, new Date());
+      const [lvw] = await db.select({ status: c.status, next: c.nextFollowupAt, state: c.state }).from(c).where(eq(c.id, lv));
+      assert.deepEqual([lvw.status, lvw.next, (lvw.state as ChatState).stage], ["OPEN", null, "DONE"], "Kiều Văn Lệ: không lịch nhắc, bước DONE");
+      const nlv = prompts.length;
+      await run();
+      await run();
+      assert.equal(pancake.sentTo("th-kvl").length, 0, "Kiều Văn Lệ: không một tin follow-up nào");
+      assert.equal(prompts.length, nlv, "Kiều Văn Lệ: không gọi AI");
+      assert.deepEqual(await onlyReason(lv), [], "không còn lịch ⇒ job không cả xét");
       await setSettingJson(AUTO_CONFIRM_COMPLETE_SETTING_KEY, { enabled: false });
 
       // ⑬ Nháp của bot CHƯA xác nhận ⇒ nhắc xác nhận hợp lệ — nhưng chữ AI «đơn … đã lên xong» bị claim-guard chặn.
@@ -363,6 +397,69 @@ export async function testFollowupLifecycleDb() {
       const [dl] = await decisions(l);
       assert.deepEqual([dl.reasonCode, (dl.payload as Record<string, unknown>).claim, (dl.payload as Record<string, unknown>).script], ["CLAIM_BLOCKED", "ORDER_CONFIRMED", "CONFIRM_REMINDER"]);
       assert.equal(pancake.sentTo("th-l").length, 0, "câu «đã lên đơn» khi đơn chưa xác nhận KHÔNG tới khách");
+
+      // ⑮ SỬA DỮ LIỆU (ops sales-stale-confirmed-repair · P0-H): dòng kẹt TỪ TRƯỚC bản vá — (a) đơn đã xác nhận mà còn lịch nhắc,
+      //    (b) đơn đã xác nhận mà còn WAITING / bước CONFIRM (không lịch). Đối chứng: đơn «Mới» (chưa xác nhận) và đơn huỷ KHÔNG đụng.
+      const stale = (thread: string, extra: Partial<typeof c.$inferInsert>) => conv(thread, { ...state0, stage: "CONFIRM" }, { nextFollowupAt: new Date(Date.now() + 5 * 3_600_000), ...extra });
+      const ra1 = await stale("th-rep-a", {});
+      await linkTo(await newOrder("CONFIRMED", "fu-rep-a"), ra1);
+      const rb1 = await stale("th-rep-b", { nextFollowupAt: null });
+      await linkTo(await newOrder("CONFIRMED", "fu-rep-b"), rb1);
+      const rNew = await stale("th-rep-new", {});
+      await linkTo(await newOrder("NEW", "fu-rep-new"), rNew);
+      const rCan = await stale("th-rep-can", {});
+      const oCan = await newOrder("CONFIRMED", "fu-rep-can");
+      await linkTo(oCan, rCan);
+      await db.update(schema.orders).set({ stage: "CANCELLED" }).where(eq(schema.orders.id, oCan));
+      const watch = [ra1, rb1, rNew, rCan];
+      const snap = async () => JSON.stringify(await db.select({ id: c.id, status: c.status, next: c.nextFollowupAt, ws: c.waitingSince, state: c.state }).from(c).where(inArray(c.id, watch)).orderBy(c.id));
+      const evCount = async () => (await db.select({ id: e.id }).from(e)).length;
+      const before = await snap();
+      const evBefore = await evCount();
+      const dry = await repairStaleConfirmed({ apply: false });
+      assert.deepEqual([dry.stale, dry.confirmedWithFollowup, dry.confirmedStaleStage, dry.staleStageConfirm, dry.staleWaiting, dry.repaired, dry.unreadable], [2, 1, 2, 2, 2, 0, 0], `chạy thử đếm đúng (a)=1 · (b)=2: ${JSON.stringify(dry)}`);
+      assert.equal(await snap(), before, "chạy thử KHÔNG ghi hội thoại nào");
+      assert.equal(await evCount(), evBefore, "chạy thử KHÔNG ghi vết nào");
+      assert.ok(staleRepairSummaryLines(ORG, dry).some((x) => x.includes("CHẠY THỬ")), "dòng tóm tắt nói rõ chạy thử");
+      const ap = await repairStaleConfirmed({ apply: true });
+      assert.deepEqual([ap.stale, ap.repaired], [2, 2], JSON.stringify(ap));
+      for (const id of [ra1, rb1]) {
+        const [r] = await db.select({ status: c.status, next: c.nextFollowupAt, ws: c.waitingSince, state: c.state }).from(c).where(eq(c.id, id));
+        assert.deepEqual([r.status, r.next, r.ws, (r.state as ChatState).stage], ["OPEN", null, null, "DONE"], `đã dọn: ${JSON.stringify(r)}`);
+        const ev = await db.select({ payload: e.payload }).from(e).where(and(eq(e.conversationId, id), eq(e.type, "stage.changed")));
+        assert.deepEqual(ev.map((x) => (x.payload as Record<string, unknown>).via), ["REPAIR"], "một dòng vết REPAIR");
+      }
+      for (const id of [rNew, rCan]) {
+        const [r] = await db.select({ status: c.status, next: c.nextFollowupAt, state: c.state }).from(c).where(eq(c.id, id));
+        assert.ok(r.status === "WAITING" && r.next && (r.state as ChatState).stage === "CONFIRM", "đơn chưa xác nhận / đã huỷ ⇒ KHÔNG đụng");
+      }
+      const evAfterApply = await evCount();
+      const afterApply = await snap();
+      const again = await repairStaleConfirmed({ apply: true });
+      assert.deepEqual([again.stale, again.repaired], [0, 0], `chạy lại = không làm gì: ${JSON.stringify(again)}`);
+      assert.equal(await snap(), afterApply, "chạy lần hai không đổi một dòng");
+      assert.equal(await evCount(), evAfterApply, "chạy lần hai không thêm vết");
+      assert.equal(pancake.sentTo("th-rep-a").length + pancake.sentTo("th-rep-b").length, 0, "sửa dữ liệu không gửi tin");
+
+      // ⑯ KỊCH BẢN BĂN KHOĂN (outreach NURTURE · P0-C): khách chốt đơn GIỮA hai bước ⇒ đọc lại đơn ngay trước khi gửi ⇒ CONVERTED,
+      //    không một tin «chị còn băn khoăn…». Đối chứng: khách chưa có đơn vẫn nhận bước kế tiếp.
+      const ot = schema.outreachTargets;
+      const oBought = await newOrder("CONFIRMED", "fu-nurture");
+      await db.update(schema.orders).set({ pageId: PAGE, conversationId: "pc-nurture-bought" }).where(eq(schema.orders.id, oBought));
+      await db.insert(ot).values([
+        { id: "fu-nur-bought", segment: "NURTURE", status: "PENDING", pageId: PAGE, conversationId: "pc-nurture-bought", pancakeCustomerId: "", customerName: "Khách A", phone: "0911000001", message: "Chị ơi chị còn băn khoăn gì không ạ", dedupeKey: "fu-nur-bought" },
+        { id: "fu-nur-open", segment: "NURTURE", status: "PENDING", pageId: PAGE, conversationId: "pc-nurture-open", pancakeCustomerId: "", customerName: "Khách B", phone: "0911000002", message: "Chị ơi chị còn băn khoăn gì không ạ", dedupeKey: "fu-nur-open" },
+      ]);
+      const sentNurture: string[] = [];
+      const fakeClient = {
+        sendMessage: async (_p: string, conversationId: string) => (sentNurture.push(conversationId), { ok: true as const, id: `m-${conversationId}` }),
+        sendAttachment: async () => ({ ok: true }),
+        listMessages: async () => [],
+      } as unknown as NonNullable<Parameters<typeof sendOutreachTargets>[2]>["client"];
+      const nr = await sendOutreachTargets(["fu-nur-bought", "fu-nur-open"], "test-fu", { client: fakeClient });
+      assert.deepEqual(sentNurture, ["pc-nurture-open"], `chỉ khách CHƯA mua nhận bước kế tiếp: ${JSON.stringify(nr)}`);
+      const [nBought] = await db.select({ status: ot.status, orderId: ot.orderId }).from(ot).where(eq(ot.id, "fu-nur-bought"));
+      assert.deepEqual([nBought.status, nBought.orderId], ["CONVERTED", oBought], "khách đã chốt ⇒ CONVERTED, mang mã đơn");
     });
   } finally {
     setSalesChatProviderForTests(null);
@@ -372,8 +469,77 @@ export async function testFollowupLifecycleDb() {
   }
 }
 
+// ─────────────────────────── 3. ĐƠN ĐÃ XÁC NHẬN THẮNG SỔ CŨ (P0-B / P0-C / P0-H · thuần + quét mã nguồn) ───────────────────────────
+
+export function testConfirmedSettlePure() {
+  const lcOf = (order: "CONFIRMED" | "CREATED" | "CREATION_PENDING" | "CANCELLED" | "NONE") => ({ order, orderId: order === "NONE" ? null : "erp-x" });
+  const convOf = (p: { status?: string; next?: Date | null; stage?: string }) => ({ status: p.status ?? "WAITING", nextFollowupAt: p.next === undefined ? new Date() : p.next, state: (p.stage ? { stage: p.stage } : {}) as ChatState });
+  const s1 = confirmedStaleness(convOf({ stage: "CONFIRM" }), lcOf("CONFIRMED"));
+  assert.deepEqual([s1.confirmed, s1.followupScheduled, s1.waiting, s1.stageStale, s1.stale, s1.orderId], [true, true, true, true, true, "erp-x"], "đã xác nhận + lịch + WAITING + bước CONFIRM ⇒ cần dọn");
+  assert.equal(confirmedStaleness(convOf({ status: "OPEN", next: null, stage: "DONE" }), lcOf("CONFIRMED")).stale, false, "đã sạch ⇒ không dọn (idempotent)");
+  assert.equal(confirmedStaleness(convOf({ status: "OPEN", next: null }), lcOf("CONFIRMED")).stale, true, "bước trống mà đơn đã xác nhận ⇒ dọn");
+  for (const o of ["CREATED", "CREATION_PENDING", "CANCELLED", "NONE"] as const) assert.equal(confirmedStaleness(convOf({ stage: "CONFIRM" }), lcOf(o)).stale, false, `${o} ⇒ KHÔNG dọn (chỉ đơn đã xác nhận)`);
+  // Tham số script: cờ lạ / số sai ⇒ lỗi, mặc định CHẠY THỬ.
+  const okArgs = parseStaleRepairArgs(["hslc"]);
+  assert.ok(okArgs.ok && okArgs.args.apply === false && okArgs.args.code === "hslc", "mặc định chạy thử");
+  assert.ok(parseStaleRepairArgs(["--all", "--apply", "--days=60"]).ok);
+  for (const bad of [[], ["hslc", "--all"], ["hslc", "--days=0"], ["hslc", "--days=121"], ["hslc", "--apply=1"], ["hslc", "--xoa"], ["HSLC;rm"]]) assert.equal(parseStaleRepairArgs(bad).ok, false, `tham số sai bị từ chối: ${bad.join(" ")}`);
+}
+
+/**
+ * P0-C: sau khi đơn đã xác nhận, KHÔNG đường ERP nào được gửi kịch bản chốt / «còn băn khoăn» / «tiếp tục chốt». Mọi tệp trong
+ * lib/ gọi một ống gửi tin RA KHÁCH phải khai ở đây kèm lý do; hai đường TỰ GỬI kịch bản chốt phải đọc ĐƠN THẬT ngay trước khi gửi.
+ */
+const POST_CONFIRM_SEND_PATHS: Record<string, string> = {
+  "lib/sales-chatbot/fanpage.ts": "trả lời TIN MỚI của khách (chatTurn) — được phép sau xác nhận (P0-C); khách nhắn sau khi chốt ⇒ engine chuyển người",
+  "lib/sales-chatbot/messenger.ts": "như fanpage — Messenger trực tiếp",
+  "lib/sales-chatbot/zalo.ts": "như fanpage — Zalo OA",
+  "lib/sales-chatbot/inbox.ts": "NHÂN VIÊN gõ — người quyết",
+  "lib/sales-chatbot/order-sync.ts": "xác nhận đặt lại do KHÁCH chủ động mua lại",
+  "lib/sales-chatbot/followup.ts": "TỰ GỬI kịch bản chốt — cổng đọc vòng đời ngay trước khi gửi: đơn đã có ⇒ ORDER_EXISTS, đơn đã xác nhận ⇒ dọn sổ",
+  "lib/outreach/send.ts": "TỰ GỬI kịch bản băn khoăn (NURTURE) — đọc lại đơn ngay trước khi gửi từng bước ⇒ CONVERTED, không gửi",
+  "lib/outreach/broadcast.ts": "chiến dịch NHÂN VIÊN soạn và bấm gửi — campaign riêng (P0-C: bán chéo sau mua là campaign riêng)",
+};
+const CUSTOMER_SEND = /\b(?:sendBotText|sendFanpageText|sendMessengerPageText|sendMessengerText|sendZaloText|zaloSendText|sendInbox)\(|\.(?:sendMessage|sendText|sendAttachment)\(/;
+const SEND_DEF = /function\s+(?:sendBotText|sendFanpageText|sendMessengerPageText|sendMessengerText|sendZaloText|zaloSendText|sendInbox)\(|^\s*(?:sendMessage|sendText|sendAttachment)\(/;
+
+function libFiles(dir: string, out: string[] = []): string[] {
+  for (const name of readdirSync(dir)) {
+    const full = path.join(dir, name);
+    if (statSync(full).isDirectory()) libFiles(full, out);
+    else if (/\.(ts|tsx)$/.test(name)) out.push(full.split(path.sep).join("/"));
+  }
+  return out;
+}
+
+export function testPostConfirmSendPaths() {
+  const read = (rel: string) => readFileSync(rel, "utf8").replace(/\r\n/g, "\n");
+  const senders = libFiles("lib")
+    .filter((f) => !f.startsWith("lib/integrations/"))
+    .filter((f) => read(f).split("\n").some((ln) => CUSTOMER_SEND.test(ln) && !SEND_DEF.test(ln) && !/^\s*(?:\/\/|\*)/.test(ln)));
+  const undeclared = senders.filter((f) => !(f in POST_CONFIRM_SEND_PATHS));
+  assert.deepEqual(undeclared, [], `đường gửi tin ra khách CHƯA khai luật sau-xác-nhận (P0-C): ${undeclared.join(", ")}`);
+  for (const f of Object.keys(POST_CONFIRM_SEND_PATHS)) assert.ok(senders.includes(f), `khai thừa (tệp không còn gửi tin): ${f}`);
+  // Follow-up: cổng đọc vòng đời + dọn sổ đơn đã xác nhận, đều TRƯỚC lời gọi gửi.
+  const fu = read("lib/sales-chatbot/followup.ts");
+  const send = fu.indexOf("await sendBotText(");
+  assert.ok(fu.indexOf("decideFollowup(") > 0 && fu.indexOf("decideFollowup(") < send, "follow-up: cổng trước khi gửi");
+  assert.ok(fu.indexOf("settleConfirmedConversation(") > 0 && fu.indexOf("settleConfirmedConversation(") < send, "follow-up: dọn sổ đơn đã xác nhận ở nhánh chặn");
+  assert.ok(read("lib/sales-chatbot/followup-shared.ts").includes('return no("ORDER_EXISTS")'), "decideFollowup có nhánh ORDER_EXISTS");
+  // Xếp lịch: đọc đơn thật trước khi xếp.
+  const fp = read("lib/sales-chatbot/fanpage.ts");
+  const mw = fp.slice(fp.indexOf("export async function markWaitingForCustomer("));
+  assert.ok(mw.indexOf("loadLifecycle(") > 0 && mw.indexOf("loadLifecycle(") < mw.indexOf("nextFollowupAt(now"), "xếp lịch: đọc đơn thật TRƯỚC khi xếp");
+  // Kịch bản băn khoăn: đọc lại đơn TRƯỚC lời gọi gửi.
+  const os = read("lib/outreach/send.ts");
+  assert.ok(os.indexOf("hasRecentOrder(") > 0 && os.indexOf("hasRecentOrder(") < os.indexOf("client.sendMessage("), "kịch bản băn khoăn: đọc lại đơn TRƯỚC khi gửi");
+}
+
 export async function testFollowupLifecycle() {
   testLifecyclePure();
+  testConfirmedSettlePure();
+  testPostConfirmSendPaths();
   await testFollowupLifecycleDb();
   console.log("  ✓ vòng đời khách + follow-up an toàn: sáu chiều độc lập (SĐT ≠ đơn, nháp bot ≠ đơn, Pancake PAID ≠ tiền); cổng đọc lại trước khi gửi — đã tạo đơn / đã thu / đã huỷ / từ chối nhận tin / khách vừa nhắn / người vừa trả lời / nguồn ERP khác ⇒ không gửi; hai worker · cron lặp · khoá có sẵn ⇒ một tin; ca KimThu Le ⇒ không gửi; vết đủ trường không PII; «đã lên đơn» khi đơn chưa xác nhận ⇒ claim-guard chặn");
+  console.log("  ✓ đơn đã xác nhận thắng sổ cũ: xếp lịch + job phát hiện ⇒ huỷ lịch, WAITING ⇒ OPEN, bước DONE, vết theo nơi phát hiện; ca Kiều Văn Lệ ⇒ không lịch, không tin; sửa dữ liệu: chạy thử 0 dòng ghi, --apply dọn đúng (a)+(b), chạy lại = không làm gì, đơn Mới / huỷ không đụng; mọi đường gửi tin ra khách khai luật sau-xác-nhận, kịch bản băn khoăn đọc lại đơn trước khi gửi");
 }
