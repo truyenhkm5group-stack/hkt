@@ -1922,3 +1922,4 @@
 {"at":"2026-10-11T01:15:37.420Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MIGRATION_RESERVED","mission":"saas-value-snapshots","detail":"0241"}
 {"at":"2026-10-11T01:15:55.240Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MIGRATION_RESERVED","mission":"inbox-unread-perf","detail":"0242"}
 {"at":"2026-10-11T01:19:04.805Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"saas-value-snapshots","detail":"feat/saas-value-snapshots @ 7f5f3a529475 · 1 lệnh kiểm thử"}
+{"at":"2026-10-11T01:19:20.835Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#794 @ 7f5f3a529475 · Đọc lõi chụp: ghi duy nhất qua hai tệp, chỉ đường JOB, ngày cũ không ghi, lỗi từng nguồn ⇒ NULL + source_errors; migration 0241 chỉ CREATE TABLE/INDEX/CHECK (không UPDATE/DELETE); khai bảng platform_* đủ ba chỗ"}

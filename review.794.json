@@ -1,0 +1,8 @@
+{
+  "pr": 794,
+  "sha": "7f5f3a5294756fc3ae9bd99547bc21ba676c912f",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-11T01:19:08.180Z",
+  "note": "Đọc lõi chụp: ghi duy nhất qua hai tệp, chỉ đường JOB, ngày cũ không ghi, lỗi từng nguồn ⇒ NULL + source_errors; migration 0241 chỉ CREATE TABLE/INDEX/CHECK (không UPDATE/DELETE); khai bảng platform_* đủ ba chỗ"
+}
