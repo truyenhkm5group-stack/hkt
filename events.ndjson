@@ -1993,3 +1993,4 @@
 {"at":"2026-10-11T04:12:40.836Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"avatar-proxy-check","detail":"#799 cho fix/avatar-proxy-check @ 69c84c29eb46"}
 {"at":"2026-10-11T04:13:04.495Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#799 @ 69c84c29eb46 · Chỉ script ops + bài kiểm; chỉ đọc, chỉ GET; không in id/URL/token"}
 {"at":"2026-10-11T04:18:53.718Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"sales-integrity-audit","detail":"#797 @ 91f1375fcc07 → 1e73d6f9eaa5 (MERGE_ISOLATED · HIGH · gates success)"}
+{"at":"2026-10-11T04:20:06.600Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DEPLOY_DISPATCHED","detail":"1e73d6f9eaa5 · run 38111227980 https://github.com/truyenhkm5group-stack/hkt/actions/runs/38111227980"}
