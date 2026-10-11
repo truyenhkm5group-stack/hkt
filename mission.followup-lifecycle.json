@@ -29,18 +29,18 @@
     "0243": "2026-10-11T05:12:17.480Z"
   },
   "created_at": "2026-10-11T02:05:34.188Z",
-  "updated_at": "2026-10-11T05:13:35.976Z",
-  "last_heartbeat": "2026-10-11T05:12:56.771Z",
+  "updated_at": "2026-10-11T08:00:25.518Z",
+  "last_heartbeat": "2026-10-11T08:00:25.518Z",
   "definition_of_done": [],
   "handoff": {
     "branch": "fix/followup-lifecycle",
-    "sha": "00b54f61caf9f410ca204e6c032690f1325e8f1b",
-    "at": "2026-10-11T05:12:56.771Z",
+    "sha": "d2c76ce8307f677232d2dfd2e5346d296a167ff2",
+    "at": "2026-10-11T08:00:25.518Z",
     "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
     "title": "P0 vòng đời khách dùng chung + follow-up an toàn: kiểm lại trạng thái mới nhất ngay trước khi gửi, không «tiếp tục chốt» khi đơn đã tạo, chống trùng, decision trace, câu follow-up qua claim-guard (L6)",
-    "summary": "Vòng đời khách dùng chung (lifecycle.ts, 6 chiều có nguồn) + follow-up kiểm lại trạng thái mới nhất trước AI và ngay trước gửi (23 mã lý do; đơn đã có ⇒ ORDER_EXISTS), khoá đợt chống trùng trước khi gọi Pancake, vết followup.decided, chữ follow-up qua claim-guard (hết CHƯA PHỦ); migration chỉ nới CHECK loại sự kiện",
+    "summary": "Vòng đời khách + follow-up an toàn + đơn DB thắng state (huỷ lịch, stage DONE) + chặn kịch bản băn khoăn lúc gửi + script sales-stale-confirmed-repair (chạy thử mặc định); migration 0243 chỉ nới CHECK",
     "tests": [
-      "npm test đầy đủ trên 00b54f61: TẤT CẢ KIỂM THỬ ĐẠT (809 ✓) · typecheck · lint · followup-lifecycle (fu-life thật: đã có đơn/thanh toán/huỷ/opt-out/khách trả lời trước giờ/hai worker/cron lặp/page vừa trả lời/ca KimThu Le/trace không PII/claim-guard chặn) · 6 đột biến"
+      "npm test đầy đủ trên 714280d7: TẤT CẢ KIỂM THỬ ĐẠT · 8 đột biến · gộp main (#800) + đổi 0242→0243: tsc sạch · migration-journal đạt"
     ]
   }
 }
