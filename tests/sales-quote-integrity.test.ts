@@ -29,7 +29,8 @@ import { buildQuote, catalogReferenceAmounts, computePriced, packChoiceMistake, 
 import { quoteFactOf, quoteSnapshotOf } from "@/lib/sales-chatbot/quote-shared";
 import { renderQuickAnswer } from "@/lib/sales-chatbot/quick-replies";
 import { classifyOrderPrice } from "@/lib/sales-chatbot/price-mismatch";
-import { parsePriceScanArgs, scanBotOrders } from "../scripts/price-mismatch-scan";
+import { applyMismatchFlags, parsePriceScanArgs, planMismatchFlags, scanBotOrders } from "../scripts/price-mismatch-scan";
+import { orderReviewOf, withReviewResolved } from "@/lib/constants/order-review";
 import { autoConfirmBlocker, autoConfirmText, type ChatState } from "@/lib/sales-chatbot/tools";
 import { AUTO_CONFIRM_COMPLETE_SETTING_KEY } from "@/lib/constants/manual-orders";
 import { getSettingJson, setSettingJson } from "@/lib/settings";
@@ -813,9 +814,17 @@ function testWholesalePure() {
   const changed = classifyOrderPrice([{ variantId: "v1", quantity: 1, unitPrice: 300_000, discount: 0 }], [retailBuyer]);
   assert.deepEqual([changed.kind, changed.missingVolumeDiscount], ["PRICE_MISMATCH", false], "giá danh mục đổi ≠ thiếu giảm khối lượng");
   assert.equal(classifyOrderPrice([{ variantId: "xoa", quantity: 1, unitPrice: 1, discount: 0 }], [retailBuyer]).kind, "UNPRICEABLE");
-  assert.deepEqual(parsePriceScanArgs(["hslc", "--days=30"]), { code: "hslc", days: 30 });
-  assert.ok("error" in parsePriceScanArgs(["hslc", "--days=99"]));
-  assert.ok("error" in parsePriceScanArgs([]));
+  const at = new Date("2026-10-11T12:00:00Z");
+  assert.deepEqual(parsePriceScanArgs(["hslc", "--days=30"], at), { code: "hslc", days: 30, since: null, flag: false, apply: false });
+  assert.ok("error" in parsePriceScanArgs(["hslc", "--days=99"], at));
+  assert.ok("error" in parsePriceScanArgs([], at));
+  assert.equal((parsePriceScanArgs(["hslc", "--since=2026-10-11T14:30:00+07:00"], at) as { since: Date }).since.toISOString(), "2026-10-11T07:30:00.000Z", "mốc deploy giờ VN");
+  assert.ok("error" in parsePriceScanArgs(["hslc", "--since=2026-10-12"], at), "mốc ở tương lai");
+  assert.ok("error" in parsePriceScanArgs(["hslc", "--since=2026-01-01"], at), "mốc cũ hơn 60 ngày");
+  assert.ok("error" in parsePriceScanArgs(["hslc", "--since=hom-qua"], at));
+  assert.ok("error" in parsePriceScanArgs(["hslc", "--apply"], at), "--apply chỉ đi cùng --flag");
+  assert.ok("error" in parsePriceScanArgs(["hslc", "--fix"], at), "cờ lạ");
+  assert.deepEqual(["flag", "apply"].map((k) => (parsePriceScanArgs(["hslc", "--flag", "--apply"], at) as Record<string, unknown>)[k]), [true, true]);
   // Chế độ giá lẻ (sỉ tắt) không đổi: 940.000.
   const retail = pricingContextOf(catalog, cfgOf(), null);
   assert.equal(computePriced([{ variantId: "v2", quantity: 1 }, { variantId: "m1", quantity: 1 }], retail).subtotal, 940_000);
@@ -898,6 +907,32 @@ async function testWholesaleCases() {
       await db.update(schema.orderItems).set({ totalDiscount: 0 }).where(eq(schema.orderItems.orderId, order.id));
       const old = (await scanBotOrders(db, 1)).find((r) => r.id === order.id);
       assert.deepEqual([old?.verdict.kind, old?.verdict.actual, old?.verdict.expected, old?.verdict.missingVolumeDiscount, old?.verdict.multiUnit], ["PRICE_MISMATCH", 960_000, 940_000, true, true]);
+      // --since: chỉ đơn tạo SAU mốc ⇒ đơn này (tạo trước mốc) không được đếm — «mismatch MỚI».
+      assert.equal((await scanBotOrders(db, 1, new Date(), new Date(Date.now() + 60_000))).some((r) => r.id === order.id), false, "--since sau đơn ⇒ không đếm");
+      // --flag: chạy thử không ghi; --apply gắn cờ PRICE_MISMATCH + số đúng, KHÔNG đổi giá; chạy lại không gắn lại.
+      const mineOf = (rows: Awaited<ReturnType<typeof scanBotOrders>>) => rows.filter((r) => r.id === order.id);
+      const plan = planMismatchFlags(mineOf(await scanBotOrders(db, 1)));
+      assert.deepEqual(plan.map((p) => p.action), ["FLAG"]);
+      assert.match(plan[0].note, /960\.000.*940\.000.*chênh 20\.000.*thiếu giảm theo khối lượng/);
+      assert.deepEqual(await applyMismatchFlags(plan, false), { flagged: [], failed: [] }, "chạy thử ⇒ không ghi");
+      const rawOf = async () => (await db.select({ raw: schema.orders.raw, total: schema.orders.totalPriceAfterDiscount }).from(schema.orders).where(eq(schema.orders.id, order.id)))[0];
+      assert.equal(orderReviewOf((await rawOf()).raw)?.entries.some((e) => e.code === "PRICE_MISMATCH") ?? false, false);
+      assert.deepEqual(await applyMismatchFlags(plan, true), { flagged: [order.id], failed: [] });
+      const after = await rawOf();
+      const flag = orderReviewOf(after.raw)?.entries.find((e) => e.code === "PRICE_MISMATCH");
+      assert.ok(flag && /940\.000/.test(flag.note), JSON.stringify(after.raw));
+      assert.equal(after.total, order.totalPriceAfterDiscount, "gắn cờ KHÔNG đổi giá đơn");
+      const again = planMismatchFlags(mineOf(await scanBotOrders(db, 1)));
+      assert.deepEqual(again.map((p) => p.action), ["ALREADY_FLAGGED"]);
+      assert.deepEqual(await applyMismatchFlags(again, true), { flagged: [], failed: [] }, "idempotent");
+      // Người đã kiểm cờ (vết reviewLog) ⇒ không gắn lại.
+      const resolved = withReviewResolved(after.raw as Record<string, unknown>, { action: "CONFIRMED", at: new Date().toISOString(), byUserId: null, byName: "Kiểm thử" });
+      await db.update(schema.orders).set({ raw: resolved.raw }).where(eq(schema.orders.id, order.id));
+      assert.deepEqual(planMismatchFlags(mineOf(await scanBotOrders(db, 1))).map((p) => p.action), ["ALREADY_REVIEWED"]);
+      // Đơn đã qua giai đoạn gắn cờ ⇒ liệt kê riêng, không gắn.
+      await db.update(schema.orders).set({ raw: after.raw, stage: "SHIPPED" }).where(eq(schema.orders.id, order.id));
+      await db.update(schema.orders).set({ raw: { ...(after.raw as Record<string, unknown>), review: null } }).where(eq(schema.orders.id, order.id));
+      assert.deepEqual(planMismatchFlags(mineOf(await scanBotOrders(db, 1))).map((p) => p.action), ["STAGE_LOCKED"]);
     },
   });
   assert.deepEqual([...seen].sort(), WHOLESALE_CASES.map((c) => c.key).sort());
