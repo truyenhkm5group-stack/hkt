@@ -3,7 +3,7 @@
   "mission_id": "handoff-ownership",
   "title": "P0: mọi hội thoại chuyển người phải có người/nhóm chịu trách nhiệm + thời gian chờ + SLA + báo nhân viên; không còn hội thoại AI im mà không ai nhận",
   "business_goal": "",
-  "status": "RUNNING",
+  "status": "PR_READY",
   "priority": "P0",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -27,7 +27,18 @@
     "0242": "2026-10-11T04:26:58.708Z"
   },
   "created_at": "2026-10-11T01:59:18.577Z",
-  "updated_at": "2026-10-11T04:26:58.708Z",
-  "last_heartbeat": "2026-10-11T01:59:18.577Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-11T04:27:43.880Z",
+  "last_heartbeat": "2026-10-11T04:27:43.880Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "fix/handoff-ownership",
+    "sha": "07c1e057414770fa489a2d0fc352831e1ec49c74",
+    "at": "2026-10-11T04:27:43.880Z",
+    "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+    "title": "P0: mọi hội thoại chuyển người phải có người/nhóm chịu trách nhiệm + thời gian chờ + SLA + báo nhân viên; không còn hội thoại AI im mà không ai nhận",
+    "summary": "Mọi hội thoại chuyển người có chủ: hàng đợi phòng (work-ownership) hoặc người cầm, hạn work-sla tính lúc đọc, chiếu vào /work (SALES_CHAT_HANDOFF), báo một tin mỗi đợt + khi khách nhắn thêm, leo thang 1 tin/phòng/ngày, dòng «Chờ X phút · Phụ trách · Hạn» ở hộp thư; migration 0242 chỉ thêm cột",
+    "tests": [
+      "tsc · eslint · build · handoff-ownership (PGlite: vào hàng đợi phòng + hạn work.sla, phòng trống = không chủ nhưng vẫn báo, một tin mỗi đợt, 3 tin khách = 1 thông báo, trả AI xoá hạn, phân việc tắt/bật không giật việc, quét + leo thang, SQL≡thuần, không hard-code giờ/phòng) + inbox/work/migration chạy riêng · 4 đột biến · npm test đầy đủ dừng ở bài không liên quan khi đĩa đầy ⇒ CI chạy đủ"
+    ]
+  }
 }

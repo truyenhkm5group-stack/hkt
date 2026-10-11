@@ -1997,3 +1997,4 @@
 {"at":"2026-10-11T04:26:34.316Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MIGRATION_RELEASED","mission":"inbox-unread-perf","detail":"0242 — handoff-ownership (chỉ ADD COLUMN, không cần duyệt) lấy 0242 đi trước; #792 chờ chủ shop chuyển sang 0243"}
 {"at":"2026-10-11T04:26:58.767Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MIGRATION_RESERVED","mission":"handoff-ownership","detail":"0242"}
 {"at":"2026-10-11T04:27:23.159Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MIGRATION_RESERVED","mission":"inbox-unread-perf","detail":"0243"}
+{"at":"2026-10-11T04:27:43.952Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"handoff-ownership","detail":"fix/handoff-ownership @ 07c1e0574147 · 1 lệnh kiểm thử"}
