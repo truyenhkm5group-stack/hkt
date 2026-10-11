@@ -1,0 +1,8 @@
+{
+  "pr": 802,
+  "sha": "5ab92d674da8d961bd1a962c47b21c06910eb3b4",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-11T05:30:19.065Z",
+  "note": "Không có luật địa giới thứ hai (dùng vn-admin-2025.json có nguồn); mơ hồ không bao giờ tự điền; viết tắt HCM danh sách đóng có kiểm; tools.ts chỉ đoạn địa chỉ (gộp trước authoritative-quote); golden chỉ thêm khối address_check"
+}

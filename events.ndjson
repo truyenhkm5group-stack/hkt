@@ -2013,3 +2013,4 @@
 {"at":"2026-10-11T05:24:58.061Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DEPLOY_DISPATCHED","detail":"8539ead78771 · run 38114687437 https://github.com/truyenhkm5group-stack/hkt/actions/runs/38114687437"}
 {"at":"2026-10-11T05:29:35.049Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"address-normalize","detail":"fix/address-normalize @ 5ab92d674da8 · 1 lệnh kiểm thử"}
 {"at":"2026-10-11T05:30:13.872Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"address-normalize","detail":"#802 cho fix/address-normalize @ 5ab92d674da8"}
+{"at":"2026-10-11T05:30:32.831Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#802 @ 5ab92d674da8 · Không có luật địa giới thứ hai (dùng vn-admin-2025.json có nguồn); mơ hồ không bao giờ tự điền; viết tắt HCM danh sách đóng có kiểm; tools.ts chỉ đoạn địa chỉ (gộp trước authoritative-quote); golden chỉ thêm khối address_check"}
