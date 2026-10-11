@@ -20,8 +20,11 @@ export type AdminProvince = { code: number; name: string };
 export type AddressMatch =
   /** Đủ tỉnh + xã, một đáp án. `via` = đọc được bằng tên MỚI hay quy từ địa chỉ CŨ (xã cũ + huyện cũ). */
   | { status: "MATCHED"; province: AdminProvince; ward: AdminWard; via: "NEW_NAME" | "LEGACY" }
-  /** Biết tỉnh, xã có vài khả năng — người chọn một. */
-  | { status: "AMBIGUOUS"; province: AdminProvince; candidates: AdminWard[]; reason: string }
+  /**
+   * Biết tỉnh, xã có vài khả năng — người chọn một. `legacy` = tên xã / huyện CŨ (đúng chữ trong danh mục trước 01/07/2025) mà
+   * dòng địa chỉ khớp, khi nhiều đáp án sinh ra từ MỘT xã cũ bị chia — để câu hỏi khách nói được «phường Cổ Nhuế 2 cũ nay thuộc…».
+   */
+  | { status: "AMBIGUOUS"; province: AdminProvince; candidates: AdminWard[]; reason: string; legacy?: { ward: string; district: string } }
   /** Biết tỉnh, không đọc được xã. */
   | { status: "PROVINCE_ONLY"; province: AdminProvince; reason: string }
   | { status: "UNKNOWN"; reason: string };
@@ -80,6 +83,8 @@ const PROVINCE_ALIASES: Record<string, string> = {
  */
 export function expandAbbreviations(folded: string): string {
   return ` ${folded} `
+    // Dính liền phường + quận kiểu Sài Gòn: «f1q5», «p13q3» (một từ, không dấu cách) ⇒ «phuong 1 quan 5».
+    .replace(/ (?:p|f|ph)(\d{1,2})q(\d{1,2})(?= )/g, " phuong $1 quan $2")
     .replace(/ (?:p|f|ph) ?(\d{1,2}) /g, " phuong $1 ")
     .replace(/ q ?(\d{1,2}) /g, " quan $1 ")
     .replace(/ tp(?= )/g, " thanh pho")
@@ -91,6 +96,36 @@ export function expandAbbreviations(folded: string): string {
     .replace(/ x(?= [a-z])/g, " xa")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+/**
+ * Viết tắt quận / thành phố CŨ của TP HCM khách hay gõ («P13 GV», «Q.PN»). Bảng ĐÓNG, khai tay — đích là TÊN HUYỆN CŨ (đã gập)
+ * và bài kiểm (`tests/address-normalize.test.ts`) khẳng định mỗi đích có thật trong danh mục cũ của TP HCM: viết tắt chỉ là lối
+ * tới một tên có nguồn, không phải một ánh xạ địa giới mới. CỐ Ý không có: «BT» (Bình Thạnh hay Bình Tân?), «TP» (thành phố),
+ * «CC» (chung cư / Củ Chi), «BC» (bưu cục / Bình Chánh) — mơ hồ thì không đoán.
+ */
+export const HCM_DISTRICT_ABBREVIATIONS: Readonly<Record<string, string>> = {
+  gv: "quan go vap",
+  pn: "quan phu nhuan",
+  tb: "quan tan binh",
+  btan: "quan binh tan",
+  bthanh: "quan binh thanh",
+  td: "thanh pho thu duc",
+};
+const HCM_PROVINCE_CODE = 79;
+
+/**
+ * Bung viết tắt quận HCM — CHỈ khi có căn cứ đó là một quận: đứng sau «quận» («q gv»), ngay sau một phường số («phuong 13 gv»),
+ * hoặc dòng địa chỉ đã nói TP HCM. «TB» trơ trọi trong một dòng không nói tỉnh nào thì giữ nguyên chữ.
+ */
+function expandHcmDistricts(t: string, hcmNamed: boolean): string {
+  const keys = Object.keys(HCM_DISTRICT_ABBREVIATIONS).join("|");
+  const full = (k: string) => HCM_DISTRICT_ABBREVIATIONS[k];
+  let out = ` ${t} `
+    .replace(new RegExp(` quan (${keys})(?= )`, "g"), (_m, k: string) => ` ${full(k)}`)
+    .replace(new RegExp(` (phuong [0-9]{1,2}) (${keys})(?= )`, "g"), (_m, w: string, k: string) => ` ${w} ${full(k)}`);
+  if (hcmNamed) out = out.replace(new RegExp(` (${keys})(?= )`, "g"), (_m, k: string) => ` ${full(k)}`);
+  return out.replace(/\s+/g, " ").trim();
 }
 
 /** Vị trí KẾT THÚC của lần xuất hiện CUỐI CÙNG của `needle` (đủ từ) trong `hay`; không có ⇒ -1. */
@@ -106,9 +141,12 @@ function lastWordHit(hay: string, needle: string): number {
 
 type Index = {
   provinces: { p: AdminProvince; names: string[] }[];
-  wards: { w: AdminWard; type: string; core: string; legacy: { district: string; districtType: string; ward: string; wardType: string }[] }[];
+  wards: { w: AdminWard; type: string; core: string; legacy: LegacyPair[] }[];
   wardCoreCount: Map<string, number>;
 };
+
+/** Một cặp (huyện cũ, xã cũ) đã gộp vào một xã mới: phần gập để khớp + chữ gốc để nói với khách. */
+type LegacyPair = { district: string; districtType: string; ward: string; wardType: string; rawDistrict: string; rawWard: string };
 
 let cache: Index | null = null;
 
@@ -133,7 +171,7 @@ function index(): Index {
         legacy: legacy.map(([d, w]) => {
           const dd = splitType(d);
           const ww = splitType(w);
-          return { district: dd.core, districtType: dd.type, ward: ww.core, wardType: ww.type };
+          return { district: dd.core, districtType: dd.type, ward: ww.core, wardType: ww.type, rawDistrict: d, rawWard: w };
         }),
       });
     }
@@ -150,6 +188,39 @@ export function adminProvinces(): AdminProvince[] {
 /** Danh mục xã / phường MỚI của một tỉnh — cho ô chọn xã. */
 export function adminWardsOf(provinceCode: number): AdminWard[] {
   return index().wards.filter((x) => x.w.provinceCode === provinceCode).map((x) => x.w);
+}
+
+/**
+ * Xã / phường MỚI của một tỉnh theo tên người / khách gõ («đông ngạc», «Phường Đông Ngạc», «P. Đông Ngạc»); không có ⇒ `null`.
+ * Chỉ tra trong danh mục — tên lạ không bao giờ thành một xã.
+ */
+export function findWardIn(provinceCode: number, text: string): AdminWard | null {
+  const f = expandAbbreviations(foldVnText(text));
+  if (!f) return null;
+  const { type, core } = splitType(f);
+  const hits = index().wards.filter((x) => x.w.provinceCode === provinceCode && x.core === core && (!type || x.type === type));
+  return hits.length === 1 ? hits[0].w : null;
+}
+
+/**
+ * Chữ (đã gập) có phải đúng MỘT tên hành chính — tỉnh mới / cũ, xã mới, huyện cũ, xã cũ — không. Cho bộ tách phần số nhà / đường:
+ * đoạn «…, Bắc Từ Liêm, …» không có tiền tố loại vẫn là đơn vị hành chính, không phải tên đường.
+ */
+export function isAdminName(folded: string): boolean {
+  const f = expandAbbreviations(folded);
+  const core = splitType(f).core;
+  if (!core) return false;
+  const idx = index();
+  if (idx.provinces.some((x) => x.names.includes(core) || x.names.includes(f))) return true;
+  if (needsType(core)) return false;
+  return idx.wardCoreCount.has(core) || adminLegacyNames().has(core);
+}
+
+let legacyNames: Set<string> | null = null;
+function adminLegacyNames(): Set<string> {
+  if (legacyNames) return legacyNames;
+  legacyNames = new Set(index().wards.flatMap((x) => x.legacy.flatMap((l) => [l.district, l.ward])));
+  return legacyNames;
 }
 
 /** Tên tỉnh (mới / cũ / viết tắt, có hay không có dấu) ⇒ tỉnh MỚI; không nhận ra ⇒ `null`. */
@@ -186,9 +257,10 @@ const needsType = (core: string) => /^\d+$/.test(core) || core.length < 3;
  *  4. Chỉ có huyện cũ ⇒ các xã mới có phần đất của huyện đó (≤ `MAX_WARD_CANDIDATES` thì đưa người chọn).
  */
 export function normalizeVnAddress(text: string): AddressMatch {
-  const t = expandAbbreviations(foldVnText(text));
-  if (!t) return { status: "UNKNOWN", reason: "Địa chỉ trống." };
+  const t0 = expandAbbreviations(foldVnText(text));
+  if (!t0) return { status: "UNKNOWN", reason: "Địa chỉ trống." };
   const idx = index();
+  const t = expandHcmDistricts(t0, provinceIn(t0)?.p.code === HCM_PROVINCE_CODE);
   const prov = provinceIn(t);
   // Phần chữ TRƯỚC tên tỉnh — xã / huyện nằm ở đó (tên tỉnh cũng có thể trùng tên một xã: «xã Thanh Hoá»).
   const head = prov ? t.slice(0, Math.max(0, prov.start)).trim() || t : t;
@@ -218,27 +290,56 @@ export function normalizeVnAddress(text: string): AddressMatch {
     const provs = new Set(legacyHits.map((x) => x.w.provinceCode));
     const p = prov?.p ?? (provs.size === 1 ? provinceOf(legacyHits[0].w) : null);
     if (p && legacyHits.length === 1) return { status: "MATCHED", province: p, ward: legacyHits[0].w, via: "LEGACY" };
-    if (p && provs.size === 1 && legacyHits.length <= MAX_WARD_CANDIDATES) return { status: "AMBIGUOUS", province: p, candidates: legacyHits.map((x) => x.w), reason: "Xã / phường cũ đã được chia cho nhiều xã / phường mới — chọn theo số nhà, đường." };
+    if (p && provs.size === 1 && legacyHits.length <= MAX_WARD_CANDIDATES) {
+      // Tên xã cũ đã khớp — chỉ nêu khi MỌI đáp án cùng sinh ra từ đúng một cặp (huyện cũ, xã cũ) (một xã cũ bị chia).
+      const pairs = new Set(legacyHits.map((x) => {
+        const l = maxByItem(x.legacy, (y) => legacyScore(head, y));
+        return l ? `${l.rawDistrict}|${l.rawWard}` : "";
+      }));
+      const [only] = pairs;
+      const legacy = pairs.size === 1 && only ? { district: only.split("|")[0], ward: only.split("|")[1] } : undefined;
+      return { status: "AMBIGUOUS", province: p, candidates: legacyHits.map((x) => x.w), reason: "Xã / phường cũ đã được chia cho nhiều xã / phường mới — chọn theo số nhà, đường.", ...(legacy ? { legacy } : {}) };
+    }
   }
-  if (!prov) return { status: "UNKNOWN", reason: strong.length ? "Không thấy tên tỉnh / thành — tên xã trùng ở nhiều tỉnh." : "Không thấy tên tỉnh / thành trong địa chỉ." };
+  // Không có tên tỉnh mà có quận / huyện CŨ KÈM LOẠI chỉ tồn tại ở MỘT tỉnh («quận Gò Vấp», «quận 3») ⇒ tỉnh đó — không đoán
+  // gì thêm: tên huyện có loại trùng ở hai tỉnh thì vẫn là chưa biết tỉnh.
+  const inferred = prov ? null : provinceFromTypedDistrict(head);
+  if (!prov && !inferred) return { status: "UNKNOWN", reason: strong.length ? "Không thấy tên tỉnh / thành — tên xã trùng ở nhiều tỉnh." : "Không thấy tên tỉnh / thành trong địa chỉ." };
+  const pv: AdminProvince = prov ? prov.p : inferred!;
+  const area = prov ? pool : idx.wards.filter((x) => x.w.provinceCode === pv.code);
 
   // 3. Tên mới KHÔNG loại — đủ dài, không là số («…, Long Bình, Thủ Đức, HCM»).
   //    Tên trùng tên một HUYỆN CŨ của tỉnh («Việt Trì», «Ba Đình», «Nha Trang») không đứng một mình được: khách viết địa chỉ cũ
   //    thì đó là cả thành phố / quận cũ (nay chia nhiều phường) ⇒ xuống bước 4, người chọn.
-  const oldDistricts = new Set(pool.flatMap((x) => x.legacy.map((l) => l.district)));
-  const weak = pool.filter((x) => !needsType(x.core) && x.core.includes(" ") && !oldDistricts.has(x.core) && lastWordHit(head, x.core) >= 0);
+  const oldDistricts = new Set(area.flatMap((x) => x.legacy.map((l) => l.district)));
+  const weak = area.filter((x) => !needsType(x.core) && x.core.includes(" ") && !oldDistricts.has(x.core) && lastWordHit(head, x.core) >= 0);
   if (weak.length) {
-    const r = pickNew(prov.p, weak);
+    const r = pickNew(pv, weak);
     if (r) return r;
   }
 
   // 4. Chỉ huyện cũ.
-  const byDistrict = pool.filter((x) => x.legacy.some((l) => (l.districtType && lastWordHit(head, `${l.districtType} ${l.district}`) >= 0) || (!needsType(l.district) && lastWordHit(head, l.district) >= 0)));
+  const byDistrict = area.filter((x) => x.legacy.some((l) => (l.districtType && lastWordHit(head, `${l.districtType} ${l.district}`) >= 0) || (!needsType(l.district) && lastWordHit(head, l.district) >= 0)));
   // Xã mới mang ĐÚNG tên huyện cũ («Đặc khu Phú Quốc», «Phường Việt Trì») lên đầu danh sách — vẫn là gợi ý, người chọn.
   byDistrict.sort((a, b) => Number(lastWordHit(head, b.core) >= 0) - Number(lastWordHit(head, a.core) >= 0));
-  if (byDistrict.length === 1) return { status: "MATCHED", province: prov.p, ward: byDistrict[0].w, via: "LEGACY" };
-  if (byDistrict.length > 1 && byDistrict.length <= MAX_WARD_CANDIDATES) return { status: "AMBIGUOUS", province: prov.p, candidates: byDistrict.map((x) => x.w), reason: "Chỉ có quận / huyện cũ — chọn xã / phường mới." };
-  return { status: "PROVINCE_ONLY", province: prov.p, reason: byDistrict.length ? `Chỉ có quận / huyện cũ (${byDistrict.length} xã / phường mới) — cần tên xã / phường.` : "Không đọc được xã / phường." };
+  if (byDistrict.length === 1) return { status: "MATCHED", province: pv, ward: byDistrict[0].w, via: "LEGACY" };
+  if (byDistrict.length > 1 && byDistrict.length <= MAX_WARD_CANDIDATES) return { status: "AMBIGUOUS", province: pv, candidates: byDistrict.map((x) => x.w), reason: typedWardIn(head) ? `Danh mục cũ không có «${typedWardIn(head)}» trong quận / huyện này (có thể đã gộp trước 01/07/2025) — chọn xã / phường mới theo quận / huyện cũ.` : "Chỉ có quận / huyện cũ — chọn xã / phường mới." };
+  return { status: "PROVINCE_ONLY", province: pv, reason: byDistrict.length ? `Chỉ có quận / huyện cũ (${byDistrict.length} xã / phường mới) — cần tên xã / phường.` : "Không đọc được xã / phường." };
+}
+
+/** Quận / huyện cũ CÓ LOẠI nhắc trong dòng mà chỉ một tỉnh có ⇒ tỉnh đó; không có / nhiều tỉnh ⇒ `null`. */
+function provinceFromTypedDistrict(head: string): AdminProvince | null {
+  const codes = new Set<number>();
+  for (const x of index().wards) for (const l of x.legacy) if (l.districtType && lastWordHit(head, `${l.districtType} ${l.district}`) >= 0) codes.add(x.w.provinceCode);
+  if (codes.size !== 1) return null;
+  const [code] = codes;
+  return index().provinces.find((x) => x.p.code === code)?.p ?? null;
+}
+
+/** Chữ «phường / xã / thị trấn <tên>» khách ghi (đã gập) — để nói rõ khi danh mục không có nó. */
+function typedWardIn(head: string): string | null {
+  const m = ` ${head} `.match(/ (phuong|xa|thi tran) (\d{1,2}|[a-z]+(?: [a-z]+)?)(?= )/);
+  return m ? `${m[1]} ${m[2]}` : null;
 }
 
 /** Một đoạn (đủ từ) khớp ⇒ [đầu, cuối) của lần xuất hiện CUỐI; không có ⇒ null. */
@@ -248,7 +349,7 @@ function span(hay: string, needle: string): [number, number] | null {
 }
 
 /** Điểm khớp của một cặp (huyện cũ, xã cũ) với dòng địa chỉ: 0 = không khớp; ngược lại = tổng độ dài hai đoạn khớp. */
-function legacyScore(head: string, l: { district: string; districtType: string; ward: string; wardType: string }): number {
+function legacyScore(head: string, l: LegacyPair): number {
   const w = span(head, l.wardType ? `${l.wardType} ${l.ward}` : l.ward) ?? (!needsType(l.ward) && l.ward.includes(" ") ? span(head, l.ward) : null);
   if (!w) return 0;
   const d = span(head, l.districtType ? `${l.districtType} ${l.district}` : l.district) ?? (!needsType(l.district) ? span(head, l.district) : null);
@@ -270,6 +371,20 @@ function provinceOf(w: AdminWard): AdminProvince {
 
 function maxBy<T>(xs: readonly T[], f: (x: T) => number): number {
   return xs.reduce((m, x) => Math.max(m, f(x)), -Infinity);
+}
+
+/** Phần tử điểm cao nhất (> 0); không có ⇒ `null`. */
+function maxByItem<T>(xs: readonly T[], f: (x: T) => number): T | null {
+  let best: T | null = null;
+  let score = 0;
+  for (const x of xs) {
+    const v = f(x);
+    if (v > score) {
+      best = x;
+      score = v;
+    }
+  }
+  return best;
 }
 
 // ─────────────────────────── NGƯỜI NHẬN CỦA ĐƠN ───────────────────────────

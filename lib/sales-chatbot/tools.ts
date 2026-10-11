@@ -43,6 +43,7 @@ import { foldVi } from "@/lib/sales-chatbot/text";
 import { buildQuote, computePriced, loadPricingContext, packChoiceMistake, packingIssues, packingRequestOf, verifiedUnitPrices, type AgentQuoteClaim, type Priced, type PricingContext } from "@/lib/sales-chatbot/quote";
 import { priceUnverifiedReason, QUOTE_UNVERIFIED_INSTRUCTION, quoteSnapshotOf, type PriceDisputeState, type Quote, type QuoteSnapshot } from "@/lib/sales-chatbot/quote-shared";
 import { CLAIM_SAFE_TEXT, orderValidityOf } from "@/lib/sales-chatbot/claim-guard";
+import { acceptCustomerWard, addressQuestion, canAutoFill, parseCustomerAddress, type AddressConfidence, type AddressPart } from "@/lib/address/customer-address";
 import { searchCatalog, sellableCatalog, stockFor, type CatalogItem } from "@/lib/sales-chatbot/catalog";
 import { quotedInText } from "@/lib/sales-chatbot/text";
 import { isMessagingChannel, type ChatChannel, type SalesChatbotConfig, type SalesTool } from "@/lib/sales-chatbot/config";
@@ -56,7 +57,8 @@ import type { PancakeThreadProfile, ReturningCustomer } from "@/lib/sales-chatbo
 
 export type CartLine = { variantId: string; quantity: number };
 export { onlyAddOns, type Priced } from "@/lib/sales-chatbot/quote";
-export type Recipient = { name: string; phone: string; address: string; province: string };
+/** `ward` = xã / phường MỚI khách đã XÁC NHẬN (`acceptCustomerWard`) — trống ⇒ lõi đơn tự đọc từ dòng địa chỉ. */
+export type Recipient = { name: string; phone: string; address: string; province: string; ward?: string };
 import { SALES_STAGE_LABEL, type SalesStage } from "@/lib/sales-chatbot/stages";
 
 export { SALES_STAGE_LABEL, SALES_STAGES, type SalesStage } from "@/lib/sales-chatbot/stages";
@@ -123,6 +125,11 @@ export type ChatState = {
   postContext?: { postId: string; text: string | null };
   /** Số lượt của hội thoại lúc lượt mua hiện tại bắt đầu — trần lượt (`turnsPerConversation`) đếm theo LƯỢT MUA, không theo đời hội thoại. */
   cycleStartTurns?: number;
+  /**
+   * ĐỊA CHỈ CHƯA CHUẨN HOÁ (P0 address-normalize 11/10/2026): lượt đầu tiên câu hỏi lại khách (`addressQuestion`) được đưa cho bot
+   * cho ĐÚNG địa chỉ `key`. `confirm_order` chỉ chốt đơn có địa chỉ mơ hồ / không đọc được khi câu hỏi đã có ở một lượt TRƯỚC.
+   */
+  addressAsk?: { key: string; turn: number };
   /** Nhật ký GHI ĐƠN TỪ HỘI THOẠI (`order-sync.ts`) — bot không bao giờ ghi khoá này; engine giữ bản trong CSDL khi lưu. */
   orderSync?: OrderSyncThreadState;
 };
@@ -249,6 +256,7 @@ const DEFS: Record<SalesTool, AiToolDef> = {
         recipient_name: { type: "string" },
         recipient_phone: { type: "string" },
         address: { type: "string" },
+        ward: { type: "string", description: "Xã / phường MỚI (sau 01/07/2025) — CHỈ khi KHÁCH vừa tự nói tên đó trong câu cuối (thường là trả lời câu hỏi address_check.ask_customer). Không tự chọn một ứng viên thay khách." },
         delivery_note: { type: "string" },
       },
       required: ["items"],
@@ -266,6 +274,7 @@ const DEFS: Record<SalesTool, AiToolDef> = {
         recipient_name: { type: "string" },
         recipient_phone: { type: "string" },
         address: { type: "string" },
+        ward: { type: "string", description: "Xã / phường MỚI (sau 01/07/2025) — CHỈ khi KHÁCH vừa tự nói tên đó trong câu cuối (thường là trả lời câu hỏi address_check.ask_customer). Không tự chọn một ứng viên thay khách." },
         delivery_note: { type: "string" },
       },
       additionalProperties: false,
@@ -576,16 +585,61 @@ function orderInput(state: ChatState, draft: NonNullable<ChatState["draft"]>, pr
     shippingFee: priced.shippingFee ?? 0,
     note: notes.join("\n").slice(0, 2000),
     channel: channel === "FANPAGE" ? "Chatbot fanpage" : channel === "ZALO" ? "Chatbot Zalo" : "Chatbot web",
-    recipient: { name: draft.recipient.name, phone: draft.recipient.phone, address: draft.recipient.address, province: draft.recipient.province },
+    recipient: { name: draft.recipient.name, phone: draft.recipient.phone, address: draft.recipient.address, province: draft.recipient.province, ward: draft.recipient.ward ?? "" },
   };
 }
 
+/**
+ * KẾT QUẢ ĐỌC ĐỊA CHỈ cho bot (P0 address-normalize 11/10/2026) — cùng bộ đọc với lõi đơn (`vn-address.ts`), không luật thứ hai.
+ * `ask_customer` = câu hỏi khách khi xã / tỉnh / số nhà chưa chắc — ứng viên là tên THẬT trong danh mục, không bao giờ bịa. Không
+ * trả số nhà / tên đường (địa chỉ máy điền từ đơn cũ phải giữ bản ĐÃ CHE).
+ */
+export type AddressCheckView = { status: AddressConfidence | "CUSTOMER_CONFIRMED"; province: string | null; ward: string | null; candidates: string[]; missing: AddressPart[]; ask_customer: string | null; note: string };
+
+export function addressCheckOf(r: Pick<Recipient, "address" | "province" | "ward">): { key: string; view: AddressCheckView } {
+  const key = [r.address, r.province, r.ward ?? ""].map((x) => x.trim()).join("|");
+  const a = parseCustomerAddress(r.address, r.province);
+  const chosen = (r.ward ?? "").trim();
+  if (chosen && a.province) {
+    const missing = a.missing.filter((m) => m !== "ward");
+    const ask = missing.includes("street") ? addressQuestion({ ...a, ward: chosen, confidence: "EXACT", candidates: [], missing }) : null;
+    return { key, view: { status: "CUSTOMER_CONFIRMED", province: a.province, ward: chosen, candidates: [], missing, ask_customer: ask, note: "Khách đã xác nhận xã / phường mới." } };
+  }
+  const ask = addressQuestion(a);
+  const note = canAutoFill(a)
+    ? ask
+      ? "Tỉnh + xã / phường đã ghép theo địa giới mới; còn thiếu số nhà / tên đường — hỏi khách bằng ask_customer."
+      : "Tỉnh + xã / phường đã ghép theo địa giới mới."
+    : "Địa chỉ CHƯA chuẩn hoá — ô xã / phường để trống, đơn cần người kiểm. Hỏi khách ĐÚNG câu ask_customer (gộp vào tin tóm tắt); khách trả lời tên xã / phường ⇒ update_draft_order với ward = tên khách nói. KHÔNG tự chọn, KHÔNG nói địa chỉ đã đúng.";
+  return { key, view: { status: a.confidence, province: a.province, ward: a.ward, candidates: a.candidates, missing: a.missing, ask_customer: ask, note } };
+}
+
+/**
+ * Địa chỉ mơ hồ / không đọc được mà khách CHƯA được hỏi ở một lượt TRƯỚC ⇒ chưa chốt (cả chốt tay `confirm_order` lẫn tự chốt
+ * `autoConfirmBlocker` — một mệnh đề). Gọi lẻ không có lượt (bài kiểm công cụ) ⇒ không xét.
+ */
+function addressAskPending(state: ChatState, chk: { key: string; view: AddressCheckView }, turn: number | undefined): boolean {
+  const unsure = chk.view.status === "AMBIGUOUS" || chk.view.status === "NOT_FOUND";
+  return unsure && Boolean(chk.view.ask_customer) && turn !== undefined && !(state.addressAsk?.key === chk.key && state.addressAsk.turn < turn);
+}
+
+/** Câu hỏi địa chỉ vừa được đưa cho bot ở lượt này ⇒ ghi mốc (lượt sau `confirm_order` biết khách đã được hỏi). */
+function markAddressAsked(state: ChatState, chk: { key: string; view: AddressCheckView }, turn: number | undefined) {
+  if (!chk.view.ask_customer || turn === undefined) return;
+  if (state.addressAsk?.key === chk.key && state.addressAsk.turn <= turn) return;
+  state.addressAsk = { key: chk.key, turn };
+}
+
 function recipientFrom(input: { recipient_name?: string; recipient_phone?: string; address?: string }, base: Recipient): Recipient {
+  const newAddress = Boolean(input.address?.trim()) && input.address!.trim() !== base.address;
+  // Địa chỉ đổi ⇒ xã khách xác nhận cho địa chỉ CŨ không còn căn cứ (xã mới, nếu có, đặt lại ở bước kiểm `ward`).
+  const ward = newAddress ? "" : (base.ward ?? "");
   return {
     name: input.recipient_name?.trim() || base.name,
     phone: input.recipient_phone?.trim() || base.phone,
     address: input.address?.trim() || base.address,
     province: input.address?.trim() ? "" : base.province,
+    ...(ward ? { ward } : {}),
   };
 }
 
@@ -789,7 +843,9 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
       const firstAt = state.customer?.phone === v.data.phone && state.customer.at ? state.customer.at : new Date().toISOString();
       if (simulated) {
         state.customer = { id: null, name: v.data.name, phone: v.data.phone, address: v.data.address, province: v.data.province ?? "", simulated: true, at: firstAt, ...(saved ? { savedAddress: true } : {}) };
-        return ok(`(Thử) lưu khách ${v.data.name}`, { customer_id: "thu-nghiem", simulated: true, note: "Khung thử: KHÔNG lưu khách thật." }, state);
+        const chkSim = addressCheckOf({ address: v.data.address, province: v.data.province ?? "" });
+        markAddressAsked(state, chkSim, ctx.turn);
+        return ok(`(Thử) lưu khách ${v.data.name}`, { customer_id: "thu-nghiem", simulated: true, note: "Khung thử: KHÔNG lưu khách thật.", address_check: chkSim.view }, state);
       }
       const r = await createCustomerAsAgent(ctx.agent, { name: v.data.name, phone: v.data.phone, address: v.data.address, province: v.data.province });
       if (!r.ok) return err("Lưu khách: lỗi", failureText(r), state, omsSignal(r));
@@ -803,13 +859,15 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
       // Địa chỉ máy điền giữ nhãn khi khách gọi lại công cụ với ĐÚNG thông tin đó — không để lượt sau bỏ che (review bảo mật H1).
       const keepSaved = saved || (state.customer?.savedAddress === true && state.customer.phone === v.data.phone && state.customer.address === v.data.address);
       state.customer = { id: r.id, name: v.data.name, phone: v.data.phone, address: v.data.address, province: v.data.province ?? "", simulated: false, at: firstAt, ...(keepSaved ? { savedAddress: true } : {}), ...(verifiedIdentity ? { verifiedIdentity: true } : {}) };
-      return ok(r.existing ? `Khách cũ (${v.data.phone})` : `Đã lưu khách ${v.data.name}`, { customer_id: r.id, existing_customer: r.existing }, state);
+      const chk = addressCheckOf({ address: v.data.address, province: v.data.province ?? "" });
+      markAddressAsked(state, chk, ctx.turn);
+      return ok(r.existing ? `Khách cũ (${v.data.phone})` : `Đã lưu khách ${v.data.name}`, { customer_id: r.id, existing_customer: r.existing, address_check: chk.view }, state);
     }
     case "create_draft_order":
     case "update_draft_order": {
       if (!state.customer) return err("Đơn nháp: chưa có khách", "Chưa lưu thông tin khách — gọi create_customer trước.", state);
       const v = z
-        .object({ items: itemsZ.optional(), recipient_name: z.string().trim().max(120).optional(), recipient_phone: z.string().trim().max(30).optional(), address: z.string().trim().max(300).optional(), delivery_note: z.string().trim().max(500).optional() })
+        .object({ items: itemsZ.optional(), recipient_name: z.string().trim().max(120).optional(), recipient_phone: z.string().trim().max(30).optional(), address: z.string().trim().max(300).optional(), ward: z.string().trim().max(120).optional(), delivery_note: z.string().trim().max(500).optional() })
         .safeParse(input);
       if (!v.success) return err("Đơn nháp: sai đầu vào", "Đầu vào đơn nháp không hợp lệ.", state, { reason: "BAD_INPUT", fields: v.error.issues.map((i) => i.path.map(String).join(".")) });
       const existing = state.draft;
@@ -830,6 +888,12 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
       const recipient = recipientFrom(v.data, base);
       // Yêu cầu đóng gói riêng («2 gói riêng», «chia 2 túi») — giữ qua các lượt sửa đơn, ghi vào ghi chú đơn cho kho.
       const packing = packingRequestOf(ctx.lastUserText) ?? existing?.packing ?? null;
+      // Xã / phường khách vừa xác nhận: phải có trong danh mục của tỉnh đã đọc được VÀ khách vừa nói đúng tên đó (không đoán thay).
+      if (v.data.ward) {
+        const okWard = acceptCustomerWard(parseCustomerAddress(recipient.address, recipient.province), v.data.ward, ctx.lastUserText);
+        if (!okWard.ok) return err("Đơn nháp: xã / phường chưa xác nhận", okWard.error, state);
+        recipient.ward = okWard.ward;
+      }
       const priced = await priceLines(lines, ctx.config, verifiedCustomerId(state), [recipient.address, recipient.province].join(", "), { packing: Boolean(packing) });
       if (priced.missing.length) return err("Đơn nháp: mã không có", `Không có mẫu mã: ${priced.missing.join(", ")}.`, state, { reason: "UNKNOWN_SKU" });
       if (priced.unpriced.length) return { ...err("Đơn nháp: mã chưa có giá", `Chưa có giá: ${priced.unpriced.join(", ")}.`, state, { reason: "UNPRICED_SKU" }), requireHuman: `Giá bất thường: ${priced.unpriced.join(", ")} chưa có giá` };
@@ -866,7 +930,9 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
       state.draft = draft;
       state.quote = quoteSnapshotOf(priced.quote, now);
       settleDispute(state, ctx.turn);
-      const view = { order_code: draft.orderId ? `#${manualOrderShortCode(draft.orderId)}` : "(thử)", status: "Nháp — chưa chốt, chưa giữ hàng", simulated, ...cartView(priced), recipient: recipientView(draft.recipient, state), delivery_note: draft.note || null };
+      const addr = addressCheckOf(draft.recipient);
+      markAddressAsked(state, addr, ctx.turn);
+      const view = { order_code: draft.orderId ? `#${manualOrderShortCode(draft.orderId)}` : "(thử)", status: "Nháp — chưa chốt, chưa giữ hàng", simulated, ...cartView(priced), recipient: recipientView(draft.recipient, state), delivery_note: draft.note || null, address_check: addr.view };
       if (editingConfirmed && state.confirmed) {
         const validity = simulated || !draft.orderId ? null : await confirmedValidity(draft.orderId);
         state.confirmed = { ...state.confirmed, total: priced.total ?? priced.subtotal, quoteId: priced.quote.quoteId, ...(validity ? { valid: validity.valid, pending: validity.pending } : {}) };
@@ -920,6 +986,14 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
         if (changedExisting && raised && !/(?:^|[^a-z])them(?![a-z])/.test(foldVi(ctx.lastUserText))) {
           return err("Chốt: tổng mới chưa xác nhận", `Khách vừa đổi số lượng / quy cách — báo giá cũ hết hiệu lực, tổng mới ${formatVND(d.quote.total ?? d.quote.subtotal)}. Gửi tóm tắt với tổng mới và hỏi khách xác nhận; khách đồng ý ở tin SAU mới chốt.`, state);
         }
+      }
+      // ĐỊA CHỈ CHƯA CHUẨN HOÁ (P0 11/10/2026, đơn #463DEBAE «phường Cổ Nhuế 2» cũ): khách chưa từng được hỏi phần thiếu ⇒ chưa chốt,
+      // hỏi ĐÚNG câu của bộ đọc rồi dừng. Đã hỏi ở lượt trước mà khách vẫn đồng ý ⇒ chốt theo luật chủ shop 08/10 (máy chốt + cờ
+      // CẦN NGƯỜI KIỂM «địa chỉ chưa ghép» — ô xã vẫn trống, không đoán). Bài kiểm gọi lẻ (không có lượt) ⇒ không xét.
+      const addrChk = addressCheckOf(d.recipient);
+      if (ctx.turn !== undefined && addressAskPending(state, addrChk, ctx.turn)) {
+        state.addressAsk = { key: addrChk.key, turn: ctx.turn };
+        return err("Chốt: địa chỉ chưa chuẩn hoá — hỏi khách", `Địa chỉ giao chưa ghép được xã / phường theo địa giới mới (${addrChk.view.status}). CHƯA chốt. Hỏi khách đúng câu: «${addrChk.view.ask_customer}» rồi DỪNG, đợi khách trả lời. Khách nói tên xã / phường ⇒ update_draft_order với ward = tên đó rồi confirm_order. KHÔNG nói đã lên đơn.`, state);
       }
       const priced = await priceLines(d.lines, ctx.config, verifiedCustomerId(state), [d.recipient.address, d.recipient.province].join(", "), { packing: Boolean(d.packing) });
       if (priced.missing.length || priced.unpriced.length) return err("Chốt: mã không bán được", "Có mẫu mã không còn bán hoặc chưa có giá — chuyển nhân viên.", state, { reason: priced.missing.length ? "UNKNOWN_SKU" : "UNPRICED_SKU" });
@@ -978,6 +1052,7 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
         // Tự chốt (P0-A): một câu ngắn, không đọc lại cả đơn, không hỏi thêm.
         ...(ctx.autoConfirming ? { auto_confirmed: true, ...(pendingText ? {} : { say_to_customer: autoConfirmText(priced.lines), instruction: "ĐƠN ĐÃ TỰ CHỐT. Gửi khách ĐÚNG MỘT câu say_to_customer — KHÔNG đọc lại cả đơn, KHÔNG hỏi «lấy thêm gì không», «có chốt không», «xác nhận giúp em»." }) } : {}),
         stock_note: unknownStock ? "Có mã kho chưa xác nhận tồn — nhân viên sẽ kiểm trước khi giao." : null,
+        address_check: addrChk.view,
       }, state);
     }
     case "send_quick_reply": {
@@ -1142,6 +1217,9 @@ export function autoConfirmBlocker(state: ChatState, ctx: Pick<ToolContext, "las
   const gaps = manualOrderGaps({ phone: d.recipient.phone, address: d.recipient.address, province: d.recipient.province || resolveRecipientPlace({ address: d.recipient.address, province: d.recipient.province, ward: "" }).province }, d.lines.length);
   if (gaps.includes("SĐT")) return "SĐT chưa hợp lệ — hỏi lại khách SĐT";
   if (gaps.includes("địa chỉ") || gaps.includes("tỉnh / thành")) return "Địa chỉ chưa đủ để giao (chưa đọc được tỉnh / thành) — hỏi khách đúng phần còn thiếu";
+  // Xã / phường chưa ghép được theo địa giới mới mà khách chưa được hỏi (P0 address-normalize) ⇒ hỏi ĐÚNG câu của bộ đọc, chưa tự chốt.
+  const addr = addressCheckOf(d.recipient);
+  if (addressAskPending(state, addr, ctx.turn)) return `Địa chỉ chưa chuẩn hoá (${addr.view.status}) — hỏi khách đúng câu: «${addr.view.ask_customer}»`;
   return null;
 }
 

@@ -212,6 +212,8 @@ type Prepared = {
   orderDiscount: number;
   totals: Extract<ReturnType<typeof manualOrderTotals>, { ok: true }>["totals"];
   variants: Map<string, { id: string; productId: string; productName: string; sku: string; detail: string; color: string; size: string; image: string | null; weight: number }>;
+  /** Xã / phường MỚI có thể đúng khi bộ đọc trả nhiều đáp án — cho ghi chú của cờ «địa chỉ chưa ghép» (người kiểm hỏi khách). */
+  wardCandidates: string[];
 };
 
 /**
@@ -274,7 +276,8 @@ async function prepare(rawInput: unknown): Promise<{ ok: true; p: Prepared } | M
   // SĐT lưu dạng CHUẨN HOÁ ở đường ghi (`canonicalRecipientPhone`): khách gõ «0919.000.808» / «+84 919 000 808» ⇒ «0919000808».
   const typedPhone = r?.phone || (customer.phone ?? "");
   const recipient: Recipient = { name: r?.name || customer.name, phone: canonicalRecipientPhone(typedPhone), address, province: place.province, ward: place.ward };
-  return { ok: true, p: { customer, recipient, stage: v.stage, note: v.note.trim(), channel: v.channel.trim(), orderDiscount: v.orderDiscount, totals: t.totals, variants } };
+  const wardCandidates = !recipient.ward && place.match.status === "AMBIGUOUS" ? place.match.candidates.map((c) => c.name) : [];
+  return { ok: true, p: { customer, recipient, stage: v.stage, note: v.note.trim(), channel: v.channel.trim(), orderDiscount: v.orderDiscount, totals: t.totals, variants, wardCandidates } };
 }
 
 /** Chữ mô tả mẫu mã trên dòng đơn — cùng dạng "màu · size" mà dòng Pancake mang. */
@@ -410,7 +413,7 @@ export type ManualOrderResult = { ok: true; id: string; reused?: boolean } | Met
  */
 function addressReview(w: Writer, p: Prepared, raw: Record<string, unknown>, now: Date): { raw: Record<string, unknown>; changed: boolean } {
   if (w.actorKind !== "AGENT" || p.stage !== "CONFIRMED" || (p.recipient.ward ?? "").trim()) return { raw, changed: false };
-  const where = p.recipient.province ? `tỉnh ${p.recipient.province}, chưa có xã / phường` : "chưa nhận ra tỉnh / thành và xã / phường";
+  const where = p.recipient.province ? `tỉnh ${p.recipient.province}, chưa có xã / phường${p.wardCandidates.length ? ` — có thể là ${p.wardCandidates.join(" / ")}, hỏi khách` : ""}` : "chưa nhận ra tỉnh / thành và xã / phường";
   return withReviewEntry(raw, { code: "ADDRESS_UNRESOLVED", note: `Máy chốt khi địa chỉ chưa ghép được (${where}) — dòng địa chỉ: ${p.recipient.address}`, quote: null, at: now.toISOString(), by: w.name });
 }
 

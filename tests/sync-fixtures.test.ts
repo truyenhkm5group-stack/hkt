@@ -370,6 +370,7 @@ import { testOrgOrderAuditPure } from "./org-order-audit.test";
 import { testMetaCapiDb, testMetaCapiPure } from "./meta-capi.test";
 import { testOrgCatalogDb, testOrgCatalogPure } from "./org-catalog.test";
 import { testVnAddress } from "./vn-address.test";
+import { testAddressNormalizePure, testAddressNormalizeTools } from "./address-normalize.test";
 import { testVelocityUnifyDb, testVelocityUnifyPure } from "./velocity-unify.test";
 import { testOutreachClearanceUnit } from "./outreach-clearance-unit.test";
 import { testPageUsageDb, testPageUsagePure, testPageUsageSource } from "./page-usage.test";
@@ -2341,6 +2342,9 @@ async function main() {
   await testOrgCatalogDb();
   // Chuẩn hoá địa chỉ theo địa giới 01/07/2025 — đơn bot / máy ghi chỉ có một dòng chữ (05/10/2026).
   testVnAddress();
+  // P0 address-normalize (11/10/2026): địa chỉ tự do ⇒ mức tin cậy + câu hỏi khách; bot không chốt đơn địa chỉ mơ hồ khi khách chưa được hỏi.
+  testAddressNormalizePure();
+  await testAddressNormalizeTools();
   // Company OS · Agent V: MỘT tốc độ bán (Kế hoạch SX) cho Hàng chậm / Quyết định vốn tồn / Hiệu quả mẫu mã + ops velocity-compare (mã `cos-v-` / `COSV`, tự dọn).
   testVelocityUnifyPure();
   testOutreachClearanceUnit();
