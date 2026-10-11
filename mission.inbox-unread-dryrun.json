@@ -3,7 +3,7 @@
   "mission_id": "inbox-unread-dryrun",
   "title": "Chạy thử CHỈ ĐỌC trước migration 0245 (#792): số hội thoại đổi chưa đọc, thời gian dẫn xuất",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -23,9 +23,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-11T17:51:42.535Z",
-  "updated_at": "2026-10-11T17:52:54.229Z",
+  "updated_at": "2026-10-11T19:05:42.293Z",
   "last_heartbeat": "2026-10-11T17:51:59.505Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#809 → 4670c31a0d2880b04b25a552274e953661eab7f6"
+  },
   "handoff": {
     "branch": "fix/inbox-unread-dryrun",
     "sha": "df266a6efdd3872f5d82ac30d3b02cb5a1ebec61",

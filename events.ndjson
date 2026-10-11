@@ -2145,3 +2145,4 @@
 {"at":"2026-10-11T17:51:59.540Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"inbox-unread-dryrun","detail":"fix/inbox-unread-dryrun @ df266a6efdd3 · 3 lệnh kiểm thử"}
 {"at":"2026-10-11T17:52:54.262Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"inbox-unread-dryrun","detail":"#809 cho fix/inbox-unread-dryrun @ df266a6efdd3"}
 {"at":"2026-10-11T19:04:54.585Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#809 @ df266a6efdd3 · Script ops CHỈ ĐỌC (ERP_READ_ONLY + hỏi lại phiên, getDbForInspection), chỉ in số đếm/thời gian, MÃ HOÁ; mục ops theo khuôn inbox-read-audit; chỉ nhập lib đã có trong image ce84f77d"}
+{"at":"2026-10-11T19:05:42.326Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"inbox-unread-dryrun","detail":"#809 @ df266a6efdd3 → 4670c31a0d28 (MERGE_ISOLATED · HIGH · gates success)"}
