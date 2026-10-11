@@ -2066,3 +2066,4 @@
 {"at":"2026-10-11T09:07:43.667Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"followup-lifecycle","detail":"fix/followup-lifecycle @ 4cc1148270a2 · 1 lệnh kiểm thử"}
 {"at":"2026-10-11T09:08:00.965Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#801 @ 4cc1148270a2 · Chỉ commit gộp main; danh sách ops giải hợp"}
 {"at":"2026-10-11T09:15:54.550Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"authoritative-quote","detail":"fix/authoritative-quote @ e296495d6544 · 1 lệnh kiểm thử"}
+{"at":"2026-10-11T09:16:30.487Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"authoritative-quote","detail":"#807 cho fix/authoritative-quote @ e296495d6544"}
