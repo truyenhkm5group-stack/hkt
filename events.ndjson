@@ -2046,3 +2046,4 @@
 {"at":"2026-10-11T07:03:50.939Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#805 @ 049146b4cc0b · Chỉ commit gộp main; danh sách ops giải hợp (giữ avatar-proxy-check + sender-provenance-probe)"}
 {"at":"2026-10-11T07:04:32.223Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#805 @ 3b8232e8d16d · Chỉ commit gộp main; danh sách ops giải hợp (giữ avatar-proxy-check + sender-provenance-probe)"}
 {"at":"2026-10-11T07:19:01.692Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"handoff-ownership","detail":"#800 @ 099823bced8a → f9657f4fa1b0 (MERGE_ISOLATED · HIGH · gates success)"}
+{"at":"2026-10-11T07:44:50.279Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DEPLOY_DISPATCHED","detail":"f9657f4fa1b0 · run 38122386879 https://github.com/truyenhkm5group-stack/hkt/actions/runs/38122386879"}
