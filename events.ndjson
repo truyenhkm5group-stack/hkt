@@ -1991,3 +1991,4 @@
 {"at":"2026-10-11T04:11:34.216Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"CLAIM","mission":"avatar-proxy-check","detail":"RUNNING · 2 mẫu phạm vi · MEDIUM"}
 {"at":"2026-10-11T04:11:56.662Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"avatar-proxy-check","detail":"fix/avatar-proxy-check @ 69c84c29eb46 · 1 lệnh kiểm thử"}
 {"at":"2026-10-11T04:12:40.836Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"avatar-proxy-check","detail":"#799 cho fix/avatar-proxy-check @ 69c84c29eb46"}
+{"at":"2026-10-11T04:13:04.495Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#799 @ 69c84c29eb46 · Chỉ script ops + bài kiểm; chỉ đọc, chỉ GET; không in id/URL/token"}
