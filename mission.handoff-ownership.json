@@ -3,7 +3,7 @@
   "mission_id": "handoff-ownership",
   "title": "P0: mọi hội thoại chuyển người phải có người/nhóm chịu trách nhiệm + thời gian chờ + SLA + báo nhân viên; không còn hội thoại AI im mà không ai nhận",
   "business_goal": "",
-  "status": "INTEGRATING",
+  "status": "VERIFYING",
   "priority": "P0",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -29,11 +29,13 @@
     "0242": "2026-10-11T04:26:58.708Z"
   },
   "created_at": "2026-10-11T01:59:18.577Z",
-  "updated_at": "2026-10-11T07:19:01.639Z",
+  "updated_at": "2026-10-11T08:09:50.510Z",
   "last_heartbeat": "2026-10-11T06:48:51.834Z",
   "definition_of_done": [],
   "evidence": {
-    "merged": "#800 → f9657f4fa1b0d05c3f9de95747d4b9c46fb62998"
+    "merged": "#800 → f9657f4fa1b0d05c3f9de95747d4b9c46fb62998",
+    "verify": "PASS f9657f4fa1b0d05c3f9de95747d4b9c46fb62998 2026-10-11T08:09:36.177Z",
+    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/38122386879"
   },
   "handoff": {
     "branch": "fix/handoff-ownership",
