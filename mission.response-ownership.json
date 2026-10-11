@@ -1,0 +1,27 @@
+{
+  "schema": 1,
+  "mission_id": "response-ownership",
+  "title": "P0: lượt khách chỉ «đã trả lời» khi có phản hồi hợp lệ SAU nó; máy trạng thái chủ trả lời AI_ACTIVE/HUMAN_ACTIVE/TEMPORARY_AI_PAUSE/HANDOFF_PENDING/RESOLVED; chống trùng theo lượt khách; nhiều bên cùng nối Page",
+  "business_goal": "",
+  "status": "RUNNING",
+  "priority": "P0",
+  "risk": "MEDIUM",
+  "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "worker": null,
+  "worktree": null,
+  "branch": "fix/response-ownership",
+  "base_sha": "1f2c3c04966497522c7d60304b6fc49abc84062d",
+  "domains": [],
+  "owned_paths": [
+    "lib/sales-chatbot/response-ownership.ts",
+    "tests/response-ownership.test.ts"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-11T02:24:49.854Z",
+  "updated_at": "2026-10-11T02:24:49.854Z",
+  "last_heartbeat": "2026-10-11T02:24:49.854Z",
+  "definition_of_done": []
+}
