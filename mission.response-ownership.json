@@ -28,18 +28,21 @@
     "0244": "2026-10-11T05:45:27.878Z"
   },
   "created_at": "2026-10-11T02:24:49.854Z",
-  "updated_at": "2026-10-11T09:36:22.959Z",
-  "last_heartbeat": "2026-10-11T09:36:22.959Z",
+  "updated_at": "2026-10-11T15:17:46.368Z",
+  "last_heartbeat": "2026-10-11T15:17:46.368Z",
   "definition_of_done": [],
   "handoff": {
     "branch": "fix/response-ownership",
-    "sha": "27d9b2c7cc52516502668c93cb957b209769d4c1",
-    "at": "2026-10-11T09:36:22.959Z",
+    "sha": "74c4da487205f4b97f91c3a6d37469cdb335e4eb",
+    "at": "2026-10-11T15:17:46.368Z",
     "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
     "title": "P0: lượt khách chỉ «đã trả lời» khi có phản hồi hợp lệ SAU nó; máy trạng thái chủ trả lời AI_ACTIVE/HUMAN_ACTIVE/TEMPORARY_AI_PAUSE/HANDOFF_PENDING/RESOLVED; chống trùng theo lượt khách; nhiều bên cùng nối Page",
-    "summary": "Nguồn sự thật lượt khách đã xử lý: + MEDIA_ONLY là lượt người (aiAnswerable tách), staff_seen_at = người mở, chat web, tin mẫu neo theo dòng (bỏ now)",
+    "summary": "Gộp origin/main (#800 #801 #805–#808); migration đổi số 0244; AI nhận lại hội thoại cũng xoá dấu hàng đợi người",
     "tests": [
-      "tsc · eslint · response-ownership (đối chiếu TS≡SQL 37 hội thoại + ma trận) · sales-inbox · inbox-semantics-v3 · inbox-read-v3 · inbox-v2-a/b · inbox-advanced · self-service-journey · sales-human-takeover · saas-l3-inbox · messenger · ai-sales-retry · repo-integrity · test-hygiene"
+      "tsc: sạch",
+      "eslint tệp chạm: sạch",
+      "response-ownership·followup-lifecycle·handoff-ownership·sales-claim-guard·sales-quote-integrity·self-service-journey·saas-l3-inbox·sales-inbox·migration-upgrade-path·sales-human-takeover·saas-page-gate: đạt",
+      "repo-integrity·test-hygiene·migration-journal: đạt sau commit merge"
     ]
   }
 }
