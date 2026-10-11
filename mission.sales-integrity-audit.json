@@ -3,7 +3,7 @@
   "mission_id": "sales-integrity-audit",
   "title": "P0 HSLC: ops chỉ đọc quét 30 ngày giá AI ≠ giá đơn, giá đổi trong hội thoại, báo đơn thành công khi chưa tạo, handoff không ai nhận, địa chỉ ghép hỏng + tìm ca Nguyễn Thanh Thủy",
   "business_goal": "",
-  "status": "RUNNING",
+  "status": "PR_READY",
   "priority": "P0",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -22,7 +22,18 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-11T01:58:28.511Z",
-  "updated_at": "2026-10-11T01:58:28.511Z",
-  "last_heartbeat": "2026-10-11T01:58:28.511Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-11T03:46:43.462Z",
+  "last_heartbeat": "2026-10-11T03:46:43.462Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "fix/sales-integrity-audit",
+    "sha": "91f1375fcc07eedd993d81a453237d9c899420f1",
+    "at": "2026-10-11T03:46:43.462Z",
+    "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+    "title": "P0 HSLC: ops chỉ đọc quét 30 ngày giá AI ≠ giá đơn, giá đổi trong hội thoại, báo đơn thành công khi chưa tạo, handoff không ai nhận, địa chỉ ghép hỏng + tìm ca Nguyễn Thanh Thủy",
+    "summary": "Ops chỉ đọc sales-integrity-audit + lib thuần integrity-audit: giá bot≠giá đơn, «2kg» hai biểu diễn, giá tự đổi, xác nhận giả, handoff trễ, địa chỉ chưa ghép, nhắc sau khi chốt, lượt khách bị chặn, ý định mua bỏ lỡ, mất doanh thu ước; --find-name / --conv. CẦN DEPLOY trước khi chạy ops.",
+    "tests": [
+      "tsc · eslint các tệp đổi · sales-integrity-audit (thuần + PGlite theo ca Thủy/Lê Bạch Nguyên, tóm tắt không lọt PII) · test-hygiene · repo-integrity · platform-isolation-static · ops-log-leak · 7 đột biến · npm test đầy đủ hỏng vì ổ C đầy (không liên quan) ⇒ CI chạy đủ"
+    ]
+  }
 }
