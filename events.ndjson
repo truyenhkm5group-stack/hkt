@@ -2139,3 +2139,4 @@
 {"at":"2026-10-11T15:17:46.401Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"response-ownership","detail":"fix/response-ownership @ 74c4da487205 · 4 lệnh kiểm thử"}
 {"at":"2026-10-11T15:18:21.578Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#803 @ 74c4da487205 · Merge main: xung đột fanpage.ts giữ cả avatar theo page (#806) và sourceAt/senderApp; markWaitingForCustomer giữ #801; HANDOFF_QUEUE_CLEAR khi AI nhận lại; 0244 chỉ thêm cột"}
 {"at":"2026-10-11T15:44:07.030Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"response-ownership","detail":"#803 @ 74c4da487205 → ce84f77d57bd (MERGE_ISOLATED · HIGH · gates success)"}
+{"at":"2026-10-11T15:45:03.106Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DEPLOY_DISPATCHED","detail":"ce84f77d57bd · run 38152562993 https://github.com/truyenhkm5group-stack/hkt/actions/runs/38152562993"}
