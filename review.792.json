@@ -1,8 +1,8 @@
 {
   "pr": 792,
-  "sha": "b14abfd3bbb12be11b0dc259ba4406337ab02b2e",
+  "sha": "b222a779c0c4232243ac7f3cfe49717a4752068f",
   "verdict": "PASS",
   "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
-  "at": "2026-10-10T23:14:57.551Z",
-  "note": "Chỉ commit gộp main + đổi số 0240→0241 (journal liên tục, when tăng), tham chiếu cập nhật"
+  "at": "2026-10-11T10:19:48.589Z",
+  "note": "Một định nghĩa (#803), lưu sẵn có kiểm parity + kiểm thân hàm từng ký tự; NULL = chưa biết (rơi về hàm trực tiếp); migration chỉ cộng thêm + dẫn xuất tất định — vẫn cần chủ shop duyệt UPDATE (owner-approve-792); gộp sau #803 và sau khi P0 giá PASS"
 }
