@@ -1,8 +1,8 @@
 {
   "pr": 792,
-  "sha": "6d99c3a8c90f951ff13fa12edcb72be680de2ea1",
+  "sha": "0f4281943d30f35f676c2a5776fb6cbfd6e346e7",
   "verdict": "PASS",
   "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
-  "at": "2026-10-11T19:27:53.188Z",
-  "note": "Dựng lại trên main sau #803: chỉ phần riêng #792 (0245 cột lưu sẵn + trigger + truy vấn hộp thư + công tắc lùi inbox.unread.materialized + audit/tests). Thân hàm CSDL trùng từng ký tự với SQL #803 (bài kiểm so chuỗi). Ma trận e1–e7/x7–x9 qua trigger thật. SET LOCAL lock_timeout 10s / statement_timeout 600s trong giao dịch migrate. Dry-run production: HSLC 2439→616 chưa đọc, true→false 1897, false→"
+  "at": "2026-10-11T20:05:51.981Z",
+  "note": "6d99c3a8 + bài kiểm tĩnh cho phép script dry-run chỉ đọc (#809) nhắc tên cột; không đổi mã chạy"
 }
