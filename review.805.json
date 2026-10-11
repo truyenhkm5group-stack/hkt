@@ -1,8 +1,8 @@
 {
   "pr": 805,
-  "sha": "049146b4cc0b32189e8ecda98ddf73e31ede4f2e",
+  "sha": "3b8232e8d16d9cc4d1e1b7c4eb58e49afe35fddd",
   "verdict": "PASS",
   "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
-  "at": "2026-10-11T07:03:35.824Z",
+  "at": "2026-10-11T07:04:14.604Z",
   "note": "Chỉ commit gộp main; danh sách ops giải hợp (giữ avatar-proxy-check + sender-provenance-probe)"
 }
