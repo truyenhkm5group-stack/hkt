@@ -27,14 +27,10 @@
   "related_prs": [
     794
   ],
-  "migration_reservations": [
-    "0242"
-  ],
-  "migration_reserved_at": {
-    "0242": "2026-10-10T18:42:40.247Z"
-  },
+  "migration_reservations": [],
+  "migration_reserved_at": {},
   "created_at": "2026-10-10T18:42:21.906Z",
-  "updated_at": "2026-10-10T22:35:14.389Z",
+  "updated_at": "2026-10-11T01:14:13.602Z",
   "last_heartbeat": "2026-10-10T22:34:42.615Z",
   "definition_of_done": [],
   "handoff": {
