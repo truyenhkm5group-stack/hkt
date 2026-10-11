@@ -64,6 +64,7 @@ import { runAiIncidentWatch } from "@/lib/tech/ai-incident-watch";
 import { runAgentRunReconcile } from "@/lib/tech/agent-run-reconcile";
 import { runTaskAdvanceWatch } from "@/lib/tech/task-advance-watch";
 import { runSyncIncidentWatch } from "@/lib/tech/sync-incident-watch";
+import { runTechRegistrySync } from "@/lib/tech/registry-sync";
 import { reapStaleRuns } from "@/lib/agents/runner";
 import { runCreativeLoopTick } from "@/lib/creative/loop";
 import { pushAdBotsFromJob } from "@/lib/integrations/chatbot/ad-bots";
@@ -353,6 +354,17 @@ export const JOB_DEFINITIONS: Record<string, JobDefinition> = {
       "Không đổi trạng thái việc, không đụng ô của người, và không làm `updated_at` của việc nhảy — mốc của phép chiếu nằm ở `pr_synced_at`. " +
       "PR đang mở mà không việc nào nhận được ĐẾM RIÊNG và in ra.",
     run: (o) => runGithubPrSync({ trigger: o.trigger, actor: o.actor, limit: num(o.params?.limit), budget: num(o.params?.budget) }),
+  },
+  "tech-registry-sync": {
+    label: "Đọc sổ Tech Room vào /tech",
+    source: "GITHUB",
+    module: "tech",
+    description:
+      "CHỈ ĐỌC: đọc nhánh sổ điều phối `ai-control/registry` (mission.*.json + events.ndjson) rồi chiếu vào `tech_registry_missions` / `tech_registry_events` cho /tech/missions và «Cần chủ shop». " +
+      "ERP KHÔNG ghi ngược vào sổ. Sổ không đổi ⇒ một lượt hỏi có ETag (304), không tải gì. Chỉ tải tệp đổi SHA; sứ mệnh biến khỏi sổ chỉ bị đánh dấu, không xoá. " +
+      "Báo Lark nhóm Quản lý đúng MỘT lần khi sứ mệnh P0/P1 (hoặc rủi ro cao) xong đã kiểm production, hoặc chuyển sang chờ chủ shop; lần đọc đầu chỉ ghi mốc. " +
+      "Chạy tay (nút «Đọc lại sổ» / ops run-job) — đưa vào lịch 10 phút là đổi lịch scheduler, việc chủ shop duyệt (AGENTS.md §7). ?force=1 bỏ qua ETag.",
+    run: (o) => runTechRegistrySync({ trigger: o.trigger, actor: o.actor, force: o.params?.force === "1" }),
   },
   "tech-incident-watch": {
     label: "Mở sự cố cho job đồng bộ hỏng liên tiếp",
@@ -1179,6 +1191,7 @@ export const HOME_CREDENTIAL_JOBS: Readonly<Record<string, string>> = {
   "agent-reaper": "github",
   "task-advance-watch": "github",
   "tech-incident-watch": "github",
+  "tech-registry-sync": "github",
   "ai-incident-watch": "ai",
   "creative-loop": "openai",
   "marketing-digest": "lark",

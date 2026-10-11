@@ -116,6 +116,8 @@ export function testKhongSoBangMocDocLaiDongHo() {
 
 /** Miễn trừ — mỗi dòng nói RÕ vì sao đọc môi trường ở đó là đo MÃ NGUỒN chứ không đo máy. */
 const DOC_MOI_TRUONG_DA_KHAI: Record<string, string> = {
+  "tests/tech-mission-control.test.ts":
+    "ĐẶT ERP_GITHUB_REPO = «owner/repo» (BỊA) để client GitHub dựng URL cho bản fetch giả, và ERP_COMMIT = SHA BỊA để phép «production có chứa commit gộp không» có vế production — cả hai là ĐẦU VÀO của phép kiểm, trả lại nguyên trạng trong finally. Trần hỏi deploy truyền TƯỜNG MINH (`deployBudget`) nên kết luận không rẽ nhánh theo máy có GITHUB_TOKEN hay không.",
   "tests/saas-hide-internal.test.ts":
     "ĐẶT PLATFORM_SECRETS_KEY = giá trị BỊA để người vận hành lưu khoá AI (bịa) của workspace khách qua lõi sổ kết nối — đó là ĐẦU VÀO của phép kiểm (cùng cách self-service-journey), trả lại nguyên trạng trong finally; kết luận không đổi theo máy.",
   "tests/zalo-oa.test.ts":
@@ -275,6 +277,10 @@ const DOC_MOI_TRUONG_DA_KHAI: Record<string, string> = {
     "Ký token kiểm thử bằng AUTH_SECRET đọc qua ĐÚNG fallback của lib/env.ts (dev-secret-… khi chưa đặt). Đó là dựng kỳ vọng TỪ CÙNG MỘT NGUỒN với mã đang đo — gõ lại một khoá khác mới là đo sai.",
   "tests/session-revocation.test.ts":
     "Cùng lý do với session-renewal; nhánh production trả chuỗi rỗng đúng như lib/env.ts, nên bài kiểm không bao giờ ký bằng một khoá mà mã sản xuất không dùng.",
+
+  /* ───── HÀNG RÀO an toàn, không phải nhánh kết luận ───── */
+  "tests/sync-runner-concurrent-start.test.ts":
+    "Đọc DATABASE_URL chỉ để TỪ CHỐI chạy khi nó không phải PGlite (bài kiểm ghi sync_runs — không bao giờ được chạm Postgres thật); chạy riêng mà chưa đặt thì dựng pglite:memory làm ĐẦU VÀO. Không khẳng định nào rẽ nhánh theo giá trị của máy: trên mọi máy nó hoặc đo cùng một hợp đồng khoá, hoặc dừng hẳn.",
 
   /* ───── KHÔNG đọc biến nào cả — chỉ TÌM chuỗi đó trong mã nguồn ───── */
   "tests/ads-write.test.ts":

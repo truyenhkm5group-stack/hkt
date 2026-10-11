@@ -1678,8 +1678,15 @@
     {
       "idx": 240,
       "version": "7",
-      "when": 1791400878330,
-      "tag": "0240_tenant_value_snapshots",
+      "when": 1791401000000,
+      "tag": "0240_tech_registry_projection",
+      "breakpoints": true
+    },
+    {
+      "idx": 241,
+      "version": "7",
+      "when": 1791401100000,
+      "tag": "0241_tenant_value_snapshots",
       "breakpoints": true
     }
   ]

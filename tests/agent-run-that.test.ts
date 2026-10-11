@@ -88,7 +88,9 @@ export function testMaViecLaMaProduction() {
 
   const wf = readFileSync(path.join(goc, ".github/workflows/agent-run.yml"), "utf8");
   const wfThan = wf.split("\n").filter((d) => !d.trimStart().startsWith("#")).join("\n");
-  assert.ok(/--prod-task "\$\{\{ steps\.setup\.outputs\.prod_task_code \}\}"/.test(wfThan), "workflow phải truyền mã production cho bước chép sổ");
+  // Mã production đi qua `env:` rồi `"$PROD_TASK_CODE"` — không nội suy `${{ }}` vào thân lệnh (Team Premium F8).
+  assert.ok(/PROD_TASK_CODE: \$\{\{ steps\.setup\.outputs\.prod_task_code \}\}/.test(wfThan), "bước chép sổ phải nhận mã production từ bước lấy việc");
+  assert.ok(/--prod-task "\$PROD_TASK_CODE"/.test(wfThan), "workflow phải truyền mã production cho bước chép sổ");
   assert.ok(/prod_task_code=" >> "\$GITHUB_OUTPUT"/.test(wfThan), "lượt tự kiểm phải xuất mã production RỖNG");
 }
 
@@ -237,10 +239,12 @@ export function testVaiAgentTheoViec() {
 
   assert.ok(!/--agent\s+documentation/.test(than), "KHÔNG được ghi cứng vai trong workflow — vai là thuộc tính của VIỆC");
   assert.equal(
-    (than.match(/--agent "\$\{\{ steps\.setup\.outputs\.agent_key \}\}"/g) ?? []).length,
+    (than.match(/--agent "\$AGENT_KEY"/g) ?? []).length,
     2,
     "cả hai đường (chạy mới và chạy lại) đều phải lấy vai từ bước lấy việc",
   );
+  // …và `AGENT_KEY` của bước chạy là ĐẦU RA của bước lấy việc, đi qua `env:` — không nội suy `${{ }}` vào thân lệnh (Team Premium F8).
+  assert.ok(/AGENT_KEY: \$\{\{ steps\.setup\.outputs\.agent_key \}\}/.test(than), "bước chạy agent phải nhận vai từ bước lấy việc qua env");
   assert.ok(/agent_key=\$AGENT_KEY/.test(than), "bước lấy việc phải xuất `agent_key` cho các bước sau");
   assert.ok(!/ai\/documentation\//.test(than), "tên nhánh được phép đẩy phải theo VAI của việc, không ghim một vai");
   assert.ok(/ai\/\$VAI\//.test(than), "bước đẩy phải dựng mẫu nhánh từ vai đang chạy");

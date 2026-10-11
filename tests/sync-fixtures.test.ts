@@ -75,6 +75,7 @@ import { testTechControlPlaneGoalsDb, testTechControlPlaneVocabulary } from "./t
 import { testTechWorkerDb, testTechWorkerPure } from "./tech-worker.test";
 import { testTechDeliveryDb, testTechDeliveryPure } from "./tech-delivery.test";
 import { testTechPolicyDb, testTechPolicyPure } from "./tech-policy.test";
+import { testTechMissionControlDb, testTechMissionControlPure, testTechMissionControlSourceGuards } from "./tech-mission-control.test";
 import { testAgentRunner, testAgentSandbox, testGithubDeploymentSync, testPhase2aBarriers, testPhase2aSourceGuards, testTechWorkProjection } from "./tech-phase2a.test";
 import { cleanupPrProjectionFixtures, testGithubPrSync, testPrPureMappers, testSyncIncidentPure, testSyncIncidentWatch } from "./tech-pr-projection.test";
 import { cleanupAgentIngestFixtures, testAgentIngestDb, testAgentIngestPure, testAgentIngestSourceGuards } from "./agent-run-ingest.test";
@@ -180,6 +181,7 @@ import { testMigrationUpgradePath } from "./migration-upgrade-path.test";
 import { testMigrationNumberUnique, testMigrationAppendOnly, testRepoIntegrity } from "./repo-integrity.test";
 import { testAiTechRoom } from "./ai-tech-room.test";
 import { testDeliveryV2 } from "./delivery-v2.test";
+import { testWorkflowHardening } from "./workflow-hardening.test";
 import { testChatbotDeployShape, testChatbotImportGuards, testChatbotNoSecretsInRepo } from "./chatbot.test";
 import { testChatbotAdBots } from "./chatbot-ad-bots.test";
 import { testChatbotVoice } from "./chatbot-voice.test";
@@ -228,6 +230,7 @@ import { testLogisticsFreshness } from "./logistics-freshness.test";
 import { testOperatingFunnel } from "./operating-funnel.test";
 import { testMemoInflight } from "./memo-inflight.test";
 import { testCacheSemantics } from "./cache-semantics.test";
+import { testSyncRunnerConcurrentStart } from "./sync-runner-concurrent-start.test";
 import { testRefreshButton } from "./refresh-button.test";
 import { testCommandCatalog } from "./command-catalog.test";
 import { testExperienceProfile } from "./experience-profile.test";
@@ -495,6 +498,7 @@ import { testInboxAdvanced } from "./inbox-advanced.test";
 import { testInboxComposer } from "./inbox-composer.test";
 import { testInboxV2A } from "./inbox-v2-a.test";
 import { testInboxAvatarProfile } from "./inbox-avatar-profile.test";
+import { testPancakeAvatarShape } from "./pancake-avatar-shape.test";
 import { testAvatarProxy } from "./avatar-proxy.test";
 import { testInboxSemanticsV3 } from "./inbox-semantics-v3.test";
 import { testInboxReadV3 } from "./inbox-read-v3.test";
@@ -2191,6 +2195,12 @@ async function main() {
   testPromisedDeliveryPure();
   await testMemoInflight();
   await testCacheSemantics();
+  // Team Premium F3: khoá «một job một lượt» của runSyncJob giữ TRƯỚC lượt await đầu — hai lượt cùng nhịp chỉ chạy thân job một lần;
+  // chèn sync_runs ném thì khoá vẫn được nhả (không kẹt job tới khi khởi động lại).
+  {
+    const r = await testSyncRunnerConcurrentStart();
+    assert.deepEqual(r.failed, [], `sync-runner-concurrent-start: ${r.failed.join(" · ")}`);
+  }
   await testRefreshButton();
   testCommandCatalog();
   testExperienceProfile();
@@ -2524,6 +2534,8 @@ async function main() {
   await testTechWorkerDb();
   await testTechDeliveryDb();
   await testTechPolicyDb();
+  // Mission Control: phép chiếu sổ Tech Room (GitHub giả, không mạng) — tự dọn hai bảng tech_registry_* của nó.
+  await testTechMissionControlDb();
   /*
     PHASE 2A. Chạy ngay sau mặt phẳng điều khiển và tự dọn bằng tiền tố `p2a-`. Ba khối đầu đụng
     CSDL; khối runner còn dựng KHO GIT TẠM và chạy tiến trình con thật (`npm run typecheck` trong
@@ -2728,6 +2740,8 @@ async function main() {
   testTechWorkerPure();
   testTechDeliveryPure();
   testTechPolicyPure();
+  testTechMissionControlPure();
+  testTechMissionControlSourceGuards();
   testTechPermissions();
   testTechHealthParsing();
   testRepoIntegrity();
@@ -2735,6 +2749,9 @@ async function main() {
   await testAiTechRoom();
   // Điều phối V2: cổng song song · deploy dùng lại bằng chứng cổng · sổ xuyên sứ mệnh · khoá Integration Lead · giữ chỗ migration (docs/ai-tech-room/delivery-v2.md).
   await testDeliveryV2();
+  // Team Premium F7/F8: job chạm VPS chỉ chạy từ main + Environment production; checkout của workflow agent / có quyền GHI
+  // không giữ credential; agent-run không dán đầu ra bước vào shell, token GHI chỉ ở bước đẩy nhánh.
+  testWorkflowHardening();
   // Nền tảng đa tổ chức: máy quét cô lập mức tiến trình (thuần, không CSDL) — cạnh các bài quét mã nguồn khác.
   testPlatformIsolationStatic();
   // Hồi quy 27/09: script trên GitHub Actions (không CSDL) vẫn phân giải được tổ chức nhà.
@@ -2895,6 +2912,8 @@ async function main() {
   // Ảnh đại diện khách + bấm ảnh mở trang Facebook (chủ shop 10/10/2026 mục E · F): PSID / fb_id không bao giờ thành link Facebook,
   // năm trạng thái PROFILE_*, đường ghi Pancake dùng chung một lõi, ops inbox-avatar-audit chỉ đọc. Thuần + quét mã nguồn.
   await testInboxAvatarProfile();
+  // Ops pancake-avatar-shape (11/10/2026): dáng payload Pancake để tìm khoá ảnh thật — chỉ in đường khoá + kiểu + dạng, không giá trị. Thuần + quét mã nguồn.
+  testPancakeAvatarShape();
   // Ảnh khách qua proxy ERP (11/10/2026): URL Pancake mang khoá ⇒ cất bản KHÔNG khoá, máy chủ gắn token lúc tải; chặn SSRF, đệm LRU, quyền theo tổ chức — tổ chức `anh-dai-dien-proxy`, fetch giả.
   await testAvatarProxy();
   // INBOX-SEMANTICS-V3 (chủ shop 10/10/2026): bốn khái niệm tách riêng — chưa đọc (AI trả lời không xoá) · chờ trả lời · cần người thật · người đang xử lý; ma trận 20 hội thoại × mọi bộ lọc — tổ chức `hop-thu-sem-v3`.

@@ -1,5 +1,5 @@
 /**
- * ═══════════ SỨC KHOẺ THEO NGÀY — TÍN HIỆU THƯƠNG MẠI + ĐƯỜNG GHI DUY NHẤT CỦA `platform_tenant_health_daily` (0240) ═══════════
+ * ═══════════ SỨC KHOẺ THEO NGÀY — TÍN HIỆU THƯƠNG MẠI + ĐƯỜNG GHI DUY NHẤT CỦA `platform_tenant_health_daily` (0241) ═══════════
  *
  * Ké lượt chụp giá trị của JOB (`lib/saas/tenant-value-capture.ts`). Ba việc, không có công thức nào mới:
  *  1. `readTenantCommercialSignals` — MỘT lượt đọc CSDL nhà cho mọi workspace: ảnh chụp thương mại (`loadCommercialSnapshot` — tài

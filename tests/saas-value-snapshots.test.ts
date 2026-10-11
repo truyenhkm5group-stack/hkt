@@ -1,5 +1,5 @@
 /**
- * ẢNH GIÁ TRỊ THEO TỔ CHỨC + SỨC KHOẺ THEO NGÀY (0240 · sứ mệnh saas-value-snapshots · docs/saas/VALUE_CENTER.md §8).
+ * ẢNH GIÁ TRỊ THEO TỔ CHỨC + SỨC KHOẺ THEO NGÀY (0241 · sứ mệnh saas-value-snapshots · docs/saas/VALUE_CENTER.md §8).
  *
  *  1. THUẦN — chọn tổ chức ở MỘT chỗ (nhà + workspace nghiệm thu + tổ chức không ACTIVE bị loại) · cửa sổ đúng cách tính kỳ của bộ
  *     đọc · khách trả / chi phí khác từ sổ nhà (nguồn hỏng ⇒ `null`, không có dòng ⇒ 0 thật, khoản cấp tài khoản ⇒ chưa biết) ·

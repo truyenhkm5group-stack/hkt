@@ -1,5 +1,5 @@
 /*
-  ops `saas-value-snapshot-check` — ẢNH GIÁ TRỊ THEO TỔ CHỨC + SỨC KHOẺ THEO NGÀY ĐÃ CHỤP TỚI ĐÂU (0240 · CHỈ ĐỌC).
+  ops `saas-value-snapshot-check` — ẢNH GIÁ TRỊ THEO TỔ CHỨC + SỨC KHOẺ THEO NGÀY ĐÃ CHỤP TỚI ĐÂU (0241 · CHỈ ĐỌC).
 
   Vì sao có (11/10/2026, sứ mệnh saas-value-snapshots): lượt chụp chạy NGẦM, ké job `alerts` của nhà (captureSaasSnapshot · nhánh JOB),
   một lần mỗi ngày VN. Sau deploy cần trả lời ba câu mà không mở CSDL bằng tay: (1) hôm nay đã có ảnh chưa, mấy tổ chức × mấy cửa sổ;
@@ -16,7 +16,7 @@
    · Mã thoát: 0 đọc xong (kể cả CHƯA CÓ ẢNH — chưa chụp không phải lỗi của phép đọc) · 64 arg sai · 70 CSDL không chỉ đọc · 1 lỗi đọc.
 
   arg: "[--days=1..30]" (mặc định 3 ngày gần nhất).
-  ops lấy SCRIPT này từ `main` nhưng `lib/` từ IMAGE đang chạy — cần image mang 0240.
+  ops lấy SCRIPT này từ `main` nhưng `lib/` từ IMAGE đang chạy — cần image mang 0241.
 */
 const ARGS = process.argv.slice(2);
 const CHAY_THANG = Boolean(process.argv[1] && process.argv[1].endsWith("saas-value-snapshot-check.ts"));
