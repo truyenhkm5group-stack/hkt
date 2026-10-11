@@ -1934,3 +1934,6 @@
 {"at":"2026-10-11T01:22:06.373Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"inbox-unread-perf","detail":"fix/inbox-unread-perf @ 59b160288db8 · 1 lệnh kiểm thử"}
 {"at":"2026-10-11T01:51:08.837Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"saas-value-snapshots","detail":"#794 @ 7f5f3a529475 → 1f2c3c049664 (MERGE_ISOLATED · HIGH · gates success)"}
 {"at":"2026-10-11T01:52:08.173Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DEPLOY_DISPATCHED","detail":"1f2c3c049664 · run 38103253478 https://github.com/truyenhkm5group-stack/hkt/actions/runs/38103253478"}
+{"at":"2026-10-11T01:58:28.615Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"CLAIM","mission":"sales-integrity-audit","detail":"RUNNING · 3 mẫu phạm vi · MEDIUM"}
+{"at":"2026-10-11T01:58:28.615Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"OVERLAP_ACCEPTED","mission":"sales-integrity-audit","detail":"OVERLAP_ACCEPTED với master-mission: phạm vi lib/sales-chatbot/integrity-audit.ts ↔ lib/sales-chatbot/ — cách tích hợp: chỉ đọc, tệp mới"}
+{"at":"2026-10-11T01:58:28.615Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"OVERLAP_ACCEPTED","mission":"sales-integrity-audit","detail":"OVERLAP_ACCEPTED với pancake-replacement: phạm vi lib/sales-chatbot/integrity-audit.ts ↔ lib/sales-chatbot/ — cách tích hợp: chỉ đọc, tệp mới"}
