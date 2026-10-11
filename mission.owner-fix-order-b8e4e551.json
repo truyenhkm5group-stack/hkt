@@ -1,0 +1,30 @@
+{
+  "schema": 1,
+  "mission_id": "owner-fix-order-b8e4e551",
+  "title": "VIỆC CỦA SHOP: sửa đơn #B8E4E551 (Chị Hoàn) về 540.000 ₫ như nhân viên đã hứa trước khi giao",
+  "business_goal": "",
+  "status": "BLOCKED",
+  "priority": "P2",
+  "risk": "MEDIUM",
+  "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "worker": null,
+  "worktree": null,
+  "branch": "decision/owner-fix-order-b8e4e551",
+  "base_sha": null,
+  "domains": [],
+  "owned_paths": [
+    "docs/ops/owner-actions.md"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-11T06:28:16.279Z",
+  "updated_at": "2026-10-11T06:28:16.279Z",
+  "last_heartbeat": "2026-10-11T06:28:16.279Z",
+  "definition_of_done": [],
+  "needs_owner": {
+    "category": "APPROVAL_REQUIRED",
+    "action": "Đơn #B8E4E551 (Chị Hoàn, hội thoại 675e793a…) đang «ĐÃ XÁC NHẬN» 2 × CHA-CA-THU 1kg = 560.000 ₫. Khách phản đối «2 ký giá 540 chứ», nhân viên Hàn Mộc Thiên đã trả lời 09:57 «Dạ vâng, 540K, miễn phí ship ạ» nhưng đơn chưa sửa. Cần nhân viên mở đơn → Sửa đơn → đổi sang mẫu mã gói 2kg (CHA-CA-THU-2KG 540.000) giữ ghi chú «2 gói riêng» → Xác nhận, trước khi gửi ĐVVC. Tech Lead KHÔNG tự sửa đơn khách trên production."
+  }
+}
