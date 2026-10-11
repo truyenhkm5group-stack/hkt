@@ -1,0 +1,8 @@
+{
+  "pr": 808,
+  "sha": "9bb3fc18f07c865dde0b1721883ea28527c8e0af",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-11T13:21:19.191Z",
+  "note": "Cờ đi qua lõi đơn có nhật ký, không đổi giá/không gửi tin, chạy thử mặc định, idempotent; P0 giá"
+}
