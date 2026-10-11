@@ -3,7 +3,7 @@
   "mission_id": "avatar-accept-header",
   "title": "Ảnh khách hộp thư: bước 1 gọi điểm cuối ảnh Pancake gửi accept */* (image/* bị 406 — đo production 5/5)",
   "business_goal": "",
-  "status": "RUNNING",
+  "status": "PR_READY",
   "priority": "P1",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -21,7 +21,18 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-11T06:11:23.542Z",
-  "updated_at": "2026-10-11T06:11:23.542Z",
-  "last_heartbeat": "2026-10-11T06:11:23.542Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-11T06:11:41.309Z",
+  "last_heartbeat": "2026-10-11T06:11:41.309Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "fix/avatar-accept-header",
+    "sha": "ee8e5fb4df2f1f5733d69b98810b22c4f88a11dc",
+    "at": "2026-10-11T06:11:41.309Z",
+    "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+    "title": "Ảnh khách hộp thư: bước 1 gọi điểm cuối ảnh Pancake gửi accept */* (image/* bị 406 — đo production 5/5)",
+    "summary": "Một header: bước 1 accept */* (đo: image/* ⇒ 406, */* ⇒ 301 → content.pancake.vn → 200 image/jpeg); bước cuối vẫn bắt buộc ảnh raster",
+    "tests": [
+      "avatar-proxy (fetch giả 406 với image/* như production ⇒ vẫn ra ảnh; header theo bước [*/*, image/*]) · avatar-proxy-check · tsc · eslint · 2 đột biến đỏ · npm test để CI"
+    ]
+  }
 }
