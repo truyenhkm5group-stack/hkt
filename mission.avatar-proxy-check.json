@@ -23,18 +23,18 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-11T04:11:34.067Z",
-  "updated_at": "2026-10-11T04:12:40.779Z",
-  "last_heartbeat": "2026-10-11T04:11:56.600Z",
+  "updated_at": "2026-10-11T05:16:55.485Z",
+  "last_heartbeat": "2026-10-11T05:16:55.485Z",
   "definition_of_done": [],
   "handoff": {
     "branch": "fix/avatar-proxy-check",
-    "sha": "69c84c29eb46d852533d6cb3c102c12c659c5aec",
-    "at": "2026-10-11T04:11:56.600Z",
+    "sha": "53ad79a314c700da237d111b2b8e6f0370447937",
+    "at": "2026-10-11T05:16:55.485Z",
     "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
     "title": "Ops chỉ đọc avatar-proxy-check: đi lại từng bước proxy ảnh (ref, token, bước 1 image/* vs */*, bước 2, kiểu nội dung) để biết vì sao /api/ai-sales/avatar trả 404",
-    "summary": "Ops chỉ đọc chẩn đoán proxy ảnh, dùng lib đã có trên image, không in id/URL/token",
+    "summary": "Ops chẩn đoán proxy ảnh, token qua pageTokensForOffboard + connectionStatusRows của service (không chạm cột bản mã)",
     "tests": [
-      "tsc · eslint · avatar-proxy-check + pancake-avatar-shape + test-hygiene + repo-integrity + platform-isolation-static + ops-log-leak + ops-concurrency · npm test để CI"
+      "connectors (gồm «chỉ schema + service chạm cột bản mã») · avatar-proxy-check (ba mức token) · platform-isolation-static · repo-integrity · tsc · eslint"
     ]
   }
 }
