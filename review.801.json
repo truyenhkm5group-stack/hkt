@@ -1,8 +1,8 @@
 {
   "pr": 801,
-  "sha": "00b54f61caf9f410ca204e6c032690f1325e8f1b",
+  "sha": "d2c76ce8307f677232d2dfd2e5346d296a167ff2",
   "verdict": "PASS",
   "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
-  "at": "2026-10-11T05:13:42.627Z",
-  "note": "Nguyên nhân gốc xác minh bằng mã (điều kiện dừng chỉ state.confirmed, job không đọc orders, chữ follow-up ngoài claim-guard); kiểm hai lần trên dữ liệu đọc lại, lỗi đọc ⇒ chặn (phía hẹp); khoá trước gửi; vết không PII; ORDER_EXISTS chặn chứ không bịa kịch bản sau mua; migration nới CHECK (không UPDATE). Phải renumber 0242→0243 sau #800"
+  "at": "2026-10-11T08:00:29.055Z",
+  "note": "Phần P0-B/C: confirmed-settle dùng chiều order của lifecycle (không định nghĩa lại), idempotent, không đụng đơn/không gửi tin; quét mọi đường gửi khai luật sau-xác-nhận; repair chạy thử mặc định. Gộp main + 0243"
 }
