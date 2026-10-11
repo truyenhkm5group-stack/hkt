@@ -2060,3 +2060,4 @@
 {"at":"2026-10-11T08:05:06.968Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#803 @ 2db170241646 · Một định nghĩa, hai dạng, có bài đối chiếu; tin tự động/hệ thống/gửi hỏng không là xử lý; con trỏ đọc bất kỳ người = xử lý; sửa kèm lỗi khoá câu mẫu SQL. Gộp sau #801, đổi migration 0244"}
 {"at":"2026-10-11T08:09:50.563Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"VERIFY_PASS","mission":"handoff-ownership","detail":"PASS f9657f4fa1b0d05c3f9de95747d4b9c46fb62998 2026-10-11T08:09:36.177Z"}
 {"at":"2026-10-11T08:10:29.554Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"UPDATE","mission":"owner-handoff-team","detail":"BLOCKED → BLOCKED · 1 mẫu phạm vi · MEDIUM"}
+{"at":"2026-10-11T08:16:01.618Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"sender-provenance-probe","detail":"fix/sender-provenance-probe @ 3b8232e8d16d · 1 lệnh kiểm thử"}
