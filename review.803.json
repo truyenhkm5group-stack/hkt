@@ -1,8 +1,8 @@
 {
   "pr": 803,
-  "sha": "27d9b2c7cc52516502668c93cb957b209769d4c1",
+  "sha": "74c4da487205f4b97f91c3a6d37469cdb335e4eb",
   "verdict": "PASS",
   "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
-  "at": "2026-10-11T09:36:26.921Z",
-  "note": "Ba lỗ phủ vá đúng hướng (không bỏ sót khách), vẫn một định nghĩa, đối chiếu TS≡SQL mở rộng; chờ P0 giá xong mới gộp (0244)"
+  "at": "2026-10-11T15:18:08.827Z",
+  "note": "Merge main: xung đột fanpage.ts giữ cả avatar theo page (#806) và sourceAt/senderApp; markWaitingForCustomer giữ #801; HANDOFF_QUEUE_CLEAR khi AI nhận lại; 0244 chỉ thêm cột"
 }
