@@ -20,11 +20,11 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-11T01:13:41.767Z",
-  "updated_at": "2026-10-11T01:13:41.767Z",
-  "last_heartbeat": "2026-10-11T01:13:41.767Z",
+  "updated_at": "2026-10-11T10:20:47.396Z",
+  "last_heartbeat": "2026-10-11T10:20:47.396Z",
   "definition_of_done": [],
   "needs_owner": {
     "category": "APPROVAL_REQUIRED",
-    "action": "#792 sửa P0 hộp thư chậm (tải danh sách 510→824 ms sau V3; bản sửa đưa về ~mức cũ trên fixture, kết quả trùng từng byte). Hàng đợi xếp CRITICAL vì migration có câu UPDATE … SET — nhưng UPDATE chỉ ĐIỀN cột MỚI last_inbound_message_at từ sổ tin khách (tất định, chạy lại cùng kết quả) và trigger giữ cột đó; KHÔNG đổi/xoá dữ liệu cũ nào; lùi bản cũ thì cột bị bỏ qua, vô hại. Rủi ro còn lại: lúc migration chạy khoá bảng hội thoại vài giây (webhook chờ). Duyệt ⇒ Tech Lead gộp + deploy + đo lại p50/p95 trên HSLC."
+    "action": "[CẬP NHẬT] #792 nay là phần HIỆU NĂNG + UI của định nghĩa unread mới anh chốt (lượt khách mới nhất chưa xử lý — #803). Fixture: SQL tải hộp thư Tất cả 112 ms (trước V3 117, hiện tại 169), Chưa đọc 189 ms (hiện 388); FALSE_UNREAD 1.222 → 0. Hàng đợi chặn vì migration có UPDATE … SET — UPDATE chỉ ĐIỀN cột mới (turn_unhandled, last_read_at) từ dữ liệu sẵn có, tất định, không đổi/xoá dữ liệu cũ; khoá bảng hội thoại vài giây lúc áp. Duyệt ⇒ gộp ngay sau #803 (sau khi PR giá #807 PASS production)."
   }
 }
