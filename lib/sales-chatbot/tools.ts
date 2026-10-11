@@ -39,8 +39,8 @@ import { markOrderWritten, omsValidationReason, orderSignalToolReason, OrderWrit
 import { agentUnitPrice } from "@/lib/commerce/pricing";
 import { notifySalesChatBooking, notifySalesChatHandoff } from "@/lib/sales-chatbot/alerts";
 import { foldVi } from "@/lib/sales-chatbot/text";
-import { buildQuote, computePriced, loadPricingContext, packChoiceMistake, verifiedUnitPrices, type AgentQuoteClaim, type Priced, type PricingContext } from "@/lib/sales-chatbot/quote";
-import { priceUnverifiedReason, QUOTE_UNVERIFIED_INSTRUCTION, quoteSnapshotOf, type Quote, type QuoteSnapshot } from "@/lib/sales-chatbot/quote-shared";
+import { buildQuote, computePriced, loadPricingContext, packChoiceMistake, packingIssues, packingRequestOf, verifiedUnitPrices, type AgentQuoteClaim, type Priced, type PricingContext } from "@/lib/sales-chatbot/quote";
+import { priceUnverifiedReason, QUOTE_UNVERIFIED_INSTRUCTION, quoteSnapshotOf, type PriceDisputeState, type Quote, type QuoteSnapshot } from "@/lib/sales-chatbot/quote-shared";
 import { CLAIM_SAFE_TEXT, orderValidityOf } from "@/lib/sales-chatbot/claim-guard";
 import { searchCatalog, sellableCatalog, stockFor, type CatalogItem } from "@/lib/sales-chatbot/catalog";
 import { quotedInText } from "@/lib/sales-chatbot/text";
@@ -76,7 +76,13 @@ export type ChatState = {
    * ĐẦU. Chưa từng thấy tóm tắt ⇒ chốt chỉ ở lượt SAU; đã thấy ở lượt trước rồi đồng ý thêm / sửa món ⇒ sửa và chốt luôn.
    */
   /** `quote` = báo giá máy chủ của đơn nháp (`quote.ts`) — chốt đơn đối chiếu đúng mã này; đơn nháp trước 11/10/2026 không có. */
-  draft?: { orderId: string | null; lines: CartLine[]; unitPrices: Record<string, number>; recipient: Recipient; note: string; simulated: boolean; shownTurn?: number; firstShownTurn?: number; quote?: AgentQuoteClaim };
+  /**
+   * `seenQuoteId` / `seenLines` = báo giá + dòng hàng khách ĐÃ THẤY ở lượt trước (đổi số lượng / quy cách trong lượt này ⇒ báo giá cũ hết
+   * hiệu lực, phải xin xác nhận tổng mới). `packing` = NGUYÊN VĂN yêu cầu đóng gói riêng của khách — ghi vào ghi chú đơn cho kho.
+   */
+  draft?: { orderId: string | null; lines: CartLine[]; unitPrices: Record<string, number>; recipient: Recipient; note: string; simulated: boolean; shownTurn?: number; firstShownTurn?: number; quote?: AgentQuoteClaim; seenQuoteId?: string; seenLines?: CartLine[]; seenTotal?: number; packing?: string | null };
+  /** Khách PHẢN ĐỐI giá (PRICE_DISPUTED, 11/10/2026) — engine ghi khi phát hiện; chốt đơn bị chặn tới khi máy chủ báo lại và khách xác nhận. */
+  priceDispute?: PriceDisputeState;
   /**
    * `stamp` = dấu lời nhắc / cấu hình / model / bản mã ĐÚNG lúc chốt (`prompt-stamp.ts`); đơn chốt trước 08/10/2026 không có.
    * `valid` / `pending` = đơn vừa chốt có QUA KIỂM không (`orderValidityOf`, đọc lại ngay sau lượt ghi — P0 11/10/2026): `false` ⇒ bot
@@ -465,10 +471,17 @@ export type PricedQuote = Priced & { quote: Quote };
  * `address` = địa chỉ giao (đơn nháp / khách đã lưu) — cho luật miễn ship theo khu vực; `null` khi chưa biết. Phép tính ở
  * `computePriced` (quote.ts) — nơi DUY NHẤT tính tiền cho đường agent; lõi đơn tính lại đúng hàm đó.
  */
-export async function priceLines(lines: readonly CartLine[], cfg: SalesChatbotConfig, customerId: string | null = null, address: string | null = null): Promise<PricedQuote> {
+export async function priceLines(lines: readonly CartLine[], cfg: SalesChatbotConfig, customerId: string | null = null, address: string | null = null, opts: { packing?: boolean } = {}): Promise<PricedQuote> {
   const ctx = await pricingContextFor(cfg, customerId);
   const priced = computePriced(lines, ctx, address);
+  // Khách đòi đóng gói riêng ⇒ «tách gói có còn giá gói không» là quyết định của shop — chưa khai ⇒ chưa xác thực (packingIssues).
+  if (opts.packing) priced.issues.push(...packingIssues(priced));
   return { ...priced, quote: buildQuote(priced, ctx) };
+}
+
+/** Báo giá mới ĐÃ XÁC THỰC sau lúc khách phản đối giá ⇒ hết «đang phản đối»; khách phải xác nhận ở lượt SAU (`requotedTurn`). */
+function settleDispute(state: ChatState, turn: number | undefined) {
+  if (state.priceDispute?.open) state.priceDispute = { ...state.priceDispute, open: false, requotedTurn: turn ?? null };
 }
 
 /** Báo giá mang vào lõi đơn — lõi tính lại phần hàng và đối chiếu (`verifyAgentQuote`). */
@@ -540,6 +553,7 @@ function cartView(p: Priced) {
 function orderInput(state: ChatState, draft: NonNullable<ChatState["draft"]>, priced: Priced, stage: "NEW" | "CONFIRMED", cfg: SalesChatbotConfig, channel: ChatChannel) {
   const notes = [
     draft.note,
+    draft.packing ? `Đóng gói theo yêu cầu khách: «${draft.packing}»` : "",
     priced.ship.kind === "FREE_IF_AREA" ? "Miễn ship NẾU địa chỉ thuộc khu vực miễn ship — nhân viên kiểm địa chỉ trước khi giao." : priced.shippingFee === null ? "Phí ship: CHƯA BÁO — nhân viên cập nhật trước khi giao." : "",
   ].filter((x) => x.trim());
   return {
@@ -728,7 +742,8 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
       const items = itemsZ.safeParse(input.items);
       if (!items.success) return err("Tính giỏ: sai đầu vào", "items phải là danh sách { variant_id, quantity ≥ 1 }.", state);
       const knownAddress = state.draft ? [state.draft.recipient.address, state.draft.recipient.province].join(", ") : state.customer ? [state.customer.address, state.customer.province].join(", ") : null;
-      const priced = await priceLines(mergeLines(items.data.map((i) => ({ variantId: i.variant_id, quantity: i.quantity }))), ctx.config, verifiedCustomerId(state), knownAddress);
+      const packingAsk = packingRequestOf(ctx.lastUserText) ?? state.draft?.packing ?? null;
+      const priced = await priceLines(mergeLines(items.data.map((i) => ({ variantId: i.variant_id, quantity: i.quantity }))), ctx.config, verifiedCustomerId(state), knownAddress, { packing: Boolean(packingAsk) });
       if (priced.missing.length) return err("Tính giỏ: mã không có", `Không có mẫu mã: ${priced.missing.join(", ")}.`, state);
       if (priced.unpriced.length) return { ...err("Tính giỏ: mã chưa có giá", `Chưa có giá: ${priced.unpriced.join(", ")} — không báo giá, chuyển nhân viên.`, state), requireHuman: `Giá bất thường: ${priced.unpriced.join(", ")} chưa có giá` };
       if (priced.addOnOnly) return err("Tính giỏ: chỉ có món bán kèm", ADD_ON_ONLY_ERROR, state);
@@ -737,6 +752,7 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
       // BÁO GIÁ MÁY CHỦ (P0 11/10/2026): giỏ là một báo giá có mã; chưa xác thực (catalog mâu thuẫn) ⇒ không có số để báo, người xác minh.
       state.quote = quoteSnapshotOf(priced.quote, now);
       if (!priced.quote.verified) return { ...err("Tính giỏ: giá chưa xác thực", `${QUOTE_UNVERIFIED_INSTRUCTION} (${quoteReasons(priced.quote)})`, state), requireHuman: priceUnverifiedReason(quoteReasons(priced.quote)) };
+      settleDispute(state, ctx.turn);
       return ok(`Giỏ: ${formatVND(priced.subtotal)}${priced.total !== null ? ` · COD ${formatVND(priced.total)}` : ""}`, cartView(priced), state);
     }
     case "create_customer": {
@@ -798,7 +814,9 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
       const base: Recipient = existing?.recipient ?? { name: state.customer.name, phone: state.customer.phone, address: state.customer.address, province: state.customer.province };
       const lines = v.data.items ? mergeLines(v.data.items.map((i) => ({ variantId: i.variant_id, quantity: i.quantity }))) : existing!.lines;
       const recipient = recipientFrom(v.data, base);
-      const priced = await priceLines(lines, ctx.config, verifiedCustomerId(state), [recipient.address, recipient.province].join(", "));
+      // Yêu cầu đóng gói riêng («2 gói riêng», «chia 2 túi») — giữ qua các lượt sửa đơn, ghi vào ghi chú đơn cho kho.
+      const packing = packingRequestOf(ctx.lastUserText) ?? existing?.packing ?? null;
+      const priced = await priceLines(lines, ctx.config, verifiedCustomerId(state), [recipient.address, recipient.province].join(", "), { packing: Boolean(packing) });
       if (priced.missing.length) return err("Đơn nháp: mã không có", `Không có mẫu mã: ${priced.missing.join(", ")}.`, state, { reason: "UNKNOWN_SKU" });
       if (priced.unpriced.length) return { ...err("Đơn nháp: mã chưa có giá", `Chưa có giá: ${priced.unpriced.join(", ")}.`, state, { reason: "UNPRICED_SKU" }), requireHuman: `Giá bất thường: ${priced.unpriced.join(", ")} chưa có giá` };
       if (priced.addOnOnly) return err("Đơn nháp: chỉ có món bán kèm", ADD_ON_ONLY_ERROR, state);
@@ -815,7 +833,10 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
       const firstShown = existing?.firstShownTurn ?? existing?.shownTurn ?? ctx.turn;
       // Đơn nháp giữ dòng ĐÃ QUY GÓI (đúng những dòng ghi vào đơn) — chốt đơn tính lại trên chính chúng.
       const quoteClaim = quoteClaimOf(priced.quote);
-      const draft = { ...(ctx.turn !== undefined ? { shownTurn: ctx.turn } : {}), ...(firstShown !== undefined ? { firstShownTurn: firstShown } : {}), orderId: existing?.orderId ?? null, lines: priced.lines.map((l) => ({ variantId: l.variantId, quantity: l.quantity })), unitPrices: Object.fromEntries(priced.lines.map((l) => [l.variantId, l.unitPrice])), recipient, note: v.data.delivery_note ?? existing?.note ?? "", simulated, quote: quoteClaim };
+      // Báo giá + dòng khách ĐÃ THẤY = của đơn nháp ở lượt TRƯỚC (sửa nhiều lần trong một lượt vẫn giữ bản khách đã thấy).
+      const carrySeen = existing && existing.shownTurn !== ctx.turn;
+      const seen = carrySeen ? { seenQuoteId: existing.quote?.id, seenLines: existing.lines, seenTotal: existing.quote ? (existing.quote.total ?? existing.quote.subtotal) : undefined } : { seenQuoteId: existing?.seenQuoteId, seenLines: existing?.seenLines, seenTotal: existing?.seenTotal };
+      const draft = { ...(ctx.turn !== undefined ? { shownTurn: ctx.turn } : {}), ...(firstShown !== undefined ? { firstShownTurn: firstShown } : {}), orderId: existing?.orderId ?? null, lines: priced.lines.map((l) => ({ variantId: l.variantId, quantity: l.quantity })), unitPrices: Object.fromEntries(priced.lines.map((l) => [l.variantId, l.unitPrice])), recipient, note: v.data.delivery_note ?? existing?.note ?? "", simulated, quote: quoteClaim, ...(seen.seenQuoteId ? seen : {}), packing };
       if (!simulated) {
         const payload = orderInput(state, draft, priced, "NEW", ctx.config, ctx.channel);
         // Đơn MỚI mang mã quảng cáo đã dẫn khách vào hội thoại (trong cửa sổ quy kết — máy chủ quyết); sửa đơn KHÔNG đổi nó.
@@ -828,6 +849,7 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
       }
       state.draft = draft;
       state.quote = quoteSnapshotOf(priced.quote, now);
+      settleDispute(state, ctx.turn);
       const view = { order_code: draft.orderId ? `#${manualOrderShortCode(draft.orderId)}` : "(thử)", status: "Nháp — chưa chốt, chưa giữ hàng", simulated, ...cartView(priced), recipient: recipientView(draft.recipient, state), delivery_note: draft.note || null };
       return ok(`${simulated ? "(Thử) " : ""}${existing ? "Sửa" : "Lên"} đơn nháp · ${formatVND(priced.subtotal)}`, view, state);
     }
@@ -847,7 +869,22 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
       }
       const d = state.draft;
       if (!d.recipient.name || !d.recipient.phone || !d.recipient.address) return err("Chốt: thiếu người nhận", "Thiếu tên / SĐT / địa chỉ người nhận.", state, { reason: "MISSING_CONTACT", fields: (["name", "phone", "address"] as const).filter((k) => !d.recipient[k]).map((k) => `recipient.${k}`) });
-      const priced = await priceLines(d.lines, ctx.config, verifiedCustomerId(state), [d.recipient.address, d.recipient.province].join(", "));
+      // KHÁCH PHẢN ĐỐI GIÁ (PRICE_DISPUTED, ca «Chị Hoàn» 11/10/2026): không chốt khi khách chưa đồng ý lại một báo giá máy chủ.
+      const pd = state.priceDispute;
+      if (pd && (pd.open || (ctx.turn !== undefined && pd.requotedTurn === ctx.turn))) {
+        return err("Chốt: khách đang phản đối giá", "KHÁCH ĐANG PHẢN ĐỐI GIÁ — KHÔNG chốt trong lượt này. Báo lại ĐÚNG số tiền máy chủ trả (calculate_cart / đơn nháp) và hỏi khách xác nhận; khách đồng ý ở tin SAU mới gọi confirm_order. Số khách nói không có trong báo giá máy chủ ⇒ handoff_to_human «Giá / tồn bất thường — PRICE_DISPUTED».", state);
+      }
+      // ĐỔI SỐ LƯỢNG / QUY CÁCH trong CHÍNH lượt này làm TỔNG TĂNG so với tổng khách đã thấy (dòng khách đã thấy bị đổi, không phải chỉ
+      // thêm món) ⇒ báo giá cũ hết hiệu lực: khách phải thấy và đồng ý TỔNG MỚI (BỔ SUNG 11/10 (5), ca «Chị Hoàn»). Giữ luật 6 / 04/10/2026:
+      // khách tự GIẢM («không phải 2kg, lấy 1kg thôi») hay nói «lấy THÊM …» / nhận món mời thêm (dòng mới) ⇒ sửa và chốt luôn.
+      if (ctx.turn !== undefined && d.shownTurn === ctx.turn && d.seenLines && d.quote && d.seenQuoteId && d.seenQuoteId !== d.quote.id) {
+        const changedExisting = d.seenLines.some((s) => d.lines.find((l) => l.variantId === s.variantId)?.quantity !== s.quantity);
+        const raised = d.seenTotal === undefined || (d.quote.total ?? d.quote.subtotal) > d.seenTotal;
+        if (changedExisting && raised && !/(?:^|[^a-z])them(?![a-z])/.test(foldVi(ctx.lastUserText))) {
+          return err("Chốt: tổng mới chưa xác nhận", `Khách vừa đổi số lượng / quy cách — báo giá cũ hết hiệu lực, tổng mới ${formatVND(d.quote.total ?? d.quote.subtotal)}. Gửi tóm tắt với tổng mới và hỏi khách xác nhận; khách đồng ý ở tin SAU mới chốt.`, state);
+        }
+      }
+      const priced = await priceLines(d.lines, ctx.config, verifiedCustomerId(state), [d.recipient.address, d.recipient.province].join(", "), { packing: Boolean(d.packing) });
       if (priced.missing.length || priced.unpriced.length) return err("Chốt: mã không bán được", "Có mẫu mã không còn bán hoặc chưa có giá — chuyển nhân viên.", state, { reason: priced.missing.length ? "UNKNOWN_SKU" : "UNPRICED_SKU" });
       if (priced.addOnOnly) return err("Chốt: chỉ có món bán kèm", ADD_ON_ONLY_ERROR, state);
       // Giá chưa xác thực ⇒ KHÔNG chốt, người xác minh (yêu cầu 4–5 của chủ shop).

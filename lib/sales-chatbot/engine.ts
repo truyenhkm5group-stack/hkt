@@ -64,7 +64,9 @@ import { withTurnEvents } from "@/lib/sales-chatbot/events";
 import { FOOD_PACK, salesPackFor, type SalesPack } from "@/lib/sales-chatbot/packs";
 import { executeTool, orderTotalsOf, toolDefsFor, TOOLS_HOLDING_TEXT, type ChatState } from "@/lib/sales-chatbot/tools";
 import { allowedImageUrl, describeImages, fetchCustomerImage, IMAGE_PROMPT_RULE, imageLine, VISION_LIMITS } from "@/lib/sales-chatbot/vision";
-import { claimFactsLoader, extractVndAmounts, guardOutgoing, paymentSignalHandoff, paymentSignalInCustomerText, unverifiedAmounts, type ClaimVerdict } from "@/lib/sales-chatbot/claim-guard";
+import { CLAIM_HANDOFF_REASON, CLAIM_SAFE_TEXT, claimFactsLoader, detectPriceDispute, extractVndAmounts, guardOutgoing, paymentSignalHandoff, paymentSignalInCustomerText, unverifiedAmounts, type ClaimVerdict } from "@/lib/sales-chatbot/claim-guard";
+import { flagOrderForReviewAsAgent } from "@/lib/records/order-create";
+import type { PriceDisputeState } from "@/lib/sales-chatbot/quote-shared";
 import { catalogReferenceAmounts } from "@/lib/sales-chatbot/quote";
 import { vnDayOffset, WEEKDAY_LABEL } from "@/lib/constants/booking";
 
@@ -226,6 +228,12 @@ export function systemPrompt(cfg: SalesChatbotConfig, shopName: string, profile:
   ]
     .filter(Boolean)
     .join("\n");
+}
+
+/** Dặn model khi khách đang phản đối giá — chỉ có trong lượt có tranh chấp (lời nhắc các lượt khác không đổi). HÀM THUẦN. */
+export function priceDisputePrompt(pd: PriceDisputeState | undefined): string {
+  if (!pd?.open) return "";
+  return `KHÁCH ĐANG PHẢN ĐỐI GIÁ (PRICE_DISPUTED): khách nói ${pd.amounts.map((a) => formatVND(a)).join(", ")}. Số đó CÓ trong bảng giá máy chủ (vd đúng giá một gói / một quy cách khác) ⇒ gọi calculate_cart (hoặc update_draft_order nếu đã có đơn nháp) với ĐÚNG mẫu mã có giá đó, báo lại ĐÚNG số máy chủ trả và hỏi khách xác nhận. KHÔNG tự đổi giá, KHÔNG gọi confirm_order trong lượt này. Không chắc khách nói mẫu mã nào ⇒ handoff_to_human «Giá / tồn bất thường — PRICE_DISPUTED».`;
 }
 
 type ConvRow = typeof schema.salesChatConversations.$inferSelect;
@@ -885,9 +893,32 @@ async function chatTurnCore(
       if (isPublicChannel(opts.channel)) await notifySalesChatHandoff(conv.id, v.handoffReason, next.customer, now, { dedupeKey: `sales-chat:claim-guard:${conv.id}:${turnSeq}` }).catch(() => undefined);
       return { state: next, safe: isMessagingChannel(opts.channel) ? null : v.safeText };
     };
+    // KHÁCH PHẢN ĐỐI GIÁ (PRICE_DISPUTED — chủ shop 11/10/2026, ca «Chị Hoàn»: bot báo 560.000 ₫, khách «2 ký giá 540đ chứ», đơn nháp vẫn
+    // «ĐÃ XÁC NHẬN»). Máy chủ tra số khách nói trong tập số máy chủ báo được (`quote.ts`): CÓ (vd đúng giá gói 2kg) ⇒ AI báo lại đúng số
+    // máy chủ + xin xác nhận, chốt bị chặn tới lượt sau; KHÔNG / không chắc ⇒ chuyển nhân viên ngay. Đơn nháp đang có ⇒ cờ «khách phản
+    // đối giá» (khung đơn thôi hiện «ĐÃ XÁC NHẬN»). Không bao giờ tự đổi giá đơn.
+    const dispute = st0.quote && !st0.confirmed ? detectPriceDispute(text, st0.quote) : null;
+    if (dispute) {
+      const ref = await catalogReferenceAmounts(cfg).catch((): ReadonlySet<number> => new Set<number>());
+      const knownPrice = dispute.amounts.length > 0 && dispute.amounts.every((a) => ref.has(a));
+      const pd: PriceDisputeState = { at: now.toISOString(), amounts: dispute.amounts, quoteId: st0.quote!.id, turn: turnSeq, open: true };
+      if (st0.draft?.orderId && opts.channel !== "TEST") await flagOrderForReviewAsAgent(SALES_AGENT, st0.draft.orderId, { code: "PRICE_DISPUTED", note: `Khách phản đối giá đã báo (${formatVND(st0.quote!.total ?? st0.quote!.subtotal)})${dispute.amounts.length ? ` — khách nói ${dispute.amounts.map((a) => formatVND(a)).join(", ")}` : ""}`, quote: text.trim().slice(0, 300) || null }, now).catch(() => undefined);
+      if (!knownPrice) {
+        const reason = CLAIM_HANDOFF_REASON.PRICE_DISPUTED;
+        const st: ChatState = { ...st0, priceDispute: pd, handoff: { reason, at: now.toISOString() } };
+        if (!isMessagingChannel(opts.channel)) await reply(conv, seq, CLAIM_SAFE_TEXT.PRICE_DISPUTE);
+        await bump({ status: "HANDOFF", handoffReason: reason, state: st as Record<string, unknown>, turns: conv.turns + 1, lastError: `Khách phản đối giá — số khách nói ${dispute.amounts.map((a) => formatVND(a)).join(", ") || "(không nêu số)"} không có trong giá máy chủ` });
+        if (isPublicChannel(opts.channel)) await notifySalesChatHandoff(conv.id, reason, st.customer, now, { dedupeKey: `sales-chat:price-dispute:${conv.id}:${turnSeq}` }).catch(() => undefined);
+        return { ok: true, view: (await conversationView(conv.id))! };
+      }
+      const st: ChatState = { ...st0, priceDispute: pd };
+      await bump({ state: st as Record<string, unknown> });
+      conv.state = st as Record<string, unknown>;
+      st0 = st;
+    }
     // Câu bot / page vừa nói — câu mẫu TRÙNG một câu trong số này thì không gửi lại (khách đang trả lời nó).
     const recentSaid = recentShopTexts(msgs, 4);
-    const quick: QuickReplyStep = opts.context ? { kind: "SKIP", reason: "Có ngữ cảnh bài viết — AI đọc cùng ngữ cảnh" } : qrSettings.enabled ? await quickReplyByKeyword(text, { ordering: Boolean(st0.draft && !st0.confirmed), cfg, recent: recentSaid }) : { kind: "SKIP", reason: "Câu mẫu đang tắt" };
+    const quick: QuickReplyStep = st0.priceDispute?.open ? { kind: "SKIP", reason: "Khách đang phản đối giá — AI báo lại theo báo giá máy chủ" } : opts.context ? { kind: "SKIP", reason: "Có ngữ cảnh bài viết — AI đọc cùng ngữ cảnh" } : qrSettings.enabled ? await quickReplyByKeyword(text, { ordering: Boolean(st0.draft && !st0.confirmed), cfg, recent: recentSaid }) : { kind: "SKIP", reason: "Câu mẫu đang tắt" };
     const sendQuick = async (pick: QuickReplyPick, ai: { calls: number; inTok: number; outTok: number } | null): Promise<TurnResult> => {
       const verdict = await guardOutgoing(pick.text, () => claimFacts(st0));
       if (!verdict.ok) {
@@ -956,7 +987,7 @@ async function chatTurnCore(
     const returning = await findReturningCustomer(known.customer || !syncCustomer ? known : { ...known, customer: { ...syncCustomer, simulated: false } }).catch(() => null);
     // ĐẶT LỊCH: shop bật trong cấu hình bot VÀ tổ chức bật module Lịch hẹn — thiếu một trong hai thì bot không có công cụ đặt lịch.
     const bookingOn = cfg.booking.enabled && (await canUseModule("appointments"));
-    const system = [systemPrompt(cfg, orgRow?.name ?? org.code, await businessProfile(), opts.channel, await publishedPlaybook(), quickCatalog, returningCustomerPrompt(returning, known.returning), bookingOn ? bookingPrompt(cfg, now) : "", now, salesPackFor(orgRow?.templateKey ?? null)), await learnedLessons(), await levelPromptFor(conv.id, now), customerNamePrompt(opts.customerName), opts.context ?? ""].filter(Boolean).join("\n");
+    const system = [systemPrompt(cfg, orgRow?.name ?? org.code, await businessProfile(), opts.channel, await publishedPlaybook(), quickCatalog, returningCustomerPrompt(returning, known.returning), bookingOn ? bookingPrompt(cfg, now) : "", now, salesPackFor(orgRow?.templateKey ?? null)), await learnedLessons(), await levelPromptFor(conv.id, now), customerNamePrompt(opts.customerName), priceDisputePrompt(known.priceDispute), opts.context ?? ""].filter(Boolean).join("\n");
     const deliveredImages: string[] = [];
     let deliveredReplyId: string | null = null;
     let deliveredText: string | null = null;

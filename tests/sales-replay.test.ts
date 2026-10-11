@@ -9,6 +9,7 @@
  *     không; người trả lời thật được nhận ra qua tiền tố «[Shop đã nhắn]»; hội thoại nguồn không đổi một byte; 0 đơn;
  *     một lượt mỗi lúc; người chỉ xem không chạy được; tổ chức khác không đọc được lượt.
  */
+import { CLAIM_SAFE_TEXT } from "@/lib/sales-chatbot/claim-guard";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { rmSync } from "node:fs";
@@ -184,13 +185,16 @@ export async function testSalesReplay() {
     assert.ok(!bySeq.get(1)!.flags.includes("PRICE_UNGROUNDED"), "giá bảng là có căn cứ");
     assert.ok(bySeq.get(1)!.flags.includes("HISTORY_HUMAN"));
     assert.equal(bySeq.get(3)!.historicalSpeaker, "BOT");
-    assert.ok(bySeq.get(3)!.flags.includes("PRICE_UNGROUNDED"), "45.000đ không phải phí ship đã khai (30.000đ)");
-    assert.deepEqual(bySeq.get(3)!.ungroundedAmounts, [45_000]);
+    // 45.000đ không phải phí ship đã khai (30.000đ): từ P0 authoritative-quote (11/10/2026) hàng rào số tiền của MÁY CHỦ chặn câu đó
+    // ngay trong lượt — câu tới khách (và vào bản phát lại) là câu an toàn, không còn con số bịa nào để cờ.
+    assert.equal(bySeq.get(3)!.aiReply, CLAIM_SAFE_TEXT.PRICE, "giá bịa bị máy chủ chặn trước khi tới khách");
+    assert.ok(!bySeq.get(3)!.flags.includes("PRICE_UNGROUNDED"));
+    assert.deepEqual(bySeq.get(3)!.ungroundedAmounts, []);
     assert.equal(bySeq.get(3)!.historyMessages, 2);
     assert.equal(bySeq.get(5)!.historicalSpeaker, "NONE");
     assert.equal(detail.run.summary?.points, 3);
     assert.equal(detail.run.summary?.priceUngroundedRate, null, "2 câu có tiền < 5 ⇒ chưa in tỷ lệ");
-    assert.equal(detail.run.summary?.flagCounts.PRICE_UNGROUNDED, 1);
+    assert.equal(detail.run.summary?.flagCounts.PRICE_UNGROUNDED ?? 0, 0, "câu giá bịa đã bị chặn ở máy chủ");
 
     // Tổ chức khác: không thấy lượt, không mở được bằng id.
     const other = await userOf(OTHER, "ADMIN");
@@ -199,7 +203,7 @@ export async function testSalesReplay() {
       assert.ok("ok" in list && list.runs.length === 0);
       assert.ok("error" in (await loadReplayRun(other, runId)), "id lượt của tổ chức khác ⇒ không có");
     });
-    console.log("  ✓ phát lại (tổ chức thật): nguồn đúng, chạy ở kênh THỬ rồi xoá, giá bịa bị cờ, 0 đơn, một lượt mỗi lúc, cô lập tổ chức");
+    console.log("  ✓ phát lại (tổ chức thật): nguồn đúng, chạy ở kênh THỬ rồi xoá, giá bịa bị máy chủ chặn, 0 đơn, một lượt mỗi lúc, cô lập tổ chức");
   } finally {
     setSalesChatProviderForTests(null);
     await cleanup();

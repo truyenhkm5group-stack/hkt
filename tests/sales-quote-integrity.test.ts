@@ -20,12 +20,12 @@ import { getDb, schema } from "@/db";
 import { agentPriceProblems } from "@/lib/commerce/pricing";
 import { createProductCore } from "@/lib/records/product-create";
 import { createOrderAsAgent } from "@/lib/records/order-create";
-import { CLAIM_HANDOFF_REASON, CLAIM_SAFE_TEXT, claimFactsLoader, claimVerdict, extractVndAmounts, guardClaims, guardOutgoing, orderValidityOf } from "@/lib/sales-chatbot/claim-guard";
+import { CLAIM_HANDOFF_REASON, CLAIM_SAFE_TEXT, claimFactsLoader, claimVerdict, detectPriceDispute, extractVndAmounts, guardClaims, guardOutgoing, orderValidityOf } from "@/lib/sales-chatbot/claim-guard";
 import type { CatalogItem } from "@/lib/sales-chatbot/catalog";
 import { DEFAULT_SALES_CHATBOT_CONFIG, SALES_CHATBOT_SETTING_KEY, parseSalesChatbotConfig, type SalesChatbotConfig } from "@/lib/sales-chatbot/config";
-import { verifiedGreeting } from "@/lib/sales-chatbot/engine";
+import { priceDisputePrompt, verifiedGreeting } from "@/lib/sales-chatbot/engine";
 import { classifyHandoffReason } from "@/lib/sales-chatbot/events-shared";
-import { buildQuote, catalogReferenceAmounts, computePriced, packChoiceMistake, pricingContextOf, referenceAmounts, type PricingConfig } from "@/lib/sales-chatbot/quote";
+import { buildQuote, catalogReferenceAmounts, computePriced, packChoiceMistake, packingIssues, packingRequestOf, pricingContextOf, referenceAmounts, type PricingConfig } from "@/lib/sales-chatbot/quote";
 import { quoteFactOf, quoteSnapshotOf } from "@/lib/sales-chatbot/quote-shared";
 import { renderQuickAnswer } from "@/lib/sales-chatbot/quick-replies";
 import type { ChatState } from "@/lib/sales-chatbot/tools";
@@ -402,14 +402,198 @@ async function testRuleOff() {
   assert.deepEqual([...seen].sort(), RULE_OFF_CASES.map((c) => c.key).sort());
 }
 
+// ═══ KHÁCH PHẢN ĐỐI GIÁ · ĐỔI SỐ LƯỢNG · ĐÓNG GÓI RIÊNG (BỔ SUNG 11/10 (5), ca «Chị Hoàn») ═══
+
+function testDisputePure() {
+  const q = { amounts: [280_000, 560_000, 30_000, 590_000], subtotal: 560_000, total: 590_000 };
+  assert.deepEqual(detectPriceDispute("2 ký giá 540đ chứ", q), { amounts: [540_000], phrase: true }, "«2 ký giá 540đ chứ» ⇒ phản đối, khách nói 540.000 ₫");
+  assert.deepEqual(detectPriceDispute("Sao lại 560k vậy em, tưởng 540k", q)?.amounts, [540_000]);
+  assert.deepEqual(detectPriceDispute("sao lại 560k", q), { amounts: [], phrase: true }, "phản đối đúng số đã báo, không nêu số khác ⇒ vẫn là phản đối");
+  assert.deepEqual(detectPriceDispute("em tính sai rồi", q), { amounts: [], phrase: true });
+  for (const ok of ["ok 560 nhé em", "giá bao nhiêu em", "ship bao nhiêu", "chị lấy 2kg", "chốt đơn nhé", "đúng rồi em"]) assert.equal(detectPriceDispute(ok, q), null, `không phải phản đối: «${ok}»`);
+  assert.equal(detectPriceDispute("2 ký giá 540đ chứ", null), null, "chưa có báo giá ⇒ không xét");
+
+  assert.ok(packingRequestOf("2kg đóng 2 gói riêng nhé em"));
+  assert.ok(packingRequestOf("chia 2 túi giúp chị"));
+  assert.ok(packingRequestOf("đóng riêng từng gói nha"));
+  assert.equal(packingRequestOf("lấy 2kg chả cá thu"), null);
+  // Tách gói có còn giá gói không: gói 2kg 540k vs 2 × 1kg 560k ⇒ quyết định của shop ⇒ vấn đề báo giá; luật bật và gói khớp ⇒ không.
+  const off = pricingContextOf([item("v1", "1kg", 280_000), item("v2", "2kg", 540_000)], cfgOf({ volumeDiscount: { ...RULE_ON, enabled: false } }), null);
+  assert.equal(packingIssues(computePriced([{ variantId: "v1", quantity: 2 }], off))[0]?.code, "PACK_PRICE_CONFLICT");
+  const on = pricingContextOf([item("v1", "1kg", 280_000), item("v2", "2kg", 540_000)], cfgOf(), null);
+  assert.deepEqual(packingIssues(computePriced([{ variantId: "v2", quantity: 1 }], on)), [], "luật bật: 2 × 1kg − 20k = gói 2kg ⇒ tách gói không đổi giá");
+  assert.deepEqual(packingIssues(computePriced([{ variantId: "v1", quantity: 1 }], off)), [], "1 gói 1kg ⇒ không có gói nào để so");
+
+  const snap = quoteSnapshotOf(buildQuote(computePriced([{ variantId: "v1", quantity: 2 }], on), on), new Date());
+  assert.equal(quoteFactOf(snap, { at: "", amounts: [540_000], quoteId: snap.id, turn: 3, open: true }).state, "DISPUTED", "khung đơn không được hiện «ĐÃ XÁC NHẬN» khi giá tranh chấp");
+  assert.equal(quoteFactOf(snap, { at: "", amounts: [540_000], quoteId: snap.id, turn: 3, open: false, requotedTurn: 3 }).state, "VERIFIED");
+  assert.match(priceDisputePrompt({ at: "", amounts: [540_000], quoteId: "q", turn: 1, open: true }), /PRICE_DISPUTED.*540\.000/);
+  assert.equal(priceDisputePrompt(undefined), "", "không tranh chấp ⇒ lời nhắc không đổi");
+  assert.equal(classifyHandoffReason(CLAIM_HANDOFF_REASON.PRICE_DISPUTED), "PRICE_STOCK_ANOMALY");
+}
+
+const HOAN = { name: "Chị Hoàn", phone: "0961234567" };
+
+/** Luật giảm TẮT, danh mục có gói 1kg 280k + gói 2kg 540k (hai SKU) — đúng dữ liệu hai ca 540 / 560. */
+const PACK_CASES: GoldenCase[] = [
+  {
+    key: "qi-phan-doi-co-can-cu",
+    title: "Khách phản đối «2 ký giá 540đ chứ» khi bot báo 2 × 1kg = 560k: 540k CÓ trong giá máy chủ (gói 2kg) ⇒ báo lại + xin xác nhận, không chốt cùng lượt; đơn mang cờ khách phản đối giá",
+    shop: "food",
+    channel: "WEB",
+    config: OFF,
+    turns: [
+      {
+        say: `lấy 1kg chả cá thu, ${HOAN.name} ${HOAN.phone}, ${GOOD_ADDRESS}`,
+        ai: [
+          () => [tool("create_customer", { name: HOAN.name, phone: HOAN.phone, address: GOOD_ADDRESS })],
+          ({ v }) => [tool("create_draft_order", { items: [{ variant_id: v("CCT-1KG"), quantity: 1 }] })],
+          () => [say("Tóm tắt: 1kg chả cá thu 280.000 ₫. Mình lấy thêm gì không, không thì em giao luôn ạ?")],
+        ],
+      },
+      { say: "cho chị 2 túi 1kg", ai: [({ v }) => [tool("update_draft_order", { items: [{ variant_id: v("CCT-1KG"), quantity: 2 }] })], () => [say("Dạ 2 túi 1kg là 560.000 ₫ ạ, chị xác nhận giúp em nhé?")]] },
+      {
+        say: "2 ký giá 540đ chứ",
+        ai: [
+          () => [tool("confirm_order", { customer_confirmation: "2 ký giá 540đ chứ" })],
+          ({ v }) => [tool("update_draft_order", { items: [{ variant_id: v("CCT-2KG"), quantity: 1 }] })],
+          () => [say("Dạ gói 2kg là 540.000 ₫ ạ, chị xác nhận giúp em nhé?")],
+        ],
+      },
+      { say: "ok em", ai: [() => [tool("confirm_order", { customer_confirmation: "ok em" })], () => [say(ORDER_TEXT)]] },
+    ],
+  },
+  {
+    key: "qi-dong-goi-rieng",
+    title: "Khách đòi 2kg đóng 2 gói riêng: gói 2kg 540k ≠ 2 × 1kg 560k — tách gói có giữ giá gói là quyết định của shop ⇒ chưa xác thực, không sửa đơn, chuyển người",
+    shop: "food",
+    channel: "WEB",
+    config: OFF,
+    turns: [
+      {
+        say: `lấy 1kg chả cá thu, Chị Lan 0967654321, ${GOOD_ADDRESS}`,
+        ai: [
+          () => [tool("create_customer", { name: "Chị Lan", phone: "0967654321", address: GOOD_ADDRESS })],
+          ({ v }) => [tool("create_draft_order", { items: [{ variant_id: v("CCT-1KG"), quantity: 1 }] })],
+          () => [say("Tóm tắt: 1kg chả cá thu 280.000 ₫. Mình lấy thêm gì không, không thì em giao luôn ạ?")],
+        ],
+      },
+      { say: "chị lấy 2kg, đóng 2 gói riêng nhé", ai: [({ v }) => [tool("update_draft_order", { items: [{ variant_id: v("CCT-1KG"), quantity: 2 }] })], () => [say("Dạ em kiểm lại giá chính xác và báo mình ngay ạ.")]] },
+    ],
+  },
+];
+
+/** Luật TẮT, chỉ gói 1kg (không gói 2kg) — số khách nói không có trong giá máy chủ ⇒ chuyển người ngay; đổi số lượng ⇒ xin xác nhận tổng mới. */
+const DISPUTE_UNKNOWN_CASES: GoldenCase[] = [
+  {
+    key: "qi-phan-doi-khong-can-cu",
+    title: "Khách nói «2kg 500k chứ» — 500k không có trong giá máy chủ ⇒ chuyển nhân viên ngay (PRICE_DISPUTED), model không chạy",
+    shop: "food",
+    channel: "WEB",
+    config: OFF,
+    turns: [
+      { say: "2kg chả cá thu bao nhiêu em", ai: [({ v }) => [tool("calculate_cart", { items: [{ variant_id: v("CCT-1KG"), quantity: 2 }] })], () => [say("Dạ 2kg chả cá thu 560.000 ₫ ạ.")]] },
+      { say: "2kg 500k chứ em", ai: [() => [say("Dạ vâng 500k ạ")]] },
+    ],
+  },
+  {
+    key: "qi-doi-so-luong",
+    title: "Khách đổi 1kg ⇒ 2kg rồi đòi chốt luôn: báo giá cũ hết hiệu lực, máy chủ chặn chốt cùng lượt, bot báo tổng mới 560k",
+    shop: "food",
+    channel: "WEB",
+    config: OFF,
+    turns: [
+      {
+        say: `lấy 1kg chả cá thu, Anh Tú 0971234567, ${GOOD_ADDRESS}`,
+        ai: [
+          () => [tool("create_customer", { name: "Anh Tú", phone: "0971234567", address: GOOD_ADDRESS })],
+          ({ v }) => [tool("create_draft_order", { items: [{ variant_id: v("CCT-1KG"), quantity: 1 }] })],
+          () => [say("Tóm tắt: 1kg chả cá thu 280.000 ₫. Mình lấy thêm gì không, không thì em giao luôn ạ?")],
+        ],
+      },
+      {
+        say: "đổi thành 2kg giúp anh, chốt luôn",
+        ai: [
+          ({ v }) => [tool("update_draft_order", { items: [{ variant_id: v("CCT-1KG"), quantity: 2 }] }), tool("confirm_order", { customer_confirmation: "chốt luôn" })],
+          () => [say("Dạ 2kg chả cá thu 560.000 ₫, ship 30.000 ₫, tổng 590.000 ₫ ạ. Anh xác nhận giúp em nhé?")],
+        ],
+      },
+    ],
+  },
+];
+
+async function testDisputeCases() {
+  const seen = new Set<string>();
+  await runGoldenCases(PACK_CASES, {
+    orgSuffix: "-qi3",
+    beforeCase: async (c, ctx) => {
+      if (!ctx.ids.has("CCT-1KG")) await seedCct(ctx, 280_000, 540_000);
+    },
+    afterCase: async (c, ctx, transcript) => {
+      seen.add(c.key);
+      const { row, state, order, items } = await orderOfConversation(ctx.conversationId);
+      if (c.key === "qi-phan-doi-co-can-cu") {
+        const t3 = transcript.turns[2];
+        assert.ok(t3.rounds.some((r) => /phản đối giá/i.test(JSON.stringify(r.results))), `lượt khách phản đối: confirm_order bị chặn — ${JSON.stringify(t3.rounds.map((r) => r.results))}`);
+        assert.deepEqual(t3.shown, ["Dạ gói 2kg là 540.000 ₫ ạ, chị xác nhận giúp em nhé?"], "báo lại đúng giá máy chủ (gói 2kg) + xin xác nhận");
+        assert.notEqual(t3.status, "HANDOFF", "540k có căn cứ trong giá máy chủ ⇒ không cần chuyển người");
+        assert.ok(order, "có đơn");
+        assert.equal(order.stage, "CONFIRMED", "khách xác nhận lại ở tin SAU ⇒ chốt");
+        assert.deepEqual(items.map((i) => [ctx.ids.get("CCT-2KG") === i.variantId, i.quantity, Number(i.unitPrice)]), [[true, 1, 540_000]], "đơn = gói 2kg 540k — đúng số khách đồng ý");
+        assert.equal(order.totalPriceAfterDiscount, 540_000);
+        const review = (order.raw as { review?: { entries: { code: string }[] } | null }).review;
+        assert.ok(review?.entries.some((e) => e.code === "PRICE_DISPUTED"), "đơn mang cờ «khách phản đối giá» — người kiểm giá");
+        assert.deepEqual(transcript.turns[3].shown, [CLAIM_SAFE_TEXT.ORDER_PENDING_CHECK], "đơn còn cờ phản đối giá ⇒ KHÔNG «đã lên đơn»");
+        assert.equal(state.priceDispute?.open, false);
+        assert.equal(quoteFactOf(state.quote, state.priceDispute).state, "VERIFIED");
+        return;
+      }
+      // qi-dong-goi-rieng
+      assert.equal(transcript.final.status, "HANDOFF", "chuyển người: shop quyết tách gói có giữ giá gói không");
+      assert.match(row.handoffReason ?? "", /PRICE_UNVERIFIED/);
+      assert.ok((state.quote?.reasons ?? []).some((r) => /đóng gói riêng/.test(r)), JSON.stringify(state.quote));
+      assert.ok(order && items.length === 1 && items[0].quantity === 1, "đơn nháp KHÔNG bị sửa thành 560k khi giá chưa xác thực");
+    },
+  });
+  await runGoldenCases(DISPUTE_UNKNOWN_CASES, {
+    orgSuffix: "-qi4",
+    beforeCase: async (c, ctx) => {
+      if (!ctx.ids.has("CCT-1KG")) await seedCct(ctx, 280_000, null);
+    },
+    afterCase: async (c, ctx, transcript) => {
+      seen.add(c.key);
+      const { row, state, order } = await orderOfConversation(ctx.conversationId);
+      if (c.key === "qi-phan-doi-khong-can-cu") {
+        assert.deepEqual(transcript.turns[1].shown, [CLAIM_SAFE_TEXT.PRICE_DISPUTE]);
+        assert.equal(transcript.turns[1].rounds.length, 0, "model không chạy — máy chủ chuyển người ngay");
+        assert.equal(transcript.final.status, "HANDOFF");
+        assert.match(row.handoffReason ?? "", /PRICE_DISPUTED/);
+        assert.equal(state.priceDispute?.open, true);
+        assert.equal(order, null, "đơn chưa tạo ⇒ không tạo");
+        return;
+      }
+      // qi-doi-so-luong
+      assert.ok(transcript.turns[1].rounds.some((r) => /tổng mới/i.test(JSON.stringify(r.results))), "chốt cùng lượt đổi số lượng bị chặn");
+      assert.ok(order && order.stage !== "CONFIRMED", "chưa chốt");
+      assert.equal(state.confirmed, undefined);
+      assert.equal(order.totalPriceAfterDiscount, 560_000, "đơn nháp cập nhật NGAY theo báo giá mới");
+      assert.notEqual(state.draft?.seenQuoteId, state.draft?.quote?.id, "báo giá cũ hết hiệu lực");
+      assert.deepEqual(transcript.turns[1].shown, ["Dạ 2kg chả cá thu 560.000 ₫, ship 30.000 ₫, tổng 590.000 ₫ ạ. Anh xác nhận giúp em nhé?"]);
+    },
+  });
+  assert.deepEqual([...seen].sort(), [...PACK_CASES, ...DISPUTE_UNKNOWN_CASES].map((c) => c.key).sort());
+}
+
 export async function testSalesQuoteIntegrity() {
   testExtract();
   testQuotePure();
   testVerdictPure();
+  testDisputePure();
   // Tiền đề của hai hội thoại địa chỉ: địa chỉ «tốt» ghép được xã / phường, địa chỉ «xấu» thì không.
   assert.ok(resolveRecipientPlace({ address: GOOD_ADDRESS, province: "" }).ward, `địa chỉ tốt phải ghép được xã: ${JSON.stringify(resolveRecipientPlace({ address: GOOD_ADDRESS, province: "" }))}`);
   assert.equal(resolveRecipientPlace({ address: BAD_ADDRESS, province: "" }).ward, "", "địa chỉ xấu không ghép được xã");
   await testRuleOn();
   await testRuleOff();
-  console.log("  ✓ báo giá máy chủ (quote.ts): một phép tính cho giỏ · đơn · lõi; 2kg = 2 × 1kg − giảm, cùng mã báo giá; catalog mâu thuẫn / thiếu khối lượng ⇒ chưa xác thực (tái hiện 540 / 560); số tiền trong chữ bot phải thuộc báo giá đã xác thực — 540k khi báo giá 560k bị chặn + PRICE_UNVERIFIED; câu mẫu / lời chào lệch giá bị chặn; giá chưa xác thực ⇒ không tạo đơn; đơn cần kiểm địa chỉ ⇒ «đã lên đơn» bị thay, không chuyển người; tổng đơn ≠ báo giá ⇒ lõi không ghi; mã + phiên bản giá lưu vào đơn");
+  await testDisputeCases();
+  console.log("  ✓ báo giá máy chủ (quote.ts): một phép tính cho giỏ · đơn · lõi; 2kg = 2 × 1kg − giảm, cùng mã báo giá; catalog mâu thuẫn / thiếu khối lượng ⇒ chưa xác thực (tái hiện 540 / 560); số tiền trong chữ bot phải thuộc báo giá đã xác thực — 540k khi báo giá 560k bị chặn + PRICE_UNVERIFIED; câu mẫu / lời chào lệch giá bị chặn; giá chưa xác thực ⇒ không tạo đơn; khách phản đối giá ⇒ có căn cứ thì báo lại + xin xác nhận, không thì chuyển người (PRICE_DISPUTED), đơn mang cờ; đổi số lượng ⇒ xin xác nhận tổng mới; đóng gói riêng đổi giá ⇒ shop quyết; đơn cần kiểm địa chỉ ⇒ «đã lên đơn» bị thay, không chuyển người; tổng đơn ≠ báo giá ⇒ lõi không ghi; mã + phiên bản giá lưu vào đơn");
 }

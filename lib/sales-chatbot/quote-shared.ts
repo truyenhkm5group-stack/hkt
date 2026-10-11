@@ -42,12 +42,23 @@ export function quoteSnapshotOf(q: Quote, at: Date): QuoteSnapshot {
   return { id: q.quoteId, priceVersion: q.priceVersion, verified: q.verified, subtotal: q.subtotal, total: q.total, amounts: q.amounts, reasons: q.unverifiedReasons.map((r) => r.detail), at: at.toISOString() };
 }
 
-/** Dữ kiện báo giá cho vòng đời: chưa báo · đã báo nhưng CHƯA xác thực · đã xác thực. HÀM THUẦN. */
-export type QuoteFact = { state: "NONE" | "QUOTED" | "VERIFIED"; quoteId: string | null; priceVersion: string | null; total: number | null; reasons: string[] };
+/**
+ * Khách PHẢN ĐỐI giá (PRICE_DISPUTED). `open` = chưa có báo giá mới nào sau lúc khách phản đối; `requotedTurn` = lượt máy chủ báo lại
+ * (khách phải xác nhận ở lượt SAU — chốt cùng lượt bị chặn). Lưu trong `state` hội thoại.
+ */
+export type PriceDisputeState = { at: string; amounts: number[]; quoteId: string; turn: number | null; open: boolean; requotedTurn?: number | null };
 
-export function quoteFactOf(snapshot: QuoteSnapshot | null | undefined): QuoteFact {
+/**
+ * Dữ kiện báo giá cho vòng đời: chưa báo · đã báo nhưng CHƯA xác thực · đã xác thực · khách đang PHẢN ĐỐI giá (khung đơn không được
+ * hiện «ĐÃ XÁC NHẬN» khi `DISPUTED`). HÀM THUẦN.
+ */
+export type QuoteFact = { state: "NONE" | "QUOTED" | "VERIFIED" | "DISPUTED"; quoteId: string | null; priceVersion: string | null; total: number | null; reasons: string[] };
+
+export function quoteFactOf(snapshot: QuoteSnapshot | null | undefined, dispute?: PriceDisputeState | null): QuoteFact {
   if (!snapshot || typeof snapshot.id !== "string") return { state: "NONE", quoteId: null, priceVersion: null, total: null, reasons: [] };
-  return { state: snapshot.verified ? "VERIFIED" : "QUOTED", quoteId: snapshot.id, priceVersion: snapshot.priceVersion ?? null, total: snapshot.total ?? null, reasons: Array.isArray(snapshot.reasons) ? snapshot.reasons : [] };
+  const reasons = Array.isArray(snapshot.reasons) ? snapshot.reasons : [];
+  const state = dispute?.open ? "DISPUTED" : snapshot.verified ? "VERIFIED" : "QUOTED";
+  return { state, quoteId: snapshot.id, priceVersion: snapshot.priceVersion ?? null, total: snapshot.total ?? null, reasons: dispute?.open ? [...reasons, "Khách phản đối giá"] : reasons };
 }
 
 /** Lý do chuyển người khi giá chưa xác thực — tiền tố «Giá / tồn bất thường» ⇒ `classifyHandoffReason` = PRICE_STOCK_ANOMALY. */

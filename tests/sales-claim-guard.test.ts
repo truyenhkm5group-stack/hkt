@@ -251,7 +251,8 @@ function testSourceScan() {
   for (const a of appends) assert.ok(allowed.has(a), `tin assistant ghi thẳng chưa khai: ${a}`);
   assert.equal(appends.length, 3, "ba chỗ ghi tin assistant: chữ model · câu giữ lại · câu an toàn");
   // (f) Mọi chữ hằng gửi qua `reply()` không mang khẳng định; đối số không phải hằng thì nằm trong danh sách đã biết.
-  const knownExpr = new Set(["cfg.handoff.message", "cfg.businessHours.outsideMessage", "EMPTY_REPLY_TEXT", "aiDownReply(cfg)", "pick.text", "safeText", "b.safe"]);
+  const knownExpr = new Set(["cfg.handoff.message", "cfg.businessHours.outsideMessage", "EMPTY_REPLY_TEXT", "aiDownReply(cfg)", "pick.text", "safeText", "b.safe", "CLAIM_SAFE_TEXT.PRICE_DISPUTE"]);
+  assert.deepEqual(detectClaims(CLAIM_SAFE_TEXT.PRICE_DISPUTE), [], "câu an toàn khi khách phản đối giá không mang khẳng định");
   for (const arg of replyArgs(core)) {
     if (/^["'`]/.test(arg)) {
       const literal = arg.slice(1, -1).replace(/\$\{[^}]*\}/g, " ");

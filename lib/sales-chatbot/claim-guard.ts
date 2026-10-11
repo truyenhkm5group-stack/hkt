@@ -56,6 +56,8 @@ export const CLAIM_SAFE_TEXT = {
   ORDER_PENDING_CHECK: "Dạ em đã ghi nhận đơn của mình, nhân viên sẽ kiểm tra và xác nhận lại đơn giúp mình ngay ạ.",
   /** Bot định nói một số tiền không khớp báo giá máy chủ đã xác thực. */
   PRICE: "Dạ em kiểm lại giá chính xác và báo mình ngay ạ.",
+  /** Khách phản đối giá mà máy chủ không xác minh được số khách nói ⇒ nhân viên kiểm. */
+  PRICE_DISPUTE: "Dạ em ghi nhận ý mình về giá, em chuyển nhân viên kiểm tra lại giá chính xác và báo mình ngay ạ.",
 } as const;
 
 /** Lý do chuyển người — tiền tố `classifyHandoffReason` đọc (events-shared.ts) để đếm theo nhóm. */
@@ -68,6 +70,7 @@ export const CLAIM_HANDOFF_REASON = {
   /** Đơn có nhưng chưa qua kiểm — KHÔNG chuyển người (đơn đã nằm trong hàng «Cần người kiểm»); chỉ ghi lý do vào nhật ký. */
   ORDER_PENDING: "AI định khẳng định đã lên đơn khi đơn còn cần kiểm (địa chỉ / giá / SĐT) — đã thay câu, đơn chờ nhân viên xác nhận",
   PRICE_UNVERIFIED: `${PRICE_UNVERIFIED_PREFIX}: AI định báo số tiền không khớp báo giá máy chủ đã xác thực — đã chặn câu, nhân viên xác minh giá`,
+  PRICE_DISPUTED: "Giá / tồn bất thường — PRICE_DISPUTED: khách phản đối giá đã báo, máy chủ không xác minh được số khách nói — nhân viên kiểm giá, KHÔNG chốt đơn",
 } as const;
 
 // ═══ PHẦN THUẦN ═══
@@ -228,6 +231,34 @@ export function extractVndAmounts(text: string): number[] {
   take(GROUPED_AMOUNT_RE, (m) => Number(m[2].replace(/[.,]/g, "")));
   take(PLAIN_CURRENCY_RE, (m) => Number(m[2]));
   return out;
+}
+
+/**
+ * Cụm khách PHẢN ĐỐI giá (đã bỏ dấu): «… chứ», «sao lại …», «tưởng …», «bảo là …», «tính sai / nhầm», «đắt thế», «không phải …».
+ * «chứ» chỉ tính khi đứng cuối mệnh đề (đuôi phản bác), không tính «chứ không» giữa câu.
+ */
+const DISPUTE_PHRASE_RE = /\b(?:sao lai|sao gia|sao tinh|tuong la|tuong gia|bao la|bao gia la|niem yet|dat the|dat vay|dat qua|nham|sai gia|sai tien|tinh sai|tinh nham|khong phai|ko phai|k phai|ma sao|tinh lai)\b|\bchu\s*(?:a|ah|ak|nhi|nha|em|shop|e|c|chi)?\s*[.!?]*\s*$/;
+/** Cụm hoàn toàn khẳng định sai giá — không cần số tiền để biết khách đang khiếu nại giá. */
+const DISPUTE_STRONG_RE = /\b(?:sai gia|sai tien|tinh sai|tinh nham|nham gia)\b/;
+
+export type PriceDispute = { amounts: number[]; phrase: boolean };
+
+/**
+ * Khách PHẢN ĐỐI giá đã báo (PRICE_DISPUTED — chủ shop 11/10/2026, ca «Chị Hoàn»: bot báo 560.000 ₫, khách «2 ký giá 540đ chứ», bot vẫn
+ * để đơn «ĐÃ XÁC NHẬN»). HÀM THUẦN. Chỉ xét khi hội thoại ĐÃ có báo giá. Phản đối = (a) khách nói số tiền KHÁC mọi số của báo giá gần nhất
+ * (hoặc nhắc lại chính số đã báo) kèm cụm phản bác, hoặc (b) cụm khẳng định sai giá («tính sai», «sai giá»). Khách hay gõ «540đ» / «540» cho 540.000 ₫ ⇒ số < 10.000
+ * nhân 1.000. Khách nói đúng số của báo giá («ok 560 nhé») hay chỉ hỏi chung («ship bao nhiêu») ⇒ không phải phản đối.
+ */
+export function detectPriceDispute(customerText: string, quote: { amounts: readonly number[]; total: number | null; subtotal: number } | null | undefined): PriceDispute | null {
+  if (!quote) return null;
+  const folded = foldClaim(customerText).trim();
+  const amounts = [...new Set(extractVndAmounts(customerText).map((n) => (n > 0 && n < 10_000 ? n * 1000 : n)).filter((n) => n > 0))];
+  const quoted = new Set<number>([...quote.amounts, quote.subtotal, ...(quote.total !== null ? [quote.total] : [])]);
+  const differs = amounts.filter((n) => !quoted.has(n));
+  const phrase = DISPUTE_PHRASE_RE.test(folded);
+  if (phrase && amounts.length) return { amounts: differs, phrase };
+  if (DISPUTE_STRONG_RE.test(folded)) return { amounts: differs, phrase: true };
+  return null;
 }
 
 /** Số tiền trong câu KHÔNG thuộc tập đã xác thực (0 luôn hợp lệ — «0 ₫», miễn ship). HÀM THUẦN. */

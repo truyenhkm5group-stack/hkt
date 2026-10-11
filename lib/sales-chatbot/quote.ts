@@ -264,6 +264,37 @@ export function packChoiceMistake(priced: Pick<Priced, "lines" | "packOptions">,
   return null;
 }
 
+/** Cụm khách yêu cầu ĐÓNG GÓI RIÊNG (đã bỏ dấu): «2 gói riêng», «chia 2 túi», «đóng riêng», «tách 2 gói», «mỗi túi 1kg». */
+const PACKING_RE = /\b(?:\d+\s*(?:goi|tui|bich|hop|phan)\s*rieng|chia\s*(?:lam\s*|ra\s*)?\d+\s*(?:goi|tui|bich|hop|phan)|dong\s*(?:goi\s*)?rieng|tach\s*(?:ra\s*)?(?:\d+\s*)?(?:goi|tui|bich|hop)|moi\s*(?:goi|tui|bich)\s*\d+(?:[.,]\d+)?\s*(?:kg|g|ky|ki|lang))\b/;
+
+/** Câu khách có yêu cầu đóng gói riêng không — trả NGUYÊN VĂN câu (cắt 200 ký tự) để ghi vào đơn, hoặc `null`. HÀM THUẦN. */
+export function packingRequestOf(customerText: string): string | null {
+  return PACKING_RE.test(foldVi(customerText)) ? customerText.trim().slice(0, 200) : null;
+}
+
+/**
+ * Đóng gói riêng có đổi giá không — HÀM THUẦN. Giỏ có một sản phẩm mà danh mục có GÓI đúng tổng khối lượng với giá KHÁC tiền giỏ đang
+ * tính (vd 2 × 1kg = 560k vs gói 2kg 540k) và khách đòi đóng riêng ⇒ «tách gói có còn giá gói không» là QUYẾT ĐỊNH CỦA SHOP; cấu hình
+ * chưa khai ⇒ báo giá CHƯA XÁC THỰC (`PACK_PRICE_CONFLICT`), không đoán.
+ */
+export function packingIssues(priced: Pick<Priced, "lines" | "packOptions">): QuoteIssue[] {
+  const out: QuoteIssue[] = [];
+  const byVariant = new Map(priced.packOptions.map((p) => [p.variantId, p]));
+  const groups = new Map<string, Priced["lines"]>();
+  for (const l of priced.lines) {
+    const pid = byVariant.get(l.variantId)?.productId;
+    if (pid) groups.set(pid, [...(groups.get(pid) ?? []), l]);
+  }
+  for (const [pid, g] of groups) {
+    if (g.some((l) => l.weightGrams == null)) continue;
+    const grams = g.reduce((s, l) => s + l.weightGrams! * l.quantity, 0);
+    const total = g.reduce((s, l) => s + l.lineTotal, 0);
+    const pack = priced.packOptions.find((p) => p.productId === pid && p.weightGrams === grams && !p.addOnOnly && p.price !== null && p.price > 0 && !(g.length === 1 && g[0].variantId === p.variantId && g[0].quantity === 1));
+    if (pack && pack.price !== total) out.push({ code: "PACK_PRICE_CONFLICT", detail: `Khách đòi đóng gói riêng: «${pack.name}» ${formatVND(pack.price)} ≠ tách gói ${formatVND(total)} — shop chưa khai tách gói có còn giá gói không` });
+  }
+  return out;
+}
+
 /** Giá ĐÃ XÁC THỰC của MỘT đơn vị từng mẫu mã (báo giá của giỏ [mẫu mã × 1]); chưa xác thực ⇒ `null` kèm lý do. HÀM THUẦN. */
 export function verifiedUnitPrices(variantIds: readonly string[], ctx: PricingContext): Map<string, { price: number | null; reason: string | null }> {
   const out = new Map<string, { price: number | null; reason: string | null }>();
