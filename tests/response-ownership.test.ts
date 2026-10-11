@@ -25,7 +25,7 @@ import { provisionOrganization } from "@/lib/platform/provision";
 import { FANPAGE_STAFF_REASON } from "@/lib/sales-chatbot/ai-hold-shared";
 import { DEFAULT_SALES_CHATBOT_CONFIG, SALES_CHATBOT_SETTING_KEY } from "@/lib/sales-chatbot/config";
 import { setConversationControlCore } from "@/lib/sales-chatbot/conversation-control";
-import { setSalesChatProviderForTests } from "@/lib/sales-chatbot/engine";
+import { setSalesChatProviderForTests, SHOP_SAID } from "@/lib/sales-chatbot/engine";
 import { META_SYSTEM_REASON, PAGE_REPLIED_REASON, PAGE_REPLY, processFanpageThread, receiveFanpageEvent, resumeFanpageAfterPause, STAFF_OUT_PREFIX, UNKNOWN_SENDER_REASON, type FanpageEvent } from "@/lib/sales-chatbot/fanpage";
 import { loadInboxThread } from "@/lib/sales-chatbot/inbox";
 import {
@@ -47,6 +47,7 @@ import {
   senderOfRow,
   STAFF_OUT_ID_PREFIX,
   latestTurnHandled,
+  latestWebTurnHandled,
   META_SYSTEM_TEXT_RE,
   META_SYSTEM_TEXT_SQL_RE,
   turnAnswered,
@@ -56,7 +57,7 @@ import {
   type LedgerMessage,
   type OutboundFacts,
 } from "@/lib/sales-chatbot/response-ownership";
-import { latestCustomerTurnUnhandledSql, latestTurnStateOf, loadRescueQueue, loadResponseOwnershipMetrics } from "@/lib/sales-chatbot/response-ownership-ledger";
+import { latestCustomerTurnUnhandledSql, latestTurnStateOf, loadRescueQueue, loadResponseOwnershipMetrics, WEB_STAFF_PREFIX } from "@/lib/sales-chatbot/response-ownership-ledger";
 
 const ORG = "tra-loi-dung-luot";
 const PAGE = "5544332211";
@@ -66,6 +67,7 @@ const MIN = 60_000;
 const GREETING = "CHẢ CÁ THU NGUYÊN CHẤT 100% - Chả cá đánh bắt tại Quảng Ninh gửi đường bay vào sg ạ";
 const META_NOTICE = "Bạn đang phản hồi bình luận của người dùng về bài viết trên Trang của mình. Xem bình luận.";
 const TPL_PARITY = "Dạ em chào anh/chị! Chả cá thu nguyên chất, 1kg giá 280k, 2kg còn 540k, em miễn ship toàn quốc ạ";
+const TPL_PARITY_LATER = "Dạ bên em giao hoả tốc nội thành trong 2 giờ, ngoại thành hôm sau ạ, chị cứ yên tâm nhé";
 const rowsOfPg = (r: unknown): Record<string, unknown>[] => (Array.isArray(r) ? r : ((r as { rows?: Record<string, unknown>[] }).rows ?? []));
 
 // ─────────────────────────── Phần thuần ───────────────────────────
@@ -206,6 +208,24 @@ function testPure() {
   assert.equal(unread([...P0, cust("c", T, { status: "PENDING" }), out("b", "AI_AGENT", T + 5_000)]), true, "câu bot chưa thấy tin (PENDING) ⇒ chưa xử lý");
   assert.equal(unread([...P0, cust("c", T)], T - MIN), true, "con trỏ đọc CŨ hơn tin khách ⇒ chưa xử lý");
   assert.equal(latestTurnHandled([...P0, cust("c", T)], { readThroughAt: T }).by, "HUMAN_READ");
+  // (a) MEDIA_ONLY: lượt của người (hàng đợi thấy), nhưng KHÔNG phải việc của AI.
+  assert.equal(unread([...P0, cust("c", T), out("b", "AI_AGENT", T + 5_000), cust("st", T + MIN, { mediaOnly: true })]), true, "nhãn dán sau câu bot ⇒ lượt mới, người phải thấy");
+  const mediaTurn = buildCustomerTurns([...P0, cust("st", T, { mediaOnly: true, status: "DONE", note: "MEDIA_ONLY" })]).at(-1)!;
+  assert.ok(!mediaTurn.answered && !mediaTurn.aiAnswerable, "lượt toàn nhãn dán: chưa xử lý, AI không trả lời");
+  const pausedMedia = [cust("pm", Date.now() - 5 * MIN, { mediaOnly: true, status: "DONE", note: "MEDIA_ONLY" })];
+  assert.deepEqual(resumeDecision({ owner: "AI_ACTIVE", turns: buildCustomerTurns(pausedMedia), ledger: pausedMedia, nowMs: Date.now(), pauseNotes: () => true }), { resume: false, reason: "MEDIA_ONLY" }, "hết nhường không gửi bù cho nhãn dán");
+  const mixed = [cust("q", Date.now() - 6 * MIN, { status: "SKIPPED", note: FANPAGE_STAFF_REASON }), cust("st2", Date.now() - 5 * MIN, { mediaOnly: true, status: "DONE", note: "MEDIA_ONLY" })];
+  const rm = resumeDecision({ owner: "AI_ACTIVE", turns: buildCustomerTurns(mixed), ledger: mixed, nowMs: Date.now(), pauseNotes: (n) => n === FANPAGE_STAFF_REASON });
+  assert.ok(rm.resume && rm.messageIds.join() === "q", `chữ + nhãn dán ⇒ mở lại phần chữ: ${JSON.stringify(rm)}`);
+  // (c) Chat web.
+  const web = (xs: [number, "user" | "assistant", boolean, number][], read: number | null = null) => latestWebTurnHandled(xs.map(([seq, role, hasText, at]) => ({ seq, role, hasText, at })), { readThroughAt: read });
+  assert.equal(web([[1, "user", true, T]]).handled, false);
+  assert.equal(web([[1, "user", true, T], [2, "assistant", true, T + 1]]).handled, true);
+  assert.equal(web([[1, "user", true, T], [2, "assistant", true, T + 1], [3, "user", true, T + 2]]).handled, false);
+  assert.equal(web([[1, "user", true, T], [2, "assistant", true, T + 1], [3, "user", false, T + 2]]).handled, true, "dòng kết quả công cụ không phải khách");
+  assert.equal(web([[1, "user", true, T]], T).by, "HUMAN_READ");
+  assert.equal(web([[2, "assistant", true, T]]).hasCustomer, false);
+  assert.equal(WEB_STAFF_PREFIX, SHOP_SAID, "bản sao chữ câu nhân viên chat web khớp engine.ts");
 
   // 10. Đếm + hàng đợi cứu đơn.
   const th = (id: string, ledger: LedgerMessage[], extra: Partial<Parameters<typeof rescueCandidates>[0][number]> = {}) => ({ conversationId: id, ledger, owner: "AI_ACTIVE" as const, ...extra });
@@ -472,9 +492,11 @@ async function testFlow() {
         const T0 = new Date(Date.now() - 3 * 60 * MIN).getTime();
         const at2 = (ms: number) => new Date(T0 + ms);
         type Row = { id: string; kind: "C" | "BOT" | "STAFF" | "PAGE"; at: number; src?: number | null; sender?: string | null; text?: string; status?: string; staff?: string };
-        const cases: { name: string; rows: Row[]; read?: number | null; expect: boolean }[] = [];
+        type WebRow = { seq: number; role: "user" | "assistant"; text?: string | null; at: number };
+        const cases: { name: string; rows: Row[]; read?: number | null; seen?: number | null; web?: WebRow[]; expect: boolean }[] = [];
         const prior: Row[] = [{ id: "p0", kind: "C", at: -60 * MIN }, { id: "pb", kind: "BOT", at: -60 * MIN + 5_000 }];
-        const add = (name: string, expect: boolean, rows: Row[], read: number | null = null) => cases.push({ name, rows, read, expect });
+        const add = (name: string, expect: boolean, rows: Row[], read: number | null = null, seen: number | null = null) => cases.push({ name, rows, read, seen, expect });
+        const addWeb = (name: string, expect: boolean, web: WebRow[], seen: number | null = null) => cases.push({ name, rows: [], web, seen, expect });
         add("customer", true, [...prior, { id: "c", kind: "C", at: 0 }]);
         add("ai-valid", false, [...prior, { id: "c", kind: "C", at: 0 }, { id: "b", kind: "BOT", at: 5_000 }]);
         add("staff-valid", false, [...prior, { id: "c", kind: "C", at: 0 }, { id: "s", kind: "STAFF", at: 5_000, staff: "SENT" }]);
@@ -500,14 +522,34 @@ async function testFlow() {
         add("other-app-ambiguous", true, [...prior, { id: "c", kind: "C", at: 0 }, { id: "oa", kind: "PAGE", at: 5_000, sender: "OTHER_APP" }]);
         add("verified-source-before", true, [...prior, { id: "c", kind: "C", at: 0, src: 0 }, { id: "v", kind: "PAGE", at: 90_000, src: -1_000, sender: "VERIFIED_HUMAN" }]);
         add("meta-system", true, [...prior, { id: "c", kind: "C", at: 0 }, { id: "ms", kind: "PAGE", at: 5 * MIN, sender: "META_SYSTEM" }]);
-        add("media-only-not-turn", false, [...prior, { id: "c", kind: "C", at: 0 }, { id: "b", kind: "BOT", at: 5_000 }, { id: "st", kind: "C", at: MIN, status: "DONE", text: "" }]);
+        // (a) Nhãn dán / ghi âm (MEDIA_ONLY) LÀ lượt khách với hàng đợi người — «không bỏ sót khách».
+        add("media-after-ai", true, [...prior, { id: "c", kind: "C", at: 0 }, { id: "b", kind: "BOT", at: 5_000 }, { id: "st", kind: "C", at: MIN, status: "DONE", text: "" }]);
+        add("media-only", true, [{ id: "st", kind: "C", at: 0, status: "DONE", text: "" }]);
+        add("media-then-staff", false, [...prior, { id: "st", kind: "C", at: 0, status: "DONE", text: "" }, { id: "s", kind: "STAFF", at: 5_000, staff: "SENT" }]);
+        // (b) Mốc mở cấp cửa hàng cũ `staff_seen_at` là bằng chứng người mở.
+        add("staff-seen-after", false, [...prior, { id: "c", kind: "C", at: 0 }], null, MIN);
+        add("staff-seen-before", true, [...prior, { id: "c", kind: "C", at: 0 }], null, -MIN);
+        // Tin mẫu dòng cũ: cửa sổ NEO theo mốc của chính dòng — câu giống hệt nhưng chỉ xuất hiện ở hội thoại khác SAU nó ⇒ chưa là mẫu.
+        add("legacy-template-later-seed", false, [...prior, { id: "c", kind: "C", at: 0 }, { id: "lt2", kind: "PAGE", at: 5 * MIN, sender: null, text: TPL_PARITY_LATER }]);
+        // (c) Chat web: dòng `user` có chữ là lượt khách; `assistant` có chữ sau nó / người mở là xử lý; dòng kết quả công cụ không phải khách.
+        addWeb("web-customer", true, [{ seq: 1, role: "user", text: "Shop ơi", at: 0 }]);
+        addWeb("web-replied", false, [{ seq: 1, role: "user", text: "Shop ơi", at: 0 }, { seq: 2, role: "assistant", text: "Dạ em đây", at: 5_000 }]);
+        addWeb("web-replied-new", true, [{ seq: 1, role: "user", text: "Shop ơi", at: 0 }, { seq: 2, role: "assistant", text: "Dạ em đây", at: 5_000 }, { seq: 3, role: "user", text: "Giá sao em", at: MIN }]);
+        addWeb("web-tool-row", false, [{ seq: 1, role: "user", text: "Shop ơi", at: 0 }, { seq: 2, role: "assistant", text: "Dạ em đây", at: 5_000 }, { seq: 3, role: "user", text: null, at: 6_000 }]);
+        addWeb("web-staff-seen", false, [{ seq: 1, role: "user", text: "Shop ơi", at: 0 }], MIN);
+        addWeb("web-staff-reply", false, [{ seq: 1, role: "user", text: "Shop ơi", at: 0 }, { seq: 2, role: "assistant", text: "[Shop đã nhắn] Dạ chị đợi em", at: 5_000 }]);
         // Tin mẫu cũ: cùng khoá ở một hội thoại KHÁC trong 7 ngày.
-        await db.insert(t).values({ pageId: PAGE, threadId: "u-tpl-other", messageId: "u-tpl-other.p", text: TPL_PARITY, status: "DONE", processedAt: new Date(), note: PAGE_REPLY });
+        await db.insert(t).values({ pageId: PAGE, threadId: "u-tpl-other", messageId: "u-tpl-other.p", text: TPL_PARITY, status: "DONE", processedAt: at2(-10 * MIN), createdAt: at2(-10 * MIN), note: PAGE_REPLY });
+        await db.insert(t).values({ pageId: PAGE, threadId: "u-tpl-other", messageId: "u-tpl-other.later", text: TPL_PARITY_LATER, status: "DONE", processedAt: at2(20 * MIN), createdAt: at2(20 * MIN), note: PAGE_REPLY });
         const ids: string[] = [];
         for (const k of cases) {
           const thread = `u-${k.name}`;
-          const [conv] = await db.insert(cv).values({ channel: "FANPAGE", pageId: PAGE, threadId: thread, visitorKey: `vk-${thread}` }).returning({ id: cv.id });
+          const [conv] = await db
+            .insert(cv)
+            .values(k.web ? { channel: "WEB", visitorKey: `vk-${thread}`, ...(k.seen != null ? { staffSeenAt: at2(k.seen) } : {}) } : { channel: "FANPAGE", pageId: PAGE, threadId: thread, visitorKey: `vk-${thread}`, ...(k.seen != null ? { staffSeenAt: at2(k.seen) } : {}) })
+            .returning({ id: cv.id });
           ids.push(conv.id);
+          for (const w of k.web ?? []) await db.insert(schema.salesChatMessages).values({ conversationId: conv.id, seq: w.seq, role: w.role, content: w.text === null ? [{ type: "tool_result", toolUseId: "x", content: "{}" }] : [{ type: "text", text: w.text ?? "" }], createdAt: at2(w.at) });
           for (const r of k.rows) {
             const mid = `${thread}.${r.id}`;
             const base = { pageId: PAGE, threadId: thread, createdAt: at2(r.at), sourceAt: r.src === undefined || r.src === null ? null : at2(r.src), processedAt: at2(r.at) };
@@ -521,10 +563,11 @@ async function testFlow() {
           if (k.read !== null && k.read !== undefined) await db.insert(schema.salesChatReads).values({ conversationId: conv.id, userId: admin.id, readThroughAt: at2(k.read) });
         }
         const nowP = new Date();
-        const sqlRows = await db.select({ id: cv.id, unread: latestCustomerTurnUnhandledSql(nowP) }).from(cv).where(inArray(cv.id, ids));
+        const sqlRows = await db.select({ id: cv.id, unread: latestCustomerTurnUnhandledSql() }).from(cv).where(inArray(cv.id, ids));
         const sqlOf = new Map(sqlRows.map((r) => [r.id, Boolean(r.unread)]));
         for (const [i, k] of cases.entries()) {
-          const ts = await latestTurnStateOf(ids[i], PAGE, `u-${k.name}`, nowP);
+          const ts = await latestTurnStateOf(ids[i], nowP);
+          assert.ok(ts, k.name);
           assert.equal(!ts.handled, k.expect, `TS «${k.name}»: ${JSON.stringify(ts)}`);
           assert.equal(sqlOf.get(ids[i]), k.expect, `SQL «${k.name}» phải bằng TS`);
         }

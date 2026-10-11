@@ -177,6 +177,11 @@ export type LedgerMessage = {
   sourceSeq?: number | null;
   /** Tin khách: câu mẫu quảng cáo (`CUSTOMER_TEMPLATE_MIN_THREADS`). */
   template?: boolean;
+  /**
+   * Tin khách KHÔNG có chữ mà AI đọc được (nhãn dán · ghi âm · video — ghi chú MEDIA_ONLY). Vẫn là một LƯỢT KHÁCH với hàng đợi người
+   * (mở / kéo dài lượt — «không bỏ sót khách»), nhưng lượt chỉ gồm tin như vậy KHÔNG để AI trả lời (`CustomerTurn.aiAnswerable`).
+   */
+  mediaOnly?: boolean;
   /** Trạng thái / ghi chú của dòng tin khách (PENDING · DONE · SKIPPED · DEAD). */
   status?: string | null;
   note?: string | null;
@@ -191,6 +196,8 @@ export type CustomerTurn = {
   lastMessageId: string;
   /** Mọi tin của lượt đều là câu mẫu quảng cáo. */
   allTemplate: boolean;
+  /** Lượt có ít nhất một tin AI đọc được (không chỉ nhãn dán / ghi âm). `false` ⇒ việc của người, AI không trả lời / không gửi bù. */
+  aiAnswerable: boolean;
   answered: boolean;
   answeredBy: { id: string; origin: OutboundOrigin; at: number } | null;
 };
@@ -271,6 +278,7 @@ export function buildCustomerTurns(ms: readonly LedgerMessage[], opts: { handled
       lastAt: keyOf(msgs[msgs.length - 1]),
       lastMessageId: msgs[msgs.length - 1].id,
       allTemplate: msgs.every((m) => m.template === true),
+      aiAnswerable: msgs.some((m) => !m.mediaOnly),
       answered: by !== null,
       answeredBy: by,
     });
@@ -313,7 +321,9 @@ export function buildCustomerTurns(ms: readonly LedgerMessage[], opts: { handled
  *  (1) câu bot đã gửi (dòng `BOT_SENT` — dòng ghi sẵn bị XOÁ khi gửi hỏng) mà bot đã THẤY tin khách đó (không còn PENDING);
  *  (2) câu nhân viên hợp lệ: hộp thư ERP (`staff-out:` — tin nhân viên chưa `SENT` không tính) hoặc người đã xác minh phía page;
  *  (3) câu phía page hợp lệ: ứng dụng khác / chưa rõ người gửi (không phải tin chào đầu phiên), chắc chắn tạo sau (`definitelyAfter`);
- *  (4) một NGƯỜI mở / đọc tường minh lượt đó — con trỏ đọc của BẤT KỲ người dùng (`sales_chat_reads.read_through_at`) ≥ tin khách cuối.
+ *  (4) một NGƯỜI mở / đọc tường minh lượt đó — con trỏ đọc của BẤT KỲ người dùng (`sales_chat_reads.read_through_at`), hoặc mốc mở
+ *      cấp cửa hàng cũ `staff_seen_at` (trước con trỏ V3 10/10 — bằng chứng người mở), ≥ tin khách cuối.
+ * Tin khách MEDIA_ONLY (nhãn dán / ghi âm) LÀ một lượt khách ở đây (người phải thấy) — chỉ đường AI mới không trả lời lượt toàn media.
  * Tin tự động của page (kể cả trả lời câu mẫu quảng cáo) và chữ hệ thống KHÔNG BAO GIỜ là xử lý — khác đường quyết định của AI (ở đó
  * tin tự động trả lời lượt TOÀN câu mẫu để bot không báo giá đôi), vì hàng đợi của NGƯỜI phải thấy khách mà chưa NGƯỜI / AI nào đáp.
  * Không có tin khách nào ⇒ không có gì chưa xử lý. Dùng chung `effectiveOrigins` · `answers` · `definitelyAfter` với đường quyết định.
@@ -347,6 +357,27 @@ export function latestTurnHandled(ledger: readonly LedgerMessage[], opts: { read
   }
   const h = opts.readThroughAt ?? null;
   if (h !== null && c.arrivedAt <= h) return { ...base, handled: true, by: "HUMAN_READ" };
+  return { ...base, handled: false, by: null };
+}
+
+/**
+ * CHAT WEB (không có sổ tin thô — lịch sử hội thoại chính là thứ khách thấy): lượt khách = dòng `user` CÓ khối chữ (dòng kết quả công
+ * cụ cũng mang vai `user` — không phải khách); xử lý = dòng `assistant` có khối chữ đứng SAU nó theo `seq` (bot / «[Shop đã nhắn]» của
+ * nhân viên — chat web không có đường gửi hỏng: câu đã ghi là câu khách thấy khi mở lại khung chat), hoặc người mở / đọc tường minh.
+ * Cùng hợp đồng `LatestTurnState` với kênh nhắn tin; bản SQL cùng tệp ledger. HÀM THUẦN.
+ */
+export type WebMessage = { seq: number; role: "user" | "assistant"; hasText: boolean; at: number; staff?: boolean };
+
+export function latestWebTurnHandled(msgs: readonly WebMessage[], opts: { readThroughAt?: number | null } = {}): LatestTurnState {
+  const users = msgs.filter((m) => m.role === "user" && m.hasText);
+  if (!users.length) return { hasCustomer: false, handled: true, by: null, turnId: null, lastCustomerId: null, lastCustomerAt: null };
+  const last = users.reduce((a, b) => (b.seq > a.seq ? b : a));
+  const firstOfTurn = [...users].filter((u) => u.seq <= last.seq && !msgs.some((m) => m.role === "assistant" && m.hasText && m.seq > u.seq && m.seq < last.seq)).reduce((a, b) => (b.seq < a.seq ? b : a), last);
+  const base = { hasCustomer: true, turnId: turnIdOf(`web:${firstOfTurn.seq}`), lastCustomerId: `web:${last.seq}`, lastCustomerAt: last.at };
+  const reply = msgs.filter((m) => m.role === "assistant" && m.hasText && m.seq > last.seq).sort((a, b) => a.seq - b.seq)[0];
+  if (reply) return { ...base, handled: true, by: reply.staff ? "VERIFIED_HUMAN" : "AI_AGENT" };
+  const h = opts.readThroughAt ?? null;
+  if (h !== null && last.at <= h) return { ...base, handled: true, by: "HUMAN_READ" };
   return { ...base, handled: false, by: null };
 }
 
@@ -484,7 +515,7 @@ export function turnTraceNote(i: { answered: boolean; isOpenTurn: boolean; code:
 
 // ─────────────────────────── 4. Hết nhường ⇒ đánh giá lại tồn ───────────────────────────
 
-export type ResumeVerdict = { resume: true; turnId: string; messageIds: string[] } | { resume: false; reason: "NOT_AI" | "NO_OPEN_TURN" | "IN_FLIGHT" | "NOT_PAUSED" | "STALE" };
+export type ResumeVerdict = { resume: true; turnId: string; messageIds: string[] } | { resume: false; reason: "NOT_AI" | "NO_OPEN_TURN" | "MEDIA_ONLY" | "IN_FLIGHT" | "NOT_PAUSED" | "STALE" };
 
 /**
  * Hội thoại vừa về tay AI (hết nhường / trả lại): lượt khách MỚI NHẤT chưa ai trả lời, mọi tin của nó bị chốt bởi một lý do nhường /
@@ -494,11 +525,13 @@ export function resumeDecision(i: { owner: ResponseOwnerState; turns: readonly C
   if (i.owner !== "AI_ACTIVE") return { resume: false, reason: "NOT_AI" };
   const t = openTurnOf(i.turns);
   if (!t) return { resume: false, reason: "NO_OPEN_TURN" };
-  const rows = t.messageIds.map((id) => i.ledger.find((m) => m.id === id));
+  // Nhãn dán / ghi âm trong lượt: không phải việc của AI, không cần mở lại — chỉ xét các tin AI đọc được.
+  const rows = t.messageIds.map((id) => i.ledger.find((m) => m.id === id)).filter((r) => !r?.mediaOnly);
+  if (!t.aiAnswerable || !rows.length) return { resume: false, reason: "MEDIA_ONLY" };
   if (rows.some((r) => r?.status === "PENDING")) return { resume: false, reason: "IN_FLIGHT" };
   if (!rows.every((r) => r && r.status === "SKIPPED" && i.pauseNotes(r.note ?? null))) return { resume: false, reason: "NOT_PAUSED" };
   if (i.nowMs - t.lastAt > (i.maxAgeMs ?? RESUME_MAX_TURN_AGE_MS)) return { resume: false, reason: "STALE" };
-  return { resume: true, turnId: t.id, messageIds: t.messageIds };
+  return { resume: true, turnId: t.id, messageIds: rows.map((r) => r!.id) };
 }
 
 // ─────────────────────────── 5. Ý định mua ───────────────────────────
@@ -636,7 +669,7 @@ export function rescueCandidates(threads: readonly OwnershipThread[], nowMs: num
     if (th.optedOut) continue;
     const t = openTurnOf(buildCustomerTurns(th.ledger));
     if (!t) continue;
-    const rows = t.messageIds.map((id) => th.ledger.find((m) => m.id === id)).filter((m): m is LedgerMessage => Boolean(m));
+    const rows = t.messageIds.map((id) => th.ledger.find((m) => m.id === id)).filter((m): m is LedgerMessage => Boolean(m) && !m?.mediaOnly);
     if (!rows.length || rows.some((r) => r.status === "PENDING" || r.status === "DONE")) continue;
     const hit = rows.map((r) => purchaseIntent(r.text ?? "")).find((x) => x.intent);
     if (!hit?.kind) continue;
