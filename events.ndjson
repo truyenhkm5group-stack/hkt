@@ -2124,3 +2124,4 @@
 {"at":"2026-10-11T10:39:03.429Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"authoritative-quote","detail":"fix/authoritative-quote @ 3f29d35c19d6 · 1 lệnh kiểm thử"}
 {"at":"2026-10-11T10:39:21.460Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#807 @ 3f29d35c19d6 · Nguyên nhân gốc xác định đúng tệp:dòng (if(!books) + booksForChat luôn trả book khi bật sỉ); sửa theo nguồn giá dòng, không giảm hai lần; một computePriced cho mọi đường; bài kiểm có tổ chức thật sỉ+giảm cùng bật. P0 TUYỆT ĐỐI — gộp trước mọi PR"}
 {"at":"2026-10-11T10:41:55.439Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"authoritative-quote","detail":"fix/authoritative-quote @ 9342f3a81266 · 1 lệnh kiểm thử"}
+{"at":"2026-10-11T10:42:13.505Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#807 @ 9342f3a81266 · Chỉ commit gộp main (#801); danh sách ops giải hợp"}

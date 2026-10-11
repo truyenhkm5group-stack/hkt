@@ -1,8 +1,8 @@
 {
   "pr": 807,
-  "sha": "3f29d35c19d6360ef857e8622149ccc78b2c8478",
+  "sha": "9342f3a8126623c5b7aff2477f43267d5c4480c6",
   "verdict": "PASS",
   "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
-  "at": "2026-10-11T10:39:07.628Z",
-  "note": "Nguyên nhân gốc xác định đúng tệp:dòng (if(!books) + booksForChat luôn trả book khi bật sỉ); sửa theo nguồn giá dòng, không giảm hai lần; một computePriced cho mọi đường; bài kiểm có tổ chức thật sỉ+giảm cùng bật. P0 TUYỆT ĐỐI — gộp trước mọi PR"
+  "at": "2026-10-11T10:41:59.062Z",
+  "note": "Chỉ commit gộp main (#801); danh sách ops giải hợp"
 }
