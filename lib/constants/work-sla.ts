@@ -130,6 +130,16 @@ const SOURCE_RULES: SlaRule[] = [
     department: "SALES",
     alsoShownOn: "CSKH & tin nhắn",
   },
+  {
+    // P0 11/10/2026: LẤY LẠI hạn của case CSKH (luật 22) — chưa có hằng số hạn riêng nào cho hội thoại chatbot chờ người, và
+    // gõ một con số mới ở đây là quyết thay chủ shop. Đặt riêng được bằng khoá này ở `work.sla`.
+    key: "SALES_CHAT_HANDOFF",
+    label: "Hội thoại AI bán hàng chờ người (AI đã dừng trả lời)",
+    hours: WORK_SOURCE_SPEC.SALES_CHAT_HANDOFF.slaHours,
+    why: ALERT_SLA_WHY.CS_CASE,
+    department: WORK_SOURCE_SPEC.SALES_CHAT_HANDOFF.department,
+    alsoShownOn: "Hộp thư AI bán hàng",
+  },
 
   {
     key: "ORDER_DUPLICATE",

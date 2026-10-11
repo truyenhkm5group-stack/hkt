@@ -512,7 +512,7 @@ async function testBotSignals(variantId: string) {
       const vk = visitorKeyOf(`ops-sig-don-hong-${Date.now()}`);
       const w = await openConversation("WEB", { visitorKey: vk });
       convWrite = w.id;
-      // Hội thoại TỪNG chuyển người một lần (khoá chung `sales-chat:handoff:<hội thoại>` đã chiếm) — lỗi ghi đơn vẫn phải ra chuông mới.
+      // Hội thoại TỪNG chuyển người một lần, mang khoá chung VĨNH VIỄN `sales-chat:handoff:<hội thoại>` của bản trước #800 (dòng cũ còn trên production; đường ghi nay khoá theo ĐỢT) — lỗi ghi đơn vẫn phải ra chuông mới.
       await db.insert(schema.notifications).values({ kind: "SYSTEM", severity: "warning", title: "Chatbot chuyển khách cho nhân viên", body: "Khách xin gặp nhân viên", href: "/ai/sales-chatbot/inbox", entityType: "SALES_CHAT", entityId: w.id, dedupeKey: `sales-chat:handoff:${w.id}`, occurredAt: new Date() });
       const r = await chatTurn(w.id, `Cho em 1 gói, ${SECRET_PHONE}, 12 Hàng Bạc Hà Nội`, { channel: "WEB", visitorKey: vk });
       assert.ok(r.ok, r.ok ? "" : r.error);

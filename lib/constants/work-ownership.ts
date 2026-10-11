@@ -48,6 +48,7 @@ export type OwnershipRule = {
 
 const SOURCE_OWNERSHIP_WHY: Record<WorkSource, string> = {
   CS_CASE: "Khách nhắn tin là khâu chốt đơn — người trả lời chính là người bán.",
+  SALES_CHAT_HANDOFF: "AI bán hàng đã nhường hội thoại cho người: người bán trả lời tiếp, cùng phòng với case CSKH (nhóm việc CS).",
   SHIPMENT_CARE: "Làm việc với Viettel Post về một kiện đang mắc là nghề của giao vận, không phải của người chốt đơn.",
   RETURN_INSPECTION: "Chỉ người mở kiện và đếm hàng mới lập được phiếu tái nhập — hàng hoàn không tự vào tồn.",
   RETURN_DISPOSITION: "Món hỏng / bẩn / sai hàng nằm trên kệ kho; người cầm nó mới đưa đi sửa, đếm lại để nhập, hay lập biên bản huỷ.",

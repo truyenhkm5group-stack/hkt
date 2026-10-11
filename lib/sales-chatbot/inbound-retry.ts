@@ -18,6 +18,7 @@
 import { and, eq, gte, inArray, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { rowsOf } from "@/lib/sql-rows";
+import { HANDOFF_QUEUE_CLEAR } from "@/lib/sales-chatbot/handoff-routing-shared";
 
 /** Số lượt xử lý tối đa của MỘT tin khách (lượt đầu + thử lại). */
 export const INBOUND_MAX_ATTEMPTS = 3;
@@ -177,7 +178,7 @@ export async function requeueAiDownDeadLetters(aiDownReason: string, providerRec
       // Mở lại ĐÚNG hội thoại đang ở lý do AI hỏng (điều kiện trong câu ghi — người vừa nhận thì câu này không chạm gì).
       const reopened = await db
         .update(c)
-        .set({ status: "OPEN", handoffReason: null, state: sql`${c.state} - 'handoff'`, humanCooldownUntil: null, updatedAt: now })
+        .set({ status: "OPEN", handoffReason: null, state: sql`${c.state} - 'handoff'`, humanCooldownUntil: null, ...HANDOFF_QUEUE_CLEAR, updatedAt: now })
         .where(and(eq(c.id, r.conv_id), eq(c.status, "HANDOFF"), eq(c.handoffReason, aiDownReason)))
         .returning({ id: c.id });
       if (!reopened.length) {
