@@ -1,0 +1,8 @@
+{
+  "pr": 806,
+  "sha": "ee8e5fb4df2f1f5733d69b98810b22c4f88a11dc",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-11T06:12:22.561Z",
+  "note": "Sửa đúng nguyên nhân đã đo; không nới kiểm content-type/host/token"
+}

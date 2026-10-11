@@ -2034,3 +2034,4 @@
 {"at":"2026-10-11T06:11:23.659Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"OVERLAP_ACCEPTED","mission":"avatar-accept-header","detail":"OVERLAP_ACCEPTED với pancake-replacement: phạm vi lib/sales-chatbot/avatar-proxy.ts ↔ lib/sales-chatbot/ — cách tích hợp: tiếp avatar-pancake-endpoint"}
 {"at":"2026-10-11T06:11:41.348Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"avatar-accept-header","detail":"fix/avatar-accept-header @ ee8e5fb4df2f · 1 lệnh kiểm thử"}
 {"at":"2026-10-11T06:12:17.544Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"avatar-accept-header","detail":"#806 cho fix/avatar-accept-header @ ee8e5fb4df2f"}
+{"at":"2026-10-11T06:12:38.296Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#806 @ ee8e5fb4df2f · Sửa đúng nguyên nhân đã đo; không nới kiểm content-type/host/token"}
