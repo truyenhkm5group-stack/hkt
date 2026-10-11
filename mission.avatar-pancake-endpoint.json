@@ -25,8 +25,8 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-11T01:20:15.710Z",
-  "updated_at": "2026-10-11T03:46:10.494Z",
-  "last_heartbeat": "2026-10-11T03:46:10.494Z",
+  "updated_at": "2026-10-11T06:03:45.459Z",
+  "last_heartbeat": "2026-10-11T06:03:45.459Z",
   "definition_of_done": [],
   "evidence": {
     "merged": "#796 → e3dbd71b9faf25e7fe716585746f50c9f060b2f3"
