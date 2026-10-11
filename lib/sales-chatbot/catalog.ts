@@ -11,7 +11,7 @@
  * Sản phẩm / mẫu mã đã gỡ hoặc đang ẩn (`is_hidden` = thôi bán) không hiện với bot.
  */
 import { and, asc, eq, inArray } from "drizzle-orm";
-import { getDb, schema } from "@/db";
+import { getDb, schema, type Db } from "@/db";
 import { loadCustomDefs } from "@/lib/metadata/common";
 import { availableStockExpr, erpStockExpr, stockKnownExpr, variantReceiptsSubquery, variantSalesSubquery } from "@/lib/queries/stock";
 import { foldVi } from "@/lib/sales-chatbot/text";
@@ -40,10 +40,10 @@ function variantText(v: { detail: string; color: string; size: string }): string
   return v.detail.trim() || [v.color, v.size].filter((x) => x.trim()).join(" · ");
 }
 
-async function productFieldValues(productIds: string[], allowed: readonly string[]): Promise<Map<string, Record<string, string>>> {
+async function productFieldValues(productIds: string[], allowed: readonly string[], dbIn?: Db): Promise<Map<string, Record<string, string>>> {
   const out = new Map<string, Record<string, string>>();
   if (productIds.length === 0 || allowed.length === 0) return out;
-  const db = await getDb();
+  const db = dbIn ?? (await getDb());
   const rows = await db
     .select({ recordId: schema.customValues.recordId, values: schema.customValues.values })
     .from(schema.customValues)
@@ -64,8 +64,9 @@ async function productFieldValues(productIds: string[], allowed: readonly string
  * Mọi mẫu mã ĐANG BÁN của tổ chức (trần 2.000) kèm field cho phép. `only` = chỉ những mã này (vẫn đúng luật «đang bán» + cách
  * đọc giá ở trên) — ô soạn hộp thư đọc ĐÍCH DANH một mẫu mã lúc bấm thay vì đọc cả danh mục.
  */
-export async function sellableCatalog(allowedFields: readonly string[], only?: readonly string[]): Promise<CatalogItem[]> {
-  const db = await getDb();
+export async function sellableCatalog(allowedFields: readonly string[], only?: readonly string[], dbIn?: Db): Promise<CatalogItem[]> {
+  // `dbIn` — CSDL tổ chức mở tường minh (ops chỉ đọc, `getDbForInspection`); vắng ⇒ CSDL của ngữ cảnh hiện tại như mọi nơi khác.
+  const db = dbIn ?? (await getDb());
   const pv = schema.productVariants;
   const p = schema.products;
   const rows = await db
@@ -75,7 +76,7 @@ export async function sellableCatalog(allowedFields: readonly string[], only?: r
     .where(and(eq(pv.isRemoved, false), eq(pv.isHidden, false), eq(p.isRemoved, false), only ? inArray(pv.id, [...only]) : undefined))
     .orderBy(asc(p.name), asc(pv.sku))
     .limit(MAX_ITEMS);
-  const fields = await productFieldValues([...new Set(rows.map((r) => r.productId))], allowedFields);
+  const fields = await productFieldValues([...new Set(rows.map((r) => r.productId))], allowedFields, db);
   return rows.map((r) => ({
     variantId: r.variantId,
     productId: r.productId,

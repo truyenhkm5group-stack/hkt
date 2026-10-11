@@ -28,6 +28,8 @@ import { classifyHandoffReason } from "@/lib/sales-chatbot/events-shared";
 import { buildQuote, catalogReferenceAmounts, computePriced, packChoiceMistake, packingIssues, packingRequestOf, pricingContextOf, referenceAmounts, type PricingConfig } from "@/lib/sales-chatbot/quote";
 import { quoteFactOf, quoteSnapshotOf } from "@/lib/sales-chatbot/quote-shared";
 import { renderQuickAnswer } from "@/lib/sales-chatbot/quick-replies";
+import { classifyOrderPrice } from "@/lib/sales-chatbot/price-mismatch";
+import { parsePriceScanArgs, scanBotOrders } from "../scripts/price-mismatch-scan";
 import { autoConfirmBlocker, autoConfirmText, type ChatState } from "@/lib/sales-chatbot/tools";
 import { AUTO_CONFIRM_COMPLETE_SETTING_KEY } from "@/lib/constants/manual-orders";
 import { getSettingJson, setSettingJson } from "@/lib/settings";
@@ -765,11 +767,148 @@ async function testAutoConfirmCases() {
   assert.deepEqual([...seen].sort(), AUTO_CASES.map((c) => c.key).sort());
 }
 
+// ═══ GIÁ SỈ BẬT + GIẢM THEO KHỐI LƯỢNG BẬT (P0 11/10/2026, ca «Phạm Minh Ái») ═══
+// Trước đây khối giảm khối lượng nằm trong `if (!books)`: tổ chức bật «báo giá sỉ» thì `books` luôn khác null ⇒ khách LẺ mất giảm,
+// 2kg chả cá thu 560.000 thay vì 540.000, cộng 1kg chả mực 400.000 ⇒ 960.000 thay vì 940.000.
+
+const mucItem = (variantId: string, price: number) => item(variantId, "1kg", price, { productId: "p-muc", name: "Chả mực" });
+const book = (id: string, isDefault: boolean, tiers: { variantId: string; minQuantity: number; unitPrice: number }[]) => ({ id, name: id, isDefault, tiers });
+
+function testWholesalePure() {
+  const catalog = [item("v1", "1kg", 280_000), item("v2", "2kg", 540_000), mucItem("m1", 400_000)];
+  // Bảng mặc định có bậc sỉ cho chả cá thu 1kg từ 10 túi — khách lẻ mua 2kg CHƯA tới bậc ⇒ giá lẻ ⇒ giảm khối lượng VẪN áp.
+  const defaultBook = book("si-mac-dinh", true, [{ variantId: "v1", minQuantity: 10, unitPrice: 240_000 }]);
+  const retailBuyer = pricingContextOf(catalog, cfgOf({ wholesalePricing: true }), { customerList: null, defaultList: defaultBook });
+  const kg = (n: number, ctx = retailBuyer) => computePriced([{ variantId: "v1", quantity: n }], ctx).subtotal;
+  assert.deepEqual([1, 2, 3, 4].map((n) => kg(n)), [280_000, 540_000, 820_000, 1_080_000], "khách lẻ, sỉ bật: 1/2/3/4kg theo PER_STEP 20.000 mỗi 2kg");
+  const pack = computePriced([{ variantId: "v2", quantity: 1 }], retailBuyer);
+  assert.equal(pack.subtotal, 540_000, "AI chọn gói 2kg ⇒ quy 2 × 1kg − 20.000 = 540.000");
+  assert.deepEqual(pack.lines.map((l) => [l.variantId, l.quantity, l.unitPrice, l.discount, l.priceSource]), [["v1", 2, 280_000, 20_000, "RETAIL"]]);
+  const ai = computePriced([{ variantId: "v2", quantity: 1 }, { variantId: "m1", quantity: 1 }], retailBuyer);
+  assert.equal(ai.subtotal, 940_000, "ca Phạm Minh Ái: 2kg chả cá thu + 1kg chả mực = 940.000 (không phải 960.000)");
+  assert.equal(buildQuote(ai, retailBuyer).verified, true);
+  // Bảng mặc định KHÔNG có dòng nào cho sản phẩm — vẫn giá lẻ + giảm.
+  const emptyBook = pricingContextOf(catalog, cfgOf({ wholesalePricing: true }), { customerList: null, defaultList: book("rong", true, []) });
+  assert.equal(computePriced([{ variantId: "v2", quantity: 1 }, { variantId: "m1", quantity: 1 }], emptyBook).subtotal, 940_000);
+  // Đủ bậc sỉ của bảng (10 túi) ⇒ giá bảng 240.000, KHÔNG cộng thêm giảm khối lượng.
+  const bulk = computePriced([{ variantId: "v1", quantity: 10 }], retailBuyer);
+  assert.deepEqual([bulk.subtotal, bulk.lines[0].discount, bulk.lines[0].priceSource], [2_400_000, 0, "DEFAULT_LIST"], "đủ bậc sỉ ⇒ theo bảng, không giảm hai lần");
+  // Khách THUỘC NHÓM SỈ (bảng riêng: chả cá thu 1kg từ 1 túi 250.000) ⇒ giá bảng, không giảm khối lượng.
+  const wholesaleBuyer = pricingContextOf(catalog, cfgOf({ wholesalePricing: true }), { customerList: book("si-rieng", false, [{ variantId: "v1", minQuantity: 1, unitPrice: 250_000 }]), defaultList: defaultBook });
+  const ws = computePriced([{ variantId: "v1", quantity: 2 }], wholesaleBuyer);
+  assert.deepEqual([ws.subtotal, ws.lines[0].discount, ws.lines[0].priceSource], [500_000, 0, "CUSTOMER_LIST"], "khách sỉ: 2 × 250.000 theo bảng, không cộng giảm khối lượng");
+  // Khách sỉ mua món KHÔNG có trong bảng của mình (chả mực) ⇒ giá lẻ; 2kg chả mực ⇒ giảm khối lượng áp cho đúng sản phẩm đó.
+  const wsMuc = computePriced([{ variantId: "v1", quantity: 2 }, { variantId: "m1", quantity: 2 }], wholesaleBuyer);
+  assert.equal(wsMuc.subtotal, 500_000 + 780_000, "chả cá theo bảng · chả mực giá lẻ − 20.000");
+  // Gói lớn CÓ dòng riêng trong bảng ⇒ giữ nguyên gói (giá bảng của chính gói đó), không quy sang gói đơn vị.
+  const packBook = pricingContextOf(catalog, cfgOf({ wholesalePricing: true }), { customerList: book("goi", false, [{ variantId: "v2", minQuantity: 1, unitPrice: 520_000 }]), defaultList: null });
+  assert.deepEqual(computePriced([{ variantId: "v2", quantity: 1 }], packBook).lines.map((l) => [l.variantId, l.unitPrice, l.discount]), [["v2", 520_000, 0]]);
+  // Bộ quét đơn lệch (ops price-mismatch-scan) — CÙNG computePriced.
+  const ok = classifyOrderPrice([{ variantId: "v1", quantity: 2, unitPrice: 280_000, discount: 20_000 }, { variantId: "m1", quantity: 1, unitPrice: 400_000, discount: 0 }], [retailBuyer]);
+  assert.deepEqual([ok.kind, ok.actual, ok.expected], ["OK", 940_000, 940_000]);
+  const bug = classifyOrderPrice([{ variantId: "v1", quantity: 2, unitPrice: 280_000, discount: 0 }, { variantId: "m1", quantity: 1, unitPrice: 400_000, discount: 0 }], [retailBuyer]);
+  assert.deepEqual([bug.kind, bug.actual, bug.expected, bug.missingVolumeDiscount, bug.multiUnit], ["PRICE_MISMATCH", 960_000, 940_000, true, true], "đơn 960.000 của lỗi cũ ⇒ PRICE_MISMATCH + thiếu giảm khối lượng");
+  const viaBook = classifyOrderPrice([{ variantId: "v1", quantity: 2, unitPrice: 250_000, discount: 0 }], [retailBuyer, wholesaleBuyer]);
+  assert.equal(viaBook.kind, "OK", "đơn khách sỉ theo bảng riêng ⇒ khớp ngữ cảnh thứ hai");
+  const changed = classifyOrderPrice([{ variantId: "v1", quantity: 1, unitPrice: 300_000, discount: 0 }], [retailBuyer]);
+  assert.deepEqual([changed.kind, changed.missingVolumeDiscount], ["PRICE_MISMATCH", false], "giá danh mục đổi ≠ thiếu giảm khối lượng");
+  assert.equal(classifyOrderPrice([{ variantId: "xoa", quantity: 1, unitPrice: 1, discount: 0 }], [retailBuyer]).kind, "UNPRICEABLE");
+  assert.deepEqual(parsePriceScanArgs(["hslc", "--days=30"]), { code: "hslc", days: 30 });
+  assert.ok("error" in parsePriceScanArgs(["hslc", "--days=99"]));
+  assert.ok("error" in parsePriceScanArgs([]));
+  // Chế độ giá lẻ (sỉ tắt) không đổi: 940.000.
+  const retail = pricingContextOf(catalog, cfgOf(), null);
+  assert.equal(computePriced([{ variantId: "v2", quantity: 1 }, { variantId: "m1", quantity: 1 }], retail).subtotal, 940_000);
+}
+
+/** Tổ chức thật: bật CẢ báo giá sỉ (bảng mặc định có bậc từ 10 túi) VÀ giảm theo khối lượng — khách lẻ. */
+const WS: Partial<SalesChatbotConfig> = { ...ON, wholesalePricing: true };
+const WHOLESALE_CASES: GoldenCase[] = [
+  {
+    key: "qi-pham-minh-ai",
+    title: "Ca Phạm Minh Ái: sỉ bật + giảm khối lượng bật, khách lẻ 2kg chả cá thu + 1kg chả mực ⇒ báo giá = đơn = 940.000 (2kg = 540.000)",
+    shop: "food",
+    channel: "WEB",
+    config: WS,
+    turns: [
+      {
+        say: "2kg chả cá thu với 1kg chả mực bao nhiêu em",
+        ai: [({ v }) => [tool("calculate_cart", { items: [{ variant_id: v("CCT-2KG"), quantity: 1 }, { variant_id: v("CM-1KG"), quantity: 1 }] })], () => [say("Dạ 2kg chả cá thu 540.000 ₫ và 1kg chả mực 400.000 ₫, tiền hàng 940.000 ₫ ạ.")]],
+      },
+      {
+        say: `lấy nhé, Phạm Minh Ái 0983334445, ${GOOD_ADDRESS}`,
+        ai: [
+          () => [tool("create_customer", { name: "Phạm Minh Ái", phone: "0983334445", address: GOOD_ADDRESS })],
+          ({ v }) => [tool("create_draft_order", { items: [{ variant_id: v("CCT-2KG"), quantity: 1 }, { variant_id: v("CM-1KG"), quantity: 1 }] })],
+          () => [say("Tóm tắt: 2kg chả cá thu 540.000 ₫ + 1kg chả mực 400.000 ₫. Mình xác nhận giúp em nhé?")],
+        ],
+      },
+    ],
+  },
+  {
+    key: "qi-si-bat-3kg",
+    title: "Sỉ bật + giảm bật, khách lẻ 3kg ⇒ 820.000 (PER_STEP: 20.000 mỗi 2kg)",
+    shop: "food",
+    channel: "WEB",
+    config: WS,
+    turns: [{ say: "3kg chả cá thu bao nhiêu", ai: [({ v }) => [tool("calculate_cart", { items: [{ variant_id: v("CCT-1KG"), quantity: 3 }] })], () => [say("Dạ 3kg chả cá thu 820.000 ₫ ạ.")]] }],
+  },
+];
+
+async function testWholesaleCases() {
+  const seen = new Set<string>();
+  await runGoldenCases(WHOLESALE_CASES, {
+    orgSuffix: "-qi6",
+    beforeCase: async (c, ctx) => {
+      if (ctx.ids.has("CCT-1KG")) return;
+      await seedCct(ctx, 280_000, 540_000);
+      const admin = await ctx.admin();
+      const r = await createProductCore(admin, { name: "Chả mực", code: "CM", unit: "gói", retailPrice: 400_000, cost: null, variants: [{ sku: "CM-1KG", size: "1kg", color: "", retailPrice: 400_000, cost: null, selling: true }] });
+      assert.ok(r.ok, JSON.stringify(r));
+      const db = await getDb();
+      const [v] = await db.select({ id: schema.productVariants.id }).from(schema.productVariants).where(eq(schema.productVariants.productId, r.id));
+      (ctx.ids as Map<string, string>).set("CM-1KG", v.id);
+      // Bảng giá sỉ MẶC ĐỊNH: chả cá thu 1kg từ 10 túi 240.000 — khách lẻ 2–4kg chưa tới bậc.
+      const [pl] = await db.insert(schema.priceLists).values({ name: "Sỉ", isDefault: true, active: true }).returning({ id: schema.priceLists.id });
+      await db.insert(schema.priceListItems).values({ priceListId: pl.id, variantId: ctx.ids.get("CCT-1KG")!, minQuantity: 10, unitPrice: 240_000 });
+    },
+    afterCase: async (c, ctx, transcript) => {
+      seen.add(c.key);
+      const results = JSON.stringify(transcript.turns.flatMap((t) => t.rounds.map((r) => r.results)));
+      if (c.key === "qi-si-bat-3kg") {
+        assert.match(results, /"subtotal":820000/, results.slice(0, 500));
+        assert.deepEqual(transcript.turns[0].shown, ["Dạ 3kg chả cá thu 820.000 ₫ ạ."], "820k thuộc báo giá ⇒ không bị chặn");
+        return;
+      }
+      assert.match(JSON.stringify(transcript.turns[0].rounds.map((r) => r.results)), /"subtotal":940000/, "calculate_cart = 940.000");
+      assert.deepEqual(transcript.turns[0].shown, ["Dạ 2kg chả cá thu 540.000 ₫ và 1kg chả mực 400.000 ₫, tiền hàng 940.000 ₫ ạ."], "chữ AI 540k / 940k khớp báo giá ⇒ tới khách");
+      const { order, items, state } = await orderOfConversation(ctx.conversationId);
+      assert.ok(order, "có đơn");
+      assert.equal(order.totalPriceAfterDiscount, 940_000, "tổng đơn = 940.000");
+      const cct = ctx.ids.get("CCT-1KG");
+      const rows = items.map((i) => [i.variantId === cct ? "CCT-1KG" : "CM-1KG", i.quantity, Number(i.unitPrice), Number(i.totalDiscount)]).sort();
+      assert.deepEqual(rows, [["CCT-1KG", 2, 280_000, 20_000], ["CM-1KG", 1, 400_000, 0]], "dòng đơn: 2 × 280.000 − 20.000 · 400.000");
+      assert.equal(state.quote?.subtotal, 940_000);
+      assert.equal(state.quote?.verified, true);
+      assert.equal((order.raw as { quote?: { subtotal: number } }).quote?.subtotal, 940_000, "báo giá lưu vào đơn = 940.000");
+      // ops price-mismatch-scan trên CSDL thật: đơn đúng ⇒ OK; giả lập đơn cũ (mất 20.000 giảm) ⇒ PRICE_MISMATCH + thiếu giảm.
+      const db = await getDb();
+      const mine = (await scanBotOrders(db, 1)).find((r) => r.id === order.id);
+      assert.equal(mine?.verdict.kind, "OK", JSON.stringify(mine));
+      await db.update(schema.orderItems).set({ totalDiscount: 0 }).where(eq(schema.orderItems.orderId, order.id));
+      const old = (await scanBotOrders(db, 1)).find((r) => r.id === order.id);
+      assert.deepEqual([old?.verdict.kind, old?.verdict.actual, old?.verdict.expected, old?.verdict.missingVolumeDiscount, old?.verdict.multiUnit], ["PRICE_MISMATCH", 960_000, 940_000, true, true]);
+    },
+  });
+  assert.deepEqual([...seen].sort(), WHOLESALE_CASES.map((c) => c.key).sort());
+}
+
 export async function testSalesQuoteIntegrity() {
   testExtract();
   testQuotePure();
   testVerdictPure();
   testDisputePure();
+  testWholesalePure();
   testAutoConfirmPure();
   // Tiền đề của hai hội thoại địa chỉ: địa chỉ «tốt» ghép được xã / phường, địa chỉ «xấu» thì không.
   assert.ok(resolveRecipientPlace({ address: GOOD_ADDRESS, province: "" }).ward, `địa chỉ tốt phải ghép được xã: ${JSON.stringify(resolveRecipientPlace({ address: GOOD_ADDRESS, province: "" }))}`);
@@ -778,5 +917,6 @@ export async function testSalesQuoteIntegrity() {
   await testRuleOff();
   await testDisputeCases();
   await testAutoConfirmCases();
-  console.log("  ✓ báo giá máy chủ (quote.ts): một phép tính cho giỏ · đơn · lõi; 2kg = 2 × 1kg − giảm, cùng mã báo giá; catalog mâu thuẫn / thiếu khối lượng ⇒ chưa xác thực (tái hiện 540 / 560); số tiền trong chữ bot phải thuộc báo giá đã xác thực — 540k khi báo giá 560k bị chặn + PRICE_UNVERIFIED; câu mẫu / lời chào lệch giá bị chặn; giá chưa xác thực ⇒ không tạo đơn; khách phản đối giá ⇒ có căn cứ thì báo lại + xin xác nhận, không thì chuyển người (PRICE_DISPUTED), đơn mang cờ; đổi số lượng ⇒ xin xác nhận tổng mới; đóng gói riêng đổi giá ⇒ shop quyết; đơn cần kiểm địa chỉ ⇒ «đã lên đơn» bị thay, không chuyển người; tổng đơn ≠ báo giá ⇒ lõi không ghi; mã + phiên bản giá lưu vào đơn");
+  await testWholesaleCases();
+  console.log("  ✓ báo giá máy chủ (quote.ts): một phép tính cho giỏ · đơn · lõi; 2kg = 2 × 1kg − giảm, cùng mã báo giá; catalog mâu thuẫn / thiếu khối lượng ⇒ chưa xác thực (tái hiện 540 / 560); số tiền trong chữ bot phải thuộc báo giá đã xác thực — 540k khi báo giá 560k bị chặn + PRICE_UNVERIFIED; câu mẫu / lời chào lệch giá bị chặn; giá chưa xác thực ⇒ không tạo đơn; sỉ bật + khách lẻ ⇒ giảm khối lượng vẫn áp (Phạm Minh Ái 940.000), khách sỉ theo bảng không cộng giảm, bộ quét đơn lệch; khách phản đối giá ⇒ có căn cứ thì báo lại + xin xác nhận, không thì chuyển người (PRICE_DISPUTED), đơn mang cờ; đổi số lượng ⇒ xin xác nhận tổng mới; đóng gói riêng đổi giá ⇒ shop quyết; đơn cần kiểm địa chỉ ⇒ «đã lên đơn» bị thay, không chuyển người; tổng đơn ≠ báo giá ⇒ lõi không ghi; mã + phiên bản giá lưu vào đơn");
 }

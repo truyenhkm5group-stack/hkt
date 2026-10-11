@@ -25,8 +25,8 @@
  */
 import { createHash } from "node:crypto";
 import { eq } from "drizzle-orm";
-import { getDb, schema } from "@/db";
-import { agentUnitPrice, priceBooksForMode, type AgentPricingMode, type PriceBooks } from "@/lib/commerce/pricing";
+import { getDb, schema, type Db } from "@/db";
+import { agentUnitQuote, bookListsVariant, priceBooksForMode, type AgentPricingMode, type PriceBooks } from "@/lib/commerce/pricing";
 import { formatVND } from "@/lib/format";
 import { sellableCatalog, type CatalogItem } from "@/lib/sales-chatbot/catalog";
 import { parseSalesChatbotConfig, SALES_CHATBOT_SETTING_KEY, type SalesChatbotConfig } from "@/lib/sales-chatbot/config";
@@ -57,7 +57,7 @@ export type PricingContext = {
 export type Priced = {
   ship: ShipVerdict;
   /** Dòng hàng SAU khi quy về gói đơn vị (`toUnitPacks`) — đúng những dòng ghi vào đơn. `lineTotal` = đơn giá × SL − `discount`. */
-  lines: { variantId: string; name: string; quantity: number; unitPrice: number; lineTotal: number; /** Tiền giảm của cả dòng (luật giảm theo khối lượng). */ discount: number; /** Khối lượng MỘT đơn vị mẫu mã (gram) — `null` khi không biết. */ weightGrams?: number | null }[];
+  lines: { variantId: string; name: string; quantity: number; unitPrice: number; lineTotal: number; /** Tiền giảm của cả dòng (luật giảm theo khối lượng). */ discount: number; /** Khối lượng MỘT đơn vị mẫu mã (gram) — `null` khi không biết. */ weightGrams?: number | null; /** Nguồn đơn giá: giá lẻ hay bảng giá sỉ (bảng riêng / mặc định). */ priceSource?: "RETAIL" | "CUSTOMER_LIST" | "DEFAULT_LIST" }[];
   /** Dòng hàng AI GỬI LÊN (trước khi quy gói) — để bắt nhầm quy cách thành số lượng trên đúng thứ AI chọn. */
   asked: { variantId: string; productId: string | null; name: string; quantity: number; weightGrams: number | null }[];
   subtotal: number;
@@ -87,8 +87,8 @@ export function pricingContextOf(catalog: readonly CatalogItem[], cfg: PricingCo
 }
 
 /** Một lượt đọc danh mục + bảng giá. `books` = bảng giá theo chế độ (null = giá lẻ). */
-export async function loadPricingContext(cfg: PricingConfig, books: PriceBooks): Promise<PricingContext> {
-  return pricingContextOf(await sellableCatalog([...WEIGHT_FIELDS]), cfg, books);
+export async function loadPricingContext(cfg: PricingConfig, books: PriceBooks, db?: Db): Promise<PricingContext> {
+  return pricingContextOf(await sellableCatalog([...WEIGHT_FIELDS], undefined, db), cfg, books);
 }
 
 /** Đơn / giỏ CHỈ gồm mẫu mã bán kèm ⇒ không bán (0238). HÀM THUẦN. */
@@ -110,29 +110,35 @@ export function computePriced(lines: readonly CartLine[], ctx: PricingContext, a
     const it = byId.get(l.variantId);
     return { variantId: l.variantId, productId: it?.productId ?? null, name: it ? label(it) : l.variantId, quantity: l.quantity, weightGrams: it ? (weight.get(it.variantId) ?? null) : null };
   });
-  // BÁN THEO GÓI ĐƠN VỊ (10/10/2026, volume-discount.ts): AI chọn gói lớn ⇒ máy chủ quy về N × gói đơn vị của cùng sản phẩm.
-  const effective = toUnitPacks(lines, sub.map((c) => ({ variantId: c.variantId, productId: c.productId, price: c.price, weightGrams: weight.get(c.variantId) ?? null, ...(c.addOnOnly ? { addOnOnly: true } : {}) })), rule);
+  // BÁN THEO GÓI ĐƠN VỊ (10/10/2026, volume-discount.ts): AI chọn gói lớn ⇒ máy chủ quy về N × gói đơn vị của cùng sản phẩm. Mẫu mã có
+  // dòng RIÊNG trong bảng giá sỉ đang dùng thì giữ nguyên (giá bảng của chính gói đó thắng — không quy sang gói khác).
+  const inBook = lines.filter((l) => bookListsVariant(books, l.variantId));
+  const effective = [...toUnitPacks(lines.filter((l) => !bookListsVariant(books, l.variantId)), sub.map((c) => ({ variantId: c.variantId, productId: c.productId, price: c.price, weightGrams: weight.get(c.variantId) ?? null, ...(c.addOnOnly ? { addOnOnly: true } : {}) })), rule), ...inBook];
   const out: Priced["lines"] = [];
   const unpriced: string[] = [];
   const missing: string[] = [];
   for (const l of effective) {
     const it = byId.get(l.variantId);
     // MỘT công thức với lõi đơn (lib/commerce/pricing.ts) — lõi tính lại đúng hàm này và từ chối đơn lệch giá.
-    const unit = it ? agentUnitPrice({ variantId: it.variantId, quantity: l.quantity, retailPrice: it.price, books }) : null;
+    const unit = it ? agentUnitQuote({ variantId: it.variantId, quantity: l.quantity, retailPrice: it.price, books }) : null;
     if (!it) missing.push(l.variantId);
     else if (unit === null) unpriced.push(it.name);
-    else out.push({ variantId: l.variantId, name: label(it), quantity: l.quantity, unitPrice: unit, lineTotal: unit * l.quantity, discount: 0, weightGrams: weight.get(it.variantId) ?? null });
+    else out.push({ variantId: l.variantId, name: label(it), quantity: l.quantity, unitPrice: unit.unitPrice, lineTotal: unit.unitPrice * l.quantity, discount: 0, weightGrams: weight.get(it.variantId) ?? null, priceSource: unit.source });
   }
   const issues: QuoteIssue[] = [];
-  // GIẢM THEO KHỐI LƯỢNG — từng SẢN PHẨM; tiền giảm đặt vào dòng lớn nhất của sản phẩm (không vượt tiền dòng). Đang báo giá theo
-  // bảng giá sỉ ⇒ KHÔNG cộng thêm (bậc sỉ đã là giá theo số lượng — cộng là giảm hai lần).
-  if (!books) {
+  // GIẢM THEO KHỐI LƯỢNG — từng SẢN PHẨM; tiền giảm đặt vào dòng lớn nhất của sản phẩm (không vượt tiền dòng).
+  // P0 11/10/2026 (ca «Phạm Minh Ái»: 2kg chả cá thu 560.000 thay vì 540.000, tổng 960.000 thay vì 940.000): trước đây cả khối này nằm
+  // trong `if (!books)` — tổ chức BẬT «báo giá sỉ» thì `books` luôn khác null (bảng mặc định), nên MỌI khách, kể cả khách lẻ mua đúng
+  // giá lẻ, mất giảm theo khối lượng. Luật nay đi theo NGUỒN GIÁ TỪNG DÒNG: sản phẩm mà mọi dòng là GIÁ LẺ ⇒ giảm áp như chế độ giá lẻ;
+  // sản phẩm có dòng giá BẢNG SỈ ⇒ theo bảng, KHÔNG cộng thêm giảm khối lượng (bậc sỉ đã là giá theo số lượng — cộng là giảm hai lần).
+  {
     const byProduct = new Map<string, Priced["lines"]>();
     for (const l of out) {
       const pid = byId.get(l.variantId)!.productId;
       byProduct.set(pid, [...(byProduct.get(pid) ?? []), l]);
     }
     for (const [pid, group] of byProduct) {
+      if (group.some((l) => l.priceSource !== "RETAIL")) continue;
       const grams = group.every((l) => l.weightGrams != null) ? group.reduce((g, l) => g + l.weightGrams! * l.quantity, 0) : null;
       const d = volumeDiscountFor(grams, rule);
       if (d) {
@@ -353,8 +359,9 @@ export async function catalogReferenceAmounts(cfg: PricingConfig): Promise<Set<n
   return referenceAmounts(await loadPricingContext(cfg, await priceBooksForMode(cfg.wholesalePricing ? "DEFAULT_BOOK" : "RETAIL", null)));
 }
 
-async function orgPricingConfig(): Promise<PricingConfig> {
-  const db = await getDb();
+/** Cấu hình tính tiền của tổ chức. `dbIn` — CSDL mở tường minh (ops chỉ đọc); vắng ⇒ CSDL của ngữ cảnh hiện tại. */
+export async function orgPricingConfig(dbIn?: Db): Promise<PricingConfig> {
+  const db = dbIn ?? (await getDb());
   const [row] = await db.select({ value: schema.settings.value }).from(schema.settings).where(eq(schema.settings.key, SALES_CHATBOT_SETTING_KEY)).limit(1);
   let raw: unknown = null;
   try {

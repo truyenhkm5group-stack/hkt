@@ -26,6 +26,23 @@ export function agentUnitPrice(input: { variantId: string; quantity: number; ret
   return quoteUnitPrice({ variantId: input.variantId, quantity: input.quantity, retailPrice: retail, customerList: input.books.customerList, defaultList: input.books.defaultList })?.unitPrice ?? null;
 }
 
+/**
+ * Đơn giá + NGUỒN của MỘT dòng — HÀM THUẦN, cùng phép tính với `agentUnitPrice`. `source = "RETAIL"` cả khi chế độ bảng giá lùi về giá
+ * lẻ (mẫu mã không có trong bảng / chưa tới bậc): dòng đó là GIÁ LẺ thật, nên luật giảm theo khối lượng của tổ chức VẪN áp (P0 11/10/2026,
+ * ca «Phạm Minh Ái»). `CUSTOMER_LIST` / `DEFAULT_LIST` = giá bảng — bậc sỉ đã là giá theo số lượng, không cộng thêm giảm khối lượng.
+ */
+export function agentUnitQuote(input: { variantId: string; quantity: number; retailPrice: number | null; books: PriceBooks }): { unitPrice: number; source: "RETAIL" | "CUSTOMER_LIST" | "DEFAULT_LIST" } | null {
+  const retail = input.retailPrice !== null && input.retailPrice > 0 ? input.retailPrice : null;
+  if (!input.books) return retail === null ? null : { unitPrice: retail, source: "RETAIL" };
+  const q = quoteUnitPrice({ variantId: input.variantId, quantity: input.quantity, retailPrice: retail, customerList: input.books.customerList, defaultList: input.books.defaultList });
+  return q ? { unitPrice: q.unitPrice, source: q.source } : null;
+}
+
+/** Mẫu mã có dòng nào trong bảng giá đang dùng (riêng của khách / mặc định) — HÀM THUẦN. */
+export function bookListsVariant(books: PriceBooks, variantId: string): boolean {
+  return Boolean(books && [books.customerList, books.defaultList].some((b) => b?.tiers.some((t) => t.variantId === variantId)));
+}
+
 /** Bảng giá cần cho một chế độ — `null` ở chế độ giá lẻ (không đọc CSDL). */
 export async function priceBooksForMode(mode: AgentPricingMode, customerId: string | null): Promise<PriceBooks> {
   return mode === "PRICE_BOOK" ? priceBooksFor(customerId) : mode === "DEFAULT_BOOK" ? priceBooksFor(null) : null;
