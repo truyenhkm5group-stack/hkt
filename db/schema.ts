@@ -11120,6 +11120,14 @@ export const salesChatConversations = pgTable(
      * nhường nữa — mọi lượt ghi đều đẩy cột ấy về «bây giờ». NULL ở dòng cũ = đọc mốc cũ như trước (không backfill).
      */
     humanCooldownUntil: ts("human_cooldown_until"),
+    /**
+     * 0242 · HÀNG ĐỢI NGƯỜI KHI AI IM (lib/sales-chatbot/handoff-routing.ts — P0 11/10/2026 «AI chuyển người nhưng không ai nhận»):
+     * mốc hội thoại VÀO hàng đợi người của ĐỢT hiện tại (AI chuyển người · AI hỏng · tiếp quản) — hạn xử lý tính lúc đọc từ mốc này
+     * theo `work.sla` (luật 26, không ghi hạn xuống CSDL); và lần cuối ERP báo nhân viên / phòng trong đợt (chống báo trùng mỗi tin).
+     * Xoá cả hai khi AI nhận lại hội thoại. NULL ở dòng cũ = chưa vào hàng đợi — lượt quét `sales-health` đóng dấu, không backfill.
+     */
+    handoffQueuedAt: ts("handoff_queued_at"),
+    handoffAlertedAt: ts("handoff_alerted_at"),
     /** Giỏ nháp của khung THỬ (không ghi đơn thật) + mốc tóm tắt đã đọc cho khách — lib/sales-chatbot/engine.ts. */
     state: jsonb("state").$type<Record<string, unknown>>().notNull().default({}),
     createdBy: text("created_by"),
@@ -11136,6 +11144,7 @@ export const salesChatConversations = pgTable(
     index("sales_chat_conversations_followup_idx").on(t.status, t.nextFollowupAt),
     index("sales_chat_conversations_inbox_idx").on(t.lastCustomerAt),
     index("sales_chat_conversations_assignee_idx").on(t.assigneeUserId).where(sql`${t.assigneeUserId} is not null`),
+    index("sales_chat_conversations_handoff_queue_idx").on(t.handoffQueuedAt).where(sql`${t.handoffQueuedAt} is not null`),
     check("sales_chat_conversations_level_check", sql`${t.customerLevel} IS NULL OR ${t.customerLevel} IN ('ORDERED','UPSELL_REPLY','FULL_INFO_ORDER','FULL_INFO_NO_ITEM','PHONE_ONLY','ADDRESS_ONLY','PICKED_ITEM','MEASUREMENTS','NEW_MESSAGE','DECLINED')`),
     index("sales_chat_conversations_level_idx").on(t.customerLevel).where(sql`${t.customerLevel} is not null`),
     index("sales_chat_conversations_phone_idx").on(t.customerPhone).where(sql`${t.customerPhone} is not null`),
@@ -11379,7 +11388,7 @@ export const salesChatInbound = pgTable(
     transport: text("transport"),
     senderId: text("sender_id"),
     /**
-     * 0242 — NGUỒN GỐC NGƯỜI GỬI của tin phía page ngoài ERP (lib/sales-chatbot/response-ownership.ts::OUTBOUND_ORIGINS: AI_AGENT ·
+     * 0244 — NGUỒN GỐC NGƯỜI GỬI của tin phía page ngoài ERP (lib/sales-chatbot/response-ownership.ts::OUTBOUND_ORIGINS: AI_AGENT ·
      * VERIFIED_HUMAN · PANCAKE_AUTOMATION · META_SYSTEM · OTHER_APP · UNKNOWN), mốc TẠO tin ở nguồn (Pancake `inserted_at` / Meta
      * `timestamp`) và mã ứng dụng / tài khoản gửi trong payload. NULL ở dòng cũ = chưa biết (không backfill — luật 35).
      */
@@ -11456,7 +11465,7 @@ export const salesConversationEvents = pgTable(
     index("sales_conversation_events_type_idx").on(t.type, t.occurredAt),
     check(
       "sales_conversation_events_type_check",
-      sql`${t.type} IN ('conversation.opened','message.received','ai.replied','stage.changed','quote.given','customer.identified','upsell.offered','upsell.accepted','upsell.declined','order.drafted','order.confirmed','appointment.booked','handoff.requested','human.took_over','human.replied','ai.resumed','followup.sent','conversation.declined')`,
+      sql`${t.type} IN ('conversation.opened','message.received','ai.replied','stage.changed','quote.given','customer.identified','upsell.offered','upsell.accepted','upsell.declined','order.drafted','order.confirmed','appointment.booked','handoff.requested','human.took_over','human.replied','ai.resumed','followup.sent','conversation.declined','followup.decided')`,
     ),
     check("sales_conversation_events_actor_check", sql`${t.actorKind} IN ('CUSTOMER','AI','HUMAN','SYSTEM')`),
     check("sales_conversation_events_channel_check", sql`${t.channel} ~ '^[A-Z_]{2,20}$'`),

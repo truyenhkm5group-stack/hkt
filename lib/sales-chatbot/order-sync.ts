@@ -706,6 +706,8 @@ async function syncThread(a: {
   // Hồ sơ có bảng giá riêng mà người chat chưa xác minh là chủ hồ sơ ⇒ nói rõ cho người kiểm đơn (giá đại lý là việc của người).
   const privateSkipped = pricing.mode === "DEFAULT_BOOK" && Boolean((await priceBooksFor(cust.id)).customerList);
   if (priced.missing.length || priced.unpriced.length || !priced.lines.length) return { outcome: "SKIPPED", result: `Món chưa có giá / thôi bán (${[...priced.unpriced, ...priced.missing].join(", ")}) — nhân viên lên đơn tay` };
+  // Báo giá máy chủ CHƯA XÁC THỰC (catalog mâu thuẫn với luật giảm theo khối lượng — quote.ts) ⇒ không ghi đơn tự động.
+  if (!priced.quote.verified) return { outcome: "SKIPPED", result: `Giá chưa xác thực (${priced.quote.unverifiedReasons.map((r) => r.detail).join(" · ")}) — nhân viên lên đơn tay` };
   const notes = [
     "Ghi tự động từ hội thoại fanpage (nhân viên chốt) — KIỂM rồi chốt đơn.",
     `Lời chốt ${formatDateTime(ag.at)} (${ag.from === "customer" ? "khách" : "shop"}): «${ag.text.slice(0, 200)}»`,
@@ -724,7 +726,7 @@ async function syncThread(a: {
     note: notes.join("\n").slice(0, 2000),
     channel: ORDER_SYNC_CHANNEL,
     recipient: decision.recipient,
-  }, { pricing: pricing.mode, idempotencyKey: `order-sync:${conv.id}:${ag.id || ag.at}`, adId: await chatOrderAdId(conv.id, now) });
+  }, { pricing: pricing.mode, idempotencyKey: `order-sync:${conv.id}:${ag.id || ag.at}`, adId: await chatOrderAdId(conv.id, now), quote: { id: priced.quote.quoteId, priceVersion: priced.quote.priceVersion, subtotal: priced.quote.subtotal, total: priced.quote.total } });
   if (!created.ok) return { outcome: "SKIPPED", result: `Không ghi được đơn: ${"errors" in created ? created.errors.map((e) => e.message).join(" · ") : "lỗi"}` };
   const code = `#${manualOrderShortCode(created.id)}`;
   // Tổ chức bật «đơn đủ thông tin = đã xác nhận» ⇒ lõi ghi đơn đã ghi thẳng «Đã xác nhận».

@@ -39,6 +39,8 @@ export const SALES_EVENT_TYPES = [
   "ai.resumed",
   "followup.sent",
   "conversation.declined",
+  /** Vết quyết định của MỘT lượt follow-up (gửi / chặn + mã lý do + ảnh chụp vòng đời) — dòng GỬI cũng là khoá chống trùng (0242). */
+  "followup.decided",
 ] as const;
 export type SalesEventType = (typeof SALES_EVENT_TYPES)[number];
 
@@ -62,6 +64,7 @@ export const SALES_EVENT_LABEL: Record<SalesEventType, string> = {
   "ai.resumed": "AI trả lời lại",
   "followup.sent": "Nhắn lại khách",
   "conversation.declined": "Khách không mua",
+  "followup.decided": "Quyết định nhắn lại",
 };
 
 export const SALES_EVENT_ACTORS = ["CUSTOMER", "AI", "HUMAN", "SYSTEM"] as const;
@@ -183,6 +186,8 @@ export function classifyHandoffReason(reason: string | null | undefined): Handof
 /** Giá trị đơn nháp = Σ đơn giá × số lượng (tiền hàng, chưa ship). `null` khi thiếu đơn giá của dòng nào đó. HÀM THUẦN. */
 export function draftValue(draft: ChatState["draft"] | undefined): number | null {
   if (!draft) return null;
+  // Đơn nháp mang báo giá máy chủ (P0 11/10/2026) ⇒ tiền hàng SAU giảm theo khối lượng — đơn giá × SL bỏ mất phần giảm.
+  if (draft.quote && Number.isFinite(draft.quote.subtotal)) return draft.quote.subtotal;
   let sum = 0;
   for (const l of draft.lines) {
     const p = draft.unitPrices[l.variantId];

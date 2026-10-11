@@ -455,6 +455,9 @@ async function testEngine() {
   try {
     await withOrganization(ORG, async () => {
       const db = await getDb();
+      // Giá model giả nói phải là giá CÓ THẬT trong danh mục — hàng rào số tiền (P0 authoritative-quote 11/10/2026) chặn số bịa.
+      await db.insert(schema.products).values({ id: "fo-p", name: "Chả mực giã tay" }).onConflictDoNothing();
+      await db.insert(schema.productVariants).values({ id: "fo-v", productId: "fo-p", sku: "FO-1", retailPrice: 400_000 }).onConflictDoNothing();
       const setCfg = async (patch: Partial<SalesChatbotConfig>) => {
         const v = JSON.stringify({ ...DEFAULT_SALES_CHATBOT_CONFIG, enabled: true, connectorKey: "gemini-byok", ...patch });
         await db.insert(schema.settings).values({ key: SALES_CHATBOT_SETTING_KEY, value: v }).onConflictDoUpdate({ target: schema.settings.key, set: { value: v } });

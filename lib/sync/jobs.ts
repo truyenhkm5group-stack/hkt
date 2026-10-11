@@ -86,6 +86,7 @@ import { runFanpageOrderSync } from "@/lib/sales-chatbot/order-sync";
 import { runSalesHealthCheck } from "@/lib/sales-chatbot/health";
 import { mirrorSalesOpsHealth } from "@/lib/sales-chatbot/ops-mirror";
 import { alertStaleOrderWriteHandoffs } from "@/lib/sales-chatbot/alerts";
+import { sweepHandoffOwnership } from "@/lib/sales-chatbot/handoff-routing";
 import { pruneAuthFailuresForJob } from "@/lib/platform/auth-failures";
 import { runAiCustomerUsageAlerts } from "@/lib/pricing/usage-alerts";
 import { runAiBalanceAlerts } from "@/lib/billing/ai-usage-charge";
@@ -925,11 +926,15 @@ export const JOB_DEFINITIONS: Record<string, JobDefinition> = {
         // của lượt canh không làm hỏng job giám sát.
         const ow = await alertStaleOrderWriteHandoffs().catch((e: unknown) => ({ error: e instanceof Error ? e.message.slice(0, 120) : "lỗi lạ" }));
         const owText = "error" in ow ? ` · canh ghi đơn hỏng lỗi: ${ow.error}` : ow.alerted ? ` · báo ${ow.alerted} khách chờ vì ghi đơn hỏng` : "";
+        // AI IM THÌ PHẢI CÓ CHỦ (P0 11/10/2026 — handoff-routing.ts): đóng dấu hàng đợi cho hội thoại chuyển người chưa có dấu, dọn dấu của
+        // hội thoại AI đã nhận lại, báo tin khách chờ (chat web), phân việc nếu phòng bật, leo thang một tin/phòng/ngày; in số KHÔNG CHỦ.
+        const ho = await sweepHandoffOwnership().catch((e: unknown) => ({ error: e instanceof Error ? e.message.slice(0, 120) : "lỗi lạ" }));
+        const hoText = "error" in ho ? ` · hàng đợi người lỗi: ${ho.error}` : ` · chờ người ${ho.unowned.silent}${ho.unowned.unowned ? ` (KHÔNG CHỦ ${ho.unowned.unowned})` : ""}${ho.stamped ? ` · vào hàng đợi ${ho.stamped}` : ""}${ho.assigned ? ` · máy giao ${ho.assigned}` : ""}`;
         // Ngưỡng khách AI 80 · 100 · 120 · 150 (L5 · lib/pricing/usage-alerts.ts) đi CÙNG lịch giám sát — không thêm lịch mới.
         const usage = await runAiCustomerUsageAlerts();
         // Số dư AI thấp / hết (docs/saas/AI_BALANCE_V1.md) — cùng lịch, một chuông mỗi mức mỗi ngày.
         const balance = await runAiBalanceAlerts();
-        ctx.summary.detail = `${r.status} · ${r.alerted} · ${r.health.headline} · ${mirror}${owText}${usage.sent ? ` · báo ngưỡng khách AI ${usage.sent}` : ""}${balance.sent ? ` · báo số dư AI ${balance.sent}` : ""}`.slice(0, 900);
+        ctx.summary.detail = `${r.status} · ${r.alerted} · ${r.health.headline} · ${mirror}${owText}${hoText}${usage.sent ? ` · báo ngưỡng khách AI ${usage.sent}` : ""}${balance.sent ? ` · báo số dư AI ${balance.sent}` : ""}`.slice(0, 900);
         if (r.status === "RED") ctx.summary.warning = r.health.headline.slice(0, 500);
         return { status: r.status, alerted: r.alerted, health: r.health, mirror };
       }),

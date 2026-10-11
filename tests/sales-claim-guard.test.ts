@@ -39,6 +39,7 @@ import {
   paymentSignalHandoff,
   paymentSignalInCustomerText,
   UNVERIFIED_PAYMENT_IMAGE_LABEL,
+  type ClaimFacts,
   type ClaimKind,
 } from "@/lib/sales-chatbot/claim-guard";
 import { DEFAULT_SALES_CHATBOT_CONFIG, SALES_CHATBOT_SETTING_KEY } from "@/lib/sales-chatbot/config";
@@ -53,11 +54,13 @@ import { runGoldenCases, say, tool, type GoldenCase } from "./sales-agent-golden
 
 const NO = { paymentVerified: false, orderConfirmed: false, orderCancelled: false };
 const ALL = { paymentVerified: true, orderConfirmed: true, orderCancelled: true };
+/** Ba căn cứ gốc (#789) — bộ đọc nay trả thêm `orderPending` + `allowedAmounts` (P0 11/10/2026), so riêng ở sales-quote-integrity. */
+const core3 = (f: ClaimFacts) => ({ paymentVerified: f.paymentVerified, orderConfirmed: f.orderConfirmed, orderCancelled: f.orderCancelled });
 
 function testTruthTable() {
   const all: ClaimKind[] = ["PAYMENT_RECEIVED", "ORDER_CONFIRMED", "ORDER_CANCELLED"];
   const kinds: ClaimKind[][] = [[], ...all.map((k) => [k]), ["PAYMENT_RECEIVED", "ORDER_CONFIRMED"], all];
-  const SAFE: Record<ClaimKind, string> = { PAYMENT_RECEIVED: CLAIM_SAFE_TEXT.PAYMENT, ORDER_CONFIRMED: CLAIM_SAFE_TEXT.ORDER, ORDER_CANCELLED: CLAIM_SAFE_TEXT.CANCEL };
+  const SAFE: Record<ClaimKind, string> = { PAYMENT_RECEIVED: CLAIM_SAFE_TEXT.PAYMENT, ORDER_CONFIRMED: CLAIM_SAFE_TEXT.ORDER, ORDER_CANCELLED: CLAIM_SAFE_TEXT.CANCEL, PRICE_UNVERIFIED: CLAIM_SAFE_TEXT.PRICE };
   for (const claims of kinds)
     for (const paymentVerified of [false, true])
       for (const orderConfirmed of [false, true])
@@ -161,8 +164,12 @@ async function testCustomerSignal() {
   // Lỗi đọc căn cứ ⇒ CHẶN (rơi về phía hẹp), và câu không khẳng định thì không đọc gì cả.
   let reads = 0;
   assert.equal((await guardOutgoing("Dạ em đã nhận được tiền ạ", () => Promise.reject(new Error("CSDL hỏng")))).ok, false, "lỗi đọc ⇒ chặn");
+  assert.equal((await guardOutgoing("Dạ chả mực giã tay, 1kg một gói ạ", () => (reads++, Promise.resolve(NO)))).ok, true);
+  assert.equal(reads, 0, "câu không khẳng định, không số tiền ⇒ 0 truy vấn");
+  // Câu có SỐ TIỀN ⇒ đọc căn cứ (tập số tiền đã xác thực — P0 authoritative-quote 11/10/2026); căn cứ không cấp tập số ⇒ không kiểm số.
   assert.equal((await guardOutgoing("Dạ chả mực 400.000 ₫ ạ", () => (reads++, Promise.resolve(NO)))).ok, true);
-  assert.equal(reads, 0, "câu không khẳng định ⇒ 0 truy vấn");
+  assert.equal(reads, 1, "câu có số tiền ⇒ đọc căn cứ một lần");
+  assert.equal((await guardOutgoing("Dạ chả mực 400.000 ₫ ạ", () => Promise.reject(new Error("CSDL hỏng")))).ok, false, "lỗi đọc ⇒ số tiền chưa xác thực ⇒ chặn");
 }
 
 // ═══ QUÉT MÃ NGUỒN ═══
@@ -174,7 +181,7 @@ const SEND_PATHS: Record<string, { covered: boolean; why: string }> = {
   "lib/sales-chatbot/zalo.ts": { covered: true, why: "Zalo OA: gửi chữ của chatTurn (đã qua claim-guard); sendZaloText là ống gửi chung" },
   "lib/sales-chatbot/inbox.ts": { covered: true, why: "NHÂN VIÊN gõ trong hộp thư — chữ của người, không phải khẳng định của AI (nhãn cho gợi ý AI: PR-L5)" },
   "lib/sales-chatbot/order-sync.ts": { covered: true, why: "tin xác nhận mua lại gửi SAU khi đơn ERP đã ghi — khẳng định có đơn thật" },
-  "lib/sales-chatbot/followup.ts": { covered: false, why: "nhắn lại khách do AI soạn, gửi TRƯỚC khi ghi — cổng lifecycle cho follow-up là PR-L6 (kiểm toán 10/10/2026 mục 3.9); tệp giữ cho PR sau" },
+  "lib/sales-chatbot/followup.ts": { covered: true, why: "nhắn lại khách do AI soạn: cổng vòng đời (lifecycle.ts) đọc lại ngay trước khi gửi, rồi guardOutgoing TRƯỚC sendBotText (mission followup-lifecycle, 11/10/2026)" },
 };
 const SEND_PRIMITIVE = /\b(?:sendBotText|sendFanpageText|sendMessengerPageText|sendMessengerText|sendZaloText|zaloSendText|appendBotMessage|sendInbox)\(/;
 const SEND_DEFINITION = /function\s+(?:sendBotText|sendFanpageText|sendMessengerPageText|sendMessengerText|sendZaloText|zaloSendText|appendBotMessage|sendInbox)\(/;
@@ -244,7 +251,8 @@ function testSourceScan() {
   for (const a of appends) assert.ok(allowed.has(a), `tin assistant ghi thẳng chưa khai: ${a}`);
   assert.equal(appends.length, 3, "ba chỗ ghi tin assistant: chữ model · câu giữ lại · câu an toàn");
   // (f) Mọi chữ hằng gửi qua `reply()` không mang khẳng định; đối số không phải hằng thì nằm trong danh sách đã biết.
-  const knownExpr = new Set(["cfg.handoff.message", "cfg.businessHours.outsideMessage", "EMPTY_REPLY_TEXT", "aiDownReply(cfg)", "pick.text", "safeText", "b.safe"]);
+  const knownExpr = new Set(["cfg.handoff.message", "cfg.businessHours.outsideMessage", "EMPTY_REPLY_TEXT", "aiDownReply(cfg)", "pick.text", "safeText", "b.safe", "CLAIM_SAFE_TEXT.PRICE_DISPUTE"]);
+  assert.deepEqual(detectClaims(CLAIM_SAFE_TEXT.PRICE_DISPUTE), [], "câu an toàn khi khách phản đối giá không mang khẳng định");
   for (const arg of replyArgs(core)) {
     if (/^["'`]/.test(arg)) {
       const literal = arg.slice(1, -1).replace(/\$\{[^}]*\}/g, " ");
@@ -258,6 +266,14 @@ function testSourceScan() {
     const lines = read(rel).split("\n");
     if (lines.some((l) => SEND_PRIMITIVE.test(l) && !SEND_DEFINITION.test(l))) callers.add(rel);
   }
+  // (h) Follow-up: chữ AI soạn qua guardOutgoing TRƯỚC khi gửi, và khoá gửi giành TRƯỚC lời gọi gửi (mission followup-lifecycle).
+  const fu = read("lib/sales-chatbot/followup.ts");
+  const fuRun = fu.slice(fu.indexOf("export async function runSalesFollowups("));
+  const fuGuard = fuRun.indexOf("guardOutgoing(text");
+  const fuLock = fuRun.indexOf("claimConversationEvent(");
+  const fuSend = fuRun.indexOf("sendBotText(row.pageId");
+  assert.ok(fuGuard > 0 && fuLock > fuGuard && fuSend > fuLock, "follow-up: guardOutgoing → giành khoá gửi → sendBotText");
+  assert.equal((fuRun.match(/sendBotText\(/g) ?? []).length, 1, "follow-up chỉ một chỗ gửi");
   for (const c of callers) assert.ok(SEND_PATHS[c], `${c} gọi ống gửi tin ra khách mà chưa khai trong SEND_PATHS (đi qua claim-guard chưa?)`);
   for (const k of Object.keys(SEND_PATHS)) assert.ok(callers.has(k), `SEND_PATHS khai ${k} nhưng tệp không còn gửi tin — xoá dòng khai`);
   return Object.entries(SEND_PATHS).filter(([, v]) => !v.covered).map(([k, v]) => `${k} (${v.why})`);
@@ -337,9 +353,9 @@ const INTEGRATION_CASES: GoldenCase[] = [
     channel: "WEB",
     turns: [
       {
-        say: `lay 1 cha muc, Lý Thị Mai ${PHONE_A}, 9 Hai Bà Trưng Hà Nội`,
+        say: `lay 1 cha muc, Lý Thị Mai ${PHONE_A}, 9 Hai Bà Trưng Phường Hoàn Kiếm Hà Nội`,
         ai: [
-          () => [tool("create_customer", { name: "Lý Thị Mai", phone: PHONE_A, address: "9 Hai Bà Trưng, Hà Nội" })],
+          () => [tool("create_customer", { name: "Lý Thị Mai", phone: PHONE_A, address: "9 Hai Bà Trưng, Phường Hoàn Kiếm, Thành phố Hà Nội" })],
           ({ v }) => [tool("create_draft_order", { items: [{ variant_id: v("CHA-MUC"), quantity: 1 }] })],
           () => [say("Tóm tắt đơn: 1 chả mực. Mình lấy thêm gì không, không thì em giao luôn ạ?")],
         ],
@@ -383,7 +399,7 @@ async function testIntegration() {
       if (c.key === "cg-nhap-khong-tinh") {
         assert.ok(state.draft?.orderId && !state.confirmed, "có đơn nháp ERP, chưa chốt");
         const f = await claimFactsLoader(conv)(state);
-        assert.deepEqual(f, NO, "đơn NHÁP của bot (stage NEW) KHÔNG tính là đơn đã chốt");
+        assert.deepEqual(core3(f), NO, "đơn NHÁP của bot (stage NEW) KHÔNG tính là đơn đã chốt");
         assert.equal((await guardOutgoing("Dạ em chốt đơn cho anh rồi ạ.", () => claimFactsLoader(conv)(state))).ok, false);
         return;
       }
@@ -392,7 +408,7 @@ async function testIntegration() {
       assert.deepEqual(transcript.turns[1].shown, ["Dạ em lên đơn cho mình rồi ạ."], "câu «đã lên đơn» SAU khi chốt thành công được gửi");
       const orderId = row.orderId!;
       const f0 = await claimFactsLoader(conv)(state);
-      assert.deepEqual(f0, { paymentVerified: false, orderConfirmed: true, orderCancelled: false }, "đơn chốt ⇒ có đơn; CHƯA có chứng từ thu ⇒ tiền chưa xác minh");
+      assert.deepEqual(core3(f0), { paymentVerified: false, orderConfirmed: true, orderCancelled: false }, "đơn chốt ⇒ có đơn; CHƯA có chứng từ thu ⇒ tiền chưa xác minh");
       assert.equal((await guardOutgoing("Dạ shop đã nhận được tiền của chị rồi ạ", () => claimFactsLoader(conv)(state))).ok, false, "chưa có chứng từ ⇒ chặn câu tiền");
       assert.equal((await guardOutgoing("Shop đã nhận đơn từ hôm qua ạ", () => claimFactsLoader(conv)(state))).ok, true, "có đơn ⇒ «đã nhận đơn» qua");
       const [o] = await db.select().from(schema.orders).where(eq(schema.orders.id, orderId));
@@ -404,7 +420,7 @@ async function testIntegration() {
       assert.equal((await claimFactsLoader(conv)(state)).paymentVerified, false, "thu một phần ⇒ chưa xác minh");
       const rest = await recordManualPaymentCore(admin, orderId, { kind: "RECEIPT", method: "BANK_TRANSFER", amount: due - Math.floor(due / 2), paidAt: new Date().toISOString() });
       assert.ok(rest.ok, JSON.stringify(rest));
-      assert.deepEqual(await claimFactsLoader(conv)(state), { ...ALL, orderCancelled: false }, "chứng từ thu đủ số (nhân viên ghi) ⇒ tiền đã xác minh");
+      assert.deepEqual(core3(await claimFactsLoader(conv)(state)), { ...ALL, orderCancelled: false }, "chứng từ thu đủ số (nhân viên ghi) ⇒ tiền đã xác minh");
       assert.equal((await guardOutgoing("Dạ shop đã nhận được tiền của chị rồi ạ", () => claimFactsLoader(conv)(state))).ok, true, "đủ chứng từ ⇒ câu tiền qua");
       // Ops PR-L0 chạy được trên CSDL tổ chức thật (câu SQL đúng) và chỉ in số đếm / đúng-sai.
       const printed: string[] = [];

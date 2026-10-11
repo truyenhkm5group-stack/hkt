@@ -17,6 +17,7 @@ import { recordConversationEvent } from "@/lib/sales-chatbot/events";
 import { aiHoldOf, cooldownUntilFrom, HUMAN_COOLDOWN_MAX_MINUTES, HUMAN_COOLDOWN_MIN_MINUTES, HUMAN_COOLDOWN_MINUTES, HUMAN_COOLDOWN_SETTING_KEY, humanResumeReason, normalizeCooldownMinutes, type AiHold, type AiHoldInput } from "@/lib/sales-chatbot/ai-hold-shared";
 import { getSettingJson, setSettingJson } from "@/lib/settings";
 import { controlOf, controlSkipNote, NEEDS_HUMAN_NOTE } from "@/lib/sales-chatbot/conversation-control-shared";
+import { HANDOFF_QUEUE_CLEAR } from "@/lib/sales-chatbot/handoff-routing-shared";
 
 /**
  * ═══════════ ĐỔI CHẾ ĐỘ AI ↔ NGƯỜI CỦA MỘT HỘI THOẠI + CỔNG GỬI CỦA BOT ═══════════
@@ -100,12 +101,14 @@ export async function setConversationControlCore(user: SessionUser, conversation
           humanCooldownUntil: null,
           assigneeUserId: sql`coalesce(${c.assigneeUserId}, ${user.id})`,
           assignedAt: sql`coalesce(${c.assignedAt}, ${at})`,
+          // Tiếp quản = AI im ⇒ hội thoại vào hàng đợi người (người bấm là chủ) — mốc tính hạn của đợt (handoff-routing.ts).
+          handoffQueuedAt: sql`coalesce(${c.handoffQueuedAt}, ${at})`,
           updatedAt: at,
         }
       : mode === "COPILOT"
-        ? { state: sql`(${base} - 'handoff') || ${JSON.stringify({ control: stamp })}::jsonb`, status: sql`case when ${c.status} = 'HANDOFF' then 'OPEN' else ${c.status} end`, handoffReason: null, humanCooldownUntil: null, updatedAt: at }
+        ? { state: sql`(${base} - 'handoff') || ${JSON.stringify({ control: stamp })}::jsonb`, status: sql`case when ${c.status} = 'HANDOFF' then 'OPEN' else ${c.status} end`, handoffReason: null, humanCooldownUntil: null, ...HANDOFF_QUEUE_CLEAR, updatedAt: at }
         : // «Cho AI tiếp tục ngay» (đang nhường) / «Trả lại cho AI» (đang tiếp quản / cần người): XOÁ mốc nhường ⇒ AI_ACTIVE ngay.
-          { state: sql`${base} - 'control' - 'handoff'`, status: sql`case when ${c.status} = 'HANDOFF' then 'OPEN' else ${c.status} end`, handoffReason: null, humanCooldownUntil: null, updatedAt: at };
+          { state: sql`${base} - 'control' - 'handoff'`, status: sql`case when ${c.status} = 'HANDOFF' then 'OPEN' else ${c.status} end`, handoffReason: null, humanCooldownUntil: null, ...HANDOFF_QUEUE_CLEAR, updatedAt: at };
   const [row] = await db.update(c).set(set).where(unchanged).returning({ status: c.status });
   if (!row) return { ok: false, error: CONTROL_CHANGED_MEANWHILE };
 
@@ -187,13 +190,19 @@ export function holdSkipNote(conv: Pick<HoldRow, "handoffReason" | "state">, hol
 
 export async function holdGate(conv: HoldRow, now: Date): Promise<{ skip: string } | null> {
   const hold = aiHoldOf(conv, now);
-  if (hold.state !== "AI_ACTIVE") return { skip: holdSkipNote(conv, hold) };
+  if (hold.state !== "AI_ACTIVE") {
+    // Khách nhắn thêm khi AI đang im ⇒ hội thoại VẪN trong hàng đợi người và người phụ trách / phòng nhận MỘT tin mỗi chu kỳ trả lời
+    // (P0 11/10/2026 — trước đây tin chỉ bị bỏ qua, không báo ai). Nạp muộn (vòng phụ thuộc qua inbox-states → fanpage); lỗi báo không
+    // chặn đường xử lý tin. AI nhường tạm sau câu tay của nhân viên không phải «AI im» — hàm tự bỏ qua.
+    await import("@/lib/sales-chatbot/handoff-routing").then((m) => m.noteCustomerWhileQueued(conv.id, now)).catch(() => undefined);
+    return { skip: holdSkipNote(conv, hold) };
+  }
   if (!hold.expired) return null;
   const db = await getDb();
   const c = schema.salesChatConversations;
   const [reopened] = await db
     .update(c)
-    .set({ status: "OPEN", handoffReason: null, state: sql`${c.state} - 'handoff'`, humanCooldownUntil: null, updatedAt: now })
+    .set({ status: "OPEN", handoffReason: null, state: sql`${c.state} - 'handoff'`, humanCooldownUntil: null, ...HANDOFF_QUEUE_CLEAR, updatedAt: now })
     .where(and(eq(c.id, conv.id), eq(c.status, "HANDOFF"), conv.handoffReason ? eq(c.handoffReason, conv.handoffReason) : isNull(c.handoffReason), or(isNull(c.humanCooldownUntil), lte(c.humanCooldownUntil, now))))
     .returning({ id: c.id });
   if (!reopened) return { skip: conv.handoffReason ?? NEEDS_HUMAN_NOTE };

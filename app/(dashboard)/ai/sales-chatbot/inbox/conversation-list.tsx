@@ -6,7 +6,9 @@ import { Bot, Hourglass, Sparkles, UserRound } from "lucide-react";
 import { AI_HOLD_LABEL } from "@/lib/sales-chatbot/ai-hold-shared";
 import { avatarHrefOf, compactTimeAgo, HUMAN_HANDLING_LABEL, INBOX_HANDLING_LABEL, INBOX_SOURCE_LABEL, inboxHref, inboxRowStatus, unreadBadge, type InboxFilterState, type InboxRow } from "@/lib/sales-chatbot/inbox-shared";
 import { inboxDisplayRows } from "@/lib/sales-chatbot/inbox-read-shared";
+import { activeOutsideList, inboxListKey, shownForList } from "@/lib/sales-chatbot/inbox-search-shared";
 import { CUSTOMER_LEVEL_LABEL } from "@/lib/sales-chatbot/levels-shared";
+import { handoffQueueLine } from "@/lib/sales-chatbot/handoff-routing-shared";
 import { cn } from "@/lib/utils";
 import { AvatarLinkWrap, ChannelAvatar } from "./avatar";
 import { useInboxReads } from "./read-store";
@@ -165,6 +167,20 @@ function Row({ r, href, active, showPage, nowMs }: { r: InboxRow; href: string; 
             </span>
           ) : null}
         </div>
+        {r.handoffQueue ? (
+          // AI đang im: hàng LUÔN nói khách chờ bao lâu, ai phụ trách, hạn tới đâu (P0 11/10/2026 — không còn «AI im mà không ai nhận»).
+          <p
+            className={cn(
+              "mt-0.5 truncate pl-5 text-[11px] leading-[14px]",
+              r.handoffQueue.unowned || r.handoffQueue.slaState === "BREACHED" ? "font-semibold text-red-600 dark:text-red-400" : r.handoffQueue.ownerKind === "DEPARTMENT" ? "text-amber-700 dark:text-amber-300" : "text-muted-foreground",
+            )}
+            data-handoff-owner={r.handoffQueue.ownerKind}
+            data-handoff-sla={r.handoffQueue.slaState}
+            suppressHydrationWarning
+          >
+            {handoffQueueLine(r.handoffQueue, nowMs)}
+          </p>
+        ) : null}
         {r.unread && r.afterPreview ? (
           // Dòng phụ: tin khách chưa đọc đã được trả lời (AI · bạn · page) — để nhân viên biết khách không bị bỏ im.
           <p className="mt-0.5 truncate pl-5 text-[11px] leading-[14px] text-muted-foreground" data-after-preview={r.afterPreview.side} suppressHydrationWarning>
@@ -181,13 +197,19 @@ export function ConversationRows({ rows, state, showPage }: { rows: InboxRow[]; 
   const activeId = useSelectedConversation();
   // Bản danh sách ĐÃ HIỆN lần trước — để giữ hội thoại đang mở đứng yên (xem chú thích đầu tệp). Mở hội thoại = đã đọc: hàng đang
   // mở thôi in đậm / số chưa đọc ngay, không đợi lượt làm mới.
-  const shown = useRef<InboxRow[] | null>(null);
+  // Bản đã hiện GẮN với danh tính danh sách (`inboxListKey` — mọi bộ lọc + ô tìm): đổi ô tìm / bộ lọc là danh sách MỚI, hàng đang mở
+  // của danh sách cũ KHÔNG được chèn vào kết quả mới (P0 inbox-search 11/10/2026 — trước đây `keepActiveInPlace` mang nó sang).
+  const listKey = inboxListKey(state);
+  const shown = useRef<{ key: string; rows: InboxRow[] } | null>(null);
   // Xác nhận đọc của máy chủ (khung chat ghi vào read-store) thắng mọi bản danh sách dựng TRƯỚC lượt đọc.
   const reads = useInboxReads();
-  const display = inboxDisplayRows(rows, shown.current, { activeId, filter: state.filter, reads });
+  const display = inboxDisplayRows(rows, shownForList(shown.current, listKey), { activeId, filter: state.filter, reads });
   useEffect(() => {
-    shown.current = display;
+    shown.current = { key: listKey, rows: display };
   });
+  // Hội thoại đang mở KHÔNG có trong danh sách này (vừa đổi ô tìm / bộ lọc, hoặc mở bằng đường dẫn) ⇒ nói rõ, không để người đọc
+  // tưởng khung chat bên phải là một kết quả tìm.
+  const outside = activeOutsideList(activeId, display);
   // Giờ «x phút» tính theo đồng hồ trình duyệt, cập nhật mỗi phút (trang tự làm mới 5 giây đã đọc lại dữ liệu).
   const [nowMs, setNowMs] = useState(() => Date.now());
   useEffect(() => {
@@ -204,6 +226,14 @@ export function ConversationRows({ rows, state, showPage }: { rows: InboxRow[]; 
   return (
     <>
       <li ref={anchor} hidden aria-hidden />
+      {outside ? (
+        <li className="flex items-center gap-2 bg-amber-50 px-3 py-1.5 text-[12px] text-amber-900 dark:bg-amber-950/40 dark:text-amber-100" data-testid="inbox-active-outside" role="status">
+          <span className="min-w-0 flex-1">{state.q.trim() ? "Hội thoại đang mở không nằm trong kết quả tìm này." : "Hội thoại đang mở không nằm trong danh sách này."}</span>
+          <Link href={inboxHref(state, { c: null })} className="shrink-0 font-medium underline" prefetch={false}>
+            Đóng
+          </Link>
+        </li>
+      ) : null}
       {display.map((r) => (
         <li key={r.id}>
           <Row r={r} href={inboxHref(state, { c: r.id })} active={r.id === activeId} showPage={showPage} nowMs={nowMs} />

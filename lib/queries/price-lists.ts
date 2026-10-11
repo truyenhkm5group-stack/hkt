@@ -1,5 +1,5 @@
 import { asc, eq, inArray, sql } from "drizzle-orm";
-import { getDb, schema } from "@/db";
+import { getDb, schema, type Db } from "@/db";
 import type { PriceListBook, PriceTier } from "@/lib/constants/price-lists";
 
 /** Bảng giá cho trang danh sách — số bậc, số mẫu mã, số khách đang gán. */
@@ -35,8 +35,8 @@ export async function getPriceList(id: string): Promise<{ id: string; name: stri
  * Bảng giá áp cho MỘT khách: bảng gán cho khách (nếu còn bật) + bảng mặc định đang bật. Khách `null` (chưa nhận ra là
  * ai) ⇒ chỉ bảng mặc định. Đầu vào của `quoteUnitPrice` ở chatbot.
  */
-export async function priceBooksFor(customerId: string | null): Promise<{ customerList: PriceListBook | null; defaultList: PriceListBook | null }> {
-  const db = await getDb();
+export async function priceBooksFor(customerId: string | null, dbIn?: Db): Promise<{ customerList: PriceListBook | null; defaultList: PriceListBook | null }> {
+  const db = dbIn ?? (await getDb());
   const lists = await db.select().from(schema.priceLists).where(eq(schema.priceLists.active, true));
   if (lists.length === 0) return { customerList: null, defaultList: null };
   let assigned: string | null = null;

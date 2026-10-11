@@ -45,6 +45,8 @@ import { nextFollowupAt } from "@/lib/sales-chatbot/followup-shared";
 import { fetchPancakeThreadProfile, threadProfileStale } from "@/lib/sales-chatbot/returning";
 import { noteAiCustomerReply } from "@/lib/pricing/ai-customer";
 import { loadFollowupSettings } from "@/lib/sales-chatbot/followup-settings";
+import { confirmedStaleness, settleConfirmedConversation } from "@/lib/sales-chatbot/confirmed-settle";
+import { loadLifecycle } from "@/lib/sales-chatbot/lifecycle";
 import type { ChatState } from "@/lib/sales-chatbot/tools";
 import { imagesAlreadyDescribed, pancakeImageUrls, pancakeStickerUrls } from "@/lib/sales-chatbot/vision";
 import { adReferralFromPancake, isPancakePageSide, type AdReferral } from "@/lib/sales-chatbot/ad-referral-shared";
@@ -58,6 +60,7 @@ import { loadThreadLedger, ownerOfConversation, pauseVerified, templateTexts } f
 import { recordConversationEvent } from "@/lib/sales-chatbot/events";
 import { notifySalesChatHandoff } from "@/lib/sales-chatbot/alerts";
 import { CONTROL_HUMAN_NOTE, NEEDS_HUMAN_NOTE, TAKEOVER_REASON } from "@/lib/sales-chatbot/conversation-control-shared";
+import { HANDOFF_QUEUE_CLEAR } from "@/lib/sales-chatbot/handoff-routing-shared";
 
 export const FANPAGE_CONNECTOR = "pancake-fanpage";
 /** Nhân viên thật vừa trả lời trên fanpage ⇒ bot im lặng chừng này phút cho hội thoại đó. */
@@ -167,7 +170,7 @@ export const INHERITED_PAUSE_APP = "inherited:verified-pause";
 
 /**
  * Hội thoại (page, luồng) đang ở tay một NGƯỜI ĐÃ XÁC MINH tại `now` (nhường còn hạn mang dấu VERIFIED_HUMAN, hoặc «Tiếp quản») ⇒ mã
- * hội thoại; không ⇒ `null`. Nhường cũ không dấu (trước 0242) / AI xin người / AI hỏng KHÔNG tính.
+ * hội thoại; không ⇒ `null`. Nhường cũ không dấu (trước 0244) / AI xin người / AI hỏng KHÔNG tính.
  */
 export async function heldByVerifiedHuman(pageId: string, threadId: string, now: Date): Promise<string | null> {
   const conv = await conversationFor(pageId, threadId).catch(() => null);
@@ -297,11 +300,11 @@ export type FanpageEvent = {
    */
   avatar?: PancakeAvatarFacts | null;
   /**
-   * 0242: mốc TẠO tin ở Pancake (`message.inserted_at`, UTC không múi giờ) — so thứ tự theo NGUỒN, không theo giờ webhook tới.
+   * 0244: mốc TẠO tin ở Pancake (`message.inserted_at`, UTC không múi giờ) — so thứ tự theo NGUỒN, không theo giờ webhook tới.
    * `null` / thiếu = chưa biết.
    */
   sourceAt?: Date | null;
-  /** 0242: tài khoản / ứng dụng gửi mà Pancake ghi (`from.uid` / `from.admin_id`; tin tự động ⇒ «pancake-automation»). */
+  /** 0244: tài khoản / ứng dụng gửi mà Pancake ghi (`from.uid` / `from.admin_id`; tin tự động ⇒ «pancake-automation»). */
   senderApp?: string | null;
 };
 
@@ -353,7 +356,7 @@ export function parsePancakeWebhook(payload: unknown): FanpageEvent | null {
   const automated = fromPage && Boolean(from.ai_generated || from.is_automated);
   const adReferral = fromPage ? null : adReferralFromPancake(payload);
   const senderId = fromPage ? "" : str(conv?.from_psid) || str(from.id);
-  const avatar = fromPage || !inbox ? null : mergePancakeAvatarFacts([pancakeAvatarFactsOf(conv, "WEBHOOK"), pancakeAvatarFactsOf(msg, "WEBHOOK")]);
+  const avatar = fromPage || !inbox ? null : mergePancakeAvatarFacts([pancakeAvatarFactsOf(conv, "WEBHOOK", pageId), pancakeAvatarFactsOf(msg, "WEBHOOK", pageId)]);
   const sourceMs = pancakeMs(msg?.inserted_at ?? msg?.created_at);
   const sourceAt = sourceMs === null ? null : new Date(sourceMs);
   const senderApp = fromPage ? str(from.uid) || str(from.admin_id) || (automated ? "pancake-automation" : "") || null : null;
@@ -809,6 +812,17 @@ export async function markWaitingForCustomer(conversationId: string, now: Date, 
   if (!row) return;
   const st = (row.state ?? {}) as ChatState;
   const done = row.status === "HANDOFF" || Boolean(st.confirmed) || Boolean(st.declined) || Boolean(st.handoff);
+  // ĐƠN ĐÃ XÁC NHẬN THẮNG SỔ CŨ (chủ shop 11/10/2026 · P0-B): `state.confirmed` chỉ do `confirm_order` ghi — đơn tự xác nhận ở lõi
+  // đơn (công tắc «đơn đủ thông tin = đã xác nhận») hay do người xác nhận thì sổ vẫn trống. Đọc ĐƠN THẬT trước khi xếp lịch: đã
+  // xác nhận ⇒ không xếp, dọn lịch cũ + bước DONE ngay tại đây. Đọc lỗi ⇒ xếp như cũ (cổng của job đọc lại và chặn ở phía hẹp).
+  if (!done) {
+    const loaded = await loadLifecycle(conversationId, now).catch(() => null);
+    if (loaded && confirmedStaleness(loaded.conv, loaded.snapshot).confirmed) {
+      await db.update(c).set({ lastBotAt: now, ...(threadId ? { threadId } : {}) }).where(eq(c.id, conversationId));
+      await settleConfirmedConversation(loaded.conv, loaded.snapshot, now, "SCHEDULE").catch(() => undefined);
+      return;
+    }
+  }
   const fs = await loadFollowupSettings();
   await db
     .update(c)
@@ -1031,7 +1045,7 @@ async function buyIntentWhileHeld(conv: NonNullable<Awaited<ReturnType<typeof co
   const c = schema.salesChatConversations;
   const [reopened] = await db
     .update(c)
-    .set({ status: "OPEN", handoffReason: null, humanCooldownUntil: null, state: sql`${c.state} - 'handoff'`, updatedAt: now })
+    .set({ status: "OPEN", handoffReason: null, humanCooldownUntil: null, state: sql`${c.state} - 'handoff'`, ...HANDOFF_QUEUE_CLEAR, updatedAt: now })
     .where(and(eq(c.id, conv.id), eq(c.status, "HANDOFF"), conv.handoffReason ? eq(c.handoffReason, conv.handoffReason) : isNull(c.handoffReason)))
     .returning({ id: c.id });
   if (!reopened) return "NONE";
@@ -1623,7 +1637,7 @@ export async function noteListedAvatars(pageId: string, convs: readonly Record<s
       const threadId = str(conv.id);
       const type = str(conv.type).toUpperCase();
       if (!threadId || (type && type !== "INBOX")) continue;
-      byKey.set(fanpageVisitorKey(pageId, threadId), pancakeAvatarFactsOf(conv, "POLL"));
+      byKey.set(fanpageVisitorKey(pageId, threadId), pancakeAvatarFactsOf(conv, "POLL", pageId));
     }
     if (!byKey.size) return 0;
     const db = await getDb();
@@ -1724,7 +1738,7 @@ export async function catchUpFanpage(deps: FanpageDeps = {}): Promise<CatchUpRes
     const customerName = str((c.from as { name?: unknown } | undefined)?.name) || str(((c.customers as { name?: unknown }[] | undefined) ?? [])[0]?.name);
     let touched = 0;
     for (const m of waiting) {
-      const r = await receiveFanpageEvent({ pageId, threadId, messageId: m.id, text: m.text, customerName, fromPage: false, humanStaff: false, inbox: true, comment: null, imageUrls: [], avatar: pancakeAvatarFactsOf(c, "POLL") }, now());
+      const r = await receiveFanpageEvent({ pageId, threadId, messageId: m.id, text: m.text, customerName, fromPage: false, humanStaff: false, inbox: true, comment: null, imageUrls: [], avatar: pancakeAvatarFactsOf(c, "POLL", pageId) }, now());
       if (r.queued) {
         out.queued += 1;
         touched += 1;

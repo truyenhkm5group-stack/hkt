@@ -10,6 +10,7 @@ import { saveFollowupSettings } from "@/lib/sales-chatbot/followup-settings";
 import { chatTurn, conversationView, openConversation, resumeConversationToAi } from "@/lib/sales-chatbot/engine";
 import { bindOrganization } from "@/lib/platform/background";
 import { recordConversationEvent } from "@/lib/sales-chatbot/events";
+import { clearHandoffQueue } from "@/lib/sales-chatbot/handoff-routing";
 import { cancelInboxHistory, driveInboxHistory, startInboxHistory } from "@/lib/sales-chatbot/history";
 import { runMessengerHistory, startMessengerHistory } from "@/lib/sales-chatbot/messenger-history";
 import { checkLearnNow, learnLessons, rollbackLessons, saveLessons, setLessonsEnabled } from "@/lib/sales-chatbot/lessons";
@@ -171,6 +172,8 @@ export async function resumeConversationAction(id: string): Promise<{ ok: true; 
   if (!can(user, SALES_CHATBOT_MANAGE)) return { error: "Bạn không có quyền điều khiển chatbot bán hàng (ai_sales:manage)." };
   const done = await resumeConversationToAi(String(id ?? ""));
   if (!done) return { error: "Hội thoại không ở trạng thái cần người xử lý." };
+  // AI nhận lại ⇒ rời hàng đợi người, xoá hạn (lib/sales-chatbot/handoff-routing.ts).
+  await clearHandoffQueue(String(id));
   const at = new Date();
   await recordConversationEvent(String(id), { type: "ai.resumed", actorKind: "HUMAN", actorUserId: user.id, occurredAt: at, reasonCode: "RETURNED", key: `resume:${at.toISOString()}` });
   await audit({ userId: user.id, userEmail: user.email, action: "SALES_CHAT_RESUME_AI", entity: "SALES_CHAT_CONVERSATION", entityId: String(id), reason: "Người xử lý xong — trả hội thoại lại cho AI" });

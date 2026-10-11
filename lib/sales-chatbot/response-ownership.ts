@@ -143,7 +143,7 @@ export function originPausesAi(origin: OutboundOrigin): boolean {
   return origin === "VERIFIED_HUMAN";
 }
 
-/** Đọc ngược cột `sender_kind` (chuỗi lạ / NULL ⇒ `null` — dòng cũ trước 0242). HÀM THUẦN. */
+/** Đọc ngược cột `sender_kind` (chuỗi lạ / NULL ⇒ `null` — dòng cũ trước 0244). HÀM THUẦN. */
 export function parseOrigin(v: unknown): OutboundOrigin | null {
   return typeof v === "string" && (OUTBOUND_ORIGINS as readonly string[]).includes(v) ? (v as OutboundOrigin) : null;
 }
@@ -564,7 +564,7 @@ export function purchaseIntent(text: string): { intent: boolean; kind: "BUY_WORD
 
 /**
  * Khách có ý định mua TRONG LÚC NHƯỜNG: có NGƯỜI THẬT cầm (nhường do người đã xác minh / tiếp quản tay) ⇒ báo ngay người đó (AI vẫn
- * im); nhường KHÔNG có người thật đứng sau (nguồn gốc mơ hồ / dòng cũ trước 0242) ⇒ AI tiếp ngay — không bao giờ bỏ khách sẵn sàng
+ * im); nhường KHÔNG có người thật đứng sau (nguồn gốc mơ hồ / dòng cũ trước 0244) ⇒ AI tiếp ngay — không bao giờ bỏ khách sẵn sàng
  * mua. Không có ý định mua ⇒ giữ luật nhường. HÀM THUẦN.
  */
 export function buyIntentDuringPause(i: { intent: boolean; owner: ResponseOwnerState; pauseVerified: boolean }): "NONE" | "NOTIFY_HOLDER" | "AI_CONTINUES" {

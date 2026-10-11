@@ -101,6 +101,9 @@ async function testRealOrg() {
       const db = await getDb();
       const admin = await adminOf();
       await setSettingJson(SALES_CHATBOT_SETTING_KEY, { ...DEFAULT_SALES_CHATBOT_CONFIG, enabled: true });
+      // Giá model giả nói («280k/kg») phải là giá CÓ THẬT trong danh mục — hàng rào số tiền (P0 authoritative-quote 11/10/2026) chặn số bịa.
+      await db.insert(schema.products).values({ id: "rt-p1", name: "Chả cá thu" });
+      await db.insert(schema.productVariants).values({ id: "rt-v1", productId: "rt-p1", sku: "RT-CCT1", retailPrice: 280_000 });
       const posts: string[] = [];
       let sendFails = false;
       const pancakeFetch = (async (input: RequestInfo | URL, init?: RequestInit) => {

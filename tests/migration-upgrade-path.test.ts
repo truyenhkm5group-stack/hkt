@@ -189,7 +189,9 @@ const MOI = [
   "0239_sales_chat_reads",
   "0240_tech_registry_projection",
   "0241_tenant_value_snapshots",
-  "0242_sales_chat_inbound_sender",
+  "0242_sales_chat_handoff_queue",
+  "0243_followup_decided_event",
+  "0244_sales_chat_inbound_sender",
 ] as const;
 
 /*
@@ -411,11 +413,11 @@ export async function testMigrationUpgradePath() {
     await assert.rejects(client.query(`insert into platform_tenant_health_daily (day, org_code, level, churn_risk, reason_codes, churn_reason_codes, rule_version) values (current_date, 'up-tv', 'TOT', 'LOW', array['ALL_SIGNALS_OK']::text[], array['NO_RISK_SIGNAL']::text[], 'v1')`), "bước 2: 0241 — mức trong danh sách đóng");
     await client.query(`delete from platform_tenant_value_snapshots where org_code = 'up-tv'`);
 
-    // 0242 (nguồn gốc người gửi của tin phía page — P0 response-ownership): ba cột mới NULL ở dòng cũ (không backfill — luật 35);
+    // 0244 (nguồn gốc người gửi của tin phía page — P0 response-ownership): ba cột mới NULL ở dòng cũ (không backfill — luật 35);
     // CHECK chỉ nhận sáu nguồn gốc đóng.
-    assert.equal(await dem("select count(*)::int as n from sales_chat_inbound where sender_kind is not null or source_at is not null or sender_app is not null"), 0, "bước 2: 0242 không đoán nguồn gốc cho dòng cũ");
+    assert.equal(await dem("select count(*)::int as n from sales_chat_inbound where sender_kind is not null or source_at is not null or sender_app is not null"), 0, "bước 2: 0244 không đoán nguồn gốc cho dòng cũ");
     await client.query(`insert into sales_chat_inbound (id, page_id, thread_id, message_id, text, note, sender_kind, source_at) values ('up-sk-1', 'up-p', 'up-t', 'up-sk-1', 'Dạ', 'PAGE_REPLY', 'PANCAKE_AUTOMATION', now())`);
-    await assert.rejects(client.query(`insert into sales_chat_inbound (id, page_id, thread_id, message_id, text, note, sender_kind) values ('up-sk-2', 'up-p', 'up-t', 'up-sk-2', 'Dạ', 'PAGE_REPLY', 'NHAN_VIEN')`), "bước 2: 0242 — nguồn gốc trong danh sách đóng");
+    await assert.rejects(client.query(`insert into sales_chat_inbound (id, page_id, thread_id, message_id, text, note, sender_kind) values ('up-sk-2', 'up-p', 'up-t', 'up-sk-2', 'Dạ', 'PAGE_REPLY', 'NHAN_VIEN')`), "bước 2: 0244 — nguồn gốc trong danh sách đóng");
     await client.query(`delete from sales_chat_inbound where page_id = 'up-p'`);
 
     // 0178 (G-ORDER — phiếu giao có ký nhận của đơn tạo tay): bảng mới RỖNG (không đoán đơn nào "đã giao" — mục 8.8, 35);

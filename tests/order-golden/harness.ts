@@ -45,6 +45,8 @@ export type OrderGoldenCaseRun = {
   toolErrors: string[];
   /** Engine hỏi model nhiều / ít vòng hơn kịch bản — kịch bản không còn đi đúng đường đã định. Rỗng = khớp. */
   scriptIssues: string[];
+  /** Máy chủ TỰ CHỐT đơn ở một lượt nào đó (P0-A 11/10/2026 — chỉ biến thể BẬT công tắc tự xác nhận). */
+  autoConfirmed: boolean;
 };
 
 export type OrderGoldenRun = { variant: OrderGoldenVariant; cases: OrderGoldenCaseRun[]; summary: OrderGoldenSummary };
@@ -103,6 +105,10 @@ function scriptIssuesOf(c: OrderGoldenCase, t: GoldenTranscript): string[] {
   if (t.turns.length !== c.turns.length) out.push(`${t.turns.length} lượt chạy ≠ ${c.turns.length} lượt kịch bản`);
   t.turns.forEach((turn, i) => {
     const want = c.turns[i]?.ai.length ?? 0;
+    // TỰ CHỐT KHI ĐỦ ĐƠN (chủ shop 11/10/2026, P0-A — biến thể BẬT): đơn đã tự chốt ở lượt trước ⇒ tin sau của khách đi luật «khách nhắn
+    // sau khi đã chốt» — đơn tự chốt thì bot xử lý tiếp (sửa chính đơn), kịch bản viết cho luồng xin xác nhận cũ không còn là đường của lượt đó.
+    const autoConfirmedBefore = t.turns.slice(0, i).some((p) => JSON.stringify(p.rounds.map((r) => r.results)).includes('"auto_confirmed":true'));
+    if (autoConfirmedBefore && (turn.rounds.length === 0 || want === 0)) return;
     if (turn.rounds.length !== want) out.push(`lượt ${i + 1} «${turn.customer.slice(0, 40)}»: engine hỏi model ${turn.rounds.length} vòng, kịch bản có ${want}`);
   });
   return out;
@@ -131,7 +137,7 @@ export async function runOrderGolden(variant: OrderGoldenVariant, cases: readonl
     afterCase: async (g, ctx, transcript) => {
       const c = caseOf(g);
       const observation: OrderCaseObservation = { key: c.key, orders: await ordersSince(before, ctx.ids) };
-      runs.set(c.key, { key: c.key, observation, score: scoreOrderCase(labelFor(c, variant), observation), status: transcript.final.status, toolErrors: toolErrorsOf(transcript), scriptIssues: scriptIssuesOf(c, transcript) });
+      runs.set(c.key, { key: c.key, observation, score: scoreOrderCase(labelFor(c, variant), observation), status: transcript.final.status, toolErrors: toolErrorsOf(transcript), scriptIssues: scriptIssuesOf(c, transcript), autoConfirmed: JSON.stringify(transcript.turns.map((t) => t.rounds.map((r) => r.results))).includes('"auto_confirmed":true') });
     },
   });
   const list = cases.map((c) => {

@@ -1,4 +1,4 @@
--- 0242 · AI IM LẶNG / CHẶN TRẢ LỜI SAI (P0 response-ownership, chủ shop 11/10/2026 — ca «Uyen Tran», «Lê Bạch Nguyên»).
+-- 0244 · AI IM LẶNG / CHẶN TRẢ LỜI SAI (P0 response-ownership, chủ shop 11/10/2026 — ca «Uyen Tran», «Lê Bạch Nguyên»).
 -- Tin phía page được ghi `PAGE_REPLY` mà không biết AI GỬI: tin chào quảng cáo bị coi là «nhân viên đã trả lời», chữ hệ thống
 -- trả lời bình luận của Facebook bị coi là NGƯỜI và bật nhường 30 phút. Ba cột cho dòng sổ tin thô, chỉ CỘNG THÊM, idempotent:
 --   sender_kind — nguồn gốc người gửi của tin phía page ngoài ERP (lib/sales-chatbot/response-ownership.ts::OUTBOUND_ORIGINS);

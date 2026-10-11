@@ -1692,8 +1692,22 @@
     {
       "idx": 242,
       "version": "7",
-      "when": 1791401137123,
-      "tag": "0242_sales_chat_inbound_sender",
+      "when": 1791401200000,
+      "tag": "0242_sales_chat_handoff_queue",
+      "breakpoints": true
+    },
+    {
+      "idx": 243,
+      "version": "7",
+      "when": 1791401300000,
+      "tag": "0243_followup_decided_event",
+      "breakpoints": true
+    },
+    {
+      "idx": 244,
+      "version": "7",
+      "when": 1791401337123,
+      "tag": "0244_sales_chat_inbound_sender",
       "breakpoints": true
     }
   ]

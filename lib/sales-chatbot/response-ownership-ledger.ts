@@ -140,7 +140,7 @@ export async function templateTexts(pageId: string, threadId: string, customerTe
 export const ROW_TEMPLATE_WINDOW_MS = 168 * 3_600_000;
 
 /**
- * Dòng phía page CŨ (chưa có `sender_kind`, trước 0242) nào là TIN MẪU: cùng khoá (gộp khoảng trắng, ≥ 40 ký tự) đã có ở một hội thoại
+ * Dòng phía page CŨ (chưa có `sender_kind`, trước 0244) nào là TIN MẪU: cùng khoá (gộp khoảng trắng, ≥ 40 ký tự) đã có ở một hội thoại
  * KHÁC của page trong 168 giờ TRƯỚC mốc của CHÍNH dòng đó — đúng điều đường nhận (`isPageTemplate`) hỏi lúc dòng tới. Kết quả TẤT ĐỊNH
  * theo dòng (không phụ thuộc «bây giờ») ⇒ lưu / cache được; bản SQL trong `latestCustomerTurnUnhandledFor`. Trả mã tin.
  */
@@ -345,7 +345,7 @@ export function ownerOfConversation(conv: OwnerConvRow, ledger: readonly LedgerM
 
 /**
  * Lần nhường ĐANG CÓ được bật bởi một NGƯỜI ĐÃ XÁC MINH (`state.pause.origin = VERIFIED_HUMAN` với đúng mốc hết hạn đang lưu), hay
- * người bấm «Tiếp quản». Dòng nhường cũ (trước 0242, không có dấu) ⇒ KHÔNG xác minh được. HÀM THUẦN.
+ * người bấm «Tiếp quản». Dòng nhường cũ (trước 0244, không có dấu) ⇒ KHÔNG xác minh được. HÀM THUẦN.
  */
 export function pauseVerified(conv: OwnerConvRow): boolean {
   if (readConversationControl(conv.state)?.mode === "HUMAN") return true;
