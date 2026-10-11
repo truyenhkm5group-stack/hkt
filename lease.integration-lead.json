@@ -2,9 +2,9 @@
   "name": "integration-lead",
   "holder": "DESKTOP-56TH98Y:wt-tech-lead-v2",
   "purpose": "",
-  "acquired_at": "2026-10-10T14:43:56.209Z",
-  "heartbeat_at": "2026-10-10T14:43:56.209Z",
-  "expires_at": "2026-10-11T02:43:56.209Z",
-  "generation": 5,
-  "token_hash": "8973857e4b3de3716fd965b726415d59bea656c709859ac3095b8ebc46555fb9"
+  "acquired_at": "2026-10-11T03:47:53.029Z",
+  "heartbeat_at": "2026-10-11T03:47:53.029Z",
+  "expires_at": "2026-10-11T15:47:53.029Z",
+  "generation": 6,
+  "token_hash": "d9ed966c1e7ccbba61d1dbba0acac716eaf6575b85af7ef617662833521988d9"
 }
