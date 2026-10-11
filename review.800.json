@@ -1,8 +1,8 @@
 {
   "pr": 800,
-  "sha": "07c1e057414770fa489a2d0fc352831e1ec49c74",
+  "sha": "099823bced8a5fa907b04696ffc995b98f1ca266",
   "verdict": "PASS",
   "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
-  "at": "2026-10-11T04:28:31.457Z",
-  "note": "Đúng luật 19/22/25/26: phép chiếu /work, hạn/phòng lấy lại từ hằng đang chạy + ghi đè settings, phân việc mặc định TẮT không giật việc, leo thang tính lúc đọc 1 tin/phòng/ngày; migration chỉ ADD COLUMN; không chạm engine.ts"
+  "at": "2026-10-11T06:48:55.321Z",
+  "note": "Bài chuông giữ ý định luật 03/10, kiểm chặt hơn theo khoá đợt; gộp main không xung đột"
 }
