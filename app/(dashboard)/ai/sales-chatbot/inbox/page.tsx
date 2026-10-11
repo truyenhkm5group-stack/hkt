@@ -8,6 +8,7 @@ import { countHumanHandled } from "@/lib/sales-chatbot/bulk-return-ai";
 import { listLabels } from "@/lib/sales-chatbot/inbox-labels";
 import { INBOX_CHANNELS, INBOX_FILTERS, INBOX_LIST_MAX, INBOX_PERIODS, inboxHref, type InboxChannel, type InboxFilter, type InboxFilterState, type InboxHandler, type InboxPeriod } from "@/lib/sales-chatbot/inbox-shared";
 import { listPageRoutes } from "@/lib/sales-chatbot/channel-ownership";
+import { inboxEmptyHint } from "@/lib/sales-chatbot/inbox-search-shared";
 import { humanCooldownMinutes } from "@/lib/sales-chatbot/conversation-control";
 import { organizationLevelPack } from "@/lib/sales-chatbot/levels";
 import { CUSTOMER_LEVELS, levelsForPack, type CustomerLevel } from "@/lib/sales-chatbot/levels-shared";
@@ -113,6 +114,7 @@ export default async function SalesInboxPage({ searchParams }: { searchParams: P
   // Bộ lọc đang áp — MỘT đối tượng dựng mọi đường dẫn của hộp thư (`inboxHref`, ĐÚNG tên tham số cũ).
   const state: InboxFilterState = { filter, q, page, channel, handler, assignee, phone, level, period, from, to, label, limit, selected: selected || null };
   const href = (patch: Parameters<typeof inboxHref>[1]) => inboxHref(state, patch);
+  const emptyHint = list.ok ? inboxEmptyHint(filter, list.counts, q) : null;
   const description = `Facebook · Instagram · Zalo OA · chat web — trả lời khách ngay tại đây. Nhân viên gửi tin thì AI nhường ${cooldown} phút.`;
 
   return (
@@ -171,7 +173,18 @@ export default async function SalesInboxPage({ searchParams }: { searchParams: P
                     Chưa có tin khách nào — tin nhắn mới sẽ hiện ở đây ngay khi khách nhắn.
                   </li>
                 ) : (
-                  <li className="p-6 text-center text-sm text-muted-foreground">Không có hội thoại nào ở bộ lọc này.</li>
+                  <li className="space-y-2 p-6 text-center text-sm text-muted-foreground" data-testid="inbox-empty-filter">
+                    <p>Không có hội thoại nào ở bộ lọc này.</p>
+                    {/* Bộ lọc rỗng mà «Tất cả» (cùng ô tìm, cùng page) có ⇒ nói ra và dẫn sang — số từ CÙNG câu đếm (inbox-search-shared.ts). */}
+                    {emptyHint ? (
+                      <p data-testid="inbox-empty-hint" data-count={emptyHint.count}>
+                        {emptyHint.text} —{" "}
+                        <Link href={href({ f: null, n: null })} className="font-medium text-primary hover:underline">
+                          xem
+                        </Link>
+                      </p>
+                    ) : null}
+                  </li>
                 )
               ) : null}
               <ConversationRows rows={list.rows} state={state} showPage={pages.length > 1 && !page} />

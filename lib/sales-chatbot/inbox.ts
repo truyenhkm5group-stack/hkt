@@ -70,6 +70,7 @@ type StaffImageType = (typeof STAFF_IMAGE_TYPES)[number];
 import { sendBotText, sendPageImages } from "@/lib/sales-chatbot/messenger";
 import { draftCopilotSuggestion, loadModeConfig } from "@/lib/sales-chatbot/operating-mode";
 import { feedbackFor } from "@/lib/sales-chatbot/inbox-feedback";
+import { inboxSearchCondition } from "@/lib/sales-chatbot/inbox-search";
 import { CUSTOMER_LEVELS, parseCustomerLevel, type CustomerLevel } from "@/lib/sales-chatbot/levels-shared";
 import type { ChatState } from "@/lib/sales-chatbot/tools";
 import { assessCustomerRisk } from "@/lib/alerts/risk";
@@ -265,10 +266,9 @@ export async function listInbox(
   if (q.channel) base.push(eq(c.channel, q.channel));
   if (q.page) base.push(eq(c.pageId, q.page));
   if (q.label) base.push(sql`exists (select 1 from "sales_chat_conversation_labels" cl where cl.conversation_id = "${sql.raw(C)}"."id" and cl.label_id = ${q.label})`);
-  if (q.q) {
-    const like = `%${q.q.replace(/[%_\\]/g, (m) => `\\${m}`)}%`;
-    base.push(or(sql`${cu.name} ilike ${like}`, sql`${cu.phone} ilike ${like}`, sql`${c.customerPhone} ilike ${like}`, sql`${c.state}->'customer'->>'name' ilike ${like}`, sql`${c.state}->'customer'->>'phone' ilike ${like}`, sql`${INBOUND_NAME} ilike ${like}`)!);
-  }
+  // Ô tìm: SĐT chuẩn hoá · tên bỏ dấu / khoảng trắng · tin khách · đơn · mã đơn — MỘT chỗ dựng (inbox-search.ts).
+  const searchCond = await inboxSearchCondition(q.q);
+  if (searchCond) base.push(searchCond);
   if (q.phone === "HAS") base.push(HAS_PHONE);
   if (q.phone === "NONE") base.push(sql`not ${HAS_PHONE}`);
   // Ai đang trả lời (INBOX_HANDLERS) — CÙNG điều kiện với huy hiệu trên hàng (`classifyInboxState`, inbox-states.ts — một nguồn).

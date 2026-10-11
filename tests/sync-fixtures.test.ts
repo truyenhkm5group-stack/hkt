@@ -502,6 +502,7 @@ import { testPancakeAvatarShape } from "./pancake-avatar-shape.test";
 import { testAvatarProxy } from "./avatar-proxy.test";
 import { testInboxSemanticsV3 } from "./inbox-semantics-v3.test";
 import { testInboxReadV3 } from "./inbox-read-v3.test";
+import { testInboxSearch } from "./inbox-search.test";
 import { testInboxBulkAi } from "./inbox-bulk-ai.test";
 import { testSalesInboxHistory } from "./sales-inbox-history.test";
 import { testE2eAiSalesPlatform } from "./e2e-ai-sales-platform.test";
@@ -2921,6 +2922,8 @@ async function main() {
   await testInboxSemanticsV3();
   // INBOX READ V3 (chủ shop 10/10/2026 tối, P0): «chưa đọc» = có tin KHÁCH thật sau con trỏ đọc CỦA NGƯỜI XEM (0239); nạp khung chat ≠ đọc; con trỏ = tin khách cuối của payload, chỉ tiến; xem trước tin khách khi chưa đọc; danh sách vá theo xác nhận đọc; audit FALSE-UNREAD = 0 — tổ chức `hop-thu-doc-v3`.
   await testInboxReadV3();
+  // TÌM KIẾM HỘP THƯ (P0 inbox-search, chủ shop 11/10/2026): SĐT chuẩn hoá 0/+84/khoảng trắng · SĐT trong tin / đơn / Pancake / web · tên bỏ dấu + khoảng trắng · mã đơn · tìm × bộ lọc × phân trang · UNREAD rỗng ⇒ gợi ý «Tất cả» đúng số · danh sách mới không mang hội thoại cũ · 3.000 hội thoại — `tim-hop-thu-a` / `tim-hop-thu-b`.
+  await testInboxSearch();
   // «Trả tất cả cho AI» (chủ shop 10/10/2026, mục D): quyền · cách ly tổ chức · trả được / bị chặn theo lý do · sự kiện + nhật ký người bấm · chạy lại 0 dòng mới — `hop-thu-bulk-a` / `hop-thu-bulk-b`.
   await testInboxBulkAi();
   // Nhập đủ lịch sử hội thoại vào hộp thư (0221): tổ chức THẬT `hop-thu-lich-su`, Pancake giả, tự cấp, tự dọn.

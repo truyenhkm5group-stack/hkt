@@ -28,6 +28,7 @@ import { CUSTOMER_LEVEL_LABEL, type CustomerLevel } from "@/lib/sales-chatbot/le
 import { formatNumber } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { useInboxReads } from "./read-store";
+import { useSelectedConversation } from "./thread-pane";
 
 /**
  * ═══════════ BỘ LỌC GỌN CỦA HỘP THƯ (INBOX-V2-A, chủ shop 09/10/2026) ═══════════
@@ -63,6 +64,9 @@ const FIELD = "space-y-1 text-[12px] font-medium text-muted-foreground";
 
 export function InboxFilters({ state, counts: serverCounts, unreadStamp = null, phoneCount, levelCounts, levels, pages, labels, users, tools, manage, bulk }: Props) {
   const router = useRouter();
+  // Hội thoại đang mở theo URL SỐNG (bấm hàng đổi `?c=` bằng pushState, chưa dựng lại trang) — không phải `state.selected` của lượt
+  // dựng trước: tìm ngay sau khi bấm sang hội thoại B từng đưa người dùng về hội thoại A cũ.
+  const liveSelected = useSelectedConversation();
   // Số «Tin khách chưa đọc» trừ ngay các hội thoại vừa đọc mà bản đếm của máy chủ chưa thấy (inbox-read-shared.ts) — không đợi làm mới.
   const reads = useInboxReads();
   const counts: Record<InboxFilter, number> = { ...serverCounts, UNREAD: patchUnreadCount(serverCounts.UNREAD, unreadStamp, reads.values()) };
@@ -76,7 +80,7 @@ export function InboxFilters({ state, counts: serverCounts, unreadStamp = null, 
   const go = (form: HTMLFormElement) => {
     const p = new URLSearchParams();
     for (const [k, v] of new FormData(form)) if (typeof v === "string" && v.trim()) p.set(k, v.trim());
-    if (state.selected) p.set("c", state.selected);
+    if (liveSelected) p.set("c", liveSelected);
     const s = p.toString();
     setOpen(false);
     router.push(`${INBOX_HREF}${s ? `?${s}` : ""}`);
@@ -114,7 +118,7 @@ export function InboxFilters({ state, counts: serverCounts, unreadStamp = null, 
         >
           {keep(["q"])}
           <Search className="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" aria-hidden />
-          <input name="q" defaultValue={state.q} key={state.q} placeholder={`Tìm tên / SĐT trong ${counts.ALL} hội thoại…`} maxLength={80} className="h-8 w-full rounded-md border border-foreground/15 bg-card pl-7 pr-2 text-[13px] outline-none focus:ring-2 focus:ring-primary/30" aria-label="Tìm khách" />
+          <input name="q" defaultValue={state.q} key={state.q} placeholder={`Tìm tên / SĐT / mã đơn trong ${counts.ALL} hội thoại…`} maxLength={80} className="h-8 w-full rounded-md border border-foreground/15 bg-card pl-7 pr-2 text-[13px] outline-none focus:ring-2 focus:ring-primary/30" aria-label="Tìm khách" />
         </form>
         <Popover open={open} onOpenChange={setOpen}>
           <PopoverTrigger asChild>
