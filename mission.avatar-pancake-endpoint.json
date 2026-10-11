@@ -3,7 +3,7 @@
   "mission_id": "avatar-pancake-endpoint",
   "title": "Ảnh khách hộp thư qua điểm cuối ảnh Pancake (pages.fm/api/v1/pages/<page>/avatar/<psid> → 301 content.pancake.vn), ref dẫn xuất lúc đọc từ mã hội thoại",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P1",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -25,9 +25,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-11T01:20:15.710Z",
-  "updated_at": "2026-10-11T01:21:07.876Z",
+  "updated_at": "2026-10-11T02:27:46.698Z",
   "last_heartbeat": "2026-10-11T01:20:33.890Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#796 → e3dbd71b9faf25e7fe716585746f50c9f060b2f3"
+  },
   "handoff": {
     "branch": "fix/avatar-pancake-endpoint",
     "sha": "7e96d0430d1805a186ac7220ccfd4765631db808",
