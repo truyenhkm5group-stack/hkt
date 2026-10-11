@@ -879,7 +879,11 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
         const blocker = autoConfirmBlocker(state, ctx);
         if (!blocker) {
           const c = await executeToolCore("confirm_order", { customer_confirmation: "" }, { ...ctx, state, autoConfirming: true });
-          if (c.isError) return { ...c, content: JSON.stringify({ ...view, auto_confirm_error: (JSON.parse(c.content) as { error?: string }).error ?? "Chưa chốt được" }) };
+          if (c.isError) {
+            // Lượt chốt hỏng mà lõi đã nâng đơn lên «Đã xác nhận» (công tắc) ⇒ đơn thật thắng: ghi state.confirmed theo đơn.
+            const synced = simulated ? null : await confirmedFromOrder(c.state, now).catch(() => null);
+            return { ...c, ...(synced ? { state: synced } : {}), content: JSON.stringify({ ...view, auto_confirm_error: (JSON.parse(c.content) as { error?: string }).error ?? "Chưa chốt được", ...(synced ? { order_confirmed_in_erp: true } : {}) }) };
+          }
           return { ...c, summary: `${c.summary} · tự chốt` };
         }
         return ok(`${simulated ? "(Thử) " : ""}${existing ? "Sửa" : "Lên"} đơn nháp · ${formatVND(priced.subtotal)} · chưa tự chốt`, { ...view, auto_confirm: false, missing: blocker }, state);
@@ -1144,6 +1148,25 @@ export function autoConfirmBlocker(state: ChatState, ctx: Pick<ToolContext, "las
 /** Câu chốt ngắn khi máy chủ tự chốt — «Dạ em lên đơn 2 × Chả cá thu (1kg) cho mình rồi ạ, shop giao theo thông tin mình vừa gửi nhé.» */
 export function autoConfirmText(lines: readonly { name: string; quantity: number }[]): string {
   return `Dạ em lên đơn ${lines.map((l) => `${l.quantity} × ${l.name}`).join(", ")} cho mình rồi ạ, shop giao theo thông tin mình vừa gửi nhé.`;
+}
+
+/** Giai đoạn đơn coi là ĐÃ CHỐT (đã xác nhận trở đi, chưa huỷ) — đọc từ đơn THẬT. */
+const CONFIRMED_STAGES = new Set(["CONFIRMED", "PACKING", "READY_TO_SHIP", "SHIPPED", "DELIVERED", "PAID", "RETURNING", "PARTIAL_RETURN", "RETURNED"]);
+
+/**
+ * ĐƠN TRONG CSDL THẮNG STATE CŨ (P0-A/B 11/10/2026): đơn nháp của bot đã được XÁC NHẬN ngoài lượt chốt của bot (công tắc «đơn đủ thông tin
+ * = đã xác nhận» của lõi, nhân viên bấm, lượt tự chốt hỏng giữa chừng) mà `state.confirmed` còn trống ⇒ dựng `state.confirmed` từ đơn thật
+ * (`auto: true` — khách chưa từng bị hỏi «có chốt không», sửa ngay sau đó bot làm được). Không có / chưa xác nhận / lỗi đọc ⇒ `null`.
+ */
+export async function confirmedFromOrder(state: ChatState, now: Date = new Date()): Promise<ChatState | null> {
+  const id = state.draft?.orderId;
+  if (state.confirmed || !id || state.draft?.simulated) return null;
+  const db = await getDb();
+  const o = schema.orders;
+  const [row] = await db.select({ stage: o.stage, total: o.totalPriceAfterDiscount, ship: o.shippingFee, at: o.lastUpdateStatusAt }).from(o).where(eq(o.id, id)).limit(1);
+  if (!row || !CONFIRMED_STAGES.has(String(row.stage))) return null;
+  const v = await confirmedValidity(id);
+  return { ...state, confirmed: { orderId: id, simulated: false, total: Number(row.total ?? 0) + Number(row.ship ?? 0), at: (row.at ?? now).toISOString(), auto: true, valid: v.valid, pending: v.pending }, stage: "DONE" };
 }
 
 /** Câu dặn model khi huỷ CHƯA xong — một chỗ. */

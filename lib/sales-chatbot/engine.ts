@@ -62,7 +62,7 @@ import { volumeDiscountPolicyText } from "@/lib/sales-chatbot/volume-discount";
 import { formatVND } from "@/lib/format";
 import { withTurnEvents } from "@/lib/sales-chatbot/events";
 import { FOOD_PACK, salesPackFor, type SalesPack } from "@/lib/sales-chatbot/packs";
-import { executeTool, orderTotalsOf, toolDefsFor, TOOLS_HOLDING_TEXT, type ChatState } from "@/lib/sales-chatbot/tools";
+import { confirmedFromOrder, executeTool, orderTotalsOf, toolDefsFor, TOOLS_HOLDING_TEXT, type ChatState } from "@/lib/sales-chatbot/tools";
 import { allowedImageUrl, describeImages, fetchCustomerImage, IMAGE_PROMPT_RULE, imageLine, VISION_LIMITS } from "@/lib/sales-chatbot/vision";
 import { CLAIM_HANDOFF_REASON, CLAIM_SAFE_TEXT, claimFactsLoader, detectPriceDispute, extractVndAmounts, guardOutgoing, paymentSignalHandoff, paymentSignalInCustomerText, unverifiedAmounts, type ClaimVerdict } from "@/lib/sales-chatbot/claim-guard";
 import { flagOrderForReviewAsAgent, loadAutoConfirmComplete } from "@/lib/records/order-create";
@@ -230,6 +230,12 @@ export function systemPrompt(cfg: SalesChatbotConfig, shopName: string, profile:
   ]
     .filter(Boolean)
     .join("\n");
+}
+
+/** Đơn của lượt mua này ĐÃ CHỐT ⇒ không xin xác nhận lại (P0-A/B/C 11/10/2026). Chỉ có khi đã chốt — lời nhắc lượt khác không đổi. HÀM THUẦN. */
+export function confirmedOrderPrompt(st: Pick<ChatState, "confirmed">): string {
+  if (!st.confirmed) return "";
+  return `ĐƠN CỦA KHÁCH ĐÃ CHỐT${st.confirmed.orderId ? ` (#${manualOrderShortCode(st.confirmed.orderId)})` : ""} — KHÔNG hỏi khách xác nhận / chốt lại, KHÔNG mời tiếp tục chốt đơn. Trả lời đúng câu khách hỏi; khách sửa món / số lượng / SĐT / địa chỉ ⇒ update_draft_order${st.confirmed.auto ? "" : " (đơn chốt qua lời đồng ý ⇒ chuyển nhân viên)"}.`;
 }
 
 /** Dặn model khi khách đang phản đối giá — chỉ có trong lượt có tranh chấp (lời nhắc các lượt khác không đổi). HÀM THUẦN. */
@@ -850,6 +856,16 @@ async function chatTurnCore(
     // chốt ⇒ bỏ qua câu mẫu (chốt đơn cần công cụ của AI). Bước AI ĐỌC HIỂU chạy SAU công tắc / hạn mức / khoá bên dưới.
     const qrSettings = await loadQuickReplySettings();
     let st0 = (conv.state ?? {}) as ChatState;
+    // ĐƠN THẬT THẮNG STATE CŨ (P0-A/B 11/10/2026): đơn nháp của bot đã «Đã xác nhận» trong CSDL (công tắc tự xác nhận, nhân viên) mà
+    // state chưa biết ⇒ ghi state.confirmed theo đơn — AI không bao giờ xin khách xác nhận lại một đơn đã xác nhận.
+    if (!st0.confirmed && st0.draft?.orderId && opts.channel !== "TEST") {
+      const synced = await confirmedFromOrder(st0, now).catch(() => null);
+      if (synced) {
+        await bump({ state: synced as Record<string, unknown> });
+        conv.state = synced as Record<string, unknown>;
+        st0 = synced;
+      }
+    }
     // SAU KHI CHỐT ĐƠN (03/10/2026, «Đỗ Là»: đơn đã chốt, khách hỏi đổi địa chỉ / giao Chủ nhật ⇒ bot hứa «em đã cập nhật ghi
     // chú…» — việc nó KHÔNG làm được — rồi chép cả báo giá cũ). Khách nhắn trong POST_ORDER_HANDOFF_MS sau khi chốt ⇒ nhân viên
     // xử lý (fanpage: bot im, nhóm được báo). Lâu hơn ⇒ lượt mua MỚI: đơn cũ sang `pastOrders`, bán lại từ đầu.
@@ -997,7 +1013,7 @@ async function chatTurnCore(
     const bookingOn = cfg.booking.enabled && (await canUseModule("appointments"));
     // TỰ CHỐT KHI ĐỦ ĐƠN (P0-A, chủ shop 11/10/2026): theo công tắc «đơn đủ thông tin = đã xác nhận» của tổ chức. Lỗi đọc ⇒ TẮT (luồng xin xác nhận cũ).
     const autoConfirm = await loadAutoConfirmComplete().catch(() => false);
-    const system = [systemPrompt(cfg, orgRow?.name ?? org.code, await businessProfile(), opts.channel, await publishedPlaybook(), quickCatalog, returningCustomerPrompt(returning, known.returning), bookingOn ? bookingPrompt(cfg, now) : "", now, salesPackFor(orgRow?.templateKey ?? null), { autoConfirm }), await learnedLessons(), await levelPromptFor(conv.id, now), customerNamePrompt(opts.customerName), priceDisputePrompt(known.priceDispute), opts.context ?? ""].filter(Boolean).join("\n");
+    const system = [systemPrompt(cfg, orgRow?.name ?? org.code, await businessProfile(), opts.channel, await publishedPlaybook(), quickCatalog, returningCustomerPrompt(returning, known.returning), bookingOn ? bookingPrompt(cfg, now) : "", now, salesPackFor(orgRow?.templateKey ?? null), { autoConfirm }), await learnedLessons(), await levelPromptFor(conv.id, now), customerNamePrompt(opts.customerName), priceDisputePrompt(known.priceDispute), confirmedOrderPrompt(known), opts.context ?? ""].filter(Boolean).join("\n");
     const deliveredImages: string[] = [];
     let deliveredReplyId: string | null = null;
     let deliveredText: string | null = null;

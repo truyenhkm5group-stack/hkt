@@ -674,6 +674,34 @@ const AUTO_CASES: GoldenCase[] = [
       },
     ],
   },
+  {
+    key: "qi-don-that-thang-state",
+    title: "Đơn nháp được xác nhận NGOÀI lượt chốt của bot (công tắc / nhân viên) ⇒ tin mới của khách: state.confirmed lấy theo đơn thật, lời nhắc nói ĐÃ CHỐT, không xin xác nhận lại",
+    shop: "food",
+    channel: "WEB",
+    config: ON,
+    turns: [
+      {
+        say: `1kg chả cá thu, Minh 0972223334, ${GOOD_ADDRESS}, để chị suy nghĩ thêm`,
+        ai: [
+          () => [tool("create_customer", { name: "Minh", phone: "0972223334", address: GOOD_ADDRESS })],
+          ({ v }) => [tool("create_draft_order", { items: [{ variant_id: v("CCT-1KG"), quantity: 1 }] })],
+          () => [say("Dạ vâng ạ.")],
+        ],
+      },
+      {
+        say: "ship mấy ngày em?",
+        before: async ({ conversationId }) => {
+          const db = await getDb();
+          const [row] = await db.select({ state: schema.salesChatConversations.state }).from(schema.salesChatConversations).where(eq(schema.salesChatConversations.id, conversationId));
+          const id = (row.state as ChatState).draft?.orderId;
+          assert.ok(id, "có đơn nháp");
+          await db.update(schema.orders).set({ stage: "CONFIRMED", lastUpdateStatusAt: new Date() }).where(eq(schema.orders.id, id));
+        },
+        ai: [() => [say("Dạ shop giao 1–2 ngày ạ.")]],
+      },
+    ],
+  },
 ];
 
 async function testAutoConfirmCases() {
@@ -715,6 +743,17 @@ async function testAutoConfirmCases() {
         assert.equal(state.confirmed?.valid, false);
         assert.deepEqual(transcript.turns[0].shown, [CLAIM_SAFE_TEXT.ORDER_PENDING_ADDRESS], "câu ghi nhận — KHÔNG «đã lên đơn»");
         assert.notEqual(transcript.final.status, "HANDOFF", "không chuyển người — đơn nằm trong hàng «Cần người kiểm»");
+        return;
+      }
+      if (c.key === "qi-don-that-thang-state") {
+        assert.equal(state.confirmed?.orderId, order?.id, "state.confirmed dựng từ đơn thật");
+        assert.equal(state.confirmed?.auto, true);
+        assert.equal(state.stage, "DONE");
+        const prompt2 = transcript.prompts[transcript.turns[1].rounds[0].prompt];
+        assert.match(prompt2, /ĐƠN CỦA KHÁCH ĐÃ CHỐT/, "lời nhắc lượt sau nói đơn đã chốt");
+        assert.match(prompt2, /KHÔNG hỏi khách xác nhận/);
+        assert.ok(!/ĐƠN CỦA KHÁCH ĐÃ CHỐT/.test(transcript.prompts[transcript.turns[0].rounds[0].prompt]), "lượt chưa chốt không có dòng đó");
+        assert.deepEqual(transcript.turns[1].shown, ["Dạ shop giao 1–2 ngày ạ."], "bot trả lời câu hỏi mới, không chuyển người");
         return;
       }
       // qi-tu-chot-hoan
