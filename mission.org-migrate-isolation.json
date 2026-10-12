@@ -1,0 +1,29 @@
+{
+  "schema": 1,
+  "mission_id": "org-migrate-isolation",
+  "title": "P0: migration hỏng cô lập theo workspace — khoá theo tổ chức, lùi sau lỗi, DEGRADED_MIGRATION serve schema cũ (chỉ migration khai tương thích), verify-migrations có trần; probe chẩn đoán qa",
+  "business_goal": "",
+  "status": "RUNNING",
+  "priority": "P0",
+  "risk": "HIGH",
+  "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "worker": null,
+  "worktree": null,
+  "branch": "fix/org-migrate-isolation",
+  "base_sha": "656dfd00d3f85fe93f822e8982b46d883ece7a75",
+  "domains": [],
+  "owned_paths": [
+    "db/migrate.ts",
+    "db/index.ts",
+    "scripts/verify-migrations.ts",
+    "scripts/org-migrate-probe.ts"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-12T06:23:27.011Z",
+  "updated_at": "2026-10-12T06:23:27.011Z",
+  "last_heartbeat": "2026-10-12T06:23:27.011Z",
+  "definition_of_done": []
+}
