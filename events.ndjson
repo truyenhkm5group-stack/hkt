@@ -2187,3 +2187,4 @@
 {"at":"2026-10-12T06:41:07.496Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"inbox-read-audit-orgctx","detail":"#813 cho fix/inbox-read-audit-org-ctx @ 1161848c209b"}
 {"at":"2026-10-12T07:15:08.049Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"inbox-read-audit-orgctx","detail":"#813 @ 1161848c209b → 8ad6f6949268 (MERGE_NOW · MEDIUM · gates success)"}
 {"at":"2026-10-12T08:46:58.643Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"CLAIM","mission":"migration-rehearsal","detail":"RUNNING · 2 mẫu phạm vi · MEDIUM"}
+{"at":"2026-10-12T08:47:20.001Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"migration-rehearsal","detail":"fix/migration-rehearsal @ cd72b7ec47b7 · 3 lệnh kiểm thử"}

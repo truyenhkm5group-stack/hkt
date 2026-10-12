@@ -3,7 +3,7 @@
   "mission_id": "migration-rehearsal",
   "title": "Ops migration-rehearsal: chạy thử migration còn thiếu trên BẢN SAO CSDL tổ chức (container tạm) — đo vì sao 0245 quá trần ở qa",
   "business_goal": "",
-  "status": "RUNNING",
+  "status": "PR_READY",
   "priority": "P0",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -21,7 +21,20 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-12T08:46:58.532Z",
-  "updated_at": "2026-10-12T08:46:58.532Z",
-  "last_heartbeat": "2026-10-12T08:46:58.532Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-12T08:47:19.931Z",
+  "last_heartbeat": "2026-10-12T08:47:19.931Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "fix/migration-rehearsal",
+    "sha": "cd72b7ec47b7d3b3afc7233545031600cbba8496",
+    "at": "2026-10-12T08:47:19.931Z",
+    "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+    "title": "Ops migration-rehearsal: chạy thử migration còn thiếu trên BẢN SAO CSDL tổ chức (container tạm) — đo vì sao 0245 quá trần ở qa",
+    "summary": "Bản sao qa trong container tạm: thống kê, sổ migration, bấm giờ hàm 0245 từng hội thoại + biến thể, EXPLAIN, chạy 0245 trong giao dịch ROLLBACK, so JIT / chỉ mục thử",
+    "tests": [
+      "typecheck·lint: sạch",
+      "migration-rehearsal·backup·repo-integrity·test-hygiene: đạt",
+      "npm test: TẤT CẢ KIỂM THỬ ĐẠT"
+    ]
+  }
 }
