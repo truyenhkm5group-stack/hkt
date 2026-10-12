@@ -2157,3 +2157,4 @@
 {"at":"2026-10-12T02:15:59.255Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"CLAIM","mission":"acceptance-s12-port","detail":"RUNNING · 3 mẫu phạm vi · MEDIUM"}
 {"at":"2026-10-12T02:16:20.064Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"acceptance-s12-port","detail":"docs/acceptance-s12-port @ c825fc78ec25 · 2 lệnh kiểm thử"}
 {"at":"2026-10-12T02:16:55.215Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"acceptance-s12-port","detail":"#810 cho docs/acceptance-s12-port @ c825fc78ec25"}
+{"at":"2026-10-12T02:17:12.438Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"CLAIM","mission":"tech-worker-onboarding-gap","detail":"RUNNING · 1 mẫu phạm vi · MEDIUM"}
