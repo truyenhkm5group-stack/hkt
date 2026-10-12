@@ -3,7 +3,7 @@
   "mission_id": "gates-build-heap",
   "title": "Gates: next build không còn đỏ vì hết heap runner (NODE_OPTIONS 6 GB)",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P0",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -22,9 +22,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-12T09:46:16.652Z",
-  "updated_at": "2026-10-12T09:47:23.734Z",
+  "updated_at": "2026-10-12T10:21:46.702Z",
   "last_heartbeat": "2026-10-12T09:46:41.090Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#816 → bfac9afcbf3d3b91f8dd4b2599f985c3425f59ca"
+  },
   "handoff": {
     "branch": "fix/gates-build-heap",
     "sha": "18c7f97c925bfceeb03bfe6755cfbf87086aee96",
