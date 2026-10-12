@@ -50,7 +50,7 @@ nó đang là đường giao hàng đang chạy (`gates`, `deploy-plan`, `verify
 | Bộ lập lịch | `scripts/scheduler.mjs` → `/api/sync/<job>` + `sync_runs` | Đủ cho watchdog, không cần dịch vụ mới |
 | Nhật ký kiểm toán | `audit()` → `audit_logs` | |
 | Luồng sự kiện miền | `emitDomainEvent` → `domain_events` (append-only, dedupe, causation/correlation) | Dùng cho Goal/Mission/Worker — không tạo bảng sự kiện thứ hai |
-| Cổng CI + bảo vệ `main` | `gates.yml` (4 job + `gates / gates`), ruleset 1 duyệt người | KHÔNG nới, KHÔNG lách |
+| Cổng CI + bảo vệ `main` | `gates.yml` (4 job + `gates / gates`), ruleset: bắt buộc PR + `gates / gates`, **0 lượt duyệt** từ 25/09/2026 | KHÔNG nới, KHÔNG lách |
 | Deploy + smoke | `deploy-vps.yml` (dùng lại lượt cổng xanh đúng SHA, `flock` trên VPS, smoke `/api/health`) | |
 | Ngân sách AI theo ngày | `lib/ai/budget.ts` (trần ngày trong `settings`) · `platform_ai_usage` | Nền cho ngân sách API |
 
@@ -260,7 +260,7 @@ npm run tech:worker                      # chạy mãi
 | Không rơi sang tiền API | chỉ đăng ký worker `SUBSCRIPTION_CLAUDE_CODE`; không đặt `TECH_WORKER_ANTHROPIC_API_KEY` |
 | Chỉ việc tài liệu | worker khai đúng một năng lực `write-docs` |
 | Không đụng production | worker không giữ secret production; deploy vẫn do người / Delivery Controller; năng lực deploy / migration `autonomous = false` |
-| Không lách nhánh bảo vệ | PR mở bằng bot `agent-open-pr.yml`, gộp qua `gates / gates` + 1 người duyệt |
+| Không lách nhánh bảo vệ | PR mở bằng bot `agent-open-pr.yml`, gộp qua `gates / gates` (ruleset 0 lượt duyệt — người bấm gộp là chốt chặn cuối) |
 | CI đỏ trên PR của worker | NGƯỜI sửa tay. Việc `ci-debug` máy tự tạo là loại BUGFIX ⇒ chính sách R1 ⇒ KHÔNG được nhận dưới trần R0; nó nằm SPEC_READY và việc gốc đứng ở REVIEW (không tự FAILED, không chi tiền). Huỷ việc `ci-debug` đó trên `/tech` sau khi sửa tay |
 
 Bất biến đã khoá bằng bài kiểm (`tests/tech-worker.test.ts`): hai worker không nhận trùng · phụ thuộc chưa DONE /
@@ -366,3 +366,16 @@ vì vậy BẮT BUỘC khi chạy production: tài khoản hệ điều hành RI
 credential dưới đây), không nhúng token vào URL remote của bản clone, credential là fine-grained token chỉ cho ĐÚNG kho này, chỉ
 `contents: write` (token không giới hạn được theo nhánh — ruleset `main` hiện có chặn đẩy thẳng; muốn chặn mọi nhánh
 ngoài `ai/worker/*` thì thêm ruleset), KHÔNG dùng tài khoản GitHub cá nhân của chủ shop.
+
+Rủi ro còn lại của đường hiện tại (review bảo mật PR #631, 07/10/2026 — chưa vá trên `main`):
+
+- Ruleset `main` không còn đòi lượt duyệt (chỉ PR + `gates / gates`), nên một token `contents: write` lấy được từ máy
+  worker GỘP được mọi PR đã xanh vào `main`. Cổng chạy mã agent vừa viết dưới CÙNG người dùng với lượt `git push` của
+  worker (`scripts/tech-worker.ts`), nên credential ấy coi như với tới được từ mã của nhánh — tài khoản hệ điều hành
+  riêng giảm phạm vi lộ nhưng không cắt được đường đó.
+- Hộp thoại «Đăng ký worker» ở `/tech/workers` in khoá `tw_…` trong lệnh PowerShell để chép; khoá đã đi qua màn hình /
+  bộ nhớ tạm / lịch sử PowerShell thì coi như đã lộ. «Tắt» chặn được khoá, nhưng «Bật» lại dùng ĐÚNG khoá cũ (chưa có
+  xoay khoá) — khoá đã lộ thì đăng ký một worker MỚI.
+- Cách vá đầy đủ nằm ở PR #631 (mã ghi danh một lần thay cho khoá trên màn hình; worker KHÔNG giữ quyền ghi GitHub nào,
+  chỉ nộp bộ thay đổi để máy chủ kiểm rồi tự ghi nhánh `ai/worker/*` bằng bot). Chạy worker production trước khi có
+  bản vá đó là quyết định của chủ shop (D11 trong `docs/tech/MASTER_MISSION_REGISTRY.md`).
