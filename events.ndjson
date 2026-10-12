@@ -2162,3 +2162,6 @@
 {"at":"2026-10-12T02:18:13.622Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"tech-worker-onboarding-gap","detail":"#811 cho feat/tech-worker-onboarding-gap @ cc1129cb489a"}
 {"at":"2026-10-12T02:19:19.760Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#810 @ c825fc78ec25 · Chỉ tài liệu/chú thích: không đổi mã chạy"}
 {"at":"2026-10-12T02:19:41.410Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#811 @ cc1129cb489a · Chỉ tài liệu/chú thích: không đổi mã chạy"}
+{"at":"2026-10-12T02:57:03.717Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"CLAIM","mission":"inbox-read-audit-recheck","detail":"RUNNING · 1 mẫu phạm vi · MEDIUM"}
+{"at":"2026-10-12T02:57:03.717Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"OVERLAP_ACCEPTED","mission":"inbox-read-audit-recheck","detail":"OVERLAP_ACCEPTED với inbox-read-v3: phạm vi scripts/inbox-read-audit.ts — cách tích hợp: chỉ script ops chỉ đọc + bài kiểm thuần"}
+{"at":"2026-10-12T02:57:03.717Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"OVERLAP_ACCEPTED","mission":"inbox-read-audit-recheck","detail":"OVERLAP_ACCEPTED với inbox-unread-gate: phạm vi scripts/inbox-read-audit.ts — cách tích hợp: chỉ script ops chỉ đọc + bài kiểm thuần"}

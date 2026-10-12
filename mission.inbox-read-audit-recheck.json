@@ -1,0 +1,26 @@
+{
+  "schema": 1,
+  "mission_id": "inbox-read-audit-recheck",
+  "title": "Audit chưa đọc: đọc lại cùng lúc dòng lệch SQL/TS (tách race khỏi lệch thật) + không mất tóm tắt ở lượt lớn",
+  "business_goal": "",
+  "status": "RUNNING",
+  "priority": "P2",
+  "risk": "MEDIUM",
+  "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "worker": null,
+  "worktree": null,
+  "branch": "fix/inbox-read-audit-recheck",
+  "base_sha": "ca19da29c82b19bd9edd974a9fc512e212e933fb",
+  "domains": [],
+  "owned_paths": [
+    "scripts/inbox-read-audit.ts"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-12T02:57:03.547Z",
+  "updated_at": "2026-10-12T02:57:03.547Z",
+  "last_heartbeat": "2026-10-12T02:57:03.547Z",
+  "definition_of_done": []
+}
