@@ -1,0 +1,28 @@
+{
+  "schema": 1,
+  "mission_id": "tech-worker-onboarding-v2",
+  "title": "Worker /tech một nút — làm lại lõi #631 trên main mới: mã ghi danh một lần, khoá không hiện màn hình, bộ cài .cmd, worker KHÔNG giữ quyền ghi GitHub (máy chủ ghi ai/worker/*), xoay khoá khi bật lại, thu hồi dogfood-1",
+  "business_goal": "",
+  "status": "BLOCKED",
+  "priority": "P2",
+  "risk": "MEDIUM",
+  "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "worker": null,
+  "worktree": null,
+  "branch": null,
+  "base_sha": null,
+  "domains": [],
+  "owned_paths": [],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-12T02:15:29.266Z",
+  "updated_at": "2026-10-12T02:15:29.266Z",
+  "last_heartbeat": "2026-10-12T02:15:29.266Z",
+  "definition_of_done": [],
+  "needs_owner": {
+    "category": "APPROVAL_REQUIRED",
+    "action": "D11 — có làm lại lõi worker /tech (schema + migration + đổi kiến trúc ghi GitHub, ~3.000 dòng) không; tới lúc đó KHÔNG đăng ký worker production (đường hiện tại push bằng credential của máy)"
+  }
+}
