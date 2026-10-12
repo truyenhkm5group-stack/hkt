@@ -1,0 +1,27 @@
+{
+  "schema": 1,
+  "mission_id": "inbox-search-global",
+  "title": "P0: ô tìm hộp thư tìm TOÀN hộp thư mặc định (bỏ qua bộ lọc khi có q), SĐT khớp chính xác lên đầu, debounce 300 ms, đang tải, «chỉ trong bộ lọc hiện tại»",
+  "business_goal": "",
+  "status": "RUNNING",
+  "priority": "P0",
+  "risk": "MEDIUM",
+  "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "worker": null,
+  "worktree": null,
+  "branch": "fix/inbox-search-global",
+  "base_sha": "8cd40bc3f35ee33e88ce73a07b2572e81c79a2c5",
+  "domains": [],
+  "owned_paths": [
+    "lib/sales-chatbot/inbox-search-shared.ts",
+    "lib/sales-chatbot/inbox-search.ts"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-12T09:58:13.240Z",
+  "updated_at": "2026-10-12T09:58:13.240Z",
+  "last_heartbeat": "2026-10-12T09:58:13.240Z",
+  "definition_of_done": []
+}
