@@ -2241,3 +2241,4 @@
 {"at":"2026-10-12T12:53:35.723Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"stuck-conversation-audit","detail":"#820 cho fix/stuck-conversation-audit @ ecae99d25aaf"}
 {"at":"2026-10-12T12:53:54.062Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"hslc-postsale-handoff","detail":"fix/hslc-postsale-handoff @ d724b0a1f5a0 · 3 lệnh kiểm thử"}
 {"at":"2026-10-12T12:54:30.194Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"hslc-postsale-handoff","detail":"#821 cho fix/hslc-postsale-handoff @ d724b0a1f5a0"}
+{"at":"2026-10-12T12:55:27.415Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#820 @ ecae99d25aaf · Script ops CHỈ ĐỌC (ERP_READ_ONLY + hỏi lại phiên, getDbForInspection, SQL thô chỉ select), MÃ HOÁ, xả stdout; khai ops đủ 4 chỗ"}

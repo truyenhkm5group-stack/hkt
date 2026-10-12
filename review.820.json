@@ -1,0 +1,8 @@
+{
+  "pr": 820,
+  "sha": "ecae99d25aaf85f2b2e18d40ed1a61a033a17ead",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-12T12:55:11.581Z",
+  "note": "Script ops CHỈ ĐỌC (ERP_READ_ONLY + hỏi lại phiên, getDbForInspection, SQL thô chỉ select), MÃ HOÁ, xả stdout; khai ops đủ 4 chỗ"
+}
