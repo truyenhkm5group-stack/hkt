@@ -14,7 +14,8 @@
  *  · `EXACT` — xã đọc bằng TÊN MỚI (sau 01/07/2025), một đáp án.
  *  · `UNIQUE_FROM_OLD` — quy từ tên CŨ (xã cũ + huyện cũ, hoặc huyện cũ chỉ còn một xã mới), một đáp án.
  *  · `AMBIGUOUS` — nhiều xã mới có thể đúng (xã cũ bị chia, chỉ có quận cũ, tên trùng) — `candidates` là danh sách THẬT.
- *  · `NOT_FOUND` — không đọc được xã (có thể có tỉnh), hoặc không đọc được cả tỉnh.
+ *  · `NOT_FOUND` — không đọc được xã (có thể có tỉnh), hoặc không đọc được cả tỉnh. Tỉnh chỉ suy được nhờ bung viết tắt tên quận
+ *    («P13 GV») cũng ở đây: `province = null`, `missing` có `province`, cách đọc đi riêng ở `provinceHint` cho câu hỏi khách.
  * Chỉ `EXACT` / `UNIQUE_FROM_OLD` được tự điền (`canAutoFill`). Hai mức còn lại ⇒ hỏi khách, ô xã để trống, cờ cần kiểm giữ nguyên.
  */
 import { expandAbbreviations, findProvince, findWardIn, foldVnText, isAdminName, normalizeVnAddress, type AddressMatch } from "@/lib/address/vn-address";
@@ -38,6 +39,11 @@ export type CustomerAddress = {
   candidates: string[];
   /** Xã + huyện CŨ khách ghi (khi các ứng viên sinh ra từ đúng một xã cũ bị chia). */
   legacy: { ward: string; district: string } | null;
+  /**
+   * Cách đọc CHƯA XÁC NHẬN khi tỉnh chỉ suy được nhờ bung viết tắt tên quận («P13 GV» ⇒ quận Gò Vấp ⇒ TP HCM). `province` ở trên
+   * vẫn `null` và `missing` vẫn có `province` — gợi ý chỉ để câu hỏi khách hỏi ĐÚNG tỉnh; `wardCandidates` = xã mới NẾU khách xác nhận.
+   */
+  provinceHint: { province: string; district: string; abbreviation: string; wardCandidates: string[] } | null;
   missing: AddressPart[];
   reason: string;
 };
@@ -114,6 +120,7 @@ export function parseCustomerAddress(address: string, province = ""): CustomerAd
     confidence,
     candidates: match.status === "AMBIGUOUS" ? match.candidates.map((c) => c.name) : [],
     legacy: match.status === "AMBIGUOUS" ? (match.legacy ?? null) : null,
+    provinceHint: !prov && match.status === "UNKNOWN" && match.hint ? { province: match.hint.province.name, district: match.hint.district, abbreviation: match.hint.abbreviation, wardCandidates: match.hint.candidates.map((c) => c.name) } : null,
     missing,
     reason: "reason" in match ? match.reason : "",
   };
@@ -142,6 +149,8 @@ export function addressQuestion(a: CustomerAddress): string | null {
     if (a.legacy) return `Dạ ${lowerType(a.legacy.ward)} cũ nay thuộc ${options} theo địa giới mới ạ? Mình xác nhận giúp em${streetTail} để shop giao đúng nha.`;
     return `Dạ địa chỉ mình nay thuộc ${options} theo địa giới mới ạ? Mình xác nhận giúp em${streetTail} để shop giao đúng nha.`;
   }
+  // Thiếu TỈNH là phần thiếu chính: hỏi tỉnh trước (xã mới phụ thuộc tỉnh). Có cách đọc từ viết tắt ⇒ hỏi xác nhận đúng cách đọc đó.
+  if (a.missing.includes("province") && a.provinceHint) return `Dạ «${a.provinceHint.abbreviation}» trong địa chỉ mình là ${lowerType(a.provinceHint.district)} cũ ở ${a.provinceHint.province} phải không ạ? Mình xác nhận giúp em tỉnh / thành phố${streetTail} để shop giao đúng nha.`;
   if (a.missing.includes("province")) return `Dạ mình cho em xin phường / xã và tỉnh / thành phố của địa chỉ nhận hàng${streetTail} với ạ?`;
   if (a.missing.includes("ward")) return `Dạ mình cho em xin tên phường / xã (theo địa giới mới) của địa chỉ nhận hàng${streetTail} với ạ?`;
   if (needStreet) return "Dạ mình cho em xin số nhà, tên đường (hoặc thôn / xóm) để shop giao đúng ạ?";
@@ -166,6 +175,7 @@ export function acceptCustomerWard(a: Pick<CustomerAddress, "provinceCode" | "pr
 
 /** Dòng ghi chú cho người kiểm (cờ ADDRESS_UNRESOLVED): ứng viên thật, hoặc lý do bộ đọc. */
 export function addressReviewHint(a: CustomerAddress): string {
+  if (a.provinceHint) return `${a.reason} Nếu đúng ${a.provinceHint.district} (${a.provinceHint.province}) thì xã mới có thể là: ${a.provinceHint.wardCandidates.join(" / ") || "chưa rõ"}`;
   if (a.confidence === "AMBIGUOUS" && a.candidates.length) return `${a.legacy ? `${a.legacy.ward} (${a.legacy.district}) cũ` : "Địa chỉ"} nay có thể thuộc: ${a.candidates.join(" / ")} — hỏi khách`;
   return a.reason;
 }

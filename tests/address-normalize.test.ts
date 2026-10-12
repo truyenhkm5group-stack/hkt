@@ -4,15 +4,19 @@
  * Hai ca thật production:
  *  · «SN 242 đường cổ Nhuế, phường Cổ Nhuế 2, Bắc Từ Liêm, Hà Nội» (đơn #463DEBAE) — phường CŨ bị CHIA khi sáp nhập 01/07/2025
  *    ⇒ AMBIGUOUS (Thượng Cát / Đông Ngạc), hỏi khách, KHÔNG tự điền; trước đây kết quả này rơi mất và bot không hỏi gì.
- *  · «1094/3 Lê Đức Thọ P13 GV» (khách TP HCM) — «GV» = quận Gò Vấp cũ; danh mục trước sáp nhập KHÔNG có phường 13 Gò Vấp
- *    (đã gộp 01/01/2025) ⇒ biết tỉnh (quận Gò Vấp chỉ có ở TP HCM), xã mơ hồ trong 6 phường mới có đất Gò Vấp ⇒ hỏi khách.
- *  · Luật: chỉ EXACT / UNIQUE_FROM_OLD được tự điền; viết tắt mơ hồ không sinh ra tỉnh; xã chỉ ghi khi KHÁCH vừa nói tên đó.
+ *  · «1094/3 Lê Đức Thọ P13 GV» (ca KimThu Le) — khách KHÔNG ghi tỉnh, KHÔNG ghi tên quận: «GV» là hai chữ cái. Bung «GV» ⇒
+ *    quận Gò Vấp rồi suy TP HCM là hai bước đoán chồng nhau ⇒ vẫn CHƯA BIẾT TỈNH (cùng kết luận với
+ *    `tests/sales-integrity-audit.test.ts` — MISSING_PROVINCE); cách đọc đó chỉ đi kèm (`provinceHint`) để câu hỏi khách hỏi ĐÚNG
+ *    tỉnh. Khách ghi thêm «TP.HCM» ⇒ biết tỉnh; danh mục trước sáp nhập KHÔNG có phường 13 Gò Vấp (đã gộp 01/01/2025) ⇒ xã mơ hồ
+ *    trong 6 phường mới có đất Gò Vấp ⇒ hỏi xã.
+ *  · Luật: chỉ EXACT / UNIQUE_FROM_OLD được tự điền; viết tắt tên quận không bao giờ là căn cứ DUY NHẤT của tỉnh; xã chỉ ghi khi
+ *    KHÁCH vừa nói tên đó.
  */
 import assert from "node:assert/strict";
 import data from "@/lib/address/vn-admin-2025.json";
 import { acceptCustomerWard, addressQuestion, canAutoFill, parseCustomerAddress, streetPart } from "@/lib/address/customer-address";
 import { HCM_DISTRICT_ABBREVIATIONS, foldVnText } from "@/lib/address/vn-address";
-import { addressCheckOf, executeTool, type ChatState } from "@/lib/sales-chatbot/tools";
+import { addressCheckOf, autoConfirmBlocker, executeTool, type ChatState } from "@/lib/sales-chatbot/tools";
 import { parseSalesChatbotConfig } from "@/lib/sales-chatbot/config";
 
 const AGENT = { name: "Chatbot bán hàng", source: "lib/sales-chatbot/tools.ts" };
@@ -46,19 +50,34 @@ export function testAddressNormalizePure() {
   assert.equal(addressQuestion(f1), null);
   assert.equal(parseCustomerAddress("12 Lê Lợi, P. Bến Nghé, Q.1, TP.HCM").ward, "Phường Sài Gòn", "P. / Q. / TP.HCM");
 
-  // ③ Ca thật «P13 GV»: biết tỉnh, xã mơ hồ trong 6 phường mới có đất Gò Vấp; phường 13 không có trong danh mục cũ ⇒ nói rõ.
-  for (const text of [GO_VAP, `${GO_VAP}, TP.HCM`, "1094/3 le duc tho p13 gv"]) {
+  // ③ Ca thật «P13 GV» KHÔNG ghi tỉnh: thiếu TỈNH là phần thiếu chính (tên quận chỉ là hai chữ cái) ⇒ không tự điền tỉnh lẫn xã,
+  //    câu hỏi khách hỏi xác nhận TỈNH; cách đọc «quận Gò Vấp ⇒ 6 phường mới» đi kèm ở `provinceHint`, không vào `province`.
+  const SIX = ["Phường An Hội Tây", "Phường An Hội Đông", "Phường An Nhơn", "Phường Gò Vấp", "Phường Hạnh Thông", "Phường Thông Tây Hội"];
+  for (const text of [GO_VAP, "1094/3 le duc tho p13 gv"]) {
     const g = parseCustomerAddress(text);
-    assert.equal(g.confidence, "AMBIGUOUS", `${text}: ${JSON.stringify(g)}`);
-    assert.equal(g.province, "Thành phố Hồ Chí Minh");
-    assert.equal(g.ward, null);
-    assert.deepEqual([...g.candidates].sort(), ["Phường An Hội Tây", "Phường An Hội Đông", "Phường An Nhơn", "Phường Gò Vấp", "Phường Hạnh Thông", "Phường Thông Tây Hội"]);
-    assert.match(g.reason, /phuong 13/, "nói rõ danh mục cũ không có phường khách ghi");
+    assert.deepEqual([g.confidence, g.province, g.provinceCode, g.ward, g.candidates], ["NOT_FOUND", null, null, null, []], `${text}: ${JSON.stringify(g)}`);
+    assert.deepEqual(g.missing, ["province", "ward"], "thiếu tỉnh VÀ xã — tỉnh đứng trước");
+    assert.equal(canAutoFill(g), false);
+    assert.deepEqual(g.provinceHint && { ...g.provinceHint, wardCandidates: [...g.provinceHint.wardCandidates].sort() }, { province: "Thành phố Hồ Chí Minh", district: "Quận Gò Vấp", abbreviation: "GV", wardCandidates: SIX });
+    assert.match(g.reason, /chưa ghi tỉnh/);
+    const ask = addressQuestion(g)!;
+    assert.ok(ask.includes("«GV»") && ask.includes("quận Gò Vấp") && ask.includes("Thành phố Hồ Chí Minh") && /tỉnh \/ thành phố/.test(ask), ask);
+    assert.ok(!ask.includes("phường Hạnh Thông"), "chưa biết tỉnh ⇒ chưa đưa danh sách xã cho khách chọn");
     assert.ok(/^1094\/3 l/i.test(g.street) && !/p13|gv/i.test(g.street), `phần đường dừng trước phường / quận: ${g.street}`);
+    assert.equal(acceptCustomerWard(g, "Phường Hạnh Thông", "hạnh thông em").ok, false, "chưa biết tỉnh ⇒ không ghi xã");
   }
-  assert.ok(addressQuestion(parseCustomerAddress(GO_VAP))!.includes("phường Hạnh Thông"));
-  // Phường số CÓ trong danh mục cũ ⇒ quy được: P5 Gò Vấp ⇒ An Nhơn.
-  assert.equal(parseCustomerAddress("12 Nguyễn Văn Nghi P5 GV").ward, "Phường An Nhơn");
+  // Khách ghi tỉnh ⇒ biết tỉnh, xã mơ hồ trong 6 phường mới có đất Gò Vấp; phường 13 không có trong danh mục cũ ⇒ nói rõ, hỏi XÃ.
+  const gHcm = parseCustomerAddress(`${GO_VAP}, TP.HCM`);
+  assert.deepEqual([gHcm.confidence, gHcm.province, gHcm.ward, gHcm.provinceHint, gHcm.missing], ["AMBIGUOUS", "Thành phố Hồ Chí Minh", null, null, ["ward"]], JSON.stringify(gHcm));
+  assert.deepEqual([...gHcm.candidates].sort(), SIX);
+  assert.match(gHcm.reason, /phuong 13/, "nói rõ danh mục cũ không có phường khách ghi");
+  assert.ok(addressQuestion(gHcm)!.includes("phường Hạnh Thông"));
+  // Phường số CÓ trong danh mục cũ ⇒ quy được KHI biết tỉnh: P5 Gò Vấp ⇒ An Nhơn. Không ghi tỉnh ⇒ vẫn hỏi tỉnh, An Nhơn chỉ là gợi ý.
+  assert.equal(parseCustomerAddress("12 Nguyễn Văn Nghi P5 GV, HCM").ward, "Phường An Nhơn");
+  const p5 = parseCustomerAddress("12 Nguyễn Văn Nghi P5 GV");
+  assert.deepEqual([p5.confidence, p5.province, p5.ward, p5.provinceHint?.wardCandidates], ["NOT_FOUND", null, null, ["Phường An Nhơn"]], JSON.stringify(p5));
+  // Tên quận khách VIẾT RA (không phải viết tắt) chỉ có ở một tỉnh ⇒ suy tỉnh được (căn cứ là chữ khách gõ, không phải hai chữ cái).
+  assert.deepEqual([parseCustomerAddress("12 Nguyễn Văn Nghi phường 5 quận Gò Vấp").ward, parseCustomerAddress("12 Nguyễn Văn Nghi phường 5 quận Gò Vấp").provinceHint], ["Phường An Nhơn", null]);
   assert.equal(parseCustomerAddress("12 Phan Xích Long p2 q.pn hcm").ward, "Phường Cầu Kiệu", "q.pn");
   // Viết tắt đứng trơ trọi, không tỉnh, không phường ⇒ KHÔNG sinh tỉnh.
   const tb = parseCustomerAddress("Số 5 ngõ 3 TB");
@@ -109,7 +128,7 @@ export function testAddressNormalizePure() {
   assert.ok(view.ask_customer?.includes("phường Đông Ngạc") && !JSON.stringify(view).includes("242"), JSON.stringify(view));
   const confirmed = addressCheckOf({ address: CO_NHUE, province: "", ward: "Phường Đông Ngạc" }).view;
   assert.deepEqual([confirmed.status, confirmed.ward, confirmed.ask_customer], ["CUSTOMER_CONFIRMED", "Phường Đông Ngạc", null]);
-  console.log("✓ Địa chỉ tự do: Cổ Nhuế 2 cũ ⇒ hỏi Thượng Cát / Đông Ngạc · f1q5 · P13 GV ⇒ HCM + 6 ứng viên · tỉnh gộp · không tồn tại ⇒ NOT_FOUND · xã chỉ ghi khi khách nói");
+  console.log("✓ Địa chỉ tự do: Cổ Nhuế 2 cũ ⇒ hỏi Thượng Cát / Đông Ngạc · f1q5 · P13 GV không tỉnh ⇒ hỏi TỈNH (gợi ý Gò Vấp) · có tỉnh ⇒ 6 ứng viên · tỉnh gộp · không tồn tại ⇒ NOT_FOUND · xã chỉ ghi khi khách nói");
 }
 
 /** Cổng ở công cụ bot (khung thử TEST — không ghi gì): chốt đơn địa chỉ mơ hồ ⇒ hỏi khách trước; xã chỉ nhận khi khách nói. */
@@ -144,5 +163,20 @@ export async function testAddressNormalizeTools() {
   // Xã không có trong danh mục ⇒ từ chối.
   const bogus = await executeTool("update_draft_order", { ward: "Phường Cổ Nhuế 2" }, ctx(clone(gate.state), "phường Cổ Nhuế 2 em ơi", 6));
   assert.ok(bogus.isError && /không có trong danh mục/.test(bogus.content), bogus.content);
-  console.log("✓ Công cụ bot: địa chỉ mơ hồ ⇒ hỏi khách trước khi chốt · lượt sau mới chốt (cờ cần kiểm) · xã chỉ nhận khi khách nói và có trong danh mục");
+
+  // Tự chốt (P0-A của main) đi qua CÙNG mệnh đề: khách chưa được hỏi ⇒ chưa tự chốt, nói đúng phần thiếu; đã hỏi lượt trước ⇒ không chặn vì địa chỉ.
+  const ac: ChatState = { ...clone(base), draft: { ...clone(base).draft!, quote: { id: "q-addr", priceVersion: "pv-addr", subtotal: 280_000, total: 280_000 } } };
+  assert.match(autoConfirmBlocker(ac, { lastUserText: "ok em", turn: 5 }) ?? "", /Địa chỉ chưa chuẩn hoá.*phường Thượng Cát/);
+  assert.equal(autoConfirmBlocker({ ...ac, addressAsk: { key: addressCheckOf(recipient).key, turn: 4 } }, { lastUserText: "ok em", turn: 5 }), null, "đã hỏi ở lượt trước ⇒ không chặn vì địa chỉ");
+
+  // Ca KimThu Le «P13 GV» không ghi tỉnh: cổng chốt hỏi TỈNH (xác nhận cách đọc «GV» = quận Gò Vấp, TP HCM), không đưa danh sách phường.
+  const gvRecipient = { ...recipient, address: GO_VAP };
+  const gv: ChatState = { ...clone(base), customer: { ...clone(base).customer!, address: GO_VAP }, draft: { ...clone(base).draft!, recipient: gvRecipient } };
+  assert.deepEqual([addressCheckOf(gvRecipient).view.status, addressCheckOf(gvRecipient).view.province, addressCheckOf(gvRecipient).view.missing], ["NOT_FOUND", null, ["province", "ward"]]);
+  const gvGate = await executeTool("confirm_order", { customer_confirmation: "ok em" }, ctx(gv, "ok em", 5));
+  assert.ok(gvGate.isError && gvGate.content.includes("TỈNH") && gvGate.content.includes("«GV»") && gvGate.content.includes("quận Gò Vấp") && !gvGate.content.includes("phường Hạnh Thông"), gvGate.content);
+  assert.ok(!gvGate.state.confirmed);
+  const gvWard = await executeTool("update_draft_order", { ward: "Phường Hạnh Thông" }, ctx(clone(gvGate.state), "phường Hạnh Thông em", 6));
+  assert.ok(gvWard.isError && /tỉnh \/ thành/.test(gvWard.content), `chưa biết tỉnh ⇒ không nhận xã: ${gvWard.content}`);
+  console.log("✓ Công cụ bot: địa chỉ mơ hồ ⇒ hỏi khách trước khi chốt · lượt sau mới chốt (cờ cần kiểm) · xã chỉ nhận khi khách nói và có trong danh mục · tự chốt cùng cổng · «P13 GV» không tỉnh ⇒ hỏi TỈNH");
 }

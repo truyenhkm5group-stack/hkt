@@ -610,7 +610,9 @@ export function addressCheckOf(r: Pick<Recipient, "address" | "province" | "ward
     ? ask
       ? "Tỉnh + xã / phường đã ghép theo địa giới mới; còn thiếu số nhà / tên đường — hỏi khách bằng ask_customer."
       : "Tỉnh + xã / phường đã ghép theo địa giới mới."
-    : "Địa chỉ CHƯA chuẩn hoá — ô xã / phường để trống, đơn cần người kiểm. Hỏi khách ĐÚNG câu ask_customer (gộp vào tin tóm tắt); khách trả lời tên xã / phường ⇒ update_draft_order với ward = tên khách nói. KHÔNG tự chọn, KHÔNG nói địa chỉ đã đúng.";
+    : a.missing.includes("province")
+      ? "CHƯA BIẾT TỈNH / THÀNH — ô tỉnh và xã để trống, đơn cần người kiểm. Hỏi khách ĐÚNG câu ask_customer (hỏi tỉnh trước, xã sau); khách nói tỉnh ⇒ update_draft_order với address thêm đúng tên tỉnh khách nói. KHÔNG tự thêm tỉnh, KHÔNG tự chọn xã, KHÔNG nói địa chỉ đã đúng."
+      : "Địa chỉ CHƯA chuẩn hoá — ô xã / phường để trống, đơn cần người kiểm. Hỏi khách ĐÚNG câu ask_customer (gộp vào tin tóm tắt); khách trả lời tên xã / phường ⇒ update_draft_order với ward = tên khách nói. KHÔNG tự chọn, KHÔNG nói địa chỉ đã đúng.";
   return { key, view: { status: a.confidence, province: a.province, ward: a.ward, candidates: a.candidates, missing: a.missing, ask_customer: ask, note } };
 }
 
@@ -993,7 +995,9 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
       const addrChk = addressCheckOf(d.recipient);
       if (ctx.turn !== undefined && addressAskPending(state, addrChk, ctx.turn)) {
         state.addressAsk = { key: addrChk.key, turn: ctx.turn };
-        return err("Chốt: địa chỉ chưa chuẩn hoá — hỏi khách", `Địa chỉ giao chưa ghép được xã / phường theo địa giới mới (${addrChk.view.status}). CHƯA chốt. Hỏi khách đúng câu: «${addrChk.view.ask_customer}» rồi DỪNG, đợi khách trả lời. Khách nói tên xã / phường ⇒ update_draft_order với ward = tên đó rồi confirm_order. KHÔNG nói đã lên đơn.`, state);
+        const noProvince = addrChk.view.missing.includes("province");
+        const next = noProvince ? "Khách nói tỉnh / thành ⇒ update_draft_order với address thêm đúng tên tỉnh khách nói (KHÔNG tự thêm)" : "Khách nói tên xã / phường ⇒ update_draft_order với ward = tên đó rồi confirm_order";
+        return err("Chốt: địa chỉ chưa chuẩn hoá — hỏi khách", `Địa chỉ giao chưa ghép được ${noProvince ? "TỈNH / THÀNH (và xã / phường)" : "xã / phường"} theo địa giới mới (${addrChk.view.status}). CHƯA chốt. Hỏi khách đúng câu: «${addrChk.view.ask_customer}» rồi DỪNG, đợi khách trả lời. ${next}. KHÔNG nói đã lên đơn.`, state);
       }
       const priced = await priceLines(d.lines, ctx.config, verifiedCustomerId(state), [d.recipient.address, d.recipient.province].join(", "), { packing: Boolean(d.packing) });
       if (priced.missing.length || priced.unpriced.length) return err("Chốt: mã không bán được", "Có mẫu mã không còn bán hoặc chưa có giá — chuyển nhân viên.", state, { reason: priced.missing.length ? "UNKNOWN_SKU" : "UNPRICED_SKU" });
