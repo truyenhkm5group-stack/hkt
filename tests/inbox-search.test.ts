@@ -254,7 +254,7 @@ async function testDb() {
 
       // 8 · UNREAD rỗng ⇒ gợi ý «Tất cả» ĐÚNG số (ca của chủ shop).
       const unread = await find("0900111222", { filter: "UNREAD" });
-      assert.equal(unread.rows.length, 0, "UNREAD rỗng là ĐÚNG luật V3 (tin cuối là của AI, đã đọc)");
+      assert.equal(unread.rows.length, 0, "UNREAD rỗng là ĐÚNG (tin cuối là câu trả lời của AI — đã xử lý)");
       assert.equal(unread.counts.UNREAD, 0);
       assert.equal(unread.counts.ALL, 1, "cùng câu đếm: «Tất cả» có 1");
       const hint = inboxEmptyHint("UNREAD", unread.counts, "0900111222");

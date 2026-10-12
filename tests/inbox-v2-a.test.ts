@@ -172,13 +172,15 @@ async function testUnreadFirstOrder() {
         const read = i % 3 === 0;
         return { channel: "FANPAGE", status: "OPEN", visitorKey: fanpageVisitorKey(PAGE, `t${i}`), pageId: PAGE, threadId: `t${i}`, lastCustomerAt: at, lastBotAt: i % 2 ? new Date(at.getTime() + 30_000) : null, staffSeenAt: read ? new Date(at.getTime() + 60_000) : null, customerId: i === 5 ? "khach-5" : null, createdAt: new Date(at.getTime() - 3_600_000) };
       });
-      await db.insert(c).values(values);
+      const made = await db.insert(c).values(values).returning({ id: c.id, threadId: c.threadId });
       // Bằng chứng của «chưa đọc» (P0 10/10/2026 tối): mỗi hội thoại có ĐÚNG tin khách ở mốc `last_customer_at` (+ câu bot khi có) —
       // chưa đọc giờ đọc từ TIN KHÁCH THẬT sau con trỏ, không từ cột mốc (bản trước dựng hội thoại «chưa đọc» không có tin nào).
       await db.insert(schema.salesChatInbound).values(values.flatMap((v, i) => [
         { pageId: PAGE, threadId: v.threadId, messageId: `v2a-c-${i}`, text: "Xin giá", status: "DONE", createdAt: v.lastCustomerAt },
         ...(v.lastBotAt ? [{ pageId: PAGE, threadId: v.threadId, messageId: `v2a-b-${i}`, text: "Dạ giá 280k ạ", note: "BOT_SENT", status: "DONE", createdAt: v.lastBotAt }] : []),
       ]));
+      // «Người đã mở» = con trỏ đọc tới tin khách (`sales_chat_reads` — vế «người đọc» của response-ownership #803), không phải mốc chung cũ.
+      await db.insert(schema.salesChatReads).values(values.flatMap((v, i) => (v.staffSeenAt ? [{ conversationId: made[i].id, userId: admin.id, readThroughAt: v.lastCustomerAt }] : [])));
 
       const ids = (r: Awaited<ReturnType<typeof listInbox>>) => (r.ok ? r.rows : []);
       const p1 = ids(await listInbox(admin, { limit: 50 }));
@@ -189,14 +191,13 @@ async function testUnreadFirstOrder() {
       const firstRead = p2.findIndex((r) => !r.unread);
       assert.ok(firstRead > 0, "có cả hai nhóm");
       assert.ok(p2.slice(firstRead).every((r) => !r.unread), "CHƯA ĐỌC luôn đứng trước ĐÃ ĐỌC (qua cả hai trang)");
-      // Chủ shop 10/10/2026 (mục B1, SỬA khẳng định cũ cùng ngày): «chưa đọc» = NGƯỜI chưa mở tin của khách, BẤT KỂ AI đã trả lời
-      // hay chưa. Bản trước coi hội thoại bot đã trả lời (i lẻ) là «đã đọc» dù chưa ai mở — đúng cái chủ shop báo sai: khách
-      // «xin giá» → AI «Dạ giá 280k…», nhân viên chưa mở ⇒ VẪN chưa đọc. 70 hội thoại: 46 nhân viên chưa mở ⇒ 46 chưa đọc.
-      assert.equal(firstRead, 46, "46 hội thoại chưa đọc / 70 (nhân viên chưa mở từ tin khách cuối, kể cả khi bot đã trả lời)");
+      // Chủ shop 11/10/2026 (P0-D — thay luật 10/10 «AI trả lời không xoá chưa đọc»): «chưa đọc» = tin khách CHƯA ĐƯỢC XỬ LÝ — chưa ai
+      // mở VÀ chưa ai trả lời (bot · nhân viên · page). 70 hội thoại: chưa mở (i % 3 ≠ 0) và bot chưa trả lời (i chẵn) ⇒ 23 chưa đọc.
+      assert.equal(firstRead, 23, "23 hội thoại chưa đọc / 70 (chưa ai mở VÀ bot chưa trả lời)");
       const idOf = new Map((await db.select({ id: c.id, threadId: c.threadId }).from(c).where(eq(c.pageId, PAGE))).map((r) => [r.threadId, r.id]));
       const rowOf = (thread: string) => p2.find((r) => r.id === idOf.get(thread))!;
-      assert.equal(rowOf("t1").unread, true, "t1: BOT đã trả lời sau tin khách nhưng nhân viên chưa mở ⇒ VẪN chưa đọc");
-      assert.ok(rowOf("t1").unreadCount >= 1);
+      assert.equal(rowOf("t1").unread, false, "t1: BOT đã trả lời sau tin khách ⇒ đã xử lý (P0-D), dù nhân viên chưa mở");
+      assert.equal(rowOf("t1").unreadCount, 0);
       assert.equal(rowOf("t2").unread, true, "t2: tin cuối là của khách, chưa ai trả lời, chưa ai mở ⇒ chưa đọc");
       assert.equal(rowOf("t3").unread, false, "t3: nhân viên đã mở sau tin khách");
       assert.ok(p2.every((r) => r.unread === (r.unreadCount > 0)), "số chưa đọc trên hàng khớp cờ chưa đọc");

@@ -13,6 +13,11 @@
  *     thẻ «Tin khách chưa đọc» ⇒ A rời NGAY; ở «Tất cả» A về nhóm đã đọc đúng chỗ; có tin khách mới hơn ⇒ A vẫn chưa đọc.
  * Quét mã nguồn: đường đánh dấu đọc không dùng `now` / `new Date()` làm mốc; hàng danh sách không lồng `<a>` trong `<a>`.
  * Mốc thời gian đi theo đồng hồ THẬT (AGENTS 50).
+ *
+ * 11/10/2026 chủ shop ĐỊNH NGHĨA LẠI «chưa đọc» (OWNER CORRECTION): LƯỢT KHÁCH MỚI NHẤT CHƯA XỬ LÝ — định nghĩa của response-ownership
+ * (#803): xử lý khi sau tin khách cuối có câu AI / nhân viên / page hợp lệ hoặc một người mở / đọc (mốc đọc lớn nhất của cửa hàng). Kỳ vọng của chín ca + phần «hai người» đã sửa theo luật mới (KHÁCH→BOT,
+ * KHÁCH→PAGE, nhiều tin khách→AI nay ĐÃ xử lý; một người đọc là hết chưa đọc với cả cửa hàng). Ma trận P0-E đầy đủ ở
+ * tests/inbox-unread-perf.test.ts. Phần nạp ≠ đọc, con trỏ chỉ tiến, idempotent, tin tới giữa chừng vẫn chưa đọc: GIỮ NGUYÊN.
  */
 import assert from "node:assert/strict";
 import { readFileSync, rmSync } from "node:fs";
@@ -166,16 +171,16 @@ async function testDb() {
       const c = schema.salesChatConversations;
       const t = schema.salesChatInbound;
 
-      // ═══ CHÍN CA CỦA ĐẶC TẢ (+ một ca luật cũ) — kỳ vọng viết tay cho người xem CHƯA có con trỏ riêng ═══
+      // ═══ CHÍN CA CỦA ĐẶC TẢ (+ một ca luật cũ) — kỳ vọng viết tay theo luật VẬN HÀNH 11/10 (mọi câu trả lời hợp lệ xử lý tin khách) ═══
       const cases: Case[] = [
         { id: "r1", note: "chỉ KHÁCH", msgs: [{ side: "C", ago: 10 * MIN }], expect: { unread: 1, preview: "CUSTOMER" } },
-        { id: "r2", note: "KHÁCH → BOT (AI trả lời, chưa ai mở)", msgs: [{ side: "C", ago: 20 * MIN }, { side: "BOT", ago: 19 * MIN }], expect: { unread: 1, preview: "CUSTOMER", after: "BOT" } },
+        { id: "r2", note: "KHÁCH → BOT (AI trả lời = đã xử lý, P0-D)", msgs: [{ side: "C", ago: 20 * MIN }, { side: "BOT", ago: 19 * MIN }], expect: { unread: 0, preview: "BOT" } },
         { id: "r3", note: "KHÁCH → STAFF (nhân viên trả lời từ ERP = đã thấy)", msgs: [{ side: "C", ago: 30 * MIN }, { side: "STAFF", ago: 29 * MIN }], expect: { unread: 0, preview: "STAFF" } },
-        { id: "r4", note: "KHÁCH → PAGE ngoài ERP (người trong ERP chưa thấy)", msgs: [{ side: "C", ago: 40 * MIN }, { side: "PAGE", ago: 39 * MIN }], expect: { unread: 1, preview: "CUSTOMER", after: "PAGE" } },
+        { id: "r4", note: "KHÁCH → PAGE ngoài ERP 5 phút sau (câu trả lời hợp lệ theo #803 — không phải tin chào ≤ 60 giây quanh tin mở phiên)", msgs: [{ side: "C", ago: 40 * MIN }, { side: "PAGE", ago: 35 * MIN }], expect: { unread: 0, preview: "PAGE" } },
         { id: "r5", note: "chỉ BOT", msgs: [{ side: "BOT", ago: 50 * MIN }], expect: { unread: 0, preview: "BOT" } },
         { id: "r6", note: "chỉ STAFF", msgs: [{ side: "STAFF", ago: 60 * MIN }], expect: { unread: 0, preview: "STAFF" } },
         { id: "r7", note: "chỉ PAGE", msgs: [{ side: "PAGE", ago: 70 * MIN }], expect: { unread: 0, preview: "PAGE" } },
-        { id: "r8", note: "nhiều tin KHÁCH rồi AI", msgs: [{ side: "C", ago: 83 * MIN }, { side: "C", ago: 82 * MIN }, { side: "C", ago: 81 * MIN }, { side: "BOT", ago: 80 * MIN }], expect: { unread: 3, preview: "CUSTOMER", after: "BOT" } },
+        { id: "r8", note: "nhiều tin KHÁCH rồi AI", msgs: [{ side: "C", ago: 83 * MIN }, { side: "C", ago: 82 * MIN }, { side: "C", ago: 81 * MIN }, { side: "BOT", ago: 80 * MIN }], expect: { unread: 0, preview: "BOT" } },
         { id: "r9", note: "KHÁCH (tin mới sẽ tới trong lúc nạp khung chat)", msgs: [{ side: "C", ago: 90 * MIN }], expect: { unread: 1, preview: "CUSTOMER" } },
         // Luật CŨ: cột mốc `last_customer_at` bị đẩy bằng giờ xử lý sau lần người mở, không có tin khách nào sau đó ⇒ huy hiệu giả.
         { id: "r10", note: "cột mốc bị đẩy, không tin khách sau lần mở (luật cũ in «AI: … ①»)", msgs: [{ side: "C", ago: 100 * MIN }, { side: "BOT", ago: 99 * MIN }], conv: { staffSeenAt: at(98 * MIN), lastCustomerAt: at(97 * MIN) }, expect: { unread: 0, preview: "BOT" } },
@@ -219,11 +224,11 @@ async function testDb() {
         assert.equal(r.previewSide, k.expect.preview, `${k.id} (${k.note}): phía của tin xem trước`);
         assert.equal(r.afterPreview?.side ?? null, k.expect.after ?? null, `${k.id}: dòng phụ «đã trả lời»`);
       }
-      assert.equal(all.rows.find((x) => x.id === ids.r8)!.preview, `${text.C} (3)`, "nhiều tin khách ⇒ xem trước tin khách MỚI NHẤT");
+      assert.equal(all.rows.find((x) => x.id === ids.r8)!.preview, text.BOT, "nhiều tin khách rồi AI trả lời ⇒ đã xử lý, xem trước tin mới nhất (P0-G)");
       assert.ok(all.rows.every((r) => !r.unread || r.previewSide === "CUSTOMER"), "không bao giờ «chưa đọc» với xem trước tin AI / NV / page");
       const unread0 = await listOf(admin, "UNREAD");
-      assert.deepEqual(new Set(unread0.rows.map((r) => r.id)), new Set(["r1", "r2", "r4", "r8", "r9"].map((k) => ids[k])), "thẻ «Tin khách chưa đọc» = đúng các ca có tin khách");
-      assert.equal(unread0.counts.UNREAD, 5);
+      assert.deepEqual(new Set(unread0.rows.map((r) => r.id)), new Set(["r1", "r9"].map((k) => ids[k])), "thẻ «Tin khách chưa đọc» = đúng các ca có tin khách CHƯA XỬ LÝ");
+      assert.equal(unread0.counts.UNREAD, 2);
 
       // ── Nạp khung chat KHÔNG đánh dấu đọc; con trỏ = tin khách cuối cùng của payload; tin khách tới giữa chừng ⇒ vẫn chưa đọc ──
       const th9 = await loadInboxThread(lan, ids.r9);
@@ -242,7 +247,7 @@ async function testDb() {
       const th8 = await loadInboxThread(lan, ids.r8);
       assert.ok(th8.ok && th8.thread.readThrough);
       const a8 = await markInboxReadCore(lan, ids.r8, th8.thread.readThrough.id);
-      assert.ok(a8.ok && a8.read.unreadBefore === 3 && a8.read.unreadAfter === 0, JSON.stringify(a8));
+      assert.ok(a8.ok && a8.read.unreadBefore === 0 && a8.read.unreadAfter === 0, `r8 đã được AI xử lý trước lượt đọc: ${JSON.stringify(a8)}`);
       const b8 = await markInboxReadCore(lan, ids.r8, th8.thread.readThrough.id);
       assert.ok(b8.ok && b8.read.stamp === a8.read.stamp && b8.read.throughAt === a8.read.throughAt && b8.read.unreadBefore === 0, "gọi lại cùng tin ⇒ không đổi gì (idempotent)");
       const older = (await db.select({ id: t.id }).from(t).where(eq(t.messageId, "r8-0")))[0];
@@ -258,7 +263,8 @@ async function testDb() {
       assert.equal((await markInboxReadCore(outsider, ids.r1, older.id)).ok, false, "không quyền xem ⇒ không đánh dấu");
 
       // ── Hai người, chưa đọc độc lập ──
-      // admin đọc r2 trước (có con trỏ riêng), rồi khách nhắn thêm ⇒ cả hai chưa đọc; Lan đọc ⇒ Lan hết, admin VẪN còn.
+      // admin đọc r2 trước (có con trỏ riêng), rồi khách nhắn thêm ⇒ cả hai chưa đọc; Lan đọc ⇒ HẾT chưa đọc với CẢ HAI (P0-D: mốc đọc
+      // của cửa hàng — con trỏ riêng của admin vẫn cũ hơn, chỉ còn cho audit).
       const th2a = await loadInboxThread(admin, ids.r2);
       assert.ok(th2a.ok && th2a.thread.readThrough && (await markInboxReadCore(admin, ids.r2, th2a.thread.readThrough.id)).ok);
       assert.equal((await rowOf(admin, "r2")).unread, false, "admin đọc r2");
@@ -268,19 +274,21 @@ async function testDb() {
       assert.ok(th2l.ok && th2l.thread.readThrough && (await markInboxReadCore(lan, ids.r2, th2l.thread.readThrough.id)).ok);
       assert.equal((await rowOf(lan, "r2")).unread, false, "Lan đọc ⇒ Lan hết chưa đọc");
       const adminR2 = await rowOf(admin, "r2");
-      assert.ok(adminR2.unread && adminR2.unreadCount === 1, "admin có con trỏ riêng ⇒ VẪN chưa đọc tin Lan đã đọc (chưa đọc là CÁ NHÂN)");
+      assert.ok(!adminR2.unread && adminR2.unreadCount === 0, "Lan đọc ⇒ admin cũng hết chưa đọc (chưa đọc vận hành là của CỬA HÀNG)");
+      const [adminCursor] = await db.select().from(schema.salesChatReads).where(and(eq(schema.salesChatReads.conversationId, ids.r2), eq(schema.salesChatReads.userId, admin.id)));
+      assert.ok(adminCursor && adminCursor.readThroughMessageId === th2a.thread.readThrough.id, "con trỏ riêng của admin giữ nguyên cho audit");
       // Tương thích ngược (quyết định đã ghi ở inbox-states.ts): người CHƯA có con trỏ riêng của hội thoại đọc mốc chung — Lan (trả lời
       // được) đẩy mốc chung tới đúng tin khách đã đọc, nên với r8 admin cũng thấy đã đọc như hôm nay.
       assert.equal((await rowOf(admin, "r8")).unread, false, "chưa có con trỏ riêng ⇒ lùi về mốc chung");
-      // Bộ đếm theo người: admin còn r2 chưa đọc, Lan thì không.
-      assert.ok((await listOf(admin, "UNREAD")).rows.some((r) => r.id === ids.r2) && !(await listOf(lan, "UNREAD")).rows.some((r) => r.id === ids.r2), "thẻ «Tin khách chưa đọc» theo người xem");
+      // Bộ đếm như nhau với mọi người: r2 đã xử lý.
+      assert.ok(!(await listOf(admin, "UNREAD")).rows.some((r) => r.id === ids.r2) && !(await listOf(lan, "UNREAD")).rows.some((r) => r.id === ids.r2), "thẻ «Tin khách chưa đọc» của cửa hàng");
 
       // ═══ BẤT BIẾN FALSE-UNREAD = 0 trên toàn bộ dữ liệu mẫu, cho cả hai người ═══
       for (const who of [admin, lan]) {
         const l = await listOf(who);
         for (const r of l.rows) {
           assert.equal(r.unread, r.unreadCount > 0, `${r.id}: chưa đọc ⇔ số ≥ 1`);
-          if (r.unread) assert.ok(r.newestCustomerAt && r.readCursorAt && r.newestCustomerAt > r.readCursorAt, `${r.id}: chưa đọc ⇒ có tin khách sau con trỏ của người xem`);
+          if (r.unread) assert.ok(r.newestCustomerAt && (!r.readCursorAt || r.newestCustomerAt > r.readCursorAt), `${r.id}: chưa đọc ⇒ có tin khách sau mốc xử lý (chưa ai xử lý ⇒ mốc NULL)`);
           if (r.unread) assert.equal(r.previewSide, "CUSTOMER", `${r.id}: chưa đọc ⇒ xem trước tin khách`);
         }
         const u = await listOf(who, "UNREAD");
@@ -294,6 +302,7 @@ async function testDb() {
       assert.equal(tot.current.falseUnread, 0, "audit: FALSE-UNREAD luật mới = 0");
       assert.equal(tot.current.aiPreviewUnread, 0, "audit: không hội thoại chưa đọc nào xem trước tin AI / NV / page");
       assert.equal(tot.readers.falseUnread, 0, "audit: con trỏ riêng không vi phạm");
+      assert.ok(tot.attention.measured && tot.attention.falseUnread === 0 && tot.attention.missed === 0, `audit: luật vận hành (#803) FALSE_UNREAD 0, không bỏ sót (${JSON.stringify(tot.attention)})`);
       assert.ok(tot.legacy.falseUnread >= 1, `audit: luật cũ có chưa đọc giả (r10): ${JSON.stringify(tot.legacy)}`);
       assert.ok(tot.legacy.aiPreviewUnread >= 1, "audit: luật cũ có «AI: … + huy hiệu»");
       const one = await collectReadAudit(db, { limit: 500, conversation: ids.r9 });

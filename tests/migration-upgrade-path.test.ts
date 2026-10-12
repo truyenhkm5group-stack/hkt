@@ -192,6 +192,7 @@ const MOI = [
   "0242_sales_chat_handoff_queue",
   "0243_followup_decided_event",
   "0244_sales_chat_inbound_sender",
+  "0245_sales_chat_last_inbound",
 ] as const;
 
 /*
@@ -401,6 +402,40 @@ export async function testMigrationUpgradePath() {
     await client.query(`delete from sales_chat_conversations where id = 'up-scr'`);
     assert.equal(await dem("select count(*)::int as n from sales_chat_reads"), 0, "bước 2: 0239 — xoá hội thoại thì con trỏ đi theo");
 
+    // 0245 («chưa đọc» lưu sẵn = kết quả định nghĩa #803, trigger + dẫn xuất tất định). Bảng hội thoại / tin của trạng thái cũ ra đời TRONG
+    // nhóm migration mới nên không gieo được ở bước 1: dựng dữ liệu, xoá cột, rồi chạy lại ĐÚNG câu dẫn xuất của tệp.
+    await client.query(`insert into sales_chat_conversations (id, channel, page_id, thread_id) values ('up-li1', 'FANPAGE', 'up-pg', 'up-t1'), ('up-li2', 'FANPAGE', 'up-pg', 'up-t2'), ('up-li3', 'WEB', null, null), ('up-li4', 'FANPAGE', 'up-pg', 'up-t4')`);
+    await client.query(`insert into sales_chat_inbound (id, page_id, thread_id, message_id, text, note, status, imported_at, created_at) values
+      ('up-i1', 'up-pg', 'up-t1', 'up-m1', 'hỏi', null, 'DONE', null, '2026-10-01T01:00:00Z'),
+      ('up-i2', 'up-pg', 'up-t1', 'up-m2', 'đáp', 'BOT_SENT', 'DONE', null, '2026-10-01T02:00:00Z'),
+      ('up-i4', 'up-pg', 'up-t2', 'up-m4', 'lịch sử', null, 'DONE', '2026-10-02T00:00:00Z', '2026-10-01T04:00:00Z'),
+      ('up-i6', 'up-pg', 'up-t4', 'up-m6', 'còn hàng?', null, 'DONE', null, '2026-10-01T05:00:00Z')`);
+    await client.query(`insert into sales_chat_messages (id, conversation_id, seq, role, content, created_at) values ('up-w1', 'up-li3', 1, 'user', '[{"type":"text","text":"hỏi"}]', '2026-10-01T05:00:00Z')`);
+    await client.query(`insert into sales_chat_reads (conversation_id, user_id, read_through_at) values ('up-li1', 'u1', '2026-10-01T01:00:00Z')`);
+    const co = async (id: string) => (await client.query<{ u: boolean | null; r: string | null }>(`select turn_unhandled as u, to_char(last_read_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI') as r from sales_chat_conversations where id = '${id}'`)).rows[0];
+    const kiem = async (khi: string) => {
+      assert.deepEqual(await co("up-li1"), { u: false, r: "2026-10-01T01:00" }, `bước 2: 0245 ${khi} — bot đã trả lời + con trỏ đọc ⇒ đã xử lý`);
+      assert.equal((await co("up-li2")).u, false, `bước 2: 0245 ${khi} — chỉ có tin nhập lịch sử ⇒ không chưa đọc`);
+      assert.equal((await co("up-li3")).u, true, `bước 2: 0245 ${khi} — chat web: khách hỏi chưa ai đáp ⇒ chưa đọc`);
+      assert.equal((await co("up-li4")).u, true, `bước 2: 0245 ${khi} — khách hỏi chưa ai đáp ⇒ chưa đọc`);
+    };
+    await kiem("trigger");
+    await client.query(`alter table sales_chat_conversations disable trigger sales_chat_conversations_turn_upd`);
+    await client.query(`update sales_chat_conversations set turn_unhandled = null, last_read_at = null where id like 'up-li%'`);
+    await client.query(`alter table sales_chat_conversations enable trigger sales_chat_conversations_turn_upd`);
+    const dan = readFileSync(path.join(goc, "0245_sales_chat_last_inbound.sql"), "utf8")
+      .split("--> statement-breakpoint")
+      .map((x) => x.replace(/^\s*--.*$/gm, "").trim())
+      .filter((x) => x.startsWith('UPDATE "sales_chat_conversations" c SET'));
+    assert.equal(dan.length, 1, "bước 2: 0245 dẫn xuất bằng MỘT câu");
+    for (const cau of dan) await client.query(cau);
+    await kiem("dẫn xuất");
+    await client.query(`insert into sales_chat_inbound (id, page_id, thread_id, message_id, text, status, created_at) values ('up-i5', 'up-pg', 'up-t2', 'up-m5', 'tin sống', 'DONE', '2026-10-03T00:00:00Z')`);
+    assert.equal((await co("up-li2")).u, true, "bước 2: 0245 — trigger: tin khách mới ⇒ chưa đọc");
+    await client.query(`delete from sales_chat_inbound where id in ('up-i1', 'up-i2', 'up-i4', 'up-i5', 'up-i6')`);
+    assert.equal((await co("up-li2")).u, false, "bước 2: 0245 — xoá tin khách ⇒ trigger tính lại");
+    await client.query(`delete from sales_chat_conversations where id = 'up-li4'`);
+    await client.query(`delete from sales_chat_conversations where id in ('up-li1', 'up-li2', 'up-li3')`);
     // 0241 (ảnh giá trị theo tổ chức + sức khoẻ theo ngày — sứ mệnh saas-value-snapshots): hai bảng mới RỖNG (không gieo, không
     // backfill — ngày trước lượt chụp đầu tiên là CHƯA ĐO); CHECK chặn cửa sổ lạ, chi âm, phiên bản rỗng, mã lý do sai dạng / thiếu mã.
     assert.equal(await dem("select count(*)::int as n from platform_tenant_value_snapshots"), 0, "bước 2: 0241 không gieo ảnh giá trị nào");

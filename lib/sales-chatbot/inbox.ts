@@ -1,5 +1,4 @@
 import { and, asc, desc, eq, inArray, isNotNull, isNull, ne, or, sql, type SQL } from "drizzle-orm";
-import { alias } from "drizzle-orm/pg-core";
 import { z } from "zod";
 import { getDb, schema } from "@/db";
 import { listChannelPages } from "@/lib/connectors/service";
@@ -28,10 +27,6 @@ import {
   customerInboundRowSql,
   customerMessageRowSql,
   PAGE_REPLY_AFTER_CUSTOMER_SQL,
-  personalUnreadCountSql,
-  personalUnreadSql,
-  readCursorSql,
-  VIEWER_READ_ALIAS,
   WAITING_REPLY_SQL,
   WEB_STAFF_REASON,
 } from "@/lib/sales-chatbot/inbox-states";
@@ -80,6 +75,8 @@ import { assessCustomerRisk } from "@/lib/alerts/risk";
 import { loadAlertConfig } from "@/lib/alerts/config";
 import { PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
 import { RETURNED_OUTCOMES_SQL } from "@/lib/constants/truth";
+import { rowsOf } from "@/lib/sql-rows";
+import { loadInboxUnreadSql } from "@/lib/sales-chatbot/inbox-unread";
 import { sendZaloImages, sendZaloText, ZALO_STAFF_REASON } from "@/lib/sales-chatbot/zalo";
 
 /**
@@ -242,7 +239,8 @@ export function webSideOf(role: string, text: string): TimelineSide {
  * THỨ TỰ DANH SÁCH (INBOX-V2-A 09/10 · chủ shop 10/10/2026 mục C) — xếp ở MÁY CHỦ, không xếp lại trên trình duyệt, nên «Xem thêm»
  * (nâng `limit`) luôn ra ĐÚNG phần nối tiếp của trang trước:
  *  · «Chờ trả lời»: khách chờ LÂU NHẤT lên đầu (đúng thứ tự phải xử lý).
- *  · Mọi thẻ khác: NGƯỜI XEM CHƯA ĐỌC trước (`personalUnreadSql` — AI trả lời không làm hội thoại thành «đã đọc»), rồi đã đọc; trong
+ *  · Mọi thẻ khác: CHƯA ĐỌC trước (`loadInboxUnreadSql` — LƯỢT KHÁCH MỚI NHẤT CHƯA XỬ LÝ theo response-ownership #803: chưa có câu trả lời
+ *    hợp lệ của AI / nhân viên / page, chưa ai mở — chủ shop 11/10/2026), rồi đã xử lý; trong
  *    mỗi nhóm TIN CÓ NGHĨA mới nhất lên đầu (`INBOX_ACTIVITY_SQL` — không cột siêu dữ liệu nào: nhãn / người phụ trách / hồ sơ khách
  *    không đổi chỗ hội thoại).
  * Khoá cuối là `id` để hai hội thoại cùng mốc không đổi chỗ giữa hai lượt tải (phân trang ổn định). Hội thoại ĐANG MỞ thành «đã
@@ -288,14 +286,14 @@ export async function listInbox(
   if (range?.to) base.push(sql`${INBOX_ACTIVITY_SQL} < ${range.to}`);
   // Bộ lọc level đứng RIÊNG: số đếm theo level tính trên các bộ lọc khác (chip level không tự triệt tiêu nhau).
   const levelCond = q.level ? eq(c.customerLevel, q.level) : undefined;
-  // «Tin khách chưa đọc» là của NGƯỜI XEM (con trỏ đọc riêng — inbox-states.ts); mọi thẻ khác là trạng thái chung của cửa hàng.
-  // Con trỏ của người xem nối MỘT lần (LEFT JOIN theo khoá chính) cho cả ba câu — không phải một câu con mỗi lần nhắc tới.
-  const scr = alias(schema.salesChatReads, VIEWER_READ_ALIAS);
-  const viewerRead = and(eq(scr.conversationId, c.id), eq(scr.userId, user.id));
-  const personalUnread = personalUnreadSql(user.id, true);
+  // «Tin khách chưa đọc» = LƯỢT KHÁCH MỚI NHẤT CHƯA XỬ LÝ (chủ shop 11/10/2026 — MỘT định nghĩa của response-ownership #803). Kết quả
+  // lưu sẵn trên dòng hội thoại (0245, trigger CSDL — inbox-unread.ts): một phép đọc cột cho bộ đếm, bộ lọc và khoá xếp. Trạng thái của
+  // CỬA HÀNG — không nối con trỏ của người xem. Công tắc lùi `inbox.unread.materialized` (inbox-unread.ts) đổi sang tính trực tiếp.
+  const unreadSql = await loadInboxUnreadSql();
+  const unread = unreadSql.unread;
   const byFilter: Record<InboxFilter, SQL | undefined> = {
     ALL: undefined,
-    UNREAD: personalUnread,
+    UNREAD: unread,
     UNANSWERED: WAITING_REPLY_SQL,
     NEEDS_HUMAN: needsHuman,
     MINE: eq(c.assigneeUserId, user.id),
@@ -314,14 +312,12 @@ export async function listInbox(
     .select({ ...countCols, phone: sql<number>`count(*) filter (where ${HAS_PHONE})::int`, unreadStamp: sql<string | null>`(select max(r.updated_at) from "sales_chat_reads" r where r.user_id = ${user.id})` })
     .from(c)
     .leftJoin(cu, eq(cu.id, c.customerId))
-    .leftJoin(scr, viewerRead)
     .where(and(...base, ...(levelCond ? [levelCond] : [])));
   const counts = Object.fromEntries(INBOX_FILTERS.map((f) => [f, Number((countRow as Record<string, unknown> | undefined)?.[f] ?? 0)])) as Record<InboxFilter, number>;
   const levelRows = await db
     .select({ level: c.customerLevel, n: sql<number>`count(*)::int` })
     .from(c)
     .leftJoin(cu, eq(cu.id, c.customerId))
-    .leftJoin(scr, viewerRead)
     .where(and(...base, ...(byFilter[q.filter] ? [byFilter[q.filter]!] : [])))
     .groupBy(c.customerLevel);
   const levelCounts: Partial<Record<CustomerLevel, number>> = {};
@@ -349,10 +345,13 @@ export async function listInbox(
       pageReplyAfterCustomer: PAGE_REPLY_AFTER_CUSTOMER_SQL,
       orderUnderReview: ORDER_UNDER_REVIEW_SQL,
       activity: INBOX_ACTIVITY_SQL,
-      // Cờ chờ trả lời: ĐÚNG biểu thức của bộ lọc. «Chưa đọc» = SỐ tin khách sau con trỏ của người xem ≥ 1 (cùng điều kiện với bộ lọc
+      // Cờ chờ trả lời: ĐÚNG biểu thức của bộ lọc. «Chưa đọc» = SỐ tin khách chưa xử lý ≥ 1 (cùng điều kiện với bộ lọc
       // và khoá xếp — một hàng không bao giờ đứng sai nhóm, và không bao giờ «chưa đọc» mà số 0).
       needsReply: WAITING_REPLY_SQL,
-      readCursor: readCursorSql(user.id, true),
+      // Mốc «người đã mở» của CỬA HÀNG (con trỏ lớn nhất của mọi người · mốc mở cũ) — trình duyệt so nó với xác nhận đọc.
+      readCursor: unreadSql.seenAt,
+      // Cờ chưa đọc: cột ĐƯỢC XẾP THEO (khoá xếp gọi tên cột).
+      unreadFlag: sql<boolean>`${unread}`.as("unread_flag"),
       assigneeUserId: c.assigneeUserId,
       assigneeName: u.name,
       hasOrder: HAS_ORDER,
@@ -361,7 +360,8 @@ export async function listInbox(
       state: c.state,
       updatedAt: c.updatedAt,
       humanCooldownUntil: c.humanCooldownUntil,
-      unreadN: personalUnreadCountSql(user.id, true),
+      // Số tin khách chưa xử lý — chỉ có nghĩa khi `unreadFlag`; Postgres chỉ tính cho các dòng của trang (sau LIMIT).
+      unreadPending: unreadSql.pendingCount,
       closed: CLOSED,
       transport: THREAD_TRANSPORT,
       // Hàng đợi người khi AI im (P0 11/10/2026 — handoff-routing.ts): «chờ X phút · phụ trách · hạn» của hàng.
@@ -372,16 +372,18 @@ export async function listInbox(
     .from(c)
     .leftJoin(cu, eq(cu.id, c.customerId))
     .leftJoin(u, eq(u.id, c.assigneeUserId))
-    .leftJoin(scr, viewerRead)
     .where(where)
-    .orderBy(...inboxOrderBy(q.filter, personalUnread))
+    .orderBy(...inboxOrderBy(q.filter, sql<boolean>`"unread_flag"`))
     .limit(q.limit);
 
   /*
     DÒNG XEM TRƯỚC (chủ shop 10/10/2026 tối, P0.2): hai tin mỗi hội thoại — tin MỚI NHẤT (mọi phía) và tin KHÁCH thật mới nhất. Hội
     thoại người xem chưa đọc ⇒ xem trước TIN KHÁCH (đó chính là tin chưa đọc mới nhất: chưa đọc ⇔ có tin khách sau con trỏ), kèm dòng
     phụ «AI đã trả lời …» nếu sau nó đã có câu trả lời; đã đọc ⇒ tin mới nhất như cũ. Trước đây luôn là tin mới nhất ⇒ «AI: Dạ giá
-    280k… [1]» — huy hiệu của tin khách đứng cạnh chữ của AI. Hai câu DISTINCT ON trên ≤ 500 luồng của trang, chỉ mục (luồng, mốc) 0239.
+    280k… [1]» — huy hiệu của tin khách đứng cạnh chữ của AI.
+    MỘT câu cho mỗi loại kênh (P0 inbox-unread-perf 11/10): hai `LEFT JOIN LATERAL … ORDER BY mốc DESC LIMIT 1` trên chỉ mục (luồng, mốc)
+    0239 — mỗi luồng của trang đọc lùi từ dòng mới nhất tới dòng khớp đầu tiên. Bản trước là hai câu DISTINCT ON đọc + xếp MỌI dòng của
+    ≤ 100 luồng (cả tin nhập lịch sử) chỉ để giữ một dòng mỗi luồng. Cùng thứ tự xếp ⇒ cùng dòng được chọn.
   */
   type Pv = { text: string; side: TimelineSide; at: Date };
   const latest = new Map<string, Pv>();
@@ -390,34 +392,51 @@ export async function listInbox(
     const body = l.text.trim() || (Array.isArray(l.imageUrls) && l.imageUrls.length ? "[Ảnh]" : "[Tin không có chữ]");
     return l.kind === "COMMENT" ? `[Bình luận] ${body}` : body;
   };
+  const at = (x: unknown) => (x instanceof Date ? x : new Date(String(x)));
   const messaging = rows.filter((r) => r.pageId && r.threadId);
   if (messaging.length) {
-    const t = schema.salesChatInbound;
-    const pairs = messaging.map((r) => and(eq(t.pageId, r.pageId!), eq(t.threadId, r.threadId!))!);
-    const cols = { pageId: t.pageId, threadId: t.threadId, text: t.text, note: t.note, messageId: t.messageId, imageUrls: t.imageUrls, kind: t.kind, createdAt: t.createdAt };
-    const last = await db.selectDistinctOn([t.pageId, t.threadId], cols).from(t).where(and(or(...pairs), eq(t.kind, "INBOX"))).orderBy(t.pageId, t.threadId, desc(t.createdAt));
-    const cust = await db.selectDistinctOn([t.pageId, t.threadId], cols).from(t).where(and(or(...pairs), customerInboundRowSql(`"sales_chat_inbound"`))).orderBy(t.pageId, t.threadId, desc(t.createdAt));
     const key = (pageId: string, threadId: string) => `${pageId}\u0000${threadId}`;
-    const byKey = new Map(last.map((l) => [key(l.pageId, l.threadId), l]));
-    const custByKey = new Map(cust.map((l) => [key(l.pageId, l.threadId), l]));
+    const pairs = [...new Map(messaging.map((r) => [key(r.pageId!, r.threadId!), { pageId: r.pageId!, threadId: r.threadId! }])).values()];
+    type PreviewRow = { page_id: string; thread_id: string; l_text: string | null; l_note: string | null; l_message_id: string | null; l_image_urls: unknown; l_created_at: unknown; k_text: string | null; k_image_urls: unknown; k_kind: string | null; k_created_at: unknown };
+    const got = rowsOf<PreviewRow>(
+      await db.execute(sql`select p.page_id, p.thread_id,
+          l.text as l_text, l.note as l_note, l.message_id as l_message_id, l.image_urls as l_image_urls, l.created_at as l_created_at,
+          k.text as k_text, k.image_urls as k_image_urls, k.kind as k_kind, k.created_at as k_created_at
+        from (values ${sql.join(
+          pairs.map((x) => sql`(${x.pageId}::text, ${x.threadId}::text)`),
+          sql`, `,
+        )}) as p(page_id, thread_id)
+        left join lateral (select i.text, i.note, i.message_id, i.image_urls, i.created_at from "sales_chat_inbound" i
+          where i.page_id = p.page_id and i.thread_id = p.thread_id and i.kind = 'INBOX' order by i.created_at desc limit 1) l on true
+        left join lateral (select i.text, i.image_urls, i.kind, i.created_at from "sales_chat_inbound" i
+          where i.page_id = p.page_id and i.thread_id = p.thread_id and ${customerInboundRowSql("i")} order by i.created_at desc limit 1) k on true`),
+    );
+    const byKey = new Map(got.map((g) => [key(g.page_id, g.thread_id), g]));
     for (const r of messaging) {
-      const l = byKey.get(key(r.pageId!, r.threadId!));
-      if (l) latest.set(r.id, { text: inboundText({ ...l, kind: null }), side: inboundSide(l.note, l.messageId), at: l.createdAt });
-      const k = custByKey.get(key(r.pageId!, r.threadId!));
-      if (k) newestCustomer.set(r.id, { text: inboundText(k), side: "CUSTOMER", at: k.createdAt });
+      const g = byKey.get(key(r.pageId!, r.threadId!));
+      if (g && g.l_created_at != null) latest.set(r.id, { text: inboundText({ text: g.l_text ?? "", imageUrls: g.l_image_urls, kind: null }), side: inboundSide(g.l_note, g.l_message_id ?? ""), at: at(g.l_created_at) });
+      if (g && g.k_created_at != null) newestCustomer.set(r.id, { text: inboundText({ text: g.k_text ?? "", imageUrls: g.k_image_urls, kind: g.k_kind }), side: "CUSTOMER", at: at(g.k_created_at) });
     }
   }
   const web = rows.filter((r) => !(r.pageId && r.threadId));
   if (web.length) {
-    const m = schema.salesChatMessages;
-    const cols = { conversationId: m.conversationId, role: m.role, content: m.content, createdAt: m.createdAt };
-    const last = await db.selectDistinctOn([m.conversationId], cols).from(m).where(inArray(m.conversationId, web.map((r) => r.id))).orderBy(m.conversationId, desc(m.seq));
-    for (const l of last) {
-      const text = textOf(l.content as AiBlock[]);
-      latest.set(l.conversationId, { text: text.replace(SHOP_SAID, "").trim(), side: webSideOf(l.role, text), at: l.createdAt });
+    type WebRow = { id: string; l_role: string | null; l_content: unknown; l_created_at: unknown; k_content: unknown; k_created_at: unknown };
+    const got = rowsOf<WebRow>(
+      await db.execute(sql`select p.id, l.role as l_role, l.content as l_content, l.created_at as l_created_at, k.content as k_content, k.created_at as k_created_at
+        from (values ${sql.join(
+          web.map((r) => sql`(${r.id}::text)`),
+          sql`, `,
+        )}) as p(id)
+        left join lateral (select m.role, m.content, m.created_at from "sales_chat_messages" m where m.conversation_id = p.id order by m.seq desc limit 1) l on true
+        left join lateral (select m.content, m.created_at from "sales_chat_messages" m where m.conversation_id = p.id and ${customerMessageRowSql("m")} order by m.seq desc limit 1) k on true`),
+    );
+    for (const g of got) {
+      if (g.l_created_at != null) {
+        const text = textOf(g.l_content as AiBlock[]);
+        latest.set(g.id, { text: text.replace(SHOP_SAID, "").trim(), side: webSideOf(g.l_role ?? "", text), at: at(g.l_created_at) });
+      }
+      if (g.k_created_at != null) newestCustomer.set(g.id, { text: textOf(g.k_content as AiBlock[]), side: "CUSTOMER", at: at(g.k_created_at) });
     }
-    const cust = await db.selectDistinctOn([m.conversationId], cols).from(m).where(and(inArray(m.conversationId, web.map((r) => r.id)), customerMessageRowSql(`"sales_chat_messages"`))).orderBy(m.conversationId, desc(m.seq));
-    for (const l of cust) newestCustomer.set(l.conversationId, { text: textOf(l.content as AiBlock[]), side: "CUSTOMER", at: l.createdAt });
   }
 
   const labels = await labelsFor(rows.map((r) => r.id));
@@ -434,7 +453,7 @@ export async function listInbox(
     rows: rows.map((r) => {
       const hold = aiHoldOf({ status: r.status, handoffReason: r.handoffReason, state: r.state, updatedAt: r.updatedAt, humanCooldownUntil: r.humanCooldownUntil }, now).state;
       // Huy hiệu AI / người + lý do cần người: hàm THUẦN cùng tệp với điều kiện lọc (inbox-states.ts).
-      const unreadN = Math.max(0, Number(r.unreadN ?? 0));
+      const unreadN = r.unreadFlag ? Math.max(1, Number(r.unreadPending ?? 0)) : 0;
       const st = classifyInboxState({ ...r, pageReplyAfterCustomer: Boolean(r.pageReplyAfterCustomer), orderUnderReview: Boolean(r.orderUnderReview), customerUnread: unreadN }, now, orgCopilot);
       const lt = latest.get(r.id) ?? null;
       const nc = newestCustomer.get(r.id) ?? null;
@@ -462,7 +481,7 @@ export async function listInbox(
         readCursorAt: iso(r.readCursor),
         lastActivityAt: iso(r.activity) ?? new Date(0).toISOString(),
         waitingSince: r.needsReply ? iso(r.lastCustomerAt) : null,
-        // Bất biến: chưa đọc ⇔ số tin khách sau con trỏ ≥ 1 — KHÔNG còn `max(1, …)` (nó in «1» cho hội thoại không có tin khách nào).
+        // Bất biến: chưa đọc ⇔ số tin khách sau mốc xử lý ≥ 1 — KHÔNG còn `max(1, …)` (nó in «1» cho hội thoại không có tin khách nào).
         unread: st.humanUnread,
         unreadCount: unreadN,
         avatarUrl: avatarOf(r.state, r.id, r),

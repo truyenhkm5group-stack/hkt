@@ -11092,6 +11092,13 @@ export const salesChatConversations = pgTable(
     /** 0212: lần cuối một NHÂN VIÊN mở hội thoại trong hộp thư — «chưa đọc» = tin khách mới hơn mốc này. */
     staffSeenAt: ts("staff_seen_at"),
     /**
+     * 0245 · KẾT QUẢ LƯU SẴN của «tin khách chưa đọc» = lượt khách mới nhất chưa xử lý (định nghĩa response-ownership #803, tất định theo
+     * dòng) — TRIGGER CSDL giữ ở mọi thứ định nghĩa đọc tới; KHÔNG đường TypeScript nào được ghi. NULL = chưa biết ⇒ mã đọc tính trực tiếp
+     * (lib/sales-chatbot/inbox-unread.ts). `last_read_at` = con trỏ đọc MỚI NHẤT của mọi người (vế «người đã mở», cùng staff_seen_at).
+     */
+    turnUnhandled: boolean("turn_unhandled"),
+    lastReadAt: ts("last_read_at"),
+    /**
      * 0217: level khách (`lib/sales-chatbot/levels-shared.ts::CUSTOMER_LEVELS`) + SĐT khách của hội thoại — KẾT QUẢ ĐỌC do job làm
      * mới (`refreshConversationLevels`) để lọc / đếm nhanh; `level_at` = lần tính gần nhất. Không phải nguồn sự thật.
      */
@@ -11143,6 +11150,8 @@ export const salesChatConversations = pgTable(
     check("sales_chat_conversations_status_check", sql`${t.status} IN ('OPEN','WAITING','HANDOFF','CLOSED')`),
     index("sales_chat_conversations_followup_idx").on(t.status, t.nextFollowupAt),
     index("sales_chat_conversations_inbox_idx").on(t.lastCustomerAt),
+    // 0245: trigger giữ «chưa đọc» lưu sẵn tìm hội thoại của một tin vừa ghi theo (page, luồng).
+    index("sales_chat_conversations_thread_idx").on(t.pageId, t.threadId).where(sql`${t.pageId} is not null`),
     index("sales_chat_conversations_assignee_idx").on(t.assigneeUserId).where(sql`${t.assigneeUserId} is not null`),
     index("sales_chat_conversations_handoff_queue_idx").on(t.handoffQueuedAt).where(sql`${t.handoffQueuedAt} is not null`),
     check("sales_chat_conversations_level_check", sql`${t.customerLevel} IS NULL OR ${t.customerLevel} IN ('ORDERED','UPSELL_REPLY','FULL_INFO_ORDER','FULL_INFO_NO_ITEM','PHONE_ONLY','ADDRESS_ONLY','PICKED_ITEM','MEASUREMENTS','NEW_MESSAGE','DECLINED')`),
