@@ -27,6 +27,7 @@
  */
 import { and, asc, eq, gt, isNull, lte, notInArray, or, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
+import { compatTableColumns } from "@/lib/db/serve-compat-columns";
 import { estimateCostUsd } from "@/lib/ai/provider";
 import { aiKillSwitchDenial } from "@/lib/ai-usage/control";
 import { recordAiUsage } from "@/lib/ai-usage/ledger";
@@ -177,7 +178,7 @@ export async function runSalesFollowups(deps: FanpageDeps = {}): Promise<Followu
   const db = await getDb();
   const c = schema.salesChatConversations;
   const due = await db
-    .select()
+    .select(compatTableColumns(c))
     .from(c)
     .where(and(eq(c.channel, "FANPAGE"), eq(c.status, "WAITING"), lte(c.nextFollowupAt, now)))
     .orderBy(asc(c.nextFollowupAt))
