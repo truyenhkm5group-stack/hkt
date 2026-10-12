@@ -3,7 +3,7 @@
   "mission_id": "inbox-read-audit-orgctx",
   "title": "Audit chưa đọc: TS #803 đọc đúng CSDL tổ chức (withOrganization + handle chỉ đọc)",
   "business_goal": "",
-  "status": "RUNNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -20,7 +20,20 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-12T06:40:13.338Z",
-  "updated_at": "2026-10-12T06:40:13.338Z",
-  "last_heartbeat": "2026-10-12T06:40:13.338Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-12T06:40:32.395Z",
+  "last_heartbeat": "2026-10-12T06:40:32.395Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "fix/inbox-read-audit-org-ctx",
+    "sha": "1161848c209b3ccb260fa4b2ced5132f3b38642c",
+    "at": "2026-10-12T06:40:32.395Z",
+    "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+    "title": "Audit chưa đọc: TS #803 đọc đúng CSDL tổ chức (withOrganization + handle chỉ đọc)",
+    "summary": "485/485 FALSE_UNREAD là do TS đọc CSDL nhà ⇒ null ⇒ «đã xử lý»; giờ đọc đúng tổ chức",
+    "tests": [
+      "tsc: sạch",
+      "eslint: sạch",
+      "inbox-read-v3·inbox-unread-perf: đạt"
+    ]
+  }
 }
