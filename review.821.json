@@ -1,0 +1,8 @@
+{
+  "pr": 821,
+  "sha": "b6e120f242cc988a6bcc19174425580946b1e352",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-12T17:35:17.943Z",
+  "note": "Review độc lập 4 vòng: hậu mãi không HANDOFF mặc định nhưng sửa đơn chốt qua lời đồng ý (update/create_draft/create_customer) ⇒ requireHuman; ORDER_EDITED/REFUND_PROMISE; khiếu nại máy chủ ép chuyển người (có dấu/không dấu có ngữ cảnh, phủ định, câu hỏi giả định); watchdog chỉ đổi trạng thái, trần 100/lượt, không gửi bù ngoài 2h/24h, không kích follow-up; hàng đợi chung; release loại khách đang ch"
+}
