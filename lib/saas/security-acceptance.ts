@@ -1,5 +1,5 @@
 /**
- * ═══════════ NGHIỆM THU BẢO MẬT TRÊN PRODUCTION — LÕI CỦA OPS `security-acceptance` (LAUNCH_GATE §3 · docs/saas/ACCEPTANCE.md §11) ═══════════
+ * ═══════════ NGHIỆM THU BẢO MẬT TRÊN PRODUCTION — LÕI CỦA OPS `security-acceptance` (LAUNCH_GATE §3 · docs/saas/ACCEPTANCE.md §12) ═══════════
  *
  * CHỈ ĐỌC: mọi lượt gọi HTTP là GET tới ứng dụng đang chạy (`127.0.0.1:3000` với Host chỉ định — đúng cách bước C của
  * `saas-acceptance` mở vỏ app); mọi lượt đọc CSDL là SELECT trên CSDL NHÀ (script đặt ERP_READ_ONLY=1 và hỏi lại Postgres).
