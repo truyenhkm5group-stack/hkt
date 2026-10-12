@@ -219,4 +219,9 @@ jobs:
       - name: Cài phụ thuộc
         run: npm ci
       - name: Dựng bản production
+        # Heap mặc định của Node không còn đủ cho `next build`: 12/10/2026 ba lượt gates đỏ «JavaScript heap out of memory»
+        # (#812, #815 và chính ngọn main) dù mã không lỗi — đỏ vì máy chạy, không vì mã. Runner ubuntu-latest của kho
+        # công khai có 16 GB; 6 GB cho heap để chỗ cho phần còn lại của lượt dựng.
+        env:
+          NODE_OPTIONS: --max-old-space-size=6144
         run: npm run build
