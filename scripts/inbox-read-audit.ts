@@ -93,6 +93,13 @@ export type ReadAuditRow = {
   unreadSql?: boolean | null;
   turnHandled?: boolean | null;
   turnBy?: string | null;
+  /**
+   * Dòng mà SQL và TS LỆCH nhau ở lượt đầu được ĐỌC LẠI cả hai dạng cùng lúc (`unreadSqlRecheck` / `turnHandledRecheck`): lượt đầu
+   * đọc SQL cho cả trang trước rồi mới chạy TS từng hội thoại một — giờ cao điểm AI trả lời trong vài giây nên câu trả lời tới GIỮA
+   * hai lần đọc trông như lệch định nghĩa. Còn lệch sau khi đọc lại mới là lệch thật. `undefined` = không cần đọc lại.
+   */
+  unreadSqlRecheck?: boolean | null;
+  turnHandledRecheck?: boolean | null;
 };
 
 export type ReadAuditTotals = {
@@ -104,7 +111,20 @@ export type ReadAuditTotals = {
    * Chưa đọc VẬN HÀNH trên các dòng đã đo: TRƯỚC (luật V3) `v3Unread` · `v3FalseUnread` (V3 báo chưa đọc mà #803 nói đã xử lý — chia theo
    * `byReply` / `byRead`); SAU (câu SQL hộp thư) `unread` · `falseUnread` (phải 0) · `missed` (TS chưa xử lý mà SQL nói đã — phải 0).
    */
-  attention: { measured: boolean; v3Unread: number; v3FalseUnread: number; byReply: number; byRead: number; unread: number; falseUnread: number; missed: number };
+  attention: {
+    measured: boolean;
+    v3Unread: number;
+    v3FalseUnread: number;
+    byReply: number;
+    byRead: number;
+    unread: number;
+    falseUnread: number;
+    missed: number;
+    /** Sau khi đọc lại cùng lúc: còn lệch (lệch THẬT) · hết lệch (câu trả lời / tin khách tới giữa hai lần đọc). */
+    falseUnreadConfirmed: number;
+    missedConfirmed: number;
+    raced: number;
+  };
 };
 
 /** Phía + mốc của tin xem trước theo luật MỚI (`listInbox`): chưa đọc ⇒ tin khách chưa đọc mới nhất; không ⇒ tin mới nhất. HÀM THUẦN. */
@@ -119,7 +139,7 @@ export function auditReadRows(rows: readonly ReadAuditRow[]): ReadAuditTotals {
     legacy: { unread: 0, falseUnread: 0, aiPreviewUnread: 0 },
     current: { unread: 0, falseUnread: 0, aiPreviewUnread: 0 },
     readers: { pairs: 0, unread: 0, falseUnread: 0 },
-    attention: { measured: false, v3Unread: 0, v3FalseUnread: 0, byReply: 0, byRead: 0, unread: 0, falseUnread: 0, missed: 0 },
+    attention: { measured: false, v3Unread: 0, v3FalseUnread: 0, byReply: 0, byRead: 0, unread: 0, falseUnread: 0, missed: 0, falseUnreadConfirmed: 0, missedConfirmed: 0, raced: 0 },
   };
   for (const r of rows) {
     if (r.legacyUnread) {
@@ -152,6 +172,13 @@ export function auditReadRows(rows: readonly ReadAuditRow[]): ReadAuditTotals {
       t.attention.unread += 1;
       if (r.turnHandled) t.attention.falseUnread += 1;
     } else if (!r.turnHandled) t.attention.missed += 1;
+    if (r.unreadSql === !r.turnHandled) continue;
+    // Lệch ở lượt đầu: chỉ tính là lệch THẬT khi đọc lại cùng lúc vẫn lệch. Chưa đọc lại (bài kiểm dựng dòng tay) ⇒ coi như còn lệch.
+    const sqlNow = r.unreadSqlRecheck ?? r.unreadSql;
+    const tsNow = r.turnHandledRecheck ?? r.turnHandled;
+    if (sqlNow === !tsNow) t.attention.raced += 1;
+    else if (sqlNow) t.attention.falseUnreadConfirmed += 1;
+    else t.attention.missedConfirmed += 1;
   }
   return t;
 }
@@ -172,7 +199,7 @@ export function readAuditLine(i: number, r: ReadAuditRow): string {
     `tin khách sau con trỏ chung ${r.customerAfterShared}`,
     `huy hiệu cũ ${legacyBadge} / mới ${r.customerAfterShared}`,
     `xem trước cũ ${r.latestSide ?? "—"} ${isoOr(r.latestAt)} / mới ${cur.side ?? "—"} ${isoOr(cur.at)}`,
-    `vận hành: SQL ${r.unreadSql === undefined || r.unreadSql === null ? "—" : r.unreadSql ? "chưa đọc" : "đã xử lý"} · TS ${r.turnHandled === undefined || r.turnHandled === null ? "—" : r.turnHandled ? `đã xử lý (${r.turnBy ?? "—"})` : "chưa xử lý"}`,
+    `vận hành: SQL ${r.unreadSql === undefined || r.unreadSql === null ? "—" : r.unreadSql ? "chưa đọc" : "đã xử lý"} · TS ${r.turnHandled === undefined || r.turnHandled === null ? "—" : r.turnHandled ? `đã xử lý (${r.turnBy ?? "—"})` : "chưa xử lý"}` + (r.unreadSqlRecheck !== undefined || r.turnHandledRecheck !== undefined ? ` · đọc lại: SQL ${r.unreadSqlRecheck === null || r.unreadSqlRecheck === undefined ? "—" : r.unreadSqlRecheck ? "chưa đọc" : "đã xử lý"} · TS ${r.turnHandledRecheck ? "đã xử lý" : "chưa xử lý"}` : ""),
   ].join(" · ");
 }
 
@@ -275,6 +302,17 @@ export async function collectReadAudit(db: Db, opts: { limit: number; conversati
       turn.set(r.id, { handled: st ? st.handled : true, by: st?.by ?? null });
     }
   }
+  // Đọc lại CÙNG LÚC cho các dòng lệch: SQL trước, TS ngay sau, từng hội thoại một (khoảng cách mili giây thay vì cả trang).
+  const recheck = new Map<string, { sql: boolean | null; handled: boolean }>();
+  if (measureAttention) {
+    for (const r of base) {
+      const t0 = turn.get(r.id);
+      if (!t0 || r.unreadSql === null || r.unreadSql === undefined || Boolean(r.unreadSql) === !t0.handled) continue;
+      const [again] = await db.select({ u: INBOX_UNREAD_SQL }).from(c).where(eq(c.id, r.id));
+      const st = await latestTurnStateOf(r.id, new Date());
+      recheck.set(r.id, { sql: again ? Boolean(again.u) : null, handled: st ? st.handled : true });
+    }
+  }
   return {
     hasReadsTable,
     attentionMeasured: measureAttention,
@@ -300,6 +338,7 @@ export async function collectReadAudit(db: Db, opts: { limit: number; conversati
         unreadSql: r.unreadSql === null || r.unreadSql === undefined ? null : Boolean(r.unreadSql),
         turnHandled: turn.get(r.id)?.handled ?? null,
         turnBy: turn.get(r.id)?.by ?? null,
+        ...(recheck.has(r.id) ? { unreadSqlRecheck: recheck.get(r.id)!.sql, turnHandledRecheck: recheck.get(r.id)!.handled } : {}),
       };
     }),
   };
@@ -369,7 +408,7 @@ async function main() {
   tomTat(`UNREAD_COUNT (mọi hội thoại): TRƯỚC (luật V3, người chưa có con trỏ riêng) ${li.v3UnreadCount} · SAU (lượt khách mới nhất chưa xử lý — #803) ${li.unreadCount ?? "chưa đo (chưa triển khai 0245)"}`);
   tomTat(
     at.measured
-      ? `FALSE_UNREAD (${tot.rows} hội thoại đã đo, TS #803 làm chuẩn): TRƯỚC ${at.v3FalseUnread}/${at.v3Unread} (đã trả lời ${at.byReply} · đã đọc ${at.byRead}) · SAU ${at.falseUnread}/${at.unread} (phải 0) · bỏ sót ${at.missed} (phải 0)`
+      ? `FALSE_UNREAD (${tot.rows} hội thoại đã đo, TS #803 làm chuẩn): TRƯỚC ${at.v3FalseUnread}/${at.v3Unread} (đã trả lời ${at.byReply} · đã đọc ${at.byRead}) · SAU lượt đầu ${at.falseUnread}/${at.unread} · bỏ sót lượt đầu ${at.missed} · ĐỌC LẠI CÙNG LÚC: còn lệch FALSE_UNREAD ${at.falseUnreadConfirmed} · bỏ sót ${at.missedConfirmed} (phải 0) · hết lệch (tin tới giữa hai lần đọc) ${at.raced}`
       : "FALSE_UNREAD: chưa đo (CSDL chưa có 0245 / bảng con trỏ đọc — cần bản triển khai có #803 + 0245)",
   );
   tomTat(
@@ -377,7 +416,11 @@ async function main() {
       ? `«Chưa đọc» lưu sẵn 0245 (mọi hội thoại): ${li.conversations} hội thoại · LỆCH so với định nghĩa #803 tính trực tiếp ${li.drift} · mốc đọc lệch ${li.readDrift} (phải 0)`
       : "«Chưa đọc» lưu sẵn 0245: cột CHƯA có (chưa triển khai 0245)",
   );
-  process.exit(at.falseUnread + at.missed + li.drift + li.readDrift > 0 ? 2 : 0);
+  // Xả stdout RỒI mới thoát: stdout vào ống là ghi bất đồng bộ, `process.exit()` ngay sau console.log cắt mất phần còn trong bộ đệm —
+  // lượt 3.000 hội thoại (12/10/2026) mất trọn khối tóm tắt ở cuối, chỉ còn mã thoát. Không bỏ `exit` được: bể kết nối CSDL giữ tiến trình sống.
+  const code = at.falseUnreadConfirmed + at.missedConfirmed + li.drift + li.readDrift > 0 ? 2 : 0;
+  await new Promise<void>((done) => process.stdout.write("", () => done()));
+  process.exit(code);
 }
 
 // Chỉ chạy khi được gọi THẲNG từ dòng lệnh — `import` từ bài kiểm không được kéo theo `process.exit`.
