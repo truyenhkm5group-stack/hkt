@@ -3,7 +3,7 @@
   "mission_id": "acceptance-s12-port",
   "title": "ACCEPTANCE.md: mục bảo mật S1–S3 thành §12 (port #750 lên main hiện tại)",
   "business_goal": "",
-  "status": "RUNNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -22,7 +22,19 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-12T02:15:59.082Z",
-  "updated_at": "2026-10-12T02:15:59.082Z",
-  "last_heartbeat": "2026-10-12T02:15:59.082Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-12T02:16:20.027Z",
+  "last_heartbeat": "2026-10-12T02:16:20.027Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "docs/acceptance-s12-port",
+    "sha": "c825fc78ec25ed1ea304d05deadf1efadc1b866d",
+    "at": "2026-10-12T02:16:20.027Z",
+    "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+    "title": "ACCEPTANCE.md: mục bảo mật S1–S3 thành §12 (port #750 lên main hiện tại)",
+    "summary": "Hai mục cùng số 11 ⇒ mục bảo mật thành §12, sửa ba chỗ trỏ (chú thích ops-vps.yml + 2 tệp hằng số)",
+    "tests": [
+      "tsc: sạch",
+      "repo-integrity·migration append-only/unique·test-hygiene·security-acceptance: đạt"
+    ]
+  }
 }

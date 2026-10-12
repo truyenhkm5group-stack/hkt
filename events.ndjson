@@ -2155,3 +2155,4 @@
 {"at":"2026-10-12T02:15:11.559Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"CANCELLED","mission":"tech-worker-onboarding","detail":"Chủ shop 12/10: #631 lùi 172 commit, KHÔNG cứu nhánh. README tách sang tech-worker-onboarding-gap (cc1129cb); lõi (mã ghi danh một lần, bộ cài, worker không giữ quyền ghi GitHub) đăng ký làm lại ở tech-worker-onboarding-v2 từ main mới"}
 {"at":"2026-10-12T02:15:29.319Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"CLAIM","mission":"tech-worker-onboarding-v2","detail":"BLOCKED · 0 mẫu phạm vi · MEDIUM"}
 {"at":"2026-10-12T02:15:59.255Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"CLAIM","mission":"acceptance-s12-port","detail":"RUNNING · 3 mẫu phạm vi · MEDIUM"}
+{"at":"2026-10-12T02:16:20.064Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"acceptance-s12-port","detail":"docs/acceptance-s12-port @ c825fc78ec25 · 2 lệnh kiểm thử"}
