@@ -43,6 +43,8 @@ export type InboxSearchTerms = {
   raw: string;
   /** SĐT: phần LÕI (không số 0 / 84 đầu) để so «chứa»; `null` = ô tìm không phải SĐT. */
   phone: string | null;
+  /** Ô tìm là MỘT SĐT ĐỦ (chuẩn hoá được): phần lõi để xếp khớp CHÍNH XÁC lên đầu (`inboxSearchRankSql`); `null` = số dở / không phải SĐT. */
+  exactPhone: string | null;
   /** Tên đã bỏ dấu + bỏ khoảng trắng; `null` = không có chữ cái / quá ngắn. */
   fold: string | null;
   /** Đơn ERP theo mã ngắn: tiền tố mã đầy đủ (`erp-5e7a9c1b`). */
@@ -61,9 +63,10 @@ export function parseInboxSearch(input: string | null | undefined): InboxSearchT
   if (!raw) return null;
   const digits = raw.replace(/\D/g, "");
   let phone: string | null = null;
+  let exactPhone: string | null = null;
   if (PHONE_CHARS.test(raw) && digits.length >= PHONE_MIN_DIGITS) {
     const full = normalizeVnPhone(raw);
-    if (full) phone = full.slice(1);
+    if (full) phone = exactPhone = full.slice(1);
     else {
       // Một PHẦN số (vd. 6 số cuối, hoặc «+84 832 106» đang gõ dở): bỏ 84 / 0 đầu để khớp cả dạng 0… lẫn +84….
       let d = digits;
@@ -78,7 +81,7 @@ export function parseInboxSearch(input: string | null | undefined): InboxSearchT
   const orderPrefix = /^[0-9a-f]{6,8}$/i.test(code) && /\d/.test(code) ? `${MANUAL_ORDER_ID_PREFIX}${code.toLowerCase()}` : null;
   const orderId = /^[A-Za-z0-9_-]{4,64}$/.test(code) && !phone ? (code.toLowerCase().startsWith(MANUAL_ORDER_ID_PREFIX) ? code.toLowerCase() : code) : null;
   const displayId = /^[1-9]\d{0,8}$/.test(code) && !phone ? Number(code) : null;
-  return { raw, phone, fold, orderPrefix, orderId, displayId };
+  return { raw, phone, exactPhone, fold, orderPrefix, orderId, displayId };
 }
 
 const UPPER_CO_DAU = NGUYEN_AM_CO_DAU.toUpperCase();
@@ -160,6 +163,26 @@ export function inboxSearchSql(t: InboxSearchTerms): SQL {
   if (t.displayId !== null) orderMatch.push(sql`o.display_id = ${t.displayId}`);
   if (orderMatch.length) parts.push(linkedOrder(sql.join(orderMatch, sql` or `), false));
   return sql`(${sql.join(parts, sql` or `)})`;
+}
+
+/**
+ * KHỚP SĐT CHÍNH XÁC (P0 inbox-search-global 12/10/2026): ô tìm là một SĐT đủ ⇒ hội thoại mà SĐT GHI NHẬN của khách (SĐT hội thoại ·
+ * hồ sơ khách — mọi số · bot ghi · Pancake ghi) BẰNG ĐÚNG số đó (sau khi bỏ khoảng trắng / dấu câu / 0 / 84 đầu) xếp TRƯỚC các hội
+ * thoại chỉ «chứa» số (một tin nhắn nhắc tới số, một đơn của người khác…). Chỉ là KHOÁ XẾP — không lọc thêm, không bớt hàng nào.
+ * `null` = không xếp hạng (ô tìm không phải SĐT đủ). HÀM THUẦN (chỉ dựng SQL; dùng trong câu có `sales_chat_conversations` +
+ * LEFT JOIN `customers` tên gốc).
+ */
+export function inboxSearchRankSql(q: string | null | undefined): SQL | null {
+  const t = parseInboxSearch(q);
+  if (!t?.exactPhone || !/^\d+$/.test(t.exactPhone)) return null;
+  const re = `^(84|0)?${t.exactPhone}$`;
+  const eqPhone = (x: SQL) => sql`${stripSql(x)} ~ ${re}`;
+  const pancake = sql`${C}."state"->'pancakePhones'`;
+  return sql`(${eqPhone(sql`${C}."customer_phone"`)}
+    or ${eqPhone(sql`${CU}."phone"`)}
+    or ${eqPhone(sql`${C}."state"->'customer'->>'phone'`)}
+    or exists (select 1 from unnest(coalesce(${CU}."phones", '{}'::text[])) as cp(v) where ${eqPhone(sql`cp.v`)})
+    or exists (select 1 from jsonb_array_elements_text(case when jsonb_typeof(${pancake}) = 'array' then ${pancake} else '[]'::jsonb end) as pp(v) where ${eqPhone(sql`pp.v`)}))`;
 }
 
 /** Mảng chữ của Postgres (`{"a","b"}`) — MỘT tham số cho `= any(...)`, không một tham số cho mỗi mã. */

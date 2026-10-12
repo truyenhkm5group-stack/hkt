@@ -420,7 +420,8 @@ function testSource() {
     .filter((f) => /\.(ts|tsx)$/.test(f) && f !== "lib/platform/inbox-unread-switch.ts" && f !== "lib/sales-chatbot/inbox-unread.ts")
     .filter((f) => /readInboxUnreadSwitch|INBOX_UNREAD_SWITCH_KEY/.test(readFileSync(f, "utf8")));
   assert.deepEqual(readers, [], "không chỗ nào khác đọc công tắc");
-  assert.match(inbox, /orderBy\(\.\.\.inboxOrderBy\(q\.filter, sql<boolean>`"unread_flag"`\)\)/, "khoá xếp gọi tên cột cờ");
+  // Đối số thứ ba (P0 inbox-search-global 12/10/2026): khớp SĐT chính xác đứng đầu khi ô tìm là một SĐT đủ — khoá cờ vẫn gọi tên cột.
+  assert.match(inbox, /orderBy\(\.\.\.inboxOrderBy\(q\.filter, sql<boolean>`"unread_flag"`, inboxSearchRankSql\(q\.q\)\)\)/, "khoá xếp gọi tên cột cờ");
   const body = inbox.slice(inbox.indexOf("export async function listInbox"), inbox.indexOf("export async function customerHistory"));
   assert.doesNotMatch(body, /selectDistinctOn/, "xem trước không còn DISTINCT ON đọc mọi dòng của luồng");
   assert.equal((body.match(/left join lateral/g) ?? []).length, 4, "xem trước: hai LATERAL LIMIT 1 cho mỗi loại kênh");

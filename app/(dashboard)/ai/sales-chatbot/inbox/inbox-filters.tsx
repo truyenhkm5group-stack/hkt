@@ -1,9 +1,9 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, useTransition, type ReactNode } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ChevronDown, Search, SlidersHorizontal, X } from "lucide-react";
+import { ChevronDown, Loader2, Search, SlidersHorizontal, X } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
   compactCount,
@@ -24,6 +24,18 @@ import {
   type InboxLabel,
 } from "@/lib/sales-chatbot/inbox-shared";
 import { patchUnreadCount } from "@/lib/sales-chatbot/inbox-read-shared";
+import {
+  INBOX_SEARCH_DEBOUNCE_MS,
+  inboxActiveChip,
+  inboxChipHref,
+  inboxFilterLabels,
+  inboxHasFilters,
+  inboxScopeHref,
+  inboxSearchHref,
+  inboxSearchMode,
+  normalizeInboxQuery,
+  shouldLiveSearch,
+} from "@/lib/sales-chatbot/inbox-search-shared";
 import { CUSTOMER_LEVEL_LABEL, type CustomerLevel } from "@/lib/sales-chatbot/levels-shared";
 import { formatNumber } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -38,6 +50,11 @@ import { useSelectedConversation } from "./thread-pane";
  * (`INBOX_QUICK_FILTERS`). Mọi bộ lọc khác nằm trong «Lọc ▾» — không bộ lọc nào mất (`INBOX_URL_PARAMS` là bản khai, bài kiểm so).
  * URL vẫn là tham số cũ (`f · pg · ch · xl · nv · sdt · lv · tg · tu · den · lb · q`), nên link cũ, nút quay lại, tab mới đều đúng.
  * Áp bộ lọc = điều hướng tới URL mới (máy chủ lọc + đếm); ô trống không vào URL.
+ *
+ * Ô TÌM (P0 inbox-search-global, chủ shop 12/10/2026): tìm TOÀN hộp thư mặc định — gõ là tìm (debounce `INBOX_SEARCH_DEBOUNCE_MS`),
+ * Enter / nút «Tìm» tìm ngay, biểu tượng quay khi đang tìm. Thẻ / bộ lọc đang chọn KHÔNG ngầm thu hẹp lần tìm: chúng nằm nguyên trong
+ * URL (xoá ô tìm là về đúng bộ lọc cũ) và một dòng nói rõ «Đang tìm trong toàn hộp thư · tạm bỏ qua …» kèm lựa chọn «Chỉ tìm trong
+ * bộ lọc hiện tại» (`pv=loc`). Luật áp bộ lọc ở MỘT chỗ: `inboxQueryState` (inbox-search-shared.ts).
  */
 
 type Props = {
@@ -51,6 +68,8 @@ type Props = {
   pages: { id: string; name: string }[];
   labels: InboxLabel[];
   users: { id: string; name: string }[];
+  /** Số hội thoại khớp danh sách đang hiện (`listInbox().total`) — in cạnh dòng phạm vi tìm. */
+  total?: number;
   /** Nút âm báo + lối tới cấu hình — đứng cuối hàng tìm. */
   tools?: ReactNode;
   /** Phần quản lý (đường nhận tin & AI nhường) — chỉ người quản lý; nằm cuối bảng «Lọc». */
@@ -62,7 +81,7 @@ type Props = {
 const SELECT = "h-9 w-full min-w-0 rounded-md border border-foreground/15 bg-card px-2 text-[13px]";
 const FIELD = "space-y-1 text-[12px] font-medium text-muted-foreground";
 
-export function InboxFilters({ state, counts: serverCounts, unreadStamp = null, phoneCount, levelCounts, levels, pages, labels, users, tools, manage, bulk }: Props) {
+export function InboxFilters({ state, counts: serverCounts, unreadStamp = null, phoneCount, levelCounts, levels, pages, labels, users, total, tools, manage, bulk }: Props) {
   const router = useRouter();
   // Hội thoại đang mở theo URL SỐNG (bấm hàng đổi `?c=` bằng pushState, chưa dựng lại trang) — không phải `state.selected` của lượt
   // dựng trước: tìm ngay sau khi bấm sang hội thoại B từng đưa người dùng về hội thoại A cũ.
@@ -85,6 +104,45 @@ export function InboxFilters({ state, counts: serverCounts, unreadStamp = null, 
     setOpen(false);
     router.push(`${INBOX_HREF}${s ? `?${s}` : ""}`);
   };
+
+  // ═══ Ô TÌM: gõ là tìm (debounce), Enter / nút «Tìm» tìm ngay, trạng thái đang tải ═══
+  const mode = inboxSearchMode(state);
+  const hasFilters = inboxHasFilters(state);
+  const filterLabels = inboxFilterLabels(state, Object.fromEntries(pages.map((p) => [p.id, p.name])));
+  const activeChip = inboxActiveChip(state);
+  const [navPending, startNav] = useTransition();
+  const [text, setText] = useState(state.q);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const timer = useRef<number | null>(null);
+  // URL đổi từ NGOÀI ô tìm (Back / Forward, link xoá ô tìm, thẻ) trong lúc người dùng không gõ ⇒ ô nhập theo URL. Đang gõ thì không
+  // ghi đè: lượt dựng của một chuỗi cũ hơn tới sau không được kéo lùi chữ người đang gõ.
+  useEffect(() => {
+    if (document.activeElement !== inputRef.current) setText(state.q);
+  }, [state.q]);
+  useEffect(
+    () => () => {
+      if (timer.current) window.clearTimeout(timer.current);
+    },
+    [],
+  );
+  const search = (value: string, how: "push" | "replace") => {
+    if (timer.current) window.clearTimeout(timer.current);
+    timer.current = null;
+    const href = inboxSearchHref(state, value, liveSelected);
+    startNav(() => (how === "push" ? router.push(href) : router.replace(href)));
+  };
+  const onType = (value: string) => {
+    setText(value);
+    if (timer.current) window.clearTimeout(timer.current);
+    timer.current = null;
+    if (!shouldLiveSearch(value)) return;
+    // Bắt đầu tìm từ danh sách thường ⇒ một mục lịch sử mới (Back về đúng bộ lọc cũ); đang tìm mà gõ tiếp ⇒ thay mục hiện tại.
+    const how = normalizeInboxQuery(state.q) ? "replace" : "push";
+    timer.current = window.setTimeout(() => search(value, how), INBOX_SEARCH_DEBOUNCE_MS);
+  };
+  // Đang tải: đang điều hướng, hoặc chữ đã gõ khác lần tìm máy chủ đã trả (đợi debounce).
+  const queued = shouldLiveSearch(text) && normalizeInboxQuery(text) !== normalizeInboxQuery(state.q);
+  const busy = navPending || queued;
 
   /** Ô ẩn giữ các bộ lọc KHÁC khi gửi một form (ô tìm giữ bộ lọc nâng cao và ngược lại). */
   const keep = (omit: readonly string[]) => {
@@ -113,12 +171,57 @@ export function InboxFilters({ state, counts: serverCounts, unreadStamp = null, 
           className="relative min-w-0 flex-1"
           onSubmit={(e) => {
             e.preventDefault();
-            go(e.currentTarget);
+            search(text, normalizeInboxQuery(text) === normalizeInboxQuery(state.q) ? "replace" : "push");
           }}
+          data-testid="inbox-search"
+          data-pending={busy ? "1" : "0"}
+          aria-busy={busy}
         >
-          {keep(["q"])}
-          <Search className="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" aria-hidden />
-          <input name="q" defaultValue={state.q} key={state.q} placeholder={`Tìm tên / SĐT / mã đơn trong ${counts.ALL} hội thoại…`} maxLength={80} className="h-8 w-full rounded-md border border-foreground/15 bg-card pl-7 pr-2 text-[13px] outline-none focus:ring-2 focus:ring-primary/30" aria-label="Tìm khách" />
+          {busy ? (
+            <Loader2 className="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 animate-spin text-primary" aria-hidden data-testid="inbox-search-loading" />
+          ) : (
+            <Search className="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" aria-hidden />
+          )}
+          <input
+            ref={inputRef}
+            name="q"
+            value={text}
+            onChange={(e) => onType(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Escape" && text) {
+                e.preventDefault();
+                setText("");
+                search("", "push");
+              }
+            }}
+            placeholder="Tìm tên / SĐT / mã đơn trong toàn hộp thư…"
+            maxLength={80}
+            enterKeyHint="search"
+            autoComplete="off"
+            className="h-8 w-full rounded-md border border-foreground/15 bg-card pl-7 pr-14 text-[13px] outline-none focus:ring-2 focus:ring-primary/30"
+            aria-label="Tìm khách trong toàn hộp thư"
+          />
+          <div className="absolute right-1 top-1/2 flex -translate-y-1/2 items-center gap-0.5">
+            {text ? (
+              <button
+                type="button"
+                className="inline-flex size-6 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
+                aria-label="Xoá ô tìm — về bộ lọc trước đó"
+                title="Xoá ô tìm — về bộ lọc trước đó"
+                onClick={() => {
+                  setText("");
+                  search("", "push");
+                  inputRef.current?.focus();
+                }}
+                data-testid="inbox-search-clear"
+              >
+                <X className="size-3.5" />
+              </button>
+            ) : null}
+            <button type="submit" className="inline-flex size-6 items-center justify-center rounded bg-primary/10 text-primary hover:bg-primary/20" aria-label="Tìm" title="Tìm (Enter)" data-testid="inbox-search-submit">
+              <Search className="size-3.5" />
+            </button>
+          </div>
         </form>
         <Popover open={open} onOpenChange={setOpen}>
           <PopoverTrigger asChild>
@@ -143,6 +246,13 @@ export function InboxFilters({ state, counts: serverCounts, unreadStamp = null, 
               }}
             >
               {keep(["f", "pg", "ch", "xl", "nv", "sdt", "lv", "tg", "tu", "den", "lb"])}
+              {/* Áp bộ lọc trong lúc đang tìm = người dùng CHỌN tìm trong bộ lọc đó (không còn là bộ lọc ngầm). */}
+              {normalizeInboxQuery(state.q) ? <input type="hidden" name="pv" value="loc" /> : null}
+              {mode === "GLOBAL" && hasFilters ? (
+                <p className="rounded-md bg-amber-50 px-2 py-1.5 text-[12px] text-amber-900 dark:bg-amber-950/40 dark:text-amber-100" data-testid="inbox-filter-paused">
+                  Đang tìm trong toàn hộp thư nên các bộ lọc dưới đây tạm chưa áp. Bấm «Áp dụng» để chỉ tìm trong bộ lọc.
+                </p>
+              ) : null}
               <div className="grid grid-cols-2 gap-2">
                 <label className={cn(FIELD, "col-span-2")}>
                   <span>Trạng thái</span>
@@ -271,18 +381,41 @@ export function InboxFilters({ state, counts: serverCounts, unreadStamp = null, 
         </Popover>
         {tools}
       </div>
+      {mode !== "NONE" ? (
+        // Phạm vi của lần tìm — nói RÕ đang tìm ở đâu, và lối chuyển phạm vi (chủ shop 12/10/2026).
+        <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 rounded-md bg-primary/5 px-2 py-1 text-[12px] leading-[18px]" data-testid="inbox-search-scope" data-mode={mode} role="status">
+          <span className="font-medium text-foreground">{mode === "GLOBAL" ? "Đang tìm trong toàn hộp thư" : `Đang tìm trong bộ lọc: ${filterLabels.join(" · ")}`}</span>
+          <span className="tabular-nums text-muted-foreground" data-testid="inbox-search-count">
+            {busy ? "· đang tìm…" : total !== undefined ? `· ${formatNumber(total)} kết quả` : null}
+          </span>
+          {mode === "GLOBAL" && hasFilters ? (
+            <>
+              <span className="min-w-0 text-muted-foreground">· tạm bỏ qua «{filterLabels.join(" · ")}»</span>
+              <Link href={inboxScopeHref(state, "FILTER", liveSelected)} className="font-medium text-primary hover:underline" data-testid="inbox-search-scope-filter">
+                Chỉ tìm trong bộ lọc hiện tại
+              </Link>
+            </>
+          ) : null}
+          {mode === "FILTERED" ? (
+            <Link href={inboxScopeHref(state, "GLOBAL", liveSelected)} className="font-medium text-primary hover:underline" data-testid="inbox-search-scope-global">
+              Tìm toàn hộp thư
+            </Link>
+          ) : null}
+        </div>
+      ) : null}
       <div className="flex items-center gap-0.5 overflow-x-auto [scrollbar-width:none]" data-testid="inbox-quick-filters" data-quick-row>
         {INBOX_QUICK_FILTERS.map((f) => {
-          const on = f === state.filter;
+          // Đang tìm toàn hộp thư ⇒ không thẻ nào bật (thẻ trong URL tạm không áp); số trên thẻ là số KẾT QUẢ TÌM thuộc thẻ đó.
+          const on = f === activeChip;
           const hot = !on && (f === "UNREAD" || f === "UNANSWERED" || f === "NEEDS_HUMAN") && counts[f] > 0;
           return (
             <Link
               key={f}
-              // Bấm lại thẻ đang bật ⇒ về «Tất cả».
-              href={inboxHref(state, { f: on ? null : f, c: null, n: null })}
+              // Bấm lại thẻ đang bật ⇒ về «Tất cả». Đang tìm toàn hộp thư ⇒ bấm thẻ = chọn tìm trong thẻ đó (`inboxChipHref`).
+              href={inboxChipHref(state, f)}
               className={cn("inline-flex h-7 shrink-0 items-center gap-0.5 whitespace-nowrap rounded-full border px-[5px] text-[12px]", on ? "border-foreground bg-foreground font-medium text-background" : "border-foreground/15 bg-card hover:bg-muted", hot && "text-foreground")}
               aria-current={on ? "true" : undefined}
-              title={`${INBOX_FILTER_LABEL[f]}: ${formatNumber(counts[f])} hội thoại — ${INBOX_FILTER_HINT[f]}`}
+              title={mode === "GLOBAL" ? `${INBOX_FILTER_LABEL[f]}: ${formatNumber(counts[f])} kết quả tìm — bấm để chỉ tìm trong thẻ này` : `${INBOX_FILTER_LABEL[f]}: ${formatNumber(counts[f])} hội thoại — ${INBOX_FILTER_HINT[f]}`}
               data-filter={f}
             >
               {INBOX_FILTER_LABEL[f]}
