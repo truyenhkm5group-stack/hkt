@@ -117,6 +117,7 @@ on:
           - pitr-drill          # PITR: DIỄN TẬP khôi phục tới một mốc (arg: ISO, ví dụ 2026-09-30T20:15:00Z; rỗng = đoạn WAL mới nhất − 2 phút) trong container TẠM (không mạng, trần RAM) — không chạm erp-db
           - pitr-pause          # PITR: PHANH — tạm dừng lưu WAL không cần khởi động lại (arg rỗng); arg "resume" = chạy lại (sau đó chụp bản nền mới)
           - restore-drill-org   # DIỄN TẬP khôi phục MỘT CSDL tổ chức erp_org_* (arg: mã tổ chức; rỗng = luân phiên) vào CSDL tạm tam_khoiphuc_<mã> trong container TẠM, đếm bảng lõi, xoá container — chạy tay; cron cũng tự chạy mỗi Chủ nhật qua drill-org-weekly (luân phiên)
+          - migration-rehearsal # CHẠY THỬ migration còn thiếu trên BẢN SAO một CSDL tổ chức (cùng đường khôi phục với restore-drill-org, container TẠM) — thống kê bảng, bấm giờ từng câu, chẩn đoán hàm 0245, EXPLAIN; KHÔNG chạm erp-db; MÃ HOÁ, số qua kênh tóm tắt (arg: "<mã tổ chức> [--candidate-index] [--compare-jit] [--timeout=1200] [--budget=600] [--sample=20] [--explain=3] [--no-analyze] [--skip-diagnose] [--skip-migrate]")
           - restart             # khởi động lại app + scheduler
           - rotate-webhook-secrets # tạo lại secret webhook Pancake/Viettel Post trong .env rồi khởi động lại
           - apply-ai-env        # ghi OPENAI_API_KEY / ANTHROPIC_API_KEY / AI_PROVIDER từ Secrets vào .env, khởi động lại, rồi kiểm tra AI
@@ -163,7 +164,7 @@ permissions:
 # Thao tác trong danh sách mà cần cho người vận hành thấy NGAY một con số ("đã đóng 12 case") thì
 # script tự in dòng ấy với tiền tố `[ops:tom-tat] ` — kênh tóm tắt duy nhất ra log (qua che_log).
 env:
-  OPS_THAO_TAC_MA_HOA: "platform-secrets-verify db-query vtp-debug phone-probe vtp-probe vtp-statement-peek payroll-reconcile seed-employees marketing-explain cs-stale check-integrations run-job vtp-replay-explain vtp-manual-verify returns-hmt care-false-reopen care-outcome-before-open fanpage-evidence-backfill cod-statement-audit stock-wait-summary org-summary org-order-audit org-ai-cutover org-catalog org-offboard identity-reconcile confirm-funnel-audit company-os-summary velocity-compare org-prepaid-ai saas-v1-migration ban-hang-reply-upgrade saas-acceptance ops-signals-check security-acceptance inbox-perf-probe inbox-avatar-audit inbox-read-audit inbox-unread-dryrun pitr-status pitr-basebackup pitr-mark pitr-drill pitr-pause order-cancel-reconcile sales-lifecycle-audit sales-integrity-audit pancake-avatar-shape saas-value-snapshot-check avatar-proxy-check sender-provenance-probe sales-stale-confirmed-repair price-mismatch-scan"
+  OPS_THAO_TAC_MA_HOA: "platform-secrets-verify db-query vtp-debug phone-probe vtp-probe vtp-statement-peek payroll-reconcile seed-employees marketing-explain cs-stale check-integrations run-job vtp-replay-explain vtp-manual-verify returns-hmt care-false-reopen care-outcome-before-open fanpage-evidence-backfill cod-statement-audit stock-wait-summary org-summary org-order-audit org-ai-cutover org-catalog org-offboard identity-reconcile confirm-funnel-audit company-os-summary velocity-compare org-prepaid-ai saas-v1-migration ban-hang-reply-upgrade saas-acceptance ops-signals-check security-acceptance inbox-perf-probe inbox-avatar-audit inbox-read-audit inbox-unread-dryrun pitr-status pitr-basebackup pitr-mark pitr-drill pitr-pause order-cancel-reconcile sales-lifecycle-audit sales-integrity-audit pancake-avatar-shape saas-value-snapshot-check avatar-proxy-check sender-provenance-probe sales-stale-confirmed-repair price-mismatch-scan migration-rehearsal"
 
 # ═══════════ HÀNG ĐỢI NẰM TRÊN MÁY CHỦ, KHÔNG NẰM Ở GITHUB ═══════════
 #
@@ -515,7 +516,7 @@ jobs:
             # ─── PHÂN LOẠI: mặc định là GHI, và cờ ghi đè lên tên ───
             DOC_NHE="status perf disk logs chatbot-status db-query backup-status pitr-status"
             DOC_PROBE="check-integrations vtp-debug vtp-probe vtp-web-probe phone-probe pages-debug meta-id-probe meta-ad-post-probe vtp-capability ads-level-probe"
-            DOC_NANG="platform-secrets-verify verify smoke session-verify perf-probe perf-audit kpi-snapshot explain-stock outcome-explain outcome-parity returns-parity reason-coverage reason-backfill cogs-drift profit-verify marketing-calibrate marketing-explain payroll-reconcile fanpage-evidence-backfill care-false-reopen care-outcome-before-open care-waiting-reconcile cs-rule-update cs-stale sepay-reconcile cod-rebuild cod-status-repair vtp-return-status-repair agent-run-reattach vtp-rebuild-state vtp-replay-files vtp-replay-explain vtp-manual-verify vtp-statement-peek cod-statement-audit stock-wait-summary org-summary company-os-summary velocity-compare confirm-funnel-audit returns-hmt ai-check platform-ai-model-probe platform-ai-bench backup restore-drill restore-drill-org pitr-basebackup pitr-drill org-order-audit org-ai-cutover org-catalog org-offboard org-prepaid-ai org-volume-discount saas-v1-migration identity-reconcile ban-hang-reply-upgrade saas-acceptance ops-signals-check security-acceptance inbox-perf-probe inbox-avatar-audit inbox-read-audit inbox-unread-dryrun order-cancel-reconcile sales-lifecycle-audit sales-integrity-audit pancake-avatar-shape saas-value-snapshot-check avatar-proxy-check sender-provenance-probe sales-stale-confirmed-repair price-mismatch-scan"
+            DOC_NANG="platform-secrets-verify verify smoke session-verify perf-probe perf-audit kpi-snapshot explain-stock outcome-explain outcome-parity returns-parity reason-coverage reason-backfill cogs-drift profit-verify marketing-calibrate marketing-explain payroll-reconcile fanpage-evidence-backfill care-false-reopen care-outcome-before-open care-waiting-reconcile cs-rule-update cs-stale sepay-reconcile cod-rebuild cod-status-repair vtp-return-status-repair agent-run-reattach vtp-rebuild-state vtp-replay-files vtp-replay-explain vtp-manual-verify vtp-statement-peek cod-statement-audit stock-wait-summary org-summary company-os-summary velocity-compare confirm-funnel-audit returns-hmt ai-check platform-ai-model-probe platform-ai-bench backup restore-drill restore-drill-org migration-rehearsal pitr-basebackup pitr-drill org-order-audit org-ai-cutover org-catalog org-offboard org-prepaid-ai org-volume-discount saas-v1-migration identity-reconcile ban-hang-reply-upgrade saas-acceptance ops-signals-check security-acceptance inbox-perf-probe inbox-avatar-audit inbox-read-audit inbox-unread-dryrun order-cancel-reconcile sales-lifecycle-audit sales-integrity-audit pancake-avatar-shape saas-value-snapshot-check avatar-proxy-check sender-provenance-probe sales-stale-confirmed-repair price-mismatch-scan"
 
             LOP=GHI
             case "$ARG" in
@@ -1464,6 +1465,25 @@ jobs:
                 SB=/root/erp/scripts/erp-backup.sh
                 [ -f "$SB" ] || { SB="$(mktemp)"; fetch_script erp-backup.sh > "$SB"; }
                 ERP_DIR=/root/erp bash "$SB" restore-drill-org "$ARG" ;;
+              migration-rehearsal)
+                # CHẠY THỬ MIGRATION TRÊN BẢN SAO (scripts/erp-migration-rehearsal.sh) — P0 0245 TIMEOUT trên tổ chức qa. Bản dump
+                # mới nhất của MỘT CSDL erp_org_* khôi phục bằng ĐÚNG đường của restore-drill-org (`dung_ban_sao_tam_to_chuc`:
+                # container TẠM cùng ảnh, --network none, trần RAM, trap dọn) rồi: thống kê bảng / chỉ mục, sổ migration, chẩn đoán
+                # hàm 0245 (bấm giờ từng hội thoại, biến thể từng vế, EXPLAIN ANALYZE), chạy THẬT migration còn thiếu trong giao
+                # dịch ROLLBACK, bấm giờ từng câu; `--candidate-index` đo lại sau khi dựng chỉ mục thử TRÊN BẢN SAO. KHÔNG một lệnh
+                # nào vào erp-db ngoài `docker inspect` lấy tên ảnh. Kế hoạch đầy đủ có thể mang mã page / luồng ⇒ MÃ HOÁ cả lượt;
+                # [ops:tom-tat] chỉ số đếm, thời gian, tên bảng / chỉ mục / migration / nút kế hoạch. Làn DOC_NANG (Postgres thứ
+                # hai trên máy 2 GB) — giữ khoá đọc nặng + vòng đời CHIA SẺ suốt lượt (tối đa ~100 phút), deploy chờ. Bản đã deploy
+                # có tệp thì chạy bản đó (đi cùng erp-backup.sh cùng commit); chưa có thì lấy CẢ HAI tệp từ main vào một thư mục.
+                kiem_arg
+                SR=/root/erp/scripts/erp-migration-rehearsal.sh
+                if [ ! -f "$SR" ]; then
+                  _dmr="$(mktemp -d)"
+                  fetch_script erp-backup.sh > "$_dmr/erp-backup.sh"
+                  fetch_script erp-migration-rehearsal.sh > "$_dmr/erp-migration-rehearsal.sh"
+                  SR="$_dmr/erp-migration-rehearsal.sh"
+                fi
+                ma_hoa_ket_qua chay_voi_arg env ERP_DIR=/root/erp bash "$SR" ;;
               pitr-status)
                 # ═══ PITR (docs/platform/backup-recovery.md §9.4) — năm thao tác, MỘT script: scripts/erp-pitr.sh ═══
                 # Chạy ĐÚNG bản đã deploy (/root/erp): nó `source` erp-backup.sh cùng commit và đọc compose cùng commit —
