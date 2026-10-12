@@ -31,7 +31,7 @@
  */
 import { readFileSync } from "node:fs";
 import { sql } from "drizzle-orm";
-import { getDb, getDbFor, type Db } from "@/db";
+import { cancelOrganizationMigration, getDb, getDbFor, type Db } from "@/db";
 import { fanOutOrganizationCodes, listOrganizations } from "@/lib/platform/organizations";
 
 type JournalEntry = { idx: number; tag: string; when: number };
@@ -67,30 +67,106 @@ async function checkDb(label: string, db: Db, entries: readonly JournalEntry[]):
   return missing.length;
 }
 
+/**
+ * ═══ TRẦN THỜI GIAN MỖI TỔ CHỨC (sự cố 12/10/2026) ═══
+ *
+ * Sau deploy #792, CSDL `qa` chạy câu dẫn xuất của 0245 tới trần 600 giây; script này mở tổ chức TUẦN TỰ và chờ vô hạn, nên treo tới
+ * khi SSH của workflow deploy hết giờ ⇒ deploy đỏ mà smoke KHÔNG chạy, và các tổ chức đứng sau `qa` chưa được kiểm. Nay mỗi tổ chức
+ * có trần (`VERIFY_ORG_MIGRATE_TIMEOUT_S`, mặc định 120 giây): quá trần ⇒ in ✗, HUỶ câu migration đang chạy của chính tiến trình này
+ * (`cancelOrganizationMigration`), ĐI TIẾP tổ chức sau, và cuối cùng thoát 1 — deploy vẫn đỏ đúng nghĩa (install-vps.sh ghi
+ * MIGRATIONS_UNAPPLIED=1 rồi chạy tiếp smoke như mọi lần verify hỏng), chỉ là không treo.
+ */
+export const VERIFY_ORG_TIMEOUT_DEFAULT_S = 120;
+
+export function verifyOrgTimeoutMs(env: Record<string, string | undefined> = process.env): number {
+  const s = Number((env.VERIFY_ORG_MIGRATE_TIMEOUT_S || "").trim());
+  return (Number.isFinite(s) && s > 0 ? s : VERIFY_ORG_TIMEOUT_DEFAULT_S) * 1000;
+}
+
+export type OrgVerifyStatus = "OK" | "MISSING" | "ERROR" | "TIMEOUT";
+export type OrgVerifyResult = { code: string; status: OrgVerifyStatus; seconds: number; detail?: string };
+
+const HET_GIO = Symbol("het-gio");
+
+/**
+ * Mở + đối chiếu từng tổ chức, MỖI tổ chức một trần thời gian. Tiêm phụ thuộc (mở · đối chiếu · huỷ · ghi log) để bài kiểm chạy được
+ * không cần Postgres. Một tổ chức hỏng / quá trần KHÔNG chặn tổ chức sau.
+ */
+export async function verifyOrganizations<T>(
+  codes: readonly string[],
+  deps: {
+    open: (code: string) => Promise<T>;
+    check: (code: string, db: T, openedSeconds: number) => Promise<number>;
+    cancel: (code: string) => Promise<boolean>;
+    timeoutMs: number;
+    log?: (line: string) => void;
+    error?: (line: string) => void;
+  },
+): Promise<OrgVerifyResult[]> {
+  const log = deps.log ?? ((l: string) => console.log(l));
+  const error = deps.error ?? ((l: string) => console.error(l));
+  const out: OrgVerifyResult[] = [];
+  for (const code of codes) {
+    const started = Date.now();
+    const secs = () => (Date.now() - started) / 1000;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const hetGio = new Promise<typeof HET_GIO>((resolve) => {
+      timer = setTimeout(() => resolve(HET_GIO), deps.timeoutMs);
+    });
+    const work = (async () => {
+      const db = await deps.open(code);
+      return deps.check(code, db, secs());
+    })();
+    try {
+      const r = await Promise.race([work, hetGio]);
+      if (r === HET_GIO) {
+        // Lời hứa `work` vẫn có người nghe (Promise.race đã gắn) — nó hỏng muộn sau lệnh huỷ cũng không thành lỗi không ai bắt.
+        work.catch(() => undefined);
+        const sent = await deps.cancel(code).catch(() => false);
+        const detail = `quá ${Math.round(deps.timeoutMs / 1000)} giây chưa mở / migrate xong (migration chạy lâu, hoặc tiến trình khác đang giữ khoá migrate của tổ chức này)${sent ? " — đã gửi lệnh HUỶ câu migration đang chạy của bước kiểm" : ""}. Đi tiếp tổ chức sau.`;
+        error(`[migrations] ✗ tổ chức «${code}»: ${detail}`);
+        out.push({ code, status: "TIMEOUT", seconds: secs(), detail });
+      } else {
+        out.push({ code, status: r > 0 ? "MISSING" : "OK", seconds: secs() });
+      }
+    } catch (e) {
+      const detail = e instanceof Error ? e.message : String(e);
+      error(`[migrations] ✗ tổ chức «${code}»: không mở / migrate được — ${detail}`);
+      out.push({ code, status: "ERROR", seconds: secs(), detail });
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
+  const hong = out.filter((r) => r.status !== "OK");
+  if (codes.length) log(`[migrations] tổ chức khách: ${out.length - hong.length}/${out.length} khớp${hong.length ? ` · hỏng: ${hong.map((r) => `${r.code} (${r.status})`).join(", ")}` : ""}`);
+  return out;
+}
+
 async function main() {
   const journal = JSON.parse(readFileSync("drizzle/meta/_journal.json", "utf8")) as { entries: JournalEntry[] };
   let failed = (await checkDb("nhà", await getDb(), journal.entries)) > 0;
 
   const codes = fanOutOrganizationCodes(await listOrganizations());
-  if (codes.length) console.log(`[migrations] ${codes.length} tổ chức khách đang hoạt động — mở (và migrate) lần lượt từng CSDL.`);
-  for (const code of codes) {
-    const started = Date.now();
-    try {
-      const db = await getDbFor({ code, isHome: false });
-      const missing = await checkDb(`tổ chức «${code}» (${((Date.now() - started) / 1000).toFixed(1)} giây)`, db, journal.entries);
-      if (missing > 0) failed = true;
-    } catch (error) {
-      failed = true;
-      console.error(`[migrations] ✗ tổ chức «${code}»: không mở / migrate được — ${error instanceof Error ? error.message : String(error)}`);
-    }
-  }
+  const timeoutMs = verifyOrgTimeoutMs();
+  if (codes.length) console.log(`[migrations] ${codes.length} tổ chức khách đang hoạt động — mở (và migrate) lần lượt từng CSDL, trần ${Math.round(timeoutMs / 1000)} giây mỗi tổ chức.`);
+  const results = await verifyOrganizations(codes, {
+    open: (code) => getDbFor({ code, isHome: false }),
+    check: (code, db, openedSeconds) => checkDb(`tổ chức «${code}» (${openedSeconds.toFixed(1)} giây)`, db, journal.entries),
+    cancel: (code) => cancelOrganizationMigration(code),
+    timeoutMs,
+  });
+  if (results.some((r) => r.status !== "OK")) failed = true;
 
   if (failed) process.exit(1);
 }
 
-main()
-  .then(() => process.exit(0))
-  .catch((error) => {
-    console.error("[migrations] Không kiểm được:", error instanceof Error ? error.message : error);
-    process.exit(1);
-  });
+// Chỉ chạy khi được gọi THẲNG từ dòng lệnh — `import` từ bài kiểm không được kéo theo `process.exit`.
+const CHAY_THANG = Boolean(process.argv[1] && process.argv[1].endsWith("verify-migrations.ts"));
+if (CHAY_THANG) {
+  main()
+    .then(() => process.exit(0))
+    .catch((error) => {
+      console.error("[migrations] Không kiểm được:", error instanceof Error ? error.message : error);
+      process.exit(1);
+    });
+}

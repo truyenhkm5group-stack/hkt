@@ -18,8 +18,11 @@ type Holder = {
   inspect?: Map<string, Promise<Db>>;
   /** Cách ĐÓNG handle chẩn đoán của từng tổ chức (`releaseOrganizationDb`) — bể / PGlite của `inspect` không nằm ở đâu khác. */
   inspectClose?: Map<string, () => Promise<void>>;
+  /** LÙI SAU LỖI migrate theo mã tổ chức (`getOrgDb`): tới `until` mọi lời mở CSDL tổ chức đó ném ngay, không chạy lại migration. */
+  orgMigrateBackoff?: Map<string, { until: number; reason: string }>;
 };
-type OrgHandle = { db?: Db; pending?: Promise<Db>; pool?: Pool; pglite?: unknown };
+/** `migratePid` = mã tiến trình máy chủ của kết nối ĐANG migrate (chỉ Postgres thật) — để `cancelOrganizationMigration` huỷ được câu đang chạy. */
+type OrgHandle = { db?: Db; pending?: Promise<Db>; pool?: Pool; pglite?: unknown; migratePid?: number };
 const holder = globalThis as unknown as { __erpDb?: Holder };
 if (!holder.__erpDb) holder.__erpDb = {};
 
@@ -273,6 +276,8 @@ export async function releaseOrganizationDb(code: string, opts: { inspectionOnly
   const h = holder.__erpDb!;
   const app = opts.inspectionOnly ? undefined : h.orgs?.get(code);
   if (app) h.orgs?.delete(code);
+  // Mở lại sau khi đóng là một lượt MỚI (offboard rồi cấp lại cùng mã) — không mang theo lượt lùi của handle cũ.
+  if (!opts.inspectionOnly) h.orgMigrateBackoff?.delete(code);
   const pendingInspect = h.inspect?.get(code);
   h.inspect?.delete(code);
   if (app?.pending) await app.pending.catch(() => undefined);
@@ -364,6 +369,20 @@ async function getOrgDb(code: string): Promise<Db> {
   }
   const handle = h;
   if (!handle.pending) {
+    /*
+      ═══ LÙI SAU LỖI MIGRATE (sự cố 12/10/2026, CSDL `qa` + migration 0245) ═══
+
+      Trước đây lượt migrate hỏng chỉ xoá `pending`, nên lời mở KẾ TIẾP (job scheduler, request) chạy lại NGAY đúng câu vừa hỏng —
+      với 0245 đó là một câu 600 giây, chạy gần như liên tục trên máy hai nhân. Nay lỗi được ghi kèm hạn lùi (`orgMigrateRetryAfterMs`:
+      migration hỏng 30 phút · khoá bận 60 giây · chưa kết nối được 0); trong hạn đó mọi lời mở tổ chức ấy ném NGAY một lỗi nói rõ lý do
+      và lúc thử lại. Đúng MỘT chỗ — mọi lối vào CSDL tổ chức (getDb / getDbFor) đều đi qua hàm này.
+    */
+    const backoff = (holder.__erpDb!.orgMigrateBackoff ??= new Map());
+    const lui = backoff.get(code);
+    if (lui && lui.until > Date.now()) {
+      const conLai = Math.ceil((lui.until - Date.now()) / 1000);
+      throw new Error(`CSDL tổ chức «${code}» migrate hỏng, đang LÙI — thử lại sau ${conLai} giây (lúc ${new Date(lui.until).toISOString()}). Lỗi gốc: ${lui.reason}`);
+    }
     handle.pending = (async () => {
       const url = organizationDatabaseUrl({ code, isHome: false });
       let db: Db;
@@ -374,8 +393,25 @@ async function getOrgDb(code: string): Promise<Db> {
         db = createPg(url, Math.max(1, Number(process.env.PGPOOL_MAX_ORG) || 2), (p) => (handle.pool = p));
       }
       // CSDL tổ chức tự áp bộ migration khi mở lần đầu trong tiến trình (idempotent, có khoá).
-      const { migrateOrganizationDb } = await import("./migrate");
-      await migrateOrganizationDb(db, { pool: handle.pool });
+      const { migrateOrganizationDb, orgMigrateRetryAfterMs } = await import("./migrate");
+      try {
+        await migrateOrganizationDb(db, { pool: handle.pool, onMigrating: (pid) => (handle.migratePid = pid) });
+      } catch (error) {
+        const retryMs = orgMigrateRetryAfterMs(error);
+        if (retryMs > 0) backoff.set(code, { until: Date.now() + retryMs, reason: (error instanceof Error ? error.message : String(error)).slice(0, 300) });
+        // Bể / PGlite của lượt hỏng không ai dùng lại (lượt sau dựng handle mới) — đóng, không để rò một handle mỗi lần thử, và
+        // không để hai PGlite cùng mở một thư mục khi hết hạn lùi.
+        const pool = handle.pool;
+        const pglite = handle.pglite as { close(): Promise<void> } | undefined;
+        handle.pool = undefined;
+        handle.pglite = undefined;
+        if (pool) void pool.end().catch(() => undefined);
+        if (pglite) await pglite.close().catch(() => undefined);
+        throw error;
+      } finally {
+        handle.migratePid = undefined;
+      }
+      backoff.delete(code);
       handle.db = db;
       if (handle.pglite) await evictIdlePgliteOrgs(orgs, code);
       return db;
@@ -385,6 +421,23 @@ async function getOrgDb(code: string): Promise<Db> {
     });
   }
   return handle.pending;
+}
+
+/**
+ * HUỶ câu migration ĐANG CHẠY của một tổ chức trong tiến trình này (`pg_cancel_backend` trên đúng kết nối đang cầm khoá migrate, qua
+ * một kết nối khác của cùng bể). Dùng DUY NHẤT ở bước kiểm của deploy (`scripts/verify-migrations.ts`) khi một tổ chức quá trần thời
+ * gian: bước kiểm đi tiếp, không để một câu 600 giây tiếp tục ăn CPU trong lúc smoke chạy. Lượt migrate ấy ROLLBACK (drizzle chạy cả
+ * lượt trong một giao dịch) và rơi vào nhánh lùi như mọi lỗi khác. Trả `true` nếu đã gửi lệnh huỷ.
+ */
+export async function cancelOrganizationMigration(code: string): Promise<boolean> {
+  const h = holder.__erpDb!.orgs?.get(code);
+  if (!h?.pool || !h.migratePid || h.db) return false;
+  try {
+    const r = await h.pool.query<{ ok: boolean }>("select pg_cancel_backend($1) as ok", [h.migratePid]);
+    return r.rows[0]?.ok === true;
+  } catch {
+    return false;
+  }
 }
 
 /** Handle singleton của CSDL nhà — ĐÚNG hàm `getDb()` trước nền tảng. */

@@ -397,8 +397,9 @@ function testSource() {
   const files = execFileSync("git", ["ls-files", "lib", "app", "scripts", "components", "db"], { encoding: "utf8" })
     .split("\n")
     .filter((f) => /\.(ts|tsx)$/.test(f));
-  // Hai script ops CHỈ ĐỌC (Postgres ép `ERP_READ_ONLY`): audit sau triển khai + chạy thử trước 0245 (#809, chỉ nhắc tên cột trong chữ in).
-  const allowed = new Set(["db/schema.ts", "lib/sales-chatbot/inbox-unread.ts", "scripts/inbox-read-audit.ts", "scripts/inbox-unread-dryrun.ts"]);
+  // Ba script ops CHỈ ĐỌC (Postgres ép `ERP_READ_ONLY`): audit sau triển khai + chạy thử trước 0245 (#809, chỉ nhắc tên cột trong chữ in)
+  // + chẩn đoán migrate chậm (`org-migrate-probe`, chỉ hỏi information_schema xem cột 0245 đã có chưa).
+  const allowed = new Set(["db/schema.ts", "lib/sales-chatbot/inbox-unread.ts", "scripts/inbox-read-audit.ts", "scripts/inbox-unread-dryrun.ts", "scripts/org-migrate-probe.ts"]);
   const touching = files.filter((f) => /turnUnhandled|turn_unhandled|lastReadAt|last_read_at/.test(readFileSync(f, "utf8")));
   assert.deepEqual(
     touching.filter((f) => !allowed.has(f)),

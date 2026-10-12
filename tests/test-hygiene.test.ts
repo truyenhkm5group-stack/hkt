@@ -116,6 +116,8 @@ export function testKhongSoBangMocDocLaiDongHo() {
 
 /** Miễn trừ — mỗi dòng nói RÕ vì sao đọc môi trường ở đó là đo MÃ NGUỒN chứ không đo máy. */
 const DOC_MOI_TRUONG_DA_KHAI: Record<string, string> = {
+  "tests/org-migrate-isolation.test.ts":
+    "ĐẶT ORG_MIGRATE_BACKOFF_MS / ORG_MIGRATE_BUSY_RETRY_MS = giá trị BỊA (vài trăm mili giây, hoặc chuỗi hỏng) để kiểm chính sách lùi sau lỗi migrate và để hạn lùi hết trong vài trăm mili giây thay vì 30 phút — đó là ĐẦU VÀO của phép kiểm, trả lại nguyên trạng trong finally; kết luận không đổi theo máy.",
   "tests/tech-mission-control.test.ts":
     "ĐẶT ERP_GITHUB_REPO = «owner/repo» (BỊA) để client GitHub dựng URL cho bản fetch giả, và ERP_COMMIT = SHA BỊA để phép «production có chứa commit gộp không» có vế production — cả hai là ĐẦU VÀO của phép kiểm, trả lại nguyên trạng trong finally. Trần hỏi deploy truyền TƯỜNG MINH (`deployBudget`) nên kết luận không rẽ nhánh theo máy có GITHUB_TOKEN hay không.",
   "tests/saas-hide-internal.test.ts":
