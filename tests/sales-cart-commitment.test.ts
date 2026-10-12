@@ -333,6 +333,46 @@ function testReview2() {
   for (const t of ["lấy 1kg mai giao", "Ngon chị mới lấy nha em", "chiều giao giúp chị"]) assert.equal(customerHesitates(t), false, t);
 }
 
+/** Review vòng 3 #819 @ 37c762cd: «huy» không dấu là «hủy» (trừ tên người), «chỉ / thôi» kèm số của một món, «thôi» đứng một mình, mời mua nhiều hơn. */
+function testReview3() {
+  const apply = (c: CartCommitment | undefined, text: string, turn = 3) => applyCustomerCartMessage(c, text, turn, NOW());
+  const pair = () => bindCommitment(cartOf("2kg chả cá thu + 1kg chả mực"), [L("p-cct", "v1", "Chả cá thu (1kg)", 2, 1000), L("p-muc", "m1", "Chả mực giã tay (1kg)", 1, 1000)], 1, NOW());
+  const names = (c: CartCommitment | undefined) => (c?.selectedItems ?? []).map((x) => [x.label, x.quantity]);
+  // 1. «huy» gõ không dấu là «hủy».
+  for (const t of ["huy cha muc", "huy mon muc giu ca"]) {
+    const out = apply(pair(), t);
+    assert.deepEqual(names(out), [["Chả cá thu", 2000]], `«${t}» ⇒ bỏ chả mực`);
+    assert.equal(commitmentViolation(out, [L("p-cct", "v1", "Chả cá thu (1kg)", 2, 1000)], 3), null, `«${t}»: đơn chỉ còn chả cá KHÔNG bị chặn`);
+  }
+  const one = bound2kg();
+  for (const t of ["huy nhe em", "huy giup chi", "thoi huy di", "huy"]) assert.equal(classifyCartMessage(t).kind, "CANCEL", `«${t}» ⇒ huỷ`);
+  assert.deepEqual(apply(one, "huy cha ca")?.selectedItems, [], "«huy cha ca» ⇒ bỏ món");
+  for (const t of ["huy nhe em", "huy giup chi", "thoi huy di", "huy"]) {
+    assert.deepEqual(apply(one, t)?.selectedItems, [], `«${t}» ⇒ giỏ rỗng`);
+    assert.equal(cartHoldVerdict("Dạ em hủy đơn cho chị nhé.", one, t), null, `«${t}»: câu bot xác nhận huỷ không bị thay`);
+  }
+  // «Huy» là tên người khi đứng sau anh / chị / cho / người nhận, hoặc viết hoa giữa câu.
+  for (const t of ["giao cho anh Huy nhé", "người nhận huy 0912345678", "gửi cho huy nha", "ship em Huy giúp chị", "nhờ Huy nhận hàng"]) {
+    assert.equal(apply(one, t), one, `«${t}» ⇒ tên người, không huỷ`);
+  }
+  // 2. Giỏ hai món + «chỉ / thôi» kèm số của MỘT món ⇒ giữ món đó với số mới, bỏ món kia.
+  for (const t of ["chỉ lấy 1kg chả mực thôi", "chi lay 1kg cha muc thoi", "lấy 1kg chả mực thôi", "1kg chả mực thôi"]) {
+    const out = apply(pair(), t);
+    assert.deepEqual(names(out), [["Chả mực giã tay", 1000]], `«${t}» ⇒ chỉ còn 1kg chả mực`);
+    assert.equal(commitmentViolation(out, [L("p-muc", "m1", "Chả mực giã tay (1kg)", 1, 1000)], 3), null, `«${t}»: bỏ chả cá KHÔNG bị chặn`);
+  }
+  const unsure = apply(pair(), "chỉ lấy 1kg thôi");
+  assert.equal(unsure?.relaxedTurn, 3, "«chỉ lấy 1kg thôi» trên giỏ hai món ⇒ chưa rõ món ⇒ nới + hỏi lại");
+  // 3. «thôi» đứng một mình (thường là đồng ý) không nới lượt.
+  for (const t of ["thôi", "thôi em", "thôi được rồi", "thôi ok"]) {
+    const c = pair();
+    assert.equal(apply(c, t), c, `«${t}» trên giỏ hai món ⇒ giữ nguyên, không nới`);
+  }
+  // 4. Mời mua NHIỀU hơn không bị thay; đề xuất ÍT hơn vẫn bị thay.
+  assert.equal(cartHoldVerdict("Dạ chị lấy 2kg hay 3kg để được giảm ạ?", one, "ok em"), null);
+  assert.equal(cartHoldVerdict("Dạ chị lấy 1kg hay 2kg ạ?", one, "ok em")?.reason, "REASK");
+}
+
 function testViolation() {
   const c = cartOf("Cho chị 2kg chả cá thu");
   // 2kg = gói 2kg × 1 = 2 × gói 1kg — cùng sản phẩm, cùng khối lượng ⇒ được.
@@ -731,6 +771,7 @@ export async function testSalesCartCommitment() {
   testViolation();
   testReviewCases();
   testReview2();
+  testReview3();
   testHoldText();
   testReadinessAndPrompt();
   testHesitation();
