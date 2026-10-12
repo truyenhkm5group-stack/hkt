@@ -2188,6 +2188,8 @@ async function testJourney() {
           const toolTurn = req.messages[req.messages.length - 1]?.content.some((b) => b.type === "tool_result");
           if (/cho chị đổi địa chỉ/.test(said)) return poResp(toolTurn ? [{ type: "text", text: "Dạ em đã đổi địa chỉ giao cho chị rồi ạ." }] : [poUse({ address: "12 Lê Lợi, Quận 1" })]);
           if (/đổi giúp chị sang 12 Lê Lợi/.test(said)) return poResp([{ type: "text", text: "Dạ em đã đổi địa chỉ giao cho chị sang 12 Lê Lợi rồi ạ, em cập nhật ghi chú giao Chủ nhật cho chị rồi nha." }]);
+          // (c) vòng 3: model «lách» bằng create_customer (chỉ sửa HỒ SƠ khách, không đụng đơn) rồi nói đã cập nhật.
+          if (/địa chỉ mới là 12 Lê Lợi/.test(said)) return poResp(toolTurn ? [{ type: "text", text: "Dạ em cập nhật địa chỉ mới cho chị rồi ạ." }] : [{ type: "tool_use", id: `po-cc-${Math.random().toString(36).slice(2)}`, name: "create_customer", input: { name: "Đỗ Là", phone: "0963535065", address: "12 Lê Lợi, Quận 1" } }]);
           if (/câu trả lời mẫu/.test(req.system)) return poResp([{ type: "text", text: "Q1" }]);
           return baseBot.complete(req);
         },
@@ -2214,6 +2216,15 @@ async function testJourney() {
       assert.equal(poConv2.status, "HANDOFF", "câu khẳng định đã sửa đơn không căn cứ ⇒ chuyển người");
       assert.equal(poConv2.handoffReason, CLAIM_HANDOFF_REASON.ORDER_EDITED);
       assert.equal(said2, CLAIM_SAFE_TEXT.ORDER_EDIT, `khung THỬ nhận câu an toàn, không phải câu «đã đổi»: «${said2}»`);
+      // (c) create_customer trên đơn chốt qua lời đồng ý ⇒ máy chủ chuyển người «Sửa đơn đã chốt», câu «đã cập nhật» KHÔNG tới khách (review #821 vòng 3).
+      await db.update(schema.salesChatConversations).set({ status: "OPEN", handoffReason: null, state: poState }).where(eq(schema.salesChatConversations.id, po.id));
+      await chatTurn(po.id, "địa chỉ mới là 12 Lê Lợi nhé em", { channel: "TEST" });
+      const poConv3 = (await db.select().from(schema.salesChatConversations).where(eq(schema.salesChatConversations.id, po.id)))[0];
+      const said3 = await lastBot();
+      assert.equal(poConv3.status, "HANDOFF", "đổi địa chỉ qua create_customer trên đơn đã chốt ⇒ chuyển người");
+      assert.match(poConv3.handoffReason ?? "", /Sửa đơn đã chốt/, `lý do: ${poConv3.handoffReason}`);
+      assert.doesNotMatch(said3, /cập nhật|đã đổi/, `bot KHÔNG nói đã cập nhật: «${said3}»`);
+      assert.equal((poConv3.state as ChatState).customer?.address, "29 Thảo Điền", "hồ sơ khách không bị sửa lặng (đơn vẫn địa chỉ cũ — người xử lý)");
       await db.update(schema.salesChatConversations).set({ status: "OPEN", handoffReason: null, state: { ...poState, confirmed: { ...poState.confirmed, at: new Date(Date.now() - 4 * 86_400_000).toISOString() } } }).where(eq(schema.salesChatConversations.id, po.id));
       await chatTurn(po.id, "cho chị thêm 1kg chả cá nữa", { channel: "TEST" });
       const poAfter = (await db.select().from(schema.salesChatConversations).where(eq(schema.salesChatConversations.id, po.id)))[0];

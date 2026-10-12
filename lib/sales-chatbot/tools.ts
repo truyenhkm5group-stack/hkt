@@ -768,6 +768,9 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
       return ok(`Giỏ: ${formatVND(priced.subtotal)}${priced.total !== null ? ` · COD ${formatVND(priced.total)}` : ""}`, cartView(priced), state);
     }
     case "create_customer": {
+      // Đơn chốt qua LỜI ĐỒNG Ý: đổi SĐT / địa chỉ lúc này là SỬA ĐƠN — hồ sơ khách đổi mà đơn vẫn giữ địa chỉ cũ (review #821 vòng 3, ca
+      // «Đỗ Là»). Máy chủ ép chuyển người như update_draft_order trên đơn đã chốt; không để tuỳ model.
+      if (state.confirmed && !state.confirmed.auto) return { ...err("Đơn đã chốt", "Đơn của hội thoại này đã chốt — đổi SĐT / địa chỉ là sửa đơn: KHÔNG nói đã cập nhật; máy chủ đã chuyển nhân viên.", state), requireHuman: `Sửa đơn đã chốt — khách đổi thông tin nhận hàng: «${ctx.lastUserText.trim().slice(0, 120)}»` };
       // KHÁCH CŨ: máy chủ điền SĐT + địa chỉ của lần mua trước — chỉ khi khách VỪA xác nhận (luật 3.12: gợi ý, không tự điền).
       let saved = false;
       let fields: Record<string, unknown> = input;

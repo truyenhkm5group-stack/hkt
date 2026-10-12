@@ -477,11 +477,20 @@ export function customerReceiptClaim(text: string): boolean {
  *  3. Mệnh đề HỎI («thế nào», «… không em?») chỉ tính luật có từ LỖI rõ (`inQuestion: true` — mốc, hỏng, thiếu, sai…); «chậm … cũng
  *     được / không sao» không phải than phiền.
  */
-type ComplaintRule = { re: RegExp; folded: boolean; inQuestion: boolean; unless?: RegExp };
+/**
+ * `unaccentedOnly` = luật chỉ chạy khi CẢ tin gõ không dấu (khách gõ không dấu thì không thể đọc «dở» trên chữ còn dấu) — và luôn BẮT BUỘC
+ * có ngữ cảnh («hang do qua», «giao cham vay»), không bao giờ từ trần. `questionOk` = câu hỏi vẫn tính khi có dấu hiệu than phiền
+ * («sao giao chậm vậy em?»).
+ */
+type ComplaintRule = { re: RegExp; folded: boolean; inQuestion: boolean; unless?: RegExp; unaccentedOnly?: boolean; questionOk?: RegExp };
 const W0 = String.raw`(?:^|[^\p{L}\d])`;
 const W1 = String.raw`(?=$|[^\p{L}\d])`;
 const acc = (body: string): RegExp => new RegExp(`${W0}(?:${body})${W1}`, "u");
 const SLOW_OK = /\b(?:cung duoc|khong sao|ko sao|tu tu|khong van de|cung ok)\b/;
+/** Câu hỏi than phiền: «sao … vậy», «sao mãi chưa …» — hỏi nhưng là trách. */
+const COMPLAIN_QUESTION_RE = /\bsao\b/;
+/** Có chữ có dấu tiếng Việt ⇒ khách gõ CÓ DẤU (luật `unaccentedOnly` không chạy). */
+const VI_DIACRITIC_RE = /[àáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹđ]/i;
 const COMPLAINT_RULES: readonly ComplaintRule[] = [
   // Hàng lỗi — cụm không mơ hồ khi bỏ dấu.
   { re: /\bbi\s+(?:loi|hong|thiu|moc|chay dau|chay nuoc|het han|qua han)\b/, folded: true, inQuestion: true },
@@ -500,8 +509,11 @@ const COMPLAINT_RULES: readonly ComplaintRule[] = [
   // Chất lượng tệ (CÓ DẤU — «dở» ≠ «đó / đỡ / đỏ»); «không ngon MIỆNG» (khách tự nói về mình) không tính.
   { re: acc("(?:dở|tệ|chán|khó ăn|nhạt nhẽo)\\s+(?:quá|lắm|thật|thế|vậy|ghê)|không\\s+(?:còn\\s+)?(?:ngon|tươi|thơm)\\s+(?:như|bằng)|không\\s+(?:giống|đúng như)\\s+(?:ảnh|hình|mô tả|quảng cáo)|khác\\s+(?:ảnh|hình|mô tả|quảng cáo)"), folded: false, inQuestion: false },
   // Giao chậm (CÓ DẤU — «chậm» ≠ «chấm / chăm»); «N ngày chưa thấy» không mơ hồ khi bỏ dấu.
-  { re: acc("(?:giao|ship|gửi)\\s+chậm|chậm\\s+quá"), folded: false, inQuestion: false, unless: SLOW_OK },
+  { re: acc("(?:giao|ship|gửi)\\s+chậm|chậm\\s+quá"), folded: false, inQuestion: false, unless: SLOW_OK, questionOk: COMPLAIN_QUESTION_RE },
   { re: /\b\d+\s+ngay\s+(?:roi\s+)?(?:ma\s+)?(?:van\s+)?chua\s+(?:thay|nhan|toi|den|giao)\b/, folded: true, inQuestion: false, unless: SLOW_OK },
+  // KHÁCH GÕ KHÔNG DẤU (review #821 vòng 3): từ dễ lẫn chỉ tính khi có NGỮ CẢNH đi kèm.
+  { re: /\b(?:hang|banh|ruoc|goi|do an|cha|mon)\s+do\s+(?:qua|lam|te)\b|\b(?:te|chan)\s+qua\b|\bkhong\s+ngon\s+nhu\s+(?:lan truoc|truoc)\b|\bchay dau het\b|\bbi vo\b|\bco mui\s+(?:la|hoi|chua)\b|\ban xong\s+(?:bi\s+)?dau bung\b/, folded: true, inQuestion: false, unaccentedOnly: true },
+  { re: /\b(?:giao|ship)\s+cham\s+(?:qua|vay|the|v)\b/, folded: true, inQuestion: false, unless: SLOW_OK, unaccentedOnly: true, questionOk: COMPLAIN_QUESTION_RE },
 ];
 const COMPLAINT_NEGATION = new Set(["khong", "chua", "ko", "k", "chang", "cha", "khoi"]);
 const COMPLAINT_QUESTION_RE = /(?:\b(?:the nao|ra sao)\b|\b(?:khong|ko|chua|nhi|sao|duoc khong)(?:\s+(?:em|shop|a|chi|anh|ban|c|e|vay|v|nhe))*\s*$)/;
@@ -531,14 +543,19 @@ function negatedBefore(prefix: string): boolean {
  * nên luật ưu tiên KHÔNG BẮT NHẦM (xem ba hàng rào ở trên). HÀM THUẦN.
  */
 export function customerComplaintSignal(text: string): boolean {
+  const unaccented = !VI_DIACRITIC_RE.test(text.normalize("NFC"));
   for (const c of complaintClauses(text)) {
     for (const rule of COMPLAINT_RULES) {
-      if (c.question && !rule.inQuestion) continue;
+      if (rule.unaccentedOnly && !unaccented) continue;
+      if (c.question && !rule.inQuestion && !(rule.questionOk && rule.questionOk.test(c.folded))) continue;
       if (rule.unless && rule.unless.test(c.folded)) continue;
       const hay = rule.folded ? c.folded : c.raw;
       const m = rule.re.exec(hay);
       if (!m) continue;
-      if (negatedBefore(hay.slice(0, m.index + (m[0].length - m[0].trimStart().length)))) continue;
+      const prefix = hay.slice(0, m.index + (m[0].length - m[0].trimStart().length));
+      if (negatedBefore(prefix)) continue;
+      // Hỏi GIẢ ĐỊNH «có (bị) … không» («có bị chảy dầu không em?») là hỏi trước khi mua, không phải khiếu nại.
+      if (c.question && /\bco\b/.test(foldVi(prefix))) continue;
       return true;
     }
   }
@@ -602,8 +619,9 @@ export function postSalePrompt(v: CustomerPhaseView, shortCode: string | null): 
     const who = v.receivedBy === "CARRIER" ? "Đơn vị vận chuyển báo đã giao." : "Khách NÓI đã nhận hàng (lời khách — ERP chưa có chứng từ giao: KHÔNG nói thay đơn vị vận chuyển, KHÔNG nói đơn «đã giao thành công»).";
     return `${common} ${who} Cảm ơn khách đã nhận hàng, hỏi thăm nhẹ (dùng thử thấy thế nào / cần hướng dẫn bảo quản, sử dụng không). Khách chưa dùng thử ⇒ chúc khách dùng ngon và mời phản hồi khi dùng. Khách hỏi cách dùng / bảo quản ⇒ trả lời theo «Về shop» / sổ tay. Khách báo hàng lỗi / thiếu / sai / muốn đổi trả / hoàn tiền ⇒ handoff_to_human «Khiếu nại — <ý khách>».`;
   }
-  if (v.phase === "IN_TRANSIT") return `${common} Đơn đang trên đường giao: khách hỏi bao giờ nhận ⇒ get_order_status rồi nói ĐÚNG «status», không hứa ngày giao.`;
-  return `${common} Đơn đang chờ gửi đi: khách hỏi tình trạng ⇒ get_order_status rồi nói ĐÚNG «status» (không khẳng định «chưa gửi» khi ERP chưa có thông tin vận chuyển). Khách muốn đổi địa chỉ / số lượng ⇒ update_draft_order nếu đơn còn sửa được, không thì handoff_to_human «Sửa đơn — <ý khách>».`;
+  const complainLine = "Khách than phiền / khiếu nại (giao chậm, hàng lỗi, muốn huỷ / đổi trả / hoàn tiền) ⇒ xin lỗi ngắn, KHÔNG hứa gì, handoff_to_human «Khiếu nại — <ý khách>».";
+  if (v.phase === "IN_TRANSIT") return `${common} Đơn đang trên đường giao: khách hỏi bao giờ nhận ⇒ get_order_status rồi nói ĐÚNG «status», không hứa ngày giao. ${complainLine}`;
+  return `${common} Đơn đang chờ gửi đi: khách hỏi tình trạng ⇒ get_order_status rồi nói ĐÚNG «status» (không khẳng định «chưa gửi» khi ERP chưa có thông tin vận chuyển). Khách muốn đổi địa chỉ / số lượng ⇒ update_draft_order nếu đơn còn sửa được, không thì handoff_to_human «Sửa đơn — <ý khách>». ${complainLine}`;
 }
 
 /**

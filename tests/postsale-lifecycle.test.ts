@@ -69,6 +69,11 @@ function testPhases() {
   ])
     assert.ok(!customerComplaintSignal(no), `«${no}» KHÔNG phải khiếu nại (bắt nhầm ⇒ bot im với khách đang khen)`);
   for (const yes of ["goi ruoc bi moc roi, minh muon tra hang hoan tien", "hàng bị mốc rồi phải làm sao?", "an xong bi dau bung"]) assert.ok(customerComplaintSignal(yes), `«${yes}» là khiếu nại (gõ không dấu / câu hỏi có từ lỗi rõ)`);
+  // Vòng 3: khách gõ KHÔNG DẤU — từ dễ lẫn chỉ tính khi có ngữ cảnh; «sao … vậy» là câu trách; «có (bị) … không» là hỏi giả định.
+  for (const yes of ["hang do qua", "ruoc do qua", "giao cham qua", "sao giao cham vay em", "te qua", "khong ngon nhu lan truoc", "ruoc chay dau het", "hop bi vo", "co mui la", "an xong dau bung", "sao giao chậm vậy em?"])
+    assert.ok(customerComplaintSignal(yes), `«${yes}» là khiếu nại`);
+  for (const no of ["loai do the nao em", "cai do the nao", "an thay do lam", "chi thay do qua", "cham qua ngon", "cham qua", "giao cham xiu cung duoc", "ship cham cung duoc em", "phong ngua the nao", "do qua", "con chi an khong ngon mieng may hom nay", "ngon khong chay dau", "có bị chảy dầu không em?", "co bi chay dau khong em"])
+    assert.ok(!customerComplaintSignal(no), `«${no}» KHÔNG phải khiếu nại (không dấu / hỏi giả định)`);
 
   const snap = (o: Partial<Pick<LifecycleSnapshot, "order" | "fulfillment" | "salesStage" | "orderId">>) => ({ order: "CONFIRMED" as const, fulfillment: "NONE" as const, salesStage: "AWAITING_CONFIRMATION" as const, orderId: "erp-6495ca72-x", ...o });
   const none = { receipt: false, complaint: false };
@@ -100,6 +105,7 @@ function testPhases() {
   assert.match(p, /Cảm ơn khách đã nhận hàng, hỏi thăm/);
   assert.doesNotMatch(postSalePrompt(carrier, "6495CA72"), /lời khách/, "ĐVVC đã giao ⇒ không gắn nhãn lời khách");
   assert.match(postSalePrompt(customerPhaseOf(snap({}), { receipt: false, complaint: true }, 1), null), /handoff_to_human với reason «Khiếu nại/);
+  for (const f of ["NONE", "SHIPPING"] as const) assert.match(postSalePrompt(customerPhaseOf(snap({ fulfillment: f }), none, 1), null), /khiếu nại .*handoff_to_human «Khiếu nại/, `chờ giao / đang giao (${f}) cũng dặn chuyển người khi khách than phiền`);
   console.log("  ✓ giai đoạn khách: trước bán · đang chốt · chờ giao · đang giao · đã nhận (ĐVVC / lời khách) · sau bán · khiếu nại — lời khách không đổi logistics; lời dặn hậu mãi không chốt lại / không lên đơn mới");
 }
 

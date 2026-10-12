@@ -1145,9 +1145,11 @@ async function chatTurnCore(
         if (uses.length === 0) break;
         const results: AiBlock[] = [];
         for (const u of uses) {
+          const confirmedBefore = Boolean(state.confirmed);
           const r = await executeTool(u.name, u.input, { autoConfirm, conversationId: conv.id, channel: opts.channel, config: cfg, state, lastUserText: text, agent: SALES_AGENT, customerName: opts.customerName ?? null, quickReplies: quickCatalog, returning, recentSaid, turn: turnSeq, bookingOn, now, commentTurn: opts.aiCustomer?.threadKind === "COMMENT", promptStamp: { ...stampBase, model: res.model || prov.provider.model } });
           state = r.state;
-          if (!r.isError && (u.name === "create_customer" || u.name === "create_draft_order" || u.name === "update_draft_order")) wroteThisTurn = true;
+          // create_customer chỉ sửa HỒ SƠ khách, không đụng đơn ⇒ chỉ là căn cứ khi CHƯA có đơn đã chốt (review #821 vòng 3).
+          if (!r.isError && ((u.name === "create_customer" && !confirmedBefore) || u.name === "create_draft_order" || u.name === "update_draft_order")) wroteThisTurn = true;
           // Câu mẫu AI gửi qua công cụ cũng qua hàng rào khẳng định — bị chặn ⇒ không gửi, chuyển người như chữ model.
           const deliverVerdict = r.deliver ? await guardOutgoing(r.deliver.text, () => claimFacts(state)) : null;
           const deliver = deliverVerdict?.ok ? r.deliver : undefined;

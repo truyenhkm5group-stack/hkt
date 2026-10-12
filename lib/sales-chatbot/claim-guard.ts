@@ -191,6 +191,8 @@ const CLAIM_RULES: readonly ClaimRule[] = [
   { kind: "ORDER_EDITED", re: /\bthem\s+(?:\S+\s+){0,4}vao\s+(?:don|don hang)\b/, needsDone: true, allowProposal: false },
   // «em ghi chú giao giờ hành chính rồi ạ» · «em note lại cho kho rồi» · «em báo kho rồi» · «em đổi sang 2 hộp rồi ạ» (review #821 vòng 2)
   { kind: "ORDER_EDITED", re: /\b(?:ghi chu|note|bao kho|dan kho|nhan kho|bao ben kho)\b|\bdoi\s+(?:lai\s+)?sang\s+\S+/, needsDone: true, allowProposal: false },
+  // «Dạ đơn của chị em đã đổi xong ạ» · «đơn đã sửa rồi» (review #821 vòng 3)
+  { kind: "ORDER_EDITED", re: /\bdon(?:\s+hang)?(?:\s+cua\s+(?:minh|chi|anh|ban|c|a))?(?:\s+(?:em|shop))?\s+(?:da\s+)?(?:duoc\s+)?(?:doi|sua|cap nhat)\b/, needsDone: true, allowProposal: false },
 ];
 
 /**
