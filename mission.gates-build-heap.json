@@ -3,7 +3,7 @@
   "mission_id": "gates-build-heap",
   "title": "Gates: next build không còn đỏ vì hết heap runner (NODE_OPTIONS 6 GB)",
   "business_goal": "",
-  "status": "RUNNING",
+  "status": "PR_READY",
   "priority": "P0",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -20,7 +20,18 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-12T09:46:16.652Z",
-  "updated_at": "2026-10-12T09:46:16.652Z",
-  "last_heartbeat": "2026-10-12T09:46:16.652Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-12T09:46:41.090Z",
+  "last_heartbeat": "2026-10-12T09:46:41.090Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "fix/gates-build-heap",
+    "sha": "18c7f97c925bfceeb03bfe6755cfbf87086aee96",
+    "at": "2026-10-12T09:46:41.090Z",
+    "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+    "title": "Gates: next build không còn đỏ vì hết heap runner (NODE_OPTIONS 6 GB)",
+    "summary": "Ba lượt OOM next build 12/10 (kể cả main) chặn mọi deploy",
+    "tests": [
+      "test-hygiene·repo-integrity: đạt"
+    ]
+  }
 }

@@ -2202,3 +2202,4 @@
 {"at":"2026-10-12T09:46:16.866Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"OVERLAP_ACCEPTED","mission":"gates-build-heap","detail":"OVERLAP_ACCEPTED với pipeline-env-agent-creds: điểm nóng SERIAL .github/ — cách tích hợp: một bước của gates.yml"}
 {"at":"2026-10-12T09:46:16.866Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"OVERLAP_ACCEPTED","mission":"gates-build-heap","detail":"OVERLAP_ACCEPTED với saas-v1-plan-migration: điểm nóng SERIAL .github/ — cách tích hợp: một bước của gates.yml"}
 {"at":"2026-10-12T09:46:16.866Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"OVERLAP_ACCEPTED","mission":"gates-build-heap","detail":"OVERLAP_ACCEPTED với sync-runner-lock: điểm nóng SERIAL .github/ — cách tích hợp: một bước của gates.yml"}
+{"at":"2026-10-12T09:46:41.213Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"gates-build-heap","detail":"fix/gates-build-heap @ 18c7f97c925b · 1 lệnh kiểm thử"}
