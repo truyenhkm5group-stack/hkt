@@ -1,8 +1,8 @@
 {
   "pr": 802,
-  "sha": "5ab92d674da8d961bd1a962c47b21c06910eb3b4",
+  "sha": "c91f1076625b83c4fa42edadfbd5a5e194131d09",
   "verdict": "PASS",
   "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
-  "at": "2026-10-11T05:30:19.065Z",
-  "note": "Không có luật địa giới thứ hai (dùng vn-admin-2025.json có nguồn); mơ hồ không bao giờ tự điền; viết tắt HCM danh sách đóng có kiểm; tools.ts chỉ đoạn địa chỉ (gộp trước authoritative-quote); golden chỉ thêm khối address_check"
+  "at": "2026-10-12T09:33:15.083Z",
+  "note": "Sửa điểm chặn review: tỉnh chỉ suy từ tên quận NGUYÊN CHỮ trong văn bản gốc; q1/tp/f1q5/GV ⇒ UNKNOWN + gợi ý, cổng thiếu tỉnh vẫn chặn tự chốt (test + kiểm đột biến). KimThu Le MISSING_PROVINCE giữ. Nợ cũ P5 Q3 ghi trong commit."
 }
