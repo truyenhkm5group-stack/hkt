@@ -24,20 +24,25 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-12T12:52:38.920Z",
-  "updated_at": "2026-10-12T12:54:30.163Z",
-  "last_heartbeat": "2026-10-12T12:53:54.028Z",
+  "updated_at": "2026-10-12T14:13:46.499Z",
+  "last_heartbeat": "2026-10-12T14:13:46.499Z",
   "definition_of_done": [],
   "handoff": {
     "branch": "fix/hslc-postsale-handoff",
-    "sha": "d724b0a1f5a059dabbcc8fd3797964fce77684c4",
-    "at": "2026-10-12T12:53:54.028Z",
-    "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+    "sha": "025c57e26cf315c5434696d9620aa6984ff8ee46",
+    "at": "2026-10-12T14:13:46.499Z",
+    "actor": "DESKTOP-56TH98Y:wt-hslc-postsale",
     "title": "HOTFIX P0 HSLC: AI không dừng mặc định sau chốt (giai đoạn hậu mãi), hàng đợi chung thay KHÔNG CHỦ, watchdog nhường hết hạn, đồng hồ AI hỏng/SLA đọc mốc thật, nhãn «Chưa có vận đơn», panel đơn báo lỗi đọc được",
-    "summary": "Gốc: engine.ts:884 nhắn sau chốt ⇒ HANDOFF không hết hạn; phòng trống ⇒ KHÔNG CHỦ; đồng hồ AI hỏng/SLA đọc updated_at bị đẩy; NOT_SHIPPED in «Chưa gửi»",
+    "summary": "Sửa theo review #821 (F1–F6) trên cùng nhánh: sửa đơn chốt qua lời đồng ý ⇒ tools requireHuman «Sửa đơn đã chốt»; claim-guard ORDER_EDITED (chỉ qua khi công cụ ghi trong lượt) + REFUND_PROMISE (luôn chặn) ⇒ chặn câu + chuyển người; phase COMPLAINT (mở rộng: đau bụng, không ngon, dở, chảy dầu, giao chậm; chưa nhận + ĐVVC DELIVERED) ⇒ máy chủ chuyển người trước lượt AI; trả-cho-AI loại khách đang chờ + có yêu cầu (sửa/khiếu nại/huỷ/chuyển khoản), chạy thử in số; watchdog không trả AI khi còn tin DEAD AI hỏng chưa trả lời (đổi lý do cần người), ai.resumed của máy cho AI hỏng; ISO chặt cho state.handoff.at; tin phòng trống theo STALE, không đếm tiếp quản; câu mẫu bỏ mọi giai đoạn sau bán; sửa câu con tương quan cột trần ở handoff-routing (tên khách /work). Hai commit audit (#820) giữ nguyên ở đáy nhánh.",
     "tests": [
-      "typecheck·lint·build: sạch",
-      "postsale-lifecycle·golden hau-mai-da-nhan-hang·handoff-ownership·self-service-journey·order-golden (trùng đơn 0/30): đạt",
-      "npm test: TẤT CẢ KIỂM THỬ ĐẠT"
+      "npm run typecheck",
+      "npm run lint (tệp đổi)",
+      "npm test (TẤT CẢ KIỂM THỬ ĐẠT, 1005 ✓)",
+      "npm run build",
+      "tests/repo-integrity.test.ts",
+      "tests/test-hygiene.test.ts",
+      "tests/ops-log-leak.test.ts",
+      "tests/ops-concurrency.test.ts"
     ]
   }
 }
