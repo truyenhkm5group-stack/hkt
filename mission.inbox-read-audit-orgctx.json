@@ -1,0 +1,26 @@
+{
+  "schema": 1,
+  "mission_id": "inbox-read-audit-orgctx",
+  "title": "Audit chưa đọc: TS #803 đọc đúng CSDL tổ chức (withOrganization + handle chỉ đọc)",
+  "business_goal": "",
+  "status": "RUNNING",
+  "priority": "P2",
+  "risk": "MEDIUM",
+  "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "worker": null,
+  "worktree": null,
+  "branch": "fix/inbox-read-audit-org-ctx",
+  "base_sha": "8cd40bc3f35ee33e88ce73a07b2572e81c79a2c5",
+  "domains": [],
+  "owned_paths": [
+    "scripts/inbox-read-audit.ts"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-12T06:40:13.338Z",
+  "updated_at": "2026-10-12T06:40:13.338Z",
+  "last_heartbeat": "2026-10-12T06:40:13.338Z",
+  "definition_of_done": []
+}
