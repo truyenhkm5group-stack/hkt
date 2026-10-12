@@ -28,6 +28,7 @@
 import { and, desc, eq, inArray, like, ne, or, sql, type SQL } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { PANCAKE_PAGES_API } from "@/lib/connectors/testers";
+import { mapOrder } from "@/lib/integrations/pancake/mapper";
 import { MANUAL_ORDER_ORIGIN } from "@/lib/constants/manual-orders";
 import { formatDate } from "@/lib/format";
 import { maskAddress, type ChatState } from "@/lib/sales-chatbot/tools";
@@ -41,7 +42,45 @@ export const PROFILE_TTL_MS = 6 * 3_600_000;
 export type PriorMessage = { from: "customer" | "shop"; text: string; at: string; id?: string };
 /** Số tin cũ và độ dài mỗi tin đọc từ Pancake — bot dùng `RETURNING_LIMITS`, ghi đơn từ hội thoại đọc nhiều hơn. */
 export type ThreadReadLimits = { priorMessages: number; priorChars: number; pages: number };
-export type PancakeThreadProfile = { fetchedAt: string; phones: string[]; fbIds: string[]; prior: PriorMessage[] };
+/**
+ * ĐƠN PANCAKE CỦA CHÍNH KHÁCH TRONG HỘI THOẠI NÀY (Customer 360 — 11/10/2026, ca «Nga Ho Thien»: lịch sử giao từ 03/2025 CHỈ nằm ở
+ * Pancake, ERP không có đơn nào ⇒ bot xin lại địa chỉ dù khách nói «vẫn địa chỉ cũ»). Pancake trả `recent_orders` trong phản hồi tin
+ * của MỘT hội thoại (ops pancake-avatar-shape 11/10/2026 thấy khoá) — đơn shop đã lên cho khách của hội thoại đó. Đọc bằng ĐÚNG
+ * `mapOrder` của bộ đồng bộ đơn Pancake (không luật đọc thứ hai). Trạng thái Pancake KHÔNG BAO GIỜ là bằng chứng giao thành công
+ * (AGENTS.md mục 3.2) — `customer-360.ts` chỉ dùng nó để loại đơn huỷ / hoàn và để biết đơn đã qua bước xác nhận.
+ * `at = null` khi Pancake không gửi mốc (không lấy «bây giờ» thay — `mapOrder` làm vậy cho đơn đồng bộ, ở đây là bịa ngày).
+ */
+export type PancakeRecentOrder = { id: string; at: string | null; stage: string; name: string; phone: string; address: string; province: string; ward: string; declaredPrepaid: boolean; items: string[] };
+/**
+ * `recentOrders`: `undefined` = CHƯA BIẾT (hồ sơ đọc trước bản này, hoặc Pancake không gửi khoá) — KHÁC `[]` (Pancake nói: không có
+ * đơn nào). `recentOrdersUnparsed` = phần tử Pancake gửi mà `mapOrder` không đọc được (chỉ đếm, để phép đo thấy dáng lạ).
+ */
+export type PancakeThreadProfile = { fetchedAt: string; phones: string[]; fbIds: string[]; prior: PriorMessage[]; recentOrders?: PancakeRecentOrder[]; recentOrdersUnparsed?: number };
+
+/** Tối đa số đơn Pancake giữ trong hồ sơ hội thoại. */
+export const RECENT_ORDERS_MAX = 10;
+
+/** Một phần tử `recent_orders` của Pancake ⇒ đơn gọn, hoặc `null` khi không đọc được (thiếu mã). HÀM THUẦN. */
+export function pancakeRecentOrderOf(value: unknown): PancakeRecentOrder | null {
+  const raw = value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
+  if (!raw) return null;
+  const m = mapOrder(raw);
+  if (!m) return null;
+  const at = pancakeTime(raw.inserted_at);
+  return {
+    id: m.id,
+    at: at ? at.toISOString() : null,
+    stage: m.stage,
+    name: m.shipFullName || m.billFullName,
+    phone: normalizeVnPhone(m.shipPhone || m.billPhone) ?? "",
+    address: m.shipAddress || m.shipFullAddress,
+    province: m.shipProvince,
+    ward: m.shipCommune,
+    // Số trả trước KHAI trên đơn Pancake — chỉ là dữ kiện để đọc, KHÔNG phải tiền thật (lifecycle.ts: đơn Pancake ⇒ payment UNKNOWN).
+    declaredPrepaid: m.prepaid > 0 || m.transferMoney > 0,
+    items: m.items.filter((i) => i.productName.trim()).slice(0, RETURNING_LIMITS.lastItems).map((i) => `${i.productName.trim()}${i.variationDetail.trim() ? ` (${i.variationDetail.trim()})` : ""} × ${i.quantity}`),
+  };
+}
 
 export type ReturningTrust = "THREAD" | "FB_ID" | "PHONE";
 export type ReturningCustomer = {
@@ -117,7 +156,18 @@ export function parsePancakeThreadProfile(bodies: readonly Record<string, unknow
   const fbIds = new Set<string>();
   const seen = new Set<string>();
   const prior: (PriorMessage & { t: number })[] = [];
+  const recent = new Map<string, PancakeRecentOrder>();
+  let recentKnown = false;
+  let recentUnparsed = 0;
   for (const body of bodies) {
+    if (Array.isArray(body.recent_orders)) {
+      recentKnown = true;
+      for (const x of body.recent_orders as unknown[]) {
+        const o = pancakeRecentOrderOf(x);
+        if (o) recent.set(o.id, o);
+        else recentUnparsed += 1;
+      }
+    }
     for (const key of ["conv_phone_numbers", "recent_phone_numbers"]) {
       const list = Array.isArray(body[key]) ? (body[key] as unknown[]) : [];
       for (const p of list) {
@@ -148,6 +198,7 @@ export function parsePancakeThreadProfile(bodies: readonly Record<string, unknow
     phones: [...phones].slice(0, RETURNING_LIMITS.phones),
     fbIds: [...fbIds].slice(0, 5),
     prior: prior.slice(-limits.priorMessages).map(({ from, text, at, id }) => ({ from, text, at, ...(id ? { id } : {}) })),
+    ...(recentKnown ? { recentOrders: [...recent.values()].sort((a, b) => (b.at ?? "").localeCompare(a.at ?? "")).slice(0, RECENT_ORDERS_MAX), recentOrdersUnparsed: recentUnparsed } : {}),
   };
 }
 

@@ -53,6 +53,7 @@ import { customerOrderStatus } from "@/lib/sales-chatbot/order-status-shared";
 import { fanpageVisitorKeyMirror } from "@/lib/pricing/ai-customer-identity";
 import type { PromptStamp } from "@/lib/sales-chatbot/prompt-stamp";
 import type { PancakeThreadProfile, ReturningCustomer } from "@/lib/sales-chatbot/returning";
+import type { Customer360 } from "@/lib/sales-chatbot/customer-360";
 
 export type CartLine = { variantId: string; quantity: number };
 export { onlyAddOns, type Priced } from "@/lib/sales-chatbot/quote";
@@ -149,6 +150,8 @@ export type ToolContext = {
   agent: OrderAgent;
   /** Khách cũ máy chủ đã nhận ra (`findReturningCustomer`) — nguồn của `create_customer` + `use_saved_address`. */
   returning?: ReturningCustomer | null;
+  /** Hồ sơ Customer 360 của lượt (`customer-360.ts`) — nguồn của `saved_address_choice` khi khách có nhiều địa chỉ cũ. */
+  customer360?: Customer360 | null;
   /** Câu shop vừa nói (`recentShopTexts`) — câu mẫu trùng một câu trong đó không gửi lại. */
   recentSaid?: readonly string[];
   /** Shop bật đặt lịch qua chat VÀ module Lịch hẹn đang bật — engine tính, công cụ đặt lịch chỉ chạy khi `true`. */
@@ -230,10 +233,10 @@ const DEFS: Record<SalesTool, AiToolDef> = {
   create_customer: {
     name: "create_customer",
     description:
-      "Lưu thông tin người mua sau khi khách đã cho số điện thoại + địa chỉ giao (họ tên: bỏ trống ⇒ máy chủ dùng tên Facebook của khách). SĐT đã có trong sổ ⇒ dùng lại đúng khách đó. KHÁCH CŨ có địa chỉ ĐÃ CHE và khách vừa xác nhận giao như lần trước ⇒ use_saved_address = true + customer_confirmation = nguyên văn lời xác nhận (bỏ trống phone / address — máy chủ tự điền).",
+      "Lưu thông tin người mua sau khi khách đã cho số điện thoại + địa chỉ giao (họ tên: bỏ trống ⇒ máy chủ dùng tên Facebook của khách). SĐT đã có trong sổ ⇒ dùng lại đúng khách đó. KHÁCH CŨ có địa chỉ ĐÃ CHE và khách vừa xác nhận giao như lần trước ⇒ use_saved_address = true + customer_confirmation = nguyên văn lời xác nhận (bỏ trống phone / address — máy chủ tự điền). Khối TRA LỊCH SỬ liệt kê nhiều địa chỉ cũ và khách chọn một ⇒ thêm saved_address_choice = số thứ tự khách chọn.",
     inputSchema: {
       type: "object",
-      properties: { name: { type: "string" }, phone: { type: "string" }, address: { type: "string" }, province: { type: "string" }, use_saved_address: { type: "boolean" }, customer_confirmation: { type: "string" } },
+      properties: { name: { type: "string" }, phone: { type: "string" }, address: { type: "string" }, province: { type: "string" }, use_saved_address: { type: "boolean" }, saved_address_choice: { type: "integer", minimum: 1 }, customer_confirmation: { type: "string" } },
       required: [],
       additionalProperties: false,
     },
@@ -772,12 +775,22 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
       let saved = false;
       let fields: Record<string, unknown> = input;
       if (input.use_saved_address === true) {
-        const r = ctx.returning;
+        // Nhiều địa chỉ cũ (Customer 360): khách chọn số mấy trong danh sách máy chủ đã đọc cho bot — sai số ⇒ hỏi lại, không đoán.
+        const choice = input.saved_address_choice;
+        const hasChoice = choice !== undefined && choice !== null;
+        // Nạp động: customer-360.ts nạp tệp này (maskAddress) — nạp tĩnh là thành vòng (cùng cách `lookup_customer` nạp returning.ts).
+        const picked = hasChoice ? (await import("@/lib/sales-chatbot/customer-360")).savedAddressChoice(ctx.customer360, choice) : null;
+        if (hasChoice && !picked) return err("Lưu khách: số địa chỉ cũ không có", "saved_address_choice phải là số thứ tự trong danh sách địa chỉ cũ của khối TRA LỊCH SỬ. Hỏi lại khách chọn địa chỉ nào.", state);
+        const r = picked ?? ctx.returning;
         if (!r) return err("Lưu khách: không có địa chỉ cũ", "Shop không có địa chỉ cũ của khách này — hỏi khách SĐT và địa chỉ.", state);
         const quote = z.string().trim().min(2).max(300).safeParse(input.customer_confirmation);
         if (!quote.success || !quotedInText(quote.data, ctx.lastUserText)) return err("Lưu khách: khách chưa xác nhận địa chỉ cũ", "customer_confirmation phải là nguyên văn lời khách xác nhận giao về địa chỉ cũ, trong câu CUỐI của khách. Khách chưa xác nhận ⇒ hỏi lại.", state);
         const typed = typeof input.name === "string" ? input.name.trim() : "";
-        fields = { name: typed.length >= 2 ? typed : r.name, phone: r.phone, address: r.address, province: r.province };
+        // Khách ĐỔI SĐT mà giữ địa chỉ cũ (Customer 360): chỉ khi địa chỉ nối bằng ĐƠN của chính hội thoại / mã Facebook — nối bằng SĐT
+        // thì đổi số là mất căn cứ — và số mới nằm NGUYÊN trong câu cuối của khách (model không tự chế số).
+        const typedDigits = typeof input.phone === "string" ? input.phone.replace(/\D/g, "") : "";
+        const newPhone = r.trust !== "PHONE" && typedDigits.length >= 9 && ctx.lastUserText.replace(/\D/g, "").includes(typedDigits) ? String(input.phone).trim() : null;
+        fields = { name: typed.length >= 2 ? typed : r.name, phone: newPhone ?? r.phone, address: r.address, province: r.province };
         // Mức PHONE — và THREAD mà chính nó đã là địa chỉ máy điền (`returning.ts` trả về mức PHONE) — đều là dữ liệu chủ SĐT.
         saved = r.trust === "PHONE";
       }

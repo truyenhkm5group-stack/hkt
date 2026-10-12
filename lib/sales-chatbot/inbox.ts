@@ -716,7 +716,9 @@ export async function loadInboxThread(user: SessionUser, conversationId: unknown
   const canReply = canReplyTo(user);
   // KHÔNG đánh dấu đọc ở đây (trước 10/10/2026 tối: `staff_seen_at = now` — tin khách tới giữa câu đọc trên và câu ghi này bị coi là đã
   // đọc). Nạp khung chat chỉ ĐỌC; trình duyệt hiện xong mới gửi `readThrough` về `markInboxReadCore` (inbox-read.ts).
-  const phoneForHistory = cust?.phone ?? st.customer?.phone ?? conv.customerPhone ?? null;
+  // Customer 360 (11/10/2026, ca «Nga Ho Thien»): khung khách in «Chưa có SĐT» trong khi Pancake ĐÃ ghi nhận SĐT của hội thoại
+  // (`state.returning.phones` — bot vẫn đọc được). Màn của NHÂN VIÊN ⇒ dùng SĐT đó làm phương án cuối để đối chiếu lịch sử.
+  const phoneForHistory = cust?.phone ?? st.customer?.phone ?? conv.customerPhone ?? st.returning?.phones?.[0] ?? null;
   const [labelMap, allLabels, notes, history, feedback] = await Promise.all([labelsFor([conv.id]), listLabels(), notesFor(user, conv.id), customerHistory(cust?.id ?? null, phoneForHistory).catch(() => null), feedbackFor(conv.id).catch(() => [])]);
   return {
     ok: true,

@@ -93,6 +93,14 @@ function invariants(t: Map<string, GoldenTranscript>) {
   assert.match(unknownPolicy.final.handoffReason ?? "", /^Ngoài chính sách/, "chính sách chưa khai ⇒ chuyển người, không tự đặt");
   for (const x of t.values()) if (x.key !== know.key && x.key !== unknownPolicy.key) assert.ok(x.prompts.every((p) => !p.includes(KNOW)), `[${x.key}] không khai kiến thức ⇒ lời nhắc không có khối kiến thức`);
 
+  // CUSTOMER 360 (11/10/2026, ca «Nga Ho Thien»): «vẫn địa chỉ cũ» ⇒ máy chủ tra đơn cũ của CHÍNH hội thoại trước khi bot hỏi; lời
+  // nhắc đề xuất xác nhận (không xin lại); khách đồng ý ⇒ máy chủ điền địa chỉ của đơn cũ. Mọi hội thoại khác: không có khối nào.
+  const old = get("khach-cu-van-dia-chi-cu");
+  const oldPrompt = old.prompts[old.turns[0].rounds[0].prompt];
+  assert.ok(/TRA LỊCH SỬ/.test(oldPrompt) && /Shop CÓ đúng MỘT địa chỉ cũ/.test(oldPrompt) && /KHÔNG xin lại địa chỉ/.test(oldPrompt), "«vẫn địa chỉ cũ» ⇒ lời nhắc đề xuất xác nhận địa chỉ đơn cũ");
+  assert.ok(old.final.customer?.address.startsWith("Số 8 ngõ 2") && old.final.draft, "khách đồng ý ⇒ máy chủ điền địa chỉ đơn cũ, lên được đơn nháp");
+  for (const x of t.values()) if (x.key !== old.key) assert.ok(x.prompts.every((p) => !p.includes("TRA LỊCH SỬ")), `[${x.key}] không nói gì về thông tin cũ ⇒ không có khối TRA LỊCH SỬ`);
+
   for (const x of t.values())
     for (const turn of x.turns) assert.ok(!turn.rounds.some((r) => r.text === "[HẾT KỊCH BẢN]"), `[${x.key}] engine hỏi model nhiều vòng hơn kịch bản ở lượt «${turn.customer}»`);
 }
