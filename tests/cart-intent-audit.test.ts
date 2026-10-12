@@ -78,6 +78,10 @@ function testPure() {
   // Câu sửa tường minh ⇒ đơn 1kg KHÔNG phải trôi ý định.
   const fixed = auditConversation(convo([["user", txt(OPEN)], ["user", draft("Chả cá thu (2kg)", 1)], ["user", txt("đổi 1kg thôi")], ["user", draft("Chả cá thu (1kg)", 1)], ["assistant", txt("Dạ em sửa còn 1kg chả cá thu ạ.")]]), start);
   assert.equal(fixed.drift.length, 0);
+  // Khách có ý bớt mà không rõ số («bớt đi em») ⇒ bản sửa không chặn lượt đó ⇒ đơn 1kg sau đó KHÔNG đếm là trôi ý định.
+  assert.equal(auditConversation(convo([["user", txt(OPEN)], ["user", draft("Chả cá thu (2kg)", 1)], ["user", txt("bớt đi em")], ["user", draft("Chả cá thu (1kg)", 1)]]), start).drift.length, 0);
+  // P0-1 của review: câu nhiều lượng không làm script ném.
+  assert.doesNotThrow(() => auditConversation(convo([["user", txt(OPEN)], ["user", txt("thêm 1kg, thêm 1kg nữa")], ["user", txt("cho chị 2kg, à không 1kg")]]), start));
   // 2kg = 2 × gói 1kg ⇒ không hạ.
   assert.equal(auditConversation(convo([["user", txt(OPEN)], ["user", draft("Chả cá thu (1kg)", 2)]]), start).drift.length, 0);
 
