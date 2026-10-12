@@ -97,7 +97,7 @@ const STOP = new Set(
     "chot len don order de ok oke okie vang u uh roi khong ko k hok hong hem khoi phai chu ma cua loai dt sdt so dien thoai dia gium giup dum luon di hang nay kia do nao " +
     "the vay duoc dc can cai tong hay hoac moi ngon an truoc trc chiu bao nhieu bn gia sao dung tien het may tui goi hop set phan bich khay combo suat hu lo chiec cay " +
     "kg ky ki can gram gr g x da uhm oki shop xuong tru ha mai mot ve du qua lam it lan gio hom ngay toi sang chieu trua dem tuan thang tet mon huy gi vao ra " +
-    "nhen nghen nghe ne nhi hen nhaa ak day dau"
+    "nhen nghen nghe ne nhi hen nhaa ak day dau giu"
   ).split(" "),
 );
 const CUT_RE = /[\n,/;:+!?()[\]|.&]|\d/;
@@ -229,12 +229,18 @@ const PARTICLES = "(?: (?:nha|nhe|nhen|a|em|chi|anh|di|dau|day|luon|giup|cho|dum
  * «đổi / sửa địa chỉ · SĐT · giờ», «xuống nhà», «khỏi gọi», «không lấy hoá đơn», «bỏ vào túi». HÀM THUẦN.
  */
 export function foldCart(text: string): string {
-  const raw = text.toLowerCase();
-  const toks = raw.split(/[^\p{L}\p{N}%]+/u).filter(Boolean);
+  const orig = text.split(/[^\p{L}\p{N}%]+/u).filter(Boolean);
+  const toks = orig.map((t) => t.toLowerCase());
   const out = toks.map((t, i) => {
     const f = foldVi(t);
     if (f === "bo" && t !== "bỏ" && t !== "bo") return "box";
-    if (f === "huy" && t !== "hủy" && t !== "huỷ" && !(t === "huy" && foldVi(toks[i + 1] ?? "") === "don")) return "huyx";
+    // «huy» là TÊN NGƯỜI chỉ khi đứng sau anh / chị / em / bạn / cho / tên / người nhận, hoặc viết hoa «Huy» giữa câu; còn lại (kể cả
+    // gõ không dấu «huy cha muc», «thoi huy di») là «hủy».
+    if (f === "huy" && t !== "hủy" && t !== "huỷ") {
+      const prev = foldVi(toks[i - 1] ?? "");
+      const prev2 = `${foldVi(toks[i - 2] ?? "")} ${prev}`;
+      if (/^(?:anh|chi|em|ban|a|c|e|cho|ten|ong|ba|co|chu|bac)$/.test(prev) || prev2 === "nguoi nhan" || (i > 0 && orig[i] === "Huy")) return "huyx";
+    }
     return f;
   });
   return ` ${out.join(" ")} `
@@ -274,6 +280,17 @@ function leadingRun(s: string): string {
  * thường ngày («giảm giá», «đổi địa chỉ», «đổi trả», «ship cho bố», «khỏi gọi», «xuống nhà», «bỏ vào túi», «không lấy hoá đơn») KHÔNG
  * phải. Có mà không áp chắc được ⇒ tắt kiểm cứng của lượt, hỏi lại. HÀM THUẦN.
  */
+/**
+ * Câu có «chỉ» / «thôi» kiểu CHỌN LẠI món (không tính «thế thôi», «vậy thôi», hay «thôi» / «thôi em» / «thôi được rồi» / «thôi ok» đứng
+ * một mình — thường là đồng ý). HÀM THUẦN.
+ */
+export function pickCueOf(text: string): boolean {
+  const f = foldCart(text);
+  if (new RegExp(`^${THOI}(?: (?:em|a|nhe|nha|ok|oke|duoc|duoc roi|roi|vay|chi|anh|e))*$`).test(f)) return false;
+  const rest = f.replace(new RegExp(`(?:^| )(?:the|vay|lay vay|chi lay vay|the la) ${THOI}(?= |$)`, "g"), " ");
+  return new RegExp(`(?:^| )${THOI}(?: |$)`).test(rest) || /(?:^|[^\p{L}])chỉ(?![\p{L}])/u.test(text.toLowerCase());
+}
+
 export function hasEditCue(text: string, labels: readonly string[] = []): boolean {
   const f = foldCart(text);
   const has = (re: RegExp) => re.test(f);
@@ -391,7 +408,7 @@ export function applyCustomerCartMessage(cart: CartCommitment | undefined, text:
   const labels = items.map((x) => x.match);
   if (intent.kind === "AMBIGUOUS" || intent.kind === "QUESTION") {
     // Giỏ ≥ 2 món mà câu có «thôi» / «chỉ» chưa phân loại chắc ⇒ cũng không giữ cứng (khách đang chọn lại món).
-    const pickCue = items.length >= 2 && (/(?:^| )(?:thoi|thui|thoii+)(?: |$)/.test(foldCart(text).replace(/(?:^| )(?:the|vay|lay vay|chi lay vay|the la) (?:thoi|thui|thoii+)(?= |$)/g, " ")) || /(?:^|[^\p{L}])chỉ(?![\p{L}])/u.test(text.toLowerCase()));
+    const pickCue = items.length >= 2 && pickCueOf(text);
     if ((hasEditCue(text, labels) || pickCue) && items.some((x) => x.customerExplicit)) return relax("Khách có vẻ muốn sửa / bớt / huỷ nhưng câu chưa rõ món hay số lượng — hỏi lại khách muốn đổi thế nào; KHÔNG giữ cứng số cũ ở lượt này");
     return cart?.clarify ? { ...cart, clarify: null } : cart;
   }
@@ -427,6 +444,14 @@ export function applyCustomerCartMessage(cart: CartCommitment | undefined, text:
   const hits = new Map<string, number>();
   intent.amounts.forEach((_, k) => hits.set(keyOf(k), (hits.get(keyOf(k)) ?? 0) + 1));
   if (intent.kind !== "ADD" && [...hits.values()].some((n) => n > 1)) return cart ? relax("Khách nói nhiều số lượng cho cùng một món trong một câu — chưa chắc số nào, hỏi lại") : cart;
+  // Giỏ ≥ 2 món + «chỉ» / «thôi» kèm số của MỘT món («chỉ lấy 1kg chả mực thôi») ⇒ GIỮ đúng món đó với số mới, bỏ món kia; không
+  // chắc món nào ⇒ hỏi lại, không chặn (review vòng 3).
+  if (items.length >= 2 && (intent.kind === "SET" || intent.kind === "ORDER") && !intent.tentative && pickCueOf(text)) {
+    const t = targets[0];
+    if (intent.amounts.length !== 1 || typeof t !== "number" || !intent.amounts[0].label) return relax("Khách chọn lại món («chỉ / thôi») nhưng chưa rõ giữ món nào — hỏi lại");
+    const a = intent.amounts[0];
+    return done([{ ...items[t], quantity: a.value, unit: a.unit, sourceMessageId: turn, customerExplicit: true, confidence: "HIGH" }]);
+  }
   const next = items.map((x) => ({ ...x }));
   const added: CommittedItem[] = [];
   let changed = false;
@@ -501,7 +526,8 @@ function holdReason(botText: string, cart: CartCommitment, customerText: string)
   if (smaller && !mentionsCommitted) return "DOWNSELL";
   // Hỏi số lượng của món THÊM («lấy thêm ruốc bao nhiêu gói?») là mời thêm, không phải hỏi lại số đã biết.
   if (REASK_RE.test(f) && !/(?:^| )them(?: |$)/.test(f) && (botText.includes("?") || /(?:^| )(?:a|ak|nhe|nha|vay)$/.test(f))) return "REASK";
-  if (said.length >= 2 && /(?:^| )hay(?: |$)/.test(f) && botText.includes("?") && said.every((a) => aboutItem(a))) return "REASK";
+  // «1kg hay 2kg?» khi khách đã chốt 2kg là hỏi lại; «2kg hay 3kg để được giảm?» là mời mua NHIỀU hơn — không thay.
+  if (said.length >= 2 && /(?:^| )hay(?: |$)/.test(f) && botText.includes("?") && said.every((a) => aboutItem(a)) && said.some((a) => a.value < single!.quantity)) return "REASK";
   return null;
 }
 
