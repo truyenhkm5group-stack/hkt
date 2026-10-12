@@ -2244,3 +2244,4 @@
 {"at":"2026-10-12T12:55:27.415Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#820 @ ecae99d25aaf · Script ops CHỈ ĐỌC (ERP_READ_ONLY + hỏi lại phiên, getDbForInspection, SQL thô chỉ select), MÃ HOÁ, xả stdout; khai ops đủ 4 chỗ"}
 {"at":"2026-10-12T13:03:04.226Z","actor":"DESKTOP-56TH98Y:wt-sticky-cart","kind":"HANDOFF","mission":"sticky-cart-intent","detail":"fix/sticky-cart-intent @ 3f7858f1ab43 · 16 lệnh kiểm thử"}
 {"at":"2026-10-12T13:24:29.967Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"cart-intent-audit","detail":"fix/cart-intent-audit @ 346aab79b1b5 · 2 lệnh kiểm thử"}
+{"at":"2026-10-12T13:24:50.851Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#818 @ 346aab79b1b5 · ce54c899 + gộp main: chỉ hợp danh sách ops-vps.yml"}
