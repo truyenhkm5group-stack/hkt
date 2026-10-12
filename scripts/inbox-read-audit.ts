@@ -32,6 +32,7 @@ import "dotenv/config";
 import { and, desc, eq, inArray, ne, or, sql } from "drizzle-orm";
 import { getDbForInspection, schema, type Db } from "@/db";
 import { findOrganization } from "@/lib/platform/organizations";
+import { withOrganization } from "@/lib/platform/context";
 import type { AiBlock } from "@/lib/ai/provider";
 import { inboundSide, webSideOf } from "@/lib/sales-chatbot/inbox";
 import {
@@ -373,6 +374,22 @@ export async function measureLastInboundDrift(db: Db): Promise<{ hasColumn: bool
   };
 }
 
+type DbHolder = { __erpDb?: { orgs?: Map<string, { db?: Db }> } };
+
+/**
+ * Gắn handle CHẨN ĐOÁN (chỉ đọc, không migrate) vào sổ handle tổ chức của db/index.ts để `getDb()` trong `withOrganization` dùng nó
+ * — cùng cách `scripts/inbox-perf-probe.ts::bindReadOnlyOrgHandle`. Đã có handle sống ⇒ để nguyên. Cấu trúc sổ đổi ⇒ ném (không lặng lẽ
+ * đi đường migrate, vốn hỏng ngay dưới `ERP_READ_ONLY=1`).
+ */
+async function bindReadOnlyOrgHandle(org: { code: string; isHome: boolean }, db: Db): Promise<void> {
+  if (org.isHome) return;
+  const holder = (globalThis as unknown as DbHolder).__erpDb;
+  if (!holder || typeof holder !== "object") throw new Error("Không thấy sổ handle CSDL của db/index.ts — không gắn được handle chỉ đọc; dừng.");
+  const orgs = (holder.orgs ??= new Map());
+  if (!(orgs instanceof Map)) throw new Error("Sổ handle CSDL tổ chức đổi cấu trúc — không gắn được handle chỉ đọc; dừng.");
+  if (!orgs.get(org.code)?.db) orgs.set(org.code, { db });
+}
+
 async function main() {
   const args = parseReadAuditArgs(process.argv.slice(2));
   if ("error" in args) {
@@ -391,7 +408,12 @@ async function main() {
     process.exit(1);
   }
   const now = new Date();
-  const { rows, ids, hasReadsTable } = await collectReadAudit(db, args);
+  // Bản TS của #803 (`latestTurnStateOf`) đọc qua `getDb()` của NGỮ CẢNH tổ chức. Script không có ngữ cảnh ⇒ `getDb()` là CSDL NHÀ,
+  // không thấy hội thoại nào của tổ chức ⇒ `null` ⇒ bị tính «đã xử lý»: lượt 3.000 hội thoại HSLC 12/10/2026 báo 485/485 FALSE_UNREAD
+  // «còn lệch sau đọc lại» chỉ vì đọc nhầm CSDL. Gắn CHÍNH handle chỉ đọc này vào chỗ `getDb()` tìm handle của tổ chức (không migrate,
+  // không dọn) rồi chạy trong `withOrganization` — hai dạng của định nghĩa đọc CÙNG một CSDL.
+  await bindReadOnlyOrgHandle({ code: org.code, isHome: org.isHome }, db);
+  const { rows, ids, hasReadsTable } = await withOrganization(org.code, () => collectReadAudit(db, args));
   const tot = auditReadRows(rows);
   const li = await measureLastInboundDrift(db);
 

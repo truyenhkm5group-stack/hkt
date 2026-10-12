@@ -1,6 +1,7 @@
 import { and, asc, desc, eq, inArray, isNotNull, isNull, ne, or, sql, type SQL } from "drizzle-orm";
 import { z } from "zod";
 import { getDb, schema } from "@/db";
+import { compatTableColumns } from "@/lib/db/serve-compat-columns";
 import { listChannelPages } from "@/lib/connectors/service";
 import { loadTransportFacts, MESSENGER_DIRECT_KEY, transportOwnerOf, type TransportFacts } from "@/lib/sales-chatbot/channel-ownership";
 import type { AiBlock } from "@/lib/ai/provider";
@@ -68,7 +69,7 @@ type StaffImageType = (typeof STAFF_IMAGE_TYPES)[number];
 import { sendBotText, sendPageImages } from "@/lib/sales-chatbot/messenger";
 import { draftCopilotSuggestion, loadModeConfig } from "@/lib/sales-chatbot/operating-mode";
 import { feedbackFor } from "@/lib/sales-chatbot/inbox-feedback";
-import { inboxSearchCondition } from "@/lib/sales-chatbot/inbox-search";
+import { inboxSearchCondition, inboxSearchRankSql } from "@/lib/sales-chatbot/inbox-search";
 import { CUSTOMER_LEVELS, parseCustomerLevel, type CustomerLevel } from "@/lib/sales-chatbot/levels-shared";
 import type { ChatState } from "@/lib/sales-chatbot/tools";
 import { assessCustomerRisk } from "@/lib/alerts/risk";
@@ -246,9 +247,11 @@ export function webSideOf(role: string, text: string): TimelineSide {
  * Khoá cuối là `id` để hai hội thoại cùng mốc không đổi chỗ giữa hai lượt tải (phân trang ổn định). Hội thoại ĐANG MỞ thành «đã
  * đọc» không nhảy chỗ khi đang đọc: trình duyệt giữ nó tại chỗ (`keepActiveInPlace`), chuyển hội thoại khác thì nó về vị trí này.
  */
-export function inboxOrderBy(filter: InboxFilter, unread: SQL<boolean>): SQL[] {
-  if (filter === "UNANSWERED") return [asc(schema.salesChatConversations.lastCustomerAt), asc(schema.salesChatConversations.id)];
-  return [sql`${unread} desc`, desc(INBOX_ACTIVITY_SQL), desc(schema.salesChatConversations.id)];
+export function inboxOrderBy(filter: InboxFilter, unread: SQL<boolean>, exactFirst: SQL | null = null): SQL[] {
+  // Ô tìm là một SĐT đủ ⇒ hội thoại có SĐT ghi nhận BẰNG ĐÚNG số đó đứng đầu, rồi mới tới thứ tự thường (inbox-search.ts::inboxSearchRankSql).
+  const lead = exactFirst ? [sql`(${exactFirst}) desc`] : [];
+  if (filter === "UNANSWERED") return [...lead, asc(schema.salesChatConversations.lastCustomerAt), asc(schema.salesChatConversations.id)];
+  return [...lead, sql`${unread} desc`, desc(INBOX_ACTIVITY_SQL), desc(schema.salesChatConversations.id)];
 }
 
 /** Danh sách hội thoại của hộp thư (tối đa 100) — lọc theo việc cần làm, kênh, tên / SĐT. Không kéo nội dung tin (chỉ một dòng xem trước). */
@@ -373,7 +376,7 @@ export async function listInbox(
     .leftJoin(cu, eq(cu.id, c.customerId))
     .leftJoin(u, eq(u.id, c.assigneeUserId))
     .where(where)
-    .orderBy(...inboxOrderBy(q.filter, sql<boolean>`"unread_flag"`))
+    .orderBy(...inboxOrderBy(q.filter, sql<boolean>`"unread_flag"`, inboxSearchRankSql(q.q)))
     .limit(q.limit);
 
   /*
@@ -546,7 +549,7 @@ type ConvRow = typeof schema.salesChatConversations.$inferSelect;
 async function loadConv(id: unknown): Promise<ConvRow | null> {
   if (typeof id !== "string" || !id || id.length > 100) return null;
   const db = await getDb();
-  const [row] = await db.select().from(schema.salesChatConversations).where(eq(schema.salesChatConversations.id, id)).limit(1);
+  const [row] = await db.select(compatTableColumns(schema.salesChatConversations)).from(schema.salesChatConversations).where(eq(schema.salesChatConversations.id, id)).limit(1);
   return row && row.channel !== "TEST" ? row : null;
 }
 

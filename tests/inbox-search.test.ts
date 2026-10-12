@@ -27,8 +27,25 @@ import { fanpageVisitorKey, PAGE_REPLY } from "@/lib/sales-chatbot/fanpage";
 import { listInbox } from "@/lib/sales-chatbot/inbox";
 import { inboxDisplayRows } from "@/lib/sales-chatbot/inbox-read-shared";
 import { foldSql, inboxSearchSql, parseInboxSearch } from "@/lib/sales-chatbot/inbox-search";
-import { activeOutsideList, foldSearchText, inboxEmptyHint, inboxListKey, shownForList } from "@/lib/sales-chatbot/inbox-search-shared";
-import type { InboxFilter, InboxFilterState, InboxRow } from "@/lib/sales-chatbot/inbox-shared";
+import {
+  activeOutsideList,
+  dropSelectionOnSearch,
+  foldSearchText,
+  INBOX_SEARCH_DEBOUNCE_MS,
+  inboxActiveChip,
+  inboxChipHref,
+  inboxEmptyHint,
+  inboxFilterLabels,
+  inboxListKey,
+  inboxListQuery,
+  inboxQueryState,
+  inboxScopeHref,
+  inboxSearchHref,
+  inboxSearchMode,
+  shouldLiveSearch,
+  shownForList,
+} from "@/lib/sales-chatbot/inbox-search-shared";
+import { inboxParams, type InboxFilter, type InboxFilterState, type InboxRow } from "@/lib/sales-chatbot/inbox-shared";
 
 const ORG_A = "tim-hop-thu-a";
 const ORG_B = "tim-hop-thu-b";
@@ -91,6 +108,79 @@ function testPure() {
   console.log("  ✓ thuần: SĐT 6 dạng = 1 lõi · tên bỏ dấu/khoảng trắng · mã đơn · gợi ý «Tất cả» · danh sách mới không mang hội thoại cũ");
 }
 
+/** URL ⇒ trạng thái, ĐÚNG cách `page.tsx` đọc (phần cần cho bài này) — để soát vòng URL → trạng thái → URL. */
+function stateOf(href: string): InboxFilterState {
+  const p = new URL(href, "http://x").searchParams;
+  return { ...STATE, filter: (p.get("f") as InboxFilter | null) ?? "ALL", q: p.get("q") ?? "", page: p.get("pg"), handler: p.get("xl") === "nguoi" ? "HUMAN" : p.get("xl") === "ai" ? "AI" : null, assignee: p.get("nv"), selected: p.get("c"), searchScope: p.get("pv") === "loc" ? "FILTER" : null };
+}
+
+function testGlobalSearchPure() {
+  // 1 · Đang ở «Tin khách chưa đọc» mà gõ SĐT ⇒ tìm TOÀN hộp thư: không thẻ / bộ lọc nào áp ngầm.
+  const unread: InboxFilterState = { ...STATE, filter: "UNREAD" };
+  const searching = stateOf(inboxSearchHref(unread, " 0368 000 111 ", null));
+  assert.equal(searching.q, "0368 000 111", "ô tìm vào URL (cắt hai đầu)");
+  assert.equal(searching.filter, "UNREAD", "thẻ cũ VẪN nằm trong URL (để xoá ô tìm là về đúng nó)");
+  assert.equal(inboxSearchMode(searching), "GLOBAL", "mặc định tìm toàn hộp thư");
+  assert.equal(inboxQueryState(searching).filter, "ALL", "thẻ «chưa đọc» KHÔNG áp khi đang tìm");
+  assert.equal(inboxActiveChip(searching), "ALL", "không thẻ nhanh nào hiện như đang bật");
+  const busy: InboxFilterState = { ...STATE, q: "0900111222", filter: "NEEDS_HUMAN", handler: "HUMAN", assignee: "u1", page: "p2", channel: "ZALO", phone: "HAS", level: "PHONE_ONLY", period: "7D", label: "lb1" };
+  const eff = inboxQueryState(busy);
+  assert.deepEqual([eff.filter, eff.handler, eff.assignee, eff.page, eff.channel, eff.phone, eff.level, eff.period, eff.label], ["ALL", null, null, null, null, null, null, null, null], "cần người / AI-người / người phụ trách / page / kênh / SĐT / level / thời gian / nhãn: KHÔNG áp ngầm");
+  assert.deepEqual(inboxListQuery(busy), { filter: "ALL", channel: null, q: "0900111222", label: null, page: null, phone: null, level: null, assignee: null, period: null, from: null, to: null, limit: 100, handler: null }, "tham số listInbox của trang = toàn hộp thư");
+  assert.deepEqual(inboxFilterLabels(busy, { p2: "Page Hai" }), ["Cần người", "Page Page Hai", "Kênh Zalo OA", "Người đang xử lý", "Nhân viên phụ trách", "Có SĐT", "Level khách", "Thời gian tin cuối", "Nhãn"], "tên các bộ lọc đang tạm bỏ qua");
+
+  // 2 · Chọn TƯỜNG MINH «Chỉ tìm trong bộ lọc hiện tại» ⇒ UNREAD vẫn giữ.
+  const scoped = stateOf(inboxScopeHref(searching, "FILTER", null));
+  assert.equal(scoped.searchScope, "FILTER");
+  assert.equal(inboxSearchMode(scoped), "FILTERED");
+  assert.equal(inboxQueryState(scoped).filter, "UNREAD", "trong bộ lọc: UNREAD giữ nguyên");
+  assert.equal(inboxListQuery(scoped).filter, "UNREAD");
+  assert.equal(inboxActiveChip(scoped), "UNREAD");
+  // Gõ tiếp trong phạm vi đã chọn ⇒ phạm vi giữ; «Tìm toàn hộp thư» ⇒ bỏ phạm vi.
+  assert.equal(stateOf(inboxSearchHref(scoped, "0368", null)).searchScope, "FILTER", "đang tìm trong bộ lọc mà gõ tiếp ⇒ giữ lựa chọn");
+  assert.equal(inboxSearchMode(stateOf(inboxScopeHref(scoped, "GLOBAL", null))), "GLOBAL");
+  // «Trong bộ lọc» mà không có bộ lọc nào ⇒ vẫn là toàn hộp thư (không có gì để thu hẹp).
+  assert.equal(inboxSearchMode({ ...STATE, q: "x", searchScope: "FILTER" }), "GLOBAL");
+
+  // 3 · Xoá ô tìm ⇒ về ĐÚNG bộ lọc trước đó, và phạm vi không lưu sang lần tìm sau.
+  assert.equal(inboxSearchHref(searching, "", null), "/ai/sales-chatbot/inbox?f=UNREAD", "xoá ô tìm (toàn hộp thư) ⇒ về «chưa đọc»");
+  assert.equal(inboxSearchHref(scoped, "   ", null), "/ai/sales-chatbot/inbox?f=UNREAD", "xoá ô tìm (trong bộ lọc) ⇒ về «chưa đọc», bỏ pv");
+  const restored = stateOf(inboxSearchHref(scoped, "", null));
+  assert.equal(inboxSearchMode(restored), "NONE");
+  assert.equal(inboxQueryState(restored).filter, "UNREAD", "bộ lọc áp lại như trước khi tìm");
+  assert.equal(stateOf(inboxSearchHref(restored, "lan", null)).searchScope, null, "lần tìm MỚI lại mặc định toàn hộp thư");
+  assert.equal(inboxParams({ ...STATE, filter: "UNREAD", searchScope: "FILTER" }).toString(), "f=UNREAD", "không có ô tìm ⇒ pv không bao giờ vào URL");
+  // Hội thoại đang mở (URL sống) đi theo lần tìm; về đầu danh sách.
+  const withSel = new URL(inboxSearchHref({ ...unread, limit: 300 }, "lan", "conv-9"), "http://x").searchParams;
+  assert.equal(withSel.get("c"), "conv-9");
+  assert.equal(withSel.get("n"), null, "đổi ô tìm ⇒ về đầu danh sách");
+
+  // 4 · Thẻ nhanh khi đang tìm toàn hộp thư = chọn tường minh tìm trong thẻ đó; không tìm ⇒ như cũ.
+  const chip = stateOf(inboxChipHref(searching, "UNANSWERED"));
+  assert.deepEqual([chip.filter, chip.searchScope, inboxSearchMode(chip)], ["UNANSWERED", "FILTER", "FILTERED"]);
+  assert.equal(inboxChipHref(unread, "UNREAD"), "/ai/sales-chatbot/inbox", "không tìm: bấm lại thẻ đang bật ⇒ «Tất cả»");
+  assert.equal(inboxChipHref(scoped, "UNREAD"), "/ai/sales-chatbot/inbox?q=0368+000+111&pv=loc", "trong bộ lọc: bấm lại thẻ đang bật ⇒ bỏ thẻ");
+
+  // 5 · Danh sách: tìm toàn hộp thư từ «chưa đọc» hay từ «Tất cả» là CÙNG một danh sách.
+  assert.equal(inboxListKey(searching), inboxListKey({ ...STATE, q: "0368 000 111" }));
+  assert.notEqual(inboxListKey(scoped), inboxListKey(searching), "đổi phạm vi ⇒ danh sách khác");
+
+  // 6 · Hội thoại đang mở chỉ giữ khi nằm trong kết quả tìm.
+  const rs = [{ id: "a" }, { id: "b" }];
+  assert.equal(dropSelectionOnSearch("0900", "x", rs, 2), true, "không có trong kết quả (đủ mọi kết quả) ⇒ bỏ chọn");
+  assert.equal(dropSelectionOnSearch("0900", "a", rs, 2), false, "có trong kết quả ⇒ giữ");
+  assert.equal(dropSelectionOnSearch("0900", "x", rs, 250), false, "kết quả quá trang đầu ⇒ không biết ⇒ không bỏ (chỉ báo)");
+  assert.equal(dropSelectionOnSearch("", "x", rs, 2), false, "không tìm ⇒ không đụng tới hội thoại đang mở");
+  assert.equal(dropSelectionOnSearch("0900", null, rs, 2), false);
+
+  // 7 · Gõ là tìm: debounce ~300 ms, từ 2 ký tự; xoá ô tìm thì tìm lại ngay.
+  assert.equal(INBOX_SEARCH_DEBOUNCE_MS, 300);
+  assert.equal(shouldLiveSearch("a"), false);
+  assert.equal(shouldLiveSearch("an"), true);
+  assert.equal(shouldLiveSearch("  "), true, "xoá ô tìm ⇒ tự về bộ lọc cũ");
+  console.log("  ✓ thuần: ô tìm = toàn hộp thư (bỏ 9 loại bộ lọc ngầm) · «chỉ trong bộ lọc» giữ UNREAD · xoá ô tìm về đúng bộ lọc · thẻ khi đang tìm · bỏ chọn ngoài kết quả · debounce 300 ms");
+}
+
 function testSource() {
   const inbox = readFileSync("lib/sales-chatbot/inbox.ts", "utf8");
   assert.match(inbox, /const searchCond = await inboxSearchCondition\(q\.q\);/, "listInbox nối ĐÚNG một điểm sang inbox-search.ts");
@@ -102,7 +192,16 @@ function testSource() {
   assert.match(list, /shownForList\(shown\.current, listKey\)/, "bản đã hiện gắn với danh tính danh sách");
   assert.match(list, /data-testid="inbox-active-outside"/);
   const page = readFileSync("app/(dashboard)/ai/sales-chatbot/inbox/page.tsx", "utf8");
-  assert.match(page, /inboxEmptyHint\(filter, list\.counts, q\)/, "gợi ý đọc CÙNG câu đếm của trang");
+  assert.match(page, /inboxEmptyHint\(eff\.filter, list\.counts, q\)/, "gợi ý đọc CÙNG câu đếm của trang (theo bộ lọc THẬT SỰ áp)");
+  // Ô tìm toàn hộp thư: trang đi qua ĐÚNG một đường (inboxListQuery ⇒ inboxQueryState), không tự chép bộ lọc vào listInbox.
+  assert.match(page, /listInbox\(user, inboxListQuery\(state\)\)/, "trang gọi listInbox bằng inboxListQuery(state)");
+  assert.match(page, /one\("pv"\) === "loc"/, "phạm vi «trong bộ lọc» chỉ khi người dùng chọn (pv=loc)");
+  assert.match(filters, /window\.setTimeout\(\(\) => search\(value, how\), INBOX_SEARCH_DEBOUNCE_MS\)/, "gõ là tìm (debounce)");
+  assert.match(filters, /type="submit"[^>]*aria-label="Tìm"/, "nút «Tìm» rõ ràng (Enter cũng gửi form)");
+  assert.match(filters, /data-testid="inbox-search-scope"/, "dòng «Đang tìm trong toàn hộp thư»");
+  assert.match(filters, /Chỉ tìm trong bộ lọc hiện tại/);
+  assert.match(filters, /data-testid="inbox-search-loading"/, "trạng thái đang tải");
+  assert.match(list, /dropSelectionOnSearch\(state\.q, activeId, display, total\)/, "bỏ chọn hội thoại không nằm trong kết quả");
   console.log("  ✓ mã nguồn: một điểm nối · ô tìm giữ c sống · danh sách theo khoá · gợi ý từ cùng câu đếm");
 }
 
@@ -252,6 +351,42 @@ async function testDb() {
       await only("hoa mai", [HOSO, HOSO2, KHAC_PAGE], "tìm + người phụ trách «chưa ai cầm»", { assignee: "none" });
       await only("hoa mai", [], "tìm + Của tôi", { filter: "MINE" });
 
+      // 7b · Ô TÌM = TOÀN HỘP THƯ (P0 inbox-search-global 12/10/2026) — đi ĐÚNG đường của trang: trạng thái URL ⇒ inboxListQuery ⇒ listInbox.
+      const viaPage = async (s: Partial<InboxFilterState>) => {
+        const r = await listInbox(admin, inboxListQuery({ ...STATE, limit: 500, ...s }), new Date(T0 + 1000));
+        assert.ok(r.ok, JSON.stringify(r));
+        return r;
+      };
+      // Từ «Tin khách chưa đọc», tìm SĐT của hội thoại ĐÃ ĐỌC (HOSO: tin cuối là AI, người xem đã đọc) ⇒ PHẢI ra; ba cách gõ ⇒ CÙNG khách.
+      for (const v of ["0900111222", "+84900111222", "0900 111 222"]) {
+        const r = await viaPage({ filter: "UNREAD", q: v });
+        assert.deepEqual(r.rows.map((x) => x.id), [HOSO], `từ «chưa đọc», «${v}» ⇒ ra hội thoại ĐÃ ĐỌC`);
+        assert.equal(r.total, 1);
+      }
+      // Bộ lọc khác cũng KHÔNG áp ngầm (cần người · người xử lý · chưa ai nhận · page khác).
+      assert.deepEqual((await viaPage({ filter: "NEEDS_HUMAN", handler: "HUMAN", assignee: "none", page: PAGE2, q: "0900111222" })).rows.map((x) => x.id), [HOSO], "cần người / người xử lý / page khác không thu hẹp lần tìm");
+      // «Chỉ tìm trong bộ lọc hiện tại» (pv=loc) ⇒ UNREAD giữ nguyên ⇒ hội thoại đã đọc KHÔNG ra; gợi ý «Tất cả» đúng số.
+      const scopedR = await viaPage({ filter: "UNREAD", q: "0900111222", searchScope: "FILTER" });
+      assert.deepEqual(scopedR.rows.map((x) => x.id), [], "trong bộ lọc «chưa đọc»: hội thoại đã đọc không ra");
+      assert.equal(scopedR.counts.ALL, 1);
+      // Xoá ô tìm ⇒ bộ lọc cũ áp lại: «chưa đọc» không có HOSO.
+      const back = await viaPage({ filter: "UNREAD", q: "" });
+      assert.ok(!back.rows.some((x) => x.id === HOSO), "xoá ô tìm ⇒ về «chưa đọc» (HOSO đã đọc không có)");
+      assert.ok(back.rows.some((x) => x.id === HOSO2), "«chưa đọc» lại có hội thoại chưa đọc");
+
+      // 7c · KHỚP SĐT CHÍNH XÁC XẾP ĐẦU: EXACT ghi SĐT đó (đã đọc, cũ) · MENTION chỉ NHẮC số trong tin (chưa đọc, mới hơn — thứ tự thường đứng trước).
+      const EXACT = await mk({ thread: "exact", name: "Khách Khớp Đúng", msgs: [{ side: "C", text: "cho chị hỏi", ago: 120 * MIN }, reply(119 * MIN)], read: true });
+      await db.update(c).set({ customerPhone: "0900 246 810" }).where(eq(c.id, EXACT));
+      const MENTION = await mk({ thread: "mention", name: "Khách Nhắc Số", msgs: [{ side: "C", text: "chị nhắn giúp số 0900246810 của bạn chị", ago: 2 * MIN }] });
+      for (const v of ["0900246810", "+84900246810", "0900 246 810"]) {
+        assert.deepEqual((await viaPage({ q: v })).rows.map((x) => x.id), [EXACT, MENTION], `«${v}»: khớp SĐT chính xác đứng đầu, chỉ-nhắc-số đứng sau`);
+        assert.deepEqual((await viaPage({ filter: "UNREAD", q: v })).rows.map((x) => x.id), [EXACT, MENTION], `«${v}» từ «chưa đọc»: vẫn toàn hộp thư, khớp chính xác đầu`);
+      }
+      assert.deepEqual((await viaPage({ filter: "UNANSWERED", searchScope: "FILTER", q: "0900246810" })).rows.map((x) => x.id), [MENTION], "trong «Chờ trả lời»: chỉ hội thoại đang chờ");
+      // Số DỞ (không phải SĐT đủ) ⇒ không xếp hạng — thứ tự thường (chưa đọc trước).
+      assert.deepEqual((await viaPage({ q: "246810" })).rows.map((x) => x.id), [MENTION, EXACT], "số dở: thứ tự thường");
+      // EXACT / MENTION ở lại: không khớp ô tìm nào của các bước sau (SĐT / tên riêng).
+
       // 8 · UNREAD rỗng ⇒ gợi ý «Tất cả» ĐÚNG số (ca của chủ shop).
       const unread = await find("0900111222", { filter: "UNREAD" });
       assert.equal(unread.rows.length, 0, "UNREAD rỗng là ĐÚNG (tin cuối là câu trả lời của AI — đã xử lý)");
@@ -318,6 +453,7 @@ async function testDb() {
 export async function testInboxSearch() {
   console.log("Hộp thư — tìm kiếm + bộ lọc (inbox-search):");
   testPure();
+  testGlobalSearchPure();
   testSource();
   await testDb();
 }
