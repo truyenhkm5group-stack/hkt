@@ -1,0 +1,8 @@
+{
+  "pr": 822,
+  "sha": "75c0b8cdf93819fb3e750ecae82b2854cabbcc6f",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-12T21:43:45.267Z",
+  "note": "Chỉ đồng bộ bản sao luật trong script audit CHỈ ĐỌC với cart-commitment.ts @ #819 + 5 dòng test"
+}
