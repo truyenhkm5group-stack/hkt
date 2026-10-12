@@ -2168,3 +2168,4 @@
 {"at":"2026-10-12T02:57:22.817Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"inbox-read-audit-recheck","detail":"fix/inbox-read-audit-recheck @ 0b5fca9802ed · 3 lệnh kiểm thử"}
 {"at":"2026-10-12T02:58:00.083Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"inbox-read-audit-recheck","detail":"#812 cho fix/inbox-read-audit-recheck @ 0b5fca9802ed"}
 {"at":"2026-10-12T02:58:58.171Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"tech-worker-onboarding-gap","detail":"#811 @ cc1129cb489a → 7ed86a4b31e9 (MERGE_NOW · LOW · gates success)"}
+{"at":"2026-10-12T03:01:34.692Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"acceptance-s12-port","detail":"#810 @ c825fc78ec25 → 656dfd00d3f8 (MERGE_ISOLATED · HIGH · gates success)"}

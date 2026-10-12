@@ -3,7 +3,7 @@
   "mission_id": "acceptance-s12-port",
   "title": "ACCEPTANCE.md: mục bảo mật S1–S3 thành §12 (port #750 lên main hiện tại)",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -24,9 +24,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-12T02:15:59.082Z",
-  "updated_at": "2026-10-12T02:16:55.181Z",
+  "updated_at": "2026-10-12T03:01:34.638Z",
   "last_heartbeat": "2026-10-12T02:16:20.027Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#810 → 656dfd00d3f85fe93f822e8982b46d883ece7a75"
+  },
   "handoff": {
     "branch": "docs/acceptance-s12-port",
     "sha": "c825fc78ec25ed1ea304d05deadf1efadc1b866d",
