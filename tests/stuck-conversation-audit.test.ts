@@ -153,9 +153,11 @@ async function testDb() {
       const b = await collectOwnership({ code: ORG, isHome: false }, now);
       assert.ok(b.ok, `B/C đọc được bằng lib #800: ${JSON.stringify(b)}`);
       if (b.ok) {
-        assert.equal(b.silent, 3, "cùng tập «AI im» với A");
-        assert.equal(b.person + b.department + b.unowned, 3);
-        assert.ok(b.unqueued >= 2, "k2 · k3 chưa vào hàng đợi");
+        // Sau bản vá đồng hồ AI hỏng (HOTFIX 12/10/2026 — aiDownStartedAt): k2 hỏng 300 phút trước KHÔNG còn là «AI im» dù updated_at
+        // mới bị đẩy — đúng là nhóm AI_DOWN_CLOCK_PUSHED mà phần A (SQL thô, luật cũ) đếm ra. Tập «AI im» của lib = A trừ nhóm đó.
+        assert.equal(b.silent, a.counts.silent - a.counts.byClass.AI_DOWN_CLOCK_PUSHED.total, "tập «AI im» của lib = A trừ AI hỏng bị đẩy đồng hồ");
+        assert.equal(b.person + b.department + b.shared + b.unowned, b.silent);
+        assert.ok(b.unqueued >= 1, "k3 chưa vào hàng đợi");
         assert.ok(b.viewers >= 1, "chủ shop xem được hộp thư");
       }
 

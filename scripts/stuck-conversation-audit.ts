@@ -294,7 +294,7 @@ export async function collectSilent(db: Db, now: Date): Promise<{ counts: StuckC
   return { counts, samples, reasons };
 }
 
-export type OwnershipMeasure = { ok: true; silent: number; person: number; department: number; unowned: number; byReason: Record<string, number>; responders: number; viewers: number; departmentCode: string; overdue: number; stale: number; queued: number; unqueued: number } | { ok: false; why: string };
+export type OwnershipMeasure = { ok: true; silent: number; person: number; department: number; shared: number; unowned: number; byReason: Record<string, number>; responders: number; viewers: number; departmentCode: string; overdue: number; stale: number; queued: number; unqueued: number } | { ok: false; why: string };
 
 /** B + C — đọc bằng lib #800 trong ngữ cảnh tổ chức (handle chỉ đọc). Thiếu hàm trên image ⇒ CHƯA ĐO ĐƯỢC. */
 export async function collectOwnership(org: { code: string; isHome: boolean }, now: Date): Promise<OwnershipMeasure> {
@@ -302,7 +302,7 @@ export async function collectOwnership(org: { code: string; isHome: boolean }, n
     await bindReadOnlyOrgHandle(org);
     return await withOrganization(org.code, async () => {
       const routing = (await import("@/lib/sales-chatbot/handoff-routing")) as Record<string, unknown>;
-      const count = routing.countUnownedHandoffs as ((now: Date) => Promise<{ silent: number; person: number; department: number; unowned: number; byReason: Record<string, number>; responders: number; departmentCode: string }>) | undefined;
+      const count = routing.countUnownedHandoffs as ((now: Date) => Promise<{ silent: number; person: number; department: number; shared?: number; unowned: number; byReason: Record<string, number>; responders: number; departmentCode: string }>) | undefined;
       const items = routing.handoffWorkItems as ((now: Date) => Promise<{ createdAt: Date; assignee: unknown; tags: string[] }[]>) | undefined;
       const ctxOf = routing.handoffViewContext as (() => Promise<{ cfg: unknown }>) | undefined;
       const dueOf = routing.handoffDueAt as ((queuedAt: Date, cfg: unknown) => Date | null) | undefined;
@@ -320,7 +320,7 @@ export async function collectOwnership(org: { code: string; isHome: boolean }, n
         overdue += 1;
         if (!it.assignee && now.getTime() - due.getTime() > 24 * 3_600_000) stale += 1;
       }
-      return { ok: true as const, silent: u.silent, person: u.person, department: u.department, unowned: u.unowned, byReason: u.byReason, responders: u.responders, viewers: viewers.length, departmentCode: u.departmentCode, overdue, stale, queued, unqueued: list.length - queued };
+      return { ok: true as const, silent: u.silent, person: u.person, department: u.department, shared: u.shared ?? 0, unowned: u.unowned, byReason: u.byReason, responders: u.responders, viewers: viewers.length, departmentCode: u.departmentCode, overdue, stale, queued, unqueued: list.length - queued };
     });
   } catch (e) {
     return { ok: false, why: e instanceof Error ? e.message.slice(0, 160) : String(e).slice(0, 160) };
@@ -475,7 +475,7 @@ async function oneOrg(org: { code: string; isHome: boolean }, args: StuckArgs, n
 
     const b = await collectOwnership(org, now);
     if (b.ok) {
-      tomTat(`${org.code} B · cần người ${b.silent}: người cầm ${b.person} · hàng đợi phòng ${b.department} · KHÔNG CHỦ ${b.unowned} (${Object.entries(b.byReason).map(([k, v]) => `${k} ${v}`).join(" · ")}) · phòng ${b.departmentCode} có ${b.responders} người xem được hộp thư · cả tổ chức ${b.viewers}`);
+      tomTat(`${org.code} B · cần người ${b.silent}: người cầm ${b.person} · hàng đợi phòng ${b.department} · hàng đợi chung ${b.shared} · KHÔNG CHỦ ${b.unowned} (${Object.entries(b.byReason).map(([k, v]) => `${k} ${v}`).join(" · ")}) · phòng ${b.departmentCode} có ${b.responders} người xem được hộp thư · cả tổ chức ${b.viewers}`);
       tomTat(`${org.code} C · SLA (work.sla): đã vào hàng đợi ${b.queued} · quá hạn ${b.overdue} · quá hạn > 24 giờ chưa ai cầm ${b.stale} · chưa vào hàng đợi ${b.unqueued}`);
     } else {
       tomTat(`${org.code} B/C · CHƯA ĐO ĐƯỢC — ${b.why}`);
