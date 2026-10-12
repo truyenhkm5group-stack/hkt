@@ -24,24 +24,23 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-12T12:52:38.920Z",
-  "updated_at": "2026-10-12T17:31:49.689Z",
-  "last_heartbeat": "2026-10-12T17:31:49.689Z",
+  "updated_at": "2026-10-12T22:24:37.133Z",
+  "last_heartbeat": "2026-10-12T22:24:37.133Z",
   "definition_of_done": [],
   "handoff": {
     "branch": "fix/hslc-postsale-handoff",
-    "sha": "b6e120f242cc988a6bcc19174425580946b1e352",
-    "at": "2026-10-12T17:31:49.689Z",
+    "sha": "7d474c2c8af6acfa2118f42531f1a3d49b99f340",
+    "at": "2026-10-12T22:24:37.133Z",
     "actor": "DESKTOP-56TH98Y:wt-hslc-postsale",
     "title": "HOTFIX P0 HSLC: AI không dừng mặc định sau chốt (giai đoạn hậu mãi), hàng đợi chung thay KHÔNG CHỦ, watchdog nhường hết hạn, đồng hồ AI hỏng/SLA đọc mốc thật, nhãn «Chưa có vận đơn», panel đơn báo lỗi đọc được",
-    "summary": "Review #821 vòng 3: create_customer trên đơn chốt qua lời đồng ý ⇒ requireHuman «Sửa đơn đã chốt» (hồ sơ không sửa lặng), create_customer chỉ là căn cứ ORDER_EDITED khi chưa có đơn chốt; khiếu nại gõ không dấu theo ngữ cảnh, «sao giao chậm vậy» tính, «có (bị) … không» không tính; lời dặn chờ giao/đang giao có chuyển người khi than phiền; «đơn … đã đổi xong» ⇒ ORDER_EDITED. Watchdog: trần 100/lượt, ưu tiên khách nhắn gần nhất, mở lại chỉ đổi trạng thái — tin cũ không gửi bù (resume ≤ 2 giờ < cửa sổ 24 giờ); chạy thử in «sẽ mở lại N, trả lời ngay M». Không chạm client.",
+    "summary": "Gộp origin/main (#820 · #802 · #817 · #819) bằng merge (không rebase): engine giữ giỏ có thẩm quyền (#819, chạy TRƯỚC) rồi giai đoạn khách; lời nhắc gồm cartPromptOf + postSalePrompt; executeTool mang prevTurn + confirmedBefore; tools.ts tự gộp — requireHuman sửa đơn chốt + create_customer guard còn nguyên cạnh #819/#802; stuck-conversation-audit lấy bản nhánh (main = bản audit gốc, không khác); ops-vps giữ cart-intent-audit + sales-postorder-handoff-release; sync-fixtures giữ test của main. Hội thoại vàng hau-mai đo lại (lời nhắc #819, address_check #802) — hành vi không đổi.",
     "tests": [
       "npm run typecheck",
       "npm run lint (tệp đổi)",
-      "npm test (TẤT CẢ KIỂM THỬ ĐẠT, 1005 ✓)",
-      "tests/repo-integrity.test.ts",
-      "tests/test-hygiene.test.ts",
-      "tests/ops-log-leak.test.ts",
-      "tests/ops-concurrency.test.ts"
+      "npm run build",
+      "npm test (TẤT CẢ KIỂM THỬ ĐẠT, 1027 ✓)",
+      "postsale-lifecycle · stuck-conversation-audit · sales-cart-commitment · address-normalize · self-service-journey · sales-agent-golden · order-golden · sales-claim-guard · handoff-ownership · followup-lifecycle · inbox-search",
+      "repo-integrity · test-hygiene · ops-log-leak · ops-concurrency"
     ]
   }
 }
