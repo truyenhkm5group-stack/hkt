@@ -502,6 +502,7 @@ import { testPancakeAvatarShape } from "./pancake-avatar-shape.test";
 import { testAvatarProxyCheck } from "./avatar-proxy-check.test";
 import { testSenderProvenanceProbe } from "./sender-provenance-probe.test";
 import { testInboxUnreadDryrun } from "./inbox-unread-dryrun.test";
+import { testStuckConversationAudit } from "./stuck-conversation-audit.test";
 import { testAvatarProxy } from "./avatar-proxy.test";
 import { testInboxSemanticsV3 } from "./inbox-semantics-v3.test";
 import { testHandoffOwnership } from "./handoff-ownership.test";
@@ -2930,6 +2931,8 @@ async function main() {
   testSenderProvenanceProbe();
   // Ops inbox-unread-dryrun (11/10/2026, điều kiện duyệt #792): chạy thử «chưa đọc» theo hàm #803 so với luật đang chạy + bấm giờ câu dẫn xuất — CHỈ ĐỌC. Thuần + quét mã nguồn + PGlite.
   await testInboxUnreadDryrun();
+  // Ops stuck-conversation-audit (HOTFIX P0 12/10/2026, ca «Khanh Nhung»): hội thoại AI kẹt theo nhóm lý do · không chủ · SLA · nhắn lại sau đơn · đơn chưa đồng bộ — CHỈ ĐỌC. Thuần + quét mã nguồn + PGlite.
+  await testStuckConversationAudit();
   // Ảnh khách qua proxy ERP (11/10/2026): URL Pancake mang khoá ⇒ cất bản KHÔNG khoá, máy chủ gắn token lúc tải; chặn SSRF, đệm LRU, quyền theo tổ chức — tổ chức `anh-dai-dien-proxy`, fetch giả.
   await testAvatarProxy();
   // INBOX-SEMANTICS-V3 (chủ shop 10/10/2026): bốn khái niệm tách riêng — chưa đọc (AI trả lời không xoá) · chờ trả lời · cần người thật · người đang xử lý; ma trận 20 hội thoại × mọi bộ lọc — tổ chức `hop-thu-sem-v3`.
