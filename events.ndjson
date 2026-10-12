@@ -2269,3 +2269,4 @@
 {"at":"2026-10-12T21:42:32.710Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"CLAIM","mission":"cart-intent-audit-sync","detail":"RUNNING · 2 mẫu phạm vi · MEDIUM"}
 {"at":"2026-10-12T21:42:32.710Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"OVERLAP_ACCEPTED","mission":"cart-intent-audit-sync","detail":"OVERLAP_ACCEPTED với cart-intent-audit: phạm vi scripts/cart-intent-audit.ts, tests/cart-intent-audit.test.ts — cách tích hợp: nhánh cũ của #818, chỉ còn đồng bộ luật"}
 {"at":"2026-10-12T21:42:50.444Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"cart-intent-audit-sync","detail":"fix/cart-intent-audit @ 75c0b8cdf938 · 1 lệnh kiểm thử"}
+{"at":"2026-10-12T21:43:23.017Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"cart-intent-audit-sync","detail":"#822 cho fix/cart-intent-audit @ 75c0b8cdf938"}
