@@ -3,7 +3,7 @@
   "mission_id": "org-migrate-isolation",
   "title": "P0: migration hỏng cô lập theo workspace — khoá theo tổ chức, lùi sau lỗi, DEGRADED_MIGRATION serve schema cũ (chỉ migration khai tương thích), verify-migrations có trần; probe chẩn đoán qa",
   "business_goal": "",
-  "status": "RUNNING",
+  "status": "PR_READY",
   "priority": "P0",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -23,7 +23,21 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-12T06:23:27.011Z",
-  "updated_at": "2026-10-12T06:23:27.011Z",
-  "last_heartbeat": "2026-10-12T06:23:27.011Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-12T09:12:23.467Z",
+  "last_heartbeat": "2026-10-12T09:12:23.467Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "fix/org-migrate-isolation",
+    "sha": "c6341cc6f7452dbfaa071b2094520751f8097287",
+    "at": "2026-10-12T09:12:23.467Z",
+    "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+    "title": "P0: migration hỏng cô lập theo workspace — khoá theo tổ chức, lùi sau lỗi, DEGRADED_MIGRATION serve schema cũ (chỉ migration khai tương thích), verify-migrations có trần; probe chẩn đoán qa",
+    "summary": "Khoá migrate theo tổ chức có trần chờ; lùi sau lỗi; DEGRADED_MIGRATION serve lược đồ cũ CHỈ khi hết giờ + mọi migration thiếu có trong sổ tương thích (0245); thử lại 6 giờ; verify-migrations có trần, in DEGRADED WORKSPACES; probe org-migrate-probe",
+    "tests": [
+      "tsc·lint: sạch",
+      "org-migrate-isolation·migration-serve-compat (CSDL hạ về 0244: openConversation·listInbox·loadInboxThread·markInboxReadCore·listCustomers·listOrders)·platform-isolation-static: đạt",
+      "kiểm đột biến engine.ts cũ ⇒ đỏ",
+      "npm test: TẤT CẢ KIỂM THỬ ĐẠT"
+    ]
+  }
 }
