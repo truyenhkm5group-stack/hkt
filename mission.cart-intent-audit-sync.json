@@ -3,7 +3,7 @@
   "mission_id": "cart-intent-audit-sync",
   "title": "cart-intent-audit: bản sao luật khớp cart-commitment.ts sau #819 (đo AFTER bằng đúng luật đang chạy)",
   "business_goal": "",
-  "status": "RUNNING",
+  "status": "PR_READY",
   "priority": "P0",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -21,7 +21,18 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-12T21:42:32.623Z",
-  "updated_at": "2026-10-12T21:42:32.623Z",
-  "last_heartbeat": "2026-10-12T21:42:32.623Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-12T21:42:50.413Z",
+  "last_heartbeat": "2026-10-12T21:42:50.413Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "fix/cart-intent-audit",
+    "sha": "75c0b8cdf93819fb3e750ecae82b2854cabbcc6f",
+    "at": "2026-10-12T21:42:50.413Z",
+    "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+    "title": "cart-intent-audit: bản sao luật khớp cart-commitment.ts sau #819 (đo AFTER bằng đúng luật đang chạy)",
+    "summary": "Đồng bộ luật audit với #819 @ 79ac9224",
+    "tests": [
+      "typecheck·lint·cart-intent-audit·platform-isolation-static: đạt"
+    ]
+  }
 }
