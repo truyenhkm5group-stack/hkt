@@ -2212,3 +2212,4 @@
 {"at":"2026-10-12T09:58:31.575Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"inbox-search-global","detail":"fix/inbox-search-global @ 1cc2023ac354 · 3 lệnh kiểm thử"}
 {"at":"2026-10-12T09:59:15.301Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"inbox-search-global","detail":"#817 cho fix/inbox-search-global @ 1cc2023ac354"}
 {"at":"2026-10-12T09:59:57.475Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#817 @ 1cc2023ac354 · Một chỗ quyết bộ lọc (inboxQueryState): q ≠ rỗng ⇒ bỏ mọi bộ lọc trạng thái/người/page/kênh/SĐT/level/thời gian/nhãn; pv=loc mới giữ; xếp hạng SĐT khớp chính xác chỉ là khoá xếp; build đạt"}
+{"at":"2026-10-12T10:13:26.984Z","actor":"DESKTOP-56TH98Y:wt-p0-c360","kind":"HANDOFF","mission":"customer-360","detail":"fix/customer-360 @ 238e8a7b90eb · 1 lệnh kiểm thử"}
