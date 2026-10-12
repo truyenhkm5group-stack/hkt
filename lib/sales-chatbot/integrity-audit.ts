@@ -341,11 +341,11 @@ export function classifyAddress(r: { address: string; province: string; ward: st
   if (r.province.trim() && r.ward.trim()) return null;
   const m = normalizeVnAddress([r.address, r.province].filter((x) => x.trim()).join(", "));
   if (m.status === "MATCHED") return "RESOLVABLE_NOW";
+  // Tỉnh chỉ suy được nhờ bung viết tắt tên quận («P13 GV») ⇒ bộ đọc trả UNKNOWN kèm gợi ý: vẫn là THIẾU TỈNH.
   if (m.status === "UNKNOWN") return r.province.trim() ? "MISSING_WARD" : "MISSING_PROVINCE";
-  const reason = foldVi(m.reason);
-  if (/cu da duoc chia/.test(reason)) return "LEGACY_WARD_SPLIT";
-  if (/chi co quan huyen cu/.test(reason)) return "LEGACY_DISTRICT_ONLY";
-  if (m.status === "AMBIGUOUS") return "AMBIGUOUS_NAME";
+  // Khoá `kind` của bộ đọc — không dò câu chữ `reason` (đổi chữ một lần là nhãn rơi về «trùng tên»).
+  if (m.status === "AMBIGUOUS") return m.kind === "LEGACY_WARD_SPLIT" ? "LEGACY_WARD_SPLIT" : m.kind === "LEGACY_DISTRICT_ONLY" ? "LEGACY_DISTRICT_ONLY" : "AMBIGUOUS_NAME";
+  if (/chi co quan huyen cu/.test(foldVi(m.reason))) return "LEGACY_DISTRICT_ONLY";
   return "MISSING_WARD";
 }
 

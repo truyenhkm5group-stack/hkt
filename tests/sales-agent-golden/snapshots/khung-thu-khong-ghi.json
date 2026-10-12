@@ -29,6 +29,17 @@
               "customer_id": "thu-nghiem",
               "simulated": true,
               "note": "Khung thử: KHÔNG lưu khách thật.",
+              "address_check": {
+                "status": "NOT_FOUND",
+                "province": "Thành phố Đà Nẵng",
+                "ward": null,
+                "candidates": [],
+                "missing": [
+                  "ward"
+                ],
+                "ask_customer": "Dạ mình cho em xin tên phường / xã (theo địa giới mới) của địa chỉ nhận hàng với ạ?",
+                "note": "Địa chỉ CHƯA chuẩn hoá — ô xã / phường để trống, đơn cần người kiểm. Hỏi khách ĐÚNG câu ask_customer (gộp vào tin tóm tắt); khách trả lời tên xã / phường ⇒ update_draft_order với ward = tên khách nói. KHÔNG tự chọn, KHÔNG nói địa chỉ đã đúng."
+              },
               "__summary": "(Thử) lưu khách Lê Thị Hoa"
             }
           ]
@@ -77,6 +88,17 @@
                 "province": ""
               },
               "delivery_note": null,
+              "address_check": {
+                "status": "NOT_FOUND",
+                "province": "Thành phố Đà Nẵng",
+                "ward": null,
+                "candidates": [],
+                "missing": [
+                  "ward"
+                ],
+                "ask_customer": "Dạ mình cho em xin tên phường / xã (theo địa giới mới) của địa chỉ nhận hàng với ạ?",
+                "note": "Địa chỉ CHƯA chuẩn hoá — ô xã / phường để trống, đơn cần người kiểm. Hỏi khách ĐÚNG câu ask_customer (gộp vào tin tóm tắt); khách trả lời tên xã / phường ⇒ update_draft_order với ward = tên khách nói. KHÔNG tự chọn, KHÔNG nói địa chỉ đã đúng."
+              },
               "__summary": "(Thử) Lên đơn nháp · 400.000 ₫"
             }
           ]
@@ -130,6 +152,17 @@
               "cod_total_text": "400.000 ₫ + phí ship (báo sau)",
               "order_valid": null,
               "stock_note": null,
+              "address_check": {
+                "status": "NOT_FOUND",
+                "province": "Thành phố Đà Nẵng",
+                "ward": null,
+                "candidates": [],
+                "missing": [
+                  "ward"
+                ],
+                "ask_customer": "Dạ mình cho em xin tên phường / xã (theo địa giới mới) của địa chỉ nhận hàng với ạ?",
+                "note": "Địa chỉ CHƯA chuẩn hoá — ô xã / phường để trống, đơn cần người kiểm. Hỏi khách ĐÚNG câu ask_customer (gộp vào tin tóm tắt); khách trả lời tên xã / phường ⇒ update_draft_order với ward = tên khách nói. KHÔNG tự chọn, KHÔNG nói địa chỉ đã đúng."
+              },
               "__summary": "(Thử) Đã chốt đơn · 400.000 ₫"
             }
           ]

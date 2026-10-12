@@ -28,6 +28,15 @@
             {
               "customer_id": "<id 1>",
               "existing_customer": false,
+              "address_check": {
+                "status": "EXACT",
+                "province": "Thành phố Hà Nội",
+                "ward": "Phường Cửa Nam",
+                "candidates": [],
+                "missing": [],
+                "ask_customer": null,
+                "note": "Tỉnh + xã / phường đã ghép theo địa giới mới."
+              },
               "__summary": "Đã lưu khách Phạm Thị Thu"
             }
           ]
@@ -76,6 +85,15 @@
                 "province": ""
               },
               "delivery_note": null,
+              "address_check": {
+                "status": "EXACT",
+                "province": "Thành phố Hà Nội",
+                "ward": "Phường Cửa Nam",
+                "candidates": [],
+                "missing": [],
+                "ask_customer": null,
+                "note": "Tỉnh + xã / phường đã ghép theo địa giới mới."
+              },
               "__summary": "Lên đơn nháp · 400.000 ₫"
             }
           ]
@@ -129,6 +147,15 @@
               "cod_total_text": "400.000 ₫ + phí ship (báo sau)",
               "order_valid": true,
               "stock_note": null,
+              "address_check": {
+                "status": "EXACT",
+                "province": "Thành phố Hà Nội",
+                "ward": "Phường Cửa Nam",
+                "candidates": [],
+                "missing": [],
+                "ask_customer": null,
+                "note": "Tỉnh + xã / phường đã ghép theo địa giới mới."
+              },
               "__summary": "Đã chốt đơn · 400.000 ₫"
             }
           ]

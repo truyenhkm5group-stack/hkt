@@ -190,7 +190,7 @@ cùng CSDL, so `contentHash`.
 - **Lời khai cuối cùng** về việc gì đã chạy là bảng `drizzle.__drizzle_migrations` TRONG TỪNG CSDL — CSDL nhà và mỗi
   `erp_org_*` có sổ riêng. Bản dump `-Fc` mang cả lược đồ `drizzle`, nên khôi phục một CSDL là khôi phục luôn sổ ấy.
 - CSDL nhà migrate lúc app khởi động (`ensureMigrated`); CSDL tổ chức migrate lúc được MỞ lần đầu trong tiến trình
-  (`migrateOrganizationDb`, khoá tư vấn `780152001`, rồi xoá bản sao `platform_*`). Khôi phục một bản dump CŨ hơn mã đang
+  (`migrateOrganizationDb`, khoá tư vấn THEO TỔ CHỨC `(780152001, băm tên CSDL)` chờ có trần, lỗi thì lùi — `db/migrate.ts`, rồi xoá bản sao `platform_*`). Khôi phục một bản dump CŨ hơn mã đang
   chạy ⇒ lần mở kế tiếp tự áp phần migration còn thiếu — đúng đường nâng cấp mà `tests/migration-upgrade-path.test.ts`
   đã kiểm.
 - KHÔNG khôi phục một bản dump MỚI hơn mã đang chạy (sổ có migration mà thư mục `drizzle/` không có): deploy mã tương

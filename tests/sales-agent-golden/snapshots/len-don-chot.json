@@ -186,6 +186,15 @@
             {
               "customer_id": "<id 1>",
               "existing_customer": false,
+              "address_check": {
+                "status": "UNIQUE_FROM_OLD",
+                "province": "Thành phố Hà Nội",
+                "ward": "Phường Hoàn Kiếm",
+                "candidates": [],
+                "missing": [],
+                "ask_customer": null,
+                "note": "Tỉnh + xã / phường đã ghép theo địa giới mới."
+              },
               "__summary": "Đã lưu khách Nguyễn Thị Lan"
             }
           ]
@@ -247,6 +256,15 @@
                 "province": ""
               },
               "delivery_note": "Giao giờ hành chính",
+              "address_check": {
+                "status": "UNIQUE_FROM_OLD",
+                "province": "Thành phố Hà Nội",
+                "ward": "Phường Hoàn Kiếm",
+                "candidates": [],
+                "missing": [],
+                "ask_customer": null,
+                "note": "Tỉnh + xã / phường đã ghép theo địa giới mới."
+              },
               "__summary": "Lên đơn nháp · 1.150.000 ₫"
             }
           ]
@@ -308,6 +326,15 @@
               "cod_total_text": "1.150.000 ₫ + phí ship (báo sau)",
               "order_valid": true,
               "stock_note": null,
+              "address_check": {
+                "status": "UNIQUE_FROM_OLD",
+                "province": "Thành phố Hà Nội",
+                "ward": "Phường Hoàn Kiếm",
+                "candidates": [],
+                "missing": [],
+                "ask_customer": null,
+                "note": "Tỉnh + xã / phường đã ghép theo địa giới mới."
+              },
               "__summary": "Đã chốt đơn · 1.150.000 ₫"
             }
           ]

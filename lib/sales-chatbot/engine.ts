@@ -15,9 +15,10 @@
  * Tin nhắn append-only (`sales_chat_messages`, `seq` UNIQUE trong hội thoại): hai lượt gửi đua nhau ⇒ lượt thua báo
  * "đang trả lời câu trước", không chen tin vào giữa.
  */
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { and, asc, desc, eq, gte, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
+import { compatTableColumns } from "@/lib/db/serve-compat-columns";
 import { AI_DOWN_HANDOFF_REASON as AI_DOWN_REASON_TEXT } from "@/lib/sales-chatbot/ai-hold-shared";
 import type { AiImage } from "@/lib/ai/images";
 import { estimateCostUsd, getAiProvider, type AiBlock, type AiMessage, type AiProvider, type AiUsage } from "@/lib/ai/provider";
@@ -276,10 +277,13 @@ export function visitorKeyOf(raw: string): string {
 export async function openConversation(channel: ChatChannel, opts: { visitorKey?: string | null; createdBy?: string | null } = {}): Promise<{ id: string; greeting: string; botName: string }> {
   const cfg = await loadSalesChatbotConfig();
   const db = await getDb();
-  const [row] = await db
-    .insert(schema.salesChatConversations)
-    .values({ channel, visitorKey: opts.visitorKey ?? null, createdBy: opts.createdBy ?? null, state: {} })
-    .returning({ id: schema.salesChatConversations.id });
+  // Câu chèn liệt kê ĐÚNG các cột cần ghi — `db.insert(bảng)` của drizzle liệt kê MỌI cột của lược đồ (cột không gán ghi `default`), nên
+  // trên CSDL tổ chức đang phục vụ bằng lược đồ cũ (`DEGRADED_MIGRATION`, lib/constants/migration-serve-compat.ts) nó báo «column does not
+  // exist» và không khách mới nào mở được hội thoại.
+  const row = { id: randomUUID() };
+  await db.execute(
+    sql`insert into "sales_chat_conversations" ("id", "channel", "visitor_key", "created_by", "state") values (${row.id}, ${channel}, ${opts.visitorKey ?? null}, ${opts.createdBy ?? null}, '{}'::jsonb)`,
+  );
   const greeting = await verifiedGreeting(cfg);
   await db.insert(schema.salesChatMessages).values({ conversationId: row.id, seq: 1, role: "assistant", content: [{ type: "text", text: greeting }] satisfies AiBlock[] });
   return { id: row.id, greeting, botName: cfg.botName };
@@ -299,7 +303,7 @@ export async function verifiedGreeting(cfg: SalesChatbotConfig): Promise<string>
 
 async function loadConversation(id: string): Promise<ConvRow | null> {
   const db = await getDb();
-  const [row] = await db.select().from(schema.salesChatConversations).where(eq(schema.salesChatConversations.id, id)).limit(1);
+  const [row] = await db.select(compatTableColumns(schema.salesChatConversations)).from(schema.salesChatConversations).where(eq(schema.salesChatConversations.id, id)).limit(1);
   return row ?? null;
 }
 
