@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useRef, useState, useTransition, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ChevronDown, Loader2, Search, SlidersHorizontal, X } from "lucide-react";
+import { useNavTransition } from "@/components/nav-progress";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
   compactCount,
@@ -110,7 +111,8 @@ export function InboxFilters({ state, counts: serverCounts, unreadStamp = null, 
   const hasFilters = inboxHasFilters(state);
   const filterLabels = inboxFilterLabels(state, Object.fromEntries(pages.map((p) => [p.id, p.name])));
   const activeChip = inboxActiveChip(state);
-  const [navPending, startNav] = useTransition();
+  // Điều hướng của ô tìm báo lên thanh tiến trình chung (useNavTransition), không dùng useTransition trần.
+  const [navPending, startNav] = useNavTransition();
   const [text, setText] = useState(state.q);
   const inputRef = useRef<HTMLInputElement>(null);
   const timer = useRef<number | null>(null);
