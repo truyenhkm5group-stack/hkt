@@ -26,7 +26,7 @@
   RÀNG BUỘC: ops lấy script từ `main` nhưng `lib/` từ IMAGE đang chạy ⇒ phần đếm chính là SQL THÔ trên cột đã có từ 0242 (#800) —
   không nhập hàm mới nào của bản vá. Hai phép dùng lib (B, C) đọc qua `withOrganization` sau khi GẮN handle chỉ đọc
   (`bindReadOnlyOrgHandle`, như scripts/inbox-perf-probe.ts); lib cũ / thiếu ⇒ in «CHƯA ĐO ĐƯỢC», không phải 0. CHỈ ĐỌC do Postgres
-  ép (`ERP_READ_ONLY=1` trước lần mở kết nối đầu tiên + hỏi lại phiên). Kênh `[ops:tom-tat]` chỉ số đếm; mã hội thoại / lý do nguyên
+  ép (`ERP_READ_ONLY=1` trước lần mở kết nối đầu tiên + hỏi lại phiên). Kênh `[ops:tom-tat] ` chỉ số đếm; mã hội thoại / lý do nguyên
   văn chỉ ở phần MÃ HOÁ (ops-vps `OPS_THAO_TAC_MA_HOA`). Mã thoát: 0 đo xong · 1 có CSDL hỏng / arg sai.
 */
 const CHAY_THANG = Boolean(process.argv[1] && process.argv[1].endsWith("stuck-conversation-audit.ts"));
