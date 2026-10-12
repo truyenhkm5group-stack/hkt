@@ -24,18 +24,18 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-11T01:59:01.592Z",
-  "updated_at": "2026-10-11T05:30:13.813Z",
-  "last_heartbeat": "2026-10-11T05:29:34.994Z",
+  "updated_at": "2026-10-12T04:43:18.977Z",
+  "last_heartbeat": "2026-10-12T04:43:18.977Z",
   "definition_of_done": [],
   "handoff": {
     "branch": "fix/address-normalize",
-    "sha": "5ab92d674da8d961bd1a962c47b21c06910eb3b4",
-    "at": "2026-10-11T05:29:34.994Z",
-    "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+    "sha": "a75e9cc4aa0d68b4c99371a008c6f1e5ba9a37b3",
+    "at": "2026-10-12T04:43:18.977Z",
+    "actor": "DESKTOP-56TH98Y:wt-p0-addr",
     "title": "P0: chuẩn hoá địa chỉ khách gõ tự do theo địa giới 2 cấp hiện hành (tên phường/xã cũ ⇒ mới), không chắc ⇒ hỏi khách phần thiếu, không đoán để vượt kiểm",
-    "summary": "Địa chỉ khách: kết quả AMBIGUOUS của bộ đọc không còn bị vứt — công cụ đơn trả address_check, confirm_order hỏi khách bằng ứng viên có thật trước khi chốt, ô ward chỉ nhận khi khách nói đúng tên; bung f1q5/P13 + viết tắt quận HCM (danh sách đóng); suy tỉnh từ quận cũ; mẫu 15 địa chỉ: tự điền đúng 5→8, hỏi khách 0→7/7, điền sai 0",
+    "summary": "#802 rebase lên main a75e9cc4 (main thắng: báo giá máy chủ, tự chốt P0-A). Gốc CI đỏ: viết tắt «GV» bung thành quận Gò Vấp rồi suy TP HCM ⇒ «P13 GV» không ghi tỉnh bị coi là biết tỉnh, vượt cổng thiếu tỉnh. Nay tỉnh chỉ suy từ viết tắt ⇒ UNKNOWN + hint, bot hỏi TỈNH trước; classifyAddress đọc khoá kind thay vì dò câu chữ; tự chốt giữ luật P0-A.",
     "tests": [
-      "npm test đầy đủ: TẤT CẢ KIỂM THỬ ĐẠT · typecheck · lint · address-normalize (Cổ Nhuế có/không dấu, f1q5, P13 GV, P5 GV, q.pn, viết tắt mơ hồ không sinh tỉnh, tỉnh gộp, NOT_FOUND không tự điền, cổng chốt) · golden 5/20 chỉ thêm address_check · 4 đột biến"
+      "address-normalize (thuần + công cụ bot) · sales-integrity-audit · sales-agent-golden (20) · order-golden v2 · sales-quote-integrity · typecheck · lint · npm test đầy đủ: TẤT CẢ KIỂM THỬ ĐẠT"
     ]
   }
 }
