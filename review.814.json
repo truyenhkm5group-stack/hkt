@@ -1,0 +1,8 @@
+{
+  "pr": 814,
+  "sha": "cd72b7ec47b7d3b3afc7233545031600cbba8496",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-12T08:48:08.721Z",
+  "note": "erp-backup.sh: tách hàm dựng bản sao dùng chung, cùng cờ docker/trap/MỘT pg_restore; phần nhà không đổi byte; script mới chỉ chạm container tạm (không mạng, trần RAM), MÃ HOÁ"
+}
