@@ -370,6 +370,7 @@ import { testOrgOrderAuditPure } from "./org-order-audit.test";
 import { testMetaCapiDb, testMetaCapiPure } from "./meta-capi.test";
 import { testOrgCatalogDb, testOrgCatalogPure } from "./org-catalog.test";
 import { testVnAddress } from "./vn-address.test";
+import { testAddressNormalizePure, testAddressNormalizeTools } from "./address-normalize.test";
 import { testVelocityUnifyDb, testVelocityUnifyPure } from "./velocity-unify.test";
 import { testOutreachClearanceUnit } from "./outreach-clearance-unit.test";
 import { testPageUsageDb, testPageUsagePure, testPageUsageSource } from "./page-usage.test";
@@ -502,6 +503,9 @@ import { testPancakeAvatarShape } from "./pancake-avatar-shape.test";
 import { testAvatarProxyCheck } from "./avatar-proxy-check.test";
 import { testSenderProvenanceProbe } from "./sender-provenance-probe.test";
 import { testInboxUnreadDryrun } from "./inbox-unread-dryrun.test";
+import { testOrgMigrateIsolation } from "./org-migrate-isolation.test";
+import { testMigrationServeCompat } from "./migration-serve-compat.test";
+import { testStuckConversationAudit } from "./stuck-conversation-audit.test";
 import { testAvatarProxy } from "./avatar-proxy.test";
 import { testInboxSemanticsV3 } from "./inbox-semantics-v3.test";
 import { testHandoffOwnership } from "./handoff-ownership.test";
@@ -551,6 +555,7 @@ import { testSalesVision } from "./sales-vision.test";
 import { testSalesClaimGuard } from "./sales-claim-guard.test";
 import { testSalesQuoteIntegrity } from "./sales-quote-integrity.test";
 import { testSalesIntegrityAudit } from "./sales-integrity-audit.test";
+import { testCartIntentAudit } from "./cart-intent-audit.test";
 import { testFollowupLifecycle } from "./followup-lifecycle.test";
 import { testChatWidget } from "./chat-widget.test";
 import { testWebProductImport } from "./web-product-import.test";
@@ -2341,6 +2346,9 @@ async function main() {
   await testOrgCatalogDb();
   // Chuẩn hoá địa chỉ theo địa giới 01/07/2025 — đơn bot / máy ghi chỉ có một dòng chữ (05/10/2026).
   testVnAddress();
+  // P0 address-normalize (11/10/2026): địa chỉ tự do ⇒ mức tin cậy + câu hỏi khách; bot không chốt đơn địa chỉ mơ hồ khi khách chưa được hỏi.
+  testAddressNormalizePure();
+  await testAddressNormalizeTools();
   // Company OS · Agent V: MỘT tốc độ bán (Kế hoạch SX) cho Hàng chậm / Quyết định vốn tồn / Hiệu quả mẫu mã + ops velocity-compare (mã `cos-v-` / `COSV`, tự dọn).
   testVelocityUnifyPure();
   testOutreachClearanceUnit();
@@ -2930,6 +2938,12 @@ async function main() {
   testSenderProvenanceProbe();
   // Ops inbox-unread-dryrun (11/10/2026, điều kiện duyệt #792): chạy thử «chưa đọc» theo hàm #803 so với luật đang chạy + bấm giờ câu dẫn xuất — CHỈ ĐỌC. Thuần + quét mã nguồn + PGlite.
   await testInboxUnreadDryrun();
+  // Migrate CSDL tổ chức cô lập (sự cố 0245 ở qa 12/10/2026): khoá theo tổ chức có trần chờ · lùi sau lỗi · trần mỗi tổ chức của verify-migrations · ops org-migrate-probe chỉ đọc. Thuần + PGlite + quét mã nguồn.
+  await testOrgMigrateIsolation();
+  // Phục vụ bằng lược đồ cũ (chủ shop 12/10/2026, «Serve with old schema»): sổ tương thích 0245 chứng minh bằng PGlite dừng ở 0244 + mã hiện tại; DEGRADED_MIGRATION chỉ khi hết giờ VÀ mọi mục thiếu trong sổ — tổ chức `serve-compat-0245`.
+  await testMigrationServeCompat();
+  // Ops stuck-conversation-audit (HOTFIX P0 12/10/2026, ca «Khanh Nhung»): hội thoại AI kẹt theo nhóm lý do · không chủ · SLA · nhắn lại sau đơn · đơn chưa đồng bộ — CHỈ ĐỌC. Thuần + quét mã nguồn + PGlite.
+  await testStuckConversationAudit();
   // Ảnh khách qua proxy ERP (11/10/2026): URL Pancake mang khoá ⇒ cất bản KHÔNG khoá, máy chủ gắn token lúc tải; chặn SSRF, đệm LRU, quyền theo tổ chức — tổ chức `anh-dai-dien-proxy`, fetch giả.
   await testAvatarProxy();
   // INBOX-SEMANTICS-V3 (chủ shop 10/10/2026): bốn khái niệm tách riêng — chưa đọc (AI trả lời không xoá) · chờ trả lời · cần người thật · người đang xử lý; ma trận 20 hội thoại × mọi bộ lọc — tổ chức `hop-thu-sem-v3`.
@@ -2993,6 +3007,9 @@ async function main() {
   // P0 11/10/2026 — ops sales-integrity-audit: giá bot ≠ giá đơn · giá tự đổi · xác nhận giả · chuyển người không ai nhận ·
   // địa chỉ chưa ghép · nhắc sau đơn chốt — thuần + CSDL thật (mã `erp-ia-`, tự dọn), tóm tắt không lọt PII.
   await testSalesIntegrityAudit();
+  // P0 12/10/2026 — ops cart-intent-audit: bot tự hạ số lượng khách đã nói / đơn đủ ORDER_READY vẫn bị hỏi · mời — thuần + CSDL thật
+  // (hội thoại dựng theo ca HSLC, tự dọn), tóm tắt không lọt PII, chỉ đọc, ops khai đủ bốn chỗ.
+  await testCartIntentAudit();
   // P0 11/10/2026 (KimThu Le) — vòng đời khách dùng chung + follow-up đọc lại ngay trước khi gửi (đơn thật · chứng từ thu ·
   // từ chối nhận tin · người / nguồn khác vừa nhắn), khoá gửi chống trùng, vết quyết định — tổ chức THẬT `fu-life` (tự cấp, tự dọn).
   await testFollowupLifecycle();

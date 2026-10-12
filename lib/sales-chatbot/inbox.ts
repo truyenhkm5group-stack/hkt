@@ -1,6 +1,7 @@
 import { and, asc, desc, eq, inArray, isNotNull, isNull, ne, or, sql, type SQL } from "drizzle-orm";
 import { z } from "zod";
 import { getDb, schema } from "@/db";
+import { compatTableColumns } from "@/lib/db/serve-compat-columns";
 import { listChannelPages } from "@/lib/connectors/service";
 import { loadTransportFacts, MESSENGER_DIRECT_KEY, transportOwnerOf, type TransportFacts } from "@/lib/sales-chatbot/channel-ownership";
 import type { AiBlock } from "@/lib/ai/provider";
@@ -548,7 +549,7 @@ type ConvRow = typeof schema.salesChatConversations.$inferSelect;
 async function loadConv(id: unknown): Promise<ConvRow | null> {
   if (typeof id !== "string" || !id || id.length > 100) return null;
   const db = await getDb();
-  const [row] = await db.select().from(schema.salesChatConversations).where(eq(schema.salesChatConversations.id, id)).limit(1);
+  const [row] = await db.select(compatTableColumns(schema.salesChatConversations)).from(schema.salesChatConversations).where(eq(schema.salesChatConversations.id, id)).limit(1);
   return row && row.channel !== "TEST" ? row : null;
 }
 
