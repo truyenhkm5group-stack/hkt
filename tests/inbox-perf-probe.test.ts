@@ -18,6 +18,7 @@ import { withOrganization } from "@/lib/platform/context";
 import { getHomeOrganization, invalidateOrganizations } from "@/lib/platform/organizations";
 import { provisionOrganization } from "@/lib/platform/provision";
 import { fanpageVisitorKey } from "@/lib/sales-chatbot/fanpage";
+import { inboxListQuery } from "@/lib/sales-chatbot/inbox-search-shared";
 import {
   bindReadOnlyOrgHandle,
   collectInboxPerf,
@@ -125,7 +126,14 @@ export function testInboxPerfProbeSource() {
   for (const fn of ["listLabels()", "inboxPages()", "inboxThreadPayload(user, selected)", "assignableUsers(user)", "inboxAssignees(user)", "organizationLevelPack()", "listPageRoutes().catch(() => [])", "humanCooldownMinutes()", "manualOrderGate(user)"]) {
     assert.ok(page.includes(fn), `page.tsx còn gọi ${fn}`);
   }
-  assert.match(page, /listInbox\(user, \{ filter, channel, q, label, page, phone, level, assignee, period, from, to, limit, handler \}\)/, "page.tsx gọi listInbox với đúng bộ khoá script dựng mặc định");
+  // Trang dựng tham số listInbox qua `inboxListQuery(state)` (P0 inbox-search-global 12/10/2026) — bộ khoá của nó ở trạng thái mặc
+  // định phải ĐÚNG bộ script dựng (`DEFAULT_LIST_QUERY`), để script vẫn đo đúng lời gọi của trang.
+  assert.match(page, /listInbox\(user, inboxListQuery\(state\)\)/, "page.tsx gọi listInbox qua inboxListQuery(state)");
+  assert.deepEqual(
+    inboxListQuery({ filter: "ALL", q: "", page: null, channel: null, handler: null, assignee: null, phone: null, level: null, period: null, from: null, to: null, label: null, limit: 100, selected: null }),
+    { filter: "ALL", channel: null, q: "", label: null, page: null, phone: null, level: null, assignee: null, period: null, from: null, to: null, limit: 100, handler: null },
+    "trạng thái mặc định của trang ⇒ đúng bộ khoá script dựng mặc định",
+  );
   for (const fn of ["await listLabels();", "await inboxPages();", "await inboxThreadPayload(user, selected)", "listInbox(user, DEFAULT_LIST_QUERY)", "assignableUsers(user)", "inboxAssignees(user)", "organizationLevelPack()", "listPageRoutes().catch(() => [])", "humanCooldownMinutes()", "manualOrderGate(user)"]) {
     assert.ok(code.includes(fn), `script gọi ${fn} như trang`);
   }
