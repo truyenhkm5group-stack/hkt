@@ -43,6 +43,7 @@ import { foldVi } from "@/lib/sales-chatbot/text";
 import { buildQuote, computePriced, loadPricingContext, packChoiceMistake, packingIssues, packingRequestOf, verifiedUnitPrices, type AgentQuoteClaim, type Priced, type PricingContext } from "@/lib/sales-chatbot/quote";
 import { priceUnverifiedReason, QUOTE_UNVERIFIED_INSTRUCTION, quoteSnapshotOf, type PriceDisputeState, type Quote, type QuoteSnapshot } from "@/lib/sales-chatbot/quote-shared";
 import { CLAIM_SAFE_TEXT, orderValidityOf } from "@/lib/sales-chatbot/claim-guard";
+import { bindCommitment, commitmentViolation, declinesAddOnOnly, type CartCommitment } from "@/lib/sales-chatbot/cart-commitment";
 import { searchCatalog, sellableCatalog, stockFor, type CatalogItem } from "@/lib/sales-chatbot/catalog";
 import { quotedInText } from "@/lib/sales-chatbot/text";
 import { isMessagingChannel, type ChatChannel, type SalesChatbotConfig, type SalesTool } from "@/lib/sales-chatbot/config";
@@ -125,6 +126,11 @@ export type ChatState = {
   cycleStartTurns?: number;
   /** Nhật ký GHI ĐƠN TỪ HỘI THOẠI (`order-sync.ts`) — bot không bao giờ ghi khoá này; engine giữ bản trong CSDL khi lưu. */
   orderSync?: OrderSyncThreadState;
+  /**
+   * GIỎ CÓ THẨM QUYỀN (P0 12/10/2026 — `cart-commitment.ts`): món + số lượng khách nói TƯỜNG MINH (dính tới khi khách sửa tường minh) +
+   * món bot đề xuất. Engine ghi từ tin khách; công cụ ghi đơn đối chiếu (từ chối hạ / bỏ) và gắn mẫu mã khi đơn nháp lên.
+   */
+  cart?: CartCommitment;
 };
 
 /** Công cụ QUY TRÌNH — luôn bật (không nằm trong `allowedTools` đã lưu của tổ chức, nên công cụ mới tới được mọi tổ chức). */
@@ -839,6 +845,10 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
       if (packMistake) return err("Đơn nháp: nhầm quy cách thành số lượng", packMistake, state, { reason: "BAD_INPUT", fields: ["items.quantity"] });
       const choice = v.data.items ? packChoiceMistake(priced, ctx.config, ctx.lastUserText) : null;
       if (choice) return err("Đơn nháp: nhầm gói", choice, state, { reason: "BAD_INPUT", fields: ["items"] });
+      // GIỎ CÓ THẨM QUYỀN (P0 12/10/2026): hạ / bỏ món khách đã nói tường minh mà khách chưa sửa tường minh ⇒ từ chối (trình tự hội
+      // thoại, không phải đơn hỏng ⇒ không gắn tín hiệu đơn không hợp lệ).
+      const cartBreak = v.data.items ? commitmentViolation(state.cart, priced.asked) : null;
+      if (cartBreak) return err("Đơn nháp: hạ số lượng khách đã chốt", cartBreak, state);
       // Giá chưa xác thực ⇒ KHÔNG tạo / sửa đơn tự động, người xác minh (yêu cầu 5 của chủ shop).
       if (!priced.quote.verified) {
         state.quote = quoteSnapshotOf(priced.quote, now);
@@ -864,6 +874,7 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
         draft.orderId = r.id;
       }
       state.draft = draft;
+      state.cart = bindCommitment(state.cart, priced.asked, ctx.turn ?? null, now);
       state.quote = quoteSnapshotOf(priced.quote, now);
       settleDispute(state, ctx.turn);
       const view = { order_code: draft.orderId ? `#${manualOrderShortCode(draft.orderId)}` : "(thử)", status: "Nháp — chưa chốt, chưa giữ hàng", simulated, ...cartView(priced), recipient: recipientView(draft.recipient, state), delivery_note: draft.note || null };
@@ -1121,8 +1132,16 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
   return err(`${name}: không có`, `Không có công cụ «${name}».`, state);
 }
 
-/** Ý định CHƯA phải mua (đã bỏ dấu): hoãn, cân nhắc, hỏi người nhà, từ chối, chỉ hỏi chấm. */
-const HESITATION_RE = /\b(?:de (?:chi|anh|em|minh|toi|c|a|e) (?:hoi|xem|nghi|suy nghi|tinh|bao|ban)|suy nghi|chua (?:chot|lay|mua|can|dat|chac)|tu tu|khoan|thoi (?:khong|ko|k)\b|khong (?:lay|mua|dat)|ko (?:lay|mua)|k (?:lay|mua)|hoi (?:chong|vo|nha|lai)|de sau|lan sau|tinh sau)\b/;
+/**
+ * Ý định CHƯA phải mua (đã bỏ dấu): hoãn, cân nhắc, hỏi người nhà, từ chối, chỉ hỏi chấm. «Không lấy THÊM / GÌ nữa» là ĐỦ RỒI (giữ đơn —
+ * luật 6 của lời nhắc), không phải từ chối (P0 12/10/2026, giỏ có thẩm quyền).
+ */
+const HESITATION_RE = /\b(?:de (?:chi|anh|em|minh|toi|c|a|e) (?:hoi|xem|nghi|suy nghi|tinh|bao|ban)|suy nghi|chua (?:chot|lay|mua|can|dat|chac)|tu tu|khoan|thoi (?:khong|ko|k)\b(?! (?:lay |mua |can )?(?:them|gi)\b)|khong (?:lay|mua|dat)(?! (?:them|gi)\b)|ko (?:lay|mua)(?! (?:them|gi)\b)|k (?:lay|mua)(?! (?:them|gi)\b)|hoi (?:chong|vo|nha|lai)|de sau|lan sau|tinh sau)\b/;
+
+/** Câu cuối của khách đang hoãn / từ chối — cùng biểu thức với điều kiện (1) của tự chốt. HÀM THUẦN. */
+export function customerHesitates(text: string): boolean {
+  return HESITATION_RE.test(foldVi(text));
+}
 
 /**
  * Còn thiếu gì để TỰ CHỐT (P0-A) — `null` = đủ sáu điều kiện: (1) ý định mua (khách đã gửi SĐT + địa chỉ giao — `state.customer` — và câu cuối
@@ -1138,7 +1157,10 @@ export function autoConfirmBlocker(state: ChatState, ctx: Pick<ToolContext, "las
   if (state.declined || state.cancelRequest) return "Khách đang từ chối / xin huỷ — không tự chốt";
   if (state.priceDispute && (state.priceDispute.open || (ctx.turn !== undefined && state.priceDispute.requotedTurn === ctx.turn))) return "Khách đang phản đối giá — báo lại giá máy chủ, đợi khách đồng ý";
   if (ctx.turn !== undefined && state.upsellTurn === ctx.turn) return "Vừa mời thêm món trong lượt này — đợi khách trả lời rồi chốt";
-  if (HESITATION_RE.test(foldVi(ctx.lastUserText))) return "Khách chưa quyết mua (đang hoãn / cân nhắc) — không tự chốt";
+  // Khách chỉ TỪ CHỐI LỜI MỜI THÊM MÓN («để lần sau», «không cần thêm») sau khi đã nói tường minh món + số lượng ⇒ vẫn là ý định mua
+  // đơn hiện tại (upsell không được nhận ⇒ quay về chốt đơn), không phải hoãn cả đơn.
+  const declinedAddOn = Boolean(state.upsellSent) && Boolean(state.cart?.selectedItems.some((x) => x.customerExplicit)) && declinesAddOnOnly(ctx.lastUserText);
+  if (!declinedAddOn && customerHesitates(ctx.lastUserText)) return "Khách chưa quyết mua (đang hoãn / cân nhắc) — không tự chốt";
   const gaps = manualOrderGaps({ phone: d.recipient.phone, address: d.recipient.address, province: d.recipient.province || resolveRecipientPlace({ address: d.recipient.address, province: d.recipient.province, ward: "" }).province }, d.lines.length);
   if (gaps.includes("SĐT")) return "SĐT chưa hợp lệ — hỏi lại khách SĐT";
   if (gaps.includes("địa chỉ") || gaps.includes("tỉnh / thành")) return "Địa chỉ chưa đủ để giao (chưa đọc được tỉnh / thành) — hỏi khách đúng phần còn thiếu";
