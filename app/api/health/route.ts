@@ -1,6 +1,6 @@
 import { sql } from "drizzle-orm";
 import { NextResponse } from "next/server";
-import { getDb, getPlatformDb } from "@/db";
+import { degradedOrganizations, getDb, getPlatformDb } from "@/db";
 import { secretsKeyHealth } from "@/lib/connectors/secrets";
 import { HOME_EXPECTED_MODULES, MODULE_KEYS } from "@/lib/constants/platform-modules";
 import { getEnabledModules } from "@/lib/platform/capabilities";
@@ -34,6 +34,10 @@ export const dynamic = "force-dynamic";
  * không suy ngược) + trạng thái biến PREVIOUS. Không mã khoá đầy đủ, không câu lý do, không một byte của khoá — đủ để
  * kiểm từ ngoài "khoá đã tới container chưa" và "hai lượt deploy có đổi khoá không". Khoá TUỲ CHỌN nên nó KHÔNG góp vào
  * `platform.ok`: thiếu khoá chỉ tắt việc lưu bí mật kết nối, tổ chức nhà không ảnh hưởng.
+ *
+ * `degradedMigration` (12/10/2026): CỜ đúng/sai — tiến trình này có đang phục vụ tổ chức nào bằng LƯỢC ĐỒ CŨ sau một lượt migrate hết giờ
+ * không (db/index.ts · DEGRADED_MIGRATION). Không mã, không số lượng tổ chức (tuyến công khai); danh sách + lý do ở trang /platform và ở
+ * bước kiểm của deploy (`scripts/verify-migrations.ts` in «DEGRADED WORKSPACES»). Không góp vào `platform.ok` (đó là câu hỏi về nhà).
  */
 export async function GET() {
   const running = runningVersion();
@@ -63,6 +67,7 @@ async function platformHealth() {
       homeResolved: home.isHome && home.status === "ACTIVE",
       homeModules: `${enabled.size}/${MODULE_KEYS.length}`,
       migrations: rows?.[0]?.n ?? null,
+      degradedMigration: degradedOrganizations().length > 0,
       ...secretsKeyHealth(),
     };
   } catch (error) {

@@ -8,7 +8,7 @@ import { countHumanHandled } from "@/lib/sales-chatbot/bulk-return-ai";
 import { listLabels } from "@/lib/sales-chatbot/inbox-labels";
 import { INBOX_CHANNELS, INBOX_FILTERS, INBOX_LIST_MAX, INBOX_PERIODS, inboxHref, type InboxChannel, type InboxFilter, type InboxFilterState, type InboxHandler, type InboxPeriod } from "@/lib/sales-chatbot/inbox-shared";
 import { listPageRoutes } from "@/lib/sales-chatbot/channel-ownership";
-import { inboxEmptyHint } from "@/lib/sales-chatbot/inbox-search-shared";
+import { inboxEmptyHint, inboxListQuery, inboxQueryState, inboxSearchMode } from "@/lib/sales-chatbot/inbox-search-shared";
 import { humanCooldownMinutes } from "@/lib/sales-chatbot/conversation-control";
 import { organizationLevelPack } from "@/lib/sales-chatbot/levels";
 import { CUSTOMER_LEVELS, levelsForPack, type CustomerLevel } from "@/lib/sales-chatbot/levels-shared";
@@ -76,6 +76,13 @@ export default async function SalesInboxPage({ searchParams }: { searchParams: P
   // NHIỀU PAGE: một hộp thư chung cho mọi page; chọn một page là LỌC trên cùng hội thoại, không phải một hộp thư thứ hai.
   const pages = await inboxPages();
   const page = pages.some((p) => p.id === one("pg")) ? one("pg") : null;
+  // Ô tìm mặc định tìm TOÀN hộp thư (chủ shop 12/10/2026); `pv=loc` = người dùng chọn «Chỉ tìm trong bộ lọc hiện tại».
+  const searchScope = one("pv") === "loc" ? ("FILTER" as const) : null;
+  // Bộ lọc đang áp (URL) — MỘT đối tượng dựng mọi đường dẫn của hộp thư (`inboxHref`, ĐÚNG tên tham số cũ).
+  const state: InboxFilterState = { filter, q, page, channel, handler, assignee, phone, level, period, from, to, label, limit, selected: selected || null, searchScope };
+  // Bộ lọc THẬT SỰ áp cho danh sách + bộ đếm: đang tìm toàn hộp thư ⇒ bỏ MỌI bộ lọc (thẻ chưa đọc / chờ trả lời / cần người, AI-người,
+  // người phụ trách, page, kênh, nhãn, …) — chúng vẫn nằm trong URL nên xoá ô tìm là về đúng bộ lọc cũ (inbox-search-shared.ts).
+  const eff = inboxQueryState(state);
   // Nạp hội thoại KHÔNG đánh dấu đọc (P0.3, 10/10/2026 tối): khung chat hiện xong mới gửi tin khách cuối cùng nó đã hiện về
   // `/api/ai-sales/inbox-read`; danh sách vá theo xác nhận đó (inbox-read-shared.ts). Workspace KHÁCH: lý do AI không trả lời + dấu vết từng tin lọc ở MÁY CHỦ trước khi vào props (lib/saas/visibility.ts).
   // Bấm sang hội thoại khác KHÔNG đi qua đây (thread-pane.tsx — chỉ tải hội thoại); đây là lối mở bằng đường dẫn / tự làm mới.
@@ -83,7 +90,7 @@ export default async function SalesInboxPage({ searchParams }: { searchParams: P
   const thread = selected ? await inboxThreadPayload(user, selected) : null;
   const canManage = can(user, "ai_sales:manage");
   const [list, users, assignees, pack, routes, cooldown, orderGate, bulkCount] = await Promise.all([
-    listInbox(user, { filter, channel, q, label, page, phone, level, assignee, period, from, to, limit, handler }),
+    listInbox(user, inboxListQuery(state)),
     assignableUsers(user),
     inboxAssignees(user),
     organizationLevelPack(),
@@ -95,12 +102,12 @@ export default async function SalesInboxPage({ searchParams }: { searchParams: P
     countHumanHandled(user).catch(() => null),
   ]);
   const levels = levelsForPack(pack);
-  const advanced = Boolean(channel || label || assignee || period || phone === "NONE");
+  const advanced = Boolean(eff.channel || eff.label || eff.assignee || eff.period || eff.phone === "NONE");
   // Hộp thư rỗng mà KHÔNG lọc gì ⇒ hỏi «đã nối kênh nào chưa» bằng ĐÚNG hàm của bước onboarding «đã nối kênh» (Pancake · Facebook
   // nối thẳng · Zalo OA · chat web đã xuất bản — lib/onboarding/go-live.ts), không chỉ danh sách page của hộp thư: shop chỉ nối
   // Zalo OA / chat web thì không có page Facebook nào mà vẫn có kênh. Chỉ đọc khi hộp thư rỗng thật (trang có tin không tốn gì);
   // đọc hỏng ⇒ KHÔNG kết luận «chưa nối kênh» (chưa biết không phải «không có»).
-  const unfiltered = filter === "ALL" && !q && !advanced && !level && phone === null && !handler && !page;
+  const unfiltered = eff.filter === "ALL" && !q && !advanced && !eff.level && eff.phone === null && !eff.handler && !eff.page;
   const emptyInbox = list.ok && list.total === 0 && unfiltered;
   // Đệm 60 giây theo MÃ TỔ CHỨC (`memo` của lib/cache.ts — khoá mang mã tổ chức, và memo tự thêm tiền tố tổ chức): hộp thư là
   // trang nhà của mọi shop mới và tự làm mới mỗi 5 giây, bốn lượt đọc kênh không cần chạy lại mỗi lượt. Nối kênh là lượt ghi của
@@ -111,10 +118,8 @@ export default async function SalesInboxPage({ searchParams }: { searchParams: P
   // Nút «Kết nối Facebook» theo ĐÚNG quyền nối kênh của màn Kênh kết nối (`CHANNELS_MANAGE_PERMISSION`), không theo quyền quản lý
   // chatbot: người chỉ xem được Kênh kết nối mà bấm vào sẽ tới một màn không có nút nào cho họ.
   const canConnect = can(user, CHANNELS_MANAGE_PERMISSION);
-  // Bộ lọc đang áp — MỘT đối tượng dựng mọi đường dẫn của hộp thư (`inboxHref`, ĐÚNG tên tham số cũ).
-  const state: InboxFilterState = { filter, q, page, channel, handler, assignee, phone, level, period, from, to, label, limit, selected: selected || null };
   const href = (patch: Parameters<typeof inboxHref>[1]) => inboxHref(state, patch);
-  const emptyHint = list.ok ? inboxEmptyHint(filter, list.counts, q) : null;
+  const emptyHint = list.ok ? inboxEmptyHint(eff.filter, list.counts, q) : null;
   const description = `Facebook · Instagram · Zalo OA · chat web — trả lời khách ngay tại đây. Nhân viên gửi tin thì AI nhường ${cooldown} phút.`;
 
   return (
@@ -140,6 +145,7 @@ export default async function SalesInboxPage({ searchParams }: { searchParams: P
               pages={pages}
               labels={labels}
               users={users.length ? users : assignees}
+              total={list.total}
               tools={
                 <>
                   <InboxAutoRefresh waiting={list.counts.UNANSWERED} unread={list.counts.UNREAD} unreadStamp={list.unreadStamp} compact />
@@ -173,8 +179,8 @@ export default async function SalesInboxPage({ searchParams }: { searchParams: P
                     Chưa có tin khách nào — tin nhắn mới sẽ hiện ở đây ngay khi khách nhắn.
                   </li>
                 ) : (
-                  <li className="space-y-2 p-6 text-center text-sm text-muted-foreground" data-testid="inbox-empty-filter">
-                    <p>Không có hội thoại nào ở bộ lọc này.</p>
+                  <li className="space-y-2 p-6 text-center text-sm text-muted-foreground" data-testid="inbox-empty-filter" data-search-mode={inboxSearchMode(state)}>
+                    <p>{inboxSearchMode(state) === "GLOBAL" ? `Không tìm thấy hội thoại nào khớp «${q.trim()}» trong toàn hộp thư.` : inboxSearchMode(state) === "FILTERED" ? `Không có hội thoại nào khớp «${q.trim()}» trong bộ lọc hiện tại.` : "Không có hội thoại nào ở bộ lọc này."}</p>
                     {/* Bộ lọc rỗng mà «Tất cả» (cùng ô tìm, cùng page) có ⇒ nói ra và dẫn sang — số từ CÙNG câu đếm (inbox-search-shared.ts). */}
                     {emptyHint ? (
                       <p data-testid="inbox-empty-hint" data-count={emptyHint.count}>
@@ -187,7 +193,7 @@ export default async function SalesInboxPage({ searchParams }: { searchParams: P
                   </li>
                 )
               ) : null}
-              <ConversationRows rows={list.rows} state={state} showPage={pages.length > 1 && !page} />
+              <ConversationRows rows={list.rows} state={state} total={list.total} showPage={pages.length > 1 && !eff.page} />
               {list.rows.length >= limit && limit < INBOX_LIST_MAX ? (
                 <li className="p-2 text-center">
                   <Link href={href({ n: String(Math.min(INBOX_LIST_MAX, limit + 100)) })} className="text-[13px] font-medium text-primary hover:underline">
