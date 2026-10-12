@@ -164,10 +164,12 @@ export async function testAddressNormalizeTools() {
   const bogus = await executeTool("update_draft_order", { ward: "Phường Cổ Nhuế 2" }, ctx(clone(gate.state), "phường Cổ Nhuế 2 em ơi", 6));
   assert.ok(bogus.isError && /không có trong danh mục/.test(bogus.content), bogus.content);
 
-  // Tự chốt (P0-A của main) đi qua CÙNG mệnh đề: khách chưa được hỏi ⇒ chưa tự chốt, nói đúng phần thiếu; đã hỏi lượt trước ⇒ không chặn vì địa chỉ.
+  // Tự chốt của máy chủ (P0-A, main): biết tỉnh mà xã mơ hồ KHÔNG chặn — đơn tự chốt kèm cờ cần kiểm (tests/sales-quote-integrity
+  // «qi-tu-chot-can-kiem»). Chưa biết tỉnh («P13 GV» không ghi tỉnh) thì CÓ chặn: cổng «thiếu tỉnh» không bị viết tắt vượt qua.
   const ac: ChatState = { ...clone(base), draft: { ...clone(base).draft!, quote: { id: "q-addr", priceVersion: "pv-addr", subtotal: 280_000, total: 280_000 } } };
-  assert.match(autoConfirmBlocker(ac, { lastUserText: "ok em", turn: 5 }) ?? "", /Địa chỉ chưa chuẩn hoá.*phường Thượng Cát/);
-  assert.equal(autoConfirmBlocker({ ...ac, addressAsk: { key: addressCheckOf(recipient).key, turn: 4 } }, { lastUserText: "ok em", turn: 5 }), null, "đã hỏi ở lượt trước ⇒ không chặn vì địa chỉ");
+  assert.equal(autoConfirmBlocker(ac, { lastUserText: "ok em", turn: 5 }), null, "xã mơ hồ, biết tỉnh ⇒ tự chốt kèm cờ (luật P0-A)");
+  const acGv: ChatState = { ...ac, draft: { ...ac.draft!, recipient: { ...recipient, address: GO_VAP } } };
+  assert.match(autoConfirmBlocker(acGv, { lastUserText: "ok em", turn: 5 }) ?? "", /tỉnh \/ thành/, "«P13 GV» không tỉnh ⇒ chưa tự chốt");
 
   // Ca KimThu Le «P13 GV» không ghi tỉnh: cổng chốt hỏi TỈNH (xác nhận cách đọc «GV» = quận Gò Vấp, TP HCM), không đưa danh sách phường.
   const gvRecipient = { ...recipient, address: GO_VAP };

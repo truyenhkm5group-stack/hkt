@@ -617,8 +617,8 @@ export function addressCheckOf(r: Pick<Recipient, "address" | "province" | "ward
 }
 
 /**
- * Địa chỉ mơ hồ / không đọc được mà khách CHƯA được hỏi ở một lượt TRƯỚC ⇒ chưa chốt (cả chốt tay `confirm_order` lẫn tự chốt
- * `autoConfirmBlocker` — một mệnh đề). Gọi lẻ không có lượt (bài kiểm công cụ) ⇒ không xét.
+ * Địa chỉ mơ hồ / không đọc được mà khách CHƯA được hỏi ở một lượt TRƯỚC ⇒ `confirm_order` (bot gọi chốt) chưa chốt, hỏi đúng câu.
+ * Gọi lẻ không có lượt (bài kiểm công cụ) ⇒ không xét. Lượt TỰ CHỐT của máy chủ không đi qua đây (luật P0-A: tự chốt kèm cờ cần kiểm).
  */
 function addressAskPending(state: ChatState, chk: { key: string; view: AddressCheckView }, turn: number | undefined): boolean {
   const unsure = chk.view.status === "AMBIGUOUS" || chk.view.status === "NOT_FOUND";
@@ -993,7 +993,7 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
       // hỏi ĐÚNG câu của bộ đọc rồi dừng. Đã hỏi ở lượt trước mà khách vẫn đồng ý ⇒ chốt theo luật chủ shop 08/10 (máy chốt + cờ
       // CẦN NGƯỜI KIỂM «địa chỉ chưa ghép» — ô xã vẫn trống, không đoán). Bài kiểm gọi lẻ (không có lượt) ⇒ không xét.
       const addrChk = addressCheckOf(d.recipient);
-      if (ctx.turn !== undefined && addressAskPending(state, addrChk, ctx.turn)) {
+      if (!ctx.autoConfirming && ctx.turn !== undefined && addressAskPending(state, addrChk, ctx.turn)) {
         state.addressAsk = { key: addrChk.key, turn: ctx.turn };
         const noProvince = addrChk.view.missing.includes("province");
         const next = noProvince ? "Khách nói tỉnh / thành ⇒ update_draft_order với address thêm đúng tên tỉnh khách nói (KHÔNG tự thêm)" : "Khách nói tên xã / phường ⇒ update_draft_order với ward = tên đó rồi confirm_order";
@@ -1221,9 +1221,8 @@ export function autoConfirmBlocker(state: ChatState, ctx: Pick<ToolContext, "las
   const gaps = manualOrderGaps({ phone: d.recipient.phone, address: d.recipient.address, province: d.recipient.province || resolveRecipientPlace({ address: d.recipient.address, province: d.recipient.province, ward: "" }).province }, d.lines.length);
   if (gaps.includes("SĐT")) return "SĐT chưa hợp lệ — hỏi lại khách SĐT";
   if (gaps.includes("địa chỉ") || gaps.includes("tỉnh / thành")) return "Địa chỉ chưa đủ để giao (chưa đọc được tỉnh / thành) — hỏi khách đúng phần còn thiếu";
-  // Xã / phường chưa ghép được theo địa giới mới mà khách chưa được hỏi (P0 address-normalize) ⇒ hỏi ĐÚNG câu của bộ đọc, chưa tự chốt.
-  const addr = addressCheckOf(d.recipient);
-  if (addressAskPending(state, addr, ctx.turn)) return `Địa chỉ chưa chuẩn hoá (${addr.view.status}) — hỏi khách đúng câu: «${addr.view.ask_customer}»`;
+  // Xã / phường chưa ghép (biết tỉnh) KHÔNG chặn tự chốt — luật P0-A: đơn tự chốt kèm cờ ADDRESS_UNRESOLVED, câu ghi nhận
+  // ORDER_PENDING_ADDRESS, nhân viên hỏi lại. Tỉnh chỉ suy từ viết tắt («P13 GV») là CHƯA BIẾT TỈNH ⇒ đã dừng ở dòng trên.
   return null;
 }
 
