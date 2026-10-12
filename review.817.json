@@ -1,0 +1,8 @@
+{
+  "pr": 817,
+  "sha": "1cc2023ac3543c21f13eadab3243185cde077f50",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-12T09:59:39.148Z",
+  "note": "Một chỗ quyết bộ lọc (inboxQueryState): q ≠ rỗng ⇒ bỏ mọi bộ lọc trạng thái/người/page/kênh/SĐT/level/thời gian/nhãn; pv=loc mới giữ; xếp hạng SĐT khớp chính xác chỉ là khoá xếp; build đạt"
+}
