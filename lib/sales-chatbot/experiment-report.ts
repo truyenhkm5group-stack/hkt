@@ -1,6 +1,7 @@
 import { parsePerfPeriod } from "@/lib/sales-chatbot/performance-shared";
 import { and, desc, eq, gte, inArray, lte, ne, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
+import { compatTableColumns } from "@/lib/db/serve-compat-columns";
 import { dauNgayVN } from "@/lib/ai/budget";
 import { aiCostOfConversationSets } from "@/lib/ai-usage/conversation-cost";
 import { can, type SessionUser } from "@/lib/auth/session";
@@ -177,7 +178,7 @@ export async function loadConversationReview(user: SessionUser, id: string): Pro
   if (!can(user, "ai_sales:view")) return { error: "Bạn không có quyền xem AI bán hàng." };
   const db = await getDb();
   const c = schema.salesChatConversations;
-  const [conv] = await db.select().from(c).where(eq(c.id, String(id ?? ""))).limit(1);
+  const [conv] = await db.select(compatTableColumns(c)).from(c).where(eq(c.id, String(id ?? ""))).limit(1);
   if (!conv || conv.channel === "TEST") return { error: "Không có hội thoại này." };
   const view = await conversationView(conv.id);
   if (!view) return { error: "Không có hội thoại này." };
