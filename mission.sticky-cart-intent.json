@@ -3,7 +3,7 @@
   "mission_id": "sticky-cart-intent",
   "title": "P0: giỏ dính — số lượng khách nói tường minh chỉ đổi khi có câu sửa tường minh; máy chủ từ chối hạ; upsell không downsell; khối ĐƠN HIỆN TẠI; bỏ câu mẫu «1kg ăn thử» khi đã có số lượng",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P0",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -23,9 +23,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-12T11:24:34.985Z",
-  "updated_at": "2026-10-12T19:17:08.331Z",
+  "updated_at": "2026-10-12T20:28:57.301Z",
   "last_heartbeat": "2026-10-12T19:17:08.331Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#819 → e6b979618a2a70115c69605a0184d50bcb71ad35"
+  },
   "handoff": {
     "branch": "fix/sticky-cart-intent",
     "sha": "dc497578babcdd5f5750337b8bed5bf4dace6eba",

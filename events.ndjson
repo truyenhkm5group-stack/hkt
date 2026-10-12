@@ -2264,3 +2264,4 @@
 {"at":"2026-10-12T19:17:08.367Z","actor":"DESKTOP-56TH98Y:wt-sticky-cart","kind":"HANDOFF","mission":"sticky-cart-intent","detail":"fix/sticky-cart-intent @ dc497578babc · 11 lệnh kiểm thử"}
 {"at":"2026-10-12T19:17:32.073Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DEPLOY_DISPATCHED","detail":"db425775ad59 · run 38296633657 https://github.com/truyenhkm5group-stack/hkt/actions/runs/38296633657"}
 {"at":"2026-10-12T19:18:28.157Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#819 @ dc497578babc · 79ac9224 (PASS vòng 4) + gộp main (#802/#818/#820): xung đột duy nhất ở import tools.ts; autoConfirmBlocker giữ cả cổng địa chỉ #802 lẫn giỏ; npm test đủ đạt"}
+{"at":"2026-10-12T20:28:57.336Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"sticky-cart-intent","detail":"#819 @ dc497578babc → e6b979618a2a (MERGE_NOW · MEDIUM · gates success)"}
