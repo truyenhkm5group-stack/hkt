@@ -2217,3 +2217,4 @@
 {"at":"2026-10-12T10:14:59.134Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"CLAIM","mission":"test-flake-ai-balance","detail":"BACKLOG · 0 mẫu phạm vi · MEDIUM"}
 {"at":"2026-10-12T10:21:46.798Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"gates-build-heap","detail":"#816 @ 18c7f97c925b → bfac9afcbf3d (MERGE_ISOLATED · HIGH · gates success)"}
 {"at":"2026-10-12T10:22:31.582Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#815 @ b0d7296b662c · c6341cc6 + gộp main (#816 heap build) — không đổi mã của nhánh"}
+{"at":"2026-10-12T10:54:15.501Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DEPLOY_DISPATCHED","detail":"bfac9afcbf3d · run 38239184896 https://github.com/truyenhkm5group-stack/hkt/actions/runs/38239184896"}
