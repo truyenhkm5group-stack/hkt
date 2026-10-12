@@ -2227,3 +2227,4 @@
 {"at":"2026-10-12T11:24:52.931Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"sticky-cart-intent","detail":"fix/sticky-cart-intent @ e2fa5896e754 · 3 lệnh kiểm thử"}
 {"at":"2026-10-12T11:25:26.138Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"sticky-cart-intent","detail":"#819 cho fix/sticky-cart-intent @ e2fa5896e754"}
 {"at":"2026-10-12T11:26:08.282Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#818 @ ce54c8990cbc · Script ops CHỈ ĐỌC (ERP_READ_ONLY + hỏi lại phiên, getDbForInspection, không getDb), tự chứa, MÃ HOÁ, xả stdout trước khi thoát; mục ops theo khuôn"}
+{"at":"2026-10-12T11:36:11.951Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"org-migrate-isolation","detail":"fix/org-migrate-isolation @ b0d7296b662c · 1 lệnh kiểm thử"}
