@@ -2251,3 +2251,4 @@
 {"at":"2026-10-12T15:27:16.226Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"stuck-conversation-audit","detail":"fix/stuck-conversation-audit @ c28a42a2a5b6 · 3 lệnh kiểm thử"}
 {"at":"2026-10-12T15:27:35.594Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#820 @ c28a42a2a5b6 · ecae99d2 + gộp main: chỉ hợp danh sách ops-vps.yml + khối sync-fixtures"}
 {"at":"2026-10-12T15:28:49.712Z","actor":"DESKTOP-56TH98Y:wt-hslc-postsale","kind":"HANDOFF","mission":"hslc-postsale-handoff","detail":"fix/hslc-postsale-handoff @ 6329931c08fd · 7 lệnh kiểm thử"}
+{"at":"2026-10-12T16:44:01.202Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"stuck-conversation-audit","detail":"#820 @ c28a42a2a5b6 → 427293109f3c (MERGE_ISOLATED · HIGH · gates success)"}
