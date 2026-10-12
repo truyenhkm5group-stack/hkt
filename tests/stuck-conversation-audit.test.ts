@@ -24,6 +24,9 @@ import { TAKEOVER_REASON } from "@/lib/sales-chatbot/conversation-control-shared
 import { WEB_STAFF_REASON } from "@/lib/sales-chatbot/inbox-states";
 import { ORDER_WRITE_HANDOFF_PREFIX } from "@/lib/constants/ops-signals";
 import { PRICE_UNVERIFIED_PREFIX } from "@/lib/sales-chatbot/quote-shared";
+import { RESUME_MAX_TURN_AGE_MS } from "@/lib/sales-chatbot/response-ownership";
+import { WATCHDOG_MAX_PER_SWEEP } from "@/lib/sales-chatbot/handoff-routing";
+import { DEAD_AI_DOWN_NOTE } from "@/lib/sales-chatbot/inbound-retry";
 import {
   addSilent,
   AI_DOWN_RETRY_MINUTES,
@@ -36,6 +39,9 @@ import {
   RECEIPT_CLAIM_RE,
   RECEIPT_CLAIM_SQL_RE,
   REASON_TEXT,
+  DEAD_AI_DOWN_NOTE_TEXT,
+  RESUME_WINDOW_MINUTES,
+  WATCHDOG_CAP,
   silentSince,
   silentSummary,
   type SilentRow,
@@ -106,6 +112,9 @@ function testCopies() {
   assert.equal(REASON_TEXT.ORDER_WRITE_PREFIX, ORDER_WRITE_HANDOFF_PREFIX);
   assert.ok(PRICE_UNVERIFIED_PREFIX.startsWith(REASON_TEXT.PRICE_PREFIX));
   assert.equal(AI_DOWN_RETRY_MINUTES, HUMAN_COOLDOWN_MINUTES);
+  assert.equal(RESUME_WINDOW_MINUTES * 60_000, RESUME_MAX_TURN_AGE_MS);
+  assert.equal(WATCHDOG_CAP, WATCHDOG_MAX_PER_SWEEP);
+  assert.equal(DEAD_AI_DOWN_NOTE_TEXT, DEAD_AI_DOWN_NOTE);
   console.log("  ✓ bản sao chữ / số của script tự chứa BẰNG hằng gốc");
 }
 
@@ -147,6 +156,8 @@ async function testDb() {
       assert.equal(a.counts.byClass.AI_DOWN_CLOCK_PUSHED.total, 1, "hỏng 300 phút trước mà updated_at vừa ghi ⇒ đồng hồ bị đẩy");
       assert.equal(a.counts.byClass.TAKEOVER.total, 1);
       assert.equal(a.counts.customerWaiting, 1);
+      assert.deepEqual([a.counts.watchdogReopen, a.counts.watchdogAnswerNow, a.counts.watchdogToHuman], [1, 0, 0], "chạy thử watchdog: mở lại k2 (AI hỏng bị đẩy đồng hồ), không lượt khách nào trong cửa sổ");
+      assert.match(silentSummary(ORG, a.counts).join("\n"), /CHẠY THỬ watchdog .*sẽ mở lại 1 .*AI trả lời ngay 0/);
       assert.ok(a.samples.POST_ORDER?.includes(k1.id), "mã hội thoại chỉ ở phần MÃ HOÁ");
       assert.ok(silentSummary(ORG, a.counts).every((l) => !l.includes(k1.id)), "tóm tắt không mang mã hội thoại");
 

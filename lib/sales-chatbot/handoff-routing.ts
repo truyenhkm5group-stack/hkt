@@ -513,8 +513,15 @@ export async function sweepHandoffOwnership(now: Date = new Date()): Promise<Han
  * mở lại qua `holdGate` (ghi có điều kiện + `ai.resumed` COOLDOWN_EXPIRED của MÁY). Chỉ những dòng `aiHoldOf` nói AI_ACTIVE kèm
  * `expired` — tiếp quản / chuyển người bắt buộc không bao giờ lọt vào. Lượt quét `resumeFanpageAfterPause` (job follow-up) sau đó
  * đánh giá lại lượt khách còn tươi. Trả số hội thoại đã mở lại. Không ném ra ngoài lượt quét.
+ *
+ * MỞ LẠI CHỈ ĐỔI TRẠNG THÁI GIỮ (đo 12/10/2026: HSLC 535 + qa 744 hội thoại «nhường đã hết» chờ mở): KHÔNG gọi AI, KHÔNG gửi, KHÔNG đụng
+ * tin khách cũ. Tin đã chốt lúc nhường chỉ được trả lời bởi đường hiện có — `resumeFanpageAfterPause` (lượt khách mới nhất còn trong
+ * `RESUME_MAX_TURN_AGE_MS` = 2 giờ, < cửa sổ nhắn tin 24 giờ của Meta, tối đa 20 hội thoại / lượt) và lượt thử lại DEAD «AI hỏng» (≤ 30 phút)
+ * — nên tin khách 3 ngày trước không bao giờ được gửi bù. Trần `WATCHDOG_MAX_PER_SWEEP` mỗi lượt quét (ưu tiên khách nhắn gần nhất) để
+ * không dồn lượt ghi / lượt AI cùng lúc; phần còn lại mở ở các lượt quét sau.
  */
-export async function recoverExpiredHolds(now: Date): Promise<number> {
+export const WATCHDOG_MAX_PER_SWEEP = 100;
+export async function recoverExpiredHolds(now: Date, max: number = WATCHDOG_MAX_PER_SWEEP): Promise<number> {
   const db = await getDb();
   const rows = await db
     .select({
@@ -533,10 +540,12 @@ export async function recoverExpiredHolds(now: Date): Promise<number> {
     })
     .from(C)
     .where(and(eq(C.status, "HANDOFF"), sql`${C.channel} <> 'TEST'`, inArray(C.handoffReason, [...STAFF_COOLDOWN_REASON_LIST, AI_DOWN_HANDOFF_REASON])))
-    .limit(500);
+    .orderBy(sql`${C.lastCustomerAt} desc nulls last`)
+    .limit(2000);
   const { holdGate } = await import("@/lib/sales-chatbot/conversation-control");
   let n = 0;
   for (const r of rows) {
+    if (n >= max) break;
     const hold = aiHoldOf(r, now);
     if (hold.state !== "AI_ACTIVE" || !hold.expired) continue;
     // AI hỏng đã hết khoảng thử lại NHƯNG còn tin khách bị chốt lúc AI hỏng chưa ai trả lời ⇒ KHÔNG trả AI (AI không quay lại trả lời

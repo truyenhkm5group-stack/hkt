@@ -28,7 +28,10 @@ import { AI_DOWN_HANDOFF_REASON, AI_DOWN_UNANSWERED_REASON, aiDownStartedAt, aiH
 import { DEAD_AI_DOWN_NOTE } from "@/lib/sales-chatbot/inbound-retry";
 import { CLAIM_HANDOFF_REASON } from "@/lib/sales-chatbot/claim-guard";
 import { TAKEOVER_REASON } from "@/lib/sales-chatbot/conversation-control-shared";
-import { sweepHandoffOwnership } from "@/lib/sales-chatbot/handoff-routing";
+import { recoverExpiredHolds, sweepHandoffOwnership } from "@/lib/sales-chatbot/handoff-routing";
+import { resumablePauseNote } from "@/lib/sales-chatbot/fanpage";
+import { MESSAGING_WINDOW_MS } from "@/lib/sales-chatbot/followup-shared";
+import { buildCustomerTurns, resumeDecision, RESUME_MAX_TURN_AGE_MS, type LedgerMessage } from "@/lib/sales-chatbot/response-ownership";
 import { INBOX_OUTCOME_LABEL } from "@/lib/sales-chatbot/inbox-shared";
 import { classifyInboxState, needsHumanReasonSql } from "@/lib/sales-chatbot/inbox-states";
 import { customerComplaintSignal, customerNotReceivedSignal, customerPhaseOf, customerReceiptClaim, postSalePrompt, type LifecycleSnapshot } from "@/lib/sales-chatbot/lifecycle";
@@ -254,6 +257,28 @@ async function testDb() {
       assert.equal(n.length, 1);
       assert.match(n[0].title, /hàng đợi chung/, "có người xem hộp thư ⇒ tin nói đúng «hàng đợi chung»");
 
+      // ═══ Watchdog mở lại hàng loạt (đo 12/10: HSLC 535 + qa 744 «nhường đã hết») — CHỈ đổi trạng thái, có trần mỗi lượt, KHÔNG gửi bù ═══
+      // s5: tin khách 3 NGÀY trước bị chốt lúc nhân viên nhường · s6: tin khách 10 PHÚT trước. Cả hai nhường đã hết hạn.
+      await conv("s5", { handoffReason: FANPAGE_STAFF_REASON, humanCooldownUntil: ago(3 * 1440 - 30), lastCustomerAt: ago(3 * 1440), lastBotAt: ago(4 * 1440) });
+      await conv("s6", { handoffReason: FANPAGE_STAFF_REASON, humanCooldownUntil: ago(5), lastCustomerAt: ago(10), lastBotAt: ago(4 * 1440) });
+      await db.insert(schema.salesChatInbound).values({ pageId: "pg-hm", threadId: "s5", messageId: "s5-c", text: "còn hàng không shop", status: "SKIPPED", note: FANPAGE_STAFF_REASON, createdAt: ago(3 * 1440) });
+      await db.insert(schema.salesChatInbound).values({ pageId: "pg-hm", threadId: "s6", messageId: "s6-c", text: "còn hàng không shop", status: "SKIPPED", note: FANPAGE_STAFF_REASON, createdAt: ago(10) });
+      const msgsBefore = (await db.select({ n: sql<number>`count(*)::int` }).from(schema.salesChatMessages))[0]?.n ?? 0;
+      assert.equal(await recoverExpiredHolds(now, 1), 1, "trần mỗi lượt: chỉ MỘT hội thoại được mở");
+      const firstOpen = (await db.select({ id: c.id }).from(c).where(and(eq(c.status, "OPEN"), sql`${c.id} in ('s5','s6')`))).map((r) => r.id);
+      assert.deepEqual(firstOpen, ["s6"], "ưu tiên khách nhắn gần nhất");
+      assert.equal(await recoverExpiredHolds(now, 1), 1, "lượt sau mở hội thoại còn lại");
+      const inb = await db.select({ id: schema.salesChatInbound.messageId, st: schema.salesChatInbound.status }).from(schema.salesChatInbound).where(sql`${schema.salesChatInbound.messageId} in ('s5-c','s6-c')`);
+      assert.ok(inb.every((r) => r.st === "SKIPPED"), "mở lại KHÔNG đụng tin khách đã chốt (không requeue, không gửi)");
+      assert.equal((await db.select({ n: sql<number>`count(*)::int` }).from(schema.salesChatMessages))[0]?.n ?? 0, msgsBefore, "mở lại KHÔNG sinh câu bot nào");
+      // Đường DUY NHẤT trả lời tin đã chốt lúc nhường (`resumeFanpageAfterPause` → `resumeDecision`): 3 ngày ⇒ STALE (không gửi bù), 10 phút ⇒ trả lời.
+      const ledgerOf = (id: string, at: Date): LedgerMessage[] => [{ id, sender: "CUSTOMER", text: "còn hàng không shop", arrivedAt: at.getTime(), sourceAt: at.getTime(), status: "SKIPPED", note: FANPAGE_STAFF_REASON }];
+      const oldL = ledgerOf("s5-c", ago(3 * 1440));
+      const newL = ledgerOf("s6-c", ago(10));
+      assert.deepEqual(resumeDecision({ owner: "AI_ACTIVE", turns: buildCustomerTurns(oldL), ledger: oldL, nowMs: now.getTime(), pauseNotes: resumablePauseNote }), { resume: false, reason: "STALE" }, "tin 3 ngày trước ⇒ KHÔNG trả lời bù");
+      assert.equal(resumeDecision({ owner: "AI_ACTIVE", turns: buildCustomerTurns(newL), ledger: newL, nowMs: now.getTime(), pauseNotes: resumablePauseNote }).resume, true, "tin 10 phút trước ⇒ AI trả lời");
+      assert.ok(RESUME_MAX_TURN_AGE_MS < MESSAGING_WINDOW_MS, "cửa sổ trả lời bù (2 giờ) nằm TRONG cửa sổ nhắn tin 24 giờ của Meta");
+
       // ═══ Lõi trả-cho-AI luật cũ: chạy thử không ghi · --apply chỉ hội thoại không ai cầm · chạy lại không ghi thêm ═══
       const dry = await releaseLegacyPostOrderHandoffs({ apply: false, now });
       assert.deepEqual({ c: dry.candidates, r: dry.released, ...dry.byVerdict }, { c: 6, r: 0, RELEASE: 1, HELD_BY_PERSON: 1, STAFF_REPLIED: 1, TAKEOVER: 0, CUSTOMER_WAITING: 1, CUSTOMER_REQUEST: 2 });
@@ -274,7 +299,7 @@ async function testDb() {
       const [x] = await db.select({ s: schema.salesChatConversations.status }).from(schema.salesChatConversations).where(eq(schema.salesChatConversations.id, "x1"));
       assert.equal(x?.s, "HANDOFF", "CÁCH LY: lượt của tổ chức khác không đụng hội thoại ở đây");
     });
-    console.log("  ✓ PGlite: SQL ≡ thuần (AI hỏng) · watchdog mở lại AI hỏng / nhường đã hết, KHÔNG đụng chuyển khoản / tiếp quản / luật cũ · phòng trống ⇒ hàng đợi chung + 1 tin quản trị/ngày · AI hỏng còn tin chưa trả lời ⇒ ở lại hàng đợi người · ai.resumed của MÁY · trả-cho-AI: chạy thử 0 ghi, --apply 1/6 (loại khách đang chờ · khách có yêu cầu, kể cả tin gây chuyển người trước mốc), chạy lại 0 · cách ly tổ chức");
+    console.log("  ✓ PGlite: SQL ≡ thuần (AI hỏng) · watchdog mở lại AI hỏng / nhường đã hết, KHÔNG đụng chuyển khoản / tiếp quản / luật cũ · phòng trống ⇒ hàng đợi chung + 1 tin quản trị/ngày · AI hỏng còn tin chưa trả lời ⇒ ở lại hàng đợi người · watchdog có trần/lượt, mở lại KHÔNG gửi bù (3 ngày ⇒ STALE, 10 phút ⇒ trả lời) · ai.resumed của MÁY · trả-cho-AI: chạy thử 0 ghi, --apply 1/6 (loại khách đang chờ · khách có yêu cầu, kể cả tin gây chuyển người trước mốc), chạy lại 0 · cách ly tổ chức");
   } finally {
     await dropOrg(ORG);
     await dropOrg(ORG2);
