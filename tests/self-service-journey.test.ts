@@ -2167,15 +2167,16 @@ async function testJourney() {
       assert.match((await catchUpFanpage({ fetch: cuFetch.fetch })).detail[0] ?? "", /đang lùi/);
       assert.equal(cuFetch.calls.length, pollCallsBefore, "đang lùi ⇒ không gọi Pancake");
       await savePollState({ ...EMPTY_POLL_STATE, pageId: PAGE });
-      // SAU KHI CHỐT ĐƠN (03/10/2026 · «Đỗ Là»: bot hứa đổi lịch / đổi địa chỉ của đơn đã chốt). Trong 3 ngày ⇒ nhân viên xử lý,
-      // bot không trả lời; quá 3 ngày ⇒ lượt mua MỚI, đơn cũ sang pastOrders (báo cáo vẫn đếm).
+      // SAU KHI CHỐT ĐƠN — HOTFIX P0 12/10/2026 (ca HSLC «Khanh Nhung») THAY luật 03/10 («Đỗ Là»): máy chủ KHÔNG còn chuyển người MẶC
+      // ĐỊNH mọi tin sau chốt (AI dừng 1.500+ phút, 248 hội thoại treo). AI trả lời theo giai đoạn khách; sửa đơn chốt qua lời đồng ý vẫn
+      // đi người nhưng bằng lời dặn (`confirmedOrderPrompt`) + handoff_to_human có lý do. Quá 3 ngày ⇒ lượt mua MỚI, đơn cũ sang pastOrders.
       const po = await openConversation("TEST");
       const poState = { customer: { id: null, name: "Đỗ Là", phone: "0963535065", address: "29 Thảo Điền", province: "", simulated: true }, confirmed: { orderId: null, simulated: true, total: 680_000, at: new Date(Date.now() - 3_600_000).toISOString() }, stage: "DONE" };
       await db.update(schema.salesChatConversations).set({ state: poState }).where(eq(schema.salesChatConversations.id, po.id));
       const aiBefore = aiCalls.length;
       const poTurn = await chatTurn(po.id, "chủ nhật giao được không, cho chị đổi địa chỉ", { channel: "TEST" });
       const poConv = (await db.select().from(schema.salesChatConversations).where(eq(schema.salesChatConversations.id, po.id)))[0];
-      assert.ok(poTurn.ok && poConv.status === "HANDOFF" && /sau khi đã chốt đơn/.test(poConv.handoffReason ?? "") && aiCalls.length === aiBefore, `nhắn sau khi chốt ⇒ nhân viên, không gọi AI: ${JSON.stringify(poConv.handoffReason)}`);
+      assert.ok(poTurn.ok && poConv.status !== "HANDOFF" && !/sau khi đã chốt đơn/.test(poConv.handoffReason ?? ""), `nhắn sau khi chốt ⇒ KHÔNG chuyển người mặc định: ${JSON.stringify({ status: poConv.status, reason: poConv.handoffReason, ai: aiCalls.length - aiBefore })}`);
       await db.update(schema.salesChatConversations).set({ status: "OPEN", handoffReason: null, state: { ...poState, confirmed: { ...poState.confirmed, at: new Date(Date.now() - 4 * 86_400_000).toISOString() } } }).where(eq(schema.salesChatConversations.id, po.id));
       await chatTurn(po.id, "cho chị thêm 1kg chả cá nữa", { channel: "TEST" });
       const poAfter = (await db.select().from(schema.salesChatConversations).where(eq(schema.salesChatConversations.id, po.id)))[0];

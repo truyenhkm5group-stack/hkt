@@ -164,7 +164,7 @@
           "review": [
             []
           ],
-          "status": "HANDOFF",
+          "status": "OPEN",
           "toolErrors": []
         },
         "tiep-quan-nguoi": {
@@ -501,7 +501,7 @@
           "review": [
             []
           ],
-          "status": "OPEN",
+          "status": "HANDOFF",
           "toolErrors": []
         },
         "webhook-trung": {
