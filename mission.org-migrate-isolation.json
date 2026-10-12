@@ -3,7 +3,7 @@
   "mission_id": "org-migrate-isolation",
   "title": "P0: migration hỏng cô lập theo workspace — khoá theo tổ chức, lùi sau lỗi, DEGRADED_MIGRATION serve schema cũ (chỉ migration khai tương thích), verify-migrations có trần; probe chẩn đoán qa",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P0",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -25,9 +25,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-12T06:23:27.011Z",
-  "updated_at": "2026-10-12T11:36:11.914Z",
+  "updated_at": "2026-10-12T11:37:01.499Z",
   "last_heartbeat": "2026-10-12T11:36:11.914Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#815 → 803ba13520c730cfc7923e0521d87a094e73bd36"
+  },
   "handoff": {
     "branch": "fix/org-migrate-isolation",
     "sha": "b0d7296b662ca4a8017565004976e79cea560dfb",
