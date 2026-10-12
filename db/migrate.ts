@@ -2,6 +2,7 @@ import path from "node:path";
 import { sql } from "drizzle-orm";
 import type { Pool, PoolClient } from "pg";
 import { getPlatformDb, isPglite, type Db } from "@/db";
+import { isMigrationTimeoutError, migrationErrorText, missingMigrationTags, orgMigrationDegradeDecision } from "@/lib/constants/migration-serve-compat";
 
 const holder = globalThis as unknown as { __erpMigrated?: Promise<void> };
 
@@ -111,6 +112,43 @@ export async function acquireBoundedLock(
     const left = deadline - now();
     if (left <= 0) return false;
     await sleep(Math.min(pollMs, left));
+  }
+}
+
+/**
+ * ═══════ PHỤC VỤ BẰNG LƯỢC ĐỒ CŨ KHI MIGRATE HẾT GIỜ — `DEGRADED_MIGRATION` (chủ shop 12/10/2026, «Serve with old schema») ═══════
+ *
+ * Lượt migrate một tổ chức hỏng vì HẾT GIỜ (`isMigrationTimeoutError`) VÀ mọi migration còn thiếu đều nằm trong sổ tương thích
+ * (lib/constants/migration-serve-compat.ts) ⇒ workspace VẪN được phục vụ bằng lược đồ hiện có, thử lại theo nhịp
+ * `orgMigrateDegradedRetryMs()` (mặc định 6 giờ) + mỗi lần tiến trình khởi động. Mọi trường hợp khác ⇒ `serve: false`, bên gọi ném như
+ * cũ. Tắt hẳn: `ORG_MIGRATE_SERVE_DEGRADED=0`.
+ *
+ * Vì sao 6 giờ chứ không 30 phút: mỗi lượt thử 0245 giữ ACCESS EXCLUSIVE trên sales_chat_conversations tới trần 600 giây — thử 30 phút
+ * một lần là workspace đứng 1/3 thời gian.
+ */
+export function orgMigrateServeDegradedEnabled(): boolean {
+  return (process.env.ORG_MIGRATE_SERVE_DEGRADED || "").trim() !== "0";
+}
+
+export function orgMigrateDegradedRetryMs(): number {
+  return envMs("ORG_MIGRATE_DEGRADED_RETRY_MS", 6 * 3_600_000);
+}
+
+export type OrgDegradeCheck = { serve: true; missing: string[]; reason: string } | { serve: false; why: string };
+
+export async function orgMigrationDegradeCheck(db: Db, error: unknown): Promise<OrgDegradeCheck> {
+  if (!orgMigrateServeDegradedEnabled()) return { serve: false, why: "ORG_MIGRATE_SERVE_DEGRADED=0" };
+  if (!isMigrationTimeoutError(error)) return { serve: false, why: "lỗi không phải hết giờ" };
+  try {
+    const { readFileSync } = await import("node:fs");
+    const journal = (JSON.parse(readFileSync(path.join(process.cwd(), "drizzle", "meta", "_journal.json"), "utf8")) as { entries: { tag: string; when: number }[] }).entries;
+    const res = await db.execute(sql`select created_at from "drizzle"."__drizzle_migrations"`);
+    const rows = (Array.isArray(res) ? res : ((res as { rows?: unknown[] }).rows ?? [])) as { created_at: unknown }[];
+    const d = orgMigrationDegradeDecision(missingMigrationTags(journal, rows.map((r) => Number(r.created_at))));
+    if (!d.serve) return { serve: false, why: d.why };
+    return { serve: true, missing: d.missing, reason: migrationErrorText(error) };
+  } catch (e) {
+    return { serve: false, why: `không đọc được sổ migration: ${e instanceof Error ? e.message : String(e)}` };
   }
 }
 

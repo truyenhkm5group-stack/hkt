@@ -20,7 +20,10 @@ type Holder = {
   inspectClose?: Map<string, () => Promise<void>>;
   /** LÙI SAU LỖI migrate theo mã tổ chức (`getOrgDb`): tới `until` mọi lời mở CSDL tổ chức đó ném ngay, không chạy lại migration. */
   orgMigrateBackoff?: Map<string, { until: number; reason: string }>;
+  /** Tổ chức đang phục vụ bằng LƯỢC ĐỒ CŨ sau một lượt migrate hết giờ (`DEGRADED_MIGRATION`, db/migrate.ts::orgMigrationDegradeCheck). */
+  orgDegraded?: Map<string, OrgDegradedState>;
 };
+type OrgDegradedState = { since: number; reason: string; missing: string[]; nextRetryAt: number; attempts: number; retrying: boolean };
 /** `migratePid` = mã tiến trình máy chủ của kết nối ĐANG migrate (chỉ Postgres thật) — để `cancelOrganizationMigration` huỷ được câu đang chạy. */
 type OrgHandle = { db?: Db; pending?: Promise<Db>; pool?: Pool; pglite?: unknown; migratePid?: number };
 const holder = globalThis as unknown as { __erpDb?: Holder };
@@ -277,7 +280,10 @@ export async function releaseOrganizationDb(code: string, opts: { inspectionOnly
   const app = opts.inspectionOnly ? undefined : h.orgs?.get(code);
   if (app) h.orgs?.delete(code);
   // Mở lại sau khi đóng là một lượt MỚI (offboard rồi cấp lại cùng mã) — không mang theo lượt lùi của handle cũ.
-  if (!opts.inspectionOnly) h.orgMigrateBackoff?.delete(code);
+  if (!opts.inspectionOnly) {
+    h.orgMigrateBackoff?.delete(code);
+    h.orgDegraded?.delete(code);
+  }
   const pendingInspect = h.inspect?.get(code);
   h.inspect?.delete(code);
   if (app?.pending) await app.pending.catch(() => undefined);
@@ -356,6 +362,7 @@ async function getOrgDb(code: string): Promise<Db> {
   const orgs = (holder.__erpDb!.orgs ??= new Map());
   let h = orgs.get(code);
   if (h?.db) {
+    maybeRetryDegraded(code, h);
     // Dùng gần đây nhất ⇒ cuối hàng (Map giữ thứ tự chèn) — LRU của `evictIdlePgliteOrgs`.
     if (h.pglite) {
       orgs.delete(code);
@@ -393,12 +400,35 @@ async function getOrgDb(code: string): Promise<Db> {
         db = createPg(url, Math.max(1, Number(process.env.PGPOOL_MAX_ORG) || 2), (p) => (handle.pool = p));
       }
       // CSDL tổ chức tự áp bộ migration khi mở lần đầu trong tiến trình (idempotent, có khoá).
-      const { migrateOrganizationDb, orgMigrateRetryAfterMs } = await import("./migrate");
+      const { migrateOrganizationDb, orgMigrateRetryAfterMs, orgMigrationDegradeCheck, orgMigrateDegradedRetryMs } = await import("./migrate");
+      const { migrationErrorText } = await import("@/lib/constants/migration-serve-compat");
+      let failure: { error: unknown } | null = null;
       try {
         await migrateOrganizationDb(db, { pool: handle.pool, onMigrating: (pid) => (handle.migratePid = pid) });
       } catch (error) {
+        failure = { error };
+      } finally {
+        handle.migratePid = undefined;
+      }
+      if (failure) {
+        const { error } = failure;
+        // HẾT GIỜ + mọi migration còn thiếu đều trong sổ tương thích ⇒ phục vụ bằng LƯỢC ĐỒ CŨ (DEGRADED_MIGRATION), không ném.
+        // Mọi trường hợp khác (lỗi SQL thật, thiếu migration ngoài sổ, đã tắt bằng env) ⇒ hành vi cũ: lùi + ném.
+        const check = await orgMigrationDegradeCheck(db, error);
+        if (check.serve) {
+          const now = Date.now();
+          const st: OrgDegradedState = { since: now, reason: check.reason, missing: check.missing, nextRetryAt: now + orgMigrateDegradedRetryMs(), attempts: 1, retrying: false };
+          (holder.__erpDb!.orgDegraded ??= new Map()).set(code, st);
+          console.warn(
+            `[org-migrate] DEGRADED_MIGRATION «${code}»: migrate hết giờ, PHỤC VỤ BẰNG LƯỢC ĐỒ CŨ — thiếu ${check.missing.join(", ")} · thử lại lúc ${new Date(st.nextRetryAt).toISOString()} · lỗi: ${check.reason}`,
+          );
+          backoff.delete(code);
+          handle.db = db;
+          if (handle.pglite) await evictIdlePgliteOrgs(orgs, code);
+          return db;
+        }
         const retryMs = orgMigrateRetryAfterMs(error);
-        if (retryMs > 0) backoff.set(code, { until: Date.now() + retryMs, reason: (error instanceof Error ? error.message : String(error)).slice(0, 300) });
+        if (retryMs > 0) backoff.set(code, { until: Date.now() + retryMs, reason: migrationErrorText(error) });
         // Bể / PGlite của lượt hỏng không ai dùng lại (lượt sau dựng handle mới) — đóng, không để rò một handle mỗi lần thử, và
         // không để hai PGlite cùng mở một thư mục khi hết hạn lùi.
         const pool = handle.pool;
@@ -408,9 +438,8 @@ async function getOrgDb(code: string): Promise<Db> {
         if (pool) void pool.end().catch(() => undefined);
         if (pglite) await pglite.close().catch(() => undefined);
         throw error;
-      } finally {
-        handle.migratePid = undefined;
       }
+      holder.__erpDb!.orgDegraded?.delete(code);
       backoff.delete(code);
       handle.db = db;
       if (handle.pglite) await evictIdlePgliteOrgs(orgs, code);
@@ -424,6 +453,49 @@ async function getOrgDb(code: string): Promise<Db> {
 }
 
 /**
+ * Thử lại migration của một tổ chức đang `DEGRADED_MIGRATION` khi tới hạn — NỀN, không chặn lời gọi (lời gọi vẫn nhận handle đang phục vụ
+ * bằng lược đồ cũ). Hạn kế tiếp đặt TRƯỚC khi thử, nên mọi lời gọi trong lúc thử không đẻ thêm lượt nào. Thành công ⇒ hết degraded; hỏng
+ * (bất kể lý do) ⇒ VẪN phục vụ bằng lược đồ cũ — workspace đã chạy được với nó, thử lại hỏng không phải lý do để đánh sập — và ghi log.
+ */
+function maybeRetryDegraded(code: string, h: OrgHandle): void {
+  const st = holder.__erpDb!.orgDegraded?.get(code);
+  if (!st || st.retrying || !h.db || Date.now() < st.nextRetryAt) return;
+  st.retrying = true;
+  st.attempts += 1;
+  const db = h.db;
+  void (async () => {
+    const m = await import("./migrate");
+    const { migrationErrorText } = await import("@/lib/constants/migration-serve-compat");
+    st.nextRetryAt = Date.now() + m.orgMigrateDegradedRetryMs();
+    try {
+      await m.migrateOrganizationDb(db, { pool: h.pool, onMigrating: (pid) => (h.migratePid = pid) });
+      holder.__erpDb!.orgDegraded?.delete(code);
+      console.log(`[org-migrate] «${code}» migrate xong ở lượt thử thứ ${st.attempts} — hết DEGRADED_MIGRATION.`);
+    } catch (error) {
+      st.reason = migrationErrorText(error);
+      console.warn(`[org-migrate] DEGRADED_MIGRATION «${code}»: lượt thử thứ ${st.attempts} hỏng — vẫn phục vụ bằng lược đồ cũ · thử lại lúc ${new Date(st.nextRetryAt).toISOString()} · lỗi: ${st.reason}`);
+    } finally {
+      st.retrying = false;
+      h.migratePid = undefined;
+    }
+  })().catch(() => undefined);
+}
+
+export type OrgMigrationDegraded = { code: string; since: string; reason: string; missing: string[]; nextRetryAt: string; attempts: number; retrying: boolean };
+
+/** Trạng thái `DEGRADED_MIGRATION` của MỘT tổ chức trong tiến trình này — `null` = không degraded (hoặc chưa mở). */
+export function organizationMigrationDegraded(code: string): OrgMigrationDegraded | null {
+  const st = holder.__erpDb!.orgDegraded?.get(code);
+  if (!st) return null;
+  return { code, since: new Date(st.since).toISOString(), reason: st.reason, missing: [...st.missing], nextRetryAt: new Date(st.nextRetryAt).toISOString(), attempts: st.attempts, retrying: st.retrying };
+}
+
+/** Mọi tổ chức đang `DEGRADED_MIGRATION` trong tiến trình này (trang /platform, /api/health chỉ lấy CỜ, bước kiểm deploy). */
+export function degradedOrganizations(): OrgMigrationDegraded[] {
+  return [...(holder.__erpDb!.orgDegraded?.keys() ?? [])].sort().map((c) => organizationMigrationDegraded(c)!);
+}
+
+/**
  * HUỶ câu migration ĐANG CHẠY của một tổ chức trong tiến trình này (`pg_cancel_backend` trên đúng kết nối đang cầm khoá migrate, qua
  * một kết nối khác của cùng bể). Dùng DUY NHẤT ở bước kiểm của deploy (`scripts/verify-migrations.ts`) khi một tổ chức quá trần thời
  * gian: bước kiểm đi tiếp, không để một câu 600 giây tiếp tục ăn CPU trong lúc smoke chạy. Lượt migrate ấy ROLLBACK (drizzle chạy cả
@@ -431,7 +503,7 @@ async function getOrgDb(code: string): Promise<Db> {
  */
 export async function cancelOrganizationMigration(code: string): Promise<boolean> {
   const h = holder.__erpDb!.orgs?.get(code);
-  if (!h?.pool || !h.migratePid || h.db) return false;
+  if (!h?.pool || !h.migratePid) return false;
   try {
     const r = await h.pool.query<{ ok: boolean }>("select pg_cancel_backend($1) as ok", [h.migratePid]);
     return r.rows[0]?.ok === true;

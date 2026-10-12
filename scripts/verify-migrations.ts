@@ -31,7 +31,7 @@
  */
 import { readFileSync } from "node:fs";
 import { sql } from "drizzle-orm";
-import { cancelOrganizationMigration, getDb, getDbFor, type Db } from "@/db";
+import { cancelOrganizationMigration, getDb, getDbFor, organizationMigrationDegraded, type Db } from "@/db";
 import { fanOutOrganizationCodes, listOrganizations } from "@/lib/platform/organizations";
 
 type JournalEntry = { idx: number; tag: string; when: number };
@@ -72,18 +72,27 @@ async function checkDb(label: string, db: Db, entries: readonly JournalEntry[]):
  *
  * Sau deploy #792, CSDL `qa` chạy câu dẫn xuất của 0245 tới trần 600 giây; script này mở tổ chức TUẦN TỰ và chờ vô hạn, nên treo tới
  * khi SSH của workflow deploy hết giờ ⇒ deploy đỏ mà smoke KHÔNG chạy, và các tổ chức đứng sau `qa` chưa được kiểm. Nay mỗi tổ chức
- * có trần (`VERIFY_ORG_MIGRATE_TIMEOUT_S`, mặc định 120 giây): quá trần ⇒ in ✗, HUỶ câu migration đang chạy của chính tiến trình này
+ * có trần (`VERIFY_ORG_MIGRATE_TIMEOUT_S`, mặc định 150 giây — DÀI HƠN trần chờ khoá migrate 120 giây, để khi ứng dụng đang cầm khoá
+ * của tổ chức đó thì bước kiểm nhận LOCK_BUSY ⇒ DEGRADED_MIGRATION có lý do, thay vì một TIMEOUT không nói gì): quá trần ⇒ in ✗, HUỶ câu
+ * migration đang chạy của chính tiến trình này
  * (`cancelOrganizationMigration`), ĐI TIẾP tổ chức sau, và cuối cùng thoát 1 — deploy vẫn đỏ đúng nghĩa (install-vps.sh ghi
  * MIGRATIONS_UNAPPLIED=1 rồi chạy tiếp smoke như mọi lần verify hỏng), chỉ là không treo.
  */
-export const VERIFY_ORG_TIMEOUT_DEFAULT_S = 120;
+export const VERIFY_ORG_TIMEOUT_DEFAULT_S = 150;
+
+/*
+ * ═══ DEGRADED_MIGRATION (chủ shop 12/10/2026, «Serve with old schema») ═══
+ * Tổ chức migrate hết giờ mà mọi migration còn thiếu nằm trong sổ tương thích được PHỤC VỤ bằng lược đồ cũ (db/index.ts). Với bước kiểm
+ * đó KHÔNG phải «khớp»: in ✗ + lý do + migration còn thiếu, gom vào dòng «DEGRADED WORKSPACES», và thoát 1 — deploy đỏ đúng nghĩa tới khi
+ * migration áp xong.
+ */
 
 export function verifyOrgTimeoutMs(env: Record<string, string | undefined> = process.env): number {
   const s = Number((env.VERIFY_ORG_MIGRATE_TIMEOUT_S || "").trim());
   return (Number.isFinite(s) && s > 0 ? s : VERIFY_ORG_TIMEOUT_DEFAULT_S) * 1000;
 }
 
-export type OrgVerifyStatus = "OK" | "MISSING" | "ERROR" | "TIMEOUT";
+export type OrgVerifyStatus = "OK" | "MISSING" | "DEGRADED" | "ERROR" | "TIMEOUT";
 export type OrgVerifyResult = { code: string; status: OrgVerifyStatus; seconds: number; detail?: string };
 
 const HET_GIO = Symbol("het-gio");
@@ -98,6 +107,8 @@ export async function verifyOrganizations<T>(
     open: (code: string) => Promise<T>;
     check: (code: string, db: T, openedSeconds: number) => Promise<number>;
     cancel: (code: string) => Promise<boolean>;
+    /** Tổ chức đang phục vụ bằng lược đồ cũ sau lượt mở này — `null` = không. */
+    degraded?: (code: string) => { reason: string; missing: readonly string[] } | null;
     timeoutMs: number;
     log?: (line: string) => void;
     error?: (line: string) => void;
@@ -127,7 +138,14 @@ export async function verifyOrganizations<T>(
         error(`[migrations] ✗ tổ chức «${code}»: ${detail}`);
         out.push({ code, status: "TIMEOUT", seconds: secs(), detail });
       } else {
-        out.push({ code, status: r > 0 ? "MISSING" : "OK", seconds: secs() });
+        const dg = deps.degraded?.(code) ?? null;
+        if (dg) {
+          const detail = `DEGRADED_MIGRATION — đang phục vụ bằng LƯỢC ĐỒ CŨ, thiếu ${dg.missing.join(", ")}; lý do: ${dg.reason}`;
+          error(`[migrations] ✗ tổ chức «${code}»: ${detail}`);
+          out.push({ code, status: "DEGRADED", seconds: secs(), detail });
+        } else {
+          out.push({ code, status: r > 0 ? "MISSING" : "OK", seconds: secs() });
+        }
       }
     } catch (e) {
       const detail = e instanceof Error ? e.message : String(e);
@@ -139,6 +157,8 @@ export async function verifyOrganizations<T>(
   }
   const hong = out.filter((r) => r.status !== "OK");
   if (codes.length) log(`[migrations] tổ chức khách: ${out.length - hong.length}/${out.length} khớp${hong.length ? ` · hỏng: ${hong.map((r) => `${r.code} (${r.status})`).join(", ")}` : ""}`);
+  const dgList = out.filter((r) => r.status === "DEGRADED");
+  if (dgList.length) error(`[migrations] DEGRADED WORKSPACES: ${dgList.map((r) => r.code).join(", ")} — phục vụ bằng lược đồ cũ, migration CHƯA xong (lib/constants/migration-serve-compat.ts).`);
   return out;
 }
 
@@ -153,6 +173,7 @@ async function main() {
     open: (code) => getDbFor({ code, isHome: false }),
     check: (code, db, openedSeconds) => checkDb(`tổ chức «${code}» (${openedSeconds.toFixed(1)} giây)`, db, journal.entries),
     cancel: (code) => cancelOrganizationMigration(code),
+    degraded: (code) => organizationMigrationDegraded(code),
     timeoutMs,
   });
   if (results.some((r) => r.status !== "OK")) failed = true;

@@ -116,6 +116,8 @@ export function testKhongSoBangMocDocLaiDongHo() {
 
 /** Miễn trừ — mỗi dòng nói RÕ vì sao đọc môi trường ở đó là đo MÃ NGUỒN chứ không đo máy. */
 const DOC_MOI_TRUONG_DA_KHAI: Record<string, string> = {
+  "tests/migration-serve-compat.test.ts":
+    "ĐẶT ORG_MIGRATE_SERVE_DEGRADED / ORG_MIGRATE_DEGRADED_RETRY_MS / ORG_MIGRATE_BACKOFF_MS = giá trị BỊA để kiểm công tắc tắt phục vụ lược đồ cũ và nhịp thử lại trong vài trăm mili giây thay vì 6 giờ — đó là ĐẦU VÀO của phép kiểm, trả lại nguyên trạng trong finally; kết luận không đổi theo máy.",
   "tests/org-migrate-isolation.test.ts":
     "ĐẶT ORG_MIGRATE_BACKOFF_MS / ORG_MIGRATE_BUSY_RETRY_MS = giá trị BỊA (vài trăm mili giây, hoặc chuỗi hỏng) để kiểm chính sách lùi sau lỗi migrate và để hạn lùi hết trong vài trăm mili giây thay vì 30 phút — đó là ĐẦU VÀO của phép kiểm, trả lại nguyên trạng trong finally; kết luận không đổi theo máy.",
   "tests/tech-mission-control.test.ts":

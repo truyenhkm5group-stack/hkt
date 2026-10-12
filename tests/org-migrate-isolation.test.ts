@@ -16,6 +16,7 @@
  */
 import assert from "node:assert/strict";
 import { readFileSync, rmSync } from "node:fs";
+import { sql } from "drizzle-orm";
 import { getDbFor, organizationDatabaseUrl, releaseOrganizationDb, schema } from "@/db";
 import {
   acquireBoundedLock,
@@ -181,12 +182,33 @@ async function testBackoffAndProbe() {
     // Sổ migration sai hình dạng ⇒ drizzle hỏng ở câu đọc sổ (thiếu cột hash) — một lượt migrate HỎNG thật, tất định.
     await seedBroken(dir, `create schema drizzle; create table drizzle.__drizzle_migrations (id int)`);
     const org = { code: ORG, isHome: false };
+    // BẤT BIẾN ĐA TỔ CHỨC (chủ shop 12/10/2026): «migration failure isolated per workspace» — một tổ chức hỏng migrate, tổ chức khác mở
+    // CÙNG LÚC vẫn lên bình thường (khoá theo tổ chức + lùi theo tổ chức + handle theo tổ chức).
+    const healthy = { code: `${ORG}-khoe`, isHome: false };
+    const healthyDir = organizationDatabaseUrl(healthy).replace(/^pglite:\/\//, "");
+    await releaseOrganizationDb(healthy.code);
+    rmSync(healthyDir, { recursive: true, force: true });
     let err1 = "";
-    await assert.rejects(getDbFor(org), (e: unknown) => ((err1 = e instanceof Error ? e.message : String(e)), true));
+    process.env.ORG_MIGRATE_BACKOFF_MS = "60000"; // tổ chức khoẻ migrate đủ bộ mất vài giây — hạn lùi phải còn khi hỏi lại
+    try {
+      const [broken, ok] = await Promise.allSettled([getDbFor(org), getDbFor(healthy)]);
+      assert.equal(broken.status, "rejected", "tổ chức hỏng migrate ⇒ ném");
+      err1 = broken.status === "rejected" ? String((broken.reason as Error)?.message ?? broken.reason) : "";
+      assert.equal(ok.status, "fulfilled", "tổ chức KHÁC mở cùng lúc vẫn lên");
+      if (ok.status === "fulfilled") await ok.value.execute(sql`select 1`);
+      await assert.rejects(getDbFor(org), /đang LÙI/);
+      await (await getDbFor(healthy)).execute(sql`select 1`);
+    } finally {
+      await releaseOrganizationDb(healthy.code);
+      rmSync(healthyDir, { recursive: true, force: true });
+    }
     assert.doesNotMatch(err1, /đang LÙI/, "lần đầu là lỗi gốc của migration");
-
+    console.log("  ✓ bất biến đa tổ chức: tổ chức hỏng migrate ném + lùi, tổ chức khác mở CÙNG LÚC vẫn lên và vẫn dùng được trong lúc tổ chức kia lùi");
+    await releaseOrganizationDb(ORG);
+    process.env.ORG_MIGRATE_BACKOFF_MS = "400";
+    await assert.rejects(getDbFor(org), (e: unknown) => e instanceof Error && !/đang LÙI/.test(e.message), "release xoá lượt lùi ⇒ thử lại thật");
     const t0 = Date.now();
-    await assert.rejects(getDbFor(org), (e: unknown) => e instanceof Error && /đang LÙI/.test(e.message) && e.message.includes(err1.slice(0, 40)));
+    await assert.rejects(getDbFor(org), (e: unknown) => e instanceof Error && /đang LÙI/.test(e.message) && /hash/.test(e.message));
     assert.ok(Date.now() - t0 < 200, "trong hạn lùi ⇒ ném NGAY, không chạy lại migration");
 
     await wait(500);
@@ -242,27 +264,30 @@ async function testVerifyDeadline() {
   const checked: string[] = [];
   const out: string[] = [];
   const t0 = Date.now();
-  const results = await verifyOrganizations(["a-shop", "qa", "loi", "thieu", "test-shop"], {
+  const results = await verifyOrganizations(["a-shop", "qa", "loi", "thieu", "cu", "test-shop"], {
     open: (code) => (code === "qa" ? new Promise<string>(() => undefined) : code === "loi" ? Promise.reject(new Error("không kết nối được")) : Promise.resolve(code)),
     check: async (code) => (checked.push(code), code === "thieu" ? 2 : 0),
     cancel: async (code) => (cancelled.push(code), true),
+    degraded: (code) => (code === "cu" ? { reason: "[57014] canceling statement due to statement timeout", missing: ["0245_sales_chat_last_inbound"] } : null),
     timeoutMs: 60,
     log: (l) => out.push(l),
     error: (l) => out.push(l),
   });
   assert.ok(Date.now() - t0 < 2_000, "tổ chức treo không làm treo bước kiểm");
-  assert.deepEqual(results.map((r) => `${r.code}:${r.status}`), ["a-shop:OK", "qa:TIMEOUT", "loi:ERROR", "thieu:MISSING", "test-shop:OK"]);
-  assert.deepEqual(checked, ["a-shop", "thieu", "test-shop"], "tổ chức SAU tổ chức treo vẫn được kiểm");
+  assert.deepEqual(results.map((r) => `${r.code}:${r.status}`), ["a-shop:OK", "qa:TIMEOUT", "loi:ERROR", "thieu:MISSING", "cu:DEGRADED", "test-shop:OK"]);
+  assert.deepEqual(checked, ["a-shop", "thieu", "cu", "test-shop"], "tổ chức SAU tổ chức treo vẫn được kiểm");
   assert.deepEqual(cancelled, ["qa"], "quá trần ⇒ gửi lệnh huỷ câu migration của chính bước kiểm");
   assert.ok(out.some((l) => /✗ tổ chức «qa»: quá \d+ giây/.test(l) && /HUỶ/.test(l)), "in ✗ rõ ràng");
-  assert.ok(out.some((l) => /2\/5 khớp · hỏng: qa \(TIMEOUT\), loi \(ERROR\), thieu \(MISSING\)/.test(l)), "dòng tổng kết");
+  assert.ok(out.some((l) => /2\/6 khớp · hỏng: qa \(TIMEOUT\), loi \(ERROR\), thieu \(MISSING\), cu \(DEGRADED\)/.test(l)), "dòng tổng kết");
+  assert.ok(out.some((l) => /✗ tổ chức «cu»: DEGRADED_MIGRATION — đang phục vụ bằng LƯỢC ĐỒ CŨ, thiếu 0245_sales_chat_last_inbound; lý do: \[57014\]/.test(l)), "degraded ⇒ ✗ + lý do");
+  assert.ok(out.some((l) => /DEGRADED WORKSPACES: cu —/.test(l)), "dòng DEGRADED WORKSPACES");
 
   const src = readFileSync("scripts/verify-migrations.ts", "utf8");
   assert.match(src, /if \(CHAY_THANG\) \{\n\s+main\(\)/, "main() chỉ chạy khi gọi thẳng — import từ bài kiểm không kéo process.exit");
   assert.match(src, /if \(results\.some\(\(r\) => r\.status !== "OK"\)\) failed = true;/, "tổ chức hỏng / quá trần ⇒ thoát 1");
   const install = readFileSync("scripts/install-vps.sh", "utf8");
   assert.match(install, /if ! docker exec erp-app npx tsx --tsconfig tsconfig\.json scripts\/verify-migrations\.ts; then\n\s+warn [^\n]*\n\s+MIGRATIONS_UNAPPLIED=1\nfi\n/, "install-vps.sh: verify hỏng ⇒ cảnh báo rồi chạy TIẾP smoke (không đổi hành vi deploy)");
-  console.log("  ✓ verify-migrations: trần mỗi tổ chức (mặc định 120 s) · treo ⇒ TIMEOUT + huỷ · tổ chức sau vẫn kiểm · không OK ⇒ thoát 1 · deploy chạy tiếp smoke");
+  console.log("  ✓ verify-migrations: trần mỗi tổ chức (mặc định 150 s > trần chờ khoá 120 s) · DEGRADED ⇒ ✗ + lý do + «DEGRADED WORKSPACES» · treo ⇒ TIMEOUT + huỷ · tổ chức sau vẫn kiểm · không OK ⇒ thoát 1 · deploy chạy tiếp smoke");
 }
 
 function testProbePureAndSource() {
