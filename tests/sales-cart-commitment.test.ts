@@ -26,6 +26,7 @@ import {
   classifyCartMessage,
   commitmentViolation,
   declinesAddOnOnly,
+  hasEditCue,
   holdCartText,
   orderReadiness,
   type AskedLine,
@@ -275,6 +276,61 @@ function testReviewCases() {
   assert.equal(commitmentViolation(fresh, [L("p-muc", "m1", "Chả mực giã tay (1kg)", 2, 1000)], 3), null);
   assert.equal(orderReadiness({ cart: base, declined: { reason: "x" }, blocker: null, lastUserText: "ok", hesitating: false }).level, "ON_HOLD", "đang từ chối ⇒ ON_HOLD");
   assert.equal(orderReadiness({ cart: base, cancelRequest: { orderIds: [] }, blocker: null, lastUserText: "ok", hesitating: false }).level, "ON_HOLD", "đang xin huỷ ⇒ ON_HOLD");
+}
+
+/** Review vòng 2 #819 @ 3f7858f1: ĐÚNG các câu tái hiện (CAO · TB-1 · TB-2 · mục nên làm cùng). */
+function testReview2() {
+  const apply = (c: CartCommitment | undefined, text: string, turn = 3) => applyCustomerCartMessage(c, text, turn, NOW());
+  // Giỏ hai món đã gắn đơn nháp: 2kg chả cá thu + 1kg chả mực.
+  const pair = () => bindCommitment(cartOf("2kg chả cá thu + 1kg chả mực"), [L("p-cct", "v1", "Chả cá thu (1kg)", 2, 1000), L("p-muc", "m1", "Chả mực giã tay (1kg)", 1, 1000)], 1, NOW());
+  const names = (c: CartCommitment | undefined) => (c?.selectedItems ?? []).map((x) => [x.label, x.quantity]);
+  // CAO: câu sửa KHÔNG có số trên giỏ hai món — giữ một món, bỏ món kia; máy chủ KHÔNG chặn đơn mới.
+  for (const t of ["chỉ lấy chả mực thôi", "chi lay cha muc thoi", "chả mực thôi"]) {
+    const out = apply(pair(), t);
+    assert.deepEqual(names(out), [["Chả mực giã tay", 1000]], `«${t}» ⇒ chỉ còn chả mực`);
+    assert.equal(commitmentViolation(out, [L("p-muc", "m1", "Chả mực giã tay (1kg)", 1, 1000)], 3), null, `«${t}»: bỏ chả cá KHÔNG bị chặn`);
+  }
+  for (const t of ["lấy chả cá thôi", "lay ca thu thoi", "mực thì thôi nhé", "thôi mực khỏi", "mực k lấy nữa", "chả mực thôi không lấy"]) {
+    const out = apply(pair(), t);
+    assert.deepEqual(names(out), [["Chả cá thu", 2000]], `«${t}» ⇒ chỉ còn chả cá (không huỷ cả giỏ)`);
+    assert.equal(commitmentViolation(out, [L("p-cct", "v1", "Chả cá thu (1kg)", 2, 1000)], 3), null, `«${t}»: bỏ chả mực KHÔNG bị chặn`);
+  }
+  assert.equal(classifyCartMessage("bớt chả mực 1kg").kind, "REDUCE", "«bớt chả mực 1kg» là bớt, không phải đặt 1kg");
+  const reduced = apply(pair(), "bớt chả mực 1kg");
+  assert.deepEqual(names(reduced), [["Chả cá thu", 2000]]);
+  assert.equal(commitmentViolation(reduced, [L("p-cct", "v1", "Chả cá thu (1kg)", 2, 1000)], 3), null);
+  // Dự phòng: giỏ ≥ 2 món + «thôi» / «chỉ» mà không phân loại chắc ⇒ nới lượt + hỏi lại.
+  for (const t of ["chỉ một món thôi nhé", "thôi lấy một loại thôi"]) {
+    const out = apply(pair(), t);
+    assert.equal(out?.relaxedTurn, 3, `«${t}» ⇒ tắt kiểm cứng của lượt`);
+    assert.ok(out?.clarify, `«${t}» ⇒ hỏi lại`);
+  }
+  for (const t of ["thế thôi", "chị lấy vậy thôi", "ok em", "không lấy thêm đâu"]) {
+    const c = pair();
+    assert.equal(apply(c, t), c, `«${t}» trên giỏ hai món ⇒ giữ nguyên, KHÔNG nới (G5)`);
+  }
+  // TB-1: câu thường ngày KHÔNG phải câu sửa — không nới kiểm cứng, câu bot «1kg ăn thử» vẫn bị thay.
+  const one = bound2kg();
+  for (const t of ["giảm giá được không em", "có giảm giá không", "đổi địa chỉ giúp chị", "sửa địa chỉ: 12 Hàng Bạc, Hà Nội", "đổi trả thế nào em", "ship cho bố chị nhé", "khỏi gọi trước nha em", "xuống nhà lấy được không", "bỏ vào túi giúp chị", "k lấy hóa đơn"]) {
+    assert.equal(hasEditCue(t, ["cha ca thu"]), false, `«${t}» không phải câu sửa`);
+    assert.equal(apply(one, t), one, `«${t}» không đổi giỏ, không nới`);
+    assert.match(commitmentViolation(apply(one, t), [L("p-cct", "v1", "Chả cá thu (1kg)", 1, 1000)], 3) ?? "", /KHÔNG được hạ/, `«${t}»: model hạ 1kg vẫn bị chặn`);
+    assert.equal(cartHoldVerdict("Dạ mình lấy 1kg ăn thử trước nhé, ngon thì lần sau lấy thêm ạ", one, t)?.reason, "TRIAL", `«${t}»: câu «1kg ăn thử» vẫn bị thay`);
+  }
+  // TB-2: câu bot TỰ hạ có chữ «bớt / bỏ / sửa đơn / giảm» mà khách chỉ nói «ok em» ⇒ vẫn bị thay.
+  for (const b of ["Dạ chị lấy bớt còn 1kg cho vừa nhé?", "Dạ chị bỏ bớt còn 1kg cho vừa nhé?", "Dạ em sửa đơn còn 1kg ăn thử cho chị nhé?", "Dạ mua 1kg được giảm 10k, mình lấy 1kg trước nhé?"]) {
+    assert.ok(cartHoldVerdict(b, one, "ok em"), `«${b}» ⇒ thay bằng câu giữ đơn`);
+  }
+  // Nên làm cùng: «Huy» là tên người, «cancel đơn» là huỷ, hoãn kiểu hẹn lại / chê giá.
+  assert.equal(apply(one, "giao cho anh Huy nhé"), one, "«anh Huy» không phải «hủy»");
+  assert.equal(classifyCartMessage("giao cho anh Huy nhé").kind, "AMBIGUOUS");
+  assert.equal(classifyCartMessage("cancel đơn").kind, "CANCEL");
+  for (const t of ["mai chị lấy", "mai lấy nha em", "tối chị lấy", "tuần sau chị lấy", "thôi để hôm khác", "hôm khác chị lấy", "để chị coi lại", "giá hơi cao chị xem đã", "để lần sau, giờ chị bận"]) {
+    assert.equal(customerHesitates(t, { justInvited: true }), true, `«${t}» ⇒ hoãn`);
+  }
+  assert.equal(declinesAddOnOnly("để lần sau, giờ chị bận"), false);
+  assert.equal(customerHesitates("dang co khuyen mai gi ko, lay 2 goi cha muc het bao nhieu"), false, "«ko, lấy 2 gói» không phải «không lấy»");
+  for (const t of ["lấy 1kg mai giao", "Ngon chị mới lấy nha em", "chiều giao giúp chị"]) assert.equal(customerHesitates(t), false, t);
 }
 
 function testViolation() {
@@ -674,6 +730,7 @@ export async function testSalesCartCommitment() {
   testApply();
   testViolation();
   testReviewCases();
+  testReview2();
   testHoldText();
   testReadinessAndPrompt();
   testHesitation();

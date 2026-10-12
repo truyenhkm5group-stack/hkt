@@ -54,7 +54,7 @@ export type CommittedItem = {
  */
 export type CartCommitment = { selectedItems: CommittedItem[]; turn: number | null; at: string; clarify?: string | null; relaxedTurn?: number | null };
 
-export type CartIntentKind = "ORDER" | "SET" | "ADD" | "REDUCE" | "REMOVE" | "CANCEL" | "QUESTION" | "AMBIGUOUS";
+export type CartIntentKind = "ORDER" | "SET" | "ADD" | "REDUCE" | "KEEP" | "REMOVE" | "CANCEL" | "QUESTION" | "AMBIGUOUS";
 export type CartAmount = { value: number; unit: CartUnit; label: string; display: string; index: number; end: number };
 /** `tentative` = số lượng nói kèm câu hỏi giá («lấy 2kg bao nhiêu em») — chỉ THÊM món mới (không dính), không bao giờ sửa món đã có. */
 export type CartIntent = { kind: CartIntentKind; amounts: CartAmount[]; label: string | null; tentative?: boolean };
@@ -120,6 +120,9 @@ function resolveLabel(raw: { match: string; display: string }, catalog?: readonl
   return { match: "", display: "" };
 }
 
+/** Từ dừng theo CHỮ GỐC: «bỏ» / «hủy» là động từ (khác «bò», «bộ» — có thể là tên món). */
+const isStop = (w: string) => STOP.has(foldVi(w)) || /^(?:bỏ|hủy|huỷ)$/iu.test(w);
+
 /** Tên món ĐỨNG SAU số lượng («2kg chả cá thu / ĐT…» ⇒ «chả cá thu»), không có thì ĐỨNG TRƯỚC («chả cá thu 2kg»). */
 function labelAround(text: string, index: number, end: number): { match: string; display: string } {
   const after = text.slice(end, end + 60);
@@ -129,18 +132,18 @@ function labelAround(text: string, index: number, end: number): { match: string;
   const take: string[] = [];
   for (const w of words) {
     const f = foldVi(w);
-    if (!f || STOP.has(f) || take.length >= 5) break;
+    if (!f || isStop(w) || take.length >= 5) break;
     take.push(w);
   }
   if (take.length) return { match: foldVi(take.join(" ")), display: take.join(" ") };
   const before = text.slice(Math.max(0, index - 60), index);
   const lastCut = Math.max(...[...before.matchAll(/[\n,/;:+!?()[\]|.&]|\d/g)].map((m) => m.index ?? -1), -1);
   const bwords = before.slice(lastCut + 1).trim().split(/\s+/).filter(Boolean);
-  while (bwords.length && STOP.has(foldVi(bwords[bwords.length - 1]))) bwords.pop();
+  while (bwords.length && isStop(bwords[bwords.length - 1])) bwords.pop();
   const run: string[] = [];
   for (let i = bwords.length - 1; i >= 0 && run.length < 5; i--) {
     const f = foldVi(bwords[i]);
-    if (!f || STOP.has(f)) break;
+    if (!f || isStop(bwords[i])) break;
     run.unshift(bwords[i]);
   }
   return run.length ? { match: foldVi(run.join(" ")), display: run.join(" ") } : { match: "", display: "" };
@@ -208,18 +211,71 @@ const head = (s: string) => {
 const NEG = "(?:khong|ko|k|hok|hong|hem)";
 const THOI = "(?:thoi|thui|thoii+|thoy)";
 const PARTICLES = "(?: (?:nha|nhe|nhen|a|em|chi|anh|di|dau|day|luon|giup|cho|dum|don|ca|het|gi|nua))*";
-/** Cả đơn: «thôi không lấy nữa», «hok lấy nữa», «khỏi lấy nữa», «thôi khỏi», «hủy giúp chị», «bỏ đơn đi», «không lấy nha em». */
+
+/**
+ * Bỏ dấu theo TỪNG chữ gốc cho luật giỏ: «bỏ» / «bo» ⇒ `bo` nhưng «bố» · «bộ» · «bò» · «bơ» ⇒ `box` (không phải động từ bỏ); «hủy» / «huỷ»
+ * ⇒ `huy` nhưng «Huy» (tên người — «giao cho anh Huy nhé») ⇒ `huyx`, trừ «huy don». Rồi gỡ các cụm KHÔNG nói về giỏ: «giảm giá», «đổi trả»,
+ * «đổi / sửa địa chỉ · SĐT · giờ», «xuống nhà», «khỏi gọi», «không lấy hoá đơn», «bỏ vào túi». HÀM THUẦN.
+ */
+export function foldCart(text: string): string {
+  const raw = text.toLowerCase();
+  const toks = raw.split(/[^\p{L}\p{N}%]+/u).filter(Boolean);
+  const out = toks.map((t, i) => {
+    const f = foldVi(t);
+    if (f === "bo" && t !== "bỏ" && t !== "bo") return "box";
+    if (f === "huy" && t !== "hủy" && t !== "huỷ" && !(t === "huy" && foldVi(toks[i + 1] ?? "") === "don")) return "huyx";
+    return f;
+  });
+  return ` ${out.join(" ")} `
+    .replace(/ (?:giam gia|bot gia|bot tien|doi tra|xuong nha|khoi goi|(?:khong|ko|k|hok) lay (?:hoa don|bill)|bo (?:vao|giup vao|chung vao))(?= )/g, " ")
+    .replace(/ (?:doi|sua|thay|chinh)(?: lai)? (?:dia chi|sdt|so dien thoai|so dt|so|gio|ngay|ten|nguoi nhan|lich|thoi gian)(?= )/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/** Cả đơn: «thôi không lấy nữa», «hok lấy nữa», «khỏi lấy nữa», «thôi khỏi», «hủy giúp chị», «bỏ đơn đi», «cancel đơn», «không lấy nha em». */
 const CANCEL_RE = new RegExp(
-  `(?:^| )(?:${NEG} (?:lay|mua|dat|can)(?! them)${PARTICLES}$|${NEG} (?:lay|mua|dat) (?:nua|gi)(?: |$)|(?:${THOI} )?khoi(?: (?:lay|mua|dat))?${PARTICLES}$|huy${PARTICLES}$|huy don(?: |$)|bo don(?: |$))`,
-);
-/** Dấu hiệu khách MUỐN SỬA (bớt / hạ / bỏ / huỷ / đổi …) — có mà không áp chắc được ⇒ tắt kiểm cứng của lượt, hỏi lại. */
-const EDIT_CUE_RE = new RegExp(
-  `(?:^| )(?:bot|giam|xuong|tru|bo|huy|doi|sua|khoi|it hon|it thoi|nhieu qua|nhieu lam|${NEG} (?:lay|mua)(?! them)|${THOI} (?:lay|${NEG}|chi|cho)|(?:lay|chi lay) [0-9][a-z0-9]* ${THOI}|[0-9]+ ?(?:kg|ky|ki|goi|tui|hop) ${THOI})(?: |$)`,
+  `(?:^| )(?:${NEG} (?:lay|mua|dat|can)(?! them)${PARTICLES}$|${NEG} (?:lay|mua|dat) (?:nua|gi)(?: |$)|(?:${THOI} )?khoi(?: (?:lay|mua|dat))?${PARTICLES}$|huy${PARTICLES}$|huy don(?: |$)|bo don(?: |$)|cancel(?: don)?(?: |$))`,
 );
 
-/** Câu khách có dấu hiệu muốn sửa / bớt / bỏ / huỷ đơn. HÀM THUẦN. */
-export function hasEditCue(text: string): boolean {
-  return EDIT_CUE_RE.test(foldVi(text));
+/** Đoạn chữ cuối là tên món (dãy từ không thuộc STOP đứng ngay trước / sau một động từ). */
+function trailingRun(s: string): string {
+  const w = s.split(" ").filter(Boolean);
+  while (w.length && STOP.has(w[w.length - 1])) w.pop();
+  const run: string[] = [];
+  for (let i = w.length - 1; i >= 0 && run.length < 5; i--) {
+    if (STOP.has(w[i])) break;
+    run.unshift(w[i]);
+  }
+  return run.join(" ");
+}
+function leadingRun(s: string): string {
+  const run: string[] = [];
+  for (const x of s.split(" ").filter(Boolean)) {
+    if (STOP.has(x) || run.length >= 5) break;
+    run.push(x);
+  }
+  return run.join(" ");
+}
+
+/**
+ * Câu khách có dấu hiệu muốn sửa / bớt / bỏ / huỷ đơn — từ khoá phải đứng cạnh SỐ LƯỢNG, TÊN MÓN của giỏ (`labels`) hay chữ «đơn»; cụm
+ * thường ngày («giảm giá», «đổi địa chỉ», «đổi trả», «ship cho bố», «khỏi gọi», «xuống nhà», «bỏ vào túi», «không lấy hoá đơn») KHÔNG
+ * phải. Có mà không áp chắc được ⇒ tắt kiểm cứng của lượt, hỏi lại. HÀM THUẦN.
+ */
+export function hasEditCue(text: string, labels: readonly string[] = []): boolean {
+  const f = foldCart(text);
+  const has = (re: RegExp) => re.test(f);
+  const amt = amountsIn(text).length > 0;
+  const mentionsItem = labels.some((l) => l && labelTokens(l).length && labelsMatch(l, f) && labelTokens(l).some((t) => f.split(" ").includes(t)));
+  if (has(/(?:^| )(?:huy|bo|cancel)(?: |$)/)) return true;
+  if (has(/(?:^| )bot(?: |$)/)) return true;
+  if (has(/(?:^| )giam (?:bot|xuong|di|lai|con)(?: |$)/)) return true;
+  if (has(new RegExp(`(?:^| )(?:khoi (?:lay|mua)|${THOI} khoi|${NEG} (?:lay|mua)(?: nua)?$|${NEG} (?:lay|mua) (?:nua|gi)|it hon|it thoi)(?: |$)`))) return true;
+  if (has(/(?:^| )(?:doi|sua|huy|bo) don(?: |$)/)) return true;
+  if (amt && has(new RegExp(`(?:^| )(?:doi|sua|xuong|tru|giam|con|it hon|nhieu qua|nhieu lam|du roi|${THOI})(?: |$)`))) return true;
+  if (mentionsItem && has(new RegExp(`(?:^| )(?:${THOI}|doi|sua|giam|khoi|${NEG} (?:lay|mua)|chi lay)(?: |$)`))) return true;
+  return false;
 }
 
 /**
@@ -227,26 +283,38 @@ export function hasEditCue(text: string): boolean {
  * hỏi điều kiện — «1kg bao nhiêu», «nếu lấy 3kg thì sao») ⇒ GIỮ NGUYÊN. HÀM THUẦN.
  *  · ORDER  — nói số lượng một cách khẳng định («cho chị 2kg chả cá thu», «2kg nhé») ⇒ đặt đúng số đó;
  *  · SET    — câu sửa («đổi còn 1kg», «lấy 1kg thôi / thui», «giảm xuống 1kg», «1kg đủ rồi», «cho chị 2kg, à không 1kg»);
- *  · ADD / REDUCE — «thêm 1kg» / «bớt 1kg», «trừ 1kg»; REMOVE — «không lấy chả cá nữa», «bỏ chả cá thu», «hủy chả cá»;
- *  · CANCEL — «thôi không lấy nữa», «hủy giúp chị», «thôi khỏi», «bỏ đơn đi» (cả đơn).
+ *  · ADD / REDUCE — «thêm 1kg» / «bớt 1kg», «trừ 1kg», «bớt chả mực 1kg»;
+ *  · KEEP   — «(chỉ) lấy chả mực thôi», «chả mực thôi» ⇒ giữ món đó, bỏ món khác;
+ *  · REMOVE — «không lấy chả cá nữa», «bỏ chả cá thu», «hủy chả cá», «mực thì thôi», «thôi mực khỏi», «mực k lấy nữa»;
+ *  · CANCEL — «thôi không lấy nữa», «hủy giúp chị», «thôi khỏi», «bỏ đơn đi», «cancel đơn» (cả đơn).
  */
 export function classifyCartMessage(text: string, catalog?: readonly string[]): CartIntent {
   const raw = text.toLowerCase();
-  const f = foldVi(text);
+  const f = foldCart(text);
   const none = (kind: CartIntentKind): CartIntent => ({ kind, amounts: [], label: null });
-  if (/(?:^| )(?:neu|thi) /.test(` ${f} `)) return none("QUESTION");
   const all = amountsIn(text, catalog);
-  // Một món: «không lấy chả cá nữa», «bỏ chả cá thu nha», «hủy chả cá», «bỏ món chả cá đi em».
-  const rm = f.match(new RegExp(`(?:^| )(?:bo|huy|${NEG} (?:lay|mua))(?: mon)? ([a-z]+(?: [a-z]+){0,5})`));
-  if (rm && !all.length) {
-    const run: string[] = [];
-    for (const w of rm[1].split(" ")) {
-      if (STOP.has(w)) break;
-      run.push(w);
+  if (!all.length) {
+    // Bỏ một món, tên món ĐỨNG TRƯỚC: «mực thì thôi nhé», «thôi mực khỏi», «mực k lấy nữa», «chả mực thôi không lấy».
+    const pre = f.match(new RegExp(`^(?:${THOI} )?(.+?) (?:thi ${THOI}|khoi|(?:${THOI} )?${NEG} (?:lay|mua)(?: nua)?)${PARTICLES}$`));
+    if (pre) {
+      const label = trailingRun(pre[1]);
+      if (label) return { kind: "REMOVE", amounts: [], label };
     }
-    if (run.length) return { kind: "REMOVE", amounts: [], label: run.join(" ") };
+    // Giữ một món: «chỉ lấy chả mực thôi», «chi lay cha muc thoi», «chả mực thôi», «lấy chả cá thôi».
+    const keep = f.match(new RegExp(`^(?:(?:${THOI}|vay|the) )?(?:(?:chi|em|minh|anh) )?(?:chi )?(?:lay |mua |dat )?(.+?) ${THOI}${PARTICLES}$`));
+    if (keep) {
+      const label = trailingRun(keep[1]);
+      if (label && label === keep[1].split(" ").filter((w) => !STOP.has(w)).join(" ")) return { kind: "KEEP", amounts: [], label };
+    }
+    // Bỏ một món, tên món ĐỨNG SAU: «không lấy chả cá nữa», «bỏ chả cá thu nha», «hủy chả cá», «bỏ món chả cá đi em».
+    const rm = f.match(new RegExp(`(?:^| )(?:bo|huy|${NEG} (?:lay|mua))(?: mon)? ([a-z]+(?: [a-z]+){0,5})`));
+    if (rm) {
+      const label = leadingRun(rm[1]);
+      if (label) return { kind: "REMOVE", amounts: [], label };
+    }
+    if (CANCEL_RE.test(f)) return none("CANCEL");
   }
-  if (!all.length && CANCEL_RE.test(f)) return none("CANCEL");
+  if (/(?:^| )(?:neu|thi) /.test(` ${f} `)) return none("QUESTION");
   // «không phải 2kg», «không lấy 2kg đâu», «2kg nhiều quá» — số bị phủ định là số CŨ; «2kg, à không 1kg» — số đứng trước bị rút lại.
   const retract = all.findIndex((a, i) => i > 0 && /(?:^| )(?:(?:a|o|ay|ui) )?(?:khong|ko|nham)$/.test(tail(text.slice(0, a.index))) && !/(?:^| )(?:phai|lay|mua)$/.test(tail(text.slice(0, a.index))));
   const amounts = all.filter((a, i) => {
@@ -264,6 +332,9 @@ export function classifyCartMessage(text: string, catalog?: readonly string[]): 
   const adds = amounts.filter((a) => addRe.test(leadOf(a)) || /^nua(?: |$)/.test(trailOf(a)));
   if (adds.length) return { kind: "ADD", amounts: adds, label: null };
   if (/(?:^| )(?:bot|giam|tru|bot di|giam di|tru di|bot cho (?:chi|em|anh|minh))$/.test(leadOf(last))) return { kind: "REDUCE", amounts: [last], label: null };
+  // «bớt chả mực 1kg» / «giảm chả cá 1kg» — động từ, rồi tên món, rồi số lượng ⇒ bớt trên ĐÚNG món đó.
+  const reduceNamed = leadOf(last).match(/(?:^| )(?:bot|giam|tru)(?: di)? ([a-z]+(?: [a-z]+){0,4})$/);
+  if (reduceNamed && reduceNamed[1].split(" ").every((w) => !STOP.has(w))) return { kind: "REDUCE", amounts: [last], label: null };
   const correction =
     /(?:^| )(?:doi|sua|chuyen)(?: (?:thanh|sang|lai|ve))?(?: (?:con|lay|xuong))?$/.test(leadOf(last)) ||
     /(?:^| )(?:con|xuong)$/.test(leadOf(last)) ||
@@ -306,11 +377,20 @@ export function applyCustomerCartMessage(cart: CartCommitment | undefined, text:
   const items = cart?.selectedItems ?? [];
   const relax = (clarify: string): CartCommitment | undefined => (cart ? { ...cart, clarify, relaxedTurn: turn, at } : cart);
   const done = (next: CommittedItem[], clarify: string | null = null): CartCommitment => ({ selectedItems: next, turn, at, clarify, relaxedTurn: null });
+  const labels = items.map((x) => x.match);
   if (intent.kind === "AMBIGUOUS" || intent.kind === "QUESTION") {
-    if (hasEditCue(text) && items.some((x) => x.customerExplicit)) return relax("Khách có vẻ muốn sửa / bớt / huỷ nhưng câu chưa rõ món hay số lượng — hỏi lại khách muốn đổi thế nào; KHÔNG giữ cứng số cũ ở lượt này");
+    // Giỏ ≥ 2 món mà câu có «thôi» / «chỉ» chưa phân loại chắc ⇒ cũng không giữ cứng (khách đang chọn lại món).
+    const pickCue = items.length >= 2 && (/(?:^| )(?:thoi|thui|thoii+)(?: |$)/.test(foldCart(text).replace(/(?:^| )(?:the|vay|lay vay|chi lay vay|the la) (?:thoi|thui|thoii+)(?= |$)/g, " ")) || /(?:^|[^\p{L}])chỉ(?![\p{L}])/u.test(text.toLowerCase()));
+    if ((hasEditCue(text, labels) || pickCue) && items.some((x) => x.customerExplicit)) return relax("Khách có vẻ muốn sửa / bớt / huỷ nhưng câu chưa rõ món hay số lượng — hỏi lại khách muốn đổi thế nào; KHÔNG giữ cứng số cũ ở lượt này");
     return cart?.clarify ? { ...cart, clarify: null } : cart;
   }
   if (intent.kind === "CANCEL") return items.length ? done([]) : cart;
+  if (intent.kind === "KEEP") {
+    const keepIdx = items.map((it, i) => (labelsMatch(it.match, intent.label ?? "") ? i : -1)).filter((i) => i >= 0);
+    if (!keepIdx.length) return items.length ? relax(`Khách muốn chỉ lấy «${intent.label}» nhưng giỏ không có món khớp — hỏi lại`) : cart;
+    if (keepIdx.length === items.length) return cart;
+    return done(items.filter((_, k) => keepIdx.includes(k)));
+  }
   if (intent.kind === "REMOVE") {
     const i = findItem(items, intent.label ?? "");
     if (i === null) return items.length ? relax(`Khách muốn bỏ «${intent.label}» nhưng giỏ không có đúng một món khớp — hỏi lại món nào`) : cart;
@@ -363,7 +443,7 @@ export function applyCustomerCartMessage(cart: CartCommitment | undefined, text:
     next[t] = { ...cur, quantity, unit: relative ? cur.unit : a.unit, sourceMessageId: turn, customerExplicit: true, confidence: cur.productId || a.label ? "HIGH" : "MEDIUM", ...(a.label && !cur.match ? { match: a.label, label: a.display } : {}) };
     changed = true;
   }
-  if (!changed) return hasEditCue(text) && cart ? relax("Khách có vẻ muốn sửa nhưng máy chưa áp được — hỏi lại") : cart;
+  if (!changed) return hasEditCue(text, labels) && cart ? relax("Khách có vẻ muốn sửa nhưng máy chưa áp được — hỏi lại") : cart;
   return done([...next.filter((x) => x.quantity > 0), ...added]);
 }
 
@@ -481,8 +561,9 @@ type HoldReason = "DOWNSELL" | "TRIAL" | "REASK";
 function holdReason(botText: string, cart: CartCommitment, customerText: string): HoldReason | null {
   const explicit = cart.selectedItems.filter((x) => x.customerExplicit);
   const f = foldVi(botText);
-  // Bot đang xác nhận một lần huỷ · bớt · sửa của khách, hay trả lời đúng câu khách hỏi về gói ăn thử ⇒ không phải tự hạ số lượng.
-  if (/(?:^| )(?:huy|bot|bo|sua don|giam)(?: |$)/.test(f) || TRIAL_RE.test(foldVi(customerText))) return null;
+  // Bot trả lời đúng câu khách hỏi về gói ăn thử ⇒ không phải tự hạ số lượng. (Bot xác nhận một lần sửa CỦA KHÁCH đã được
+  // `cartHoldVerdict` cho qua ở nhánh «khách vừa sửa»; câu bot có chữ «bớt» / «sửa đơn» mà khách không hề sửa VẪN bị xét.)
+  if (TRIAL_RE.test(foldVi(customerText))) return null;
   const asked = amountsIn(customerText);
   const all = amountsIn(botText);
   // Đơn giá («400.000đ một gói», «1kg 280.000 ₫», «280k/kg», «mỗi gói») là báo giá theo đơn vị, không phải đề nghị lấy ít hơn.
@@ -513,7 +594,7 @@ function holdReason(botText: string, cart: CartCommitment, customerText: string)
  */
 export function cartHoldVerdict(botText: string, cart: CartCommitment | undefined, customerText = "", opts: { hasDraft?: boolean } = {}): { reason: HoldReason; safeText: string; note: string } | null {
   if (!cart || !cart.selectedItems.some((x) => x.customerExplicit)) return null;
-  if (customerText && (hasEditCue(customerText) || ["SET", "REDUCE", "REMOVE", "CANCEL"].includes(classifyCartMessage(customerText).kind))) return null;
+  if (customerText && (hasEditCue(customerText, cart.selectedItems.map((x) => x.match)) || ["SET", "REDUCE", "KEEP", "REMOVE", "CANCEL"].includes(classifyCartMessage(customerText).kind))) return null;
   const reason = holdReason(botText, cart, customerText);
   if (!reason) return null;
   const rest = (botText.match(/[^.!?\n]+[.!?]*/g) ?? []).map((s) => s.trim()).filter((s) => s && !holdReason(s, cart, customerText) && !amountsIn(s).length);
@@ -531,8 +612,10 @@ export function customerHesitates(text: string, opts: { justInvited?: boolean } 
   const f = foldVi(text);
   const them = opts.justInvited ? "(?!(?: (?:lay|mua|can|dat))? them(?: |$))" : "";
   const re = new RegExp(
-    `(?:^| )(?:de (?:chi|anh|em|minh|toi|c|a|e) (?:hoi|xem|nghi|suy nghi|tinh|bao|ban)|suy nghi|chua (?:chot|lay|mua|can|dat|chac|co tien)|het tien|tu tu|khoan|` +
-      `de mai|de sau|lan sau|tinh sau|${THOI} khoi|khoi (?:lay|mua|dat)|${THOI} (?:chi |em |minh )?${NEG}(?: (?:lay|mua|can))?${them}|${NEG} (?:lay|mua|dat)${them}|hoi (?:chong|vo|nha|lai))(?: |$)`,
+    `(?:^| )(?:de (?:chi|anh|em|minh|toi|c|a|e) (?:hoi|xem|nghi|suy nghi|tinh|bao|ban|coi)|suy nghi|chua (?:chot|lay|mua|can|dat|chac|co tien)|het tien|tu tu|khoan|` +
+      `de mai|de sau|lan sau|tinh sau|hom khac|bua khac|dip khac|(?:mai|toi|toi nay|chieu|tuan sau|thang sau)(?: (?:chi|em|anh|minh|c|e))? (?:lay|mua|dat|chot)|` +
+      `de (?:chi |em |minh )?coi|(?:chi |em |minh )?xem (?:lai )?da|gia hoi cao|hoi dat|mac qua|dat qua|gio (?:chi |em |minh )?ban|dang ban|ban qua|ban roi|` +
+      `${THOI} khoi|khoi (?:lay|mua|dat)|${THOI} (?:chi |em |minh )?${NEG}(?: (?:lay|mua|can))?${them}(?! [0-9])|${NEG} (?:lay|mua|dat)${them}(?! [0-9])|hoi (?:chong|vo|nha|lai))(?: |$)`,
   );
   return re.test(f);
 }
