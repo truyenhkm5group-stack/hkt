@@ -3,7 +3,7 @@
   "mission_id": "tech-worker-onboarding-gap",
   "title": "README control plane: ruleset 0 lượt duyệt + rủi ro worker còn lại (phần nhỏ tách từ #631)",
   "business_goal": "",
-  "status": "RUNNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -20,7 +20,18 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-12T02:17:12.346Z",
-  "updated_at": "2026-10-12T02:17:12.346Z",
-  "last_heartbeat": "2026-10-12T02:17:12.346Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-12T02:17:33.973Z",
+  "last_heartbeat": "2026-10-12T02:17:33.973Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "feat/tech-worker-onboarding-gap",
+    "sha": "cc1129cb489a3dd6e9f0b4e5e53750ac8e482f6d",
+    "at": "2026-10-12T02:17:33.973Z",
+    "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+    "title": "README control plane: ruleset 0 lượt duyệt + rủi ro worker còn lại (phần nhỏ tách từ #631)",
+    "summary": "Sửa câu ruleset 1 duyệt ⇒ 0 duyệt từ 25/09; nêu 3 rủi ro worker còn lại tới khi lõi #631 làm lại",
+    "tests": [
+      "repo-integrity·migration append-only/unique·test-hygiene: đạt (chỉ tài liệu)"
+    ]
+  }
 }
