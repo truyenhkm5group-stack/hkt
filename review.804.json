@@ -1,8 +1,8 @@
 {
   "pr": 804,
-  "sha": "a4a10b98dcda5abd8c16eb98f027119c59dbecd2",
+  "sha": "238e8a7b90ebb4fa94bd5f50fe6447a110bc2de5",
   "verdict": "PASS",
   "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
-  "at": "2026-10-11T05:48:12.905Z",
-  "note": "Theo tenant; địa chỉ chỉ GỢI Ý, máy chủ kiểm lời đồng ý mới điền (§3.12); đơn hoàn/huỷ/nháp/chưa ghép không bao giờ đề xuất; SĐT trùng ⇒ AMBIGUOUS; mức PHONE che địa chỉ; Pancake PAID không coi là đã giao. Gộp sau #802 (tools.ts) và trước authoritative-quote"
+  "at": "2026-10-12T10:14:24.442Z",
+  "note": "Đủ 4 lỗi review: ERP+ORDER_OUTCOME đè bản Pancake cùng mã (test + gỡ sửa thì đỏ); SĐT mới so cụm chuẩn hoá, không xác minh ⇒ hỏi lại; hồ sơ từ lịch sử fromHistory ⇒ chỉ gợi ý + chặn máy chủ historyAddressWithoutConsent; đếm đã mua trừ hoàn/huỷ"
 }
