@@ -3,7 +3,7 @@
   "mission_id": "tech-worker-onboarding-gap",
   "title": "README control plane: ruleset 0 lượt duyệt + rủi ro worker còn lại (phần nhỏ tách từ #631)",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -22,9 +22,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-12T02:17:12.346Z",
-  "updated_at": "2026-10-12T02:18:13.579Z",
+  "updated_at": "2026-10-12T02:58:58.125Z",
   "last_heartbeat": "2026-10-12T02:17:33.973Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#811 → 7ed86a4b31e922b180b63f333365cfd7b529b008"
+  },
   "handoff": {
     "branch": "feat/tech-worker-onboarding-gap",
     "sha": "cc1129cb489a3dd6e9f0b4e5e53750ac8e482f6d",
