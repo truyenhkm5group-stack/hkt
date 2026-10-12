@@ -23,20 +23,18 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-12T09:58:13.240Z",
-  "updated_at": "2026-10-12T09:59:15.244Z",
-  "last_heartbeat": "2026-10-12T09:58:31.518Z",
+  "updated_at": "2026-10-12T18:41:15.576Z",
+  "last_heartbeat": "2026-10-12T18:41:15.576Z",
   "definition_of_done": [],
   "handoff": {
     "branch": "fix/inbox-search-global",
-    "sha": "1cc2023ac3543c21f13eadab3243185cde077f50",
-    "at": "2026-10-12T09:58:31.518Z",
+    "sha": "5193336c0872bc52ed6114e3f7d404566d0fa20e",
+    "at": "2026-10-12T18:41:15.576Z",
     "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
     "title": "P0: ô tìm hộp thư tìm TOÀN hộp thư mặc định (bỏ qua bộ lọc khi có q), SĐT khớp chính xác lên đầu, debounce 300 ms, đang tải, «chỉ trong bộ lọc hiện tại»",
-    "summary": "Nguyên nhân: form gửi kèm f=UNREAD và mọi bộ lọc khi tìm. Giờ q ≠ rỗng ⇒ tìm toàn hộp thư, pv=loc mới giữ bộ lọc",
+    "summary": "Cập nhật theo main",
     "tests": [
-      "typecheck·lint·build: sạch",
-      "inbox-search (UNREAD tìm hội thoại đã đọc · 3 dạng SĐT · khớp chính xác đầu · pv=loc · xoá q về UNREAD)·inbox-v2-a·inbox-unread-perf·inbox-read-v3·inbox-perf-probe: đạt",
-      "npm test: TẤT CẢ KIỂM THỬ ĐẠT"
+      "1cc2023a đã đạt npm test + build; cập nhật nhánh theo main (#802 + heap build) bằng update-branch"
     ]
   }
 }
