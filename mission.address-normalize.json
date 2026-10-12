@@ -24,18 +24,18 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-11T01:59:01.592Z",
-  "updated_at": "2026-10-12T04:43:18.977Z",
-  "last_heartbeat": "2026-10-12T04:43:18.977Z",
+  "updated_at": "2026-10-12T09:32:25.567Z",
+  "last_heartbeat": "2026-10-12T09:32:25.567Z",
   "definition_of_done": [],
   "handoff": {
     "branch": "fix/address-normalize",
-    "sha": "a75e9cc4aa0d68b4c99371a008c6f1e5ba9a37b3",
-    "at": "2026-10-12T04:43:18.977Z",
+    "sha": "c91f1076625b83c4fa42edadfbd5a5e194131d09",
+    "at": "2026-10-12T09:32:25.567Z",
     "actor": "DESKTOP-56TH98Y:wt-p0-addr",
     "title": "P0: chuẩn hoá địa chỉ khách gõ tự do theo địa giới 2 cấp hiện hành (tên phường/xã cũ ⇒ mới), không chắc ⇒ hỏi khách phần thiếu, không đoán để vượt kiểm",
-    "summary": "#802 rebase lên main a75e9cc4 (main thắng: báo giá máy chủ, tự chốt P0-A). Gốc CI đỏ: viết tắt «GV» bung thành quận Gò Vấp rồi suy TP HCM ⇒ «P13 GV» không ghi tỉnh bị coi là biết tỉnh, vượt cổng thiếu tỉnh. Nay tỉnh chỉ suy từ viết tắt ⇒ UNKNOWN + hint, bot hỏi TỈNH trước; classifyAddress đọc khoá kind thay vì dò câu chữ; tự chốt giữ luật P0-A.",
+    "summary": "Sửa theo review Tech Lead: tỉnh chỉ suy từ tên quận/huyện khách gõ NGUYÊN CHỮ; q1 / tp Vinh / f1q5 / GV không ghi tỉnh ⇒ UNKNOWN + hint, bot hỏi tỉnh, tự chốt bị cổng thiếu tỉnh chặn. markAddressAsked ghi rõ giới hạn. Nợ còn lại: cặp xã+huyện cũ qua viết tắt loại («P5 Q3») vẫn ra HCM như main.",
     "tests": [
-      "address-normalize (thuần + công cụ bot) · sales-integrity-audit · sales-agent-golden (20) · order-golden v2 · sales-quote-integrity · typecheck · lint · npm test đầy đủ: TẤT CẢ KIỂM THỬ ĐẠT"
+      "address-normalize (thuần + công cụ bot, thêm q1 / tp Vinh / f1q5 không tỉnh) · sales-integrity-audit · sales-agent-golden (20) · order-golden v2 · sales-quote-integrity · typecheck · lint · npm test đầy đủ: TẤT CẢ KIỂM THỬ ĐẠT"
     ]
   }
 }
