@@ -1,8 +1,8 @@
 {
   "pr": 820,
-  "sha": "ecae99d25aaf85f2b2e18d40ed1a61a033a17ead",
+  "sha": "c28a42a2a5b6cd0f454d659e49b5e9cd5f97c9a1",
   "verdict": "PASS",
   "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
-  "at": "2026-10-12T12:55:11.581Z",
-  "note": "Script ops CHỈ ĐỌC (ERP_READ_ONLY + hỏi lại phiên, getDbForInspection, SQL thô chỉ select), MÃ HOÁ, xả stdout; khai ops đủ 4 chỗ"
+  "at": "2026-10-12T15:27:19.921Z",
+  "note": "ecae99d2 + gộp main: chỉ hợp danh sách ops-vps.yml + khối sync-fixtures"
 }
