@@ -2191,3 +2191,4 @@
 {"at":"2026-10-12T08:48:02.693Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"migration-rehearsal","detail":"#814 cho fix/migration-rehearsal @ cd72b7ec47b7"}
 {"at":"2026-10-12T08:48:43.836Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#814 @ cd72b7ec47b7 · erp-backup.sh: tách hàm dựng bản sao dùng chung, cùng cờ docker/trap/MỘT pg_restore; phần nhà không đổi byte; script mới chỉ chạm container tạm (không mạng, trần RAM), MÃ HOÁ"}
 {"at":"2026-10-12T09:12:23.510Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"org-migrate-isolation","detail":"fix/org-migrate-isolation @ c6341cc6f745 · 4 lệnh kiểm thử"}
+{"at":"2026-10-12T09:13:11.857Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"org-migrate-isolation","detail":"#815 cho fix/org-migrate-isolation @ c6341cc6f745"}
