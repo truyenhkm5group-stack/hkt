@@ -62,8 +62,9 @@ import { volumeDiscountPolicyText } from "@/lib/sales-chatbot/volume-discount";
 import { formatVND } from "@/lib/format";
 import { withTurnEvents } from "@/lib/sales-chatbot/events";
 import { FOOD_PACK, salesPackFor, type SalesPack } from "@/lib/sales-chatbot/packs";
-import { autoConfirmBlocker, confirmedFromOrder, customerHesitates, executeTool, orderTotalsOf, toolDefsFor, TOOLS_HOLDING_TEXT, type ChatState } from "@/lib/sales-chatbot/tools";
-import { applyCustomerCartMessage, cartCommitmentPrompt, cartHoldVerdict, orderReadiness } from "@/lib/sales-chatbot/cart-commitment";
+import { autoConfirmBlocker, confirmedFromOrder, executeTool, orderTotalsOf, toolDefsFor, TOOLS_HOLDING_TEXT, type ChatState } from "@/lib/sales-chatbot/tools";
+import { applyCustomerCartMessage, cartCommitmentPrompt, cartHoldVerdict, customerHesitates, orderReadiness } from "@/lib/sales-chatbot/cart-commitment";
+import { sellableCatalog } from "@/lib/sales-chatbot/catalog";
 import { allowedImageUrl, describeImages, fetchCustomerImage, IMAGE_PROMPT_RULE, imageLine, VISION_LIMITS } from "@/lib/sales-chatbot/vision";
 import { CLAIM_HANDOFF_REASON, CLAIM_SAFE_TEXT, claimFactsLoader, detectPriceDispute, extractVndAmounts, guardOutgoing, paymentSignalHandoff, paymentSignalInCustomerText, unverifiedAmounts, type ClaimVerdict } from "@/lib/sales-chatbot/claim-guard";
 import { flagOrderForReviewAsAgent, loadAutoConfirmComplete } from "@/lib/records/order-create";
@@ -249,10 +250,21 @@ export function priceDisputePrompt(pd: PriceDisputeState | undefined): string {
  * Khối «ĐƠN HIỆN TẠI» của lượt (giỏ có thẩm quyền — cart-commitment.ts): mức sẵn sàng của đơn nháp đọc ĐÚNG `autoConfirmBlocker` (P0-A),
  * chưa có đơn nháp thì theo giỏ + SĐT + địa chỉ. Rỗng khi giỏ chưa có món khách nói tường minh. HÀM THUẦN.
  */
-export function cartPromptOf(st: ChatState, lastUserText: string, turn: number, autoConfirm: boolean): string {
+export function cartPromptOf(st: ChatState, lastUserText: string, turn: number, autoConfirm: boolean, prevTurn?: number): string {
   if (!st.cart?.selectedItems.some((x) => x.customerExplicit)) return "";
-  const r = orderReadiness({ ...st, blocker: st.draft ? autoConfirmBlocker(st, { lastUserText, turn }) : null, lastUserText, hesitating: customerHesitates(lastUserText) });
-  return cartCommitmentPrompt(st, r, { autoConfirm });
+  const justInvited = prevTurn !== undefined && (st.upsellTurn === prevTurn || st.draft?.shownTurn === prevTurn);
+  const r = orderReadiness({ ...st, blocker: st.draft ? autoConfirmBlocker(st, { lastUserText, turn, prevTurn }) : null, lastUserText, hesitating: customerHesitates(lastUserText, { justInvited }) });
+  return cartCommitmentPrompt(st, r, { autoConfirm, turn });
+}
+
+/** Tên sản phẩm đang bán — chỉ đọc khi câu khách có số lượng / chữ bỏ · huỷ (đọc tên món từ DANH MỤC, không đẻ món ảo). Lỗi ⇒ `undefined`. */
+async function cartCatalogNames(text: string): Promise<string[] | undefined> {
+  if (!/\d|nửa|một|hai|ba |bỏ|hủy|huỷ|bo |huy /i.test(text)) return undefined;
+  try {
+    return [...new Set((await sellableCatalog([])).map((c) => c.name))];
+  } catch {
+    return undefined;
+  }
 }
 
 type ConvRow = typeof schema.salesChatConversations.$inferSelect;
@@ -814,6 +826,8 @@ async function chatTurnCore(
   const now = opts.now ?? new Date();
   const msgs = await loadMessages(conv.id);
   let seq = (msgs[msgs.length - 1]?.seq ?? 0) + 1;
+  // Seq tin KHÁCH gần nhất trước lượt này (không tính kết quả công cụ) — «lượt khách ngay sau lời mời thêm món / tóm tắt».
+  const prevTurn = [...msgs].reverse().find((m) => m.role === "user" && m.content.some((b) => b.type === "text") && !m.content.some((b) => b.type === "tool_result"))?.seq;
   try {
     const turnSeq = seq;
     await appendMessage(conv.id, seq++, "user", [{ type: "text", text }]);
@@ -904,7 +918,13 @@ async function chatTurnCore(
     }
     // GIỎ CÓ THẨM QUYỀN (P0 12/10/2026 — cart-commitment.ts): số lượng khách nói TƯỜNG MINH ghi vào giỏ NGAY khi tin tới (trước câu
     // mẫu / lượt AI); chỉ câu sửa tường minh mới đổi nó. Câu mơ hồ («ngon chị mới lấy nha em», «ok») ⇒ giỏ giữ nguyên, không ghi gì.
-    const cartNext = applyCustomerCartMessage(st0.cart, text, turnSeq, now);
+    // Lỗi bất kỳ ở bước này ⇒ giỏ giữ nguyên NHƯNG tắt kiểm cứng của lượt (không chặn khách), không ném ra ngoài lượt.
+    let cartNext: ChatState["cart"];
+    try {
+      cartNext = applyCustomerCartMessage(st0.cart, text, turnSeq, now, { catalog: await cartCatalogNames(text) });
+    } catch {
+      cartNext = st0.cart ? { ...st0.cart, relaxedTurn: turnSeq } : undefined;
+    }
     if (cartNext !== st0.cart) {
       const st: ChatState = { ...st0, cart: cartNext };
       await bump({ state: st as Record<string, unknown> });
@@ -1033,7 +1053,7 @@ async function chatTurnCore(
     const bookingOn = cfg.booking.enabled && (await canUseModule("appointments"));
     // TỰ CHỐT KHI ĐỦ ĐƠN (P0-A, chủ shop 11/10/2026): theo công tắc «đơn đủ thông tin = đã xác nhận» của tổ chức. Lỗi đọc ⇒ TẮT (luồng xin xác nhận cũ).
     const autoConfirm = await loadAutoConfirmComplete().catch(() => false);
-    const system = [systemPrompt(cfg, orgRow?.name ?? org.code, await businessProfile(), opts.channel, await publishedPlaybook(), quickCatalog, returningCustomerPrompt(returning, known.returning), bookingOn ? bookingPrompt(cfg, now) : "", now, salesPackFor(orgRow?.templateKey ?? null), { autoConfirm }), await learnedLessons(), await levelPromptFor(conv.id, now), customerNamePrompt(opts.customerName), priceDisputePrompt(known.priceDispute), confirmedOrderPrompt(known), cartPromptOf(known, text, turnSeq, autoConfirm), opts.context ?? ""].filter(Boolean).join("\n");
+    const system = [systemPrompt(cfg, orgRow?.name ?? org.code, await businessProfile(), opts.channel, await publishedPlaybook(), quickCatalog, returningCustomerPrompt(returning, known.returning), bookingOn ? bookingPrompt(cfg, now) : "", now, salesPackFor(orgRow?.templateKey ?? null), { autoConfirm }), await learnedLessons(), await levelPromptFor(conv.id, now), customerNamePrompt(opts.customerName), priceDisputePrompt(known.priceDispute), confirmedOrderPrompt(known), cartPromptOf(known, text, turnSeq, autoConfirm, prevTurn), opts.context ?? ""].filter(Boolean).join("\n");
     const deliveredImages: string[] = [];
     let deliveredReplyId: string | null = null;
     let deliveredText: string | null = null;
@@ -1118,7 +1138,7 @@ async function chatTurnCore(
             const out = plainForMessenger(g.text);
             const verdict = await guardOutgoing(out, () => claimFacts(state));
             // GIỎ CÓ THẨM QUYỀN: chữ đề xuất ít hơn / gói ăn thử / hỏi lại số lượng khách đã chốt ⇒ câu giữ đơn thay chỗ (không chuyển người).
-            const cartHold = verdict.ok ? cartHoldVerdict(out, state.cart, text) : null;
+            const cartHold = verdict.ok ? cartHoldVerdict(out, state.cart, text, { hasDraft: Boolean(state.draft) }) : null;
             if (cartHold) {
               lastError = lastError ?? cartHold.note;
               if (!content.some((x) => x.type === "text" && x.text === cartHold.safeText)) {
@@ -1156,7 +1176,7 @@ async function chatTurnCore(
         if (uses.length === 0) break;
         const results: AiBlock[] = [];
         for (const u of uses) {
-          const r = await executeTool(u.name, u.input, { autoConfirm, conversationId: conv.id, channel: opts.channel, config: cfg, state, lastUserText: text, agent: SALES_AGENT, customerName: opts.customerName ?? null, quickReplies: quickCatalog, returning, recentSaid, turn: turnSeq, bookingOn, now, commentTurn: opts.aiCustomer?.threadKind === "COMMENT", promptStamp: { ...stampBase, model: res.model || prov.provider.model } });
+          const r = await executeTool(u.name, u.input, { autoConfirm, prevTurn, conversationId: conv.id, channel: opts.channel, config: cfg, state, lastUserText: text, agent: SALES_AGENT, customerName: opts.customerName ?? null, quickReplies: quickCatalog, returning, recentSaid, turn: turnSeq, bookingOn, now, commentTurn: opts.aiCustomer?.threadKind === "COMMENT", promptStamp: { ...stampBase, model: res.model || prov.provider.model } });
           state = r.state;
           // Câu mẫu AI gửi qua công cụ cũng qua hàng rào khẳng định — bị chặn ⇒ không gửi, chuyển người như chữ model.
           const deliverVerdict = r.deliver ? await guardOutgoing(r.deliver.text, () => claimFacts(state)) : null;

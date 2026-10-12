@@ -43,7 +43,7 @@ import { foldVi } from "@/lib/sales-chatbot/text";
 import { buildQuote, computePriced, loadPricingContext, packChoiceMistake, packingIssues, packingRequestOf, verifiedUnitPrices, type AgentQuoteClaim, type Priced, type PricingContext } from "@/lib/sales-chatbot/quote";
 import { priceUnverifiedReason, QUOTE_UNVERIFIED_INSTRUCTION, quoteSnapshotOf, type PriceDisputeState, type Quote, type QuoteSnapshot } from "@/lib/sales-chatbot/quote-shared";
 import { CLAIM_SAFE_TEXT, orderValidityOf } from "@/lib/sales-chatbot/claim-guard";
-import { bindCommitment, commitmentViolation, declinesAddOnOnly, type CartCommitment } from "@/lib/sales-chatbot/cart-commitment";
+import { bindCommitment, commitmentViolation, customerHesitates, declinesAddOnOnly, type CartCommitment } from "@/lib/sales-chatbot/cart-commitment";
 import { searchCatalog, sellableCatalog, stockFor, type CatalogItem } from "@/lib/sales-chatbot/catalog";
 import { quotedInText } from "@/lib/sales-chatbot/text";
 import { isMessagingChannel, type ChatChannel, type SalesChatbotConfig, type SalesTool } from "@/lib/sales-chatbot/config";
@@ -163,6 +163,8 @@ export type ToolContext = {
   now?: Date;
   /** Mã lượt = seq tin khách của lượt này (engine). Thiếu (bài kiểm gọi lẻ công cụ) ⇒ không xét «cùng lượt». */
   turn?: number;
+  /** Seq tin khách NGAY TRƯỚC lượt này (engine) — «khách trả lời lời mời thêm món / tóm tắt ở lượt kế» (P0-A, giỏ có thẩm quyền). */
+  prevTurn?: number;
   /** Tên Facebook của khách (kênh fanpage) — `create_customer` dùng khi AI không ghi tên. */
   customerName?: string | null;
   /** Lượt này trả lời BÌNH LUẬN công khai (engine — cùng gợi ý cổng Số dư AI dùng). Công cụ đọc đơn không chạy trong lượt này. */
@@ -847,7 +849,7 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
       if (choice) return err("Đơn nháp: nhầm gói", choice, state, { reason: "BAD_INPUT", fields: ["items"] });
       // GIỎ CÓ THẨM QUYỀN (P0 12/10/2026): hạ / bỏ món khách đã nói tường minh mà khách chưa sửa tường minh ⇒ từ chối (trình tự hội
       // thoại, không phải đơn hỏng ⇒ không gắn tín hiệu đơn không hợp lệ).
-      const cartBreak = v.data.items ? commitmentViolation(state.cart, priced.asked) : null;
+      const cartBreak = v.data.items ? commitmentViolation(state.cart, priced.asked, ctx.turn ?? null) : null;
       if (cartBreak) return err("Đơn nháp: hạ số lượng khách đã chốt", cartBreak, state);
       // Giá chưa xác thực ⇒ KHÔNG tạo / sửa đơn tự động, người xác minh (yêu cầu 5 của chủ shop).
       if (!priced.quote.verified) {
@@ -1044,6 +1046,8 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
       const reason = z.string().trim().min(2).max(300).safeParse(input.reason);
       state.declined = { reason: reason.success ? reason.data : "Khách từ chối", at: new Date().toISOString() };
       state.stage = "DECLINED";
+      // Khách từ chối ⇒ giỏ cũ hết thẩm quyền: không được chặn một đơn MỚI khách nói sau đó (giỏ có thẩm quyền, review 12/10/2026).
+      delete state.cart;
       // KHÁCH TỪ CHỐI KHI ĐÃ CÓ ĐƠN = YÊU CẦU HUỶ (chủ shop 10/10/2026, thay luật 08/10): KHÔNG huỷ ở đây — ghi yêu cầu (nguyên văn +
       // mốc) lên MỌI đơn đang mở của hội thoại (đơn bot chốt, đơn nháp, đơn nhân viên / bộ ghi đơn lên cho hội thoại — sự cố #189A435E:
       // đơn không nằm trong `state` thì bản cũ không gắn gì và trả «khách từ chối» trơn), gắn cờ «khách huỷ», mở lượt GIỮ ĐƠN. Huỷ thật
@@ -1078,6 +1082,7 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
         state.cancelledOrders = [...(state.cancelledOrders ?? []), { orderId: null, at: now.toISOString(), simulated: true }];
         state.declined = { reason, at: now.toISOString() };
         state.stage = "DECLINED";
+        delete state.cart;
         return ok("(Thử) Huỷ đơn — mô phỏng", { cancelled: true, simulated: true, note: "Khung thử: không có đơn thật nào bị huỷ." }, state);
       }
       const targets = await conversationCancelTargets(ctx.conversationId, [state.confirmed?.orderId, state.draft?.orderId]);
@@ -1118,6 +1123,7 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
       state.stage = "DECLINED";
       if (!state.cancelledOrders?.some((x) => x.orderId === r.orderId)) state.cancelledOrders = [...(state.cancelledOrders ?? []), { orderId: r.orderId, at: now.toISOString(), simulated: false }];
       if (state.draft?.orderId === r.orderId) delete state.draft;
+      delete state.cart;
       return ok(`Đã huỷ đơn #${r.shortCode}`, { cancelled: true, order_code: `#${r.shortCode}`, carrier_cancelled: r.carrier ? true : undefined, instruction: "Đơn ĐÃ HUỶ trong hệ thống. Báo khách MỘT câu ngắn: shop đã huỷ đơn theo yêu cầu." }, state);
     }
     case "handoff_to_human": {
@@ -1132,16 +1138,8 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
   return err(`${name}: không có`, `Không có công cụ «${name}».`, state);
 }
 
-/**
- * Ý định CHƯA phải mua (đã bỏ dấu): hoãn, cân nhắc, hỏi người nhà, từ chối, chỉ hỏi chấm. «Không lấy THÊM / GÌ nữa» là ĐỦ RỒI (giữ đơn —
- * luật 6 của lời nhắc), không phải từ chối (P0 12/10/2026, giỏ có thẩm quyền).
- */
-const HESITATION_RE = /\b(?:de (?:chi|anh|em|minh|toi|c|a|e) (?:hoi|xem|nghi|suy nghi|tinh|bao|ban)|suy nghi|chua (?:chot|lay|mua|can|dat|chac)|tu tu|khoan|thoi (?:khong|ko|k)\b(?! (?:lay |mua |can )?(?:them|gi)\b)|khong (?:lay|mua|dat)(?! (?:them|gi)\b)|ko (?:lay|mua)(?! (?:them|gi)\b)|k (?:lay|mua)(?! (?:them|gi)\b)|hoi (?:chong|vo|nha|lai)|de sau|lan sau|tinh sau)\b/;
-
-/** Câu cuối của khách đang hoãn / từ chối — cùng biểu thức với điều kiện (1) của tự chốt. HÀM THUẦN. */
-export function customerHesitates(text: string): boolean {
-  return HESITATION_RE.test(foldVi(text));
-}
+/** Câu cuối khách đang hoãn / từ chối — một định nghĩa ở `cart-commitment.ts` (điều kiện (1) của tự chốt P0-A). */
+export { customerHesitates };
 
 /**
  * Còn thiếu gì để TỰ CHỐT (P0-A) — `null` = đủ sáu điều kiện: (1) ý định mua (khách đã gửi SĐT + địa chỉ giao — `state.customer` — và câu cuối
@@ -1149,7 +1147,7 @@ export function customerHesitates(text: string): boolean {
  * (3) số lượng > 0, (4) SĐT hợp lệ, (5) địa chỉ đủ giao (đọc được tỉnh / thành; xã / phường chưa ghép ⇒ vẫn chốt, lõi gắn cờ cần kiểm).
  * Không tự chốt khi: khách đang phản đối giá, đang xin huỷ / đã từ chối, hay vừa nhận lời mời thêm món trong CHÍNH lượt này. HÀM THUẦN.
  */
-export function autoConfirmBlocker(state: ChatState, ctx: Pick<ToolContext, "lastUserText" | "turn">): string | null {
+export function autoConfirmBlocker(state: ChatState, ctx: Pick<ToolContext, "lastUserText" | "turn" | "prevTurn">): string | null {
   const d = state.draft;
   if (!d || !d.lines.length || d.lines.some((l) => l.quantity <= 0)) return "Chưa có món / số lượng — hỏi khách món và số lượng";
   if (!d.quote) return "Chưa có báo giá máy chủ — gọi lại create_draft_order";
@@ -1157,10 +1155,11 @@ export function autoConfirmBlocker(state: ChatState, ctx: Pick<ToolContext, "las
   if (state.declined || state.cancelRequest) return "Khách đang từ chối / xin huỷ — không tự chốt";
   if (state.priceDispute && (state.priceDispute.open || (ctx.turn !== undefined && state.priceDispute.requotedTurn === ctx.turn))) return "Khách đang phản đối giá — báo lại giá máy chủ, đợi khách đồng ý";
   if (ctx.turn !== undefined && state.upsellTurn === ctx.turn) return "Vừa mời thêm món trong lượt này — đợi khách trả lời rồi chốt";
-  // Khách chỉ TỪ CHỐI LỜI MỜI THÊM MÓN («để lần sau», «không cần thêm») sau khi đã nói tường minh món + số lượng ⇒ vẫn là ý định mua
-  // đơn hiện tại (upsell không được nhận ⇒ quay về chốt đơn), không phải hoãn cả đơn.
-  const declinedAddOn = Boolean(state.upsellSent) && Boolean(state.cart?.selectedItems.some((x) => x.customerExplicit)) && declinesAddOnOnly(ctx.lastUserText);
-  if (!declinedAddOn && customerHesitates(ctx.lastUserText)) return "Khách chưa quyết mua (đang hoãn / cân nhắc) — không tự chốt";
+  // «Không lấy thêm» / «để lần sau» chỉ là TỪ CHỐI LỜI MỜI khi đó là lượt khách NGAY SAU lời mời thêm món (hoặc ngay sau tóm tắt «lấy thêm
+  // gì không») VÀ giỏ có món khách đã nói tường minh; câu còn vế hoãn khác («…, để chị bàn với chồng») vẫn là hoãn (review 12/10/2026).
+  const justInvited = ctx.prevTurn !== undefined && (state.upsellTurn === ctx.prevTurn || d.shownTurn === ctx.prevTurn);
+  const declinedAddOn = justInvited && Boolean(state.cart?.selectedItems.some((x) => x.customerExplicit)) && declinesAddOnOnly(ctx.lastUserText);
+  if (!declinedAddOn && customerHesitates(ctx.lastUserText, { justInvited })) return "Khách chưa quyết mua (đang hoãn / cân nhắc) — không tự chốt";
   const gaps = manualOrderGaps({ phone: d.recipient.phone, address: d.recipient.address, province: d.recipient.province || resolveRecipientPlace({ address: d.recipient.address, province: d.recipient.province, ward: "" }).province }, d.lines.length);
   if (gaps.includes("SĐT")) return "SĐT chưa hợp lệ — hỏi lại khách SĐT";
   if (gaps.includes("địa chỉ") || gaps.includes("tỉnh / thành")) return "Địa chỉ chưa đủ để giao (chưa đọc được tỉnh / thành) — hỏi khách đúng phần còn thiếu";
