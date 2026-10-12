@@ -1,0 +1,8 @@
+{
+  "pr": 815,
+  "sha": "c6341cc6f7452dbfaa071b2094520751f8097287",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-12T09:13:18.509Z",
+  "note": "Đúng 7 yêu cầu chủ shop: chỉ hết giờ (57014/55P03/LOCK_BUSY) + sổ khai tường minh (0245, có proof); lỗi SQL thật ném; khoá FNV theo CSDL; thử lại 6h; health chỉ cờ; verify thoát 1 + DEGRADED WORKSPACES; insert/select tường minh cột (compatTableColumns) có quét nguồn + kiểm đột biến"
+}
