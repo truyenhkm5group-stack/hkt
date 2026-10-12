@@ -125,6 +125,7 @@ export const C360_LIMITS = { orders: 20, addresses: 3, products: 3, phones: 5 } 
 
 const DEAD_STAGES = new Set(["RETURNING", "PARTIAL_RETURN", "RETURNED", "CANCELLED", "DELETED"]);
 const UNCONFIRMED_STAGES = new Set(["NEW", "WAITING"]);
+const RETURN_STAGES = new Set(["RETURNING", "PARTIAL_RETURN", "RETURNED"]);
 
 /**
  * Địa chỉ của MỘT đơn có phải địa chỉ ĐÃ XÁC MINH không. LUẬT (khai cho bài kiểm):
@@ -205,7 +206,9 @@ export function assembleCustomer360(input: AssembleInput): Customer360 {
     ? {
         orders: usable.length,
         delivered: usable.filter((f) => f.outcome === "DELIVERED").length,
-        returned: usable.filter((f) => f.outcome && OUTCOME_GROUP[f.outcome] === "RETURNED").length,
+        // Đơn Pancake không có ORDER_OUTCOME ⇒ khâu hoàn của Pancake chỉ dùng để KHÔNG đếm nó là «đang mở» / «đã mua» — không bao
+        // giờ để kết luận giao thành công.
+        returned: usable.filter((f) => (f.outcome ? OUTCOME_GROUP[f.outcome] === "RETURNED" : RETURN_STAGES.has(f.stage))).length,
         cancelled: usable.filter((f) => (f.outcome && OUTCOME_GROUP[f.outcome] === "CANCELLED") || f.stage === "CANCELLED").length,
         open: 0,
       }
@@ -370,10 +373,13 @@ function returningOf(c: Customer360, a: AddressCandidate): ReturningCustomer {
     phone: a.phone,
     address: fullAddressLine(a.address, a.ward, ""),
     province: a.province,
-    orders: c.history?.orders ?? null,
+    // «Đã mua N đơn»: chỉ đơn KHÔNG huỷ / hoàn (đơn hoàn chưa từng tới tay khách).
+    orders: c.history ? c.history.orders - c.history.returned - c.history.cancelled : null,
     lastOrderAt: c.lastOrder?.at ?? null,
     lastItems: c.topProducts.map((p) => p.name),
     repeat: c.buyer === "REPEAT",
+    // Địa chỉ dựng từ ĐƠN CŨ ⇒ khối KHÁCH CŨ chỉ được GỢI Ý, ghi vào đơn qua use_saved_address + lời xác nhận (AGENTS 3.12).
+    fromHistory: true,
   };
 }
 
@@ -386,6 +392,53 @@ export function returningFrom360(c: Customer360 | null): ReturningCustomer | nul
 export function savedAddressChoice(c: Customer360 | null | undefined, n: unknown): ReturningCustomer | null {
   if (!c || c.suggestion !== "MANY" || typeof n !== "number" || !Number.isInteger(n) || n < 1 || n > c.addresses.length) return null;
   return returningOf(c, c.addresses[n - 1]);
+}
+
+/**
+ * SĐT trong một câu của khách — tách theo CỤM (chữ số nối bằng một khoảng trắng / dấu chấm / gạch), mọi dãy cụm LIỀN NHAU, chuẩn
+ * hoá bằng `normalizeVnPhone`. Không gộp các chữ số rời rạc thành một chuỗi: «2 hộp 500g, 0912345678» chỉ cho ra 0912345678, số
+ * cắt ngang như 0091234567 không bao giờ khớp. HÀM THUẦN.
+ */
+export function phonesInText(text: string): string[] {
+  const out = new Set<string>();
+  for (const m of text.match(/\+?\d+(?:[ .-]\d+)*/g) ?? []) {
+    const groups = m.split(/[ .-]/).slice(0, 12);
+    for (let i = 0; i < groups.length; i++)
+      for (let j = i; j < groups.length; j++) {
+        const p = normalizeVnPhone(groups.slice(i, j + 1).join(""));
+        if (p) out.add(p);
+      }
+  }
+  return [...out];
+}
+
+/**
+ * SĐT ghi vào hồ sơ khi khách dùng lại địa chỉ cũ (`use_saved_address`). Không có `phone` hoặc trùng số cũ ⇒ số cũ. Số KHÁC số cũ ⇒
+ * chỉ nhận khi địa chỉ nối bằng đơn của chính hội thoại / mã Facebook (nối bằng SĐT thì đổi số là mất căn cứ) VÀ số đó nằm nguyên
+ * trong câu cuối của khách; không thì `error` để bot hỏi lại — KHÔNG BAO GIỜ lặng lẽ lùi về số cũ. HÀM THUẦN.
+ */
+export function savedAddressPhone(r: Pick<ReturningCustomer, "trust" | "phone">, inputPhone: unknown, lastUserText: string): { phone: string } | { error: string } {
+  const typed = typeof inputPhone === "string" ? inputPhone.trim() : "";
+  if (!typed) return { phone: r.phone };
+  const next = normalizeVnPhone(typed);
+  if (next && next === normalizeVnPhone(r.phone)) return { phone: r.phone };
+  if (r.trust === "PHONE") return { error: "Địa chỉ cũ ĐÃ CHE nối theo SĐT cũ — khách đổi số thì không dùng được địa chỉ đó: xin SĐT mới + địa chỉ đầy đủ, gọi create_customer KHÔNG có use_saved_address." };
+  if (!next) return { error: "SĐT mới không hợp lệ — hỏi khách gửi lại số điện thoại mới." };
+  if (!phonesInText(lastUserText).includes(next)) return { error: "SĐT mới không có trong câu cuối của khách — hỏi khách gửi lại số mới (không tự điền số, không dùng số cũ)." };
+  return { phone: next };
+}
+
+/**
+ * Model gõ lại ĐÚNG địa chỉ của đơn cũ vào `create_customer` mà không qua `use_saved_address` (bỏ qua kiểm lời xác nhận) ⇒ `true`,
+ * trừ khi khách tự gõ địa chỉ đó trong câu cuối. HÀM THUẦN.
+ */
+export function historyAddressWithoutConsent(r: Pick<ReturningCustomer, "address" | "fromHistory"> | null | undefined, typedAddress: unknown, lastUserText: string): boolean {
+  if (!r?.fromHistory || typeof typedAddress !== "string") return false;
+  const key = (s: string) => foldVnText(s).replace(/[^a-z0-9]/g, "");
+  const old = key(r.address);
+  const typed = key(typedAddress);
+  if (old.length < 6 || typed.length < 6 || !(typed.includes(old) || old.includes(typed))) return false;
+  return !key(lastUserText).includes(typed);
 }
 
 /**
@@ -479,6 +532,17 @@ export async function loadCustomer360(src: Customer360Source, opts: { db?: Db; b
   for (const p of st.returning?.recentOrders ?? []) {
     if (facts.has(p.id)) continue;
     facts.set(p.id, pancakeFact(p, isCurrent(p.id, p.at)));
+  }
+  // ĐƠN PANCAKE MÀ ERP CŨNG CÓ (đồng bộ từ Pancake nhưng `conversation_id` rỗng / lệch nên bước trên không bắt được): dòng ERP mang
+  // ORDER_OUTCOME LUÔN đè bản Pancake (`outcome = null`) — không thì đơn HOÀN mà Pancake còn ghi «Đã gửi» / «Đã nhận» thành địa chỉ
+  // «đã xác nhận» và được đề xuất. Đơn ERP đã xoá ⇒ bỏ luôn bản Pancake.
+  const pancakeIds = [...facts.values()].filter((f) => f.source === "PANCAKE").map((f) => f.orderId);
+  if (pancakeIds.length) {
+    for (const d of await db.select({ id: o.id }).from(o).where(and(inArray(o.id, pancakeIds), eq(o.stage, "DELETED")))) facts.delete(d.id);
+    for (const r of await rowsWhere(inArray(o.id, pancakeIds))) {
+      facts.delete(r.id);
+      add(r, "THREAD");
+    }
   }
 
   // 2. FB_ID — hồ sơ khớp mã Facebook của người đang nhắn; chỉ đơn có người đứng sau (`vouchedOrder`).

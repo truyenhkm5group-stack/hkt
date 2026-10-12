@@ -779,21 +779,25 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
         const choice = input.saved_address_choice;
         const hasChoice = choice !== undefined && choice !== null;
         // Nạp động: customer-360.ts nạp tệp này (maskAddress) — nạp tĩnh là thành vòng (cùng cách `lookup_customer` nạp returning.ts).
-        const picked = hasChoice ? (await import("@/lib/sales-chatbot/customer-360")).savedAddressChoice(ctx.customer360, choice) : null;
+        const c360 = await import("@/lib/sales-chatbot/customer-360");
+        const picked = hasChoice ? c360.savedAddressChoice(ctx.customer360, choice) : null;
         if (hasChoice && !picked) return err("Lưu khách: số địa chỉ cũ không có", "saved_address_choice phải là số thứ tự trong danh sách địa chỉ cũ của khối TRA LỊCH SỬ. Hỏi lại khách chọn địa chỉ nào.", state);
         const r = picked ?? ctx.returning;
         if (!r) return err("Lưu khách: không có địa chỉ cũ", "Shop không có địa chỉ cũ của khách này — hỏi khách SĐT và địa chỉ.", state);
         const quote = z.string().trim().min(2).max(300).safeParse(input.customer_confirmation);
         if (!quote.success || !quotedInText(quote.data, ctx.lastUserText)) return err("Lưu khách: khách chưa xác nhận địa chỉ cũ", "customer_confirmation phải là nguyên văn lời khách xác nhận giao về địa chỉ cũ, trong câu CUỐI của khách. Khách chưa xác nhận ⇒ hỏi lại.", state);
         const typed = typeof input.name === "string" ? input.name.trim() : "";
-        // Khách ĐỔI SĐT mà giữ địa chỉ cũ (Customer 360): chỉ khi địa chỉ nối bằng ĐƠN của chính hội thoại / mã Facebook — nối bằng SĐT
-        // thì đổi số là mất căn cứ — và số mới nằm NGUYÊN trong câu cuối của khách (model không tự chế số).
-        const typedDigits = typeof input.phone === "string" ? input.phone.replace(/\D/g, "") : "";
-        const newPhone = r.trust !== "PHONE" && typedDigits.length >= 9 && ctx.lastUserText.replace(/\D/g, "").includes(typedDigits) ? String(input.phone).trim() : null;
-        fields = { name: typed.length >= 2 ? typed : r.name, phone: newPhone ?? r.phone, address: r.address, province: r.province };
+        // Khách ĐỔI SĐT mà giữ địa chỉ cũ (Customer 360): số mới phải là một CỤM SĐT trong câu cuối của khách, và địa chỉ phải nối
+        // bằng đơn của chính hội thoại / mã Facebook. Không xác minh được ⇒ hỏi lại, KHÔNG lặng lẽ dùng số cũ.
+        const phone = c360.savedAddressPhone(r, input.phone, ctx.lastUserText);
+        if ("error" in phone) return err("Lưu khách: SĐT mới chưa xác minh", phone.error, state);
+        fields = { name: typed.length >= 2 ? typed : r.name, phone: phone.phone, address: r.address, province: r.province };
         // Mức PHONE — và THREAD mà chính nó đã là địa chỉ máy điền (`returning.ts` trả về mức PHONE) — đều là dữ liệu chủ SĐT.
         saved = r.trust === "PHONE";
       }
+      // Địa chỉ ĐƠN CŨ (Customer 360) chỉ là gợi ý (AGENTS 3.12): gõ lại nó mà không qua use_saved_address ⇒ bỏ qua kiểm lời xác nhận.
+      if (!saved && ctx.returning?.fromHistory && input.use_saved_address !== true && (await import("@/lib/sales-chatbot/customer-360")).historyAddressWithoutConsent(ctx.returning, input.address, ctx.lastUserText))
+        return err("Lưu khách: địa chỉ đơn cũ chưa được khách xác nhận", "Địa chỉ này lấy từ ĐƠN CŨ — hỏi khách xác nhận dùng lại, rồi gọi create_customer với use_saved_address = true + customer_confirmation = nguyên văn lời xác nhận.", state);
       // Họ tên: AI ghi ⇒ dùng; trống / quá ngắn ⇒ tên Facebook của khách (kênh fanpage) — không bắt khách khai lại tên.
       const typedName = typeof fields.name === "string" && fields.name.trim().length >= 2 ? fields.name : "";
       const v = z.object({ name: z.string().trim().min(2).max(200), phone: z.string().trim().min(8).max(30), address: z.string().trim().min(5).max(500), province: z.string().trim().max(100).optional() }).safeParse({ name: typedName || ctx.customerName || "", phone: fields.phone, address: fields.address, province: fields.province || undefined });

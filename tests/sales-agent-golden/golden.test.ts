@@ -99,6 +99,9 @@ function invariants(t: Map<string, GoldenTranscript>) {
   const oldPrompt = old.prompts[old.turns[0].rounds[0].prompt];
   assert.ok(/TRA LỊCH SỬ/.test(oldPrompt) && /Shop CÓ đúng MỘT địa chỉ cũ/.test(oldPrompt) && /KHÔNG xin lại địa chỉ/.test(oldPrompt), "«vẫn địa chỉ cũ» ⇒ lời nhắc đề xuất xác nhận địa chỉ đơn cũ");
   assert.ok(old.final.customer?.address.startsWith("Số 8 ngõ 2") && old.final.draft, "khách đồng ý ⇒ máy chủ điền địa chỉ đơn cũ, lên được đơn nháp");
+  // Hồ sơ khách cũ dựng từ ĐƠN CŨ chỉ là GỢI Ý (AGENTS 3.12): khối KHÁCH CŨ không còn đường «trả lời tiếp về món ⇒ create_customer bằng
+  // đúng thông tin trên» (bỏ qua kiểm lời xác nhận nguyên văn của use_saved_address).
+  for (const p of old.prompts) assert.ok(!p.includes("hoặc trả lời tiếp về món ⇒ create_customer bằng ĐÚNG thông tin trên") && /CHỈ GỢI Ý/.test(p), "khối KHÁCH CŨ từ lịch sử chỉ gợi ý, ghi qua use_saved_address");
   for (const x of t.values()) if (x.key !== old.key) assert.ok(x.prompts.every((p) => !p.includes("TRA LỊCH SỬ")), `[${x.key}] không nói gì về thông tin cũ ⇒ không có khối TRA LỊCH SỬ`);
 
   for (const x of t.values())

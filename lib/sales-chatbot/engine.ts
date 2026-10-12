@@ -1012,7 +1012,9 @@ async function chatTurnCore(
     const baseReturning = await findReturningCustomer(known.customer || !syncCustomer ? known : { ...known, customer: { ...syncCustomer, simulated: false } }).catch(() => null);
     // CUSTOMER 360 (customer-360.ts, 11/10/2026 — ca «Nga Ho Thien»): nối khách qua ĐƠN của chính hội thoại (bot · Pancake) + SĐT, địa
     // chỉ cũ ĐÃ XÁC MINH, và luật «khách nói địa chỉ / SĐT cũ ⇒ TRA trước khi hỏi». Lỗi đọc ⇒ `null`: khối lời nhắc nói thật «chưa tra
-    // được», không chặn lượt. Khối rỗng khi không cần ⇒ lời nhắc mọi hội thoại khác giữ nguyên.
+    // được», không chặn lượt. Khối TRA LỊCH SỬ rỗng khi khách không nói gì về thông tin cũ. Riêng `preferReturning` chạy MỌI lượt: hội
+    // thoại có đơn cũ mà chưa có khách cũ nào mạnh hơn thì khối KHÁCH CŨ dựng từ đơn cũ — hồ sơ mang `fromHistory` nên khối đó chỉ GỢI Ý
+    // (hỏi xác nhận ⇒ use_saved_address + lời xác nhận nguyên văn), và create_customer chặn gõ lại địa chỉ đơn cũ (AGENTS 3.12).
     const c360 = await loadCustomer360({ conversationId: conv.id, pageId: conv.pageId, threadId: conv.threadId, state: known }).catch(() => null);
     const returning = preferReturning(baseReturning, c360);
     const reuse = reuseIntentOf([

@@ -16,9 +16,11 @@ import {
   assembleCustomer360,
   botContactFacts,
   customer360Prompt,
+  historyAddressWithoutConsent,
   loadCustomer360,
   measureReturningMetrics,
   NO_REUSE_INTENT,
+  phonesInText,
   preferReturning,
   returningFrom360,
   returningMetrics,
@@ -26,10 +28,11 @@ import {
   reuseIntentOf,
   RETURNING_MIN_SAMPLE,
   savedAddressChoice,
+  savedAddressPhone,
   type OrderFact,
   type ReturningConversationFact,
 } from "@/lib/sales-chatbot/customer-360";
-import { pancakeRecentOrderOf, parsePancakeThreadProfile, type ReturningCustomer } from "@/lib/sales-chatbot/returning";
+import { pancakeRecentOrderOf, parsePancakeThreadProfile, returningCustomerPrompt, type ReturningCustomer } from "@/lib/sales-chatbot/returning";
 import type { ChatState } from "@/lib/sales-chatbot/tools";
 import { keyPaths, looksLikeAddress, maskProbeKey, monthOf, parseProbeArgs } from "../scripts/customer-360-probe";
 import { GOLDEN_CASES, RETURNING_THREAD, seedReturningThread } from "./sales-agent-golden/cases";
@@ -121,6 +124,9 @@ function testAssemble() {
   assert.equal(build([], S({ returning: noOrders })).buyer, "UNKNOWN", "Pancake chưa nói ⇒ CHƯA BIẾT, không phải khách mới (8.5)");
   assert.equal(build([], S()).buyer, "UNKNOWN");
   assert.equal(build([F({ orderId: "pk", source: "PANCAKE", at: null })]).suggestion, "NONE", "đơn Pancake không mốc ⇒ không biết có phải «lần trước»");
+  const pkBack = build([F({ orderId: "ok" }), F({ orderId: "pk-hoan", source: "PANCAKE", stage: "RETURNED", ...A2 }), F({ orderId: "pk-huy", source: "PANCAKE", stage: "CANCELLED", address: "Số 5 ngõ huỷ" })]);
+  assert.deepEqual(pkBack.history, { orders: 3, delivered: 0, returned: 1, cancelled: 1, open: 1 }, "đơn Pancake khâu hoàn / huỷ không đếm là đang mở");
+  assert.equal(returningFrom360(pkBack)?.orders, 1, "«Đã mua N đơn» chỉ đếm đơn không huỷ / hoàn");
 
   const paidState = S({ draft: { orderId: "d1", lines: [], unitPrices: {}, recipient: { name: "", phone: "", address: "", province: "" }, note: "", simulated: false }, customer: { id: null, name: "Chị Thử", phone: "0900000111", address: "Số 1 ngõ 1", province: "", simulated: false } });
   const paid = build([F({ orderId: "d1", currentCycle: true, paid: true })], paidState);
@@ -193,6 +199,37 @@ function testBridges() {
   assert.equal(preferReturning(base("FB_ID"), one)?.trust, "FB_ID");
   assert.equal(preferReturning(null, one)?.trust, "THREAD");
   assert.equal(preferReturning(null, null), null);
+}
+
+function testPhoneChange() {
+  assert.deepEqual(phonesInText("2 hộp 500g, 0912345678"), ["0912345678"], "chỉ cụm SĐT, không gộp chữ số rời rạc");
+  assert.ok(!phonesInText("2 hộp 500g, 0912345678").includes("0091234567"));
+  assert.deepEqual(phonesInText("số mới +84 912 345 678 nhé"), ["0912345678"]);
+  assert.ok(phonesInText("nhà số 12 0912.345.678").includes("0912345678"), "số nhà đứng sát không làm hỏng cụm SĐT");
+  const thread = { trust: "THREAD" as const, phone: "0900000123" };
+  assert.deepEqual(savedAddressPhone(thread, undefined, "vẫn địa chỉ cũ"), { phone: "0900000123" }, "không có số mới ⇒ số cũ");
+  assert.deepEqual(savedAddressPhone(thread, "+84 900 000 123", "vẫn địa chỉ cũ"), { phone: "0900000123" }, "trùng số cũ (khác cách viết) ⇒ số cũ");
+  assert.deepEqual(savedAddressPhone(thread, "0912345678", "số mới +84 912 345 678 nhé"), { phone: "0912345678" }, "khách gõ +84 …, model gõ 0… ⇒ khớp");
+  assert.deepEqual(savedAddressPhone(thread, "0912 345 678", "vẫn địa chỉ cũ nhưng số mới 0912345678"), { phone: "0912345678" });
+  assert.ok("error" in savedAddressPhone(thread, "0091234567", "2 hộp 500g, 0912345678"), "số cắt ngang ⇒ không khớp ⇒ hỏi lại");
+  assert.ok("error" in savedAddressPhone(thread, "0987654321", "vẫn địa chỉ cũ nhé"), "số không có trong câu khách ⇒ hỏi lại, KHÔNG lùi về số cũ");
+  assert.ok("error" in savedAddressPhone(thread, "12345", "số 12345"), "số không hợp lệ ⇒ hỏi lại");
+  assert.ok("error" in savedAddressPhone({ trust: "PHONE", phone: "0900000123" }, "0912345678", "số mới 0912345678"), "nối bằng SĐT mà đổi số ⇒ không dùng địa chỉ che, hỏi lại");
+}
+
+function testHistoryPrompt() {
+  // Hồ sơ dựng từ ĐƠN CŨ ⇒ khối KHÁCH CŨ của main chỉ GỢI Ý, đường ghi là use_saved_address + lời xác nhận (AGENTS 3.12).
+  const fromHistory = returningFrom360(build([F({ orderId: "o1" })]));
+  assert.ok(fromHistory?.fromHistory === true);
+  const hist = returningCustomerPrompt(fromHistory, undefined);
+  assert.ok(/CHỈ GỢI Ý/.test(hist) && /use_saved_address = true/.test(hist) && /KHÔNG tự gõ địa chỉ này/.test(hist), hist);
+  assert.ok(!hist.includes("hoặc trả lời tiếp về món ⇒ create_customer bằng ĐÚNG thông tin trên"), "hồ sơ từ lịch sử không còn đường «trả lời tiếp về món ⇒ create_customer»");
+  const typedHere: ReturningCustomer = { ...fromHistory!, fromHistory: undefined };
+  assert.ok(returningCustomerPrompt(typedHere, undefined).includes("hoặc trả lời tiếp về món ⇒ create_customer bằng ĐÚNG thông tin trên"), "hồ sơ khách tự khai giữ nguyên hành vi main");
+  assert.equal(historyAddressWithoutConsent(fromHistory, "Số 1 ngõ 1, Phường Cầu Giấy", "cho chị 1 gói"), true, "gõ lại địa chỉ đơn cũ khi khách chưa xác nhận ⇒ chặn");
+  assert.equal(historyAddressWithoutConsent(fromHistory, "Số 1 ngõ 1", "giao về Số 1 ngõ 1 nhé"), false, "khách tự gõ địa chỉ ⇒ được");
+  assert.equal(historyAddressWithoutConsent(fromHistory, "Số 77 phố Mới", "cho chị 1 gói"), false, "địa chỉ khác ⇒ không liên quan");
+  assert.equal(historyAddressWithoutConsent(typedHere, "Số 1 ngõ 1, Phường Cầu Giấy", "cho chị 1 gói"), false, "không phải hồ sơ từ lịch sử ⇒ không chặn");
 }
 
 function testMetrics() {
@@ -320,7 +357,7 @@ const INTEGRATION: GoldenCase[] = [
   },
   {
     key: "c360-so-bia",
-    title: "model tự chế SĐT không có trong câu khách ⇒ máy chủ giữ SĐT của đơn cũ",
+    title: "model tự chế SĐT không có trong câu khách ⇒ máy chủ từ chối (hỏi lại), KHÔNG lặng lẽ dùng SĐT của đơn cũ",
     shop: "food",
     channel: "WEB",
     turns: [
@@ -341,6 +378,19 @@ const INTEGRATION: GoldenCase[] = [
         before: (ctx) => seedReturningThread(ctx, { orderId: "c360-gy", threadId: "pg-vang_gy" }),
         say: "cho chị 1 gói chả mực, vẫn địa chỉ cũ",
         ai: [() => [tool("create_customer", { use_saved_address: true, customer_confirmation: "đúng rồi em" })], () => [say("Dạ em gửi về địa chỉ cũ như đơn trước được không ạ?")]],
+      },
+    ],
+  },
+  {
+    key: "c360-go-lai-dia-chi",
+    title: "model gõ lại địa chỉ ĐƠN CŨ vào create_customer mà khách chưa xác nhận ⇒ máy chủ chặn (AGENTS 3.12)",
+    shop: "food",
+    channel: "WEB",
+    turns: [
+      {
+        before: (ctx) => seedReturningThread(ctx, { orderId: "c360-gl", threadId: "pg-vang_gl" }),
+        say: "cho chị 1 gói chả mực",
+        ai: [() => [tool("create_customer", { name: "Chị Vàng", phone: RETURNING_THREAD.phone, address: `${RETURNING_THREAD.address}, ${RETURNING_THREAD.ward}`, province: RETURNING_THREAD.province })], () => [say("Dạ em gửi về địa chỉ cũ như đơn trước được không ạ?")]],
       },
     ],
   },
@@ -407,6 +457,16 @@ async function loaderChecks(conversationId: string) {
   await db.insert(o).values({ ...base, id: "c360-out-st", insertedAt: new Date(Date.now() - 5 * 86_400_000), stage: "DELIVERED", salesConversationId: "c360-conv-st", shipPhone: "0900000889", shipAddress: "Số 31 ngõ nhận" });
   const outSt = await loadCustomer360({ conversationId: "c360-conv-st", pageId: null, threadId: null, state: S() });
   assert.ok(outSt.suggestion === "ONE" && outSt.addresses[0].confidence === "CONFIRMED_NORMALIZED" && outSt.history?.delivered === 0, `khâu «Đã nhận» không phải giao thành công: ${JSON.stringify([outSt.addresses, outSt.history])}`);
+  // ĐƠN ERP CÙNG MÃ VỚI recent_orders PANCAKE (đồng bộ nhưng conversation_id rỗng): ERP nói HOÀN theo ORDER_OUTCOME, Pancake còn ghi
+  // «Đã gửi» ⇒ dòng ERP đè bản Pancake ⇒ KHÔNG đề xuất địa chỉ.
+  await db.insert(o).values({ ...base, id: "c360-pk-hoan", insertedAt: new Date(Date.now() - 6 * 86_400_000), stage: "DELIVERED", shipPhone: "0900000991", shipAddress: "Số 40 ngõ Pancake" });
+  await db.insert(schema.shipments).values({ id: "c360-s-pkh", orderId: "c360-pk-hoan", carrier: "Viettel Post", vtpOrderNumber: "C360PKH01", stage: "DELIVERED", codAmount: 280_000, codCollected: 30_000 });
+  await db.insert(o).values({ ...base, id: "c360-pk-xoa", insertedAt: new Date(Date.now() - 7 * 86_400_000), stage: "DELETED", shipPhone: "0900000992", shipAddress: "Số 41 ngõ xoá" });
+  const pkOrder = (id: string, address: string) => ({ id, at: new Date(Date.now() - 6 * 86_400_000).toISOString(), stage: "SHIPPED", name: "Chị Pancake", phone: "", address, province: "Thành phố Hà Nội", ward: "Phường Cầu Giấy", declaredPrepaid: false, items: [] });
+  const shadow = await loadCustomer360({ conversationId: "c360-pk-shadow", pageId: "pg-y", threadId: "pg-y_1", state: S({ returning: { fetchedAt: "", phones: [], fbIds: [], prior: [], recentOrders: [pkOrder("c360-pk-hoan", "Số 40 ngõ Pancake"), pkOrder("c360-pk-xoa", "Số 41 ngõ xoá")] } }) });
+  assert.ok(shadow.suggestion === "NONE" && shadow.lastOrder?.source === "ERP" && shadow.history?.orders === 1 && shadow.history.returned === 1, `ERP (ORDER_OUTCOME hoàn) đè bản Pancake, đơn ERP đã xoá bỏ luôn: ${JSON.stringify([shadow.history, shadow.lastOrder, shadow.addresses])}`);
+  const shadowText = customer360Prompt(shadow, REUSE);
+  assert.ok(!shadowText.includes("Số 40 ngõ Pancake") && !shadowText.includes("Số 41 ngõ xoá"), shadowText);
   // Mốc `before` (phép đo): đơn tạo SAU lúc mở hội thoại là của lượt này.
   const later = await loadCustomer360({ conversationId: "c360-ph", pageId: null, threadId: null, state: S({ returning: { fetchedAt: "", phones: ["0900000444"], fbIds: [], prior: [] } }) }, { before: new Date(Date.now() - 2 * 86_400_000) });
   assert.equal(later.suggestion, "NONE", "đơn sau mốc mở hội thoại không phải «lần trước»");
@@ -459,7 +519,9 @@ async function testIntegration() {
         return;
       }
       if (c.key === "c360-so-bia") {
-        assert.ok(t.final.customer?.address.startsWith("Số 8 ngõ 2") && t.final.customer.phone === RETURNING_THREAD.phone, `số không có trong câu khách ⇒ giữ SĐT đơn cũ: ${JSON.stringify(t.final.customer)}`);
+        const res = t.turns[0].rounds[0].results[0] as { error?: string } | undefined;
+        assert.ok(res?.error && /không có trong câu cuối/.test(res.error), `số không có trong câu khách ⇒ từ chối: ${JSON.stringify(res)}`);
+        assert.ok(!t.final.customer, `không lùi về số cũ: ${JSON.stringify(t.final.customer)}`);
         return;
       }
       if (c.key === "c360-chi-goi-y") {
@@ -467,6 +529,13 @@ async function testIntegration() {
         const res = t.turns[0].rounds[0].results[0] as { error?: string } | undefined;
         assert.ok(res?.error && /nguyên văn lời khách xác nhận/.test(res.error), `lời xác nhận không có trong câu khách ⇒ từ chối: ${JSON.stringify(res)}`);
         assert.ok(!t.final.customer, `không tự điền địa chỉ cũ vào hồ sơ nhận hàng: ${JSON.stringify(t.final.customer)}`);
+        return;
+      }
+      if (c.key === "c360-go-lai-dia-chi") {
+        assert.ok(p0.includes("KHÁCH CŨ — dữ liệu shop đã có") && /CHỈ GỢI Ý/.test(p0) && !p0.includes("hoặc trả lời tiếp về món ⇒ create_customer bằng ĐÚNG thông tin trên"), "khối KHÁCH CŨ từ lịch sử chỉ gợi ý");
+        const res = t.turns[0].rounds[0].results[0] as { error?: string } | undefined;
+        assert.ok(res?.error && /ĐƠN CŨ/.test(res.error), `gõ lại địa chỉ đơn cũ ⇒ chặn: ${JSON.stringify(res)}`);
+        assert.ok(!t.final.customer, `không ghi địa chỉ cũ khi khách chưa xác nhận: ${JSON.stringify(t.final.customer)}`);
         return;
       }
       if (c.key === "c360-do-don") {
@@ -490,6 +559,8 @@ export async function testCustomer360() {
   testIntent();
   testPrompt();
   testBridges();
+  testPhoneChange();
+  testHistoryPrompt();
   testMetrics();
   testPancakeParse();
   testProbePure();

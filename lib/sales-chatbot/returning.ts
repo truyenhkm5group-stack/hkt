@@ -85,6 +85,12 @@ export function pancakeRecentOrderOf(value: unknown): PancakeRecentOrder | null 
 export type ReturningTrust = "THREAD" | "FB_ID" | "PHONE";
 export type ReturningCustomer = {
   trust: ReturningTrust;
+  /**
+   * Hồ sơ dựng từ ĐƠN CŨ của hội thoại (Customer 360 — `customer-360.ts::returningOf`), khách CHƯA xác nhận dùng lại lần này ⇒
+   * khối KHÁCH CŨ chỉ gợi ý: hỏi xác nhận ⇒ `use_saved_address` + `customer_confirmation` (AGENTS 3.12), không «create_customer bằng
+   * đúng thông tin trên». Vắng ⇒ hành vi cũ.
+   */
+  fromHistory?: true;
   customerId: string | null;
   name: string;
   phone: string;
@@ -414,7 +420,7 @@ export function returningCustomerPrompt(r: ReturningCustomer | null, profile: Pa
       const hint = promptDataText(r.name.trim().split(/\s+/).pop() ?? "", NAME_MAX);
       lines.push(`  · SĐT ${r.phone} (khách đã gửi trong hội thoại) có trong sổ của shop${hint ? ` — người nhận tên «${hint}»` : ""}, địa chỉ cũ ĐÃ CHE: «${maskAddress(fullAddress(r)) || "…"}». Bạn KHÔNG biết số nhà — không đoán, không hỏi khách đọc lại để «kiểm tra».`);
     } else {
-      lines.push(`  · ${repeat ? "Thông tin nhận hàng lần trước" : "Thông tin nhận hàng khách đã cho"}: ${promptDataText(r.name, NAME_MAX)} · SĐT ${promptDataText(r.phone, 20)} · ${fullAddress(r)}`);
+      lines.push(`  · ${r.fromHistory ? "Thông tin nhận hàng của ĐƠN CŨ (CHỈ GỢI Ý — khách CHƯA xác nhận dùng lại lần này)" : repeat ? "Thông tin nhận hàng lần trước" : "Thông tin nhận hàng khách đã cho"}: ${promptDataText(r.name, NAME_MAX)} · SĐT ${promptDataText(r.phone, 20)} · ${fullAddress(r)}`);
     }
     // Mức PHONE: SĐT ai cũng gõ được ⇒ không lịch sử mua (số đơn · ngày · món) của chủ SĐT trong lời nhắc.
     if (!masked && repeat && r.orders !== null && r.orders > 0) lines.push(`  · Đã mua ${r.orders} đơn${r.lastOrderAt ? `, gần nhất ${formatDate(r.lastOrderAt)}` : ""}${r.lastItems.length ? `: ${r.lastItems.map((x) => promptDataText(x, ITEM_MAX)).join("; ")}` : ""}.`);
@@ -429,7 +435,9 @@ export function returningCustomerPrompt(r: ReturningCustomer | null, profile: Pa
   if (!lines.length) return "";
   const how = !r
     ? "CÁCH LÀM: SĐT / địa chỉ khách đã gửi ở tin cũ thì KHÔNG hỏi lại — nhắc lại ngắn để khách xác nhận, GỘP chung tin với lời mời thêm món; chỉ hỏi phần THỰC SỰ còn thiếu."
-    : masked
+    : r.fromHistory && !masked
+      ? `CÁCH LÀM: KHÔNG xin lại họ tên / SĐT / địa chỉ. Khi khách đã chọn món: trong CÙNG MỘT tin, hỏi xác nhận «em gửi về ${fullAddress(r)}, SĐT đuôi ${tail4(r.phone)} như đơn trước được không ạ?» + mời thêm đúng một món (B4). Đây CHỈ là GỢI Ý: khách xác nhận («đúng», «như cũ», «địa chỉ ở trên»…) ⇒ create_customer với use_saved_address = true và customer_confirmation = nguyên văn lời xác nhận — máy chủ tự điền; KHÔNG tự gõ địa chỉ này vào create_customer. Khách đổi ⇒ dùng thông tin mới.`
+      : masked
       ? `CÁCH LÀM: KHÔNG xin lại SĐT. Khi khách đã chọn món: trong CÙNG MỘT tin, hỏi xác nhận «em gửi về địa chỉ cũ ${maskAddress(fullAddress(r)) || "…"} như lần trước phải không ạ?» + mời thêm đúng một món (B4). Khách xác nhận («đúng», «như cũ», «địa chỉ ở trên»…) ⇒ create_customer với use_saved_address = true và customer_confirmation = nguyên văn lời xác nhận — máy chủ tự điền địa chỉ đầy đủ. Khách đổi địa chỉ ⇒ xin địa chỉ mới.`
       : `CÁCH LÀM: KHÔNG xin lại họ tên / SĐT / địa chỉ. Khi khách đã chọn món: trong CÙNG MỘT tin, xác nhận ngắn «em gửi về ${fullAddress(r)}, SĐT đuôi ${tail4(r.phone)}${repeat ? " như lần trước" : ""} nha» + mời thêm đúng một món (B4: món đi kèm${repeat ? " / món khác lần trước" : ""}). Khách đồng ý, nói «như cũ» / «địa chỉ ở trên», hoặc trả lời tiếp về món ⇒ create_customer bằng ĐÚNG thông tin trên ⇒ create_draft_order ⇒ đọc tóm tắt ⇒ khách đồng ý ⇒ confirm_order. Khách báo đổi ⇒ dùng thông tin mới.`;
   // CHỐT KHÁCH CŨ (chủ shop 03/10/2026, «Linh Nguyễn»: mua 05/2024, hôm nay hỏi giá qua quảng cáo rồi «Thanks 😍» là đi).
