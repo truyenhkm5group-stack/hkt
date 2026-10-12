@@ -2204,3 +2204,4 @@
 {"at":"2026-10-12T09:46:16.866Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"OVERLAP_ACCEPTED","mission":"gates-build-heap","detail":"OVERLAP_ACCEPTED với sync-runner-lock: điểm nóng SERIAL .github/ — cách tích hợp: một bước của gates.yml"}
 {"at":"2026-10-12T09:46:41.213Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"gates-build-heap","detail":"fix/gates-build-heap @ 18c7f97c925b · 1 lệnh kiểm thử"}
 {"at":"2026-10-12T09:47:23.789Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"gates-build-heap","detail":"#816 cho fix/gates-build-heap @ 18c7f97c925b"}
+{"at":"2026-10-12T09:48:03.515Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#816 @ 18c7f97c925b · Một env NODE_OPTIONS cho bước next build của gates; không đổi bước nào khác"}
