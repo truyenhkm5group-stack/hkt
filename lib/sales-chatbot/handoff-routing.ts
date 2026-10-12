@@ -542,10 +542,16 @@ export async function recoverExpiredHolds(now: Date): Promise<number> {
     // AI hỏng đã hết khoảng thử lại NHƯNG còn tin khách bị chốt lúc AI hỏng chưa ai trả lời ⇒ KHÔNG trả AI (AI không quay lại trả lời
     // các tin đã chốt — khách sẽ bị bỏ rơi): đổi sang lý do CẦN NGƯỜI không tự hết hạn để hội thoại ở lại hàng đợi người.
     if (hold.expired.cause === "AI_DOWN" && r.deadUnanswered) {
-      await db
+      const moved = await db
         .update(C)
         .set({ handoffReason: AI_DOWN_UNANSWERED_REASON, state: sql`coalesce(${C.state}, '{}'::jsonb) || ${JSON.stringify({ handoff: { reason: AI_DOWN_UNANSWERED_REASON, at: now.toISOString() } })}::jsonb` })
-        .where(and(eq(C.id, r.id), eq(C.status, "HANDOFF"), eq(C.handoffReason, AI_DOWN_HANDOFF_REASON)));
+        .where(and(eq(C.id, r.id), eq(C.status, "HANDOFF"), eq(C.handoffReason, AI_DOWN_HANDOFF_REASON)))
+        .returning({ id: C.id });
+      // Vết của MÁY (luật 34–36: actor NULL): AI hỏng hết hạn ⇒ chuyển hàng đợi người vì còn tin khách chưa trả lời.
+      if (moved.length) {
+        const { recordConversationEvent } = await import("@/lib/sales-chatbot/events");
+        await recordConversationEvent(r.id, { type: "handoff.requested", actorKind: "SYSTEM", actorUserId: null, occurredAt: now, reasonCode: "AI_DOWN", payload: { reason: AI_DOWN_UNANSWERED_REASON, via: "WATCHDOG", unanswered: true }, key: `ai-down-unanswered:${r.id}:${hold.expired.at.toISOString()}` });
+      }
       continue;
     }
     if ((await holdGate(r, now).catch(() => ({ skip: "lỗi" }))) === null) n += 1;

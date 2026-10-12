@@ -101,8 +101,11 @@ export type AiHold = {
 /**
  * Dạng ISO ĐẦY ĐỦ mà engine ghi vào `state.handoff.at` (`toISOString`): ngày · giờ · múi giờ, khoảng tháng / ngày / giờ hợp lệ. MỘT chuỗi
  * cho cả hai bản — POSIX ERE của Postgres và RegExp của JS đọc giống nhau (`STATE_HANDOFF_AT_SQL`, inbox-states.ts). Sai dạng ⇒ không tin mốc.
+ * Ngày phải có thật trong tháng (31/04, 31/02 bị loại — ép kiểu sẽ HỎNG cả câu); 29/02 cũng bị loại (không phân biệt năm nhuận bằng biểu
+ * thức) ⇒ lùi về `updated_at`, đúng phía an toàn.
  */
-export const ISO_AT_SQL_RE = "^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])T([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]([.][0-9]{1,6})?(Z|[+-]([01][0-9]|2[0-3]):?[0-5][0-9])$";
+export const ISO_AT_SQL_RE =
+  "^[0-9]{4}-((0[13578]|1[02])-(0[1-9]|[12][0-9]|3[01])|(0[469]|11)-(0[1-9]|[12][0-9]|30)|02-(0[1-9]|1[0-9]|2[0-8]))T([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]([.][0-9]{1,6})?(Z|[+-]([01][0-9]|2[0-3]):?[0-5][0-9])$";
 const ISO_AT_RE = new RegExp(ISO_AT_SQL_RE);
 
 /**

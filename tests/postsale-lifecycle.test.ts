@@ -48,6 +48,27 @@ function testPhases() {
   for (const yes of ["chưa nhận được hàng mà bên vận chuyển báo giao rồi", "mình không nhận được hàng", "vẫn chưa thấy hàng đâu"]) assert.ok(customerNotReceivedSignal(yes), `«${yes}» là «chưa nhận hàng»`);
   for (const no of ["Tôi nhận hàng rồi nhưng chưa thử chất lượng", "bao giờ nhận được hàng"]) assert.ok(!customerNotReceivedSignal(no), `«${no}» KHÔNG phải «chưa nhận hàng»`);
   for (const no of ["Tôi nhận hàng rồi nhưng chưa thử chất lượng", "ngon lắm shop", "cảm ơn em", "bảo quản thế nào em"]) assert.ok(!customerComplaintSignal(no), `«${no}» KHÔNG phải khiếu nại`);
+  // Review #821 vòng 2 — engine ép chuyển người + bot im theo luật này ⇒ câu khen / trung tính / câu hỏi KHÔNG được bắt nhầm (từ mơ hồ khi
+  // bỏ dấu chỉ khớp trên chữ CÒN DẤU, phủ định ngay trước cụm, «chậm … cũng được», câu hỏi chỉ tính khi có từ lỗi rõ).
+  for (const no of [
+    "ngon không chảy dầu",
+    "ruốc ngon, không bị chảy dầu như chỗ khác",
+    "loại đó thế nào em",
+    "cái đó thế nào",
+    "ăn thấy đỡ lắm",
+    "chị thấy đỡ quá",
+    "chấm quá ngon",
+    "chăm quá",
+    "giao chậm xíu cũng được",
+    "ship chậm cũng được em",
+    "phòng ngừa thế nào",
+    "đỏ quá",
+    "con chị ăn không ngon miệng mấy hôm nay",
+    "shop có đổi hàng không?",
+    "ăn có bị đau bụng không em?",
+  ])
+    assert.ok(!customerComplaintSignal(no), `«${no}» KHÔNG phải khiếu nại (bắt nhầm ⇒ bot im với khách đang khen)`);
+  for (const yes of ["goi ruoc bi moc roi, minh muon tra hang hoan tien", "hàng bị mốc rồi phải làm sao?", "an xong bi dau bung"]) assert.ok(customerComplaintSignal(yes), `«${yes}» là khiếu nại (gõ không dấu / câu hỏi có từ lỗi rõ)`);
 
   const snap = (o: Partial<Pick<LifecycleSnapshot, "order" | "fulfillment" | "salesStage" | "orderId">>) => ({ order: "CONFIRMED" as const, fulfillment: "NONE" as const, salesStage: "AWAITING_CONFIRMATION" as const, orderId: "erp-6495ca72-x", ...o });
   const none = { receipt: false, complaint: false };
@@ -96,6 +117,7 @@ function testAiDownClockPure() {
   assert.equal(aiDownStartedAt({ state: {}, updatedAt: ago(5) }).getTime(), ago(5).getTime(), "dòng cũ không có mốc ⇒ updated_at như cũ");
   assert.equal(aiDownStartedAt({ state: { handoff: { reason: "khác", at: ago(600).toISOString() } }, updatedAt: ago(5) }).getTime(), ago(5).getTime(), "mốc của lý do khác không dùng");
   assert.equal(aiDownStartedAt({ state: { handoff: { reason: AI_DOWN_HANDOFF_REASON, at: new Date(now.getTime() + MIN).toISOString() } }, updatedAt: ago(5) }).getTime(), ago(5).getTime(), "mốc sau updated_at ⇒ không tin");
+  for (const bad of ["2026-02-31T10:00:00.000Z", "2026-04-31T10:00:00Z", "2026-13-01T10:00:00Z", "2026-10-12", "hôm qua"]) assert.equal(aiDownStartedAt({ state: { handoff: { reason: AI_DOWN_HANDOFF_REASON, at: bad } }, updatedAt: ago(5) }).getTime(), ago(5).getTime(), `«${bad}» không phải mốc hợp lệ ⇒ updated_at`);
   const base = { updatedAt: ago(5), humanCooldownUntil: null, lastCustomerAt: ago(3), lastBotAt: ago(700), lastStaffAt: null, staffSeenAt: null, historyUntil: null, pageReplyAfterCustomer: false, orderUnderReview: false };
   assert.equal(classifyInboxState({ ...base, status: "HANDOFF", handoffReason: AI_DOWN_HANDOFF_REASON, state: st(600) }, now, false).needsHuman, null, "hộp thư: AI hỏng đã quá khoảng thử lại ⇒ không còn «AI dừng»");
   assert.equal(classifyInboxState({ ...base, status: "HANDOFF", handoffReason: AI_DOWN_HANDOFF_REASON, state: st(10) }, now, false).needsHuman, "AI_DOWN");
@@ -181,6 +203,8 @@ async function testDb() {
       // d3 AI hỏng 500 phút trước, còn tin khách bị chốt «AI hỏng» (DEAD) sau câu bot cuối, chưa ai trả lời (review #821 F5).
       await conv("d3", { handoffReason: AI_DOWN_HANDOFF_REASON, state: { handoff: { reason: AI_DOWN_HANDOFF_REASON, at: ago(500).toISOString() } } });
       await db.insert(schema.salesChatInbound).values({ pageId: "pg-hm", threadId: "d3", messageId: "d3-dead", text: "shop ơi còn hàng không", status: "DEAD", note: DEAD_AI_DOWN_NOTE, createdAt: ago(400) });
+      // d4 mốc AI hỏng SAI ngày (31/02) ⇒ cả bản SQL lẫn bản thuần lùi về updated_at (vừa ghi) — câu SQL không được hỏng vì ép kiểu.
+      await conv("d4", { handoffReason: AI_DOWN_HANDOFF_REASON, state: { handoff: { reason: AI_DOWN_HANDOFF_REASON, at: "2026-02-31T10:00:00.000Z" } } });
       await conv("t1", { status: "OPEN", handoffReason: TAKEOVER_REASON, state: { control: { mode: "HUMAN" } } });
       const admin = await db.query.users.findFirst({ where: eq(schema.users.email, `admin@${ORG}.local`) });
       assert.ok(admin);
@@ -189,12 +213,15 @@ async function testDb() {
       await conv("o4", { handoffReason: POST_ORDER_REASON, state: { handoff: { reason: POST_ORDER_REASON, at: ago(1520).toISOString() } } });
       await conv("o5", { handoffReason: POST_ORDER_REASON, state: { handoff: { reason: POST_ORDER_REASON, at: ago(1520).toISOString() } }, lastCustomerAt: ago(900), lastBotAt: ago(890) });
       await db.insert(schema.salesChatInbound).values({ pageId: "pg-hm", threadId: "o5", messageId: "o5-c", text: "cho chị đổi địa chỉ sang 5 Hai Bà Trưng nhé", status: "SKIPPED", createdAt: ago(900) });
+      // o6: CHÍNH tin gây chuyển người («đổi ngày giao») tới TRƯỚC mốc handoff.at một phút — mốc lùi phải giữ nó (review #821 vòng 2).
+      await conv("o6", { handoffReason: POST_ORDER_REASON, state: { handoff: { reason: POST_ORDER_REASON, at: ago(1520).toISOString() } }, lastCustomerAt: ago(1521), lastBotAt: ago(1500) });
+      await db.insert(schema.salesChatInbound).values({ pageId: "pg-hm", threadId: "o6", messageId: "o6-c", text: "cho chị đổi ngày giao sang thứ 7 nhé", status: "SKIPPED", createdAt: ago(1521) });
       await conv("o2", { handoffReason: POST_ORDER_REASON, state: { handoff: { reason: POST_ORDER_REASON, at: ago(1520).toISOString() } }, assigneeUserId: admin.id });
       await conv("o3", { handoffReason: POST_ORDER_REASON, state: { handoff: { reason: POST_ORDER_REASON, at: ago(1520).toISOString() } }, lastStaffAt: ago(1000) });
 
       // ═══ Bản SQL của đồng hồ AI hỏng ≡ bản thuần ═══
       const sqlDown = new Set((await db.select({ id: c.id }).from(c).where(needsHumanReasonSql("AI_DOWN", now))).map((r) => r.id));
-      assert.deepEqual([...sqlDown].sort(), ["d2"], `SQL: chỉ d2 còn trong khoảng thử lại (d1 hỏng 600 phút, updated_at mới ghi): ${[...sqlDown]}`);
+      assert.deepEqual([...sqlDown].sort(), ["d2", "d4"], `SQL: d2 còn trong khoảng thử lại; d4 mốc sai ngày ⇒ lùi updated_at (vừa ghi); d1 hỏng 600 phút: ${[...sqlDown]}`);
       const rows = await db.select().from(c).where(eq(c.handoffReason, AI_DOWN_HANDOFF_REASON));
       for (const r of rows) assert.equal(aiHoldOf(r, now).state === "HUMAN_COOLDOWN", sqlDown.has(r.id), `${r.id}: thuần ≡ SQL`);
 
@@ -204,11 +231,13 @@ async function testDb() {
       assert.equal(sw.recovered, 2, `watchdog mở lại đúng d1 + s1: ${JSON.stringify(sw)} ${JSON.stringify([...st.entries()])}`);
       assert.equal(st.get("d1")?.status, "OPEN", "AI hỏng đã quá khoảng thử lại ⇒ AI nhận lại");
       assert.equal(st.get("s1")?.status, "OPEN", "nhân viên nhường đã hết hạn ⇒ AI nhận lại");
-      for (const id of ["d2", "s2", "p1", "o1", "o2", "o3"]) assert.equal(st.get(id)?.status, "HANDOFF", `${id}: watchdog KHÔNG đụng (còn hạn / chuyển người bắt buộc / luật cũ chờ chủ shop duyệt)`);
+      for (const id of ["d2", "d4", "s2", "p1", "o1", "o2", "o3"]) assert.equal(st.get(id)?.status, "HANDOFF", `${id}: watchdog KHÔNG đụng (còn hạn / chuyển người bắt buộc / luật cũ chờ chủ shop duyệt)`);
       assert.deepEqual([st.get("d3")?.status, st.get("d3")?.reason], ["HANDOFF", AI_DOWN_UNANSWERED_REASON], "AI hỏng hết hạn nhưng còn tin khách chưa trả lời ⇒ KHÔNG trả AI, ở lại hàng đợi người");
       const resumed = await db.select({ id: schema.salesConversationEvents.conversationId, actor: schema.salesConversationEvents.actorUserId }).from(schema.salesConversationEvents).where(and(eq(schema.salesConversationEvents.type, "ai.resumed"), eq(schema.salesConversationEvents.reasonCode, "COOLDOWN_EXPIRED")));
       assert.deepEqual(resumed.map((r) => r.id).sort(), ["d1", "s1"], "mọi lần hết nhường (nhân viên · AI hỏng) có vết ai.resumed");
       assert.ok(resumed.every((r) => r.actor === null), "người thao tác NULL = MÁY (luật 34–36)");
+      const moved = await db.select({ actor: schema.salesConversationEvents.actorUserId, code: schema.salesConversationEvents.reasonCode }).from(schema.salesConversationEvents).where(and(eq(schema.salesConversationEvents.conversationId, "d3"), eq(schema.salesConversationEvents.type, "handoff.requested")));
+      assert.deepEqual(moved, [{ actor: null, code: "AI_DOWN" }], "đổi sang hàng đợi người vì còn tin chưa trả lời ⇒ một vết của MÁY");
       assert.equal(sw.unowned.unowned, 0, `không hội thoại nào «KHÔNG CHỦ» khi tổ chức có người xem hộp thư: ${JSON.stringify(sw.unowned)}`);
       assert.equal(sw.unowned.responders, 0, "tổ chức mới cấp: phòng phụ trách chưa có thành viên");
       assert.ok(sw.unowned.viewers >= 1 && sw.unowned.shared > 0, "phòng trống, chủ shop xem được hộp thư ⇒ hàng đợi chung");
@@ -221,16 +250,16 @@ async function testDb() {
 
       // ═══ Lõi trả-cho-AI luật cũ: chạy thử không ghi · --apply chỉ hội thoại không ai cầm · chạy lại không ghi thêm ═══
       const dry = await releaseLegacyPostOrderHandoffs({ apply: false, now });
-      assert.deepEqual({ c: dry.candidates, r: dry.released, ...dry.byVerdict }, { c: 5, r: 0, RELEASE: 1, HELD_BY_PERSON: 1, STAFF_REPLIED: 1, TAKEOVER: 0, CUSTOMER_WAITING: 1, CUSTOMER_REQUEST: 1 });
-      assert.ok(dry.waiting >= 1 && dry.requests.EDIT === 1, `chạy thử in số khách đang chờ + yêu cầu theo loại: ${JSON.stringify({ w: dry.waiting, r: dry.requests })}`);
+      assert.deepEqual({ c: dry.candidates, r: dry.released, ...dry.byVerdict }, { c: 6, r: 0, RELEASE: 1, HELD_BY_PERSON: 1, STAFF_REPLIED: 1, TAKEOVER: 0, CUSTOMER_WAITING: 1, CUSTOMER_REQUEST: 2 });
+      assert.ok(dry.waiting >= 1 && dry.requests.EDIT === 2, `chạy thử in số khách đang chờ + yêu cầu theo loại: ${JSON.stringify({ w: dry.waiting, r: dry.requests })}`);
       assert.equal((await db.select({ s: c.status }).from(c).where(eq(c.id, "o1")))[0]?.s, "HANDOFF", "chạy thử không ghi");
       const ap = await releaseLegacyPostOrderHandoffs({ apply: true, now });
       assert.equal(ap.released, 1);
       const o1 = (await db.select().from(c).where(eq(c.id, "o1")))[0];
       assert.deepEqual([o1.status, o1.handoffReason, o1.handoffQueuedAt, (o1.state as { handoff?: unknown }).handoff], ["OPEN", null, null, undefined], "o1 về AI, rời hàng đợi");
-      for (const id of ["o2", "o3", "o4", "o5", "p1"]) assert.equal((await db.select({ s: c.status }).from(c).where(eq(c.id, id)))[0]?.s, "HANDOFF", `${id} để nguyên (người cầm / khách đang chờ / khách có yêu cầu / chuyển người bắt buộc)`);
+      for (const id of ["o2", "o3", "o4", "o5", "o6", "p1"]) assert.equal((await db.select({ s: c.status }).from(c).where(eq(c.id, id)))[0]?.s, "HANDOFF", `${id} để nguyên (người cầm / khách đang chờ / khách có yêu cầu / chuyển người bắt buộc)`);
       const ap2 = await releaseLegacyPostOrderHandoffs({ apply: true, now });
-      assert.deepEqual([ap2.candidates, ap2.released], [4, 0], "chạy lại không ghi thêm");
+      assert.deepEqual([ap2.candidates, ap2.released], [5, 0], "chạy lại không ghi thêm");
       const ev = await db.select({ n: sql<number>`count(*)::int` }).from(schema.salesConversationEvents).where(and(eq(schema.salesConversationEvents.conversationId, "o1"), eq(schema.salesConversationEvents.type, "ai.resumed")));
       assert.equal(ev[0]?.n, 1, "một vết ai.resumed");
     });
@@ -239,7 +268,7 @@ async function testDb() {
       const [x] = await db.select({ s: schema.salesChatConversations.status }).from(schema.salesChatConversations).where(eq(schema.salesChatConversations.id, "x1"));
       assert.equal(x?.s, "HANDOFF", "CÁCH LY: lượt của tổ chức khác không đụng hội thoại ở đây");
     });
-    console.log("  ✓ PGlite: SQL ≡ thuần (AI hỏng) · watchdog mở lại AI hỏng / nhường đã hết, KHÔNG đụng chuyển khoản / tiếp quản / luật cũ · phòng trống ⇒ hàng đợi chung + 1 tin quản trị/ngày · AI hỏng còn tin chưa trả lời ⇒ ở lại hàng đợi người · ai.resumed của MÁY · trả-cho-AI: chạy thử 0 ghi, --apply 1/5 (loại khách đang chờ · khách có yêu cầu), chạy lại 0 · cách ly tổ chức");
+    console.log("  ✓ PGlite: SQL ≡ thuần (AI hỏng) · watchdog mở lại AI hỏng / nhường đã hết, KHÔNG đụng chuyển khoản / tiếp quản / luật cũ · phòng trống ⇒ hàng đợi chung + 1 tin quản trị/ngày · AI hỏng còn tin chưa trả lời ⇒ ở lại hàng đợi người · ai.resumed của MÁY · trả-cho-AI: chạy thử 0 ghi, --apply 1/6 (loại khách đang chờ · khách có yêu cầu, kể cả tin gây chuyển người trước mốc), chạy lại 0 · cách ly tổ chức");
   } finally {
     await dropOrg(ORG);
     await dropOrg(ORG2);

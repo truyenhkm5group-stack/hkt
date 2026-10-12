@@ -92,6 +92,9 @@ function testTruthTable() {
     const v = guardClaims(t, { ...ALL, orderEditedThisTurn: true });
     assert.ok(!v.ok && v.claim === "REFUND_PROMISE" && v.handoff && v.safeText === CLAIM_SAFE_TEXT.REFUND, `«${t}» luôn chặn + chuyển người`);
   }
+  for (const t of ["em ghi chú giao giờ hành chính cho chị rồi ạ", "em đổi sang 2 hộp rồi ạ", "em báo kho rồi ạ"]) assert.deepEqual(detectClaims(t), ["ORDER_EDITED"], `«${t}» là khẳng định ĐÃ SỬA ĐƠN (vòng 2)`);
+  assert.deepEqual(detectClaims("shop gửi bù 1 hũ cho chị nhé"), ["REFUND_PROMISE"], "«gửi bù» là lời hứa");
+  for (const t of ["bên vận chuyển sẽ gửi lại hàng cho chị vào ngày mai", "em không có quyền hoàn tiền ạ"]) assert.deepEqual(detectClaims(t), [], `«${t}» KHÔNG phải shop hứa (chủ ngữ ĐVVC / phủ định)`);
   for (const t of ["Dạ mình trả tiền khi nhận hàng ạ", "Nếu hàng lỗi shop hoàn tiền 100% ạ", "Đổi trong 3 ngày nếu hàng lỗi", "Chị muốn đổi địa chỉ giao không ạ?", "Em sẽ chuyển nhân viên đổi địa chỉ cho chị", "Dạ em ghi đơn cho chị rồi ạ"]) {
     assert.ok(!detectClaims(t).includes("ORDER_EDITED") && !detectClaims(t).includes("REFUND_PROMISE"), `«${t}» không phải khẳng định sửa đơn / hứa hoàn tiền`);
   }

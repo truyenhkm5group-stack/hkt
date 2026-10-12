@@ -468,30 +468,81 @@ export function customerReceiptClaim(text: string): boolean {
   return RECEIPT_RULES.some((re) => re.test(f));
 }
 
-const COMPLAINT_RULES: readonly RegExp[] = [
-  /\bbi\s+(?:loi|hong|thiu|moc|vo|be|dap|nat|hu|chay nuoc|co mui|het han|qua han)\b/,
-  /\b(?:hang|banh|do|san pham|sp|goi|hop|tui)\s+(?:loi|hong|thiu|moc|vo|be|dap|nat|het han|qua han)\b/,
-  /\b(?:giao|gui|ship)\s+(?:thieu|sai|nham)\b/,
-  /\b(?:thieu|sai|nham)\s+(?:hang|mon|so luong|loai|size|mau)\b/,
-  /\b(?:tra|doi)\s+(?:lai\s+)?hang\b|\bhoan\s+(?:lai\s+)?tien\b|\btra\s+lai\s+tien\b|\bboi\s+thuong\b/,
-  /\b(?:lua dao|that vong|qua te|te qua|khong dung nhu|khac (?:anh|hinh|mo ta|quang cao))\b/,
-  /\b(?:khieu nai|phan nan|boc phot)\b/,
-  // Sức khoẻ sau khi ăn — luôn là việc của người (review #821 F2).
-  /\b(?:dau bung|ngo doc|tieu chay|di ngoai|non mua|buon non|di ung|noi man|ngua)\b/,
-  // Chất lượng tệ: «không ngon như lần trước», «hàng dở quá», «ruốc bị chảy dầu» (luật «bị …» ở trên + chảy dầu).
-  /\bkhong\s+(?:con\s+)?(?:ngon|tuoi|thom|nhu lan truoc|giong lan truoc|giong anh)\b|\b(?:do|te|chan|kho an|nhat nheo)\s+(?:qua|lam|that|the)\b|\bbi\s+chay\s+dau\b|\bchay\s+dau\b/,
-  // Giao chậm: «giao chậm quá», «5 ngày chưa thấy».
-  /\b(?:giao|ship|gui)\s+cham\b|\bcham\s+qua\b|\b\d+\s+ngay\s+(?:roi\s+)?(?:ma\s+)?(?:van\s+)?chua\s+(?:thay|nhan|toi|den|giao)\b/,
+/**
+ * LUẬT KHIẾU NẠI (review #821 vòng 2): engine ép chuyển người + bot im theo luật này, nên bắt NHẦM một câu khen là tái tạo đúng sự cố PR
+ * này sửa. Ba hàng rào:
+ *  1. Từ MƠ HỒ khi bỏ dấu («dở» ↔ «đó / đỡ / đỏ», «chậm» ↔ «chấm / chăm», «ngứa» ↔ «ngừa», «đau» …) chỉ khớp trên chữ CÒN DẤU
+ *     (`folded: false`). Luật chạy trên chữ bỏ dấu chỉ gồm cụm KHÔNG mơ hồ (khách gõ không dấu vẫn được bắt: «goi ruoc bi moc»).
+ *  2. Phủ định ngay trước cụm («không / chưa / ko (bị) …») ⇒ không tính: «ruốc ngon, không bị chảy dầu như chỗ khác».
+ *  3. Mệnh đề HỎI («thế nào», «… không em?») chỉ tính luật có từ LỖI rõ (`inQuestion: true` — mốc, hỏng, thiếu, sai…); «chậm … cũng
+ *     được / không sao» không phải than phiền.
+ */
+type ComplaintRule = { re: RegExp; folded: boolean; inQuestion: boolean; unless?: RegExp };
+const W0 = String.raw`(?:^|[^\p{L}\d])`;
+const W1 = String.raw`(?=$|[^\p{L}\d])`;
+const acc = (body: string): RegExp => new RegExp(`${W0}(?:${body})${W1}`, "u");
+const SLOW_OK = /\b(?:cung duoc|khong sao|ko sao|tu tu|khong van de|cung ok)\b/;
+const COMPLAINT_RULES: readonly ComplaintRule[] = [
+  // Hàng lỗi — cụm không mơ hồ khi bỏ dấu.
+  { re: /\bbi\s+(?:loi|hong|thiu|moc|chay dau|chay nuoc|het han|qua han)\b/, folded: true, inQuestion: true },
+  // «bị đau bụng / ngộ độc» gõ không dấu — câu HỎI («ăn có bị đau bụng không em?») là hỏi trước khi mua, không tính.
+  { re: /\bbi\s+(?:dau bung|ngo doc|tieu chay|di ung)\b/, folded: true, inQuestion: false },
+  { re: /\b(?:hang|banh|san pham|sp|goi|hop|tui)\s+(?:loi|hong|thiu|moc|het han|qua han)\b/, folded: true, inQuestion: true },
+  { re: acc("bị\\s+(?:vỡ|bể|dập|nát|hư|có mùi|bốc mùi)|(?:hàng|bánh|sản phẩm|gói|hộp|túi)\\s+(?:vỡ|bể|dập|nát|hư)"), folded: false, inQuestion: true },
+  { re: acc("chảy dầu|chảy nước|bốc mùi|có mùi lạ"), folded: false, inQuestion: true },
+  // Giao thiếu / sai.
+  { re: /\b(?:giao|gui|ship)\s+(?:thieu|sai|nham)\b|\b(?:thieu|sai|nham)\s+(?:hang|mon|so luong|loai|size|mau)\b/, folded: true, inQuestion: true },
+  // Đổi trả / hoàn tiền — câu hỏi chính sách («shop có đổi hàng không?») không tính.
+  { re: /\b(?:tra|doi)\s+(?:lai\s+)?hang\b|\bhoan\s+(?:lai\s+)?tien\b|\btra\s+lai\s+tien\b|\bboi\s+thuong\b/, folded: true, inQuestion: false },
+  { re: /\b(?:khieu nai|phan nan|boc phot|lua dao|that vong)\b/, folded: true, inQuestion: true },
+  // Sức khoẻ sau khi ăn (CÓ DẤU — «ngứa» ≠ «ngừa»).
+  { re: acc("đau bụng|ngộ độc|tiêu chảy|đi ngoài|buồn nôn|nôn ói|dị ứng|nổi mẩn|ngứa"), folded: false, inQuestion: false },
+  // Chất lượng tệ (CÓ DẤU — «dở» ≠ «đó / đỡ / đỏ»); «không ngon MIỆNG» (khách tự nói về mình) không tính.
+  { re: acc("(?:dở|tệ|chán|khó ăn|nhạt nhẽo)\\s+(?:quá|lắm|thật|thế|vậy|ghê)|không\\s+(?:còn\\s+)?(?:ngon|tươi|thơm)\\s+(?:như|bằng)|không\\s+(?:giống|đúng như)\\s+(?:ảnh|hình|mô tả|quảng cáo)|khác\\s+(?:ảnh|hình|mô tả|quảng cáo)"), folded: false, inQuestion: false },
+  // Giao chậm (CÓ DẤU — «chậm» ≠ «chấm / chăm»); «N ngày chưa thấy» không mơ hồ khi bỏ dấu.
+  { re: acc("(?:giao|ship|gửi)\\s+chậm|chậm\\s+quá"), folded: false, inQuestion: false, unless: SLOW_OK },
+  { re: /\b\d+\s+ngay\s+(?:roi\s+)?(?:ma\s+)?(?:van\s+)?chua\s+(?:thay|nhan|toi|den|giao)\b/, folded: true, inQuestion: false, unless: SLOW_OK },
 ];
+const COMPLAINT_NEGATION = new Set(["khong", "chua", "ko", "k", "chang", "cha", "khoi"]);
+const COMPLAINT_QUESTION_RE = /(?:\b(?:the nao|ra sao)\b|\b(?:khong|ko|chua|nhi|sao|duoc khong)(?:\s+(?:em|shop|a|chi|anh|ban|c|e|vay|v|nhe))*\s*$)/;
+
+/** Mệnh đề (cắt theo dấu câu / phẩy / xuống dòng) kèm cờ hỏi. */
+function complaintClauses(text: string): { raw: string; folded: string; question: boolean }[] {
+  const out: { raw: string; folded: string; question: boolean }[] = [];
+  for (const m of text.normalize("NFC").matchAll(/[^.!?;\n,]+[.!?;\n,]*/g)) {
+    const raw = m[0].trim().toLowerCase();
+    if (!raw) continue;
+    const folded = foldVi(raw).replace(/[.!?;,]+$/g, "").trim();
+    out.push({ raw: raw.replace(/[.!?;,]+$/g, "").trim(), folded, question: raw.includes("?") || COMPLAINT_QUESTION_RE.test(folded) });
+  }
+  return out;
+}
+
+function negatedBefore(prefix: string): boolean {
+  const words = foldVi(prefix).trim().split(/\s+/).filter(Boolean);
+  const last = words.slice(-2);
+  // «không bị …» / «chưa bị …» / «không …»: phủ định nằm trong hai từ ngay trước cụm.
+  return last.some((w) => COMPLAINT_NEGATION.has(w));
+}
 
 /**
  * Khách KHIẾU NẠI / đòi đổi trả / hoàn tiền — câu rõ ràng về hàng lỗi, thiếu, sai, hỏng, chất lượng tệ, đau bụng sau khi ăn, giao chậm,
  * muốn trả / hoàn tiền. «chưa thử chất lượng» KHÔNG phải khiếu nại (khách chưa dùng). Có đơn sống mà khớp ⇒ MÁY CHỦ chuyển người (engine),
- * không để tuỳ lời nhắc. HÀM THUẦN.
+ * nên luật ưu tiên KHÔNG BẮT NHẦM (xem ba hàng rào ở trên). HÀM THUẦN.
  */
 export function customerComplaintSignal(text: string): boolean {
-  const f = foldVi(text.normalize("NFC"));
-  return COMPLAINT_RULES.some((re) => re.test(f));
+  for (const c of complaintClauses(text)) {
+    for (const rule of COMPLAINT_RULES) {
+      if (c.question && !rule.inQuestion) continue;
+      if (rule.unless && rule.unless.test(c.folded)) continue;
+      const hay = rule.folded ? c.folded : c.raw;
+      const m = rule.re.exec(hay);
+      if (!m) continue;
+      if (negatedBefore(hay.slice(0, m.index + (m[0].length - m[0].trimStart().length)))) continue;
+      return true;
+    }
+  }
+  return false;
 }
 
 const NOT_RECEIVED_RE = /\b(?:chua|khong|ko|k|van chua)\s+(?:\S+\s+){0,2}(?:nhan|thay)\s+(?:duoc\s+)?(?:hang|don|goi|hop|buu pham)\b|\bchua\s+(?:nhan|thay)\s+(?:gi|duoc gi)\b/;

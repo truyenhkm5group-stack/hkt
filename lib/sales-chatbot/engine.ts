@@ -917,7 +917,11 @@ async function chatTurnCore(
     // chuyển người, ghi lý do (`handoffReason` ⇒ sự kiện `handoff.requested` + `lastError`). Căn cứ chỉ đọc khi câu có khẳng định.
     // SỐ TIỀN (P0 authoritative-quote 11/10/2026): mọi số tiền trong chữ bot phải thuộc báo giá máy chủ đã xác thực của hội thoại hoặc
     // tập tham chiếu của danh mục (`quote.ts`) — đọc lười, một lần mỗi lượt, chỉ khi câu có số tiền.
-    const claimFacts = claimFactsLoader({ id: conv.id, orderId: conv.orderId, pageId: conv.pageId, threadId: conv.threadId }, { reference: () => catalogReferenceAmounts(cfg), turn: turnSeq });
+    const claimFactsBase = claimFactsLoader({ id: conv.id, orderId: conv.orderId, pageId: conv.pageId, threadId: conv.threadId }, { reference: () => catalogReferenceAmounts(cfg), turn: turnSeq });
+    // Căn cứ của câu «đã cập nhật địa chỉ / đã sửa đơn» (claim-guard ORDER_EDITED): công cụ lưu khách / lên / sửa đơn GHI THÀNH CÔNG trong
+    // CHÍNH lượt này (review #821 vòng 2 — trước bán, cập nhật địa chỉ khách bằng create_customer không được bị coi là bịa).
+    let wroteThisTurn = false;
+    const claimFacts = (s: ChatState) => claimFactsBase(s).then((f) => (wroteThisTurn ? { ...f, orderEditedThisTurn: true } : f));
     const claimBlock = async (v: Extract<ClaimVerdict, { ok: false }>, st: ChatState): Promise<{ state: ChatState; safe: string | null }> => {
       // Thay câu KHÔNG chuyển người (đơn đã tạo nhưng còn chờ kiểm — đơn nằm sẵn trong hàng «Cần người kiểm»): câu an toàn gửi trên MỌI kênh.
       if (!v.handoff) return { state: st, safe: v.safeText };
@@ -1143,6 +1147,7 @@ async function chatTurnCore(
         for (const u of uses) {
           const r = await executeTool(u.name, u.input, { autoConfirm, conversationId: conv.id, channel: opts.channel, config: cfg, state, lastUserText: text, agent: SALES_AGENT, customerName: opts.customerName ?? null, quickReplies: quickCatalog, returning, recentSaid, turn: turnSeq, bookingOn, now, commentTurn: opts.aiCustomer?.threadKind === "COMMENT", promptStamp: { ...stampBase, model: res.model || prov.provider.model } });
           state = r.state;
+          if (!r.isError && (u.name === "create_customer" || u.name === "create_draft_order" || u.name === "update_draft_order")) wroteThisTurn = true;
           // Câu mẫu AI gửi qua công cụ cũng qua hàng rào khẳng định — bị chặn ⇒ không gửi, chuyển người như chữ model.
           const deliverVerdict = r.deliver ? await guardOutgoing(r.deliver.text, () => claimFacts(state)) : null;
           const deliver = deliverVerdict?.ok ? r.deliver : undefined;

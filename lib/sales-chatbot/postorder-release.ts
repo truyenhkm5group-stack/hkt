@@ -1,4 +1,4 @@
-import { and, asc, eq, gt, like, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, like, lte, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { audit } from "@/lib/audit";
 import { paymentSignalInCustomerText } from "@/lib/sales-chatbot/claim-guard";
@@ -87,20 +87,27 @@ export type ReleaseReport = {
 const C = schema.salesChatConversations;
 const MACHINE_EMAIL = "job:sales-postorder-handoff-release";
 
-/** Tin KHÁCH của hội thoại kể từ `since` (sổ tin thô kênh nhắn tin; chat web: lịch sử bot). Tối đa 50 tin, chỉ để nhận yêu cầu. */
+/**
+ * Tin KHÁCH của hội thoại kể từ tin khách CUỐI ở / trước mốc chuyển người (mốc LÙI — review #821 vòng 2: chính tin làm hội thoại bị chuyển
+ * người, vd «cho chị đổi địa chỉ», tới TRƯỚC `handoff.at` vài giây; lọc «sau mốc» là loại đúng yêu cầu cần giữ). Sổ tin thô kênh nhắn tin;
+ * chat web: lịch sử bot. Tối đa 50 tin, chỉ để nhận yêu cầu.
+ */
 async function customerTextsSince(conv: { id: string; pageId: string | null; threadId: string | null }, since: Date | null): Promise<string[]> {
   const db = await getDb();
-  const from = since ?? new Date(0);
   if (conv.pageId && conv.threadId) {
     const i = schema.salesChatInbound;
+    const own = and(eq(i.pageId, conv.pageId), eq(i.threadId, conv.threadId), customerInboundRowSql('"sales_chat_inbound"'));
+    const [anchor] = since ? await db.select({ at: i.createdAt }).from(i).where(and(own, lte(i.createdAt, since))).orderBy(desc(i.createdAt)).limit(1) : [];
+    const from = anchor ? new Date(anchor.at.getTime() - 1) : (since ?? new Date(0));
     const rows = await db
       .select({ text: i.text })
       .from(i)
-      .where(and(eq(i.pageId, conv.pageId), eq(i.threadId, conv.threadId), gt(i.createdAt, from), customerInboundRowSql('"sales_chat_inbound"')))
+      .where(and(own, gt(i.createdAt, from)))
       .orderBy(asc(i.createdAt))
       .limit(50);
     return rows.map((r) => r.text);
   }
+  const from = since ? new Date(since.getTime() - 10 * 60_000) : new Date(0);
   const rows = rowsOf<{ content: unknown }>(await db.execute(sql`select m.content from "sales_chat_messages" m where m.conversation_id = ${conv.id} and m.created_at > ${from} and ${CUSTOMER_MESSAGE_ROW_SQL} order by m.seq limit 50`));
   const out: string[] = [];
   for (const r of rows) for (const b of Array.isArray(r.content) ? (r.content as { type?: string; text?: string }[]) : []) if (b.type === "text" && b.text) out.push(b.text);

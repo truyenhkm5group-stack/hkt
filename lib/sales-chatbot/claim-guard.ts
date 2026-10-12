@@ -189,6 +189,8 @@ const CLAIM_RULES: readonly ClaimRule[] = [
   { kind: "ORDER_EDITED", re: /\b(?:doi|sua|cap nhat|chuyen)\s+(?:lai\s+)?(?:dia chi|sdt|so dien thoai|ngay giao|lich giao|gio giao|ghi chu|thong tin don|nguoi nhan)\b|\bsua\s+(?:lai\s+)?don\b/, needsDone: true, allowProposal: false },
   // «em thêm 1 hũ ruốc vào đơn cho chị rồi ạ»
   { kind: "ORDER_EDITED", re: /\bthem\s+(?:\S+\s+){0,4}vao\s+(?:don|don hang)\b/, needsDone: true, allowProposal: false },
+  // «em ghi chú giao giờ hành chính rồi ạ» · «em note lại cho kho rồi» · «em báo kho rồi» · «em đổi sang 2 hộp rồi ạ» (review #821 vòng 2)
+  { kind: "ORDER_EDITED", re: /\b(?:ghi chu|note|bao kho|dan kho|nhan kho|bao ben kho)\b|\bdoi\s+(?:lai\s+)?sang\s+\S+/, needsDone: true, allowProposal: false },
 ];
 
 /**
@@ -196,15 +198,20 @@ const CLAIM_RULES: readonly ClaimRule[] = [
  * «sẽ», «nhé» KHÔNG cứu được câu (hứa tương lai vẫn là hứa); chỉ phủ định đứng ngay trước, câu hỏi, hoặc mệnh đề CHÍNH SÁCH có điều kiện
  * («nếu hàng lỗi shop hoàn tiền», «trong vòng 3 ngày», «theo chính sách») mới không tính — đọc lại chính sách của shop là việc hợp lệ.
  */
-const REFUND_PROMISE_RE = /\b(?:hoan|tra lai|gui lai|chuyen lai)\s+(?:lai\s+)?(?:tien|tien hang|tien cho)\b|\bdoi\s+(?:lai\s+)?(?:hang|san pham|sp|mon|goi|hop|hu)(?:\s+moi)?\s+cho\b|\bgui\s+(?:lai|bu|them)\s+(?:hang|don|goi|hop|hu|mon|san pham|sp)\s+(?:moi\s+)?(?:cho|bu)\b|\bboi thuong\b/;
+const REFUND_PROMISE_RE = /\b(?:hoan|tra lai|gui lai|chuyen lai)\s+(?:lai\s+)?(?:tien|tien hang|tien cho)\b|\bdoi\s+(?:lai\s+)?(?:hang|san pham|sp|mon|goi|hop|hu)(?:\s+moi)?\s+cho\b|\bgui\s+bu\b|\bgui\s+lai\s+(?:\d+\s+)?(?:hang|don|goi|hop|hu|mon|san pham|sp)\b|\bboi thuong\b/;
 const REFUND_NEGATION = new Set(["chua", "khong", "ko", "k", "chang", "khoi"]);
+/** Chủ ngữ là ĐVVC / bưu tá («bên vận chuyển sẽ gửi lại hàng cho chị») — bot đang thuật lời khai của hãng, không phải shop hứa. */
+const CARRIER_SUBJECT_RE = /\b(?:ben van chuyen|don vi van chuyen|dvvc|buu ta|buu cuc|shipper|nha van chuyen|viettel post|ghtk|ghn|j&t)\b/;
 const POLICY_CONDITIONAL_RE = /\b(?:neu|khi|truong hop|chinh sach|trong vong|quy dinh|dieu kien)\b/;
 
 function refundPromiseIn(c: { folded: string; question: boolean }): boolean {
   if (c.question || QUESTION_TAIL_RE.test(c.folded) || POLICY_CONDITIONAL_RE.test(c.folded)) return false;
   const m = REFUND_PROMISE_RE.exec(c.folded);
   if (!m) return false;
-  const before = c.folded.slice(0, m.index).trim().split(/\s+/).filter(Boolean).slice(-2);
+  const beforeText = c.folded.slice(0, m.index);
+  if (CARRIER_SUBJECT_RE.test(beforeText)) return false;
+  // Phủ định trong BỐN từ trước cụm: «em không có quyền hoàn tiền» · «shop chưa thể hoàn tiền».
+  const before = beforeText.trim().split(/\s+/).filter(Boolean).slice(-4);
   return !before.some((w) => REFUND_NEGATION.has(w));
 }
 
