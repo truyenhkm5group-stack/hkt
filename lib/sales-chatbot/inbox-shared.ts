@@ -432,15 +432,20 @@ export type InboxThread = {
   readThrough: { id: string; at: string } | null;
 };
 
-/** Nhãn kết quả đơn theo `ORDER_OUTCOME` (lib/queries/return-rate.ts) — chỉ để HIỆN, không tính gì. */
+/**
+ * Nhãn kết quả đơn theo `ORDER_OUTCOME` (lib/queries/return-rate.ts) — chỉ để HIỆN, không tính gì. `NOT_SHIPPED` nghĩa là ERP KHÔNG có
+ * vận đơn nào của đơn, không phải «shop chưa gửi hàng» (HOTFIX P0 12/10/2026, ca «Khanh Nhung»: đơn in «Chưa gửi» trong khi khách đã
+ * nhận — shop gửi qua kênh ERP không thấy). Nhãn nói đúng điều ERP biết, như câu trạng thái của bot (`order-status-shared.ts`).
+ */
 export const INBOX_OUTCOME_LABEL: Record<string, string> = {
-  NOT_SHIPPED: "Chưa gửi",
+  NOT_SHIPPED: "Chưa có vận đơn",
   AWAITING_PICKUP: "Chờ lấy hàng",
   IN_TRANSIT: "Đang giao",
   DELIVERED: "Giao thành công",
   RETURNED: "Hoàn",
   RETURNED_BY_RULE: "Không thành công",
   CANCELLED: "Huỷ",
+  UNKNOWN: "Chưa rõ — ĐVVC chưa báo",
 };
 
 /** Tin nhân viên tối đa (chia đoạn theo trần từng kênh khi gửi). */

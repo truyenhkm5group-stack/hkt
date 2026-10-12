@@ -93,11 +93,29 @@ export type AiHold = {
   expired: { cause: "STAFF_REPLY" | "AI_DOWN"; at: Date } | null;
 };
 
+const ISO_AT_RE = /^\d{4}-\d{2}-\d{2}T/;
+
+/**
+ * MỐC AI HỎNG THẬT (HOTFIX P0 12/10/2026): `state.handoff.at` mà engine ghi CÙNG lượt chuyển hội thoại sang «AI hỏng» (lý do khớp).
+ * Trước bản này đồng hồ thử lại đọc `updated_at + 30 phút` — nhưng `updated_at` có `$onUpdate` nên MỌI lượt ghi vào hội thoại (đóng
+ * dấu hàng đợi người, báo «khách nhắn thêm», người mở hội thoại, nhật ký ghi đơn…) đẩy nó về «bây giờ»: hội thoại AI hỏng một lần có
+ * thể bị coi là «đang chờ thử lại» mãi mãi. Dòng cũ không có mốc (hoặc mốc lạ / sau `updated_at`) ⇒ lùi về `updated_at` như cũ. Bản
+ * SQL tương đương: `AI_DOWN_STARTED_SQL` (inbox-states.ts) — bài kiểm so hai bản. HÀM THUẦN.
+ */
+export function aiDownStartedAt(conv: Pick<AiHoldInput, "state" | "updatedAt">): Date {
+  const h = conv.state && typeof conv.state === "object" ? (conv.state as { handoff?: { reason?: unknown; at?: unknown } }).handoff : undefined;
+  if (h && h.reason === AI_DOWN_HANDOFF_REASON && typeof h.at === "string" && ISO_AT_RE.test(h.at)) {
+    const at = new Date(h.at);
+    if (Number.isFinite(at.getTime()) && at.getTime() <= conv.updatedAt.getTime()) return at;
+  }
+  return conv.updatedAt;
+}
+
 /** Mốc hết nhường của lần nhường đang lưu — `null` = hội thoại không ở lý do tự hết hạn. HÀM THUẦN. */
 function cooldownOf(conv: AiHoldInput): { cause: "STAFF_REPLY" | "AI_DOWN"; until: Date } | null {
   if (conv.status !== "HANDOFF" || !conv.handoffReason) return null;
   if (STAFF_COOLDOWN_REASONS.has(conv.handoffReason)) return { cause: "STAFF_REPLY", until: new Date((conv.humanCooldownUntil ?? new Date(conv.updatedAt.getTime() + HUMAN_COOLDOWN_MS)).getTime()) };
-  if (conv.handoffReason === AI_DOWN_HANDOFF_REASON) return { cause: "AI_DOWN", until: new Date(conv.updatedAt.getTime() + HUMAN_COOLDOWN_MS) };
+  if (conv.handoffReason === AI_DOWN_HANDOFF_REASON) return { cause: "AI_DOWN", until: new Date(aiDownStartedAt(conv).getTime() + HUMAN_COOLDOWN_MS) };
   return null;
 }
 

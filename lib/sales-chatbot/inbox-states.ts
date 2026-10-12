@@ -1,5 +1,5 @@
 import { sql, type SQL } from "drizzle-orm";
-import { AI_DOWN_HANDOFF_REASON, HUMAN_COOLDOWN_MINUTES, HUMAN_COOLDOWN_MS, STAFF_COOLDOWN_REASON_LIST } from "@/lib/sales-chatbot/ai-hold-shared";
+import { AI_DOWN_HANDOFF_REASON, aiDownStartedAt, HUMAN_COOLDOWN_MINUTES, HUMAN_COOLDOWN_MS, STAFF_COOLDOWN_REASON_LIST } from "@/lib/sales-chatbot/ai-hold-shared";
 import { readConversationControl, TAKEOVER_REASON } from "@/lib/sales-chatbot/conversation-control-shared";
 import { PAGE_REPLY } from "@/lib/sales-chatbot/fanpage";
 import { HISTORY_CREATED_BY } from "@/lib/sales-chatbot/history-shared";
@@ -168,8 +168,15 @@ function staffCooldownCore(now: Date): SQL {
     or (${REASON} in (${inList(STAFF_COOLDOWN_REASON_LIST)}) and coalesce(${col("human_cooldown_until")}, ${FALLBACK_UNTIL}) > ${now})
     or (${REASON} not in (${inList(STAFF_COOLDOWN_REASON_LIST)}) and coalesce(${col("human_cooldown_until")} > ${now}, false))))`;
 }
+/**
+ * Mốc AI hỏng THẬT — bản SQL của `aiDownStartedAt` (ai-hold-shared.ts): `state.handoff.at` khi lý do trong sổ là «AI hỏng» và mốc hợp lệ
+ * (không sau `updated_at`), không thì `updated_at` (dòng cũ). CASE lồng để phép ép kiểu chỉ chạy trên chuỗi đã qua kiểm định dạng.
+ */
+export const AI_DOWN_STARTED_SQL = sql`(case when ${col("state")}->'handoff'->>'reason' = ${AI_DOWN_HANDOFF_REASON} and ${col("state")}->'handoff'->>'at' ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T'
+  then (case when (${col("state")}->'handoff'->>'at')::timestamptz <= ${col("updated_at")} then (${col("state")}->'handoff'->>'at')::timestamptz else ${col("updated_at")} end)
+  else ${col("updated_at")} end)`;
 function aiDownCore(now: Date): SQL {
-  return sql`(${IS_HANDOFF} and ${REASON} = ${AI_DOWN_HANDOFF_REASON} and ${FALLBACK_UNTIL} > ${now})`;
+  return sql`(${IS_HANDOFF} and ${REASON} = ${AI_DOWN_HANDOFF_REASON} and (${AI_DOWN_STARTED_SQL} + (${HUMAN_COOLDOWN_MINUTES}::int * interval '1 minute')) > ${now})`;
 }
 const AI_HANDOFF_CORE = sql`(${IS_HANDOFF} and ${REASON} not in (${inList(NOT_AI_HANDOFF_REASONS)}) and ${MODE} <> 'HUMAN')`;
 
@@ -268,7 +275,7 @@ export function classifyInboxState(r: InboxStateInput, now: Date, orgCopilot: bo
   const copilot = !manual && !cooldown && (orgCopilot || mode === "COPILOT");
   const humanHandling: HumanHandling | null = manual ? "MANUAL_TAKEOVER" : cooldown ? "STAFF_COOLDOWN" : copilot ? "COPILOT" : null;
 
-  const aiDown = handoff && reason === AI_DOWN_HANDOFF_REASON && fallbackUntil > t;
+  const aiDown = handoff && reason === AI_DOWN_HANDOFF_REASON && aiDownStartedAt(r).getTime() + HUMAN_COOLDOWN_MS > t;
   const aiHandoff = handoff && !NOT_AI_HANDOFF_SET.has(reason) && mode !== "HUMAN";
   const needsHuman: NeedsHumanCode | null = aiDown ? "AI_DOWN" : aiHandoff ? "AI_HANDOFF" : r.orderUnderReview ? "ORDER_REVIEW" : null;
   const replying: InboxReplying = humanHandling ? "HUMAN" : aiDown || aiHandoff ? "NOBODY" : "AI";

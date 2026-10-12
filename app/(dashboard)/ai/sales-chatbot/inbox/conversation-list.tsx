@@ -172,7 +172,7 @@ function Row({ r, href, active, showPage, nowMs }: { r: InboxRow; href: string; 
           <p
             className={cn(
               "mt-0.5 truncate pl-5 text-[11px] leading-[14px]",
-              r.handoffQueue.unowned || r.handoffQueue.slaState === "BREACHED" ? "font-semibold text-red-600 dark:text-red-400" : r.handoffQueue.ownerKind === "DEPARTMENT" ? "text-amber-700 dark:text-amber-300" : "text-muted-foreground",
+              r.handoffQueue.unowned || r.handoffQueue.slaState === "BREACHED" ? "font-semibold text-red-600 dark:text-red-400" : r.handoffQueue.ownerKind === "DEPARTMENT" || r.handoffQueue.ownerKind === "SHARED" ? "text-amber-700 dark:text-amber-300" : "text-muted-foreground",
             )}
             data-handoff-owner={r.handoffQueue.ownerKind}
             data-handoff-sla={r.handoffQueue.slaState}

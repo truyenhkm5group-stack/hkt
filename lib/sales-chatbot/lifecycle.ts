@@ -313,7 +313,7 @@ export type LifecycleConvRow = {
 export type LoadedLifecycle = { conv: LifecycleConvRow; facts: LifecycleFacts; snapshot: LifecycleSnapshot };
 
 /** Đơn nối với hội thoại + ORDER_OUTCOME + chứng từ thu. Ném khi CSDL lỗi (người gọi quyết phía hẹp). */
-export async function linkedOrdersFor(conv: Pick<LifecycleConvRow, "id" | "orderId" | "draftOrderId" | "pageId" | "threadId" | "state">, now: Date): Promise<LinkedOrderFact[]> {
+export async function linkedOrdersFor(conv: Pick<LifecycleConvRow, "id" | "orderId" | "draftOrderId" | "pageId" | "threadId" | "state">, now: Date, opts: { includePast?: boolean } = {}): Promise<LinkedOrderFact[]> {
   const db = await getDb();
   const o = schema.orders;
   const s = schema.shipments;
@@ -322,7 +322,7 @@ export async function linkedOrdersFor(conv: Pick<LifecycleConvRow, "id" | "order
   const explicit = new Map<string, OrderLink>();
   if (conv.orderId) explicit.set(conv.orderId, "CONV_ORDER");
   if (conv.draftOrderId && !explicit.has(conv.draftOrderId)) explicit.set(conv.draftOrderId, "CONV_DRAFT");
-  for (const id of [st.confirmed?.orderId, st.draft?.orderId, ...(st.cancelledOrders ?? []).map((c) => c.orderId)]) if (id && !explicit.has(id)) explicit.set(id, "BOT_STATE");
+  for (const id of [st.confirmed?.orderId, st.draft?.orderId, ...(st.cancelledOrders ?? []).map((c) => c.orderId), ...(opts.includePast ? (st.pastOrders ?? []).map((p) => p.orderId) : [])]) if (id && !explicit.has(id)) explicit.set(id, "BOT_STATE");
   const since = new Date(now.getTime() - LIFECYCLE_ORDER_LOOKBACK_DAYS * 86_400_000);
   const recent: SQL[] = [eq(o.salesConversationId, conv.id)];
   if (conv.pageId && conv.threadId) recent.push(and(eq(o.pageId, conv.pageId), eq(o.conversationId, conv.threadId))!);
@@ -345,7 +345,8 @@ export async function linkedOrdersFor(conv: Pick<LifecycleConvRow, "id" | "order
     .where(and(where, ne(o.stage, "DELETED")))
     .orderBy(desc(o.insertedAt))
     .limit(20);
-  const kept = rows.filter((r) => !past.has(r.id));
+  // `includePast` (giai đoạn sau bán — `loadCustomerPhase`): đơn của lượt mua CŨ vẫn là đơn khách đang chờ / vừa nhận — không loại.
+  const kept = opts.includePast ? rows : rows.filter((r) => !past.has(r.id));
   const manual = kept.filter((r) => r.id.startsWith("erp-"));
   const pay = new Map<string, OrderPaymentStatus>();
   if (manual.length) {
@@ -425,4 +426,130 @@ export async function loadLifecycle(conversationId: string, now: Date, extra: { 
     customerTexts: texts,
   };
   return { conv, facts, snapshot: deriveLifecycle(facts) };
+}
+
+// ═══ GIAI ĐOẠN KHÁCH SAU KHI CÓ ĐƠN (HOTFIX P0 12/10/2026 — ca HSLC «Khanh Nhung», đơn #6495CA72) ═══
+//
+// Sự cố: khách nhắn «Tôi nhận hàng rồi nhưng chưa thử chất lượng» khi AI đã DỪNG hơn 1.500 phút: luật cũ của engine «khách nhắn
+// trong 3 ngày sau khi chốt đơn (chốt qua lời đồng ý) ⇒ chuyển người» bắt MỌI tin, kể cả lời cảm ơn, và phòng phụ trách không có ai.
+// Hết 3 ngày thì engine đẩy đơn sang `pastOrders` rồi bán lại từ đầu ⇒ AI có thể chào bán / xin chốt lại khi khách chỉ báo đã nhận
+// hàng. Gốc chung: không nơi nào gọi tên GIAI ĐOẠN của khách sau khi đã có đơn.
+//
+// `customerPhaseOf` là PHÉP CHIẾU của ảnh chụp sáu chiều ở trên (không phải trục thứ hai): đọc `order` + `fulfillment` (chứng từ ĐVVC /
+// ORDER_OUTCOME) + `salesStage`, cộng HAI lời khai của khách trong tin đang trả lời — «đã nhận hàng» và «khiếu nại». Lời khai của
+// khách CHỈ đổi cách AI nói chuyện; nó KHÔNG đổi trạng thái đơn, không đổi `fulfillment`, không ghi gì (AGENTS 0.1 — không kết luận
+// giao thành công từ lời khách). Nhãn «đã nhận» luôn mang NGUỒN: `CARRIER` (chứng từ ĐVVC / phiếu giao) hay `CUSTOMER_CLAIM`.
+
+export const CUSTOMER_PHASES = ["PRE_SALE", "CLOSING", "AWAITING_SHIPMENT", "IN_TRANSIT", "RECEIVED", "AFTER_SALES", "COMPLAINT"] as const;
+export type CustomerPhase = (typeof CUSTOMER_PHASES)[number];
+export const CUSTOMER_PHASE_LABEL: Record<CustomerPhase, string> = {
+  PRE_SALE: "tư vấn trước bán",
+  CLOSING: "đang chốt",
+  AWAITING_SHIPMENT: "chờ giao",
+  IN_TRANSIT: "đang giao",
+  RECEIVED: "đã nhận hàng",
+  AFTER_SALES: "chăm sóc sau bán",
+  COMPLAINT: "khiếu nại",
+};
+/** Đơn đã nhận (theo ĐVVC hoặc lời khách) lên quá chừng này ngày ⇒ «chăm sóc sau bán» thay vì «vừa nhận hàng». Mốc phân nhóm, không phải đích. */
+export const AFTER_SALES_DAYS = 7;
+
+const RECEIPT_RULES: readonly RegExp[] = [
+  /\b(?:da|moi|vua|minh|em|chi|toi|tui|anh)\s+nhan\s+(?:duoc\s+)?(?:hang|don|roi)\b/,
+  /\bnhan\s+(?:duoc\s+)?(?:hang|don)\s+(?:roi|r)\b/,
+  /\bhang\s+(?:ve|toi|den)\s+(?:roi|r)\b/,
+];
+const RECEIPT_NEGATION = /\b(?:chua|khong|ko|bao gio|khi nao|luc nao)\s+(?:\S+\s+){0,2}nhan\b|\bnhan\s+(?:hang\s+)?o\s+dau\b/;
+
+/** Khách tự nói ĐÃ NHẬN HÀNG — LỜI KHAI, chỉ đổi cách AI trả lời. Đọc trên chữ đã bỏ dấu. HÀM THUẦN. */
+export function customerReceiptClaim(text: string): boolean {
+  const f = foldVi(text.normalize("NFC"));
+  if (RECEIPT_NEGATION.test(f)) return false;
+  return RECEIPT_RULES.some((re) => re.test(f));
+}
+
+const COMPLAINT_RULES: readonly RegExp[] = [
+  /\bbi\s+(?:loi|hong|thiu|moc|vo|be|dap|nat|hu|chay nuoc|co mui|het han|qua han)\b/,
+  /\b(?:hang|banh|do|san pham|sp|goi|hop|tui)\s+(?:loi|hong|thiu|moc|vo|be|dap|nat|het han|qua han)\b/,
+  /\b(?:giao|gui|ship)\s+(?:thieu|sai|nham)\b/,
+  /\b(?:thieu|sai|nham)\s+(?:hang|mon|so luong|loai|size|mau)\b/,
+  /\b(?:tra|doi)\s+(?:lai\s+)?hang\b|\bhoan\s+(?:lai\s+)?tien\b|\btra\s+lai\s+tien\b|\bboi\s+thuong\b/,
+  /\b(?:lua dao|that vong|qua te|te qua|khong dung nhu|khac (?:anh|hinh|mo ta|quang cao))\b/,
+  /\b(?:khieu nai|phan nan|boc phot)\b/,
+];
+
+/**
+ * Khách KHIẾU NẠI / đòi đổi trả / hoàn tiền — câu rõ ràng về hàng lỗi, thiếu, sai, hỏng, muốn trả / hoàn tiền. «chưa thử chất lượng»
+ * KHÔNG phải khiếu nại (khách chưa dùng). Cố ý hẹp: chỉ để gọi đúng giai đoạn + dặn AI chuyển người; câu mơ hồ ⇒ AI hỏi thăm. HÀM THUẦN.
+ */
+export function customerComplaintSignal(text: string): boolean {
+  const f = foldVi(text.normalize("NFC"));
+  return COMPLAINT_RULES.some((re) => re.test(f));
+}
+
+export type CustomerPhaseView = {
+  phase: CustomerPhase;
+  /** Nguồn của «đã nhận»: chứng từ ĐVVC hay lời khách — `null` khi chưa nói tới nhận hàng. */
+  receivedBy: "CARRIER" | "CUSTOMER_CLAIM" | null;
+  orderId: string | null;
+  /** Câu nguồn cho vết (không chứa chữ khách). */
+  source: string;
+};
+
+/**
+ * Giai đoạn của khách. HÀM THUẦN. Thứ tự: khiếu nại (lời khách, khi có đơn) → không có đơn sống ⇒ trước bán / đang chốt theo
+ * `salesStage` → ĐVVC đã giao / khách nói đã nhận ⇒ đã nhận (đơn lên quá `AFTER_SALES_DAYS` ⇒ chăm sóc sau bán) → đang giao → chờ giao.
+ */
+export function customerPhaseOf(snap: Pick<LifecycleSnapshot, "order" | "fulfillment" | "salesStage" | "orderId">, claims: { receipt: boolean; complaint: boolean }, orderAgeDays: number | null): CustomerPhaseView {
+  const orderId = snap.orderId;
+  const hasLive = snap.order === "CREATED" || snap.order === "CONFIRMED";
+  if (claims.complaint && (hasLive || snap.order === "RETURNED")) return { phase: "COMPLAINT", receivedBy: null, orderId, source: "lời khách: khiếu nại / đổi trả / hoàn tiền" };
+  if (!hasLive) {
+    const closing = snap.order === "CREATION_PENDING" || snap.salesStage === "AWAITING_CONFIRMATION" || snap.salesStage === "CUSTOMER_INFO_COLLECTED";
+    return { phase: closing ? "CLOSING" : "PRE_SALE", receivedBy: null, orderId, source: `order=${snap.order} · salesStage=${snap.salesStage}` };
+  }
+  const old = orderAgeDays !== null && orderAgeDays > AFTER_SALES_DAYS;
+  if (snap.fulfillment === "DELIVERED") return { phase: old ? "AFTER_SALES" : "RECEIVED", receivedBy: "CARRIER", orderId, source: "ORDER_OUTCOME=DELIVERED (chứng từ ĐVVC / phiếu giao)" };
+  if (claims.receipt) return { phase: old ? "AFTER_SALES" : "RECEIVED", receivedBy: "CUSTOMER_CLAIM", orderId, source: `lời khách «đã nhận hàng» — ERP chưa có chứng từ giao (fulfillment=${snap.fulfillment})` };
+  if (snap.fulfillment === "SHIPPING") return { phase: "IN_TRANSIT", receivedBy: null, orderId, source: "ORDER_OUTCOME / chặng ĐVVC: đang giao" };
+  return { phase: "AWAITING_SHIPMENT", receivedBy: null, orderId, source: `đơn ${snap.order} · fulfillment=${snap.fulfillment}` };
+}
+
+/**
+ * Câu dặn AI theo giai đoạn SAU KHI ĐÃ CÓ ĐƠN. Trước bán / đang chốt ⇒ rỗng (lời nhắc bán hàng thường lo). HÀM THUẦN.
+ * Luật chung: không hỏi lại SĐT / địa chỉ / món đã có (trừ khi khách tự báo đổi); không đòi chốt lại; không lên đơn mới trừ khi khách
+ * nói rõ muốn mua THÊM; không chào bán sai ngữ cảnh. Người chỉ khi thật cần: khiếu nại · đổi trả · hoàn tiền · sửa đơn vượt quyền.
+ */
+export function postSalePrompt(v: CustomerPhaseView, shortCode: string | null): string {
+  if (v.phase === "PRE_SALE" || v.phase === "CLOSING") return "";
+  const code = shortCode ? ` #${shortCode}` : "";
+  const common =
+    `GIAI ĐOẠN KHÁCH: ${CUSTOMER_PHASE_LABEL[v.phase].toUpperCase()} — khách ĐÃ CÓ ĐƠN${code}. KHÔNG hỏi lại SĐT / địa chỉ / món đã có (chỉ khi khách tự báo đổi); KHÔNG mời chốt / xác nhận lại đơn; ` +
+    "KHÔNG gọi create_draft_order trừ khi khách nói RÕ muốn mua THÊM một đơn mới; KHÔNG chào bán / giới thiệu món khác khi khách không hỏi. Trả lời đúng câu khách nói, ngắn, ấm áp.";
+  if (v.phase === "COMPLAINT") return `${common} Khách đang KHIẾU NẠI / muốn đổi trả / hoàn tiền: xin lỗi ngắn gọn, KHÔNG hứa hoàn tiền / đổi hàng / bồi thường, KHÔNG đổ lỗi ⇒ handoff_to_human với reason «Khiếu nại — <ý khách>».`;
+  if (v.phase === "RECEIVED" || v.phase === "AFTER_SALES") {
+    const who = v.receivedBy === "CARRIER" ? "Đơn vị vận chuyển báo đã giao." : "Khách NÓI đã nhận hàng (lời khách — ERP chưa có chứng từ giao: KHÔNG nói thay đơn vị vận chuyển, KHÔNG nói đơn «đã giao thành công»).";
+    return `${common} ${who} Cảm ơn khách đã nhận hàng, hỏi thăm nhẹ (dùng thử thấy thế nào / cần hướng dẫn bảo quản, sử dụng không). Khách chưa dùng thử ⇒ chúc khách dùng ngon và mời phản hồi khi dùng. Khách hỏi cách dùng / bảo quản ⇒ trả lời theo «Về shop» / sổ tay. Khách báo hàng lỗi / thiếu / sai / muốn đổi trả / hoàn tiền ⇒ handoff_to_human «Khiếu nại — <ý khách>».`;
+  }
+  if (v.phase === "IN_TRANSIT") return `${common} Đơn đang trên đường giao: khách hỏi bao giờ nhận ⇒ get_order_status rồi nói ĐÚNG «status», không hứa ngày giao.`;
+  return `${common} Đơn đang chờ gửi đi: khách hỏi tình trạng ⇒ get_order_status rồi nói ĐÚNG «status» (không khẳng định «chưa gửi» khi ERP chưa có thông tin vận chuyển). Khách muốn đổi địa chỉ / số lượng ⇒ update_draft_order nếu đơn còn sửa được, không thì handoff_to_human «Sửa đơn — <ý khách>».`;
+}
+
+/**
+ * Bộ nạp cho engine: ảnh chụp vòng đời GỒM đơn của lượt mua cũ (`pastOrders`) + giai đoạn khách cho tin `text`. Chỉ đọc khi hội thoại có
+ * dấu đơn (sổ bot / ô đơn) — hội thoại chưa từng có đơn không tốn câu nào. Lỗi đọc ⇒ `null` (engine giữ lời nhắc bán hàng thường).
+ */
+export async function loadCustomerPhase(conv: Pick<LifecycleConvRow, "id" | "orderId" | "draftOrderId" | "pageId" | "threadId" | "state" | "status" | "handoffReason" | "turns">, text: string, now: Date): Promise<(CustomerPhaseView & { shortCode: string | null }) | null> {
+  const st = conv.state;
+  if (!st.confirmed && !st.pastOrders?.length && !conv.orderId && !st.draft) return null;
+  try {
+    const orders = await linkedOrdersFor(conv, now, { includePast: true });
+    const snap = deriveLifecycle({ conversation: { status: conv.status, handoffReason: conv.handoffReason, control: controlOf(st), turns: conv.turns }, state: st, orders, customerTexts: [] });
+    const chosen = snap.orderId ? orders.find((o) => o.id === snap.orderId) : undefined;
+    const age = chosen?.insertedAt ? (now.getTime() - chosen.insertedAt.getTime()) / 86_400_000 : null;
+    const v = customerPhaseOf(snap, { receipt: customerReceiptClaim(text), complaint: customerComplaintSignal(text) }, age);
+    return { ...v, shortCode: snap.orderId ? manualOrderShortCode(snap.orderId) : null };
+  } catch {
+    return null;
+  }
 }
