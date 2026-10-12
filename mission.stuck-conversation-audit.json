@@ -3,7 +3,7 @@
   "mission_id": "stuck-conversation-audit",
   "title": "Ops stuck-conversation-audit CHỈ ĐỌC: AI im theo nhóm/lý do, không chủ + SLA, nhắn lại sau đơn, đơn không đồng bộ",
   "business_goal": "",
-  "status": "RUNNING",
+  "status": "PR_READY",
   "priority": "P0",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -20,7 +20,19 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-12T12:52:20.948Z",
-  "updated_at": "2026-10-12T12:52:20.948Z",
-  "last_heartbeat": "2026-10-12T12:52:20.948Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-12T12:52:58.013Z",
+  "last_heartbeat": "2026-10-12T12:52:58.013Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "fix/stuck-conversation-audit",
+    "sha": "ecae99d25aaf85f2b2e18d40ed1a61a033a17ead",
+    "at": "2026-10-12T12:52:58.013Z",
+    "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+    "title": "Ops stuck-conversation-audit CHỈ ĐỌC: AI im theo nhóm/lý do, không chủ + SLA, nhắn lại sau đơn, đơn không đồng bộ",
+    "summary": "Đo TRƯỚC khi gộp hotfix hậu mãi",
+    "tests": [
+      "typecheck·eslint: sạch",
+      "stuck-conversation-audit·ops-log-leak·ops-concurrency·repo-integrity·test-hygiene: đạt"
+    ]
+  }
 }
