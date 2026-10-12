@@ -2166,3 +2166,4 @@
 {"at":"2026-10-12T02:57:03.717Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"OVERLAP_ACCEPTED","mission":"inbox-read-audit-recheck","detail":"OVERLAP_ACCEPTED với inbox-read-v3: phạm vi scripts/inbox-read-audit.ts — cách tích hợp: chỉ script ops chỉ đọc + bài kiểm thuần"}
 {"at":"2026-10-12T02:57:03.717Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"OVERLAP_ACCEPTED","mission":"inbox-read-audit-recheck","detail":"OVERLAP_ACCEPTED với inbox-unread-gate: phạm vi scripts/inbox-read-audit.ts — cách tích hợp: chỉ script ops chỉ đọc + bài kiểm thuần"}
 {"at":"2026-10-12T02:57:22.817Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"inbox-read-audit-recheck","detail":"fix/inbox-read-audit-recheck @ 0b5fca9802ed · 3 lệnh kiểm thử"}
+{"at":"2026-10-12T02:58:00.083Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"inbox-read-audit-recheck","detail":"#812 cho fix/inbox-read-audit-recheck @ 0b5fca9802ed"}
