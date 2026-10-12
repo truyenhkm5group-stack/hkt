@@ -3,7 +3,7 @@
   "mission_id": "inbox-search-global",
   "title": "P0: ô tìm hộp thư tìm TOÀN hộp thư mặc định (bỏ qua bộ lọc khi có q), SĐT khớp chính xác lên đầu, debounce 300 ms, đang tải, «chỉ trong bộ lọc hiện tại»",
   "business_goal": "",
-  "status": "RUNNING",
+  "status": "PR_READY",
   "priority": "P0",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -21,7 +21,20 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-12T09:58:13.240Z",
-  "updated_at": "2026-10-12T09:58:13.240Z",
-  "last_heartbeat": "2026-10-12T09:58:13.240Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-12T09:58:31.518Z",
+  "last_heartbeat": "2026-10-12T09:58:31.518Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "fix/inbox-search-global",
+    "sha": "1cc2023ac3543c21f13eadab3243185cde077f50",
+    "at": "2026-10-12T09:58:31.518Z",
+    "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+    "title": "P0: ô tìm hộp thư tìm TOÀN hộp thư mặc định (bỏ qua bộ lọc khi có q), SĐT khớp chính xác lên đầu, debounce 300 ms, đang tải, «chỉ trong bộ lọc hiện tại»",
+    "summary": "Nguyên nhân: form gửi kèm f=UNREAD và mọi bộ lọc khi tìm. Giờ q ≠ rỗng ⇒ tìm toàn hộp thư, pv=loc mới giữ bộ lọc",
+    "tests": [
+      "typecheck·lint·build: sạch",
+      "inbox-search (UNREAD tìm hội thoại đã đọc · 3 dạng SĐT · khớp chính xác đầu · pv=loc · xoá q về UNREAD)·inbox-v2-a·inbox-unread-perf·inbox-read-v3·inbox-perf-probe: đạt",
+      "npm test: TẤT CẢ KIỂM THỬ ĐẠT"
+    ]
+  }
 }
