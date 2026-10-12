@@ -2159,3 +2159,4 @@
 {"at":"2026-10-12T02:16:55.215Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"acceptance-s12-port","detail":"#810 cho docs/acceptance-s12-port @ c825fc78ec25"}
 {"at":"2026-10-12T02:17:12.438Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"CLAIM","mission":"tech-worker-onboarding-gap","detail":"RUNNING · 1 mẫu phạm vi · MEDIUM"}
 {"at":"2026-10-12T02:17:34.016Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"tech-worker-onboarding-gap","detail":"feat/tech-worker-onboarding-gap @ cc1129cb489a · 1 lệnh kiểm thử"}
+{"at":"2026-10-12T02:18:13.622Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"tech-worker-onboarding-gap","detail":"#811 cho feat/tech-worker-onboarding-gap @ cc1129cb489a"}
