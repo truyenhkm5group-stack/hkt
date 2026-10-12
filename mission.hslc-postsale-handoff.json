@@ -3,7 +3,7 @@
   "mission_id": "hslc-postsale-handoff",
   "title": "HOTFIX P0 HSLC: AI không dừng mặc định sau chốt (giai đoạn hậu mãi), hàng đợi chung thay KHÔNG CHỦ, watchdog nhường hết hạn, đồng hồ AI hỏng/SLA đọc mốc thật, nhãn «Chưa có vận đơn», panel đơn báo lỗi đọc được",
   "business_goal": "",
-  "status": "RUNNING",
+  "status": "PR_READY",
   "priority": "P0",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -22,7 +22,20 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-12T12:52:38.920Z",
-  "updated_at": "2026-10-12T12:52:38.920Z",
-  "last_heartbeat": "2026-10-12T12:52:38.920Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-12T12:53:54.028Z",
+  "last_heartbeat": "2026-10-12T12:53:54.028Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "fix/hslc-postsale-handoff",
+    "sha": "d724b0a1f5a059dabbcc8fd3797964fce77684c4",
+    "at": "2026-10-12T12:53:54.028Z",
+    "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+    "title": "HOTFIX P0 HSLC: AI không dừng mặc định sau chốt (giai đoạn hậu mãi), hàng đợi chung thay KHÔNG CHỦ, watchdog nhường hết hạn, đồng hồ AI hỏng/SLA đọc mốc thật, nhãn «Chưa có vận đơn», panel đơn báo lỗi đọc được",
+    "summary": "Gốc: engine.ts:884 nhắn sau chốt ⇒ HANDOFF không hết hạn; phòng trống ⇒ KHÔNG CHỦ; đồng hồ AI hỏng/SLA đọc updated_at bị đẩy; NOT_SHIPPED in «Chưa gửi»",
+    "tests": [
+      "typecheck·lint·build: sạch",
+      "postsale-lifecycle·golden hau-mai-da-nhan-hang·handoff-ownership·self-service-journey·order-golden (trùng đơn 0/30): đạt",
+      "npm test: TẤT CẢ KIỂM THỬ ĐẠT"
+    ]
+  }
 }
