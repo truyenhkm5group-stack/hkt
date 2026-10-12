@@ -3,7 +3,7 @@
   "mission_id": "inbox-search-global",
   "title": "P0: ô tìm hộp thư tìm TOÀN hộp thư mặc định (bỏ qua bộ lọc khi có q), SĐT khớp chính xác lên đầu, debounce 300 ms, đang tải, «chỉ trong bộ lọc hiện tại»",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P0",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -23,9 +23,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-12T09:58:13.240Z",
-  "updated_at": "2026-10-12T18:41:15.576Z",
+  "updated_at": "2026-10-12T19:16:29.369Z",
   "last_heartbeat": "2026-10-12T18:41:15.576Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#817 → db425775ad59057f9237e2689bb9a7013364bde6"
+  },
   "handoff": {
     "branch": "fix/inbox-search-global",
     "sha": "5193336c0872bc52ed6114e3f7d404566d0fa20e",
