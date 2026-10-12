@@ -3,7 +3,7 @@
   "mission_id": "inbox-read-audit-recheck",
   "title": "Audit chưa đọc: đọc lại cùng lúc dòng lệch SQL/TS (tách race khỏi lệch thật) + không mất tóm tắt ở lượt lớn",
   "business_goal": "",
-  "status": "RUNNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -20,7 +20,20 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-12T02:57:03.547Z",
-  "updated_at": "2026-10-12T02:57:03.547Z",
-  "last_heartbeat": "2026-10-12T02:57:03.547Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-12T02:57:22.766Z",
+  "last_heartbeat": "2026-10-12T02:57:22.766Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "fix/inbox-read-audit-recheck",
+    "sha": "0b5fca9802eddafdaf30a5af1243f1ac271d2d5a",
+    "at": "2026-10-12T02:57:22.766Z",
+    "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+    "title": "Audit chưa đọc: đọc lại cùng lúc dòng lệch SQL/TS (tách race khỏi lệch thật) + không mất tóm tắt ở lượt lớn",
+    "summary": "Hậu kiểm #792: 8/8 lệch SQL/TS nghi do câu trả lời tới giữa hai lần đọc — đọc lại cùng lúc để kết luận; xả stdout trước khi thoát",
+    "tests": [
+      "tsc: sạch",
+      "eslint: sạch",
+      "inbox-read-v3 (thêm ca race/lệch thật)·inbox-unread-perf: đạt"
+    ]
+  }
 }
