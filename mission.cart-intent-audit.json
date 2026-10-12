@@ -23,20 +23,19 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-12T11:23:25.749Z",
-  "updated_at": "2026-10-12T11:24:17.793Z",
-  "last_heartbeat": "2026-10-12T11:23:43.676Z",
+  "updated_at": "2026-10-12T13:24:29.913Z",
+  "last_heartbeat": "2026-10-12T13:24:29.913Z",
   "definition_of_done": [],
   "handoff": {
     "branch": "fix/cart-intent-audit",
-    "sha": "ce54c8990cbc5894597cf5e0256cbe4335b7c943",
-    "at": "2026-10-12T11:23:43.676Z",
+    "sha": "346aab79b1b57ab3185e2425ad2769e9836c3f76",
+    "at": "2026-10-12T13:24:29.913Z",
     "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
     "title": "Ops cart-intent-audit CHỈ ĐỌC: CART_INTENT_DRIFT (bot hạ số lượng khách đã nói) + ORDER_READY_LOOP",
-    "summary": "Đo BEFORE trước khi gộp giỏ dính; tự chứa, chạy được trên image hiện tại",
+    "summary": "Cập nhật theo main",
     "tests": [
-      "typecheck·lint: sạch",
-      "cart-intent-audit·platform-isolation-static·repo-integrity: đạt",
-      "npm test: TẤT CẢ KIỂM THỬ ĐẠT"
+      "gộp main (ops-vps.yml hợp danh sách với org-migrate-probe)",
+      "cart-intent-audit·platform-isolation-static·ops-concurrency·repo-integrity·test-hygiene: đạt"
     ]
   }
 }
