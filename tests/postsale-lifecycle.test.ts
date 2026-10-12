@@ -24,15 +24,16 @@ import { invalidateCapabilities } from "@/lib/platform/capabilities";
 import { withOrganization } from "@/lib/platform/context";
 import { invalidateOrganizations } from "@/lib/platform/organizations";
 import { provisionOrganization } from "@/lib/platform/provision";
-import { AI_DOWN_HANDOFF_REASON, aiDownStartedAt, aiHoldOf, FANPAGE_STAFF_REASON, HUMAN_COOLDOWN_MS } from "@/lib/sales-chatbot/ai-hold-shared";
+import { AI_DOWN_HANDOFF_REASON, AI_DOWN_UNANSWERED_REASON, aiDownStartedAt, aiHoldOf, FANPAGE_STAFF_REASON, HUMAN_COOLDOWN_MS } from "@/lib/sales-chatbot/ai-hold-shared";
+import { DEAD_AI_DOWN_NOTE } from "@/lib/sales-chatbot/inbound-retry";
 import { CLAIM_HANDOFF_REASON } from "@/lib/sales-chatbot/claim-guard";
 import { TAKEOVER_REASON } from "@/lib/sales-chatbot/conversation-control-shared";
 import { sweepHandoffOwnership } from "@/lib/sales-chatbot/handoff-routing";
 import { INBOX_OUTCOME_LABEL } from "@/lib/sales-chatbot/inbox-shared";
 import { classifyInboxState, needsHumanReasonSql } from "@/lib/sales-chatbot/inbox-states";
-import { customerComplaintSignal, customerPhaseOf, customerReceiptClaim, postSalePrompt, type LifecycleSnapshot } from "@/lib/sales-chatbot/lifecycle";
+import { customerComplaintSignal, customerNotReceivedSignal, customerPhaseOf, customerReceiptClaim, postSalePrompt, type LifecycleSnapshot } from "@/lib/sales-chatbot/lifecycle";
 import { orderPanelCallError, INBOX_ORDER_READ_FAILED } from "@/lib/sales-chatbot/order-verification-shared";
-import { LEGACY_POST_ORDER_REASON_PREFIX, releaseLegacyPostOrderHandoffs, releaseVerdict } from "@/lib/sales-chatbot/postorder-release";
+import { customerRequestKinds, LEGACY_POST_ORDER_REASON_PREFIX, releaseLegacyPostOrderHandoffs, releaseVerdict } from "@/lib/sales-chatbot/postorder-release";
 import { parseReleaseArgs } from "@/scripts/sales-postorder-handoff-release";
 
 const ORG = "hau-mai-ai-dung";
@@ -43,7 +44,9 @@ const POST_ORDER_REASON = `${LEGACY_POST_ORDER_REASON_PREFIX} — nhân viên x�
 function testPhases() {
   for (const yes of ["Tôi nhận hàng rồi nhưng chưa thử chất lượng", "em đã nhận được hàng rồi nha", "nhan hang roi shop oi", "hàng về rồi nhé", "mình vừa nhận hàng"]) assert.ok(customerReceiptClaim(yes), `«${yes}» là lời khai đã nhận`);
   for (const no of ["khi nào nhận hàng vậy shop", "chưa nhận được hàng", "nhận hàng ở đâu", "bao giờ nhận hàng", "cho chị 2kg"]) assert.ok(!customerReceiptClaim(no), `«${no}» KHÔNG phải lời khai đã nhận`);
-  for (const yes of ["gói ruốc bị mốc rồi", "giao thiếu 1 hộp", "mình muốn trả hàng hoàn tiền", "hàng bị hỏng hết", "sai màu rồi shop"]) assert.ok(customerComplaintSignal(yes), `«${yes}» là khiếu nại`);
+  for (const yes of ["gói ruốc bị mốc rồi", "giao thiếu 1 hộp", "mình muốn trả hàng hoàn tiền", "hàng bị hỏng hết", "sai màu rồi shop", "ăn xong bị đau bụng", "hàng không ngon như lần trước", "hàng dở quá", "ruốc bị chảy dầu", "giao chậm quá 5 ngày chưa thấy"]) assert.ok(customerComplaintSignal(yes), `«${yes}» là khiếu nại`);
+  for (const yes of ["chưa nhận được hàng mà bên vận chuyển báo giao rồi", "mình không nhận được hàng", "vẫn chưa thấy hàng đâu"]) assert.ok(customerNotReceivedSignal(yes), `«${yes}» là «chưa nhận hàng»`);
+  for (const no of ["Tôi nhận hàng rồi nhưng chưa thử chất lượng", "bao giờ nhận được hàng"]) assert.ok(!customerNotReceivedSignal(no), `«${no}» KHÔNG phải «chưa nhận hàng»`);
   for (const no of ["Tôi nhận hàng rồi nhưng chưa thử chất lượng", "ngon lắm shop", "cảm ơn em", "bảo quản thế nào em"]) assert.ok(!customerComplaintSignal(no), `«${no}» KHÔNG phải khiếu nại`);
 
   const snap = (o: Partial<Pick<LifecycleSnapshot, "order" | "fulfillment" | "salesStage" | "orderId">>) => ({ order: "CONFIRMED" as const, fulfillment: "NONE" as const, salesStage: "AWAITING_CONFIRMATION" as const, orderId: "erp-6495ca72-x", ...o });
@@ -56,6 +59,11 @@ function testPhases() {
   assert.deepEqual([claimed.phase, claimed.receivedBy], ["RECEIVED", "CUSTOMER_CLAIM"], "ca «Khanh Nhung»: lời khách ⇒ đã nhận THEO LỜI KHÁCH");
   assert.match(claimed.source, /fulfillment=NONE/, "lời khách không đổi chiều logistics (AGENTS 0.1)");
   const carrier = customerPhaseOf(snap({ fulfillment: "DELIVERED" }), none, 2);
+  // Review #821 F2: ĐVVC báo đã giao mà khách nói chưa nhận ⇒ KHIẾU NẠI (trước: RECEIVED/CARRIER + lời nhắc CẢM ƠN — sai).
+  const disputed = customerPhaseOf(snap({ fulfillment: "DELIVERED" }), { receipt: false, complaint: false, notReceived: true }, 2);
+  assert.deepEqual([disputed.phase, disputed.receivedBy], ["COMPLAINT", null], "chứng từ ĐVVC ↔ lời khách mâu thuẫn ⇒ khiếu nại");
+  assert.doesNotMatch(postSalePrompt(disputed, null), /Cảm ơn khách đã nhận hàng/, "không bao giờ cảm ơn «đã nhận» khi khách nói chưa nhận");
+  assert.equal(customerPhaseOf(snap({ fulfillment: "SHIPPING" }), { receipt: false, complaint: false, notReceived: true }, 2).phase, "IN_TRANSIT", "chưa giao mà khách hỏi chưa nhận ⇒ vẫn đang giao (AI tra trạng thái)");
   assert.deepEqual([carrier.phase, carrier.receivedBy], ["RECEIVED", "CARRIER"]);
   assert.equal(customerPhaseOf(snap({ fulfillment: "DELIVERED" }), none, 9).phase, "AFTER_SALES");
   assert.equal(customerPhaseOf(snap({}), { receipt: true, complaint: true }, 1).phase, "COMPLAINT", "khiếu nại thắng lời đã nhận");
@@ -127,6 +135,10 @@ function testSource() {
   assert.equal(releaseVerdict({ state: {}, assigneeUserId: "u", assigneeActive: false, lastStaffAt: null, since: now }), "RELEASE", "người cầm đã khoá ⇒ không ai cầm");
   assert.equal(releaseVerdict({ state: {}, assigneeUserId: null, assigneeActive: false, lastStaffAt: new Date(now.getTime() + MIN), since: now }), "STAFF_REPLIED");
   assert.equal(releaseVerdict({ state: {}, assigneeUserId: null, assigneeActive: false, lastStaffAt: new Date(now.getTime() - MIN), since: now }), "RELEASE", "câu nhân viên TRƯỚC khi chuyển không tính");
+  assert.equal(releaseVerdict({ state: {}, assigneeUserId: null, assigneeActive: false, lastStaffAt: null, since: now, waiting: true }), "CUSTOMER_WAITING", "khách đang chờ ⇒ không trả AI (F3)");
+  assert.equal(releaseVerdict({ state: {}, assigneeUserId: null, assigneeActive: false, lastStaffAt: null, since: now, requests: ["CANCEL"] }), "CUSTOMER_REQUEST");
+  assert.deepEqual(customerRequestKinds(["cho chị đổi địa chỉ sang 5 Hai Bà Trưng", "thôi huỷ đơn giúp chị", "ăn xong bị đau bụng", "chị ck rồi nhé"]), ["EDIT", "COMPLAINT", "CANCEL", "PAYMENT"]);
+  assert.deepEqual(customerRequestKinds(["cảm ơn shop", "ok em"]), []);
   console.log("  ✓ mã nguồn: engine bỏ chuyển người mặc định sau chốt · AI hỏng ghi mốc thật · ops khai đủ bốn chỗ · trả-cho-AI mặc định chạy thử");
 }
 
@@ -165,11 +177,18 @@ async function testDb() {
       await conv("d2", { handoffReason: AI_DOWN_HANDOFF_REASON, state: { handoff: { reason: AI_DOWN_HANDOFF_REASON, at: ago(10).toISOString() } } });
       await conv("s1", { handoffReason: FANPAGE_STAFF_REASON, humanCooldownUntil: ago(5) });
       await conv("s2", { handoffReason: FANPAGE_STAFF_REASON, humanCooldownUntil: new Date(now.getTime() + 20 * MIN) });
-      await conv("p1", { handoffReason: CLAIM_HANDOFF_REASON.PAYMENT_TEXT, state: { handoff: { reason: CLAIM_HANDOFF_REASON.PAYMENT_TEXT, at: ago(1500).toISOString() } } });
+      await conv("p1", { handoffReason: CLAIM_HANDOFF_REASON.PAYMENT_TEXT, state: { handoff: { reason: CLAIM_HANDOFF_REASON.PAYMENT_TEXT, at: ago(5 * 1440).toISOString() } } });
+      // d3 AI hỏng 500 phút trước, còn tin khách bị chốt «AI hỏng» (DEAD) sau câu bot cuối, chưa ai trả lời (review #821 F5).
+      await conv("d3", { handoffReason: AI_DOWN_HANDOFF_REASON, state: { handoff: { reason: AI_DOWN_HANDOFF_REASON, at: ago(500).toISOString() } } });
+      await db.insert(schema.salesChatInbound).values({ pageId: "pg-hm", threadId: "d3", messageId: "d3-dead", text: "shop ơi còn hàng không", status: "DEAD", note: DEAD_AI_DOWN_NOTE, createdAt: ago(400) });
       await conv("t1", { status: "OPEN", handoffReason: TAKEOVER_REASON, state: { control: { mode: "HUMAN" } } });
       const admin = await db.query.users.findFirst({ where: eq(schema.users.email, `admin@${ORG}.local`) });
       assert.ok(admin);
-      await conv("o1", { handoffReason: POST_ORDER_REASON, state: { handoff: { reason: POST_ORDER_REASON, at: ago(1520).toISOString() } }, handoffQueuedAt: ago(1520) });
+      // o1 không ai cầm, bot đã trả lời sau tin khách cuối · o4 khách đang chờ câu trả lời · o5 khách xin ĐỔI ĐỊA CHỈ sau khi chuyển người.
+      await conv("o1", { handoffReason: POST_ORDER_REASON, state: { handoff: { reason: POST_ORDER_REASON, at: ago(1520).toISOString() } }, handoffQueuedAt: ago(1520), lastCustomerAt: ago(2000), lastBotAt: ago(1990) });
+      await conv("o4", { handoffReason: POST_ORDER_REASON, state: { handoff: { reason: POST_ORDER_REASON, at: ago(1520).toISOString() } } });
+      await conv("o5", { handoffReason: POST_ORDER_REASON, state: { handoff: { reason: POST_ORDER_REASON, at: ago(1520).toISOString() } }, lastCustomerAt: ago(900), lastBotAt: ago(890) });
+      await db.insert(schema.salesChatInbound).values({ pageId: "pg-hm", threadId: "o5", messageId: "o5-c", text: "cho chị đổi địa chỉ sang 5 Hai Bà Trưng nhé", status: "SKIPPED", createdAt: ago(900) });
       await conv("o2", { handoffReason: POST_ORDER_REASON, state: { handoff: { reason: POST_ORDER_REASON, at: ago(1520).toISOString() } }, assigneeUserId: admin.id });
       await conv("o3", { handoffReason: POST_ORDER_REASON, state: { handoff: { reason: POST_ORDER_REASON, at: ago(1520).toISOString() } }, lastStaffAt: ago(1000) });
 
@@ -182,33 +201,36 @@ async function testDb() {
       // ═══ Watchdog + hàng đợi chung ═══
       const sw = await sweepHandoffOwnership(now);
       const st = new Map((await db.select({ id: c.id, status: c.status, reason: c.handoffReason }).from(c)).map((r) => [r.id, r]));
-      assert.equal(sw.recovered, 2, `watchdog mở lại đúng d1 + s1: ${JSON.stringify(sw)}`);
+      assert.equal(sw.recovered, 2, `watchdog mở lại đúng d1 + s1: ${JSON.stringify(sw)} ${JSON.stringify([...st.entries()])}`);
       assert.equal(st.get("d1")?.status, "OPEN", "AI hỏng đã quá khoảng thử lại ⇒ AI nhận lại");
       assert.equal(st.get("s1")?.status, "OPEN", "nhân viên nhường đã hết hạn ⇒ AI nhận lại");
       for (const id of ["d2", "s2", "p1", "o1", "o2", "o3"]) assert.equal(st.get(id)?.status, "HANDOFF", `${id}: watchdog KHÔNG đụng (còn hạn / chuyển người bắt buộc / luật cũ chờ chủ shop duyệt)`);
-      const resumed = await db.select({ id: schema.salesConversationEvents.conversationId }).from(schema.salesConversationEvents).where(and(eq(schema.salesConversationEvents.type, "ai.resumed"), eq(schema.salesConversationEvents.reasonCode, "COOLDOWN_EXPIRED")));
-      assert.deepEqual(resumed.map((r) => r.id).sort(), ["s1"], "hết nhường của NHÂN VIÊN có vết ai.resumed của MÁY (AI hỏng hết hạn: đường cũ không ghi vết — giữ nguyên)");
+      assert.deepEqual([st.get("d3")?.status, st.get("d3")?.reason], ["HANDOFF", AI_DOWN_UNANSWERED_REASON], "AI hỏng hết hạn nhưng còn tin khách chưa trả lời ⇒ KHÔNG trả AI, ở lại hàng đợi người");
+      const resumed = await db.select({ id: schema.salesConversationEvents.conversationId, actor: schema.salesConversationEvents.actorUserId }).from(schema.salesConversationEvents).where(and(eq(schema.salesConversationEvents.type, "ai.resumed"), eq(schema.salesConversationEvents.reasonCode, "COOLDOWN_EXPIRED")));
+      assert.deepEqual(resumed.map((r) => r.id).sort(), ["d1", "s1"], "mọi lần hết nhường (nhân viên · AI hỏng) có vết ai.resumed");
+      assert.ok(resumed.every((r) => r.actor === null), "người thao tác NULL = MÁY (luật 34–36)");
       assert.equal(sw.unowned.unowned, 0, `không hội thoại nào «KHÔNG CHỦ» khi tổ chức có người xem hộp thư: ${JSON.stringify(sw.unowned)}`);
-      if (sw.unowned.responders === 0) {
-        assert.ok(sw.unowned.shared > 0, "phòng trống ⇒ hàng đợi chung");
-        assert.equal(sw.noResponderAlerts, 1, "phòng trống có khách chờ ⇒ một tin quản trị");
-        const again = await sweepHandoffOwnership(new Date(now.getTime() + 5 * MIN));
-        assert.equal(again.noResponderAlerts, 0, "quét lại trong ngày ⇒ không báo thêm (luật 26)");
-        const n = await db.select({ k: schema.notifications.dedupeKey }).from(schema.notifications).where(like(schema.notifications.dedupeKey, "sales-chat:handoff-no-responder:%"));
-        assert.equal(n.length, 1);
-      }
+      assert.equal(sw.unowned.responders, 0, "tổ chức mới cấp: phòng phụ trách chưa có thành viên");
+      assert.ok(sw.unowned.viewers >= 1 && sw.unowned.shared > 0, "phòng trống, chủ shop xem được hộp thư ⇒ hàng đợi chung");
+      assert.equal(sw.noResponderAlerts, 1, "phòng trống + có việc STALE (p1 vỡ hạn > 24 giờ, chưa ai cầm) ⇒ một tin quản trị");
+      const again = await sweepHandoffOwnership(new Date(now.getTime() + 5 * MIN));
+      assert.equal(again.noResponderAlerts, 0, "quét lại trong ngày ⇒ không báo thêm (luật 26)");
+      const n = await db.select({ k: schema.notifications.dedupeKey, title: schema.notifications.title }).from(schema.notifications).where(like(schema.notifications.dedupeKey, "sales-chat:handoff-no-responder:%"));
+      assert.equal(n.length, 1);
+      assert.match(n[0].title, /hàng đợi chung/, "có người xem hộp thư ⇒ tin nói đúng «hàng đợi chung»");
 
       // ═══ Lõi trả-cho-AI luật cũ: chạy thử không ghi · --apply chỉ hội thoại không ai cầm · chạy lại không ghi thêm ═══
       const dry = await releaseLegacyPostOrderHandoffs({ apply: false, now });
-      assert.deepEqual({ c: dry.candidates, r: dry.released, ...dry.byVerdict }, { c: 3, r: 0, RELEASE: 1, HELD_BY_PERSON: 1, STAFF_REPLIED: 1, TAKEOVER: 0 });
+      assert.deepEqual({ c: dry.candidates, r: dry.released, ...dry.byVerdict }, { c: 5, r: 0, RELEASE: 1, HELD_BY_PERSON: 1, STAFF_REPLIED: 1, TAKEOVER: 0, CUSTOMER_WAITING: 1, CUSTOMER_REQUEST: 1 });
+      assert.ok(dry.waiting >= 1 && dry.requests.EDIT === 1, `chạy thử in số khách đang chờ + yêu cầu theo loại: ${JSON.stringify({ w: dry.waiting, r: dry.requests })}`);
       assert.equal((await db.select({ s: c.status }).from(c).where(eq(c.id, "o1")))[0]?.s, "HANDOFF", "chạy thử không ghi");
       const ap = await releaseLegacyPostOrderHandoffs({ apply: true, now });
       assert.equal(ap.released, 1);
       const o1 = (await db.select().from(c).where(eq(c.id, "o1")))[0];
       assert.deepEqual([o1.status, o1.handoffReason, o1.handoffQueuedAt, (o1.state as { handoff?: unknown }).handoff], ["OPEN", null, null, undefined], "o1 về AI, rời hàng đợi");
-      for (const id of ["o2", "o3", "p1"]) assert.equal((await db.select({ s: c.status }).from(c).where(eq(c.id, id)))[0]?.s, "HANDOFF", `${id} để nguyên`);
+      for (const id of ["o2", "o3", "o4", "o5", "p1"]) assert.equal((await db.select({ s: c.status }).from(c).where(eq(c.id, id)))[0]?.s, "HANDOFF", `${id} để nguyên (người cầm / khách đang chờ / khách có yêu cầu / chuyển người bắt buộc)`);
       const ap2 = await releaseLegacyPostOrderHandoffs({ apply: true, now });
-      assert.deepEqual([ap2.candidates, ap2.released], [2, 0], "chạy lại không ghi thêm");
+      assert.deepEqual([ap2.candidates, ap2.released], [4, 0], "chạy lại không ghi thêm");
       const ev = await db.select({ n: sql<number>`count(*)::int` }).from(schema.salesConversationEvents).where(and(eq(schema.salesConversationEvents.conversationId, "o1"), eq(schema.salesConversationEvents.type, "ai.resumed")));
       assert.equal(ev[0]?.n, 1, "một vết ai.resumed");
     });
@@ -217,7 +239,7 @@ async function testDb() {
       const [x] = await db.select({ s: schema.salesChatConversations.status }).from(schema.salesChatConversations).where(eq(schema.salesChatConversations.id, "x1"));
       assert.equal(x?.s, "HANDOFF", "CÁCH LY: lượt của tổ chức khác không đụng hội thoại ở đây");
     });
-    console.log("  ✓ PGlite: SQL ≡ thuần (AI hỏng) · watchdog mở lại AI hỏng / nhường đã hết, KHÔNG đụng chuyển khoản / tiếp quản / luật cũ · phòng trống ⇒ hàng đợi chung + 1 tin quản trị/ngày · trả-cho-AI: chạy thử 0 ghi, --apply 1/3, chạy lại 0 · cách ly tổ chức");
+    console.log("  ✓ PGlite: SQL ≡ thuần (AI hỏng) · watchdog mở lại AI hỏng / nhường đã hết, KHÔNG đụng chuyển khoản / tiếp quản / luật cũ · phòng trống ⇒ hàng đợi chung + 1 tin quản trị/ngày · AI hỏng còn tin chưa trả lời ⇒ ở lại hàng đợi người · ai.resumed của MÁY · trả-cho-AI: chạy thử 0 ghi, --apply 1/5 (loại khách đang chờ · khách có yêu cầu), chạy lại 0 · cách ly tổ chức");
   } finally {
     await dropOrg(ORG);
     await dropOrg(ORG2);

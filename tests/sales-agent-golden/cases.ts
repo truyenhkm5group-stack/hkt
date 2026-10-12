@@ -75,7 +75,7 @@ export const GOLDEN_CASES: readonly GoldenCase[] = [
   },
   {
     key: "hau-mai-da-nhan-hang",
-    title: "Vòng đời tư vấn → chốt → hậu mãi (HOTFIX 12/10/2026, ca «Khanh Nhung»): khách nhắn sau khi chốt ⇒ AI VẪN trả lời (không chuyển người mặc định), «nhận hàng rồi» ⇒ cảm ơn + hỏi thăm, không chốt lại / không lên đơn mới; khiếu nại hoàn tiền ⇒ chuyển người",
+    title: "Vòng đời tư vấn → chốt → hậu mãi (HOTFIX 12/10/2026, ca «Khanh Nhung»): khách nhắn sau khi chốt ⇒ AI VẪN trả lời (không chuyển người mặc định), «nhận hàng rồi» ⇒ cảm ơn + hỏi thăm, không chốt lại / không lên đơn mới; khiếu nại hoàn tiền ⇒ MÁY CHỦ chuyển người (không lượt AI)",
     shop: "food",
     channel: "WEB",
     turns: [
@@ -89,7 +89,8 @@ export const GOLDEN_CASES: readonly GoldenCase[] = [
       },
       { say: "ok chốt đơn", ai: [() => [tool("confirm_order", { customer_confirmation: "ok chốt đơn" })], reply(() => "Dạ em lên đơn cho chị rồi ạ.")] },
       { say: "Tôi nhận hàng rồi nhưng chưa thử chất lượng", ai: [() => [say("Dạ em cảm ơn chị đã nhận hàng ạ. Chị dùng thử thấy thế nào nhắn em nhé!")]] },
-      { say: "goi ruoc bi moc roi, minh muon tra hang hoan tien", ai: [() => [tool("handoff_to_human", { reason: "Khiếu nại — ruốc bị mốc, khách muốn trả hàng hoàn tiền" })], reply(() => "Dạ em xin lỗi chị, em chuyển nhân viên hỗ trợ ngay ạ.")] },
+      // Khiếu nại có đơn ⇒ MÁY CHỦ chuyển người trước lượt AI (review #821 F2) — model không được hỏi, không thể hứa hoàn tiền.
+      { say: "goi ruoc bi moc roi, minh muon tra hang hoan tien", ai: [] },
     ],
   },
   {

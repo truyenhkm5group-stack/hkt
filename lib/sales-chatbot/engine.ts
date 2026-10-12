@@ -901,12 +901,23 @@ async function chatTurnCore(
       if (isPublicChannel(opts.channel)) await notifySalesChatHandoff(conv.id, reason, st.customer, now, { dedupeKey: `sales-chat:payment-claim:${conv.id}:${turnSeq}` }).catch(() => undefined);
       return { ok: true, view: (await conversationView(conv.id))! };
     }
+    // KHIẾU NẠI SAU KHI CÓ ĐƠN (review #821 F2): hàng lỗi / thiếu / sai / đau bụng / giao chậm / đòi đổi trả, hoàn tiền, hoặc ĐVVC báo đã
+    // giao mà khách nói chưa nhận ⇒ MÁY CHỦ chuyển người ngay như nhánh khách báo chuyển khoản — không lượt AI, không câu mẫu, không để
+    // tuỳ lời nhắc (model có thể hứa hoàn tiền / đổi hàng). Kênh nhắn tin chuyển người thì bot IM; kênh khác nhận câu an toàn.
+    if (phase?.phase === "COMPLAINT") {
+      const reason = `Khiếu nại — ${phase.source}${phase.shortCode ? ` (đơn #${phase.shortCode})` : ""}`.slice(0, 300);
+      const st = { ...st0, handoff: { reason, at: now.toISOString() } };
+      if (!isMessagingChannel(opts.channel)) await reply(conv, seq, CLAIM_SAFE_TEXT.REFUND);
+      await bump({ status: "HANDOFF", handoffReason: reason, state: st as Record<string, unknown>, turns: conv.turns + 1 });
+      if (isPublicChannel(opts.channel)) await notifySalesChatHandoff(conv.id, reason, st.customer, now, { dedupeKey: `sales-chat:complaint:${conv.id}:${turnSeq}` }).catch(() => undefined);
+      return { ok: true, view: (await conversationView(conv.id))! };
+    }
     // HÀNG RÀO KHẲNG ĐỊNH (claim-guard.ts): MỌI chữ bot sắp gửi — câu mẫu, câu mẫu AI gửi qua công cụ, chữ model — qua
     // `guardOutgoing`. «Đã nhận tiền» khi chưa có chứng từ thu, «đã chốt đơn» khi chưa có đơn ERP ⇒ câu KHÔNG được ghi / gửi;
     // chuyển người, ghi lý do (`handoffReason` ⇒ sự kiện `handoff.requested` + `lastError`). Căn cứ chỉ đọc khi câu có khẳng định.
     // SỐ TIỀN (P0 authoritative-quote 11/10/2026): mọi số tiền trong chữ bot phải thuộc báo giá máy chủ đã xác thực của hội thoại hoặc
     // tập tham chiếu của danh mục (`quote.ts`) — đọc lười, một lần mỗi lượt, chỉ khi câu có số tiền.
-    const claimFacts = claimFactsLoader({ id: conv.id, orderId: conv.orderId, pageId: conv.pageId, threadId: conv.threadId }, { reference: () => catalogReferenceAmounts(cfg) });
+    const claimFacts = claimFactsLoader({ id: conv.id, orderId: conv.orderId, pageId: conv.pageId, threadId: conv.threadId }, { reference: () => catalogReferenceAmounts(cfg), turn: turnSeq });
     const claimBlock = async (v: Extract<ClaimVerdict, { ok: false }>, st: ChatState): Promise<{ state: ChatState; safe: string | null }> => {
       // Thay câu KHÔNG chuyển người (đơn đã tạo nhưng còn chờ kiểm — đơn nằm sẵn trong hàng «Cần người kiểm»): câu an toàn gửi trên MỌI kênh.
       if (!v.handoff) return { state: st, safe: v.safeText };
@@ -942,7 +953,7 @@ async function chatTurnCore(
     const recentSaid = recentShopTexts(msgs, 4);
     const quick: QuickReplyStep = st0.priceDispute?.open
       ? { kind: "SKIP", reason: "Khách đang phản đối giá — AI báo lại theo báo giá máy chủ" }
-      : postSale && (phase!.phase === "RECEIVED" || phase!.phase === "AFTER_SALES" || phase!.phase === "COMPLAINT")
+      : postSale
         ? { kind: "SKIP", reason: `Khách ở giai đoạn ${CUSTOMER_PHASE_LABEL[phase!.phase]} — câu mẫu bán hàng sai ngữ cảnh, AI trả lời` }
         : opts.context ? { kind: "SKIP", reason: "Có ngữ cảnh bài viết — AI đọc cùng ngữ cảnh" } : qrSettings.enabled ? await quickReplyByKeyword(text, { ordering: Boolean(st0.draft && !st0.confirmed), cfg, recent: recentSaid }) : { kind: "SKIP", reason: "Câu mẫu đang tắt" };
     const sendQuick = async (pick: QuickReplyPick, ai: { calls: number; inTok: number; outTok: number } | null): Promise<TurnResult> => {

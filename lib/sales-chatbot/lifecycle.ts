@@ -476,15 +476,32 @@ const COMPLAINT_RULES: readonly RegExp[] = [
   /\b(?:tra|doi)\s+(?:lai\s+)?hang\b|\bhoan\s+(?:lai\s+)?tien\b|\btra\s+lai\s+tien\b|\bboi\s+thuong\b/,
   /\b(?:lua dao|that vong|qua te|te qua|khong dung nhu|khac (?:anh|hinh|mo ta|quang cao))\b/,
   /\b(?:khieu nai|phan nan|boc phot)\b/,
+  // Sức khoẻ sau khi ăn — luôn là việc của người (review #821 F2).
+  /\b(?:dau bung|ngo doc|tieu chay|di ngoai|non mua|buon non|di ung|noi man|ngua)\b/,
+  // Chất lượng tệ: «không ngon như lần trước», «hàng dở quá», «ruốc bị chảy dầu» (luật «bị …» ở trên + chảy dầu).
+  /\bkhong\s+(?:con\s+)?(?:ngon|tuoi|thom|nhu lan truoc|giong lan truoc|giong anh)\b|\b(?:do|te|chan|kho an|nhat nheo)\s+(?:qua|lam|that|the)\b|\bbi\s+chay\s+dau\b|\bchay\s+dau\b/,
+  // Giao chậm: «giao chậm quá», «5 ngày chưa thấy».
+  /\b(?:giao|ship|gui)\s+cham\b|\bcham\s+qua\b|\b\d+\s+ngay\s+(?:roi\s+)?(?:ma\s+)?(?:van\s+)?chua\s+(?:thay|nhan|toi|den|giao)\b/,
 ];
 
 /**
- * Khách KHIẾU NẠI / đòi đổi trả / hoàn tiền — câu rõ ràng về hàng lỗi, thiếu, sai, hỏng, muốn trả / hoàn tiền. «chưa thử chất lượng»
- * KHÔNG phải khiếu nại (khách chưa dùng). Cố ý hẹp: chỉ để gọi đúng giai đoạn + dặn AI chuyển người; câu mơ hồ ⇒ AI hỏi thăm. HÀM THUẦN.
+ * Khách KHIẾU NẠI / đòi đổi trả / hoàn tiền — câu rõ ràng về hàng lỗi, thiếu, sai, hỏng, chất lượng tệ, đau bụng sau khi ăn, giao chậm,
+ * muốn trả / hoàn tiền. «chưa thử chất lượng» KHÔNG phải khiếu nại (khách chưa dùng). Có đơn sống mà khớp ⇒ MÁY CHỦ chuyển người (engine),
+ * không để tuỳ lời nhắc. HÀM THUẦN.
  */
 export function customerComplaintSignal(text: string): boolean {
   const f = foldVi(text.normalize("NFC"));
   return COMPLAINT_RULES.some((re) => re.test(f));
+}
+
+const NOT_RECEIVED_RE = /\b(?:chua|khong|ko|k|van chua)\s+(?:\S+\s+){0,2}(?:nhan|thay)\s+(?:duoc\s+)?(?:hang|don|goi|hop|buu pham)\b|\bchua\s+(?:nhan|thay)\s+(?:gi|duoc gi)\b/;
+
+/**
+ * Khách nói CHƯA NHẬN / KHÔNG NHẬN ĐƯỢC hàng. Khi chứng từ ĐVVC báo ĐÃ GIAO thì đây là MÂU THUẪN chứng từ ↔ lời khách — việc của người
+ * (kiểm với bưu cục), tuyệt đối không cảm ơn «đã nhận hàng». HÀM THUẦN.
+ */
+export function customerNotReceivedSignal(text: string): boolean {
+  return NOT_RECEIVED_RE.test(foldVi(text.normalize("NFC")));
 }
 
 export type CustomerPhaseView = {
@@ -500,10 +517,13 @@ export type CustomerPhaseView = {
  * Giai đoạn của khách. HÀM THUẦN. Thứ tự: khiếu nại (lời khách, khi có đơn) → không có đơn sống ⇒ trước bán / đang chốt theo
  * `salesStage` → ĐVVC đã giao / khách nói đã nhận ⇒ đã nhận (đơn lên quá `AFTER_SALES_DAYS` ⇒ chăm sóc sau bán) → đang giao → chờ giao.
  */
-export function customerPhaseOf(snap: Pick<LifecycleSnapshot, "order" | "fulfillment" | "salesStage" | "orderId">, claims: { receipt: boolean; complaint: boolean }, orderAgeDays: number | null): CustomerPhaseView {
+export function customerPhaseOf(snap: Pick<LifecycleSnapshot, "order" | "fulfillment" | "salesStage" | "orderId">, claims: { receipt: boolean; complaint: boolean; notReceived?: boolean }, orderAgeDays: number | null): CustomerPhaseView {
   const orderId = snap.orderId;
   const hasLive = snap.order === "CREATED" || snap.order === "CONFIRMED";
   if (claims.complaint && (hasLive || snap.order === "RETURNED")) return { phase: "COMPLAINT", receivedBy: null, orderId, source: "lời khách: khiếu nại / đổi trả / hoàn tiền" };
+  // ĐVVC báo đã giao mà khách nói chưa nhận ⇒ mâu thuẫn chứng từ ↔ lời khách = khiếu nại (review #821 F2: trước đây ra RECEIVED/CARRIER
+  // và lời nhắc CẢM ƠN khách đã nhận hàng).
+  if (hasLive && snap.fulfillment === "DELIVERED" && claims.notReceived) return { phase: "COMPLAINT", receivedBy: null, orderId, source: "lời khách «chưa nhận được hàng» — chứng từ ĐVVC báo ĐÃ GIAO (mâu thuẫn, cần kiểm với bưu cục)" };
   if (!hasLive) {
     const closing = snap.order === "CREATION_PENDING" || snap.salesStage === "AWAITING_CONFIRMATION" || snap.salesStage === "CUSTOMER_INFO_COLLECTED";
     return { phase: closing ? "CLOSING" : "PRE_SALE", receivedBy: null, orderId, source: `order=${snap.order} · salesStage=${snap.salesStage}` };
@@ -547,7 +567,7 @@ export async function loadCustomerPhase(conv: Pick<LifecycleConvRow, "id" | "ord
     const snap = deriveLifecycle({ conversation: { status: conv.status, handoffReason: conv.handoffReason, control: controlOf(st), turns: conv.turns }, state: st, orders, customerTexts: [] });
     const chosen = snap.orderId ? orders.find((o) => o.id === snap.orderId) : undefined;
     const age = chosen?.insertedAt ? (now.getTime() - chosen.insertedAt.getTime()) / 86_400_000 : null;
-    const v = customerPhaseOf(snap, { receipt: customerReceiptClaim(text), complaint: customerComplaintSignal(text) }, age);
+    const v = customerPhaseOf(snap, { receipt: customerReceiptClaim(text), complaint: customerComplaintSignal(text), notReceived: customerNotReceivedSignal(text) }, age);
     return { ...v, shortCode: snap.orderId ? manualOrderShortCode(snap.orderId) : null };
   } catch {
     return null;

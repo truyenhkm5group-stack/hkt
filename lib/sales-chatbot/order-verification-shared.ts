@@ -81,11 +81,6 @@ export type ConversationOrderSummary = {
   otherActive: number;
 };
 
-/**
- * ĐƠN ĐÃ HUỶ gần nhất của hội thoại (chủ shop 10/10/2026 — sự cố #189A435E): khi hội thoại không còn đơn đang mở, khung đơn hộp thư
- * in MỘT dòng «ĐÃ HUỶ» (ai yêu cầu · ai ghi · lý do — `cancellationLine`) thay vì im lặng, để người trực thấy lượt huỷ đã GHI XONG.
- * Không phải một trạng thái kiểm của `orderVerification` (đơn huỷ không còn ô nào để kiểm).
- */
 /** Câu lỗi khi máy chủ không đọc được đơn của hội thoại (lỗi đã ghi nhật ký máy chủ). */
 export const INBOX_ORDER_READ_FAILED = "Máy chủ không đọc được đơn của hội thoại (đã ghi nhật ký kỹ thuật) — bấm «Đọc lại đơn»; còn lỗi thì báo kỹ thuật kèm mã hội thoại.";
 
@@ -99,6 +94,11 @@ export function orderPanelCallError(e: unknown): string {
   return "Không kết nối được máy chủ để đọc đơn — kiểm tra mạng rồi bấm «Đọc lại đơn».";
 }
 
+/**
+ * ĐƠN ĐÃ HUỶ gần nhất của hội thoại (chủ shop 10/10/2026 — sự cố #189A435E): khi hội thoại không còn đơn đang mở, khung đơn hộp thư
+ * in MỘT dòng «ĐÃ HUỶ» (ai yêu cầu · ai ghi · lý do — `cancellationLine`) thay vì im lặng, để người trực thấy lượt huỷ đã GHI XONG.
+ * Không phải một trạng thái kiểm của `orderVerification` (đơn huỷ không còn ô nào để kiểm).
+ */
 export type ConversationCancelledOrder = { orderId: string; shortCode: string; cancelledAt: string | null; line: string };
 export const ORDER_CANCELLED_LABEL = "ĐÃ HUỶ";
 

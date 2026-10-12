@@ -25,8 +25,10 @@ import {
   type HandoffQueueView,
   type HandoffUnownedReason,
 } from "@/lib/sales-chatbot/handoff-routing-shared";
-import { AI_DOWN_HANDOFF_REASON, aiHoldOf, STAFF_COOLDOWN_REASON_LIST } from "@/lib/sales-chatbot/ai-hold-shared";
-import { humanHandlingKindSql, needsHumanReasonSql, WAITING_REPLY_SQL, WEB_STAFF_REASON } from "@/lib/sales-chatbot/inbox-states";
+import { AI_DOWN_HANDOFF_REASON, AI_DOWN_UNANSWERED_REASON, aiHoldOf, STAFF_COOLDOWN_REASON_LIST } from "@/lib/sales-chatbot/ai-hold-shared";
+import { DEAD_AI_DOWN_NOTE } from "@/lib/sales-chatbot/inbound-retry";
+import { TAKEOVER_REASON } from "@/lib/sales-chatbot/conversation-control-shared";
+import { humanHandlingKindSql, needsHumanReasonSql, STATE_HANDOFF_AT_SQL, WAITING_REPLY_SQL, WEB_STAFF_REASON } from "@/lib/sales-chatbot/inbox-states";
 
 /**
  * ═══════════ AI IM THÌ PHẢI CÓ CHỦ — ĐƯỜNG GHI (P0 11/10/2026, yêu cầu 9 «Human handoff») ═══════════
@@ -219,6 +221,7 @@ type QueueRow = {
   lastStaffAt: Date | null;
   handoffAt: Date | null;
   customerName: string | null;
+  mode: string | null;
 };
 
 async function silentRows(now: Date, ids?: string[]): Promise<QueueRow[]> {
@@ -236,8 +239,9 @@ async function silentRows(now: Date, ids?: string[]): Promise<QueueRow[]> {
       assigneeName: u.name,
       assigneeActive: u.active,
       lastStaffAt: C.lastStaffAt,
-      handoffAt: sql<Date | null>`case when ${C.state}->'handoff'->>'at' ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T' then (${C.state}->'handoff'->>'at')::timestamptz end`,
-      customerName: sql<string | null>`coalesce(${C.state}->'customer'->>'name', (select i.customer_name from "sales_chat_inbound" i where i.page_id = ${C.pageId} and i.thread_id = ${C.threadId} and i.customer_name is not null order by i.created_at desc limit 1))`,
+      handoffAt: STATE_HANDOFF_AT_SQL,
+      mode: sql<string | null>`${C.state}->'control'->>'mode'`,
+      customerName: sql<string | null>`coalesce(${C.state}->'customer'->>'name', (select i.customer_name from "sales_chat_inbound" i where i.page_id = "sales_chat_conversations"."page_id" and i.thread_id = "sales_chat_conversations"."thread_id" and i.customer_name is not null order by i.created_at desc limit 1))`,
     })
     .from(C)
     .leftJoin(u, eq(u.id, C.assigneeUserId))
@@ -254,7 +258,7 @@ export async function handoffWorkItems(now: Date): Promise<WorkItem[]> {
   return rows.map((r) => {
     // Chưa có dấu hàng đợi ⇒ mốc chuyển người của chính đường chuyển (`state.handoff.at`); `updated_at` chỉ là chỗ lùi cuối — cột này bị
     // mọi lượt ghi đẩy tới, dùng nó làm mốc tính hạn là hạn KHÔNG BAO GIỜ vỡ (HOTFIX P0 12/10/2026).
-    const queued = r.queuedAt ?? r.handoffAt ?? r.updatedAt;
+    const queued = r.queuedAt ?? (r.handoffAt ? new Date(r.handoffAt) : null) ?? r.updatedAt;
     const held = Boolean(r.assigneeUserId && r.assigneeActive);
     const status: WorkStatus = !held ? "NEW" : r.lastStaffAt && r.lastStaffAt.getTime() >= queued.getTime() ? "IN_PROGRESS" : "ASSIGNED";
     return {
@@ -280,7 +284,7 @@ export async function handoffWorkItems(now: Date): Promise<WorkItem[]> {
       businessEntityId: r.id,
       sourceUrl: inboxHref(r.id),
       money: MONEY_UNKNOWN,
-      tags: [r.channel, ...(r.queuedAt ? [] : ["NOT_QUEUED"])],
+      tags: [r.channel, ...(r.queuedAt ? [] : ["NOT_QUEUED"]), ...(r.mode === "HUMAN" || r.handoffReason === TAKEOVER_REASON ? ["TAKEOVER"] : [])],
       evidence: { source: "Hộp thư AI bán hàng", detail: r.queuedAt ? `Vào hàng đợi người ${r.queuedAt.toISOString()}` : "AI đã dừng nhưng chưa vào hàng đợi — lượt quét 5 phút sẽ đóng dấu" },
       blockedReason: "",
       creationSource: "AUTO",
@@ -429,7 +433,7 @@ export async function sweepHandoffOwnership(now: Date = new Date()): Promise<Han
     .where(and(isNotNull(C.handoffQueuedAt), sql`not ${aiSilentSql(now)}`))
     .returning({ id: C.id });
 
-  const handoffAt = sql<Date>`case when ${C.state}->'handoff'->>'at' ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T' and (${C.state}->'handoff'->>'at')::timestamptz <= ${now} then (${C.state}->'handoff'->>'at')::timestamptz else ${now} end`;
+  const handoffAt = sql<Date>`case when ${STATE_HANDOFF_AT_SQL} <= ${now} then ${STATE_HANDOFF_AT_SQL} else ${now} end`;
   const stampedRows = await db
     .update(C)
     .set({ handoffQueuedAt: handoffAt })
@@ -478,11 +482,18 @@ export async function sweepHandoffOwnership(now: Date = new Date()): Promise<Han
 
   const unowned = await countUnownedHandoffs(now);
   let noResponderAlerts = 0;
-  if (unowned.responders === 0 && unowned.silent - unowned.person > 0) {
+  // Ngưỡng của luật 26 (review #821 F6): chỉ báo khi có việc STALE (vỡ hạn > 24 giờ VÀ chưa ai cầm), KHÔNG đếm «Tiếp quản» (người đang
+  // làm, không phải khách bị bỏ rơi). Tổ chức không ai xem được hộp thư thì KHÔNG nói «hàng đợi chung» — hội thoại là KHÔNG CHỦ thật.
+  const staleWaiting = stale.filter((i) => !i.tags.includes("TAKEOVER")).length;
+  if (unowned.responders === 0 && staleWaiting > 0) {
     const key = `sales-chat:handoff-no-responder:${department}:${VN_DAY(now)}`;
-    const waitingN = unowned.silent - unowned.person;
-    const title = `Phòng ${DEPARTMENT_LABEL[department]} chưa có ai xem được hộp thư — ${waitingN} khách chờ đang ở hàng đợi chung`;
-    const body = `${waitingN} hội thoại AI đã dừng chưa ai nhận. Phòng phụ trách hàng đợi khách chờ (khoá SALES_CHAT_HANDOFF) chưa có thành viên nào xem được hộp thư nên hội thoại đang nằm ở HÀNG ĐỢI CHUNG của mọi người xem hộp thư. Xếp người vào phòng ở Cấu hình → Nhân sự và phòng ban, hoặc đổi phòng ở Cấu hình → Phòng phụ trách.`;
+    const shared = unowned.viewers > 0;
+    const title = shared
+      ? `Phòng ${DEPARTMENT_LABEL[department]} chưa có ai xem được hộp thư — ${staleWaiting} khách chờ quá hạn ở hàng đợi chung`
+      : `Không ai xem được hộp thư AI bán hàng — ${staleWaiting} khách chờ quá hạn KHÔNG CHỦ`;
+    const body = shared
+      ? `${staleWaiting} hội thoại AI đã dừng, vỡ hạn hơn 24 giờ, chưa ai nhận. Phòng phụ trách hàng đợi khách chờ (khoá SALES_CHAT_HANDOFF) chưa có thành viên nào xem được hộp thư nên hội thoại đang nằm ở HÀNG ĐỢI CHUNG của mọi người xem hộp thư. Xếp người vào phòng ở Cấu hình → Nhân sự và phòng ban, hoặc đổi phòng ở Cấu hình → Phòng phụ trách.`
+      : `${staleWaiting} hội thoại AI đã dừng, vỡ hạn hơn 24 giờ, và cả tổ chức chưa có tài khoản đang hoạt động nào xem được hộp thư (ai_sales:view). Cấp quyền xem hộp thư cho ít nhất một người rồi xếp vào phòng phụ trách.`;
     const ins = await db
       .insert(schema.notifications)
       .values({ kind: "SYSTEM", severity: "warning", title, body, href: "/ai/sales-chatbot/inbox?f=UNASSIGNED", entityType: "SALES_CHAT", entityId: department, dedupeKey: key, occurredAt: now })
@@ -506,7 +517,20 @@ export async function sweepHandoffOwnership(now: Date = new Date()): Promise<Han
 export async function recoverExpiredHolds(now: Date): Promise<number> {
   const db = await getDb();
   const rows = await db
-    .select({ id: C.id, status: C.status, handoffReason: C.handoffReason, state: C.state, updatedAt: C.updatedAt, humanCooldownUntil: C.humanCooldownUntil })
+    .select({
+      id: C.id,
+      status: C.status,
+      handoffReason: C.handoffReason,
+      state: C.state,
+      updatedAt: C.updatedAt,
+      humanCooldownUntil: C.humanCooldownUntil,
+      // Tin khách bị chốt «AI hỏng» (DEAD) sau câu trả lời cuối của bot / nhân viên — chưa ai trả lời (review #821 F5).
+      // Cột của hội thoại viết TƯỜNG MINH `"sales_chat_conversations"."…"`: drizzle in cột trần trong câu con tương quan thành `"page_id"`
+      // — tự so với chính bảng con (bài học «câu con tương quan với id trần»).
+      deadUnanswered: sql<boolean>`exists (select 1 from "sales_chat_inbound" i where i.page_id = "sales_chat_conversations"."page_id" and i.thread_id = "sales_chat_conversations"."thread_id"
+        and i.status = 'DEAD' and i.note = ${DEAD_AI_DOWN_NOTE}
+        and i.created_at > coalesce(greatest("sales_chat_conversations"."last_bot_at", "sales_chat_conversations"."last_staff_at"), 'epoch'::timestamptz))`,
+    })
     .from(C)
     .where(and(eq(C.status, "HANDOFF"), sql`${C.channel} <> 'TEST'`, inArray(C.handoffReason, [...STAFF_COOLDOWN_REASON_LIST, AI_DOWN_HANDOFF_REASON])))
     .limit(500);
@@ -515,6 +539,15 @@ export async function recoverExpiredHolds(now: Date): Promise<number> {
   for (const r of rows) {
     const hold = aiHoldOf(r, now);
     if (hold.state !== "AI_ACTIVE" || !hold.expired) continue;
+    // AI hỏng đã hết khoảng thử lại NHƯNG còn tin khách bị chốt lúc AI hỏng chưa ai trả lời ⇒ KHÔNG trả AI (AI không quay lại trả lời
+    // các tin đã chốt — khách sẽ bị bỏ rơi): đổi sang lý do CẦN NGƯỜI không tự hết hạn để hội thoại ở lại hàng đợi người.
+    if (hold.expired.cause === "AI_DOWN" && r.deadUnanswered) {
+      await db
+        .update(C)
+        .set({ handoffReason: AI_DOWN_UNANSWERED_REASON, state: sql`coalesce(${C.state}, '{}'::jsonb) || ${JSON.stringify({ handoff: { reason: AI_DOWN_UNANSWERED_REASON, at: now.toISOString() } })}::jsonb` })
+        .where(and(eq(C.id, r.id), eq(C.status, "HANDOFF"), eq(C.handoffReason, AI_DOWN_HANDOFF_REASON)));
+      continue;
+    }
     if ((await holdGate(r, now).catch(() => ({ skip: "lỗi" }))) === null) n += 1;
   }
   return n;

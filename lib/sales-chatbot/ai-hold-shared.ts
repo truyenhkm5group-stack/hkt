@@ -46,6 +46,11 @@ export const FANPAGE_STAFF_REASON = "Nhân viên đang trả lời trên fanpage
 export const ZALO_STAFF_REASON = "Nhân viên đang trả lời trên Zalo OA";
 /** AI hỏng ⇒ chuyển người, tự thử lại sau cùng khoảng nhường (engine.ts trỏ về đây). */
 export const AI_DOWN_HANDOFF_REASON = "AI tạm không trả lời được — nhân viên liên hệ lại khách";
+/**
+ * AI hỏng đã hết khoảng thử lại nhưng còn tin khách bị chốt lúc AI hỏng CHƯA AI TRẢ LỜI (watchdog — handoff-routing.ts::recoverExpiredHolds):
+ * lý do CẦN NGƯỜI không tự hết hạn — hội thoại ở lại hàng đợi người tới khi có người trả lời / trả lại cho AI (review #821 F5).
+ */
+export const AI_DOWN_UNANSWERED_REASON = "AI hỏng — còn tin khách chưa được trả lời, nhân viên trả lời khách";
 
 /** Lý do nhường TỰ HẾT HẠN của nhân viên (mỗi kênh một câu) — hộp thư dựng điều kiện SQL tương đương `aiHoldOf` từ đúng danh sách này. */
 export const STAFF_COOLDOWN_REASON_LIST: readonly string[] = [FANPAGE_STAFF_REASON, ZALO_STAFF_REASON];
@@ -93,7 +98,12 @@ export type AiHold = {
   expired: { cause: "STAFF_REPLY" | "AI_DOWN"; at: Date } | null;
 };
 
-const ISO_AT_RE = /^\d{4}-\d{2}-\d{2}T/;
+/**
+ * Dạng ISO ĐẦY ĐỦ mà engine ghi vào `state.handoff.at` (`toISOString`): ngày · giờ · múi giờ, khoảng tháng / ngày / giờ hợp lệ. MỘT chuỗi
+ * cho cả hai bản — POSIX ERE của Postgres và RegExp của JS đọc giống nhau (`STATE_HANDOFF_AT_SQL`, inbox-states.ts). Sai dạng ⇒ không tin mốc.
+ */
+export const ISO_AT_SQL_RE = "^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])T([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]([.][0-9]{1,6})?(Z|[+-]([01][0-9]|2[0-3]):?[0-5][0-9])$";
+const ISO_AT_RE = new RegExp(ISO_AT_SQL_RE);
 
 /**
  * MỐC AI HỎNG THẬT (HOTFIX P0 12/10/2026): `state.handoff.at` mà engine ghi CÙNG lượt chuyển hội thoại sang «AI hỏng» (lý do khớp).
