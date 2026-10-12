@@ -1,0 +1,26 @@
+{
+  "schema": 1,
+  "mission_id": "stuck-conversation-audit",
+  "title": "Ops stuck-conversation-audit CHỈ ĐỌC: AI im theo nhóm/lý do, không chủ + SLA, nhắn lại sau đơn, đơn không đồng bộ",
+  "business_goal": "",
+  "status": "RUNNING",
+  "priority": "P0",
+  "risk": "MEDIUM",
+  "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "worker": null,
+  "worktree": null,
+  "branch": "fix/stuck-conversation-audit",
+  "base_sha": "8ad6f6949268028c4209762b50c66dafb8b3aa99",
+  "domains": [],
+  "owned_paths": [
+    "scripts/stuck-conversation-audit.ts"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-12T12:52:20.948Z",
+  "updated_at": "2026-10-12T12:52:20.948Z",
+  "last_heartbeat": "2026-10-12T12:52:20.948Z",
+  "definition_of_done": []
+}
