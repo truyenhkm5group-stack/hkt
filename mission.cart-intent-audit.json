@@ -3,7 +3,7 @@
   "mission_id": "cart-intent-audit",
   "title": "Ops cart-intent-audit CHỈ ĐỌC: CART_INTENT_DRIFT (bot hạ số lượng khách đã nói) + ORDER_READY_LOOP",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P0",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -23,9 +23,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-12T11:23:25.749Z",
-  "updated_at": "2026-10-12T13:24:29.913Z",
+  "updated_at": "2026-10-12T14:28:09.561Z",
   "last_heartbeat": "2026-10-12T13:24:29.913Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#818 → d46ff7607425fdfe5d66f6578ce93e05f9f43d38"
+  },
   "handoff": {
     "branch": "fix/cart-intent-audit",
     "sha": "346aab79b1b57ab3185e2425ad2769e9836c3f76",
