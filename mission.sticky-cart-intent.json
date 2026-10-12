@@ -23,20 +23,33 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-12T11:24:34.985Z",
-  "updated_at": "2026-10-12T11:25:26.105Z",
-  "last_heartbeat": "2026-10-12T11:24:52.898Z",
+  "updated_at": "2026-10-12T13:03:04.192Z",
+  "last_heartbeat": "2026-10-12T13:03:04.192Z",
   "definition_of_done": [],
   "handoff": {
     "branch": "fix/sticky-cart-intent",
-    "sha": "e2fa5896e754beddc335ee1d554814f627b918dd",
-    "at": "2026-10-12T11:24:52.898Z",
-    "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+    "sha": "3f7858f1ab43409e6740e77bf3c8aeca4bfd2054",
+    "at": "2026-10-12T13:03:04.192Z",
+    "actor": "DESKTOP-56TH98Y:wt-sticky-cart",
     "title": "P0: giỏ dính — số lượng khách nói tường minh chỉ đổi khi có câu sửa tường minh; máy chủ từ chối hạ; upsell không downsell; khối ĐƠN HIỆN TẠI; bỏ câu mẫu «1kg ăn thử» khi đã có số lượng",
-    "summary": "Gốc: câu chốt mẫu packs.ts «1kg ăn thử» + máy chủ không giữ giỏ + biểu thức hoãn bắt nhầm «không lấy thêm»",
+    "summary": "Sửa review #819 @ e2fa5896: mọi nhánh lỗi/không chắc rơi về phía không chặn khách (relaxedTurn + clarify); P0-1 đích ổn định + try/catch; P0-2 không món ảo (danh mục), quy đổi gói, bỏ món, huỷ đơn; P0-3 lối tắt từ chối lời mời chỉ ngay sau lời mời (prevTurn), «gì» luôn là hoãn; CAO-4 xoá giỏ khi từ chối/huỷ; CAO-5 không thay nhầm chữ bot; tên món là dữ liệu; packs.ts nudge chỉ khi chưa nói số lượng.",
     "tests": [
-      "typecheck·lint: sạch",
-      "sales-cart-commitment (ma trận G1–G6 + model cố hạ)·sales-agent-golden (18/20 chỉ đổi lời nhắc)·order-golden·sales-quote-integrity·sales-claim-guard·response-ownership·followup-lifecycle: đạt",
-      "npm test: TẤT CẢ KIỂM THỬ ĐẠT"
+      "npm run typecheck",
+      "npm run lint (tệp chạm)",
+      "npm test: TẤT CẢ KIỂM THỬ ĐẠT",
+      "tests/sales-cart-commitment.test.ts (ma trận G1–G6 + testReviewCases + testReviewGolden)",
+      "sales-agent-golden",
+      "order-golden",
+      "sales-quote-integrity",
+      "sales-claim-guard",
+      "response-ownership",
+      "followup-lifecycle",
+      "platform-isolation-static",
+      "ops-log-leak",
+      "test-hygiene",
+      "sales-packs",
+      "ai-provider-failover",
+      "repo-integrity"
     ]
   }
 }
