@@ -40,10 +40,11 @@ export type CustomerAddress = {
   /** Xã + huyện CŨ khách ghi (khi các ứng viên sinh ra từ đúng một xã cũ bị chia). */
   legacy: { ward: string; district: string } | null;
   /**
-   * Cách đọc CHƯA XÁC NHẬN khi tỉnh chỉ suy được nhờ bung viết tắt tên quận («P13 GV» ⇒ quận Gò Vấp ⇒ TP HCM). `province` ở trên
-   * vẫn `null` và `missing` vẫn có `province` — gợi ý chỉ để câu hỏi khách hỏi ĐÚNG tỉnh; `wardCandidates` = xã mới NẾU khách xác nhận.
+   * Cách đọc CHƯA XÁC NHẬN khi tỉnh chỉ suy được nhờ bung viết tắt («P13 GV» ⇒ quận Gò Vấp ⇒ TP HCM; «q1»; «tp Vinh»; «f1q5»).
+   * `province` ở trên vẫn `null` và `missing` vẫn có `province` — gợi ý chỉ để câu hỏi khách hỏi ĐÚNG tỉnh; `abbreviation` = chữ
+   * viết tắt khi biết (`null` khi chỉ là viết tắt loại «q», «tp»); `wardCandidates` = xã mới NẾU khách xác nhận.
    */
-  provinceHint: { province: string; district: string; abbreviation: string; wardCandidates: string[] } | null;
+  provinceHint: { province: string; district: string; abbreviation: string | null; wardCandidates: string[] } | null;
   missing: AddressPart[];
   reason: string;
 };
@@ -150,7 +151,11 @@ export function addressQuestion(a: CustomerAddress): string | null {
     return `Dạ địa chỉ mình nay thuộc ${options} theo địa giới mới ạ? Mình xác nhận giúp em${streetTail} để shop giao đúng nha.`;
   }
   // Thiếu TỈNH là phần thiếu chính: hỏi tỉnh trước (xã mới phụ thuộc tỉnh). Có cách đọc từ viết tắt ⇒ hỏi xác nhận đúng cách đọc đó.
-  if (a.missing.includes("province") && a.provinceHint) return `Dạ «${a.provinceHint.abbreviation}» trong địa chỉ mình là ${lowerType(a.provinceHint.district)} cũ ở ${a.provinceHint.province} phải không ạ? Mình xác nhận giúp em tỉnh / thành phố${streetTail} để shop giao đúng nha.`;
+  if (a.missing.includes("province") && a.provinceHint) {
+    const h = a.provinceHint;
+    const lead = h.abbreviation ? `«${h.abbreviation}» trong địa chỉ mình là ${lowerType(h.district)} cũ ở ${h.province}` : `địa chỉ mình thuộc ${lowerType(h.district)} cũ ở ${h.province}`;
+    return `Dạ ${lead} phải không ạ? Mình xác nhận giúp em tỉnh / thành phố${streetTail} để shop giao đúng nha.`;
+  }
   if (a.missing.includes("province")) return `Dạ mình cho em xin phường / xã và tỉnh / thành phố của địa chỉ nhận hàng${streetTail} với ạ?`;
   if (a.missing.includes("ward")) return `Dạ mình cho em xin tên phường / xã (theo địa giới mới) của địa chỉ nhận hàng${streetTail} với ạ?`;
   if (needStreet) return "Dạ mình cho em xin số nhà, tên đường (hoặc thôn / xóm) để shop giao đúng ạ?";

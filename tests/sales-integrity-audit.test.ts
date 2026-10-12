@@ -145,6 +145,9 @@ function testAddressLostAndText() {
   assert.equal(classifyAddress({ address: "1094/3 Lê Đức Thọ P13 GV", province: "", ward: "" }), "MISSING_PROVINCE", "viết tắt không đọc ra tỉnh (ca KimThu Le)");
   // Cùng ca khi khách ghi tỉnh: phường 13 Gò Vấp không có trong danh mục cũ ⇒ chỉ dùng được quận cũ — KHÔNG phải «trùng tên phường».
   assert.equal(classifyAddress({ address: "1094/3 Lê Đức Thọ P13 GV", province: "TP Hồ Chí Minh", ward: "" }), "LEGACY_DISTRICT_ONLY", "phường không có trong danh mục cũ ⇒ theo quận cũ");
+  // Viết tắt loại không ghi tỉnh («q1», «tp Vinh») ⇒ vẫn là thiếu tỉnh — không đoán tỉnh từ chữ viết tắt.
+  assert.equal(classifyAddress({ address: "12 Lê Lợi q1", province: "", ward: "" }), "MISSING_PROVINCE");
+  assert.equal(classifyAddress({ address: "Số 5 tp Vinh", province: "", ward: "" }), "MISSING_PROVINCE");
   assert.equal(classifyAddress({ address: "12 Nguyễn Trãi, Thanh Xuân, Hà Nội", province: "", ward: "" }), "LEGACY_DISTRICT_ONLY");
   assert.equal(classifyAddress({ address: "Hà Nội nhé shop", province: "Thành phố Hà Nội", ward: "" }), "MISSING_WARD");
   assert.equal(classifyAddress({ address: "45 Lê Lợi, Phường 5, Quận 3, HCM", province: "", ward: "" }), "RESOLVABLE_NOW", "bộ đọc hôm nay ghép được — đơn chưa cập nhật");

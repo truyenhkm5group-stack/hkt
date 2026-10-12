@@ -280,7 +280,7 @@ async function prepare(rawInput: unknown): Promise<{ ok: true; p: Prepared } | M
   const recipient: Recipient = { name: r?.name || customer.name, phone: canonicalRecipientPhone(typedPhone), address, province: place.province, ward: place.ward };
   const wardCandidates = !recipient.ward && place.match.status === "AMBIGUOUS" ? place.match.candidates.map((c) => c.name) : [];
   // Tỉnh chỉ suy được nhờ viết tắt tên quận («P13 GV») ⇒ ô tỉnh vẫn trống; cách đọc chưa xác nhận chỉ vào ghi chú cho người kiểm hỏi khách.
-  const provinceHint = !recipient.province && place.match.status === "UNKNOWN" && place.match.hint ? `«${place.match.hint.abbreviation}» có thể là ${place.match.hint.district} (${place.match.hint.province.name})` : "";
+  const provinceHint = !recipient.province && place.match.status === "UNKNOWN" && place.match.hint ? `${place.match.hint.abbreviation ? `«${place.match.hint.abbreviation}» có thể là ` : "có thể "}${place.match.hint.district} (${place.match.hint.province.name})` : "";
   return { ok: true, p: { customer, recipient, stage: v.stage, note: v.note.trim(), channel: v.channel.trim(), orderDiscount: v.orderDiscount, totals: t.totals, variants, wardCandidates, provinceHint } };
 }
 

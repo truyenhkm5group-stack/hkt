@@ -43,11 +43,24 @@ export function testAddressNormalizePure() {
   // Cổ Nhuế 1 cũ chia ba ⇒ ba ứng viên, không phải hai.
   assert.equal(parseCustomerAddress("số 5 ngõ 12 cổ nhuế p cổ nhuế 1 q bắc từ liêm hn").candidates.length, 3);
 
-  // ② «875/4B trần hưng đạo f1q5» — f1q5 dính liền, không tỉnh ⇒ phường 1 quận 5 cũ chỉ có ở TP HCM, gộp trọn vào Chợ Quán.
+  // ② «875/4B trần hưng đạo f1q5» — f1q5 dính liền nhưng KHÔNG ghi tỉnh: căn cứ duy nhất của TP HCM là viết tắt ⇒ chưa biết tỉnh,
+  //    không tự điền, hỏi tỉnh (gợi ý quận 5 cũ ⇒ Chợ Quán đi kèm). Ghi «TP.HCM» ⇒ phường 1 quận 5 cũ gộp trọn vào Chợ Quán.
   const f1 = parseCustomerAddress("875/4B trần hưng đạo f1q5");
-  assert.deepEqual([f1.confidence, f1.province, f1.ward, f1.street, f1.houseNumber], ["UNIQUE_FROM_OLD", "Thành phố Hồ Chí Minh", "Phường Chợ Quán", "875/4B trần hưng đạo", "875/4B"]);
-  assert.equal(canAutoFill(f1), true);
-  assert.equal(addressQuestion(f1), null);
+  assert.deepEqual([f1.confidence, f1.province, f1.ward, f1.street, f1.houseNumber, f1.missing], ["NOT_FOUND", null, null, "875/4B trần hưng đạo", "875/4B", ["province", "ward"]], JSON.stringify(f1));
+  assert.deepEqual(f1.provinceHint, { province: "Thành phố Hồ Chí Minh", district: "Quận 5", abbreviation: "f1q5", wardCandidates: ["Phường Chợ Quán"] });
+  assert.equal(canAutoFill(f1), false);
+  assert.ok(addressQuestion(f1)!.includes("«f1q5»") && addressQuestion(f1)!.includes("quận 5"), addressQuestion(f1)!);
+  const f1Hcm = parseCustomerAddress("875/4B trần hưng đạo f1q5, TP.HCM");
+  assert.deepEqual([f1Hcm.confidence, f1Hcm.province, f1Hcm.ward], ["UNIQUE_FROM_OLD", "Thành phố Hồ Chí Minh", "Phường Chợ Quán"]);
+  assert.equal(addressQuestion(f1Hcm), null);
+  // Viết tắt LOẠI («q1», «tp») không ghi tỉnh ⇒ tên quận đọc ra chỉ là gợi ý, không phải căn cứ ghi tỉnh (review Tech Lead #802).
+  const q1 = parseCustomerAddress("12 Lê Lợi q1");
+  assert.deepEqual([q1.confidence, q1.province, q1.ward, q1.missing, q1.provinceHint?.province, q1.provinceHint?.district, q1.provinceHint?.abbreviation], ["NOT_FOUND", null, null, ["province", "ward"], "Thành phố Hồ Chí Minh", "Quận 1", null], JSON.stringify(q1));
+  assert.match(addressQuestion(q1)!, /quận 1 cũ ở Thành phố Hồ Chí Minh phải không/);
+  const vinh = parseCustomerAddress("Số 5 tp Vinh");
+  assert.deepEqual([vinh.confidence, vinh.province, vinh.missing, vinh.provinceHint?.province], ["NOT_FOUND", null, ["province", "ward"], "Tỉnh Nghệ An"], JSON.stringify(vinh));
+  // Gõ NGUYÊN CHỮ tên quận có loại chỉ một tỉnh có ⇒ suy tỉnh được (căn cứ là chữ khách gõ).
+  assert.deepEqual([parseCustomerAddress("12 Lê Lợi quận 1").province, parseCustomerAddress("12 Lê Lợi quận 1").provinceHint], ["Thành phố Hồ Chí Minh", null]);
   assert.equal(parseCustomerAddress("12 Lê Lợi, P. Bến Nghé, Q.1, TP.HCM").ward, "Phường Sài Gòn", "P. / Q. / TP.HCM");
 
   // ③ Ca thật «P13 GV» KHÔNG ghi tỉnh: thiếu TỈNH là phần thiếu chính (tên quận chỉ là hai chữ cái) ⇒ không tự điền tỉnh lẫn xã,
@@ -170,6 +183,12 @@ export async function testAddressNormalizeTools() {
   assert.equal(autoConfirmBlocker(ac, { lastUserText: "ok em", turn: 5 }), null, "xã mơ hồ, biết tỉnh ⇒ tự chốt kèm cờ (luật P0-A)");
   const acGv: ChatState = { ...ac, draft: { ...ac.draft!, recipient: { ...recipient, address: GO_VAP } } };
   assert.match(autoConfirmBlocker(acGv, { lastUserText: "ok em", turn: 5 }) ?? "", /tỉnh \/ thành/, "«P13 GV» không tỉnh ⇒ chưa tự chốt");
+  // Viết tắt loại / dính liền không ghi tỉnh cũng KHÔNG vượt cổng thiếu tỉnh của tự chốt (review Tech Lead #802: «12 Lê Lợi q1»).
+  for (const address of ["12 Lê Lợi q1", "Số 5 tp Vinh", "875/4B trần hưng đạo f1q5"]) {
+    const st: ChatState = { ...ac, draft: { ...ac.draft!, recipient: { ...recipient, address } } };
+    assert.match(autoConfirmBlocker(st, { lastUserText: "ok em", turn: 5 }) ?? "", /tỉnh \/ thành/, `${address}: chưa biết tỉnh ⇒ chưa tự chốt`);
+  }
+  assert.equal(autoConfirmBlocker({ ...ac, draft: { ...ac.draft!, recipient: { ...recipient, address: "12 Lê Lợi, Quận 1" } } }, { lastUserText: "ok em", turn: 5 }), null, "gõ nguyên «Quận 1» ⇒ biết tỉnh");
 
   // Ca KimThu Le «P13 GV» không ghi tỉnh: cổng chốt hỏi TỈNH (xác nhận cách đọc «GV» = quận Gò Vấp, TP HCM), không đưa danh sách phường.
   const gvRecipient = { ...recipient, address: GO_VAP };

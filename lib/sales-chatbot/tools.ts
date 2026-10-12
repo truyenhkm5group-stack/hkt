@@ -625,7 +625,12 @@ function addressAskPending(state: ChatState, chk: { key: string; view: AddressCh
   return unsure && Boolean(chk.view.ask_customer) && turn !== undefined && !(state.addressAsk?.key === chk.key && state.addressAsk.turn < turn);
 }
 
-/** Câu hỏi địa chỉ vừa được đưa cho bot ở lượt này ⇒ ghi mốc (lượt sau `confirm_order` biết khách đã được hỏi). */
+/**
+ * Câu hỏi địa chỉ vừa được đưa cho bot ở lượt này ⇒ ghi mốc (lượt sau `confirm_order` biết khách đã được hỏi).
+ * GIỚI HẠN ĐÃ BIẾT: mốc ghi lúc CÔNG CỤ trả `ask_customer`, không đối chiếu chữ bot thật sự gửi — công cụ chạy trước khi model soạn
+ * câu, và câu gửi đi còn qua bộ lọc / hàng rào khẳng định ở engine. Nếu model bỏ qua câu hỏi, lượt sau `confirm_order` vẫn cho chốt;
+ * lưới đỡ khi đó là cờ cần kiểm ADDRESS_UNRESOLVED của lõi đơn (ô xã trống ⇒ người kiểm hỏi lại), không phải cổng này.
+ */
 function markAddressAsked(state: ChatState, chk: { key: string; view: AddressCheckView }, turn: number | undefined) {
   if (!chk.view.ask_customer || turn === undefined) return;
   if (state.addressAsk?.key === chk.key && state.addressAsk.turn <= turn) return;
