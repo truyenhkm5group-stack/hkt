@@ -2354,3 +2354,4 @@
 {"at":"2026-10-13T11:29:51.000Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"gates-test-timeout","detail":"#830 @ 16fb61f0f060 → d6db837175a6 (MERGE_ISOLATED · HIGH · gates success)"}
 {"at":"2026-10-13T11:30:49.553Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DEPLOY_DISPATCHED","detail":"d6db837175a6 · run 38390694487 https://github.com/truyenhkm5group-stack/hkt/actions/runs/38390694487"}
 {"at":"2026-10-13T12:23:19.003Z","actor":"vm:hkt","kind":"LEASE_ACQUIRED","detail":"tech-lead"}
+{"at":"2026-10-13T12:23:37.658Z","actor":"vm:hkt","kind":"DUPLICATE_PREVENTED","detail":"Giá vốn giả định sửa trên BCLN không áp dụng; hợp nhất nguồn giá vốn kế hoạch/thực tế vốn,assumption,cogs,unit_cost · MISSION ai-cost-caps «Trần chi phí AI bán hàng: trần một lượt + đếm chat vào trần USD/ngày (Team Premium F10) — CHỜ chủ shop chốt con số» · khớp cost"}
