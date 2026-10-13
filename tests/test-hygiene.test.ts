@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
+import { moiTruongShell } from "./shell-locale";
 
 /**
  * ═══════════ BÀI KIỂM ĐO MÃ NGUỒN, KHÔNG ĐO CÁI MÁY ĐANG CHẠY (AGENTS.md mục 65) ═══════════
@@ -72,6 +73,39 @@ export function testDuongDanChuanHoa() {
   );
 }
 
+/* ═════════════ 2a · THỨ TỰ VĂN BẢN CỦA SHELL PHẢI GHIM TRONG MÃ ═════════════ */
+
+export function testShellGhimThuTuVanBan() {
+  /*
+    Nguồn môi trường thứ năm, cắn thật 13/10/2026: bài kiểm sao lưu để shell xếp danh sách tệp rồi
+    so với một mảng viết sẵn. Thứ tự ấy đi theo COLLATION của máy chạy — CI (C.UTF-8) so theo byte
+    nên dấu `-` (0x2D) đứng trước `/` (0x2F), còn Git Bash trên Windows (en_US.UTF-8) bỏ qua dấu
+    khi so nên cho thứ tự NGƯỢC LẠI. Cùng một commit: xanh ở CI, đỏ trên máy người viết. Và vì bài
+    đó NÉM lỗi, nó chặn luôn mọi bài chạy sau nó.
+
+    Ghim bằng `LC_ALL=C npm test` chỉ đúng cho người nhớ gõ — nên phép ghim phải nằm TRONG MÃ, ở
+    đúng chỗ bài kiểm dựng môi trường cho shell: `moiTruongShell()` (tests/shell-locale.ts).
+  */
+  const env = moiTruongShell();
+  assert.equal(env.LC_COLLATE, "C", "moiTruongShell() phải ghim collation — không ghim thì mọi lượt gọi shell đo máy chạy");
+  assert.equal(env.LC_ALL, undefined, "moiTruongShell() phải GỠ LC_ALL — người chạy có đặt nó thì nó đè LC_COLLATE và phép ghim thành vô nghĩa");
+
+  // Mẫu dựng TỪ CHUỖI để chính bài này không tự khớp với mẫu của mình.
+  const xepTheoLocale = new RegExp(["\\|\\s*sort\\b", "\\bls\\s+-1"].join("|"));
+  const pham: string[] = [];
+  for (const tep of tepKiemThu()) {
+    const ma = boChuThich(readFileSync(path.join(goc, tep), "utf8"));
+    if (!xepTheoLocale.test(ma)) continue;
+    if (ma.includes("moiTruongShell")) continue;
+    pham.push(tep);
+  }
+  assert.deepEqual(
+    pham,
+    [],
+    "bài kiểm nào để shell xếp danh sách tệp thì phải dựng môi trường bằng moiTruongShell() (tests/shell-locale.ts) — nếu không, cùng một commit cho hai kết luận trên Windows và Linux",
+  );
+}
+
 /* ═════════════ 2b · KHÔNG SO BẰNG VỚI MỘT MỐC ĐỌC LẠI ĐỒNG HỒ ═════════════ */
 
 export function testKhongSoBangMocDocLaiDongHo() {
@@ -116,6 +150,8 @@ export function testKhongSoBangMocDocLaiDongHo() {
 
 /** Miễn trừ — mỗi dòng nói RÕ vì sao đọc môi trường ở đó là đo MÃ NGUỒN chứ không đo máy. */
 const DOC_MOI_TRUONG_DA_KHAI: Record<string, string> = {
+  "tests/shell-locale.ts":
+    "ĐỌC process.env để KẾ THỪA môi trường của tiến trình rồi GHIM LC_COLLATE=C và GỠ LC_ALL — đây chính là chỗ bài kiểm thôi đo cái máy: không ghim thì `sort`/`ls` của shell xếp theo collation của từng máy và cùng một commit cho hai kết luận (đo thật 13/10/2026: backup.test.ts xanh ở CI, đỏ trên Git Bash Windows). Không một khẳng định nào rẽ nhánh theo giá trị đọc được.",
   "tests/migration-serve-compat.test.ts":
     "ĐẶT ORG_MIGRATE_SERVE_DEGRADED / ORG_MIGRATE_DEGRADED_RETRY_MS / ORG_MIGRATE_BACKOFF_MS = giá trị BỊA để kiểm công tắc tắt phục vụ lược đồ cũ và nhịp thử lại trong vài trăm mili giây thay vì 6 giờ — đó là ĐẦU VÀO của phép kiểm, trả lại nguyên trạng trong finally; kết luận không đổi theo máy.",
   "tests/org-migrate-isolation.test.ts":
@@ -561,6 +597,7 @@ export function testTestHygiene() {
   testKhongCoKyTuDieuKhienTrongMaNguon();
   testKetThucDongGhimLF();
   testDuongDanChuanHoa();
+  testShellGhimThuTuVanBan();
   testKhongSoBangMocDocLaiDongHo();
   testKhongReNhanhTheoMoiTruong();
   testCiChayHaiCheDo();
@@ -568,6 +605,6 @@ export function testTestHygiene() {
   testKhongDoiHangRaoLayMauXanh();
   testImportDongQuaFileUrl();
   console.log(
-    "✓ Vệ sinh bài kiểm (mục 65): không ký tự điều khiển lọt vào mã nguồn · LF ghim ở tầng kho · đường dẫn chuẩn hoá · không so BẰNG với mốc đọc lại đồng hồ · mọi bài đọc môi trường đều có lý do · CI chạy 2 chế độ bằng token GIẢ · thiếu công cụ thì nói CHƯA ĐO ĐƯỢC chứ không ✓ · hàng rào agent không bị đổi để lấy màu xanh · import() động đi qua file URL",
+    "✓ Vệ sinh bài kiểm (mục 65): không ký tự điều khiển lọt vào mã nguồn · LF ghim ở tầng kho · đường dẫn chuẩn hoá · thứ tự văn bản của shell ghim trong mã · không so BẰNG với mốc đọc lại đồng hồ · mọi bài đọc môi trường đều có lý do · CI chạy 2 chế độ bằng token GIẢ · thiếu công cụ thì nói CHƯA ĐO ĐƯỢC chứ không ✓ · hàng rào agent không bị đổi để lấy màu xanh · import() động đi qua file URL",
   );
 }
