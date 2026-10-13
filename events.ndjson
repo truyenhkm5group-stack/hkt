@@ -2307,3 +2307,4 @@
 {"at":"2026-10-13T05:37:55.386Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"postorder-release-batch","detail":"#824 @ 4f468cdecc12 → 89a20d7c496f (MERGE_ISOLATED · HIGH · gates success)"}
 {"at":"2026-10-13T05:50:25.461Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DEPLOY_DISPATCHED","detail":"89a20d7c496f · run 38353433315 https://github.com/truyenhkm5group-stack/hkt/actions/runs/38353433315"}
 {"at":"2026-10-13T06:29:18.151Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"inbox-perf-probe-topn","detail":"fix/inbox-perf-probe-topn @ 73449b810f3d · 1 lệnh kiểm thử"}
+{"at":"2026-10-13T06:29:34.485Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#826 @ 89a20d7c496f · + allowlist probe chỉ đọc trong bài kiểm cột 0245"}
