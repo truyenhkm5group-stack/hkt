@@ -30,6 +30,24 @@ hai nhánh PR chưa có #830 nên vẫn chạy trần cũ. Không ai đọc kỹ
 - `fix/inbox-list-perf` ff284930 → **99013db1** (đẩy 13:02Z)
 Cổng 45′ đang chạy trên cả hai.
 
+**CẬP NHẬT 13:55Z — CỔNG ĐÃ XANH HOÀN TOÀN, HAI PR SẴN SÀNG GỘP.** Cả bốn nhánh cổng + job gom `gates` ĐẠT trên
+`99013db1` (#827) và `c9d33af4` (#831) — run 38403175630. `npm run ai -- queue` xếp **MERGE_NOW · cùng MỘT lô ·
+một lượt deploy cho cả lô** (kèm #832 đang chờ trên main).
+
+**AI GỘP ĐƯỢC:** phiên Max — khoá `integration-lead` được gia hạn lúc 13:42Z (đời 6, tới 14:42Z) nên Max VẪN SỐNG;
+phiên Team KHÔNG có khoá và KHÔNG có token GitHub (`GITHUB_TOKEN`/`GH_TOKEN` đều trống, máy không có `gh`), nên
+Team không gộp/deploy được và cũng KHÔNG chép credential sang (luật bàn giao). Team dừng đúng ở ranh giới này.
+Lệnh cho người cầm khoá: `merge 827 --sha=99013db136b7a25a9a2254bd93c059cc3debc42e` → `merge 831 --sha=c9d33af4e898c2565f03e2342f09786c351463a7`
+→ `deploy-plan` → MỘT lượt deploy → `verify`.
+
+**CẢNH BÁO §65 — QUẢ BOM THỨ BA, CHƯA SỬA:** `tests/backup.test.ts:1095` chạy `find . -type f | sort` KHÔNG ghim
+locale. CI (`LANG=C.UTF-8`) xếp `./orgs-last-hourly.json` TRƯỚC `./orgs/erp_org_alpha/…`; máy Windows dev
+(`LANG=en_US.UTF-8`) xếp NGƯỢC LẠI (collation UTF-8 bỏ qua `-` và `/`) ⇒ khẳng định dòng 1598 ĐỎ trên máy dev,
+XANH ở CI. Bài kiểm NÉM LỖI nên chặn cả phần sau — không phiên nào trên Windows chạy được `npm test` tới các bài
+hộp thư. Sửa đúng chỗ: ghim `LC_ALL=C` trong chính dòng lệnh của bài kiểm (KHÔNG vá từng khẳng định), và cân nhắc
+thêm locale vào `tests/test-hygiene.test.ts` như nguồn môi trường thứ năm. CHƯA SỬA vì tệp nằm trong phạm vi
+PR #814 đang mở ⇒ phải khai phạm vi với sổ trước.
+
 ### BƯỚC KẾ (Team)
 1. Cổng xanh ⇒ `handoff` LẠI đúng SHA mới cho cả hai sứ mệnh (nhánh đã đi tiếp sau bàn giao).
 2. Lấy `lease acquire integration-lead` SAU 13:22:24Z.
