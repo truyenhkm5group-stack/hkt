@@ -159,9 +159,11 @@ export async function testMarketerPriceQueries(db: Db) {
       đang đo (AGENTS.md mục 50) — dòng hạ giá 15/10/2027 chỉ thành giá hiện tại khi đồng hồ tới ngày đó.
       Phía MKT vẫn chịu giá báo theo NGÀY LÊN ĐƠN như cũ.
     */
-    const bayGio = Date.now();
-    const giaHienTai = bayGio >= d("2027-10-15").getTime() ? 120_000 : 150_000;
-    const giaHienTai2 = bayGio >= d("2027-10-01").getTime() ? 200_000 : 80_000;
+    // MỘT phép chọn cho mọi thời điểm (không rẽ nhánh tay theo ngày): dòng giá báo mới nhất đã tới hiệu lực lúc
+    // chạy, không có thì giá phiếu nhập — đúng bậc thang của `current-marketer-cost.ts`.
+    const hienTai = (dong: { price: number; from: string }[], phieu: number) => dong.filter((x) => d(x.from).getTime() <= Date.now()).sort((a, b) => d(b.from).getTime() - d(a.from).getTime())[0]?.price ?? phieu;
+    const giaHienTai = hienTai([{ price: 150_000, from: "2026-07-01" }, { price: 120_000, from: "2027-10-15" }], 100_000);
+    const giaHienTai2 = hienTai([{ price: 200_000, from: "2027-10-01" }], 80_000);
     const sau = await getMarketerReport(THANG10, "profit1");
     const dong = sau.products.find((p) => p.productId === "mpk-prod");
     assert.equal(dong?.cogsDelivered, 3 * giaHienTai, "giá vốn CỦA MÃ (shop) = giá báo MKT HIỆN TẠI × 3 (chủ shop chốt 13/10/2026)");

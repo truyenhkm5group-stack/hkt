@@ -53,9 +53,9 @@ deploy dừng, không phải cảnh báo.
 12. Khách cũ mua lại: chỉ **gợi ý** SĐT/địa chỉ cũ, không tự điền vào đơn.
 13. Giá vốn tính "sống": **GIÁ BÁO MKT ĐANG HIỆU LỰC HÔM NAY** của mã (chủ shop chốt 13/10/2026 —
     áp cho MỌI đơn ở MỌI báo cáo, kể cả đơn cũ; giá báo 0 ₫ = chưa định giá) → phiếu nhập ERP gần nhất →
-    giá vốn Pancake → giá nhập mẫu mã. Một khối SQL duy nhất: `lib/queries/current-marketer-cost.ts`. Đơn mà
-    mọi dòng có giá báo mang căn cứ `MARKETER_PRICE` và KHÔNG đóng băng giá vốn ghi nhận (đổi giá báo ⇒
-    dựng lại giá vốn mọi đơn của mã); kỳ đã chốt vẫn đọc ảnh chụp. Giá vốn KẾ HOẠCH (Trung tâm giá vốn,
+    giá vốn Pancake → giá nhập mẫu mã. Một khối SQL duy nhất: `lib/queries/current-marketer-cost.ts`. Đơn có
+    ít nhất một dòng có giá báo mang căn cứ `MARKETER_PRICE` và KHÔNG đóng băng giá vốn ghi nhận (đổi giá báo ⇒
+    dựng lại giá vốn mọi đơn của mã); ảnh chụp kỳ đã chốt không đổi, nhưng quyết toán lương M+2 đọc số hôm nay. Giá vốn KẾ HOẠCH (Trung tâm giá vốn,
     `docs/cost-center.md`) là thứ khác: chỉ BCLN chế độ kế hoạch / tạm tính đọc nó. **Đơn giá
     trên phiếu NHẬP HÀNG MỚI = giá báo MKT của mã theo ngày nhập** (chủ shop chốt 25/09/2026 — kho
     không nhập giá; `lib/inventory/receipt-pricing.ts`). Mã chưa có giá báo ⇒ dòng ghi 0 = CHƯA BIẾT.

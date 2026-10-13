@@ -80,19 +80,23 @@ export async function rematerializeOutcomes(orderIds?: string[]): Promise<{ rows
   /*
     ─── 13/10/2026: GIÁ BÁO MKT HIỆN TẠI ĐỨNG TRÊN CÙNG (chủ shop chốt "giá vốn thực tế = giá báo MKT
     hiện tại cho mọi đơn") ───
-    Dòng có giá báo đang hiệu lực mang hạng 4 (`MARKETER_PRICE`). Cả đơn chỉ mang căn cứ ấy khi MỌI dòng
-    có giá báo (căn cứ cả đơn = mắt xích yếu nhất, như cũ). Đơn mang `MARKETER_PRICE` KHÔNG đóng băng:
+    Dòng có giá báo đang hiệu lực mang hạng 4 (`MARKETER_PRICE`). Cả đơn mang căn cứ ấy khi CÓ ÍT NHẤT MỘT
+    dòng có giá báo — các dòng còn lại vẫn lấy bậc thang chứng từ của chúng trong cùng con số, nên nhãn
+    `MARKETER_PRICE` nghĩa là "giá vốn đơn này đi theo giá báo hiện tại", không phải "mọi dòng đều có
+    giá báo" (docs/cost-center.md mục 5). Đơn mang `MARKETER_PRICE` KHÔNG đóng băng:
     giá báo đổi thì giá vốn ghi nhận đi theo (xem nhánh `GIA_BAO_SONG` ở lượt upsert) — đúng điều chủ
     shop chọn. Đơn chưa đủ giá báo giữ nguyên luật đóng băng 11/09/2026.
   */
   const COST_FACTS = sql`(
     select
+      -- CHỈ CẦN MỘT dòng có giá báo là cả đơn đi theo giá báo hiện tại (không đóng băng): chủ shop chốt
+      -- "mọi đơn" — đơn nhiều mã mà một mã có giá báo cũng phải đổi khi giá báo đổi (review 13/10/2026).
+      case when bool_or(l.mkt_cost is not null) then 4 else
       coalesce(min(case
-        when l.mkt_cost is not null then 4
         when l.before_cost is not null then 3
         when l.after_cost is not null then 2
         when l.provisional is not null then 1
-        else 0 end), 0) as rank,
+        else 0 end), 0) end as rank,
       sum(l.quantity * coalesce(l.mkt_cost, l.before_cost, l.after_cost, l.provisional))::bigint as cost
     from (
       select oi.quantity,
@@ -304,6 +308,12 @@ export async function rematerializeStale(limit = 2000): Promise<{ rebuilt: numbe
          where oi3.order_id = o.id
            and (mp.created_at > m.computed_at or (mp.effective_from > m.computed_at and mp.effective_from <= now()))
        )
+       -- Don dang mang can cu gia bao ma KHONG con dong nao co gia bao hien tai (gia bao bi xoa / ve 0):
+       -- phai dung lai de tro ve bac chung tu kho.
+       or (m.cogs_basis = 'MARKETER_PRICE' and not exists (
+         select 1 from order_items oi4 left join product_variants pv4 on pv4.id = oi4.variant_id
+         where oi4.order_id = o.id and ${rawCurrentMarketerCost("coalesce(pv4.product_id, oi4.product_id)")} is not null
+       ))
        -- Sua dong hang cua don (so luong, mau ma, gia von Pancake) cung doi gia von ca don.
        or exists (select 1 from order_items oi2 where oi2.order_id = o.id and o.updated_at > m.computed_at)
        -- DON DA GIAO MA CHUA CHOT GIA VON: dong duoc ghi TRUOC ban P0.4 khong co recognized_cogs.

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { schema, type Db } from "@/db";
 import { clearMemo } from "@/lib/cache";
 import {
@@ -242,6 +242,21 @@ export async function testCostCenter(db: Db) {
     }
     await dungLai(PID);
     assert.equal((await ghiNhan())?.basis, "MARKETER_PRICE", "có 0246 ⇒ luật giá báo áp lại ở lượt dựng kế tiếp");
+    // Đường ghi hàng hoàn huỷ bỏ hỏi CÙNG hàm trước khi ghi căn cứ MARKETER_PRICE (lib/returns/disposition.ts).
+    const { constraintAllowsMarketerPrice } = await import("@/lib/queries/current-marketer-cost");
+    const RD_CU = `check (("disposition" = 'WRITE_OFF' or ("unit_cost_estimate" is null and "value_estimate" is null and "cost_basis" is null)) and ("value_estimate" is null or "value_estimate" >= 0) and ("cost_basis" is null or "cost_basis" in ('RECEIPT', 'ORDER_SNAPSHOT', 'VARIANT_DEFAULT', 'UNKNOWN'))) not valid`;
+    const RD_MOI = RD_CU.replace("('RECEIPT',", "('MARKETER_PRICE', 'RECEIPT',");
+    const datRd = async (dn: string) => {
+      await db.execute(sql.raw(`alter table "return_dispositions" drop constraint if exists "return_dispositions_value_check"`));
+      await db.execute(sql.raw(`alter table "return_dispositions" add constraint "return_dispositions_value_check" ${dn}`));
+    };
+    assert.equal(await constraintAllowsMarketerPrice(db, "return_dispositions_value_check"), true, "có 0246 ⇒ hàng hoàn được ghi căn cứ giá báo");
+    await datRd(RD_CU);
+    try {
+      assert.equal(await constraintAllowsMarketerPrice(db, "return_dispositions_value_check"), false, "lược đồ cũ ⇒ đường ghi hàng hoàn lùi về bậc cũ");
+    } finally {
+      await datRd(RD_MOI);
+    }
 
     // MKT hạ giá báo từ nửa giờ trước ⇒ giá vốn MỌI đơn của mã (kể cả đơn đã giao) đi theo — KHÔNG đóng băng.
     await db.insert(schema.marketerPrices).values({ productId: PID, productCode: "GVTT-Q004", price: 170_000, effectiveFrom: gio(0.5), reason: "đổi giá", setBy: "mkt@kiem" });
@@ -250,6 +265,20 @@ export async function testCostCenter(db: Db) {
     await dungLai(PID);
     clearMemo();
     assert.deepEqual(await ghiNhan(), { basis: "MARKETER_PRICE", cogs: 170_000 }, "giá báo đổi ⇒ giá vốn ghi nhận đổi theo; dòng hiệu lực tương lai chưa áp");
+    // ĐƠN HỖN HỢP: một dòng có giá báo + một dòng chỉ có phiếu nhập ⇒ cả đơn vẫn đi theo giá báo (không đóng băng).
+    await db.insert(schema.products).values({ id: `${P}mix`, name: "Phụ kiện kiểm", customId: "GVTT-MIX" }).onConflictDoNothing();
+    await db.insert(schema.productVariants).values({ id: `${P}mix-v`, productId: `${P}mix`, sku: "GVTT-MIX-1", retailPrice: 99_000 }).onConflictDoNothing();
+    const [phieuMix] = await db.insert(schema.stockReceipts).values({ kind: "RECEIPT", receivedAt: gio(24 * 20), reference: `${P}mix`, totalQuantity: 10, totalCost: 500_000, createdBy: "test" }).returning({ id: schema.stockReceipts.id });
+    await db.insert(schema.stockReceiptItems).values({ receiptId: phieuMix.id, variantId: `${P}mix-v`, quantity: 10, unitCost: 50_000 });
+    await db.insert(schema.orderItems).values({ id: `${P}i-d0-mix`, orderId: `${P}o-d0`, variantId: `${P}mix-v`, productId: `${P}mix`, sku: `${P}mix-v`, productName: "Phụ kiện kiểm", variationDetail: "-", quantity: 1, lineTotal: 99_000, unitCost: 0, isBonus: false });
+    await dungLai(PID);
+    assert.deepEqual(await ghiNhan(), { basis: "MARKETER_PRICE", cogs: 170_000 + 50_000 }, "đơn hỗn hợp: giá báo + phiếu nhập trong cùng con số, căn cứ MARKETER_PRICE");
+    await db.update(schema.marketerPrices).set({ price: 165_000 }).where(and(eq(schema.marketerPrices.productId, PID), eq(schema.marketerPrices.price, 170_000)));
+    await dungLai(PID);
+    assert.deepEqual(await ghiNhan(), { basis: "MARKETER_PRICE", cogs: 165_000 + 50_000 }, "đơn hỗn hợp KHÔNG đóng băng: giá báo đổi ⇒ giá vốn ghi nhận đổi");
+    await db.delete(schema.orderItems).where(eq(schema.orderItems.id, `${P}i-d0-mix`));
+    await db.update(schema.marketerPrices).set({ price: 170_000 }).where(and(eq(schema.marketerPrices.productId, PID), eq(schema.marketerPrices.price, 165_000)));
+    await dungLai(PID);
     assert.equal((await lay("ACTUAL")).expectedCogs, Math.round(tt4.expectedQty * 170_000));
     // Dòng giá báo đang hiệu lực là 0 ₫ = "chưa định giá" ⇒ lùi về phiếu nhập gần nhất, KHÔNG thành giá vốn 0.
     await db.insert(schema.marketerPrices).values({ productId: PID, productCode: "GVTT-Q004", price: 0, effectiveFrom: gio(0.25), reason: "chưa định giá", setBy: "mkt@kiem" });
@@ -281,8 +310,8 @@ export async function testCostCenter(db: Db) {
       await db.delete(schema.stockReceiptItems).where(inArray(schema.stockReceiptItems.receiptId, phieu.map((x) => x.id)));
       await db.delete(schema.stockReceipts).where(inArray(schema.stockReceipts.id, phieu.map((x) => x.id)));
     }
-    await db.delete(schema.productVariants).where(eq(schema.productVariants.id, VID));
-    await db.delete(schema.products).where(eq(schema.products.id, PID));
+    await db.delete(schema.productVariants).where(inArray(schema.productVariants.id, [VID, `${P}mix-v`]));
+    await db.delete(schema.products).where(inArray(schema.products.id, [PID, `${P}mix`]));
     await db.delete(schema.settings).where(eq(schema.settings.key, ESTIMATED_COST_KEY));
     clearMemo();
   }

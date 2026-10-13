@@ -6,6 +6,7 @@ import { memo, periodKey } from "@/lib/cache";
 import { DEFAULT_PROFIT_ASSUMPTIONS, fixedCostForPeriod, manualShipFee, opsCosts, periodMonths, PROFIT_ASSUMPTIONS_KEY, rescuedFromRate, resolveShipFees, type ProfitAssumptions, type ShipFeeSource } from "@/lib/constants/profit";
 import { ORDER_OUTCOME_FAST, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
 import { LINE_UNIT_COST } from "@/lib/queries/cogs";
+import { VARIANT_CURRENT_MARKETER_COST } from "@/lib/queries/current-marketer-cost";
 import { LINE_MARKETER_PRICE } from "@/lib/queries/marketer-price";
 import type { Period } from "@/lib/search-params";
 import { getSettingJson } from "@/lib/settings";
@@ -709,7 +710,8 @@ async function stockByProduct(): Promise<Map<string, StockSnapshot>> {
   const rows = await chayKhongJit(db, (tx) => {
     const salesAgg = variantSalesSubquery(tx);
     const receiptsAgg = variantReceiptsSubquery(tx);
-    const unitCost = sql<number>`coalesce(nullif(${LAST_RECEIPT_COST}, 0), ${pv.lastImportedPrice}, 0)`;
+    // Giá trị tồn theo CÙNG bậc thang giá vốn (giá báo MKT hiện tại đứng đầu — luật 13, 13/10/2026), như trang Sản phẩm.
+    const unitCost = sql<number>`coalesce(${VARIANT_CURRENT_MARKETER_COST}, nullif(${LAST_RECEIPT_COST}, 0), ${pv.lastImportedPrice}, 0)`;
     return tx
       .select({
         productId: pv.productId,

@@ -70,10 +70,15 @@ Quyền: xem `reports:nominal`; sửa `reports:assumptions` (như ô cũ).
    cáo, kế hoạch SX, giá trị tồn theo mẫu mã, hàng hoàn…). Một khối SQL: `lib/queries/current-marketer-cost.ts`,
    đứng đầu `LINE_UNIT_COST` · `lineUnitCost` · `ORDER_COGS` · giá vốn ghi nhận lúc giao. Mã chưa khai giá
    báo (hoặc giá báo đang hiệu lực = 0 ₫) lùi về phiếu nhập gần nhất → Pancake → giá nhập mẫu mã.
-   - Đơn có giá báo ở MỌI dòng mang căn cứ `MARKETER_PRICE` và KHÔNG đóng băng giá vốn ghi nhận: MKT đổi
-     giá báo ⇒ `rematerializeProductOrders` dựng lại giá vốn mọi đơn của mã ngay khi lưu; lượt job
-     `rematerializeStale` bắt dòng giá báo vừa tới ngày hiệu lực. Đơn chưa đủ giá báo giữ luật đóng băng 11/09/2026.
-   - Kỳ ĐÃ CHỐT (lương khoá, review FINAL) đọc ảnh chụp — không đổi.
+   - Đơn có ÍT NHẤT MỘT dòng có giá báo mang căn cứ `MARKETER_PRICE` (các dòng khác vẫn lấy bậc chứng từ
+     trong cùng con số) và KHÔNG đóng băng giá vốn ghi nhận: MKT lưu / sửa / xoá giá báo ⇒
+     `rematerializeProductOrders` dựng lại giá vốn mọi đơn của mã ngay (nhật ký gộp
+     `MARKETER_PRICE_COGS_REBUILD`); lỗi giữa chừng thì job `rematerializeStale` bắt lại (dấu `created_at` mới,
+     căn cứ giá báo mồ côi, dòng giá vừa tới ngày hiệu lực). Đơn không có dòng nào có giá báo giữ luật đóng băng 11/09/2026.
+   - Ảnh chụp kỳ ĐÃ CHỐT (lương khoá, review FINAL) không đổi. **NHƯNG** lượt quyết toán lương tự động (tháng
+     M+2 tính lại kỳ M bằng tỷ lệ đã chốt, luật 71) đọc số HÔM NAY — MKT đổi giá báo trong khoảng đó thì máy
+     sinh dòng "Quyết toán … truy thu / truy lĩnh" cho phần lợi nhuận đổi theo giá báo. Chờ chủ shop quyết có
+     giữ hệ quả này không.
 2. **Phiếu nhập giữ luật 13**: đơn giá phiếu nhập mới = giá báo MKT theo ngày nhập.
 3. Giá vốn KẾ HOẠCH vẫn sửa / áp dụng được ở Trung tâm giá vốn và nút bút BCLN để xem kịch bản (chế độ
    "Giá vốn kế hoạch").

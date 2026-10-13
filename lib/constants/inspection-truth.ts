@@ -140,7 +140,7 @@ export const COST_BASIS_LABEL: Record<CostBasis, string> = {
   UNKNOWN: "Chưa biết",
 };
 
-/** Bậc nào là chứng từ kho thật — chỉ bậc này mới gọi là "đo được". */
+/** Bậc nào gọi là "đo được": chứng từ kho thật, và giá báo MKT hiện tại — con số đã KHAI, chủ shop chốt là giá vốn thực tế (13/10/2026). */
 export const COST_BASIS_IS_AUTHORITATIVE: Record<CostBasis, boolean> = {
   // Chủ shop chốt 13/10/2026: giá báo MKT hiện tại LÀ giá vốn thực tế — con số đã khai, có người đặt.
   MARKETER_PRICE: true,

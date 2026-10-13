@@ -202,7 +202,10 @@ export async function setReturnDispositionCore(db: Db, input: SetDispositionInpu
   // ── Giá trị ƯỚC TÍNH của huỷ bỏ (chụp lại lúc huỷ) ──
   let cost: { unitCost: number | null; basis: CostBasis } | null = null;
   if (input.disposition === "WRITE_OFF") {
-    cost = variantId ? (subject.variantId === variantId ? { unitCost: subject.unitCost, basis: subject.costBasis } : await unitCostEstimate(db, variantId, subject.orderId)) : { unitCost: null, basis: "UNKNOWN" };
+    // Giá chụp từ hàng đợi mang căn cứ MARKETER_PRICE mà CSDL chưa có 0246 (đang phục vụ bằng lược đồ cũ) ⇒ tính lại qua
+    // `unitCostEstimate` (nó hỏi ràng buộc) thay vì để CHECK cũ từ chối lượt ghi.
+    const dungGiaHangDoi = subject.variantId === variantId && (subject.costBasis !== "MARKETER_PRICE" || (await constraintAllowsMarketerPrice(db, "return_dispositions_value_check")));
+    cost = variantId ? (dungGiaHangDoi ? { unitCost: subject.unitCost, basis: subject.costBasis } : await unitCostEstimate(db, variantId, subject.orderId)) : { unitCost: null, basis: "UNKNOWN" };
     const giaTri = cost.unitCost === null ? null : cost.unitCost * kiem.qty;
     const cong = await input.gate({
       group: WRITE_OFF_APPROVAL_GROUP,
