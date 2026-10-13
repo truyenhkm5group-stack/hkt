@@ -10,7 +10,7 @@ import { renderSystemPrompt } from "./prompt.js";
 import { settings } from "./settings.js";
 import { adBots } from "./adbots.js";
 import { extractAdIds, adBotPromptBlock, testImageRefs } from "./adpersona.js";
-import { orderSync, describeOrder, phonesInText, norm } from "./orders.js";
+import { orderSync, describeOrder, phonesInText, norm, blockedCodesFor } from "./orders.js";
 import { OrderBot } from "./orderbot.js";
 import { identifyProduct } from "./vision.js";
 import { transcribeVoiceMessages, voiceLabel, isAudioAttachment, hasCustomerVoice, VOICE_PROMPT_HINT } from "./voice.js";
@@ -2050,6 +2050,16 @@ ${Xung} lấy màu nào để em lên đơn cho mình ạ?`;
       store.bumpStat(pageId, "materialGuard");
       const r5 = await generateReply(systemPrompt + `\n\n## CẢNH BÁO TỪ HỆ THỐNG\nCâu trả lời vừa rồi nói chất liệu Rayon — SAI. Mẫu của page này là chất liệu **${chatLieu}**. Viết lại, nói đúng chất liệu ${chatLieu} (hoặc bỏ câu chất liệu), giữ nguyên các ý khác.`, history, { model: eff.model, temperature: 0.2 }).catch(() => null);
       if (r5?.text && !/rayon/i.test(r5.text) && !this.findDisallowedPrices(r5.text, systemPrompt).length) reply = r5.text;
+    }
+    // Page KHONG ban ma nay (AURA ban dam nhung, khong phai Q005 — chu shop 13/10/2026): cau tra loi nhac ma do -> viet lai
+    const maCam = blockedCodesFor([this.pageNames.get(pageId), this.pancakeNames?.get(pageId)]).filter((c) => new RegExp(`\\b${c}\\b`, "i").test(reply));
+    if (maCam.length) {
+      log.warn(`[${pageId}] ${conversationId}: tra loi nhac ma ${maCam.join(", ")} ma page khong ban -> viet lai`);
+      store.bumpStat(pageId, "blockedCodeGuard");
+      const r6 = await generateReply(systemPrompt + `\n\n## CẢNH BÁO TỪ HỆ THỐNG\nPage này KHÔNG bán mẫu ${maCam.join(", ")}. Câu trả lời vừa rồi nhắc mã đó — SAI. Viết lại: nói về mẫu đầm của page (theo ảnh và hướng dẫn riêng), KHÔNG ghi mã ${maCam.join(", ")}, giữ nguyên màu/size/thông tin khách đã cho.`, history, { model: eff.model, temperature: 0.2 }).catch(() => null);
+      if (r6?.text && !maCam.some((c) => new RegExp(`\\b${c}\\b`, "i").test(r6.text)) && !this.findDisallowedPrices(r6.text, systemPrompt).length) reply = r6.text;
+      // Viet lai van nhac ma -> bo han ma khoi cau ("Đầm Q005 màu Đỏ" -> "Đầm màu Đỏ"): thieu ma con hon sai ma
+      else for (const c of maCam) reply = reply.replace(new RegExp(`\\s*\\b${c}\\b`, "gi"), "");
     }
     // Chan bot NEU NHAM MA MAU (vd page chu luc Q002 ma bot chot "Dam Q004")
     let maLa = this.wrongModelInReply(reply, pageId, messages, maNhanDien);

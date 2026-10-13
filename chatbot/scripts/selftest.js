@@ -2230,16 +2230,22 @@ console.log("OK 18: doi chieu dia chi don POS -> bat don chon nham xa, bo qua tr
   console.log("OK 52: quet lai page kiem lai ca don nhap chua xac nhan, khong dung don da xac nhan / da bo qua / ngoai ky");
 }
 
-// ---- 53: page AURA chi ban dam NHUNG — mau chu luc chon theo chu (dung MOT mau), bot khong noi chat lieu Rayon
+// ---- 53: page AURA ban dam NHUNG, khong phai Q005 (chu shop 13/10/2026) — chan ma Q005, khong noi chat lieu Rayon
 {
   const { materialIn } = await import("../src/bot.js");
-  const { uniqueProductCode } = await import("../src/orderbot.js");
+  const { blockedCodesFor } = await import("../src/orders.js");
   assert.equal(materialIn("Đầm nhung đỏ đô cổ tim"), "nhung");
   assert.equal(materialIn("Dạ chị ơi những mẫu này lên form đẹp"), null, "những / Dạ / lên khong phai chat lieu");
-  const re = /(^|[^\p{L}])nhung(?=$|[^\p{L}])/iu;
-  assert.equal(uniqueProductCode([{ code: "q009", name: "Đầm nhung xếp ly" }, { code: "Q002", name: "Đầm những ngày hè" }], re), "Q009");
-  assert.equal(uniqueProductCode([{ code: "A", name: "Đầm nhung" }, { code: "B", name: "Váy nhung" }], re), null, "2 mau khop -> khong doan");
-  assert.equal(uniqueProductCode([{ code: "A", name: "Đầm voan" }], re), null);
+  assert.deepEqual(blockedCodesFor(["AURA - Thời Trang Nữ Cao Cấp"]), ["Q005"], "page AURA khong ban Q005");
+  assert.deepEqual(blockedCodesFor(["Linh Tây Luxury CS1"]), [], "page khac khong bi chan");
+  // Mau chu luc dang la Q005 tren page AURA -> bo (mot lan)
+  bot.pageNames.set("PAURA", "AURA - Thời Trang Nữ Cao Cấp");
+  settings.update("PAURA", { defaultProduct: "Q005" });
+  bot.orderBot._save = () => {};
+  bot.orderBot.seedDefaultProducts();
+  assert.equal(String(settings.get("PAURA").defaultProduct || ""), "", "page AURA bo mau chu luc Q005");
+  bot.pageNames.delete("PAURA");
+  delete bot.orderBot._save;
   const prev = catalog.products;
   const cu = settings.get("PAGE1").defaultProduct;
   catalog.setProducts([{ id: "n1", code: "Q009", name: "Đầm nhung đỏ đô", note: "", price: { min: 499000, max: 499000 }, attributes: { "Màu": ["Đỏ đô"] }, variations: [], images: [] }]);
@@ -2251,7 +2257,7 @@ console.log("OK 18: doi chieu dia chi don POS -> bat don chon nham xa, bo qua tr
   assert.equal(bot.pageProductBlock("PAGE1"), "", "page khong co mau chu luc -> khong them khoi");
   settings.update("PAGE1", { defaultProduct: cu || "" });
   catalog.setProducts(prev);
-  console.log("OK 53: mau chu luc chon theo chu chi khi dung mot mau; page ban dam nhung khong noi chat lieu Rayon");
+  console.log("OK 53: page AURA khong ban Q005 (bot khong len don / khong nhac ma); mau nhung khong noi chat lieu Rayon");
 }
 
 console.log("\nTAT CA TEST PASS");
