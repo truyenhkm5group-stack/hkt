@@ -148,13 +148,13 @@ export function CostSheets({
     });
   };
 
-  // ĐƯỜNG DUY NHẤT sang giá ước tính của BCLN: `setEstimatedCost` có sẵn (quyền reports:assumptions).
+  // ĐƯỜNG DUY NHẤT sang giá vốn KẾ HOẠCH (Trung tâm giá vốn): `setEstimatedCost` → `setPlannedCosts` (quyền reports:assumptions). Chỉ bảng ĐÃ CHỐT.
   const dungLamGiaUocTinh = (s: CostSheetView) => {
     if (!productId || estimateBlocker(s)) return;
     start(async () => {
       const r = await setEstimatedCost({ productId, unitCost: s.totalUnitCost, reason: `Bảng giá thành V${s.version} đã chốt${s.finalizedBy ? ` bởi ${s.finalizedBy}` : ""} (sản xuất · topic/giá thành)` });
       if ("error" in r) toast.error(r.error);
-      else toast.success(`Đã đặt giá vốn dự tính ${formatVND(s.totalUnitCost)}/sp cho báo cáo lợi nhuận danh nghĩa`);
+      else toast.success(`Đã đặt giá vốn KẾ HOẠCH ${formatVND(s.totalUnitCost)}/sp — cùng một con số ở Trung tâm giá vốn và BCLN`);
     });
   };
 
@@ -239,7 +239,7 @@ export function CostSheets({
                           title={estimateBlocker(s) ?? (productId ? "Ghi tổng này làm giá vốn dự tính (Báo cáo lợi nhuận danh nghĩa) qua đúng đường đặt giá dự tính có sẵn" : "Mẫu chưa có sản phẩm Pancake — chưa có mã hàng để đặt giá dự tính")}
                           onClick={() => dungLamGiaUocTinh(s)}
                         >
-                          <Tag className="size-3.5" /> Dùng làm giá ước tính
+                          <Tag className="size-3.5" /> Dùng làm giá kế hoạch
                         </Button>
                       ) : null}
                     </div>

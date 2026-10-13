@@ -124,9 +124,10 @@ export function AdsCeilingTable({
             vận hành cố định chia cho nhiều đơn hơn nên trần thật nhích lên chút ít — con số nghiêng về phía thận trọng.
           </p>
           <p className="mt-2">
-            <b>Giá vốn dự tính</b> chỉ lấp sản phẩm KHÔNG có phiếu nhập / giá Pancake, và tự đứng sang một bên khi mã có giá thật. Chỉ
-            tab này dùng nó: bảng lương, báo cáo marketer ở trang Quảng cáo, dòng tiền thực và sổ kho vẫn coi sản phẩm đó là chưa biết
-            giá vốn. <b>Đặt GTC</b> dùng đúng ô ghi đè của bảng “Mã mới” — một kênh, không có bản thứ hai.
+            <b>Giá vốn kế hoạch</b> (nút bút) ghi vào ĐÚNG Trung tâm giá vốn — không có giá thứ hai. Chế độ <b>thực tế</b> chỉ dùng nó lấp
+            sản phẩm KHÔNG có phiếu nhập / giá Pancake (nhãn “tạm tính”); chế độ <b>kế hoạch</b> tính toàn bộ mã theo nó. Giá báo MKT chỉ là
+            tham chiếu lùi cho mã chưa đặt kế hoạch, không bao giờ đè con số đã đặt. Bảng lương, dòng tiền thực và sổ kho không đọc giá kế
+            hoạch. <b>Đặt GTC</b> dùng đúng ô ghi đè của bảng “Mã mới” — một kênh, không có bản thứ hai.
           </p>
         </>
       }
@@ -153,16 +154,14 @@ export function AdsCeilingTable({
             {rows.map((r) => {
               const c = tinh(r, r.orders);
               const gv = giaVonMoiSp(r);
-              // Ô đặt giá dự tính hiện khi mã có hàng BÁN RA chưa biết giá vốn, HOẶC phiếu nhập trong kỳ thiếu
-              // đơn giá — giá dự tính định giá cả phần đó ở bảng "LN theo hàng nhập" (chủ shop chốt 25/09/2026).
-              const coCho = r.cogsUnknownQty > 0 || r.purchaseUnpricedQty > 0;
               /*
-                GIÁ DỰ TÍNH ĐẾN TỪ GIÁ BÁO MKT (luật 5, chủ shop chốt 26/09/2026): ô đặt tay KHÔNG hiện, vì con
-                số gõ ở đây sẽ bị giá báo thắng — một ô sửa mà sửa không có tác dụng là một ô nói dối. Muốn đổi
-                thì đổi giá báo ở Xưởng › Giá báo MKT.
+                Ô BÚT LUÔN SỬA GIÁ KẾ HOẠCH CỦA MÃ (chủ shop 13/10/2026, luật 5'/7). Bản cũ chỉ hiện ô khi mã có
+                sản phẩm chưa biết giá, và GIẤU ô khi giá báo MKT đang thắng — mà giá báo thắng cả số đặt tay,
+                nên sửa Q004 trên BCLN không có tác dụng. Nay giá kế hoạch thắng giá báo, ô mở đúng con số đang
+                lưu (`plannedCost`), và chế độ kế hoạch áp nó cho cả mã đã có phiếu nhập.
               */
               const tuGiaBao = r.estimatedCost?.source === "MARKETER_PRICE";
-              const nhanDuTinh = tuGiaBao ? "giá báo MKT" : "dự tính";
+              const nhanDuTinh = r.costBasis === "PLANNED" ? "kế hoạch" : tuGiaBao ? "tham chiếu giá báo" : "tạm tính";
               return (
                 <TableRow key={r.productId} className={cn(r.cogsUncoveredQty > 0 && "bg-amber-50/60 dark:bg-amber-950/20")}>
                   <TableCell className="max-w-[230px] whitespace-normal align-top">
@@ -175,7 +174,7 @@ export function AdsCeilingTable({
                   <TableCell className="text-right align-top">
                     <div className="numeric flex items-center justify-end gap-0.5 font-semibold">
                       {r.cogsUncoveredQty > 0 ? <span className="text-amber-700 dark:text-amber-300">chưa biết</span> : gv === null ? "—" : formatVND(gv)}
-                      {coCho && r.estimatedCost && !tuGiaBao ? <EstimatedCostControl productId={r.productId} current={r.estimatedCost} canWrite={canWrite} /> : null}
+                      <EstimatedCostControl productId={r.productId} current={r.plannedCost} canWrite={canWrite} />
                     </div>
                     <div className="text-[10.5px] text-muted-foreground">
                       {r.cogsUncoveredQty > 0
@@ -184,16 +183,13 @@ export function AdsCeilingTable({
                           ? r.expectedCogsEstimated === r.expectedCogs
                             ? `${nhanDuTinh} ${formatVND(r.estimatedCost.unitCost, { compact: true })}/sp`
                             : `gồm ${formatNumber(r.cogsUnknownQty)} sp ${nhanDuTinh} ${formatVND(r.estimatedCost.unitCost, { compact: true })}`
-                          : "giá nhập thật"}
+                          : r.costBasis === "ACTUAL_NO_PLAN"
+                            ? "giá nhập thật · chưa đặt kế hoạch"
+                            : "giá nhập thật"}
                     </div>
-                    {tuGiaBao ? (
-                      <div className="text-[10.5px] text-muted-foreground" title={r.estimatedCost?.reason ?? ""}>
-                        sửa ở <Link href="/inventory/workshop?tab=cost" className="underline">Xưởng › Giá báo MKT</Link>
-                      </div>
-                    ) : null}
-                    {coCho && !r.estimatedCost ? (
-                      <div className="mt-1 flex justify-end">
-                        <EstimatedCostControl productId={r.productId} current={r.estimatedCost} canWrite={canWrite} />
+                    {r.plannedCost && r.costBasis !== "PLANNED" ? (
+                      <div className="text-[10.5px] text-muted-foreground" title={r.plannedCost.reason}>
+                        kế hoạch {formatVND(r.plannedCost.unitCost, { compact: true })}/sp · <Link href="/inventory/cost-center" className="underline">Trung tâm giá vốn</Link>
                       </div>
                     ) : null}
                   </TableCell>

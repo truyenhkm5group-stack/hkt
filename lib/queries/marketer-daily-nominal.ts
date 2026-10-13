@@ -10,6 +10,7 @@ import type { OrderOutcome } from "@/lib/constants/returns";
 import { OUTCOME_GROUP } from "@/lib/constants/truth";
 import { adMarketerMap } from "@/lib/integrations/facebook/ads-index";
 import { carrierSubstateSql } from "@/lib/queries/carrier-substate-sql";
+import type { CostMode } from "@/lib/constants/estimated-cost";
 import { LINE_UNIT_COST } from "@/lib/queries/cogs";
 import { marketerPriceOnOrderDate } from "@/lib/queries/marketer-price";
 import { listEmployees, loadPayrollConfig } from "@/lib/queries/payroll";
@@ -459,7 +460,7 @@ type Slices = {
 
 const keyOf = (mid: string | null) => mid ?? MARKETING_UNATTRIBUTED;
 
-async function slicesUncached(period: Period, basis: TimeBasis, withStock: boolean): Promise<Slices> {
+async function slicesUncached(period: Period, basis: TimeBasis, withStock: boolean, costMode: CostMode): Promise<Slices> {
   const [nominal, lines, spend, lookup, employees, config] = await Promise.all([
     /*
       BA CỜ, MỖI CỜ MỘT LÝ DO:
@@ -473,7 +474,7 @@ async function slicesUncached(period: Period, basis: TimeBasis, withStock: boole
           nhuận danh nghĩa BẬT, vì tab ấy đã tự tính đúng bản có tồn và bộ đệm dùng chung được.
         · MỐC — cùng mốc với bảng theo mã đứng ngay trên, để hai bảng đứng trên cùng một tập đơn.
     */
-    getNominalProfitReport(period, basis, NO_ORDER_VALUE_FILTER, true, true, withStock),
+    getNominalProfitReport(period, basis, NO_ORDER_VALUE_FILTER, true, true, withStock, costMode),
     readLines(period, basis),
     readSpend(period),
     getProbabilityLookup(),
@@ -637,8 +638,9 @@ async function slicesUncached(period: Period, basis: TimeBasis, withStock: boole
  * bộ lọc mã / marketer thì KHÔNG — chúng chỉ là phép cộng trên cùng các ô, nên đổi bộ lọc không
  * phải tính lại cả bảng.
  */
-function getSlices(period: Period, basis: TimeBasis, withStock: boolean): Promise<Slices> {
-  return memo(`nominalSlices:${basis}:${periodKey(period)}:${withStock ? "ton" : "khongton"}`, 120_000, () => slicesUncached(period, basis, withStock));
+function getSlices(period: Period, basis: TimeBasis, withStock: boolean, costMode: CostMode = "ACTUAL"): Promise<Slices> {
+  // Chế độ giá vốn đổi `expectedCogs` của mọi mã ⇒ phải vào khoá cache (AGENTS.md §2).
+  return memo(`nominalSlices:${basis}:${periodKey(period)}:${withStock ? "ton" : "khongton"}:${costMode}`, 120_000, () => slicesUncached(period, basis, withStock, costMode));
 }
 
 function labelFor(names: Record<string, string>, key: string): string {
@@ -907,8 +909,9 @@ export type NominalDaily = {
   warnings: string[];
 };
 
-export async function getNominalDaily(period: Period, basis: TimeBasis, filter: NominalDailyFilter, withStock = true): Promise<NominalDaily> {
-  const { nominal, cells, spend, otherPct, names } = await getSlices(period, basis, withStock);
+export async function getNominalDaily(period: Period, basis: TimeBasis, filter: NominalDailyFilter, withStock = true, costMode: CostMode = "ACTUAL"): Promise<NominalDaily> {
+  // Bảng theo ngày là phép CHIA số của bảng theo mã ⇒ phải đứng trên CÙNG chế độ giá vốn với bảng ấy.
+  const { nominal, cells, spend, otherPct, names } = await getSlices(period, basis, withStock, costMode);
   const f: NominalDailyFilter = { productId: filter.productId || null, marketerKey: filter.marketerKey || null };
   const mappedSet = new Set(spend.mappedMarketers);
   const spendMappedOf = (key: string) => key === MARKETING_UNATTRIBUTED || mappedSet.has(key);

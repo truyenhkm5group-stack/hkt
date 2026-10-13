@@ -337,7 +337,7 @@ export const PLATFORM_MODULES: readonly ModuleDef[] = [
       { key: "finance.profit_reports", label: "Báo cáo lợi nhuận", defaultEnabled: true, why: "`/reports` — danh nghĩa, theo đơn giao, theo dòng tiền." },
       { key: "finance.cashflow", label: "Dòng tiền", defaultEnabled: true, why: "`/reports/cashflow`, `/finance-ops`." },
     ],
-    routes: ["/finance", "/finance-ops", "/cod", "/bank", "/expenses", "/reports", "/api/export/cod", "/api/export/report"],
+    routes: ["/finance", "/finance-ops", "/cod", "/bank", "/expenses", "/reports", "/inventory/cost-center", "/api/export/cod", "/api/export/report"],
     permissions: ["cod:view", "bank:view", "bank:write", "bank:accounts", "reports:delivered", "reports:cash", "reports:assumptions"],
     why: "Tiền thật và lợi nhuận. Không phụ thuộc module nào: tổ chức chỉ ghi sổ chi phí / ngân hàng vẫn dùng được; báo cáo tự rỗng khi thiếu đơn.",
   },

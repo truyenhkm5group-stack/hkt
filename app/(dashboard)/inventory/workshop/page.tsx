@@ -448,7 +448,7 @@ function CostTab({ ledger, variance, prices, products }: { ledger: Ledger; varia
         title="Giá sản xuất theo mã hàng · chênh lệch với phiếu kho"
         hint={
           <>
-            Năm con số cho một mã, mỗi con số là lời khai của một khâu: <b>giá SX thực tế</b> = MỌI tiền vải của mã (kể cả đợt chưa gán lô) + tiền công mọi lô, chia tổng hàng xưởng trả · <b>giá lệnh SX</b> = đơn giá trên lệnh sản xuất gần nhất có ghi giá · <b>giá ước tính</b> = giá vốn dự tính chủ shop đặt ở tab Lợi nhuận danh nghĩa · <b>giá báo MKT</b> = giá đang hiệu lực hôm nay · <b>giá phiếu kho</b> = giá nhập bình quân của phiếu nhập kho gần nhất.
+            Năm con số cho một mã, mỗi con số là lời khai của một khâu: <b>giá SX thực tế</b> = MỌI tiền vải của mã (kể cả đợt chưa gán lô) + tiền công mọi lô, chia tổng hàng xưởng trả · <b>giá lệnh SX</b> = đơn giá trên lệnh sản xuất gần nhất có ghi giá · <b>giá kế hoạch</b> = giá vốn kế hoạch đang hiệu lực, đặt ở <Link href="/inventory/cost-center" className="underline">Trung tâm giá vốn</Link> (nơi duy nhất sửa giá vốn kế hoạch) · <b>giá báo MKT</b> = giá đang hiệu lực hôm nay · <b>giá phiếu kho</b> = giá nhập bình quân của phiếu nhập kho gần nhất.
             <br />
             <br />
             <b>Vì sao so với phiếu kho:</b> đó là con số DUY NHẤT trong năm con số thật sự đi vào giá vốn của báo cáo lợi nhuận — bốn con số kia là kế hoạch hoặc lời khai. Dòng nhỏ dưới mỗi giá là chênh = <b>phiếu kho − giá ấy</b> (dương = phiếu kho ghi cao hơn). Lệch nhiều thường là phiếu kho ghi sai giá hoặc kế hoạch sai; ERP không tự sửa phiếu. Ô “—” là CHƯA BIẾT, không phải 0 ₫.

@@ -403,6 +403,7 @@ import { testSessionRenewal } from "./session-renewal.test";
 import { testSessionRevocation } from "./session-revocation.test";
 import { testReportingParity } from "./reporting-parity.test";
 import { testEstimatedCost } from "./estimated-cost.test";
+import { testCostCenter } from "./cost-center.test";
 import { testLoginThrottle } from "./login-throttle.test";
 import { testWebhookHardening } from "./webhook-hardening.test";
 import { testWebhookLogRedaction } from "./webhook-log-redaction.test";
@@ -2505,6 +2506,8 @@ async function main() {
   await testReportingParity(db);
   // Ngay sau đó: gieo ba mã riêng tiền tố `gvdt-` và một dòng settings giá dự tính, rồi TỰ DỌN sạch cả hai.
   await testEstimatedCost(db);
+  // P0 hợp nhất giá vốn (13/10/2026): Trung tâm giá vốn + hai chế độ BCLN — tám kịch bản nghiệm thu của chủ shop.
+  await testCostCenter(db);
   await testLoginThrottle();
   await testWebhookHardening();
   testWebhookLogRedaction();

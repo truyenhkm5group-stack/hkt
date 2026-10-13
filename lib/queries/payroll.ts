@@ -3,6 +3,7 @@ import { chayKhongJit, getDb, schema } from "@/db";
 import { memo, periodKey } from "@/lib/cache";
 import { attributionShares, DEFAULT_PAYROLL_CONFIG, PAYROLL_CONFIG_KEY, PAYROLL_EMPLOYEES_KEY, payrollPeriodKey, shareFor, splitProfit, type AttributionMode, type Employee, type PageBucket, type PayrollBasis, type PayrollConfig } from "@/lib/constants/payroll";
 import { employmentWindow } from "@/lib/constants/payroll-employment";
+import type { CostMode } from "@/lib/constants/estimated-cost";
 import { PAYROLL_COMPONENT_SIGN, type PayrollComponentKind } from "@/lib/constants/payroll-components";
 import { loadAdjustments } from "@/lib/queries/payroll-policies";
 import { vnDateKey } from "@/lib/format";
@@ -1411,10 +1412,12 @@ export async function getNominalMarketerBreakdown(
    * hai con số lợi nhuận cho cùng một mã. `getPayrollReport` / `getMarketerReport` không đi qua đây.
    */
   withEstimatedCost = false,
+  /** Chế độ giá vốn của bảng theo mã đứng ngay trên (BCLN) — chỉ CHUYỂN TIẾP, lương không đi qua đây. */
+  costMode: CostMode = "ACTUAL",
 ): Promise<{ rows: NominalMarketerRow[]; unattributed: number; shopRetained: number; ownerSharePct: number; pagesMapped: number; pagesTotal: number; marketerPriceMargin: number; workshopPenaltyCredited: number; workshopPenaltyUncredited: number }> {
-  return memo(`nominalByMarketer:${periodKey(period)}:${orderValueKey(value)}:${includeAds ? "ads" : "noads"}:${withEstimatedCost ? "gvdt" : "thuc"}`, 120_000, async () => {
+  return memo(`nominalByMarketer:${periodKey(period)}:${orderValueKey(value)}:${includeAds ? "ads" : "noads"}:${withEstimatedCost ? "gvdt" : "thuc"}:${costMode}`, 120_000, async () => {
     const db = await getDb();
-    const [nominal, employees, config, byPage, penalties] = await Promise.all([getNominalProfitReport(period, "ORDERED", value, includeAds, withEstimatedCost), listEmployees(), loadPayrollConfig(), salesByProductPage(period, "confirmed"), workshopPenaltyByProduct(period)]);
+    const [nominal, employees, config, byPage, penalties] = await Promise.all([getNominalProfitReport(period, "ORDERED", value, includeAds, withEstimatedCost, true, costMode), listEmployees(), loadPayrollConfig(), salesByProductPage(period, "confirmed"), workshopPenaltyByProduct(period)]);
     const ads = schema.adSpends;
     const spendRows = await db
       .select({ marketerId: ads.marketerId, productId: ads.productId, spend: sql<number>`coalesce(sum(${ads.spend}), 0)` })

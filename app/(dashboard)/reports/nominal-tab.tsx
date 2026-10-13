@@ -39,7 +39,7 @@ import { currentOrganization } from "@/lib/platform/context";
 import { settingDeclared } from "@/lib/settings";
 import { NewProductRates } from "@/app/(dashboard)/reports/new-product-rates";
 import { AdsCeilingTable } from "@/app/(dashboard)/reports/ads-ceiling-table";
-import { adsCeiling } from "@/lib/constants/estimated-cost";
+import { adsCeiling, COST_BASIS_LABEL, COST_MODE_LABEL, type CostMode } from "@/lib/constants/estimated-cost";
 import { DELIVERY_RATE_MEASURED } from "@/lib/constants/delivery-rate";
 import { PROJECTED_GTC_VERSION } from "@/lib/constants/projected-delivery";
 import { TIME_BASES, TIME_BASIS_LABEL, type TimeBasis } from "@/lib/constants/report-time-basis";
@@ -281,6 +281,42 @@ function TranHoaVon({ r, otherPct }: { r: NominalRow; otherPct: number }) {
   );
 }
 
+/** Công tắc Thực tế / Kế hoạch + lời khai của chế độ đang xem — giữ nguyên mọi tham số khác của URL. */
+function CheDoGiaVon({ costMode, tabQuery, rows }: { costMode: CostMode; tabQuery: string; rows: NominalRow[] }) {
+  const goc = tabQuery.replace(/&gv=kehoach/g, "");
+  const banCo = rows.filter((r) => r.orders > 0);
+  const theoKeHoach = banCo.filter((r) => r.costBasis === "PLANNED").length;
+  const tamTinh = banCo.filter((r) => r.costBasis === "PROVISIONAL").length;
+  const chuaBiet = banCo.filter((r) => r.costBasis === "UNKNOWN").length;
+  const chuaDat = banCo.filter((r) => r.costBasis === "ACTUAL_NO_PLAN").length;
+  return (
+    <div className={cn("flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-xl border px-4 py-2.5 text-[12.5px]", costMode === "PLANNED" ? "border-sky-300 bg-sky-50 dark:border-sky-800 dark:bg-sky-950/40" : "border-border bg-muted/30")}>
+      <span className="inline-flex overflow-hidden rounded-md border text-xs font-medium">
+        {(["ACTUAL", "PLANNED"] as const).map((m) => (
+          <Link key={m} href={`/reports?${goc}${m === "PLANNED" ? "&gv=kehoach" : ""}`} className={cn("px-2.5 py-1", costMode === m ? "bg-primary text-primary-foreground" : "bg-background hover:bg-muted")}>
+            {COST_MODE_LABEL[m]}
+          </Link>
+        ))}
+      </span>
+      {costMode === "PLANNED" ? (
+        <span>
+          Lợi nhuận <b>DỰ TÍNH theo giá vốn kế hoạch</b>: {formatNumber(theoKeHoach)} mã tính theo giá kế hoạch · {formatNumber(chuaDat)} mã chưa đặt kế hoạch nên đứng trên giá thật
+          {tamTinh ? ` · ${formatNumber(tamTinh)} mã ${COST_BASIS_LABEL.PROVISIONAL.toLowerCase()}` : ""}
+          {chuaBiet ? ` · ${formatNumber(chuaBiet)} mã chưa biết giá vốn` : ""}. Đây không phải lợi nhuận đã thực hiện.
+        </span>
+      ) : (
+        <span>
+          Giá vốn từ <b>chứng từ</b> (phiếu nhập kho / Pancake){tamTinh ? `; ${formatNumber(tamTinh)} mã có phần ${COST_BASIS_LABEL.PROVISIONAL.toLowerCase()} bằng giá kế hoạch / tham chiếu` : ""}
+          {chuaBiet ? `; ${formatNumber(chuaBiet)} mã chưa biết giá vốn` : ""}.
+        </span>
+      )}
+      <Link href="/inventory/cost-center" className="ml-auto font-medium text-primary hover:underline">
+        Trung tâm giá vốn →
+      </Link>
+    </div>
+  );
+}
+
 export async function NominalTab({
   period,
   productId,
@@ -291,6 +327,7 @@ export async function NominalTab({
   value = NO_ORDER_VALUE_FILTER,
   includeAds = true,
   targetMargin = null,
+  costMode = "ACTUAL",
 }: {
   period: Period;
   productId: string;
@@ -306,6 +343,8 @@ export async function NominalTab({
   includeAds?: boolean;
   /** Biên LN người xem gõ (`?bien=`) để tính trần CPQC giữ biên — `null` = chỉ tính trần hoà vốn. */
   targetMargin?: number | null;
+  /** Chế độ giá vốn (`?gv=kehoach`) — luật 7 ở `lib/constants/estimated-cost.ts`. */
+  costMode?: CostMode;
 }) {
   /*
     BẢNG MARKETER CỐ Ý Ở LẠI MỐC NGÀY TẠO ĐƠN.
@@ -333,14 +372,14 @@ export async function NominalTab({
   const [org, assumptionsDeclared] = await Promise.all([currentOrganization(), settingDeclared(PROFIT_ASSUMPTIONS_KEY)]);
   const sampleAssumptions = !org.isHome && assumptionsDeclared === false;
   const [report, byMarketer, daily] = await Promise.all([
-    getNominalProfitReport(period, basis, value, includeAds, true),
-    getNominalMarketerBreakdown(period, value, includeAds, true),
+    getNominalProfitReport(period, basis, value, includeAds, true, true, costMode),
+    getNominalMarketerBreakdown(period, value, includeAds, true, costMode),
     /*
       Bảng theo ngày đứng CÙNG MỐC với bảng theo mã, trên MỌI đơn và CÓ chi QC: nó là phép chia số
       của từng mã, và phép chia ấy chưa biết đường đi của bộ lọc giá trị đơn — khi bộ lọc bật, màn
       hình nói ra thay vì lặng lẽ đặt hai tập đơn cạnh nhau.
     */
-    getNominalDaily(period, basis, { productId: productId || null, marketerKey: marketerKey || null }),
+    getNominalDaily(period, basis, { productId: productId || null, marketerKey: marketerKey || null }, true, costMode),
   ]);
   const selected = productId
     ? report.rows.find((r) => r.productId === productId)
@@ -381,6 +420,15 @@ export async function NominalTab({
       >
         <OrderValueFilterControl value={value} showAds adsIncluded={includeAds} />
       </DataTableToolbar>
+
+      {/*
+        ═══ CHẾ ĐỘ GIÁ VỐN — HAI CÂU HỎI KHÁC NHAU, KHÔNG TRỘN (luật 7, lib/constants/estimated-cost.ts) ═══
+
+        THỰC TẾ: giá vốn từ chứng từ (phiếu nhập / Pancake), chỗ trống lấp bằng giá kế hoạch ⇒ nhãn
+        "Tạm tính". KẾ HOẠCH: mã đã đặt giá kế hoạch tính TOÀN BỘ theo giá kế hoạch — trả lời "nếu giá
+        vốn là X thì lãi bao nhiêu". Giá kế hoạch đặt ở MỘT nơi: Trung tâm giá vốn.
+      */}
+      <CheDoGiaVon costMode={costMode} tabQuery={tabQuery} rows={report.rows} />
 
       {/*
         ═══ ĐANG XEM MỘT LÁT CẮT THÌ PHẢI NÓI RA, Ở CHỖ KHÔNG BỎ QUA ĐƯỢC ═══
@@ -465,7 +513,7 @@ export async function NominalTab({
               Margin {t.netMargin !== null ? `${t.netMargin.toFixed(1)}%` : "—"}{" "}
               <DataWarnings
                 items={[
-                  t.expectedCogsEstimated ? `Giá vốn gồm ${formatVND(t.expectedCogsEstimated, { compact: true })} DỰ TÍNH (${formatNumber(t.estimatedCostProducts)} mã chưa có giá nhập)` : null,
+                  t.expectedCogsEstimated ? (report.costMode === "PLANNED" ? `Giá vốn gồm ${formatVND(t.expectedCogsEstimated, { compact: true })} theo GIÁ KẾ HOẠCH / tạm tính (${formatNumber(t.estimatedCostProducts)} mã)` : `Giá vốn gồm ${formatVND(t.expectedCogsEstimated, { compact: true })} TẠM TÍNH (${formatNumber(t.estimatedCostProducts)} mã chưa có giá nhập)`) : null,
                   !t.cogsKnown ? `${formatNumber(t.cogsUncoveredQty)} sản phẩm CHƯA BIẾT giá vốn (đang tính 0đ)` : null,
                 ]}
               />
@@ -625,7 +673,7 @@ export async function NominalTab({
                     >
                       <Money value={r.expectedRevenue} className="font-semibold" />
                     </OKep>
-                    <OKep sub={<>{formatNumber(r.expectedQty)} sp{r.expectedCogsEstimated ? <span title={`${formatVND(r.expectedCogsEstimated)} trong ô này là giá vốn DỰ TÍNH ${formatVND(r.estimatedCost?.unitCost ?? 0)}/sp (${r.estimatedCost?.source === "MARKETER_PRICE" ? `= giá báo MKT · ${r.estimatedCost.reason}` : (r.estimatedCost?.setBy ?? "—")}) cho ${formatNumber(r.cogsUnknownQty)} sp chưa có phiếu nhập / giá Pancake — ${r.estimatedCost?.source === "MARKETER_PRICE" ? "sửa ở Xưởng › Giá báo MKT" : "sửa ở bảng “Bàn dự tính” bên dưới"}`}> · gồm {formatVND(r.expectedCogsEstimated, { compact: true })} dự tính</span> : null}</>}>
+                    <OKep sub={<>{formatNumber(r.expectedQty)} sp · <span title={`Nguồn giá vốn: ${COST_BASIS_LABEL[r.costBasis]}`}>{COST_BASIS_LABEL[r.costBasis].toLowerCase()}</span>{r.costBasis === "PLANNED" ? <span title={`Toàn bộ giá vốn của mã tính theo GIÁ KẾ HOẠCH ${formatVND(r.estimatedCost?.unitCost ?? 0)}/sp (${r.estimatedCost?.setBy ?? "—"}) — sửa ở Trung tâm giá vốn hoặc nút bút ở bảng “Bàn dự tính” bên dưới`}> {formatVND(r.estimatedCost?.unitCost ?? 0, { compact: true })}/sp</span> : r.expectedCogsEstimated ? <span title={`${formatVND(r.expectedCogsEstimated)} trong ô này là giá vốn TẠM TÍNH ${formatVND(r.estimatedCost?.unitCost ?? 0)}/sp (${r.estimatedCost?.source === "MARKETER_PRICE" ? `tham chiếu giá báo MKT · ${r.estimatedCost.reason}` : `giá kế hoạch · ${r.estimatedCost?.setBy ?? "—"}`}) cho ${formatNumber(r.cogsUnknownQty)} sp chưa có phiếu nhập / giá Pancake — đặt giá kế hoạch ở Trung tâm giá vốn để thay`}> · gồm {formatVND(r.expectedCogsEstimated, { compact: true })} tạm tính</span> : null}</>}>
                       <TienCoTheChuaBiet value={r.expectedCogs} known={r.cogsKnown} reason={`${formatNumber(r.cogsUncoveredQty)} sản phẩm chưa biết giá vốn (không phiếu nhập, không giá Pancake) — giá vốn đang bị tính 0đ nên không in ra. Đặt giá dự tính ở bảng “Bàn dự tính” bên dưới.`} className={r.expectedCogsEstimated ? "italic text-muted-foreground" : "text-muted-foreground"} />
                     </OKep>
                     <OKep><Money value={r.shipCost} className="text-muted-foreground" /></OKep>

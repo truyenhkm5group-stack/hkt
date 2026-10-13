@@ -10,9 +10,9 @@ import { getEstimatedCosts } from "@/lib/queries/profit-nominal";
  *
  * Luật (Tech Lead chốt 09/10/2026):
  *  1. Có giá gia công (> 0) ⇒ `KNOWN`, số tiền = số món × giá.
- *  2. Chưa có ⇒ GIÁ DỰ TÍNH của mã (`ESTIMATED`): giá báo MKT đang hiệu lực, không có thì con số đặt
- *     tay ở Bàn dự tính — đúng `getEstimatedCosts` mà báo cáo lợi nhuận danh nghĩa dùng (chủ shop chốt
- *     26/09/2026 "giá dự tính = giá báo MKT", luật 5 ở `lib/constants/estimated-cost.ts`).
+ *  2. Chưa có ⇒ GIÁ DỰ TÍNH của mã (`ESTIMATED`): giá vốn kế hoạch (Trung tâm giá vốn), chưa đặt thì
+ *     tham chiếu giá báo MKT đang hiệu lực — đúng `getEstimatedCosts` mà báo cáo lợi nhuận danh nghĩa
+ *     dùng (luật 5' ở `lib/constants/estimated-cost.ts`, chủ shop sửa 13/10/2026: kế hoạch thắng giá báo).
  *  3. Không cái nào ⇒ `UNPRICED_FORCED`: số tiền `null` — cổng coi CHƯA BIẾT là VƯỢT ngưỡng
  *     (`overThreshold`), nên lệnh bắt duyệt khi nhóm đang cưỡng chế. Không bao giờ đi qua với 0.
  *
@@ -53,7 +53,7 @@ export function resolvePoApprovalPrice(input: { qty: number; unitCost: number | 
 
 /** Câu tóm tắt của yêu cầu duyệt — nói rõ số tiền đứng trên căn cứ nào. */
 export function poApprovalSummary(p: { productName: string; qty: number; supplier: string; price: PoApprovalPrice }): string {
-  const tien = p.price.amount === null ? "chưa có giá — bắt duyệt" : `${p.price.amount}đ theo ${PO_PRICE_BASIS_LABEL[p.price.basis]}${p.price.basis === "ESTIMATED" ? ` (${p.price.unitPrice}đ/sp${p.price.estimateSource === "MARKETER_PRICE" ? " · giá báo MKT" : " · Bàn dự tính"})` : ""}`;
+  const tien = p.price.amount === null ? "chưa có giá — bắt duyệt" : `${p.price.amount}đ theo ${PO_PRICE_BASIS_LABEL[p.price.basis]}${p.price.basis === "ESTIMATED" ? ` (${p.price.unitPrice}đ/sp${p.price.estimateSource === "MARKETER_PRICE" ? " · giá báo MKT" : " · giá kế hoạch"})` : ""}`;
   return `Đặt xưởng ${p.productName} · ${p.qty} món · ${tien}${p.supplier ? ` · ${p.supplier}` : ""}`;
 }
 
