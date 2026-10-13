@@ -13,15 +13,18 @@
   "base_sha": null,
   "domains": [],
   "owned_paths": [
-    "tests/backup.test.ts"
+    "tests/backup.test.ts",
+    "tests/pitr.test.ts",
+    "tests/shell-locale.ts",
+    "tests/test-hygiene.test.ts"
   ],
   "dependencies": [],
   "blocked_by": [],
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-13T14:20:28.962Z",
-  "updated_at": "2026-10-13T14:20:28.962Z",
-  "last_heartbeat": "2026-10-13T14:20:28.962Z",
+  "updated_at": "2026-10-13T14:22:22.920Z",
+  "last_heartbeat": "2026-10-13T14:22:22.920Z",
   "definition_of_done": [],
   "intake": {
     "verdict": "IN_PROGRESS",
