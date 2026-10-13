@@ -2276,3 +2276,4 @@
 {"at":"2026-10-13T00:11:35.790Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"cart-intent-audit-sync","detail":"fix/cart-intent-audit @ 75c0b8cdf938 · 1 lệnh kiểm thử"}
 {"at":"2026-10-13T00:11:53.872Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#822 @ 75c0b8cdf938 · Chỉ đồng bộ bản sao luật audit CHỈ ĐỌC với #819"}
 {"at":"2026-10-13T00:12:24.455Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"hslc-postsale-handoff","detail":"#821 @ 7d474c2c8af6 → 935ffdb2c087 (MERGE_ISOLATED · HIGH · gates success)"}
+{"at":"2026-10-13T00:13:25.174Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DEPLOY_DISPATCHED","detail":"935ffdb2c087 · run 38326139783 https://github.com/truyenhkm5group-stack/hkt/actions/runs/38326139783"}
