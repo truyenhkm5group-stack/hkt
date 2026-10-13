@@ -58,18 +58,24 @@ async function nextEntryAfter(productId: string, from: Date): Promise<Date | nul
 }
 
 /**
- * Dựng lại giá vốn mọi đơn của mã sau khi giá báo đổi. Lỗi giữa chừng KHÔNG ném: giá báo đã lưu, phần đơn chưa dựng
- * lại sẽ được lượt job `rematerializeStale` bắt (dấu `created_at` mới / căn cứ MARKETER_PRICE mồ côi) — trả lời người bấm
- * đúng điều đó. Một dòng nhật ký GỘP (số đơn) cho mỗi lượt: số đã ghi nhận của các đơn đổi theo giá báo có vết.
+ * Dựng lại giá vốn mọi đơn của mã sau khi giá báo đổi. Lỗi giữa chừng KHÔNG ném: thay đổi giá báo đã ghi thật. Job
+ * `rematerializeStale` chỉ bắt được dòng giá mới / sửa đè (dấu `created_at`) và căn cứ giá báo mồ côi — XOÁ một dòng khi
+ * mã còn dòng cũ hơn KHÔNG để lại dấu, nên câu lỗi phải chỉ đúng việc người bấm làm tiếp (docs/cost-center.md mục 5).
+ * Một dòng nhật ký GỘP (số đơn) cho mỗi lượt: số đã ghi nhận của các đơn đổi theo giá báo có vết.
  */
-async function dungLaiGiaVon(user: { id: string; email: string }, productId: string, code: string): Promise<{ error: string } | null> {
+async function dungLaiGiaVon(user: { id: string; email: string }, productId: string, code: string, viec: "LUU" | "XOA"): Promise<{ error: string } | null> {
   try {
     const r = await rematerializeProductOrders(productId);
     await audit({ userId: user.id, userEmail: user.email, action: "MARKETER_PRICE_COGS_REBUILD", entity: "MARKETER_PRICE", entityId: productId, detail: { code, orders: r.orders } });
     return null;
   } catch (e) {
     console.error("[giá báo] dựng lại giá vốn lỗi", productId, e);
-    return { error: `Đã lưu giá báo ${code}, nhưng dựng lại giá vốn các đơn của mã bị lỗi — báo cáo có thể còn giá vốn cũ. Bấm lưu lại dòng giá này để thử dựng lại; vẫn lỗi thì báo kỹ thuật.` };
+    return {
+      error:
+        viec === "LUU"
+          ? `Đã lưu giá báo ${code}, nhưng dựng lại giá vốn các đơn của mã bị lỗi — báo cáo có thể còn giá vốn cũ. Bấm lưu lại dòng giá này để thử dựng lại; vẫn lỗi thì báo kỹ thuật.`
+          : `Đã xoá dòng giá báo ${code}, nhưng dựng lại giá vốn các đơn của mã bị lỗi — báo cáo có thể còn giá vốn theo dòng vừa xoá. KHÔNG tạo lại dòng đã xoá: bấm lưu lại dòng giá ĐANG hiệu lực còn lại của mã (nếu có) để thử dựng lại; vẫn lỗi thì báo kỹ thuật.`,
+    };
   } finally {
     clearMemo();
   }
@@ -99,7 +105,7 @@ export async function setMarketerPrice(input: unknown): Promise<Result> {
     .returning({ id: schema.marketerPrices.id });
   await audit({ userId: user.id, userEmail: user.email, action: "MARKETER_PRICE_SET", entity: "MARKETER_PRICE", entityId: row.id, detail: { code, price: d.price, effectiveFrom: d.effectiveFrom, reason: d.reason } });
   // Giá báo là GIÁ VỐN THỰC TẾ của mã (chủ shop chốt 13/10/2026) ⇒ dựng lại giá vốn mọi đơn của mã, rồi xoá đệm báo cáo.
-  const dung = await dungLaiGiaVon(user, product.id, code);
+  const dung = await dungLaiGiaVon(user, product.id, code, "LUU");
   // Làm mới trang CẢ khi dựng lại lỗi: giá báo đã lưu thật.
   revalidatePath("/inventory/workshop");
   revalidatePath("/payroll");
@@ -117,7 +123,7 @@ export async function deleteMarketerPrice(id: string): Promise<Result> {
   if (khoa) return { error: `Dòng giá này đã áp vào kỳ lương đã khoá (${khoa}) — không xoá được` };
   await db.delete(schema.marketerPrices).where(eq(schema.marketerPrices.id, id));
   await audit({ userId: user.id, userEmail: user.email, action: "MARKETER_PRICE_DELETE", entity: "MARKETER_PRICE", entityId: id, detail: { code: row.productCode, price: row.price, effectiveFrom: row.effectiveFrom, setBy: row.setBy } });
-  const dung = await dungLaiGiaVon(user, row.productId, row.productCode);
+  const dung = await dungLaiGiaVon(user, row.productId, row.productCode, "XOA");
   // Làm mới trang CẢ khi dựng lại lỗi: giá báo đã lưu thật.
   revalidatePath("/inventory/workshop");
   revalidatePath("/payroll");

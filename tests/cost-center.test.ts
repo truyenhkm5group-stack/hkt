@@ -284,7 +284,7 @@ export async function testCostCenter(db: Db) {
     await dungLai(PID);
     const chuaBiet = await ghiNhan();
     assert.equal(chuaBiet?.cogs, null, "còn dòng không nguồn giá ⇒ giá vốn ghi nhận CHƯA BIẾT (NULL), không phải tổng thiếu");
-    assert.notEqual(chuaBiet?.basis, "MARKETER_PRICE", "không mang nhãn giá báo khi con số chưa đủ");
+    assert.equal(chuaBiet?.basis, "NONE", "không mang nhãn giá báo khi con số chưa đủ — căn cứ NONE (chưa biết)");
     await db.delete(schema.orderItems).where(inArray(schema.orderItems.id, [`${P}i-d0-mix`, `${P}i-d0-nogia`]));
     await db.update(schema.marketerPrices).set({ price: 170_000 }).where(and(eq(schema.marketerPrices.productId, PID), eq(schema.marketerPrices.price, 165_000)));
     await dungLai(PID);
