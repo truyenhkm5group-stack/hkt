@@ -2278,3 +2278,4 @@
 {"at":"2026-10-13T00:12:24.455Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"hslc-postsale-handoff","detail":"#821 @ 7d474c2c8af6 → 935ffdb2c087 (MERGE_ISOLATED · HIGH · gates success)"}
 {"at":"2026-10-13T00:13:25.174Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DEPLOY_DISPATCHED","detail":"935ffdb2c087 · run 38326139783 https://github.com/truyenhkm5group-stack/hkt/actions/runs/38326139783"}
 {"at":"2026-10-13T01:04:02.914Z","actor":"DESKTOP-56TH98Y:wt-p0-c360","kind":"HANDOFF","mission":"customer-360","detail":"fix/customer-360 @ 83dd92b2772e · 1 lệnh kiểm thử"}
+{"at":"2026-10-13T01:05:11.030Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#804 @ 83dd92b2772e · 238e8a7b (PASS) + gộp main (#802/#817/#819/#820/#821): main thắng; chặn đơn chốt không auto của #821 đứng đầu create_customer trước mọi nhánh C360; TRA LỊCH SỬ tắt ở hậu mãi; quét nguồn khoá thứ tự; npm test đủ đạt"}

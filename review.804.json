@@ -1,8 +1,8 @@
 {
   "pr": 804,
-  "sha": "238e8a7b90ebb4fa94bd5f50fe6447a110bc2de5",
+  "sha": "83dd92b2772e95c71d8b647fddebd8601360bfc0",
   "verdict": "PASS",
   "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
-  "at": "2026-10-12T10:14:24.442Z",
-  "note": "Đủ 4 lỗi review: ERP+ORDER_OUTCOME đè bản Pancake cùng mã (test + gỡ sửa thì đỏ); SĐT mới so cụm chuẩn hoá, không xác minh ⇒ hỏi lại; hồ sơ từ lịch sử fromHistory ⇒ chỉ gợi ý + chặn máy chủ historyAddressWithoutConsent; đếm đã mua trừ hoàn/huỷ"
+  "at": "2026-10-13T01:04:58.179Z",
+  "note": "238e8a7b (PASS) + gộp main (#802/#817/#819/#820/#821): main thắng; chặn đơn chốt không auto của #821 đứng đầu create_customer trước mọi nhánh C360; TRA LỊCH SỬ tắt ở hậu mãi; quét nguồn khoá thứ tự; npm test đủ đạt"
 }
