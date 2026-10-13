@@ -85,13 +85,15 @@ export async function rematerializeOutcomes(orderIds?: string[]): Promise<{ rows
     `MARKETER_PRICE` nghĩa là "giá vốn đơn này đi theo giá báo hiện tại", không phải "mọi dòng đều có
     giá báo" (docs/cost-center.md mục 5). Đơn mang `MARKETER_PRICE` KHÔNG đóng băng:
     giá báo đổi thì giá vốn ghi nhận đi theo (xem nhánh `GIA_BAO_SONG` ở lượt upsert) — đúng điều chủ
-    shop chọn. Đơn chưa đủ giá báo giữ nguyên luật đóng băng 11/09/2026.
+    shop chọn. Đơn KHÔNG có dòng nào có giá báo giữ nguyên luật đóng băng 11/09/2026.
   */
   const COST_FACTS = sql`(
     select
       -- CHỈ CẦN MỘT dòng có giá báo là cả đơn đi theo giá báo hiện tại (không đóng băng): chủ shop chốt
       -- "mọi đơn" — đơn nhiều mã mà một mã có giá báo cũng phải đổi khi giá báo đổi (review 13/10/2026).
-      case when bool_or(l.mkt_cost is not null) then 4 else
+      -- NHƯNG còn một dòng KHÔNG có nguồn giá nào ⇒ cả đơn là CHƯA BIẾT (hạng 0, NULL) — không bao giờ ghi một tổng
+      -- thiếu dòng dưới nhãn giá báo (AGENTS.md mục 42; luật 11/09 điểm 2).
+      case when bool_or(l.mkt_cost is not null) and bool_and(coalesce(l.mkt_cost, l.before_cost, l.after_cost, l.provisional) is not null) then 4 else
       coalesce(min(case
         when l.before_cost is not null then 3
         when l.after_cost is not null then 2

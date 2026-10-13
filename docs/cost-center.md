@@ -73,11 +73,15 @@ Quyền: xem `reports:nominal`; sửa `reports:assumptions` (như ô cũ).
    - Đơn có ÍT NHẤT MỘT dòng có giá báo mang căn cứ `MARKETER_PRICE` (các dòng khác vẫn lấy bậc chứng từ
      trong cùng con số) và KHÔNG đóng băng giá vốn ghi nhận: MKT lưu / sửa / xoá giá báo ⇒
      `rematerializeProductOrders` dựng lại giá vốn mọi đơn của mã ngay (nhật ký gộp
-     `MARKETER_PRICE_COGS_REBUILD`); lỗi giữa chừng thì job `rematerializeStale` bắt lại (dấu `created_at` mới,
-     căn cứ giá báo mồ côi, dòng giá vừa tới ngày hiệu lực). Đơn không có dòng nào có giá báo giữ luật đóng băng 11/09/2026.
+     `MARKETER_PRICE_COGS_REBUILD`); job `rematerializeStale` bắt dòng giá vừa tới ngày hiệu lực, dòng giá mới / sửa
+     đè (dấu `created_at`) và đơn mang căn cứ giá báo mà mã không còn giá báo. Xoá MỘT dòng giá khi mã còn dòng cũ
+     hơn KHÔNG để lại dấu: nếu lượt dựng lại lúc xoá lỗi, màn hình báo lỗi và người bấm phải lưu lại để dựng lại.
+     Đơn còn một dòng KHÔNG có nguồn giá nào là CHƯA BIẾT (NULL), không bao giờ ghi tổng thiếu dưới nhãn giá báo. Đơn không có dòng nào có giá báo giữ luật đóng băng 11/09/2026.
    - Ảnh chụp kỳ ĐÃ CHỐT (lương khoá, review FINAL) không đổi. **NHƯNG** lượt quyết toán lương tự động (tháng
      M+2 tính lại kỳ M bằng tỷ lệ đã chốt, luật 71) đọc số HÔM NAY — MKT đổi giá báo trong khoảng đó thì máy
-     sinh dòng "Quyết toán … truy thu / truy lĩnh" cho phần lợi nhuận đổi theo giá báo. Chờ chủ shop quyết có
+     sinh dòng "Quyết toán … truy thu / truy lĩnh" cho phần **% lợi nhuận toàn shop** (`totalProfit` đi theo giá vốn
+     shop = giá báo hiện tại). Phần lợi nhuận cá nhân MKT đi theo giá báo NGÀY LÊN ĐƠN (`cogsDeliveredMkt`) nên chỉ đổi
+     ở mã chưa có giá báo ngày lên đơn. Chờ chủ shop quyết có
      giữ hệ quả này không.
 2. **Phiếu nhập giữ luật 13**: đơn giá phiếu nhập mới = giá báo MKT theo ngày nhập.
 3. Giá vốn KẾ HOẠCH vẫn sửa / áp dụng được ở Trung tâm giá vốn và nút bút BCLN để xem kịch bản (chế độ

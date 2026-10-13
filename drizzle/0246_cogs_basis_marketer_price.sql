@@ -1,7 +1,7 @@
 -- ═══════ GIÁ VỐN THỰC TẾ = GIÁ BÁO MKT HIỆN TẠI (chủ shop chốt 13/10/2026) ═══════
 --
--- Thêm căn cứ giá vốn 'MARKETER_PRICE' cho canonical_order_outcome: đơn mà MỌI dòng có giá báo MKT
--- đang hiệu lực mang căn cứ này và KHÔNG đóng băng giá vốn ghi nhận (lib/queries/canonical-outcome.ts,
+-- Thêm căn cứ giá vốn 'MARKETER_PRICE' cho canonical_order_outcome: đơn có ÍT NHẤT MỘT dòng có giá báo MKT
+-- đang hiệu lực (và không dòng nào thiếu mọi nguồn giá) mang căn cứ này và KHÔNG đóng băng giá vốn ghi nhận (lib/queries/canonical-outcome.ts,
 -- lib/queries/current-marketer-cost.ts, docs/cost-center.md mục 5).
 --
 -- CHỈ NỚI RÀNG BUỘC — không đổi dữ liệu nào. Viết tay, idempotent: DROP IF EXISTS rồi ADD NOT VALID

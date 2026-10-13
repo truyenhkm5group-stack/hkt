@@ -276,7 +276,16 @@ export async function testCostCenter(db: Db) {
     await db.update(schema.marketerPrices).set({ price: 165_000 }).where(and(eq(schema.marketerPrices.productId, PID), eq(schema.marketerPrices.price, 170_000)));
     await dungLai(PID);
     assert.deepEqual(await ghiNhan(), { basis: "MARKETER_PRICE", cogs: 165_000 + 50_000 }, "đơn hỗn hợp KHÔNG đóng băng: giá báo đổi ⇒ giá vốn ghi nhận đổi");
-    await db.delete(schema.orderItems).where(eq(schema.orderItems.id, `${P}i-d0-mix`));
+    // Dòng thứ hai KHÔNG có nguồn giá nào (không phiếu, không giá Pancake, không giá nhập mẫu) ⇒ cả đơn CHƯA BIẾT,
+    // không bao giờ ghi tổng thiếu dòng dưới nhãn giá báo "đo được" (AGENTS.md mục 42).
+    await db.insert(schema.products).values({ id: `${P}nogia`, name: "Hàng chưa có giá", customId: "GVTT-NOGIA" }).onConflictDoNothing();
+    await db.insert(schema.productVariants).values({ id: `${P}nogia-v`, productId: `${P}nogia`, sku: "GVTT-NOGIA-1", retailPrice: 99_000 }).onConflictDoNothing();
+    await db.insert(schema.orderItems).values({ id: `${P}i-d0-nogia`, orderId: `${P}o-d0`, variantId: `${P}nogia-v`, productId: `${P}nogia`, sku: `${P}nogia-v`, productName: "Hàng chưa có giá", variationDetail: "-", quantity: 1, lineTotal: 99_000, unitCost: 0, isBonus: false });
+    await dungLai(PID);
+    const chuaBiet = await ghiNhan();
+    assert.equal(chuaBiet?.cogs, null, "còn dòng không nguồn giá ⇒ giá vốn ghi nhận CHƯA BIẾT (NULL), không phải tổng thiếu");
+    assert.notEqual(chuaBiet?.basis, "MARKETER_PRICE", "không mang nhãn giá báo khi con số chưa đủ");
+    await db.delete(schema.orderItems).where(inArray(schema.orderItems.id, [`${P}i-d0-mix`, `${P}i-d0-nogia`]));
     await db.update(schema.marketerPrices).set({ price: 170_000 }).where(and(eq(schema.marketerPrices.productId, PID), eq(schema.marketerPrices.price, 165_000)));
     await dungLai(PID);
     assert.equal((await lay("ACTUAL")).expectedCogs, Math.round(tt4.expectedQty * 170_000));
@@ -310,8 +319,8 @@ export async function testCostCenter(db: Db) {
       await db.delete(schema.stockReceiptItems).where(inArray(schema.stockReceiptItems.receiptId, phieu.map((x) => x.id)));
       await db.delete(schema.stockReceipts).where(inArray(schema.stockReceipts.id, phieu.map((x) => x.id)));
     }
-    await db.delete(schema.productVariants).where(inArray(schema.productVariants.id, [VID, `${P}mix-v`]));
-    await db.delete(schema.products).where(inArray(schema.products.id, [PID, `${P}mix`]));
+    await db.delete(schema.productVariants).where(inArray(schema.productVariants.id, [VID, `${P}mix-v`, `${P}nogia-v`]));
+    await db.delete(schema.products).where(inArray(schema.products.id, [PID, `${P}mix`, `${P}nogia`]));
     await db.delete(schema.settings).where(eq(schema.settings.key, ESTIMATED_COST_KEY));
     clearMemo();
   }

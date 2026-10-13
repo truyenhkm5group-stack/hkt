@@ -68,7 +68,8 @@ async function dungLaiGiaVon(user: { id: string; email: string }, productId: str
     await audit({ userId: user.id, userEmail: user.email, action: "MARKETER_PRICE_COGS_REBUILD", entity: "MARKETER_PRICE", entityId: productId, detail: { code, orders: r.orders } });
     return null;
   } catch (e) {
-    return { error: `Đã lưu giá báo ${code}, nhưng dựng lại giá vốn các đơn bị lỗi (${e instanceof Error ? e.message.slice(0, 120) : "không rõ"}) — job đồng bộ sẽ dựng lại; báo kỹ thuật nếu sau 30 phút số chưa đổi.` };
+    console.error("[giá báo] dựng lại giá vốn lỗi", productId, e);
+    return { error: `Đã lưu giá báo ${code}, nhưng dựng lại giá vốn các đơn của mã bị lỗi — báo cáo có thể còn giá vốn cũ. Bấm lưu lại dòng giá này để thử dựng lại; vẫn lỗi thì báo kỹ thuật.` };
   } finally {
     clearMemo();
   }
@@ -99,11 +100,11 @@ export async function setMarketerPrice(input: unknown): Promise<Result> {
   await audit({ userId: user.id, userEmail: user.email, action: "MARKETER_PRICE_SET", entity: "MARKETER_PRICE", entityId: row.id, detail: { code, price: d.price, effectiveFrom: d.effectiveFrom, reason: d.reason } });
   // Giá báo là GIÁ VỐN THỰC TẾ của mã (chủ shop chốt 13/10/2026) ⇒ dựng lại giá vốn mọi đơn của mã, rồi xoá đệm báo cáo.
   const dung = await dungLaiGiaVon(user, product.id, code);
-  if (dung) return dung;
+  // Làm mới trang CẢ khi dựng lại lỗi: giá báo đã lưu thật.
   revalidatePath("/inventory/workshop");
   revalidatePath("/payroll");
   revalidatePath("/reports");
-  return { ok: true };
+  return dung ?? { ok: true };
 }
 
 export async function deleteMarketerPrice(id: string): Promise<Result> {
@@ -117,11 +118,11 @@ export async function deleteMarketerPrice(id: string): Promise<Result> {
   await db.delete(schema.marketerPrices).where(eq(schema.marketerPrices.id, id));
   await audit({ userId: user.id, userEmail: user.email, action: "MARKETER_PRICE_DELETE", entity: "MARKETER_PRICE", entityId: id, detail: { code: row.productCode, price: row.price, effectiveFrom: row.effectiveFrom, setBy: row.setBy } });
   const dung = await dungLaiGiaVon(user, row.productId, row.productCode);
-  if (dung) return dung;
+  // Làm mới trang CẢ khi dựng lại lỗi: giá báo đã lưu thật.
   revalidatePath("/inventory/workshop");
   revalidatePath("/payroll");
   revalidatePath("/reports");
-  return { ok: true };
+  return dung ?? { ok: true };
 }
 
 // ─────────── Phiếu nhập CŨ ghi giá 0 → định giá theo giá báo MKT (chủ shop chốt 25/09/2026) ───────────

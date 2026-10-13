@@ -17,8 +17,9 @@ import { rowsOf } from "@/lib/sql-rows";
  * KHÔNG áp `marketerPriceCutoff()`: mốc ấy là ngày bắt đầu TÍNH LƯƠNG MKT theo giá báo, không phải
  * ngày giá báo bắt đầu là giá vốn. Chủ shop chốt "mọi đơn".
  *
- * Kỳ ĐÃ CHỐT không đổi: bảng lương / review đã chốt đọc ẢNH CHỤP (AGENTS.md mục 21), không đọc biểu
- * thức này.
+ * ẢNH CHỤP kỳ đã chốt không đổi (bảng lương / review đã chốt — AGENTS.md mục 21). NHƯNG quyết toán lương
+ * M+2 (luật 71) tính lại kỳ M bằng số hôm nay: đổi giá báo ⇒ phần % lợi nhuận toàn shop sinh dòng truy thu /
+ * truy lĩnh (docs/cost-center.md mục 5 — chờ chủ shop quyết).
  *
  * Hiệu năng: tra theo chỉ mục duy nhất `marketer_prices_product_from_uq (product_id, effective_from)`
  * — một lần dò chỉ mục mỗi dòng, bảng giá báo chỉ vài trăm dòng.
