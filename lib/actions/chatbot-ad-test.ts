@@ -6,7 +6,7 @@ import { audit } from "@/lib/audit";
 import { can, requireUser, type SessionUser } from "@/lib/auth/session";
 import { addManualAdSchema, saveAdTestInfoSchema, setAdTestPageSchema, type AdTestView, type ChatReply } from "@/lib/constants/chatbot-ad-bots";
 import type { AdBotPushResult } from "@/lib/integrations/chatbot/ad-bots";
-import { addAdTestColor, addManualAd, chatAdTest, connectPageToBot, setBotPageEnabled, loadAdTestView, removeAdTestColor, removeManualAd, saveAdTestInfo, setAdTestLive, setAdTestPage, uploadAdTestColor } from "@/lib/integrations/chatbot/ad-test";
+import { addAdTestColor, addManualAd, chatAdTest, connectPageToBot, setBotPageEnabled, loadAdTestView, removeAdTestColor, removeManualAd, removePageProduct, saveAdTestInfo, setAdTestLive, setAdTestPage, uploadAdTestColor } from "@/lib/integrations/chatbot/ad-test";
 
 /**
  * Nút "Chat test" ở Thư viện Media · tab ④. Người chạy camp (ideas:write) hoặc người giữ kịch bản bot (cs:config) đều dùng
@@ -135,6 +135,16 @@ export async function removeManualAdAction(adId: string) {
   if (!r.ok) return { error: r.error } satisfies Fail;
   await audit({ userId: user.id, userEmail: user.email, action: "CHATBOT_AD_BOT_SWITCH", entity: "CHATBOT_AD_TEST", entityId: adId, after: { removedManualAd: true } });
   return done(r.push, "Đã bỏ quảng cáo dựng tay — bot thôi dùng bot riêng của nó.");
+}
+
+/** Bỏ "Sản phẩm của page": bot thôi dùng mẫu mới riêng của page đó. */
+export async function removePageProductAction(pageId: string) {
+  const user = await requireUser();
+  if (!allowed(user)) return { error: "Bạn không có quyền chat test." } satisfies Fail;
+  const r = await removePageProduct(String(pageId ?? ""));
+  if (!r.ok) return { error: r.error } satisfies Fail;
+  await audit({ userId: user.id, userEmail: user.email, action: "CHATBOT_AD_BOT_SWITCH", entity: "CHATBOT_AD_TEST", entityId: `page:${pageId}`, after: { removedPageProduct: true } });
+  return done(r.push, "Đã bỏ sản phẩm của page — bot quay lại tư vấn theo danh mục của page.");
 }
 
 const connectSchema = z.object({ campKey: z.string().min(1).max(64), token: z.string().trim().max(4000).optional() });

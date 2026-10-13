@@ -7,7 +7,7 @@ import { toast } from "sonner";
 import { ChatTestButton } from "@/app/(dashboard)/marketing/creatives/chat-test";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { addManualAdAction, removeManualAdAction } from "@/lib/actions/chatbot-ad-test";
+import { addManualAdAction, removeManualAdAction, removePageProductAction } from "@/lib/actions/chatbot-ad-test";
 
 /**
  * Quảng cáo DỰNG TAY trên Trình quản lý quảng cáo Facebook (không qua Thư viện Media): dán ID quảng cáo + chọn fanpage ⇒
@@ -83,6 +83,67 @@ export function RemoveManualAdButton({ adId }: { adId: string }) {
         if (!window.confirm("Bỏ quảng cáo này khỏi danh sách? Bot sẽ thôi dùng bot riêng của nó.")) return;
         start(async () => {
           const r = await removeManualAdAction(adId);
+          if ("error" in r) toast.error(r.error);
+          else toast.success(r.message);
+          router.refresh();
+        });
+      }}
+    >
+      <Trash2 className="size-4" />
+      Bỏ
+    </Button>
+  );
+}
+
+/**
+ * "Sản phẩm của page": chọn fanpage ⇒ mở khung Chat test với khoá `page:<pageId>` — tải ảnh từng màu, nhập tên · giá ·
+ * chất vải · size · ưu đãi, chat thử, rồi bật. Bot của page đó chỉ tư vấn theo đúng các thông tin này.
+ */
+export function PageProductForm({ pages, usedPageIds }: { pages: { id: string; name: string; inBot: boolean }[]; usedPageIds: string[] }) {
+  const used = new Set(usedPageIds);
+  const [pageId, setPageId] = useState("");
+  const [opened, setOpened] = useState<string | null>(null);
+  return (
+    <div className="space-y-2">
+      <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
+        <label className="grid gap-1 text-xs">
+          <span className="text-muted-foreground">Fanpage bán mẫu mới</span>
+          <select className="h-8 rounded-md border bg-background px-2 text-sm" value={pageId} onChange={(e) => setPageId(e.target.value)}>
+            <option value="">— chọn fanpage —</option>
+            {pages.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}
+                {used.has(p.id) ? " (đã có sản phẩm — mở để sửa)" : ""}
+                {p.inBot ? "" : " (bot chưa có token)"}
+              </option>
+            ))}
+          </select>
+        </label>
+        <div className="flex items-end">
+          <Button size="sm" disabled={!pageId} onClick={() => setOpened(`page:${pageId}`)}>
+            <Plus className="size-4" />
+            Mở &amp; nhập sản phẩm
+          </Button>
+        </div>
+      </div>
+      {!pages.length ? <p className="text-xs text-amber-700 dark:text-amber-400">Không đọc được danh sách fanpage (bot chat hoặc Pancake chưa kết nối) — kiểm trang Bot chat bán hàng.</p> : null}
+      {opened ? <ChatTestButton key={opened} campKey={opened} defaultOpen /> : null}
+    </div>
+  );
+}
+
+export function RemovePageProductButton({ pageId }: { pageId: string }) {
+  const router = useRouter();
+  const [pending, start] = useTransition();
+  return (
+    <Button
+      size="sm"
+      variant="ghost"
+      disabled={pending}
+      onClick={() => {
+        if (!window.confirm("Bỏ sản phẩm của page này? Bot sẽ quay lại tư vấn theo danh mục / hướng dẫn riêng của page.")) return;
+        start(async () => {
+          const r = await removePageProductAction(pageId);
           if ("error" in r) toast.error(r.error);
           else toast.success(r.message);
           router.refresh();

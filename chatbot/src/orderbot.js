@@ -83,7 +83,7 @@ export class OrderBot {
   notify(pageId, conversationId, messages, customerName = "", adIds = [], { dueNow = false } = {}) {
     if (!this.enabledFor(pageId)) return;
     // Hoi thoai cua MAU TEST MOI (chua co tren POS): khong len don (chu shop: chi len don khi mau thang)
-    if (adBots.testProductForConversation(conversationId, adIds)) return;
+    if (adBots.testProductForConversation(conversationId, adIds, pageId)) return;
     const f = this.bot.customerFacts(pageId, messages);
     if (!f.phone) return; // chua co SDT -> chua theo doi
     const key = String(conversationId);
@@ -163,7 +163,7 @@ export class OrderBot {
       if (defaultCode) it.defaultCode = defaultCode;
       const tenPage = [this.bot.pageNames.get(pageId), this.bot.pancakeNames?.get(pageId)];
       const blockedCodes = blockedCodesFor(tenPage);
-      const offCatalog = offCatalogPage(tenPage);
+      const offCatalog = offCatalogPage(tenPage) || !!adBots.pageBot(pageId);
       const r = await orderSync.syncFromConversation({ pageId, pageName: this.bot.pageNames.get(pageId), conversationId, customerName: it.customerName || name, historyText: text, strict: true, addressOverride, defaultCode: it.defaultCode || "", blockedCodes, offCatalog });
       it.lastCheckAt = Date.now();
       it.checks = (it.checks || 0) + 1;
