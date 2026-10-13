@@ -1,10 +1,10 @@
 {
   "name": "tech-lead",
-  "holder": "vm:hkt",
-  "purpose": "Tech Lead — P0 giá vốn",
-  "acquired_at": "2026-10-13T12:23:18.995Z",
-  "heartbeat_at": "2026-10-13T13:04:53.478Z",
-  "expires_at": "2026-10-13T14:04:53.478Z",
-  "generation": 1,
-  "token_hash": "a53c07d8f25231eccb02f42f13e3f7d9849428cdda4d138166760ea6cbe04591"
+  "holder": "DESKTOP-56TH98Y:wt-team",
+  "purpose": "Team tiếp quản P0 giá vốn sau khi khoá của vm:hkt hết hạn",
+  "acquired_at": "2026-10-13T14:34:45.926Z",
+  "heartbeat_at": "2026-10-13T14:34:45.926Z",
+  "expires_at": "2026-10-13T15:34:45.926Z",
+  "generation": 2,
+  "token_hash": "2145e7b0411ddb805ac2c0677a8fbc05045c0e058421d9c57b7ac627c5c1720e"
 }
