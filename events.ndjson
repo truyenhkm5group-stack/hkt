@@ -2294,3 +2294,5 @@
 {"at":"2026-10-13T03:33:18.513Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#824 @ 4f468cdecc12 · Chỉ đổi trạng thái giữ; test khẳng định không câu bot/BOT_SENT/đơn/lịch follow-up mới; rollback có điều kiện chưa có trả lời; mặc định chạy thử"}
 {"at":"2026-10-13T04:34:45.156Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"customer-360","detail":"#804 @ 83dd92b2772e → 3a0ba0224925 (MERGE_ISOLATED · HIGH · gates success)"}
 {"at":"2026-10-13T04:35:48.157Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DEPLOY_DISPATCHED","detail":"3a0ba0224925 · run 38347177445 https://github.com/truyenhkm5group-stack/hkt/actions/runs/38347177445"}
+{"at":"2026-10-13T04:57:02.219Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"CLAIM","mission":"inbox-perf-probe-topn","detail":"RUNNING · 1 mẫu phạm vi · MEDIUM"}
+{"at":"2026-10-13T04:57:02.219Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"OVERLAP_ACCEPTED","mission":"inbox-perf-probe-topn","detail":"OVERLAP_ACCEPTED với hslc-bot-tin-sot-429: phạm vi scripts/inbox-perf-probe.ts — cách tích hợp: chỉ script đo"}
