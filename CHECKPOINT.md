@@ -6,6 +6,43 @@
 > Nguồn sự thật readiness: `docs/saas/LAUNCH_GATE.md` trên main. Readiness chỉ tăng bằng BẰNG CHỨNG PRODUCTION, không bằng mã.
 
 
+
+## Checkpoint 2026-10-13 ~19:00 VN — BÀN GIAO MAX → TEAM (Max 89% tuần) — ĐỌC PHẦN NÀY TRƯỚC
+
+**PRODUCTION:** `b5296e6d` (main tới #826). Deploy «đỏ» = CỐ Ý (qa DEGRADED trong verify-migrations); kiểm smoke trong log SSH.
+**OWNER khoá gộp/deploy:** phiên Max đang cầm `integration-lead` — Team CHỈ `lease acquire integration-lead` SAU khi Max `lease release`
+(hoặc khi lease hết hạn tự nhiên — kiểm `npm run ai -- lease status`). Một task = một owner; Team làm trong cây `wt-team`, KHÔNG ghi vào cây `wt-*` khác.
+
+### ĐANG CHẠY lúc bàn giao (đừng chạy trùng)
+- Lượt nền phía Max: gộp **#830** (trần job kiểm thử 35→45′) → gộp **#831** (probe nút nóng + JIT) → đo `inbox-perf-probe "--org=hslc-hmt-shop --samples=3 --analyze"`.
+  Team: kiểm `gh`/API — #830/#831 đã merged chưa; nếu chưa và Max đã nhả khoá thì tự gộp theo thứ tự đó, rồi chạy probe.
+- Vòng gia hạn khoá phía Max (tự dừng khi phiên Max dừng; lease 60′ tự hết).
+
+### P0 INBOX — trạng thái + bước kế (owner: Team tiếp quản)
+- Số đo HSLC: listInbox p50 13–19 s (hàng 7–12 s, đếm-thẻ 5–6 s), loadInboxThread 0,1–1 s; «chưa đọc» đường LƯU SẴN (0245 đủ); state nhỏ (TB 1,3 KB).
+- GIẢ THUYẾT MẠNH: **JIT Postgres** (cost ước ~300 triệu do nhánh lùi #803 lập kế hoạch nhưng 0 vòng chạy) — tiền lệ `db/index.ts::chayKhongJit`.
+  Xác nhận bằng dòng «JIT … biên dịch» của probe #831.
+- Bản sửa sẵn: `fix/inbox-list-subplans` @ `4ccf931b` (xếp chồng trên `fix/inbox-list-perf` @ `ff284930` = PR **#827**): 5 câu quét cả hộp thư
+  chạy `set local jit = off` qua `chayKhongJit` + state giải nén 1 lần + câu lấy hàng 2 pha. CHƯA PR, CHƯA `npm test` đủ.
+  Bước: (1) probe xác nhận JIT; (2) #827: `handoff inbox-list-perf` lại @ff284930 → review → merge+deploy (client: bỏ router.refresh khi chuyển
+  hội thoại, tự làm mới không chồng lượt, thử lại 20 s); (3) rebase subplans lên main (`rebase --onto origin/main 1027a21d` nếu #827 squash),
+  npm test đủ, `handoff inbox-list-subplans` → PR → review → merge+deploy → đo lại (mục tiêu p95 < 2 s).
+- Việc sau: phân trang con trỏ 30–50, memo bộ đếm, «chờ trả lời» (WAITING_REPLY_SQL) gộp vào định nghĩa #803 (cần cột lưu sẵn mới), «AI gửi hỏng ⇒ vẫn chờ».
+
+### ĐÃ XONG hôm nay (đừng làm lại)
+- #821 hậu mãi: AI im 751→149, KHÔNG CHỦ 127→0. Release POST_ORDER cũ **39/39 xong** (4 lô; mã lượt rel-20261013064629-kmi3 · rel-20261013091310-ftwe ·
+  rel-20261013102634-5wgs · rel-20261013112843-yzkn — hoàn tác `--rollback=<mã> --apply`); 66 hội thoại còn lại cần NGƯỜI (49–50 khách đang chờ).
+- #819 giỏ dính: CART_INTENT_DRIFT 13/368 → **0/218**, ORDER_READY_LOOP 22/215 → **1/99**. #804 Customer 360, #823, #824, #826 trên production.
+
+### KHÁC
+- **Trung tâm giá vốn ERP** (ưu tiên chủ shop 13/10): CHƯA có sứ mệnh/đặc tả trong sổ (chỉ có `unknown-cost-not-zero` P2 VERIFYING). Team: hỏi chủ shop
+  đặc tả hoặc đọc yêu cầu gốc, rồi `claim` MỘT sứ mệnh — không tự bịa phạm vi. Luật liên quan: AGENTS 3.13 (giá vốn «sống»), 3.14–3.15, 3.18.
+- qa 0245: rehearsal #814 (nháp, PASS review) — chạy sau P0 inbox, không cùng lúc deploy.
+- Chủ shop: xếp người phòng «Kinh doanh & CSKH» HSLC; dọn Google Drive.
+
+### KHÔNG ĐƯỢC
+Không bật API trả phí / usage credits; không chép credential giữa hai tài khoản; không bỏ PR gates/review; không ghi production ngoài ops có chạy thử + duyệt.
+
 ## Checkpoint 2026-10-13 ~10:00 VN (Integration Lead · phiên Max) — ĐỌC PHẦN NÀY TRƯỚC
 
 **PRODUCTION_SHA:** `935ffdb2` (#821) · **MAIN:** kiểm `git log origin/main -5` (đang gộp #823, #804). Deploy «đỏ» hiện nay là CỐ Ý:
