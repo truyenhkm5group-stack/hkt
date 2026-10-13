@@ -2,6 +2,7 @@ import { sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { ORDER_OUTCOME } from "@/lib/queries/return-rate";
 import { ORDER_COGS } from "@/lib/queries/cogs";
+import { constraintAllowsMarketerPrice, rawCurrentMarketerCost } from "@/lib/queries/current-marketer-cost";
 import { CANONICAL_OUTCOME_VERSION } from "@/lib/constants/canonical-outcome";
 
 /**
@@ -32,7 +33,7 @@ const COGS_TRUE_UP_ACTOR = "hệ thống";
  * NULL / 'NONE' = 0. Chỉ phiếu nhập kho (≥ 2) mới được coi là chứng từ.
  */
 function basisRank(basis: ReturnType<typeof sql>) {
-  return sql`case ${basis} when 'RECEIPT_BEFORE' then 3 when 'RECEIPT_AFTER' then 2 when 'PROVISIONAL' then 1 else 0 end`;
+  return sql`case ${basis} when 'MARKETER_PRICE' then 4 when 'RECEIPT_BEFORE' then 3 when 'RECEIPT_AFTER' then 2 when 'PROVISIONAL' then 1 else 0 end`;
 }
 
 /**
@@ -49,6 +50,8 @@ export async function rematerializeOutcomes(orderIds?: string[]): Promise<{ rows
   if (ids && !ids.length) return { rows: 0 };
 
   const scope = ids ? sql`${schema.orders.id} in ${ids}` : sql`true`;
+  // Lược đồ cũ (chưa 0246, đang được phục vụ tạm) ⇒ không ghi căn cứ MARKETER_PRICE — lùi về luật cũ thay vì CHECK nổ.
+  const coGiaBao = await constraintAllowsMarketerPrice(db, "canonical_cogs_basis_check");
 
   /**
    * Mốc ghi nhận doanh thu = ngày hàng tới tay khách.
@@ -74,16 +77,26 @@ export async function rematerializeOutcomes(orderIds?: string[]): Promise<{ rows
    * Khác `ORDER_COGS` (cột `cogs` — ước tính "sống" theo phiếu gần nhất tính tới hôm nay): ở đây
    * phiếu "trước ngày giao" được ưu tiên, nên nhập lô mới sau này không làm số đã ghi nhận trôi.
    */
+  /*
+    ─── 13/10/2026: GIÁ BÁO MKT HIỆN TẠI ĐỨNG TRÊN CÙNG (chủ shop chốt "giá vốn thực tế = giá báo MKT
+    hiện tại cho mọi đơn") ───
+    Dòng có giá báo đang hiệu lực mang hạng 4 (`MARKETER_PRICE`). Cả đơn chỉ mang căn cứ ấy khi MỌI dòng
+    có giá báo (căn cứ cả đơn = mắt xích yếu nhất, như cũ). Đơn mang `MARKETER_PRICE` KHÔNG đóng băng:
+    giá báo đổi thì giá vốn ghi nhận đi theo (xem nhánh `GIA_BAO_SONG` ở lượt upsert) — đúng điều chủ
+    shop chọn. Đơn chưa đủ giá báo giữ nguyên luật đóng băng 11/09/2026.
+  */
   const COST_FACTS = sql`(
     select
       coalesce(min(case
+        when l.mkt_cost is not null then 4
         when l.before_cost is not null then 3
         when l.after_cost is not null then 2
         when l.provisional is not null then 1
         else 0 end), 0) as rank,
-      sum(l.quantity * coalesce(l.before_cost, l.after_cost, l.provisional))::bigint as cost
+      sum(l.quantity * coalesce(l.mkt_cost, l.before_cost, l.after_cost, l.provisional))::bigint as cost
     from (
       select oi.quantity,
+        ${coGiaBao ? rawCurrentMarketerCost("coalesce(pv2.product_id, oi.product_id)") : sql`null::int`} as mkt_cost,
         (select ri.unit_cost from stock_receipt_items ri join stock_receipts r on r.id = ri.receipt_id
           where ri.variant_id = oi.variant_id and ri.unit_cost > 0 and r.received_at <= (${RECOGNIZED_AT})
           order by r.received_at desc, r.created_at desc limit 1) as before_cost,
@@ -96,7 +109,7 @@ export async function rematerializeOutcomes(orderIds?: string[]): Promise<{ rows
     ) l
   )`;
 
-  const BASIS_FROM_RANK = sql`case k.rank when 3 then 'RECEIPT_BEFORE' when 2 then 'RECEIPT_AFTER' when 1 then 'PROVISIONAL' else 'NONE' end`;
+  const BASIS_FROM_RANK = sql`case k.rank when 4 then 'MARKETER_PRICE' when 3 then 'RECEIPT_BEFORE' when 2 then 'RECEIPT_AFTER' when 1 then 'PROVISIONAL' else 'NONE' end`;
 
   /**
    * CHỐT LẠI MỘT LẦN — điều kiện, viết một chỗ để đọc được:
@@ -112,6 +125,13 @@ export async function rematerializeOutcomes(orderIds?: string[]): Promise<{ rows
     and (${basisRank(sql`excluded.cogs_basis`)}) >= 2
     and (${basisRank(sql`excluded.cogs_basis`)}) > (${basisRank(sql`canonical_order_outcome.cogs_basis`)})
   )`;
+
+  /**
+   * GIÁ BÁO SỐNG: dòng mà căn cứ MỚI hoặc căn cứ ĐANG LƯU là giá báo MKT thì lấy giá trị mới — không đóng
+   * băng (giá báo đổi ⇒ giá vốn đổi; mã thôi có giá báo ⇒ trở về bậc thang chứng từ kho). Không đụng
+   * cột `trued_up_*`: đây không phải lượt "chốt lại một lần" mà là luật của căn cứ giá báo.
+   */
+  const GIA_BAO_SONG = sql`(excluded.cogs_basis = 'MARKETER_PRICE' or canonical_order_outcome.cogs_basis = 'MARKETER_PRICE')`;
 
   return db.transaction(async (tx) => {
     // KHÔNG xoá rồi ghi lại: giá vốn ĐÃ CHỐT phải sống sót qua mọi lần dựng lại, nếu không thì việc
@@ -140,17 +160,19 @@ export async function rematerializeOutcomes(orderIds?: string[]): Promise<{ rows
         -- ĐÃ CHỐT LÀ KHÔNG ĐỔI — trừ đúng hai ngoại lệ: (a) chưa biết thì điền khi biết; (b) chốt lại
         -- MỘT LẦN khi có chứng từ mạnh hơn. Một phiếu nhập cùng hạng không được viết lại kỳ đã qua.
         recognized_cogs = case
+          when ${GIA_BAO_SONG} then excluded.recognized_cogs
           when ${TRUE_UP} then excluded.recognized_cogs
           when canonical_order_outcome.recognized_cogs is null then excluded.recognized_cogs
           else canonical_order_outcome.recognized_cogs end,
         cogs_basis = case
+          when ${GIA_BAO_SONG} then excluded.cogs_basis
           when ${TRUE_UP} then excluded.cogs_basis
           when canonical_order_outcome.recognized_cogs is null and excluded.cogs_basis is not null then excluded.cogs_basis
           else coalesce(canonical_order_outcome.cogs_basis, excluded.cogs_basis) end,
         recognized_at   = coalesce(canonical_order_outcome.recognized_at, excluded.recognized_at),
-        trued_up_at         = case when ${TRUE_UP} then now() else canonical_order_outcome.trued_up_at end,
-        trued_up_from       = case when ${TRUE_UP} then canonical_order_outcome.recognized_cogs else canonical_order_outcome.trued_up_from end,
-        trued_up_from_basis = case when ${TRUE_UP} then canonical_order_outcome.cogs_basis else canonical_order_outcome.trued_up_from_basis end,
+        trued_up_at         = case when ${GIA_BAO_SONG} then canonical_order_outcome.trued_up_at when ${TRUE_UP} then now() else canonical_order_outcome.trued_up_at end,
+        trued_up_from       = case when ${GIA_BAO_SONG} then canonical_order_outcome.trued_up_from when ${TRUE_UP} then canonical_order_outcome.recognized_cogs else canonical_order_outcome.trued_up_from end,
+        trued_up_from_basis = case when ${GIA_BAO_SONG} then canonical_order_outcome.trued_up_from_basis when ${TRUE_UP} then canonical_order_outcome.cogs_basis else canonical_order_outcome.trued_up_from_basis end,
         logic_version = excluded.logic_version,
         computed_at = now()
     `);
@@ -233,6 +255,23 @@ export async function rematerializeOutcomes(orderIds?: string[]): Promise<{ rows
  * Idempotent (chạy lại không đổi kết quả), chạy tiếp được (có trần mỗi lượt), và quan sát được (trả
  * về số đơn đã dựng lại cùng số đơn còn tồn).
  */
+/**
+ * Giá báo MKT của MỘT mã vừa đổi (khai / sửa / xoá) ⇒ dựng lại kết quả của mọi đơn có mã ấy, để giá
+ * vốn — nay đi theo giá báo hiện tại (13/10/2026) — đổi NGAY chứ không đợi lượt job. Sửa đè cùng ngày
+ * hiệu lực hay xoá một dòng giá không để lại dấu thời gian nào cho `rematerializeStale` thấy, nên
+ * lượt này là đường DUY NHẤT bắt được hai trường hợp đó. Chia lô để không giữ một giao dịch quá dài.
+ */
+export async function rematerializeProductOrders(productId: string, batch = 500): Promise<{ orders: number }> {
+  const db = await getDb();
+  const res = await db.execute(sql`
+    select distinct oi.order_id as id
+    from order_items oi left join product_variants pv on pv.id = oi.variant_id
+    where coalesce(pv.product_id, oi.product_id) = ${productId}`);
+  const ids = ((Array.isArray(res) ? res : ((res as { rows?: unknown[] }).rows ?? [])) as { id: string }[]).map((r) => String(r.id));
+  for (let k = 0; k < ids.length; k += batch) await rematerializeOutcomes(ids.slice(k, k + batch));
+  return { orders: ids.length };
+}
+
 export async function rematerializeStale(limit = 2000): Promise<{ rebuilt: number; remaining: number }> {
   const db = await getDb();
   const staleIds = await db.execute(sql`
@@ -255,6 +294,15 @@ export async function rematerializeStale(limit = 2000): Promise<{ rebuilt: numbe
          join stock_receipt_items ri on ri.variant_id = oi.variant_id
          join stock_receipts r on r.id = ri.receipt_id
          where oi.order_id = o.id and r.updated_at > m.computed_at
+       )
+       -- GIA BAO MKT LA GIA VON (13/10/2026): khai / sua gia bao, hoac mot dong gia bao vua toi ngay
+       -- hieu luc, doi gia von cua MOI don co ma do.
+       or exists (
+         select 1 from order_items oi3
+         left join product_variants pv3 on pv3.id = oi3.variant_id
+         join marketer_prices mp on mp.product_id = coalesce(pv3.product_id, oi3.product_id)
+         where oi3.order_id = o.id
+           and (mp.created_at > m.computed_at or (mp.effective_from > m.computed_at and mp.effective_from <= now()))
        )
        -- Sua dong hang cua don (so luong, mau ma, gia von Pancake) cung doi gia von ca don.
        or exists (select 1 from order_items oi2 where oi2.order_id = o.id and o.updated_at > m.computed_at)

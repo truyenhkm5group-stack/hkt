@@ -159,7 +159,8 @@ export async function testCostCenter(db: Db) {
     // Trước khi đặt kế hoạch: chế độ kế hoạch đứng trên giá THẬT và nói ra là chưa đặt.
     const tt0 = await lay("ACTUAL");
     assert.ok(tt0 && tt0.expectedQty > 0, "fixture Q004 phải có SL giao TC ước tính");
-    assert.equal(tt0.expectedCogs, Math.round(tt0.expectedQty * 185_000), "chế độ thực tế = giá phiếu kho 185.000 (giá báo MKT không phải giá vốn)");
+    // Chủ shop chốt 13/10/2026: giá vốn THỰC TẾ = giá báo MKT đang hiệu lực hôm nay (160.000), không phải phiếu 185.000.
+    assert.equal(tt0.expectedCogs, Math.round(tt0.expectedQty * 160_000), "chế độ thực tế = giá báo MKT hiện tại 160.000 (luật 13 mới)");
     assert.equal(tt0.costBasis, "ACTUAL");
     const kh0 = await lay("PLANNED");
     assert.equal(kh0.costBasis, "ACTUAL_NO_PLAN", "chưa đặt giá kế hoạch ⇒ nhãn nói ra, không lặng lẽ dùng giá báo");
@@ -180,7 +181,7 @@ export async function testCostCenter(db: Db) {
 
     // TEST 2 — chế độ thực tế KHÔNG bị giá kế hoạch ghi đè (mã có phiếu kho).
     const tt2 = await lay("ACTUAL");
-    assert.equal(tt2.expectedCogs, Math.round(tt2.expectedQty * 185_000));
+    assert.equal(tt2.expectedCogs, Math.round(tt2.expectedQty * 160_000), "thực tế = giá báo hiện tại, không bị giá kế hoạch 150.000 ghi đè");
     assert.equal(tt2.costBasis, "ACTUAL");
     assert.equal(tt2.plannedCost?.unitCost, 150_000, "ô bút ở chế độ thực tế vẫn mở đúng giá kế hoạch đang lưu");
 
@@ -189,9 +190,9 @@ export async function testCostCenter(db: Db) {
     assert.equal(cc.planned?.unitCost, 150_000);
     assert.equal(cc.history.length, 2, "lịch sử giữ cả hai lần sửa");
     assert.equal(cc.appliedPlanned?.unit, 150_000, "giá đang áp dụng (kế hoạch) = đúng con số BCLN dùng");
-    assert.equal(cc.appliedActual?.unit, 185_000);
+    assert.equal(cc.appliedActual?.unit, 160_000, "đang áp dụng (thực tế) = giá báo MKT hiện tại");
     assert.equal(cc.receipt?.unitCost, 185_000);
-    assert.equal(cc.marketerPrice, 160_000, "giá báo hiện như tham chiếu");
+    assert.equal(cc.marketerPrice, 160_000, "giá báo MKT hiện tại");
     assert.equal(cc.planVsReceipt, -35_000);
     assert.equal((await lay("ACTUAL")).expectedCogs, tt2.expectedCogs, "bộ đệm không phục vụ số kế hoạch cho chế độ thực tế");
 
@@ -212,8 +213,58 @@ export async function testCostCenter(db: Db) {
     await db.insert(schema.stockReceiptItems).values({ receiptId: phieu2.id, variantId: VID, quantity: 20, unitCost: 190_000 });
     clearMemo();
     const tt4 = await lay("ACTUAL");
-    assert.equal(tt4.expectedCogs, Math.round(tt4.expectedQty * 190_000), "giá thực tế = phiếu nhập gần nhất");
+    assert.equal(tt4.expectedCogs, Math.round(tt4.expectedQty * 160_000), "mã có giá báo: lô nhập mới KHÔNG đổi giá vốn thực tế (giá báo hiện tại đứng đầu)");
     assert.equal((await lay("PLANNED")).expectedCogs, kh2.expectedCogs, "phiếu nhập KHÔNG ghi đè giá kế hoạch");
+    // ─── LUẬT 13 MỚI (13/10/2026): giá báo HIỆN TẠI là giá vốn, không đóng băng ───
+    const { rematerializeProductOrders: dungLai } = await import("@/lib/queries/canonical-outcome");
+    const ghiNhan = async () =>
+      (await db.select({ basis: schema.canonicalOrderOutcome.cogsBasis, cogs: schema.canonicalOrderOutcome.recognizedCogs }).from(schema.canonicalOrderOutcome).where(eq(schema.canonicalOrderOutcome.orderId, `${P}o-d0`)))[0];
+    await dungLai(PID);
+    clearMemo();
+    assert.deepEqual(await ghiNhan(), { basis: "MARKETER_PRICE", cogs: 160_000 }, "đơn đã giao, mọi dòng có giá báo ⇒ căn cứ MARKETER_PRICE, giá vốn ghi nhận = giá báo hiện tại");
+    /*
+      CHỨNG MINH cho sổ `MIGRATION_SERVE_COMPAT` mục 0246: trên LƯỢC ĐỒ CŨ (CHECK chưa nhận MARKETER_PRICE — đúng trạng thái
+      NGAY TRƯỚC 0246) lượt dựng lại KHÔNG nổ, căn cứ lùi về bậc thang chứng từ kho; trả ràng buộc về bản 0246 thì luật mới áp lại.
+    */
+    const CHECK_CU = `check ("cogs_basis" is null or "cogs_basis" in ('RECEIPT_BEFORE', 'RECEIPT_AFTER', 'PROVISIONAL', 'NONE')) not valid`;
+    const CHECK_MOI = `check ("cogs_basis" is null or "cogs_basis" in ('MARKETER_PRICE', 'RECEIPT_BEFORE', 'RECEIPT_AFTER', 'PROVISIONAL', 'NONE')) not valid`;
+    const datCheck = async (dinhNghia: string) => {
+      await db.execute(sql.raw(`alter table "canonical_order_outcome" drop constraint if exists "canonical_cogs_basis_check"`));
+      await db.execute(sql.raw(`alter table "canonical_order_outcome" add constraint "canonical_cogs_basis_check" ${dinhNghia}`));
+    };
+    await db.update(schema.canonicalOrderOutcome).set({ cogsBasis: null, recognizedCogs: null }).where(eq(schema.canonicalOrderOutcome.orderId, `${P}o-d0`));
+    await datCheck(CHECK_CU);
+    try {
+      await dungLai(PID);
+      assert.equal((await ghiNhan())?.basis, "RECEIPT_BEFORE", "lược đồ cũ ⇒ không ghi MARKETER_PRICE, lùi về chứng từ kho — KHÔNG nổ CHECK");
+    } finally {
+      await datCheck(CHECK_MOI);
+    }
+    await dungLai(PID);
+    assert.equal((await ghiNhan())?.basis, "MARKETER_PRICE", "có 0246 ⇒ luật giá báo áp lại ở lượt dựng kế tiếp");
+
+    // MKT hạ giá báo từ nửa giờ trước ⇒ giá vốn MỌI đơn của mã (kể cả đơn đã giao) đi theo — KHÔNG đóng băng.
+    await db.insert(schema.marketerPrices).values({ productId: PID, productCode: "GVTT-Q004", price: 170_000, effectiveFrom: gio(0.5), reason: "đổi giá", setBy: "mkt@kiem" });
+    // Dòng giá có hiệu lực NGÀY MAI chưa phải giá hiện tại.
+    await db.insert(schema.marketerPrices).values({ productId: PID, productCode: "GVTT-Q004", price: 999_000, effectiveFrom: new Date(Date.now() + 86_400_000), reason: "tương lai", setBy: "mkt@kiem" });
+    await dungLai(PID);
+    clearMemo();
+    assert.deepEqual(await ghiNhan(), { basis: "MARKETER_PRICE", cogs: 170_000 }, "giá báo đổi ⇒ giá vốn ghi nhận đổi theo; dòng hiệu lực tương lai chưa áp");
+    assert.equal((await lay("ACTUAL")).expectedCogs, Math.round(tt4.expectedQty * 170_000));
+    // Dòng giá báo đang hiệu lực là 0 ₫ = "chưa định giá" ⇒ lùi về phiếu nhập gần nhất, KHÔNG thành giá vốn 0.
+    await db.insert(schema.marketerPrices).values({ productId: PID, productCode: "GVTT-Q004", price: 0, effectiveFrom: gio(0.25), reason: "chưa định giá", setBy: "mkt@kiem" });
+    await dungLai(PID);
+    clearMemo();
+    assert.equal((await lay("ACTUAL")).expectedCogs, Math.round(tt4.expectedQty * 190_000), "giá báo 0 ₫ ⇒ phiếu nhập gần nhất");
+    assert.equal((await ghiNhan())?.basis, "RECEIPT_BEFORE", "mất giá báo ⇒ trở về bậc thang chứng từ kho");
+
+    // Mã thôi có giá báo ⇒ giá thực tế lùi về phiếu nhập GẦN NHẤT (190.000) — đúng bậc thang luật 13.
+    await db.delete(schema.marketerPrices).where(eq(schema.marketerPrices.productId, PID));
+    const { rematerializeProductOrders } = await import("@/lib/queries/canonical-outcome");
+    await rematerializeProductOrders(PID);
+    clearMemo();
+    const tt5 = await lay("ACTUAL");
+    assert.equal(tt5.expectedCogs, Math.round(tt5.expectedQty * 190_000), "không có giá báo ⇒ giá thực tế = phiếu nhập gần nhất");
     assert.equal((await getCostCenter(ky)).find((r) => r.productId === PID)?.planned?.unitCost, 150_000);
 
     console.log("✓ Trung tâm giá vốn: giá kế hoạch sửa ở BCLN áp ngay (chế độ kế hoạch) · thực tế không bị đè · giá báo MKT không đè kế hoạch · phiếu nhập không đổi kế hoạch · lịch sử + ngày hiệu lực · Trung tâm giá vốn = BCLN · theo ngày = theo mã · lương không thấy giá kế hoạch");

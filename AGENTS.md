@@ -51,7 +51,12 @@ deploy dừng, không phải cảnh báo.
 10. **SỔ KHO** (`lib/queries/stock.ts`): `Tồn thực tế = tổng phiếu kho − đã xuất qua ĐVVC`; `Khả dụng bán = Tồn thực tế − đã chốt đơn chưa xuất`. Phiếu kho quy ước DƯƠNG = vào kho (RECEIPT nhập mới, RETURN tái nhập hàng hoàn, ADJUSTMENT tăng), ÂM = ra kho (ISSUE xuất tay, ADJUSTMENT giảm). "Đã xuất" đếm theo `SHIPMENT_LEFT_WAREHOUSE` (mốc lấy hàng / trạng thái vận đơn dựng từ sự kiện Viettel Post) — **không** dùng `ORDER_OUTCOME` (đó là định nghĩa theo tiền) và **không** dùng trạng thái Pancake. Hàng hoàn CHỈ quay lại tồn khi kho lập phiếu RETURN với số đếm thực tế; ĐVVC báo "đã hoàn" là chưa đủ. Hàng tặng (`is_bonus`) vẫn trừ tồn như hàng bán. Mẫu mã chưa có phiếu RECEIPT nào ⇒ `stockKnown = false`, hiện "Chưa có phiếu nhập", không hiện số. Đơn tạo tay rời kho bằng **phiếu giao có ký nhận** (`ORDER_LEFT_WAREHOUSE`, một vị ngữ cho cả "đã xuất" lẫn "thôi giữ"), KHÔNG bằng phiếu XUẤT TAY — làm cả hai là trừ hai lần (`ORDER_OUTCOME.md` mục 11).
 11. Landing: 1 sản phẩm không ghi giá = 499K + 25K ship; gói ≥ 2 = giá gói, free ship; không đoán mẫu mã khi thiếu cả size lẫn màu; không ghi ngược vào Pancake (API không có update-order).
 12. Khách cũ mua lại: chỉ **gợi ý** SĐT/địa chỉ cũ, không tự điền vào đơn.
-13. Giá vốn tính "sống" theo phiếu nhập ERP gần nhất → giá vốn Pancake → giá nhập mẫu mã. **Đơn giá
+13. Giá vốn tính "sống": **GIÁ BÁO MKT ĐANG HIỆU LỰC HÔM NAY** của mã (chủ shop chốt 13/10/2026 —
+    áp cho MỌI đơn ở MỌI báo cáo, kể cả đơn cũ; giá báo 0 ₫ = chưa định giá) → phiếu nhập ERP gần nhất →
+    giá vốn Pancake → giá nhập mẫu mã. Một khối SQL duy nhất: `lib/queries/current-marketer-cost.ts`. Đơn mà
+    mọi dòng có giá báo mang căn cứ `MARKETER_PRICE` và KHÔNG đóng băng giá vốn ghi nhận (đổi giá báo ⇒
+    dựng lại giá vốn mọi đơn của mã); kỳ đã chốt vẫn đọc ảnh chụp. Giá vốn KẾ HOẠCH (Trung tâm giá vốn,
+    `docs/cost-center.md`) là thứ khác: chỉ BCLN chế độ kế hoạch / tạm tính đọc nó. **Đơn giá
     trên phiếu NHẬP HÀNG MỚI = giá báo MKT của mã theo ngày nhập** (chủ shop chốt 25/09/2026 — kho
     không nhập giá; `lib/inventory/receipt-pricing.ts`). Mã chưa có giá báo ⇒ dòng ghi 0 = CHƯA BIẾT.
     Phiếu cũ giá 0 chỉ được lấp qua nút "Định giá phiếu nhập" (xem trước → người bấm), không backfill ngầm.

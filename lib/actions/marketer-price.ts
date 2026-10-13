@@ -6,6 +6,7 @@ import { z } from "zod";
 import { getDb, schema } from "@/db";
 import { audit } from "@/lib/audit";
 import { clearMemo } from "@/lib/cache";
+import { rematerializeProductOrders } from "@/lib/queries/canonical-outcome";
 import { can, requireUser } from "@/lib/auth/session";
 import { marketerPriceCutoff } from "@/lib/constants/marketer-price";
 import { normalizeProductCode } from "@/lib/constants/workshop-ledger";
@@ -78,6 +79,9 @@ export async function setMarketerPrice(input: unknown): Promise<Result> {
     })
     .returning({ id: schema.marketerPrices.id });
   await audit({ userId: user.id, userEmail: user.email, action: "MARKETER_PRICE_SET", entity: "MARKETER_PRICE", entityId: row.id, detail: { code, price: d.price, effectiveFrom: d.effectiveFrom, reason: d.reason } });
+  // Giá báo là GIÁ VỐN THỰC TẾ của mã (chủ shop chốt 13/10/2026) ⇒ dựng lại giá vốn mọi đơn của mã, rồi xoá đệm báo cáo.
+  await rematerializeProductOrders(product.id);
+  clearMemo();
   revalidatePath("/inventory/workshop");
   revalidatePath("/payroll");
   revalidatePath("/reports");
@@ -94,6 +98,8 @@ export async function deleteMarketerPrice(id: string): Promise<Result> {
   if (khoa) return { error: `Dòng giá này đã áp vào kỳ lương đã khoá (${khoa}) — không xoá được` };
   await db.delete(schema.marketerPrices).where(eq(schema.marketerPrices.id, id));
   await audit({ userId: user.id, userEmail: user.email, action: "MARKETER_PRICE_DELETE", entity: "MARKETER_PRICE", entityId: id, detail: { code: row.productCode, price: row.price, effectiveFrom: row.effectiveFrom, setBy: row.setBy } });
+  await rematerializeProductOrders(row.productId);
+  clearMemo();
   revalidatePath("/inventory/workshop");
   revalidatePath("/payroll");
   revalidatePath("/reports");

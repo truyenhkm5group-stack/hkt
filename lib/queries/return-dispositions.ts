@@ -13,6 +13,7 @@ import {
   type ReturnDisposition,
 } from "@/lib/constants/return-disposition";
 import { LAST_RECEIPT_COST_BY_VARIANT } from "@/lib/queries/cost-basis";
+import { rawCurrentMarketerCost } from "@/lib/queries/current-marketer-cost";
 import { returnProductContext, type ReturnProductContext } from "@/lib/returns/product-context";
 import { rowsOf } from "@/lib/sql-rows";
 
@@ -86,6 +87,7 @@ type SubjectRow = {
   sku: string | null;
   color: string | null;
   size: string | null;
+  mkt_cost: number | string | null;
   receipt_cost: number | string | null;
   order_cost: number | string | null;
   variant_cost: number | string | null;
@@ -148,6 +150,7 @@ export function subjectsQuery(where: SQL, opts: { openOnly: boolean; limit?: num
            subj.condition, subj.inspect_note, subj.inspected_at, subj.qty, subj.variant_id,
            pv.product_id, coalesce(p.name, nullif(subj.name_snapshot, ''), '') as product_name,
            coalesce(nullif(pv.sku, ''), subj.sku_snapshot, '') as sku, coalesce(pv.color, '') as color, coalesce(pv.size, '') as size,
+           ${rawCurrentMarketerCost("pv.product_id")} as mkt_cost,
            gia.unit_cost as receipt_cost,
            (select nullif(max(oi.unit_cost), 0) from order_items oi where oi.order_id = coalesce(i.order_id, subj.linked_order_id) and oi.variant_id = subj.variant_id) as order_cost,
            nullif(pv.last_imported_price, 0) as variant_cost
@@ -166,7 +169,9 @@ export function subjectsQuery(where: SQL, opts: { openOnly: boolean; limit?: num
 const num = (v: number | string | null | undefined): number | null => (v === null || v === undefined || v === "" ? null : Number(v));
 
 /** Bậc giá vốn — CÙNG thứ tự với `LINE_UNIT_COST`, bậc cuối CHƯA BIẾT (không phải 0). */
-export function pickUnitCost(r: { receipt_cost: number | string | null; order_cost: number | string | null; variant_cost: number | string | null }): { unitCost: number | null; basis: CostBasis } {
+export function pickUnitCost(r: { mkt_cost?: number | string | null; receipt_cost: number | string | null; order_cost: number | string | null; variant_cost: number | string | null }): { unitCost: number | null; basis: CostBasis } {
+  const mkt = num(r.mkt_cost);
+  if (mkt !== null && mkt > 0) return { unitCost: mkt, basis: "MARKETER_PRICE" };
   const receipt = num(r.receipt_cost);
   if (receipt !== null && receipt > 0) return { unitCost: receipt, basis: "RECEIPT" };
   const order = num(r.order_cost);

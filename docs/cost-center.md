@@ -64,14 +64,16 @@ chỉ ĐIỀN ô, không lưu — biến giá báo thành giá kế hoạch là 
 
 Quyền: xem `reports:nominal`; sửa `reports:assumptions` (như ô cũ).
 
-## 5. Những gì CỐ Ý chưa đổi (cần chủ shop quyết)
+## 5. Quyết định chủ shop 13/10/2026 (sau PR #834)
 
-1. **Phương pháp giá vốn thực tế.** `LINE_UNIT_COST` = đơn giá phiếu NHẬP gần nhất của mẫu mã → giá vốn
-   Pancake trên đơn → giá nhập mẫu mã. Đổi sang bình quân gia quyền / FIFO theo lô là đổi số lợi nhuận
-   mọi báo cáo (AGENTS.md mục 7) — bản này không làm.
-2. **Luật 13 (phiếu nhập định giá bằng giá báo MKT).** Yêu cầu nói "phiếu nhập chỉ ghi đơn giá thực tế
-   của lô". Hôm nay kho không nhập giá, nên bỏ luật 13 ⇒ phiếu mới ghi 0 = CHƯA BIẾT. Cần chủ shop chọn
-   nguồn đơn giá thật cho phiếu (hoá đơn xưởng / giá SX đã chốt) trước khi đổi.
-3. **Q001–Q004 trên production.** Chênh BCLN ↔ SX thực tế là đúng thiết kế (BCLN không đọc sổ xưởng);
-   chênh nhỏ kiểu 149.821 vs 150.000 là bình quân của nhiều mẫu mã khác giá (phiếu cũ / giá Pancake).
-   Con số từng mẫu mã phải đo bằng ops `db-query` (kết quả mã hoá — mục 4) trên máy vận hành.
+1. **Giá vốn thực tế = giá báo MKT đang hiệu lực HÔM NAY, cho MỌI đơn, ở MỌI báo cáo** (lương, BCLN, quảng
+   cáo, kế hoạch SX, giá trị tồn theo mẫu mã, hàng hoàn…). Một khối SQL: `lib/queries/current-marketer-cost.ts`,
+   đứng đầu `LINE_UNIT_COST` · `lineUnitCost` · `ORDER_COGS` · giá vốn ghi nhận lúc giao. Mã chưa khai giá
+   báo (hoặc giá báo đang hiệu lực = 0 ₫) lùi về phiếu nhập gần nhất → Pancake → giá nhập mẫu mã.
+   - Đơn có giá báo ở MỌI dòng mang căn cứ `MARKETER_PRICE` và KHÔNG đóng băng giá vốn ghi nhận: MKT đổi
+     giá báo ⇒ `rematerializeProductOrders` dựng lại giá vốn mọi đơn của mã ngay khi lưu; lượt job
+     `rematerializeStale` bắt dòng giá báo vừa tới ngày hiệu lực. Đơn chưa đủ giá báo giữ luật đóng băng 11/09/2026.
+   - Kỳ ĐÃ CHỐT (lương khoá, review FINAL) đọc ảnh chụp — không đổi.
+2. **Phiếu nhập giữ luật 13**: đơn giá phiếu nhập mới = giá báo MKT theo ngày nhập.
+3. Giá vốn KẾ HOẠCH vẫn sửa / áp dụng được ở Trung tâm giá vốn và nút bút BCLN để xem kịch bản (chế độ
+   "Giá vốn kế hoạch").

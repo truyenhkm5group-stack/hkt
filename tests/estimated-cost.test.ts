@@ -274,31 +274,19 @@ export async function testEstimatedCost(db: Db) {
     assert.equal(ngay.total.expectedCogs, c.expectedCogs, "bảng theo ngày chia ĐÚNG giá vốn của dòng cha — gồm cả phần giá dự tính");
     assert.ok(ngay.days.length > 0 && ngay.days.every((d) => d.cell.cogsUncoveredQty === 0), "mã đã đặt giá dự tính ⇒ ngày không in “—” ở giá vốn");
 
-    // ─── Luật 5' trên báo cáo thật: khai giá báo cho mã C — giá kế hoạch 100.000 đặt tay VẪN THẮNG ───
-    await db.insert(schema.marketerPrices).values({ productId: `${P}pc`, productCode: "GVDT-C", price: 130_000, effectiveFrom: gio(24 * 60), reason: "kiểm luật 5", setBy: "mkt@kiem" });
-    clearMemo();
-    const coGiaBao = await getNominalProfitReport(ky, "ORDERED", undefined, true, true);
-    const c1 = coGiaBao.rows.find((r) => r.code === "GVDT-C")!;
-    assert.equal(c1.estimatedCost?.unitCost, 100_000, "giá báo KHÔNG đè giá kế hoạch đặt tay (lỗi P0 13/10/2026)");
-    assert.equal(c1.estimatedCost?.source, "MANUAL");
-    // Bỏ giá kế hoạch của C (một DÒNG bỏ giá, lịch sử giữ nguyên) ⇒ giá báo thành tham chiếu lùi.
-    await db
-      .insert(schema.settings)
-      .values({
-        key: ESTIMATED_COST_KEY,
-        value: JSON.stringify({
-          [`${P}pa`]: { unitCost: 150_000, reason: "báo giá xưởng", setAt: new Date().toISOString(), setBy: "kiem@thu" },
-          [`${P}pc`]: { history: [{ unitCost: 100_000, reason: "lô thử", setAt: "2026-09-01T00:00:00Z", setBy: null, effectiveFrom: null }, { cleared: true, reason: "bỏ", setAt: new Date().toISOString(), setBy: "kiem@thu", effectiveFrom: null }] },
-        }),
-      })
-      .onConflictDoUpdate({ target: schema.settings.key, set: { value: sql`excluded.value` } });
+    // ─── 13/10/2026: khai giá báo cho mã C ⇒ giá báo hiện tại LÀ giá vốn thực tế (luật 13 mới) — không còn
+    //     là "chỗ trống" để giá kế hoạch / tạm tính lấp; giá kế hoạch 100.000 vẫn lưu, chỉ chế độ kế hoạch đọc. ───
+    await db.insert(schema.marketerPrices).values({ productId: `${P}pc`, productCode: "GVDT-C", price: 130_000, effectiveFrom: gio(24 * 60), reason: "kiểm luật 13", setBy: "mkt@kiem" });
+    const { rematerializeProductOrders } = await import("@/lib/queries/canonical-outcome");
+    await rematerializeProductOrders(`${P}pc`);
     clearMemo();
     const boKeHoach = await getNominalProfitReport(ky, "ORDERED", undefined, true, true);
     const c2 = boKeHoach.rows.find((r) => r.code === "GVDT-C")!;
-    assert.equal(c2.estimatedCost?.unitCost, 130_000, "mã không còn giá kế hoạch: tạm tính theo tham chiếu giá báo");
-    assert.equal(c2.estimatedCost?.source, "MARKETER_PRICE");
-    assert.equal(c2.costBasis, "PROVISIONAL", "nhãn Tạm tính");
-    assert.equal(c2.expectedCogsEstimated, Math.round(2 * (1 - c2.returnRate! / 100) * 130_000), "phần tạm tính đi theo giá báo");
+    assert.equal(c2.cogsUnknownQty, 0, "có giá báo hiện tại ⇒ sản phẩm KHÔNG còn chưa biết giá vốn");
+    assert.equal(c2.estimatedCost, null, "giá thật (giá báo) có rồi ⇒ không tạm tính");
+    assert.equal(c2.costBasis, "ACTUAL");
+    assert.equal(c2.plannedCost?.unitCost, 100_000, "giá kế hoạch vẫn lưu — chế độ kế hoạch đọc nó");
+    assert.equal(c2.expectedCogs, Math.round(2 * 130_000 * (1 - c2.returnRate! / 100)), "giá vốn thực tế đi theo giá báo hiện tại");
     const a2 = boKeHoach.rows.find((r) => r.code === "GVDT-A")!;
     assert.equal(a2.estimatedCost?.source, "MANUAL", "mã chưa khai giá báo giữ số đặt tay");
     assert.equal(a2.expectedCogsEstimated, 450_000);

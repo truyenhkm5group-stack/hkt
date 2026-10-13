@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { and, eq, inArray, like, sql } from "drizzle-orm";
 import { schema, type Db } from "@/db";
 import { clearMemo } from "@/lib/cache";
@@ -72,7 +72,10 @@ export function testCompanyOsReturnsPure() {
   // ───────── Hằng số khớp CHECK ở CSDL ─────────
   const mig = nguon("drizzle/0137_company_os_returns.sql");
   for (const d of RETURN_DISPOSITIONS) assert.ok(mig.includes(`'${d}'`), `CHECK kết cục của migration thiếu ${d}`);
-  for (const b of COST_BASES) assert.ok(mig.includes(`'${b}'`), `CHECK bậc giá vốn thiếu ${b}`);
+  // Ràng buộc bậc giá vốn được nới ở migration SAU (0246 thêm MARKETER_PRICE, chủ shop chốt 13/10/2026) ⇒ đọc bản
+  // MỚI NHẤT định nghĩa `return_dispositions_value_check`, không chỉ 0137.
+  const migGiaVon = readdirSync("drizzle").filter((f) => f.endsWith(".sql")).sort().map((f) => nguon(`drizzle/${f}`)).filter((src) => src.includes("CONSTRAINT \"return_dispositions_value_check\"")).at(-1) ?? mig;
+  for (const b of COST_BASES) assert.ok(migGiaVon.includes(`'${b}'`), `CHECK bậc giá vốn thiếu ${b}`);
   assert.ok(mig.includes(`"return_dispositions_note_check" CHECK ("disposition" <> 'WRITE_OFF' OR length(trim("note")) > 0)`), "huỷ bỏ phải bắt buộc lý do ở CSDL");
   assert.deepEqual(RETURN_DISPOSITIONS.filter((d) => DISPOSITION_NEEDS_NOTE[d]), ["WRITE_OFF"], "danh sách bắt buộc lý do phải khớp CHECK `return_dispositions_note_check`");
   assert.ok(/"actor_user_id" text NOT NULL/.test(mig), "người làm bắt buộc có khoá tài khoản (luật 34)");
