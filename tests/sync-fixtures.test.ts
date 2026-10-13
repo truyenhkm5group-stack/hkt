@@ -80,6 +80,7 @@ import { testAgentRunner, testAgentSandbox, testGithubDeploymentSync, testPhase2
 import { cleanupPrProjectionFixtures, testGithubPrSync, testPrPureMappers, testSyncIncidentPure, testSyncIncidentWatch } from "./tech-pr-projection.test";
 import { cleanupAgentIngestFixtures, testAgentIngestDb, testAgentIngestPure, testAgentIngestSourceGuards } from "./agent-run-ingest.test";
 import { testTestHygiene } from "./test-hygiene.test";
+import { testCheckpointChiDuocThem } from "./checkpoint-append.test";
 import { cleanupAiHealthFixtures, testAiHealthKhongDemLuotTuKiem, testAiHealthSourceGuards } from "./ai-health-selftest.test";
 import { cleanupAiIncidentFixtures, testAiIncidentPure, testAiIncidentSourceGuards, testAiIncidentWatchDb } from "./ai-incident-watch.test";
 import { testMoTaLoiCsdl, testMoTaLoiSourceGuards } from "./db-error-message.test";
@@ -2691,6 +2692,8 @@ async function main() {
   testOrgLinkOrigin();
   testAgentIngestSourceGuards();
   testTestHygiene();
+  // Sổ bàn giao chỉ được THÊM: lượt ghi dựng từ bản đọc trước đã ăn mất chữ của phiên khác 13/10/2026.
+  testCheckpointChiDuocThem();
   testAiHealthSourceGuards();
   testAiIncidentPure();
   testAiIncidentSourceGuards();
