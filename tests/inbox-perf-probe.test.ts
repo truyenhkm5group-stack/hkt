@@ -38,6 +38,7 @@ import {
   planRootOf,
   planStructure,
   queryBlockOf,
+  stateLine,
   shapeHash,
   topLine,
   topQueries,
@@ -53,9 +54,12 @@ const sample = (msv: number, extra: Partial<RenderSample> = {}): RenderSample =>
 
 export function testInboxPerfProbePure() {
   // 1 · arg
-  assert.deepEqual(parseProbeArgs([]), { ok: true, org: null, samples: 5 });
-  assert.deepEqual(parseProbeArgs(["--org=hslc", "--samples=12"]), { ok: true, org: "hslc", samples: 12 });
-  assert.deepEqual(parseProbeArgs(["--org=hslc --samples=3"]), { ok: true, org: "hslc", samples: 3 }, "ô arg một chuỗi có khoảng trắng");
+  assert.deepEqual(parseProbeArgs([]), { ok: true, org: null, samples: 5, analyze: false });
+  assert.deepEqual(parseProbeArgs(["--org=hslc", "--samples=12"]), { ok: true, org: "hslc", samples: 12, analyze: false });
+  assert.deepEqual(parseProbeArgs(["--org=hslc --samples=3"]), { ok: true, org: "hslc", samples: 3, analyze: false }, "ô arg một chuỗi có khoảng trắng");
+  assert.deepEqual(parseProbeArgs(["--org=hslc --samples=3 --analyze"]), { ok: true, org: "hslc", samples: 3, analyze: true }, "cờ --analyze");
+  assert.equal(parseProbeArgs(["--analyze"]).ok, false, "--analyze cần --org");
+  assert.equal(parseProbeArgs(["--org=hslc --analyze --analyze"]).ok, false, "--analyze chỉ một lần");
   for (const bad of [["--samples=0"], ["--samples=21"], ["--samples=abc"], ["--samples=5.5"], ["--org=HSLC"], ["--org=a"], ["--org=x;rm"], ["hslc"], ["--apply"], ["--org=a1", "--org=b2"], ["--samples=3", "--samples=4"], ["--org="]]) {
     assert.equal(parseProbeArgs(bad).ok, false, `arg sai phải bị từ chối: ${bad.join(" ")}`);
   }
@@ -170,6 +174,15 @@ export function testInboxPerfProbePure() {
     /^org#1 chẩn đoán «chưa đọc» 0245: cột đủ 2\/2 · đường đọc TÍNH TRỰC TIẾP \(hàm #803 cho từng hội thoại\) · turn_unhandled NULL 0\/3629 · migration đã áp 246 \(sổ kho 246\) · PG 16\.4$/,
   );
   assert.match(diagLine("org#1", { columns: 0, materialized: null, conversations: null, nullTurns: null, migrationsApplied: null, migrationsInRepo: 246, pgVersion: null }), /cột THIẾU \(0\/2\) · đường đọc — · turn_unhandled NULL — /, "chưa đọc được ⇒ «—», không phải 0");
+  // Cỡ state + kế hoạch có số THẬT (ANALYZE): nút không chạy lần nào được đếm riêng (nhánh coalesce cost cao mà không chạy).
+  const sline = stateLine("org#1", { columns: 2, materialized: true, conversations: 10, nullTurns: 0, migrationsApplied: 1, migrationsInRepo: 1, pgVersion: "16", stateBytes: { avg: 61_440, p95: 102_400, max: 204_800 }, stateKeys: [{ key: "returning", avg: 51_200 }, { key: "bad key; drop", avg: 9 }, { key: "quote", avg: 2_048 }] });
+  assert.equal(sline, "org#1 cột state hội thoại (sau nén): TB 60,0 KB · p95 100,0 KB · max 200,0 KB · nhánh lớn nhất (200 hội thoại mới nhất): returning ~50,0 KB · quote ~2,0 KB");
+  assert.equal(stateLine("org#1", { columns: 2, materialized: true, conversations: 10, nullTurns: 0, migrationsApplied: 1, migrationsInRepo: 1, pgVersion: "16" }), null);
+  const ran = planStructure(
+    planRootOf([{ Plan: { "Node Type": "Aggregate", "Total Cost": 9, "Plan Rows": 1, "Actual Total Time": 5856.2, "Actual Loops": 1, "Actual Rows": 1, Plans: [{ "Node Type": "Index Scan", "Parent Relationship": "SubPlan", "Subplan Name": "SubPlan 8", "Relation Name": "sales_chat_inbound", "Plan Rows": 1, "Total Cost": 75529, "Actual Total Time": 0, "Actual Loops": 0, "Actual Rows": 0 }] } }]),
+  );
+  assert.match(ran[0], /THẬT 5856 ms · 1 nút KHÔNG chạy lần nào$/);
+  assert.match(ran.join("\n"), /\[SubPlan 8\] Index Scan on sales_chat_inbound · ~1 dòng · cost 75529 · THẬT 0 ms \(0 vòng × 0 dòng\)/);
   // Tóm tắt in khối câu chậm + kế hoạch khi có.
   const withSlow = okOrg("shop-cham", 3);
   if (withSlow.result.ok) {
@@ -194,9 +207,12 @@ export function testInboxPerfProbeSource() {
   const raw = [...code.matchAll(/sql`([^`]*)`/g)].map((m) => m[1].trim());
   assert.ok(raw.includes("show default_transaction_read_only"), "hỏi chế độ chỉ đọc");
   for (const r of raw) assert.match(r, /^(show|select) /, `câu SQL thô chỉ ĐỌC: ${r.slice(0, 60)}`);
-  // EXPLAIN của câu chậm: KHÔNG ANALYZE (chỉ lập kế hoạch — câu không chạy lần nữa).
-  assert.match(code, /`EXPLAIN \(FORMAT JSON\) \$\{q\.text\}`/, "EXPLAIN chỉ lập kế hoạch");
-  assert.ok(!/ANALYZE/i.test(code.replace(/không ANALYZE|KHÔNG ANALYZE/g, "")), "không EXPLAIN ANALYZE");
+  // EXPLAIN của câu chậm: mặc định KHÔNG ANALYZE (chỉ lập kế hoạch); ANALYZE CHỈ sau cờ --analyze (cần --org).
+  assert.match(code, /export const EXPLAIN_RUN = "EXPLAIN \(ANALYZE, BUFFERS, FORMAT JSON\)";/);
+  assert.match(code, /explainPlan\(original, t\.slowest, Boolean\(opts\.analyze\)\)/, "ANALYZE chỉ khi cờ bật");
+  assert.match(code, /analyze: args\.analyze/, "cờ đi từ arg đã soát");
+  assert.match(code, /export const EXPLAIN_PLAN_ONLY = "EXPLAIN \(FORMAT JSON\)";/, "mặc định chỉ lập kế hoạch");
+  assert.equal((code.match(/ANALYZE/g) ?? []).length, 1, "chữ ANALYZE chỉ ở MỘT hằng (EXPLAIN_RUN)");
   for (const w of ["sendStaffReplyCore", "claimConversationCore", "assignConversationCore", "releaseConversationCore", "handBackToAiCore", "suggestReplyCore", "addNoteCore", "setConversationLabelsCore", "runJob", "enqueue", "dispatch", "notify", "sendTelegram", "sendLark", "setSetting", "audit(", "migrate"]) {
     assert.ok(!code.includes(w), `script không ghi / không gửi: ${w}`);
   }
@@ -320,13 +336,15 @@ export async function testInboxPerfProbeDb() {
       assert.equal(seen.length, 0, "danh tính chỉ xem KHÔNG ghi staff_seen_at — lượt đo không xoá dấu «chưa đọc» của shop");
     });
     // Câu chậm nhất + chẩn đoán 0245 + EXPLAIN (đường thật trên PGlite).
-    const [rSlow] = await collectInboxPerf([ORG], 2, { orgReadOnly: async () => true }, { explain: true, top: 8 });
+    const [rSlow] = await collectInboxPerf([ORG], 2, { orgReadOnly: async () => true }, { explain: true, analyze: true, top: 8 });
     assert.ok(rSlow.result.ok && rSlow.result.slow && rSlow.result.diag, JSON.stringify(rSlow.result).slice(0, 300));
     const slow = rSlow.result.slow;
     assert.ok(slow.top.some((t) => t.block === "listInbox.đếm-thẻ") && slow.top.some((t) => t.block === "listInbox.hàng"), `bắt được câu của listInbox: ${slow.top.map((t) => t.block).join(", ")}`);
     assert.equal(slow.plans.length, 2, "EXPLAIN hai hình dạng chậm nhất");
     assert.ok(slow.plans.every((p) => p.structure[0] !== "kế hoạch: không đọc được"), `EXPLAIN đọc được: ${JSON.stringify(slow.plans.map((p) => p.structure[0]))}`);
     assert.equal(rSlow.result.diag.columns, 2, "CSDL kiểm thử có đủ cột 0245");
+    assert.ok(slow.plans.every((p) => / THẬT \d+ ms · \d+ nút KHÔNG chạy lần nào$/.test(p.structure[0])), `ANALYZE ra số thật: ${JSON.stringify(slow.plans.map((p) => p.structure[0]))}`);
+    assert.ok(rSlow.result.diag.stateBytes && rSlow.result.diag.stateBytes.max !== null, "đọc được cỡ cột state");
     assert.ok(rSlow.result.diag.conversations !== null && rSlow.result.diag.conversations >= 5);
     assert.ok(rSlow.result.load.cold.every((s) => s.captured === undefined), "chữ câu + tham số rời khỏi mẫu sau khi gộp");
     const rep3 = summarizeInboxPerf([rSlow], { samples: 2, acceptanceCodes: [], top: 8 });

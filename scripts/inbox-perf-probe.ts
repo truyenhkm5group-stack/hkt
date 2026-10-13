@@ -47,7 +47,14 @@
   CẤU TRÚC kế hoạch (loại nút · bảng · chỉ mục · số dòng ước tính · cost) — không điều kiện lọc, không hằng số; chữ câu + kế hoạch đủ
   điều kiện nằm ở phần MÃ HOÁ.
 
-  arg: `[--org=<mã>] [--samples=<n>]` — mặc định mọi tổ chức ACTIVE (trừ nhà) đang bật `ai_sales`, tối đa 10 (workspace nghiệm thu
+  CỠ `state` + `--analyze` (13/10/2026 tối — probe sau #826: HSLC đọc LƯU SẴN, NULL 0/3.742, mà câu lấy hàng vẫn 7.294 ms, câu đếm thẻ
+  5.856 ms; EXPLAIN không ANALYZE chỉ in cost ƯỚC TÍNH — gồm cả nhánh `coalesce` không bao giờ chạy — nên không chỉ ra câu con nào thật
+  sự tốn): in cỡ cột `state` JSONB của hội thoại (TB · p95 · max sau nén — `pg_column_size`, không giải nén) và các NHÁNH lớn nhất (tên khoá
+  do mã đặt, trên 200 hội thoại mới nhất) — mỗi `state->'…'` trong một điều kiện quét cả hộp thư giải nén TOÀN BỘ giá trị TOAST. Cờ
+  `--analyze` (chỉ khi `--org`): `EXPLAIN (ANALYZE, BUFFERS)` hai câu chậm nhất — CHẠY câu SELECT thêm một lần (chỉ đọc, CSDL ép chỉ
+  đọc), in thời gian THẬT · số vòng · số dòng từng nút (vẫn chỉ cấu trúc ở kênh công khai).
+
+  arg: `[--org=<mã>] [--samples=<n>] [--analyze]` — mặc định mọi tổ chức ACTIVE (trừ nhà) đang bật `ai_sales`, tối đa 10 (workspace nghiệm thu
   trước, rồi theo mã); `--samples` 1–20, mặc định 5.
   ops lấy SCRIPT này từ `main` nhưng `lib/` từ IMAGE đang chạy.
 */
@@ -106,16 +113,22 @@ export const ACCEPTANCE_CODES: readonly string[] = ACCEPTANCE_WORKSPACES.map((w)
 
 // ─────────────────────────── PHẦN THUẦN ───────────────────────────
 
-export type ProbeArgs = { ok: true; org: string | null; samples: number } | { ok: false; error: string };
+export type ProbeArgs = { ok: true; org: string | null; samples: number; analyze: boolean } | { ok: false; error: string };
 
-/** Soát arg NGHIÊM: chỉ `--org=<mã>` và `--samples=<1..20>`, mỗi cờ một lần, không tham số trần. HÀM THUẦN. */
+/** Soát arg NGHIÊM: chỉ `--org=<mã>`, `--samples=<1..20>` và cờ `--analyze` (cần `--org`), mỗi cờ một lần, không tham số trần. HÀM THUẦN. */
 export function parseProbeArgs(argv: readonly string[]): ProbeArgs {
   const parts = argv.flatMap((a) => a.split(/\s+/)).filter(Boolean);
   let org: string | null = null;
   let samples: number | null = null;
+  let analyze = false;
   for (const p of parts) {
+    if (p === "--analyze") {
+      if (analyze) return { ok: false, error: "--analyze chỉ một lần" };
+      analyze = true;
+      continue;
+    }
     const m = /^--(org|samples)=(.*)$/.exec(p);
-    if (!m) return { ok: false, error: "chỉ nhận --org=<mã> và --samples=<n>" };
+    if (!m) return { ok: false, error: "chỉ nhận --org=<mã>, --samples=<n> và --analyze" };
     if (m[1] === "org") {
       if (org !== null) return { ok: false, error: "--org chỉ một lần" };
       if (!ORG_CODE.test(m[2])) return { ok: false, error: "--org phải là mã tổ chức dạng chữ thường / số / gạch ngang (2–31 ký tự)" };
@@ -126,7 +139,8 @@ export function parseProbeArgs(argv: readonly string[]): ProbeArgs {
       samples = Number(m[2]);
     }
   }
-  return { ok: true, org, samples: samples ?? DEFAULT_SAMPLES };
+  if (analyze && !org) return { ok: false, error: "--analyze cần --org (chạy lại câu chậm của MỘT tổ chức)" };
+  return { ok: true, org, samples: samples ?? DEFAULT_SAMPLES, analyze };
 }
 
 export type SeriesStats = { n: number; p50: number | null; p95: number | null; max: number | null };
@@ -275,6 +289,7 @@ export function planStructure(root: PlanNode | null, maxLines: number = PLAN_PUB
   const lines: string[] = [];
   let nodes = 0;
   let subplans = 0;
+  let neverRun = 0;
   const seq = new Set<string>();
   const walk = (n: PlanNode, depth: number) => {
     nodes += 1;
@@ -285,13 +300,17 @@ export function planStructure(root: PlanNode | null, maxLines: number = PLAN_PUB
     const sub = word(n["Subplan Name"]);
     if (parent === "SubPlan" || parent === "InitPlan") subplans += 1;
     if (type === "Seq Scan" && rel) seq.add(rel);
+    const loops = num(n["Actual Loops"]);
+    const actual = typeof n["Actual Total Time"] === "number" && loops !== null ? ` · THẬT ${Math.round((n["Actual Total Time"] as number) * loops)} ms (${loops} vòng × ${num(n["Actual Rows"]) ?? "?"} dòng)` : "";
+    if (loops === 0) neverRun += 1;
     lines.push(
-      `${"  ".repeat(Math.min(depth, 8))}${sub ? `[${sub}] ` : parent && parent !== "Outer" && parent !== "Inner" && parent !== "Member" ? `[${parent}] ` : ""}${type}${rel ? ` on ${rel}` : ""}${idx ? ` using ${idx}` : ""} · ~${num(n["Plan Rows"]) ?? "?"} dòng · cost ${num(n["Total Cost"]) ?? "?"}`,
+      `${"  ".repeat(Math.min(depth, 8))}${sub ? `[${sub}] ` : parent && parent !== "Outer" && parent !== "Inner" && parent !== "Member" ? `[${parent}] ` : ""}${type}${rel ? ` on ${rel}` : ""}${idx ? ` using ${idx}` : ""} · ~${num(n["Plan Rows"]) ?? "?"} dòng · cost ${num(n["Total Cost"]) ?? "?"}${actual}`,
     );
     for (const c of n.Plans ?? []) walk(c, depth + 1);
   };
   walk(root, 0);
-  const head = `${nodes} nút · ${subplans} SubPlan/InitPlan · Seq Scan: ${seq.size ? [...seq].sort().join(", ") : "không"} · cost gốc ${num(root["Total Cost"]) ?? "?"}`;
+  const ran = typeof root["Actual Total Time"] === "number" ? ` · THẬT ${Math.round(root["Actual Total Time"] as number)} ms · ${neverRun} nút KHÔNG chạy lần nào` : "";
+  const head = `${nodes} nút · ${subplans} SubPlan/InitPlan · Seq Scan: ${seq.size ? [...seq].sort().join(", ") : "không"} · cost gốc ${num(root["Total Cost"]) ?? "?"}${ran}`;
   const body = lines.slice(0, Math.max(0, maxLines - 1));
   return [head, ...body, ...(lines.length > body.length ? [`… (+${lines.length - body.length} nút)`] : [])];
 }
@@ -323,10 +342,22 @@ export type InboxDiag = {
   migrationsApplied: number | null;
   migrationsInRepo: number | null;
   pgVersion: string | null;
+  /** Cỡ cột `state` (byte, SAU NÉN — `pg_column_size`, không giải nén). */
+  stateBytes?: { avg: number | null; p95: number | null; max: number | null };
+  /** Nhánh cấp một lớn nhất của `state` trên 200 hội thoại mới nhất (tên khoá do mã đặt) — byte trung bình. */
+  stateKeys?: { key: string; avg: number }[];
 };
 
 const yn = (x: boolean | null, yes: string, no: string) => (x === null ? "—" : x ? yes : no);
 /** Một dòng công khai của chẩn đoán (số đếm, không dữ liệu khách). HÀM THUẦN. */
+const kb = (b: number | null) => (b === null ? "—" : `${(b / 1024).toFixed(1).replace(".", ",")} KB`);
+/** Dòng công khai cỡ `state` (byte + tên khoá do mã đặt). `null` nếu chưa đọc được. HÀM THUẦN. */
+export function stateLine(label: string, d: InboxDiag): string | null {
+  if (!d.stateBytes) return null;
+  const keys = (d.stateKeys ?? []).filter((k) => /^[A-Za-z_][A-Za-z0-9_]{0,40}$/.test(k.key)).slice(0, 6);
+  return `${label} cột state hội thoại (sau nén): TB ${kb(d.stateBytes.avg)} · p95 ${kb(d.stateBytes.p95)} · max ${kb(d.stateBytes.max)} · nhánh lớn nhất (200 hội thoại mới nhất): ${keys.length ? keys.map((k) => `${k.key} ~${kb(k.avg)}`).join(" · ") : "—"}`;
+}
+
 export function diagLine(label: string, d: InboxDiag): string {
   const cols = d.columns === null ? "—" : d.columns === 2 ? "đủ 2/2" : `THIẾU (${d.columns}/2)`;
   const nulls = d.nullTurns === null ? "—" : `${d.nullTurns}/${d.conversations ?? "—"}`;
@@ -426,6 +457,8 @@ export function summarizeInboxPerf(orgs: readonly OrgPerf[], opts: { samples: nu
       `${label} tải hộp thư (ms): nguội ${triple(loadCold)} · ấm ${triple(loadWarm)} (n=${loadCold.n}/${loadWarm.n}) · listInbox nguội p50 ${ms(listCold.p50)} · SQL nguội p50 ${ms(sqlCold.p50)} ms / ${ms(qCold.p50)} câu · hàng ${rows ? `${rows.rows}/${rows.total ?? "—"}` : "—"}${thin(loadCold, loadWarm)}`,
     );
     if (r.diag) body.push(diagLine(label, r.diag));
+    const sl = r.diag ? stateLine(label, r.diag) : null;
+    if (sl) body.push(sl);
     if (r.slow) {
       const n = opts.top ?? (orgs.length === 1 ? TOP_SINGLE_ORG : TOP_MANY_ORGS);
       r.slow.top.slice(0, n).forEach((t, i) => body.push(topLine(label, i, t)));
@@ -487,6 +520,8 @@ const errText = (e: unknown) => (e instanceof Error ? e.message : String(e)).spl
   giữ hàm gốc), chỉ ghi khi `sink` đang mở — ngoài lượt đo không tốn gì. Không đổi câu nào, không chạy thêm câu nào.
 */
 type QueryFn = (...args: unknown[]) => Promise<unknown>;
+export const EXPLAIN_PLAN_ONLY = "EXPLAIN (FORMAT JSON)";
+export const EXPLAIN_RUN = "EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)";
 const originals = new WeakMap<object, QueryFn>();
 let sink: CapturedQuery[] | null = null;
 
@@ -528,10 +563,13 @@ export function installCapture(db: unknown): QueryFn | null {
   return original;
 }
 
-/** `EXPLAIN (FORMAT JSON)` — KHÔNG ANALYZE: chỉ lập kế hoạch, câu không chạy. Hỏng ⇒ null (kế hoạch «không đọc được»). */
-export async function explainPlan(original: QueryFn, q: CapturedQuery): Promise<ReturnType<typeof planRootOf>> {
+/**
+ * `EXPLAIN (FORMAT JSON)` — mặc định KHÔNG ANALYZE: chỉ lập kế hoạch, câu không chạy. `analyze` (cờ `--analyze`, chỉ khi `--org`) ⇒ chạy
+ * câu SELECT thêm MỘT lần (CSDL ép chỉ đọc) để có thời gian thật từng nút. Hỏng ⇒ null (kế hoạch «không đọc được»).
+ */
+export async function explainPlan(original: QueryFn, q: CapturedQuery, analyze = false): Promise<ReturnType<typeof planRootOf>> {
   try {
-    const r = (await original(`EXPLAIN (FORMAT JSON) ${q.text}`, [...q.values])) as { rows?: Record<string, unknown>[] } | undefined;
+    const r = (await original(`${analyze ? EXPLAIN_RUN : EXPLAIN_PLAN_ONLY} ${q.text}`, [...q.values])) as { rows?: Record<string, unknown>[] } | undefined;
     const row = r?.rows?.[0];
     return planRootOf(row ? (row["QUERY PLAN"] ?? Object.values(row)[0]) : null);
   } catch {
@@ -569,7 +607,20 @@ export async function inboxDiagnostics(): Promise<InboxDiag> {
   const nullTurns = columns === 2 ? asNum(await scalar(db, sql`select count(*)::int as n from "sales_chat_conversations" where "channel" <> 'TEST' and "turn_unhandled" is null`, "n")) : null;
   const migrationsApplied = asNum(await scalar(db, sql`select count(*)::int as n from "drizzle"."__drizzle_migrations"`, "n"));
   const version = await scalar(db, sql`show server_version`, "server_version");
-  return { columns, materialized, conversations, nullTurns, migrationsApplied, migrationsInRepo: migrationsInRepo(), pgVersion: version === null ? null : String(version).slice(0, 40) };
+  let stateBytes: InboxDiag["stateBytes"];
+  let stateKeys: InboxDiag["stateKeys"];
+  try {
+    const [r] = rowsOf<Record<string, unknown>>(
+      await db.execute(sql`select avg(pg_column_size("state"))::int as a, (percentile_cont(0.95) within group (order by pg_column_size("state")))::int as p, max(pg_column_size("state"))::int as m from "sales_chat_conversations" where "channel" <> 'TEST'`),
+    );
+    stateBytes = { avg: asNum(r?.a), p95: asNum(r?.p), max: asNum(r?.m) };
+    stateKeys = rowsOf<{ k: string; b: number }>(
+      await db.execute(sql`select e.key as k, avg(pg_column_size(e.value))::int as b from (select "state" as s from "sales_chat_conversations" where "channel" <> 'TEST' and jsonb_typeof("state") = 'object' order by "updated_at" desc limit 200) x, jsonb_each(x.s) e group by e.key order by b desc limit 8`),
+    ).map((x) => ({ key: String(x.k), avg: Number(x.b) }));
+  } catch {
+    stateBytes = undefined;
+  }
+  return { columns, materialized, conversations, nullTurns, migrationsApplied, migrationsInRepo: migrationsInRepo(), pgVersion: version === null ? null : String(version).slice(0, 40), stateBytes, stateKeys };
 }
 
 /** Bộ lọc MẶC ĐỊNH của page.tsx (không tham số URL nào) — đúng đối tượng `listInbox` nhận khi mở hộp thư. */
@@ -656,7 +707,7 @@ export async function switchConversationPath(user: SessionUser, id: string): Pro
 export async function measureInbox(
   user: SessionUser,
   samples: number,
-  opts: { explain?: boolean; top?: number } = {},
+  opts: { explain?: boolean; analyze?: boolean; top?: number } = {},
 ): Promise<{ load: { cold: RenderSample[]; warm: RenderSample[] }; switchTo: { cold: RenderSample[]; warm: RenderSample[] }; conversations: number; diag: InboxDiag | null; slow: SlowReport }> {
   const original = installCapture(await getDb());
   const diag = await inboxDiagnostics().catch(() => null);
@@ -687,7 +738,7 @@ export async function measureInbox(
   const plans: SlowReport["plans"] = [];
   if (opts.explain && original) {
     for (const t of top.slice(0, EXPLAIN_SHAPES)) {
-      const root = await explainPlan(original, t.slowest);
+      const root = await explainPlan(original, t.slowest, Boolean(opts.analyze));
       plans.push({ hash: t.hash, block: t.block, structure: planStructure(root), detail: planDetail(root) });
     }
   }
@@ -771,7 +822,7 @@ const defaultDeps: CollectDeps = {
 };
 
 /** Đo từng tổ chức. Không ném: tổ chức hỏng ⇒ `result.ok = false` kèm câu lỗi (chỉ phần mã hoá). */
-export async function collectInboxPerf(codes: readonly string[], samples: number, deps: Partial<CollectDeps> = {}, opts: { explain?: boolean; top?: number } = {}): Promise<OrgPerf[]> {
+export async function collectInboxPerf(codes: readonly string[], samples: number, deps: Partial<CollectDeps> = {}, opts: { explain?: boolean; analyze?: boolean; top?: number } = {}): Promise<OrgPerf[]> {
   const d = { ...defaultDeps, ...deps };
   const out: OrgPerf[] = [];
   for (const code of codes) {
@@ -830,7 +881,7 @@ async function main() {
   const { codes, cappedFrom } = await pickOrganizations(args.org);
   // EXPLAIN chỉ khi đo MỘT tổ chức (`--org`): kênh tóm tắt có trần 60 dòng, và đó là lượt đi tìm câu chậm.
   const top = codes.length === 1 ? TOP_SINGLE_ORG : TOP_MANY_ORGS;
-  const orgs = await collectInboxPerf(codes, args.samples, {}, { explain: Boolean(args.org), top });
+  const orgs = await collectInboxPerf(codes, args.samples, {}, { explain: Boolean(args.org), analyze: args.analyze, top });
   const report = summarizeInboxPerf(orgs, { samples: args.samples, cappedFrom, top });
   for (const o of orgs) for (const l of privateLinesOf(o, report.labels.get(o.code) ?? o.code)) console.log(l);
   for (const l of report.publicLines) tomTat(l);
