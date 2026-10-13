@@ -33,6 +33,15 @@ import {
   THIN_LABEL,
   type OrgPerf,
   type RenderSample,
+  diagLine,
+  fullShape,
+  planRootOf,
+  planStructure,
+  queryBlockOf,
+  shapeHash,
+  topLine,
+  topQueries,
+  type CapturedQuery,
 } from "@/scripts/inbox-perf-probe";
 
 const NT = "cdt-nghiem-thu";
@@ -104,6 +113,76 @@ export function testInboxPerfProbePure() {
   const priv = privateLinesOf(okOrg(NT, 1), NT).join("\n");
   assert.match(priv, /cdt-nghiem-thu = cdt-nghiem-thu: danh tính NARROWED · tài khoản user-bi-mat-1 · vai trò đo VIEWER \(gốc ADMIN\)/);
   assert.match(privateLinesOf(leaky, "org#3")[0], /^org#3 = shop-ro-ri: ĐO HỎNG/);
+  // 5 · CÂU CHẬM NHẤT (13/10/2026): khối theo cấu trúc câu, gộp theo hình dạng (bỏ tham số), trung vị qua các lượt.
+  assert.equal(queryBlockOf('select count(*) filter (where x)::int from "sales_chat_conversations"'), "listInbox.đếm-thẻ");
+  assert.equal(queryBlockOf('select "sales_chat_conversations"."id" from "sales_chat_conversations" order by "unread_flag" desc'), "listInbox.hàng");
+  assert.equal(queryBlockOf('select p.page_id from (values ($1::text, $2::text)) as p(page_id, thread_id) left join lateral (select 1 from "sales_chat_inbound" i) l on true'), "listInbox.xem-trước-fanpage");
+  assert.equal(queryBlockOf('select "customer_level", count(*)::int from "sales_chat_conversations" group by "sales_chat_conversations"."customer_level"'), "listInbox.đếm-level");
+  assert.equal(queryBlockOf('select 1 from "orders" where x'), "khác:orders");
+  assert.equal(shapeHash("select * from t where a = $1 and b = 'Lan'"), shapeHash("select *  from t where a = $2 and b = 'Hoa'"), "tham số / hằng chuỗi không đổi hình dạng");
+  assert.ok(!fullShape(`select 1 where name = '${TEN_KHACH}'`).includes(TEN_KHACH), "hình dạng không mang hằng chuỗi");
+  const q = (text: string, ms: number, rows = 1): CapturedQuery => ({ text, values: [TEN_KHACH], ms, rows });
+  const COUNT = 'select count(*) filter (where a)::int from "sales_chat_conversations" where "channel" <> $1';
+  const PREVIEW = 'select 1 from (values ($1::text)) as p(id) left join lateral (select 1 from "sales_chat_inbound" i) l on true';
+  const top = topQueries(
+    [
+      [q(COUNT, 900), q(PREVIEW, 5), q(PREVIEW, 7)],
+      [q(COUNT, 1100), q(PREVIEW, 6)],
+      [q(COUNT, 1000), q(PREVIEW, 4), q(PREVIEW, 4), q(PREVIEW, 4)],
+    ],
+    5,
+  );
+  assert.equal(top[0].block, "listInbox.đếm-thẻ");
+  assert.equal(top[0].ms, 1000, "trung vị tổng ms của hình dạng qua 3 lượt");
+  assert.equal(top[0].maxOne, 1100);
+  assert.equal(top[0].slowest.ms, 1100, "giữ lần chậm nhất để EXPLAIN");
+  assert.equal(top[1].calls, 2, "trung vị số lần chạy mỗi lượt (2 · 1 · 3)");
+  assert.equal(top[1].ms, 12);
+  assert.deepEqual(topQueries([], 3), []);
+  const tl = topLine("org#1", 0, top[0]);
+  assert.match(tl, /^org#1 câu chậm #1 listInbox\.đếm-thẻ \[[0-9a-f]{8}\]: 1000 ms\/lượt · 1 lần\/lượt · lần chậm nhất 1100 ms · 1 dòng$/);
+  assert.ok(!tl.includes(TEN_KHACH), "dòng công khai không mang tham số");
+  // Kế hoạch: cấu trúc (nút · bảng · chỉ mục · ước tính) — KHÔNG điều kiện lọc / hằng số.
+  const plan = planRootOf(
+    JSON.stringify([
+      {
+        Plan: {
+          "Node Type": "Aggregate",
+          "Total Cost": 5123.4,
+          "Plan Rows": 1,
+          Plans: [
+            { "Node Type": "Seq Scan", "Parent Relationship": "Outer", "Relation Name": "sales_chat_conversations", "Plan Rows": 3629, "Total Cost": 400, Filter: `(name = '${TEN_KHACH}')` },
+            { "Node Type": "Index Scan", "Parent Relationship": "SubPlan", "Subplan Name": "SubPlan 1", "Relation Name": "sales_chat_inbound", "Index Name": "sales_chat_inbound_thread_created_idx", "Plan Rows": 1, "Total Cost": 8.1, "Index Cond": `(thread_id = '${SDT}')` },
+          ],
+        },
+      },
+    ]),
+  );
+  const st = planStructure(plan);
+  assert.equal(st[0], "3 nút · 1 SubPlan/InitPlan · Seq Scan: sales_chat_conversations · cost gốc 5123");
+  assert.match(st.join("\n"), /\[SubPlan 1\] Index Scan on sales_chat_inbound using sales_chat_inbound_thread_created_idx · ~1 dòng · cost 8/);
+  assert.ok(!st.join("\n").includes(TEN_KHACH) && !st.join("\n").includes(SDT), "cấu trúc kế hoạch không mang hằng số của câu");
+  assert.deepEqual(planStructure(null), ["kế hoạch: không đọc được"]);
+  assert.equal(planRootOf("không phải json"), null);
+  assert.ok(planStructure(plan, 2).length <= 3, "trần số dòng (+ một dòng «… còn N nút»)");
+  assert.match(
+    diagLine("org#1", { columns: 2, materialized: false, conversations: 3629, nullTurns: 0, migrationsApplied: 246, migrationsInRepo: 246, pgVersion: "16.4" }),
+    /^org#1 chẩn đoán «chưa đọc» 0245: cột đủ 2\/2 · đường đọc TÍNH TRỰC TIẾP \(hàm #803 cho từng hội thoại\) · turn_unhandled NULL 0\/3629 · migration đã áp 246 \(sổ kho 246\) · PG 16\.4$/,
+  );
+  assert.match(diagLine("org#1", { columns: 0, materialized: null, conversations: null, nullTurns: null, migrationsApplied: null, migrationsInRepo: 246, pgVersion: null }), /cột THIẾU \(0\/2\) · đường đọc — · turn_unhandled NULL — /, "chưa đọc được ⇒ «—», không phải 0");
+  // Tóm tắt in khối câu chậm + kế hoạch khi có.
+  const withSlow = okOrg("shop-cham", 3);
+  if (withSlow.result.ok) {
+    withSlow.result.diag = { columns: 2, materialized: true, conversations: 10, nullTurns: 0, migrationsApplied: 1, migrationsInRepo: 1, pgVersion: "16" };
+    withSlow.result.slow = { top, plans: [{ hash: top[0].hash, block: top[0].block, structure: st, detail: ["Filter: bí mật"] }] };
+  }
+  const sw = summarizeInboxPerf([withSlow], { samples: 5, acceptanceCodes: [] });
+  const swPub = sw.publicLines.join("\n");
+  assert.match(swPub, /org#1 chẩn đoán «chưa đọc» 0245: cột đủ 2\/2 · đường đọc LƯU SẴN/);
+  assert.match(swPub, /org#1 câu chậm #1 listInbox\.đếm-thẻ/);
+  assert.match(swPub, /org#1 kế hoạch \[[0-9a-f]{8}\] listInbox\.đếm-thẻ: 3 nút/);
+  assert.ok(!swPub.includes("bí mật") && !swPub.includes(TEN_KHACH), "kế hoạch đủ điều kiện chỉ ở phần mã hoá");
+  assert.match(privateLinesOf(withSlow, "org#1").join("\n"), /kế hoạch đủ \[[0-9a-f]{8}\] listInbox\.đếm-thẻ:\n {4}Filter: bí mật/);
   console.log("✓ inbox-perf-probe thuần: arg nghiêm · p50 trung vị / p95 hạng gần nhất / rỗng ⇒ null · che org#i · mẫu < 3 ⇒ chưa kết luận · chưa có đích · ≤ 300 ký tự / ≤ 60 dòng");
 }
 
@@ -113,7 +192,11 @@ export function testInboxPerfProbeSource() {
   assert.ok(!/\b(insert|update|delete|truncate|alter|drop|create|upsert|grant)\b\s+(into|from|table|set|schema|index|[a-z_"]+\s+set)/i.test(code), "script không có câu SQL ghi nào");
   assert.ok(!/\.(insert|update|delete)\s*\(|onConflict|returning\s*\(/.test(code), "script không gọi lệnh ghi drizzle nào");
   const raw = [...code.matchAll(/sql`([^`]*)`/g)].map((m) => m[1].trim());
-  assert.deepEqual(raw, ["show default_transaction_read_only"], "câu SQL thô DUY NHẤT là câu hỏi chế độ chỉ đọc");
+  assert.ok(raw.includes("show default_transaction_read_only"), "hỏi chế độ chỉ đọc");
+  for (const r of raw) assert.match(r, /^(show|select) /, `câu SQL thô chỉ ĐỌC: ${r.slice(0, 60)}`);
+  // EXPLAIN của câu chậm: KHÔNG ANALYZE (chỉ lập kế hoạch — câu không chạy lần nữa).
+  assert.match(code, /`EXPLAIN \(FORMAT JSON\) \$\{q\.text\}`/, "EXPLAIN chỉ lập kế hoạch");
+  assert.ok(!/ANALYZE/i.test(code.replace(/không ANALYZE|KHÔNG ANALYZE/g, "")), "không EXPLAIN ANALYZE");
   for (const w of ["sendStaffReplyCore", "claimConversationCore", "assignConversationCore", "releaseConversationCore", "handBackToAiCore", "suggestReplyCore", "addNoteCore", "setConversationLabelsCore", "runJob", "enqueue", "dispatch", "notify", "sendTelegram", "sendLark", "setSetting", "audit(", "migrate"]) {
     assert.ok(!code.includes(w), `script không ghi / không gửi: ${w}`);
   }
@@ -236,6 +319,22 @@ export async function testInboxPerfProbeDb() {
       const seen = await (await getDb()).select({ id: schema.salesChatConversations.id }).from(schema.salesChatConversations).where(isNotNull(schema.salesChatConversations.staffSeenAt));
       assert.equal(seen.length, 0, "danh tính chỉ xem KHÔNG ghi staff_seen_at — lượt đo không xoá dấu «chưa đọc» của shop");
     });
+    // Câu chậm nhất + chẩn đoán 0245 + EXPLAIN (đường thật trên PGlite).
+    const [rSlow] = await collectInboxPerf([ORG], 2, { orgReadOnly: async () => true }, { explain: true, top: 8 });
+    assert.ok(rSlow.result.ok && rSlow.result.slow && rSlow.result.diag, JSON.stringify(rSlow.result).slice(0, 300));
+    const slow = rSlow.result.slow;
+    assert.ok(slow.top.some((t) => t.block === "listInbox.đếm-thẻ") && slow.top.some((t) => t.block === "listInbox.hàng"), `bắt được câu của listInbox: ${slow.top.map((t) => t.block).join(", ")}`);
+    assert.equal(slow.plans.length, 2, "EXPLAIN hai hình dạng chậm nhất");
+    assert.ok(slow.plans.every((p) => p.structure[0] !== "kế hoạch: không đọc được"), `EXPLAIN đọc được: ${JSON.stringify(slow.plans.map((p) => p.structure[0]))}`);
+    assert.equal(rSlow.result.diag.columns, 2, "CSDL kiểm thử có đủ cột 0245");
+    assert.ok(rSlow.result.diag.conversations !== null && rSlow.result.diag.conversations >= 5);
+    assert.ok(rSlow.result.load.cold.every((s) => s.captured === undefined), "chữ câu + tham số rời khỏi mẫu sau khi gộp");
+    const rep3 = summarizeInboxPerf([rSlow], { samples: 2, acceptanceCodes: [], top: 8 });
+    const pub3 = rep3.publicLines.join("\n");
+    assert.match(pub3, /org#1 câu chậm #1 /);
+    assert.match(pub3, /org#1 kế hoạch \[[0-9a-f]{8}\] /);
+    for (const secret of [ORG, TEN_KHACH, SDT, CHU_TIN, r1.identity?.userId ?? "—", "ipp-t0", "ipp-page"]) assert.ok(!pub3.includes(secret), `công khai (câu chậm) không mang «${secret}»`);
+
     const rep = summarizeInboxPerf([r1], { samples: 3, acceptanceCodes: [] });
     assert.equal(rep.verdict, "MEASURED", rep.publicLines.join("\n"));
     const pub = rep.publicLines.join("\n");
