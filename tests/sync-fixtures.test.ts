@@ -509,6 +509,7 @@ import { testStuckConversationAudit } from "./stuck-conversation-audit.test";
 import { testAvatarProxy } from "./avatar-proxy.test";
 import { testInboxSemanticsV3 } from "./inbox-semantics-v3.test";
 import { testHandoffOwnership } from "./handoff-ownership.test";
+import { testPostSaleLifecycle } from "./postsale-lifecycle.test";
 import { testInboxReadV3 } from "./inbox-read-v3.test";
 import { testInboxUnreadPerf } from "./inbox-unread-perf.test";
 import { testInboxSearch } from "./inbox-search.test";
@@ -2951,6 +2952,8 @@ async function main() {
   await testInboxSemanticsV3();
   // AI IM THÌ PHẢI CÓ CHỦ (P0 11/10/2026, yêu cầu 9): chuyển người ⇒ hàng đợi phòng (work.ownership) + hạn (work.sla) · một tin mỗi đợt · tin khách mới ⇒ một thông báo · trả AI xoá hạn · phân việc bật ⇒ người còn chỗ · câu đếm «không chủ» = 0 — tổ chức `chuyen-nguoi-co-chu`.
   await testHandoffOwnership();
+  // HẬU MÃI + AI DỪNG + HÀNG ĐỢI CHUNG (HOTFIX P0 12/10/2026, ca HSLC «Khanh Nhung»): giai đoạn khách sau khi có đơn (lời khách không đổi logistics) · đồng hồ AI hỏng đọc mốc thật · watchdog mở lại nhường hết hạn, không đụng chuyển người bắt buộc · phòng trống ⇒ hàng đợi chung + 1 tin quản trị/ngày · trả-cho-AI luật cũ chạy thử / --apply / idempotent · cách ly tổ chức — tổ chức `hau-mai-ai-dung` + `hau-mai-cach-ly`.
+  await testPostSaleLifecycle();
   // INBOX READ V3 (chủ shop 10/10/2026 tối, P0): «chưa đọc» = có tin KHÁCH thật sau con trỏ đọc CỦA NGƯỜI XEM (0239); nạp khung chat ≠ đọc; con trỏ = tin khách cuối của payload, chỉ tiến; xem trước tin khách khi chưa đọc; danh sách vá theo xác nhận đọc; audit FALSE-UNREAD = 0 — tổ chức `hop-thu-doc-v3`.
   await testInboxReadV3();
   // INBOX UNREAD PERF (chủ shop 11/10/2026, OWNER CORRECTION): «tin khách chưa đọc» = lượt khách mới nhất chưa xử lý — hàm của response-ownership (#803) sau cổng rẻ 0245 (trigger CSDL); ma trận chủ shop qua listInbox · A→B · parity cổng + hàm ≡ hàm trần ≡ bản TS trên 3.000 hội thoại · cổng đúng sau mọi đường ghi · audit TRƯỚC/SAU — tổ chức `hop-thu-unread-perf`.

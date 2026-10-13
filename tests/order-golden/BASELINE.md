@@ -1,7 +1,7 @@
 # Bộ đo đơn vàng v2 — số đo hiện trạng (BASELINE)
 
 <!-- NỀN ĐO -->
-> Đo lúc 11/10/2026 (giờ Việt Nam) trên SHA nền `31315ebf` — `npx tsx tests/order-golden/update-baseline.ts`.
+> Đo lúc 12/10/2026 (giờ Việt Nam) trên SHA nền `973a4673` — `npx tsx tests/order-golden/update-baseline.ts`.
 <!-- HẾT NỀN ĐO -->
 
 Sứ mệnh `saas-order-accuracy`, lát C1 (bộ đo) + lát `order-confirm-rules` (luật chủ shop 08/10/2026 + sửa lỗi thuần mã). Tài liệu
@@ -69,7 +69,8 @@ chỉ chưa ghép được xã ⇒ VẪN chốt + cờ CẦN NGƯỜI KIỂM —
 ### Chung cả hai biến thể
 
 - **Đơn trùng 0/30, thiếu đơn 0/30, bỏ lỡ lời chốt 0.** Tin đặt hàng tới hai lần (`webhook-trung`) sửa ĐÚNG nháp cũ; lời chốt lặp
-  rơi vào nhánh «khách nhắn sau khi chốt ⇒ nhân viên»; trạng thái MẤT giữa chừng rồi khách gửi lại (`mat-trang-thai-goi-lai`) ⇒
+  SAU khi đã chốt gọi lại confirm_order và máy chủ trả «đã chốt từ trước» (từ 12/10/2026 máy chủ không còn chuyển người mặc
+  định sau chốt — `webhook-trung` OFF nay `OPEN`; `nhac-don-cu` ON nay `HANDOFF` vì model chuyển người «Sửa đơn — …»); trạng thái MẤT giữa chừng rồi khách gửi lại (`mat-trang-thai-goi-lai`) ⇒
   khoá lần mua (`raw.agentKey` + `pg_advisory_xact_lock` — `order-create.ts`) trả lại ĐÚNG đơn cũ. Cột `agentKey` không có chỉ mục
   UNIQUE nên an toàn dựa hoàn toàn vào khoá tư vấn — lượt chạy tuần tự ở đây không thử được hai tiến trình đua nhau.
 - **Phần máy chủ tính đúng hết trên dataset:** đơn giá luôn từ ERP (35/35 dòng), tổng gồm ship (30/30), địa chỉ ghép tỉnh + xã

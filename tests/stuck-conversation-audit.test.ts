@@ -24,6 +24,9 @@ import { TAKEOVER_REASON } from "@/lib/sales-chatbot/conversation-control-shared
 import { WEB_STAFF_REASON } from "@/lib/sales-chatbot/inbox-states";
 import { ORDER_WRITE_HANDOFF_PREFIX } from "@/lib/constants/ops-signals";
 import { PRICE_UNVERIFIED_PREFIX } from "@/lib/sales-chatbot/quote-shared";
+import { RESUME_MAX_TURN_AGE_MS } from "@/lib/sales-chatbot/response-ownership";
+import { WATCHDOG_MAX_PER_SWEEP } from "@/lib/sales-chatbot/handoff-routing";
+import { DEAD_AI_DOWN_NOTE } from "@/lib/sales-chatbot/inbound-retry";
 import {
   addSilent,
   AI_DOWN_RETRY_MINUTES,
@@ -36,6 +39,9 @@ import {
   RECEIPT_CLAIM_RE,
   RECEIPT_CLAIM_SQL_RE,
   REASON_TEXT,
+  DEAD_AI_DOWN_NOTE_TEXT,
+  RESUME_WINDOW_MINUTES,
+  WATCHDOG_CAP,
   silentSince,
   silentSummary,
   type SilentRow,
@@ -106,6 +112,9 @@ function testCopies() {
   assert.equal(REASON_TEXT.ORDER_WRITE_PREFIX, ORDER_WRITE_HANDOFF_PREFIX);
   assert.ok(PRICE_UNVERIFIED_PREFIX.startsWith(REASON_TEXT.PRICE_PREFIX));
   assert.equal(AI_DOWN_RETRY_MINUTES, HUMAN_COOLDOWN_MINUTES);
+  assert.equal(RESUME_WINDOW_MINUTES * 60_000, RESUME_MAX_TURN_AGE_MS);
+  assert.equal(WATCHDOG_CAP, WATCHDOG_MAX_PER_SWEEP);
+  assert.equal(DEAD_AI_DOWN_NOTE_TEXT, DEAD_AI_DOWN_NOTE);
   console.log("  ✓ bản sao chữ / số của script tự chứa BẰNG hằng gốc");
 }
 
@@ -147,15 +156,19 @@ async function testDb() {
       assert.equal(a.counts.byClass.AI_DOWN_CLOCK_PUSHED.total, 1, "hỏng 300 phút trước mà updated_at vừa ghi ⇒ đồng hồ bị đẩy");
       assert.equal(a.counts.byClass.TAKEOVER.total, 1);
       assert.equal(a.counts.customerWaiting, 1);
+      assert.deepEqual([a.counts.watchdogReopen, a.counts.watchdogAnswerNow, a.counts.watchdogToHuman], [1, 0, 0], "chạy thử watchdog: mở lại k2 (AI hỏng bị đẩy đồng hồ), không lượt khách nào trong cửa sổ");
+      assert.match(silentSummary(ORG, a.counts).join("\n"), /CHẠY THỬ watchdog .*sẽ mở lại 1 .*AI trả lời ngay 0/);
       assert.ok(a.samples.POST_ORDER?.includes(k1.id), "mã hội thoại chỉ ở phần MÃ HOÁ");
       assert.ok(silentSummary(ORG, a.counts).every((l) => !l.includes(k1.id)), "tóm tắt không mang mã hội thoại");
 
       const b = await collectOwnership({ code: ORG, isHome: false }, now);
       assert.ok(b.ok, `B/C đọc được bằng lib #800: ${JSON.stringify(b)}`);
       if (b.ok) {
-        assert.equal(b.silent, 3, "cùng tập «AI im» với A");
-        assert.equal(b.person + b.department + b.unowned, 3);
-        assert.ok(b.unqueued >= 2, "k2 · k3 chưa vào hàng đợi");
+        // Sau bản vá đồng hồ AI hỏng (HOTFIX 12/10/2026 — aiDownStartedAt): k2 hỏng 300 phút trước KHÔNG còn là «AI im» dù updated_at
+        // mới bị đẩy — đúng là nhóm AI_DOWN_CLOCK_PUSHED mà phần A (SQL thô, luật cũ) đếm ra. Tập «AI im» của lib = A trừ nhóm đó.
+        assert.equal(b.silent, a.counts.silent - a.counts.byClass.AI_DOWN_CLOCK_PUSHED.total, "tập «AI im» của lib = A trừ AI hỏng bị đẩy đồng hồ");
+        assert.equal(b.person + b.department + b.shared + b.unowned, b.silent);
+        assert.ok(b.unqueued >= 1, "k3 chưa vào hàng đợi");
         assert.ok(b.viewers >= 1, "chủ shop xem được hộp thư");
       }
 

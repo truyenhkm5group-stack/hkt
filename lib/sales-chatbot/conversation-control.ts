@@ -165,8 +165,14 @@ export type HoldRow = AiHoldInput & { id: string };
 
 /** Lần nhường 30 phút đã hết hạn ⇒ sự kiện `ai.resumed` (COOLDOWN_EXPIRED) của MÁY tại đúng mốc hết hạn — khoá theo mốc, ghi lại vô hại. */
 async function recordCooldownExpired(conversationId: string, hold: AiHold): Promise<void> {
-  if (hold.expired?.cause !== "STAFF_REPLY") return;
+  if (!hold.expired) return;
   const at = hold.expired.at;
+  // AI HỎNG hết khoảng thử lại cũng để lại vết (review #821 F5 — luật 34–36: `actor_user_id` NULL = MÁY làm). Khoá kèm mã hội thoại: sổ
+  // chống trùng là TOÀN BẢNG. Khoá của nhường-nhân-viên giữ nguyên dạng cũ để không ghi đôi các vết đã có.
+  if (hold.expired.cause === "AI_DOWN") {
+    await recordConversationEvent(conversationId, { type: "ai.resumed", actorKind: "SYSTEM", actorUserId: null, occurredAt: at, reasonCode: "COOLDOWN_EXPIRED", payload: { cooldownUntil: at.toISOString(), cause: "AI_DOWN" }, key: `ai-down-end:${conversationId}:${at.toISOString()}` });
+    return;
+  }
   await recordConversationEvent(conversationId, { type: "ai.resumed", actorKind: "SYSTEM", actorUserId: null, occurredAt: at, reasonCode: "COOLDOWN_EXPIRED", payload: { cooldownUntil: at.toISOString() }, key: `cooldown-end:${at.toISOString()}` });
 }
 

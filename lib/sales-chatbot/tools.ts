@@ -837,6 +837,9 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
       return ok(`Giỏ: ${formatVND(priced.subtotal)}${priced.total !== null ? ` · COD ${formatVND(priced.total)}` : ""}`, cartView(priced), state);
     }
     case "create_customer": {
+      // Đơn chốt qua LỜI ĐỒNG Ý: đổi SĐT / địa chỉ lúc này là SỬA ĐƠN — hồ sơ khách đổi mà đơn vẫn giữ địa chỉ cũ (review #821 vòng 3, ca
+      // «Đỗ Là»). Máy chủ ép chuyển người như update_draft_order trên đơn đã chốt; không để tuỳ model.
+      if (state.confirmed && !state.confirmed.auto) return { ...err("Đơn đã chốt", "Đơn của hội thoại này đã chốt — đổi SĐT / địa chỉ là sửa đơn: KHÔNG nói đã cập nhật; máy chủ đã chuyển nhân viên.", state), requireHuman: `Sửa đơn đã chốt — khách đổi thông tin nhận hàng: «${ctx.lastUserText.trim().slice(0, 120)}»` };
       // KHÁCH CŨ: máy chủ điền SĐT + địa chỉ của lần mua trước — chỉ khi khách VỪA xác nhận (luật 3.12: gợi ý, không tự điền).
       let saved = false;
       let fields: Record<string, unknown> = input;
@@ -897,7 +900,9 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
       }
       // Đơn máy TỰ CHỐT (P0-A): khách sửa ngay sau đó ⇒ update_draft_order sửa chính đơn đã chốt (giữ «Đã xác nhận»). Còn lại như cũ.
       const editingConfirmed = Boolean(state.confirmed?.auto) && name === "update_draft_order" && Boolean(state.draft?.orderId || state.confirmed?.simulated);
-      if (state.confirmed && !editingConfirmed) return err("Đơn đã chốt", "Đơn của hội thoại này đã chốt — muốn đổi thì chuyển nhân viên (handoff_to_human).", state);
+      // Đơn chốt qua LỜI ĐỒNG Ý (không phải máy tự chốt) ⇒ sửa / thêm vào đơn là việc của NHÂN VIÊN — máy chủ ép chuyển người, không để tuỳ
+      // model (HOTFIX 12/10/2026: engine bỏ chuyển người mặc định sau chốt nên đây là lớp chặn ca «Đỗ Là» — bot hứa đổi địa chỉ / lịch giao).
+      if (state.confirmed && !editingConfirmed) return { ...err("Đơn đã chốt", "Đơn của hội thoại này đã chốt — KHÔNG nói đã sửa / đã thêm; máy chủ đã chuyển nhân viên.", state), ...(state.confirmed.auto ? {} : { requireHuman: `Sửa đơn đã chốt — khách muốn ${name === "create_draft_order" ? "thêm đơn / thêm món" : "đổi đơn"}: «${ctx.lastUserText.trim().slice(0, 120)}»` }) };
       const base: Recipient = existing?.recipient ?? { name: state.customer.name, phone: state.customer.phone, address: state.customer.address, province: state.customer.province };
       const lines = v.data.items ? mergeLines(v.data.items.map((i) => ({ variantId: i.variant_id, quantity: i.quantity }))) : existing!.lines;
       const recipient = recipientFrom(v.data, base);

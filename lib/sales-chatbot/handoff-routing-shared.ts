@@ -45,18 +45,25 @@ export type HandoffUnownedReason = (typeof HANDOFF_UNOWNED_REASONS)[number];
 
 export const HANDOFF_UNOWNED_LABEL: Record<HandoffUnownedReason, string> = {
   NOT_QUEUED: "Chưa vào hàng đợi người nào",
-  NO_RESPONDER: "Phòng phụ trách chưa có ai xem được hộp thư",
+  NO_RESPONDER: "Cả tổ chức chưa có ai xem được hộp thư",
 };
 
 /** Việc phải làm để hết «không chủ» — một câu, đủ cụ thể để sửa được. */
 export const HANDOFF_UNOWNED_FIX: Record<HandoffUnownedReason, string> = {
   NOT_QUEUED: "Lượt quét «Giám sát AI bán hàng» (5 phút) tự đưa vào hàng đợi; còn thấy sau 10 phút là đường chuyển người mới chưa nối — báo kỹ thuật.",
-  NO_RESPONDER: "Xếp ít nhất một người có quyền xem hộp thư vào phòng phụ trách (Cấu hình → Nhân sự và phòng ban), hoặc đổi phòng ở Cấu hình → Phòng phụ trách (khoá SALES_CHAT_HANDOFF).",
+  NO_RESPONDER: "Cấp quyền xem hộp thư AI bán hàng (ai_sales:view) cho ít nhất một tài khoản đang hoạt động, rồi xếp người đó vào phòng phụ trách (Cấu hình → Nhân sự và phòng ban).",
 };
 
+/**
+ * `SHARED` = HÀNG ĐỢI CHUNG (HOTFIX P0 12/10/2026): phòng phụ trách CHƯA có ai xem được hộp thư, nhưng tổ chức CÓ người xem được ⇒ hội
+ * thoại thuộc hàng đợi chung của mọi người xem hộp thư (đúng tập người đã nhận tin báo `ALL_VIEWERS`), không phải «KHÔNG CHỦ». Đo
+ * production 11/10: 248 hội thoại HSLC treo «KHÔNG CHỦ» chỉ vì phòng «Kinh doanh & CSKH» chưa có thành viên — trong khi chủ shop vẫn
+ * xem được hộp thư. Cấu hình phòng thiếu người vẫn là lỗi phải sửa: lượt quét báo quản trị MỘT tin mỗi phòng mỗi ngày (luật 26).
+ */
 export type HandoffOwner =
   | { kind: "PERSON"; userId: string }
   | { kind: "DEPARTMENT"; department: DepartmentCode; responders: number }
+  | { kind: "SHARED"; department: DepartmentCode; viewers: number }
   | { kind: "NONE"; department: DepartmentCode; reason: HandoffUnownedReason };
 
 export type HandoffOwnerInput = {
@@ -70,6 +77,8 @@ export type HandoffOwnerInput = {
   department: DepartmentCode;
   /** Số người của phòng ĐANG hoạt động và xem được hộp thư (`ai_sales:view`). */
   responders: number;
+  /** Số người ĐANG hoạt động xem được hộp thư của CẢ tổ chức — hàng đợi chung khi phòng chưa có ai. Vắng = 0 (hành vi cũ). */
+  viewers?: number;
 };
 
 /**
@@ -80,7 +89,7 @@ export function handoffOwnerOf(i: HandoffOwnerInput): HandoffOwner | null {
   if (!i.silent) return null;
   if (i.assigneeUserId && i.assigneeActive) return { kind: "PERSON", userId: i.assigneeUserId };
   if (!i.queuedAt) return { kind: "NONE", department: i.department, reason: "NOT_QUEUED" };
-  if (i.responders <= 0) return { kind: "NONE", department: i.department, reason: "NO_RESPONDER" };
+  if (i.responders <= 0) return (i.viewers ?? 0) > 0 ? { kind: "SHARED", department: i.department, viewers: i.viewers ?? 0 } : { kind: "NONE", department: i.department, reason: "NO_RESPONDER" };
   return { kind: "DEPARTMENT", department: i.department, responders: i.responders };
 }
 
@@ -117,7 +126,9 @@ export function handoffQueueView(i: HandoffViewInput, now: Date): HandoffQueueVi
       ? (i.assigneeName ?? "Người đã nhận")
       : i.owner.kind === "DEPARTMENT"
         ? `Phòng ${DEPARTMENT_LABEL[i.owner.department]} (chưa ai nhận)`
-        : `KHÔNG CHỦ — ${HANDOFF_UNOWNED_LABEL[i.owner.reason]}`;
+        : i.owner.kind === "SHARED"
+          ? `Hàng đợi chung (phòng ${DEPARTMENT_LABEL[i.owner.department]} chưa có người) — chưa ai nhận`
+          : `KHÔNG CHỦ — ${HANDOFF_UNOWNED_LABEL[i.owner.reason]}`;
   return {
     queuedAt: i.queuedAt.toISOString(),
     waitingFrom: waitingFrom ? waitingFrom.toISOString() : null,
