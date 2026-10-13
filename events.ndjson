@@ -2534,3 +2534,4 @@
 {"at":"2026-10-13T15:33:48.463Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#835 @ 121d25b490af · JIT tắt cục bộ (set local jit=off qua chayKhongJit) cho 5 câu listInbox — XÁC NHẬN production: JIT 291/187 hàm, Limit 6.873 ms & Seq Scan 4.521 ms tự thân; state 1 lần + 2 pha vô hại có test; npm test đủ đạt"}
 {"at":"2026-10-13T15:34:53.037Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"inbox-list-perf","detail":"#827 @ 99013db136b7 → e557a91048f9 (MERGE_NOW · MEDIUM · gates success)"}
 {"at":"2026-10-13T15:35:56.979Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DEPLOY_DISPATCHED","detail":"e557a91048f9 · run 38423392247 https://github.com/truyenhkm5group-stack/hkt/actions/runs/38423392247"}
+{"at":"2026-10-13T15:51:56.321Z","actor":"vm:wt-cost-mkt","kind":"MIGRATION_RESERVED","mission":"cost-actual-mkt-price","detail":"0246"}
