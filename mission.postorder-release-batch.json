@@ -3,7 +3,7 @@
   "mission_id": "postorder-release-batch",
   "title": "Release POST_ORDER cũ theo lô: --limit, chạy thử từng hội thoại, ai.resumed có run id + trạng thái trước, --rollback",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P0",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -23,9 +23,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-13T03:31:57.578Z",
-  "updated_at": "2026-10-13T03:32:57.367Z",
+  "updated_at": "2026-10-13T05:37:55.354Z",
   "last_heartbeat": "2026-10-13T03:32:17.681Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#824 → 89a20d7c496fd6240effd8365af0e924f02e0c01"
+  },
   "handoff": {
     "branch": "fix/postorder-release-batch",
     "sha": "4f468cdecc12d5265f0ea097d7e80e20af16bccf",
