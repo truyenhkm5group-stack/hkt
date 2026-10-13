@@ -3,7 +3,7 @@
   "mission_id": "inbox-perf-probe-hotnodes",
   "title": "inbox-perf-probe: TOP 12 nút tự thân + dấu hiệu biểu thức + khối JIT",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P0",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -22,9 +22,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-13T10:53:47.173Z",
-  "updated_at": "2026-10-13T14:28:25.069Z",
+  "updated_at": "2026-10-13T14:29:24.570Z",
   "last_heartbeat": "2026-10-13T14:28:25.069Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#831 → d9bdaca2ed777a048d2883dc332d6e8b9441f8da"
+  },
   "handoff": {
     "branch": "fix/inbox-perf-probe-hotnodes",
     "sha": "c9d33af4e898c2565f03e2342f09786c351463a7",
