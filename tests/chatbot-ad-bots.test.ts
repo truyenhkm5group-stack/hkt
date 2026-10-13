@@ -11,7 +11,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { AD_TEST_IMAGE_LIMITS, addManualAdSchema, adTestReadiness, manualAdIdOf, manualAdKey, manualAdRows, buildAdBots, DEFAULT_AD_BOT_CONFIG, pageIdOfPost, productCodeOf, saveAdBotSchema, testImageGate, testImageSpendToday, testProductMissing, type AdBotSourceRow, type AdTestProduct, type ReadinessInput } from "@/lib/constants/chatbot-ad-bots";
+import { AD_TEST_IMAGE_LIMITS, addManualAdSchema, buildPageBots, pageProductKey, pageProductPageOf, adTestReadiness, manualAdIdOf, manualAdKey, manualAdRows, buildAdBots, DEFAULT_AD_BOT_CONFIG, pageIdOfPost, productCodeOf, saveAdBotSchema, testImageGate, testImageSpendToday, testProductMissing, type AdBotSourceRow, type AdTestProduct, type ReadinessInput } from "@/lib/constants/chatbot-ad-bots";
 
 const row = (x: Partial<AdBotSourceRow> & { adId: string }): AdBotSourceRow => ({
   source: "CREATIVE_TEST",
@@ -161,6 +161,27 @@ export async function testChatbotAdBots() {
   const auditCall = connectAct.slice(connectAct.indexOf("await audit("), connectAct.indexOf(");", connectAct.indexOf("await audit(")));
   assert.ok(!/\btoken\s*[:,}]|p\.data\b(?!\.campKey)/.test(auditCall.replace("tokenSource", "")), "nhật ký không ghi token (chỉ ghi nguồn: tự sinh / dán tay)");
   assert.ok(connectAct.includes('can(user, "cs:config")'), "nạp page vào bot cần quyền quản trị bot (cs:config)");
+
+  // ── Sản phẩm của page (mẫu mới chưa có trên POS, áp cho mọi khách của một fanpage) ──
+  assert.equal(pageProductKey("123456789"), "page:123456789");
+  assert.equal(pageProductPageOf("page:123456789"), "123456789");
+  assert.equal(pageProductPageOf("page:abc"), null, "khoá page phải là ID số");
+  assert.equal(pageProductPageOf("123456789"), null, "ID quảng cáo không phải khoá page");
+  const pageUploaded = { ...test, colors: [{ ...test.colors[0], source: "UPLOAD" as const }] };
+  const pageCfg = { ...DEFAULT_AD_BOT_CONFIG, overrides: { "page:123456789": { ...meta, enabled: false, test: pageUploaded }, "page:223456789": { ...meta, enabled: true, test: { ...pageUploaded, fabric: "" } } } };
+  const pDraft = buildPageBots(pageCfg);
+  assert.equal(pDraft.lines.length, 2);
+  assert.deepEqual(pDraft.push.map((x) => x.pageId), ["123456789"], "thiếu chất vải ⇒ không gửi sang bot");
+  assert.equal(pDraft.push[0].enabled, false, "sản phẩm của page bắt đầu TẮT — chỉ chat thử");
+  assert.equal(pDraft.lines.find((l) => l.pageId === "223456789")?.live, false, "thiếu thông tin thì không bao giờ chạy cho khách");
+  assert.equal(buildAdBots([], pageCfg).push.length, 0, "khoá page không lẫn vào bot theo quảng cáo");
+  const pLive = buildPageBots({ ...pageCfg, overrides: { "page:123456789": { ...meta, enabled: true, test: pageUploaded } } });
+  assert.equal(pLive.push[0].enabled, true);
+  assert.equal(buildPageBots({ ...pageCfg, enabled: false, overrides: { "page:123456789": { ...meta, enabled: true, test: pageUploaded } } }).lines[0].live, false, "công tắc chung tắt ⇒ không chạy");
+  const pageBotGot = (bot.normalizeAdBotPayload({ bots: [], pages: pLive.push }) as unknown as { pages: Record<string, { enabled: boolean; test: { code: string } | null }> }).pages;
+  assert.equal(pageBotGot["123456789"]?.enabled, true, "gói sản phẩm của page qua được bộ kiểm của bot");
+  assert.equal(pageBotGot["123456789"]?.test?.code, "TEST-DB01");
+  console.log("✓ Sản phẩm của page: khoá page:<ID> không lẫn quảng cáo, thiếu thông tin ⇒ không gửi, bắt đầu TẮT, gói qua được bộ kiểm của bot");
 
   console.log("✓ Nạp page từ Chat test: page vào bot ở trạng thái TẮT (ghi trước khi gắn), không gửi nhầm khoá người dùng, token không về trình duyệt / nhật ký, cần cs:config");
   console.log("✓ Quảng cáo dựng tay theo ID: khoá ad:<ID> không lẫn id mẩu, bắt buộc fanpage, chưa có mẫu ⇒ không bot riêng, có mẫu (ảnh tải lên) ⇒ chat thử trước, bật sau");
