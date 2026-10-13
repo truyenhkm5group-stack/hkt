@@ -8,7 +8,9 @@
  * Khoá:
  *  1. THỨ TỰ RẺ TRƯỚC (`CHEAP_FIRST`) ≡ bản chuẩn (`CANONICAL` — thân hàm CSDL 0245) TỪNG hội thoại, trên fixture có lịch sử mẫu chào;
  *  2. listInbox tính trực tiếp ≡ listInbox lưu sẵn (thẻ · thứ tự · cờ · số chưa đọc) — tập «chưa đọc» dựng MỘT lần;
- *  3. ≥ 5.000 hội thoại: số đo trước / sau in ra (không ngưỡng — AGENTS 38);
+ *  3. số đo trước / sau in ra (không ngưỡng — AGENTS 38). Trong `npm test` fixture NHỎ (1.000 hội thoại, 200 luồng lịch sử dài — đủ
+ *     cho đối chiếu từng hội thoại, ~1 lượt mỗi phép đo); lượt ĐO ≥ 5.000 hội thoại chạy riêng: `npm run perf:inbox` (cờ `--big`). Lý do:
+ *     CI chạy npm test HAI lần với trần 30 phút — bản 5.000 hội thoại (đường cũ 18–34 s/lượt) làm job «có token giả» bị huỷ (#827);
  *  4. chuyển hội thoại: phần thuần chọn đúng payload khi bấm nhanh A→B→C, câu trả lời muộn không đè; tự làm mới không chồng lượt và
  *     giãn nhịp; khung chat không còn `router.refresh()`; trang nạp hội thoại SONG SONG với danh sách.
  */
@@ -32,9 +34,10 @@ import { seedInboxFixture } from "./inbox-unread-seed";
 
 const ORG = "hop-thu-list-perf";
 const PAGE = "pg-list-perf";
-const N = 5000;
-/** Số luồng mang lịch sử dài có tin chào mẫu (đắt nhất cho vế tin mẫu cũ) — đủ để vượt hẳn đường lưu sẵn mà bộ kiểm thử vẫn chạy nhanh. */
-const HEAVY = 600;
+/** Cỡ fixture: `npm test` = nhỏ (đối chiếu); `npm run perf:inbox` (`--big`) = ≥ 5.000 hội thoại (đo). */
+type Size = { n: number; heavy: number; runs: number };
+const SMALL: Size = { n: 1000, heavy: 200, runs: 1 };
+const BIG: Size = { n: 5000, heavy: 600, runs: 3 };
 const HIST = 10;
 const TPL = "Chào bạn! Cảm ơn bạn đã nhắn tin cho shop. Shop sẽ phản hồi trong ít phút, bạn vui lòng chờ nhé ạ.";
 
@@ -118,7 +121,9 @@ async function cleanup() {
 
 const p50 = (xs: number[]) => [...xs].sort((a, b) => a - b)[Math.floor(xs.length / 2)];
 
-async function testDb() {
+async function testDb(size: Size) {
+  const N = size.n;
+  const HEAVY = size.heavy;
   await cleanup();
   try {
     await provisionOrganization({ code: ORG, name: "Shop hộp thư lớn", plan: "standard", modules: ["customers", "products", "orders", "inventory", "ai_sales"], admin: { email: `admin@${ORG}.local`, name: "Chủ shop", password: "HopThu@123456" }, source: "TEST", actor: null });
@@ -186,7 +191,7 @@ async function testDb() {
       const run = async (filter: "ALL" | "UNREAD" | "UNANSWERED"): Promise<{ r: Listed; ms: number[] }> => {
         const ms: number[] = [];
         let last: Listed | null = null;
-        for (let i = 0; i < 3; i++) {
+        for (let i = 0; i < size.runs; i++) {
           const t0 = performance.now();
           const r = await listInbox(admin, { filter, limit: 100 });
           ms.push(performance.now() - t0);
@@ -222,18 +227,21 @@ async function testDb() {
   }
 }
 
-export async function testInboxListPerf() {
-  console.log("Hộp thư — P0 inbox-list-perf (listInbox nhanh khi chưa có cột 0245, chuyển hội thoại không dựng lại danh sách):");
+export async function testInboxListPerf(size: Size = SMALL) {
+  console.log(`Hộp thư — P0 inbox-list-perf (listInbox nhanh khi chưa có cột 0245, chuyển hội thoại không dựng lại danh sách) · ${size.n} hội thoại:`);
+  const t0 = Date.now();
   testPure();
   testSource();
-  await testDb();
+  await testDb(size);
+  console.log(`  (bài chạy ${Math.round((Date.now() - t0) / 1000)} s)`);
 }
 
 if (process.argv[1] && /inbox-list-perf\.test\.ts$/.test(process.argv[1])) {
+  const size = process.argv.includes("--big") ? BIG : SMALL;
   import("./setup-env")
     .then(() => import("@/db/migrate"))
     .then(({ ensureMigrated }) => ensureMigrated())
-    .then(testInboxListPerf)
+    .then(() => testInboxListPerf(size))
     .then(
       () => process.exit(0),
       (e: unknown) => {
