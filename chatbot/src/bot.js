@@ -10,7 +10,7 @@ import { renderSystemPrompt } from "./prompt.js";
 import { settings } from "./settings.js";
 import { adBots } from "./adbots.js";
 import { extractAdIds, adBotPromptBlock, testImageRefs } from "./adpersona.js";
-import { orderSync, describeOrder, phonesInText, norm, blockedCodesFor } from "./orders.js";
+import { orderSync, describeOrder, phonesInText, norm, blockedCodesFor, offCatalogPage } from "./orders.js";
 import { OrderBot } from "./orderbot.js";
 import { identifyProduct } from "./vision.js";
 import { transcribeVoiceMessages, voiceLabel, isAudioAttachment, hasCustomerVoice, VOICE_PROMPT_HINT } from "./voice.js";
@@ -1160,6 +1160,7 @@ ${Xung} lấy màu nào để em lên đơn cho mình ạ?`;
       t.match(/\bQ\d{3}\b/)?.[0] ||
       String(eff.defaultProduct || "").trim() ||
       String(eff.extraPrompt || "").match(/(?:chủ lực|mặc định)[^\n]{0,60}?\b(Q\d{3})\b/i)?.[1];
+    if (this.offCatalog(pageId) && !this.scopedTestProduct(pageId)) return t; // mau moi chua co tren POS: khong co anh danh muc nao dung
     // Page KHONG ban ma nay (AURA - Q005): khong tu dinh kem anh cua no
     if (ma && blockedCodesFor([this.pageNames.get(pageId), this.pancakeNames?.get(pageId)]).includes(String(ma).toUpperCase())) return t;
     const test = this.scopedTestProduct(pageId);
@@ -1333,7 +1334,8 @@ ${Xung} lấy màu nào để em lên đơn cho mình ạ?`;
     let extra = eff.extraPrompt;
     // Bang gia khuyen mai chi duoc ghep vao khi hoi thoai thuc su dang chay khuyen mai
     if (saleActive && String(eff.salePrompt || "").trim()) extra = eff.salePrompt; // THAY HAN ban gia thuong, khong ghep chung de bot khoi lan hai bang gia
-    let prompt = renderSystemPrompt(template, { shopName, customerName, type, extraPrompt: extra, commentMode: commentMode || eff.commentMode });
+    const ngoaiDanhMuc = this.offCatalog(pageId);
+    let prompt = renderSystemPrompt(template, { shopName, customerName, type, extraPrompt: extra, commentMode: commentMode || eff.commentMode, noCatalog: ngoaiDanhMuc });
     // Hoi thoai dang chay XA KHO: bo han "chien luoc giam gia bac thang" cua prompt chung.
     // Neu de lai, cac muc 499k/480k/470k/450k van nam trong prompt -> model lay nham, VA chot chan gia coi
     // do la gia hop le (findDisallowedPrices lay moi con so trong prompt lam gia duoc phep).
@@ -1360,6 +1362,11 @@ ${Xung} lấy màu nào để em lên đơn cho mình ạ?`;
     return prompt;
   }
 
+  /** Page ban mau moi chua co tren POS (khong dung danh muc). */
+  offCatalog(pageId) {
+    return offCatalogPage([this.pageNames.get(String(pageId)), this.pancakeNames?.get(String(pageId))]);
+  }
+
   /** San pham (danh muc POS) cua mau chu luc page, hoac null. */
   pageProduct(pageId) {
     const ma = String(settings.effective(pageId).defaultProduct || "").trim().toUpperCase();
@@ -1370,13 +1377,36 @@ ${Xung} lấy màu nào để em lên đơn cho mình ạ?`;
    * Chat lieu cua mau chu luc page: ten / mo ta trong danh muc POS truoc, roi huong dan rieng cua page. null = khong ro.
    * Su co AURA 13/10/2026: page ban dam NHUNG ma bot noi "Chat lieu Rayon" — cau Rayon nam trong huong dan CHUNG.
    */
-  pageMaterial(pageId) {
-    const sp = this.pageProduct(pageId);
-    return materialIn(sp ? `${sp.name} ${sp.note || ""}` : "") || materialIn(settings.effective(pageId).extraPrompt);
+  /** Chat lieu NHAN VIEN THAT da noi trong hoi thoai (tin moi nhat), hoac null — nguoi ban hang biet hang, may khong cai lai. */
+  staffMaterial(pageId, messages = []) {
+    for (const m of [...(messages || [])].reverse()) {
+      if (!this.isHumanStaff(m, pageId)) continue;
+      const c = materialIn(this.messageText(m));
+      if (c) return c;
+    }
+    return null;
+  }
+
+  pageMaterial(pageId, messages = []) {
+    const sp = this.offCatalog(pageId) ? null : this.pageProduct(pageId);
+    const cuaShop = (messages || []).filter((m) => this.isFromPage(m, pageId)).map((m) => this.messageText(m)).join("\n");
+    // Khach den tu quang cao co MAU TEST (bot rieng theo quang cao, ERP khai chat vai): chat lieu cua mau do thang tat ca
+    const test = this.scopedTestProduct(pageId);
+    const tuQuangCao = test ? materialIn(`${test.fabric || ""} ${test.name || ""}`) : null;
+    // Su co Thi Tuyet Vu 13/10/2026: khach hoi "nhung the hay ni", nhan vien go "dạ chất nhung ạ" ma bot van cai "Rayon"
+    return this.staffMaterial(pageId, messages) || tuQuangCao || materialIn(sp ? `${sp.name} ${sp.note || ""}` : "") || materialIn(settings.effective(pageId).extraPrompt) || (this.offCatalog(pageId) ? materialIn(cuaShop) : null);
   }
 
   /** Khoi prompt: mau chu luc cua page (ten, ma, chat lieu) — de len mo ta chung khi khac. */
   pageProductBlock(pageId) {
+    if (this.offCatalog(pageId)) {
+      return [
+        `\n\n## MẪU CỦA PAGE NÀY (MẪU MỚI, CHƯA CÓ TRONG DANH MỤC)`,
+        `- Page chỉ bán MỘT mẫu mới. Mọi câu về mẫu (màu, size, giá, chất liệu) CHỈ lấy từ "Hướng dẫn riêng" của page, mục "KHÁCH ĐẾN TỪ QUẢNG CÁO" (mẫu test của camp, nếu có) và các tin SHOP đã gửi khách trong hội thoại (vd tin chào mẫu kèm ảnh).`,
+        `- KHÔNG nêu mã mẫu trong danh mục POS (Q001, Q004…), KHÔNG kể màu / size / ảnh của mẫu khác. Chỉ gửi mã ảnh [[IMG:...]] của mẫu test trong mục quảng cáo (nếu có).`,
+        `- Khách hỏi điều chưa có trong hai nguồn trên (vd màu nào còn hàng): trả lời "Dạ em kiểm tra rồi báo chị ngay ạ" — KHÔNG đoán.`,
+      ].join("\n");
+    }
     const sp = this.pageProduct(pageId);
     if (!sp) return "";
     const cl = this.pageMaterial(pageId);
@@ -1514,8 +1544,10 @@ ${Xung} lấy màu nào để em lên đơn cho mình ạ?`;
    * Neu khach co gui anh trong lich su: chen dau hoi thoai 1 luot "anh tham chieu" (1 anh/mau/san pham tu POS)
    * de Gemini so sanh truc tiep anh khach gui voi anh that cua shop.
    */
-  async attachReferenceImages(history) {
+  async attachReferenceImages(history, pageId) {
     if (!config.vision.enabled || !history.some((h) => h.images?.length)) return history;
+    // Page ban mau moi chua co tren POS: anh tham chieu danh muc deu la mau khac -> bot tung noi "anh chi gui khong phai mau ben em"
+    if (pageId !== undefined && this.offCatalog(pageId)) return history;
     const refs = catalog.referenceImages(config.vision.referenceImages);
     if (!refs.length) return history;
     const images = [];
@@ -1919,7 +1951,7 @@ ${Xung} lấy màu nào để em lên đơn cho mình ạ?`;
       }
     }
     const history = await this.buildHistory(fullMessages.slice(-(recheck ? config.historyLimitRecheck : config.historyLimit)), pageId, { maxImages: recheck ? Math.max(config.vision.maxImages, 6) : undefined });
-    await this.attachReferenceImages(history);
+    await this.attachReferenceImages(history, pageId);
     const name = customerName || data.conv_from?.name || "";
     if (type !== "INBOX" && eff.commentMode === "off") return;
     const saleActive = this.saleActiveIn(pageId, messages);
@@ -1930,6 +1962,15 @@ ${Xung} lấy màu nào để em lên đơn cho mình ạ?`;
     // Don da chot cung kem muc nay: no noi "đơn đã đủ, đừng hỏi thêm, đọc ngữ cảnh tin ngắn" (truoc day bo qua -> AI
     // khong biet don da du, hoc theo lich su ma hoi "Em lên đơn…?" mai — Bui Phuong Vy 02/10/2026)
     systemPrompt += this.orderProgressPrompt(pageId, messages);
+    // Da xin chieu cao / can nang o mot trong 3 tin shop gan nhat ma khach chua tra loi -> khong xin lai, tra loi dung cau khach hoi
+    // (su co Thi Tuyet Vu 13/10/2026: khach hoi chat lieu 3 lan, bot 3 lan "cho em xin chiều cao cân nặng")
+    const ganShop = (messages || []).filter((m) => this.isFromPage(m, pageId)).slice(-3).map((m) => this.messageText(m));
+    const f0 = this.customerFacts(pageId, messages);
+    if (!f0.measured && !f0.size && ganShop.some((t) => /chiều cao|cân nặng/i.test(t))) {
+      systemPrompt += `\n\n## ĐÃ XIN SỐ ĐO RỒI\n- Shop vừa xin chiều cao / cân nặng và khách chưa gửi. Câu này KHÔNG xin lại số đo — trả lời ĐÚNG điều khách vừa hỏi / vừa nói (chất liệu, giá, màu…). Khách gửi số đo thì mới tư vấn size.`;
+    }
+    const clNv = this.staffMaterial(pageId, messages);
+    if (clNv) systemPrompt += `\n\n## CHẤT LIỆU NHÂN VIÊN ĐÃ XÁC NHẬN\n- Nhân viên shop đã báo khách chất liệu **${clNv}** trong hội thoại này. Dùng đúng chất liệu ${clNv}; KHÔNG nói chất liệu khác (bỏ qua câu chất liệu trong hướng dẫn chung).`;
     systemPrompt += this.quotedPriceBlock(pageId, messages);
     if (this.orderClosedIn(pageId, messages)) {
       systemPrompt += `
@@ -2046,12 +2087,17 @@ ${Xung} lấy màu nào để em lên đơn cho mình ạ?`;
       if (ok(r3?.text)) reply = r3.text;
     }
     // Chan bot NOI SAI CHAT LIEU: mau cua page la nhung / ren... ma cau tra loi chep cau "Rayon" cua huong dan chung
-    const chatLieu = this.pageMaterial(pageId);
+    const chatLieu = this.pageMaterial(pageId, messages);
     if (chatLieu && chatLieu !== "rayon" && /rayon/i.test(reply)) {
       log.warn(`[${pageId}] ${conversationId}: tra loi noi chat lieu Rayon, mau cua page la ${chatLieu} -> viet lai`);
       store.bumpStat(pageId, "materialGuard");
       const r5 = await generateReply(systemPrompt + `\n\n## CẢNH BÁO TỪ HỆ THỐNG\nCâu trả lời vừa rồi nói chất liệu Rayon — SAI. Mẫu của page này là chất liệu **${chatLieu}**. Viết lại, nói đúng chất liệu ${chatLieu} (hoặc bỏ câu chất liệu), giữ nguyên các ý khác.`, history, { model: eff.model, temperature: 0.2 }).catch(() => null);
       if (r5?.text && !/rayon/i.test(r5.text) && !this.findDisallowedPrices(r5.text, systemPrompt).length) reply = r5.text;
+    }
+    // Page mau moi ngoai danh muc: bo moi ma anh [[IMG:...]] (anh danh muc deu la mau khac)
+    if (this.offCatalog(pageId)) {
+      const test = this.scopedTestProduct(pageId);
+      reply = reply.replace(IMG_RE, (tag, ref) => (test && testImageRefs(test, ref) ? tag : "")).trim();
     }
     // Page KHONG ban ma nay (AURA ban dam nhung, khong phai Q005 — chu shop 13/10/2026): cau tra loi nhac ma do -> viet lai
     const maCam = blockedCodesFor([this.pageNames.get(pageId), this.pancakeNames?.get(pageId)]).filter((c) => new RegExp(`\\b${c}\\b`, "i").test(reply));
