@@ -2292,3 +2292,4 @@
 {"at":"2026-10-13T03:32:17.718Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"postorder-release-batch","detail":"fix/postorder-release-batch @ 4f468cdecc12 · 3 lệnh kiểm thử"}
 {"at":"2026-10-13T03:32:57.406Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"postorder-release-batch","detail":"#824 cho fix/postorder-release-batch @ 4f468cdecc12"}
 {"at":"2026-10-13T03:33:18.513Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#824 @ 4f468cdecc12 · Chỉ đổi trạng thái giữ; test khẳng định không câu bot/BOT_SENT/đơn/lịch follow-up mới; rollback có điều kiện chưa có trả lời; mặc định chạy thử"}
+{"at":"2026-10-13T04:34:45.156Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"customer-360","detail":"#804 @ 83dd92b2772e → 3a0ba0224925 (MERGE_ISOLATED · HIGH · gates success)"}

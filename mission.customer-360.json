@@ -3,7 +3,7 @@
   "mission_id": "customer-360",
   "title": "P0/P1 nhận diện khách cũ: Customer 360 dùng chung (danh tính PSID/page/Pancake/ERP/SĐT, địa chỉ đã xác minh gần nhất, đơn gần nhất), «địa chỉ cũ» ⇒ tra trước khi hỏi, đề xuất xác nhận; không nạp cả lịch sử vào model",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P0",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -23,9 +23,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-11T02:47:25.541Z",
-  "updated_at": "2026-10-13T01:04:02.882Z",
+  "updated_at": "2026-10-13T04:34:45.123Z",
   "last_heartbeat": "2026-10-13T01:04:02.882Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#804 → 3a0ba0224925da29e18211f6304d86d4a8e95562"
+  },
   "handoff": {
     "branch": "fix/customer-360",
     "sha": "83dd92b2772e95c71d8b647fddebd8601360bfc0",
