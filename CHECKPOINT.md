@@ -183,6 +183,7 @@ PR #814 đang mở ⇒ phải khai phạm vi với sổ trước.
 
 ### P0 INBOX — trạng thái + bước kế (owner: Team tiếp quản)
 - Số đo HSLC: listInbox p50 13–19 s (hàng 7–12 s, đếm-thẻ 5–6 s), loadInboxThread 0,1–1 s; «chưa đọc» đường LƯU SẴN (0245 đủ); state nhỏ (TB 1,3 KB).
+- **XONG 14/10:** #827 + #835 (JIT tắt) trên production 3683c9e9 — HSLC listInbox nguội p50 386 ms · p95 1.484 ms (trước 13–19 s), ấm 260/274 ms; mở hội thoại p50 134 · p95 380 ms; «JIT không chạy». Việc còn: phân trang con trỏ, memo bộ đếm, WAITING_REPLY gộp vào #803.
 - **ĐÃ XÁC NHẬN 13/10 (probe #831):** JIT — listInbox.hàng «JIT 291 hàm», Limit 6.873 ms tự thân/100 dòng; đếm-thẻ «JIT 187 hàm», Seq Scan 3.788 dòng 4.521 ms; mọi nút khác < 200 ms. #830 (trần 45′) + #831 đã gộp.
 - (cũ) GIẢ THUYẾT: **JIT Postgres** (cost ước ~300 triệu do nhánh lùi #803 lập kế hoạch nhưng 0 vòng chạy) — tiền lệ `db/index.ts::chayKhongJit`.
   Xác nhận bằng dòng «JIT … biên dịch» của probe #831.
