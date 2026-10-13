@@ -173,7 +173,7 @@ PR #814 đang mở ⇒ phải khai phạm vi với sổ trước.
 ## Checkpoint 2026-10-13 ~19:00 VN — BÀN GIAO MAX → TEAM (Max 89% tuần) — ĐỌC PHẦN NÀY TRƯỚC
 
 **PRODUCTION:** `b5296e6d` (main tới #826). Deploy «đỏ» = CỐ Ý (qa DEGRADED trong verify-migrations); kiểm smoke trong log SSH.
-**OWNER khoá gộp/deploy:** phiên Max đang cầm `integration-lead` — Team CHỈ `lease acquire integration-lead` SAU khi Max `lease release`
+**OWNER khoá gộp/deploy:** Max ĐÃ NHẢ `integration-lead` 14/10 (trống) — Team `lease acquire integration-lead` rồi làm; trước đây phiên Max cầm `integration-lead` — Team CHỈ `lease acquire integration-lead` SAU khi Max `lease release`
 (hoặc khi lease hết hạn tự nhiên — kiểm `npm run ai -- lease status`). Một task = một owner; Team làm trong cây `wt-team`, KHÔNG ghi vào cây `wt-*` khác.
 
 ### ĐANG CHẠY lúc bàn giao (đừng chạy trùng)
@@ -200,7 +200,8 @@ PR #814 đang mở ⇒ phải khai phạm vi với sổ trước.
 - #819 giỏ dính: CART_INTENT_DRIFT 13/368 → **0/218**, ORDER_READY_LOOP 22/215 → **1/99**. #804 Customer 360, #823, #824, #826 trên production.
 
 ### KHÁC
-- **Trung tâm giá vốn ERP** (ưu tiên chủ shop 13/10): CHƯA có sứ mệnh/đặc tả trong sổ (chỉ có `unknown-cost-not-zero` P2 VERIFYING). Team: hỏi chủ shop
+- **Trung tâm giá vốn ERP = PR #834** (phiên «vm:hkt · Tech Lead — P0 giá vốn», khoá tech-lead HẾT HẠN 13/10 20:19Z). Team: tiếp quản #834 (đọc PR + sứ mệnh của nó), KHÔNG mở sứ mệnh trùng.
+- (cũ) Trung tâm giá vốn ERP: CHƯA có sứ mệnh/đặc tả trong sổ (chỉ có `unknown-cost-not-zero` P2 VERIFYING). Team: hỏi chủ shop
   đặc tả hoặc đọc yêu cầu gốc, rồi `claim` MỘT sứ mệnh — không tự bịa phạm vi. Luật liên quan: AGENTS 3.13 (giá vốn «sống»), 3.14–3.15, 3.18.
 - qa 0245: rehearsal #814 (nháp, PASS review) — chạy sau P0 inbox, không cùng lúc deploy.
 - Chủ shop: xếp người phòng «Kinh doanh & CSKH» HSLC; dọn Google Drive.
