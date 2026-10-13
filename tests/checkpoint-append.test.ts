@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { chenMuc, dongBiMat, dungNoiDungMoi } from "../scripts/checkpoint-append";
+import { chenMuc, dongBiMat, dungNoiDungMoi, giuKetThuc } from "../scripts/checkpoint-append";
 
 /**
  * ═══════════ CHECKPOINT CHỈ ĐƯỢC THÊM — BÀI KIỂM DỰNG TỪ ĐÚNG SỰ CỐ ĐÃ XẢY RA ═══════════
@@ -64,7 +64,14 @@ export function testCheckpointChiDuocThem() {
   assert.equal(dungNoiDungMoi.length, 2, "dungNoiDungMoi(goc, muc) — đúng hai tham số, không nhận 'nội dung đầy đủ'");
   assert.ok(dungNoiDungMoi(SO_GOC, "## Mục mới").includes("JIT 291 hàm"));
 
+  /* 9 · Kiểu kết thúc tệp giữ nguyên. Phép kiểm "mất dòng" cố ý bỏ qua khoảng trắng nên nó KHÔNG
+         bắt được chỗ này — đo thật 14/10/2026: lượt ghi đầu tiên để lại "\ No newline at end of file",
+         làm dòng cuối của người khác hiện ra ở cột XOÁ trong mọi lượt diff sau đó. */
+  assert.ok(dungNoiDungMoi("# A\n\n## cũ\n- x\n", "## mới").endsWith("\n"), "gốc có xuống dòng cuối thì bản mới phải có");
+  assert.ok(!dungNoiDungMoi("# A\n\n## cũ\n- x", "## mới").endsWith("\n"), "gốc KHÔNG có thì bản mới cũng không được tự thêm");
+  assert.equal(giuKetThuc("a\n", "a\n\n\n"), "a\n", "đuôi nhiều dòng trống quy về đúng một xuống dòng");
+
   console.log(
-    "✓ Checkpoint chỉ được THÊM: mục mới lên đầu sau khối tiêu đề · chèn không mất dòng nào · bản dựng từ nội dung ĐỌC TRƯỚC bị bắt và nêu đúng dòng mất · so theo bội · khoảng trắng không tính · đoạn rỗng bị từ chối · sổ chưa có mục thì nối cuối",
+    "✓ Checkpoint chỉ được THÊM: mục mới lên đầu sau khối tiêu đề · chèn không mất dòng nào · bản dựng từ nội dung ĐỌC TRƯỚC bị bắt và nêu đúng dòng mất · so theo bội · khoảng trắng không tính · đoạn rỗng bị từ chối · sổ chưa có mục thì nối cuối · giữ nguyên kiểu kết thúc tệp",
   );
 }

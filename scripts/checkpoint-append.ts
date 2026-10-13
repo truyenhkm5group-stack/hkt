@@ -70,9 +70,16 @@ export function chenMuc(goc: string, muc: string): string {
   return [...dong.slice(0, i), ...khoi, ...dong.slice(i)].join("\n");
 }
 
+/** Giữ nguyên kiểu kết thúc tệp của bản gốc: có xuống dòng cuối thì bản mới cũng phải có, và ngược lại. */
+export function giuKetThuc(goc: string, moi: string): string {
+  const coXuongDong = goc.endsWith("\n");
+  const than = moi.replace(/\n+$/, "");
+  return coXuongDong ? `${than}\n` : than;
+}
+
 /** Lượt ghi hợp lệ = chèn xong mà KHÔNG mất dòng nào. Trả nội dung mới, hoặc ném kèm danh sách mất. */
 export function dungNoiDungMoi(goc: string, muc: string): string {
-  const moi = chenMuc(goc, muc);
+  const moi = giuKetThuc(goc, chenMuc(goc, muc));
   const mat = dongBiMat(goc, moi);
   if (mat.length) {
     const vd = mat.slice(0, 5).map((d) => `  − ${d.slice(0, 120)}`).join("\n");
@@ -83,14 +90,22 @@ export function dungNoiDungMoi(goc: string, muc: string): string {
 
 /* ───────────────────────── phần chạy thật (git) ───────────────────────── */
 
+function gitTho(args: string[], opts: { env?: NodeJS.ProcessEnv } = {}): string {
+  return execFileSync("git", args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], env: opts.env ?? process.env });
+}
+
+/** Mã băm / tên nhánh: cắt khoảng trắng. KHÔNG dùng cho NỘI DUNG TỆP — xem `gitTho`. */
 function git(args: string[], opts: { env?: NodeJS.ProcessEnv } = {}): string {
-  return execFileSync("git", args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], env: opts.env ?? process.env }).trim();
+  return gitTho(args, opts).trim();
 }
 
 function docSoVuaFetch(remote: string): { sha: string; noiDung: string } {
   git(["fetch", remote, `+refs/heads/${NHANH_SO}:refs/remotes/${remote}/${NHANH_SO}`, "--quiet"]);
   const sha = git(["rev-parse", `${remote}/${NHANH_SO}`]);
-  return { sha, noiDung: git(["show", `${sha}:${TEP_CHECKPOINT}`]) };
+  // `gitTho`, KHÔNG trim: cắt khoảng trắng ở đây là ăn mất ký tự xuống dòng cuối tệp. Phép kiểm
+  // "mất dòng" cố ý bỏ qua khoảng trắng (xê dịch dòng trống không phải mất chữ) nên nó KHÔNG bắt
+  // được chỗ này — đo thật 14/10/2026: lượt ghi đầu tiên để lại "\ No newline at end of file".
+  return { sha, noiDung: gitTho(["show", `${sha}:${TEP_CHECKPOINT}`]) };
 }
 
 function ghiMotLuot(remote: string, muc: string, loiNhan: string): "DA_GHI" | "VA_THU_LAI" {
