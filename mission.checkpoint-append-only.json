@@ -22,8 +22,8 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-13T16:21:40.528Z",
-  "updated_at": "2026-10-13T17:15:23.347Z",
-  "last_heartbeat": "2026-10-13T17:15:23.347Z",
+  "updated_at": "2026-10-13T17:20:10.757Z",
+  "last_heartbeat": "2026-10-13T17:20:10.757Z",
   "definition_of_done": [],
   "intake": {
     "verdict": "IN_PROGRESS",
@@ -31,16 +31,17 @@
   },
   "handoff": {
     "branch": "claude/checkpoint-append-only",
-    "sha": "b2997846d778eff769838c75201c78e080902e48",
-    "at": "2026-10-13T17:15:23.347Z",
+    "sha": "2d0b5a6ac86ec5345122d987896d044acc55ff8c",
+    "at": "2026-10-13T17:20:10.757Z",
     "actor": "DESKTOP-56TH98Y:wt-team",
     "title": "CHECKPOINT.md chỉ được THÊM: công cụ ghi an toàn, từ chối lượt ghi làm mất dòng của phiên khác",
-    "summary": "Công cụ ghi CHECKPOINT.md chỉ-THÊM: dựng từ đầu nhánh vừa fetch, từ chối lượt ghi làm mất dòng (so theo bội), va thì fetch lại và thử lại, không bao giờ --force.",
+    "summary": "Công cụ ghi CHECKPOINT.md chỉ-THÊM: dựng từ đầu nhánh vừa fetch, từ chối lượt ghi làm mất dòng (so theo bội), giữ nguyên kiểu kết thúc tệp, va thì fetch lại và thử lại, không bao giờ --force.",
     "tests": [
-      "tests/checkpoint-append.test.ts chạy riêng: ĐẠT (8 nhóm khẳng định, dựng từ chính sự cố 13/10)",
+      "tests/checkpoint-append.test.ts chạy riêng: ĐẠT (9 nhóm khẳng định, gồm giữ nguyên kiểu kết thúc tệp)",
       "npm run typecheck: sạch",
       "npm run lint: sạch",
-      "npm test đủ: để cổng CI chạy — máy dev thiếu RAM"
+      "dùng thật trên sổ: 1 lượt ghi ĐẠT (0 dòng mất), lỗi xuống dòng cuối đã vá và vá luôn sổ",
+      "npm test đủ: để cổng CI chạy"
     ]
   }
 }
