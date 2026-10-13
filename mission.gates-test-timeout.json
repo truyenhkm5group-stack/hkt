@@ -1,0 +1,26 @@
+{
+  "schema": 1,
+  "mission_id": "gates-test-timeout",
+  "title": "Gates: trần job kiểm thử 35 → 45 phút (bộ kiểm thử chạm 35 phút)",
+  "business_goal": "",
+  "status": "RUNNING",
+  "priority": "P0",
+  "risk": "HIGH",
+  "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "worker": null,
+  "worktree": null,
+  "branch": "fix/gates-test-timeout",
+  "base_sha": "e192ac9c5bd0d3ea76a12921ee149ea3acca585d",
+  "domains": [],
+  "owned_paths": [
+    ".github/workflows/gates.yml"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-13T10:51:43.018Z",
+  "updated_at": "2026-10-13T10:51:43.018Z",
+  "last_heartbeat": "2026-10-13T10:51:43.018Z",
+  "definition_of_done": []
+}
