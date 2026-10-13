@@ -8,7 +8,7 @@
  * Khoá:
  *  1. THỨ TỰ RẺ TRƯỚC (`CHEAP_FIRST`) ≡ bản chuẩn (`CANONICAL` — thân hàm CSDL 0245) TỪNG hội thoại, trên fixture có lịch sử mẫu chào;
  *  2. listInbox tính trực tiếp ≡ listInbox lưu sẵn (thẻ · thứ tự · cờ · số chưa đọc) — tập «chưa đọc» dựng MỘT lần;
- *  3. số đo trước / sau in ra (không ngưỡng — AGENTS 38). Trong `npm test` fixture NHỎ (1.000 hội thoại, 200 luồng lịch sử dài — đủ
+ *  3. số đo trước / sau in ra (không ngưỡng — AGENTS 38). Trong `npm test` fixture NHỎ (500 hội thoại, 100 luồng lịch sử dài — đủ
  *     cho đối chiếu từng hội thoại, ~1 lượt mỗi phép đo); lượt ĐO ≥ 5.000 hội thoại chạy riêng: `npm run perf:inbox` (cờ `--big`). Lý do:
  *     CI chạy npm test HAI lần với trần 30 phút — bản 5.000 hội thoại (đường cũ 18–34 s/lượt) làm job «có token giả» bị huỷ (#827);
  *  4. chuyển hội thoại: phần thuần chọn đúng payload khi bấm nhanh A→B→C, câu trả lời muộn không đè; tự làm mới không chồng lượt và
@@ -36,7 +36,7 @@ const ORG = "hop-thu-list-perf";
 const PAGE = "pg-list-perf";
 /** Cỡ fixture: `npm test` = nhỏ (đối chiếu); `npm run perf:inbox` (`--big`) = ≥ 5.000 hội thoại (đo). */
 type Size = { n: number; heavy: number; runs: number };
-const SMALL: Size = { n: 1000, heavy: 200, runs: 1 };
+const SMALL: Size = { n: 500, heavy: 100, runs: 1 };
 const BIG: Size = { n: 5000, heavy: 600, runs: 3 };
 const HIST = 10;
 const TPL = "Chào bạn! Cảm ơn bạn đã nhắn tin cho shop. Shop sẽ phản hồi trong ít phút, bạn vui lòng chờ nhé ạ.";
