@@ -1,4 +1,4 @@
-import { orderSync, phonesInText, normalizePhone, hasStreetDetail, ORDER_STATUS_VI } from "./orders.js";
+import { orderSync, phonesInText, normalizePhone, hasStreetDetail, ORDER_STATUS_VI, blockedCodesFor } from "./orders.js";
 import { settings } from "./settings.js";
 import { store } from "./store.js";
 import { log } from "./logger.js";
@@ -25,6 +25,8 @@ const SWEEP_MS = 5 * 60 * 1000;
 // Mau chu luc chu shop chot cho tung page — ap MOT lan khi khoi dong neu page chua khai (sua lai trong cai dat page van
 // duoc, khong bi de lai). Chu shop 02/10/2026: "mặc định page này chạy Q005" (Linh Tây Luxury CS1).
 const PAGE_DEFAULT_PRODUCT_SEED = [{ page: "linh tay luxury cs1", code: "Q005" }];
+
+
 // Quet lai MOT lan cac hoi thoai co SDT 15 ngay qua cua page (chu shop 06/10/2026: "check cac don tren page nay don moi dien dung dia
 // chi san pham roi xac nhan"): hoi thoai trong `hours` gio qua chua xac nhan duoc kiem lai ngay -> dien don nhap, du dieu
 // kien thi tu xac nhan, thieu (vd khach chi ghi ten cua hang, khong co xa/huyen/tinh) thi sang "can duyet" kem ly do.
@@ -159,7 +161,8 @@ export class OrderBot {
         return it;
       }
       if (defaultCode) it.defaultCode = defaultCode;
-      const r = await orderSync.syncFromConversation({ pageId, pageName: this.bot.pageNames.get(pageId), conversationId, customerName: it.customerName || name, historyText: text, strict: true, addressOverride, defaultCode: it.defaultCode || "" });
+      const blockedCodes = blockedCodesFor([this.bot.pageNames.get(pageId), this.bot.pancakeNames?.get(pageId)]);
+      const r = await orderSync.syncFromConversation({ pageId, pageName: this.bot.pageNames.get(pageId), conversationId, customerName: it.customerName || name, historyText: text, strict: true, addressOverride, defaultCode: it.defaultCode || "", blockedCodes });
       it.lastCheckAt = Date.now();
       it.checks = (it.checks || 0) + 1;
       if (r.status === "created" || r.status === "updated") {
@@ -585,6 +588,16 @@ export class OrderBot {
     for (const [pid, ten] of this.bot.pageNames) {
       // Ten Pancake tai sau khi khoi dong -> xet ca hai ten; sweep goi lai nen page doi ten muon van duoc ap
       const cacTen = [ten, this.bot.pancakeNames?.get(pid)].map(khongDau);
+      // Mau chu luc dang la ma page KHONG ban -> bo (moi page mot lan), de bot chat / bot len don khong mac dinh ma do nua
+      const cam = blockedCodesFor(cacTen);
+      const dangCo = String(settings.get(pid).defaultProduct || "").trim().toUpperCase();
+      const kCam = `${pid}:bo:${dangCo}`;
+      if (dangCo && cam.includes(dangCo) && !daAp[kCam]) {
+        daAp[kCam] = Date.now();
+        settings.update(pid, { defaultProduct: "" });
+        log.info(`[orderbot] page ${ten}: bo mau chu luc ${dangCo} (page khong ban ma nay)`);
+        out.push(pid);
+      }
       for (const s of PAGE_DEFAULT_PRODUCT_SEED) {
         const k = `${pid}:${s.code}`;
         if (daAp[k] || !cacTen.includes(s.page)) continue;
