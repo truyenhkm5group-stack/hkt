@@ -1,8 +1,8 @@
 {
   "pr": 831,
-  "sha": "12566b624cc96015bbc67551de28600ad780c0b1",
+  "sha": "c9d33af4e898c2565f03e2342f09786c351463a7",
   "verdict": "PASS",
   "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
-  "at": "2026-10-13T10:54:43.264Z",
-  "note": "Chỉ script đo CHỈ ĐỌC: top nút tự thân, tên hàm/cột không giá trị, khối JIT"
+  "at": "2026-10-13T14:27:23.533Z",
+  "note": "12566b62 (PASS) + gộp main"
 }
