@@ -275,10 +275,24 @@ function rowAlias(a: string) {
 }
 
 /**
+ * Thứ tự ĐÁNH GIÁ các vế của cùng một định nghĩa (P0 inbox-list-perf 13/10/2026):
+ *  · `CANONICAL` — đúng chữ câu mà thân hàm CSDL 0245 lưu (bài kiểm so từng ký tự với migration) — CHỈ dùng để dựng thân hàm đó;
+ *  · `CHEAP_FIRST` — cùng ba vế, cùng phép AND, đổi THỨ TỰ: «đã đọc» → «bot / AI / nhân viên / người đã xác minh đã trả lời» (đọc
+ *    trong luồng, không câu con chéo luồng) → vế «đã trả lời» ĐẦY ĐỦ (tin mẫu cũ dò CHÉO LUỒNG 168 giờ trên mọi dòng PAGE_REPLY của
+ *    page · tin chào đầu phiên). Postgres dừng phép AND ở vế sai đầu tiên của biểu thức trong danh sách chọn, nên hội thoại đã được
+ *    AI trả lời (phần lớn hộp thư) không bao giờ chạm tới phép dò chéo luồng. Vế giữa chỉ là MỘT PHẦN của vế đầy đủ (mỗi nhánh của nó
+ *    là một nhánh của `answered`) ⇒ `not đọc ∧ not nhanh ∧ not đầy đủ` ≡ `not đầy đủ ∧ not đọc` — không đổi một kết quả nào; bài kiểm
+ *    so từng hội thoại với thân hàm CSDL (inbox-unread-perf) và với bản TS (response-ownership M).
+ * Vì sao cần: tổ chức chưa có cột lưu sẵn 0245 (DEGRADED_MIGRATION — lượt dẫn xuất 0245 quá 600 giây) tính định nghĩa này cho TỪNG
+ * hội thoại ở bộ đếm thẻ và khoá xếp; HSLC 13/10: listInbox nguội p50 13.364 ms trên 3.629 hội thoại.
+ */
+export type TurnSqlOrder = "CANONICAL" | "CHEAP_FIRST";
+
+/**
  * «Lượt khách mới nhất của luồng (page, thread) CHƯA được xử lý» — điều kiện SQL. `convId` = mã hội thoại (con trỏ đọc). `now` = mốc của
  * cửa sổ 7 ngày nhận dạng tin mẫu (cùng `now` mà bản TS dùng).
  */
-export function latestCustomerTurnUnhandledFor(pageId: SQL, threadId: SQL, seenAt: SQL): SQL<boolean> {
+export function latestCustomerTurnUnhandledFor(pageId: SQL, threadId: SQL, seenAt: SQL, order: TurnSqlOrder = "CANONICAL"): SQL<boolean> {
   const L = rowAlias("lc");
   const O = rowAlias("o");
   const S = rowAlias("s");
@@ -299,14 +313,40 @@ export function latestCustomerTurnUnhandledFor(pageId: SQL, threadId: SQL, seenA
   const generic = sql`(case when ${O.c("source_at")} is not null and ${L.c("source_at")} is not null then ${ms(O.c("source_at"))} > ${ms(L.c("source_at"))}
     else ${O.created} - ${L.created} >= interval '60 seconds' end)`;
   const verifiedAfter = sql`(case when ${O.c("source_at")} is null then ${O.created} > ${L.created} else ${generic} end)`;
+  // Hai nhánh TRONG LUỒNG của `answered` (bot / AI phía page · nhân viên ERP / người đã xác minh) — cùng một mảnh SQL cho vế đầy đủ và vế nhanh.
+  const byAi = sql`((${O.bot} or (${O.pageOther} and ${O.c("sender_kind")} = 'AI_AGENT')) and ${L.c("status")} <> 'PENDING' and ${O.created} > ${L.created})`;
+  const byHuman = sql`((${O.staffOut} or (${O.pageOther} and ${O.c("sender_kind")} = 'VERIFIED_HUMAN')) and ${verifiedAfter})`;
   const answered = sql`exists (select 1 from "sales_chat_inbound" o where o.page_id = ${pageId} and o.thread_id = ${threadId} and ${O.order} > ${L.order} and (
-      ((${O.bot} or (${O.pageOther} and ${O.c("sender_kind")} = 'AI_AGENT')) and ${L.c("status")} <> 'PENDING' and ${O.created} > ${L.created})
-      or ((${O.staffOut} or (${O.pageOther} and ${O.c("sender_kind")} = 'VERIFIED_HUMAN')) and ${verifiedAfter})
+      ${byAi}
+      or ${byHuman}
       or (${O.pageOther} and ${origin} = 'OTHER_APP' and ${generic})
       or (${O.pageOther} and ${origin} = 'UNKNOWN' and ${generic} and not ${greeting})))`;
   const read = sql`coalesce(${L.created} <= ${ms(seenAt)}, false)`;
-  return sql<boolean>`coalesce((select (not ${answered} and not ${read}) from (select * from "sales_chat_inbound" lc where lc.page_id = ${pageId} and lc.thread_id = ${threadId} and ${L.customer}
-    order by ${L.key} desc, ${L.created} desc, lc.message_id desc limit 1) lc), false)`;
+  const latest = sql`(select * from "sales_chat_inbound" lc where lc.page_id = ${pageId} and lc.thread_id = ${threadId} and ${L.customer}
+    order by ${L.key} desc, ${L.created} desc, lc.message_id desc limit 1) lc`;
+  if (order === "CHEAP_FIRST") {
+    const answeredInThread = sql`exists (select 1 from "sales_chat_inbound" o where o.page_id = ${pageId} and o.thread_id = ${threadId} and ${O.order} > ${L.order} and (${byAi} or ${byHuman}))`;
+    // Vế đầy đủ, cùng nghĩa, rẻ hơn:
+    //  · tin mẫu cũ: thêm hai CẬN THÔ trên cột `created_at` (dò được bằng chỉ mục mốc) — ms(p) < ms(o) ⇒ p < o; ms(p) ≥ ms(o) − 168 giờ ⇒
+    //    p > o − 168 giờ − 1 ms. Hai cận là HỆ QUẢ của điều kiện gốc (giữ nguyên bên cạnh) ⇒ không loại dòng nào điều kiện gốc nhận;
+    //  · nguồn gốc của dòng phía page: so mốc «chắc chắn sau» (`generic`, rẻ) TRƯỚC, rồi mới xét nguồn gốc — MỘT lần (bản chuẩn tính
+    //    CASE nguồn gốc hai lần ở hai nhánh OTHER_APP / UNKNOWN, mỗi lần một phép dò chéo luồng). Tin chào tự động tới trong vòng 60 giây
+    //    sau tin khách ⇒ `generic` sai ⇒ không bao giờ dò.
+    const legacyFast = sql`(char_length(${O.tplKey}) >= 40 and exists (select 1 from "sales_chat_inbound" p where p.page_id = ${O.c("page_id")} and p.thread_id <> ${O.c("thread_id")}
+    and p.note = ${PAGE_REPLY_NOTE} and p.created_at < ${O.c("created_at")} and p.created_at > ${O.c("created_at")} - interval '168 hours' - interval '1 millisecond'
+    and ${P.created} < ${O.created} and ${P.created} >= ${O.created} - interval '168 hours' and ${P.tplKey} = ${O.tplKey}))`;
+    const originFast = sql`(case when ${O.c("sender_kind")} is not null then ${O.c("sender_kind")}
+    when ${O.c("text")} ~* ${META_SYSTEM_TEXT_SQL_RE} then 'META_SYSTEM'
+    when ${legacyFast} then 'PANCAKE_AUTOMATION' else 'UNKNOWN' end)`;
+    // (Đo PGlite 3.000 hội thoại + 60.333 dòng lịch sử mẫu chào: xét tin chào TRƯỚC tin mẫu chậm hơn — 14,1 s so với 8,0 s — nên giữ
+    // thứ tự của bản chuẩn: nguồn gốc rồi mới tới tin chào.)
+    const answeredFast = sql`exists (select 1 from "sales_chat_inbound" o where o.page_id = ${pageId} and o.thread_id = ${threadId} and ${O.order} > ${L.order} and (
+      ${byAi}
+      or ${byHuman}
+      or (${O.pageOther} and ${generic} and (case ${originFast} when 'OTHER_APP' then true when 'UNKNOWN' then not ${greeting} else false end))))`;
+    return sql<boolean>`coalesce((select (not ${read} and not ${answeredInThread} and not ${answeredFast}) from ${latest}), false)`;
+  }
+  return sql<boolean>`coalesce((select (not ${answered} and not ${read}) from ${latest}), false)`;
 }
 
 /** Mốc «người đã mở» của một hội thoại: con trỏ đọc lớn nhất của MỌI người dùng, hoặc mốc mở cấp cửa hàng cũ `staff_seen_at`. */
@@ -330,7 +370,7 @@ export function latestCustomerTurnUnhandledSql(): SQL<boolean> {
   const col = (n: string) => sql.raw(`"sales_chat_conversations"."${n}"`);
   const seen = humanSeenAtSql(col("id"), col("staff_seen_at"));
   return sql<boolean>`(case when ${col("page_id")} is not null and ${col("thread_id")} is not null
-    then ${latestCustomerTurnUnhandledFor(col("page_id"), col("thread_id"), seen)}
+    then ${latestCustomerTurnUnhandledFor(col("page_id"), col("thread_id"), seen, "CHEAP_FIRST")}
     else ${latestWebTurnUnhandledFor(col("id"), seen)} end)`;
 }
 

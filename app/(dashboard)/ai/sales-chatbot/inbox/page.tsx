@@ -87,9 +87,11 @@ export default async function SalesInboxPage({ searchParams }: { searchParams: P
   // `/api/ai-sales/inbox-read`; danh sách vá theo xác nhận đó (inbox-read-shared.ts). Workspace KHÁCH: lý do AI không trả lời + dấu vết từng tin lọc ở MÁY CHỦ trước khi vào props (lib/saas/visibility.ts).
   // Bấm sang hội thoại khác KHÔNG đi qua đây (thread-pane.tsx — chỉ tải hội thoại); đây là lối mở bằng đường dẫn / tự làm mới.
   // «Chưa đọc» = tin khách CHƯA ĐƯỢC XỬ LÝ — trạng thái của cửa hàng (`loadInboxUnreadSql`, inbox-unread.ts; chủ shop 11/10/2026).
-  const thread = selected ? await inboxThreadPayload(user, selected) : null;
+  // Nạp hội thoại SONG SONG với danh sách (P0 13/10/2026): trước đây chờ xong hội thoại rồi mới bắt đầu danh sách — mỗi lượt tự làm
+  // mới có `?c=` cộng thêm trọn thời gian nạp hội thoại vào thời gian dựng trang.
   const canManage = can(user, "ai_sales:manage");
-  const [list, users, assignees, pack, routes, cooldown, orderGate, bulkCount] = await Promise.all([
+  const [thread, list, users, assignees, pack, routes, cooldown, orderGate, bulkCount] = await Promise.all([
+    selected ? inboxThreadPayload(user, selected) : Promise.resolve(null),
     listInbox(user, inboxListQuery(state)),
     assignableUsers(user),
     inboxAssignees(user),

@@ -571,7 +571,7 @@ export function testHideInternalStatic() {
   const actions = read("lib/actions/sales-chatbot.ts");
   // Hộp thư (10/10/2026): hai lối mở hội thoại — trang (đường dẫn / tự làm mới) và route chuyển hội thoại — đi CHUNG một lõi lọc.
   assert.ok(read("lib/sales-chatbot/inbox-thread-payload.ts").includes("const thread = customerFacing(user.organization) ? customerInboxThread(loaded.thread) : loaded.thread;"), "hộp thư: hội thoại của khách lọc ở máy chủ trước khi vào props");
-  assert.ok(read("app/(dashboard)/ai/sales-chatbot/inbox/page.tsx").includes("await inboxThreadPayload(user, selected)") && !read("app/(dashboard)/ai/sales-chatbot/inbox/page.tsx").includes("loadInboxThread("), "trang mở hội thoại qua lõi lọc, không gọi thẳng loadInboxThread");
+  assert.ok(read("app/(dashboard)/ai/sales-chatbot/inbox/page.tsx").includes("inboxThreadPayload(user, selected)") && !read("app/(dashboard)/ai/sales-chatbot/inbox/page.tsx").includes("loadInboxThread("), "trang mở hội thoại qua lõi lọc, không gọi thẳng loadInboxThread");
   assert.ok(read("app/api/ai-sales/inbox-thread/route.ts").includes("await inboxThreadPayload(user, id)") && !read("app/api/ai-sales/inbox-thread/route.ts").includes("loadInboxThread("), "route chuyển hội thoại cũng qua lõi lọc");
   assert.equal((actions.match(/testView\(user,/g) ?? []).length, 3, "cả hai action khung thử trả view qua bộ lọc của khách");
 
