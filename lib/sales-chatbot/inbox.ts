@@ -1,7 +1,7 @@
 import { and, asc, desc, eq, inArray, isNotNull, isNull, ne, or, sql, type SQL } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { z } from "zod";
-import { getDb, schema } from "@/db";
+import { chayKhongJit, getDb, schema, type Db } from "@/db";
 import { compatTableColumns } from "@/lib/db/serve-compat-columns";
 import { listChannelPages } from "@/lib/connectors/service";
 import { loadTransportFacts, MESSENGER_DIRECT_KEY, transportOwnerOf, type TransportFacts } from "@/lib/sales-chatbot/channel-ownership";
@@ -328,12 +328,20 @@ export async function listInbox(
   // CỬA HÀNG — không nối con trỏ của người xem. Công tắc lùi `inbox.unread.materialized` (inbox-unread.ts) đổi sang tính trực tiếp.
   const unreadSql = await loadInboxUnreadSql();
   const src = inboxConversationsSource(unreadSql.materialized);
+  /*
+    JIT TẮT cho các câu quét cả hộp thư (P0 inbox-list-subplans 13/10/2026). Cost ƯỚC TÍNH của câu đếm thẻ ~306 triệu (probe HSLC) — phần
+    lớn là nhánh lùi về hàm #803 của «chưa đọc» lưu sẵn được lập kế hoạch mà không bao giờ chạy — vượt xa `jit_above_cost` ⇒ Postgres
+    biên dịch JIT cả chục biểu thức bộ lọc + câu con, và thời gian biên dịch bị tính vào nút đầu tiên đánh giá biểu thức: HSLC «Seq Scan
+    3.772 dòng · 4.555 ms» trên bảng 8 MB, câu lấy hàng «Limit 8.821 ms» trên con 326 ms. Cùng bệnh và cùng thuốc với db/index.ts::chayKhongJit
+    (10/09: thực thi 26 ms · biên dịch 17.037 ms). Mỗi câu một giao dịch `set local jit = off` — không đổi cấu hình máy chủ.
+  */
+  const noJit = <T>(f: (d: Db) => Promise<T>) => chayKhongJit(db, f);
   // Chưa có cột lưu sẵn (tổ chức DEGRADED_MIGRATION ở 0245 / công tắc lùi): định nghĩa #803 là một câu con cho TỪNG hội thoại, và trước
   // đây chạy BA lượt trên cả hộp thư (bộ đếm thẻ · khoá xếp · đếm level khi lọc «Chưa đọc»). Nay MỘT lượt dựng tập hội thoại chưa đọc
   // (trong `base` — mọi bộ lọc khác đã áp), ba chỗ kia đọc tập đó. Cùng biểu thức, cùng kết quả (P0 inbox-list-perf 13/10/2026).
   let unread: SQL<boolean> = unreadSql.unread;
   if (!unreadSql.materialized) {
-    const ids = (await db.select({ id: viaSource(c.id) }).from(src).leftJoin(cu, eq(cu.id, c.customerId)).where(and(...base, unreadSql.unread))).map((r) => r.id);
+    const ids = (await noJit((d) => d.select({ id: viaSource(c.id) }).from(src).leftJoin(cu, eq(cu.id, c.customerId)).where(and(...base, unreadSql.unread)))).map((r) => r.id);
     unread = ids.length ? sql<boolean>`(${inArray(c.id, ids)})` : sql<boolean>`false`;
   }
   const byFilter: Record<InboxFilter, SQL | undefined> = {
@@ -353,32 +361,39 @@ export async function listInbox(
   const countCols = Object.fromEntries(INBOX_FILTERS.map((f) => [f, byFilter[f] ? sql<number>`count(*) filter (where ${byFilter[f]})::int` : sql<number>`count(*)::int`])) as Record<InboxFilter, SQL<number>>;
   // `unreadStamp`: dấu con trỏ đọc MỚI NHẤT của người xem, đọc trong CÙNG câu (cùng ảnh chụp) với số «chưa đọc» — trình duyệt so nó
   // với xác nhận đọc để biết bản đếm này đã thấy lượt đọc vừa rồi chưa (inbox-read-shared.ts::patchUnreadCount).
-  const [countRow] = await db
+  const [countRow] = await noJit((d) =>
+    d
     .select({ ...countCols, phone: sql<number>`count(*) filter (where ${HAS_PHONE})::int`, unreadStamp: sql<string | null>`(select max(r.updated_at) from "sales_chat_reads" r where r.user_id = ${user.id})` })
     .from(src)
     .leftJoin(cu, eq(cu.id, c.customerId))
-    .where(and(...base, ...(levelCond ? [levelCond] : [])));
+    .where(and(...base, ...(levelCond ? [levelCond] : []))),
+  );
   const counts = Object.fromEntries(INBOX_FILTERS.map((f) => [f, Number((countRow as Record<string, unknown> | undefined)?.[f] ?? 0)])) as Record<InboxFilter, number>;
-  const levelRows = await db
+  const levelRows = await noJit((d) =>
+    d
     .select({ level: viaSource(c.customerLevel), n: sql<number>`count(*)::int` })
     .from(src)
     .leftJoin(cu, eq(cu.id, c.customerId))
     .where(and(...base, ...(byFilter[q.filter] ? [byFilter[q.filter]!] : [])))
-    .groupBy(c.customerLevel);
+    .groupBy(c.customerLevel),
+  );
   const levelCounts: Partial<Record<CustomerLevel, number>> = {};
   for (const r of levelRows) if (r.level) levelCounts[r.level as CustomerLevel] = Number(r.n);
   const where = and(...base, ...(byFilter[q.filter] ? [byFilter[q.filter]!] : []), ...(levelCond ? [levelCond] : []));
   // Pha 1: xếp + cắt trang. Cờ chưa đọc là cột ĐƯỢC XẾP THEO (khoá xếp gọi tên cột).
-  const page = await db
+  const page = await noJit((d) =>
+    d
     .select({ id: viaSource(c.id), unreadFlag: sql<boolean>`${unread}`.as("unread_flag") })
     .from(src)
     .leftJoin(cu, eq(cu.id, c.customerId))
     .where(where)
     .orderBy(...inboxOrderBy(q.filter, sql<boolean>`"unread_flag"`, inboxSearchRankSql(q.q)))
-    .limit(q.limit);
+    .limit(q.limit),
+  );
   const pageIds = page.map((p) => p.id);
   // Pha 2: chi tiết của đúng các dòng trang (mã hội thoại lọc xuống tới bảng gốc).
-  const detail = await db
+  const detail = await noJit((d) =>
+    d
     .select({
       id: viaSource(c.id),
       channel: viaSource(c.channel),
@@ -426,7 +441,8 @@ export async function listInbox(
     .from(src)
     .leftJoin(cu, eq(cu.id, c.customerId))
     .leftJoin(u, eq(u.id, c.assigneeUserId))
-    .where(pageIds.length ? inArray(c.id, pageIds) : sql`false`);
+    .where(pageIds.length ? inArray(c.id, pageIds) : sql`false`),
+  );
   const byId = new Map(detail.map((r) => [r.id, r]));
   const rows = page.flatMap((p) => {
     const r = byId.get(p.id);

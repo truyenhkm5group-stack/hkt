@@ -413,7 +413,7 @@ function testSource() {
   const inbox = readFileSync("lib/sales-chatbot/inbox.ts", "utf8");
   assert.doesNotMatch(inbox, /personalUnread|VIEWER_READ_ALIAS|HANDLED_AT|inboxUnreadSql\(/, "hộp thư không còn luật chưa đọc riêng");
   // P0 inbox-list-perf 13/10/2026: tính trực tiếp ⇒ tập «chưa đọc» dựng MỘT lần bằng đúng biểu thức đó (tests/inbox-list-perf.test.ts).
-  assert.match(inbox, /const unreadSql = await loadInboxUnreadSql\(\);[\s\S]{0,600}let unread: SQL<boolean> = unreadSql\.unread;/, "hộp thư lấy bộ biểu thức qua MỘT chỗ đọc công tắc");
+  assert.match(inbox, /const unreadSql = await loadInboxUnreadSql\(\);[\s\S]{0,2500}let unread: SQL<boolean> = unreadSql\.unread;/, "hộp thư lấy bộ biểu thức qua MỘT chỗ đọc công tắc");
   assert.equal((inbox.match(/loadInboxUnreadSql\(\)/g) ?? []).length, 1, "listInbox đọc công tắc đúng một lần");
   assert.equal((unread.match(/readInboxUnreadSwitch\(\)/g) ?? []).length, 1, "công tắc chỉ được đọc ở inboxUnreadMaterialized");
   const sw = readFileSync("lib/platform/inbox-unread-switch.ts", "utf8");

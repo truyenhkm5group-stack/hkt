@@ -103,7 +103,11 @@ function testSource() {
   // P0 inbox-list-subplans: các câu quét cả hộp thư đọc «state gọn» (giải nén MỘT lần mỗi dòng); câu lấy hàng HAI pha.
   assert.equal((body.match(/\.from\(src\)/g) ?? []).length, 5, "đếm thẻ · đếm level · tập chưa đọc · pha 1 · pha 2 đều đọc bảng dẫn xuất");
   assert.doesNotMatch(body, /\.from\(c\)/, "listInbox không còn câu nào đọc thẳng bảng hội thoại");
-  assert.match(body, /const page = await db[\s\S]*?\.limit\(q\.limit\);[\s\S]*?const detail = await db[\s\S]*?inArray\(c\.id, pageIds\)/, "pha 1 xếp + cắt trang, pha 2 đọc chi tiết theo mã");
+  assert.match(body, /const page = await noJit\(\(d\) =>[\s\S]*?\.limit\(q\.limit\),[\s\S]*?const detail = await noJit\(\(d\) =>[\s\S]*?inArray\(c\.id, pageIds\)/, "pha 1 xếp + cắt trang, pha 2 đọc chi tiết theo mã");
+  // JIT TẮT cho mọi câu quét cả hộp thư: cost ước tính khổng lồ (nhánh coalesce #803 không chạy) ⇒ biên dịch JIT nhiều giây trên production.
+  assert.equal((body.match(/await noJit\(\(d\) =>/g) ?? []).length, 5, "đếm thẻ · đếm level · tập chưa đọc · pha 1 · pha 2 chạy trong chayKhongJit");
+  assert.match(body, /const noJit = <T>\(f: \(d: Db\) => Promise<T>\) => chayKhongJit\(db, f\);/);
+  assert.doesNotMatch(body, /await db\s*\n\s*\.select/, "không câu quét nào chạy ngoài chayKhongJit");
   assert.match(body, /state: sql<unknown>`"sales_chat_conversations"\."state_full"`/, "state ĐẦY ĐỦ chỉ ở pha 2");
   assert.match(inbox, /cross join lateral \(select t\."state" \|\| '\{\}'::jsonb as x offset 0\) d/, "state giải nén MỘT lần mỗi dòng");
   const led = readFileSync("lib/sales-chatbot/response-ownership-ledger.ts", "utf8");
