@@ -2331,3 +2331,4 @@
 {"at":"2026-10-13T09:40:19.932Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"inbox-perf-probe-state","detail":"fix/inbox-perf-probe-state @ 14406d725cfa · 1 lệnh kiểm thử"}
 {"at":"2026-10-13T09:40:54.601Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"inbox-perf-probe-state","detail":"#829 cho fix/inbox-perf-probe-state @ 14406d725cfa"}
 {"at":"2026-10-13T09:41:38.390Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#829 @ 14406d725cfa · Chỉ script đo CHỈ ĐỌC: cỡ state + EXPLAIN ANALYZE trên --org; công khai chỉ số đếm/cấu trúc"}
+{"at":"2026-10-13T10:14:16.901Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"inbox-perf-probe-state","detail":"#829 @ 14406d725cfa → e192ac9c5bd0 (MERGE_ISOLATED · HIGH · gates success)"}
