@@ -3,7 +3,7 @@
   "mission_id": "inbox-perf-probe-topn",
   "title": "inbox-perf-probe: top-N câu chậm theo khối + chẩn đoán đường «chưa đọc» (lưu sẵn/tính trực tiếp) + EXPLAIN",
   "business_goal": "",
-  "status": "RUNNING",
+  "status": "PR_READY",
   "priority": "P0",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -20,7 +20,19 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-13T04:57:02.129Z",
-  "updated_at": "2026-10-13T04:57:02.129Z",
-  "last_heartbeat": "2026-10-13T04:57:02.129Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-13T04:57:37.315Z",
+  "last_heartbeat": "2026-10-13T04:57:37.315Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "fix/inbox-perf-probe-topn",
+    "sha": "73449b810f3d6517830e254bb840fca245fd5ae9",
+    "at": "2026-10-13T04:57:37.315Z",
+    "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+    "title": "inbox-perf-probe: top-N câu chậm theo khối + chẩn đoán đường «chưa đọc» (lưu sẵn/tính trực tiếp) + EXPLAIN",
+    "summary": "P0 hộp thư HSLC 13–29 s",
+    "tests": [
+      "tsc·eslint·build: sạch",
+      "npm test: TẤT CẢ KIỂM THỬ ĐẠT"
+    ]
+  }
 }
