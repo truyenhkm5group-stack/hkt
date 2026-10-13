@@ -7,6 +7,41 @@
 
 
 
+
+## Checkpoint 2026-10-13 ~20:05 VN — TEAM TIẾP QUẢN P0 HỘP THƯ (phiên Claude Team, cây `wt-team`)
+
+**Phiên:** Claude Team · DESKTOP-56TH98Y:wt-team. Max 89% hạn mức tuần; vòng gia hạn khoá phía Max ĐÃ DỪNG
+(nhịp `integration-lead` đứng ở 12:22:24Z, hết hạn 13:22:24Z). Team KHÔNG cướp khoá, chờ hết hạn tự nhiên.
+
+### GIÁ VỐN — KHÔNG PHẢI VIỆC CỦA TEAM (chủ shop chốt 13/10 ~20:00)
+Checkpoint 19:00 ghi «chưa có sứ mệnh giá vốn» — nay ĐÃ CÓ: `cost-center-unify` RUNNING, chủ `vm:hkt`,
+khoá `tech-lead` («Tech Lead — P0 giá vốn») còn hiệu lực, nhịp tim tươi, đã đẩy **2 commit · 1.329 dòng**
+trên `claude/lucid-brahmagupta-fnvimb` (Trung tâm giá vốn + BCLN hai chế độ Thực tế/Kế hoạch).
+⇒ Team ĐỨNG NGOÀI, không dựng sứ mệnh thứ hai (AGENTS 10.1: đang có người làm ⇒ phối hợp).
+
+### NGUYÊN NHÂN GỐC CỔNG ĐỎ #827 + #831 — KHÔNG phải lỗi mã, đã sửa
+Job kiểm thử bị CẮT ở phút **34:46** trên cả hai lượt — đúng trần **35′ CŨ**:
+run 38384289979 job 115252103978 (#827, «Kiểm thử ẩn danh») · run 38386551746 job 115259660846 (#831, «có token giả»).
+Job kia XANH; một job bị HUỶ là đủ làm job gom `gates` ĐỎ. #830 đã nâng trần 35′→45′ nhưng **chỉ trên main**;
+hai nhánh PR chưa có #830 nên vẫn chạy trần cũ. Không ai đọc kỹ chữ «cancelled» nên nó trông như lỗi kiểm thử.
+
+**Đã sửa (gộp main vào nhánh, không xung đột, chỉ thêm merge commit — không sửa mã của worker):**
+- `fix/inbox-perf-probe-hotnodes` 12566b62 → **c9d33af4** (đẩy 13:01Z)
+- `fix/inbox-list-perf` ff284930 → **99013db1** (đẩy 13:02Z)
+Cổng 45′ đang chạy trên cả hai.
+
+### BƯỚC KẾ (Team)
+1. Cổng xanh ⇒ `handoff` LẠI đúng SHA mới cho cả hai sứ mệnh (nhánh đã đi tiếp sau bàn giao).
+2. Lấy `lease acquire integration-lead` SAU 13:22:24Z.
+3. Gộp **#831** (chỉ công cụ đo, không cần deploy) ⇒ chạy `inbox-perf-probe "--org=hslc-hmt-shop --samples=3 --analyze"`
+   để XÁC NHẬN giả thuyết JIT Postgres (dòng «JIT … biên dịch»).
+4. Gộp **#827** + deploy — lưu ý main `f457f6de8` (#832) đang đi TRƯỚC production `d6db83717` một commit chưa deploy;
+   gộp chung MỘT lượt deploy.
+5. Rebase `fix/inbox-list-subplans` (4ccf931b) lên main sau khi #827 squash → `npm test` đủ → handoff → PR.
+
+### KHÔNG ĐỤNG
+`cost-center-unify` (vm:hkt) · #833 `claude/vigilant-sagan-dzqtn5` (chưa thuộc sứ mệnh nào trong sổ) · #814 (nháp).
+
 ## Checkpoint 2026-10-13 ~19:00 VN — BÀN GIAO MAX → TEAM (Max 89% tuần) — ĐỌC PHẦN NÀY TRƯỚC
 
 **PRODUCTION:** `b5296e6d` (main tới #826). Deploy «đỏ» = CỐ Ý (qa DEGRADED trong verify-migrations); kiểm smoke trong log SSH.
