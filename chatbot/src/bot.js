@@ -95,6 +95,15 @@ export function looksLikeBareAddress(text) {
 }
 
 /** Moi so tien (>= 10.000d) trong mot doan chu: "249.000đ", "249000", "249k". */
+// Chat lieu doc duoc tu ten / mo ta mau. Bo "len", "dạ", "thô": trung voi chu thuong ("lên", "Dạ" chao khach).
+const CHAT_LIEU = ["nhung", "ren", "voan", "lụa", "linen", "đũi", "kaki", "jean", "cotton", "chiffon", "satin", "organza", "tafta", "gấm", "nỉ", "tweed", "rayon"];
+/** Chat lieu dau tien nhac toi trong chu (giu dau tieng Viet: "nhung" khac "những"), hoac null. */
+export function materialIn(text) {
+  const t = String(text || "").toLowerCase();
+  for (const c of CHAT_LIEU) if (new RegExp(`(^|[^\\p{L}])${c}(?=$|[^\\p{L}])`, "u").test(t)) return c;
+  return null;
+}
+
 export function amountsIn(t) {
   const out = new Set();
   const re = /(?<![A-Za-z0-9])(\d{1,3}(?:[.,]\d{3})+|\d{4,8})(?![A-Za-z0-9])|(?<![A-Za-z0-9])(\d{2,3})\s*[kK](?![A-Za-z0-9])/g;
@@ -1340,12 +1349,38 @@ ${Xung} lấy màu nào để em lên đơn cho mình ạ?`;
     const scoped = aiScope.getStore();
     const botCamp = adBot !== undefined ? adBot : scoped && String(scoped.adBotPageId) === String(pageId) ? scoped.adBot : null;
     prompt += adBotPromptBlock(botCamp);
+    prompt += this.pageProductBlock(pageId);
     // Thoi gian giao hang: MOT cho duy nhat (settings.deliveryDays), de len moi con so khac trong prompt chung / rieng
     prompt += `
 
 ## THỜI GIAN GIAO HÀNG (shop vừa cập nhật — dùng con số này, bỏ mọi con số khác trong hướng dẫn)
 - Giao hàng toàn quốc ${settings.deliveryDays()} ngày.`;
     return prompt;
+  }
+
+  /** San pham (danh muc POS) cua mau chu luc page, hoac null. */
+  pageProduct(pageId) {
+    const ma = String(settings.effective(pageId).defaultProduct || "").trim().toUpperCase();
+    return ma ? catalog.products.find((p) => String(p.code || "").toUpperCase() === ma) || null : null;
+  }
+
+  /**
+   * Chat lieu cua mau chu luc page: ten / mo ta trong danh muc POS truoc, roi huong dan rieng cua page. null = khong ro.
+   * Su co AURA 13/10/2026: page ban dam NHUNG ma bot noi "Chat lieu Rayon" — cau Rayon nam trong huong dan CHUNG.
+   */
+  pageMaterial(pageId) {
+    const sp = this.pageProduct(pageId);
+    return materialIn(sp ? `${sp.name} ${sp.note || ""}` : "") || materialIn(settings.effective(pageId).extraPrompt);
+  }
+
+  /** Khoi prompt: mau chu luc cua page (ten, ma, chat lieu) — de len mo ta chung khi khac. */
+  pageProductBlock(pageId) {
+    const sp = this.pageProduct(pageId);
+    if (!sp) return "";
+    const cl = this.pageMaterial(pageId);
+    const dong = [`\n\n## MẪU CHÍNH CỦA PAGE NÀY`, `- **${sp.name}** (mã ${sp.code}). Khách hỏi chung chung (giá, màu, size, chất liệu, "mẫu này") là hỏi mẫu này — màu / size / giá lấy đúng dữ liệu của mẫu này trong danh mục, không lấy của mẫu khác.`];
+    if (cl && cl !== "rayon") dong.push(`- Chất liệu: **${cl}**. KHÔNG nói "Rayon" hay chất liệu nào khác (câu chất liệu trong hướng dẫn chung là của mẫu khác).`);
+    return dong.join("\n");
   }
 
   /** Nhan payload webhook cua Pancake (event_type = messaging) */
@@ -2007,6 +2042,14 @@ ${Xung} lấy màu nào để em lên đơn cho mình ạ?`;
       const r3 = await generateReply(systemPrompt + `\n\n## CẢNH BÁO TỪ HỆ THỐNG\nShop ĐÃ báo khách này giá ${v}đ/đầm. Câu trả lời vừa rồi dùng giá khác${lechGia.length ? ` (${lechGia.map((n) => n.toLocaleString("vi-VN") + "đ").join(", ")})` : ""}. Viết lại với đúng ${v}đ/đầm × số lượng (+ phí ship nếu có); có thể nhắc giá cũ để so sánh, giữ nguyên các ý khác.`, history, { model: eff.model, temperature: 0.2 }).catch(() => null);
       const ok = (t) => t && !this.pricesOffQuote(t, giaBao).length && (!isOrderSummaryReply(t, false) || this.summaryUsesPrice(t, giaBao)) && !this.findDisallowedPrices(t, systemPrompt).length;
       if (ok(r3?.text)) reply = r3.text;
+    }
+    // Chan bot NOI SAI CHAT LIEU: mau cua page la nhung / ren... ma cau tra loi chep cau "Rayon" cua huong dan chung
+    const chatLieu = this.pageMaterial(pageId);
+    if (chatLieu && chatLieu !== "rayon" && /rayon/i.test(reply)) {
+      log.warn(`[${pageId}] ${conversationId}: tra loi noi chat lieu Rayon, mau cua page la ${chatLieu} -> viet lai`);
+      store.bumpStat(pageId, "materialGuard");
+      const r5 = await generateReply(systemPrompt + `\n\n## CẢNH BÁO TỪ HỆ THỐNG\nCâu trả lời vừa rồi nói chất liệu Rayon — SAI. Mẫu của page này là chất liệu **${chatLieu}**. Viết lại, nói đúng chất liệu ${chatLieu} (hoặc bỏ câu chất liệu), giữ nguyên các ý khác.`, history, { model: eff.model, temperature: 0.2 }).catch(() => null);
+      if (r5?.text && !/rayon/i.test(r5.text) && !this.findDisallowedPrices(r5.text, systemPrompt).length) reply = r5.text;
     }
     // Chan bot NEU NHAM MA MAU (vd page chu luc Q002 ma bot chot "Dam Q004")
     let maLa = this.wrongModelInReply(reply, pageId, messages, maNhanDien);

@@ -2230,5 +2230,29 @@ console.log("OK 18: doi chieu dia chi don POS -> bat don chon nham xa, bo qua tr
   console.log("OK 52: quet lai page kiem lai ca don nhap chua xac nhan, khong dung don da xac nhan / da bo qua / ngoai ky");
 }
 
+// ---- 53: page AURA chi ban dam NHUNG — mau chu luc chon theo chu (dung MOT mau), bot khong noi chat lieu Rayon
+{
+  const { materialIn } = await import("../src/bot.js");
+  const { uniqueProductCode } = await import("../src/orderbot.js");
+  assert.equal(materialIn("Đầm nhung đỏ đô cổ tim"), "nhung");
+  assert.equal(materialIn("Dạ chị ơi những mẫu này lên form đẹp"), null, "những / Dạ / lên khong phai chat lieu");
+  const re = /(^|[^\p{L}])nhung(?=$|[^\p{L}])/iu;
+  assert.equal(uniqueProductCode([{ code: "q009", name: "Đầm nhung xếp ly" }, { code: "Q002", name: "Đầm những ngày hè" }], re), "Q009");
+  assert.equal(uniqueProductCode([{ code: "A", name: "Đầm nhung" }, { code: "B", name: "Váy nhung" }], re), null, "2 mau khop -> khong doan");
+  assert.equal(uniqueProductCode([{ code: "A", name: "Đầm voan" }], re), null);
+  const prev = catalog.products;
+  const cu = settings.get("PAGE1").defaultProduct;
+  catalog.setProducts([{ id: "n1", code: "Q009", name: "Đầm nhung đỏ đô", note: "", price: { min: 499000, max: 499000 }, attributes: { "Màu": ["Đỏ đô"] }, variations: [], images: [] }]);
+  settings.update("PAGE1", { defaultProduct: "Q009" });
+  assert.equal(bot.pageMaterial("PAGE1"), "nhung");
+  const khoi = bot.pageProductBlock("PAGE1");
+  assert.ok(/Đầm nhung đỏ đô/.test(khoi) && /mã Q009/.test(khoi) && /KHÔNG nói "Rayon"/.test(khoi), khoi);
+  settings.update("PAGE1", { defaultProduct: "" });
+  assert.equal(bot.pageProductBlock("PAGE1"), "", "page khong co mau chu luc -> khong them khoi");
+  settings.update("PAGE1", { defaultProduct: cu || "" });
+  catalog.setProducts(prev);
+  console.log("OK 53: mau chu luc chon theo chu chi khi dung mot mau; page ban dam nhung khong noi chat lieu Rayon");
+}
+
 console.log("\nTAT CA TEST PASS");
 process.exit(0);

@@ -6,6 +6,7 @@ import { sortChrono, parseTs } from "./util.js";
 import { adBots } from "./adbots.js";
 import { extractAdIds } from "./adpersona.js";
 import { isOrderSummaryReply } from "./bot.js";
+import { catalog } from "./catalog.js";
 
 /**
  * ═══════════ BOT LÊN ĐƠN (độc lập với bot tư vấn) ═══════════
@@ -24,7 +25,19 @@ import { isOrderSummaryReply } from "./bot.js";
 const SWEEP_MS = 5 * 60 * 1000;
 // Mau chu luc chu shop chot cho tung page — ap MOT lan khi khoi dong neu page chua khai (sua lai trong cai dat page van
 // duoc, khong bi de lai). Chu shop 02/10/2026: "mặc định page này chạy Q005" (Linh Tây Luxury CS1).
-const PAGE_DEFAULT_PRODUCT_SEED = [{ page: "linh tay luxury cs1", code: "Q005" }];
+// match: chon mau theo CHU trong ten / mo ta danh muc POS — chi ap khi khop DUNG MOT mau (khong doan khi 0 hay >1).
+// force: ghi de mau chu luc dang co (chu shop da noi ro page chi ban mau do).
+const PAGE_DEFAULT_PRODUCT_SEED = [
+  { page: "linh tay luxury cs1", code: "Q005" },
+  // Chu shop 13/10/2026: page AURA "chi chay 1 mau nay" — dam nhung do do (bot dang tu van chat lieu Rayon, 4 mau cua mau khac)
+  { page: "aura - thoi trang nu cao cap", match: /(^|[^\p{L}])nhung(?=$|[^\p{L}])/iu, key: "nhung", force: true },
+];
+
+/** Ma mau duy nhat trong danh muc POS co ten / mo ta khop `re`; 0 hoac nhieu mau -> null (khong doan). */
+export function uniqueProductCode(products, re) {
+  const hit = (products || []).filter((p) => re.test(`${p.name || ""} ${p.note || ""}`) && p.code);
+  return hit.length === 1 ? String(hit[0].code).toUpperCase() : null;
+}
 // Quet lai MOT lan cac hoi thoai co SDT 15 ngay qua cua page (chu shop 06/10/2026: "check cac don tren page nay don moi dien dung dia
 // chi san pham roi xac nhan"): hoi thoai trong `hours` gio qua chua xac nhan duoc kiem lai ngay -> dien don nhap, du dieu
 // kien thi tu xac nhan, thieu (vd khach chi ghi ten cua hang, khong co xa/huyen/tinh) thi sang "can duyet" kem ly do.
@@ -586,12 +599,24 @@ export class OrderBot {
       // Ten Pancake tai sau khi khoi dong -> xet ca hai ten; sweep goi lai nen page doi ten muon van duoc ap
       const cacTen = [ten, this.bot.pancakeNames?.get(pid)].map(khongDau);
       for (const s of PAGE_DEFAULT_PRODUCT_SEED) {
-        const k = `${pid}:${s.code}`;
+        const k = `${pid}:${s.code || s.key}`;
         if (daAp[k] || !cacTen.includes(s.page)) continue;
+        // Chon theo chu: danh muc chua tai xong -> de luot quet sau (khong danh dau); khop 0 / nhieu mau -> bao, khong doan
+        let ma = s.code;
+        if (!ma) {
+          if (!catalog.products.length) continue;
+          ma = uniqueProductCode(catalog.products, s.match);
+          if (!ma) {
+            if (!this._seedWarned?.[k]) log.warn(`[orderbot] page ${ten}: khong tim duoc DUNG MOT mau "${s.key}" trong danh muc POS -> chua dat mau chu luc`);
+            (this._seedWarned ||= {})[k] = true;
+            continue;
+          }
+        }
         daAp[k] = Date.now();
-        if (String(settings.get(pid).defaultProduct || "").trim()) continue;
-        settings.update(pid, { defaultProduct: s.code });
-        log.info(`[orderbot] page ${ten}: dat mau chu luc ${s.code}`);
+        const dang = String(settings.get(pid).defaultProduct || "").trim();
+        if (dang && (!s.force || dang.toUpperCase() === ma)) continue;
+        settings.update(pid, { defaultProduct: ma });
+        log.info(`[orderbot] page ${ten}: dat mau chu luc ${ma}${dang ? ` (thay ${dang})` : ""}`);
         out.push(pid);
         this.requeuePage(pid);
       }
