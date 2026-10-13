@@ -1,9 +1,10 @@
 "use client";
 
-import { startTransition, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Bell, BellOff } from "lucide-react";
 import { patchUnreadCount } from "@/lib/sales-chatbot/inbox-read-shared";
+import { nextRefreshDelayMs, refreshDue } from "@/lib/sales-chatbot/inbox-switch-shared";
 import { useInboxReads } from "./read-store";
 
 const SOUND_KEY = "inbox.sound";
@@ -55,22 +56,42 @@ export function InboxAutoRefresh({ waiting, unread: serverUnread, unreadStamp = 
     setSound(readSound());
   }, []);
 
+  /*
+    Tab đang mở: mỗi `everyMs`. Tab ẩn: vẫn hỏi, thưa hơn (gấp 6) — để tiêu đề tab và âm báo còn đúng khi nhân viên đang ở màn khác.
+    KHÔNG CHỒNG LƯỢT (P0 13/10/2026): trước đây cờ «bận» tự nhả sau 4 giây dù lượt làm mới chưa xong — máy chủ mất 13 giây (HSLC) là
+    ba lượt dựng trang chồng nhau trên bể 2 kết nối CSDL, và lượt nạp hội thoại phải xếp hàng sau chúng («Đang mở hội thoại…» kẹt).
+    Nay «đang chạy» = `isPending` của transition bọc `router.refresh()` (React giữ nó tới khi bản dựng mới về), và lượt kế tiếp hẹn từ
+    lúc lượt trước XONG, giãn theo thời gian nó thật sự mất (`nextRefreshDelayMs` — máy chủ chậm thì hỏi thưa lại, trần 60 giây).
+  */
+  const [pending, startRefresh] = useTransition();
+  const clock = useRef({ startedAt: 0, doneAt: 0, notBefore: 0, pending: false });
+  clock.current.pending = pending;
   useEffect(() => {
-    // Tab đang mở: mỗi `everyMs`. Tab ẩn: vẫn hỏi, thưa hơn (gấp 6) — để tiêu đề tab và âm báo còn đúng khi nhân viên đang ở màn khác.
-    // Không chồng lượt: lượt làm mới trước chưa xong (máy chủ chậm) thì bỏ nhịp này — chồng lượt là nguồn nháy danh sách.
-    let ticks = 0;
-    let busy = false;
+    const c = clock.current;
+    if (pending || !c.startedAt) return;
+    const now = Date.now();
+    c.notBefore = now + nextRefreshDelayMs(everyMs, now - c.startedAt);
+    c.doneAt = now;
+    c.startedAt = 0;
+  }, [pending, everyMs]);
+  useEffect(() => {
+    const c = clock.current;
+    c.notBefore = Date.now() + everyMs;
+    c.doneAt = Date.now();
     const id = window.setInterval(() => {
-      ticks += 1;
-      if (busy || !(document.visibilityState === "visible" || ticks % 6 === 0)) return;
-      busy = true;
-      startTransition(() => {
+      const now = Date.now();
+      // Lưới an toàn: transition đã xong mà hiệu ứng `pending` không bắt được lần đổi (React gộp) ⇒ coi như xong sau 2 giây.
+      if (c.startedAt && !c.pending && now - c.startedAt > 2_000) {
+        c.notBefore = now + nextRefreshDelayMs(everyMs, now - c.startedAt);
+        c.doneAt = now;
+        c.startedAt = 0;
+      }
+      if (c.startedAt || !refreshDue({ pending: c.pending, now, notBefore: c.notBefore, visible: document.visibilityState === "visible", lastDoneAt: c.doneAt, everyMs })) return;
+      c.startedAt = now;
+      startRefresh(() => {
         router.refresh();
       });
-      window.setTimeout(() => {
-        busy = false;
-      }, Math.min(everyMs, 4_000));
-    }, everyMs);
+    }, 1_000);
     return () => window.clearInterval(id);
   }, [router, everyMs]);
 

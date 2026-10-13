@@ -594,6 +594,7 @@ import { testOpsSignals } from "./ops-signals.test";
 import { testOpsSignalsCheck } from "./ops-signals-check.test";
 import { testSecurityAcceptance } from "./security-acceptance.test";
 import { testInboxPerfProbe } from "./inbox-perf-probe.test";
+import { testInboxListPerf } from "./inbox-list-perf.test";
 import { testTestOrgCodes } from "./test-org-codes.test";
 import { testHelpGuides } from "./help-guides.test";
 import { testChotDonAssets, testChotDonBrand, testMissedOrdersCalculator, testOrgLinkOrigin, testPublicSiteData, testPublicSiteHost, testPublicSiteSource } from "./public-site.test";
@@ -3122,6 +3123,9 @@ async function main() {
   // Ops `inbox-perf-probe`: Hộp thư khách — tải / chuyển hội thoại bấm giờ ĐÚNG chuỗi hàm máy chủ của page.tsx, CHỈ ĐỌC (handle chỉ đọc,
   // danh tính chỉ xem không ghi staff_seen_at), công khai che tổ chức thành org#i, mẫu < 3 ⇒ chưa kết luận, không đích. Tổ chức THẬT `ipp-a`.
   await testInboxPerfProbe();
+  // P0 inbox-list-perf (13/10/2026): thứ tự rẻ trước ≡ bản chuẩn #803 từng hội thoại · listInbox tính trực tiếp ≡ lưu sẵn trên ≥ 5.000
+  // hội thoại (số đo in ra) · chuyển hội thoại không dựng lại danh sách · tự làm mới không chồng lượt. Tổ chức THẬT `hop-thu-list-perf`.
+  await testInboxListPerf();
   testHelpGuides();
   // Trang giới thiệu: bảng giá đọc thật từ platform_plans, gói khởi điểm không bao giờ in thành 0 ₫.
   await testPublicSiteData();
