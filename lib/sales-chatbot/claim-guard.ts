@@ -56,6 +56,10 @@ export const CLAIM_SAFE_TEXT = {
   ORDER_PENDING_CHECK: "Dạ em đã ghi nhận đơn của mình, nhân viên sẽ kiểm tra và xác nhận lại đơn giúp mình ngay ạ.",
   /** Bot định nói một số tiền không khớp báo giá máy chủ đã xác thực. */
   PRICE: "Dạ em kiểm lại giá chính xác và báo mình ngay ạ.",
+  /** Bot định nói đã đổi địa chỉ / lịch giao / ghi chú / thêm món vào đơn mà không công cụ nào ghi (HOTFIX 12/10/2026, ca «Đỗ Là»). */
+  ORDER_EDIT: "Dạ em ghi nhận yêu cầu thay đổi của mình, em chuyển nhân viên cập nhật đơn giúp mình ngay ạ.",
+  /** Bot định hứa hoàn tiền / đổi hàng / gửi bù / bồi thường — việc bot không có quyền làm. */
+  REFUND: "Dạ em xin lỗi mình, em chuyển nhân viên kiểm tra và hỗ trợ mình ngay ạ.",
   /** Khách phản đối giá mà máy chủ không xác minh được số khách nói ⇒ nhân viên kiểm. */
   PRICE_DISPUTE: "Dạ em ghi nhận ý mình về giá, em chuyển nhân viên kiểm tra lại giá chính xác và báo mình ngay ạ.",
 } as const;
@@ -71,12 +75,14 @@ export const CLAIM_HANDOFF_REASON = {
   ORDER_PENDING: "AI định khẳng định đã lên đơn khi đơn còn cần kiểm (địa chỉ / giá / SĐT) — đã thay câu, đơn chờ nhân viên xác nhận",
   PRICE_UNVERIFIED: `${PRICE_UNVERIFIED_PREFIX}: AI định báo số tiền không khớp báo giá máy chủ đã xác thực — đã chặn câu, nhân viên xác minh giá`,
   PRICE_DISPUTED: "Giá / tồn bất thường — PRICE_DISPUTED: khách phản đối giá đã báo, máy chủ không xác minh được số khách nói — nhân viên kiểm giá, KHÔNG chốt đơn",
+  ORDER_EDITED: "AI định khẳng định đã sửa đơn (địa chỉ / lịch giao / ghi chú / món) khi không công cụ nào ghi — đã chặn câu, nhân viên cập nhật đơn",
+  REFUND_PROMISE: "AI định hứa hoàn tiền / đổi hàng / gửi bù — việc bot không có quyền làm, đã chặn câu, nhân viên xử lý khiếu nại",
 } as const;
 
 // ═══ PHẦN THUẦN ═══
 
 export type PaymentSignal = "IMAGE" | "TEXT";
-export type ClaimKind = "PAYMENT_RECEIVED" | "ORDER_CONFIRMED" | "ORDER_CANCELLED" | "PRICE_UNVERIFIED";
+export type ClaimKind = "PAYMENT_RECEIVED" | "ORDER_CONFIRMED" | "ORDER_CANCELLED" | "PRICE_UNVERIFIED" | "ORDER_EDITED" | "REFUND_PROMISE";
 /**
  * `orderCancelled` = công cụ `cancel_order` đã trả cancelled = true trong hội thoại (`state.cancelledOrders`, ghi SAU khi lõi đơn huỷ xong — #786).
  * `orderConfirmed` = có đơn ĐÃ TẠO **và** QUA KIỂM (P0 11/10/2026 — `orderValidityOf`): đơn «CẦN XÁC THỰC» (địa chỉ chưa ghép, tổng lệch báo
@@ -84,7 +90,11 @@ export type ClaimKind = "PAYMENT_RECEIVED" | "ORDER_CONFIRMED" | "ORDER_CANCELLE
  * `allowedAmounts` = mọi số tiền máy chủ đã xác thực cho hội thoại (báo giá gần nhất · giá công cụ đã trả · tập tham chiếu của danh mục);
  * KHÔNG khai ⇒ không kiểm số tiền (bài kiểm cũ / người gọi chưa cấp).
  */
-export type ClaimFacts = { paymentVerified: boolean; orderConfirmed: boolean; orderCancelled: boolean; orderPending?: "ADDRESS" | "CHECK" | null; allowedAmounts?: ReadonlySet<number> };
+/**
+ * `orderEditedThisTurn` (HOTFIX 12/10/2026) = công cụ lên / sửa đơn ĐÃ GHI THÀNH CÔNG trong CHÍNH lượt này (`state.draft.shownTurn` = lượt) —
+ * căn cứ duy nhất cho câu «em đã đổi địa chỉ / đã thêm món vào đơn». Vắng ⇒ không có căn cứ.
+ */
+export type ClaimFacts = { paymentVerified: boolean; orderConfirmed: boolean; orderCancelled: boolean; orderPending?: "ADDRESS" | "CHECK" | null; allowedAmounts?: ReadonlySet<number>; orderEditedThisTurn?: boolean };
 /** `handoff = false` ⇒ thay câu nhưng KHÔNG chuyển người (câu an toàn vẫn gửi trên mọi kênh). */
 export type ClaimVerdict = { ok: true } | { ok: false; claim: ClaimKind; safeText: string; handoffReason: string; note: string; handoff: boolean; amounts?: number[] };
 
@@ -174,7 +184,38 @@ const CLAIM_RULES: readonly ClaimRule[] = [
   { kind: "ORDER_CANCELLED", re: /\bdon(?:\s+hang)?(?:\s+cua\s+(?:minh|chi|anh|ban|em|c|a))?\s+(?:da\s+|vua\s+)?(?:duoc\s+)?huy\b/, needsDone: true, allowProposal: false },
   // «shop đã nhận đơn / em nhận được đơn của chị» — «shop nhận đơn tới 17h» là chính sách, không phải khẳng định
   { kind: "ORDER_CONFIRMED", re: /\b(?:em|shop|ben em|ben shop)\s+(?:da\s+)?nhan\s+(duoc\s+)?don\b/, needsDone: (m) => !m[1], allowProposal: true },
+  // «em đã đổi địa chỉ giao …» · «em cập nhật ghi chú giao Chủ nhật … rồi» · «đã sửa đơn» · «đổi lịch giao xong» (HOTFIX 12/10/2026, «Đỗ Là»)
+  // («ghi đơn» / «lên đơn» là luật ORDER_CONFIRMED ở trên — không đếm ở đây.)
+  { kind: "ORDER_EDITED", re: /\b(?:doi|sua|cap nhat|chuyen)\s+(?:lai\s+)?(?:dia chi|sdt|so dien thoai|ngay giao|lich giao|gio giao|ghi chu|thong tin don|nguoi nhan)\b|\bsua\s+(?:lai\s+)?don\b/, needsDone: true, allowProposal: false },
+  // «em thêm 1 hũ ruốc vào đơn cho chị rồi ạ»
+  { kind: "ORDER_EDITED", re: /\bthem\s+(?:\S+\s+){0,4}vao\s+(?:don|don hang)\b/, needsDone: true, allowProposal: false },
+  // «em ghi chú giao giờ hành chính rồi ạ» · «em note lại cho kho rồi» · «em báo kho rồi» · «em đổi sang 2 hộp rồi ạ» (review #821 vòng 2)
+  { kind: "ORDER_EDITED", re: /\b(?:ghi chu|note|bao kho|dan kho|nhan kho|bao ben kho)\b|\bdoi\s+(?:lai\s+)?sang\s+\S+/, needsDone: true, allowProposal: false },
+  // «Dạ đơn của chị em đã đổi xong ạ» · «đơn đã sửa rồi» (review #821 vòng 3)
+  { kind: "ORDER_EDITED", re: /\bdon(?:\s+hang)?(?:\s+cua\s+(?:minh|chi|anh|ban|c|a))?(?:\s+(?:em|shop))?\s+(?:da\s+)?(?:duoc\s+)?(?:doi|sua|cap nhat)\b/, needsDone: true, allowProposal: false },
 ];
+
+/**
+ * Lời HỨA bot không có quyền thực hiện (HOTFIX 12/10/2026): hoàn tiền · đổi hàng · gửi bù / gửi lại hàng · bồi thường. Khác các luật trên:
+ * «sẽ», «nhé» KHÔNG cứu được câu (hứa tương lai vẫn là hứa); chỉ phủ định đứng ngay trước, câu hỏi, hoặc mệnh đề CHÍNH SÁCH có điều kiện
+ * («nếu hàng lỗi shop hoàn tiền», «trong vòng 3 ngày», «theo chính sách») mới không tính — đọc lại chính sách của shop là việc hợp lệ.
+ */
+const REFUND_PROMISE_RE = /\b(?:hoan|tra lai|gui lai|chuyen lai)\s+(?:lai\s+)?(?:tien|tien hang|tien cho)\b|\bdoi\s+(?:lai\s+)?(?:hang|san pham|sp|mon|goi|hop|hu)(?:\s+moi)?\s+cho\b|\bgui\s+bu\b|\bgui\s+lai\s+(?:\d+\s+)?(?:hang|don|goi|hop|hu|mon|san pham|sp)\b|\bboi thuong\b/;
+const REFUND_NEGATION = new Set(["chua", "khong", "ko", "k", "chang", "khoi"]);
+/** Chủ ngữ là ĐVVC / bưu tá («bên vận chuyển sẽ gửi lại hàng cho chị») — bot đang thuật lời khai của hãng, không phải shop hứa. */
+const CARRIER_SUBJECT_RE = /\b(?:ben van chuyen|don vi van chuyen|dvvc|buu ta|buu cuc|shipper|nha van chuyen|viettel post|ghtk|ghn|j&t)\b/;
+const POLICY_CONDITIONAL_RE = /\b(?:neu|khi|truong hop|chinh sach|trong vong|quy dinh|dieu kien)\b/;
+
+function refundPromiseIn(c: { folded: string; question: boolean }): boolean {
+  if (c.question || QUESTION_TAIL_RE.test(c.folded) || POLICY_CONDITIONAL_RE.test(c.folded)) return false;
+  const m = REFUND_PROMISE_RE.exec(c.folded);
+  if (!m) return false;
+  const beforeText = c.folded.slice(0, m.index);
+  if (CARRIER_SUBJECT_RE.test(beforeText)) return false;
+  // Phủ định trong BỐN từ trước cụm: «em không có quyền hoàn tiền» · «shop chưa thể hoàn tiền».
+  const before = beforeText.trim().split(/\s+/).filter(Boolean).slice(-4);
+  return !before.some((w) => REFUND_NEGATION.has(w));
+}
 
 /**
  * Loại khẳng định có trong câu của BOT (rỗng = không khẳng định gì cần căn cứ). Chỉ mệnh đề KHẲNG ĐỊNH: câu hỏi, câu đề nghị,
@@ -197,6 +238,7 @@ export function detectClaims(text: string): ClaimKind[] {
       found.add(rule.kind);
     }
   }
+  for (const c of clausesOf(text)) if (refundPromiseIn(c)) found.add("REFUND_PROMISE");
   return [...found];
 }
 
@@ -283,6 +325,13 @@ export function claimVerdict(claims: readonly ClaimKind[], facts: ClaimFacts, am
   if (claims.includes("ORDER_CANCELLED") && !facts.orderCancelled) {
     return { ok: false, claim: "ORDER_CANCELLED", safeText: CLAIM_SAFE_TEXT.CANCEL, handoffReason: CLAIM_HANDOFF_REASON.ORDER_CANCELLED, note: "Đã chặn câu AI khẳng định đã huỷ đơn — lõi đơn chưa huỷ", handoff: true };
   }
+  // Lời hứa hoàn tiền / đổi hàng: KHÔNG có căn cứ nào cho phép bot nói — luôn chặn + chuyển người.
+  if (claims.includes("REFUND_PROMISE")) {
+    return { ok: false, claim: "REFUND_PROMISE", safeText: CLAIM_SAFE_TEXT.REFUND, handoffReason: CLAIM_HANDOFF_REASON.REFUND_PROMISE, note: "Đã chặn câu AI hứa hoàn tiền / đổi hàng / gửi bù", handoff: true };
+  }
+  if (claims.includes("ORDER_EDITED") && !facts.orderEditedThisTurn) {
+    return { ok: false, claim: "ORDER_EDITED", safeText: CLAIM_SAFE_TEXT.ORDER_EDIT, handoffReason: CLAIM_HANDOFF_REASON.ORDER_EDITED, note: "Đã chặn câu AI khẳng định đã sửa đơn — không công cụ nào ghi trong lượt", handoff: true };
+  }
   if (facts.allowedAmounts && amounts.length) {
     const bad = unverifiedAmounts(amounts, facts.allowedAmounts);
     if (bad.length) {
@@ -305,7 +354,7 @@ export async function guardOutgoing(text: string, facts: () => Promise<ClaimFact
   const claims = detectClaims(text);
   const amounts = extractVndAmounts(text);
   if (!claims.length && !amounts.length) return { ok: true };
-  const f = await facts().catch((): ClaimFacts => ({ paymentVerified: false, orderConfirmed: false, orderCancelled: false, allowedAmounts: new Set([0]) }));
+  const f = await facts().catch((): ClaimFacts => ({ paymentVerified: false, orderConfirmed: false, orderCancelled: false, allowedAmounts: new Set([0]), orderEditedThisTurn: false }));
   return claimVerdict(claims, f, amounts);
 }
 
@@ -380,7 +429,7 @@ export function orderValidityOf(o: { id: string; raw: unknown; phone: string; ad
  * `confirm_order` có thể vừa chốt ở vòng trước của chính lượt này). `reference` = tập số tham chiếu của danh mục (`quote.ts`) —
  * thiếu ⇒ tập số tiền chỉ gồm báo giá của hội thoại.
  */
-export function claimFactsLoader(conv: ClaimConversation, opts: { reference?: () => Promise<ReadonlySet<number>> } = {}): (state: ChatState) => Promise<ClaimFacts> {
+export function claimFactsLoader(conv: ClaimConversation, opts: { reference?: () => Promise<ReadonlySet<number>>; turn?: number } = {}): (state: ChatState) => Promise<ClaimFacts> {
   let db: Promise<LinkedFacts> | null = null;
   let ref: Promise<ReadonlySet<number>> | null = null;
   return async (state) => {
@@ -402,7 +451,8 @@ export function claimFactsLoader(conv: ClaimConversation, opts: { reference?: ()
     const allowed = new Set<number>(reference);
     if (state.quote?.verified) for (const n of state.quote.amounts) allowed.add(n);
     for (const n of state.priceFacts ?? []) allowed.add(n);
-    return { paymentVerified: liveOrders.some((o) => r.paidOrderIds.has(o.id)), orderConfirmed, orderPending, orderCancelled: Boolean(state.cancelledOrders?.length), allowedAmounts: allowed };
+    const orderEditedThisTurn = opts.turn !== undefined && state.draft?.shownTurn === opts.turn;
+    return { paymentVerified: liveOrders.some((o) => r.paidOrderIds.has(o.id)), orderConfirmed, orderPending, orderCancelled: Boolean(state.cancelledOrders?.length), allowedAmounts: allowed, orderEditedThisTurn };
   };
 }
 

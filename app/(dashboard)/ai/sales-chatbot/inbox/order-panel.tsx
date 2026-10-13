@@ -11,7 +11,7 @@ import { confirmOrderReviewAction } from "@/lib/actions/manual-orders";
 import { reviewSeenOf } from "@/lib/constants/order-review";
 import { formatNumber, formatVND } from "@/lib/format";
 import type { InboxOrder } from "@/lib/sales-chatbot/inbox-shared";
-import { FIELD_LABEL, orderConfirmButton, orderVerification, VERIFIED_FIELDS, type ConversationOrderSummary, type FieldCheck, type OrderVerificationState } from "@/lib/sales-chatbot/order-verification-shared";
+import { FIELD_LABEL, orderConfirmButton, orderPanelCallError, orderVerification, VERIFIED_FIELDS, type ConversationOrderSummary, type FieldCheck, type OrderVerificationState } from "@/lib/sales-chatbot/order-verification-shared";
 import { cn } from "@/lib/utils";
 
 /**
@@ -87,8 +87,10 @@ export function InboxOrderPanel({ conversationId, orders, canDecide }: { convers
       if ("error" in r) setError(r.error);
       else setSummary(r.summary);
       setLoaded(true);
-    } catch {
-      setError("Không đọc được đơn — thử lại.");
+    } catch (e) {
+      // Lời gọi hỏng (không phải lỗi đọc đơn — máy chủ đã trả `{ error }` cho loại đó): nói đúng cách sửa (tải lại trang khi ERP vừa
+      // cập nhật, hay kiểm tra mạng) thay cho «thử lại» chung chung (HOTFIX P0 12/10/2026).
+      setError(orderPanelCallError(e));
     } finally {
       setLoading(false);
     }

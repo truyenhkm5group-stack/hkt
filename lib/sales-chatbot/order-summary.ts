@@ -54,7 +54,14 @@ const DEAD_STAGES = ["CANCELLED", "DELETED"] as const;
 type ItemJson = { sku?: unknown; productName?: unknown; variation?: unknown; quantity?: unknown; unitPrice?: unknown; discount?: unknown; lineTotal?: unknown; isBonus?: unknown; variantId?: unknown; variantKnown?: unknown; variantRemoved?: unknown };
 
 const asArray = (v: unknown): unknown[] => {
-  const x = typeof v === "string" ? (JSON.parse(v) as unknown) : v;
+  let x: unknown = v;
+  if (typeof v === "string") {
+    try {
+      x = JSON.parse(v);
+    } catch {
+      return [];
+    }
+  }
   return Array.isArray(x) ? x : [];
 };
 const str = (v: unknown) => (typeof v === "string" ? v : "");
@@ -136,7 +143,7 @@ export async function loadConversationOrderSummary(user: SessionUser, conversati
   const profile = await profileRead;
   const r = rows[0];
   if (!r) return { ok: false, error: "Không có hội thoại này." };
-  if (!r.id || !r.stage || !r.insertedAt) return { ok: true, summary: null, cancelled: await lastCancelledOrder(conversationId) };
+  if (!r.id || !r.stage || !r.insertedAt) return { ok: true, summary: null, cancelled: await lastCancelledOrder(conversationId).catch(() => null) };
   const manual = isManualOrderId(r.id);
   const lines = asArray(r.items)
     .map(itemFromJson)

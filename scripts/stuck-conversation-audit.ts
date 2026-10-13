@@ -52,6 +52,10 @@ export const STUCK_MINUTE_BUCKETS = [60, 240, 1440] as const;
 export const NO_SHIPMENT_AFTER_DAYS = 3;
 /** Khoảng nhường của AI hỏng — bản sao số của `HUMAN_COOLDOWN_MINUTES` (ai-hold-shared.ts); bài kiểm so hai giá trị. */
 export const AI_DOWN_RETRY_MINUTES = 30;
+/** Bản sao của `RESUME_MAX_TURN_AGE_MS` (response-ownership.ts, 2 giờ) — lượt khách cũ hơn không bao giờ được trả lời bù; bài kiểm so hai giá trị. */
+export const RESUME_WINDOW_MINUTES = 120;
+/** Bản sao của `WATCHDOG_MAX_PER_SWEEP` (handoff-routing.ts) — trần hội thoại mở lại mỗi lượt quét 5 phút. */
+export const WATCHDOG_CAP = 100;
 /** Bản sao chữ (script tự chứa — ops lấy lib từ image): bài kiểm so bằng nhau với hằng gốc. */
 export const REASON_TEXT = {
   AI_DOWN: "AI tạm không trả lời được — nhân viên liên hệ lại khách",
@@ -67,6 +71,8 @@ export const REASON_TEXT = {
   PRICE_PREFIX: "Giá / tồn bất thường",
 } as const;
 
+/** Bản sao của `DEAD_AI_DOWN_NOTE` (inbound-retry.ts) — bài kiểm so bằng nhau. */
+export const DEAD_AI_DOWN_NOTE_TEXT = "AI hỏng — bot không trả lời được, đã chuyển nhân viên";
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const USAGE = `<mã tổ chức> | --all [--days=1..${STUCK_MAX_DAYS}] [--conv=<uuid>] [--order=<mã ngắn>]`;
 
@@ -210,14 +216,23 @@ export type StuckCounts = {
   /** Khách đang chờ trả lời (tin cuối là của khách) trong nhóm AI im. */
   customerWaiting: number;
   longest: { minutes: number; cls: StuckClass } | null;
+  /** Watchdog (bản vá #821) SẼ mở lại: nhường hết hạn · AI hỏng hết hạn (thật / bị đẩy đồng hồ) trừ ca còn tin DEAD chưa trả lời. */
+  watchdogReopen: number;
+  /** …trong đó lượt khách mới nhất còn trong `RESUME_WINDOW_MINUTES` và chưa ai trả lời ⇒ được AI trả lời ngay sau khi mở. */
+  watchdogAnswerNow: number;
+  /** AI hỏng hết hạn nhưng còn tin DEAD chưa trả lời ⇒ watchdog chuyển hàng đợi người (không mở). */
+  watchdogToHuman: number;
 };
 
 export function emptyCounts(): StuckCounts {
-  return { silent: 0, byClass: Object.fromEntries(STUCK_CLASSES.map((c) => [c, { total: 0, over: STUCK_MINUTE_BUCKETS.map(() => 0) }])) as StuckCounts["byClass"], estimated: 0, customerWaiting: 0, longest: null };
+  return { silent: 0, byClass: Object.fromEntries(STUCK_CLASSES.map((c) => [c, { total: 0, over: STUCK_MINUTE_BUCKETS.map(() => 0) }])) as StuckCounts["byClass"], estimated: 0, customerWaiting: 0, longest: null, watchdogReopen: 0, watchdogAnswerNow: 0, watchdogToHuman: 0 };
 }
 
-/** Gom một hội thoại vào bộ đếm. HÀM THUẦN (đổi `c`). */
-export function addSilent(c: StuckCounts, r: SilentRow, waiting: boolean, now: Date): StuckClass {
+/** Nhóm mà watchdog của bản vá mở lại (tự hết hạn đã quá mốc thật). */
+export const WATCHDOG_CLASSES: ReadonlySet<StuckClass> = new Set<StuckClass>(["STAFF_PAUSE_EXPIRED", "AI_DOWN_EXPIRED", "AI_DOWN_CLOCK_PUSHED"]);
+
+/** Gom một hội thoại vào bộ đếm. HÀM THUẦN (đổi `c`). `extra` = dữ kiện cho dòng chạy thử của watchdog. */
+export function addSilent(c: StuckCounts, r: SilentRow, waiting: boolean, now: Date, extra: { lastCustomerAt?: Date | null; deadUnanswered?: boolean } = {}): StuckClass {
   const cls = classifyStuck(r, now);
   const since = silentSince(r);
   const minutes = Math.max(0, Math.floor((now.getTime() - since.at.getTime()) / 60_000));
@@ -229,6 +244,13 @@ export function addSilent(c: StuckCounts, r: SilentRow, waiting: boolean, now: D
   if (since.estimated) c.estimated += 1;
   if (waiting) c.customerWaiting += 1;
   if (!c.longest || minutes > c.longest.minutes) c.longest = { minutes, cls };
+  if (WATCHDOG_CLASSES.has(cls)) {
+    if (cls !== "STAFF_PAUSE_EXPIRED" && extra.deadUnanswered) c.watchdogToHuman += 1;
+    else {
+      c.watchdogReopen += 1;
+      if (waiting && extra.lastCustomerAt && now.getTime() - extra.lastCustomerAt.getTime() <= RESUME_WINDOW_MINUTES * 60_000) c.watchdogAnswerNow += 1;
+    }
+  }
   return cls;
 }
 
@@ -239,6 +261,7 @@ export function silentSummary(org: string, c: StuckCounts): string[] {
   lines.push(`${org} A · AI im ${c.silent} hội thoại: ${STUCK_GROUPS.map((g) => `${STUCK_GROUP_LABEL[g]} ${group(g)}`).join(" · ")} · khách đang chờ trả lời ${c.customerWaiting} · mốc ước tính ${c.estimated}${c.longest ? ` · lâu nhất ${c.longest.minutes} phút (${c.longest.cls})` : ""}`);
   const rows = STUCK_CLASSES.filter((k) => c.byClass[k].total > 0).map((k) => `${k} ${c.byClass[k].total} (${STUCK_MINUTE_BUCKETS.map((b, i) => `>${b}p ${c.byClass[k].over[i]}`).join(" ")})`);
   for (let i = 0; i < rows.length; i += 3) lines.push(`${org} A · ${rows.slice(i, i + 3).join(" · ")}`);
+  lines.push(`${org} A · CHẠY THỬ watchdog (bản vá #821): sẽ mở lại ${c.watchdogReopen} (trần ${WATCHDOG_CAP}/lượt quét 5 phút ⇒ ~${Math.ceil(c.watchdogReopen / WATCHDOG_CAP)} lượt), trong đó AI trả lời ngay ${c.watchdogAnswerNow} (lượt khách ≤ ${RESUME_WINDOW_MINUTES} phút, chưa ai trả lời) · còn lại chỉ đổi trạng thái, KHÔNG gửi bù tin cũ · AI hỏng còn tin chưa trả lời ⇒ hàng đợi người ${c.watchdogToHuman}`);
   return lines;
 }
 
@@ -266,7 +289,9 @@ const toDate = (v: unknown): Date | null => {
 /** A — hội thoại AI im ngay lúc đo. Trả cả mã hội thoại theo nhóm (phần MÃ HOÁ). */
 export async function collectSilent(db: Db, now: Date): Promise<{ counts: StuckCounts; samples: Partial<Record<StuckClass, string[]>>; reasons: Map<string, number> }> {
   const res = await db.execute(sql`select c.id, c.status, c.handoff_reason, c.state->'control'->>'mode' as mode,
-      c.state->'handoff'->>'at' as handoff_at, c.state->'handoff'->>'reason' as handoff_state_reason, c.updated_at, c.human_cooldown_until, c.handoff_queued_at,
+      c.state->'handoff'->>'at' as handoff_at, c.state->'handoff'->>'reason' as handoff_state_reason, c.updated_at, c.human_cooldown_until, c.handoff_queued_at, c.last_customer_at,
+      exists (select 1 from "sales_chat_inbound" i where i.page_id = c.page_id and i.thread_id = c.thread_id and i.status = 'DEAD' and i.note = ${DEAD_AI_DOWN_NOTE_TEXT}
+        and i.created_at > coalesce(greatest(c.last_bot_at, c.last_staff_at), 'epoch'::timestamptz)) as dead_unanswered,
       (c.last_customer_at is not null and c.last_customer_at > coalesce(c.last_bot_at, 'epoch'::timestamptz) and c.last_customer_at > coalesce(c.last_staff_at, 'epoch'::timestamptz)) as waiting
     from "sales_chat_conversations" c
     where c.channel <> 'TEST' and (c.status = 'HANDOFF' or coalesce(c.state->'control'->>'mode', '') = 'HUMAN')
@@ -285,7 +310,7 @@ export async function collectSilent(db: Db, now: Date): Promise<{ counts: StuckC
       cooldownUntil: toDate(r.human_cooldown_until),
       queuedAt: toDate(r.handoff_queued_at),
     };
-    const cls = addSilent(counts, row, r.waiting === true || r.waiting === "t", now);
+    const cls = addSilent(counts, row, r.waiting === true || r.waiting === "t", now, { lastCustomerAt: toDate(r.last_customer_at), deadUnanswered: r.dead_unanswered === true || r.dead_unanswered === "t" });
     const list = (samples[cls] ??= []);
     if (list.length < 30) list.push(String(r.id));
     const key = (row.reason ?? "(trống)").replace(/#[0-9A-F]{8}\b/g, "#…").slice(0, 90);
@@ -294,7 +319,7 @@ export async function collectSilent(db: Db, now: Date): Promise<{ counts: StuckC
   return { counts, samples, reasons };
 }
 
-export type OwnershipMeasure = { ok: true; silent: number; person: number; department: number; unowned: number; byReason: Record<string, number>; responders: number; viewers: number; departmentCode: string; overdue: number; stale: number; queued: number; unqueued: number } | { ok: false; why: string };
+export type OwnershipMeasure = { ok: true; silent: number; person: number; department: number; shared: number; unowned: number; byReason: Record<string, number>; responders: number; viewers: number; departmentCode: string; overdue: number; stale: number; queued: number; unqueued: number } | { ok: false; why: string };
 
 /** B + C — đọc bằng lib #800 trong ngữ cảnh tổ chức (handle chỉ đọc). Thiếu hàm trên image ⇒ CHƯA ĐO ĐƯỢC. */
 export async function collectOwnership(org: { code: string; isHome: boolean }, now: Date): Promise<OwnershipMeasure> {
@@ -302,7 +327,7 @@ export async function collectOwnership(org: { code: string; isHome: boolean }, n
     await bindReadOnlyOrgHandle(org);
     return await withOrganization(org.code, async () => {
       const routing = (await import("@/lib/sales-chatbot/handoff-routing")) as Record<string, unknown>;
-      const count = routing.countUnownedHandoffs as ((now: Date) => Promise<{ silent: number; person: number; department: number; unowned: number; byReason: Record<string, number>; responders: number; departmentCode: string }>) | undefined;
+      const count = routing.countUnownedHandoffs as ((now: Date) => Promise<{ silent: number; person: number; department: number; shared?: number; unowned: number; byReason: Record<string, number>; responders: number; departmentCode: string }>) | undefined;
       const items = routing.handoffWorkItems as ((now: Date) => Promise<{ createdAt: Date; assignee: unknown; tags: string[] }[]>) | undefined;
       const ctxOf = routing.handoffViewContext as (() => Promise<{ cfg: unknown }>) | undefined;
       const dueOf = routing.handoffDueAt as ((queuedAt: Date, cfg: unknown) => Date | null) | undefined;
@@ -320,7 +345,7 @@ export async function collectOwnership(org: { code: string; isHome: boolean }, n
         overdue += 1;
         if (!it.assignee && now.getTime() - due.getTime() > 24 * 3_600_000) stale += 1;
       }
-      return { ok: true as const, silent: u.silent, person: u.person, department: u.department, unowned: u.unowned, byReason: u.byReason, responders: u.responders, viewers: viewers.length, departmentCode: u.departmentCode, overdue, stale, queued, unqueued: list.length - queued };
+      return { ok: true as const, silent: u.silent, person: u.person, department: u.department, shared: u.shared ?? 0, unowned: u.unowned, byReason: u.byReason, responders: u.responders, viewers: viewers.length, departmentCode: u.departmentCode, overdue, stale, queued, unqueued: list.length - queued };
     });
   } catch (e) {
     return { ok: false, why: e instanceof Error ? e.message.slice(0, 160) : String(e).slice(0, 160) };
@@ -475,7 +500,7 @@ async function oneOrg(org: { code: string; isHome: boolean }, args: StuckArgs, n
 
     const b = await collectOwnership(org, now);
     if (b.ok) {
-      tomTat(`${org.code} B · cần người ${b.silent}: người cầm ${b.person} · hàng đợi phòng ${b.department} · KHÔNG CHỦ ${b.unowned} (${Object.entries(b.byReason).map(([k, v]) => `${k} ${v}`).join(" · ")}) · phòng ${b.departmentCode} có ${b.responders} người xem được hộp thư · cả tổ chức ${b.viewers}`);
+      tomTat(`${org.code} B · cần người ${b.silent}: người cầm ${b.person} · hàng đợi phòng ${b.department} · hàng đợi chung ${b.shared} · KHÔNG CHỦ ${b.unowned} (${Object.entries(b.byReason).map(([k, v]) => `${k} ${v}`).join(" · ")}) · phòng ${b.departmentCode} có ${b.responders} người xem được hộp thư · cả tổ chức ${b.viewers}`);
       tomTat(`${org.code} C · SLA (work.sla): đã vào hàng đợi ${b.queued} · quá hạn ${b.overdue} · quá hạn > 24 giờ chưa ai cầm ${b.stale} · chưa vào hàng đợi ${b.unqueued}`);
     } else {
       tomTat(`${org.code} B/C · CHƯA ĐO ĐƯỢC — ${b.why}`);

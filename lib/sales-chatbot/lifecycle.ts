@@ -313,7 +313,7 @@ export type LifecycleConvRow = {
 export type LoadedLifecycle = { conv: LifecycleConvRow; facts: LifecycleFacts; snapshot: LifecycleSnapshot };
 
 /** Đơn nối với hội thoại + ORDER_OUTCOME + chứng từ thu. Ném khi CSDL lỗi (người gọi quyết phía hẹp). */
-export async function linkedOrdersFor(conv: Pick<LifecycleConvRow, "id" | "orderId" | "draftOrderId" | "pageId" | "threadId" | "state">, now: Date): Promise<LinkedOrderFact[]> {
+export async function linkedOrdersFor(conv: Pick<LifecycleConvRow, "id" | "orderId" | "draftOrderId" | "pageId" | "threadId" | "state">, now: Date, opts: { includePast?: boolean } = {}): Promise<LinkedOrderFact[]> {
   const db = await getDb();
   const o = schema.orders;
   const s = schema.shipments;
@@ -322,7 +322,7 @@ export async function linkedOrdersFor(conv: Pick<LifecycleConvRow, "id" | "order
   const explicit = new Map<string, OrderLink>();
   if (conv.orderId) explicit.set(conv.orderId, "CONV_ORDER");
   if (conv.draftOrderId && !explicit.has(conv.draftOrderId)) explicit.set(conv.draftOrderId, "CONV_DRAFT");
-  for (const id of [st.confirmed?.orderId, st.draft?.orderId, ...(st.cancelledOrders ?? []).map((c) => c.orderId)]) if (id && !explicit.has(id)) explicit.set(id, "BOT_STATE");
+  for (const id of [st.confirmed?.orderId, st.draft?.orderId, ...(st.cancelledOrders ?? []).map((c) => c.orderId), ...(opts.includePast ? (st.pastOrders ?? []).map((p) => p.orderId) : [])]) if (id && !explicit.has(id)) explicit.set(id, "BOT_STATE");
   const since = new Date(now.getTime() - LIFECYCLE_ORDER_LOOKBACK_DAYS * 86_400_000);
   const recent: SQL[] = [eq(o.salesConversationId, conv.id)];
   if (conv.pageId && conv.threadId) recent.push(and(eq(o.pageId, conv.pageId), eq(o.conversationId, conv.threadId))!);
@@ -345,7 +345,8 @@ export async function linkedOrdersFor(conv: Pick<LifecycleConvRow, "id" | "order
     .where(and(where, ne(o.stage, "DELETED")))
     .orderBy(desc(o.insertedAt))
     .limit(20);
-  const kept = rows.filter((r) => !past.has(r.id));
+  // `includePast` (giai đoạn sau bán — `loadCustomerPhase`): đơn của lượt mua CŨ vẫn là đơn khách đang chờ / vừa nhận — không loại.
+  const kept = opts.includePast ? rows : rows.filter((r) => !past.has(r.id));
   const manual = kept.filter((r) => r.id.startsWith("erp-"));
   const pay = new Map<string, OrderPaymentStatus>();
   if (manual.length) {
@@ -425,4 +426,219 @@ export async function loadLifecycle(conversationId: string, now: Date, extra: { 
     customerTexts: texts,
   };
   return { conv, facts, snapshot: deriveLifecycle(facts) };
+}
+
+// ═══ GIAI ĐOẠN KHÁCH SAU KHI CÓ ĐƠN (HOTFIX P0 12/10/2026 — ca HSLC «Khanh Nhung», đơn #6495CA72) ═══
+//
+// Sự cố: khách nhắn «Tôi nhận hàng rồi nhưng chưa thử chất lượng» khi AI đã DỪNG hơn 1.500 phút: luật cũ của engine «khách nhắn
+// trong 3 ngày sau khi chốt đơn (chốt qua lời đồng ý) ⇒ chuyển người» bắt MỌI tin, kể cả lời cảm ơn, và phòng phụ trách không có ai.
+// Hết 3 ngày thì engine đẩy đơn sang `pastOrders` rồi bán lại từ đầu ⇒ AI có thể chào bán / xin chốt lại khi khách chỉ báo đã nhận
+// hàng. Gốc chung: không nơi nào gọi tên GIAI ĐOẠN của khách sau khi đã có đơn.
+//
+// `customerPhaseOf` là PHÉP CHIẾU của ảnh chụp sáu chiều ở trên (không phải trục thứ hai): đọc `order` + `fulfillment` (chứng từ ĐVVC /
+// ORDER_OUTCOME) + `salesStage`, cộng HAI lời khai của khách trong tin đang trả lời — «đã nhận hàng» và «khiếu nại». Lời khai của
+// khách CHỈ đổi cách AI nói chuyện; nó KHÔNG đổi trạng thái đơn, không đổi `fulfillment`, không ghi gì (AGENTS 0.1 — không kết luận
+// giao thành công từ lời khách). Nhãn «đã nhận» luôn mang NGUỒN: `CARRIER` (chứng từ ĐVVC / phiếu giao) hay `CUSTOMER_CLAIM`.
+
+export const CUSTOMER_PHASES = ["PRE_SALE", "CLOSING", "AWAITING_SHIPMENT", "IN_TRANSIT", "RECEIVED", "AFTER_SALES", "COMPLAINT"] as const;
+export type CustomerPhase = (typeof CUSTOMER_PHASES)[number];
+export const CUSTOMER_PHASE_LABEL: Record<CustomerPhase, string> = {
+  PRE_SALE: "tư vấn trước bán",
+  CLOSING: "đang chốt",
+  AWAITING_SHIPMENT: "chờ giao",
+  IN_TRANSIT: "đang giao",
+  RECEIVED: "đã nhận hàng",
+  AFTER_SALES: "chăm sóc sau bán",
+  COMPLAINT: "khiếu nại",
+};
+/** Đơn đã nhận (theo ĐVVC hoặc lời khách) lên quá chừng này ngày ⇒ «chăm sóc sau bán» thay vì «vừa nhận hàng». Mốc phân nhóm, không phải đích. */
+export const AFTER_SALES_DAYS = 7;
+
+const RECEIPT_RULES: readonly RegExp[] = [
+  /\b(?:da|moi|vua|minh|em|chi|toi|tui|anh)\s+nhan\s+(?:duoc\s+)?(?:hang|don|roi)\b/,
+  /\bnhan\s+(?:duoc\s+)?(?:hang|don)\s+(?:roi|r)\b/,
+  /\bhang\s+(?:ve|toi|den)\s+(?:roi|r)\b/,
+];
+const RECEIPT_NEGATION = /\b(?:chua|khong|ko|bao gio|khi nao|luc nao)\s+(?:\S+\s+){0,2}nhan\b|\bnhan\s+(?:hang\s+)?o\s+dau\b/;
+
+/** Khách tự nói ĐÃ NHẬN HÀNG — LỜI KHAI, chỉ đổi cách AI trả lời. Đọc trên chữ đã bỏ dấu. HÀM THUẦN. */
+export function customerReceiptClaim(text: string): boolean {
+  const f = foldVi(text.normalize("NFC"));
+  if (RECEIPT_NEGATION.test(f)) return false;
+  return RECEIPT_RULES.some((re) => re.test(f));
+}
+
+/**
+ * LUẬT KHIẾU NẠI (review #821 vòng 2): engine ép chuyển người + bot im theo luật này, nên bắt NHẦM một câu khen là tái tạo đúng sự cố PR
+ * này sửa. Ba hàng rào:
+ *  1. Từ MƠ HỒ khi bỏ dấu («dở» ↔ «đó / đỡ / đỏ», «chậm» ↔ «chấm / chăm», «ngứa» ↔ «ngừa», «đau» …) chỉ khớp trên chữ CÒN DẤU
+ *     (`folded: false`). Luật chạy trên chữ bỏ dấu chỉ gồm cụm KHÔNG mơ hồ (khách gõ không dấu vẫn được bắt: «goi ruoc bi moc»).
+ *  2. Phủ định ngay trước cụm («không / chưa / ko (bị) …») ⇒ không tính: «ruốc ngon, không bị chảy dầu như chỗ khác».
+ *  3. Mệnh đề HỎI («thế nào», «… không em?») chỉ tính luật có từ LỖI rõ (`inQuestion: true` — mốc, hỏng, thiếu, sai…); «chậm … cũng
+ *     được / không sao» không phải than phiền.
+ */
+/**
+ * `unaccentedOnly` = luật chỉ chạy khi CẢ tin gõ không dấu (khách gõ không dấu thì không thể đọc «dở» trên chữ còn dấu) — và luôn BẮT BUỘC
+ * có ngữ cảnh («hang do qua», «giao cham vay»), không bao giờ từ trần. `questionOk` = câu hỏi vẫn tính khi có dấu hiệu than phiền
+ * («sao giao chậm vậy em?»).
+ */
+type ComplaintRule = { re: RegExp; folded: boolean; inQuestion: boolean; unless?: RegExp; unaccentedOnly?: boolean; questionOk?: RegExp };
+const W0 = String.raw`(?:^|[^\p{L}\d])`;
+const W1 = String.raw`(?=$|[^\p{L}\d])`;
+const acc = (body: string): RegExp => new RegExp(`${W0}(?:${body})${W1}`, "u");
+const SLOW_OK = /\b(?:cung duoc|khong sao|ko sao|tu tu|khong van de|cung ok)\b/;
+/** Câu hỏi than phiền: «sao … vậy», «sao mãi chưa …» — hỏi nhưng là trách. */
+const COMPLAIN_QUESTION_RE = /\bsao\b/;
+/** Có chữ có dấu tiếng Việt ⇒ khách gõ CÓ DẤU (luật `unaccentedOnly` không chạy). */
+const VI_DIACRITIC_RE = /[àáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹđ]/i;
+const COMPLAINT_RULES: readonly ComplaintRule[] = [
+  // Hàng lỗi — cụm không mơ hồ khi bỏ dấu.
+  { re: /\bbi\s+(?:loi|hong|thiu|moc|chay dau|chay nuoc|het han|qua han)\b/, folded: true, inQuestion: true },
+  // «bị đau bụng / ngộ độc» gõ không dấu — câu HỎI («ăn có bị đau bụng không em?») là hỏi trước khi mua, không tính.
+  { re: /\bbi\s+(?:dau bung|ngo doc|tieu chay|di ung)\b/, folded: true, inQuestion: false },
+  { re: /\b(?:hang|banh|san pham|sp|goi|hop|tui)\s+(?:loi|hong|thiu|moc|het han|qua han)\b/, folded: true, inQuestion: true },
+  { re: acc("bị\\s+(?:vỡ|bể|dập|nát|hư|có mùi|bốc mùi)|(?:hàng|bánh|sản phẩm|gói|hộp|túi)\\s+(?:vỡ|bể|dập|nát|hư)"), folded: false, inQuestion: true },
+  { re: acc("chảy dầu|chảy nước|bốc mùi|có mùi lạ"), folded: false, inQuestion: true },
+  // Giao thiếu / sai.
+  { re: /\b(?:giao|gui|ship)\s+(?:thieu|sai|nham)\b|\b(?:thieu|sai|nham)\s+(?:hang|mon|so luong|loai|size|mau)\b/, folded: true, inQuestion: true },
+  // Đổi trả / hoàn tiền — câu hỏi chính sách («shop có đổi hàng không?») không tính.
+  { re: /\b(?:tra|doi)\s+(?:lai\s+)?hang\b|\bhoan\s+(?:lai\s+)?tien\b|\btra\s+lai\s+tien\b|\bboi\s+thuong\b/, folded: true, inQuestion: false },
+  { re: /\b(?:khieu nai|phan nan|boc phot|lua dao|that vong)\b/, folded: true, inQuestion: true },
+  // Sức khoẻ sau khi ăn (CÓ DẤU — «ngứa» ≠ «ngừa»).
+  { re: acc("đau bụng|ngộ độc|tiêu chảy|đi ngoài|buồn nôn|nôn ói|dị ứng|nổi mẩn|ngứa"), folded: false, inQuestion: false },
+  // Chất lượng tệ (CÓ DẤU — «dở» ≠ «đó / đỡ / đỏ»); «không ngon MIỆNG» (khách tự nói về mình) không tính.
+  { re: acc("(?:dở|tệ|chán|khó ăn|nhạt nhẽo)\\s+(?:quá|lắm|thật|thế|vậy|ghê)|không\\s+(?:còn\\s+)?(?:ngon|tươi|thơm)\\s+(?:như|bằng)|không\\s+(?:giống|đúng như)\\s+(?:ảnh|hình|mô tả|quảng cáo)|khác\\s+(?:ảnh|hình|mô tả|quảng cáo)"), folded: false, inQuestion: false },
+  // Giao chậm (CÓ DẤU — «chậm» ≠ «chấm / chăm»); «N ngày chưa thấy» không mơ hồ khi bỏ dấu.
+  { re: acc("(?:giao|ship|gửi)\\s+chậm|chậm\\s+quá"), folded: false, inQuestion: false, unless: SLOW_OK, questionOk: COMPLAIN_QUESTION_RE },
+  { re: /\b\d+\s+ngay\s+(?:roi\s+)?(?:ma\s+)?(?:van\s+)?chua\s+(?:thay|nhan|toi|den|giao)\b/, folded: true, inQuestion: false, unless: SLOW_OK },
+  // KHÁCH GÕ KHÔNG DẤU (review #821 vòng 3): từ dễ lẫn chỉ tính khi có NGỮ CẢNH đi kèm.
+  { re: /\b(?:hang|banh|ruoc|goi|do an|cha|mon)\s+do\s+(?:qua|lam|te)\b|\b(?:te|chan)\s+qua\b|\bkhong\s+ngon\s+nhu\s+(?:lan truoc|truoc)\b|\bchay dau het\b|\bbi vo\b|\bco mui\s+(?:la|hoi|chua)\b|\ban xong\s+(?:bi\s+)?dau bung\b/, folded: true, inQuestion: false, unaccentedOnly: true },
+  { re: /\b(?:giao|ship)\s+cham\s+(?:qua|vay|the|v)\b/, folded: true, inQuestion: false, unless: SLOW_OK, unaccentedOnly: true, questionOk: COMPLAIN_QUESTION_RE },
+];
+const COMPLAINT_NEGATION = new Set(["khong", "chua", "ko", "k", "chang", "cha", "khoi"]);
+const COMPLAINT_QUESTION_RE = /(?:\b(?:the nao|ra sao)\b|\b(?:khong|ko|chua|nhi|sao|duoc khong)(?:\s+(?:em|shop|a|chi|anh|ban|c|e|vay|v|nhe))*\s*$)/;
+
+/** Mệnh đề (cắt theo dấu câu / phẩy / xuống dòng) kèm cờ hỏi. */
+function complaintClauses(text: string): { raw: string; folded: string; question: boolean }[] {
+  const out: { raw: string; folded: string; question: boolean }[] = [];
+  for (const m of text.normalize("NFC").matchAll(/[^.!?;\n,]+[.!?;\n,]*/g)) {
+    const raw = m[0].trim().toLowerCase();
+    if (!raw) continue;
+    const folded = foldVi(raw).replace(/[.!?;,]+$/g, "").trim();
+    out.push({ raw: raw.replace(/[.!?;,]+$/g, "").trim(), folded, question: raw.includes("?") || COMPLAINT_QUESTION_RE.test(folded) });
+  }
+  return out;
+}
+
+function negatedBefore(prefix: string): boolean {
+  const words = foldVi(prefix).trim().split(/\s+/).filter(Boolean);
+  const last = words.slice(-2);
+  // «không bị …» / «chưa bị …» / «không …»: phủ định nằm trong hai từ ngay trước cụm.
+  return last.some((w) => COMPLAINT_NEGATION.has(w));
+}
+
+/**
+ * Khách KHIẾU NẠI / đòi đổi trả / hoàn tiền — câu rõ ràng về hàng lỗi, thiếu, sai, hỏng, chất lượng tệ, đau bụng sau khi ăn, giao chậm,
+ * muốn trả / hoàn tiền. «chưa thử chất lượng» KHÔNG phải khiếu nại (khách chưa dùng). Có đơn sống mà khớp ⇒ MÁY CHỦ chuyển người (engine),
+ * nên luật ưu tiên KHÔNG BẮT NHẦM (xem ba hàng rào ở trên). HÀM THUẦN.
+ */
+export function customerComplaintSignal(text: string): boolean {
+  const unaccented = !VI_DIACRITIC_RE.test(text.normalize("NFC"));
+  for (const c of complaintClauses(text)) {
+    for (const rule of COMPLAINT_RULES) {
+      if (rule.unaccentedOnly && !unaccented) continue;
+      if (c.question && !rule.inQuestion && !(rule.questionOk && rule.questionOk.test(c.folded))) continue;
+      if (rule.unless && rule.unless.test(c.folded)) continue;
+      const hay = rule.folded ? c.folded : c.raw;
+      const m = rule.re.exec(hay);
+      if (!m) continue;
+      const prefix = hay.slice(0, m.index + (m[0].length - m[0].trimStart().length));
+      if (negatedBefore(prefix)) continue;
+      // Hỏi GIẢ ĐỊNH «có (bị) … không» («có bị chảy dầu không em?») là hỏi trước khi mua, không phải khiếu nại.
+      if (c.question && /\bco\b/.test(foldVi(prefix))) continue;
+      return true;
+    }
+  }
+  return false;
+}
+
+const NOT_RECEIVED_RE = /\b(?:chua|khong|ko|k|van chua)\s+(?:\S+\s+){0,2}(?:nhan|thay)\s+(?:duoc\s+)?(?:hang|don|goi|hop|buu pham)\b|\bchua\s+(?:nhan|thay)\s+(?:gi|duoc gi)\b/;
+
+/**
+ * Khách nói CHƯA NHẬN / KHÔNG NHẬN ĐƯỢC hàng. Khi chứng từ ĐVVC báo ĐÃ GIAO thì đây là MÂU THUẪN chứng từ ↔ lời khách — việc của người
+ * (kiểm với bưu cục), tuyệt đối không cảm ơn «đã nhận hàng». HÀM THUẦN.
+ */
+export function customerNotReceivedSignal(text: string): boolean {
+  return NOT_RECEIVED_RE.test(foldVi(text.normalize("NFC")));
+}
+
+export type CustomerPhaseView = {
+  phase: CustomerPhase;
+  /** Nguồn của «đã nhận»: chứng từ ĐVVC hay lời khách — `null` khi chưa nói tới nhận hàng. */
+  receivedBy: "CARRIER" | "CUSTOMER_CLAIM" | null;
+  orderId: string | null;
+  /** Câu nguồn cho vết (không chứa chữ khách). */
+  source: string;
+};
+
+/**
+ * Giai đoạn của khách. HÀM THUẦN. Thứ tự: khiếu nại (lời khách, khi có đơn) → không có đơn sống ⇒ trước bán / đang chốt theo
+ * `salesStage` → ĐVVC đã giao / khách nói đã nhận ⇒ đã nhận (đơn lên quá `AFTER_SALES_DAYS` ⇒ chăm sóc sau bán) → đang giao → chờ giao.
+ */
+export function customerPhaseOf(snap: Pick<LifecycleSnapshot, "order" | "fulfillment" | "salesStage" | "orderId">, claims: { receipt: boolean; complaint: boolean; notReceived?: boolean }, orderAgeDays: number | null): CustomerPhaseView {
+  const orderId = snap.orderId;
+  const hasLive = snap.order === "CREATED" || snap.order === "CONFIRMED";
+  if (claims.complaint && (hasLive || snap.order === "RETURNED")) return { phase: "COMPLAINT", receivedBy: null, orderId, source: "lời khách: khiếu nại / đổi trả / hoàn tiền" };
+  // ĐVVC báo đã giao mà khách nói chưa nhận ⇒ mâu thuẫn chứng từ ↔ lời khách = khiếu nại (review #821 F2: trước đây ra RECEIVED/CARRIER
+  // và lời nhắc CẢM ƠN khách đã nhận hàng).
+  if (hasLive && snap.fulfillment === "DELIVERED" && claims.notReceived) return { phase: "COMPLAINT", receivedBy: null, orderId, source: "lời khách «chưa nhận được hàng» — chứng từ ĐVVC báo ĐÃ GIAO (mâu thuẫn, cần kiểm với bưu cục)" };
+  if (!hasLive) {
+    const closing = snap.order === "CREATION_PENDING" || snap.salesStage === "AWAITING_CONFIRMATION" || snap.salesStage === "CUSTOMER_INFO_COLLECTED";
+    return { phase: closing ? "CLOSING" : "PRE_SALE", receivedBy: null, orderId, source: `order=${snap.order} · salesStage=${snap.salesStage}` };
+  }
+  const old = orderAgeDays !== null && orderAgeDays > AFTER_SALES_DAYS;
+  if (snap.fulfillment === "DELIVERED") return { phase: old ? "AFTER_SALES" : "RECEIVED", receivedBy: "CARRIER", orderId, source: "ORDER_OUTCOME=DELIVERED (chứng từ ĐVVC / phiếu giao)" };
+  if (claims.receipt) return { phase: old ? "AFTER_SALES" : "RECEIVED", receivedBy: "CUSTOMER_CLAIM", orderId, source: `lời khách «đã nhận hàng» — ERP chưa có chứng từ giao (fulfillment=${snap.fulfillment})` };
+  if (snap.fulfillment === "SHIPPING") return { phase: "IN_TRANSIT", receivedBy: null, orderId, source: "ORDER_OUTCOME / chặng ĐVVC: đang giao" };
+  return { phase: "AWAITING_SHIPMENT", receivedBy: null, orderId, source: `đơn ${snap.order} · fulfillment=${snap.fulfillment}` };
+}
+
+/**
+ * Câu dặn AI theo giai đoạn SAU KHI ĐÃ CÓ ĐƠN. Trước bán / đang chốt ⇒ rỗng (lời nhắc bán hàng thường lo). HÀM THUẦN.
+ * Luật chung: không hỏi lại SĐT / địa chỉ / món đã có (trừ khi khách tự báo đổi); không đòi chốt lại; không lên đơn mới trừ khi khách
+ * nói rõ muốn mua THÊM; không chào bán sai ngữ cảnh. Người chỉ khi thật cần: khiếu nại · đổi trả · hoàn tiền · sửa đơn vượt quyền.
+ */
+export function postSalePrompt(v: CustomerPhaseView, shortCode: string | null): string {
+  if (v.phase === "PRE_SALE" || v.phase === "CLOSING") return "";
+  const code = shortCode ? ` #${shortCode}` : "";
+  const common =
+    `GIAI ĐOẠN KHÁCH: ${CUSTOMER_PHASE_LABEL[v.phase].toUpperCase()} — khách ĐÃ CÓ ĐƠN${code}. KHÔNG hỏi lại SĐT / địa chỉ / món đã có (chỉ khi khách tự báo đổi); KHÔNG mời chốt / xác nhận lại đơn; ` +
+    "KHÔNG gọi create_draft_order trừ khi khách nói RÕ muốn mua THÊM một đơn mới; KHÔNG chào bán / giới thiệu món khác khi khách không hỏi. Trả lời đúng câu khách nói, ngắn, ấm áp.";
+  if (v.phase === "COMPLAINT") return `${common} Khách đang KHIẾU NẠI / muốn đổi trả / hoàn tiền: xin lỗi ngắn gọn, KHÔNG hứa hoàn tiền / đổi hàng / bồi thường, KHÔNG đổ lỗi ⇒ handoff_to_human với reason «Khiếu nại — <ý khách>».`;
+  if (v.phase === "RECEIVED" || v.phase === "AFTER_SALES") {
+    const who = v.receivedBy === "CARRIER" ? "Đơn vị vận chuyển báo đã giao." : "Khách NÓI đã nhận hàng (lời khách — ERP chưa có chứng từ giao: KHÔNG nói thay đơn vị vận chuyển, KHÔNG nói đơn «đã giao thành công»).";
+    return `${common} ${who} Cảm ơn khách đã nhận hàng, hỏi thăm nhẹ (dùng thử thấy thế nào / cần hướng dẫn bảo quản, sử dụng không). Khách chưa dùng thử ⇒ chúc khách dùng ngon và mời phản hồi khi dùng. Khách hỏi cách dùng / bảo quản ⇒ trả lời theo «Về shop» / sổ tay. Khách báo hàng lỗi / thiếu / sai / muốn đổi trả / hoàn tiền ⇒ handoff_to_human «Khiếu nại — <ý khách>».`;
+  }
+  const complainLine = "Khách than phiền / khiếu nại (giao chậm, hàng lỗi, muốn huỷ / đổi trả / hoàn tiền) ⇒ xin lỗi ngắn, KHÔNG hứa gì, handoff_to_human «Khiếu nại — <ý khách>».";
+  if (v.phase === "IN_TRANSIT") return `${common} Đơn đang trên đường giao: khách hỏi bao giờ nhận ⇒ get_order_status rồi nói ĐÚNG «status», không hứa ngày giao. ${complainLine}`;
+  return `${common} Đơn đang chờ gửi đi: khách hỏi tình trạng ⇒ get_order_status rồi nói ĐÚNG «status» (không khẳng định «chưa gửi» khi ERP chưa có thông tin vận chuyển). Khách muốn đổi địa chỉ / số lượng ⇒ update_draft_order nếu đơn còn sửa được, không thì handoff_to_human «Sửa đơn — <ý khách>». ${complainLine}`;
+}
+
+/**
+ * Bộ nạp cho engine: ảnh chụp vòng đời GỒM đơn của lượt mua cũ (`pastOrders`) + giai đoạn khách cho tin `text`. Chỉ đọc khi hội thoại có
+ * dấu đơn (sổ bot / ô đơn) — hội thoại chưa từng có đơn không tốn câu nào. Lỗi đọc ⇒ `null` (engine giữ lời nhắc bán hàng thường).
+ */
+export async function loadCustomerPhase(conv: Pick<LifecycleConvRow, "id" | "orderId" | "draftOrderId" | "pageId" | "threadId" | "state" | "status" | "handoffReason" | "turns">, text: string, now: Date): Promise<(CustomerPhaseView & { shortCode: string | null }) | null> {
+  const st = conv.state;
+  if (!st.confirmed && !st.pastOrders?.length && !conv.orderId && !st.draft) return null;
+  try {
+    const orders = await linkedOrdersFor(conv, now, { includePast: true });
+    const snap = deriveLifecycle({ conversation: { status: conv.status, handoffReason: conv.handoffReason, control: controlOf(st), turns: conv.turns }, state: st, orders, customerTexts: [] });
+    const chosen = snap.orderId ? orders.find((o) => o.id === snap.orderId) : undefined;
+    const age = chosen?.insertedAt ? (now.getTime() - chosen.insertedAt.getTime()) / 86_400_000 : null;
+    const v = customerPhaseOf(snap, { receipt: customerReceiptClaim(text), complaint: customerComplaintSignal(text), notReceived: customerNotReceivedSignal(text) }, age);
+    return { ...v, shortCode: snap.orderId ? manualOrderShortCode(snap.orderId) : null };
+  } catch {
+    return null;
+  }
 }

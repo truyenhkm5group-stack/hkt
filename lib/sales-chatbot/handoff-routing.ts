@@ -25,7 +25,10 @@ import {
   type HandoffQueueView,
   type HandoffUnownedReason,
 } from "@/lib/sales-chatbot/handoff-routing-shared";
-import { humanHandlingKindSql, needsHumanReasonSql, WAITING_REPLY_SQL, WEB_STAFF_REASON } from "@/lib/sales-chatbot/inbox-states";
+import { AI_DOWN_HANDOFF_REASON, AI_DOWN_UNANSWERED_REASON, aiHoldOf, STAFF_COOLDOWN_REASON_LIST } from "@/lib/sales-chatbot/ai-hold-shared";
+import { DEAD_AI_DOWN_NOTE } from "@/lib/sales-chatbot/inbound-retry";
+import { TAKEOVER_REASON } from "@/lib/sales-chatbot/conversation-control-shared";
+import { humanHandlingKindSql, needsHumanReasonSql, STATE_HANDOFF_AT_SQL, WAITING_REPLY_SQL, WEB_STAFF_REASON } from "@/lib/sales-chatbot/inbox-states";
 
 /**
  * ═══════════ AI IM THÌ PHẢI CÓ CHỦ — ĐƯỜNG GHI (P0 11/10/2026, yêu cầu 9 «Human handoff») ═══════════
@@ -216,7 +219,9 @@ type QueueRow = {
   assigneeName: string | null;
   assigneeActive: boolean | null;
   lastStaffAt: Date | null;
+  handoffAt: Date | null;
   customerName: string | null;
+  mode: string | null;
 };
 
 async function silentRows(now: Date, ids?: string[]): Promise<QueueRow[]> {
@@ -234,7 +239,9 @@ async function silentRows(now: Date, ids?: string[]): Promise<QueueRow[]> {
       assigneeName: u.name,
       assigneeActive: u.active,
       lastStaffAt: C.lastStaffAt,
-      customerName: sql<string | null>`coalesce(${C.state}->'customer'->>'name', (select i.customer_name from "sales_chat_inbound" i where i.page_id = ${C.pageId} and i.thread_id = ${C.threadId} and i.customer_name is not null order by i.created_at desc limit 1))`,
+      handoffAt: STATE_HANDOFF_AT_SQL,
+      mode: sql<string | null>`${C.state}->'control'->>'mode'`,
+      customerName: sql<string | null>`coalesce(${C.state}->'customer'->>'name', (select i.customer_name from "sales_chat_inbound" i where i.page_id = "sales_chat_conversations"."page_id" and i.thread_id = "sales_chat_conversations"."thread_id" and i.customer_name is not null order by i.created_at desc limit 1))`,
     })
     .from(C)
     .leftJoin(u, eq(u.id, C.assigneeUserId))
@@ -249,7 +256,9 @@ async function silentRows(now: Date, ids?: string[]): Promise<QueueRow[]> {
 export async function handoffWorkItems(now: Date): Promise<WorkItem[]> {
   const rows = await silentRows(now);
   return rows.map((r) => {
-    const queued = r.queuedAt ?? r.updatedAt;
+    // Chưa có dấu hàng đợi ⇒ mốc chuyển người của chính đường chuyển (`state.handoff.at`); `updated_at` chỉ là chỗ lùi cuối — cột này bị
+    // mọi lượt ghi đẩy tới, dùng nó làm mốc tính hạn là hạn KHÔNG BAO GIỜ vỡ (HOTFIX P0 12/10/2026).
+    const queued = r.queuedAt ?? (r.handoffAt ? new Date(r.handoffAt) : null) ?? r.updatedAt;
     const held = Boolean(r.assigneeUserId && r.assigneeActive);
     const status: WorkStatus = !held ? "NEW" : r.lastStaffAt && r.lastStaffAt.getTime() >= queued.getTime() ? "IN_PROGRESS" : "ASSIGNED";
     return {
@@ -275,7 +284,7 @@ export async function handoffWorkItems(now: Date): Promise<WorkItem[]> {
       businessEntityId: r.id,
       sourceUrl: inboxHref(r.id),
       money: MONEY_UNKNOWN,
-      tags: [r.channel, ...(r.queuedAt ? [] : ["NOT_QUEUED"])],
+      tags: [r.channel, ...(r.queuedAt ? [] : ["NOT_QUEUED"]), ...(r.mode === "HUMAN" || r.handoffReason === TAKEOVER_REASON ? ["TAKEOVER"] : [])],
       evidence: { source: "Hộp thư AI bán hàng", detail: r.queuedAt ? `Vào hàng đợi người ${r.queuedAt.toISOString()}` : "AI đã dừng nhưng chưa vào hàng đợi — lượt quét 5 phút sẽ đóng dấu" },
       blockedReason: "",
       creationSource: "AUTO",
@@ -337,10 +346,14 @@ export type UnownedHandoffCount = {
   silent: number;
   person: number;
   department: number;
+  /** Hàng đợi CHUNG — phòng chưa có ai, tổ chức có người xem hộp thư (không phải «không chủ», nhưng cấu hình phòng thiếu người). */
+  shared: number;
   unowned: number;
   byReason: Record<HandoffUnownedReason, number>;
   departmentCode: DepartmentCode;
   responders: number;
+  /** Người xem được hộp thư của cả tổ chức. */
+  viewers: number;
   /** Tối đa 50 mã hội thoại không chủ — để audit mở thẳng. */
   sample: string[];
 };
@@ -353,13 +366,14 @@ export type UnownedHandoffCount = {
 export async function countUnownedHandoffs(now: Date = new Date()): Promise<UnownedHandoffCount> {
   const cfg = await getWorkConfig();
   const departmentCode = handoffDepartment(cfg);
-  const [rows, responders] = await Promise.all([silentRows(now), handoffResponders(departmentCode)]);
-  const out: UnownedHandoffCount = { silent: rows.length, person: 0, department: 0, unowned: 0, byReason: Object.fromEntries(HANDOFF_UNOWNED_REASONS.map((r) => [r, 0])) as Record<HandoffUnownedReason, number>, departmentCode, responders: responders.length, sample: [] };
+  const [rows, responders, viewers] = await Promise.all([silentRows(now), handoffResponders(departmentCode), activeUserIdsWhoCan("ai_sales:view")]);
+  const out: UnownedHandoffCount = { silent: rows.length, person: 0, department: 0, shared: 0, unowned: 0, byReason: Object.fromEntries(HANDOFF_UNOWNED_REASONS.map((r) => [r, 0])) as Record<HandoffUnownedReason, number>, departmentCode, responders: responders.length, viewers: viewers.length, sample: [] };
   for (const r of rows) {
-    const o = handoffOwnerOf({ silent: true, assigneeUserId: r.assigneeUserId, assigneeActive: Boolean(r.assigneeActive), queuedAt: r.queuedAt, department: departmentCode, responders: responders.length });
+    const o = handoffOwnerOf({ silent: true, assigneeUserId: r.assigneeUserId, assigneeActive: Boolean(r.assigneeActive), queuedAt: r.queuedAt, department: departmentCode, responders: responders.length, viewers: viewers.length });
     if (!o) continue;
     if (o.kind === "PERSON") out.person += 1;
     else if (o.kind === "DEPARTMENT") out.department += 1;
+    else if (o.kind === "SHARED") out.shared += 1;
     else {
       out.unowned += 1;
       out.byReason[o.reason] += 1;
@@ -374,15 +388,16 @@ export async function countUnownedHandoffs(now: Date = new Date()): Promise<Unow
 export type HandoffViewRow = { id: string; silent: boolean; queuedAt: Date | null; assigneeUserId: string | null; assigneeName: string | null; assigneeActive: boolean; lastStaffAt: Date | null; waitingSince: Date | null };
 
 /** Bối cảnh MỘT lần cho cả trang hộp thư: phòng, số người trả lời được, cấu hình hạn. */
-export async function handoffViewContext(): Promise<{ cfg: WorkConfig; department: DepartmentCode; responders: number }> {
+export async function handoffViewContext(): Promise<{ cfg: WorkConfig; department: DepartmentCode; responders: number; viewers: number }> {
   const cfg = await getWorkConfig();
   const department = handoffDepartment(cfg);
-  return { cfg, department, responders: (await handoffResponders(department)).length };
+  const [responders, viewers] = await Promise.all([handoffResponders(department), activeUserIdsWhoCan("ai_sales:view")]);
+  return { cfg, department, responders: responders.length, viewers: viewers.length };
 }
 
 /** «chờ X phút · phụ trách · hạn» của MỘT hội thoại; `null` = AI đang trả lời (không hiện). */
-export function handoffViewOf(r: HandoffViewRow, ctx: { cfg: WorkConfig; department: DepartmentCode; responders: number }, now: Date): HandoffQueueView | null {
-  const owner: HandoffOwner | null = handoffOwnerOf({ silent: r.silent, assigneeUserId: r.assigneeUserId, assigneeActive: r.assigneeActive, queuedAt: r.queuedAt, department: ctx.department, responders: ctx.responders });
+export function handoffViewOf(r: HandoffViewRow, ctx: { cfg: WorkConfig; department: DepartmentCode; responders: number; viewers?: number }, now: Date): HandoffQueueView | null {
+  const owner: HandoffOwner | null = handoffOwnerOf({ silent: r.silent, assigneeUserId: r.assigneeUserId, assigneeActive: r.assigneeActive, queuedAt: r.queuedAt, department: ctx.department, responders: ctx.responders, viewers: ctx.viewers });
   if (!owner) return null;
   // Chưa có dấu (đường chuyển người không báo, chưa tới lượt quét) ⇒ vẫn hiện, tính chờ từ «bây giờ» là nói dối — dùng mốc tin cuối.
   const queuedAt = r.queuedAt ?? r.lastStaffAt ?? r.waitingSince ?? now;
@@ -391,7 +406,7 @@ export function handoffViewOf(r: HandoffViewRow, ctx: { cfg: WorkConfig; departm
 
 /* ═══════════════════ LƯỢT QUÉT (job `sales-health`, 5 phút) ═══════════════════ */
 
-export type HandoffSweepResult = { cleared: number; stamped: number; followups: number; assigned: number; staleDepartments: number; unowned: UnownedHandoffCount };
+export type HandoffSweepResult = { cleared: number; stamped: number; followups: number; assigned: number; staleDepartments: number; recovered: number; noResponderAlerts: number; unowned: UnownedHandoffCount };
 
 const VN_DAY = (d: Date) => new Date(d.getTime() + 7 * 3_600_000).toISOString().slice(0, 10);
 
@@ -403,16 +418,22 @@ const VN_DAY = (d: Date) => new Date(d.getTime() + 7 * 3_600_000).toISOString().
  *  3. Tin khách chờ mà chưa báo (chat web không đi qua `holdGate`) ⇒ cùng đường `noteCustomerWhileQueued` (chống trùng theo khoá).
  *  4. Phòng bật phân việc tự động ⇒ giao người còn chỗ.
  *  5. Leo thang: vỡ hạn > 24 giờ mà chưa ai cầm ⇒ MỘT tin mỗi phòng mỗi ngày (luật 26).
+ *  6. WATCHDOG (HOTFIX P0 12/10/2026): lần nhường TỰ HẾT HẠN (nhân viên vừa trả lời tay · AI hỏng) đã quá mốc mà hội thoại còn
+ *     `HANDOFF` ⇒ mở lại cho AI bằng ĐÚNG cổng của đường xử lý tin (`holdGate`, ghi `ai.resumed` COOLDOWN_EXPIRED). Trước đây chỉ tin
+ *     khách KẾ TIẾP mới mở lại, nên hộp thư treo «AI đã dừng» dù không còn lý do nào. KHÔNG BAO GIỜ chạm chuyển người bắt buộc (khách
+ *     báo chuyển khoản, hàng rào khẳng định, khiếu nại, ghi đơn hỏng…) hay «Tiếp quản» — chỉ người trả lại được.
+ *  7. Phòng phụ trách chưa có ai xem được hộp thư mà có khách chờ ⇒ hội thoại ở HÀNG ĐỢI CHUNG + MỘT tin quản trị mỗi phòng mỗi ngày.
  */
 export async function sweepHandoffOwnership(now: Date = new Date()): Promise<HandoffSweepResult> {
   const db = await getDb();
+  const recovered = await recoverExpiredHolds(now).catch(() => 0);
   const cleared = await db
     .update(C)
     .set({ handoffQueuedAt: null, handoffAlertedAt: null })
     .where(and(isNotNull(C.handoffQueuedAt), sql`not ${aiSilentSql(now)}`))
     .returning({ id: C.id });
 
-  const handoffAt = sql<Date>`case when ${C.state}->'handoff'->>'at' ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T' and (${C.state}->'handoff'->>'at')::timestamptz <= ${now} then (${C.state}->'handoff'->>'at')::timestamptz else ${now} end`;
+  const handoffAt = sql<Date>`case when ${STATE_HANDOFF_AT_SQL} <= ${now} then ${STATE_HANDOFF_AT_SQL} else ${now} end`;
   const stampedRows = await db
     .update(C)
     .set({ handoffQueuedAt: handoffAt })
@@ -459,5 +480,90 @@ export async function sweepHandoffOwnership(now: Date = new Date()): Promise<Han
     }
   }
 
-  return { cleared: cleared.length, stamped: stampedRows.length, followups, assigned, staleDepartments, unowned: await countUnownedHandoffs(now) };
+  const unowned = await countUnownedHandoffs(now);
+  let noResponderAlerts = 0;
+  // Ngưỡng của luật 26 (review #821 F6): chỉ báo khi có việc STALE (vỡ hạn > 24 giờ VÀ chưa ai cầm), KHÔNG đếm «Tiếp quản» (người đang
+  // làm, không phải khách bị bỏ rơi). Tổ chức không ai xem được hộp thư thì KHÔNG nói «hàng đợi chung» — hội thoại là KHÔNG CHỦ thật.
+  const staleWaiting = stale.filter((i) => !i.tags.includes("TAKEOVER")).length;
+  if (unowned.responders === 0 && staleWaiting > 0) {
+    const key = `sales-chat:handoff-no-responder:${department}:${VN_DAY(now)}`;
+    const shared = unowned.viewers > 0;
+    const title = shared
+      ? `Phòng ${DEPARTMENT_LABEL[department]} chưa có ai xem được hộp thư — ${staleWaiting} khách chờ quá hạn ở hàng đợi chung`
+      : `Không ai xem được hộp thư AI bán hàng — ${staleWaiting} khách chờ quá hạn KHÔNG CHỦ`;
+    const body = shared
+      ? `${staleWaiting} hội thoại AI đã dừng, vỡ hạn hơn 24 giờ, chưa ai nhận. Phòng phụ trách hàng đợi khách chờ (khoá SALES_CHAT_HANDOFF) chưa có thành viên nào xem được hộp thư nên hội thoại đang nằm ở HÀNG ĐỢI CHUNG của mọi người xem hộp thư. Xếp người vào phòng ở Cấu hình → Nhân sự và phòng ban, hoặc đổi phòng ở Cấu hình → Phòng phụ trách.`
+      : `${staleWaiting} hội thoại AI đã dừng, vỡ hạn hơn 24 giờ, và cả tổ chức chưa có tài khoản đang hoạt động nào xem được hộp thư (ai_sales:view). Cấp quyền xem hộp thư cho ít nhất một người rồi xếp vào phòng phụ trách.`;
+    const ins = await db
+      .insert(schema.notifications)
+      .values({ kind: "SYSTEM", severity: "warning", title, body, href: "/ai/sales-chatbot/inbox?f=UNASSIGNED", entityType: "SALES_CHAT", entityId: department, dedupeKey: key, occurredAt: now })
+      .onConflictDoNothing({ target: schema.notifications.dedupeKey })
+      .returning({ id: schema.notifications.id });
+    if (ins.length) {
+      noResponderAlerts = 1;
+      const managers = await activeUserIdsWhoCan("ai_sales:manage");
+      await sendInboxMessages(managers.map((userId) => ({ userId, kind: "SALES_CHAT_HANDOFF", title, body, href: "/ai/sales-chatbot/inbox?f=UNASSIGNED", dedupeKey: `${key}:${userId}` })), db);
+    }
+  }
+  return { cleared: cleared.length, stamped: stampedRows.length, followups, assigned, staleDepartments, recovered, noResponderAlerts, unowned };
+}
+
+/**
+ * WATCHDOG: hội thoại còn `HANDOFF` với lý do nhường TỰ HẾT HẠN (nhân viên trả lời tay trên fanpage / Zalo · AI hỏng) mà mốc đã qua ⇒
+ * mở lại qua `holdGate` (ghi có điều kiện + `ai.resumed` COOLDOWN_EXPIRED của MÁY). Chỉ những dòng `aiHoldOf` nói AI_ACTIVE kèm
+ * `expired` — tiếp quản / chuyển người bắt buộc không bao giờ lọt vào. Lượt quét `resumeFanpageAfterPause` (job follow-up) sau đó
+ * đánh giá lại lượt khách còn tươi. Trả số hội thoại đã mở lại. Không ném ra ngoài lượt quét.
+ *
+ * MỞ LẠI CHỈ ĐỔI TRẠNG THÁI GIỮ (đo 12/10/2026: HSLC 535 + qa 744 hội thoại «nhường đã hết» chờ mở): KHÔNG gọi AI, KHÔNG gửi, KHÔNG đụng
+ * tin khách cũ. Tin đã chốt lúc nhường chỉ được trả lời bởi đường hiện có — `resumeFanpageAfterPause` (lượt khách mới nhất còn trong
+ * `RESUME_MAX_TURN_AGE_MS` = 2 giờ, < cửa sổ nhắn tin 24 giờ của Meta, tối đa 20 hội thoại / lượt) và lượt thử lại DEAD «AI hỏng» (≤ 30 phút)
+ * — nên tin khách 3 ngày trước không bao giờ được gửi bù. Trần `WATCHDOG_MAX_PER_SWEEP` mỗi lượt quét (ưu tiên khách nhắn gần nhất) để
+ * không dồn lượt ghi / lượt AI cùng lúc; phần còn lại mở ở các lượt quét sau.
+ */
+export const WATCHDOG_MAX_PER_SWEEP = 100;
+export async function recoverExpiredHolds(now: Date, max: number = WATCHDOG_MAX_PER_SWEEP): Promise<number> {
+  const db = await getDb();
+  const rows = await db
+    .select({
+      id: C.id,
+      status: C.status,
+      handoffReason: C.handoffReason,
+      state: C.state,
+      updatedAt: C.updatedAt,
+      humanCooldownUntil: C.humanCooldownUntil,
+      // Tin khách bị chốt «AI hỏng» (DEAD) sau câu trả lời cuối của bot / nhân viên — chưa ai trả lời (review #821 F5).
+      // Cột của hội thoại viết TƯỜNG MINH `"sales_chat_conversations"."…"`: drizzle in cột trần trong câu con tương quan thành `"page_id"`
+      // — tự so với chính bảng con (bài học «câu con tương quan với id trần»).
+      deadUnanswered: sql<boolean>`exists (select 1 from "sales_chat_inbound" i where i.page_id = "sales_chat_conversations"."page_id" and i.thread_id = "sales_chat_conversations"."thread_id"
+        and i.status = 'DEAD' and i.note = ${DEAD_AI_DOWN_NOTE}
+        and i.created_at > coalesce(greatest("sales_chat_conversations"."last_bot_at", "sales_chat_conversations"."last_staff_at"), 'epoch'::timestamptz))`,
+    })
+    .from(C)
+    .where(and(eq(C.status, "HANDOFF"), sql`${C.channel} <> 'TEST'`, inArray(C.handoffReason, [...STAFF_COOLDOWN_REASON_LIST, AI_DOWN_HANDOFF_REASON])))
+    .orderBy(sql`${C.lastCustomerAt} desc nulls last`)
+    .limit(2000);
+  const { holdGate } = await import("@/lib/sales-chatbot/conversation-control");
+  let n = 0;
+  for (const r of rows) {
+    if (n >= max) break;
+    const hold = aiHoldOf(r, now);
+    if (hold.state !== "AI_ACTIVE" || !hold.expired) continue;
+    // AI hỏng đã hết khoảng thử lại NHƯNG còn tin khách bị chốt lúc AI hỏng chưa ai trả lời ⇒ KHÔNG trả AI (AI không quay lại trả lời
+    // các tin đã chốt — khách sẽ bị bỏ rơi): đổi sang lý do CẦN NGƯỜI không tự hết hạn để hội thoại ở lại hàng đợi người.
+    if (hold.expired.cause === "AI_DOWN" && r.deadUnanswered) {
+      const moved = await db
+        .update(C)
+        .set({ handoffReason: AI_DOWN_UNANSWERED_REASON, state: sql`coalesce(${C.state}, '{}'::jsonb) || ${JSON.stringify({ handoff: { reason: AI_DOWN_UNANSWERED_REASON, at: now.toISOString() } })}::jsonb` })
+        .where(and(eq(C.id, r.id), eq(C.status, "HANDOFF"), eq(C.handoffReason, AI_DOWN_HANDOFF_REASON)))
+        .returning({ id: C.id });
+      // Vết của MÁY (luật 34–36: actor NULL): AI hỏng hết hạn ⇒ chuyển hàng đợi người vì còn tin khách chưa trả lời.
+      if (moved.length) {
+        const { recordConversationEvent } = await import("@/lib/sales-chatbot/events");
+        await recordConversationEvent(r.id, { type: "handoff.requested", actorKind: "SYSTEM", actorUserId: null, occurredAt: now, reasonCode: "AI_DOWN", payload: { reason: AI_DOWN_UNANSWERED_REASON, via: "WATCHDOG", unanswered: true }, key: `ai-down-unanswered:${r.id}:${hold.expired.at.toISOString()}` });
+      }
+      continue;
+    }
+    if ((await holdGate(r, now).catch(() => ({ skip: "lỗi" }))) === null) n += 1;
+  }
+  return n;
 }

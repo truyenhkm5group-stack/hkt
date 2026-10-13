@@ -63,6 +63,7 @@ import { DEFAULT_SALES_CHATBOT_CONFIG, SALES_BOT_ERROR_LABEL, SALES_CHATBOT_SETT
 import { getSettingJson, setSettingJson } from "@/lib/settings";
 import { notifySalesChatHandoff } from "@/lib/sales-chatbot/alerts";
 import { handoffEpisodeKey } from "@/lib/sales-chatbot/handoff-routing-shared";
+import { CLAIM_HANDOFF_REASON, CLAIM_SAFE_TEXT } from "@/lib/sales-chatbot/claim-guard";
 import { AI_DOWN_HANDOFF_REASON, isModelUnavailableError, loadSalesChatbotConfig, withModelFallback, chatTurn, conversationView, customerFacingText, customerNamePrompt, plainForMessenger, historyForModel, listConversations, messageTimeTag, nowPromptLine, openConversation, recentShopTexts, resumeConversationToAi, setSalesChatProviderForTests, systemPrompt, visitorKeyOf } from "@/lib/sales-chatbot/engine";
 import { saveSalesChatbotConfig } from "@/lib/sales-chatbot/settings";
 import { reorderDigestText, sendReorderDigest, type DigestRow } from "@/lib/reorder/digest";
@@ -2167,15 +2168,63 @@ async function testJourney() {
       assert.match((await catchUpFanpage({ fetch: cuFetch.fetch })).detail[0] ?? "", /đang lùi/);
       assert.equal(cuFetch.calls.length, pollCallsBefore, "đang lùi ⇒ không gọi Pancake");
       await savePollState({ ...EMPTY_POLL_STATE, pageId: PAGE });
-      // SAU KHI CHỐT ĐƠN (03/10/2026 · «Đỗ Là»: bot hứa đổi lịch / đổi địa chỉ của đơn đã chốt). Trong 3 ngày ⇒ nhân viên xử lý,
-      // bot không trả lời; quá 3 ngày ⇒ lượt mua MỚI, đơn cũ sang pastOrders (báo cáo vẫn đếm).
+      // SAU KHI CHỐT ĐƠN — HOTFIX P0 12/10/2026 (ca HSLC «Khanh Nhung») THAY luật 03/10 («Đỗ Là»): máy chủ KHÔNG còn chuyển người MẶC
+      // ĐỊNH mọi tin sau chốt. Nhưng sửa đơn chốt qua LỜI ĐỒNG Ý vẫn là việc của người, và do MÁY CHỦ ép (review #821 F1), không tuỳ model:
+      //  (a) model gọi update_draft_order đổi địa chỉ ⇒ công cụ trả «Đơn đã chốt» + requireHuman ⇒ HANDOFF «Sửa đơn đã chốt», bot KHÔNG nói
+      //      đã đổi (khung THỬ nhận câu chuyển người);
+      //  (b) model chỉ VIẾT «em đã đổi địa chỉ … rồi ạ» (không công cụ nào ghi) ⇒ hàng rào khẳng định ORDER_EDITED chặn câu, chuyển người.
+      // Quá 3 ngày ⇒ lượt mua MỚI, đơn cũ sang pastOrders.
       const po = await openConversation("TEST");
-      const poState = { customer: { id: null, name: "Đỗ Là", phone: "0963535065", address: "29 Thảo Điền", province: "", simulated: true }, confirmed: { orderId: null, simulated: true, total: 680_000, at: new Date(Date.now() - 3_600_000).toISOString() }, stage: "DONE" };
+      const poState = { customer: { id: null, name: "Đỗ Là", phone: "0963535065", address: "29 Thảo Điền", province: "", simulated: true }, confirmed: { orderId: null, simulated: true, total: 680_000, at: new Date(Date.now() - 3_600_000).toISOString() }, stage: "DONE", draft: { orderId: null, lines: [{ variantId: chaMuc, quantity: 1 }], unitPrices: { [chaMuc]: 340_000 }, recipient: { name: "Đỗ Là", phone: "0963535065", address: "29 Thảo Điền", province: "" }, note: "", simulated: true } };
       await db.update(schema.salesChatConversations).set({ state: poState }).where(eq(schema.salesChatConversations.id, po.id));
+      const poUse = (input: unknown): AiBlock => ({ type: "tool_use", id: `po-${Math.random().toString(36).slice(2)}`, name: "update_draft_order", input });
+      const poResp = (content: AiBlock[]) => ({ content, stopReason: content.some((b) => b.type === "tool_use") ? "tool_use" : "end_turn", usage: { inputTokens: 50, outputTokens: 5, cacheReadTokens: 0, cacheWriteTokens: 0 }, model: "claude-sonnet-5", latencyMs: 1 }) as AiResponse;
+      setSalesChatProviderForTests(() => ({
+        ...baseBot,
+        complete: async (req: AiRequest) => {
+          aiCalls.push(req);
+          const lastUser = [...req.messages].reverse().find((m) => m.role === "user" && m.content.every((b) => b.type === "text"));
+          const said = lastUser ? lastUser.content.map((b) => (b.type === "text" ? b.text : "")).join(" ") : "";
+          const toolTurn = req.messages[req.messages.length - 1]?.content.some((b) => b.type === "tool_result");
+          if (/cho chị đổi địa chỉ/.test(said)) return poResp(toolTurn ? [{ type: "text", text: "Dạ em đã đổi địa chỉ giao cho chị rồi ạ." }] : [poUse({ address: "12 Lê Lợi, Quận 1" })]);
+          if (/đổi giúp chị sang 12 Lê Lợi/.test(said)) return poResp([{ type: "text", text: "Dạ em đã đổi địa chỉ giao cho chị sang 12 Lê Lợi rồi ạ, em cập nhật ghi chú giao Chủ nhật cho chị rồi nha." }]);
+          // (c) vòng 3: model «lách» bằng create_customer (chỉ sửa HỒ SƠ khách, không đụng đơn) rồi nói đã cập nhật.
+          if (/địa chỉ mới là 12 Lê Lợi/.test(said)) return poResp(toolTurn ? [{ type: "text", text: "Dạ em cập nhật địa chỉ mới cho chị rồi ạ." }] : [{ type: "tool_use", id: `po-cc-${Math.random().toString(36).slice(2)}`, name: "create_customer", input: { name: "Đỗ Là", phone: "0963535065", address: "12 Lê Lợi, Quận 1" } }]);
+          if (/câu trả lời mẫu/.test(req.system)) return poResp([{ type: "text", text: "Q1" }]);
+          return baseBot.complete(req);
+        },
+      }));
+      const lastBot = async () => {
+        const v = await conversationView(po.id);
+        const bot = (v?.messages ?? []).filter((m) => m.role === "assistant");
+        return bot[bot.length - 1]?.text ?? "";
+      };
       const aiBefore = aiCalls.length;
       const poTurn = await chatTurn(po.id, "chủ nhật giao được không, cho chị đổi địa chỉ", { channel: "TEST" });
       const poConv = (await db.select().from(schema.salesChatConversations).where(eq(schema.salesChatConversations.id, po.id)))[0];
-      assert.ok(poTurn.ok && poConv.status === "HANDOFF" && /sau khi đã chốt đơn/.test(poConv.handoffReason ?? "") && aiCalls.length === aiBefore, `nhắn sau khi chốt ⇒ nhân viên, không gọi AI: ${JSON.stringify(poConv.handoffReason)}`);
+      assert.ok(poTurn.ok && aiCalls.length > aiBefore, "nhắn sau khi chốt ⇒ AI được hỏi (không còn chuyển người mặc định trước lượt AI)");
+      assert.ok(!/sau khi đã chốt đơn/.test(poConv.handoffReason ?? ""), "không còn lý do chuyển người mặc định của luật cũ");
+      assert.equal(poConv.status, "HANDOFF", "sửa đơn chốt qua lời đồng ý ⇒ máy chủ chuyển người");
+      assert.match(poConv.handoffReason ?? "", /Sửa đơn đã chốt/, `lý do chuyển người là sửa đơn: ${poConv.handoffReason}`);
+      const said1 = await lastBot();
+      assert.doesNotMatch(said1, /đã đổi/, `bot KHÔNG nói đã đổi địa chỉ: «${said1}»`);
+      // (b) trả lại AI, khách nhắn tiếp — model chỉ VIẾT câu «đã đổi …» không gọi công cụ ⇒ hàng rào chặn câu + chuyển người.
+      await db.update(schema.salesChatConversations).set({ status: "OPEN", handoffReason: null, state: poState }).where(eq(schema.salesChatConversations.id, po.id));
+      await chatTurn(po.id, "vậy đổi giúp chị sang 12 Lê Lợi nhé", { channel: "TEST" });
+      const poConv2 = (await db.select().from(schema.salesChatConversations).where(eq(schema.salesChatConversations.id, po.id)))[0];
+      const said2 = await lastBot();
+      assert.equal(poConv2.status, "HANDOFF", "câu khẳng định đã sửa đơn không căn cứ ⇒ chuyển người");
+      assert.equal(poConv2.handoffReason, CLAIM_HANDOFF_REASON.ORDER_EDITED);
+      assert.equal(said2, CLAIM_SAFE_TEXT.ORDER_EDIT, `khung THỬ nhận câu an toàn, không phải câu «đã đổi»: «${said2}»`);
+      // (c) create_customer trên đơn chốt qua lời đồng ý ⇒ máy chủ chuyển người «Sửa đơn đã chốt», câu «đã cập nhật» KHÔNG tới khách (review #821 vòng 3).
+      await db.update(schema.salesChatConversations).set({ status: "OPEN", handoffReason: null, state: poState }).where(eq(schema.salesChatConversations.id, po.id));
+      await chatTurn(po.id, "địa chỉ mới là 12 Lê Lợi nhé em", { channel: "TEST" });
+      const poConv3 = (await db.select().from(schema.salesChatConversations).where(eq(schema.salesChatConversations.id, po.id)))[0];
+      const said3 = await lastBot();
+      assert.equal(poConv3.status, "HANDOFF", "đổi địa chỉ qua create_customer trên đơn đã chốt ⇒ chuyển người");
+      assert.match(poConv3.handoffReason ?? "", /Sửa đơn đã chốt/, `lý do: ${poConv3.handoffReason}`);
+      assert.doesNotMatch(said3, /cập nhật|đã đổi/, `bot KHÔNG nói đã cập nhật: «${said3}»`);
+      assert.equal((poConv3.state as ChatState).customer?.address, "29 Thảo Điền", "hồ sơ khách không bị sửa lặng (đơn vẫn địa chỉ cũ — người xử lý)");
       await db.update(schema.salesChatConversations).set({ status: "OPEN", handoffReason: null, state: { ...poState, confirmed: { ...poState.confirmed, at: new Date(Date.now() - 4 * 86_400_000).toISOString() } } }).where(eq(schema.salesChatConversations.id, po.id));
       await chatTurn(po.id, "cho chị thêm 1kg chả cá nữa", { channel: "TEST" });
       const poAfter = (await db.select().from(schema.salesChatConversations).where(eq(schema.salesChatConversations.id, po.id)))[0];

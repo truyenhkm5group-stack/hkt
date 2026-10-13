@@ -389,7 +389,9 @@ export const ORDER_GOLDEN_CASES: readonly OrderGoldenCase[] = [
     turns: [
       infoTurn(`lấy chị 1 hộp chả cá 500g, Nhung 0924000414, ${DN_HAI_CHAU}`, { name: "Nhung", phone: "0924000414", address: DN_HAI_CHAU }, [["CHA-CA-500", 1]]),
       consentTurn("ok giao cho chị nhé"),
-      silentTurn("em ơi gửi thêm chị 1 hũ ruốc chung với đơn vừa rồi nhé"),
+      // HOTFIX 12/10/2026: máy chủ không còn chuyển người MẶC ĐỊNH sau chốt — model (theo `confirmedOrderPrompt`: đơn chốt qua lời đồng ý
+      // ⇒ sửa đơn là việc của nhân viên) gọi handoff_to_human; fanpage ⇒ bot im. Kết quả không đổi: không đẻ đơn mới, nhân viên xử lý.
+      { say: "em ơi gửi thêm chị 1 hũ ruốc chung với đơn vừa rồi nhé", ai: [() => [tool("handoff_to_human", { reason: "Sửa đơn — khách muốn gửi thêm 1 hũ ruốc chung đơn vừa chốt" })]] },
     ],
     label: withOrder(order([ln("CHA-CA-500", 1)], "0924000414", addr("Đà Nẵng", "Hải Châu", "88 đường Ví Dụ"), 210_000), agreed("Khách «ok giao cho chị nhé» sau tóm tắt; lời nhắn thêm vào đơn cũ là việc của nhân viên (không phải đơn mới)")),
   },
@@ -403,7 +405,9 @@ export const ORDER_GOLDEN_CASES: readonly OrderGoldenCase[] = [
       infoTurn(`lấy chị 1kg chả cá thu, Vân 0925000515, ${HCM_BEN_THANH}`, { name: "Vân", phone: "0925000515", address: HCM_BEN_THANH }, [["CHA-CA-1KG", 1]]),
       infoTurn(`lấy chị 1kg chả cá thu, Vân 0925000515, ${HCM_BEN_THANH}`, { name: "Vân", phone: "0925000515", address: HCM_BEN_THANH }, [["CHA-CA-1KG", 1]]),
       consentTurn("ok chốt em"),
-      silentTurn("ok chốt em"),
+      // HOTFIX 12/10/2026: lời chốt lặp SAU khi đơn đã chốt không còn rơi vào «chuyển người mặc định» — AI được hỏi; model gọi lại
+      // confirm_order thì máy chủ trả «đã chốt từ trước» (không đơn thứ hai — chống tạo trùng đơn ở MÁY CHỦ, không nhờ lời nhắc).
+      { say: "ok chốt em", ai: [() => [tool("confirm_order", { customer_confirmation: "ok chốt em" })], () => [say("Dạ đơn của mình em lên rồi ạ.")]] },
     ],
     label: withOrder(order([ln("CHA-CA-1KG", 1)], "0925000515", addr("Hồ Chí Minh", "Bến Thành", "12 đường Giả Định"), 370_000), agreed("Khách «ok chốt em» sau tóm tắt — bản lặp không phải lần mua thứ hai")),
   },

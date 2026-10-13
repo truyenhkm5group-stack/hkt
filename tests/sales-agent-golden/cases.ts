@@ -99,6 +99,26 @@ export const GOLDEN_CASES: readonly GoldenCase[] = [
     ],
   },
   {
+    key: "hau-mai-da-nhan-hang",
+    title: "Vòng đời tư vấn → chốt → hậu mãi (HOTFIX 12/10/2026, ca «Khanh Nhung»): khách nhắn sau khi chốt ⇒ AI VẪN trả lời (không chuyển người mặc định), «nhận hàng rồi» ⇒ cảm ơn + hỏi thăm, không chốt lại / không lên đơn mới; khiếu nại hoàn tiền ⇒ MÁY CHỦ chuyển người (không lượt AI)",
+    shop: "food",
+    channel: "WEB",
+    turns: [
+      {
+        say: "lay 1 goi ruoc tom, Lê Thị Hoa 0977000111, 8 Trần Phú Đà Nẵng",
+        ai: [
+          () => [tool("create_customer", { name: "Lê Thị Hoa", phone: "0977000111", address: "8 Trần Phú, Đà Nẵng" })],
+          ({ v }) => [tool("create_draft_order", { items: [{ variant_id: v("RUOC-TOM"), quantity: 1 }] })],
+          reply((r) => `Đơn tạm tính ${String(r.cod_total_text)}, chị xác nhận giúp em nhé.`),
+        ],
+      },
+      { say: "ok chốt đơn", ai: [() => [tool("confirm_order", { customer_confirmation: "ok chốt đơn" })], reply(() => "Dạ em lên đơn cho chị rồi ạ.")] },
+      { say: "Tôi nhận hàng rồi nhưng chưa thử chất lượng", ai: [() => [say("Dạ em cảm ơn chị đã nhận hàng ạ. Chị dùng thử thấy thế nào nhắn em nhé!")]] },
+      // Khiếu nại có đơn ⇒ MÁY CHỦ chuyển người trước lượt AI (review #821 F2) — model không được hỏi, không thể hứa hoàn tiền.
+      { say: "goi ruoc bi moc roi, minh muon tra hang hoan tien", ai: [] },
+    ],
+  },
+  {
     key: "chot-khi-chua-dong-y",
     title: "Model tự chốt khi câu cuối của khách KHÔNG phải lời đồng ý ⇒ máy chủ từ chối, đơn vẫn nháp",
     shop: "food",
