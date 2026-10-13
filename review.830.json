@@ -1,0 +1,8 @@
+{
+  "pr": 830,
+  "sha": "b5296e6d9f231a21955a5295ab9be9821b8593d7",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-13T10:52:41.419Z",
+  "note": "Chỉ nâng timeout-minutes hai job kiểm thử 35→45"
+}
