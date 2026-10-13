@@ -23,19 +23,18 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-13T04:57:18.596Z",
-  "updated_at": "2026-10-13T04:59:15.847Z",
-  "last_heartbeat": "2026-10-13T04:58:27.600Z",
+  "updated_at": "2026-10-13T08:45:25.670Z",
+  "last_heartbeat": "2026-10-13T08:45:25.670Z",
   "definition_of_done": [],
   "handoff": {
     "branch": "fix/inbox-list-perf",
-    "sha": "f4feed095d2e2ca156118f2ac6160bb308c0d5e7",
-    "at": "2026-10-13T04:58:27.600Z",
-    "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+    "sha": "1027a21d941886bf0576232b2e2b871d649d42f3",
+    "at": "2026-10-13T08:45:25.670Z",
+    "actor": "DESKTOP-56TH98Y:wt-inbox-list-perf",
     "title": "P0 hộp thư: listInbox tính «chưa đọc» một lần (CHEAP_FIRST), bỏ router.refresh khi chuyển hội thoại, tự làm mới không chồng lượt, thử lại 20 s",
-    "summary": "P0 hộp thư HSLC 13–29 s",
+    "summary": "Sửa CI hết giờ #827: npm test dùng fixture 1.000 hội thoại (giữ nguyên khẳng định CHEAP_FIRST≡CANONICAL≡0245, trực tiếp≡lưu sẵn); lượt đo 5.000 tách ra npm run perf:inbox. SHA 1027a21d",
     "tests": [
-      "tsc·eslint·build: sạch",
-      "npm test: TẤT CẢ KIỂM THỬ ĐẠT"
+      "tests/inbox-list-perf.test.ts 78 s → 18 s (1.000 hội thoại; 5.000 qua npm run perf:inbox) · test-hygiene · repo-integrity · tsc · eslint · npm test đủ TẤT CẢ KIỂM THỬ ĐẠT"
     ]
   }
 }
