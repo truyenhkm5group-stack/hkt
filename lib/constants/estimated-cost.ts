@@ -309,6 +309,33 @@ export function plannedCostImpact(row: PlannedCostImpactInput, newUnit: number |
 }
 
 /**
+ * Phép chọn ĐÍCH của bản xem trước cho MỘT mã — hàm THUẦN (dùng ở `previewPlannedCostImpact`).
+ *
+ *  · Giá đích = dòng hiệu lực vào `at` của lịch sử SAU khi thêm; không đổi so với trước ⇒ Δ 0.
+ *  · Đích là "bỏ giá" ⇒ giá thật; chỉ biết chắc khi mã KHÔNG còn sản phẩm chưa có giá thật, vì chỗ
+ *    trống sẽ được lấp bằng giá tham chiếu mà bản xem trước không tính lại ⇒ Δ `null`.
+ */
+export function previewImpactForItem(input: {
+  productId: string;
+  before: readonly PlannedCostEntry[];
+  after: readonly PlannedCostEntry[];
+  at: Date;
+  planned: { expectedQty: number; expectedCogs: number; cogsKnown: boolean } | null;
+  actual: { expectedCogs: number; cogsKnown: boolean; cogsUnknownQty: number } | null;
+  inventoryRiskPercent: number;
+}): PlannedCostImpact {
+  const giaTruoc = activePlannedEntry(input.before, input.at)?.unitCost ?? null;
+  const giaSau = activePlannedEntry(input.after, input.at)?.unitCost ?? null;
+  const a = input.planned;
+  const b = input.actual;
+  return plannedCostImpact(
+    { productId: input.productId, expectedQty: a?.expectedQty ?? 0, currentCogs: a?.expectedCogs ?? 0, currentKnown: a ? a.cogsKnown : true, actualCogs: b?.expectedCogs ?? 0, actualKnown: b ? b.cogsUnknownQty === 0 && b.cogsKnown : true },
+    giaSau,
+    { inventoryRiskPercent: input.inventoryRiskPercent, applies: giaSau !== giaTruoc },
+  );
+}
+
+/**
  * ═══════════ TRẦN CPQC — CHI BAO NHIÊU QUẢNG CÁO THÌ MÃ CÒN ĐẠT BIÊN MUỐN CÓ ═══════════
  *
  * Mọi khoản trong lợi nhuận danh nghĩa của một mã KHÔNG phụ thuộc quảng cáo, trừ hai: chính CPQC và

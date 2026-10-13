@@ -1452,8 +1452,8 @@ export async function getNominalProfitReport(
 }
 
 /**
- * Giá vốn dự tính theo `productId`: giá báo MKT hiệu lực vào `at` nếu mã đã khai (luật 5 ở
- * `lib/constants/estimated-cost.ts`), không thì con số đặt tay. Dòng hỏng bị bỏ, không thành 0 ₫.
+ * Giá vốn kế hoạch / tham chiếu theo `productId` vào `at` (luật 5' ở `lib/constants/estimated-cost.ts`):
+ * giá kế hoạch đang hiệu lực nếu đã đặt, chưa đặt thì tham chiếu giá báo MKT. Dòng hỏng bị bỏ, không thành 0 ₫.
  */
 export async function getEstimatedCosts(at: Date = new Date()): Promise<EstimatedCostMap> {
   const [manual, prices] = await Promise.all([getSettingJson<Record<string, unknown>>(ESTIMATED_COST_KEY, {}), marketerPriceEntriesByProduct()]);

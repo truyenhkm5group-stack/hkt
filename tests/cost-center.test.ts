@@ -13,6 +13,7 @@ import {
   parseEstimatedCosts,
   parsePlannedCostHistory,
   plannedCostImpact,
+  previewImpactForItem,
   serializePlannedEntry,
   vnDateKey,
   type PlannedCostEntry,
@@ -81,6 +82,18 @@ function testPure() {
   assert.equal(imp.deltaNetProfit, 105_000);
   assert.equal(plannedCostImpact({ productId: "x", expectedQty: 10, currentCogs: 1_600_000, currentKnown: true, actualCogs: 0, actualKnown: false }, null, { inventoryRiskPercent: 5, applies: true }).deltaCogs, null, "bỏ giá mà mã chưa có giá thật ⇒ CHƯA BIẾT, không phải 0");
   assert.equal(plannedCostImpact({ productId: "x", expectedQty: 10, currentCogs: 1_600_000, currentKnown: true, actualCogs: 0, actualKnown: true }, 150_000, { inventoryRiskPercent: 5, applies: false }).deltaCogs, 0, "hiệu lực sau cuối kỳ ⇒ kỳ đó không đổi");
+
+  // Phép chọn đích của bản xem trước (hàm thuần dùng ở action).
+  const at = new Date("2026-10-31T12:00:00+07:00");
+  const dangAp = [e(150_000, "2026-10-20", "2026-10-20T00:00:00Z")];
+  const kh = { expectedQty: 10, expectedCogs: 1_500_000, cogsKnown: true };
+  const som = previewImpactForItem({ productId: "x", before: dangAp, after: [...dangAp, e(120_000, "2026-10-10", "2026-10-21T00:00:00Z")], at, planned: kh, actual: { expectedCogs: 1_850_000, cogsKnown: true, cogsUnknownQty: 0 }, inventoryRiskPercent: 0 });
+  assert.equal(som.applies, false, "dòng hiệu lực SỚM hơn dòng đang áp ⇒ BCLN không đổi ⇒ xem trước Δ 0");
+  assert.equal(som.deltaCogs, 0);
+  const boThieu = previewImpactForItem({ productId: "x", before: dangAp, after: [...dangAp, e(null, null, "2026-10-22T00:00:00Z"), e(null, "2026-10-25", "2026-10-22T00:00:01Z")], at, planned: kh, actual: { expectedCogs: 600_000, cogsKnown: true, cogsUnknownQty: 4 }, inventoryRiskPercent: 0 });
+  assert.equal(boThieu.deltaCogs, null, "bỏ giá ở mã còn sản phẩm chưa có giá thật ⇒ Δ CHƯA BIẾT");
+  const boDu = previewImpactForItem({ productId: "x", before: dangAp, after: [...dangAp, e(null, "2026-10-25", "2026-10-22T00:00:00Z")], at, planned: kh, actual: { expectedCogs: 1_850_000, cogsKnown: true, cogsUnknownQty: 0 }, inventoryRiskPercent: 0 });
+  assert.equal(boDu.deltaCogs, 350_000, "bỏ giá ở mã đủ giá thật ⇒ đích = giá thật");
 
   assert.equal(parseCostMode("kehoach"), "PLANNED");
   assert.equal(parseCostMode(""), "ACTUAL", "mặc định THỰC TẾ — mở trang không con số nào xê dịch");

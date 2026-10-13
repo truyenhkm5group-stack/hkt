@@ -11,7 +11,7 @@ import {
   ESTIMATED_COST_KEY,
   ESTIMATED_UNIT_COST_MAX,
   parsePlannedCostHistory,
-  plannedCostImpact,
+  previewImpactForItem,
   type PlannedCostEntry,
   type PlannedCostImpact,
 } from "@/lib/constants/estimated-cost";
@@ -95,16 +95,19 @@ export async function setPlannedCosts(input: unknown): Promise<{ ok: true; saved
   const before = await db.transaction(async (tx) => {
     await tx.insert(schema.settings).values({ key: ESTIMATED_COST_KEY, value: "{}" }).onConflictDoNothing();
     const [row] = await tx.select({ value: schema.settings.value }).from(schema.settings).where(eq(schema.settings.key, ESTIMATED_COST_KEY)).for("update");
-    let raw: unknown = {};
+    // Bản lưu hỏng / sai dáng ⇒ KHÔNG ghi: lùi về `{}` rồi ghi là xoá toàn bộ lịch sử (luật 6).
+    let raw: unknown;
     try {
       raw = JSON.parse(String(row?.value ?? "{}"));
     } catch {
-      raw = {};
+      return null;
     }
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
     const next = appendPlannedCosts(raw, add);
     await tx.update(schema.settings).set({ value: JSON.stringify(next), updatedAt: new Date() }).where(eq(schema.settings.key, ESTIMATED_COST_KEY));
     return parsePlannedCostHistory(raw);
   });
+  if (before === null) return { error: "Bản lưu giá kế hoạch đang hỏng — không ghi để khỏi mất lịch sử. Báo kỹ thuật kiểm khoá profit.estimatedCosts." };
   for (const it of items) {
     await audit({
       userId: user.id,
@@ -197,15 +200,15 @@ export async function previewPlannedCostImpact(input: unknown): Promise<PlannedC
     const a = kh.get(it.productId);
     const b = tt.get(it.productId);
     const qty = a?.expectedQty ?? 0;
-    const giaTruoc = activePlannedEntry(truoc[it.productId] ?? [], cuoiKy)?.unitCost ?? null;
-    const giaSau = activePlannedEntry(sau[it.productId] ?? [], cuoiKy)?.unitCost ?? null;
-    // Bỏ giá ⇒ đích là giá thật; chỉ biết chắc khi mã KHÔNG còn sản phẩm chưa có giá thật.
-    const dichThatBiet = b ? b.cogsUnknownQty === 0 && b.cogsKnown : true;
-    const imp = plannedCostImpact(
-      { productId: it.productId, expectedQty: qty, currentCogs: a?.expectedCogs ?? 0, currentKnown: a ? a.cogsKnown : true, actualCogs: b?.expectedCogs ?? 0, actualKnown: dichThatBiet },
-      giaSau,
-      { inventoryRiskPercent: riskPct, applies: giaSau !== giaTruoc },
-    );
+    const imp = previewImpactForItem({
+      productId: it.productId,
+      before: truoc[it.productId] ?? [],
+      after: sau[it.productId] ?? [],
+      at: cuoiKy,
+      planned: a ? { expectedQty: a.expectedQty, expectedCogs: a.expectedCogs, cogsKnown: a.cogsKnown } : null,
+      actual: b ? { expectedCogs: b.expectedCogs, cogsKnown: b.cogsKnown, cogsUnknownQty: b.cogsUnknownQty } : null,
+      inventoryRiskPercent: riskPct,
+    });
     totalN = totalN === null || imp.deltaNominalProfit === null ? null : totalN + imp.deltaNominalProfit;
     totalR = totalR === null || imp.deltaNetProfit === null ? null : totalR + imp.deltaNetProfit;
     const currentUnit = a && a.expectedQty > 0 && a.cogsKnown ? Math.round(a.expectedCogs / a.expectedQty) : (a?.plannedCost?.unitCost ?? null);

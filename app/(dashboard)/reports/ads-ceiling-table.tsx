@@ -190,7 +190,7 @@ export function AdsCeilingTable({
                             ? "giá nhập thật · chưa đặt kế hoạch"
                             : "giá nhập thật"}
                     </div>
-                    {coCho && !r.plannedCost ? <div className="text-[10.5px] font-medium text-amber-700 dark:text-amber-300">cần giá kế hoạch — bấm bút để đặt</div> : null}
+                    {coCho && !r.plannedCost ? <div className="text-[10.5px] font-medium text-amber-700 dark:text-amber-300">{canWrite ? "cần giá kế hoạch — bấm bút để đặt" : "cần giá kế hoạch (Trung tâm giá vốn)"}</div> : null}
                     {r.plannedCost && r.costBasis !== "PLANNED" ? (
                       <div className="text-[10.5px] text-muted-foreground" title={r.plannedCost.reason}>
                         kế hoạch {formatVND(r.plannedCost.unitCost, { compact: true })}/sp · <Link href="/inventory/cost-center" className="underline">Trung tâm giá vốn</Link>
