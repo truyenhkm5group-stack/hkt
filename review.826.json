@@ -1,0 +1,8 @@
+{
+  "pr": 826,
+  "sha": "73449b810f3d6517830e254bb840fca245fd5ae9",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-13T04:59:39.621Z",
+  "note": "Chỉ script đo CHỈ ĐỌC + test + mô tả ops: top-N câu chậm theo khối, chẩn đoán đường chưa đọc, EXPLAIN không ANALYZE; công khai chỉ cấu trúc"
+}

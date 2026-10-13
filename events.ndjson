@@ -2303,3 +2303,4 @@
 {"at":"2026-10-13T04:58:10.198Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"inbox-perf-probe-topn","detail":"#826 cho fix/inbox-perf-probe-topn @ 73449b810f3d"}
 {"at":"2026-10-13T04:58:27.632Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"inbox-list-perf","detail":"fix/inbox-list-perf @ f4feed095d2e · 2 lệnh kiểm thử"}
 {"at":"2026-10-13T04:59:15.877Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"inbox-list-perf","detail":"#827 cho fix/inbox-list-perf @ f4feed095d2e"}
+{"at":"2026-10-13T04:59:52.560Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#826 @ 73449b810f3d · Chỉ script đo CHỈ ĐỌC + test + mô tả ops: top-N câu chậm theo khối, chẩn đoán đường chưa đọc, EXPLAIN không ANALYZE; công khai chỉ cấu trúc"}
