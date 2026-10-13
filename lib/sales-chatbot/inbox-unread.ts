@@ -110,6 +110,9 @@ export async function inboxUnreadMaterialized(): Promise<boolean> {
   });
 }
 
+/** Hai cột lưu sẵn 0245 — câu nào tự liệt kê cột hội thoại (bảng dẫn xuất của listInbox) thêm chúng CHỈ khi `materialized` (đã kiểm có cột). */
+export const INBOX_UNREAD_COLUMNS = ["turn_unhandled", "last_read_at"] as const;
+
 /** MỘT chỗ đọc công tắc: bộ biểu thức «chưa đọc» cho lượt tải hộp thư / xác nhận đọc. */
 export async function loadInboxUnreadSql(): Promise<InboxUnreadSql> {
   return inboxUnreadSqlFor(await inboxUnreadMaterialized());
