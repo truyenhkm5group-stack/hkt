@@ -139,6 +139,7 @@ export function CostCenterTable({ rows, canWrite, period }: { rows: CostCenterRo
                     ) : (
                       <Tien v={r.planned?.unitCost ?? null} />
                     )}
+                    {sua[r.productId] && ["0", "-"].includes(sua[r.productId].trim()) ? <div className="mt-0.5 text-[10.5px] font-medium text-rose-600">sẽ BỎ giá kế hoạch</div> : null}
                     <div className="mt-0.5 text-[10.5px] text-muted-foreground">
                       {r.planned ? `${formatVND(r.planned.unitCost ?? 0)} · từ ${ngayVN(r.planned.effectiveFrom)} · ${r.planned.setBy ?? "—"}` : "chưa đặt"}
                     </div>

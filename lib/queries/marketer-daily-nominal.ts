@@ -572,7 +572,12 @@ async function slicesUncached(period: Period, basis: TimeBasis, withStock: boole
     const pos = slots.map((s) => s.pos);
     const cnt = slots.map((s) => s.frac);
     const rev = slots.map((s) => s.revKey);
-    const cogsK = slots.map((s) => s.cogsKey);
+    /*
+      CHẾ ĐỘ KẾ HOẠCH: giá vốn của mã = SL × MỘT đơn giá kế hoạch ⇒ chia theo SỐ LƯỢNG giao được, không
+      theo giá vốn THẬT của dòng (dòng chưa có giá thật sẽ nhận 0 giá vốn kế hoạch và trông lãi trọn).
+    */
+    const theoKeHoach = row.costBasis === "PLANNED";
+    const cogsK = slots.map((s) => (theoKeHoach ? s.qtyKey : s.cogsKey));
     const expRev = chiaTheoCanCu(row.expectedRevenue, rev, pos, cnt);
     const expCogs = chiaTheoCanCu(row.expectedCogs, cogsK, rev, cnt);
     /*
@@ -594,7 +599,8 @@ async function slicesUncached(period: Period, basis: TimeBasis, withStock: boole
       giá báo cao hơn vừa có giá xả tồn thấp hơn giá vốn thì phần chênh RÒNG đi theo các dòng cùng chiều.
     */
     const chieu = row.marketerCostDelta < 0 ? -1 : 1;
-    const mktAdj = chiaTheoCanCu(row.marketerCostDelta, slots.map((s) => s.mktKey * chieu), cogsK, rev, cnt);
+    // Chế độ kế hoạch: chênh giá báo đo so với MỘT đơn giá kế hoạch ⇒ chia theo số lượng của các dòng CÓ giá báo.
+    const mktAdj = chiaTheoCanCu(row.marketerCostDelta, slots.map((s) => (theoKeHoach ? (s.mktKey !== 0 ? s.qtyKey : 0) : s.mktKey * chieu)), cogsK, rev, cnt);
 
     slots.forEach((s, i) => {
       const sc = cellOf(s.day, s.key, pid);
@@ -818,7 +824,9 @@ function costWarnings(nominal: NominalReport): string[] {
   const out: string[] = [];
   if (nominal.totals.expectedCogsEstimated > 0) {
     out.push(
-      `Giá vốn ước tính gồm ${nominal.totals.expectedCogsEstimated.toLocaleString("vi-VN")} ₫ giá vốn DỰ TÍNH (chủ shop đặt ở Báo cáo lợi nhuận) cho ${nominal.totals.estimatedCostProducts} mã chưa có giá nhập thật — cùng cách tab Lợi nhuận danh nghĩa tính. Lợi nhuận của MKTer chạy những mã ấy phụ thuộc con số đặt tay này; lập phiếu nhập có đơn giá thì giá thật tự thay chỗ.`,
+      nominal.costMode === "PLANNED"
+        ? `Đang xem theo GIÁ VỐN KẾ HOẠCH: giá vốn ước tính gồm ${nominal.totals.expectedCogsEstimated.toLocaleString("vi-VN")} ₫ theo giá kế hoạch / tạm tính của ${nominal.totals.estimatedCostProducts} mã (đặt ở Trung tâm giá vốn) — đây là lợi nhuận dự tính, không phải đã thực hiện.`
+        : `Giá vốn ước tính gồm ${nominal.totals.expectedCogsEstimated.toLocaleString("vi-VN")} ₫ giá vốn TẠM TÍNH (giá kế hoạch ở Trung tâm giá vốn, chưa đặt thì tham chiếu giá báo MKT) cho ${nominal.totals.estimatedCostProducts} mã chưa có giá nhập thật — cùng cách tab Lợi nhuận danh nghĩa tính. Lập phiếu nhập có đơn giá thì giá thật tự thay chỗ.`,
     );
   }
   if (nominal.totals.cogsUncoveredQty > 0) {

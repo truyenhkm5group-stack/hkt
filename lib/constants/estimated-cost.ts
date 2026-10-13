@@ -215,15 +215,19 @@ export function parseEstimatedCosts(raw: unknown, at: Date = new Date()): Estima
 }
 
 /**
- * Bản lưu mới sau khi THÊM các dòng (luật 6) — không bao giờ xoá dòng cũ. Mã đang ở dáng cũ được
- * chuyển sang dáng lịch sử với chính dòng cũ đứng đầu. Hàm THUẦN.
+ * Bản lưu mới sau khi THÊM các dòng (luật 6) — không bao giờ xoá dòng cũ, KỂ CẢ dòng đọc không hiểu
+ * (giữ nguyên văn: đọc hỏng hôm nay không được thành mất dữ liệu ngày mai). Mã ở dáng cũ được chuyển
+ * sang dáng lịch sử với chính dòng cũ đứng đầu. Hàm THUẦN.
  */
-export function appendPlannedCosts(raw: unknown, add: Record<string, PlannedCostEntry>): Record<string, { history: PlannedCostEntry[] }> {
-  const cu = parsePlannedCostHistory(raw);
-  const out: Record<string, { history: PlannedCostEntry[] }> = {};
-  for (const [pid, entries] of Object.entries(cu)) out[pid] = { history: entries };
-  for (const [pid, e] of Object.entries(add)) out[pid] = { history: [...(out[pid]?.history ?? []), e] };
-  return out;
+export function appendPlannedCosts(raw: unknown, add: Record<string, PlannedCostEntry>): Record<string, unknown> {
+  const goc: Record<string, unknown> = raw && typeof raw === "object" && !Array.isArray(raw) ? { ...(raw as Record<string, unknown>) } : {};
+  for (const [pid, e] of Object.entries(add)) {
+    const cu = goc[pid];
+    const lichSu: unknown[] =
+      cu && typeof cu === "object" && Array.isArray((cu as { history?: unknown }).history) ? [...(cu as { history: unknown[] }).history] : cu && typeof cu === "object" ? [cu] : [];
+    goc[pid] = { history: [...lichSu, serializePlannedEntry(e)] };
+  }
+  return goc;
 }
 
 /** Dạng lưu của một dòng: dòng bỏ giá mang `cleared: true`, không mang `unitCost`. */

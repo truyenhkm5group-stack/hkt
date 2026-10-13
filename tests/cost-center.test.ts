@@ -58,12 +58,13 @@ function testPure() {
   assert.deepEqual(parsePlannedCostHistory({ a: { history: [{ unitCost: 0 }, { unitCost: "x" }, { cleared: "yes" }] } }), {});
 
   // Ghi THÊM, không bao giờ xoá; mã dáng cũ chuyển sang dáng lịch sử với dòng cũ đứng đầu.
-  const sau = appendPlannedCosts({ a: { unitCost: 150_000, setAt: "2026-09-01T00:00:00Z" }, b: { history: [serializePlannedEntry(e(90_000, null, "2026-09-02T00:00:00Z"))] } }, { a: e(160_000, "2026-10-13", "2026-10-13T01:00:00Z"), c: e(null, null, "2026-10-13T01:00:00Z") });
-  assert.equal(sau.a.history.length, 2);
-  assert.equal(sau.a.history[0].unitCost, 150_000);
-  assert.equal(sau.b.history.length, 1, "mã không được sửa giữ nguyên lịch sử");
-  const luu = Object.fromEntries(Object.entries(sau).map(([k, v]) => [k, { history: v.history.map(serializePlannedEntry) }]));
-  const doc = parsePlannedCostHistory(JSON.parse(JSON.stringify(luu)));
+  const la = { la: "dòng đời sau, bản này chưa hiểu" };
+  const sau = appendPlannedCosts({ a: { unitCost: 150_000, setAt: "2026-09-01T00:00:00Z" }, b: { history: [serializePlannedEntry(e(90_000, null, "2026-09-02T00:00:00Z")), la] } }, { a: e(160_000, "2026-10-13", "2026-10-13T01:00:00Z"), b: e(95_000, null, "2026-10-13T01:00:00Z"), c: e(null, null, "2026-10-13T01:00:00Z") });
+  const doc = parsePlannedCostHistory(JSON.parse(JSON.stringify(sau)));
+  assert.equal(doc.a.length, 2);
+  assert.equal(doc.a[0].unitCost, 150_000, "dòng dáng cũ đứng đầu lịch sử");
+  assert.deepEqual((sau.b as { history: unknown[] }).history[1], la, "dòng đọc không hiểu được GIỮ NGUYÊN VĂN khi ghi thêm — không mất dữ liệu");
+  assert.equal(doc.b.length, 2);
   assert.equal(doc.c[0].unitCost, null, "dòng bỏ giá đi qua lưu / đọc vẫn là dòng bỏ giá");
 
   // LUẬT 5': giá kế hoạch THẮNG giá báo MKT; giá báo chỉ là tham chiếu lùi cho mã chưa đặt.
@@ -95,6 +96,8 @@ function testSourceScan() {
   const action = doc("lib/actions/estimated-cost.ts");
   assert.ok(action.includes("clearMemo()"), "lưu giá kế hoạch phải xoá bộ đệm báo cáo — người vừa lưu thấy NGAY con số mới");
   for (const p of ["/reports", "/inventory/cost-center"]) assert.ok(action.includes(`"${p}"`), `lưu giá kế hoạch phải làm mới ${p}`);
+  assert.ok(/\.for\("update"\)/.test(action), "đọc–sửa–ghi giá kế hoạch phải khoá dòng settings — hai người lưu cùng lúc không xoá lịch sử của nhau");
+  assert.ok(/can\(user, "reports:nominal"\)/.test(action) && /requireResource\("REPORTS"/.test(action), "xem trước tác động trả số lợi nhuận ⇒ đòi quyền XEM + phạm vi như màn hình");
   assert.ok(doc("app/(dashboard)/reports/estimated-cost-control.tsx").includes("setEstimatedCost"), "nút bút BCLN đi qua đúng action");
   const report = doc("lib/queries/profit-nominal.ts");
   assert.ok(/\$\{mode\}`, 120000/.test(report), "chế độ giá vốn phải nằm trong khoá cache (AGENTS.md §2)");

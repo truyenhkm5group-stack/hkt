@@ -27,6 +27,13 @@ Bộ đệm KHÔNG phải nguyên nhân: action đã `clearMemo()` + `revalidate
 
 Giá kế hoạch áp theo dòng hiệu lực vào **cuối kỳ** đang xem (kỳ "Toàn bộ" ⇒ hôm nay) — cùng mốc với giá báo cũ.
 
+**Chế độ THỰC TẾ mặc định có đổi số ở MỘT trường hợp hẹp** (đúng là lỗi được sửa, không phải tác dụng phụ):
+mã vừa có giá đặt tay cũ, vừa có giá báo MKT, VÀ còn sản phẩm chưa có giá thật. Trước: phần chưa có giá
+lấp bằng giá báo; nay lấp bằng giá đặt tay (luật 5'). Kéo theo `expectedCogs`, LN, dự phòng rủi ro, phần
+chênh giá báo của bảng MKT (`/reports`, `/ads/daily`, `/reports/target`) và số tiền giá dự tính ở cổng
+duyệt đặt xưởng của các mã ấy. Mã có giá thật đủ, hoặc chỉ có một trong hai giá, KHÔNG đổi. Số mã bị
+ảnh hưởng trên production phải đo bằng ops `db-query` (kết quả mã hoá, giải trên máy vận hành).
+
 ## 3. Nguồn giá vốn — trước / sau
 
 | Chỗ | Trước | Sau |
@@ -48,7 +55,11 @@ chế độ** trong kỳ chọn (đọc từ chính `getNominalProfitReport`, n�
 
 Sửa hàng loạt: gõ giá (0 = bỏ giá) → chọn ngày hiệu lực (trống = mọi kỳ) → lý do → **Xem trước tác động**
 (Δ giá vốn, Δ LN danh nghĩa, Δ LN ròng gồm dự phòng rủi ro tồn kho, theo kỳ chọn — `plannedCostImpact`) →
-nút Lưu chỉ mở khi bản xem trước khớp đúng các ô đang sửa. Nút "Điền giá báo MKT cho mã chưa có kế hoạch"
+nút Lưu chỉ mở khi bản xem trước khớp đúng các ô đang sửa. Xem trước dùng đúng dòng sẽ hiệu lực vào
+cuối kỳ của lịch sử SAU khi thêm (dòng có ngày hiệu lực sớm hơn dòng đang áp ⇒ Δ = 0); bỏ giá ở mã còn
+sản phẩm chưa có giá thật ⇒ Δ "chưa tính được" (đích phụ thuộc giá tham chiếu). Xem trước cần cả quyền
+xem (`reports:nominal` + phạm vi REPORTS) lẫn quyền sửa. Ghi trong một giao dịch khoá dòng `settings`:
+hai người lưu cùng lúc không xoá lịch sử của nhau; dòng lịch sử đọc không hiểu được giữ nguyên văn. Nút "Điền giá báo MKT cho mã chưa có kế hoạch"
 chỉ ĐIỀN ô, không lưu — biến giá báo thành giá kế hoạch là việc người bấm.
 
 Quyền: xem `reports:nominal`; sửa `reports:assumptions` (như ô cũ).

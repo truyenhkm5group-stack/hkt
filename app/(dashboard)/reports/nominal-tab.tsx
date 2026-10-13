@@ -674,7 +674,7 @@ export async function NominalTab({
                       <Money value={r.expectedRevenue} className="font-semibold" />
                     </OKep>
                     <OKep sub={<>{formatNumber(r.expectedQty)} sp · <span title={`Nguồn giá vốn: ${COST_BASIS_LABEL[r.costBasis]}`}>{COST_BASIS_LABEL[r.costBasis].toLowerCase()}</span>{r.costBasis === "PLANNED" ? <span title={`Toàn bộ giá vốn của mã tính theo GIÁ KẾ HOẠCH ${formatVND(r.estimatedCost?.unitCost ?? 0)}/sp (${r.estimatedCost?.setBy ?? "—"}) — sửa ở Trung tâm giá vốn hoặc nút bút ở bảng “Bàn dự tính” bên dưới`}> {formatVND(r.estimatedCost?.unitCost ?? 0, { compact: true })}/sp</span> : r.expectedCogsEstimated ? <span title={`${formatVND(r.expectedCogsEstimated)} trong ô này là giá vốn TẠM TÍNH ${formatVND(r.estimatedCost?.unitCost ?? 0)}/sp (${r.estimatedCost?.source === "MARKETER_PRICE" ? `tham chiếu giá báo MKT · ${r.estimatedCost.reason}` : `giá kế hoạch · ${r.estimatedCost?.setBy ?? "—"}`}) cho ${formatNumber(r.cogsUnknownQty)} sp chưa có phiếu nhập / giá Pancake — đặt giá kế hoạch ở Trung tâm giá vốn để thay`}> · gồm {formatVND(r.expectedCogsEstimated, { compact: true })} tạm tính</span> : null}</>}>
-                      <TienCoTheChuaBiet value={r.expectedCogs} known={r.cogsKnown} reason={`${formatNumber(r.cogsUncoveredQty)} sản phẩm chưa biết giá vốn (không phiếu nhập, không giá Pancake) — giá vốn đang bị tính 0đ nên không in ra. Đặt giá dự tính ở bảng “Bàn dự tính” bên dưới.`} className={r.expectedCogsEstimated ? "italic text-muted-foreground" : "text-muted-foreground"} />
+                      <TienCoTheChuaBiet value={r.expectedCogs} known={r.cogsKnown} reason={`${formatNumber(r.cogsUncoveredQty)} sản phẩm chưa biết giá vốn (không phiếu nhập, không giá Pancake) — giá vốn đang bị tính 0đ nên không in ra. Đặt giá vốn kế hoạch ở Trung tâm giá vốn hoặc nút bút ở bảng “Bàn dự tính” bên dưới.`} className={r.expectedCogsEstimated ? "italic text-muted-foreground" : "text-muted-foreground"} />
                     </OKep>
                     <OKep><Money value={r.shipCost} className="text-muted-foreground" /></OKep>
                     <OKep sub={chiTietVanHanh(r)}>
@@ -904,7 +904,7 @@ export async function NominalTab({
                       <TienCoTheChuaBiet
                         value={r.purchaseCost}
                         known={r.purchaseCostKnown}
-                        reason={`${formatNumber(r.purchaseUnpricedQty)} sp trên phiếu nhập trong kỳ không ghi đơn giá và mã chưa có giá vốn dự tính — giá trị hàng nhập CHƯA BIẾT, không phải 0 ₫. Đặt giá dự tính ở Bàn dự tính bên trên.`}
+                        reason={`${formatNumber(r.purchaseUnpricedQty)} sp trên phiếu nhập trong kỳ không ghi đơn giá và mã chưa có giá vốn dự tính — giá trị hàng nhập CHƯA BIẾT, không phải 0 ₫. Đặt giá vốn kế hoạch ở Trung tâm giá vốn.`}
                         className={cn(r.purchaseCost ? "text-rose-600" : "text-muted-foreground", r.purchaseCostEstimated > 0 && "italic")}
                       />
                     </OKep>
@@ -1107,7 +1107,7 @@ function DoiChieu({ label, ours, report }: { label: string; ours: number; report
  */
 function DongNgay({ label, sub, c, className, unassignedSpend = 0 }: { label: React.ReactNode; sub?: React.ReactNode; c: NominalCell; className?: string; unassignedSpend?: number }) {
   const giaVonDu = c.cogsUncoveredQty === 0;
-  const chuaDuGiaVon = `${formatNumber(Math.round(c.cogsUncoveredQty))} sản phẩm chưa có giá vốn nào (không phiếu nhập, không giá Pancake, chưa đặt giá dự tính) — giá vốn đang bị tính 0 ₫ nên KHÔNG in ra; số lượng bên dưới vẫn đo được`;
+  const chuaDuGiaVon = `${formatNumber(Math.round(c.cogsUncoveredQty))} sản phẩm chưa có giá vốn nào (không phiếu nhập, không giá Pancake, chưa đặt giá kế hoạch) — giá vốn đang bị tính 0 ₫ nên KHÔNG in ra; số lượng bên dưới vẫn đo được`;
   const loNhuanCao = giaVonDu ? null : <span title="Giá vốn còn thiếu ⇒ lợi nhuận này CAO hơn thực tế"> ⚠</span>;
   return (
     <TableRow className={cn("align-top", className)}>

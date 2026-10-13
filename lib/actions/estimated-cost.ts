@@ -12,15 +12,16 @@ import {
   ESTIMATED_UNIT_COST_MAX,
   parsePlannedCostHistory,
   plannedCostImpact,
-  serializePlannedEntry,
-  vnDateKey,
   type PlannedCostEntry,
   type PlannedCostImpact,
 } from "@/lib/constants/estimated-cost";
 import { NO_ORDER_VALUE_FILTER } from "@/lib/constants/order-value";
 import { getNominalProfitReport } from "@/lib/queries/profit-nominal";
 import { resolvePeriod } from "@/lib/search-params";
-import { getSettingJson, setSettingJson } from "@/lib/settings";
+import { eq, inArray } from "drizzle-orm";
+import { getDb, schema } from "@/db";
+import { requireResource } from "@/lib/auth/scope-guard";
+import { getSettingJson } from "@/lib/settings";
 
 /**
  * ═══════════ GIÁ VỐN KẾ HOẠCH — MỘT ĐƯỜNG GHI, MỘT KHOÁ ═══════════
@@ -54,11 +55,15 @@ const bulkSchema = z.object({
   reason: z.string().trim().min(3, "Phải ghi vì sao đặt con số này"),
 });
 
-const REVALIDATE = ["/reports", "/inventory/cost-center", "/inventory/workshop", "/ads/daily", "/reports/target"];
+const REVALIDATE = ["/inventory/cost-center", "/inventory/workshop", "/ads/daily", "/reports/target"];
 
 function lamMoi() {
   clearMemo();
+  // Viết thẳng: ô bút BCLN đã bỏ `router.refresh()` dựa trên ĐÚNG dòng này (tests/report-override-latency.test.ts).
+  revalidatePath("/reports");
   for (const p of REVALIDATE) revalidatePath(p);
+  // Bảng giá thành (Sản xuất) cũng gọi đường ghi này.
+  revalidatePath("/production", "layout");
 }
 
 /** Ghi một lượt giá kế hoạch cho nhiều mã — đường ghi DUY NHẤT. */
@@ -74,17 +79,32 @@ export async function setPlannedCosts(input: unknown): Promise<{ ok: true; saved
     ids.add(it.productId);
   }
 
-  const raw = await getSettingJson<Record<string, unknown>>(ESTIMATED_COST_KEY, {});
-  const before = parsePlannedCostHistory(raw);
+  const db = await getDb();
+  const daCo = await db.select({ id: schema.products.id }).from(schema.products).where(inArray(schema.products.id, [...ids]));
+  if (daCo.length !== ids.size) return { error: "Có mã hàng không tồn tại trong danh mục" };
+
   const now = new Date();
   const add: Record<string, PlannedCostEntry> = {};
   for (const it of items) {
     add[it.productId] = { unitCost: it.unitCost, effectiveFrom, reason, setAt: now.toISOString(), setBy: user.email, setByUserId: user.id };
   }
-  const next = appendPlannedCosts(raw, add);
-  const stored: Record<string, { history: Record<string, unknown>[] }> = {};
-  for (const [pid, v] of Object.entries(next)) stored[pid] = { history: v.history.map(serializePlannedEntry) };
-  await setSettingJson(ESTIMATED_COST_KEY, stored);
+  /*
+    ĐỌC–SỬA–GHI TRONG MỘT GIAO DỊCH CÓ KHOÁ DÒNG: hai người lưu cùng lúc thì lượt sau CHỜ lượt trước,
+    rồi thêm dòng của mình lên bản đã có dòng của người kia — không ai xoá lịch sử của ai (luật 6).
+  */
+  const before = await db.transaction(async (tx) => {
+    await tx.insert(schema.settings).values({ key: ESTIMATED_COST_KEY, value: "{}" }).onConflictDoNothing();
+    const [row] = await tx.select({ value: schema.settings.value }).from(schema.settings).where(eq(schema.settings.key, ESTIMATED_COST_KEY)).for("update");
+    let raw: unknown = {};
+    try {
+      raw = JSON.parse(String(row?.value ?? "{}"));
+    } catch {
+      raw = {};
+    }
+    const next = appendPlannedCosts(raw, add);
+    await tx.update(schema.settings).set({ value: JSON.stringify(next), updatedAt: new Date() }).where(eq(schema.settings.key, ESTIMATED_COST_KEY));
+    return parsePlannedCostHistory(raw);
+  });
   for (const it of items) {
     await audit({
       userId: user.id,
@@ -138,22 +158,36 @@ export type PlannedCostPreview = {
 
 /**
  * XEM TRƯỚC tác động lên lợi nhuận DỰ TÍNH (chế độ kế hoạch) của kỳ chọn — CHỈ ĐỌC, không ghi gì.
- * Đứng trên đúng báo cáo BCLN dùng (`getNominalProfitReport`, hai chế độ) nên con số xem trước là
- * con số BCLN sẽ in sau khi lưu (`plannedCostImpact`).
+ *
+ * Giá ĐÍCH của mỗi mã là dòng sẽ HIỆU LỰC vào cuối kỳ của lịch sử SAU KHI thêm (cùng `appendPlannedCosts`
+ * + `activePlannedEntry` mà báo cáo dùng) — không phải con số vừa gõ: một dòng có ngày hiệu lực sớm hơn
+ * dòng đang áp thì không đổi gì. Bỏ giá mà mã còn sản phẩm chưa có giá thật ⇒ đích phụ thuộc giá tham
+ * chiếu sẽ lấp chỗ trống ⇒ Δ CHƯA BIẾT (`null`), không đoán. Mốc kỳ là ngày lên đơn, không lọc giá trị
+ * đơn — cùng mặc định của BCLN.
+ *
+ * Quyền: như MÀN HÌNH (xem `reports:nominal` + phạm vi REPORTS) VÀ quyền sửa — trả số lợi nhuận theo mã
+ * cho người chỉ được sửa mà không được xem là một cửa sau (AGENTS.md mục 28–31).
  */
 export async function previewPlannedCostImpact(input: unknown): Promise<PlannedCostPreview | { error: string }> {
   const user = await requireUser();
-  if (!can(user, "reports:assumptions")) return { error: "Không có quyền" };
+  if (!can(user, "reports:assumptions") || !can(user, "reports:nominal")) return { error: "Không có quyền" };
+  const { decision } = await requireResource("REPORTS", "reports:nominal");
+  if (decision.allow === "NONE") return { error: "Phạm vi dữ liệu của bạn không gồm báo cáo lợi nhuận toàn shop" };
   const parsed = previewSchema.safeParse(input);
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dữ liệu không hợp lệ" };
   const { items, effectiveFrom } = parsed.data;
   const period = resolvePeriod({ period: parsed.data.period, from: parsed.data.from, to: parsed.data.to });
-  const [keHoach, thucTe] = await Promise.all([
+  const [keHoach, thucTe, raw] = await Promise.all([
     getNominalProfitReport(period, "ORDERED", NO_ORDER_VALUE_FILTER, true, true, false, "PLANNED"),
     getNominalProfitReport(period, "ORDERED", NO_ORDER_VALUE_FILTER, true, true, false, "ACTUAL"),
+    getSettingJson<Record<string, unknown>>(ESTIMATED_COST_KEY, {}),
   ]);
-  const cuoiKy = vnDateKey(period.to ?? new Date());
-  const applies = effectiveFrom === null || effectiveFrom <= cuoiKy;
+  const cuoiKy = period.to ?? new Date();
+  const now = new Date().toISOString();
+  const add: Record<string, PlannedCostEntry> = {};
+  for (const it of items) add[it.productId] = { unitCost: it.unitCost, effectiveFrom, reason: "xem trước", setAt: now, setBy: null };
+  const truoc = parsePlannedCostHistory(raw);
+  const sau = parsePlannedCostHistory(appendPlannedCosts(raw, add));
   const riskPct = Number(keHoach.assumptions.inventoryRiskPercent ?? 0);
   const kh = new Map(keHoach.rows.map((r) => [r.productId, r]));
   const tt = new Map(thucTe.rows.map((r) => [r.productId, r]));
@@ -163,10 +197,14 @@ export async function previewPlannedCostImpact(input: unknown): Promise<PlannedC
     const a = kh.get(it.productId);
     const b = tt.get(it.productId);
     const qty = a?.expectedQty ?? 0;
+    const giaTruoc = activePlannedEntry(truoc[it.productId] ?? [], cuoiKy)?.unitCost ?? null;
+    const giaSau = activePlannedEntry(sau[it.productId] ?? [], cuoiKy)?.unitCost ?? null;
+    // Bỏ giá ⇒ đích là giá thật; chỉ biết chắc khi mã KHÔNG còn sản phẩm chưa có giá thật.
+    const dichThatBiet = b ? b.cogsUnknownQty === 0 && b.cogsKnown : true;
     const imp = plannedCostImpact(
-      { productId: it.productId, expectedQty: qty, currentCogs: a?.expectedCogs ?? 0, currentKnown: a ? a.cogsKnown : true, actualCogs: b?.expectedCogs ?? 0, actualKnown: b ? b.cogsKnown : true },
-      it.unitCost,
-      { inventoryRiskPercent: riskPct, applies },
+      { productId: it.productId, expectedQty: qty, currentCogs: a?.expectedCogs ?? 0, currentKnown: a ? a.cogsKnown : true, actualCogs: b?.expectedCogs ?? 0, actualKnown: dichThatBiet },
+      giaSau,
+      { inventoryRiskPercent: riskPct, applies: giaSau !== giaTruoc },
     );
     totalN = totalN === null || imp.deltaNominalProfit === null ? null : totalN + imp.deltaNominalProfit;
     totalR = totalR === null || imp.deltaNetProfit === null ? null : totalR + imp.deltaNetProfit;
