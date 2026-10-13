@@ -146,11 +146,40 @@ export function normalizeAdBot(raw) {
   return bot;
 }
 
-/** Kiem tra ca goi ERP gui sang. Nem loi doc duoc neu hinh dang sai; tra ve { bots, skipped }. */
+/**
+ * SAN PHAM CUA PAGE (ERP: trang Bot rieng theo quang cao -> "San pham cua page"): mau moi chua co tren POS, ap cho MOI hoi
+ * thoai cua mot fanpage. Bat buoc co mau test day du — page khong co mau thi khong co gi de noi rieng.
+ */
+export function normalizePageBot(raw) {
+  if (!raw || typeof raw !== "object") return null;
+  const pageId = String(raw.pageId ?? "").trim();
+  if (!/^\d{5,25}$/.test(pageId)) return null;
+  const test = normalizeTestProduct(raw.test);
+  if (!test) return null;
+  return {
+    adId: `page:${pageId}`,
+    scope: "page",
+    pageId,
+    enabled: raw.enabled === true,
+    productCode: test.code,
+    productName: "",
+    campaignName: "Sản phẩm của page",
+    adName: "",
+    adCopy: "",
+    instructions: clip(raw.instructions, 4000),
+    source: "PAGE",
+    status: "",
+    test,
+  };
+}
+
+/** Kiem tra ca goi ERP gui sang. Nem loi doc duoc neu hinh dang sai; tra ve { bots, pages, skipped }. */
 export function normalizeAdBotPayload(payload) {
   if (!payload || typeof payload !== "object" || !Array.isArray(payload.bots)) throw new Error("Thieu truong bots (mang)");
   if (payload.bots.length > MAX_AD_BOTS) throw new Error(`Qua nhieu bot (${payload.bots.length} > ${MAX_AD_BOTS})`);
+  if (payload.pages !== undefined && !Array.isArray(payload.pages)) throw new Error("Truong pages phai la mang");
   const bots = {};
+  const pages = {};
   let skipped = 0;
   for (const raw of payload.bots) {
     const b = normalizeAdBot(raw);
@@ -160,7 +189,15 @@ export function normalizeAdBotPayload(payload) {
     }
     bots[b.adId] = b;
   }
-  return { bots, skipped };
+  for (const raw of (payload.pages || []).slice(0, MAX_AD_BOTS)) {
+    const b = normalizePageBot(raw);
+    if (!b) {
+      skipped++;
+      continue;
+    }
+    pages[b.pageId] = b;
+  }
+  return { bots, pages, skipped };
 }
 
 /** Bot cua quang cao khach bam GAN NHAT (dang bat). Khong co -> null. */
@@ -183,24 +220,37 @@ export function maskMoney(text) {
 
 const vnd = (n) => `${Number(n).toLocaleString("vi-VN")}đ`;
 
-/** Khoi thong tin MAU TEST MOI — chi dung thong tin nay cho mau nay. */
-export function testProductLines(t) {
+/**
+ * Khoi thong tin MAU TEST MOI — chi dung thong tin nay cho mau nay. `page` = San pham cua page (moi khach cua page, khong
+ * rieng khach bam quang cao). Chu shop 13/10/2026: "bot chi chat theo cac thong tin da duoc cho san, khong tu them bot".
+ */
+export function testProductLines(t, { page = false } = {}) {
   const gia = [`1 chiếc ${vnd(t.price)}${t.shipFee === 0 ? " (miễn phí ship)" : t.shipFee ? ` + ${vnd(t.shipFee)} phí ship` : ""}`];
   if (t.comboPrice) gia.push(`2 chiếc ${vnd(t.comboPrice)} (miễn phí ship, được chọn mỗi màu 1 chiếc)`);
+  const mo = page
+    ? `- Page này bán MẪU MỚI **${t.name}** (mã ${t.code}) — mẫu CHƯA có trong danh mục sản phẩm POS. Mọi khách nhắn page này đều đang hỏi mẫu này (kể cả khi nói "mẫu này", "còn không", "giá sao", gửi ảnh). KHÔNG giới thiệu, báo giá hay gửi ảnh mẫu nào khác.`
+    : `- Khách bắt đầu nhắn tin sau khi bấm quảng cáo của MẪU MỚI **${t.name}** (mã ${t.code}). Mẫu này CHƯA có trong danh mục sản phẩm: khi nói về mẫu này CHỈ dùng thông tin dưới đây — bỏ qua giá, chất liệu, màu, số size ghi trong khối báo giá chung và hướng dẫn riêng của page (các phần đó là của mẫu khác). Khách chưa nói rõ mẫu nào ("mẫu này", "còn không", "giá sao") thì hiểu là hỏi đúng mẫu ${t.code}.`;
   return [
-    `- Khách bắt đầu nhắn tin sau khi bấm quảng cáo của MẪU MỚI **${t.name}** (mã ${t.code}). Mẫu này CHƯA có trong danh mục sản phẩm: khi nói về mẫu này CHỈ dùng thông tin dưới đây — bỏ qua giá, chất liệu, màu, số size ghi trong khối báo giá chung và hướng dẫn riêng của page (các phần đó là của mẫu khác). Khách chưa nói rõ mẫu nào ("mẫu này", "còn không", "giá sao") thì hiểu là hỏi đúng mẫu ${t.code}.`,
+    mo,
+    `- THÔNG TIN ĐÃ CHO SẴN LÀ TẤT CẢ những gì được nói về mẫu này: tên, giá, chất vải, màu, size, ưu đãi, hướng dẫn bên dưới. KHÔNG tự thêm (chất liệu khác, độ dày, co giãn, xuất xứ, thời gian may, quà tặng, cam kết…) và KHÔNG bớt / đổi ý thông tin đã cho. Khách hỏi điều không có ở đây thì trả lời "Dạ em kiểm tra lại rồi báo chị ngay ạ" — không đoán.`,
     `- Giá (chỉ được báo đúng các mức này, không giảm thêm): ${gia.join("; ")}.`,
-    `- Chất vải: ${t.fabric}`,
+    `- Chất vải: ${t.fabric} — nói đúng câu chữ này, không gọi bằng tên chất liệu khác.`,
     `- Màu đang có: ${t.colors.map((c) => c.color).join(", ")}. Gửi ảnh một màu bằng [[IMG:${t.code}:tên màu]], gửi ảnh mọi màu bằng [[IMG:${t.code}]]. Màu khác ngoài danh sách: nói rõ chưa có.`,
     t.sizes ? `- Size: ${t.sizes}. Tư vấn size theo bảng size chung của page như các mẫu nữ khác.` : `- Tư vấn size theo bảng size chung của page như các mẫu nữ khác.`,
-    t.offer ? `- Ưu đãi của camp: ${t.offer}. Không hứa ưu đãi nào khác.` : `- Không hứa ưu đãi hay quà tặng nào ngoài giá ở trên.`,
+    t.offer ? `- Ưu đãi: ${t.offer}. Không hứa ưu đãi nào khác.` : `- Không hứa ưu đãi hay quà tặng nào ngoài giá ở trên.`,
     `- Kịch bản chốt đơn như bình thường; bản tóm tắt chốt đơn ghi đúng mã ${t.code}, tên mẫu, màu, size.`,
   ];
 }
 
-/** Khoi prompt rieng cho camp. */
+/** Khoi prompt rieng cho camp (hoac cho san pham cua page — `bot.scope === "page"`). */
 export function adBotPromptBlock(bot) {
   if (!bot) return "";
+  if (bot.scope === "page") {
+    if (!bot.test) return "";
+    const lines = [`## SẢN PHẨM CỦA PAGE — MẪU MỚI (chưa có trên POS)`, ...testProductLines(bot.test, { page: true })];
+    if (bot.instructions) lines.push(`- Hướng dẫn riêng cho mẫu này (ưu tiên hơn hướng dẫn chung nếu mâu thuẫn):`, bot.instructions);
+    return `\n\n${lines.join("\n")}`;
+  }
   const ten = bot.campaignName || bot.adName || `quảng cáo ${bot.adId}`;
   const lines = [`## KHÁCH ĐẾN TỪ QUẢNG CÁO TEST — BOT RIÊNG CỦA CAMP "${ten}"`];
   if (bot.test) {

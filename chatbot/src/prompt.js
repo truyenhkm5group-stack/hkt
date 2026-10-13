@@ -5,12 +5,13 @@ import { catalog } from "./catalog.js";
  * Ghep system prompt hoan chinh: thay {{SHOP_NAME}}, {{CATALOG}} + ngu canh hien tai.
  * Dung chung cho bot that va cac script test de ket qua giong nhau.
  */
-export function renderSystemPrompt(template, { shopName, customerName, type = "INBOX", extraPrompt = "", commentMode = "public" } = {}) {
+export function renderSystemPrompt(template, { shopName, customerName, type = "INBOX", extraPrompt = "", commentMode = "public", noCatalog = false } = {}) {
   const name = shopName || config.shopName || "shop";
   let prompt = template.replaceAll("{{SHOP_NAME}}", name);
-  const catalogText = catalog.toPromptText();
+  // Page ban mau moi chua co tren POS: KHONG dua danh muc vao (bot tung chot ma / mau / anh cua mau khac)
+  const catalogText = noCatalog ? "(Page này bán MẪU MỚI chưa có trong danh mục POS — không dùng danh mục, không nêu mã mẫu.)" : catalog.toPromptText();
   if (prompt.includes("{{CATALOG}}")) prompt = prompt.replaceAll("{{CATALOG}}", catalogText);
-  else if (catalog.products.length) prompt += `\n\n## Danh mục sản phẩm (đồng bộ từ POS)\n${catalogText}`;
+  else if (catalog.products.length && !noCatalog) prompt += `\n\n## Danh mục sản phẩm (đồng bộ từ POS)\n${catalogText}`;
   if (extraPrompt && extraPrompt.trim()) {
     prompt += `\n\n## Hướng dẫn riêng cho page ${name} (ưu tiên hơn các mục trên nếu mâu thuẫn)\n${extraPrompt.trim()}`;
   }
