@@ -286,6 +286,11 @@ function testSourceScan() {
   assert.match(ops, /customer-360-probe\)\n[\s\S]*?scripts\/customer-360-probe\.ts ;;/, "nhánh chạy");
   const engine = readFileSync("lib/sales-chatbot/engine.ts", "utf8");
   assert.ok(engine.includes("loadCustomer360(") && engine.includes("customer360Prompt(c360, reuse)") && engine.includes("customer360: c360") && engine.includes("preferReturning(baseReturning, c360)"), "engine nối Customer 360 ở đúng ba chỗ");
+  assert.ok(engine.includes('postSale ? "" : customer360Prompt(c360, reuse)'), "giai đoạn hậu mãi (#821) không có khối TRA LỊCH SỬ");
+  const tools = readFileSync("lib/sales-chatbot/tools.ts", "utf8");
+  const cc = tools.slice(tools.indexOf('case "create_customer": {'));
+  const gate = cc.indexOf("if (state.confirmed && !state.confirmed.auto)");
+  assert.ok(gate > 0 && gate < cc.indexOf("savedAddressChoice(") && gate < cc.indexOf("savedAddressPhone(") && gate < cc.indexOf("historyAddressWithoutConsent("), "chặn sửa đơn đã chốt (#821) đứng TRƯỚC mọi nhánh Customer 360 của create_customer");
   const lib = readFileSync("lib/sales-chatbot/customer-360.ts", "utf8");
   assert.ok(!/getPlatformDb|withOrganization|getDbForInspection/.test(lib), "Customer 360 chỉ đọc CSDL của tổ chức NGỮ CẢNH (hoặc CSDL ops truyền vào) — không mở tổ chức khác");
 }
