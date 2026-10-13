@@ -108,6 +108,50 @@ export function manualAdRows(config: AdBotConfig): AdBotSourceRow[] {
     .map(([adId, m]) => ({ adId, source: "MANUAL" as const, status: "MANUAL", campaignName: m.label, adName: "", adCopy: "", productId: null, productCode: null, productName: null, publishedAt: new Date(m.addedAt) }));
 }
 
+/**
+ * ═══ SẢN PHẨM CỦA PAGE — mẫu mới chưa có trên POS, áp cho MỌI hội thoại của một fanpage ═══
+ * Chủ shop 13/10/2026 (page AURA, Linh Tây Luxury bán đầm nhung chưa lên POS): "tạo một mục để đưa sản phẩm, chất liệu,
+ * ảnh mẫu vào bot; bot chỉ chat theo thông tin đã cho, không tự thêm bớt". Dùng LẠI nguyên khung mẫu test (tên · mã tạm ·
+ * giá · chất vải · size · ưu đãi · ảnh từng màu) — lưu ở `overrides` với khoá `page:<pageId>` (không phải ID quảng cáo nên
+ * không lẫn vào danh sách bot theo quảng cáo). Bot quảng cáo vẫn THẮNG khi khách đến từ một quảng cáo có bot riêng.
+ */
+const PAGE_PREFIX = "page:";
+export const PAGE_ID_PATTERN = /^\d{5,25}$/;
+export const pageProductKey = (pageId: string) => `${PAGE_PREFIX}${pageId}`;
+/** `page:<pageId>` ⇒ pageId; khoá khác ⇒ `null`. */
+export function pageProductPageOf(key: string): string | null {
+  if (!key.startsWith(PAGE_PREFIX)) return null;
+  const id = key.slice(PAGE_PREFIX.length);
+  return PAGE_ID_PATTERN.test(id) ? id : null;
+}
+
+/** Đúng hình dạng bot nhận ở trường `pages` của `PUT /api/erp/ad-bots` (xem `normalizePageBot` phía bot). */
+export type PageBotPush = { pageId: string; enabled: boolean; instructions: string; test: NonNullable<AdBotPush["test"]> };
+
+export type PageProductLine = { pageId: string; key: string; test: AdTestProduct | null; missing: string[]; live: boolean; override: AdBotOverride };
+
+/** HÀM THUẦN: sản phẩm của page trong sổ ⇒ dòng hiển thị + gói đẩy sang bot (chỉ mẫu ĐỦ thông tin; chưa bật ⇒ chỉ chat thử). */
+export function buildPageBots(config: AdBotConfig): { lines: PageProductLine[]; push: PageBotPush[] } {
+  const lines: PageProductLine[] = [];
+  const push: PageBotPush[] = [];
+  for (const [key, o] of Object.entries(config.overrides)) {
+    const pageId = pageProductPageOf(key);
+    if (!pageId) continue;
+    const missing = testProductMissing(o.test);
+    const live = config.enabled && o.enabled === true && missing.length === 0;
+    lines.push({ pageId, key, test: o.test ?? null, missing, live, override: o });
+    const t = o.test;
+    if (!t || missing.length || t.price === null) continue;
+    push.push({
+      pageId,
+      enabled: live,
+      instructions: (o.instructions ?? "").trim().slice(0, AD_BOT_INSTRUCTIONS_MAX),
+      test: { name: t.name.trim(), code: t.code.trim().toUpperCase(), price: t.price, shipFee: t.shipFee, comboPrice: t.comboPrice, fabric: t.fabric.trim(), sizes: t.sizes.trim(), offer: t.offer.trim(), colors: t.colors.map((c) => ({ color: c.color, sha: c.sha })) },
+    });
+  }
+  return { lines, push };
+}
+
 export const addManualAdSchema = z.object({
   adId: z.string().trim().regex(AD_ID_PATTERN, "ID quảng cáo phải toàn chữ số (Trình quản lý quảng cáo → cột ID quảng cáo)"),
   pageId: z.string().trim().regex(/^\d{5,25}$/, "Chọn fanpage chạy quảng cáo"),

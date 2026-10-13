@@ -2283,5 +2283,54 @@ console.log("OK 18: doi chieu dia chi don POS -> bat don chon nham xa, bo qua tr
   console.log("OK 53: page AURA khong ban Q005 (bot khong len don / khong nhac ma); mau nhung khong noi chat lieu Rayon");
 }
 
+// ---- 54: "San pham cua page" (chu shop 13/10/2026): mau moi chua co tren POS khai o ERP cho ca mot page — bot chi noi
+// theo thong tin da cho (khong tu them bot), khong dung danh muc POS, khong len don POS
+{
+  const crypto = await import("node:crypto");
+  const { adBots } = await import("../src/adbots.js");
+  const { normalizeAdBotPayload, adBotPromptBlock } = await import("../src/adpersona.js");
+  const { aiScope } = await import("../src/aicost.js");
+  const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==", "base64");
+  const sha = crypto.createHash("sha256").update(png).digest("hex");
+  const test = { name: "Đầm nhung tăm", code: "NHUNG01", price: 499000, shipFee: 25000, comboPrice: null, fabric: "Nhung tăm Hàn, dày dặn", sizes: "S–XL", offer: "", colors: [{ color: "Đỏ đô", sha }] };
+  // Hinh dang goi: pages phai la mang; page thieu thong tin mau -> bo, khong doan
+  assert.throws(() => normalizeAdBotPayload({ bots: [], pages: {} }), /pages/);
+  const chuan = normalizeAdBotPayload({ bots: [], pages: [{ pageId: "123456789", enabled: true, test }, { pageId: "abc", enabled: true, test }, { pageId: "223456789", enabled: true, test: { ...test, fabric: "" } }] });
+  assert.deepEqual(Object.keys(chuan.pages), ["123456789"]);
+  assert.equal(chuan.skipped, 2);
+  assert.equal(chuan.pages["123456789"].adId, "page:123456789");
+  // Chua bat: chi chat thu duoc (get theo khoa page:), khach that khong dung
+  const r = adBots.replaceAll({ bots: [], pages: [{ pageId: "987654321", enabled: false, test }] });
+  assert.equal(r.pages, 1);
+  assert.equal(adBots.pageBot("987654321"), null, "chua bat -> khach that khong dung");
+  assert.ok(adBots.get("page:987654321"), "chua bat van chat thu duoc tu ERP");
+  assert.ok(adBots.missingImages().includes(sha) || adBots.imagePath(sha), "anh mau cua page vao danh sach anh can gui");
+  adBots.replaceAll({ bots: [], pages: [{ pageId: "987654321", enabled: true, test }] });
+  const pb = adBots.pageBot("987654321");
+  assert.equal(pb?.test.code, "NHUNG01");
+  assert.equal(adBots.testProductForConversation("CONV54", [], "987654321")?.code, "NHUNG01", "hoi thoai cua page -> bot len don bo qua");
+  assert.equal(adBots.testProductForConversation("CONV54", [], "111111111"), null, "page khac khong anh huong");
+  assert.equal(adBots.status().pages.length, 1);
+  // Prompt: khoi "SAN PHAM CUA PAGE" + luat chi noi thong tin da cho; khong danh muc POS; chat lieu theo ERP
+  const khoi = adBotPromptBlock(pb);
+  assert.ok(/SẢN PHẨM CỦA PAGE/.test(khoi) && /KHÔNG tự thêm/.test(khoi) && /Nhung tăm Hàn/.test(khoi) && /499\.000đ/.test(khoi), khoi);
+  assert.ok(!/bấm quảng cáo/.test(khoi), "page: khong noi khach bam quang cao");
+  const prevSp = catalog.products;
+  catalog.setProducts([{ id: "q4", code: "Q004", name: "Đầm Q004", note: "", price: { min: 499000, max: 499000 }, attributes: { "Màu": ["Đỏ"] }, variations: [], images: [] }]);
+  const sys = aiScope.run({ adBot: pb, adBotPageId: "PAGE1" }, () => bot.buildSystemPrompt("PAGE1", { customerName: "X", type: "INBOX" }));
+  assert.ok(sys.includes("MẪU MỚI **Đầm nhung tăm**") && !/Đầm Q004/.test(sys), "prompt page co san pham, khong co danh muc POS");
+  aiScope.run({ adBot: pb, adBotPageId: "PAGE1" }, () => {
+    assert.equal(bot.offCatalog("PAGE1"), true);
+    assert.equal(bot.pageMaterial("PAGE1", []), "nhung", "chat lieu theo ERP");
+    const anh = bot.ensureQuoteImage("GIÁ NIÊM YẾT: 1 đầm 499.000đ", "PAGE1", [{ from: { id: "KHACH" }, message: "giá sao shop" }]);
+    assert.ok(/\[\[IMG:NHUNG01\]\]/.test(anh) && !/Q004/.test(anh), anh);
+  });
+  assert.equal(bot.offCatalog("PAGE1"), false, "ngoai pham vi -> page thuong");
+  catalog.setProducts(prevSp);
+  adBots.replaceAll({ bots: [], pages: [] });
+  assert.equal(adBots.pageBot("987654321"), null);
+  console.log("OK 54: san pham cua page — chi noi theo thong tin ERP, khong danh muc POS, khong len don POS");
+}
+
 console.log("\nTAT CA TEST PASS");
 process.exit(0);

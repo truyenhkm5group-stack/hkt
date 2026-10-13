@@ -1161,9 +1161,14 @@ ${Xung} lấy màu nào để em lên đơn cho mình ạ?`;
       String(eff.defaultProduct || "").trim() ||
       String(eff.extraPrompt || "").match(/(?:chủ lực|mặc định)[^\n]{0,60}?\b(Q\d{3})\b/i)?.[1];
     if (this.offCatalog(pageId) && !this.scopedTestProduct(pageId)) return t; // mau moi chua co tren POS: khong co anh danh muc nao dung
+    const test = this.scopedTestProduct(pageId);
+    // Page mau moi: anh tu dinh kem chi co the la anh mau test / san pham cua page — khong bao gio ma POS chu luc cu
+    if (this.offCatalog(pageId)) {
+      log.info(`[${pageId}] Khoi bao gia khong kem anh -> tu them [[IMG:${test.code}]]`);
+      return `${t}\n[[IMG:${test.code}]]`;
+    }
     // Page KHONG ban ma nay (AURA - Q005): khong tu dinh kem anh cua no
     if (ma && blockedCodesFor([this.pageNames.get(pageId), this.pancakeNames?.get(pageId)]).includes(String(ma).toUpperCase())) return t;
-    const test = this.scopedTestProduct(pageId);
     if (!ma || !(catalog.products.some((p) => String(p.code || "").toUpperCase() === ma.toUpperCase()) || (test && test.code === ma.toUpperCase()))) return t;
     log.info(`[${pageId}] Khoi bao gia khong kem anh -> tu them [[IMG:${ma}]]`);
     return `${t}\n[[IMG:${ma}]]`;
@@ -1364,7 +1369,14 @@ ${Xung} lấy màu nào để em lên đơn cho mình ạ?`;
 
   /** Page ban mau moi chua co tren POS (khong dung danh muc). */
   offCatalog(pageId) {
-    return offCatalogPage([this.pageNames.get(String(pageId)), this.pancakeNames?.get(String(pageId))]);
+    return offCatalogPage([this.pageNames.get(String(pageId)), this.pancakeNames?.get(String(pageId))]) || !!this.pageBotFor(pageId);
+  }
+
+  /** "San pham cua page" dang ap cho page: dang bat, hoac dang chat thu tu ERP (pham vi luot mang bot scope "page"). */
+  pageBotFor(pageId) {
+    const s = aiScope.getStore();
+    if (s?.adBot?.scope === "page" && String(s.adBotPageId) === String(pageId)) return s.adBot;
+    return adBots.pageBot(pageId);
   }
 
   /** San pham (danh muc POS) cua mau chu luc page, hoac null. */
@@ -1399,6 +1411,12 @@ ${Xung} lấy màu nào để em lên đơn cho mình ạ?`;
 
   /** Khoi prompt: mau chu luc cua page (ten, ma, chat lieu) — de len mo ta chung khi khac. */
   pageProductBlock(pageId) {
+    if (this.pageBotFor(pageId)) {
+      return [
+        `\n\n## PAGE NÀY CHỈ BÁN MẪU Ở MỤC "SẢN PHẨM CỦA PAGE"`,
+        `- KHÔNG nêu mã / tên / màu / ảnh của mẫu nào trong danh mục POS (Q001, Q004…). Câu chất liệu, giá, màu trong hướng dẫn chung là của mẫu khác — bỏ qua.`,
+      ].join("\n");
+    }
     if (this.offCatalog(pageId)) {
       return [
         `\n\n## MẪU CỦA PAGE NÀY (MẪU MỚI, CHƯA CÓ TRONG DANH MỤC)`,
@@ -1772,7 +1790,8 @@ ${Xung} lấy màu nào để em lên đơn cho mình ạ?`;
     let messages = sortChrono(data.messages); // luon cu -> moi theo inserted_at (Pancake tra thu tu khong on dinh)
     if (messages.length === 0) return;
     // Khach den tu quang cao test co bot rieng: dat vao pham vi luot xu ly -> prompt + mau mac dinh theo camp
-    const adBot = adBots.resolve(pageId, conversationId, extractAdIds({ ad_ids: adIds }, data));
+    // Khong co bot quang cao -> "San pham cua page" (mau moi chua co tren POS, ERP khai) neu page co va dang bat
+    const adBot = adBots.resolve(pageId, conversationId, extractAdIds({ ad_ids: adIds }, data)) || adBots.pageBot(pageId);
     const scope = aiScope.getStore();
     if (scope) Object.assign(scope, { adBot, adBotPageId: String(pageId) });
     if (adBot) log.info(`[${pageId}] ${conversationId}: khach tu quang cao ${adBot.adId} -> bot rieng "${adBot.campaignName || adBot.adName}"${adBot.productCode ? " (mau " + adBot.productCode + ")" : ""}`);
