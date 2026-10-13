@@ -1160,7 +1160,7 @@ ${Xung} lấy màu nào để em lên đơn cho mình ạ?`;
       t.match(/\bQ\d{3}\b/)?.[0] ||
       String(eff.defaultProduct || "").trim() ||
       String(eff.extraPrompt || "").match(/(?:chủ lực|mặc định)[^\n]{0,60}?\b(Q\d{3})\b/i)?.[1];
-    if (this.offCatalog(pageId)) return t; // mau moi chua co tren POS: khong co anh danh muc nao dung
+    if (this.offCatalog(pageId) && !this.scopedTestProduct(pageId)) return t; // mau moi chua co tren POS: khong co anh danh muc nao dung
     // Page KHONG ban ma nay (AURA - Q005): khong tu dinh kem anh cua no
     if (ma && blockedCodesFor([this.pageNames.get(pageId), this.pancakeNames?.get(pageId)]).includes(String(ma).toUpperCase())) return t;
     const test = this.scopedTestProduct(pageId);
@@ -1380,7 +1380,10 @@ ${Xung} lấy màu nào để em lên đơn cho mình ạ?`;
   pageMaterial(pageId, messages = []) {
     const sp = this.offCatalog(pageId) ? null : this.pageProduct(pageId);
     const cuaShop = (messages || []).filter((m) => this.isFromPage(m, pageId)).map((m) => this.messageText(m)).join("\n");
-    return materialIn(sp ? `${sp.name} ${sp.note || ""}` : "") || materialIn(settings.effective(pageId).extraPrompt) || (this.offCatalog(pageId) ? materialIn(cuaShop) : null);
+    // Khach den tu quang cao co MAU TEST (bot rieng theo quang cao, ERP khai chat vai): chat lieu cua mau do thang tat ca
+    const test = this.scopedTestProduct(pageId);
+    const tuQuangCao = test ? materialIn(`${test.fabric || ""} ${test.name || ""}`) : null;
+    return tuQuangCao || materialIn(sp ? `${sp.name} ${sp.note || ""}` : "") || materialIn(settings.effective(pageId).extraPrompt) || (this.offCatalog(pageId) ? materialIn(cuaShop) : null);
   }
 
   /** Khoi prompt: mau chu luc cua page (ten, ma, chat lieu) — de len mo ta chung khi khac. */
@@ -1388,8 +1391,8 @@ ${Xung} lấy màu nào để em lên đơn cho mình ạ?`;
     if (this.offCatalog(pageId)) {
       return [
         `\n\n## MẪU CỦA PAGE NÀY (MẪU MỚI, CHƯA CÓ TRONG DANH MỤC)`,
-        `- Page chỉ bán MỘT mẫu mới. Mọi câu về mẫu (màu, size, giá, chất liệu) CHỈ lấy từ "Hướng dẫn riêng" của page và các tin SHOP đã gửi khách trong hội thoại (vd tin chào mẫu kèm ảnh).`,
-        `- KHÔNG nêu mã mẫu (Q001, Q004…), KHÔNG kể màu / size / ảnh của mẫu khác, KHÔNG gửi mã ảnh [[IMG:...]].`,
+        `- Page chỉ bán MỘT mẫu mới. Mọi câu về mẫu (màu, size, giá, chất liệu) CHỈ lấy từ "Hướng dẫn riêng" của page, mục "KHÁCH ĐẾN TỪ QUẢNG CÁO" (mẫu test của camp, nếu có) và các tin SHOP đã gửi khách trong hội thoại (vd tin chào mẫu kèm ảnh).`,
+        `- KHÔNG nêu mã mẫu trong danh mục POS (Q001, Q004…), KHÔNG kể màu / size / ảnh của mẫu khác. Chỉ gửi mã ảnh [[IMG:...]] của mẫu test trong mục quảng cáo (nếu có).`,
         `- Khách hỏi điều chưa có trong hai nguồn trên (vd màu nào còn hàng): trả lời "Dạ em kiểm tra rồi báo chị ngay ạ" — KHÔNG đoán.`,
       ].join("\n");
     }
@@ -2072,7 +2075,10 @@ ${Xung} lấy màu nào để em lên đơn cho mình ạ?`;
       if (r5?.text && !/rayon/i.test(r5.text) && !this.findDisallowedPrices(r5.text, systemPrompt).length) reply = r5.text;
     }
     // Page mau moi ngoai danh muc: bo moi ma anh [[IMG:...]] (anh danh muc deu la mau khac)
-    if (this.offCatalog(pageId)) reply = reply.replace(IMG_RE, "").trim();
+    if (this.offCatalog(pageId)) {
+      const test = this.scopedTestProduct(pageId);
+      reply = reply.replace(IMG_RE, (tag, ref) => (test && testImageRefs(test, ref) ? tag : "")).trim();
+    }
     // Page KHONG ban ma nay (AURA ban dam nhung, khong phai Q005 — chu shop 13/10/2026): cau tra loi nhac ma do -> viet lai
     const maCam = blockedCodesFor([this.pageNames.get(pageId), this.pancakeNames?.get(pageId)]).filter((c) => new RegExp(`\\b${c}\\b`, "i").test(reply));
     if (maCam.length) {
