@@ -3,7 +3,7 @@
   "mission_id": "gates-test-timeout",
   "title": "Gates: trần job kiểm thử 35 → 45 phút (bộ kiểm thử chạm 35 phút)",
   "business_goal": "",
-  "status": "RUNNING",
+  "status": "PR_READY",
   "priority": "P0",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -20,7 +20,18 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-13T10:51:43.018Z",
-  "updated_at": "2026-10-13T10:51:43.018Z",
-  "last_heartbeat": "2026-10-13T10:51:43.018Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-13T10:52:01.019Z",
+  "last_heartbeat": "2026-10-13T10:52:01.019Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "fix/gates-test-timeout",
+    "sha": "16fb61f0f06024fa3c03c78e3dca3e63b975d3bc",
+    "at": "2026-10-13T10:52:01.019Z",
+    "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+    "title": "Gates: trần job kiểm thử 35 → 45 phút (bộ kiểm thử chạm 35 phút)",
+    "summary": "main + #827 bị huỷ ở 35 phút",
+    "tests": [
+      "test-hygiene·repo-integrity: đạt"
+    ]
+  }
 }
