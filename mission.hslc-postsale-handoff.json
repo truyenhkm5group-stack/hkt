@@ -3,7 +3,7 @@
   "mission_id": "hslc-postsale-handoff",
   "title": "HOTFIX P0 HSLC: AI không dừng mặc định sau chốt (giai đoạn hậu mãi), hàng đợi chung thay KHÔNG CHỦ, watchdog nhường hết hạn, đồng hồ AI hỏng/SLA đọc mốc thật, nhãn «Chưa có vận đơn», panel đơn báo lỗi đọc được",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P0",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -24,9 +24,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-12T12:52:38.920Z",
-  "updated_at": "2026-10-12T22:24:37.133Z",
+  "updated_at": "2026-10-13T00:12:24.389Z",
   "last_heartbeat": "2026-10-12T22:24:37.133Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#821 → 935ffdb2c087111b78bedbf51095e190fa4efa65"
+  },
   "handoff": {
     "branch": "fix/hslc-postsale-handoff",
     "sha": "7d474c2c8af6acfa2118f42531f1a3d49b99f340",
