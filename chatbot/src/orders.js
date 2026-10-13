@@ -189,10 +189,24 @@ export function describeOrder(o) {
 // chu luc cua page dang la Q005.
 export const PAGE_BLOCKED_CODES = [{ page: "aura - thoi trang nu cao cap", codes: ["Q005"] }];
 
-/** Cac ma page KHONG ban (theo ten page / ten Pancake, khong dau). */
+// Page ban MAU MOI CHUA CO TREN POS: khong dung danh muc POS (khong ma, mau, size, anh cua mau khac), khong len don POS
+// tu dong. Chu shop 13/10/2026 (AURA): sau khi chan Q005 bot lai chot "Dam Q004 mau Do" + anh Q004 — page chi co mau moi.
+export const PAGE_OFF_CATALOG = ["aura - thoi trang nu cao cap"];
+
+const khongDauTen = (n) => String(n || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/đ/g, "d").replace(/\s+/g, " ").trim();
+
+/** Page ban mau moi chua co tren POS (theo ten page / ten Pancake). */
+export function offCatalogPage(names) {
+  const ten = (names || []).map(khongDauTen);
+  return PAGE_OFF_CATALOG.some((p) => ten.includes(p));
+}
+
+/** Cac ma page KHONG ban (theo ten page / ten Pancake, khong dau). Page ngoai danh muc: MOI ma trong danh muc. */
 export function blockedCodesFor(names) {
-  const ten = (names || []).map((n) => String(n || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/đ/g, "d").replace(/\s+/g, " ").trim());
-  return [...new Set(PAGE_BLOCKED_CODES.filter((r) => ten.includes(r.page)).flatMap((r) => r.codes.map((c) => c.toUpperCase())))];
+  const ten = (names || []).map(khongDauTen);
+  const ma = PAGE_BLOCKED_CODES.filter((r) => ten.includes(r.page)).flatMap((r) => r.codes);
+  if (offCatalogPage(names)) ma.push(...catalog.products.map((p) => String(p.code || "")).filter(Boolean));
+  return [...new Set(ma.map((c) => c.toUpperCase()))];
 }
 
 export class OrderSync {
@@ -668,9 +682,14 @@ export class OrderSync {
     return null;
   }
 
-  async syncFromConversation({ pageId, pageName, conversationId, customerName, historyText, strict = false, addressOverride = "", defaultCode = "", blockedCodes = [] }) {
+  async syncFromConversation({ pageId, pageName, conversationId, customerName, historyText, strict = false, addressOverride = "", defaultCode = "", blockedCodes = [], offCatalog = false }) {
     if (!this.enabled) return { status: "skipped", reason: "POS chưa cấu hình" };
     // defaultCode: mau chu luc nguoi chon cho LUOT QUET LAI (vd page chua khai mau chu luc) — de len cai dat cua page
+    // Page ban mau moi chua co tren POS: khong co bien the nao dung de ghi -> khong ton AI trich don, nguoi len tay
+    if (offCatalog || offCatalogPage([pageName])) {
+      const lyDo = "Page bán mẫu mới chưa có trên POS — bot không lên đơn, nhân viên lên đơn tay";
+      return strict ? { status: "review", reasons: [lyDo] } : { status: "skipped", reason: lyDo };
+    }
     const ex = await this.extractOrder(historyText, { pageName, defaultCode: defaultCode || settings.effective(pageId).defaultProduct || "", customerName });
     if (!ex) return { status: "skipped", reason: "AI không trích xuất được đơn" };
     // Thieu DUY NHAT ten nguoi nhan (AI van hay doi) -> khong chan don: dung ten Facebook. Con thieu thu khac thi van cho.
