@@ -22,18 +22,18 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-13T04:57:02.129Z",
-  "updated_at": "2026-10-13T06:29:18.120Z",
-  "last_heartbeat": "2026-10-13T06:29:18.120Z",
+  "updated_at": "2026-10-13T06:32:14.157Z",
+  "last_heartbeat": "2026-10-13T06:32:14.157Z",
   "definition_of_done": [],
   "handoff": {
     "branch": "fix/inbox-perf-probe-topn",
-    "sha": "73449b810f3d6517830e254bb840fca245fd5ae9",
-    "at": "2026-10-13T06:29:18.120Z",
+    "sha": "f6ee83878f530936067c2518b04bc847fbdd92ec",
+    "at": "2026-10-13T06:32:14.157Z",
     "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
     "title": "inbox-perf-probe: top-N câu chậm theo khối + chẩn đoán đường «chưa đọc» (lưu sẵn/tính trực tiếp) + EXPLAIN",
     "summary": "Sửa gates đỏ",
     "tests": [
-      "allowlist bài kiểm 0245 thêm probe chỉ đọc"
+      "inbox-unread-perf (allowlist probe chỉ đọc): đạt"
     ]
   }
 }
