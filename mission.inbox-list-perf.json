@@ -3,7 +3,7 @@
   "mission_id": "inbox-list-perf",
   "title": "P0 hộp thư: listInbox tính «chưa đọc» một lần (CHEAP_FIRST), bỏ router.refresh khi chuyển hội thoại, tự làm mới không chồng lượt, thử lại 20 s",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P0",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -23,9 +23,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-13T04:57:18.596Z",
-  "updated_at": "2026-10-13T14:35:37.464Z",
+  "updated_at": "2026-10-13T15:34:53.006Z",
   "last_heartbeat": "2026-10-13T14:35:37.464Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#827 → e557a91048f97e1cab829b466f71f4375e601afa"
+  },
   "handoff": {
     "branch": "fix/inbox-list-perf",
     "sha": "99013db136b7a25a9a2254bd93c059cc3debc42e",
