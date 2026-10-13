@@ -49,12 +49,24 @@ async function main() {
     console.log("");
     console.log(`-- ${p.name || "(chưa có tên)"}${p.pancakeName && p.pancakeName !== p.name ? ` / ${p.pancakeName}` : ""} · id …${String(p.id).slice(-4)} · nguồn ${p.source}`);
     console.log(`   Bot: ${on(e.enabled)} · chạy thử (không gửi): ${on(e.dryRun)} · trả lời từ tin thứ ${e.minCustomerMessages ?? "?"} · nhường nhân viên ${e.humanTakeoverMinutes ?? "?"} phút · thẻ tắt bot: ${p.pauseTagId ? "có" : "không"} · mẫu chủ lực: ${e.defaultProduct || "—"}`);
+    console.log(`   Lên đơn POS: ${on(e.orderSync)} · hướng dẫn riêng: ${String(e.extraPrompt || "").length} ký tự · giá khuyến mãi: ${e.saleEnabled ? "BẬT" : "tắt"}`);
     console.log(`   Hoạt động gần nhất: ${gio(p.stats?.lastActivity)}`);
     console.log(`   Hôm nay: ${Object.entries(today).map(([k, v]) => `${k}=${v}`).join(" ") || "(chưa có số)"}`);
     console.log(`   7 ngày: trả lời=${l7.replies ?? 0} nhường NV=${l7.skippedStaff ?? 0} bỏ tin đầu=${l7.skippedFirst ?? 0} chuyển người=${l7.handoffs ?? 0} đơn=${l7.orders ?? 0}`);
     console.log(`   Log trong bộ nhớ: ${cuaPage.length} dòng, ${loi.length} cảnh báo/lỗi`);
     const mau = [...new Set(loi.map((x) => sanitize(x.msg)))].slice(-6);
     for (const m of mau) console.log(`     ! ${m}`);
+  }
+  // Danh muc POS bot dang ban (du lieu san pham cong khai: ma, ten, gia, mau/size) — de doi chieu mau chu luc tung page
+  const cat = await get("/api/catalog").catch(() => null);
+  if (cat?.products?.length) {
+    console.log("");
+    console.log(`-- Danh mục POS (${cat.products.length} mẫu, cập nhật ${gio(cat.updatedAt)}):`);
+    for (const sp of cat.products) {
+      const gia = sp.price ? (sp.price.min === sp.price.max ? sp.price.min : `${sp.price.min}–${sp.price.max}`) : "?";
+      const thuocTinh = Object.entries(sp.attributes || {}).map(([k, v]) => `${k}: ${(v || []).join("/")}`).join(" · ");
+      console.log(`   ${sp.code || "?"} · ${String(sp.name || "").slice(0, 60)} · ${gia}đ · ${thuocTinh.slice(0, 120)}`);
+    }
   }
   // Loi khong gan page (token Pancake, AI het han muc...) — chi mau da che
   const chung = [...new Set(logs.filter((x) => (x.level === "warn" || x.level === "error") && !/\[\d{5,}\]/.test(String(x.msg || ""))).map((x) => sanitize(x.msg)))].slice(-8);

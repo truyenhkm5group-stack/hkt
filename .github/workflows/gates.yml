@@ -131,7 +131,8 @@ jobs:
   kiem_thu:
     name: Kiểm thử (ẩn danh)
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    # 13/10/2026: bộ kiểm thử đã chạm 32–35 phút/job — một lượt trên chính main và #827 bị huỷ ở 35 phút (cancelled, không đỏ thật). 45 phút để còn chỗ; chia bộ kiểm thử là việc sau.
+    timeout-minutes: 45
     outputs:
       sha: ${{ steps.ghim.outputs.sha }}
     steps:
@@ -174,7 +175,8 @@ jobs:
   kiem_thu_token:
     name: Kiểm thử (có token giả)
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    # 13/10/2026: bộ kiểm thử đã chạm 32–35 phút/job — một lượt trên chính main và #827 bị huỷ ở 35 phút (cancelled, không đỏ thật). 45 phút để còn chỗ; chia bộ kiểm thử là việc sau.
+    timeout-minutes: 45
     outputs:
       sha: ${{ steps.ghim.outputs.sha }}
     steps:

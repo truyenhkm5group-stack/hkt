@@ -559,6 +559,7 @@ import { testSalesCartCommitment } from "./sales-cart-commitment.test";
 import { testSalesIntegrityAudit } from "./sales-integrity-audit.test";
 import { testCartIntentAudit } from "./cart-intent-audit.test";
 import { testFollowupLifecycle } from "./followup-lifecycle.test";
+import { testCustomer360 } from "./customer-360.test";
 import { testChatWidget } from "./chat-widget.test";
 import { testWebProductImport } from "./web-product-import.test";
 import { testMessenger } from "./messenger.test";
@@ -3021,6 +3022,9 @@ async function main() {
   // P0 11/10/2026 (KimThu Le) — vòng đời khách dùng chung + follow-up đọc lại ngay trước khi gửi (đơn thật · chứng từ thu ·
   // từ chối nhận tin · người / nguồn khác vừa nhắn), khoá gửi chống trùng, vết quyết định — tổ chức THẬT `fu-life` (tự cấp, tự dọn).
   await testFollowupLifecycle();
+  // Customer 360 (11/10/2026, ca «Nga Ho Thien»): nhận diện khách cũ qua đơn của chính hội thoại / SĐT, địa chỉ cũ ĐÃ XÁC MINH,
+  // «vẫn địa chỉ cũ» ⇒ tra trước khi hỏi — tổ chức THẬT `gd-food-c360` / `gd-fashion-c360` (tổ chức khác không lọt).
+  await testCustomer360();
   // Đơn cần người kiểm (chủ shop 08/10/2026): khách huỷ ⇒ ghi chú + cờ, xã chưa ghép ⇒ cờ, nút nhanh Xác nhận / Huỷ, lời xác nhận,
   // SĐT chuẩn hoá — tổ chức THẬT `or-rv` (không Pancake; tự cấp, tự dọn).
   await testOrderReview();

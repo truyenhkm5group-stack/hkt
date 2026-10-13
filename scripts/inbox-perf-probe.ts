@@ -37,7 +37,24 @@
    · KHÔNG có ngưỡng đạt / không đạt (AGENTS 38): in số + «chưa có đích». Mã thoát: 0 đo xong mọi lượt · 1 có lượt / tổ chức đo hỏng
      hoặc không có tổ chức nào · 64 arg sai · 70 CSDL không chỉ đọc.
 
-  arg: `[--org=<mã>] [--samples=<n>]` — mặc định mọi tổ chức ACTIVE (trừ nhà) đang bật `ai_sales`, tối đa 10 (workspace nghiệm thu
+  CÂU CHẬM NHẤT (13/10/2026 — HSLC listInbox nguội p50 13.364 ms / SQL 18.190 ms trên 31 câu, fixture #792 3.000 hội thoại ~117 ms):
+  tổng ms không chỉ ra CÂU nào. Script bọc `query` của CHÍNH handle tổ chức (không đổi lib/ — ops lấy script từ main nhưng lib/ từ
+  image) và ghi từng câu của lượt TẢI nguội: chữ câu + tham số (CHỈ trong bộ nhớ), ms, số dòng. Gộp theo HÌNH DẠNG (bỏ tham số), đặt
+  tên KHỐI (`queryBlockOf` — listInbox.đếm-thẻ · listInbox.hàng · xem trước …) và in top-N theo trung vị ms qua các lượt. Kèm
+  CHẨN ĐOÁN «chưa đọc» 0245 (cột có chưa · công tắc nhà · đường đọc lưu sẵn hay tính trực tiếp · số dòng `turn_unhandled` NULL ·
+  số migration đã áp so với sổ của kho) và — khi đo MỘT tổ chức (`--org`) — `EXPLAIN (FORMAT JSON)` KHÔNG ANALYZE (chỉ lập kế hoạch,
+  không chạy câu) cho `EXPLAIN_SHAPES` hình dạng chậm nhất. Công khai chỉ mang tên khối, mã băm hình dạng, ms, số câu, số dòng, và
+  CẤU TRÚC kế hoạch (loại nút · bảng · chỉ mục · số dòng ước tính · cost) — không điều kiện lọc, không hằng số; chữ câu + kế hoạch đủ
+  điều kiện nằm ở phần MÃ HOÁ.
+
+  CỠ `state` + `--analyze` (13/10/2026 tối — probe sau #826: HSLC đọc LƯU SẴN, NULL 0/3.742, mà câu lấy hàng vẫn 7.294 ms, câu đếm thẻ
+  5.856 ms; EXPLAIN không ANALYZE chỉ in cost ƯỚC TÍNH — gồm cả nhánh `coalesce` không bao giờ chạy — nên không chỉ ra câu con nào thật
+  sự tốn): in cỡ cột `state` JSONB của hội thoại (TB · p95 · max sau nén — `pg_column_size`, không giải nén) và các NHÁNH lớn nhất (tên khoá
+  do mã đặt, trên 200 hội thoại mới nhất) — mỗi `state->'…'` trong một điều kiện quét cả hộp thư giải nén TOÀN BỘ giá trị TOAST. Cờ
+  `--analyze` (chỉ khi `--org`): `EXPLAIN (ANALYZE, BUFFERS)` hai câu chậm nhất — CHẠY câu SELECT thêm một lần (chỉ đọc, CSDL ép chỉ
+  đọc), in thời gian THẬT · số vòng · số dòng từng nút (vẫn chỉ cấu trúc ở kênh công khai).
+
+  arg: `[--org=<mã>] [--samples=<n>] [--analyze]` — mặc định mọi tổ chức ACTIVE (trừ nhà) đang bật `ai_sales`, tối đa 10 (workspace nghiệm thu
   trước, rồi theo mã); `--samples` 1–20, mặc định 5.
   ops lấy SCRIPT này từ `main` nhưng `lib/` từ IMAGE đang chạy.
 */
@@ -50,7 +67,8 @@ if (CHAY_THANG) {
 }
 
 import "dotenv/config";
-import { inArray, sql } from "drizzle-orm";
+import { readFileSync } from "node:fs";
+import { inArray, sql, type SQL } from "drizzle-orm";
 import { getDb, getDbForInspection, schema, type Db } from "@/db";
 import { activeUserIdsWhoCan, can, loadPermissionSnapshots, loadRoleTemplates, type SessionUser } from "@/lib/auth/session";
 import { resolvePermissions } from "@/lib/auth/permissions";
@@ -69,6 +87,7 @@ import { assignableUsers, inboxAssignees, inboxPages, listInbox } from "@/lib/sa
 import { inboxThreadPayload } from "@/lib/sales-chatbot/inbox-thread-payload";
 import { listLabels } from "@/lib/sales-chatbot/inbox-labels";
 import { organizationLevelPack } from "@/lib/sales-chatbot/levels";
+import { inboxUnreadMaterialized } from "@/lib/sales-chatbot/inbox-unread";
 import { rowsOf } from "@/lib/sql-rows";
 
 const tomTat = (s: string) => console.log(`[ops:tom-tat] ${s}`);
@@ -94,16 +113,22 @@ export const ACCEPTANCE_CODES: readonly string[] = ACCEPTANCE_WORKSPACES.map((w)
 
 // ─────────────────────────── PHẦN THUẦN ───────────────────────────
 
-export type ProbeArgs = { ok: true; org: string | null; samples: number } | { ok: false; error: string };
+export type ProbeArgs = { ok: true; org: string | null; samples: number; analyze: boolean } | { ok: false; error: string };
 
-/** Soát arg NGHIÊM: chỉ `--org=<mã>` và `--samples=<1..20>`, mỗi cờ một lần, không tham số trần. HÀM THUẦN. */
+/** Soát arg NGHIÊM: chỉ `--org=<mã>`, `--samples=<1..20>` và cờ `--analyze` (cần `--org`), mỗi cờ một lần, không tham số trần. HÀM THUẦN. */
 export function parseProbeArgs(argv: readonly string[]): ProbeArgs {
   const parts = argv.flatMap((a) => a.split(/\s+/)).filter(Boolean);
   let org: string | null = null;
   let samples: number | null = null;
+  let analyze = false;
   for (const p of parts) {
+    if (p === "--analyze") {
+      if (analyze) return { ok: false, error: "--analyze chỉ một lần" };
+      analyze = true;
+      continue;
+    }
     const m = /^--(org|samples)=(.*)$/.exec(p);
-    if (!m) return { ok: false, error: "chỉ nhận --org=<mã> và --samples=<n>" };
+    if (!m) return { ok: false, error: "chỉ nhận --org=<mã>, --samples=<n> và --analyze" };
     if (m[1] === "org") {
       if (org !== null) return { ok: false, error: "--org chỉ một lần" };
       if (!ORG_CODE.test(m[2])) return { ok: false, error: "--org phải là mã tổ chức dạng chữ thường / số / gạch ngang (2–31 ký tự)" };
@@ -114,7 +139,8 @@ export function parseProbeArgs(argv: readonly string[]): ProbeArgs {
       samples = Number(m[2]);
     }
   }
-  return { ok: true, org, samples: samples ?? DEFAULT_SAMPLES };
+  if (analyze && !org) return { ok: false, error: "--analyze cần --org (chạy lại câu chậm của MỘT tổ chức)" };
+  return { ok: true, org, samples: samples ?? DEFAULT_SAMPLES, analyze };
 }
 
 export type SeriesStats = { n: number; p50: number | null; p95: number | null; max: number | null };
@@ -134,6 +160,215 @@ const ms = (x: number | null): string => (x === null ? "—" : String(Math.round
 const triple = (s: SeriesStats): string => `p50 ${ms(s.p50)} · p95 ${ms(s.p95)} · max ${ms(s.max)}`;
 const cap = (l: string): string => (l.length > SUMMARY_MAX_CHARS ? `${l.slice(0, SUMMARY_MAX_CHARS - 1)}…` : l);
 
+// ─────────────────────────── CÂU CHẬM NHẤT · KẾ HOẠCH (PHẦN THUẦN) ───────────────────────────
+
+/** Một câu đã chạy trong lượt đo. `values` chỉ sống trong bộ nhớ (để EXPLAIN đúng câu) — KHÔNG BAO GIỜ in. */
+export type CapturedQuery = { text: string; values: readonly unknown[]; ms: number; rows: number };
+/** Số hình dạng in ra: đo MỘT tổ chức ⇒ 8; nhiều tổ chức ⇒ 3 (kênh tóm tắt có trần 60 dòng). */
+export const TOP_SINGLE_ORG = 8;
+export const TOP_MANY_ORGS = 3;
+/** Số hình dạng chậm nhất đem EXPLAIN, và trần số dòng CẤU TRÚC kế hoạch mỗi hình dạng trên kênh công khai. */
+export const EXPLAIN_SHAPES = 2;
+export const PLAN_PUBLIC_LINES = 16;
+export const PLAN_PRIVATE_LINES = 60;
+
+/**
+ * Tên KHỐI của một câu — chỉ đọc cấu trúc câu (bảng · từ khoá), không đọc tham số. Thứ tự quan trọng: mẫu hẹp trước. HÀM THUẦN.
+ * Khối không nhận ra ⇒ «khác:<bảng đầu tiên sau from>» để vẫn lần ra được.
+ */
+const BLOCKS: readonly [RegExp, string][] = [
+  [/count\(\*\) filter \(where/i, "listInbox.đếm-thẻ"],
+  [/group by "sales_chat_conversations"\."customer_level"/i, "listInbox.đếm-level"],
+  [/"unread_flag"/i, "listInbox.hàng"],
+  [/from \(values[\s\S]*left join lateral[\s\S]*"sales_chat_inbound"/i, "listInbox.xem-trước-fanpage"],
+  [/from \(values[\s\S]*left join lateral[\s\S]*"sales_chat_messages"/i, "listInbox.xem-trước-web"],
+  [/"sales_chat_conversation_labels"|"sales_chat_labels"/i, "nhãn"],
+  [/information_schema\.columns/i, "công-tắc-0245.cột"],
+  [/from "settings"|"settings"\."key"/i, "settings"],
+  [/"channel_page_routes"|page_routes/i, "định-tuyến-page"],
+  [/"sales_chat_reads"/i, "con-trỏ-đọc"],
+  [/"connector|"connections"|channel_pages/i, "kênh/page"],
+  [/from "users"/i, "users"],
+];
+export function queryBlockOf(text: string): string {
+  for (const [re, name] of BLOCKS) if (re.test(text)) return name;
+  const m = /\bfrom\s+"?([a-z_][a-z0-9_]*)"?/i.exec(text);
+  return `khác:${m ? m[1] : "?"}`;
+}
+
+/** Hình dạng ĐỦ của câu (không cắt 240 ký tự như `shapeOf`): gộp khoảng trắng, tham số ⇒ ?, chuỗi hằng ⇒ '?'. HÀM THUẦN. */
+export function fullShape(text: string): string {
+  return text
+    .replace(/\s+/g, " ")
+    .replace(/\$\d+/g, "?")
+    .replace(/'[^']*'/g, "'?'")
+    .trim();
+}
+/** Mã băm 8 ký tự (FNV-1a 32 bit) của hình dạng — khoá nối dòng công khai với chữ câu ở phần mã hoá. HÀM THUẦN. */
+export function shapeHash(text: string): string {
+  let h = 0x811c9dc5;
+  for (const ch of fullShape(text)) {
+    h ^= ch.codePointAt(0)!;
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  return h.toString(16).padStart(8, "0");
+}
+
+export type TopQuery = {
+  block: string;
+  hash: string;
+  /** Trung vị qua các lượt có hình dạng này: tổng ms của hình dạng trong lượt · số lần chạy trong lượt · tổng dòng trả về. */
+  ms: number;
+  calls: number;
+  rows: number;
+  /** Lượt chậm nhất của MỘT lần chạy (ms) — phân biệt «một câu chậm» với «nhiều câu nhanh» (N+1). */
+  maxOne: number;
+  /** Lần chạy chậm nhất (để EXPLAIN đúng câu, đúng tham số) — chỉ trong bộ nhớ. */
+  slowest: CapturedQuery;
+};
+
+/** Gộp các lượt đo theo hình dạng ⇒ top-N theo trung vị ms. Rỗng ⇒ []. HÀM THUẦN. */
+export function topQueries(samples: readonly (readonly CapturedQuery[])[], n: number): TopQuery[] {
+  const per = new Map<string, { block: string; ms: number[]; calls: number[]; rows: number[]; maxOne: number; slowest: CapturedQuery }>();
+  for (const sample of samples) {
+    const inSample = new Map<string, { ms: number; calls: number; rows: number }>();
+    for (const q of sample) {
+      const h = shapeHash(q.text);
+      const cur = inSample.get(h) ?? { ms: 0, calls: 0, rows: 0 };
+      cur.ms += q.ms;
+      cur.calls += 1;
+      cur.rows += Math.max(0, q.rows);
+      inSample.set(h, cur);
+      const agg = per.get(h) ?? { block: queryBlockOf(q.text), ms: [], calls: [], rows: [], maxOne: 0, slowest: q };
+      if (q.ms >= agg.maxOne) {
+        agg.maxOne = q.ms;
+        agg.slowest = q;
+      }
+      per.set(h, agg);
+    }
+    for (const [h, v] of inSample) {
+      const agg = per.get(h)!;
+      agg.ms.push(v.ms);
+      agg.calls.push(v.calls);
+      agg.rows.push(v.rows);
+    }
+  }
+  return [...per.entries()]
+    .map(([hash, a]) => ({ block: a.block, hash, ms: trungVi(a.ms) ?? 0, calls: trungVi(a.calls) ?? 0, rows: trungVi(a.rows) ?? 0, maxOne: a.maxOne, slowest: a.slowest }))
+    .sort((x, y) => y.ms - x.ms || x.hash.localeCompare(y.hash))
+    .slice(0, Math.max(0, n));
+}
+
+type PlanNode = Record<string, unknown> & { Plans?: PlanNode[] };
+
+/** Gốc kế hoạch từ kết quả `EXPLAIN (FORMAT JSON)` (pg trả đối tượng, PGlite có thể trả chuỗi). Không đọc được ⇒ null. HÀM THUẦN. */
+export function planRootOf(cell: unknown): PlanNode | null {
+  let v: unknown = cell;
+  if (typeof v === "string") {
+    try {
+      v = JSON.parse(v);
+    } catch {
+      return null;
+    }
+  }
+  const first = Array.isArray(v) ? v[0] : v;
+  const plan = first && typeof first === "object" ? (first as { Plan?: unknown }).Plan : null;
+  return plan && typeof plan === "object" ? (plan as PlanNode) : null;
+}
+
+const num = (x: unknown) => (typeof x === "number" && Number.isFinite(x) ? Math.round(x) : null);
+const word = (x: unknown) => (typeof x === "string" && /^[A-Za-z0-9_ .$()-]{1,80}$/.test(x) ? x : null);
+
+/**
+ * CẤU TRÚC kế hoạch cho kênh CÔNG KHAI: loại nút · bảng · chỉ mục · quan hệ cha (SubPlan / InitPlan) · số dòng ước tính · cost. KHÔNG
+ * điều kiện lọc / Index Cond / Output (chúng mang hằng số). Tên bảng / chỉ mục chỉ in khi là định danh trơn. Dòng đầu là tóm tắt
+ * (số nút · số SubPlan · bảng bị Seq Scan). HÀM THUẦN.
+ */
+export function planStructure(root: PlanNode | null, maxLines: number = PLAN_PUBLIC_LINES): string[] {
+  if (!root) return ["kế hoạch: không đọc được"];
+  const lines: string[] = [];
+  let nodes = 0;
+  let subplans = 0;
+  let neverRun = 0;
+  const seq = new Set<string>();
+  const walk = (n: PlanNode, depth: number) => {
+    nodes += 1;
+    const type = word(n["Node Type"]) ?? "?";
+    const rel = word(n["Relation Name"]);
+    const idx = word(n["Index Name"]);
+    const parent = word(n["Parent Relationship"]);
+    const sub = word(n["Subplan Name"]);
+    if (parent === "SubPlan" || parent === "InitPlan") subplans += 1;
+    if (type === "Seq Scan" && rel) seq.add(rel);
+    const loops = num(n["Actual Loops"]);
+    const actual = typeof n["Actual Total Time"] === "number" && loops !== null ? ` · THẬT ${Math.round((n["Actual Total Time"] as number) * loops)} ms (${loops} vòng × ${num(n["Actual Rows"]) ?? "?"} dòng)` : "";
+    if (loops === 0) neverRun += 1;
+    lines.push(
+      `${"  ".repeat(Math.min(depth, 8))}${sub ? `[${sub}] ` : parent && parent !== "Outer" && parent !== "Inner" && parent !== "Member" ? `[${parent}] ` : ""}${type}${rel ? ` on ${rel}` : ""}${idx ? ` using ${idx}` : ""} · ~${num(n["Plan Rows"]) ?? "?"} dòng · cost ${num(n["Total Cost"]) ?? "?"}${actual}`,
+    );
+    for (const c of n.Plans ?? []) walk(c, depth + 1);
+  };
+  walk(root, 0);
+  const ran = typeof root["Actual Total Time"] === "number" ? ` · THẬT ${Math.round(root["Actual Total Time"] as number)} ms · ${neverRun} nút KHÔNG chạy lần nào` : "";
+  const head = `${nodes} nút · ${subplans} SubPlan/InitPlan · Seq Scan: ${seq.size ? [...seq].sort().join(", ") : "không"} · cost gốc ${num(root["Total Cost"]) ?? "?"}${ran}`;
+  const body = lines.slice(0, Math.max(0, maxLines - 1));
+  return [head, ...body, ...(lines.length > body.length ? [`… (+${lines.length - body.length} nút)`] : [])];
+}
+
+/** Kế hoạch ĐỦ ĐIỀU KIỆN cho phần MÃ HOÁ (có Filter / Index Cond — mang hằng số của câu). Mỗi dòng ≤ 300 ký tự. HÀM THUẦN. */
+export function planDetail(root: PlanNode | null, maxLines: number = PLAN_PRIVATE_LINES): string[] {
+  if (!root) return ["kế hoạch: không đọc được"];
+  const out: string[] = [];
+  const keys = ["Filter", "Index Cond", "Recheck Cond", "Join Filter", "Hash Cond", "Merge Cond", "Sort Key", "Group Key"];
+  const walk = (n: PlanNode, depth: number) => {
+    const pad = "  ".repeat(Math.min(depth, 8));
+    out.push(`${pad}${String(n["Subplan Name"] ?? n["Parent Relationship"] ?? "")} ${String(n["Node Type"] ?? "?")} ${String(n["Relation Name"] ?? "")} ${String(n["Index Name"] ?? "")} rows=${String(n["Plan Rows"] ?? "?")} cost=${String(n["Total Cost"] ?? "?")}`.slice(0, 300));
+    for (const k of keys) if (n[k] !== undefined) out.push(`${pad}  ${k}: ${typeof n[k] === "string" ? n[k] : JSON.stringify(n[k])}`.slice(0, 300));
+    for (const c of n.Plans ?? []) walk(c, depth + 1);
+  };
+  walk(root, 0);
+  return out.slice(0, maxLines);
+}
+
+/** Chẩn đoán «chưa đọc» 0245 của MỘT tổ chức. `null` ở từng trường = CHƯA ĐỌC ĐƯỢC (không phải 0 / không). */
+export type InboxDiag = {
+  /** Số cột 0245 có trên CSDL tổ chức (2 = đủ). */
+  columns: number | null;
+  /** Đường đọc hộp thư đang dùng: `true` = lưu sẵn 0245; `false` = tính trực tiếp bằng hàm #803 (đắt cho từng hội thoại). */
+  materialized: boolean | null;
+  conversations: number | null;
+  /** Hội thoại có `turn_unhandled` NULL — mỗi dòng như vậy rơi về phép tính trực tiếp trong bộ đếm + khoá xếp. */
+  nullTurns: number | null;
+  migrationsApplied: number | null;
+  migrationsInRepo: number | null;
+  pgVersion: string | null;
+  /** Cỡ cột `state` (byte, SAU NÉN — `pg_column_size`, không giải nén). */
+  stateBytes?: { avg: number | null; p95: number | null; max: number | null };
+  /** Nhánh cấp một lớn nhất của `state` trên 200 hội thoại mới nhất (tên khoá do mã đặt) — byte trung bình. */
+  stateKeys?: { key: string; avg: number }[];
+};
+
+const yn = (x: boolean | null, yes: string, no: string) => (x === null ? "—" : x ? yes : no);
+/** Một dòng công khai của chẩn đoán (số đếm, không dữ liệu khách). HÀM THUẦN. */
+const kb = (b: number | null) => (b === null ? "—" : `${(b / 1024).toFixed(1).replace(".", ",")} KB`);
+/** Dòng công khai cỡ `state` (byte + tên khoá do mã đặt). `null` nếu chưa đọc được. HÀM THUẦN. */
+export function stateLine(label: string, d: InboxDiag): string | null {
+  if (!d.stateBytes) return null;
+  const keys = (d.stateKeys ?? []).filter((k) => /^[A-Za-z_][A-Za-z0-9_]{0,40}$/.test(k.key)).slice(0, 6);
+  return `${label} cột state hội thoại (sau nén): TB ${kb(d.stateBytes.avg)} · p95 ${kb(d.stateBytes.p95)} · max ${kb(d.stateBytes.max)} · nhánh lớn nhất (200 hội thoại mới nhất): ${keys.length ? keys.map((k) => `${k.key} ~${kb(k.avg)}`).join(" · ") : "—"}`;
+}
+
+export function diagLine(label: string, d: InboxDiag): string {
+  const cols = d.columns === null ? "—" : d.columns === 2 ? "đủ 2/2" : `THIẾU (${d.columns}/2)`;
+  const nulls = d.nullTurns === null ? "—" : `${d.nullTurns}/${d.conversations ?? "—"}`;
+  return `${label} chẩn đoán «chưa đọc» 0245: cột ${cols} · đường đọc ${yn(d.materialized, "LƯU SẴN", "TÍNH TRỰC TIẾP (hàm #803 cho từng hội thoại)")} · turn_unhandled NULL ${nulls} · migration đã áp ${d.migrationsApplied ?? "—"} (sổ kho ${d.migrationsInRepo ?? "—"}) · PG ${d.pgVersion ?? "—"}`;
+}
+
+/** Dòng công khai của một hình dạng chậm. HÀM THUẦN. */
+export function topLine(label: string, i: number, t: TopQuery): string {
+  return `${label} câu chậm #${i + 1} ${t.block} [${t.hash}]: ${Math.round(t.ms)} ms/lượt · ${t.calls} lần/lượt · lần chậm nhất ${Math.round(t.maxOne)} ms · ${t.rows} dòng`;
+}
+
 /** Một lượt dựng đường máy chủ của trang. `error` khác `null` ⇒ lượt hỏng, không vào thống kê. */
 export type RenderSample = {
   ms: number;
@@ -149,6 +384,8 @@ export type RenderSample = {
   /** Số mục trên dòng thời gian của hội thoại (lượt CHUYỂN). */
   items: number | null;
   error: string | null;
+  /** Từng câu của lượt (chữ + tham số CHỈ trong bộ nhớ — không in) — chỉ có ở lượt TẢI. */
+  captured?: CapturedQuery[];
 };
 
 export type IdentityKind = "VIEW_ONLY_ACCOUNT" | "NARROWED";
@@ -156,9 +393,12 @@ export type OrgPerf = {
   code: string;
   identity: { kind: IdentityKind; userId: string; role: string; fromRole: string } | null;
   result:
-    | { ok: true; load: { cold: RenderSample[]; warm: RenderSample[] }; switchTo: { cold: RenderSample[]; warm: RenderSample[] }; conversations: number }
+    | { ok: true; load: { cold: RenderSample[]; warm: RenderSample[] }; switchTo: { cold: RenderSample[]; warm: RenderSample[] }; conversations: number; diag?: InboxDiag | null; slow?: SlowReport }
     | { ok: false; error: string };
 };
+
+/** Câu chậm nhất của lượt TẢI nguội + kế hoạch (EXPLAIN không ANALYZE) của vài hình dạng đầu. */
+export type SlowReport = { top: TopQuery[]; plans: { hash: string; block: string; structure: string[]; detail: string[] }[] };
 
 export type InboxPerfReport = { verdict: "MEASURED" | "INCOMPLETE"; publicLines: string[]; labels: Map<string, string>; failedSamples: number };
 
@@ -181,7 +421,7 @@ export function publicLabels(codes: readonly string[], acceptance: readonly stri
  *  · Dưới `THIN_SAMPLE` quan sát ở một chuỗi ⇒ «mẫu nhỏ — chưa kết luận».
  *  · `INCOMPLETE` khi không có tổ chức nào, có tổ chức đo hỏng, hoặc có lượt hỏng.
  */
-export function summarizeInboxPerf(orgs: readonly OrgPerf[], opts: { samples: number; acceptanceCodes?: readonly string[]; cappedFrom?: number | null } = { samples: DEFAULT_SAMPLES }): InboxPerfReport {
+export function summarizeInboxPerf(orgs: readonly OrgPerf[], opts: { samples: number; acceptanceCodes?: readonly string[]; cappedFrom?: number | null; top?: number } = { samples: DEFAULT_SAMPLES }): InboxPerfReport {
   const labels = publicLabels(
     orgs.map((o) => o.code),
     opts.acceptanceCodes ?? ACCEPTANCE_CODES,
@@ -216,6 +456,14 @@ export function summarizeInboxPerf(orgs: readonly OrgPerf[], opts: { samples: nu
     body.push(
       `${label} tải hộp thư (ms): nguội ${triple(loadCold)} · ấm ${triple(loadWarm)} (n=${loadCold.n}/${loadWarm.n}) · listInbox nguội p50 ${ms(listCold.p50)} · SQL nguội p50 ${ms(sqlCold.p50)} ms / ${ms(qCold.p50)} câu · hàng ${rows ? `${rows.rows}/${rows.total ?? "—"}` : "—"}${thin(loadCold, loadWarm)}`,
     );
+    if (r.diag) body.push(diagLine(label, r.diag));
+    const sl = r.diag ? stateLine(label, r.diag) : null;
+    if (sl) body.push(sl);
+    if (r.slow) {
+      const n = opts.top ?? (orgs.length === 1 ? TOP_SINGLE_ORG : TOP_MANY_ORGS);
+      r.slow.top.slice(0, n).forEach((t, i) => body.push(topLine(label, i, t)));
+      for (const p of r.slow.plans) body.push(...p.structure.map((l, i) => `${label} kế hoạch [${p.hash}] ${p.block}${i === 0 ? ": " : " │ "}${l}`));
+    }
     if (r.conversations === 0) {
       body.push(`${label} chuyển hội thoại: 0 hội thoại — không đo được (${THIN_LABEL})`);
       continue;
@@ -254,12 +502,126 @@ export function privateLinesOf(o: OrgPerf, label: string): string[] {
     ...r.load.warm.map((s, i) => one("tải ấm", s, i)),
     ...r.switchTo.cold.map((s, i) => one("chuyển nguội", s, i)),
     ...r.switchTo.warm.map((s, i) => one("chuyển ấm", s, i)),
+    ...(r.slow?.top ?? []).flatMap((t) => {
+      const shape = fullShape(t.slowest.text);
+      return [`  hình dạng [${t.hash}] ${t.block}: ${shape.slice(0, 280)}`, ...(shape.length > 280 ? [`    … ${shape.slice(280, 560)}${shape.length > 560 ? ` … (+${shape.length - 560} ký tự)` : ""}`] : [])];
+    }),
+    ...(r.slow?.plans ?? []).flatMap((p) => [`  kế hoạch đủ [${p.hash}] ${p.block}:`, ...p.detail.map((l) => `    ${l}`)]),
   ];
 }
 
 // ─────────────────────────── ĐO (chỉ đọc, qua ĐÚNG hàm của trang) ───────────────────────────
 
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e)).split("\n")[0].slice(0, 300);
+
+/*
+  BẮT TỪNG CÂU: bọc `query` của client CSDL tổ chức (`db.$client` — bể pg hoặc PGlite; cả hai đều là `query(text|config, values)`).
+  Lớp bọc của db/index.ts (`instrumentQueries`) chỉ ghi chữ câu; cần cả tham số để EXPLAIN đúng câu. Bọc MỘT lần mỗi client (WeakMap
+  giữ hàm gốc), chỉ ghi khi `sink` đang mở — ngoài lượt đo không tốn gì. Không đổi câu nào, không chạy thêm câu nào.
+*/
+type QueryFn = (...args: unknown[]) => Promise<unknown>;
+export const EXPLAIN_PLAN_ONLY = "EXPLAIN (FORMAT JSON)";
+export const EXPLAIN_RUN = "EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)";
+const originals = new WeakMap<object, QueryFn>();
+let sink: CapturedQuery[] | null = null;
+
+function argText(args: readonly unknown[]): string {
+  const a = args[0];
+  if (typeof a === "string") return a;
+  if (a && typeof a === "object" && "text" in a) return String((a as { text: unknown }).text);
+  return "(không rõ)";
+}
+function argValues(args: readonly unknown[]): unknown[] {
+  if (Array.isArray(args[1])) return args[1] as unknown[];
+  const a = args[0];
+  if (a && typeof a === "object" && Array.isArray((a as { values?: unknown }).values)) return (a as { values: unknown[] }).values;
+  return [];
+}
+
+/** Bọc client của handle `db` (một lần). Trả hàm `query` GỐC — EXPLAIN gọi thẳng nó để không tự ghi vào lượt đo. */
+export function installCapture(db: unknown): QueryFn | null {
+  const client = (db as { $client?: unknown } | null)?.$client;
+  if (!client || typeof client !== "object" || typeof (client as { query?: unknown }).query !== "function") return null;
+  const known = originals.get(client);
+  if (known) return known;
+  const c = client as { query: QueryFn };
+  const original = c.query.bind(c) as QueryFn;
+  originals.set(client, original);
+  c.query = async (...args: unknown[]) => {
+    const target = sink;
+    if (!target) return original(...args);
+    const t = performance.now();
+    let rows = -1;
+    try {
+      const r = (await original(...args)) as { rows?: unknown[] } | undefined;
+      rows = r?.rows?.length ?? 0;
+      return r;
+    } finally {
+      target.push({ text: argText(args), values: argValues(args), ms: performance.now() - t, rows });
+    }
+  };
+  return original;
+}
+
+/**
+ * `EXPLAIN (FORMAT JSON)` — mặc định KHÔNG ANALYZE: chỉ lập kế hoạch, câu không chạy. `analyze` (cờ `--analyze`, chỉ khi `--org`) ⇒ chạy
+ * câu SELECT thêm MỘT lần (CSDL ép chỉ đọc) để có thời gian thật từng nút. Hỏng ⇒ null (kế hoạch «không đọc được»).
+ */
+export async function explainPlan(original: QueryFn, q: CapturedQuery, analyze = false): Promise<ReturnType<typeof planRootOf>> {
+  try {
+    const r = (await original(`${analyze ? EXPLAIN_RUN : EXPLAIN_PLAN_ONLY} ${q.text}`, [...q.values])) as { rows?: Record<string, unknown>[] } | undefined;
+    const row = r?.rows?.[0];
+    return planRootOf(row ? (row["QUERY PLAN"] ?? Object.values(row)[0]) : null);
+  } catch {
+    return null;
+  }
+}
+
+/** Số migration trong sổ của kho (script chạy từ main ⇒ sổ của main; image có thể cũ hơn). Không đọc được ⇒ null. */
+function migrationsInRepo(): number | null {
+  try {
+    const j = JSON.parse(readFileSync("drizzle/meta/_journal.json", "utf8")) as { entries?: unknown[] };
+    return Array.isArray(j.entries) ? j.entries.length : null;
+  } catch {
+    return null;
+  }
+}
+
+async function scalar(db: Db, q: SQL, key: string): Promise<unknown> {
+  try {
+    const [r] = rowsOf<Record<string, unknown>>(await db.execute(q));
+    return r?.[key] ?? null;
+  } catch {
+    return null;
+  }
+}
+const asNum = (x: unknown) => (x === null || x === undefined || !Number.isFinite(Number(x)) ? null : Number(x));
+
+/** Chẩn đoán 0245 của tổ chức hiện hành (trong `withOrganization`) — mỗi phép đọc độc lập, hỏng ⇒ trường đó `null`. */
+export async function inboxDiagnostics(): Promise<InboxDiag> {
+  const db = await getDb();
+  const columns = asNum(await scalar(db, sql`select count(*)::int as n from information_schema.columns where table_schema = current_schema() and table_name = 'sales_chat_conversations' and column_name in ('turn_unhandled', 'last_read_at')`, "n"));
+  clearMemo();
+  const materialized = await inboxUnreadMaterialized().catch(() => null);
+  const conversations = asNum(await scalar(db, sql`select count(*)::int as n from "sales_chat_conversations" where "channel" <> 'TEST'`, "n"));
+  const nullTurns = columns === 2 ? asNum(await scalar(db, sql`select count(*)::int as n from "sales_chat_conversations" where "channel" <> 'TEST' and "turn_unhandled" is null`, "n")) : null;
+  const migrationsApplied = asNum(await scalar(db, sql`select count(*)::int as n from "drizzle"."__drizzle_migrations"`, "n"));
+  const version = await scalar(db, sql`show server_version`, "server_version");
+  let stateBytes: InboxDiag["stateBytes"];
+  let stateKeys: InboxDiag["stateKeys"];
+  try {
+    const [r] = rowsOf<Record<string, unknown>>(
+      await db.execute(sql`select avg(pg_column_size("state"))::int as a, (percentile_cont(0.95) within group (order by pg_column_size("state")))::int as p, max(pg_column_size("state"))::int as m from "sales_chat_conversations" where "channel" <> 'TEST'`),
+    );
+    stateBytes = { avg: asNum(r?.a), p95: asNum(r?.p), max: asNum(r?.m) };
+    stateKeys = rowsOf<{ k: string; b: number }>(
+      await db.execute(sql`select e.key as k, avg(pg_column_size(e.value))::int as b from (select "state" as s from "sales_chat_conversations" where "channel" <> 'TEST' and jsonb_typeof("state") = 'object' order by "updated_at" desc limit 200) x, jsonb_each(x.s) e group by e.key order by b desc limit 8`),
+    ).map((x) => ({ key: String(x.k), avg: Number(x.b) }));
+  } catch {
+    stateBytes = undefined;
+  }
+  return { columns, materialized, conversations, nullTurns, migrationsApplied, migrationsInRepo: migrationsInRepo(), pgVersion: version === null ? null : String(version).slice(0, 40), stateBytes, stateKeys };
+}
 
 /** Bộ lọc MẶC ĐỊNH của page.tsx (không tham số URL nào) — đúng đối tượng `listInbox` nhận khi mở hộp thư. */
 const DEFAULT_LIST_QUERY = { filter: "ALL", channel: null, q: "", label: null, page: null, phone: null, level: null, assignee: null, period: null, from: null, to: null, limit: 100, handler: null } as const;
@@ -277,6 +639,8 @@ export async function renderInboxServerPath(user: SessionUser, selected: string 
   let rows: number | null = null;
   let total: number | null = null;
   let ids: string[] = [];
+  const captured: CapturedQuery[] = [];
+  sink = selected ? null : captured;
   const { stats } = await probe(
     "inbox-perf-probe",
     async () => {
@@ -310,8 +674,10 @@ export async function renderInboxServerPath(user: SessionUser, selected: string 
       }
     },
     { top: 0 },
-  );
-  const sample: RenderSample = { ms: performance.now() - t0, listMs, threadMs, sqlMs: stats.queries > 0 ? stats.dbMs : null, queries: stats.queries > 0 ? stats.queries : null, rows, total, items, error };
+  ).finally(() => {
+    sink = null;
+  });
+  const sample: RenderSample = { ms: performance.now() - t0, listMs, threadMs, sqlMs: stats.queries > 0 ? stats.dbMs : null, queries: stats.queries > 0 ? stats.queries : null, rows, total, items, error, ...(selected ? {} : { captured }) };
   return { sample, ids };
 }
 
@@ -338,7 +704,13 @@ export async function switchConversationPath(user: SessionUser, id: string): Pro
 }
 
 /** Lượt đo của MỘT tổ chức — chạy BÊN TRONG `withOrganization(code)`. Không ném: lỗi của từng lượt nằm trong `error` của lượt đó. */
-export async function measureInbox(user: SessionUser, samples: number): Promise<{ load: { cold: RenderSample[]; warm: RenderSample[] }; switchTo: { cold: RenderSample[]; warm: RenderSample[] }; conversations: number }> {
+export async function measureInbox(
+  user: SessionUser,
+  samples: number,
+  opts: { explain?: boolean; analyze?: boolean; top?: number } = {},
+): Promise<{ load: { cold: RenderSample[]; warm: RenderSample[] }; switchTo: { cold: RenderSample[]; warm: RenderSample[] }; conversations: number; diag: InboxDiag | null; slow: SlowReport }> {
+  const original = installCapture(await getDb());
+  const diag = await inboxDiagnostics().catch(() => null);
   // Lượt mồi (không tính): mở kết nối, nạp mô-đun lười — chi phí một lần của tiến trình, không phải của người dùng.
   const warmup = await renderInboxServerPath(user, null);
   const load = { cold: [] as RenderSample[], warm: [] as RenderSample[] };
@@ -357,7 +729,20 @@ export async function measureInbox(user: SessionUser, samples: number): Promise<
     switchTo.cold.push(await switchConversationPath(user, id));
     switchTo.warm.push(await switchConversationPath(user, id));
   }
-  return { load, switchTo, conversations: pick.length };
+  // Câu chậm nhất: CHỈ lượt TẢI nguội (điều kiện xấu nhất, như số công khai); chữ + tham số rời khỏi mẫu ngay sau khi gộp.
+  const top = topQueries(
+    load.cold.filter((x) => x.error === null).map((x) => x.captured ?? []),
+    Math.max(opts.top ?? TOP_SINGLE_ORG, EXPLAIN_SHAPES),
+  );
+  for (const s of [...load.cold, ...load.warm]) delete s.captured;
+  const plans: SlowReport["plans"] = [];
+  if (opts.explain && original) {
+    for (const t of top.slice(0, EXPLAIN_SHAPES)) {
+      const root = await explainPlan(original, t.slowest, Boolean(opts.analyze));
+      plans.push({ hash: t.hash, block: t.block, structure: planStructure(root), detail: planDetail(root) });
+    }
+  }
+  return { load, switchTo, conversations: pick.length, diag, slow: { top, plans } };
 }
 
 /**
@@ -437,7 +822,7 @@ const defaultDeps: CollectDeps = {
 };
 
 /** Đo từng tổ chức. Không ném: tổ chức hỏng ⇒ `result.ok = false` kèm câu lỗi (chỉ phần mã hoá). */
-export async function collectInboxPerf(codes: readonly string[], samples: number, deps: Partial<CollectDeps> = {}): Promise<OrgPerf[]> {
+export async function collectInboxPerf(codes: readonly string[], samples: number, deps: Partial<CollectDeps> = {}, opts: { explain?: boolean; analyze?: boolean; top?: number } = {}): Promise<OrgPerf[]> {
   const d = { ...defaultDeps, ...deps };
   const out: OrgPerf[] = [];
   for (const code of codes) {
@@ -456,7 +841,7 @@ export async function collectInboxPerf(codes: readonly string[], samples: number
           if (!(await d.orgReadOnly())) return { code, identity: null, result: { ok: false, error: "DỪNG: CSDL tổ chức KHÔNG ở chế độ chỉ đọc — không đo." } };
           const reader = await inboxReader(org);
           if (!reader.ok) return { code, identity: null, result: { ok: false, error: reader.error } };
-          return { code, identity: reader.identity, result: { ok: true, ...(await measureInbox(reader.user, samples)) } };
+          return { code, identity: reader.identity, result: { ok: true, ...(await measureInbox(reader.user, samples, opts)) } };
         }),
       );
     } catch (e) {
@@ -494,8 +879,10 @@ async function main() {
   }
   if (process.env.ERP_PERF_PROBE !== "1") console.log("Bộ đếm câu SQL chưa bật (ERP_PERF_PROBE) — cột SQL in «—».");
   const { codes, cappedFrom } = await pickOrganizations(args.org);
-  const orgs = await collectInboxPerf(codes, args.samples);
-  const report = summarizeInboxPerf(orgs, { samples: args.samples, cappedFrom });
+  // EXPLAIN chỉ khi đo MỘT tổ chức (`--org`): kênh tóm tắt có trần 60 dòng, và đó là lượt đi tìm câu chậm.
+  const top = codes.length === 1 ? TOP_SINGLE_ORG : TOP_MANY_ORGS;
+  const orgs = await collectInboxPerf(codes, args.samples, {}, { explain: Boolean(args.org), analyze: args.analyze, top });
+  const report = summarizeInboxPerf(orgs, { samples: args.samples, cappedFrom, top });
   for (const o of orgs) for (const l of privateLinesOf(o, report.labels.get(o.code) ?? o.code)) console.log(l);
   for (const l of report.publicLines) tomTat(l);
   process.exit(report.verdict === "MEASURED" ? 0 : 1);

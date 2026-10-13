@@ -36,7 +36,7 @@ import { INBOX_OUTCOME_LABEL } from "@/lib/sales-chatbot/inbox-shared";
 import { classifyInboxState, needsHumanReasonSql } from "@/lib/sales-chatbot/inbox-states";
 import { customerComplaintSignal, customerNotReceivedSignal, customerPhaseOf, customerReceiptClaim, postSalePrompt, type LifecycleSnapshot } from "@/lib/sales-chatbot/lifecycle";
 import { orderPanelCallError, INBOX_ORDER_READ_FAILED } from "@/lib/sales-chatbot/order-verification-shared";
-import { customerRequestKinds, LEGACY_POST_ORDER_REASON_PREFIX, releaseLegacyPostOrderHandoffs, releaseVerdict } from "@/lib/sales-chatbot/postorder-release";
+import { customerRequestKinds, LEGACY_POST_ORDER_REASON_PREFIX, releaseLegacyPostOrderHandoffs, releaseSummaryLines, releaseVerdict, rollbackPostOrderRelease } from "@/lib/sales-chatbot/postorder-release";
 import { parseReleaseArgs } from "@/scripts/sales-postorder-handoff-release";
 
 const ORG = "hau-mai-ai-dung";
@@ -157,9 +157,10 @@ function testSource() {
   assert.match(ops, /OPS_THAO_TAC_MA_HOA: "[^"]*\bsales-postorder-handoff-release\b/);
   assert.match(ops, /DOC_NANG="[^"]*\bsales-postorder-handoff-release\b/);
   assert.match(ops, /sales-postorder-handoff-release\)\n[\s\S]*?scripts\/sales-postorder-handoff-release\.ts ;;/);
-  assert.deepEqual(parseReleaseArgs(["hslc"]), { ok: true, args: { code: "hslc", all: false, apply: false } }, "mặc định CHẠY THỬ");
-  assert.deepEqual(parseReleaseArgs(["--all", "--apply"]), { ok: true, args: { code: null, all: true, apply: true } });
-  for (const bad of [[], ["HSLC"], ["a", "--all"], ["a", "--force"]]) assert.ok(!parseReleaseArgs(bad).ok, JSON.stringify(bad));
+  assert.deepEqual(parseReleaseArgs(["hslc"]), { ok: true, args: { code: "hslc", all: false, apply: false, limit: 10, rollback: null } }, "mặc định CHẠY THỬ, lượt 10");
+  assert.deepEqual(parseReleaseArgs(["--all", "--apply", "--limit=5"]), { ok: true, args: { code: null, all: true, apply: true, limit: 5, rollback: null } });
+  assert.deepEqual(parseReleaseArgs(["hslc", "--rollback=rel-20261013101500-ab12"]), { ok: true, args: { code: "hslc", all: false, apply: false, limit: 10, rollback: "rel-20261013101500-ab12" } }, "hoàn tác không --apply ⇒ chạy thử");
+  for (const bad of [[], ["HSLC"], ["a", "--all"], ["a", "--force"], ["a", "--limit=0"], ["a", "--limit=101"], ["--all", "--rollback=rel-20261013101500-ab12"], ["a", "--rollback=xyz"]]) assert.ok(!parseReleaseArgs(bad).ok, JSON.stringify(bad));
   const now = new Date();
   assert.equal(releaseVerdict({ state: { control: { mode: "HUMAN" } }, assigneeUserId: null, assigneeActive: false, lastStaffAt: null, since: now }), "TAKEOVER");
   assert.equal(releaseVerdict({ state: {}, assigneeUserId: "u", assigneeActive: true, lastStaffAt: null, since: now }), "HELD_BY_PERSON");
@@ -293,6 +294,42 @@ async function testDb() {
       assert.deepEqual([ap2.candidates, ap2.released], [5, 0], "chạy lại không ghi thêm");
       const ev = await db.select({ n: sql<number>`count(*)::int` }).from(schema.salesConversationEvents).where(and(eq(schema.salesConversationEvents.conversationId, "o1"), eq(schema.salesConversationEvents.type, "ai.resumed")));
       assert.equal(ev[0]?.n, 1, "một vết ai.resumed");
+
+      // ═══ LƯỢT NHỎ + MÃ LƯỢT + HOÀN TÁC (chủ shop 13/10/2026) ═══
+      // r1..r3: ba hội thoại kẹt luật cũ, không ai cầm, bot đã trả lời sau tin khách cuối; r1 nhắn gần nhất, r3 có đơn đã chốt + lịch follow-up.
+      for (const [id, mins] of [["r1", 30], ["r2", 300], ["r3", 600]] as const)
+        await conv(id, { handoffReason: POST_ORDER_REASON, state: { handoff: { reason: POST_ORDER_REASON, at: ago(2000).toISOString() } }, handoffQueuedAt: ago(2000), lastCustomerAt: ago(mins), lastBotAt: ago(mins - 1), ...(id === "r3" ? { nextFollowupAt: new Date(now.getTime() + 60 * MIN), waitingSince: ago(500) } : {}) });
+      await db.insert(schema.orders).values({ id: "erp-r3-0000-4000-8000-000000000001", status: 1, stage: "CONFIRMED", insertedAt: ago(3000), salesConversationId: "r3" });
+      const counts = async () => ({
+        msgs: (await db.select({ n: sql<number>`count(*)::int` }).from(schema.salesChatMessages))[0]?.n ?? 0,
+        botSent: (await db.select({ n: sql<number>`count(*)::int` }).from(schema.salesChatInbound).where(eq(schema.salesChatInbound.note, "BOT_SENT")))[0]?.n ?? 0,
+        orders: (await db.select({ n: sql<number>`count(*)::int` }).from(schema.orders))[0]?.n ?? 0,
+      });
+      const before0 = await counts();
+      const plan = await releaseLegacyPostOrderHandoffs({ apply: false, now, limit: 3 });
+      assert.deepEqual(plan.plan.map((x) => x.id), ["r1", "r2", "r3"], "khách nhắn gần nhất trước");
+      assert.deepEqual([plan.plannedConfirmed, plan.plannedFresh, plan.plannedFollowup], [1, 1, 1], "tóm tắt: có đơn đã chốt 1 · tin ≤ 2h 1 · có lịch follow-up 1");
+      assert.deepEqual(plan.plan[2].order, { stage: "CONFIRMED", outcome: "NOT_SHIPPED" }, "đơn + ORDER_OUTCOME cho từng hội thoại");
+      assert.match(releaseSummaryLines(ORG, plan)[2], /trong 3 sẽ trả .*có đơn đã chốt 1 · tin khách cuối ≤ 2h 1 .*có lịch follow-up 1/);
+      const run = await releaseLegacyPostOrderHandoffs({ apply: true, now, limit: 2, runId: "rel-20261013101500-test" });
+      assert.equal(run.released, 2, "--limit=2 ⇒ trả đúng 2");
+      assert.deepEqual((await db.select({ id: c.id }).from(c).where(and(sql`${c.id} in ('r1','r2','r3')`, eq(c.status, "OPEN")))).map((r) => r.id).sort(), ["r1", "r2"]);
+      const evRun = await db.select({ id: schema.salesConversationEvents.conversationId, payload: schema.salesConversationEvents.payload }).from(schema.salesConversationEvents).where(sql`${schema.salesConversationEvents.payload}->>'runId' = 'rel-20261013101500-test'`);
+      assert.equal(evRun.length, 2);
+      assert.ok(evRun.every((e) => (e.payload as { before?: { status?: string; handoffReason?: string } }).before?.handoffReason === POST_ORDER_REASON && (e.payload as { before?: { status?: string } }).before?.status === "HANDOFF"), "sự kiện mang mã lượt + trạng thái trước");
+      // KHẲNG ĐỊNH: không gọi AI / không gửi / không tạo đơn / không đặt lịch follow-up.
+      assert.deepEqual(await counts(), before0, "release KHÔNG sinh câu bot, KHÔNG gửi, KHÔNG tạo đơn");
+      const r12 = await db.select({ w: c.waitingSince, f: c.nextFollowupAt, st: c.status }).from(c).where(sql`${c.id} in ('r1','r2')`);
+      assert.ok(r12.every((r) => r.w === null && r.f === null && r.st === "OPEN"), "release KHÔNG đặt WAITING / waiting_since / next_followup_at");
+      // r2 có câu bot SAU lúc trả ⇒ hoàn tác để nguyên; r1 chưa có gì ⇒ khôi phục HANDOFF với lý do + dấu hàng đợi cũ.
+      await db.update(c).set({ lastBotAt: new Date(now.getTime() + MIN) }).where(eq(c.id, "r2"));
+      const dryRb = await rollbackPostOrderRelease("rel-20261013101500-test", { apply: false, now });
+      assert.deepEqual([dryRb.found, dryRb.restored, dryRb.kept.map((k) => k.id)], [2, 0, ["r2"]], "chạy thử hoàn tác: không ghi");
+      const rb = await rollbackPostOrderRelease("rel-20261013101500-test", { apply: true, now });
+      assert.deepEqual([rb.restored, rb.kept.map((k) => k.id)], [1, ["r2"]]);
+      const r1 = (await db.select().from(c).where(eq(c.id, "r1")))[0];
+      assert.deepEqual([r1.status, r1.handoffReason, r1.handoffQueuedAt?.getTime(), (r1.state as { handoff?: { reason?: string } }).handoff?.reason], ["HANDOFF", POST_ORDER_REASON, ago(2000).getTime(), POST_ORDER_REASON], "r1 về đúng trạng thái trước");
+      assert.equal((await db.select({ s: c.status }).from(c).where(eq(c.id, "r2")))[0]?.s, "OPEN", "r2 có câu AI sau lúc trả ⇒ để nguyên");
     });
     await withOrganization(ORG2, async () => {
       const db = await getDb();

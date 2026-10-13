@@ -9,6 +9,8 @@ import { CUSTOMER_MESSAGE_ROW_SQL, customerInboundRowSql, STATE_HANDOFF_AT_SQL, 
 import { customerComplaintSignal, customerNotReceivedSignal } from "@/lib/sales-chatbot/lifecycle";
 import { foldVi } from "@/lib/sales-chatbot/text";
 import { rowsOf } from "@/lib/sql-rows";
+import { ORDER_OUTCOME, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
+import { RESUME_MAX_TURN_AGE_MS } from "@/lib/sales-chatbot/response-ownership";
 
 /**
  * ═══════════ TRẢ CHO AI CÁC HỘI THOẠI KẸT VÌ LUẬT CŨ «KHÁCH NHẮN SAU KHI CHỐT ĐƠN» (HOTFIX P0 12/10/2026) ═══════════
@@ -114,34 +116,81 @@ async function customerTextsSince(conv: { id: string; pageId: string | null; thr
   return out;
 }
 
-export async function releaseLegacyPostOrderHandoffs(opts: { apply: boolean; now?: Date }): Promise<ReleaseReport> {
+/** Mặc định / trần số hội thoại trả cho AI mỗi lượt `--apply` (chủ shop 13/10/2026: batch nhỏ, có rollback). */
+export const RELEASE_DEFAULT_LIMIT = 10;
+export const RELEASE_MAX_LIMIT = 100;
+/** Tin khách cuối trong chừng này ⇒ AI có thể trả lời lượt đó (`RESUME_MAX_TURN_AGE_MS` của #803 — 2 giờ). */
+export const RELEASE_FRESH_MS = RESUME_MAX_TURN_AGE_MS;
+
+/** Một hội thoại SẼ được trả (chạy thử) / ĐÃ trả (`--apply`) — chỉ in ở phần MÃ HOÁ. */
+export type ReleasePlanRow = { id: string; lastCustomerAgeMin: number | null; order: { stage: string; outcome: string | null } | null; followupWaiting: boolean };
+
+export type ReleaseReportBatch = ReleaseReport & { runId: string; limit: number; plan: ReleasePlanRow[]; plannedConfirmed: number; plannedFresh: number; plannedFollowup: number };
+
+/** Mã lượt trả cho AI — gắn vào từng sự kiện `ai.resumed` để `--rollback=<mã>` khôi phục đúng lượt đó. */
+export function newReleaseRunId(now: Date): string {
+  return `rel-${now.toISOString().replace(/[-:T]/g, "").slice(0, 14)}-${Math.random().toString(36).slice(2, 6)}`;
+}
+
+/** Đơn sống mới nhất nối với hội thoại + `ORDER_OUTCOME` (nguồn duy nhất). Chỉ đọc. */
+async function latestOrderOf(convId: string): Promise<{ stage: string; outcome: string | null } | null> {
+  const db = await getDb();
+  const [r] = rowsOf<{ stage: string; outcome: string | null }>(
+    await db.execute(sql`select "orders"."stage"::text as stage, ${ORDER_OUTCOME}::text as outcome from "orders"
+      left join "shipments" on "shipments"."order_id" = "orders"."id" and ${PRIMARY_ATTEMPT}
+      where ("orders"."sales_conversation_id" = ${convId} or "orders"."id" = (select c.order_id from "sales_chat_conversations" c where c.id = ${convId}))
+        and "orders"."stage" not in ('DELETED') order by "orders"."inserted_at" desc limit 1`),
+  );
+  return r ? { stage: r.stage, outcome: r.outcome } : null;
+}
+
+/**
+ * Trả cho AI theo LƯỢT NHỎ (chủ shop 13/10/2026). Thứ tự: khách nhắn gần nhất trước; tối đa `limit` hội thoại phán quyết RELEASE.
+ * KHẲNG ĐỊNH (bài kiểm khoá): lượt trả chỉ GHI TRẠNG THÁI hội thoại + một sự kiện + một nhật ký — KHÔNG gọi AI, KHÔNG gửi tin, KHÔNG đặt
+ * `WAITING` / `next_followup_at` / `waiting_since`, KHÔNG tạo / sửa đơn. Tin khách sau đó đi qua đường xử lý tin bình thường, nên hội
+ * thoại có đơn đã chốt vẫn theo luật hậu mãi #821 (giai đoạn khách, sửa đơn chốt ⇒ người, khiếu nại ⇒ người).
+ */
+export async function releaseLegacyPostOrderHandoffs(opts: { apply: boolean; now?: Date; limit?: number; runId?: string }): Promise<ReleaseReportBatch> {
   const now = opts.now ?? new Date();
+  const limit = Math.max(1, Math.min(RELEASE_MAX_LIMIT, opts.limit ?? RELEASE_DEFAULT_LIMIT));
+  const runId = opts.runId ?? newReleaseRunId(now);
   const db = await getDb();
   const rows = await db
     .select({
       id: C.id,
       pageId: C.pageId,
       threadId: C.threadId,
+      status: C.status,
       handoffReason: C.handoffReason,
       state: C.state,
       assigneeUserId: C.assigneeUserId,
       assigneeActive: schema.users.active,
       lastStaffAt: C.lastStaffAt,
+      lastCustomerAt: C.lastCustomerAt,
       queuedAt: C.handoffQueuedAt,
+      waitingSince: C.waitingSince,
+      nextFollowupAt: C.nextFollowupAt,
       waiting: WAITING_REPLY_SQL,
       handoffAt: STATE_HANDOFF_AT_SQL,
     })
     .from(C)
     .leftJoin(schema.users, eq(schema.users.id, C.assigneeUserId))
     .where(and(eq(C.status, "HANDOFF"), sql`${C.channel} <> 'TEST'`, like(C.handoffReason, `${LEGACY_POST_ORDER_REASON_PREFIX}%`)))
+    .orderBy(sql`${C.lastCustomerAt} desc nulls last`, asc(C.id))
     .limit(5000);
-  const report: ReleaseReport = {
+  const report: ReleaseReportBatch = {
     candidates: rows.length,
     byVerdict: Object.fromEntries(RELEASE_VERDICTS.map((v) => [v, 0])) as Record<ReleaseVerdict, number>,
     waiting: 0,
     requests: Object.fromEntries(CUSTOMER_REQUEST_KINDS.map((k) => [k, 0])) as Record<CustomerRequestKind, number>,
     released: 0,
     apply: opts.apply,
+    runId,
+    limit,
+    plan: [],
+    plannedConfirmed: 0,
+    plannedFresh: 0,
+    plannedFollowup: 0,
   };
   for (const r of rows) {
     const since = r.handoffAt ? new Date(r.handoffAt) : r.queuedAt;
@@ -151,7 +200,17 @@ export async function releaseLegacyPostOrderHandoffs(opts: { apply: boolean; now
     for (const k of requests) report.requests[k] += 1;
     const v = releaseVerdict({ state: r.state, assigneeUserId: r.assigneeUserId, assigneeActive: Boolean(r.assigneeActive), lastStaffAt: r.lastStaffAt, since, waiting, requests });
     report.byVerdict[v] += 1;
-    if (v !== "RELEASE" || !opts.apply || !r.handoffReason) continue;
+    if (v !== "RELEASE" || !r.handoffReason || report.plan.length >= limit) continue;
+    const order = await latestOrderOf(r.id);
+    const ageMs = r.lastCustomerAt ? now.getTime() - r.lastCustomerAt.getTime() : null;
+    const followupWaiting = r.waitingSince !== null || r.nextFollowupAt !== null;
+    report.plan.push({ id: r.id, lastCustomerAgeMin: ageMs === null ? null : Math.floor(ageMs / 60_000), order, followupWaiting });
+    if (order && !["NEW", "CANCELLED", "DELETED"].includes(order.stage)) report.plannedConfirmed += 1;
+    if (ageMs !== null && ageMs <= RELEASE_FRESH_MS) report.plannedFresh += 1;
+    if (followupWaiting) report.plannedFollowup += 1;
+    if (!opts.apply) continue;
+    const before = { status: r.status, handoffReason: r.handoffReason, handoffAt: r.handoffAt ? new Date(r.handoffAt).toISOString() : null, handoffQueuedAt: r.queuedAt ? r.queuedAt.toISOString() : null };
+    // CHỈ trạng thái giữ: không chạm waiting_since / next_followup_at / đơn; không gọi AI, không gửi.
     const done = await db
       .update(C)
       .set({ status: "OPEN", handoffReason: null, state: sql`${C.state} - 'handoff'`, humanCooldownUntil: null, ...HANDOFF_QUEUE_CLEAR, updatedAt: now })
@@ -159,17 +218,68 @@ export async function releaseLegacyPostOrderHandoffs(opts: { apply: boolean; now
       .returning({ id: C.id });
     if (!done.length) continue;
     report.released += 1;
-    await recordConversationEvent(r.id, { type: "ai.resumed", actorKind: "SYSTEM", actorUserId: null, occurredAt: now, reasonCode: "RETURNED", payload: { via: "POSTORDER_RELEASE", reason: r.handoffReason.slice(0, 200) }, key: `postorder-release:${r.id}` });
-    await audit({ userId: null, userEmail: MACHINE_EMAIL, action: "SALES_CHAT_POSTORDER_RELEASE", entity: "SALES_CONVERSATION", entityId: r.id, before: { status: "HANDOFF", handoffReason: r.handoffReason }, after: { status: "OPEN" }, reason: "Luật cũ «khách nhắn sau khi chốt đơn ⇒ chuyển người» đã bỏ (12/10/2026); không ai đang cầm, không yêu cầu nào chờ" });
+    await recordConversationEvent(r.id, { type: "ai.resumed", actorKind: "SYSTEM", actorUserId: null, occurredAt: now, reasonCode: "RETURNED", payload: { via: "POSTORDER_RELEASE", runId, before }, key: `postorder-release:${r.id}:${runId}` });
+    await audit({ userId: null, userEmail: MACHINE_EMAIL, action: "SALES_CHAT_POSTORDER_RELEASE", entity: "SALES_CONVERSATION", entityId: r.id, before, after: { status: "OPEN", runId }, reason: "Luật cũ «khách nhắn sau khi chốt đơn ⇒ chuyển người» đã bỏ (12/10/2026); không ai đang cầm, không yêu cầu nào chờ" });
   }
   return report;
 }
 
+export type RollbackReport = { runId: string; apply: boolean; found: number; restored: number; kept: { id: string; why: string }[] };
+
+/**
+ * `--rollback=<mã lượt>`: đưa các hội thoại của ĐÚNG lượt đó về `HANDOFF` với lý do / mốc / dấu hàng đợi CŨ (đọc từ payload `before` của
+ * sự kiện) — CHỈ khi sau lúc trả chưa có câu AI / nhân viên nào và hội thoại vẫn `OPEN`; có thì để nguyên và nói lý do. Mặc định chạy thử.
+ */
+export async function rollbackPostOrderRelease(runId: string, opts: { apply: boolean; now?: Date }): Promise<RollbackReport> {
+  const now = opts.now ?? new Date();
+  const db = await getDb();
+  const e = schema.salesConversationEvents;
+  const evs = await db
+    .select({ conversationId: e.conversationId, occurredAt: e.occurredAt, payload: e.payload })
+    .from(e)
+    .where(and(eq(e.type, "ai.resumed"), sql`${e.payload}->>'via' = 'POSTORDER_RELEASE'`, sql`${e.payload}->>'runId' = ${runId}`));
+  const out: RollbackReport = { runId, apply: opts.apply, found: evs.length, restored: 0, kept: [] };
+  for (const ev of evs) {
+    const before = (ev.payload as { before?: { handoffReason?: string | null; handoffAt?: string | null; handoffQueuedAt?: string | null } }).before;
+    if (!before?.handoffReason) {
+      out.kept.push({ id: ev.conversationId, why: "sự kiện thiếu trạng thái trước" });
+      continue;
+    }
+    const [c] = await db.select({ status: C.status, lastBotAt: C.lastBotAt, lastStaffAt: C.lastStaffAt }).from(C).where(eq(C.id, ev.conversationId)).limit(1);
+    if (!c) {
+      out.kept.push({ id: ev.conversationId, why: "không còn hội thoại" });
+      continue;
+    }
+    const at = ev.occurredAt.getTime();
+    if (c.status !== "OPEN") {
+      out.kept.push({ id: ev.conversationId, why: `trạng thái đã đổi (${c.status})` });
+      continue;
+    }
+    if ((c.lastBotAt && c.lastBotAt.getTime() > at) || (c.lastStaffAt && c.lastStaffAt.getTime() > at)) {
+      out.kept.push({ id: ev.conversationId, why: "đã có câu AI / nhân viên sau lúc trả" });
+      continue;
+    }
+    if (!opts.apply) continue;
+    const handoff = { reason: before.handoffReason, at: before.handoffAt ?? now.toISOString() };
+    const done = await db
+      .update(C)
+      .set({ status: "HANDOFF", handoffReason: before.handoffReason, state: sql`coalesce(${C.state}, '{}'::jsonb) || ${JSON.stringify({ handoff })}::jsonb`, handoffQueuedAt: before.handoffQueuedAt ? new Date(before.handoffQueuedAt) : now, updatedAt: now })
+      .where(and(eq(C.id, ev.conversationId), eq(C.status, "OPEN")))
+      .returning({ id: C.id });
+    if (!done.length) continue;
+    out.restored += 1;
+    await recordConversationEvent(ev.conversationId, { type: "handoff.requested", actorKind: "SYSTEM", actorUserId: null, occurredAt: now, reasonCode: "AFTER_ORDER", payload: { via: "POSTORDER_RELEASE_ROLLBACK", runId }, key: `postorder-release-rollback:${ev.conversationId}:${runId}` });
+    await audit({ userId: null, userEmail: MACHINE_EMAIL, action: "SALES_CHAT_POSTORDER_RELEASE_ROLLBACK", entity: "SALES_CONVERSATION", entityId: ev.conversationId, before: { status: "OPEN" }, after: { status: "HANDOFF", handoffReason: before.handoffReason, runId }, reason: `Hoàn tác lượt trả cho AI ${runId}` });
+  }
+  return out;
+}
+
 /** Dòng tóm tắt chỉ số đếm. HÀM THUẦN. */
-export function releaseSummaryLines(code: string, r: ReleaseReport): string[] {
+export function releaseSummaryLines(code: string, r: ReleaseReportBatch): string[] {
   return [
     `${code}: hội thoại kẹt luật cũ «sau khi chốt đơn» ${r.candidates} · ${RELEASE_VERDICTS.map((v) => `${RELEASE_VERDICT_LABEL[v]} ${r.byVerdict[v]}`).join(" · ")}`,
     `${code}: khách đang chờ câu trả lời ${r.waiting} · yêu cầu trong tin khách kể từ lúc chuyển: ${CUSTOMER_REQUEST_KINDS.map((k) => `${CUSTOMER_REQUEST_LABEL[k]} ${r.requests[k]}`).join(" · ")}`,
-    `${code}: ${r.apply ? `ĐÃ trả cho AI ${r.released}` : "CHẠY THỬ — chưa ghi gì (thêm --apply sau khi chủ shop duyệt)"}`,
+    `${code}: trong ${r.plan.length} sẽ trả (lượt tối đa ${r.limit}, khách nhắn gần nhất trước): có đơn đã chốt ${r.plannedConfirmed} · tin khách cuối ≤ 2h ${r.plannedFresh} (AI có thể trả lời) · có lịch follow-up ${r.plannedFollowup}`,
+    `${code}: ${r.apply ? `ĐÃ trả cho AI ${r.released} · mã lượt ${r.runId} (hoàn tác: --rollback=${r.runId} --apply)` : "CHẠY THỬ — chưa ghi gì (thêm --apply sau khi chủ shop duyệt)"}`,
   ];
 }
