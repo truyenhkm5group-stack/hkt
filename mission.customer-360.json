@@ -23,18 +23,18 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-11T02:47:25.541Z",
-  "updated_at": "2026-10-12T10:13:26.934Z",
-  "last_heartbeat": "2026-10-12T10:13:26.934Z",
+  "updated_at": "2026-10-13T01:04:02.882Z",
+  "last_heartbeat": "2026-10-13T01:04:02.882Z",
   "definition_of_done": [],
   "handoff": {
     "branch": "fix/customer-360",
-    "sha": "238e8a7b90ebb4fa94bd5f50fe6447a110bc2de5",
-    "at": "2026-10-12T10:13:26.934Z",
+    "sha": "83dd92b2772e95c71d8b647fddebd8601360bfc0",
+    "at": "2026-10-13T01:04:02.882Z",
     "actor": "DESKTOP-56TH98Y:wt-p0-c360",
     "title": "P0/P1 nhận diện khách cũ: Customer 360 dùng chung (danh tính PSID/page/Pancake/ERP/SĐT, địa chỉ đã xác minh gần nhất, đơn gần nhất), «địa chỉ cũ» ⇒ tra trước khi hỏi, đề xuất xác nhận; không nạp cả lịch sử vào model",
-    "summary": "Sửa 4 lỗi review #804 @62f9aae9: (1) đơn ERP cùng mã luôn đè bản recent_orders Pancake (ORDER_OUTCOME hoàn không còn bị che), đơn ERP đã xoá bỏ luôn; (2) SĐT mới: tách cụm SĐT (phonesInText) + savedAddressPhone — số không xác minh / mức PHONE ⇒ lỗi để hỏi lại, không lùi về số cũ; (3) hồ sơ từ đơn cũ mang fromHistory ⇒ khối KHÁCH CŨ chỉ gợi ý qua use_saved_address + lời xác nhận, create_customer chặn gõ lại địa chỉ đơn cũ, bất biến vàng; (4) đơn Pancake khâu hoàn không đếm đang mở, Đã mua N đơn bỏ đơn huỷ/hoàn. Nháp giữ nguyên.",
+    "summary": "Merge origin/main (#802 địa chỉ, #817, #819 giỏ dính, #820, #821 hậu mãi) vào fix/customer-360 — main thắng: engine giữ cartPromptOf/postSalePrompt/prevTurn/confirmedBefore của main, khối TRA LỊCH SỬ tắt ở giai đoạn hậu mãi; create_customer: chặn đơn chốt không auto ⇒ requireHuman (#821) đứng đầu, trước use_saved_address/saved_address_choice/đổi SĐT/historyAddressWithoutConsent; cổng địa chỉ #802 chạy sau khi lưu (snapshot vàng có address_check EXACT). Thêm quét nguồn khoá thứ tự này. Nháp giữ nguyên.",
     "tests": [
-      "SHA 238e8a7b trên 8cd40bc3: npm run typecheck OK · npm run lint OK · npm test TẤT CẢ KIỂM THỬ ĐẠT (lượt thứ 3; lượt 1-2 đỏ ở ai-balance-usage — đồng hồ thật readAt = now+1s khi máy bận, không đụng tệp nào của nhánh, chạy riêng PASS) · chạy riêng PASS: customer-360, sales-agent-golden, order-golden, sales-claim-guard, sales-quote-integrity, response-ownership, followup-lifecycle, saas-l3-inbox, platform-isolation-static, test-hygiene · gỡ bản sửa (1) ⇒ customer-360 đỏ"
+      "SHA 83dd92b2 (merge origin/main 935ffdb2, không rebase): npm run typecheck OK · npm run lint OK · npm test TẤT CẢ KIỂM THỬ ĐẠT (dọn data/pglite-test-* trước) · chạy riêng PASS: customer-360, sales-agent-golden, order-golden, sales-claim-guard, sales-quote-integrity, sales-cart-commitment, postsale-lifecycle, address-normalize, self-service-journey, platform-isolation-static, response-ownership"
     ]
   }
 }
