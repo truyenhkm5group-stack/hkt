@@ -28,12 +28,20 @@
     "drizzle/meta/_journal.json",
     "AGENTS.md",
     "docs/cost-center.md",
+    "db/schema.ts",
+    "lib/constants/live-cogs.ts",
+    "lib/queries/cashflow.ts",
+    "lib/queries/model-economics.ts",
+    "lib/queries/orders.ts",
+    "lib/returns/warehouse.ts",
+    "lib/queries/profit-nominal.ts",
     "tests/marketer-price.test.ts",
     "tests/estimated-cost.test.ts",
     "tests/cost-center.test.ts",
     "tests/migration-serve-compat.test.ts",
     "tests/migration-upgrade-path.test.ts",
-    "tests/company-os-returns.test.ts"
+    "tests/company-os-returns.test.ts",
+    "tests/unknown-cost.test.ts"
   ],
   "dependencies": [
     "cost-center-unify"
@@ -47,8 +55,8 @@
     "0246": "2026-10-13T15:51:56.315Z"
   },
   "created_at": "2026-10-13T15:32:26.308Z",
-  "updated_at": "2026-10-13T17:38:39.610Z",
-  "last_heartbeat": "2026-10-13T17:38:39.610Z",
+  "updated_at": "2026-10-13T18:37:19.837Z",
+  "last_heartbeat": "2026-10-13T18:37:19.837Z",
   "definition_of_done": [],
   "intake": {
     "verdict": "PARTIAL",
