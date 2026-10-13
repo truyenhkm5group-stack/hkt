@@ -2315,3 +2315,6 @@
 {"at":"2026-10-13T07:22:27.238Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DEPLOY_DISPATCHED","detail":"b5296e6d9f23 · run 38362204902 https://github.com/truyenhkm5group-stack/hkt/actions/runs/38362204902"}
 {"at":"2026-10-13T08:45:25.706Z","actor":"DESKTOP-56TH98Y:wt-inbox-list-perf","kind":"HANDOFF","mission":"inbox-list-perf","detail":"fix/inbox-list-perf @ 1027a21d9418 · 1 lệnh kiểm thử"}
 {"at":"2026-10-13T09:39:27.812Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#827 @ 1027a21d9418 · f4feed09 + bài hiệu năng gọn (1.000 hội thoại, 5.000 tách perf:inbox); khẳng định lệch 0 giữ nguyên; 78→18 s"}
+{"at":"2026-10-13T09:39:44.342Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"CLAIM","mission":"inbox-perf-probe-state","detail":"RUNNING · 1 mẫu phạm vi · MEDIUM"}
+{"at":"2026-10-13T09:39:44.342Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"OVERLAP_ACCEPTED","mission":"inbox-perf-probe-state","detail":"OVERLAP_ACCEPTED với hslc-bot-tin-sot-429: phạm vi scripts/inbox-perf-probe.ts — cách tích hợp: chỉ script đo"}
+{"at":"2026-10-13T09:39:44.342Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"OVERLAP_ACCEPTED","mission":"inbox-perf-probe-state","detail":"OVERLAP_ACCEPTED với inbox-perf-probe-topn: phạm vi scripts/inbox-perf-probe.ts — cách tích hợp: chỉ script đo"}
