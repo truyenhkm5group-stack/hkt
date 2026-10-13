@@ -1,8 +1,8 @@
 {
   "pr": 826,
-  "sha": "89a20d7c496fd6240effd8365af0e924f02e0c01",
+  "sha": "f6ee83878f530936067c2518b04bc847fbdd92ec",
   "verdict": "PASS",
   "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
-  "at": "2026-10-13T06:29:21.495Z",
-  "note": "+ allowlist probe chỉ đọc trong bài kiểm cột 0245"
+  "at": "2026-10-13T06:32:17.541Z",
+  "note": "73449b81 + allowlist probe chỉ đọc trong bài kiểm cột 0245"
 }
