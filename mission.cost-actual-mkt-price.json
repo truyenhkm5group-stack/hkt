@@ -1,0 +1,37 @@
+{
+  "schema": 1,
+  "mission_id": "cost-actual-mkt-price",
+  "title": "Giá vốn thực tế = giá báo MKT hiện tại cho mọi đơn, mọi báo cáo",
+  "business_goal": "Chủ shop chốt 13/10/2026: giá vốn thực tế mặc định = giá báo MKT đang hiệu lực hôm nay cho mọi đơn ở mọi báo cáo; phiếu nhập giữ luật 13; chưa khai giá báo thì lùi phiếu nhập → Pancake",
+  "status": "PLANNING",
+  "priority": "P0",
+  "risk": "HIGH",
+  "owner": "vm:hkt",
+  "worker": null,
+  "worktree": null,
+  "branch": "claude/lucid-brahmagupta-fnvimb",
+  "base_sha": "d9bdaca2ed777a048d2883dc332d6e8b9441f8da",
+  "domains": [],
+  "owned_paths": [
+    "lib/queries/cogs.ts",
+    "lib/queries/canonical-outcome.ts",
+    "lib/constants/canonical-outcome.ts",
+    "lib/actions/marketer-price.ts",
+    "AGENTS.md",
+    "docs/cost-center.md"
+  ],
+  "dependencies": [
+    "cost-center-unify"
+  ],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-13T15:32:26.308Z",
+  "updated_at": "2026-10-13T15:32:26.308Z",
+  "last_heartbeat": "2026-10-13T15:32:26.308Z",
+  "definition_of_done": [],
+  "intake": {
+    "verdict": "PARTIAL",
+    "evidence": []
+  }
+}
