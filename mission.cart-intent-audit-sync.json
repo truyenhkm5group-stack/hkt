@@ -9,7 +9,7 @@
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
   "worker": null,
   "worktree": null,
-  "branch": "fix/cart-intent-audit",
+  "branch": "fix/cart-audit-rules-sync",
   "base_sha": "fd13f1ca7edfb5ad98969d02d7ea4ba05bd1f563",
   "domains": [],
   "owned_paths": [
@@ -23,16 +23,16 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-12T21:42:32.623Z",
-  "updated_at": "2026-10-13T00:11:35.747Z",
-  "last_heartbeat": "2026-10-13T00:11:35.747Z",
+  "updated_at": "2026-10-13T02:42:29.069Z",
+  "last_heartbeat": "2026-10-13T02:42:29.069Z",
   "definition_of_done": [],
   "handoff": {
-    "branch": "fix/cart-intent-audit",
+    "branch": "fix/cart-audit-rules-sync",
     "sha": "75c0b8cdf93819fb3e750ecae82b2854cabbcc6f",
-    "at": "2026-10-13T00:11:35.747Z",
+    "at": "2026-10-13T02:42:29.069Z",
     "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
     "title": "cart-intent-audit: bản sao luật khớp cart-commitment.ts sau #819 (đo AFTER bằng đúng luật đang chạy)",
-    "summary": "Đồng bộ luật audit với #819",
+    "summary": "Đồng bộ luật audit với #819 (thay #822, đổi tên nhánh)",
     "tests": [
       "typecheck·lint·cart-intent-audit·platform-isolation-static: đạt"
     ]
