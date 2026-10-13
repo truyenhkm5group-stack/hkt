@@ -1,8 +1,8 @@
 {
   "pr": 835,
-  "sha": "121d25b490afa2abc85627d7415cf4fe8f6a34ae",
+  "sha": "45f62179ac26b8c779bb59b3fe48b668cfc93262",
   "verdict": "PASS",
   "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
-  "at": "2026-10-13T15:33:33.968Z",
-  "note": "JIT tắt cục bộ (set local jit=off qua chayKhongJit) cho 5 câu listInbox — XÁC NHẬN production: JIT 291/187 hàm, Limit 6.873 ms & Seq Scan 4.521 ms tự thân; state 1 lần + 2 pha vô hại có test; npm test đủ đạt"
+  "at": "2026-10-13T17:20:52.260Z",
+  "note": "121d25b4 (PASS) rebase lên main sau #827 — cùng nội dung 2 commit"
 }

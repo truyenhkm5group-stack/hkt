@@ -2541,3 +2541,4 @@
 {"at":"2026-10-13T17:15:23.385Z","actor":"DESKTOP-56TH98Y:wt-team","kind":"HANDOFF","mission":"checkpoint-append-only","detail":"claude/checkpoint-append-only @ b2997846d778 · 4 lệnh kiểm thử"}
 {"at":"2026-10-13T17:20:10.788Z","actor":"DESKTOP-56TH98Y:wt-team","kind":"HANDOFF","mission":"checkpoint-append-only","detail":"claude/checkpoint-append-only @ 2d0b5a6ac86e · 5 lệnh kiểm thử"}
 {"at":"2026-10-13T17:20:48.809Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"inbox-list-subplans","detail":"fix/inbox-list-subplans @ 45f62179ac26 · 1 lệnh kiểm thử"}
+{"at":"2026-10-13T17:21:06.139Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#835 @ 45f62179ac26 · 121d25b4 (PASS) rebase lên main sau #827 — cùng nội dung 2 commit"}
