@@ -8,6 +8,61 @@
 
 
 
+
+## Checkpoint 2026-10-13 ~21:15 VN — TEAM: VIỆC CẦN NGƯỜI CẦM KHOÁ `integration-lead` LÀM
+
+> Phiên Team (`DESKTOP-56TH98Y:wt-team`) KHÔNG có khoá và KHÔNG có token GitHub ⇒ không gộp, không mở PR,
+> không deploy. Bốn việc dưới đây là của phiên đang cầm khoá (hiện là Max, gia hạn 14:04Z, tới ~15:00Z).
+
+**1 · GỘP #827 — P0 hộp thư, việc cuối của lô này.** Cổng XANH, hàng đợi xếp `MERGE_NOW`, đầu lô.
+```
+npm run ai -- merge 827 --sha=99013db136b7a25a9a2254bd93c059cc3debc42e --token=…
+```
+(#831 đã gộp lúc ~14:0xZ → `d9bdaca2`; #833 đã gộp VÀ đã lên production `785d1e28`.)
+
+**2 · MỘT LƯỢT DEPLOY CHO CẢ LÔ, RỒI HẬU KIỂM.** `#831` đang nằm trên main mà CHƯA lên production.
+```
+npm run ai -- deploy-plan --token=…      # phải nói DEPLOY
+npm run ai -- deploy --token=…           # MỘT lượt cho cả lô
+npm run ai -- verify --record --mission=inbox-list-perf
+```
+Deploy «đỏ» vì `verify-migrations` báo `qa` DEGRADED là CỐ Ý — đọc log bước SSH, smoke phải «134/134 đạt».
+
+**3 · ĐO LẠI SAU KHI #831 LÊN PRODUCTION — xác nhận giả thuyết JIT.**
+```
+ops: inbox-perf-probe "--org=hslc-hmt-shop --samples=3 --analyze"
+```
+Tìm dòng «JIT … biên dịch». Xác nhận rồi thì bản sửa chồng `fix/inbox-list-subplans` (`4ccf931b`, nay đã
+có bản gộp main `c591531d` trong cây `wt-team`) mới đáng đưa qua PR — Team đã chạy `typecheck` + `lint` sạch
+cho nó, `npm test` đủ CHƯA chạy xong (lượt chạy bị dừng vì máy hết RAM).
+
+**4 · MỞ PR CHO HAI BÀN GIAO ĐANG CHỜ.**
+```
+npm run ai -- pr-open test-locale-order --token=…     # claude/test-locale-order @ d9a91d81 — MỚI, xem mục dưới
+npm run ai -- pr-open inbox-unread-perf --token=…     # CHỜ chủ shop duyệt #792 trước (owner-approve-792)
+```
+
+### TEAM ĐÃ LÀM XONG (13/10, không cần làm lại)
+- **Gỡ nghẽn cổng #827 + #831.** Cổng đỏ KHÔNG phải lỗi mã: job kiểm thử bị cắt ở 34:46 = trần 35′ cũ;
+  #830 đã nâng 45′ nhưng chỉ trên main. Gộp main vào hai nhánh ⇒ `99013db1` và `c9d33af4`, cổng xanh cả bốn
+  nhánh (run 38403175630). Kết quả đo được: **#831 đã gộp được ngay sau đó**.
+- **`test-locale-order` (`claude/test-locale-order` @ `d9a91d81`) — PR_READY, rủi ro thấp, chỉ chạm `tests/`.**
+  Bài kiểm sao lưu đỏ trên Windows / xanh ở CI vì `find … | sort` của shell xếp theo COLLATION của máy chạy
+  (`-` 0x2D < `/` 0x2F ở C.UTF-8; en_US.UTF-8 bỏ qua dấu ⇒ ngược lại). Nó NÉM lỗi nên chặn mọi bài sau nó —
+  đó là lý do `npm test` trên máy Windows không bao giờ chạy tới các bài hộp thư. Sửa ở đúng tầng:
+  `tests/shell-locale.ts` ghim `LC_COLLATE=C` + GỠ `LC_ALL` cho mọi lượt gọi shell của bài kiểm, và
+  `tests/test-hygiene.test.ts` thêm mục 2a chặn cả lớp ở mức mã nguồn. **Không đổi một giá trị kỳ vọng nào,
+  không bỏ qua bài nào, không đụng luật nghiệp vụ sao lưu.** Đã chạy riêng từng bộ (máy thiếu RAM):
+  backup ĐẠT · pitr ĐẠT · test-hygiene ĐẠT · typecheck + lint sạch.
+  Chồng tệp với PR #814: ĐÃ ĐỐI CHIẾU — #814 chỉ sửa `tests/backup.test.ts` vùng dòng 1300–1330, việc này
+  sửa vùng ~60–110; hai vùng không giao nhau, đã khai `OVERLAP_ACCEPTED` trong sổ.
+
+### CẦN CHỦ SHOP QUYẾT
+- **Sứ mệnh giá vốn `cost-center-unify` nay KHÔNG CÒN AI GIỮ**: khoá `tech-lead` của `vm:hkt` HẾT HẠN lúc
+  14:04:53Z, nhịp tim cuối 13:13Z, nhánh `claude/lucid-brahmagupta-fnvimb` dừng ở `19ed1d52` (3 commit).
+  Sáng 13/10 chủ shop chốt Team đứng ngoài vì phiên kia đang sống — nay nó đã chết. Team tiếp quản hay không
+  là quyết định của chủ shop, không phải của phiên nào.
+
 ## Checkpoint 2026-10-13 ~20:05 VN — TEAM TIẾP QUẢN P0 HỘP THƯ (phiên Claude Team, cây `wt-team`)
 
 **Phiên:** Claude Team · DESKTOP-56TH98Y:wt-team. Max 89% hạn mức tuần; vòng gia hạn khoá phía Max ĐÃ DỪNG
