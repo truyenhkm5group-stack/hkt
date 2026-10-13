@@ -38,6 +38,7 @@ import {
   planRootOf,
   planStructure,
   exprSignature,
+  jitSummary,
   planHotNodes,
   queryBlockOf,
   stateLine,
@@ -183,7 +184,10 @@ export function testInboxPerfProbePure() {
   const ran = planStructure(
     planRootOf([{ Plan: { "Node Type": "Aggregate", "Total Cost": 9, "Plan Rows": 1, "Actual Total Time": 5856.2, "Actual Loops": 1, "Actual Rows": 1, Plans: [{ "Node Type": "Index Scan", "Parent Relationship": "SubPlan", "Subplan Name": "SubPlan 8", "Relation Name": "sales_chat_inbound", "Plan Rows": 1, "Total Cost": 75529, "Actual Total Time": 0, "Actual Loops": 0, "Actual Rows": 0 }] } }]),
   );
-  assert.match(ran[0], /THẬT 5856 ms · 1 nút KHÔNG chạy lần nào$/);
+  assert.match(ran[0], /THẬT 5856 ms · 1 nút KHÔNG chạy lần nào · JIT không chạy$/);
+  const withJit = planRootOf([{ Plan: { "Node Type": "Aggregate", "Actual Total Time": 4908, "Actual Loops": 1 }, JIT: { Functions: 465, Timing: { Generation: { Deform: 1, Total: 40.2 }, Inlining: 900.4, Optimization: 2800.1, Emission: 1100, Total: 4840.7 } } }]);
+  assert.equal(jitSummary(withJit), "JIT 465 hàm · biên dịch 4841 ms (sinh 40 · inline 900 · tối ưu 2800 · phát 1100)");
+  assert.match(planStructure(withJit)[0], /· JIT 465 hàm · biên dịch 4841 ms/);
   assert.match(ran.join("\n"), /\[SubPlan 8\] Index Scan on sales_chat_inbound · ~1 dòng · cost 75529 · THẬT 0 ms \(0 vòng × 0 dòng\)/);
   // Nút nóng: thời gian TỰ THÂN (tổng − con), dấu hiệu biểu thức chỉ TÊN hàm / cột — không giá trị.
   const sig = exprSignature({ Filter: `((regexp_replace(c.customer_phone, '[^0-9]', '', 'g') = '${SDT}') AND ((c.state -> 'control'::text) ->> 'mode'::text) ~ '${TEN_KHACH}')`, Output: ["c.id", "(SubPlan 3)", "lower(c.state ->> 'x')"] });
@@ -367,7 +371,7 @@ export async function testInboxPerfProbeDb() {
     assert.equal(slow.plans.length, 2, "EXPLAIN hai hình dạng chậm nhất");
     assert.ok(slow.plans.every((p) => p.structure[0] !== "kế hoạch: không đọc được"), `EXPLAIN đọc được: ${JSON.stringify(slow.plans.map((p) => p.structure[0]))}`);
     assert.equal(rSlow.result.diag.columns, 2, "CSDL kiểm thử có đủ cột 0245");
-    assert.ok(slow.plans.every((p) => / THẬT \d+ ms · \d+ nút KHÔNG chạy lần nào$/.test(p.structure[0])), `ANALYZE ra số thật: ${JSON.stringify(slow.plans.map((p) => p.structure[0]))}`);
+    assert.ok(slow.plans.every((p) => / THẬT \d+ ms · \d+ nút KHÔNG chạy lần nào · JIT /.test(p.structure[0])), `ANALYZE ra số thật: ${JSON.stringify(slow.plans.map((p) => p.structure[0]))}`);
     assert.ok(rSlow.result.diag.stateBytes && rSlow.result.diag.stateBytes.max !== null, "đọc được cỡ cột state");
     assert.ok(slow.plans.every((p) => (p.hot?.length ?? 0) > 0 && /ms tự thân · /.test(p.hot![0])), `ANALYZE ⇒ có nút nóng: ${JSON.stringify(slow.plans.map((p) => p.hot?.[0]))}`);
     assert.ok(rSlow.result.diag.conversations !== null && rSlow.result.diag.conversations >= 5);

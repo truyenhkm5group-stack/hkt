@@ -273,7 +273,28 @@ export function planRootOf(cell: unknown): PlanNode | null {
   }
   const first = Array.isArray(v) ? v[0] : v;
   const plan = first && typeof first === "object" ? (first as { Plan?: unknown }).Plan : null;
-  return plan && typeof plan === "object" ? (plan as PlanNode) : null;
+  if (!plan || typeof plan !== "object") return null;
+  // Khối JIT (anh em của Plan) đi kèm gốc dưới khoá riêng — thời gian biên dịch JIT bị tính vào nút đầu tiên chạy biểu thức.
+  const jit = (first as { JIT?: unknown }).JIT;
+  return jit && typeof jit === "object" ? ({ ...(plan as PlanNode), [JIT_KEY]: jit } as PlanNode) : (plan as PlanNode);
+}
+
+const JIT_KEY = "__JIT";
+const jitMs = (x: unknown): number | null => (typeof x === "number" ? x : x && typeof x === "object" && typeof (x as { Total?: unknown }).Total === "number" ? ((x as { Total: number }).Total) : null);
+/**
+ * Tóm tắt JIT của một kế hoạch ANALYZE (13/10/2026): biên dịch JIT bị Postgres tính vào nút ĐẦU TIÊN đánh giá biểu thức — một «Seq Scan
+ * 3.772 dòng 4,5 giây» trên bảng 8 MB có thể là 4,5 giây BIÊN DỊCH chứ không phải quét. Tiền lệ: db/index.ts::chayKhongJit (10/09/2026:
+ * thực thi 26 ms · biên dịch JIT 17.037 ms). Không có khối JIT ⇒ «JIT không chạy». HÀM THUẦN.
+ */
+export function jitSummary(root: PlanNode | null): string {
+  const j = root ? (root[JIT_KEY] as Record<string, unknown> | undefined) : undefined;
+  if (!j) return "JIT không chạy";
+  const t = (j.Timing ?? {}) as Record<string, unknown>;
+  const f = (k: string) => {
+    const v = jitMs(t[k]);
+    return v === null ? "—" : String(Math.round(v));
+  };
+  return `JIT ${num(j.Functions) ?? "?"} hàm · biên dịch ${f("Total")} ms (sinh ${f("Generation")} · inline ${f("Inlining")} · tối ưu ${f("Optimization")} · phát ${f("Emission")})`;
 }
 
 const num = (x: unknown) => (typeof x === "number" && Number.isFinite(x) ? Math.round(x) : null);
@@ -309,7 +330,7 @@ export function planStructure(root: PlanNode | null, maxLines: number = PLAN_PUB
     for (const c of n.Plans ?? []) walk(c, depth + 1);
   };
   walk(root, 0);
-  const ran = typeof root["Actual Total Time"] === "number" ? ` · THẬT ${Math.round(root["Actual Total Time"] as number)} ms · ${neverRun} nút KHÔNG chạy lần nào` : "";
+  const ran = typeof root["Actual Total Time"] === "number" ? ` · THẬT ${Math.round(root["Actual Total Time"] as number)} ms · ${neverRun} nút KHÔNG chạy lần nào · ${jitSummary(root)}` : "";
   const head = `${nodes} nút · ${subplans} SubPlan/InitPlan · Seq Scan: ${seq.size ? [...seq].sort().join(", ") : "không"} · cost gốc ${num(root["Total Cost"]) ?? "?"}${ran}`;
   const body = lines.slice(0, Math.max(0, maxLines - 1));
   return [head, ...body, ...(lines.length > body.length ? [`… (+${lines.length - body.length} nút)`] : [])];
