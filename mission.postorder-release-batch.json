@@ -1,0 +1,27 @@
+{
+  "schema": 1,
+  "mission_id": "postorder-release-batch",
+  "title": "Release POST_ORDER cũ theo lô: --limit, chạy thử từng hội thoại, ai.resumed có run id + trạng thái trước, --rollback",
+  "business_goal": "",
+  "status": "RUNNING",
+  "priority": "P0",
+  "risk": "MEDIUM",
+  "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "worker": null,
+  "worktree": null,
+  "branch": "fix/postorder-release-batch",
+  "base_sha": "935ffdb2c087111b78bedbf51095e190fa4efa65",
+  "domains": [],
+  "owned_paths": [
+    "lib/sales-chatbot/postorder-release.ts",
+    "scripts/sales-postorder-handoff-release.ts"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-13T03:31:57.578Z",
+  "updated_at": "2026-10-13T03:31:57.578Z",
+  "last_heartbeat": "2026-10-13T03:31:57.578Z",
+  "definition_of_done": []
+}
