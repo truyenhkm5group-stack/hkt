@@ -160,6 +160,9 @@ export function AdsCeilingTable({
                 nên sửa Q004 trên BCLN không có tác dụng. Nay giá kế hoạch thắng giá báo, ô mở đúng con số đang
                 lưu (`plannedCost`), và chế độ kế hoạch áp nó cho cả mã đã có phiếu nhập.
               */
+              // Mã có hàng BÁN RA chưa biết giá vốn, HOẶC phiếu nhập trong kỳ thiếu đơn giá (chủ shop chốt
+              // 25/09/2026) ⇒ thiếu giá kế hoạch ở đây là thiếu thật: ô bút kèm lời nhắc, không chỉ một cây bút.
+              const coCho = r.cogsUnknownQty > 0 || r.purchaseUnpricedQty > 0;
               const tuGiaBao = r.estimatedCost?.source === "MARKETER_PRICE";
               const nhanDuTinh = r.costBasis === "PLANNED" ? "kế hoạch" : tuGiaBao ? "tham chiếu giá báo" : "tạm tính";
               return (
@@ -187,6 +190,7 @@ export function AdsCeilingTable({
                             ? "giá nhập thật · chưa đặt kế hoạch"
                             : "giá nhập thật"}
                     </div>
+                    {coCho && !r.plannedCost ? <div className="text-[10.5px] font-medium text-amber-700 dark:text-amber-300">cần giá kế hoạch — bấm bút để đặt</div> : null}
                     {r.plannedCost && r.costBasis !== "PLANNED" ? (
                       <div className="text-[10.5px] text-muted-foreground" title={r.plannedCost.reason}>
                         kế hoạch {formatVND(r.plannedCost.unitCost, { compact: true })}/sp · <Link href="/inventory/cost-center" className="underline">Trung tâm giá vốn</Link>
