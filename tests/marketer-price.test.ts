@@ -73,7 +73,10 @@ export function testMarketerPricePure() {
   assert.deepEqual(lot, [], "giá báo MKT chỉ được đọc ở đường của MKT (lương + lợi nhuận danh nghĩa theo MKT) — báo cáo lợi nhuận shop đứng trên giá vốn thật");
   const nominalSrc = readFileSync("lib/queries/profit-nominal.ts", "utf8");
   assert.ok(!nominalSrc.includes("MKT_LINE_UNIT_COST"), "báo cáo lợi nhuận danh nghĩa theo MÃ không được thay giá vốn bằng giá báo");
-  assert.equal((nominalSrc.match(/\$\{LINE_MARKETER_PRICE\}/g) ?? []).length, 3, "giá báo chỉ đi vào hai cột riêng của đường MKT (`mktDeltaFull`, `mktPricedUnknownQty`)");
+  // 13/10/2026 (Trung tâm giá vốn): thêm `mktPricedQty` + `mktPricedCogs` — CHỈ nuôi `marketerCostDelta` ở chế độ giá vốn
+  // KẾ HOẠCH (phần chênh giá báo phải đo so với giá kế hoạch). Vẫn là cột riêng của đường MKT, không vào giá vốn của shop.
+  assert.equal((nominalSrc.match(/\$\{LINE_MARKETER_PRICE\}/g) ?? []).length, 5, "giá báo chỉ đi vào các cột riêng của đường MKT (`mktDeltaFull`, `mktPricedUnknownQty`, `mktPricedQty`, `mktPricedCogs`)");
+  assert.ok(!/expectedCogs[^\n]*mktPriced(Qty|Cogs)/.test(nominalSrc), "hai cột mới không được đi vào giá vốn của shop");
   console.log("✓ Giá báo MKT (hàm thuần): một mã một giá theo ngày lên đơn · hạ giá không đổi đơn cũ · trước 01/09/2026 không áp · không lọt vào lợi nhuận shop");
 }
 
