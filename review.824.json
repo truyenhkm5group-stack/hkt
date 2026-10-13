@@ -1,0 +1,8 @@
+{
+  "pr": 824,
+  "sha": "4f468cdecc12d5265f0ea097d7e80e20af16bccf",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-13T03:33:02.284Z",
+  "note": "Chỉ đổi trạng thái giữ; test khẳng định không câu bot/BOT_SENT/đơn/lịch follow-up mới; rollback có điều kiện chưa có trả lời; mặc định chạy thử"
+}
