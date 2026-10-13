@@ -1377,13 +1377,24 @@ ${Xung} lấy màu nào để em lên đơn cho mình ạ?`;
    * Chat lieu cua mau chu luc page: ten / mo ta trong danh muc POS truoc, roi huong dan rieng cua page. null = khong ro.
    * Su co AURA 13/10/2026: page ban dam NHUNG ma bot noi "Chat lieu Rayon" — cau Rayon nam trong huong dan CHUNG.
    */
+  /** Chat lieu NHAN VIEN THAT da noi trong hoi thoai (tin moi nhat), hoac null — nguoi ban hang biet hang, may khong cai lai. */
+  staffMaterial(pageId, messages = []) {
+    for (const m of [...(messages || [])].reverse()) {
+      if (!this.isHumanStaff(m, pageId)) continue;
+      const c = materialIn(this.messageText(m));
+      if (c) return c;
+    }
+    return null;
+  }
+
   pageMaterial(pageId, messages = []) {
     const sp = this.offCatalog(pageId) ? null : this.pageProduct(pageId);
     const cuaShop = (messages || []).filter((m) => this.isFromPage(m, pageId)).map((m) => this.messageText(m)).join("\n");
     // Khach den tu quang cao co MAU TEST (bot rieng theo quang cao, ERP khai chat vai): chat lieu cua mau do thang tat ca
     const test = this.scopedTestProduct(pageId);
     const tuQuangCao = test ? materialIn(`${test.fabric || ""} ${test.name || ""}`) : null;
-    return tuQuangCao || materialIn(sp ? `${sp.name} ${sp.note || ""}` : "") || materialIn(settings.effective(pageId).extraPrompt) || (this.offCatalog(pageId) ? materialIn(cuaShop) : null);
+    // Su co Thi Tuyet Vu 13/10/2026: khach hoi "nhung the hay ni", nhan vien go "dạ chất nhung ạ" ma bot van cai "Rayon"
+    return this.staffMaterial(pageId, messages) || tuQuangCao || materialIn(sp ? `${sp.name} ${sp.note || ""}` : "") || materialIn(settings.effective(pageId).extraPrompt) || (this.offCatalog(pageId) ? materialIn(cuaShop) : null);
   }
 
   /** Khoi prompt: mau chu luc cua page (ten, ma, chat lieu) — de len mo ta chung khi khac. */
@@ -1951,6 +1962,15 @@ ${Xung} lấy màu nào để em lên đơn cho mình ạ?`;
     // Don da chot cung kem muc nay: no noi "đơn đã đủ, đừng hỏi thêm, đọc ngữ cảnh tin ngắn" (truoc day bo qua -> AI
     // khong biet don da du, hoc theo lich su ma hoi "Em lên đơn…?" mai — Bui Phuong Vy 02/10/2026)
     systemPrompt += this.orderProgressPrompt(pageId, messages);
+    // Da xin chieu cao / can nang o mot trong 3 tin shop gan nhat ma khach chua tra loi -> khong xin lai, tra loi dung cau khach hoi
+    // (su co Thi Tuyet Vu 13/10/2026: khach hoi chat lieu 3 lan, bot 3 lan "cho em xin chiều cao cân nặng")
+    const ganShop = (messages || []).filter((m) => this.isFromPage(m, pageId)).slice(-3).map((m) => this.messageText(m));
+    const f0 = this.customerFacts(pageId, messages);
+    if (!f0.measured && !f0.size && ganShop.some((t) => /chiều cao|cân nặng/i.test(t))) {
+      systemPrompt += `\n\n## ĐÃ XIN SỐ ĐO RỒI\n- Shop vừa xin chiều cao / cân nặng và khách chưa gửi. Câu này KHÔNG xin lại số đo — trả lời ĐÚNG điều khách vừa hỏi / vừa nói (chất liệu, giá, màu…). Khách gửi số đo thì mới tư vấn size.`;
+    }
+    const clNv = this.staffMaterial(pageId, messages);
+    if (clNv) systemPrompt += `\n\n## CHẤT LIỆU NHÂN VIÊN ĐÃ XÁC NHẬN\n- Nhân viên shop đã báo khách chất liệu **${clNv}** trong hội thoại này. Dùng đúng chất liệu ${clNv}; KHÔNG nói chất liệu khác (bỏ qua câu chất liệu trong hướng dẫn chung).`;
     systemPrompt += this.quotedPriceBlock(pageId, messages);
     if (this.orderClosedIn(pageId, messages)) {
       systemPrompt += `

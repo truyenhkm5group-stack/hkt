@@ -2262,6 +2262,10 @@ console.log("OK 18: doi chieu dia chi don POS -> bat don chon nham xa, bo qua tr
   const spKhac = bot.buildSystemPrompt("PAGE1", { customerName: "Khách", type: "INBOX" });
   assert.ok(/Đầm Q004/.test(spKhac), "page khac van co danh muc");
   assert.equal(bot.pageMaterial("PAURA", [{ from: { id: "PAURA" }, message: "Chất vải nhung cao cấp, mềm mát" }]), "nhung", "chat lieu doc tu tin shop");
+  // Nhan vien that go "dạ chất nhung ạ" -> chat lieu nhung thang moi nguon (ke ca page thuong)
+  const nv = { id: "nv1", from: { id: "PAGE1", admin_id: "staff-1", uid: "staff-1" }, message: "dạ chất nhung ạ" };
+  assert.ok(bot.isHumanStaff(nv, "PAGE1"), "tin nhan vien that"); assert.equal(bot.staffMaterial("PAGE1", [nv]), "nhung");
+  assert.equal(bot.staffMaterial("PAGE1", [{ from: { id: "KHACH" }, message: "nhung hay nỉ" }]), null, "khach noi khong tinh");
   catalog.setProducts(prevSp);
   bot.pageNames.delete("PAURA");
   delete bot.orderBot._save;
