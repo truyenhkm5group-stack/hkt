@@ -1,8 +1,8 @@
 {
   "pr": 827,
-  "sha": "f4feed095d2e2ca156118f2ac6160bb308c0d5e7",
+  "sha": "1027a21d941886bf0576232b2e2b871d649d42f3",
   "verdict": "PASS",
   "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
-  "at": "2026-10-13T07:20:45.814Z",
-  "note": "Client: bỏ router.refresh sau chuyển hội thoại, tự làm mới không chồng lượt, hạn 20 s + thử lại, bỏ câu trả lời muộn; server: tập chưa đọc tính một lần (CHEAP_FIRST giữ kết quả, so lệch 0 với cột 0245). Không đủ cho HSLC (đường lưu sẵn vẫn 13 s — việc tiếp inbox-list-subplans)"
+  "at": "2026-10-13T09:39:14.898Z",
+  "note": "f4feed09 + bài hiệu năng gọn (1.000 hội thoại, 5.000 tách perf:inbox); khẳng định lệch 0 giữ nguyên; 78→18 s"
 }
