@@ -9,6 +9,50 @@
 
 
 
+
+## Checkpoint 2026-10-14 ~00:20 VN — TEAM: #827 ĐÃ LÊN PRODUCTION · BA NHÁNH CHỜ MỞ PR
+
+**PRODUCTION `e557a910`** (#827 + #831 + #833), `ok: true`, `migrations 246`, `degradedMigration: true`.
+
+**Lượt deploy 38423392247 = ĐỎ NHƯNG ĐÃ LÊN.** Mọi job cổng + `bang_chung` + `build_image` XANH; chỉ job
+`release` đỏ ở bước «SSH vào VPS và chạy bootstrap». Production ĐANG phục vụ đúng SHA đích và khoẻ ⇒ mã đã
+lên, cái đỏ là bước hậu kiểm. Dấu hiệu khớp dạng «đỏ CỐ Ý» đã ghi trong các checkpoint trước: `qa` còn
+DEGRADED ở 0245 (`degradedMigration: true`). **CHƯA XÁC MINH ĐƯỢC TỪNG CHỮ**: đọc log job đòi token, phiên
+Team hỏi ẩn danh bị HTTP 403. Ai có token mở log bước SSH, kiểm «smoke 134/134 đạt», rồi `verify --record`.
+Gốc của cái đỏ này là quyết định đang chờ chủ shop: **cách sửa 0245 cho `qa`** (OWNER_DECISIONS) — không
+phải lỗi mới của #827.
+
+### CHỜ NGƯỜI CẦM KHOÁ `integration-lead` + TOKEN — BA NHÁNH ĐÃ PR_READY
+```
+npm run ai -- pr-open cost-center-unify     --token=…   # claude/lucid-brahmagupta-fnvimb — P0 giá vốn, RỦI RO CAO
+npm run ai -- pr-open test-locale-order     --token=…   # claude/test-locale-order @ d9a91d81
+npm run ai -- pr-open checkpoint-append-only --token=…  # claude/checkpoint-append-only @ b2997846
+```
+`cost-center-unify` rủi ro HIGH ⇒ sau khi có số PR phải có `review <PR> --sha=<đầu nhánh> --verdict=PASS`
+trong sổ thì hàng đợi mới cho gộp. **Chủ nó (`vm:hkt`) đã bàn giao, Team KHÔNG nhận trùng.**
+
+### VIỆC 2 CHƯA LÀM ĐƯỢC: XÁC MINH HỘP THƯ HSLC TRÊN PRODUCTION
+Cần chạy ops (dispatch workflow ⇒ token + khoá). Bốn phép đo, chạy SAU khi #827 đã lên (đã lên lúc ~17:1xZ):
+```
+ops: inbox-perf-probe "--org=hslc-hmt-shop --samples=3 --analyze"
+```
+- tốc độ tải hội thoại: so với nền TRƯỚC #827 (listInbox p50 13–19 s · p95 21–29 s);
+- bộ lọc «Chưa đọc» / «Chờ trả lời»: số đếm thẻ phải khớp số dòng thật của từng bộ lọc;
+- bộ đếm + realtime: đổi `?c=` KHÔNG được dựng lại trang (vế chính của #827), tự làm mới không chồng lượt.
+Chưa đo thì **chưa được đóng `inbox-list-perf` thành DONE** — workflow xanh không phải hậu kiểm.
+
+### TEAM LÀM XONG TRONG LƯỢT NÀY
+- **`checkpoint-append-only`** — công cụ ghi sổ này an toàn: nội dung LUÔN dựng từ đầu nhánh vừa fetch (không
+  có tham số nhận cả tệp), lượt ghi làm MẤT dòng thì bị TỪ CHỐI và nêu đúng dòng mất, va thì fetch lại và
+  thử lại, không bao giờ `--force`. Sinh ra từ chính lỗi Team gây ra chiều 13/10 (ăn mất dòng «probe #831 đã
+  XÁC NHẬN JIT»). **Mục này được ghi bằng chính công cụ đó.**
+- **`test-locale-order`** — bài kiểm chạy shell thôi phụ thuộc collation của máy; lá chắn §65 mục 2a chặn cả lớp.
+
+### QUYỀN GITHUB CỦA TEAM (chủ shop chốt 14/10)
+Team được cấp PAT fine-grained RIÊNG, chỉ kho này, chỉ `Pull requests` đọc+ghi (+ `Contents`/`Metadata` đọc) —
+đủ `pr-open`, KHÔNG gộp, KHÔNG deploy. Không chép credential của phiên khác. Token cất ở hồ sơ Git Bash của
+máy, không bao giờ vào cây làm việc (kho PUBLIC).
+
 ## Checkpoint 2026-10-13 ~21:15 VN — TEAM: VIỆC CẦN NGƯỜI CẦM KHOÁ `integration-lead` LÀM
 
 > Phiên Team (`DESKTOP-56TH98Y:wt-team`) KHÔNG có khoá và KHÔNG có token GitHub ⇒ không gộp, không mở PR,
