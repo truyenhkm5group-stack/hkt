@@ -56,6 +56,7 @@ import { LESSONS_SETTING_KEY, lessonsPrompt, parseLessonsState } from "@/lib/sal
 import { levelPromptFor } from "@/lib/sales-chatbot/levels";
 import { loadQuickReplySettings, markQuickReplyUsed, quickReplyByAi, quickReplyByKeyword, quickReplyCatalog, type QuickReplyPick, type QuickReplyStep } from "@/lib/sales-chatbot/quick-replies";
 import { repeatsRecent } from "@/lib/sales-chatbot/quick-replies-shared";
+import { customer360Prompt, loadCustomer360, preferReturning, reuseIntentOf } from "@/lib/sales-chatbot/customer-360";
 import { CUSTOMER_PHASE_LABEL, loadCustomerPhase, postSalePrompt } from "@/lib/sales-chatbot/lifecycle";
 import { findReturningCustomer, returningCustomerPrompt } from "@/lib/sales-chatbot/returning";
 import { freeShipPolicyText } from "@/lib/sales-chatbot/shipping";
@@ -1071,12 +1072,27 @@ async function chatTurnCore(
     const known = (conv.state ?? {}) as ChatState;
     // Khách của đơn NHÂN VIÊN chốt trong hội thoại này (ghi đơn từ hội thoại) cũng là khách đã biết — mức tin `THREAD`.
     const syncCustomer = known.orderSync?.customer;
-    const returning = await findReturningCustomer(known.customer || !syncCustomer ? known : { ...known, customer: { ...syncCustomer, simulated: false } }).catch(() => null);
+    const baseReturning = await findReturningCustomer(known.customer || !syncCustomer ? known : { ...known, customer: { ...syncCustomer, simulated: false } }).catch(() => null);
+    // CUSTOMER 360 (customer-360.ts, 11/10/2026 — ca «Nga Ho Thien»): nối khách qua ĐƠN của chính hội thoại (bot · Pancake) + SĐT, địa
+    // chỉ cũ ĐÃ XÁC MINH, và luật «khách nói địa chỉ / SĐT cũ ⇒ TRA trước khi hỏi». Lỗi đọc ⇒ `null`: khối lời nhắc nói thật «chưa tra
+    // được», không chặn lượt. Khối TRA LỊCH SỬ rỗng khi khách không nói gì về thông tin cũ. Riêng `preferReturning` chạy MỌI lượt: hội
+    // thoại có đơn cũ mà chưa có khách cũ nào mạnh hơn thì khối KHÁCH CŨ dựng từ đơn cũ — hồ sơ mang `fromHistory` nên khối đó chỉ GỢI Ý
+    // (hỏi xác nhận ⇒ use_saved_address + lời xác nhận nguyên văn), và create_customer chặn gõ lại địa chỉ đơn cũ (AGENTS 3.12). Giai
+    // đoạn hậu mãi (`postSale`, #821) KHÔNG có khối TRA LỊCH SỬ: sửa thông tin nhận hàng của đơn đã chốt là việc của nhân viên.
+    const c360 = await loadCustomer360({ conversationId: conv.id, pageId: conv.pageId, threadId: conv.threadId, state: known }).catch(() => null);
+    const returning = preferReturning(baseReturning, c360);
+    const reuse = reuseIntentOf([
+      ...msgs
+        .filter((m) => m.role === "user")
+        .slice(-3)
+        .map((m) => textOf(m.content)),
+      text,
+    ]);
     // ĐẶT LỊCH: shop bật trong cấu hình bot VÀ tổ chức bật module Lịch hẹn — thiếu một trong hai thì bot không có công cụ đặt lịch.
     const bookingOn = cfg.booking.enabled && (await canUseModule("appointments"));
     // TỰ CHỐT KHI ĐỦ ĐƠN (P0-A, chủ shop 11/10/2026): theo công tắc «đơn đủ thông tin = đã xác nhận» của tổ chức. Lỗi đọc ⇒ TẮT (luồng xin xác nhận cũ).
     const autoConfirm = await loadAutoConfirmComplete().catch(() => false);
-    const system = [systemPrompt(cfg, orgRow?.name ?? org.code, await businessProfile(), opts.channel, await publishedPlaybook(), quickCatalog, returningCustomerPrompt(returning, known.returning), bookingOn ? bookingPrompt(cfg, now) : "", now, salesPackFor(orgRow?.templateKey ?? null), { autoConfirm }), await learnedLessons(), await levelPromptFor(conv.id, now), customerNamePrompt(opts.customerName), priceDisputePrompt(known.priceDispute), confirmedOrderPrompt(known), cartPromptOf(known, text, turnSeq, autoConfirm, prevTurn), postSale ? postSalePrompt(phase!, phase!.shortCode) : "", opts.context ?? ""].filter(Boolean).join("\n");
+    const system = [systemPrompt(cfg, orgRow?.name ?? org.code, await businessProfile(), opts.channel, await publishedPlaybook(), quickCatalog, returningCustomerPrompt(returning, known.returning), bookingOn ? bookingPrompt(cfg, now) : "", now, salesPackFor(orgRow?.templateKey ?? null), { autoConfirm }), postSale ? "" : customer360Prompt(c360, reuse), await learnedLessons(), await levelPromptFor(conv.id, now), customerNamePrompt(opts.customerName), priceDisputePrompt(known.priceDispute), confirmedOrderPrompt(known), cartPromptOf(known, text, turnSeq, autoConfirm, prevTurn), postSale ? postSalePrompt(phase!, phase!.shortCode) : "", opts.context ?? ""].filter(Boolean).join("\n");
     const deliveredImages: string[] = [];
     let deliveredReplyId: string | null = null;
     let deliveredText: string | null = null;
@@ -1200,7 +1216,7 @@ async function chatTurnCore(
         const results: AiBlock[] = [];
         for (const u of uses) {
           const confirmedBefore = Boolean(state.confirmed);
-          const r = await executeTool(u.name, u.input, { autoConfirm, prevTurn, conversationId: conv.id, channel: opts.channel, config: cfg, state, lastUserText: text, agent: SALES_AGENT, customerName: opts.customerName ?? null, quickReplies: quickCatalog, returning, recentSaid, turn: turnSeq, bookingOn, now, commentTurn: opts.aiCustomer?.threadKind === "COMMENT", promptStamp: { ...stampBase, model: res.model || prov.provider.model } });
+          const r = await executeTool(u.name, u.input, { autoConfirm, prevTurn, conversationId: conv.id, channel: opts.channel, config: cfg, state, lastUserText: text, agent: SALES_AGENT, customerName: opts.customerName ?? null, quickReplies: quickCatalog, returning, customer360: c360, recentSaid, turn: turnSeq, bookingOn, now, commentTurn: opts.aiCustomer?.threadKind === "COMMENT", promptStamp: { ...stampBase, model: res.model || prov.provider.model } });
           state = r.state;
           // create_customer chỉ sửa HỒ SƠ khách, không đụng đơn ⇒ chỉ là căn cứ khi CHƯA có đơn đã chốt (review #821 vòng 3).
           if (!r.isError && ((u.name === "create_customer" && !confirmedBefore) || u.name === "create_draft_order" || u.name === "update_draft_order")) wroteThisTurn = true;

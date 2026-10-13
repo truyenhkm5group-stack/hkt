@@ -28,6 +28,7 @@
 import { and, desc, eq, inArray, like, ne, or, sql, type SQL } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { PANCAKE_PAGES_API } from "@/lib/connectors/testers";
+import { mapOrder } from "@/lib/integrations/pancake/mapper";
 import { MANUAL_ORDER_ORIGIN } from "@/lib/constants/manual-orders";
 import { formatDate } from "@/lib/format";
 import { maskAddress, type ChatState } from "@/lib/sales-chatbot/tools";
@@ -41,11 +42,55 @@ export const PROFILE_TTL_MS = 6 * 3_600_000;
 export type PriorMessage = { from: "customer" | "shop"; text: string; at: string; id?: string };
 /** Số tin cũ và độ dài mỗi tin đọc từ Pancake — bot dùng `RETURNING_LIMITS`, ghi đơn từ hội thoại đọc nhiều hơn. */
 export type ThreadReadLimits = { priorMessages: number; priorChars: number; pages: number };
-export type PancakeThreadProfile = { fetchedAt: string; phones: string[]; fbIds: string[]; prior: PriorMessage[] };
+/**
+ * ĐƠN PANCAKE CỦA CHÍNH KHÁCH TRONG HỘI THOẠI NÀY (Customer 360 — 11/10/2026, ca «Nga Ho Thien»: lịch sử giao từ 03/2025 CHỈ nằm ở
+ * Pancake, ERP không có đơn nào ⇒ bot xin lại địa chỉ dù khách nói «vẫn địa chỉ cũ»). Pancake trả `recent_orders` trong phản hồi tin
+ * của MỘT hội thoại (ops pancake-avatar-shape 11/10/2026 thấy khoá) — đơn shop đã lên cho khách của hội thoại đó. Đọc bằng ĐÚNG
+ * `mapOrder` của bộ đồng bộ đơn Pancake (không luật đọc thứ hai). Trạng thái Pancake KHÔNG BAO GIỜ là bằng chứng giao thành công
+ * (AGENTS.md mục 3.2) — `customer-360.ts` chỉ dùng nó để loại đơn huỷ / hoàn và để biết đơn đã qua bước xác nhận.
+ * `at = null` khi Pancake không gửi mốc (không lấy «bây giờ» thay — `mapOrder` làm vậy cho đơn đồng bộ, ở đây là bịa ngày).
+ */
+export type PancakeRecentOrder = { id: string; at: string | null; stage: string; name: string; phone: string; address: string; province: string; ward: string; declaredPrepaid: boolean; items: string[] };
+/**
+ * `recentOrders`: `undefined` = CHƯA BIẾT (hồ sơ đọc trước bản này, hoặc Pancake không gửi khoá) — KHÁC `[]` (Pancake nói: không có
+ * đơn nào). `recentOrdersUnparsed` = phần tử Pancake gửi mà `mapOrder` không đọc được (chỉ đếm, để phép đo thấy dáng lạ).
+ */
+export type PancakeThreadProfile = { fetchedAt: string; phones: string[]; fbIds: string[]; prior: PriorMessage[]; recentOrders?: PancakeRecentOrder[]; recentOrdersUnparsed?: number };
+
+/** Tối đa số đơn Pancake giữ trong hồ sơ hội thoại. */
+export const RECENT_ORDERS_MAX = 10;
+
+/** Một phần tử `recent_orders` của Pancake ⇒ đơn gọn, hoặc `null` khi không đọc được (thiếu mã). HÀM THUẦN. */
+export function pancakeRecentOrderOf(value: unknown): PancakeRecentOrder | null {
+  const raw = value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
+  if (!raw) return null;
+  const m = mapOrder(raw);
+  if (!m) return null;
+  const at = pancakeTime(raw.inserted_at);
+  return {
+    id: m.id,
+    at: at ? at.toISOString() : null,
+    stage: m.stage,
+    name: m.shipFullName || m.billFullName,
+    phone: normalizeVnPhone(m.shipPhone || m.billPhone) ?? "",
+    address: m.shipAddress || m.shipFullAddress,
+    province: m.shipProvince,
+    ward: m.shipCommune,
+    // Số trả trước KHAI trên đơn Pancake — chỉ là dữ kiện để đọc, KHÔNG phải tiền thật (lifecycle.ts: đơn Pancake ⇒ payment UNKNOWN).
+    declaredPrepaid: m.prepaid > 0 || m.transferMoney > 0,
+    items: m.items.filter((i) => i.productName.trim()).slice(0, RETURNING_LIMITS.lastItems).map((i) => `${i.productName.trim()}${i.variationDetail.trim() ? ` (${i.variationDetail.trim()})` : ""} × ${i.quantity}`),
+  };
+}
 
 export type ReturningTrust = "THREAD" | "FB_ID" | "PHONE";
 export type ReturningCustomer = {
   trust: ReturningTrust;
+  /**
+   * Hồ sơ dựng từ ĐƠN CŨ của hội thoại (Customer 360 — `customer-360.ts::returningOf`), khách CHƯA xác nhận dùng lại lần này ⇒
+   * khối KHÁCH CŨ chỉ gợi ý: hỏi xác nhận ⇒ `use_saved_address` + `customer_confirmation` (AGENTS 3.12), không «create_customer bằng
+   * đúng thông tin trên». Vắng ⇒ hành vi cũ.
+   */
+  fromHistory?: true;
   customerId: string | null;
   name: string;
   phone: string;
@@ -117,7 +162,18 @@ export function parsePancakeThreadProfile(bodies: readonly Record<string, unknow
   const fbIds = new Set<string>();
   const seen = new Set<string>();
   const prior: (PriorMessage & { t: number })[] = [];
+  const recent = new Map<string, PancakeRecentOrder>();
+  let recentKnown = false;
+  let recentUnparsed = 0;
   for (const body of bodies) {
+    if (Array.isArray(body.recent_orders)) {
+      recentKnown = true;
+      for (const x of body.recent_orders as unknown[]) {
+        const o = pancakeRecentOrderOf(x);
+        if (o) recent.set(o.id, o);
+        else recentUnparsed += 1;
+      }
+    }
     for (const key of ["conv_phone_numbers", "recent_phone_numbers"]) {
       const list = Array.isArray(body[key]) ? (body[key] as unknown[]) : [];
       for (const p of list) {
@@ -148,6 +204,7 @@ export function parsePancakeThreadProfile(bodies: readonly Record<string, unknow
     phones: [...phones].slice(0, RETURNING_LIMITS.phones),
     fbIds: [...fbIds].slice(0, 5),
     prior: prior.slice(-limits.priorMessages).map(({ from, text, at, id }) => ({ from, text, at, ...(id ? { id } : {}) })),
+    ...(recentKnown ? { recentOrders: [...recent.values()].sort((a, b) => (b.at ?? "").localeCompare(a.at ?? "")).slice(0, RECENT_ORDERS_MAX), recentOrdersUnparsed: recentUnparsed } : {}),
   };
 }
 
@@ -363,7 +420,7 @@ export function returningCustomerPrompt(r: ReturningCustomer | null, profile: Pa
       const hint = promptDataText(r.name.trim().split(/\s+/).pop() ?? "", NAME_MAX);
       lines.push(`  · SĐT ${r.phone} (khách đã gửi trong hội thoại) có trong sổ của shop${hint ? ` — người nhận tên «${hint}»` : ""}, địa chỉ cũ ĐÃ CHE: «${maskAddress(fullAddress(r)) || "…"}». Bạn KHÔNG biết số nhà — không đoán, không hỏi khách đọc lại để «kiểm tra».`);
     } else {
-      lines.push(`  · ${repeat ? "Thông tin nhận hàng lần trước" : "Thông tin nhận hàng khách đã cho"}: ${promptDataText(r.name, NAME_MAX)} · SĐT ${promptDataText(r.phone, 20)} · ${fullAddress(r)}`);
+      lines.push(`  · ${r.fromHistory ? "Thông tin nhận hàng của ĐƠN CŨ (CHỈ GỢI Ý — khách CHƯA xác nhận dùng lại lần này)" : repeat ? "Thông tin nhận hàng lần trước" : "Thông tin nhận hàng khách đã cho"}: ${promptDataText(r.name, NAME_MAX)} · SĐT ${promptDataText(r.phone, 20)} · ${fullAddress(r)}`);
     }
     // Mức PHONE: SĐT ai cũng gõ được ⇒ không lịch sử mua (số đơn · ngày · món) của chủ SĐT trong lời nhắc.
     if (!masked && repeat && r.orders !== null && r.orders > 0) lines.push(`  · Đã mua ${r.orders} đơn${r.lastOrderAt ? `, gần nhất ${formatDate(r.lastOrderAt)}` : ""}${r.lastItems.length ? `: ${r.lastItems.map((x) => promptDataText(x, ITEM_MAX)).join("; ")}` : ""}.`);
@@ -378,7 +435,9 @@ export function returningCustomerPrompt(r: ReturningCustomer | null, profile: Pa
   if (!lines.length) return "";
   const how = !r
     ? "CÁCH LÀM: SĐT / địa chỉ khách đã gửi ở tin cũ thì KHÔNG hỏi lại — nhắc lại ngắn để khách xác nhận, GỘP chung tin với lời mời thêm món; chỉ hỏi phần THỰC SỰ còn thiếu."
-    : masked
+    : r.fromHistory && !masked
+      ? `CÁCH LÀM: KHÔNG xin lại họ tên / SĐT / địa chỉ. Khi khách đã chọn món: trong CÙNG MỘT tin, hỏi xác nhận «em gửi về ${fullAddress(r)}, SĐT đuôi ${tail4(r.phone)} như đơn trước được không ạ?» + mời thêm đúng một món (B4). Đây CHỈ là GỢI Ý: khách xác nhận («đúng», «như cũ», «địa chỉ ở trên»…) ⇒ create_customer với use_saved_address = true và customer_confirmation = nguyên văn lời xác nhận — máy chủ tự điền; KHÔNG tự gõ địa chỉ này vào create_customer. Khách đổi ⇒ dùng thông tin mới.`
+      : masked
       ? `CÁCH LÀM: KHÔNG xin lại SĐT. Khi khách đã chọn món: trong CÙNG MỘT tin, hỏi xác nhận «em gửi về địa chỉ cũ ${maskAddress(fullAddress(r)) || "…"} như lần trước phải không ạ?» + mời thêm đúng một món (B4). Khách xác nhận («đúng», «như cũ», «địa chỉ ở trên»…) ⇒ create_customer với use_saved_address = true và customer_confirmation = nguyên văn lời xác nhận — máy chủ tự điền địa chỉ đầy đủ. Khách đổi địa chỉ ⇒ xin địa chỉ mới.`
       : `CÁCH LÀM: KHÔNG xin lại họ tên / SĐT / địa chỉ. Khi khách đã chọn món: trong CÙNG MỘT tin, xác nhận ngắn «em gửi về ${fullAddress(r)}, SĐT đuôi ${tail4(r.phone)}${repeat ? " như lần trước" : ""} nha» + mời thêm đúng một món (B4: món đi kèm${repeat ? " / món khác lần trước" : ""}). Khách đồng ý, nói «như cũ» / «địa chỉ ở trên», hoặc trả lời tiếp về món ⇒ create_customer bằng ĐÚNG thông tin trên ⇒ create_draft_order ⇒ đọc tóm tắt ⇒ khách đồng ý ⇒ confirm_order. Khách báo đổi ⇒ dùng thông tin mới.`;
   // CHỐT KHÁCH CŨ (chủ shop 03/10/2026, «Linh Nguyễn»: mua 05/2024, hôm nay hỏi giá qua quảng cáo rồi «Thanks 😍» là đi).
