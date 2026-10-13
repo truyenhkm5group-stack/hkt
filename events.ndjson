@@ -2344,3 +2344,7 @@
 {"at":"2026-10-13T10:52:36.552Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"gates-test-timeout","detail":"#830 cho fix/gates-test-timeout @ 16fb61f0f060"}
 {"at":"2026-10-13T10:52:54.657Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#830 @ b5296e6d9f23 · Chỉ nâng timeout-minutes hai job kiểm thử 35→45"}
 {"at":"2026-10-13T10:53:29.623Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#830 @ 16fb61f0f060 · Chỉ nâng timeout-minutes hai job kiểm thử 35→45"}
+{"at":"2026-10-13T10:53:47.261Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"CLAIM","mission":"inbox-perf-probe-hotnodes","detail":"RUNNING · 1 mẫu phạm vi · MEDIUM"}
+{"at":"2026-10-13T10:53:47.261Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"OVERLAP_ACCEPTED","mission":"inbox-perf-probe-hotnodes","detail":"OVERLAP_ACCEPTED với hslc-bot-tin-sot-429: phạm vi scripts/inbox-perf-probe.ts — cách tích hợp: chỉ script đo"}
+{"at":"2026-10-13T10:53:47.261Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"OVERLAP_ACCEPTED","mission":"inbox-perf-probe-hotnodes","detail":"OVERLAP_ACCEPTED với inbox-perf-probe-state: phạm vi scripts/inbox-perf-probe.ts — cách tích hợp: chỉ script đo"}
+{"at":"2026-10-13T10:53:47.261Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"OVERLAP_ACCEPTED","mission":"inbox-perf-probe-hotnodes","detail":"OVERLAP_ACCEPTED với inbox-perf-probe-topn: phạm vi scripts/inbox-perf-probe.ts — cách tích hợp: chỉ script đo"}

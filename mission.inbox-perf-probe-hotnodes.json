@@ -1,0 +1,26 @@
+{
+  "schema": 1,
+  "mission_id": "inbox-perf-probe-hotnodes",
+  "title": "inbox-perf-probe: TOP 12 nút tự thân + dấu hiệu biểu thức + khối JIT",
+  "business_goal": "",
+  "status": "RUNNING",
+  "priority": "P0",
+  "risk": "MEDIUM",
+  "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "worker": null,
+  "worktree": null,
+  "branch": "fix/inbox-perf-probe-hotnodes",
+  "base_sha": "e192ac9c5bd0d3ea76a12921ee149ea3acca585d",
+  "domains": [],
+  "owned_paths": [
+    "scripts/inbox-perf-probe.ts"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-13T10:53:47.173Z",
+  "updated_at": "2026-10-13T10:53:47.173Z",
+  "last_heartbeat": "2026-10-13T10:53:47.173Z",
+  "definition_of_done": []
+}
