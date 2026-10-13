@@ -2330,3 +2330,4 @@
 {"at":"2026-10-13T09:40:00.717Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"OVERLAP_ACCEPTED","mission":"inbox-list-subplans","detail":"OVERLAP_ACCEPTED với sales-human-takeover: phạm vi lib/sales-chatbot/inbox.ts — cách tích hợp: sau inbox-list-perf"}
 {"at":"2026-10-13T09:40:19.932Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"inbox-perf-probe-state","detail":"fix/inbox-perf-probe-state @ 14406d725cfa · 1 lệnh kiểm thử"}
 {"at":"2026-10-13T09:40:54.601Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"inbox-perf-probe-state","detail":"#829 cho fix/inbox-perf-probe-state @ 14406d725cfa"}
+{"at":"2026-10-13T09:41:38.390Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#829 @ 14406d725cfa · Chỉ script đo CHỈ ĐỌC: cỡ state + EXPLAIN ANALYZE trên --org; công khai chỉ số đếm/cấu trúc"}

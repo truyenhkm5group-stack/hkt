@@ -1,0 +1,8 @@
+{
+  "pr": 829,
+  "sha": "14406d725cfa2274141ebdb29907cd78094277c0",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-13T09:41:10.573Z",
+  "note": "Chỉ script đo CHỈ ĐỌC: cỡ state + EXPLAIN ANALYZE trên --org; công khai chỉ số đếm/cấu trúc"
+}
