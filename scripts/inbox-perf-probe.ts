@@ -273,7 +273,28 @@ export function planRootOf(cell: unknown): PlanNode | null {
   }
   const first = Array.isArray(v) ? v[0] : v;
   const plan = first && typeof first === "object" ? (first as { Plan?: unknown }).Plan : null;
-  return plan && typeof plan === "object" ? (plan as PlanNode) : null;
+  if (!plan || typeof plan !== "object") return null;
+  // Khối JIT (anh em của Plan) đi kèm gốc dưới khoá riêng — thời gian biên dịch JIT bị tính vào nút đầu tiên chạy biểu thức.
+  const jit = (first as { JIT?: unknown }).JIT;
+  return jit && typeof jit === "object" ? ({ ...(plan as PlanNode), [JIT_KEY]: jit } as PlanNode) : (plan as PlanNode);
+}
+
+const JIT_KEY = "__JIT";
+const jitMs = (x: unknown): number | null => (typeof x === "number" ? x : x && typeof x === "object" && typeof (x as { Total?: unknown }).Total === "number" ? ((x as { Total: number }).Total) : null);
+/**
+ * Tóm tắt JIT của một kế hoạch ANALYZE (13/10/2026): biên dịch JIT bị Postgres tính vào nút ĐẦU TIÊN đánh giá biểu thức — một «Seq Scan
+ * 3.772 dòng 4,5 giây» trên bảng 8 MB có thể là 4,5 giây BIÊN DỊCH chứ không phải quét. Tiền lệ: db/index.ts::chayKhongJit (10/09/2026:
+ * thực thi 26 ms · biên dịch JIT 17.037 ms). Không có khối JIT ⇒ «JIT không chạy». HÀM THUẦN.
+ */
+export function jitSummary(root: PlanNode | null): string {
+  const j = root ? (root[JIT_KEY] as Record<string, unknown> | undefined) : undefined;
+  if (!j) return "JIT không chạy";
+  const t = (j.Timing ?? {}) as Record<string, unknown>;
+  const f = (k: string) => {
+    const v = jitMs(t[k]);
+    return v === null ? "—" : String(Math.round(v));
+  };
+  return `JIT ${num(j.Functions) ?? "?"} hàm · biên dịch ${f("Total")} ms (sinh ${f("Generation")} · inline ${f("Inlining")} · tối ưu ${f("Optimization")} · phát ${f("Emission")})`;
 }
 
 const num = (x: unknown) => (typeof x === "number" && Number.isFinite(x) ? Math.round(x) : null);
@@ -309,10 +330,74 @@ export function planStructure(root: PlanNode | null, maxLines: number = PLAN_PUB
     for (const c of n.Plans ?? []) walk(c, depth + 1);
   };
   walk(root, 0);
-  const ran = typeof root["Actual Total Time"] === "number" ? ` · THẬT ${Math.round(root["Actual Total Time"] as number)} ms · ${neverRun} nút KHÔNG chạy lần nào` : "";
+  const ran = typeof root["Actual Total Time"] === "number" ? ` · THẬT ${Math.round(root["Actual Total Time"] as number)} ms · ${neverRun} nút KHÔNG chạy lần nào · ${jitSummary(root)}` : "";
   const head = `${nodes} nút · ${subplans} SubPlan/InitPlan · Seq Scan: ${seq.size ? [...seq].sort().join(", ") : "không"} · cost gốc ${num(root["Total Cost"]) ?? "?"}${ran}`;
   const body = lines.slice(0, Math.max(0, maxLines - 1));
   return [head, ...body, ...(lines.length > body.length ? [`… (+${lines.length - body.length} nút)`] : [])];
+}
+
+/**
+ * DẤU HIỆU biểu thức của một nút (13/10/2026 — probe --analyze HSLC: «Seq Scan on sales_chat_conversations · 3772 dòng · THẬT 4.555 ms»
+ * và «Limit · THẬT 8.821 ms» trên con 326 ms — biểu thức đắt nằm TRONG nút, phải biết nó là gì mà không lộ dữ liệu): bỏ mọi chuỗi hằng
+ * `'…'` rồi chỉ giữ TÊN hàm, TÊN cột (dạng bảng.cột), số lần dùng regex `~`, số lần `->`/`->>`, số SubPlan. Không giá trị nào. HÀM THUẦN.
+ */
+const NOT_FUNCTIONS = new Set(["and", "or", "not", "case", "when", "then", "else", "end", "in", "any", "all", "exists", "array", "row", "subplan", "initplan", "hashed", "filter", "values"]);
+export function exprSignature(node: Record<string, unknown>): string {
+  const parts: string[] = [];
+  for (const k of ["Filter", "Output", "Index Cond", "Recheck Cond", "Join Filter", "Hash Cond", "Merge Cond", "Sort Key", "Group Key"]) {
+    const v = node[k];
+    if (typeof v === "string") parts.push(v);
+    else if (Array.isArray(v)) for (const x of v) if (typeof x === "string") parts.push(x);
+  }
+  const text = parts.join(" , ").replace(/'(?:[^']|'')*'/g, "''");
+  const count = (re: RegExp) => (text.match(re) ?? []).length;
+  const fns = new Map<string, number>();
+  // Postgres in tên hàm DÍNH dấu «(» — «c.id (SubPlan 3)» không phải lời gọi hàm.
+  for (const m of text.matchAll(/\b([a-z_][a-z0-9_]*)\(/gi)) {
+    const f = m[1].toLowerCase();
+    if (!NOT_FUNCTIONS.has(f)) fns.set(f, (fns.get(f) ?? 0) + 1);
+  }
+  const cols = new Map<string, number>();
+  for (const m of text.matchAll(/\b[a-z_][a-z0-9_]*\.([a-z_][a-z0-9_]*)\b/gi)) cols.set(m[1], (cols.get(m[1]) ?? 0) + 1);
+  const top = (mp: Map<string, number>, n: number) => [...mp.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).slice(0, n).map(([k, c]) => `${k}×${c}`).join(",");
+  const out = [
+    fns.size ? `hàm ${top(fns, 8)}` : "",
+    cols.size ? `cột ${top(cols, 6)}` : "",
+    count(/~\*?/g) ? `regex×${count(/~\*?/g)}` : "",
+    count(/->>?/g) ? `json->×${count(/->>?/g)}` : "",
+    count(/SubPlan \d+/g) ? `SubPlan×${count(/SubPlan \d+/g)}` : "",
+  ].filter(Boolean);
+  return out.length ? out.join(" · ") : "—";
+}
+
+/**
+ * TOP nút theo thời gian THẬT TỰ THÂN (exclusive = tổng của nút − tổng các nút con, kể cả SubPlan/InitPlan — câu con chạy trong biểu
+ * thức của nút cha được tính vào cha) trên TOÀN cây, kèm loại · bảng · chỉ mục · vòng · dòng · dòng bị lọc bỏ · dấu hiệu biểu thức.
+ * Chỉ có nghĩa với kế hoạch ANALYZE; không có số thật ⇒ []. HÀM THUẦN.
+ */
+export function planHotNodes(root: PlanNode | null, n = 12): string[] {
+  if (!root || typeof root["Actual Total Time"] !== "number") return [];
+  const total = (x: PlanNode) => (typeof x["Actual Total Time"] === "number" ? (x["Actual Total Time"] as number) * Number(x["Actual Loops"] ?? 1) : 0);
+  const all: { ms: number; line: string }[] = [];
+  const walk = (x: PlanNode) => {
+    const kids = x.Plans ?? [];
+    const self = Math.max(0, total(x) - kids.reduce((t, k) => t + total(k), 0));
+    const type = word(x["Node Type"]) ?? "?";
+    const rel = word(x["Relation Name"]);
+    const idx = word(x["Index Name"]);
+    const sub = word(x["Subplan Name"]) ?? (word(x["Parent Relationship"]) === "SubPlan" || word(x["Parent Relationship"]) === "InitPlan" ? word(x["Parent Relationship"]) : null);
+    const removed = num(x["Rows Removed by Filter"]);
+    all.push({
+      ms: self,
+      line: `${Math.round(self)} ms tự thân · ${sub ? `[${sub}] ` : ""}${type}${rel ? ` on ${rel}` : ""}${idx ? ` using ${idx}` : ""} · ${num(x["Actual Loops"]) ?? "?"} vòng × ${num(x["Actual Rows"]) ?? "?"} dòng${removed ? ` · lọc bỏ ${removed}` : ""} · ${exprSignature(x)}`,
+    });
+    for (const k of kids) walk(k);
+  };
+  walk(root);
+  return all
+    .sort((a, b) => b.ms - a.ms)
+    .slice(0, n)
+    .map((x) => x.line);
 }
 
 /** Kế hoạch ĐỦ ĐIỀU KIỆN cho phần MÃ HOÁ (có Filter / Index Cond — mang hằng số của câu). Mỗi dòng ≤ 300 ký tự. HÀM THUẦN. */
@@ -398,7 +483,7 @@ export type OrgPerf = {
 };
 
 /** Câu chậm nhất của lượt TẢI nguội + kế hoạch (EXPLAIN không ANALYZE) của vài hình dạng đầu. */
-export type SlowReport = { top: TopQuery[]; plans: { hash: string; block: string; structure: string[]; detail: string[] }[] };
+export type SlowReport = { top: TopQuery[]; plans: { hash: string; block: string; structure: string[]; detail: string[]; hot?: string[] }[] };
 
 export type InboxPerfReport = { verdict: "MEASURED" | "INCOMPLETE"; publicLines: string[]; labels: Map<string, string>; failedSamples: number };
 
@@ -462,7 +547,11 @@ export function summarizeInboxPerf(orgs: readonly OrgPerf[], opts: { samples: nu
     if (r.slow) {
       const n = opts.top ?? (orgs.length === 1 ? TOP_SINGLE_ORG : TOP_MANY_ORGS);
       r.slow.top.slice(0, n).forEach((t, i) => body.push(topLine(label, i, t)));
-      for (const p of r.slow.plans) body.push(...p.structure.map((l, i) => `${label} kế hoạch [${p.hash}] ${p.block}${i === 0 ? ": " : " │ "}${l}`));
+      for (const p of r.slow.plans) {
+        // Có số THẬT ⇒ dòng tóm tắt + TOP nút tự thân (cây đầy đủ bị cắt ở 16 dòng không chỉ ra nút tốn); không ⇒ cấu trúc như cũ.
+        const lines = p.hot && p.hot.length ? [p.structure[0], ...p.hot.map((h, i) => `nút nóng #${i + 1}: ${h}`)] : p.structure;
+        body.push(...lines.map((l, i) => `${label} kế hoạch [${p.hash}] ${p.block}${i === 0 ? ": " : " │ "}${l}`));
+      }
     }
     if (r.conversations === 0) {
       body.push(`${label} chuyển hội thoại: 0 hội thoại — không đo được (${THIN_LABEL})`);
@@ -521,7 +610,7 @@ const errText = (e: unknown) => (e instanceof Error ? e.message : String(e)).spl
 */
 type QueryFn = (...args: unknown[]) => Promise<unknown>;
 export const EXPLAIN_PLAN_ONLY = "EXPLAIN (FORMAT JSON)";
-export const EXPLAIN_RUN = "EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)";
+export const EXPLAIN_RUN = "EXPLAIN (ANALYZE, BUFFERS, VERBOSE, FORMAT JSON)";
 const originals = new WeakMap<object, QueryFn>();
 let sink: CapturedQuery[] | null = null;
 
@@ -739,7 +828,7 @@ export async function measureInbox(
   if (opts.explain && original) {
     for (const t of top.slice(0, EXPLAIN_SHAPES)) {
       const root = await explainPlan(original, t.slowest, Boolean(opts.analyze));
-      plans.push({ hash: t.hash, block: t.block, structure: planStructure(root), detail: planDetail(root) });
+      plans.push({ hash: t.hash, block: t.block, structure: planStructure(root), detail: planDetail(root), hot: planHotNodes(root) });
     }
   }
   return { load, switchTo, conversations: pick.length, diag, slow: { top, plans } };
