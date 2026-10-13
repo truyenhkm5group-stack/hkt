@@ -2244,6 +2244,11 @@ console.log("OK 18: doi chieu dia chi don POS -> bat don chon nham xa, bo qua tr
   bot.orderBot._save = () => {};
   bot.orderBot.seedDefaultProducts();
   assert.equal(String(settings.get("PAURA").defaultProduct || ""), "", "page AURA bo mau chu luc Q005");
+  // Khoi bao gia khong kem anh: page AURA khong tu them anh Q005
+  settings.update("PAURA", { defaultProduct: "Q005" });
+  const baoGia = bot.ensureQuoteImage("GIÁ NIÊM YẾT 749K - giảm 40%: 1 đầm 499.000đ", "PAURA", [{ from: { id: "KHACH" }, message: "giá sao shop" }]);
+  assert.ok(!/IMG:Q005/i.test(baoGia), "page AURA khong tu gui anh Q005");
+  settings.update("PAURA", { defaultProduct: "" });
   bot.pageNames.delete("PAURA");
   delete bot.orderBot._save;
   const prev = catalog.products;
