@@ -1160,6 +1160,8 @@ ${Xung} lấy màu nào để em lên đơn cho mình ạ?`;
       t.match(/\bQ\d{3}\b/)?.[0] ||
       String(eff.defaultProduct || "").trim() ||
       String(eff.extraPrompt || "").match(/(?:chủ lực|mặc định)[^\n]{0,60}?\b(Q\d{3})\b/i)?.[1];
+    // Page KHONG ban ma nay (AURA - Q005): khong tu dinh kem anh cua no
+    if (ma && blockedCodesFor([this.pageNames.get(pageId), this.pancakeNames?.get(pageId)]).includes(String(ma).toUpperCase())) return t;
     const test = this.scopedTestProduct(pageId);
     if (!ma || !(catalog.products.some((p) => String(p.code || "").toUpperCase() === ma.toUpperCase()) || (test && test.code === ma.toUpperCase()))) return t;
     log.info(`[${pageId}] Khoi bao gia khong kem anh -> tu them [[IMG:${ma}]]`);
@@ -2059,7 +2061,7 @@ ${Xung} lấy màu nào để em lên đơn cho mình ạ?`;
       const r6 = await generateReply(systemPrompt + `\n\n## CẢNH BÁO TỪ HỆ THỐNG\nPage này KHÔNG bán mẫu ${maCam.join(", ")}. Câu trả lời vừa rồi nhắc mã đó — SAI. Viết lại: nói về mẫu đầm của page (theo ảnh và hướng dẫn riêng), KHÔNG ghi mã ${maCam.join(", ")}, giữ nguyên màu/size/thông tin khách đã cho.`, history, { model: eff.model, temperature: 0.2 }).catch(() => null);
       if (r6?.text && !maCam.some((c) => new RegExp(`\\b${c}\\b`, "i").test(r6.text)) && !this.findDisallowedPrices(r6.text, systemPrompt).length) reply = r6.text;
       // Viet lai van nhac ma -> bo han ma khoi cau ("Đầm Q005 màu Đỏ" -> "Đầm màu Đỏ"): thieu ma con hon sai ma
-      else for (const c of maCam) reply = reply.replace(new RegExp(`\\s*\\b${c}\\b`, "gi"), "");
+      else for (const c of maCam) reply = reply.replace(new RegExp(`\\[\\[IMG:\\s*${c}[^\\]]*\\]\\]`, "gi"), "").replace(new RegExp(`\\s*\\b${c}\\b`, "gi"), "");
     }
     // Chan bot NEU NHAM MA MAU (vd page chu luc Q002 ma bot chot "Dam Q004")
     let maLa = this.wrongModelInReply(reply, pageId, messages, maNhanDien);
