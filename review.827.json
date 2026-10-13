@@ -1,8 +1,8 @@
 {
   "pr": 827,
-  "sha": "1027a21d941886bf0576232b2e2b871d649d42f3",
+  "sha": "99013db136b7a25a9a2254bd93c059cc3debc42e",
   "verdict": "PASS",
   "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
-  "at": "2026-10-13T09:39:14.898Z",
-  "note": "f4feed09 + bài hiệu năng gọn (1.000 hội thoại, 5.000 tách perf:inbox); khẳng định lệch 0 giữ nguyên; 78→18 s"
+  "at": "2026-10-13T15:33:15.795Z",
+  "note": "ff284930 (PASS) + gộp main (#830)"
 }
