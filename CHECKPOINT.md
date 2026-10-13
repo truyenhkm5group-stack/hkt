@@ -57,6 +57,17 @@ npm run ai -- pr-open inbox-unread-perf --token=…     # CHỜ chủ shop duy�
   Chồng tệp với PR #814: ĐÃ ĐỐI CHIẾU — #814 chỉ sửa `tests/backup.test.ts` vùng dòng 1300–1330, việc này
   sửa vùng ~60–110; hai vùng không giao nhau, đã khai `OVERLAP_ACCEPTED` trong sổ.
 
+### ĐÍNH CHÍNH 21:40 VN — SỨ MỆNH GIÁ VỐN VẪN CÓ NGƯỜI LÀM, TEAM ĐÃ TRẢ KHOÁ
+
+Mục ngay dưới nói khoá `tech-lead` hết hạn ⇒ «không còn ai giữ». SAI. Team nhận khoá lúc 14:34Z rồi phát hiện
+nhánh `claude/lucid-brahmagupta-fnvimb` có commit mới lúc **14:31:27Z** (gộp `origin/main`) — phiên ấy VẪN ĐANG
+LÀM, nó chỉ thôi ghi nhịp tim vào sổ. Team **đã nhả khoá ngay** (`tech-lead` nay trống) và KHÔNG ghi một byte
+nào vào nhánh của họ (lượt đẩy bị git từ chối non-fast-forward — không có gì lọt).
+
+**BÀI HỌC: khoá hết hạn KHÔNG có nghĩa là phiên đã chết.** Nhịp tim trong sổ là lời khai; git là sự thật
+(AGENTS 10.1 «git/GitHub thắng sổ»). Trước khi tiếp quản một sứ mệnh vì khoá hết hạn, PHẢI xem mốc commit cuối
+trên nhánh của nó — không thì hai phiên cùng ghi một phạm vi, đúng thứ cả hệ điều phối này sinh ra để chặn.
+
 ### CẦN CHỦ SHOP QUYẾT
 - **Sứ mệnh giá vốn `cost-center-unify` nay KHÔNG CÒN AI GIỮ**: khoá `tech-lead` của `vm:hkt` HẾT HẠN lúc
   14:04:53Z, nhịp tim cuối 13:13Z, nhánh `claude/lucid-brahmagupta-fnvimb` dừng ở `19ed1d52` (3 commit).
@@ -128,7 +139,8 @@ PR #814 đang mở ⇒ phải khai phạm vi với sổ trước.
 
 ### P0 INBOX — trạng thái + bước kế (owner: Team tiếp quản)
 - Số đo HSLC: listInbox p50 13–19 s (hàng 7–12 s, đếm-thẻ 5–6 s), loadInboxThread 0,1–1 s; «chưa đọc» đường LƯU SẴN (0245 đủ); state nhỏ (TB 1,3 KB).
-- GIẢ THUYẾT MẠNH: **JIT Postgres** (cost ước ~300 triệu do nhánh lùi #803 lập kế hoạch nhưng 0 vòng chạy) — tiền lệ `db/index.ts::chayKhongJit`.
+- **ĐÃ XÁC NHẬN 13/10 (probe #831):** JIT — listInbox.hàng «JIT 291 hàm», Limit 6.873 ms tự thân/100 dòng; đếm-thẻ «JIT 187 hàm», Seq Scan 3.788 dòng 4.521 ms; mọi nút khác < 200 ms. #830 (trần 45′) + #831 đã gộp.
+- (cũ) GIẢ THUYẾT: **JIT Postgres** (cost ước ~300 triệu do nhánh lùi #803 lập kế hoạch nhưng 0 vòng chạy) — tiền lệ `db/index.ts::chayKhongJit`.
   Xác nhận bằng dòng «JIT … biên dịch» của probe #831.
 - Bản sửa sẵn: `fix/inbox-list-subplans` @ `4ccf931b` (xếp chồng trên `fix/inbox-list-perf` @ `ff284930` = PR **#827**): 5 câu quét cả hộp thư
   chạy `set local jit = off` qua `chayKhongJit` + state giải nén 1 lần + câu lấy hàng 2 pha. CHƯA PR, CHƯA `npm test` đủ.
