@@ -24,6 +24,15 @@
 | migration-rehearsal | P1 | fix/migration-rehearsal | #814 (nháp) | PASS review | gộp → ops `migration-rehearsal "qa --compare-jit --candidate-index --budget=300"` (≤100 phút, giữ khoá đọc nặng — KHÔNG chạy cùng deploy) → chủ shop chọn cách sửa 0245 cho qa |
 | inbox-unread-perf | P0 | — | #792 | ĐÃ DEPLOY | HSLC FALSE_UNREAD 1.812/2.278 → 0/481. Chưa DONE tới khi qa áp 0245 |
 
+### LÀM RÕ (sau bàn giao thử 13/10)
+- Điều kiện chủ shop cho release 40 hội thoại POST_ORDER: lô nhỏ (≤ 10/lượt), có audit + rollback theo run id, KHÔNG gửi lại tin cũ,
+  KHÔNG kích follow-up hàng loạt, KHÔNG tạo đơn trùng, KHÔNG mất handoff cần người (49 hội thoại khách đang chờ phải ở lại).
+- inbox-list-perf: gộp `fix/inbox-perf-probe-topn` (CHỈ công cụ đo, script) TRƯỚC để đo top-N câu chậm; `fix/inbox-list-perf` là bản SỬA chính.
+  Hai nhánh này chưa có trên remote khi ghi checkpoint — kiểm `git ls-remote origin 'fix/inbox-*'`.
+- Deploy 935ffdb2: run 38326139783 (đỏ vì verify qa; smoke 134/134 — đọc log bước «SSH vào VPS và chạy bootstrap»).
+- sticky-cart AFTER: đã hẹn chạy 10:00Z 13/10 (phiên Max); nếu checkpoint chưa có số AFTER thì chạy lại lệnh ở bảng.
+- Thứ tự #823 → #804: hàng đợi tự chặn (HIGH đi riêng — WAIT_SERIAL), chỉ cần chạy `merge` theo thứ tự.
+
 ### QUYẾT ĐỊNH KỸ THUẬT (đừng phân tích lại)
 - «Chưa đọc» = lượt khách mới nhất CHƯA XỬ LÝ — một định nghĩa (#803 `response-ownership-ledger.ts`), lưu sẵn 0245 (`turn_unhandled`), công tắc lùi `inbox.unread.materialized`.
 - Migration tổ chức hỏng vì HẾT GIỜ ⇒ phục vụ lược đồ cũ CHỈ khi mọi migration thiếu nằm trong `lib/constants/migration-serve-compat.ts` (#815).
