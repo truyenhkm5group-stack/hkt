@@ -37,6 +37,8 @@ import {
   fullShape,
   planRootOf,
   planStructure,
+  exprSignature,
+  planHotNodes,
   queryBlockOf,
   stateLine,
   shapeHash,
@@ -183,6 +185,28 @@ export function testInboxPerfProbePure() {
   );
   assert.match(ran[0], /THẬT 5856 ms · 1 nút KHÔNG chạy lần nào$/);
   assert.match(ran.join("\n"), /\[SubPlan 8\] Index Scan on sales_chat_inbound · ~1 dòng · cost 75529 · THẬT 0 ms \(0 vòng × 0 dòng\)/);
+  // Nút nóng: thời gian TỰ THÂN (tổng − con), dấu hiệu biểu thức chỉ TÊN hàm / cột — không giá trị.
+  const sig = exprSignature({ Filter: `((regexp_replace(c.customer_phone, '[^0-9]', '', 'g') = '${SDT}') AND ((c.state -> 'control'::text) ->> 'mode'::text) ~ '${TEN_KHACH}')`, Output: ["c.id", "(SubPlan 3)", "lower(c.state ->> 'x')"] });
+  assert.equal(sig, "hàm lower×1,regexp_replace×1 · cột state×2,customer_phone×1,id×1 · regex×1 · json->×3 · SubPlan×1");
+  assert.ok(!sig.includes(SDT) && !sig.includes(TEN_KHACH), "dấu hiệu không mang giá trị");
+  const hot = planHotNodes(
+    planRootOf([
+      {
+        Plan: {
+          "Node Type": "Limit", "Actual Total Time": 8821, "Actual Loops": 1, "Actual Rows": 100,
+          Plans: [
+            { "Node Type": "Result", "Actual Total Time": 326, "Actual Loops": 1, "Actual Rows": 100, Plans: [{ "Node Type": "Seq Scan", "Relation Name": "sales_chat_conversations", "Actual Total Time": 300, "Actual Loops": 1, "Actual Rows": 3772, "Rows Removed by Filter": 12, Filter: "(c.channel <> 'TEST'::text)" }] },
+            { "Node Type": "Index Scan", "Parent Relationship": "SubPlan", "Subplan Name": "SubPlan 7", "Relation Name": "sales_chat_inbound", "Index Name": "sales_chat_inbound_thread_created_idx", "Actual Total Time": 84, "Actual Loops": 100, "Actual Rows": 1, Filter: "(i.customer_name IS NOT NULL)" },
+          ],
+        },
+      },
+    ]),
+    3,
+  );
+  assert.equal(hot[0], "8400 ms tự thân · [SubPlan 7] Index Scan on sales_chat_inbound using sales_chat_inbound_thread_created_idx · 100 vòng × 1 dòng · cột customer_name×1");
+  assert.match(hot[1], /^300 ms tự thân · Seq Scan on sales_chat_conversations · 1 vòng × 3772 dòng · lọc bỏ 12 · cột channel×1$/);
+  assert.match(hot[2], /^95 ms tự thân · Limit/, "Limit tự thân = 8821 − 326 − 8400");
+  assert.deepEqual(planHotNodes(planRootOf([{ Plan: { "Node Type": "Limit", "Total Cost": 1 } }])), [], "không ANALYZE ⇒ không có nút nóng");
   // Tóm tắt in khối câu chậm + kế hoạch khi có.
   const withSlow = okOrg("shop-cham", 3);
   if (withSlow.result.ok) {
@@ -208,7 +232,7 @@ export function testInboxPerfProbeSource() {
   assert.ok(raw.includes("show default_transaction_read_only"), "hỏi chế độ chỉ đọc");
   for (const r of raw) assert.match(r, /^(show|select) /, `câu SQL thô chỉ ĐỌC: ${r.slice(0, 60)}`);
   // EXPLAIN của câu chậm: mặc định KHÔNG ANALYZE (chỉ lập kế hoạch); ANALYZE CHỈ sau cờ --analyze (cần --org).
-  assert.match(code, /export const EXPLAIN_RUN = "EXPLAIN \(ANALYZE, BUFFERS, FORMAT JSON\)";/);
+  assert.match(code, /export const EXPLAIN_RUN = "EXPLAIN \(ANALYZE, BUFFERS, VERBOSE, FORMAT JSON\)";/);
   assert.match(code, /explainPlan\(original, t\.slowest, Boolean\(opts\.analyze\)\)/, "ANALYZE chỉ khi cờ bật");
   assert.match(code, /analyze: args\.analyze/, "cờ đi từ arg đã soát");
   assert.match(code, /export const EXPLAIN_PLAN_ONLY = "EXPLAIN \(FORMAT JSON\)";/, "mặc định chỉ lập kế hoạch");
@@ -345,6 +369,7 @@ export async function testInboxPerfProbeDb() {
     assert.equal(rSlow.result.diag.columns, 2, "CSDL kiểm thử có đủ cột 0245");
     assert.ok(slow.plans.every((p) => / THẬT \d+ ms · \d+ nút KHÔNG chạy lần nào$/.test(p.structure[0])), `ANALYZE ra số thật: ${JSON.stringify(slow.plans.map((p) => p.structure[0]))}`);
     assert.ok(rSlow.result.diag.stateBytes && rSlow.result.diag.stateBytes.max !== null, "đọc được cỡ cột state");
+    assert.ok(slow.plans.every((p) => (p.hot?.length ?? 0) > 0 && /ms tự thân · /.test(p.hot![0])), `ANALYZE ⇒ có nút nóng: ${JSON.stringify(slow.plans.map((p) => p.hot?.[0]))}`);
     assert.ok(rSlow.result.diag.conversations !== null && rSlow.result.diag.conversations >= 5);
     assert.ok(rSlow.result.load.cold.every((s) => s.captured === undefined), "chữ câu + tham số rời khỏi mẫu sau khi gộp");
     const rep3 = summarizeInboxPerf([rSlow], { samples: 2, acceptanceCodes: [], top: 8 });

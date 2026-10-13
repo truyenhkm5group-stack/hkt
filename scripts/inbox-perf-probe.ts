@@ -315,6 +315,70 @@ export function planStructure(root: PlanNode | null, maxLines: number = PLAN_PUB
   return [head, ...body, ...(lines.length > body.length ? [`… (+${lines.length - body.length} nút)`] : [])];
 }
 
+/**
+ * DẤU HIỆU biểu thức của một nút (13/10/2026 — probe --analyze HSLC: «Seq Scan on sales_chat_conversations · 3772 dòng · THẬT 4.555 ms»
+ * và «Limit · THẬT 8.821 ms» trên con 326 ms — biểu thức đắt nằm TRONG nút, phải biết nó là gì mà không lộ dữ liệu): bỏ mọi chuỗi hằng
+ * `'…'` rồi chỉ giữ TÊN hàm, TÊN cột (dạng bảng.cột), số lần dùng regex `~`, số lần `->`/`->>`, số SubPlan. Không giá trị nào. HÀM THUẦN.
+ */
+const NOT_FUNCTIONS = new Set(["and", "or", "not", "case", "when", "then", "else", "end", "in", "any", "all", "exists", "array", "row", "subplan", "initplan", "hashed", "filter", "values"]);
+export function exprSignature(node: Record<string, unknown>): string {
+  const parts: string[] = [];
+  for (const k of ["Filter", "Output", "Index Cond", "Recheck Cond", "Join Filter", "Hash Cond", "Merge Cond", "Sort Key", "Group Key"]) {
+    const v = node[k];
+    if (typeof v === "string") parts.push(v);
+    else if (Array.isArray(v)) for (const x of v) if (typeof x === "string") parts.push(x);
+  }
+  const text = parts.join(" , ").replace(/'(?:[^']|'')*'/g, "''");
+  const count = (re: RegExp) => (text.match(re) ?? []).length;
+  const fns = new Map<string, number>();
+  // Postgres in tên hàm DÍNH dấu «(» — «c.id (SubPlan 3)» không phải lời gọi hàm.
+  for (const m of text.matchAll(/\b([a-z_][a-z0-9_]*)\(/gi)) {
+    const f = m[1].toLowerCase();
+    if (!NOT_FUNCTIONS.has(f)) fns.set(f, (fns.get(f) ?? 0) + 1);
+  }
+  const cols = new Map<string, number>();
+  for (const m of text.matchAll(/\b[a-z_][a-z0-9_]*\.([a-z_][a-z0-9_]*)\b/gi)) cols.set(m[1], (cols.get(m[1]) ?? 0) + 1);
+  const top = (mp: Map<string, number>, n: number) => [...mp.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).slice(0, n).map(([k, c]) => `${k}×${c}`).join(",");
+  const out = [
+    fns.size ? `hàm ${top(fns, 8)}` : "",
+    cols.size ? `cột ${top(cols, 6)}` : "",
+    count(/~\*?/g) ? `regex×${count(/~\*?/g)}` : "",
+    count(/->>?/g) ? `json->×${count(/->>?/g)}` : "",
+    count(/SubPlan \d+/g) ? `SubPlan×${count(/SubPlan \d+/g)}` : "",
+  ].filter(Boolean);
+  return out.length ? out.join(" · ") : "—";
+}
+
+/**
+ * TOP nút theo thời gian THẬT TỰ THÂN (exclusive = tổng của nút − tổng các nút con, kể cả SubPlan/InitPlan — câu con chạy trong biểu
+ * thức của nút cha được tính vào cha) trên TOÀN cây, kèm loại · bảng · chỉ mục · vòng · dòng · dòng bị lọc bỏ · dấu hiệu biểu thức.
+ * Chỉ có nghĩa với kế hoạch ANALYZE; không có số thật ⇒ []. HÀM THUẦN.
+ */
+export function planHotNodes(root: PlanNode | null, n = 12): string[] {
+  if (!root || typeof root["Actual Total Time"] !== "number") return [];
+  const total = (x: PlanNode) => (typeof x["Actual Total Time"] === "number" ? (x["Actual Total Time"] as number) * Number(x["Actual Loops"] ?? 1) : 0);
+  const all: { ms: number; line: string }[] = [];
+  const walk = (x: PlanNode) => {
+    const kids = x.Plans ?? [];
+    const self = Math.max(0, total(x) - kids.reduce((t, k) => t + total(k), 0));
+    const type = word(x["Node Type"]) ?? "?";
+    const rel = word(x["Relation Name"]);
+    const idx = word(x["Index Name"]);
+    const sub = word(x["Subplan Name"]) ?? (word(x["Parent Relationship"]) === "SubPlan" || word(x["Parent Relationship"]) === "InitPlan" ? word(x["Parent Relationship"]) : null);
+    const removed = num(x["Rows Removed by Filter"]);
+    all.push({
+      ms: self,
+      line: `${Math.round(self)} ms tự thân · ${sub ? `[${sub}] ` : ""}${type}${rel ? ` on ${rel}` : ""}${idx ? ` using ${idx}` : ""} · ${num(x["Actual Loops"]) ?? "?"} vòng × ${num(x["Actual Rows"]) ?? "?"} dòng${removed ? ` · lọc bỏ ${removed}` : ""} · ${exprSignature(x)}`,
+    });
+    for (const k of kids) walk(k);
+  };
+  walk(root);
+  return all
+    .sort((a, b) => b.ms - a.ms)
+    .slice(0, n)
+    .map((x) => x.line);
+}
+
 /** Kế hoạch ĐỦ ĐIỀU KIỆN cho phần MÃ HOÁ (có Filter / Index Cond — mang hằng số của câu). Mỗi dòng ≤ 300 ký tự. HÀM THUẦN. */
 export function planDetail(root: PlanNode | null, maxLines: number = PLAN_PRIVATE_LINES): string[] {
   if (!root) return ["kế hoạch: không đọc được"];
@@ -398,7 +462,7 @@ export type OrgPerf = {
 };
 
 /** Câu chậm nhất của lượt TẢI nguội + kế hoạch (EXPLAIN không ANALYZE) của vài hình dạng đầu. */
-export type SlowReport = { top: TopQuery[]; plans: { hash: string; block: string; structure: string[]; detail: string[] }[] };
+export type SlowReport = { top: TopQuery[]; plans: { hash: string; block: string; structure: string[]; detail: string[]; hot?: string[] }[] };
 
 export type InboxPerfReport = { verdict: "MEASURED" | "INCOMPLETE"; publicLines: string[]; labels: Map<string, string>; failedSamples: number };
 
@@ -462,7 +526,11 @@ export function summarizeInboxPerf(orgs: readonly OrgPerf[], opts: { samples: nu
     if (r.slow) {
       const n = opts.top ?? (orgs.length === 1 ? TOP_SINGLE_ORG : TOP_MANY_ORGS);
       r.slow.top.slice(0, n).forEach((t, i) => body.push(topLine(label, i, t)));
-      for (const p of r.slow.plans) body.push(...p.structure.map((l, i) => `${label} kế hoạch [${p.hash}] ${p.block}${i === 0 ? ": " : " │ "}${l}`));
+      for (const p of r.slow.plans) {
+        // Có số THẬT ⇒ dòng tóm tắt + TOP nút tự thân (cây đầy đủ bị cắt ở 16 dòng không chỉ ra nút tốn); không ⇒ cấu trúc như cũ.
+        const lines = p.hot && p.hot.length ? [p.structure[0], ...p.hot.map((h, i) => `nút nóng #${i + 1}: ${h}`)] : p.structure;
+        body.push(...lines.map((l, i) => `${label} kế hoạch [${p.hash}] ${p.block}${i === 0 ? ": " : " │ "}${l}`));
+      }
     }
     if (r.conversations === 0) {
       body.push(`${label} chuyển hội thoại: 0 hội thoại — không đo được (${THIN_LABEL})`);
@@ -521,7 +589,7 @@ const errText = (e: unknown) => (e instanceof Error ? e.message : String(e)).spl
 */
 type QueryFn = (...args: unknown[]) => Promise<unknown>;
 export const EXPLAIN_PLAN_ONLY = "EXPLAIN (FORMAT JSON)";
-export const EXPLAIN_RUN = "EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)";
+export const EXPLAIN_RUN = "EXPLAIN (ANALYZE, BUFFERS, VERBOSE, FORMAT JSON)";
 const originals = new WeakMap<object, QueryFn>();
 let sink: CapturedQuery[] | null = null;
 
@@ -739,7 +807,7 @@ export async function measureInbox(
   if (opts.explain && original) {
     for (const t of top.slice(0, EXPLAIN_SHAPES)) {
       const root = await explainPlan(original, t.slowest, Boolean(opts.analyze));
-      plans.push({ hash: t.hash, block: t.block, structure: planStructure(root), detail: planDetail(root) });
+      plans.push({ hash: t.hash, block: t.block, structure: planStructure(root), detail: planDetail(root), hot: planHotNodes(root) });
     }
   }
   return { load, switchTo, conversations: pick.length, diag, slow: { top, plans } };
