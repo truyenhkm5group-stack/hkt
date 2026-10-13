@@ -293,7 +293,14 @@ export async function listInbox(
   // lưu sẵn trên dòng hội thoại (0245, trigger CSDL — inbox-unread.ts): một phép đọc cột cho bộ đếm, bộ lọc và khoá xếp. Trạng thái của
   // CỬA HÀNG — không nối con trỏ của người xem. Công tắc lùi `inbox.unread.materialized` (inbox-unread.ts) đổi sang tính trực tiếp.
   const unreadSql = await loadInboxUnreadSql();
-  const unread = unreadSql.unread;
+  // Chưa có cột lưu sẵn (tổ chức DEGRADED_MIGRATION ở 0245 / công tắc lùi): định nghĩa #803 là một câu con cho TỪNG hội thoại, và trước
+  // đây chạy BA lượt trên cả hộp thư (bộ đếm thẻ · khoá xếp · đếm level khi lọc «Chưa đọc»). Nay MỘT lượt dựng tập hội thoại chưa đọc
+  // (trong `base` — mọi bộ lọc khác đã áp), ba chỗ kia đọc tập đó. Cùng biểu thức, cùng kết quả (P0 inbox-list-perf 13/10/2026).
+  let unread: SQL<boolean> = unreadSql.unread;
+  if (!unreadSql.materialized) {
+    const ids = (await db.select({ id: c.id }).from(c).leftJoin(cu, eq(cu.id, c.customerId)).where(and(...base, unreadSql.unread))).map((r) => r.id);
+    unread = ids.length ? sql<boolean>`(${inArray(c.id, ids)})` : sql<boolean>`false`;
+  }
   const byFilter: Record<InboxFilter, SQL | undefined> = {
     ALL: undefined,
     UNREAD: unread,
