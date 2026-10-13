@@ -3,7 +3,7 @@
   "mission_id": "inbox-list-subplans",
   "title": "P0 hộp thư: câu quét cả hộp thư giải nén state một lần/dòng (bảng dẫn xuất 3 nhánh), câu lấy hàng hai pha",
   "business_goal": "",
-  "status": "RUNNING",
+  "status": "PR_READY",
   "priority": "P0",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -20,7 +20,18 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-13T09:40:00.628Z",
-  "updated_at": "2026-10-13T09:40:00.628Z",
-  "last_heartbeat": "2026-10-13T09:40:00.628Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-13T15:31:03.884Z",
+  "last_heartbeat": "2026-10-13T15:31:03.884Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "fix/inbox-list-subplans",
+    "sha": "121d25b490afa2abc85627d7415cf4fe8f6a34ae",
+    "at": "2026-10-13T15:31:03.884Z",
+    "actor": "DESKTOP-56TH98Y:wt-inbox-list-subplans",
+    "title": "P0 hộp thư: câu quét cả hộp thư giải nén state một lần/dòng (bảng dẫn xuất 3 nhánh), câu lấy hàng hai pha",
+    "summary": "listInbox chạy JIT TẮT (chayKhongJit) cho đếm thẻ · đếm level · tập chưa đọc · pha 1 · pha 2. Production HSLC (probe #831): hàng «JIT 291 hàm» Limit 6.873 ms tự thân; đếm-thẻ «JIT 187 hàm» Seq Scan 4.521 ms tự thân. Kèm state giải nén một lần + lấy hàng hai pha (vô hại, có test). Xếp chồng trên #827 @99013db1.",
+    "tests": [
+      "npm test đủ TẤT CẢ KIỂM THỬ ĐẠT · inbox-list-perf (state lớn ≡ state nhỏ; năm câu trong chayKhongJit) · inbox-unread-perf · response-ownership · sales-inbox · inbox-search · inbox-v2-a · handoff-ownership · inbox-semantics-v3 · inbox-read-v3 · saas-hide-internal · migration-serve-compat · tsc · eslint · test-hygiene · repo-integrity"
+    ]
+  }
 }
