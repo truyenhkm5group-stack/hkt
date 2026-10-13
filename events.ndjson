@@ -2283,3 +2283,4 @@
 {"at":"2026-10-13T02:42:29.102Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"cart-intent-audit-sync","detail":"fix/cart-audit-rules-sync @ 75c0b8cdf938 · 1 lệnh kiểm thử"}
 {"at":"2026-10-13T02:43:06.115Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"cart-intent-audit-sync","detail":"#823 cho fix/cart-audit-rules-sync @ 75c0b8cdf938"}
 {"at":"2026-10-13T02:44:23.920Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#823 @ 75c0b8cdf938 · Cùng commit #822 (đã review): đồng bộ luật audit chỉ đọc"}
+{"at":"2026-10-13T03:18:43.628Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"cart-intent-audit-sync","detail":"#823 @ 75c0b8cdf938 → daceee42997d (MERGE_NOW · MEDIUM · gates success)"}
