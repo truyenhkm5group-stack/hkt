@@ -80,6 +80,11 @@ function testPure() {
   assert.equal(fixed.drift.length, 0);
   // Khách có ý bớt mà không rõ số («bớt đi em») ⇒ bản sửa không chặn lượt đó ⇒ đơn 1kg sau đó KHÔNG đếm là trôi ý định.
   assert.equal(auditConversation(convo([["user", txt(OPEN)], ["user", draft("Chả cá thu (2kg)", 1)], ["user", txt("bớt đi em")], ["user", draft("Chả cá thu (1kg)", 1)]]), start).drift.length, 0);
+  // Review vòng 2: giỏ hai món, khách chọn lại món bằng câu không số ⇒ đơn chỉ còn món đó KHÔNG phải trôi ý định.
+  const two = `2kg chả cá thu + 1kg chả mực
+ĐT ${PHONE}
+${ADDR}`;
+  assert.equal(auditConversation(convo([["user", txt(two)], ["user", result({ order_code: "#AB12CD34", lines: [{ name: "Chả cá thu (1kg)", quantity: 2 }, { name: "Chả mực giã tay (1kg)", quantity: 1 }] })], ["user", txt("chỉ lấy chả mực thôi")], ["user", draft("Chả mực giã tay (1kg)", 1)]]), start).drift.length, 0);
   // P0-1 của review: câu nhiều lượng không làm script ném.
   assert.doesNotThrow(() => auditConversation(convo([["user", txt(OPEN)], ["user", txt("thêm 1kg, thêm 1kg nữa")], ["user", txt("cho chị 2kg, à không 1kg")]]), start));
   // 2kg = 2 × gói 1kg ⇒ không hạ.
