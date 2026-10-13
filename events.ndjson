@@ -2301,3 +2301,4 @@
 {"at":"2026-10-13T04:57:18.687Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"OVERLAP_ACCEPTED","mission":"inbox-list-perf","detail":"OVERLAP_ACCEPTED với pancake-replacement: phạm vi lib/sales-chatbot/inbox-switch-shared.ts ↔ lib/sales-chatbot/ — cách tích hợp: inbox.ts / thread-pane / auto-refresh"}
 {"at":"2026-10-13T04:57:37.347Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"inbox-perf-probe-topn","detail":"fix/inbox-perf-probe-topn @ 73449b810f3d · 2 lệnh kiểm thử"}
 {"at":"2026-10-13T04:58:10.198Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"inbox-perf-probe-topn","detail":"#826 cho fix/inbox-perf-probe-topn @ 73449b810f3d"}
+{"at":"2026-10-13T04:58:27.632Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"inbox-list-perf","detail":"fix/inbox-list-perf @ f4feed095d2e · 2 lệnh kiểm thử"}
