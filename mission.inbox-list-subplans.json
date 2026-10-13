@@ -3,7 +3,7 @@
   "mission_id": "inbox-list-subplans",
   "title": "P0 hộp thư: câu quét cả hộp thư giải nén state một lần/dòng (bảng dẫn xuất 3 nhánh), câu lấy hàng hai pha",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P0",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -22,9 +22,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-13T09:40:00.628Z",
-  "updated_at": "2026-10-13T17:20:48.776Z",
+  "updated_at": "2026-10-13T17:51:56.961Z",
   "last_heartbeat": "2026-10-13T17:20:48.776Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#835 → 3683c9e943f4d27086abb2d168c70c82402465d9"
+  },
   "handoff": {
     "branch": "fix/inbox-list-subplans",
     "sha": "45f62179ac26b8c779bb59b3fe48b668cfc93262",
