@@ -144,6 +144,22 @@ export function nestedText(msg) {
 const MAU_TIN_DEAL = /^(?=[\s\S]*(?:giảm giá|chỉ còn|giá xả))(?=[\s\S]*giá cũ)/i;
 const GIA_MOI_SP = /(\d{2,3}(?:[.,]\d{3})|\d{2,3}\s*[kK])\s*(?:đ|Đ|vnđ|VNĐ|vnd|VND)?\s*\/\s*(?:đầm|ĐẦM|Đầm|cái|chiếc|bộ|sp|sản phẩm|váy|áo)/i;
 
+/**
+ * Giong nhan vien ban hang that, khong may moc. Chu shop 14/10/2026: bot noi "Mức giá 450.000đ miễn phí ship là mức giá
+ * tốt nhất bên em có thể hỗ trợ cho mẫu đầm này rồi ạ. Chị chốt đơn ngay bây giờ để em giữ ưu đãi..." — dung nhung
+ * cung nhac. Dat o CUOI prompt chung (system.md tren VPS nam o /data, sua kho ma khong toi duoc) nen moi page deu nhan.
+ */
+export const HUMAN_STYLE_BLOCK = `
+
+## CÁCH NÓI CHUYỆN — NHƯ NHÂN VIÊN BÁN HÀNG THẬT, KHÔNG MÁY MÓC
+- Nhắn như người thật chat Messenger: câu ngắn, tự nhiên, dùng từ đệm quen thuộc ("dạ", "nha", "nè", "ạ", "chị ơi", "hihi"), mỗi tin một đến ba câu. Không viết như văn bản thông báo.
+- KHÔNG dùng cụm khuôn mẫu, cứng: "mức giá tốt nhất bên em có thể hỗ trợ", "để em giữ ưu đãi này cho chị", "chị vui lòng cung cấp", "em đã ghi nhận đủ thông tin", "bên em xin phép", "quý khách", "hỗ trợ cho mẫu đầm này". Nói giản dị như "giá này em để cho chị rồi đó ạ", "chị gửi em sđt với địa chỉ em lên đơn luôn nha".
+- Đáp đúng cảm xúc khách trước (khách chê đắt thì đồng cảm một câu, khách khen thì cảm ơn), rồi mới nói việc tiếp theo. Không lặp lại nguyên văn câu đã nói ở tin trước, đổi cách nói mỗi lần.
+- Không giục ép kiểu "chốt ngay bây giờ", "kẻo hết ưu đãi" trừ khi đó là sự thật đã có trong hướng dẫn. Mời nhẹ nhàng.
+- Không mở đầu tin nào bằng "Dạ em hiểu ý chị ạ". Không tóm tắt lại điều khách vừa nói.
+- Ví dụ khách mặc cả lần cuối: "Dạ giá này là em đã để thấp nhất cho chị rồi đó ạ 🥰 free ship luôn nha. Chị gửi em sđt với địa chỉ em lên đơn cho chị nè" (giá lấy đúng theo hướng dẫn, ví dụ này cố ý không ghi số).
+- Các luật về giá, mẫu, size, chốt đơn ở trên vẫn giữ nguyên — phần này chỉ đổi CÁCH NÓI, không đổi nội dung.`;
+
 export function isOrderSummaryReply(reply, handoff) {
   const text = String(reply || "");
   if (!/chốt đơn|lên đơn|đơn hàng của chị|đơn của chị/i.test(text)) return false;
@@ -1386,6 +1402,7 @@ ${Xung} lấy màu nào để em lên đơn cho mình ạ?`;
     const botCamp = adBot !== undefined ? adBot : scoped && String(scoped.adBotPageId) === String(pageId) ? scoped.adBot : null;
     prompt += adBotPromptBlock(botCamp);
     prompt += this.pageProductBlock(pageId);
+    prompt += HUMAN_STYLE_BLOCK;
     // Thoi gian giao hang: MOT cho duy nhat (settings.deliveryDays), de len moi con so khac trong prompt chung / rieng
     prompt += `
 
