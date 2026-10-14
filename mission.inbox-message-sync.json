@@ -3,7 +3,7 @@
   "mission_id": "inbox-message-sync",
   "title": "P0: tin phía page (NV trên Pancake) đẩy hội thoại lên đầu hộp thư + phát realtime; kiểm INGEST trễ webhook→sổ p95 > 5 s",
   "business_goal": "",
-  "status": "RUNNING",
+  "status": "PR_READY",
   "priority": "P0",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -21,7 +21,20 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-14T04:30:41.742Z",
-  "updated_at": "2026-10-14T04:30:41.742Z",
-  "last_heartbeat": "2026-10-14T04:30:41.742Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-14T04:31:01.088Z",
+  "last_heartbeat": "2026-10-14T04:31:01.088Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "fix/inbox-message-sync",
+    "sha": "be4d0fed80d59ade90cd901748286e06167be4a3",
+    "at": "2026-10-14T04:31:01.088Z",
+    "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+    "title": "P0: tin phía page (NV trên Pancake) đẩy hội thoại lên đầu hộp thư + phát realtime; kiểm INGEST trễ webhook→sổ p95 > 5 s",
+    "summary": "H1: tin phía page ngoài ERP không đẩy khoá xếp, không publish",
+    "tests": [
+      "tsc·lint: sạch",
+      "inbox-message-sync (E2E qua receiveFanpageEvent + listInbox, kiểm đột biến)·inbox-list-perf: đạt",
+      "npm test: TẤT CẢ KIỂM THỬ ĐẠT"
+    ]
+  }
 }
