@@ -2332,5 +2332,74 @@ console.log("OK 18: doi chieu dia chi don POS -> bat don chon nham xa, bo qua tr
   console.log("OK 54: san pham cua page — chi noi theo thong tin ERP, khong danh muc POS, khong len don POS");
 }
 
+// ---- 55: su co 14/10/2026 (Thanh Le, Giang Nguyen — page AURA): khach gui don "1m55" roi "Nặng 53 kg" -> bot tra loi
+// tin dau, bo sot tin sau; page khong co bang size -> bot ket bang "cần tư vấn thêm gì"; khach like -> khong xin SDT dia chi;
+// ban chot co chuyen nhan vien de nguyen "[SĐT khách đã cung cấp]"
+{
+  const { store } = await import("../src/store.js");
+  const prevSettings = settings.get("PAGE1");
+  settings.update("PAGE1", { sizeChart: "" });
+  const shop = (t) => ({ from: { id: "PAGE1" }, message: t });
+  const khach = (t) => ({ from: { id: "KHACH" }, message: t });
+  const hoiThoai = [shop("Chị cho em xin Chiều Cao + Cân Nặng để em tư vấn size cho chị nha"), khach("1m55"), khach("Nặng 53 kg")];
+  // Page chua co bang size: VIEC TIEP THEO la xin luon mau / SDT / dia chi, khong dung o tu van size
+  const p = bot.orderProgressPrompt("PAGE1", hoiThoai);
+  assert.match(p, /CHƯA có bảng size/);
+  assert.match(p, /XIN LUÔN .*số điện thoại.*địa chỉ/);
+  assert.match(p, /KHÔNG hỏi "cần tư vấn thêm gì không"/);
+  // Like / tha tim khi chua chot don -> hoi tiep dung thong tin con thieu
+  assert.match(bot.nextInfoAsk("PAGE1", hoiThoai, "chị"), /số điện thoại, địa chỉ nhận hàng/);
+  assert.match(bot.nextInfoAsk("PAGE1", [shop("Dạ chị xem mẫu ạ")], "chị"), /chiều cao, cân nặng/);
+  assert.doesNotMatch(bot.nextInfoAsk("PAGE1", [...hoiThoai, khach("0912345678"), khach("số 5 ngõ 10 phường Láng Hạ quận Đống Đa Hà Nội")], "chị") || "", /số điện thoại|địa chỉ/, "da co SDT + dia chi -> khong xin lai");
+  // Mau test / san pham cua page: khach xin mien ship -> mien ship ngay cho 1 chiec, khong bat lay 2 chiec
+  const { testProductLines } = await import("../src/adpersona.js");
+  const dongGia = testProductLines({ name: "Đầm nhung", code: "NHUNG01", price: 499000, shipFee: 25000, comboPrice: 849000, fabric: "Nhung", sizes: "", offer: "", colors: [{ color: "Đỏ đô", sha: "x" }] }).join("\n");
+  assert.match(dongGia, /xin miễn ship[^\n]*MIỄN PHÍ SHIP luôn[^\n]*499\.000đ/);
+  assert.match(dongGia, /KHÔNG bắt khách lấy 2 chiếc/);
+  assert.match(dongGia, /CHỈ CÓ MỘT MÀU: Đỏ đô\. KHÔNG hỏi khách chọn màu/, "mau 1 mau -> khong hoi mau");
+  const { aiScope } = await import("../src/aicost.js");
+  const motMau = { adId: "page:1", scope: "page", test: { name: "Đầm nhung", code: "NHUNG01", price: 499000, shipFee: 25000, comboPrice: null, fabric: "Nhung", sizes: "", offer: "", colors: [{ color: "Đỏ đô", sha: "x" }] } };
+  aiScope.run({ adBot: motMau, adBotPageId: "PAGE1" }, () => {
+    const hoi = bot.nextInfoAsk("PAGE1", hoiThoai, "chị");
+    assert.ok(!/màu/.test(hoi) && /số điện thoại/.test(hoi), hoi);
+    const pr = bot.orderProgressPrompt("PAGE1", hoiThoai);
+    assert.match(pr, /Màu: Đỏ đô \(mẫu chỉ có 1 màu/);
+    assert.doesNotMatch(pr, /VIỆC TIẾP THEO: hỏi khách chọn màu/);
+  });
+  // Tin khach toi trong luc bot dang tra loi tin truoc: chi co tin CUA BOT sau no -> tra loi bu
+  calls.length = 0;
+  const cust = { id: "KHACH55", name: "Thanh" };
+  const t0 = Date.now() - 60000;
+  const iso = (ms) => new Date(ms).toISOString().replace("Z", "");
+  pancakeMessages = [
+    { id: "s55", conversation_id: "CONV55", message: "Chị cho em xin Chiều Cao + Cân Nặng để em tư vấn size cho chị nha", from: { id: "PAGE1" }, inserted_at: iso(t0) },
+    { id: "a55", conversation_id: "CONV55", message: "1m55", from: cust, inserted_at: iso(t0 + 1000) },
+    { id: "b55", conversation_id: "CONV55", message: "Nặng 53 kg", from: cust, inserted_at: iso(t0 + 3000) },
+    { id: "r55", conversation_id: "CONV55", message: "Dạ chị cao 1m55 thì cho em xin thêm cân nặng ạ", from: { id: "PAGE1" }, inserted_at: iso(t0 + 5000) },
+  ];
+  store.markBotMessage("r55");
+  store.setLastHandled("CONV55", "a55");
+  geminiText = "Dạ em ghi nhận chị cao 1m55 nặng 53kg ạ, chị cho em xin số điện thoại và địa chỉ nhận hàng nha";
+  bot.handleWebhook({ page_id: "PAGE1", event_type: "messaging", data: { conversation: { id: "CONV55", from: cust, tags: [], type: "INBOX" }, message: pancakeMessages[2], post: null } });
+  await sleep(WAIT);
+  assert.ok(calls.some((c) => c.path.includes(":generateContent")), "tin can nang bi bot tra loi tin truoc de len van duoc tra loi bu");
+  assert.equal(store.getLastHandled("CONV55"), "b55");
+  // Like khi chua chot don -> xin SDT + dia chi (khong goi AI)
+  calls.length = 0;
+  pancakeMessages = [...pancakeMessages, { id: "c55", conversation_id: "CONV55", message: "👍", from: cust, inserted_at: iso(t0 + 20000) }];
+  bot.handleWebhook({ page_id: "PAGE1", event_type: "messaging", data: { conversation: { id: "CONV55", from: cust, tags: [], type: "INBOX" }, message: pancakeMessages[4], post: null } });
+  await sleep(WAIT);
+  const gui = calls.filter((c) => c.method === "POST" && c.path.includes("/messages") && !c.path.includes(":generateContent")).map((c) => JSON.stringify(c.body || ""));
+  assert.ok(gui.some((b) => /số điện thoại/.test(b) && /địa chỉ/.test(b)), `like khi chua chot -> xin SDT dia chi: ${gui.join(" | ")}`);
+  assert.ok(!gui.some((b) => /tư vấn thêm gì/.test(b)), "khong hoi chung chung");
+  // Cho trong [..] trong ban chot co chuyen nhan vien -> khong gui nguyen ngoac
+  const ra = bot.fillPlaceholders("Dạ em xác nhận đơn:\n• Người nhận: Giang – [SĐT khách đã cung cấp]\n• Địa chỉ: Số 46 Phú Thụy", "PAGE1", [khach("sdt 0987654321")]);
+  assert.ok(!/\[/.test(ra) && /0987654321/.test(ra), ra);
+  const src = (await import("node:fs")).readFileSync(new URL("../src/bot.js", import.meta.url), "utf8");
+  assert.ok(/if \(reply && handoff\) reply = this\.fillPlaceholders/.test(src), "ban chot co chuyen nhan vien cung dien cho trong");
+  settings.update("PAGE1", { sizeChart: prevSettings.sizeChart || "" });
+  console.log("OK 55: tin khach toi luc bot dang tra loi duoc tra loi bu; page khong bang size / khach like -> xin SDT dia chi; khong gui [..] cho khach");
+}
+
 console.log("\nTAT CA TEST PASS");
 process.exit(0);
