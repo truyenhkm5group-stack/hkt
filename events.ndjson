@@ -2598,3 +2598,4 @@
 {"at":"2026-10-14T03:20:52.191Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#837 @ 2f3ac6fd29ef · 3915698b + đổi tên hàm name→variantLabel cho ops-log-leak; nội dung in không đổi"}
 {"at":"2026-10-14T03:24:51.458Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"pancake-thread-diff","detail":"fix/pancake-thread-diff @ cf347f02b158 · 1 lệnh kiểm thử"}
 {"at":"2026-10-14T03:25:13.080Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#836 @ cf347f02b158 · e9216c38 + nhãn hằng thay câu note ở kênh tóm tắt, đổi tên percentile"}
+{"at":"2026-10-14T03:52:13.756Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DEPLOY_DISPATCHED","detail":"4db2f64af069 · run 38508440545 https://github.com/truyenhkm5group-stack/hkt/actions/runs/38508440545"}
