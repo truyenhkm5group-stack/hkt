@@ -1,8 +1,8 @@
 {
   "pr": 840,
-  "sha": "5220eeb60e2e7840fb15f07c12561b92df675626",
+  "sha": "6cfb83695083583054bce791019164dd78767fbc",
   "verdict": "PASS",
   "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
-  "at": "2026-10-14T06:47:26.934Z",
-  "note": "review độc lập 5 vòng, vòng 5 PASS; npm test đạt"
+  "at": "2026-10-14T06:54:33.909Z",
+  "note": "review 5 vòng tại 5220eeb6; commit gộp main chỉ đổi danh sách ops-vps"
 }
