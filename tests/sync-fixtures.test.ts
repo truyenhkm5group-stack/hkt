@@ -496,6 +496,7 @@ import { testSalesOrderSync } from "./sales-order-sync.test";
 import { testSalesReplay } from "./sales-replay.test";
 import { testSalesOperatingMode } from "./sales-operating-mode.test";
 import { testSalesInbox } from "./sales-inbox.test";
+import { testInboxMessageSync } from "./inbox-message-sync.test";
 import { testInboxAdvanced } from "./inbox-advanced.test";
 import { testInboxComposer } from "./inbox-composer.test";
 import { testInboxV2A } from "./inbox-v2-a.test";
@@ -2928,6 +2929,8 @@ async function main() {
   // Chế độ vận hành (quan sát · copilot · thử nghiệm · tự động): tổ chức THẬT `om-shop`, Pancake + provider giả.
   await testSalesOperatingMode();
   await testSalesInbox();
+  // Đồng bộ tin Pancake → hộp thư (P0 HSLC 14/10/2026): câu nhân viên trên Pancake đẩy hội thoại lên đầu + phát sự kiện; trùng / chậm / sai thứ tự; sức khoẻ trễ webhook → sổ.
+  await testInboxMessageSync();
   // Hộp thư nâng cao: level khách · lọc · lịch sử giao · góp ý cho AI — tổ chức THẬT `hop-thu-nang-cao` (tự cấp, tự dọn).
   await testInboxAdvanced();
   // Ô soạn hộp thư: chèn câu mẫu / dòng sản phẩm (giá = giá bot, tồn chỉ khi đọc được), quyền ≡ «Gửi», cô lập — `o-soan-a` / `o-soan-b`.

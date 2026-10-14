@@ -499,10 +499,12 @@ export async function receiveFanpageEvent(ev: FanpageEvent, now: Date = new Date
       // thư ERP trống chỗ đó trong khi Pancake hiện ảnh): ghi MỘT dòng để NGƯỜI thấy — cùng dạng dòng ảnh nhân viên gửi từ ERP
       // («[Ảnh]» · PAGE_REPLY). Vẫn KHÔNG tính là trả lời: không dừng nhắc, không nhường — luật ở trên giữ nguyên.
       if (pageMedia.length) {
-        await db
+        const media = await db
           .insert(t)
           .values({ pageId: ev.pageId, threadId: ev.threadId, messageId: ev.messageId, text: STAFF_IMAGE_MARK, imageUrls: pageMedia, status: "DONE", processedAt: now, note: PAGE_REPLY })
-          .onConflictDoNothing({ target: t.messageId });
+          .onConflictDoNothing({ target: t.messageId })
+          .returning({ id: t.id });
+        if (media.length) await notePageSideActivity(ev.pageId, ev.threadId);
       }
       return { queued: false, reason: "Tin phía page không có chữ — không tính là trả lời" };
     }
@@ -512,10 +514,13 @@ export async function receiveFanpageEvent(ev: FanpageEvent, now: Date = new Date
     // trả lời, hộp thư, bảng đếm — dùng CÙNG một lời khai, không đoán lại.
     const template = !ev.humanStaff && !ev.automated ? await isPageTemplate(ev, now) : false;
     const origin: OutboundOrigin = classifyOutbound({ text: ev.text, botEcho: false, erpStaff: false, pancakeStaffAccount: ev.humanStaff, automatedFlag: Boolean(ev.automated), metaAppId: null, templateText: template });
-    await db
+    const pageRow = await db
       .insert(t)
       .values({ pageId: ev.pageId, threadId: ev.threadId, messageId: ev.messageId, text: ev.text, ...(pageMedia.length ? { imageUrls: pageMedia } : {}), status: "DONE", processedAt: now, note: PAGE_REPLY, senderKind: origin, sourceAt: ev.sourceAt ?? null, senderApp: ev.senderApp ?? null })
-      .onConflictDoNothing({ target: t.messageId });
+      .onConflictDoNothing({ target: t.messageId })
+      .returning({ id: t.id });
+    // Hộp thư đang mở phải thấy câu này NGAY và xếp lại hội thoại (mốc hoạt động đọc dòng này — `PAGE_REPLY_ACTIVITY_SQL`).
+    if (pageRow.length) await notePageSideActivity(ev.pageId, ev.threadId);
     // Chữ hệ thống (tiếng vọng tin riêng trả lời bình luận…) không phải ai lên tiếng ⇒ không dừng nhắc, không nhường.
     if (origin === "META_SYSTEM") return { queued: false, reason: META_SYSTEM_REASON };
     if (ev.inbox) await stopFollowups(ev.pageId, ev.threadId, now, false);
@@ -646,6 +651,23 @@ async function uploadPancakeContent(pageId: string, token: string, img: { data: 
  */
 export const MEDIA_ONLY_NOTE = "MEDIA_ONLY";
 export const MEDIA_ONLY_TEXT = "[Khách gửi nhãn dán / ghi âm / video / tệp — mở trên kênh để xem]";
+
+/**
+ * Tin PHÍA PAGE ngoài ERP vừa vào sổ (nhân viên gõ trên Pancake, ảnh page gửi…) ⇒ báo hộp thư đang mở làm mới hội thoại (P0 14/10/2026 —
+ * trước đây chỉ tin KHÁCH phát sự kiện, câu nhân viên trả lời trên Pancake phải đợi lượt làm mới định kỳ mới hiện). KHÔNG mở hội thoại
+ * mới (tin page không có khách nhắn trước không phải việc của hộp thư) và KHÔNG ghi cột mốc nào — mốc hoạt động đọc thẳng sổ tin.
+ * Đường phụ: lỗi KHÔNG làm hỏng lượt nhận.
+ */
+async function notePageSideActivity(pageId: string, threadId: string): Promise<void> {
+  try {
+    const db = await getDb();
+    const c = schema.salesChatConversations;
+    const [conv] = await db.select({ id: c.id }).from(c).where(and(eq(c.channel, "FANPAGE"), eq(c.visitorKey, fanpageVisitorKey(pageId, threadId)))).limit(1);
+    if (conv) publish({ type: "chat", conversationId: conv.id });
+  } catch (error) {
+    console.error(`[hộp thư] không báo được tin phía page ${pageId}/${threadId.slice(-6)}: ${error instanceof Error ? error.name : "lỗi"}`);
+  }
+}
 
 /**
  * Khách vừa nhắn ⇒ hội thoại PHẢI có trong hộp thư NGAY, không đợi bot tới lượt. Trước đây hội thoại chỉ được mở khi bot xử lý

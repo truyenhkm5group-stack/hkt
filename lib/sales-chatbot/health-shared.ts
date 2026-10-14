@@ -20,7 +20,7 @@ import type { AiSalesSlo } from "@/lib/constants/ai-sales-slo";
 
 export type HealthLevel = "OK" | "WARNING" | "CRITICAL" | "UNKNOWN";
 export type SalesHealthStatus = "GREEN" | "YELLOW" | "RED" | "UNKNOWN" | "OFF";
-export type HealthCheckKey = "BACKLOG" | "ABANDONED" | "DEAD_LETTER" | "BOT_SILENT" | "PROVIDER" | "WEBHOOK" | "LATENCY" | "SAFETY_NET" | "ORDER_SYNC";
+export type HealthCheckKey = "BACKLOG" | "ABANDONED" | "DEAD_LETTER" | "BOT_SILENT" | "PROVIDER" | "WEBHOOK" | "LATENCY" | "SAFETY_NET" | "ORDER_SYNC" | "INGEST";
 
 export type HealthCheck = { key: HealthCheckKey; level: HealthLevel; title: string; detail: string; fix?: string };
 
@@ -62,6 +62,11 @@ export type SalesHealthSnapshot = {
   };
   silent: { customerHandled: number; botSent: number; windowMinutes: number };
   latency: { p50Seconds: number | null; p95Seconds: number | null; sample: number; unanswered: number };
+  /**
+   * ĐỘ TRỄ WEBHOOK → SỔ TIN (P0 14/10/2026): mốc ghi dòng tin khách (`created_at`) trừ mốc tạo tin ở Pancake (`source_at`), chỉ dòng tới
+   * qua WEBHOOK Pancake trong `windowMinutes` (lượt quét lại không mang `source_at`). Vắng = bản chụp cũ chưa đo.
+   */
+  ingest?: { p50Seconds: number | null; p95Seconds: number | null; sample: number; windowMinutes: number };
   provider: {
     okInWindow: number;
     errorsInWindow: number;
@@ -86,6 +91,10 @@ export type SalesHealth = { status: SalesHealthStatus; checks: HealthCheck[]; he
 
 /** Tin PENDING quá mốc này (phút) bot không tự xử lý nữa: quét lại Pancake / Messenger chỉ nhìn 30 phút gần nhất. */
 export const PENDING_ELIGIBLE_MINUTES = 60;
+/** Độ trễ webhook → sổ tin: cửa sổ đo, cỡ mẫu tối thiểu (dưới ⇒ CHƯA ĐỦ DỮ LIỆU), ngưỡng cảnh báo P95 (P0 14/10/2026: > 5 giây). */
+export const INGEST_WINDOW_MINUTES = 60;
+export const INGEST_MIN_SAMPLE = 10;
+export const INGEST_P95_WARN_SECONDS = 5;
 
 const minutesSince = (iso: string | null, now: number): number | null => (iso ? Math.max(0, (now - Date.parse(iso)) / 60_000) : null);
 const rank: Record<HealthLevel, number> = { OK: 0, UNKNOWN: 1, WARNING: 2, CRITICAL: 3 };
@@ -153,6 +162,16 @@ export function evaluateSalesHealth(s: SalesHealthSnapshot, slo: AiSalesSlo): Sa
     else if (l.p95Seconds > slo.replyTargetSeconds)
       checks.push({ key: "LATENCY", level: "WARNING", title: "Độ trễ trả lời", detail: `P95 ${Math.round(l.p95Seconds)} giây > SLO ${slo.replyTargetSeconds} giây (P50 ${Math.round(l.p50Seconds ?? 0)} giây, ${l.sample} lượt).` });
     else checks.push({ key: "LATENCY", level: "OK", title: "Độ trễ trả lời", detail: `P50 ${Math.round(l.p50Seconds ?? 0)} giây · P95 ${Math.round(l.p95Seconds)} giây (${l.sample} lượt).` });
+  }
+
+  // 5b. TIN TỚI SỔ — webhook Pancake → sales_chat_inbound (tin chậm vào sổ thì chậm lên hộp thư, bot trả lời muộn theo).
+  if (s.ingest && s.channels.pancake.configured) {
+    const g = s.ingest;
+    if (g.sample < INGEST_MIN_SAMPLE || g.p95Seconds === null)
+      checks.push({ key: "INGEST", level: "UNKNOWN", title: "Tin Pancake vào sổ", detail: `Mới ${g.sample} tin qua webhook trong ${g.windowMinutes} phút (cần ≥ ${INGEST_MIN_SAMPLE}) — CHƯA ĐỦ DỮ LIỆU.` });
+    else if (g.p95Seconds > INGEST_P95_WARN_SECONDS)
+      checks.push({ key: "INGEST", level: "WARNING", title: "Tin Pancake vào sổ", detail: `P95 ${g.p95Seconds.toFixed(1)} giây > ${INGEST_P95_WARN_SECONDS} giây từ lúc khách gửi tới lúc ERP ghi (P50 ${(g.p50Seconds ?? 0).toFixed(1)} giây, ${g.sample} tin / ${g.windowMinutes} phút).`, fix: "Webhook Pancake tới chậm hoặc máy chủ ERP bận — chạy ops pancake-thread-diff để đo theo từng luồng." });
+    else checks.push({ key: "INGEST", level: "OK", title: "Tin Pancake vào sổ", detail: `P50 ${(g.p50Seconds ?? 0).toFixed(1)} giây · P95 ${g.p95Seconds.toFixed(1)} giây (${g.sample} tin / ${g.windowMinutes} phút).` });
   }
 
   // 6. LƯỚI AN TOÀN — job quét lại tin rơi + ghi đơn.

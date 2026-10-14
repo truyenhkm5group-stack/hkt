@@ -21,7 +21,7 @@ import { getSettingJson, setSettingJson } from "@/lib/settings";
 import { MESSENGER_DIRECT_KEY } from "@/lib/sales-chatbot/channel-ownership";
 import { salesBotError } from "@/lib/sales-chatbot/config";
 import { AI_DOWN_HANDOFF_REASON, loadSalesChatbotConfig } from "@/lib/sales-chatbot/engine";
-import { badCheckKeys, decideHealthAlert, evaluateSalesHealth, PENDING_ELIGIBLE_MINUTES, type SalesHealth, type SalesHealthSnapshot, type SalesHealthStatus } from "@/lib/sales-chatbot/health-shared";
+import { badCheckKeys, decideHealthAlert, evaluateSalesHealth, INGEST_WINDOW_MINUTES, PENDING_ELIGIBLE_MINUTES, type SalesHealth, type SalesHealthSnapshot, type SalesHealthStatus } from "@/lib/sales-chatbot/health-shared";
 import { loadModeConfig } from "@/lib/sales-chatbot/operating-mode";
 import { loadOrderSyncConfig } from "@/lib/sales-chatbot/order-sync";
 import { PANCAKE_POLL_SETTING_KEY } from "@/lib/sales-chatbot/pancake-poll";
@@ -121,6 +121,17 @@ export async function readSalesHealthSnapshot(now: Date = new Date(), slo?: AiSa
       from cap
     `),
   );
+  // ĐỘ TRỄ WEBHOOK → SỔ: tin khách tới qua webhook Pancake (có `source_at` = mốc tạo tin ở Pancake; lượt quét lại không mang mốc này).
+  const [ing] = rowsOf<Record<string, unknown>>(
+    await db.execute(sql`
+      select
+        percentile_cont(0.5) within group (order by extract(epoch from (created_at - source_at))) as p50,
+        percentile_cont(0.95) within group (order by extract(epoch from (created_at - source_at))) as p95,
+        count(*)::int as sample
+      from sales_chat_inbound
+      where ${CUSTOMER_ROW} and transport = 'PANCAKE' and source_at is not null and created_at >= ${new Date(now.getTime() - INGEST_WINDOW_MINUTES * 60_000)}
+    `),
+  );
   // NỀN: số tin khách của ĐÚNG khung giờ này (giờ VN) ở 14 ngày trước, trung vị — một ngày bão tin không kéo nền lên (luật 52).
   // Ngày KHÔNG có tin nào ở khung giờ này vẫn là một ngày (n = 0): bỏ chúng thì trung vị của giờ đêm bị đội lên và mọi đêm yên
   // bình báo «webhook im» (review #607). Chỉ đếm ngày từ khi tổ chức có tin khách đầu tiên — tổ chức mới dưới 5 ngày là CHƯA BIẾT.
@@ -206,6 +217,7 @@ export async function readSalesHealthSnapshot(now: Date = new Date(), slo?: AiSa
     queue: { pending: num(q?.pending), retrying: num(q?.retrying), oldestPendingAt: iso(q?.oldest), failedAiDown24h: aiDown, failedSend24h: failedSend, abandoned24h: num(q?.abandoned), deadLetter: num(q?.dead_24h) },
     silent: { customerHandled: num(q?.silent_threads), botSent: num(bot?.bot_window), windowMinutes: s.silentWindowMinutes },
     latency: { p50Seconds: numOrNull(lat?.p50), p95Seconds: numOrNull(lat?.p95), sample: num(lat?.sample), unanswered: num(lat?.unanswered) },
+    ingest: { p50Seconds: numOrNull(ing?.p50), p95Seconds: numOrNull(ing?.p95), sample: num(ing?.sample), windowMinutes: INGEST_WINDOW_MINUTES },
     provider: {
       okInWindow: prov.okInWindow,
       errorsInWindow: prov.errorsInWindow,
