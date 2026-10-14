@@ -122,6 +122,8 @@ export async function readSalesHealthSnapshot(now: Date = new Date(), slo?: AiSa
     `),
   );
   // ĐỘ TRỄ WEBHOOK → SỔ: tin khách tới qua webhook Pancake (có `source_at` = mốc tạo tin ở Pancake; lượt quét lại không mang mốc này).
+  // Chỉ tin TẠO ở Pancake trong cửa sổ: tin cũ tới muộn (nhập lịch sử · page vừa nối) mang `source_at` từ nhiều tháng trước — đo production
+  // 14/10 (pancake-thread-diff) p95 ra ~2,6 NĂM vì vài dòng như vậy ⇒ cảnh báo giả. Tin đó là việc của đồng bộ lịch sử, không phải độ trễ webhook.
   const [ing] = rowsOf<Record<string, unknown>>(
     await db.execute(sql`
       select
@@ -130,6 +132,7 @@ export async function readSalesHealthSnapshot(now: Date = new Date(), slo?: AiSa
         count(*)::int as sample
       from sales_chat_inbound
       where ${CUSTOMER_ROW} and transport = 'PANCAKE' and source_at is not null and created_at >= ${new Date(now.getTime() - INGEST_WINDOW_MINUTES * 60_000)}
+        and source_at >= ${new Date(now.getTime() - INGEST_WINDOW_MINUTES * 60_000)}
     `),
   );
   // NỀN: số tin khách của ĐÚNG khung giờ này (giờ VN) ở 14 ngày trước, trung vị — một ngày bão tin không kéo nền lên (luật 52).

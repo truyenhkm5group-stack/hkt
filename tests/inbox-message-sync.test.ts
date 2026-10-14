@@ -11,7 +11,8 @@
  *  · Sức khoẻ: độ trễ webhook → sổ P95 > 5 giây ⇒ CẢNH BÁO; mẫu nhỏ ⇒ CHƯA ĐỦ DỮ LIỆU, không phải «khoẻ».
  */
 import assert from "node:assert/strict";
-import { rmSync } from "node:fs";
+import { readFileSync, rmSync } from "node:fs";
+import path from "node:path";
 import { and, eq } from "drizzle-orm";
 import { getDb, getPlatformDb, organizationDatabaseUrl, schema } from "@/db";
 import type { SessionUser } from "@/lib/auth/session";
@@ -69,6 +70,8 @@ function testIngestHealth() {
   } satisfies SalesHealthSnapshot;
   const ingestOf = (snap: SalesHealthSnapshot) => evaluateSalesHealth(snap, slo).checks.find((c) => c.key === "INGEST");
   assert.equal(ingestOf(base), undefined, "bản chụp cũ chưa đo ⇒ không có kiểm này (không bịa)");
+  // Tin TẠO ở Pancake trước cửa sổ (nhập lịch sử) không được vào phép đo độ trễ — production 14/10 p95 ra ~2,6 năm vì chúng.
+  assert.match(readFileSync(path.join(process.cwd(), "lib/sales-chatbot/health.ts"), "utf8"), /and source_at >= \$\{new Date\(now\.getTime\(\) - INGEST_WINDOW_MINUTES/, "độ trễ chỉ đo tin tạo ở Pancake trong cửa sổ");
   assert.equal(ingestOf({ ...base, ingest: { p50Seconds: 1, p95Seconds: 30, sample: 4, windowMinutes: 60 } })?.level, "UNKNOWN", "mẫu nhỏ ⇒ CHƯA ĐỦ DỮ LIỆU, không kết luận");
   assert.equal(ingestOf({ ...base, ingest: { p50Seconds: 1, p95Seconds: INGEST_P95_WARN_SECONDS + 0.5, sample: 40, windowMinutes: 60 } })?.level, "WARNING", "P95 > 5 giây ⇒ cảnh báo");
   assert.equal(ingestOf({ ...base, ingest: { p50Seconds: 0.6, p95Seconds: 1.2, sample: 40, windowMinutes: 60 } })?.level, "OK");
