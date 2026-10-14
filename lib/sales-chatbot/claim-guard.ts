@@ -33,6 +33,7 @@ import { isManualOrderId, manualOrderGaps } from "@/lib/constants/manual-orders"
 import { manualOrderAmountDue, manualPaymentStatus, sumConfirmedPayments } from "@/lib/constants/order-payments";
 import { orderReviewOf } from "@/lib/constants/order-review";
 import { formatVND } from "@/lib/format";
+import { namedProductsIn } from "@/lib/sales-chatbot/cart-commitment";
 import type { ReferenceBreakdown } from "@/lib/sales-chatbot/quote";
 import { PRICE_UNVERIFIED_PREFIX } from "@/lib/sales-chatbot/quote-shared";
 import { foldVi } from "@/lib/sales-chatbot/text";
@@ -110,7 +111,12 @@ export type ServerTotal = { total: number; shipping: number | null | "UNKNOWN" }
  * bội số của mẫu mã KHÔNG có trong giỏ — trừ giá niêm yết một đơn vị, bội số của món đang có trong giỏ, giá công cụ đã trả và tổng hợp lệ
  * hiện tại. Có mặt ở BẤT KỲ đâu trong câu (không cần chữ «tổng») ⇒ chặn + người. `unitPrices` = giá một đơn vị (được nói cạnh chữ COD).
  */
-export type ClaimFacts = { paymentVerified: boolean; orderConfirmed: boolean; orderCancelled: boolean; orderPending?: "ADDRESS" | "CHECK" | null; allowedAmounts?: ReadonlySet<number>; orderEditedThisTurn?: boolean; totals?: ClaimTotals; suspicious?: ReadonlySet<number>; unitPrices?: ReadonlySet<number> };
+/**
+ * Review vòng 4: `seen` = tổng máy chủ đã báo trong hội thoại (LUẬT B — không phải tổng hiện tại ⇒ luôn chặn); `namedAmounts` = tên sản phẩm
+ * → bội số giá của nó (câu «nem 120k một hộp, 2 hộp 240k» gọi tên món thì được nói bội số của CHÍNH món đó); `shipFee` / `freeShipFrom` =
+ * phí ship cố định và ngưỡng miễn ship của cấu hình (được nói cạnh chữ thanh toán).
+ */
+export type ClaimFacts = { paymentVerified: boolean; orderConfirmed: boolean; orderCancelled: boolean; orderPending?: "ADDRESS" | "CHECK" | null; allowedAmounts?: ReadonlySet<number>; orderEditedThisTurn?: boolean; totals?: ClaimTotals; suspicious?: ReadonlySet<number>; unitPrices?: ReadonlySet<number>; seen?: ReadonlySet<number>; namedAmounts?: ReadonlyMap<string, ReadonlySet<number>>; shipFee?: number | null; freeShipFrom?: number | null };
 /** `handoff = false` ⇒ thay câu nhưng KHÔNG chuyển người (câu an toàn vẫn gửi trên mọi kênh). */
 export type ClaimVerdict = { ok: true } | { ok: false; claim: ClaimKind; safeText: string; handoffReason: string; note: string; handoff: boolean; amounts?: number[] };
 
@@ -366,7 +372,7 @@ export function totalClaimsIn(text: string): number[] {
 }
 
 /** Cụm báo TỔNG / thanh toán (đã bỏ dấu, review vòng 3): «tổng» (trừ «tổng hợp», «tổng tiền hàng»), «thành tiền», «tính ra», «cộng lại», «tất cả», «giá trị đơn», «thanh toán», «COD», «thu hộ», dấu «=». */
-const BROAD_CUE_RE = /(?:^| )(?:tong(?! +(?:tien +hang|hop))|thanh +tien|tinh +ra|cong +lai|tat +ca|gia +tri +don|thanh +toan|cod|thu +ho)(?= |$)|=/g;
+const BROAD_CUE_RE = /(?:^| )(?:tong(?! +(?:tien +hang|hop))|thanh +tien|tinh +ra|cong(?: +lai)?|tat +ca|gia +tri +don|thanh +toan|cod|thu +ho|chuan +bi)(?= |$)|=/g;
 /** Chữ liệt kê giữa cụm và số đầu tiên («tổng cộng có 3 loại: …», «gồm») ⇒ mệnh đề là danh sách giá, không phải câu báo tổng. */
 const LIST_WORDS = new Set(["co", "gom", "loai", "nhu"]);
 /** Chữ ngay sau một số trơn (không đơn vị) để coi nó là NGHÌN đồng («tổng 640 ạ»): hết câu hoặc trợ từ. */
@@ -435,8 +441,12 @@ export function talksAboutOrder(text: string): boolean {
  *    đã CŨ: không tổng nào hợp lệ tới khi máy chủ tính lại (`stale`).
  *  · Chưa có báo giá giỏ / nháp / chốt nào ⇒ `undefined` (số «tổng» xét như mọi số tiền khác).
  */
-export function totalAllowedOf(state: Pick<ChatState, "quote" | "draft" | "confirmed" | "cart">): ClaimTotals | undefined {
-  const q = state.quote;
+export function totalAllowedOf(state: Pick<ChatState, "quote" | "draft" | "confirmed" | "cart">, opts: { turnAt?: Date } = {}): ClaimTotals | undefined {
+  // Đã có đơn nháp: báo giá gần nhất KHÁC đơn nháp chỉ là tổng hợp lệ khi được tính TRONG lượt này (khách vừa hỏi một phương án) — báo giá
+  // phương án của lượt trước là tổng của giỏ khác (review vòng 4, luật B).
+  const q0 = state.quote;
+  const dqId = state.draft?.quote?.id;
+  const q = q0 && dqId && q0.id !== dqId && opts.turnAt && Date.parse(q0.at) < opts.turnAt.getTime() ? undefined : q0;
   const draftTotal = state.draft?.quote ? state.draft.quote.total : undefined;
   if (!q && draftTotal === undefined && !state.confirmed) return undefined;
   const cartAt = state.cart ? Date.parse(state.cart.at) : NaN;
@@ -483,7 +493,7 @@ export function unverifiedAmounts(amounts: readonly number[], allowed: ReadonlyS
 }
 
 /** Bảng chân lý: khẳng định nào cần căn cứ nào. Không khẳng định ⇒ luôn qua. `amounts` = số tiền trong câu (khi có tập xác thực). HÀM THUẦN. */
-export function claimVerdict(claims: readonly ClaimKind[], facts: ClaimFacts, amounts: readonly number[] = [], totals: readonly number[] = [], aboutOrder = true, mentions: readonly number[] = []): ClaimVerdict {
+export function claimVerdict(claims: readonly ClaimKind[], facts: ClaimFacts, amounts: readonly number[] = [], totals: readonly number[] = [], aboutOrder = true, mentions: readonly number[] = [], text = ""): ClaimVerdict {
   if (claims.includes("PAYMENT_RECEIVED") && !facts.paymentVerified) {
     return { ok: false, claim: "PAYMENT_RECEIVED", safeText: CLAIM_SAFE_TEXT.PAYMENT, handoffReason: CLAIM_HANDOFF_REASON.PAYMENT_RECEIVED, note: "Đã chặn câu AI khẳng định đã nhận tiền — chưa có chứng từ thu", handoff: true };
   }
@@ -520,11 +530,24 @@ export function claimVerdict(claims: readonly ClaimKind[], facts: ClaimFacts, am
   // Số đứng GẦN cụm tổng / thanh toán / COD mà KHÔNG phải tổng hợp lệ của giỏ (FAIL-1 review vòng 2: «Dạ tổng 640k, miễn phí ship ạ» khi
   // đơn nháp 280.000 ₫ — 640.000 có trong tập tham chiếu nên luật cũ cho qua) ⇒ CHẶN + người. Không chèn số nào, không lùi về tập tham chiếu.
   // TỔNG của một giỏ KHÁC giỏ hiện tại ở BẤT KỲ đâu trong câu (review vòng 3 — cấu trúc, không phụ thuộc chữ «tổng» / «đơn» / nếu–thì).
-  const susp = tf && facts.suspicious ? [...new Set(amounts.filter((a) => facts.suspicious!.has(a)))] : [];
+  const cfgOk = (a: number) => a === facts.freeShipFrom || a === facts.shipFee;
+  // LUẬT B (review vòng 4): tổng máy chủ ĐÃ BÁO trước đó mà không phải tổng hiện tại ⇒ LUÔN chặn, ở bất kỳ đâu trong câu — kể cả khi nó là
+  // bội số của món đang có trong giỏ (570k của báo giá 2kg cũ khi giỏ là 1kg). Báo giá máy chủ vừa tính trong lượt (giả định khách hỏi) nằm
+  // trong tập tổng hiện tại nên vẫn nói được.
+  const seenBad = tf && facts.seen ? [...new Set(amounts.filter((a) => facts.seen!.has(a) && !tf.allowed.has(a) && !cfgOk(a)))] : [];
+  if (seenBad.length) {
+    return { ok: false, claim: "PRICE_UNVERIFIED", safeText: CLAIM_SAFE_TEXT.PRICE, handoffReason: CLAIM_HANDOFF_REASON.PRICE_UNVERIFIED, note: `Đã chặn câu có số tiền ${seenBad.map((n) => formatVND(n)).join(", ")} — tổng máy chủ đã báo cho một giỏ trước, không phải giỏ hiện tại`, handoff: true, amounts: seenBad };
+  }
+  // Bội số của mẫu mã KHÔNG có trong giỏ (tổng của giỏ khác) — trừ khi câu GỌI TÊN đúng món đó («nem 120k một hộp, 2 hộp 240k»).
+  const named = facts.namedAmounts && text ? namedProductsIn(text, [...facts.namedAmounts.keys()]) : [];
+  const explained = (a: number) => named.some((n) => facts.namedAmounts!.get(n)?.has(a));
+  const susp = tf && facts.suspicious ? [...new Set(amounts.filter((a) => facts.suspicious!.has(a) && !cfgOk(a) && !explained(a)))] : [];
   if (susp.length) {
     return { ok: false, claim: "PRICE_UNVERIFIED", safeText: CLAIM_SAFE_TEXT.PRICE, handoffReason: CLAIM_HANDOFF_REASON.PRICE_UNVERIFIED, note: `Đã chặn câu có số tiền ${susp.map((n) => formatVND(n)).join(", ")} — là tổng đã tính cho một giỏ khác, không phải giỏ hiện tại`, handoff: true, amounts: susp };
   }
-  const badMentions = tf ? mentions.filter((t) => !tf.allowed.has(t) && !facts.unitPrices?.has(t)) : [];
+  // LUẬT A (review vòng 4): số SAU một cụm tổng / thanh toán / COD / chuẩn bị / «=» phải là tổng hiện tại, tiền hàng hiện tại hoặc phí ship —
+  // KHÔNG miễn giá đơn vị. Ngoại lệ duy nhất: ngưỡng miễn ship của cấu hình, trần thu hộ «tối đa» (đã bỏ khi đọc số).
+  const badMentions = tf ? mentions.filter((t) => !tf.allowed.has(t) && !cfgOk(t)) : [];
   if (tf && badMentions.length) {
     return { ok: false, claim: "PRICE_UNVERIFIED", safeText: CLAIM_SAFE_TEXT.PRICE, handoffReason: CLAIM_HANDOFF_REASON.PRICE_UNVERIFIED, note: `Đã chặn câu có số tiền ${badMentions.map((n) => formatVND(n)).join(", ")} cạnh chữ tổng / thanh toán / COD — không phải tổng của giỏ hiện tại${tf.stale ? " (giỏ vừa đổi, báo giá đã cũ)" : ""}`, handoff: true, amounts: badMentions };
   }
@@ -539,7 +562,7 @@ export function claimVerdict(claims: readonly ClaimKind[], facts: ClaimFacts, am
 
 /** `detectClaims` + `claimVerdict`. HÀM THUẦN. */
 export function guardClaims(text: string, facts: ClaimFacts): ClaimVerdict {
-  return claimVerdict(detectClaims(text), facts, extractVndAmounts(text), totalClaimsIn(text), talksAboutOrder(text), totalMentionsIn(text));
+  return claimVerdict(detectClaims(text), facts, extractVndAmounts(text), totalClaimsIn(text), talksAboutOrder(text), totalMentionsIn(text), text);
 }
 
 /**
@@ -551,7 +574,7 @@ export async function guardOutgoing(text: string, facts: () => Promise<ClaimFact
   const amounts = extractVndAmounts(text);
   if (!claims.length && !amounts.length) return { ok: true };
   const f = await facts().catch((): ClaimFacts => ({ paymentVerified: false, orderConfirmed: false, orderCancelled: false, allowedAmounts: new Set([0]), orderEditedThisTurn: false }));
-  return claimVerdict(claims, f, amounts, totalClaimsIn(text), talksAboutOrder(text), totalMentionsIn(text));
+  return claimVerdict(claims, f, amounts, totalClaimsIn(text), talksAboutOrder(text), totalMentionsIn(text), text);
 }
 
 /** Lời khách «đã chuyển khoản» gõ tay (đã bỏ dấu) — chỉ cụm nói về TIỀN, không bắt «đã chuyển địa chỉ». */
@@ -625,7 +648,7 @@ export function orderValidityOf(o: { id: string; raw: unknown; phone: string; ad
  * `confirm_order` có thể vừa chốt ở vòng trước của chính lượt này). `reference` = tập số tham chiếu của danh mục (`quote.ts`) —
  * thiếu ⇒ tập số tiền chỉ gồm báo giá của hội thoại.
  */
-export function claimFactsLoader(conv: ClaimConversation, opts: { reference?: () => Promise<ReadonlySet<number>>; breakdown?: () => Promise<ReferenceBreakdown>; turn?: number } = {}): (state: ChatState) => Promise<ClaimFacts> {
+export function claimFactsLoader(conv: ClaimConversation, opts: { reference?: () => Promise<ReadonlySet<number>>; breakdown?: () => Promise<ReferenceBreakdown>; turn?: number; turnAt?: Date } = {}): (state: ChatState) => Promise<ClaimFacts> {
   let db: Promise<LinkedFacts> | null = null;
   let ref: Promise<ReadonlySet<number>> | null = null;
   let bd: Promise<ReferenceBreakdown | null> | null = null;
@@ -650,9 +673,10 @@ export function claimFactsLoader(conv: ClaimConversation, opts: { reference?: ()
     if (state.quote?.verified) for (const n of state.quote.amounts) allowed.add(n);
     for (const n of state.priceFacts ?? []) allowed.add(n);
     const orderEditedThisTurn = opts.turn !== undefined && state.draft?.shownTurn === opts.turn;
-    const totals = totalAllowedOf(state);
+    const totals = totalAllowedOf(state, { turnAt: opts.turnAt });
     const suspicious = totals ? suspiciousTotalsOf(state, totals, breakdown) : undefined;
-    return { paymentVerified: liveOrders.some((o) => r.paidOrderIds.has(o.id)), orderConfirmed, orderPending, orderCancelled: Boolean(state.cancelledOrders?.length), allowedAmounts: allowed, orderEditedThisTurn, ...(totals ? { totals } : {}), ...(suspicious ? { suspicious } : {}), ...(breakdown ? { unitPrices: breakdown.unit } : {}) };
+    const extra = breakdown ? { unitPrices: breakdown.unit, namedAmounts: namedAmountsOf(breakdown), shipFee: breakdown.shippingFee ?? null, freeShipFrom: breakdown.freeShipFrom ?? null } : {};
+    return { paymentVerified: liveOrders.some((o) => r.paidOrderIds.has(o.id)), orderConfirmed, orderPending, orderCancelled: Boolean(state.cancelledOrders?.length), allowedAmounts: allowed, orderEditedThisTurn, ...(totals ? { totals } : {}), ...(suspicious ? { suspicious } : {}), seen: new Set(state.seenTotals ?? []), ...extra };
   };
 }
 
@@ -661,8 +685,25 @@ export function claimFactsLoader(conv: ClaimConversation, opts: { reference?: ()
  * TRỪ giá một đơn vị (`unit`), bội số của các sản phẩm ĐANG có trong giỏ / đơn nháp, giá công cụ đã trả, số của báo giá gần nhất và tổng
  * hợp lệ hiện tại. HÀM THUẦN.
  */
+/** Tên sản phẩm → mọi bội số giá của các mẫu mã của nó (± ship). HÀM THUẦN. */
+export function namedAmountsOf(bd: ReferenceBreakdown): Map<string, Set<number>> {
+  const out = new Map<string, Set<number>>();
+  for (const [v, set] of bd.byVariant) {
+    const name = bd.nameOf?.get(v);
+    if (!name) continue;
+    const cur = out.get(name) ?? new Set<number>();
+    for (const n of set) cur.add(n);
+    out.set(name, cur);
+  }
+  return out;
+}
+
+/**
+ * Bội số của mẫu mã KHÔNG có trong giỏ (tổng của giỏ khác — chỉ từ danh mục; tổng ĐÃ BÁO đi luật B riêng), trừ giá một đơn vị, bội số các
+ * sản phẩm đang trong giỏ / đơn nháp, giá công cụ đã trả, số của báo giá gần nhất và tổng hiện tại. HÀM THUẦN.
+ */
 export function suspiciousTotalsOf(state: ChatState, totals: ClaimTotals, bd: ReferenceBreakdown | null): Set<number> {
-  const pool = new Set<number>(state.seenTotals ?? []);
+  const pool = new Set<number>();
   const keep = new Set<number>([...totals.allowed, ...(state.priceFacts ?? []), ...(state.quote?.verified ? state.quote.amounts : [])]);
   if (bd) {
     for (const set of bd.byVariant.values()) for (const n of set) pool.add(n);

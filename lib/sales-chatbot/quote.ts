@@ -360,14 +360,16 @@ export function referenceAmounts(ctx: PricingContext): Set<number> {
  * phẩm. Hàng rào số tiền dùng để tách «giá niêm yết / bội số của món đang có trong giỏ» (được nói) khỏi «một TỔNG đã tính cho giỏ khác»
  * (không được nói khi không phải giỏ hiện tại). HÀM THUẦN.
  */
-export type ReferenceBreakdown = { byVariant: Map<string, Set<number>>; unit: Set<number>; productOf: Map<string, string> };
+export type ReferenceBreakdown = { byVariant: Map<string, Set<number>>; unit: Set<number>; productOf: Map<string, string>; nameOf?: Map<string, string>; shippingFee?: number | null; freeShipFrom?: number | null };
 export function referenceBreakdown(ctx: PricingContext): ReferenceBreakdown {
   const byVariant = new Map<string, Set<number>>();
   const unit = new Set<number>();
   const productOf = new Map<string, string>();
+  const nameOf = new Map<string, string>();
   const ship = ctx.cfg.shippingFee;
   for (const it of ctx.byId.values()) {
     productOf.set(it.variantId, it.productId);
+    nameOf.set(it.variantId, it.name);
     if (it.price === null || it.price <= 0) continue;
     unit.add(it.price);
     if (ship !== null) unit.add(it.price + ship);
@@ -386,7 +388,8 @@ export function referenceBreakdown(ctx: PricingContext): ReferenceBreakdown {
     }
     byVariant.set(it.variantId, set);
   }
-  return { byVariant, unit, productOf };
+  const fs = ctx.cfg.freeShipping;
+  return { byVariant, unit, productOf, nameOf, shippingFee: ship, freeShipFrom: fs.enabled ? fs.minSubtotal : null };
 }
 
 export async function catalogReferenceBreakdown(cfg: PricingConfig): Promise<ReferenceBreakdown> {

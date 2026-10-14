@@ -430,7 +430,9 @@ export function applyCustomerCartMessage(cart: CartCommitment | undefined, text:
   if (bothFit && inv && a0) return relax(`Khách nói ${amountText(a0.value, a0.unit)} không kèm tên ngay sau lời mời «${inv.display}» — số này hợp cả món đang có lẫn món được mời: HỎI LẠI khách muốn thêm món nào`);
   // Câu huỷ GỌI TÊN một món KHÔNG có trong giỏ (thường là món vừa được mời — «nem tôm chắc không cần đâu») là TỪ CHỐI món đó, không phải
   // huỷ cả đơn (review vòng 3, P0 trên main). Huỷ cả đơn khi câu không gọi tên món nào, hoặc gọi tên món đang có trong giỏ.
-  if (intent.kind === "CANCEL" && items.length) {
+  // «hủy đơn» / «không lấy nữa» / «nữa» / «hết» / «cả đơn» ⇒ LUÔN huỷ cả đơn (review vòng 4: «thôi chị không lấy nữa, nem tôm cũng không»).
+  const wholeCancel = /(?:^| )(?:huy don|bo don|ca don|nua|het)(?= |$)/.test(foldVi(text));
+  if (intent.kind === "CANCEL" && items.length && !wholeCancel) {
     const named = namedProductsIn(text, [...(opts.products ?? opts.catalog ?? []), ...(inv ? [inv.display] : [])]);
     const inCart = (n: string) => items.some((it) => it.customerExplicit && it.match && labelsMatch(it.match, n));
     if (named.length && !named.some(inCart)) return cart?.clarify ? { ...cart, clarify: null } : cart;
