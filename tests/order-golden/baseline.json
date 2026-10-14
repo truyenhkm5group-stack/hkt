@@ -512,7 +512,7 @@
             []
           ],
           "status": "OPEN",
-          "toolErrors": []
+          "toolErrors": ["create_draft_order"]
         },
         "tiep-quan-nguoi": {
           "orders": ["CONFIRMED"],

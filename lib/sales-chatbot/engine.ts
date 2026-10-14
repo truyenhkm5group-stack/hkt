@@ -888,15 +888,17 @@ async function chatTurnCore(
   let seq = (msgs[msgs.length - 1]?.seq ?? 0) + 1;
   // Seq tin KHÁCH gần nhất trước lượt này (không tính kết quả công cụ) — «lượt khách ngay sau lời mời thêm món / tóm tắt».
   const prevTurn = [...msgs].reverse().find((m) => m.role === "user" && m.content.some((b) => b.type === "text") && !m.content.some((b) => b.type === "tool_result"))?.seq;
-  // KHÔNG TRẢ LỜI TIN VỌNG LẠI / TIN TRÙNG ĐÃ TRẢ LỜI (P0 14/10/2026): lượt được kích hoạt bởi chữ của chính shop vọng lại, hoặc bởi
-  // ĐÚNG tin khách vừa được trả lời (cùng chữ, trong 2 phút, đã có câu bot sau nó — webhook giao lại / hai đường nhận tin) ⇒ không ghi,
-  // không gọi AI, không gửi. Thà thiếu một câu còn hơn khách nhận câu thừa / đơn trùng.
+  // KHÔNG TRẢ LỜI TIN VỌNG LẠI (P0 14/10/2026): lượt được kích hoạt bởi chữ của CHÍNH shop / bot vọng lại như tin khách ⇒ không ghi,
+  // không gọi AI, không gửi. Tin khách lặp lại thật (khách hỏi lại giá) VẪN được trả lời — trùng gói tin đã khử ở lớp nhận tin
+  // (`sales_chat_inbound.message_id` UNIQUE · hai đường nhận tin · `alreadyRepliedAfter`).
   if (isEchoOfShop(text, recentShopTexts(msgs, 6))) return { ok: true, view: (await conversationView(conv.id))! };
-  {
-    const lastCust = [...msgs].reverse().find((m) => m.role === "user" && m.content.some((b) => b.type === "text") && !m.content.some((b) => b.type === "tool_result"));
-    const answered = lastCust ? msgs.some((m) => m.seq > lastCust.seq && m.role === "assistant" && textOf(m.content)) || recentShopTexts(msgs.filter((m) => m.seq > lastCust.seq), 1).length > 0 : false;
-    if (lastCust && answered && textOf(lastCust.content).trim() === text && now.getTime() - lastCust.at.getTime() < 120_000) return { ok: true, view: (await conversationView(conv.id))! };
-  }
+  // Lượt mang ĐÚNG chữ của tin khách trước đó mà tin ấy ĐÃ được trả lời (lượt thử lại / gói tin lặp lọt lớp nhận tin) — model vẫn được
+  // hỏi (khách hỏi lại giá là câu thật), nhưng model im thì KHÔNG phát câu dự phòng «nói rõ hơn»: không có gì mới để khách nói rõ.
+  const repeatOfAnswered = (() => {
+    const last = [...msgs].reverse().find((m) => m.role === "user" && m.content.some((b) => b.type === "text") && !m.content.some((b) => b.type === "tool_result"));
+    if (!last || textOf(last.content).trim() !== text) return false;
+    return recentShopTexts(msgs.filter((m) => m.seq > last.seq), 1).length > 0;
+  })();
   try {
     const turnSeq = seq;
     await appendMessage(conv.id, seq++, "user", [{ type: "text", text }]);
@@ -1440,8 +1442,12 @@ async function chatTurnCore(
         // Câu hỏi lại có thể mang tổng đơn nháp ⇒ cùng hàng rào; không qua ⇒ câu chung.
         const ask = silenceFallbackText(state, text, turnSeq, autoConfirm, prevTurn);
         const fallback = ask === EMPTY_REPLY_TEXT || (await guardOutgoing(ask, () => claimFacts(state))).ok ? ask : EMPTY_REPLY_TEXT;
-        await reply(conv, seq++, fallback);
-        lastError = lastError ?? (fallback === EMPTY_REPLY_TEXT ? "Lượt không có câu nào gửi khách — đã gửi câu dự phòng" : "Lượt không có câu nào gửi khách — đã hỏi đúng phần còn thiếu của đơn");
+        if (fallback === EMPTY_REPLY_TEXT && repeatOfAnswered) {
+          lastError = lastError ?? "Lượt lặp lại tin khách đã được trả lời — model im, không gửi câu dự phòng";
+        } else {
+          await reply(conv, seq++, fallback);
+          lastError = lastError ?? (fallback === EMPTY_REPLY_TEXT ? "Lượt không có câu nào gửi khách — đã gửi câu dự phòng" : "Lượt không có câu nào gửi khách — đã hỏi đúng phần còn thiếu của đơn");
+        }
       }
     }
     // Lời gọi hỏng cuối cùng nằm ở khoá KHÁC đoạn vừa phục vụ (đổi khoá giữa lượt rồi cả hai cùng hỏng) ⇒ đoạn cũ một dòng,

@@ -43,7 +43,7 @@ import { foldVi } from "@/lib/sales-chatbot/text";
 import { buildQuote, computePriced, loadPricingContext, packChoiceMistake, packingIssues, packingRequestOf, verifiedUnitPrices, type AgentQuoteClaim, type Priced, type PricingContext } from "@/lib/sales-chatbot/quote";
 import { priceUnverifiedReason, QUOTE_UNVERIFIED_INSTRUCTION, quoteSnapshotOf, type PriceDisputeState, type Quote, type QuoteSnapshot } from "@/lib/sales-chatbot/quote-shared";
 import { CLAIM_SAFE_TEXT, orderValidityOf } from "@/lib/sales-chatbot/claim-guard";
-import { bindCommitment, commitmentViolation, customerHesitates, declinesAddOnOnly, unrequestedProducts, type CartCommitment } from "@/lib/sales-chatbot/cart-commitment";
+import { bindCommitment, commitmentViolation, customerHesitates, declinesAddOnOnly, lineBasisViolation, type CartCommitment } from "@/lib/sales-chatbot/cart-commitment";
 import { acceptCustomerWard, addressQuestion, canAutoFill, parseCustomerAddress, type AddressConfidence, type AddressPart } from "@/lib/address/customer-address";
 import { searchCatalog, sellableCatalog, stockFor, type CatalogItem } from "@/lib/sales-chatbot/catalog";
 import { quotedInText } from "@/lib/sales-chatbot/text";
@@ -944,11 +944,9 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
       // thoại, không phải đơn hỏng ⇒ không gắn tín hiệu đơn không hợp lệ).
       const cartBreak = v.data.items ? commitmentViolation(state.cart, priced.asked, ctx.turn ?? null) : null;
       if (cartBreak) return err("Đơn nháp: hạ số lượng khách đã chốt", cartBreak, state);
-      // UPSELL KHÔNG TỰ VÀO ĐƠN (P0 14/10/2026): câu mời thêm món vừa gửi TRONG lượt này ⇒ khách chưa trả lời ⇒ món mời không được vào
-      // đơn / vào tổng. Lên đơn đúng món khách đã chọn; khách nhận lời ở lượt sau thì update_draft_order thêm món.
-      const invitedNow = ctx.turn !== undefined && state.upsellTurn === ctx.turn;
-      const uninvited = v.data.items && invitedNow ? unrequestedProducts(state.cart, priced.asked, existing?.lines.map((l) => l.variantId) ?? []) : [];
-      if (uninvited.length) return err("Đơn nháp: món mời chưa được khách đồng ý", `KHÔNG thêm ${uninvited.map((n) => `«${n}»`).join(", ")} vào đơn: khách CHƯA trả lời lời mời thêm món. Lên đơn ĐÚNG món + số lượng khách đã chọn; tổng chỉ tính các món đó. Khách nhận lời ở tin sau thì mới update_draft_order thêm món.`, state);
+      // DÒNG HÀNG PHẢI CÓ CĂN CỨ TỪ KHÁCH (P0 14/10/2026, ca «Châu Dương»: món upsell × 3 khách chưa đồng ý vào đơn, đơn tự chốt 640.000 ₫).
+      const noBasis = v.data.items ? lineBasisViolation(state.cart, priced.asked, ctx.turn ?? null) : null;
+      if (noBasis) return err("Đơn nháp: dòng hàng không có căn cứ từ khách", noBasis, state);
       // Giá chưa xác thực ⇒ KHÔNG tạo / sửa đơn tự động, người xác minh (yêu cầu 5 của chủ shop).
       if (!priced.quote.verified) {
         state.quote = quoteSnapshotOf(priced.quote, now);
@@ -1047,6 +1045,9 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
       const priced = await priceLines(d.lines, ctx.config, verifiedCustomerId(state), [d.recipient.address, d.recipient.province].join(", "), { packing: Boolean(d.packing) });
       if (priced.missing.length || priced.unpriced.length) return err("Chốt: mã không bán được", "Có mẫu mã không còn bán hoặc chưa có giá — chuyển nhân viên.", state, { reason: priced.missing.length ? "UNKNOWN_SKU" : "UNPRICED_SKU" });
       if (priced.addOnOnly) return err("Chốt: chỉ có món bán kèm", ADD_ON_ONLY_ERROR, state);
+      // Đơn nháp có dòng hàng không có căn cứ từ khách ⇒ KHÔNG chốt — kể cả máy tự chốt (P0-A đi qua đúng nhánh này).
+      const noBasis = lineBasisViolation(state.cart, priced.asked, ctx.turn ?? null);
+      if (noBasis) return err("Chốt: dòng hàng không có căn cứ từ khách", `${noBasis} Sửa đơn nháp (update_draft_order) cho đúng món khách chọn rồi mới chốt.`, state);
       // Giá chưa xác thực ⇒ KHÔNG chốt, người xác minh (yêu cầu 4–5 của chủ shop).
       if (!priced.quote.verified) {
         state.quote = quoteSnapshotOf(priced.quote, now);

@@ -403,12 +403,11 @@ export const ORDER_GOLDEN_CASES: readonly OrderGoldenCase[] = [
     model: "GOOD",
     turns: [
       infoTurn(`lấy chị 1kg chả cá thu, Vân 0925000515, ${HCM_BEN_THANH}`, { name: "Vân", phone: "0925000515", address: HCM_BEN_THANH }, [["CHA-CA-1KG", 1]]),
-      // P0 14/10/2026: ĐÚNG tin khách vừa được trả lời, tới lại trong 2 phút ⇒ engine KHÔNG ghi, KHÔNG gọi model, KHÔNG gửi (chatTurn —
-      // tin trùng đã trả lời). Trước đây model được hỏi lại và lên đơn lần hai (máy chủ phải chặn trùng ở lõi đơn).
-      silentTurn(`lấy chị 1kg chả cá thu, Vân 0925000515, ${HCM_BEN_THANH}`),
+      infoTurn(`lấy chị 1kg chả cá thu, Vân 0925000515, ${HCM_BEN_THANH}`, { name: "Vân", phone: "0925000515", address: HCM_BEN_THANH }, [["CHA-CA-1KG", 1]]),
       consentTurn("ok chốt em"),
-      // Lời chốt lặp ngay sau khi đã trả lời ⇒ cùng luật: không lượt AI, không câu thừa, không đơn thứ hai.
-      silentTurn("ok chốt em"),
+      // HOTFIX 12/10/2026: lời chốt lặp SAU khi đơn đã chốt không còn rơi vào «chuyển người mặc định» — AI được hỏi; model gọi lại
+      // confirm_order thì máy chủ trả «đã chốt từ trước» (không đơn thứ hai — chống tạo trùng đơn ở MÁY CHỦ, không nhờ lời nhắc).
+      { say: "ok chốt em", ai: [() => [tool("confirm_order", { customer_confirmation: "ok chốt em" })], () => [say("Dạ đơn của mình em lên rồi ạ.")]] },
     ],
     label: withOrder(order([ln("CHA-CA-1KG", 1)], "0925000515", addr("Hồ Chí Minh", "Bến Thành", "12 đường Giả Định"), 370_000), agreed("Khách «ok chốt em» sau tóm tắt — bản lặp không phải lần mua thứ hai")),
   },

@@ -527,23 +527,48 @@ export function commitmentViolation(cart: CartCommitment | undefined, asked: rea
 }
 
 /**
- * MÓN MỜI CHƯA ĐƯỢC KHÁCH ĐỒNG Ý (P0 14/10/2026): sản phẩm trong đơn đề nghị mà KHÔNG khớp món nào khách đã nói tường minh và không có
- * sẵn trong đơn nháp trước. Dùng ngay sau câu mời thêm món (khách chưa kịp trả lời) — AI không được tự đưa món mời vào đơn / vào tổng.
- * Món khách nói không kèm tên («cho chị 1kg») khớp được BẤT KỲ sản phẩm nào: chỉ báo khi số sản phẩm lạ vượt số món không tên đó.
- * Giỏ chưa có món khách nói ⇒ `[]` (không đủ căn cứ để chặn). HÀM THUẦN.
+ * DÒNG HÀNG KHÔNG CÓ CĂN CỨ TỪ KHÁCH (P0 14/10/2026, ca «Châu Dương» #91F3641C): khách chọn 1kg chả cá thu, bot gửi câu upsell rồi tự đưa
+ * «Nem hải sản tôm bề bề × 3» vào đơn nháp — đơn tự chốt 640.000 ₫. Căn cứ DUY NHẤT để một sản phẩm vào đơn là MÓN KHÁCH NÓI TƯỜNG MINH
+ * trong giỏ có thẩm quyền (khớp mã đã gắn, hoặc khớp tên). Lời mời thêm món chỉ thành căn cứ khi khách NHẮC LẠI món đó kèm số lượng trong
+ * tin SAU lời mời («lấy thêm 1 hộp nem» ⇒ giỏ ghi món ấy); «ok» chung chung không phải căn cứ. Món khách nói không kèm tên («cho chị 1kg»)
+ * khớp được BẤT KỲ sản phẩm nào: chỉ báo khi số sản phẩm lạ vượt số món không tên đó. Giỏ chưa có món khách nói ⇒ `[]` (không đủ căn cứ
+ * để chặn — luật an toàn của tệp: không chắc thì không chặn khách). HÀM THUẦN.
  */
-export function unrequestedProducts(cart: CartCommitment | undefined, asked: readonly AskedLine[], existingVariantIds: readonly string[] = []): string[] {
+export function unrequestedProducts(cart: CartCommitment | undefined, asked: readonly AskedLine[]): string[] {
   const explicit = cart?.selectedItems.filter((x) => x.customerExplicit) ?? [];
   if (!explicit.length) return [];
   const products = [...new Set(asked.map((l) => l.productId ?? l.variantId))];
   const strange = products.filter((p) => {
     const lines = asked.filter((l) => (l.productId ?? l.variantId) === p);
-    if (lines.some((l) => existingVariantIds.includes(l.variantId))) return false;
     return !explicit.some((it) => (it.productId && it.productId === p) || (it.match && lines.some((l) => labelsMatch(it.match, l.name))));
   });
   const unnamed = explicit.filter((it) => !it.productId && !it.match).length;
   if (strange.length <= unnamed) return [];
   return strange.map((p) => productName(asked.find((l) => (l.productId ?? l.variantId) === p)?.name ?? "") || "món mời");
+}
+
+/**
+ * Kiểm CĂN CỨ của đơn đề nghị (P0 14/10/2026) — dùng ở lên / sửa đơn nháp VÀ ở chốt (kể cả máy tự chốt): (1) mọi sản phẩm phải có món
+ * khách nói tường minh (`unrequestedProducts`); (2) số lượng một món khách đã nói KHÔNG được vượt số khách nói (bot không tự đặt ×3) —
+ * lượt khách có dấu hiệu sửa mà máy chưa chắc (`relaxedTurn`) thì bỏ qua vế (2), không chặn khách. Không đo được ⇒ không chặn. Trả câu lỗi
+ * cho model, `null` = có căn cứ. HÀM THUẦN.
+ */
+export function lineBasisViolation(cart: CartCommitment | undefined, asked: readonly AskedLine[], turn?: number | null): string | null {
+  const strange = unrequestedProducts(cart, asked);
+  if (strange.length) {
+    return `KHÔNG đưa ${strange.map((n) => `«${n}»`).join(", ")} vào đơn: khách CHƯA nói lấy món này. Lời mời thêm món chỉ thành đơn khi khách nói TÊN món + SỐ LƯỢNG trong tin sau lời mời (vd «lấy thêm 1 hộp nem»); «ok» chung chung KHÔNG phải đồng ý thêm món. Lên đơn ĐÚNG món + số lượng khách đã chọn; khách muốn thêm mà chưa nói số lượng ⇒ HỎI số lượng.`;
+  }
+  if (!cart || (turn !== undefined && turn !== null && cart.relaxedTurn === turn)) return null;
+  for (const item of cart.selectedItems) {
+    if (!item.customerExplicit) continue;
+    const pid = productFor(item, cart, asked);
+    if (!pid) continue;
+    const proposed = proposedAmount(pid, item.unit, asked);
+    if (proposed === null || proposed <= item.quantity) continue;
+    const name = item.label || productName(asked.find((l) => l.productId === pid)?.name ?? "") || "món khách chọn";
+    return `KHÔNG tự tăng «${name}» lên ${amountText(proposed, item.unit)}: khách nói ${amountText(item.quantity, item.unit)}${item.sourceMessageId !== null ? ` (tin #${item.sourceMessageId})` : ""}. Lên đơn ĐÚNG số khách nói; khách muốn thêm thì khách tự nói số lượng.`;
+  }
+  return null;
 }
 
 /**
