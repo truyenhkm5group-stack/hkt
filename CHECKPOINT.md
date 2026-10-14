@@ -11,6 +11,56 @@
 
 
 
+
+## Checkpoint 2026-10-14 ~21:4x VN — TEAM: #842 ĐÃ SỬA XONG GỐC · CỔNG ĐỎ VÌ TRẦN THỜI GIAN, KHÔNG VÌ MÃ
+
+**#842 @ `ba697f42`** — bốn nhánh cổng: «Toàn vẹn · kiểu · chuẩn mã» XANH · «Dựng bản production» XANH ·
+**«Kiểm thử (ẩn danh)» XANH (34,2′)** · «Kiểm thử (có token giả)» **BỊ HUỶ ở 45,5′** ⇒ job gom `gates` đỏ.
+
+**Job ẩn danh xanh là bằng chứng mã ĐÚNG**: đó CHÍNH LÀ job đỏ ở lượt trước. Hai lỗi đã sửa đúng gốc, không
+sửa kỳ vọng:
+1. `tests/inbox-semantics-v3.test.ts` — `activityOf` bỏ vế tin phía page (#839 `PAGE_REPLY_ACTIVITY_SQL`) nên
+   xếp s17 sau s08; máy chủ đúng, mô hình sai.
+2. `tests/inbox-unread-perf.test.ts` — câu THAM CHIẾU xếp `chưa đọc desc` cho CẢ hai thẻ, tức khoá lại đúng
+   hành vi chủ shop vừa bỏ. Bài này chỉ lộ ra SAU khi sửa bài 1, vì bộ kiểm thử dừng ở lỗi đầu tiên.
+Đã quét cả `tests/`: chỉ hai tệp mô hình hoá thứ tự hộp thư, cả hai nay theo luật mới.
+
+**TRẦN 45′ ĐANG QUÁ SÁT — SỐ ĐO, ĐỪNG ĐOÁN:**
+| lượt | chế độ | thời gian | kết quả |
+|---|---|---|---|
+| main `35c7168d` | có token giả | **34,6′** | ĐẠT |
+| #842 `ba697f42` | ẩn danh | **34,2′** | ĐẠT |
+| #842 `ba697f42` | có token giả | **45,5′** | BỊ HUỶ (đụng trần) |
+
+Cùng bộ kiểm thử, cùng chế độ, chênh ~11′ so với main — **không thay đổi nào của #842 giải thích được**
+(#842 chỉ sửa khoá xếp một thẻ + hai mô hình bài kiểm; không thêm vòng lặp, không thêm truy vấn). Nên đây là
+độ dao động của runner trên một bộ kiểm thử chạy 34–35′ dưới trần 45′ — biên chỉ ~10′, và #830 đã phải nâng
+trần một lần rồi (35 → 45). **Nâng tiếp là gia hạn con số, không phải sửa.** Hướng đúng khi có người làm:
+chia job kiểm thử theo nhóm chạy song song, hoặc cắt phần chậm nhất — cần ĐO trước (bài nào ăn bao nhiêu
+phút), chưa ai đo.
+
+**VIỆC KẾ:** chạy lại lượt cổng cho ĐÚNG `ba697f42` (không cần commit mới — mã không sai). Phiên Team KHÔNG
+làm được: chạy lại workflow qua API cần token. Ai có token: `gh run rerun <run> --failed` hoặc bấm trên
+GitHub, rồi gộp + MỘT lượt deploy.
+
+**KHOÁ / PHIÊN (đo lúc 13:14Z):** `integration-lead` TRỐNG · `tech-lead` hết hạn · **không có phiên Claude nào
+khác đang chạy trên máy** ⇒ KHÔNG tồn tại «Integration Lead hiện có» để bàn giao việc gộp. Vai đó = khoá CỘNG
+token; phiên duy nhất đang sống là Team và Team không có token. Team không nhận khoá vì cầm khoá không dùng
+được chỉ chặn người khác.
+
+**BỐN NHÁNH PR_READY CHỜ `pr-open`:** `thread-diff-media-match` @ `bfd4ee74` · `checkpoint-append-only` @
+`2d0b5a6a` · `test-locale-order` @ `d9a91d81` · `inbox-unread-perf` @ `b222a779`.
+
+### P0.2 — ĐÃ VÁ PHÉP ĐO TRƯỚC KHI AI KỊP BACKFILL NHẦM
+`diffThread` bỏ qua hoàn toàn nhánh khớp-theo-chữ khi tin Pancake RỖNG CHỮ (`const hit = t ? … : undefined`),
+nên tin phía page CHỈ-ẢNH không còn đường khớp nào ngoài mã tin — mà mã lệch là chuyện thường: ảnh nhân viên
+gửi TỪ ERP nằm trong sổ dưới mã `staff-out:<id>:img`, chữ dán «[Ảnh]», còn Pancake trả tin ấy không có chữ.
+⇒ **một phần trong «9 tin page thiếu» có thể vẫn đang nằm trong hộp thư.** Backfill trước khi biết là nhân đôi
+tin của khách thật. `claude/thread-diff-media-match` thêm lượt khớp RIÊNG chỉ nối hai tin ĐỀU không chữ, cùng
+phía, cùng cửa sổ 10′, đếm ở ô `matchedByMedia` (không gộp vào khớp-theo-chữ). Ảnh KHÔNG có dòng ERP tương
+ứng VẪN là thiếu — bản vá không hạ con số bằng cách nới định nghĩa. Chạy lại phép đo sau khi gộp nhánh này
+thì con số mới đọc được.
+
 ## Checkpoint 2026-10-14 ~2x:xx VN — TEAM NHẬN P0 HSLC · #842 ĐÃ SỬA GỐC · BỐN VIỆC KẸT TOKEN
 
 **Khoá:** `integration-lead` TRỐNG (Desktop đã nhả). Team **CHƯA nhận** — nhận khoá mà không có token GitHub
