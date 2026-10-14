@@ -3,7 +3,7 @@
   "mission_id": "test-timing-table",
   "title": "Bộ kiểm thử tự in bảng thời gian từng nhóm — số đo để chia job, thay vì nâng trần",
   "business_goal": "",
-  "status": "RUNNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-team",
@@ -21,7 +21,21 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-14T15:42:24.658Z",
-  "updated_at": "2026-10-14T15:42:24.658Z",
-  "last_heartbeat": "2026-10-14T15:42:24.658Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-14T15:46:25.901Z",
+  "last_heartbeat": "2026-10-14T15:46:25.901Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/test-timing-table",
+    "sha": "9fed7350100d5242d7cb80426373cced9bd07aa6",
+    "at": "2026-10-14T15:46:25.901Z",
+    "actor": "DESKTOP-56TH98Y:wt-team",
+    "title": "Bộ kiểm thử tự in bảng thời gian từng nhóm — số đo để chia job, thay vì nâng trần",
+    "summary": "Mọi lượt cổng tự in bảng 15 nhóm kiểm thử chậm nhất kèm phần trăm. Đây là SỐ ĐO để chia job; không nâng trần, không đổi dòng in nào đang có.",
+    "tests": [
+      "tests/test-timing.test.ts chạy riêng: ĐẠT (xếp hạng · phần trăm · ổn định khi bằng nhau · bộ rỗng)",
+      "npm run typecheck: sạch",
+      "npm run lint: sạch",
+      "npm test đủ: để cổng CI chạy — máy dev còn 0,8 GB RAM trống"
+    ]
+  }
 }
