@@ -2775,3 +2775,4 @@
 {"at":"2026-10-14T08:08:54.492Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"inbox-message-sync","detail":"fix/inbox-message-sync @ 57ae4dcb7623 · 3 lệnh kiểm thử"}
 {"at":"2026-10-14T08:09:12.135Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#839 @ 57ae4dcb7623 · thread-diff production: KHOÁ XẾP TỤT 6/109 xác nhận gốc H1; lọc source_at cửa sổ cho INGEST"}
 {"at":"2026-10-14T08:31:47.119Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"inbox-message-sync","detail":"#839 @ 57ae4dcb7623 → c137564424db (MERGE_NOW · MEDIUM · gates success)"}
+{"at":"2026-10-14T08:32:49.439Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DEPLOY_DISPATCHED","detail":"c137564424db · run 38535836557 https://github.com/truyenhkm5group-stack/hkt/actions/runs/38535836557"}
