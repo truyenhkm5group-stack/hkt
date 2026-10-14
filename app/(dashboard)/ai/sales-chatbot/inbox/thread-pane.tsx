@@ -1,8 +1,9 @@
 "use client";
 
-import { startTransition, useEffect, useRef, useState, type ReactNode } from "react";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { usePathname, useSearchParams } from "next/navigation";
 import type { InboxReadConfirmation } from "@/lib/sales-chatbot/inbox-read-shared";
+import { acceptThreadResponse, pickThreadPayload, serverPayloadFresh, THREAD_FETCH_TIMEOUT_MS } from "@/lib/sales-chatbot/inbox-switch-shared";
 import type { InboxThreadPayload } from "@/lib/sales-chatbot/inbox-thread-payload";
 import { cn } from "@/lib/utils";
 import { recordInboxRead } from "./read-store";
@@ -14,8 +15,11 @@ import { InboxThreadView } from "./thread-view";
  * Chủ shop HSLC: «chuyển giữa các hội thoại khá lag». Đo (ops inbox-perf-probe): mỗi lần bấm là một lượt dựng LẠI cả trang —
  * `listInbox` (100 hàng, 22 câu SQL) 350–800 ms trong khi nội dung hội thoại chỉ 30–210 ms. Nay bấm một hàng ⇒ đổi `?c=` tại chỗ
  * (`history.pushState` — Next 15 đồng bộ nó vào `useSearchParams` và vào URL mà `router.refresh` dùng, nút Back vẫn đúng) ⇒ CHỈ
- * tải hội thoại qua `/api/ai-sales/inbox-thread`. Danh sách tự làm mới theo nhịp cũ; một lượt làm mới nền chạy sau khi người
- * dừng bấm để đường dẫn của bộ lọc mang đúng hội thoại đang mở.
+ * tải hội thoại qua `/api/ai-sales/inbox-thread`. Danh sách tự làm mới theo nhịp của nó (auto-refresh.tsx).
+ * P0 13/10/2026 (HSLC: danh sách 13–29 giây, kẹt «Đang mở hội thoại…»): BỎ lượt `router.refresh()` 1,5 giây sau mỗi lần chuyển — nó
+ * dựng lại CẢ trang (chạy lại `listInbox`) cho một cú bấm chỉ đổi hội thoại, và chiếm kết nối CSDL mà route nạp hội thoại cần. Lượt nạp
+ * có hạn chờ `THREAD_FETCH_TIMEOUT_MS` (quá hạn ⇒ huỷ, hiện lỗi + «Thử lại»); câu trả lời về muộn của hội thoại cũ bị bỏ
+ * (`acceptThreadResponse`) — lib/sales-chatbot/inbox-switch-shared.ts.
  *
  * Nguồn của khung chat: bản MỚI NHẤT trong hai — bản trang dựng (mở bằng đường dẫn, lượt tự làm mới, sau khi gửi tin) hoặc bản vừa
  * tải bằng route. Hội thoại đang mở không có bản nào ⇒ chữ «Đang mở…», danh sách vẫn đứng yên.
@@ -30,8 +34,6 @@ type Stamped = { at: number; payload: InboxThreadPayload };
 
 export const THREAD_ROUTE = "/api/ai-sales/inbox-thread";
 export const READ_ROUTE = "/api/ai-sales/inbox-read";
-/** Làm mới nền sau khi người DỪNG bấm chừng này — không chạy lại danh sách cho từng cú bấm khi lướt nhanh qua nhiều khách. */
-const SETTLE_REFRESH_MS = 1_500;
 
 /** Hội thoại đang mở theo URL (`?c=`) — đổi ngay khi bấm hàng (pushState), khi Back / Forward, và khi trang điều hướng thật. */
 export function useSelectedConversation(): string | null {
@@ -75,7 +77,6 @@ export function InboxThreadPane({
   /** Khung khi chưa chọn hội thoại (trang dựng — có số khách đang chờ). */
   empty: ReactNode;
 }) {
-  const router = useRouter();
   const pathname = usePathname();
   const params = useSearchParams();
   const selected = params.get("c") || null;
@@ -89,35 +90,42 @@ export function InboxThreadPane({
   const [fetched, setFetched] = useState<Map<string, Stamped>>(() => new Map());
   const wanted = useRef<string | null>(null);
 
+  // «Thử lại» sau lỗi / quá hạn: tăng `attempt` ⇒ effect nạp lại đúng hội thoại đang chọn.
+  const [attempt, setAttempt] = useState(0);
+
   useEffect(() => {
     wanted.current = selected;
     if (!selected) return;
-    // Trang vừa dựng đúng hội thoại này (mở bằng đường dẫn / Back về một mục trang đã dựng) ⇒ không tải lại.
-    if (fromServer.id === selected && fromServer.s && Date.now() - fromServer.s.at < 2_000) return;
+    if (attempt === 0 && serverPayloadFresh(selected, fromServer, Date.now())) return;
     const ctrl = new AbortController();
+    let timedOut = false;
+    const timer = window.setTimeout(() => {
+      timedOut = true;
+      ctrl.abort();
+    }, THREAD_FETCH_TIMEOUT_MS);
+    const fail = (error: string) => setFetched((m) => new Map(m).set(selected, { at: Date.now(), payload: { ok: false, error } }));
     void fetch(`${THREAD_ROUTE}?c=${encodeURIComponent(selected)}`, { cache: "no-store", signal: ctrl.signal })
       .then(async (res) => (await res.json().catch(() => ({ ok: false, error: `Không mở được hội thoại (HTTP ${res.status}).` }))) as InboxThreadPayload)
       .then((payload) => {
-        if (wanted.current !== selected) return;
+        if (!acceptThreadResponse(selected, wanted.current)) return;
         setFetched((m) => new Map(m).set(selected, { at: Date.now(), payload }));
       })
       .catch((e: unknown) => {
-        if (ctrl.signal.aborted || wanted.current !== selected) return;
-        setFetched((m) => new Map(m).set(selected, { at: Date.now(), payload: { ok: false, error: `Không mở được hội thoại: ${e instanceof Error ? e.message : String(e)}` } }));
-      });
-    // Người dừng bấm ⇒ một lượt làm mới nền: số chưa đọc + đường dẫn bộ lọc theo hội thoại đang mở.
-    const settle = window.setTimeout(() => startTransition(() => router.refresh()), SETTLE_REFRESH_MS);
+        if (!acceptThreadResponse(selected, wanted.current)) return;
+        if (timedOut) return fail(`Mở hội thoại quá ${Math.round(THREAD_FETCH_TIMEOUT_MS / 1000)} giây — máy chủ đang bận. Bấm «Thử lại».`);
+        if (ctrl.signal.aborted) return;
+        fail(`Không mở được hội thoại: ${e instanceof Error ? e.message : String(e)}`);
+      })
+      .finally(() => window.clearTimeout(timer));
     return () => {
       ctrl.abort();
-      window.clearTimeout(settle);
+      window.clearTimeout(timer);
     };
-    // Chỉ chạy khi ĐỔI hội thoại — bản trang dựng đổi mỗi 5 giây không phải lý do tải lại.
+    // Chỉ chạy lại khi đổi hội thoại hoặc bấm «Thử lại» — bản trang dựng mới (tự làm mới) không phải lý do nạp lại.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selected]);
+  }, [selected, attempt]);
 
-  const a = selected && fromServer.id === selected ? fromServer.s : null;
-  const b = selected ? (fetched.get(selected) ?? null) : null;
-  const best = a && b ? (a.at >= b.at ? a : b) : (a ?? b);
+  const best = pickThreadPayload(selected, fromServer, fetched);
   const shownThread = best?.payload.ok ? best.payload.thread : null;
   const shownId = shownThread?.id ?? null;
   const throughId = shownThread?.readThrough?.id ?? null;
@@ -151,7 +159,22 @@ export function InboxThreadPane({
 
   if (!selected) return <>{empty}</>;
   if (!best) return <div className="flex h-full items-center justify-center p-6 text-sm text-muted-foreground" data-testid="inbox-thread-loading">Đang mở hội thoại…</div>;
-  if (!best.payload.ok) return <div className="p-6 text-sm text-destructive">{best.payload.error}</div>;
+  if (!best.payload.ok)
+    return (
+      <div className="space-y-3 p-6 text-sm" data-testid="inbox-thread-error">
+        <p className="text-destructive">{best.payload.error}</p>
+        <button type="button" className="inline-flex h-9 items-center rounded-md border border-foreground/15 bg-background px-3 font-medium hover:bg-muted" onClick={() => {
+            setFetched((m) => {
+              const next = new Map(m);
+              next.delete(selected);
+              return next;
+            });
+            setAttempt((n) => n + 1);
+          }} data-testid="inbox-thread-retry">
+          Thử lại
+        </button>
+      </div>
+    );
   const back = new URLSearchParams(params.toString());
   back.delete("c");
   const backHref = `${pathname}${back.size ? `?${back.toString()}` : ""}`;

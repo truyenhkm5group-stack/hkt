@@ -8,9 +8,11 @@
  * Bổ sung hội thoại thật của HSLC (đã che SĐT / tên / địa chỉ) là việc sau: cần một thao tác ops chỉ-đọc xuất hội thoại — chưa
  * có, vì `db-query` không đọc CSDL tổ chức (MIGRATION_PLAN.md · M1).
  */
+import { eq } from "drizzle-orm";
+import { getDb, schema } from "@/db";
 import { addDays, todayVN } from "@/lib/format";
 import { imageLine } from "@/lib/sales-chatbot/vision";
-import { say, tool, type GoldenCase, type Step } from "./harness";
+import { say, tool, type GoldenCase, type GoldenHookCtx, type Step } from "./harness";
 
 /** Bước trả lời bằng chữ dựng từ kết quả công cụ (số luôn lấy từ máy chủ, không gõ tay trong kịch bản). */
 const reply =
@@ -38,6 +40,29 @@ export const GOLDEN_KNOWLEDGE = {
     { title: "Khuyến mãi chưa tới", content: "Đồng giá 99K.", from: addDays(todayVN(), 10), to: null },
   ],
 };
+
+/**
+ * KHÁCH CŨ CỦA CHÍNH HỘI THOẠI (Customer 360 — 11/10/2026, ca «Nga Ho Thien»): hội thoại mang mã page + mã hội thoại Pancake, và ERP
+ * có MỘT đơn đồng bộ từ Pancake mang đúng mã hội thoại đó (đã gửi, có xã + tỉnh chuẩn hoá) — chưa có hồ sơ khách, chưa có SĐT trong
+ * hội thoại. Dữ liệu GIẢ (kho PUBLIC). Mốc đơn = lúc gieo (đồng hồ thật — AGENTS.md mục 50: «gần nhất <ngày>» là ngày chạy).
+ */
+export const RETURNING_THREAD = { pageId: "pg-vang", threadId: "pg-vang_psid-vang", orderId: "vang-don-cu", phone: "0900000123", address: "Số 8 ngõ 2", ward: "Phường Cầu Giấy", province: "Thành phố Hà Nội" } as const;
+export async function seedReturningThread({ conversationId }: Pick<GoldenHookCtx, "conversationId">, over: { orderId?: string; stage?: "SHIPPED" | "RETURNED"; address?: string; at?: Date; threadId?: string } = {}): Promise<void> {
+  const db = await getDb();
+  await db.update(schema.salesChatConversations).set({ pageId: RETURNING_THREAD.pageId, threadId: over.threadId ?? RETURNING_THREAD.threadId }).where(eq(schema.salesChatConversations.id, conversationId));
+  await db.insert(schema.orders).values({
+    id: over.orderId ?? RETURNING_THREAD.orderId,
+    insertedAt: over.at ?? new Date(),
+    stage: over.stage ?? "SHIPPED",
+    pageId: RETURNING_THREAD.pageId,
+    conversationId: over.threadId ?? RETURNING_THREAD.threadId,
+    shipFullName: "Chị Vàng",
+    shipPhone: RETURNING_THREAD.phone,
+    shipAddress: over.address ?? RETURNING_THREAD.address,
+    shipCommune: RETURNING_THREAD.ward,
+    shipProvince: RETURNING_THREAD.province,
+  });
+}
 
 export const GOLDEN_CASES: readonly GoldenCase[] = [
   {
@@ -71,6 +96,26 @@ export const GOLDEN_CASES: readonly GoldenCase[] = [
         ],
       },
       { say: "ok chốt đơn", ai: [() => [tool("confirm_order", { customer_confirmation: "ok chốt đơn" })], reply((r) => `Đã chốt đơn ${String(r.order_code)}, tổng thu ${String(r.cod_total_text)}.`)] },
+    ],
+  },
+  {
+    key: "hau-mai-da-nhan-hang",
+    title: "Vòng đời tư vấn → chốt → hậu mãi (HOTFIX 12/10/2026, ca «Khanh Nhung»): khách nhắn sau khi chốt ⇒ AI VẪN trả lời (không chuyển người mặc định), «nhận hàng rồi» ⇒ cảm ơn + hỏi thăm, không chốt lại / không lên đơn mới; khiếu nại hoàn tiền ⇒ MÁY CHỦ chuyển người (không lượt AI)",
+    shop: "food",
+    channel: "WEB",
+    turns: [
+      {
+        say: "lay 1 goi ruoc tom, Lê Thị Hoa 0977000111, 8 Trần Phú Đà Nẵng",
+        ai: [
+          () => [tool("create_customer", { name: "Lê Thị Hoa", phone: "0977000111", address: "8 Trần Phú, Đà Nẵng" })],
+          ({ v }) => [tool("create_draft_order", { items: [{ variant_id: v("RUOC-TOM"), quantity: 1 }] })],
+          reply((r) => `Đơn tạm tính ${String(r.cod_total_text)}, chị xác nhận giúp em nhé.`),
+        ],
+      },
+      { say: "ok chốt đơn", ai: [() => [tool("confirm_order", { customer_confirmation: "ok chốt đơn" })], reply(() => "Dạ em lên đơn cho chị rồi ạ.")] },
+      { say: "Tôi nhận hàng rồi nhưng chưa thử chất lượng", ai: [() => [say("Dạ em cảm ơn chị đã nhận hàng ạ. Chị dùng thử thấy thế nào nhắn em nhé!")]] },
+      // Khiếu nại có đơn ⇒ MÁY CHỦ chuyển người trước lượt AI (review #821 F2) — model không được hỏi, không thể hứa hoàn tiền.
+      { say: "goi ruoc bi moc roi, minh muon tra hang hoan tien", ai: [] },
     ],
   },
   {
@@ -250,5 +295,26 @@ export const GOLDEN_CASES: readonly GoldenCase[] = [
     channel: "WEB",
     config: GOLDEN_KNOWLEDGE,
     turns: [{ say: "bao hanh the nao shop", ai: [() => [tool("handoff_to_human", { reason: "Ngoài chính sách — bảo hành" })], reply(() => "Dạ phần bảo hành em chưa có thông tin, em chuyển nhân viên báo mình ngay ạ.")] }],
+  },
+  {
+    key: "khach-cu-van-dia-chi-cu",
+    title: "Khách cũ «vẫn địa chỉ cũ» ⇒ máy chủ tra đơn cũ của CHÍNH hội thoại (mã hội thoại Pancake), lời nhắc đề xuất xác nhận thay vì xin lại; khách đồng ý ⇒ máy chủ tự điền địa chỉ",
+    shop: "food",
+    channel: "WEB",
+    turns: [
+      {
+        before: (ctx) => seedReturningThread(ctx),
+        say: "Cho chi 1 goi cha muc\nVẫn địa chỉ cũ nhé",
+        ai: [() => [say("Dạ em gửi 1 gói chả mực về Số 8 ngõ 2, Phường Cầu Giấy, Thành phố Hà Nội, SĐT đuôi 0123 như đơn trước được không ạ?")]],
+      },
+      {
+        say: "đúng rồi em",
+        ai: [
+          () => [tool("create_customer", { use_saved_address: true, customer_confirmation: "đúng rồi em" })],
+          ({ v }) => [tool("create_draft_order", { items: [{ variant_id: v("CHA-MUC"), quantity: 1 }] })],
+          reply((r) => `Tóm tắt đơn: tổng thu ${String(r.cod_total_text)}. Chị xác nhận chốt đơn không ạ?`),
+        ],
+      },
+    ],
   },
 ];

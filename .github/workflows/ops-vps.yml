@@ -54,17 +54,25 @@ on:
           - saas-acceptance      # NGHIỆM THU khách Chốt Đơn trên production, CHỈ workspace THỬ trong sổ khai lib/constants/saas-acceptance.ts — MÃ HOÁ, công khai đúng một dòng [ops:tom-tat] (MẶC ĐỊNH CHỈ ĐỌC: kiểm workspace thử · mở vỏ app · chat công khai; "--apply" GHI: cấp phát qua job «Tạo khách» + kích hoạt + đăng nhập email không mã tổ chức, cuối lượt xoay mật khẩu; "--apply --e2e" thêm chat web → AI → đơn, TỐN AI)
           - security-acceptance  # bằng chứng production LAUNCH_GATE §3: S1 cô lập tổ chức (GET id bản ghi của tổ chức kia bằng phiên workspace nghiệm thu / phiên ADMIN nhà) · S2 quét bí mật trong trang vỏ + trang công khai · S3 phong bì bản mã — MÃ HOÁ; công khai chỉ trạng thái + số đếm (CHỈ ĐỌC; không arg)
           - ops-signals-check    # tám tín hiệu vận hành O1–O8 (LAUNCH_GATE §4) tính trên production bằng ĐÚNG hàm của khung «Sự cố 24 giờ / 7 ngày» (/platform/org) cho MỌI tổ chức — MÃ HOÁ; công khai chỉ số tổ chức theo mức + mã lý do của workspace nghiệm thu (CHỈ ĐỌC; không arg)
-          - inbox-perf-probe     # Hộp thư khách mở / chuyển hội thoại mất bao lâu trên workspace khách: bấm giờ ĐÚNG chuỗi hàm máy chủ của /ai/sales-chatbot/inbox (tải: listInbox… · chuyển: loadInboxThread…), nguội / ấm, p50 · p95 · max + SQL — MÃ HOÁ; công khai che tổ chức thành org#i, không đích (CHỈ ĐỌC; arg: "[--org=<mã>] [--samples=1..20]")
+          - inbox-perf-probe     # Hộp thư khách mở / chuyển hội thoại mất bao lâu trên workspace khách: bấm giờ ĐÚNG chuỗi hàm máy chủ của /ai/sales-chatbot/inbox (tải: listInbox… · chuyển: loadInboxThread…), nguội / ấm, p50 · p95 · max + SQL + top câu chậm theo khối + chẩn đoán «chưa đọc» 0245 + cỡ cột state (+ EXPLAIN khi --org; thêm --analyze ⇒ thời gian thật từng nút) — MÃ HOÁ; công khai che tổ chức thành org#i, không đích (CHỈ ĐỌC; arg: "[--org=<mã>] [--samples=1..20] [--analyze]")
           - inbox-avatar-audit   # ảnh đại diện + link Facebook của hộp thư khách trên N hội thoại gần nhất của MỘT tổ chức: có ảnh · trạng thái PROFILE_* + lý do · mã lỗi Graph · payload Pancake nói gì về ảnh · bấm ảnh mở Facebook / hồ sơ nội bộ theo lý do · DẠNG fb_id / conversation_link (không in giá trị) — MÃ HOÁ (CHỈ ĐỌC; arg: "<mã tổ chức> [--limit=1..3000]")
           - pancake-avatar-shape # ảnh khách nằm ở KHOÁ nào trong payload API Pancake của MỘT tổ chức: gọi đúng API danh sách hội thoại của lượt quét lại (≤ 5) + tin (≤ 2), in ĐƯỜNG DẪN KHOÁ + kiểu + dạng (host · có tham số khoá · độ dài) — không giá trị/tên/SĐT/mã; thử điểm cuối ảnh Pancake (mã HTTP · kiểu · host chuyển hướng) — MÃ HOÁ (CHỈ ĐỌC; arg: "<mã tổ chức> [--limit=1..5]")
           - avatar-proxy-check   # ảnh khách qua proxy hỏng ở BƯỚC nào cho ≤ 5 hội thoại của MỘT tổ chức: ref · page khớp · token page (CÓ/KHÔNG + nguồn, không in token) · bước 1 Pancake (hai header) · bước 2 CDN · đường thật ⇒ reason của avatarProxyCore — không id/URL/token/tên — MÃ HOÁ (CHỈ ĐỌC; arg: "<mã tổ chức> [--limit=1..5]")
           - sender-provenance-probe # tin phía page của MỘT tổ chức mang dấu người gửi gì (7 ngày): uid nhân viên Pancake · app Hộp thư Page · app khác (ẩn 4 số cuối) · chữ hệ thống bình luận · tin mẫu · tiếng vọng bot · KHÔNG GÌ CẢ (⇒ UNKNOWN) + bao nhiêu tin không dấu nằm giữa chuỗi người đang chat — đọc CSDL + GET tin Pancake, không in chữ tin — MÃ HOÁ (CHỈ ĐỌC; arg: "<mã tổ chức> [--days=1..14] [--threads=1..80]")
+          - pancake-thread-diff     # tin Pancake đối chiếu với sổ tin ERP và hộp thư: --conv=<uuid> ⇒ MỘT hội thoại (thiếu/thừa theo phía, mốc, vị trí trang đầu từng thẻ); không --conv ⇒ toàn tổ chức --hours (luồng có tin mới vs có trong ERP, tin thiếu theo giờ, trễ webhook p50/p95) — MÃ HOÁ (CHỈ ĐỌC; arg: "<mã tổ chức> [--conv=<uuid>] [--hours=1..72] [--threads=1..200]")
+          - customer-360-probe   # vì sao bot không nhận ra KHÁCH CŨ trên MỘT tổ chức: --conv dữ kiện một hội thoại (hồ sơ Pancake đã lưu · đơn ERP theo mã hội thoại / mã FB / SĐT · Pancake GET tin: số SĐT, số recent_orders, đọc được bao nhiêu, đã có trong ERP bao nhiêu, dáng khoá đã che · hồ sơ Customer 360) + bối cảnh tổ chức + ba thước đo khách cũ (nhận ra · mua lại · bị hỏi lại) --days — MÃ HOÁ, chỉ số đếm (CHỈ ĐỌC; arg: "<mã tổ chức> [--conv=<uuid>] [--days=1..60]")
           - inbox-read-audit   # «chưa đọc» của hộp thư khách có bằng chứng không, trên N hội thoại gần nhất (hoặc một hội thoại) của MỘT tổ chức: mốc khách / bot / NV · con trỏ chung + số người có con trỏ riêng · số tin khách sau con trỏ · phía + mốc tin xem trước · TỔNG FALSE-UNREAD luật cũ / mới — MÃ HOÁ (CHỈ ĐỌC; arg: "<mã tổ chức> [--limit=1..3000] [--conversation=<mã>]")
           - inbox-unread-dryrun # CHẠY THỬ «tin khách chưa đọc» lưu sẵn của #792 trước khi gộp: tổng hội thoại · số turn_unhandled = true theo hàm #803 · UNREAD luật đang chạy (V3) · đổi true→false (lý do: AI · NV/page · người mở) / false→true · THỜI GIAN hàm #803 trên toàn bảng ⇒ ước lượng dẫn xuất 0245 · kích thước bảng — MÃ HOÁ (CHỈ ĐỌC; arg: "<mã tổ chức>" hoặc "--all")
+          - org-migrate-probe  # vì sao MỘT tổ chức migrate chậm / hỏng (sự cố 0245 ở qa 12/10): sổ migration đã áp (số mục + tag cuối) · hàm 0245 có chưa · hội thoại theo kênh · tin theo note · PAGE_REPLY sender_kind NULL chữ ≥ 40 · page · dòng/luồng max/p95 · PAGE_REPLY mỗi page trong 168 giờ · nếu 0245 chưa có: bấm giờ định nghĩa #803 trên N luồng lớn nhất, 60 s mỗi câu — chỉ số đếm, MÃ HOÁ (CHỈ ĐỌC, không migrate; arg: "<mã tổ chức> [--top=1..50]")
           - saas-value-snapshot-check # ảnh giá trị theo tổ chức + sức khoẻ theo ngày (0240) đã chụp tới đâu: số tổ chức × cửa sổ mỗi ngày, ô phẳng CHƯA BIẾT, nguồn hỏng theo mã, phân bố mức sức khoẻ / rủi ro, thời gian lượt chụp của job alerts — MÃ HOÁ; công khai chỉ số đếm (CHỈ ĐỌC; arg: "[--days=1..30]")
           - sales-lifecycle-audit # AI bán hàng có khẳng định điều chưa xác minh không, trên MỘT tổ chức: --conv đường trả lời từng tin bot (AI / câu mẫu / hệ thống / nhắn lại) + câu khẳng định tiền / chốt · công cụ OK / lỗi · đơn nối theo từng phép nối · đuôi SĐT có ở nguồn nào (đúng/sai); --days đếm mẫu lỗi A–F — MÃ HOÁ, chỉ số đếm (CHỈ ĐỌC; arg: "<mã tổ chức> [--conv=<uuid>] [--phone-tail=NNN] [--days=1..60]")
           - sales-integrity-audit # AI bán hàng báo sai giá / xác nhận giả / bỏ rơi khách, trên MỘT tổ chức: giá bot ≠ giá đơn · giá tự đổi «2kg» · câu «đã lên đơn» khi đơn chưa có / còn cờ kiểm · chuyển người không ai nhận 1h/4h/24h · địa chỉ chưa ghép · nhắc sau đơn chốt · SĐT trong tin mà hồ sơ trống · lượt khách bị chặn không ai trả lời + ý định mua bị bỏ lỡ — MÃ HOÁ, chỉ số đếm (CHỈ ĐỌC; arg: "<mã tổ chức> [--days=1..60] [--find-name=ten_khach[,ten_2]] [--conv=<uuid>]")
+          - stuck-conversation-audit # HỘI THOẠI AI BÁN HÀNG KẸT Ở ĐÂU (HOTFIX P0 12/10/2026, ca «Khanh Nhung»): AI dừng > 60/240/1.440 phút theo nhóm lý do (chờ người · lỗi kỹ thuật — AI hỏng mà đồng hồ updated_at bị đẩy · tạm dừng có chủ đích) · cần người KHÔNG CHỦ · SLA quá hạn · nhắn lại sau khi đã có đơn · đơn chốt quá hạn chưa vận đơn / ERP + Pancake cùng hội thoại / thiếu xã · khách nói đã nhận mà chưa có chứng từ giao — MÃ HOÁ, chỉ số đếm (CHỈ ĐỌC; arg: "<mã tổ chức>|--all [--days=1..30] [--conv=<uuid>] [--order=<mã ngắn>]")
+          - sales-postorder-handoff-release # TRẢ CHO AI hội thoại kẹt vì luật cũ «khách nhắn sau khi chốt đơn ⇒ chuyển người» (HOTFIX P0 12/10/2026 — cần deploy bản vá engine trước): đếm theo phán quyết (trả được · có người phụ trách · nhân viên đã trả lời · đang tiếp quản) — MẶC ĐỊNH CHẠY THỬ (không ghi), MÃ HOÁ, chỉ số đếm; "--apply" (chủ shop duyệt) trả về AI hội thoại không ai cầm, LƯỢT NHỎ (--limit, mặc định 10) có mã lượt; hoàn tác "--rollback=<mã lượt> --apply"; arg: "<mã tổ chức | --all> [--limit=1..100] [--apply] | <mã tổ chức> --rollback=<mã lượt> [--apply]"
+          - conv-money-trace # TRUY VẾT TIỀN + NGUỒN GỐC từng tin bot của MỘT hội thoại: tin fanpage (khách / page / bot, người gửi, trùng chữ, ảnh) · tin bot theo NGUỒN thật (chữ model · câu mẫu · câu cố định của engine như «nói rõ hơn» / câu an toàn) + tin khách kích hoạt + số tiền và tập số của hàng rào (báo giá · giá công cụ · tham chiếu) + số TỔNG lệch báo giá · công cụ + dòng giỏ / nháp · sự kiện · trạng thái giỏ / nháp / chốt · đơn nối được (dòng, SL, đơn giá, giảm, ship, tổng) · câu mẫu có số tiền cố định; --scan đếm mẫu «nói rõ hơn» không có tin khách mới + TỔNG lệch giỏ — MÃ HOÁ, không chữ tin / tên / SĐT (CHỈ ĐỌC; arg: "<mã tổ chức> --conv=<uuid> [--order=<mã ngắn>]" hoặc "<mã tổ chức> --scan [--days=1..30]")
+          - upsell-basis-scan # đơn của bot có dòng hàng KHÔNG có căn cứ từ khách (món mời khách chưa đồng ý · số lượng bot tự tăng — ca «Châu Dương» #91F3641C) trên MỘT tổ chức: dựng lại giỏ có thẩm quyền từ tin khách bằng luật của máy chủ (ESTIMATED) · mã đơn chỉ trong phần MÃ HOÁ · --flag đưa đơn còn sống vào «Cần người kiểm» (cờ UPSELL_UNCONSENTED, không đổi tiền / dòng đơn, không gửi tin; mặc định chạy thử, --flag --apply mới ghi) (arg: "<mã tổ chức> [--days=1..30] [--flag [--apply]]")
           - price-mismatch-scan # đơn của bot có tiền hàng ≠ báo giá máy chủ (tính lại bằng quote.ts) trên MỘT tổ chức — PRICE_MISMATCH + thiếu giảm khối lượng (ca «Phạm Minh Ái»: sỉ bật thì mất giảm) · danh sách mã đơn chỉ trong phần MÃ HOÁ · --since=<ISO> đếm CHỈ đơn sau mốc deploy · --flag đưa đơn lệch còn sống vào «Cần người kiểm» (cờ PRICE_MISMATCH, không đổi giá, không gửi tin; mặc định chạy thử, --flag --apply mới ghi) (arg: "<mã tổ chức> [--days=1..60] [--since=<ISO>] [--flag [--apply]]")
+          - cart-intent-audit   # bot có tự HẠ số lượng khách đã nói (2kg ⇒ «1kg ăn thử») / cứ hỏi · mời khi đơn đã đủ để chốt, trên MỘT tổ chức: CART_INTENT_DRIFT · ORDER_READY_LOOP — MÃ HOÁ, chỉ số đếm + tỷ lệ (CHỈ ĐỌC; arg: "<mã tổ chức> [--days=1..30] [--since=<ISO>]")
           - stock-wait-summary   # chờ hàng & GTC theo số ngày chờ, miền, vùng + đơn đang chờ + đề xuất — số tổng hợp (CHỈ ĐỌC; arg "--days=N")
           - company-os-summary   # Company OS đã được dùng tới đâu: sổ mẫu, topic / giá thành / mẫu xưởng / bản thiết kế, "Cần anh quyết", hàng hoàn, yêu cầu duyệt, phiếu nhập — CHỈ SỐ ĐẾM (CHỈ ĐỌC; không arg)
           - platform-secrets-verify # kiểm PLATFORM_SECRETS_KEY trên production (V1–V7): khoá có, canary niêm/giải qua deploy, cô lập tổ chức, CSDL + log không chứa bản rõ — arg rỗng = CHỈ ĐỌC; "seal --apply" niêm canary; "rotate --apply" cập nhật canary
@@ -164,7 +172,7 @@ permissions:
 # Thao tác trong danh sách mà cần cho người vận hành thấy NGAY một con số ("đã đóng 12 case") thì
 # script tự in dòng ấy với tiền tố `[ops:tom-tat] ` — kênh tóm tắt duy nhất ra log (qua che_log).
 env:
-  OPS_THAO_TAC_MA_HOA: "platform-secrets-verify db-query vtp-debug phone-probe vtp-probe vtp-statement-peek payroll-reconcile seed-employees marketing-explain cs-stale check-integrations run-job vtp-replay-explain vtp-manual-verify returns-hmt care-false-reopen care-outcome-before-open fanpage-evidence-backfill cod-statement-audit stock-wait-summary org-summary org-order-audit org-ai-cutover org-catalog org-offboard identity-reconcile confirm-funnel-audit company-os-summary velocity-compare org-prepaid-ai saas-v1-migration ban-hang-reply-upgrade saas-acceptance ops-signals-check security-acceptance inbox-perf-probe inbox-avatar-audit inbox-read-audit inbox-unread-dryrun pitr-status pitr-basebackup pitr-mark pitr-drill pitr-pause order-cancel-reconcile sales-lifecycle-audit sales-integrity-audit pancake-avatar-shape saas-value-snapshot-check avatar-proxy-check sender-provenance-probe sales-stale-confirmed-repair price-mismatch-scan migration-rehearsal"
+  OPS_THAO_TAC_MA_HOA: "platform-secrets-verify db-query vtp-debug phone-probe vtp-probe vtp-statement-peek payroll-reconcile seed-employees marketing-explain cs-stale check-integrations run-job vtp-replay-explain vtp-manual-verify returns-hmt care-false-reopen care-outcome-before-open fanpage-evidence-backfill cod-statement-audit stock-wait-summary org-summary org-order-audit org-ai-cutover org-catalog org-offboard identity-reconcile confirm-funnel-audit company-os-summary velocity-compare org-prepaid-ai saas-v1-migration ban-hang-reply-upgrade saas-acceptance ops-signals-check security-acceptance inbox-perf-probe inbox-avatar-audit inbox-read-audit inbox-unread-dryrun org-migrate-probe pitr-status pitr-basebackup pitr-mark pitr-drill pitr-pause order-cancel-reconcile sales-lifecycle-audit sales-integrity-audit pancake-avatar-shape customer-360-probe saas-value-snapshot-check avatar-proxy-check sender-provenance-probe sales-stale-confirmed-repair price-mismatch-scan conv-money-trace cart-intent-audit stuck-conversation-audit sales-postorder-handoff-release pancake-thread-diff upsell-basis-scan migration-rehearsal"
 
 # ═══════════ HÀNG ĐỢI NẰM TRÊN MÁY CHỦ, KHÔNG NẰM Ở GITHUB ═══════════
 #
@@ -516,7 +524,7 @@ jobs:
             # ─── PHÂN LOẠI: mặc định là GHI, và cờ ghi đè lên tên ───
             DOC_NHE="status perf disk logs chatbot-status db-query backup-status pitr-status"
             DOC_PROBE="check-integrations vtp-debug vtp-probe vtp-web-probe phone-probe pages-debug meta-id-probe meta-ad-post-probe vtp-capability ads-level-probe"
-            DOC_NANG="platform-secrets-verify verify smoke session-verify perf-probe perf-audit kpi-snapshot explain-stock outcome-explain outcome-parity returns-parity reason-coverage reason-backfill cogs-drift profit-verify marketing-calibrate marketing-explain payroll-reconcile fanpage-evidence-backfill care-false-reopen care-outcome-before-open care-waiting-reconcile cs-rule-update cs-stale sepay-reconcile cod-rebuild cod-status-repair vtp-return-status-repair agent-run-reattach vtp-rebuild-state vtp-replay-files vtp-replay-explain vtp-manual-verify vtp-statement-peek cod-statement-audit stock-wait-summary org-summary company-os-summary velocity-compare confirm-funnel-audit returns-hmt ai-check platform-ai-model-probe platform-ai-bench backup restore-drill restore-drill-org migration-rehearsal pitr-basebackup pitr-drill org-order-audit org-ai-cutover org-catalog org-offboard org-prepaid-ai org-volume-discount saas-v1-migration identity-reconcile ban-hang-reply-upgrade saas-acceptance ops-signals-check security-acceptance inbox-perf-probe inbox-avatar-audit inbox-read-audit inbox-unread-dryrun order-cancel-reconcile sales-lifecycle-audit sales-integrity-audit pancake-avatar-shape saas-value-snapshot-check avatar-proxy-check sender-provenance-probe sales-stale-confirmed-repair price-mismatch-scan"
+            DOC_NANG="platform-secrets-verify verify smoke session-verify perf-probe perf-audit kpi-snapshot explain-stock outcome-explain outcome-parity returns-parity reason-coverage reason-backfill cogs-drift profit-verify marketing-calibrate marketing-explain payroll-reconcile fanpage-evidence-backfill care-false-reopen care-outcome-before-open care-waiting-reconcile cs-rule-update cs-stale sepay-reconcile cod-rebuild cod-status-repair vtp-return-status-repair agent-run-reattach vtp-rebuild-state vtp-replay-files vtp-replay-explain vtp-manual-verify vtp-statement-peek cod-statement-audit stock-wait-summary org-summary company-os-summary velocity-compare confirm-funnel-audit returns-hmt ai-check platform-ai-model-probe platform-ai-bench backup restore-drill restore-drill-org pitr-basebackup pitr-drill org-order-audit org-ai-cutover org-catalog org-offboard org-prepaid-ai org-volume-discount saas-v1-migration identity-reconcile ban-hang-reply-upgrade saas-acceptance ops-signals-check security-acceptance inbox-perf-probe inbox-avatar-audit inbox-read-audit inbox-unread-dryrun org-migrate-probe order-cancel-reconcile sales-lifecycle-audit sales-integrity-audit pancake-avatar-shape customer-360-probe saas-value-snapshot-check avatar-proxy-check sender-provenance-probe sales-stale-confirmed-repair price-mismatch-scan conv-money-trace cart-intent-audit stuck-conversation-audit sales-postorder-handoff-release pancake-thread-diff upsell-basis-scan migration-rehearsal"
 
             LOP=GHI
             case "$ARG" in
@@ -1048,6 +1056,24 @@ jobs:
                 fetch_script sales-lifecycle-audit.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/sales-lifecycle-audit.ts'
                 kiem_arg
                 ma_hoa_ket_qua chay_voi_arg docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/sales-lifecycle-audit.ts ;;
+              conv-money-trace)
+                # TRUY VẾT TIỀN + NGUỒN GỐC TỪNG TIN BOT (scripts/conv-money-trace.ts — P0 HSLC 14/10/2026: bot báo TỔNG 640.000 ₫ cho 1kg
+                # 280.000 ₫; bot tự nói «nói rõ hơn» khi khách không nhắn gì) — CHỈ ĐỌC (script tự đặt ERP_READ_ONLY=1 trước khi nạp @/db
+                # và hỏi lại Postgres; CSDL tổ chức mở bằng getDbForInspection, hàm lib đọc qua handle chỉ đọc gắn cho tổ chức — không
+                # migrate, không tạo). In số tiền VND, tên mẫu mã trong danh mục, số lượng, nguồn gốc tin — không chữ tin, tên, SĐT, địa
+                # chỉ. Vẫn MÃ HOÁ cả lượt. arg: "<mã tổ chức> --conv=<uuid> [--order=<mã ngắn>]" | "<mã tổ chức> --scan [--days=1..30]".
+                fetch_script conv-money-trace.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/conv-money-trace.ts'
+                kiem_arg
+                ma_hoa_ket_qua chay_voi_arg docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/conv-money-trace.ts ;;
+              upsell-basis-scan)
+                # ĐƠN CỦA BOT CÓ DÒNG HÀNG KHÔNG CĂN CỨ TỪ KHÁCH? (scripts/upsell-basis-scan.ts — P0 HSLC 14/10/2026, ca «Châu Dương») — mặc định
+                # CHỈ ĐỌC (script tự đặt ERP_READ_ONLY=1 trước khi nạp @/db và hỏi lại Postgres; CSDL tổ chức mở bằng getDbForInspection — không
+                # migrate, không tạo). Dựng lại giỏ có thẩm quyền bằng applyCustomerCartMessage + lineBasisViolation của máy chủ (ESTIMATED).
+                # --flag: kế hoạch cờ UPSELL_UNCONSENTED (chạy thử); --flag --apply: gắn qua flagOrderForReviewAsAgent trong withOrganization
+                # (không đổi tiền / dòng đơn, không gửi tin). Tóm tắt chỉ số đếm / tiền tổng. arg: "<mã tổ chức> [--days=1..30] [--flag [--apply]]".
+                fetch_script upsell-basis-scan.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/upsell-basis-scan.ts'
+                kiem_arg
+                ma_hoa_ket_qua chay_voi_arg docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/upsell-basis-scan.ts ;;
               price-mismatch-scan)
                 # ĐƠN CỦA BOT LỆCH BÁO GIÁ MÁY CHỦ? (scripts/price-mismatch-scan.ts — P0 HSLC 11/10/2026, ca «Phạm Minh Ái») — CHỈ ĐỌC
                 # (script tự đặt ERP_READ_ONLY=1 trước khi nạp @/db và hỏi lại Postgres; CSDL tổ chức mở bằng getDbForInspection — không
@@ -1059,6 +1085,33 @@ jobs:
                 fetch_script price-mismatch-scan.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/price-mismatch-scan.ts'
                 kiem_arg
                 ma_hoa_ket_qua chay_voi_arg docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/price-mismatch-scan.ts ;;
+              sales-postorder-handoff-release)
+                # TRẢ CHO AI HỘI THOẠI KẸT VÌ LUẬT CŨ «SAU KHI CHỐT ĐƠN» (scripts/sales-postorder-handoff-release.ts, lõi
+                # lib/sales-chatbot/postorder-release.ts). CẦN DEPLOY bản vá engine TRƯỚC (lib/ lấy từ image). Không "--apply" ⇒ CHẠY THỬ:
+                # chỉ đọc. "--apply" ⇒ hội thoại không ai cầm (không người phụ trách, không câu nhân viên sau khi chuyển, không tiếp quản) về
+                # OPEN + vết ai.resumed + nhật ký; KHÔNG gửi tin, KHÔNG đụng đơn / lý do chuyển người khác. Chỉ in SỐ ĐẾM; vẫn MÃ HOÁ cả lượt.
+                # arg: "<mã tổ chức | --all> [--limit=1..100] [--apply] | <mã tổ chức> --rollback=<mã lượt> [--apply]" (script soát).
+                fetch_script sales-postorder-handoff-release.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/sales-postorder-handoff-release.ts'
+                kiem_arg
+                ma_hoa_ket_qua chay_voi_arg docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/sales-postorder-handoff-release.ts ;;
+              cart-intent-audit)
+                # BOT CÓ TỰ HẠ SỐ LƯỢNG KHÁCH ĐÃ NÓI / CỨ HỎI KHI ĐƠN ĐÃ ĐỦ? (scripts/cart-intent-audit.ts — P0 HSLC 12/10/2026) — CHỈ ĐỌC
+                # (script tự đặt ERP_READ_ONLY=1 trước khi nạp @/db và hỏi lại Postgres; CSDL tổ chức mở bằng getDbForInspection — không
+                # migrate, không tạo; không gọi hàm lib nào đọc getDb()). Luật «câu sửa tường minh / mơ hồ» là bản sao TỰ CHỨA của
+                # lib/sales-chatbot/cart-commitment.ts để đo được TRƯỚC deploy. Tóm tắt chỉ số đếm + tỷ lệ (ESTIMATED); mã hội thoại chỉ
+                # trong bản MÃ HOÁ. arg: "<mã tổ chức> [--days=1..30] [--since=<ISO>]".
+                fetch_script cart-intent-audit.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/cart-intent-audit.ts'
+                kiem_arg
+                ma_hoa_ket_qua chay_voi_arg docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/cart-intent-audit.ts ;;
+              stuck-conversation-audit)
+                # HỘI THOẠI AI BÁN HÀNG KẸT Ở ĐÂU (scripts/stuck-conversation-audit.ts — HOTFIX P0 12/10/2026) — CHỈ ĐỌC (script tự đặt
+                # ERP_READ_ONLY=1 trước khi nạp @/db và hỏi lại Postgres; CSDL tổ chức mở bằng getDbForInspection — không migrate; phần
+                # dùng lib #800 gắn handle chỉ đọc rồi withOrganization, image thiếu hàm ⇒ «CHƯA ĐO ĐƯỢC»). Phần đếm chính là SQL thô trên
+                # cột đã có ⇒ chạy được trên image đang chạy. Tóm tắt chỉ số đếm; mã hội thoại / lý do nguyên văn / dòng thời gian
+                # --conv / --order chỉ trong bản MÃ HOÁ. arg: "<mã tổ chức>|--all [--days=1..30] [--conv=<uuid>] [--order=<mã ngắn>]".
+                fetch_script stuck-conversation-audit.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/stuck-conversation-audit.ts'
+                kiem_arg
+                ma_hoa_ket_qua chay_voi_arg docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/stuck-conversation-audit.ts ;;
               sales-integrity-audit)
                 # AI BÁN HÀNG BÁO SAI GIÁ / XÁC NHẬN GIẢ / BỎ RƠI KHÁCH? (scripts/sales-integrity-audit.ts — P0 HSLC 11/10/2026) — CHỈ ĐỌC
                 # (script tự đặt ERP_READ_ONLY=1 trước khi nạp @/db và hỏi lại Postgres; CSDL tổ chức mở bằng getDbForInspection — không
@@ -1086,6 +1139,17 @@ jobs:
                 fetch_script sender-provenance-probe.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/sender-provenance-probe.ts'
                 kiem_arg
                 ma_hoa_ket_qua chay_voi_arg docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/sender-provenance-probe.ts ;;
+              pancake-thread-diff)
+                # TIN PANCAKE ĐỐI CHIẾU VỚI SỔ TIN ERP VÀ HỘP THƯ (scripts/pancake-thread-diff.ts — P0 14/10 hội thoại HSLC không hiện như
+                # Pancake) — CHỈ ĐỌC (script tự đặt ERP_READ_ONLY=1 trước khi nạp @/db và hỏi lại Postgres; CSDL tổ chức mở bằng
+                # getDbForInspection, listInbox chạy trong withOrganization với handle chỉ đọc + danh tính không gửi được — không ghi).
+                # Gọi Pancake CHỈ GET, nghỉ 500 ms, dừng khi 429. Tóm tắt chỉ số đếm / mốc — không chữ tin, tên, SĐT, mã hội thoại.
+                # Kéo cả inbox-perf-probe.ts (script dùng lại inboxReader + bindReadOnlyOrgHandle). Vẫn MÃ HOÁ cả lượt.
+                # arg: "<mã tổ chức> [--conv=<uuid>] [--hours=1..72] [--threads=1..200]" (script soát).
+                fetch_script inbox-perf-probe.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/inbox-perf-probe.ts'
+                fetch_script pancake-thread-diff.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/pancake-thread-diff.ts'
+                kiem_arg
+                ma_hoa_ket_qua chay_voi_arg docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/pancake-thread-diff.ts ;;
               pancake-avatar-shape)
                 # ẢNH KHÁCH NẰM Ở KHOÁ NÀO TRONG PAYLOAD API PANCAKE (scripts/pancake-avatar-shape.ts) — CHỈ ĐỌC (script tự đặt
                 # ERP_READ_ONLY=1 trước khi nạp @/db và hỏi lại Postgres; CSDL tổ chức mở bằng getDbForInspection, token page đọc bằng
@@ -1095,6 +1159,14 @@ jobs:
                 fetch_script pancake-avatar-shape.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/pancake-avatar-shape.ts'
                 kiem_arg
                 ma_hoa_ket_qua chay_voi_arg docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/pancake-avatar-shape.ts ;;
+              customer-360-probe)
+                # VÌ SAO BOT KHÔNG NHẬN RA KHÁCH CŨ (scripts/customer-360-probe.ts — Customer 360, 11/10/2026) — CHỈ ĐỌC (script tự đặt
+                # ERP_READ_ONLY=1 trước khi nạp @/db và hỏi lại Postgres; CSDL tổ chức mở bằng getDbForInspection, token page đọc bằng
+                # pageTokensForOffboard — không ghi). Gọi Pancake CHỈ bằng GET tin của MỘT hội thoại. Chỉ in SỐ ĐẾM / ĐÚNG-SAI / dáng khoá
+                # đã che — không tên, SĐT, địa chỉ, chữ tin. Vẫn MÃ HOÁ cả lượt. arg: "<mã tổ chức> [--conv=<uuid>] [--days=1..60]" (script soát).
+                fetch_script customer-360-probe.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/customer-360-probe.ts'
+                kiem_arg
+                ma_hoa_ket_qua chay_voi_arg docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/customer-360-probe.ts ;;
               inbox-read-audit)
                 # «CHƯA ĐỌC» CỦA HỘP THƯ KHÁCH CÓ BẰNG CHỨNG KHÔNG (scripts/inbox-read-audit.ts) — CHỈ ĐỌC (script tự đặt ERP_READ_ONLY=1
                 # trước khi nạp @/db và hỏi lại Postgres; CSDL tổ chức mở bằng getDbForInspection — không migrate, không tạo). Chỉ in MỐC
@@ -1111,6 +1183,14 @@ jobs:
                 fetch_script inbox-unread-dryrun.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/inbox-unread-dryrun.ts'
                 kiem_arg
                 ma_hoa_ket_qua chay_voi_arg docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/inbox-unread-dryrun.ts ;;
+              org-migrate-probe)
+                # CHẨN ĐOÁN MIGRATE CHẬM CỦA MỘT TỔ CHỨC (scripts/org-migrate-probe.ts) — CHỈ ĐỌC (script tự đặt ERP_READ_ONLY=1 trước khi nạp
+                # @/db và hỏi lại Postgres; CSDL tổ chức mở bằng getDbForInspection — KHÔNG migrate, không dọn). Mỗi câu đọc nặng có
+                # statement_timeout 60 giây riêng, bấm giờ dừng sau 2 lần quá trần. Chỉ in SỐ ĐẾM + THỜI GIAN + tag migration: không tên,
+                # SĐT, chữ tin, mã page / luồng. Vẫn MÃ HOÁ cả lượt. arg: "<mã tổ chức> [--top=1..50]" (script soát).
+                fetch_script org-migrate-probe.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/org-migrate-probe.ts'
+                kiem_arg
+                ma_hoa_ket_qua chay_voi_arg docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/org-migrate-probe.ts ;;
               saas-value-snapshot-check)
                 # ẢNH GIÁ TRỊ THEO TỔ CHỨC + SỨC KHOẺ THEO NGÀY (0240 · scripts/saas-value-snapshot-check.ts) — CHỈ ĐỌC (script tự đặt
                 # ERP_READ_ONLY=1 trước khi nạp @/db và hỏi lại Postgres). Đọc hai bảng ảnh chụp ở CSDL nhà + chi tiết lượt chạy job alerts

@@ -13,6 +13,7 @@ import {
 import { emitDomainEvent } from "@/lib/events/emit";
 import { foldOf, loadEntries, loadSubjectByKey, pickUnitCost, type DispositionSubject } from "@/lib/queries/return-dispositions";
 import { LAST_RECEIPT_COST_BY_VARIANT } from "@/lib/queries/cost-basis";
+import { constraintAllowsMarketerPrice, rawCurrentMarketerCost } from "@/lib/queries/current-marketer-cost";
 import { createRestockReceipt } from "@/lib/returns/inspection";
 import { returnProductContext } from "@/lib/returns/product-context";
 import { writeUnidentifiedRestockReceipt } from "@/lib/returns/unidentified";
@@ -101,10 +102,11 @@ export type SetDispositionResult =
 
 /** Đơn giá vốn ƯỚC TÍNH của một mẫu mã trên một đơn — CÙNG bậc thang với hàng đợi (`pickUnitCost`). */
 export async function unitCostEstimate(db: DbLike, variantId: string, orderId: string | null): Promise<{ unitCost: number | null; basis: CostBasis }> {
-  const [r] = rowsOf<{ receipt_cost: number | null; order_cost: number | null; variant_cost: number | null }>(
+  const [r] = rowsOf<{ mkt_cost: number | null; receipt_cost: number | null; order_cost: number | null; variant_cost: number | null }>(
     await db.execute(sql`
       with gia as ${LAST_RECEIPT_COST_BY_VARIANT}
-      select (select gia.unit_cost from gia where gia.variant_id = pv.id) as receipt_cost,
+      select ${(await constraintAllowsMarketerPrice(db, "return_dispositions_value_check")) ? rawCurrentMarketerCost("pv.product_id") : sql`null::int`} as mkt_cost,
+             (select gia.unit_cost from gia where gia.variant_id = pv.id) as receipt_cost,
              (select nullif(max(oi.unit_cost), 0) from order_items oi where oi.order_id = ${orderId} and oi.variant_id = pv.id) as order_cost,
              nullif(pv.last_imported_price, 0) as variant_cost
       from product_variants pv where pv.id = ${variantId}
@@ -200,7 +202,10 @@ export async function setReturnDispositionCore(db: Db, input: SetDispositionInpu
   // ── Giá trị ƯỚC TÍNH của huỷ bỏ (chụp lại lúc huỷ) ──
   let cost: { unitCost: number | null; basis: CostBasis } | null = null;
   if (input.disposition === "WRITE_OFF") {
-    cost = variantId ? (subject.variantId === variantId ? { unitCost: subject.unitCost, basis: subject.costBasis } : await unitCostEstimate(db, variantId, subject.orderId)) : { unitCost: null, basis: "UNKNOWN" };
+    // Giá chụp từ hàng đợi mang căn cứ MARKETER_PRICE mà CSDL chưa có 0246 (đang phục vụ bằng lược đồ cũ) ⇒ tính lại qua
+    // `unitCostEstimate` (nó hỏi ràng buộc) thay vì để CHECK cũ từ chối lượt ghi.
+    const dungGiaHangDoi = subject.variantId === variantId && (subject.costBasis !== "MARKETER_PRICE" || (await constraintAllowsMarketerPrice(db, "return_dispositions_value_check")));
+    cost = variantId ? (dungGiaHangDoi ? { unitCost: subject.unitCost, basis: subject.costBasis } : await unitCostEstimate(db, variantId, subject.orderId)) : { unitCost: null, basis: "UNKNOWN" };
     const giaTri = cost.unitCost === null ? null : cost.unitCost * kiem.qty;
     const cong = await input.gate({
       group: WRITE_OFF_APPROVAL_GROUP,

@@ -23,6 +23,8 @@ class AdBots {
     this.seenFile = path.join(config.dataDir, "ad-seen.json");
     this.convFile = path.join(config.dataDir, "ad-conv.json");
     this.bots = {};
+    /** San pham cua page: pageId -> bot (scope "page"), ap cho moi hoi thoai cua page khi khong co bot quang cao. */
+    this.pageBots = {};
     this.syncedAt = null;
     this.seen = {};
     this.convAds = new Map();
@@ -35,6 +37,7 @@ class AdBots {
       if (fs.existsSync(this.file)) {
         const j = JSON.parse(fs.readFileSync(this.file, "utf8"));
         this.bots = j.bots && typeof j.bots === "object" ? j.bots : {};
+        this.pageBots = j.pages && typeof j.pages === "object" ? j.pages : {};
         this.syncedAt = j.syncedAt || null;
       }
     } catch (e) {
@@ -60,13 +63,15 @@ class AdBots {
 
   /** ERP day ca bo. Hinh dang sai -> nem loi, KHONG ghi gi (giu bo cu). */
   replaceAll(payload) {
-    const { bots, skipped } = normalizeAdBotPayload(payload);
+    const { bots, pages, skipped } = normalizeAdBotPayload(payload);
     this.bots = bots;
+    this.pageBots = pages;
     this.syncedAt = new Date().toISOString();
-    this._write(this.file, { syncedAt: this.syncedAt, bots });
+    this._write(this.file, { syncedAt: this.syncedAt, bots, pages });
     const n = Object.keys(bots).length;
-    log.info(`Bot theo quang cao: nhan ${n} bot tu ERP${skipped ? ` (bo ${skipped} dong khong hop le)` : ""}`);
-    return { count: n, skipped, syncedAt: this.syncedAt, missingImages: this.missingImages() };
+    const np = Object.keys(pages).length;
+    log.info(`Bot theo quang cao: nhan ${n} bot + ${np} san pham cua page tu ERP${skipped ? ` (bo ${skipped} dong khong hop le)` : ""}`);
+    return { count: n, pages: np, skipped, syncedAt: this.syncedAt, missingImages: this.missingImages() };
   }
 
   /** Nho ad_id cua hoi thoai, tra ve danh sach day du (cu -> moi). */
@@ -137,7 +142,7 @@ class AdBots {
   /** sha anh ma cac bot dang dung nhung bot chua co tep. */
   missingImages() {
     const need = new Set();
-    for (const b of Object.values(this.bots)) for (const c of b.test?.colors || []) need.add(c.sha);
+    for (const b of [...Object.values(this.bots), ...Object.values(this.pageBots)]) for (const c of b.test?.colors || []) need.add(c.sha);
     return [...need].filter((sha) => !this.imagePath(sha));
   }
 
@@ -170,18 +175,28 @@ class AdBots {
   }
 
   /** Mau test (dang bat) cua hoi thoai, theo bo nho hoi thoai -> quang cao va (neu co) ad_id doc them. */
-  testProductForConversation(conversationId, adIds = []) {
+  testProductForConversation(conversationId, adIds = [], pageId = null) {
     const list = [...(this.convAds.get(String(conversationId || "")) || []), ...(adIds || [])];
-    return pickAdBot(list, this.bots)?.test || null;
+    return pickAdBot(list, this.bots)?.test || this.pageBot(pageId)?.test || null;
   }
 
+  /** San pham cua page DANG BAT (bot quang cao van thang khi khach den tu quang cao co bot rieng). */
+  pageBot(pageId) {
+    const b = this.pageBots[String(pageId || "")];
+    return b && b.enabled === true ? b : null;
+  }
+
+  /** `page:<pageId>` -> san pham cua page (ca khi chua bat — de ERP chat thu truoc khi bat). */
   get(adId) {
-    return this.bots[String(adId || "")] || null;
+    const id = String(adId || "");
+    if (id.startsWith("page:")) return this.pageBots[id.slice(5)] || null;
+    return this.bots[id] || null;
   }
 
   status() {
     const bots = Object.values(this.bots).map((b) => ({ adId: b.adId, productCode: b.productCode, campaignName: b.campaignName, adName: b.adName, enabled: b.enabled !== false, test: !!b.test }));
-    return { syncedAt: this.syncedAt, count: bots.length, bots, seen: this.seen, missingImages: this.missingImages() };
+    const pages = Object.values(this.pageBots).map((b) => ({ pageId: b.pageId, productCode: b.productCode, enabled: b.enabled === true }));
+    return { syncedAt: this.syncedAt, count: bots.length, bots, pages, seen: this.seen, missingImages: this.missingImages() };
   }
 }
 

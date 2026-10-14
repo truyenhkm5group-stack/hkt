@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { sql } from "drizzle-orm";
-import { getDbFor, getDbForInspection, type Db } from "@/db";
+import { getDbFor, getDbForInspection, organizationMigrationDegraded, type Db } from "@/db";
 import { PLATFORM_MODULES, moduleDependencyErrors, type ModuleDependencyError } from "@/lib/constants/platform-modules";
 import { getModuleRows } from "@/lib/platform/capabilities";
 import { FALLBACK_HOME_CODE, listOrganizations } from "@/lib/platform/organizations";
@@ -189,6 +189,9 @@ async function checkOrganization(org: Organization, expected: number | null, mod
   health.migrationsApplied = mig.n;
   health.migrationsNote = mig.note;
   if (mig.n !== null && expected !== null && mig.n < expected) health.problems.push(`CSDL mới áp ${mig.n}/${expected} migration của mã nguồn.`);
+  // DEGRADED_MIGRATION (db/index.ts): CSDL đang được phục vụ bằng lược đồ cũ sau một lượt migrate hết giờ — đúng điều người vận hành phải thấy.
+  const degraded = org.isHome ? null : organizationMigrationDegraded(org.code);
+  if (degraded) health.problems.push(`DEGRADED_MIGRATION từ ${degraded.since}: phục vụ bằng lược đồ cũ, thiếu ${degraded.missing.join(", ")} · thử lại lúc ${degraded.nextRetryAt} · lỗi: ${degraded.reason}`);
   if (mig.n !== null && expected !== null && mig.n > expected) health.problems.push(`CSDL đã áp ${mig.n} migration, NHIỀU hơn ${expected} mục của mã nguồn đang chạy — mã cũ hơn CSDL?`);
 
   if (!org.isHome) {

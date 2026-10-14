@@ -1,6 +1,8 @@
 import { and, asc, desc, eq, inArray, isNotNull, isNull, ne, or, sql, type SQL } from "drizzle-orm";
+import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { z } from "zod";
-import { getDb, schema } from "@/db";
+import { chayKhongJit, getDb, schema, type Db } from "@/db";
+import { compatTableColumns } from "@/lib/db/serve-compat-columns";
 import { listChannelPages } from "@/lib/connectors/service";
 import { loadTransportFacts, MESSENGER_DIRECT_KEY, transportOwnerOf, type TransportFacts } from "@/lib/sales-chatbot/channel-ownership";
 import type { AiBlock } from "@/lib/ai/provider";
@@ -68,7 +70,7 @@ type StaffImageType = (typeof STAFF_IMAGE_TYPES)[number];
 import { sendBotText, sendPageImages } from "@/lib/sales-chatbot/messenger";
 import { draftCopilotSuggestion, loadModeConfig } from "@/lib/sales-chatbot/operating-mode";
 import { feedbackFor } from "@/lib/sales-chatbot/inbox-feedback";
-import { inboxSearchCondition } from "@/lib/sales-chatbot/inbox-search";
+import { inboxSearchCondition, inboxSearchRankSql } from "@/lib/sales-chatbot/inbox-search";
 import { CUSTOMER_LEVELS, parseCustomerLevel, type CustomerLevel } from "@/lib/sales-chatbot/levels-shared";
 import type { ChatState } from "@/lib/sales-chatbot/tools";
 import { assessCustomerRisk } from "@/lib/alerts/risk";
@@ -76,7 +78,7 @@ import { loadAlertConfig } from "@/lib/alerts/config";
 import { PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
 import { RETURNED_OUTCOMES_SQL } from "@/lib/constants/truth";
 import { rowsOf } from "@/lib/sql-rows";
-import { loadInboxUnreadSql } from "@/lib/sales-chatbot/inbox-unread";
+import { INBOX_UNREAD_COLUMNS, loadInboxUnreadSql } from "@/lib/sales-chatbot/inbox-unread";
 import { sendZaloImages, sendZaloText, ZALO_STAFF_REASON } from "@/lib/sales-chatbot/zalo";
 
 /**
@@ -246,9 +248,44 @@ export function webSideOf(role: string, text: string): TimelineSide {
  * Khoá cuối là `id` để hai hội thoại cùng mốc không đổi chỗ giữa hai lượt tải (phân trang ổn định). Hội thoại ĐANG MỞ thành «đã
  * đọc» không nhảy chỗ khi đang đọc: trình duyệt giữ nó tại chỗ (`keepActiveInPlace`), chuyển hội thoại khác thì nó về vị trí này.
  */
-export function inboxOrderBy(filter: InboxFilter, unread: SQL<boolean>): SQL[] {
-  if (filter === "UNANSWERED") return [asc(schema.salesChatConversations.lastCustomerAt), asc(schema.salesChatConversations.id)];
-  return [sql`${unread} desc`, desc(INBOX_ACTIVITY_SQL), desc(schema.salesChatConversations.id)];
+export function inboxOrderBy(filter: InboxFilter, unread: SQL<boolean>, exactFirst: SQL | null = null): SQL[] {
+  // Ô tìm là một SĐT đủ ⇒ hội thoại có SĐT ghi nhận BẰNG ĐÚNG số đó đứng đầu, rồi mới tới thứ tự thường (inbox-search.ts::inboxSearchRankSql).
+  const lead = exactFirst ? [sql`(${exactFirst}) desc`] : [];
+  if (filter === "UNANSWERED") return [...lead, asc(schema.salesChatConversations.lastCustomerAt), asc(schema.salesChatConversations.id)];
+  return [...lead, sql`${unread} desc`, desc(INBOX_ACTIVITY_SQL), desc(schema.salesChatConversations.id)];
+}
+
+/**
+ * ═══════════ «STATE GỌN» CHO CÁC CÂU QUÉT CẢ HỘP THƯ (P0 inbox-list-subplans 13/10/2026) ═══════════
+ *
+ * Production HSLC (ops inbox-perf-probe sau #826): đường «chưa đọc» LƯU SẴN, mọi câu khác < 25 ms, nhưng câu lấy hàng 7.294 ms và câu đếm
+ * thẻ 5.856 ms trên 3.742 hội thoại. Các điều kiện «AI / người / cần người / AI im / có SĐT» đọc `state` JSONB của hội thoại — câu đếm
+ * nhắc `"state"` 26 lần mỗi dòng, câu lấy hàng 11 lần (đo bằng chữ câu) — và Postgres GIẢI NÉN TOÀN BỘ giá trị TOAST cho MỖI lần `->`
+ * (không giữ bản đã giải nén giữa các biểu thức). `state` lớn (hồ sơ khách cũ, giỏ, báo giá, đồng bộ đơn…) ⇒ chi phí nhân lên theo cỡ
+ * của nó: PGlite 4.000 hội thoại, state ~60 KB sau nén ⇒ listInbox 6,3 giây; state rỗng ⇒ 0,1 giây.
+ * Sửa: (1) các câu quét cả hộp thư đọc từ một bảng dẫn xuất CÙNG TÊN `sales_chat_conversations` mà cột `state` chỉ còn ba nhánh SQL
+ * thật sự đọc (`INBOX_STATE_SQL_KEYS` — bài kiểm quét chữ câu, nhánh mới mà quên khai ⇒ đỏ), dựng từ state giải nén MỘT lần mỗi dòng;
+ * mọi mảnh SQL dùng chung (inbox-states · handoff-routing) giữ nguyên chữ. (2) Câu lấy hàng tách HAI pha: pha 1 chỉ xếp + cắt trang (mã
+ * hội thoại, cờ chưa đọc — không cột nào cần `state` trừ khi bộ lọc cần), pha 2 đọc chi tiết + `state` ĐẦY ĐỦ (`state_full`) cho đúng
+ * các dòng của trang. Trước đây mọi biểu thức «rẻ» của danh sách cột (tên / SĐT trong state, AI im…) được Postgres tính cho CẢ hộp thư
+ * trước phép xếp.
+ */
+export const INBOX_STATE_SQL_KEYS = ["control", "handoff", "customer"] as const;
+
+/** Cột của hội thoại đọc qua bảng dẫn xuất cùng tên (drizzle chỉ nhận cột của bảng có trong FROM ⇒ bọc `sql`, giữ phép đổi kiểu của cột). */
+function viaSource<T extends AnyPgColumn>(col: T): SQL<T["_"]["data"]> {
+  return sql<T["_"]["data"]>`${col}`.mapWith(col);
+}
+
+function inboxConversationsSource(materialized: boolean): SQL {
+  // Cột của lược đồ trừ cột sổ tương thích (tổ chức DEGRADED chưa có) — hai cột 0245 thêm lại khi công tắc đã kiểm là CÓ.
+  const cols = [...Object.values(compatTableColumns(schema.salesChatConversations)).map((x) => x.name), ...(materialized ? INBOX_UNREAD_COLUMNS : [])];
+  // `d.x` = state đã GIẢI NÉN MỘT LẦN (`||` lấy đối số đã giải nén; `offset 0` giữ phép tính ở một chỗ thay vì chép vào từng `->`).
+  const slim = sql.raw(`jsonb_strip_nulls(jsonb_build_object(${INBOX_STATE_SQL_KEYS.map((k) => `'${k}', d.x->'${k}'`).join(", ")}))`);
+  const list = cols.map((n) => (n === "state" ? sql`${slim} as "state"` : sql.raw(`t."${n}"`)));
+  // Bảng dẫn xuất KHÔNG chặn kéo phẳng (điều kiện lọc vẫn xuống tới bảng gốc / chỉ mục); chỉ `d` có `offset 0` — cột không ai đọc thì
+  // Postgres bỏ khỏi `d` (câu không đụng `state` không giải nén gì).
+  return sql`(select ${sql.join(list, sql`, `)}, t."state" as "state_full" from "sales_chat_conversations" t cross join lateral (select t."state" || '{}'::jsonb as x offset 0) d) as "sales_chat_conversations"`;
 }
 
 /** Danh sách hội thoại của hộp thư (tối đa 100) — lọc theo việc cần làm, kênh, tên / SĐT. Không kéo nội dung tin (chỉ một dòng xem trước). */
@@ -290,7 +327,23 @@ export async function listInbox(
   // lưu sẵn trên dòng hội thoại (0245, trigger CSDL — inbox-unread.ts): một phép đọc cột cho bộ đếm, bộ lọc và khoá xếp. Trạng thái của
   // CỬA HÀNG — không nối con trỏ của người xem. Công tắc lùi `inbox.unread.materialized` (inbox-unread.ts) đổi sang tính trực tiếp.
   const unreadSql = await loadInboxUnreadSql();
-  const unread = unreadSql.unread;
+  const src = inboxConversationsSource(unreadSql.materialized);
+  /*
+    JIT TẮT cho các câu quét cả hộp thư (P0 inbox-list-subplans 13/10/2026). Cost ƯỚC TÍNH của câu đếm thẻ ~306 triệu (probe HSLC) — phần
+    lớn là nhánh lùi về hàm #803 của «chưa đọc» lưu sẵn được lập kế hoạch mà không bao giờ chạy — vượt xa `jit_above_cost` ⇒ Postgres
+    biên dịch JIT cả chục biểu thức bộ lọc + câu con, và thời gian biên dịch bị tính vào nút đầu tiên đánh giá biểu thức: HSLC «Seq Scan
+    3.772 dòng · 4.555 ms» trên bảng 8 MB, câu lấy hàng «Limit 8.821 ms» trên con 326 ms. Cùng bệnh và cùng thuốc với db/index.ts::chayKhongJit
+    (10/09: thực thi 26 ms · biên dịch 17.037 ms). Mỗi câu một giao dịch `set local jit = off` — không đổi cấu hình máy chủ.
+  */
+  const noJit = <T>(f: (d: Db) => Promise<T>) => chayKhongJit(db, f);
+  // Chưa có cột lưu sẵn (tổ chức DEGRADED_MIGRATION ở 0245 / công tắc lùi): định nghĩa #803 là một câu con cho TỪNG hội thoại, và trước
+  // đây chạy BA lượt trên cả hộp thư (bộ đếm thẻ · khoá xếp · đếm level khi lọc «Chưa đọc»). Nay MỘT lượt dựng tập hội thoại chưa đọc
+  // (trong `base` — mọi bộ lọc khác đã áp), ba chỗ kia đọc tập đó. Cùng biểu thức, cùng kết quả (P0 inbox-list-perf 13/10/2026).
+  let unread: SQL<boolean> = unreadSql.unread;
+  if (!unreadSql.materialized) {
+    const ids = (await noJit((d) => d.select({ id: viaSource(c.id) }).from(src).leftJoin(cu, eq(cu.id, c.customerId)).where(and(...base, unreadSql.unread)))).map((r) => r.id);
+    unread = ids.length ? sql<boolean>`(${inArray(c.id, ids)})` : sql<boolean>`false`;
+  }
   const byFilter: Record<InboxFilter, SQL | undefined> = {
     ALL: undefined,
     UNREAD: unread,
@@ -308,40 +361,57 @@ export async function listInbox(
   const countCols = Object.fromEntries(INBOX_FILTERS.map((f) => [f, byFilter[f] ? sql<number>`count(*) filter (where ${byFilter[f]})::int` : sql<number>`count(*)::int`])) as Record<InboxFilter, SQL<number>>;
   // `unreadStamp`: dấu con trỏ đọc MỚI NHẤT của người xem, đọc trong CÙNG câu (cùng ảnh chụp) với số «chưa đọc» — trình duyệt so nó
   // với xác nhận đọc để biết bản đếm này đã thấy lượt đọc vừa rồi chưa (inbox-read-shared.ts::patchUnreadCount).
-  const [countRow] = await db
+  const [countRow] = await noJit((d) =>
+    d
     .select({ ...countCols, phone: sql<number>`count(*) filter (where ${HAS_PHONE})::int`, unreadStamp: sql<string | null>`(select max(r.updated_at) from "sales_chat_reads" r where r.user_id = ${user.id})` })
-    .from(c)
+    .from(src)
     .leftJoin(cu, eq(cu.id, c.customerId))
-    .where(and(...base, ...(levelCond ? [levelCond] : [])));
+    .where(and(...base, ...(levelCond ? [levelCond] : []))),
+  );
   const counts = Object.fromEntries(INBOX_FILTERS.map((f) => [f, Number((countRow as Record<string, unknown> | undefined)?.[f] ?? 0)])) as Record<InboxFilter, number>;
-  const levelRows = await db
-    .select({ level: c.customerLevel, n: sql<number>`count(*)::int` })
-    .from(c)
+  const levelRows = await noJit((d) =>
+    d
+    .select({ level: viaSource(c.customerLevel), n: sql<number>`count(*)::int` })
+    .from(src)
     .leftJoin(cu, eq(cu.id, c.customerId))
     .where(and(...base, ...(byFilter[q.filter] ? [byFilter[q.filter]!] : [])))
-    .groupBy(c.customerLevel);
+    .groupBy(c.customerLevel),
+  );
   const levelCounts: Partial<Record<CustomerLevel, number>> = {};
   for (const r of levelRows) if (r.level) levelCounts[r.level as CustomerLevel] = Number(r.n);
   const where = and(...base, ...(byFilter[q.filter] ? [byFilter[q.filter]!] : []), ...(levelCond ? [levelCond] : []));
-  const rows = await db
+  // Pha 1: xếp + cắt trang. Cờ chưa đọc là cột ĐƯỢC XẾP THEO (khoá xếp gọi tên cột).
+  const page = await noJit((d) =>
+    d
+    .select({ id: viaSource(c.id), unreadFlag: sql<boolean>`${unread}`.as("unread_flag") })
+    .from(src)
+    .leftJoin(cu, eq(cu.id, c.customerId))
+    .where(where)
+    .orderBy(...inboxOrderBy(q.filter, sql<boolean>`"unread_flag"`, inboxSearchRankSql(q.q)))
+    .limit(q.limit),
+  );
+  const pageIds = page.map((p) => p.id);
+  // Pha 2: chi tiết của đúng các dòng trang (mã hội thoại lọc xuống tới bảng gốc).
+  const detail = await noJit((d) =>
+    d
     .select({
-      id: c.id,
-      channel: c.channel,
-      status: c.status,
-      handoffReason: c.handoffReason,
-      pageId: c.pageId,
-      threadId: c.threadId,
+      id: viaSource(c.id),
+      channel: viaSource(c.channel),
+      status: viaSource(c.status),
+      handoffReason: viaSource(c.handoffReason),
+      pageId: viaSource(c.pageId),
+      threadId: viaSource(c.threadId),
       customerName: cu.name,
       customerPhone: cu.phone,
-      customerId: c.customerId,
+      customerId: viaSource(c.customerId),
       stateName: sql<string | null>`${c.state}->'customer'->>'name'`,
       statePhone: sql<string | null>`${c.state}->'customer'->>'phone'`,
       inboundName: INBOUND_NAME,
-      lastCustomerAt: c.lastCustomerAt,
-      lastBotAt: c.lastBotAt,
-      lastStaffAt: c.lastStaffAt,
-      staffSeenAt: c.staffSeenAt,
-      historyUntil: c.historyUntil,
+      lastCustomerAt: viaSource(c.lastCustomerAt),
+      lastBotAt: viaSource(c.lastBotAt),
+      lastStaffAt: viaSource(c.lastStaffAt),
+      staffSeenAt: viaSource(c.staffSeenAt),
+      historyUntil: viaSource(c.historyUntil),
       pageReplyAfterCustomer: PAGE_REPLY_AFTER_CUSTOMER_SQL,
       orderUnderReview: ORDER_UNDER_REVIEW_SQL,
       activity: INBOX_ACTIVITY_SQL,
@@ -350,31 +420,34 @@ export async function listInbox(
       needsReply: WAITING_REPLY_SQL,
       // Mốc «người đã mở» của CỬA HÀNG (con trỏ lớn nhất của mọi người · mốc mở cũ) — trình duyệt so nó với xác nhận đọc.
       readCursor: unreadSql.seenAt,
-      // Cờ chưa đọc: cột ĐƯỢC XẾP THEO (khoá xếp gọi tên cột).
-      unreadFlag: sql<boolean>`${unread}`.as("unread_flag"),
-      assigneeUserId: c.assigneeUserId,
+      assigneeUserId: viaSource(c.assigneeUserId),
       assigneeName: u.name,
       hasOrder: HAS_ORDER,
-      level: c.customerLevel,
-      convPhone: c.customerPhone,
-      state: c.state,
-      updatedAt: c.updatedAt,
-      humanCooldownUntil: c.humanCooldownUntil,
+      level: viaSource(c.customerLevel),
+      convPhone: viaSource(c.customerPhone),
+      // `state` ĐẦY ĐỦ (ảnh đại diện · nhường AI) — chỉ giải nén cho các dòng của trang.
+      state: sql<unknown>`"sales_chat_conversations"."state_full"`,
+      updatedAt: viaSource(c.updatedAt),
+      humanCooldownUntil: viaSource(c.humanCooldownUntil),
       // Số tin khách chưa xử lý — chỉ có nghĩa khi `unreadFlag`; Postgres chỉ tính cho các dòng của trang (sau LIMIT).
       unreadPending: unreadSql.pendingCount,
       closed: CLOSED,
       transport: THREAD_TRANSPORT,
       // Hàng đợi người khi AI im (P0 11/10/2026 — handoff-routing.ts): «chờ X phút · phụ trách · hạn» của hàng.
       aiSilent: aiSilentSql(now),
-      handoffQueuedAt: c.handoffQueuedAt,
+      handoffQueuedAt: viaSource(c.handoffQueuedAt),
       assigneeActive: u.active,
     })
-    .from(c)
+    .from(src)
     .leftJoin(cu, eq(cu.id, c.customerId))
     .leftJoin(u, eq(u.id, c.assigneeUserId))
-    .where(where)
-    .orderBy(...inboxOrderBy(q.filter, sql<boolean>`"unread_flag"`))
-    .limit(q.limit);
+    .where(pageIds.length ? inArray(c.id, pageIds) : sql`false`),
+  );
+  const byId = new Map(detail.map((r) => [r.id, r]));
+  const rows = page.flatMap((p) => {
+    const r = byId.get(p.id);
+    return r ? [{ ...r, unreadFlag: Boolean(p.unreadFlag) }] : [];
+  });
 
   /*
     DÒNG XEM TRƯỚC (chủ shop 10/10/2026 tối, P0.2): hai tin mỗi hội thoại — tin MỚI NHẤT (mọi phía) và tin KHÁCH thật mới nhất. Hội
@@ -546,7 +619,7 @@ type ConvRow = typeof schema.salesChatConversations.$inferSelect;
 async function loadConv(id: unknown): Promise<ConvRow | null> {
   if (typeof id !== "string" || !id || id.length > 100) return null;
   const db = await getDb();
-  const [row] = await db.select().from(schema.salesChatConversations).where(eq(schema.salesChatConversations.id, id)).limit(1);
+  const [row] = await db.select(compatTableColumns(schema.salesChatConversations)).from(schema.salesChatConversations).where(eq(schema.salesChatConversations.id, id)).limit(1);
   return row && row.channel !== "TEST" ? row : null;
 }
 
@@ -716,7 +789,9 @@ export async function loadInboxThread(user: SessionUser, conversationId: unknown
   const canReply = canReplyTo(user);
   // KHÔNG đánh dấu đọc ở đây (trước 10/10/2026 tối: `staff_seen_at = now` — tin khách tới giữa câu đọc trên và câu ghi này bị coi là đã
   // đọc). Nạp khung chat chỉ ĐỌC; trình duyệt hiện xong mới gửi `readThrough` về `markInboxReadCore` (inbox-read.ts).
-  const phoneForHistory = cust?.phone ?? st.customer?.phone ?? conv.customerPhone ?? null;
+  // Customer 360 (11/10/2026, ca «Nga Ho Thien»): khung khách in «Chưa có SĐT» trong khi Pancake ĐÃ ghi nhận SĐT của hội thoại
+  // (`state.returning.phones` — bot vẫn đọc được). Màn của NHÂN VIÊN ⇒ dùng SĐT đó làm phương án cuối để đối chiếu lịch sử.
+  const phoneForHistory = cust?.phone ?? st.customer?.phone ?? conv.customerPhone ?? st.returning?.phones?.[0] ?? null;
   const [labelMap, allLabels, notes, history, feedback] = await Promise.all([labelsFor([conv.id]), listLabels(), notesFor(user, conv.id), customerHistory(cust?.id ?? null, phoneForHistory).catch(() => null), feedbackFor(conv.id).catch(() => [])]);
   return {
     ok: true,

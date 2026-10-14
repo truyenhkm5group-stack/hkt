@@ -13,7 +13,7 @@
  * Hàm THUẦN để trang chi tiết đơn và bài kiểm dùng cùng một luật.
  */
 
-export type LiveCostSource = "RECEIPT" | "ORDER_SNAPSHOT" | "VARIANT_DEFAULT";
+export type LiveCostSource = "MARKETER_PRICE" | "RECEIPT" | "ORDER_SNAPSHOT" | "VARIANT_DEFAULT";
 
 /** Một nguồn giá chỉ được tính khi là số hữu hạn DƯƠNG — 0 / âm / NULL / NaN đều là chưa khai giá. */
 function positiveOrNull(value: number | null | undefined): number | null {
@@ -23,7 +23,10 @@ function positiveOrNull(value: number | null | undefined): number | null {
 }
 
 /** Đơn giá vốn của MỘT dòng theo thứ tự mục 3.13. Không nguồn nào ⇒ `unitCost: null` (CHƯA BIẾT). */
-export function liveLineUnitCost(sources: { receipt: number | null | undefined; orderSnapshot: number | null | undefined; variantDefault: number | null | undefined }): { unitCost: number | null; source: LiveCostSource | null } {
+export function liveLineUnitCost(sources: { marketer?: number | null | undefined; receipt: number | null | undefined; orderSnapshot: number | null | undefined; variantDefault: number | null | undefined }): { unitCost: number | null; source: LiveCostSource | null } {
+  // Giá báo MKT đang hiệu lực hôm nay đứng ĐẦU (chủ shop chốt 13/10/2026 — AGENTS.md luật 13).
+  const marketer = positiveOrNull(sources.marketer);
+  if (marketer !== null) return { unitCost: marketer, source: "MARKETER_PRICE" };
   const receipt = positiveOrNull(sources.receipt);
   if (receipt !== null) return { unitCost: receipt, source: "RECEIPT" };
   const snapshot = positiveOrNull(sources.orderSnapshot);

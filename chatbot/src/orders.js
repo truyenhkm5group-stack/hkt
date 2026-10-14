@@ -184,6 +184,31 @@ export function describeOrder(o) {
   return parts.join(" – ");
 }
 
+// Page KHONG ban cac ma nay: bo mau chu luc neu dang la ma do (mot lan) va bot len don KHONG BAO GIO ghi ma do cho page.
+// Chu shop 13/10/2026: page AURA (dam nhung) "khong phai Q005, dung len don Q005" — don #5898 bi ghi Q005 Do XL vi mau
+// chu luc cua page dang la Q005.
+export const PAGE_BLOCKED_CODES = [{ page: "aura - thoi trang nu cao cap", codes: ["Q005"] }];
+
+// Page ban MAU MOI CHUA CO TREN POS: khong dung danh muc POS (khong ma, mau, size, anh cua mau khac), khong len don POS
+// tu dong. Chu shop 13/10/2026 (AURA): sau khi chan Q005 bot lai chot "Dam Q004 mau Do" + anh Q004 — page chi co mau moi.
+export const PAGE_OFF_CATALOG = ["aura - thoi trang nu cao cap"];
+
+const khongDauTen = (n) => String(n || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/đ/g, "d").replace(/\s+/g, " ").trim();
+
+/** Page ban mau moi chua co tren POS (theo ten page / ten Pancake). */
+export function offCatalogPage(names) {
+  const ten = (names || []).map(khongDauTen);
+  return PAGE_OFF_CATALOG.some((p) => ten.includes(p));
+}
+
+/** Cac ma page KHONG ban (theo ten page / ten Pancake, khong dau). Page ngoai danh muc: MOI ma trong danh muc. */
+export function blockedCodesFor(names) {
+  const ten = (names || []).map(khongDauTen);
+  const ma = PAGE_BLOCKED_CODES.filter((r) => ten.includes(r.page)).flatMap((r) => r.codes);
+  if (offCatalogPage(names)) ma.push(...catalog.products.map((p) => String(p.code || "")).filter(Boolean));
+  return [...new Set(ma.map((c) => c.toUpperCase()))];
+}
+
 export class OrderSync {
   constructor() {
     this.geo = { provinces: null, provincesAt: 0, districts: new Map(), communes: new Map() };
@@ -657,9 +682,14 @@ export class OrderSync {
     return null;
   }
 
-  async syncFromConversation({ pageId, pageName, conversationId, customerName, historyText, strict = false, addressOverride = "", defaultCode = "" }) {
+  async syncFromConversation({ pageId, pageName, conversationId, customerName, historyText, strict = false, addressOverride = "", defaultCode = "", blockedCodes = [], offCatalog = false }) {
     if (!this.enabled) return { status: "skipped", reason: "POS chưa cấu hình" };
     // defaultCode: mau chu luc nguoi chon cho LUOT QUET LAI (vd page chua khai mau chu luc) — de len cai dat cua page
+    // Page ban mau moi chua co tren POS: khong co bien the nao dung de ghi -> khong ton AI trich don, nguoi len tay
+    if (offCatalog || offCatalogPage([pageName])) {
+      const lyDo = "Page bán mẫu mới chưa có trên POS — bot không lên đơn, nhân viên lên đơn tay";
+      return strict ? { status: "review", reasons: [lyDo] } : { status: "skipped", reason: lyDo };
+    }
     const ex = await this.extractOrder(historyText, { pageName, defaultCode: defaultCode || settings.effective(pageId).defaultProduct || "", customerName });
     if (!ex) return { status: "skipped", reason: "AI không trích xuất được đơn" };
     // Thieu DUY NHAT ten nguoi nhan (AI van hay doi) -> khong chan don: dung ten Facebook. Con thieu thu khac thi van cho.
@@ -676,6 +706,13 @@ export class OrderSync {
     // Gemini bia ra "0337711777" -> tao don moi voi SDT sai thay vi cap nhat don nhap cua khach.
     if (!phoneInText(historyText, phone)) {
       return { status: "skipped", reason: `SĐT ${phone} không có trong hội thoại (AI tự suy ra) — chờ khách gửi lại SĐT` };
+    }
+    // Page KHONG ban ma nay (vd page AURA dam nhung, don bi ghi Q005 — chu shop 13/10/2026): khong ghi gi len POS, nguoi duyet
+    const cam = [...new Set([...(blockedCodes || []), ...blockedCodesFor([pageName])])];
+    const maCam = (ex.items || []).map((i) => String(i.code || "").trim().toUpperCase()).filter((c) => c && cam.some((b) => c === b || c.startsWith(b)));
+    if (maCam.length) {
+      const lyDo = `Page này không bán mã ${[...new Set(maCam)].join(", ")} — bot không lên đơn, nhân viên chọn đúng mẫu`;
+      return strict ? { status: "review", reasons: [lyDo] } : { status: "skipped", reason: lyDo };
     }
     const { mapped, problems } = this.mapItems(ex.items);
     const diaChiKhach = String(addressOverride || ex.address || "").trim();

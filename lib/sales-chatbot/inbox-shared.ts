@@ -79,6 +79,9 @@ export const INBOX_URL_PARAMS = {
   tu: { kind: "advanced", label: "Từ ngày" },
   den: { kind: "advanced", label: "Đến ngày" },
   lb: { kind: "advanced", label: "Nhãn" },
+  // Phạm vi của ô tìm (P0 inbox-search-global, chủ shop 12/10/2026): ô tìm mặc định tìm TOÀN hộp thư; `pv=loc` = người dùng CHỌN
+  // tường minh «Chỉ tìm trong bộ lọc hiện tại». Không có ô tìm thì tham số này vô nghĩa và bị bỏ khỏi mọi đường dẫn.
+  pv: { kind: "quick", label: "Phạm vi tìm (toàn hộp thư / trong bộ lọc hiện tại)" },
   n: { kind: "nav", label: "Số hội thoại đã tải («Xem thêm»)" },
   c: { kind: "nav", label: "Hội thoại đang mở" },
 } as const;
@@ -100,6 +103,11 @@ export type InboxFilterState = {
   label: string | null;
   limit: number;
   selected: string | null;
+  /**
+   * Phạm vi của ô tìm: `FILTER` = người dùng đã CHỌN «Chỉ tìm trong bộ lọc hiện tại» (`pv=loc`). Mặc định (thiếu / `null`) = tìm TOÀN
+   * hộp thư — bộ lọc vẫn nằm trong URL (xoá ô tìm là về đúng bộ lọc cũ) nhưng KHÔNG áp khi đang tìm (`inboxQueryState`).
+   */
+  searchScope?: "FILTER" | null;
 };
 
 /** Trạng thái lọc ⇒ tham số URL (ĐÚNG tên tham số cũ). `patch` đè từng khoá; `null` = bỏ. HÀM THUẦN. */
@@ -119,8 +127,11 @@ export function inboxParams(s: InboxFilterState, patch: Partial<Record<InboxUrlP
     n: s.limit > 100 ? String(s.limit) : null,
     xl: s.handler === "AI" ? "ai" : s.handler === "HUMAN" ? "nguoi" : null,
     c: s.selected || null,
+    pv: s.searchScope === "FILTER" ? "loc" : null,
     ...patch,
   };
+  // Phạm vi tìm chỉ có nghĩa khi có ô tìm: đường dẫn nào xoá ô tìm cũng xoá luôn phạm vi (lần tìm sau lại mặc định toàn hộp thư).
+  if (!cur.q?.trim()) cur.pv = null;
   const p = new URLSearchParams();
   for (const [k, v] of Object.entries(cur)) if (v) p.set(k, v);
   return p;
@@ -432,15 +443,20 @@ export type InboxThread = {
   readThrough: { id: string; at: string } | null;
 };
 
-/** Nhãn kết quả đơn theo `ORDER_OUTCOME` (lib/queries/return-rate.ts) — chỉ để HIỆN, không tính gì. */
+/**
+ * Nhãn kết quả đơn theo `ORDER_OUTCOME` (lib/queries/return-rate.ts) — chỉ để HIỆN, không tính gì. `NOT_SHIPPED` nghĩa là ERP KHÔNG có
+ * vận đơn nào của đơn, không phải «shop chưa gửi hàng» (HOTFIX P0 12/10/2026, ca «Khanh Nhung»: đơn in «Chưa gửi» trong khi khách đã
+ * nhận — shop gửi qua kênh ERP không thấy). Nhãn nói đúng điều ERP biết, như câu trạng thái của bot (`order-status-shared.ts`).
+ */
 export const INBOX_OUTCOME_LABEL: Record<string, string> = {
-  NOT_SHIPPED: "Chưa gửi",
+  NOT_SHIPPED: "Chưa có vận đơn",
   AWAITING_PICKUP: "Chờ lấy hàng",
   IN_TRANSIT: "Đang giao",
   DELIVERED: "Giao thành công",
   RETURNED: "Hoàn",
   RETURNED_BY_RULE: "Không thành công",
   CANCELLED: "Huỷ",
+  UNKNOWN: "Chưa rõ — ĐVVC chưa báo",
 };
 
 /** Tin nhân viên tối đa (chia đoạn theo trần từng kênh khi gửi). */

@@ -1,4 +1,5 @@
 import { sql } from "drizzle-orm";
+import { rawCurrentMarketerCost } from "@/lib/queries/current-marketer-cost";
 import { operatingExpenseCond } from "@/lib/queries/cost-allocation";
 import { chayKhongJit, getDb, schema } from "@/db";
 import { memo } from "@/lib/cache";
@@ -143,7 +144,7 @@ async function buildCashflow(): Promise<CashflowReport> {
                           where oi.variant_id = pv.id
                             and exists (select 1 from shipments ss where ss.order_id = oo.id
                                         and (ss.picked_up_at is not null or ss.stage::text in ('PICKED_UP','IN_TRANSIT','OUT_FOR_DELIVERY','DELIVERY_FAILED','DELIVERED','RETURNING','RETURNED')))), 0) as ton,
-            pv.last_imported_price as gia
+            coalesce(${rawCurrentMarketerCost("pv.product_id")}, pv.last_imported_price) as gia
           from product_variants pv where pv.is_removed = false
         ) x
       ), 0)`,

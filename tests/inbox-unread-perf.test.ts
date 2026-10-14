@@ -397,8 +397,10 @@ function testSource() {
   const files = execFileSync("git", ["ls-files", "lib", "app", "scripts", "components", "db"], { encoding: "utf8" })
     .split("\n")
     .filter((f) => /\.(ts|tsx)$/.test(f));
-  // Hai script ops CHỈ ĐỌC (Postgres ép `ERP_READ_ONLY`): audit sau triển khai + chạy thử trước 0245 (#809, chỉ nhắc tên cột trong chữ in).
-  const allowed = new Set(["db/schema.ts", "lib/sales-chatbot/inbox-unread.ts", "scripts/inbox-read-audit.ts", "scripts/inbox-unread-dryrun.ts"]);
+  // Ba script ops CHỈ ĐỌC (Postgres ép `ERP_READ_ONLY`): audit sau triển khai + chạy thử trước 0245 (#809, chỉ nhắc tên cột trong chữ in)
+  // + chẩn đoán migrate chậm (`org-migrate-probe`, chỉ hỏi information_schema xem cột 0245 đã có chưa)
+  // + sổ tương thích lược đồ cũ (khai hai cột 0245 để mã TRÁNH chúng khi tổ chức đang DEGRADED_MIGRATION — không đọc, không ghi).
+  const allowed = new Set(["db/schema.ts", "lib/sales-chatbot/inbox-unread.ts", "scripts/inbox-read-audit.ts", "scripts/inbox-unread-dryrun.ts", "scripts/org-migrate-probe.ts", "lib/constants/migration-serve-compat.ts", "scripts/inbox-perf-probe.ts", "scripts/pancake-thread-diff.ts"]);
   const touching = files.filter((f) => /turnUnhandled|turn_unhandled|lastReadAt|last_read_at/.test(readFileSync(f, "utf8")));
   assert.deepEqual(
     touching.filter((f) => !allowed.has(f)),
@@ -410,7 +412,8 @@ function testSource() {
   assert.match(unread, /coalesce\(\$\{col\("turn_unhandled"\)\}, \$\{latestCustomerTurnUnhandledSql\(\)\}, false\)/, "chưa đọc = kết quả lưu sẵn, NULL ⇒ hàm của #803 (không luật thứ hai)");
   const inbox = readFileSync("lib/sales-chatbot/inbox.ts", "utf8");
   assert.doesNotMatch(inbox, /personalUnread|VIEWER_READ_ALIAS|HANDLED_AT|inboxUnreadSql\(/, "hộp thư không còn luật chưa đọc riêng");
-  assert.match(inbox, /const unreadSql = await loadInboxUnreadSql\(\);\n  const unread = unreadSql\.unread;/, "hộp thư lấy bộ biểu thức qua MỘT chỗ đọc công tắc");
+  // P0 inbox-list-perf 13/10/2026: tính trực tiếp ⇒ tập «chưa đọc» dựng MỘT lần bằng đúng biểu thức đó (tests/inbox-list-perf.test.ts).
+  assert.match(inbox, /const unreadSql = await loadInboxUnreadSql\(\);[\s\S]{0,2500}let unread: SQL<boolean> = unreadSql\.unread;/, "hộp thư lấy bộ biểu thức qua MỘT chỗ đọc công tắc");
   assert.equal((inbox.match(/loadInboxUnreadSql\(\)/g) ?? []).length, 1, "listInbox đọc công tắc đúng một lần");
   assert.equal((unread.match(/readInboxUnreadSwitch\(\)/g) ?? []).length, 1, "công tắc chỉ được đọc ở inboxUnreadMaterialized");
   const sw = readFileSync("lib/platform/inbox-unread-switch.ts", "utf8");
@@ -420,7 +423,8 @@ function testSource() {
     .filter((f) => /\.(ts|tsx)$/.test(f) && f !== "lib/platform/inbox-unread-switch.ts" && f !== "lib/sales-chatbot/inbox-unread.ts")
     .filter((f) => /readInboxUnreadSwitch|INBOX_UNREAD_SWITCH_KEY/.test(readFileSync(f, "utf8")));
   assert.deepEqual(readers, [], "không chỗ nào khác đọc công tắc");
-  assert.match(inbox, /orderBy\(\.\.\.inboxOrderBy\(q\.filter, sql<boolean>`"unread_flag"`\)\)/, "khoá xếp gọi tên cột cờ");
+  // Đối số thứ ba (P0 inbox-search-global 12/10/2026): khớp SĐT chính xác đứng đầu khi ô tìm là một SĐT đủ — khoá cờ vẫn gọi tên cột.
+  assert.match(inbox, /orderBy\(\.\.\.inboxOrderBy\(q\.filter, sql<boolean>`"unread_flag"`, inboxSearchRankSql\(q\.q\)\)\)/, "khoá xếp gọi tên cột cờ");
   const body = inbox.slice(inbox.indexOf("export async function listInbox"), inbox.indexOf("export async function customerHistory"));
   assert.doesNotMatch(body, /selectDistinctOn/, "xem trước không còn DISTINCT ON đọc mọi dòng của luồng");
   assert.equal((body.match(/left join lateral/g) ?? []).length, 4, "xem trước: hai LATERAL LIMIT 1 cho mỗi loại kênh");

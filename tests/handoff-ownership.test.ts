@@ -64,7 +64,10 @@ function testPure() {
   assert.deepEqual(handoffOwnerOf({ ...base, assigneeUserId: "u1", assigneeActive: true }), { kind: "PERSON", userId: "u1" });
   assert.equal(handoffOwnerOf({ ...base, assigneeUserId: "u1", assigneeActive: false })?.kind, "DEPARTMENT", "người cầm đã khoá ⇒ về hàng đợi phòng");
   assert.deepEqual(handoffOwnerOf({ ...base, queuedAt: null }), { kind: "NONE", department: "SALES", reason: "NOT_QUEUED" });
-  assert.deepEqual(handoffOwnerOf({ ...base, responders: 0 }), { kind: "NONE", department: "SALES", reason: "NO_RESPONDER" }, "phòng không người KHÔNG phải chủ");
+  assert.deepEqual(handoffOwnerOf({ ...base, responders: 0 }), { kind: "NONE", department: "SALES", reason: "NO_RESPONDER" }, "phòng không người và cả tổ chức không ai xem hộp thư ⇒ KHÔNG CHỦ");
+  // HOTFIX 12/10/2026: phòng chưa có người nhưng tổ chức CÓ người xem hộp thư ⇒ HÀNG ĐỢI CHUNG (248 hội thoại HSLC treo «KHÔNG CHỦ» chỉ vì phòng trống).
+  assert.deepEqual(handoffOwnerOf({ ...base, responders: 0, viewers: 3 }), { kind: "SHARED", department: "SALES", viewers: 3 }, "phòng trống, tổ chức có người xem ⇒ hàng đợi chung");
+  assert.match(handoffQueueView({ owner: { kind: "SHARED", department: "SALES", viewers: 3 }, queuedAt: now, assigneeName: null, lastStaffAt: null, waitingSince: null, dueAt: null }, now).ownerLabel, /^Hàng đợi chung \(phòng .+ chưa có người\)/);
   assert.ok(isAiSilent({ needsHuman: "AI_HANDOFF", humanHandling: null }, false) && isAiSilent({ needsHuman: "AI_DOWN", humanHandling: null }, false) && isAiSilent({ needsHuman: null, humanHandling: "MANUAL_TAKEOVER" }, false) && isAiSilent({ needsHuman: null, humanHandling: "STAFF_COOLDOWN" }, true));
   assert.ok(!isAiSilent({ needsHuman: null, humanHandling: "STAFF_COOLDOWN" }, false) && !isAiSilent({ needsHuman: "ORDER_REVIEW", humanHandling: null }, false) && !isAiSilent({ needsHuman: null, humanHandling: "COPILOT" }, false), "AI nhường tạm / đơn cần kiểm / AI gợi ý: AI vẫn còn đó");
   const q1 = new Date(now.getTime() - 30 * MIN);
@@ -159,7 +162,9 @@ export async function testHandoffOwnership() {
       const qA = await queuedOf("A");
       assert.equal(qA?.getTime(), nowA.getTime(), "chuyển người ⇒ có mốc vào hàng đợi");
       const c1 = await countUnownedHandoffs();
-      assert.deepEqual({ silent: c1.silent, unowned: c1.unowned, r: c1.byReason.NO_RESPONDER }, { silent: 1, unowned: 1, r: 1 }, `phòng không người ⇒ KHÔNG CHỦ (đếm, không giấu): ${JSON.stringify(c1)}`);
+      // HOTFIX 12/10/2026: phòng chưa có ai nhưng chủ shop xem được hộp thư ⇒ HÀNG ĐỢI CHUNG (đếm riêng, không giấu), không còn «KHÔNG CHỦ».
+      assert.deepEqual({ silent: c1.silent, unowned: c1.unowned, shared: c1.shared, r: c1.byReason.NO_RESPONDER }, { silent: 1, unowned: 0, shared: 1, r: 0 }, `phòng không người ⇒ HÀNG ĐỢI CHUNG: ${JSON.stringify(c1)}`);
+      assert.ok(c1.viewers >= 1 && c1.responders === 0);
       assert.equal((await userMsgs(handoffEpisodeKey("A", qA!))).length, 2, "phòng trống ⇒ tin tới MỌI người xem hộp thư (không rơi im)");
 
       // ═══ 2. Có người trong phòng ⇒ chủ = hàng đợi phòng, hạn đúng work.sla; ghi đè work.sla đổi hạn ═══
@@ -261,7 +266,7 @@ export async function testHandoffOwnership() {
       assert.ok(silentIds.has("H") && !silentIds.has("I") && silentIds.has("J"), "chat web chờ trả lại + tiếp quản = AI im; AI nhường tạm = không");
       const fin = await countUnownedHandoffs();
       assert.equal(fin.unowned, 0, `câu đếm «chuyển người không chủ» = 0 sau luồng: ${JSON.stringify(fin)}`);
-      console.log(`  ✓ chuyển người có chủ: phòng (work.ownership) + hạn (work.sla, ghi đè được) · phòng trống ĐẾM là không chủ, tin không rơi im · một tin mỗi đợt, đợt hai vẫn báo · 3 tin khách ⇒ 1 thông báo · trả AI xoá hạn · phân việc bật ⇒ người còn chỗ, không giật việc · quét đóng dấu / dọn / leo thang 1 tin/phòng/ngày · SQL ≡ thuần · ${fin.silent} hội thoại AI im, 0 không chủ`);
+      console.log(`  ✓ chuyển người có chủ: phòng (work.ownership) + hạn (work.sla, ghi đè được) · phòng trống ⇒ hàng đợi chung (đếm riêng), tin không rơi im · một tin mỗi đợt, đợt hai vẫn báo · 3 tin khách ⇒ 1 thông báo · trả AI xoá hạn · phân việc bật ⇒ người còn chỗ, không giật việc · quét đóng dấu / dọn / leo thang 1 tin/phòng/ngày · SQL ≡ thuần · ${fin.silent} hội thoại AI im, 0 không chủ`);
     });
   } finally {
     await cleanup();

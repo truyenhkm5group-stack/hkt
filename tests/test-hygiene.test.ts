@@ -116,6 +116,10 @@ export function testKhongSoBangMocDocLaiDongHo() {
 
 /** Miễn trừ — mỗi dòng nói RÕ vì sao đọc môi trường ở đó là đo MÃ NGUỒN chứ không đo máy. */
 const DOC_MOI_TRUONG_DA_KHAI: Record<string, string> = {
+  "tests/migration-serve-compat.test.ts":
+    "ĐẶT ORG_MIGRATE_SERVE_DEGRADED / ORG_MIGRATE_DEGRADED_RETRY_MS / ORG_MIGRATE_BACKOFF_MS = giá trị BỊA để kiểm công tắc tắt phục vụ lược đồ cũ và nhịp thử lại trong vài trăm mili giây thay vì 6 giờ — đó là ĐẦU VÀO của phép kiểm, trả lại nguyên trạng trong finally; kết luận không đổi theo máy.",
+  "tests/org-migrate-isolation.test.ts":
+    "ĐẶT ORG_MIGRATE_BACKOFF_MS / ORG_MIGRATE_BUSY_RETRY_MS = giá trị BỊA (vài trăm mili giây, hoặc chuỗi hỏng) để kiểm chính sách lùi sau lỗi migrate và để hạn lùi hết trong vài trăm mili giây thay vì 30 phút — đó là ĐẦU VÀO của phép kiểm, trả lại nguyên trạng trong finally; kết luận không đổi theo máy.",
   "tests/tech-mission-control.test.ts":
     "ĐẶT ERP_GITHUB_REPO = «owner/repo» (BỊA) để client GitHub dựng URL cho bản fetch giả, và ERP_COMMIT = SHA BỊA để phép «production có chứa commit gộp không» có vế production — cả hai là ĐẦU VÀO của phép kiểm, trả lại nguyên trạng trong finally. Trần hỏi deploy truyền TƯỜNG MINH (`deployBudget`) nên kết luận không rẽ nhánh theo máy có GITHUB_TOKEN hay không.",
   "tests/saas-hide-internal.test.ts":
@@ -162,6 +166,8 @@ const DOC_MOI_TRUONG_DA_KHAI: Record<string, string> = {
     "ĐẶT PLATFORM_SECRETS_KEY = giá trị BỊA để lưu bí mật của kết nối «Fanpage qua Pancake» trong tổ chức thử (cùng cách sales-order-sync); Pancake và provider AI là bản giả. Đó là ĐẦU VÀO của phép kiểm, trả lại nguyên trạng trong finally; kết luận không phụ thuộc máy có khoá thật hay không.",
   "tests/sales-inbox.test.ts":
     "ĐẶT PLATFORM_SECRETS_KEY = giá trị BỊA để lưu token BỊA của kết nối «pancake-fanpage» trong tổ chức thử và để đường gửi của hộp thư đọc lại nó (cùng cách sales-operating-mode); fetch là bản giả đóng vai Pancake. Đó là ĐẦU VÀO của phép kiểm, trả lại nguyên trạng trong finally; kết luận không phụ thuộc máy có khoá thật hay không.",
+  "tests/inbox-message-sync.test.ts":
+    "ĐẶT PLATFORM_SECRETS_KEY = giá trị BỊA để lưu token BỊA của kết nối «pancake-fanpage» trong tổ chức thử (cùng cách sales-inbox) — webhook đi qua receiveFanpageEvent đòi kết nối đang bật; fetch là bản giả đóng vai Pancake. Đó là ĐẦU VÀO của phép kiểm, trả lại nguyên trạng trong finally; kết luận không phụ thuộc máy có khoá thật hay không.",
   "tests/sales-inbox-history.test.ts":
     "ĐẶT PLATFORM_SECRETS_KEY = giá trị BỊA để lưu token BỊA của kết nối «pancake-fanpage» trong tổ chức thử và để lượt nhập lịch sử đọc lại nó (cùng cách sales-inbox); fetch là bản giả đóng vai Pancake. Đó là ĐẦU VÀO của phép kiểm, trả lại nguyên trạng trong finally; kết luận không phụ thuộc máy có khoá thật hay không.",
   "tests/sales-order-sync.test.ts":
@@ -291,6 +297,8 @@ const DOC_MOI_TRUONG_DA_KHAI: Record<string, string> = {
     "Không đọc biến nào: nó QUÉT MÃ NGUỒN của lib/env.ts để đòi chốt ngoài cùng đọc THẲNG process.env và chỉ nhận đúng chuỗi \"true\". Chuỗi `process.env.ADS_WRITE_ENABLED` nằm trong dấu nháy của một phép so chuỗi, không phải một lời đọc môi trường — bộ gác không tách được nên khai ở đây.",
   "tests/payroll-reconcile-script.test.ts":
     "`src.indexOf('process.env.ERP_READ_ONLY = \"1\"')` là quét MÃ NGUỒN để đòi script bật cờ chỉ-đọc, không phải đọc môi trường. Bộ gác không tách được chuỗi trong dấu nháy nên khai ở đây.",
+  "tests/customer-360.test.ts":
+    "`probe.indexOf('process.env.ERP_READ_ONLY = \"1\"')` là quét MÃ NGUỒN để đòi ops customer-360-probe bật cờ chỉ-đọc TRƯỚC khi nạp @/db, không phải đọc môi trường. Bộ gác không tách được chuỗi trong dấu nháy nên khai ở đây.",
   "tests/ops-log-leak.test.ts":
     "Chép process.env cho tiến trình bash/openssl con (để tìm được hai công cụ trên PATH) và BỎ OPENSSL_CONF — trên Windows biến ấy hay trỏ vào tệp đã gỡ và openssl chết trước khi làm gì; đó là dựng ĐẦU VÀO. process.platform chỉ dùng theo mẫu mục 65: thiếu bash/openssl TRÊN LINUX là ĐỎ, nền khác in CHƯA ĐO ĐƯỢC. Không khẳng định nào rẽ theo giá trị sẵn có của máy.",
 };

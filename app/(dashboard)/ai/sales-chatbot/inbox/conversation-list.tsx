@@ -6,7 +6,7 @@ import { Bot, Hourglass, Sparkles, UserRound } from "lucide-react";
 import { AI_HOLD_LABEL } from "@/lib/sales-chatbot/ai-hold-shared";
 import { avatarHrefOf, compactTimeAgo, HUMAN_HANDLING_LABEL, INBOX_HANDLING_LABEL, INBOX_SOURCE_LABEL, inboxHref, inboxRowStatus, unreadBadge, type InboxFilterState, type InboxRow } from "@/lib/sales-chatbot/inbox-shared";
 import { inboxDisplayRows } from "@/lib/sales-chatbot/inbox-read-shared";
-import { activeOutsideList, inboxListKey, shownForList } from "@/lib/sales-chatbot/inbox-search-shared";
+import { activeOutsideList, dropSelectionOnSearch, inboxListKey, inboxQueryState, shownForList } from "@/lib/sales-chatbot/inbox-search-shared";
 import { CUSTOMER_LEVEL_LABEL } from "@/lib/sales-chatbot/levels-shared";
 import { handoffQueueLine } from "@/lib/sales-chatbot/handoff-routing-shared";
 import { cn } from "@/lib/utils";
@@ -172,7 +172,7 @@ function Row({ r, href, active, showPage, nowMs }: { r: InboxRow; href: string; 
           <p
             className={cn(
               "mt-0.5 truncate pl-5 text-[11px] leading-[14px]",
-              r.handoffQueue.unowned || r.handoffQueue.slaState === "BREACHED" ? "font-semibold text-red-600 dark:text-red-400" : r.handoffQueue.ownerKind === "DEPARTMENT" ? "text-amber-700 dark:text-amber-300" : "text-muted-foreground",
+              r.handoffQueue.unowned || r.handoffQueue.slaState === "BREACHED" ? "font-semibold text-red-600 dark:text-red-400" : r.handoffQueue.ownerKind === "DEPARTMENT" || r.handoffQueue.ownerKind === "SHARED" ? "text-amber-700 dark:text-amber-300" : "text-muted-foreground",
             )}
             data-handoff-owner={r.handoffQueue.ownerKind}
             data-handoff-sla={r.handoffQueue.slaState}
@@ -192,7 +192,7 @@ function Row({ r, href, active, showPage, nowMs }: { r: InboxRow; href: string; 
   );
 }
 
-export function ConversationRows({ rows, state, showPage }: { rows: InboxRow[]; state: InboxFilterState; showPage: boolean }) {
+export function ConversationRows({ rows, state, total, showPage }: { rows: InboxRow[]; state: InboxFilterState; total: number; showPage: boolean }) {
   // Hội thoại đang mở theo URL — bấm hàng đổi `?c=` tại chỗ (thread-pane.tsx), danh sách không dựng lại nên đọc thẳng URL.
   const activeId = useSelectedConversation();
   // Bản danh sách ĐÃ HIỆN lần trước — để giữ hội thoại đang mở đứng yên (xem chú thích đầu tệp). Mở hội thoại = đã đọc: hàng đang
@@ -203,13 +203,24 @@ export function ConversationRows({ rows, state, showPage }: { rows: InboxRow[]; 
   const shown = useRef<{ key: string; rows: InboxRow[] } | null>(null);
   // Xác nhận đọc của máy chủ (khung chat ghi vào read-store) thắng mọi bản danh sách dựng TRƯỚC lượt đọc.
   const reads = useInboxReads();
-  const display = inboxDisplayRows(rows, shownForList(shown.current, listKey), { activeId, filter: state.filter, reads });
+  // Thẻ THẬT SỰ áp (đang tìm toàn hộp thư ⇒ «Tất cả» dù URL còn `f=UNREAD` — inbox-search-shared.ts::inboxQueryState).
+  const display = inboxDisplayRows(rows, shownForList(shown.current, listKey), { activeId, filter: inboxQueryState(state).filter, reads });
   useEffect(() => {
     shown.current = { key: listKey, rows: display };
   });
   // Hội thoại đang mở KHÔNG có trong danh sách này (vừa đổi ô tìm / bộ lọc, hoặc mở bằng đường dẫn) ⇒ nói rõ, không để người đọc
   // tưởng khung chat bên phải là một kết quả tìm.
-  const outside = activeOutsideList(activeId, display);
+  // Đang tìm: hội thoại đang mở chỉ được giữ khi nó NẰM TRONG kết quả (chủ shop 12/10/2026) — không có ⇒ bỏ chọn tại chỗ (`?c=` ra
+  // khỏi URL, khung chat về trống), không giữ một khung chat của khách khác cạnh kết quả tìm.
+  const drop = dropSelectionOnSearch(state.q, activeId, display, total);
+  useEffect(() => {
+    if (!drop) return;
+    const url = new URL(window.location.href);
+    if (!url.searchParams.has("c")) return;
+    url.searchParams.delete("c");
+    window.history.replaceState(null, "", `${url.pathname}${url.search}`);
+  }, [drop]);
+  const outside = !drop && activeOutsideList(activeId, display);
   // Giờ «x phút» tính theo đồng hồ trình duyệt, cập nhật mỗi phút (trang tự làm mới 5 giây đã đọc lại dữ liệu).
   const [nowMs, setNowMs] = useState(() => Date.now());
   useEffect(() => {

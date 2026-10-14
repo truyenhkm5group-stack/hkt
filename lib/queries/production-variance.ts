@@ -18,7 +18,7 @@ import { getSettingJson } from "@/lib/settings";
  * Năm con số cho MỘT mã, mỗi con số là lời khai của một khâu khác nhau:
  *
  *   giá báo MKT      — giá chốt tính cho marketer (bảng `marketer_prices`, đang hiệu lực tại `now`)
- *   giá ước tính     — giá vốn DỰ TÍNH chủ shop đặt (`profit.estimatedCosts`)
+ *   giá kế hoạch     — giá vốn KẾ HOẠCH đang hiệu lực (`profit.estimatedCosts`, sửa ở Trung tâm giá vốn)
  *   giá lệnh SX (PO) — đơn giá trên lệnh sản xuất gần nhất có ghi giá (`production_orders.unit_cost`)
  *   giá SX thực tế   — (vải + công) ÷ hàng xưởng trả (`productActualCost`, sổ đặt xưởng)
  *   giá phiếu kho    — giá nhập bình quân của phiếu nhập kho gần nhất — MỐC SO
@@ -41,7 +41,7 @@ export const VARIANCE_SOURCES: readonly VarianceSource[] = ["WORKSHOP_ACTUAL", "
 export const VARIANCE_SOURCE_LABEL: Record<VarianceSource, string> = {
   WORKSHOP_ACTUAL: "Giá SX thực tế (xưởng)",
   PO_UNIT_COST: "Giá lệnh SX",
-  ESTIMATED_COST: "Giá ước tính",
+  ESTIMATED_COST: "Giá kế hoạch",
   MARKETER_PRICE: "Giá báo MKT",
 };
 
@@ -96,7 +96,7 @@ export function buildProductionVariance(input: {
         ? { value: p.workshop.cost.unitCost, at: null, note: p.workshop.cost.reason }
         : { value: null, at: null, note: "Chưa có lô nào trong sổ đặt xưởng" },
       PO_UNIT_COST: po ? { value: po.unitCost, at: po.at, note: `lệnh ${po.code}` } : { value: null, at: null, note: p.productId ? "Chưa có lệnh SX nào ghi giá" : "Mã chưa khớp sản phẩm" },
-      ESTIMATED_COST: est ? { value: est.unitCost, at: est.setAt ? new Date(est.setAt) : null, note: est.reason || "không ghi lý do" } : { value: null, at: null, note: "Chưa đặt giá ước tính" },
+      ESTIMATED_COST: est ? { value: est.unitCost, at: est.setAt ? new Date(est.setAt) : null, note: est.reason || "không ghi lý do" } : { value: null, at: null, note: "Chưa đặt giá kế hoạch" },
       MARKETER_PRICE: { value: p.marketerPrice, at: null, note: p.marketerPrice === null ? "Chưa có giá báo đang hiệu lực" : "đang hiệu lực" },
     };
     const variance = Object.fromEntries(VARIANCE_SOURCES.map((k) => [k, receiptVariance(p.receipt, sources[k].value)])) as Record<VarianceSource, number | null>;

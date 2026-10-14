@@ -35,7 +35,7 @@ export function CustomerHistoryCard({ history, level }: { history: InboxCustomer
             <Stat label="Giao thành công" value={history.delivered} tone="text-emerald-700 dark:text-emerald-300" />
             <Stat label="Hoàn / không thành" value={history.returned} tone={history.returned ? "text-red-700 dark:text-red-300" : "text-foreground"} />
             <Stat label="Đang giao" value={history.inTransit} tone="text-sky-700 dark:text-sky-300" />
-            <Stat label="Chưa gửi" value={history.notShipped} tone="text-foreground" />
+            <Stat label="Chưa có vận đơn" value={history.notShipped} tone="text-foreground" />
             <Stat label="Huỷ" value={history.cancelled} tone="text-foreground/70" />
             <Stat label="Tổng đơn" value={history.total} tone="text-foreground" />
           </div>

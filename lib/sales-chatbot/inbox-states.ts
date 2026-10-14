@@ -1,5 +1,5 @@
 import { sql, type SQL } from "drizzle-orm";
-import { AI_DOWN_HANDOFF_REASON, HUMAN_COOLDOWN_MINUTES, HUMAN_COOLDOWN_MS, STAFF_COOLDOWN_REASON_LIST } from "@/lib/sales-chatbot/ai-hold-shared";
+import { AI_DOWN_HANDOFF_REASON, aiDownStartedAt, HUMAN_COOLDOWN_MINUTES, HUMAN_COOLDOWN_MS, ISO_AT_SQL_RE, STAFF_COOLDOWN_REASON_LIST } from "@/lib/sales-chatbot/ai-hold-shared";
 import { readConversationControl, TAKEOVER_REASON } from "@/lib/sales-chatbot/conversation-control-shared";
 import { PAGE_REPLY } from "@/lib/sales-chatbot/fanpage";
 import { HISTORY_CREATED_BY } from "@/lib/sales-chatbot/history-shared";
@@ -168,8 +168,20 @@ function staffCooldownCore(now: Date): SQL {
     or (${REASON} in (${inList(STAFF_COOLDOWN_REASON_LIST)}) and coalesce(${col("human_cooldown_until")}, ${FALLBACK_UNTIL}) > ${now})
     or (${REASON} not in (${inList(STAFF_COOLDOWN_REASON_LIST)}) and coalesce(${col("human_cooldown_until")} > ${now}, false))))`;
 }
+/**
+ * Mốc AI hỏng THẬT — bản SQL của `aiDownStartedAt` (ai-hold-shared.ts): `state.handoff.at` khi lý do trong sổ là «AI hỏng» và mốc hợp lệ
+ * (không sau `updated_at`), không thì `updated_at` (dòng cũ). CASE lồng để phép ép kiểu chỉ chạy trên chuỗi đã qua kiểm định dạng.
+ */
+/**
+ * `state.handoff.at` ép kiểu AN TOÀN (review #821 F6): chỉ chuỗi đúng dạng ISO đầy đủ (ngày · giờ · múi giờ, khoảng tháng / ngày / giờ hợp
+ * lệ — đúng dạng `toISOString` engine ghi) mới được ép `timestamptz`; sai ⇒ NULL (người gọi lùi về mốc khác), không bao giờ làm hỏng câu.
+ * Bản TS cùng định dạng: `ISO_AT_RE` (ai-hold-shared.ts). CASE lồng để phép ép chỉ chạy trên chuỗi đã qua kiểm.
+ */
+export const STATE_HANDOFF_AT_SQL = sql<Date | null>`(case when ${col("state")}->'handoff'->>'at' ~ '${sql.raw(ISO_AT_SQL_RE)}' then (${col("state")}->'handoff'->>'at')::timestamptz end)`;
+export const AI_DOWN_STARTED_SQL = sql`(case when ${col("state")}->'handoff'->>'reason' = ${AI_DOWN_HANDOFF_REASON} and ${STATE_HANDOFF_AT_SQL} <= ${col("updated_at")}
+  then ${STATE_HANDOFF_AT_SQL} else ${col("updated_at")} end)`;
 function aiDownCore(now: Date): SQL {
-  return sql`(${IS_HANDOFF} and ${REASON} = ${AI_DOWN_HANDOFF_REASON} and ${FALLBACK_UNTIL} > ${now})`;
+  return sql`(${IS_HANDOFF} and ${REASON} = ${AI_DOWN_HANDOFF_REASON} and (${AI_DOWN_STARTED_SQL} + (${HUMAN_COOLDOWN_MINUTES}::int * interval '1 minute')) > ${now})`;
 }
 const AI_HANDOFF_CORE = sql`(${IS_HANDOFF} and ${REASON} not in (${inList(NOT_AI_HANDOFF_REASONS)}) and ${MODE} <> 'HUMAN')`;
 
@@ -207,12 +219,26 @@ export function aiReplyingSql(now: Date, orgCopilot: boolean): SQL<boolean> {
   return safe(sql`not ${humanHandlingSql(now, orgCopilot)} and not ${nobodySql(now, orgCopilot)}`);
 }
 
+/** Mốc tin có nghĩa mới nhất ĐỌC TỪ CỘT của hội thoại (khách · bot · nhân viên ERP · tin nhập lịch sử · lúc mở). */
+const ACTIVITY_COLUMNS_SQL = sql`greatest(${ts("last_customer_at")}, ${ts("last_bot_at")}, ${ts("last_staff_at")}, ${ts("history_until")}, case when ${col("created_by")} = ${HISTORY_CREATED_BY} then ${EPOCH} else ${col("created_at")} end)`;
+
 /**
- * TIN CÓ NGHĨA mới nhất (khách · bot · nhân viên ERP · tin nhập từ lịch sử) — khoá xếp của hộp thư và mốc của bộ lọc thời gian.
- * KHÔNG `updated_at`, không cột siêu dữ liệu nào: đổi nhãn, đổi người phụ trách, mở hồ sơ khách, đổi chế độ AI không đẩy hội thoại
- * lên đầu. Hội thoại do LƯỢT NHẬP LỊCH SỬ tạo không lấy giờ nhập làm mốc.
+ * Câu trả lời PHÍA PAGE ngoài ERP (nhân viên gõ trên Pancake / Hộp thư Meta, ứng dụng khác, phía page chưa rõ — ĐÚNG tập của
+ * `PAGE_REPLY_AFTER_CUSTOMER_SQL`: tin tự động của page và chữ hệ thống KHÔNG tính) MỚI HƠN mọi cột mốc của hội thoại. Không cột nào
+ * của hội thoại ghi nhận loại tin này (P0 14/10/2026, HSLC «Châu Dương»: hội thoại HANDOFF, nhân viên trả lời trên Pancake ⇒ Pancake
+ * đưa hội thoại lên đầu, hộp thư ERP vẫn xếp nó theo tin khách cũ). Chặn dưới bằng chính các cột mốc nên mỗi hội thoại chỉ quét phần
+ * đuôi sổ tin của luồng SAU mốc ấy trên chỉ mục (page, luồng, mốc) — thường 0 dòng; dòng nhập lịch sử đã nằm trong `history_until`.
  */
-export const INBOX_ACTIVITY_SQL = sql<Date>`greatest(${ts("last_customer_at")}, ${ts("last_bot_at")}, ${ts("last_staff_at")}, ${ts("history_until")}, case when ${col("created_by")} = ${HISTORY_CREATED_BY} then ${EPOCH} else ${col("created_at")} end)`;
+export const PAGE_REPLY_ACTIVITY_SQL = sql<Date | null>`(select i.created_at from "sales_chat_inbound" i where i.page_id = ${col("page_id")} and i.thread_id = ${col("thread_id")}
+    and i.created_at > ${ACTIVITY_COLUMNS_SQL} and i.note = ${PAGE_REPLY} and i.imported_at is null and coalesce(i.sender_kind, '') not in ('PANCAKE_AUTOMATION', 'META_SYSTEM')
+    order by i.created_at desc limit 1)`;
+
+/**
+ * TIN CÓ NGHĨA mới nhất (khách · bot · nhân viên ERP · tin nhập từ lịch sử · câu trả lời phía page ngoài ERP) — khoá xếp của hộp thư
+ * và mốc của bộ lọc thời gian. KHÔNG `updated_at`, không cột siêu dữ liệu nào: đổi nhãn, đổi người phụ trách, mở hồ sơ khách, đổi chế
+ * độ AI không đẩy hội thoại lên đầu. Hội thoại do LƯỢT NHẬP LỊCH SỬ tạo không lấy giờ nhập làm mốc.
+ */
+export const INBOX_ACTIVITY_SQL = sql<Date>`greatest(${ACTIVITY_COLUMNS_SQL}, coalesce(${PAGE_REPLY_ACTIVITY_SQL}, ${EPOCH}))`;
 
 // ─────────────────────────── Hàm thuần ───────────────────────────
 
@@ -268,7 +294,7 @@ export function classifyInboxState(r: InboxStateInput, now: Date, orgCopilot: bo
   const copilot = !manual && !cooldown && (orgCopilot || mode === "COPILOT");
   const humanHandling: HumanHandling | null = manual ? "MANUAL_TAKEOVER" : cooldown ? "STAFF_COOLDOWN" : copilot ? "COPILOT" : null;
 
-  const aiDown = handoff && reason === AI_DOWN_HANDOFF_REASON && fallbackUntil > t;
+  const aiDown = handoff && reason === AI_DOWN_HANDOFF_REASON && aiDownStartedAt(r).getTime() + HUMAN_COOLDOWN_MS > t;
   const aiHandoff = handoff && !NOT_AI_HANDOFF_SET.has(reason) && mode !== "HUMAN";
   const needsHuman: NeedsHumanCode | null = aiDown ? "AI_DOWN" : aiHandoff ? "AI_HANDOFF" : r.orderUnderReview ? "ORDER_REVIEW" : null;
   const replying: InboxReplying = humanHandling ? "HUMAN" : aiDown || aiHandoff ? "NOBODY" : "AI";

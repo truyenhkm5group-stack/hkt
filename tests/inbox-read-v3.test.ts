@@ -133,6 +133,20 @@ function testPure() {
   const tot = auditReadRows([base, { ...base, customerAfterShared: 1, newestCustomerAt: new Date(1_000) }]);
   assert.deepEqual(tot.legacy, { unread: 2, falseUnread: 1, aiPreviewUnread: 2 }, "luật cũ: chưa đọc không bằng chứng + xem trước tin AI");
   assert.deepEqual(tot.current, { unread: 1, falseUnread: 0, aiPreviewUnread: 0 }, "luật mới: chỉ hội thoại có tin khách, xem trước tin khách");
+  // Đọc lại cùng lúc: lệch ở lượt đầu mà đọc lại hết lệch = câu trả lời tới GIỮA hai lần đọc, không phải lệch định nghĩa.
+  const op = { ...base, unreadSql: true, turnHandled: true, turnBy: "AI" };
+  const race = auditReadRows([
+    { ...op, unreadSqlRecheck: false, turnHandledRecheck: true },
+    { ...op, unreadSqlRecheck: true, turnHandledRecheck: true },
+    op,
+    { ...op, unreadSql: false, turnHandled: false, unreadSqlRecheck: false, turnHandledRecheck: false },
+    { ...op, unreadSql: true, turnHandled: false },
+  ]).attention;
+  assert.deepEqual(
+    { falseUnread: race.falseUnread, missed: race.missed, raced: race.raced, falseUnreadConfirmed: race.falseUnreadConfirmed, missedConfirmed: race.missedConfirmed },
+    { falseUnread: 3, missed: 1, raced: 1, falseUnreadConfirmed: 2, missedConfirmed: 1 },
+    "lệch lượt đầu: hết lệch khi đọc lại ⇒ raced; còn lệch / chưa đọc lại ⇒ lệch thật; khớp ⇒ không đếm",
+  );
   console.log("  ✓ thuần: bản danh sách cũ không đè lượt đọc · A rời thẻ chưa đọc ngay · «Tất cả» về nhóm đã đọc đúng chỗ · tin khách mới ⇒ còn chưa đọc · bộ đếm trừ ngay theo dấu · audit đếm bất biến");
 }
 
@@ -340,7 +354,8 @@ function testSource() {
   assert.match(rowSrc, /<AvatarLinkWrap link=\{avatarLink\}/, "ảnh đại diện có đích riêng (avatarHrefOf)");
   assert.match(rowSrc, /avatarHrefOf\(r\.customerId\)/, "đích ảnh = avatarHrefOf — không dựng facebook.com/<PSID>");
   // Bản đã hiện có thể đi qua `shownForList` (P0 inbox-search: chỉ dùng khi CÙNG danh sách) — vẫn là ĐÚNG hàm vá theo xác nhận đọc.
-  assert.match(list, /inboxDisplayRows\(rows, (?:shown\.current|shownForList\(shown\.current, listKey\)), \{ activeId, filter: state\.filter, reads \}\)/, "danh sách vẽ qua hàm vá theo xác nhận đọc");
+  // Thẻ truyền vào là thẻ THẬT SỰ áp (`inboxQueryState(state).filter` — P0 inbox-search-global: đang tìm toàn hộp thư ⇒ «Tất cả»).
+  assert.match(list, /inboxDisplayRows\(rows, (?:shown\.current|shownForList\(shown\.current, listKey\)), \{ activeId, filter: (?:state\.filter|inboxQueryState\(state\)\.filter), reads \}\)/, "danh sách vẽ qua hàm vá theo xác nhận đọc");
 
   // Nhãn mới, khoá lọc + tham số URL cũ giữ nguyên.
   assert.equal(INBOX_FILTER_LABEL.UNREAD, "Tin khách chưa đọc");

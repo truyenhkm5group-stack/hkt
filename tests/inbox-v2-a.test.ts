@@ -42,6 +42,8 @@ const strip = (src: string) => src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|
 
 /** Tham số URL hộp thư có TRƯỚC INBOX-V2-A (đọc từ page.tsx của origin/main 09/10/2026) — không được mất cái nào. */
 const LEGACY_PARAMS = ["f", "ch", "q", "c", "lb", "sdt", "lv", "nv", "tg", "tu", "den", "n", "xl", "pg"];
+/** Tham số THÊM sau INBOX-V2-A, mỗi cái một lý do: `pv` = phạm vi ô tìm «Chỉ tìm trong bộ lọc hiện tại» (P0 inbox-search-global 12/10/2026). */
+const ADDED_PARAMS = ["pv"];
 
 const BASE: InboxFilterState = { filter: "ALL", q: "", page: null, channel: null, handler: null, assignee: null, phone: null, level: null, period: null, from: null, to: null, label: null, limit: 100, selected: null };
 
@@ -50,7 +52,7 @@ function testFilterContract() {
   const page = readFileSync(`${DIR}/page.tsx`, "utf8");
   const read = new Set([...page.matchAll(/\b(?:one|day)\("([a-z]+)"\)/g)].map((m) => m[1]));
   assert.deepEqual([...read].sort(), Object.keys(INBOX_URL_PARAMS).sort(), "page.tsx đọc ĐÚNG các tham số trong INBOX_URL_PARAMS");
-  assert.deepEqual(Object.keys(INBOX_URL_PARAMS).sort(), [...LEGACY_PARAMS].sort(), "không tham số cũ nào bị bỏ, không tham số lạ");
+  assert.deepEqual(Object.keys(INBOX_URL_PARAMS).sort(), [...LEGACY_PARAMS, ...ADDED_PARAMS].sort(), "không tham số cũ nào bị bỏ, không tham số lạ (tham số mới phải khai ở ADDED_PARAMS)");
 
   // 2. Mọi bộ lọc có chỗ bấm: nâng cao ⇒ ô `name="…"` trong «Lọc ▾»; nhanh ⇒ ô tìm + thẻ.
   const filters = readFileSync(`${DIR}/inbox-filters.tsx`, "utf8");

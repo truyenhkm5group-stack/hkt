@@ -244,7 +244,10 @@ class Settings {
       splitMessages: !!p.splitMessages,
       customerTitle: p.customerTitle || "",
       ownPrompt: !!p.ownPrompt,
-      sizeChart: p.sizeChart || "",
+      // Page chua co bang size rieng (page moi them tu app, vd AURA) -> dung bang size chung cua shop (bang dung o nhieu
+      // page dam nhat). Chu shop 14/10/2026 (Hoa Hoang): khach hoi "Sai gì ạ", bot chi noi "nhân viên sẽ chọn size".
+      // Page do nam (xung "anh" / kich ban rieng) KHONG muon bang size do nu.
+      sizeChart: p.sizeChart || (p.ownPrompt || p.customerTitle === "anh" ? "" : this.sharedSizeChart(pageId)),
       sizeNote: p.sizeNote || "",
       saleEnabled: !!p.saleEnabled,
       saleTrigger: p.saleTrigger || "",
@@ -254,6 +257,19 @@ class Settings {
       // CHO RIENG hoi thoai do — moi cho dung defaultProduct (chan nham ma, ghi don, gui anh) tu theo camp.
       defaultProduct: this.scopedAdProduct(pageId) || p.defaultProduct || "",
     };
+  }
+
+  /** Bang size dung o NHIEU page dam nhat (khong tinh page do nam, khong tinh chinh page dang hoi), hoac "". */
+  sharedSizeChart(exceptPageId) {
+    const dem = new Map();
+    for (const [id, p] of Object.entries(this.pages || {})) {
+      if (id === String(exceptPageId) || !p || p.ownPrompt || p.customerTitle === "anh") continue;
+      const c = String(p.sizeChart || "").trim();
+      if (c) dem.set(c, (dem.get(c) || 0) + 1);
+    }
+    let best = "", n = 0;
+    for (const [c, k] of dem) if (k > n) (best = c), (n = k);
+    return best;
   }
 
   /** Mau cua bot quang cao dang ap cho luot xu ly hien tai (cung page), hoac "". */

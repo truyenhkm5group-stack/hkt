@@ -81,6 +81,19 @@ export type ConversationOrderSummary = {
   otherActive: number;
 };
 
+/** Câu lỗi khi máy chủ không đọc được đơn của hội thoại (lỗi đã ghi nhật ký máy chủ). */
+export const INBOX_ORDER_READ_FAILED = "Máy chủ không đọc được đơn của hội thoại (đã ghi nhật ký kỹ thuật) — bấm «Đọc lại đơn»; còn lỗi thì báo kỹ thuật kèm mã hội thoại.";
+
+/**
+ * Câu lỗi khi LỜI GỌI tới máy chủ hỏng (không có câu trả lời): bản ERP vừa cập nhật mà trang còn mở từ trước (mã server action cũ không
+ * còn) ⇒ phải tải lại trang — bấm «thử lại» bao nhiêu lần cũng hỏng; còn lại là mất kết nối. HÀM THUẦN.
+ */
+export function orderPanelCallError(e: unknown): string {
+  const msg = e instanceof Error ? e.message : String(e ?? "");
+  if (/server action|failed to find|not found on the server|deployment/i.test(msg)) return "ERP vừa được cập nhật — tải lại trang (F5) để đọc đơn.";
+  return "Không kết nối được máy chủ để đọc đơn — kiểm tra mạng rồi bấm «Đọc lại đơn».";
+}
+
 /**
  * ĐƠN ĐÃ HUỶ gần nhất của hội thoại (chủ shop 10/10/2026 — sự cố #189A435E): khi hội thoại không còn đơn đang mở, khung đơn hộp thư
  * in MỘT dòng «ĐÃ HUỶ» (ai yêu cầu · ai ghi · lý do — `cancellationLine`) thay vì im lặng, để người trực thấy lượt huỷ đã GHI XONG.

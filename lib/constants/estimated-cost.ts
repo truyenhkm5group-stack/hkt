@@ -38,8 +38,63 @@ import { receiptPriceEntry, type MarketerPriceEntry } from "@/lib/constants/mark
  *      Ngoại lệ thứ hai của luật 2 (cùng ngày): trang Kế hoạch mục tiêu lợi nhuận
  *      (`lib/queries/profit-target.ts`) bật giá dự tính, để kịch bản "giữ nguyên" nói cùng lợi
  *      nhuận với tab Lợi nhuận danh nghĩa. Trang ấy không vào lương.
+ *
+ * ─── SỬA 13/10/2026 (chủ shop, P0 "Hợp nhất giá vốn") — `docs/cost-center.md` ───
+ *
+ * Con số này nay mang tên **GIÁ VỐN KẾ HOẠCH** và có ĐÚNG MỘT nơi đặt: Trung tâm giá vốn
+ * (`/inventory/cost-center`); nút bút trên BCLN và nút "Dùng làm giá ước tính" của bảng giá thành
+ * đi qua CÙNG đường ghi. Ba luật đổi, có tên người quyết:
+ *
+ *   5'. GIÁ KẾ HOẠCH ĐẶT TAY THẮNG GIÁ BÁO MKT. Luật 5 cũ để giá báo thắng, nên chủ shop sửa giá
+ *       Q004 trên BCLN mà con số không đổi — ô sửa "không có tác dụng" (gốc của lỗi P0). Giá báo MKT
+ *       nay chỉ là THAM CHIẾU LÙI cho mã CHƯA đặt giá kế hoạch, mang nguồn `MARKETER_PRICE` và nhãn
+ *       riêng ở mọi màn hình; nó không bao giờ ghi đè một con số người đã đặt. Lương MKT vẫn đọc giá
+ *       báo như cũ — đó là cơ sở hoa hồng, không phải giá vốn của shop.
+ *   6.  CÓ NGÀY HIỆU LỰC VÀ KHÔNG XOÁ LỊCH SỬ. Mỗi lần đặt là MỘT dòng thêm vào lịch sử của mã
+ *       (`PlannedCostEntry`), "bỏ giá" cũng là một dòng (`unitCost = null`). Tại một thời điểm, mỗi mã
+ *       có ĐÚNG MỘT dòng hiệu lực: ngày hiệu lực muộn nhất ≤ thời điểm, hoà thì dòng ghi sau. Bản lưu
+ *       cũ (một dòng không ngày) đọc như hiệu lực từ đầu — không cần migration, không backfill.
+ *   7.  HAI CHẾ ĐỘ BÁO CÁO (`CostMode`). `ACTUAL` = giá thật (bậc thang `LINE_UNIT_COST`) và chỉ lấp
+ *       chỗ trống bằng giá kế hoạch, nhãn "Tạm tính" — đúng hành vi cũ. `PLANNED` = mọi sản phẩm của
+ *       mã đã đặt giá kế hoạch tính theo giá kế hoạch, kể cả khi có phiếu nhập: đó là chế độ trả lời
+ *       "nếu giá vốn là X thì lãi bao nhiêu". Mã chưa có giá kế hoạch thì đứng trên giá thật và mang
+ *       nhãn nói ra điều đó. Không trộn hai nguồn mà không gắn nhãn (AGENTS.md mục 8.6).
  */
 export const ESTIMATED_COST_KEY = "profit.estimatedCosts";
+
+/** Chế độ giá vốn của báo cáo lợi nhuận danh nghĩa — luật 7. */
+export type CostMode = "ACTUAL" | "PLANNED";
+
+export const COST_MODE_LABEL: Record<CostMode, string> = {
+  ACTUAL: "Giá vốn thực tế",
+  PLANNED: "Giá vốn kế hoạch",
+};
+
+/** `?gv=kehoach` ⇒ PLANNED; mọi thứ khác ⇒ ACTUAL (mặc định cũ — mở trang không con số nào xê dịch). */
+export function parseCostMode(v: string | null | undefined): CostMode {
+  return v === "kehoach" ? "PLANNED" : "ACTUAL";
+}
+
+/** Nguồn giá vốn của MỘT mã trên một dòng báo cáo — nhãn bắt buộc ở mọi ô giá vốn. */
+export type CostBasis =
+  /** Giá thật đủ cho mọi sản phẩm (phiếu nhập / giá Pancake). */
+  | "ACTUAL"
+  /** Chế độ thực tế, có sản phẩm chưa có giá thật được lấp bằng giá kế hoạch / tham chiếu. */
+  | "PROVISIONAL"
+  /** Chế độ kế hoạch, mã đã đặt giá kế hoạch. */
+  | "PLANNED"
+  /** Chế độ kế hoạch, mã CHƯA đặt giá kế hoạch ⇒ đứng trên giá thật. */
+  | "ACTUAL_NO_PLAN"
+  /** Còn sản phẩm không có giá nào (đang tính 0 ₫). */
+  | "UNKNOWN";
+
+export const COST_BASIS_LABEL: Record<CostBasis, string> = {
+  ACTUAL: "Thực tế",
+  PROVISIONAL: "Tạm tính",
+  PLANNED: "Kế hoạch",
+  ACTUAL_NO_PLAN: "Thực tế (chưa đặt kế hoạch)",
+  UNKNOWN: "Chưa biết",
+};
 
 export type EstimatedCost = {
   /** Giá vốn dự tính cho MỘT sản phẩm (VND, số nguyên dương). */
@@ -49,8 +104,10 @@ export type EstimatedCost = {
   setAt: string | null;
   /** Email người đặt — MÁY CHỦ đọc từ phiên đăng nhập, không nhận từ client (mục 34). */
   setBy: string | null;
-  /** Nguồn của con số: đặt tay ở Bàn dự tính, hay giá báo MKT (luật 5). Thiếu = đặt tay. */
+  /** Nguồn của con số: giá kế hoạch đặt tay, hay tham chiếu lùi giá báo MKT (luật 5'). Thiếu = đặt tay. */
   source?: "MANUAL" | "MARKETER_PRICE";
+  /** Ngày bắt đầu hiệu lực (YYYY-MM-DD, giờ VN). `null` = hiệu lực từ đầu (mọi kỳ). */
+  effectiveFrom?: string | null;
 };
 
 export type EstimatedCostMap = Record<string, EstimatedCost>;
@@ -59,40 +116,140 @@ export type EstimatedCostMap = Record<string, EstimatedCost>;
 export const ESTIMATED_UNIT_COST_MAX = 100_000_000;
 
 /**
- * Đọc bản lưu một cách PHÒNG THỦ: dòng hỏng thì BỎ dòng đó, không bao giờ biến nó thành 0 ₫ —
- * một giá vốn 0 ₫ đặt tay còn tệ hơn chỗ trống, vì nó mang nhãn "đã có người đặt".
+ * MỘT DÒNG LỊCH SỬ giá vốn kế hoạch của một mã (luật 6). `unitCost = null` = dòng "bỏ giá kế hoạch"
+ * từ ngày ấy — giữ lại để lịch sử không bao giờ mất một lần sửa.
  */
-export function parseEstimatedCosts(raw: unknown): EstimatedCostMap {
-  const out: EstimatedCostMap = {};
-  if (!raw || typeof raw !== "object") return out;
+export type PlannedCostEntry = {
+  unitCost: number | null;
+  effectiveFrom: string | null;
+  reason: string;
+  setAt: string | null;
+  setBy: string | null;
+  /** `users.id` do máy chủ đọc từ phiên (AGENTS.md mục 34). Bản lưu cũ không có ⇒ `null`. */
+  setByUserId?: string | null;
+};
+
+export type PlannedCostHistory = Record<string, PlannedCostEntry[]>;
+
+const NGAY = /^\d{4}-\d{2}-\d{2}$/;
+
+/** Ngày lịch VN (YYYY-MM-DD) của một thời điểm — so ngày hiệu lực theo giờ Việt Nam, không theo UTC. */
+export function vnDateKey(at: Date): string {
+  return new Date(at.getTime() + 7 * 3600_000).toISOString().slice(0, 10);
+}
+
+function docMotDong(v: unknown): PlannedCostEntry | null {
+  if (!v || typeof v !== "object") return null;
+  const x = v as Record<string, unknown>;
+  const eff = typeof x.effectiveFrom === "string" && NGAY.test(x.effectiveFrom) ? x.effectiveFrom : null;
+  const base = {
+    effectiveFrom: eff,
+    reason: typeof x.reason === "string" ? x.reason : "",
+    setAt: typeof x.setAt === "string" ? x.setAt : null,
+    setBy: typeof x.setBy === "string" ? x.setBy : null,
+    setByUserId: typeof x.setByUserId === "string" ? x.setByUserId : null,
+  };
+  // Dòng "bỏ giá" phải KHAI RÕ (`cleared: true`) — một ô hỏng không được hiểu nhầm thành lệnh bỏ giá.
+  if (x.cleared === true) return { ...base, unitCost: null };
+  const unitCost = Math.round(Number(x.unitCost));
+  if (!Number.isFinite(unitCost) || unitCost <= 0 || unitCost > ESTIMATED_UNIT_COST_MAX) return null;
+  return { ...base, unitCost };
+}
+
+/**
+ * Đọc bản lưu thành LỊCH SỬ theo mã. Nhận cả hai dáng: bản cũ `{ [mã]: {unitCost,…} }` (một dòng,
+ * hiệu lực từ đầu) và bản mới `{ [mã]: { history: [...] } }`. Dòng hỏng bị BỎ, không thành 0 ₫.
+ */
+export function parsePlannedCostHistory(raw: unknown): PlannedCostHistory {
+  const out: PlannedCostHistory = {};
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return out;
   for (const [productId, v] of Object.entries(raw as Record<string, unknown>)) {
     if (!productId || !v || typeof v !== "object") continue;
-    const x = v as Partial<EstimatedCost>;
-    const unitCost = Math.round(Number(x.unitCost));
-    if (!Number.isFinite(unitCost) || unitCost <= 0 || unitCost > ESTIMATED_UNIT_COST_MAX) continue;
-    out[productId] = {
-      unitCost,
-      reason: typeof x.reason === "string" ? x.reason : "",
-      setAt: typeof x.setAt === "string" ? x.setAt : null,
-      setBy: typeof x.setBy === "string" ? x.setBy : null,
-    };
+    const list = Array.isArray((v as { history?: unknown }).history) ? ((v as { history: unknown[] }).history) : [v];
+    const entries = list.map(docMotDong).filter((e): e is PlannedCostEntry => e !== null);
+    if (entries.length) out[productId] = entries;
   }
   return out;
+}
+
+/** Thứ tự quyết định của luật 6: ngày hiệu lực (không ngày = sớm nhất), rồi lúc ghi. */
+function sauHon(a: PlannedCostEntry, b: PlannedCostEntry): boolean {
+  const ea = a.effectiveFrom ?? "";
+  const eb = b.effectiveFrom ?? "";
+  if (ea !== eb) return ea > eb;
+  return (a.setAt ?? "") >= (b.setAt ?? "");
+}
+
+/**
+ * Dòng ĐANG HIỆU LỰC của một mã vào thời điểm `at` (luật 6). Hàm THUẦN. `null` = không có giá kế
+ * hoạch (chưa đặt, đã bỏ, hoặc mọi dòng đều hiệu lực SAU `at`).
+ */
+export function activePlannedEntry(entries: readonly PlannedCostEntry[], at: Date): PlannedCostEntry | null {
+  const ngay = vnDateKey(at);
+  let best: PlannedCostEntry | null = null;
+  for (const e of entries) {
+    if (e.effectiveFrom !== null && e.effectiveFrom > ngay) continue;
+    if (!best || sauHon(e, best)) best = e;
+  }
+  return best && best.unitCost !== null ? best : null;
+}
+
+/** Bảng giá kế hoạch đang hiệu lực vào `at` của mọi mã. */
+export function activePlannedCosts(history: PlannedCostHistory, at: Date): EstimatedCostMap {
+  const out: EstimatedCostMap = {};
+  for (const [productId, entries] of Object.entries(history)) {
+    const e = activePlannedEntry(entries, at);
+    if (!e || e.unitCost === null) continue;
+    out[productId] = { unitCost: e.unitCost, reason: e.reason, setAt: e.setAt, setBy: e.setBy, effectiveFrom: e.effectiveFrom };
+  }
+  return out;
+}
+
+/**
+ * Đọc bản lưu một cách PHÒNG THỦ: dòng hỏng thì BỎ dòng đó, không bao giờ biến nó thành 0 ₫ —
+ * một giá vốn 0 ₫ đặt tay còn tệ hơn chỗ trống, vì nó mang nhãn "đã có người đặt". Trả bảng giá
+ * kế hoạch ĐANG HIỆU LỰC vào `at` (mặc định bây giờ).
+ */
+export function parseEstimatedCosts(raw: unknown, at: Date = new Date()): EstimatedCostMap {
+  return activePlannedCosts(parsePlannedCostHistory(raw), at);
+}
+
+/**
+ * Bản lưu mới sau khi THÊM các dòng (luật 6) — không bao giờ xoá dòng cũ, KỂ CẢ dòng đọc không hiểu
+ * (giữ nguyên văn: đọc hỏng hôm nay không được thành mất dữ liệu ngày mai). Mã ở dáng cũ được chuyển
+ * sang dáng lịch sử với chính dòng cũ đứng đầu. Hàm THUẦN.
+ */
+export function appendPlannedCosts(raw: unknown, add: Record<string, PlannedCostEntry>): Record<string, unknown> {
+  const goc: Record<string, unknown> = raw && typeof raw === "object" && !Array.isArray(raw) ? { ...(raw as Record<string, unknown>) } : {};
+  for (const [pid, e] of Object.entries(add)) {
+    const cu = goc[pid];
+    const lichSu: unknown[] =
+      cu && typeof cu === "object" && Array.isArray((cu as { history?: unknown }).history) ? [...(cu as { history: unknown[] }).history] : cu && typeof cu === "object" ? [cu] : [];
+    goc[pid] = { history: [...lichSu, serializePlannedEntry(e)] };
+  }
+  return goc;
+}
+
+/** Dạng lưu của một dòng: dòng bỏ giá mang `cleared: true`, không mang `unitCost`. */
+export function serializePlannedEntry(e: PlannedCostEntry): Record<string, unknown> {
+  const { unitCost, ...rest } = e;
+  return unitCost === null ? { ...rest, cleared: true } : { ...rest, unitCost };
 }
 
 export type MarketerPriceForEstimate = MarketerPriceEntry & { reason: string; setBy: string };
 
 /**
- * LUẬT 5 — giá dự tính của từng mã khi đã có giá báo MKT. Hàm THUẦN.
+ * LUẬT 5' (13/10/2026) — giá kế hoạch của từng mã, có tham chiếu lùi giá báo MKT. Hàm THUẦN.
  *
- *  · Có giá báo áp được (> 0) vào thời điểm `at` ⇒ giá báo, nguồn `MARKETER_PRICE`.
- *  · Không có (chưa khai, hoặc dòng áp được là 0 ₫) ⇒ giữ con số đặt tay nếu có.
+ *  · Mã ĐÃ ĐẶT giá kế hoạch (đang hiệu lực) ⇒ giá kế hoạch, nguồn `MANUAL`. Giá báo KHÔNG ghi đè.
+ *  · Chưa đặt mà có giá báo áp được (> 0) vào `at` ⇒ giá báo, nguồn `MARKETER_PRICE` (tham chiếu).
  *  · Không cái nào ⇒ mã không có trong bảng: CHƯA BIẾT, không bao giờ 0 ₫.
  */
 export function estimatedCostsWithMarketerPrice(manual: EstimatedCostMap, prices: Record<string, readonly MarketerPriceForEstimate[]>, at: Date): EstimatedCostMap {
   const out: EstimatedCostMap = {};
   for (const [productId, v] of Object.entries(manual)) out[productId] = { ...v, source: "MANUAL" };
   for (const [productId, entries] of Object.entries(prices)) {
+    if (out[productId]) continue;
     const e = receiptPriceEntry(entries, at);
     if (!e || !(e.price > 0) || e.price > ESTIMATED_UNIT_COST_MAX) continue;
     const tu = e.effectiveFrom.toISOString().slice(0, 10).split("-").reverse().join("/");
@@ -105,6 +262,77 @@ export function estimatedCostsWithMarketerPrice(manual: EstimatedCostMap, prices
     };
   }
   return out;
+}
+
+/**
+ * ═══════════ XEM TRƯỚC TÁC ĐỘNG KHI SỬA GIÁ KẾ HOẠCH ═══════════
+ *
+ * Trả lời "đổi giá kế hoạch thành X thì lợi nhuận DỰ TÍNH (chế độ kế hoạch) của kỳ đổi bao nhiêu"
+ * TRƯỚC khi lưu. Hàm THUẦN, đứng trên đúng hai dòng báo cáo của mã (chế độ kế hoạch = hiện tại,
+ * chế độ thực tế = đích khi BỎ giá kế hoạch), nên nó nói cùng con số với BCLN sau khi lưu.
+ *
+ *   giá vốn mới   = SL giao TC ước tính × giá mới       (bỏ giá ⇒ giá vốn chế độ thực tế)
+ *   Δ LN danh nghĩa = −(giá vốn mới − giá vốn hiện tại)
+ *   Δ LN ròng       = Δ LN danh nghĩa × (1 + % dự phòng rủi ro tồn kho)   — dự phòng đi theo giá vốn (mục 14)
+ *
+ * Giá ĐÍCH không biết được (bỏ giá mà mã chưa có giá thật) ⇒ Δ là `null`, KHÔNG phải 0.
+ * Ngày hiệu lực SAU cuối kỳ xem trước ⇒ `applies = false`, Δ = 0 thật (kỳ đó không đổi).
+ */
+export type PlannedCostImpactInput = {
+  productId: string;
+  /** SL giao TC ước tính của mã trong kỳ (cùng phép cân với BCLN). */
+  expectedQty: number;
+  /** Giá vốn chế độ KẾ HOẠCH hiện tại của mã. */
+  currentCogs: number;
+  currentKnown: boolean;
+  /** Giá vốn chế độ THỰC TẾ (đích khi bỏ giá kế hoạch). */
+  actualCogs: number;
+  actualKnown: boolean;
+};
+
+export type PlannedCostImpact = {
+  productId: string;
+  applies: boolean;
+  newCogs: number | null;
+  deltaCogs: number | null;
+  deltaNominalProfit: number | null;
+  deltaNetProfit: number | null;
+};
+
+export function plannedCostImpact(row: PlannedCostImpactInput, newUnit: number | null, opts: { inventoryRiskPercent: number; applies: boolean }): PlannedCostImpact {
+  if (!opts.applies) return { productId: row.productId, applies: false, newCogs: row.currentKnown ? row.currentCogs : null, deltaCogs: 0, deltaNominalProfit: 0, deltaNetProfit: 0 };
+  const newCogs = newUnit !== null ? Math.round(Math.max(0, row.expectedQty) * newUnit) : row.actualKnown ? row.actualCogs : null;
+  if (newCogs === null || !row.currentKnown) return { productId: row.productId, applies: true, newCogs, deltaCogs: null, deltaNominalProfit: null, deltaNetProfit: null };
+  const deltaCogs = newCogs - row.currentCogs;
+  const risk = Math.max(0, opts.inventoryRiskPercent) / 100;
+  return { productId: row.productId, applies: true, newCogs, deltaCogs, deltaNominalProfit: -deltaCogs, deltaNetProfit: -Math.round(deltaCogs * (1 + risk)) };
+}
+
+/**
+ * Phép chọn ĐÍCH của bản xem trước cho MỘT mã — hàm THUẦN (dùng ở `previewPlannedCostImpact`).
+ *
+ *  · Giá đích = dòng hiệu lực vào `at` của lịch sử SAU khi thêm; không đổi so với trước ⇒ Δ 0.
+ *  · Đích là "bỏ giá" ⇒ giá thật; chỉ biết chắc khi mã KHÔNG còn sản phẩm chưa có giá thật, vì chỗ
+ *    trống sẽ được lấp bằng giá tham chiếu mà bản xem trước không tính lại ⇒ Δ `null`.
+ */
+export function previewImpactForItem(input: {
+  productId: string;
+  before: readonly PlannedCostEntry[];
+  after: readonly PlannedCostEntry[];
+  at: Date;
+  planned: { expectedQty: number; expectedCogs: number; cogsKnown: boolean } | null;
+  actual: { expectedCogs: number; cogsKnown: boolean; cogsUnknownQty: number } | null;
+  inventoryRiskPercent: number;
+}): PlannedCostImpact {
+  const giaTruoc = activePlannedEntry(input.before, input.at)?.unitCost ?? null;
+  const giaSau = activePlannedEntry(input.after, input.at)?.unitCost ?? null;
+  const a = input.planned;
+  const b = input.actual;
+  return plannedCostImpact(
+    { productId: input.productId, expectedQty: a?.expectedQty ?? 0, currentCogs: a?.expectedCogs ?? 0, currentKnown: a ? a.cogsKnown : true, actualCogs: b?.expectedCogs ?? 0, actualKnown: b ? b.cogsUnknownQty === 0 && b.cogsKnown : true },
+    giaSau,
+    { inventoryRiskPercent: input.inventoryRiskPercent, applies: giaSau !== giaTruoc },
+  );
 }
 
 /**

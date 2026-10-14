@@ -8,6 +8,8 @@ import {
   manualAdIdOf,
   manualAdKey,
   pageIdOfPost,
+  pageProductKey,
+  pageProductPageOf,
   testImageGate,
   testImageSpendToday,
   testProductMissing,
@@ -59,6 +61,9 @@ type Camp = {
  * phẩm thật đi kèm ⇒ ảnh màu do người TẢI LÊN, AI không đổi màu (ranh giới điểm ảnh của vòng mẫu).
  */
 async function loadCamp(db: Db, campKey: string): Promise<Camp | null> {
+  // Sản phẩm của page: khoá `page:<pageId>` vừa là khoá camp vừa là khoá `overrides` (không có ảnh ERP ⇒ người tải ảnh lên).
+  const page = pageProductPageOf(campKey);
+  if (page) return { campKey, adId: campKey, campaignName: `Sản phẩm của page ${page}`, headline: "", imageId: null, productId: null, productName: null, pageId: page, photoSourceId: null, isDesign: false };
   const manual = manualAdIdOf(campKey);
   if (manual) {
     const m = (await getAdBotConfig()).manualAds?.[manual];
@@ -147,6 +152,7 @@ export async function loadAdTestView(campKey: string, now = new Date()): Promise
   const o = config.overrides[camp.adId];
   const test = o?.test ?? null;
   const live = !!test && o?.enabled === true;
+  const isPage = pageProductPageOf(camp.campKey) !== null;
   let botPages: BotPage[] = [];
   let botError: string | null = status.state === "UNREACHABLE" ? status.error : null;
   if (status.state === "RUNNING") botPages = await readBotPages().catch((e: unknown) => ((botError = e instanceof Error ? e.message : String(e)), []));
@@ -166,13 +172,14 @@ export async function loadAdTestView(campKey: string, now = new Date()): Promise
     botPage,
     testMissing: testProductMissing(test),
     imagesMissingOnBot,
-    live,
+    // Sản phẩm của page không gắn ID quảng cáo nào ⇒ không có dòng "đã nhận khách từ quảng cáo".
+    live: live && !isPage,
     seenCount: bot && bot.reachable ? (bot.seen[camp.adId]?.count ?? 0) : 0,
   });
   const chatPage = botPage ?? botPages[0] ?? null;
   return {
     campKey: camp.campKey,
-    manual: manualAdIdOf(camp.campKey) !== null,
+    manual: manualAdIdOf(camp.campKey) !== null || isPage,
     adId: camp.adId,
     campaignName: camp.campaignName,
     productName: camp.productName,
@@ -185,7 +192,7 @@ export async function loadAdTestView(campKey: string, now = new Date()): Promise
     spentTodayUsd,
     limits: AD_TEST_IMAGE_LIMITS,
     canRecolor: gate.ok && !!camp.photoSourceId && !!camp.imageId,
-    recolorBlocked: manualAdIdOf(camp.campKey) ? "Quảng cáo dựng tay: ERP không có ảnh quảng cáo / ảnh sản phẩm thật để AI đổi màu — tải ảnh từng màu lên." : !camp.imageId ? "Camp không còn ảnh quảng cáo." : !camp.photoSourceId ? "Camp không có ảnh sản phẩm thật đi kèm — AI không đổi màu được; chỉ dùng được màu gốc." : gate.ok ? null : gate.reason,
+    recolorBlocked: isPage ? "Sản phẩm của page: ERP không có ảnh sản phẩm thật để AI đổi màu — tải ảnh từng màu lên." : manualAdIdOf(camp.campKey) ? "Quảng cáo dựng tay: ERP không có ảnh quảng cáo / ảnh sản phẩm thật để AI đổi màu — tải ảnh từng màu lên." : !camp.imageId ? "Camp không còn ảnh quảng cáo." : !camp.photoSourceId ? "Camp không có ảnh sản phẩm thật đi kèm — AI không đổi màu được; chỉ dùng được màu gốc." : gate.ok ? null : gate.reason,
     readiness: r.checks,
     canChat: r.canChat && !!chatPage,
     canGoLive: r.canGoLive,
@@ -362,6 +369,17 @@ export async function removeManualAd(adId: string): Promise<AdTestResult> {
   return { ok: true, push: await pushAdBots() };
 }
 
+/** Bỏ sản phẩm của một page: bot quay lại tư vấn theo danh mục POS / hướng dẫn riêng của page (ảnh trong ERP giữ nguyên). */
+export async function removePageProduct(pageId: string): Promise<AdTestResult> {
+  const config = await getAdBotConfig();
+  const key = pageProductKey(pageId);
+  if (!pageProductPageOf(key) || !config.overrides[key]) return { ok: false, error: "Page này chưa có sản phẩm riêng." };
+  const overrides = { ...config.overrides };
+  delete overrides[key];
+  await setSettingJson(CHATBOT_AD_BOTS_KEY, { ...config, overrides });
+  return { ok: true, push: await pushAdBots() };
+}
+
 function mergePageOptions(bot: BotPage[], pancake: { ids: string[] | null; names: Map<string, string> }): { id: string; name: string; inBot: boolean }[] {
   const out = new Map<string, { id: string; name: string; inBot: boolean }>();
   for (const p of bot) out.set(p.id, { id: p.id, name: p.name || pancake.names.get(p.id) || p.id, inBot: true });
@@ -380,6 +398,7 @@ export async function manualAdPageOptions(): Promise<{ id: string; name: string;
 export async function setAdTestPage(i: { campKey: string; pageId: string }, actor: Actor): Promise<AdTestResult> {
   const camp = await campByKey(i.campKey);
   if (!camp) return { ok: false, error: "Không tìm thấy camp." };
+  if (pageProductPageOf(i.campKey)) return { ok: false, error: "Sản phẩm của page gắn cố định với page đã chọn — muốn đổi page thì tạo mục mới cho page kia." };
   const adId = manualAdIdOf(i.campKey);
   if (adId) {
     const config = await getAdBotConfig();

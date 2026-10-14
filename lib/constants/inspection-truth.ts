@@ -129,18 +129,21 @@ export const COVERAGE_VERDICT_WHY: Record<CoverageVerdict, string> = {
  * KHÔNG BAO GIỜ dùng giá BÁN, doanh thu POS hay biên lợi nhuận ước tính để thay giá vốn: đó là
  * lấy thứ khách trả làm thứ shop bỏ ra.
  */
-export const COST_BASES = ["RECEIPT", "ORDER_SNAPSHOT", "VARIANT_DEFAULT", "UNKNOWN"] as const;
+export const COST_BASES = ["MARKETER_PRICE", "RECEIPT", "ORDER_SNAPSHOT", "VARIANT_DEFAULT", "UNKNOWN"] as const;
 export type CostBasis = (typeof COST_BASES)[number];
 
 export const COST_BASIS_LABEL: Record<CostBasis, string> = {
+  MARKETER_PRICE: "Giá báo MKT hiện tại",
   RECEIPT: "Phiếu nhập kho",
   ORDER_SNAPSHOT: "Giá vốn ghi trên đơn",
   VARIANT_DEFAULT: "Giá nhập mẫu mã",
   UNKNOWN: "Chưa biết",
 };
 
-/** Bậc nào là chứng từ kho thật — chỉ bậc này mới gọi là "đo được". */
+/** Bậc nào gọi là "đo được": chứng từ kho thật, và giá báo MKT hiện tại — con số đã KHAI, chủ shop chốt là giá vốn thực tế (13/10/2026). */
 export const COST_BASIS_IS_AUTHORITATIVE: Record<CostBasis, boolean> = {
+  // Chủ shop chốt 13/10/2026: giá báo MKT hiện tại LÀ giá vốn thực tế — con số đã khai, có người đặt.
+  MARKETER_PRICE: true,
   RECEIPT: true,
   ORDER_SNAPSHOT: false,
   VARIANT_DEFAULT: false,
@@ -148,6 +151,7 @@ export const COST_BASIS_IS_AUTHORITATIVE: Record<CostBasis, boolean> = {
 };
 
 export const COST_BASIS_WHY: Record<CostBasis, string> = {
+  MARKETER_PRICE: "Giá báo MKT đang hiệu lực hôm nay của mã — giá vốn thực tế mặc định theo quyết định chủ shop 13/10/2026.",
   RECEIPT: "Giá trên phiếu nhập kho gần nhất của chính mẫu mã này — chứng từ thật, kiểm chứng lại được.",
   ORDER_SNAPSHOT: "Giá vốn Pancake chụp lại lúc đồng bộ đơn. Dùng được nhưng không phải chứng từ kho.",
   VARIANT_DEFAULT: "Giá nhập khai ở mẫu mã. Là con số khai báo, không gắn với một lần nhập cụ thể nào.",

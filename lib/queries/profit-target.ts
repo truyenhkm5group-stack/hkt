@@ -63,7 +63,7 @@ export async function getProfitTargetData(period: Period): Promise<ProfitTargetD
   const chuaDo = skus.filter((s) => s.deliveryRate === null);
   if (chuaDo.length) warnings.push(`${chuaDo.length} mã chưa đo được TL GTC (${chuaDo.map((s) => s.code || s.name).join(", ")}) — không đưa vào kế hoạch được; phần lãi/lỗ hiện tại của chúng nằm ở "phần còn lại".`);
   const thieuGia = skus.filter((s) => s.cogsIncomplete);
-  if (thieuGia.length) warnings.push(`${thieuGia.length} mã còn sản phẩm chưa có giá vốn nào (${thieuGia.map((s) => s.code || s.name).join(", ")}) — lãi góp/đơn của chúng đang CAO hơn thật, nên số đơn cần có đang THẤP hơn thật. Khai giá báo MKT cho mã (Xưởng › Giá báo MKT) thì giá dự tính tự lấp.`);
+  if (thieuGia.length) warnings.push(`${thieuGia.length} mã còn sản phẩm chưa có giá vốn nào (${thieuGia.map((s) => s.code || s.name).join(", ")}) — lãi góp/đơn của chúng đang CAO hơn thật, nên số đơn cần có đang THẤP hơn thật. Đặt giá vốn kế hoạch cho mã ở Trung tâm giá vốn (/inventory/cost-center) thì phần đó được tạm tính theo giá kế hoạch.`);
   if (report.totals.projectionError) warnings.push(`Mô hình dự báo giao thành công lỗi (${report.totals.projectionError}); TL GTC đang theo tỷ lệ.`);
   return {
     periodDays: soNgay(period),

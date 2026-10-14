@@ -1,4 +1,4 @@
-import { buildAdBots, CHATBOT_AD_BOTS_KEY, DEFAULT_AD_BOT_CONFIG, manualAdRows, type AdBotConfig, type AdBotLine } from "@/lib/constants/chatbot-ad-bots";
+import { buildAdBots, buildPageBots, CHATBOT_AD_BOTS_KEY, DEFAULT_AD_BOT_CONFIG, manualAdRows, type AdBotConfig, type AdBotLine, type PageProductLine } from "@/lib/constants/chatbot-ad-bots";
 import { chatbotConfig, chatbotFetch } from "@/lib/integrations/chatbot/client";
 import { peekIsNonHome } from "@/lib/platform/credentials";
 import { listAdBotSources } from "@/lib/queries/chatbot-ad-bots";
@@ -54,11 +54,13 @@ async function uploadMissingImages(config: AdBotConfig, missing: string[]): Prom
 export async function pushAdBots(): Promise<AdBotPushResult> {
   const [rows, config] = await Promise.all([listAdBotSources(), getAdBotConfig()]);
   const { push } = buildAdBots([...rows, ...manualAdRows(config)], config);
+  // Sản phẩm của page (mẫu mới chưa có trên POS) đi CÙNG lượt: bot thay nguyên bộ cả hai danh sách.
+  const pages = config.enabled ? buildPageBots(config).push : [];
   try {
     const res = await chatbotFetch("/api/erp/ad-bots", {
       method: "PUT",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ bots: push }),
+      body: JSON.stringify({ bots: push, pages }),
       timeoutMs: 8000,
     });
     const body = (await res.json().catch(() => ({}))) as { count?: number; skipped?: number; error?: string; missingImages?: string[] };
@@ -95,7 +97,7 @@ export async function getBotAdStatus(): Promise<BotAdStatus> {
   }
 }
 
-export async function loadAdBotLines(): Promise<{ lines: AdBotLine[]; config: AdBotConfig }> {
+export async function loadAdBotLines(): Promise<{ lines: AdBotLine[]; pageLines: PageProductLine[]; config: AdBotConfig }> {
   const [rows, config] = await Promise.all([listAdBotSources(), getAdBotConfig()]);
-  return { lines: buildAdBots([...rows, ...manualAdRows(config)], config).lines, config };
+  return { lines: buildAdBots([...rows, ...manualAdRows(config)], config).lines, pageLines: buildPageBots(config).lines, config };
 }

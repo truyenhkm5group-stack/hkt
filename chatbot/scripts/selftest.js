@@ -2230,5 +2230,197 @@ console.log("OK 18: doi chieu dia chi don POS -> bat don chon nham xa, bo qua tr
   console.log("OK 52: quet lai page kiem lai ca don nhap chua xac nhan, khong dung don da xac nhan / da bo qua / ngoai ky");
 }
 
+// ---- 53: page AURA ban dam NHUNG, khong phai Q005 (chu shop 13/10/2026) — chan ma Q005, khong noi chat lieu Rayon
+{
+  const { materialIn } = await import("../src/bot.js");
+  const { blockedCodesFor } = await import("../src/orders.js");
+  assert.equal(materialIn("Đầm nhung đỏ đô cổ tim"), "nhung");
+  assert.equal(materialIn("Dạ chị ơi những mẫu này lên form đẹp"), null, "những / Dạ / lên khong phai chat lieu");
+  assert.ok(blockedCodesFor(["AURA - Thời Trang Nữ Cao Cấp"]).includes("Q005"), "page AURA khong ban Q005");
+  assert.deepEqual(blockedCodesFor(["Linh Tây Luxury CS1"]), [], "page khac khong bi chan");
+  // Mau chu luc dang la Q005 tren page AURA -> bo (mot lan)
+  bot.pageNames.set("PAURA", "AURA - Thời Trang Nữ Cao Cấp");
+  settings.update("PAURA", { defaultProduct: "Q005" });
+  bot.orderBot._save = () => {};
+  bot.orderBot.seedDefaultProducts();
+  assert.equal(String(settings.get("PAURA").defaultProduct || ""), "", "page AURA bo mau chu luc Q005");
+  // Khoi bao gia khong kem anh: page AURA khong tu them anh Q005
+  settings.update("PAURA", { defaultProduct: "Q005" });
+  const baoGia = bot.ensureQuoteImage("GIÁ NIÊM YẾT 749K - giảm 40%: 1 đầm 499.000đ", "PAURA", [{ from: { id: "KHACH" }, message: "giá sao shop" }]);
+  assert.ok(!/IMG:Q005/i.test(baoGia), "page AURA khong tu gui anh Q005");
+  settings.update("PAURA", { defaultProduct: "" });
+  // Page AURA ban MAU MOI chua co tren POS: khong dua danh muc vao prompt, khoi mau moi, chan moi ma danh muc
+  const { offCatalogPage } = await import("../src/orders.js");
+  assert.equal(offCatalogPage(["AURA - Thời Trang Nữ Cao Cấp"]), true);
+  assert.equal(offCatalogPage(["Linh Tây Luxury"]), false);
+  const prevSp = catalog.products;
+  catalog.setProducts([{ id: "q4", code: "Q004", name: "Đầm Q004", note: "", price: { min: 499000, max: 499000 }, attributes: { "Màu": ["Đỏ", "Nâu", "Đen"] }, variations: [], images: [] }]);
+  assert.ok(blockedCodesFor(["AURA - Thời Trang Nữ Cao Cấp"]).includes("Q004"), "page ngoai danh muc: chan ca Q004");
+  const spAura = bot.buildSystemPrompt("PAURA", { customerName: "Khách", type: "INBOX" });
+  assert.ok(!/Đầm Q004/.test(spAura), "prompt page AURA khong co danh muc POS");
+  assert.ok(/MẪU MỚI, CHƯA CÓ TRONG DANH MỤC/.test(spAura), "prompt page AURA co khoi mau moi");
+  const spKhac = bot.buildSystemPrompt("PAGE1", { customerName: "Khách", type: "INBOX" });
+  assert.ok(/Đầm Q004/.test(spKhac), "page khac van co danh muc");
+  assert.equal(bot.pageMaterial("PAURA", [{ from: { id: "PAURA" }, message: "Chất vải nhung cao cấp, mềm mát" }]), "nhung", "chat lieu doc tu tin shop");
+  // Nhan vien that go "dạ chất nhung ạ" -> chat lieu nhung thang moi nguon (ke ca page thuong)
+  const nv = { id: "nv1", from: { id: "PAGE1", admin_id: "staff-1", uid: "staff-1" }, message: "dạ chất nhung ạ" };
+  assert.ok(bot.isHumanStaff(nv, "PAGE1"), "tin nhan vien that"); assert.equal(bot.staffMaterial("PAGE1", [nv]), "nhung");
+  assert.equal(bot.staffMaterial("PAGE1", [{ from: { id: "KHACH" }, message: "nhung hay nỉ" }]), null, "khach noi khong tinh");
+  catalog.setProducts(prevSp);
+  bot.pageNames.delete("PAURA");
+  delete bot.orderBot._save;
+  const prev = catalog.products;
+  const cu = settings.get("PAGE1").defaultProduct;
+  catalog.setProducts([{ id: "n1", code: "Q009", name: "Đầm nhung đỏ đô", note: "", price: { min: 499000, max: 499000 }, attributes: { "Màu": ["Đỏ đô"] }, variations: [], images: [] }]);
+  settings.update("PAGE1", { defaultProduct: "Q009" });
+  assert.equal(bot.pageMaterial("PAGE1"), "nhung");
+  const khoi = bot.pageProductBlock("PAGE1");
+  assert.ok(/Đầm nhung đỏ đô/.test(khoi) && /mã Q009/.test(khoi) && /KHÔNG nói "Rayon"/.test(khoi), khoi);
+  settings.update("PAGE1", { defaultProduct: "" });
+  assert.equal(bot.pageProductBlock("PAGE1"), "", "page khong co mau chu luc -> khong them khoi");
+  settings.update("PAGE1", { defaultProduct: cu || "" });
+  catalog.setProducts(prev);
+  console.log("OK 53: page AURA khong ban Q005 (bot khong len don / khong nhac ma); mau nhung khong noi chat lieu Rayon");
+}
+
+// ---- 54: "San pham cua page" (chu shop 13/10/2026): mau moi chua co tren POS khai o ERP cho ca mot page — bot chi noi
+// theo thong tin da cho (khong tu them bot), khong dung danh muc POS, khong len don POS
+{
+  const crypto = await import("node:crypto");
+  const { adBots } = await import("../src/adbots.js");
+  const { normalizeAdBotPayload, adBotPromptBlock } = await import("../src/adpersona.js");
+  const { aiScope } = await import("../src/aicost.js");
+  const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==", "base64");
+  const sha = crypto.createHash("sha256").update(png).digest("hex");
+  const test = { name: "Đầm nhung tăm", code: "NHUNG01", price: 499000, shipFee: 25000, comboPrice: null, fabric: "Nhung tăm Hàn, dày dặn", sizes: "S–XL", offer: "", colors: [{ color: "Đỏ đô", sha }] };
+  // Hinh dang goi: pages phai la mang; page thieu thong tin mau -> bo, khong doan
+  assert.throws(() => normalizeAdBotPayload({ bots: [], pages: {} }), /pages/);
+  const chuan = normalizeAdBotPayload({ bots: [], pages: [{ pageId: "123456789", enabled: true, test }, { pageId: "abc", enabled: true, test }, { pageId: "223456789", enabled: true, test: { ...test, fabric: "" } }] });
+  assert.deepEqual(Object.keys(chuan.pages), ["123456789"]);
+  assert.equal(chuan.skipped, 2);
+  assert.equal(chuan.pages["123456789"].adId, "page:123456789");
+  // Chua bat: chi chat thu duoc (get theo khoa page:), khach that khong dung
+  const r = adBots.replaceAll({ bots: [], pages: [{ pageId: "987654321", enabled: false, test }] });
+  assert.equal(r.pages, 1);
+  assert.equal(adBots.pageBot("987654321"), null, "chua bat -> khach that khong dung");
+  assert.ok(adBots.get("page:987654321"), "chua bat van chat thu duoc tu ERP");
+  assert.ok(adBots.missingImages().includes(sha) || adBots.imagePath(sha), "anh mau cua page vao danh sach anh can gui");
+  adBots.replaceAll({ bots: [], pages: [{ pageId: "987654321", enabled: true, test }] });
+  const pb = adBots.pageBot("987654321");
+  assert.equal(pb?.test.code, "NHUNG01");
+  assert.equal(adBots.testProductForConversation("CONV54", [], "987654321")?.code, "NHUNG01", "hoi thoai cua page -> bot len don bo qua");
+  assert.equal(adBots.testProductForConversation("CONV54", [], "111111111"), null, "page khac khong anh huong");
+  assert.equal(adBots.status().pages.length, 1);
+  // Prompt: khoi "SAN PHAM CUA PAGE" + luat chi noi thong tin da cho; khong danh muc POS; chat lieu theo ERP
+  const khoi = adBotPromptBlock(pb);
+  assert.ok(/SẢN PHẨM CỦA PAGE/.test(khoi) && /KHÔNG tự thêm/.test(khoi) && /Nhung tăm Hàn/.test(khoi) && /499\.000đ/.test(khoi), khoi);
+  assert.ok(!/bấm quảng cáo/.test(khoi), "page: khong noi khach bam quang cao");
+  const prevSp = catalog.products;
+  catalog.setProducts([{ id: "q4", code: "Q004", name: "Đầm Q004", note: "", price: { min: 499000, max: 499000 }, attributes: { "Màu": ["Đỏ"] }, variations: [], images: [] }]);
+  const sys = aiScope.run({ adBot: pb, adBotPageId: "PAGE1" }, () => bot.buildSystemPrompt("PAGE1", { customerName: "X", type: "INBOX" }));
+  assert.ok(sys.includes("MẪU MỚI **Đầm nhung tăm**") && !/Đầm Q004/.test(sys), "prompt page co san pham, khong co danh muc POS");
+  aiScope.run({ adBot: pb, adBotPageId: "PAGE1" }, () => {
+    assert.equal(bot.offCatalog("PAGE1"), true);
+    assert.equal(bot.pageMaterial("PAGE1", []), "nhung", "chat lieu theo ERP");
+    const anh = bot.ensureQuoteImage("GIÁ NIÊM YẾT: 1 đầm 499.000đ", "PAGE1", [{ from: { id: "KHACH" }, message: "giá sao shop" }]);
+    assert.ok(/\[\[IMG:NHUNG01\]\]/.test(anh) && !/Q004/.test(anh), anh);
+  });
+  assert.equal(bot.offCatalog("PAGE1"), false, "ngoai pham vi -> page thuong");
+  catalog.setProducts(prevSp);
+  adBots.replaceAll({ bots: [], pages: [] });
+  assert.equal(adBots.pageBot("987654321"), null);
+  console.log("OK 54: san pham cua page — chi noi theo thong tin ERP, khong danh muc POS, khong len don POS");
+}
+
+// ---- 55: su co 14/10/2026 (Thanh Le, Giang Nguyen — page AURA): khach gui don "1m55" roi "Nặng 53 kg" -> bot tra loi
+// tin dau, bo sot tin sau; page khong co bang size -> bot ket bang "cần tư vấn thêm gì"; khach like -> khong xin SDT dia chi;
+// ban chot co chuyen nhan vien de nguyen "[SĐT khách đã cung cấp]"
+{
+  const { store } = await import("../src/store.js");
+  const prevSettings = settings.get("PAGE1");
+  settings.update("PAGE1", { sizeChart: "" });
+  const shop = (t) => ({ from: { id: "PAGE1" }, message: t });
+  const khach = (t) => ({ from: { id: "KHACH" }, message: t });
+  const hoiThoai = [shop("Chị cho em xin Chiều Cao + Cân Nặng để em tư vấn size cho chị nha"), khach("1m55"), khach("Nặng 53 kg")];
+  // Page chua co bang size: VIEC TIEP THEO la xin luon mau / SDT / dia chi, khong dung o tu van size
+  const p = bot.orderProgressPrompt("PAGE1", hoiThoai);
+  assert.match(p, /CHƯA có bảng size/);
+  assert.match(p, /XIN LUÔN .*số điện thoại.*địa chỉ/);
+  assert.match(p, /KHÔNG hỏi "cần tư vấn thêm gì không"/);
+  // Like / tha tim khi chua chot don -> hoi tiep dung thong tin con thieu
+  assert.match(bot.nextInfoAsk("PAGE1", hoiThoai, "chị"), /số điện thoại, địa chỉ nhận hàng/);
+  assert.match(bot.nextInfoAsk("PAGE1", [shop("Dạ chị xem mẫu ạ")], "chị"), /chiều cao, cân nặng/);
+  assert.doesNotMatch(bot.nextInfoAsk("PAGE1", [...hoiThoai, khach("0912345678"), khach("số 5 ngõ 10 phường Láng Hạ quận Đống Đa Hà Nội")], "chị") || "", /số điện thoại|địa chỉ/, "da co SDT + dia chi -> khong xin lai");
+  // Mau test / san pham cua page: khach xin mien ship -> mien ship ngay cho 1 chiec, khong bat lay 2 chiec
+  const { testProductLines } = await import("../src/adpersona.js");
+  const dongGia = testProductLines({ name: "Đầm nhung", code: "NHUNG01", price: 499000, shipFee: 25000, comboPrice: 849000, fabric: "Nhung", sizes: "", offer: "", colors: [{ color: "Đỏ đô", sha: "x" }] }).join("\n");
+  assert.match(dongGia, /xin miễn ship[^\n]*MIỄN PHÍ SHIP luôn[^\n]*499\.000đ/);
+  assert.match(dongGia, /KHÔNG bắt khách lấy 2 chiếc/);
+  assert.match(dongGia, /CHỈ CÓ MỘT MÀU: Đỏ đô\. KHÔNG hỏi khách chọn màu/, "mau 1 mau -> khong hoi mau");
+  const { aiScope } = await import("../src/aicost.js");
+  const motMau = { adId: "page:1", scope: "page", test: { name: "Đầm nhung", code: "NHUNG01", price: 499000, shipFee: 25000, comboPrice: null, fabric: "Nhung", sizes: "", offer: "", colors: [{ color: "Đỏ đô", sha: "x" }] } };
+  aiScope.run({ adBot: motMau, adBotPageId: "PAGE1" }, () => {
+    const hoi = bot.nextInfoAsk("PAGE1", hoiThoai, "chị");
+    assert.ok(!/màu/.test(hoi) && /số điện thoại/.test(hoi), hoi);
+    const pr = bot.orderProgressPrompt("PAGE1", hoiThoai);
+    assert.match(pr, /Màu: Đỏ đô \(mẫu chỉ có 1 màu/);
+    assert.doesNotMatch(pr, /VIỆC TIẾP THEO: hỏi khách chọn màu/);
+  });
+  // Tin khach toi trong luc bot dang tra loi tin truoc: chi co tin CUA BOT sau no -> tra loi bu
+  calls.length = 0;
+  const cust = { id: "KHACH55", name: "Thanh" };
+  const t0 = Date.now() - 60000;
+  const iso = (ms) => new Date(ms).toISOString().replace("Z", "");
+  pancakeMessages = [
+    { id: "s55", conversation_id: "CONV55", message: "Chị cho em xin Chiều Cao + Cân Nặng để em tư vấn size cho chị nha", from: { id: "PAGE1" }, inserted_at: iso(t0) },
+    { id: "a55", conversation_id: "CONV55", message: "1m55", from: cust, inserted_at: iso(t0 + 1000) },
+    { id: "b55", conversation_id: "CONV55", message: "Nặng 53 kg", from: cust, inserted_at: iso(t0 + 3000) },
+    { id: "r55", conversation_id: "CONV55", message: "Dạ chị cao 1m55 thì cho em xin thêm cân nặng ạ", from: { id: "PAGE1" }, inserted_at: iso(t0 + 5000) },
+  ];
+  store.markBotMessage("r55");
+  store.setLastHandled("CONV55", "a55");
+  geminiText = "Dạ em ghi nhận chị cao 1m55 nặng 53kg ạ, chị cho em xin số điện thoại và địa chỉ nhận hàng nha";
+  bot.handleWebhook({ page_id: "PAGE1", event_type: "messaging", data: { conversation: { id: "CONV55", from: cust, tags: [], type: "INBOX" }, message: pancakeMessages[2], post: null } });
+  await sleep(WAIT);
+  assert.ok(calls.some((c) => c.path.includes(":generateContent")), "tin can nang bi bot tra loi tin truoc de len van duoc tra loi bu");
+  assert.equal(store.getLastHandled("CONV55"), "b55");
+  // Like khi chua chot don -> xin SDT + dia chi (khong goi AI)
+  calls.length = 0;
+  pancakeMessages = [...pancakeMessages, { id: "c55", conversation_id: "CONV55", message: "👍", from: cust, inserted_at: iso(t0 + 20000) }];
+  bot.handleWebhook({ page_id: "PAGE1", event_type: "messaging", data: { conversation: { id: "CONV55", from: cust, tags: [], type: "INBOX" }, message: pancakeMessages[4], post: null } });
+  await sleep(WAIT);
+  const gui = calls.filter((c) => c.method === "POST" && c.path.includes("/messages") && !c.path.includes(":generateContent")).map((c) => JSON.stringify(c.body || ""));
+  assert.ok(gui.some((b) => /số điện thoại/.test(b) && /địa chỉ/.test(b)), `like khi chua chot -> xin SDT dia chi: ${gui.join(" | ")}`);
+  assert.ok(!gui.some((b) => /tư vấn thêm gì/.test(b)), "khong hoi chung chung");
+  // Cho trong [..] trong ban chot co chuyen nhan vien -> khong gui nguyen ngoac
+  const ra = bot.fillPlaceholders("Dạ em xác nhận đơn:\n• Người nhận: Giang – [SĐT khách đã cung cấp]\n• Địa chỉ: Số 46 Phú Thụy", "PAGE1", [khach("sdt 0987654321")]);
+  assert.ok(!/\[/.test(ra) && /0987654321/.test(ra), ra);
+  const src = (await import("node:fs")).readFileSync(new URL("../src/bot.js", import.meta.url), "utf8");
+  assert.ok(/if \(reply && handoff\) reply = this\.fillPlaceholders/.test(src), "ban chot co chuyen nhan vien cung dien cho trong");
+  settings.update("PAGE1", { sizeChart: prevSettings.sizeChart || "" });
+  console.log("OK 55: tin khach toi luc bot dang tra loi duoc tra loi bu; page khong bang size / khach like -> xin SDT dia chi; khong gui [..] cho khach");
+}
+
+// ---- 56: page chua co bang size (AURA, them tu app) dung bang size chung cua shop — chu shop 14/10/2026 (Hoa Hoang:
+// khach "cao 1,50 nặng 54 kg" roi hoi "Sai gì ạ", bot chi noi "nhân viên sẽ chọn size")
+{
+  const bang = '[{"h":[140,175],"w":[[40,49,"M"],[50,57,"L"],[58,65,"XL"]]}]';
+  const cu = { a: settings.get("P56A").sizeChart, b: settings.get("P56B").sizeChart };
+  settings.update("P56A", { sizeChart: bang });
+  settings.update("P56B", { sizeChart: bang });
+  settings.update("P56NAM", { sizeChart: '[{"h":[160,190],"w":[[60,75,"L"]]}]', customerTitle: "anh" });
+  assert.equal(settings.effective("P56AURA").sizeChart, bang, "page khong co bang size -> bang chung");
+  settings.update("P56AURA", { customerTitle: "anh" });
+  assert.equal(settings.effective("P56AURA").sizeChart, "", "page do nam khong muon bang size do nu");
+  settings.update("P56AURA", { customerTitle: "" });
+  const khach = (t) => ({ from: { id: "KHACH" }, message: t });
+  const f = bot.customerFacts("P56AURA", [khach("Mình cao 1,50 nặng 54 kg có mặc được không ạ")]);
+  assert.equal(f.size, "L", "tra duoc size tu bang chung");
+  settings.update("P56A", { sizeChart: cu.a || "" });
+  settings.update("P56B", { sizeChart: cu.b || "" });
+  settings.update("P56NAM", { sizeChart: "", customerTitle: "" });
+  console.log("OK 56: page chua co bang size dung bang size chung cua shop (tru page do nam)");
+}
+
 console.log("\nTAT CA TEST PASS");
 process.exit(0);

@@ -33,7 +33,7 @@ function testPure() {
     assert.equal(systemPrompt(c, "Shop", "", "FANPAGE", "", [], "", "", now), systemPrompt(c, "Shop", "", "FANPAGE", "", [], "", "", now, FOOD_PACK));
   }
   const food = systemPrompt(cfg, "Shop", "", "FANPAGE");
-  for (const old of ["(vd 1kg hay 2kg)", "«1kí», «1 ký», «1 cân», «1kg» đều là 1kg", "(vd «chả cá thu»)", "(vd shop hỏi «lấy bao nhiêu kg», khách đáp «lấy lần 20-30 kg»)", "(vd «Dạ mình lấy 1kg ăn thử trước nhé, em lên đơn luôn ạ?»)", "số lượng lớn (từ 10kg):", "«lấy thêm 1kg»"]) {
+  for (const old of ["(vd 1kg hay 2kg)", "«1kí», «1 ký», «1 cân», «1kg» đều là 1kg", "(vd «chả cá thu»)", "(vd shop hỏi «lấy bao nhiêu kg», khách đáp «lấy lần 20-30 kg»)", "(vd khách CHƯA nói số lượng: «Dạ mình lấy 1kg ăn thử trước nhé, em lên đơn luôn ạ?» — khách ĐÃ nói số lượng thì KHÔNG dùng câu này, chốt đúng số khách chọn)", "số lượng lớn (từ 10kg):", "«lấy thêm 1kg»"]) {
     assert.ok(food.includes(old), `gói food phải giữ nguyên văn: ${old}`);
   }
   for (const pack of [GENERIC_PACK, FASHION_PACK]) {

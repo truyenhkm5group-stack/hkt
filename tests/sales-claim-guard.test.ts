@@ -60,7 +60,7 @@ const core3 = (f: ClaimFacts) => ({ paymentVerified: f.paymentVerified, orderCon
 function testTruthTable() {
   const all: ClaimKind[] = ["PAYMENT_RECEIVED", "ORDER_CONFIRMED", "ORDER_CANCELLED"];
   const kinds: ClaimKind[][] = [[], ...all.map((k) => [k]), ["PAYMENT_RECEIVED", "ORDER_CONFIRMED"], all];
-  const SAFE: Record<ClaimKind, string> = { PAYMENT_RECEIVED: CLAIM_SAFE_TEXT.PAYMENT, ORDER_CONFIRMED: CLAIM_SAFE_TEXT.ORDER, ORDER_CANCELLED: CLAIM_SAFE_TEXT.CANCEL, PRICE_UNVERIFIED: CLAIM_SAFE_TEXT.PRICE };
+  const SAFE: Record<ClaimKind, string> = { PAYMENT_RECEIVED: CLAIM_SAFE_TEXT.PAYMENT, ORDER_CONFIRMED: CLAIM_SAFE_TEXT.ORDER, ORDER_CANCELLED: CLAIM_SAFE_TEXT.CANCEL, PRICE_UNVERIFIED: CLAIM_SAFE_TEXT.PRICE, ORDER_EDITED: CLAIM_SAFE_TEXT.ORDER_EDIT, REFUND_PROMISE: CLAIM_SAFE_TEXT.REFUND };
   for (const claims of kinds)
     for (const paymentVerified of [false, true])
       for (const orderConfirmed of [false, true])
@@ -78,6 +78,27 @@ function testTruthTable() {
   assert.equal(guardClaims("Dạ em chốt đơn cho chị rồi ạ", { ...NO, paymentVerified: true }).ok, false, "có tiền ≠ có đơn");
   assert.equal(guardClaims("Dạ shop đã huỷ đơn theo yêu cầu của chị ạ", { ...NO, orderConfirmed: true }).ok, false, "có đơn ≠ đã huỷ: chỉ cancel_order cancelled = true mở câu «đã huỷ»");
   assert.equal(guardClaims("Dạ shop đã huỷ đơn theo yêu cầu của chị ạ", { ...NO, orderCancelled: true }).ok, true);
+  // HOTFIX 12/10/2026 (review #821 F1 — ca «Đỗ Là»): câu «đã sửa đơn» chỉ qua khi công cụ GHI trong chính lượt; lời hứa hoàn tiền / đổi hàng
+  // KHÔNG BAO GIỜ qua (bot không có quyền) — mọi câu dưới đây trước bản vá detectClaims trả [].
+  const edited = ["Dạ em đã đổi địa chỉ giao cho chị sang 12 Lê Lợi rồi ạ", "em cập nhật ghi chú giao Chủ nhật cho chị rồi nha", "em thêm 1 hũ ruốc vào đơn cho chị rồi ạ"];
+  for (const t of edited) {
+    assert.deepEqual(detectClaims(t), ["ORDER_EDITED"], `«${t}» là khẳng định ĐÃ SỬA ĐƠN`);
+    const v = guardClaims(t, ALL);
+    assert.ok(!v.ok && v.claim === "ORDER_EDITED" && v.handoff && v.safeText === CLAIM_SAFE_TEXT.ORDER_EDIT, `«${t}» không công cụ ghi ⇒ chặn + chuyển người`);
+    assert.equal(guardClaims(t, { ...ALL, orderEditedThisTurn: true }).ok, true, `«${t}» công cụ đã ghi trong lượt ⇒ qua`);
+  }
+  for (const t of ["shop sẽ hoàn tiền cho chị trong hôm nay ạ", "em đổi hàng mới cho chị nhé", "Dạ em gửi bù hàng cho chị nhé"]) {
+    assert.deepEqual(detectClaims(t), ["REFUND_PROMISE"], `«${t}» là lời hứa hoàn tiền / đổi hàng`);
+    const v = guardClaims(t, { ...ALL, orderEditedThisTurn: true });
+    assert.ok(!v.ok && v.claim === "REFUND_PROMISE" && v.handoff && v.safeText === CLAIM_SAFE_TEXT.REFUND, `«${t}» luôn chặn + chuyển người`);
+  }
+  for (const t of ["em ghi chú giao giờ hành chính cho chị rồi ạ", "em đổi sang 2 hộp rồi ạ", "em báo kho rồi ạ"]) assert.deepEqual(detectClaims(t), ["ORDER_EDITED"], `«${t}» là khẳng định ĐÃ SỬA ĐƠN (vòng 2)`);
+  assert.deepEqual(detectClaims("shop gửi bù 1 hũ cho chị nhé"), ["REFUND_PROMISE"], "«gửi bù» là lời hứa");
+  assert.deepEqual(detectClaims("Dạ đơn của chị em đã đổi xong ạ"), ["ORDER_EDITED"], "«đơn … đã đổi xong» là khẳng định đã sửa đơn (vòng 3)");
+  for (const t of ["bên vận chuyển sẽ gửi lại hàng cho chị vào ngày mai", "em không có quyền hoàn tiền ạ"]) assert.deepEqual(detectClaims(t), [], `«${t}» KHÔNG phải shop hứa (chủ ngữ ĐVVC / phủ định)`);
+  for (const t of ["Dạ mình trả tiền khi nhận hàng ạ", "Nếu hàng lỗi shop hoàn tiền 100% ạ", "Đổi trong 3 ngày nếu hàng lỗi", "Chị muốn đổi địa chỉ giao không ạ?", "Em sẽ chuyển nhân viên đổi địa chỉ cho chị", "Dạ em ghi đơn cho chị rồi ạ"]) {
+    assert.ok(!detectClaims(t).includes("ORDER_EDITED") && !detectClaims(t).includes("REFUND_PROMISE"), `«${t}» không phải khẳng định sửa đơn / hứa hoàn tiền`);
+  }
 }
 
 function testDetect() {
@@ -247,12 +268,21 @@ function testSourceScan() {
   assert.ok(!/deliveredText = r\.deliver|__deliver: r\.deliver/.test(core), "không đường nào dùng r.deliver chưa qua hàng rào");
   // (e) Mọi tin assistant ghi thẳng trong lượt là một trong ba dạng đã qua hàng rào.
   const appends = [...core.matchAll(/appendMessage\(conv\.id, seq\+\+, "assistant", ([^)]*?)\);/g)].map((m) => m[1].trim());
-  const allowed = new Set(["content", '[{ type: "text", text: held }]', '[{ type: "text", text: blk.safe }]']);
+  // P0 14/10/2026: chữ có số tiền viết cùng tin với công cụ tính tiền GIỮ tới sau công cụ (`out` — qua guardOutgoing theo báo giá mới) và
+  // câu thay của nó (`safe` — câu an toàn / câu giữ đơn / câu nói lại tổng máy chủ).
+  const allowed = new Set(["content", '[{ type: "text", text: held }]', '[{ type: "text", text: blk.safe }]', '[{ type: "text", text: out }]', '[{ type: "text", text: safe }]']);
   for (const a of appends) assert.ok(allowed.has(a), `tin assistant ghi thẳng chưa khai: ${a}`);
-  assert.equal(appends.length, 3, "ba chỗ ghi tin assistant: chữ model · câu giữ lại · câu an toàn");
+  assert.equal(appends.length, 5, "năm chỗ ghi tin assistant: chữ model · câu giữ lại · câu an toàn · chữ có số tiền giữ tới sau công cụ · câu thay của nó");
+  const heldLoop = core.slice(core.indexOf("for (const out of heldMoney)"), core.indexOf("// Câu «đã chốt» giữ lại ở trên"));
+  assert.ok(heldLoop.indexOf("guardOutgoing(out") > 0 && heldLoop.indexOf("guardOutgoing(out") < heldLoop.indexOf('text: out }]'), "chữ có số tiền giữ lại qua guardOutgoing TRƯỚC khi ghi");
   // (f) Mọi chữ hằng gửi qua `reply()` không mang khẳng định; đối số không phải hằng thì nằm trong danh sách đã biết.
-  const knownExpr = new Set(["cfg.handoff.message", "cfg.businessHours.outsideMessage", "EMPTY_REPLY_TEXT", "aiDownReply(cfg)", "pick.text", "safeText", "b.safe", "CLAIM_SAFE_TEXT.PRICE_DISPUTE"]);
+  // `draftUnsaid` (tóm tắt đơn theo kết quả công cụ) và `fallback` (câu hỏi đúng phần còn thiếu) đều qua guardOutgoing ngay trước reply.
+  const knownExpr = new Set(["cfg.handoff.message", "cfg.businessHours.outsideMessage", "EMPTY_REPLY_TEXT", "aiDownReply(cfg)", "pick.text", "safeText", "b.safe", "CLAIM_SAFE_TEXT.PRICE_DISPUTE", "CLAIM_SAFE_TEXT.REFUND", "draftUnsaid", "fallback"]);
+  assert.match(core, /guardOutgoing\(draftUnsaid, [^\n]*\n\s*await reply\(conv, seq\+\+, draftUnsaid\)/, "tóm tắt đơn qua guardOutgoing trước reply");
+  assert.match(core, /guardOutgoing\(ask, [^\n]*\n(?:[^\n]*\n){0,12}\s*await reply\(conv, seq\+\+, fallback\)/, "câu hỏi lại qua guardOutgoing trước reply");
   assert.deepEqual(detectClaims(CLAIM_SAFE_TEXT.PRICE_DISPUTE), [], "câu an toàn khi khách phản đối giá không mang khẳng định");
+  assert.deepEqual(detectClaims(CLAIM_SAFE_TEXT.REFUND), [], "câu an toàn khi khách khiếu nại (máy chủ chuyển người) không mang khẳng định / lời hứa");
+  assert.deepEqual(detectClaims(CLAIM_SAFE_TEXT.ORDER_EDIT), [], "câu an toàn khi chặn «đã sửa đơn» không tự mang khẳng định");
   for (const arg of replyArgs(core)) {
     if (/^["'`]/.test(arg)) {
       const literal = arg.slice(1, -1).replace(/\$\{[^}]*\}/g, " ");

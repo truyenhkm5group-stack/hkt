@@ -9,8 +9,8 @@ import { formatDateTime, formatNumber } from "@/lib/format";
 import { getBotAdStatus, loadAdBotLines } from "@/lib/integrations/chatbot/ad-bots";
 import { manualAdPageOptions } from "@/lib/integrations/chatbot/ad-test";
 import { ChatTestButton } from "@/app/(dashboard)/marketing/creatives/chat-test";
-import { ManualAdForm, RemoveManualAdButton } from "@/app/(dashboard)/chatbot/ad-bots/manual-ad";
-import { manualAdKey } from "@/lib/constants/chatbot-ad-bots";
+import { ManualAdForm, PageProductForm, RemoveManualAdButton, RemovePageProductButton } from "@/app/(dashboard)/chatbot/ad-bots/manual-ad";
+import { manualAdKey, pageProductKey } from "@/lib/constants/chatbot-ad-bots";
 import { AdBotEditor, AdBotsGlobalControls } from "@/app/(dashboard)/chatbot/ad-bots/ad-bot-controls";
 
 export const metadata = { title: "Bot riêng theo quảng cáo" };
@@ -34,7 +34,7 @@ const RUNNING = new Set(["LIVE", "ACTIVE"]);
  */
 export default async function ChatbotAdBotsPage() {
   await requirePermission("cs:config");
-  const [{ lines, config }, bot, pageOptions] = await Promise.all([loadAdBotLines(), getBotAdStatus(), manualAdPageOptions().catch(() => [])]);
+  const [{ lines, pageLines, config }, bot, pageOptions] = await Promise.all([loadAdBotLines(), getBotAdStatus(), manualAdPageOptions().catch(() => [])]);
   const seen = bot.reachable ? bot.seen : {};
   const known = new Set(lines.map((l) => l.adId));
   const unknownSeen = Object.entries(seen)
@@ -81,6 +81,34 @@ export default async function ChatbotAdBotsPage() {
           </Link>{" "}
           → chọn page → tab Chat thử → chọn quảng cáo ở ô &quot;Giả lập khách bấm quảng cáo&quot;.
         </p>
+      </SectionCard>
+
+      <SectionCard
+        title="Sản phẩm của page (mẫu mới chưa có trên POS)"
+        description="Cho page chỉ bán một mẫu mới chưa lên POS. Chọn page, tải ảnh từng màu, nhập tên · mã tạm · giá · chất vải · size · ưu đãi, chat thử rồi bật. Bot của page đó chỉ tư vấn theo đúng thông tin đã nhập, không lấy danh mục POS, không tự thêm bớt; điều chưa có thì bot nói kiểm tra rồi báo khách. Bot lên đơn POS không tự lên đơn cho page này — nhân viên lên đơn tay."
+      >
+        <div className="space-y-3">
+          {pageLines.length ? (
+            <ul className="space-y-2 text-sm">
+              {pageLines.map((l) => {
+                const name = pageOptions.find((p) => p.id === l.pageId)?.name || `Page ${l.pageId}`;
+                return (
+                  <li key={l.key} className="flex flex-wrap items-center gap-2">
+                    <b>{name}</b>
+                    <Badge variant={l.live ? "default" : "outline"}>{l.live ? "Đang chạy cho khách" : l.missing.length ? "Còn thiếu thông tin" : "Chưa bật — chỉ chat thử"}</Badge>
+                    <span className="text-muted-foreground">
+                      {l.test ? `${l.test.name || "—"} (${l.test.code || "chưa có mã tạm"}) · ${l.test.colors.length} màu${l.test.fabric ? ` · ${l.test.fabric}` : ""}` : "Chưa nhập thông tin"}
+                      {l.missing.length ? ` · thiếu: ${l.missing.join(", ")}` : ""}
+                    </span>
+                    <ChatTestButton campKey={pageProductKey(l.pageId)} />
+                    <RemovePageProductButton pageId={l.pageId} />
+                  </li>
+                );
+              })}
+            </ul>
+          ) : null}
+          <PageProductForm pages={pageOptions} usedPageIds={pageLines.map((l) => l.pageId)} />
+        </div>
       </SectionCard>
 
       <SectionCard

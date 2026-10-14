@@ -371,6 +371,7 @@ import { testOrgOrderAuditPure } from "./org-order-audit.test";
 import { testMetaCapiDb, testMetaCapiPure } from "./meta-capi.test";
 import { testOrgCatalogDb, testOrgCatalogPure } from "./org-catalog.test";
 import { testVnAddress } from "./vn-address.test";
+import { testAddressNormalizePure, testAddressNormalizeTools } from "./address-normalize.test";
 import { testVelocityUnifyDb, testVelocityUnifyPure } from "./velocity-unify.test";
 import { testOutreachClearanceUnit } from "./outreach-clearance-unit.test";
 import { testPageUsageDb, testPageUsagePure, testPageUsageSource } from "./page-usage.test";
@@ -403,6 +404,7 @@ import { testSessionRenewal } from "./session-renewal.test";
 import { testSessionRevocation } from "./session-revocation.test";
 import { testReportingParity } from "./reporting-parity.test";
 import { testEstimatedCost } from "./estimated-cost.test";
+import { testCostCenter } from "./cost-center.test";
 import { testLoginThrottle } from "./login-throttle.test";
 import { testWebhookHardening } from "./webhook-hardening.test";
 import { testWebhookLogRedaction } from "./webhook-log-redaction.test";
@@ -495,6 +497,7 @@ import { testSalesOrderSync } from "./sales-order-sync.test";
 import { testSalesReplay } from "./sales-replay.test";
 import { testSalesOperatingMode } from "./sales-operating-mode.test";
 import { testSalesInbox } from "./sales-inbox.test";
+import { testInboxMessageSync } from "./inbox-message-sync.test";
 import { testInboxAdvanced } from "./inbox-advanced.test";
 import { testInboxComposer } from "./inbox-composer.test";
 import { testInboxV2A } from "./inbox-v2-a.test";
@@ -502,10 +505,15 @@ import { testInboxAvatarProfile } from "./inbox-avatar-profile.test";
 import { testPancakeAvatarShape } from "./pancake-avatar-shape.test";
 import { testAvatarProxyCheck } from "./avatar-proxy-check.test";
 import { testSenderProvenanceProbe } from "./sender-provenance-probe.test";
+import { testPancakeThreadDiff } from "./pancake-thread-diff.test";
 import { testInboxUnreadDryrun } from "./inbox-unread-dryrun.test";
+import { testOrgMigrateIsolation } from "./org-migrate-isolation.test";
+import { testMigrationServeCompat } from "./migration-serve-compat.test";
+import { testStuckConversationAudit } from "./stuck-conversation-audit.test";
 import { testAvatarProxy } from "./avatar-proxy.test";
 import { testInboxSemanticsV3 } from "./inbox-semantics-v3.test";
 import { testHandoffOwnership } from "./handoff-ownership.test";
+import { testPostSaleLifecycle } from "./postsale-lifecycle.test";
 import { testInboxReadV3 } from "./inbox-read-v3.test";
 import { testInboxUnreadPerf } from "./inbox-unread-perf.test";
 import { testInboxSearch } from "./inbox-search.test";
@@ -551,8 +559,13 @@ import { testOnboardingV2 } from "./onboarding-v2.test";
 import { testSalesVision } from "./sales-vision.test";
 import { testSalesClaimGuard } from "./sales-claim-guard.test";
 import { testSalesQuoteIntegrity } from "./sales-quote-integrity.test";
+import { testSalesCartCommitment } from "./sales-cart-commitment.test";
+import { testConvMoneyTrace } from "./conv-money-trace.test";
+import { testSalesQuote640 } from "./sales-quote-640.test";
 import { testSalesIntegrityAudit } from "./sales-integrity-audit.test";
+import { testCartIntentAudit } from "./cart-intent-audit.test";
 import { testFollowupLifecycle } from "./followup-lifecycle.test";
+import { testCustomer360 } from "./customer-360.test";
 import { testChatWidget } from "./chat-widget.test";
 import { testWebProductImport } from "./web-product-import.test";
 import { testMessenger } from "./messenger.test";
@@ -586,6 +599,7 @@ import { testOpsSignals } from "./ops-signals.test";
 import { testOpsSignalsCheck } from "./ops-signals-check.test";
 import { testSecurityAcceptance } from "./security-acceptance.test";
 import { testInboxPerfProbe } from "./inbox-perf-probe.test";
+import { testInboxListPerf } from "./inbox-list-perf.test";
 import { testTestOrgCodes } from "./test-org-codes.test";
 import { testHelpGuides } from "./help-guides.test";
 import { testChotDonAssets, testChotDonBrand, testMissedOrdersCalculator, testOrgLinkOrigin, testPublicSiteData, testPublicSiteHost, testPublicSiteSource } from "./public-site.test";
@@ -2342,6 +2356,9 @@ async function main() {
   await testOrgCatalogDb();
   // Chuẩn hoá địa chỉ theo địa giới 01/07/2025 — đơn bot / máy ghi chỉ có một dòng chữ (05/10/2026).
   testVnAddress();
+  // P0 address-normalize (11/10/2026): địa chỉ tự do ⇒ mức tin cậy + câu hỏi khách; bot không chốt đơn địa chỉ mơ hồ khi khách chưa được hỏi.
+  testAddressNormalizePure();
+  await testAddressNormalizeTools();
   // Company OS · Agent V: MỘT tốc độ bán (Kế hoạch SX) cho Hàng chậm / Quyết định vốn tồn / Hiệu quả mẫu mã + ops velocity-compare (mã `cos-v-` / `COSV`, tự dọn).
   testVelocityUnifyPure();
   testOutreachClearanceUnit();
@@ -2495,6 +2512,8 @@ async function main() {
   await testReportingParity(db);
   // Ngay sau đó: gieo ba mã riêng tiền tố `gvdt-` và một dòng settings giá dự tính, rồi TỰ DỌN sạch cả hai.
   await testEstimatedCost(db);
+  // P0 hợp nhất giá vốn (13/10/2026): Trung tâm giá vốn + hai chế độ BCLN — tám kịch bản nghiệm thu của chủ shop.
+  await testCostCenter(db);
   await testLoginThrottle();
   await testWebhookHardening();
   testWebhookLogRedaction();
@@ -2916,6 +2935,8 @@ async function main() {
   // Chế độ vận hành (quan sát · copilot · thử nghiệm · tự động): tổ chức THẬT `om-shop`, Pancake + provider giả.
   await testSalesOperatingMode();
   await testSalesInbox();
+  // Đồng bộ tin Pancake → hộp thư (P0 HSLC 14/10/2026): câu nhân viên trên Pancake đẩy hội thoại lên đầu + phát sự kiện; trùng / chậm / sai thứ tự; sức khoẻ trễ webhook → sổ.
+  await testInboxMessageSync();
   // Hộp thư nâng cao: level khách · lọc · lịch sử giao · góp ý cho AI — tổ chức THẬT `hop-thu-nang-cao` (tự cấp, tự dọn).
   await testInboxAdvanced();
   // Ô soạn hộp thư: chèn câu mẫu / dòng sản phẩm (giá = giá bot, tồn chỉ khi đọc được), quyền ≡ «Gửi», cô lập — `o-soan-a` / `o-soan-b`.
@@ -2931,14 +2952,24 @@ async function main() {
   testAvatarProxyCheck();
   // Ops sender-provenance-probe (11/10/2026): tin phía page mang dấu người gửi gì — đo rủi ro AI chen vào cuộc chat người trước deploy P0. Thuần + quét mã nguồn.
   testSenderProvenanceProbe();
+  // Ops pancake-thread-diff (P0 HSLC 14/10/2026): tin Pancake đối chiếu sổ tin ERP + hộp thư — khớp mã/chữ, quá mới, trễ webhook. Thuần + quét mã nguồn.
+  testPancakeThreadDiff();
   // Ops inbox-unread-dryrun (11/10/2026, điều kiện duyệt #792): chạy thử «chưa đọc» theo hàm #803 so với luật đang chạy + bấm giờ câu dẫn xuất — CHỈ ĐỌC. Thuần + quét mã nguồn + PGlite.
   await testInboxUnreadDryrun();
+  // Migrate CSDL tổ chức cô lập (sự cố 0245 ở qa 12/10/2026): khoá theo tổ chức có trần chờ · lùi sau lỗi · trần mỗi tổ chức của verify-migrations · ops org-migrate-probe chỉ đọc. Thuần + PGlite + quét mã nguồn.
+  await testOrgMigrateIsolation();
+  // Phục vụ bằng lược đồ cũ (chủ shop 12/10/2026, «Serve with old schema»): sổ tương thích 0245 chứng minh bằng PGlite dừng ở 0244 + mã hiện tại; DEGRADED_MIGRATION chỉ khi hết giờ VÀ mọi mục thiếu trong sổ — tổ chức `serve-compat-0245`.
+  await testMigrationServeCompat();
+  // Ops stuck-conversation-audit (HOTFIX P0 12/10/2026, ca «Khanh Nhung»): hội thoại AI kẹt theo nhóm lý do · không chủ · SLA · nhắn lại sau đơn · đơn chưa đồng bộ — CHỈ ĐỌC. Thuần + quét mã nguồn + PGlite.
+  await testStuckConversationAudit();
   // Ảnh khách qua proxy ERP (11/10/2026): URL Pancake mang khoá ⇒ cất bản KHÔNG khoá, máy chủ gắn token lúc tải; chặn SSRF, đệm LRU, quyền theo tổ chức — tổ chức `anh-dai-dien-proxy`, fetch giả.
   await testAvatarProxy();
   // INBOX-SEMANTICS-V3 (chủ shop 10/10/2026): bốn khái niệm tách riêng — chưa đọc (AI trả lời không xoá) · chờ trả lời · cần người thật · người đang xử lý; ma trận 20 hội thoại × mọi bộ lọc — tổ chức `hop-thu-sem-v3`.
   await testInboxSemanticsV3();
   // AI IM THÌ PHẢI CÓ CHỦ (P0 11/10/2026, yêu cầu 9): chuyển người ⇒ hàng đợi phòng (work.ownership) + hạn (work.sla) · một tin mỗi đợt · tin khách mới ⇒ một thông báo · trả AI xoá hạn · phân việc bật ⇒ người còn chỗ · câu đếm «không chủ» = 0 — tổ chức `chuyen-nguoi-co-chu`.
   await testHandoffOwnership();
+  // HẬU MÃI + AI DỪNG + HÀNG ĐỢI CHUNG (HOTFIX P0 12/10/2026, ca HSLC «Khanh Nhung»): giai đoạn khách sau khi có đơn (lời khách không đổi logistics) · đồng hồ AI hỏng đọc mốc thật · watchdog mở lại nhường hết hạn, không đụng chuyển người bắt buộc · phòng trống ⇒ hàng đợi chung + 1 tin quản trị/ngày · trả-cho-AI luật cũ chạy thử / --apply / idempotent · cách ly tổ chức — tổ chức `hau-mai-ai-dung` + `hau-mai-cach-ly`.
+  await testPostSaleLifecycle();
   // INBOX READ V3 (chủ shop 10/10/2026 tối, P0): «chưa đọc» = có tin KHÁCH thật sau con trỏ đọc CỦA NGƯỜI XEM (0239); nạp khung chat ≠ đọc; con trỏ = tin khách cuối của payload, chỉ tiến; xem trước tin khách khi chưa đọc; danh sách vá theo xác nhận đọc; audit FALSE-UNREAD = 0 — tổ chức `hop-thu-doc-v3`.
   await testInboxReadV3();
   // INBOX UNREAD PERF (chủ shop 11/10/2026, OWNER CORRECTION): «tin khách chưa đọc» = lượt khách mới nhất chưa xử lý — hàm của response-ownership (#803) sau cổng rẻ 0245 (trigger CSDL); ma trận chủ shop qua listInbox · A→B · parity cổng + hàm ≡ hàm trần ≡ bản TS trên 3.000 hội thoại · cổng đúng sau mọi đường ghi · audit TRƯỚC/SAU — tổ chức `hop-thu-unread-perf`.
@@ -2993,12 +3024,27 @@ async function main() {
   // P0 11/10/2026 — báo giá do MÁY CHỦ quyết (quote.ts): 2kg = 2 × 1kg − giảm, catalog mâu thuẫn ⇒ chưa xác thực, số tiền trong chữ bot
   // phải thuộc báo giá đã xác thực, «đã lên đơn» chỉ khi đơn qua kiểm — tổ chức THẬT `gd-food-qi1` / `gd-food-qi2`.
   await testSalesQuoteIntegrity();
+  // P0 12/10/2026 — giỏ có thẩm quyền (cart-commitment.ts): số lượng khách nói tường minh DÍNH tới khi khách sửa tường minh; công cụ
+  // ghi đơn hạ / bỏ món ⇒ máy chủ từ chối; ma trận G1–G6 qua chatTurn thật — tổ chức THẬT `gd-food-cc1` / `gd-food-cc2`.
+  await testSalesCartCommitment();
+  // P0 14/10/2026 — tổng tiền trong chữ bot = tổng máy chủ của giỏ hiện tại (ca «Châu Dương» 640k cho 1kg 280k) · lượt im không «nói rõ
+  // hơn» (ca «Viet Nguyen Thi») · upsell chưa đồng ý không vào đơn · tin vọng lại / trùng không sinh tin — tổ chức THẬT `gd-food-q640`.
+  await testSalesQuote640();
   // P0 11/10/2026 — ops sales-integrity-audit: giá bot ≠ giá đơn · giá tự đổi · xác nhận giả · chuyển người không ai nhận ·
   // địa chỉ chưa ghép · nhắc sau đơn chốt — thuần + CSDL thật (mã `erp-ia-`, tự dọn), tóm tắt không lọt PII.
   await testSalesIntegrityAudit();
+  // P0 12/10/2026 — ops cart-intent-audit: bot tự hạ số lượng khách đã nói / đơn đủ ORDER_READY vẫn bị hỏi · mời — thuần + CSDL thật
+  // (hội thoại dựng theo ca HSLC, tự dọn), tóm tắt không lọt PII, chỉ đọc, ops khai đủ bốn chỗ.
+  await testCartIntentAudit();
+  // P0 14/10/2026 — ops conv-money-trace: số TỔNG trong tin bot ≠ báo giá giỏ (ca «Châu Dương» 640k cho 1kg 280k) · câu «nói rõ hơn»
+  // của engine khi khách không nhắn gì (ca «Viet Nguyen Thi») — thuần + CSDL thật (tự dọn), tóm tắt không lọt PII, chỉ đọc.
+  await testConvMoneyTrace();
   // P0 11/10/2026 (KimThu Le) — vòng đời khách dùng chung + follow-up đọc lại ngay trước khi gửi (đơn thật · chứng từ thu ·
   // từ chối nhận tin · người / nguồn khác vừa nhắn), khoá gửi chống trùng, vết quyết định — tổ chức THẬT `fu-life` (tự cấp, tự dọn).
   await testFollowupLifecycle();
+  // Customer 360 (11/10/2026, ca «Nga Ho Thien»): nhận diện khách cũ qua đơn của chính hội thoại / SĐT, địa chỉ cũ ĐÃ XÁC MINH,
+  // «vẫn địa chỉ cũ» ⇒ tra trước khi hỏi — tổ chức THẬT `gd-food-c360` / `gd-fashion-c360` (tổ chức khác không lọt).
+  await testCustomer360();
   // Đơn cần người kiểm (chủ shop 08/10/2026): khách huỷ ⇒ ghi chú + cờ, xã chưa ghép ⇒ cờ, nút nhanh Xác nhận / Huỷ, lời xác nhận,
   // SĐT chuẩn hoá — tổ chức THẬT `or-rv` (không Pancake; tự cấp, tự dọn).
   await testOrderReview();
@@ -3094,6 +3140,9 @@ async function main() {
   // Ops `inbox-perf-probe`: Hộp thư khách — tải / chuyển hội thoại bấm giờ ĐÚNG chuỗi hàm máy chủ của page.tsx, CHỈ ĐỌC (handle chỉ đọc,
   // danh tính chỉ xem không ghi staff_seen_at), công khai che tổ chức thành org#i, mẫu < 3 ⇒ chưa kết luận, không đích. Tổ chức THẬT `ipp-a`.
   await testInboxPerfProbe();
+  // P0 inbox-list-perf (13/10/2026): thứ tự rẻ trước ≡ bản chuẩn #803 từng hội thoại · listInbox tính trực tiếp ≡ lưu sẵn trên ≥ 5.000
+  // hội thoại (số đo in ra) · chuyển hội thoại không dựng lại danh sách · tự làm mới không chồng lượt. Tổ chức THẬT `hop-thu-list-perf`.
+  await testInboxListPerf();
   testHelpGuides();
   // Trang giới thiệu: bảng giá đọc thật từ platform_plans, gói khởi điểm không bao giờ in thành 0 ₫.
   await testPublicSiteData();
