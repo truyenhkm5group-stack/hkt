@@ -23,19 +23,20 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-14T04:30:41.742Z",
-  "updated_at": "2026-10-14T06:55:24.277Z",
-  "last_heartbeat": "2026-10-14T06:55:24.277Z",
+  "updated_at": "2026-10-14T08:08:54.460Z",
+  "last_heartbeat": "2026-10-14T08:08:54.460Z",
   "definition_of_done": [],
   "handoff": {
     "branch": "fix/inbox-message-sync",
-    "sha": "d2e3b11680f742c2b9dead6b3a9666712913238b",
-    "at": "2026-10-14T06:55:24.277Z",
+    "sha": "57ae4dcb7623d8dd1e4a208e438a54565715ae2f",
+    "at": "2026-10-14T08:08:54.460Z",
     "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
     "title": "P0: tin phía page (NV trên Pancake) đẩy hội thoại lên đầu hộp thư + phát realtime; kiểm INGEST trễ webhook→sổ p95 > 5 s",
     "summary": "",
     "tests": [
-      "testIngestHealth (gồm kiểm cửa sổ source_at): đạt",
-      "tsc + eslint: sạch"
+      "testIngestHealth: đạt",
+      "tsc + eslint: sạch",
+      "cập nhật nhánh theo main"
     ]
   }
 }
