@@ -527,6 +527,26 @@ export function commitmentViolation(cart: CartCommitment | undefined, asked: rea
 }
 
 /**
+ * MÓN MỜI CHƯA ĐƯỢC KHÁCH ĐỒNG Ý (P0 14/10/2026): sản phẩm trong đơn đề nghị mà KHÔNG khớp món nào khách đã nói tường minh và không có
+ * sẵn trong đơn nháp trước. Dùng ngay sau câu mời thêm món (khách chưa kịp trả lời) — AI không được tự đưa món mời vào đơn / vào tổng.
+ * Món khách nói không kèm tên («cho chị 1kg») khớp được BẤT KỲ sản phẩm nào: chỉ báo khi số sản phẩm lạ vượt số món không tên đó.
+ * Giỏ chưa có món khách nói ⇒ `[]` (không đủ căn cứ để chặn). HÀM THUẦN.
+ */
+export function unrequestedProducts(cart: CartCommitment | undefined, asked: readonly AskedLine[], existingVariantIds: readonly string[] = []): string[] {
+  const explicit = cart?.selectedItems.filter((x) => x.customerExplicit) ?? [];
+  if (!explicit.length) return [];
+  const products = [...new Set(asked.map((l) => l.productId ?? l.variantId))];
+  const strange = products.filter((p) => {
+    const lines = asked.filter((l) => (l.productId ?? l.variantId) === p);
+    if (lines.some((l) => existingVariantIds.includes(l.variantId))) return false;
+    return !explicit.some((it) => (it.productId && it.productId === p) || (it.match && lines.some((l) => labelsMatch(it.match, l.name))));
+  });
+  const unnamed = explicit.filter((it) => !it.productId && !it.match).length;
+  if (strange.length <= unnamed) return [];
+  return strange.map((p) => productName(asked.find((l) => (l.productId ?? l.variantId) === p)?.name ?? "") || "món mời");
+}
+
+/**
  * Sau khi đơn nháp ghi xong: gắn sản phẩm / mẫu mã / quy cách gói cho món của giỏ (tên = tên DANH MỤC), và ghi món bot đề xuất mà
  * khách chưa nói số (`customerExplicit = false`, không dính) theo đúng lượng của đơn. Món khách đã nói giữ NGUYÊN số khách nói (sàn).
  * HÀM THUẦN.

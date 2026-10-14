@@ -558,6 +558,7 @@ import { testSalesClaimGuard } from "./sales-claim-guard.test";
 import { testSalesQuoteIntegrity } from "./sales-quote-integrity.test";
 import { testSalesCartCommitment } from "./sales-cart-commitment.test";
 import { testConvMoneyTrace } from "./conv-money-trace.test";
+import { testSalesQuote640 } from "./sales-quote-640.test";
 import { testSalesIntegrityAudit } from "./sales-integrity-audit.test";
 import { testCartIntentAudit } from "./cart-intent-audit.test";
 import { testFollowupLifecycle } from "./followup-lifecycle.test";
@@ -3017,6 +3018,9 @@ async function main() {
   // P0 12/10/2026 — giỏ có thẩm quyền (cart-commitment.ts): số lượng khách nói tường minh DÍNH tới khi khách sửa tường minh; công cụ
   // ghi đơn hạ / bỏ món ⇒ máy chủ từ chối; ma trận G1–G6 qua chatTurn thật — tổ chức THẬT `gd-food-cc1` / `gd-food-cc2`.
   await testSalesCartCommitment();
+  // P0 14/10/2026 — tổng tiền trong chữ bot = tổng máy chủ của giỏ hiện tại (ca «Châu Dương» 640k cho 1kg 280k) · lượt im không «nói rõ
+  // hơn» (ca «Viet Nguyen Thi») · upsell chưa đồng ý không vào đơn · tin vọng lại / trùng không sinh tin — tổ chức THẬT `gd-food-q640`.
+  await testSalesQuote640();
   // P0 11/10/2026 — ops sales-integrity-audit: giá bot ≠ giá đơn · giá tự đổi · xác nhận giả · chuyển người không ai nhận ·
   // địa chỉ chưa ghép · nhắc sau đơn chốt — thuần + CSDL thật (mã `erp-ia-`, tự dọn), tóm tắt không lọt PII.
   await testSalesIntegrityAudit();

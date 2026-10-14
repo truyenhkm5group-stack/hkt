@@ -32,6 +32,7 @@ import { getDb, schema } from "@/db";
 import { isManualOrderId, manualOrderGaps } from "@/lib/constants/manual-orders";
 import { manualOrderAmountDue, manualPaymentStatus, sumConfirmedPayments } from "@/lib/constants/order-payments";
 import { orderReviewOf } from "@/lib/constants/order-review";
+import { formatVND } from "@/lib/format";
 import { PRICE_UNVERIFIED_PREFIX } from "@/lib/sales-chatbot/quote-shared";
 import { foldVi } from "@/lib/sales-chatbot/text";
 import type { ChatState } from "@/lib/sales-chatbot/tools";
@@ -94,7 +95,16 @@ export type ClaimKind = "PAYMENT_RECEIVED" | "ORDER_CONFIRMED" | "ORDER_CANCELLE
  * `orderEditedThisTurn` (HOTFIX 12/10/2026) = công cụ lên / sửa đơn ĐÃ GHI THÀNH CÔNG trong CHÍNH lượt này (`state.draft.shownTurn` = lượt) —
  * căn cứ duy nhất cho câu «em đã đổi địa chỉ / đã thêm món vào đơn». Vắng ⇒ không có căn cứ.
  */
-export type ClaimFacts = { paymentVerified: boolean; orderConfirmed: boolean; orderCancelled: boolean; orderPending?: "ADDRESS" | "CHECK" | null; allowedAmounts?: ReadonlySet<number>; orderEditedThisTurn?: boolean };
+/**
+ * `totals` (P0 14/10/2026, ca «Châu Dương» — bot báo TỔNG 640.000 ₫ cho 1kg 280.000 ₫): số TỔNG của REVISION giỏ / nháp / đơn chốt
+ * hiện tại theo báo giá máy chủ (`totalAllowedOf`). Vắng ⇒ hội thoại chưa có giỏ ⇒ số «tổng» xét như mọi số tiền khác (tập tham chiếu).
+ * Có ⇒ một số mang nghĩa «tổng» trong chữ bot phải THUỘC `totals.allowed`; `current` = tổng để nói lại cho khách (`null` = báo giá đã
+ * cũ so với giỏ / chưa biết phí ship ⇒ không có số nào để nói thay).
+ */
+export type ClaimTotals = { allowed: ReadonlySet<number>; current: ServerTotal | null; stale: boolean };
+/** Tổng để nói lại: `shipping` = phí ship đã gồm trong tổng · `null` = không tách được (đơn đã chốt) · `"UNKNOWN"` = phí ship chưa biết (tổng = tiền hàng). */
+export type ServerTotal = { total: number; shipping: number | null | "UNKNOWN" };
+export type ClaimFacts = { paymentVerified: boolean; orderConfirmed: boolean; orderCancelled: boolean; orderPending?: "ADDRESS" | "CHECK" | null; allowedAmounts?: ReadonlySet<number>; orderEditedThisTurn?: boolean; totals?: ClaimTotals };
 /** `handoff = false` ⇒ thay câu nhưng KHÔNG chuyển người (câu an toàn vẫn gửi trên mọi kênh). */
 export type ClaimVerdict = { ok: true } | { ok: false; claim: ClaimKind; safeText: string; handoffReason: string; note: string; handoff: boolean; amounts?: number[] };
 
@@ -303,13 +313,90 @@ export function detectPriceDispute(customerText: string, quote: { amounts: reado
   return null;
 }
 
+/** Bỏ dấu GIỮ NGUYÊN độ dài (mỗi ký tự ra đúng một ký tự, ký tự ngoài chữ / số thành khoảng trắng) — chỉ số dùng được trên chữ gốc. HÀM THUẦN. */
+export function foldKeepLength(s: string): string {
+  let out = "";
+  for (const ch of s) {
+    const b = ch.normalize("NFD").replace(/\p{M}/gu, "").replace(/đ/g, "d").replace(/Đ/g, "D").toLowerCase();
+    out += b.length === 1 && /[a-z0-9]/.test(b) ? b : " ".repeat(ch.length);
+  }
+  return out;
+}
+
+/** Cụm đứng trước một số tiền làm nó là «TỔNG phải trả» (đã bỏ dấu). «tổng tiền hàng» là TIỀN HÀNG, không phải tổng. */
+const TOTAL_CUE_RE = /(?:^| )(?:tong +cong|tong +tien(?! +hang)|tong +don|tong +thanh +toan|tong(?! +tien +hang)|can +thanh +toan|thanh +toan|tat +ca +la|het +tat +ca|cod|thu +ho)(?= |$)/g;
+const NEXT_CUE_RE = /(?:^| )(?:tong|thanh +toan|cod|thu +ho)(?= |$)/;
+
+/**
+ * Số tiền mang nghĩa «TỔNG» trong chữ bot (P0 14/10/2026): mỗi dòng / câu có cụm tổng ⇒ phần SAU cụm (tới cụm tổng kế tiếp); có «=» ⇒
+ * phần sau dấu «=» cuối («280k + 30k = 310k»); lấy số tiền ĐẦU TIÊN của phần đó. «Thanh toán khi nhận hàng» không kèm số ⇒ không có
+ * gì. HÀM THUẦN.
+ */
+export function totalClaimsIn(text: string): number[] {
+  const out: number[] = [];
+  for (const seg of text.normalize("NFC").split(/\n|[.!?;]\s+(?=\p{Lu})/u)) {
+    const folded = foldKeepLength(seg);
+    TOTAL_CUE_RE.lastIndex = 0;
+    for (let m = TOTAL_CUE_RE.exec(folded); m; m = TOTAL_CUE_RE.exec(folded)) {
+      const from = m.index + m[0].length;
+      let rest = seg.slice(from);
+      const next = foldKeepLength(rest).search(NEXT_CUE_RE);
+      if (next > 0) rest = rest.slice(0, next);
+      const eqAt = rest.lastIndexOf("=");
+      if (eqAt >= 0) rest = rest.slice(eqAt + 1);
+      const first = extractVndAmounts(rest)[0];
+      if (typeof first === "number" && first > 0) out.push(first);
+    }
+  }
+  return [...new Set(out)];
+}
+
+/**
+ * Tập TỔNG hợp lệ của hội thoại — REVISION giỏ / nháp / đơn chốt hiện tại theo báo giá MÁY CHỦ (P0 14/10/2026). HÀM THUẦN.
+ *  · báo giá gần nhất `state.quote` (xác thực, đã biết phí ship) · báo giá của đơn nháp `state.draft.quote` · tổng đơn đã chốt.
+ *  · Giỏ có thẩm quyền ĐỔI sau báo giá gần nhất (khách sửa số lượng — `cart.at` mới hơn `quote.at`, không phải lượt «nới») ⇒ báo giá
+ *    đã CŨ: không tổng nào hợp lệ tới khi máy chủ tính lại (`stale`).
+ *  · Chưa có báo giá giỏ / nháp / chốt nào ⇒ `undefined` (số «tổng» xét như mọi số tiền khác).
+ */
+export function totalAllowedOf(state: Pick<ChatState, "quote" | "draft" | "confirmed" | "cart">): ClaimTotals | undefined {
+  const q = state.quote;
+  const draftTotal = state.draft?.quote ? state.draft.quote.total : undefined;
+  if (!q && draftTotal === undefined && !state.confirmed) return undefined;
+  const cartAt = state.cart ? Date.parse(state.cart.at) : NaN;
+  const quoteAt = q ? Date.parse(q.at) : NaN;
+  const stale = !state.confirmed && Number.isFinite(cartAt) && Number.isFinite(quoteAt) && cartAt > quoteAt && (state.cart?.relaxedTurn ?? null) === null;
+  if (stale) return { allowed: new Set<number>(), current: null, stale: true };
+  const allowed = new Set<number>();
+  if (q?.verified && q.total !== null && q.total > 0) allowed.add(q.total);
+  // Phí ship CHƯA BIẾT (luật 42) ⇒ «tổng» chỉ có thể là tiền hàng — câu thay nói rõ ship báo sau.
+  if (q?.verified && q.total === null && q.subtotal > 0) allowed.add(q.subtotal);
+  if (typeof draftTotal === "number" && draftTotal > 0) allowed.add(draftTotal);
+  if (state.confirmed && state.confirmed.total > 0) allowed.add(state.confirmed.total);
+  const current: ServerTotal | null =
+    q?.verified && q.total !== null && q.total > 0
+      ? { total: q.total, shipping: q.total - q.subtotal }
+      : q?.verified && q.total === null && q.subtotal > 0
+        ? { total: q.subtotal, shipping: "UNKNOWN" }
+        : state.confirmed && state.confirmed.total > 0
+          ? { total: state.confirmed.total, shipping: null }
+          : null;
+  return { allowed, current, stale: false };
+}
+
+/** Câu nói lại TỔNG theo báo giá máy chủ — thay câu bot báo sai tổng. HÀM THUẦN. */
+export function serverTotalText(current: ServerTotal): string {
+  if (current.shipping === "UNKNOWN") return `Dạ tiền hàng của mình là ${formatVND(current.total)}, phí ship nhân viên báo sau ạ.`;
+  const ship = current.shipping === null ? "" : current.shipping === 0 ? " (miễn phí ship)" : ` (đã gồm ${formatVND(current.shipping)} phí ship)`;
+  return `Dạ tổng đơn của mình là ${formatVND(current.total)}${ship} ạ.`;
+}
+
 /** Số tiền trong câu KHÔNG thuộc tập đã xác thực (0 luôn hợp lệ — «0 ₫», miễn ship). HÀM THUẦN. */
 export function unverifiedAmounts(amounts: readonly number[], allowed: ReadonlySet<number>): number[] {
   return [...new Set(amounts.filter((a) => a !== 0 && !allowed.has(a)))];
 }
 
 /** Bảng chân lý: khẳng định nào cần căn cứ nào. Không khẳng định ⇒ luôn qua. `amounts` = số tiền trong câu (khi có tập xác thực). HÀM THUẦN. */
-export function claimVerdict(claims: readonly ClaimKind[], facts: ClaimFacts, amounts: readonly number[] = []): ClaimVerdict {
+export function claimVerdict(claims: readonly ClaimKind[], facts: ClaimFacts, amounts: readonly number[] = [], totals: readonly number[] = []): ClaimVerdict {
   if (claims.includes("PAYMENT_RECEIVED") && !facts.paymentVerified) {
     return { ok: false, claim: "PAYMENT_RECEIVED", safeText: CLAIM_SAFE_TEXT.PAYMENT, handoffReason: CLAIM_HANDOFF_REASON.PAYMENT_RECEIVED, note: "Đã chặn câu AI khẳng định đã nhận tiền — chưa có chứng từ thu", handoff: true };
   }
@@ -332,6 +419,16 @@ export function claimVerdict(claims: readonly ClaimKind[], facts: ClaimFacts, am
   if (claims.includes("ORDER_EDITED") && !facts.orderEditedThisTurn) {
     return { ok: false, claim: "ORDER_EDITED", safeText: CLAIM_SAFE_TEXT.ORDER_EDIT, handoffReason: CLAIM_HANDOFF_REASON.ORDER_EDITED, note: "Đã chặn câu AI khẳng định đã sửa đơn — không công cụ nào ghi trong lượt", handoff: true };
   }
+  // TỔNG phải là tổng của REVISION giỏ / nháp hiện tại (P0 14/10/2026). Có báo giá ⇒ nói lại đúng tổng máy chủ (không chuyển người);
+  // báo giá đã cũ so với giỏ / không có tổng để nói ⇒ chặn như số tiền chưa xác thực.
+  const tf = facts.totals;
+  const badTotals = tf ? totals.filter((t) => !tf.allowed.has(t)) : [];
+  if (tf && badTotals.length) {
+    const cur = tf.current;
+    const note = `Đã chặn câu báo TỔNG ${badTotals.map((n) => formatVND(n)).join(", ")} — ${tf.stale ? "giỏ vừa đổi, báo giá máy chủ đã cũ" : cur ? `tổng máy chủ của giỏ hiện tại là ${formatVND(cur.total)}` : "chưa có tổng máy chủ để đối chiếu"}`;
+    if (cur) return { ok: false, claim: "PRICE_UNVERIFIED", safeText: serverTotalText(cur), handoffReason: CLAIM_HANDOFF_REASON.PRICE_UNVERIFIED, note, handoff: false, amounts: badTotals };
+    return { ok: false, claim: "PRICE_UNVERIFIED", safeText: CLAIM_SAFE_TEXT.PRICE, handoffReason: CLAIM_HANDOFF_REASON.PRICE_UNVERIFIED, note, handoff: true, amounts: badTotals };
+  }
   if (facts.allowedAmounts && amounts.length) {
     const bad = unverifiedAmounts(amounts, facts.allowedAmounts);
     if (bad.length) {
@@ -343,7 +440,7 @@ export function claimVerdict(claims: readonly ClaimKind[], facts: ClaimFacts, am
 
 /** `detectClaims` + `claimVerdict`. HÀM THUẦN. */
 export function guardClaims(text: string, facts: ClaimFacts): ClaimVerdict {
-  return claimVerdict(detectClaims(text), facts, extractVndAmounts(text));
+  return claimVerdict(detectClaims(text), facts, extractVndAmounts(text), totalClaimsIn(text));
 }
 
 /**
@@ -355,7 +452,7 @@ export async function guardOutgoing(text: string, facts: () => Promise<ClaimFact
   const amounts = extractVndAmounts(text);
   if (!claims.length && !amounts.length) return { ok: true };
   const f = await facts().catch((): ClaimFacts => ({ paymentVerified: false, orderConfirmed: false, orderCancelled: false, allowedAmounts: new Set([0]), orderEditedThisTurn: false }));
-  return claimVerdict(claims, f, amounts);
+  return claimVerdict(claims, f, amounts, totalClaimsIn(text));
 }
 
 /** Lời khách «đã chuyển khoản» gõ tay (đã bỏ dấu) — chỉ cụm nói về TIỀN, không bắt «đã chuyển địa chỉ». */
@@ -452,7 +549,8 @@ export function claimFactsLoader(conv: ClaimConversation, opts: { reference?: ()
     if (state.quote?.verified) for (const n of state.quote.amounts) allowed.add(n);
     for (const n of state.priceFacts ?? []) allowed.add(n);
     const orderEditedThisTurn = opts.turn !== undefined && state.draft?.shownTurn === opts.turn;
-    return { paymentVerified: liveOrders.some((o) => r.paidOrderIds.has(o.id)), orderConfirmed, orderPending, orderCancelled: Boolean(state.cancelledOrders?.length), allowedAmounts: allowed, orderEditedThisTurn };
+    const totals = totalAllowedOf(state);
+    return { paymentVerified: liveOrders.some((o) => r.paidOrderIds.has(o.id)), orderConfirmed, orderPending, orderCancelled: Boolean(state.cancelledOrders?.length), allowedAmounts: allowed, orderEditedThisTurn, ...(totals ? { totals } : {}) };
   };
 }
 
