@@ -1,8 +1,8 @@
 {
   "pr": 814,
-  "sha": "cd72b7ec47b7d3b3afc7233545031600cbba8496",
+  "sha": "b49054445e379fa4fe29f175bb0015630b8daf48",
   "verdict": "PASS",
   "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
-  "at": "2026-10-12T08:48:08.721Z",
-  "note": "erp-backup.sh: tách hàm dựng bản sao dùng chung, cùng cờ docker/trap/MỘT pg_restore; phần nhà không đổi byte; script mới chỉ chạm container tạm (không mạng, trần RAM), MÃ HOÁ"
+  "at": "2026-10-14T09:10:53.454Z",
+  "note": "ops chỉ đọc trên bản sao container tạm; gộp main chỉ đổi danh sách ops-vps"
 }
