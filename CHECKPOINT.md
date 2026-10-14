@@ -10,6 +10,27 @@
 
 
 
+## Checkpoint 2026-10-14 ~18:00 VN — BÀN GIAO DESKTOP(Max 96%) → TEAM · ĐỌC TRƯỚC
+**Khoá:** Desktop đã `lease release integration-lead` ngay sau mục này. Team `lease acquire integration-lead` rồi mới gộp/deploy. Desktop KHÔNG gộp/deploy/chạy ops ghi nữa. Claude Web chỉ đọc.
+
+**A. Phân loại deploy «failure» (mọi lượt từ 4db2f64a tới 97393def — 8 lượt):** bước hỏng duy nhất = `release › SSH vào VPS và chạy bootstrap` vì `verify-migrations`: «tổ chức khách 7/8 khớp · hỏng: qa (TIMEOUT)» ⇒ DEGRADED_MIGRATION qa thiếu 0245 + 0246. Đã đọc log đầy đủ lượt 38530647572 (849fa00c): 7/8 tổ chức đủ 246 mục, smoke 135/135 · 0 lỗi ứng dụng, health ok, commit đúng. KHÔNG có lỗi SSH/CI/runtime ở lượt đó. **Team cần xác nhận cùng mẫu cho 7 lượt còn lại** (`joblog.py <run> release` / log job release, grep `[migrations]` + `[smoke]`) trước khi kết luận cho từng lượt. Lượt 38552538313 (35c7168d) do phiên khác dispatch 10:51Z — chưa xem.
+**Hệ quả:** `ai verify` coi deploy failure là INCIDENT ⇒ `close --status=DONE` bị chặn cho MỌI sứ mệnh chạm tệp chạy trên VPS (đã thử: conv-money-trace, pancake-thread-diff bị từ chối). Không nới cổng này.
+
+**B. QA 0245:** #814 đã gộp (97393def). Desktop đã xếp lượt `ops migration-rehearsal "qa"` (chỉ đọc, bản sao container tạm) SAU `conv-money-trace --scan --days=1` và `pancake-thread-diff --hours=24` — xem kết quả công khai trong log Actions «ops-vps» (dòng `[ops:tom-tat]`). Nếu lượt đó chưa chạy/hỏng: Team chạy lại MỘT lần. Tìm gốc từ số đo (câu UPDATE dẫn xuất 0245 > 600 s trên 959 hội thoại: vế nào chậm — tin mẫu chéo luồng / UNKNOWN lồng / thiếu ANALYZE / chỉ mục). Sửa bằng migration MỚI (không sửa 0245 đã áp ở 7 tổ chức), đo trước/sau trên bản sao bằng `--candidate-index`. Chưa xong ⇒ giữ blocker.
+
+**C. Control plane (việc của Team, PR riêng, không chạm logic nghiệp vụ):** tách trạng thái hậu kiểm: PRODUCTION_VERIFIED (health + commit + smoke + migration nhà/tổ chức khách thật) · QA_VERIFIED · QA_KNOWN_ISSUE (bằng chứng + người duyệt + mã sứ mệnh liên quan; KHÔNG tự bỏ qua) · DEPLOYMENT_FAILED · BUSINESS_E2E_VERIFIED. DONE chỉ khi đủ tiêu chí của sứ mệnh; lỗi qa không liên quan chỉ được miễn khi có QA_KNOWN_ISSUE đã duyệt. Cần chủ shop duyệt chính sách miễn.
+
+**D. Đối soát sứ mệnh:**
+| Sứ mệnh | PR | Production | Còn thiếu để DONE |
+|---|---|---|---|
+| cost-center (#834) | gộp | 4db2f64a+ | UI E2E (sửa Q004, BCLN `?gv=kehoach`, đồng bộ lịch sử) cần phiên đăng nhập; bảng chênh lệch M+2 chưa có (chủ shop: chờ duyệt, không tự điều chỉnh) |
+| pancake-thread-diff (#836) | gộp | có | chỉ cổng verify (ops chỉ đọc, đã chạy production) |
+| conv-money-trace (#837) | gộp | có | chỉ cổng verify (đã chạy production) |
+| inbox-message-sync (#839) | gộp c1375644 | có | E2E: `pancake-thread-diff --hours=24` sau deploy (khoá xếp tụt phải 0) |
+| hslc-quote-640 (#840) | gộp 849fa00c | có | E2E: `conv-money-trace --scan` trên lưu lượng SAU 14/10 15:00 VN (0 EMPTY_REPLY không tin khách mới, 0 dòng không căn cứ). 8 đơn đã gắn cờ (idempotent) |
+| migration-rehearsal (#814) | gộp 97393def | có | kết quả đo qa |
+| inbox-all-recency (#842) | MỞ @1e4f4edc | chưa | gates đỏ: `tests/inbox-semantics-v3.test.ts` «Tất cả: đúng tập + đúng thứ tự» — mô hình `activityOf` của bài kiểm lệch khoá xếp máy chủ khi bỏ nhóm chưa đọc (s17/s08). Kiểm activityOf có tính vế phía page (#839 `PAGE_REPLY_ACTIVITY_SQL`) / hoà mốc chưa. Sửa MÔ HÌNH cho khớp luật mới, không sửa luật. Worktree `wt-inbox-all`, nhánh `fix/inbox-all-recency`. |
+
 ## Checkpoint 2026-10-14 ~17:00 VN (phiên Desktop · cầm khoá `integration-lead`) — ĐỌC TRƯỚC, ĐỪNG KIỂM LẠI
 **Phân vai (chủ shop 14/10: ba phiên KHÔNG cùng kiểm / deploy một việc):** Desktop cầm khoá + mọi gộp/deploy/ops ghi tới khi `lease release`. Claude Web và Claude Team: CHỈ ĐỌC việc dưới đây, không merge / dispatch deploy / chạy ops ghi; muốn nhận việc thì nhận mục «Còn mở» mà chưa ai cầm, ghi tên vào đây trước.
 
