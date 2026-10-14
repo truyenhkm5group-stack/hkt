@@ -383,7 +383,7 @@ async function testDb() {
         assert.deepEqual((await viaPage({ filter: "UNREAD", q: v })).rows.map((x) => x.id), [EXACT, MENTION], `«${v}» từ «chưa đọc»: vẫn toàn hộp thư, khớp chính xác đầu`);
       }
       assert.deepEqual((await viaPage({ filter: "UNANSWERED", searchScope: "FILTER", q: "0900246810" })).rows.map((x) => x.id), [MENTION], "trong «Chờ trả lời»: chỉ hội thoại đang chờ");
-      // Số DỞ (không phải SĐT đủ) ⇒ không xếp hạng — thứ tự thường (chưa đọc trước).
+      // Số DỞ (không phải SĐT đủ) ⇒ không xếp hạng — thứ tự thường («Tất cả»: tin mới nhất trước).
       assert.deepEqual((await viaPage({ q: "246810" })).rows.map((x) => x.id), [MENTION, EXACT], "số dở: thứ tự thường");
       // EXACT / MENTION ở lại: không khớp ô tìm nào của các bước sau (SĐT / tên riêng).
 

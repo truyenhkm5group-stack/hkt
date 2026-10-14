@@ -164,7 +164,7 @@ export async function testInboxMessageSync() {
       await receiveFanpageEvent(ev({ threadId: "t-a", messageId: "cust-t-a-2", text: "Lấy 2kg nhé" }), new Date());
       assert.ok((await order("UNANSWERED")).includes(A));
       assert.ok((await order("UNREAD")).includes(A));
-      assert.equal((await order())[0], A, "chưa đọc lên đầu");
+      assert.equal((await order())[0], A, "tin khách mới nhất ⇒ đứng đầu «Tất cả»");
     });
     console.log("  ✓ đạt");
   } finally {
