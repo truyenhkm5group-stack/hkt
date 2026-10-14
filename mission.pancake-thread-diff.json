@@ -22,18 +22,18 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-14T02:26:30.238Z",
-  "updated_at": "2026-10-14T02:27:24.442Z",
-  "last_heartbeat": "2026-10-14T02:26:49.964Z",
+  "updated_at": "2026-10-14T03:24:51.420Z",
+  "last_heartbeat": "2026-10-14T03:24:51.420Z",
   "definition_of_done": [],
   "handoff": {
     "branch": "fix/pancake-thread-diff",
-    "sha": "e9216c38c288c4907ffd41fdb7165d2a99300e68",
-    "at": "2026-10-14T02:26:49.964Z",
+    "sha": "cf347f02b158d86fc91418de3835ac5c41f8ce77",
+    "at": "2026-10-14T03:24:51.420Z",
     "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
     "title": "Ops pancake-thread-diff CHỈ ĐỌC: so tin Pancake ↔ sales_chat_inbound theo hội thoại / 72 giờ, thiếu/thừa, độ trễ, có lên trang đầu hộp thư",
-    "summary": "Đo tin Messenger không về Inbox HSLC",
+    "summary": "Sửa ops-log-leak",
     "tests": [
-      "tsc·eslint·pancake-thread-diff·platform-isolation-static: đạt"
+      "ops-log-leak·pancake-thread-diff·repo-integrity·tsc·eslint: đạt"
     ]
   }
 }
