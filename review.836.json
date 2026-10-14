@@ -1,8 +1,8 @@
 {
   "pr": 836,
-  "sha": "e9216c38c288c4907ffd41fdb7165d2a99300e68",
+  "sha": "cf347f02b158d86fc91418de3835ac5c41f8ce77",
   "verdict": "PASS",
   "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
-  "at": "2026-10-14T02:27:28.826Z",
-  "note": "Script ops CHỈ ĐỌC, token page che, chỉ số đếm/mốc; khai ops 4 chỗ"
+  "at": "2026-10-14T03:24:55.317Z",
+  "note": "e9216c38 + nhãn hằng thay câu note ở kênh tóm tắt, đổi tên percentile"
 }
