@@ -43,7 +43,7 @@ import { foldVi } from "@/lib/sales-chatbot/text";
 import { buildQuote, computePriced, loadPricingContext, packChoiceMistake, packingIssues, packingRequestOf, verifiedUnitPrices, type AgentQuoteClaim, type Priced, type PricingContext } from "@/lib/sales-chatbot/quote";
 import { priceUnverifiedReason, QUOTE_UNVERIFIED_INSTRUCTION, quoteSnapshotOf, type PriceDisputeState, type Quote, type QuoteSnapshot } from "@/lib/sales-chatbot/quote-shared";
 import { CLAIM_SAFE_TEXT, orderValidityOf } from "@/lib/sales-chatbot/claim-guard";
-import { bindCommitment, commitmentViolation, customerHesitates, declinesAddOnOnly, type CartCommitment } from "@/lib/sales-chatbot/cart-commitment";
+import { bindCommitment, commitmentViolation, customerHesitates, declinesAddOnOnly, lineBasisViolation, type CartCommitment } from "@/lib/sales-chatbot/cart-commitment";
 import { acceptCustomerWard, addressQuestion, canAutoFill, parseCustomerAddress, type AddressConfidence, type AddressPart } from "@/lib/address/customer-address";
 import { searchCatalog, sellableCatalog, stockFor, type CatalogItem } from "@/lib/sales-chatbot/catalog";
 import { quotedInText } from "@/lib/sales-chatbot/text";
@@ -99,6 +99,8 @@ export type ChatState = {
   confirmed?: { orderId: string | null; simulated: boolean; total: number; at: string; stamp?: PromptStamp; quoteId?: string; valid?: boolean; pending?: "ADDRESS" | "CHECK" | null; auto?: boolean };
   /** Báo giá máy chủ GẦN NHẤT của hội thoại (giỏ / đơn nháp / chốt) — hàng rào số tiền đọc `amounts` khi `verified`. */
   quote?: QuoteSnapshot;
+  /** Mọi TỔNG / tiền hàng máy chủ đã tính cho các giỏ / đơn nháp trong hội thoại (`noteSeenTotals`) — hàng rào chặn nói lại tổng của giỏ CŨ. */
+  seenTotals?: number[];
   /** Giá ĐÃ XÁC THỰC công cụ đọc đã trả cho model trong hội thoại (search / get_product / get_current_price) — tối đa `PRICE_FACTS_MAX`. */
   priceFacts?: number[];
   /** Đơn đã chốt của các lượt mua TRƯỚC trong cùng hội thoại (khách mua lại sau `POST_ORDER_HANDOFF_MS`) — báo cáo vẫn đếm. */
@@ -153,6 +155,8 @@ export type BookingTool = (typeof BOOKING_TOOLS)[number];
 
 export type ToolContext = {
   conversationId: string;
+  /** CHỮ MUA của khách trong lượt mua hiện tại (`buyingText` — bỏ câu hỏi giá / câu từ chối) — căn cứ «khách đã gọi tên món» (`lineBasisViolation`). */
+  customerSaid?: string;
   channel: ChatChannel;
   config: SalesChatbotConfig;
   state: ChatState;
@@ -944,6 +948,11 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
       // thoại, không phải đơn hỏng ⇒ không gắn tín hiệu đơn không hợp lệ).
       const cartBreak = v.data.items ? commitmentViolation(state.cart, priced.asked, ctx.turn ?? null) : null;
       if (cartBreak) return err("Đơn nháp: hạ số lượng khách đã chốt", cartBreak, state);
+      // DÒNG HÀNG PHẢI CÓ CĂN CỨ TỪ KHÁCH (P0 14/10/2026, ca «Châu Dương»: món upsell × 3 khách chưa đồng ý vào đơn, đơn tự chốt 640.000 ₫).
+      // Sản phẩm ĐÃ nằm trong đơn nháp hiện có đã qua kiểm này lúc được ghi ⇒ chỉ kiểm sản phẩm MỚI (review 14/10: không bắt bỏ món chính).
+      const grounded = v.data.items && existing ? new Set((await priceLines(existing.lines, ctx.config, verifiedCustomerId(state))).asked.map((l) => l.productId ?? l.variantId)) : new Set<string>();
+      const noBasis = v.data.items ? lineBasisViolation(state.cart, priced.asked, ctx.turn ?? null, ctx.customerSaid ?? "", grounded) : null;
+      if (noBasis) return err("Đơn nháp: dòng hàng không có căn cứ từ khách", noBasis, state);
       // Giá chưa xác thực ⇒ KHÔNG tạo / sửa đơn tự động, người xác minh (yêu cầu 5 của chủ shop).
       if (!priced.quote.verified) {
         state.quote = quoteSnapshotOf(priced.quote, now);
@@ -1042,6 +1051,11 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
       const priced = await priceLines(d.lines, ctx.config, verifiedCustomerId(state), [d.recipient.address, d.recipient.province].join(", "), { packing: Boolean(d.packing) });
       if (priced.missing.length || priced.unpriced.length) return err("Chốt: mã không bán được", "Có mẫu mã không còn bán hoặc chưa có giá — chuyển nhân viên.", state, { reason: priced.missing.length ? "UNKNOWN_SKU" : "UNPRICED_SKU" });
       if (priced.addOnOnly) return err("Chốt: chỉ có món bán kèm", ADD_ON_ONLY_ERROR, state);
+      // Đơn nháp có dòng hàng không có căn cứ từ khách ⇒ KHÔNG chốt — kể cả máy tự chốt (P0-A đi qua đúng nhánh này).
+      // Đơn nháp khách đã thấy ở lượt TRƯỚC ⇒ dòng của nó đã qua kiểm lúc ghi; lên + chốt trong cùng lượt (máy tự chốt) ⇒ kiểm lại cả đơn.
+      const seenBefore = d.shownTurn !== undefined && ctx.turn !== undefined && d.shownTurn < ctx.turn;
+      const noBasis = lineBasisViolation(state.cart, priced.asked, ctx.turn ?? null, ctx.customerSaid ?? "", seenBefore ? new Set(priced.asked.map((l) => l.productId ?? l.variantId)) : new Set<string>());
+      if (noBasis) return err("Chốt: dòng hàng không có căn cứ từ khách", `${noBasis} Sửa đơn nháp (update_draft_order) cho đúng món khách chọn rồi mới chốt.`, state);
       // Giá chưa xác thực ⇒ KHÔNG chốt, người xác minh (yêu cầu 4–5 của chủ shop).
       if (!priced.quote.verified) {
         state.quote = quoteSnapshotOf(priced.quote, now);

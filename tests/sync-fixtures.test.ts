@@ -504,6 +504,7 @@ import { testInboxAvatarProfile } from "./inbox-avatar-profile.test";
 import { testPancakeAvatarShape } from "./pancake-avatar-shape.test";
 import { testAvatarProxyCheck } from "./avatar-proxy-check.test";
 import { testSenderProvenanceProbe } from "./sender-provenance-probe.test";
+import { testPancakeThreadDiff } from "./pancake-thread-diff.test";
 import { testInboxUnreadDryrun } from "./inbox-unread-dryrun.test";
 import { testOrgMigrateIsolation } from "./org-migrate-isolation.test";
 import { testMigrationServeCompat } from "./migration-serve-compat.test";
@@ -558,6 +559,8 @@ import { testSalesVision } from "./sales-vision.test";
 import { testSalesClaimGuard } from "./sales-claim-guard.test";
 import { testSalesQuoteIntegrity } from "./sales-quote-integrity.test";
 import { testSalesCartCommitment } from "./sales-cart-commitment.test";
+import { testConvMoneyTrace } from "./conv-money-trace.test";
+import { testSalesQuote640 } from "./sales-quote-640.test";
 import { testSalesIntegrityAudit } from "./sales-integrity-audit.test";
 import { testCartIntentAudit } from "./cart-intent-audit.test";
 import { testFollowupLifecycle } from "./followup-lifecycle.test";
@@ -2946,6 +2949,8 @@ async function main() {
   testAvatarProxyCheck();
   // Ops sender-provenance-probe (11/10/2026): tin phía page mang dấu người gửi gì — đo rủi ro AI chen vào cuộc chat người trước deploy P0. Thuần + quét mã nguồn.
   testSenderProvenanceProbe();
+  // Ops pancake-thread-diff (P0 HSLC 14/10/2026): tin Pancake đối chiếu sổ tin ERP + hộp thư — khớp mã/chữ, quá mới, trễ webhook. Thuần + quét mã nguồn.
+  testPancakeThreadDiff();
   // Ops inbox-unread-dryrun (11/10/2026, điều kiện duyệt #792): chạy thử «chưa đọc» theo hàm #803 so với luật đang chạy + bấm giờ câu dẫn xuất — CHỈ ĐỌC. Thuần + quét mã nguồn + PGlite.
   await testInboxUnreadDryrun();
   // Migrate CSDL tổ chức cô lập (sự cố 0245 ở qa 12/10/2026): khoá theo tổ chức có trần chờ · lùi sau lỗi · trần mỗi tổ chức của verify-migrations · ops org-migrate-probe chỉ đọc. Thuần + PGlite + quét mã nguồn.
@@ -3019,12 +3024,18 @@ async function main() {
   // P0 12/10/2026 — giỏ có thẩm quyền (cart-commitment.ts): số lượng khách nói tường minh DÍNH tới khi khách sửa tường minh; công cụ
   // ghi đơn hạ / bỏ món ⇒ máy chủ từ chối; ma trận G1–G6 qua chatTurn thật — tổ chức THẬT `gd-food-cc1` / `gd-food-cc2`.
   await testSalesCartCommitment();
+  // P0 14/10/2026 — tổng tiền trong chữ bot = tổng máy chủ của giỏ hiện tại (ca «Châu Dương» 640k cho 1kg 280k) · lượt im không «nói rõ
+  // hơn» (ca «Viet Nguyen Thi») · upsell chưa đồng ý không vào đơn · tin vọng lại / trùng không sinh tin — tổ chức THẬT `gd-food-q640`.
+  await testSalesQuote640();
   // P0 11/10/2026 — ops sales-integrity-audit: giá bot ≠ giá đơn · giá tự đổi · xác nhận giả · chuyển người không ai nhận ·
   // địa chỉ chưa ghép · nhắc sau đơn chốt — thuần + CSDL thật (mã `erp-ia-`, tự dọn), tóm tắt không lọt PII.
   await testSalesIntegrityAudit();
   // P0 12/10/2026 — ops cart-intent-audit: bot tự hạ số lượng khách đã nói / đơn đủ ORDER_READY vẫn bị hỏi · mời — thuần + CSDL thật
   // (hội thoại dựng theo ca HSLC, tự dọn), tóm tắt không lọt PII, chỉ đọc, ops khai đủ bốn chỗ.
   await testCartIntentAudit();
+  // P0 14/10/2026 — ops conv-money-trace: số TỔNG trong tin bot ≠ báo giá giỏ (ca «Châu Dương» 640k cho 1kg 280k) · câu «nói rõ hơn»
+  // của engine khi khách không nhắn gì (ca «Viet Nguyen Thi») — thuần + CSDL thật (tự dọn), tóm tắt không lọt PII, chỉ đọc.
+  await testConvMoneyTrace();
   // P0 11/10/2026 (KimThu Le) — vòng đời khách dùng chung + follow-up đọc lại ngay trước khi gửi (đơn thật · chứng từ thu ·
   // từ chối nhận tin · người / nguồn khác vừa nhắn), khoá gửi chống trùng, vết quyết định — tổ chức THẬT `fu-life` (tự cấp, tự dọn).
   await testFollowupLifecycle();

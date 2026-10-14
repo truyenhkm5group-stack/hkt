@@ -268,11 +268,18 @@ function testSourceScan() {
   assert.ok(!/deliveredText = r\.deliver|__deliver: r\.deliver/.test(core), "không đường nào dùng r.deliver chưa qua hàng rào");
   // (e) Mọi tin assistant ghi thẳng trong lượt là một trong ba dạng đã qua hàng rào.
   const appends = [...core.matchAll(/appendMessage\(conv\.id, seq\+\+, "assistant", ([^)]*?)\);/g)].map((m) => m[1].trim());
-  const allowed = new Set(["content", '[{ type: "text", text: held }]', '[{ type: "text", text: blk.safe }]']);
+  // P0 14/10/2026: chữ có số tiền viết cùng tin với công cụ tính tiền GIỮ tới sau công cụ (`out` — qua guardOutgoing theo báo giá mới) và
+  // câu thay của nó (`safe` — câu an toàn / câu giữ đơn / câu nói lại tổng máy chủ).
+  const allowed = new Set(["content", '[{ type: "text", text: held }]', '[{ type: "text", text: blk.safe }]', '[{ type: "text", text: out }]', '[{ type: "text", text: safe }]']);
   for (const a of appends) assert.ok(allowed.has(a), `tin assistant ghi thẳng chưa khai: ${a}`);
-  assert.equal(appends.length, 3, "ba chỗ ghi tin assistant: chữ model · câu giữ lại · câu an toàn");
+  assert.equal(appends.length, 5, "năm chỗ ghi tin assistant: chữ model · câu giữ lại · câu an toàn · chữ có số tiền giữ tới sau công cụ · câu thay của nó");
+  const heldLoop = core.slice(core.indexOf("for (const out of heldMoney)"), core.indexOf("// Câu «đã chốt» giữ lại ở trên"));
+  assert.ok(heldLoop.indexOf("guardOutgoing(out") > 0 && heldLoop.indexOf("guardOutgoing(out") < heldLoop.indexOf('text: out }]'), "chữ có số tiền giữ lại qua guardOutgoing TRƯỚC khi ghi");
   // (f) Mọi chữ hằng gửi qua `reply()` không mang khẳng định; đối số không phải hằng thì nằm trong danh sách đã biết.
-  const knownExpr = new Set(["cfg.handoff.message", "cfg.businessHours.outsideMessage", "EMPTY_REPLY_TEXT", "aiDownReply(cfg)", "pick.text", "safeText", "b.safe", "CLAIM_SAFE_TEXT.PRICE_DISPUTE", "CLAIM_SAFE_TEXT.REFUND"]);
+  // `draftUnsaid` (tóm tắt đơn theo kết quả công cụ) và `fallback` (câu hỏi đúng phần còn thiếu) đều qua guardOutgoing ngay trước reply.
+  const knownExpr = new Set(["cfg.handoff.message", "cfg.businessHours.outsideMessage", "EMPTY_REPLY_TEXT", "aiDownReply(cfg)", "pick.text", "safeText", "b.safe", "CLAIM_SAFE_TEXT.PRICE_DISPUTE", "CLAIM_SAFE_TEXT.REFUND", "draftUnsaid", "fallback"]);
+  assert.match(core, /guardOutgoing\(draftUnsaid, [^\n]*\n\s*await reply\(conv, seq\+\+, draftUnsaid\)/, "tóm tắt đơn qua guardOutgoing trước reply");
+  assert.match(core, /guardOutgoing\(ask, [^\n]*\n(?:[^\n]*\n){0,12}\s*await reply\(conv, seq\+\+, fallback\)/, "câu hỏi lại qua guardOutgoing trước reply");
   assert.deepEqual(detectClaims(CLAIM_SAFE_TEXT.PRICE_DISPUTE), [], "câu an toàn khi khách phản đối giá không mang khẳng định");
   assert.deepEqual(detectClaims(CLAIM_SAFE_TEXT.REFUND), [], "câu an toàn khi khách khiếu nại (máy chủ chuyển người) không mang khẳng định / lời hứa");
   assert.deepEqual(detectClaims(CLAIM_SAFE_TEXT.ORDER_EDIT), [], "câu an toàn khi chặn «đã sửa đơn» không tự mang khẳng định");
