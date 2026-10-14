@@ -2839,3 +2839,4 @@
 {"at":"2026-10-14T09:46:12.193Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"migration-rehearsal","detail":"#814 @ b49054445e37 → 97393def4df3 (MERGE_ISOLATED · HIGH · gates success)"}
 {"at":"2026-10-14T10:10:31.465Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DEPLOY_DISPATCHED","detail":"97393def4df3 · run 38547666101 https://github.com/truyenhkm5group-stack/hkt/actions/runs/38547666101"}
 {"at":"2026-10-14T10:32:48.736Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"inbox-all-recency","detail":"fix/inbox-all-recency @ 1e4f4edc4d8d · 2 lệnh kiểm thử"}
+{"at":"2026-10-14T10:33:05.690Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#842 @ 1e4f4edc4d8d · chủ shop duyệt 14/10: «Tất cả» theo tin mới nhất"}
