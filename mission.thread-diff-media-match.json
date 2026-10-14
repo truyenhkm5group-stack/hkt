@@ -3,7 +3,7 @@
   "mission_id": "thread-diff-media-match",
   "title": "pancake-thread-diff: tin phía page KHÔNG CÓ CHỮ thôi bị đếm là THIẾU",
   "business_goal": "",
-  "status": "RUNNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-team",
@@ -21,11 +21,26 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-14T13:17:03.821Z",
-  "updated_at": "2026-10-14T13:17:03.821Z",
-  "last_heartbeat": "2026-10-14T13:17:03.821Z",
+  "updated_at": "2026-10-14T13:21:34.026Z",
+  "last_heartbeat": "2026-10-14T13:21:34.026Z",
   "definition_of_done": [],
   "intake": {
     "verdict": "IN_PROGRESS",
     "evidence": []
+  },
+  "handoff": {
+    "branch": "claude/thread-diff-media-match",
+    "sha": "bfd4ee7469efaf15f561872d511665b991e6ab92",
+    "at": "2026-10-14T13:21:34.026Z",
+    "actor": "DESKTOP-56TH98Y:wt-team",
+    "title": "pancake-thread-diff: tin phía page KHÔNG CÓ CHỮ thôi bị đếm là THIẾU",
+    "summary": "diffThread thêm lượt khớp riêng cho tin không có chữ (ảnh/nhãn dán), đếm ở ô matchedByMedia — thôi báo «thiếu» cho tin vẫn nằm trong hộp thư, trước khi ai đó backfill và nhân đôi tin của khách.",
+    "tests": [
+      "tests/pancake-thread-diff.test.ts chạy riêng: ĐẠT (thêm 2 vế chặn: ảnh không có dòng ERP VẪN là thiếu; tin không-chữ không nuốt dòng CÓ chữ)",
+      "npm run typecheck: sạch",
+      "npm run lint: sạch",
+      "npm test đủ: để cổng CI chạy",
+      "production: CHƯA chạy được, ops dispatch cần token"
+    ]
   }
 }
