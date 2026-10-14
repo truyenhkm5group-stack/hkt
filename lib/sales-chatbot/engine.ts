@@ -66,7 +66,7 @@ import { formatVND } from "@/lib/format";
 import { withTurnEvents } from "@/lib/sales-chatbot/events";
 import { FOOD_PACK, salesPackFor, type SalesPack } from "@/lib/sales-chatbot/packs";
 import { autoConfirmBlocker, confirmedFromOrder, executeTool, orderTotalsOf, toolDefsFor, TOOLS_HOLDING_TEXT, type ChatState } from "@/lib/sales-chatbot/tools";
-import { amountText, applyCustomerCartMessage, cartCommitmentPrompt, cartHoldVerdict, customerHesitates, orderReadiness } from "@/lib/sales-chatbot/cart-commitment";
+import { amountText, applyCustomerCartMessage, buyingText, cartCommitmentPrompt, cartHoldVerdict, customerHesitates, invitedProductOf, orderReadiness } from "@/lib/sales-chatbot/cart-commitment";
 import { sellableCatalog } from "@/lib/sales-chatbot/catalog";
 import { allowedImageUrl, describeImages, fetchCustomerImage, IMAGE_PROMPT_RULE, imageLine, VISION_LIMITS } from "@/lib/sales-chatbot/vision";
 import { CLAIM_HANDOFF_REASON, CLAIM_SAFE_TEXT, claimFactsLoader, detectPriceDispute, extractVndAmounts, guardOutgoing, paymentSignalHandoff, paymentSignalInCustomerText, unverifiedAmounts, type ClaimVerdict } from "@/lib/sales-chatbot/claim-guard";
@@ -985,7 +985,11 @@ async function chatTurnCore(
     // Lỗi bất kỳ ở bước này ⇒ giỏ giữ nguyên NHƯNG tắt kiểm cứng của lượt (không chặn khách), không ném ra ngoài lượt.
     let cartNext: ChatState["cart"];
     try {
-      cartNext = applyCustomerCartMessage(st0.cart, text, turnSeq, now, { catalog: await cartCatalogNames(text) });
+      const catalog = await cartCatalogNames(text);
+      // Món VỪA ĐƯỢC MỜI (bot / page gọi tên đúng một món kể từ tin khách trước) — «ừ cho chị 1 hộp» là số của món đó (review 14/10).
+      const lastCustSeq = prevTurn ?? 0;
+      const invited = invitedProductOf(recentShopTexts(msgs.filter((m) => m.seq > lastCustSeq), 6).map((t) => (t.startsWith(SHOP_SAID) ? t.slice(SHOP_SAID.length).trim() : t)), catalog, st0.cart);
+      cartNext = applyCustomerCartMessage(st0.cart, text, turnSeq, now, { catalog, invited });
     } catch {
       cartNext = st0.cart ? { ...st0.cart, relaxedTurn: turnSeq } : undefined;
     }
@@ -1159,7 +1163,8 @@ async function chatTurnCore(
     const autoConfirm = await loadAutoConfirmComplete().catch(() => false);
     const system = [systemPrompt(cfg, orgRow?.name ?? org.code, await businessProfile(), opts.channel, await publishedPlaybook(), quickCatalog, returningCustomerPrompt(returning, known.returning), bookingOn ? bookingPrompt(cfg, now) : "", now, salesPackFor(orgRow?.templateKey ?? null), { autoConfirm }), postSale ? "" : customer360Prompt(c360, reuse), await learnedLessons(), await levelPromptFor(conv.id, now), customerNamePrompt(opts.customerName), priceDisputePrompt(known.priceDispute), confirmedOrderPrompt(known), cartPromptOf(known, text, turnSeq, autoConfirm, prevTurn), postSale ? postSalePrompt(phase!, phase!.shortCode) : "", opts.context ?? ""].filter(Boolean).join("\n");
     // Chữ KHÁCH của lượt mua hiện tại — căn cứ «khách đã gọi tên món» khi công cụ lên / chốt đơn (lineBasisViolation, P0 14/10/2026).
-    const customerSaid = [...msgs.slice(Math.max(0, msgs.length - SALES_CHATBOT_LIMITS.historyMessages)).filter((m) => m.role === "user" && !m.content.some((b) => b.type === "tool_result")).map((m) => textOf(m.content)), text].join("\n");
+    // Chỉ CHỮ MUA (bỏ câu hỏi giá / câu từ chối / giả định — `buyingText`): gọi tên món trong «nem tôm bao nhiêu?» không phải căn cứ.
+    const customerSaid = buyingText([...msgs.slice(Math.max(0, msgs.length - SALES_CHATBOT_LIMITS.historyMessages)).filter((m) => m.role === "user" && !m.content.some((b) => b.type === "tool_result")).map((m) => textOf(m.content)), text]);
     const deliveredImages: string[] = [];
     let deliveredReplyId: string | null = null;
     let deliveredText: string | null = null;
@@ -1445,7 +1450,12 @@ async function chatTurnCore(
         const ask = silenceFallbackText(state, text, turnSeq, autoConfirm, prevTurn);
         const fallback = ask === EMPTY_REPLY_TEXT || (await guardOutgoing(ask, () => claimFacts(state))).ok ? ask : EMPTY_REPLY_TEXT;
         if (fallback === EMPTY_REPLY_TEXT && repeatOfAnswered) {
-          lastError = lastError ?? "Lượt lặp lại tin khách đã được trả lời — model im, không gửi câu dự phòng";
+          // Không gửi câu thừa, nhưng KHÔNG im lặng lẳng lặng (review 14/10): gắn cờ cần người, nhân viên xem tin lặp này.
+          lastError = lastError ?? "Lượt lặp lại tin khách đã được trả lời — model im, không gửi câu dự phòng; cần người xem";
+          if (!state.handoff) {
+            state = { ...state, handoff: { reason: "Cần người xử lý — khách nhắn lại đúng tin đã được trả lời, AI không có câu trả lời mới", at: now.toISOString() } };
+            if (isPublicChannel(opts.channel)) await notifySalesChatHandoff(conv.id, state.handoff!.reason, state.customer, now).catch(() => undefined);
+          }
         } else {
           await reply(conv, seq++, fallback);
           lastError = lastError ?? (fallback === EMPTY_REPLY_TEXT ? "Lượt không có câu nào gửi khách — đã gửi câu dự phòng" : "Lượt không có câu nào gửi khách — đã hỏi đúng phần còn thiếu của đơn");

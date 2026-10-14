@@ -15,11 +15,11 @@
  *     bot, không đơn thứ hai.
  */
 import assert from "node:assert/strict";
-import { eq } from "drizzle-orm";
+import { and, desc, eq, gt } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { AUTO_CONFIRM_COMPLETE_SETTING_KEY } from "@/lib/constants/manual-orders";
 import { createProductCore } from "@/lib/records/product-create";
-import { lineBasisViolation, unrequestedProducts, type CartCommitment } from "@/lib/sales-chatbot/cart-commitment";
+import { applyCustomerCartMessage, bindCommitment, buyingText, commitmentViolation, invitedProductOf, lineBasisViolation, unrequestedProducts, type AskedLine, type CartCommitment } from "@/lib/sales-chatbot/cart-commitment";
 import { claimFactsLoader, claimVerdict, CLAIM_SAFE_TEXT, extractVndAmounts, guardClaims, serverTotalText, totalAllowedOf, totalClaimsIn, type ClaimFacts } from "@/lib/sales-chatbot/claim-guard";
 import type { SalesChatbotConfig } from "@/lib/sales-chatbot/config";
 import { draftSummaryFromTool, EMPTY_REPLY_TEXT, isEchoOfShop, silenceFallbackText } from "@/lib/sales-chatbot/engine";
@@ -73,10 +73,10 @@ function testTotals() {
   assert.ok(guardClaims("Dạ 1kg 280k, 2kg 540k ạ", facts).ok, "bảng giá (không phải tổng) ⇒ qua");
   assert.ok(guardClaims("Dạ mình nhận giúp em nhé", facts).ok, "tin thường không bị chặn");
   // Câu mẫu / nhắn lại có số tổng cố định ≠ báo giá ⇒ chặn (cùng một hàm cho mọi đường gửi).
-  const q = guardClaims("Combo hôm nay tổng chỉ 540k, free ship ạ", facts);
+  const q = guardClaims("Đơn combo hôm nay của mình tổng chỉ 540k, free ship ạ", facts);
   assert.ok(!q.ok && q.safeText === "Dạ tổng đơn của mình là 280.000 ₫ (miễn phí ship) ạ.", "câu mẫu có tổng cố định ≠ báo giá ⇒ thay bằng tổng máy chủ");
   // Báo giá đã cũ (khách đổi số lượng) ⇒ không có tổng nào để nói ⇒ chặn + chuyển người.
-  const s = guardClaims("Tổng 280.000đ ạ", { ...facts, totals: stale });
+  const s = guardClaims("Đơn của mình tổng 280.000đ ạ", { ...facts, totals: stale });
   assert.ok(!s.ok && s.handoff && s.safeText === CLAIM_SAFE_TEXT.PRICE);
   // Chưa có giỏ: số «tổng» xét như mọi số tiền (tập tham chiếu) — không chặn bảng giá trước khi khách chọn.
   assert.ok(guardClaims("Combo 2kg tổng 540k ạ", { ...BASE, allowedAmounts: REFERENCE }).ok);
@@ -131,11 +131,15 @@ function testUpsellScanPure() {
     { productId: "p-nem", variantId: "v3", name: "Nem hải sản tôm bề bề (Hộp 10 cái)", quantity: 3, weightGrams: null },
   ];
   const catalog = ["Chả cá thu", "Nem hải sản tôm bề bề"];
-  // Ca «Châu Dương»: khách chỉ nói 1kg chả cá, «ok» sau lời mời ⇒ nem × 3 không căn cứ.
-  assert.equal(basisVerdictOf([{ text: "Cho chị 1kg chả cá thu", seq: 1, at }, { text: "ok em", seq: 3, at }], asked, catalog).kind, "NO_BASIS");
-  // Khách nói «lấy thêm 3 hộp nem» ⇒ có căn cứ.
-  assert.equal(basisVerdictOf([{ text: "Cho chị 1kg chả cá thu", seq: 1, at }, { text: "lấy thêm 3 hộp nem nhé", seq: 3, at }], asked, catalog).kind, "OK");
-  assert.equal(basisVerdictOf([{ text: "shop ơi", seq: 1, at }], asked, catalog).kind, "UNKNOWN", "không có món khách nói ⇒ không kết luận");
+  const C = (text: string, seq: number) => ({ kind: "CUSTOMER" as const, text, seq, at });
+  const W = (a: AskedLine[], seq: number) => ({ kind: "DRAFT_WRITE" as const, asked: a, seq, at });
+  // Ca «Châu Dương» phát lại ĐÚNG đường máy chủ: lần ghi đầu 1kg (có căn cứ) ⇒ «ok» sau lời mời ⇒ lần ghi thêm nem × 3 ⇒ NO_BASIS.
+  assert.equal(basisVerdictOf([C("Cho chị 1kg chả cá thu", 1), W([asked[0]], 2), { kind: "BOT", text: "Shop còn Nem hải sản tôm bề bề 120k ạ" }, C("ok em", 3), W(asked, 4)], catalog).kind, "NO_BASIS");
+  // Khách nói «lấy thêm 3 hộp nem» ⇒ có căn cứ; món đã ở lần ghi trước không bị bắt lại.
+  assert.equal(basisVerdictOf([C("Cho chị 1kg chả cá thu", 1), W([asked[0]], 2), C("lấy thêm 3 hộp nem nhé", 3), W(asked, 4)], catalog).kind, "OK");
+  // Câu hỏi giá không phải căn cứ (cùng `buyingText` với máy chủ).
+  assert.equal(basisVerdictOf([C("Cho chị 1kg chả cá thu", 1), W([asked[0]], 2), C("nem tôm bao nhiêu em?", 3), C("ok em", 4), W(asked, 5)], catalog).kind, "NO_BASIS");
+  assert.equal(basisVerdictOf([C("shop ơi", 1), W(asked, 2)], catalog).kind, "UNKNOWN", "không có món khách nói ⇒ không kết luận");
   const src = readFileSync("scripts/upsell-basis-scan.ts", "utf8");
   assert.match(src, /if \(CHAY_THANG && !SE_GHI\) process\.env\.ERP_READ_ONLY = "1"/);
   assert.match(src, /show default_transaction_read_only/);
@@ -146,6 +150,76 @@ function testUpsellScanPure() {
   assert.match(ops, /DOC_NANG="[^"]*\bupsell-basis-scan\b/);
   assert.match(ops, /\n\s+upsell-basis-scan\)\n[\s\S]*?ma_hoa_ket_qua chay_voi_arg[^\n]*scripts\/upsell-basis-scan\.ts ;;/);
   assert.ok(readFileSync("tests/platform-isolation-static.test.ts", "utf8").includes('"scripts/upsell-basis-scan.ts":'));
+}
+
+// ═══ REVIEW ĐỘC LẬP 14/10 — mọi repro thành bài kiểm ═══
+
+const CAT1 = ["Chả cá thu", "Chả mực giã tay", "Nem hải sản tôm bề bề", "Ruốc bông tôm 100%", "Combo ăn vặt 3 món"];
+const CAT2 = [...CAT1, "Nem chua Thanh Hoá"];
+const cct = (q = 1): AskedLine => ({ productId: "p-cct", variantId: "v-cct1", name: "Chả cá thu (1kg)", quantity: q, weightGrams: 1000 });
+const nemL = (q = 1): AskedLine => ({ productId: "p-nem", variantId: "v-nem", name: "Nem hải sản tôm bề bề (Hộp 10 cái)", quantity: q, weightGrams: null });
+const comboL = (q = 1): AskedLine => ({ productId: "p-combo", variantId: "v-combo", name: "Combo ăn vặt 3 món", quantity: q, weightGrams: null });
+const catFor = (t: string, cat: string[]) => (/\d|nửa|một|hai|ba |bỏ|hủy|huỷ|bo |huy /i.test(t) ? cat : undefined);
+
+/**
+ * Đi đúng đường của engine: tin «Cho chị 1kg chả cá thu» + đơn nháp 1kg đã gắn; mỗi tin sau áp lên giỏ (kèm món vừa được mời từ chữ bot
+ * trước nó); CHỮ MUA = `buyingText`; sản phẩm của đơn nháp hiện có là căn cứ sẵn.
+ */
+function review(msgs: string[], asked: AskedLine[], cat = CAT1, bot: Record<number, string> = {}) {
+  const at = new Date();
+  let cart = applyCustomerCartMessage(undefined, "Cho chị 1kg chả cá thu", 1, at, { catalog: cat });
+  cart = bindCommitment(cart, [cct()], 1, at);
+  msgs.forEach((m, i) => {
+    const said = bot[i] ? [bot[i]] : [];
+    cart = applyCustomerCartMessage(cart, m, i + 2, at, { catalog: catFor(m, cat), invited: invitedProductOf(said, cat, cart) });
+  });
+  const turn = msgs.length + 1;
+  return { cart, basis: lineBasisViolation(cart, asked, turn, buyingText(["Cho chị 1kg chả cá thu", ...msgs]), new Set(["p-cct"])), lower: commitmentViolation(cart, asked, turn) };
+}
+const cctGrams = (c: CartCommitment | undefined) => c?.selectedItems.find((x) => /cha ca/.test(x.match))?.quantity;
+
+function testReviewRepros() {
+  // P0-1: món ĐÃ trong đơn nháp không bị coi là «không căn cứ».
+  assert.equal(review(["[Khách gửi ảnh: hộp nhựa màu cam]", "lấy cái này nhé", "thêm 2 hộp nem tôm"], [cct(), nemL(2)]).basis, null, "P0-1a");
+  assert.equal(review(["như lần trước nhé em", "thêm 1 hộp nem tôm"], [cct(), nemL(1)]).basis, null, "P0-1b");
+  // P0-2: tên mơ hồ / đơn vị là tên món / món vừa được mời — số lượng không rơi về món sẵn có.
+  const a = review(["lấy thêm 1 hộp nem đi em"], [cct()], CAT2);
+  assert.equal(cctGrams(a.cart), 1000, "P0-2a «1 hộp nem» khi có hai loại nem ⇒ chả cá GIỮ 1kg");
+  assert.equal(a.lower, null, "P0-2a đơn 1kg chả cá không bị coi là hạ số lượng");
+  assert.equal(cctGrams(review(["lấy 3 hộp nem luôn"], [cct()], CAT2).cart), 1000, "P0-2b chả cá không thành × 3");
+  const c = review(["thêm 1 combo nữa"], [cct(), comboL(1)]);
+  assert.equal(cctGrams(c.cart), 1000, "P0-2c «1 combo» không cộng vào chả cá");
+  assert.equal(c.basis, null, "P0-2c combo là món khách gọi bằng chính đơn vị");
+  const invite = "Dạ shop còn Nem hải sản tôm bề bề hộp 10 cái 120.000 ₫, mình lấy thêm không ạ?";
+  assert.equal(review(["ừ cho chị 1 hộp"], [cct(), nemL(1)], CAT1, { 0: invite }).basis, null, "P0-2d sau lời mời MỘT món ⇒ «1 hộp» là món đó");
+  assert.match(review(["ừ cho chị 1 hộp"], [cct(), nemL(3)], CAT1, { 0: invite }).basis ?? "", /KHÔNG tự tăng/, "P0-2d bot không tự đặt × 3");
+  assert.equal(cctGrams(review(["ừ cho chị 1 hộp"], [cct(), nemL(1)], CAT1, { 0: invite }).cart), 1000, "P0-2d chả cá giữ 1kg");
+  assert.equal(review(["lấy thêm nem nhé", "1 hộp"], [cct(), nemL(1)], CAT1, { 1: "Dạ mình lấy mấy hộp nem hải sản tôm ạ?" }).basis, null, "P0-2e bot hỏi số lượng, khách «1 hộp» ⇒ thêm được");
+  // P0-3: câu từ chối / hỏi giá KHÔNG phải căn cứ; gọi tên không số lượng ⇒ tối đa 1.
+  assert.ok(review(["không lấy nem tôm đâu em"], [cct(), nemL(3)]).basis !== null, "P0-3a");
+  assert.ok(review(["nem tôm bao nhiêu em?", "ok em"], [cct(), nemL(3)]).basis !== null, "P0-3b");
+  assert.match(review(["lấy thêm nem tôm nhé"], [cct(), nemL(3)]).basis ?? "", /KHÔNG tự đặt 3 × «Nem hải sản tôm bề bề»/, "P0-3c gọi tên không số lượng ⇒ không tự đặt 3");
+  assert.equal(review(["lấy thêm nem tôm nhé"], [cct(), nemL(1)]).basis, null, "P0-3c gọi tên ⇒ 1 được");
+  assert.equal(buyingText(["không lấy nem tôm đâu em", "nem tôm bao nhiêu em?", "chả mực giã tay 1kg nhé", "chả bò 2 hộp"]), "chả mực giã tay 1kg nhé\nchả bò 2 hộp", "«giã» / «bò» không bị coi là hỏi giá / bỏ");
+
+  // P1-4: chỉ số CHẮC CHẮN là tổng mới bị thay; câu giả định / phí ship / liệt kê đi đường kiểm số cũ.
+  const draft = { orderId: "erp-x", lines: [{ variantId: "v1", quantity: 1 }], unitPrices: { v1: 280_000 }, recipient: { name: "K", phone: "0961000000", address: "x", province: "y" }, note: "", simulated: false, quote: { id: "qd", priceVersion: "p", subtotal: 280_000, total: 310_000 } };
+  const totals = totalAllowedOf({ quote: quote(540_000, 570_000), draft })!;
+  assert.deepEqual(totals.current, { total: 310_000, shipping: 30_000 }, "đơn nháp thắng báo giá phương án 2kg");
+  const facts: ClaimFacts = { ...BASE, allowedAmounts: new Set([...REFERENCE, 400_000, 120_000, 310_000]), totals };
+  for (const t of ["Dạ nếu chị lấy 2kg thì tổng 540k ạ", "Dạ chả cá thu 280k/kg, mình thanh toán khi nhận hàng (COD) ạ", "Dạ thanh toán 30k ship ạ, hàng 280k", "Dạ tổng cộng có 3 loại: chả cá 280k, chả mực 400k, nem 120k ạ", "Dạ em tổng hợp lại đơn: 1kg chả cá 280k, ship 30k, tổng cộng 310k. Chị xác nhận giúp em nhé"]) {
+    assert.ok(guardClaims(t, facts).ok, `không thay nhầm: ${t}`);
+  }
+  for (const t of ["Dạ nếu chị lấy 2kg thì tổng 540k ạ", "Dạ chả cá thu 280k/kg… COD", "Dạ thanh toán 30k ship ạ, hàng 280k", "Dạ tổng cộng có 3 loại: chả cá 280k", "Thêm 1 hộp nem 120k thì tổng 430k ạ"]) assert.deepEqual(totalClaimsIn(t), [], `không phải số tổng: ${t}`);
+  // Câu KHÔNG nói về đơn (phương án 2kg) ⇒ không chắc là tổng của đơn ⇒ luật cũ: số có thật trong tập ⇒ qua, không chèn tổng 310.000.
+  assert.ok(guardClaims("Dạ 2kg là 540k, tổng thanh toán 570k gồm ship ạ", { ...facts, allowedAmounts: new Set([...facts.allowedAmounts!, 570_000]) }).ok, "phương án không bị thay bằng tổng đơn");
+  const notOrder = guardClaims("Dạ tổng 1kg chả cá là 280k ạ", facts);
+  assert.ok(notOrder.ok, "câu không nói về đơn ⇒ không chèn tổng đơn");
+  // Câu nói về ĐƠN mà tổng sai ⇒ nói lại đúng tổng đơn nháp.
+  const wrong = guardClaims("Dạ đơn của mình tổng 640.000đ, miễn phí ship ạ", facts);
+  assert.ok(!wrong.ok && wrong.safeText === "Dạ tổng đơn của mình là 310.000 ₫ (đã gồm 30.000 ₫ phí ship) ạ.", JSON.stringify(wrong));
+  const hypo = guardClaims("Thêm 1 hộp nem 120k thì tổng 430k ạ", facts);
+  assert.ok(!hypo.ok && hypo.safeText === CLAIM_SAFE_TEXT.PRICE && hypo.handoff, "số lạ trong câu giả định ⇒ luật cũ (chặn + người), KHÔNG chèn một tổng tự tin");
 }
 
 async function testLoader() {
@@ -207,6 +281,17 @@ const CASES: GoldenCase[] = [
     ],
   },
   {
+    key: "q640-lap-im",
+    title: "Khách nhắn lại ĐÚNG tin đã được trả lời, giỏ trống, model im ⇒ không câu «nói rõ hơn» NHƯNG gắn cờ cần người (không im lặng lẳng lặng)",
+    shop: "food",
+    channel: "WEB",
+    config: CFG,
+    turns: [
+      { say: "shop ơi còn hàng không", ai: [() => [say("Dạ còn hàng ạ.")]] },
+      { say: "shop ơi còn hàng không", ai: [() => []] },
+    ],
+  },
+  {
     key: "q640-tu-chot",
     title: "Máy TỰ CHỐT (P0-A) không bao giờ chốt dòng hàng không có căn cứ: model tự thêm chả mực (khách chỉ nói 1kg chả cá) ⇒ từ chối, đơn tự chốt ĐÚNG 1kg chả cá",
     shop: "food",
@@ -247,7 +332,7 @@ const CASES: GoldenCase[] = [
       // «ok» chung chung sau lời mời nhiều món KHÔNG phải đồng ý thêm món: model cố thêm chả mực × 3 ⇒ máy chủ từ chối, đơn vẫn 1kg.
       { say: "ok em", ai: [({ v }) => [tool("update_draft_order", { items: [{ variant_id: v("CCT-1KG"), quantity: 1 }, { variant_id: v("CHA-MUC"), quantity: 3 }] })], () => [say("Dạ mình cần thêm món gì cứ nhắn em ạ.")]] },
       { say: "lấy thêm 1kg chả mực nhé", ai: [({ v }) => [tool("update_draft_order", { items: [{ variant_id: v("CCT-1KG"), quantity: 1 }, { variant_id: v("CHA-MUC"), quantity: 1 }] })], () => [say("Dạ đơn mới của mình tổng 710.000 ₫ ạ.")]] },
-      { say: "đổi chả cá thành 2kg nhé", ai: [({ v }) => [say("Dạ em sửa rồi ạ, tổng vẫn 710.000 ₫ nhé"), tool("update_draft_order", { items: [{ variant_id: v("CCT-2KG"), quantity: 1 }, { variant_id: v("CHA-MUC"), quantity: 1 }] })], () => []] },
+      { say: "đổi chả cá thành 2kg nhé", ai: [({ v }) => [say("Dạ em sửa đơn rồi ạ, tổng vẫn 710.000 ₫ nhé"), tool("update_draft_order", { items: [{ variant_id: v("CCT-2KG"), quantity: 1 }, { variant_id: v("CHA-MUC"), quantity: 1 }] })], () => []] },
     ],
   },
 ];
@@ -264,6 +349,12 @@ async function testChatTurn() {
     afterCase: async (c, ctx, t) => {
       seen.add(c.key);
       const db = await getDb();
+      if (c.key === "q640-lap-im") {
+        assert.deepEqual(t.turns[1].shown, [], "không gửi câu thừa");
+        assert.equal(t.final.status, "HANDOFF", "gắn cờ cần người");
+        assert.match(t.final.handoffReason ?? "", /nhắn lại đúng tin đã được trả lời/);
+        return;
+      }
       const orders = await db.select().from(schema.orders).where(eq(schema.orders.salesConversationId, ctx.conversationId));
       assert.equal(orders.length, 1, `[${c.key}] đúng MỘT đơn`);
       const items = await db.select().from(schema.orderItems).where(eq(schema.orderItems.orderId, orders[0].id));
@@ -290,7 +381,14 @@ async function testChatTurn() {
         // kế hoạch cờ chạy thử, --apply gắn UPSELL_UNCONSENTED qua lõi đơn, chạy lại không gắn lần hai.
         const scan0 = (await scanUpsellBasis(db, 1)).find((r) => r.id === orders[0].id);
         assert.equal(scan0?.verdict.kind, "OK", JSON.stringify(scan0?.verdict));
-        await db.insert(schema.orderItems).values({ id: `${orders[0].id}-extra`, orderId: orders[0].id, variantId: ctx.ids.get("CHA-MUC")!, productName: "Chả mực giã tay", quantity: 3, unitPrice: 400_000 });
+        const mm = schema.salesChatMessages;
+        const [lastMsg] = await db.select({ seq: mm.seq }).from(mm).where(eq(mm.conversationId, ctx.conversationId)).orderBy(desc(mm.seq)).limit(1);
+        const atOrder = orders[0].insertedAt ?? new Date();
+        await db.insert(mm).values([
+          { conversationId: ctx.conversationId, seq: lastMsg.seq + 1, role: "user", content: [{ type: "text", text: "ok em" }], createdAt: atOrder },
+          { conversationId: ctx.conversationId, seq: lastMsg.seq + 2, role: "assistant", content: [{ type: "tool_use", id: "tu-extra", name: "update_draft_order", input: { items: [{ variant_id: ctx.ids.get("CCT-2KG"), quantity: 1 }, { variant_id: ctx.ids.get("CHA-MUC"), quantity: 3 }] } }], createdAt: atOrder },
+          { conversationId: ctx.conversationId, seq: lastMsg.seq + 3, role: "user", content: [{ type: "tool_result", toolUseId: "tu-extra", content: "{}", isError: false }], createdAt: atOrder },
+        ]);
         const scan1 = (await scanUpsellBasis(db, 1)).find((r) => r.id === orders[0].id)!;
         assert.equal(scan1.verdict.kind, "NO_BASIS", JSON.stringify(scan1.verdict));
         const plan = planUpsellFlags([scan1]);
@@ -301,7 +399,7 @@ async function testChatTurn() {
         assert.ok(orderReviewOf(after.raw)?.entries.some((e) => e.code === "UPSELL_UNCONSENTED"), "cờ UPSELL_UNCONSENTED đã gắn");
         assert.equal(Number(after.totalPriceAfterDiscount), 540_000, "không đổi tiền đơn");
         assert.equal(planUpsellFlags((await scanUpsellBasis(db, 1)).filter((r) => r.id === orders[0].id))[0]?.action, "ALREADY_FLAGGED", "chạy lại không gắn lần hai");
-        await db.delete(schema.orderItems).where(eq(schema.orderItems.id, `${orders[0].id}-extra`));
+        await db.delete(mm).where(and(eq(mm.conversationId, ctx.conversationId), gt(mm.seq, lastMsg.seq)));
         assert.deepEqual(t.turns[0].shown, ["Dạ đơn 2kg chả cá thu 540.000 ₫ + ship 30.000 ₫, tổng 570.000 ₫. Mình xác nhận giúp em nhé."], "tổng đúng đi qua nguyên văn");
         return;
       }
@@ -329,6 +427,7 @@ export async function testSalesQuote640() {
   testTotals();
   testPureFlow();
   testUpsellScanPure();
+  testReviewRepros();
   await testLoader();
   await testChatTurn();
   console.log("  ✓ tổng tiền = tổng máy chủ của giỏ hiện tại (ca «Châu Dương» 640.000 ₫ cho 1kg 280.000 ₫): số «tổng» đọc đúng, tập tham chiếu không còn cho tổng sai lọt, chữ viết cùng tin với lệnh lên đơn kiểm SAU công cụ, câu mẫu / nhắn lại cùng hàm; dòng hàng phải có căn cứ từ khách (món mời chưa đồng ý · số lượng tự tăng bị chặn, kể cả máy tự chốt) + ops upsell-basis-scan gắn cờ UPSELL_UNCONSENTED; sửa số lượng ⇒ tổng mới; lượt im ⇒ tóm tắt / hỏi đúng phần thiếu, không «nói rõ hơn» (ca «Viet Nguyen Thi»); tin vọng lại không sinh tin, không đơn thứ hai");

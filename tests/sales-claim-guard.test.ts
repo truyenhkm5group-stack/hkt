@@ -279,7 +279,7 @@ function testSourceScan() {
   // `draftUnsaid` (tóm tắt đơn theo kết quả công cụ) và `fallback` (câu hỏi đúng phần còn thiếu) đều qua guardOutgoing ngay trước reply.
   const knownExpr = new Set(["cfg.handoff.message", "cfg.businessHours.outsideMessage", "EMPTY_REPLY_TEXT", "aiDownReply(cfg)", "pick.text", "safeText", "b.safe", "CLAIM_SAFE_TEXT.PRICE_DISPUTE", "CLAIM_SAFE_TEXT.REFUND", "draftUnsaid", "fallback"]);
   assert.match(core, /guardOutgoing\(draftUnsaid, [^\n]*\n\s*await reply\(conv, seq\+\+, draftUnsaid\)/, "tóm tắt đơn qua guardOutgoing trước reply");
-  assert.match(core, /guardOutgoing\(ask, [^\n]*\n(?:[^\n]*\n){0,4}\s*await reply\(conv, seq\+\+, fallback\)/, "câu hỏi lại qua guardOutgoing trước reply");
+  assert.match(core, /guardOutgoing\(ask, [^\n]*\n(?:[^\n]*\n){0,12}\s*await reply\(conv, seq\+\+, fallback\)/, "câu hỏi lại qua guardOutgoing trước reply");
   assert.deepEqual(detectClaims(CLAIM_SAFE_TEXT.PRICE_DISPUTE), [], "câu an toàn khi khách phản đối giá không mang khẳng định");
   assert.deepEqual(detectClaims(CLAIM_SAFE_TEXT.REFUND), [], "câu an toàn khi khách khiếu nại (máy chủ chuyển người) không mang khẳng định / lời hứa");
   assert.deepEqual(detectClaims(CLAIM_SAFE_TEXT.ORDER_EDIT), [], "câu an toàn khi chặn «đã sửa đơn» không tự mang khẳng định");

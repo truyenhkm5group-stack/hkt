@@ -55,7 +55,8 @@ export type CommittedItem = {
 export type CartCommitment = { selectedItems: CommittedItem[]; turn: number | null; at: string; clarify?: string | null; relaxedTurn?: number | null };
 
 export type CartIntentKind = "ORDER" | "SET" | "ADD" | "REDUCE" | "KEEP" | "REMOVE" | "CANCEL" | "QUESTION" | "AMBIGUOUS";
-export type CartAmount = { value: number; unit: CartUnit; label: string; display: string; index: number; end: number };
+/** `ambiguous` = chữ quanh số lượng gọi tên NHIỀU sản phẩm của danh mục («1 hộp nem» khi có hai loại nem) — không được rơi về món sẵn có. */
+export type CartAmount = { value: number; unit: CartUnit; label: string; display: string; index: number; end: number; ambiguous?: boolean };
 /** `tentative` = số lượng nói kèm câu hỏi giá («lấy 2kg bao nhiêu em») — chỉ THÊM món mới (không dính), không bao giờ sửa món đã có. */
 export type CartIntent = { kind: CartIntentKind; amounts: CartAmount[]; label: string | null; tentative?: boolean };
 
@@ -102,7 +103,7 @@ const productName = (name: string) => name.replace(/\s*\([^)]*\)\s*$/, "").trim(
  * Chữ khách gõ ⇒ tên món. Có DANH MỤC: chỉ nhận đoạn chữ nằm TRONG đúng một tên sản phẩm (dài nhất trước) và trả TÊN DANH MỤC có dấu;
  * không khớp / khớp nhiều ⇒ «» (không rõ món — không bao giờ đẻ món ảo). Không có danh mục ⇒ chữ khách (đã lọc STOP). HÀM THUẦN.
  */
-function resolveLabel(raw: { match: string; display: string }, catalog?: readonly string[]): { match: string; display: string } {
+function resolveLabel(raw: { match: string; display: string }, catalog?: readonly string[]): { match: string; display: string; ambiguous?: boolean } {
   if (!catalog || !raw.match) return raw;
   const names = [...new Set(catalog.map(productName))];
   const tokens = raw.match.split(" ").filter(Boolean);
@@ -114,7 +115,7 @@ function resolveLabel(raw: { match: string; display: string }, catalog?: readonl
         return sub.every((w) => nt.includes(w));
       });
       if (hits.length === 1) return { match: foldVi(hits[0]), display: hits[0] };
-      if (hits.length > 1 && len === tokens.length) return { match: "", display: "" };
+      if (hits.length > 1 && len === tokens.length) return { match: "", display: "", ambiguous: true };
     }
   }
   return { match: "", display: "" };
@@ -155,9 +156,11 @@ function labelAround(text: string, index: number, end: number): { match: string;
  */
 export function amountsIn(text: string, catalog?: readonly string[]): CartAmount[] {
   const out: CartAmount[] = [];
-  const push = (value: number, unit: CartUnit, idx: number, len: number) => {
-    const lb = resolveLabel(labelAround(text, idx, idx + len), catalog);
-    out.push({ value, unit, label: lb.match, display: lb.display, index: idx, end: idx + len });
+  const push = (value: number, unit: CartUnit, idx: number, len: number, unitWord = "") => {
+    let lb = resolveLabel(labelAround(text, idx, idx + len), catalog);
+    // Chữ đơn vị tự nó là tên món của danh mục («thêm 1 combo nữa» khi shop có «Combo ăn vặt 3 món») ⇒ món đó.
+    if (!lb.match && !lb.ambiguous && unitWord && catalog) lb = resolveLabel({ match: foldVi(unitWord), display: unitWord }, catalog);
+    out.push({ value, unit, label: lb.match, display: lb.display, index: idx, end: idx + len, ...(lb.ambiguous ? { ambiguous: true } : {}) });
   };
   for (const m of text.matchAll(WEIGHT_RE)) {
     const n = numOf(m[1]);
@@ -172,7 +175,7 @@ export function amountsIn(text: string, catalog?: readonly string[]): CartAmount
     if (n === null || !Number.isInteger(n)) continue;
     const idx = m.index ?? 0;
     if (out.some((a) => idx < a.end && idx + m[0].length > a.index)) continue;
-    push(n, "pack", idx, m[0].length);
+    push(n, "pack", idx, m[0].length, m[2]);
   }
   out.sort((a, b) => a.index - b.index);
   // «2 túi 1kg» / «2 gói loại 1kg» / «lấy 2 gói, mỗi gói 1kg» = 2 × 1kg = 2kg — MỘT lượng, không phải «2 gói» + «1kg».
@@ -388,8 +391,13 @@ const newItem = (a: CartAmount, turn: number | null, explicit: boolean): Committ
  * MỘT lần trên giỏ GỐC (chỉ số ổn định — không lần theo đối tượng đã thay), rồi mới áp. Không áp chắc được mà câu có dấu hiệu sửa ⇒
  * giỏ giữ nguyên + `clarify` + `relaxedTurn` (kiểm cứng của lượt tắt — không chặn khách). HÀM THUẦN.
  */
-export function applyCustomerCartMessage(cart: CartCommitment | undefined, text: string, turn: number | null, now: Date, opts: { catalog?: readonly string[] } = {}): CartCommitment | undefined {
-  const intent = classifyCartMessage(text, opts.catalog);
+export function applyCustomerCartMessage(cart: CartCommitment | undefined, text: string, turn: number | null, now: Date, opts: { catalog?: readonly string[]; invited?: { match: string; display: string } | null } = {}): CartCommitment | undefined {
+  const parsed = classifyCartMessage(text, opts.catalog);
+  // Tin NGAY SAU lời mời đúng MỘT món (P0 14/10/2026): số lượng không kèm tên («ừ cho chị 1 hộp») là số của món vừa được mời — không phải của
+  // món sẵn có trong giỏ. Chỉ áp khi giỏ ĐÃ có món khách nói (lời mời THÊM món — trước đó số không tên vẫn đi đường cũ, vd «chả mực bao
+  // nhiêu?» → «cho chị 2 gói») và chỉ cho câu đặt / thêm; câu sửa / bớt vẫn đi đường cũ.
+  const inv = cart?.selectedItems.some((x) => x.customerExplicit) ? opts.invited : null;
+  const intent: CartIntent = inv && (parsed.kind === "ORDER" || parsed.kind === "ADD") && parsed.amounts.length === 1 && !parsed.amounts[0].label && !parsed.amounts[0].ambiguous ? { ...parsed, kind: "ADD", amounts: [{ ...parsed.amounts[0], label: inv.match, display: inv.display }] } : parsed;
   const at = now.toISOString();
   const items = cart?.selectedItems ?? [];
   const relax = (clarify: string): CartCommitment | undefined => (cart ? { ...cart, clarify, relaxedTurn: turn, at } : cart);
@@ -416,6 +424,8 @@ export function applyCustomerCartMessage(cart: CartCommitment | undefined, text:
   const explicitIdx = items.map((x, i) => (x.customerExplicit ? i : -1)).filter((i) => i >= 0);
   /** Đích của một lượng trên giỏ GỐC: khớp tên, hoặc không tên mà giỏ có đúng MỘT món khách đã nói. */
   const target = (a: CartAmount): number | "NEW" | "AMBIGUOUS" => {
+    // Tên gọi NHIỀU sản phẩm (P0 14/10/2026: «lấy thêm 1 hộp nem» khi shop có hai loại nem) ⇒ KHÔNG rơi về món sẵn có — hỏi lại món nào.
+    if (a.ambiguous) return "AMBIGUOUS";
     if (a.label) {
       const i = findItem(items, a.label);
       if (i !== null) return i;
@@ -529,7 +539,7 @@ export function commitmentViolation(cart: CartCommitment | undefined, asked: rea
 /**
  * Khách đã GỌI TÊN sản phẩm trong chữ của mình (kể cả không kèm số lượng máy đọc được — «cho chị 2 gói, thêm 1 ruốc tôm»): từ ĐẦU của tên
  * (danh từ món: «ruốc», «nem», «chả») có mặt VÀ ít nhất hai từ của tên có mặt (tên một từ ⇒ đủ một). «chả cá» không gọi tên «Chả mực giã
- * tay» (chỉ chung «chả»); «ok» không gọi tên món nào. HÀM THUẦN.
+ * tay» (chỉ chung «chả»); «ok» không gọi tên món nào. Chỉ đọc trên CHỮ MUA (`buyingText`). HÀM THUẦN.
  */
 export function mentionsProduct(name: string, customerSaid: string): boolean {
   if (!customerSaid.trim()) return false;
@@ -540,38 +550,86 @@ export function mentionsProduct(name: string, customerSaid: string): boolean {
   return words.filter((w) => said.has(w)).length >= Math.min(2, new Set(words).size);
 }
 
+/** Mệnh đề KHÔNG phải lời mua: phủ định / bỏ / huỷ · hỏi giá / hỏi điều kiện · giả định. */
+const NOT_BUYING_RE = /(?:^| )(?:khong|ko|k|chua|dung|hong|hok|chang) (?:lay|mua|can|dat|an|thich)(?: |$)|(?:^| )(?:bao nhieu|bn|nhieu tien|may tien|het bao|bao gia|gia (?:bao|sao|nhieu|the nao|ca)|neu|thi sao)(?: |$)|(?:^| )(?:khong|ko|k|hong|hok)$/;
+/** «bỏ» / «hủy» / «khỏi» đọc trên chữ CÓ DẤU — bỏ dấu thì «bò» (tên món) cũng thành «bo». */
+const NOT_BUYING_RAW_RE = /(?:^|\s)(?:bỏ|hủy|huỷ|khỏi)(?:\s|$)/iu;
+
+/**
+ * CHỮ MUA của khách (P0 14/10/2026, review): chỉ các mệnh đề là lời MUA — bỏ mệnh đề phủ định («không lấy nem tôm đâu em»), hỏi giá
+ * («nem tôm bao nhiêu em?»), giả định («nếu…»). Gọi tên món trong một câu hỏi hay câu từ chối KHÔNG BAO GIỜ là căn cứ đưa món vào đơn.
+ * HÀM THUẦN — engine (lượt sống) và ops `upsell-basis-scan` dùng chung.
+ */
+export function buyingText(texts: readonly string[]): string {
+  const out: string[] = [];
+  for (const t of texts) {
+    for (const clause of t.split(/[\n,.;!]+|\s+(?:nhưng|nhung)\s+/i)) {
+      if (!clause.trim() || clause.includes("?")) continue;
+      if (NOT_BUYING_RE.test(foldVi(clause)) || NOT_BUYING_RAW_RE.test(clause.toLowerCase())) continue;
+      out.push(clause.trim());
+    }
+  }
+  return out.join("\n");
+}
+
+/**
+ * Món VỪA ĐƯỢC MỜI: chữ bot / page kể từ tin khách trước gọi tên ĐÚNG MỘT sản phẩm của danh mục mà giỏ chưa có (lời mời một món, hoặc câu
+ * hỏi «mình lấy mấy hộp nem hải sản ạ?»). Hai món trở lên / không món nào ⇒ `null` (không đoán). HÀM THUẦN.
+ */
+export function invitedProductOf(botTexts: readonly string[], catalog: readonly string[] | undefined, cart: CartCommitment | undefined): { match: string; display: string } | null {
+  if (!catalog?.length || !botTexts.length) return null;
+  const said = botTexts.join("\n");
+  const names = [...new Set(catalog.map(productName))].filter((n) => mentionsProduct(n, said));
+  const fresh = names.filter((n) => !(cart?.selectedItems ?? []).some((it) => it.match && labelsMatch(it.match, n)));
+  return fresh.length === 1 ? { match: foldVi(fresh[0]), display: fresh[0] } : null;
+}
+
+const keyOfLine = (l: Pick<AskedLine, "productId" | "variantId">) => l.productId ?? l.variantId;
+
 /**
  * DÒNG HÀNG KHÔNG CÓ CĂN CỨ TỪ KHÁCH (P0 14/10/2026, ca «Châu Dương» #91F3641C): khách chọn 1kg chả cá thu, bot gửi câu upsell rồi tự đưa
- * «Nem hải sản tôm bề bề × 3» vào đơn nháp — đơn tự chốt 640.000 ₫. Căn cứ DUY NHẤT để một sản phẩm vào đơn là MÓN KHÁCH NÓI TƯỜNG MINH
- * trong giỏ có thẩm quyền (khớp mã đã gắn, hoặc khớp tên). Lời mời thêm món chỉ thành căn cứ khi khách NHẮC LẠI món đó kèm số lượng trong
- * tin SAU lời mời («lấy thêm 1 hộp nem» ⇒ giỏ ghi món ấy); «ok» chung chung không phải căn cứ. Món khách nói không kèm tên («cho chị 1kg»)
- * khớp được BẤT KỲ sản phẩm nào: chỉ báo khi số sản phẩm lạ vượt số món không tên đó. Giỏ chưa có món khách nói ⇒ `[]` (không đủ căn cứ
- * để chặn — luật an toàn của tệp: không chắc thì không chặn khách). HÀM THUẦN.
+ * «Nem hải sản tôm bề bề × 3» vào đơn nháp — đơn tự chốt 640.000 ₫. Một sản phẩm MỚI so với đơn nháp hiện có (`grounded` = sản phẩm đã nằm
+ * trong đơn nháp — đã qua kiểm này lúc được ghi) chỉ có căn cứ khi khớp MÓN KHÁCH NÓI TƯỜNG MINH trong giỏ có thẩm quyền, hoặc khách GỌI TÊN
+ * nó trong CHỮ MUA. «ok» chung chung, câu hỏi giá, câu từ chối KHÔNG phải căn cứ. Món khách nói không kèm tên («cho chị 1kg») khớp được BẤT
+ * KỲ sản phẩm nào: chỉ báo khi số sản phẩm lạ vượt số món không tên đó. Giỏ chưa có món khách nói ⇒ `[]` (không đủ căn cứ để chặn — luật an
+ * toàn của tệp: không chắc thì không chặn khách). HÀM THUẦN.
  */
-export function unrequestedProducts(cart: CartCommitment | undefined, asked: readonly AskedLine[], customerSaid = ""): string[] {
+export function unrequestedProducts(cart: CartCommitment | undefined, asked: readonly AskedLine[], customerSaid = "", grounded: ReadonlySet<string> = new Set()): string[] {
   const explicit = cart?.selectedItems.filter((x) => x.customerExplicit) ?? [];
   if (!explicit.length) return [];
-  const products = [...new Set(asked.map((l) => l.productId ?? l.variantId))];
+  const products = [...new Set(asked.map(keyOfLine))].filter((p) => !grounded.has(p));
   const strange = products.filter((p) => {
-    const lines = asked.filter((l) => (l.productId ?? l.variantId) === p);
+    const lines = asked.filter((l) => keyOfLine(l) === p);
     if (lines.some((l) => mentionsProduct(l.name, customerSaid))) return false;
     return !explicit.some((it) => (it.productId && it.productId === p) || (it.match && lines.some((l) => labelsMatch(it.match, l.name))));
   });
   const unnamed = explicit.filter((it) => !it.productId && !it.match).length;
   if (strange.length <= unnamed) return [];
-  return strange.map((p) => productName(asked.find((l) => (l.productId ?? l.variantId) === p)?.name ?? "") || "món mời");
+  return strange.map((p) => productName(asked.find((l) => keyOfLine(l) === p)?.name ?? "") || "món mời");
 }
 
 /**
- * Kiểm CĂN CỨ của đơn đề nghị (P0 14/10/2026) — dùng ở lên / sửa đơn nháp VÀ ở chốt (kể cả máy tự chốt): (1) mọi sản phẩm phải có món
- * khách nói tường minh hoặc khách đã gọi tên (`unrequestedProducts` · `mentionsProduct` trên `customerSaid` = chữ khách của lượt mua); (2) số lượng một món khách đã nói KHÔNG được vượt số khách nói (bot không tự đặt ×3) —
- * lượt khách có dấu hiệu sửa mà máy chưa chắc (`relaxedTurn`) thì bỏ qua vế (2), không chặn khách. Không đo được ⇒ không chặn. Trả câu lỗi
- * cho model, `null` = có căn cứ. HÀM THUẦN.
+ * Kiểm CĂN CỨ của đơn đề nghị (P0 14/10/2026) — dùng ở lên / sửa đơn nháp VÀ ở chốt (kể cả máy tự chốt): (1) mọi sản phẩm MỚI so với đơn
+ * nháp hiện có phải có căn cứ (`unrequestedProducts`); (2) sản phẩm chỉ có căn cứ vì khách GỌI TÊN (không có số lượng trong giỏ) ⇒ tối đa 1
+ * — số lớn hơn là bot tự đặt, phải hỏi khách; (3) số lượng một món khách đã nói KHÔNG được vượt số khách nói — lượt «nới», món không tên,
+ * hai món cùng trỏ một sản phẩm ⇒ bỏ qua vế (3), không chặn khách. Trả câu lỗi cho model, `null` = có căn cứ. HÀM THUẦN.
  */
-export function lineBasisViolation(cart: CartCommitment | undefined, asked: readonly AskedLine[], turn?: number | null, customerSaid = ""): string | null {
-  const strange = unrequestedProducts(cart, asked, customerSaid);
+export function lineBasisViolation(cart: CartCommitment | undefined, asked: readonly AskedLine[], turn?: number | null, customerSaid = "", grounded: ReadonlySet<string> = new Set()): string | null {
+  const strange = unrequestedProducts(cart, asked, customerSaid, grounded);
   if (strange.length) {
-    return `KHÔNG đưa ${strange.map((n) => `«${n}»`).join(", ")} vào đơn: khách CHƯA nói lấy món này. Lời mời thêm món chỉ thành đơn khi khách nói TÊN món + SỐ LƯỢNG trong tin sau lời mời (vd «lấy thêm 1 hộp nem»); «ok» chung chung KHÔNG phải đồng ý thêm món. Lên đơn ĐÚNG món + số lượng khách đã chọn; khách muốn thêm mà chưa nói số lượng ⇒ HỎI số lượng.`;
+    return `KHÔNG đưa ${strange.map((n) => `«${n}»`).join(", ")} vào đơn: khách CHƯA nói lấy món này. Lời mời thêm món chỉ thành đơn khi khách nói TÊN món + SỐ LƯỢNG trong tin sau lời mời (vd «lấy thêm 1 hộp nem»); «ok» chung chung, câu hỏi giá, câu từ chối KHÔNG phải đồng ý thêm món. Lên đơn ĐÚNG món + số lượng khách đã chọn; khách muốn thêm mà chưa nói số lượng ⇒ HỎI số lượng.`;
+  }
+  const explicit = cart?.selectedItems.filter((x) => x.customerExplicit) ?? [];
+  // Món khách nói không kèm tên («lấy chị 2 hộp loại nhỏ») có thể chính là sản phẩm đó ⇒ số lượng ấy là của khách: không áp trần 1.
+  if (explicit.length && !explicit.some((it) => !it.productId && !it.match)) {
+    for (const p of [...new Set(asked.map(keyOfLine))].filter((k) => !grounded.has(k))) {
+      const lines = asked.filter((l) => keyOfLine(l) === p);
+      const inCart = explicit.some((it) => (it.productId && it.productId === p) || (it.match && lines.some((l) => labelsMatch(it.match, l.name))));
+      const qty = lines.reduce((t, l) => t + l.quantity, 0);
+      if (!inCart && qty > 1 && lines.some((l) => mentionsProduct(l.name, customerSaid))) {
+        return `KHÔNG tự đặt ${qty} × «${productName(lines[0].name)}»: khách mới gọi tên món, CHƯA nói số lượng. HỎI khách lấy mấy rồi mới thêm vào đơn.`;
+      }
+    }
   }
   if (!cart || (turn !== undefined && turn !== null && cart.relaxedTurn === turn)) return null;
   // Có món khách nói KHÔNG kèm tên («chả cá thu 1kg lấy 2 hộp» ⇒ 1kg chả cá + «2 hộp» không tên) ⇒ số lượng không quy được về đúng món:

@@ -7,8 +7,9 @@
   bằng CHÍNH luật của máy chủ (`applyCustomerCartMessage` trên từng tin khách tới lúc đơn được ghi lần cuối) rồi hỏi `lineBasisViolation`
   với dòng hàng THẬT của đơn (quy gói bằng `computePriced` — cùng phép tính của lõi đơn).
 
-  Kết quả là ƯỚC TÍNH (ESTIMATED): giỏ dựng lại từ chữ khách hôm nay; hội thoại không có món khách nói tường minh ⇒ KHÔNG kết luận (đếm
-  riêng «không đủ căn cứ»), đúng luật an toàn của bản sửa (không chắc thì không chặn).
+  Phát lại ĐÚNG đường của máy chủ: mỗi lần ghi đơn nháp thành công trong lịch sử bot được kiểm với giỏ + CHỮ MUA (`buyingText`) tới lúc
+  đó, sản phẩm của lần ghi trước coi là đã qua kiểm, rồi `bindCommitment` như công cụ. Kết quả là ƯỚC TÍNH (ESTIMATED): danh mục hôm nay;
+  không lần ghi nào có món khách nói tường minh ⇒ KHÔNG kết luận (đếm riêng «không đủ căn cứ»), đúng luật an toàn (không chắc thì không chặn).
 
   `--flag` = kế hoạch gắn cờ UPSELL_UNCONSENTED cho đơn còn sống (CHẠY THỬ, chỉ in); `--flag --apply` = gắn qua lõi đơn
   (`flagOrderForReviewAsAgent` — khoá dòng, nhật ký ORDER_REVIEW). KHÔNG đổi dòng / tiền đơn, KHÔNG gửi tin: người kiểm gọi khách rồi
@@ -31,8 +32,8 @@ import { canFlagOrderForReview, orderReviewLogOf, orderReviewOf } from "@/lib/co
 import { withOrganization } from "@/lib/platform/context";
 import { findOrganization } from "@/lib/platform/organizations";
 import { flagOrderForReviewAsAgent } from "@/lib/records/order-create";
-import { applyCustomerCartMessage, lineBasisViolation, type AskedLine, type CartCommitment } from "@/lib/sales-chatbot/cart-commitment";
-import { computePriced, loadPricingContext, orgPricingConfig } from "@/lib/sales-chatbot/quote";
+import { applyCustomerCartMessage, bindCommitment, buyingText, invitedProductOf, lineBasisViolation, type AskedLine, type CartCommitment } from "@/lib/sales-chatbot/cart-commitment";
+import { computePriced, loadPricingContext, orgPricingConfig, type PricingContext } from "@/lib/sales-chatbot/quote";
 import { rowsOf } from "@/lib/sql-rows";
 
 export const UPSELL_SCAN_DEFAULT_DAYS = 7;
@@ -60,22 +61,85 @@ export function parseUpsellScanArgs(argv: readonly string[]): UpsellScanArgs | {
 
 export type BasisVerdict = { kind: "OK" | "NO_BASIS" | "UNKNOWN"; reason: string | null };
 
+/** Một bước của hội thoại theo seq: tin khách · chữ bot / câu mẫu đã gửi · lần ghi đơn nháp THÀNH CÔNG (dòng hàng model gửi). */
+export type BasisStep = { kind: "CUSTOMER"; text: string; seq: number; at: Date } | { kind: "BOT"; text: string } | { kind: "DRAFT_WRITE"; asked: readonly AskedLine[]; seq: number; at: Date };
+
 /**
- * Giỏ có thẩm quyền dựng lại từ tin khách (theo thứ tự) ⇒ phán quyết căn cứ cho dòng hàng của đơn. Giỏ không có món khách nói tường minh
- * ⇒ UNKNOWN (không kết luận). HÀM THUẦN.
+ * Phát lại ĐÚNG đường của máy chủ (review 14/10): tin khách ⇒ giỏ có thẩm quyền (`applyCustomerCartMessage`, kèm món vừa được mời từ chữ
+ * bot kể từ tin khách trước — `invitedProductOf`); mỗi lần ghi đơn nháp ⇒ `lineBasisViolation` với CHỮ MUA tới lúc đó (`buyingText`) và
+ * sản phẩm của đơn nháp trước (đã qua kiểm), rồi `bindCommitment`. Một lần ghi vi phạm ⇒ NO_BASIS. Không lần ghi nào có giỏ món khách nói
+ * tường minh ⇒ UNKNOWN (không kết luận). HÀM THUẦN.
  */
-export function basisVerdictOf(customerTexts: readonly { text: string; seq: number; at: Date }[], asked: readonly AskedLine[], catalog: readonly string[]): BasisVerdict {
+export function basisVerdictOf(steps: readonly BasisStep[], catalog: readonly string[]): BasisVerdict {
   let cart: CartCommitment | undefined;
-  for (const m of customerTexts) {
-    try {
-      cart = applyCustomerCartMessage(cart, m.text, m.seq, m.at, { catalog });
-    } catch {
-      /* luật giỏ ném ⇒ giữ giỏ cũ, như engine */
+  const customer: string[] = [];
+  let bot: string[] = [];
+  let grounded = new Set<string>();
+  let turn: number | null = null;
+  let judged = false;
+  for (const st of steps) {
+    if (st.kind === "BOT") {
+      bot.push(st.text);
+      continue;
+    }
+    if (st.kind === "CUSTOMER") {
+      try {
+        cart = applyCustomerCartMessage(cart, st.text, st.seq, st.at, { catalog, invited: invitedProductOf(bot, catalog, cart) });
+      } catch {
+        /* luật giỏ ném ⇒ giữ giỏ cũ, như engine */
+      }
+      customer.push(st.text);
+      bot = [];
+      turn = st.seq;
+      continue;
+    }
+    if (cart?.selectedItems.some((x) => x.customerExplicit)) judged = true;
+    const v = lineBasisViolation(cart, st.asked, turn, buyingText(customer), grounded);
+    if (v) return { kind: "NO_BASIS", reason: v };
+    grounded = new Set(st.asked.map((l) => l.productId ?? l.variantId));
+    cart = bindCommitment(cart, st.asked, turn, st.at);
+  }
+  return judged ? { kind: "OK", reason: null } : { kind: "UNKNOWN", reason: "Không lần ghi đơn nào có món khách nói tường minh — không đủ căn cứ để kết luận" };
+}
+
+type Block = { type?: unknown; text?: unknown; id?: unknown; name?: unknown; input?: unknown; toolUseId?: unknown; content?: unknown; isError?: unknown };
+
+/** Lịch sử bot của một hội thoại ⇒ các bước phát lại (tới mốc `until`). Dòng hàng của lần ghi = items model gửi, quy gói bằng computePriced. */
+export function basisStepsOf(msgs: readonly { seq: number; role: string; content: unknown; at: Date }[], until: number, ctx: PricingContext): BasisStep[] {
+  const steps: BasisStep[] = [];
+  const uses = new Map<string, { name: string; items: { variantId: string; quantity: number }[] }>();
+  for (const m of msgs) {
+    if (m.at.getTime() > until) break;
+    const blocks = Array.isArray(m.content) ? (m.content as Block[]) : [];
+    if (m.role === "assistant") {
+      for (const b of blocks) {
+        if (b.type === "tool_use" && typeof b.name === "string") {
+          const inp = (b.input ?? {}) as { items?: { variant_id?: unknown; quantity?: unknown }[] };
+          uses.set(String(b.id ?? ""), { name: b.name, items: Array.isArray(inp.items) ? inp.items.map((x) => ({ variantId: String(x.variant_id ?? ""), quantity: Number(x.quantity ?? 0) })).filter((x) => x.variantId && x.quantity > 0) : [] });
+        }
+        if (b.type === "text" && typeof b.text === "string" && b.text.trim()) steps.push({ kind: "BOT", text: b.text.replace(/^\[Shop đã nhắn\]\s*/, "") });
+      }
+      continue;
+    }
+    const results = blocks.filter((b) => b.type === "tool_result");
+    if (!results.length) {
+      const text = blocks.filter((b) => b.type === "text" && typeof b.text === "string").map((b) => String(b.text)).join("\n").trim();
+      if (text) steps.push({ kind: "CUSTOMER", text, seq: m.seq, at: m.at });
+      continue;
+    }
+    for (const r of results) {
+      let payload: { __deliver?: unknown } = {};
+      try {
+        payload = JSON.parse(String(r.content)) as { __deliver?: unknown };
+      } catch {
+        /* kết quả không phải JSON */
+      }
+      if (typeof payload.__deliver === "string") steps.push({ kind: "BOT", text: payload.__deliver });
+      const u = uses.get(String(r.toolUseId ?? ""));
+      if (!r.isError && u && (u.name === "create_draft_order" || u.name === "update_draft_order") && u.items.length) steps.push({ kind: "DRAFT_WRITE", asked: computePriced(u.items, ctx).asked, seq: m.seq, at: m.at });
     }
   }
-  if (!cart?.selectedItems.some((x) => x.customerExplicit)) return { kind: "UNKNOWN", reason: "Hội thoại không có món khách nói tường minh — không đủ căn cứ để kết luận" };
-  const v = lineBasisViolation(cart, asked, null);
-  return v ? { kind: "NO_BASIS", reason: v } : { kind: "OK", reason: null };
+  return steps;
 }
 
 export type ScannedUpsell = { id: string; stage: string; total: number; verdict: BasisVerdict; raw: unknown };
@@ -99,18 +163,13 @@ export async function scanUpsellBasis(db: Db, days: number, now: Date = new Date
   const out: ScannedUpsell[] = [];
   for (const ord of orders) {
     const until = Math.max(ord.at?.getTime() ?? 0, ord.updatedAt?.getTime() ?? 0);
-    const texts = msgs
-      .filter((x) => x.conv === ord.conv && x.role === "user" && x.at.getTime() <= until)
-      .map((x) => {
-        const blocks = Array.isArray(x.content) ? (x.content as { type?: unknown; text?: unknown }[]) : [];
-        if (blocks.some((b) => b.type === "tool_result")) return null;
-        const text = blocks.filter((b) => b.type === "text" && typeof b.text === "string").map((b) => String(b.text)).join("\n").trim();
-        return text ? { text, seq: x.seq, at: x.at } : null;
-      })
-      .filter((x): x is { text: string; seq: number; at: Date } => x !== null);
-    const lines = items.filter((x) => x.orderId === ord.id && x.variantId).map((x) => ({ variantId: x.variantId!, quantity: x.quantity }));
-    const asked = computePriced(lines, ctx).asked;
-    out.push({ id: ord.id, stage: ord.stage, total: Number(ord.total ?? 0) + Number(ord.fee ?? 0), verdict: basisVerdictOf(texts, asked, catalog), raw: ord.raw });
+    const steps = basisStepsOf(msgs.filter((x) => x.conv === ord.conv), until, ctx);
+    // Đơn không có lần ghi nào trong lịch sử bot (ghi đơn từ hội thoại, đơn cũ) ⇒ xét dòng THẬT của đơn như một lần ghi cuối.
+    if (!steps.some((x) => x.kind === "DRAFT_WRITE")) {
+      const lines = items.filter((x) => x.orderId === ord.id && x.variantId).map((x) => ({ variantId: x.variantId!, quantity: x.quantity }));
+      steps.push({ kind: "DRAFT_WRITE", asked: computePriced(lines, ctx).asked, seq: Number.MAX_SAFE_INTEGER, at: new Date(until) });
+    }
+    out.push({ id: ord.id, stage: ord.stage, total: Number(ord.total ?? 0) + Number(ord.fee ?? 0), verdict: basisVerdictOf(steps, catalog), raw: ord.raw });
   }
   return out;
 }

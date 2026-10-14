@@ -323,32 +323,45 @@ export function foldKeepLength(s: string): string {
   return out;
 }
 
-/** Cụm đứng trước một số tiền làm nó là «TỔNG phải trả» (đã bỏ dấu). «tổng tiền hàng» là TIỀN HÀNG, không phải tổng. */
-const TOTAL_CUE_RE = /(?:^| )(?:tong +cong|tong +tien(?! +hang)|tong +don|tong +thanh +toan|tong(?! +tien +hang)|can +thanh +toan|thanh +toan|tat +ca +la|het +tat +ca|cod|thu +ho)(?= |$)/g;
-const NEXT_CUE_RE = /(?:^| )(?:tong|thanh +toan|cod|thu +ho)(?= |$)/;
+/**
+ * Cụm «TỔNG phải trả» (đã bỏ dấu). KHÔNG có «cod» / «thanh toán» trần («thanh toán 30k ship ạ» là phí ship) và «tổng» chỉ tính khi số
+ * tiền đứng NGAY sau («tổng hợp lại đơn», «tổng cộng có 3 loại» không phải tổng). «tổng tiền hàng» là TIỀN HÀNG.
+ */
+const TOTAL_CUE_RE = /(?:^| )(?:tong +cong|tong +tien(?! +hang)|tong +don|tong +thanh +toan|can +thanh +toan|tat +ca +la|het +tat +ca|tong(?! +(?:tien +hang|hop)))(?= |$)/g;
+const NEXT_CUE_RE = /(?:^| )tong(?= |$)/;
+/** Câu giả định / phương án («nếu lấy 2kg thì tổng 540k», «thêm 1 hộp nem 120k thì tổng 430k») — số trong đó không phải tổng của đơn. */
+const HYPOTHETICAL_RE = /(?:^| )(?:neu|thi|gia su)(?= |$)/;
+/** Chữ đệm được phép giữa cụm tổng và số tiền: «tổng: 310k», «tổng = 310k», «tổng cộng là 310k», «tổng đơn của mình là 310k». */
+const TOTAL_FILLER_RE = /^[\s:=]*(?:(?:của|cua)\s+(?:mình|minh|chị|chi|anh|em|bạn|ban|đơn|don)\s+)?(?:(?:là|la|chỉ|chi|còn|con|hết|het|vẫn|van|sẽ|se)\s+)*[\s:=]*/iu;
 
 /**
- * Số tiền mang nghĩa «TỔNG» trong chữ bot (P0 14/10/2026): mỗi dòng / câu có cụm tổng ⇒ phần SAU cụm (tới cụm tổng kế tiếp); có «=» ⇒
- * phần sau dấu «=» cuối («280k + 30k = 310k»); lấy số tiền ĐẦU TIÊN của phần đó. «Thanh toán khi nhận hàng» không kèm số ⇒ không có
- * gì. HÀM THUẦN.
+ * Số tiền mang nghĩa «TỔNG» trong chữ bot (P0 14/10/2026, review): mỗi dòng / câu KHÔNG giả định có cụm tổng mà số tiền đứng NGAY sau
+ * (chỉ chữ đệm «:», «là», «của mình là») ⇒ số đó; phần sau có «=» ⇒ số sau dấu «=» cuối («tổng: 280k + 30k = 310k»). Không chắc là tổng
+ * ⇒ KHÔNG trả gì (số đó vẫn đi qua kiểm tập số tiền như mọi số khác). HÀM THUẦN.
  */
 export function totalClaimsIn(text: string): number[] {
   const out: number[] = [];
   for (const seg of text.normalize("NFC").split(/\n|[.!?;]\s+(?=\p{Lu})/u)) {
     const folded = foldKeepLength(seg);
+    if (HYPOTHETICAL_RE.test(folded)) continue;
     TOTAL_CUE_RE.lastIndex = 0;
     for (let m = TOTAL_CUE_RE.exec(folded); m; m = TOTAL_CUE_RE.exec(folded)) {
-      const from = m.index + m[0].length;
-      let rest = seg.slice(from);
+      let rest = seg.slice(m.index + m[0].length);
       const next = foldKeepLength(rest).search(NEXT_CUE_RE);
       if (next > 0) rest = rest.slice(0, next);
-      const eqAt = rest.lastIndexOf("=");
-      if (eqAt >= 0) rest = rest.slice(eqAt + 1);
-      const first = extractVndAmounts(rest)[0];
+      const head = rest.replace(TOTAL_FILLER_RE, "");
+      if (!/^\d/.test(head)) continue;
+      const eqAt = head.lastIndexOf("=");
+      const first = extractVndAmounts(eqAt >= 0 ? head.slice(eqAt + 1) : head)[0];
       if (typeof first === "number" && first > 0) out.push(first);
     }
   }
   return [...new Set(out)];
+}
+
+/** Câu nói về ĐƠN của khách («đơn của mình», «đơn hàng», «lên đơn») — điều kiện để một số «tổng» chắc là tổng của đơn. HÀM THUẦN. */
+export function talksAboutOrder(text: string): boolean {
+  return /(?:^| )don(?= |$)/.test(foldKeepLength(text.normalize("NFC")));
 }
 
 /**
@@ -371,15 +384,22 @@ export function totalAllowedOf(state: Pick<ChatState, "quote" | "draft" | "confi
   // Phí ship CHƯA BIẾT (luật 42) ⇒ «tổng» chỉ có thể là tiền hàng — câu thay nói rõ ship báo sau.
   if (q?.verified && q.total === null && q.subtotal > 0) allowed.add(q.subtotal);
   if (typeof draftTotal === "number" && draftTotal > 0) allowed.add(draftTotal);
+  if (state.draft?.quote && state.draft.quote.total === null && state.draft.quote.subtotal > 0) allowed.add(state.draft.quote.subtotal);
   if (state.confirmed && state.confirmed.total > 0) allowed.add(state.confirmed.total);
+  // Tổng để nói lại: ĐƠN NHÁP thắng báo giá gần nhất (báo giá gần nhất có thể là một phương án «nếu lấy 2kg» — review 14/10).
+  const dq = state.draft?.quote;
   const current: ServerTotal | null =
-    q?.verified && q.total !== null && q.total > 0
-      ? { total: q.total, shipping: q.total - q.subtotal }
-      : q?.verified && q.total === null && q.subtotal > 0
-        ? { total: q.subtotal, shipping: "UNKNOWN" }
+    dq && dq.total !== null && dq.total > 0
+      ? { total: dq.total, shipping: dq.total - dq.subtotal }
+      : dq && dq.total === null && dq.subtotal > 0
+        ? { total: dq.subtotal, shipping: "UNKNOWN" }
         : state.confirmed && state.confirmed.total > 0
           ? { total: state.confirmed.total, shipping: null }
-          : null;
+          : q?.verified && q.total !== null && q.total > 0
+            ? { total: q.total, shipping: q.total - q.subtotal }
+            : q?.verified && q.total === null && q.subtotal > 0
+              ? { total: q.subtotal, shipping: "UNKNOWN" }
+              : null;
   return { allowed, current, stale: false };
 }
 
@@ -396,7 +416,7 @@ export function unverifiedAmounts(amounts: readonly number[], allowed: ReadonlyS
 }
 
 /** Bảng chân lý: khẳng định nào cần căn cứ nào. Không khẳng định ⇒ luôn qua. `amounts` = số tiền trong câu (khi có tập xác thực). HÀM THUẦN. */
-export function claimVerdict(claims: readonly ClaimKind[], facts: ClaimFacts, amounts: readonly number[] = [], totals: readonly number[] = []): ClaimVerdict {
+export function claimVerdict(claims: readonly ClaimKind[], facts: ClaimFacts, amounts: readonly number[] = [], totals: readonly number[] = [], aboutOrder = true): ClaimVerdict {
   if (claims.includes("PAYMENT_RECEIVED") && !facts.paymentVerified) {
     return { ok: false, claim: "PAYMENT_RECEIVED", safeText: CLAIM_SAFE_TEXT.PAYMENT, handoffReason: CLAIM_HANDOFF_REASON.PAYMENT_RECEIVED, note: "Đã chặn câu AI khẳng định đã nhận tiền — chưa có chứng từ thu", handoff: true };
   }
@@ -419,10 +439,11 @@ export function claimVerdict(claims: readonly ClaimKind[], facts: ClaimFacts, am
   if (claims.includes("ORDER_EDITED") && !facts.orderEditedThisTurn) {
     return { ok: false, claim: "ORDER_EDITED", safeText: CLAIM_SAFE_TEXT.ORDER_EDIT, handoffReason: CLAIM_HANDOFF_REASON.ORDER_EDITED, note: "Đã chặn câu AI khẳng định đã sửa đơn — không công cụ nào ghi trong lượt", handoff: true };
   }
-  // TỔNG phải là tổng của REVISION giỏ / nháp hiện tại (P0 14/10/2026). Có báo giá ⇒ nói lại đúng tổng máy chủ (không chuyển người);
-  // báo giá đã cũ so với giỏ / không có tổng để nói ⇒ chặn như số tiền chưa xác thực.
+  // TỔNG phải là tổng của REVISION giỏ / nháp hiện tại (P0 14/10/2026). CHỈ khi câu nói về ĐƠN («đơn của mình… tổng …» — `aboutOrder`) mới
+  // chắc số đó là tổng của đơn: có báo giá ⇒ nói lại đúng tổng máy chủ (không chuyển người); báo giá đã cũ ⇒ chặn + người. Câu không nói về
+  // đơn («2kg là 540k, tổng 570k gồm ship») KHÔNG chắc ⇒ đi luật cũ (kiểm tập số tiền) — không bao giờ chèn một tổng tự tin (review 14/10).
   const tf = facts.totals;
-  const badTotals = tf ? totals.filter((t) => !tf.allowed.has(t)) : [];
+  const badTotals = tf && aboutOrder ? totals.filter((t) => !tf.allowed.has(t)) : [];
   if (tf && badTotals.length) {
     const cur = tf.current;
     const note = `Đã chặn câu báo TỔNG ${badTotals.map((n) => formatVND(n)).join(", ")} — ${tf.stale ? "giỏ vừa đổi, báo giá máy chủ đã cũ" : cur ? `tổng máy chủ của giỏ hiện tại là ${formatVND(cur.total)}` : "chưa có tổng máy chủ để đối chiếu"}`;
@@ -440,7 +461,7 @@ export function claimVerdict(claims: readonly ClaimKind[], facts: ClaimFacts, am
 
 /** `detectClaims` + `claimVerdict`. HÀM THUẦN. */
 export function guardClaims(text: string, facts: ClaimFacts): ClaimVerdict {
-  return claimVerdict(detectClaims(text), facts, extractVndAmounts(text), totalClaimsIn(text));
+  return claimVerdict(detectClaims(text), facts, extractVndAmounts(text), totalClaimsIn(text), talksAboutOrder(text));
 }
 
 /**
@@ -452,7 +473,7 @@ export async function guardOutgoing(text: string, facts: () => Promise<ClaimFact
   const amounts = extractVndAmounts(text);
   if (!claims.length && !amounts.length) return { ok: true };
   const f = await facts().catch((): ClaimFacts => ({ paymentVerified: false, orderConfirmed: false, orderCancelled: false, allowedAmounts: new Set([0]), orderEditedThisTurn: false }));
-  return claimVerdict(claims, f, amounts, totalClaimsIn(text));
+  return claimVerdict(claims, f, amounts, totalClaimsIn(text), talksAboutOrder(text));
 }
 
 /** Lời khách «đã chuyển khoản» gõ tay (đã bỏ dấu) — chỉ cụm nói về TIỀN, không bắt «đã chuyển địa chỉ». */
