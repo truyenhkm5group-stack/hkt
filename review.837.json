@@ -1,8 +1,8 @@
 {
   "pr": 837,
-  "sha": "3915698b9c3377bbbed4d331ff463533e7cd3fb9",
+  "sha": "2f3ac6fd29ef1688693f230f96455827fcf97a32",
   "verdict": "PASS",
   "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
-  "at": "2026-10-14T02:35:08.835Z",
-  "note": "Script ops CHỈ ĐỌC: số tiền + nguồn gốc tin + công cụ/đơn; không chữ tin/PII"
+  "at": "2026-10-14T03:20:34.726Z",
+  "note": "3915698b + đổi tên hàm name→variantLabel cho ops-log-leak; nội dung in không đổi"
 }

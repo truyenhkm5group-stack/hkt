@@ -2595,3 +2595,4 @@
 {"at":"2026-10-14T02:35:03.783Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"conv-money-trace","detail":"#837 cho fix/conv-money-trace @ 3915698b9c33"}
 {"at":"2026-10-14T02:35:24.999Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#837 @ 3915698b9c33 · Script ops CHỈ ĐỌC: số tiền + nguồn gốc tin + công cụ/đơn; không chữ tin/PII"}
 {"at":"2026-10-14T03:20:30.467Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"conv-money-trace","detail":"fix/conv-money-trace @ 2f3ac6fd29ef · 1 lệnh kiểm thử"}
+{"at":"2026-10-14T03:20:52.191Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#837 @ 2f3ac6fd29ef · 3915698b + đổi tên hàm name→variantLabel cho ops-log-leak; nội dung in không đổi"}
