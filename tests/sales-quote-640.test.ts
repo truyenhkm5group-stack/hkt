@@ -94,6 +94,10 @@ function testPureFlow() {
   assert.equal(lineBasisViolation(withNem, [L("p-cct", "v1", "Chả cá thu (1kg)"), nem(1)]), null, "khách nói tên + số lượng ⇒ thêm đúng 1");
   assert.match(lineBasisViolation(withNem, [L("p-cct", "v1", "Chả cá thu (1kg)"), nem(3)]) ?? "", /KHÔNG tự tăng «nem» lên 3/, "bot không tự đặt × 3");
   assert.match(lineBasisViolation(cart, [{ ...L("p-cct", "v1", "Chả cá thu (1kg)"), quantity: 2 }]) ?? "", /KHÔNG tự tăng «chả cá thu» lên 2kg: khách nói 1kg/);
+  // Khách GỌI TÊN món mà máy không đọc được số lượng («thêm 1 ruốc tôm») ⇒ có căn cứ; «chả cá» không gọi tên «Chả mực giã tay».
+  assert.equal(lineBasisViolation(cart, [L("p-cct", "v1", "Chả cá thu (1kg)"), L("p-ruoc", "v4", "Ruốc bông tôm 100%")], null, "cho chị 1kg chả cá thu, thêm 1 ruốc tôm"), null);
+  assert.ok(lineBasisViolation(cart, [L("p-cct", "v1", "Chả cá thu (1kg)"), L("p-muc", "v2", "Chả mực giã tay (1kg)")], null, "cho chị 1kg chả cá thu") !== null);
+  assert.ok(lineBasisViolation(cart, [L("p-cct", "v1", "Chả cá thu (1kg)"), L("p-nem", "v3", "Nem hải sản tôm bề bề (Hộp 10 cái)")], null, "1kg chả cá thu\nok em") !== null, "«ok» không gọi tên món mời");
   assert.equal(lineBasisViolation({ ...cart, relaxedTurn: 5 }, [{ ...L("p-cct", "v1", "Chả cá thu (1kg)"), quantity: 2 }], 5), null, "lượt khách sửa mà máy chưa chắc ⇒ không chặn số lượng");
   assert.deepEqual(unrequestedProducts(undefined, [L("p-muc", "v2", "Chả mực")]), [], "giỏ chưa có món khách nói ⇒ không đủ căn cứ chặn");
   const unnamed: CartCommitment = { ...cart, selectedItems: [{ ...cart.selectedItems[0], match: "", label: "" }] };

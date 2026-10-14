@@ -527,6 +527,20 @@ export function commitmentViolation(cart: CartCommitment | undefined, asked: rea
 }
 
 /**
+ * Khách đã GỌI TÊN sản phẩm trong chữ của mình (kể cả không kèm số lượng máy đọc được — «cho chị 2 gói, thêm 1 ruốc tôm»): từ ĐẦU của tên
+ * (danh từ món: «ruốc», «nem», «chả») có mặt VÀ ít nhất hai từ của tên có mặt (tên một từ ⇒ đủ một). «chả cá» không gọi tên «Chả mực giã
+ * tay» (chỉ chung «chả»); «ok» không gọi tên món nào. HÀM THUẦN.
+ */
+export function mentionsProduct(name: string, customerSaid: string): boolean {
+  if (!customerSaid.trim()) return false;
+  const words = labelTokens(productName(name)).filter((w) => !/^\d/.test(w) && w !== "kg" && w !== "g");
+  if (!words.length) return false;
+  const said = new Set(labelTokens(customerSaid));
+  if (!said.has(words[0])) return false;
+  return words.filter((w) => said.has(w)).length >= Math.min(2, new Set(words).size);
+}
+
+/**
  * DÒNG HÀNG KHÔNG CÓ CĂN CỨ TỪ KHÁCH (P0 14/10/2026, ca «Châu Dương» #91F3641C): khách chọn 1kg chả cá thu, bot gửi câu upsell rồi tự đưa
  * «Nem hải sản tôm bề bề × 3» vào đơn nháp — đơn tự chốt 640.000 ₫. Căn cứ DUY NHẤT để một sản phẩm vào đơn là MÓN KHÁCH NÓI TƯỜNG MINH
  * trong giỏ có thẩm quyền (khớp mã đã gắn, hoặc khớp tên). Lời mời thêm món chỉ thành căn cứ khi khách NHẮC LẠI món đó kèm số lượng trong
@@ -534,12 +548,13 @@ export function commitmentViolation(cart: CartCommitment | undefined, asked: rea
  * khớp được BẤT KỲ sản phẩm nào: chỉ báo khi số sản phẩm lạ vượt số món không tên đó. Giỏ chưa có món khách nói ⇒ `[]` (không đủ căn cứ
  * để chặn — luật an toàn của tệp: không chắc thì không chặn khách). HÀM THUẦN.
  */
-export function unrequestedProducts(cart: CartCommitment | undefined, asked: readonly AskedLine[]): string[] {
+export function unrequestedProducts(cart: CartCommitment | undefined, asked: readonly AskedLine[], customerSaid = ""): string[] {
   const explicit = cart?.selectedItems.filter((x) => x.customerExplicit) ?? [];
   if (!explicit.length) return [];
   const products = [...new Set(asked.map((l) => l.productId ?? l.variantId))];
   const strange = products.filter((p) => {
     const lines = asked.filter((l) => (l.productId ?? l.variantId) === p);
+    if (lines.some((l) => mentionsProduct(l.name, customerSaid))) return false;
     return !explicit.some((it) => (it.productId && it.productId === p) || (it.match && lines.some((l) => labelsMatch(it.match, l.name))));
   });
   const unnamed = explicit.filter((it) => !it.productId && !it.match).length;
@@ -549,20 +564,26 @@ export function unrequestedProducts(cart: CartCommitment | undefined, asked: rea
 
 /**
  * Kiểm CĂN CỨ của đơn đề nghị (P0 14/10/2026) — dùng ở lên / sửa đơn nháp VÀ ở chốt (kể cả máy tự chốt): (1) mọi sản phẩm phải có món
- * khách nói tường minh (`unrequestedProducts`); (2) số lượng một món khách đã nói KHÔNG được vượt số khách nói (bot không tự đặt ×3) —
+ * khách nói tường minh hoặc khách đã gọi tên (`unrequestedProducts` · `mentionsProduct` trên `customerSaid` = chữ khách của lượt mua); (2) số lượng một món khách đã nói KHÔNG được vượt số khách nói (bot không tự đặt ×3) —
  * lượt khách có dấu hiệu sửa mà máy chưa chắc (`relaxedTurn`) thì bỏ qua vế (2), không chặn khách. Không đo được ⇒ không chặn. Trả câu lỗi
  * cho model, `null` = có căn cứ. HÀM THUẦN.
  */
-export function lineBasisViolation(cart: CartCommitment | undefined, asked: readonly AskedLine[], turn?: number | null): string | null {
-  const strange = unrequestedProducts(cart, asked);
+export function lineBasisViolation(cart: CartCommitment | undefined, asked: readonly AskedLine[], turn?: number | null, customerSaid = ""): string | null {
+  const strange = unrequestedProducts(cart, asked, customerSaid);
   if (strange.length) {
     return `KHÔNG đưa ${strange.map((n) => `«${n}»`).join(", ")} vào đơn: khách CHƯA nói lấy món này. Lời mời thêm món chỉ thành đơn khi khách nói TÊN món + SỐ LƯỢNG trong tin sau lời mời (vd «lấy thêm 1 hộp nem»); «ok» chung chung KHÔNG phải đồng ý thêm món. Lên đơn ĐÚNG món + số lượng khách đã chọn; khách muốn thêm mà chưa nói số lượng ⇒ HỎI số lượng.`;
   }
   if (!cart || (turn !== undefined && turn !== null && cart.relaxedTurn === turn)) return null;
+  // Có món khách nói KHÔNG kèm tên («chả cá thu 1kg lấy 2 hộp» ⇒ 1kg chả cá + «2 hộp» không tên) ⇒ số lượng không quy được về đúng món:
+  // không chặn vế số lượng (luật an toàn — không chắc thì không chặn khách).
+  if (cart.selectedItems.some((x) => x.customerExplicit && !x.match && !x.productId)) return null;
+  const explicitPids = cart.selectedItems.filter((x) => x.customerExplicit).map((x) => productFor(x, cart, asked));
   for (const item of cart.selectedItems) {
     if (!item.customerExplicit) continue;
     const pid = productFor(item, cart, asked);
     if (!pid) continue;
+    // Hai món khách nói cùng trỏ về MỘT sản phẩm (sau khi gắn mã: «1kg» + «2 hộp») ⇒ không biết số nào là số của khách: không chặn.
+    if (explicitPids.filter((p) => p === pid).length > 1) continue;
     const proposed = proposedAmount(pid, item.unit, asked);
     if (proposed === null || proposed <= item.quantity) continue;
     const name = item.label || productName(asked.find((l) => l.productId === pid)?.name ?? "") || "món khách chọn";

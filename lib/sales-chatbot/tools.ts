@@ -153,6 +153,8 @@ export type BookingTool = (typeof BOOKING_TOOLS)[number];
 
 export type ToolContext = {
   conversationId: string;
+  /** Chữ KHÁCH của lượt mua hiện tại (các tin khách nối lại, gồm tin của lượt này) — căn cứ «khách đã gọi tên món» (`lineBasisViolation`). */
+  customerSaid?: string;
   channel: ChatChannel;
   config: SalesChatbotConfig;
   state: ChatState;
@@ -945,7 +947,7 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
       const cartBreak = v.data.items ? commitmentViolation(state.cart, priced.asked, ctx.turn ?? null) : null;
       if (cartBreak) return err("Đơn nháp: hạ số lượng khách đã chốt", cartBreak, state);
       // DÒNG HÀNG PHẢI CÓ CĂN CỨ TỪ KHÁCH (P0 14/10/2026, ca «Châu Dương»: món upsell × 3 khách chưa đồng ý vào đơn, đơn tự chốt 640.000 ₫).
-      const noBasis = v.data.items ? lineBasisViolation(state.cart, priced.asked, ctx.turn ?? null) : null;
+      const noBasis = v.data.items ? lineBasisViolation(state.cart, priced.asked, ctx.turn ?? null, ctx.customerSaid ?? ctx.lastUserText) : null;
       if (noBasis) return err("Đơn nháp: dòng hàng không có căn cứ từ khách", noBasis, state);
       // Giá chưa xác thực ⇒ KHÔNG tạo / sửa đơn tự động, người xác minh (yêu cầu 5 của chủ shop).
       if (!priced.quote.verified) {
@@ -1046,7 +1048,7 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
       if (priced.missing.length || priced.unpriced.length) return err("Chốt: mã không bán được", "Có mẫu mã không còn bán hoặc chưa có giá — chuyển nhân viên.", state, { reason: priced.missing.length ? "UNKNOWN_SKU" : "UNPRICED_SKU" });
       if (priced.addOnOnly) return err("Chốt: chỉ có món bán kèm", ADD_ON_ONLY_ERROR, state);
       // Đơn nháp có dòng hàng không có căn cứ từ khách ⇒ KHÔNG chốt — kể cả máy tự chốt (P0-A đi qua đúng nhánh này).
-      const noBasis = lineBasisViolation(state.cart, priced.asked, ctx.turn ?? null);
+      const noBasis = lineBasisViolation(state.cart, priced.asked, ctx.turn ?? null, ctx.customerSaid ?? ctx.lastUserText);
       if (noBasis) return err("Chốt: dòng hàng không có căn cứ từ khách", `${noBasis} Sửa đơn nháp (update_draft_order) cho đúng món khách chọn rồi mới chốt.`, state);
       // Giá chưa xác thực ⇒ KHÔNG chốt, người xác minh (yêu cầu 4–5 của chủ shop).
       if (!priced.quote.verified) {
