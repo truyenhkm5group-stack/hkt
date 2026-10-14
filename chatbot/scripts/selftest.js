@@ -2401,5 +2401,26 @@ console.log("OK 18: doi chieu dia chi don POS -> bat don chon nham xa, bo qua tr
   console.log("OK 55: tin khach toi luc bot dang tra loi duoc tra loi bu; page khong bang size / khach like -> xin SDT dia chi; khong gui [..] cho khach");
 }
 
+// ---- 56: page chua co bang size (AURA, them tu app) dung bang size chung cua shop — chu shop 14/10/2026 (Hoa Hoang:
+// khach "cao 1,50 nặng 54 kg" roi hoi "Sai gì ạ", bot chi noi "nhân viên sẽ chọn size")
+{
+  const bang = '[{"h":[140,175],"w":[[40,49,"M"],[50,57,"L"],[58,65,"XL"]]}]';
+  const cu = { a: settings.get("P56A").sizeChart, b: settings.get("P56B").sizeChart };
+  settings.update("P56A", { sizeChart: bang });
+  settings.update("P56B", { sizeChart: bang });
+  settings.update("P56NAM", { sizeChart: '[{"h":[160,190],"w":[[60,75,"L"]]}]', customerTitle: "anh" });
+  assert.equal(settings.effective("P56AURA").sizeChart, bang, "page khong co bang size -> bang chung");
+  settings.update("P56AURA", { customerTitle: "anh" });
+  assert.equal(settings.effective("P56AURA").sizeChart, "", "page do nam khong muon bang size do nu");
+  settings.update("P56AURA", { customerTitle: "" });
+  const khach = (t) => ({ from: { id: "KHACH" }, message: t });
+  const f = bot.customerFacts("P56AURA", [khach("Mình cao 1,50 nặng 54 kg có mặc được không ạ")]);
+  assert.equal(f.size, "L", "tra duoc size tu bang chung");
+  settings.update("P56A", { sizeChart: cu.a || "" });
+  settings.update("P56B", { sizeChart: cu.b || "" });
+  settings.update("P56NAM", { sizeChart: "", customerTitle: "" });
+  console.log("OK 56: page chua co bang size dung bang size chung cua shop (tru page do nam)");
+}
+
 console.log("\nTAT CA TEST PASS");
 process.exit(0);
