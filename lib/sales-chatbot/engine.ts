@@ -69,10 +69,10 @@ import { autoConfirmBlocker, confirmedFromOrder, executeTool, orderTotalsOf, too
 import { amountText, applyCustomerCartMessage, buyingText, cartCommitmentPrompt, cartHoldVerdict, customerHesitates, invitedProductOf, orderReadiness } from "@/lib/sales-chatbot/cart-commitment";
 import { sellableCatalog } from "@/lib/sales-chatbot/catalog";
 import { allowedImageUrl, describeImages, fetchCustomerImage, IMAGE_PROMPT_RULE, imageLine, VISION_LIMITS } from "@/lib/sales-chatbot/vision";
-import { CLAIM_HANDOFF_REASON, CLAIM_SAFE_TEXT, claimFactsLoader, detectPriceDispute, extractVndAmounts, guardOutgoing, paymentSignalHandoff, paymentSignalInCustomerText, unverifiedAmounts, type ClaimVerdict } from "@/lib/sales-chatbot/claim-guard";
+import { CLAIM_HANDOFF_REASON, CLAIM_SAFE_TEXT, claimFactsLoader, detectPriceDispute, extractVndAmounts, guardOutgoing, noteSeenTotals, paymentSignalHandoff, paymentSignalInCustomerText, unverifiedAmounts, type ClaimVerdict } from "@/lib/sales-chatbot/claim-guard";
 import { flagOrderForReviewAsAgent, loadAutoConfirmComplete } from "@/lib/records/order-create";
 import type { PriceDisputeState } from "@/lib/sales-chatbot/quote-shared";
-import { catalogReferenceAmounts } from "@/lib/sales-chatbot/quote";
+import { catalogReferenceAmounts, catalogReferenceBreakdown } from "@/lib/sales-chatbot/quote";
 import { vnDayOffset, WEEKDAY_LABEL } from "@/lib/constants/booking";
 
 export const SALES_AGENT = { name: "Chatbot bán hàng", source: "lib/sales-chatbot/engine.ts" } as const;
@@ -319,6 +319,20 @@ async function cartCatalogNames(text: string): Promise<string[] | undefined> {
   if (!/\d|nửa|một|hai|ba |bỏ|hủy|huỷ|bo |huy /i.test(text)) return undefined;
   try {
     return [...new Set((await sellableCatalog([])).map((c) => c.name))];
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Danh mục đầy đủ (tên + đơn vị bán) cho hai việc của giỏ khi giỏ ĐÃ có món khách nói: nhận món vừa được mời và đơn vị của nó (`g` khi một
+ * mẫu mã ghi quy cách kg — chả cá 1kg; `pack` còn lại — hộp nem, hũ ruốc 250g), và nhận câu huỷ gọi tên món ngoài giỏ. Lỗi ⇒ `undefined`.
+ */
+async function cartProducts(): Promise<{ names: string[]; unitOf: (name: string) => "g" | "pack" } | undefined> {
+  try {
+    const items = await sellableCatalog([]);
+    const names = [...new Set(items.map((c) => c.name))];
+    return { names, unitOf: (name) => (items.some((c) => c.name === name && /\d\s*(?:kg|kí|ký)\b/i.test(`${c.variant} ${c.sku}`)) ? "g" : "pack") };
   } catch {
     return undefined;
   }
@@ -986,10 +1000,13 @@ async function chatTurnCore(
     let cartNext: ChatState["cart"];
     try {
       const catalog = await cartCatalogNames(text);
-      // Món VỪA ĐƯỢC MỜI (bot / page gọi tên đúng một món kể từ tin khách trước) — «ừ cho chị 1 hộp» là số của món đó (review 14/10).
+      // Món VỪA ĐƯỢC MỜI (bot / page gọi tên đúng một món kể từ tin khách trước) — «ừ cho chị 1 hộp» là số của món đó (review 14/10). Danh mục
+      // đầy đủ chỉ đọc khi giỏ đã có món khách nói (lời mời THÊM món / câu huỷ gọi tên món ngoài giỏ).
+      const full = st0.cart?.selectedItems.some((x) => x.customerExplicit) ? await cartProducts() : undefined;
       const lastCustSeq = prevTurn ?? 0;
-      const invited = invitedProductOf(recentShopTexts(msgs.filter((m) => m.seq > lastCustSeq), 6).map((t) => (t.startsWith(SHOP_SAID) ? t.slice(SHOP_SAID.length).trim() : t)), catalog, st0.cart);
-      cartNext = applyCustomerCartMessage(st0.cart, text, turnSeq, now, { catalog, invited });
+      const inv0 = invitedProductOf(recentShopTexts(msgs.filter((m) => m.seq > lastCustSeq), 6).map((t) => (t.startsWith(SHOP_SAID) ? t.slice(SHOP_SAID.length).trim() : t)), full?.names ?? catalog, st0.cart);
+      const invited = inv0 && full ? { ...inv0, unit: full.unitOf(inv0.display) } : inv0;
+      cartNext = applyCustomerCartMessage(st0.cart, text, turnSeq, now, { catalog, invited, ...(full ? { products: full.names } : {}) });
     } catch {
       cartNext = st0.cart ? { ...st0.cart, relaxedTurn: turnSeq } : undefined;
     }
@@ -1031,7 +1048,7 @@ async function chatTurnCore(
     // chuyển người, ghi lý do (`handoffReason` ⇒ sự kiện `handoff.requested` + `lastError`). Căn cứ chỉ đọc khi câu có khẳng định.
     // SỐ TIỀN (P0 authoritative-quote 11/10/2026): mọi số tiền trong chữ bot phải thuộc báo giá máy chủ đã xác thực của hội thoại hoặc
     // tập tham chiếu của danh mục (`quote.ts`) — đọc lười, một lần mỗi lượt, chỉ khi câu có số tiền.
-    const claimFactsBase = claimFactsLoader({ id: conv.id, orderId: conv.orderId, pageId: conv.pageId, threadId: conv.threadId }, { reference: () => catalogReferenceAmounts(cfg), turn: turnSeq });
+    const claimFactsBase = claimFactsLoader({ id: conv.id, orderId: conv.orderId, pageId: conv.pageId, threadId: conv.threadId }, { reference: () => catalogReferenceAmounts(cfg), breakdown: () => catalogReferenceBreakdown(cfg), turn: turnSeq });
     // Căn cứ của câu «đã cập nhật địa chỉ / đã sửa đơn» (claim-guard ORDER_EDITED): công cụ lưu khách / lên / sửa đơn GHI THÀNH CÔNG trong
     // CHÍNH lượt này (review #821 vòng 2 — trước bán, cập nhật địa chỉ khách bằng create_customer không được bị coi là bịa).
     let wroteThisTurn = false;
@@ -1307,7 +1324,9 @@ async function chatTurnCore(
         for (const u of uses) {
           const confirmedBefore = Boolean(state.confirmed);
           const r = await executeTool(u.name, u.input, { autoConfirm, prevTurn, conversationId: conv.id, customerSaid, channel: opts.channel, config: cfg, state, lastUserText: text, agent: SALES_AGENT, customerName: opts.customerName ?? null, quickReplies: quickCatalog, returning, customer360: c360, recentSaid, turn: turnSeq, bookingOn, now, commentTurn: opts.aiCustomer?.threadKind === "COMMENT", promptStamp: { ...stampBase, model: res.model || prov.provider.model } });
+          // Tổng máy chủ vừa tính vào sổ `seenTotals` — hàng rào chặn nói lại tổng của giỏ CŨ (review vòng 3).
           state = r.state;
+          state = noteSeenTotals(state);
           // create_customer chỉ sửa HỒ SƠ khách, không đụng đơn ⇒ chỉ là căn cứ khi CHƯA có đơn đã chốt (review #821 vòng 3).
           if (!r.isError && ((u.name === "create_customer" && !confirmedBefore) || u.name === "create_draft_order" || u.name === "update_draft_order")) wroteThisTurn = true;
           // Đơn lên / sửa / chốt THÀNH CÔNG ⇒ khách phải được đọc tóm tắt theo số MÁY CHỦ; model nói sau đó thì xoá cờ.

@@ -33,6 +33,7 @@ import { isManualOrderId, manualOrderGaps } from "@/lib/constants/manual-orders"
 import { manualOrderAmountDue, manualPaymentStatus, sumConfirmedPayments } from "@/lib/constants/order-payments";
 import { orderReviewOf } from "@/lib/constants/order-review";
 import { formatVND } from "@/lib/format";
+import type { ReferenceBreakdown } from "@/lib/sales-chatbot/quote";
 import { PRICE_UNVERIFIED_PREFIX } from "@/lib/sales-chatbot/quote-shared";
 import { foldVi } from "@/lib/sales-chatbot/text";
 import type { ChatState } from "@/lib/sales-chatbot/tools";
@@ -104,7 +105,12 @@ export type ClaimKind = "PAYMENT_RECEIVED" | "ORDER_CONFIRMED" | "ORDER_CANCELLE
 export type ClaimTotals = { allowed: ReadonlySet<number>; current: ServerTotal | null; stale: boolean };
 /** Tổng để nói lại: `shipping` = phí ship đã gồm trong tổng · `null` = không tách được (đơn đã chốt) · `"UNKNOWN"` = phí ship chưa biết (tổng = tiền hàng). */
 export type ServerTotal = { total: number; shipping: number | null | "UNKNOWN" };
-export type ClaimFacts = { paymentVerified: boolean; orderConfirmed: boolean; orderCancelled: boolean; orderPending?: "ADDRESS" | "CHECK" | null; allowedAmounts?: ReadonlySet<number>; orderEditedThisTurn?: boolean; totals?: ClaimTotals };
+/**
+ * `suspicious` (review vòng 3): số tiền là MỘT TỔNG đã tính cho một giỏ KHÁC giỏ hiện tại — tổng máy chủ đã báo trước đó (`seenTotals`) hoặc
+ * bội số của mẫu mã KHÔNG có trong giỏ — trừ giá niêm yết một đơn vị, bội số của món đang có trong giỏ, giá công cụ đã trả và tổng hợp lệ
+ * hiện tại. Có mặt ở BẤT KỲ đâu trong câu (không cần chữ «tổng») ⇒ chặn + người. `unitPrices` = giá một đơn vị (được nói cạnh chữ COD).
+ */
+export type ClaimFacts = { paymentVerified: boolean; orderConfirmed: boolean; orderCancelled: boolean; orderPending?: "ADDRESS" | "CHECK" | null; allowedAmounts?: ReadonlySet<number>; orderEditedThisTurn?: boolean; totals?: ClaimTotals; suspicious?: ReadonlySet<number>; unitPrices?: ReadonlySet<number> };
 /** `handoff = false` ⇒ thay câu nhưng KHÔNG chuyển người (câu an toàn vẫn gửi trên mọi kênh). */
 export type ClaimVerdict = { ok: true } | { ok: false; claim: ClaimKind; safeText: string; handoffReason: string; note: string; handoff: boolean; amounts?: number[] };
 
@@ -359,37 +365,62 @@ export function totalClaimsIn(text: string): number[] {
   return [...new Set(out)];
 }
 
-/** Cụm «tổng / thanh toán / COD / thu hộ» RỘNG — để bắt mọi số tiền đứng gần nó (FAIL-1 review vòng 2). «tổng hợp», «tổng tiền hàng» không tính. */
-const BROAD_CUE_RE = /(?:^| )(?:tong(?! +(?:tien +hang|hop))|thanh +toan|cod|thu +ho|tat +ca)(?= |$)/g;
-/** Từ giữa cụm và số làm số đó KHÔNG phải tổng: liệt kê («có 3 loại», «gồm», «món»), phí ship. */
-const BROAD_STOP = new Set(["loai", "mon", "co", "gom", "nhu", "va", "ship", "phi", "cuoc", "giam"]);
+/** Cụm báo TỔNG / thanh toán (đã bỏ dấu, review vòng 3): «tổng» (trừ «tổng hợp», «tổng tiền hàng»), «thành tiền», «tính ra», «cộng lại», «tất cả», «giá trị đơn», «thanh toán», «COD», «thu hộ», dấu «=». */
+const BROAD_CUE_RE = /(?:^| )(?:tong(?! +(?:tien +hang|hop))|thanh +tien|tinh +ra|cong +lai|tat +ca|gia +tri +don|thanh +toan|cod|thu +ho)(?= |$)|=/g;
+/** Chữ liệt kê giữa cụm và số đầu tiên («tổng cộng có 3 loại: …», «gồm») ⇒ mệnh đề là danh sách giá, không phải câu báo tổng. */
+const LIST_WORDS = new Set(["co", "gom", "loai", "nhu"]);
+/** Chữ ngay sau một số trơn (không đơn vị) để coi nó là NGHÌN đồng («tổng 640 ạ»): hết câu hoặc trợ từ. */
+const BARE_TAIL = new Set(["", "a", "nhe", "nha", "thoi", "ha", "luon", "nhen", "nhak", "roi", "shop", "em", "chi", "anh"]);
 
 /**
- * Mọi số tiền đứng GẦN cụm tổng / thanh toán / COD / thu hộ (≤ 5 chữ đệm, không chữ liệt kê / phí ship) trong một mệnh đề KHÔNG giả định
- * (không «nếu» / «giả sử», không «thêm … thì»). Số đứng ngay trước chữ «ship» là phí ship, không phải tổng. Rộng hơn `totalClaimsIn`: dùng
- * để CHẶN (không bao giờ để thay số) khi số đó không phải một tổng hợp lệ của giỏ. HÀM THUẦN.
+ * Mọi số tiền đứng SAU một cụm tổng / thanh toán / COD / «=» trong cùng mệnh đề — MỌI số, không chỉ số đầu (review vòng 3: «tổng: 280k +
+ * 360k = 640k», «tổng 2 món là 640k»); số trơn 2–4 chữ số ngay trước trợ từ / hết câu tính là nghìn đồng («tổng 640 ạ»). Bỏ qua: mệnh đề
+ * liệt kê («có 3 loại»), mệnh đề phần trăm («trước 50% là 140k»), trần thu hộ ≥ 1 triệu kèm «tối đa», số nhỏ (≤ 100.000) đứng ngay trước
+ * chữ «ship» (phí ship). Giả định («nếu… thì») KHÔNG được bỏ qua — câu giả định chỉ qua khi số đúng là tổng của báo giá máy chủ gần nhất
+ * (luật ở `claimVerdict`). HÀM THUẦN.
  */
 export function totalMentionsIn(text: string): number[] {
   const out: number[] = [];
   for (const clause of text.normalize("NFC").split(/[\n,;!?]+|\.\s+|…/u)) {
     const folded = foldKeepLength(clause);
-    if (/(?:^| )(?:neu|gia su)(?= |$)/.test(folded) || (/(?:^| )them(?= |$)/.test(folded) && /(?:^| )thi(?= |$)/.test(folded))) continue;
+    if (clause.includes("%")) continue;
     BROAD_CUE_RE.lastIndex = 0;
-    for (let m = BROAD_CUE_RE.exec(folded); m; m = BROAD_CUE_RE.exec(folded)) {
-      const rest = clause.slice(m.index + m[0].length);
-      const d = rest.search(/\d/);
-      if (d < 0) continue;
-      const between = foldVi(rest.slice(0, d)).split(" ").filter(Boolean);
-      if (between.length > 5 || between.some((w) => BROAD_STOP.has(w))) continue;
-      const toks = rest.slice(d).split(/\s+/);
-      const first = extractVndAmounts(toks.slice(0, 2).join(" "))[0];
-      if (typeof first !== "number" || first <= 0) continue;
-      const after = foldVi(toks.slice(1, 3).join(" "));
-      if (/^(?:d |đ |dong )?(?:ship|phi ship|tien ship|cuoc)/.test(after)) continue;
-      out.push(first);
+    const m = BROAD_CUE_RE.exec(folded);
+    if (!m) continue;
+    const rest = clause.slice(m.index + m[0].length);
+    const d = rest.search(/\d/);
+    if (d < 0) continue;
+    if (foldVi(rest.slice(0, d)).split(" ").some((w) => LIST_WORDS.has(w))) continue;
+    const cap = /(?:^| )toi +da(?= |$)/.test(folded);
+    const take = (n: number, after: string) => {
+      if (!(n > 0)) return;
+      if (cap && n >= 1_000_000) return;
+      if (n <= 100_000 && /^(?:d |đ |dong )?(?:ship|phi ship|tien ship|cuoc)/.test(foldVi(after).trim())) return;
+      out.push(n);
+    };
+    // Số có đơn vị tiền (k · nghìn · triệu · đ · ₫ · tách nghìn) — từng số một, kèm chữ ngay sau để nhận phí ship.
+    const moneyRe = /(\d+(?:[.,]\d+)*)\s*(k|nghìn|nghin|ngàn|ngan|tr|triệu|trieu|đ|₫|vnđ|vnd|đồng|dong)?(?![\p{L}\d])/giu;
+    for (const mm of rest.matchAll(moneyRe)) {
+      const raw = mm[0];
+      const after = rest.slice((mm.index ?? 0) + raw.length, (mm.index ?? 0) + raw.length + 20);
+      const vnd = extractVndAmounts(raw)[0];
+      if (typeof vnd === "number") {
+        take(vnd, after);
+        continue;
+      }
+      // Số trơn: 2–4 chữ số, ngay sau là hết câu / trợ từ ⇒ nghìn đồng.
+      if (!mm[2] && /^\d{2,4}$/.test(mm[1]) && BARE_TAIL.has(foldVi(after).trim().split(" ")[0] ?? "")) take(Number(mm[1]) * 1000, after);
     }
   }
   return [...new Set(out)];
+}
+
+/** Lưu mọi tổng / tiền hàng máy chủ vừa tính (báo giá gần nhất · đơn nháp) vào `seenTotals` — gọi sau mỗi lời gọi công cụ. HÀM THUẦN. */
+export function noteSeenTotals(state: ChatState): ChatState {
+  const add = [state.quote?.verified ? state.quote.subtotal : null, state.quote?.verified ? state.quote.total : null, state.draft?.quote?.subtotal, state.draft?.quote?.total].filter((n): n is number => typeof n === "number" && n > 0);
+  const prev = state.seenTotals ?? [];
+  const fresh = add.filter((n) => !prev.includes(n));
+  return fresh.length ? { ...state, seenTotals: [...prev, ...fresh].slice(-40) } : state;
 }
 
 /** Câu nói về ĐƠN của khách («đơn của mình», «đơn hàng», «lên đơn») — điều kiện để một số «tổng» chắc là tổng của đơn. HÀM THUẦN. */
@@ -488,7 +519,12 @@ export function claimVerdict(claims: readonly ClaimKind[], facts: ClaimFacts, am
   }
   // Số đứng GẦN cụm tổng / thanh toán / COD mà KHÔNG phải tổng hợp lệ của giỏ (FAIL-1 review vòng 2: «Dạ tổng 640k, miễn phí ship ạ» khi
   // đơn nháp 280.000 ₫ — 640.000 có trong tập tham chiếu nên luật cũ cho qua) ⇒ CHẶN + người. Không chèn số nào, không lùi về tập tham chiếu.
-  const badMentions = tf ? mentions.filter((t) => !tf.allowed.has(t)) : [];
+  // TỔNG của một giỏ KHÁC giỏ hiện tại ở BẤT KỲ đâu trong câu (review vòng 3 — cấu trúc, không phụ thuộc chữ «tổng» / «đơn» / nếu–thì).
+  const susp = tf && facts.suspicious ? [...new Set(amounts.filter((a) => facts.suspicious!.has(a)))] : [];
+  if (susp.length) {
+    return { ok: false, claim: "PRICE_UNVERIFIED", safeText: CLAIM_SAFE_TEXT.PRICE, handoffReason: CLAIM_HANDOFF_REASON.PRICE_UNVERIFIED, note: `Đã chặn câu có số tiền ${susp.map((n) => formatVND(n)).join(", ")} — là tổng đã tính cho một giỏ khác, không phải giỏ hiện tại`, handoff: true, amounts: susp };
+  }
+  const badMentions = tf ? mentions.filter((t) => !tf.allowed.has(t) && !facts.unitPrices?.has(t)) : [];
   if (tf && badMentions.length) {
     return { ok: false, claim: "PRICE_UNVERIFIED", safeText: CLAIM_SAFE_TEXT.PRICE, handoffReason: CLAIM_HANDOFF_REASON.PRICE_UNVERIFIED, note: `Đã chặn câu có số tiền ${badMentions.map((n) => formatVND(n)).join(", ")} cạnh chữ tổng / thanh toán / COD — không phải tổng của giỏ hiện tại${tf.stale ? " (giỏ vừa đổi, báo giá đã cũ)" : ""}`, handoff: true, amounts: badMentions };
   }
@@ -589,13 +625,15 @@ export function orderValidityOf(o: { id: string; raw: unknown; phone: string; ad
  * `confirm_order` có thể vừa chốt ở vòng trước của chính lượt này). `reference` = tập số tham chiếu của danh mục (`quote.ts`) —
  * thiếu ⇒ tập số tiền chỉ gồm báo giá của hội thoại.
  */
-export function claimFactsLoader(conv: ClaimConversation, opts: { reference?: () => Promise<ReadonlySet<number>>; turn?: number } = {}): (state: ChatState) => Promise<ClaimFacts> {
+export function claimFactsLoader(conv: ClaimConversation, opts: { reference?: () => Promise<ReadonlySet<number>>; breakdown?: () => Promise<ReferenceBreakdown>; turn?: number } = {}): (state: ChatState) => Promise<ClaimFacts> {
   let db: Promise<LinkedFacts> | null = null;
   let ref: Promise<ReadonlySet<number>> | null = null;
+  let bd: Promise<ReferenceBreakdown | null> | null = null;
   return async (state) => {
     if (!db) db = linkedOrderFacts(conv, [state.confirmed?.orderId, state.draft?.orderId]);
     if (!ref) ref = opts.reference ? opts.reference().catch((): ReadonlySet<number> => new Set<number>([0])) : Promise.resolve(new Set<number>([0]));
-    const [r, reference] = await Promise.all([db, ref]);
+    if (!bd) bd = opts.breakdown ? opts.breakdown().catch(() => null) : Promise.resolve(null);
+    const [r, reference, breakdown] = await Promise.all([db, ref, bd]);
     const botDraft = !state.confirmed ? (state.draft?.orderId ?? null) : null;
     const liveOrders = r.orders.filter((o) => !(o.id === botDraft && o.stage === "NEW"));
     const validDb = liveOrders.filter((o) => o.validity.valid);
@@ -613,8 +651,31 @@ export function claimFactsLoader(conv: ClaimConversation, opts: { reference?: ()
     for (const n of state.priceFacts ?? []) allowed.add(n);
     const orderEditedThisTurn = opts.turn !== undefined && state.draft?.shownTurn === opts.turn;
     const totals = totalAllowedOf(state);
-    return { paymentVerified: liveOrders.some((o) => r.paidOrderIds.has(o.id)), orderConfirmed, orderPending, orderCancelled: Boolean(state.cancelledOrders?.length), allowedAmounts: allowed, orderEditedThisTurn, ...(totals ? { totals } : {}) };
+    const suspicious = totals ? suspiciousTotalsOf(state, totals, breakdown) : undefined;
+    return { paymentVerified: liveOrders.some((o) => r.paidOrderIds.has(o.id)), orderConfirmed, orderPending, orderCancelled: Boolean(state.cancelledOrders?.length), allowedAmounts: allowed, orderEditedThisTurn, ...(totals ? { totals } : {}), ...(suspicious ? { suspicious } : {}), ...(breakdown ? { unitPrices: breakdown.unit } : {}) };
   };
+}
+
+/**
+ * Tập số «TỔNG CỦA GIỎ KHÁC» (review vòng 3): tổng máy chủ đã báo trong hội thoại (`seenTotals`) + bội số của mọi mẫu mã (`byVariant`),
+ * TRỪ giá một đơn vị (`unit`), bội số của các sản phẩm ĐANG có trong giỏ / đơn nháp, giá công cụ đã trả, số của báo giá gần nhất và tổng
+ * hợp lệ hiện tại. HÀM THUẦN.
+ */
+export function suspiciousTotalsOf(state: ChatState, totals: ClaimTotals, bd: ReferenceBreakdown | null): Set<number> {
+  const pool = new Set<number>(state.seenTotals ?? []);
+  const keep = new Set<number>([...totals.allowed, ...(state.priceFacts ?? []), ...(state.quote?.verified ? state.quote.amounts : [])]);
+  if (bd) {
+    for (const set of bd.byVariant.values()) for (const n of set) pool.add(n);
+    for (const n of bd.unit) keep.add(n);
+    const products = new Set<string>();
+    for (const l of state.draft?.lines ?? []) products.add(bd.productOf.get(l.variantId) ?? l.variantId);
+    for (const it of state.cart?.selectedItems ?? []) {
+      if (it.productId) products.add(it.productId);
+      if (it.variantId) products.add(bd.productOf.get(it.variantId) ?? it.variantId);
+    }
+    for (const [v, set] of bd.byVariant) if (products.has(bd.productOf.get(v) ?? v)) for (const n of set) keep.add(n);
+  }
+  return new Set([...pool].filter((n) => n > 0 && !keep.has(n)));
 }
 
 type LinkedFacts = { orders: { id: string; stage: string; validity: OrderValidity }[]; paidOrderIds: Set<string> };

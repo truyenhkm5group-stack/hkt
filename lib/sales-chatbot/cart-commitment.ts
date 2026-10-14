@@ -391,7 +391,21 @@ const newItem = (a: CartAmount, turn: number | null, explicit: boolean): Committ
  * MỘT lần trên giỏ GỐC (chỉ số ổn định — không lần theo đối tượng đã thay), rồi mới áp. Không áp chắc được mà câu có dấu hiệu sửa ⇒
  * giỏ giữ nguyên + `clarify` + `relaxedTurn` (kiểm cứng của lượt tắt — không chặn khách). HÀM THUẦN.
  */
-export function applyCustomerCartMessage(cart: CartCommitment | undefined, text: string, turn: number | null, now: Date, opts: { catalog?: readonly string[]; invited?: { match: string; display: string } | null } = {}): CartCommitment | undefined {
+/** Món vừa được mời: tên danh mục + đơn vị bán (`g` = bán theo khối lượng kg · `pack` = hộp / gói / cái; vắng ⇒ `pack`). */
+export type InvitedProduct = { match: string; display: string; unit?: CartUnit };
+
+/**
+ * Sản phẩm được GỌI TÊN trong câu: đủ hai từ của tên (`mentionsProduct`), hoặc từ ĐẦU của tên có mặt và từ đầu ấy là DUY NHẤT trong danh
+ * mục («nem» khi shop chỉ có một loại nem). HÀM THUẦN.
+ */
+export function namedProductsIn(text: string, catalog: readonly string[]): string[] {
+  const names = [...new Set(catalog.map(productName))];
+  const said = new Set(labelTokens(text));
+  const heads = names.map((n) => labelTokens(n)[0] ?? "");
+  return names.filter((n, i) => mentionsProduct(n, text) || (heads[i] && said.has(heads[i]) && heads.filter((h) => h === heads[i]).length === 1));
+}
+
+export function applyCustomerCartMessage(cart: CartCommitment | undefined, text: string, turn: number | null, now: Date, opts: { catalog?: readonly string[]; invited?: InvitedProduct | null; products?: readonly string[] } = {}): CartCommitment | undefined {
   const parsed = classifyCartMessage(text, opts.catalog);
   // Tin NGAY SAU lời mời đúng MỘT món (P0 14/10/2026): số lượng không kèm tên («ừ cho chị 1 hộp») là số của món vừa được mời — không phải của
   // món sẵn có trong giỏ. Chỉ áp khi giỏ ĐÃ có món khách nói (lời mời THÊM món — trước đó số không tên vẫn đi đường cũ, vd «chả mực bao
@@ -400,13 +414,27 @@ export function applyCustomerCartMessage(cart: CartCommitment | undefined, text:
   // GÓI / HỘP / CÁI không tên mới về món được mời. Tên mơ hồ («2 hộp nem» khi có hai loại nem) mà khớp đúng món vừa mời ⇒ món đó.
   const inv = cart?.selectedItems.some((x) => x.customerExplicit) ? opts.invited : null;
   const a0 = parsed.amounts.length === 1 ? parsed.amounts[0] : null;
-  const toInvited = Boolean(inv && a0 && (parsed.kind === "ORDER" || parsed.kind === "ADD") && ((!a0.label && !a0.ambiguous && a0.unit === "pack") || (a0.ambiguous && a0.hint && labelsMatch(a0.hint, inv.match))));
+  // Review vòng 3: đơn vị HỢP CẢ món chính lẫn món được mời («ừ lấy 1kg» sau lời mời chả mực khi chả cá cũng bán theo kg; «thêm 1 hộp nữa»
+  // khi nem và ruốc cùng bán theo hộp) ⇒ không gán — hỏi lại. Chỉ hợp món được mời ⇒ món được mời; chỉ hợp món chính ⇒ món chính.
+  const unnamedA0 = Boolean(inv && a0 && !a0.label && !a0.ambiguous && (parsed.kind === "ORDER" || parsed.kind === "ADD"));
+  const invUnit: CartUnit = inv?.unit ?? "pack";
+  const mainUnits = new Set((cart?.selectedItems ?? []).filter((x) => x.customerExplicit).map((x) => x.unit));
+  const bothFit = unnamedA0 && a0!.unit === invUnit && mainUnits.has(a0!.unit);
+  const toInvited = Boolean(inv && a0 && !bothFit && ((unnamedA0 && a0.unit === invUnit) || ((parsed.kind === "ORDER" || parsed.kind === "ADD") && a0.ambiguous && a0.hint && labelsMatch(a0.hint, inv.match))));
   const intent: CartIntent = toInvited && inv && a0 ? { ...parsed, kind: "ADD", amounts: [{ ...a0, label: inv.match, display: inv.display, ambiguous: false }] } : parsed;
   const at = now.toISOString();
   const items = cart?.selectedItems ?? [];
   const relax = (clarify: string): CartCommitment | undefined => (cart ? { ...cart, clarify, relaxedTurn: turn, at } : cart);
   const done = (next: CommittedItem[], clarify: string | null = null): CartCommitment => ({ selectedItems: next, turn, at, clarify, relaxedTurn: null });
   const labels = items.map((x) => x.match);
+  if (bothFit && inv && a0) return relax(`Khách nói ${amountText(a0.value, a0.unit)} không kèm tên ngay sau lời mời «${inv.display}» — số này hợp cả món đang có lẫn món được mời: HỎI LẠI khách muốn thêm món nào`);
+  // Câu huỷ GỌI TÊN một món KHÔNG có trong giỏ (thường là món vừa được mời — «nem tôm chắc không cần đâu») là TỪ CHỐI món đó, không phải
+  // huỷ cả đơn (review vòng 3, P0 trên main). Huỷ cả đơn khi câu không gọi tên món nào, hoặc gọi tên món đang có trong giỏ.
+  if (intent.kind === "CANCEL" && items.length) {
+    const named = namedProductsIn(text, [...(opts.products ?? opts.catalog ?? []), ...(inv ? [inv.display] : [])]);
+    const inCart = (n: string) => items.some((it) => it.customerExplicit && it.match && labelsMatch(it.match, n));
+    if (named.length && !named.some(inCart)) return cart?.clarify ? { ...cart, clarify: null } : cart;
+  }
   if (intent.kind === "AMBIGUOUS" || intent.kind === "QUESTION") {
     // Giỏ ≥ 2 món mà câu có «thôi» / «chỉ» chưa phân loại chắc ⇒ cũng không giữ cứng (khách đang chọn lại món).
     const pickCue = items.length >= 2 && pickCueOf(text);
@@ -557,9 +585,9 @@ export function mentionsProduct(name: string, customerSaid: string): boolean {
 /** Mệnh đề KHÔNG phải lời mua: phủ định / bỏ / huỷ · hỏi giá / hỏi điều kiện · giả định. */
 const NOT_BUYING_RE = /(?:^| )(?:khong|ko|k|chua|dung|hong|hok|chang) (?:lay|mua|can|dat|an|thich)(?: |$)|(?:^| )(?:bao nhieu|bn|nhieu tien|may tien|het bao|bao gia|gia (?:bao|sao|nhieu|the nao|ca)|neu|thi sao)(?: |$)|(?:^| )(?:khong|ko|k|hong|hok)$/;
 /** «bỏ» / «hủy» / «khỏi» đọc trên chữ CÓ DẤU — bỏ dấu thì «bò» (tên món) cũng thành «bo». */
-const NOT_BUYING_RAW_RE = /(?:^|\s)(?:bỏ|hủy|huỷ|khỏi)(?:\s|$)/iu;
+const NOT_BUYING_RAW_RE = /(?:^|\s)(?:bỏ|hủy|huỷ|khỏi|ngán)(?:\s|$)/iu;
 /** Hoãn («để lần sau», «để chị xem đã», «sau nha») · hỏi tồn («hết rồi», «còn hàng») · câu hỏi không dấu «?» («ngon ko em», «hết rồi hả»). */
-const DEFER_OR_ASK_RE = /(?:^| )(?:de lan sau|lan sau|sau nha|sau nhe|de sau|xem da|tinh sau|de (?:chi|em|anh|minh|toi|c|a|e) (?:xem|tinh|nghi|hoi|ban)|het roi|het hang|con hang|con khong|con ko)(?: |$)|(?:^| )(?:ko|khong|k|hong|hem|chua|nhi|sao)(?: (?:em|e|shop|chi|c|a|vay|v))*$/;
+const DEFER_OR_ASK_RE = /(?:^| )(?:de lan sau|lan sau|de sau|xem da|tinh sau|de (?:chi|em|anh|minh|toi|c|a|e) (?:xem|tinh|nghi|hoi|ban)|het roi|het hang|con hang|con khong|con ko|mac qua|dat qua|thi thoi|thoi nha|thoi nhe|thoi khoi|an roi|an [a-z]+ roi|an [a-z]+ [a-z]+ roi|khong can|ko can|k can|chua can|loai nao|cai nao|mon nao|the nao|ra sao|nhu nao|nhu the nao|co ngon|ngon khong|ngon ko)(?: |$)|(?:^| )[a-z]+ hay [a-z]+(?: (?:em|e|shop|a|vay|v))?$|(?:^| )(?:ko|khong|k|hong|hem|chua|nhi|sao)(?: (?:em|e|shop|chi|c|a|vay|v))*$/;
 const ASK_TAIL_RAW_RE = /(?:^|\s)(?:hả|à|hở)(?:\s+(?:em|e|shop|chị|c|ạ|vậy|v))*\s*$/iu;
 
 /**
@@ -584,7 +612,7 @@ export function buyingText(texts: readonly string[]): string {
  * Món VỪA ĐƯỢC MỜI: chữ bot / page kể từ tin khách trước gọi tên ĐÚNG MỘT sản phẩm của danh mục mà giỏ chưa có (lời mời một món, hoặc câu
  * hỏi «mình lấy mấy hộp nem hải sản ạ?»). Hai món trở lên / không món nào ⇒ `null` (không đoán). HÀM THUẦN.
  */
-export function invitedProductOf(botTexts: readonly string[], catalog: readonly string[] | undefined, cart: CartCommitment | undefined): { match: string; display: string } | null {
+export function invitedProductOf(botTexts: readonly string[], catalog: readonly string[] | undefined, cart: CartCommitment | undefined): InvitedProduct | null {
   if (!catalog?.length || !botTexts.length) return null;
   const said = botTexts.join("\n");
   const names = [...new Set(catalog.map(productName))].filter((n) => mentionsProduct(n, said));

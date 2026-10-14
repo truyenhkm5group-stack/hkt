@@ -354,6 +354,45 @@ export function referenceAmounts(ctx: PricingContext): Set<number> {
   return out;
 }
 
+/**
+ * Bảng số tham chiếu theo TỪNG mẫu mã (review vòng 3 — hàng rào tổng CẤU TRÚC): `byVariant` = mọi số máy chủ báo được cho giỏ chỉ có mẫu
+ * mã đó × 1…10 (± phí ship); `unit` = giá MỘT đơn vị của mọi mẫu mã (± ship, kể cả mẫu mã chỉ bán kèm); `productOf` = mẫu mã → sản
+ * phẩm. Hàng rào số tiền dùng để tách «giá niêm yết / bội số của món đang có trong giỏ» (được nói) khỏi «một TỔNG đã tính cho giỏ khác»
+ * (không được nói khi không phải giỏ hiện tại). HÀM THUẦN.
+ */
+export type ReferenceBreakdown = { byVariant: Map<string, Set<number>>; unit: Set<number>; productOf: Map<string, string> };
+export function referenceBreakdown(ctx: PricingContext): ReferenceBreakdown {
+  const byVariant = new Map<string, Set<number>>();
+  const unit = new Set<number>();
+  const productOf = new Map<string, string>();
+  const ship = ctx.cfg.shippingFee;
+  for (const it of ctx.byId.values()) {
+    productOf.set(it.variantId, it.productId);
+    if (it.price === null || it.price <= 0) continue;
+    unit.add(it.price);
+    if (ship !== null) unit.add(it.price + ship);
+    if (it.addOnOnly) continue;
+    const set = new Set<number>();
+    for (let n = 1; n <= REFERENCE_MAX_QUANTITY; n++) {
+      const q = buildQuote(computePriced([{ variantId: it.variantId, quantity: n }], ctx), ctx);
+      if (!q.verified) continue;
+      if (n === 1) {
+        unit.add(q.subtotal);
+        if (ship !== null) unit.add(q.subtotal + ship);
+      }
+      set.add(q.subtotal);
+      if (q.total !== null) set.add(q.total);
+      if (ship !== null) set.add(q.subtotal + ship);
+    }
+    byVariant.set(it.variantId, set);
+  }
+  return { byVariant, unit, productOf };
+}
+
+export async function catalogReferenceBreakdown(cfg: PricingConfig): Promise<ReferenceBreakdown> {
+  return referenceBreakdown(await loadPricingContext(cfg, await priceBooksForMode(cfg.wholesalePricing ? "DEFAULT_BOOK" : "RETAIL", null)));
+}
+
 /** Tập số tham chiếu đọc từ CSDL của tổ chức ngữ cảnh (bảng giá mặc định khi shop bật giá sỉ). */
 export async function catalogReferenceAmounts(cfg: PricingConfig): Promise<Set<number>> {
   return referenceAmounts(await loadPricingContext(cfg, await priceBooksForMode(cfg.wholesalePricing ? "DEFAULT_BOOK" : "RETAIL", null)));
