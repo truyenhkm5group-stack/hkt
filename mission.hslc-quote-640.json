@@ -3,7 +3,7 @@
   "mission_id": "hslc-quote-640",
   "title": "HSLC: bot không còn báo tổng sai (640k) — món mời chưa đồng ý không vào đơn, tổng chỉ là tổng của giỏ hiện tại",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P2",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -29,9 +29,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-14T06:14:52.332Z",
-  "updated_at": "2026-10-14T06:54:30.289Z",
+  "updated_at": "2026-10-14T07:30:43.156Z",
   "last_heartbeat": "2026-10-14T06:54:30.289Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#840 → 849fa00cf13715b4bf8ffd356ef442c8aa7b7f94"
+  },
   "handoff": {
     "branch": "fix/hslc-quote-640",
     "sha": "6cfb83695083583054bce791019164dd78767fbc",
