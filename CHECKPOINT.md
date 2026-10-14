@@ -10,6 +10,55 @@
 
 
 
+
+## Checkpoint 2026-10-14 ~2x:xx VN — TEAM NHẬN P0 HSLC · #842 ĐÃ SỬA GỐC · BỐN VIỆC KẸT TOKEN
+
+**Khoá:** `integration-lead` TRỐNG (Desktop đã nhả). Team **CHƯA nhận** — nhận khoá mà không có token GitHub
+thì chỉ chặn người khác chứ không gộp/deploy được gì. Team làm ở vai WORKER.
+**Token:** phiên Team vẫn KHÔNG có `GH_TOKEN`/`GITHUB_TOKEN` (đã xin 14/10, chủ shop duyệt PAT fine-grained
+chỉ `Pull requests` đọc+ghi, cất ở hồ sơ Git Bash — CHƯA đặt). **Đây là nút thắt của 4/5 việc P0 dưới đây.**
+
+### P0.1 — #842 ĐÃ SỬA GỐC, ĐẨY LÊN `e9bf1b34`, CỔNG ĐANG CHẠY LẠI
+Dựng lại lỗi TẠI CHỖ (không đọc log — Team không có token): chạy riêng `tests/inbox-semantics-v3.test.ts` trên
+PGlite. Chỉ **s17 ↔ s08** đảo chỗ, 18 hội thoại còn lại đúng.
+- **Máy chủ ĐÚNG:** s17 có tin NHÂN VIÊN TRẢ LỜI TRÊN PANCAKE lúc T−13′ ⇒ hoạt động T−13′, đứng trước s08
+  (tin khách T−15′). Đúng luật chủ shop duyệt 14/10.
+- **Bài kiểm SAI:** `activityOf` chỉ đọc bốn CỘT mốc, bỏ vế tin phía page mà #839 đã thêm vào khoá xếp
+  (`PAGE_REPLY_ACTIVITY_SQL`). Lệch này CÓ TỪ TRƯỚC, bị nhóm CHƯA ĐỌC che (s08 chưa đọc nên luôn đứng trước).
+  Bỏ nhóm chưa đọc cho riêng «Tất cả» làm nó lộ ra.
+- **Sửa MÔ HÌNH, không sửa luật, không sửa kỳ vọng.** Luật máy chủ không đổi một dòng: xếp vẫn ở MÁY CHỦ
+  trong câu truy vấn (xếp TRƯỚC, cắt trang SAU), «Tất cả» theo `INBOX_ACTIVITY_SQL`; «Chưa đọc» / «Chờ trả
+  lời» / «Cần người» giữ nguyên logic riêng.
+- Đã chạy: inbox-semantics-v3 · inbox-message-sync · inbox-search · inbox-v2-a đều ĐẠT; typecheck + lint sạch.
+- **CÒN LẠI (cần khoá + token):** cổng xanh ⇒ gộp ⇒ deploy ⇒ đo lại 100 hội thoại hoạt động mới nhất bằng
+  `pancake-thread-diff "hslc-hmt-shop --hours=24 --threads=120"` (kỳ vọng: «Tất cả» KHÔNG còn hội thoại mới
+  hoạt động rơi khỏi trang đầu; trước đó 97/100).
+
+### P0.2 — 9 TIN PHÍA PAGE THIẾU: KHÔNG XÁC ĐỊNH ĐƯỢC ID NẾU KHÔNG CHẠY ĐƯỢC OPS
+Đã đọc `scripts/pancake-thread-diff.ts`: «thiếu» = tin phía page CÓ ở Pancake, ERP không có dòng nào TRÙNG MÃ,
+không khớp theo CHỮ trong cửa sổ, và đã quá ngưỡng «quá mới». Nên 9 tin ấy là **thiếu thật**, không phải nhiễu
+của phép đo. Phân bố 7/9 dồn vào khung 16h ⇒ nghiêng về một KHOẢNG HỤT ngắn (gói tin không tới / lượt nhập
+hỏng) hơn là một bộ lọc bỏ sót có hệ thống — nhưng **đó mới là giả thuyết, chưa đo**.
+Bước đúng (cần token): `pancake-thread-diff "hslc-hmt-shop --hours=24 --threads=120"` rồi lấy mã luồng của các
+dòng THIẾU, chạy `--conv=<id>` cho từng luồng để in mã tin. KHÔNG backfill trước khi biết nguyên nhân, và
+backfill (nếu có) phải ghi `imported_at` để không kích AI trả lời lại.
+
+### P0.3 — MONEY TRACE: CHƯA CHẠY ĐƯỢC
+`conv-money-trace "hslc-hmt-shop --scan --days=1"` là ops chỉ đọc nhưng vẫn dispatch qua Actions ⇒ cần token.
+8 đơn đã gắn cờ là idempotent, chạy lại gắn 0 — không có rủi ro chạy trùng.
+
+### P0.4 — QA 0245: KHÔNG CHẠY LẠI LÚC NÀY
+VPS còn 664 MB < ngưỡng 700 MB. **Không hạ ngưỡng.** Và hôm nay còn một lượt deploy #842 đang chờ ⇒ đúng lúc
+KHÔNG nên chiếm RAM. Đề xuất nhỏ nhất khi cần: chạy lượt đo vào khung thấp điểm sau khi lô deploy xong, trước
+đó dừng tạm job nền nặng; nếu vẫn thiếu thì nâng swap trước khi nghĩ tới nâng gói VPS.
+**Phân biệt rõ:** `qa` DEGRADED_MIGRATION (0245 + 0246) là LỖI MIGRATION CỦA MỘT TỔ CHỨC QA — không phải lỗi
+triển khai production. Production `35c7168d` đang phục vụ, `ok: true`.
+
+### P0.5 — CONTROL PLANE
+Không ép DONE: `verify` vẫn coi deploy failure là INCIDENT, và Team không có bằng chứng production nào tự đọc
+được (log job đòi token). Ba bàn giao vẫn NEEDS_PR: `checkpoint-append-only` @ `2d0b5a6a` · `test-locale-order`
+@ `d9a91d81` · `inbox-unread-perf` @ `b222a779`.
+
 ## Checkpoint 2026-10-14 ~18:00 VN — BÀN GIAO DESKTOP(Max 96%) → TEAM · ĐỌC TRƯỚC
 **Khoá:** Desktop đã `lease release integration-lead` ngay sau mục này. Team `lease acquire integration-lead` rồi mới gộp/deploy. Desktop KHÔNG gộp/deploy/chạy ops ghi nữa. Claude Web chỉ đọc.
 
