@@ -2608,3 +2608,4 @@
 {"at":"2026-10-14T04:30:41.864Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"OVERLAP_ACCEPTED","mission":"inbox-message-sync","detail":"OVERLAP_ACCEPTED với pancake-replacement: phạm vi lib/sales-chatbot/inbox-states.ts ↔ lib/sales-chatbot/ — cách tích hợp: fanpage.ts notePageSideActivity + health"}
 {"at":"2026-10-14T04:31:01.121Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"inbox-message-sync","detail":"fix/inbox-message-sync @ be4d0fed80d5 · 3 lệnh kiểm thử"}
 {"at":"2026-10-14T04:31:40.154Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"inbox-message-sync","detail":"#839 cho fix/inbox-message-sync @ be4d0fed80d5"}
+{"at":"2026-10-14T04:37:48.041Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"pancake-thread-diff","detail":"fix/pancake-thread-diff @ 75017356539c · 2 lệnh kiểm thử"}
