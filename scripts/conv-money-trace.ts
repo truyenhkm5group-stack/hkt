@@ -221,7 +221,7 @@ export async function traceConversation(db: Db, convId: string, orderShort: stri
   const confirmed = st.confirmed as { orderId?: string | null; total?: number; at?: string; auto?: boolean; valid?: boolean } | undefined;
   const cart = st.cart as { selectedItems?: { productId?: string | null; variantId?: string | null; quantity?: number; unit?: string; customerExplicit?: boolean; sourceMessageId?: number | null; label?: string }[]; turn?: number | null; at?: string; relaxedTurn?: number | null } | undefined;
   const sets: AmountSets = { quote: new Set(quote?.verified ? (quote.amounts ?? []) : []), facts: new Set(Array.isArray(st.priceFacts) ? (st.priceFacts as number[]) : []), reference: ctx.reference };
-  const name = (v: string) => ctx.names.get(v) ?? `mẫu mã ?${v.slice(-6)}`;
+  const variantLabel = (v: string) => ctx.names.get(v) ?? `mẫu mã ?${v.slice(-6)}`;
 
   console.log(`Hội thoại ${conv.id} · kênh ${conv.channel} · trạng thái ${conv.status} · lượt ${conv.turns} · câu mẫu ${conv.quickReplies} · lời gọi AI ${conv.aiCalls} · lỗi lượt: ${conv.lastError ? conv.lastError.slice(0, 160) : "—"}`);
 
@@ -298,7 +298,7 @@ export async function traceConversation(db: Db, convId: string, orderShort: stri
         bump(tools, `${tn} ${b.isError ? "LỖI" : "OK"}`);
         const mo = moneyOfToolResult(b.content);
         const moneyTool = /cart|draft|confirm|price|quick/.test(tn);
-        const lines = mo?.lines.length ? ` · dòng ${mo.lines.map((l) => `${name(l.variantId)} × ${l.quantity} @ ${vnd(l.unitPrice)}${l.discount ? ` − ${vnd(l.discount)}` : ""} = ${vnd(l.lineTotal)}`).join(" | ")}` : "";
+        const lines = mo?.lines.length ? ` · dòng ${mo.lines.map((l) => `${variantLabel(l.variantId)} × ${l.quantity} @ ${vnd(l.unitPrice)}${l.discount ? ` − ${vnd(l.discount)}` : ""} = ${vnd(l.lineTotal)}`).join(" | ")}` : "";
         const money = mo && (mo.subtotal !== null || mo.total !== null) ? ` · tiền hàng ${vnd(mo.subtotal)} · ship ${vnd(mo.shipping)} · COD ${vnd(mo.total)}` : "";
         if (mo && !b.isError && (mo.total !== null || mo.subtotal !== null) && /cart|draft|confirm/.test(tn)) runningQuoteTotal = mo.total ?? mo.subtotal;
         console.log(`    ↳ kết quả ${tn}: ${b.isError ? "LỖI" : "OK"}${moneyTool && mo?.summary ? ` «${mo.summary.slice(0, 90)}»` : ""}${lines}${money}`);
@@ -310,7 +310,7 @@ export async function traceConversation(db: Db, convId: string, orderShort: stri
       if (b.type === "tool_use" && typeof b.name === "string") {
         toolNames.set(String(b.id ?? ""), b.name);
         const inp = (b.input ?? {}) as Record<string, unknown>;
-        const items = Array.isArray(inp.items) ? (inp.items as { variant_id?: unknown; quantity?: unknown }[]).map((i) => `${name(String(i.variant_id ?? ""))} × ${Number(i.quantity ?? 0)}`).join(" | ") : "";
+        const items = Array.isArray(inp.items) ? (inp.items as { variant_id?: unknown; quantity?: unknown }[]).map((i) => `${variantLabel(String(i.variant_id ?? ""))} × ${Number(i.quantity ?? 0)}`).join(" | ") : "";
         console.log(`  gọi #${x.seq} ${x.at.toISOString()} ${b.name}${items ? ` · ${items}` : ""}${typeof inp.code === "string" ? ` · mã ${inp.code.slice(0, 8)}` : ""}${typeof inp.stage === "string" ? ` · bước ${inp.stage.slice(0, 12)}` : ""} · khoá vào: ${Object.keys(inp).slice(0, 12).join(",")}`);
       }
     }
@@ -330,9 +330,9 @@ export async function traceConversation(db: Db, convId: string, orderShort: stri
 
   // 5. Trạng thái.
   console.log(`— Trạng thái: báo giá ${quote ? `${quote.verified ? "ĐÃ" : "CHƯA"} xác thực · tiền hàng ${vnd(quote.subtotal)} · tổng ${vnd(quote.total ?? null)} · ${quote.at ?? "?"}` : "—"} · giá công cụ đã nhớ ${sets.facts.size} số · tập tham chiếu ${ctx.reference.size} số`);
-  if (draft) console.log(`  nháp ${shortOrder(draft.orderId)} · ${(draft.lines ?? []).map((l) => `${name(l.variantId)} × ${l.quantity} @ ${vnd(draft.unitPrices?.[l.variantId])}`).join(" | ")} · báo giá nháp tiền hàng ${vnd(draft.quote?.subtotal)} · tổng ${vnd(draft.quote?.total ?? null)} · khách đã thấy tổng ${vnd(draft.seenTotal)} · lượt thấy ${draft.firstShownTurn ?? "—"}/${draft.shownTurn ?? "—"}`);
+  if (draft) console.log(`  nháp ${shortOrder(draft.orderId)} · ${(draft.lines ?? []).map((l) => `${variantLabel(l.variantId)} × ${l.quantity} @ ${vnd(draft.unitPrices?.[l.variantId])}`).join(" | ")} · báo giá nháp tiền hàng ${vnd(draft.quote?.subtotal)} · tổng ${vnd(draft.quote?.total ?? null)} · khách đã thấy tổng ${vnd(draft.seenTotal)} · lượt thấy ${draft.firstShownTurn ?? "—"}/${draft.shownTurn ?? "—"}`);
   if (confirmed) console.log(`  chốt ${shortOrder(confirmed.orderId)} · tổng ${vnd(confirmed.total)} · ${confirmed.auto ? "máy tự chốt" : "theo lời đồng ý"} · qua kiểm ${confirmed.valid === undefined ? "?" : confirmed.valid ? "có" : "KHÔNG"} · ${confirmed.at ?? "?"}`);
-  console.log(`  giỏ có thẩm quyền: ${cart?.selectedItems?.length ? cart.selectedItems.map((it) => `${it.variantId ? name(it.variantId) : it.productId ? "món đã gắn SP" : "(chưa gắn mẫu mã)"} ${it.quantity}${it.unit === "g" ? "g" : " gói"}${it.customerExplicit ? " · khách nói" : " · bot đề xuất"} · tin #${it.sourceMessageId ?? "—"}`).join(" | ") : "—"} · lượt ${cart?.turn ?? "—"} · nới ${cart?.relaxedTurn ?? "—"} · upsell gửi ${st.upsellSent ? `có (lượt ${String(st.upsellTurn ?? "?")})` : "không"}`);
+  console.log(`  giỏ có thẩm quyền: ${cart?.selectedItems?.length ? cart.selectedItems.map((it) => `${it.variantId ? variantLabel(it.variantId) : it.productId ? "món đã gắn SP" : "(chưa gắn mẫu mã)"} ${it.quantity}${it.unit === "g" ? "g" : " gói"}${it.customerExplicit ? " · khách nói" : " · bot đề xuất"} · tin #${it.sourceMessageId ?? "—"}`).join(" | ") : "—"} · lượt ${cart?.turn ?? "—"} · nới ${cart?.relaxedTurn ?? "—"} · upsell gửi ${st.upsellSent ? `có (lượt ${String(st.upsellTurn ?? "?")})` : "không"}`);
 
   // 6. Đơn.
   const o = schema.orders;
@@ -346,7 +346,7 @@ export async function traceConversation(db: Db, convId: string, orderShort: stri
     const rq = raw.quote as { subtotal?: number; total?: number | null; id?: string } | undefined;
     const its = items.filter((i) => i.orderId === r.id);
     console.log(`— Đơn ${shortOrder(r.id)} · ${r.stage} · ${r.at?.toISOString() ?? "?"} · nối ${r.sc === conv.id ? "khoá bot" : "ô đơn / mã ngắn"} · tiền hàng ${vnd(Number(r.totalPrice ?? 0))} · giảm ${vnd(Number(r.discount ?? 0))} · sau giảm ${vnd(Number(r.total ?? 0))} · ship ${vnd(Number(r.fee ?? 0))} · COD ${vnd(r.cod === null ? null : Number(r.cod))} · báo giá lưu ${rq ? `${vnd(rq.subtotal)} / tổng ${vnd(rq.total ?? null)}` : "—"}`);
-    for (const i of its) console.log(`    ${i.variantId ? name(i.variantId) : i.productName} × ${i.quantity} @ ${vnd(Number(i.unitPrice ?? 0))} · giảm/cái ${vnd(Number(i.discountEach ?? 0))} · giảm dòng ${vnd(Number(i.totalDiscount ?? 0))} · thành tiền ${vnd(i.lineTotal === null ? null : Number(i.lineTotal))}${i.isBonus ? " · TẶNG" : ""}`);
+    for (const i of its) console.log(`    ${i.variantId ? variantLabel(i.variantId) : i.productName} × ${i.quantity} @ ${vnd(Number(i.unitPrice ?? 0))} · giảm/cái ${vnd(Number(i.discountEach ?? 0))} · giảm dòng ${vnd(Number(i.totalDiscount ?? 0))} · thành tiền ${vnd(i.lineTotal === null ? null : Number(i.lineTotal))}${i.isBonus ? " · TẶNG" : ""}`);
   }
 
   // 7. Câu mẫu có số tiền cố định.
@@ -359,7 +359,7 @@ export async function traceConversation(db: Db, convId: string, orderShort: stri
   tomTat(`Báo giá hội thoại: ${quote ? `${quote.verified ? "xác thực" : "CHƯA xác thực"} · tiền hàng ${vnd(quote.subtotal)} · tổng ${vnd(quote.total ?? null)}` : "—"} · nháp ${draft ? `tổng ${vnd(draft.quote?.total ?? null)} · khách thấy ${vnd(draft.seenTotal)}` : "—"} · chốt ${confirmed ? vnd(confirmed.total) : "—"} · upsell ${st.upsellSent ? "đã gửi" : "chưa"}`);
   for (const r of orders) {
     const its = items.filter((i) => i.orderId === r.id);
-    tomTat(`Đơn ${shortOrder(r.id)} ${r.stage}: ${its.map((i) => `${i.variantId ? name(i.variantId) : i.productName} × ${i.quantity} @ ${vnd(Number(i.unitPrice ?? 0))}${Number(i.totalDiscount ?? 0) ? ` − ${vnd(Number(i.totalDiscount))}` : ""}`).join(" | ")} · ship ${vnd(Number(r.fee ?? 0))} · tổng ${vnd(Number(r.total ?? 0) + Number(r.fee ?? 0))}`);
+    tomTat(`Đơn ${shortOrder(r.id)} ${r.stage}: ${its.map((i) => `${i.variantId ? variantLabel(i.variantId) : i.productName} × ${i.quantity} @ ${vnd(Number(i.unitPrice ?? 0))}${Number(i.totalDiscount ?? 0) ? ` − ${vnd(Number(i.totalDiscount))}` : ""}`).join(" | ")} · ship ${vnd(Number(r.fee ?? 0))} · tổng ${vnd(Number(r.total ?? 0) + Number(r.fee ?? 0))}`);
   }
   tomTat(`Tin fanpage: ${fmt(inbCounts)} · câu mẫu có số tiền cố định ${fixedTpl.length}/${ctx.templates.length}${fixedTpl.length ? ` (${fixedTpl.slice(0, 4).map((tp) => `${tp.code}: ${tp.fixed.map(vnd).join("/")}`).join(" · ")})` : ""}`);
   return true;
