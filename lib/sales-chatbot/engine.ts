@@ -1261,6 +1261,7 @@ async function chatTurnCore(
               if (!content.some((x) => x.type === "text" && x.text === cartHold.safeText)) {
                 content.push({ type: "text", text: cartHold.safeText });
                 spoke = true;
+                draftUnsaid = null;
               }
               continue;
             }
@@ -1275,6 +1276,7 @@ async function chatTurnCore(
               if (blk.safe && !content.some((x) => x.type === "text" && x.text === blk.safe)) {
                 content.push({ type: "text", text: blk.safe });
                 spoke = true;
+                draftUnsaid = null;
               }
               continue;
             }
@@ -1358,8 +1360,8 @@ async function chatTurnCore(
             await appendMessage(conv.id, seq++, "assistant", [{ type: "text", text: safe }]);
             lastSafe = safe;
             spoke = true;
-            // Câu thay nói lại tổng máy chủ thì khách đã có số đúng của đơn.
-            if (!v.ok && !v.handoff) draftUnsaid = null;
+            // Khách đã nhận một câu SAU khi đơn lên (câu nói lại tổng máy chủ / câu giữ đơn / câu an toàn) — không đọc thêm tóm tắt.
+            draftUnsaid = null;
           }
         }
         // Câu «đã chốt» giữ lại ở trên: công cụ chốt THÀNH CÔNG ⇒ giờ mới ghi / gửi; không ⇒ chặn, câu an toàn, chuyển người.
@@ -1378,6 +1380,7 @@ async function chatTurnCore(
             if (blk.safe) {
               await appendMessage(conv.id, seq++, "assistant", [{ type: "text", text: blk.safe }]);
               spoke = true;
+              draftUnsaid = null;
             }
           }
         }
