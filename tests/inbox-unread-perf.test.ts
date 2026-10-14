@@ -244,7 +244,10 @@ async function testDb() {
             .select({ id: c.id })
             .from(c)
             .where(and(ne(c.channel, "TEST"), ...(filter === "UNREAD" ? [sql`coalesce(${raw}, false)`] : [])))
-            .orderBy(sql`coalesce(${raw}, false) desc`, desc(INBOX_ACTIVITY_SQL), desc(c.id))
+            // Hàm trần phải phản chiếu `inboxOrderBy`: từ 14/10/2026 thẻ «Tất cả» xếp THUẦN theo tin mới nhất
+            // (chủ shop duyệt — 687 hội thoại chưa đọc đang chôn mọi hội thoại vừa có tin khỏi trang đầu); các thẻ
+            // khác vẫn chưa đọc trước. Giữ vế chưa đọc ở đây cho «Tất cả» là khoá lại ĐÚNG hành vi vừa bị bỏ.
+            .orderBy(...(filter === "ALL" ? [] : [sql`coalesce(${raw}, false) desc`]), desc(INBOX_ACTIVITY_SQL), desc(c.id))
             .limit(100);
           assert.deepEqual(
             got.rows.map((r) => r.id),
