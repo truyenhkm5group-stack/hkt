@@ -25,7 +25,12 @@
  * `PRICE_DISPUTED` (P0 11/10/2026, ca «Chị Hoàn»): khách phản đối giá đã báo («2 ký giá 540 chứ») — đơn KHÔNG được coi là xác nhận cho tới
  * khi người kiểm giá; máy không tự đổi giá đơn khi cấu hình không có căn cứ.
  */
-export const ORDER_REVIEW_CODES = ["CUSTOMER_CANCELLED", "ADDRESS_UNRESOLVED", "CANCEL_BLOCKED", "PRICE_DISPUTED", "PRICE_MISMATCH"] as const;
+/**
+ * `UPSELL_UNCONSENTED` (P0 14/10/2026, ca «Châu Dương» #91F3641C): ops `upsell-basis-scan --flag --apply` gắn cho đơn của bot có dòng hàng
+ * KHÔNG có căn cứ từ khách (món mời khách chưa đồng ý · số lượng bot tự tăng) — máy chủ chặn từ nay (`lineBasisViolation`), cờ này dành
+ * cho đơn đã tạo trước bản sửa. Không đổi tiền / dòng đơn: người gọi khách rồi sửa.
+ */
+export const ORDER_REVIEW_CODES = ["CUSTOMER_CANCELLED", "ADDRESS_UNRESOLVED", "CANCEL_BLOCKED", "PRICE_DISPUTED", "PRICE_MISMATCH", "UPSELL_UNCONSENTED"] as const;
 export type OrderReviewCode = (typeof ORDER_REVIEW_CODES)[number];
 
 export const ORDER_REVIEW_LABEL: Record<OrderReviewCode, string> = {
@@ -34,6 +39,7 @@ export const ORDER_REVIEW_LABEL: Record<OrderReviewCode, string> = {
   CANCEL_BLOCKED: "Khách chốt huỷ — máy không tự huỷ được",
   PRICE_DISPUTED: "Khách phản đối giá — cần kiểm giá",
   PRICE_MISMATCH: "Tiền hàng lệch báo giá máy chủ — cần kiểm giá",
+  UPSELL_UNCONSENTED: "Đơn có món / số lượng khách chưa đồng ý — cần gọi khách",
 };
 
 /** Nhãn NGẮN (dòng lý do của khung đơn hộp thư). */
@@ -43,6 +49,7 @@ export const ORDER_REVIEW_SHORT_LABEL: Record<OrderReviewCode, string> = {
   CANCEL_BLOCKED: "khách chốt huỷ, máy chưa huỷ được",
   PRICE_DISPUTED: "khách phản đối giá",
   PRICE_MISMATCH: "giá lệch báo giá",
+  UPSELL_UNCONSENTED: "món khách chưa đồng ý",
 };
 
 /** Việc người phải làm với từng lý do — in cạnh lý do để người đọc biết bấm gì. */
@@ -52,6 +59,7 @@ export const ORDER_REVIEW_HINT: Record<OrderReviewCode, string> = {
   CANCEL_BLOCKED: "Đọc lý do: hãng đã lấy hàng ⇒ chặn giao / chờ hoàn; hãng lỗi ⇒ huỷ vận đơn trên trang hãng rồi «Huỷ đơn».",
   PRICE_DISPUTED: "Đối chiếu bảng giá (SKU · gói · giảm theo khối lượng) với số khách nói, báo lại khách giá đúng, sửa đơn nếu cần rồi «Xác nhận đơn».",
   PRICE_MISMATCH: "Ghi chú có số tiền ĐÚNG theo báo giá máy chủ: sửa dòng đơn (thường là thiếu giảm theo khối lượng), báo khách nếu tổng đổi, rồi «Xác nhận đơn».",
+  UPSELL_UNCONSENTED: "Gọi / nhắn khách xác nhận ĐÚNG món + số lượng: bỏ món khách không lấy, báo tổng mới, rồi «Xác nhận đơn».",
 };
 
 /** Câu lý do mặc định khi huỷ bằng nút nhanh (người sửa được trước khi bấm). */
@@ -61,6 +69,7 @@ export const ORDER_REVIEW_CANCEL_REASON: Record<OrderReviewCode, string> = {
   CANCEL_BLOCKED: "Khách huỷ (theo hội thoại)",
   PRICE_DISPUTED: "Khách không đồng ý giá",
   PRICE_MISMATCH: "Giá đơn sai — huỷ để lên lại",
+  UPSELL_UNCONSENTED: "Khách không đặt món bot tự thêm — huỷ để lên lại",
 };
 
 /** Một lý do cần kiểm. `quote` = NGUYÊN VĂN câu khách (khách huỷ); `by` = tên máy / người ghi; `at` = mốc ISO. */

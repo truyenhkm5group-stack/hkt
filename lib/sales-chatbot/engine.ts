@@ -66,13 +66,13 @@ import { formatVND } from "@/lib/format";
 import { withTurnEvents } from "@/lib/sales-chatbot/events";
 import { FOOD_PACK, salesPackFor, type SalesPack } from "@/lib/sales-chatbot/packs";
 import { autoConfirmBlocker, confirmedFromOrder, executeTool, orderTotalsOf, toolDefsFor, TOOLS_HOLDING_TEXT, type ChatState } from "@/lib/sales-chatbot/tools";
-import { applyCustomerCartMessage, cartCommitmentPrompt, cartHoldVerdict, customerHesitates, orderReadiness } from "@/lib/sales-chatbot/cart-commitment";
+import { amountText, applyCustomerCartMessage, buyingText, cartCommitmentPrompt, cartHoldVerdict, customerHesitates, invitedProductOf, orderReadiness } from "@/lib/sales-chatbot/cart-commitment";
 import { sellableCatalog } from "@/lib/sales-chatbot/catalog";
 import { allowedImageUrl, describeImages, fetchCustomerImage, IMAGE_PROMPT_RULE, imageLine, VISION_LIMITS } from "@/lib/sales-chatbot/vision";
-import { CLAIM_HANDOFF_REASON, CLAIM_SAFE_TEXT, claimFactsLoader, detectPriceDispute, extractVndAmounts, guardOutgoing, paymentSignalHandoff, paymentSignalInCustomerText, unverifiedAmounts, type ClaimVerdict } from "@/lib/sales-chatbot/claim-guard";
+import { CLAIM_HANDOFF_REASON, CLAIM_SAFE_TEXT, claimFactsLoader, detectPriceDispute, extractVndAmounts, guardOutgoing, noteSeenTotals, paymentSignalHandoff, paymentSignalInCustomerText, unverifiedAmounts, type ClaimVerdict } from "@/lib/sales-chatbot/claim-guard";
 import { flagOrderForReviewAsAgent, loadAutoConfirmComplete } from "@/lib/records/order-create";
 import type { PriceDisputeState } from "@/lib/sales-chatbot/quote-shared";
-import { catalogReferenceAmounts } from "@/lib/sales-chatbot/quote";
+import { catalogReferenceAmounts, catalogReferenceBreakdown } from "@/lib/sales-chatbot/quote";
 import { vnDayOffset, WEEKDAY_LABEL } from "@/lib/constants/booking";
 
 export const SALES_AGENT = { name: "Chatbot bán hàng", source: "lib/sales-chatbot/engine.ts" } as const;
@@ -260,11 +260,79 @@ export function cartPromptOf(st: ChatState, lastUserText: string, turn: number, 
   return cartCommitmentPrompt(st, r, { autoConfirm, turn });
 }
 
+/**
+ * CÂU KHI LƯỢT IM (P0 14/10/2026, ca «Viet Nguyen Thi»): trước đây lượt không có câu nào tới khách luôn nhận «Dạ, anh/chị nói rõ hơn giúp
+ * em nhé» — kể cả khi khách đã gửi đủ món + SĐT + địa chỉ. Nay câu đi theo MỨC SẴN SÀNG của giỏ có thẩm quyền: thiếu gì hỏi đúng cái đó;
+ * đủ mà có đơn nháp ⇒ đọc lại tổng MÁY CHỦ và xin xác nhận; đủ mà chưa có nháp ⇒ xin xác nhận đúng món + số lượng khách đã nói. Chỉ khi
+ * chưa có gì để bám (đang xem hàng, đã chốt, đang hoãn) mới dùng câu chung. HÀM THUẦN.
+ */
+export function silenceFallbackText(st: ChatState, lastUserText: string, turn: number, autoConfirm: boolean, prevTurn?: number): string {
+  if (!st.cart?.selectedItems.some((x) => x.customerExplicit) && !st.draft) return EMPTY_REPLY_TEXT;
+  const justInvited = prevTurn !== undefined && (st.upsellTurn === prevTurn || st.draft?.shownTurn === prevTurn);
+  const r = orderReadiness({ ...st, blocker: st.draft ? autoConfirmBlocker(st, { lastUserText, turn, prevTurn }) : null, lastUserText, hesitating: customerHesitates(lastUserText, { justInvited }) });
+  if (r.level === "NEED_PHONE") return "Dạ mình cho em xin số điện thoại nhận hàng nhé.";
+  if (r.level === "NEED_ADDRESS") return "Dạ mình cho em xin địa chỉ nhận hàng đầy đủ (số nhà, đường, phường / xã, quận / huyện, tỉnh / thành) nhé.";
+  if (r.level === "NEED_ITEMS") return "Dạ mình muốn lấy món nào, số lượng bao nhiêu ạ?";
+  if (r.level !== "ORDER_READY") return EMPTY_REPLY_TEXT;
+  const total = st.draft?.quote ? (st.draft.quote.total ?? null) : null;
+  if (st.draft && total !== null) return `Dạ đơn của mình tổng ${formatVND(total)} ạ. Mình xác nhận giúp em để em gửi hàng nhé.`;
+  const items = (st.cart?.selectedItems ?? []).filter((x) => x.customerExplicit).map((x) => `${amountText(x.quantity, x.unit)}${x.label ? ` ${x.label.toLowerCase()}` : ""}`);
+  return items.length ? `Dạ em lên đơn ${items.join(" + ")} cho mình nhé, mình xác nhận giúp em ạ.` : EMPTY_REPLY_TEXT;
+}
+
+/**
+ * Tóm tắt đơn nháp / đơn vừa chốt theo ĐÚNG kết quả công cụ (dòng + tổng của MÁY CHỦ) — gửi khi công cụ lên / sửa đơn thành công mà
+ * model không nói câu nào sau đó (ca «Viet Nguyen Thi»: câu upsell → lên đơn → model im ⇒ trước đây khách nhận «nói rõ hơn»).
+ * `say_to_customer` của công cụ thắng; không đọc được ⇒ `null`. HÀM THUẦN.
+ */
+export function draftSummaryFromTool(content: string): string | null {
+  let p: Record<string, unknown>;
+  try {
+    p = JSON.parse(content) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+  if (typeof p.say_to_customer === "string" && p.say_to_customer.trim()) return p.say_to_customer.trim();
+  const lines = Array.isArray(p.lines) ? (p.lines as { name?: unknown; quantity?: unknown; line_total?: unknown }[]) : [];
+  const parts = lines.filter((l) => typeof l.name === "string" && typeof l.line_total === "number").map((l) => `${String(l.name)} × ${Number(l.quantity ?? 1)} = ${formatVND(Number(l.line_total))}`);
+  if (!parts.length) return null;
+  const totalText = typeof p.cod_total_text === "string" ? p.cod_total_text : typeof p.cod_total === "number" ? formatVND(p.cod_total) : null;
+  if (!totalText) return null;
+  const ship = typeof p.shipping_text === "string" && p.shipping_text.trim() ? ` · ${p.shipping_text.trim()}` : "";
+  return `Dạ em tóm tắt đơn của mình: ${parts.join("; ")}${ship}. Tổng ${totalText}. Mình xác nhận giúp em để em gửi hàng nhé.`;
+}
+
+/** Công cụ mà chữ model viết CÙNG tin phải đợi kết quả mới được gửi khi chữ có số tiền — tổng chỉ biết sau khi máy chủ tính (P0 14/10/2026). */
+export const PRICING_TOOLS: ReadonlySet<string> = new Set(["calculate_cart", "create_draft_order", "update_draft_order", "confirm_order"]);
+
+/**
+ * Tin «khách» thực ra là chữ của CHÍNH shop / bot vọng lại (echo của Pancake / Messenger) — trùng câu bot / page vừa nói. Chỉ xét câu
+ * đủ dài (≥ 15 ký tự) để «ok» / «dạ» của khách không bao giờ bị coi là vọng lại. HÀM THUẦN.
+ */
+export function isEchoOfShop(text: string, recentShop: readonly string[]): boolean {
+  if (text.trim().length < 15) return false;
+  return repeatsRecent(text, recentShop.map((t) => (t.startsWith(SHOP_SAID) ? t.slice(SHOP_SAID.length).trim() : t)));
+}
+
 /** Tên sản phẩm đang bán — chỉ đọc khi câu khách có số lượng / chữ bỏ · huỷ (đọc tên món từ DANH MỤC, không đẻ món ảo). Lỗi ⇒ `undefined`. */
 async function cartCatalogNames(text: string): Promise<string[] | undefined> {
   if (!/\d|nửa|một|hai|ba |bỏ|hủy|huỷ|bo |huy /i.test(text)) return undefined;
   try {
     return [...new Set((await sellableCatalog([])).map((c) => c.name))];
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Danh mục đầy đủ (tên + đơn vị bán) cho hai việc của giỏ khi giỏ ĐÃ có món khách nói: nhận món vừa được mời và đơn vị của nó (`g` khi một
+ * mẫu mã ghi quy cách kg — chả cá 1kg; `pack` còn lại — hộp nem, hũ ruốc 250g), và nhận câu huỷ gọi tên món ngoài giỏ. Lỗi ⇒ `undefined`.
+ */
+async function cartProducts(): Promise<{ names: string[]; unitOf: (name: string) => "g" | "pack" } | undefined> {
+  try {
+    const items = await sellableCatalog([]);
+    const names = [...new Set(items.map((c) => c.name))];
+    return { names, unitOf: (name) => (items.some((c) => c.name === name && /\d\s*(?:kg|kí|ký)\b/i.test(`${c.variant} ${c.sku}`)) ? "g" : "pack") };
   } catch {
     return undefined;
   }
@@ -834,6 +902,17 @@ async function chatTurnCore(
   let seq = (msgs[msgs.length - 1]?.seq ?? 0) + 1;
   // Seq tin KHÁCH gần nhất trước lượt này (không tính kết quả công cụ) — «lượt khách ngay sau lời mời thêm món / tóm tắt».
   const prevTurn = [...msgs].reverse().find((m) => m.role === "user" && m.content.some((b) => b.type === "text") && !m.content.some((b) => b.type === "tool_result"))?.seq;
+  // KHÔNG TRẢ LỜI TIN VỌNG LẠI (P0 14/10/2026): lượt được kích hoạt bởi chữ của CHÍNH shop / bot vọng lại như tin khách ⇒ không ghi,
+  // không gọi AI, không gửi. Tin khách lặp lại thật (khách hỏi lại giá) VẪN được trả lời — trùng gói tin đã khử ở lớp nhận tin
+  // (`sales_chat_inbound.message_id` UNIQUE · hai đường nhận tin · `alreadyRepliedAfter`).
+  if (isEchoOfShop(text, recentShopTexts(msgs, 6))) return { ok: true, view: (await conversationView(conv.id))! };
+  // Lượt mang ĐÚNG chữ của tin khách trước đó mà tin ấy ĐÃ được trả lời (lượt thử lại / gói tin lặp lọt lớp nhận tin) — model vẫn được
+  // hỏi (khách hỏi lại giá là câu thật), nhưng model im thì KHÔNG phát câu dự phòng «nói rõ hơn»: không có gì mới để khách nói rõ.
+  const repeatOfAnswered = (() => {
+    const last = [...msgs].reverse().find((m) => m.role === "user" && m.content.some((b) => b.type === "text") && !m.content.some((b) => b.type === "tool_result"));
+    if (!last || textOf(last.content).trim() !== text) return false;
+    return recentShopTexts(msgs.filter((m) => m.seq > last.seq), 1).length > 0;
+  })();
   try {
     const turnSeq = seq;
     await appendMessage(conv.id, seq++, "user", [{ type: "text", text }]);
@@ -920,7 +999,14 @@ async function chatTurnCore(
     // Lỗi bất kỳ ở bước này ⇒ giỏ giữ nguyên NHƯNG tắt kiểm cứng của lượt (không chặn khách), không ném ra ngoài lượt.
     let cartNext: ChatState["cart"];
     try {
-      cartNext = applyCustomerCartMessage(st0.cart, text, turnSeq, now, { catalog: await cartCatalogNames(text) });
+      const catalog = await cartCatalogNames(text);
+      // Món VỪA ĐƯỢC MỜI (bot / page gọi tên đúng một món kể từ tin khách trước) — «ừ cho chị 1 hộp» là số của món đó (review 14/10). Danh mục
+      // đầy đủ chỉ đọc khi giỏ đã có món khách nói (lời mời THÊM món / câu huỷ gọi tên món ngoài giỏ).
+      const full = st0.cart?.selectedItems.some((x) => x.customerExplicit) ? await cartProducts() : undefined;
+      const lastCustSeq = prevTurn ?? 0;
+      const inv0 = invitedProductOf(recentShopTexts(msgs.filter((m) => m.seq > lastCustSeq), 6).map((t) => (t.startsWith(SHOP_SAID) ? t.slice(SHOP_SAID.length).trim() : t)), full?.names ?? catalog, st0.cart);
+      const invited = inv0 && full ? { ...inv0, unit: full.unitOf(inv0.display) } : inv0;
+      cartNext = applyCustomerCartMessage(st0.cart, text, turnSeq, now, { catalog, invited, ...(full ? { products: full.names } : {}) });
     } catch {
       cartNext = st0.cart ? { ...st0.cart, relaxedTurn: turnSeq } : undefined;
     }
@@ -962,7 +1048,7 @@ async function chatTurnCore(
     // chuyển người, ghi lý do (`handoffReason` ⇒ sự kiện `handoff.requested` + `lastError`). Căn cứ chỉ đọc khi câu có khẳng định.
     // SỐ TIỀN (P0 authoritative-quote 11/10/2026): mọi số tiền trong chữ bot phải thuộc báo giá máy chủ đã xác thực của hội thoại hoặc
     // tập tham chiếu của danh mục (`quote.ts`) — đọc lười, một lần mỗi lượt, chỉ khi câu có số tiền.
-    const claimFactsBase = claimFactsLoader({ id: conv.id, orderId: conv.orderId, pageId: conv.pageId, threadId: conv.threadId }, { reference: () => catalogReferenceAmounts(cfg), turn: turnSeq });
+    const claimFactsBase = claimFactsLoader({ id: conv.id, orderId: conv.orderId, pageId: conv.pageId, threadId: conv.threadId }, { reference: () => catalogReferenceAmounts(cfg), breakdown: () => catalogReferenceBreakdown(cfg), turn: turnSeq, turnAt: now });
     // Căn cứ của câu «đã cập nhật địa chỉ / đã sửa đơn» (claim-guard ORDER_EDITED): công cụ lưu khách / lên / sửa đơn GHI THÀNH CÔNG trong
     // CHÍNH lượt này (review #821 vòng 2 — trước bán, cập nhật địa chỉ khách bằng create_customer không được bị coi là bịa).
     let wroteThisTurn = false;
@@ -1093,6 +1179,9 @@ async function chatTurnCore(
     // TỰ CHỐT KHI ĐỦ ĐƠN (P0-A, chủ shop 11/10/2026): theo công tắc «đơn đủ thông tin = đã xác nhận» của tổ chức. Lỗi đọc ⇒ TẮT (luồng xin xác nhận cũ).
     const autoConfirm = await loadAutoConfirmComplete().catch(() => false);
     const system = [systemPrompt(cfg, orgRow?.name ?? org.code, await businessProfile(), opts.channel, await publishedPlaybook(), quickCatalog, returningCustomerPrompt(returning, known.returning), bookingOn ? bookingPrompt(cfg, now) : "", now, salesPackFor(orgRow?.templateKey ?? null), { autoConfirm }), postSale ? "" : customer360Prompt(c360, reuse), await learnedLessons(), await levelPromptFor(conv.id, now), customerNamePrompt(opts.customerName), priceDisputePrompt(known.priceDispute), confirmedOrderPrompt(known), cartPromptOf(known, text, turnSeq, autoConfirm, prevTurn), postSale ? postSalePrompt(phase!, phase!.shortCode) : "", opts.context ?? ""].filter(Boolean).join("\n");
+    // Chữ KHÁCH của lượt mua hiện tại — căn cứ «khách đã gọi tên món» khi công cụ lên / chốt đơn (lineBasisViolation, P0 14/10/2026).
+    // Chỉ CHỮ MUA (bỏ câu hỏi giá / câu từ chối / giả định — `buyingText`): gọi tên món trong «nem tôm bao nhiêu?» không phải căn cứ.
+    const customerSaid = buyingText([...msgs.slice(Math.max(0, msgs.length - SALES_CHATBOT_LIMITS.historyMessages)).filter((m) => m.role === "user" && !m.content.some((b) => b.type === "tool_result")).map((m) => textOf(m.content)), text]);
     const deliveredImages: string[] = [];
     let deliveredReplyId: string | null = null;
     let deliveredText: string | null = null;
@@ -1114,6 +1203,10 @@ async function chatTurnCore(
     // Lượt này đã có câu nào TỚI KHÁCH chưa (chữ còn lại sau bộ lọc, câu mẫu, câu báo của máy chủ) — xem «KHÔNG ĐỂ KHÁCH IM».
     let spoke = false;
     let modelSpoke = false;
+    // Tóm tắt đơn (số MÁY CHỦ) còn NỢ khách: công cụ lên / sửa / chốt đơn thành công mà model chưa nói câu nào sau đó.
+    let draftUnsaid: string | null = null;
+    // Câu thay gần nhất đã ghi — không ghi hai câu thay giống hệt nhau trong một lượt.
+    let lastSafe: string | null = null;
     const aiTexts: string[] = [];
     // SỔ AI THEO NHÀ CUNG CẤP THẬT (provider-failover.ts): vòng công cụ có thể đổi khoá giữa chừng (khoá chính hỏng ở vòng 3)
     // ⇒ mỗi đoạn liền một nhà cung cấp là MỘT dòng, để tiền không ghi nhầm nguồn trả (BYOK ≠ credit gói). Không đổi khoá ⇒
@@ -1150,7 +1243,10 @@ async function chatTurnCore(
         seg.think = seg.think === null || res.usage.thoughtTokens === undefined ? null : seg.think + res.usage.thoughtTokens;
         seg.cached += res.usage.cacheReadTokens;
         seg.lat += res.latencyMs;
-        const raw = res.content.length ? res.content : [{ type: "text" as const, text: EMPTY_REPLY_TEXT }];
+        // Model trả RỖNG (P0 14/10/2026, ca «Viet Nguyen Thi»): trước đây chèn «nói rõ hơn» ở MỌI vòng — kể cả vòng sau câu upsell /
+        // đơn nháp đã gửi. Nay vòng rỗng KẾT THÚC lượt; câu cho khách (nếu lượt chưa nói gì) do khối «KHÔNG ĐỂ KHÁCH IM» quyết.
+        if (!res.content.length) break;
+        const raw = res.content;
         // Messenger không hiển thị markdown — «*Họ tên, SĐT…*» tới khách nguyên dấu sao (03/10/2026, «Dương Bích Phượng»).
         // CHỮ GỬI KHÁCH QUA BỘ LỌC SUY LUẬN (03/10/2026, «Phuoc Ha»): model viết lẩm bẩm vào câu trả lời — tên công cụ, «Khách
         // vừa nhắn…», «Ta đáp:» — và cả đoạn đã tới khách. Lọc ở máy chủ, không trông vào lời dặn.
@@ -1163,6 +1259,10 @@ async function chatTurnCore(
         const holdText = raw.some((b) => b.type === "tool_use" && TOOLS_HOLDING_TEXT.has(b.name));
         // Lên / sửa đơn nháp khi tổ chức tự chốt cũng là một lượt chốt — câu «đã lên đơn» viết kèm được GIỮ tới khi biết kết quả.
         const confirmingNow = raw.some((b) => b.type === "tool_use" && (b.name === "confirm_order" || (autoConfirm && (b.name === "create_draft_order" || b.name === "update_draft_order"))));
+        // Chữ có SỐ TIỀN viết cùng tin với công cụ tính tiền / lên đơn (P0 14/10/2026, ca «Châu Dương» — «tổng 640.000 ₫» viết TRƯỚC khi
+        // máy chủ tính đơn 280.000 ₫): GIỮ tới khi công cụ chạy xong rồi mới kiểm, theo báo giá MỚI của giỏ — không kiểm theo trạng thái cũ.
+        const pricingNow = raw.some((b) => b.type === "tool_use" && PRICING_TOOLS.has(b.name));
+        const heldMoney: string[] = [];
         let held: string | null = null;
         const modelOut: string[] = [];
         for (const b of raw) {
@@ -1175,6 +1275,10 @@ async function chatTurnCore(
           if (g.leaked) leaks += 1;
           if (g.text) {
             const out = plainForMessenger(g.text);
+            if (pricingNow && extractVndAmounts(out).length) {
+              heldMoney.push(out);
+              continue;
+            }
             const verdict = await guardOutgoing(out, () => claimFacts(state));
             // GIỎ CÓ THẨM QUYỀN: chữ đề xuất ít hơn / gói ăn thử / hỏi lại số lượng khách đã chốt ⇒ câu giữ đơn thay chỗ (không chuyển người).
             const cartHold = verdict.ok ? cartHoldVerdict(out, state.cart, text, { hasDraft: Boolean(state.draft) }) : null;
@@ -1183,6 +1287,7 @@ async function chatTurnCore(
               if (!content.some((x) => x.type === "text" && x.text === cartHold.safeText)) {
                 content.push({ type: "text", text: cartHold.safeText });
                 spoke = true;
+                draftUnsaid = null;
               }
               continue;
             }
@@ -1197,6 +1302,7 @@ async function chatTurnCore(
               if (blk.safe && !content.some((x) => x.type === "text" && x.text === blk.safe)) {
                 content.push({ type: "text", text: blk.safe });
                 spoke = true;
+                draftUnsaid = null;
               }
               continue;
             }
@@ -1204,9 +1310,10 @@ async function chatTurnCore(
             modelOut.push(out);
             spoke = true;
             modelSpoke = true;
+            draftUnsaid = null;
           }
         }
-        history.push({ role: "assistant", content: held === null ? content : [{ type: "text", text: held }, ...content] });
+        history.push({ role: "assistant", content: [...(held === null ? [] : [{ type: "text" as const, text: held }]), ...heldMoney.map((t) => ({ type: "text" as const, text: t })), ...content] });
         await appendMessage(conv.id, seq++, "assistant", content);
         // Câu an toàn của máy chủ KHÔNG phải câu AI (đồng hồ khách AI chỉ đếm chữ model sinh) — tin chỉ có câu an toàn không vào.
         const modelText = modelOut.length ? textOf(content) : "";
@@ -1216,10 +1323,14 @@ async function chatTurnCore(
         const results: AiBlock[] = [];
         for (const u of uses) {
           const confirmedBefore = Boolean(state.confirmed);
-          const r = await executeTool(u.name, u.input, { autoConfirm, prevTurn, conversationId: conv.id, channel: opts.channel, config: cfg, state, lastUserText: text, agent: SALES_AGENT, customerName: opts.customerName ?? null, quickReplies: quickCatalog, returning, customer360: c360, recentSaid, turn: turnSeq, bookingOn, now, commentTurn: opts.aiCustomer?.threadKind === "COMMENT", promptStamp: { ...stampBase, model: res.model || prov.provider.model } });
+          const r = await executeTool(u.name, u.input, { autoConfirm, prevTurn, conversationId: conv.id, customerSaid, channel: opts.channel, config: cfg, state, lastUserText: text, agent: SALES_AGENT, customerName: opts.customerName ?? null, quickReplies: quickCatalog, returning, customer360: c360, recentSaid, turn: turnSeq, bookingOn, now, commentTurn: opts.aiCustomer?.threadKind === "COMMENT", promptStamp: { ...stampBase, model: res.model || prov.provider.model } });
+          // Tổng máy chủ vừa tính vào sổ `seenTotals` — hàng rào chặn nói lại tổng của giỏ CŨ (review vòng 3).
           state = r.state;
+          state = noteSeenTotals(state);
           // create_customer chỉ sửa HỒ SƠ khách, không đụng đơn ⇒ chỉ là căn cứ khi CHƯA có đơn đã chốt (review #821 vòng 3).
           if (!r.isError && ((u.name === "create_customer" && !confirmedBefore) || u.name === "create_draft_order" || u.name === "update_draft_order")) wroteThisTurn = true;
+          // Đơn lên / sửa / chốt THÀNH CÔNG ⇒ khách phải được đọc tóm tắt theo số MÁY CHỦ; model nói sau đó thì xoá cờ.
+          if (!r.isError && (u.name === "create_draft_order" || u.name === "update_draft_order" || u.name === "confirm_order")) draftUnsaid = draftSummaryFromTool(r.content);
           // Câu mẫu AI gửi qua công cụ cũng qua hàng rào khẳng định — bị chặn ⇒ không gửi, chuyển người như chữ model.
           const deliverVerdict = r.deliver ? await guardOutgoing(r.deliver.text, () => claimFacts(state)) : null;
           const deliver = deliverVerdict?.ok ? r.deliver : undefined;
@@ -1250,6 +1361,37 @@ async function chatTurnCore(
         }
         history.push({ role: "user", content: results });
         await appendMessage(conv.id, seq++, "user", results);
+        // Chữ có số tiền giữ lại ở trên: kiểm theo trạng thái SAU công cụ (báo giá mới). Qua ⇒ gửi; không ⇒ câu thay (nói lại đúng tổng
+        // máy chủ, hoặc câu an toàn + chuyển người khi báo giá đã cũ).
+        for (const out of heldMoney) {
+          const v = await guardOutgoing(out, () => claimFacts(state));
+          const cartHold = v.ok ? cartHoldVerdict(out, state.cart, text, { hasDraft: Boolean(state.draft) }) : null;
+          if (v.ok && !cartHold) {
+            await appendMessage(conv.id, seq++, "assistant", [{ type: "text", text: out }]);
+            aiTexts.push(out);
+            spoke = true;
+            modelSpoke = true;
+            draftUnsaid = null;
+            continue;
+          }
+          let safe: string | null = null;
+          if (cartHold) {
+            lastError = lastError ?? cartHold.note;
+            safe = cartHold.safeText;
+          } else if (!v.ok) {
+            const blk = await claimBlock(v, state);
+            state = blk.state;
+            lastError = lastError ?? v.note;
+            safe = blk.safe;
+          }
+          if (safe && safe !== lastSafe) {
+            await appendMessage(conv.id, seq++, "assistant", [{ type: "text", text: safe }]);
+            lastSafe = safe;
+            spoke = true;
+            // Khách đã nhận một câu SAU khi đơn lên (câu nói lại tổng máy chủ / câu giữ đơn / câu an toàn) — không đọc thêm tóm tắt.
+            draftUnsaid = null;
+          }
+        }
         // Câu «đã chốt» giữ lại ở trên: công cụ chốt THÀNH CÔNG ⇒ giờ mới ghi / gửi; không ⇒ chặn, câu an toàn, chuyển người.
         if (held !== null) {
           const v = await guardOutgoing(held, () => claimFacts(state));
@@ -1258,6 +1400,7 @@ async function chatTurnCore(
             aiTexts.push(held);
             spoke = true;
             modelSpoke = true;
+            draftUnsaid = null;
           } else {
             const blk = await claimBlock(v, state);
             state = blk.state;
@@ -1265,6 +1408,7 @@ async function chatTurnCore(
             if (blk.safe) {
               await appendMessage(conv.id, seq++, "assistant", [{ type: "text", text: blk.safe }]);
               spoke = true;
+              draftUnsaid = null;
             }
           }
         }
@@ -1309,13 +1453,34 @@ async function chatTurnCore(
     // bộ lọc suy luận chặn (kể cả khi model nhại lỗi công cụ) ⇒ lượt kết thúc mà khách không nhận một câu nào. Luật kênh giữ
     // nguyên: trên kênh NHẮN TIN (fanpage) chuyển người thì bot IM — nhân viên trả lời trực tiếp (chủ shop chốt 01/10/2026).
     // Ghi đơn hỏng đã xử lý câu với khách ở nhánh catch (như AI hỏng) — không thêm câu nào ở đây.
+    // ĐƠN ĐÃ LÊN MÀ KHÁCH CHƯA ĐƯỢC ĐỌC (P0 14/10/2026): công cụ lên / sửa / chốt đơn thành công, model im sau đó ⇒ máy chủ đọc tóm tắt
+    // theo ĐÚNG kết quả công cụ (dòng + tổng máy chủ). Đã chuyển người ⇒ không.
+    if (draftUnsaid && status === "OK" && !orderWriteFailed && !state.handoff && (await guardOutgoing(draftUnsaid, () => claimFacts(state))).ok) {
+      await reply(conv, seq++, draftUnsaid);
+      spoke = true;
+    }
     if (!spoke && status === "OK" && !orderWriteFailed) {
       const handedOffNow = Boolean(state.handoff) && conv.status !== "HANDOFF";
       if (handedOffNow) {
         if (!isMessagingChannel(opts.channel)) await reply(conv, seq++, cfg.handoff.message);
       } else {
-        await reply(conv, seq++, EMPTY_REPLY_TEXT);
-        lastError = lastError ?? "Lượt không có câu nào gửi khách — đã gửi câu dự phòng";
+        // Thiếu gì hỏi đúng cái đó (giỏ có thẩm quyền) — câu chung «nói rõ hơn» chỉ khi chưa có gì để bám.
+        // Câu hỏi lại có thể mang tổng đơn nháp ⇒ cùng hàng rào; không qua ⇒ câu chung.
+        const ask = silenceFallbackText(state, text, turnSeq, autoConfirm, prevTurn);
+        const fallback = ask === EMPTY_REPLY_TEXT || (await guardOutgoing(ask, () => claimFacts(state))).ok ? ask : EMPTY_REPLY_TEXT;
+        if (fallback === EMPTY_REPLY_TEXT && repeatOfAnswered) {
+          // Không gửi câu thừa, nhưng KHÔNG im lặng lẳng lặng (review 14/10): gắn cờ cần người, nhân viên xem tin lặp này.
+          lastError = lastError ?? "Lượt lặp lại tin khách đã được trả lời — model im, không gửi câu dự phòng; cần người xem";
+          if (!state.handoff) {
+            state = { ...state, handoff: { reason: "Cần người xử lý — khách nhắn lại đúng tin đã được trả lời, AI không có câu trả lời mới", at: now.toISOString() } };
+            if (isPublicChannel(opts.channel)) await notifySalesChatHandoff(conv.id, state.handoff!.reason, state.customer, now).catch(() => undefined);
+          }
+          // Kênh không phải nhắn tin (web, khung thử) nhận câu chuyển người như mọi nhánh chuyển người khác; fanpage / Zalo ⇒ bot im.
+          if (!isMessagingChannel(opts.channel)) await reply(conv, seq++, cfg.handoff.message);
+        } else {
+          await reply(conv, seq++, fallback);
+          lastError = lastError ?? (fallback === EMPTY_REPLY_TEXT ? "Lượt không có câu nào gửi khách — đã gửi câu dự phòng" : "Lượt không có câu nào gửi khách — đã hỏi đúng phần còn thiếu của đơn");
+        }
       }
     }
     // Lời gọi hỏng cuối cùng nằm ở khoá KHÁC đoạn vừa phục vụ (đổi khoá giữa lượt rồi cả hai cùng hỏng) ⇒ đoạn cũ một dòng,
