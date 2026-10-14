@@ -3,7 +3,7 @@
   "mission_id": "hslc-quote-640",
   "title": "HSLC: bot không còn báo tổng sai (640k) — món mời chưa đồng ý không vào đơn, tổng chỉ là tổng của giỏ hiện tại",
   "business_goal": "",
-  "status": "RUNNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -27,7 +27,22 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-14T06:14:52.332Z",
-  "updated_at": "2026-10-14T06:14:52.332Z",
-  "last_heartbeat": "2026-10-14T06:14:52.332Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-14T06:46:37.746Z",
+  "last_heartbeat": "2026-10-14T06:46:37.746Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "fix/hslc-quote-640",
+    "sha": "5220eeb60e2e7840fb15f07c12561b92df675626",
+    "at": "2026-10-14T06:46:37.746Z",
+    "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+    "title": "HSLC: bot không còn báo tổng sai (640k) — món mời chưa đồng ý không vào đơn, tổng chỉ là tổng của giỏ hiện tại",
+    "summary": "Gốc 640k: model đưa món mời khách chưa đồng ý (nem ×3) vào đơn nháp rồi tự chốt. Sửa: dòng hàng phải có căn cứ từ lời mua của khách; hàng rào tổng hai luật (sau cụm thanh toán chỉ tổng hiện tại; tổng của giỏ cũ luôn chặn, không chèn số); hết câu «nói rõ hơn» khi khách không nhắn mới (24 hội thoại/3 ngày); câu từ chối món mời không huỷ cả giỏ; ops upsell-basis-scan chỉ đọc mặc định, --apply chỉ gắn cờ.",
+    "tests": [
+      "npm test: TẤT CẢ KIỂM THỬ ĐẠT",
+      "typecheck: sạch",
+      "lint: sạch",
+      "sales-quote-640: đạt (mọi repro 5 vòng review)",
+      "hội thoại vàng 22 + đơn vàng 33x2: không đổi"
+    ]
+  }
 }
