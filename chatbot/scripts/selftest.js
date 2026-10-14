@@ -2422,5 +2422,15 @@ console.log("OK 18: doi chieu dia chi don POS -> bat don chon nham xa, bo qua tr
   console.log("OK 56: page chua co bang size dung bang size chung cua shop (tru page do nam)");
 }
 
+// ---- 57: giong nguoi that (chu shop 14/10/2026) — khoi cach noi chuyen co trong prompt moi page, KHONG chua con so nao
+// (chot chan gia lay moi so trong prompt lam gia hop le — mot vi du "450k" se mo khoa gia sai cho moi page)
+{
+  const { HUMAN_STYLE_BLOCK } = await import("../src/bot.js");
+  assert.ok(!/\d/.test(HUMAN_STYLE_BLOCK), "khoi giong noi khong co so");
+  const sp = bot.buildSystemPrompt("PAGE1", { customerName: "Khách", type: "INBOX" });
+  assert.ok(sp.includes("NHƯ NHÂN VIÊN BÁN HÀNG THẬT") && /mức giá tốt nhất bên em có thể hỗ trợ/.test(sp), "co khoi giong noi + cum cam");
+  console.log("OK 57: khoi cach noi chuyen giong nguoi that o moi page, khong mang con so vao prompt");
+}
+
 console.log("\nTAT CA TEST PASS");
 process.exit(0);
