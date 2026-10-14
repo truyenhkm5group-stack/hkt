@@ -1,8 +1,8 @@
 {
   "pr": 836,
-  "sha": "cf347f02b158d86fc91418de3835ac5c41f8ce77",
+  "sha": "75017356539c622df3f57e3b4c921e7e0fcf28a9",
   "verdict": "PASS",
   "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
-  "at": "2026-10-14T03:24:55.317Z",
-  "note": "e9216c38 + nhãn hằng thay câu note ở kênh tóm tắt, đổi tên percentile"
+  "at": "2026-10-14T04:37:51.619Z",
+  "note": "cf347f02 + gộp main: chỉ hợp danh sách ops-vps"
 }
