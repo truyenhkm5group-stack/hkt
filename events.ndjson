@@ -2590,3 +2590,4 @@
 {"at":"2026-10-14T02:26:49.995Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"pancake-thread-diff","detail":"fix/pancake-thread-diff @ e9216c38c288 · 1 lệnh kiểm thử"}
 {"at":"2026-10-14T02:27:24.474Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"pancake-thread-diff","detail":"#836 cho fix/pancake-thread-diff @ e9216c38c288"}
 {"at":"2026-10-14T02:27:42.422Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#836 @ e9216c38c288 · Script ops CHỈ ĐỌC, token page che, chỉ số đếm/mốc; khai ops 4 chỗ"}
+{"at":"2026-10-14T02:33:59.119Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"CLAIM","mission":"conv-money-trace","detail":"RUNNING · 1 mẫu phạm vi · MEDIUM"}
