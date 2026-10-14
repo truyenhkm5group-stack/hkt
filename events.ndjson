@@ -2834,3 +2834,4 @@
 {"at":"2026-10-14T09:05:23.155Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"OVERLAP_ACCEPTED","mission":"inbox-all-recency","detail":"OVERLAP_ACCEPTED với sticky-cart-intent: phạm vi lib/sales-chatbot/ ↔ lib/sales-chatbot/cart-commitment.ts — cách tích hợp: một hàm xếp inboxOrderBy + bài kiểm; không chạm hằng số/workflow"}
 {"at":"2026-10-14T09:05:41.631Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"inbox-all-recency","detail":"fix/inbox-all-recency @ 7df1aabe0359 · 3 lệnh kiểm thử"}
 {"at":"2026-10-14T09:06:16.576Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"inbox-all-recency","detail":"#842 cho fix/inbox-all-recency @ 7df1aabe0359"}
+{"at":"2026-10-14T09:10:36.314Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"migration-rehearsal","detail":"fix/migration-rehearsal @ b49054445e37 · 2 lệnh kiểm thử"}
