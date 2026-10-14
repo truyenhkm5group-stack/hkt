@@ -168,7 +168,7 @@ export function diffThread(pc: readonly PcMsg[], erp: readonly ErpRow[], nowMs: 
 }
 
 /** Phân vị (nearest-rank) — `null` khi không có mẫu. HÀM THUẦN. */
-export function percentile(xs: readonly number[], p: number): number | null {
+export function phanVi(xs: readonly number[], p: number): number | null {
   if (!xs.length) return null;
   const s = [...xs].sort((a, b) => a - b);
   return s[Math.min(s.length - 1, Math.max(0, Math.ceil((p / 100) * s.length) - 1))];
@@ -281,7 +281,9 @@ async function inboxCheck(org: { code: string; name: string; isHome: boolean; br
   });
 }
 
-const noteCode = (note: string | null) => (note === null ? "—" : note === PAGE_REPLIED_REASON ? "PAGE_REPLIED" : note.length > 24 ? `${note.slice(0, 24)}…` : note);
+/** Nhãn của ghi chú dòng sổ tin cho kênh TÓM TẮT: chỉ các hằng của hệ thống; câu khác (lỗi gửi…) ⇒ «KHÁC» — câu gốc chỉ ở phần mã hoá. */
+const KNOWN_LEDGER_LABELS: ReadonlySet<string> = new Set(["BOT_SENT", "PAGE_REPLY", "HISTORY", "MEDIA_ONLY"]);
+const ledgerLabel = (v: string | null) => (v === null ? "—" : v === PAGE_REPLIED_REASON ? "PAGE_REPLIED" : KNOWN_LEDGER_LABELS.has(v) ? v : "KHÁC");
 
 async function runConversation(db: Db, org: { code: string; name: string; isHome: boolean; brand?: "vnx" | "chotdon" | null }, convId: string, tokens: Map<string, string>) {
   const c = schema.salesChatConversations;
@@ -333,7 +335,9 @@ async function runConversation(db: Db, org: { code: string; name: string; isHome
       .from(t)
       .where(and(eq(t.pageId, conv.pageId), eq(t.threadId, conv.threadId)))
       .groupBy(t.status, t.note);
-    tomTat(`SỔ TIN ERP: ${st.map((r) => `${r.status}/${noteCode(r.note)} ${r.n} (cuối ${vnTime(tsOf(r.last))})`).join(" · ") || "KHÔNG CÓ DÒNG NÀO"}`);
+    console.log(`sổ tin ERP (chi tiết): ${st.map((r) => `${r.status}/${r.note ?? "—"} ${r.n}`).join(" | ")}`);
+    const ledger = st.map((r) => `${r.status}/${ledgerLabel(r.note)} ${r.n} (cuối ${vnTime(tsOf(r.last))})`).join(" · ");
+    tomTat(`SỔ TIN ERP: ${ledger || "KHÔNG CÓ DÒNG NÀO"}`);
   }
 
   // Pancake.
@@ -353,7 +357,7 @@ async function runConversation(db: Db, org: { code: string; name: string; isHome
       const miss = (side: "CUSTOMER" | "PAGE") => d.missing.filter((m) => m.side === side);
       tomTat(`THIẾU (có ở Pancake, không có ở ERP): khách ${miss("CUSTOMER").length} [${miss("CUSTOMER").slice(-6).map((m) => vnTime(m.at)).join(", ")}] · page ${miss("PAGE").length} [${miss("PAGE").slice(-6).map((m) => vnTime(m.at)).join(", ")}]`);
       tomTat(`THỪA (ERP có, Pancake không): ${d.extra.length} — ${d.extra.slice(0, 6).map((r) => `${r.side} ${vnTime(r.at)}`).join(", ") || "không"}`);
-      tomTat(`TIN CUỐI: Pancake ${vnTime(d.lastPancakeAt)} (khách ${vnTime(d.lastPancakeCustomerAt)}) · ERP ${vnTime(d.lastErpAt)} · trễ webhook tin khách p50 ${ms(percentile(d.latencies, 50))} ms · max ${ms(d.latencies.length ? Math.max(...d.latencies) : null)} ms (n=${d.latencies.length})`);
+      tomTat(`TIN CUỐI: Pancake ${vnTime(d.lastPancakeAt)} (khách ${vnTime(d.lastPancakeCustomerAt)}) · ERP ${vnTime(d.lastErpAt)} · trễ webhook tin khách p50 ${ms(phanVi(d.latencies, 50))} ms · max ${ms(d.latencies.length ? Math.max(...d.latencies) : null)} ms (n=${d.latencies.length})`);
       if (activity !== null && d.lastPancakeAt !== null) {
         const lag = d.lastPancakeAt - activity;
         tomTat(`KHOÁ XẾP hộp thư so với tin cuối Pancake: ${lag > 60_000 ? `TỤT ${Math.round(lag / 60_000)} phút (tin mới phía Pancake không đẩy mốc hoạt động)` : "khớp (≤ 1 phút)"}`);
@@ -453,8 +457,8 @@ async function runOrg(db: Db, org: { code: string; name: string; isHome: boolean
   tomTat(`TOÀN TỔ CHỨC ${hours} giờ · ${tokens.size} page · luồng Pancake có cập nhật đọc được ${threadsRead}/${threadsSeen}${limited ? " · DỪNG vì 429 (số dưới chỉ trên phần đã đọc)" : ""} · có tin trong kỳ: có hội thoại ERP ${inErp} · KHÔNG có ${notInErp}`);
   tomTat(`TIN trong kỳ (theo luật nhập): Pancake khách ${pcCustomer} · page ${pcPage} | THIẾU ở ERP: khách ${missCustomer} · page ${missPage} · quá mới ${tooFresh}`);
   tomTat(`THIẾU theo giờ VN: ${[...missByHour].sort((a, b) => a[0] - b[0]).map(([h, n]) => `${h}h ${n}`).join(" · ") || "không"}`);
-  const p95 = percentile(latencies, 95);
-  tomTat(`TRỄ webhook→sổ (tin khách khớp mã, không tính nhập lịch sử): p50 ${ms(percentile(latencies, 50))} ms · p95 ${ms(p95)} ms · max ${ms(latencies.length ? Math.max(...latencies) : null)} ms (n=${latencies.length})${p95 !== null && p95 > WEBHOOK_P95_WARN_MS ? ` · CẢNH BÁO p95 > ${WEBHOOK_P95_WARN_MS / 1000} s` : ""}`);
+  const p95 = phanVi(latencies, 95);
+  tomTat(`TRỄ webhook→sổ (tin khách khớp mã, không tính nhập lịch sử): p50 ${ms(phanVi(latencies, 50))} ms · p95 ${ms(p95)} ms · max ${ms(latencies.length ? Math.max(...latencies) : null)} ms (n=${latencies.length})${p95 !== null && p95 > WEBHOOK_P95_WARN_MS ? ` · CẢNH BÁO p95 > ${WEBHOOK_P95_WARN_MS / 1000} s` : ""}`);
   tomTat(`KHOÁ XẾP TỤT (tin cuối Pancake mới hơn mốc hoạt động ERP > 1 phút): ${lagging}/${lastPc.size} hội thoại`);
 
   // Hộp thư: trang đầu «Tất cả» so với 100 hội thoại hoạt động gần nhất và 100 luồng Pancake mới nhất.

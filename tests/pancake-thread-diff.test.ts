@@ -7,7 +7,7 @@
  */
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { diffThread, parseDiffArgs, percentile, vnHour, vnTime, type ErpRow, type PcMsg } from "@/scripts/pancake-thread-diff";
+import { diffThread, parseDiffArgs, phanVi, vnHour, vnTime, type ErpRow, type PcMsg } from "@/scripts/pancake-thread-diff";
 
 const MIN = 60_000;
 
@@ -17,9 +17,9 @@ export function testPancakeThreadDiff() {
   assert.deepEqual(parseDiffArgs(["hslc-hmt-shop"]), { code: "hslc-hmt-shop", conv: null, hours: 72, threads: 60 });
   assert.deepEqual(parseDiffArgs(["hslc", `--conv=${UUID.toUpperCase()}`, "--hours=24", "--threads=200"]), { code: "hslc", conv: UUID, hours: 24, threads: 200 });
   for (const bad of [[], ["HSLC"], ["hslc", "--hours=73"], ["hslc", "--threads=0"], ["hslc", "--conv=abc"], ["hslc", "--hours=1.5"]]) assert.ok("error" in parseDiffArgs(bad), JSON.stringify(bad));
-  assert.equal(percentile([], 95), null, "không mẫu ⇒ chưa biết, không phải 0");
-  assert.equal(percentile([5, 1, 3, 2, 4], 50), 3);
-  assert.equal(percentile([1, 2, 3, 4, 100], 95), 100);
+  assert.equal(phanVi([], 95), null, "không mẫu ⇒ chưa biết, không phải 0");
+  assert.equal(phanVi([5, 1, 3, 2, 4], 50), 3);
+  assert.equal(phanVi([1, 2, 3, 4, 100], 95), 100);
   assert.equal(vnTime(null), "—");
   assert.equal(vnTime(Date.parse("2026-10-13T22:55:00Z")), "14/10 05:55", "giờ Việt Nam");
   assert.equal(vnHour(Date.parse("2026-10-13T22:55:00Z")), 5);
