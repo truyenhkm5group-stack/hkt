@@ -62,6 +62,15 @@ export function testMarketerPricePure() {
     // Chủ shop chốt 25/09/2026 "Luôn lấy giá báo MKT" làm giá nhập kho: đường GHI phiếu nhập đọc giá báo
     // để điền `unit_cost`. Báo cáo vẫn chỉ đọc phiếu kho — tệp này không tính báo cáo nào.
     "lib/inventory/receipt-pricing.ts",
+    /*
+      Chủ shop chốt 13/10/2026: "giá vốn thực tế = giá báo MKT đang hiệu lực hôm nay, cho mọi đơn, ở mọi
+      báo cáo". Giá báo vào giá vốn của shop qua ĐÚNG MỘT khối SQL (`current-marketer-cost.ts`) — mọi bậc
+      thang giá vốn (`cogs.ts`, giá vốn theo mẫu mã, hàng hoàn) nhập khối ấy chứ không tự đọc bảng. Riêng
+      `canonical-outcome.ts` đọc bảng giá báo ở điều kiện LÀM CŨ (giá báo đổi ⇒ dựng lại giá vốn) — nó
+      không tính giá nào.
+    */
+    "lib/queries/current-marketer-cost.ts",
+    "lib/queries/canonical-outcome.ts",
   ]);
   const tep = execSync("git ls-files lib app components && git ls-files --others --exclude-standard lib app components", { encoding: "utf8" })
     .split("\n")
@@ -70,10 +79,13 @@ export function testMarketerPricePure() {
   // Bỏ chú thích trước khi quét: nhắc tên bảng trong một đoạn giải thích không phải là đọc bảng.
   const boChuThich = (src: string) => src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
   const lot = tep.filter((f) => !DUOC_PHEP.has(f) && /marketer_prices|marketerPrices|LINE_MARKETER_PRICE|MKT_LINE_UNIT_COST/.test(boChuThich(readFileSync(f, "utf8"))));
-  assert.deepEqual(lot, [], "giá báo MKT chỉ được đọc ở đường của MKT (lương + lợi nhuận danh nghĩa theo MKT) — báo cáo lợi nhuận shop đứng trên giá vốn thật");
+  assert.deepEqual(lot, [], "giá báo MKT chỉ được đọc ở đường của MKT và ở MỘT khối giá vốn chung (current-marketer-cost.ts) — không truy vấn nào khác tự đọc bảng giá báo");
   const nominalSrc = readFileSync("lib/queries/profit-nominal.ts", "utf8");
   assert.ok(!nominalSrc.includes("MKT_LINE_UNIT_COST"), "báo cáo lợi nhuận danh nghĩa theo MÃ không được thay giá vốn bằng giá báo");
-  assert.equal((nominalSrc.match(/\$\{LINE_MARKETER_PRICE\}/g) ?? []).length, 3, "giá báo chỉ đi vào hai cột riêng của đường MKT (`mktDeltaFull`, `mktPricedUnknownQty`)");
+  // 13/10/2026 (Trung tâm giá vốn): thêm `mktPricedQty` + `mktPricedCogs` — CHỈ nuôi `marketerCostDelta` ở chế độ giá vốn
+  // KẾ HOẠCH (phần chênh giá báo phải đo so với giá kế hoạch). Vẫn là cột riêng của đường MKT, không vào giá vốn của shop.
+  assert.equal((nominalSrc.match(/\$\{LINE_MARKETER_PRICE\}/g) ?? []).length, 5, "giá báo chỉ đi vào các cột riêng của đường MKT (`mktDeltaFull`, `mktPricedUnknownQty`, `mktPricedQty`, `mktPricedCogs`)");
+  assert.ok(!/expectedCogs[^\n]*mktPriced(Qty|Cogs)/.test(nominalSrc), "hai cột mới không được đi vào giá vốn của shop");
   console.log("✓ Giá báo MKT (hàm thuần): một mã một giá theo ngày lên đơn · hạ giá không đổi đơn cũ · trước 01/09/2026 không áp · không lọt vào lợi nhuận shop");
 }
 
@@ -123,7 +135,6 @@ export async function testMarketerPriceQueries(db: Db) {
     const goc = await getMarketerReport(THANG10, "profit1");
     const gocNominal = await getNominalMarketerBreakdown(THANG10);
     const gocShop = await getNominalProfitReport(THANG10, "ORDERED");
-    const gocT8 = await getMarketerReport(THANG8_2026, "profit1");
     const gocDaily = await getMarketerDailyNominal(THANG10);
     const mkt = (r: typeof goc) => r.marketers.find((m) => m.marketerId === "mpk-mkt");
     assert.equal(mkt(goc)?.cogsCharged, 300_000, "chưa có giá báo ⇒ MKT chịu đúng giá vốn thật 3 × 100.000");
@@ -136,43 +147,61 @@ export async function testMarketerPriceQueries(db: Db) {
       { productId: "mpk-prod2", productCode: "MPK2", price: 200_000, effectiveFrom: d("2027-10-01") },
     ]);
     await db.insert(schema.productionBatches).values({ productId: "mpk-prod", productCode: "MPK1", batchNo: 1, orderedAt: d("2027-09-01"), orderedQty: 10, workshopPenalty: 50_000, penaltyAt: d("2027-10-10"), status: "DONE" });
+    // Đúng việc action `setMarketerPrice` làm sau khi ghi: dựng lại giá vốn mọi đơn của mã (giá báo là giá vốn).
+    const { rematerializeProductOrders } = await import("@/lib/queries/canonical-outcome");
+    await rematerializeProductOrders("mpk-prod");
+    await rematerializeProductOrders("mpk-prod2");
     clearMemo();
 
+    /*
+      13/10/2026 — chủ shop chốt: GIÁ VỐN THỰC TẾ của shop = giá báo MKT đang hiệu lực HÔM NAY, cho mọi đơn
+      (`lib/queries/current-marketer-cost.ts`). Giá báo "hôm nay" đi theo ĐỒNG HỒ THẬT, cùng nhịp với thứ
+      đang đo (AGENTS.md mục 50) — dòng hạ giá 15/10/2027 chỉ thành giá hiện tại khi đồng hồ tới ngày đó.
+      Phía MKT vẫn chịu giá báo theo NGÀY LÊN ĐƠN như cũ.
+    */
+    // MỘT phép chọn cho mọi thời điểm (không rẽ nhánh tay theo ngày): dòng giá báo mới nhất đã tới hiệu lực lúc
+    // chạy, không có thì giá phiếu nhập — đúng bậc thang của `current-marketer-cost.ts`.
+    const hienTai = (dong: { price: number; from: string }[], phieu: number) => dong.filter((x) => d(x.from).getTime() <= Date.now()).sort((a, b) => d(b.from).getTime() - d(a.from).getTime())[0]?.price ?? phieu;
+    const giaHienTai = hienTai([{ price: 150_000, from: "2026-07-01" }, { price: 120_000, from: "2027-10-15" }], 100_000);
+    const giaHienTai2 = hienTai([{ price: 200_000, from: "2027-10-01" }], 80_000);
     const sau = await getMarketerReport(THANG10, "profit1");
     const dong = sau.products.find((p) => p.productId === "mpk-prod");
-    assert.equal(dong?.cogsDelivered, 300_000, "lợi nhuận CỦA MÃ (shop) vẫn trên giá vốn thật");
-    assert.equal(sau.totals.profit, goc.totals.profit, "giá báo và hoàn phạt KHÔNG đổi lợi nhuận shop");
+    assert.equal(dong?.cogsDelivered, 3 * giaHienTai, "giá vốn CỦA MÃ (shop) = giá báo MKT HIỆN TẠI × 3 (chủ shop chốt 13/10/2026)");
+    assert.equal(sau.totals.profit - goc.totals.profit, -3 * (giaHienTai - 100_000), "lợi nhuận shop đổi đúng bằng phần giá vốn đổi theo giá báo; hoàn phạt KHÔNG đổi lợi nhuận shop");
     assert.equal(mkt(sau)?.cogsCharged, 2 * 150_000 + 1 * 120_000, "MKT chịu giá báo theo NGÀY LÊN ĐƠN: đơn 05/10 giá 150.000, đơn 20/10 giá đã hạ 120.000");
-    assert.equal(sau.totals.marketerPriceMargin, 420_000 - 300_000, "phần chênh shop giữ đứng thành một dòng đối soát");
+    assert.equal(sau.totals.marketerPriceMargin, 420_000 - 3 * giaHienTai, "phần chênh (giá báo ngày lên đơn − giá vốn shop) đứng thành một dòng đối soát");
     assert.equal(mkt(sau)?.workshopPenaltyCredit, 50_000, "phạt xưởng cộng cho MKT phụ trách mã");
     assert.equal((mkt(sau)?.personalProfit ?? 0) - (mkt(goc)?.personalProfit ?? 0), -120_000 + 50_000, "lợi nhuận cá nhân đổi đúng bằng (giá vốn thật − giá báo) + hoàn phạt");
     assert.equal(sau.totals.workshopPenaltyCredited, 50_000);
 
     const sauT8 = await getMarketerReport(THANG8_2026, "profit1");
-    assert.equal(mkt(sauT8)?.cogsCharged ?? 0, mkt(gocT8)?.cogsCharged ?? 0, "đơn tháng 8/2026 KHÔNG bị tính lại theo giá báo");
+    // Trước mốc 01/09/2026 KHÔNG áp giá báo theo ngày lên đơn cho MKT: MKT chịu đúng giá vốn của shop (nay = giá báo hiện tại).
+    assert.equal(mkt(sauT8)?.cogsCharged ?? 0, sauT8.products.find((p) => p.productId === "mpk-prod")?.cogsDelivered ?? 0, "đơn tháng 8/2026 KHÔNG áp giá báo theo ngày lên đơn — MKT chịu đúng giá vốn shop");
     assert.equal(sauT8.totals.marketerPriceMargin, 0);
 
     // ── Lợi nhuận danh nghĩa: bảng theo MÃ đứng yên, bảng theo MKT đứng trên giá báo ──
     const sauShop = await getNominalProfitReport(THANG10, "ORDERED");
-    assert.equal(sauShop.totals.expectedProfit, gocShop.totals.expectedProfit, "lợi nhuận danh nghĩa của SHOP không đổi");
+    assert.equal(sauShop.totals.expectedProfit - gocShop.totals.expectedProfit, -(sauShop.totals.expectedCogs - gocShop.totals.expectedCogs), "lợi nhuận danh nghĩa của SHOP chỉ đổi đúng phần giá vốn đổi theo giá báo hiện tại");
     const dongNominal = sauShop.rows.find((r) => r.productId === "mpk-prod");
     assert.ok(dongNominal, "mã phải có dòng trong lợi nhuận danh nghĩa");
     const tyLe = dongNominal.items > 0 ? dongNominal.expectedQty / dongNominal.items : 0;
-    assert.equal(dongNominal.marketerCostDelta, Math.round(120_000 * tyLe), "phần chênh quy về số sản phẩm giao thành công ƯỚC TÍNH của mã");
+    assert.equal(dongNominal.marketerCostDelta, Math.round((420_000 - 3 * giaHienTai) * tyLe), "phần chênh quy về số sản phẩm giao thành công ƯỚC TÍNH của mã");
+    const gocDong = gocShop.rows.find((r) => r.productId === "mpk-prod")!;
     const sauNominal = await getNominalMarketerBreakdown(THANG10);
     const r = (x: typeof sauNominal) => x.rows.find((m) => m.marketerId === "mpk-mkt");
     assert.equal(sauNominal.marketerPriceMargin, dongNominal.marketerCostDelta);
-    assert.equal((r(sauNominal)?.personalNet ?? 0) - (r(gocNominal)?.personalNet ?? 0), -dongNominal.marketerCostDelta + 50_000, "lợi nhuận danh nghĩa của MKT đổi đúng bằng phần chênh giá báo + hoàn phạt");
+    // Δ lợi nhuận danh nghĩa của MKT = Δ LN ròng của mã (giá vốn shop nay theo giá báo hiện tại) − phần chênh giá báo + hoàn phạt.
+    assert.equal((r(sauNominal)?.personalNet ?? 0) - (r(gocNominal)?.personalNet ?? 0), dongNominal.netProfit - gocDong.netProfit - dongNominal.marketerCostDelta + 50_000, "lợi nhuận danh nghĩa của MKT đổi đúng bằng Δ LN của mã − phần chênh giá báo + hoàn phạt");
     assert.equal(sauNominal.workshopPenaltyCredited, 50_000);
 
     // ── /ads/daily: cột MKT trên giá báo, hàng tổng trên giá vốn thật ──
     const sauDaily = await getMarketerDailyNominal(THANG10);
     const cot = (x: typeof sauDaily) => x.marketers.find((m) => m.key === "mpk-mkt");
     const chuaQuyKet = (x: typeof sauDaily) => x.marketers.find((m) => m.key === MARKETING_UNATTRIBUTED)?.total.expectedCogs ?? 0;
-    assert.equal(chuaQuyKet(sauDaily), chuaQuyKet(gocDaily), "ô 'Chưa quy kết' là phần shop giữ ⇒ giá vốn thật, dù mã có giá báo");
+    assert.equal(chuaQuyKet(sauDaily) === chuaQuyKet(gocDaily), giaHienTai2 === 80_000, "ô 'Chưa quy kết' là phần shop giữ ⇒ giá vốn shop (giá báo HIỆN TẠI nếu đã tới ngày hiệu lực, không thì phiếu nhập)");
     assert.equal(sauDaily.marketerPriceMargin, dongNominal.marketerCostDelta, "/ads/daily chia đúng phần chênh của mã mà tab Lợi nhuận danh nghĩa dùng");
-    assert.equal((cot(sauDaily)?.total.expectedCogs ?? 0) - (cot(gocDaily)?.total.expectedCogs ?? 0), dongNominal.marketerCostDelta, "cột của MKT chịu giá vốn theo giá báo");
-    assert.equal(sauDaily.total.expectedCogs, gocDaily.total.expectedCogs, "hàng tổng kỳ vẫn trên giá vốn thật");
+    assert.equal((cot(sauDaily)?.total.expectedCogs ?? 0) - (cot(gocDaily)?.total.expectedCogs ?? 0), dongNominal.marketerCostDelta + (dongNominal.expectedCogs - gocDong.expectedCogs), "cột của MKT chịu giá vốn theo giá báo ngày lên đơn");
+    assert.equal(sauDaily.total.expectedCogs - gocDaily.total.expectedCogs, sauShop.totals.expectedCogs - gocShop.totals.expectedCogs, "hàng tổng kỳ đổi đúng bằng giá vốn shop đổi");
     assert.equal(sauDaily.reconcile.expectedProfit.ours, sauDaily.reconcile.expectedProfit.report, "đối chiếu với Báo cáo lợi nhuận vẫn khớp từng đồng");
     assert.ok(sauDaily.warnings.some((w) => w.includes("GIÁ BÁO MKT")), "màn hình phải nói cột MKT đang trên giá báo");
 
@@ -181,7 +210,7 @@ export async function testMarketerPriceQueries(db: Db) {
     const ma = so.products.find((p) => p.productCode === "MPK1");
     assert.equal(ma?.marketerName, "MKT Kiểm", "tên MKT phụ trách phải đọc được từ cấu hình Lương (sổ nhân sự lưu dạng { list })");
     assert.equal(ma?.marketerPrice, 120_000, "giá báo đang áp là dòng mới nhất đã tới ngày hiệu lực");
-    console.log("✓ Giá báo MKT (CSDL): lợi nhuận shop đứng yên · MKT chịu giá báo theo ngày lên đơn · hạ giá không đổi đơn cũ · tháng 8/2026 không tính lại · hoàn phạt cộng cho MKT phụ trách · phần chênh thành dòng đối soát · tên MKT đọc đúng sổ nhân sự");
+    console.log("✓ Giá báo MKT (CSDL): giá vốn shop = giá báo hiện tại · MKT chịu giá báo theo ngày lên đơn · hạ giá không đổi đơn cũ · tháng 8/2026 không tính lại · hoàn phạt cộng cho MKT phụ trách · phần chênh thành dòng đối soát · tên MKT đọc đúng sổ nhân sự");
   } finally {
     await setSettingJson(PAYROLL_EMPLOYEES_KEY, nhanSuTruoc ?? { list: [] });
     await setSettingJson(PAYROLL_CONFIG_KEY, cauHinhTruoc ?? {});

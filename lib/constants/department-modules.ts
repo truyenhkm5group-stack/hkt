@@ -533,6 +533,13 @@ export const NAV_MODULES = [
     why: "Lợi nhuận danh nghĩa và tiền thật, cùng phễu và mô phỏng kịch bản — người dựng và bảo vệ các số này là kế toán.",
   },
   {
+    href: "/inventory/cost-center",
+    label: "Trung tâm giá vốn",
+    zone: "FINANCE",
+    permission: "reports:nominal",
+    why: "MỘT nơi đặt giá vốn kế hoạch (có ngày hiệu lực + lịch sử) và đối chiếu nó với giá phiếu kho, giá SX xưởng, giá báo MKT — con số này quyết định lợi nhuận danh nghĩa nên người giữ nó là kế toán (docs/cost-center.md).",
+  },
+  {
     href: "/reports/cashflow",
     label: "Dòng tiền",
     zone: "FINANCE",

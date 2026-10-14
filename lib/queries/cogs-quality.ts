@@ -64,7 +64,8 @@ export type CogsCoverage = {
  * là chính cái bệnh mà việc đóng băng sinh ra để chữa.
  */
 const HANG = sql`case
-  when m.cogs_basis = 'RECEIPT_BEFORE' then 'VERIFIED'
+  -- Giá báo MKT là giá vốn thực tế theo quyết định chủ shop 13/10/2026 — một con số đã KHAI, có người đặt.
+  when m.cogs_basis in ('RECEIPT_BEFORE', 'MARKETER_PRICE') then 'VERIFIED'
   when m.cogs_basis in ('RECEIPT_AFTER', 'PROVISIONAL') then 'RECONSTRUCTED'
   else 'UNVERIFIED'
 end`;

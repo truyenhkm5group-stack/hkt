@@ -9830,7 +9830,7 @@ export const returnDispositions = pgTable(
     check("return_dispositions_note_check", sql`${t.disposition} <> 'WRITE_OFF' OR length(trim(${t.note})) > 0`),
     check(
       "return_dispositions_value_check",
-      sql`(${t.disposition} = 'WRITE_OFF' OR (${t.unitCostEstimate} IS NULL AND ${t.valueEstimate} IS NULL AND ${t.costBasis} IS NULL)) AND (${t.valueEstimate} IS NULL OR ${t.valueEstimate} >= 0) AND (${t.costBasis} IS NULL OR ${t.costBasis} IN ('RECEIPT', 'ORDER_SNAPSHOT', 'VARIANT_DEFAULT', 'UNKNOWN'))`,
+      sql`(${t.disposition} = 'WRITE_OFF' OR (${t.unitCostEstimate} IS NULL AND ${t.valueEstimate} IS NULL AND ${t.costBasis} IS NULL)) AND (${t.valueEstimate} IS NULL OR ${t.valueEstimate} >= 0) AND (${t.costBasis} IS NULL OR ${t.costBasis} IN ('MARKETER_PRICE', 'RECEIPT', 'ORDER_SNAPSHOT', 'VARIANT_DEFAULT', 'UNKNOWN'))`,
     ),
   ],
 );

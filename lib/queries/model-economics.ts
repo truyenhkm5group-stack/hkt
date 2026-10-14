@@ -300,7 +300,7 @@ export function buildModelEconomics(input: {
       estimated: "LIVE_LATEST_RECEIPT",
       realized: "LIVE_LATEST_RECEIPT",
       usesFrozenRecognizedCogs: false,
-      note: "Cả hai cột tính giá vốn SỐNG theo phiếu nhập gần nhất; P&L và lợi nhuận tiền thật dùng giá vốn ĐÓNG BĂNG lúc giao (recognized_cogs). Nhập phiếu mới có thể đổi số ở đây mà không đổi P&L của cùng mã.",
+      note: "Cả hai cột tính giá vốn SỐNG: giá báo MKT hiện tại → phiếu nhập gần nhất (luật 13, 13/10/2026). P&L và lợi nhuận tiền thật dùng giá vốn ghi nhận lúc giao (recognized_cogs) — đơn có giá báo đi theo giá báo hiện tại, đơn chưa có giá báo đóng băng. Nhập phiếu mới có thể đổi số ở đây mà không đổi P&L của cùng mã.",
     },
     lines,
     notes,

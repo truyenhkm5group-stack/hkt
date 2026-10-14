@@ -10,6 +10,7 @@ import type { OrderOutcome } from "@/lib/constants/returns";
 import { OUTCOME_GROUP } from "@/lib/constants/truth";
 import { adMarketerMap } from "@/lib/integrations/facebook/ads-index";
 import { carrierSubstateSql } from "@/lib/queries/carrier-substate-sql";
+import type { CostMode } from "@/lib/constants/estimated-cost";
 import { LINE_UNIT_COST } from "@/lib/queries/cogs";
 import { marketerPriceOnOrderDate } from "@/lib/queries/marketer-price";
 import { listEmployees, loadPayrollConfig } from "@/lib/queries/payroll";
@@ -459,7 +460,7 @@ type Slices = {
 
 const keyOf = (mid: string | null) => mid ?? MARKETING_UNATTRIBUTED;
 
-async function slicesUncached(period: Period, basis: TimeBasis, withStock: boolean): Promise<Slices> {
+async function slicesUncached(period: Period, basis: TimeBasis, withStock: boolean, costMode: CostMode): Promise<Slices> {
   const [nominal, lines, spend, lookup, employees, config] = await Promise.all([
     /*
       BA CỜ, MỖI CỜ MỘT LÝ DO:
@@ -473,7 +474,7 @@ async function slicesUncached(period: Period, basis: TimeBasis, withStock: boole
           nhuận danh nghĩa BẬT, vì tab ấy đã tự tính đúng bản có tồn và bộ đệm dùng chung được.
         · MỐC — cùng mốc với bảng theo mã đứng ngay trên, để hai bảng đứng trên cùng một tập đơn.
     */
-    getNominalProfitReport(period, basis, NO_ORDER_VALUE_FILTER, true, true, withStock),
+    getNominalProfitReport(period, basis, NO_ORDER_VALUE_FILTER, true, true, withStock, costMode),
     readLines(period, basis),
     readSpend(period),
     getProbabilityLookup(),
@@ -571,7 +572,12 @@ async function slicesUncached(period: Period, basis: TimeBasis, withStock: boole
     const pos = slots.map((s) => s.pos);
     const cnt = slots.map((s) => s.frac);
     const rev = slots.map((s) => s.revKey);
-    const cogsK = slots.map((s) => s.cogsKey);
+    /*
+      CHẾ ĐỘ KẾ HOẠCH: giá vốn của mã = SL × MỘT đơn giá kế hoạch ⇒ chia theo SỐ LƯỢNG giao được, không
+      theo giá vốn THẬT của dòng (dòng chưa có giá thật sẽ nhận 0 giá vốn kế hoạch và trông lãi trọn).
+    */
+    const theoKeHoach = row.costBasis === "PLANNED";
+    const cogsK = slots.map((s) => (theoKeHoach ? s.qtyKey : s.cogsKey));
     const expRev = chiaTheoCanCu(row.expectedRevenue, rev, pos, cnt);
     const expCogs = chiaTheoCanCu(row.expectedCogs, cogsK, rev, cnt);
     /*
@@ -593,7 +599,8 @@ async function slicesUncached(period: Period, basis: TimeBasis, withStock: boole
       giá báo cao hơn vừa có giá xả tồn thấp hơn giá vốn thì phần chênh RÒNG đi theo các dòng cùng chiều.
     */
     const chieu = row.marketerCostDelta < 0 ? -1 : 1;
-    const mktAdj = chiaTheoCanCu(row.marketerCostDelta, slots.map((s) => s.mktKey * chieu), cogsK, rev, cnt);
+    // Chế độ kế hoạch: chênh giá báo đo so với MỘT đơn giá kế hoạch ⇒ chia theo số lượng của các dòng CÓ giá báo.
+    const mktAdj = chiaTheoCanCu(row.marketerCostDelta, slots.map((s) => (theoKeHoach ? (s.mktKey !== 0 ? s.qtyKey : 0) : s.mktKey * chieu)), cogsK, rev, cnt);
 
     slots.forEach((s, i) => {
       const sc = cellOf(s.day, s.key, pid);
@@ -637,8 +644,9 @@ async function slicesUncached(period: Period, basis: TimeBasis, withStock: boole
  * bộ lọc mã / marketer thì KHÔNG — chúng chỉ là phép cộng trên cùng các ô, nên đổi bộ lọc không
  * phải tính lại cả bảng.
  */
-function getSlices(period: Period, basis: TimeBasis, withStock: boolean): Promise<Slices> {
-  return memo(`nominalSlices:${basis}:${periodKey(period)}:${withStock ? "ton" : "khongton"}`, 120_000, () => slicesUncached(period, basis, withStock));
+function getSlices(period: Period, basis: TimeBasis, withStock: boolean, costMode: CostMode = "ACTUAL"): Promise<Slices> {
+  // Chế độ giá vốn đổi `expectedCogs` của mọi mã ⇒ phải vào khoá cache (AGENTS.md §2).
+  return memo(`nominalSlices:${basis}:${periodKey(period)}:${withStock ? "ton" : "khongton"}:${costMode}`, 120_000, () => slicesUncached(period, basis, withStock, costMode));
 }
 
 function labelFor(names: Record<string, string>, key: string): string {
@@ -816,7 +824,9 @@ function costWarnings(nominal: NominalReport): string[] {
   const out: string[] = [];
   if (nominal.totals.expectedCogsEstimated > 0) {
     out.push(
-      `Giá vốn ước tính gồm ${nominal.totals.expectedCogsEstimated.toLocaleString("vi-VN")} ₫ giá vốn DỰ TÍNH (chủ shop đặt ở Báo cáo lợi nhuận) cho ${nominal.totals.estimatedCostProducts} mã chưa có giá nhập thật — cùng cách tab Lợi nhuận danh nghĩa tính. Lợi nhuận của MKTer chạy những mã ấy phụ thuộc con số đặt tay này; lập phiếu nhập có đơn giá thì giá thật tự thay chỗ.`,
+      nominal.costMode === "PLANNED"
+        ? `Đang xem theo GIÁ VỐN KẾ HOẠCH: giá vốn ước tính gồm ${nominal.totals.expectedCogsEstimated.toLocaleString("vi-VN")} ₫ theo giá kế hoạch / tạm tính của ${nominal.totals.estimatedCostProducts} mã (đặt ở Trung tâm giá vốn) — đây là lợi nhuận dự tính, không phải đã thực hiện.`
+        : `Giá vốn ước tính gồm ${nominal.totals.expectedCogsEstimated.toLocaleString("vi-VN")} ₫ giá vốn TẠM TÍNH (giá kế hoạch ở Trung tâm giá vốn, chưa đặt thì tham chiếu giá báo MKT) cho ${nominal.totals.estimatedCostProducts} mã chưa có giá nhập thật — cùng cách tab Lợi nhuận danh nghĩa tính. Lập phiếu nhập có đơn giá thì giá thật tự thay chỗ.`,
     );
   }
   if (nominal.totals.cogsUncoveredQty > 0) {
@@ -907,8 +917,9 @@ export type NominalDaily = {
   warnings: string[];
 };
 
-export async function getNominalDaily(period: Period, basis: TimeBasis, filter: NominalDailyFilter, withStock = true): Promise<NominalDaily> {
-  const { nominal, cells, spend, otherPct, names } = await getSlices(period, basis, withStock);
+export async function getNominalDaily(period: Period, basis: TimeBasis, filter: NominalDailyFilter, withStock = true, costMode: CostMode = "ACTUAL"): Promise<NominalDaily> {
+  // Bảng theo ngày là phép CHIA số của bảng theo mã ⇒ phải đứng trên CÙNG chế độ giá vốn với bảng ấy.
+  const { nominal, cells, spend, otherPct, names } = await getSlices(period, basis, withStock, costMode);
   const f: NominalDailyFilter = { productId: filter.productId || null, marketerKey: filter.marketerKey || null };
   const mappedSet = new Set(spend.mappedMarketers);
   const spendMappedOf = (key: string) => key === MARKETING_UNATTRIBUTED || mappedSet.has(key);

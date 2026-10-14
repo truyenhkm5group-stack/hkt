@@ -6,6 +6,7 @@ import { memo, periodKey } from "@/lib/cache";
 import { DEFAULT_PROFIT_ASSUMPTIONS, fixedCostForPeriod, manualShipFee, opsCosts, periodMonths, PROFIT_ASSUMPTIONS_KEY, rescuedFromRate, resolveShipFees, type ProfitAssumptions, type ShipFeeSource } from "@/lib/constants/profit";
 import { ORDER_OUTCOME_FAST, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
 import { LINE_UNIT_COST } from "@/lib/queries/cogs";
+import { VARIANT_CURRENT_MARKETER_COST } from "@/lib/queries/current-marketer-cost";
 import { LINE_MARKETER_PRICE } from "@/lib/queries/marketer-price";
 import type { Period } from "@/lib/search-params";
 import { getSettingJson } from "@/lib/settings";
@@ -17,7 +18,7 @@ import { getProjectedDeliveryMetrics, type BacktestSummary } from "@/lib/queries
 import { NO_ORDER_VALUE_FILTER, orderValueActive, orderValueKey, orderValueMatches, orderValueWhereSql, type OrderValueFilter } from "@/lib/constants/order-value";
 import { erpStockExpr, LAST_RECEIPT_COST, stockKnownExpr, variantReceiptsSubquery, variantSalesSubquery } from "@/lib/queries/stock";
 import { FINISHED_OUTCOMES_SQL, RETURNED_OUTCOMES_SQL } from "@/lib/constants/truth";
-import { ESTIMATED_COST_KEY, estimatedCostsWithMarketerPrice, parseEstimatedCosts, type EstimatedCost, type EstimatedCostMap } from "@/lib/constants/estimated-cost";
+import { ESTIMATED_COST_KEY, estimatedCostsWithMarketerPrice, parseEstimatedCosts, parsePlannedCostHistory, type CostBasis, type CostMode, type EstimatedCost, type EstimatedCostMap, type PlannedCostHistory } from "@/lib/constants/estimated-cost";
 import { marketerPriceEntriesByProduct } from "@/lib/queries/marketer-price";
 import { IN_SALES_REPORTS, NOT_MANUAL_ORDER } from "@/lib/queries/manual-order-sql";
 
@@ -284,6 +285,13 @@ export type NominalRow = {
   /** Giá vốn dự tính chủ shop đặt cho mã (chỉ khi báo cáo được gọi với `withEstimatedCost`). `null` = không có / không áp. */
   estimatedCost: EstimatedCost | null;
   /**
+   * GIÁ VỐN KẾ HOẠCH đang hiệu lực của mã (đặt ở Trung tâm giá vốn, nguồn `MANUAL`) — có mặt ở CẢ HAI
+   * chế độ để ô sửa luôn mở đúng con số đang lưu. Giá báo MKT KHÔNG phải giá kế hoạch (luật 5').
+   */
+  plannedCost: EstimatedCost | null;
+  /** Nguồn giá vốn của dòng — nhãn "Thực tế" / "Tạm tính" / "Kế hoạch" ở mọi ô giá vốn (luật 7). */
+  costBasis: CostBasis;
+  /**
    * PHẦN của `expectedCogs` đến từ giá DỰ TÍNH, không phải chứng từ — tách riêng để màn hình dán
    * nhãn được (AGENTS.md mục 8.6). `0` khi không có giá dự tính.
    */
@@ -411,6 +419,8 @@ export type NominalRow = {
 
 export type NominalReport = {
   assumptions: ResolvedAssumptions;
+  /** Chế độ giá vốn của báo cáo (luật 7 ở `lib/constants/estimated-cost.ts`). */
+  costMode: CostMode;
   rows: NominalRow[];
   /** Khoảng giá trị đơn đang lọc — màn hình phải in ra, không để người đọc đoán mình đang xem tập nào. */
   valueFilter: OrderValueFilter;
@@ -577,6 +587,24 @@ function applyAssumptions(
 }
 
 /**
+ * Thay giá vốn của một dòng đã tính bằng GIÁ KẾ HOẠCH × số sản phẩm giao TC ước tính (luật 7). Mọi
+ * khoản khác (doanh thu, cước, quảng cáo) giữ nguyên — chỉ đơn giá vốn đổi. Toàn bộ giá vốn là số
+ * kế hoạch ⇒ `expectedCogsEstimated` = `expectedCogs`, để màn hình không bao giờ gọi nó là giá thật.
+ */
+export function giaVonTheoKeHoach<T extends { expectedRevenue: number; expectedQty: number; shipCost: number; expectedCogs: number; expectedProfit: number }>(calc: T, unitCost: number): T & { expectedCogsEstimated: number; margin: number | null } {
+  const expectedCogs = Math.round(Math.max(0, calc.expectedQty) * unitCost);
+  const expectedProfit = calc.expectedProfit + calc.expectedCogs - expectedCogs;
+  return { ...calc, expectedCogs, expectedCogsEstimated: expectedCogs, expectedProfit, margin: calc.expectedRevenue ? (expectedProfit / calc.expectedRevenue) * 100 : null };
+}
+
+/** Nhãn nguồn giá vốn của một dòng (luật 7). Hàm THUẦN. */
+export function nguonGiaVon(mode: CostMode, coKeHoach: boolean, soChuaCoGiaThat: number, coGiaLap: boolean): CostBasis {
+  if (coKeHoach) return "PLANNED";
+  if (soChuaCoGiaThat > 0) return coGiaLap ? "PROVISIONAL" : "UNKNOWN";
+  return mode === "PLANNED" ? "ACTUAL_NO_PLAN" : "ACTUAL";
+}
+
+/**
  * ═══ GIÁ TRỊ HÀNG NHẬP CỦA MỘT MÃ, KHI PHIẾU NHẬP CÓ DÒNG KHÔNG GHI ĐƠN GIÁ ═══
  *
  * Chủ shop chốt 25/09/2026: dòng phiếu nhập không ghi đơn giá được định giá bằng GIÁ VỐN DỰ TÍNH
@@ -682,7 +710,8 @@ async function stockByProduct(): Promise<Map<string, StockSnapshot>> {
   const rows = await chayKhongJit(db, (tx) => {
     const salesAgg = variantSalesSubquery(tx);
     const receiptsAgg = variantReceiptsSubquery(tx);
-    const unitCost = sql<number>`coalesce(nullif(${LAST_RECEIPT_COST}, 0), ${pv.lastImportedPrice}, 0)`;
+    // Giá trị tồn theo CÙNG bậc thang giá vốn (giá báo MKT hiện tại đứng đầu — luật 13, 13/10/2026), như trang Sản phẩm.
+    const unitCost = sql<number>`coalesce(${VARIANT_CURRENT_MARKETER_COST}, nullif(${LAST_RECEIPT_COST}, 0), ${pv.lastImportedPrice}, 0)`;
     return tx
       .select({
         productId: pv.productId,
@@ -718,7 +747,7 @@ async function stockByProduct(): Promise<Map<string, StockSnapshot>> {
 const TON_CHUA_BIET: StockSnapshot = { qty: 0, value: 0, known: false, inTransitQty: 0, awaitingReturnQty: 0 };
 
 /** Lợi nhuận danh nghĩa theo mã hàng: đơn lên trong kỳ × (1 − tỷ lệ hoàn ước tính) − giá vốn − vận chuyển − quảng cáo */
-async function getNominalProfitReportUncached(period: Period, basis: TimeBasis, value: OrderValueFilter, includeAds: boolean, withEstimatedCost: boolean, withStock: boolean): Promise<NominalReport> {
+async function getNominalProfitReportUncached(period: Period, basis: TimeBasis, value: OrderValueFilter, includeAds: boolean, withEstimatedCost: boolean, withStock: boolean, costMode: CostMode): Promise<NominalReport> {
   const locGiaTri = orderValueWhereSql(value);
   const dangLoc = orderValueActive(value);
   const db = await getDb();
@@ -793,6 +822,10 @@ async function getNominalProfitReportUncached(period: Period, basis: TimeBasis, 
         */
         mktDeltaFull: sql<number>`coalesce(sum(${i.quantity} * (${LINE_MARKETER_PRICE} - ${LINE_UNIT_COST})) filter (where ${NOT_CANCELLED} and ${LINE_MARKETER_PRICE} is not null), 0)`,
         mktPricedUnknownQty: sql<number>`coalesce(sum(${i.quantity}) filter (where ${NOT_CANCELLED} and ${LINE_MARKETER_PRICE} is not null and ${LINE_UNIT_COST} = 0), 0)`,
+        // Chỉ chế độ KẾ HOẠCH cần: phần chênh giá báo phải đo so với giá kế hoạch, không so với giá thật.
+        // Chế độ thực tế không trả tiền cho một truy vấn con nữa trên mỗi dòng đơn.
+        mktPricedQty: costMode === "PLANNED" ? sql<number>`coalesce(sum(${i.quantity}) filter (where ${NOT_CANCELLED} and ${LINE_MARKETER_PRICE} is not null), 0)` : sql<number>`0`,
+        mktPricedCogs: costMode === "PLANNED" ? sql<number>`coalesce(sum(${i.quantity} * ${LINE_UNIT_COST}) filter (where ${NOT_CANCELLED} and ${LINE_MARKETER_PRICE} is not null), 0)` : sql<number>`0`,
         delivered: sql<number>`count(distinct ${o.id}) filter (where ${ORDER_OUTCOME_FAST} = 'DELIVERED')`,
         returned: sql<number>`count(distinct ${o.id}) filter (where ${IS_RETURNED})`,
         inTransit: sql<number>`count(distinct ${o.id}) filter (where ${ORDER_OUTCOME_FAST} = 'IN_TRANSIT')`,
@@ -1041,7 +1074,16 @@ async function getNominalProfitReportUncached(period: Period, basis: TimeBasis, 
       // Giá dự tính chỉ có nghĩa khi mã THẬT SỰ có sản phẩm chưa có giá — mã đã đủ phiếu nhập thì
       // con số đặt tay đứng sang một bên, và dòng không mang nhãn "dự tính" nào.
       const duTinh = cogsUnknownQty > 0 ? (giaDuTinh[r.productId] ?? null) : null;
-      const calc = applyAssumptions(base, returnRate, assumptions, orderLevel, duTinh?.unitCost ?? null);
+      const calcThuc = applyAssumptions(base, returnRate, assumptions, orderLevel, duTinh?.unitCost ?? null);
+      /*
+        CHẾ ĐỘ KẾ HOẠCH (luật 7): mã đã đặt giá kế hoạch thì MỌI sản phẩm giao TC ước tính tính theo
+        giá kế hoạch — kể cả khi có phiếu nhập. Đây chính là chỗ bản cũ bỏ qua: giá thật luôn thắng
+        nên sửa giá Q004 (có phiếu 185.000) trên BCLN không đổi được con số nào. Số LƯỢNG đi đúng
+        đường cũ (`expectedQty`), chỉ đơn giá đổi. Giá báo MKT KHÔNG phải giá kế hoạch (luật 5').
+      */
+      const keHoachCuaMa = giaDuTinh[r.productId]?.source === "MANUAL" ? giaDuTinh[r.productId] : null;
+      const keHoach = costMode === "PLANNED" ? keHoachCuaMa : null;
+      const calc = keHoach ? giaVonTheoKeHoach(calcThuc, keHoach.unitCost) : calcThuc;
       const pur = purchases.get(r.productId);
       const nhap = valuePurchase(pur, giaDuTinh[r.productId] ?? null);
       /*
@@ -1052,7 +1094,14 @@ async function getNominalProfitReportUncached(period: Period, basis: TimeBasis, 
       */
       const tyLeGiao = base.items > 0 ? calc.expectedQty / base.items : 0;
       const duTinhBiThay = duTinh?.unitCost ? duTinh.unitCost * Number(r.mktPricedUnknownQty ?? 0) : 0;
-      const marketerCostDelta = Math.round((Number(r.mktDeltaFull ?? 0) - duTinhBiThay) * tyLeGiao);
+      /*
+        Chế độ kế hoạch: giá vốn của shop là giá kế hoạch, nên phần MKT chịu thêm = Σ(giá báo − giá kế
+        hoạch) trên các dòng có giá báo = Σ giá báo − SL × giá kế hoạch, với Σ giá báo = chênh-so-với-
+        giá-thật + giá thật của chính các dòng ấy.
+      */
+      const marketerCostDelta = keHoach
+        ? Math.round((Number(r.mktDeltaFull ?? 0) + Number(r.mktPricedCogs ?? 0) - Number(r.mktPricedQty ?? 0) * keHoach.unitCost) * tyLeGiao)
+        : Math.round((Number(r.mktDeltaFull ?? 0) - duTinhBiThay) * tyLeGiao);
       return {
         productId: r.productId,
         productName: r.productName ?? "",
@@ -1066,10 +1115,12 @@ async function getNominalProfitReportUncached(period: Period, basis: TimeBasis, 
         projection: duBao && orderLevel ? { eligibleSent: duBao.eligibleSent, active: duBao.active, unmodelledActive: duBao.unmodelledActive, pending: duBao.pending, pendingUnmodelled: duBao.pendingUnmodelled, awaitingPickup: duBao.awaitingPickup, unmodelledRevenue: duBao.unmodelledRevenue, finished: duBao.deliveredActual + duBao.failedActual } : null,
         revenueBasis: (orderLevel ? "ORDER_LEVEL" : "RATE") as NominalRow["revenueBasis"],
         unmodelledRevenue: orderLevel && duBao ? duBao.unmodelledRevenue : 0,
-        cogsKnown: cogsUnknownQty === 0 || duTinh !== null,
+        cogsKnown: keHoach !== null || cogsUnknownQty === 0 || duTinh !== null,
         cogsUnknownQty,
-        cogsUncoveredQty: duTinh ? 0 : cogsUnknownQty,
-        estimatedCost: duTinh,
+        cogsUncoveredQty: keHoach || duTinh ? 0 : cogsUnknownQty,
+        estimatedCost: keHoach ?? duTinh,
+        plannedCost: keHoachCuaMa,
+        costBasis: nguonGiaVon(costMode, keHoach !== null, cogsUnknownQty, duTinh !== null),
         marketerCostDelta,
         purchaseCostKnown: nhap.known,
         purchaseUnpricedQty: nhap.unpricedQty,
@@ -1129,7 +1180,7 @@ async function getNominalProfitReportUncached(period: Period, basis: TimeBasis, 
       productId: pid, productName: pur.name || pid, code: pur.code, image: null, orders: 0, ordersWeighted: 0, items: 0, grossSales: 0, salesAfterDiscount: 0, adSpend: adByProduct.get(pid) ?? 0,
       // Mã CHƯA CÓ ĐƠN: không có tỷ lệ nào để in — `null`, không phải 100% (không giao đơn nào thì không "giao thành công 100%").
       ads: adsRatios({ adSpend: adByProduct.get(pid) ?? 0, posSales: 0, deliveredRevenueActual: 0, projectedDeliveredRevenue: 0 }),
-      returnRate: null, deliveryRate: null, returnRateSource: "unmeasured" as const, projection: null, revenueBasis: "RATE" as const, unmodelledRevenue: 0, cogsKnown: true, cogsUnknownQty: 0, marketerCostDelta: 0, cogsUncoveredQty: 0, estimatedCost: null, purchaseCostKnown: nhap.known, purchaseUnpricedQty: nhap.unpricedQty, purchaseCostEstimated: nhap.estimated, profitOnPurchaseKnown: nhap.known,
+      returnRate: null, deliveryRate: null, returnRateSource: "unmeasured" as const, projection: null, revenueBasis: "RATE" as const, unmodelledRevenue: 0, cogsKnown: true, cogsUnknownQty: 0, marketerCostDelta: 0, cogsUncoveredQty: 0, estimatedCost: null, plannedCost: giaDuTinh[pid]?.source === "MANUAL" ? giaDuTinh[pid] : null, costBasis: (costMode === "PLANNED" ? "ACTUAL_NO_PLAN" : "ACTUAL") as CostBasis, purchaseCostKnown: nhap.known, purchaseUnpricedQty: nhap.unpricedQty, purchaseCostEstimated: nhap.estimated, profitOnPurchaseKnown: nhap.known,
       baseReturnRate: 0, historyFinished: 0, rateMature: false, rateOwnFinished: 0, rateOverride: null, rateMatureAt: assumptions.rateMatureMinFinished, measuredDeliveryRate: null, borrowedShare: null, blendReason: null, expectedRevenue: 0, expectedCogs: 0, expectedCogsEstimated: 0, expectedQty: 0, shipCost: 0, expectedProfit: -(adByProduct.get(pid) ?? 0), margin: null, cpo: null, revenuePerOrder: null,
       delivered: 0, returned: 0, inTransit: 0, failed: 0, pending: 0, actualRevenue: 0, operatingAlloc: 0, rescued: 0, packingCost: 0, opsStaffCost: 0, fixedAlloc: 0, opexTotal: 0, otherCostsTotal: 0, opexPerOrder: null, opexPerDelivered: null,
       // Chưa bán được gì trong kỳ ⇒ chưa giải phóng đồng dự phòng nào vào lãi lỗ; rủi ro của lô
@@ -1276,6 +1327,7 @@ async function getNominalProfitReportUncached(period: Period, basis: TimeBasis, 
   const adSpendAttributed = totals.adSpend;
   return {
     assumptions,
+    costMode,
     rows,
     valueFilter: value,
     adsIncluded: includeAds,
@@ -1388,18 +1440,29 @@ export async function getNominalProfitReport(
    * tiền, nên nó tắt cờ này. Tắt thì tồn là CHƯA BIẾT (`stockKnown = false`), không phải 0.
    */
   withStock = true,
+  /**
+   * CHẾ ĐỘ GIÁ VỐN (luật 7 ở `lib/constants/estimated-cost.ts`). `PLANNED` chỉ có nghĩa khi
+   * `withEstimatedCost` bật — tắt thì không đọc giá kế hoạch nào, nên chế độ bị ép về `ACTUAL`.
+   */
+  costMode: CostMode = "ACTUAL",
 ): Promise<NominalReport> {
-  // Bộ lọc giá trị đơn, công tắc quảng cáo, giá dự tính VÀ việc đọc tồn đều đổi kết quả ⇒ đều phải vào khoá cache (§2).
-  return memo(`getNominalProfitReport:${basis}:${periodKey(period)}:${orderValueKey(value)}:${includeAds ? "ads" : "noads"}:${withEstimatedCost ? "gvdt" : "thuc"}:${withStock ? "ton" : "khongton"}`, 120000, () =>
-    getNominalProfitReportUncached(period, basis, value, includeAds, withEstimatedCost, withStock),
+  const mode: CostMode = withEstimatedCost ? costMode : "ACTUAL";
+  // Bộ lọc giá trị đơn, công tắc quảng cáo, giá dự tính, CHẾ ĐỘ GIÁ VỐN VÀ việc đọc tồn đều đổi kết quả ⇒ đều phải vào khoá cache (§2).
+  return memo(`getNominalProfitReport:${basis}:${periodKey(period)}:${orderValueKey(value)}:${includeAds ? "ads" : "noads"}:${withEstimatedCost ? "gvdt" : "thuc"}:${withStock ? "ton" : "khongton"}:${mode}`, 120000, () =>
+    getNominalProfitReportUncached(period, basis, value, includeAds, withEstimatedCost, withStock, mode),
   );
 }
 
 /**
- * Giá vốn dự tính theo `productId`: giá báo MKT hiệu lực vào `at` nếu mã đã khai (luật 5 ở
- * `lib/constants/estimated-cost.ts`), không thì con số đặt tay. Dòng hỏng bị bỏ, không thành 0 ₫.
+ * Giá vốn kế hoạch / tham chiếu theo `productId` vào `at` (luật 5' ở `lib/constants/estimated-cost.ts`):
+ * giá kế hoạch đang hiệu lực nếu đã đặt, chưa đặt thì tham chiếu giá báo MKT. Dòng hỏng bị bỏ, không thành 0 ₫.
  */
 export async function getEstimatedCosts(at: Date = new Date()): Promise<EstimatedCostMap> {
   const [manual, prices] = await Promise.all([getSettingJson<Record<string, unknown>>(ESTIMATED_COST_KEY, {}), marketerPriceEntriesByProduct()]);
-  return estimatedCostsWithMarketerPrice(parseEstimatedCosts(manual), prices, at);
+  return estimatedCostsWithMarketerPrice(parseEstimatedCosts(manual, at), prices, at);
+}
+
+/** LỊCH SỬ giá vốn kế hoạch của mọi mã (luật 6) — Trung tâm giá vốn đọc để in "ai sửa, khi nào, từ ngày nào". */
+export async function getPlannedCostHistory(): Promise<PlannedCostHistory> {
+  return parsePlannedCostHistory(await getSettingJson<Record<string, unknown>>(ESTIMATED_COST_KEY, {}));
 }

@@ -2,6 +2,7 @@ import { and, asc, eq, sql } from "drizzle-orm";
 import { chayKhongJit, getDb, schema } from "@/db";
 import { memo } from "@/lib/cache";
 import { computePlan, DEFAULT_PLANNING, PLANNING_KEY, paceOfPlanRow, type PlanInput, type PlanningAssumptions, type PlanOutput, type PlanStatus, type StockPace } from "@/lib/constants/planning";
+import { VARIANT_CURRENT_MARKETER_COST } from "@/lib/queries/current-marketer-cost";
 import { LAST_RECEIPT_COST, erpStockExpr, stockKnownExpr, stockShrinkageExpr, variantReceiptsSubquery, variantSalesSubquery } from "@/lib/queries/stock";
 import { ORDER_OUTCOME_FAST, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
 import { productDeliveryRates, type ProductDeliveryRates } from "@/lib/queries/delivery-rate";
@@ -220,7 +221,7 @@ export function buildPlanRowsQuery(db: Awaited<ReturnType<typeof getDb>>, a: Pla
       soldInWindow: sql<number>`coalesce(${dw.qty}, 0)`,
       peakDayQty: sql<number>`coalesce(${peak.peak}, 0)`,
       // Bậc cuối là NULL (CHƯA BIẾT), không phải 0: giá nhập mẫu mã 0 = chưa khai (mục 3.13, mục 42).
-      unitCostKnown: sql<number | null>`coalesce(${LAST_RECEIPT_COST}, nullif(${pv.lastImportedPrice}, 0))`,
+      unitCostKnown: sql<number | null>`coalesce(${VARIANT_CURRENT_MARKETER_COST}, ${LAST_RECEIPT_COST}, nullif(${pv.lastImportedPrice}, 0))`,
       retailPrice: pv.retailPrice,
     })
     .from(pv)

@@ -7,6 +7,7 @@ import { toDate } from "@/lib/format";
 import { getProductStockPlan, isPlanRowActive } from "@/lib/queries/planning";
 import { ORDER_LEFT_WAREHOUSE, ORDER_OUTCOME_FAST, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
 import { successRate } from "@/lib/queries/metrics";
+import { VARIANT_CURRENT_MARKETER_COST } from "@/lib/queries/current-marketer-cost";
 import { availableStockExpr, erpStockExpr, LAST_RECEIPT_COST, productOutcomeOrders, stockKnownExpr, stockShrinkageExpr, variantReceiptsSubquery, variantSalesSubquery } from "@/lib/queries/stock";
 import type { ListParams } from "@/lib/search-params";
 
@@ -186,7 +187,8 @@ export async function listProducts(params: ListParams, limit?: number) {
   const receipts = variantReceiptsSubquery(db);
   const soldQty = sql<number>`coalesce(${sold.qty}, 0)`;
   const erpStock = erpStockExpr(sales, receipts);
-  const unitCost = sql<number>`coalesce(${LAST_RECEIPT_COST}, ${pv.lastImportedPrice}, 0)`;
+  // Giá báo MKT hiện tại đứng đầu bậc thang (chủ shop chốt 13/10/2026 — lib/queries/current-marketer-cost.ts).
+  const unitCost = sql<number>`coalesce(${VARIANT_CURRENT_MARKETER_COST}, ${LAST_RECEIPT_COST}, ${pv.lastImportedPrice}, 0)`;
   const stockValue = sql<number>`greatest(${erpStock}, 0) * ${unitCost}`;
   const received = sql<number>`coalesce(${receipts.received}, 0)`;
   const receiptIn = sql<number>`coalesce(${receipts.receiptIn}, 0)`;
@@ -437,7 +439,8 @@ async function productSummaryUncached(params: ListParams) {
   const receipts = variantReceiptsSubquery(db);
   const erpStock = erpStockExpr(sales, receipts);
   const stockKnown = stockKnownExpr(receipts);
-  const unitCost = sql<number>`coalesce(${LAST_RECEIPT_COST}, ${pv.lastImportedPrice}, 0)`;
+  // Giá báo MKT hiện tại đứng đầu bậc thang (chủ shop chốt 13/10/2026 — lib/queries/current-marketer-cost.ts).
+  const unitCost = sql<number>`coalesce(${VARIANT_CURRENT_MARKETER_COST}, ${LAST_RECEIPT_COST}, ${pv.lastImportedPrice}, 0)`;
   // TẮT JIT: nối ĐÚNG ba bảng dẫn xuất (`sold30` mang ORDER_OUTCOME_FAST · `vsales` · `vreceipts`)
   // như câu danh sách của `listProducts` — họ câu đã đo 8.578 ms bật JIT ↔ 26 ms tắt (db/index.ts).
   const [row] = await chayKhongJit(db, (tx) => tx
