@@ -87,6 +87,8 @@ export type ThreadDiff = {
   erp: Record<TimelineSide, number>;
   matchedById: { CUSTOMER: number; PAGE: number };
   matchedByText: { CUSTOMER: number; PAGE: number };
+  /** Tin Pancake KHÔNG CÓ CHỮ khớp một dòng ERP cũng không có chữ (ảnh · nhãn dán) — verdict RIÊNG, không gộp vào khớp-theo-chữ. */
+  matchedByMedia: { CUSTOMER: number; PAGE: number };
   tooFresh: number;
   missing: PcMsg[];
   /** Dòng ERP trong cửa sổ không khớp tin Pancake nào (mã tạm `bot-out:` / `staff-out:` không tính — đó là bản ghi của ERP). */
@@ -100,11 +102,21 @@ export type ThreadDiff = {
 
 const ws = (s: string) => s.replace(/\s+/g, " ").trim();
 const ERP_OWN_PREFIX = /^(bot-out|staff-out):/;
+/**
+ * Chữ mà ERP DÁN cho một tin KHÔNG CÓ CHỮ, để người đọc hộp thư biết có gì đó đã được gửi: ảnh nhân viên gửi («[Ảnh]»,
+ * `STAFF_IMAGE_MARK`) và nhãn dán / ghi âm / video của khách (`MEDIA_ONLY_TEXT`). Chép chữ vào đây thay vì import để
+ * script ops chạy được bằng `node` trần; lệch chữ chỉ làm lượt khớp này bỏ sót, KHÔNG bao giờ khớp nhầm.
+ */
+const ERP_MEDIA_MARKS: readonly string[] = ["[Ảnh]", "[Khách gửi nhãn dán / ghi âm / video / tệp — mở trên kênh để xem]"];
+const khongCoChu = (s: string) => { const t = ws(s); return t === "" || ERP_MEDIA_MARKS.includes(t); };
+
 
 /**
  * So tin Pancake với dòng sổ ERP của CÙNG luồng. Cửa sổ so = từ tin Pancake cũ nhất đã đọc (trang tin đầu của Pancake chỉ chứa các tin
  * gần nhất) — dòng ERP cũ hơn nằm ngoài phép so. Khớp theo mã trước; tin phía page chưa khớp thì khớp theo chữ với dòng bot / nhân
- * viên / page trong 10 phút, mỗi dòng ERP dùng một lần. HÀM THUẦN.
+ * viên / page trong 10 phút, mỗi dòng ERP dùng một lần. Tin KHÔNG CÓ CHỮ (ảnh · nhãn dán) khớp với một dòng ERP cũng không
+ * có chữ trong cùng cửa sổ — đếm RIÊNG ở `matchedByMedia`, vì «khớp nhờ không ai có chữ» là một phán quyết khác hẳn
+ * «khớp vì chữ trùng». HÀM THUẦN.
  */
 export function diffThread(pc: readonly PcMsg[], erp: readonly ErpRow[], nowMs: number): ThreadDiff {
   const out: ThreadDiff = {
@@ -112,6 +124,7 @@ export function diffThread(pc: readonly PcMsg[], erp: readonly ErpRow[], nowMs: 
     erp: { CUSTOMER: 0, BOT: 0, STAFF: 0, PAGE: 0 },
     matchedById: { CUSTOMER: 0, PAGE: 0 },
     matchedByText: { CUSTOMER: 0, PAGE: 0 },
+    matchedByMedia: { CUSTOMER: 0, PAGE: 0 },
     tooFresh: 0,
     missing: [],
     extra: [],
@@ -156,6 +169,25 @@ export function diffThread(pc: readonly PcMsg[], erp: readonly ErpRow[], nowMs: 
       used.add(hit.messageId);
       out.matchedByText[m.side] += 1;
       continue;
+    }
+    /*
+      TIN KHÔNG CÓ CHỮ (ảnh · nhãn dán · ghi âm · video). Trước bản vá này nhánh khớp-theo-chữ bị BỎ QUA hoàn toàn khi `t`
+      rỗng (`t ? … : undefined`), nên một tin phía page chỉ-ảnh KHÔNG có đường khớp nào ngoài mã tin — và mã tin lệch là
+      chuyện thường: ảnh nhân viên gửi TỪ ERP nằm trong sổ dưới mã `staff-out:<id>:img` chứ không mang mã của Pancake.
+      Hệ quả: nó bị đếm là THIẾU dù nội dung VẪN Ở TRONG hộp thư. Một con số «thiếu» sai hướng này nguy hiểm hơn là thiếu
+      một con số: nó dẫn người đọc đi BACKFILL, tức nhân đôi tin trong hộp thư của khách thật.
+
+      Lượt khớp này CHỈ nối hai tin ĐỀU không có chữ, trong cùng cửa sổ thời gian, cùng phía — nên nó không bao giờ nuốt
+      một tin có chữ bị mất thật. Đếm vào ô RIÊNG (`matchedByMedia`): «khớp được nhờ không ai có chữ» là một phán quyết
+      khác hẳn «khớp được vì chữ trùng», và gộp hai thứ lại là làm mất khả năng đọc con số.
+    */
+    if (!t) {
+      const media = window.find((r) => !used.has(r.messageId) && wantSides.includes(r.side) && Math.abs(r.at - m.at) <= DIFF_TEXT_WINDOW_MS && khongCoChu(r.text));
+      if (media) {
+        used.add(media.messageId);
+        out.matchedByMedia[m.side] += 1;
+        continue;
+      }
     }
     if (nowMs - m.at < DIFF_TOO_FRESH_MS) {
       out.tooFresh += 1;
@@ -353,7 +385,7 @@ async function runConversation(db: Db, org: { code: string; name: string; isHome
       const erp = await erpThread(db, conv.pageId, conv.threadId);
       const d = diffThread(msgs, erp, nowMs);
       tomTat(`TIN (cửa sổ trang tin đầu của Pancake, từ ${vnTime(msgs.length ? Math.min(...msgs.map((m) => m.at)) : null)}): Pancake khách ${d.pancake.CUSTOMER} · page ${d.pancake.PAGE} | ERP khách ${d.erp.CUSTOMER} · bot ${d.erp.BOT} · nv ERP ${d.erp.STAFF} · page ${d.erp.PAGE}`);
-      tomTat(`KHỚP: theo mã khách ${d.matchedById.CUSTOMER} · page ${d.matchedById.PAGE} | theo chữ khách ${d.matchedByText.CUSTOMER} · page ${d.matchedByText.PAGE} | quá mới ${d.tooFresh}`);
+      tomTat(`KHỚP: theo mã khách ${d.matchedById.CUSTOMER} · page ${d.matchedById.PAGE} | theo chữ khách ${d.matchedByText.CUSTOMER} · page ${d.matchedByText.PAGE} | không-chữ khách ${d.matchedByMedia.CUSTOMER} · page ${d.matchedByMedia.PAGE} | quá mới ${d.tooFresh}`);
       const miss = (side: "CUSTOMER" | "PAGE") => d.missing.filter((m) => m.side === side);
       tomTat(`THIẾU (có ở Pancake, không có ở ERP): khách ${miss("CUSTOMER").length} [${miss("CUSTOMER").slice(-6).map((m) => vnTime(m.at)).join(", ")}] · page ${miss("PAGE").length} [${miss("PAGE").slice(-6).map((m) => vnTime(m.at)).join(", ")}]`);
       tomTat(`THỪA (ERP có, Pancake không): ${d.extra.length} — ${d.extra.slice(0, 6).map((r) => `${r.side} ${vnTime(r.at)}`).join(", ") || "không"}`);
