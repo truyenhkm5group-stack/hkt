@@ -2837,3 +2837,4 @@
 {"at":"2026-10-14T09:10:36.314Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"migration-rehearsal","detail":"fix/migration-rehearsal @ b49054445e37 · 2 lệnh kiểm thử"}
 {"at":"2026-10-14T09:11:09.106Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#814 @ b49054445e37 · ops chỉ đọc trên bản sao container tạm; gộp main chỉ đổi danh sách ops-vps"}
 {"at":"2026-10-14T09:46:12.193Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"migration-rehearsal","detail":"#814 @ b49054445e37 → 97393def4df3 (MERGE_ISOLATED · HIGH · gates success)"}
+{"at":"2026-10-14T10:10:31.465Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DEPLOY_DISPATCHED","detail":"97393def4df3 · run 38547666101 https://github.com/truyenhkm5group-stack/hkt/actions/runs/38547666101"}
