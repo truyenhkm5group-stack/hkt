@@ -1,0 +1,27 @@
+{
+  "schema": 1,
+  "mission_id": "inbox-message-sync",
+  "title": "P0: tin phía page (NV trên Pancake) đẩy hội thoại lên đầu hộp thư + phát realtime; kiểm INGEST trễ webhook→sổ p95 > 5 s",
+  "business_goal": "",
+  "status": "RUNNING",
+  "priority": "P0",
+  "risk": "MEDIUM",
+  "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "worker": null,
+  "worktree": null,
+  "branch": "fix/inbox-message-sync",
+  "base_sha": "4db2f64af069def9465e78f21ffe6b04556ec692",
+  "domains": [],
+  "owned_paths": [
+    "lib/sales-chatbot/inbox-states.ts",
+    "tests/inbox-message-sync.test.ts"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-14T04:30:41.742Z",
+  "updated_at": "2026-10-14T04:30:41.742Z",
+  "last_heartbeat": "2026-10-14T04:30:41.742Z",
+  "definition_of_done": []
+}
