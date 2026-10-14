@@ -1456,6 +1456,8 @@ async function chatTurnCore(
             state = { ...state, handoff: { reason: "Cần người xử lý — khách nhắn lại đúng tin đã được trả lời, AI không có câu trả lời mới", at: now.toISOString() } };
             if (isPublicChannel(opts.channel)) await notifySalesChatHandoff(conv.id, state.handoff!.reason, state.customer, now).catch(() => undefined);
           }
+          // Kênh không phải nhắn tin (web, khung thử) nhận câu chuyển người như mọi nhánh chuyển người khác; fanpage / Zalo ⇒ bot im.
+          if (!isMessagingChannel(opts.channel)) await reply(conv, seq++, cfg.handoff.message);
         } else {
           await reply(conv, seq++, fallback);
           lastError = lastError ?? (fallback === EMPTY_REPLY_TEXT ? "Lượt không có câu nào gửi khách — đã gửi câu dự phòng" : "Lượt không có câu nào gửi khách — đã hỏi đúng phần còn thiếu của đơn");

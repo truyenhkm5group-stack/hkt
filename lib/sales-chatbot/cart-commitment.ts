@@ -56,7 +56,7 @@ export type CartCommitment = { selectedItems: CommittedItem[]; turn: number | nu
 
 export type CartIntentKind = "ORDER" | "SET" | "ADD" | "REDUCE" | "KEEP" | "REMOVE" | "CANCEL" | "QUESTION" | "AMBIGUOUS";
 /** `ambiguous` = chữ quanh số lượng gọi tên NHIỀU sản phẩm của danh mục («1 hộp nem» khi có hai loại nem) — không được rơi về món sẵn có. */
-export type CartAmount = { value: number; unit: CartUnit; label: string; display: string; index: number; end: number; ambiguous?: boolean };
+export type CartAmount = { value: number; unit: CartUnit; label: string; display: string; index: number; end: number; ambiguous?: boolean; hint?: string };
 /** `tentative` = số lượng nói kèm câu hỏi giá («lấy 2kg bao nhiêu em») — chỉ THÊM món mới (không dính), không bao giờ sửa món đã có. */
 export type CartIntent = { kind: CartIntentKind; amounts: CartAmount[]; label: string | null; tentative?: boolean };
 
@@ -103,7 +103,7 @@ const productName = (name: string) => name.replace(/\s*\([^)]*\)\s*$/, "").trim(
  * Chữ khách gõ ⇒ tên món. Có DANH MỤC: chỉ nhận đoạn chữ nằm TRONG đúng một tên sản phẩm (dài nhất trước) và trả TÊN DANH MỤC có dấu;
  * không khớp / khớp nhiều ⇒ «» (không rõ món — không bao giờ đẻ món ảo). Không có danh mục ⇒ chữ khách (đã lọc STOP). HÀM THUẦN.
  */
-function resolveLabel(raw: { match: string; display: string }, catalog?: readonly string[]): { match: string; display: string; ambiguous?: boolean } {
+function resolveLabel(raw: { match: string; display: string }, catalog?: readonly string[]): { match: string; display: string; ambiguous?: boolean; hint?: string } {
   if (!catalog || !raw.match) return raw;
   const names = [...new Set(catalog.map(productName))];
   const tokens = raw.match.split(" ").filter(Boolean);
@@ -115,7 +115,7 @@ function resolveLabel(raw: { match: string; display: string }, catalog?: readonl
         return sub.every((w) => nt.includes(w));
       });
       if (hits.length === 1) return { match: foldVi(hits[0]), display: hits[0] };
-      if (hits.length > 1 && len === tokens.length) return { match: "", display: "", ambiguous: true };
+      if (hits.length > 1 && len === tokens.length) return { match: "", display: "", ambiguous: true, hint: raw.match };
     }
   }
   return { match: "", display: "" };
@@ -160,7 +160,7 @@ export function amountsIn(text: string, catalog?: readonly string[]): CartAmount
     let lb = resolveLabel(labelAround(text, idx, idx + len), catalog);
     // Chữ đơn vị tự nó là tên món của danh mục («thêm 1 combo nữa» khi shop có «Combo ăn vặt 3 món») ⇒ món đó.
     if (!lb.match && !lb.ambiguous && unitWord && catalog) lb = resolveLabel({ match: foldVi(unitWord), display: unitWord }, catalog);
-    out.push({ value, unit, label: lb.match, display: lb.display, index: idx, end: idx + len, ...(lb.ambiguous ? { ambiguous: true } : {}) });
+    out.push({ value, unit, label: lb.match, display: lb.display, index: idx, end: idx + len, ...(lb.ambiguous ? { ambiguous: true, hint: lb.hint } : {}) });
   };
   for (const m of text.matchAll(WEIGHT_RE)) {
     const n = numOf(m[1]);
@@ -396,8 +396,12 @@ export function applyCustomerCartMessage(cart: CartCommitment | undefined, text:
   // Tin NGAY SAU lời mời đúng MỘT món (P0 14/10/2026): số lượng không kèm tên («ừ cho chị 1 hộp») là số của món vừa được mời — không phải của
   // món sẵn có trong giỏ. Chỉ áp khi giỏ ĐÃ có món khách nói (lời mời THÊM món — trước đó số không tên vẫn đi đường cũ, vd «chả mực bao
   // nhiêu?» → «cho chị 2 gói») và chỉ cho câu đặt / thêm; câu sửa / bớt vẫn đi đường cũ.
+  // Đơn vị phải HỢP món được mời (FAIL-2 review vòng 2): «cho chị 2kg» khi món chính tính theo khối lượng vẫn là của món chính — chỉ số
+  // GÓI / HỘP / CÁI không tên mới về món được mời. Tên mơ hồ («2 hộp nem» khi có hai loại nem) mà khớp đúng món vừa mời ⇒ món đó.
   const inv = cart?.selectedItems.some((x) => x.customerExplicit) ? opts.invited : null;
-  const intent: CartIntent = inv && (parsed.kind === "ORDER" || parsed.kind === "ADD") && parsed.amounts.length === 1 && !parsed.amounts[0].label && !parsed.amounts[0].ambiguous ? { ...parsed, kind: "ADD", amounts: [{ ...parsed.amounts[0], label: inv.match, display: inv.display }] } : parsed;
+  const a0 = parsed.amounts.length === 1 ? parsed.amounts[0] : null;
+  const toInvited = Boolean(inv && a0 && (parsed.kind === "ORDER" || parsed.kind === "ADD") && ((!a0.label && !a0.ambiguous && a0.unit === "pack") || (a0.ambiguous && a0.hint && labelsMatch(a0.hint, inv.match))));
+  const intent: CartIntent = toInvited && inv && a0 ? { ...parsed, kind: "ADD", amounts: [{ ...a0, label: inv.match, display: inv.display, ambiguous: false }] } : parsed;
   const at = now.toISOString();
   const items = cart?.selectedItems ?? [];
   const relax = (clarify: string): CartCommitment | undefined => (cart ? { ...cart, clarify, relaxedTurn: turn, at } : cart);
@@ -554,6 +558,9 @@ export function mentionsProduct(name: string, customerSaid: string): boolean {
 const NOT_BUYING_RE = /(?:^| )(?:khong|ko|k|chua|dung|hong|hok|chang) (?:lay|mua|can|dat|an|thich)(?: |$)|(?:^| )(?:bao nhieu|bn|nhieu tien|may tien|het bao|bao gia|gia (?:bao|sao|nhieu|the nao|ca)|neu|thi sao)(?: |$)|(?:^| )(?:khong|ko|k|hong|hok)$/;
 /** «bỏ» / «hủy» / «khỏi» đọc trên chữ CÓ DẤU — bỏ dấu thì «bò» (tên món) cũng thành «bo». */
 const NOT_BUYING_RAW_RE = /(?:^|\s)(?:bỏ|hủy|huỷ|khỏi)(?:\s|$)/iu;
+/** Hoãn («để lần sau», «để chị xem đã», «sau nha») · hỏi tồn («hết rồi», «còn hàng») · câu hỏi không dấu «?» («ngon ko em», «hết rồi hả»). */
+const DEFER_OR_ASK_RE = /(?:^| )(?:de lan sau|lan sau|sau nha|sau nhe|de sau|xem da|tinh sau|de (?:chi|em|anh|minh|toi|c|a|e) (?:xem|tinh|nghi|hoi|ban)|het roi|het hang|con hang|con khong|con ko)(?: |$)|(?:^| )(?:ko|khong|k|hong|hem|chua|nhi|sao)(?: (?:em|e|shop|chi|c|a|vay|v))*$/;
+const ASK_TAIL_RAW_RE = /(?:^|\s)(?:hả|à|hở)(?:\s+(?:em|e|shop|chị|c|ạ|vậy|v))*\s*$/iu;
 
 /**
  * CHỮ MUA của khách (P0 14/10/2026, review): chỉ các mệnh đề là lời MUA — bỏ mệnh đề phủ định («không lấy nem tôm đâu em»), hỏi giá
@@ -565,7 +572,8 @@ export function buyingText(texts: readonly string[]): string {
   for (const t of texts) {
     for (const clause of t.split(/[\n,.;!]+|\s+(?:nhưng|nhung)\s+/i)) {
       if (!clause.trim() || clause.includes("?")) continue;
-      if (NOT_BUYING_RE.test(foldVi(clause)) || NOT_BUYING_RAW_RE.test(clause.toLowerCase())) continue;
+      const fc = foldVi(clause);
+      if (NOT_BUYING_RE.test(fc) || DEFER_OR_ASK_RE.test(fc) || NOT_BUYING_RAW_RE.test(clause.toLowerCase()) || ASK_TAIL_RAW_RE.test(clause.toLowerCase().trim())) continue;
       out.push(clause.trim());
     }
   }
