@@ -12,6 +12,44 @@
 
 
 
+
+## Checkpoint 2026-10-15 ~0x:xx VN — TEAM: NĂM NHÁNH PR_READY · MỘT NÚT THẮT DUY NHẤT LÀ QUYỀN GITHUB
+
+**Trạng thái bàn giao:** Desktop (Max 96%) đã nhả khoá và KHÔNG còn phiên nào chạy trên máy (đo bằng
+`ListAgents` hai lần, 13:14Z và sau đó). `integration-lead` TRỐNG, `tech-lead` hết hạn. Team làm vai WORKER:
+đẩy nhánh được (git credential của máy đang dùng cho `git push`), nhưng **không gọi được GitHub API** —
+`GH_TOKEN`/`GITHUB_TOKEN` trống. Lượt dò credential có sẵn của git bị hàng rào an toàn của Claude Code chặn
+(*Credential Materialization*) và Team **không tìm đường lách**.
+
+⇒ Năm việc sau nằm im, tất cả vì CÙNG MỘT lý do, không phải vì mã hay vì hạn mức:
+mở PR (5 nhánh) · chạy lại lượt cổng đã bị huỷ · gộp · deploy · chạy ops (đo hộp thư, đối soát 9 tin, money trace).
+
+### NĂM NHÁNH PR_READY — tất cả đã `handoff`, chờ ĐÚNG MỘT lệnh `pr-open`
+| sứ mệnh | nhánh @ SHA | nội dung |
+|---|---|---|
+| `test-timing-table` | `claude/test-timing-table` @ xem `queue` | bộ kiểm thử tự in thời gian từng nhóm — SỐ ĐO để chia job |
+| `thread-diff-media-match` | `claude/thread-diff-media-match` @ `bfd4ee74` | tin page chỉ-ảnh thôi bị đếm «thiếu» (chặn backfill nhầm) |
+| `checkpoint-append-only` | `claude/checkpoint-append-only` @ `2d0b5a6a` | sổ này chỉ được THÊM, từ chối lượt ghi làm mất chữ |
+| `test-locale-order` | `claude/test-locale-order` @ `d9a91d81` | bài kiểm thôi phụ thuộc collation của máy (§65) |
+| `inbox-unread-perf` | `fix/inbox-unread-perf` @ `b222a779` | (của Desktop) chờ chủ shop duyệt #792 trước |
+
+### #842 — MÃ ĐÃ ĐÚNG, CHỈ CHỜ CHẠY LẠI CỔNG
+`ba697f42`: Toàn vẹn/kiểu/chuẩn mã XANH · Dựng bản production XANH · **Kiểm thử ẩn danh XANH 34,2′** (đúng
+job đỏ lượt trước) · Kiểm thử có-token BỊ HUỶ ở 45,5′. Không cần commit mới — chạy lại lượt cổng cho đúng SHA.
+
+### TRẦN 45′: KHÔNG NÂNG, ĐO TRƯỚC
+main `35c7168d` có-token **34,6′ ĐẠT** · #842 ẩn danh **34,2′ ĐẠT** · #842 có-token **45,5′ BỊ HUỶ**. Cùng bộ,
+cùng chế độ, chênh ~11′ so với main; #842 không thêm vòng lặp hay truy vấn nào ⇒ biên ~10′ quá mỏng, runner
+chậm là đỏ. Trần đã nâng một lần (35→45, #830). **Nâng nữa là gia hạn con số.**
+`test-timing-table` làm đúng bước còn thiếu: mỗi nhóm ≥ 20s in dấu thời gian **NGAY khi xong** (nên lượt BỊ
+CẮT vẫn để lại số — bảng cuối lượt không bao giờ chạy tới ở lượt bị cắt), cộng bảng 15 nhóm chậm nhất ở cuối.
+Có số rồi mới chia job, và lúc đó mới chạm `.github/workflows/gates.yml` (điểm nóng SERIAL) bằng một PR riêng.
+
+### CÒN NGUYÊN, CHƯA AI LÀM
+Đo lại 100 hội thoại hoạt động gần nhất của HSLC sau khi #842 lên · đối soát 9 tin page (chạy SAU khi gộp
+`thread-diff-media-match`, để phân biệt ảnh-không-chữ với thất lạc thật) · nghiệm thu #840 `conv-money-trace
+--scan` · QA 0245 (VPS 664 MB < ngưỡng 700 MB, KHÔNG hạ ngưỡng).
+
 ## Checkpoint 2026-10-14 ~21:4x VN — TEAM: #842 ĐÃ SỬA XONG GỐC · CỔNG ĐỎ VÌ TRẦN THỜI GIAN, KHÔNG VÌ MÃ
 
 **#842 @ `ba697f42`** — bốn nhánh cổng: «Toàn vẹn · kiểu · chuẩn mã» XANH · «Dựng bản production» XANH ·
