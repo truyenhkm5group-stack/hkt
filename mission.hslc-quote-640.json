@@ -1,0 +1,33 @@
+{
+  "schema": 1,
+  "mission_id": "hslc-quote-640",
+  "title": "HSLC: bot không còn báo tổng sai (640k) — món mời chưa đồng ý không vào đơn, tổng chỉ là tổng của giỏ hiện tại",
+  "business_goal": "",
+  "status": "RUNNING",
+  "priority": "P2",
+  "risk": "HIGH",
+  "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "worker": null,
+  "worktree": null,
+  "branch": "fix/hslc-quote-640",
+  "base_sha": "0d457541187b8af864abf68d9177304151f9d456",
+  "domains": [],
+  "owned_paths": [
+    ".github/workflows/",
+    "lib/constants/",
+    "lib/sales-chatbot/",
+    "scripts/upsell-basis-scan.ts",
+    "tests/platform-isolation-static.test.ts",
+    "tests/sales-claim-guard.test.ts",
+    "tests/sales-quote-640.test.ts",
+    "tests/sync-fixtures.test.ts"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-14T06:14:52.332Z",
+  "updated_at": "2026-10-14T06:14:52.332Z",
+  "last_heartbeat": "2026-10-14T06:14:52.332Z",
+  "definition_of_done": []
+}
