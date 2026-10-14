@@ -13,6 +13,11 @@
 ## Checkpoint 2026-10-14 ~18:00 VN — BÀN GIAO DESKTOP(Max 96%) → TEAM · ĐỌC TRƯỚC
 **Khoá:** Desktop đã `lease release integration-lead` ngay sau mục này. Team `lease acquire integration-lead` rồi mới gộp/deploy. Desktop KHÔNG gộp/deploy/chạy ops ghi nữa. Claude Web chỉ đọc.
 
+**Kết quả 3 lượt đo chỉ đọc (Desktop, sau bàn giao, 14/10 ~18:10 VN):**
+- `pancake-thread-diff --hours=24`: tin khách thiếu 0/186 · tin page thiếu 9/460 (7 ở 16h) · KHOÁ XẾP TỤT 2/116 (trước #839: 6/109) · «Tất cả» 97/100 hội thoại mới hoạt động KHÔNG lên trang đầu (707 chưa đọc) ⇒ cần #842. Trễ webhook p50 5,1 s · p95 18 s (max vẫn dính tin lịch sử — số của script đo, kiểm INGEST trên app đã lọc).
+- `conv-money-trace --scan --days=1`: KHÔNG có tóm tắt (lượt hỏng hoặc sai tham số) — Team chạy lại `conv-money-trace "hslc-hmt-shop --scan --days=1"`.
+- `migration-rehearsal qa`: KHÔNG CHẠY — «RAM dùng được 664 MB < 700 MB» trên VPS. Chạy lại lúc VPS rảnh (sau deploy, ngoài giờ cao điểm); không hạ ngưỡng RAM.
+
 **A. Phân loại deploy «failure» (mọi lượt từ 4db2f64a tới 97393def — 8 lượt):** bước hỏng duy nhất = `release › SSH vào VPS và chạy bootstrap` vì `verify-migrations`: «tổ chức khách 7/8 khớp · hỏng: qa (TIMEOUT)» ⇒ DEGRADED_MIGRATION qa thiếu 0245 + 0246. Đã đọc log đầy đủ lượt 38530647572 (849fa00c): 7/8 tổ chức đủ 246 mục, smoke 135/135 · 0 lỗi ứng dụng, health ok, commit đúng. KHÔNG có lỗi SSH/CI/runtime ở lượt đó. **Team cần xác nhận cùng mẫu cho 7 lượt còn lại** (`joblog.py <run> release` / log job release, grep `[migrations]` + `[smoke]`) trước khi kết luận cho từng lượt. Lượt 38552538313 (35c7168d) do phiên khác dispatch 10:51Z — chưa xem.
 **Hệ quả:** `ai verify` coi deploy failure là INCIDENT ⇒ `close --status=DONE` bị chặn cho MỌI sứ mệnh chạm tệp chạy trên VPS (đã thử: conv-money-trace, pancake-thread-diff bị từ chối). Không nới cổng này.
 
