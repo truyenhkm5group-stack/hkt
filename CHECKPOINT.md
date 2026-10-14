@@ -10,6 +10,21 @@
 
 
 
+## Checkpoint 2026-10-14 ~17:00 VN (phiên Desktop · cầm khoá `integration-lead`) — ĐỌC TRƯỚC, ĐỪNG KIỂM LẠI
+**Phân vai (chủ shop 14/10: ba phiên KHÔNG cùng kiểm / deploy một việc):** Desktop cầm khoá + mọi gộp/deploy/ops ghi tới khi `lease release`. Claude Web và Claude Team: CHỈ ĐỌC việc dưới đây, không merge / dispatch deploy / chạy ops ghi; muốn nhận việc thì nhận mục «Còn mở» mà chưa ai cầm, ghi tên vào đây trước.
+
+**Quyết định chủ shop 14/10 (đã duyệt):**
+1. Gắn cờ 8 đơn nghi món mời chưa đồng ý — CHỈ cờ + bằng chứng, không sửa tiền / huỷ / tạo đơn / nhắn khách. **ĐÃ LÀM:** `upsell-basis-scan hslc-hmt-shop --days=7 --flag --apply` ⇒ gắn cờ 8 (#DB06BB04 #47B8682B #FB4DDA60 #C35E9C93 #507BAFD3 #4E7E9044 #E8F168D8 #0B878427, Σ 4.860.000 ₫); chạy lại: sẽ gắn 0 · đã có cờ 8 (idempotent). 126 đơn «không đủ căn cứ» KHÔNG gắn. #91F3641C (Châu Dương) không nằm trong 8 — thuộc nhóm không đủ căn cứ (đơn chốt qua luồng cũ), để nhân viên xem tay.
+2. «Tất cả» của Hộp thư xếp theo hoạt động mới nhất (khách · AI · nhân viên); thẻ Chưa đọc / Chờ trả lời / Cần người theo trạng thái xử lý thật. **PR #842** (`fix/inbox-all-recency`) đang gộp + deploy.
+3. Giá vốn đổi ⇒ tính lại báo cáo quản trị theo luật đã duyệt; KHÔNG tự điều chỉnh lương đã quyết toán; truy thu/truy lĩnh M+2 phải có bảng chênh lệch + chờ duyệt. Kiểm mã: #834 chỉ chuyển tiếp `costMode` cho màn hình; kỳ lương LOCKED/PAID đọc ảnh chụp ⇒ lương đã chốt không đổi. Bảng chênh lệch M+2 CHƯA có (không mở tính năng mới khi chưa được giao).
+
+**Production:** 849fa00c (#840) đã chạy; c1375644 (#839) đang deploy; #842 + #814 xếp sau (một lượt deploy). Smoke 849fa00c 135/135.
+**Migration:** 7/8 tổ chức đủ 246 mục (gồm hslc-hmt, hslc-hmt-shop, hslc-vgcnj). `qa` DEGRADED_MIGRATION thiếu 0245 + 0246, phục vụ lược đồ cũ, thử lại mỗi 6 giờ. «Deploy failure» hiện nay = verify-migrations của qa, KHÔNG phải lỗi ứng dụng — kiểm smoke + `/api/health.commit`. #814 `migration-rehearsal` (chỉ đọc, bản sao container tạm) gộp để đo gốc 0245 ở qa.
+
+**P0 HSLC — trạng thái:**
+- Chốt sai tiền 640k: **#840 ĐÃ DEPLOY** (849fa00c) sau 5 vòng review độc lập. Còn: nghiệm thu hành vi trên hội thoại MỚI (chạy `conv-money-trace "hslc-hmt-shop --scan --days=1"` khi đủ vài giờ lưu lượng sau 15:00 VN 14/10 — kỳ vọng 0 EMPTY_REPLY không có tin khách mới, 0 dòng không căn cứ). PR sau (đã ghi nhận, CHƯA làm): ngưỡng miễn ship trùng tổng sai; bội số món ngoài giỏ + «gửi shipper»; từ chối món mời bằng «nữa/hết» xoá giỏ (như #819).
+- Tin không về Inbox: #836 đo production — 0/218 tin khách thiếu (72 giờ); gốc = «Tất cả» đẩy 687 chưa đọc lên trước ⇒ 89/100 hội thoại mới hoạt động không lên trang đầu (→ #842). 14 tin phía page thiếu; khoá xếp tụt 6/109 (→ #839). Nghiệm thu sau deploy: chạy lại `pancake-thread-diff "hslc-hmt-shop --hours=24 --threads=120"`.
+
 ## Checkpoint 2026-10-14 ~11:30 VN (phiên Max/Desktop) — ĐỌC TRƯỚC, ĐỪNG KIỂM LẠI
 - **#834 Trung tâm giá vốn ĐÃ DEPLOY** 4db2f64a (run 38508440545): migration nhà 247 (0246 đã áp; 0246 chỉ thay CHECK `NOT VALID`, có trong sổ tương thích); smoke 135/135 đạt, `/inventory/cost-center` 524 ms. qa vẫn DEGRADED (thiếu 0245+0246, phục vụ lược đồ cũ — đúng thiết kế). CHƯA kiểm thao tác (sửa giá Q004, BCLN `?gv=kehoach`, đồng bộ lịch sử) bằng UI — cần người có phiên đăng nhập. **Chờ chủ shop:** quyết toán lương M+2 đọc giá báo hôm nay ⇒ truy thu/truy lĩnh phần % lợi nhuận toàn shop.
 - **P0 HSLC chốt sai tiền — GỐC ĐÃ XÁC NHẬN (conv-money-trace #837):** đơn #91F3641C (Châu Dương) CONFIRMED 640k = chả cá 1kg 280k + **Nem tôm bề bề hộp 10 × 3 = 360k — món upsell khách CHƯA đồng ý** do model đưa vào create_draft_order. «nói rõ hơn» = EMPTY_REPLY phát khi không có tin khách mới (24 hội thoại/3 ngày). Quick reply KHÔNG phải nguyên nhân (0/86 có số tiền). Sửa: nhánh `fix/hslc-quote-640` (worker đang làm: chặn dòng hàng không có căn cứ khách ở máy chủ, tự chốt không chốt nháp có dòng không căn cứ, EMPTY_REPLY không phát khi không có tin khách mới, script gắn cờ đơn sai — chạy có duyệt). Đơn #91F3641C: KHÔNG tự sửa.
