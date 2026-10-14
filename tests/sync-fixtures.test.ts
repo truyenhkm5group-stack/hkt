@@ -503,6 +503,7 @@ import { testInboxAvatarProfile } from "./inbox-avatar-profile.test";
 import { testPancakeAvatarShape } from "./pancake-avatar-shape.test";
 import { testAvatarProxyCheck } from "./avatar-proxy-check.test";
 import { testSenderProvenanceProbe } from "./sender-provenance-probe.test";
+import { testPancakeThreadDiff } from "./pancake-thread-diff.test";
 import { testInboxUnreadDryrun } from "./inbox-unread-dryrun.test";
 import { testOrgMigrateIsolation } from "./org-migrate-isolation.test";
 import { testMigrationServeCompat } from "./migration-serve-compat.test";
@@ -2945,6 +2946,8 @@ async function main() {
   testAvatarProxyCheck();
   // Ops sender-provenance-probe (11/10/2026): tin phía page mang dấu người gửi gì — đo rủi ro AI chen vào cuộc chat người trước deploy P0. Thuần + quét mã nguồn.
   testSenderProvenanceProbe();
+  // Ops pancake-thread-diff (P0 HSLC 14/10/2026): tin Pancake đối chiếu sổ tin ERP + hộp thư — khớp mã/chữ, quá mới, trễ webhook. Thuần + quét mã nguồn.
+  testPancakeThreadDiff();
   // Ops inbox-unread-dryrun (11/10/2026, điều kiện duyệt #792): chạy thử «chưa đọc» theo hàm #803 so với luật đang chạy + bấm giờ câu dẫn xuất — CHỈ ĐỌC. Thuần + quét mã nguồn + PGlite.
   await testInboxUnreadDryrun();
   // Migrate CSDL tổ chức cô lập (sự cố 0245 ở qa 12/10/2026): khoá theo tổ chức có trần chờ · lùi sau lỗi · trần mỗi tổ chức của verify-migrations · ops org-migrate-probe chỉ đọc. Thuần + PGlite + quét mã nguồn.
