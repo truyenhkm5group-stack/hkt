@@ -10,6 +10,12 @@
 
 
 
+## Checkpoint 2026-10-14 ~11:30 VN (phiên Max/Desktop) — ĐỌC TRƯỚC, ĐỪNG KIỂM LẠI
+- **#834 Trung tâm giá vốn ĐÃ DEPLOY** 4db2f64a (run 38508440545): migration nhà 247 (0246 đã áp; 0246 chỉ thay CHECK `NOT VALID`, có trong sổ tương thích); smoke 135/135 đạt, `/inventory/cost-center` 524 ms. qa vẫn DEGRADED (thiếu 0245+0246, phục vụ lược đồ cũ — đúng thiết kế). CHƯA kiểm thao tác (sửa giá Q004, BCLN `?gv=kehoach`, đồng bộ lịch sử) bằng UI — cần người có phiên đăng nhập. **Chờ chủ shop:** quyết toán lương M+2 đọc giá báo hôm nay ⇒ truy thu/truy lĩnh phần % lợi nhuận toàn shop.
+- **P0 HSLC chốt sai tiền — GỐC ĐÃ XÁC NHẬN (conv-money-trace #837):** đơn #91F3641C (Châu Dương) CONFIRMED 640k = chả cá 1kg 280k + **Nem tôm bề bề hộp 10 × 3 = 360k — món upsell khách CHƯA đồng ý** do model đưa vào create_draft_order. «nói rõ hơn» = EMPTY_REPLY phát khi không có tin khách mới (24 hội thoại/3 ngày). Quick reply KHÔNG phải nguyên nhân (0/86 có số tiền). Sửa: nhánh `fix/hslc-quote-640` (worker đang làm: chặn dòng hàng không có căn cứ khách ở máy chủ, tự chốt không chốt nháp có dòng không căn cứ, EMPTY_REPLY không phát khi không có tin khách mới, script gắn cờ đơn sai — chạy có duyệt). Đơn #91F3641C: KHÔNG tự sửa.
+- **P0 tin không về Inbox:** #836 `pancake-thread-diff` chờ gộp + chạy (`hslc-hmt-shop --conv=1b942a28-…` và `--hours=72 --threads=120`); bản sửa `fix/inbox-message-sync` đang chạy npm test.
+- Khoá `integration-lead`: phiên Desktop cầm (vòng gia hạn) — Team/Web chờ nhả hoặc hết hạn.
+
 ## Checkpoint 2026-10-14 ~00:20 VN — TEAM: #827 ĐÃ LÊN PRODUCTION · BA NHÁNH CHỜ MỞ PR
 
 **PRODUCTION `e557a910`** (#827 + #831 + #833), `ok: true`, `migrations 246`, `degradedMigration: true`.
