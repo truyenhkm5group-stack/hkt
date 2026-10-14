@@ -26,20 +26,19 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-14T09:05:23.030Z",
-  "updated_at": "2026-10-14T09:06:16.544Z",
-  "last_heartbeat": "2026-10-14T09:05:41.600Z",
+  "updated_at": "2026-10-14T10:32:48.705Z",
+  "last_heartbeat": "2026-10-14T10:32:48.705Z",
   "definition_of_done": [],
   "handoff": {
     "branch": "fix/inbox-all-recency",
-    "sha": "7df1aabe03598b1632638b98f7524d9f262f88e1",
-    "at": "2026-10-14T09:05:41.600Z",
+    "sha": "1e4f4edc4d8dce6038523ca482f62e5b7712f345",
+    "at": "2026-10-14T10:32:48.705Z",
     "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
     "title": "Hộp thư «Tất cả» xếp theo tin mới nhất (chủ shop duyệt 14/10)",
     "summary": "",
     "tests": [
-      "tsc: sạch phần thay đổi (lỗi qrcode có sẵn ở node_modules cục bộ)",
-      "eslint 5 tệp: sạch",
-      "inbox-v2-a / inbox-search / inbox-message-sync: chạy ở gates"
+      "eslint: sạch",
+      "inbox-semantics-v3: mô hình thứ tự cập nhật theo quyết định 14/10"
     ]
   }
 }
