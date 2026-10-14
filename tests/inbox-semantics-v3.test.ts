@@ -128,7 +128,8 @@ export async function testInboxSemanticsV3() {
 
       // ═══ 2. MỖI bộ lọc: số đếm · tập dòng · không trùng · thứ tự ═══
       const activityOf = (s: Spec) => Math.max(...[s.v.lastCustomerAt, s.v.lastBotAt, s.v.lastStaffAt, s.v.historyUntil].map((d) => (d instanceof Date ? d.getTime() : 0)), s.v.createdBy === HISTORY_CREATED_BY ? 0 : T0 - 5 * DAY);
-      const defaultOrder = (xs: Spec[]) => [...xs].sort((a, b) => Number(b.e.unread) - Number(a.e.unread) || activityOf(b) - activityOf(a) || (a.id < b.id ? 1 : -1)).map((s) => s.id);
+      // «Tất cả» (chủ shop 14/10/2026): THUẦN tin mới nhất; các thẻ khác: chưa đọc trước rồi tin mới nhất.
+      const defaultOrder = (xs: Spec[], filter: InboxFilter) => [...xs].sort((a, b) => (filter === "ALL" ? 0 : Number(b.e.unread) - Number(a.e.unread)) || activityOf(b) - activityOf(a) || (a.id < b.id ? 1 : -1)).map((s) => s.id);
       const waitOrder = (xs: Spec[]) => [...xs].sort((a, b) => (a.v.lastCustomerAt as Date).getTime() - (b.v.lastCustomerAt as Date).getTime() || (a.id < b.id ? -1 : 1)).map((s) => s.id);
       // Phân công trước khi đo: s02 · s11 về admin («Của tôi»), còn lại chưa ai nhận.
       await db.update(c).set({ assigneeUserId: admin.id }).where(inArray(c.id, ["s02", "s11"]));
@@ -152,7 +153,7 @@ export async function testInboxSemanticsV3() {
         const ids = r.rows.map((x) => x.id);
         const want = specs.filter((s) => keep(s) && pred[filter](s));
         assert.equal(new Set(ids).size, ids.length, `${label}: không trùng`);
-        assert.deepEqual(ids, filter === "UNANSWERED" ? waitOrder(want) : defaultOrder(want), `${label}: đúng tập + đúng thứ tự`);
+        assert.deepEqual(ids, filter === "UNANSWERED" ? waitOrder(want) : defaultOrder(want, filter), `${label}: đúng tập + đúng thứ tự`);
         assert.equal(r.total, ids.length, `${label}: số đếm = số dòng`);
         assert.equal(r.counts[filter], ids.length, `${label}: thẻ ${filter} đếm đúng`);
         return r;
