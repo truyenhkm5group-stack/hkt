@@ -20,6 +20,19 @@ export type NhipDo = { ms: number; dong: string };
 /** Mốc chia cột — một bài 5 phút và một bài 5 giây không được in cùng một kiểu. */
 const NGUONG_NOI_BAT_MS = 60_000;
 
+/**
+ * Ngưỡng IN NGAY. Bảng cuối lượt vô dụng đúng lúc cần nhất: lượt bị cắt ở trần (45,5′ của #842) KHÔNG BAO
+ * GIỜ chạy tới dòng in bảng, nên nó không để lại một con số nào — mà đó chính là lượt ta cần đọc. Nhóm nào
+ * vượt ngưỡng thì in dấu thời gian NGAY sau khi xong, nên log của một lượt bị cắt vẫn nói được thời gian đã
+ * đi đâu, tới tận nhóm cuối cùng kịp chạy.
+ */
+export const NGUONG_IN_NGAY_MS = 20_000;
+
+/** Dấu thời gian in NGAY sau một nhóm chậm; `null` = nhóm nhanh, không làm bẩn log. HÀM THUẦN. */
+export function dongInNgay(ms: number): string | null {
+  return ms >= NGUONG_IN_NGAY_MS ? `  ⏱ ${giay(ms)} ← nhóm vừa xong` : null;
+}
+
 /** Giây, một chữ số thập phân — đủ để xếp hạng, không giả vờ chính xác hơn đồng hồ của runner. */
 export function giay(ms: number): string {
   return `${(ms / 1000).toFixed(1)}s`;
@@ -67,5 +80,11 @@ export function testTestTiming() {
   // Không nhóm nào ⇒ không chia cho 0, không in phần trăm vô nghĩa.
   assert.deepEqual(bangThoiGian([], 5), ["THỜI GIAN: 0 nhóm · tổng 0.0s · 5 nhóm chậm nhất:"]);
 
-  console.log("  ✓ Bảng thời gian bộ kiểm thử: xếp theo thời gian · phần trăm · dấu nổi bật ≥ 60s · ổn định khi bằng nhau · bộ rỗng không chia cho 0");
+  /* IN NGAY: lượt bị cắt ở trần không chạy tới bảng cuối lượt, nên nhóm chậm phải để lại dấu ngay khi xong. */
+  assert.equal(dongInNgay(NGUONG_IN_NGAY_MS - 1), null, "nhóm nhanh không làm bẩn log");
+  assert.equal(dongInNgay(NGUONG_IN_NGAY_MS), "  ⏱ 20.0s ← nhóm vừa xong", "đúng ngưỡng là in — không để lọt ca biên");
+  assert.match(String(dongInNgay(125_000)), /125\.0s/);
+  assert.ok(NGUONG_IN_NGAY_MS < NGUONG_NOI_BAT_MS, "ngưỡng IN NGAY phải THẤP hơn ngưỡng nổi bật của bảng — lượt bị cắt cần nhiều dấu hơn, không ít hơn");
+
+  console.log("  ✓ Bảng thời gian bộ kiểm thử: xếp theo thời gian · phần trăm · dấu nổi bật ≥ 60s · ổn định khi bằng nhau · bộ rỗng không chia cho 0 · in NGAY khi nhóm ≥ 20s (lượt bị cắt vẫn để lại số)");
 }
