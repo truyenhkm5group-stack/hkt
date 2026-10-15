@@ -2895,3 +2895,4 @@
 {"at":"2026-10-15T05:27:30.542Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"address-ward-explicit","detail":"claude/address-ward-explicit @ 5e36bcba5e3f · 4 lệnh kiểm thử"}
 {"at":"2026-10-15T05:28:10.285Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"address-ward-explicit","detail":"#848 cho claude/address-ward-explicit @ 5e36bcba5e3f"}
 {"at":"2026-10-15T06:18:02.618Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"crm-note-dat-giai-doan","detail":"#846 @ d2079716bd63 → ed9a0ddc0414 (MERGE_NOW · MEDIUM · gates success)"}
+{"at":"2026-10-15T06:19:04.268Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DEPLOY_DISPATCHED","detail":"ed9a0ddc0414 · run 38691657742 https://github.com/truyenhkm5group-stack/hkt/actions/runs/38691657742"}
