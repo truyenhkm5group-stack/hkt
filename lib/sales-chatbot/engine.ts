@@ -923,8 +923,15 @@ async function chatTurnCore(
       // không ghi đè bằng bản chụp lúc lượt bắt đầu (mất nhật ký ⇒ job đọc lại hội thoại và có thể ghi trùng đơn).
       // `state.control` (Tiếp quản / AI gợi ý — conversation-control-shared.ts) thuộc NGƯỜI, cùng luật: nhân viên tiếp quản
       // trong lúc AI đang soạn thì lượt này không được xoá mất lựa chọn đó.
+      // `state.cart` (giỏ có thẩm quyền) — REVISION theo `cart.at` (review 15/10/2026, ca «Hoa Lê»): một lượt CŨ chạy chậm (webhook lặp, job
+      // trễ) không được đè giỏ mà một lượt MỚI HƠN đã ghi sau khi lượt này bắt đầu. Giỏ trong CSDL có mốc muộn hơn lúc lượt này bắt đầu ⇒
+      // giữ giỏ trong CSDL. Lượt này tự ghi giỏ luôn mang mốc = lúc bắt đầu lượt, nên không bao giờ tự chặn mình.
       const { state, ...rest } = patch;
-      const stateSql = state ? sql`${JSON.stringify({ ...state, orderSync: undefined, control: undefined })}::jsonb || jsonb_strip_nulls(jsonb_build_object('orderSync', ${cv.state}->'orderSync', 'control', ${cv.state}->'control'))` : undefined;
+      const ourCart = state ? ((state as ChatState).cart ?? null) : null;
+      const ourRev = state ? ((state as ChatState).cartRev ?? null) : null;
+      // Mốc của bản trong CSDL = muộn hơn trong mốc giỏ và `cartRev` (ghi cả khi giỏ bị xoá) — giỏ đã XOÁ bởi lượt mới hơn cũng không bị dựng lại.
+      const newerInDb = sql`greatest(coalesce(${cv.state}->'cart'->>'at', ''), coalesce(${cv.state}->>'cartRev', '')) > ${now.toISOString()}`;
+      const stateSql = state ? sql`${JSON.stringify({ ...state, orderSync: undefined, control: undefined, cart: undefined, cartRev: undefined })}::jsonb || jsonb_strip_nulls(jsonb_build_object('orderSync', ${cv.state}->'orderSync', 'control', ${cv.state}->'control', 'cart', CASE WHEN ${newerInDb} THEN ${cv.state}->'cart' ELSE ${JSON.stringify(ourCart)}::jsonb END, 'cartRev', CASE WHEN ${newerInDb} THEN ${cv.state}->'cartRev' ELSE ${JSON.stringify(ourRev)}::jsonb END))` : undefined;
       await db.update(cv).set({ ...rest, ...(stateSql ? { state: stateSql } : {}), updatedAt: new Date() }).where(eq(cv.id, conv.id));
     };
     // Đã chuyển nhân viên ⇒ bot IM LẶNG ở MỌI kênh công khai (chủ shop 05/10/2026 — trước đây web nhắn «Nhân viên của shop
@@ -987,7 +994,7 @@ async function chatTurnCore(
       const at = Date.parse(st0.confirmed.at);
       const within = Number.isFinite(at) && now.getTime() - at < POST_ORDER_HANDOFF_MS;
       if (!within) {
-        const fresh: ChatState = { ...st0, pastOrders: [...(st0.pastOrders ?? []), st0.confirmed], cycleStartTurns: conv.turns };
+        const fresh: ChatState = { ...st0, pastOrders: [...(st0.pastOrders ?? []), st0.confirmed], cycleStartTurns: conv.turns, cartRev: now.toISOString() };
         for (const k of ["confirmed", "draft", "stage", "upsellSent", "upsellUnavailable", "declined", "handoff", "cart"] as const) delete fresh[k];
         await bump({ state: fresh as Record<string, unknown> });
         conv.state = fresh as Record<string, unknown>;
@@ -1011,7 +1018,7 @@ async function chatTurnCore(
       cartNext = st0.cart ? { ...st0.cart, relaxedTurn: turnSeq } : undefined;
     }
     if (cartNext !== st0.cart) {
-      const st: ChatState = { ...st0, cart: cartNext };
+      const st: ChatState = { ...st0, cart: cartNext, cartRev: now.toISOString() };
       await bump({ state: st as Record<string, unknown> });
       conv.state = st as Record<string, unknown>;
       st0 = st;
