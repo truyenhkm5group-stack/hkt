@@ -1,0 +1,32 @@
+{
+  "schema": 1,
+  "mission_id": "ai-verify-actions",
+  "title": "Hậu kiểm production chạy trên GitHub Actions",
+  "business_goal": "verify --record chạy được từ runner Actions (có mạng tới production) để phiên Cloud không mạng vẫn đóng DONE đúng cổng",
+  "status": "PLANNING",
+  "priority": "P0",
+  "risk": "HIGH",
+  "owner": "vm:hkt",
+  "worker": null,
+  "worktree": null,
+  "branch": "claude/ai-verify-actions",
+  "base_sha": null,
+  "domains": [],
+  "owned_paths": [
+    ".github/workflows/ai-verify.yml",
+    "tests/ai-verify-workflow.test.ts",
+    "tests/sync-fixtures.test.ts"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-15T17:25:48.914Z",
+  "updated_at": "2026-10-15T17:25:48.914Z",
+  "last_heartbeat": "2026-10-15T17:25:48.914Z",
+  "definition_of_done": [],
+  "intake": {
+    "verdict": "MISSING",
+    "evidence": []
+  }
+}
