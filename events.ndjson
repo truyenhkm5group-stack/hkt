@@ -2883,3 +2883,4 @@
 {"at":"2026-10-15T02:40:02.014Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#847 @ 0056a5523294 · review độc lập PASS (chỉ đọc, --since)"}
 {"at":"2026-10-15T03:09:22.245Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"money-trace-since","detail":"#847 @ 0056a5523294 → 9f2e2c79f71a (MERGE_NOW · MEDIUM · gates success)"}
 {"at":"2026-10-15T03:10:29.482Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DEPLOY_DISPATCHED","detail":"9f2e2c79f71a · run 38674841836 https://github.com/truyenhkm5group-stack/hkt/actions/runs/38674841836"}
+{"at":"2026-10-15T03:31:31.249Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#845 @ d376c7e3cc1e · review độc lập vòng 4 PASS; npm test đầy đủ chờ worker"}
