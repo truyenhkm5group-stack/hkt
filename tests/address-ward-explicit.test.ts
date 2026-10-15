@@ -308,6 +308,11 @@ export async function testAddressWardExplicitTools() {
     const view = addressCheckOf({ address: line, province: "", ward: "" }, { customerTexts: [TUYET_MSG, said] }).view;
     assert.notEqual(view.ward, AN_HOI_TAY, `${said}: ${JSON.stringify(view)}`);
   }
+  // REVIEW LẦN 6 — tin mới hơn nhắc một quận cũ khác («Thủ Đức») ⇒ không mượn phường Bến Thành dù cùng số nhà + tên đường.
+  const thuDuc = addressCheckOf({ address: "100 Nguyễn Trãi, TP.HCM", province: "", ward: "" }, { customerTexts: ["100 Nguyễn Trãi, P Bến Thành, TP.HCM", "lần này giao nhà mẹ chị 100 Nguyễn Trãi Thủ Đức nha"] }).view;
+  assert.notEqual(thuDuc.ward, "Phường Bến Thành", JSON.stringify(thuDuc));
+  // ... còn tin mới nhắc ĐÚNG quận cũ của phường (Gò Vấp cho An Hội Tây) thì vẫn ghép.
+  assert.equal(addressCheckOf({ address: MODEL_LINE, province: "", ward: "" }, { customerTexts: [TUYET_MSG, "230/20 Phan Huy Ích Gò Vấp nhé em"] }).view.ward, AN_HOI_TAY);
   // Trí nhớ «đã hỏi phường» chỉ áp cho CÙNG nơi giao: đổi hẳn địa chỉ ⇒ bắt đầu lại; chép lại khác chữ ⇒ giữ.
   assert.equal(sameDeliveryPlace(MODEL_LINE, `${MODEL_LINE} gần chợ`), true);
   assert.equal(sameDeliveryPlace(MODEL_LINE, NEW_ADDR), false);

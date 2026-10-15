@@ -246,6 +246,13 @@ export function customerStatedAddresses(texts: readonly string[]): StatedAddress
     if (!canAutoFill(a) || !streetLooksReal(a) || !a.ward || !a.province) return;
     // Từ CHÍNH tin mang địa chỉ trở về sau, xét TỪNG DÒNG: một dòng nêu phường khác là lời sửa (dòng của chính địa chỉ ra cùng phường).
     if (msgs.slice(messageIndex).some((m) => m.split(/\n+/).some((x) => namesOtherWard(x, a.province!, a.ward!)))) return;
+    // Tin MỚI HƠN nhắc một quận / huyện CŨ mà phường này không có đất ở đó («… 100 Nguyễn Trãi Thủ Đức» sau «100 Nguyễn Trãi, P Bến
+    // Thành») ⇒ nơi giao khác (review PR #848 lần 6: `namesOtherWard` không nhận «Thủ Đức» là đơn vị hành chính).
+    const own = a.provinceCode === null ? [] : wardOldDistricts(a.ward, a.provinceCode);
+    if (a.provinceCode !== null && own.length && msgs.slice(messageIndex + 1).some((m) => m.split(/\n+/).some((x) => {
+      const ds = oldDistrictsIn(x, a.provinceCode!);
+      return ds.length > 0 && !ds.some((d) => own.includes(d));
+    }))) return;
     out.push({ ...a, messageIndex });
   };
   for (let i = msgs.length - 1; i >= 0; i--) {
