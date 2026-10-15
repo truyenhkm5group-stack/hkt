@@ -2872,3 +2872,4 @@
 {"at":"2026-10-15T02:14:22.196Z","actor":"DESKTOP-56TH98Y:wt-team","kind":"HANDOFF","mission":"cart-qty-guard-unit","detail":"claude/cart-qty-guard-unit @ eac5526788d6 · 6 lệnh kiểm thử"}
 {"at":"2026-10-15T02:24:59.609Z","actor":"DESKTOP-56TH98Y:wt-team","kind":"HANDOFF","mission":"cart-qty-guard-unit","detail":"claude/cart-qty-guard-unit @ 9655435be93a · 6 lệnh kiểm thử"}
 {"at":"2026-10-15T02:25:58.432Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"LEASE_ACQUIRED","detail":"integration-lead"}
+{"at":"2026-10-15T02:26:45.350Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"cart-qty-guard-unit","detail":"#845 cho claude/cart-qty-guard-unit @ 9655435be93a"}
