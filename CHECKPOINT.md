@@ -23,6 +23,26 @@
   ≈ vài giờ ⇒ nghi 0245 tính lại TOÀN BẢNG theo từng luồng, không phải một luồng to. Không phải tổ chức khách (HSLC không degraded). Việc kế: `migration-rehearsal qa` để đo cả lượt
   trên bản sao trước khi đề xuất sửa (KHÔNG sửa migration đã áp — viết migration mới / làm lười theo lô).
 
+
+## Checkpoint 2026-10-15 ~17:50Z — CLAUDE WEB: NGHIỆM THU P0 — VERIFY QUA ACTIONS (#853) · GỐC 0245 ĐÃ ĐO
+
+- **Deploy «failure» là THẬT với cổng verify:** 5 lượt deploy liên tiếp (882–886, 03:10Z→12:26Z 15/10) đều `failure` ở «có migration trong sổ chưa áp» = tổ chức THỬ `qa` thiếu 0245
+  (ứng dụng + smoke vẫn đạt, health ok). `verify` đòi lượt deploy của SHA `success` ⇒ **mọi sứ mệnh P0 sẽ KHÔNG ĐẠT verify cho tới khi qa áp được 0245** — đây là chặn thật, không vá cổng.
+- **#853 `claude/ai-verify-actions` (HIGH, `.github/workflows/ai-verify.yml`):** workflow_dispatch chạy `ai-tech verify --record` trên máy Actions (phiên Cloud bị proxy 403 tới production).
+  Chỉ main, không SSH/secret, chỉ lệnh verify, đỏ khi KHÔNG ĐẠT. Review độc lập đang chạy; cần 1 duyệt người.
+- **migration-rehearsal qa trên VPS: KHÔNG CHẠY** — «RAM dùng được 443 MB < 700 MB» (17:26Z). Ngưỡng giữ nguyên. Không xuất dump qa ra ngoài VPS (có tin nhắn thật).
+- **GỐC 0245 — đo trên DỮ LIỆU TỔNG HỢP cùng hình dạng qa** (Postgres 16 cục bộ, không chạm production, không dữ liệu khách): 1 page · 959 hội thoại · 13.241 PAGE_REPLY trong 7 ngày
+  (12.360 sender_kind NULL) · 2.450 tin khách ⇒ 1.524 dòng PAGE_REPLY NULL dài sau lượt khách cuối ở 695 luồng (qa thật: 1.610 / 841).
+  Câu UPDATE dẫn xuất 0245: **175 s** trên máy 4 nhân rảnh (VPS 2 GB đang chạy production chậm hơn nhiều ⇒ vượt trần 600 s). Thủ phạm: vế «tin mẫu chéo luồng» — mỗi dòng ứng viên
+  quét MỌI PAGE_REPLY cùng page trong 168 giờ bằng `btrim(regexp_replace(text…))`, không chỉ mục biểu thức, và CASE chứa vế ấy lặp HAI lần (=OTHER_APP, =UNKNOWN) ⇒ ~1.524×2×13k phép regexp.
+  **Chỉ mục ứng viên** `USING hash (btrim(regexp_replace(text,'[[:space:]]+',' ','g'))) WHERE note='PAGE_REPLY'`: dựng 0,2 s; UPDATE **175 s → 2,5 s**; kết quả 959/959 hội thoại GIỐNG HỆT (0 lệch).
+- **CẦN CHỦ SHOP (APPROVAL_REQUIRED — ngoại lệ AGENTS mục 4 «không index ngoài migration»):** hướng đề xuất (a) MỘT lượt ops tạo chỉ mục trên ở CSDL `qa` (CONCURRENTLY, chỉ qa) để 0245
+  tự áp ở lượt thử lại 6 giờ; (b) PR migration mới 0247 tạo cùng chỉ mục IF NOT EXISTS cho mọi tổ chức (trigger 0245 chạy vế này ở MỖI tin page — HSLC sẽ có lợi). Phương án khác: chủ shop
+  cho xoá / làm gọn dữ liệu thử của `qa`. Chưa có quyết định thì không làm.
+- **Messenger (khách có thấy dòng CRM không):** ERP chưa có quyền Meta Graph cho Page (`meta-messenger-access` BLOCKED) ⇒ chỉ kiểm được bằng NGƯỜI: một tài khoản Facebook thử nhắn page HSLC,
+  đổi giai đoạn khách trên Pancake, nhìn phía Messenger của khách. Không kết luận từ giao diện Pancake.
+- **KPI 24h:** đã hẹn lượt tự đo 16/10 12:45Z (send_later trig_01G8U77GmSdbJumTRfey3NZV): address-reask · conv-money-trace · cart-intent · upsell-basis · price-mismatch · sender-provenance · thread-diff.
+
 ## Checkpoint 2026-10-15 ~17:20Z — CLAUDE WEB (phiên mới) TIẾP QUẢN: P0 HSLC ĐÃ LÊN HẾT, CHỈ CÒN HẬU KIỂM
 
 - **Trạng thái thật (GitHub + ops `status` 17:13Z):** #842 · #845 · #846 · #848 đều đã gộp; production `commit 48651de28ba0` (chứa cả bốn) · ok=true · 247 migration.
