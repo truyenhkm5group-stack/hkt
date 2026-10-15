@@ -15,6 +15,18 @@
 
 
 
+
+## Checkpoint 2026-10-15 ~14:56Z — CLAUDE WEB: LÔ P0 XONG, MAIN XANH, KHOÁ GỘP ĐÃ NHẢ
+
+- Gộp thêm #851 (3d7d7ecd, công cụ checkpoint chỉ-thêm — dùng `node scripts/checkpoint-append.ts --file=…`) + #852 (8d1e12c3). Main 3d7d7ecd gates XANH.
+- Đóng DONE `--no-runtime`: test-timing-table (#849), test-locale-order (#852). thread-diff-media-match (#850) + checkpoint-append-only (#851)
+  chạm `scripts/` ⇒ công cụ đòi verify; ops lấy script từ main lúc chạy nên KHÔNG cần deploy — chờ phiên có mạng production `verify --record`.
+- **Đo SAU deploy #848 (từ 12:26Z, mẫu nhỏ):** address-reask-audit HSLC 46 hội thoại · gửi địa chỉ 14 · hỏi lại 0/14 · phường rõ vẫn hỏi 0/8
+  (nền 7 ngày: 14/395 · 1/231). conv-money-trace HSLC từ 07:30Z: 141 hội thoại · «nói rõ hơn» 0 · tổng ≠ giỏ 0. ĐO LẠI sau 24 giờ.
+- `integration-lead` ĐÃ NHẢ. `tech-lead` = vm:hkt (Web).
+- Tiếp theo theo ưu tiên: (1) đo lại 24 giờ hai số trên; (2) `sender-provenance-probe hslc-hmt-shop` — khách có nhận thật dòng CRM không;
+  (3) Hoa Lê ứng viên số 2 `cart-commitment.ts:675` cần chữ hội thoại thật (ops `conv-money-trace --conv`, kết quả MÃ HOÁ ⇒ cần khoá giải mã trên máy vận hành).
+
 ## Checkpoint 2026-10-15 ~12:40Z — CLAUDE WEB TIẾP QUẢN TECH LEAD + INTEGRATION LEAD (Desktop hết hạn mức)
 
 **Khoá:** `tech-lead` + `integration-lead` = `vm:hkt` (Claude Web). Integration-lead tiếp quản lúc 10:10Z sau khi khoá Desktop hết hạn
