@@ -13,6 +13,23 @@
 
 
 
+## P0 CRITICAL 15/10 — HSLC «Hoa Lê» (SĐT …0388): 1kg → 10kg, tổng 1.920.000 ₫, tin CRM lặp — GIAO TEAM (Desktop hết quota, KHÔNG cầm khoá)
+Lệnh đầy đủ của chủ shop: mục A–E (bảo vệ đơn · Cart Engine chung · CRM · E2E · delivery). Báo cáo: ROOT CAUSE / ORDER HOA LÊ / AFFECTED ORDERS / CART FIX / CRM FIX / PR / DEPLOY / E2E VERIFIED. KHÔNG DONE vì prompt/CI xanh: phải chứng minh 1kg chả cá + 10 cái nem = 400.000 ₫ theo cấu hình giá HSLC và CRM không gửi tin nội bộ ra Page.
+
+**Sự thật đã biết (đừng kiểm lại):** #840 (849fa00c, chặn món mời không căn cứ + hàng rào tổng) ĐÃ chạy từ 14/10 ⇒ ca này lọt QUA #840. Hàng rào tổng không bắt được vì 1.920.000 khớp đơn nháp (đơn nháp tự sai) — giống gốc 640k: lỗi ở GIỎ, không ở câu trả lời.
+
+**Giả thuyết số 1 (đo trước khi sửa):** «thêm 10 cái nem» — số 10 rơi về món tường minh duy nhất (chả cá) theo luật giỏ #819 (`cart-commitment.ts` nhánh số lượng không tên ⇒ món tường minh duy nhất, ~dòng 117/426), vì đơn vị «cái» không khớp đơn vị bán của nem (bán theo «hộp 10 cái») và/hoặc «nem» mơ hồ. #840 chỉ gán số không tên cho món MỜI ngay sau lời mời một món, theo đơn vị hộp/gói/cái — kiểm câu khách có nằm ngay sau lời mời không. Nem «1 hộp» = đúng (10 cái = 1 hộp); chả cá 10kg = sai.
+Bước đo: `conv-money-trace` cho hội thoại Hoa Lê (tìm theo SĐT …0388 / tên trong `--scan --days=1`), đọc `state.cart` từng lượt + câu khách.
+
+**Sửa (một PR, nối tiếp #840, không PR trùng):** số lượng chỉ gắn vào dòng có TÊN/đơn vị khớp; «N cái» của món bán theo hộp quy đổi theo quy cách (10 cái = 1 hộp) hoặc HỎI LẠI — tuyệt đối không rơi về món khác; dòng đã khách xác nhận chỉ đổi khi khách gọi tên nó; số lượng mới > 3× số khách nói ⇒ chặn + chuyển người. Mỗi dòng giữ product/variant, đơn vị, số lượng, giá, message_id căn cứ; cart revision chống job cũ ghi đè (đã có lease job? kiểm `sales_chat_conversations.state` ghi đè).
+
+**CRM:** câu «Đã đặt giai đoạn của khách hàng tiềm năng … Đủ tiêu chuẩn» là DÒNG PANCAKE TỰ CHÈN (xem `PANCAKE_AUTO_NOTE_RE` trong `lib/sales-chatbot/fanpage.ts`) — ERP không soạn câu này. Phải xác minh: (1) khách có NHẬN THẬT trên Messenger không (Pancake automation/kịch bản gửi tin khi đổi giai đoạn?) hay chỉ là ghi chú nội bộ hiện trong Pancake; (2) cái gì đổi giai đoạn LẶP LẠI — grep đường ERP gọi API Pancake đặt tag/giai đoạn khách (đồng bộ CRM/nhãn) chạy mỗi lượt; (3) regex hiện bắt «đặt giai đoạn», chủ shop chép «Đã ĐẠT giai đoạn» — nếu Pancake viết «đạt» thì dòng không được nhận là ghi chú tự động ⇒ bị coi là page trả lời. Sửa ở NGUỒN gửi/lặp, không bằng prompt.
+
+**Bảo vệ ngay:** tìm đơn Hoa Lê (ERP + Pancake), trạng thái tiền/vận chuyển. Có đơn sai ⇒ gắn cờ (`flagOrderForReviewAsAgent`, như upsell-basis-scan), không tự sửa/huỷ. Quét lịch sử: mở rộng `upsell-basis-scan` hoặc ops mới tìm đơn có số lượng món chính tăng sau lượt khách thêm món khác (dry-run, chủ shop duyệt --apply).
+
+**E2E bắt buộc:** 1kg + 10 cái nem = 400k · 1kg + 2 hộp nem · đổi riêng số lượng một món · từ chối upsell · nhiều đơn vị khác nhau · webhook trùng/job chậm · CRM đổi trạng thái liên tục · không đơn trùng.
+
+
 ## Checkpoint 2026-10-15 ~0x:xx VN — TEAM: NĂM NHÁNH PR_READY · MỘT NÚT THẮT DUY NHẤT LÀ QUYỀN GITHUB
 
 **Trạng thái bàn giao:** Desktop (Max 96%) đã nhả khoá và KHÔNG còn phiên nào chạy trên máy (đo bằng
