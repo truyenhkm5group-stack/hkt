@@ -5,14 +5,25 @@
   "business_goal": "",
   "status": "PR_READY",
   "priority": "P2",
-  "risk": "MEDIUM",
+  "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
   "worker": null,
   "worktree": null,
   "branch": "claude/address-ward-explicit",
   "base_sha": "9f2e2c79f71a014058e89858a33f94d11e14f1d4",
   "domains": [],
-  "owned_paths": [],
+  "owned_paths": [
+    ".github/workflows/",
+    "lib/address/",
+    "lib/sales-chatbot/",
+    "scripts/address-reask-audit.ts",
+    "tests/address-normalize.test.ts",
+    "tests/address-reask-audit.test.ts",
+    "tests/address-ward-explicit.test.ts",
+    "tests/platform-isolation-static.test.ts",
+    "tests/sales-agent-golden/",
+    "tests/sync-fixtures.test.ts"
+  ],
   "dependencies": [],
   "blocked_by": [],
   "related_prs": [
@@ -20,9 +31,13 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-15T03:51:07.585Z",
-  "updated_at": "2026-10-15T08:25:00.052Z",
-  "last_heartbeat": "2026-10-15T08:25:00.052Z",
+  "updated_at": "2026-10-15T08:55:27.886Z",
+  "last_heartbeat": "2026-10-15T08:55:27.886Z",
   "definition_of_done": [],
+  "needs_owner": {
+    "category": "UNKNOWN_HIGH_RISK_STATE",
+    "action": "khoá integration-lead vẫn được DESKTOP-56TH98Y:wt-tech-lead-v2 gia hạn đều (lần cuối 08:29Z) mà không có thao tác gộp/deploy nào từ 06:43Z — đóng hẳn Claude Desktop trên máy DESKTOP-56TH98Y để khoá tự hết hạn; Claude Web sẽ gộp #842 + #848 và deploy"
+  },
   "handoff": {
     "branch": "claude/address-ward-explicit",
     "sha": "01ad085152b4c4fda25dce6fdb3fb7dd31a10c85",
