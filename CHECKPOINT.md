@@ -13,6 +13,22 @@
 
 
 
+## P0 CHƯƠNG TRÌNH 15/10 — ĐỘ TIN CẬY HỘI THOẠI BÁN HÀNG (HSLC trước, rồi mọi tổ chức) — GIAO TEAM
+Lệnh đầy đủ của chủ shop: mục A–G. Báo cáo cuối: ROOT CAUSE | AFFECTED CONVERSATIONS | REPEATED QUESTIONS | WRONG ORDERS | GUARDRAILS | PR | DEPLOY | PRODUCTION VERIFIED. KHÔNG vá bằng câu dặn prompt; sửa state machine · dữ liệu · công cụ · cổng gửi. Canary HSLC trước toàn SaaS.
+
+**Sự thật đã có (đừng audit lại từ đầu):**
+- Hai đường AI: `chatbot/` = bot NHÀ (VNX, Node riêng) · `lib/sales-chatbot/` = bot của TỔ CHỨC (HSLC và mọi khách SaaS). Phạm vi chương trình này là `lib/sales-chatbot/`; `chatbot/` chỉ kiểm có gửi vào page HSLC không (không được).
+- Đã có thẩm quyền: giỏ = `cart-commitment.ts` (#819) + căn cứ dòng hàng `lineBasisViolation` (#840); tổng = báo giá máy chủ + hàng rào `claim-guard.ts` (#807/#840); chưa đọc/đã xử lý = response-ownership (#803, 0245); sau bán = #821; ops đo: `conv-money-trace`, `upsell-basis-scan`, `pancake-thread-diff`, `sender-provenance-probe`. Bộ hồi quy: hội thoại vàng 22 + đơn vàng 33×2 (`tests/`). Mở rộng các thứ này, KHÔNG dựng engine thứ hai.
+- Ca đã truy gốc: Châu Dương (640k = món mời chưa đồng ý → #840) · Viet Nguyen Thi («nói rõ hơn» = EMPTY_REPLY không có tin khách mới → #840). Ca mở: Hoa Lê (mục ngay trên), Lê Văn Dụ (địa chỉ), Thanh Vo (chưa có trace).
+
+**Thứ tự PR (nhỏ, mỗi PR có test + đo production trước/sau):**
+1. **Cổng gửi + bảo vệ đơn (hotfix trước):** một Outbound Policy Gate ở máy chủ (mọi đường gửi đi qua `guardOutgoing`): chặn chữ CRM/ghi chú/tool output; một tin khách ⇒ tối đa MỘT lượt trả lời (khoá theo message_id khách); không trả lời tin vọng của chính bot; không fallback khi không có tin khách mới hợp lệ; trần số tin liên tiếp. Kèm Hoa Lê (1kg→10kg) + cart revision chống job cũ ghi đè. Đo: `conv-money-trace --scan`.
+2. **Bộ nhớ có cấu trúc «đã biết»:** SĐT · địa chỉ gốc + chuẩn hoá · giỏ · giá đã báo · câu đã hỏi/đã trả lời ⇒ máy chủ chặn câu hỏi lại thông tin đã biết hợp lệ (kiểm ở cổng gửi, không ở prompt). Đủ thông tin ⇒ lên đơn, không hỏi «có chốt không»; thiếu đúng một ⇒ chỉ hỏi cái đó.
+3. **Địa chỉ (Lê Văn Dụ — Xa La / Phúc La cũ, Hà Đông):** một Address Resolution: giữ nguyên chữ khách → ánh xạ cũ/mới từ dữ liệu có nguồn → một đáp án chắc ⇒ dùng, không hỏi; nhiều đáp án và ĐVVC bắt buộc ⇒ hỏi MỘT câu đúng phần thiếu, lưu, không hỏi lại; chưa chuẩn hoá được mà đủ cho nhân viên ⇒ chuyển xác minh nội bộ. Không đoán phường.
+4. **Bộ hồi quy hội thoại vàng mở rộng + chỉ số:** từ hội thoại thật đã che PII, chạy giả lập không gửi/không tạo đơn; đo tỷ lệ hỏi lại, sai ý định, sai giá/số lượng, đơn trùng, trả lời không có sự kiện, số câu hỏi từ chọn hàng → tạo đơn, tỷ lệ chuyển người.
+
+**Đang mở cần xử lý cùng:** #842 (Tất cả theo tin mới nhất — gates đỏ, xem bảng D) · qa 0245 (rehearsal thiếu RAM) · cổng verify chặn close (xem A/C).
+
 ## P0 CRITICAL 15/10 — HSLC «Hoa Lê» (SĐT …0388): 1kg → 10kg, tổng 1.920.000 ₫, tin CRM lặp — GIAO TEAM (Desktop hết quota, KHÔNG cầm khoá)
 Lệnh đầy đủ của chủ shop: mục A–E (bảo vệ đơn · Cart Engine chung · CRM · E2E · delivery). Báo cáo: ROOT CAUSE / ORDER HOA LÊ / AFFECTED ORDERS / CART FIX / CRM FIX / PR / DEPLOY / E2E VERIFIED. KHÔNG DONE vì prompt/CI xanh: phải chứng minh 1kg chả cá + 10 cái nem = 400.000 ₫ theo cấu hình giá HSLC và CRM không gửi tin nội bộ ra Page.
 
