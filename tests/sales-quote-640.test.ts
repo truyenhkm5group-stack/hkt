@@ -514,7 +514,6 @@ function testHoaLe() {
     ["H5", [hlBase, hlD, hlInv, "thêm 10 cái nem"], HL_CAT2, hlNem],
     ["H6", [hlBase, hlD, hlInv, "lấy thêm 10 cái nhé"], HL_CAT1, hlNem],
     ["H9", ["cho chị 1kg chả cá thu với 10 cái nem hải sản"], HL_CAT2, hlNem],
-    ["H10", [hlBase, hlD, hlInvT, "thêm 10 cái nem hải sản"], HL_CAT3, hlNemT],
   ];
   for (const [k, steps, cat, nemOf] of named) {
     const r = hoaLe(steps, [[hlCct(1), nemOf(1)], [hlCct(10), nemOf(1)], [hlCct(11), nemOf(1)], [hlCct(1), nemOf(10)]], cat);
@@ -582,8 +581,19 @@ function testHoaLe() {
   assert.ok(cat3.relaxed, "CAT3: «nem hải sản» không có trong danh mục ⇒ hỏi lại");
   assert.equal(cat3.cart?.selectedItems.find((x) => /cha ca/.test(x.match))?.quantity, 1000, "CAT3: chả cá vẫn 1kg, không thành 2kg");
   assert.deepEqual(cat3.verdicts.map((v) => v === null), [false, true]);
-  // Tên ngoài danh mục nhưng cùng danh từ món với món VỪA MỜI ⇒ là món được mời (H10).
-  assert.equal(hoaLe([hlBase, hlD, hlInvT, "thêm 10 cái nem hải sản"], [[hlCct(1), hlNemT(1)]], HL_CAT3).verdicts[0], null);
+  // Tên ngoài danh mục ⇒ LUÔN hỏi lại, kể cả cùng danh từ món với món VỪA MỜI (review c0b7eb96): không ghi món được mời thành lựa chọn khách.
+  const h10 = hoaLe([hlBase, hlD, hlInvT, "thêm 10 cái nem hải sản"], [[hlCct(1), hlNemT(1)], [hlCct(1)]], HL_CAT3);
+  assert.ok(h10.relaxed && !h10.cart?.selectedItems.some((x) => /nem/.test(x.match)), "H10: «nem hải sản» (không bán) sau lời mời Nem tôm ⇒ hỏi lại, không ghi Nem tôm");
+  assert.deepEqual(h10.verdicts.map((v) => v === null), [false, true]);
+  for (const [k, steps, cat, asked] of [
+    ["nem rán", [hlBase, hlD, hlInvT, "thêm 2 hộp nem rán"], HL_CAT3, [hlCct(1), hlNemT(2)]],
+    ["nem chua", [hlBase, hlD, hlInvT, "cho chị 2 hộp nem chua"], HL_CAT1, [hlCct(1), hlNem(2)]],
+    ["chả lụa", ["cho chị 2 hộp nem hải sản", { draft: [hlNem(2)] }, { bot: "Dạ shop còn Chả mực giã tay 1kg, mình lấy thêm không ạ?" }, "thêm 1kg chả lụa"], HL_CAT1, [hlNem(2), hlMuc(2)]],
+  ] as [string, HlStep[], string[], AskedLine[]][]) {
+    const r = hoaLe(steps, [asked], cat);
+    assert.ok(r.relaxed, `${k}: món không bán ⇒ hỏi lại`);
+    assert.ok(r.verdicts[0] !== null, `${k}: món được mời KHÔNG được ghi thành lựa chọn của khách`);
+  }
   // P1: quy cách «(Hộp)» không ghi số cái ⇒ CHƯA BIẾT (không mặc định 1): «10 cái» ⇒ hỏi lại, không đơn nào có nem qua.
   assert.equal(piecesOf("Nem hải sản tôm bề bề (Hộp)"), null);
   assert.equal(piecesOf("Combo ăn vặt (Set)"), null);
@@ -594,6 +604,10 @@ function testHoaLe() {
   const addCap = hoaLe(["cho chị 1kg chả cá thu, 2 hộp nem hải sản, 1 hũ ruốc", { draft: [hlCct(), hlNem(2), hlRuoc()] }, "thêm 2 hũ nữa"], [[hlCct(1), hlNem(2), hlRuoc(3)], [hlCct(3), hlNem(2), hlRuoc(1)], [hlCct(1), hlNem(2), hlRuoc(4)]]);
   assert.ok(addCap.relaxed);
   assert.deepEqual(addCap.verdicts.map((v) => v === null), [true, false, false], "«thêm 2 hũ»: ruốc 1 + 2 = 3 qua; 4 hoặc chả cá 3kg bị chặn");
+  // «thêm 2 hộp nữa» không tên: MỘT phần tăng 2 cho cả nhóm cùng đơn vị — nem +2 HOẶC ruốc +2, không phải cả hai.
+  const total = hoaLe(["cho chị 2 hộp nem hải sản, 1 hũ ruốc", { draft: [hlNem(2), hlRuoc()] }, "thêm 2 hộp nữa"], [[hlNem(4), hlRuoc(3)], [hlNem(4), hlRuoc(1)], [hlNem(3), hlRuoc(2)], [hlNem(2), hlRuoc(3)]]);
+  assert.ok(total.relaxed);
+  assert.deepEqual(total.verdicts.map((v) => v === null), [false, true, true, true], "trần là TỔNG phần tăng của nhóm cùng đơn vị");
   // Số cái theo quy cách mẫu mã.
   assert.equal(piecesOf("Nem hải sản tôm bề bề (Hộp 10 cái)"), 10);
   assert.equal(piecesOf("Áo thun (M)"), 1, "món bán theo cái: 1 cái = 1 đơn vị");

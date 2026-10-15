@@ -95,10 +95,12 @@ const STOP = new Set(
     "chot len don order de ok oke okie vang u uh roi khong ko k hok hong hem khoi phai chu ma cua loai dt sdt so dien thoai dia gium giup dum luon di hang nay kia do nao " +
     "the vay duoc dc can cai tong hay hoac moi ngon an truoc trc chiu bao nhieu bn gia sao dung tien het may tui goi hop set phan bich khay combo suat hu lo chiec cay " +
     "kg ky ki can gram gr g x da uhm oki shop xuong tru ha mai mot ve du qua lam it lan gio hom ngay toi sang chieu trua dem tuan thang tet mon huy gi vao ra " +
-    "nhen nghen nghe ne nhi hen nhaa ak day dau giu"
+    "nhen nghen nghe ne nhi hen nhaa ak day dau giu vs cung"
   ).split(" "),
 );
 const CUT_RE = /[\n,/;:+!?()[\]|.&]|\d/;
+/** Từ chỉ CỠ / MÀU / loại — đứng sau danh từ món vẫn là cùng món («đầm size M», «áo đen»), không phải một món khác. */
+const ATTR_WORDS = new Set("size sz co mau loai s m l xl xxl xxxl den trang do xanh vang hong tim nau xam be kem ghi bac nho to lon vua".split(" "));
 
 function labelTokens(s: string): string[] {
   return foldVi(s).split(" ").filter(Boolean);
@@ -122,7 +124,14 @@ function resolveLabel(raw: { match: string; display: string }, catalog?: readonl
         const nt = labelTokens(n);
         return sub.every((w) => nt.includes(w));
       });
-      if (hits.length === 1) return { match: foldVi(hits[0]), display: hits[0] };
+      if (hits.length === 1) {
+        // Từ ngay sau DANH TỪ MÓN mà tên danh mục không có (và không phải cỡ / màu) ⇒ khách gọi một món KHÁC cùng danh từ («nem chua» khi shop
+        // chỉ có «Nem hải sản tôm bề bề», «nem rán») — không phải món này (review c0b7eb96). Trả «không khớp» ⇒ tên ngoài danh mục ⇒ hỏi lại.
+        const nt = labelTokens(hits[0]);
+        const second = tokens[1];
+        if (s === 0 && second && !nt.includes(second) && !/\d/.test(second) && !ATTR_WORDS.has(second)) return { match: "", display: "" };
+        return { match: foldVi(hits[0]), display: hits[0] };
+      }
       if (hits.length > 1 && len === tokens.length) return { match: "", display: "", ambiguous: true, hint: raw.match };
     }
   }
@@ -465,13 +474,6 @@ function saidOf(text: string, catalog: readonly string[] | undefined, add: boole
   return amountsIn(text, catalog).map((x) => ({ value: x.value, unit: x.unit, ...(x.pieces ? { pieces: true } : {}), ...(add ? { add: true } : {}) }));
 }
 
-/** Hai tên cùng DANH TỪ MÓN (từ đầu): «nem hải sản» · «Nem tôm bề bề». HÀM THUẦN. */
-function sameHead(raw: string | undefined, name: string | undefined): boolean {
-  const a = raw ? labelTokens(raw)[0] : undefined;
-  const b = name ? labelTokens(productName(name))[0] : undefined;
-  return Boolean(a && b && a === b);
-}
-
 type ApplyOpts = { catalog?: readonly string[]; invited?: InvitedProduct | null; products?: readonly string[] };
 
 /**
@@ -480,9 +482,10 @@ type ApplyOpts = { catalog?: readonly string[]; invited?: InvitedProduct | null;
  * công cụ ghép với bất kỳ sản phẩm nào) và HỎI LẠI khách món nào. HÀM THUẦN.
  */
 export function applyCustomerCartMessage(cart: CartCommitment | undefined, text: string, turn: number | null, now: Date, opts: ApplyOpts = {}): CartCommitment | undefined {
-  const inv = cart?.selectedItems.some((x) => x.customerExplicit) ? opts.invited : null;
-  // Tên không có trong danh mục nhưng cùng DANH TỪ MÓN với món vừa được mời («nem hải sản» sau lời mời «Nem tôm bề bề») ⇒ là món được mời.
-  const unbound = opts.catalog ? amountsIn(text, opts.catalog).filter((a) => a.unbound && !sameHead(a.raw, inv?.display)) : [];
+  // Tên ngoài danh mục LUÔN là hỏi lại — kể cả khi cùng danh từ món với món vừa mời («nem rán» sau lời mời «Nem tôm bề bề» là món shop KHÔNG
+  // bán, không phải lời nhận lời mời — review c0b7eb96). Xác nhận «mình lấy Nem tôm bề bề đúng không ạ?» là việc của model, máy chủ chỉ
+  // không ghi nó thành lựa chọn của khách.
+  const unbound = opts.catalog ? amountsIn(text, opts.catalog).filter((a) => a.unbound) : [];
   const out = applyCart(cart, text, turn, now, opts, unbound.length > 0);
   if (!unbound.length) return out;
   const base = out ?? cart;
@@ -493,8 +496,7 @@ export function applyCustomerCartMessage(cart: CartCommitment | undefined, text:
 
 function applyCart(cart: CartCommitment | undefined, text: string, turn: number | null, now: Date, opts: ApplyOpts, dropUnbound: boolean): CartCommitment | undefined {
   const parsed0 = classifyCartMessage(text, opts.catalog);
-  const invDisplay = cart?.selectedItems.some((x) => x.customerExplicit) ? opts.invited?.display : undefined;
-  const parsed: CartIntent = dropUnbound ? { ...parsed0, amounts: parsed0.amounts.filter((a) => !a.unbound || sameHead(a.raw, invDisplay)) } : parsed0;
+  const parsed: CartIntent = dropUnbound ? { ...parsed0, amounts: parsed0.amounts.filter((a) => !a.unbound) } : parsed0;
   // Tin NGAY SAU lời mời đúng MỘT món (P0 14/10/2026): số lượng không kèm tên («ừ cho chị 1 hộp») là số của món vừa được mời — không phải của
   // món sẵn có trong giỏ. Chỉ áp khi giỏ ĐÃ có món khách nói (lời mời THÊM món — trước đó số không tên vẫn đi đường cũ, vd «chả mực bao
   // nhiêu?» → «cho chị 2 gói») và chỉ cho câu đặt / thêm; câu sửa / bớt vẫn đi đường cũ.
@@ -508,7 +510,7 @@ function applyCart(cart: CartCommitment | undefined, text: string, turn: number 
   const invUnit: CartUnit = inv?.unit ?? "pack";
   const mainUnits = new Set((cart?.selectedItems ?? []).filter((x) => x.customerExplicit).map((x) => x.unit));
   const bothFit = unnamedA0 && a0!.unit === invUnit && mainUnits.has(a0!.unit);
-  const toInvited = Boolean(inv && a0 && !bothFit && ((unnamedA0 && a0.unit === invUnit) || ((parsed.kind === "ORDER" || parsed.kind === "ADD") && ((a0.ambiguous && a0.hint && labelsMatch(a0.hint, inv.match)) || (a0.unbound && sameHead(a0.raw, inv.display))))));
+  const toInvited = Boolean(inv && a0 && !bothFit && ((unnamedA0 && a0.unit === invUnit) || ((parsed.kind === "ORDER" || parsed.kind === "ADD") && a0.ambiguous && a0.hint && labelsMatch(a0.hint, inv.match))));
   const intent: CartIntent = toInvited && inv && a0 ? { ...parsed, kind: "ADD", amounts: [{ ...a0, label: inv.match, display: inv.display, ambiguous: false }] } : parsed;
   const at = now.toISOString();
   const items = cart?.selectedItems ?? [];
@@ -808,6 +810,9 @@ export function lineBasisViolation(cart: CartCommitment | undefined, asked: read
   const coTheLaSoKhongTen = (it: CommittedItem): boolean =>
     soKhongTen.some((u) => donViHopNhau(u, it) && coTenRo.filter((x) => donViHopNhau(u, x)).length === 1);
   const explicitCoMa = cart.selectedItems.filter((x) => x.customerExplicit).map((x) => ({ it: x, pid: productFor(x, cart, asked) }));
+  const relaxedNow = turn !== undefined && turn !== null && cart.relaxedTurn === turn;
+  /** Phần tăng «thêm N» còn lại theo nhóm đơn vị của lượt nới — dùng chung cho mọi món cùng đơn vị. */
+  const addBudget = new Map<string, number>();
   for (const item of cart.selectedItems) {
     if (!item.customerExplicit) continue;
     const pid = productFor(item, cart, asked);
@@ -826,9 +831,19 @@ export function lineBasisViolation(cart: CartCommitment | undefined, asked: read
     if (item.pieces && asked.some((l) => l.productId === pid && piecesOf(l.name) === null)) {
       return `«${item.label || productName(asked.find((l) => l.productId === pid)?.name ?? "")}»: khách nói ${amountText(item.quantity, item.unit, true)} mà quy cách mẫu mã không ghi số cái mỗi hộp / gói — chưa quy được ra số hộp. HỎI LẠI khách lấy mấy hộp, chưa lên đơn món này.`;
     }
-    // Lượt «nới»: trần tăng = số lớn nhất khách nói CÙNG đơn vị trong tin đó (không nói số ⇒ không được tăng).
-    const relaxedCap = turn !== undefined && turn !== null && cart.relaxedTurn === turn ? Math.max(0, ...(cart.relaxedSaid ?? []).filter((x) => x.unit === item.unit && Boolean(x.pieces) === Boolean(item.pieces)).map((x) => (x.add ? item.quantity + x.value : x.value))) : 0;
-    if (proposed === null || proposed <= Math.max(item.quantity, relaxedCap)) continue;
+    if (proposed === null || proposed <= item.quantity) continue;
+    // Lượt «nới»: số khách nói trong tin là TRẦN. Số tuyệt đối («lấy 2kg») ⇒ món đó tới đúng số ấy; «thêm N» ⇒ MỘT phần tăng N cho CẢ nhóm
+    // món cùng đơn vị (review c0b7eb96: «thêm 2 hộp nữa» không được thành nem +2 VÀ ruốc +2). Không nói số ⇒ không được tăng.
+    if (relaxedNow) {
+      const key = `${item.unit}:${item.pieces ? 1 : 0}`;
+      const same = (cart.relaxedSaid ?? []).filter((x) => `${x.unit}:${x.pieces ? 1 : 0}` === key);
+      if (proposed <= Math.max(0, ...same.filter((x) => !x.add).map((x) => x.value))) continue;
+      const budget = addBudget.get(key) ?? same.filter((x) => x.add).reduce((t, x) => t + x.value, 0);
+      if (proposed - item.quantity <= budget) {
+        addBudget.set(key, budget - (proposed - item.quantity));
+        continue;
+      }
+    }
     const name = item.label || productName(asked.find((l) => l.productId === pid)?.name ?? "") || "món khách chọn";
     return `KHÔNG tự tăng «${name}» lên ${amountText(proposed, item.unit, item.pieces)}: khách nói ${amountText(item.quantity, item.unit, item.pieces)}${item.sourceMessageId !== null ? ` (tin #${item.sourceMessageId})` : ""}. Lên đơn ĐÚNG số khách nói; khách muốn thêm thì khách tự nói số lượng.`;
   }
