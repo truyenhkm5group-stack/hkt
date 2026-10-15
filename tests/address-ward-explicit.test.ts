@@ -298,6 +298,16 @@ export async function testAddressWardExplicitTools() {
   // Lời sửa phường dạng CÂU HỎI («ủa mà chị ở An Hội Đông mà em?») bỏ cách đọc cũ: không CUSTOMER_STATED An Hội Tây nữa.
   const qFix = [TUYET_MSG, "ủa mà chị ở An Hội Đông mà em?", "đúng rồi em"];
   assert.notEqual(addressCheckOf({ address: MODEL_LINE, province: "", ward: "" }, { customerTexts: qFix }).view.ward, AN_HOI_TAY);
+  // REVIEW LẦN 5 — cùng tên đường nhưng KHÔNG có số nhà (hoặc khác số) là nơi giao khác: không mượn phường của địa chỉ cũ.
+  for (const [said, line] of [
+    ["à lần này giao lên công ty chị trên đường Phan Huy Ích nhé, gần ngã tư", "Công ty, Phan Huy Ích, Gò Vấp, TP.HCM"],
+    ["giao giúp chị ra chợ Phan Huy Ích, chị bán ở đó", "Chợ Phan Huy Ích, Gò Vấp, TP.HCM"],
+    ["giao cho em gái chị hẻm 230 Phan Huy Ích nha, nhà khác", "Hẻm 230 Phan Huy Ích, Gò Vấp, TP.HCM"],
+    ["giao về số 50 Phan Huy Ích", "Phan Huy Ích, Gò Vấp, TP.HCM"],
+  ] as const) {
+    const view = addressCheckOf({ address: line, province: "", ward: "" }, { customerTexts: [TUYET_MSG, said] }).view;
+    assert.notEqual(view.ward, AN_HOI_TAY, `${said}: ${JSON.stringify(view)}`);
+  }
   // Trí nhớ «đã hỏi phường» chỉ áp cho CÙNG nơi giao: đổi hẳn địa chỉ ⇒ bắt đầu lại; chép lại khác chữ ⇒ giữ.
   assert.equal(sameDeliveryPlace(MODEL_LINE, `${MODEL_LINE} gần chợ`), true);
   assert.equal(sameDeliveryPlace(MODEL_LINE, NEW_ADDR), false);

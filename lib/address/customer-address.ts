@@ -333,7 +333,7 @@ export function sameDeliveryPlace(x: string, y: string): boolean {
  * dòng của công cụ — không bao giờ ghép xã của một địa chỉ khác vào (review độc lập PR #848: «12 Lê Lợi, P Bến Thành» rồi khách đổi sang
  * «12 Nguyễn Văn Lượng, Gò Vấp» từng nhận Bến Thành vì chỉ so số nhà):
  *  · CÙNG ĐƯỜNG (tên đường / khu, đã gập, cái này nằm trọn trong cái kia) — bắt buộc;
- *  · cùng số nhà khi cả hai có số nhà;
+ *  · CÙNG SỐ NHÀ — bắt buộc cả hai bên có số nhà (thiếu ở một bên ⇒ không ghép);
  *  · cùng tỉnh khi dòng công cụ đọc được tỉnh; dòng công cụ KHÔNG có tỉnh ⇒ chỉ nhận địa chỉ trong tin khách MỚI NHẤT có địa chỉ
  *    (không mượn tỉnh + xã của một địa chỉ cũ hơn);
  *  · không tin khách nào mới hơn nêu một phường khác (`customerStatedAddresses`).
@@ -358,9 +358,11 @@ export function wardFromCustomerWords(a: CustomerAddress, toolAddress: string, t
     // Dòng công cụ nhắc một quận / huyện CŨ mà phường của tin khách không có đất ở đó (Bến Thành vs Gò Vấp) ⇒ hai địa chỉ khác nhau.
     const toolDistricts = oldDistrictsIn(toolAddress, s.provinceCode);
     if (toolDistricts.length && !wardOldDistricts(s.ward, s.provinceCode).some((d) => toolDistricts.includes(d))) continue;
+    // SỐ NHÀ BẮT BUỘC Ở CẢ HAI BÊN và phải trùng (review PR #848 lần 5): cùng tên đường mà thiếu số nhà («công ty chị trên đường Phan
+    // Huy Ích», «chợ Phan Huy Ích», model chép mất «số 50») là nơi giao KHÁC — một con đường dài đi qua nhiều phường.
     const hn = houseKey(a.houseNumber);
     const hs = houseKey(s.houseNumber);
-    if (hn && hs && hn !== hs) continue;
+    if (!hn || !hs || hn !== hs) continue;
     return { ward: s.ward, province: s.province, provinceCode: s.provinceCode, confidence: s.confidence };
   }
   return null;
