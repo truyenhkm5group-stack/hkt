@@ -173,6 +173,31 @@ export function testAddressWardExplicitPure() {
   assert.deepEqual([corrected.ward, corrected.corrected], [null, true]);
   assert.equal(addressReaskVerdict("Dạ mình đổi sang phường An Hội Đông đúng không ạ?", { ...corrected, wardAskedAt: 1 }, 6), null, "đã hỏi trước đó nhưng khách đang sửa ⇒ vẫn cho hỏi");
 
+  // a5 (re-review PR #848): khách SỬA bằng phường SỐ CŨ không kèm quận («P15», «F15», «phường 15 cũ») — bộ đọc không ra phường nào
+  // chắc chắn, nhưng đó vẫn là lời sửa ⇒ bỏ cách đọc cũ, ô xã trống, bot được hỏi lại (hướng an toàn).
+  for (const fix of ["à em nhầm P15 nhé", "nhầm rồi em, F15 nha", "à không phải An Hội Tây, phường 15 cũ", "à em nhầm, phường 15 Gò Vấp nhé"]) {
+    const texts = ["230/20 Phan Huy Ích, P An Hội Tây, TP.HCM", fix];
+    const vw = addressCheckOf({ address: "230/20 Phan Huy Ích, Gò Vấp", province: "TP.HCM" }, { customerTexts: texts, turn: 5 }).view;
+    assert.ok(vw.status !== "CUSTOMER_STATED" && vw.ward === null && Boolean(vw.ask_customer), `${fix}: ${JSON.stringify(vw)}`);
+    const ask = "Dạ phường 15 cũ nay là phường nào theo tên mới ạ?";
+    assert.equal(addressReaskVerdict(ask, addressKnowledge({}, texts), 5), null, `${fix}: không có trạng thái ⇒ không bỏ câu hỏi`);
+    const kept: ChatState = { draft: { orderId: null, lines: [], unitPrices: {}, recipient: { name: "T", phone: "0901234567", address: "230/20 Phan Huy Ích, Gò Vấp", province: "TP.HCM", ward: AN_HOI_TAY }, note: "", simulated: true } };
+    assert.equal(addressReaskVerdict(ask, { ...addressKnowledge(kept, texts), wardAskedAt: 1 }, 5), null, `${fix}: đơn nháp còn giữ phường cũ, đã hỏi trước ⇒ vẫn không bỏ câu hỏi`);
+  }
+  // Lời nhắc lại ĐÚNG phường đang giữ / câu không nói gì về phường KHÔNG phải lời sửa.
+  assert.equal(addressCheckOf({ address: MODEL_LINE, province: "" }, { customerTexts: [TUYET_MSG, "phường An Hội Tây em nhé", "ok em giao giúp chị"] }).view.status, "CUSTOMER_STATED");
+
+  // X6: «12 Trần Phú, Hà Đông, Hà Nội» — «Trần Phú» đứng ngay sau số nhà là TÊN ĐƯỜNG, không phải «Xã Trần Phú» (cũng là tên một xã
+  // mới của Hà Nội). Có tiền tố loại thì vẫn là xã.
+  assert.notEqual(parseCustomerAddress("12 Trần Phú, Hà Đông, Hà Nội").ward, "Xã Trần Phú");
+  assert.equal(parseCustomerAddress("12 Trần Phú, Hà Đông, Hà Nội").confidence, "NOT_FOUND");
+  assert.equal(parseCustomerAddress("thôn 3, xã Trần Phú, Hà Nội").ward, "Xã Trần Phú");
+  const x6 = addressCheckOf({ address: "12 Trần Phú", province: "" }, { customerTexts: ["12 Trần Phú, phường Hạc Thành, Thanh Hóa", "ok em", "12 Trần Phú, Hà Đông, Hà Nội nha"], turn: 5 }).view;
+  assert.ok(x6.ward !== "Xã Trần Phú" && x6.ward !== "Phường Hạc Thành", JSON.stringify(x6));
+  // X8: dòng công cụ nhắc quận cũ Gò Vấp; phường trong tin khách (Bến Thành — quận 1 cũ) không có đất ở Gò Vấp ⇒ không ghép, hỏi.
+  const x8 = addressCheckOf({ address: "12 Lê Lợi nối dài, Gò Vấp", province: "TP.HCM" }, { customerTexts: ["12 Lê Lợi, P Bến Thành, TP.HCM"], turn: 5 }).view;
+  assert.deepEqual([x8.status, x8.ward, Boolean(x8.ask_customer)], ["AMBIGUOUS", null, true], JSON.stringify(x8));
+
   // ⑧ Câu khi lượt im: đã có dòng địa chỉ mà chỉ thiếu TỈNH ⇒ hỏi đúng tỉnh, không xin lại cả địa chỉ.
   const cart: CartCommitment = { selectedItems: [{ label: "chả cá thu", match: "cha ca thu", productId: null, variantId: null, sku: null, quantity: 1000, unit: "g", sourceMessageId: 1, confidence: "HIGH", customerExplicit: true }], turn: 1, at: new Date().toISOString() };
   const noProv = { id: null, name: "K", phone: "0961004962", address: "Số 5 ngõ 3 TB", province: "", simulated: false };

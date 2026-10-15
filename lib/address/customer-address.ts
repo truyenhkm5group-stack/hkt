@@ -18,7 +18,7 @@
  *    («P13 GV») cũng ở đây: `province = null`, `missing` có `province`, cách đọc đi riêng ở `provinceHint` cho câu hỏi khách.
  * Chỉ `EXACT` / `UNIQUE_FROM_OLD` được tự điền (`canAutoFill`). Hai mức còn lại ⇒ hỏi khách, ô xã để trống, cờ cần kiểm giữ nguyên.
  */
-import { expandAbbreviations, findProvince, findWardIn, foldVnText, isAdminName, normalizeVnAddress, type AddressMatch } from "@/lib/address/vn-address";
+import { expandAbbreviations, findProvince, findWardIn, foldVnText, isAdminName, normalizeVnAddress, oldDistrictsIn, wardOldDistricts, type AddressMatch } from "@/lib/address/vn-address";
 
 export const ADDRESS_CONFIDENCES = ["EXACT", "UNIQUE_FROM_OLD", "AMBIGUOUS", "NOT_FOUND"] as const;
 export type AddressConfidence = (typeof ADDRESS_CONFIDENCES)[number];
@@ -240,13 +240,23 @@ export function customerStatedAddresses(texts: readonly string[]): StatedAddress
  */
 export function namesOtherWard(text: string, province: string, ward: string): boolean {
   if (text.includes("?")) return false;
-  // Tin tự đọc ra một phường KHÁC (kể cả ở tỉnh khác — khách đổi hẳn địa chỉ) ⇒ sửa.
+  const f = expandAbbreviations(foldVnText(text));
+  // Có chữ chỉ phường / xã («P15», «F15», «phường 15 cũ», «xã …») hoặc tên đọc ra được + lời sửa («nhầm», «không phải», «sai»).
+  const wardToken = /(?:^| )(?:phuong|xa|thi tran|dac khu) [a-z0-9]/.test(f);
+  const cue = /(?:^| )(?:nham|khong phai|ko phai|k phai|sai(?! gon))(?: |$)/.test(f);
   const own = normalizeVnAddress(text);
-  if (own.status === "MATCHED" && own.ward.name !== ward) return true;
   const m = normalizeVnAddress(`${text}, ${province}`);
+  const named = (r: AddressMatch) => r.status === "MATCHED" || r.status === "AMBIGUOUS";
+  const isCurrent = (r: AddressMatch) => r.status === "MATCHED" && r.ward.name === ward;
+  // Lời SỬA nói tới phường ⇒ sửa, kể cả khi câu nhắc lại chính phường cũ («không phải An Hội Tây, phường 15 cũ»).
+  if (cue && (wardToken || named(own) || named(m))) return true;
+  // Tin tự đọc ra một phường KHÁC (kể cả ở tỉnh khác — khách đổi hẳn địa chỉ) ⇒ sửa.
+  if (own.status === "MATCHED" && own.ward.name !== ward) return true;
   if (m.status === "MATCHED") return m.ward.name !== ward;
   if (m.status === "AMBIGUOUS") return !m.candidates.some((c) => c.name === ward);
-  return false;
+  // Có chữ chỉ phường mà KHÔNG đọc chắc ra chính phường đang giữ (phường số cũ thiếu quận: «à em nhầm P15») ⇒ coi là sửa — hướng an
+  // toàn: bỏ cách đọc cũ, để bot hỏi (review PR #848, a5).
+  return wardToken && !isCurrent(own) && !isCurrent(m);
 }
 
 const houseKey = (h: string | null) => (h ? h.toLowerCase() : null);
@@ -304,6 +314,9 @@ export function wardFromCustomerWords(a: CustomerAddress, toolAddress: string, t
     if (!s.ward || !s.province || s.provinceCode === null) continue;
     if (a.provinceCode !== null ? a.provinceCode !== s.provinceCode : s.messageIndex < newestAddress) continue;
     if (!sameStreet(toolStreet, s.street)) continue;
+    // Dòng công cụ nhắc một quận / huyện CŨ mà phường của tin khách không có đất ở đó (Bến Thành vs Gò Vấp) ⇒ hai địa chỉ khác nhau.
+    const toolDistricts = oldDistrictsIn(toolAddress, s.provinceCode);
+    if (toolDistricts.length && !wardOldDistricts(s.ward, s.provinceCode).some((d) => toolDistricts.includes(d))) continue;
     const hn = houseKey(a.houseNumber);
     const hs = houseKey(s.houseNumber);
     if (hn && hs && hn !== hs) continue;

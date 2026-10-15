@@ -236,6 +236,23 @@ export function adminProvinces(): AdminProvince[] {
   return index().provinces.map((x) => x.p);
 }
 
+/** Quận / huyện CŨ (đã gập) của một tỉnh được nhắc trong dòng chữ (có loại «quận Gò Vấp» hoặc tên trơn đủ dài «Gò Vấp»). HÀM THUẦN. */
+export function oldDistrictsIn(text: string, provinceCode: number): string[] {
+  const t = expandAbbreviations(foldVnText(text));
+  const out = new Set<string>();
+  for (const x of index().wards) {
+    if (x.w.provinceCode !== provinceCode) continue;
+    for (const l of x.legacy) if ((l.districtType && lastWordHit(t, `${l.districtType} ${l.district}`) >= 0) || (!needsType(l.district) && lastWordHit(t, l.district) >= 0)) out.add(l.district);
+  }
+  return [...out];
+}
+
+/** Quận / huyện CŨ (đã gập) có phần đất trong một xã MỚI (tên chuẩn); không có xã đó ⇒ mảng rỗng. HÀM THUẦN. */
+export function wardOldDistricts(wardName: string, provinceCode: number): string[] {
+  const x = index().wards.find((w) => w.w.provinceCode === provinceCode && w.w.name === wardName);
+  return x ? [...new Set(x.legacy.map((l) => l.district))] : [];
+}
+
 /** Danh mục xã / phường MỚI của một tỉnh — cho ô chọn xã. */
 export function adminWardsOf(provinceCode: number): AdminWard[] {
   return index().wards.filter((x) => x.w.provinceCode === provinceCode).map((x) => x.w);
@@ -420,7 +437,9 @@ function readWithinProvince(head: string, pv: AdminProvince, area: Index["wards"
   //    Tên trùng tên một HUYỆN CŨ của tỉnh («Việt Trì», «Ba Đình», «Nha Trang») không đứng một mình được: khách viết địa chỉ cũ
   //    thì đó là cả thành phố / quận cũ (nay chia nhiều phường) ⇒ xuống bước 4, người chọn.
   const oldDistricts = new Set(area.flatMap((x) => x.legacy.map((l) => l.district)));
-  const weak = area.filter((x) => !needsType(x.core) && x.core.includes(" ") && !oldDistricts.has(x.core) && lastWordHit(head, x.core) >= 0);
+  //    Tên đứng NGAY SAU một số nhà («12 Trần Phú», «ngõ 5 Lê Lợi») ở vị trí tên đường ⇒ là tên đường, không phải xã (review PR #848, X6:
+  //    «12 Trần Phú, Hà Đông, Hà Nội» từng tự điền «Xã Trần Phú»). Muốn là xã thì phải có tiền tố loại (bước 1).
+  const weak = area.filter((x) => !needsType(x.core) && x.core.includes(" ") && !oldDistricts.has(x.core) && lastWordHit(head, x.core) >= 0 && !afterHouseNumber(head, x.core));
   if (weak.length) {
     const r = pickNew(pv, weak);
     if (r) return r;
@@ -495,6 +514,18 @@ function legacyWardAlone(head: string, segments: readonly string[], area: Index[
 function typedWardIn(head: string): string | null {
   const m = ` ${head} `.match(/ (phuong|xa|thi tran) (\d{1,2}|[a-z]+(?: [a-z]+)?)(?= )/);
   return m ? `${m[1]} ${m[2]}` : null;
+}
+
+/**
+ * Lần xuất hiện CUỐI của `name` (đủ từ, KHÔNG có tiền tố loại) đứng ngay sau một từ là số («12», «230 20», «5a») ⇒ vị trí tên đường
+ * («12 Trần Phú»), không phải tên xã / phường. HÀM THUẦN.
+ */
+function afterHouseNumber(head: string, name: string): boolean {
+  const s = span(head, name);
+  if (!s) return false;
+  // `span` trả vị trí trên chuỗi có dấu cách đệm đầu (` ${head}`) — cắt trên đúng chuỗi đó.
+  const prev = ` ${head}`.slice(0, s[0]).trim().split(" ").pop() ?? "";
+  return /^\d/.test(prev);
 }
 
 /** Một đoạn (đủ từ) khớp ⇒ [đầu, cuối) của lần xuất hiện CUỐI; không có ⇒ null. */
