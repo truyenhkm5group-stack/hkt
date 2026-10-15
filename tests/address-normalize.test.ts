@@ -84,7 +84,10 @@ export function testAddressNormalizePure() {
   assert.deepEqual([gHcm.confidence, gHcm.province, gHcm.ward, gHcm.provinceHint, gHcm.missing], ["AMBIGUOUS", "Thành phố Hồ Chí Minh", null, null, ["ward"]], JSON.stringify(gHcm));
   assert.deepEqual([...gHcm.candidates].sort(), SIX);
   assert.match(gHcm.reason, /phuong 13/, "nói rõ danh mục cũ không có phường khách ghi");
-  assert.ok(addressQuestion(gHcm)!.includes("phường Hạnh Thông"));
+  // Đổi đặc tả theo chủ shop (P0 15/10/2026, ca «Tuyet Nguyen Thi»): KHÔNG bao giờ bắt khách chọn trong danh sách 5–6 phường — 6 ứng
+  // viên vẫn nằm ở `candidates` cho người kiểm, câu hỏi khách chỉ xin ĐÚNG phần thiếu (tên phường / xã mới), không liệt kê tên nào.
+  const askSix = addressQuestion(gHcm)!;
+  assert.ok(!SIX.some((w) => askSix.includes(w.replace(/^Phường/, "phường"))) && /phường \/ xã/.test(askSix), askSix);
   // Phường số CÓ trong danh mục cũ ⇒ quy được KHI biết tỉnh: P5 Gò Vấp ⇒ An Nhơn. Không ghi tỉnh ⇒ vẫn hỏi tỉnh, An Nhơn chỉ là gợi ý.
   assert.equal(parseCustomerAddress("12 Nguyễn Văn Nghi P5 GV, HCM").ward, "Phường An Nhơn");
   const p5 = parseCustomerAddress("12 Nguyễn Văn Nghi P5 GV");

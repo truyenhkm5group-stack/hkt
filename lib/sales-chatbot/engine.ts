@@ -69,6 +69,7 @@ import { autoConfirmBlocker, confirmedFromOrder, executeTool, orderTotalsOf, too
 import { amountText, applyCustomerCartMessage, buyingText, cartCommitmentPrompt, cartHoldVerdict, customerHesitates, invitedProductOf, orderReadiness } from "@/lib/sales-chatbot/cart-commitment";
 import { sellableCatalog } from "@/lib/sales-chatbot/catalog";
 import { allowedImageUrl, describeImages, fetchCustomerImage, IMAGE_PROMPT_RULE, imageLine, VISION_LIMITS } from "@/lib/sales-chatbot/vision";
+import { ADDRESS_KNOWN_TEXT, addressKnowledge, addressReaskVerdict } from "@/lib/sales-chatbot/address-memory";
 import { CLAIM_HANDOFF_REASON, CLAIM_SAFE_TEXT, claimFactsLoader, detectPriceDispute, extractVndAmounts, guardOutgoing, noteSeenTotals, paymentSignalHandoff, paymentSignalInCustomerText, unverifiedAmounts, type ClaimVerdict } from "@/lib/sales-chatbot/claim-guard";
 import { flagOrderForReviewAsAgent, loadAutoConfirmComplete } from "@/lib/records/order-create";
 import type { PriceDisputeState } from "@/lib/sales-chatbot/quote-shared";
@@ -271,7 +272,8 @@ export function silenceFallbackText(st: ChatState, lastUserText: string, turn: n
   const justInvited = prevTurn !== undefined && (st.upsellTurn === prevTurn || st.draft?.shownTurn === prevTurn);
   const r = orderReadiness({ ...st, blocker: st.draft ? autoConfirmBlocker(st, { lastUserText, turn, prevTurn }) : null, lastUserText, hesitating: customerHesitates(lastUserText, { justInvited }) });
   if (r.level === "NEED_PHONE") return "Dạ mình cho em xin số điện thoại nhận hàng nhé.";
-  if (r.level === "NEED_ADDRESS") return "Dạ mình cho em xin địa chỉ nhận hàng đầy đủ (số nhà, đường, phường / xã, quận / huyện, tỉnh / thành) nhé.";
+  // Đã có dòng địa chỉ mà chỉ thiếu tỉnh / thành ⇒ hỏi ĐÚNG phần đó, không xin lại cả địa chỉ (P0 15/10/2026).
+  if (r.level === "NEED_ADDRESS") return (st.draft?.recipient.address ?? st.customer?.address ?? "").trim() ? "Dạ mình cho em xin tỉnh / thành phố của địa chỉ nhận hàng nhé." : "Dạ mình cho em xin địa chỉ nhận hàng đầy đủ (số nhà, đường, phường / xã, quận / huyện, tỉnh / thành) nhé.";
   if (r.level === "NEED_ITEMS") return "Dạ mình muốn lấy món nào, số lượng bao nhiêu ạ?";
   if (r.level !== "ORDER_READY") return EMPTY_REPLY_TEXT;
   const total = st.draft?.quote ? (st.draft.quote.total ?? null) : null;
@@ -1181,7 +1183,10 @@ async function chatTurnCore(
     const system = [systemPrompt(cfg, orgRow?.name ?? org.code, await businessProfile(), opts.channel, await publishedPlaybook(), quickCatalog, returningCustomerPrompt(returning, known.returning), bookingOn ? bookingPrompt(cfg, now) : "", now, salesPackFor(orgRow?.templateKey ?? null), { autoConfirm }), postSale ? "" : customer360Prompt(c360, reuse), await learnedLessons(), await levelPromptFor(conv.id, now), customerNamePrompt(opts.customerName), priceDisputePrompt(known.priceDispute), confirmedOrderPrompt(known), cartPromptOf(known, text, turnSeq, autoConfirm, prevTurn), postSale ? postSalePrompt(phase!, phase!.shortCode) : "", opts.context ?? ""].filter(Boolean).join("\n");
     // Chữ KHÁCH của lượt mua hiện tại — căn cứ «khách đã gọi tên món» khi công cụ lên / chốt đơn (lineBasisViolation, P0 14/10/2026).
     // Chỉ CHỮ MUA (bỏ câu hỏi giá / câu từ chối / giả định — `buyingText`): gọi tên món trong «nem tôm bao nhiêu?» không phải căn cứ.
-    const customerSaid = buyingText([...msgs.slice(Math.max(0, msgs.length - SALES_CHATBOT_LIMITS.historyMessages)).filter((m) => m.role === "user" && !m.content.some((b) => b.type === "tool_result")).map((m) => textOf(m.content)), text]);
+    // Tin KHÁCH thô (cũ ⇒ mới) trong cùng cửa sổ — căn cứ đọc ĐỊA CHỈ KHÁCH TỰ GÕ (P0 15/10/2026: dòng model chép vào công cụ có thể mất
+    // phường khách đã ghi rõ) và hàng rào «địa chỉ đã biết không hỏi lại» (`address-memory.ts`).
+    const customerTexts = [...msgs.slice(Math.max(0, msgs.length - SALES_CHATBOT_LIMITS.historyMessages)).filter((m) => m.role === "user" && !m.content.some((b) => b.type === "tool_result")).map((m) => textOf(m.content)), text];
+    const customerSaid = buyingText(customerTexts);
     const deliveredImages: string[] = [];
     let deliveredReplyId: string | null = null;
     let deliveredText: string | null = null;
@@ -1291,6 +1296,19 @@ async function chatTurnCore(
               }
               continue;
             }
+            // ĐỊA CHỈ ĐÃ BIẾT / ĐÃ HỎI KHÔNG HỎI LẠI (P0 15/10/2026, ca «Tuyet Nguyen Thi» · «Lê Văn Dụ»): câu hỏi phường / xã bị bỏ, phần
+            // còn lại vẫn gửi. Cả tin chỉ là câu hỏi lại ⇒ câu ghi nhận — trừ khi tóm tắt đơn của máy chủ còn nợ khách (nó sẽ được gửi).
+            const addrHold = verdict.ok ? addressReaskVerdict(out, addressKnowledge(state, customerTexts), turnSeq) : null;
+            if (addrHold) {
+              lastError = lastError ?? addrHold.note;
+              const said = addrHold.rest || (draftUnsaid ? "" : ADDRESS_KNOWN_TEXT);
+              if (said && !content.some((x) => x.type === "text" && x.text === said)) {
+                content.push({ type: "text", text: said });
+                spoke = true;
+                if (addrHold.rest) draftUnsaid = null;
+              }
+              continue;
+            }
             if (!verdict.ok && verdict.claim === "ORDER_CONFIRMED" && confirmingNow && held === null) {
               held = out;
               continue;
@@ -1323,7 +1341,7 @@ async function chatTurnCore(
         const results: AiBlock[] = [];
         for (const u of uses) {
           const confirmedBefore = Boolean(state.confirmed);
-          const r = await executeTool(u.name, u.input, { autoConfirm, prevTurn, conversationId: conv.id, customerSaid, channel: opts.channel, config: cfg, state, lastUserText: text, agent: SALES_AGENT, customerName: opts.customerName ?? null, quickReplies: quickCatalog, returning, customer360: c360, recentSaid, turn: turnSeq, bookingOn, now, commentTurn: opts.aiCustomer?.threadKind === "COMMENT", promptStamp: { ...stampBase, model: res.model || prov.provider.model } });
+          const r = await executeTool(u.name, u.input, { autoConfirm, prevTurn, conversationId: conv.id, customerSaid, customerTexts, channel: opts.channel, config: cfg, state, lastUserText: text, agent: SALES_AGENT, customerName: opts.customerName ?? null, quickReplies: quickCatalog, returning, customer360: c360, recentSaid, turn: turnSeq, bookingOn, now, commentTurn: opts.aiCustomer?.threadKind === "COMMENT", promptStamp: { ...stampBase, model: res.model || prov.provider.model } });
           // Tổng máy chủ vừa tính vào sổ `seenTotals` — hàng rào chặn nói lại tổng của giỏ CŨ (review vòng 3).
           state = r.state;
           state = noteSeenTotals(state);

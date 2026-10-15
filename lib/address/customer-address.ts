@@ -139,12 +139,23 @@ function orList(xs: readonly string[]): string {
 }
 
 /**
- * Câu hỏi khách cho phần còn thiếu — `null` khi không thiếu gì. Câu nêu tên xã chỉ khi có danh sách ứng viên THẬT; không có thì hỏi
- * chung, không gợi ý một tên nào.
+ * Trần số tên xã được NÊU trong MỘT câu hỏi khách (P0 15/10/2026, ca «Tuyet Nguyen Thi»: bot bắt khách chọn giữa 6 phường của quận Gò
+ * Vấp cũ). Một xã cũ bị chia làm hai / ba là một câu chọn ngắn; nhiều hơn thì không còn là câu hỏi mà là bắt khách tra bản đồ ⇒ hỏi
+ * ĐÚNG phần thiếu (tên phường / xã mới), không liệt kê. Danh sách đầy đủ vẫn nằm ở `candidates` cho người kiểm.
+ */
+export const MAX_WARDS_NAMED_IN_QUESTION = 3;
+
+/**
+ * Câu hỏi khách cho phần còn thiếu — `null` khi không thiếu gì. Câu nêu tên xã chỉ khi có danh sách ứng viên THẬT và ngắn
+ * (≤ `MAX_WARDS_NAMED_IN_QUESTION`); không có / quá dài thì hỏi chung đúng phần thiếu, không gợi ý một tên nào.
  */
 export function addressQuestion(a: CustomerAddress): string | null {
   const needStreet = a.missing.includes("street");
   const streetTail = needStreet ? " kèm số nhà, tên đường (hoặc thôn / xóm)" : "";
+  if (a.confidence === "AMBIGUOUS" && a.candidates.length > MAX_WARDS_NAMED_IN_QUESTION) {
+    if (a.legacy) return `Dạ ${lowerType(a.legacy.ward)} cũ nay là phường / xã nào theo tên mới ạ? Mình cho em xin tên phường / xã mới${streetTail} để shop giao đúng nha.`;
+    return `Dạ mình cho em xin tên phường / xã (theo địa giới mới) của địa chỉ nhận hàng${streetTail} với ạ?`;
+  }
   if (a.confidence === "AMBIGUOUS" && a.candidates.length) {
     const options = orList(a.candidates.map(lowerType));
     if (a.legacy) return `Dạ ${lowerType(a.legacy.ward)} cũ nay thuộc ${options} theo địa giới mới ạ? Mình xác nhận giúp em${streetTail} để shop giao đúng nha.`;
@@ -183,4 +194,57 @@ export function addressReviewHint(a: CustomerAddress): string {
   if (a.provinceHint) return `${a.reason} Nếu đúng ${a.provinceHint.district} (${a.provinceHint.province}) thì xã mới có thể là: ${a.provinceHint.wardCandidates.join(" / ") || "chưa rõ"}`;
   if (a.confidence === "AMBIGUOUS" && a.candidates.length) return `${a.legacy ? `${a.legacy.ward} (${a.legacy.district}) cũ` : "Địa chỉ"} nay có thể thuộc: ${a.candidates.join(" / ")} — hỏi khách`;
   return a.reason;
+}
+
+// ─────────────────────────── CHỮ CỦA CHÍNH KHÁCH ───────────────────────────
+
+/**
+ * ĐỊA CHỈ KHÁCH TỰ GÕ, đọc thẳng từ tin của khách (P0 15/10/2026). Công cụ của bot chỉ thấy dòng địa chỉ MODEL chép lại — ca «Tuyet Nguyen
+ * Thi»: khách gõ «230/20 Phan Huy Ích, P An Hội Tây, TP.HCM» (phường MỚI sau sáp nhập), model không biết tên mới nên chép thành
+ * «…, Gò Vấp, TP.HCM» ⇒ bộ đọc chỉ còn quận cũ ⇒ 6 phường ⇒ bot bắt khách chọn. Hàm này trả các cách đọc TỰ ĐIỀN ĐƯỢC của
+ * những tin khách trông như một địa chỉ giao: từng dòng, cả tin, rồi tin đó ghép với tin ngay trước (khách gõ địa chỉ làm hai
+ * tin). Bỏ dòng là câu hỏi («phường An Hội Tây có ship không?») và dòng không có phần số nhà / đường. Thứ tự: mới nhất trước; không
+ * có ⇒ mảng rỗng. HÀM THUẦN.
+ */
+export function customerStatedAddresses(texts: readonly string[]): CustomerAddress[] {
+  const msgs = texts.map((t) => t.trim()).filter(Boolean);
+  const out: CustomerAddress[] = [];
+  const seen = new Set<string>();
+  const tryLine = (line: string) => {
+    const l = line.trim();
+    if (!l || l.includes("?") || seen.has(l)) return;
+    seen.add(l);
+    const a = parseCustomerAddress(l);
+    if (canAutoFill(a) && foldVnText(a.street).length >= 3) out.push(a);
+  };
+  for (let i = msgs.length - 1; i >= 0; i--) {
+    const lines = msgs[i].split(/\n+/);
+    for (let j = lines.length - 1; j >= 0; j--) tryLine(lines[j]);
+    if (lines.length > 1) tryLine(lines.join(", "));
+    if (i > 0) tryLine(`${msgs[i - 1].split(/\n+/).pop() ?? ""}, ${lines[0]}`);
+  }
+  return out;
+}
+
+const houseKey = (h: string | null) => (h ? h.toLowerCase() : null);
+
+/**
+ * Xã / phường MỚI lấy từ CHÍNH chữ khách khi dòng địa chỉ của công cụ (`a` — bản model chép) chưa tự điền được. Chỉ nhận khi KHỚP với
+ * dòng của công cụ — không bao giờ ghép xã của một địa chỉ khác vào:
+ *  · cùng tỉnh (dòng công cụ đã đọc được tỉnh thì tỉnh của tin khách phải trùng);
+ *  · cùng số nhà khi cả hai có số nhà; dòng công cụ không có số nhà ⇒ phần đường của tin khách phải nằm trong dòng công cụ.
+ * Trả tên chuẩn xã + tỉnh và mức tin cậy của tin khách; không có ⇒ `null`. HÀM THUẦN.
+ */
+export function wardFromCustomerWords(a: CustomerAddress, toolAddress: string, texts: readonly string[] | undefined): { ward: string; province: string; provinceCode: number; confidence: AddressConfidence } | null {
+  if (canAutoFill(a) || !texts?.length) return null;
+  const tool = ` ${foldVnText(toolAddress)} `;
+  for (const s of customerStatedAddresses(texts)) {
+    if (!s.ward || !s.province || s.provinceCode === null) continue;
+    if (a.provinceCode !== null && a.provinceCode !== s.provinceCode) continue;
+    const hn = houseKey(a.houseNumber);
+    const hs = houseKey(s.houseNumber);
+    if (hn && hs ? hn !== hs : !tool.includes(` ${foldVnText(s.street)} `)) continue;
+    return { ward: s.ward, province: s.province, provinceCode: s.provinceCode, confidence: s.confidence };
+  }
+  return null;
 }
