@@ -99,6 +99,8 @@ export type ChatState = {
   confirmed?: { orderId: string | null; simulated: boolean; total: number; at: string; stamp?: PromptStamp; quoteId?: string; valid?: boolean; pending?: "ADDRESS" | "CHECK" | null; auto?: boolean };
   /** Báo giá máy chủ GẦN NHẤT của hội thoại (giỏ / đơn nháp / chốt) — hàng rào số tiền đọc `amounts` khi `verified`. */
   quote?: QuoteSnapshot;
+  /** Mốc REVISION của giỏ — ghi cả khi giỏ bị XOÁ (lượt mua mới), để một lượt cũ chạy chậm không dựng lại giỏ đã xoá (review 15/10/2026). */
+  cartRev?: string;
   /** Mọi TỔNG / tiền hàng máy chủ đã tính cho các giỏ / đơn nháp trong hội thoại (`noteSeenTotals`) — hàng rào chặn nói lại tổng của giỏ CŨ. */
   seenTotals?: number[];
   /** Giá ĐÃ XÁC THỰC công cụ đọc đã trả cho model trong hội thoại (search / get_product / get_current_price) — tối đa `PRICE_FACTS_MAX`. */

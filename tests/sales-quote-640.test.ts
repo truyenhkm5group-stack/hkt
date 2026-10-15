@@ -549,9 +549,10 @@ function testHoaLe() {
   // Hỗn hợp đơn vị trong một tin.
   assert.deepEqual(hoaLe(["cho chị 1kg chả cá thu, 2 hộp nem hải sản, 1 hũ ruốc"], [[hlCct(1), hlNem(2), hlRuoc(1)], [hlCct(10), hlNem(2), hlRuoc(1)], [hlCct(1), hlNem(2), hlRuoc(3)]]).verdicts.map((v) => v === null), [true, false, false]);
   // Số không tên hợp HAI món cùng đơn vị ⇒ hỏi lại; không món nào được tự tăng.
-  const two = hoaLe(["cho chị 2 hộp nem hải sản với 2 hộp chả mực", { draft: [hlNem(2), hlMuc(2)] }, "thêm 1 hộp"], [[hlNem(3), hlMuc(2)], [hlNem(2), hlMuc(3)], [hlNem(2), hlMuc(2)]]);
+  const two = hoaLe(["cho chị 2 hộp nem hải sản với 2 hộp chả mực", { draft: [hlNem(2), hlMuc(2)] }, "thêm 1 hộp"], [[hlNem(3), hlMuc(2)], [hlNem(2), hlMuc(3)], [hlNem(2), hlMuc(2)], [hlNem(5), hlMuc(2)]]);
+  assert.ok(two.verdicts[3] !== null, "nem 2 → 5 khi khách nói thêm 1 hộp ⇒ chặn");
   assert.ok(two.relaxed);
-  assert.deepEqual(two.verdicts.map((v) => v === null), [false, false, true]);
+  assert.deepEqual(two.verdicts.slice(0, 3).map((v) => v === null), [true, true, true], "«thêm 1 hộp» không tên: trần lượt nới = hiện có + 1 cho món cùng đơn vị (bot vẫn được hỏi lại vì giỏ nới)");
   // «hộp» / «cái» KHÔNG quy ra gram theo khối lượng mẫu mã; chỉ «gói / túi / bịch» mới quy (giữ #819 «bớt 1 gói»).
   const box = hoaLe([hlBase, hlD, "chả cá thêm 2 hộp"], [[hlCct(3)]]);
   assert.ok(box.relaxed, "«chả cá thêm 2 hộp» ⇒ hỏi lại, không tự quy 2 hộp = 2kg");
@@ -565,6 +566,34 @@ function testHoaLe() {
   const capped = hoaLe([hlBase, hlD, "chả cá lấy 2kg, đóng 2 gói riêng nhé"], [[hlCct(2)], [hlCct(3)]]);
   assert.ok(capped.relaxed);
   assert.deepEqual(capped.verdicts.map((v) => v === null), [true, false], "lượt nới: trần tăng = số khách nói trong tin");
+  // Review dbd7ac98 (BLOCKER): gộp «1kg lấy 2 hộp» CHỈ khi sau «hộp» không còn chữ nào ngoài trợ từ — đọc chữ GỐC, không đọc kết quả gắn
+  // danh mục; tên không có trong danh mục («xôi», «bánh tráng», «nemm», «nem hải sản» khi shop chỉ có «Nem tôm bề bề») ⇒ không gộp, hỏi lại.
+  for (const t of ["chả cá thu 1kg lấy 2 hộp xôi", "chả cá 1kg lấy 2 hộp bánh tráng", "chả cá thu 1kg lấy 2 hộp nemm"]) {
+    const am = amountsIn(t, HL_CAT1);
+    assert.deepEqual(am.map((x) => [x.value, x.unit]), [[1000, "g"], [2, "pack"]], `không gộp: ${t}`);
+    assert.ok(am[1].unbound, `tên ngoài danh mục: ${t}`);
+    const r = hoaLe([t], [[hlCct(2)], [hlCct(1), hlNem(2)], [hlCct(1)]]);
+    assert.ok(r.relaxed && /KHÔNG có trong danh mục/.test(r.cart?.clarify ?? ""), `hỏi lại món nào: ${t}`);
+    assert.ok(!r.cart?.selectedItems.some((x) => !x.match && !x.productId), `không đẻ món «không tên» ghép được với bất kỳ sản phẩm nào: ${t}`);
+    assert.deepEqual(r.verdicts.map((v) => v === null), [false, false, true], `chả cá 2kg / thêm nem bị chặn, giữ 1kg qua: ${t}`);
+  }
+  for (const t of ["chả cá thu 1kg lấy 2 hộp nhé", "chả cá thu 1kg lấy 2 hộp nha em", "chả cá thu 1kg lấy 2 hộp luôn"]) assert.deepEqual(amountsIn(t, HL_CAT1).map((x) => [x.value, x.unit]), [[2000, "g"]], `gộp khi chỉ còn trợ từ: ${t}`);
+  const cat3 = hoaLe(["chả cá thu 1kg lấy 2 hộp nem hải sản"], [[hlCct(2)], [hlCct(1)]], HL_CAT3);
+  assert.ok(cat3.relaxed, "CAT3: «nem hải sản» không có trong danh mục ⇒ hỏi lại");
+  assert.equal(cat3.cart?.selectedItems.find((x) => /cha ca/.test(x.match))?.quantity, 1000, "CAT3: chả cá vẫn 1kg, không thành 2kg");
+  assert.deepEqual(cat3.verdicts.map((v) => v === null), [false, true]);
+  // Tên ngoài danh mục nhưng cùng danh từ món với món VỪA MỜI ⇒ là món được mời (H10).
+  assert.equal(hoaLe([hlBase, hlD, hlInvT, "thêm 10 cái nem hải sản"], [[hlCct(1), hlNemT(1)]], HL_CAT3).verdicts[0], null);
+  // P1: quy cách «(Hộp)» không ghi số cái ⇒ CHƯA BIẾT (không mặc định 1): «10 cái» ⇒ hỏi lại, không đơn nào có nem qua.
+  assert.equal(piecesOf("Nem hải sản tôm bề bề (Hộp)"), null);
+  assert.equal(piecesOf("Combo ăn vặt (Set)"), null);
+  const nemHop = (q = 1): AskedLine => ({ ...hlNem(q), name: "Nem hải sản tôm bề bề (Hộp)" });
+  const unknownPieces = hoaLe([hlBase, hlD, "thêm 10 cái nem hải sản"], [[hlCct(1), nemHop(1)], [hlCct(1), nemHop(10)]]);
+  assert.ok(unknownPieces.verdicts.every((v) => v !== null && /HỎI LẠI khách lấy mấy hộp/.test(v)), JSON.stringify(unknownPieces.verdicts));
+  // Minor: trần lượt nới của câu «thêm N» = hiện có + N.
+  const addCap = hoaLe(["cho chị 1kg chả cá thu, 2 hộp nem hải sản, 1 hũ ruốc", { draft: [hlCct(), hlNem(2), hlRuoc()] }, "thêm 2 hũ nữa"], [[hlCct(1), hlNem(2), hlRuoc(3)], [hlCct(3), hlNem(2), hlRuoc(1)], [hlCct(1), hlNem(2), hlRuoc(4)]]);
+  assert.ok(addCap.relaxed);
+  assert.deepEqual(addCap.verdicts.map((v) => v === null), [true, false, false], "«thêm 2 hũ»: ruốc 1 + 2 = 3 qua; 4 hoặc chả cá 3kg bị chặn");
   // Số cái theo quy cách mẫu mã.
   assert.equal(piecesOf("Nem hải sản tôm bề bề (Hộp 10 cái)"), 10);
   assert.equal(piecesOf("Áo thun (M)"), 1, "món bán theo cái: 1 cái = 1 đơn vị");
@@ -893,6 +922,22 @@ async function testHoaLeChat() {
         const [after] = await db.select({ state: cv.state }).from(cv).where(eq(cv.id, ctx.conversationId));
         assert.deepEqual((after.state as ChatState).cart?.selectedItems.map((x) => x.quantity), [3000], "giỏ MỚI HƠN (3kg) không bị lượt cũ đè");
         assert.equal((await db.select().from(schema.orders).where(eq(schema.orders.salesConversationId, ctx.conversationId))).length, 1, "lượt chậm không đẻ đơn thứ hai");
+        // Lượt mới hơn XOÁ giỏ (không còn cart.at) ⇒ lượt cũ chạy chậm KHÔNG dựng lại giỏ (so bằng `cartRev`).
+        const clearing: AiProvider = {
+          ...slow,
+          async complete(): Promise<AiResponse> {
+            const [row] = await db.select({ state: cv.state }).from(cv).where(eq(cv.id, ctx.conversationId));
+            const next: Record<string, unknown> = { ...(row.state as Record<string, unknown>), cartRev: new Date(Date.now() + 7_200_000).toISOString() };
+            delete next.cart;
+            await db.update(cv).set({ state: next }).where(eq(cv.id, ctx.conversationId));
+            return { content: [say("Dạ vâng ạ.")], stopReason: "end_turn", usage: { inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0 }, model: "claude-sonnet-5", latencyMs: 1 };
+          },
+        };
+        setSalesChatProviderForTests(() => clearing);
+        const res2 = await chatTurn(ctx.conversationId, "cho chị 1kg chả cá thu nhé", { channel: "WEB", visitorKey: visitorKeyOf(`hoi-thoai-vang-${c.key}-0123456789abcdef`) });
+        assert.ok(res2.ok, JSON.stringify(res2));
+        const [after2] = await db.select({ state: cv.state }).from(cv).where(eq(cv.id, ctx.conversationId));
+        assert.equal((after2.state as ChatState).cart, undefined, "giỏ đã bị lượt mới hơn XOÁ không bị lượt cũ dựng lại");
         return;
       }
       if (c.key === "q845-hai-hop") {
