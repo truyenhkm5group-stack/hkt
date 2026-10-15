@@ -19,6 +19,7 @@ import {
   type BackupTarget,
 } from "@/lib/constants/backup";
 import { backupTargetFor, readBackupStatusFiles } from "@/lib/queries/backup-status";
+import { moiTruongShell } from "./shell-locale";
 
 /**
  * ═══════════ SAO LƯU TỰ ĐỘNG — BÀI KIỂM CHẠY SHELL THẬT, KHÔNG MÔ PHỎNG BẰNG LỜI ═══════════
@@ -60,7 +61,7 @@ function chayBash(noiDung: string, env?: Record<string, string>): Ra {
   const kich = path.join(tmp, "run.sh");
   writeFileSync(kich, noiDung);
   try {
-    const ra = execFileSync("bash", [kich], { stdio: "pipe", encoding: "utf8", maxBuffer: 1 << 24, env: env ? { ...process.env, ...env } : process.env });
+    const ra = execFileSync("bash", [kich], { stdio: "pipe", encoding: "utf8", maxBuffer: 1 << 24, env: moiTruongShell(env) });
     return { ma: 0, ra };
   } catch (e) {
     const err = e as { status?: number; stdout?: string; stderr?: string };

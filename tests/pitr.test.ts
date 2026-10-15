@@ -3,6 +3,7 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { moiTruongShell } from "./shell-locale";
 
 /**
  * ═══════════ PITR CỦA erp-db — BÀI KIỂM CHẠY SHELL THẬT, KHÔNG MÔ PHỎNG BẰNG LỜI ═══════════
@@ -49,7 +50,7 @@ function chayBash(noiDung: string, trinh = "bash"): Ra {
   const kich = path.join(tmp, "run.sh");
   writeFileSync(kich, noiDung);
   try {
-    return { ma: 0, ra: execFileSync(trinh, [kich], { stdio: "pipe", encoding: "utf8", maxBuffer: 1 << 24 }) };
+    return { ma: 0, ra: execFileSync(trinh, [kich], { stdio: "pipe", encoding: "utf8", maxBuffer: 1 << 24, env: moiTruongShell() }) };
   } catch (e) {
     const err = e as { status?: number; stdout?: string; stderr?: string };
     return { ma: err.status ?? 1, ra: String(err.stdout ?? "") + String(err.stderr ?? "") };
