@@ -59,6 +59,12 @@ Materialization* của Claude Code chặn — Team KHÔNG lách. Hệ quả: kh�
 không gộp · không deploy · không chạy ops ⇒ **không có KPI trước/sau nào, và không sứ mệnh nào được phép
 đóng DONE**. Gỡ bằng một trong hai: mở quyền ấy cho phiên Team, hoặc mở lại phiên Desktop đang có `GH_TOKEN`.
 
+## 15/10 sáng — DESKTOP CẦM KHOÁ `integration-lead` (chủ shop giao delivery P0) — Team/Web: KHÔNG gộp/deploy, KHÔNG ghi vào các nhánh dưới
+- **#845** `claude/cart-qty-guard-unit` (Hoa Lê): review độc lập @9655435b **FAIL** — gốc nằm ở `applyCustomerCartMessage` (không ở `lineBasisViolation`): số không tên rơi vào món tường minh duy nhất + `packGrams` suy từ khối lượng mẫu mã ⇒ chả cá 11kg; «10 cái» đọc thành 10 gói. Người ghi DUY NHẤT nhánh này giờ là worker của Desktop (đẩy tiếp lên chính nhánh). Team đừng sửa.
+- **#846** `claude/crm-note-dat-giai-doan`: đã mở PR (bot), đang review độc lập.
+- **#847** `fix/money-trace-hours`: `conv-money-trace --since=<UTC>` để đo đúng khoảng sau deploy. Số đo 15/10 (2 ngày, trùm trước #840): «nói rõ hơn» không tin khách mới 22 tin/22 hội thoại · tổng ≠ giỏ 1 tin — CHƯA tách được trước/sau #840.
+- #842: vẫn FIX_GATES (mô hình thứ tự trong `inbox-semantics-v3`), làm sau #845/#846.
+
 ## P0 CHƯƠNG TRÌNH 15/10 — ĐỘ TIN CẬY HỘI THOẠI BÁN HÀNG (HSLC trước, rồi mọi tổ chức) — GIAO TEAM
 Lệnh đầy đủ của chủ shop: mục A–G. Báo cáo cuối: ROOT CAUSE | AFFECTED CONVERSATIONS | REPEATED QUESTIONS | WRONG ORDERS | GUARDRAILS | PR | DEPLOY | PRODUCTION VERIFIED. KHÔNG vá bằng câu dặn prompt; sửa state machine · dữ liệu · công cụ · cổng gửi. Canary HSLC trước toàn SaaS.
 
