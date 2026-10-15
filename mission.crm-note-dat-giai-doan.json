@@ -3,7 +3,7 @@
   "mission_id": "crm-note-dat-giai-doan",
   "title": "Ghi chú CRM «Đã ĐẠT giai đoạn» của Pancake thôi bị coi là page trả lời (bot im đúng lúc khách chốt)",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-team",
@@ -23,9 +23,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-15T01:53:01.512Z",
-  "updated_at": "2026-10-15T04:20:58.227Z",
+  "updated_at": "2026-10-15T06:18:02.588Z",
   "last_heartbeat": "2026-10-15T04:20:58.227Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#846 → ed9a0ddc0414a3e22eb8b57d49e71d32525cb8bc"
+  },
   "handoff": {
     "branch": "claude/crm-note-dat-giai-doan",
     "sha": "d2079716bd630669bb7764a7fa2e3f13d6bda9be",
