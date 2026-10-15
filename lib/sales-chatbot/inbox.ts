@@ -241,7 +241,11 @@ export function webSideOf(role: string, text: string): TimelineSide {
  * THỨ TỰ DANH SÁCH (INBOX-V2-A 09/10 · chủ shop 10/10/2026 mục C) — xếp ở MÁY CHỦ, không xếp lại trên trình duyệt, nên «Xem thêm»
  * (nâng `limit`) luôn ra ĐÚNG phần nối tiếp của trang trước:
  *  · «Chờ trả lời»: khách chờ LÂU NHẤT lên đầu (đúng thứ tự phải xử lý).
- *  · Mọi thẻ khác: CHƯA ĐỌC trước (`loadInboxUnreadSql` — LƯỢT KHÁCH MỚI NHẤT CHƯA XỬ LÝ theo response-ownership #803: chưa có câu trả lời
+ *  · «Tất cả» (chủ shop 14/10/2026 — thay mục C ngày 10/10 cho riêng thẻ này): CHỈ theo TIN CÓ NGHĨA mới nhất (khách · AI · nhân viên ERP ·
+ *    nhân viên trên Pancake — `INBOX_ACTIVITY_SQL`), không đẩy chưa đọc lên trước. Đo production HSLC 14/10 (pancake-thread-diff): 687
+ *    hội thoại chưa đọc đứng trên mọi hội thoại đã xử lý ⇒ 89/100 hội thoại hoạt động gần nhất KHÔNG lên trang đầu, chủ shop thấy như
+ *    «tin Messenger không về». Chưa đọc vẫn có dấu trên hàng và thẻ «Chưa đọc» riêng.
+ *  · Các thẻ còn lại: CHƯA ĐỌC trước (`loadInboxUnreadSql` — LƯỢT KHÁCH MỚI NHẤT CHƯA XỬ LÝ theo response-ownership #803: chưa có câu trả lời
  *    hợp lệ của AI / nhân viên / page, chưa ai mở — chủ shop 11/10/2026), rồi đã xử lý; trong
  *    mỗi nhóm TIN CÓ NGHĨA mới nhất lên đầu (`INBOX_ACTIVITY_SQL` — không cột siêu dữ liệu nào: nhãn / người phụ trách / hồ sơ khách
  *    không đổi chỗ hội thoại).
@@ -252,6 +256,7 @@ export function inboxOrderBy(filter: InboxFilter, unread: SQL<boolean>, exactFir
   // Ô tìm là một SĐT đủ ⇒ hội thoại có SĐT ghi nhận BẰNG ĐÚNG số đó đứng đầu, rồi mới tới thứ tự thường (inbox-search.ts::inboxSearchRankSql).
   const lead = exactFirst ? [sql`(${exactFirst}) desc`] : [];
   if (filter === "UNANSWERED") return [...lead, asc(schema.salesChatConversations.lastCustomerAt), asc(schema.salesChatConversations.id)];
+  if (filter === "ALL") return [...lead, desc(INBOX_ACTIVITY_SQL), desc(schema.salesChatConversations.id)];
   return [...lead, sql`${unread} desc`, desc(INBOX_ACTIVITY_SQL), desc(schema.salesChatConversations.id)];
 }
 

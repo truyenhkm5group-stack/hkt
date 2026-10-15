@@ -127,8 +127,19 @@ export async function testInboxSemanticsV3() {
       }
 
       // ═══ 2. MỖI bộ lọc: số đếm · tập dòng · không trùng · thứ tự ═══
-      const activityOf = (s: Spec) => Math.max(...[s.v.lastCustomerAt, s.v.lastBotAt, s.v.lastStaffAt, s.v.historyUntil].map((d) => (d instanceof Date ? d.getTime() : 0)), s.v.createdBy === HISTORY_CREATED_BY ? 0 : T0 - 5 * DAY);
-      const defaultOrder = (xs: Spec[]) => [...xs].sort((a, b) => Number(b.e.unread) - Number(a.e.unread) || activityOf(b) - activityOf(a) || (a.id < b.id ? 1 : -1)).map((s) => s.id);
+      // Mốc hoạt động của mô hình PHẢI phản chiếu `INBOX_ACTIVITY_SQL` của máy chủ: các CỘT mốc của hội thoại, VÀ
+      // câu trả lời PHÍA PAGE ngoài ERP (#839 `PAGE_REPLY_ACTIVITY_SQL` — nhân viên gõ trên Pancake / Hộp thư Meta).
+      // Thiếu vế sau, mô hình xếp s17 (tin phía page lúc T−13′) SAU s08 (tin khách T−15′) trong khi máy chủ xếp s17
+      // trước — và máy chủ ĐÚNG: luật của chủ shop 14/10 là «hoạt động gần nhất của khách · AI · NHÂN VIÊN».
+      // Trước 14/10 chỗ lệch này bị NHÓM CHƯA ĐỌC che: s08 chưa đọc nên luôn đứng trước s17 ở mọi thẻ, nên mô hình
+      // sai vẫn ra cùng kết quả. Bỏ nhóm chưa đọc cho «Tất cả» làm nó lộ ra — bài kiểm đã làm đúng việc của nó.
+      const colActivityOf = (s: Spec) => Math.max(...[s.v.lastCustomerAt, s.v.lastBotAt, s.v.lastStaffAt, s.v.historyUntil].map((d) => (d instanceof Date ? d.getTime() : 0)), s.v.createdBy === HISTORY_CREATED_BY ? 0 : s.v.createdAt instanceof Date ? s.v.createdAt.getTime() : T0 - 5 * DAY);
+      // ĐÚNG tập của `PAGE_REPLY_ACTIVITY_SQL`: note = PAGE_REPLY và KHÔNG phải dòng nhập lịch sử (dòng nhập đã nằm
+      // trong `history_until`). Tin tự động của page / chữ hệ thống mang `sender_kind` riêng, bài kiểm không gieo.
+      const pageReplyAtOf = (s: Spec) => Math.max(0, ...(s.inbound ?? []).filter((m) => m.note === PAGE_REPLY && !m.imported).map((m) => T0 - m.at));
+      const activityOf = (s: Spec) => Math.max(colActivityOf(s), pageReplyAtOf(s));
+      // «Tất cả» (chủ shop 14/10/2026): THUẦN tin mới nhất; các thẻ khác: chưa đọc trước rồi tin mới nhất.
+      const defaultOrder = (xs: Spec[], filter: InboxFilter) => [...xs].sort((a, b) => (filter === "ALL" ? 0 : Number(b.e.unread) - Number(a.e.unread)) || activityOf(b) - activityOf(a) || (a.id < b.id ? 1 : -1)).map((s) => s.id);
       const waitOrder = (xs: Spec[]) => [...xs].sort((a, b) => (a.v.lastCustomerAt as Date).getTime() - (b.v.lastCustomerAt as Date).getTime() || (a.id < b.id ? -1 : 1)).map((s) => s.id);
       // Phân công trước khi đo: s02 · s11 về admin («Của tôi»), còn lại chưa ai nhận.
       await db.update(c).set({ assigneeUserId: admin.id }).where(inArray(c.id, ["s02", "s11"]));
@@ -152,7 +163,7 @@ export async function testInboxSemanticsV3() {
         const ids = r.rows.map((x) => x.id);
         const want = specs.filter((s) => keep(s) && pred[filter](s));
         assert.equal(new Set(ids).size, ids.length, `${label}: không trùng`);
-        assert.deepEqual(ids, filter === "UNANSWERED" ? waitOrder(want) : defaultOrder(want), `${label}: đúng tập + đúng thứ tự`);
+        assert.deepEqual(ids, filter === "UNANSWERED" ? waitOrder(want) : defaultOrder(want, filter), `${label}: đúng tập + đúng thứ tự`);
         assert.equal(r.total, ids.length, `${label}: số đếm = số dòng`);
         assert.equal(r.counts[filter], ids.length, `${label}: thẻ ${filter} đếm đúng`);
         return r;

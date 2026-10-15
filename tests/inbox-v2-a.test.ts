@@ -5,7 +5,8 @@
  *    lặng lẽ làm mất bộ lọc nào; mọi bộ lọc nâng cao có ô trong «Lọc ▾»; mọi thẻ của `INBOX_FILTERS` vẫn chọn được; đường dẫn dựng
  *    lại đúng mã cũ (`sdt=co|khong`, `xl=ai|nguoi`); huy hiệu «Lọc (n)»; hàng đang mở đứng yên; MỘT trạng thái trên hàng.
  *  · Mã nguồn: không dựng đường dẫn Facebook (từ PSID / mã luồng) ở hộp thư — không nguồn nào trả link hồ sơ thật.
- *  · CSDL (tổ chức THẬT `hop-thu-v2a`, tự cấp, tự dọn): thứ tự mặc định = CHƯA ĐỌC trước, trong nhóm tin mới nhất trước — xếp ở
+ *  · CSDL (tổ chức THẬT `hop-thu-v2a`, tự cấp, tự dọn): «Tất cả» = tin mới nhất trước, KHÔNG đẩy chưa đọc lên (chủ shop 14/10/2026);
+ *    thẻ «Chưa đọc» = đúng các hàng chưa đọc theo cùng thứ tự — xếp ở
  *    MÁY CHỦ nên «Xem thêm» (limit 50 → 100) ra đúng phần nối tiếp; «Chờ trả lời» vẫn khách chờ lâu nhất trước.
  */
 import assert from "node:assert/strict";
@@ -190,9 +191,13 @@ async function testUnreadFirstOrder() {
       assert.equal(p1.length, 50);
       assert.equal(p2.length, 70);
       assert.deepEqual(p1.map((r) => r.id), p2.slice(0, 50).map((r) => r.id), "«Xem thêm» ra ĐÚNG phần nối tiếp — thứ tự xếp ở máy chủ, ổn định");
-      const firstRead = p2.findIndex((r) => !r.unread);
-      assert.ok(firstRead > 0, "có cả hai nhóm");
-      assert.ok(p2.slice(firstRead).every((r) => !r.unread), "CHƯA ĐỌC luôn đứng trước ĐÃ ĐỌC (qua cả hai trang)");
+      // Chủ shop 14/10/2026: «Tất cả» xếp THUẦN theo tin mới nhất (khách · AI · nhân viên) — chưa đọc KHÔNG được đẩy lên trước, vì 687
+      // hội thoại chưa đọc từng chôn 89/100 hội thoại vừa có tin khỏi trang đầu (production HSLC).
+      for (let i = 1; i < p2.length; i++) assert.ok(p2[i - 1].lastActivityAt >= p2[i].lastActivityAt, `«Tất cả»: tin mới nhất trước (${p2[i - 1].id} ≥ ${p2[i].id})`);
+      const unreadRows = p2.filter((r) => r.unread);
+      const firstRead = unreadRows.length;
+      const lastUnreadAt = p2.reduce((k, r, i) => (r.unread ? i : k), -1);
+      assert.ok(p2.findIndex((r) => !r.unread) < lastUnreadAt, "chưa đọc và đã đọc XEN KẼ theo thời gian — không còn nhóm chưa đọc đứng đầu");
       // Chủ shop 11/10/2026 (P0-D — thay luật 10/10 «AI trả lời không xoá chưa đọc»): «chưa đọc» = tin khách CHƯA ĐƯỢC XỬ LÝ — chưa ai
       // mở VÀ chưa ai trả lời (bot · nhân viên · page). 70 hội thoại: chưa mở (i % 3 ≠ 0) và bot chưa trả lời (i chẵn) ⇒ 23 chưa đọc.
       assert.equal(firstRead, 23, "23 hội thoại chưa đọc / 70 (chưa ai mở VÀ bot chưa trả lời)");
@@ -203,20 +208,17 @@ async function testUnreadFirstOrder() {
       assert.equal(rowOf("t2").unread, true, "t2: tin cuối là của khách, chưa ai trả lời, chưa ai mở ⇒ chưa đọc");
       assert.equal(rowOf("t3").unread, false, "t3: nhân viên đã mở sau tin khách");
       assert.ok(p2.every((r) => r.unread === (r.unreadCount > 0)), "số chưa đọc trên hàng khớp cờ chưa đọc");
-      for (const group of [p2.slice(0, firstRead), p2.slice(firstRead)]) {
-        for (let i = 1; i < group.length; i++) assert.ok(group[i - 1].lastActivityAt >= group[i].lastActivityAt, `trong nhóm: tin mới nhất trước (${group[i - 1].id} ≥ ${group[i].id})`);
-      }
-      assert.ok(p1.some((r) => !r.unread), "trang đầu cắt giữa nhóm đã đọc — phép kiểm có nghĩa");
+      assert.ok(p1.some((r) => !r.unread) && p1.some((r) => r.unread), "trang đầu có cả hai loại — phép kiểm có nghĩa");
       assert.deepEqual(p2.filter((r) => r.customerId).map((r) => r.customerId), ["khach-5"], "hàng mang mã hồ sơ khách (ảnh mở hồ sơ)");
 
       // Thẻ «Chưa đọc»: cùng thứ tự (mới nhất trước), chỉ hàng chưa đọc.
       const unread = ids(await listInbox(admin, { filter: "UNREAD", limit: 100 }));
-      assert.deepEqual(unread.map((r) => r.id), p2.slice(0, firstRead).map((r) => r.id));
+      assert.deepEqual(unread.map((r) => r.id), unreadRows.map((r) => r.id), "thẻ «Chưa đọc» = đúng các hàng chưa đọc của «Tất cả», cùng thứ tự");
       // «Chờ trả lời» giữ thứ tự riêng: khách chờ LÂU NHẤT trước.
       const waiting = ids(await listInbox(admin, { filter: "UNANSWERED", limit: 100 }));
       assert.ok(waiting.length > 0);
       for (let i = 1; i < waiting.length; i++) assert.ok(waiting[i - 1].lastActivityAt <= waiting[i].lastActivityAt, "chờ lâu nhất trước");
-      console.log(`  ✓ chưa đọc trước: ${firstRead} chưa đọc rồi ${70 - firstRead} đã đọc · trang 50 = tiền tố trang 100 · Chờ trả lời giữ chờ-lâu-nhất-trước`);
+      console.log(`  ✓ «Tất cả» tin mới nhất trước (${firstRead} chưa đọc xen kẽ ${70 - firstRead} đã đọc) · thẻ Chưa đọc đúng tập · trang 50 = tiền tố trang 100 · Chờ trả lời giữ chờ-lâu-nhất-trước`);
     });
   } finally {
     await cleanup();
