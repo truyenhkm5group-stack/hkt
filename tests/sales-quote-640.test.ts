@@ -95,6 +95,26 @@ function testPureFlow() {
   assert.equal(lineBasisViolation(withNem, [L("p-cct", "v1", "Chả cá thu (1kg)"), nem(1)]), null, "khách nói tên + số lượng ⇒ thêm đúng 1");
   assert.match(lineBasisViolation(withNem, [L("p-cct", "v1", "Chả cá thu (1kg)"), nem(3)]) ?? "", /KHÔNG tự tăng «nem» lên 3/, "bot không tự đặt × 3");
   assert.match(lineBasisViolation(cart, [{ ...L("p-cct", "v1", "Chả cá thu (1kg)"), quantity: 2 }]) ?? "", /KHÔNG tự tăng «chả cá thu» lên 2kg: khách nói 1kg/);
+
+  /*
+    ═══ SỐ KHÔNG TÊN MIỄN THEO MÓN, KHÔNG MIỄN CẢ GIỎ (P0 15/10/2026, ca «Hoa Lê» 1kg → 10kg) ═══
+    Trước bản vá: chỉ cần MỘT món trong giỏ không gắn được tên là hàm trả `null` cho CẢ giỏ, tức hàng rào số
+    lượng tắt hẳn — một đơn nháp ghi 10kg chả cá trong khi khách nói 1kg đi lọt. ĐƠN VỊ quyết định số không
+    tên ấy có thể là của món nào: «10 cái» không thể là kilogram chả cá.
+  */
+  const soTran = (q: number, unit: "g" | "pack") => ({ label: `${q}`, match: "", productId: null, variantId: null, sku: null, quantity: q, unit, sourceMessageId: 2, confidence: "MEDIUM" as const, customerExplicit: true });
+  const caiKhongTen: CartCommitment = { ...cart, selectedItems: [...cart.selectedItems, soTran(10, "pack")] };
+  assert.match(
+    lineBasisViolation(caiKhongTen, [{ ...L("p-cct", "v1", "Chả cá thu (1kg)"), quantity: 10 }]) ?? "",
+    /KHÔNG tự tăng «chả cá thu» lên 10kg: khách nói 1kg/,
+    "«10 cái» không tên KHÔNG miễn hàng rào cho món bán theo kg — đây là đường đi của ca Hoa Lê",
+  );
+  // Nhưng vẫn KHÔNG chặn nhầm khách: số không tên CÙNG đơn vị với món thì có thể chính là số của món ấy.
+  const hopKhongTen: CartCommitment = { ...cart, selectedItems: [...cart.selectedItems, { label: "nem", match: "nem", productId: null, variantId: null, sku: null, quantity: 1, unit: "pack", sourceMessageId: 3, confidence: "HIGH", customerExplicit: true }, soTran(2, "pack")] };
+  assert.equal(lineBasisViolation(hopKhongTen, [L("p-cct", "v1", "Chả cá thu (1kg)"), nem(3)]), null, "«2 hộp» không tên cùng đơn vị với nem ⇒ vẫn miễn cho nem (không chắc thì không chặn khách)");
+  // Quy cách gói đã biết ⇒ «2 hộp» có thể chính là món bán theo khối lượng ⇒ vẫn miễn.
+  const coQuyCach: CartCommitment = { ...cart, selectedItems: [{ ...cart.selectedItems[0], packGrams: 500 }, soTran(2, "pack")] };
+  assert.equal(lineBasisViolation(coQuyCach, [{ ...L("p-cct", "v1", "Chả cá thu (1kg)"), quantity: 2 }]), null, "quy đổi được qua quy cách gói ⇒ không chặn");
   // Khách GỌI TÊN món mà máy không đọc được số lượng («thêm 1 ruốc tôm») ⇒ có căn cứ; «chả cá» không gọi tên «Chả mực giã tay».
   assert.equal(lineBasisViolation(cart, [L("p-cct", "v1", "Chả cá thu (1kg)"), L("p-ruoc", "v4", "Ruốc bông tôm 100%")], null, "cho chị 1kg chả cá thu, thêm 1 ruốc tôm"), null);
   assert.ok(lineBasisViolation(cart, [L("p-cct", "v1", "Chả cá thu (1kg)"), L("p-muc", "v2", "Chả mực giã tay (1kg)")], null, "cho chị 1kg chả cá thu") !== null);

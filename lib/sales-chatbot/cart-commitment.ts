@@ -670,16 +670,39 @@ export function lineBasisViolation(cart: CartCommitment | undefined, asked: read
     }
   }
   if (!cart || (turn !== undefined && turn !== null && cart.relaxedTurn === turn)) return null;
-  // Có món khách nói KHÔNG kèm tên («chả cá thu 1kg lấy 2 hộp» ⇒ 1kg chả cá + «2 hộp» không tên) ⇒ số lượng không quy được về đúng món:
-  // không chặn vế số lượng (luật an toàn — không chắc thì không chặn khách).
-  if (cart.selectedItems.some((x) => x.customerExplicit && !x.match && !x.productId)) return null;
-  const explicitPids = cart.selectedItems.filter((x) => x.customerExplicit).map((x) => productFor(x, cart, asked));
+  /*
+    MIỄN THEO MÓN, KHÔNG MIỄN CẢ GIỎ (P0 15/10/2026).
+
+    Khách nói một số KHÔNG kèm tên («chả cá thu 1kg lấy 2 hộp») thì số ấy không quy chắc về món nào, nên chặn
+    theo số lượng là có thể chặn nhầm khách. Đó là lý do đúng. Nhưng cách làm cũ là `return null` cho CẢ HÀM:
+    chỉ cần MỘT món không gắn được tên là toàn bộ hàng rào số lượng tắt — kể cả cho những món đã gắn tên và mã
+    rõ ràng. Một đơn nháp ghi 10kg chả cá trong khi khách nói 1kg sẽ đi lọt, và hàng rào duy nhất đứng giữa
+    một câu mơ hồ và một đơn sai tiền thì không được tắt vì một món KHÁC mơ hồ.
+
+    ĐƠN VỊ là thứ quyết định số không tên ấy CÓ THỂ là của món nào. «2 hộp» có thể là hộp nem, không thể là
+    kilogram chả cá; «10 cái» cũng vậy. Nên chỉ miễn cho món mà số không tên hợp đơn vị — hoặc quy đổi được
+    qua quy cách gói đã biết (`packGrams`), vì lúc đó «2 hộp» thật sự có thể là chính món bán theo khối lượng.
+    Mọi món còn lại GIỮ NGUYÊN hàng rào.
+  */
+  /** Số của `a` CÓ THỂ là số của `b` không? Cùng đơn vị, hoặc quy đổi được qua quy cách gói đã biết. */
+  const donViHopNhau = (a: CommittedItem, b: CommittedItem): boolean =>
+    a.unit === b.unit || (Boolean(b.packGrams ?? a.packGrams) && ((a.unit === "pack" && b.unit === "g") || (a.unit === "g" && b.unit === "pack")));
+  const soKhongTen = cart.selectedItems.filter((x) => x.customerExplicit && !x.match && !x.productId);
+  const coTheLaSoKhongTen = (it: CommittedItem): boolean => soKhongTen.some((u) => donViHopNhau(u, it));
+  const explicitCoMa = cart.selectedItems.filter((x) => x.customerExplicit).map((x) => ({ it: x, pid: productFor(x, cart, asked) }));
   for (const item of cart.selectedItems) {
     if (!item.customerExplicit) continue;
     const pid = productFor(item, cart, asked);
     if (!pid) continue;
-    // Hai món khách nói cùng trỏ về MỘT sản phẩm (sau khi gắn mã: «1kg» + «2 hộp») ⇒ không biết số nào là số của khách: không chặn.
-    if (explicitPids.filter((p) => p === pid).length > 1) continue;
+    // Số KHÔNG TÊN của khách có thể chính là số của món này (cùng đơn vị, hoặc quy đổi được) ⇒ không chặn món này.
+    if (coTheLaSoKhongTen(item)) continue;
+    /*
+      Hai món khách nói cùng trỏ về MỘT sản phẩm («1kg» + «2 hộp» sau khi gắn mã) ⇒ không biết số nào là số của
+      khách. Nhưng điều đó chỉ đúng khi hai số ẤY CÓ THỂ THAY NHAU: cùng đơn vị, hoặc quy đổi được qua quy cách
+      gói. «10 cái» KHÔNG thể là 1kg, nên để nó miễn hàng rào cho chả cá là mở đúng cái cửa mà ca «Hoa Lê» đã đi
+      qua (1kg → 10kg). Không quy đổi được thì GIỮ hàng rào — bot hỏi lại, chứ không tự chốt một con số.
+    */
+    if (explicitCoMa.some((e) => e.pid === pid && e.it !== item && donViHopNhau(e.it, item))) continue;
     const proposed = proposedAmount(pid, item.unit, asked);
     if (proposed === null || proposed <= item.quantity) continue;
     const name = item.label || productName(asked.find((l) => l.productId === pid)?.name ?? "") || "món khách chọn";
