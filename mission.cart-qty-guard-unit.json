@@ -1,0 +1,27 @@
+{
+  "schema": 1,
+  "mission_id": "cart-qty-guard-unit",
+  "title": "Hàng rào số lượng thôi tự tắt: số KHÔNG TÊN chỉ miễn cho món HỢP ĐƠN VỊ (đường đi của ca Hoa Lê 1kg→10kg)",
+  "business_goal": "",
+  "status": "RUNNING",
+  "priority": "P2",
+  "risk": "MEDIUM",
+  "owner": "DESKTOP-56TH98Y:wt-team",
+  "worker": null,
+  "worktree": null,
+  "branch": "claude/cart-qty-guard-unit",
+  "base_sha": null,
+  "domains": [],
+  "owned_paths": [
+    "lib/sales-chatbot/cart-commitment.ts",
+    "tests/sales-quote-640.test.ts"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-15T02:11:57.389Z",
+  "updated_at": "2026-10-15T02:11:57.389Z",
+  "last_heartbeat": "2026-10-15T02:11:57.389Z",
+  "definition_of_done": []
+}
