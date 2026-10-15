@@ -2886,3 +2886,4 @@
 {"at":"2026-10-15T03:31:31.249Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#845 @ d376c7e3cc1e · review độc lập vòng 4 PASS; npm test đầy đủ chờ worker"}
 {"at":"2026-10-15T03:33:06.436Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"cart-qty-guard-unit","detail":"claude/cart-qty-guard-unit @ 43cef336acd3 · 3 lệnh kiểm thử"}
 {"at":"2026-10-15T03:33:28.413Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#845 @ 43cef336acd3 · review độc lập vòng 4 PASS"}
+{"at":"2026-10-15T03:51:07.729Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"CLAIM","mission":"address-ward-explicit","detail":"RUNNING · 0 mẫu phạm vi · MEDIUM"}
