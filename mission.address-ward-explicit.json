@@ -3,7 +3,7 @@
   "mission_id": "address-ward-explicit",
   "title": "HSLC: không hỏi lại phường khi khách đã ghi rõ (Tuyet Nguyen Thi, Lê Văn Dụ)",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P0",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -31,9 +31,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-15T03:51:07.585Z",
-  "updated_at": "2026-10-15T11:29:10.477Z",
+  "updated_at": "2026-10-15T11:30:16.650Z",
   "last_heartbeat": "2026-10-15T11:29:10.477Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#848 → 48651de28ba06c219fa0de98a021ff5a7d7226a0"
+  },
   "handoff": {
     "branch": "claude/address-ward-explicit",
     "sha": "01ad085152b4c4fda25dce6fdb3fb7dd31a10c85",
