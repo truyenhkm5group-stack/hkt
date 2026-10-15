@@ -14,6 +14,31 @@
 
 
 
+
+## Checkpoint 2026-10-15 ~12:40Z — CLAUDE WEB TIẾP QUẢN TECH LEAD + INTEGRATION LEAD (Desktop hết hạn mức)
+
+**Khoá:** `tech-lead` + `integration-lead` = `vm:hkt` (Claude Web). Integration-lead tiếp quản lúc 10:10Z sau khi khoá Desktop hết hạn
+TỰ NHIÊN (không cướp). Desktop từng gia hạn đều 07:49→09:30Z mà không gộp/deploy gì từ 06:43Z — chủ shop được báo đóng Desktop.
+
+**ĐÃ LÊN PRODUCTION (đo bằng ops `status` /api/health):**
+| PR | gộp | deploy | bằng chứng |
+|---|---|---|---|
+| #842 Tất cả theo tin mới nhất | 412fb387 | run 38718552627 | health commit 412fb387d453 · smoke 135/135 |
+| #848 không hỏi lại phường | 48651de2 | run 38727812343 (lượt 2; lượt 1 chờ khoá VPS 1200s, chưa chạm máy) | health commit 48651de28ba0 · degradedMigration=false · smoke 135/135 · HSLC 3 tổ chức đủ 246 |
+| #849 bảng thời gian kiểm thử · #850 thread-diff ảnh-không-chữ | f0cf923e · 6a5f2ffa | KHÔNG cần (chỉ tests + script ops lấy từ main) | — |
+
+**#848 KHÁC bản Desktop bàn giao:** review độc lập 6 lượt; aa8849c5 FAIL (phường địa chỉ CŨ ghi vào đơn địa chỉ MỚI, không cờ). Sửa:
+bỏ hẳn nhận phường từ «lời trả lời ở tin trước»; phường từ chữ khách chỉ ghép khi CÙNG đường + CÙNG số nhà (bắt buộc cả hai bên);
+tin mới nhắc quận cũ khác / nêu phường khác (cả dạng câu hỏi) ⇒ bỏ cách đọc cũ; hàng rào chỉ bỏ câu hỏi lại khi tin khách mới nhất
+mang chính địa chỉ / nêu đúng phường / là lời đồng ý. Đánh đổi chấp nhận: «trả lời phường rồi ok em» ⇒ ô xã trống + cờ cần kiểm.
+
+**SỐ ĐO:** conv-money-trace HSLC từ 07:30Z (sau #845/#846): 55 hội thoại · «nói rõ hơn» không tin khách mới 0 · tổng ≠ giỏ 0.
+address-reask-audit HSLC 7 ngày (NỀN, phần lớn trước #848): hỏi lại 14/395 (3,5%) · phường rõ vẫn hỏi 1/231 ⇒ ĐO LẠI `--since=2026-10-15T12:26:00Z`.
+
+**CÒN MỞ:** #851 (đã merge main, giải xung đột sync-fixtures giữ cả hai) + #852 (update-branch) chờ gates rồi gộp, không cần deploy.
+`verify --record` KHÔNG chạy được từ Web (proxy chặn tên miền production) ⇒ address-ward-explicit / inbox-all-recency chưa `close DONE`
+— phiên có mạng tới production chạy `verify --sha=48651de2 --record` rồi close. Deploy «đỏ» = qa 0245 (đã biết), lượt cuối qa đã hết degraded.
+
 ## Checkpoint 2026-10-15 — TEAM: ĐỘ TIN CẬY HỘI THOẠI · MỘT KẾT QUẢ ÂM TÍNH QUAN TRỌNG
 
 ### 1 · GIẢ THUYẾT «HOA LÊ» SỐ 1 — KHÔNG DỰNG LẠI ĐƯỢC (đừng sửa giỏ theo nó)
