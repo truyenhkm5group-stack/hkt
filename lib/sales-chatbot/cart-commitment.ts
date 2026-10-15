@@ -684,11 +684,23 @@ export function lineBasisViolation(cart: CartCommitment | undefined, asked: read
     qua quy cách gói đã biết (`packGrams`), vì lúc đó «2 hộp» thật sự có thể là chính món bán theo khối lượng.
     Mọi món còn lại GIỮ NGUYÊN hàng rào.
   */
-  /** Số của `a` CÓ THỂ là số của `b` không? Cùng đơn vị, hoặc quy đổi được qua quy cách gói đã biết. */
+  /*
+    Số của `a` CÓ THỂ là số của `b` không? Cùng đơn vị thì có. Khác đơn vị thì CHỈ khi món ĐƯỢC BẢO VỆ (`b`)
+    có quy cách gói đã biết — quy cách là thứ của món bán, không phải của một con số trôi nổi, nên không đọc
+    `packGrams` của `a`: suy quy đổi từ phía không có định nghĩa là tự bịa ra một tỷ lệ.
+  */
   const donViHopNhau = (a: CommittedItem, b: CommittedItem): boolean =>
-    a.unit === b.unit || (Boolean(b.packGrams ?? a.packGrams) && ((a.unit === "pack" && b.unit === "g") || (a.unit === "g" && b.unit === "pack")));
+    a.unit === b.unit || (Boolean(b.packGrams) && ((a.unit === "pack" && b.unit === "g") || (a.unit === "g" && b.unit === "pack")));
   const soKhongTen = cart.selectedItems.filter((x) => x.customerExplicit && !x.match && !x.productId);
-  const coTheLaSoKhongTen = (it: CommittedItem): boolean => soKhongTen.some((u) => donViHopNhau(u, it));
+  const coTenRo = cart.selectedItems.filter((x) => x.customerExplicit && (x.match || x.productId));
+  /*
+    Một số KHÔNG TÊN chỉ miễn hàng rào cho món mà nó CHỈ CÓ THỂ thuộc về: tức món DUY NHẤT hợp đơn vị với nó.
+    Giỏ «1 hộp nem + 2 gói chả mực + “3 hộp”» thì «3 hộp» hợp với CẢ HAI ⇒ nó không chứng minh được gì cho
+    riêng món nào, và miễn cho cả hai là bỏ hàng rào của hai món khách đã xác nhận chỉ vì một câu mơ hồ. Mơ hồ
+    thì giữ giỏ an toàn và hỏi lại — không tự xác nhận một con số (chủ shop 15/10/2026).
+  */
+  const coTheLaSoKhongTen = (it: CommittedItem): boolean =>
+    soKhongTen.some((u) => donViHopNhau(u, it) && coTenRo.filter((x) => donViHopNhau(u, x)).length === 1);
   const explicitCoMa = cart.selectedItems.filter((x) => x.customerExplicit).map((x) => ({ it: x, pid: productFor(x, cart, asked) }));
   for (const item of cart.selectedItems) {
     if (!item.customerExplicit) continue;

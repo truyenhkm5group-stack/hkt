@@ -112,6 +112,15 @@ function testPureFlow() {
   // Nhưng vẫn KHÔNG chặn nhầm khách: số không tên CÙNG đơn vị với món thì có thể chính là số của món ấy.
   const hopKhongTen: CartCommitment = { ...cart, selectedItems: [...cart.selectedItems, { label: "nem", match: "nem", productId: null, variantId: null, sku: null, quantity: 1, unit: "pack", sourceMessageId: 3, confidence: "HIGH", customerExplicit: true }, soTran(2, "pack")] };
   assert.equal(lineBasisViolation(hopKhongTen, [L("p-cct", "v1", "Chả cá thu (1kg)"), nem(3)]), null, "«2 hộp» không tên cùng đơn vị với nem ⇒ vẫn miễn cho nem (không chắc thì không chặn khách)");
+  // GIỎ NHIỀU SKU: số không tên hợp đơn vị với HAI món đã xác nhận ⇒ nó không chứng minh được gì cho riêng món
+  // nào ⇒ KHÔNG miễn cho món nào cả. Bỏ hàng rào của hai món khách đã chốt chỉ vì một câu mơ hồ là sai hướng.
+  const named = (label: string, match: string, q: number) => ({ label, match, productId: null, variantId: null, sku: null, quantity: q, unit: "pack" as const, sourceMessageId: 3, confidence: "HIGH" as const, customerExplicit: true });
+  const nhieuSku: CartCommitment = { ...cart, selectedItems: [named("nem", "nem", 1), named("chả mực giã tay", "cha muc gia tay", 2), soTran(3, "pack")] };
+  assert.match(
+    lineBasisViolation(nhieuSku, [nem(5), { ...L("p-muc", "v2", "Chả mực giã tay (1kg)"), quantity: 2 }]) ?? "",
+    /KHÔNG tự tăng «nem» lên 5/,
+    "giỏ nhiều SKU: «3 hộp» không tên hợp cả nem lẫn chả mực ⇒ không miễn cho món nào",
+  );
   // Quy cách gói đã biết ⇒ «2 hộp» có thể chính là món bán theo khối lượng ⇒ vẫn miễn.
   const coQuyCach: CartCommitment = { ...cart, selectedItems: [{ ...cart.selectedItems[0], packGrams: 500 }, soTran(2, "pack")] };
   assert.equal(lineBasisViolation(coQuyCach, [{ ...L("p-cct", "v1", "Chả cá thu (1kg)"), quantity: 2 }]), null, "quy đổi được qua quy cách gói ⇒ không chặn");
