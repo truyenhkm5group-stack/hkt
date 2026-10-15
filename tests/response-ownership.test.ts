@@ -572,9 +572,13 @@ async function testFlow() {
           assert.equal(sqlOf.get(ids[i]), k.expect, `SQL «${k.name}» phải bằng TS`);
         }
         // Chữ hệ thống: bản SQL của mẫu khớp bản JS trên cùng các câu.
-        for (const txt of [META_NOTICE, "You're replying to a comment on your Page", "Dư Thị Liên đã trả lời một quảng cáo.", "Đã thêm nhãn tự động: …", "Dạ em gửi chị bảng giá", "Chị cho em xin địa chỉ"]) {
+        for (const txt of [META_NOTICE, "You're replying to a comment on your Page", "Dư Thị Liên đã trả lời một quảng cáo.", "Đã thêm nhãn tự động: …", "Đã đạt giai đoạn của khách hàng tiềm năng thành Đủ tiêu chuẩn", "Đã đặt giai đoạn của khách hàng tiềm năng thành Đủ tiêu chuẩn", "Dạ em gửi chị bảng giá", "Chị cho em xin địa chỉ"]) {
           const [r] = rowsOfPg(await db.execute(sql`select (${txt} ~* ${META_SYSTEM_TEXT_SQL_RE}) as hit`));
           assert.equal(Boolean(r?.hit), META_SYSTEM_TEXT_RE.test(txt), `mẫu chữ hệ thống JS ≡ SQL: «${txt}»`);
+        }
+        // Pancake viết «Đã ĐẠT giai đoạn» (15/10/2026, ca Hoa Lê) — một luật với PANCAKE_AUTO_NOTE_RE, cả hai cách viết.
+        for (const txt of ["Đã đạt giai đoạn của khách hàng tiềm năng thành Đủ tiêu chuẩn", "Đã đặt giai đoạn của khách hàng tiềm năng thành Đủ tiêu chuẩn"]) {
+          assert.ok(META_SYSTEM_TEXT_RE.test(txt), `chữ hệ thống: «${txt}»`);
         }
       }
 
