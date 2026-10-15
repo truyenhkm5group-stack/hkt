@@ -91,7 +91,22 @@ export const FIRST_CONTACT_LOOKBACK_MS = 60_000;
  * coi là «page đã trả lời», im đúng lúc khách sắp chốt đơn. 04/10/2026 («Đỗ Thị Hoa»): khách vào từ bài viết, chốt «Mình lấy
  * 1 kg» ⇒ Pancake chèn «Đỗ Thị Hoa đã trả lời về một bài viết. (link bài)» phía page ⇒ bot im — cùng lớp, khác câu chữ.
  */
-export const PANCAKE_AUTO_NOTE_RE = /nhãn tự động|đánh dấu trạng thái đơn|đặt giai đoạn của khách hàng|đã trả lời (?:về )?một (?:quảng cáo|bài viết)/i;
+/*
+  «ĐẶT» hay «ĐẠT» — MỘT DẤU NẶNG LÀM BOT IM ĐÚNG LÚC KHÁCH CHỐT (P0 15/10/2026, ca «Hoa Lê»).
+
+  Biểu thức cũ chỉ nhận «đặt giai đoạn của khách hàng». Chủ shop chép lại dòng Pancake hiện trong hội thoại là
+  «Đã ĐẠT giai đoạn … Đủ tiêu chuẩn». Hai chữ ấy khác nhau đúng một dấu, và hậu quả thì không nhỏ: dòng không
+  khớp ⇒ ERP coi nó là PAGE ĐÃ TRẢ LỜI ⇒ bot nhường, im lặng — đúng tình huống đã trả giá ngày 03/10/2026
+  («Thủy Nguyễn»: khách vừa gửi SĐT thì Pancake chèn dòng giai đoạn, bot im khi khách sắp chốt đơn).
+
+  Hướng sai của hai loại lỗi KHÔNG bằng nhau, nên chỗ này cố ý nới về phía nhận:
+   · BỎ SÓT một ghi chú tự động ⇒ bot tưởng có người trả lời ⇒ im ⇒ MẤT ĐƠN, và không ai biết vì sao.
+   · Nhận nhầm một câu người thật ⇒ chỉ khi nhân viên gõ đúng cụm «…giai đoạn của khách hàng…», điều không
+     xảy ra trong một câu bán hàng.
+  Nên khớp CẢ hai cách viết. Không nới rộng hơn thế: cụm «của khách hàng» vẫn bắt buộc, để câu chữ của người
+  không bao giờ rơi vào đây.
+*/
+export const PANCAKE_AUTO_NOTE_RE = /nhãn tự động|đánh dấu trạng thái đơn|đ[ặạ]t giai đoạn của khách hàng|đã trả lời (?:về )?một (?:quảng cáo|bài viết)/i;
 
 function pancakeMs(v: unknown): number | null {
   const s = typeof v === "string" ? v.trim() : "";

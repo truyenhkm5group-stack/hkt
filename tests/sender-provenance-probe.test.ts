@@ -41,6 +41,11 @@ export function testSenderProvenanceProbe() {
   assert.equal(classifyProbeMessage(m({ text: "Dạ em gửi chị  bảng giá" }), ctx), "ERP_STAFF");
   assert.equal(classifyProbeMessage(m({ text: "" }), ctx), "AUTO_NOTE");
   assert.equal(classifyProbeMessage(m({ text: "Đã đặt giai đoạn của khách hàng tiềm năng thành Đủ tiêu chuẩn" }), ctx), "AUTO_NOTE");
+  // «ĐẶT» và «ĐẠT» khác nhau đúng một dấu nặng, và chỗ này cố ý nhận CẢ HAI: bỏ sót một ghi chú tự động thì ERP
+  // coi nó là PAGE ĐÃ TRẢ LỜI ⇒ bot nhường và im đúng lúc khách sắp chốt (đã trả giá 03/10/2026, «Thủy Nguyễn»).
+  assert.equal(classifyProbeMessage(m({ text: "Đã đạt giai đoạn của khách hàng tiềm năng thành Đủ tiêu chuẩn" }), ctx), "AUTO_NOTE", "cách viết «đạt» cũng là ghi chú tự động — một dấu nặng không được làm bot im");
+  // Nhưng KHÔNG nới rộng hơn: cụm «của khách hàng» vẫn bắt buộc, để câu của người thật không bao giờ rơi vào đây.
+  assert.notEqual(classifyProbeMessage(m({ text: "Dạ chị đặt giai đoạn nào cũng được ạ" }), ctx), "AUTO_NOTE", "câu bán hàng của người không được nhận nhầm là ghi chú tự động");
   assert.equal(classifyProbeMessage(m({ text: "Bạn đang phản hồi bình luận của người dùng về bài viết trên Trang của mình. Xem bình luận." }), ctx), "META_COMMENT_SYSTEM");
   assert.equal(classifyProbeMessage(m({ uid: true }), ctx), "STAFF_UID");
   assert.equal(classifyProbeMessage(m({ uid: true, automated: true }), ctx), "AUTO_FLAG");
