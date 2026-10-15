@@ -58,6 +58,8 @@ jobs:
           SHA_VAO: ${{ inputs.sha }}
           SU_MENH: ${{ inputs.missions }}
         run: |
+          # Tắt bung glob: «*» trong ô mã sứ mệnh không được thành tên tệp ở gốc kho.
+          set -f
           case "$SHA_VAO" in
             *[!0-9a-f]*|"") echo "::error::sha phải là 40 ký tự hex thường"; exit 1 ;;
           esac
@@ -74,8 +76,11 @@ jobs:
           # Đọc lượt deploy qua API (kho public đọc được ẩn danh, token chỉ để khỏi hạn mức 60 lượt/giờ).
           GH_TOKEN: ${{ github.token }}
           GHI_TOKEN: ${{ github.token }}
-          AI_LEAD_ID: actions:ai-verify
+          # Nhãn người ghi trong sổ mang số lượt chạy ⇒ events.ndjson truy được về đúng lượt Actions (chỉ là số, hợp ACTOR_RE).
+          AI_LEAD_ID: actions:ai-verify:${{ github.run_id }}
         run: |
+          # pipefail: mã thoát của verify phải đi qua `| tee` (shell mặc định của Actions không bật nó).
+          set -f -o pipefail
           # Token ghi chỉ sống trong tiến trình của bước này: biến cấu hình git của tiến trình (không ghi vào
           # `.git/config`, không vào argv), tắt hooks.
           AUTH="$(printf 'x-access-token:%s' "$GHI_TOKEN" | base64 -w0)"
@@ -90,6 +95,10 @@ jobs:
           RC=0
           for m in $SU_MENH; do
             echo "════════ $m ════════"
-            node scripts/ai-tech.ts verify --sha="$SHA_VAO" --record --mission="$m" || RC=1
+            OUT="$(mktemp)"
+            node scripts/ai-tech.ts verify --sha="$SHA_VAO" --record --mission="$m" | tee "$OUT" || RC=1
+            # Không ghi được dấu (mã sứ mệnh chưa có trong sổ…) thì công cụ vẫn có thể trả 0 khi production ĐẠT —
+            # một dấu tick xanh không kèm dấu trong sổ là «chưa ghi» bị in thành «đã ghi». Đòi đúng dòng xác nhận ghi.
+            grep -q "✓ đã ghi " "$OUT" || { echo "::error::$m: KHÔNG ghi được dấu vào sổ"; RC=1; }
           done
           exit $RC
