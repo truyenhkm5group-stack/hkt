@@ -3,7 +3,7 @@
   "mission_id": "inbox-all-recency",
   "title": "Hộp thư «Tất cả» xếp theo tin mới nhất (chủ shop duyệt 14/10)",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -26,9 +26,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-14T09:05:23.030Z",
-  "updated_at": "2026-10-15T10:10:54.442Z",
+  "updated_at": "2026-10-15T10:11:19.595Z",
   "last_heartbeat": "2026-10-15T10:10:54.442Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#842 → 412fb387d453e6bd72e505f7d7c56d04a708e67b"
+  },
   "handoff": {
     "branch": "fix/inbox-all-recency",
     "sha": "ba697f4287abbab6fa59e738558599ecbf30f589",
