@@ -2849,3 +2849,4 @@
 {"at":"2026-10-14T15:42:24.744Z","actor":"DESKTOP-56TH98Y:wt-team","kind":"CLAIM","mission":"test-timing-table","detail":"RUNNING · 2 mẫu phạm vi · MEDIUM"}
 {"at":"2026-10-14T15:46:25.932Z","actor":"DESKTOP-56TH98Y:wt-team","kind":"HANDOFF","mission":"test-timing-table","detail":"claude/test-timing-table @ 9fed7350100d · 4 lệnh kiểm thử"}
 {"at":"2026-10-14T17:30:27.859Z","actor":"DESKTOP-56TH98Y:wt-team","kind":"HANDOFF","mission":"test-timing-table","detail":"claude/test-timing-table @ 1db60af8c9b2 · 4 lệnh kiểm thử"}
+{"at":"2026-10-15T01:49:41.302Z","actor":"DESKTOP-56TH98Y:wt-team","kind":"DUPLICATE_PREVENTED","detail":"Hoa Lê: «thêm 10 cái nem» làm số lượng chả cá 1kg thành 10kg — số lượng không tên rơi vào món tường minh duy nhất; gắn số lượng theo TÊN/đơn vị khớp, quy đổi cá · MISSION cart-intent-audit-sync «cart-intent-audit: bản sao luật khớp cart-commitment.ts sau #819 (đo AFTER bằng đúng luật đang chạy)» · khớp cart, commitment"}
