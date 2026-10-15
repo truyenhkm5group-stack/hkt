@@ -22,7 +22,7 @@ import { openConversationInPlace, useSelectedConversation } from "./thread-pane"
  * nay ≈ 56 px. Thông tin phụ KHÔNG mất: rê chuột lên hàng thấy page · nguồn · level · SĐT · người nhận · nhãn (title), và mọi thứ
  * đó vẫn LỌC được ở «Lọc ▾». Chấm màu cạnh tên = nhãn (tên nhãn ở title).
  *
- * THỨ TỰ do máy chủ quyết (`inboxOrderBy`: chưa đọc trước, mới nhất trước). Trang vá đúng hai thứ (`inboxDisplayRows`,
+ * THỨ TỰ do máy chủ quyết (`inboxOrderBy`: «Tất cả» tin mới nhất trước; thẻ khác chưa đọc trước). Trang vá đúng hai thứ (`inboxDisplayRows`,
  * inbox-read-shared.ts): hội thoại ĐANG MỞ đứng yên tại chỗ người vừa bấm và hiện đã đọc ngay; và XÁC NHẬN ĐỌC của máy chủ thắng mọi bản
  * danh sách dựng trước lượt đọc — rời A ở thẻ «Tin khách chưa đọc» ⇒ A rời danh sách NGAY (trừ khi có tin khách mới hơn lượt đọc), ở
  * thẻ khác A về nhóm đã đọc đúng chỗ. Bản danh sách mới hơn lượt đọc thì máy chủ thắng.

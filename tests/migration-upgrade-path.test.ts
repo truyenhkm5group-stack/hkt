@@ -193,6 +193,7 @@ const MOI = [
   "0243_followup_decided_event",
   "0244_sales_chat_inbound_sender",
   "0245_sales_chat_last_inbound",
+  "0246_cogs_basis_marketer_price",
 ] as const;
 
 /*

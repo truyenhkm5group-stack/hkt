@@ -6,6 +6,7 @@ import { z } from "zod";
 import { getDb, schema } from "@/db";
 import { audit } from "@/lib/audit";
 import { clearMemo } from "@/lib/cache";
+import { rematerializeProductOrders } from "@/lib/queries/canonical-outcome";
 import { can, requireUser } from "@/lib/auth/session";
 import { marketerPriceCutoff } from "@/lib/constants/marketer-price";
 import { normalizeProductCode } from "@/lib/constants/workshop-ledger";
@@ -56,6 +57,30 @@ async function nextEntryAfter(productId: string, from: Date): Promise<Date | nul
   return row ? new Date(row.at.getTime() - 1) : null;
 }
 
+/**
+ * Dựng lại giá vốn mọi đơn của mã sau khi giá báo đổi. Lỗi giữa chừng KHÔNG ném: thay đổi giá báo đã ghi thật. Job
+ * `rematerializeStale` chỉ bắt được dòng giá mới / sửa đè (dấu `created_at`) và căn cứ giá báo mồ côi — XOÁ một dòng khi
+ * mã còn dòng cũ hơn KHÔNG để lại dấu, nên câu lỗi phải chỉ đúng việc người bấm làm tiếp (docs/cost-center.md mục 5).
+ * Một dòng nhật ký GỘP (số đơn) cho mỗi lượt: số đã ghi nhận của các đơn đổi theo giá báo có vết.
+ */
+async function dungLaiGiaVon(user: { id: string; email: string }, productId: string, code: string, viec: "LUU" | "XOA"): Promise<{ error: string } | null> {
+  try {
+    const r = await rematerializeProductOrders(productId);
+    await audit({ userId: user.id, userEmail: user.email, action: "MARKETER_PRICE_COGS_REBUILD", entity: "MARKETER_PRICE", entityId: productId, detail: { code, orders: r.orders } });
+    return null;
+  } catch (e) {
+    console.error("[giá báo] dựng lại giá vốn lỗi", productId, e);
+    return {
+      error:
+        viec === "LUU"
+          ? `Đã lưu giá báo ${code}, nhưng dựng lại giá vốn các đơn của mã bị lỗi — báo cáo có thể còn giá vốn cũ. Bấm lưu lại dòng giá này để thử dựng lại; vẫn lỗi thì báo kỹ thuật.`
+          : `Đã xoá dòng giá báo ${code}, nhưng dựng lại giá vốn các đơn của mã bị lỗi — báo cáo có thể còn giá vốn theo dòng vừa xoá. KHÔNG tạo lại dòng đã xoá: bấm lưu lại dòng giá ĐANG hiệu lực còn lại của mã (nếu có) để thử dựng lại; vẫn lỗi thì báo kỹ thuật.`,
+    };
+  } finally {
+    clearMemo();
+  }
+}
+
 export async function setMarketerPrice(input: unknown): Promise<Result> {
   const user = await requireUser();
   if (!can(user, "payroll:manage")) return { error: "Đặt giá báo MKT cần quyền Lương: khai báo nhân sự & chia mã" };
@@ -74,14 +99,18 @@ export async function setMarketerPrice(input: unknown): Promise<Result> {
     .values({ productId: product.id, productCode: code, price: d.price, effectiveFrom: from, reason: d.reason, setByUserId: user.id, setBy: user.name || user.email })
     .onConflictDoUpdate({
       target: [schema.marketerPrices.productId, schema.marketerPrices.effectiveFrom],
-      set: { price: d.price, reason: d.reason, setByUserId: user.id, setBy: user.name || user.email, productCode: code },
+      // `created_at` = LÚC GHI (kể cả sửa đè cùng ngày hiệu lực): đó là dấu `rematerializeStale` dùng để biết giá vốn của mã đã cũ.
+      set: { price: d.price, reason: d.reason, setByUserId: user.id, setBy: user.name || user.email, productCode: code, createdAt: new Date() },
     })
     .returning({ id: schema.marketerPrices.id });
   await audit({ userId: user.id, userEmail: user.email, action: "MARKETER_PRICE_SET", entity: "MARKETER_PRICE", entityId: row.id, detail: { code, price: d.price, effectiveFrom: d.effectiveFrom, reason: d.reason } });
+  // Giá báo là GIÁ VỐN THỰC TẾ của mã (chủ shop chốt 13/10/2026) ⇒ dựng lại giá vốn mọi đơn của mã, rồi xoá đệm báo cáo.
+  const dung = await dungLaiGiaVon(user, product.id, code, "LUU");
+  // Làm mới trang CẢ khi dựng lại lỗi: giá báo đã lưu thật.
   revalidatePath("/inventory/workshop");
   revalidatePath("/payroll");
   revalidatePath("/reports");
-  return { ok: true };
+  return dung ?? { ok: true };
 }
 
 export async function deleteMarketerPrice(id: string): Promise<Result> {
@@ -94,10 +123,12 @@ export async function deleteMarketerPrice(id: string): Promise<Result> {
   if (khoa) return { error: `Dòng giá này đã áp vào kỳ lương đã khoá (${khoa}) — không xoá được` };
   await db.delete(schema.marketerPrices).where(eq(schema.marketerPrices.id, id));
   await audit({ userId: user.id, userEmail: user.email, action: "MARKETER_PRICE_DELETE", entity: "MARKETER_PRICE", entityId: id, detail: { code: row.productCode, price: row.price, effectiveFrom: row.effectiveFrom, setBy: row.setBy } });
+  const dung = await dungLaiGiaVon(user, row.productId, row.productCode, "XOA");
+  // Làm mới trang CẢ khi dựng lại lỗi: giá báo đã lưu thật.
   revalidatePath("/inventory/workshop");
   revalidatePath("/payroll");
   revalidatePath("/reports");
-  return { ok: true };
+  return dung ?? { ok: true };
 }
 
 // ─────────── Phiếu nhập CŨ ghi giá 0 → định giá theo giá báo MKT (chủ shop chốt 25/09/2026) ───────────

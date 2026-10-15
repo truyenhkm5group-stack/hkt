@@ -1301,7 +1301,13 @@ function thanHam(ten: string): string {
 export function testDienTapToChucMaNguon() {
   const { toChuc } = tachPhanToChuc();
   const khoi = boChuThichShell(toChuc);
-  const dt = thanHam("cmd_restore_drill_to_chuc");
+  const goi = thanHam("cmd_restore_drill_to_chuc");
+  const banSao = thanHam("dung_ban_sao_tam_to_chuc");
+  // Container tạm + pg_restore sống ở ĐÚNG MỘT hàm dùng chung (diễn tập tổ chức + chạy thử migration trên bản sao).
+  const dt = `${goi}\n${banSao}`;
+  assert.deepEqual(boChuThichShell(src()).match(/pg_restore -U erp -d "\$tam"/g), ['pg_restore -U erp -d "$tam"'], "khối tổ chức chỉ có MỘT lệnh pg_restore vào CSDL tạm — mọi bản sao đi qua dung_ban_sao_tam_to_chuc");
+  assert.ok(!/docker run|pg_restore/.test(goi), "restore-drill-org không tự dựng container / pg_restore — đi qua dung_ban_sao_tam_to_chuc");
+  assert.match(goi, /dung_ban_sao_tam_to_chuc "\$NHAN_DIEN_TAP_TO_CHUC" "erp-restore-drill-org" "\$tam" "\$ban"/, "diễn tập gọi hàm dùng chung với ĐÚNG nhãn + tên của nó");
   // Đích khôi phục KHÔNG BAO GIỜ là erp-db.
   assert.ok(!/\b(dropdb|createdb)\b|alter database/i.test(khoi), "khối tổ chức không được tạo / xoá / đổi tên CSDL nào — CSDL tạm sống và chết cùng container tạm");
   for (const dong of khoi.split("\n").filter((d) => /"\$DB_CONTAINER"/.test(d) && /docker exec/.test(d))) {
@@ -1315,8 +1321,9 @@ export function testDienTapToChucMaNguon() {
   assert.match(dt, /--memory "\$BO_NHO_DIEN_TAP" --memory-swap "\$BO_NHO_DIEN_TAP"/, "trần bộ nhớ như diễn tập nhà");
   assert.match(dt, /trap don_dien_tap_to_chuc EXIT/, "container tạm phải bị xoá cả khi diễn tập hỏng giữa chừng");
   assert.match(thanHam("don_dien_tap_to_chuc"), /docker rm -f -v "\$DRILL_TEN_TO_CHUC"/);
-  assert.ok(dt.indexOf("RAM_TOI_THIEU_DIEN_TAP_MB") > 0 && dt.indexOf("RAM_TOI_THIEU_DIEN_TAP_MB") < dt.indexOf("docker run"), "kiểm RAM TRƯỚC khi dựng container");
-  assert.ok(dt.indexOf('ten_csdl_tam "$csdl"') < dt.indexOf("docker run"), "tên CSDL tạm qua hàng rào TRƯỚC khi dựng gì");
+  assert.ok(goi.indexOf("RAM_TOI_THIEU_DIEN_TAP_MB") > 0 && goi.indexOf("RAM_TOI_THIEU_DIEN_TAP_MB") < goi.indexOf("dung_ban_sao_tam_to_chuc"), "kiểm RAM TRƯỚC khi dựng container");
+  assert.ok(goi.indexOf('ten_csdl_tam "$csdl"') > 0 && goi.indexOf('ten_csdl_tam "$csdl"') < goi.indexOf("dung_ban_sao_tam_to_chuc"), "tên CSDL tạm qua hàng rào TRƯỚC khi dựng gì");
+  assert.ok(banSao.indexOf("trap don_dien_tap_to_chuc EXIT") > 0 && banSao.indexOf("trap don_dien_tap_to_chuc EXIT") < banSao.indexOf("docker run"), "trap dọn gài TRƯỚC docker run");
   // Tên tạm: tiền tố KHÔNG giao với mẫu tên CSDL tổ chức — lượt sao lưu đêm không bao giờ coi nó là một tổ chức.
   const tienTo = /^TIEN_TO_CSDL_TAM="([^"]+)"$/m.exec(src())?.[1];
   assert.equal(tienTo, "tam_khoiphuc_");

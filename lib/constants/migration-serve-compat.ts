@@ -38,6 +38,17 @@ export const MIGRATION_SERVE_COMPAT: readonly ServeCompatEntry[] = [
     addedColumns: { sales_chat_conversations: ["turn_unhandled", "last_read_at"] },
     proof: "tests/migration-serve-compat.test.ts",
   },
+  {
+    tag: "0246_cogs_basis_marketer_price",
+    why:
+      "Chỉ NỚI hai ràng buộc CHECK (thêm căn cứ 'MARKETER_PRICE'), không thêm / đổi / xoá cột nào. Nơi ghi căn cứ ấy " +
+      "(`rematerializeOutcomes`; ghi huỷ bỏ hàng hoàn — `unitCostEstimate` VÀ nhánh dùng giá chụp từ hàng đợi) hỏi " +
+      "`constraintAllowsMarketerPrice()` trước: lược đồ cũ ⇒ không " +
+      "ghi căn cứ mới, lùi về bậc thang chứng từ kho như trước 13/10/2026 — chạy đúng, chỉ chưa áp luật giá báo cho giá vốn GHI NHẬN. " +
+      "Giá vốn sống (`ORDER_COGS`, `LINE_UNIT_COST`) không chạm ràng buộc nào nên vẫn theo giá báo. 0246 áp sau ⇒ lượt dựng lại kế tiếp tự đúng.",
+    addedColumns: {},
+    proof: "tests/cost-center.test.ts",
+  },
 ];
 
 /** Bộ cột phải tránh của MỘT bảng (tên CSDL) — hợp của mọi mục trong sổ. HÀM THUẦN. */

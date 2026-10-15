@@ -113,6 +113,9 @@ function testSource() {
 // ─────────────────────────── 3. PGlite THẬT ───────────────────────────
 
 /** Hạ CSDL đã áp 0245 về ĐÚNG trạng thái 0244: gỡ mọi thứ 0245 dựng + dòng sổ của nó. Chỉ bài kiểm dùng. */
+const MOC_0245 = (JSON.parse(readFileSync("drizzle/meta/_journal.json", "utf8")) as { entries: { tag: string; when: number }[] }).entries.find((e) => e.tag === "0245_sales_chat_last_inbound")?.when ?? 0;
+/** Mọi tag từ 0245 trở đi — hạ về 0244 là thiếu ĐÚNG chừng ấy mục. */
+const TU_0245 = (JSON.parse(readFileSync("drizzle/meta/_journal.json", "utf8")) as { entries: { tag: string; when: number }[] }).entries.filter((e) => e.when >= MOC_0245).map((e) => e.tag);
 const DOWNGRADE_0245 = `
 drop trigger if exists "sales_chat_inbound_turn" on "sales_chat_inbound";
 drop trigger if exists "sales_chat_staff_messages_turn" on "sales_chat_staff_messages";
@@ -125,7 +128,13 @@ drop function if exists "sales_chat_turn_refresh_template"(text, text, text, tim
 drop function if exists "sales_chat_turn_unhandled_of"(text, text, text, timestamptz), "sales_chat_turn_unhandled_web"(text, timestamptz), "sales_chat_turn_unhandled_thread"(text, text, timestamptz);
 drop index if exists "sales_chat_conversations_thread_idx";
 alter table "sales_chat_conversations" drop column if exists "turn_unhandled", drop column if exists "last_read_at";
-delete from "drizzle"."__drizzle_migrations" where created_at = (select max(created_at) from "drizzle"."__drizzle_migrations");
+-- 0246 (và mọi migration sau 0245 trong sổ khai tương thích): trả hai ràng buộc CHECK về định nghĩa trước 0246.
+alter table "canonical_order_outcome" drop constraint if exists "canonical_cogs_basis_check";
+alter table "canonical_order_outcome" add constraint "canonical_cogs_basis_check" check ("cogs_basis" is null or "cogs_basis" in ('RECEIPT_BEFORE', 'RECEIPT_AFTER', 'PROVISIONAL', 'NONE')) not valid;
+alter table "return_dispositions" drop constraint if exists "return_dispositions_value_check";
+alter table "return_dispositions" add constraint "return_dispositions_value_check" check (("disposition" = 'WRITE_OFF' or ("unit_cost_estimate" is null and "value_estimate" is null and "cost_basis" is null)) and ("value_estimate" is null or "value_estimate" >= 0) and ("cost_basis" is null or "cost_basis" in ('RECEIPT', 'ORDER_SNAPSHOT', 'VARIANT_DEFAULT', 'UNKNOWN'))) not valid;
+-- Gỡ dòng sổ của 0245 VÀ mọi migration sau nó (mốc của 0245 = mốc nhỏ nhất trong nhóm đã áp sau 0244).
+delete from "drizzle"."__drizzle_migrations" where created_at >= ${MOC_0245};
 `;
 
 /** Câu dẫn xuất của 0245 «hết giờ»: trigger giả CHỈ nổ trong giao dịch của 0245 (nó đặt statement_timeout 600 s = '10min'). */
@@ -246,7 +255,7 @@ async function testDb() {
     }
     const dg = organizationMigrationDegraded(ORG);
     assert.ok(dg, "mở được, trạng thái DEGRADED_MIGRATION");
-    assert.deepEqual(dg.missing, [TAG]);
+    assert.deepEqual(dg.missing, TU_0245, "thiếu đúng 0245 và các migration sau nó (đều khai trong sổ tương thích)");
     assert.match(dg.reason, /statement timeout/);
     assert.ok(degradedOrganizations().some((d) => d.code === ORG));
     assert.equal(warns.filter((w) => w.includes("DEGRADED_MIGRATION") && w.includes(ORG)).length, 1, "log rõ MỘT lần khi vào trạng thái");

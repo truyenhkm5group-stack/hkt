@@ -244,7 +244,10 @@ async function testDb() {
             .select({ id: c.id })
             .from(c)
             .where(and(ne(c.channel, "TEST"), ...(filter === "UNREAD" ? [sql`coalesce(${raw}, false)`] : [])))
-            .orderBy(sql`coalesce(${raw}, false) desc`, desc(INBOX_ACTIVITY_SQL), desc(c.id))
+            // Hàm trần phải phản chiếu `inboxOrderBy`: từ 14/10/2026 thẻ «Tất cả» xếp THUẦN theo tin mới nhất
+            // (chủ shop duyệt — 687 hội thoại chưa đọc đang chôn mọi hội thoại vừa có tin khỏi trang đầu); các thẻ
+            // khác vẫn chưa đọc trước. Giữ vế chưa đọc ở đây cho «Tất cả» là khoá lại ĐÚNG hành vi vừa bị bỏ.
+            .orderBy(...(filter === "ALL" ? [] : [sql`coalesce(${raw}, false) desc`]), desc(INBOX_ACTIVITY_SQL), desc(c.id))
             .limit(100);
           assert.deepEqual(
             got.rows.map((r) => r.id),
@@ -400,7 +403,7 @@ function testSource() {
   // Ba script ops CHỈ ĐỌC (Postgres ép `ERP_READ_ONLY`): audit sau triển khai + chạy thử trước 0245 (#809, chỉ nhắc tên cột trong chữ in)
   // + chẩn đoán migrate chậm (`org-migrate-probe`, chỉ hỏi information_schema xem cột 0245 đã có chưa)
   // + sổ tương thích lược đồ cũ (khai hai cột 0245 để mã TRÁNH chúng khi tổ chức đang DEGRADED_MIGRATION — không đọc, không ghi).
-  const allowed = new Set(["db/schema.ts", "lib/sales-chatbot/inbox-unread.ts", "scripts/inbox-read-audit.ts", "scripts/inbox-unread-dryrun.ts", "scripts/org-migrate-probe.ts", "lib/constants/migration-serve-compat.ts", "scripts/inbox-perf-probe.ts"]);
+  const allowed = new Set(["db/schema.ts", "lib/sales-chatbot/inbox-unread.ts", "scripts/inbox-read-audit.ts", "scripts/inbox-unread-dryrun.ts", "scripts/org-migrate-probe.ts", "lib/constants/migration-serve-compat.ts", "scripts/inbox-perf-probe.ts", "scripts/pancake-thread-diff.ts"]);
   const touching = files.filter((f) => /turnUnhandled|turn_unhandled|lastReadAt|last_read_at/.test(readFileSync(f, "utf8")));
   assert.deepEqual(
     touching.filter((f) => !allowed.has(f)),
@@ -412,7 +415,8 @@ function testSource() {
   assert.match(unread, /coalesce\(\$\{col\("turn_unhandled"\)\}, \$\{latestCustomerTurnUnhandledSql\(\)\}, false\)/, "chưa đọc = kết quả lưu sẵn, NULL ⇒ hàm của #803 (không luật thứ hai)");
   const inbox = readFileSync("lib/sales-chatbot/inbox.ts", "utf8");
   assert.doesNotMatch(inbox, /personalUnread|VIEWER_READ_ALIAS|HANDLED_AT|inboxUnreadSql\(/, "hộp thư không còn luật chưa đọc riêng");
-  assert.match(inbox, /const unreadSql = await loadInboxUnreadSql\(\);\n  const unread = unreadSql\.unread;/, "hộp thư lấy bộ biểu thức qua MỘT chỗ đọc công tắc");
+  // P0 inbox-list-perf 13/10/2026: tính trực tiếp ⇒ tập «chưa đọc» dựng MỘT lần bằng đúng biểu thức đó (tests/inbox-list-perf.test.ts).
+  assert.match(inbox, /const unreadSql = await loadInboxUnreadSql\(\);[\s\S]{0,2500}let unread: SQL<boolean> = unreadSql\.unread;/, "hộp thư lấy bộ biểu thức qua MỘT chỗ đọc công tắc");
   assert.equal((inbox.match(/loadInboxUnreadSql\(\)/g) ?? []).length, 1, "listInbox đọc công tắc đúng một lần");
   assert.equal((unread.match(/readInboxUnreadSwitch\(\)/g) ?? []).length, 1, "công tắc chỉ được đọc ở inboxUnreadMaterialized");
   const sw = readFileSync("lib/platform/inbox-unread-switch.ts", "utf8");

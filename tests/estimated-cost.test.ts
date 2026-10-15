@@ -135,7 +135,13 @@ function testOnlyNominalTabEnablesEstimates() {
     26/09/2026 cùng lúc với luật 5 "giá dự tính = giá báo MKT": kịch bản "giữ nguyên" phải nói cùng
     lợi nhuận với tab Lợi nhuận danh nghĩa. Trang ấy chỉ tính kế hoạch, không vào lương.
   */
-  const choPhep = new Set(["app/(dashboard)/reports/nominal-tab.tsx", "lib/queries/payroll.ts", "lib/queries/marketer-daily-nominal.ts", "lib/queries/profit-target.ts"]);
+  /*
+    `cost-center.ts` + `actions/estimated-cost.ts` — Trung tâm giá vốn (chủ shop 13/10/2026). Trang ấy
+    in giá vốn / sp mà CHÍNH tab Lợi nhuận danh nghĩa đang dùng ở hai chế độ, và bản xem trước tác
+    động trước khi lưu giá kế hoạch — nên nó phải gọi đúng báo cáo ấy với cùng công tắc. Không vào
+    lương, không vào dòng tiền thực, không ghi gì.
+  */
+  const choPhep = new Set(["app/(dashboard)/reports/nominal-tab.tsx", "lib/queries/payroll.ts", "lib/queries/marketer-daily-nominal.ts", "lib/queries/profit-target.ts", "lib/queries/cost-center.ts", "lib/actions/estimated-cost.ts"]);
   for (const p of [...tepMaNguon(path.join(goc, "app")), ...tepMaNguon(path.join(goc, "lib"))]) {
     const rel = path.relative(goc, p).split(path.sep).join("/");
     const src = readFileSync(p, "utf8");
@@ -154,10 +160,11 @@ function testOnlyNominalTabEnablesEstimates() {
 }
 
 /**
- * ═══ LUẬT 5: GIÁ DỰ TÍNH = GIÁ BÁO MKT (chủ shop chốt 26/09/2026) ═══
+ * ═══ LUẬT 5' (chủ shop sửa 13/10/2026): GIÁ KẾ HOẠCH ĐẶT TAY THẮNG GIÁ BÁO MKT ═══
  *
- * Mã đã khai giá báo thì giá dự tính LÀ giá báo — cùng phép chọn dòng với phiếu nhập kho; mã chưa
- * khai mới dùng số đặt tay. Giá báo 0 ₫ là "chưa định giá" (như ở kho), không được thành giá vốn 0.
+ * Luật 5 cũ (26/09/2026) cho giá báo thắng số đặt tay — nên sửa giá trên BCLN không có tác dụng (lỗi
+ * P0). Nay: mã đã đặt giá kế hoạch giữ nó; mã CHƯA đặt mới lấy giá báo làm tham chiếu lùi — cùng phép
+ * chọn dòng với phiếu nhập kho. Giá báo 0 ₫ là "chưa định giá" (như ở kho), không thành giá vốn 0.
  */
 function testMarketerPriceRule() {
   const ngay = (s: string) => new Date(`${s}T00:00:00+07:00`);
@@ -170,11 +177,14 @@ function testMarketerPriceRule() {
     C: [{ price: 0, effectiveFrom: ngay("2026-09-01"), reason: "", setBy: "" }],
   };
   const t9 = estimatedCostsWithMarketerPrice(tay, bao, ngay("2026-09-30"));
-  assert.equal(t9.A.unitCost, 150_000, "mã có giá báo: giá dự tính = giá báo đang hiệu lực, THẮNG số đặt tay");
-  assert.equal(t9.A.source, "MARKETER_PRICE");
-  assert.ok(t9.A.reason.includes("Giá báo MKT"), "nguồn phải nói ra được");
-  assert.equal(estimatedCostsWithMarketerPrice(tay, bao, ngay("2026-11-01")).A.unitCost, 120_000, "cuối kỳ sau ngày hạ giá ⇒ giá mới");
-  assert.equal(estimatedCostsWithMarketerPrice(tay, bao, ngay("2026-08-01")).A.unitCost, 150_000, "trước dòng giá đầu tiên ⇒ dòng đầu tiên, như phiếu nhập kho");
+  assert.equal(t9.A.unitCost, 100_000, "mã đã đặt giá kế hoạch: giá báo KHÔNG đè (luật 5')");
+  assert.equal(t9.A.source, "MANUAL");
+  const chiBao = estimatedCostsWithMarketerPrice({}, bao, ngay("2026-09-30"));
+  assert.equal(chiBao.A.unitCost, 150_000, "mã CHƯA đặt kế hoạch: tham chiếu lùi = giá báo đang hiệu lực");
+  assert.equal(chiBao.A.source, "MARKETER_PRICE");
+  assert.ok(chiBao.A.reason.includes("Giá báo MKT"), "nguồn phải nói ra được");
+  assert.equal(estimatedCostsWithMarketerPrice({}, bao, ngay("2026-11-01")).A.unitCost, 120_000, "cuối kỳ sau ngày hạ giá ⇒ giá mới");
+  assert.equal(estimatedCostsWithMarketerPrice({}, bao, ngay("2026-08-01")).A.unitCost, 150_000, "trước dòng giá đầu tiên ⇒ dòng đầu tiên, như phiếu nhập kho");
   assert.equal(t9.B.unitCost, 90_000, "mã chưa khai giá báo: giữ số đặt tay");
   assert.equal(t9.B.source, "MANUAL");
   assert.equal(t9.C, undefined, "giá báo 0 ₫ = chưa định giá ⇒ không có giá dự tính (CHƯA BIẾT), không phải 0 ₫");
@@ -264,15 +274,20 @@ export async function testEstimatedCost(db: Db) {
     assert.equal(ngay.total.expectedCogs, c.expectedCogs, "bảng theo ngày chia ĐÚNG giá vốn của dòng cha — gồm cả phần giá dự tính");
     assert.ok(ngay.days.length > 0 && ngay.days.every((d) => d.cell.cogsUncoveredQty === 0), "mã đã đặt giá dự tính ⇒ ngày không in “—” ở giá vốn");
 
-    // ─── Luật 5 trên báo cáo thật: khai giá báo cho mã C ⇒ giá dự tính của C thành giá báo ───
-    await db.insert(schema.marketerPrices).values({ productId: `${P}pc`, productCode: "GVDT-C", price: 130_000, effectiveFrom: gio(24 * 60), reason: "kiểm luật 5", setBy: "mkt@kiem" });
+    // ─── 13/10/2026: khai giá báo cho mã C ⇒ giá báo hiện tại LÀ giá vốn thực tế (luật 13 mới) — không còn
+    //     là "chỗ trống" để giá kế hoạch / tạm tính lấp; giá kế hoạch 100.000 vẫn lưu, chỉ chế độ kế hoạch đọc. ───
+    await db.insert(schema.marketerPrices).values({ productId: `${P}pc`, productCode: "GVDT-C", price: 130_000, effectiveFrom: gio(24 * 60), reason: "kiểm luật 13", setBy: "mkt@kiem" });
+    const { rematerializeProductOrders } = await import("@/lib/queries/canonical-outcome");
+    await rematerializeProductOrders(`${P}pc`);
     clearMemo();
-    const coGiaBao = await getNominalProfitReport(ky, "ORDERED", undefined, true, true);
-    const c2 = coGiaBao.rows.find((r) => r.code === "GVDT-C")!;
-    assert.equal(c2.estimatedCost?.unitCost, 130_000, "mã đã khai giá báo: giá dự tính = giá báo, không còn là 100.000 đặt tay");
-    assert.equal(c2.estimatedCost?.source, "MARKETER_PRICE");
-    assert.equal(c2.expectedCogsEstimated, Math.round(2 * (1 - c2.returnRate! / 100) * 130_000), "phần dự tính đi theo giá báo");
-    const a2 = coGiaBao.rows.find((r) => r.code === "GVDT-A")!;
+    const boKeHoach = await getNominalProfitReport(ky, "ORDERED", undefined, true, true);
+    const c2 = boKeHoach.rows.find((r) => r.code === "GVDT-C")!;
+    assert.equal(c2.cogsUnknownQty, 0, "có giá báo hiện tại ⇒ sản phẩm KHÔNG còn chưa biết giá vốn");
+    assert.equal(c2.estimatedCost, null, "giá thật (giá báo) có rồi ⇒ không tạm tính");
+    assert.equal(c2.costBasis, "ACTUAL");
+    assert.equal(c2.plannedCost?.unitCost, 100_000, "giá kế hoạch vẫn lưu — chế độ kế hoạch đọc nó");
+    assert.equal(c2.expectedCogs, Math.round(2 * 130_000 * (1 - c2.returnRate! / 100)), "giá vốn thực tế đi theo giá báo hiện tại");
+    const a2 = boKeHoach.rows.find((r) => r.code === "GVDT-A")!;
     assert.equal(a2.estimatedCost?.source, "MANUAL", "mã chưa khai giá báo giữ số đặt tay");
     assert.equal(a2.expectedCogsEstimated, 450_000);
     const macDinh2 = await getNominalProfitReport(ky);

@@ -287,7 +287,7 @@ export const SCOPE_RESOURCES: readonly ScopeResource[] = [
     label: "Báo cáo lợi nhuận",
     readPermissions: ["reports:delivered", "reports:cash", "reports:nominal", "reports:returns"],
     writePermission: "reports:assumptions",
-    routes: ["/reports", "/reports/returns", "/reports/funnel", "/reports/scenario", "/reports/target", "/products/performance"],
+    routes: ["/reports", "/reports/returns", "/reports/funnel", "/reports/scenario", "/reports/target", "/products/performance", "/inventory/cost-center"],
     table: "orders",
     rowOwner: null,
     rowAssignee: null,
