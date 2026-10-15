@@ -2893,3 +2893,4 @@
 {"at":"2026-10-15T04:21:19.436Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#846 @ d2079716bd63 · cây bằng 9d244c9a đã review PASS"}
 {"at":"2026-10-15T04:24:08.274Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DEPLOY_DISPATCHED","detail":"c30912bd1f6f · run 38681228498 https://github.com/truyenhkm5group-stack/hkt/actions/runs/38681228498"}
 {"at":"2026-10-15T05:27:30.542Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"address-ward-explicit","detail":"claude/address-ward-explicit @ 5e36bcba5e3f · 4 lệnh kiểm thử"}
+{"at":"2026-10-15T05:28:10.285Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"address-ward-explicit","detail":"#848 cho claude/address-ward-explicit @ 5e36bcba5e3f"}
