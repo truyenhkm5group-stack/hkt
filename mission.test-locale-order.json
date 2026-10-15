@@ -25,8 +25,8 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-13T14:20:28.962Z",
-  "updated_at": "2026-10-15T10:13:02.333Z",
-  "last_heartbeat": "2026-10-13T14:32:15.990Z",
+  "updated_at": "2026-10-15T12:36:50.270Z",
+  "last_heartbeat": "2026-10-15T12:36:50.270Z",
   "definition_of_done": [],
   "intake": {
     "verdict": "IN_PROGRESS",
@@ -34,18 +34,13 @@
   },
   "handoff": {
     "branch": "claude/test-locale-order",
-    "sha": "d9a91d81c5f9693cd99991c67e5b11e2c4b54897",
-    "at": "2026-10-13T14:32:15.990Z",
-    "actor": "DESKTOP-56TH98Y:wt-team",
+    "sha": "2b0669943e6c4c51308b3fb5e94b353943b71a19",
+    "at": "2026-10-15T12:36:50.270Z",
+    "actor": "vm:wt-852",
     "title": "Bài kiểm sao lưu thôi phụ thuộc locale của máy chạy (AGENTS §65)",
-    "summary": "Ghim LC_COLLATE=C và gỡ LC_ALL trong mã cho mọi lượt gọi shell của bài kiểm (tests/shell-locale.ts), thêm lá chắn §65 mục 2a. Không đổi giá trị kỳ vọng nào, không bỏ qua bài nào, không đụng luật nghiệp vụ sao lưu.",
+    "summary": "",
     "tests": [
-      "bài sao lưu chạy riêng (tests/backup.test.ts::testSaoLuu): ĐẠT trên Windows, kể cả khẳng định từng đỏ",
-      "tests/pitr.test.ts::testPitr: ĐẠT",
-      "tests/test-hygiene.test.ts::testTestHygiene: ĐẠT (có mục 2a mới)",
-      "npm run typecheck: sạch",
-      "npm run lint: sạch",
-      "npm test đủ: để CI chạy — máy dev đang thiếu RAM"
+      "GitHub update-branch (merge main); chờ gates"
     ]
   }
 }
