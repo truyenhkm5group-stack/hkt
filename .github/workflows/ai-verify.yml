@@ -88,17 +88,20 @@ jobs:
           export GIT_CONFIG_COUNT=2
           export GIT_CONFIG_KEY_0="http.https://github.com/.extraheader" GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $AUTH"
           export GIT_CONFIG_KEY_1="core.hooksPath" GIT_CONFIG_VALUE_1="/dev/null"
-          if [ -z "$SU_MENH" ]; then
+          # Tách từ TRƯỚC rồi đếm: ô chỉ có khoảng trắng phải đi nhánh «chỉ kiểm», không phải một vòng 0 lượt rồi xanh.
+          set -- $SU_MENH
+          if [ $# -eq 0 ]; then
             node scripts/ai-tech.ts verify --sha="$SHA_VAO"
             exit $?
           fi
           RC=0
-          for m in $SU_MENH; do
+          for m in "$@"; do
             echo "════════ $m ════════"
             OUT="$(mktemp)"
             node scripts/ai-tech.ts verify --sha="$SHA_VAO" --record --mission="$m" | tee "$OUT" || RC=1
             # Không ghi được dấu (mã sứ mệnh chưa có trong sổ…) thì công cụ vẫn có thể trả 0 khi production ĐẠT —
             # một dấu tick xanh không kèm dấu trong sổ là «chưa ghi» bị in thành «đã ghi». Đòi đúng dòng xác nhận ghi.
-            grep -q "✓ đã ghi " "$OUT" || { echo "::error::$m: KHÔNG ghi được dấu vào sổ"; RC=1; }
+            # Mẫu = câu cmdVerify in sau khi đẩy sổ thành công (bài kiểm đối chiếu với scripts/ai-tech.ts). Chỉ PASS: FAIL đã đỏ qua mã thoát.
+            grep -Eq "✓ đã ghi PASS $SHA_VAO [^ ]+ vào $m\$" "$OUT" || { echo "::error::$m: KHÔNG ghi được dấu PASS vào sổ"; RC=1; }
           done
           exit $RC

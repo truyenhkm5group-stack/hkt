@@ -107,7 +107,8 @@ export function testAiVerifyWorkflow() {
   // Không chạm VPS, không secret nào ngoài github.token, chỉ action được phép.
   assert.ok(!/secrets\./.test(MA), "ai-verify.yml không được đọc secret nào — chỉ github.token");
   assert.ok(!/appleboy|ssh-action|\bssh\b|VPS_/i.test(MA), "ai-verify.yml không được SSH / chạm VPS");
-  const uses = [...MA.matchAll(/uses:\s*([^@\s]+)@/g)].map((m) => m[1]);
+  // Mọi dòng `uses:` (kể cả action cục bộ `./…` hay `docker://…` không có `@`) phải là một trong hai action được phép.
+  const uses = [...MA.matchAll(/uses:\s*(\S+)/g)].map((m) => m[1]!.replace(/@.*$/, ""));
   assert.deepEqual([...new Set(uses)].sort(), ["actions/checkout", "actions/setup-node"], `chỉ actions/checkout + actions/setup-node, thấy: ${uses.join(", ")}`);
 
   const buoc = [...jobs.values()].flatMap(tachBuoc);
@@ -139,7 +140,15 @@ export function testAiVerifyWorkflow() {
   assert.ok(!/ai-tech\.ts\s+"?\$/.test(MA), "không gọi ai-tech.ts với lệnh lấy từ biến");
   assert.match(MA, /verify --sha="\$SHA_VAO" --record --mission="\$m"/, "ghi sổ phải qua verify --record --mission");
   // Không ghi được dấu ⇒ đỏ, kể cả khi production ĐẠT (công cụ trả 0 khi mã sứ mệnh chưa có trong sổ).
-  assert.match(MA, /grep -q "✓ đã ghi " "\$OUT" \|\| \{[^}]*RC=1; \}/, "phải đòi dòng «✓ đã ghi» cho mỗi sứ mệnh, thiếu thì RC=1");
+  assert.match(MA, /grep -Eq "✓ đã ghi PASS \$SHA_VAO \[\^ \]\+ vào \$m\\\$" "\$OUT" \|\| \{[^}]*RC=1; \}/, "phải đòi dòng «✓ đã ghi PASS <sha> … vào <sứ mệnh>» cho mỗi sứ mệnh, thiếu thì RC=1");
+  // Mẫu ấy là câu của cmdVerify — dựng kỳ vọng từ CÙNG NGUỒN (mục 65): đổi câu ở công cụ mà quên workflow thì đỏ ở đây, không đỏ VĨNH VIỄN trên Actions.
+  const congCu = readFileSync(path.join(goc, "scripts/ai-tech.ts"), "utf8");
+  assert.ok(congCu.includes("`✓ đã ghi ${stamp} vào ${id}`"), "scripts/ai-tech.ts phải còn in «✓ đã ghi ${stamp} vào ${id}» sau khi ghi dấu verify");
+  assert.ok(congCu.includes('`${v.pass ? "PASS" : "FAIL"} ${sha} ${new Date().toISOString()}`'), "dấu verify phải giữ dạng «PASS|FAIL <sha> <ISO>»");
+  // Ô sứ mệnh chỉ có khoảng trắng: tách từ trước rồi đếm, không `[ -z "$SU_MENH" ]` (vòng 0 lượt rồi xanh).
+  assert.match(MA, /set -- \$SU_MENH\n\s*if \[ \$# -eq 0 \]; then/, "phải tách mã sứ mệnh trước rồi đếm `$#`");
+  assert.ok(!/\[ -z "\$SU_MENH" \]/.test(MA), "không thử rỗng trên chuỗi thô — ô chỉ có khoảng trắng sẽ thành vòng 0 lượt");
+  assert.ok(!/^\s*exit 0\s*$/m.test(MA), "không `exit 0` đứng riêng");
   assert.match(MA, /^\s*exit \$RC\s*$/m, "bước verify phải kết thúc bằng exit $RC");
 
   // Mẫu mã sứ mệnh ở bước kiểm = SLUG_RE của công cụ (một nguồn, không gõ lại).
