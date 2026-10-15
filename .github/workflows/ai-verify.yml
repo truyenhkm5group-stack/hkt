@@ -1,0 +1,107 @@
+# ═══════════ HẬU KIỂM PRODUCTION CHẠY TRÊN MÁY ACTIONS — `ai-tech verify --record` ═══════════
+#
+# Actions → "Hậu kiểm production (AI Tech Room)" → Run workflow → nhập SHA + mã sứ mệnh.
+#
+# VÌ SAO CÓ (15/10/2026): phiên Claude Cloud KHÔNG gọi được tên miền production (proxy của môi trường trả 403),
+# nên `npm run ai -- verify --record` — cổng mà `close --status=DONE` đòi — không bao giờ chạy được từ đó. Bốn
+# hotfix P0 HSLC (#842 #845 #846 #848) đã lên production mà không sứ mệnh nào đóng được. Mở mạng cho phiên Cloud
+# là nới một hàng rào để lấy một con dấu; chạy ĐÚNG lệnh ấy ở nơi đã có mạng tới production là không nới gì.
+#
+# WORKFLOW NÀY CHẠY ĐÚNG MỘT LỆNH CỦA DELIVERY CONTROLLER và không có phán quyết riêng: mã nguồn `verify` (đọc
+# `/api/health`, đếm migration theo `_journal.json` của SHA, tìm lượt deploy-vps của SHA, gọi `verifyEndpoints`)
+# là của `scripts/ai-tech.ts` trên `main`. KHÔNG ĐẠT thì job ĐỎ — không có `|| true`.
+#
+# NÓ KHÔNG BAO GIỜ: chạm VPS (không SSH, không secret VPS), đọc CSDL, deploy, gộp, hay ghi vào nhánh nào ngoài
+# `ai-control/registry` (đường đẩy duy nhất là `pushControlCommit` của công cụ — chỉ đúng nhánh điều khiển,
+# không ép, không refspec `+`). Không `close`: đóng DONE vẫn là việc của Lead, đọc dấu PASS mà lượt này ghi.
+name: Hậu kiểm production (AI Tech Room)
+
+on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: "SHA đầy đủ (40 ký tự) của bản mong đợi đang chạy trên production"
+        type: string
+        required: true
+      missions:
+        description: "Mã sứ mệnh cần ghi dấu, cách nhau bởi khoảng trắng (rỗng = chỉ kiểm, không ghi sổ)"
+        type: string
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: ai-verify
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    # Chỉ mã công cụ trên main được cầm token ghi sổ — một nhánh khác dispatch được thì tự viết `verify` của nó.
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      # Không `npm ci`: công cụ chỉ dùng thư viện chuẩn và chạy bằng `node` trần (Node 22 bỏ kiểu TS).
+
+      - name: Kiểm hình dạng đầu vào
+        env:
+          SHA_VAO: ${{ inputs.sha }}
+          SU_MENH: ${{ inputs.missions }}
+        run: |
+          # Tắt bung glob: «*» trong ô mã sứ mệnh không được thành tên tệp ở gốc kho.
+          set -f
+          case "$SHA_VAO" in
+            *[!0-9a-f]*|"") echo "::error::sha phải là 40 ký tự hex thường"; exit 1 ;;
+          esac
+          [ "${#SHA_VAO}" -eq 40 ] || { echo "::error::sha phải đủ 40 ký tự"; exit 1; }
+          for m in $SU_MENH; do
+            printf '%s' "$m" | grep -Pq '^[a-z0-9](?:[a-z0-9-]{0,46}[a-z0-9])?$' || { echo "::error::mã sứ mệnh sai dạng (độ dài ${#m})"; exit 1; }
+          done
+          git fetch --no-tags origin "+refs/heads/ai-control/registry:refs/remotes/origin/ai-control/registry" || echo "chưa có sổ điều khiển"
+
+      - name: verify (--record khi có mã sứ mệnh)
+        env:
+          SHA_VAO: ${{ inputs.sha }}
+          SU_MENH: ${{ inputs.missions }}
+          # Đọc lượt deploy qua API (kho public đọc được ẩn danh, token chỉ để khỏi hạn mức 60 lượt/giờ).
+          GH_TOKEN: ${{ github.token }}
+          GHI_TOKEN: ${{ github.token }}
+          # Nhãn người ghi trong sổ mang số lượt chạy ⇒ events.ndjson truy được về đúng lượt Actions (chỉ là số, hợp ACTOR_RE).
+          AI_LEAD_ID: actions:ai-verify:${{ github.run_id }}
+        run: |
+          # pipefail: mã thoát của verify phải đi qua `| tee` (shell mặc định của Actions không bật nó).
+          set -f -o pipefail
+          # Token ghi chỉ sống trong tiến trình của bước này: biến cấu hình git của tiến trình (không ghi vào
+          # `.git/config`, không vào argv), tắt hooks.
+          AUTH="$(printf 'x-access-token:%s' "$GHI_TOKEN" | base64 -w0)"
+          echo "::add-mask::$AUTH"
+          export GIT_CONFIG_COUNT=2
+          export GIT_CONFIG_KEY_0="http.https://github.com/.extraheader" GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $AUTH"
+          export GIT_CONFIG_KEY_1="core.hooksPath" GIT_CONFIG_VALUE_1="/dev/null"
+          # Tách từ TRƯỚC rồi đếm: ô chỉ có khoảng trắng phải đi nhánh «chỉ kiểm», không phải một vòng 0 lượt rồi xanh.
+          set -- $SU_MENH
+          if [ $# -eq 0 ]; then
+            node scripts/ai-tech.ts verify --sha="$SHA_VAO"
+            exit $?
+          fi
+          RC=0
+          for m in "$@"; do
+            echo "════════ $m ════════"
+            OUT="$(mktemp)"
+            node scripts/ai-tech.ts verify --sha="$SHA_VAO" --record --mission="$m" | tee "$OUT" || RC=1
+            # Không ghi được dấu (mã sứ mệnh chưa có trong sổ…) thì công cụ vẫn có thể trả 0 khi production ĐẠT —
+            # một dấu tick xanh không kèm dấu trong sổ là «chưa ghi» bị in thành «đã ghi». Đòi đúng dòng xác nhận ghi.
+            # Mẫu = câu cmdVerify in sau khi đẩy sổ thành công (bài kiểm đối chiếu với scripts/ai-tech.ts). Chỉ PASS: FAIL đã đỏ qua mã thoát.
+            grep -Eq "✓ đã ghi PASS $SHA_VAO [^ ]+ vào $m\$" "$OUT" || { echo "::error::$m: KHÔNG ghi được dấu PASS vào sổ"; RC=1; }
+          done
+          exit $RC
