@@ -14,7 +14,7 @@
  *
  * KHÔNG ĐOÁN: hàng rào chỉ BỎ câu hỏi, không bao giờ tự điền một phường. Phường chưa biết và chưa hỏi lần nào ⇒ câu hỏi đầu tiên đi qua.
  */
-import { canAutoFill, customerStatedAddresses, parseCustomerAddress, wardFromCustomerWords, type AddressPart } from "@/lib/address/customer-address";
+import { canAutoFill, customerStatedAddresses, namesOtherWard, parseCustomerAddress, wardFromCustomerWords, type AddressPart } from "@/lib/address/customer-address";
 import { foldVnText } from "@/lib/address/vn-address";
 import type { ChatState } from "@/lib/sales-chatbot/tools";
 
@@ -51,8 +51,11 @@ export function askedBefore(m: AddressAskMemory | undefined, parts: readonly Add
 
 // ─────────────────────────── ĐỊA CHỈ ĐÃ BIẾT + HÀNG RÀO CÂU HỎI LẠI ───────────────────────────
 
-/** Những gì máy chủ BIẾT về địa chỉ giao của lượt. `ward` = tên chuẩn khi đã biết; `wardAskedAt` = lượt đầu tiên đã hỏi phường. */
-export type AddressKnowledge = { ward: string | null; wardAskedAt: number | null; province: boolean; street: boolean };
+/**
+ * Những gì máy chủ BIẾT về địa chỉ giao của lượt. `ward` = tên chuẩn khi đã biết; `wardAskedAt` = lượt đầu tiên đã hỏi phường;
+ * `corrected` = tin khách MỚI NHẤT nêu một phường KHÁC phường máy đang biết (khách đang sửa) — khi đó bot được hỏi / xác nhận lại.
+ */
+export type AddressKnowledge = { ward: string | null; wardAskedAt: number | null; province: boolean; street: boolean; corrected?: boolean };
 
 /**
  * Đọc địa chỉ đã biết: đơn nháp (ô xã người / khách đã chọn, hoặc dòng địa chỉ tự điền được) → khách đã lưu → tin khách tự gõ (kể cả
@@ -62,24 +65,34 @@ export function addressKnowledge(state: Pick<ChatState, "draft" | "customer" | "
   const mem = askMemoryParts(state.addressAsk);
   const wardAskedAt = mem.ward ?? null;
   const r = state.draft?.recipient ?? (state.customer?.address.trim() ? { address: state.customer.address, province: state.customer.province, ward: undefined } : null);
+  const last = customerTexts[customerTexts.length - 1] ?? "";
   if (r && r.address.trim()) {
     const a = parseCustomerAddress(r.address, r.province);
     const chosen = (r.ward ?? "").trim();
     const stated = chosen || canAutoFill(a) ? null : wardFromCustomerWords(a, r.address, customerTexts);
     const ward = chosen || (canAutoFill(a) ? a.ward : null) || stated?.ward || null;
+    const provinceName = a.province ?? stated?.province ?? null;
+    // Khách vừa nêu một phường khác (sửa không kèm đường) ⇒ phường máy đang giữ KHÔNG còn là điều đã biết.
+    if (ward && provinceName && last.split(/\n+/).some((x) => namesOtherWard(x, provinceName, ward))) return { ward: null, wardAskedAt, province: true, street: !a.missing.includes("street"), corrected: true };
     return { ward, wardAskedAt, province: a.province !== null || Boolean(stated), street: !a.missing.includes("street") };
   }
   const [said] = customerStatedAddresses(customerTexts);
   return said ? { ward: said.ward, wardAskedAt, province: said.province !== null, street: !said.missing.includes("street") } : { ward: null, wardAskedAt, province: false, street: false };
 }
 
-/** Câu HỎI phường / xã (đã gập): «phường nào», «phường / xã gì», «cho em xin tên phường», «… hay phường B», «theo địa giới mới …?». */
-const WARD_ASK = [
-  /(?:^| )(?:phuong|xa|thi tran)(?: (?:phuong|xa))? (?:nao|gi)(?: |$)/,
+/** Câu HỎI phường / xã (đã gập) tự thân là câu hỏi: «phường nào», «phường / xã gì». */
+const WARD_ASK = [/(?:^| )(?:phuong|xa|thi tran)(?: (?:phuong|xa))? (?:nao|gi)(?: |$)/];
+/**
+ * Chỉ tính là câu HỎI khi có dấu hiệu hỏi (`isQuestion`): «cho em xin tên phường … ạ?», «… hay phường B?», «theo địa giới mới …?». Câu
+ * KỂ «Em xác nhận phường An Hội Tây cho mình nhé.» / «giao tới …, phường An Hội Tây» không phải câu hỏi (review PR #848).
+ */
+const WARD_ASK_Q = [
   /(?:^| )(?:xin|xac nhan|cho em biet|cho biet|bao|kiem tra|chon)(?: lai)?(?: giup)?(?: em| shop| minh| chi| anh)?(?: lai)?(?: (?:ten|dung))? (?:phuong|xa)(?: |$)/,
+  /(?:^| )hay (?:phuong|xa) /,
+  /(?:^| )dia gioi moi(?: |$)/,
 ];
-/** Chỉ tính là câu hỏi khi có dấu «?» — câu tóm tắt «giao tới …, phường An Hội Tây» không phải câu hỏi. */
-const WARD_ASK_Q = [/(?:^| )hay (?:phuong|xa) /, /(?:^| )dia gioi moi(?: |$)/];
+/** Dấu hiệu câu hỏi: dấu «?», hoặc kết bằng tiểu từ hỏi («… không», «… chưa», «… nào» + «ạ / nhé / nha»). */
+const isQuestion = (sentence: string, folded: string) => sentence.includes("?") || /(?:^| )(?:khong|ko|chua|nao|gi)(?: (?:a|nhe|nha|a nhe|a nha))?$/.test(folded);
 /** Câu xin lại CẢ địa chỉ. */
 const FULL_ADDRESS_ASK = /(?:^| )(?:xin|gui|cho em|nhan)(?: lai)?(?: giup em)? (?:thong tin )?dia chi(?: |$)/;
 
@@ -87,7 +100,7 @@ const FULL_ADDRESS_ASK = /(?:^| )(?:xin|gui|cho em|nhan)(?: lai)?(?: giup em)? (
 export function asksForWard(sentence: string): boolean {
   const f = foldVnText(sentence);
   if (WARD_ASK.some((re) => re.test(f))) return true;
-  return sentence.includes("?") && WARD_ASK_Q.some((re) => re.test(f));
+  return isQuestion(sentence, f) && WARD_ASK_Q.some((re) => re.test(f));
 }
 
 /** Một câu có xin lại CẢ địa chỉ không. HÀM THUẦN. */
@@ -103,7 +116,8 @@ export const ADDRESS_KNOWN_TEXT = "Dạ em ghi nhận địa chỉ của mình r
  * `note` = lý do cho người vận hành. Không ⇒ `null`. Phường chưa biết và chưa hỏi lần nào ⇒ câu hỏi đầu tiên đi qua. HÀM THUẦN.
  */
 export function addressReaskVerdict(botText: string, k: AddressKnowledge, turn: number): { rest: string; note: string } | null {
-  const wardSettled = k.ward !== null || (k.wardAskedAt !== null && k.wardAskedAt < turn);
+  // Khách đang sửa phường ⇒ bot được hỏi / xác nhận lại — hàng rào không bỏ câu hỏi phường ở lượt đó.
+  const wardSettled = !k.corrected && (k.ward !== null || (k.wardAskedAt !== null && k.wardAskedAt < turn));
   const fullKnown = k.ward !== null && k.province && k.street;
   if (!wardSettled && !fullKnown) return null;
   const sentences = (botText.match(/[^.!?\n]+[.!?]*/g) ?? []).map((s) => s.trim()).filter(Boolean);

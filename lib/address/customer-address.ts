@@ -198,52 +198,115 @@ export function addressReviewHint(a: CustomerAddress): string {
 
 // ─────────────────────────── CHỮ CỦA CHÍNH KHÁCH ───────────────────────────
 
+/** Một cách đọc địa chỉ khách tự gõ + VỊ TRÍ tin mang nó (chỉ số trong mảng tin, cũ ⇒ mới) — để biết tin nào MỚI HƠN nó. */
+export type StatedAddress = CustomerAddress & { messageIndex: number };
+
 /**
  * ĐỊA CHỈ KHÁCH TỰ GÕ, đọc thẳng từ tin của khách (P0 15/10/2026). Công cụ của bot chỉ thấy dòng địa chỉ MODEL chép lại — ca «Tuyet Nguyen
  * Thi»: khách gõ «230/20 Phan Huy Ích, P An Hội Tây, TP.HCM» (phường MỚI sau sáp nhập), model không biết tên mới nên chép thành
  * «…, Gò Vấp, TP.HCM» ⇒ bộ đọc chỉ còn quận cũ ⇒ 6 phường ⇒ bot bắt khách chọn. Hàm này trả các cách đọc TỰ ĐIỀN ĐƯỢC của
  * những tin khách trông như một địa chỉ giao: từng dòng, cả tin, rồi tin đó ghép với tin ngay trước (khách gõ địa chỉ làm hai
- * tin). Bỏ dòng là câu hỏi («phường An Hội Tây có ship không?») và dòng không có phần số nhà / đường. Thứ tự: mới nhất trước; không
- * có ⇒ mảng rỗng. HÀM THUẦN.
+ * tin — cách đọc ghép mang vị trí của tin CŨ hơn). Bỏ dòng là câu hỏi («phường An Hội Tây có ship không?») và dòng không có số nhà /
+ * đường / khu thật (`streetLooksReal`). Cách đọc mà từ tin của nó trở về sau có một dòng nêu phường KHÁC («à em nhầm, phường An Hội
+ * Đông nhé» — sửa không kèm đường; hay một địa chỉ khác hẳn) bị bỏ: khách đã sửa, phường cũ không còn là lời khai (review PR #848).
+ * Thứ tự: mới nhất trước; không có ⇒ mảng rỗng. HÀM THUẦN.
  */
-export function customerStatedAddresses(texts: readonly string[]): CustomerAddress[] {
+export function customerStatedAddresses(texts: readonly string[]): StatedAddress[] {
   const msgs = texts.map((t) => t.trim()).filter(Boolean);
-  const out: CustomerAddress[] = [];
+  const out: StatedAddress[] = [];
   const seen = new Set<string>();
-  const tryLine = (line: string) => {
+  const tryLine = (line: string, messageIndex: number) => {
     const l = line.trim();
     if (!l || l.includes("?") || seen.has(l)) return;
     seen.add(l);
     const a = parseCustomerAddress(l);
-    if (canAutoFill(a) && foldVnText(a.street).length >= 3) out.push(a);
+    if (!canAutoFill(a) || !streetLooksReal(a) || !a.ward || !a.province) return;
+    // Từ CHÍNH tin mang địa chỉ trở về sau, xét TỪNG DÒNG: một dòng nêu phường khác là lời sửa (dòng của chính địa chỉ ra cùng phường).
+    if (msgs.slice(messageIndex).some((m) => m.split(/\n+/).some((x) => namesOtherWard(x, a.province!, a.ward!)))) return;
+    out.push({ ...a, messageIndex });
   };
   for (let i = msgs.length - 1; i >= 0; i--) {
     const lines = msgs[i].split(/\n+/);
-    for (let j = lines.length - 1; j >= 0; j--) tryLine(lines[j]);
-    if (lines.length > 1) tryLine(lines.join(", "));
-    if (i > 0) tryLine(`${msgs[i - 1].split(/\n+/).pop() ?? ""}, ${lines[0]}`);
+    for (let j = lines.length - 1; j >= 0; j--) tryLine(lines[j], i);
+    if (lines.length > 1) tryLine(lines.join(", "), i);
+    if (i > 0) tryLine(`${msgs[i - 1].split(/\n+/).pop() ?? ""}, ${lines[0]}`, i - 1);
   }
   return out;
+}
+
+/**
+ * Tin khách nêu một phường / xã KHÁC `ward` trong tỉnh `province` (đọc ra một phường khác, hoặc vài ứng viên không gồm `ward`) — lời SỬA
+ * của khách, kể cả không kèm số nhà / đường. Tin không nhắc đơn vị hành chính nào («ok em», SĐT) ⇒ `false`. HÀM THUẦN.
+ */
+export function namesOtherWard(text: string, province: string, ward: string): boolean {
+  if (text.includes("?")) return false;
+  // Tin tự đọc ra một phường KHÁC (kể cả ở tỉnh khác — khách đổi hẳn địa chỉ) ⇒ sửa.
+  const own = normalizeVnAddress(text);
+  if (own.status === "MATCHED" && own.ward.name !== ward) return true;
+  const m = normalizeVnAddress(`${text}, ${province}`);
+  if (m.status === "MATCHED") return m.ward.name !== ward;
+  if (m.status === "AMBIGUOUS") return !m.candidates.some((c) => c.name === ward);
+  return false;
 }
 
 const houseKey = (h: string | null) => (h ? h.toLowerCase() : null);
 
 /**
+ * Phần trước đơn vị hành chính có thật là SỐ NHÀ / ĐƯỜNG / KHU không: có số nhà, hoặc mở đầu bằng một tiếng chỉ nơi chốn (khu, KĐT, thôn,
+ * xóm, ấp, ngõ, hẻm, đường, phố, tổ, lô, chung cư…). «à em nhầm, phường An Hội Đông» có «phần đường» là «à em nhầm» — đó là câu nói,
+ * không phải một địa chỉ để ghép (review PR #848).
+ */
+function streetLooksReal(a: Pick<CustomerAddress, "street" | "houseNumber">): boolean {
+  if (a.houseNumber) return true;
+  return /^(?:khu|kdt|thon|xom|ap|ban|ngo|ngach|hem|kiet|duong|pho|to|cum|lo|toa|chung cu|cc|so)(?: |$)/.test(foldVnText(a.street));
+}
+
+/** Phần TÊN ĐƯỜNG / khu đã gập, bỏ số nhà và chữ «số / SN / nhà» ở đầu («230/20 Phan Huy Ích» ⇒ «phan huy ich»). */
+function streetCore(street: string): string {
+  const words = foldVnText(street).split(" ").filter(Boolean);
+  let i = 0;
+  while (i < words.length && (/\d/.test(words[i]) || ["so", "sn", "nha"].includes(words[i]))) i++;
+  return words.slice(i).join(" ");
+}
+
+/** Hai phần đường cùng nói một con đường / một khu: cả hai đủ dài và cái này nằm trọn (đủ từ) trong cái kia. */
+function sameStreet(x: string, y: string): boolean {
+  const a = streetCore(x);
+  const b = streetCore(y);
+  if (a.length < 3 || b.length < 3) return false;
+  return ` ${a} `.includes(` ${b} `) || ` ${b} `.includes(` ${a} `);
+}
+
+/**
  * Xã / phường MỚI lấy từ CHÍNH chữ khách khi dòng địa chỉ của công cụ (`a` — bản model chép) chưa tự điền được. Chỉ nhận khi KHỚP với
- * dòng của công cụ — không bao giờ ghép xã của một địa chỉ khác vào:
- *  · cùng tỉnh (dòng công cụ đã đọc được tỉnh thì tỉnh của tin khách phải trùng);
- *  · cùng số nhà khi cả hai có số nhà; dòng công cụ không có số nhà ⇒ phần đường của tin khách phải nằm trong dòng công cụ.
+ * dòng của công cụ — không bao giờ ghép xã của một địa chỉ khác vào (review độc lập PR #848: «12 Lê Lợi, P Bến Thành» rồi khách đổi sang
+ * «12 Nguyễn Văn Lượng, Gò Vấp» từng nhận Bến Thành vì chỉ so số nhà):
+ *  · CÙNG ĐƯỜNG (tên đường / khu, đã gập, cái này nằm trọn trong cái kia) — bắt buộc;
+ *  · cùng số nhà khi cả hai có số nhà;
+ *  · cùng tỉnh khi dòng công cụ đọc được tỉnh; dòng công cụ KHÔNG có tỉnh ⇒ chỉ nhận địa chỉ trong tin khách MỚI NHẤT có địa chỉ
+ *    (không mượn tỉnh + xã của một địa chỉ cũ hơn);
+ *  · không tin khách nào mới hơn nêu một phường khác (`customerStatedAddresses`).
  * Trả tên chuẩn xã + tỉnh và mức tin cậy của tin khách; không có ⇒ `null`. HÀM THUẦN.
  */
 export function wardFromCustomerWords(a: CustomerAddress, toolAddress: string, texts: readonly string[] | undefined): { ward: string; province: string; provinceCode: number; confidence: AddressConfidence } | null {
   if (canAutoFill(a) || !texts?.length) return null;
-  const tool = ` ${foldVnText(toolAddress)} `;
-  for (const s of customerStatedAddresses(texts)) {
+  const toolStreet = a.street || streetPart(toolAddress);
+  const msgs = texts.map((t) => t.trim()).filter(Boolean);
+  // Tin khách MỚI NHẤT có dáng một địa chỉ (số nhà + đọc được tỉnh / ứng viên xã / gợi ý tỉnh) — chỉ số trong cùng mảng đã lọc.
+  let newestAddress = -1;
+  for (let i = msgs.length - 1; i >= 0 && newestAddress < 0; i--) {
+    if (msgs[i].split(/\n+/).some((l) => {
+      const p = parseCustomerAddress(l);
+      return (p.houseNumber !== null || /\d/.test(p.street)) && (p.province !== null || p.candidates.length > 0 || p.provinceHint !== null);
+    })) newestAddress = i;
+  }
+  for (const s of customerStatedAddresses(msgs)) {
     if (!s.ward || !s.province || s.provinceCode === null) continue;
-    if (a.provinceCode !== null && a.provinceCode !== s.provinceCode) continue;
+    if (a.provinceCode !== null ? a.provinceCode !== s.provinceCode : s.messageIndex < newestAddress) continue;
+    if (!sameStreet(toolStreet, s.street)) continue;
     const hn = houseKey(a.houseNumber);
     const hs = houseKey(s.houseNumber);
-    if (hn && hs ? hn !== hs : !tool.includes(` ${foldVnText(s.street)} `)) continue;
+    if (hn && hs && hn !== hs) continue;
     return { ward: s.ward, province: s.province, provinceCode: s.provinceCode, confidence: s.confidence };
   }
   return null;

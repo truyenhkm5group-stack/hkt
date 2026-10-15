@@ -45,11 +45,13 @@ const tomTat = (s: string) => console.log(`[ops:tom-tat] ${s.slice(0, 300)}`);
 
 // ─────────────────────────── BẢN SAO TỰ CHỨA: CÂU HỎI PHƯỜNG / TỈNH / CẢ ĐỊA CHỈ ───────────────────────────
 
-const WARD_ASK = [
-  /(?:^| )(?:phuong|xa|thi tran)(?: (?:phuong|xa))? (?:nao|gi)(?: |$)/,
+const WARD_ASK = [/(?:^| )(?:phuong|xa|thi tran)(?: (?:phuong|xa))? (?:nao|gi)(?: |$)/];
+const WARD_ASK_Q = [
   /(?:^| )(?:xin|xac nhan|cho em biet|cho biet|bao|kiem tra|chon)(?: lai)?(?: giup)?(?: em| shop| minh| chi| anh)?(?: lai)?(?: (?:ten|dung))? (?:phuong|xa)(?: |$)/,
+  /(?:^| )hay (?:phuong|xa) /,
+  /(?:^| )dia gioi moi(?: |$)/,
 ];
-const WARD_ASK_Q = [/(?:^| )hay (?:phuong|xa) /, /(?:^| )dia gioi moi(?: |$)/];
+const isQuestion = (sentence: string, folded: string) => sentence.includes("?") || /(?:^| )(?:khong|ko|chua|nao|gi)(?: (?:a|nhe|nha|a nhe|a nha))?$/.test(folded);
 const FULL_ADDRESS_ASK = /(?:^| )(?:xin|gui|cho em|nhan)(?: lai)?(?: giup em)? (?:thong tin )?dia chi(?: |$)/;
 const PROVINCE_ASK = /(?:^| )(?:tinh|thanh pho)(?: (?:tinh|thanh pho))? (?:nao|gi)(?: |$)|(?:^| )(?:xin|xac nhan)(?: giup)?(?: em)?(?: lai)? (?:tinh|thanh pho)(?: |$)/;
 
@@ -57,7 +59,7 @@ const PROVINCE_ASK = /(?:^| )(?:tinh|thanh pho)(?: (?:tinh|thanh pho))? (?:nao|g
 export function asksForWardCopy(sentence: string): boolean {
   const f = foldVnText(sentence);
   if (WARD_ASK.some((re) => re.test(f))) return true;
-  return sentence.includes("?") && WARD_ASK_Q.some((re) => re.test(f));
+  return isQuestion(sentence, f) && WARD_ASK_Q.some((re) => re.test(f));
 }
 
 const sentencesOf = (text: string) => (text.match(/[^.!?\n]+[.!?]*/g) ?? []).map((s) => s.trim()).filter(Boolean);
