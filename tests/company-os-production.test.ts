@@ -228,7 +228,8 @@ export function testCompanyOsProductionPure() {
         }
       }
     }
-    if (/ESTIMATED_COST_KEY|profit\.estimatedCosts/.test(src) && /setSettingJson\(/.test(src)) ghiGiaUocTinh.push(f);
+    // Hai kiểu ghi: `setSettingJson(` và ghi thẳng bảng settings trong giao dịch có khoá (`setPlannedCosts`, 13/10/2026).
+    if (/ESTIMATED_COST_KEY|profit\.estimatedCosts/.test(src) && /setSettingJson\(|\.(insert|update)\(\s*schema\.settings\b/.test(src)) ghiGiaUocTinh.push(f);
   }
   assert.deepEqual(viPham, [], "tin trao đổi / lượt duyệt / bản thiết kế đã duyệt là APPEND-ONLY");
   assert.deepEqual(ghiDesign, ["lib/production/samples.ts"], "bản thiết kế đã duyệt sinh ra DUY NHẤT từ lượt duyệt mẫu");

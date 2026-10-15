@@ -1,4 +1,5 @@
 import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
+import { rawCurrentMarketerCost } from "@/lib/queries/current-marketer-cost";
 import type { Actor } from "@/lib/constants/actor";
 import { getDb, schema, type Db } from "@/db";
 import { IS_RETURN_AWAITING_WAREHOUSE } from "@/lib/queries/return-rate";
@@ -80,7 +81,7 @@ export async function pendingReturnedForWarehouse() {
        * "có đáng bỏ một buổi ra đếm không".
        */
       value: sql<number>`coalesce(sum((
-        select coalesce(sum(oi.quantity * coalesce(nullif(pv.last_imported_price, 0), 0)), 0)
+        select coalesce(sum(oi.quantity * coalesce(${rawCurrentMarketerCost("coalesce(pv.product_id, oi.product_id)")}, nullif(pv.last_imported_price, 0), 0)), 0)
         from order_items oi left join product_variants pv on pv.id = oi.variant_id
         where oi.order_id = ${s.orderId}
       )) filter (where ${s.orderId} is not null), 0)`,

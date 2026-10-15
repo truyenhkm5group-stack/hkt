@@ -112,6 +112,7 @@ const ROUTES = [
   "/returns",
   "/inventory/planning",
   "/inventory/workshop",
+  "/inventory/cost-center",
   "/inventory/shortage",
   "/inventory/decisions",
   "/models",

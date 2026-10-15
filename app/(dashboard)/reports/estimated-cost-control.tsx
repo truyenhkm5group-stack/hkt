@@ -20,8 +20,9 @@ function docSoTien(v: string): number {
 }
 
 /**
- * Ô đặt GIÁ VỐN DỰ TÍNH cho một mã. Chỉ hiện ở mã THẬT SỰ có sản phẩm chưa có giá vốn — mã đã có
- * phiếu nhập thì giá thật thắng, và một ô đặt tay ở đó chỉ gợi ý sai rằng nó có tác dụng.
+ * Ô đặt GIÁ VỐN KẾ HOẠCH cho một mã — lối tắt của Trung tâm giá vốn, ghi qua CÙNG `setPlannedCosts`
+ * (chủ shop 13/10/2026). Hiện ở MỌI mã: chế độ kế hoạch của BCLN áp giá này cả cho mã đã có phiếu
+ * nhập; chế độ thực tế chỉ dùng nó lấp chỗ trống. `current` là giá kế hoạch ĐANG LƯU, không phải giá báo.
  */
 export function EstimatedCostControl({
   productId,
@@ -35,33 +36,34 @@ export function EstimatedCostControl({
   const [open, setOpen] = React.useState(false);
   const [value, setValue] = React.useState(current ? String(current.unitCost) : "");
   const [reason, setReason] = React.useState(current?.reason ?? "");
+  const [effectiveFrom, setEffectiveFrom] = React.useState("");
   const [pending, startTransition] = React.useTransition();
   const so = docSoTien(value);
   const hopLe = Number.isFinite(so) && so > 0 && reason.trim().length >= 3;
 
-  if (!canWrite) return current ? <span className="text-[10.5px] text-muted-foreground">dự tính · {current.setBy ?? "—"}</span> : null;
+  if (!canWrite) return current ? <span className="text-[10.5px] text-muted-foreground">kế hoạch · {current.setBy ?? "—"}</span> : null;
 
   // Một lượt dựng trang, và popover đóng NGAY khi bấm — xem chú thích ở `ReturnRateOverride`
   // (app/(dashboard)/reports/assumptions-form.tsx). Giá trị đã gõ vẫn giữ nếu máy chủ báo lỗi.
   const luu = () => {
     setOpen(false);
-    const id = toast.loading(`Đang lưu giá vốn dự tính ${formatVND(so)}/sp và tính lại bảng…`);
+    const id = toast.loading(`Đang lưu giá vốn kế hoạch ${formatVND(so)}/sp và tính lại bảng…`);
     startTransition(async () => {
-      const r = await setEstimatedCost({ productId, unitCost: so, reason: reason.trim() });
+      const r = await setEstimatedCost({ productId, unitCost: so, reason: reason.trim(), effectiveFrom: effectiveFrom || null });
       if ("error" in r) toast.error(r.error, { id });
-      else toast.success(`Đã đặt giá vốn dự tính ${formatVND(so)}/sp`, { id });
+      else toast.success(`Đã đặt giá vốn kế hoạch ${formatVND(so)}/sp — Trung tâm giá vốn hiện cùng con số`, { id });
     });
   };
   const go = () => {
     setOpen(false);
-    const id = toast.loading("Đang bỏ giá vốn dự tính và tính lại bảng…");
+    const id = toast.loading("Đang bỏ giá vốn kế hoạch và tính lại bảng…");
     startTransition(async () => {
       const r = await clearEstimatedCost(productId);
       if ("error" in r) toast.error(r.error, { id });
       else {
         setValue("");
         setReason("");
-        toast.success("Đã bỏ giá vốn dự tính — mã quay về “chưa biết giá vốn”", { id });
+        toast.success("Đã bỏ giá vốn kế hoạch — mã quay về giá thật (lịch sử vẫn giữ)", { id });
       }
     });
   };
@@ -71,20 +73,23 @@ export function EstimatedCostControl({
       <PopoverTrigger asChild>
         {/* Chưa có giá thì nút là LỜI MỜI, có chữ; đã đặt rồi thì chỉ còn một cây bút cạnh con số. */}
         {current ? (
-          <Button type="button" variant="ghost" size="icon" className="size-6" title={pending ? "Đang lưu và tính lại bảng…" : "Sửa giá vốn dự tính"} aria-label="Sửa giá vốn dự tính">
+          <Button type="button" variant="ghost" size="icon" className="size-6" title={pending ? "Đang lưu và tính lại bảng…" : "Sửa giá vốn kế hoạch"} aria-label="Sửa giá vốn kế hoạch">
             {pending ? <Loader2 className="size-3 animate-spin" /> : <Pencil className="size-3" />}
           </Button>
         ) : (
           <Button type="button" variant="outline" size="sm" className="h-7 gap-1 px-2 text-[11px]">
-            {pending ? <Loader2 className="size-3 animate-spin" /> : <Pencil className="size-3" />} Đặt giá dự tính
+            {pending ? <Loader2 className="size-3 animate-spin" /> : <Pencil className="size-3" />} Đặt giá kế hoạch
           </Button>
         )}
       </PopoverTrigger>
       <PopoverContent align="end" className="w-80 space-y-2 text-xs">
         <p className="text-muted-foreground">
-          Giá nhập DỰ TÍNH cho mỗi sản phẩm chưa có phiếu nhập / giá Pancake, và cho các dòng phiếu nhập KHÔNG ghi đơn giá (bảng
-          &ldquo;LN theo hàng nhập&rdquo;). Có giá thật là con số này tự đứng sang một bên. Chỉ báo cáo lợi nhuận danh nghĩa dùng nó —
-          lương và dòng tiền thực không đọc.
+          GIÁ VỐN KẾ HOẠCH của mã — cùng một con số với{" "}
+          <a href="/inventory/cost-center" className="underline">
+            Trung tâm giá vốn
+          </a>
+          . Chế độ <b>kế hoạch</b> tính cả mã theo giá này; chế độ <b>thực tế</b> chỉ dùng nó cho sản phẩm chưa có phiếu nhập / giá
+          Pancake (nhãn tạm tính). Giá báo MKT không đè con số này. Lương và dòng tiền thực không đọc.
         </p>
         <Input
           type="text"
@@ -95,13 +100,18 @@ export function EstimatedCostControl({
           onChange={(e) => setValue(e.target.value)}
         />
         <Input type="text" className="h-8" placeholder="Căn cứ: báo giá xưởng, lô thử…" value={reason} onChange={(e) => setReason(e.target.value)} />
+        <label className="flex items-center gap-2 text-muted-foreground">
+          Hiệu lực từ
+          <Input type="date" className="h-8 w-40" value={effectiveFrom} onChange={(e) => setEffectiveFrom(e.target.value)} />
+          <span>(trống = mọi kỳ)</span>
+        </label>
         <div className="flex items-center gap-2">
           <Button type="button" size="sm" onClick={luu} disabled={pending || !hopLe}>
             {pending ? <Loader2 className="size-4 animate-spin" /> : null} Lưu
           </Button>
           {current ? (
             <Button type="button" size="sm" variant="ghost" onClick={go} disabled={pending}>
-              Bỏ giá dự tính
+              Bỏ giá kế hoạch
             </Button>
           ) : null}
         </div>

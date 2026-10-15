@@ -1,4 +1,6 @@
 import { listKey, memo } from "@/lib/cache";
+import { currentMarketerCost } from "@/lib/queries/current-marketer-cost";
+import { rowsOf } from "@/lib/sql-rows";
 import { and, asc, count, desc, eq, exists, gte, ilike, inArray, lte, or, sql, type SQL } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { getDb, schema } from "@/db";
@@ -314,7 +316,7 @@ export async function getOrderDetail(id: string) {
     with: {
       customer: true,
       warehouse: true,
-      items: { with: { variant: { columns: { id: true, images: true, remainQuantity: true, sku: true, lastImportedPrice: true } } } },
+      items: { with: { variant: { columns: { id: true, images: true, remainQuantity: true, sku: true, lastImportedPrice: true, productId: true } } } },
       statusHistory: { orderBy: [desc(schema.orderStatusHistory.updatedAt)] },
       /**
        * MỌI LẦN GỬI, KHÔNG PHẢI MỘT.
@@ -334,7 +336,7 @@ export async function getOrderDetail(id: string) {
     },
   });
   if (!order) return null;
-  // Giá vốn "sống": giá nhập trên phiếu ERP gần nhất → giá vốn Pancake ghi trên đơn → giá nhập mẫu mã
+  // Giá vốn "sống": giá báo MKT hiện tại → giá nhập trên phiếu ERP gần nhất → giá vốn Pancake ghi trên đơn → giá nhập mẫu mã
   const variantIds = order.items.map((it) => it.variantId).filter((v): v is string => Boolean(v));
   const receiptCosts = variantIds.length
     ? await db
@@ -346,10 +348,18 @@ export async function getOrderDetail(id: string) {
     : [];
   const lastCost = new Map<string, number>();
   for (const rc of receiptCosts) if (rc.variantId && !lastCost.has(rc.variantId)) lastCost.set(rc.variantId, Number(rc.unitCost));
+  // Giá báo MKT hiện tại của từng mã — CÙNG khối SQL với mọi báo cáo (lib/queries/current-marketer-cost.ts).
+  const productIds = [...new Set(order.items.map((it) => it.variant?.productId ?? it.productId).filter((v): v is string => Boolean(v)))];
+  const giaBao = new Map<string, number | null>();
+  for (const pid of productIds) {
+    const [g] = rowsOf<{ p: number | null }>(await db.execute(sql`select ${currentMarketerCost(sql`${pid}`)} as p`));
+    giaBao.set(pid, g?.p === null || g?.p === undefined ? null : Number(g.p));
+  }
   // Không nguồn nào ⇒ `liveUnitCost = null` (CHƯA BIẾT) — bản cũ kết thúc bằng `|| 0` nên trang in
   // "Giá vốn 0 ₫" và lãi gộp = nguyên doanh thu (AGENTS.md mục 42). Luật nằm ở `lib/constants/live-cogs.ts`.
   const items = order.items.map((it) => {
-    const live = liveLineUnitCost({ receipt: it.variantId ? lastCost.get(it.variantId) : null, orderSnapshot: it.unitCost, variantDefault: it.variant?.lastImportedPrice });
+    const pid = it.variant?.productId ?? it.productId;
+    const live = liveLineUnitCost({ marketer: pid ? giaBao.get(pid) : null, receipt: it.variantId ? lastCost.get(it.variantId) : null, orderSnapshot: it.unitCost, variantDefault: it.variant?.lastImportedPrice });
     return { ...it, liveUnitCost: live.unitCost, liveCostSource: live.source };
   });
   const cogs = liveOrderCogs(items.map((it) => ({ unitCost: it.liveUnitCost, quantity: it.quantity })));

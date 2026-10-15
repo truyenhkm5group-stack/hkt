@@ -81,6 +81,7 @@ import { cleanupPrProjectionFixtures, testGithubPrSync, testPrPureMappers, testS
 import { cleanupAgentIngestFixtures, testAgentIngestDb, testAgentIngestPure, testAgentIngestSourceGuards } from "./agent-run-ingest.test";
 import { testTestHygiene } from "./test-hygiene.test";
 import { testCheckpointChiDuocThem } from "./checkpoint-append.test";
+import { bangThoiGian, dongInNgay, testTestTiming, type NhipDo } from "./test-timing.test";
 import { cleanupAiHealthFixtures, testAiHealthKhongDemLuotTuKiem, testAiHealthSourceGuards } from "./ai-health-selftest.test";
 import { cleanupAiIncidentFixtures, testAiIncidentPure, testAiIncidentSourceGuards, testAiIncidentWatchDb } from "./ai-incident-watch.test";
 import { testMoTaLoiCsdl, testMoTaLoiSourceGuards } from "./db-error-message.test";
@@ -134,6 +135,7 @@ import { testApplyGithubEnvBlock, testDeployScript } from "./deploy-script.test"
 import { testOpsConcurrency } from "./ops-concurrency.test";
 import { testSaoLuu } from "./backup.test";
 import { testPitr } from "./pitr.test";
+import { testMigrationRehearsal } from "./migration-rehearsal.test";
 import { testPrepaidCash } from "./prepaid-cash.test";
 import { testProductIntelligence } from "./product-intelligence.test";
 import { testActionQueue } from "./action-queue.test";
@@ -372,6 +374,8 @@ import { testMetaCapiDb, testMetaCapiPure } from "./meta-capi.test";
 import { testOrgCatalogDb, testOrgCatalogPure } from "./org-catalog.test";
 import { testVnAddress } from "./vn-address.test";
 import { testAddressNormalizePure, testAddressNormalizeTools } from "./address-normalize.test";
+import { testAddressWardExplicitPure, testAddressWardExplicitTools } from "./address-ward-explicit.test";
+import { testAddressReaskAudit } from "./address-reask-audit.test";
 import { testVelocityUnifyDb, testVelocityUnifyPure } from "./velocity-unify.test";
 import { testOutreachClearanceUnit } from "./outreach-clearance-unit.test";
 import { testPageUsageDb, testPageUsagePure, testPageUsageSource } from "./page-usage.test";
@@ -404,6 +408,7 @@ import { testSessionRenewal } from "./session-renewal.test";
 import { testSessionRevocation } from "./session-revocation.test";
 import { testReportingParity } from "./reporting-parity.test";
 import { testEstimatedCost } from "./estimated-cost.test";
+import { testCostCenter } from "./cost-center.test";
 import { testLoginThrottle } from "./login-throttle.test";
 import { testWebhookHardening } from "./webhook-hardening.test";
 import { testWebhookLogRedaction } from "./webhook-log-redaction.test";
@@ -496,6 +501,7 @@ import { testSalesOrderSync } from "./sales-order-sync.test";
 import { testSalesReplay } from "./sales-replay.test";
 import { testSalesOperatingMode } from "./sales-operating-mode.test";
 import { testSalesInbox } from "./sales-inbox.test";
+import { testInboxMessageSync } from "./inbox-message-sync.test";
 import { testInboxAdvanced } from "./inbox-advanced.test";
 import { testInboxComposer } from "./inbox-composer.test";
 import { testInboxV2A } from "./inbox-v2-a.test";
@@ -503,6 +509,7 @@ import { testInboxAvatarProfile } from "./inbox-avatar-profile.test";
 import { testPancakeAvatarShape } from "./pancake-avatar-shape.test";
 import { testAvatarProxyCheck } from "./avatar-proxy-check.test";
 import { testSenderProvenanceProbe } from "./sender-provenance-probe.test";
+import { testPancakeThreadDiff } from "./pancake-thread-diff.test";
 import { testInboxUnreadDryrun } from "./inbox-unread-dryrun.test";
 import { testOrgMigrateIsolation } from "./org-migrate-isolation.test";
 import { testMigrationServeCompat } from "./migration-serve-compat.test";
@@ -557,6 +564,8 @@ import { testSalesVision } from "./sales-vision.test";
 import { testSalesClaimGuard } from "./sales-claim-guard.test";
 import { testSalesQuoteIntegrity } from "./sales-quote-integrity.test";
 import { testSalesCartCommitment } from "./sales-cart-commitment.test";
+import { testConvMoneyTrace } from "./conv-money-trace.test";
+import { testSalesQuote640 } from "./sales-quote-640.test";
 import { testSalesIntegrityAudit } from "./sales-integrity-audit.test";
 import { testCartIntentAudit } from "./cart-intent-audit.test";
 import { testFollowupLifecycle } from "./followup-lifecycle.test";
@@ -677,6 +686,29 @@ import { testAiSalesKnowledge } from "./ai-sales-knowledge.test";
 import { testSalesModelFallbackTenant } from "./sales-model-fallback-tenant.test";
 
 async function main() {
+  /*
+    ═══ ĐO THỜI GIAN TỪNG NHÓM — SỐ ĐỂ CHIA JOB, KHÔNG PHẢI ĐỂ NÂNG TRẦN ═══
+    Trần job kiểm thử đã phải nâng một lần (35′ → 45′, #830) và vẫn bị cắt (#842: 45,5′ ở nhánh có token,
+    trong khi cùng bộ ấy chạy 34,2′ ở nhánh ẩn danh và 34,6′ trên main). Muốn CHIA bộ kiểm thử thì phải
+    biết nhóm nào ăn bao nhiêu phút — mà bộ này chỉ in «✓ …», không in thời gian. Lớp dưới lấy mốc quanh
+    mỗi dòng in, cuối lượt in bảng nhóm chậm nhất, nên MỌI lượt cổng để lại số đo mà không tốn thêm lượt
+    chạy nào. Không đổi một dòng in nào đang có (bảng in THÊM ở cuối), không đọc biến môi trường.
+  */
+  const nhip: NhipDo[] = [];
+  const inGoc = console.log;
+  let mocDo = Date.now();
+  console.log = (...a: unknown[]) => {
+    const nay = Date.now();
+    const mocDong = mocDo;
+    const dong = a.map((x) => String(x)).join(" ").split("\n").map((d) => d.trim()).find((d) => d.length > 0) ?? "";
+    nhip.push({ ms: nay - mocDo, dong });
+    mocDo = nay;
+    inGoc(...a);
+    // IN NGAY, không đợi bảng cuối lượt: lượt bị cắt ở trần (45,5′ của #842) không bao giờ chạy tới bảng,
+    // mà đó đúng là lượt cần đọc. `inGoc` chứ không `console.log` — nếu không, dấu này tự đếm chính nó.
+    const dau = dongInNgay(nay - mocDong);
+    if (dau) inGoc(dau);
+  };
   await ensureMigrated();
   const db = await getDb();
 
@@ -2354,6 +2386,11 @@ async function main() {
   // P0 address-normalize (11/10/2026): địa chỉ tự do ⇒ mức tin cậy + câu hỏi khách; bot không chốt đơn địa chỉ mơ hồ khi khách chưa được hỏi.
   testAddressNormalizePure();
   await testAddressNormalizeTools();
+  // P0 15/10/2026 (ca «Tuyet Nguyen Thi» · «Lê Văn Dụ»): phường khách ghi rõ không bị hỏi lại · chữ khách thắng bản model chép · mơ hồ ⇒
+  // một câu ngắn, không danh sách 6 phường · phần đã hỏi không hỏi lại · hàng rào chữ gửi khách; ops address-reask-audit đo phạm vi.
+  testAddressWardExplicitPure();
+  await testAddressWardExplicitTools();
+  await testAddressReaskAudit();
   // Company OS · Agent V: MỘT tốc độ bán (Kế hoạch SX) cho Hàng chậm / Quyết định vốn tồn / Hiệu quả mẫu mã + ops velocity-compare (mã `cos-v-` / `COSV`, tự dọn).
   testVelocityUnifyPure();
   testOutreachClearanceUnit();
@@ -2507,6 +2544,8 @@ async function main() {
   await testReportingParity(db);
   // Ngay sau đó: gieo ba mã riêng tiền tố `gvdt-` và một dòng settings giá dự tính, rồi TỰ DỌN sạch cả hai.
   await testEstimatedCost(db);
+  // P0 hợp nhất giá vốn (13/10/2026): Trung tâm giá vốn + hai chế độ BCLN — tám kịch bản nghiệm thu của chủ shop.
+  await testCostCenter(db);
   await testLoginThrottle();
   await testWebhookHardening();
   testWebhookLogRedaction();
@@ -2694,6 +2733,8 @@ async function main() {
   testTestHygiene();
   // Sổ bàn giao chỉ được THÊM: lượt ghi dựng từ bản đọc trước đã ăn mất chữ của phiên khác 13/10/2026.
   testCheckpointChiDuocThem();
+  // Bảng thời gian: hàm thuần dựng bảng nhóm chậm nhất (đo để chia job, không để nâng trần).
+  testTestTiming();
   testAiHealthSourceGuards();
   testAiIncidentPure();
   testAiIncidentSourceGuards();
@@ -2792,6 +2833,8 @@ async function main() {
   testOpsConcurrency();
   await testSaoLuu();
   testPitr();
+  // ops migration-rehearsal: chạy thử migration còn thiếu trên BẢN SAO một CSDL tổ chức (P0 0245 trên qa).
+  testMigrationRehearsal();
   testMigrationAppendOnly();
   await testMigrationUpgradePath();
   testMigrationNumberUnique();
@@ -2928,6 +2971,8 @@ async function main() {
   // Chế độ vận hành (quan sát · copilot · thử nghiệm · tự động): tổ chức THẬT `om-shop`, Pancake + provider giả.
   await testSalesOperatingMode();
   await testSalesInbox();
+  // Đồng bộ tin Pancake → hộp thư (P0 HSLC 14/10/2026): câu nhân viên trên Pancake đẩy hội thoại lên đầu + phát sự kiện; trùng / chậm / sai thứ tự; sức khoẻ trễ webhook → sổ.
+  await testInboxMessageSync();
   // Hộp thư nâng cao: level khách · lọc · lịch sử giao · góp ý cho AI — tổ chức THẬT `hop-thu-nang-cao` (tự cấp, tự dọn).
   await testInboxAdvanced();
   // Ô soạn hộp thư: chèn câu mẫu / dòng sản phẩm (giá = giá bot, tồn chỉ khi đọc được), quyền ≡ «Gửi», cô lập — `o-soan-a` / `o-soan-b`.
@@ -2943,6 +2988,8 @@ async function main() {
   testAvatarProxyCheck();
   // Ops sender-provenance-probe (11/10/2026): tin phía page mang dấu người gửi gì — đo rủi ro AI chen vào cuộc chat người trước deploy P0. Thuần + quét mã nguồn.
   testSenderProvenanceProbe();
+  // Ops pancake-thread-diff (P0 HSLC 14/10/2026): tin Pancake đối chiếu sổ tin ERP + hộp thư — khớp mã/chữ, quá mới, trễ webhook. Thuần + quét mã nguồn.
+  testPancakeThreadDiff();
   // Ops inbox-unread-dryrun (11/10/2026, điều kiện duyệt #792): chạy thử «chưa đọc» theo hàm #803 so với luật đang chạy + bấm giờ câu dẫn xuất — CHỈ ĐỌC. Thuần + quét mã nguồn + PGlite.
   await testInboxUnreadDryrun();
   // Migrate CSDL tổ chức cô lập (sự cố 0245 ở qa 12/10/2026): khoá theo tổ chức có trần chờ · lùi sau lỗi · trần mỗi tổ chức của verify-migrations · ops org-migrate-probe chỉ đọc. Thuần + PGlite + quét mã nguồn.
@@ -3016,12 +3063,18 @@ async function main() {
   // P0 12/10/2026 — giỏ có thẩm quyền (cart-commitment.ts): số lượng khách nói tường minh DÍNH tới khi khách sửa tường minh; công cụ
   // ghi đơn hạ / bỏ món ⇒ máy chủ từ chối; ma trận G1–G6 qua chatTurn thật — tổ chức THẬT `gd-food-cc1` / `gd-food-cc2`.
   await testSalesCartCommitment();
+  // P0 14/10/2026 — tổng tiền trong chữ bot = tổng máy chủ của giỏ hiện tại (ca «Châu Dương» 640k cho 1kg 280k) · lượt im không «nói rõ
+  // hơn» (ca «Viet Nguyen Thi») · upsell chưa đồng ý không vào đơn · tin vọng lại / trùng không sinh tin — tổ chức THẬT `gd-food-q640`.
+  await testSalesQuote640();
   // P0 11/10/2026 — ops sales-integrity-audit: giá bot ≠ giá đơn · giá tự đổi · xác nhận giả · chuyển người không ai nhận ·
   // địa chỉ chưa ghép · nhắc sau đơn chốt — thuần + CSDL thật (mã `erp-ia-`, tự dọn), tóm tắt không lọt PII.
   await testSalesIntegrityAudit();
   // P0 12/10/2026 — ops cart-intent-audit: bot tự hạ số lượng khách đã nói / đơn đủ ORDER_READY vẫn bị hỏi · mời — thuần + CSDL thật
   // (hội thoại dựng theo ca HSLC, tự dọn), tóm tắt không lọt PII, chỉ đọc, ops khai đủ bốn chỗ.
   await testCartIntentAudit();
+  // P0 14/10/2026 — ops conv-money-trace: số TỔNG trong tin bot ≠ báo giá giỏ (ca «Châu Dương» 640k cho 1kg 280k) · câu «nói rõ hơn»
+  // của engine khi khách không nhắn gì (ca «Viet Nguyen Thi») — thuần + CSDL thật (tự dọn), tóm tắt không lọt PII, chỉ đọc.
+  await testConvMoneyTrace();
   // P0 11/10/2026 (KimThu Le) — vòng đời khách dùng chung + follow-up đọc lại ngay trước khi gửi (đơn thật · chứng từ thu ·
   // từ chối nhận tin · người / nguồn khác vừa nhắn), khoá gửi chống trùng, vết quyết định — tổ chức THẬT `fu-life` (tự cấp, tự dọn).
   await testFollowupLifecycle();
@@ -3258,6 +3311,8 @@ async function main() {
   // Nền tảng · 1.x: trang tổng hợp / công cụ AI theo module, chẩn đoán chỉ đọc, tệp hai tổ chức (mã `ph-`, tự cấp và tự dọn).
   await testPlatformHardening();
   console.log("\nTẤT CẢ KIỂM THỬ ĐẠT");
+  console.log = inGoc; // bảng tự nó không phải một nhóm kiểm thử
+  inGoc("\n" + bangThoiGian(nhip).join("\n"));
   process.exit(0);
 
 }

@@ -1,0 +1,162 @@
+/**
+ * ═══════════ ĐỊA CHỈ ĐÃ BIẾT KHÔNG ĐƯỢC HỎI LẠI — HÀNG RÀO MÁY CHỦ TRÊN CHỮ GỬI KHÁCH (P0 15/10/2026) ═══════════
+ *
+ * Hai ca thật HSLC:
+ *  · «Tuyet Nguyen Thi» (15/10 10:46): khách gõ «230/20 Phan Huy Ích, P An Hội Tây, TP.HCM» + SĐT đầy đủ — phường MỚI, có thật
+ *    trong danh mục sau sáp nhập — mà bot bắt chọn giữa 6 phường của quận Gò Vấp cũ.
+ *  · «Lê Văn Dụ»: «khu đô thị Xa La, Phúc La cũ, Hà Đông, Hà Nội» — bot hỏi phường mới qua nhiều lượt.
+ *
+ * Công cụ đã không còn đưa câu hỏi cho phần đã biết / đã hỏi (`addressCheckOf` · `askedBefore` ở tools.ts), nhưng model vẫn có thể
+ * TỰ hỏi bằng hiểu biết của nó (model không biết tên phường mới thì nghĩ địa chỉ «sai»). Tệp này là lớp cuối: câu bot sắp gửi mà HỎI
+ * phường / xã khi máy chủ đã biết phường (đơn nháp có ô xã · dòng địa chỉ tự điền được · tin khách ghi rõ một phường có thật), hoặc
+ * khi phường đã được hỏi ở một lượt trước ⇒ bỏ câu hỏi đó, giữ phần còn lại. Câu hỏi lại CẢ địa chỉ khi đã biết đủ tỉnh + xã + số nhà
+ * cũng bỏ. HÀM THUẦN — không CSDL, không mạng; chỉ đọc trạng thái hội thoại và tin khách.
+ *
+ * KHÔNG ĐOÁN: hàng rào chỉ BỎ câu hỏi, không bao giờ tự điền một phường. Phường chưa biết và chưa hỏi lần nào ⇒ câu hỏi đầu tiên đi qua.
+ */
+import { canAutoFill, customerStatedAddresses, namesOtherWard, parseCustomerAddress, sameDeliveryPlace, wantsAddressChange, wardFromCustomerWords, type AddressPart } from "@/lib/address/customer-address";
+
+export { wantsAddressChange };
+import { foldVnText } from "@/lib/address/vn-address";
+import type { ChatState } from "@/lib/sales-chatbot/tools";
+
+// ─────────────────────────── TRÍ NHỚ ĐÃ HỎI ───────────────────────────
+
+/**
+ * TRÍ NHỚ HỎI ĐỊA CHỈ của hội thoại. `key` / `turn` = địa chỉ + lượt của câu hỏi gần nhất (giữ nguyên nghĩa cũ). `parts` = PHẦN nào của
+ * địa chỉ (tỉnh · xã · số nhà) đã được hỏi, ở lượt NÀO (lần đầu) — P0 15/10/2026, ca «Lê Văn Dụ»: trí nhớ cũ khoá theo ĐÚNG chuỗi địa chỉ,
+ * nên mỗi lần khách trả lời và model chép lại địa chỉ (chuỗi khác) thì cổng chốt coi như chưa hỏi và hỏi lại phường — nhiều lượt liền.
+ * Nay một phần đã hỏi ở lượt trước thì KHÔNG hỏi lại, dù chuỗi địa chỉ đổi: đơn đi tiếp với cờ cần kiểm địa chỉ, nhân viên xác nhận.
+ * Dòng cũ không có `parts` ⇒ suy từ `key` (`askMemoryParts`).
+ */
+export type AddressAskMemory = { key: string; turn: number; parts?: Partial<Record<AddressPart, number>> };
+
+/** Phần địa chỉ một câu hỏi khách nhắm tới: thiếu tỉnh ⇒ câu hỏi TỈNH (xã hỏi sau, khi đã biết tỉnh); còn lại ⇒ đúng các phần thiếu. */
+export function askParts(missing: readonly AddressPart[]): AddressPart[] {
+  return missing.includes("province") ? missing.filter((p) => p !== "ward") : [...missing];
+}
+
+/** Phần đã hỏi + lượt hỏi lần đầu. Dòng trí nhớ cũ (chưa có `parts`) ⇒ suy từ chính địa chỉ của câu hỏi (`key` = địa chỉ|tỉnh|xã). */
+export function askMemoryParts(m: AddressAskMemory | undefined): Partial<Record<AddressPart, number>> {
+  if (!m) return {};
+  if (m.parts) return m.parts;
+  const [address = "", province = ""] = m.key.split("|");
+  return Object.fromEntries(askParts(parseCustomerAddress(address, province).missing).map((p) => [p, m.turn]));
+}
+
+/**
+ * Trí nhớ hỏi địa chỉ CÒN áp cho `address` không: câu hỏi gần nhất hỏi về CÙNG nơi giao (cùng đường, cùng số nhà) ⇒ giữ; khách đổi
+ * hẳn địa chỉ ⇒ bỏ (review PR #848 lần 2: phường đã hỏi ở lượt 3 không được chặn câu hỏi phường của một địa chỉ khác ở lượt 10).
+ * Model chép lại cùng địa chỉ khác chữ («… gần chợ») vẫn giữ. HÀM THUẦN.
+ */
+export function askMemoryFor(m: AddressAskMemory | undefined, address: string): AddressAskMemory | undefined {
+  if (!m) return undefined;
+  const [prevAddress = ""] = m.key.split("|");
+  return sameDeliveryPlace(prevAddress, address) ? m : undefined;
+}
+
+/** Mọi phần câu hỏi này nhắm tới đều đã được hỏi ở một lượt TRƯỚC (cùng lượt thì chưa — khách chưa thấy câu hỏi). */
+export function askedBefore(m: AddressAskMemory | undefined, parts: readonly AddressPart[], turn: number | undefined): boolean {
+  if (turn === undefined || !parts.length) return false;
+  const mem = askMemoryParts(m);
+  return parts.every((p) => mem[p] !== undefined && mem[p]! < turn);
+}
+
+// ─────────────────────────── ĐỊA CHỈ ĐÃ BIẾT + HÀNG RÀO CÂU HỎI LẠI ───────────────────────────
+
+/**
+ * Những gì máy chủ BIẾT về địa chỉ giao của lượt. `ward` = tên chuẩn khi đã biết; `wardAskedAt` = lượt đầu tiên đã hỏi phường;
+ * `corrected` = tin khách MỚI NHẤT nêu một phường KHÁC phường máy đang biết (khách đang sửa) — khi đó bot được hỏi / xác nhận lại.
+ */
+export type AddressKnowledge = { ward: string | null; wardAskedAt: number | null; province: boolean; street: boolean; corrected?: boolean; changeRequested?: boolean; lastSettlesAddress?: boolean };
+
+/** Lời đồng ý ngắn («ok em», «vâng», «đúng rồi», «chốt nhé»). */
+const ACK = /^(?:ok|oke|okie|okay|uh|u|um|vang|da|dung|dung roi|duoc|chot|chot don|roi|co|yes)(?: (?:em|a|nhe|nha|shop|ban|roi|luon|di|vay|the))*$/;
+/**
+ * Tin khách MỚI NHẤT chính là tin mang địa chỉ, hoặc chỉ là lời đồng ý — chỉ khi đó câu bot «xin lại cả địa chỉ» mới chắc chắn là hỏi lại
+ * điều vừa biết. Tin khác («gửi cho mẹ chị dưới quê nhé», «chị không ở đó nữa rồi») có thể là đổi người / nơi nhận mà không danh sách
+ * mẫu nào bắt hết ⇒ hàng rào để câu xin địa chỉ đi qua (review PR #848 lần 4). HÀM THUẦN.
+ */
+function settlesAddress(last: string, ward: string | null): boolean {
+  const f = foldVnText(last);
+  const wardCore = ward ? foldVnText(ward).replace(/^(phuong|xa|thi tran|dac khu) /, "") : "";
+  return ACK.test(f) || customerStatedAddresses([last]).length > 0 || (wardCore.length > 0 && ` ${f} `.includes(` ${wardCore} `));
+}
+
+
+/**
+ * Đọc địa chỉ đã biết: đơn nháp (ô xã người / khách đã chọn, hoặc dòng địa chỉ tự điền được) → khách đã lưu → tin khách tự gõ (kể cả
+ * khi model CHƯA gọi công cụ lưu khách — model hay hỏi lại ngay ở lượt khách vừa gửi địa chỉ). HÀM THUẦN.
+ */
+export function addressKnowledge(state: Pick<ChatState, "draft" | "customer" | "addressAsk">, customerTexts: readonly string[]): AddressKnowledge {
+  const r = state.draft?.recipient ?? (state.customer?.address.trim() ? { address: state.customer.address, province: state.customer.province, ward: undefined } : null);
+  const last = customerTexts[customerTexts.length - 1] ?? "";
+  // Khách xin đổi địa chỉ ⇒ địa chỉ máy đang giữ KHÔNG còn là điều đã biết; câu hỏi phường / địa chỉ của bot đi qua.
+  if (wantsAddressChange(last)) return { ward: null, wardAskedAt: null, province: false, street: false, changeRequested: true };
+  const mem = askMemoryParts(r ? askMemoryFor(state.addressAsk, r.address) : state.addressAsk);
+  const wardAskedAt = mem.ward ?? null;
+  if (r && r.address.trim()) {
+    const a = parseCustomerAddress(r.address, r.province);
+    const chosen = (r.ward ?? "").trim();
+    const stated = chosen || canAutoFill(a) ? null : wardFromCustomerWords(a, r.address, customerTexts);
+    const ward = chosen || (canAutoFill(a) ? a.ward : null) || stated?.ward || null;
+    const provinceName = a.province ?? stated?.province ?? null;
+    // Khách vừa nêu một phường khác (sửa không kèm đường) ⇒ phường máy đang giữ KHÔNG còn là điều đã biết.
+    if (ward && provinceName && last.split(/\n+/).some((x) => namesOtherWard(x, provinceName, ward))) return { ward: null, wardAskedAt, province: true, street: !a.missing.includes("street"), corrected: true };
+    return { ward, wardAskedAt, province: a.province !== null || Boolean(stated), street: !a.missing.includes("street"), lastSettlesAddress: settlesAddress(last, ward) };
+  }
+  const [said] = customerStatedAddresses(customerTexts);
+  return said ? { ward: said.ward, wardAskedAt, province: said.province !== null, street: !said.missing.includes("street"), lastSettlesAddress: settlesAddress(last, said.ward) } : { ward: null, wardAskedAt, province: false, street: false };
+}
+
+/** Câu HỎI phường / xã (đã gập) tự thân là câu hỏi: «phường nào», «phường / xã gì». */
+const WARD_ASK = [/(?:^| )(?:phuong|xa|thi tran)(?: (?:phuong|xa))? (?:nao|gi)(?: |$)/];
+/**
+ * Chỉ tính là câu HỎI khi có dấu hiệu hỏi (`isQuestion`): «cho em xin tên phường … ạ?», «… hay phường B?», «theo địa giới mới …?». Câu
+ * KỂ «Em xác nhận phường An Hội Tây cho mình nhé.» / «giao tới …, phường An Hội Tây» không phải câu hỏi (review PR #848).
+ */
+const WARD_ASK_Q = [
+  /(?:^| )(?:xin|xac nhan|cho em biet|cho biet|bao|kiem tra|chon)(?: lai)?(?: giup)?(?: em| shop| minh| chi| anh)?(?: lai)?(?: (?:ten|dung))? (?:phuong|xa)(?: |$)/,
+  /(?:^| )hay (?:phuong|xa) /,
+  /(?:^| )dia gioi moi(?: |$)/,
+];
+/** Dấu hiệu câu hỏi: dấu «?», hoặc kết bằng tiểu từ hỏi («… không», «… chưa», «… nào» + «ạ / nhé / nha»). */
+const isQuestion = (sentence: string, folded: string) => sentence.includes("?") || /(?:^| )(?:khong|ko|chua|nao|gi)(?: (?:a|nhe|nha|a nhe|a nha))?$/.test(folded);
+/** Câu xin lại CẢ địa chỉ. */
+const FULL_ADDRESS_ASK = /(?:^| )(?:xin|gui|cho em|nhan)(?: lai)?(?: giup em)? (?:thong tin )?dia chi(?: |$)/;
+/** Câu nhắc địa chỉ MỚI / KHÁC, hay câu KỂ đã nhận («em đã nhận địa chỉ…») — không phải câu xin lại địa chỉ đã biết. */
+const NOT_A_REASK = /(?:^| )(?:moi|khac)(?: |$)|(?:^| )(?:da|vua) nhan(?: |$)|(?:^| )dia chi (?:nha|cong ty|co quan|cua hang|cho|truong|van phong|kho|xuong)(?: |$)/;
+
+/** Một câu (một đoạn giữa dấu chấm / hỏi / xuống dòng) có HỎI phường / xã không. HÀM THUẦN. */
+export function asksForWard(sentence: string): boolean {
+  const f = foldVnText(sentence);
+  if (WARD_ASK.some((re) => re.test(f))) return true;
+  return isQuestion(sentence, f) && WARD_ASK_Q.some((re) => re.test(f));
+}
+
+/** Một câu có xin lại CẢ địa chỉ không. HÀM THUẦN. */
+export function asksForFullAddress(sentence: string): boolean {
+  const f = foldVnText(sentence);
+  return FULL_ADDRESS_ASK.test(f) && !NOT_A_REASK.test(f);
+}
+
+/** Câu thay khi cả tin chỉ là câu hỏi lại địa chỉ — ghi nhận, không hỏi gì thêm. */
+export const ADDRESS_KNOWN_TEXT = "Dạ em ghi nhận địa chỉ của mình rồi ạ.";
+
+/**
+ * Câu bot sắp gửi có HỎI LẠI phần địa chỉ đã biết / đã hỏi không. Có ⇒ `rest` = các câu còn lại (có thể rỗng — nơi gọi quyết câu thay),
+ * `note` = lý do cho người vận hành. Không ⇒ `null`. Phường chưa biết và chưa hỏi lần nào ⇒ câu hỏi đầu tiên đi qua. HÀM THUẦN.
+ */
+export function addressReaskVerdict(botText: string, k: AddressKnowledge, turn: number): { rest: string; note: string } | null {
+  // Khách đang sửa phường ⇒ bot được hỏi / xác nhận lại — hàng rào không bỏ câu hỏi phường ở lượt đó.
+  // Phường ĐÃ BIẾT chỉ chặn câu hỏi phường khi tin khách mới nhất xác nhận / mang chính địa chỉ đó — tin khác có thể là đổi người / nơi
+  // nhận («gửi cho mẹ chị dưới quê»), bot phải hỏi được phường của nơi mới (review PR #848 lần 4).
+  const wardSettled = !k.corrected && ((k.ward !== null && Boolean(k.lastSettlesAddress)) || (k.ward === null && k.wardAskedAt !== null && k.wardAskedAt < turn));
+  const fullKnown = k.ward !== null && k.province && k.street && Boolean(k.lastSettlesAddress);
+  if (!wardSettled && !fullKnown) return null;
+  const sentences = (botText.match(/[^.!?\n]+[.!?]*/g) ?? []).map((s) => s.trim()).filter(Boolean);
+  const drop = (s: string) => (wardSettled && asksForWard(s)) || (fullKnown && asksForFullAddress(s));
+  if (!sentences.some(drop)) return null;
+  const note = k.ward !== null ? "AI hỏi lại phường / xã khách đã cho (máy chủ đã ghép được theo địa giới mới) — đã bỏ câu hỏi" : "AI hỏi lại phường / xã đã hỏi khách ở lượt trước — đã bỏ câu hỏi, đơn đi tiếp với cờ cần kiểm địa chỉ";
+  return { rest: sentences.filter((s) => !drop(s)).join(" "), note };
+}

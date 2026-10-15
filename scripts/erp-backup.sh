@@ -1039,8 +1039,62 @@ ghi_dien_tap_to_chuc() { # $1=csdl $2=kết quả $3=lý do $4=bản $5=CSDL t�
     || loi "không ghi được trạng thái diễn tập của $1"
 }
 
+# ĐƯỜNG KHÔI PHỤC DUY NHẤT của khối tổ chức: dựng container Postgres TẠM (cùng ảnh erp-db, không mạng, không cổng, trần RAM)
+# với CSDL tạm $3, rồi `pg_restore` bản $4 vào đó. Dùng chung cho `restore-drill-org` (đếm bảng lõi) và
+# `scripts/erp-migration-rehearsal.sh` (chạy thử migration trên bản sao) — không nơi nào viết một `pg_restore` thứ hai.
+# Đặt DRILL_TEN_TO_CHUC và gài `trap don_dien_tap_to_chuc EXIT` TRƯỚC `docker run`: hỏng ở bất kỳ bước nào sau đó thì
+# container (kèm volume = CSDL tạm) vẫn bị xoá. Hỏng ⇒ `return 1`, lý do (đọc được, không dữ liệu) ở LY_DO_BAN_SAO.
+# Không `exit` (luật khối). Người gọi đã soát tên CSDL tạm và tài nguyên.
+LY_DO_BAN_SAO=""
+dung_ban_sao_tam_to_chuc() { # $1=nhãn docker $2=tiền tố tên container $3=CSDL tạm $4=bản dump
+  local nhan="$1" tien_to="$2" tam="$3" ban="$4" ten_ban anh i so_loi tep_loi
+  ten_ban="$(basename "$ban")"
+  LY_DO_BAN_SAO=""
+  # Container sót lại từ lượt trước bị cắt ngang — dọn trước (chỉ container mang ĐÚNG nhãn của lượt này).
+  docker ps -aq --filter "label=$nhan" 2>/dev/null | xargs -r docker rm -f -v >/dev/null 2>&1 || true
+  anh="$(docker inspect -f '{{.Config.Image}}' "$DB_CONTAINER" 2>/dev/null || true)"
+  if [ -z "$anh" ]; then
+    LY_DO_BAN_SAO="Không đọc được ảnh của container $DB_CONTAINER."
+    loi "Không đọc được ảnh của $DB_CONTAINER."; return 1
+  fi
+  DRILL_TEN_TO_CHUC="$tien_to-$(date +%s)"
+  trap don_dien_tap_to_chuc EXIT
+  # --network none: không cổng, không mạng — `trust` vô hại vì không ai tới được nó. POSTGRES_DB dựng sẵn CSDL tạm.
+  if ! docker run -d --name "$DRILL_TEN_TO_CHUC" --label "$nhan" --network none \
+    --memory "$BO_NHO_DIEN_TAP" --memory-swap "$BO_NHO_DIEN_TAP" --cpus 1 --pids-limit 256 \
+    -e POSTGRES_USER=erp -e POSTGRES_DB="$tam" -e POSTGRES_HOST_AUTH_METHOD=trust \
+    -v "$ban:/drill/ban.dump:ro" "$anh" \
+    postgres -c shared_buffers=32MB -c maintenance_work_mem=64MB -c fsync=off -c synchronous_commit=off -c full_page_writes=off -c autovacuum=off >/dev/null; then
+    LY_DO_BAN_SAO="Không dựng được container Postgres tạm."
+    loi "docker run container tạm lỗi — dựng bản sao thất bại."; return 1
+  fi
+
+  # Chờ "init process complete" rồi mới hỏi — pg_isready xanh trong lúc initdb là xanh giả (như diễn tập nhà).
+  for i in $(seq 1 90); do
+    if grep -q "PostgreSQL init process complete" <<< "$(docker logs "$DRILL_TEN_TO_CHUC" 2>&1)" \
+      && docker exec "$DRILL_TEN_TO_CHUC" pg_isready -U erp -d "$tam" >/dev/null 2>&1; then break; fi
+    sleep 2
+  done
+  if ! docker exec "$DRILL_TEN_TO_CHUC" pg_isready -U erp -d "$tam" >/dev/null 2>&1; then
+    LY_DO_BAN_SAO="Container Postgres tạm không lên sau 180 giây."
+    loi "Container tạm không lên — dựng bản sao thất bại."; return 1
+  fi
+
+  bao "khôi phục bản $ten_ban vào $tam trong container tạm $DRILL_TEN_TO_CHUC…"
+  tep_loi="$STATUS_DIR/.drill-to-chuc.err"
+  if ! timeout "$TRAN_LENH_GIAY" docker exec "$DRILL_TEN_TO_CHUC" pg_restore -U erp -d "$tam" --no-owner --no-privileges /drill/ban.dump 2>"$tep_loi"; then
+    so_loi="$(grep -c 'error' "$tep_loi" 2>/dev/null || true)"
+    echo "── 20 dòng đầu của lỗi pg_restore ──"; head -n 20 "$tep_loi" 2>/dev/null || true
+    rm -f "$tep_loi"
+    LY_DO_BAN_SAO="pg_restore báo lỗi (${so_loi:-?} dòng lỗi) — bản $ten_ban KHÔNG khôi phục sạch."
+    return 1
+  fi
+  rm -f "$tep_loi"
+  return 0
+}
+
 cmd_restore_drill_to_chuc() { # $1 = mã tổ chức | tên CSDL erp_org_* | rỗng (luân phiên)
-  local csdl tam ban ten_ban avail db_mb tu_do can anh i b phuc song hoi loi_bang="" bang_json="" so_loi bat_dau tep_loi
+  local csdl tam ban ten_ban avail db_mb tu_do can b phuc song hoi loi_bang="" bang_json="" bat_dau
   bat_dau="$(bay_gio_utc)"
   if [ "$#" -gt 1 ]; then loi "restore-drill-org nhận TỐI ĐA một tham số (mã tổ chức)."; return 2; fi
   chuan_bi_thu_muc || { loi "Không chuẩn bị được thư mục sao lưu."; return 1; }
@@ -1079,46 +1133,11 @@ cmd_restore_drill_to_chuc() { # $1 = mã tổ chức | tên CSDL erp_org_* | r�
   fi
   bao "diễn tập tổ chức: $csdl · bản $ten_ban → CSDL tạm $tam · RAM dùng được ${avail} MB · ổ còn ${tu_do} MB (cần ${can} MB)"
 
-  # Container sót lại từ lượt trước bị cắt ngang — dọn trước (chỉ container mang nhãn diễn tập tổ chức).
-  docker ps -aq --filter "label=$NHAN_DIEN_TAP_TO_CHUC" 2>/dev/null | xargs -r docker rm -f -v >/dev/null 2>&1 || true
-  anh="$(docker inspect -f '{{.Config.Image}}' "$DB_CONTAINER" 2>/dev/null || true)"
-  if [ -z "$anh" ]; then
-    ghi_dien_tap_to_chuc "$csdl" "FAILED" "Không đọc được ảnh của container $DB_CONTAINER." "$ten_ban" "$tam" "[]" "$bat_dau"
-    loi "Không đọc được ảnh của $DB_CONTAINER."; return 1
+  # Dựng container tạm + pg_restore: ĐƯỜNG DUY NHẤT `dung_ban_sao_tam_to_chuc` (trap dọn đã gài bên trong).
+  if ! dung_ban_sao_tam_to_chuc "$NHAN_DIEN_TAP_TO_CHUC" "erp-restore-drill-org" "$tam" "$ban"; then
+    ghi_dien_tap_to_chuc "$csdl" "FAILED" "$LY_DO_BAN_SAO" "$ten_ban" "$tam" "[]" "$bat_dau"
+    loi "Diễn tập $csdl thất bại ở bước dựng bản sao: $LY_DO_BAN_SAO — bản sao lưu CHƯA chứng minh được là dùng được."; return 1
   fi
-  DRILL_TEN_TO_CHUC="erp-restore-drill-org-$(date +%s)"
-  trap don_dien_tap_to_chuc EXIT
-  # --network none: không cổng, không mạng — `trust` vô hại vì không ai tới được nó. POSTGRES_DB dựng sẵn CSDL tạm.
-  if ! docker run -d --name "$DRILL_TEN_TO_CHUC" --label "$NHAN_DIEN_TAP_TO_CHUC" --network none \
-    --memory "$BO_NHO_DIEN_TAP" --memory-swap "$BO_NHO_DIEN_TAP" --cpus 1 --pids-limit 256 \
-    -e POSTGRES_USER=erp -e POSTGRES_DB="$tam" -e POSTGRES_HOST_AUTH_METHOD=trust \
-    -v "$ban:/drill/ban.dump:ro" "$anh" \
-    postgres -c shared_buffers=32MB -c maintenance_work_mem=64MB -c fsync=off -c synchronous_commit=off -c full_page_writes=off -c autovacuum=off >/dev/null; then
-    ghi_dien_tap_to_chuc "$csdl" "FAILED" "Không dựng được container Postgres tạm." "$ten_ban" "$tam" "[]" "$bat_dau"
-    loi "docker run container tạm lỗi — diễn tập thất bại."; return 1
-  fi
-
-  # Chờ "init process complete" rồi mới hỏi — pg_isready xanh trong lúc initdb là xanh giả (như diễn tập nhà).
-  for i in $(seq 1 90); do
-    if grep -q "PostgreSQL init process complete" <<< "$(docker logs "$DRILL_TEN_TO_CHUC" 2>&1)" \
-      && docker exec "$DRILL_TEN_TO_CHUC" pg_isready -U erp -d "$tam" >/dev/null 2>&1; then break; fi
-    sleep 2
-  done
-  if ! docker exec "$DRILL_TEN_TO_CHUC" pg_isready -U erp -d "$tam" >/dev/null 2>&1; then
-    ghi_dien_tap_to_chuc "$csdl" "FAILED" "Container Postgres tạm không lên sau 180 giây." "$ten_ban" "$tam" "[]" "$bat_dau"
-    loi "Container tạm không lên — diễn tập thất bại."; return 1
-  fi
-
-  bao "diễn tập tổ chức: pg_restore vào $tam trong container tạm $DRILL_TEN_TO_CHUC…"
-  tep_loi="$STATUS_DIR/.drill-to-chuc.err"
-  if ! timeout "$TRAN_LENH_GIAY" docker exec "$DRILL_TEN_TO_CHUC" pg_restore -U erp -d "$tam" --no-owner --no-privileges /drill/ban.dump 2>"$tep_loi"; then
-    so_loi="$(grep -c 'error' "$tep_loi" 2>/dev/null || true)"
-    echo "── 20 dòng đầu của lỗi pg_restore ──"; head -n 20 "$tep_loi" 2>/dev/null || true
-    rm -f "$tep_loi"
-    ghi_dien_tap_to_chuc "$csdl" "FAILED" "pg_restore báo lỗi (${so_loi:-?} dòng lỗi) — bản $ten_ban KHÔNG khôi phục sạch." "$ten_ban" "$tam" "[]" "$bat_dau"
-    loi "pg_restore lỗi — bản sao lưu của $csdl CHƯA chứng minh được là dùng được."; return 1
-  fi
-  rm -f "$tep_loi"
 
   echo
   printf '%-32s %14s %14s %10s\n' "BẢNG ($csdl)" "BẢN SAO LƯU" "CSDL SỐNG" "CHÊNH"

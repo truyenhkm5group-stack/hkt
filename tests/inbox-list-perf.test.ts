@@ -25,7 +25,7 @@ import { withOrganization } from "@/lib/platform/context";
 import { invalidateOrganizations } from "@/lib/platform/organizations";
 import { provisionOrganization } from "@/lib/platform/provision";
 import { PAGE_REPLY } from "@/lib/sales-chatbot/fanpage";
-import { listInbox } from "@/lib/sales-chatbot/inbox";
+import { INBOX_STATE_SQL_KEYS, listInbox } from "@/lib/sales-chatbot/inbox";
 import { INBOX_UNREAD_SWITCH_KEY, inboxUnreadMaterialized } from "@/lib/sales-chatbot/inbox-unread";
 import { acceptThreadResponse, nextRefreshDelayMs, pickThreadPayload, REFRESH_MAX_DELAY_MS, refreshDue, serverPayloadFresh, THREAD_FETCH_TIMEOUT_MS } from "@/lib/sales-chatbot/inbox-switch-shared";
 import { humanSeenAtSql, latestCustomerTurnUnhandledFor, type TurnSqlOrder } from "@/lib/sales-chatbot/response-ownership-ledger";
@@ -100,6 +100,16 @@ function testSource() {
   const body = inbox.slice(inbox.indexOf("export async function listInbox"), inbox.indexOf("export async function customerHistory"));
   assert.equal((body.match(/unreadSql\.unread/g) ?? []).length, 2, "listInbox dùng biểu thức #803 đúng hai chỗ: mặc định + MỘT lượt dựng tập khi tính trực tiếp");
   assert.match(body, /if \(!unreadSql\.materialized\) \{[\s\S]*?inArray\(c\.id, ids\)/, "tính trực tiếp ⇒ tập chưa đọc dựng MỘT lần, bộ đếm + khoá xếp đọc tập");
+  // P0 inbox-list-subplans: các câu quét cả hộp thư đọc «state gọn» (giải nén MỘT lần mỗi dòng); câu lấy hàng HAI pha.
+  assert.equal((body.match(/\.from\(src\)/g) ?? []).length, 5, "đếm thẻ · đếm level · tập chưa đọc · pha 1 · pha 2 đều đọc bảng dẫn xuất");
+  assert.doesNotMatch(body, /\.from\(c\)/, "listInbox không còn câu nào đọc thẳng bảng hội thoại");
+  assert.match(body, /const page = await noJit\(\(d\) =>[\s\S]*?\.limit\(q\.limit\),[\s\S]*?const detail = await noJit\(\(d\) =>[\s\S]*?inArray\(c\.id, pageIds\)/, "pha 1 xếp + cắt trang, pha 2 đọc chi tiết theo mã");
+  // JIT TẮT cho mọi câu quét cả hộp thư: cost ước tính khổng lồ (nhánh coalesce #803 không chạy) ⇒ biên dịch JIT nhiều giây trên production.
+  assert.equal((body.match(/await noJit\(\(d\) =>/g) ?? []).length, 5, "đếm thẻ · đếm level · tập chưa đọc · pha 1 · pha 2 chạy trong chayKhongJit");
+  assert.match(body, /const noJit = <T>\(f: \(d: Db\) => Promise<T>\) => chayKhongJit\(db, f\);/);
+  assert.doesNotMatch(body, /await db\s*\n\s*\.select/, "không câu quét nào chạy ngoài chayKhongJit");
+  assert.match(body, /state: sql<unknown>`"sales_chat_conversations"\."state_full"`/, "state ĐẦY ĐỦ chỉ ở pha 2");
+  assert.match(inbox, /cross join lateral \(select t\."state" \|\| '\{\}'::jsonb as x offset 0\) d/, "state giải nén MỘT lần mỗi dòng");
   const led = readFileSync("lib/sales-chatbot/response-ownership-ledger.ts", "utf8");
   assert.match(led, /then \$\{latestCustomerTurnUnhandledFor\(col\("page_id"\), col\("thread_id"\), seen, "CHEAP_FIRST"\)\}/, "hộp thư dùng thứ tự rẻ trước");
   assert.match(readFileSync("lib/sales-chatbot/inbox-unread-render.ts", "utf8"), /latestCustomerTurnUnhandledFor\(sql\.raw\("p_page"\), sql\.raw\("p_thread"\), sql\.raw\("p_seen"\)\)/, "thân hàm CSDL 0245 vẫn dựng từ bản CHUẨN");
@@ -221,6 +231,70 @@ async function testDb(size: Size) {
       await forgetMemo("inbox-unread-switch");
       const total = await db.select({ n: sql<number>`count(*)::int` }).from(c).where(ne(c.channel, "TEST"));
       console.log(`  ✓ listInbox trên ${total[0].n} hội thoại — ${report.join(" · ")} (đường cũ tính #803 ba lượt trên cả hộp thư: ≈ 2 × ${canon.ms} ms)`);
+
+      // ═══ 5. STATE LỚN (P0 inbox-list-subplans): HSLC đọc LƯU SẴN mà câu lấy hàng 7,3 s · đếm thẻ 5,9 s — mỗi `state->'…'` giải nén TOÀN
+      // BỘ giá trị TOAST. Trạng thái nghiệp vụ đa dạng (người tiếp quản · copilot · AI hỏng · nhường · SĐT trong state) để mọi thẻ có số. ═══
+      const some = [...ids.values()].slice(0, 400);
+      const mark = (i: number) => some.slice(i * 50, i * 50 + 50);
+      await db.execute(sql`update "sales_chat_conversations" set "state" = coalesce("state", '{}'::jsonb) || '{"control":{"mode":"HUMAN"}}'::jsonb where "id" in ${mark(0)}`);
+      await db.execute(sql`update "sales_chat_conversations" set "state" = coalesce("state", '{}'::jsonb) || '{"control":{"mode":"COPILOT"}}'::jsonb where "id" in ${mark(1)}`);
+      await db.execute(sql`update "sales_chat_conversations" set "status" = 'HANDOFF', "handoff_reason" = 'AI tạm hỏng', "state" = coalesce("state", '{}'::jsonb) || jsonb_build_object('handoff', jsonb_build_object('reason', 'AI tạm hỏng', 'at', to_char(now() at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'))) where "id" in ${mark(2)}`);
+      await db.execute(sql`update "sales_chat_conversations" set "status" = 'HANDOFF', "handoff_reason" = 'Khách cần tư vấn thêm' where "id" in ${mark(3)}`);
+      await db.execute(sql`update "sales_chat_conversations" set "state" = coalesce("state", '{}'::jsonb) || '{"customer":{"name":"Chị Lan","phone":"0912345678"}}'::jsonb where "id" in ${mark(4)}`);
+      await db.execute(sql`update "sales_chat_conversations" set "assignee_user_id" = ${admin.id} where "id" in ${mark(5)}`);
+      const FILTERS = ["ALL", "UNREAD", "UNANSWERED", "NEEDS_HUMAN", "MINE", "UNASSIGNED", "AI", "HUMAN", "ORDERED", "NOT_ORDERED"] as const;
+      const snap = async () => {
+        const out: Record<string, unknown> = {};
+        for (const f of FILTERS) {
+          const r = await listInbox(admin, { filter: f, limit: 100 });
+          if (!r.ok) throw new Error(r.error);
+          out[f] = { counts: r.counts, levels: r.levelCounts, phone: r.phoneCount, rows: r.rows.map((x) => [x.id, x.unread, x.unreadCount, x.handling, x.needsHuman, x.humanHandling, x.customerName, x.customerPhone, x.aiHold, x.handoffQueue ? 1 : 0]) };
+        }
+        for (const extra of [{ handler: "AI" }, { handler: "HUMAN" }, { phone: "HAS" }, { phone: "NONE" }] as const) {
+          const r = await listInbox(admin, { filter: "ALL", limit: 100, ...extra });
+          if (!r.ok) throw new Error(r.error);
+          out[JSON.stringify(extra)] = { counts: r.counts, rows: r.rows.map((x) => x.id) };
+        }
+        return out;
+      };
+      const timeAll = async () => {
+        const ms: number[] = [];
+        for (let i = 0; i < 3; i++) {
+          const t0 = performance.now();
+          await listInbox(admin, { filter: "ALL", limit: 100 });
+          ms.push(performance.now() - t0);
+        }
+        return Math.round(p50(ms));
+      };
+      const small = await snap();
+      const smallMs = await timeAll();
+      // Một nhánh LỚN không SQL nào đọc (như hồ sơ khách cũ / giỏ / báo giá), chuỗi ngẫu nhiên để nén không xẹp.
+      await db.execute(sql.raw(`update "sales_chat_conversations" set "state" = coalesce("state", '{}'::jsonb) || jsonb_build_object('zzNhanhLon', (select jsonb_agg(md5(random()::text || g::text)) from generate_series(1, 600) g))`));
+      const [sz] = await db.select({ b: sql<number>`avg(pg_column_size("state"))::int` }).from(c);
+      const big = await snap();
+      const bigMs = await timeAll();
+      assert.deepEqual(big, small, "state lớn KHÔNG đổi một con số / một hàng nào của hộp thư (mọi thẻ · bộ lọc AI/người · SĐT)");
+      for (const f of ["NEEDS_HUMAN", "AI", "HUMAN", "MINE"] as const) assert.ok(((small[f] as { counts: Record<string, number> }).counts[f] ?? 0) > 0, `thẻ ${f} có số (bài kiểm thật sự chạm nhánh state)`);
+      // Mọi nhánh `state` mà SQL của listInbox đọc nằm trong bảng dẫn xuất gọn — nhánh mới mà quên khai thì đọc ra NULL lặng lẽ, nên đỏ ở đây.
+      const client = (db as unknown as { $client: { query: (...a: unknown[]) => Promise<unknown> } }).$client;
+      const orig = client.query.bind(client);
+      const texts: string[] = [];
+      client.query = async (...a: unknown[]) => {
+        const x = a[0] as string | { text: string };
+        texts.push(typeof x === "string" ? x : x.text);
+        return orig(...a);
+      };
+      try {
+        await snap();
+      } finally {
+        client.query = orig;
+      }
+      const keys = new Set<string>();
+      for (const tx of texts) for (const m of tx.matchAll(/"sales_chat_conversations"\."state"\s*(?:->>?|#>>?)\s*'([A-Za-z_]+)'/g)) keys.add(m[1]);
+      assert.ok(keys.size > 0, "đọc được các nhánh state trong chữ câu");
+      assert.deepEqual([...keys].filter((k) => !(INBOX_STATE_SQL_KEYS as readonly string[]).includes(k)), [], `nhánh state SQL đọc phải nằm trong INBOX_STATE_SQL_KEYS: ${[...keys].join(", ")}`);
+      assert.ok(!texts.some((tx) => /"sales_chat_conversations"\."state"\s*(?:@>|\?|#-)/.test(tx)), "không phép toán state nào ngoài -> / ->>");
+      console.log(`  ✓ state lớn (~${sz.b} byte/hội thoại sau nén) ≡ state nhỏ ở mọi thẻ / bộ lọc · listInbox «Tất cả» p50 ${smallMs} → ${bigMs} ms · nhánh SQL đọc: ${[...keys].sort().join(", ")}`);
     });
   } finally {
     await cleanup();

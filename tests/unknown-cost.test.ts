@@ -31,6 +31,9 @@ const REF = "uc-unknown-cost";
 function testPure() {
   // Thứ tự nguồn mục 3.13, chỉ số DƯƠNG là căn cứ.
   assert.deepEqual(liveLineUnitCost({ receipt: 150_000, orderSnapshot: 90_000, variantDefault: 80_000 }), { unitCost: 150_000, source: "RECEIPT" });
+  // Luật 13 (13/10/2026): giá báo MKT hiện tại đứng ĐẦU; giá báo 0 / null ⇒ lùi bậc như cũ.
+  assert.deepEqual(liveLineUnitCost({ marketer: 160_000, receipt: 185_000, orderSnapshot: 90_000, variantDefault: 80_000 }), { unitCost: 160_000, source: "MARKETER_PRICE" });
+  assert.deepEqual(liveLineUnitCost({ marketer: 0, receipt: 185_000, orderSnapshot: 90_000, variantDefault: 80_000 }), { unitCost: 185_000, source: "RECEIPT" }, "giá báo 0 ₫ = chưa định giá");
   assert.deepEqual(liveLineUnitCost({ receipt: null, orderSnapshot: 90_000, variantDefault: 80_000 }), { unitCost: 90_000, source: "ORDER_SNAPSHOT" });
   assert.deepEqual(liveLineUnitCost({ receipt: 0, orderSnapshot: 0, variantDefault: 80_000 }), { unitCost: 80_000, source: "VARIANT_DEFAULT" });
   assert.deepEqual(liveLineUnitCost({ receipt: 0, orderSnapshot: 0, variantDefault: 0 }), { unitCost: null, source: null }, "ba nguồn đều 0 ⇒ CHƯA BIẾT, không phải 0 ₫");

@@ -233,13 +233,20 @@ export function testProductLines(t, { page = false } = {}) {
   return [
     mo,
     `- THÔNG TIN ĐÃ CHO SẴN LÀ TẤT CẢ những gì được nói về mẫu này: tên, giá, chất vải, màu, size, ưu đãi, hướng dẫn bên dưới. KHÔNG tự thêm (chất liệu khác, độ dày, co giãn, xuất xứ, thời gian may, quà tặng, cam kết…) và KHÔNG bớt / đổi ý thông tin đã cho. Khách hỏi điều không có ở đây thì trả lời "Dạ em kiểm tra lại rồi báo chị ngay ạ" — không đoán.`,
-    `- Giá (chỉ được báo đúng các mức này, không giảm thêm): ${gia.join("; ")}.`,
+    `- Giá (chỉ được báo đúng các mức này, không giảm thêm tiền hàng): ${gia.join("; ")}.`,
+    // Chu shop 14/10/2026 (Thanh Le - AURA): khach hoi "Miễn ship hả shop", bot doi khach lay 2 dam moi mien ship
+    t.shipFee
+      ? `- Khách xin miễn ship / chê phí ship / mặc cả: MIỄN PHÍ SHIP luôn cho khách (1 chiếc còn ${vnd(t.price)}, miễn phí ship) rồi xin ngay số điện thoại + địa chỉ để giữ ưu đãi. KHÔNG bắt khách lấy 2 chiếc mới được miễn ship, KHÔNG giảm thêm tiền hàng.`
+      : "",
     `- Chất vải: ${t.fabric} — nói đúng câu chữ này, không gọi bằng tên chất liệu khác.`,
-    `- Màu đang có: ${t.colors.map((c) => c.color).join(", ")}. Gửi ảnh một màu bằng [[IMG:${t.code}:tên màu]], gửi ảnh mọi màu bằng [[IMG:${t.code}]]. Màu khác ngoài danh sách: nói rõ chưa có.`,
+    t.colors.length === 1
+      ? // Chu shop 14/10/2026 (Phuc Ba - AURA): mau chi co 1 mau ma bot hoi "lấy màu Đỏ đô hay xem thêm màu khác", "ưng màu này chưa"
+        `- Mẫu này CHỈ CÓ MỘT MÀU: ${t.colors[0].color}. KHÔNG hỏi khách chọn màu, KHÔNG hỏi "ưng màu này chưa", KHÔNG mời "xem thêm màu khác"; bản chốt đơn ghi màu ${t.colors[0].color}. Khách hỏi màu khác thì nói thật chỉ có ${t.colors[0].color} rồi đi tiếp bước chốt đơn. Gửi ảnh bằng [[IMG:${t.code}]].`
+      : `- Màu đang có: ${t.colors.map((c) => c.color).join(", ")}. Gửi ảnh một màu bằng [[IMG:${t.code}:tên màu]], gửi ảnh mọi màu bằng [[IMG:${t.code}]]. Màu khác ngoài danh sách: nói rõ chưa có.`,
     t.sizes ? `- Size: ${t.sizes}. Tư vấn size theo bảng size chung của page như các mẫu nữ khác.` : `- Tư vấn size theo bảng size chung của page như các mẫu nữ khác.`,
     t.offer ? `- Ưu đãi: ${t.offer}. Không hứa ưu đãi nào khác.` : `- Không hứa ưu đãi hay quà tặng nào ngoài giá ở trên.`,
     `- Kịch bản chốt đơn như bình thường; bản tóm tắt chốt đơn ghi đúng mã ${t.code}, tên mẫu, màu, size.`,
-  ];
+  ].filter(Boolean);
 }
 
 /** Khoi prompt rieng cho camp (hoac cho san pham cua page — `bot.scope === "page"`). */

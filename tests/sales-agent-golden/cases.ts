@@ -317,4 +317,20 @@ export const GOLDEN_CASES: readonly GoldenCase[] = [
       },
     ],
   },
+  {
+    key: "phuong-moi-khach-da-ghi-khong-hoi-lai",
+    title: "P0 15/10/2026 (ca «Tuyet Nguyen Thi»): khách ghi rõ phường MỚI «P An Hội Tây», model chép vào công cụ thành «Gò Vấp» rồi tự liệt kê 6 phường ⇒ công cụ đọc chữ khách (CUSTOMER_STATED, không câu hỏi), đơn nháp mang ô xã An Hội Tây, máy chủ bỏ câu hỏi phường, khách chỉ nhận phần còn lại",
+    shop: "food",
+    channel: "WEB",
+    turns: [
+      {
+        say: "lay 1 goi ruoc tom\n230/20 Phan Huy Ích, P An Hội Tây, TP.HCM\n0977000222",
+        ai: [
+          () => [tool("create_customer", { name: "Tuyết", phone: "0977000222", address: "230/20 Phan Huy Ích, Gò Vấp, TP.HCM" })],
+          ({ v }) => [tool("create_draft_order", { items: [{ variant_id: v("RUOC-TOM"), quantity: 1 }] })],
+          () => [say("Dạ địa chỉ mình nay thuộc phường Gò Vấp, phường An Nhơn, phường An Hội Đông, phường An Hội Tây, phường Hạnh Thông hay phường Thông Tây Hội theo địa giới mới ạ? Mình lấy 1 gói ruốc tôm đúng không ạ?")],
+        ],
+      },
+    ],
+  },
 ];
