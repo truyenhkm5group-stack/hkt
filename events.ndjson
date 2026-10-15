@@ -2881,3 +2881,4 @@
 {"at":"2026-10-15T02:37:18.559Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"crm-note-dat-giai-doan","detail":"claude/crm-note-dat-giai-doan @ 1c1df5a35d14 · 3 lệnh kiểm thử"}
 {"at":"2026-10-15T02:37:38.060Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#846 @ 1c1df5a35d14 · review độc lập PASS @9d244c9a; commit thêm chỉ đồng bộ hai bản regex theo đề xuất reviewer"}
 {"at":"2026-10-15T02:40:02.014Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#847 @ 0056a5523294 · review độc lập PASS (chỉ đọc, --since)"}
+{"at":"2026-10-15T03:09:22.245Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"money-trace-since","detail":"#847 @ 0056a5523294 → 9f2e2c79f71a (MERGE_NOW · MEDIUM · gates success)"}

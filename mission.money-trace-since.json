@@ -3,7 +3,7 @@
   "mission_id": "money-trace-since",
   "title": "Ops conv-money-trace --since: đo đúng khoảng sau deploy",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -23,9 +23,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-15T02:32:37.387Z",
-  "updated_at": "2026-10-15T02:33:35.109Z",
+  "updated_at": "2026-10-15T03:09:22.211Z",
   "last_heartbeat": "2026-10-15T02:32:58.199Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#847 → 9f2e2c79f71a014058e89858a33f94d11e14f1d4"
+  },
   "handoff": {
     "branch": "fix/money-trace-hours",
     "sha": "0056a5523294bac4a5f487aa74c72af16ed13c51",
