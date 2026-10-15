@@ -1,4 +1,3 @@
-{"at":"2026-10-06T10:27:01.335Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"CLAIM","mission":"deploy-reuse-wait","detail":"RUNNING · 2 mẫu phạm vi · HIGH"}
 {"at":"2026-10-06T10:29:43.549Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"deploy-reuse-wait","detail":"fix/deploy-reuse-wait @ d670af2b3a5e · 1 lệnh kiểm thử"}
 {"at":"2026-10-06T10:30:26.373Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"deploy-reuse-wait","detail":"#606 cho fix/deploy-reuse-wait @ d670af2b3a5e"}
 {"at":"2026-10-06T10:32:43.430Z","actor":"DESKTOP-56TH98Y:wt-pricing-billing","kind":"STATUS","mission":"pricing-billing-foundation","detail":"PLANNING → RUNNING · 29 mẫu phạm vi · HIGH"}
@@ -2998,3 +2997,4 @@
 {"at":"2026-10-15T10:11:19.603Z","actor":"vm:hkt","kind":"MERGED","mission":"inbox-all-recency","detail":"#842 @ ba697f4287ab → 412fb387d453 (MERGE_NOW · MEDIUM · gates success)"}
 {"at":"2026-10-15T10:12:32.363Z","actor":"vm:hkt","kind":"PR_OPENED","mission":"test-timing-table","detail":"#849 cho claude/test-timing-table @ 1db60af8c9b2"}
 {"at":"2026-10-15T10:12:42.940Z","actor":"vm:hkt","kind":"PR_OPENED","mission":"thread-diff-media-match","detail":"#850 cho claude/thread-diff-media-match @ bfd4ee7469ef"}
+{"at":"2026-10-15T10:12:52.959Z","actor":"vm:hkt","kind":"PR_OPENED","mission":"checkpoint-append-only","detail":"#851 cho claude/checkpoint-append-only @ 2d0b5a6ac86e"}
