@@ -46,17 +46,24 @@ export type CommittedItem = {
   customerExplicit: boolean;
   /** Khối lượng MỘT gói của món trong đơn nháp (mọi dòng cùng quy cách) — để quy «bớt 1 gói» ra gram. */
   packGrams?: number | null;
+  /**
+   * `quantity` đếm CÁI / CHIẾC (khách nói «10 cái»), không phải số hộp / gói (ca «Hoa Lê» 15/10/2026: «thêm 10 cái nem» với nem bán
+   * «Hộp 10 cái» = 1 hộp). So với đơn đề nghị bằng số cái của quy cách mẫu mã (`piecesOf`).
+   */
+  pieces?: boolean;
 };
 
 /**
  * `clarify` = câu khách có vẻ muốn sửa nhưng máy không áp chắc được ⇒ giỏ GIỮ NGUYÊN, model hỏi lại. `relaxedTurn` = lượt khách mà kiểm
  * cứng TẮT (không chặn khách sửa khi máy không chắc).
  */
-export type CartCommitment = { selectedItems: CommittedItem[]; turn: number | null; at: string; clarify?: string | null; relaxedTurn?: number | null };
+/** `relaxedSaid` = mọi số lượng khách nói trong tin của lượt «nới» — trần TĂNG của lượt đó (khách nói «2kg» thì được 2kg, không nói số thì không được tăng). */
+export type CartCommitment = { selectedItems: CommittedItem[]; turn: number | null; at: string; clarify?: string | null; relaxedTurn?: number | null; relaxedSaid?: { value: number; unit: CartUnit; pieces?: boolean }[] };
 
 export type CartIntentKind = "ORDER" | "SET" | "ADD" | "REDUCE" | "KEEP" | "REMOVE" | "CANCEL" | "QUESTION" | "AMBIGUOUS";
 /** `ambiguous` = chữ quanh số lượng gọi tên NHIỀU sản phẩm của danh mục («1 hộp nem» khi có hai loại nem) — không được rơi về món sẵn có. */
-export type CartAmount = { value: number; unit: CartUnit; label: string; display: string; index: number; end: number; ambiguous?: boolean; hint?: string };
+/** `pieces` = số CÁI / CHIẾC; `word` = chữ đơn vị khách gõ («gói», «hộp», «cái») — chỉ «gói / túi / bịch» mới quy được ra gram theo quy cách gói. */
+export type CartAmount = { value: number; unit: CartUnit; label: string; display: string; index: number; end: number; ambiguous?: boolean; hint?: string; pieces?: boolean; word?: string };
 /** `tentative` = số lượng nói kèm câu hỏi giá («lấy 2kg bao nhiêu em») — chỉ THÊM món mới (không dính), không bao giờ sửa món đã có. */
 export type CartIntent = { kind: CartIntentKind; amounts: CartAmount[]; label: string | null; tentative?: boolean };
 
@@ -157,10 +164,11 @@ function labelAround(text: string, index: number, end: number): { match: string;
 export function amountsIn(text: string, catalog?: readonly string[]): CartAmount[] {
   const out: CartAmount[] = [];
   const push = (value: number, unit: CartUnit, idx: number, len: number, unitWord = "") => {
+    const pieces = unit === "pack" && PIECE_WORD_RE.test(unitWord);
     let lb = resolveLabel(labelAround(text, idx, idx + len), catalog);
     // Chữ đơn vị tự nó là tên món của danh mục («thêm 1 combo nữa» khi shop có «Combo ăn vặt 3 món») ⇒ món đó.
     if (!lb.match && !lb.ambiguous && unitWord && catalog) lb = resolveLabel({ match: foldVi(unitWord), display: unitWord }, catalog);
-    out.push({ value, unit, label: lb.match, display: lb.display, index: idx, end: idx + len, ...(lb.ambiguous ? { ambiguous: true, hint: lb.hint } : {}) });
+    out.push({ value, unit, label: lb.match, display: lb.display, index: idx, end: idx + len, ...(lb.ambiguous ? { ambiguous: true, hint: lb.hint } : {}), ...(pieces ? { pieces: true } : {}), ...(unitWord ? { word: unitWord } : {}) });
   };
   for (const m of text.matchAll(WEIGHT_RE)) {
     const n = numOf(m[1]);
@@ -186,12 +194,33 @@ export function amountsIn(text: string, catalog?: readonly string[]): CartAmount
     if (a.unit !== "pack" || b.unit !== "g" || !/^\s*,?\s*(?:(?:mỗi|moi)\s+(?:gói|goi|túi|tui|hộp|hop|bịch|bich|hũ|hu)\s*)?(?:loại|loai|cỡ|co|size|x|×)?\s*$/i.test(gap)) continue;
     out.splice(i, 2, { ...b, value: a.value * b.value, index: a.index, label: b.label || a.label, display: b.display || a.display });
   }
+  // «chả cá thu 1kg lấy 2 hộp» = 2 hộp loại 1kg = 2kg — số GÓI / HỘP không tên đứng NGAY sau một khối lượng (chỉ cách bởi «lấy / cho / đặt /
+  // mua / x») là SỐ LẦN của khối lượng ấy, không phải một món thứ hai (review 15/10/2026 — trước đây thành «1kg» + «2 hộp» không tên và
+  // đơn 2 × 1kg đúng ý khách bị coi là tự tăng). Có tên món / đếm cái / có dấu phẩy ⇒ giữ hai lượng như cũ.
+  for (let i = 0; i + 1 < out.length; i++) {
+    const a = out[i];
+    const b = out[i + 1];
+    if (a.unit !== "g" || b.unit !== "pack" || b.label || b.ambiguous || b.pieces) continue;
+    if (!/^\s*(?:(?:lấy|lay|cho|đặt|dat|mua)(?:\s+(?:chị|chi|em|anh|mình|minh))?|x|×)?\s*$/i.test(text.slice(a.end, b.index))) continue;
+    out.splice(i, 2, { ...a, value: a.value * b.value, end: b.end });
+  }
   return out;
 }
 
-/** «2kg» · «500g» · «1,5kg» · «2 gói». HÀM THUẦN. */
-export function amountText(value: number, unit: CartUnit): string {
-  if (unit === "pack") return `${value} gói`;
+/** Chữ đơn vị đếm CÁI / CHIẾC (khác hộp / gói). */
+const PIECE_WORD_RE = /^(?:cái|cai|chiếc|chiec)$/i;
+/** Chữ đơn vị là GÓI / TÚI / BỊCH — chỉ những chữ này mới quy ra gram theo quy cách gói của món bán theo khối lượng («bớt 1 gói»). */
+const BAG_WORD_RE = /^(?:gói|goi|túi|tui|bịch|bich)$/i;
+/** Số cái trong MỘT đơn vị bán theo quy cách mẫu mã («Hộp 10 cái» ⇒ 10); không ghi ⇒ 1 (món bán theo cái). HÀM THUẦN. */
+export function piecesOf(name: string): number {
+  const m = foldVi(name).match(/(?:^| )(\d+) (?:cai|chiec|mieng|vien)(?: |$)/);
+  const n = m ? Number(m[1]) : 1;
+  return Number.isFinite(n) && n > 0 ? n : 1;
+}
+
+/** «2kg» · «500g» · «1,5kg» · «2 gói» · «10 cái». HÀM THUẦN. */
+export function amountText(value: number, unit: CartUnit, pieces = false): string {
+  if (unit === "pack") return pieces ? `${value} cái` : `${value} gói`;
   if (value % 1000 === 0) return `${value / 1000}kg`;
   if (value < 1000) return `${value}g`;
   return `${(value / 1000).toLocaleString("vi-VN")}kg`;
@@ -384,13 +413,19 @@ function findItem(items: readonly CommittedItem[], label: string): number | null
   return hits.length === 1 ? hits[0] : null;
 }
 
-const newItem = (a: CartAmount, turn: number | null, explicit: boolean): CommittedItem => ({ label: a.display, match: a.label, productId: null, variantId: null, sku: null, quantity: a.value, unit: a.unit, sourceMessageId: turn, confidence: a.label ? "HIGH" : "MEDIUM", customerExplicit: explicit });
+const newItem = (a: CartAmount, turn: number | null, explicit: boolean): CommittedItem => ({ label: a.display, match: a.label, productId: null, variantId: null, sku: null, quantity: a.value, unit: a.unit, sourceMessageId: turn, confidence: a.label ? "HIGH" : "MEDIUM", customerExplicit: explicit, ...(a.pieces ? { pieces: true } : {}) });
 
 /**
  * Áp MỘT tin khách lên giỏ. Trả ĐÚNG đối tượng cũ khi không đổi gì (engine chỉ ghi khi khác). Đích của MỌI lượng trong câu được tính
  * MỘT lần trên giỏ GỐC (chỉ số ổn định — không lần theo đối tượng đã thay), rồi mới áp. Không áp chắc được mà câu có dấu hiệu sửa ⇒
  * giỏ giữ nguyên + `clarify` + `relaxedTurn` (kiểm cứng của lượt tắt — không chặn khách). HÀM THUẦN.
  */
+/** Số `a` (không tên) có thể là số của món `it` không: cùng đơn vị (cùng đếm cái / gói), hoặc «gói / túi / bịch» với món bán theo kg. HÀM THUẦN. */
+function unitFits(a: CartAmount, it: CommittedItem): boolean {
+  if (a.unit === it.unit) return a.unit === "g" || Boolean(a.pieces) === Boolean(it.pieces);
+  return a.unit === "pack" && !a.pieces && it.unit === "g" && BAG_WORD_RE.test(a.word ?? "");
+}
+
 /** Món vừa được mời: tên danh mục + đơn vị bán (`g` = bán theo khối lượng kg · `pack` = hộp / gói / cái; vắng ⇒ `pack`). */
 export type InvitedProduct = { match: string; display: string; unit?: CartUnit };
 
@@ -424,7 +459,7 @@ export function applyCustomerCartMessage(cart: CartCommitment | undefined, text:
   const intent: CartIntent = toInvited && inv && a0 ? { ...parsed, kind: "ADD", amounts: [{ ...a0, label: inv.match, display: inv.display, ambiguous: false }] } : parsed;
   const at = now.toISOString();
   const items = cart?.selectedItems ?? [];
-  const relax = (clarify: string): CartCommitment | undefined => (cart ? { ...cart, clarify, relaxedTurn: turn, at } : cart);
+  const relax = (clarify: string): CartCommitment | undefined => (cart ? { ...cart, clarify, relaxedTurn: turn, at, relaxedSaid: amountsIn(text, opts.catalog).map((x) => ({ value: x.value, unit: x.unit, ...(x.pieces ? { pieces: true } : {}) })) } : cart);
   const done = (next: CommittedItem[], clarify: string | null = null): CartCommitment => ({ selectedItems: next, turn, at, clarify, relaxedTurn: null });
   const labels = items.map((x) => x.match);
   if (bothFit && inv && a0) return relax(`Khách nói ${amountText(a0.value, a0.unit)} không kèm tên ngay sau lời mời «${inv.display}» — số này hợp cả món đang có lẫn món được mời: HỎI LẠI khách muốn thêm món nào`);
@@ -457,7 +492,7 @@ export function applyCustomerCartMessage(cart: CartCommitment | undefined, text:
   }
   const explicitIdx = items.map((x, i) => (x.customerExplicit ? i : -1)).filter((i) => i >= 0);
   /** Đích của một lượng trên giỏ GỐC: khớp tên, hoặc không tên mà giỏ có đúng MỘT món khách đã nói. */
-  const target = (a: CartAmount): number | "NEW" | "AMBIGUOUS" => {
+  const target = (a: CartAmount): number | "NEW" | "AMBIGUOUS" | "UNIT" => {
     // Tên gọi NHIỀU sản phẩm (P0 14/10/2026: «lấy thêm 1 hộp nem» khi shop có hai loại nem) ⇒ KHÔNG rơi về món sẵn có — hỏi lại món nào.
     if (a.ambiguous) return "AMBIGUOUS";
     if (a.label) {
@@ -467,11 +502,17 @@ export function applyCustomerCartMessage(cart: CartCommitment | undefined, text:
       // «Cho chị 2kg» rồi «2kg chả cá thu nhé» — giỏ có đúng MỘT món chưa rõ tên ⇒ đó là món này.
       return items.length === 1 && !items[0].match ? 0 : "NEW";
     }
-    if (explicitIdx.length === 1) return explicitIdx[0];
-    if (!items.length) return "NEW";
-    return items.length === 1 ? 0 : "AMBIGUOUS";
+    // Số KHÔNG TÊN rơi về món sẵn có CHỈ khi hợp đơn vị (ca «Hoa Lê» 15/10/2026: «thêm 10 cái nem hải sản» không gắn được tên ⇒ rơi về
+    // chả cá 1kg ⇒ +10kg). Khác đơn vị ⇒ HỎI LẠI, không bao giờ cộng vào món đó. «gói / túi» với món bán theo kg vẫn tới món đó (quy theo
+    // quy cách gói ở bước dưới, không quy được thì hỏi lại).
+    const only = explicitIdx.length === 1 ? explicitIdx[0] : !items.length ? null : items.length === 1 ? 0 : -1;
+    if (only === null) return "NEW";
+    if (only === -1) return "AMBIGUOUS";
+    return unitFits(a, items[only]) ? only : "UNIT";
   };
   const targets = intent.amounts.map(target);
+  const unitMiss = intent.amounts.find((_, k) => targets[k] === "UNIT");
+  if (unitMiss && cart) return relax(`Khách nói ${amountText(unitMiss.value, unitMiss.unit, unitMiss.pieces)} không kèm tên món mà món đang có tính theo đơn vị khác — chưa quy đổi được, HỎI LẠI khách muốn thêm món nào`);
   if (targets.includes("AMBIGUOUS")) return cart ? relax(`Khách nói ${intent.amounts.map((a) => amountText(a.value, a.unit)).join(", ")} nhưng giỏ có ${items.length} món — chưa rõ món nào, GIỮ NGUYÊN và hỏi lại`) : cart;
   const keyOf = (k: number) => (targets[k] === "NEW" ? `NEW:${intent.amounts[k].label}` : String(targets[k]));
   const hits = new Map<string, number>();
@@ -491,6 +532,9 @@ export function applyCustomerCartMessage(cart: CartCommitment | undefined, text:
   for (let k = 0; k < intent.amounts.length; k++) {
     const a = intent.amounts[k];
     const t = targets[k] as number | "NEW";
+    if (typeof t === "number" && !intent.tentative && (intent.kind === "ADD" || intent.kind === "REDUCE") && next[t].unit === "pack" && a.unit === "pack" && Boolean(next[t].pieces) !== Boolean(a.pieces)) {
+      return relax(`Khách nói ${amountText(a.value, a.unit, a.pieces)} mà món đang tính theo ${next[t].pieces ? "cái" : "hộp / gói"} — chưa quy đổi được, hỏi lại khách muốn bao nhiêu`);
+    }
     if (t === "NEW") {
       if (intent.kind === "REDUCE") return cart ? relax(`Khách muốn bớt ${amountText(a.value, a.unit)} nhưng giỏ không có món đó — hỏi lại`) : cart;
       const prev = added.find((x) => x.match === a.label && x.unit === a.unit);
@@ -505,11 +549,12 @@ export function applyCustomerCartMessage(cart: CartCommitment | undefined, text:
     let delta = a.value;
     if (relative && cur.unit !== a.unit) {
       // «bớt 1 gói» với giỏ tính theo kg ⇒ quy theo quy cách mẫu mã của đơn nháp; không quy được ⇒ hỏi lại, không chặn.
-      if (a.unit === "pack" && cur.unit === "g" && cur.packGrams) delta = a.value * cur.packGrams;
+      // CHỈ «gói / túi / bịch» mới quy theo quy cách gói (review 15/10/2026); «hộp», «cái», «hũ»… với món bán theo kg ⇒ hỏi lại.
+      if (a.unit === "pack" && !a.pieces && cur.unit === "g" && cur.packGrams && BAG_WORD_RE.test(a.word ?? "")) delta = a.value * cur.packGrams;
       else return relax(`Khách nói ${amountText(a.value, a.unit)} mà món đang tính theo ${cur.unit === "g" ? "khối lượng" : "gói"} — chưa quy đổi được, hỏi lại khách muốn còn bao nhiêu`);
     }
     const quantity = intent.kind === "ADD" ? cur.quantity + delta : intent.kind === "REDUCE" ? cur.quantity - delta : a.value;
-    next[t] = { ...cur, quantity, unit: relative ? cur.unit : a.unit, sourceMessageId: turn, customerExplicit: true, confidence: cur.productId || a.label ? "HIGH" : "MEDIUM", ...(a.label && !cur.match ? { match: a.label, label: a.display } : {}) };
+    next[t] = { ...cur, quantity, unit: relative ? cur.unit : a.unit, ...(relative ? {} : { pieces: Boolean(a.pieces) || undefined }), sourceMessageId: turn, customerExplicit: true, confidence: cur.productId || a.label ? "HIGH" : "MEDIUM", ...(a.label && !cur.match ? { match: a.label, label: a.display } : {}) };
     changed = true;
   }
   if (!changed) return hasEditCue(text, labels) && cart ? relax("Khách có vẻ muốn sửa nhưng máy chưa áp được — hỏi lại") : cart;
@@ -536,13 +581,15 @@ function productFor(item: CommittedItem, cart: CartCommitment, asked: readonly A
   if (unbound.length === 1 && free.length === 1 && (!item.match || cart.selectedItems.length === 1)) return free[0];
   // Câu không nêu tên («cho chị 2 gói, thêm 1 ruốc») mà đơn có nhiều món ⇒ món DUY NHẤT có đúng lượng khách nói.
   if (item.match) return null;
-  const exact = free.filter((p) => proposedAmount(p, item.unit, asked) === item.quantity);
+  const exact = free.filter((p) => proposedAmount(p, item.unit, asked, item.pieces) === item.quantity);
   return exact.length === 1 ? exact[0] : null;
 }
 
 /** Lượng đề nghị của một sản phẩm theo đơn vị của món trong giỏ; `null` = không đo được (thiếu khối lượng mẫu mã). */
-function proposedAmount(productId: string, unit: CartUnit, asked: readonly AskedLine[]): number | null {
+function proposedAmount(productId: string, unit: CartUnit, asked: readonly AskedLine[], pieces = false): number | null {
   const lines = asked.filter((l) => l.productId === productId);
+  // Khách đếm CÁI ⇒ đơn đề nghị quy ra cái theo quy cách mẫu mã («Hộp 10 cái» × 1 = 10 cái).
+  if (unit === "pack" && pieces) return lines.reduce((s, l) => s + l.quantity * piecesOf(l.name), 0);
   if (unit === "pack") return lines.reduce((s, l) => s + l.quantity, 0);
   if (lines.some((l) => l.weightGrams == null)) return lines.length ? null : 0;
   return lines.reduce((s, l) => s + (l.weightGrams ?? 0) * l.quantity, 0);
@@ -560,11 +607,11 @@ export function commitmentViolation(cart: CartCommitment | undefined, asked: rea
     if (!item.customerExplicit) continue;
     const pid = productFor(item, cart, asked);
     if (!pid) continue;
-    const proposed = proposedAmount(pid, item.unit, asked);
+    const proposed = proposedAmount(pid, item.unit, asked, item.pieces);
     if (proposed === null || proposed >= item.quantity) continue;
     const name = item.label || productName(asked.find((l) => l.productId === pid)?.name ?? "") || "món khách chọn";
-    const want = amountText(item.quantity, item.unit);
-    const what = proposed === 0 ? `bỏ «${name}»` : `hạ «${name}» từ ${want} xuống ${amountText(proposed, item.unit)}`;
+    const want = amountText(item.quantity, item.unit, item.pieces);
+    const what = proposed === 0 ? `bỏ «${name}»` : `hạ «${name}» từ ${want} xuống ${amountText(proposed, item.unit, item.pieces)}`;
     return `KHÔNG được ${what}: khách đã nói TƯỜNG MINH ${want} ${name}${item.sourceMessageId !== null ? ` (tin #${item.sourceMessageId})` : ""} và CHƯA có câu sửa tường minh nào mới hơn. Giữ ĐÚNG ${want}; KHÔNG gợi ý gói ăn thử / gói nhỏ hơn, KHÔNG hỏi lại số lượng. Khách nói muốn đổi mà câu chưa rõ ⇒ HỎI LẠI khách muốn còn bao nhiêu. Mời thêm món chỉ được THÊM món khác — khách không nhận lời mời thì chốt đúng đơn ${want} ${name}.`;
   }
   return null;
@@ -669,7 +716,9 @@ export function lineBasisViolation(cart: CartCommitment | undefined, asked: read
       }
     }
   }
-  if (!cart || (turn !== undefined && turn !== null && cart.relaxedTurn === turn)) return null;
+  // Lượt «nới» (khách có ý sửa mà máy chưa chắc) chỉ nới vế HẠ / BỎ (commitmentViolation) — KHÔNG nới vế TĂNG: «thôi nem khỏi em» không
+  // phải căn cứ để bot đặt chả cá 10kg (review 15/10/2026, ca «Hoa Lê»). Khách muốn tăng thật thì khách nói số mới.
+  if (!cart) return null;
   /*
     MIỄN THEO MÓN, KHÔNG MIỄN CẢ GIỎ (P0 15/10/2026).
 
@@ -715,10 +764,12 @@ export function lineBasisViolation(cart: CartCommitment | undefined, asked: read
       qua (1kg → 10kg). Không quy đổi được thì GIỮ hàng rào — bot hỏi lại, chứ không tự chốt một con số.
     */
     if (explicitCoMa.some((e) => e.pid === pid && e.it !== item && donViHopNhau(e.it, item))) continue;
-    const proposed = proposedAmount(pid, item.unit, asked);
-    if (proposed === null || proposed <= item.quantity) continue;
+    const proposed = proposedAmount(pid, item.unit, asked, item.pieces);
+    // Lượt «nới»: trần tăng = số lớn nhất khách nói CÙNG đơn vị trong tin đó (không nói số ⇒ không được tăng).
+    const relaxedCap = turn !== undefined && turn !== null && cart.relaxedTurn === turn ? Math.max(0, ...(cart.relaxedSaid ?? []).filter((x) => x.unit === item.unit && Boolean(x.pieces) === Boolean(item.pieces)).map((x) => x.value)) : 0;
+    if (proposed === null || proposed <= Math.max(item.quantity, relaxedCap)) continue;
     const name = item.label || productName(asked.find((l) => l.productId === pid)?.name ?? "") || "món khách chọn";
-    return `KHÔNG tự tăng «${name}» lên ${amountText(proposed, item.unit)}: khách nói ${amountText(item.quantity, item.unit)}${item.sourceMessageId !== null ? ` (tin #${item.sourceMessageId})` : ""}. Lên đơn ĐÚNG số khách nói; khách muốn thêm thì khách tự nói số lượng.`;
+    return `KHÔNG tự tăng «${name}» lên ${amountText(proposed, item.unit, item.pieces)}: khách nói ${amountText(item.quantity, item.unit, item.pieces)}${item.sourceMessageId !== null ? ` (tin #${item.sourceMessageId})` : ""}. Lên đơn ĐÚNG số khách nói; khách muốn thêm thì khách tự nói số lượng.`;
   }
   return null;
 }
@@ -772,7 +823,7 @@ const REASK_RE = /(?:^| )(?:lay|mua|dat|can)? ?(?:may|bao nhieu) (?:kg|ky|ki|can
  * lấy 2kg chả cá thu như đã chọn nhé.» (không nói «giữ đơn» khi chưa có đơn). HÀM THUẦN.
  */
 export function holdCartText(cart: CartCommitment, opts: { hasDraft?: boolean } = {}): string {
-  const parts = cart.selectedItems.filter((x) => x.customerExplicit).map((x) => `${amountText(x.quantity, x.unit)}${x.label ? ` ${x.label.toLowerCase()}` : ""}`);
+  const parts = cart.selectedItems.filter((x) => x.customerExplicit).map((x) => `${amountText(x.quantity, x.unit, x.pieces)}${x.label ? ` ${x.label.toLowerCase()}` : ""}`);
   const what = parts.join(" + ") || "như cũ";
   return opts.hasDraft === false ? `Dạ, mình lấy ${what} như đã chọn nhé.` : `Dạ, em giữ đơn ${what} như mình đã chọn nhé.`;
 }
@@ -921,7 +972,7 @@ export function cartCommitmentPrompt(
 ): string {
   const explicit = s.cart?.selectedItems.filter((x) => x.customerExplicit) ?? [];
   if (!s.cart || !explicit.length) return "";
-  const items = s.cart.selectedItems.map((x) => `${amountText(x.quantity, x.unit)} ${x.label ? quoted(x.label) : "(chưa rõ món)"}${x.customerExplicit ? ` — khách nói TƯỜNG MINH${x.sourceMessageId !== null ? ` ở tin #${x.sourceMessageId}` : ""}, CỐ ĐỊNH` : " — bot đề xuất / khách chỉ hỏi, chưa chốt số"}`);
+  const items = s.cart.selectedItems.map((x) => `${amountText(x.quantity, x.unit, x.pieces)} ${x.label ? quoted(x.label) : "(chưa rõ món)"}${x.customerExplicit ? ` — khách nói TƯỜNG MINH${x.sourceMessageId !== null ? ` ở tin #${x.sourceMessageId}` : ""}, CỐ ĐỊNH` : " — bot đề xuất / khách chỉ hỏi, chưa chốt số"}`);
   const money = s.draft?.quote ? `đơn nháp ${s.draft.lines.length} dòng · tiền hàng ${formatVND(s.draft.quote.subtotal)} (giá MÁY CHỦ — đọc đúng số này)` : "chưa có đơn nháp / báo giá máy chủ";
   const phone = s.customer?.phone ? `đã có (${maskPhone(s.customer.phone)})` : "chưa lưu";
   const addr = s.customer?.address ? `đã có${s.customer.province || resolveRecipientPlace({ address: s.customer.address, province: "", ward: "" }).province ? " — đọc được tỉnh / thành" : " — CHƯA đọc được tỉnh / thành"}` : "chưa lưu";
@@ -946,6 +997,7 @@ export function cartCommitmentPrompt(
     `  · SĐT: ${phone} · Địa chỉ: ${addr}`,
     `  · Mức sẵn sàng: ${r.level} — ${act[r.level]}`,
     s.cart.clarify ? `  · Cần hỏi lại: ${s.cart.clarify}` : "",
+    s.cart.selectedItems.some((x) => x.pieces) ? "  · Số «N cái» là số CÁI khách đếm, KHÔNG phải số hộp / gói: mẫu mã «Hộp 10 cái» ⇒ 10 cái = 1 hộp (quantity 1). Không chia hết / không rõ quy cách ⇒ HỎI LẠI khách lấy mấy hộp." : "",
     relaxed ? "  · Lượt này khách có ý SỬA mà máy chưa chắc: làm theo ý khách nếu rõ, chưa rõ thì hỏi lại — máy chủ KHÔNG chặn lần sửa này." : "",
     "LUẬT GIỎ: số lượng khách nói TƯỜNG MINH là CỐ ĐỊNH. KHÔNG đề xuất ít hơn, KHÔNG gợi ý gói ăn thử / gói nhỏ hơn, KHÔNG hỏi lại số lượng đã biết. Câu mơ hồ («ok», «ngon chị mới lấy nha em», «không lấy thêm», «để lần sau», «thế nhé») KHÔNG đổi giỏ. Khách SỬA («đổi còn 1kg», «lấy 1kg thôi», «bớt 1kg», «bỏ chả cá», «hủy giúp chị») ⇒ làm theo khách. Mời thêm món chỉ được THÊM món khác; khách không nhận lời mời ⇒ quay về chốt đúng đơn trên.",
   ]
