@@ -2874,3 +2874,5 @@
 {"at":"2026-10-15T02:25:58.432Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"LEASE_ACQUIRED","detail":"integration-lead"}
 {"at":"2026-10-15T02:26:45.350Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"cart-qty-guard-unit","detail":"#845 cho claude/cart-qty-guard-unit @ 9655435be93a"}
 {"at":"2026-10-15T02:28:12.895Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"crm-note-dat-giai-doan","detail":"#846 cho claude/crm-note-dat-giai-doan @ 9d244c9a626d"}
+{"at":"2026-10-15T02:32:37.513Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"CLAIM","mission":"money-trace-since","detail":"RUNNING · 2 mẫu phạm vi · MEDIUM"}
+{"at":"2026-10-15T02:32:37.513Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"OVERLAP_ACCEPTED","mission":"money-trace-since","detail":"OVERLAP_ACCEPTED với conv-money-trace: phạm vi scripts/conv-money-trace.ts — cách tích hợp: chỉ script ops chỉ đọc + bài kiểm của nó"}
