@@ -2877,3 +2877,4 @@
 {"at":"2026-10-15T02:32:37.513Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"CLAIM","mission":"money-trace-since","detail":"RUNNING · 2 mẫu phạm vi · MEDIUM"}
 {"at":"2026-10-15T02:32:37.513Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"OVERLAP_ACCEPTED","mission":"money-trace-since","detail":"OVERLAP_ACCEPTED với conv-money-trace: phạm vi scripts/conv-money-trace.ts — cách tích hợp: chỉ script ops chỉ đọc + bài kiểm của nó"}
 {"at":"2026-10-15T02:32:58.230Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"money-trace-since","detail":"fix/money-trace-hours @ 0056a5523294 · 3 lệnh kiểm thử"}
+{"at":"2026-10-15T02:33:35.141Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"money-trace-since","detail":"#847 cho fix/money-trace-hours @ 0056a5523294"}
