@@ -24,6 +24,19 @@
   trên bản sao trước khi đề xuất sửa (KHÔNG sửa migration đã áp — viết migration mới / làm lười theo lô).
 
 
+
+## Checkpoint 2026-10-15 ~18:25Z — CLAUDE WEB: #853 ĐÃ GỘP · HẬU KIỂM QUA ACTIONS CHẠY THẬT
+
+- **#853 gộp** `c52e5c57` (squash, khoá integration-lead, review độc lập PASS @fe94be44 sau 3 lượt — 1 lỗi TRUNG BÌNH «verify --record với mã sứ mệnh lạ vẫn xanh» + 1 «ô sứ mệnh toàn khoảng trắng xanh rỗng»
+  đã sửa; gates xanh). Không cần deploy (chỉ workflow + test). Khoá integration-lead ĐÃ NHẢ.
+- **Cách dùng:** Actions → «Hậu kiểm production (AI Tech Room)» → sha = SHA đang chạy trên production (40 ký tự), missions = các mã cách nhau khoảng trắng (rỗng = chỉ kiểm). Từ phiên Cloud:
+  MCP `actions_run_trigger` workflow `ai-verify.yml` ref `main`. ĐỪNG nhập SHA cũ khi đã có PASS — FAIL đè PASS (hành vi sẵn của công cụ).
+- **Lượt thật đầu tiên (run 38784953416, chỉ kiểm, 48651de2):** máy Actions GỌI ĐƯỢC production · health ok · commit 48651de28ba0 khớp · migration 247 = 246 + 1 · /api/health 200 · /login 200 ·
+  ✗ lượt deploy 38727812343 `failure` ⇒ KHÔNG ĐẠT — đúng sự thật (qa 0245). Chưa thử được nhánh `--record` đẩy sổ bằng GITHUB_TOKEN: thử ở lượt verify ĐẠT đầu tiên.
+- **Chặn duy nhất còn lại trước DONE của 4 hotfix P0 + ai-verify-actions:** qa 0245 ⇒ chờ chủ shop chọn phương án (mục 17:50Z). Khi qa áp được 0245: deploy lại main (deploy-plan) ⇒ ai-verify cho SHA mới
+  với missions «address-ward-explicit inbox-all-recency …» ⇒ `close --status=DONE`.
+- Môi trường phiên Web: GH_TOKEN/GITHUB_TOKEN trong env là chuỗi rỗng/không hợp lệ ⇒ `ai-tech queue/merge/pr-open` trả 401/403; dùng MCP GitHub (đã cầm khoá đúng quy trình).
+
 ## Checkpoint 2026-10-15 ~17:50Z — CLAUDE WEB: NGHIỆM THU P0 — VERIFY QUA ACTIONS (#853) · GỐC 0245 ĐÃ ĐO
 
 - **Deploy «failure» là THẬT với cổng verify:** 5 lượt deploy liên tiếp (882–886, 03:10Z→12:26Z 15/10) đều `failure` ở «có migration trong sổ chưa áp» = tổ chức THỬ `qa` thiếu 0245
