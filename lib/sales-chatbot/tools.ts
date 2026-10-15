@@ -44,7 +44,7 @@ import { buildQuote, computePriced, loadPricingContext, packChoiceMistake, packi
 import { priceUnverifiedReason, QUOTE_UNVERIFIED_INSTRUCTION, quoteSnapshotOf, type PriceDisputeState, type Quote, type QuoteSnapshot } from "@/lib/sales-chatbot/quote-shared";
 import { CLAIM_SAFE_TEXT, orderValidityOf } from "@/lib/sales-chatbot/claim-guard";
 import { bindCommitment, commitmentViolation, customerHesitates, declinesAddOnOnly, lineBasisViolation, type CartCommitment } from "@/lib/sales-chatbot/cart-commitment";
-import { acceptCustomerWard, acceptEarlierWardReply, addressQuestion, canAutoFill, namesOtherWard, parseCustomerAddress, wardFromCustomerWords, type AddressConfidence, type AddressPart } from "@/lib/address/customer-address";
+import { acceptCustomerWard, addressQuestion, canAutoFill, namesOtherWard, parseCustomerAddress, wardFromCustomerWords, type AddressConfidence, type AddressPart } from "@/lib/address/customer-address";
 import { askedBefore, askMemoryFor, askMemoryParts, askParts, type AddressAskMemory } from "@/lib/sales-chatbot/address-memory";
 import { searchCatalog, sellableCatalog, stockFor, type CatalogItem } from "@/lib/sales-chatbot/catalog";
 import { quotedInText } from "@/lib/sales-chatbot/text";
@@ -962,26 +962,22 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
       const recipient = recipientFrom(v.data, base);
       // Yêu cầu đóng gói riêng («2 gói riêng», «chia 2 túi») — giữ qua các lượt sửa đơn, ghi vào ghi chú đơn cho kho.
       const packing = packingRequestOf(ctx.lastUserText) ?? existing?.packing ?? null;
-      // Xã / phường khách vừa xác nhận: phải có trong danh mục của tỉnh đã đọc được VÀ khách vừa nói đúng tên đó (không đoán thay).
-      // Tên xã ở một tin TRƯỚC chỉ nhận qua hai đường có chặn (review độc lập PR #848 lần 2 — nối mọi tin khách lại thì phường của
-      // địa chỉ CŨ lọt vào đơn của địa chỉ MỚI): địa chỉ đầy đủ KHỚP dòng đơn (`wardFromCustomerWords`: cùng đường, số nhà, quận cũ,
-      // không lời sửa) · lời trả lời ngắn về phường mà sau nó không có địa chỉ / phường khác (`acceptEarlierWardReply`).
+      // Xã / phường khách vừa xác nhận: phải có trong danh mục của tỉnh đã đọc được VÀ TIN CUỐI của khách nói đúng tên đó, không nêu xã
+      // nào khác (không đoán thay). Tên xã ở một tin TRƯỚC chỉ nhận khi nằm trong một địa chỉ đầy đủ KHỚP dòng đơn (`wardFromCustomerWords`:
+      // cùng đường, cùng số nhà, quận cũ, không lời sửa). Review độc lập PR #848: nối mọi tin khách lại, hay nhận «lời trả lời phường» ở tin
+      // trước, đều để phường của địa chỉ CŨ lọt vào đơn của địa chỉ MỚI.
       if (v.data.ward) {
         const parsedWard = parseCustomerAddress(recipient.address, recipient.province);
         const okWard = acceptCustomerWard(parsedWard, v.data.ward, ctx.lastUserText);
-        // Tin cuối nêu tên phường nhưng cũng nêu / phủ định sang một phường KHÁC («không phải An Hội Tây, An Hội Đông») ⇒ không phải lời khai.
         const lastNamesOther = okWard.ok && Boolean(parsedWard.province) && ctx.lastUserText.split(/\n+/).some((l) => namesOtherWard(l, parsedWard.province!, okWard.ward));
         if (okWard.ok && !lastNamesOther) recipient.ward = okWard.ward;
         else {
           const wardCore = (x: string) => foldVnText(x).replace(/^(phuong|xa|thi tran|dac khu) /, "");
           const stated = wardFromCustomerWords(parsedWard, recipient.address, ctx.customerTexts);
-          const askedHere = askMemoryParts(askMemoryFor(state.addressAsk, recipient.address)).ward !== undefined;
-          const earlier = stated || lastNamesOther ? null : acceptEarlierWardReply(parsedWard, v.data.ward, ctx.customerTexts ?? [], askedHere);
           if (stated && wardCore(stated.ward) === wardCore(v.data.ward)) {
             recipient.ward = stated.ward;
             if (!parsedWard.province) recipient.province = stated.province;
-          } else if (earlier) recipient.ward = earlier.ward;
-          else return err("Đơn nháp: xã / phường chưa xác nhận", okWard.ok ? `Tin khách nêu cả một phường khác ngoài «${okWard.ward}» — hỏi lại khách đúng một câu, không tự chọn.` : okWard.error, state);
+          } else return err("Đơn nháp: xã / phường chưa xác nhận", okWard.ok ? `Tin khách nêu cả một phường khác ngoài «${okWard.ward}» — hỏi lại khách đúng một câu, không tự chọn.` : okWard.error, state);
         }
       }
       // ĐỊA CHỈ KHÁCH TỰ GÕ (P0 15/10/2026): dòng model chép mất phần xã mà tin khách ghi rõ một xã có thật (cùng tỉnh, cùng số nhà) ⇒

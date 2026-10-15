@@ -68,7 +68,20 @@ export function askedBefore(m: AddressAskMemory | undefined, parts: readonly Add
  * Những gì máy chủ BIẾT về địa chỉ giao của lượt. `ward` = tên chuẩn khi đã biết; `wardAskedAt` = lượt đầu tiên đã hỏi phường;
  * `corrected` = tin khách MỚI NHẤT nêu một phường KHÁC phường máy đang biết (khách đang sửa) — khi đó bot được hỏi / xác nhận lại.
  */
-export type AddressKnowledge = { ward: string | null; wardAskedAt: number | null; province: boolean; street: boolean; corrected?: boolean; changeRequested?: boolean };
+export type AddressKnowledge = { ward: string | null; wardAskedAt: number | null; province: boolean; street: boolean; corrected?: boolean; changeRequested?: boolean; lastSettlesAddress?: boolean };
+
+/** Lời đồng ý ngắn («ok em», «vâng», «đúng rồi», «chốt nhé»). */
+const ACK = /^(?:ok|oke|okie|okay|uh|u|um|vang|da|dung|dung roi|duoc|chot|chot don|roi|co|yes)(?: (?:em|a|nhe|nha|shop|ban|roi|luon|di|vay|the))*$/;
+/**
+ * Tin khách MỚI NHẤT chính là tin mang địa chỉ, hoặc chỉ là lời đồng ý — chỉ khi đó câu bot «xin lại cả địa chỉ» mới chắc chắn là hỏi lại
+ * điều vừa biết. Tin khác («gửi cho mẹ chị dưới quê nhé», «chị không ở đó nữa rồi») có thể là đổi người / nơi nhận mà không danh sách
+ * mẫu nào bắt hết ⇒ hàng rào để câu xin địa chỉ đi qua (review PR #848 lần 4). HÀM THUẦN.
+ */
+function settlesAddress(last: string, ward: string | null): boolean {
+  const f = foldVnText(last);
+  const wardCore = ward ? foldVnText(ward).replace(/^(phuong|xa|thi tran|dac khu) /, "") : "";
+  return ACK.test(f) || customerStatedAddresses([last]).length > 0 || (wardCore.length > 0 && ` ${f} `.includes(` ${wardCore} `));
+}
 
 
 /**
@@ -90,10 +103,10 @@ export function addressKnowledge(state: Pick<ChatState, "draft" | "customer" | "
     const provinceName = a.province ?? stated?.province ?? null;
     // Khách vừa nêu một phường khác (sửa không kèm đường) ⇒ phường máy đang giữ KHÔNG còn là điều đã biết.
     if (ward && provinceName && last.split(/\n+/).some((x) => namesOtherWard(x, provinceName, ward))) return { ward: null, wardAskedAt, province: true, street: !a.missing.includes("street"), corrected: true };
-    return { ward, wardAskedAt, province: a.province !== null || Boolean(stated), street: !a.missing.includes("street") };
+    return { ward, wardAskedAt, province: a.province !== null || Boolean(stated), street: !a.missing.includes("street"), lastSettlesAddress: settlesAddress(last, ward) };
   }
   const [said] = customerStatedAddresses(customerTexts);
-  return said ? { ward: said.ward, wardAskedAt, province: said.province !== null, street: !said.missing.includes("street") } : { ward: null, wardAskedAt, province: false, street: false };
+  return said ? { ward: said.ward, wardAskedAt, province: said.province !== null, street: !said.missing.includes("street"), lastSettlesAddress: settlesAddress(last, said.ward) } : { ward: null, wardAskedAt, province: false, street: false };
 }
 
 /** Câu HỎI phường / xã (đã gập) tự thân là câu hỏi: «phường nào», «phường / xã gì». */
@@ -136,8 +149,10 @@ export const ADDRESS_KNOWN_TEXT = "Dạ em ghi nhận địa chỉ của mình r
  */
 export function addressReaskVerdict(botText: string, k: AddressKnowledge, turn: number): { rest: string; note: string } | null {
   // Khách đang sửa phường ⇒ bot được hỏi / xác nhận lại — hàng rào không bỏ câu hỏi phường ở lượt đó.
-  const wardSettled = !k.corrected && (k.ward !== null || (k.wardAskedAt !== null && k.wardAskedAt < turn));
-  const fullKnown = k.ward !== null && k.province && k.street;
+  // Phường ĐÃ BIẾT chỉ chặn câu hỏi phường khi tin khách mới nhất xác nhận / mang chính địa chỉ đó — tin khác có thể là đổi người / nơi
+  // nhận («gửi cho mẹ chị dưới quê»), bot phải hỏi được phường của nơi mới (review PR #848 lần 4).
+  const wardSettled = !k.corrected && ((k.ward !== null && Boolean(k.lastSettlesAddress)) || (k.ward === null && k.wardAskedAt !== null && k.wardAskedAt < turn));
+  const fullKnown = k.ward !== null && k.province && k.street && Boolean(k.lastSettlesAddress);
   if (!wardSettled && !fullKnown) return null;
   const sentences = (botText.match(/[^.!?\n]+[.!?]*/g) ?? []).map((s) => s.trim()).filter(Boolean);
   const drop = (s: string) => (wardSettled && asksForWard(s)) || (fullKnown && asksForFullAddress(s));
