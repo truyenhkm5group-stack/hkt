@@ -3,7 +3,7 @@
   "mission_id": "crm-note-dat-giai-doan",
   "title": "Ghi chú CRM «Đã ĐẠT giai đoạn» của Pancake thôi bị coi là page trả lời (bot im đúng lúc khách chốt)",
   "business_goal": "",
-  "status": "RUNNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-team",
@@ -21,7 +21,22 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-15T01:53:01.512Z",
-  "updated_at": "2026-10-15T01:53:01.512Z",
-  "last_heartbeat": "2026-10-15T01:53:01.512Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-15T01:57:35.130Z",
+  "last_heartbeat": "2026-10-15T01:57:35.130Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/crm-note-dat-giai-doan",
+    "sha": "9d244c9a626d3996f485303375c5975a19ff40c2",
+    "at": "2026-10-15T01:57:35.130Z",
+    "actor": "DESKTOP-56TH98Y:wt-team",
+    "title": "Ghi chú CRM «Đã ĐẠT giai đoạn» của Pancake thôi bị coi là page trả lời (bot im đúng lúc khách chốt)",
+    "summary": "PANCAKE_AUTO_NOTE_RE nhận cả «đặt» lẫn «đạt» giai đoạn của khách hàng — bỏ sót ghi chú tự động làm ERP coi là page đã trả lời và bot im đúng lúc khách chốt. Nới đúng một dấu, giữ bắt buộc cụm «của khách hàng».",
+    "tests": [
+      "tests/sender-provenance-probe.test.ts chạy riêng: ĐẠT (nhận «đạt» · KHÔNG nhận câu người thật)",
+      "npm run typecheck: sạch",
+      "npm run lint: sạch",
+      "quét kho: không bài kiểm nào khẳng định ngược",
+      "npm test đủ: để cổng CI chạy"
+    ]
+  }
 }
