@@ -26,19 +26,18 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-14T09:05:23.030Z",
-  "updated_at": "2026-10-14T10:32:48.705Z",
-  "last_heartbeat": "2026-10-14T10:32:48.705Z",
+  "updated_at": "2026-10-15T10:10:54.442Z",
+  "last_heartbeat": "2026-10-15T10:10:54.442Z",
   "definition_of_done": [],
   "handoff": {
     "branch": "fix/inbox-all-recency",
-    "sha": "1e4f4edc4d8dce6038523ca482f62e5b7712f345",
-    "at": "2026-10-14T10:32:48.705Z",
-    "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+    "sha": "ba697f4287abbab6fa59e738558599ecbf30f589",
+    "at": "2026-10-15T10:10:54.442Z",
+    "actor": "vm:wt-842",
     "title": "Hộp thư «Tất cả» xếp theo tin mới nhất (chủ shop duyệt 14/10)",
     "summary": "",
     "tests": [
-      "eslint: sạch",
-      "inbox-semantics-v3: mô hình thứ tự cập nhật theo quyết định 14/10"
+      "gates đầy đủ XANH @ba697f42 (run 38568657791: ẩn danh 34,9′, có token 22′); sửa mô hình thứ tự trong tests/inbox-semantics-v3 + inbox-unread-perf theo luật mới, không nới kỳ vọng"
     ]
   }
 }
