@@ -23,20 +23,19 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-15T01:53:01.512Z",
-  "updated_at": "2026-10-15T02:37:18.528Z",
-  "last_heartbeat": "2026-10-15T02:37:18.528Z",
+  "updated_at": "2026-10-15T04:20:58.227Z",
+  "last_heartbeat": "2026-10-15T04:20:58.227Z",
   "definition_of_done": [],
   "handoff": {
     "branch": "claude/crm-note-dat-giai-doan",
-    "sha": "1c1df5a35d1491ad8bf294ce7ad82ce4fc16010d",
-    "at": "2026-10-15T02:37:18.528Z",
+    "sha": "d2079716bd630669bb7764a7fa2e3f13d6bda9be",
+    "at": "2026-10-15T04:20:58.227Z",
     "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
     "title": "Ghi chú CRM «Đã ĐẠT giai đoạn» của Pancake thôi bị coi là page trả lời (bot im đúng lúc khách chốt)",
     "summary": "",
     "tests": [
-      "review độc lập @9d244c9a PASS",
-      "thêm: META_SYSTEM_TEXT_RE/SQL nhận đ[ặạ]t, đối chiếu JS≡SQL thêm 2 câu",
-      "eslint sạch"
+      "cây bằng đúng 9d244c9a (review độc lập PASS)",
+      "hoàn lại thay đổi SQL dính hàm 0245"
     ]
   }
 }

@@ -2889,3 +2889,4 @@
 {"at":"2026-10-15T03:51:07.729Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"CLAIM","mission":"address-ward-explicit","detail":"RUNNING · 0 mẫu phạm vi · MEDIUM"}
 {"at":"2026-10-15T04:19:46.950Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"cart-qty-guard-unit","detail":"#845 @ 43cef336acd3 → c30912bd1f6f (MERGE_NOW · MEDIUM · gates success)"}
 {"at":"2026-10-15T04:20:09.494Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#846 @ ca4d8724f6bc · nội dung bằng 9d244c9a đã review PASS"}
+{"at":"2026-10-15T04:20:58.277Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"crm-note-dat-giai-doan","detail":"claude/crm-note-dat-giai-doan @ d2079716bd63 · 2 lệnh kiểm thử"}
