@@ -80,6 +80,7 @@ import { testAgentRunner, testAgentSandbox, testGithubDeploymentSync, testPhase2
 import { cleanupPrProjectionFixtures, testGithubPrSync, testPrPureMappers, testSyncIncidentPure, testSyncIncidentWatch } from "./tech-pr-projection.test";
 import { cleanupAgentIngestFixtures, testAgentIngestDb, testAgentIngestPure, testAgentIngestSourceGuards } from "./agent-run-ingest.test";
 import { testTestHygiene } from "./test-hygiene.test";
+import { bangThoiGian, dongInNgay, testTestTiming, type NhipDo } from "./test-timing.test";
 import { cleanupAiHealthFixtures, testAiHealthKhongDemLuotTuKiem, testAiHealthSourceGuards } from "./ai-health-selftest.test";
 import { cleanupAiIncidentFixtures, testAiIncidentPure, testAiIncidentSourceGuards, testAiIncidentWatchDb } from "./ai-incident-watch.test";
 import { testMoTaLoiCsdl, testMoTaLoiSourceGuards } from "./db-error-message.test";
@@ -684,6 +685,29 @@ import { testAiSalesKnowledge } from "./ai-sales-knowledge.test";
 import { testSalesModelFallbackTenant } from "./sales-model-fallback-tenant.test";
 
 async function main() {
+  /*
+    ═══ ĐO THỜI GIAN TỪNG NHÓM — SỐ ĐỂ CHIA JOB, KHÔNG PHẢI ĐỂ NÂNG TRẦN ═══
+    Trần job kiểm thử đã phải nâng một lần (35′ → 45′, #830) và vẫn bị cắt (#842: 45,5′ ở nhánh có token,
+    trong khi cùng bộ ấy chạy 34,2′ ở nhánh ẩn danh và 34,6′ trên main). Muốn CHIA bộ kiểm thử thì phải
+    biết nhóm nào ăn bao nhiêu phút — mà bộ này chỉ in «✓ …», không in thời gian. Lớp dưới lấy mốc quanh
+    mỗi dòng in, cuối lượt in bảng nhóm chậm nhất, nên MỌI lượt cổng để lại số đo mà không tốn thêm lượt
+    chạy nào. Không đổi một dòng in nào đang có (bảng in THÊM ở cuối), không đọc biến môi trường.
+  */
+  const nhip: NhipDo[] = [];
+  const inGoc = console.log;
+  let mocDo = Date.now();
+  console.log = (...a: unknown[]) => {
+    const nay = Date.now();
+    const mocDong = mocDo;
+    const dong = a.map((x) => String(x)).join(" ").split("\n").map((d) => d.trim()).find((d) => d.length > 0) ?? "";
+    nhip.push({ ms: nay - mocDo, dong });
+    mocDo = nay;
+    inGoc(...a);
+    // IN NGAY, không đợi bảng cuối lượt: lượt bị cắt ở trần (45,5′ của #842) không bao giờ chạy tới bảng,
+    // mà đó đúng là lượt cần đọc. `inGoc` chứ không `console.log` — nếu không, dấu này tự đếm chính nó.
+    const dau = dongInNgay(nay - mocDong);
+    if (dau) inGoc(dau);
+  };
   await ensureMigrated();
   const db = await getDb();
 
@@ -2706,6 +2730,8 @@ async function main() {
   testOrgLinkOrigin();
   testAgentIngestSourceGuards();
   testTestHygiene();
+  // Bảng thời gian: hàm thuần dựng bảng nhóm chậm nhất (đo để chia job, không để nâng trần).
+  testTestTiming();
   testAiHealthSourceGuards();
   testAiIncidentPure();
   testAiIncidentSourceGuards();
@@ -3282,6 +3308,8 @@ async function main() {
   // Nền tảng · 1.x: trang tổng hợp / công cụ AI theo module, chẩn đoán chỉ đọc, tệp hai tổ chức (mã `ph-`, tự cấp và tự dọn).
   await testPlatformHardening();
   console.log("\nTẤT CẢ KIỂM THỬ ĐẠT");
+  console.log = inGoc; // bảng tự nó không phải một nhóm kiểm thử
+  inGoc("\n" + bangThoiGian(nhip).join("\n"));
   process.exit(0);
 
 }
