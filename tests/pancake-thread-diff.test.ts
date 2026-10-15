@@ -77,5 +77,34 @@ export function testPancakeThreadDiff() {
   assert.match(ops, /OPS_THAO_TAC_MA_HOA: "[^"]*\bpancake-thread-diff\b/);
   assert.match(ops, /DOC_NANG="[^"]*\bpancake-thread-diff\b/);
   assert.match(ops, /fetch_script inbox-perf-probe\.ts[^\n]*\n\s*fetch_script pancake-thread-diff\.ts/, "kéo cả script được import");
+  /*
+    ═══ TIN KHÔNG CÓ CHỮ: KHỚP ĐƯỢC THÌ KHÔNG PHẢI «THIẾU», KHÔNG KHỚP ĐƯỢC THÌ VẪN LÀ «THIẾU» ═══
+
+    Ảnh nhân viên gửi TỪ ERP nằm trong sổ dưới mã `staff-out:<id>:img` với chữ dán «[Ảnh]», còn Pancake trả cùng tin ấy
+    KHÔNG CÓ CHỮ. Trước bản vá, nhánh khớp-theo-chữ bị bỏ qua khi tin Pancake rỗng chữ ⇒ tin ấy bị đếm THIẾU dù nội dung
+    vẫn ở trong hộp thư, và một con số «thiếu» sai hướng dẫn người đọc đi BACKFILL — tức nhân đôi tin của khách thật.
+  */
+  const t0 = now;
+  const pcMedia: PcMsg[] = [
+    { id: "m1", side: "PAGE", at: t0 - 40 * MIN, text: "" },
+    { id: "m2", side: "PAGE", at: t0 - 20 * MIN, text: "" },
+    { id: "m3", side: "PAGE", at: t0 - 50 * MIN, text: "Dạ em gửi ảnh ạ" },
+  ];
+  const erpMedia: ErpRow[] = [
+    { messageId: "staff-out:9:img", side: "PAGE", at: t0 - 40 * MIN + 3_000, text: "[Ảnh]", imported: false },
+    { messageId: "staff-out:9:txt", side: "PAGE", at: t0 - 50 * MIN, text: "Dạ em gửi ảnh ạ", imported: false },
+  ];
+  const dm = diffThread(pcMedia, erpMedia, now);
+  assert.deepEqual(dm.matchedByMedia, { CUSTOMER: 0, PAGE: 1 }, "ảnh của nhân viên khớp dòng «[Ảnh]» — đếm ở ô RIÊNG");
+  assert.deepEqual(dm.matchedByText, { CUSTOMER: 0, PAGE: 1 }, "tin có chữ vẫn đi đường khớp-theo-chữ như cũ");
+  assert.deepEqual(dm.missing.map((m) => m.id), ["m2"], "ảnh KHÔNG có dòng ERP nào tương ứng thì VẪN là thiếu");
+  assert.deepEqual(dm.extra.map((r) => r.messageId), [], "dòng ERP đã dùng không thành «thừa»");
+
+  // Tin không chữ KHÔNG được nuốt một dòng ERP CÓ chữ: nếu không, một tin có chữ mất thật sẽ bị che.
+  const dn = diffThread([{ id: "m4", side: "PAGE", at: t0 - 15 * MIN, text: "" }], [{ messageId: "k", side: "PAGE", at: t0 - 15 * MIN, text: "Dạ vâng ạ", imported: false }], now);
+  assert.deepEqual(dn.matchedByMedia, { CUSTOMER: 0, PAGE: 0 }, "không khớp tin không-chữ với dòng CÓ chữ");
+  assert.deepEqual(dn.missing.map((m) => m.id), ["m4"]);
+  assert.deepEqual(dn.extra.map((r) => r.messageId), ["k"]);
+
   console.log("  ✓ đạt");
 }
