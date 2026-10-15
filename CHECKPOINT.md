@@ -17,6 +17,12 @@
 
 
 
+
+- **17:16Z — degradedMigration ĐÃ RÕ (run 38775859509, org-migrate-probe qa):** chỉ tổ chức THỬ `qa` — sổ 244 mục, tag cuối 0244, hàm 0245 + cột turn_unhandled CHƯA có.
+  Bấm giờ định nghĩa #803 trên 20 luồng lớn nhất: không câu nào quá 60 s (lớn nhất 5,48 s · trung vị 1,75 s) — nhưng qa có **9.294 luồng**; nếu chi phí mỗi luồng cỡ trung vị thì cả bảng
+  ≈ vài giờ ⇒ nghi 0245 tính lại TOÀN BẢNG theo từng luồng, không phải một luồng to. Không phải tổ chức khách (HSLC không degraded). Việc kế: `migration-rehearsal qa` để đo cả lượt
+  trên bản sao trước khi đề xuất sửa (KHÔNG sửa migration đã áp — viết migration mới / làm lười theo lô).
+
 ## Checkpoint 2026-10-15 ~17:20Z — CLAUDE WEB (phiên mới) TIẾP QUẢN: P0 HSLC ĐÃ LÊN HẾT, CHỈ CÒN HẬU KIỂM
 
 - **Trạng thái thật (GitHub + ops `status` 17:13Z):** #842 · #845 · #846 · #848 đều đã gộp; production `commit 48651de28ba0` (chứa cả bốn) · ok=true · 247 migration.
