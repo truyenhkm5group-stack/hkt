@@ -22,7 +22,7 @@ import { getDb, schema } from "@/db";
 import type { AiToolDef } from "@/lib/ai/provider";
 import { freeSlots, slotBookable, vnDayOffset, vnInstant, WEEKDAY_LABEL } from "@/lib/constants/booking";
 import { isManualOrderId, manualOrderGaps, manualOrderShortCode, manualOrderTotals } from "@/lib/constants/manual-orders";
-import { resolveRecipientPlace } from "@/lib/address/vn-address";
+import { foldVnText, resolveRecipientPlace } from "@/lib/address/vn-address";
 import { vanDonDaiDien } from "@/lib/constants/shipment-pick";
 import { CARRIER_EVENT_SOURCES } from "@/lib/constants/truth";
 import { formatVND } from "@/lib/format";
@@ -44,8 +44,8 @@ import { buildQuote, computePriced, loadPricingContext, packChoiceMistake, packi
 import { priceUnverifiedReason, QUOTE_UNVERIFIED_INSTRUCTION, quoteSnapshotOf, type PriceDisputeState, type Quote, type QuoteSnapshot } from "@/lib/sales-chatbot/quote-shared";
 import { CLAIM_SAFE_TEXT, orderValidityOf } from "@/lib/sales-chatbot/claim-guard";
 import { bindCommitment, commitmentViolation, customerHesitates, declinesAddOnOnly, lineBasisViolation, type CartCommitment } from "@/lib/sales-chatbot/cart-commitment";
-import { acceptCustomerWard, addressQuestion, canAutoFill, parseCustomerAddress, wardFromCustomerWords, type AddressConfidence, type AddressPart } from "@/lib/address/customer-address";
-import { askedBefore, askMemoryParts, askParts, type AddressAskMemory } from "@/lib/sales-chatbot/address-memory";
+import { acceptCustomerWard, acceptEarlierWardReply, addressQuestion, canAutoFill, parseCustomerAddress, wardFromCustomerWords, type AddressConfidence, type AddressPart } from "@/lib/address/customer-address";
+import { askedBefore, askMemoryFor, askMemoryParts, askParts, type AddressAskMemory } from "@/lib/sales-chatbot/address-memory";
 import { searchCatalog, sellableCatalog, stockFor, type CatalogItem } from "@/lib/sales-chatbot/catalog";
 import { quotedInText } from "@/lib/sales-chatbot/text";
 import { isMessagingChannel, type ChatChannel, type SalesChatbotConfig, type SalesTool } from "@/lib/sales-chatbot/config";
@@ -626,7 +626,7 @@ const ASKED_ONCE_NOTE = "Phần địa chỉ này ĐÃ hỏi khách ở lượt 
 export function addressCheckOf(r: Pick<Recipient, "address" | "province" | "ward">, opts: AddressCheckOpts = {}): { key: string; view: AddressCheckView } {
   const out = addressCheckCore(r, opts);
   // HỎI MỘT LẦN (P0 15/10/2026): phần đã hỏi ở lượt trước ⇒ không đưa câu hỏi nữa — một máy chủ chặn, không trông vào lời dặn model.
-  if (out.view.ask_customer && askedBefore(opts.asked, askParts(out.view.missing), opts.turn)) return { key: out.key, view: { ...out.view, ask_customer: null, note: ASKED_ONCE_NOTE } };
+  if (out.view.ask_customer && askedBefore(askMemoryFor(opts.asked, r.address), askParts(out.view.missing), opts.turn)) return { key: out.key, view: { ...out.view, ask_customer: null, note: ASKED_ONCE_NOTE } };
   return out;
 }
 
@@ -664,7 +664,7 @@ function addressCheckCore(r: Pick<Recipient, "address" | "province" | "ward">, o
  */
 function addressAskPending(state: ChatState, chk: { key: string; view: AddressCheckView }, turn: number | undefined): boolean {
   const unsure = chk.view.status === "AMBIGUOUS" || chk.view.status === "NOT_FOUND";
-  return unsure && Boolean(chk.view.ask_customer) && turn !== undefined && !askedBefore(state.addressAsk, askParts(chk.view.missing), turn);
+  return unsure && Boolean(chk.view.ask_customer) && turn !== undefined && !askedBefore(askMemoryFor(state.addressAsk, chk.key.split("|")[0] ?? ""), askParts(chk.view.missing), turn);
 }
 
 /**
@@ -675,7 +675,8 @@ function addressAskPending(state: ChatState, chk: { key: string; view: AddressCh
  */
 function markAddressAsked(state: ChatState, chk: { key: string; view: AddressCheckView }, turn: number | undefined) {
   if (!chk.view.ask_customer || turn === undefined) return;
-  const prev = state.addressAsk;
+  // Địa chỉ khác hẳn câu hỏi trước ⇒ trí nhớ phần đã hỏi bắt đầu lại (askMemoryFor).
+  const prev = askMemoryFor(state.addressAsk, chk.key.split("|")[0] ?? "");
   const parts = { ...askMemoryParts(prev) };
   for (const p of askParts(chk.view.missing)) parts[p] ??= turn;
   state.addressAsk = { key: chk.key, turn: prev?.key === chk.key && prev.turn <= turn ? prev.turn : turn, parts };
@@ -962,11 +963,23 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
       // Yêu cầu đóng gói riêng («2 gói riêng», «chia 2 túi») — giữ qua các lượt sửa đơn, ghi vào ghi chú đơn cho kho.
       const packing = packingRequestOf(ctx.lastUserText) ?? existing?.packing ?? null;
       // Xã / phường khách vừa xác nhận: phải có trong danh mục của tỉnh đã đọc được VÀ khách vừa nói đúng tên đó (không đoán thay).
-      // Khách nói tên xã ở một tin TRƯỚC (cùng cửa sổ lịch sử) cũng là lời khách — model vẫn không chọn hộ được tên khách chưa nói.
+      // Tên xã ở một tin TRƯỚC chỉ nhận qua hai đường có chặn (review độc lập PR #848 lần 2 — nối mọi tin khách lại thì phường của
+      // địa chỉ CŨ lọt vào đơn của địa chỉ MỚI): địa chỉ đầy đủ KHỚP dòng đơn (`wardFromCustomerWords`: cùng đường, số nhà, quận cũ,
+      // không lời sửa) · lời trả lời ngắn về phường mà sau nó không có địa chỉ / phường khác (`acceptEarlierWardReply`).
       if (v.data.ward) {
-        const okWard = acceptCustomerWard(parseCustomerAddress(recipient.address, recipient.province), v.data.ward, [...(ctx.customerTexts ?? []), ctx.lastUserText].join("\n"));
-        if (!okWard.ok) return err("Đơn nháp: xã / phường chưa xác nhận", okWard.error, state);
-        recipient.ward = okWard.ward;
+        const parsedWard = parseCustomerAddress(recipient.address, recipient.province);
+        const okWard = acceptCustomerWard(parsedWard, v.data.ward, ctx.lastUserText);
+        if (okWard.ok) recipient.ward = okWard.ward;
+        else {
+          const wardCore = (x: string) => foldVnText(x).replace(/^(phuong|xa|thi tran|dac khu) /, "");
+          const stated = wardFromCustomerWords(parsedWard, recipient.address, ctx.customerTexts);
+          const earlier = stated ? null : acceptEarlierWardReply(parsedWard, v.data.ward, ctx.customerTexts ?? []);
+          if (stated && wardCore(stated.ward) === wardCore(v.data.ward)) {
+            recipient.ward = stated.ward;
+            if (!parsedWard.province) recipient.province = stated.province;
+          } else if (earlier) recipient.ward = earlier.ward;
+          else return err("Đơn nháp: xã / phường chưa xác nhận", okWard.error, state);
+        }
       }
       // ĐỊA CHỈ KHÁCH TỰ GÕ (P0 15/10/2026): dòng model chép mất phần xã mà tin khách ghi rõ một xã có thật (cùng tỉnh, cùng số nhà) ⇒
       // ghi đúng xã đó vào đơn (dòng địa chỉ giữ nguyên chữ) — không bắt khách khai lại điều đã nói.

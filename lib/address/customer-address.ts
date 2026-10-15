@@ -176,7 +176,8 @@ export function addressQuestion(a: CustomerAddress): string | null {
 /**
  * Xã / phường MỚI khách vừa xác nhận ⇒ tên chuẩn. Hai điều kiện, thiếu một là từ chối (không đoán thay khách):
  *  1. Tên có trong danh mục xã của tỉnh đã nhận ra (chưa biết tỉnh ⇒ không nhận).
- *  2. Câu CUỐI của khách nhắc đúng tên đó — model không tự chọn một ứng viên rồi ghi vào đơn.
+ *  2. Chữ khách đưa vào (`customerText`) nhắc đúng tên đó — model không tự chọn một ứng viên rồi ghi vào đơn. Nơi gọi chỉ đưa TIN CUỐI;
+ *     tên phường ở tin TRƯỚC đi qua `wardFromCustomerWords` (địa chỉ đầy đủ) hoặc `acceptEarlierWardReply` (lời trả lời ngắn).
  */
 export function acceptCustomerWard(a: Pick<CustomerAddress, "provinceCode" | "province">, ward: string, customerText: string): { ok: true; ward: string } | { ok: false; error: string } {
   if (!a.provinceCode) return { ok: false, error: "Chưa nhận ra tỉnh / thành của địa chỉ — hỏi khách tỉnh / thành trước, chưa ghi xã." };
@@ -185,8 +186,32 @@ export function acceptCustomerWard(a: Pick<CustomerAddress, "provinceCode" | "pr
   const said = ` ${expandAbbreviations(foldVnText(customerText))} `;
   const core = foldVnText(hit.name).replace(/^(phuong|xa|thi tran|dac khu) /, "");
   const needle = /^\d+$/.test(core) ? foldVnText(hit.name) : core;
-  if (!said.includes(` ${needle} `)) return { ok: false, error: `Khách chưa nói «${hit.name}» trong câu cuối — chỉ ghi xã / phường khi KHÁCH vừa xác nhận tên đó.` };
+  if (!said.includes(` ${needle} `)) return { ok: false, error: `Khách chưa nói «${hit.name}» trong tin vừa gửi — chỉ ghi xã / phường khi KHÁCH vừa xác nhận tên đó.` };
   return { ok: true, ward: hit.name };
+}
+
+/**
+ * Tên xã khách nói ở một tin TRƯỚC tin cuối (bot hỏi phường ⇒ khách «phường An Hội Tây em nhé» ⇒ «ok em»). Chỉ nhận khi tin đó là LỜI
+ * TRẢ LỜI NGẮN về phường — không số nhà / đường, không phải câu hỏi — và không tin nào MỚI HƠN mang một địa chỉ hay nêu một phường khác.
+ * Review độc lập PR #848 (lần 2): nối mọi tin khách lại rồi tìm chuỗi thì phường của địa chỉ CŨ («230/20 Phan Huy Ích, P An Hội Tây»)
+ * lọt vào đơn của địa chỉ MỚI («giao về 15 Nguyễn Oanh, Gò Vấp») mà không cờ nào bật. Địa chỉ ĐẦY ĐỦ ở tin trước đi đường
+ * `wardFromCustomerWords` (cùng đường, cùng số nhà, quận cũ, lời sửa). Không nhận ⇒ `null`. HÀM THUẦN.
+ */
+export function acceptEarlierWardReply(a: Pick<CustomerAddress, "provinceCode" | "province">, ward: string, texts: readonly string[]): { ok: true; ward: string } | null {
+  const canon = acceptCustomerWard(a, ward, ward);
+  if (!canon.ok || !a.province) return null;
+  const msgs = texts.map((t) => t.trim()).filter(Boolean);
+  for (let i = msgs.length - 1; i >= 0; i--) {
+    const lines = msgs[i].split(/\n+/);
+    const addressLike = lines.some((l) => {
+      const p = parseCustomerAddress(l);
+      return p.houseNumber !== null || /\d/.test(p.street);
+    });
+    if (acceptCustomerWard(a, canon.ward, msgs[i]).ok) return !msgs[i].includes("?") && !addressLike ? canon : null;
+    // Tin mới hơn mang một địa chỉ / nêu phường khác ⇒ phường ở tin cũ hơn không còn là lời khai cho địa chỉ này.
+    if (addressLike || lines.some((l) => namesOtherWard(l, a.province!, canon.ward))) return null;
+  }
+  return null;
 }
 
 /** Dòng ghi chú cho người kiểm (cờ ADDRESS_UNRESOLVED): ứng viên thật, hoặc lý do bộ đọc. */
@@ -285,6 +310,23 @@ function sameStreet(x: string, y: string): boolean {
   const b = streetCore(y);
   if (a.length < 3 || b.length < 3) return false;
   return ` ${a} `.includes(` ${b} `) || ` ${b} `.includes(` ${a} `);
+}
+
+/**
+ * Hai dòng địa chỉ cùng nói MỘT nơi giao: cùng đường (`sameStreet`) và cùng số nhà khi cả hai có. Không đọc được tên đường ở một
+ * trong hai ⇒ không kết luận khác (`true`). Dùng để xoá trí nhớ «đã hỏi phường» khi khách đổi hẳn địa chỉ (review PR #848 lần 2).
+ * HÀM THUẦN.
+ */
+export function sameDeliveryPlace(x: string, y: string): boolean {
+  const a = parseCustomerAddress(x);
+  const b = parseCustomerAddress(y);
+  const sa = a.street || streetPart(x);
+  const sb = b.street || streetPart(y);
+  if (streetCore(sa).length < 3 || streetCore(sb).length < 3) return true;
+  if (!sameStreet(sa, sb)) return false;
+  const ha = houseKey(a.houseNumber);
+  const hb = houseKey(b.houseNumber);
+  return !(ha && hb && ha !== hb);
 }
 
 /**

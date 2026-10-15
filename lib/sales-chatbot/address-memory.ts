@@ -14,7 +14,7 @@
  *
  * KHÔNG ĐOÁN: hàng rào chỉ BỎ câu hỏi, không bao giờ tự điền một phường. Phường chưa biết và chưa hỏi lần nào ⇒ câu hỏi đầu tiên đi qua.
  */
-import { canAutoFill, customerStatedAddresses, namesOtherWard, parseCustomerAddress, wardFromCustomerWords, type AddressPart } from "@/lib/address/customer-address";
+import { canAutoFill, customerStatedAddresses, namesOtherWard, parseCustomerAddress, sameDeliveryPlace, wardFromCustomerWords, type AddressPart } from "@/lib/address/customer-address";
 import { foldVnText } from "@/lib/address/vn-address";
 import type { ChatState } from "@/lib/sales-chatbot/tools";
 
@@ -42,6 +42,17 @@ export function askMemoryParts(m: AddressAskMemory | undefined): Partial<Record<
   return Object.fromEntries(askParts(parseCustomerAddress(address, province).missing).map((p) => [p, m.turn]));
 }
 
+/**
+ * Trí nhớ hỏi địa chỉ CÒN áp cho `address` không: câu hỏi gần nhất hỏi về CÙNG nơi giao (cùng đường, cùng số nhà) ⇒ giữ; khách đổi
+ * hẳn địa chỉ ⇒ bỏ (review PR #848 lần 2: phường đã hỏi ở lượt 3 không được chặn câu hỏi phường của một địa chỉ khác ở lượt 10).
+ * Model chép lại cùng địa chỉ khác chữ («… gần chợ») vẫn giữ. HÀM THUẦN.
+ */
+export function askMemoryFor(m: AddressAskMemory | undefined, address: string): AddressAskMemory | undefined {
+  if (!m) return undefined;
+  const [prevAddress = ""] = m.key.split("|");
+  return sameDeliveryPlace(prevAddress, address) ? m : undefined;
+}
+
 /** Mọi phần câu hỏi này nhắm tới đều đã được hỏi ở một lượt TRƯỚC (cùng lượt thì chưa — khách chưa thấy câu hỏi). */
 export function askedBefore(m: AddressAskMemory | undefined, parts: readonly AddressPart[], turn: number | undefined): boolean {
   if (turn === undefined || !parts.length) return false;
@@ -55,17 +66,28 @@ export function askedBefore(m: AddressAskMemory | undefined, parts: readonly Add
  * Những gì máy chủ BIẾT về địa chỉ giao của lượt. `ward` = tên chuẩn khi đã biết; `wardAskedAt` = lượt đầu tiên đã hỏi phường;
  * `corrected` = tin khách MỚI NHẤT nêu một phường KHÁC phường máy đang biết (khách đang sửa) — khi đó bot được hỏi / xác nhận lại.
  */
-export type AddressKnowledge = { ward: string | null; wardAskedAt: number | null; province: boolean; street: boolean; corrected?: boolean };
+export type AddressKnowledge = { ward: string | null; wardAskedAt: number | null; province: boolean; street: boolean; corrected?: boolean; changeRequested?: boolean };
+
+/**
+ * Tin khách xin ĐỔI địa chỉ giao («à chị đổi địa chỉ nhé», «giao về chỗ khác», «địa chỉ mới là…») — lúc đó câu bot xin địa chỉ mới
+ * KHÔNG được bỏ (review PR #848 lần 2: hàng rào từng thay nó bằng «em ghi nhận địa chỉ rồi», tức xác nhận địa chỉ CŨ). HÀM THUẦN.
+ */
+export function wantsAddressChange(text: string): boolean {
+  const f = foldVnText(text);
+  return /(?:^| )(?:doi|thay|sua)(?: lai)?(?: (?:sang|qua))? (?:dia chi|cho|noi|nha)(?: |$)|(?:^| )dia chi (?:moi|khac)(?: |$)|(?:^| )(?:cho|noi|nha) khac(?: |$)/.test(f);
+}
 
 /**
  * Đọc địa chỉ đã biết: đơn nháp (ô xã người / khách đã chọn, hoặc dòng địa chỉ tự điền được) → khách đã lưu → tin khách tự gõ (kể cả
  * khi model CHƯA gọi công cụ lưu khách — model hay hỏi lại ngay ở lượt khách vừa gửi địa chỉ). HÀM THUẦN.
  */
 export function addressKnowledge(state: Pick<ChatState, "draft" | "customer" | "addressAsk">, customerTexts: readonly string[]): AddressKnowledge {
-  const mem = askMemoryParts(state.addressAsk);
-  const wardAskedAt = mem.ward ?? null;
   const r = state.draft?.recipient ?? (state.customer?.address.trim() ? { address: state.customer.address, province: state.customer.province, ward: undefined } : null);
   const last = customerTexts[customerTexts.length - 1] ?? "";
+  // Khách xin đổi địa chỉ ⇒ địa chỉ máy đang giữ KHÔNG còn là điều đã biết; câu hỏi phường / địa chỉ của bot đi qua.
+  if (wantsAddressChange(last)) return { ward: null, wardAskedAt: null, province: false, street: false, changeRequested: true };
+  const mem = askMemoryParts(r ? askMemoryFor(state.addressAsk, r.address) : state.addressAsk);
+  const wardAskedAt = mem.ward ?? null;
   if (r && r.address.trim()) {
     const a = parseCustomerAddress(r.address, r.province);
     const chosen = (r.ward ?? "").trim();
@@ -95,6 +117,8 @@ const WARD_ASK_Q = [
 const isQuestion = (sentence: string, folded: string) => sentence.includes("?") || /(?:^| )(?:khong|ko|chua|nao|gi)(?: (?:a|nhe|nha|a nhe|a nha))?$/.test(folded);
 /** Câu xin lại CẢ địa chỉ. */
 const FULL_ADDRESS_ASK = /(?:^| )(?:xin|gui|cho em|nhan)(?: lai)?(?: giup em)? (?:thong tin )?dia chi(?: |$)/;
+/** Câu nhắc địa chỉ MỚI / KHÁC, hay câu KỂ đã nhận («em đã nhận địa chỉ…») — không phải câu xin lại địa chỉ đã biết. */
+const NOT_A_REASK = /(?:^| )(?:moi|khac)(?: |$)|(?:^| )(?:da|vua) nhan(?: |$)/;
 
 /** Một câu (một đoạn giữa dấu chấm / hỏi / xuống dòng) có HỎI phường / xã không. HÀM THUẦN. */
 export function asksForWard(sentence: string): boolean {
@@ -105,7 +129,8 @@ export function asksForWard(sentence: string): boolean {
 
 /** Một câu có xin lại CẢ địa chỉ không. HÀM THUẦN. */
 export function asksForFullAddress(sentence: string): boolean {
-  return FULL_ADDRESS_ASK.test(foldVnText(sentence));
+  const f = foldVnText(sentence);
+  return FULL_ADDRESS_ASK.test(f) && !NOT_A_REASK.test(f);
 }
 
 /** Câu thay khi cả tin chỉ là câu hỏi lại địa chỉ — ghi nhận, không hỏi gì thêm. */
