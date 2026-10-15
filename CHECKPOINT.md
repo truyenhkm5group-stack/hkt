@@ -13,6 +13,52 @@
 
 
 
+
+## Checkpoint 2026-10-15 — TEAM: ĐỘ TIN CẬY HỘI THOẠI · MỘT KẾT QUẢ ÂM TÍNH QUAN TRỌNG
+
+### 1 · GIẢ THUYẾT «HOA LÊ» SỐ 1 — KHÔNG DỰNG LẠI ĐƯỢC (đừng sửa giỏ theo nó)
+Checkpoint trước nghi «thêm 10 cái nem» làm số 10 rơi về món tường minh duy nhất (chả cá) theo luật #819.
+Team chạy thẳng `applyCustomerCartMessage` BỐN biến thể, cùng một kịch bản «1kg chả cá» rồi «thêm 10 cái nem»:
+| biến thể | kết quả |
+|---|---|
+| danh mục CÓ nem | chả cá 1000g giữ nguyên · nem thêm đúng 10 pack |
+| nem tên dài «hộp 10 cái» | chả cá 1000g giữ nguyên · nem thêm đúng |
+| hai loại nem (mơ hồ) | chả cá 1000g giữ nguyên · không thêm (hỏi lại) |
+| «thêm 10 cái» KHÔNG tên hẳn | chả cá 1000g giữ nguyên · không thêm |
+⇒ luật giỏ KHÔNG sai ở đường này. **Không sửa `cart-commitment.ts` theo giả thuyết ấy** — sửa một luật chưa
+chứng minh được là hỏng chỉ thêm rủi ro và che mất nguyên nhân thật.
+
+**Ứng viên số 2, đã khai sẵn trong mã:** `cart-commitment.ts:675` — giỏ có BẤT KỲ món tường minh nào không
+gắn được tên/mã ⇒ bỏ qua TOÀN BỘ hàng rào «số lượng đề xuất không được vượt số khách nói» (chú thích ghi rõ:
+«không chắc thì không chặn khách»). Đó là cửa để một đơn nháp mang 10kg đi qua mà không ai chặn. Xác nhận cần
+CHỮ THẬT của hội thoại Hoa Lê ⇒ `conv-money-trace` ⇒ cần token. Chưa có chữ thì chưa sửa.
+
+### 2 · ĐÃ SỬA: GHI CHÚ CRM LÀM BOT IM (`claude/crm-note-dat-giai-doan` @ `9d244c9a`, PR_READY)
+`PANCAKE_AUTO_NOTE_RE` chỉ nhận «**đặt** giai đoạn của khách hàng»; dòng chủ shop chép lại là «Đã **đạt**
+giai đoạn … Đủ tiêu chuẩn». Lệch một dấu nặng ⇒ ERP coi dòng CRM nội bộ là PAGE ĐÃ TRẢ LỜI ⇒ bot nhường và
+im — đúng sự cố 03/10 («Thủy Nguyễn»). Hai hướng lỗi không cân nhau (bỏ sót ⇒ mất đơn, không ai biết vì sao;
+nhận nhầm ⇒ chỉ khi người gõ đúng cụm «…giai đoạn của khách hàng…»), nên nới về phía NHẬN, ĐÚNG một dấu
+(`đ[ặạ]t`), giữ bắt buộc cụm «của khách hàng», có khẳng định phủ định khoá lại. Biểu thức này dùng ở BỐN chỗ
+(nhận gói tin fanpage · dựng lịch sử bot · cờ `autoNote` · ops sender-provenance-probe) nên sửa một chỗ là
+sửa cả bốn. **Vẫn CHƯA trả lời được câu hỏi 1 của mục CRM**: khách có NHẬN THẬT dòng đó trên Messenger không,
+hay nó chỉ hiện trong Pancake — câu ấy cần đo production.
+
+### 3 · BỘ HỘI THOẠI VÀNG: ĐÃ CÓ, ĐỪNG DỰNG BỘ THỨ HAI
+`tests/sales-agent-golden/` đã có 22 ca + `harness.ts` + `cases.ts` + `update.ts`. Thêm ca Hoa Lê / Lê Văn Dụ /
+Thanh Vo cần CHỮ THẬT đã che PII lấy từ production ⇒ lại là ops. Không bịa hội thoại để lấp chỗ trống: một ca
+vàng bịa ra sẽ khoá lại hành vi không ai quan sát được.
+
+### 4 · SÁU NHÁNH PR_READY — CHỜ ĐÚNG MỘT LỆNH `pr-open`
+`crm-note-dat-giai-doan` @ `9d244c9a` (an toàn khách — ưu tiên gộp trước) · `test-timing-table` @ `1db60af8` ·
+`thread-diff-media-match` @ `bfd4ee74` · `checkpoint-append-only` @ `2d0b5a6a` · `test-locale-order` @
+`d9a91d81` · `inbox-unread-perf` @ `b222a779` (chờ chủ shop duyệt #792).
+
+### 5 · NÚT THẮT (không đổi suốt ba lượt)
+Phiên Team KHÔNG gọi được GitHub API. Lượt đọc credential sẵn có của git bị hàng rào *Credential
+Materialization* của Claude Code chặn — Team KHÔNG lách. Hệ quả: không mở PR · không chạy lại cổng #842 ·
+không gộp · không deploy · không chạy ops ⇒ **không có KPI trước/sau nào, và không sứ mệnh nào được phép
+đóng DONE**. Gỡ bằng một trong hai: mở quyền ấy cho phiên Team, hoặc mở lại phiên Desktop đang có `GH_TOKEN`.
+
 ## P0 CHƯƠNG TRÌNH 15/10 — ĐỘ TIN CẬY HỘI THOẠI BÁN HÀNG (HSLC trước, rồi mọi tổ chức) — GIAO TEAM
 Lệnh đầy đủ của chủ shop: mục A–G. Báo cáo cuối: ROOT CAUSE | AFFECTED CONVERSATIONS | REPEATED QUESTIONS | WRONG ORDERS | GUARDRAILS | PR | DEPLOY | PRODUCTION VERIFIED. KHÔNG vá bằng câu dặn prompt; sửa state machine · dữ liệu · công cụ · cổng gửi. Canary HSLC trước toàn SaaS.
 
