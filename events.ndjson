@@ -2879,3 +2879,4 @@
 {"at":"2026-10-15T02:32:58.230Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"money-trace-since","detail":"fix/money-trace-hours @ 0056a5523294 · 3 lệnh kiểm thử"}
 {"at":"2026-10-15T02:33:35.141Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"money-trace-since","detail":"#847 cho fix/money-trace-hours @ 0056a5523294"}
 {"at":"2026-10-15T02:37:18.559Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"crm-note-dat-giai-doan","detail":"claude/crm-note-dat-giai-doan @ 1c1df5a35d14 · 3 lệnh kiểm thử"}
+{"at":"2026-10-15T02:37:38.060Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#846 @ 1c1df5a35d14 · review độc lập PASS @9d244c9a; commit thêm chỉ đồng bộ hai bản regex theo đề xuất reviewer"}
