@@ -60,11 +60,11 @@ const vnd = (n: number | null | undefined) => (typeof n === "number" && Number.i
 export const TRACE_DEFAULT_SCAN_DAYS = 3;
 export const TRACE_MAX_SCAN_DAYS = 30;
 export const TRACE_MAX_SCAN_CONVERSATIONS = 3000;
-const USAGE = `<mã tổ chức> --conv=<uuid> [--order=<mã ngắn>] | <mã tổ chức> --scan [--days=1..${TRACE_MAX_SCAN_DAYS}]`;
+const USAGE = `<mã tổ chức> --conv=<uuid> [--order=<mã ngắn>] | <mã tổ chức> --scan [--days=1..${TRACE_MAX_SCAN_DAYS} | --since=<ISO UTC>]`;
 
 // ─────────────────────────── PHẦN THUẦN ───────────────────────────
 
-export type TraceArgs = { code: string; conv: string | null; order: string | null; scan: boolean; days: number };
+export type TraceArgs = { code: string; conv: string | null; order: string | null; scan: boolean; days: number; since?: Date };
 
 export function parseTraceArgs(argv: readonly string[]): TraceArgs | { error: string } {
   const code = (argv.find((a) => !a.startsWith("--")) ?? "").trim();
@@ -79,7 +79,14 @@ export function parseTraceArgs(argv: readonly string[]): TraceArgs | { error: st
   const rawDays = val("days");
   const days = rawDays === undefined ? TRACE_DEFAULT_SCAN_DAYS : Number(rawDays);
   if (!Number.isInteger(days) || days < 1 || days > TRACE_MAX_SCAN_DAYS) return { error: `--days phải là số nguyên 1..${TRACE_MAX_SCAN_DAYS}` };
-  return { code, conv: conv?.toLowerCase() ?? null, order: order?.toLowerCase() ?? null, scan, days };
+  // `--since=<ISO UTC>` (thay `--days`): đo đúng khoảng SAU một lượt deploy — cửa sổ «N ngày» trùm cả trước bản sửa nên không nói được bản sửa có ăn không.
+  const rawSince = val("since");
+  let since: Date | undefined;
+  if (rawSince !== undefined) {
+    since = new Date(rawSince);
+    if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?Z$/.test(rawSince) || Number.isNaN(since.getTime())) return { error: "--since phải là mốc UTC dạng 2026-10-14T08:10Z" };
+  }
+  return { code, conv: conv?.toLowerCase() ?? null, order: order?.toLowerCase() ?? null, scan, days, ...(since ? { since } : {}) };
 }
 
 type Block = { type?: unknown; text?: unknown; name?: unknown; input?: unknown; id?: unknown; toolUseId?: unknown; content?: unknown; isError?: unknown };
@@ -366,8 +373,9 @@ export async function traceConversation(db: Db, convId: string, orderShort: stri
 }
 
 /** Quét mẫu chung: (A) «nói rõ hơn» có / không có tin khách mới · (B) số TỔNG trong tin bot ≠ tổng giỏ / nháp ngay trước đó. */
-export async function scanPatterns(db: Db, days: number, now: Date) {
-  const from = new Date(now.getTime() - days * 86_400_000);
+export async function scanPatterns(db: Db, days: number, now: Date, since?: Date) {
+  const from = since ?? new Date(now.getTime() - days * 86_400_000);
+  const span = since ? `từ ${since.toISOString()}` : `${days} ngày`;
   const c = schema.salesChatConversations;
   const convs = await db.select({ id: c.id }).from(c).where(gte(c.updatedAt, from)).limit(TRACE_MAX_SCAN_CONVERSATIONS + 1);
   const ids = convs.slice(0, TRACE_MAX_SCAN_CONVERSATIONS).map((x) => x.id);
@@ -410,10 +418,10 @@ export async function scanPatterns(db: Db, days: number, now: Date) {
       userSince = false;
     }
   }
-  console.log(`Quét ${days} ngày tới ${now.toISOString()} · ${ids.length} hội thoại`);
+  console.log(`Quét ${span} tới ${now.toISOString()} · ${ids.length} hội thoại`);
   console.log(`  mẫu A (≤ 20): ${[...A.convs].slice(0, 20).join(" ") || "—"}`);
   console.log(`  mẫu B (≤ 20): ${[...B.convs].slice(0, 20).join(" ") || "—"}`);
-  tomTat(`conv-money-trace quét ${days} ngày: ${ids.length}${convs.length > TRACE_MAX_SCAN_CONVERSATIONS ? "+" : ""} hội thoại`);
+  tomTat(`conv-money-trace quét ${span}: ${ids.length}${convs.length > TRACE_MAX_SCAN_CONVERSATIONS ? "+" : ""} hội thoại`);
   tomTat(`A câu «nói rõ hơn» của engine: ${A.total} tin · KHÔNG có tin khách mới kể từ tin bot trước ${A.noNew} tin / ${A.convs.size} hội thoại`);
   tomTat(`B tin bot có số TỔNG ≠ tổng giỏ / nháp máy chủ ngay trước: ${B.msgs} tin / ${B.convs.size} hội thoại · số TỔNG khi chưa có giỏ / nháp nào ${B.noQuote} tin`);
 }
@@ -441,7 +449,7 @@ async function main() {
   await bindReadOnlyOrgHandle({ code: org.code, isHome: org.isHome }, db);
   let ok = true;
   await withOrganization(org.code, async () => {
-    if (args.scan) await scanPatterns(db, args.days, new Date());
+    if (args.scan) await scanPatterns(db, args.days, new Date(), args.since);
     if (args.conv) ok = await traceConversation(db, args.conv, args.order, await loadCtx(db));
   });
   process.stdout.write("", () => process.exit(ok ? 0 : 1));

@@ -21,6 +21,8 @@ const PHONE = "0900003106";
 function testPure() {
   assert.deepEqual(parseTraceArgs(["hslc-hmt-shop", "--conv=1B942A28-86BA-4146-BF0A-2A9705F05AD3", "--order=#91F3641C"]), { code: "hslc-hmt-shop", conv: "1b942a28-86ba-4146-bf0a-2a9705f05ad3", order: "91f3641c", scan: false, days: 3 });
   assert.deepEqual(parseTraceArgs(["hslc", "--scan", "--days=7"]), { code: "hslc", conv: null, order: null, scan: true, days: 7 });
+  assert.deepEqual(parseTraceArgs(["hslc", "--scan", "--since=2026-10-14T08:10Z"]), { code: "hslc", conv: null, order: null, scan: true, days: 3, since: new Date("2026-10-14T08:10:00Z") }, "--since đo đúng khoảng sau deploy");
+  for (const bad of ["--since=hôm qua", "--since=2026-10-14", "--since=2026-10-14T08:10"]) assert.ok("error" in parseTraceArgs(["hslc", "--scan", bad]), `--since sai bị từ chối: ${bad}`);
   for (const bad of [[], ["hslc"], ["HSLC;rm", "--scan"], ["hslc", "--conv=abc"], ["hslc", "--scan", "--days=31"], ["hslc", "--conv=1b942a28-86ba-4146-bf0a-2a9705f05ad3", "--order=xyz"]]) assert.ok("error" in parseTraceArgs(bad), `đối số sai bị từ chối: ${bad.join(" ")}`);
 
   assert.deepEqual(totalClaimsIn("Dạ đơn của mình: 1kg chả cá thu 280.000đ. Tổng 640.000đ, miễn phí ship ạ"), [640_000]);
