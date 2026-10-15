@@ -16,6 +16,22 @@
 
 
 
+
+## Checkpoint 2026-10-15 ~17:20Z — CLAUDE WEB (phiên mới) TIẾP QUẢN: P0 HSLC ĐÃ LÊN HẾT, CHỈ CÒN HẬU KIỂM
+
+- **Trạng thái thật (GitHub + ops `status` 17:13Z):** #842 · #845 · #846 · #848 đều đã gộp; production `commit 48651de28ba0` (chứa cả bốn) · ok=true · 247 migration.
+  #849–#852 sau đó chỉ tests/scripts ⇒ không cần deploy. Không còn PR mở. `tech-lead` = phiên Web mới (mã phiên giữ trong cuộc trò chuyện).
+- **Đo lại (sau #848, từ 12:26Z → 17:13Z, ops address-reask-audit hslc-hmt-shop, run 38775533047):** 58 hội thoại · gửi địa chỉ 14 · hỏi lại **0/14** · phường rõ vẫn hỏi **0/8** ·
+  số câu hỏi địa chỉ→đơn TB 0,8 / trung vị 0 (n=13). Mẫu nhỏ — vẫn ĐO LẠI sau 24 giờ (≥ 16/10 12:26Z).
+- **conv-money-trace từ 07:30Z (run 38753166809, 14:38Z):** 141 hội thoại · «nói rõ hơn» không tin khách mới 0 · tổng ≠ giỏ 0.
+- **sender-provenance-probe hslc-hmt-shop 7 ngày (run 38775537123):** 437 tin phía page / 40 luồng đọc được: BOT_ECHO 176 · AUTO_NOTE 122 (27,9% — nay được nhận là ghi chú CRM nhờ #846) ·
+  TEMPLATE 43 · STAFF_UID 27 · META_COMMENT_SYSTEM 4 · KHÔNG DẤU 65 (17 nằm giữa chuỗi người ±10′ ở 4 hội thoại = rủi ro AI chen). Probe KHÔNG trả lời được «khách có nhận dòng CRM trên
+  Messenger không» — chỉ đọc API Pancake; câu đó cần xem trên Messenger thật của một khách thử (việc của chủ shop / người có quyền Page).
+- **Hoa Lê ứng viên số 2 (`cart-commitment.ts` hàng rào tự tắt khi có số không tên):** ĐÃ được #845 sửa (số không tên chỉ miễn cho món DUY NHẤT hợp đơn vị) — gạch khỏi danh sách việc.
+- **CHẶN:** `verify --record` cần gọi thẳng `https://app.chotdontudong.com` — mạng phiên Web bị proxy từ chối (403). ⇒ address-ward-explicit / inbox-all-recency / crm-note / cart-qty-guard
+  chưa `close DONE`. Gỡ: thêm `app.chotdontudong.com` vào Allowed domains của môi trường Cloud, hoặc phiên có mạng chạy `verify --sha=48651de2 --record --mission=<mã>` rồi `close`.
+- **CẦN XEM:** health báo `degradedMigration=true` lúc 17:13Z (12:40Z còn false). Nghi tổ chức qa (0245, RAM) migrate lười lại sau khi app khởi động — kiểm `org-migrate-probe qa` trước khi kết luận.
+
 ## Checkpoint 2026-10-15 ~14:56Z — CLAUDE WEB: LÔ P0 XONG, MAIN XANH, KHOÁ GỘP ĐÃ NHẢ
 
 - Gộp thêm #851 (3d7d7ecd, công cụ checkpoint chỉ-thêm — dùng `node scripts/checkpoint-append.ts --file=…`) + #852 (8d1e12c3). Main 3d7d7ecd gates XANH.
