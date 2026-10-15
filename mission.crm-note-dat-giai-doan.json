@@ -23,22 +23,20 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-15T01:53:01.512Z",
-  "updated_at": "2026-10-15T02:28:12.863Z",
-  "last_heartbeat": "2026-10-15T01:57:35.130Z",
+  "updated_at": "2026-10-15T02:37:18.528Z",
+  "last_heartbeat": "2026-10-15T02:37:18.528Z",
   "definition_of_done": [],
   "handoff": {
     "branch": "claude/crm-note-dat-giai-doan",
-    "sha": "9d244c9a626d3996f485303375c5975a19ff40c2",
-    "at": "2026-10-15T01:57:35.130Z",
-    "actor": "DESKTOP-56TH98Y:wt-team",
+    "sha": "1c1df5a35d1491ad8bf294ce7ad82ce4fc16010d",
+    "at": "2026-10-15T02:37:18.528Z",
+    "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
     "title": "Ghi chú CRM «Đã ĐẠT giai đoạn» của Pancake thôi bị coi là page trả lời (bot im đúng lúc khách chốt)",
-    "summary": "PANCAKE_AUTO_NOTE_RE nhận cả «đặt» lẫn «đạt» giai đoạn của khách hàng — bỏ sót ghi chú tự động làm ERP coi là page đã trả lời và bot im đúng lúc khách chốt. Nới đúng một dấu, giữ bắt buộc cụm «của khách hàng».",
+    "summary": "",
     "tests": [
-      "tests/sender-provenance-probe.test.ts chạy riêng: ĐẠT (nhận «đạt» · KHÔNG nhận câu người thật)",
-      "npm run typecheck: sạch",
-      "npm run lint: sạch",
-      "quét kho: không bài kiểm nào khẳng định ngược",
-      "npm test đủ: để cổng CI chạy"
+      "review độc lập @9d244c9a PASS",
+      "thêm: META_SYSTEM_TEXT_RE/SQL nhận đ[ặạ]t, đối chiếu JS≡SQL thêm 2 câu",
+      "eslint sạch"
     ]
   }
 }
