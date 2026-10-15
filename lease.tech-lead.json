@@ -1,10 +1,10 @@
 {
   "name": "tech-lead",
   "holder": "vm:hkt",
-  "purpose": "Tech Lead Web tiếp quản Desktop",
-  "acquired_at": "2026-10-15T07:38:08.287Z",
-  "heartbeat_at": "2026-10-15T14:38:18.751Z",
-  "expires_at": "2026-10-15T15:38:18.751Z",
-  "generation": 3,
-  "token_hash": "a290cb9658237bb74ace279de0e6f412ba37deff7038120f08451489e6e1418b"
+  "purpose": "Tech Lead (Web, tiếp quản 15/10 tối)",
+  "acquired_at": "2026-10-15T17:12:53.040Z",
+  "heartbeat_at": "2026-10-15T17:12:53.040Z",
+  "expires_at": "2026-10-15T18:12:53.040Z",
+  "generation": 4,
+  "token_hash": "3413971257de323469046e5188c3af45ef64330e1d93b7e6d8e16996fa3758ba"
 }
