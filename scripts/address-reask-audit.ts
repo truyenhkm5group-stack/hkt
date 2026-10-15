@@ -53,6 +53,8 @@ const WARD_ASK_Q = [
 ];
 const isQuestion = (sentence: string, folded: string) => sentence.includes("?") || /(?:^| )(?:khong|ko|chua|nao|gi)(?: (?:a|nhe|nha|a nhe|a nha))?$/.test(folded);
 const FULL_ADDRESS_ASK = /(?:^| )(?:xin|gui|cho em|nhan)(?: lai)?(?: giup em)? (?:thong tin )?dia chi(?: |$)/;
+/** Bản sao `NOT_A_REASK` (address-memory.ts): câu xin địa chỉ MỚI / KHÁC, câu kể «đã nhận địa chỉ» không phải câu hỏi lại. */
+const NOT_A_REASK = /(?:^| )(?:moi|khac)(?: |$)|(?:^| )(?:da|vua) nhan(?: |$)|(?:^| )dia chi (?:nha|cong ty|co quan|cua hang|cho|truong|van phong|kho|xuong)(?: |$)/;
 const PROVINCE_ASK = /(?:^| )(?:tinh|thanh pho)(?: (?:tinh|thanh pho))? (?:nao|gi)(?: |$)|(?:^| )(?:xin|xac nhan)(?: giup)?(?: em)?(?: lai)? (?:tinh|thanh pho)(?: |$)/;
 
 /** Bản sao của `asksForWard` (lib/sales-chatbot/address-memory.ts). HÀM THUẦN. */
@@ -73,7 +75,7 @@ export function addressAsksIn(botText: string): { ward: boolean; wardList: boole
     ward: wardSentences.length > 0,
     wardList,
     province: ss.some((s) => PROVINCE_ASK.test(foldVnText(s))),
-    full: ss.some((s) => FULL_ADDRESS_ASK.test(foldVnText(s))),
+    full: ss.some((s) => FULL_ADDRESS_ASK.test(foldVnText(s)) && !NOT_A_REASK.test(foldVnText(s))),
   };
 }
 

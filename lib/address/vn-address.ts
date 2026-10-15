@@ -127,8 +127,8 @@ function expandTypeAbbreviations(folded: string): string {
     .replace(/ tp(?= )/g, " thanh pho")
     .replace(/ tx(?= )/g, " thi xa")
     .replace(/ tt(?= )/g, " thi tran")
-    // «Lô F / Tòa P / Block F An Phú» là tên toà / lô, không phải «phường An Phú» (review PR #848 lần 2) ⇒ không bung sau từ chỉ công trình.
-    .replace(/(?<! (?:lo|toa|block|blok|khu|day|tang|can|ho|nha|so|kiot|ki ot)) (?:p|f)(?= [a-z])/g, " phuong")
+    // «Lô F / Tòa P / Lầu F / Block F An Phú» là tên toà / lô, không phải «phường An Phú» (review PR #848 lần 2) ⇒ không bung sau từ chỉ công trình.
+    .replace(/(?<! (?:lo|toa|block|blok|khu|day|tang|lau|can|ho|nha|so|kiot|ki ot)) (?:p|f)(?= [a-z])/g, " phuong")
     .replace(/ q(?= [a-z])/g, " quan")
     .replace(/ h(?= [a-z])/g, " huyen")
     .replace(/ x(?= [a-z])/g, " xa")

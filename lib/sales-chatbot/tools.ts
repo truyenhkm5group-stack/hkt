@@ -44,7 +44,7 @@ import { buildQuote, computePriced, loadPricingContext, packChoiceMistake, packi
 import { priceUnverifiedReason, QUOTE_UNVERIFIED_INSTRUCTION, quoteSnapshotOf, type PriceDisputeState, type Quote, type QuoteSnapshot } from "@/lib/sales-chatbot/quote-shared";
 import { CLAIM_SAFE_TEXT, orderValidityOf } from "@/lib/sales-chatbot/claim-guard";
 import { bindCommitment, commitmentViolation, customerHesitates, declinesAddOnOnly, lineBasisViolation, type CartCommitment } from "@/lib/sales-chatbot/cart-commitment";
-import { acceptCustomerWard, acceptEarlierWardReply, addressQuestion, canAutoFill, parseCustomerAddress, wardFromCustomerWords, type AddressConfidence, type AddressPart } from "@/lib/address/customer-address";
+import { acceptCustomerWard, acceptEarlierWardReply, addressQuestion, canAutoFill, namesOtherWard, parseCustomerAddress, wardFromCustomerWords, type AddressConfidence, type AddressPart } from "@/lib/address/customer-address";
 import { askedBefore, askMemoryFor, askMemoryParts, askParts, type AddressAskMemory } from "@/lib/sales-chatbot/address-memory";
 import { searchCatalog, sellableCatalog, stockFor, type CatalogItem } from "@/lib/sales-chatbot/catalog";
 import { quotedInText } from "@/lib/sales-chatbot/text";
@@ -969,16 +969,19 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
       if (v.data.ward) {
         const parsedWard = parseCustomerAddress(recipient.address, recipient.province);
         const okWard = acceptCustomerWard(parsedWard, v.data.ward, ctx.lastUserText);
-        if (okWard.ok) recipient.ward = okWard.ward;
+        // Tin cuối nêu tên phường nhưng cũng nêu / phủ định sang một phường KHÁC («không phải An Hội Tây, An Hội Đông») ⇒ không phải lời khai.
+        const lastNamesOther = okWard.ok && Boolean(parsedWard.province) && ctx.lastUserText.split(/\n+/).some((l) => namesOtherWard(l, parsedWard.province!, okWard.ward));
+        if (okWard.ok && !lastNamesOther) recipient.ward = okWard.ward;
         else {
           const wardCore = (x: string) => foldVnText(x).replace(/^(phuong|xa|thi tran|dac khu) /, "");
           const stated = wardFromCustomerWords(parsedWard, recipient.address, ctx.customerTexts);
-          const earlier = stated ? null : acceptEarlierWardReply(parsedWard, v.data.ward, ctx.customerTexts ?? []);
+          const askedHere = askMemoryParts(askMemoryFor(state.addressAsk, recipient.address)).ward !== undefined;
+          const earlier = stated || lastNamesOther ? null : acceptEarlierWardReply(parsedWard, v.data.ward, ctx.customerTexts ?? [], askedHere);
           if (stated && wardCore(stated.ward) === wardCore(v.data.ward)) {
             recipient.ward = stated.ward;
             if (!parsedWard.province) recipient.province = stated.province;
           } else if (earlier) recipient.ward = earlier.ward;
-          else return err("Đơn nháp: xã / phường chưa xác nhận", okWard.error, state);
+          else return err("Đơn nháp: xã / phường chưa xác nhận", okWard.ok ? `Tin khách nêu cả một phường khác ngoài «${okWard.ward}» — hỏi lại khách đúng một câu, không tự chọn.` : okWard.error, state);
         }
       }
       // ĐỊA CHỈ KHÁCH TỰ GÕ (P0 15/10/2026): dòng model chép mất phần xã mà tin khách ghi rõ một xã có thật (cùng tỉnh, cùng số nhà) ⇒

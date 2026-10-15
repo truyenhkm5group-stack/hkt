@@ -197,21 +197,40 @@ export function acceptCustomerWard(a: Pick<CustomerAddress, "provinceCode" | "pr
  * lọt vào đơn của địa chỉ MỚI («giao về 15 Nguyễn Oanh, Gò Vấp») mà không cờ nào bật. Địa chỉ ĐẦY ĐỦ ở tin trước đi đường
  * `wardFromCustomerWords` (cùng đường, cùng số nhà, quận cũ, lời sửa). Không nhận ⇒ `null`. HÀM THUẦN.
  */
-export function acceptEarlierWardReply(a: Pick<CustomerAddress, "provinceCode" | "province">, ward: string, texts: readonly string[]): { ok: true; ward: string } | null {
+export function acceptEarlierWardReply(a: Pick<CustomerAddress, "provinceCode" | "province">, ward: string, texts: readonly string[], wardAskedForThisPlace: boolean): { ok: true; ward: string } | null {
+  // Chỉ là LỜI TRẢ LỜI khi bot đã hỏi phường cho ĐÚNG nơi giao đang nằm trong đơn (`askMemoryFor` + `sameDeliveryPlace` ở nơi gọi) —
+  // review PR #848 lần 3: địa chỉ mới không có số («công ty chị ở Quang Trung Gò Vấp») từng nhận phường trả lời cho địa chỉ CŨ.
+  if (!wardAskedForThisPlace) return null;
   const canon = acceptCustomerWard(a, ward, ward);
   if (!canon.ok || !a.province) return null;
   const msgs = texts.map((t) => t.trim()).filter(Boolean);
   for (let i = msgs.length - 1; i >= 0; i--) {
     const lines = msgs[i].split(/\n+/);
-    const addressLike = lines.some((l) => {
+    // Tin nhắc BẤT KỲ địa danh / đường / số nhà nào, hay xin đổi nơi giao ⇒ không còn là chuỗi «trả lời phường rồi xác nhận».
+    const placeLike = lines.some((l) => {
       const p = parseCustomerAddress(l);
-      return p.houseNumber !== null || /\d/.test(p.street);
+      return p.houseNumber !== null || /\d/.test(p.street) || p.province !== null || p.candidates.length > 0 || p.provinceHint !== null || p.legacy !== null || p.ward !== null;
     });
-    if (acceptCustomerWard(a, canon.ward, msgs[i]).ok) return !msgs[i].includes("?") && !addressLike ? canon : null;
-    // Tin mới hơn mang một địa chỉ / nêu phường khác ⇒ phường ở tin cũ hơn không còn là lời khai cho địa chỉ này.
-    if (addressLike || lines.some((l) => namesOtherWard(l, a.province!, canon.ward))) return null;
+    const otherWard = lines.some((l) => namesOtherWard(l, a.province!, canon.ward));
+    if (acceptCustomerWard(a, canon.ward, msgs[i]).ok) {
+      // Lời trả lời phải nêu ĐÚNG MỘT phường, không phải câu hỏi, không phủ định («không phải An Hội Tây, An Hội Đông»), không kèm số nhà.
+      const negated = /(?:^| )(?:khong phai|ko phai|k phai|nham|sai(?! gon))(?: |$)/.test(foldVnText(msgs[i]));
+      const hasHouse = lines.some((l) => parseCustomerAddress(l).houseNumber !== null);
+      return !msgs[i].includes("?") && !negated && !otherWard && !hasHouse && !wantsAddressChange(msgs[i]) ? canon : null;
+    }
+    if (placeLike || otherWard || wantsAddressChange(msgs[i])) return null;
   }
   return null;
+}
+
+/**
+ * Tin khách xin ĐỔI nơi giao («à chị đổi địa chỉ nhé», «giao về chỗ khác», «giao tới công ty», «giao về nhà mẹ chị») — câu bot xin
+ * địa chỉ mới KHÔNG được bỏ, và phường đã nói cho nơi cũ không còn là lời khai (review PR #848 lần 2–3). Bắt rộng có chủ ý: bắt nhầm
+ * («chỗ khác có rẻ hơn không») chỉ làm hàng rào đứng ngoài một lượt. HÀM THUẦN.
+ */
+export function wantsAddressChange(text: string): boolean {
+  const f = foldVnText(text);
+  return /(?:^| )(?:doi|thay|sua)(?: lai)?(?: (?:sang|qua))? (?:dia chi|cho|noi|nha)(?: |$)|(?:^| )dia chi (?:moi|khac)(?: |$)|(?:^| )(?:cho|noi|nha) khac(?: |$)|(?:^| )(?:giao|gui|ship|chuyen)(?: hang)? (?:ve|toi|den|sang|qua|o|cho) (?:nha|cong ty|co quan|cua hang|shop|truong|benh vien|cho|xuong|kho|van phong|toa|chung cu)(?: |$)/.test(f);
 }
 
 /** Dòng ghi chú cho người kiểm (cờ ADDRESS_UNRESOLVED): ứng viên thật, hoặc lý do bộ đọc. */

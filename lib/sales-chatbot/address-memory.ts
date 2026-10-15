@@ -14,7 +14,9 @@
  *
  * KHÔNG ĐOÁN: hàng rào chỉ BỎ câu hỏi, không bao giờ tự điền một phường. Phường chưa biết và chưa hỏi lần nào ⇒ câu hỏi đầu tiên đi qua.
  */
-import { canAutoFill, customerStatedAddresses, namesOtherWard, parseCustomerAddress, sameDeliveryPlace, wardFromCustomerWords, type AddressPart } from "@/lib/address/customer-address";
+import { canAutoFill, customerStatedAddresses, namesOtherWard, parseCustomerAddress, sameDeliveryPlace, wantsAddressChange, wardFromCustomerWords, type AddressPart } from "@/lib/address/customer-address";
+
+export { wantsAddressChange };
 import { foldVnText } from "@/lib/address/vn-address";
 import type { ChatState } from "@/lib/sales-chatbot/tools";
 
@@ -68,14 +70,6 @@ export function askedBefore(m: AddressAskMemory | undefined, parts: readonly Add
  */
 export type AddressKnowledge = { ward: string | null; wardAskedAt: number | null; province: boolean; street: boolean; corrected?: boolean; changeRequested?: boolean };
 
-/**
- * Tin khách xin ĐỔI địa chỉ giao («à chị đổi địa chỉ nhé», «giao về chỗ khác», «địa chỉ mới là…») — lúc đó câu bot xin địa chỉ mới
- * KHÔNG được bỏ (review PR #848 lần 2: hàng rào từng thay nó bằng «em ghi nhận địa chỉ rồi», tức xác nhận địa chỉ CŨ). HÀM THUẦN.
- */
-export function wantsAddressChange(text: string): boolean {
-  const f = foldVnText(text);
-  return /(?:^| )(?:doi|thay|sua)(?: lai)?(?: (?:sang|qua))? (?:dia chi|cho|noi|nha)(?: |$)|(?:^| )dia chi (?:moi|khac)(?: |$)|(?:^| )(?:cho|noi|nha) khac(?: |$)/.test(f);
-}
 
 /**
  * Đọc địa chỉ đã biết: đơn nháp (ô xã người / khách đã chọn, hoặc dòng địa chỉ tự điền được) → khách đã lưu → tin khách tự gõ (kể cả
@@ -118,7 +112,7 @@ const isQuestion = (sentence: string, folded: string) => sentence.includes("?") 
 /** Câu xin lại CẢ địa chỉ. */
 const FULL_ADDRESS_ASK = /(?:^| )(?:xin|gui|cho em|nhan)(?: lai)?(?: giup em)? (?:thong tin )?dia chi(?: |$)/;
 /** Câu nhắc địa chỉ MỚI / KHÁC, hay câu KỂ đã nhận («em đã nhận địa chỉ…») — không phải câu xin lại địa chỉ đã biết. */
-const NOT_A_REASK = /(?:^| )(?:moi|khac)(?: |$)|(?:^| )(?:da|vua) nhan(?: |$)/;
+const NOT_A_REASK = /(?:^| )(?:moi|khac)(?: |$)|(?:^| )(?:da|vua) nhan(?: |$)|(?:^| )dia chi (?:nha|cong ty|co quan|cua hang|cho|truong|van phong|kho|xuong)(?: |$)/;
 
 /** Một câu (một đoạn giữa dấu chấm / hỏi / xuống dòng) có HỎI phường / xã không. HÀM THUẦN. */
 export function asksForWard(sentence: string): boolean {

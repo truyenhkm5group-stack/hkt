@@ -172,6 +172,12 @@ export function testAddressWardExplicitPure() {
   assert.equal(asksForFullAddress("Dạ chị gửi em xin địa chỉ mới ạ?"), false, "câu xin địa chỉ MỚI không phải câu hỏi lại");
   assert.equal(asksForFullAddress("Em đã nhận địa chỉ của mình rồi ạ."), false, "câu kể không phải câu hỏi");
   assert.equal(asksForFullAddress("Dạ chị gửi lại địa chỉ giúp em ạ?"), true);
+  // REVIEW LẦN 3 — «giao về nhà mẹ chị», «giao tới công ty» cũng là xin đổi nơi giao; câu bot xin địa chỉ nơi đó không bị bỏ.
+  assert.equal(wantsAddressChange("giao về nhà mẹ chị nhé"), true);
+  assert.equal(wantsAddressChange("chị muốn giao tới công ty"), true);
+  assert.equal(addressReaskVerdict("Dạ chị cho em xin địa chỉ nhà mẹ ạ?", addressKnowledge(tuyetDraft, [TUYET_MSG, "giao về nhà mẹ chị nhé"]), 3), null);
+  assert.equal(asksForFullAddress("Dạ chị cho em xin địa chỉ công ty ạ?"), false);
+  assert.equal(expandAbbreviations(foldVnText("Lầu F An Phú")), "lau f an phu");
   // «Lô F / Tòa P …» là tên lô / toà, không bung thành «phường».
   assert.equal(expandAbbreviations(foldVnText("Lô F An Phú, Quận 2")), "lo f an phu quan 2");
   assert.equal(expandAbbreviations(foldVnText("230/20 Phan Huy Ích, F An Hội Tây")), "230 20 phan huy ich phuong an hoi tay");
@@ -263,11 +269,23 @@ export async function testAddressWardExplicitTools() {
   const switchTexts = ["230/20 Phan Huy Ích, P An Hội Tây, TP.HCM", "à chị đổi, giao về 15 Nguyễn Oanh, Gò Vấp nha"];
   const switched = await executeTool("update_draft_order", { address: NEW_ADDR, ward: AN_HOI_TAY }, ctx(clone(base), switchTexts[1], 5, switchTexts)).catch((e: unknown) => ({ isError: true, summary: `ném: ${String(e)}`, content: "", state: {} as ChatState }));
   assert.ok(switched.isError && /chưa xác nhận/.test(switched.summary), `địa chỉ mới, phường của địa chỉ cũ ⇒ từ chối: ${switched.summary}`);
-  assert.equal(acceptEarlierWardReply(parseCustomerAddress(NEW_ADDR), AN_HOI_TAY, switchTexts), null);
+  assert.equal(acceptEarlierWardReply(parseCustomerAddress(NEW_ADDR), AN_HOI_TAY, switchTexts, true), null);
   // Tên phường chỉ nằm trong một câu HỎI không phải lời khai.
-  assert.equal(acceptEarlierWardReply(parseCustomerAddress(MODEL_LINE), "Phường Hạnh Thông", ["phường Hạnh Thông có ship không?", "ok em"]), null);
+  assert.equal(acceptEarlierWardReply(parseCustomerAddress(MODEL_LINE), "Phường Hạnh Thông", ["phường Hạnh Thông có ship không?", "ok em"], true), null);
   // Lời trả lời ngắn về phường rồi «ok em» ⇒ vẫn nhận (ca `prior` ở trên).
-  assert.deepEqual(acceptEarlierWardReply(parseCustomerAddress(MODEL_LINE), AN_HOI_TAY, ["phường An Hội Tây em nhé", "ok em"]), { ok: true, ward: AN_HOI_TAY });
+  assert.deepEqual(acceptEarlierWardReply(parseCustomerAddress(MODEL_LINE), AN_HOI_TAY, ["phường An Hội Tây em nhé", "ok em"], true), { ok: true, ward: AN_HOI_TAY });
+  // REVIEW LẦN 3 — bot CHƯA hỏi phường cho nơi giao này ⇒ không phải lời trả lời.
+  assert.equal(acceptEarlierWardReply(parseCustomerAddress(MODEL_LINE), AN_HOI_TAY, ["phường An Hội Tây em nhé", "ok em"], false), null);
+  // Địa chỉ mới KHÔNG CÓ SỐ («công ty … Quang Trung Gò Vấp») sau lời trả lời phường của địa chỉ cũ ⇒ không nhận.
+  const noNumber = ["230/20 Phan Huy Ích, Gò Vấp", "phường An Hội Tây em nhé", "à giao về chỗ khác nhé, công ty chị ở Quang Trung Gò Vấp"];
+  assert.equal(acceptEarlierWardReply(parseCustomerAddress("Công ty, Quang Trung, Gò Vấp, TP.HCM"), AN_HOI_TAY, noNumber, true), null);
+  assert.equal(acceptEarlierWardReply(parseCustomerAddress("Công ty, Quang Trung, Gò Vấp, TP.HCM"), AN_HOI_TAY, ["phường An Hội Tây em nhé", "à đổi sang giao ở công ty chị nhé"], true), null);
+  const noNumberRun = await executeTool("update_draft_order", { address: "Công ty, Quang Trung, Gò Vấp, TP.HCM", ward: AN_HOI_TAY }, ctx(clone(ask.state), noNumber[2], 5, noNumber)).catch((e: unknown) => ({ isError: true, summary: `ném: ${String(e)}`, content: "", state: {} as ChatState }));
+  assert.ok(noNumberRun.isError && /chưa xác nhận/.test(noNumberRun.summary), `địa chỉ mới không số ⇒ từ chối phường cũ: ${noNumberRun.summary}`);
+  // Câu PHỦ ĐỊNH nêu hai phường không phải lời khai cho phường bị phủ định — ở tin trước lẫn tin cuối.
+  assert.equal(acceptEarlierWardReply(parseCustomerAddress(MODEL_LINE), AN_HOI_TAY, ["không phải An Hội Tây đâu em, An Hội Đông", "ok em"], true), null);
+  const negLast = await executeTool("update_draft_order", { ward: AN_HOI_TAY }, ctx(clone(ask.state), "không phải An Hội Tây đâu em, phường An Hội Đông", 5, ["không phải An Hội Tây đâu em, phường An Hội Đông"])).catch((e: unknown) => ({ isError: true, summary: `ném: ${String(e)}`, content: "", state: {} as ChatState }));
+  assert.ok(negLast.isError && /chưa xác nhận/.test(negLast.summary), `phủ định ở tin cuối ⇒ từ chối: ${negLast.summary}`);
   // Địa chỉ đầy đủ ở tin trước, model chép CÙNG địa chỉ (mất phường) rồi gửi ward ⇒ nhận qua đường cùng đường + cùng số nhà.
   const sameAddr = await executeTool("update_draft_order", { address: MODEL_LINE, ward: AN_HOI_TAY }, ctx(clone(base), "ok em", 5, [TUYET_MSG, "ok em"])).catch((e: unknown) => ({ isError: true, summary: `ném: ${String(e)}`, content: "", state: {} as ChatState }));
   assert.ok(!/chưa xác nhận/.test(sameAddr.summary), `cùng địa chỉ khách đã ghi phường ⇒ nhận: ${sameAddr.summary}`);
