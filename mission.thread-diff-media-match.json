@@ -3,7 +3,7 @@
   "mission_id": "thread-diff-media-match",
   "title": "pancake-thread-diff: tin phía page KHÔNG CÓ CHỮ thôi bị đếm là THIẾU",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-team",
@@ -23,12 +23,15 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-14T13:17:03.821Z",
-  "updated_at": "2026-10-15T10:12:42.932Z",
+  "updated_at": "2026-10-15T12:32:11.336Z",
   "last_heartbeat": "2026-10-14T13:21:34.026Z",
   "definition_of_done": [],
   "intake": {
     "verdict": "IN_PROGRESS",
     "evidence": []
+  },
+  "evidence": {
+    "merged": "#850 → 6a5f2ffaf49919ba8f795d3d18e26ea073cb7b73"
   },
   "handoff": {
     "branch": "claude/thread-diff-media-match",
