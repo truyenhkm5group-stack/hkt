@@ -3,7 +3,7 @@
   "mission_id": "test-timing-table",
   "title": "Bộ kiểm thử tự in bảng thời gian từng nhóm — số đo để chia job, thay vì nâng trần",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-team",
@@ -23,9 +23,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-14T15:42:24.658Z",
-  "updated_at": "2026-10-15T10:12:32.357Z",
+  "updated_at": "2026-10-15T12:31:53.522Z",
   "last_heartbeat": "2026-10-14T17:30:27.826Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#849 → f0cf923e48792129299412a362e4e3d0891d1da4"
+  },
   "handoff": {
     "branch": "claude/test-timing-table",
     "sha": "1db60af8c9b2a466ca9ce83eb05ccb5e4a1189c6",
