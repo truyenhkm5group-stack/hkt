@@ -86,14 +86,14 @@ export const LOST_AFTER_MS = 2 * 3_600_000;
  * Pancake (`PANCAKE_AUTO_NOTE_RE` ở fanpage.ts — đường nhận đã bỏ chúng, ở đây để dòng cũ / tin đọc từ Pancake cũng phân loại đúng).
  */
 export const META_SYSTEM_TEXT_RE =
-  /bạn đang phản hồi bình luận|you(?:'|’)?re replying to (?:a )?comment|replied to (?:a|your) comment|đã trả lời (?:về )?một (?:quảng cáo|bài viết)|nhãn tự động|đánh dấu trạng thái đơn|đ[ặạ]t giai đoạn của khách hàng/i;
+  /bạn đang phản hồi bình luận|you(?:'|’)?re replying to (?:a )?comment|replied to (?:a|your) comment|đã trả lời (?:về )?một (?:quảng cáo|bài viết)|nhãn tự động|đánh dấu trạng thái đơn|đặt giai đoạn của khách hàng/i;
 
 /**
  * Bản SQL (Postgres `~*`) của `META_SYSTEM_TEXT_RE` — điều kiện «Tin khách chưa đọc» chạy ở máy chủ CSDL. Bài kiểm đối chiếu hai bản trên
  * cùng các câu mẫu.
  */
 export const META_SYSTEM_TEXT_SQL_RE =
-  "(bạn đang phản hồi bình luận|you('|’)?re replying to (a )?comment|replied to (a|your) comment|đã trả lời (về )?một (quảng cáo|bài viết)|nhãn tự động|đánh dấu trạng thái đơn|đ[ặạ]t giai đoạn của khách hàng)";
+  "(bạn đang phản hồi bình luận|you('|’)?re replying to (a )?comment|replied to (a|your) comment|đã trả lời (về )?một (quảng cáo|bài viết)|nhãn tự động|đánh dấu trạng thái đơn|đặt giai đoạn của khách hàng)";
 
 /** Ứng dụng của Meta mà nhân viên dùng để nhắn tay từ Hộp thư Page / Meta Business Suite (tiếng vọng mang `app_id` này). */
 export const META_HUMAN_INBOX_APP_IDS: readonly string[] = ["263902037430900"];
