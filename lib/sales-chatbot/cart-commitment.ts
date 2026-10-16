@@ -20,7 +20,7 @@
  *
  * HÀM THUẦN, không đọc CSDL. Không động tới giá / tồn / SKU: số tiền vẫn chỉ từ báo giá máy chủ (`quote.ts`).
  */
-import { resolveRecipientPlace } from "@/lib/address/vn-address";
+import { foldVnText, isAdminName, resolveRecipientPlace } from "@/lib/address/vn-address";
 import { manualOrderGaps } from "@/lib/constants/manual-orders";
 import { formatVND } from "@/lib/format";
 import { foldVi } from "@/lib/sales-chatbot/text";
@@ -64,7 +64,8 @@ export type CartIntentKind = "ORDER" | "SET" | "ADD" | "REDUCE" | "KEEP" | "REMO
 /** `ambiguous` = chữ quanh số lượng gọi tên NHIỀU sản phẩm của danh mục («1 hộp nem» khi có hai loại nem) — không được rơi về món sẵn có. */
 /** `pieces` = số CÁI / CHIẾC; `word` = chữ đơn vị khách gõ («gói», «hộp», «cái») — chỉ «gói / túi / bịch» mới quy được ra gram theo quy cách gói. */
 /** `unbound` = có chữ tên món quanh số lượng (`raw`) nhưng tên đó KHÔNG có trong danh mục («2 hộp xôi», «2 hộp nemm») — không phải số không tên. */
-export type CartAmount = { value: number; unit: CartUnit; label: string; display: string; index: number; end: number; ambiguous?: boolean; hint?: string; pieces?: boolean; word?: string; unbound?: boolean; raw?: string };
+/** `bare` = số TRẦN không chữ đơn vị («1 mực giã tay» — #855); gộp được với khối lượng cùng món đứng ngay sau («1 chả cá thu 2kg»). */
+export type CartAmount = { value: number; unit: CartUnit; label: string; display: string; index: number; end: number; ambiguous?: boolean; hint?: string; pieces?: boolean; word?: string; unbound?: boolean; raw?: string; bare?: boolean };
 /** `tentative` = số lượng nói kèm câu hỏi giá («lấy 2kg bao nhiêu em») — chỉ THÊM món mới (không dính), không bao giờ sửa món đã có. */
 export type CartIntent = { kind: CartIntentKind; amounts: CartAmount[]; label: string | null; tentative?: boolean };
 
@@ -76,6 +77,11 @@ const PACK_UNIT = "túi|tui|gói|goi|hộp|hop|set|phần|phan|bịch|bich|khay|
 const NUM_WORD = "một|mot|hai|ba|bốn|bon|năm|nam|sáu|sau|bảy|bay|tám|tam|chín|chin|mười|muoi";
 const WEIGHT_RE = new RegExp(`(\\d+(?:[.,]\\d+)?|${NUM_WORD}|nửa|nua)\\s*(${WEIGHT_UNIT})(?:\\s*(rưỡi|ruoi))?(?![\\p{L}\\d])`, "giu");
 const PACK_RE = new RegExp(`(\\d{1,3}|${NUM_WORD})\\s*(${PACK_UNIT})(?![\\p{L}\\d])`, "giu");
+/**
+ * Số TRẦN đứng trước chữ («1 mực giã tay»): tối đa hai chữ số, không dính chữ / số / dấu chấm phẩy phía trước (SĐT, «12.5», «F4/22»).
+ * Chữ số bằng lời chỉ «một / hai / ba» CÓ DẤU ĐÚNG — «bà», «năm», «sau», «bảy» là từ thường quá dễ trùng.
+ */
+const BARE_RE = /(?<![\p{L}\d.,/:-])(\d{1,2}|một|hai|ba)\s+(?=\p{L})/giu;
 
 const numOf = (raw: string): number | null => {
   const f = foldVi(raw);
@@ -167,6 +173,33 @@ function labelAround(text: string, index: number, end: number): { match: string;
   return run.length ? { match: foldVi(run.join(" ")), display: run.join(" ") } : { match: "", display: "" };
 }
 
+/** Dãy từ VIẾT HOA liền nhau bắt đầu ở `pos` (dừng ở dấu câu / chữ thường): «Chả Mực, …» ⇒ ["Chả", "Mực"]. HÀM THUẦN. */
+function capRunAt(text: string, pos: number): string[] {
+  const run: string[] = [];
+  for (const w of text.slice(pos, pos + 60).split(CUT_RE)[0].trim().split(/\s+/)) {
+    if (!w || !/^\p{Lu}/u.test(w) || run.length >= 5) break;
+    run.push(w);
+  }
+  return run;
+}
+/** MỌI từ của `words` thuộc tên ĐÚNG MỘT sản phẩm danh mục ⇒ tên đó; còn lại `null`. HÀM THUẦN. */
+function oneNameOf(words: readonly string[], catalog: readonly string[]): string | null {
+  const toks = labelTokens(words.join(" "));
+  if (!toks.length) return null;
+  const hits = [...new Set(catalog.map(productName))].filter((nm) => {
+    const nt = labelTokens(nm);
+    return toks.every((w) => nt.includes(w));
+  });
+  return hits.length === 1 ? hits[0] : null;
+}
+/** Sau dãy chữ là «, <đơn vị hành chính>» («12 Chả Cá, Hoàn Kiếm» · «…, Phường Hoàn Kiếm») ⇒ đây là ĐỊA CHỈ. HÀM THUẦN. */
+function adminAfter(rest: string): boolean {
+  const m = rest.match(/^\s*,\s*([^,\n;]+)/);
+  if (!m) return false;
+  const seg = m[1].trim();
+  return /^(?:phường|p\.|quận|q\.|huyện|xã|thị trấn|tt\.?|tp\.?|thành phố|tỉnh)(?:\s|$)/iu.test(seg) || isAdminName(foldVnText(seg));
+}
+
 /**
  * Mọi số lượng khách nói trong câu: khối lượng (gram) và số gói / cái, theo thứ tự xuất hiện, kèm tên món quanh nó (`catalog` = tên
  * sản phẩm đang bán — có thì tên món PHẢI khớp danh mục). HÀM THUẦN.
@@ -194,8 +227,57 @@ export function amountsIn(text: string, catalog?: readonly string[]): CartAmount
     const n = numOf(m[1]);
     if (n === null || !Number.isInteger(n)) continue;
     const idx = m.index ?? 0;
+    // ĐỊA CHỈ, không phải số lượng (review #855 — golden «230/20 Phan Huy Ích» từng thành «20 phần»): số đứng sau «/» (số nhà 230/20), hoặc chữ
+    // «đơn vị» VIẾT HOA mà từ kế tiếp cũng viết hoa (tên riêng «Phan Huy Ích», «Lò Đúc»).
+    if (/[\d]\/$/.test(text.slice(Math.max(0, idx - 2), idx))) continue;
+    // …trừ khi dãy chữ hoa phía sau KHỚP TRỌN một tên danh mục («Lấy 2 Gói Chả Mực», «Cho Chị 2 Hộp Nem» — khách gõ hoa đầu từ).
+    if (/^\p{Lu}/u.test(m[2]) && /^\s+\p{Lu}/u.test(text.slice(idx + m[0].length))) {
+      if (!catalog || !oneNameOf(capRunAt(text, idx + m[0].length), catalog)) continue;
+    }
     if (out.some((a) => idx < a.end && idx + m[0].length > a.index)) continue;
     push(n, "pack", idx, m[0].length, m[2]);
+  }
+  // SỐ TRẦN + TÊN MÓN (P0 #855, ca «ThuyNgo» 16/10/2026): «Ship chị 1 mực giã tay» không có chữ đơn vị nên hai vòng trên ra 0 số lượng ⇒
+  // giỏ có thẩm quyền rỗng ⇒ hàng rào căn cứ (`unrequestedProducts`) tắt ⇒ bot tự lên «1kg chả cá thu + 1kg chả mực = 680.000 ₫». Chỉ
+  // khi CÓ danh mục, và chỉ khi chữ ĐỨNG SAU con số khớp ĐÚNG MỘT sản phẩm (không mơ hồ, không lấy tên đứng trước — «chả mực 2 hôm trước»
+  // không phải 2 chả mực). Số nhà / SĐT / «2 ngày nữa» không khớp tên nào ⇒ không bao giờ thành số lượng, cũng không thành «tên lạ».
+  if (catalog) {
+    const names = [...new Set(catalog.map(productName))];
+    const catalogWords = new Set(names.flatMap((n) => n.toLowerCase().normalize("NFC").split(/\s+/)));
+    for (const m of text.matchAll(BARE_RE)) {
+      const n = numOf(m[1]);
+      const idx = m.index ?? 0;
+      if (n === null || !Number.isInteger(n) || n > 50) continue;
+      // «Hai» / «Ba» VIẾT HOA là tên riêng («quận Hai Bà Trưng»), không phải con số.
+      if (/^\p{Lu}/u.test(m[1]) && !/^\d/.test(m[1])) continue;
+      if (out.some((a) => idx < a.end && idx + m[0].length > a.index)) continue;
+      // Dãy chữ LIỀN ngay sau con số, dừng ở từ dừng / dấu câu đầu tiên (không nhặt tên món ở cuối câu như `wordsAfter`).
+      const after = text.slice(idx + m[0].length, idx + m[0].length + 60);
+      const cut = after.search(CUT_RE);
+      const take: string[] = [];
+      for (const w of (cut < 0 ? after : after.slice(0, cut)).trim().split(/\s+/)) {
+        // Từ dừng mà trùng ĐÚNG DẤU một từ của tên danh mục («giã» trong «Chả mực giã tay» — bỏ dấu thành «gia» = «giá») vẫn là tên món.
+        const inName = take.length > 0 && catalogWords.has(w.toLowerCase().normalize("NFC"));
+        if (!w || !foldVi(w) || (isStop(w) && !inName) || take.length >= 5) break;
+        take.push(w);
+      }
+      if (!take.length) continue;
+      // Dãy VIẾT HOA rồi «, <đơn vị hành chính>» ⇒ địa chỉ («12 Chả Cá, Hoàn Kiếm» là số nhà + tên đường), kể cả khi trùng tên món.
+      if (take.every((w) => /^\p{Lu}/u.test(w))) {
+        let pos = idx + m[0].length;
+        for (const w of take) pos = text.indexOf(w, pos) + w.length;
+        if (adminAfter(text.slice(pos))) continue;
+      }
+      // MỌI từ đã lấy (bắt đầu từ từ ĐẦU TIÊN sau con số) phải thuộc tên của ĐÚNG MỘT sản phẩm — không tìm chuỗi con ở giữa
+      // (review #855: «Hai Bà Trưng» từng khớp «Chả trứng»; «2 đứa nhỏ thích mực» từng thành 2 món mực; «1 nem chua» không phải nem hải sản).
+      const toks = labelTokens(take.join(" "));
+      const hits = names.filter((nm) => {
+        const nt = labelTokens(nm);
+        return toks.every((w) => nt.includes(w));
+      });
+      if (hits.length !== 1) continue;
+      out.push({ value: n, unit: "pack", label: foldVi(hits[0]), display: hits[0], index: idx, end: idx + m[1].length, bare: true });
+    }
   }
   out.sort((a, b) => a.index - b.index);
   // «2 túi 1kg» / «2 gói loại 1kg» / «lấy 2 gói, mỗi gói 1kg» = 2 × 1kg = 2kg — MỘT lượng, không phải «2 gói» + «1kg».
@@ -215,6 +297,16 @@ export function amountsIn(text: string, catalog?: readonly string[]): CartAmount
     if (a.unit !== "g" || b.unit !== "pack" || b.label || b.ambiguous || b.unbound || b.pieces || wordsAfter(text, b.end).length) continue;
     if (!/^\s*(?:(?:lấy|lay|cho|đặt|dat|mua)(?:\s+(?:chị|chi|em|anh|mình|minh))?|x|×)?\s*$/i.test(text.slice(a.end, b.index))) continue;
     out.splice(i, 2, { ...a, value: a.value * b.value, end: b.end });
+  }
+  // «1 chả cá thu 2kg» / «2 chả mực 1kg» = SỐ LẦN × khối lượng của CÙNG món (review #855 — trước đây hai số cho một món ⇒ hỏi lại). Chỉ khi
+  // giữa hai số chỉ có chữ của chính tên món (hoặc từ dừng).
+  for (let i = 0; i + 1 < out.length; i++) {
+    const a = out[i];
+    const b = out[i + 1];
+    if (!a.bare || b.unit !== "g" || !a.label || b.label !== a.label) continue;
+    const nameToks = new Set(a.label.split(" "));
+    if (!labelTokens(text.slice(a.end, b.index)).every((w) => nameToks.has(w) || STOP.has(w))) continue;
+    out.splice(i, 2, { ...b, value: a.value * b.value, index: a.index });
   }
   return out;
 }
@@ -300,6 +392,12 @@ export function foldCart(text: string): string {
     .trim();
 }
 
+/**
+ * Khách PHỦ NHẬN đã đặt («không có order», «kg có order», «ko order», «không đặt»), đọc trên `foldCart`. «kg» chỉ là «không» khi KHÔNG đứng
+ * sau một con số — «cho chị 2 kg, đặt luôn» là lời ĐẶT 2kg (review #855: bản ứng viên bắt cả câu này thành câu sửa, làm câu giữ đơn tắt).
+ */
+const DENY_ORDER_RE = /(?:^| )(?:khong|ko|k|hong|hok|(?<!\d )kg)(?: co)? (?:order|dat)(?= |$)/;
+
 /** Cả đơn: «thôi không lấy nữa», «hok lấy nữa», «khỏi lấy nữa», «thôi khỏi», «hủy giúp chị», «bỏ đơn đi», «cancel đơn», «không lấy nha em». */
 const CANCEL_RE = new RegExp(
   `(?:^| )(?:${NEG} (?:lay|mua|dat|can)(?! them)${PARTICLES}$|${NEG} (?:lay|mua|dat) (?:nua|gi)(?: |$)|(?:${THOI} )?khoi(?: (?:lay|mua|dat))?${PARTICLES}$|huy${PARTICLES}$|huy don(?: |$)|bo don(?: |$)|cancel(?: don)?(?: |$))`,
@@ -346,6 +444,8 @@ export function hasEditCue(text: string, labels: readonly string[] = []): boolea
   const has = (re: RegExp) => re.test(f);
   const amt = amountsIn(text).length > 0;
   const mentionsItem = labels.some((l) => l && labelTokens(l).length && labelsMatch(l, f) && labelTokens(l).some((t) => f.split(" ").includes(t)));
+  // Tin khách đính chính món bot tự thêm: «không có order chả cá», «kg có order chả cá» (kg = không khi có «order»).
+  if (has(DENY_ORDER_RE)) return true;
   if (has(/(?:^| )(?:huy|bo|cancel)(?: |$)/)) return true;
   if (has(/(?:^| )bot(?: |$)/)) return true;
   if (has(/(?:^| )giam (?:bot|xuong|di|lai|con)(?: |$)/)) return true;
@@ -366,7 +466,7 @@ export function hasEditCue(text: string, labels: readonly string[] = []): boolea
  *  · REMOVE — «không lấy chả cá nữa», «bỏ chả cá thu», «hủy chả cá», «mực thì thôi», «thôi mực khỏi», «mực k lấy nữa»;
  *  · CANCEL — «thôi không lấy nữa», «hủy giúp chị», «thôi khỏi», «bỏ đơn đi», «cancel đơn» (cả đơn).
  */
-export function classifyCartMessage(text: string, catalog?: readonly string[]): CartIntent {
+export function classifyCartMessage(text: string, catalog?: readonly string[], opts: { hasExplicit?: boolean } = {}): CartIntent {
   const raw = text.toLowerCase();
   const f = foldCart(text);
   const none = (kind: CartIntentKind): CartIntent => ({ kind, amounts: [], label: null });
@@ -383,6 +483,14 @@ export function classifyCartMessage(text: string, catalog?: readonly string[]): 
     if (keep) {
       const label = trailingRun(keep[1]);
       if (label && label === keep[1].split(" ").filter((w) => !STOP.has(w)).join(" ")) return { kind: "KEEP", amounts: [], label };
+    }
+    // «Không có order chả cá thu nha» / «Kg có order chả cá thu nha» = KHÁCH PHỦ NHẬN MÓN,
+    // không phải lời đặt hàng. «kg» chỉ hiểu là «không» khi có cả «có order/đặt» phía sau,
+    // tránh nhầm chữ kg chỉ đơn vị khối lượng với phủ định.
+    const denyOrder = f.match(new RegExp(`${DENY_ORDER_RE.source}(?: mon)? ([a-z]+(?: [a-z]+){0,5})`));
+    if (denyOrder) {
+      const label = leadingRun(denyOrder[1]);
+      if (label) return { kind: "REMOVE", amounts: [], label };
     }
     // Bỏ một món, tên món ĐỨNG SAU: «không lấy chả cá nữa», «bỏ chả cá thu nha», «hủy chả cá», «bỏ món chả cá đi em».
     const rm = f.match(new RegExp(`(?:^| )(?:bo|huy|${NEG} (?:lay|mua))(?: mon)? ([a-z]+(?: [a-z]+){0,5})`));
@@ -408,7 +516,15 @@ export function classifyCartMessage(text: string, catalog?: readonly string[]): 
   const trailOf = (a: CartAmount) => head(text.slice(a.end));
   const addRe = /(?:^| )(?:them|cong them|lay them|them cho (?:chi|em|anh|minh))$/;
   const adds = amounts.filter((a) => addRe.test(leadOf(a)) || /^nua(?: |$)/.test(trailOf(a)));
-  if (adds.length) return { kind: "ADD", amounts: adds, label: null };
+  if (adds.length) {
+    // «Cho chị 2 gói, thêm 1 ruốc tôm» = ĐẶT 2 gói + 1 ruốc trong MỘT câu, không phải chỉ «thêm 1 ruốc» (bản cũ đánh rơi «2 gói» — lộ ra khi
+    // #855 đọc được số trần «1 ruốc tôm»). Số không-thêm ĐỨNG TRƯỚC vế «thêm» ⇒ ORDER với mọi số — CHỈ khi số ấy có tên món, hoặc giỏ CHƯA có
+    // món khách nói (`hasExplicit === false`). Giỏ đã có món mà số đứng trước không tên («hôm qua chị lấy 2 gói rồi, thêm 1 hộp nem») ⇒ vẫn
+    // chỉ THÊM — không sửa món đang có theo một con số kể lại.
+    const lead = amounts.filter((a) => !adds.includes(a) && a.index < adds[0].index);
+    if (lead.length && !priceAsk && (lead.every((a) => a.label) || opts.hasExplicit === false)) return { kind: "ORDER", amounts, label: null };
+    return { kind: "ADD", amounts: adds, label: null };
+  }
   if (/(?:^| )(?:bot|giam|tru|bot di|giam di|tru di|bot cho (?:chi|em|anh|minh))$/.test(leadOf(last))) return { kind: "REDUCE", amounts: [last], label: null };
   // «bớt chả mực 1kg» / «giảm chả cá 1kg» — động từ, rồi tên món, rồi số lượng ⇒ bớt trên ĐÚNG món đó.
   const reduceNamed = leadOf(last).match(/(?:^| )(?:bot|giam|tru)(?: di)? ([a-z]+(?: [a-z]+){0,4})$/);
@@ -495,7 +611,7 @@ export function applyCustomerCartMessage(cart: CartCommitment | undefined, text:
 }
 
 function applyCart(cart: CartCommitment | undefined, text: string, turn: number | null, now: Date, opts: ApplyOpts, dropUnbound: boolean): CartCommitment | undefined {
-  const parsed0 = classifyCartMessage(text, opts.catalog);
+  const parsed0 = classifyCartMessage(text, opts.catalog, { hasExplicit: Boolean(cart?.selectedItems.some((x) => x.customerExplicit)) });
   const parsed: CartIntent = dropUnbound ? { ...parsed0, amounts: parsed0.amounts.filter((a) => !a.unbound) } : parsed0;
   // Tin NGAY SAU lời mời đúng MỘT món (P0 14/10/2026): số lượng không kèm tên («ừ cho chị 1 hộp») là số của món vừa được mời — không phải của
   // món sẵn có trong giỏ. Chỉ áp khi giỏ ĐÃ có món khách nói (lời mời THÊM món — trước đó số không tên vẫn đi đường cũ, vd «chả mực bao
@@ -690,6 +806,17 @@ export function mentionsProduct(name: string, customerSaid: string): boolean {
   return words.filter((w) => said.has(w)).length >= Math.min(2, new Set(words).size);
 }
 
+/**
+ * Khách gọi tên món, kể cả khi bỏ danh từ đầu («mực giã tay» = «Chả mực giã tay», «cá thu» = «Chả cá thu»): `mentionsProduct`, hoặc ít nhất
+ * HAI từ riêng (ngoài từ đầu) của tên có mặt. Chỉ dùng để NỚI hàng rào (món được gọi tên thì không bị coi là tự thêm). HÀM THUẦN.
+ */
+function calledByName(name: string, customerSaid: string): boolean {
+  if (mentionsProduct(name, customerSaid)) return true;
+  const rest = [...new Set(labelTokens(productName(name)).slice(1).filter((w) => !/^\d/.test(w) && w !== "kg" && w !== "g"))];
+  const said = new Set(labelTokens(customerSaid));
+  return rest.length >= 2 && rest.filter((w) => said.has(w)).length >= 2;
+}
+
 /** Mệnh đề KHÔNG phải lời mua: phủ định / bỏ / huỷ · hỏi giá / hỏi điều kiện · giả định. */
 const NOT_BUYING_RE = /(?:^| )(?:khong|ko|k|chua|dung|hong|hok|chang) (?:lay|mua|can|dat|an|thich)(?: |$)|(?:^| )(?:bao nhieu|bn|nhieu tien|may tien|het bao|bao gia|gia (?:bao|sao|nhieu|the nao|ca)|neu|thi sao)(?: |$)|(?:^| )(?:khong|ko|k|hong|hok)$/;
 /** «bỏ» / «hủy» / «khỏi» đọc trên chữ CÓ DẤU — bỏ dấu thì «bò» (tên món) cũng thành «bo». */
@@ -740,8 +867,14 @@ const keyOfLine = (l: Pick<AskedLine, "productId" | "variantId">) => l.productId
  */
 export function unrequestedProducts(cart: CartCommitment | undefined, asked: readonly AskedLine[], customerSaid = "", grounded: ReadonlySet<string> = new Set()): string[] {
   const explicit = cart?.selectedItems.filter((x) => x.customerExplicit) ?? [];
-  if (!explicit.length) return [];
   const products = [...new Set(asked.map(keyOfLine))].filter((p) => !grounded.has(p));
+  const nameOf = (p: string) => productName(asked.find((l) => keyOfLine(l) === p)?.name ?? "") || "món mời";
+  if (!explicit.length) {
+    // P0 #855: giỏ chưa có món khách nói (máy không đọc được số lượng) NHƯNG chữ mua của khách GỌI TÊN một số món của đơn đề nghị ⇒ món
+    // KHÔNG được gọi tên là bot tự thêm. Không món nào được gọi tên ⇒ vẫn không đủ căn cứ để chặn (luật an toàn của tệp).
+    const named = products.filter((p) => asked.some((l) => keyOfLine(l) === p && calledByName(l.name, customerSaid)));
+    return named.length ? products.filter((p) => !named.includes(p)).map(nameOf) : [];
+  }
   const strange = products.filter((p) => {
     const lines = asked.filter((l) => keyOfLine(l) === p);
     if (lines.some((l) => mentionsProduct(l.name, customerSaid))) return false;
@@ -749,7 +882,7 @@ export function unrequestedProducts(cart: CartCommitment | undefined, asked: rea
   });
   const unnamed = explicit.filter((it) => !it.productId && !it.match).length;
   if (strange.length <= unnamed) return [];
-  return strange.map((p) => productName(asked.find((l) => keyOfLine(l) === p)?.name ?? "") || "món mời");
+  return strange.map(nameOf);
 }
 
 /**
@@ -889,6 +1022,25 @@ export function bindCommitment(cart: CartCommitment | undefined, asked: readonly
   return same ? cart : { ...base, selectedItems: kept, at: now.toISOString() };
 }
 
+// ─────────────────────────── KHÁCH PHẢN ĐỐI MÓN ───────────────────────────
+
+/** Khách trách bot ĐỌC SAI — đứng được một mình, không cần tên món: «sao không coi ở trên», «khách cũ mà hỏi gì», «sai rồi / nhầm rồi». */
+const MISREAD_RE = /(?:^| )(?:sao (?:khong|ko|k|kg|hong|hok) (?:coi|xem|doc|nhin)|khach cu ma|(?:sai|nham) roi)(?: |$)/;
+/** Khách PHỦ NHẬN đã đặt / nhắc «nói rồi» — CHỈ là phản đối món khi câu GỌI TÊN một món trong giỏ / đơn nháp («chị không đặt cọc đâu» thì không). */
+const DENY_RE = /(?:^| )(?:noi roi|dau co (?:dat|order|lay)|chua (?:he |bao gio )?(?:dat|order))(?: |$)/;
+
+/**
+ * Câu khách PHẢN ĐỐI món / đọc sai (P0 #855). `labels` = tên món đang có trong giỏ / đơn nháp TRƯỚC tin này: phủ nhận đã đặt («kg có order chả cá
+ * thu», «chị chưa đặt chả cá») và «nói rồi» chỉ tính khi câu gọi tên một món trong đó; câu trách đọc sai («sao không coi ở trên») tính một mình.
+ * Câu đặt / nhắc lại món («chị order mực») KHÔNG phải. Một lần ⇒ bot sửa giỏ; lặp lại ⇒ chuyển người (`customerHandoffVerdict`). HÀM THUẦN.
+ */
+export function itemObjectionCue(text: string, labels: readonly string[] = []): boolean {
+  const f = foldCart(text);
+  if (MISREAD_RE.test(f)) return true;
+  if (!labels.some((l) => l && (mentionsProduct(l, text) || calledByName(l, text)))) return false;
+  return (amountsIn(text).length === 0 && DENY_ORDER_RE.test(f)) || DENY_RE.test(f);
+}
+
 // ─────────────────────────── CHỮ BOT ───────────────────────────
 
 const TRIAL_RE = /(?:^| )(?:an thu|dung thu|thu truoc|lay thu|mua thu|goi thu|thu (?:1|mot|it)|it thoi|lay it)(?: |$)/;
@@ -1020,7 +1172,8 @@ export function orderReadiness(s: ReadinessInput): { level: OrderReadiness; miss
   }
   if (!explicit.length) return { level: "BROWSING", missing: null };
   if (s.hesitating) return { level: "ON_HOLD", missing: "Khách chưa quyết mua (đang hoãn / cân nhắc)" };
-  if (explicit.every((x) => !x.match && !x.productId)) return { level: "NEED_ITEMS", missing: "Câu khách nêu số lượng mà không nêu tên món — xác định món theo lịch sử hội thoại (chỉ hỏi lại khi thật sự chưa rõ), KHÔNG hỏi lại số lượng" };
+  // Còn MỘT món không tên (dù món khác đã rõ — review #855) ⇒ vẫn kèm chỉ dẫn xác định món, không ORDER_READY trần.
+  if (explicit.some((x) => !x.match && !x.productId)) return { level: "NEED_ITEMS", missing: "Câu khách nêu số lượng mà không nêu tên món — xác định món theo lịch sử hội thoại (chỉ hỏi lại khi thật sự chưa rõ), KHÔNG hỏi lại số lượng" };
   const phone = s.customer?.phone ?? (s.lastUserText.match(PHONE_IN_TEXT_RE)?.[0] ?? "");
   const address = s.customer?.address ?? s.lastUserText;
   const province = s.customer?.province || resolveRecipientPlace({ address, province: "", ward: "" }).province;
