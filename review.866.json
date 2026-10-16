@@ -1,0 +1,8 @@
+{
+  "pr": 866,
+  "sha": "b5be4e72e09893acc2831d66139eeb1c90d1f0fa",
+  "verdict": "PASS",
+  "actor": "vm:hkt",
+  "at": "2026-10-16T08:21:31.718Z",
+  "note": "chỉ tệp kiểm thử; hàng rào REPEAT_ASK đúng luật #855, fanpage chuyển người thật"
+}
