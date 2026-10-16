@@ -3,7 +3,7 @@
   "mission_id": "p0-855-address",
   "title": "#855 địa chỉ: đọc trước khi hỏi, địa chỉ cũ chỉ khi đã xác minh, địa chỉ mới không bị ghi đè, guard chặn hỏi lặp",
   "business_goal": "0 hỏi lại trường đã có; 0 địa chỉ bịa; mơ hồ => người",
-  "status": "PLANNING",
+  "status": "INTEGRATING",
   "priority": "P0",
   "risk": "HIGH",
   "owner": "vm:hkt",
@@ -37,14 +37,19 @@
   ],
   "dependencies": [],
   "blocked_by": [],
-  "related_prs": [],
+  "related_prs": [
+    861
+  ],
   "migration_reservations": [],
   "created_at": "2026-10-16T03:48:00.196Z",
-  "updated_at": "2026-10-16T05:46:47.611Z",
+  "updated_at": "2026-10-16T07:29:01.258Z",
   "last_heartbeat": "2026-10-16T05:46:47.611Z",
   "definition_of_done": [],
   "intake": {
     "verdict": "PARTIAL",
     "evidence": []
+  },
+  "evidence": {
+    "merged": "#861 → c3194e5f3efceabfa4c581d76a9906e30f5ef806"
   }
 }
