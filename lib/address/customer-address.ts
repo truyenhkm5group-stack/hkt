@@ -192,11 +192,15 @@ export function acceptCustomerWard(a: Pick<CustomerAddress, "provinceCode" | "pr
   // Tin nêu thêm một xã KHÁC của cùng tỉnh («An Hội Tây hoặc Hạnh Thông», «không phải An Hội Tây, An Hội Đông») ⇒ chưa phải lời xác nhận
   // MỘT xã (review PR #848 lần 4). Tên nằm trọn trong tên đã nhận («An Phú» trong «An Phú Đông») không tính là xã khác.
   const coreOf = (name: string) => foldVnText(name).replace(/^(phuong|xa|thi tran|dac khu) /, "");
+  // Dò xã khác TỪNG VẾ (giữa dấu phẩy / chấm / xuống dòng), không trên cả câu đã gấp dấu (#871): gấp dấu bỏ dấu câu nên «An Hội Tây,
+  // TP.HCM» thành «… tay thanh pho …» và khớp nhầm «Phường Tây Thạnh» — đơn của khách đủ địa chỉ bị chặn ba lần «xã chưa xác nhận».
+  const segments = customerText.split(/[,;.\n]+/).map((x) => ` ${expandAbbreviations(foldVnText(x))} `);
   const other = adminWardsOf(a.provinceCode).find((w) => {
     if (w.name === hit.name) return false;
     const c = coreOf(w.name);
     if (` ${core} `.includes(` ${c} `)) return false;
-    return said.includes(` ${/^\d+$/.test(c) ? foldVnText(w.name) : c} `);
+    const n = ` ${/^\d+$/.test(c) ? foldVnText(w.name) : c} `;
+    return segments.some((seg) => seg.includes(n));
   });
   if (other) return { ok: false, error: `Tin khách nêu cả «${hit.name}» lẫn «${other.name}» — hỏi lại khách đúng một câu, không tự chọn.` };
   return { ok: true, ward: hit.name };
