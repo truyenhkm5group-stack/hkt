@@ -3,7 +3,7 @@
   "mission_id": "p0-855-delivery-intent",
   "title": "P0 #855: câu hỏi thời gian giao hàng — Delivery Intent",
   "business_goal": "",
-  "status": "PLANNING",
+  "status": "RUNNING",
   "priority": "P2",
   "risk": "HIGH",
   "owner": "vm:wt-p0-855-delivery",
@@ -12,13 +12,19 @@
   "branch": "claude/p0-855-delivery-intent",
   "base_sha": "c52e5c57e50e56b36e2ed420eee84db51c1a7d2a",
   "domains": [],
-  "owned_paths": [],
+  "owned_paths": [
+    "lib/sales-chatbot/order-status-shared.ts",
+    "lib/sales-chatbot/delivery-intent.ts",
+    "lib/sales-chatbot/lifecycle.ts",
+    "lib/sales-chatbot/tools.ts",
+    "tests/p0-855-delivery-intent.test.ts"
+  ],
   "dependencies": [],
   "blocked_by": [],
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-16T04:06:32.137Z",
-  "updated_at": "2026-10-16T04:06:32.137Z",
-  "last_heartbeat": "2026-10-16T04:06:32.137Z",
+  "updated_at": "2026-10-16T04:06:54.901Z",
+  "last_heartbeat": "2026-10-16T04:06:54.901Z",
   "definition_of_done": []
 }
