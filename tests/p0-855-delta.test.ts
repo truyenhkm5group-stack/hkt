@@ -16,7 +16,7 @@ import { and, eq } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { orderReviewOf, reviewCodes } from "@/lib/constants/order-review";
 import { createProductCore } from "@/lib/records/product-create";
-import { botProposedDenial, buyingText, deniedItemLabel, mentionText, unrequestedProducts, type AskedLine, type CartCommitment } from "@/lib/sales-chatbot/cart-commitment";
+import { botProposedDenial, buyingText, customerTextsSince, deniedItemLabel, mentionText, unrequestedProducts, type AskedLine, type CartCommitment } from "@/lib/sales-chatbot/cart-commitment";
 import { CLAIM_SAFE_TEXT, guardClaims } from "@/lib/sales-chatbot/claim-guard";
 import { CUSTOMER_HANDOFF_REASON, customerHandoffVerdict } from "@/lib/sales-chatbot/handoff-routing-shared";
 import { classifyHandoffReason } from "@/lib/sales-chatbot/events-shared";
@@ -71,7 +71,24 @@ function testDenial() {
   // Món KHÁCH tự nói tường minh, hoặc khách đã tự gọi tên ở tin trước (hỏi giá) ⇒ không phải «bot tự thêm» (bộ đếm phản đối của #860 lo).
   const own: CartCommitment = { ...both, selectedItems: both.selectedItems.map((x) => ({ ...x, customerExplicit: true })) };
   assert.equal(botProposedDenial("Không có order chả cá thu nha", own, proposed, true), null);
-  assert.equal(botProposedDenial("không đặt chả cá đâu em", undefined, proposed, false, ["chả cá thu với chả mực bao nhiêu em?"]), null, "khách tự hỏi giá chả cá rồi chọn bỏ ⇒ khách chọn");
+  assert.equal(botProposedDenial("không đặt chả cá đâu em", undefined, proposed, false, ["cho chị 1kg chả cá thu với chả mực nhé"]), null, "khách TỰ nói mua chả cá trong lượt này rồi bỏ ⇒ khách đổi ý");
+  // REVIEW PR #873 vòng 2 — ba ca ThuyNgo PHẢI chuyển người (DENIED_BOT_ITEM):
+  const now = Date.now();
+  const thread = [
+    { role: "user" as const, at: new Date(now - 10 * 86_400_000), text: "Cho chị 1kg chả cá thu" },
+    { role: "assistant" as const, at: new Date(now - 10 * 86_400_000 + 1000), text: "Dạ em lên đơn 1kg chả cá thu ạ" },
+    { role: "user" as const, at: new Date(now - 60_000), text: "Ship chị 1 mực giã tay" },
+  ];
+  const roundStart = new Date(now - 9 * 86_400_000);
+  // ① khách cũ: lượt mua TRƯỚC cùng luồng có «Cho chị 1kg chả cá thu» — chỉ tin của lượt mua hiện tại được xét.
+  assert.deepEqual(customerTextsSince(thread, roundStart), ["Ship chị 1 mực giã tay"]);
+  assert.equal(botProposedDenial("Kg có order chả cá thu nha", both, proposed, true, customerTextsSince(thread, roundStart))?.what, "Chả cá thu", "① món bot tự thêm (giỏ) ⇒ luôn là bot đề nghị");
+  assert.equal(botProposedDenial("Kg có order chả cá thu nha", both, proposed, true, ["Cho chị 1kg chả cá thu", "Ship chị 1 mực giã tay"])?.what, "Chả cá thu", "① kể cả nơi gọi lỡ đưa tin cũ: món bot thêm vào giỏ không bao giờ bị che");
+  // ② giỏ trống, chả cá ở lượt mua trước — báo giá máy chủ của lượt này có chả cá.
+  assert.deepEqual(botProposedDenial("Kg có order chả cá thu nha", undefined, proposed, true, customerTextsSince(thread, roundStart)), { what: "Chả cá thu", inDraft: false }, "②");
+  // ③ khách từng HỎI GIÁ chả cá, rồi bot tự thêm — câu hỏi giá không phải lời chọn mua.
+  assert.equal(botProposedDenial("Kg có order chả cá thu nha", both, proposed, true, ["chả cá thu giá sao em", "Ship chị 1 mực giã tay"])?.what, "Chả cá thu", "③ giỏ");
+  assert.equal(botProposedDenial("Kg có order chả cá thu nha", undefined, proposed, true, ["chả cá thu giá sao em", "Ship chị 1 mực giã tay"])?.what, "Chả cá thu", "③ báo giá");
   // REVIEW PR #873 (blocker): món chỉ được NHẮC trong menu / bảng giá / lời mời của bot KHÔNG phải «bot đề nghị» — không truyền vào
   // `proposedNames` (engine chỉ truyền `state.proposedItems`, ghi từ kết quả calculate_cart / đơn nháp).
   for (const t of ["không đặt chả cá, chị lấy 1kg chả mực", "ko order nem nha, lấy chả mực thôi", "không đặt nem đâu em", "không lấy nem đâu", "chị không đặt hàng online bao giờ", "không đặt hàng nhiều đâu em", "không order 2kg đâu, 1kg thôi", "k đặt luôn hôm nay được ko"]) {

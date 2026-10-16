@@ -67,7 +67,7 @@ import { formatVND } from "@/lib/format";
 import { withTurnEvents } from "@/lib/sales-chatbot/events";
 import { FOOD_PACK, salesPackFor, type SalesPack } from "@/lib/sales-chatbot/packs";
 import { autoConfirmBlocker, confirmedFromOrder, executeTool, orderTotalsOf, toolDefsFor, TOOLS_HOLDING_TEXT, type ChatState } from "@/lib/sales-chatbot/tools";
-import { amountText, applyCustomerCartMessage, botProposedDenial, buyingText, cartCommitmentPrompt, cartHoldVerdict, customerHesitates, invitedProductOf, itemObjectionCue, orderReadiness } from "@/lib/sales-chatbot/cart-commitment";
+import { amountText, applyCustomerCartMessage, botProposedDenial, buyingText, customerTextsSince, cartCommitmentPrompt, cartHoldVerdict, customerHesitates, invitedProductOf, itemObjectionCue, orderReadiness } from "@/lib/sales-chatbot/cart-commitment";
 import { readConversationControl } from "@/lib/sales-chatbot/conversation-control-shared";
 import { customerHandoffVerdict, nextObjectionTally } from "@/lib/sales-chatbot/handoff-routing-shared";
 import { sellableCatalog } from "@/lib/sales-chatbot/catalog";
@@ -1072,7 +1072,9 @@ async function chatTurnCore(
       // Phủ nhận ĐÚNG món bot đã đề nghị (món bot tự thêm vào giỏ · báo giá / đơn nháp máy chủ tính cho bot — KHÔNG phải menu / lời mời trong
       // chữ bot; khách chưa từng tự gọi tên món đó) ⇒ người ngay lần đầu (#855); món đó đã nằm trong
       // đơn nháp ⇒ cờ CẦN NGƯỜI KIỂM «món khách chưa đồng ý» trên đơn (tuyến giao giữ REVIEW_OPEN nếu đơn đã được xác nhận).
-      const customerEarlier = msgs.filter((m) => m.role === "user" && !m.content.some((b) => b.type === "tool_result")).map((m) => textOf(m.content)).slice(-SALES_CHATBOT_LIMITS.historyMessages);
+      // Chỉ tin khách của LƯỢT MUA HIỆN TẠI: sau mốc chốt đơn của lượt mua trước (khách cũ cùng luồng Messenger).
+      const roundAt = Math.max(...(st0.pastOrders ?? []).map((o) => Date.parse(o.at)).filter((n) => Number.isFinite(n)), -Infinity);
+      const customerEarlier = customerTextsSince(msgs.map((m) => ({ role: m.role, at: m.at, text: textOf(m.content), toolResult: m.content.some((b) => b.type === "tool_result") })), Number.isFinite(roundAt) ? new Date(roundAt) : null);
       const denied = botProposedDenial(text, cartBefore, st0.proposedItems ?? [], Boolean(st0.draft?.orderId), customerEarlier);
       const wants = customerHandoffVerdict({ text, objections: tally?.n ?? 0, objectionNow, onCustomerRequest: cfg.handoff.onCustomerRequest, deniedBotItem: denied !== null });
       if (wants) {

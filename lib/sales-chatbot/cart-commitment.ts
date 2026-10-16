@@ -429,20 +429,30 @@ export function deniedItemLabel(text: string): string | null {
  *  · món bot tự thêm vào giỏ TRƯỚC tin này (`customerExplicit = false` — đơn nháp bot lên gắn vào giỏ qua `bindCommitment`);
  *  · món nằm trong một BÁO GIÁ / ĐƠN NHÁP máy chủ đã tính cho bot (`proposedNames` — kết quả calculate_cart / create · update_draft_order).
  * Món chỉ được NHẮC trong chữ bot / shop (menu, bảng giá, lời mời thêm món) KHÔNG tính: «không đặt chả cá, chị lấy 1kg chả mực» sau bảng giá
- * là khách đang CHỌN, «không đặt nem đâu em» sau lời mời là khách TỪ CHỐI lời mời. Món khách đã tự nói tường minh, hay đã tự gọi tên ở một tin
- * TRƯỚC (`customerEarlier` — hỏi giá, nhắc món) ⇒ khách đổi ý / tự chọn, không phải bot tự thêm (bộ đếm phản đối của #860 lo).
+ * là khách đang CHỌN, «không đặt nem đâu em» sau lời mời là khách TỪ CHỐI lời mời. Món khách đã tự nói tường minh, hay món trong báo giá mà
+ * khách đã tự nói MUA ở một tin trước của CHÍNH lượt mua này (`customerEarlier`) ⇒ khách đổi ý / tự chọn (bộ đếm phản đối của #860 lo).
  * `inDraft` = món đó đã gắn mã từ đơn nháp đang mở ⇒ cờ cần người kiểm lên đơn. `null` = không phải. HÀM THUẦN.
  */
 export function botProposedDenial(text: string, before: CartCommitment | undefined, proposedNames: readonly string[], hasDraft: boolean, customerEarlier: readonly string[] = []): { what: string; inDraft: boolean } | null {
   const label = deniedItemLabel(text);
   if (!label) return null;
-  const earlier = mentionText(customerEarlier);
-  const customerNamed = (name: string) => Boolean(earlier) && (` ${foldVi(earlier)} `.includes(` ${label} `) || calledByName(name, earlier));
+  // Review PR #873 vòng 2: chỉ LỜI MUA (`buyingText` — không câu hỏi giá) của LƯỢT MUA HIỆN TẠI (nơi gọi lọc — `customerTextsSince`) mới
+  // là «khách tự chọn món này». Món bot tự thêm vào giỏ (`customerExplicit = false`) LUÔN là bot đề nghị — không bao giờ bị che.
+  const earlier = buyingText(customerEarlier);
+  const customerChose = (name: string) => Boolean(earlier) && (` ${foldVi(earlier)} `.includes(` ${label} `) || calledByName(name, earlier));
   const item = (before?.selectedItems ?? []).find((x) => labelsMatch(label, x.label || x.match));
   if (item?.customerExplicit) return null;
-  if (item) return customerNamed(item.label || item.match) ? null : { what: item.label || item.match, inDraft: hasDraft && Boolean(item.productId) };
+  if (item) return { what: item.label || item.match, inDraft: hasDraft && Boolean(item.productId) };
   const proposed = proposedNames.find((n) => labelsMatch(label, n));
-  return proposed && !customerNamed(proposed) ? { what: proposed, inDraft: false } : null;
+  return proposed && !customerChose(proposed) ? { what: proposed, inDraft: false } : null;
+}
+
+/**
+ * Tin KHÁCH của LƯỢT MUA HIỆN TẠI (#855, review PR #873 vòng 2): chỉ tin sau mốc bắt đầu lượt mua (`since` = mốc chốt đơn của lượt mua TRƯỚC —
+ * `ChatState.pastOrders`; `null` = hội thoại chưa từng sang lượt mua mới). Tin của shop / bot và kết quả công cụ không vào. HÀM THUẦN.
+ */
+export function customerTextsSince(msgs: readonly { role: "user" | "assistant"; at: Date; text: string; toolResult?: boolean }[], since: Date | null): string[] {
+  return msgs.filter((m) => m.role === "user" && !m.toolResult && m.text.trim() && (!since || m.at.getTime() > since.getTime())).map((m) => m.text);
 }
 
 /** Cả đơn: «thôi không lấy nữa», «hok lấy nữa», «khỏi lấy nữa», «thôi khỏi», «hủy giúp chị», «bỏ đơn đi», «cancel đơn», «không lấy nha em». */
