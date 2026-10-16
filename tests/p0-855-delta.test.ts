@@ -62,20 +62,26 @@ function testClaim() {
 }
 
 function testDenial() {
-  const offered = ["Dạ lần này em gửi chị 1kg chả cá thu + 1kg chả mực giã tay nhé?"];
-  assert.deepEqual(botProposedDenial("Kg có order chả cá thu nha", undefined, offered, false), { what: "cha ca thu", inDraft: false });
-  assert.equal(botProposedDenial("Kg có order chả cá thu nha", MUC_CART, [], true), null, "món chưa ai đưa ra ⇒ không phải mâu thuẫn");
+  // «Bot đề nghị» = món bot tự thêm vào giỏ, hoặc món trong báo giá / đơn nháp máy chủ tính cho bot (`proposedItems`).
+  const proposed = ["Chả cá thu", "Chả mực giã tay"];
+  assert.deepEqual(botProposedDenial("Kg có order chả cá thu nha", undefined, proposed, false, ["Ship chị như lần trước nhé"]), { what: "Chả cá thu", inDraft: false });
+  assert.equal(botProposedDenial("Kg có order chả cá thu nha", MUC_CART, [], true), null, "món chưa ai đề nghị ⇒ không phải mâu thuẫn");
   const both: CartCommitment = { ...MUC_CART, selectedItems: [...MUC_CART.selectedItems, { ...MUC_CART.selectedItems[0], label: "Chả cá thu", match: "cha ca thu", productId: "p-ca", customerExplicit: false }] };
   assert.deepEqual(botProposedDenial("Không có order chả cá thu nha", both, [], true), { what: "Chả cá thu", inDraft: true }, "món bot tự thêm vào đơn nháp ⇒ cờ đơn");
-  // Món KHÁCH tự nói tường minh rồi phủ nhận ⇒ không phải «bot tự thêm» (bộ đếm phản đối của #860 lo, lần 2 mới chuyển người).
+  // Món KHÁCH tự nói tường minh, hoặc khách đã tự gọi tên ở tin trước (hỏi giá) ⇒ không phải «bot tự thêm» (bộ đếm phản đối của #860 lo).
   const own: CartCommitment = { ...both, selectedItems: both.selectedItems.map((x) => ({ ...x, customerExplicit: true })) };
-  assert.equal(botProposedDenial("Không có order chả cá thu nha", own, ["Dạ mình lấy 1kg chả cá thu và 1kg chả mực giã tay ạ"], true), null);
-  // Review độc lập PR #862 (blocker): từ chối lời mời / câu thường có «không đặt / order» KHÔNG phải phủ nhận món.
-  const summary = ["Tóm tắt: 1kg chả mực giã tay 400.000 ₫. Mình lấy thêm gì không ạ?"];
+  assert.equal(botProposedDenial("Không có order chả cá thu nha", own, proposed, true), null);
+  assert.equal(botProposedDenial("không đặt chả cá đâu em", undefined, proposed, false, ["chả cá thu với chả mực bao nhiêu em?"]), null, "khách tự hỏi giá chả cá rồi chọn bỏ ⇒ khách chọn");
+  // REVIEW PR #873 (blocker): món chỉ được NHẮC trong menu / bảng giá / lời mời của bot KHÔNG phải «bot đề nghị» — không truyền vào
+  // `proposedNames` (engine chỉ truyền `state.proposedItems`, ghi từ kết quả calculate_cart / đơn nháp).
+  for (const t of ["không đặt chả cá, chị lấy 1kg chả mực", "ko order nem nha, lấy chả mực thôi", "không đặt nem đâu em", "không lấy nem đâu", "chị không đặt hàng online bao giờ", "không đặt hàng nhiều đâu em", "không order 2kg đâu, 1kg thôi", "k đặt luôn hôm nay được ko"]) {
+    assert.equal(botProposedDenial(t, undefined, [], false, ["shop có những món gì em"]), null, `menu / lời mời: «${t}» không chuyển người`);
+  }
+  // Review độc lập PR #862 (blocker): từ chối lời mời / câu thường có «không đặt / order» KHÔNG phải phủ nhận món — kể cả khi bot đã báo giá.
   for (const t of ["thôi không đặt thêm gì nữa em", "không order thêm đâu em", "k order thêm nha", "chị không đặt cọc đâu, ship COD nhé", "không đặt nhiều đâu, 1kg thôi", "không đặt trước được hả em", "sao k đặt được vậy em", "ko đặt ship nhanh nha"]) {
     assert.equal(deniedItemLabel(t), null, `«${t}» không phủ nhận món nào`);
-    assert.equal(botProposedDenial(t, MUC_CART, summary, true), null, `«${t}» không chuyển người`);
-    assert.equal(customerHandoffVerdict({ text: t, objections: 0, objectionNow: false, deniedBotItem: botProposedDenial(t, MUC_CART, summary, true) !== null }), null, `«${t}»`);
+    assert.equal(botProposedDenial(t, both, proposed, true), null, `«${t}» không chuyển người`);
+    assert.equal(customerHandoffVerdict({ text: t, objections: 0, objectionNow: false, deniedBotItem: botProposedDenial(t, both, proposed, true) !== null }), null, `«${t}»`);
   }
   const v = customerHandoffVerdict({ text: "Kg có order chả cá thu nha", objections: 1, objectionNow: true, deniedBotItem: true });
   assert.equal(v?.code, "DENIED_BOT_ITEM", "phủ nhận món bot đưa ra ⇒ người ngay LẦN ĐẦU");
@@ -162,13 +168,34 @@ const CASES: GoldenCase[] = [
   },
   {
     key: "p855d-phu-nhan-lan-dau",
-    title: "Bot mời «1kg chả cá thu + 1kg chả mực» → «Kg có order chả cá thu nha» ⇒ người NGAY lần đầu (không lượt AI) → «Robot hả» ⇒ bot im",
+    title: "Bot báo giá «1kg chả cá thu + 1kg chả mực» (máy chủ tính) → «Kg có order chả cá thu nha» ⇒ người NGAY lần đầu (không lượt AI) → «Robot hả» ⇒ bot im",
     shop: "food",
     channel: "WEB",
     turns: [
-      { say: "Ship chị 1 mực giã tay", ai: [() => [say("Dạ lần trước chị lấy chả cá thu, lần này em gửi chị 1kg chả cá thu + 1kg chả mực giã tay nhé?")]] },
+      { say: "Ship chị như lần trước nhé", ai: [({ v }) => [tool("calculate_cart", { items: [{ variant_id: v("CCT-1KG"), quantity: 1 }, { variant_id: v("CHA-MUC"), quantity: 1 }] })], () => [say("Dạ như lần trước em gửi chị 1kg chả cá thu + 1kg chả mực giã tay nhé?")]] },
       { say: "Kg có order chả cá thu nha", ai: [() => [say("Dạ em xin lỗi ạ")]] },
       { say: "Robot hả", ai: [() => [say("Dạ em xin lỗi ạ")]] },
+    ],
+  },
+  {
+    key: "p855d-menu-khong-phai-de-nghi",
+    title: "Review PR #873: bot liệt kê món («chả cá thu, chả mực, ruốc») → «không đặt chả cá, chị lấy 1kg chả mực» ⇒ khách đang CHỌN, AI trả lời tiếp",
+    shop: "food",
+    channel: "WEB",
+    turns: [
+      { say: "shop có những món gì em", ai: [() => [say("Dạ shop có chả cá thu, chả mực giã tay, ruốc bông tôm ạ")]] },
+      { say: "không đặt chả cá, chị lấy 1kg chả mực", ai: [() => [say("Dạ mình lấy 1kg chả mực giã tay ạ, cho em xin SĐT và địa chỉ nhé.")]] },
+      { say: "ko order ruốc nha, lấy chả mực thôi", ai: [() => [say("Dạ vâng, chỉ chả mực giã tay ạ.")]] },
+    ],
+  },
+  {
+    key: "p855d-tu-choi-moi-nem",
+    title: "Review PR #873: lời mời «Ruốc bông tôm…, mình lấy thêm không ạ?» → «không đặt ruốc đâu em» ⇒ từ chối lời mời, AI trả lời tiếp",
+    shop: "food",
+    channel: "WEB",
+    turns: [
+      { say: "Ship chị 1 chả mực giã tay", ai: [({ v }) => [tool("calculate_cart", { items: [{ variant_id: v("CHA-MUC"), quantity: 1 }] })], () => [say("Dạ 1kg chả mực giã tay ạ. Shop có thêm Ruốc bông tôm rất ngon, mình lấy thêm không ạ?")]] },
+      { say: "không đặt ruốc đâu em", ai: [() => [say("Dạ vâng ạ, chị cho em xin SĐT và địa chỉ nhé.")]] },
     ],
   },
   {
@@ -259,7 +286,7 @@ const CASES: GoldenCase[] = [
     shop: "food",
     channel: "TEST",
     turns: [
-      { say: "Ship chị 1 mực giã tay", ai: [() => [say("Dạ em gửi chị 1kg chả cá thu + 1kg chả mực giã tay nhé?")]] },
+      { say: "Ship chị như lần trước nhé", ai: [({ v }) => [tool("calculate_cart", { items: [{ variant_id: v("CCT-1KG"), quantity: 1 }, { variant_id: v("CHA-MUC"), quantity: 1 }] })], () => [say("Dạ em gửi chị 1kg chả cá thu + 1kg chả mực giã tay nhé?")]] },
       { say: "Kg có order chả cá thu nha", ai: [() => [say("Dạ em xin lỗi ạ")]] },
     ],
   },
@@ -296,6 +323,11 @@ async function testGolden() {
           assert.equal(t.turns[2].rounds.length, 0, "đã chuyển người ⇒ «Robot hả» không gọi model");
           assert.deepEqual(t.turns[2].shown, [], "không xin lỗi lặp");
           assert.equal(t.final.handoffReason, CUSTOMER_HANDOFF_REASON.DENIED_BOT_ITEM);
+          return;
+        case "p855d-menu-khong-phai-de-nghi":
+        case "p855d-tu-choi-moi-nem":
+          assert.notEqual(t.final.status, "HANDOFF", `[${c.key}] menu / lời mời không phải món bot đề nghị: ${t.final.handoffReason}`);
+          assert.ok(t.turns.every((x) => x.rounds.length > 0 && x.shown.length > 0), `[${c.key}] mọi lượt AI đều trả lời`);
           return;
         case "p855d-phu-nhan-co-don-nhap":
           assert.equal(t.turns[1].rounds.length, 0);

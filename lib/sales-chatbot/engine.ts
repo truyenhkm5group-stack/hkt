@@ -1002,7 +1002,7 @@ async function chatTurnCore(
       if (!within) {
         const fresh: ChatState = { ...st0, pastOrders: [...(st0.pastOrders ?? []), st0.confirmed], cycleStartTurns: conv.turns, cartRev: now.toISOString() };
         // Báo giá + sổ tổng bị từ chối của lượt mua TRƯỚC không phải đề nghị đang mở, cũng không phải tổng hiện tại (#855).
-        for (const k of ["confirmed", "draft", "stage", "upsellSent", "upsellUnavailable", "declined", "handoff", "cart", "quote", "rejectedTotals"] as const) delete fresh[k];
+        for (const k of ["confirmed", "draft", "stage", "upsellSent", "upsellUnavailable", "declined", "handoff", "cart", "quote", "rejectedTotals", "proposedItems"] as const) delete fresh[k];
         await bump({ state: fresh as Record<string, unknown> });
         conv.state = fresh as Record<string, unknown>;
         st0 = fresh;
@@ -1069,9 +1069,11 @@ async function chatTurnCore(
       const prevTally = st0.objectionTally;
       const resumedAt = objectionNow && prevTally ? await lastAiResumedAt(conv.id) : null;
       const tally = nextObjectionTally(prevTally, { objectionNow, cycle: cycleStartTurns(st0, conv.turns, now), now, resumedAt });
-      // Phủ nhận ĐÚNG món bot / shop đã đưa ra (giỏ trước tin này · câu đề nghị gần đây) ⇒ người ngay lần đầu (#855); món đó đã nằm trong
+      // Phủ nhận ĐÚNG món bot đã đề nghị (món bot tự thêm vào giỏ · báo giá / đơn nháp máy chủ tính cho bot — KHÔNG phải menu / lời mời trong
+      // chữ bot; khách chưa từng tự gọi tên món đó) ⇒ người ngay lần đầu (#855); món đó đã nằm trong
       // đơn nháp ⇒ cờ CẦN NGƯỜI KIỂM «món khách chưa đồng ý» trên đơn (tuyến giao giữ REVIEW_OPEN nếu đơn đã được xác nhận).
-      const denied = botProposedDenial(text, cartBefore, recentShopTexts(msgs, 6).map((t) => (t.startsWith(SHOP_SAID) ? t.slice(SHOP_SAID.length).trim() : t)), Boolean(st0.draft?.orderId));
+      const customerEarlier = msgs.filter((m) => m.role === "user" && !m.content.some((b) => b.type === "tool_result")).map((m) => textOf(m.content)).slice(-SALES_CHATBOT_LIMITS.historyMessages);
+      const denied = botProposedDenial(text, cartBefore, st0.proposedItems ?? [], Boolean(st0.draft?.orderId), customerEarlier);
       const wants = customerHandoffVerdict({ text, objections: tally?.n ?? 0, objectionNow, onCustomerRequest: cfg.handoff.onCustomerRequest, deniedBotItem: denied !== null });
       if (wants) {
         if (wants.code === "DENIED_BOT_ITEM" && denied?.inDraft && st0.draft?.orderId && opts.channel !== "TEST") await flagOrderForReviewAsAgent(SALES_AGENT, st0.draft.orderId, { code: "UPSELL_UNCONSENTED", note: `Khách phủ nhận món bot đưa vào đơn: «${denied.what}»`.slice(0, 300), quote: text.trim().slice(0, 300) || null }, now).catch(() => undefined);

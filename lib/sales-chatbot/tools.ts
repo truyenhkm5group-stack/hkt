@@ -115,6 +115,11 @@ export type ChatState = {
    * có báo giá hợp lệ nào để so. Tối đa `REJECTED_TOTALS_MAX`.
    */
   rejectedTotals?: number[];
+  /**
+   * Tên sản phẩm (tên danh mục, bỏ quy cách) của báo giá / đơn nháp máy chủ tính GẦN NHẤT cho bot (calculate_cart · create / update_draft_order
+   * thành công) — căn cứ «món bot đã đề nghị» khi khách phủ nhận món (`botProposedDenial`). Menu / bảng giá / lời mời trong chữ bot KHÔNG vào đây.
+   */
+  proposedItems?: string[];
   /** Giá ĐÃ XÁC THỰC công cụ đọc đã trả cho model trong hội thoại (search / get_product / get_current_price) — tối đa `PRICE_FACTS_MAX`. */
   priceFacts?: number[];
   /** Đơn đã chốt của các lượt mua TRƯỚC trong cùng hội thoại (khách mua lại sau `POST_ORDER_HANDOFF_MS`) — báo cáo vẫn đếm. */
@@ -606,6 +611,11 @@ function cartView(p: Priced) {
   };
 }
 
+/** Tên danh mục (bỏ quy cách trong ngoặc) của các dòng một báo giá / đơn nháp — `ChatState.proposedItems`. */
+function proposedNamesOf(asked: readonly { name: string }[]): string[] {
+  return [...new Set(asked.map((l) => l.name.replace(/\s*\([^)]*\)\s*$/, "").trim()).filter(Boolean))];
+}
+
 /** Trần sổ tổng «đã từ chối» (`ChatState.rejectedTotals`). */
 export const REJECTED_TOTALS_MAX = 10;
 
@@ -921,6 +931,7 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
       }
       // BÁO GIÁ MÁY CHỦ (P0 11/10/2026): giỏ là một báo giá có mã; chưa xác thực (catalog mâu thuẫn) ⇒ không có số để báo, người xác minh.
       state.quote = quoteSnapshotOf(priced.quote, now);
+      state.proposedItems = proposedNamesOf(priced.asked);
       if (!priced.quote.verified) return { ...err("Tính giỏ: giá chưa xác thực", `${QUOTE_UNVERIFIED_INSTRUCTION} (${quoteReasons(priced.quote)})`, state), requireHuman: priceUnverifiedReason(quoteReasons(priced.quote)) };
       settleDispute(state, ctx.turn);
       return ok(`Giỏ: ${formatVND(priced.subtotal)}${priced.total !== null ? ` · COD ${formatVND(priced.total)}` : ""}`, cartView(priced), state);
@@ -1123,6 +1134,7 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
       state.draft = draft;
       state.cart = bindCommitment(state.cart, priced.asked, ctx.turn ?? null, now);
       state.quote = quoteSnapshotOf(priced.quote, now);
+      state.proposedItems = proposedNamesOf(priced.asked);
       settleDispute(state, ctx.turn);
       const addr = addressCheckOf(draft.recipient, addressOpts(state, ctx));
       markAddressAsked(state, addr, ctx.turn);
