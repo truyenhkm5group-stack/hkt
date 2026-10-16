@@ -33,9 +33,10 @@ import { setSalesChatProviderForTests } from "@/lib/sales-chatbot/engine";
 import { parsePancakeWebhook, processFanpageThread, receiveFanpageEvent } from "@/lib/sales-chatbot/fanpage";
 import { withoutPhones } from "@/lib/address/customer-address";
 import { createProductCore } from "@/lib/records/product-create";
-import { ADDRESS_KNOWN_TEXT, SCHEDULE_NOTED_TEXT, addressKnowledge, addressReaskVerdict, continuesSameOrder, knownContactPrompt } from "@/lib/sales-chatbot/address-memory";
+import { ADDRESS_KNOWN_TEXT, SCHEDULE_NOTED_TEXT, addressKnowledge, addressReaskVerdict, continuesSameOrder, knownContactPrompt, placeOrRecipientSignal } from "@/lib/sales-chatbot/address-memory";
 import { deliveryPreferenceNote, deliveryPreferenceOf, deliveryPromiseIn } from "@/lib/sales-chatbot/delivery-intent";
-import { futurePurchaseOnly, postSaleReplyGuard } from "@/lib/sales-chatbot/post-sale-guard";
+import { applyCustomerCartMessage, classifyCartMessage } from "@/lib/sales-chatbot/cart-commitment";
+import { futurePurchaseOnly, postSaleDropsIn, postSaleReplyGuard } from "@/lib/sales-chatbot/post-sale-guard";
 import { quickReplyByKeyword } from "@/lib/sales-chatbot/quick-replies";
 import { QUICK_REPLY_SETTING_KEY } from "@/lib/sales-chatbot/quick-replies-shared";
 import type { ChatState } from "@/lib/sales-chatbot/tools";
@@ -107,6 +108,78 @@ function testPure() {
   assert.equal(futurePurchaseOnly("lần sau thì lấy 2kg, giờ lấy luôn 1kg nhé"), false, "có lời mua ngay ⇒ không phải chỉ tương lai");
   assert.equal(futurePurchaseOnly("Lấy 10 cái nem hải sản"), false);
   console.log("  ✓ #871 thuần: đổi chủ đề (hẹn giờ giao · thêm món · hỏi giá) giữ SĐT + địa chỉ đã biết, đổi người nhận / nơi giao vẫn hỏi được · SĐT cùng dòng không thành số nhà · khối «thông tin nhận hàng đã có» không chép PII · hẹn giờ giao là ghi chú, không phải lời hứa · hậu mãi bỏ câu mời mua / xin chốt lại · «lần sau» không phải đơn");
+}
+
+/** Bốn điểm chặn của review PR #878 — mỗi ca là một câu thật reviewer dựng lại; tất cả HÀM THUẦN. */
+function testReviewBlockers() {
+  const st = { customer: { id: null, name: "Ngọc", phone: NGOC_PHONE, address: NGOC_ADDR, province: "", simulated: true } } as Pick<ChatState, "customer">;
+  const ask = "Dạ mình cho em xin SĐT + địa chỉ chính xác để em check tuyến giao nhé!";
+  // B1 — AN TOÀN MẶC ĐỊNH: một dấu hiệu nơi giao / người nhận ⇒ không «cùng đơn», câu hỏi đi qua, không khối «lên đơn NGAY».
+  for (const last of [
+    "giao 2kg tới chỗ làm chị nha",
+    "mai giao 9h ở công ty chị nhé",
+    "mai chị đi làm, giao 9h tới cơ quan nhé",
+    "lấy 2kg gửi ra Hà Nội giúp chị",
+    "lấy 2kg giao tận Biên Hòa nha",
+    "chiều mai giao Thủ Đức giúp chị",
+    "lấy 2 hộp gửi về Thủ Đức cho chị",
+    "ship 2 hộp cho chị Lan nhé",
+    "lấy 2 hộp cho em gái chị",
+    "lấy 2kg gửi giúp bạn chị",
+    "giao 2kg cho bé nhà chị ở trường",
+    "giao cho chị Mai sáng mai",
+  ]) {
+    assert.equal(continuesSameOrder(last), false, `cùng đơn? ${last}`);
+    assert.equal(placeOrRecipientSignal(last), true, `dấu hiệu nơi / người: ${last}`);
+    const texts = ["Ship gò vấp bn? Mình muốn mua 1 kg", NGOC_BUBBLE, last];
+    assert.equal(addressReaskVerdict(ask, addressKnowledge(st, texts), 5), null, `câu xin SĐT + địa chỉ phải đi qua: ${last}`);
+    assert.equal(addressReaskVerdict(WARD_RECONFIRM, addressKnowledge(st, texts), 5), null, `câu xác nhận phường phải đi qua: ${last}`);
+    assert.equal(knownContactPrompt(st, texts), "", `không bảo model lên đơn NGAY: ${last}`);
+  }
+  // ... chỉ tin KHÔNG có dấu hiệu nào mới tiếp tục: «giao cho chị nhé» · giờ thuần · món thuần · hỏi giá thuần.
+  for (const last of ["giao cho chị nhé", "Giao sáng mai khoảng 9h", "giao cho chị 9h sáng mai nhé", "Lấy 10 cái nem hải sản", "nem hải sản bao nhiêu em", "cho chị 1kg nhé", "đổi sang 2kg nhé", "giao cho chị mai nhé"]) {
+    assert.equal(placeOrRecipientSignal(last), false, `không dấu hiệu nơi / người: ${last}`);
+    assert.equal(continuesSameOrder(last), true, `cùng đơn: ${last}`);
+  }
+
+  // B2 — câu hỏi giá đứng SAU số lượng vẫn là câu HỎI (không thành món đã chốt); câu hỏi ở câu TRƯỚC thì không kéo lời mua sau thành câu hỏi.
+  const cat = ["Chả cá thu (1kg)", "Nem hải sản hộp 10 cái"];
+  for (const m of ["2kg chả cá thu. Bao nhiêu vậy em?", "Chả cá thu 2kg. Giá sao em?", "Cho chị hỏi 2kg chả cá thu\nbao nhiêu tiền"]) {
+    assert.equal(classifyCartMessage(m, cat).kind, "QUESTION", m);
+    assert.equal(applyCustomerCartMessage(undefined, m, 1, new Date("2026-10-16T10:00:00Z"), { catalog: cat, products: cat }), undefined, `không vào giỏ: ${m}`);
+  }
+  assert.equal(classifyCartMessage("Ship gò vấp bn? Mình muốn mua 1 kg", cat).kind, "ORDER", "«?» ở câu TRƯỚC không biến lời mua thành câu hỏi");
+
+  // B3 — lời mua thật kèm ngày giao muộn KHÔNG phải «mua lần sau»; ngày giao muộn là mong muốn giờ giao.
+  for (const m of ["chị lấy 2kg, tuần sau giao", "lấy 2kg giao tháng sau nhé", "tuần sau giao giúp chị 2kg nhé", "lần sau chị lấy 2kg nhé", "tuần sau giao giúp chị nhé"]) {
+    assert.equal(futurePurchaseOnly(m), false, `không phải «chỉ tương lai»: ${m}`);
+  }
+  assert.equal(deliveryPreferenceOf("tuần sau giao giúp chị nhé"), "tuần sau giao giúp chị nhé", "ngày giao muộn trên đơn = mong muốn giờ giao");
+  assert.equal(deliveryPreferenceOf("chị lấy 2kg, tuần sau giao"), "chị lấy 2kg, tuần sau giao");
+  assert.equal(futurePurchaseOnly("ok em, mua tiếp lần sau nhé"), true, "«mua tiếp lần sau» vẫn là ý định tương lai (công cụ chỉ chặn nó sau chốt)");
+  assert.equal(deliveryPreferenceOf("mai giao em nhé, sdt 0912345678"), "mai giao em nhé", "SĐT không vào ghi chú giờ giao");
+  assert.ok(!(deliveryPreferenceOf("Giao sáng mai 9h nhé, SĐT 0900 000 871") ?? "").includes("871"), "SĐT có dấu cách cũng bị bỏ");
+
+  // B4 — hàng rào hậu mãi không bỏ câu kể / câu trả lời, không bỏ khi khách vừa hỏi, không bao giờ làm rỗng cả tin.
+  for (const r of [
+    "Dạ em đã thêm 1 hộp nem vào đơn cho chị rồi ạ.",
+    "Dạ em ghi nhận chị lấy thêm 1 hộp nem, nhân viên sẽ cập nhật đơn ạ.",
+    "Dạ combo 2kg bên em giá 300.000đ ạ.",
+    "Dạ đây là món bán chạy nhất bên em ạ.",
+    "Dạ em đã chốt đơn cho chị nhé.",
+  ]) {
+    assert.deepEqual(postSaleReplyGuard(r), { text: r, dropped: [] }, r);
+  }
+  const addrConfirm = "Dạ chị xác nhận giúp em địa chỉ mới để em báo nhân viên cập nhật nhé?";
+  assert.deepEqual(postSaleReplyGuard(addrConfirm, "à chị đổi địa chỉ sang 25 Nguyễn Trãi nhé"), { text: addrConfirm, dropped: [] }, "khách vừa xin đổi địa chỉ ⇒ câu xác nhận địa chỉ mới giữ");
+  assert.deepEqual(postSaleReplyGuard(addrConfirm), { text: addrConfirm, dropped: [] }, "xác nhận một THAY ĐỔI không phải xin chốt lại");
+  const askedProduct = "Dạ nem hải sản 120.000đ/hộp ạ. Chị lấy thêm 1 hộp không ạ?";
+  assert.deepEqual(postSaleReplyGuard(askedProduct, "nem hải sản giá bao nhiêu em").dropped, [], "khách vừa hỏi món ⇒ không lọc");
+  assert.deepEqual(postSaleReplyGuard("Mình lấy thêm 1 hộp nem hải sản không ạ?"), { text: "Mình lấy thêm 1 hộp nem hải sản không ạ?", dropped: ["UPSELL"], keptWhole: true }, "mọi câu đều bị lọc ⇒ giữ nguyên tin, không gửi tin rỗng");
+  assert.deepEqual(postSaleDropsIn("Mình lấy thêm 1 hộp nem hải sản không ạ?"), ["UPSELL"], "câu mẫu chỉ là lời mời vẫn bị chặn ở công cụ");
+  // Lời hứa mốc giờ: «ghi nhận» ở vế trước không miễn cho vế sau hứa «mai 9h shipper giao».
+  assert.deepEqual(deliveryPromiseIn("Dạ em ghi nhận, mai 9h shipper giao tới chị nhé."), ["Dạ em ghi nhận, mai 9h shipper giao tới chị nhé."]);
+  console.log("  ✓ #871 review PR #878: đổi nơi giao / người nhận (chỗ làm · công ty · tỉnh / quận · em gái · tên viết hoa) luôn để câu hỏi đi qua · câu hỏi giá sau số lượng không thành món · «lấy 2kg, tuần sau giao» là đơn + mong muốn ngày giao · hậu mãi không bỏ câu kể / câu trả lời, không làm rỗng tin · «ghi nhận» không miễn lời hứa giờ · SĐT không vào ghi chú");
 }
 
 /** Sản phẩm thật của ca (chả cá thu 1kg + nem hải sản hộp 10 cái) — tạo một lần cho tổ chức thử. */
@@ -337,6 +410,7 @@ async function testDuplicateWebhook(): Promise<void> {
 /** Điểm vào cho `sync-fixtures.test.ts`. */
 export async function testP0871ContactMemory(): Promise<void> {
   testPure();
+  testReviewBlockers();
   await testP0871ContactMemoryGolden();
   await testDuplicateWebhook();
 }

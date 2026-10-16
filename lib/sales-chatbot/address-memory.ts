@@ -17,7 +17,7 @@
 import { canAutoFill, customerStatedAddresses, hasStreetDetail, legacyAddressUnmapped, looksLikeDeliveryAddress, looksLikeStreetFragment, namesOtherWard, parseCustomerAddress, sameDeliveryPlace, wantsAddressChange, wardFromCustomerWords, type AddressPart } from "@/lib/address/customer-address";
 
 export { wantsAddressChange };
-import { findProvince, foldVnText } from "@/lib/address/vn-address";
+import { findProvince, foldVnText, isAdminName } from "@/lib/address/vn-address";
 import { classifyDeliveryQuestion } from "@/lib/sales-chatbot/delivery-intent";
 import type { ChatState } from "@/lib/sales-chatbot/tools";
 
@@ -391,7 +391,124 @@ export function continuesSameOrder(last: string): boolean {
   if (wantsAddressChange(last) || hasChangeCue(last) || PHONE_CHANGE.test(f) || OTHER_PLACE_OR_PERSON.test(f)) return false;
   // Tin mang SĐT / địa chỉ / mảnh địa chỉ là chuyện của thông tin nhận hàng — đi đường riêng (`settlesAddress`, `lastAddsAddress`).
   if (hasPhone(last) || last.split(/\n+/).some((l) => deliveryAddressIn(l) !== null || looksLikeStreetFragment(l))) return false;
-  return classifyDeliveryQuestion(last) !== null || SAME_ORDER_TOPIC.test(f);
+  // AN TOÀN MẶC ĐỊNH (review PR #878): MỘT dấu hiệu nơi giao / người nhận bất kỳ ⇒ không phải «cùng đơn» — câu hỏi được đi qua.
+  if (placeOrRecipientSignal(last)) return false;
+  return classifyDeliveryQuestion(last) !== null || SAME_ORDER_TOPIC.test(f) || SELF_DELIVERY.test(f.trim());
+}
+
+/** «giao cho chị nhé» — giao cho CHÍNH khách, không kèm gì khác. Bản gập dấu. */
+const SELF_DELIVERY = /^(?:giao|gui|ship)(?: hang| don)? (?:cho|giup|gium|dum|ho) (?:chi|em|anh|minh)(?: (?:nhe|nha|a|voi|nhen|luon|di|nhanh|som|gap))*$/;
+
+// ─────────────── DẤU HIỆU NƠI GIAO / NGƯỜI NHẬN (review PR #878 — an toàn mặc định) ───────────────
+//
+// `continuesSameOrder` = true thì địa chỉ cũ được GIỮ, câu hỏi lại bị bỏ và lời nhắc bảo model lên đơn NGAY. Sai một lần là giao nhầm
+// nơi / nhầm người — nên ở đây KHÔNG liệt kê «các kiểu đổi địa chỉ» (không danh sách nào bắt hết), mà ngược lại: tin chỉ được coi là cùng
+// đơn khi KHÔNG có một dấu hiệu nơi / người nào. Ca bản trước bỏ lọt: «giao 2kg tới chỗ làm chị nha», «lấy 2kg gửi ra Hà Nội giúp chị»,
+// «chiều mai giao Thủ Đức giúp chị», «lấy 2 hộp cho em gái chị», «giao cho chị Mai sáng mai».
+
+/** Giới từ hướng / nơi chốn — dạng CÓ DẤU (không lẫn «tối», «sáng», «quá», «tôi») và dạng không dấu (mơ hồ ⇒ vẫn tính, an toàn). */
+const DIRECTION_TOKENS = new Set("tới đến về ra qua ở tận sang lên xuống tại toi den ve o tan len xuong tai".split(" "));
+/** Từ người nhận: «cho / giúp / giùm / hộ / dùm» (không dấu cũng tính — «chợ», «hồ» có dấu thì không). */
+const RECIPIENT_TOKENS = new Set("cho giúp giùm hộ dùm giup gium ho dum".split(" "));
+const SEND_TOKENS = new Set("giao gửi gui ship chuyển chuyen mang đưa dua".split(" "));
+/** Tiểu từ + từ chỉ THỜI GIAN + từ hỏi trạng thái (đã gập dấu) — phần đuôi chỉ gồm những từ này là «giờ giao», không phải nơi giao. */
+const TIME_TAIL = new Set(
+  (
+    "nhe nha a ah ak voi vs nhen nghen ne nhi hen di luon nhanh gap som kip duoc dc khong ko k hong hok oi ha nhaa nua giup gium dum cung la thi roi tot ok oke dung hon " +
+    // hỏi TRẠNG THÁI («đơn tới đâu rồi», «tới nơi chưa», «đến khi nào») — không nêu nơi giao nào
+    "dau noi khi nao bao chua vay shop sop ad " +
+    "mai mot nay hom ngay sang chieu toi trua dem khuya luc khoang tam gio h g phut ruoi kem truoc sau tuan thang cuoi dau chu nhat cn kia muon tre"
+  ).split(" "),
+);
+/** Đại từ TỰ XƯNG — «giao cho chị nhé», «tới em nhé» là chính khách. */
+const SELF_REF = new Set("chi em anh minh toi tui to c e a".split(" "));
+/** Động từ sau «cho»: «cho chị hỏi», «cho em xin», «lấy giúp chị 2kg» — không phải người nhận. */
+const VERB_AFTER = new Set("xin hoi lay them mua dat coi xem biet gui giao ship dung an thu nhan bot doi chot len".split(" "));
+const NUMBER_WORD = new Set("mot hai ba bon nam sau bay tam chin muoi nua".split(" "));
+const UNIT_WORD = new Set("kg ky ki kilo g gam gram hop goi tui cai chiec phan set combo lo hu khay bich con mieng vien thung chai suat lang".split(" "));
+/** Nơi làm / học / nhà người thân (đã gập dấu, nguyên cụm). */
+const PLACE_WORDS =
+  /(?:^| )(?:cong ty|co quan|cho lam|noi lam|van phong|truong|ky tuc xa|ktx|benh vien|chung cu|toa nha|sieu thi|cua hang|xuong|tiem|que|nha (?:me|bo|ba|ma|ngoai|noi|chong|vo|ban|con|chau|em|anh|chi|co|chu|di|ong|moi|khac|rieng))(?: |$)/;
+/** Đơn vị hành chính có loại («quận 3», «phường 5», «Q.1», «p5», «TP Thủ Đức»). Chữ thường, có dấu. */
+const ADMIN_PREFIX_RE = /(?:^|[\s,.(])(?:quận|huyện|phường|xã|thị trấn|thị xã|thành phố|tp|quan|huyen|phuong|thi tran|thi xa|thanh pho)\.?\s*[\p{L}\d]|(?:^|[\s,.(])[qp]\.?\s?\d/u;
+const SHORT_PROVINCE = /^(?:hcm|tphcm|sg|hn|hue)$/;
+
+const tokenWord = (w: string) => w.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, "");
+const capitalized = (w: string | undefined) => w !== undefined && /^\p{Lu}/u.test(w);
+
+/** Phần đuôi CHỈ là giờ giao / tiểu từ / từ hỏi trạng thái (kể cả «thứ <ngày>», số giờ, một đại từ tự xưng / gọi). */
+function pureTimeTail(raw: readonly string[]): boolean {
+  const words = raw.map((w) => foldVnText(w).trim());
+  for (let i = 0; i < words.length; i++) {
+    const w = words[i];
+    if (!w || /^\d/.test(w)) continue;
+    if (w === "thu" && words[i + 1] !== undefined && (WEEKDAY.has(words[i + 1]) || /^\d$/.test(words[i + 1]))) {
+      i++;
+      continue;
+    }
+    if (TIME_TAIL.has(w) && !capitalized(raw[i])) continue;
+    // Đại từ tự xưng / gọi («tới chị nhé», «tới đâu rồi em») mà sau đó chỉ còn giờ / tiểu từ — không phải người nhận khác.
+    if (SELF_REF.has(w) && !capitalized(raw[i + 1]) && pureTimeTail(raw.slice(i + 1))) return true;
+    return false;
+  }
+  return true;
+}
+
+/** Sau «cho / giúp …»: chính khách / số lượng / động từ ⇒ không phải người nhận; còn lại (tên, «em gái», «bạn», «bé») ⇒ người nhận. */
+function recipientAfter(raw: readonly string[]): boolean {
+  const words = raw.map((w) => foldVnText(w).trim());
+  const neutral = (i: number): boolean => {
+    const w = words[i];
+    if (w === undefined || w === "") return true;
+    if (capitalized(raw[i])) return false; // tên riêng viết hoa («chị Mai», «em Hoa»)
+    if (/^\d/.test(w) || TIME_TAIL.has(w) || VERB_AFTER.has(w) || UNIT_WORD.has(w) || w === "thu") return true;
+    return NUMBER_WORD.has(w) && UNIT_WORD.has(words[i + 1] ?? "");
+  };
+  const w0 = words[0];
+  if (w0 === undefined || w0 === "") return false;
+  if (SELF_REF.has(w0)) return !neutral(1);
+  if (capitalized(raw[0])) return true;
+  if (NUMBER_WORD.has(w0)) return !UNIT_WORD.has(words[1] ?? "");
+  return !neutral(0);
+}
+
+/** Có tên hành chính (tỉnh · xã mới · huyện / xã cũ) trong tin — loại có tiền tố, cụm 2–3 từ khớp danh mục, hay tên tỉnh viết tắt. */
+function namesAdminUnit(text: string): boolean {
+  if (ADMIN_PREFIX_RE.test(` ${text.normalize("NFC").toLowerCase()}`)) return true;
+  const words = foldVnText(text).split(/[^a-z0-9]+/).filter(Boolean);
+  for (let i = 0; i < words.length; i++) {
+    if (SHORT_PROVINCE.test(words[i])) return true;
+    for (const n of [3, 2]) {
+      if (i + n > words.length) continue;
+      const span = words.slice(i, i + n).join(" ");
+      if (isAdminName(span) || findProvince(span)) return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Tin có dấu hiệu NƠI GIAO hay NGƯỜI NHẬN bất kỳ (review PR #878): giới từ hướng + thứ gì đó không phải giờ thuần · tên hành chính · nơi
+ * làm / học / nhà người thân · «cho / giúp / giùm» + một người (trừ «cho chị / em / anh» tự xưng) · tên riêng viết hoa sau «cho / giao».
+ * Không chắc ⇒ `true` (câu hỏi được đi qua). HÀM THUẦN.
+ */
+export function placeOrRecipientSignal(last: string): boolean {
+  if (PLACE_WORDS.test(foldVnText(last)) || namesAdminUnit(last)) return true;
+  for (const clause of last.normalize("NFC").split(/[,.;!?\n…]+/)) {
+    const raw = clause.split(/\s+/).map(tokenWord).filter(Boolean);
+    for (let i = 0; i < raw.length; i++) {
+      const t = raw[i].toLowerCase();
+      const rest = raw.slice(i + 1);
+      if (DIRECTION_TOKENS.has(t) && rest.length > 0) {
+        // «toi» không dấu theo sau là động từ = «tôi lấy …», không phải «tới».
+        if (!(t === "toi" && VERB_AFTER.has(foldVnText(rest[0]))) && !pureTimeTail(rest)) return true;
+      }
+      if (RECIPIENT_TOKENS.has(t) && recipientAfter(rest)) return true;
+      // Tên riêng viết hoa ngay sau «cho / giao / gửi …» («giao Thủ Đức», «ship cho chị Lan») — trừ đại từ tự xưng viết hoa.
+      if ((RECIPIENT_TOKENS.has(t) || SEND_TOKENS.has(t)) && rest.slice(0, 3).some((w) => capitalized(w) && !SELF_REF.has(foldVnText(w)))) return true;
+    }
+  }
+  return false;
 }
 
 /**

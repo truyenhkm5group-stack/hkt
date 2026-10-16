@@ -1382,10 +1382,10 @@ async function chatTurnCore(
           if (g.text) {
             let out = plainForMessenger(g.text);
             // HẬU MÃI (#871, ca «Nguyễn Hà»): đơn đã chốt / khách ở giai đoạn sau bán ⇒ bỏ câu mời mua thêm + câu xin xác nhận / chốt lại đơn.
-            // Phần còn lại vẫn gửi; còn rỗng ⇒ không gửi gì ở vòng này (khối «KHÔNG ĐỂ KHÁCH IM» lo câu thay khi cả lượt im).
+            // Phần còn lại vẫn gửi. Câu kể / câu trả lời, và mọi câu khi khách vừa hỏi về món / đổi đơn / địa chỉ, KHÔNG bị bỏ; bộ lọc không làm rỗng cả tin.
             if (postSale || state.confirmed) {
-              const ps = postSaleReplyGuard(out);
-              if (ps.dropped.length) {
+              const ps = postSaleReplyGuard(out, text);
+              if (ps.dropped.length && !ps.keptWhole) {
                 lastError = lastError ?? `Hậu mãi — đã bỏ câu ${[...new Set(ps.dropped)].map((d) => (d === "UPSELL" ? "mời mua thêm" : "xin chốt lại")).join(" + ")}`;
                 if (!ps.text) continue;
                 out = ps.text;

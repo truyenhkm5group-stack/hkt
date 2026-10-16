@@ -18,6 +18,7 @@
  * Không đọc / ghi CSDL. Không kết luận kết quả đơn (`ORDER_OUTCOME` vẫn là nguồn duy nhất); không suy «đã giao» từ tiền / COD.
  */
 import { NO_SHIPMENT_YET } from "@/lib/sales-chatbot/order-status-shared";
+import { withoutPhones } from "@/lib/address/customer-address";
 import { foldVi } from "@/lib/sales-chatbot/text";
 
 export type DeliveryNuance = "TODAY" | "TOMORROW" | "URGENT" | "GENERIC";
@@ -287,20 +288,27 @@ export function pickDeliveryOrder<T extends { id: string; stage: string; inserte
 
 // ─────────────────────────── MONG MUỐN GIỜ GIAO TRƯỚC KHI CHỐT (#871, ca «Ngọc Nguyễn» HSLC 16/10/2026) ───────────────────────────
 
-/** Ghi nhận (không phải hứa): «ghi nhận», «ghi chú», «mong muốn», «kiểm tra», «báo lại», «xác nhận lại», «cố gắng», «nếu được». Đã chuẩn hoá. */
-const HEDGE_RE = /(?:^|\s)(?:xacnhan lai|xacnhan|ghi nhan|ghi chu|ghi lai|luu y|mong muon|kiem tra|bao lai|co gang|neu duoc|neu kip|du kien|se bao)(?=\s|$)/;
+/** Lời RÀO cả câu (không phải hứa): «mong muốn», «kiểm tra», «báo lại», «xác nhận lại», «cố gắng», «nếu được». Đã chuẩn hoá. */
+const HEDGE_RE = /(?:^|\s)(?:xacnhan lai|xacnhan|mong muon|kiem tra|bao lai|co gang|neu duoc|neu kip|du kien|se bao)(?=\s|$)/;
+/** «Ghi nhận / ghi chú» chỉ rào ĐÚNG VẾ chứa nó: «Dạ em ghi nhận, mai 9h shipper giao tới chị nhé» vẫn là lời HỨA ở vế sau (review PR #878). */
+const NOTE_HEDGE_RE = /(?:^|\s)(?:ghi nhan|ghi chu|ghi lai|luu y)(?=\s|$)/;
 /** Mốc giờ / ngày khách nêu: «9h», «9 giờ», «9g30», «thứ 7», «chủ nhật», «ngày 18». Bản gập dấu. */
 const CLOCK_RE = /(?:^|\s)(?:\d{1,2} ?(?:h|g|gio)(?:\s?\d{1,2})?|thu (?:\d|hai|ba|tu|nam|sau|bay)|chu nhat|ngay \d{1,2})(?=\s|$)/;
+/** Ngày giao MUỘN HƠN trên chính đơn này («tuần sau giao», «giao tháng sau», «cuối tuần giao») — mong muốn giờ giao, KHÔNG phải «mua lần sau». */
+const LATER_DATE_RE = /(?:^|\s)(?:tuan (?:sau|toi|nay)|thang (?:sau|toi)|cuoi tuan|dau tuan)(?=\s|$)/;
 
 /**
  * Tin khách là MONG MUỐN thời gian giao gắn với một mốc («Giao sáng mai khoảng 9h», «chiều nay giao giúp chị», «thứ 7 giao nhé») —
  * không phải câu hỏi «bao giờ giao» trần. Trả nguyên văn đã gọn (để ghi vào ghi chú đơn) hoặc `null`. HÀM THUẦN.
  */
-export function deliveryPreferenceOf(text: string): string | null {
+export function deliveryPreferenceOf(input: string): string | null {
+  // SĐT không bao giờ vào ghi chú giờ giao (review PR #878: «mai giao em nhé, sdt 09…» từng lưu nguyên SĐT vào state + ghi chú đơn).
+  const text = withoutPhones(input).trim();
+  if (!text) return null;
   const q = classifyDeliveryQuestion(text);
   const f = normalizeAsk(text);
   // «thứ 7 giao giúp chị» không có chữ hỏi «khi nào / hôm nay / mai» nên bộ phân loại không gọi là DELIVERY_TIME — mốc + động từ giao là đủ.
-  const clockWithVerb = CLOCK_RE.test(f) && /(?:^|\s)(?:giao|ship|gui|nhan|phat)(?=\s|$)/.test(f);
+  const clockWithVerb = (CLOCK_RE.test(f) || LATER_DATE_RE.test(f)) && /(?:^|\s)(?:giao|ship|gui|nhan|phat)(?=\s|$)/.test(f);
   const anchored = q?.intent === "DELIVERY_TIME" ? q.nuance === "TODAY" || q.nuance === "TOMORROW" || CLOCK_RE.test(f) : clockWithVerb;
   if (!anchored) return null;
   // CÂU HỎI chính sách («giao trong ngày được không», «mai có giao không?») không phải lời hẹn — câu trả lời theo chính sách shop đi bình thường.
@@ -322,8 +330,17 @@ export function deliveryPreferenceNote(pref: { text: string; at: string }): stri
 export function deliveryPromiseIn(reply: string): string[] {
   // Tách câu KHÔNG dùng nhìn-ngược (Safari < 16.4 sập cả trang khi một tệp lib/* có `(?<=` tới trình duyệt).
   const parts = reply.replace(/([.!?…])\s+/g, "$1\n").split(/\n+/).map((x) => x.trim()).filter(Boolean);
+  const promises = (f: string) => PROMISE_RE.test(f) || (CLOCK_RE.test(f) && /(?:^|\s)(?:giao|ship|gui|toi|den)(?=\s|$)/.test(f));
   return parts.filter((p) => {
     const f = normalizeAsk(p);
-    return (PROMISE_RE.test(f) || (CLOCK_RE.test(f) && /(?:^|\s)(?:giao|ship|gui|toi|den)(?=\s|$)/.test(f))) && !HEDGE_RE.test(f);
+    if (!promises(f) || HEDGE_RE.test(f)) return false;
+    // «ghi nhận» chỉ miễn cho vế chứa nó — vế khác của cùng câu mà hứa mốc vẫn là lời hứa.
+    return (
+      !NOTE_HEDGE_RE.test(f) ||
+      p.split(/[,;:–—]+/).some((c) => {
+        const fc = normalizeAsk(c);
+        return promises(fc) && !NOTE_HEDGE_RE.test(fc);
+      })
+    );
   });
 }

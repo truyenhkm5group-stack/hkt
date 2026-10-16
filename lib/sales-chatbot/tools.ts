@@ -56,7 +56,7 @@ import { repeatsRecent } from "@/lib/sales-chatbot/quick-replies-shared";
 import type { OrderSyncThreadState } from "@/lib/sales-chatbot/order-sync-shared";
 import { customerOrderStatus } from "@/lib/sales-chatbot/order-status-shared";
 import { classifyDeliveryQuestion, deliveryPreferenceNote, deliveryTimeAnswer, pickDeliveryOrder, staffDeliveryCommitment } from "@/lib/sales-chatbot/delivery-intent";
-import { futurePurchaseOnly, postSaleReplyGuard } from "@/lib/sales-chatbot/post-sale-guard";
+import { futurePurchaseOnly, postSaleDropsIn } from "@/lib/sales-chatbot/post-sale-guard";
 import { LIFECYCLE_ORDER_LOOKBACK_DAYS } from "@/lib/sales-chatbot/lifecycle";
 import { fanpageVisitorKeyMirror } from "@/lib/pricing/ai-customer-identity";
 import type { PromptStamp } from "@/lib/sales-chatbot/prompt-stamp";
@@ -1010,8 +1010,9 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
         return err("Đơn nháp: chưa mời thêm món", `Trước khi lên đơn phải mời thêm món ĐÚNG MỘT LẦN: gọi send_quick_reply với mã ${upsellEntry.code} (câu upsell kèm ảnh menu), rồi gọi lại create_draft_order và gửi tóm tắt chốt đơn trong cùng lượt.`, state);
       }
       // «MUA TIẾP LẦN SAU» (#871, ca «Nguyễn Hà»): ý định TƯƠNG LAI không phải đơn — không mở đơn mới, không chuyển người (đứng TRƯỚC nhánh
-      // «đơn đã chốt» vì nhánh đó chuyển nhân viên khi khách muốn thêm đơn).
-      if (name === "create_draft_order" && futurePurchaseOnly(ctx.lastUserText)) return err("Đơn nháp: khách hẹn mua lần sau", "Khách nói sẽ mua LẦN SAU — KHÔNG lên đơn mới. Cảm ơn khách ngắn gọn, không mời mua thêm.", state);
+      // «đơn đã chốt» vì nhánh đó chuyển nhân viên khi khách muốn thêm đơn). CHỈ SAU CHỐT (review PR #878): trước chốt «chị lấy 2kg, tuần sau
+      // giao» là đơn thật kèm mong muốn ngày giao, chặn ở đây là đẩy khách về vòng tư vấn.
+      if (name === "create_draft_order" && state.confirmed && futurePurchaseOnly(ctx.lastUserText)) return err("Đơn nháp: khách hẹn mua lần sau", "Khách nói sẽ mua LẦN SAU — KHÔNG lên đơn mới. Cảm ơn khách ngắn gọn, không mời mua thêm.", state);
       // Đơn máy TỰ CHỐT (P0-A): khách sửa ngay sau đó ⇒ update_draft_order sửa chính đơn đã chốt (giữ «Đã xác nhận»). Còn lại như cũ.
       const editingConfirmed = Boolean(state.confirmed?.auto) && name === "update_draft_order" && Boolean(state.draft?.orderId || state.confirmed?.simulated);
       // Đơn chốt qua LỜI ĐỒNG Ý (không phải máy tự chốt) ⇒ sửa / thêm vào đơn là việc của NHÂN VIÊN — máy chủ ép chuyển người, không để tuỳ
@@ -1285,7 +1286,7 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
       if (ctx.customerTexts && addressReaskVerdict(pick.text, addressKnowledge(state, ctx.customerTexts), ctx.turn ?? 0, { botTexts: ctx.recentSaid ?? [] })) {
         return err(`Câu mẫu ${entry.code}: xin lại thông tin đã có`, "Câu mẫu này xin SĐT / địa chỉ mà khách ĐÃ cho — không gửi. Dùng thông tin đã có và đi tiếp (khách hẹn giờ giao ⇒ ghi nhận, không hứa giờ).", state);
       }
-      if (state.confirmed && postSaleReplyGuard(pick.text).dropped.length) return err(`Câu mẫu ${entry.code}: sai lúc sau chốt`, "Đơn ĐÃ CHỐT — câu mẫu này mời mua / xin chốt lại. KHÔNG gửi; trả lời đúng câu khách hỏi.", state);
+      if (state.confirmed && postSaleDropsIn(pick.text, ctx.lastUserText).length) return err(`Câu mẫu ${entry.code}: sai lúc sau chốt`, "Đơn ĐÃ CHỐT — câu mẫu này mời mua / xin chốt lại. KHÔNG gửi; trả lời đúng câu khách hỏi.", state);
       if (entry.upsell) {
         state.upsellSent = true;
         if (ctx.turn !== undefined) state.upsellTurn = ctx.turn;

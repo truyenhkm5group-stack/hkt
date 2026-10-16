@@ -551,12 +551,11 @@ export function classifyCartMessage(text: string, catalog?: readonly string[], o
   });
   if (!amounts.length) return none("AMBIGUOUS");
   const buyVerb = /(?:^| )(?:lay|cho|dat|mua|gui|ship|chot|order|lam|len don)(?: (?:chi|em|anh|minh|toi|c|a|e|cho chi|cho em|cho anh|cho minh|them))*$/;
-  // CÂU HỎI chỉ xét trong CÂU chứa số lượng (#871, ca «Ngọc Nguyễn»: «Ship gò vấp bn? Mình muốn mua 1 kg» — câu hỏi ship ở câu TRƯỚC không
-  // biến lời mua ở câu sau thành «số lượng nói kèm câu hỏi giá»). Tin một câu ⇒ như cũ (cả tin).
+  // CÂU HỎI xét từ CÂU chứa số lượng đầu tiên TỚI HẾT TIN (#871, ca «Ngọc Nguyễn»: «Ship gò vấp bn? Mình muốn mua 1 kg» — câu hỏi ship ở
+  // câu TRƯỚC không biến lời mua ở câu sau thành «số lượng nói kèm câu hỏi giá»). Chỉ thu hẹp ĐẦU cửa sổ: câu hỏi giá đứng SAU số lượng
+  // («2kg chả cá thu. Bao nhiêu vậy em?», «Cho chị hỏi 2kg chả cá thu⏎bao nhiêu tiền») vẫn là câu HỎI, không thành món đã chốt (review PR #878).
   const sentenceStart = Math.max(0, ...[...raw.slice(0, amounts[0].index).matchAll(/[?.!\n]/g)].map((m) => (m.index ?? -1) + 1));
-  const lastEnd = amounts[amounts.length - 1].end;
-  const nextStop = raw.slice(lastEnd).search(/[?.!\n]/);
-  const sentence = raw.slice(sentenceStart, nextStop < 0 ? raw.length : lastEnd + nextStop + 1);
+  const sentence = raw.slice(sentenceStart);
   const fs = foldCart(sentence);
   const priceAsk = sentence.includes("?") || /(?:^| )(?:bao nhieu|bn|nhieu tien|may tien|het bao|gia (?:bao|sao|the nao|nhieu|nhu)|(?:duoc|dc|co|dung|phai) (?:khong|ko|k)|the nao|sao|tinh tien|tinh gia|bao gia)(?: |$)/.test(fs) || /(?:^| )(?:khong|ko|k|hong|hok)(?: (?:em|e|a|shop|ban|vay|nhi))?$/.test(fs);
   const last = amounts[amounts.length - 1];
