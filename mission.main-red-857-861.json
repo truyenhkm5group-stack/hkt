@@ -3,7 +3,7 @@
   "mission_id": "main-red-857-861",
   "title": "Main xanh lại sau #857 + #861 (ca ngữ cảnh hộp thư)",
   "business_goal": "",
-  "status": "RUNNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -20,7 +20,19 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-16T08:29:19.582Z",
-  "updated_at": "2026-10-16T08:29:19.582Z",
-  "last_heartbeat": "2026-10-16T08:29:19.582Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-16T08:29:45.157Z",
+  "last_heartbeat": "2026-10-16T08:29:45.157Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "fix/main-red-address-reask",
+    "sha": "e4d7e70f97b259363b979366bd582d17ba4b83cb",
+    "at": "2026-10-16T08:29:45.157Z",
+    "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+    "title": "Main xanh lại sau #857 + #861 (ca ngữ cảnh hộp thư)",
+    "summary": "",
+    "tests": [
+      "eslint sạch",
+      "self-service-journey: chạy ở gates"
+    ]
+  }
 }
