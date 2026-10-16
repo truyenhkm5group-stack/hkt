@@ -19,7 +19,7 @@
         "review_flag_accuracy": [30, 30]
       },
       "falseAutoConfirmWithOrder": [2, 7],
-      "reviewFlagSensitivity": [2, 2],
+      "reviewFlagSensitivity": [3, 3],
       "critical": [
         {
           "metric": "false_auto_confirm_rate",
@@ -62,7 +62,7 @@
           "confirmedEvents": [1],
           "wrong": [],
           "review": [
-            []
+            ["ADDRESS_UNRESOLVED"]
           ],
           "status": "OPEN",
           "toolErrors": []
@@ -371,7 +371,7 @@
         "review_flag_accuracy": [30, 30]
       },
       "falseAutoConfirmWithOrder": [0, 0],
-      "reviewFlagSensitivity": [2, 2],
+      "reviewFlagSensitivity": [3, 3],
       "critical": [],
       "cases": {
         "mot-sku": {
@@ -409,7 +409,7 @@
           "confirmedEvents": [1],
           "wrong": [],
           "review": [
-            []
+            ["ADDRESS_UNRESOLVED"]
           ],
           "status": "OPEN",
           "toolErrors": []

@@ -1,7 +1,7 @@
 # Bộ đo đơn vàng v2 — số đo hiện trạng (BASELINE)
 
 <!-- NỀN ĐO -->
-> Đo lúc 12/10/2026 (giờ Việt Nam) trên SHA nền `973a4673` — `npx tsx tests/order-golden/update-baseline.ts`.
+> Đo lúc 16/10/2026 (giờ Việt Nam) trên SHA nền `422304ad` — `npx tsx tests/order-golden/update-baseline.ts`.
 <!-- HẾT NỀN ĐO -->
 
 Sứ mệnh `saas-order-accuracy`, lát C1 (bộ đo) + lát `order-confirm-rules` (luật chủ shop 08/10/2026 + sửa lỗi thuần mã). Tài liệu
@@ -49,7 +49,14 @@ Mẫu số đổi vì NHÃN đổi theo quyết định của chủ shop 08/10/2
 xác nhận» CÓ áp cho nháp của bot — giữ nguyên hành vi; (2) khách huỷ sau khi đã có đơn ⇒ `mark_declined` KHÔNG huỷ đơn, ghi chú
 «khách huỷ» (nguyên văn + mốc) + cờ CẦN NGƯỜI KIỂM, người huỷ hoặc xác nhận lại — `huy-sau-tom-tat` nay là «1 đơn + cờ»; (3) địa
 chỉ chưa ghép được xã ⇒ VẪN chốt + cờ CẦN NGƯỜI KIỂM — `dia-chi-chua-ghep-xa` nay là «chốt + cờ» (khỏi mẫu số chốt sai). Cờ nằm ở
-`orders.raw.review` (`lib/constants/order-review.ts`), chấm hai chiều ở `review_flag_accuracy`. Lỗi thuần mã đã sửa:
+`orders.raw.review` (`lib/constants/order-review.ts`), chấm hai chiều ở `review_flag_accuracy`.
+
+**16/10/2026 — #855 (luật chủ shop «khách đổi địa chỉ = chờ xác minh»).** Nhãn ca `doi-dia-chi` đổi thành «1 đơn + cờ
+ADDRESS_UNRESOLVED»: khách đổi nơi giao sau tóm tắt ⇒ đơn ghi ĐÚNG địa chỉ mới nhưng mang cờ CẦN NGƯỜI KIỂM (ghi cùng giao dịch
+với lượt sửa đơn), và máy không tạo vận đơn khi cờ còn mở (tuyến `ADDRESS_REVIEW`). `review_flag_accuracy` giữ 30/30 vì nhãn và
+hành vi đổi cùng nhau; độ nhạy cờ (ca dương) tăng 2/2 ⇒ 3/3 ở cả hai biến thể. Không ca nào khác đổi.
+
+Lỗi thuần mã đã sửa:
 
 1. **Lời xác nhận chỉ có dấu câu / emoji / một chữ / chuỗi con giữa từ** — MỘT hàm `quotedInText` (`lib/sales-chatbot/text.ts`)
    cho chốt đơn, đặt lịch và dùng địa chỉ cũ: sau NFC + gấp dấu phải còn ≥ 2 chữ cái / chữ số, khớp theo RANH GIỚI TỪ («on»
@@ -128,7 +135,7 @@ và dòng «nền đo»), sửa phần nhận định ở trên cho khớp số 
 
 `false_auto_confirm_rate` bỏ các ca NO_ORDER (chỉ ca CÓ đơn phải người xác minh): TẮT 28.6% (2/7) · BẬT — (0/0).
 
-`review_flag_accuracy` chỉ trên ca DƯƠNG (nhãn đòi cờ cần người kiểm — độ nhạy): TẮT 100.0% (2/2) · BẬT 100.0% (2/2).
+`review_flag_accuracy` chỉ trên ca DƯƠNG (nhãn đòi cờ cần người kiểm — độ nhạy): TẮT 100.0% (3/3) · BẬT 100.0% (3/3).
 
 Thành phần địa chỉ (gộp trong `address_component_accuracy`):
 
@@ -156,7 +163,7 @@ Thành phần địa chỉ (gộp trong `address_component_accuracy`):
 | `mot-sku` | Một SKU | GOOD | 1 đơn · AUTO_CONFIRM_OK (CUSTOMER_AGREED) | 1 đơn · AUTO_CONFIRM_OK (CUSTOMER_AGREED) | CONFIRMED (phát order.confirmed ×1) · ✓ | CONFIRMED (phát order.confirmed ×1) · ✓ |
 | `nhieu-sku` | Nhiều SKU | GOOD | 1 đơn · AUTO_CONFIRM_OK (CUSTOMER_AGREED) | 1 đơn · AUTO_CONFIRM_OK (CUSTOMER_AGREED) | CONFIRMED (phát order.confirmed ×1) · ✓ | CONFIRMED (phát order.confirmed ×1) · ✓ |
 | `doi-so-luong` | Đổi số lượng («không phải 2kg, lấy 1kg») | GOOD | 1 đơn · AUTO_CONFIRM_OK (RULE_6) ⚖ | 1 đơn · AUTO_CONFIRM_OK (RULE_6) ⚖ | CONFIRMED (phát order.confirmed ×1) · ✓ | CONFIRMED (phát order.confirmed ×1) · ✓ |
-| `doi-dia-chi` | Đổi địa chỉ | GOOD | 1 đơn · AUTO_CONFIRM_OK (CUSTOMER_AGREED) | 1 đơn · AUTO_CONFIRM_OK (CUSTOMER_AGREED) | CONFIRMED (phát order.confirmed ×1) · ✓ | CONFIRMED (phát order.confirmed ×1) · ✓ |
+| `doi-dia-chi` | Đổi địa chỉ | GOOD | 1 đơn · AUTO_CONFIRM_OK (CUSTOMER_AGREED) + ⚑ ADDRESS_UNRESOLVED | 1 đơn · AUTO_CONFIRM_OK (CUSTOMER_AGREED) + ⚑ ADDRESS_UNRESOLVED | CONFIRMED (phát order.confirmed ×1) ⚑ cần kiểm: ADDRESS_UNRESOLVED · ✓ | CONFIRMED (phát order.confirmed ×1) ⚑ cần kiểm: ADDRESS_UNRESOLVED · ✓ |
 | `sua-sdt` | Sửa SĐT | GOOD | 1 đơn · AUTO_CONFIRM_OK (CUSTOMER_AGREED) | 1 đơn · AUTO_CONFIRM_OK (CUSTOMER_AGREED) | CONFIRMED (phát order.confirmed ×1) · ✓ | CONFIRMED (phát order.confirmed ×1) · ✓ |
 | `sua-sdt-tao-lai-khach` | Sửa SĐT | TRAP | 1 đơn · AUTO_CONFIRM_OK (CUSTOMER_AGREED) | 1 đơn · AUTO_CONFIRM_OK (CUSTOMER_AGREED) | CONFIRMED (phát order.confirmed ×1) · ✗ sai: phone | CONFIRMED (phát order.confirmed ×1) · ✗ sai: phone |
 | `ten-goi-tat` | Tên gọi tắt sản phẩm | GOOD | 1 đơn · AUTO_CONFIRM_OK (CUSTOMER_AGREED) | 1 đơn · AUTO_CONFIRM_OK (CUSTOMER_AGREED) | CONFIRMED (phát order.confirmed ×1) · ✓ | CONFIRMED (phát order.confirmed ×1) · ✓ |

@@ -17,7 +17,11 @@
        WARD_LIST            — câu hỏi phường mang từ 5 chữ «phường / xã» trở lên (bắt khách chọn trong danh sách 4–6 phường);
        REPEAT_WARD_ASK      — hỏi phường lần thứ hai trở đi (gốc của ca «Lê Văn Dụ»);
        PROVINCE_REASK       — hỏi tỉnh / thành dù tin khách đã đọc được tỉnh;
-       FULL_ADDRESS_REASK   — xin lại cả địa chỉ.
+       FULL_ADDRESS_REASK   — xin lại cả địa chỉ;
+       OLD_WARD_CONVERT_ASK — khách đã gửi địa chỉ đọc được TỈNH + phường / xã / thị trấn CŨ (xã cũ bị chia, hoặc tên cũ + quận / huyện
+                              cũ) mà bot bắt khách tự quy đổi sang tên mới (#855 P0-A2, ca «ThivanNguyen» «Đại Kim cũ nay là phường nào
+                              theo tên mới»). Nhóm này KHÔNG có trong WARD_ALREADY_CLEAR vì phường cũ không «rõ» — trước bản này bị đếm
+                              thiếu. Câu hỏi đầu tiên CŨNG đếm: chủ shop 16/10/2026 cấm hỏi khách tên phường mới.
    · SỐ CÂU HỎI TỪ ĐỊA CHỈ TỚI ĐƠN — số tin bot có dấu «?» từ mốc khách cho địa chỉ tới kết quả công cụ đầu tiên có mã đơn (đơn nháp /
      đơn chốt). Trung bình + trung vị trên các hội thoại có cả hai mốc.
 
@@ -45,7 +49,10 @@ const tomTat = (s: string) => console.log(`[ops:tom-tat] ${s.slice(0, 300)}`);
 
 // ─────────────────────────── BẢN SAO TỰ CHỨA: CÂU HỎI PHƯỜNG / TỈNH / CẢ ĐỊA CHỈ ───────────────────────────
 
-const WARD_ASK = [/(?:^| )(?:phuong|xa|thi tran)(?: (?:phuong|xa))? (?:nao|gi)(?: |$)/];
+const WARD_ASK = [
+  /(?:^| )(?:phuong|xa|thi tran)(?: (?:phuong|xa))? (?:nao|gi)(?: |$)/,
+  /(?:^| )xin(?: lai)?(?: giup)?(?: em| shop)?(?: lai)? (?:ten )?(?:phuong|xa)(?: |$)/,
+];
 const WARD_ASK_Q = [
   /(?:^| )(?:xin|xac nhan|cho em biet|cho biet|bao|kiem tra|chon)(?: lai)?(?: giup)?(?: em| shop| minh| chi| anh)?(?: lai)?(?: (?:ten|dung))? (?:phuong|xa)(?: |$)/,
   /(?:^| )hay (?:phuong|xa) /,
@@ -82,25 +89,40 @@ export function addressAsksIn(botText: string): { ward: boolean; wardList: boole
 // ─────────────────────────── ĐỊA CHỈ KHÁCH ĐÃ CHO ───────────────────────────
 
 /** Tin khách (ghép với tin ngay trước) có trông như một địa chỉ giao: không là câu hỏi, đọc được tỉnh + số nhà / đường. HÀM THUẦN. */
-export function addressGivenIn(text: string, previous: string | null): { clear: boolean; province: boolean } | null {
+export function addressGivenIn(text: string, previous: string | null): { clear: boolean; province: boolean; oldWard: boolean } | null {
   const lines = text.split(/\n+/).map((l) => l.trim()).filter(Boolean);
   const cands = [...lines, lines.join(", "), ...(previous ? [`${previous.split(/\n+/).pop() ?? ""}, ${lines[0] ?? ""}`] : [])];
-  let best: { clear: boolean; province: boolean } | null = null;
+  let best: { clear: boolean; province: boolean; oldWard: boolean } | null = null;
   for (const c of cands) {
     if (!c.trim() || c.includes("?")) continue;
     const a = parseCustomerAddress(c);
     if (!a.province || foldVnText(a.street).length < 3) continue;
     const clear = canAutoFill(a);
-    if (clear) return { clear, province: true };
-    best = best ?? { clear: false, province: true };
+    if (clear) return { clear, province: true, oldWard: false };
+    const oldWard = oldWardNamed(c, a.legacy !== null);
+    if (!best || (oldWard && !best.oldWard)) best = { clear: false, province: true, oldWard };
   }
   return best;
 }
 
+/**
+ * Địa chỉ nêu phường / xã CŨ ở cả hai cấp: xã cũ bị chia (bộ đọc trả `legacy`), hoặc tiền tố «phường / xã / thị trấn <tên>» kèm «quận /
+ * huyện / thị xã <tên>». Bản tự chứa (không import `legacyAddressUnmapped` của lib mới — ops chạy script từ main, lib từ image). HÀM THUẦN.
+ */
+export function oldWardNamed(address: string, legacy: boolean): boolean {
+  if (legacy) return true;
+  // Đọc trên chữ CÓ dấu: bỏ dấu thì «Xa La» thành «xa la» (như «xã») và «khu đô thị Xa La» chứa «thi xa». Không dấu chỉ nhận «phuong /
+  // thi tran / quan / huyen» (không mơ hồ).
+  const t = ` ${address.normalize("NFC").toLowerCase()} `;
+  const commune = /[\s,.(](?:phường|xã|thị trấn|phuong|thi tran|p[.\s]|tt[.\s])\s*[\p{L}\d]/u.test(t);
+  const district = /[\s,.(](?:quận|huyện|thị xã|quan|huyen|q[.\s]|h\.)\s*[\p{L}\d]/u.test(t);
+  return commune && district;
+}
+
 // ─────────────────────────── MỘT HỘI THOẠI ───────────────────────────
 
-export type ReaskCause = "WARD_ALREADY_CLEAR" | "TOOL_LINE_DEGRADED" | "WARD_LIST" | "REPEAT_WARD_ASK" | "PROVINCE_REASK" | "FULL_ADDRESS_REASK";
-export const REASK_CAUSES: readonly ReaskCause[] = ["WARD_ALREADY_CLEAR", "TOOL_LINE_DEGRADED", "WARD_LIST", "REPEAT_WARD_ASK", "PROVINCE_REASK", "FULL_ADDRESS_REASK"];
+export type ReaskCause = "WARD_ALREADY_CLEAR" | "TOOL_LINE_DEGRADED" | "WARD_LIST" | "REPEAT_WARD_ASK" | "PROVINCE_REASK" | "FULL_ADDRESS_REASK" | "OLD_WARD_CONVERT_ASK";
+export const REASK_CAUSES: readonly ReaskCause[] = ["WARD_ALREADY_CLEAR", "TOOL_LINE_DEGRADED", "WARD_LIST", "REPEAT_WARD_ASK", "PROVINCE_REASK", "FULL_ADDRESS_REASK", "OLD_WARD_CONVERT_ASK"];
 export type AuditMsg = { seq: number; role: string; at: Date; content: unknown };
 export type ReaskVerdict = {
   /** Mốc tin khách cho địa chỉ (null = chưa bao giờ). */
@@ -128,6 +150,7 @@ const SHOP_SAID_RE = /^\[Shop đã nhắn\]/;
 export function auditAddressReask(msgs: readonly AuditMsg[], windowStart: Date): ReaskVerdict {
   let givenAt: Date | null = null;
   let clear = false;
+  let oldWard = false;
   let ordered = false;
   let questions = 0;
   let questionsToOrder: number | null = null;
@@ -163,11 +186,13 @@ export function auditAddressReask(msgs: readonly AuditMsg[], windowStart: Date):
         if (g) {
           givenAt = m.at;
           clear = g.clear;
+          oldWard = g.oldWard;
         }
       } else if (!clear) {
         // Khách bổ sung sau đó (trả lời câu hỏi phường) ⇒ địa chỉ có thể đã rõ — từ đó hỏi phường là hỏi lại điều đã biết.
         const g = addressGivenIn(text, prevCustomer);
         if (g?.clear) clear = true;
+        else if (g?.oldWard) oldWard = true;
       }
       prevCustomer = text;
       continue;
@@ -182,6 +207,7 @@ export function auditAddressReask(msgs: readonly AuditMsg[], windowStart: Date):
     if (ask.ward && wardAsks >= 2) causes.add("REPEAT_WARD_ASK");
     if (ask.province) causes.add("PROVINCE_REASK");
     if (ask.full) causes.add("FULL_ADDRESS_REASK");
+    if (ask.ward && oldWard && !clear) causes.add("OLD_WARD_CONVERT_ASK");
   }
   const list = REASK_CAUSES.filter((c) => causes.has(c));
   return { givenAt, clear, reasked: list.length > 0, causes: list, questionsToOrder };

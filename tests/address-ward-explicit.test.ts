@@ -86,6 +86,10 @@ export function testAddressWardExplicitPure() {
   assert.deepEqual([coNhue.confidence, [...coNhue.candidates].sort()], ["AMBIGUOUS", ["Phường Thượng Cát", "Phường Đông Ngạc"]], JSON.stringify(coNhue));
   const coAsk = addressQuestion(coNhue)!;
   assert.ok(coAsk.includes("phường Thượng Cát") && coAsk.includes("phường Đông Ngạc") && (coAsk.match(/\?/g) ?? []).length === 1, coAsk);
+  // ĐỔI LUẬT 16/10/2026 (chủ shop, issue #855: «không yêu cầu khách tự tìm hiểu tên phường mới», «không chọn ngẫu nhiên», «không chắc ⇒
+  // chuyển nhân viên»): câu trên KHÔNG còn tới khách — địa chỉ đủ theo địa giới cũ (số nhà + phường cũ + tỉnh) ⇒ công cụ trả
+  // `ask_customer = null`, ứng viên chỉ cho người kiểm; hàng rào chữ gửi khách bỏ câu này nếu model tự hỏi.
+  assert.equal(addressCheckOf({ address: "số 5, Cổ Nhuế 2, Hà Nội", province: "" }).view.ask_customer, null, "Cổ Nhuế 2 đủ ⇒ không hỏi khách");
   const gv = parseCustomerAddress(MODEL_LINE);
   assert.deepEqual([gv.confidence, [...gv.candidates].sort()], ["AMBIGUOUS", GO_VAP_SIX], "6 ứng viên vẫn nằm ở candidates cho người kiểm");
   const gvAsk = addressQuestion(gv)!;

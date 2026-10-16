@@ -207,8 +207,20 @@ export function acceptCustomerWard(a: Pick<CustomerAddress, "provinceCode" | "pr
  * địa chỉ mới KHÔNG được bỏ, và phường đã nói cho nơi cũ không còn là lời khai (review PR #848 lần 2–3). Bắt rộng có chủ ý: bắt nhầm
  * («chỗ khác có rẻ hơn không») chỉ làm hàng rào đứng ngoài một lượt. HÀM THUẦN.
  */
+const CHANGE_ACCENTED = /(?:^|[\s,.!])(?:(?:đổi|thay|sửa)(?: lại)?(?: (?:sang|qua))? (?:địa chỉ|chỗ|nơi|nhà)|địa chỉ (?:mới|khác)|(?:chỗ|nơi|nhà) khác|(?:giao|gửi|ship|chuyển)(?: hàng)? (?:về|tới|đến|sang|qua|ở|cho) (?:nhà|công ty|cơ quan|cửa hàng|shop|trường|bệnh viện|chợ|xưởng|kho|văn phòng|tòa|toà|chung cư))(?=$|[\s,.!?])/u;
+/** Chữ có dấu tiếng Việt (khách gõ có dấu ⇒ đọc trên chữ có dấu, tránh «đợi chờ» = «đổi chỗ» khi bỏ dấu). */
+const HAS_VN_DIACRITIC = /[àáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹđ]/iu;
+
+/**
+ * Bản bỏ dấu CHỈ gồm cụm không mơ hồ khi bỏ dấu — cho tin TRỘN dấu («doi dia chi nhé», «giao ve cong ty nhé», «gửi về cong ty chi»).
+ * Loại «cho» (chỗ / chờ / chợ / cho), «nha» (nhà / nha) và «thay» trần («thấy địa chỉ») — chỉ nhận «thay đổi».
+ */
+const CHANGE_FOLDED_UNAMBIGUOUS = /(?:^| )(?:doi|thay doi|sua)(?: lai)?(?: (?:sang|qua))? dia chi(?: |$)|(?:^| )dia chi (?:moi|khac)(?: |$)|(?:^| )(?:giao|gui|ship|chuyen)(?: hang)? (?:ve|toi|den|sang|qua|o) (?:cong ty|co quan|cua hang|truong|benh vien|xuong|kho|van phong|toa|chung cu)(?: |$)/;
+
 export function wantsAddressChange(text: string): boolean {
   const f = foldVnText(text);
+  // Tin có dấu (kể cả trộn dấu): regex CÓ DẤU, hoặc bản bỏ dấu đã loại cụm mơ hồ. Tin không dấu hoàn toàn: luật cũ (#848).
+  if (HAS_VN_DIACRITIC.test(text)) return CHANGE_ACCENTED.test(text.normalize("NFC").toLowerCase()) || CHANGE_FOLDED_UNAMBIGUOUS.test(f);
   return /(?:^| )(?:doi|thay|sua)(?: lai)?(?: (?:sang|qua))? (?:dia chi|cho|noi|nha)(?: |$)|(?:^| )dia chi (?:moi|khac)(?: |$)|(?:^| )(?:cho|noi|nha) khac(?: |$)|(?:^| )(?:giao|gui|ship|chuyen)(?: hang)? (?:ve|toi|den|sang|qua|o|cho) (?:nha|cong ty|co quan|cua hang|shop|truong|benh vien|cho|xuong|kho|van phong|toa|chung cu)(?: |$)/.test(f);
 }
 
@@ -299,7 +311,100 @@ const houseKey = (h: string | null) => (h ? h.toLowerCase() : null);
  */
 function streetLooksReal(a: Pick<CustomerAddress, "street" | "houseNumber">): boolean {
   if (a.houseNumber) return true;
-  return /^(?:khu|kdt|thon|xom|ap|ban|ngo|ngach|hem|kiet|duong|pho|to|cum|lo|toa|chung cu|cc|so)(?: |$)/.test(foldVnText(a.street));
+  // Viết tắt ở nông thôn / thị trấn (#855, ca «Lieu Dau»): «TDP 3» (tổ dân phố), «KP 2» (khu phố), «khóm», «buôn», «làng», «KV» (khu
+  // vực), «tiểu khu», «khối» (Nghệ An, ca «Lieu Dau» Anh Sơn) — thiếu chúng thì một địa chỉ cũ ĐỦ (tổ dân phố + thị trấn + huyện + tỉnh) bị coi là «không có phần đường».
+  return /^(?:khu|kdt|thon|xom|ap|ban|ngo|ngach|hem|kiet|duong|pho|to|tdp|kp|kv|khoi|khom|buon|lang|tieu khu|cum|lo|toa|chung cu|cc|so)(?: |$)/.test(foldVnText(a.street));
+}
+
+/**
+ * Dòng địa chỉ có phần SỐ NHÀ / ĐƯỜNG / THÔN / TỔ thật (không chỉ là tên đơn vị hành chính) — «Khương Đình» một mình KHÔNG phải một địa
+ * chỉ giao được (#855, ca «ThuyNgo»: bot chỉ còn «Khương Đình» mà vẫn coi như có địa chỉ cũ). HÀM THUẦN.
+ */
+export function hasStreetDetail(address: string): boolean {
+  const a = parseCustomerAddress(address);
+  return foldVnText(a.street).length >= 3 && streetLooksReal(a);
+}
+
+/**
+ * Chỗ trống của một địa chỉ — HAI thứ khác nhau, không được gộp (#855 P0-A2, ca «ThivanNguyen»): `CATALOG_UNMATCHED` = khách ĐÃ cho đủ
+ * (theo địa giới cũ) nhưng danh mục vận chuyển chưa ghép được một xã mới ⇒ việc của NHÂN VIÊN, không hỏi khách; `NOT_PROVIDED` = khách
+ * thật sự chưa cho phần đó (tỉnh / xã / số nhà) ⇒ được hỏi khách đúng phần thiếu, một lần. `COMPLETE` = tự điền được. HÀM THUẦN.
+ */
+export function addressGapOf(address: string, province = ""): { gap: "COMPLETE" | "CATALOG_UNMATCHED" | "NOT_PROVIDED"; missing: AddressPart[] } {
+  const a = parseCustomerAddress(address, province);
+  if (canAutoFill(a) && !a.missing.length) return { gap: "COMPLETE", missing: [] };
+  if (legacyAddressUnmapped(address, province)) return { gap: "CATALOG_UNMATCHED", missing: [] };
+  return { gap: a.missing.length ? "NOT_PROVIDED" : "COMPLETE", missing: a.missing };
+}
+
+/** Câu khách có DÁNG một địa chỉ giao (không phải câu hỏi): phần đường thật + đọc ra tỉnh / ứng viên xã / gợi ý tỉnh. HÀM THUẦN. */
+export function looksLikeDeliveryAddress(line: string): boolean {
+  const l = line.trim();
+  if (!l || l.includes("?")) return false;
+  const a = parseCustomerAddress(l);
+  return chatStreetLooksReal(a) && (a.province !== null || a.candidates.length > 0 || a.provinceHint !== null);
+}
+
+/** Chữ trong «phần đường» cho thấy câu là chuyện mua bán / giao nhận chứ không phải số nhà, tên đường (review #855). */
+const CHAT_STREET_STOP = /(?:^|[\s,.])(?:giao|gửi|gui|ship|lâu|quá|mua|lấy|đặt|order|size|bộ|cái|hộp|gói|hũ|kg|chai|túi|lạng|đôi|hàng trước|đơn trước)(?=$|[\s,.!])/u;
+/** Tiểu từ cuối câu chat (một hoặc nhiều, kèm dấu câu). */
+const CHAT_TAIL_PARTICLES = /(?:[\s,.!]+(?:nha|nhé|nhe|nhá|ạ|a|thôi|nữa|em|chị|anh|shop|ok|nhen|nghen|luôn|rồi|đi))+[\s.!,]*$/u;
+/** Tiền tố nơi chốn CÓ DẤU (hoặc viết tắt không mơ hồ) mở đầu một phần đường. */
+const CHAT_STREET_PREFIX = /^(?:khu|kđt|kdt|thôn|xóm|ấp|bản|ngõ|ngách|hẻm|kiệt|đường|phố|tổ|tdp|kp|kv|khối|khóm|buôn|làng|tiểu khu|cụm|lô|tòa|toà|chung cư|cc|số)\s+[\p{L}\d]/u;
+
+/**
+ * Phần đường của MỘT CÂU CHAT có thật là số nhà / đường / khu không — chặt hơn `streetLooksReal` (review #855: «2 bộ size L giao Hà Nội
+ * nhé», «Lô hàng trước giao Đà Nẵng lâu quá» không phải địa chỉ): có SỐ NHÀ theo sau là chữ (tên đường / ngõ), hoặc tiền tố nơi chốn
+ * CÓ DẤU; và không chứa chữ của câu mua bán («giao», «size», «bộ», «hàng trước»…). HÀM THUẦN.
+ */
+function chatStreetLooksReal(a: Pick<CustomerAddress, "street" | "houseNumber">): boolean {
+  // Bỏ tiểu từ cuối câu («… nha», «… nhé ạ», «… thôi», «… nữa») — chúng không phải tên đường.
+  const st = a.street.normalize("NFC").trim().toLowerCase().replace(CHAT_TAIL_PARTICLES, "").trim();
+  if (st.length < 3 || CHAT_STREET_STOP.test(st)) return false;
+  // «1kg chả mực», «2 hộp ruốc», «500g» — số đi kèm đơn vị hàng, không phải số nhà.
+  if (/^\d+(?:[.,]\d+)?\s*(?:kg|kí|ký|g|gr|gram|lạng|ml|l|lít|hộp|gói|cái|bộ|túi|chai|hũ|con|cặp|set|size)(?=$|[\s,.])/u.test(st)) return false;
+  // Số nhà ⇒ sau số (và sau «số / sn / nhà») phải còn ÍT NHẤT một chữ là tên đường / ngõ / khu, không phải tiểu từ («2 nha», «Số 2 nhé»).
+  const afterNumber = st.replace(/^(?:số nhà|so nha|số|so|sn|nhà|nha)\.?\s*/u, "").replace(/^\d+[0-9a-z/-]*/u, "").trim();
+  if (a.houseNumber || /^(?:số|so|sn)\s*\d/u.test(st)) return /^[\p{L}]/u.test(afterNumber) && !/^(?:nha|nhé|nhe|nhá|ạ|a|thôi|nữa|em|chị|anh|ok|nhen|nghen|luôn|rồi|đi)$/u.test(afterNumber);
+  return CHAT_STREET_PREFIX.test(st) && !/^số\s/u.test(st);
+}
+
+/**
+ * Một tin khách chỉ mang MẢNH địa chỉ (số nhà / ngõ / đường thật, chưa có tỉnh) — khách đang gõ địa chỉ làm nhiều tin («Số 5 ngõ 10»).
+ * HÀM THUẦN.
+ */
+export function looksLikeStreetFragment(line: string): boolean {
+  const l = line.trim();
+  if (!l || l.includes("?")) return false;
+  const a = parseCustomerAddress(l);
+  return a.province === null && chatStreetLooksReal(a);
+}
+
+/**
+ * ĐỊA CHỈ THEO ĐỊA GIỚI CŨ, ĐỦ, NHƯNG CHƯA GHÉP ĐƯỢC XÃ MỚI (#855, ca «Lieu Dau» 16/10/2026): khách ghi tổ dân phố / thôn + thị trấn /
+ * xã CŨ + huyện / quận CŨ + tỉnh — đầy đủ theo địa giới khách biết. Danh mục (`vn-admin-2025.json`) không quy được về MỘT xã mới (xã cũ
+ * bị chia, hay tên cũ không có trong danh mục) KHÔNG có nghĩa địa chỉ vô hiệu: giữ NGUYÊN VĂN, cờ cần kiểm cho nhân viên, và KHÔNG bắt
+ * khách tra tên phường mới. Trả `null` khi tự điền được (đã có xã mới), thiếu tỉnh, thiếu phần đường thật, hoặc không có dấu vết đơn vị
+ * hành chính CŨ ở cả hai cấp (cấp xã: tiền tố «thị trấn / xã / phường» hoặc xã cũ nhận ra trong danh mục; cấp huyện: tiền tố «huyện /
+ * quận / thị xã» hoặc quận / huyện cũ có trong danh mục). Không bao giờ chọn một xã: `candidates` chỉ để người kiểm đọc. HÀM THUẦN.
+ */
+/** Tiền tố đơn vị cấp xã / cấp huyện trong chữ có dấu (đã hạ chữ thường, bọc khoảng trắng hai đầu). */
+export const LEGACY_COMMUNE_PREFIX = /[\s,.(](?:phường|xã|thị trấn|phuong|thi tran|p[.\s]|tt[.\s])\s*[\p{L}\d]/u;
+export const LEGACY_DISTRICT_PREFIX = /[\s,.(](?:quận|huyện|thị xã|quan|huyen|q[.\s]|h\.)\s*[\p{L}\d]/u;
+
+export function legacyAddressUnmapped(address: string, province = ""): { raw: string; province: string; candidates: string[]; hint: string } | null {
+  const a = parseCustomerAddress(address, province);
+  if (canAutoFill(a) || !a.province || a.provinceCode === null) return null;
+  if (!streetLooksReal(a) || foldVnText(a.street).length < 3) return null;
+  const line = [address, province].filter((x) => x.trim()).join(", ");
+  // Tiền tố cấp xã / huyện đọc trên chữ CÓ DẤU (review #855): bỏ dấu thì «Xa La» thành «xa la» (như «xã») và «khu đô thị Xa La» chứa
+  // «thi xa». Không dấu chỉ nhận các chữ không mơ hồ («phuong», «thi tran», «quan», «huyen»); viết tắt P. / TT. / Q. / H. phải có dấu chấm
+  // hoặc khoảng trắng theo sau («Pasteur» không phải «P.»).
+  const t = ` ${line.normalize("NFC").toLowerCase()} `;
+  const commune = a.legacy !== null || LEGACY_COMMUNE_PREFIX.test(t);
+  const district = a.legacy !== null || LEGACY_DISTRICT_PREFIX.test(t) || oldDistrictsIn(line, a.provinceCode).length > 0;
+  if (!commune || !district) return null;
+  return { raw: line.trim(), province: a.province, candidates: a.candidates, hint: addressReviewHint(a) };
 }
 
 /** Phần TÊN ĐƯỜNG / khu đã gập, bỏ số nhà và chữ «số / SN / nhà» ở đầu («230/20 Phan Huy Ích» ⇒ «phan huy ich»). */
