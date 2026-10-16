@@ -36,7 +36,7 @@ import { createProductCore } from "@/lib/records/product-create";
 import { ADDRESS_KNOWN_TEXT, SCHEDULE_NOTED_TEXT, addressKnowledge, addressReaskVerdict, continuesSameOrder, knownContactPrompt, placeOrRecipientSignal } from "@/lib/sales-chatbot/address-memory";
 import { deliveryPreferenceNote, deliveryPreferenceOf, deliveryPromiseIn } from "@/lib/sales-chatbot/delivery-intent";
 import { applyCustomerCartMessage, classifyCartMessage } from "@/lib/sales-chatbot/cart-commitment";
-import { futurePurchaseOnly, postSaleDropsIn, postSaleReplyGuard } from "@/lib/sales-chatbot/post-sale-guard";
+import { POST_SALE_NEUTRAL_TEXT, POST_SALE_THANKS_TEXT, futurePurchaseOnly, orderStatusSayOf, postSaleDropsIn, postSaleFallbackText, postSaleReplyGuard } from "@/lib/sales-chatbot/post-sale-guard";
 import { quickReplyByKeyword } from "@/lib/sales-chatbot/quick-replies";
 import { QUICK_REPLY_SETTING_KEY } from "@/lib/sales-chatbot/quick-replies-shared";
 import type { ChatState } from "@/lib/sales-chatbot/tools";
@@ -102,7 +102,8 @@ function testPure() {
   assert.deepEqual([ps.text, ps.dropped], ["Dạ đơn của chị đang chờ gửi đi ạ.", ["RECONFIRM", "UPSELL"]]);
   assert.deepEqual(postSaleReplyGuard("Dạ đơn của chị đã chốt rồi ạ, shop đóng gói và gửi sớm nhé.").dropped, [], "câu kể không bị bỏ");
   assert.deepEqual(postSaleReplyGuard("Đã chốt đơn (thử — không tạo đơn thật, không báo nhóm), tổng thu 400.000 ₫.").dropped, [], "«không» giữa câu kể không biến nó thành câu hỏi");
-  assert.deepEqual(postSaleReplyGuard("Dạ bên em đang có combo nem hải sản ưu đãi cho chị nè.").dropped, ["UPSELL"]);
+  // Luật chủ shop (không bán tiếp sau chốt — review PR #878 vòng 2): tin CHỈ có lời mời thì chữ GỬI ĐI là rỗng, không phải nguyên tin.
+  assert.deepEqual(postSaleReplyGuard("Dạ bên em đang có combo nem hải sản ưu đãi cho chị nè."), { text: "", dropped: ["UPSELL"], emptied: true });
   assert.equal(futurePurchaseOnly("ok em, mua tiếp lần sau nhé"), true);
   assert.equal(futurePurchaseOnly("hôm khác chị đặt tiếp"), true);
   assert.equal(futurePurchaseOnly("lần sau thì lấy 2kg, giờ lấy luôn 1kg nhé"), false, "có lời mua ngay ⇒ không phải chỉ tương lai");
@@ -175,11 +176,27 @@ function testReviewBlockers() {
   assert.deepEqual(postSaleReplyGuard(addrConfirm), { text: addrConfirm, dropped: [] }, "xác nhận một THAY ĐỔI không phải xin chốt lại");
   const askedProduct = "Dạ nem hải sản 120.000đ/hộp ạ. Chị lấy thêm 1 hộp không ạ?";
   assert.deepEqual(postSaleReplyGuard(askedProduct, "nem hải sản giá bao nhiêu em").dropped, [], "khách vừa hỏi món ⇒ không lọc");
-  assert.deepEqual(postSaleReplyGuard("Mình lấy thêm 1 hộp nem hải sản không ạ?"), { text: "Mình lấy thêm 1 hộp nem hải sản không ạ?", dropped: ["UPSELL"], keptWhole: true }, "mọi câu đều bị lọc ⇒ giữ nguyên tin, không gửi tin rỗng");
+  // Đổi kỳ vọng (review PR #878 vòng 2): bản cũ «giữ nguyên tin» khi mọi câu đều bị lọc ⇒ tin CHỈ có lời mời vẫn tới khách — trái luật chủ
+  // shop «không bán tiếp sau chốt». Nay chữ gửi đi rỗng; engine thay bằng `postSaleFallbackText` (kiểm ở dưới + hội thoại vàng).
+  assert.deepEqual(postSaleReplyGuard("Mình lấy thêm 1 hộp nem hải sản không ạ?"), { text: "", dropped: ["UPSELL"], emptied: true }, "tin chỉ có lời mời ⇒ không gửi chữ nào của model");
+  // Hai ca reviewer dựng lại: không lời mời nào tới khách; khách hỏi trạng thái thì câu thay PHẢI là câu trạng thái (chưa có ⇒ null = tra đơn).
+  const r1 = postSaleReplyGuard("Dạ bên em đang có combo nem hải sản ưu đãi cho chị nè.", "đơn chị tới đâu rồi em");
+  assert.deepEqual([r1.text, r1.emptied], ["", true], "hỏi trạng thái + tin chỉ mời mua ⇒ lời mời không tới khách");
+  assert.equal(postSaleFallbackText("đơn chị tới đâu rồi em", null), null, "hỏi trạng thái mà chưa có kết quả tra ⇒ KHÔNG câu chung, nơi gọi phải tra đơn");
+  assert.equal(postSaleFallbackText("đơn chị tới đâu rồi em", "Dạ đơn #A1 của mình: Shop đã nhận đơn ạ."), "Dạ đơn #A1 của mình: Shop đã nhận đơn ạ.");
+  const r2 = postSaleReplyGuard("Chị có muốn lấy thêm combo nem không ạ?", "ok em cảm ơn nha");
+  assert.deepEqual([r2.text, r2.emptied], ["", true], "khách cảm ơn + tin chỉ mời mua ⇒ lời mời không tới khách");
+  assert.equal(postSaleFallbackText("ok em cảm ơn nha", null), POST_SALE_THANKS_TEXT);
+  assert.equal(postSaleFallbackText("hàng giao rồi nhé em", null), POST_SALE_NEUTRAL_TEXT);
+  for (const t of [POST_SALE_THANKS_TEXT, POST_SALE_NEUTRAL_TEXT]) assert.deepEqual(postSaleDropsIn(t), [], `câu thay không bị chính bộ lọc chặn: ${t}`);
+  assert.equal(orderStatusSayOf(JSON.stringify({ orders: [{ order_code: "#A1", status: "Shop đã nhận đơn — chưa có thông tin vận chuyển.", needs_staff: false }] })), "Dạ đơn #A1 của mình: Shop đã nhận đơn — chưa có thông tin vận chuyển ạ.");
+  assert.equal(orderStatusSayOf(JSON.stringify({ orders: [], delivery_answer: { kind: "DIRECT", say: "Dạ đơn của mình dự kiến giao ngày mai ạ." } })), "Dạ đơn của mình dự kiến giao ngày mai ạ.");
+  assert.equal(orderStatusSayOf(JSON.stringify({ orders: [] })), null, "không có đơn ⇒ không bịa câu trạng thái");
+  assert.equal(orderStatusSayOf("không phải JSON"), null);
   assert.deepEqual(postSaleDropsIn("Mình lấy thêm 1 hộp nem hải sản không ạ?"), ["UPSELL"], "câu mẫu chỉ là lời mời vẫn bị chặn ở công cụ");
   // Lời hứa mốc giờ: «ghi nhận» ở vế trước không miễn cho vế sau hứa «mai 9h shipper giao».
   assert.deepEqual(deliveryPromiseIn("Dạ em ghi nhận, mai 9h shipper giao tới chị nhé."), ["Dạ em ghi nhận, mai 9h shipper giao tới chị nhé."]);
-  console.log("  ✓ #871 review PR #878: đổi nơi giao / người nhận (chỗ làm · công ty · tỉnh / quận · em gái · tên viết hoa) luôn để câu hỏi đi qua · câu hỏi giá sau số lượng không thành món · «lấy 2kg, tuần sau giao» là đơn + mong muốn ngày giao · hậu mãi không bỏ câu kể / câu trả lời, không làm rỗng tin · «ghi nhận» không miễn lời hứa giờ · SĐT không vào ghi chú");
+  console.log("  ✓ #871 review PR #878: đổi nơi giao / người nhận (chỗ làm · công ty · tỉnh / quận · em gái · tên viết hoa) luôn để câu hỏi đi qua · câu hỏi giá sau số lượng không thành món · «lấy 2kg, tuần sau giao» là đơn + mong muốn ngày giao · hậu mãi không bỏ câu kể / câu trả lời; tin chỉ toàn lời mời không tới khách, câu thay là trạng thái / cảm ơn / câu trung tính · «ghi nhận» không miễn lời hứa giờ · SĐT không vào ghi chú");
 }
 
 /** Sản phẩm thật của ca (chả cá thu 1kg + nem hải sản hộp 10 cái) — tạo một lần cho tổ chức thử. */
@@ -250,6 +267,21 @@ const GOLDEN: GoldenCase[] = [
       { say: "ok em, mua tiếp lần sau nhé", ai: [({ v }) => [tool("create_draft_order", { items: [{ variant_id: v("NEM-HS"), quantity: 1 }] })], () => [say("Dạ em cảm ơn chị, chị dùng ngon nha. Bên em đang có combo nem hải sản ưu đãi cho chị nè.")]] },
     ],
   },
+  {
+    key: "p871-only-upsell",
+    title: "Review PR #878 vòng 2: sau chốt, tin model CHỈ là lời mời ⇒ không tới khách; hỏi trạng thái vẫn nhận câu trạng thái (từ get_order_status của lượt, hoặc máy chủ tự tra), cảm ơn nhận câu cảm ơn",
+    shop: "food",
+    channel: "WEB",
+    turns: [
+      { say: `Chị lấy 1kg chả cá thu nhé, Nguyễn Hà ${HA_PHONE}, ${HA_ADDR}`, ai: [() => [tool("create_customer", { name: "Nguyễn Hà", phone: HA_PHONE, address: HA_ADDR })], ({ v }) => [tool("create_draft_order", { items: [{ variant_id: v("CCT-1KG"), quantity: 1 }] })], () => [say("Dạ đơn của mình 1kg chả cá thu ạ.")]] },
+      { say: "ok chốt em", ai: [() => [tool("confirm_order", { customer_confirmation: "ok chốt em" })], () => [say("Dạ em lên đơn cho mình rồi ạ.")]] },
+      // Model tra đơn rồi chỉ viết lời mời ⇒ câu trạng thái từ kết quả công cụ của lượt.
+      { say: "đơn chị tới đâu rồi em", ai: [() => [tool("get_order_status", {})], () => [say("Dạ bên em đang có combo nem hải sản ưu đãi cho chị nè.")]] },
+      { say: "ok em cảm ơn nha", ai: [() => [say("Chị có muốn lấy thêm combo nem không ạ?")]] },
+      // Model KHÔNG tra đơn, chỉ viết lời mời ⇒ máy chủ tự tra.
+      { say: "đơn chị gửi chưa em", ai: [() => [say("Mình lấy thêm 1 hộp nem hải sản không ạ?")]] },
+    ],
+  },
 ];
 
 export async function testP0871ContactMemoryGolden(): Promise<void> {
@@ -291,6 +323,18 @@ export async function testP0871ContactMemoryGolden(): Promise<void> {
         assert.ok(t.turns.every((x) => x.status !== "HANDOFF"), "không chuyển người");
         return;
       }
+      if (c.key === "p871-only-upsell") {
+        assert.ok(st.confirmed, "đơn đã chốt");
+        for (const i of [2, 3, 4]) assert.ok(shown[i].length > 0 && !/combo|ưu đãi|lấy thêm/.test(shown[i]), `lượt ${i}: không lời mời nào tới khách, không im — ${shown[i]}`);
+        const statusOf = (i: number) => ((t.turns[i].rounds[0]?.results?.[0] as { orders?: { status?: string }[] } | undefined)?.orders?.[0]?.status ?? "").replace(/[.!\s]+$/u, "");
+        const s2 = statusOf(2);
+        assert.ok(s2 && shown[2].includes(s2), `hỏi trạng thái (model đã tra): câu trạng thái thật «${s2}» — ${shown[2]}`);
+        assert.equal(shown[3], POST_SALE_THANKS_TEXT, `cảm ơn ⇒ câu cảm ơn — ${shown[3]}`);
+        assert.ok(/^Dạ đơn .+ của mình: /.test(shown[4]) && shown[4].includes(s2), `hỏi trạng thái (model không tra): máy chủ tự tra — ${shown[4]}`);
+        assert.equal(orders.length, 1);
+        assert.ok(t.turns.every((x) => x.status !== "HANDOFF"), "không chuyển người");
+        return;
+      }
       // «Nguyễn Hà»
       assert.ok(st.confirmed, "đơn đã chốt");
       assert.equal(orders.length, 1, "«mua tiếp lần sau» không mở đơn thứ hai");
@@ -303,7 +347,7 @@ export async function testP0871ContactMemoryGolden(): Promise<void> {
     },
   });
   assert.deepEqual([...seen].sort(), GOLDEN.map((c) => c.key).sort());
-  console.log("  ✓ #871 hội thoại vàng: «Ngọc Nguyễn» — câu mẫu «giao» bị chặn, không hỏi lại SĐT / địa chỉ / phường ở lượt hẹn 9h và lượt thêm nem, không hứa giờ, đơn 1kg chả cá + 1 hộp nem (10 cái) mang ghi chú giờ giao, lượt lặp vẫn một đơn · «Nguyễn Hà» — sau chốt trạng thái từ get_order_status, không xin chốt lại / hỏi lại địa chỉ / mời mua, «lần sau» không thành đơn");
+  console.log("  ✓ #871 hội thoại vàng: «Ngọc Nguyễn» — câu mẫu «giao» bị chặn, không hỏi lại SĐT / địa chỉ / phường ở lượt hẹn 9h và lượt thêm nem, không hứa giờ, đơn 1kg chả cá + 1 hộp nem (10 cái) mang ghi chú giờ giao, lượt lặp vẫn một đơn · «Nguyễn Hà» — sau chốt trạng thái từ get_order_status, không xin chốt lại / hỏi lại địa chỉ / mời mua, «lần sau» không thành đơn · tin model chỉ là lời mời ⇒ không tới khách, hỏi trạng thái vẫn nhận câu trạng thái (kể cả khi model không tra — máy chủ tự tra)");
 }
 
 // ─── GÓI TIN WEBHOOK TRÙNG — ĐƯỜNG FANPAGE THẬT (receiveFanpageEvent → processFanpageThread → engine), Pancake + AI giả ───

@@ -10,7 +10,9 @@
  *    nàn, huỷ hay chờ hàng thì mời mua là sai lúc) và câu HỎI xin khách xác nhận / chốt LẠI đơn. Phần còn lại của tin vẫn gửi.
  *    KHÔNG BAO GIỜ bỏ (review PR #878): câu KỂ / câu TRẢ LỜI («em đã thêm 1 hộp nem vào đơn», «combo 2kg giá 300.000đ ạ», «em đã chốt
  *    đơn cho chị nhé»); câu nào khi chính tin khách vừa hỏi về món / giá / đổi đơn / địa chỉ; câu xác nhận một THAY ĐỔI («chị xác nhận
- *    giúp em địa chỉ mới»). Và không bao giờ làm rỗng CẢ tin — mọi câu đều «đáng bỏ» thì đó là dấu hiệu bộ lọc hiểu sai, giữ nguyên tin.
+ *    giúp em địa chỉ mới»). Tin mà MỌI câu đều là lời mời / xin chốt lại thì KHÔNG gửi (review PR #878 vòng 2): bản đầu «giữ nguyên
+ *    tin» cho an toàn, nên tin CHỈ có lời mời — đúng triệu chứng «Nguyễn Hà» — vẫn tới khách. Khách không bị bỏ im: engine dùng
+ *    `postSaleFallbackText` (hỏi trạng thái ⇒ câu trạng thái từ `get_order_status`, cảm ơn ⇒ câu cảm ơn, còn lại ⇒ câu trung tính).
  *  · `futurePurchaseOnly` — «mua tiếp lần sau», «hôm khác chị đặt» là ý định TƯƠNG LAI, không phải đơn: công cụ lên đơn từ chối — CHỈ
  *    sau chốt (nơi gọi kiểm `state.confirmed`). Có số lượng + lời mua («lấy 2kg») hay ngày giao muộn trên chính đơn («tuần sau giao»)
  *    thì KHÔNG phải «chỉ tương lai».
@@ -20,6 +22,7 @@
  * vào main, hai lớp cùng chiều (đều CHẶN lời mời sau chốt) — không xung đột; gộp về một đường ở lượt dọn sau, không bỏ lớp này trước khi
  * `offerWindow` chạy trên đúng đường gửi chữ của engine.
  */
+import { classifyDeliveryQuestion } from "@/lib/sales-chatbot/delivery-intent";
 import { foldVi } from "@/lib/sales-chatbot/text";
 
 export type PostSaleDrop = "UPSELL" | "RECONFIRM";
@@ -86,10 +89,11 @@ export function postSaleDropsIn(text: string, lastCustomerText = ""): PostSaleDr
 
 /**
  * Chữ model gửi khách khi đơn ĐÃ CHỐT (hoặc khách ở giai đoạn sau bán): bỏ lời mời mua thêm không ai hỏi + câu hỏi xin xác nhận / chốt lại.
- * Mọi câu đều bị lọc ⇒ GIỮ NGUYÊN tin (`keptWhole: true`, `dropped` vẫn kể loại câu để ghi vết): bộ lọc không bao giờ làm khách nhận
- * một tin trống — tin chỉ toàn «câu đáng bỏ» là dấu hiệu bộ lọc hiểu sai ngữ cảnh. HÀM THUẦN.
+ * Mọi câu đều bị lọc ⇒ `text: ""` + `emptied: true` — tin chỉ toàn lời mời / xin chốt lại KHÔNG tới khách (luật chủ shop: không bán tiếp
+ * sau chốt). Câu kể / câu trả lời / xác nhận thay đổi không bao giờ bị lọc (`postSaleSentenceDrop`), nên «rỗng» chỉ xảy ra khi tin thật sự
+ * không có gì khác; nơi gọi phải thay bằng `postSaleFallbackText` để khách không bị bỏ im. HÀM THUẦN.
  */
-export function postSaleReplyGuard(text: string, lastCustomerText = ""): { text: string; dropped: PostSaleDrop[]; keptWhole?: true } {
+export function postSaleReplyGuard(text: string, lastCustomerText = ""): { text: string; dropped: PostSaleDrop[]; emptied?: true } {
   const kept: string[] = [];
   const dropped: PostSaleDrop[] = [];
   for (const s of sentencesOf(text)) {
@@ -98,8 +102,66 @@ export function postSaleReplyGuard(text: string, lastCustomerText = ""): { text:
     else kept.push(s);
   }
   if (!dropped.length) return { text, dropped };
-  if (!kept.length) return { text, dropped, keptWhole: true };
+  if (!kept.length) return { text: "", dropped, emptied: true };
   return { text: kept.join(" "), dropped };
+}
+
+/** Câu cảm ơn khi khách chỉ cảm ơn / chào sau chốt và tin model chỉ là lời mời. */
+export const POST_SALE_THANKS_TEXT = "Dạ em cảm ơn mình ạ.";
+/** Câu trung tính sau chốt — không mời mua, không xin chốt lại (có kiểm thử: `postSaleDropsIn` của câu này rỗng). */
+export const POST_SALE_NEUTRAL_TEXT = "Dạ vâng ạ, mình cần hỗ trợ gì về đơn cứ nhắn em nhé.";
+const THANKS_RE = / (?:cam on|camon|thank|thanks|tks|thank you) /;
+
+/**
+ * Câu trạng thái trong MỘT kết quả `get_order_status` (chuỗi JSON công cụ trả): câu DIRECT về lịch giao máy chủ đã quyết, nếu không thì
+ * «status» của đơn mới nhất (đơn cần người ⇒ hỏi khách có cần nhân viên hỗ trợ — đúng lời dặn của lời nhắc). Không đọc được ⇒ `null`. HÀM THUẦN.
+ */
+export function orderStatusSayOf(content: string): string | null {
+  let p: { orders?: unknown; delivery_answer?: { kind?: unknown; say?: unknown } };
+  try {
+    p = JSON.parse(content) as typeof p;
+  } catch {
+    return null;
+  }
+  if (!p || typeof p !== "object" || !Array.isArray(p.orders)) return null;
+  if (p.delivery_answer?.kind === "DIRECT" && typeof p.delivery_answer.say === "string" && p.delivery_answer.say.trim()) return p.delivery_answer.say.trim();
+  const first = p.orders[0] as { status?: unknown; order_code?: unknown; needs_staff?: unknown } | undefined;
+  if (!first || typeof first.status !== "string" || !first.status.trim()) return null;
+  const code = typeof first.order_code === "string" && first.order_code.trim() ? ` ${first.order_code.trim()}` : "";
+  const line = `Dạ đơn${code} của mình: ${first.status.trim().replace(/[.!\s]+$/u, "")} ạ.`;
+  return first.needs_staff === true ? `${line} Mình có cần nhân viên shop hỗ trợ thêm không ạ?` : line;
+}
+
+type TurnBlock = { type: string; text?: string; content?: string };
+
+/** Câu trạng thái từ kết quả `get_order_status` của LƯỢT hiện tại (đọc ngược tới tin khách gần nhất có chữ). HÀM THUẦN. */
+export function turnOrderStatusSay(history: readonly { role: string; content: readonly TurnBlock[] }[]): string | null {
+  for (let i = history.length - 1; i >= 0; i--) {
+    const m = history[i];
+    if (m.role !== "user") continue;
+    if (m.content.some((b) => b.type === "text" && (b.text ?? "").trim())) return null;
+    for (const b of m.content) {
+      if (b.type !== "tool_result" || typeof b.content !== "string") continue;
+      const say = orderStatusSayOf(b.content);
+      if (say) return say;
+    }
+  }
+  return null;
+}
+
+/** Khách vừa hỏi trạng thái đơn / lịch giao (cùng bộ phân loại với công cụ `get_order_status`). HÀM THUẦN. */
+export function asksOrderStatus(lastCustomerText: string): boolean {
+  return classifyDeliveryQuestion(lastCustomerText) !== null;
+}
+
+/**
+ * Câu gửi khách khi bộ lọc hậu mãi đã bỏ HẾT tin của model (chỉ toàn lời mời / xin chốt lại). Khách hỏi trạng thái ⇒ câu trạng thái từ
+ * `get_order_status` (`statusSay`); chưa có thì `null` — nơi gọi phải tra đơn (hoặc chuyển người), KHÔNG được thay bằng câu chung. Khách
+ * cảm ơn ⇒ câu cảm ơn; còn lại ⇒ câu trung tính. Không câu nào mời mua / xin chốt lại. HÀM THUẦN.
+ */
+export function postSaleFallbackText(lastCustomerText: string, statusSay: string | null): string | null {
+  if (asksOrderStatus(lastCustomerText)) return statusSay;
+  return THANKS_RE.test(fold(lastCustomerText)) ? POST_SALE_THANKS_TEXT : POST_SALE_NEUTRAL_TEXT;
 }
 
 /** Mốc TƯƠNG LAI không xác định («lần sau», «hôm khác», «dịp khác», «tháng sau»…). */
