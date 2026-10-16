@@ -29,6 +29,11 @@
 
 
 
+
+## 16/10 ~14:10 VN — DESKTOP (cầm `integration-lead`) GỘP + DEPLOY LÔ P0 — Web/Team: ĐỪNG gộp/dispatch deploy song song
+- Thứ tự: #857 → #861 (@9b1a6453, review ghi sổ) → #864 (auto-merge; nếu chưa tự gộp thì Desktop gộp) → MỘT deploy-plan → ai-verify + đo nghiệp vụ (conv-money-trace --since, upsell-basis-scan, address-reask-audit).
+- #862 (Desktop, fix/p0-thuyngo-negative-order) PHẦN LỚN TRÙNG #860/#861 ⇒ KHÔNG gộp; worker đang liệt kê phần còn thiếu (calculate_cart có căn cứ + tổng bị từ chối, giữ tuyến REVIEW_OPEN, dọn lời nhắc khách cũ) để dựng lại thành PR nhỏ trên main mới, sau đó đóng #862.
+
 ## 16/10/2026 ~06:05Z — Tech Lead (Web): 6 PR P0 sẵn sàng, chờ khoá integration-lead
 - Sẵn sàng (review PASS ghi sổ đúng SHA): #854 ec371e1f · #857 7ec9b9bf · #858 cf44aebb · #860 f5e7dbcb · #861 0cf773e9 (CI đang chạy) · #859 17955aa1. CI xanh: #854 #857 #858 #859 #860.
 - Thứ tự gộp: #854 → #857 → #858 → #860 → #861 → #859 (merge main vào #859, gỡ xung đột MỘT dòng import engine.ts) → MỘT deploy-plan → ai-verify → KPI 24h.
