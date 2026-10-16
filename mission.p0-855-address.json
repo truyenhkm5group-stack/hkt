@@ -32,15 +32,16 @@
     "tests/shipping-routing.test.ts",
     "lib/carriers/engine.ts",
     "lib/constants/shipping-routing.ts",
-    "lib/records/order-create.ts"
+    "lib/records/order-create.ts",
+    "tests/order-golden/"
   ],
   "dependencies": [],
   "blocked_by": [],
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-16T03:48:00.196Z",
-  "updated_at": "2026-10-16T05:18:11.553Z",
-  "last_heartbeat": "2026-10-16T05:18:11.553Z",
+  "updated_at": "2026-10-16T05:46:47.611Z",
+  "last_heartbeat": "2026-10-16T05:46:47.611Z",
   "definition_of_done": [],
   "intake": {
     "verdict": "PARTIAL",
