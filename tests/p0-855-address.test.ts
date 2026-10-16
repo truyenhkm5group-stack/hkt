@@ -18,10 +18,12 @@
  */
 import assert from "node:assert/strict";
 import { addressGapOf, addressQuestion, customerStatedAddresses, hasStreetDetail, legacyAddressUnmapped, looksLikeDeliveryAddress, looksLikeStreetFragment, parseCustomerAddress, wantsAddressChange } from "@/lib/address/customer-address";
-import { ADDRESS_HANDOFF_REASON, ADDRESS_KNOWN_TEXT, ADDRESS_REASK_NOTE, CONTACT_KNOWN_TEXT, hasChangeCue, ADDRESS_STAFF_TEXT, addressKnowledge, addressReaskVerdict, asksForName, asksForPhone, deliveryAddressDecision, reuseIntentOf as reuseFromMemory } from "@/lib/sales-chatbot/address-memory";
+import { ADDRESS_HANDOFF_REASON, ADDRESS_KNOWN_TEXT, SCHEDULE_NOTED_TEXT, isScheduleOnly, ADDRESS_REASK_NOTE, CONTACT_KNOWN_TEXT, hasChangeCue, ADDRESS_STAFF_TEXT, addressKnowledge, addressReaskVerdict, asksForName, asksForPhone, deliveryAddressDecision, reuseIntentOf as reuseFromMemory } from "@/lib/sales-chatbot/address-memory";
 import { addressConfidence, assembleCustomer360, customer360Prompt, reuseIntentOf, type OrderFact } from "@/lib/sales-chatbot/customer-360";
 import { addressCheckOf, type ChatState } from "@/lib/sales-chatbot/tools";
 import { eq } from "drizzle-orm";
+import { QUICK_REPLY_SETTING_KEY } from "@/lib/sales-chatbot/quick-replies-shared";
+import { setSettingJson } from "@/lib/settings";
 import { getDb, schema } from "@/db";
 import { orderReviewOf } from "@/lib/constants/order-review";
 import { runGoldenCases, say, tool, type GoldenCase } from "./sales-agent-golden/harness";
@@ -41,6 +43,9 @@ const ANH_SON = "Khối 3, thị trấn Anh Sơn, huyện Anh Sơn, tỉnh Ngh�
 const WARD_NEW_ASK = "Dạ mình cho em xin tên phường / xã (theo địa giới mới) của địa chỉ nhận hàng với ạ?";
 const FULL_ASK = "Dạ chị cho em xin lại địa chỉ nhận hàng chi tiết ạ?";
 
+const SCHEDULE_ADDRESS = "Số 9 chung cư Thử Nghiệm, đường Quang Trung, An Hội Tây, TP.HCM";
+const SCHEDULE_CONTACT = `0900000123 ${SCHEDULE_ADDRESS}`;
+const SCHEDULE_REASK = "Dạ bên em giao hàng nhanh chóng tận nơi rồi ạ. Dạ, mình cho em xin SĐT + địa chỉ chính xác để em check tuyến giao sớm nhất cho mình nhé!";
 const draftWith = (address: string, province = "", extra: Partial<{ name: string; phone: string; ward: string }> = {}): ChatState => ({
   draft: { orderId: null, lines: [], unitPrices: {}, recipient: { name: extra.name ?? "", phone: extra.phone ?? "", address, province, ward: extra.ward }, note: "", simulated: true },
 });
@@ -74,6 +79,19 @@ export function testP0855AddressPure() {
   assert.equal(addressCheckOf({ address: dongDaAddress, province: "" }).view.ask_customer, null, "không gửi câu phường theo địa giới mới");
   assert.ok(addressReaskVerdict(WARD_NEW_ASK, addressKnowledge(draftWith(dongDaAddress), [dongDaFull]), 2), "outbound guard chặn bot hỏi phường mới trong tin khách đặt hàng");
   assert.equal(legacyAddressUnmapped("Gia Lâm, Hà Nội"), null, "chỉ huyện+tỉnh thì chưa đủ phần đường");
+  // #871: tin CHỈ hẹn giờ giao không đổi nơi nhận ⇒ câu xin lại SĐT + địa chỉ đã có bị bỏ, không chuyển người; tin có nơi chốn lạ thì không.
+  for (const t of ["Giao sáng mai khoảng 9h", "chiều nay 5h nhé", "Thứ 7 giao giúp em", "7 giờ tối nay", "Giao cho chị sáng mai khoảng 9h nhé", "mai giao lúc 9:30 nha", "chủ nhật giao nhé"]) assert.equal(isScheduleOnly(t), true, t);
+  // Review #871: tên người trùng từ chỉ thời gian («Thu», «Nam», «Mai», «Hằng», «Tư») và người thứ ba («ba», «mẹ») ⇒ đổi NGƯỜI nhận.
+  for (const t of ["gửi cho mẹ chị dưới quê nhé", "giao về 12 Lê Lợi sáng mai", "mai chị ở nhà ngoại", "giao 2 hộp sáng mai", "ok em", "9", "Giao cho chị Thu sáng mai", "gửi cho anh Nam chiều nay", "chị Hằng nhận hàng chiều mai", "gửi cho chị tôi sáng mai", "giao cho ba chiều mai", "giao cho chị Mai sáng mai", "anh Tư nhận chiều nay"]) assert.equal(isScheduleOnly(t), false, t);
+  // «giao cho chị …» là lịch của chính khách: SĐT / tên đã biết vẫn là đã biết (không rơi vào đổi người nhận ⇒ chuyển người).
+  const kSelf = addressKnowledge({}, ["Ship gò vấp bn? Mình muốn mua 1 kg", SCHEDULE_CONTACT, "Giao cho chị sáng mai khoảng 9h nhé"]);
+  assert.equal(kSelf.phoneKnown, true, "SĐT vẫn đã biết");
+  const selfHold = addressReaskVerdict(SCHEDULE_REASK, kSelf, 3, { botTexts: ["Dạ mình cho em xin SĐT + địa chỉ để em báo phí ship nhé!"] });
+  assert.ok(selfHold && !selfHold.handoff, `«giao cho chị sáng mai»: bỏ câu hỏi lại, không chuyển người — ${JSON.stringify(selfHold)}`);
+  const schedTexts = ["Ship gò vấp bn? Mình muốn mua 1 kg", SCHEDULE_CONTACT, "Giao sáng mai khoảng 9h"];
+  const schedHold = addressReaskVerdict(SCHEDULE_REASK, addressKnowledge({}, schedTexts), 3);
+  assert.ok(schedHold && !schedHold.handoff && !/xin SĐT/.test(schedHold.rest), `chặn câu xin lại khi khách chỉ hẹn giờ: ${JSON.stringify(schedHold)}`);
+  assert.equal(addressReaskVerdict(SCHEDULE_REASK, addressKnowledge({}, [...schedTexts.slice(0, 2), "gửi cho mẹ chị dưới quê nhé"]), 3), null, "nơi nhận mới ⇒ vẫn được hỏi địa chỉ");
   // Review #870 [CAO]: «địa chỉ <lượng từ>» KHÔNG phải lời khai địa chỉ mới — đọc nhầm thì máy chủ ghi đè địa chỉ đang giữ và xoá xã.
   const held = draftWith("12 Hàng Bạc, Hoàn Kiếm, Hà Nội", "Hà Nội", { ward: "Phường Hoàn Kiếm" });
   for (const noise of ["em ơi địa chỉ 2 nơi nữa ở Hà Nội nhé", "địa chỉ 1 người bạn ở Hà Nội nhé", "địa chỉ toàn ở Hà Nội thôi", "địa chỉ ngoài Hà Nội có ship không"]) {
@@ -398,14 +416,86 @@ const GOLDEN: GoldenCase[] = [
       { say: `à chị chuyển nhà rồi, giao về ${NEW_THU_DUC} nhé`, ai: [() => [tool("update_draft_order", { address: "99 Lê Lợi, Bến Thành, TP.HCM" })], () => [say("Dạ em ghi nhận ạ.")]] },
     ],
   },
+  // #871 (ẩn danh): khách nói món + số lượng, gửi SĐT + địa chỉ đủ trong MỘT tin, rồi chỉ hẹn giờ giao ⇒ không xin lại SĐT / địa chỉ,
+  // ghi nhận lịch giao, không hứa giờ. Hai đường câu xin lại tới khách: chữ model, và CÂU MẪU qua send_quick_reply (đi nguyên văn).
+  {
+    key: "p871-hen-gio-giao",
+    title: "#871: đã có SĐT + địa chỉ, khách hẹn «Giao sáng mai khoảng 9h» ⇒ không xin lại, ghi nhận lịch giao, không hứa giờ",
+    shop: "food",
+    channel: "WEB",
+    turns: [
+      { say: "Ship gò vấp bn? Mình muốn mua 1 kg chả mực giã tay", ai: [() => [say("Dạ mình cho em xin SĐT + địa chỉ để em báo phí ship nhé!")]] },
+      { say: SCHEDULE_CONTACT, ai: [() => [tool("create_customer", { name: "Khách Thử", phone: "0900000123", address: SCHEDULE_ADDRESS })], () => [say("Dạ em ghi nhận địa chỉ của mình rồi ạ.")]] },
+      { say: "Giao sáng mai khoảng 9h", ai: [() => [say(SCHEDULE_REASK)]] },
+    ],
+  },
+  {
+    key: "p871-giao-cho-chi",
+    title: "#871: «Giao cho chị sáng mai khoảng 9h nhé» là lịch của chính khách ⇒ không xin lại, không chuyển người",
+    shop: "food",
+    channel: "WEB",
+    turns: [
+      { say: "Ship gò vấp bn? Mình muốn mua 1 kg chả mực giã tay", ai: [() => [say("Dạ mình cho em xin SĐT + địa chỉ để em báo phí ship nhé!")]] },
+      { say: SCHEDULE_CONTACT, ai: [() => [tool("create_customer", { name: "Khách Thử", phone: "0900000126", address: SCHEDULE_ADDRESS })], () => [say("Dạ em ghi nhận địa chỉ của mình rồi ạ.")]] },
+      { say: "Giao cho chị sáng mai khoảng 9h nhé", ai: [() => [say(SCHEDULE_REASK)]] },
+    ],
+  },
+  {
+    key: "p871-cau-mau-xin-lai",
+    title: "#871: câu mẫu của shop xin SĐT + địa chỉ khi khách đã cho ⇒ send_quick_reply từ chối, câu mẫu không tới khách",
+    shop: "food",
+    channel: "WEB",
+    turns: [
+      { say: "Ship gò vấp bn? Mình muốn mua 1 kg chả mực giã tay", ai: [() => [say("Dạ mình cho em xin SĐT + địa chỉ để em báo phí ship nhé!")]] },
+      { say: SCHEDULE_CONTACT, ai: [() => [tool("create_customer", { name: "Khách Thử", phone: "0900000124", address: SCHEDULE_ADDRESS })], () => [say("Dạ em ghi nhận địa chỉ của mình rồi ạ.")]] },
+      { say: "Giao sáng mai khoảng 9h", ai: [() => [tool("send_quick_reply", { code: "Q1" })], () => [say("Dạ em ghi nhận ạ.")]] },
+    ],
+  },
+  {
+    key: "p871-tu-khoa-xin-lai",
+    title: "#871: câu mẫu xin SĐT + địa chỉ khớp TỪ KHOÁ «giao sáng mai» khi khách đã cho ⇒ không gửi câu mẫu, AI trả lời",
+    shop: "food",
+    channel: "WEB",
+    turns: [
+      { say: "Ship gò vấp bn? Mình muốn mua 1 kg chả mực giã tay", ai: [() => [say("Dạ mình cho em xin SĐT + địa chỉ để em báo phí ship nhé!")]] },
+      { say: SCHEDULE_CONTACT, ai: [() => [tool("create_customer", { name: "Khách Thử", phone: "0900000125", address: SCHEDULE_ADDRESS })], () => [say("Dạ em ghi nhận địa chỉ của mình rồi ạ.")]] },
+      { say: "Giao sáng mai khoảng 9h", ai: [() => [say("Dạ em ghi nhận ạ.")]] },
+    ],
+  },
 ];
 
 export async function testP0855AddressGolden() {
   const seen = new Set<string>();
   await runGoldenCases(GOLDEN, {
     orgSuffix: "-p855",
+    beforeCase: async (c) => {
+      if (c.key !== "p871-cau-mau-xin-lai" && c.key !== "p871-tu-khoa-xin-lai") return;
+      const db = await getDb();
+      const qr = schema.salesChatQuickReplies;
+      // Mỗi ca một câu mẫu RIÊNG, ca kia tắt: câu mẫu theo từ khoá «giao sáng mai» không được đè lên ca gọi send_quick_reply.
+      const title = c.key === "p871-tu-khoa-xin-lai" ? "Xin SĐT địa chỉ (từ khoá)" : "Xin SĐT địa chỉ";
+      const triggers = c.key === "p871-tu-khoa-xin-lai" ? ["giao sáng mai"] : ["mã thử p871"];
+      await db.update(qr).set({ active: false }).where(eq(qr.answer, SCHEDULE_REASK));
+      const [row] = await db.select({ id: qr.id }).from(qr).where(eq(qr.title, title)).limit(1);
+      if (row) await db.update(qr).set({ active: true }).where(eq(qr.id, row.id));
+      else await db.insert(qr).values({ title, triggers, answer: SCHEDULE_REASK, active: true });
+      await setSettingJson(QUICK_REPLY_SETTING_KEY, { enabled: true, aiMatch: false, upsellReplyId: null, autoLearn: false, autoActivate: false });
+    },
     afterCase: async (c, _ctx, t) => {
       seen.add(c.key);
+      if (c.key.startsWith("p871-")) {
+        if (c.key !== "p871-hen-gio-giao") await (await getDb()).update(schema.salesChatQuickReplies).set({ active: false }).where(eq(schema.salesChatQuickReplies.answer, SCHEDULE_REASK));
+        const last = t.turns[2].shown.join(" | ");
+        assert.ok(!/xin SĐT|địa chỉ chính xác|check tuyến/.test(last), `${c.key}: không xin lại SĐT / địa chỉ — ${last}`);
+        assert.ok(!/9h|9 giờ/.test(last), `${c.key}: không hứa giờ giao — ${last}`);
+        assert.notEqual(t.turns[2].status, "HANDOFF", `${c.key}: không chuyển người vì một câu hẹn giờ`);
+        if (c.key === "p871-hen-gio-giao" || c.key === "p871-giao-cho-chi") assert.ok(last.includes(SCHEDULE_NOTED_TEXT), `ghi nhận lịch giao: ${last}`);
+        if (c.key === "p871-cau-mau-xin-lai") {
+          const r0 = t.turns[2].rounds[0]?.results[0] as { __summary?: string } | undefined;
+          assert.equal(r0?.__summary, "Câu mẫu Q1: xin lại thông tin đã có", `send_quick_reply bị từ chối ĐÚNG lý do: ${JSON.stringify(r0)}`);
+        }
+        return;
+      }
       const shown = t.turns.map((x) => x.shown.join(" | "));
       if (c.key === "p855-dai-kim-cu") {
         assert.ok(!/tên mới|địa giới mới|Định Công|Hoàng Liệt/.test(shown[0]) && shown[0] === ADDRESS_KNOWN_TEXT, `không bắt khách chuyển địa giới, không gợi ý ứng viên: ${shown[0]}`);
