@@ -49,6 +49,7 @@ import {
   STAFF_OUT_ID_PREFIX,
   latestTurnHandled,
   latestWebTurnHandled,
+  META_HUMAN_INBOX_APP_IDS,
   META_SYSTEM_TEXT_RE,
   META_SYSTEM_TEXT_SQL_RE,
   turnAnswered,
@@ -87,6 +88,8 @@ function testPure() {
   assert.equal(classifyOutbound(facts({ templateText: true })), "PANCAKE_AUTOMATION");
   assert.equal(classifyOutbound(facts({ pancakeStaffAccount: true })), "VERIFIED_HUMAN");
   assert.equal(classifyOutbound(facts({ pancakeStaffAccount: true, templateText: true })), "VERIFIED_HUMAN", "nhân viên dùng câu lưu sẵn vẫn là người");
+  assert.equal(classifyOutbound(facts({ metaAppId: META_HUMAN_INBOX_APP_IDS[0], templateText: true })), "VERIFIED_HUMAN", "câu lưu sẵn gửi từ hộp thư người của Meta vẫn là người");
+  assert.equal(classifyOutbound(facts({ metaAppId: "999", templateText: true })), "PANCAKE_AUTOMATION", "ứng dụng lạ gửi câu mẫu vẫn là tự động");
   assert.equal(templateKeyOf("  Dạ em chào\n\nanh/chị   ạ "), "Dạ em chào anh/chị ạ", "khoá câu mẫu gộp khoảng trắng");
   assert.equal(classifyOutbound(facts({ metaAppId: "263902037430900" })), "VERIFIED_HUMAN", "Hộp thư Page / Business Suite");
   assert.equal(classifyOutbound(facts({ metaAppId: "999" })), "OTHER_APP");

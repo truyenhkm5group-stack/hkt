@@ -18,7 +18,7 @@
 import assert from "node:assert/strict";
 import { imagesAlreadyDescribed } from "@/lib/sales-chatbot/vision";
 import { rmSync } from "node:fs";
-import { and, eq, like, sql } from "drizzle-orm";
+import { and, eq, inArray, like, sql } from "drizzle-orm";
 import { getDb, getPlatformDb, organizationDatabaseUrl, schema } from "@/db";
 import type { AiBlock, AiProvider, AiRequest, AiResponse } from "@/lib/ai/provider";
 import { ByokOpenAiProvider } from "@/lib/ai-builder/providers";
@@ -70,7 +70,7 @@ import { reorderDigestText, sendReorderDigest, type DigestRow } from "@/lib/reor
 import { newOrderAlertText, sendNewOrderAlerts } from "@/lib/sales-chatbot/new-order-alert";
 import { loadPollState, markPancakeWebhook, PANCAKE_POLL_SETTING_KEY, savePollState } from "@/lib/sales-chatbot/pancake-poll";
 import { EMPTY_POLL_STATE } from "@/lib/sales-chatbot/pancake-poll-shared";
-import { catchUpFanpage, fanpageInboundCounts, fanpageVisitorKey, normalizeThreadMessages, unansweredCustomerMessages, pancakeCreatedAfterVerdict, pageAnsweredVerdict, postContextPrompt, postTextFromPancake, FIRST_CONTACT_WAIT_MS, FOLLOWUP_WAIT_MS, parsePancakeWebhook, processFanpageThread, processFanpageThreadDebounced, receiveFanpageEvent, UNKNOWN_SENDER_REASON } from "@/lib/sales-chatbot/fanpage";
+import { catchUpFanpage, fanpageInboundCounts, fanpageVisitorKey, normalizeThreadMessages, unansweredCustomerMessages, pancakeCreatedAfterVerdict, pageAnsweredVerdict, postContextPrompt, postTextFromPancake, FIRST_CONTACT_WAIT_MS, FOLLOWUP_WAIT_MS, parsePancakeWebhook, processFanpageThread, processFanpageThreadDebounced, receiveFanpageEvent, UNKNOWN_SENDER_REASON, PAGE_REPLIED_REASON as PAGE_REPLIED_REASON_856 } from "@/lib/sales-chatbot/fanpage";
 import { loadChatCostReport } from "@/lib/sales-chatbot/cost-report";
 import { learnLessons, loadLessons, rollbackLessons, saveLessons, setLessonsEnabled } from "@/lib/sales-chatbot/lessons";
 import { droppedLessonsText, lessonsPrompt, lessonTranscript, normalizeLessons, parseLessonsFromAi, parseLessonsState, riskyLesson, screenAiLessons } from "@/lib/sales-chatbot/lessons-shared";
@@ -2118,6 +2118,10 @@ async function testJourney() {
       const fEmpty = await processFanpageThread(PAGE, "t-986", { fetch: pancake.fetch, now: inMs(FIRST_CONTACT_WAIT_MS + 1000) });
       assert.ok(fEmpty.replies >= 1 && !/Page đã trả lời/.test(fEmpty.skipped ?? ""), `tin page rỗng ⇒ bot vẫn trả lời: ${JSON.stringify(fEmpty)}`);
       assert.deepEqual(unansweredCustomerMessages(normalizeThreadMessages([{ id: "q", message: "sdt 0358038447", from: { id: "c" }, inserted_at: "2026-10-03T09:30:00" }, { id: "n", message: "", from: { id: PAGE }, inserted_at: "2026-10-03T09:30:02" }], PAGE), Date.parse("2026-10-03T09:35:00Z"), 60_000, 1_800_000).map((m) => m.id), ["q"], "quét lại: tin page rỗng sau tin khách không tính là đã trả lời");
+      const GREETING_856 = "CHẢ CÁ THU NGUYÊN CHẤT 100% - Chả cá đánh bắt tại Quảng Ninh, inbox để được báo giá ạ";
+      // Issue #856: tin page Pancake gắn cờ TỰ ĐỘNG (from.is_automated / ai_generated) sau câu hỏi giá ⇒ vẫn chờ trả lời; nhân viên (uid) ⇒ đã trả lời.
+      assert.deepEqual(unansweredCustomerMessages(normalizeThreadMessages([{ id: "q", message: "Báo giá chả cá thu?", from: { id: "c" }, inserted_at: "2026-10-16T03:04:00" }, { id: "a", message: GREETING_856, from: { id: PAGE, is_automated: true }, inserted_at: "2026-10-16T03:04:01" }], PAGE), Date.parse("2026-10-16T03:09:00Z"), 60_000, 1_800_000).map((m) => m.id), ["q"], "quét lại: tin tự động của page không tính là đã trả lời");
+      assert.deepEqual(unansweredCustomerMessages(normalizeThreadMessages([{ id: "q", message: "Báo giá chả cá thu?", from: { id: "c" }, inserted_at: "2026-10-16T03:04:00" }, { id: "s", message: "Dạ 1kg 280k ạ", from: { id: PAGE, uid: "nv1" }, inserted_at: "2026-10-16T03:05:00" }], PAGE), Date.parse("2026-10-16T03:09:00Z"), 60_000, 1_800_000).map((m) => m.id), [], "quét lại: nhân viên thật đã trả lời ⇒ không chờ");
       // ═══ QUÉT LẠI TIN KHÁCH BỊ RƠI (03/10/2026 — bốn khách nhắn đúng lúc deploy khởi động lại app, không ai trả lời) ═══
       const iso = (msAgo: number) => new Date(Date.now() - msAgo).toISOString().replace("Z", "");
       const cuMsgs: Record<string, Record<string, unknown>[]> = {
@@ -2293,7 +2297,9 @@ async function testJourney() {
       assert.ok(!counts.skippedReasons.some((r) => r.reason === "BOT_SENT" || r.reason === "PAGE_REPLY"), "tin bot tự gửi / tin phía page không phải tin bị bỏ qua");
       // Dòng «Page đã trả lời» của bộ dữ liệu này trước đây sinh từ ngoại lệ «tự động của page trả lời câu mẫu» — đã bỏ 16/10/2026
       // (issue #856). Nay tin tự động không chốt lượt nào ⇒ không lý do bỏ qua nào được là «Page đã trả lời» chỉ vì tự động.
-      assert.ok(!counts.skippedReasons.some((r) => /Page đã trả lời/.test(r.reason)), `tin tự động của page không còn chốt tin khách: ${JSON.stringify(counts)}`);
+      assert.ok(counts.skipped >= 1, JSON.stringify(counts));
+      const tAuto = await db.select({ n: sql<number>`count(*)::int` }).from(schema.salesChatInbound).where(and(inArray(schema.salesChatInbound.threadId, ["t-ctx", "t-987", "t-989"]), eq(schema.salesChatInbound.note, PAGE_REPLIED_REASON_856)));
+      assert.equal(Number(tAuto[0]?.n ?? 0), 0, "luồng chỉ có tin TỰ ĐỘNG của page sau câu khách (t-ctx · t-987 · t-989): không tin khách nào bị chốt «Page đã trả lời»");
       // Nhà cung cấp OpenAI (BYOK) phải CHUYỂN mức suy luận + ngân sách của lượt gọi xuống Responses API — đo 01/10/2026: cứng
       // «medium» với ngân sách nhỏ ⇒ model suy nghĩ hết ngân sách, trả RỖNG. Thiếu `reasoning` ⇒ giữ «medium» như cũ.
       const oaBodies: Record<string, unknown>[] = [];

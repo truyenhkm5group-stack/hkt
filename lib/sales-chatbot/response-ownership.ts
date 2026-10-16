@@ -135,8 +135,11 @@ export function classifyOutbound(f: OutboundFacts): OutboundOrigin {
   // Tài khoản nhân viên Pancake gõ một câu đã dùng ở hội thoại khác (câu trả lời lưu sẵn) vẫn là NGƯỜI — tin mẫu chỉ là chứng cứ khi
   // không có danh tính người gửi.
   if (f.pancakeStaffAccount) return "VERIFIED_HUMAN";
+  // Hộp thư người của Meta (Business Suite / Messenger) cũng là danh tính người gửi: câu trả lời lưu sẵn gửi từ đó vẫn là NGƯỜI, xét TRƯỚC
+  // chứng cứ câu mẫu (review #857 — đảo thứ tự thì nhân viên dùng câu lưu sẵn trên Business Suite thành «tự động», AI chen vào).
+  if (f.metaAppId && META_HUMAN_INBOX_APP_IDS.includes(f.metaAppId)) return "VERIFIED_HUMAN";
   if (f.templateText) return "PANCAKE_AUTOMATION";
-  if (f.metaAppId) return META_HUMAN_INBOX_APP_IDS.includes(f.metaAppId) ? "VERIFIED_HUMAN" : "OTHER_APP";
+  if (f.metaAppId) return "OTHER_APP";
   return "UNKNOWN";
 }
 
@@ -196,7 +199,7 @@ export type CustomerTurn = {
   firstAt: number;
   lastAt: number;
   lastMessageId: string;
-  /** Mọi tin của lượt đều là câu mẫu quảng cáo. */
+  /** Mọi tin của lượt đều là câu mẫu quảng cáo. CHỈ ĐỂ ĐỌC / HIỂN THỊ: từ #856 không quyết định nào (trả lời hay không, ai đóng lượt) dựa vào cờ này. */
   allTemplate: boolean;
   /** Lượt có ít nhất một tin AI đọc được (không chỉ nhãn dán / ghi âm). `false` ⇒ việc của người, AI không trả lời / không gửi bù. */
   aiAnswerable: boolean;

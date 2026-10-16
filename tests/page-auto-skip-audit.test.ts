@@ -34,6 +34,14 @@ export function testPageAutoSkipAudit() {
   const sau2 = [cust("q", T), out("a", "PANCAKE_AUTOMATION", T + 1_000), cust("q2", T + 60_000, { status: "DONE", note: null })];
   assert.equal(phanLoai("q", buildCustomerTurns(sau2)), "CHOT_NHAM_BO_SOT", "khách nhắn tiếp trong cùng lượt mà chưa ai đáp ⇒ vẫn bỏ sót");
   assert.equal(phanLoai("khong-co", cao), null);
+  // Review: tin bị chốt chưa ai đáp dồn chung lượt với tin khách SAU nó; câu AI đáp tin sau đóng cả lượt nhưng KHÔNG đáp tin bị chốt.
+  const dapTinSau = buildCustomerTurns([cust("q", T, { template: true }), out("a", "PANCAKE_AUTOMATION", T + 1_000), cust("q2", T + 3_600_000, { status: "DONE", note: null }), out("b", "AI_AGENT", T + 3_600_000 + 5_000)]);
+  assert.equal(phanLoai("q", dapTinSau), "CHOT_NHAM_DA_DAP_SAU", "câu đáp cho tin sau không phải câu đáp cho tin bị chốt");
+  assert.equal(phanLoai("q", dapTinSau, new Set(["q"])), "CHOT_NHAM_DA_DAP_SAU");
+  // Khách gõ hai dòng liền, cả hai bị chốt, nhân viên đáp sau cả cụm ⇒ đóng hợp lệ cho cả hai.
+  const cum = buildCustomerTurns([cust("q", T), cust("q2", T + 4_000), out("v", "VERIFIED_HUMAN", T + 60_000)]);
+  assert.equal(phanLoai("q", cum, new Set(["q", "q2"])), "DONG_HOP_LE");
+  assert.equal(phanLoai("q2", cum, new Set(["q", "q2"])), "DONG_HOP_LE");
 
   assert.deepEqual(docThamSo(["hslc-hmt-shop"]), { org: "hslc-hmt-shop", hours: 168 });
   assert.deepEqual(docThamSo(["hslc-hmt-shop", "--hours=24"]), { org: "hslc-hmt-shop", hours: 24 });

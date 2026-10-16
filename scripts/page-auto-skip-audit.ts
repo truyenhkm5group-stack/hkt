@@ -31,7 +31,7 @@ import "dotenv/config";
 import { and, desc, eq, gte, inArray, sql } from "drizzle-orm";
 import { getDbForInspection, schema, type Db } from "@/db";
 import { findOrganization } from "@/lib/platform/organizations";
-import { buildCustomerTurns, type CustomerTurn, type LedgerMessage } from "@/lib/sales-chatbot/response-ownership";
+import { buildCustomerTurns, PAGE_REPLY_NOTE, STAFF_OUT_ID_PREFIX, type CustomerTurn, type LedgerMessage } from "@/lib/sales-chatbot/response-ownership";
 import { ledgerMessageOf } from "@/lib/sales-chatbot/response-ownership-ledger";
 import { rowsOf } from "@/lib/sql-rows";
 
@@ -63,11 +63,19 @@ export type PhanLoai = "DONG_HOP_LE" | "CHOT_NHAM_DA_DAP_SAU" | "CHOT_NHAM_BO_SO
 /**
  * Phân loại MỘT tin khách bị chốt «page đã trả lời», theo các lượt của hội thoại (luật mới). `null` = tin không thuộc lượt nào (bị lọc
  * khỏi sổ — ảnh trống / nhập lịch sử). HÀM THUẦN.
+ *
+ * `daChot` = mọi tin khách cùng luồng bị chốt «page đã trả lời». Lượt chỉ đóng khi có câu trả lời hợp lệ, nên tin khách chưa ai đáp
+ * dồn chung lượt với tin khách SAU nó: câu trả lời đóng lượt có thể là câu đáp cho tin sau (tin được AI / người xử lý bình thường), không
+ * phải cho tin bị chốt. Lượt đã đáp mà sau tin này còn một tin khách KHÔNG bị chốt ⇒ giữa tin này và tin sau không có câu trả lời hợp lệ
+ * nào ⇒ chốt nhầm, chỉ được đáp ở tin sau. Tin sau cũng bị chốt (khách gõ nhiều dòng liền) thì cùng một câu đáp hợp lệ phủ cả cụm.
  */
-export function phanLoai(messageId: string, turns: readonly CustomerTurn[]): PhanLoai | null {
+export function phanLoai(messageId: string, turns: readonly CustomerTurn[], daChot: ReadonlySet<string> = new Set([messageId])): PhanLoai | null {
   const i = turns.findIndex((t) => t.messageIds.includes(messageId));
   if (i < 0) return null;
-  if (turns[i].answered) return "DONG_HOP_LE";
+  if (turns[i].answered) {
+    const sau = turns[i].messageIds.slice(turns[i].messageIds.indexOf(messageId) + 1);
+    return sau.some((id) => !daChot.has(id)) ? "CHOT_NHAM_DA_DAP_SAU" : "DONG_HOP_LE";
+  }
   // Lượt không ai đáp. Còn lượt sau (khách nhắn tiếp) và lượt CUỐI đã được đáp ⇒ khách đã được trả lời ở lượt sau.
   const last = turns[turns.length - 1];
   return i < turns.length - 1 && last.answered ? "CHOT_NHAM_DA_DAP_SAU" : "CHOT_NHAM_BO_SOT";
@@ -111,7 +119,7 @@ async function main(): Promise<number> {
 
   const c = schema.salesChatConversations;
   const sm = schema.salesChatStaffMessages;
-  const dem = { tong: 0, hopLe: 0, daDapSau: 0, boSot: 0, tong24: 0, boSot24: 0, khongXep: 0 };
+  const dem = { tong: 0, hopLe: 0, daDapSau: 0, boSot: 0, tong24: 0, boSot24: 0, khongXep: 0, pageChuaRoNguoi: 0 };
   const hoiThoaiBoSot: { conv: string; tuoiPhut: number; tuCuu: boolean; nguoiGiu: boolean; coDon: boolean }[] = [];
   for (const [k, ds] of theoLuong) {
     const [pageId, threadId] = k.split("\u0000");
@@ -124,18 +132,22 @@ async function main(): Promise<number> {
     const staffIds = rows.map((r) => (r.messageId.startsWith("staff-out:") ? r.messageId.slice(10).split(":")[0] : null)).filter((x): x is string => Boolean(x));
     const trangThaiNv = new Map<string, string>();
     if (staffIds.length) for (const s of await db.select({ id: sm.id, status: sm.status }).from(sm).where(inArray(sm.id, staffIds))) trangThaiNv.set(s.id, s.status);
+    // Tin page chưa có `sender_kind` (dòng trước 0244): không có cờ câu mẫu (`pageTemplateIds` trống) nên tin CHÀO đầu phiên của chúng không
+    // nhận ra được ⇒ thành UNKNOWN ⇒ được tính là câu trả lời ⇒ CHỐT NHẦM bị ĐẾM THIẾU. Đếm riêng để người đọc biết con số là CẬN DƯỚI.
+    dem.pageChuaRoNguoi += rows.filter((r) => r.note === PAGE_REPLY_NOTE && !r.messageId.startsWith(STAFF_OUT_ID_PREFIX) && r.senderKind === null).length;
     const flags = { customerTemplates: new Set<string>(), pageTemplateIds: new Set<string>() };
     const ledger = rows
       .map((r) => ledgerMessageOf({ ...r, staffStatus: r.messageId.startsWith("staff-out:") ? (trangThaiNv.get(r.messageId.slice(10).split(":")[0]) ?? null) : undefined } as Parameters<typeof ledgerMessageOf>[0], flags))
       .filter((m): m is LedgerMessage => m !== null);
     const turns = buildCustomerTurns(ledger);
+    const daChot = new Set(ds.map((r) => r.messageId));
     let boSotLuong = false;
     let tuoi = Infinity;
     for (const r of ds) {
       dem.tong += 1;
       const trong24 = nowMs - r.createdAt.getTime() <= 24 * 3_600_000;
       if (trong24) dem.tong24 += 1;
-      const p = phanLoai(r.messageId, turns);
+      const p = phanLoai(r.messageId, turns, daChot);
       if (p === null) dem.khongXep += 1;
       else if (p === "DONG_HOP_LE") dem.hopLe += 1;
       else if (p === "CHOT_NHAM_DA_DAP_SAU") dem.daDapSau += 1;
@@ -155,7 +167,8 @@ async function main(): Promise<number> {
   tomTat(`page-auto-skip-audit ${ts.org} ${ts.hours} giờ: tin khách chốt «Page đã trả lời» ${dem.tong} · ĐÓNG HỢP LỆ ${dem.hopLe} · CHỐT NHẦM ${dem.daDapSau + dem.boSot} (${tyLe(dem.daDapSau + dem.boSot, dem.tong)})`);
   tomTat(`chốt nhầm: đã được đáp ở lượt sau ${dem.daDapSau} · BỎ SÓT HIỆN TẠI ${dem.boSot} tin / ${hoiThoaiBoSot.length} hội thoại · không xếp được ${dem.khongXep}`);
   tomTat(`24 giờ: chốt ${dem.tong24} · bỏ sót ${dem.boSot24} (${tyLe(dem.boSot24, dem.tong24)})`);
-  tomTat(`hội thoại bỏ sót: ≤ 2 giờ, không người giữ, chưa đơn (cơ chế sẵn có tự trả lời MỘT lần sau deploy) ${tuCuu} · có người giữ ${hoiThoaiBoSot.filter((h) => h.nguoiGiu).length} · đã có đơn/nháp ${hoiThoaiBoSot.filter((h) => h.coDon).length} · cũ hơn 2 giờ (cho NGƯỜI, AI không nhắn bù) ${hoiThoaiBoSot.filter((h) => !h.tuCuu).length}`);
+  tomTat(`tin page chưa rõ người gửi (trước 0244, tính như câu trả lời) ${dem.pageChuaRoNguoi}${dem.pageChuaRoNguoi ? " ⇒ CHỐT NHẦM là CẬN DƯỚI" : ""}`);
+  tomTat(`hội thoại bỏ sót (ƯỚC TÍNH theo tuổi lượt, chưa trừ lượt bị chặn vì lý do khác): ≤ 2 giờ, không người giữ, chưa đơn (cơ chế sẵn có tự trả lời MỘT lần sau deploy) ${tuCuu} · có người giữ ${hoiThoaiBoSot.filter((h) => h.nguoiGiu).length} · đã có đơn/nháp ${hoiThoaiBoSot.filter((h) => h.coDon).length} · cũ hơn 2 giờ (cho NGƯỜI, AI không nhắn bù) ${hoiThoaiBoSot.filter((h) => !h.tuCuu).length}`);
   console.log("── Hội thoại bỏ sót (MÃ HOÁ) — mở trong hộp thư: /ai/sales-chatbot/inbox?c=<mã> ──");
   for (const h of hoiThoaiBoSot.sort((a, b) => a.tuoiPhut - b.tuoiPhut)) console.log(`${h.conv} · ${h.tuoiPhut} phút · ${h.tuCuu ? "tự cứu" : "cho người"}${h.nguoiGiu ? " · có người giữ" : ""}${h.coDon ? " · có đơn" : ""}`);
   return 0;
