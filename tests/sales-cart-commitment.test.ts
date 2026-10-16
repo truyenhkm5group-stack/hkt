@@ -117,6 +117,11 @@ function testClassify() {
     ["bỏ chả cá thu nha", "REMOVE"],
     ["hủy chả cá", "REMOVE"],
     ["bỏ món chả cá đi em", "REMOVE"],
+    // P0 ThuyNgo: khách phủ nhận món bot tự thêm, kể cả cách viết tắt «kg» = không.
+    ["Kg có order chả cá thu nha", "REMOVE"],
+    ["Không có order chả cá thu nha", "REMOVE"],
+    ["Ko order chả cá thu", "REMOVE"],
+    ["Không đặt chả cá thu", "REMOVE"],
     // Huỷ cả đơn
     ["thôi không lấy nữa", "CANCEL"],
     ["k lấy nữa e", "CANCEL"],
@@ -290,6 +295,15 @@ function testReview2() {
     assert.deepEqual(names(out), [["Chả mực giã tay", 1000]], `«${t}» ⇒ chỉ còn chả mực`);
     assert.equal(commitmentViolation(out, [L("p-muc", "m1", "Chả mực giã tay (1kg)", 1, 1000)], 3), null, `«${t}»: bỏ chả cá KHÔNG bị chặn`);
   }
+  // P0 ThuyNgo: KHÁCH KHÔNG ĐẶT cá thu. Giữ mực, loại cá; không hiểu «kg» đơn vị là phủ nhận nếu không có «có order».
+  for (const t of ["Kg có order chả cá thu nha", "Không có order chả cá thu nha", "Ko order chả cá thu", "Không đặt chả cá thu"]) {
+    const out = apply(pair(), t);
+    assert.deepEqual(names(out), [["Chả mực giã tay", 1000]], `«${t}» ⇒ phải bỏ cá thu, giữ chả mực`);
+    assert.equal(commitmentViolation(out, [L("p-muc", "m1", "Chả mực giã tay (1kg)", 1, 1000)], 3), null);
+    assert.equal(hasEditCue(t, ["Chả cá thu", "Chả mực giã tay"]), true);
+  }
+  assert.notEqual(classifyCartMessage("chị có order chả cá thu").kind, "REMOVE");
+  assert.notEqual(classifyCartMessage("2 kg chả cá thu").kind, "REMOVE");
   for (const t of ["lấy chả cá thôi", "lay ca thu thoi", "mực thì thôi nhé", "thôi mực khỏi", "mực k lấy nữa", "chả mực thôi không lấy"]) {
     const out = apply(pair(), t);
     assert.deepEqual(names(out), [["Chả cá thu", 2000]], `«${t}» ⇒ chỉ còn chả cá (không huỷ cả giỏ)`);
