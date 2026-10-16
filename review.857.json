@@ -1,0 +1,8 @@
+{
+  "pr": 857,
+  "sha": "7ec9b9bf6f701b996fb025b7b07590de9b86f583",
+  "verdict": "PASS",
+  "actor": "vm:hkt",
+  "at": "2026-10-16T04:09:22.812Z",
+  "note": "review độc lập 3 lượt; còn: catch-up API chỉ nhận cờ Pancake, chữ PAGE_REPLIED_REASON — việc sau"
+}
