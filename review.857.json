@@ -1,8 +1,8 @@
 {
   "pr": 857,
-  "sha": "7ec9b9bf6f701b996fb025b7b07590de9b86f583",
+  "sha": "700ca7682d5a6e1e11c226bbca857f9ed87233a1",
   "verdict": "PASS",
   "actor": "vm:hkt",
-  "at": "2026-10-16T04:09:22.812Z",
-  "note": "review độc lập 3 lượt; còn: catch-up API chỉ nhận cờ Pancake, chữ PAGE_REPLIED_REASON — việc sau"
+  "at": "2026-10-16T06:43:49.743Z",
+  "note": "merge origin/main 1681f098; phần #857 không đổi so với 7ec9b9bf"
 }
