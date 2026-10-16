@@ -15,16 +15,17 @@ import { and, eq } from "drizzle-orm";
 import { getDb, getPlatformDb, organizationDatabaseUrl, schema } from "@/db";
 import type { SessionUser } from "@/lib/auth/session";
 import { saveConnection, setConnectionStatus, testOrgConnection } from "@/lib/connectors/service";
+import { ADDRESS_REVIEW_BLOCK, autoCreateShipmentCore, bulkCreateCore } from "@/lib/carriers/engine";
 import { GHN_API } from "@/lib/constants/carrier-ghn";
 import { carrierCreateOf } from "@/lib/constants/carrier-vtp";
-import { autoAttemptDue, nextFailedAttempts, parseShippingRoutingConfig, SHIPPING_ROUTING_LIMITS, type ShippingRoutingConfig } from "@/lib/constants/shipping-routing";
+import { autoAttemptDue, nextFailedAttempts, parseShippingRoutingConfig, ROUTE_HOLD_META, SHIPPING_ROUTING_LIMITS, type ShippingRoutingConfig } from "@/lib/constants/shipping-routing";
 import { getEnabledModules, invalidateCapabilities } from "@/lib/platform/capabilities";
 import { withOrganization } from "@/lib/platform/context";
 import { invalidateOrganizations } from "@/lib/platform/organizations";
 import { provisionOrganization } from "@/lib/platform/provision";
 import { orderReviewOf, reviewSeenOf } from "@/lib/constants/order-review";
 import { confirmManualDeliveryCore, confirmOrderReviewCore, createManualOrderCore, flagOrderForReviewAsAgent, manualOrderFormValues, updateManualOrderCore } from "@/lib/records/order-create";
-import { ADDRESS_REVIEW_HOLD_REASON, addressReviewOpenOf, decideShippingRoute, matchSelfArea, type RouteOrderInput } from "@/lib/shipping/route";
+import { addressReviewOpenOf, decideShippingRoute, matchSelfArea, type RouteOrderInput } from "@/lib/shipping/route";
 import { assignCourierCore, routedOrders, runShippingRoutes, saveShippingRoutingCore } from "@/lib/shipping/routing";
 import { runJob } from "@/lib/sync/jobs";
 
@@ -74,7 +75,7 @@ function testPure() {
   assert.equal((r({ weightGrams: null }) as { code?: string }).code, "NO_WEIGHT", "thiếu cân ⇒ GIỮ, không đoán cân");
   assert.deepEqual(r({}), { kind: "CARRIER", carrier: "GHN", weightGrams: 600, auto: { ok: true } });
   // #855 (review độc lập): đơn ĐÃ có xã (máy tự điền / đọc lại từ địa chỉ khách vừa đổi) nhưng còn cờ cần kiểm địa chỉ ⇒ GIỮ, mọi tuyến.
-  assert.deepEqual(r({ addressReviewOpen: true }), { kind: "HOLD", code: "NO_WARD", reason: ADDRESS_REVIEW_HOLD_REASON });
+  assert.deepEqual(r({ addressReviewOpen: true }), { kind: "HOLD", code: "ADDRESS_REVIEW", reason: ROUTE_HOLD_META.ADDRESS_REVIEW.label });
   assert.equal(r({ addressReviewOpen: true, province: "Hà Nội", ward: "Phường Hoàn Kiếm" }).kind, "HOLD", "cờ mở thắng cả khu tự giao");
   assert.deepEqual(r({ addressReviewOpen: true, hasLiveShipment: true }), { kind: "SHIPPED" }, "đã có vận đơn thì vẫn là đã đi");
   // Đọc cờ FAIL-CLOSED: không có ⇒ không giữ; có ADDRESS_UNRESOLVED / khoá review hỏng ⇒ giữ; cờ khác (khách huỷ) không phải địa chỉ.
@@ -267,9 +268,15 @@ async function testFlow() {
       const fl = await flagOrderForReviewAsAgent({ name: "Chatbot bán hàng", source: "tests/shipping-routing" }, flaggedId, { code: "ADDRESS_UNRESOLVED", note: "Khách đổi địa chỉ giao — cần người xác minh địa chỉ mới", quote: null });
       assert.ok(fl.ok && fl.flagged, JSON.stringify(fl));
       rt = await routes();
-      assert.deepEqual(rt[flaggedId]?.route, { kind: "HOLD", code: "NO_WARD", reason: ADDRESS_REVIEW_HOLD_REASON }, "ô xã đã có vẫn GIỮ khi cờ còn mở");
+      assert.deepEqual(rt[flaggedId]?.route, { kind: "HOLD", code: "ADDRESS_REVIEW", reason: ROUTE_HOLD_META.ADDRESS_REVIEW.label }, "ô xã đã có vẫn GIỮ khi cờ còn mở");
       await runShippingRoutes({}, { fetch: ghn.fetch });
       assert.equal((await db.select().from(schema.shipments).where(eq(schema.shipments.orderId, flaggedId))).length, 0, "cờ mở ⇒ không vận đơn");
+      // Chặn cứng ở lõi: gọi thẳng lõi tạo vận đơn tự động / tạo hàng loạt cũng không đi.
+      const direct = await autoCreateShipmentCore("job:kiem-thu", "GHN", flaggedId, { serviceCode: null }, { fetch: ghn.fetch });
+      assert.ok(!direct.ok && direct.error === ADDRESS_REVIEW_BLOCK, JSON.stringify(direct));
+      const bulk = await bulkCreateCore(admin, "GHN", [flaggedId], { serviceCode: "2" }, { fetch: ghn.fetch });
+      assert.ok(bulk.ok && bulk.rows[0]?.ok === false && bulk.rows[0].message === ADDRESS_REVIEW_BLOCK, JSON.stringify(bulk));
+      assert.equal((await db.select().from(schema.shipments).where(eq(schema.shipments.orderId, flaggedId))).length, 0);
       const [fr] = await db.select({ raw: schema.orders.raw }).from(schema.orders).where(eq(schema.orders.id, flaggedId));
       assert.ok((await confirmOrderReviewCore(admin, flaggedId, reviewSeenOf(orderReviewOf(fr!.raw)!.entries))).ok, "người gỡ cờ");
       const go = await runShippingRoutes({}, { fetch: ghn.fetch });

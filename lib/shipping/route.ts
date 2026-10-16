@@ -77,9 +77,6 @@ export function matchSelfArea(areas: readonly SelfArea[], province: string, ward
   return null;
 }
 
-/** Lý do GIỮ khi đơn còn cờ cần kiểm địa chỉ (dùng mã NO_WARD — cùng lối sửa «Sửa đơn / xác nhận địa chỉ»). */
-export const ADDRESS_REVIEW_HOLD_REASON = "Địa chỉ còn cờ cần kiểm (khách đổi địa chỉ / địa giới cũ chưa ghép) — nhân viên xác minh rồi «Xác nhận đơn», máy mới tạo vận đơn";
-
 /**
  * Đơn có cờ cần kiểm ĐỊA CHỈ đang mở không — đọc thẳng `raw.review` (không qua bộ đọc lọc mã lạ). FAIL-CLOSED: khoá `review` có mặt
  * mà không đọc được (không phải đối tượng có mảng `entries`) ⇒ coi như CÓ cờ (giữ đơn). HÀM THUẦN.
@@ -102,7 +99,7 @@ export function decideShippingRoute(o: RouteOrderInput, cfg: ShippingRoutingConf
   if (!o.isErp) return hold("NOT_ERP");
   if (o.stage !== "CONFIRMED") return hold("NOT_CONFIRMED");
   if (o.hasLiveShipment) return { kind: "SHIPPED" };
-  if (o.addressReviewOpen) return hold("NO_WARD", ADDRESS_REVIEW_HOLD_REASON);
+  if (o.addressReviewOpen) return hold("ADDRESS_REVIEW");
   if (!o.province.trim()) return hold("NO_PROVINCE");
   if (!o.ward.trim()) return hold("NO_WARD");
   const area = matchSelfArea(cfg.selfAreas, o.province, o.ward);

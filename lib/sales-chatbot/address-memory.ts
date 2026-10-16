@@ -17,7 +17,7 @@
 import { canAutoFill, customerStatedAddresses, hasStreetDetail, legacyAddressUnmapped, looksLikeDeliveryAddress, looksLikeStreetFragment, namesOtherWard, parseCustomerAddress, sameDeliveryPlace, wantsAddressChange, wardFromCustomerWords, type AddressPart } from "@/lib/address/customer-address";
 
 export { wantsAddressChange };
-import { foldVnText } from "@/lib/address/vn-address";
+import { findProvince, foldVnText } from "@/lib/address/vn-address";
 import type { ChatState } from "@/lib/sales-chatbot/tools";
 
 // ─────────────────────────── TRÍ NHỚ ĐÃ HỎI ───────────────────────────
@@ -84,10 +84,22 @@ const TAIL_FILLER = /[\s,.;!]*(?:nhé|nhe|nha|nhá|ạ|a|em|shop|nhé em|nha em)
 
 /** Các cách đọc một dòng thành địa chỉ: nguyên dòng, rồi phần sau lời dẫn (bỏ tiểu từ cuối). HÀM THUẦN. */
 function addressReadings(line: string): string[] {
-  const l = line.trim();
-  const m = LEAD_IN.exec(l);
-  const tail = m ? l.slice(m.index + m[0].length).replace(TAIL_FILLER, "").trim() : "";
-  return tail && tail !== l ? [l, tail] : [l];
+  const out: string[] = [];
+  const add = (x: string) => {
+    const v = x.trim().replace(TAIL_FILLER, "").replace(/^(?:ở|tại|o|tai|về|ve)\s+/iu, "").trim();
+    if (v && !out.includes(v)) out.push(v);
+  };
+  // Từng CÂU (tách ở «. » / «! » / «? »): một tin có thể mang hai địa chỉ của hai người («Chị ở <A>. Người nhận: …, <B>»).
+  const whole = line.trim();
+  for (const seg of [whole, ...whole.split(/[.!?]\s+/).map((x) => x.trim()).filter((x) => x && x !== whole)]) {
+    add(seg);
+    const m = LEAD_IN.exec(seg);
+    if (m) add(seg.slice(m.index + m[0].length));
+    // Phần đuôi sau mỗi dấu phẩy / hai chấm, dài ⇒ ngắn: «…, Thu, 0915000404, Lô 3 khu Thử, Phường Cầu Giấy, Hà Nội», «… cơ quan chị: 10
+    // đường Mẫu, Phường Đống Đa, Hà Nội nhé» — địa chỉ thường đứng CUỐI câu, sau tên / SĐT / lời dẫn.
+    for (let i = 0; i < seg.length; i++) if (seg[i] === "," || seg[i] === ":" || seg[i] === ";") add(seg.slice(i + 1));
+  }
+  return out;
 }
 
 /** Dòng (hoặc phần sau lời dẫn của nó) là một địa chỉ giao ⇒ chuỗi địa chỉ; không ⇒ `null`. HÀM THUẦN. */
@@ -95,13 +107,32 @@ function deliveryAddressIn(line: string): string | null {
   return addressReadings(line).find((x) => looksLikeDeliveryAddress(x)) ?? null;
 }
 
-/** Lời khách nói ĐỔI nơi giao TƯỜNG MINH («đổi địa chỉ», «giao về …», «chị chuyển nhà / chuyển ra HN rồi», «địa chỉ mới: …»). */
-const CHANGE_CUE = /(?:^| )(?:chuyen (?:nha|ra|vao|ve|sang|qua|cho)|doi (?:dia chi|dc|cho|noi)|dia chi (?:moi|khac)|cho khac|noi khac|nha khac|khong o (?:do|day|cho cu) nua)(?: |$)/;
+/** Lời đổi nơi giao TƯỜNG MINH đọc trên chữ CÓ DẤU (bỏ dấu thì «đợi chờ» = «đổi chỗ», «chờ khác» = «chỗ khác»). */
+const CHANGE_CUE_ACCENTED = /(?:^|[\s,.!])(?:(?:đổi|thay|sửa)(?: lại)?(?: sang| qua)? (?:địa chỉ|chỗ|nơi|nhà)|địa chỉ (?:mới|khác)|chỗ khác|nơi khác|nhà khác|chuyển nhà|dọn nhà|không ở (?:đó|đấy|đây|chỗ cũ) nữa)(?=$|[\s,.!?])/u;
+/** Bản không dấu — chỉ những cụm không mơ hồ khi bỏ dấu. */
+const CHANGE_CUE_FOLDED = /(?:^| )(?:doi dia chi|doi dc|thay dia chi|sua dia chi|dia chi (?:moi|khac)|chuyen nha|don nha)(?: |$)/;
+/** «chuyển / dọn ra · về · vào · sang · qua · đến · tới <nơi>» — chỉ là đổi địa chỉ khi phần sau là NƠI CHỐN (nhà / chỗ / địa chỉ / tỉnh / một địa chỉ). */
+const MOVE_RE = /(?:^|[\s,.!])(?:chuyển|chuyen|dọn|don) (?:ra|về|ve|vào|vao|sang|qua|đến|den|tới|toi) (.+)$/iu;
 
-/** Tin khách có tín hiệu đổi địa chỉ TƯỜNG MINH (lời dẫn «giao về…», «đổi địa chỉ», «chuyển nhà»…). HÀM THUẦN. */
+function placeAhead(rest: string): boolean {
+  const r = rest.normalize("NFC").toLowerCase().trim();
+  if (/^(?:nhà|chỗ|địa chỉ|nơi|nha moi|cho moi|dia chi)(?=$|[\s,.!])/u.test(r)) return true;
+  const words = r.replace(/[,.!?]/g, " ").split(/\s+/).filter(Boolean);
+  for (let n = Math.min(4, words.length); n >= 1; n--) if (findProvince(words.slice(0, n).join(" "))) return true;
+  return deliveryAddressIn(rest) !== null;
+}
+
+/**
+ * Tin khách có tín hiệu đổi địa chỉ TƯỜNG MINH («đổi địa chỉ», «giao về <địa chỉ>», «chị chuyển nhà / chuyển ra HN rồi»). «chị chuyển qua
+ * rồi nhé», «chuyển cho em rồi», «đợi chờ» KHÔNG phải (review độc lập #855). HÀM THUẦN.
+ */
 export function hasChangeCue(text: string): boolean {
-  const f = foldVnText(text);
-  return wantsAddressChange(text) || CHANGE_CUE.test(f) || DECLINE_ADDRESS_RE.test(f) || LEAD_IN.test(text.trim());
+  const t = text.normalize("NFC").toLowerCase();
+  if (CHANGE_CUE_ACCENTED.test(t) || CHANGE_CUE_FOLDED.test(foldVnText(text))) return true;
+  const move = MOVE_RE.exec(t);
+  if (move && placeAhead(move[1] ?? "")) return true;
+  const lead = LEAD_IN.exec(text.trim());
+  return Boolean(lead && placeAhead(text.trim().slice(lead.index + lead[0].length)));
 }
 
 /** Tín hiệu chiều địa chỉ của MỘT dòng khách gõ: từ chối > dùng lại > một địa chỉ giao tự gõ (`NEW`). HÀM THUẦN. */
@@ -209,7 +240,10 @@ export function deliveryAddressDecision(state: Pick<ChatState, "draft" | "custom
   }
   // Địa chỉ khách tự gõ MỚI HƠN lời «như cũ» (hoặc khách không nói «như cũ») ⇒ chữ khách thắng.
   if (typed && typed.messageIndex! > reuseAt) {
-    if (held && !sameDeliveryPlace(held.raw, typed.raw)) return { status: "CHANGE_PENDING_VERIFICATION", use: typed, previous: held, reason: "Khách vừa gửi địa chỉ giao KHÁC địa chỉ đơn nháp / hồ sơ đang giữ — địa chỉ mới thắng, đơn cần sửa theo nó và cần người xác minh" };
+    // Địa chỉ đang giữ cũng nằm trong CHÍNH tin đó hoặc tin sau (đặt hộ: «Chị ở <A>. Người nhận: <B>») ⇒ hai địa chỉ của hai người,
+    // không phải đổi nơi giao (đơn vàng «dat-ho-nguoi-than»).
+    const heldStatedAlongside = held !== null && hasStreetDetail(held.raw) && customerTexts.slice(typed.messageIndex!).some((m) => m.split(/\n+/).some((l) => addressReadings(l).some((x) => looksLikeDeliveryAddress(x) && sameDeliveryPlace(held.raw, x))));
+    if (held && !heldStatedAlongside && !sameDeliveryPlace(held.raw, typed.raw)) return { status: "CHANGE_PENDING_VERIFICATION", use: typed, previous: held, reason: "Khách vừa gửi địa chỉ giao KHÁC địa chỉ đơn nháp / hồ sơ đang giữ — địa chỉ mới thắng, đơn cần sửa theo nó và cần người xác minh" };
     return { status: "NEW_EXPLICIT", use: typed, previous: held, reason: "Địa chỉ khách vừa tự gõ" };
   }
   if (reuseAt >= 0) {
@@ -407,6 +441,8 @@ export function asksForName(sentence: string): boolean {
 
 /** Câu thay khi cả tin chỉ là câu hỏi lại địa chỉ — ghi nhận, không hỏi gì thêm. */
 export const ADDRESS_KNOWN_TEXT = "Dạ em ghi nhận địa chỉ của mình rồi ạ.";
+/** Câu thay khi câu bị bỏ là xin SĐT / tên đã có mà CHƯA có địa chỉ — không nói «đã ghi nhận địa chỉ». */
+export const CONTACT_KNOWN_TEXT = "Dạ em ghi nhận thông tin của mình rồi ạ.";
 /** Câu thay khi phải chuyển người kiểm thông tin nhận hàng (#855) — không hỏi khách thêm lần nào. */
 export const ADDRESS_STAFF_TEXT = "Dạ em nhờ nhân viên kiểm tra lại thông tin nhận hàng của mình ngay ạ.";
 
@@ -424,7 +460,7 @@ export type AddressReaskVerdict = { rest: string; note: string; handoff?: string
 /** Ghi chú cho người vận hành theo mã lý do — một chỗ khai (đếm `address_reask` theo đúng câu này). */
 export const ADDRESS_REASK_NOTE: Record<AddressReaskCode, string> = {
   WARD_KNOWN: "AI hỏi lại phường / xã khách đã cho (máy chủ đã ghép được theo địa giới mới) — đã bỏ câu hỏi",
-  WARD_ASKED: "AI hỏi lại phường / xã đã hỏi khách ở lượt trước mà vẫn chưa có — đã bỏ câu hỏi, chuyển nhân viên kiểm địa chỉ",
+  WARD_ASKED: "AI hỏi lại phường / xã đã hỏi khách ở lượt trước — đã bỏ câu hỏi, đơn đi với ô xã trống + cờ cần kiểm địa chỉ",
   LEGACY_UNMAPPED: "AI hỏi phường / xã theo địa giới mới khi khách đã cho địa chỉ đủ theo địa giới CŨ — đã bỏ câu hỏi; giữ nguyên văn, nhân viên kiểm (cờ cần kiểm địa chỉ)",
   FULL_KNOWN: "AI xin lại địa chỉ khách đã cho — đã bỏ câu hỏi",
   REUSE_UNVERIFIED: "Khách muốn dùng địa chỉ cũ, không có địa chỉ đầy đủ đã xác minh — đã bỏ câu hỏi lại, chuyển nhân viên kiểm",
@@ -490,7 +526,10 @@ export function addressReaskVerdict(botText: string, k: AddressKnowledge, turn: 
   const legacy = free && Boolean(k.legacyUnmapped) && (Boolean(k.lastSettlesAddress) || k.draftMismatch === true);
   const fullKnown = free && ((k.ward !== null && k.province && k.street) || Boolean(k.legacyUnmapped)) && Boolean(k.lastSettlesAddress);
   const addressHeld = k.ward !== null || Boolean(k.legacyUnmapped);
-  const wardAsked = free && k.ward === null && !k.legacyUnmapped && ((k.wardAskedAt !== null && k.wardAskedAt < turn) || (askedWardBefore && repeatOk));
+  // Mốc «đã hỏi phường»: khi nơi gọi đưa `botTexts` (engine) thì CHỈ tính câu thật sự đã gửi tới khách — mốc của công cụ
+  // (`wardAskedAt`) ghi lúc công cụ trả câu hỏi, có thể chưa bao giờ tới khách. Không đưa (bài kiểm / nơi gọi cũ) ⇒ dùng mốc công cụ.
+  const wardAskedSent = opts.botTexts !== undefined ? askedWardBefore : k.wardAskedAt !== null && k.wardAskedAt < turn;
+  const wardAsked = free && k.ward === null && !k.legacyUnmapped && wardAskedSent && repeatOk;
   const reuse = free && Boolean(k.reuseUnresolved);
   const complaintOn = (field: AskField) => free && Boolean(k.complained) && (field === "phone" ? askedPhoneBefore : field === "name" ? askedNameBefore : askedAddressBefore || askedWardBefore || k.wardAskedAt !== null);
   const twice = (field: AskField) => free && repeatOk && (field === "phone" ? askedPhoneBefore && !k.phoneKnown : field === "name" ? askedNameBefore && !k.nameKnown : field === "address" ? askedAddressBefore && !addressHeld : false);
@@ -501,7 +540,9 @@ export function addressReaskVerdict(botText: string, k: AddressKnowledge, turn: 
     if (field === "ward") {
       if (legacy) return { code: "LEGACY_UNMAPPED", missing: false };
       if (wardKnown) return { code: "WARD_KNOWN", missing: false };
-      if (wardAsked) return { code: "WARD_ASKED", missing: true };
+      // Phường đã hỏi MỘT lần và khách đã trả lời (lượt này do chính tin khách mở ra) ⇒ bỏ câu hỏi, đơn đi với ô xã trống + cờ cần
+      // kiểm; KHÔNG chuyển người — chỉ chuyển khi khách phàn nàn (nhánh COMPLAINT ở trên) hoặc đơn không lên được (cổng chốt).
+      if (wardAsked) return { code: "WARD_ASKED", missing: !(k.province || k.street) };
       return null;
     }
     if (field === "address") {
@@ -525,7 +566,9 @@ export function addressReaskVerdict(botText: string, k: AddressKnowledge, turn: 
   const missing = reasons.find((r) => r.missing);
   const code = (missing ?? reasons[0]).code;
   const note = k.draftMismatch ? `${ADDRESS_REASK_NOTE[code]} · địa chỉ khách vừa gửi KHÁC đơn nháp (cần sửa đơn + người xác minh)` : ADDRESS_REASK_NOTE[code];
-  if (!missing) return { rest, note };
+  // Không chuyển người mà không còn câu nào: chưa có địa chỉ thì KHÔNG để nơi gọi nói «đã ghi nhận địa chỉ».
+  const addressRecorded = addressHeld || (k.province && k.street);
+  if (!missing) return { rest: rest || (addressRecorded ? "" : CONTACT_KNOWN_TEXT), note };
   const handoff = code === "REUSE_UNVERIFIED" ? ADDRESS_HANDOFF_REASON.REUSE_UNVERIFIED : code === "COMPLAINT" ? ADDRESS_HANDOFF_REASON.COMPLAINT : ADDRESS_HANDOFF_REASON.REPEAT_ASK;
   return { rest: [rest, ADDRESS_STAFF_TEXT].filter(Boolean).join(" "), note, handoff };
 }

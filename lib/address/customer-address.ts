@@ -207,7 +207,12 @@ export function acceptCustomerWard(a: Pick<CustomerAddress, "provinceCode" | "pr
  * địa chỉ mới KHÔNG được bỏ, và phường đã nói cho nơi cũ không còn là lời khai (review PR #848 lần 2–3). Bắt rộng có chủ ý: bắt nhầm
  * («chỗ khác có rẻ hơn không») chỉ làm hàng rào đứng ngoài một lượt. HÀM THUẦN.
  */
+const CHANGE_ACCENTED = /(?:^|[\s,.!])(?:(?:đổi|thay|sửa)(?: lại)?(?: (?:sang|qua))? (?:địa chỉ|chỗ|nơi|nhà)|địa chỉ (?:mới|khác)|(?:chỗ|nơi|nhà) khác|(?:giao|gửi|ship|chuyển)(?: hàng)? (?:về|tới|đến|sang|qua|ở|cho) (?:nhà|công ty|cơ quan|cửa hàng|shop|trường|bệnh viện|chợ|xưởng|kho|văn phòng|tòa|toà|chung cư))(?=$|[\s,.!?])/u;
+/** Chữ có dấu tiếng Việt (khách gõ có dấu ⇒ đọc trên chữ có dấu, tránh «đợi chờ» = «đổi chỗ» khi bỏ dấu). */
+const HAS_VN_DIACRITIC = /[àáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹđ]/iu;
+
 export function wantsAddressChange(text: string): boolean {
+  if (HAS_VN_DIACRITIC.test(text)) return CHANGE_ACCENTED.test(text.normalize("NFC").toLowerCase());
   const f = foldVnText(text);
   return /(?:^| )(?:doi|thay|sua)(?: lai)?(?: (?:sang|qua))? (?:dia chi|cho|noi|nha)(?: |$)|(?:^| )dia chi (?:moi|khac)(?: |$)|(?:^| )(?:cho|noi|nha) khac(?: |$)|(?:^| )(?:giao|gui|ship|chuyen)(?: hang)? (?:ve|toi|den|sang|qua|o|cho) (?:nha|cong ty|co quan|cua hang|shop|truong|benh vien|cho|xuong|kho|van phong|toa|chung cu)(?: |$)/.test(f);
 }
@@ -335,6 +340,8 @@ export function looksLikeDeliveryAddress(line: string): boolean {
 
 /** Chữ trong «phần đường» cho thấy câu là chuyện mua bán / giao nhận chứ không phải số nhà, tên đường (review #855). */
 const CHAT_STREET_STOP = /(?:^|[\s,.])(?:giao|gửi|gui|ship|lâu|quá|mua|lấy|đặt|order|size|bộ|cái|hộp|gói|hũ|kg|chai|túi|lạng|đôi|hàng trước|đơn trước)(?=$|[\s,.!])/u;
+/** Tiểu từ cuối câu chat (một hoặc nhiều, kèm dấu câu). */
+const CHAT_TAIL_PARTICLES = /(?:[\s,.!]+(?:nha|nhé|nhe|nhá|ạ|a|thôi|nữa|em|chị|anh|shop|ok|nhen|nghen|luôn|rồi|đi))+[\s.!,]*$/u;
 /** Tiền tố nơi chốn CÓ DẤU (hoặc viết tắt không mơ hồ) mở đầu một phần đường. */
 const CHAT_STREET_PREFIX = /^(?:khu|kđt|kdt|thôn|xóm|ấp|bản|ngõ|ngách|hẻm|kiệt|đường|phố|tổ|tdp|kp|kv|khối|khóm|buôn|làng|tiểu khu|cụm|lô|tòa|toà|chung cư|cc|số)\s+[\p{L}\d]/u;
 
@@ -344,12 +351,15 @@ const CHAT_STREET_PREFIX = /^(?:khu|kđt|kdt|thôn|xóm|ấp|bản|ngõ|ngách|h
  * CÓ DẤU; và không chứa chữ của câu mua bán («giao», «size», «bộ», «hàng trước»…). HÀM THUẦN.
  */
 function chatStreetLooksReal(a: Pick<CustomerAddress, "street" | "houseNumber">): boolean {
-  const st = a.street.normalize("NFC").trim().toLowerCase();
+  // Bỏ tiểu từ cuối câu («… nha», «… nhé ạ», «… thôi», «… nữa») — chúng không phải tên đường.
+  const st = a.street.normalize("NFC").trim().toLowerCase().replace(CHAT_TAIL_PARTICLES, "").trim();
   if (st.length < 3 || CHAT_STREET_STOP.test(st)) return false;
   // «1kg chả mực», «2 hộp ruốc», «500g» — số đi kèm đơn vị hàng, không phải số nhà.
   if (/^\d+(?:[.,]\d+)?\s*(?:kg|kí|ký|g|gr|gram|lạng|ml|l|lít|hộp|gói|cái|bộ|túi|chai|hũ|con|cặp|set|size)(?=$|[\s,.])/u.test(st)) return false;
-  if (a.houseNumber && /\d[0-9a-z/-]*\s+[\p{L}]/u.test(st)) return true;
-  return CHAT_STREET_PREFIX.test(st);
+  // Số nhà ⇒ sau số (và sau «số / sn / nhà») phải còn ÍT NHẤT một chữ là tên đường / ngõ / khu, không phải tiểu từ («2 nha», «Số 2 nhé»).
+  const afterNumber = st.replace(/^(?:số nhà|so nha|số|so|sn|nhà|nha)\.?\s*/u, "").replace(/^\d+[0-9a-z/-]*/u, "").trim();
+  if (a.houseNumber || /^(?:số|so|sn)\s*\d/u.test(st)) return /^[\p{L}]/u.test(afterNumber) && !/^(?:nha|nhé|nhe|nhá|ạ|a|thôi|nữa|em|chị|anh|ok|nhen|nghen|luôn|rồi|đi)$/u.test(afterNumber);
+  return CHAT_STREET_PREFIX.test(st) && !/^số\s/u.test(st);
 }
 
 /**

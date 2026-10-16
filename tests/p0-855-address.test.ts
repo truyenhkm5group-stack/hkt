@@ -17,8 +17,8 @@
  * hard-code HSLC) và KHÔNG gửi tin thật.
  */
 import assert from "node:assert/strict";
-import { addressGapOf, addressQuestion, customerStatedAddresses, hasStreetDetail, legacyAddressUnmapped, looksLikeDeliveryAddress, parseCustomerAddress } from "@/lib/address/customer-address";
-import { ADDRESS_HANDOFF_REASON, ADDRESS_KNOWN_TEXT, ADDRESS_REASK_NOTE, ADDRESS_STAFF_TEXT, addressKnowledge, addressReaskVerdict, asksForName, asksForPhone, deliveryAddressDecision, reuseIntentOf as reuseFromMemory } from "@/lib/sales-chatbot/address-memory";
+import { addressGapOf, addressQuestion, customerStatedAddresses, hasStreetDetail, legacyAddressUnmapped, looksLikeDeliveryAddress, looksLikeStreetFragment, parseCustomerAddress } from "@/lib/address/customer-address";
+import { ADDRESS_HANDOFF_REASON, ADDRESS_KNOWN_TEXT, ADDRESS_REASK_NOTE, CONTACT_KNOWN_TEXT, hasChangeCue, ADDRESS_STAFF_TEXT, addressKnowledge, addressReaskVerdict, asksForName, asksForPhone, deliveryAddressDecision, reuseIntentOf as reuseFromMemory } from "@/lib/sales-chatbot/address-memory";
 import { addressConfidence, assembleCustomer360, customer360Prompt, reuseIntentOf, type OrderFact } from "@/lib/sales-chatbot/customer-360";
 import type { ChatState } from "@/lib/sales-chatbot/tools";
 import { eq } from "drizzle-orm";
@@ -196,6 +196,28 @@ export function testP0855AddressPure() {
   assert.equal(addressReaskVerdict("Dạ chị cho em xin địa chỉ giao hàng ạ.", addressKnowledge({}, ["lấy 1 hộp 1kg", "0920000909"]), 3, { botTexts: ["Dạ chị cho em xin SĐT và địa chỉ nhận hàng ạ."] }), null, "khách trả lời một phần (SĐT) ⇒ xin tiếp địa chỉ không phải hỏi lặp");
   //  · Địa giới cũ đọc trên chữ CÓ DẤU: «Xa La» không phải «xã», «khu đô thị» không chứa «thị xã».
   assert.equal(legacyAddressUnmapped("Số 5 khu đô thị Xa La, Hà Đông, Hà Nội"), null);
+  //  · Review vòng 3 — CHANGE_INCOMPLETE không bắt nhầm số lượng / tiểu từ / «chuyển khoản»: đơn nháp đã có địa chỉ ⇒ vẫn là địa chỉ đó.
+  for (const t of ["2 nha", "1 nhé", "38 nha", "Số 2 nhé", "chị chuyển qua rồi nhé", "chuyển cho em rồi", "đợi chờ"]) {
+    assert.equal(looksLikeStreetFragment(t), false, `${t}: không phải mảnh địa chỉ`);
+    assert.equal(hasChangeCue(t), false, `${t}: không phải lời đổi địa chỉ`);
+    const st = deliveryAddressDecision(draftWith("Số 8 ngõ 2, Phường Cầu Giấy", "Thành phố Hà Nội"), ["Số 8 ngõ 2, Phường Cầu Giấy, Hà Nội", t]).status;
+    assert.notEqual(st, "CHANGE_INCOMPLETE", t);
+    assert.equal(addressKnowledge(draftWith("Số 8 ngõ 2, Phường Cầu Giấy", "Thành phố Hà Nội"), ["Số 8 ngõ 2, Phường Cầu Giấy, Hà Nội", t]).changeRequested, undefined, t);
+  }
+  assert.ok(hasChangeCue("à chị chuyển ra HN rồi") && hasChangeCue("chị chuyển nhà rồi") && hasChangeCue(`giao về ${NEW_THU_DUC} nhé`) && !hasChangeCue("giao về sớm nhé"));
+  assert.ok(looksLikeStreetFragment("Số 5 ngõ 10") && looksLikeStreetFragment("ngõ 10"));
+  //  · Phường đã hỏi MỘT lần (câu thật sự gửi) và khách đã trả lời ⇒ bỏ câu hỏi, KHÔNG chuyển người; chưa có phần địa chỉ nào ⇒ chuyển người.
+  const replied = addressKnowledge({}, ["230/20 Phan Huy Ích, Gò Vấp, TP.HCM", "chị ở gần chợ em ơi"]);
+  const wv = addressReaskVerdict("Dạ mình ở phường nào ạ?", replied, 3, { botTexts: ["Dạ mình cho em xin tên phường / xã mới của địa chỉ với ạ?"] });
+  assert.ok(wv && wv.note === ADDRESS_REASK_NOTE.WARD_ASKED && !wv.handoff && wv.rest === "", JSON.stringify(wv));
+  assert.equal(addressReaskVerdict("Dạ mình ở phường nào ạ?", replied, 3, { botTexts: [] }), null, "mốc công cụ không tính khi câu hỏi chưa từng gửi");
+  //  · Bỏ câu xin SĐT đã có mà chưa có địa chỉ ⇒ câu thay KHÔNG nói «ghi nhận địa chỉ».
+  assert.equal(addressReaskVerdict("Dạ chị cho em xin số điện thoại ạ?", addressKnowledge({}, ["0912345678"]), 2)?.rest, CONTACT_KNOWN_TEXT);
+  //  · Đặt hộ: MỘT tin mang địa chỉ người đặt và địa chỉ người nhận ⇒ không phải đổi địa chỉ (đơn vàng «dat-ho-nguoi-than»).
+  const datHo = "chị đặt 1kg chả cá thu gửi cho mẹ chị nhé. Chị là Hiền 0930000121, ở 20 hẻm Thử, Phường Sài Gòn, Hồ Chí Minh. Người nhận: bà Tư, 0930000122, 5 thôn Mẫu, Xã Bát Tràng, Hà Nội";
+  assert.equal(deliveryAddressDecision({ customer: { id: null, name: "Hiền", phone: "0930000121", address: "20 hẻm Thử, Phường Sài Gòn, Hồ Chí Minh", province: "", simulated: true } } as ChatState, [datHo]).status, "NEW_EXPLICIT");
+  //  · Địa chỉ đứng sau «tên, SĐT,» hoặc sau «:» vẫn đọc được (đơn vàng «doi-dia-chi»).
+  assert.equal(deliveryAddressDecision(draftWith("Lô 3 khu Thử, Phường Cầu Giấy, Hà Nội"), ["cho chị 1 hộp chả cá thu 1kg, Thu, 0915000404, Lô 3 khu Thử, Phường Cầu Giấy, Hà Nội", "à em ơi đổi địa chỉ giao về cơ quan chị: 10 đường Mẫu, Phường Đống Đa, Hà Nội nhé"]).use?.raw, "10 đường Mẫu, Phường Đống Đa, Hà Nội");
   //  · Chỉ sửa món sau «như cũ» đã điền địa chỉ xác minh ⇒ không có đổi địa chỉ nào (không đè địa chỉ use_saved_address).
   assert.equal(deliveryAddressDecision(verified, ["vẫn địa chỉ cũ nhé", "cho chị thêm 1 hộp nữa"]).status, "REUSE_VERIFIED");
 
@@ -288,7 +310,34 @@ const GOLDEN: GoldenCase[] = [
         say: `à chị chuyển nhà rồi, giao về ${NEW_THU_DUC} nhé`,
         ai: [({ v }) => [tool("update_draft_order", { items: [{ variant_id: v("CHA-MUC"), quantity: 1 }] })], () => [say("Dạ em ghi nhận ạ.")]],
       },
-      { say: "cho chị thêm 1 hộp nữa nhé", ai: [({ v }) => [tool("update_draft_order", { items: [{ variant_id: v("CHA-MUC"), quantity: 2 }] })], () => [say("Dạ em sửa rồi ạ.")]] },
+      { say: "2 nha", ai: [({ v }) => [tool("update_draft_order", { items: [{ variant_id: v("CHA-MUC"), quantity: 2 }] })], () => [say("Dạ em sửa rồi ạ.")]] },
+    ],
+  },
+  {
+    key: "p855-doi-dia-chi-truoc-khi-len-don",
+    title: "Đổi địa chỉ TRƯỚC khi lên đơn: đơn MỚI mang cờ cần kiểm ngay trong giao dịch tạo đơn",
+    shop: "fashion",
+    channel: "WEB",
+    turns: [
+      { say: "Khách Thử 0901234568, 12 Hàng Bạc, Hoàn Kiếm, Hà Nội", ai: [() => [tool("create_customer", { name: "Khách Thử", phone: "0901234568", address: "12 Hàng Bạc, Hoàn Kiếm, Hà Nội" })], () => [say("Dạ em lưu thông tin rồi ạ.")]] },
+      { say: `à chị chuyển nhà rồi, giao về ${NEW_THU_DUC}\nlấy chị 1 đầm linen size M nhé`, ai: [({ v }) => [tool("create_draft_order", { items: [{ variant_id: v("DAM-LINEN-M"), quantity: 1 }] })], () => [say("Dạ em lên đơn nháp ạ.")]] },
+    ],
+  },
+  {
+    key: "p855-model-chep-dia-chi-khac",
+    title: "Khách đổi địa chỉ nhưng model chép một địa chỉ KHÁC chữ khách ⇒ không ghi đè, gắn cờ, chuyển người",
+    shop: "food",
+    channel: "WEB",
+    turns: [
+      {
+        say: "cho chị 1 chả mực giã tay\nKhách Thử 0901234569, 12 Hàng Bạc, Hoàn Kiếm, Hà Nội",
+        ai: [
+          () => [tool("create_customer", { name: "Khách Thử", phone: "0901234569", address: "12 Hàng Bạc, Hoàn Kiếm, Hà Nội" })],
+          ({ v }) => [tool("create_draft_order", { items: [{ variant_id: v("CHA-MUC"), quantity: 1 }] })],
+          () => [say("Dạ em lên đơn nháp cho mình rồi ạ.")],
+        ],
+      },
+      { say: `à chị chuyển nhà rồi, giao về ${NEW_THU_DUC} nhé`, ai: [() => [tool("update_draft_order", { address: "99 Lê Lợi, Bến Thành, TP.HCM" })], () => [say("Dạ em ghi nhận ạ.")]] },
     ],
   },
 ];
@@ -322,6 +371,22 @@ export async function testP0855AddressGolden() {
         assert.ok(!/phường nào/.test(shown[1]) && shown[1].includes("Dạ em ghi nhận ạ."), `địa chỉ mới ⇒ không hỏi phường của nó: ${shown[1]}`);
         const p1 = t.prompts[t.turns[1].rounds[0]?.prompt ?? -1] ?? "";
         assert.ok(/VỪA GỬI MỘT ĐỊA CHỈ GIAO MỚI/.test(p1), "lời nhắc: địa chỉ mới thắng địa chỉ cũ");
+        return;
+      }
+      if (c.key === "p855-doi-dia-chi-truoc-khi-len-don" || c.key === "p855-model-chep-dia-chi-khac") {
+        const db = await getDb();
+        const [cv] = await db.select({ state: schema.salesChatConversations.state }).from(schema.salesChatConversations).where(eq(schema.salesChatConversations.id, _ctx.conversationId));
+        const s2 = cv.state as ChatState;
+        const ords = await db.select({ id: schema.orders.id, raw: schema.orders.raw }).from(schema.orders).where(eq(schema.orders.salesConversationId, _ctx.conversationId));
+        assert.equal(ords.length, 1, "một đơn");
+        const rv = orderReviewOf(ords[0].raw);
+        assert.ok(rv?.entries.some((e) => e.code === "ADDRESS_UNRESOLVED" && /đổi địa chỉ/.test(e.note ?? "")), `đơn mang cờ cần kiểm: ${JSON.stringify(rv)}`);
+        if (c.key === "p855-doi-dia-chi-truoc-khi-len-don") {
+          assert.equal(s2.draft?.recipient.address, NEW_THU_DUC, "đơn mới lên bằng NGUYÊN VĂN địa chỉ khách vừa đổi");
+          return;
+        }
+        assert.equal(s2.draft?.recipient.address, "12 Hàng Bạc, Hoàn Kiếm, Hà Nội", "không ghi đè bằng địa chỉ model tự chép");
+        assert.equal(t.turns[1].status, "HANDOFF", "chuyển người");
         return;
       }
       // Đổi địa chỉ sau khi đặt.

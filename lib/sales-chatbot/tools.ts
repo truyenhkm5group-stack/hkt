@@ -1002,24 +1002,26 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
         }
       }
       // KHÁCH ĐỔI ĐỊA CHỈ (#855, ca «ThuyNgo»; review độc lập): máy chủ CHỈ tự ghi địa chỉ mới khi CHẮC — chính tin khách MỚI NHẤT mang một
-      // địa chỉ đọc được KHÁC địa chỉ đang giữ, kèm lời đổi TƯỜNG MINH («giao về …», «đổi địa chỉ», «chuyển nhà»…). Khi đó: ghi NGUYÊN VĂN
-      // chữ khách, xã đọc lại từ chính địa chỉ đó, và gắn cờ cần người TRƯỚC khi ghi (đơn đã có) — gắn cờ hỏng ⇒ KHÔNG ghi đè, chuyển
-      // người. Không chắc (khách đang gõ dở / không có lời đổi tường minh) mà model không tự chép địa chỉ mới ⇒ KHÔNG ghi đè, gắn cờ đơn đang
-      // có + chuyển người. Chỉ sửa món / ghi chú ⇒ không đụng địa chỉ (không có địa chỉ khác mới hơn).
+      // địa chỉ đọc được KHÁC địa chỉ đang giữ, kèm lời đổi TƯỜNG MINH («giao về …», «đổi địa chỉ», «chuyển nhà»…). Khi đó ghi NGUYÊN VĂN
+      // chữ khách, xã đọc lại từ chính địa chỉ đó, và cờ cần người đi CÙNG GIAO DỊCH ghi đơn (`AgentOrderOptions.review`) — đơn không bao giờ
+      // «có xã mà không cờ», kể cả đơn mới. Không chắc (khách đang gõ dở / không có lời đổi tường minh / model chép một địa chỉ KHÁC chữ
+      // khách) ⇒ KHÔNG ghi đè, gắn cờ đơn đang có + chuyển người. Chỉ sửa món / ghi chú ⇒ không đụng địa chỉ (không có địa chỉ khác mới hơn).
       const texts = ctx.customerTexts ?? [];
       const change = deliveryAddressDecision({ draft: existing, customer: state.customer }, texts);
       const pending = change.status === "CHANGE_PENDING_VERIFICATION" && change.use ? change.use : null;
       const explicitChange = pending !== null && pending.messageIndex === texts.length - 1 && hasChangeCue(texts[texts.length - 1] ?? "");
       const modelWroteNew = pending !== null && Boolean(v.data.address?.trim()) && sameDeliveryPlace(recipient.address, pending.raw);
       const changeFrom = (change.previous?.raw ?? "").slice(0, 120);
-      if ((change.status === "CHANGE_INCOMPLETE" || (pending !== null && !explicitChange)) && !modelWroteNew && !v.data.address?.trim()) {
+      const unsure = change.status === "CHANGE_INCOMPLETE" || (pending !== null && !modelWroteNew && (!explicitChange || Boolean(v.data.address?.trim())));
+      if (unsure) {
+        // Gắn cờ hỏng (lỗi / ném) vẫn đi nhánh chuyển người — không bao giờ ghi đè khi không chắc.
         if (existing?.orderId && !simulated) {
-          await flagOrderForReviewAsAgent(ctx.agent, existing.orderId, { code: "ADDRESS_UNRESOLVED", note: `Khách có thể đã đổi địa chỉ giao — máy KHÔNG tự ghi; địa chỉ đang giữ: «${changeFrom}»; cần người xác minh`, quote: (texts[texts.length - 1] ?? "").slice(0, 300) || null }, now);
+          await flagOrderForReviewAsAgent(ctx.agent, existing.orderId, { code: "ADDRESS_UNRESOLVED", note: `Khách có thể đã đổi địa chỉ giao — máy KHÔNG tự ghi; địa chỉ đang giữ: «${changeFrom}»; cần người xác minh`, quote: (texts[texts.length - 1] ?? "").slice(0, 300) || null }, now).catch(() => null);
         }
         return { ...err("Đơn nháp: địa chỉ chưa chắc", "Khách có vẻ đổi nơi giao nhưng máy chủ chưa chắc địa chỉ mới — KHÔNG ghi đè địa chỉ, đã chuyển nhân viên xác minh. KHÔNG nói đã đổi địa chỉ, KHÔNG hỏi lại khách.", state), requireHuman: "Khách đổi địa chỉ giao chưa rõ — nhân viên xác minh địa chỉ (máy không tự ghi đè)" };
       }
       const addressChange = pending && (explicitChange || modelWroteNew) ? { to: pending.raw, from: changeFrom } : null;
-      if (addressChange && explicitChange && !modelWroteNew && !sameDeliveryPlace(recipient.address, addressChange.to)) {
+      if (addressChange && !modelWroteNew && !sameDeliveryPlace(recipient.address, addressChange.to)) {
         recipient.address = addressChange.to;
         recipient.province = "";
         delete recipient.ward;
@@ -1027,11 +1029,6 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
         if (canAutoFill(parsedNew) && parsedNew.ward) recipient.ward = parsedNew.ward;
       }
       const changeFlag = addressChange ? { code: "ADDRESS_UNRESOLVED" as const, note: `Khách đổi địa chỉ giao — địa chỉ trước: «${addressChange.from}»; cần người xác minh địa chỉ mới`, quote: addressChange.to.slice(0, 300) } : null;
-      // Đơn ĐÃ CÓ: gắn cờ TRƯỚC khi ghi địa chỉ mới (lõi sửa đơn giữ nguyên cờ đang mở) — hỏng ⇒ không ghi đè.
-      if (changeFlag && existing?.orderId && !simulated) {
-        const f = await flagOrderForReviewAsAgent(ctx.agent, existing.orderId, changeFlag, now).catch((e: unknown) => ({ ok: false as const, error: String(e) }));
-        if (!f.ok || !("flagged" in f) || !f.flagged) return { ...err("Đơn nháp: chưa đổi địa chỉ", "Khách đổi địa chỉ nhưng máy chủ chưa gắn được cờ cần kiểm lên đơn — KHÔNG ghi địa chỉ mới, đã chuyển nhân viên. KHÔNG nói đã đổi địa chỉ.", state), requireHuman: "Khách đổi địa chỉ giao — máy không gắn được cờ cần kiểm, chưa ghi địa chỉ mới; nhân viên cập nhật đơn" };
-      }
       const priced = await priceLines(lines, ctx.config, verifiedCustomerId(state), [recipient.address, recipient.province].join(", "), { packing: Boolean(packing) });
       if (priced.missing.length) return err("Đơn nháp: mã không có", `Không có mẫu mã: ${priced.missing.join(", ")}.`, state, { reason: "UNKNOWN_SKU" });
       if (priced.unpriced.length) return { ...err("Đơn nháp: mã chưa có giá", `Chưa có giá: ${priced.unpriced.join(", ")}.`, state, { reason: "UNPRICED_SKU" }), requireHuman: `Giá bất thường: ${priced.unpriced.join(", ")} chưa có giá` };
@@ -1062,22 +1059,18 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
       const carrySeen = existing && existing.shownTurn !== ctx.turn;
       const seen = carrySeen ? { seenQuoteId: existing.quote?.id, seenLines: existing.lines, seenTotal: existing.quote ? (existing.quote.total ?? existing.quote.subtotal) : undefined } : { seenQuoteId: existing?.seenQuoteId, seenLines: existing?.seenLines, seenTotal: existing?.seenTotal };
       const draft = { ...(ctx.turn !== undefined ? { shownTurn: ctx.turn } : {}), ...(firstShown !== undefined ? { firstShownTurn: firstShown } : {}), orderId: existing?.orderId ?? null, lines: priced.lines.map((l) => ({ variantId: l.variantId, quantity: l.quantity })), unitPrices: Object.fromEntries(priced.lines.map((l) => [l.variantId, l.unitPrice])), recipient, note: v.data.delivery_note ?? existing?.note ?? "", simulated, quote: quoteClaim, ...(seen.seenQuoteId ? seen : {}), packing };
-      let createFlagFailed = false;
       if (!simulated) {
         const payload = orderInput(state, draft, priced, editingConfirmed ? "CONFIRMED" : "NEW", ctx.config, ctx.channel);
         // Đơn MỚI mang mã quảng cáo đã dẫn khách vào hội thoại (trong cửa sổ quy kết — máy chủ quyết); sửa đơn KHÔNG đổi nó.
         // Tổ chức tự chốt mà bot quyết CHƯA chốt (khách hoãn / phản đối giá / vừa mời thêm món) ⇒ lõi giữ «Mới» (`holdNew`).
         const holdNew = ctx.autoConfirm === true && autoConfirmBlocker({ ...state, draft }, ctx) !== null;
+        // Cờ «khách đổi địa chỉ» ghi CÙNG giao dịch với đơn (tạo / sửa) — hỏng thì cả lượt ghi hỏng, không có đơn «có xã mà không cờ».
+        const review = changeFlag ? { review: changeFlag } : {};
         const r = draft.orderId
-          ? await updateOrderAsAgent(ctx.agent, draft.orderId, payload, agentOrderOpts(ctx, state, false, quoteClaim, holdNew))
-          : await createOrderAsAgent(ctx.agent, payload, { ...agentOrderOpts(ctx, state, true, quoteClaim, holdNew), adId: await chatOrderAdId(ctx.conversationId, now) });
+          ? await updateOrderAsAgent(ctx.agent, draft.orderId, payload, { ...agentOrderOpts(ctx, state, false, quoteClaim, holdNew), ...review })
+          : await createOrderAsAgent(ctx.agent, payload, { ...agentOrderOpts(ctx, state, true, quoteClaim, holdNew), adId: await chatOrderAdId(ctx.conversationId, now), ...review });
         if (!r.ok) return err("Đơn nháp: lỗi", failureText(r), state, omsSignal(r));
         markOrderWritten(ctx.writeMark, r.id);
-        // Đơn MỚI lên với địa chỉ khách vừa đổi ⇒ gắn cờ ngay sau khi tạo; hỏng ⇒ chuyển người (đơn vẫn được giữ trong state — không đơn trùng).
-        if (changeFlag && !existing?.orderId) {
-          const f = await flagOrderForReviewAsAgent(ctx.agent, r.id, changeFlag, now).catch((e: unknown) => ({ ok: false as const, error: String(e) }));
-          if (!f.ok || !("flagged" in f) || !f.flagged) createFlagFailed = true;
-        }
         draft.orderId = r.id;
       }
       state.draft = draft;
@@ -1087,7 +1080,6 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
       const addr = addressCheckOf(draft.recipient, addressOpts(state, ctx));
       markAddressAsked(state, addr, ctx.turn);
       const view = { order_code: draft.orderId ? `#${manualOrderShortCode(draft.orderId)}` : "(thử)", status: "Nháp — chưa chốt, chưa giữ hàng", simulated, ...cartView(priced), recipient: recipientView(draft.recipient, state), delivery_note: draft.note || null, address_check: addr.view };
-      if (createFlagFailed) return { ...ok(`Lên đơn nháp · ${formatVND(priced.subtotal)} · cần nhân viên`, { ...view, instruction: "Đơn đã lên với địa chỉ khách vừa đổi nhưng chưa gắn được cờ cần kiểm — đã chuyển nhân viên. KHÔNG nói đã chốt / sẽ giao." }, state), requireHuman: "Khách đổi địa chỉ giao — đơn mới chưa gắn được cờ cần kiểm; nhân viên xác minh địa chỉ" };
       if (editingConfirmed && state.confirmed) {
         const validity = simulated || !draft.orderId ? null : await confirmedValidity(draft.orderId);
         state.confirmed = { ...state.confirmed, total: priced.total ?? priced.subtotal, quoteId: priced.quote.quoteId, ...(validity ? { valid: validity.valid, pending: validity.pending } : {}) };
