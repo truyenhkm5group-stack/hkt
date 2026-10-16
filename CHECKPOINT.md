@@ -28,6 +28,15 @@
 
 
 
+
+## 16/10/2026 ~06:05Z — Tech Lead (Web): 6 PR P0 sẵn sàng, chờ khoá integration-lead
+- Sẵn sàng (review PASS ghi sổ đúng SHA): #854 ec371e1f · #857 7ec9b9bf · #858 cf44aebb · #860 f5e7dbcb · #861 0cf773e9 (CI đang chạy) · #859 17955aa1. CI xanh: #854 #857 #858 #859 #860.
+- Thứ tự gộp: #854 → #857 → #858 → #860 → #861 → #859 (merge main vào #859, gỡ xung đột MỘT dòng import engine.ts) → MỘT deploy-plan → ai-verify → KPI 24h.
+- #860 mang 2 commit của sứ mệnh Desktop p0-855-thuyngo-lieudau ⇒ không mở PR thứ hai cho ThuyNgo.
+- Trước deploy #861: đếm đơn CONFIRMED có cờ ADDRESS_UNRESOLVED mở mà đã có xã (sẽ bị giữ ADDRESS_REVIEW).
+- Blocker: khoá integration-lead do DESKTOP-56TH98Y:wt-tech-lead-v2 giữ & gia hạn, main không đổi từ c52e5c57. Không tranh khoá.
+- Việc sau: dòng lời nhắc engine.ts:207 (sau #860); mã cờ riêng cho đổi địa chỉ chưa xác minh; nhánh máy chủ cho get_order_status khi chưa có đơn.
+
 ## 16/10/2026 ~04:35Z — Tech Lead (Web): P0 #855/#856 nhánh & review
 - #857 @7ec9b9bf review PASS (sổ) · #858 ảnh @bcfd522c review PASS (sổ), PR mở · #854 xanh+PASS — chờ khoá integration-lead (Desktop).
 - p0-855-cart @db0f7b37: review FAIL (số trần đọc chữ địa chỉ thành món; customerDemandsHuman bắt nhầm «gặp người nhận»; bỏ qua cfg.handoff.onCustomerRequest; …) — worker đang sửa. Nhánh chứa 2 commit của Desktop (fix/p0-thuyngo-negative-order) ⇒ MỘT PR.
