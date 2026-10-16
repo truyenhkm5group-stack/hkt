@@ -1,8 +1,8 @@
 {
   "pr": 858,
-  "sha": "bcfd522cef86794bf076abbc00a9145b653806a2",
+  "sha": "cf44aebb978905f02930daeb2ba48ec59abf0417",
   "verdict": "PASS",
   "actor": "vm:hkt",
-  "at": "2026-10-16T04:41:17.841Z",
-  "note": "review độc lập 2 lượt; THẤP: lỗi mạng giữa nhóm ảnh ⇒ hộp thư hiện thiếu"
+  "at": "2026-10-16T05:16:10.178Z",
+  "note": "review độc lập 3 lượt; commit cuối chỉ đổi chữ title"
 }
