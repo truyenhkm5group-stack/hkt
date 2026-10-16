@@ -3,7 +3,7 @@
   "mission_id": "p0-855-delta",
   "title": "P0 #855 phần còn lại: báo giá phải có căn cứ (680k), phủ nhận món bot thêm ⇒ người, giữ tuyến ORDER_REVIEW, dọn lời nhắc khách cũ, chặn câu xin lỗi lặp",
   "business_goal": "",
-  "status": "RUNNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -28,7 +28,21 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-16T13:41:06.658Z",
-  "updated_at": "2026-10-16T13:41:06.658Z",
-  "last_heartbeat": "2026-10-16T13:41:06.658Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-16T13:41:40.593Z",
+  "last_heartbeat": "2026-10-16T13:41:40.593Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/p0-855-delta",
+    "sha": "6a61ef13c4c9068076a726277f87635fda674827",
+    "at": "2026-10-16T13:41:40.593Z",
+    "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+    "title": "P0 #855 phần còn lại: báo giá phải có căn cứ (680k), phủ nhận món bot thêm ⇒ người, giữ tuyến ORDER_REVIEW, dọn lời nhắc khách cũ, chặn câu xin lỗi lặp",
+    "summary": "",
+    "tests": [
+      "npm test: TẤT CẢ KIỂM THỬ ĐẠT @6a61ef13",
+      "typecheck + lint sạch",
+      "p0-855-delta (thuần + 9 golden chatTurn)",
+      "golden 23 + đơn vàng v2 khớp; 7 ảnh chụp đổi chữ lời nhắc khách cũ"
+    ]
+  }
 }
