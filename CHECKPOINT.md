@@ -34,6 +34,23 @@
 
 
 
+
+## 16/10/2026 ~13:50Z — Tech Lead Web: KPI 24h sau #848 (hslc-hmt-shop), PR #870/#871/#862
+
+- **Production**: health 13:04Z `commit 2982fafb0783` · migrations 248 · `degradedMigration: true` (tổ chức thử «qa» thiếu 0245–0247, hết 150 s lúc migrate — chặn đã biết). #870 (b8807e86) đã vào main lúc 11:43Z, CHƯA deploy.
+- **Ops 12:47Z** (7 lượt) đều hết giờ chờ `/var/lock/erp-readonly-db.lock` (900 s) — không lượt ops / deploy nào của Actions giữ khoá trong khoảng đó; nghi tác vụ trên máy (scripts/erp-backup.sh cũng dùng khoá này). 13:19Z trở đi khoá nhả.
+- **KPI 24h** (mọi số ESTIMATED, tóm tắt công khai, không giải mã):
+  - address-reask-audit từ 15/10 12:26Z: 457 hội thoại · gửi địa chỉ 67 · phường rõ 42 · HỎI LẠI 3/67 (4,5%) · phường rõ mà vẫn hỏi 0/42 · nguyên nhân FULL_ADDRESS_REASK 2 · TOOL_LINE_DEGRADED 1 · OLD_WARD_CONVERT_ASK 0 · số câu hỏi tới lúc lên đơn TB 0,3 / trung vị 0 (n=53).
+  - conv-money-trace --scan 1 ngày: 450 hội thoại · «nói rõ hơn» không tin mới 0 · tổng lệch giỏ/nháp 0.
+  - cart-intent-audit: 458 hội thoại · SL tường minh 78 · CART_INTENT_DRIFT 6/78 (7,7%: TEXT_DOWNSELL 2 · TEXT_TRIAL 3 · DRAFT_REDUCED 1) · ORDER_READY_LOOP 1/50 (2,0%).
+  - upsell-basis-scan 1 ngày: 48 đơn bot · dòng KHÔNG căn cứ 3 (còn sống 2 · Σ 800.000 ₫) · không đủ căn cứ 17.
+  - price-mismatch-scan: 48 đơn bot · PRICE_MISMATCH 0.
+  - sender-provenance-probe: 279 tin phía page · BOT_ECHO 40,5% · AUTO_NOTE 33,7% · TEMPLATE 15,4% · STAFF_UID 3,2% · KHÔNG DẤU 17 (6,1%; 1 ca giữa chuỗi người ±10′).
+  - pancake-thread-diff 24h: 60/60 luồng · thiếu ở ERP: khách 0 · page 2 · trễ webhook→sổ p50 5,6 s · p95 24,2 s (CẢNH BÁO > 5 s) · khoá xếp tụt 0.
+- **#871** (Ngọc Nguyễn, hẹn «Giao sáng mai khoảng 9h» bị xin lại SĐT + địa chỉ): nguyên nhân gốc `settlesAddress` + câu mẫu đi nguyên văn ba lối không qua hàng rào. PR #872 (b6c46c26) gates XANH, review 2 vòng → PASS (sổ). Chờ Integration Lead gộp + deploy. `create_draft_order` LỖI 3 của ca này chưa rõ lý do — #872 đưa tên lỗi hằng ra [ops:tom-tat] để đo sau deploy.
+- **#862** đóng bởi chủ PR, thay bằng nhánh `claude/p0-855-delta` (chưa có PR). Bản đã review 3 vòng → PASS còn ở `fix/p0-thuyngo-negative-order` @ 01bff176 (lỗ CAO tự chốt bằng câu phản đối; địa chỉ đã lưu so theo mốc; sổ tổng bị từ chối) — đã ghi chú đối chiếu trên #862.
+- **Blocker còn lại**: khoá Anthropic của AI Copilot 401 invalid x-api-key · VTP tra cứu vận đơn HTTP 403 · «qa» 0245–0247 · p95 webhook→sổ 24 s.
+
 ## 16/10 ~18:00 VN — DESKTOP NHẬN #871 + ca Nguyễn Hà + CI đỏ #870
 - #870 (`fix/p0-855-district-address-no-ward-question`): Desktop-worker là NGƯỜI GHI DUY NHẤT từ giờ (Web đừng đẩy). Đỏ ở address-ward-explicit: W2 đổi theo luật 16/10 (không hỏi khách quy đổi phường); W3 (khách SỬA phường) là hồi quy thật của #870 ⇒ sửa mã, giữ kỳ vọng.
 - #871 (`claude/p0-871-contact-memory`, nối sau #870): gốc nghi `address-memory.ts` wardKnown/fullKnown phụ thuộc lastSettlesAddress ⇒ khách đổi chủ đề («giao 9h», «lấy 10 cái nem») là hỏi lại SĐT/địa chỉ; đơn không được tạo; hậu mãi (Nguyễn Hà) hỏi xác nhận lặp + upsell khi khách hỏi giao hàng.
