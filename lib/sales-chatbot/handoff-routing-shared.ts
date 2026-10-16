@@ -2,6 +2,7 @@ import { DEPARTMENT_LABEL, type DepartmentCode } from "@/lib/constants/departmen
 import { slaStateOf, type SlaState } from "@/lib/constants/work";
 import { vnShortStamp } from "@/lib/format";
 import type { HumanHandling, NeedsHumanCode } from "@/lib/sales-chatbot/inbox-states";
+import { foldVi } from "@/lib/sales-chatbot/text";
 
 /**
  * ═══════════ AI IM THÌ PHẢI CÓ CHỦ — PHẦN THUẦN (P0 11/10/2026, yêu cầu 9) ═══════════
@@ -164,4 +165,51 @@ export function handoffEpisodeKey(conversationId: string, queuedAt: Date): strin
  */
 export function handoffFollowupKey(conversationId: string, queuedAt: Date, lastStaffAt: Date | null): string {
   return `sales-chat:handoff-msg:${conversationId}:${queuedAt.toISOString()}:${lastStaffAt && lastStaffAt.getTime() >= queuedAt.getTime() ? lastStaffAt.toISOString() : "0"}`;
+}
+
+// ─────────────────────────── KHÁCH ĐÒI NGƯỜI / PHẢN ĐỐI LẶP (P0 #855) ───────────────────────────
+
+/**
+ * Lý do chuyển người do CHỮ KHÁCH (P0 #855, ca «ThuyNgo» 16/10/2026: khách phủ nhận món bot tự thêm bốn lần rồi hỏi «Robot hả» — bot gửi
+ * thêm 2–3 câu xin lỗi / hỏi lại). Hai chuỗi này CỐ Ý không thuộc tập lý do tự hết hạn (`STAFF_COOLDOWN_REASONS` · AI hỏng —
+ * `ai-hold-shared.ts`) ⇒ `aiHoldOf` đọc là CHỜ NGƯỜI, không cooldown nào trả hội thoại về AI; chỉ người bấm «Trả lại cho AI». Bài kiểm khoá.
+ */
+export const CUSTOMER_HANDOFF_REASON = {
+  WANTS_HUMAN: "Khách nghi đang nói chuyện với máy / đòi gặp người thật",
+  REPEATED_OBJECTION: "Khách phản đối món bot nhập sai từ 2 lần — cần người kiểm lại đơn",
+} as const;
+export type CustomerHandoffCode = keyof typeof CUSTOMER_HANDOFF_REASON;
+
+/** Số lần phản đối món (tính cả tin hiện tại) từ đó máy chủ chuyển người thay vì để AI xin lỗi thêm. */
+export const OBJECTION_HANDOFF_AT = 2;
+
+const ASK_TAIL = "(?: (?:ha|a|ak|ah|ho|hoi|sao|vay|v|khong|ko|k|ne|day|the|em|e|shop|chi|c))*";
+/**
+ * Khách hỏi có phải MÁY không, hoặc đòi gặp NGƯỜI («Robot hả», «máy à», «bot hả», «đang nói chuyện với máy hả», «trả lời tự động à», «cho
+ * chị gặp nhân viên», «người thật»). Đọc trên chữ CÓ DẤU cho «máy» / «à» / «hả» (bỏ dấu thì «mày», «may» cũng thành «may»). Câu hỏi về món
+ * («máy xay thịt bao nhiêu») KHÔNG phải: từ chỉ máy phải đứng CUỐI câu, chỉ còn trợ từ hỏi phía sau. HÀM THUẦN.
+ */
+export function customerDemandsHuman(text: string): boolean {
+  const raw = text.toLowerCase().normalize("NFC").replace(/[^\p{L}\p{N}\s]/gu, " ").replace(/\s+/g, " ").trim();
+  const f = foldVi(raw);
+  if (!f) return false;
+  if (/(?:^| )(?:gap|goi|cho (?:chi|anh|em|minh|toi) (?:gap|noi chuyen voi)|noi chuyen voi|chuyen (?:cho|qua|sang)) (?:nhan vien|nguoi that|nguoi|admin|quan ly|chu shop|shop that)(?: |$)/.test(f)) return true;
+  if (/(?:^| )nguoi that(?: |$)/.test(f)) return true;
+  // «robot» / «bot» / «chatbot» / «trả lời tự động» ở cuối câu hỏi.
+  if (new RegExp(`(?:^| )(?:la |dang noi chuyen voi |noi chuyen voi |tra loi )?(?:robot|ro bot|bot|chatbot|tu dong)${ASK_TAIL}$`).test(f) && /(?:robot|bot|tự động|tu dong)/.test(raw)) return true;
+  // «máy» chỉ khi viết đúng dấu (không phải «mày» / «may») và đứng cuối câu hỏi.
+  if (/(?:^|\s)máy(?:\s+(?:hả|à|ạ|hở|sao|vậy|ha|a|không|ko|k|nè|đấy|đó|em|e|shop|chị|c))*$/u.test(raw)) return true;
+  return false;
+}
+
+/**
+ * Quyết định chuyển người theo CHỮ KHÁCH, trước lượt AI (cùng chỗ với nhánh «khách báo đã chuyển khoản» / khiếu nại trong engine). `objections`
+ * = số tin phản đối món của lượt mua hiện tại, GỒM tin này (`countItemObjections` — cart-commitment.ts); `objectionNow` = tin này là phản
+ * đối (`itemObjectionCue`) — chỉ chuyển ĐÚNG lúc khách phản đối lần nữa, không phải ở một tin «ok» bất kỳ về sau. `null` = AI trả lời
+ * tiếp. HÀM THUẦN.
+ */
+export function customerHandoffVerdict(i: { text: string; objections: number; objectionNow: boolean }): { code: CustomerHandoffCode; reason: string } | null {
+  if (customerDemandsHuman(i.text)) return { code: "WANTS_HUMAN", reason: CUSTOMER_HANDOFF_REASON.WANTS_HUMAN };
+  if (i.objectionNow && i.objections >= OBJECTION_HANDOFF_AT) return { code: "REPEATED_OBJECTION", reason: CUSTOMER_HANDOFF_REASON.REPEATED_OBJECTION };
+  return null;
 }
