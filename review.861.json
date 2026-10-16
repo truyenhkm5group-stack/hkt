@@ -1,8 +1,8 @@
 {
   "pr": 861,
-  "sha": "9b1a64531848e019bef09e4c8ee1e3922ddbfffe",
+  "sha": "c81c4d5653a8a219b05cece221356740cb35addc",
   "verdict": "PASS",
-  "actor": "vm:hkt",
-  "at": "2026-10-16T06:55:06.397Z",
-  "note": "merge origin/main 1681f098; chỉ gỡ import + 1 ca kiểm theo luật #860"
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-16T06:55:20.872Z",
+  "note": "PASS @0cf773e9; commit gộp main chỉ giải xung đột import"
 }
