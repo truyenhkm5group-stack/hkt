@@ -141,6 +141,12 @@ function testClassify() {
     ["không lấy nha em", "CANCEL"],
   ];
   for (const [text, kind] of table) assert.equal(classifyCartMessage(text).kind, kind, `«${text}» ⇒ ${kind} (được ${classifyCartMessage(text).kind})`);
+  // P0 #863: "Lấy thêm 1/2 kg" trước đây đọc lầm 2kg từ đuôi của phân số.
+  assert.deepEqual(amountsIn("Lấy thêm 1/2 kg chả mực").map((a) => [a.value, a.unit, a.label]), [[500, "g", "cha muc"]]);
+  assert.deepEqual(amountsIn("Lấy thêm 1 / 2 kg chả mực, 1kg chả cá thu thôi").map((a) => [a.value, a.unit, a.label]), [[500, "g", "cha muc"], [1000, "g", "cha ca thu"]]);
+  assert.deepEqual(amountsIn("Lấy thêm 0,5kg chả mực").map((a) => [a.value, a.unit, a.label]), [[500, "g", "cha muc"]]);
+  assert.deepEqual(amountsIn("Lấy thêm 500g chả mực").map((a) => [a.value, a.unit, a.label]), [[500, "g", "cha muc"]]);
+  assert.deepEqual(amountsIn("Địa chỉ F4/22kg, khu 230/20 Phan Huy Ích"), [], "số nhà có / không tạo số kg");
   // Đọc số lượng: khối lượng (gram) + số gói; không bắt SĐT / địa chỉ / tiền.
   assert.deepEqual(amountsIn("Cho chị 2kg chả cá thu / ĐT 0368571285 / F4/22A").map((a) => [a.value, a.unit, a.label]), [[2000, "g", "cha ca thu"]]);
   assert.deepEqual(amountsIn("2kg chả cá + 1kg chả mực").map((a) => [a.value, a.label]), [[2000, "cha ca"], [1000, "cha muc"]]);
