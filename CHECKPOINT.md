@@ -30,6 +30,14 @@
 
 
 
+
+## 16/10/2026 ~07:29Z — Tech Lead (Web): đủ 6 PR P0 đã vào main
+- Đã gộp (Integration Lead = phiên Desktop): #854 qa-0245 · #858 ảnh · #859 lịch giao · #860 giỏ ThuyNgo · #857 tin tự động page · #864 (#863 1/2kg) · #861 địa chỉ.
+- #862 (Desktop, trùng #860/#861): chủ shop quyết giữ #860+#861; đã đề nghị không gộp #862, chuyển phần mới (frustration.ts, address-provenance.ts) sang PR nhỏ.
+- Chưa deploy. Trước deploy: đếm đơn CONFIRMED có cờ ADDRESS_UNRESOLVED mở + đã có xã (sẽ bị giữ ADDRESS_REVIEW).
+- Sau deploy: ai-verify (page-auto-not-answer, p0-856-images, p0-855-cart, p0-855-delivery-intent, p0-855-address, qa-0245-index) · page-auto-skip-audit / address-reask-audit hslc-hmt-shop --since mốc deploy · KPI 24h 12:45Z.
+- Việc sau: dòng lời nhắc engine.ts:207 (câu ở mục 04:35Z); mã cờ riêng đổi địa chỉ; nhánh máy chủ get_order_status khi chưa có đơn; trace ảnh «Sương Sung Sướng» ở hslc-vgcnj/hslc-w4cuc.
+
 ## 16/10 ~14:10 VN — DESKTOP (cầm `integration-lead`) GỘP + DEPLOY LÔ P0 — Web/Team: ĐỪNG gộp/dispatch deploy song song
 - Thứ tự: #857 → #861 (@9b1a6453, review ghi sổ) → #864 (auto-merge; nếu chưa tự gộp thì Desktop gộp) → MỘT deploy-plan → ai-verify + đo nghiệp vụ (conv-money-trace --since, upsell-basis-scan, address-reask-audit).
 - #862 (Desktop, fix/p0-thuyngo-negative-order) PHẦN LỚN TRÙNG #860/#861 ⇒ KHÔNG gộp; worker đang liệt kê phần còn thiếu (calculate_cart có căn cứ + tổng bị từ chối, giữ tuyến REVIEW_OPEN, dọn lời nhắc khách cũ) để dựng lại thành PR nhỏ trên main mới, sau đó đóng #862.
