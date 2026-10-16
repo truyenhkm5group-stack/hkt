@@ -95,8 +95,12 @@ export function testP0855AddressPure() {
   assert.deepEqual([mapped.ward, addressReaskVerdict(WARD_NEW_ASK, mapped, 2)?.note], ["Xã Đan Phượng", ADDRESS_REASK_NOTE.WARD_KNOWN]);
   // Khách đổi địa chỉ / sửa phường ⇒ hàng rào đứng ngoài (không chặn nhầm).
   assert.equal(addressReaskVerdict(WARD_NEW_ASK, addressKnowledge(draftWith(OLD_SPLIT), [OLD_SPLIT, "à chị đổi địa chỉ nhé"]), 3), null);
-  // Địa chỉ chỉ có quận cũ (không có cấp xã cũ) ⇒ câu hỏi phường ĐẦU TIÊN vẫn đi qua (luồng #848 giữ nguyên).
-  assert.equal(addressReaskVerdict(WARD_NEW_ASK, addressKnowledge({}, ["230/20 Phan Huy Ích, Gò Vấp, TP.HCM"]), 2), null);
+  // P0 #855 mới: số nhà + đường + quận cũ + tỉnh => chặn cả câu hỏi phường LẦN ĐẦU.
+  assert.equal(
+    addressReaskVerdict(WARD_NEW_ASK, addressKnowledge({}, ["230/20 Phan Huy Ích, Gò Vấp, TP.HCM"]), 2)?.note,
+    ADDRESS_REASK_NOTE.LEGACY_UNMAPPED,
+    "không hỏi khách tự chuyển đổi phường khi đã có số nhà/đường và quận cũ",
+  );
 
   // ③ CA C — CUSTOMER 360: một tên phường không bao giờ là «địa chỉ cũ đã xác minh».
   const fact = (o: Partial<OrderFact>): OrderFact => ({ orderId: "o", source: "ERP", at: "2026-01-10T03:00:00.000Z", stage: "SHIPPED", outcome: null, link: "THREAD", customerId: null, name: "Chị Thử", phone: "0900000111", address: "Số 8 ngõ 2", ward: "Phường Cầu Giấy", province: "Thành phố Hà Nội", items: [], paid: false, currentCycle: false, ...o });
