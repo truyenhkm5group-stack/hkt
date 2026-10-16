@@ -1,0 +1,34 @@
+{
+  "schema": 1,
+  "mission_id": "p0-855-cart",
+  "title": "#855 giỏ: không tự thêm SKU, phủ nhận món = bỏ món, Robot hả / phản đối lặp => chuyển người",
+  "business_goal": "0 SKU tự thêm; phủ nhận món REMOVE; phản đối lặp => HUMAN, dừng AI",
+  "status": "PLANNING",
+  "priority": "P0",
+  "risk": "HIGH",
+  "owner": "vm:hkt",
+  "worker": null,
+  "worktree": null,
+  "branch": "claude/p0-855-cart",
+  "base_sha": null,
+  "domains": [],
+  "owned_paths": [
+    "lib/sales-chatbot/cart-commitment.ts",
+    "tests/sales-cart-commitment.test.ts",
+    "lib/sales-chatbot/handoff-routing.ts",
+    "lib/sales-chatbot/handoff-routing-shared.ts",
+    "tests/p0-855-cart.test.ts"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-16T03:47:55.835Z",
+  "updated_at": "2026-10-16T03:47:55.835Z",
+  "last_heartbeat": "2026-10-16T03:47:55.835Z",
+  "definition_of_done": [],
+  "intake": {
+    "verdict": "PARTIAL",
+    "evidence": []
+  }
+}
