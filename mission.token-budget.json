@@ -1,0 +1,39 @@
+{
+  "schema": 1,
+  "mission_id": "token-budget",
+  "title": "Ngân sách token: ai wait + đo CU/việc DONE",
+  "business_goal": "Giảm ≥50% CU/việc DONE so baseline 33,6M (10–16/10)",
+  "status": "PLANNING",
+  "priority": "P2",
+  "risk": "HIGH",
+  "owner": "DESKTOP-56TH98Y:wt-token-budget",
+  "worker": null,
+  "worktree": null,
+  "branch": "claude/token-budget",
+  "base_sha": "1eee82dab15bc04cf3a44d2d831bedc7d45b2733",
+  "domains": [],
+  "owned_paths": [
+    "scripts/ai-tech.ts",
+    "scripts/claude-usage.mjs",
+    "tests/claude-usage.test.ts",
+    "tests/sync-fixtures.test.ts",
+    "docs/ai-tech-room/token-budget.md",
+    "docs/ai-tech-room/token-baseline-2026-10-16.json",
+    ".claude/agents/ai-tech-worker.md",
+    ".claude/agents/ai-tech-scout.md",
+    ".claude/skills/lead/SKILL.md",
+    "AGENTS.md"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-16T16:05:32.626Z",
+  "updated_at": "2026-10-16T16:05:32.626Z",
+  "last_heartbeat": "2026-10-16T16:05:32.626Z",
+  "definition_of_done": [],
+  "intake": {
+    "verdict": "MISSING",
+    "evidence": []
+  }
+}
