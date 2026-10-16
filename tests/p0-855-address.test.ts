@@ -224,6 +224,12 @@ export function testP0855AddressPure() {
   const narrative = deliveryAddressDecision(draftWith("Số 8 ngõ 2, Phường Cầu Giấy", "Thành phố Hà Nội"), ["Số 8 ngõ 2, Phường Cầu Giấy, Hà Nội", "Lần trước giao chậm quá, 12 Lê Lợi Huế mà 5 ngày"]);
   assert.notEqual(narrative.status, "CHANGE_PENDING_VERIFICATION", JSON.stringify(narrative));
   assert.notEqual(narrative.status, "CHANGE_INCOMPLETE", JSON.stringify(narrative));
+  //  · Lọc kể chuyện theo TỪNG VẾ: vế có lời dẫn giao vẫn là lời đổi ⇒ có cờ (không fail-open).
+  const mixed = deliveryAddressDecision(draftWith("Số 8 ngõ 2, Phường Cầu Giấy", "Thành phố Hà Nội"), ["Số 8 ngõ 2, Phường Cầu Giấy, Hà Nội", "giao về 5 Trần Phú, Đà Nẵng nhé, đơn trước chậm quá"]);
+  assert.ok(mixed.status === "CHANGE_PENDING_VERIFICATION" || mixed.status === "CHANGE_INCOMPLETE", JSON.stringify(mixed));
+  //  · «thay» trần không phải «thay đổi»: «em thấy địa chỉ đúng rồi» không phải lời đổi.
+  assert.equal(wantsAddressChange("em thấy địa chỉ đúng rồi"), false);
+  for (const t of ["em thấy địa chỉ đúng rồi", "em thay dia chi dung roi a"]) assert.equal(hasChangeCue(t), false, t);
   //  · Chỉ sửa món sau «như cũ» đã điền địa chỉ xác minh ⇒ không có đổi địa chỉ nào (không đè địa chỉ use_saved_address).
   assert.equal(deliveryAddressDecision(verified, ["vẫn địa chỉ cũ nhé", "cho chị thêm 1 hộp nữa"]).status, "REUSE_VERIFIED");
 

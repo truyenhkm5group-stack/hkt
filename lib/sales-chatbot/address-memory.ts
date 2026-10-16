@@ -96,10 +96,12 @@ function addressReadings(line: string): string[] {
   };
   // Từng CÂU (tách ở «. » / «! » / «? »): một tin có thể mang hai địa chỉ của hai người («Chị ở <A>. Người nhận: …, <B>»).
   const whole = line.trim();
-  for (const seg of [whole, ...whole.split(/[.!?]\s+/).map((x) => x.trim()).filter((x) => x && x !== whole)]) {
-    // Câu KỂ chuyện đã qua / phàn nàn («Lần trước giao chậm quá, 12 Lê Lợi Huế mà 5 ngày») nhắc một địa chỉ nhưng không phải lời
-    // giao tới đó (review #855) ⇒ không đọc thành địa chỉ giao.
-    if (isNarrative(seg)) continue;
+  for (const rawSeg of [whole, ...whole.split(/[.!?]\s+/).map((x) => x.trim()).filter((x) => x && x !== whole)]) {
+    // VẾ kể chuyện đã qua / phàn nàn («Lần trước giao chậm quá», «12 Lê Lợi Huế mà 5 ngày») bị bỏ TỪNG VẾ (giữa dấu phẩy), không bỏ cả
+    // câu: «giao về 5 Trần Phú, Đà Nẵng nhé, đơn trước chậm quá» vẫn còn lời giao. Vế mang lời dẫn giao («giao / gửi / ship về …») không
+    // bao giờ bị bỏ (review #855).
+    const seg = rawSeg.split(",").filter((c) => !isNarrative(c) || LEAD_IN.test(c.trim())).join(",").trim();
+    if (!seg) continue;
     add(seg);
     const m = LEAD_IN.exec(seg);
     if (m) add(seg.slice(m.index + m[0].length));
@@ -118,7 +120,7 @@ function deliveryAddressIn(line: string): string | null {
 /** Lời đổi nơi giao TƯỜNG MINH đọc trên chữ CÓ DẤU (bỏ dấu thì «đợi chờ» = «đổi chỗ», «chờ khác» = «chỗ khác»). */
 const CHANGE_CUE_ACCENTED = /(?:^|[\s,.!])(?:(?:đổi|thay|sửa)(?: lại)?(?: sang| qua)? (?:địa chỉ|chỗ|nơi|nhà)|địa chỉ (?:mới|khác)|chỗ khác|nơi khác|nhà khác|chuyển nhà|dọn nhà|không ở (?:đó|đấy|đây|chỗ cũ) nữa)(?=$|[\s,.!?])/u;
 /** Bản không dấu — chỉ những cụm không mơ hồ khi bỏ dấu. */
-const CHANGE_CUE_FOLDED = /(?:^| )(?:doi dia chi|doi dc|thay dia chi|sua dia chi|dia chi (?:moi|khac)|chuyen nha|don nha)(?: |$)/;
+const CHANGE_CUE_FOLDED = /(?:^| )(?:doi dia chi|doi dc|thay doi dia chi|sua dia chi|dia chi (?:moi|khac)|chuyen nha|don nha)(?: |$)/;
 /** «chuyển / dọn ra · về · vào · sang · qua · đến · tới <nơi>» — chỉ là đổi địa chỉ khi phần sau là NƠI CHỐN (nhà / chỗ / địa chỉ / tỉnh / một địa chỉ). */
 const MOVE_RE = /(?:^|[\s,.!])(?:chuyển|chuyen|dọn|don) (?:ra|về|ve|vào|vao|sang|qua|đến|den|tới|toi) (.+)$/iu;
 

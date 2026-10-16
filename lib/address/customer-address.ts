@@ -213,9 +213,9 @@ const HAS_VN_DIACRITIC = /[àáạảãâầấậẩẫăằắặẳẵèéẹ
 
 /**
  * Bản bỏ dấu CHỈ gồm cụm không mơ hồ khi bỏ dấu — cho tin TRỘN dấu («doi dia chi nhé», «giao ve cong ty nhé», «gửi về cong ty chi»).
- * Loại «cho» (chỗ / chờ / chợ / cho) và «nha» (nhà / nha) — «đợi chờ» không được thành «đổi chỗ».
+ * Loại «cho» (chỗ / chờ / chợ / cho), «nha» (nhà / nha) và «thay» trần («thấy địa chỉ») — chỉ nhận «thay đổi».
  */
-const CHANGE_FOLDED_UNAMBIGUOUS = /(?:^| )(?:doi|thay|sua)(?: lai)?(?: (?:sang|qua))? dia chi(?: |$)|(?:^| )dia chi (?:moi|khac)(?: |$)|(?:^| )(?:giao|gui|ship|chuyen)(?: hang)? (?:ve|toi|den|sang|qua|o) (?:cong ty|co quan|cua hang|truong|benh vien|xuong|kho|van phong|toa|chung cu)(?: |$)/;
+const CHANGE_FOLDED_UNAMBIGUOUS = /(?:^| )(?:doi|thay doi|sua)(?: lai)?(?: (?:sang|qua))? dia chi(?: |$)|(?:^| )dia chi (?:moi|khac)(?: |$)|(?:^| )(?:giao|gui|ship|chuyen)(?: hang)? (?:ve|toi|den|sang|qua|o) (?:cong ty|co quan|cua hang|truong|benh vien|xuong|kho|van phong|toa|chung cu)(?: |$)/;
 
 export function wantsAddressChange(text: string): boolean {
   const f = foldVnText(text);
