@@ -3,7 +3,7 @@
   "mission_id": "token-budget",
   "title": "Ngân sách token: ai wait + đo CU/việc DONE",
   "business_goal": "Giảm ≥50% CU/việc DONE so baseline 33,6M (10–16/10)",
-  "status": "PLANNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-token-budget",
@@ -29,11 +29,27 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-16T16:05:32.626Z",
-  "updated_at": "2026-10-16T16:05:32.626Z",
-  "last_heartbeat": "2026-10-16T16:05:32.626Z",
+  "updated_at": "2026-10-16T16:06:06.424Z",
+  "last_heartbeat": "2026-10-16T16:06:06.424Z",
   "definition_of_done": [],
   "intake": {
     "verdict": "MISSING",
     "evidence": []
+  },
+  "handoff": {
+    "branch": "claude/token-budget",
+    "sha": "2c5b996be8532f679803406db7d2cbd6bf65fbd4",
+    "at": "2026-10-16T16:06:06.424Z",
+    "actor": "DESKTOP-56TH98Y:wt-token-budget",
+    "title": "Agent chờ CI/deploy không còn đốt token: lệnh ai wait chạy nền + đo CU/việc DONE hằng tuần",
+    "summary": "",
+    "tests": [
+      "tests/claude-usage.test.ts: ĐẠT",
+      "tests/ai-tech-room.test.ts: ĐẠT",
+      "tests/delivery-v2.test.ts: ĐẠT",
+      "eslint tệp đổi: sạch",
+      "tsc: sạch ở tệp đổi (6 lỗi qrcode do node_modules mượn cũ, ngoài phạm vi)",
+      "ai wait health thật: ✓ 1eee82dab15b"
+    ]
   }
 }
