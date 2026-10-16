@@ -190,6 +190,8 @@ function testReviewBlockers() {
   assert.equal(postSaleFallbackText("hàng giao rồi nhé em", null), POST_SALE_NEUTRAL_TEXT);
   // Review PR #878 vòng 3: câu MỘT HƠI «trả lời, rồi mời» nối bằng dấu phẩy ⇒ chỉ bỏ VẾ mời, câu trả lời vẫn tới khách.
   assert.deepEqual(postSaleReplyGuard("Dạ có ạ, bên em xuất hoá đơn được, mình muốn lấy thêm gì không ạ?", "shop có xuất hoá đơn không"), { text: "Dạ có ạ, bên em xuất hoá đơn được.", dropped: ["UPSELL"] }, "hoá đơn: giữ vế trả lời");
+  // Review #878: câu KỂ trạng thái đơn của chính khách có chữ «combo» + đuôi «nhé» không phải lời mời — giữ nguyên, kể cả khi khách hỏi chuyện khác.
+  assert.deepEqual(postSaleReplyGuard("Dạ đơn combo 2kg của chị đang giao nhé.", "shop có xuất hoá đơn không").text, "Dạ đơn combo 2kg của chị đang giao nhé.", "câu trạng thái đơn không bị bỏ");
   assert.deepEqual(postSaleReplyGuard("Dạ shop ở 12 Lê Lợi Q1, chị ghé mua thêm nhé.", "shop ở đâu vậy em"), { text: "Dạ shop ở 12 Lê Lợi Q1.", dropped: ["UPSELL"] }, "địa chỉ shop: giữ vế trả lời");
   assert.deepEqual(postSaleReplyGuard("Dạ bên em đang có combo nem hải sản ưu đãi cho chị nè, chị lấy thêm không ạ?", "shop có xuất hoá đơn đỏ không em"), { text: "", dropped: ["UPSELL"], emptied: true }, "mọi vế đều là lời mời ⇒ vẫn rỗng");
   assert.deepEqual(postSaleReplyGuard("Dạ chị ơi, bên em có combo nem hải sản, chị thử không ạ?"), { text: "", dropped: ["UPSELL"], emptied: true }, "chỉ còn tiếng đệm «Dạ chị ơi» ⇒ rỗng, vế hỏi ngay sau vế mời cũng bỏ");

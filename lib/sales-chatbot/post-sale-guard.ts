@@ -59,6 +59,11 @@ const ASKING_RE = /\?| (?:nhe|nha|khong|ko|chua|duoc khong|a nhe|a nha|voi a)\s*
  * vì bản gập dấu không tách được «đã» khỏi «dạ» mở đầu mọi câu.
  */
 const STATEMENT_RE = /(?:^|[\s,.(])(?:đã|em vừa|shop vừa|ghi nhận|cập nhật|báo nhân viên)(?=[\s,.!?)]|$)/u;
+/**
+ * Câu KỂ trạng thái của chính đơn khách («đơn combo 2kg của chị đang giao nhé») — có chữ món (combo) và đuôi «nhé» nhưng không phải lời
+ * mời mua: review #878 bắt câu này bị bỏ, khách hỏi chuyện khác thì bị chuyển người oan.
+ */
+const ORDER_STATUS_STATEMENT_RE = /(?:^|[\s,.(])đơn(?:[\s,][^.!?]*?)?\s(?:đang (?:giao|gửi|đóng|chuẩn bị|vận chuyển|trên đường|được giao)|sẽ (?:giao|gửi|tới|đến)|đã (?:giao|gửi|lên|xuất)|chờ (?:giao|lấy|xuất))(?=[\s,.!?)]|$)/u;
 /** Câu xác nhận một THAY ĐỔI khách vừa xin («địa chỉ MỚI», «ĐỔI sang 2 hộp», «huỷ đơn») — không phải xin chốt LẠI đơn cũ. Bản gập dấu. */
 const CHANGE_RE = / (?:moi|doi|thay doi|cap nhat|sua|huy|bot|them) /;
 /** Tin KHÁCH vừa hỏi về món / giá / đổi đơn / địa chỉ ⇒ câu trả lời về món / xác nhận là ĐÚNG lúc, không lọc gì. Bản gập dấu. */
@@ -76,7 +81,7 @@ function sentencesOf(text: string): string[] {
 export function postSaleSentenceDrop(sentence: string, lastCustomerText = ""): PostSaleDrop | null {
   if (lastCustomerText && CUSTOMER_ASKED_RE.test(fold(lastCustomerText))) return null;
   const f = fold(sentence);
-  if (STATEMENT_RE.test(sentence.normalize("NFC").toLowerCase())) return null;
+  if (STATEMENT_RE.test(sentence.normalize("NFC").toLowerCase()) || ORDER_STATUS_STATEMENT_RE.test(sentence.normalize("NFC").toLowerCase())) return null;
   if (UPSELL_RE.some((re) => re.test(f))) return INVITING_RE.test(f) ? "UPSELL" : null;
   if (RECONFIRM_RE.some((re) => re.test(f)) && ASKING_RE.test(f) && !CHANGE_RE.test(f)) return "RECONFIRM";
   return null;
