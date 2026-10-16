@@ -1,0 +1,8 @@
+{
+  "pr": 862,
+  "sha": "01bff17679a8538c7b25be0697d8915105dc11b6",
+  "verdict": "PASS",
+  "actor": "vm:hkt",
+  "at": "2026-10-16T13:14:18.589Z",
+  "note": "Review độc lập đọc-chỉ 3 vòng: v1 CẦN SỬA (1 CAO tự chốt + 4 TB) đã sửa cb36681f; v2 CẦN SỬA (1 CAO savedConfirm theo chữ + 1 TB) đã sửa 01bff176; v3 ĐẠT, còn 2 THẤP"
+}
