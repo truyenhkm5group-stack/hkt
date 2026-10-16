@@ -70,6 +70,7 @@ import { amountText, applyCustomerCartMessage, buyingText, cartCommitmentPrompt,
 import { sellableCatalog } from "@/lib/sales-chatbot/catalog";
 import { allowedImageUrl, describeImages, fetchCustomerImage, IMAGE_PROMPT_RULE, imageLine, VISION_LIMITS } from "@/lib/sales-chatbot/vision";
 import { ADDRESS_KNOWN_TEXT, addressKnowledge, addressReaskVerdict } from "@/lib/sales-chatbot/address-memory";
+import { DELIVERY_HANDOFF_TEXT, deliveryReplyViolation, turnDeliverySay } from "@/lib/sales-chatbot/delivery-intent";
 import { CLAIM_HANDOFF_REASON, CLAIM_SAFE_TEXT, claimFactsLoader, detectPriceDispute, extractVndAmounts, guardOutgoing, noteSeenTotals, paymentSignalHandoff, paymentSignalInCustomerText, unverifiedAmounts, type ClaimVerdict } from "@/lib/sales-chatbot/claim-guard";
 import { flagOrderForReviewAsAgent, loadAutoConfirmComplete } from "@/lib/records/order-create";
 import type { PriceDisputeState } from "@/lib/sales-chatbot/quote-shared";
@@ -1313,6 +1314,24 @@ async function chatTurnCore(
                 content.push({ type: "text", text: said });
                 spoke = true;
                 if (addrHold.rest) draftUnsaid = null;
+              }
+              continue;
+            }
+            // HỎI LỊCH GIAO (P0 #855, ca 16/10/2026 «Hôm nào có hàng?»): bản nháp chỉ đọc câu trạng thái «chưa có thông tin vận chuyển»
+            // hoặc hứa «hôm nay / chiều nay / mai giao» mà máy chủ không quyết câu đó trong lượt ⇒ bỏ chữ, chuyển nhân viên (một lần —
+            // khoá theo lượt). Kênh nhắn tin giữ luật im khi chuyển người (01/10/2026); web nhận câu «em báo nhân viên xác nhận giờ giao».
+            const deliveryNote = verdict.ok ? deliveryReplyViolation(text, out, turnDeliverySay(history)) : null;
+            if (deliveryNote) {
+              lastError = lastError ?? deliveryNote;
+              if (!state.handoff) {
+                const reason = `Hỏi lịch giao — «${text.replace(/\s+/g, " ").trim().slice(0, 120)}» (${deliveryNote})`;
+                state = { ...state, handoff: { reason, at: now.toISOString() } };
+                if (isPublicChannel(opts.channel)) await notifySalesChatHandoff(conv.id, reason, state.customer, now, { dedupeKey: `sales-chat:delivery-time:${conv.id}:${turnSeq}` }).catch(() => undefined);
+              }
+              if (!isMessagingChannel(opts.channel) && !content.some((x) => x.type === "text" && x.text === DELIVERY_HANDOFF_TEXT)) {
+                content.push({ type: "text", text: DELIVERY_HANDOFF_TEXT });
+                spoke = true;
+                draftUnsaid = null;
               }
               continue;
             }

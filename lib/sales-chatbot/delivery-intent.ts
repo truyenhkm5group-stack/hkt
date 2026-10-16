@@ -211,3 +211,27 @@ export function deliveryReplyViolation(lastCustomerText: string, reply: string, 
   if (PROMISE_RE.test(fr) && !(verified && PROMISE_RE.test(` ${foldVi(verified)} `))) return "Khách hỏi lịch giao — bản nháp hứa mốc giao (hôm nay / ngày mai) mà máy chủ không có căn cứ";
   return null;
 }
+
+type TurnBlock = { type: string; text?: string; content?: string };
+
+/**
+ * Câu DIRECT máy chủ đã quyết trong LƯỢT hiện tại (`get_order_status` → `delivery_answer.say`) — căn cứ cho `deliveryReplyViolation`.
+ * Đọc ngược lịch sử của lượt tới tin KHÁCH gần nhất (tin `user` có chữ); kết quả công cụ của lượt cũ không phải căn cứ. HÀM THUẦN.
+ */
+export function turnDeliverySay(history: readonly { role: string; content: readonly TurnBlock[] }[]): string | null {
+  for (let i = history.length - 1; i >= 0; i--) {
+    const m = history[i];
+    if (m.role !== "user") continue;
+    if (m.content.some((b) => b.type === "text" && (b.text ?? "").trim())) return null;
+    for (const b of m.content) {
+      if (b.type !== "tool_result" || typeof b.content !== "string") continue;
+      try {
+        const d = (JSON.parse(b.content) as { delivery_answer?: { kind?: unknown; say?: unknown } }).delivery_answer;
+        if (d?.kind === "DIRECT" && typeof d.say === "string" && d.say.trim()) return d.say;
+      } catch {
+        // Kết quả không phải JSON ⇒ không phải căn cứ.
+      }
+    }
+  }
+  return null;
+}

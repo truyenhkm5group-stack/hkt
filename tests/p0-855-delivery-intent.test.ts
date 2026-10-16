@@ -29,10 +29,12 @@ import {
   deliveryTimeAnswer,
   GENERIC_STATUS_PHRASE,
   staffDeliveryCommitment,
+  turnDeliverySay,
   type DeliveryFacts,
 } from "@/lib/sales-chatbot/delivery-intent";
 import { LIFECYCLE_SHOP_SAID_PREFIX, postSalePrompt } from "@/lib/sales-chatbot/lifecycle";
 import { executeTool, toolDefsFor, type ChatState } from "@/lib/sales-chatbot/tools";
+import { runGoldenCases, say, type GoldenCase } from "./sales-agent-golden/harness";
 
 const ORG = "p0-855-lich-giao";
 
@@ -175,6 +177,11 @@ function testAnswer() {
   assert.equal(deliveryReplyViolation("Hôm nào có hàng?", DELIVERY_HANDOFF_TEXT), null);
   assert.equal(deliveryReplyViolation("đơn của em sao rồi", statusReply), null, "câu hỏi trạng thái ⇒ câu trạng thái là đúng");
 
+  // Căn cứ của lượt: chỉ kết quả công cụ SAU tin khách gần nhất.
+  const da = (say: string) => JSON.stringify({ delivery_answer: { kind: "DIRECT", say } });
+  assert.equal(turnDeliverySay([{ role: "user", content: [{ type: "text", text: "Bao giờ nhận?" }] }, { role: "assistant", content: [{ type: "tool_use" }] }, { role: "user", content: [{ type: "tool_result", content: da("Dạ bưu tá đang giao") }] }]), "Dạ bưu tá đang giao");
+  assert.equal(turnDeliverySay([{ role: "user", content: [{ type: "tool_result", content: da("cũ") }] }, { role: "user", content: [{ type: "text", text: "Hôm nào có hàng?" }] }]), null, "kết quả của lượt cũ không phải căn cứ");
+
   // Lời nhắc hậu mãi + mô tả công cụ: câu hỏi KHI NÀO đi theo `delivery_answer`, không đọc «status» thay giờ giao.
   const p = postSalePrompt({ phase: "AWAITING_SHIPMENT", receivedBy: null, orderId: "erp-x", source: "" }, "X");
   assert.match(p, /delivery_answer/);
@@ -185,6 +192,63 @@ function testAnswer() {
   assert.match(def?.description ?? "", /delivery_answer/);
   // Công cụ nhận câu khách + tin shop gần đây từ engine (không tự đoán).
   assert.match(readFileSync("lib/sales-chatbot/tools.ts", "utf8"), /orderStatusFor\(ctx\.conversationId, state, ctx\.commentTurn === true, \{ text: ctx\.lastUserText, shopTexts: ctx\.recentSaid \?\? \[\]/);
+}
+
+// ─────────────────────────── ENGINE THẬT (`chatTurn`, model giả) ───────────────────────────
+
+const STATUS_REPLY = "Dạ đơn mình hiện đang ở trạng thái: Shop đã nhận đơn — chưa có thông tin vận chuyển ạ.";
+/** Ca thật: khách ĐÃ lên đơn (đơn Pancake gắn hội thoại) rồi mới hỏi — hàng rào khẳng định «đã nhận đơn» qua được, chỉ chốt chặn lịch giao chặn. */
+const withOrder = (id: string) => async ({ conversationId }: { conversationId: string }) => {
+  const db = await getDb();
+  await db.insert(schema.orders).values({ id, insertedAt: new Date(Date.now() - 30 * 60_000), salesConversationId: conversationId, totalPrice: 280_000, stage: "CONFIRMED" });
+};
+const ENGINE_CASES: GoldenCase[] = [
+  {
+    key: "p855-web-tu-viet-trang-thai",
+    title: "Web: model KHÔNG gọi get_order_status, tự viết câu trạng thái + hứa «chiều nay» cho «Hôm nào có hàng?»",
+    shop: "food",
+    channel: "WEB",
+    turns: [{ say: "Hôm nào có hàng?", before: withOrder("7712345000000855001"), ai: [() => [say(STATUS_REPLY), say("Dạ chiều nay giao chị nhé")]] }],
+  },
+  {
+    key: "p855-fanpage-hua-chieu-nay",
+    title: "Fanpage: model hứa «chiều nay giao» ⇒ chặn, bot im (luật kênh nhắn tin), chuyển nhân viên",
+    shop: "food",
+    channel: "FANPAGE",
+    turns: [{ say: "Hôm nào có hàng?", before: withOrder("7712345000000855002"), ai: [() => [say("Dạ chiều nay giao chị nhé")]] }],
+  },
+  {
+    key: "p855-web-hoi-trang-thai",
+    title: "Web: hỏi TRẠNG THÁI ⇒ câu trạng thái không bị chặn",
+    shop: "food",
+    channel: "WEB",
+    turns: [{ say: "đơn của em sao rồi", before: withOrder("7712345000000855003"), ai: [() => [say(STATUS_REPLY)]] }],
+  },
+];
+
+async function runEngineCases() {
+  const notified = new Map<string, number>();
+  const got = await runGoldenCases(ENGINE_CASES, {
+    orgSuffix: "-p855",
+    afterCase: async (c) => {
+      const db = await getDb();
+      const rows = await db.select({ body: schema.notifications.body }).from(schema.notifications);
+      notified.set(c.key, rows.filter((r) => r.body.includes("Hỏi lịch giao")).length - [...notified.values()].reduce((a, b) => a + b, 0));
+    },
+  });
+  const web = got.get("p855-web-tu-viet-trang-thai")!;
+  assert.deepEqual(web.turns[0].shown, [DELIVERY_HANDOFF_TEXT], `web: chỉ câu chuyển nhân viên tới khách — ${JSON.stringify(web.turns[0].shown)}`);
+  assert.equal(web.final.status, "HANDOFF");
+  assert.match(web.final.handoffReason ?? "", /^Hỏi lịch giao — «Hôm nào có hàng\?»/);
+  assert.equal(notified.get("p855-web-tu-viet-trang-thai"), 1, "chuyển nhân viên đúng MỘT lần dù hai câu cùng vi phạm");
+  const fb = got.get("p855-fanpage-hua-chieu-nay")!;
+  assert.deepEqual(fb.turns[0].shown, [], `fanpage: bot im khi chuyển người — ${JSON.stringify(fb.turns[0].shown)}`);
+  assert.equal(fb.final.status, "HANDOFF");
+  assert.match(fb.final.handoffReason ?? "", /^Hỏi lịch giao/);
+  assert.equal(notified.get("p855-fanpage-hua-chieu-nay"), 1);
+  const st = got.get("p855-web-hoi-trang-thai")!;
+  assert.deepEqual(st.turns[0].shown, [STATUS_REPLY], "câu hỏi trạng thái ⇒ câu trạng thái gửi bình thường");
+  assert.notEqual(st.final.status, "HANDOFF");
 }
 
 // ─────────────────────────── TỔ CHỨC THẬT ───────────────────────────
@@ -269,7 +333,8 @@ export async function testP0855DeliveryIntent() {
   } finally {
     await cleanup();
   }
+  await runEngineCases();
   console.log(
-    `✓ P0 #855 hỏi lịch giao ≠ hỏi trạng thái: ${DELIVERY_GOLDEN.length}/${DELIVERY_GOLDEN.length} câu thời gian giao ⇒ DELIVERY_TIME · câu trạng thái ⇒ ORDER_STATUS · câu không liên quan ⇒ null · đơn chưa vận đơn hỏi «Hôm nào có hàng?» ⇒ máy chủ chuyển nhân viên, không câu trạng thái, không hứa giờ · hôm nay / ngày mai / giao gấp chưa có dữ liệu ⇒ không hứa · ETA ĐVVC đọc được / ngày hẹn ghi trên đơn ⇒ trả lời trực tiếp · nhân viên đã hẹn ⇒ AI không nói khác · chốt chặn chữ model`,
+    `✓ P0 #855 hỏi lịch giao ≠ hỏi trạng thái: ${DELIVERY_GOLDEN.length}/${DELIVERY_GOLDEN.length} câu thời gian giao ⇒ DELIVERY_TIME · câu trạng thái ⇒ ORDER_STATUS · câu không liên quan ⇒ null · đơn chưa vận đơn hỏi «Hôm nào có hàng?» ⇒ máy chủ chuyển nhân viên, không câu trạng thái, không hứa giờ · hôm nay / ngày mai / giao gấp chưa có dữ liệu ⇒ không hứa · ETA ĐVVC đọc được / ngày hẹn ghi trên đơn ⇒ trả lời trực tiếp · nhân viên đã hẹn ⇒ AI không nói khác · chốt chặn chữ model qua chatTurn (web: câu chuyển nhân viên · fanpage: im · một lần báo)`,
   );
 }
