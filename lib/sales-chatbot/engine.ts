@@ -1314,10 +1314,10 @@ async function chatTurnCore(
           if (g.leaked) leaks += 1;
           if (g.text) {
             const out = plainForMessenger(g.text);
-            // KHÔNG LẶP CÂU XIN LỖI / HỎI LẠI (P0 16/10/2026, #855 ca «ThuyNgo»): model gửi lại ĐÚNG câu xin lỗi / câu hỏi / câu xin xác nhận
+            // KHÔNG LẶP CÂU XIN LỖI / HỎI LẠI (P0 16/10/2026, #855 ca «ThuyNgo»): model gửi lại ĐÚNG câu xin lỗi / câu xin xác nhận / câu xin thông tin
             // bot vừa gửi ⇒ bỏ câu đó (cùng phép so `repeatsRecent` của câu mẫu). Cả lượt chỉ còn những câu lặp ⇒ chuyển người ở khối «KHÔNG
             // ĐỂ KHÁCH IM» bên dưới, không phát câu dự phòng.
-            if (repeatsRecent(out, recentSaid) && (out.includes("?") || REPEATABLE_ASK_RE.test(foldVi(out)))) {
+            if (repeatsRecent(out, recentSaid) && REPEATABLE_ASK_RE.test(foldVi(out))) {
               repeatedDrop = true;
               lastError = lastError ?? "AI gửi lại đúng câu xin lỗi / hỏi lại vừa gửi — đã bỏ câu lặp";
               continue;
@@ -1623,7 +1623,10 @@ export function cycleStartTurns(st: ChatState, turns: number, now: Date): number
   return st.cycleStartTurns ?? 0;
 }
 
-/** Câu bot KHÔNG được gửi lại y nguyên (#855): xin lỗi · xin / nhờ xác nhận · xin thông tin (đọc trên chữ đã gập) — và mọi câu hỏi («?»). */
+/**
+ * Câu bot KHÔNG được gửi lại y nguyên (#855): xin lỗi · xin / nhờ xác nhận · xin thông tin — đọc trên chữ đã gập. Câu hỏi thường («mình lấy
+ * 1kg hay 2kg ạ?») KHÔNG nằm đây: hỏi lại một câu chốt sau khi khách hỏi chuyện khác vẫn là một câu trả lời hợp lệ.
+ */
 const REPEATABLE_ASK_RE = /(?:^| )(?:xin loi|cho em xin|xac nhan|gui giup em|cho em biet)(?: |$)/;
 
 /** Tiền tố tin của page / nhân viên trong lịch sử của bot. */
