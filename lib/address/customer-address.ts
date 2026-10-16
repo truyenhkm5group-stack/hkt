@@ -194,14 +194,19 @@ export function otherWardNamed(provinceCode: number, ward: string, customerText:
   const straddles = (seg: string, i: number, len: number) => at(seg, own).some((j) => i > j && i < j + own.length - 1 && i + len > j + own.length);
   // Tên QUẬN / HUYỆN CŨ của chính xã đã nhận trùng tên một xã mới («P An Hội Tây, Gò Vấp» — Gò Vấp vừa là quận cũ của An Hội Tây vừa là
   // «Phường Gò Vấp» mới; tương tự Bình Thạnh, Phú Nhuận, Tân Bình…) là phần địa chỉ cũ, không phải lời nêu xã thứ hai (review #874).
+  // CHỈ khi tên ấy đứng ở VỊ TRÍ QUẬN của địa chỉ: không có chữ loại xã ngay trước, và tin không mang lời chọn / sửa («Ngọc Hà hay Ba Đình
+  // ấy em», «An Hội Tây hay phường Gò Vấp?», «không phải…», «/») — khi đó khách đang nêu nó như MỘT XÃ để chọn, phải hỏi lại (review #874).
   const oldDistricts = wardOldDistricts(ward, provinceCode);
+  const choosing = /[?/]/.test(customerText) || /(?:^| )(?:hay|hoac|hoặc|khong phai|ko phai|k phai|nham|sai|chang|chẳng)(?: |$)/.test(` ${foldVnText(customerText)} `);
+  const asDistrict = (seg: string, i: number) => !choosing && !/ (?:phuong|xa|thi tran|dac khu)$/.test(seg.slice(0, i));
   return (
     adminWardsOf(provinceCode).find((w) => {
       if (w.name === ward) return false;
       const c = coreOf(w.name);
-      if (` ${core} `.includes(` ${c} `) || oldDistricts.includes(c)) return false;
+      if (` ${core} `.includes(` ${c} `)) return false;
       const n = ` ${/^\d+$/.test(c) ? foldVnText(w.name) : c} `;
-      return segments.some((seg) => at(seg, n).some((i) => !straddles(seg, i, n.length)));
+      const oldDistrict = oldDistricts.includes(c);
+      return segments.some((seg) => at(seg, n).some((i) => !straddles(seg, i, n.length) && !(oldDistrict && asDistrict(seg, i))));
     }) ?? null
   );
 }

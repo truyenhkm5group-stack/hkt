@@ -92,6 +92,11 @@ export function testP0855AddressPure() {
   assert.equal(otherWardNamed(79, "Phường An Hội Tây", "Số 9 Quang Trung, P An Hội Tây, Gò Vấp, TP.HCM"), null, "«…An Hội Tây, Gò Vấp» không phải hai phường");
   assert.deepEqual(acceptCustomerWard(parseCustomerAddress("Số 9 Quang Trung, P An Hội Tây, Gò Vấp, TP.HCM"), "Phường An Hội Tây", "Số 9 Quang Trung, P An Hội Tây, Gò Vấp, TP.HCM"), { ok: true, ward: "Phường An Hội Tây" });
   assert.equal(otherWardNamed(79, "Phường An Hội Tây", "An Hội Tây, Bình Thạnh")?.name, "Phường Bình Thạnh", "quận KHÁC (không phải quận cũ của xã) vẫn là xã khác");
+  // …nhưng khi khách nêu tên ấy như MỘT XÃ để chọn / sửa thì vẫn là xã khác (review #874 [CAO]).
+  assert.equal(otherWardNamed(79, "Phường An Hội Tây", "An Hội Tây hay phường Gò Vấp vậy em?")?.name, "Phường Gò Vấp");
+  assert.equal(otherWardNamed(79, "Phường An Hội Tây", "phường Gò Vấp chứ em")?.name, "Phường Gò Vấp", "chữ loại «phường» ngay trước ⇒ là xã");
+  assert.equal(otherWardNamed(1, "Phường Ngọc Hà", "Ngọc Hà hay Ba Đình ấy em, chị không rõ")?.name, "Phường Ba Đình", "Hà Nội: phân vân giữa hai phường ⇒ hỏi lại");
+  assert.equal(otherWardNamed(1, "Phường Ngọc Hà", "Số 5 ngõ Thử, Ngọc Hà, Ba Đình, Hà Nội"), null, "Ba Đình ở vị trí quận cũ ⇒ không phải xã thứ hai");
   // #871: tin CHỈ hẹn giờ giao không đổi nơi nhận ⇒ câu xin lại SĐT + địa chỉ đã có bị bỏ, không chuyển người; tin có nơi chốn lạ thì không.
   for (const t of ["Giao sáng mai khoảng 9h", "chiều nay 5h nhé", "Thứ 7 giao giúp em", "7 giờ tối nay", "Giao cho chị sáng mai khoảng 9h nhé", "mai giao lúc 9:30 nha", "chủ nhật giao nhé"]) assert.equal(isScheduleOnly(t), true, t);
   // Review #871: tên người trùng từ chỉ thời gian («Thu», «Nam», «Mai», «Hằng», «Tư») và người thứ ba («ba», «mẹ») ⇒ đổi NGƯỜI nhận.
