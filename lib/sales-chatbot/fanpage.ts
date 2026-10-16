@@ -550,8 +550,8 @@ export async function receiveFanpageEvent(ev: FanpageEvent, now: Date = new Date
     if (ev.inbox) await stopFollowups(ev.pageId, ev.threadId, now, false);
     if (ev.comment) return { queued: false, reason: "Page đã trả lời bình luận — bot không chen" };
     const c = schema.salesChatConversations;
-    // Tin tự động / tin mẫu: KHÔNG phải nhân viên, KHÔNG trả lời câu hỏi thật của khách (trừ lượt toàn câu mẫu quảng cáo — xem
-    // `buildCustomerTurns`), KHÔNG chuyển hội thoại sang người.
+    // Tin tự động / tin mẫu: KHÔNG phải nhân viên, KHÔNG trả lời câu hỏi thật của khách — kể cả lượt toàn câu mẫu quảng cáo (issue
+    // #856, `answers()` của response-ownership.ts), KHÔNG chuyển hội thoại sang người.
     if (origin === "PANCAKE_AUTOMATION") return { queued: false, reason: AUTOMATION_REASON };
     if (origin === "UNKNOWN") {
       // Hội thoại ĐANG do một người ĐÃ XÁC MINH cầm (nhường còn hạn có dấu VERIFIED_HUMAN / «Tiếp quản») ⇒ câu chưa rõ người gửi tới
@@ -1701,7 +1701,8 @@ export async function resendPendingFanpageReplies(deps: FanpageDeps = {}): Promi
  */
 export const CATCH_UP_LIMITS = { maxAgeMinutes: 30, minAgeSeconds: 60, conversations: 60, threadsPerRun: 5 } as const;
 
-export type PancakeThreadMessage = { id: string; text: string; at: number; fromPage: boolean; autoNote: boolean };
+/** `automated`: Pancake / Meta gắn cờ tự động (`is_automated` / `ai_generated`) — tin tự động của page, KHÔNG phải câu trả lời (issue #856). */
+export type PancakeThreadMessage = { id: string; text: string; at: number; fromPage: boolean; autoNote: boolean; automated?: boolean };
 
 /** Tin của MỘT hội thoại Pancake ⇒ dạng chuẩn, theo thứ tự tạo. HÀM THUẦN. */
 export function normalizeThreadMessages(raw: readonly Record<string, unknown>[], pageId: string): PancakeThreadMessage[] {
@@ -1710,11 +1711,13 @@ export function normalizeThreadMessages(raw: readonly Record<string, unknown>[],
     const at = pancakeMs(m.inserted_at ?? m.created_at);
     const id = str(m.id);
     if (!id || at === null || m.is_removed === true) continue;
-    const from = (m.from ?? {}) as { id?: unknown; uid?: unknown; admin_id?: unknown };
+    const from = (m.from ?? {}) as { id?: unknown; uid?: unknown; admin_id?: unknown; ai_generated?: unknown; is_automated?: unknown };
     const text = stripHtml(str(m.original_message) || str(m.message)).slice(0, TEXT_MAX);
     const fromPage = str(from.id) === pageId || Boolean(from.uid) || Boolean(from.admin_id);
     // Tin phía page không chữ (dòng hệ thống / thẻ quảng cáo) đếm như ghi chú tự động — không phải trả lời.
-    out.push({ id, text, at, fromPage, autoNote: PANCAKE_AUTO_NOTE_RE.test(text) || (fromPage && !text.trim()) });
+    // Cùng nguồn cờ với đường nhận webhook (`from.ai_generated` / `from.is_automated`, dòng ~371).
+    const automated = fromPage && Boolean(from.ai_generated || from.is_automated);
+    out.push({ id, text, at, fromPage, autoNote: PANCAKE_AUTO_NOTE_RE.test(text) || (fromPage && !text.trim()), ...(automated ? { automated: true } : {}) });
   }
   return out.sort((a, b) => a.at - b.at);
 }
@@ -1726,7 +1729,8 @@ export function normalizeThreadMessages(raw: readonly Record<string, unknown>[],
 export function unansweredCustomerMessages(msgs: readonly PancakeThreadMessage[], nowMs: number, minAgeMs: number, maxAgeMs: number): PancakeThreadMessage[] {
   let lastReply = -1;
   msgs.forEach((m, i) => {
-    if (m.fromPage && !m.autoNote) lastReply = i;
+    // Tin TỰ ĐỘNG của page không trả lời câu hỏi thật (issue #856 — cùng luật `answers()` của response-ownership.ts).
+    if (m.fromPage && !m.autoNote && !m.automated) lastReply = i;
   });
   const pending = msgs.slice(lastReply + 1).filter((m) => !m.fromPage && !m.autoNote && m.text.trim());
   if (!pending.length || nowMs - pending[pending.length - 1].at < minAgeMs) return [];
