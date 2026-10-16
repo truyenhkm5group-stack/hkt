@@ -107,7 +107,10 @@ const STOP = new Set(
     "chot len don order de ok oke okie vang u uh roi khong ko k hok hong hem khoi phai chu ma cua loai dt sdt so dien thoai dia gium giup dum luon di hang nay kia do nao " +
     "the vay duoc dc can cai tong hay hoac moi ngon an truoc trc chiu bao nhieu bn gia sao dung tien het may tui goi hop set phan bich khay combo suat hu lo chiec cay " +
     "kg ky ki can gram gr g x da uhm oki shop xuong tru ha mai mot ve du qua lam it lan gio hom ngay toi sang chieu trua dem tuan thang tet mon huy gi vao ra " +
-    "nhen nghen nghe ne nhi hen nhaa ak day dau giu vs cung"
+    "nhen nghen nghe ne nhi hen nhaa ak day dau giu vs cung " +
+    // «Mình MUỐN mua 1 kg» (#871, ca «Ngọc Nguyễn»): động từ «muốn / thích» không phải tên món — trước đây «muốn» thành nhãn món, số 1kg
+    // bị bỏ khỏi giỏ vì «muốn» không khớp danh mục, rồi lên đơn chả cá bị chặn «khách chưa nói lấy món này».
+    "muon thich"
   ).split(" "),
 );
 const CUT_RE = /[\n,/;:+!?()[\]|.&]|\d/;
@@ -516,7 +519,14 @@ export function classifyCartMessage(text: string, catalog?: readonly string[], o
   });
   if (!amounts.length) return none("AMBIGUOUS");
   const buyVerb = /(?:^| )(?:lay|cho|dat|mua|gui|ship|chot|order|lam|len don)(?: (?:chi|em|anh|minh|toi|c|a|e|cho chi|cho em|cho anh|cho minh|them))*$/;
-  const priceAsk = raw.includes("?") || /(?:^| )(?:bao nhieu|bn|nhieu tien|may tien|het bao|gia (?:bao|sao|the nao|nhieu|nhu)|(?:duoc|dc|co|dung|phai) (?:khong|ko|k)|the nao|sao|tinh tien|tinh gia|bao gia)(?: |$)/.test(f) || /(?:^| )(?:khong|ko|k|hong|hok)(?: (?:em|e|a|shop|ban|vay|nhi))?$/.test(f);
+  // CÂU HỎI chỉ xét trong CÂU chứa số lượng (#871, ca «Ngọc Nguyễn»: «Ship gò vấp bn? Mình muốn mua 1 kg» — câu hỏi ship ở câu TRƯỚC không
+  // biến lời mua ở câu sau thành «số lượng nói kèm câu hỏi giá»). Tin một câu ⇒ như cũ (cả tin).
+  const sentenceStart = Math.max(0, ...[...raw.slice(0, amounts[0].index).matchAll(/[?.!\n]/g)].map((m) => (m.index ?? -1) + 1));
+  const lastEnd = amounts[amounts.length - 1].end;
+  const nextStop = raw.slice(lastEnd).search(/[?.!\n]/);
+  const sentence = raw.slice(sentenceStart, nextStop < 0 ? raw.length : lastEnd + nextStop + 1);
+  const fs = foldCart(sentence);
+  const priceAsk = sentence.includes("?") || /(?:^| )(?:bao nhieu|bn|nhieu tien|may tien|het bao|gia (?:bao|sao|the nao|nhieu|nhu)|(?:duoc|dc|co|dung|phai) (?:khong|ko|k)|the nao|sao|tinh tien|tinh gia|bao gia)(?: |$)/.test(fs) || /(?:^| )(?:khong|ko|k|hong|hok)(?: (?:em|e|a|shop|ban|vay|nhi))?$/.test(fs);
   const last = amounts[amounts.length - 1];
   const leadOf = (a: CartAmount) => tail(text.slice(0, a.index));
   const trailOf = (a: CartAmount) => head(text.slice(a.end));
@@ -676,8 +686,10 @@ function applyCart(cart: CartCommitment | undefined, text: string, turn: number 
       const i = findItem(items, a.label);
       if (i !== null) return i;
       if (items.some((x) => labelsMatch(x.match, a.label))) return "AMBIGUOUS";
-      // «Cho chị 2kg» rồi «2kg chả cá thu nhé» — giỏ có đúng MỘT món chưa rõ tên ⇒ đó là món này.
-      return items.length === 1 && !items[0].match ? 0 : "NEW";
+      // «Cho chị 2kg» rồi «2kg chả cá thu nhé» — giỏ có đúng MỘT món chưa rõ tên ⇒ đó là món này. CHỈ khi hợp đơn vị (#871, ca «Ngọc
+      // Nguyễn»: «mua 1 kg» rồi «Lấy 10 cái nem hải sản» — 10 CÁI không thể là 1 KG đó; trước đây nem ĐÈ lên món 1kg, giỏ mất 1kg chả cá
+      // và lên đơn chả cá bị chặn «khách chưa nói lấy món này»). Khác đơn vị ⇒ món MỚI.
+      return items.length === 1 && !items[0].match && unitFits(a, items[0]) ? 0 : "NEW";
     }
     // Số KHÔNG TÊN rơi về món sẵn có CHỈ khi hợp đơn vị (ca «Hoa Lê» 15/10/2026: «thêm 10 cái nem hải sản» không gắn được tên ⇒ rơi về
     // chả cá 1kg ⇒ +10kg). Khác đơn vị ⇒ HỎI LẠI, không bao giờ cộng vào món đó. «gói / túi» với món bán theo kg vẫn tới món đó (quy theo
@@ -839,7 +851,8 @@ const ASK_TAIL_RAW_RE = /(?:^|\s)(?:hả|à|hở)(?:\s+(?:em|e|shop|chị|c|ạ|
 export function buyingText(texts: readonly string[]): string {
   const out: string[] = [];
   for (const t of texts) {
-    for (const clause of t.split(/[\n,.;!]+|\s+(?:nhưng|nhung)\s+/i)) {
+    // «?» cũng cắt câu (#871): «Ship gò vấp bn? Mình muốn mua 1 kg» — câu hỏi bị bỏ, lời mua ở câu sau vẫn là chữ mua.
+    for (const clause of t.replace(/\?/g, "?\n").split(/[\n,.;!]+|\s+(?:nhưng|nhung)\s+/i)) {
       if (!clause.trim() || clause.includes("?")) continue;
       const fc = foldVi(clause);
       if (NOT_BUYING_RE.test(fc) || DEFER_OR_ASK_RE.test(fc) || NOT_BUYING_RAW_RE.test(clause.toLowerCase()) || ASK_TAIL_RAW_RE.test(clause.toLowerCase().trim())) continue;

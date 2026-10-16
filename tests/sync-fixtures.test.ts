@@ -380,6 +380,7 @@ import { testAddressNormalizePure, testAddressNormalizeTools } from "./address-n
 import { testAddressWardExplicitPure, testAddressWardExplicitTools } from "./address-ward-explicit.test";
 import { testAddressReaskAudit } from "./address-reask-audit.test";
 import { testP0855Address } from "./p0-855-address.test";
+import { testP0871ContactMemory } from "./p0-871-contact-memory.test";
 import { testVelocityUnifyDb, testVelocityUnifyPure } from "./velocity-unify.test";
 import { testOutreachClearanceUnit } from "./outreach-clearance-unit.test";
 import { testPageUsageDb, testPageUsagePure, testPageUsageSource } from "./page-usage.test";
@@ -2399,6 +2400,7 @@ async function main() {
   await testAddressWardExplicitTools();
   await testAddressReaskAudit();
   await testP0855Address(); // #855: địa giới cũ / «như cũ» / địa chỉ mới thắng / không hỏi lại SĐT · tên · địa chỉ · phường
+  await testP0871ContactMemory(); // #871: SĐT + địa chỉ đã biết không hỏi lại khi đổi chủ đề · câu mẫu cũng chịu hàng rào · hẹn giờ giao = ghi chú · hậu mãi không bán tiếp · gói tin trùng
   // Company OS · Agent V: MỘT tốc độ bán (Kế hoạch SX) cho Hàng chậm / Quyết định vốn tồn / Hiệu quả mẫu mã + ops velocity-compare (mã `cos-v-` / `COSV`, tự dọn).
   testVelocityUnifyPure();
   testOutreachClearanceUnit();

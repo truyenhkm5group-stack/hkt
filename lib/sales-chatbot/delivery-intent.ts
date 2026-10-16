@@ -284,3 +284,52 @@ export function pickDeliveryOrder<T extends { id: string; stage: string; inserte
   const open = live.filter((r) => !CLOSED_ORDER_STAGES.has(r.stage));
   return { kind: "TARGET", target: open[0] ?? live[0], liveOrders: open.length };
 }
+
+// ─────────────────────────── MONG MUỐN GIỜ GIAO TRƯỚC KHI CHỐT (#871, ca «Ngọc Nguyễn» HSLC 16/10/2026) ───────────────────────────
+
+/**
+ * Câu ghi nhận mong muốn giờ giao khi CHƯA có lịch giao xác minh — không nêu mốc (nêu «9h sáng mai» là một lời hứa), không xin lại thông
+ * tin nhận hàng. Bài kiểm khoá: câu này KHÔNG bị chính `deliveryPromiseIn` coi là lời hứa.
+ */
+export const DELIVERY_NOTED_TEXT = "Dạ em ghi nhận mong muốn thời gian giao của mình rồi ạ, shop kiểm tra lịch giao rồi báo lại mình nhé.";
+
+/** Ghi nhận (không phải hứa): «ghi nhận», «ghi chú», «mong muốn», «kiểm tra», «báo lại», «xác nhận lại», «cố gắng», «nếu được». Đã chuẩn hoá. */
+const HEDGE_RE = /(?:^|\s)(?:xacnhan lai|xacnhan|ghi nhan|ghi chu|ghi lai|luu y|mong muon|kiem tra|bao lai|co gang|neu duoc|neu kip|du kien|se bao)(?=\s|$)/;
+/** Mốc giờ / ngày khách nêu: «9h», «9 giờ», «9g30», «thứ 7», «chủ nhật», «ngày 18». Bản gập dấu. */
+const CLOCK_RE = /(?:^|\s)(?:\d{1,2} ?(?:h|g|gio)(?:\s?\d{1,2})?|thu (?:\d|hai|ba|tu|nam|sau|bay)|chu nhat|ngay \d{1,2})(?=\s|$)/;
+
+/**
+ * Tin khách là MONG MUỐN thời gian giao gắn với một mốc («Giao sáng mai khoảng 9h», «chiều nay giao giúp chị», «thứ 7 giao nhé») —
+ * không phải câu hỏi «bao giờ giao» trần. Trả nguyên văn đã gọn (để ghi vào ghi chú đơn) hoặc `null`. HÀM THUẦN.
+ */
+export function deliveryPreferenceOf(text: string): string | null {
+  const q = classifyDeliveryQuestion(text);
+  const f = normalizeAsk(text);
+  // «thứ 7 giao giúp chị» không có chữ hỏi «khi nào / hôm nay / mai» nên bộ phân loại không gọi là DELIVERY_TIME — mốc + động từ giao là đủ.
+  const clockWithVerb = CLOCK_RE.test(f) && /(?:^|\s)(?:giao|ship|gui|nhan|phat)(?=\s|$)/.test(f);
+  const anchored = q?.intent === "DELIVERY_TIME" ? q.nuance === "TODAY" || q.nuance === "TOMORROW" || CLOCK_RE.test(f) : clockWithVerb;
+  if (!anchored) return null;
+  // CÂU HỎI chính sách («giao trong ngày được không», «mai có giao không?») không phải lời hẹn — câu trả lời theo chính sách shop đi bình thường.
+  if (text.includes("?") || /(?:^|\s)(?:khong|ko|k|hong|hok|chua|kip khong|kip ko)(?:\s(?:a|em|shop|nhi|vay|ha|ban))?\s*$/.test(f)) return null;
+  return text.replace(/\s+/g, " ").trim().slice(0, 160);
+}
+
+/** Dòng ghi chú đơn cho mong muốn giờ giao — kèm MỐC KHÁCH NHẮN (giờ VN) để «sáng mai» đọc được ngày nào. HÀM THUẦN. */
+export function deliveryPreferenceNote(pref: { text: string; at: string }): string {
+  const at = new Date(pref.at);
+  const when = Number.isFinite(at.getTime()) ? new Intl.DateTimeFormat("vi-VN", { timeZone: "Asia/Ho_Chi_Minh", hour: "2-digit", minute: "2-digit", day: "2-digit", month: "2-digit", year: "numeric" }).format(at) : "";
+  return `Khách hẹn giờ giao (CHƯA xác nhận với ĐVVC): «${pref.text}»${when ? ` — khách nhắn lúc ${when}` : ""}`;
+}
+
+/**
+ * Câu của model HỨA một mốc giao («mai 9h em giao cho mình nhé», «sáng mai bên em giao tới») — bỏ qua câu GHI NHẬN («em ghi nhận mong muốn
+ * giao sáng mai, shop kiểm tra rồi báo lại»). Trả các câu hứa (để nơi gọi bỏ đúng câu đó). HÀM THUẦN.
+ */
+export function deliveryPromiseIn(reply: string): string[] {
+  // Tách câu KHÔNG dùng nhìn-ngược (Safari < 16.4 sập cả trang khi một tệp lib/* có `(?<=` tới trình duyệt).
+  const parts = reply.replace(/([.!?…])\s+/g, "$1\n").split(/\n+/).map((x) => x.trim()).filter(Boolean);
+  return parts.filter((p) => {
+    const f = normalizeAsk(p);
+    return (PROMISE_RE.test(f) || (CLOCK_RE.test(f) && /(?:^|\s)(?:giao|ship|gui|toi|den)(?=\s|$)/.test(f))) && !HEDGE_RE.test(f);
+  });
+}

@@ -18,6 +18,7 @@ import { canAutoFill, customerStatedAddresses, hasStreetDetail, legacyAddressUnm
 
 export { wantsAddressChange };
 import { findProvince, foldVnText } from "@/lib/address/vn-address";
+import { classifyDeliveryQuestion } from "@/lib/sales-chatbot/delivery-intent";
 import type { ChatState } from "@/lib/sales-chatbot/tools";
 
 // ─────────────────────────── TRÍ NHỚ ĐÃ HỎI ───────────────────────────
@@ -316,7 +317,43 @@ const ACK = /^(?:ok|oke|okie|okay|uh|u|um|vang|da|dung|dung roi|duoc|chot|chot d
 function settlesAddress(last: string, ward: string | null): boolean {
   const f = foldVnText(last);
   const wardCore = ward ? foldVnText(ward).replace(/^(phuong|xa|thi tran|dac khu) /, "") : "";
-  return ACK.test(f) || customerStatedAddresses([last]).length > 0 || deliveryAddressIn(last) !== null || last.split(/\n+/).some((l) => deliveryAddressIn(l) !== null) || (wardCore.length > 0 && ` ${f} `.includes(` ${wardCore} `));
+  return ACK.test(f) || continuesSameOrder(last) || customerStatedAddresses([last]).length > 0 || deliveryAddressIn(last) !== null || last.split(/\n+/).some((l) => deliveryAddressIn(l) !== null) || (wardCore.length > 0 && ` ${f} `.includes(` ${wardCore} `));
+}
+
+/** Người nhận / nơi giao KHÁC («gửi cho mẹ chị», «ship về quê», «giao lên công ty», «người nhận khác», «không ở đó nữa»). Bản gập dấu. */
+const OTHER_PLACE_OR_PERSON = new RegExp(
+  [
+    String.raw`(?:^| )(?:gui|giao|ship|chuyen|mang|dua)(?: hang| don| do)? (?:cho|ho|ve|toi|den|ra|sang|qua|o|len|xuong) (?:me|bo|ba|ma|chong|vo|con|ban|co|chu|di|ong|sep|dong nghiep|nguoi|nha|que|cong ty|co quan|cho lam|truong|van phong|kho|xuong|cua hang|shop|tiem|benh vien)(?: |$)`,
+    String.raw`(?:^| )(?:nguoi nhan|nguoi khac|que|nha khac|cho khac|noi khac|dia chi khac|dia chi moi|khong o)(?: |$)`,
+  ].join("|"),
+);
+/** Tin về CHÍNH ĐƠN đang chốt: hẹn giờ / ngày giao, thêm / đổi món (số + đơn vị, «lấy», «thêm»), hỏi giá một món. Bản gập dấu. */
+const SAME_ORDER_TOPIC = new RegExp(
+  [
+    String.raw`(?:^| )(?:lay|them|mua|dat|order|bot|doi sang)(?: |$)`,
+    String.raw`(?:^| )\d+(?:[.,]\d+)? ?(?:kg|ky|ki|kilo|g|gam|gram|hop|goi|tui|cai|chiec|phan|set|combo|lo|hu|khay|bich|con|mieng|vien|thung|chai|suat|lang)(?: |$)`,
+    String.raw`(?:^| )(?:mot|hai|ba|bon|nam|muoi|nua) (?:kg|ky|ki|hop|goi|tui|cai|chiec|phan|set|combo|lo|hu|khay|bich|con)(?: |$)`,
+    String.raw`(?:^| )(?:bao nhieu|gia|may tien|bn)(?: |$)`,
+  ].join("|"),
+);
+/**
+ * Tin khách mới nhất KHÔNG ĐỤNG tới thông tin nhận hàng mà nói tiếp về CHÍNH ĐƠN này (#871 ca «Ngọc Nguyễn», HSLC 16/10/2026: «Giao sáng
+ * mai khoảng 9h», «Lấy 10 cái nem hải sản» sau khi đã gửi SĐT + địa chỉ đầy đủ). Trước bản này hàng rào chỉ coi tin MỚI NHẤT là «chốt địa
+ * chỉ» khi chính nó mang địa chỉ hoặc là lời đồng ý — đổi chủ đề là địa chỉ đã biết bị coi như chưa biết, và câu xin lại SĐT + địa chỉ / xác
+ * nhận lại phường lọt ra tới khách. Ba trạng thái, ĐÚNG MỘT đường cho mỗi cái:
+ *  · `UNCHANGED_ADDRESS` (hàm này `true`): hẹn lịch giao · thêm / đổi món · hỏi giá — KHÔNG có lời đổi nơi giao / người nhận / SĐT;
+ *  · `EXPLICIT_CHANGE_ADDRESS`: lời đổi tường minh (`wantsAddressChange`, `hasChangeCue`, người nhận / nơi giao khác) ⇒ `false`, bot được
+ *    hỏi phần của nơi mới (review PR #848 lần 4 vẫn giữ: «gửi cho mẹ chị dưới quê nhé» không bị coi là cùng đơn);
+ *  · `UNKNOWN_ADDRESS`: tin không thuộc hai loại trên («chị không ở đó nữa rồi em») ⇒ `false` — không chắc thì để câu hỏi đi qua.
+ * HÀM THUẦN.
+ */
+export function continuesSameOrder(last: string): boolean {
+  const f = foldVnText(last);
+  if (!f.trim()) return false;
+  if (wantsAddressChange(last) || hasChangeCue(last) || PHONE_CHANGE.test(f) || OTHER_PLACE_OR_PERSON.test(f)) return false;
+  // Tin mang SĐT / địa chỉ / mảnh địa chỉ là chuyện của thông tin nhận hàng — đi đường riêng (`settlesAddress`, `lastAddsAddress`).
+  if (hasPhone(last) || last.split(/\n+/).some((l) => deliveryAddressIn(l) !== null || looksLikeStreetFragment(l))) return false;
+  return classifyDeliveryQuestion(last) !== null || SAME_ORDER_TOPIC.test(f);
 }
 
 /**
@@ -332,7 +369,9 @@ const DEFER_RE = /(?:^| )(?:gui sau|de sau|lat (?:chi |anh |em )?gui|toi (?:chi 
 const PHONE_IN_TEXT = /(?:\+?84|0)[35789]\d{8}(?!\d)/;
 const hasPhone = (t: string) => PHONE_IN_TEXT.test(t.replace(/(\d)[ .-](?=\d)/g, "$1"));
 /** Khách đổi SĐT / người nhận ⇒ câu xin SĐT / tên mới không bị bỏ. */
-const PHONE_CHANGE = /(?:^| )(?:so|sdt|so dien thoai|so dt) (?:khac|moi)(?: |$)|(?:^| )doi (?:so|sdt)(?: |$)|(?:^| )nguoi nhan(?: |$)|(?:^| )(?:gui|giao|ship) (?:cho|ho) (?:me|bo|ba|ban|chong|vo|con|em|anh|chi|co|chu|di|ong)(?: |$)/;
+// «giao cho chị nhé», «giao cho em sáng mai» = chính khách (đại từ tự xưng theo sau là tiểu từ / mốc giờ / hết câu) — KHÔNG phải người nhận
+// khác (#871: «giao cho chị 9h sáng mai» từng mở lại câu xin SĐT). «giao cho anh Huy», «gửi cho em gái chị» vẫn là người khác.
+const PHONE_CHANGE = /(?:^| )(?:so|sdt|so dien thoai|so dt) (?:khac|moi)(?: |$)|(?:^| )doi (?:so|sdt)(?: |$)|(?:^| )nguoi nhan(?: |$)|(?:^| )(?:gui|giao|ship) (?:cho|ho) (?:me|bo|ba|ban|chong|vo|con|co|chu|di|ong)(?: |$)|(?:^| )(?:gui|giao|ship) (?:cho|ho) (?:em|anh|chi) (?!(?:nhe|nha|nhe|a|voi|vs|sang|chieu|toi|trua|mai|hom|ngay|luc|khoang|truoc|sau|som|di|luon|nhanh|gap|duoc|khong|ko|thu|chu nhat|\d)(?: |$|\d))[a-z]/;
 
 /**
  * Đọc địa chỉ đã biết: đơn nháp (ô xã người / khách đã chọn, hoặc dòng địa chỉ tự điền được) → khách đã lưu → tin khách tự gõ (kể cả
@@ -388,6 +427,22 @@ export function addressKnowledge(state: Pick<ChatState, "draft" | "customer" | "
   if (said) return { ward: said.ward, wardAskedAt, province: said.province !== null, street: !said.missing.includes("street"), lastSettlesAddress: settlesAddress(last, said.ward), ...contact };
   if (decision.use) return { ...knowledgeOfLine(decision.use.raw, "", customerTexts, wardAskedAt, last), ...contact };
   return { ward: null, wardAskedAt, province: false, street: false, ...contact };
+}
+
+/**
+ * KHỐI «THÔNG TIN NHẬN HÀNG ĐÃ CÓ» cho lời nhắc (#871 — chủ shop: contact là nguồn sự thật của hội thoại). Ca «Ngọc Nguyễn»: khách đã gửi
+ * SĐT + địa chỉ đầy đủ, model vẫn muốn «xác nhận lại địa chỉ / phường» TRƯỚC khi lên đơn; hàng rào bỏ câu hỏi đó và chỉ còn «em ghi nhận địa
+ * chỉ» — đơn không bao giờ được lên vì không ai nói với model rằng thông tin đã đủ. Khối này là lời KHẲNG ĐỊNH của máy chủ (cùng bộ đọc với
+ * hàng rào — `addressKnowledge`), có nguồn, KHÔNG chép SĐT / số nhà. Chỉ in khi chắc: có SĐT, có địa chỉ (phường đã ghép · địa giới cũ chờ
+ * nhân viên · đủ tỉnh + phần đường), tin mới nhất không đổi nơi giao / người nhận, không có lời sửa đang chờ xác minh. HÀM THUẦN.
+ */
+export function knownContactPrompt(state: Pick<ChatState, "draft" | "customer" | "addressAsk">, customerTexts: readonly string[]): string {
+  const k = addressKnowledge(state, customerTexts);
+  const addressHeld = k.ward !== null || Boolean(k.legacyUnmapped) || (k.province && k.street);
+  if (!k.phoneKnown || !addressHeld || !k.lastSettlesAddress || k.corrected || k.changeRequested || k.reuseUnresolved || k.draftMismatch) return "";
+  const source = state.draft ? "đơn nháp của hội thoại" : state.customer ? "hồ sơ khách đã lưu trong hội thoại" : "tin khách đã gửi trong hội thoại";
+  const addr = k.ward ? `địa chỉ ✓ (${k.ward})` : k.legacyUnmapped ? "địa chỉ ✓ (địa giới cũ — nhân viên đối chiếu phường mới, KHÔNG hỏi khách)" : "địa chỉ ✓ (nhân viên kiểm phần chưa chuẩn hoá, KHÔNG hỏi khách)";
+  return `THÔNG TIN NHẬN HÀNG ĐÃ CÓ (máy chủ xác nhận — nguồn: ${source}): SĐT ✓ · ${addr}. KHÔNG xin lại SĐT / địa chỉ, KHÔNG xin xác nhận lại địa chỉ / phường — kể cả khi khách đang nói chuyện khác (giờ giao, thêm món, hỏi giá). Đã có món + số lượng ⇒ lên đơn NGAY trong lượt này (create_customer nếu chưa lưu, rồi create_draft_order / update_draft_order). Khách hẹn giờ giao ⇒ ghi delivery_note, nói «em ghi nhận, shop kiểm tra lịch giao rồi báo lại», KHÔNG hứa mốc.`;
 }
 
 /** Điều đã biết từ MỘT dòng địa chỉ (khách gõ): xã tự điền được · địa giới cũ chưa ghép · hay chỉ phần đã đọc được. HÀM THUẦN. */
