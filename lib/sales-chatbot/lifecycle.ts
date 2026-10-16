@@ -608,6 +608,14 @@ export function customerPhaseOf(snap: Pick<LifecycleSnapshot, "order" | "fulfill
  * Luật chung: không hỏi lại SĐT / địa chỉ / món đã có (trừ khi khách tự báo đổi); không đòi chốt lại; không lên đơn mới trừ khi khách
  * nói rõ muốn mua THÊM; không chào bán sai ngữ cảnh. Người chỉ khi thật cần: khiếu nại · đổi trả · hoàn tiền · sửa đơn vượt quyền.
  */
+/**
+ * HỎI LỊCH GIAO ≠ HỎI TRẠNG THÁI (P0 #855): «hôm nào có hàng / bao giờ nhận / chiều nay giao được không / giao gấp» là câu hỏi KHI
+ * NÀO — trả lời bằng câu trạng thái («Shop đã nhận đơn — chưa có thông tin vận chuyển») là trả lời sai câu hỏi. Máy chủ quyết câu trả
+ * lời (`delivery-intent.ts`, trường `delivery_answer` của `get_order_status`); lời nhắc chỉ dẫn model tới đó.
+ */
+export const DELIVERY_TIME_LINE =
+  "khách hỏi KHI NÀO giao / nhận / có hàng (hôm nay, ngày mai, giao gấp) ⇒ get_order_status rồi làm ĐÚNG theo «delivery_answer» (nói nguyên câu «say», hoặc máy chủ đã chuyển nhân viên — khi đó KHÔNG viết gì thêm); KHÔNG đọc «status» thay cho giờ giao, KHÔNG tự hứa giờ / ngày giao, KHÔNG nói trái lịch nhân viên shop đã nhắn trong hội thoại; KHÔNG báo giá lại, KHÔNG hỏi lại địa chỉ, KHÔNG mời mua thêm.";
+
 export function postSalePrompt(v: CustomerPhaseView, shortCode: string | null): string {
   if (v.phase === "PRE_SALE" || v.phase === "CLOSING") return "";
   const code = shortCode ? ` #${shortCode}` : "";
@@ -620,8 +628,8 @@ export function postSalePrompt(v: CustomerPhaseView, shortCode: string | null): 
     return `${common} ${who} Cảm ơn khách đã nhận hàng, hỏi thăm nhẹ (dùng thử thấy thế nào / cần hướng dẫn bảo quản, sử dụng không). Khách chưa dùng thử ⇒ chúc khách dùng ngon và mời phản hồi khi dùng. Khách hỏi cách dùng / bảo quản ⇒ trả lời theo «Về shop» / sổ tay. Khách báo hàng lỗi / thiếu / sai / muốn đổi trả / hoàn tiền ⇒ handoff_to_human «Khiếu nại — <ý khách>».`;
   }
   const complainLine = "Khách than phiền / khiếu nại (giao chậm, hàng lỗi, muốn huỷ / đổi trả / hoàn tiền) ⇒ xin lỗi ngắn, KHÔNG hứa gì, handoff_to_human «Khiếu nại — <ý khách>».";
-  if (v.phase === "IN_TRANSIT") return `${common} Đơn đang trên đường giao: khách hỏi bao giờ nhận ⇒ get_order_status rồi nói ĐÚNG «status», không hứa ngày giao. ${complainLine}`;
-  return `${common} Đơn đang chờ gửi đi: khách hỏi tình trạng ⇒ get_order_status rồi nói ĐÚNG «status» (không khẳng định «chưa gửi» khi ERP chưa có thông tin vận chuyển). Khách muốn đổi địa chỉ / số lượng ⇒ update_draft_order nếu đơn còn sửa được, không thì handoff_to_human «Sửa đơn — <ý khách>». ${complainLine}`;
+  if (v.phase === "IN_TRANSIT") return `${common} Đơn đang trên đường giao: ${DELIVERY_TIME_LINE} Khách hỏi tình trạng ⇒ get_order_status rồi nói ĐÚNG «status». ${complainLine}`;
+  return `${common} Đơn đang chờ gửi đi: ${DELIVERY_TIME_LINE} Khách hỏi TÌNH TRẠNG («đơn sao rồi», «đã gửi chưa») ⇒ get_order_status rồi nói ĐÚNG «status» (không khẳng định «chưa gửi» khi ERP chưa có thông tin vận chuyển). Khách muốn đổi địa chỉ / số lượng ⇒ update_draft_order nếu đơn còn sửa được, không thì handoff_to_human «Sửa đơn — <ý khách>». ${complainLine}`;
 }
 
 /**

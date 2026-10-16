@@ -49,6 +49,15 @@ export const MIGRATION_SERVE_COMPAT: readonly ServeCompatEntry[] = [
     addedColumns: {},
     proof: "tests/cost-center.test.ts",
   },
+  {
+    tag: "0247_sales_chat_inbound_text_hash_idx",
+    why:
+      "Chỉ THÊM một chỉ mục hash (chữ chuẩn hoá của PAGE_REPLY) — không cột, không ràng buộc, không hàm. Mã không nhắc tên chỉ mục; " +
+      "planner dùng nó khi có, quét như trước khi chưa có ⇒ cùng kết quả, chỉ chậm hơn. Ở `qa` chỉ mục được tạo TRƯỚC (ops " +
+      "org-0245-index-preseed) nên 0247 không làm gì; ở tổ chức khác lượt hỏng vì khoá bận (55P03) được phục vụ tạm thay vì đứng 30 phút.",
+    addedColumns: {},
+    proof: "tests/migration-serve-compat.test.ts",
+  },
 ];
 
 /** Bộ cột phải tránh của MỘT bảng (tên CSDL) — hợp của mọi mục trong sổ. HÀM THUẦN. */

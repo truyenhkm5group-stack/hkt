@@ -11415,6 +11415,10 @@ export const salesChatInbound = pgTable(
     // 0239: tin mới nhất / tin khách sau con trỏ đọc của một luồng (hộp thư: chưa đọc theo người · dòng xem trước).
     index("sales_chat_inbound_thread_created_idx").on(t.pageId, t.threadId, t.createdAt),
     index("sales_chat_inbound_created_idx").on(t.createdAt),
+    // 0247: vế «tin mẫu tự động đọc chéo luồng» của #803 so chữ ĐÃ CHUẨN HOÁ — biểu thức phải trùng ký tự với hàm 0245 để planner dùng được.
+    index("sales_chat_inbound_page_reply_text_hash_idx")
+      .using("hash", sql`(btrim(regexp_replace(${t.text}, '[[:space:]]+', ' ', 'g')))`)
+      .where(sql`${t.note} = 'PAGE_REPLY'`),
     check("sales_chat_inbound_status_check", sql`${t.status} IN ('PENDING','DONE','SKIPPED','DEAD')`),
     check("sales_chat_inbound_kind_check", sql`${t.kind} IN ('INBOX','COMMENT')`),
   ],
