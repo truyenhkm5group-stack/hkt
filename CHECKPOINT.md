@@ -31,6 +31,11 @@
 
 
 
+
+## 16/10 ~15:40 VN — MAIN ĐỎ sau #857 + #861 + #864 (c3194e5f) — DEPLOY CHƯA LÊN, production vẫn 48651de2
+- Lượt deploy 38867586302 dừng ở gates (chưa chạm máy chủ): self-service-journey:1978 — model giả lặp y nguyên câu xin địa chỉ, #861 chặn đúng là hỏi lặp ⇒ chuyển người ⇒ 1 tin thay vì 2. Cả hai PR riêng lẻ đều xanh.
+- Sửa: PR #867 (`fix/main-red-address-reask`, chỉ đổi model giả của ca đó, không đổi khẳng định) — review độc lập + gates đang chạy. Desktop gộp #867 rồi MỘT deploy. Đừng ai deploy main trước đó.
+
 ## 16/10/2026 ~07:29Z — Tech Lead (Web): đủ 6 PR P0 đã vào main
 - Đã gộp (Integration Lead = phiên Desktop): #854 qa-0245 · #858 ảnh · #859 lịch giao · #860 giỏ ThuyNgo · #857 tin tự động page · #864 (#863 1/2kg) · #861 địa chỉ.
 - #862 (Desktop, trùng #860/#861): chủ shop quyết giữ #860+#861; đã đề nghị không gộp #862, chuyển phần mới (frustration.ts, address-provenance.ts) sang PR nhỏ.
