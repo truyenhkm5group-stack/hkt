@@ -66,3 +66,14 @@ Rủi ro còn lại: <điều Lead cần biết, hoặc "không">
 
 CHẶN thì nêu chặn vì đâu và cần ai làm gì. Có yêu cầu đổi phạm vi thì đặt dòng
 `YÊU CẦU ĐỔI PHẠM VI: …` ngay đầu báo cáo.
+
+## 7. Ngân sách token (`docs/ai-tech-room/token-budget.md`)
+
+Đo 10–16/10/2026: 27% chi phí là các lượt `sleep` chờ CI, và context trung bình ~400k token mỗi lượt —
+công việc thật (output) chỉ 1,4%. Nên:
+- KHÔNG vòng `sleep` / poll. Cần chờ thì MỘT lệnh `npm run ai -- wait pr|run|health …` bằng `run_in_background`.
+- Đọc đúng tệp liên quan, `grep` có mục tiêu, chỉ đoạn cần (`sed -n`, `offset/limit`); không dump log dài
+  (`| tail -40`), không đọc lại tệp đã đọc.
+- Đẩy nhánh + báo cáo xong là KẾT THÚC. Không ở lại chờ CI, gộp hay deploy — Lead giao hậu kiểm cho agent khác.
+- Hai lần CI đỏ cùng nguyên nhân, hoặc context chạm ~200k token ⇒ dừng, đầu báo cáo ghi
+  `VƯỢT NGÂN SÁCH: <vì sao> — <đề xuất>`.
