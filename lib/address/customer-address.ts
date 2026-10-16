@@ -330,7 +330,37 @@ export function looksLikeDeliveryAddress(line: string): boolean {
   const l = line.trim();
   if (!l || l.includes("?")) return false;
   const a = parseCustomerAddress(l);
-  return streetLooksReal(a) && foldVnText(a.street).length >= 3 && (a.province !== null || a.candidates.length > 0 || a.provinceHint !== null);
+  return chatStreetLooksReal(a) && (a.province !== null || a.candidates.length > 0 || a.provinceHint !== null);
+}
+
+/** Chữ trong «phần đường» cho thấy câu là chuyện mua bán / giao nhận chứ không phải số nhà, tên đường (review #855). */
+const CHAT_STREET_STOP = /(?:^|[\s,.])(?:giao|gửi|gui|ship|lâu|quá|mua|lấy|đặt|order|size|bộ|cái|hộp|gói|hũ|kg|chai|túi|lạng|đôi|hàng trước|đơn trước)(?=$|[\s,.!])/u;
+/** Tiền tố nơi chốn CÓ DẤU (hoặc viết tắt không mơ hồ) mở đầu một phần đường. */
+const CHAT_STREET_PREFIX = /^(?:khu|kđt|kdt|thôn|xóm|ấp|bản|ngõ|ngách|hẻm|kiệt|đường|phố|tổ|tdp|kp|kv|khối|khóm|buôn|làng|tiểu khu|cụm|lô|tòa|toà|chung cư|cc|số)\s+[\p{L}\d]/u;
+
+/**
+ * Phần đường của MỘT CÂU CHAT có thật là số nhà / đường / khu không — chặt hơn `streetLooksReal` (review #855: «2 bộ size L giao Hà Nội
+ * nhé», «Lô hàng trước giao Đà Nẵng lâu quá» không phải địa chỉ): có SỐ NHÀ theo sau là chữ (tên đường / ngõ), hoặc tiền tố nơi chốn
+ * CÓ DẤU; và không chứa chữ của câu mua bán («giao», «size», «bộ», «hàng trước»…). HÀM THUẦN.
+ */
+function chatStreetLooksReal(a: Pick<CustomerAddress, "street" | "houseNumber">): boolean {
+  const st = a.street.normalize("NFC").trim().toLowerCase();
+  if (st.length < 3 || CHAT_STREET_STOP.test(st)) return false;
+  // «1kg chả mực», «2 hộp ruốc», «500g» — số đi kèm đơn vị hàng, không phải số nhà.
+  if (/^\d+(?:[.,]\d+)?\s*(?:kg|kí|ký|g|gr|gram|lạng|ml|l|lít|hộp|gói|cái|bộ|túi|chai|hũ|con|cặp|set|size)(?=$|[\s,.])/u.test(st)) return false;
+  if (a.houseNumber && /\d[0-9a-z/-]*\s+[\p{L}]/u.test(st)) return true;
+  return CHAT_STREET_PREFIX.test(st);
+}
+
+/**
+ * Một tin khách chỉ mang MẢNH địa chỉ (số nhà / ngõ / đường thật, chưa có tỉnh) — khách đang gõ địa chỉ làm nhiều tin («Số 5 ngõ 10»).
+ * HÀM THUẦN.
+ */
+export function looksLikeStreetFragment(line: string): boolean {
+  const l = line.trim();
+  if (!l || l.includes("?")) return false;
+  const a = parseCustomerAddress(l);
+  return a.province === null && chatStreetLooksReal(a);
 }
 
 /**
@@ -341,14 +371,21 @@ export function looksLikeDeliveryAddress(line: string): boolean {
  * hành chính CŨ ở cả hai cấp (cấp xã: tiền tố «thị trấn / xã / phường» hoặc xã cũ nhận ra trong danh mục; cấp huyện: tiền tố «huyện /
  * quận / thị xã» hoặc quận / huyện cũ có trong danh mục). Không bao giờ chọn một xã: `candidates` chỉ để người kiểm đọc. HÀM THUẦN.
  */
+/** Tiền tố đơn vị cấp xã / cấp huyện trong chữ có dấu (đã hạ chữ thường, bọc khoảng trắng hai đầu). */
+export const LEGACY_COMMUNE_PREFIX = /[\s,.(](?:phường|xã|thị trấn|phuong|thi tran|p[.\s]|tt[.\s])\s*[\p{L}\d]/u;
+export const LEGACY_DISTRICT_PREFIX = /[\s,.(](?:quận|huyện|thị xã|quan|huyen|q[.\s]|h\.)\s*[\p{L}\d]/u;
+
 export function legacyAddressUnmapped(address: string, province = ""): { raw: string; province: string; candidates: string[]; hint: string } | null {
   const a = parseCustomerAddress(address, province);
   if (canAutoFill(a) || !a.province || a.provinceCode === null) return null;
   if (!streetLooksReal(a) || foldVnText(a.street).length < 3) return null;
   const line = [address, province].filter((x) => x.trim()).join(", ");
-  const f = expandAbbreviations(foldVnText(line));
-  const commune = a.legacy !== null || /(?:^| )(?:thi tran|xa|phuong) [a-z0-9]/.test(f);
-  const district = a.legacy !== null || /(?:^| )(?:huyen|quan|thi xa) [a-z0-9]/.test(f) || oldDistrictsIn(line, a.provinceCode).length > 0;
+  // Tiền tố cấp xã / huyện đọc trên chữ CÓ DẤU (review #855): bỏ dấu thì «Xa La» thành «xa la» (như «xã») và «khu đô thị Xa La» chứa
+  // «thi xa». Không dấu chỉ nhận các chữ không mơ hồ («phuong», «thi tran», «quan», «huyen»); viết tắt P. / TT. / Q. / H. phải có dấu chấm
+  // hoặc khoảng trắng theo sau («Pasteur» không phải «P.»).
+  const t = ` ${line.normalize("NFC").toLowerCase()} `;
+  const commune = a.legacy !== null || LEGACY_COMMUNE_PREFIX.test(t);
+  const district = a.legacy !== null || LEGACY_DISTRICT_PREFIX.test(t) || oldDistrictsIn(line, a.provinceCode).length > 0;
   if (!commune || !district) return null;
   return { raw: line.trim(), province: a.province, candidates: a.candidates, hint: addressReviewHint(a) };
 }

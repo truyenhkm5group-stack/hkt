@@ -128,8 +128,10 @@ export function testP0855AddressPure() {
   //  · Lần đầu «địa chỉ cũ» chưa có địa chỉ xác minh ⇒ câu «em chưa tìm thấy…, gửi giúp em địa chỉ» đi qua MỘT lần (lời nhắc 360).
   assert.equal(addressReaskVerdict(FULL_ASK, addressKnowledge(khuong, ["Địa chỉ cũ"]), 2), null);
   //  · Khách nhắc lại / phàn nàn ⇒ bỏ câu hỏi, câu nhân viên thay chỗ, lý do chuyển người.
+  //    Phàn nàn chỉ có hiệu lực khi bot ĐÃ hỏi địa chỉ trong một câu gửi trước (review độc lập #855).
+  const ASKED_ADDR = { botTexts: ["Dạ em chưa tìm thấy địa chỉ cũ ạ. Chị gửi lại giúp em địa chỉ nhận hàng nhé?"] };
   for (const texts of [["Địa chỉ cũ", "địa chỉ cũ mà em"], ["Địa chỉ cũ", "Robot hả"], ["Địa chỉ cũ", "Khách cũ mà hỏi gì"], ["Sao kg coi ở trên"]]) {
-    const v = addressReaskVerdict(FULL_ASK, addressKnowledge(khuong, texts), 3);
+    const v = addressReaskVerdict(FULL_ASK, addressKnowledge(khuong, texts), 3, ASKED_ADDR);
     assert.ok(v && v.handoff && v.rest.endsWith(ADDRESS_STAFF_TEXT) && !/ngõ|số nhà/.test(v.rest), `${JSON.stringify(texts)}: ${JSON.stringify(v)}`);
   }
   assert.equal(addressReaskVerdict(FULL_ASK, addressKnowledge(khuong, ["Địa chỉ cũ", "địa chỉ cũ mà em"]), 3)?.handoff, ADDRESS_HANDOFF_REASON.REUSE_UNVERIFIED);
@@ -163,6 +165,39 @@ export function testP0855AddressPure() {
   const later = addressKnowledge({}, ["lấy chị 1kg chả mực, sđt 0928000818", "để tối chị gửi địa chỉ sau nhé"]);
   assert.equal(addressReaskVerdict("Dạ vâng ạ, chị gửi địa chỉ là em lên đơn ngay.", later, 3, { botTexts: ["Dạ chị cho em xin địa chỉ giao hàng ạ."] }), null);
   assert.equal(addressReaskVerdict("Dạ chị cho em xin địa chỉ giao hàng ạ?", later, 3, { botTexts: ["Dạ chị cho em xin địa chỉ giao hàng ạ."] }), null, "khách hẹn gửi sau ⇒ không chuyển người");
+
+  // ⑨ REVIEW ĐỘC LẬP #855 — các ca âm tính / biên.
+  //  · Câu chat KHÔNG phải địa chỉ: không thành «địa chỉ mới», không đè đơn nháp.
+  for (const chat of ["2 bộ size L giao Hà Nội nhé", "Lô hàng trước giao Đà Nẵng lâu quá", "Bạn ơi giao giúp mình về Hà Nội"]) {
+    assert.equal(looksLikeDeliveryAddress(chat), false, chat);
+    assert.equal(reuseIntentOf(["Địa chỉ cũ", chat]).address, "REUSE", `${chat}: không phải địa chỉ mới`);
+    assert.notEqual(deliveryAddressDecision(draftWith("Số 8 ngõ 2, Phường Cầu Giấy", "Thành phố Hà Nội"), [chat]).status, "CHANGE_PENDING_VERIFICATION", chat);
+  }
+  //  · Địa chỉ gõ làm nhiều tin sau lời «chuyển ra HN»: KHÔNG lấy bản cũ, không tự ghi — đang đổi chưa xong.
+  const multi = ["12 Lê Lợi, Huế", "à chị chuyển ra HN rồi", "Số 5 ngõ 10", "Láng Hạ Đống Đa HN"];
+  const dm = deliveryAddressDecision({}, multi);
+  assert.deepEqual([dm.status, dm.use], ["CHANGE_INCOMPLETE", null], JSON.stringify(dm));
+  assert.equal(deliveryAddressDecision(draftWith("12 Lê Lợi, Huế"), multi).status, "CHANGE_INCOMPLETE");
+  const km = addressKnowledge(draftWith("12 Lê Lợi, Huế"), multi);
+  assert.ok(km.ward === null && !km.lastSettlesAddress, `không coi địa chỉ Huế là đã biết: ${JSON.stringify(km)}`);
+  //  · Câu xin NHIỀU trường: chỉ bỏ khi MỌI trường đã có. Khách chỉ gửi SĐT ⇒ «xin SĐT và địa chỉ» vẫn đi (còn thiếu địa chỉ).
+  const onlyPhone = addressKnowledge({}, ["0912345678"]);
+  assert.equal(addressReaskVerdict("Mình cho em xin số điện thoại và địa chỉ nhận hàng ạ?", onlyPhone, 2), null);
+  //  · Bỏ câu xin phần CHƯA CÓ ⇒ luôn chuyển người, không bao giờ «đã ghi nhận địa chỉ».
+  const wardTwice = addressReaskVerdict("Dạ mình ở phường nào ạ?", empty, 3, { botTexts: ["Dạ mình ở phường nào ạ?"] });
+  assert.ok(wardTwice?.handoff && wardTwice.rest === ADDRESS_STAFF_TEXT && !wardTwice.rest.includes("ghi nhận địa chỉ"), JSON.stringify(wardTwice));
+  //  · Phàn nàn trần / câu thường KHÔNG phải phàn nàn; «chị gửi rồi nhé» khi bot chưa từng hỏi ⇒ không chuyển người.
+  for (const t of ["Phí ship mấy ạ", "size mấy ạ", "bột ạ", "chị gửi rồi nhé"]) {
+    assert.equal(addressReaskVerdict(FULL_ASK, addressKnowledge({}, [t]), 2), null, t);
+  }
+  //  · `botTexts`: tin «[Shop đã nhắn]» không phải câu bot; khách gửi phần địa chỉ MỚI ⇒ câu hỏi trước không tính (revision mới).
+  assert.equal(addressReaskVerdict(FULL_ASK, empty, 3, { botTexts: ["[Shop đã nhắn] Chị cho em xin địa chỉ nhận hàng ạ?"] }), null, "tin page không phải câu bot");
+  assert.equal(addressReaskVerdict("Dạ chị cho em xin thêm số nhà ạ?", addressKnowledge({}, ["Láng Hạ, Đống Đa, Hà Nội"]), 3, { botTexts: ["Dạ chị cho em xin địa chỉ nhận hàng ạ?"] }), null, "khách vừa gửi phần địa chỉ mới ⇒ hỏi phần còn thiếu không phải hỏi lặp");
+  assert.equal(addressReaskVerdict("Dạ chị cho em xin địa chỉ giao hàng ạ.", addressKnowledge({}, ["lấy 1 hộp 1kg", "0920000909"]), 3, { botTexts: ["Dạ chị cho em xin SĐT và địa chỉ nhận hàng ạ."] }), null, "khách trả lời một phần (SĐT) ⇒ xin tiếp địa chỉ không phải hỏi lặp");
+  //  · Địa giới cũ đọc trên chữ CÓ DẤU: «Xa La» không phải «xã», «khu đô thị» không chứa «thị xã».
+  assert.equal(legacyAddressUnmapped("Số 5 khu đô thị Xa La, Hà Đông, Hà Nội"), null);
+  //  · Chỉ sửa món sau «như cũ» đã điền địa chỉ xác minh ⇒ không có đổi địa chỉ nào (không đè địa chỉ use_saved_address).
+  assert.equal(deliveryAddressDecision(verified, ["vẫn địa chỉ cũ nhé", "cho chị thêm 1 hộp nữa"]).status, "REUSE_VERIFIED");
 
   // ⑧ P0-A2 — bảng ca thật (dữ liệu giả): 0 câu bắt khách tự chuyển địa giới, 0 địa chỉ suy đoán, 0 hỏi lặp.
   //  · «ThivanNguyen»: Đại Kim cũ ⇒ bốn ứng viên THẬT trong danh mục, không chọn bừa; câu «Đại Kim cũ nay là phường nào theo tên mới» của
@@ -253,6 +288,7 @@ const GOLDEN: GoldenCase[] = [
         say: `à chị chuyển nhà rồi, giao về ${NEW_THU_DUC} nhé`,
         ai: [({ v }) => [tool("update_draft_order", { items: [{ variant_id: v("CHA-MUC"), quantity: 1 }] })], () => [say("Dạ em ghi nhận ạ.")]],
       },
+      { say: "cho chị thêm 1 hộp nữa nhé", ai: [({ v }) => [tool("update_draft_order", { items: [{ variant_id: v("CHA-MUC"), quantity: 2 }] })], () => [say("Dạ em sửa rồi ạ.")]] },
     ],
   },
 ];
@@ -295,7 +331,8 @@ export async function testP0855AddressGolden() {
       assert.equal(st.draft?.recipient.address, NEW_THU_DUC, `nguyên văn địa chỉ khách vừa gửi: ${JSON.stringify(st.draft?.recipient)}`);
       assert.equal(st.draft?.recipient.ward, "Phường Thủ Đức", "xã đọc từ chính địa chỉ mới (danh mục), không mượn của nơi cũ");
       const orders = await db.select({ id: schema.orders.id, raw: schema.orders.raw }).from(schema.orders).where(eq(schema.orders.salesConversationId, _ctx.conversationId));
-      assert.equal(orders.length, 1, "không tạo đơn trùng");
+      assert.equal(orders.length, 1, "không tạo đơn trùng (kể cả lượt sửa món sau đó)");
+      assert.equal(st.draft?.lines[0]?.quantity, 2, "lượt chỉ sửa món vẫn ghi được, địa chỉ mới giữ nguyên");
       const review = orderReviewOf(orders[0].raw);
       assert.ok(review?.entries.some((e) => e.code === "ADDRESS_UNRESOLVED" && /đổi địa chỉ/.test(e.note ?? "")), `đơn mang cờ cần người: ${JSON.stringify(review)}`);
       const ships = await db.select({ id: schema.shipments.id }).from(schema.shipments).where(eq(schema.shipments.orderId, orders[0].id));

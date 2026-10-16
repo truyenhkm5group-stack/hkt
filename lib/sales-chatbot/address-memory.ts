@@ -14,7 +14,7 @@
  *
  * KHÔNG ĐOÁN: hàng rào chỉ BỎ câu hỏi, không bao giờ tự điền một phường. Phường chưa biết và chưa hỏi lần nào ⇒ câu hỏi đầu tiên đi qua.
  */
-import { canAutoFill, customerStatedAddresses, hasStreetDetail, legacyAddressUnmapped, looksLikeDeliveryAddress, namesOtherWard, parseCustomerAddress, sameDeliveryPlace, wantsAddressChange, wardFromCustomerWords, type AddressPart } from "@/lib/address/customer-address";
+import { canAutoFill, customerStatedAddresses, hasStreetDetail, legacyAddressUnmapped, looksLikeDeliveryAddress, looksLikeStreetFragment, namesOtherWard, parseCustomerAddress, sameDeliveryPlace, wantsAddressChange, wardFromCustomerWords, type AddressPart } from "@/lib/address/customer-address";
 
 export { wantsAddressChange };
 import { foldVnText } from "@/lib/address/vn-address";
@@ -62,8 +62,6 @@ export function askedBefore(m: AddressAskMemory | undefined, parts: readonly Add
   return parts.every((p) => mem[p] !== undefined && mem[p]! < turn);
 }
 
-// ─────────────────────────── ĐỊA CHỈ ĐÃ BIẾT + HÀNG RÀO CÂU HỎI LẠI ───────────────────────────
-
 // ─────────────────────────── Ý ĐỊNH «DÙNG LẠI ĐỊA CHỈ CŨ» / «ĐỊA CHỈ MỚI» ───────────────────────────
 
 /**
@@ -95,6 +93,15 @@ function addressReadings(line: string): string[] {
 /** Dòng (hoặc phần sau lời dẫn của nó) là một địa chỉ giao ⇒ chuỗi địa chỉ; không ⇒ `null`. HÀM THUẦN. */
 function deliveryAddressIn(line: string): string | null {
   return addressReadings(line).find((x) => looksLikeDeliveryAddress(x)) ?? null;
+}
+
+/** Lời khách nói ĐỔI nơi giao TƯỜNG MINH («đổi địa chỉ», «giao về …», «chị chuyển nhà / chuyển ra HN rồi», «địa chỉ mới: …»). */
+const CHANGE_CUE = /(?:^| )(?:chuyen (?:nha|ra|vao|ve|sang|qua|cho)|doi (?:dia chi|dc|cho|noi)|dia chi (?:moi|khac)|cho khac|noi khac|nha khac|khong o (?:do|day|cho cu) nua)(?: |$)/;
+
+/** Tin khách có tín hiệu đổi địa chỉ TƯỜNG MINH (lời dẫn «giao về…», «đổi địa chỉ», «chuyển nhà»…). HÀM THUẦN. */
+export function hasChangeCue(text: string): boolean {
+  const f = foldVnText(text);
+  return wantsAddressChange(text) || CHANGE_CUE.test(f) || DECLINE_ADDRESS_RE.test(f) || LEAD_IN.test(text.trim());
 }
 
 /** Tín hiệu chiều địa chỉ của MỘT dòng khách gõ: từ chối > dùng lại > một địa chỉ giao tự gõ (`NEW`). HÀM THUẦN. */
@@ -145,10 +152,13 @@ export type AddressFact = { source: AddressSource; raw: string; province: string
  *    đã điền qua `use_saved_address`), không có địa chỉ mới hơn ⇒ dùng.
  *  · `NEEDS_HUMAN` — khách nói «địa chỉ cũ» mà không có địa chỉ đầy đủ đã xác minh ⇒ chuyển người, KHÔNG hỏi lặp, KHÔNG suy ra địa chỉ
  *    từ một tên vùng («Khương Đình»).
+ *  · `CHANGE_INCOMPLETE` — SAU địa chỉ gõ gần nhất, khách nói đổi nơi giao / gửi mảnh địa chỉ mới mà chưa thành một địa chỉ đọc được
+ *    («12 Lê Lợi, Huế» → «à chị chuyển ra HN rồi» → «Số 5 ngõ 10» → «Láng Hạ Đống Đa HN») ⇒ KHÔNG lấy bản cũ, không tự ghi gì: cần người.
  *  · `DRAFT` — chỉ có đơn nháp / hồ sơ (luồng cũ). · `NONE` — chưa có gì.
- * HÀM THUẦN — không CSDL; `verifiedHistory` do nơi gọi đưa từ Customer 360 (đã nối danh tính).
+ * HÀM THUẦN — không CSDL. `verifiedHistory` (tuỳ chọn) = địa chỉ đơn cũ ĐÃ XÁC MINH của đúng khách mà nơi gọi lấy từ Customer 360
+ * (`Customer360.addresses`, danh tính đã nối); không đưa ⇒ chỉ tin hồ sơ máy chủ đã điền qua `use_saved_address` (`savedAddress`).
  */
-export type AddressDecisionStatus = "NEW_EXPLICIT" | "CHANGE_PENDING_VERIFICATION" | "REUSE_VERIFIED" | "NEEDS_HUMAN" | "DRAFT" | "NONE";
+export type AddressDecisionStatus = "NEW_EXPLICIT" | "CHANGE_PENDING_VERIFICATION" | "CHANGE_INCOMPLETE" | "REUSE_VERIFIED" | "NEEDS_HUMAN" | "DRAFT" | "NONE";
 export type AddressDecision = { status: AddressDecisionStatus; use: AddressFact | null; previous: AddressFact | null; reason: string };
 
 /** Địa chỉ giao MỚI NHẤT khách tự gõ: dòng / cả tin / ghép với tin trước — kèm chỉ số tin (cũ ⇒ mới). HÀM THUẦN. */
@@ -188,6 +198,15 @@ export function deliveryAddressDecision(state: Pick<ChatState, "draft" | "custom
       : null;
   const typed = latestCustomerAddress(customerTexts);
   const reuseAt = lastReuseIndex(customerTexts);
+  // Khách đang đổi nơi giao mà chưa gõ xong: tin MỚI NHẤT có tín hiệu đổi / mảnh địa chỉ nằm SAU địa chỉ đọc được gần nhất (và sau lời
+  // «như cũ») ⇒ không lấy bản cũ, không tự ghi.
+  let lastChange = -1;
+  customerTexts.forEach((m, i) => {
+    if (m.split(/\n+/).some((l) => hasChangeCue(l) || looksLikeStreetFragment(l))) lastChange = i;
+  });
+  if ((typed || held) && lastChange > Math.max(typed?.messageIndex ?? -1, reuseAt)) {
+    return { status: "CHANGE_INCOMPLETE", use: null, previous: typed ?? held, reason: "Khách đang đổi nơi giao nhưng chưa gửi đủ một địa chỉ đọc được — không dùng địa chỉ cũ, không tự ghi; cần người" };
+  }
   // Địa chỉ khách tự gõ MỚI HƠN lời «như cũ» (hoặc khách không nói «như cũ») ⇒ chữ khách thắng.
   if (typed && typed.messageIndex! > reuseAt) {
     if (held && !sameDeliveryPlace(held.raw, typed.raw)) return { status: "CHANGE_PENDING_VERIFICATION", use: typed, previous: held, reason: "Khách vừa gửi địa chỉ giao KHÁC địa chỉ đơn nháp / hồ sơ đang giữ — địa chỉ mới thắng, đơn cần sửa theo nó và cần người xác minh" };
@@ -230,8 +249,13 @@ export type AddressKnowledge = {
   nameKnown?: boolean;
   /** Tin khách mới nhất HẸN gửi thông tin sau — câu bot nhắc lại không phải hỏi lặp. */
   deferred?: boolean;
-  /** Tin khách mới nhất phàn nàn bị hỏi lại / bảo «ở trên», «robot hả», «khách cũ mà hỏi gì». */
+  /** Tin khách mới nhất có lời phàn nàn bị hỏi lại («ở trên», «robot hả», «khách cũ mà hỏi gì») — CHỈ có hiệu lực khi trường đó đã được
+   *  hỏi trong một câu bot gửi trước (hàng rào kiểm `botTexts`). */
   complained?: boolean;
+  /** Tin khách mới nhất mang phần địa chỉ MỚI (địa chỉ / mảnh địa chỉ) ⇒ «revision» mới: câu hỏi địa chỉ trước đó không tính là đã hỏi. */
+  lastAddsAddress?: boolean;
+  /** Tin khách mới nhất mang SĐT ⇒ câu xin SĐT trước đó không tính là đã hỏi. */
+  lastHasPhone?: boolean;
 };
 
 /** Lời đồng ý ngắn («ok em», «vâng», «đúng rồi», «chốt nhé»). */
@@ -247,8 +271,13 @@ function settlesAddress(last: string, ward: string | null): boolean {
   return ACK.test(f) || customerStatedAddresses([last]).length > 0 || deliveryAddressIn(last) !== null || last.split(/\n+/).some((l) => deliveryAddressIn(l) !== null) || (wardCore.length > 0 && ` ${f} `.includes(` ${wardCore} `));
 }
 
-/** Lời khách phàn nàn bị hỏi lại («ở trên», «nói rồi», «gửi rồi», «robot hả», «khách cũ mà hỏi gì», «hỏi hoài») — đã gập. */
-const COMPLAINT_RE = /(?:^| )(?:robot|ro bot|bot a|may a|o tren|coi o tren|xem o tren|doc lai|noi roi|gui roi|nhan roi|cho roi|khach cu ma|hoi gi|hoi hoai|hoi mai|hoi lai hoai|hoi nhieu)(?: |$)/;
+/**
+ * Lời khách phàn nàn bị hỏi lại — cụm CÓ DẤU hoặc cụm dài không mơ hồ khi bỏ dấu (review #855: «may a» = «mấy ạ», «bot a» = «bột ạ»,
+ * «hoi gi», «cho roi» trần bắt nhầm câu thường). Chỉ có hiệu lực khi cùng trường đã được hỏi trước đó (hàng rào kiểm).
+ */
+const COMPLAINT_ACCENTED = /(?:^|[\s,.!?])(?:robot|rô bốt|ở trên|coi ở trên|xem ở trên|đọc lại đi|nói rồi mà|gửi rồi mà|đã gửi rồi|nhắn rồi mà|khách cũ mà|hỏi gì nữa|hỏi hoài|hỏi mãi|hỏi lại hoài|hỏi nhiều thế)(?=$|[\s,.!?])/u;
+const COMPLAINT_FOLDED = /(?:^| )(?:robot|coi o tren|xem o tren|noi roi ma|gui roi ma|da gui roi|nhan roi ma|khach cu ma hoi|hoi hoai|hoi mai the|hoi lai hoai)(?: |$)/;
+const isComplaint = (text: string) => COMPLAINT_ACCENTED.test(text.normalize("NFC").toLowerCase()) || COMPLAINT_FOLDED.test(foldVnText(text));
 /** Khách hẹn gửi thông tin sau («tối chị gửi», «để sau», «lát gửi», «gửi sau nhé»). */
 const DEFER_RE = /(?:^| )(?:gui sau|de sau|lat (?:chi |anh |em )?gui|toi (?:chi |anh )?gui|chut (?:chi |anh )?gui|mai (?:chi |anh )?gui|sau (?:chi |anh )?gui)(?: |$)/;
 /** SĐT di động VN trong một câu (bỏ khoảng trắng / chấm / gạch giữa các cụm số). */
@@ -268,12 +297,16 @@ export function addressKnowledge(state: Pick<ChatState, "draft" | "customer" | "
   const contact = {
     phoneKnown: Boolean(state.customer?.phone?.trim() || state.draft?.recipient.phone?.trim() || customerTexts.some(hasPhone)) && !PHONE_CHANGE.test(lastF),
     nameKnown: Boolean(state.customer?.name?.trim() || state.draft?.recipient.name?.trim()) && !PHONE_CHANGE.test(lastF),
-    complained: COMPLAINT_RE.test(lastF),
+    complained: isComplaint(last),
     deferred: DEFER_RE.test(lastF),
+    lastAddsAddress: last.split(/\n+/).some((l) => deliveryAddressIn(l) !== null || looksLikeStreetFragment(l) || legacyAddressUnmapped(l) !== null),
+    lastHasPhone: hasPhone(last),
   };
   // Khách xin đổi địa chỉ ⇒ địa chỉ máy đang giữ KHÔNG còn là điều đã biết; câu hỏi phường / địa chỉ của bot đi qua.
   if (wantsAddressChange(last)) return { ward: null, wardAskedAt: null, province: false, street: false, changeRequested: true, ...contact, phoneKnown: false, nameKnown: false };
   const decision = deliveryAddressDecision(state, customerTexts);
+  // Đang đổi nơi giao mà chưa đủ ⇒ chưa biết địa chỉ; bot được hỏi phần còn thiếu (một lần — hàng rào kiểm `botTexts`).
+  if (decision.status === "CHANGE_INCOMPLETE") return { ward: null, wardAskedAt: null, province: false, street: false, changeRequested: true, ...contact };
   if (decision.status === "NEEDS_HUMAN") {
     // Lần LẶP mới chuyển người: khách nhắc «địa chỉ cũ» từ hai tin trở lên, hay đã có câu hỏi địa chỉ ở lượt trước. Câu hỏi đầu tiên
     // («em chưa tìm thấy địa chỉ cũ, mình gửi giúp em…») đi theo lời nhắc Customer 360 — một lần duy nhất.
@@ -391,16 +424,15 @@ export type AddressReaskVerdict = { rest: string; note: string; handoff?: string
 /** Ghi chú cho người vận hành theo mã lý do — một chỗ khai (đếm `address_reask` theo đúng câu này). */
 export const ADDRESS_REASK_NOTE: Record<AddressReaskCode, string> = {
   WARD_KNOWN: "AI hỏi lại phường / xã khách đã cho (máy chủ đã ghép được theo địa giới mới) — đã bỏ câu hỏi",
-  WARD_ASKED: "AI hỏi lại phường / xã đã hỏi khách ở lượt trước — đã bỏ câu hỏi, đơn đi tiếp với cờ cần kiểm địa chỉ",
+  WARD_ASKED: "AI hỏi lại phường / xã đã hỏi khách ở lượt trước mà vẫn chưa có — đã bỏ câu hỏi, chuyển nhân viên kiểm địa chỉ",
   LEGACY_UNMAPPED: "AI hỏi phường / xã theo địa giới mới khi khách đã cho địa chỉ đủ theo địa giới CŨ — đã bỏ câu hỏi; giữ nguyên văn, nhân viên kiểm (cờ cần kiểm địa chỉ)",
   FULL_KNOWN: "AI xin lại địa chỉ khách đã cho — đã bỏ câu hỏi",
   REUSE_UNVERIFIED: "Khách muốn dùng địa chỉ cũ, không có địa chỉ đầy đủ đã xác minh — đã bỏ câu hỏi lại, chuyển nhân viên kiểm",
   PHONE_KNOWN: "AI xin lại SĐT đã có — đã bỏ câu hỏi",
   NAME_KNOWN: "AI xin lại tên người nhận đã có — đã bỏ câu hỏi",
-  REPEAT_ASK: "AI hỏi cùng một trường thông tin nhận hàng lần thứ hai — đã bỏ câu hỏi",
+  REPEAT_ASK: "AI hỏi cùng một trường thông tin nhận hàng lần thứ hai — đã bỏ câu hỏi, chuyển nhân viên",
   COMPLAINT: "Khách phàn nàn bị hỏi lại — đã bỏ câu hỏi của AI, chuyển nhân viên",
-  };
-
+};
 
 /** Câu thật sự HỎI / XIN: dấu hiệu hỏi, hoặc lời xin («xin», «cho em», «gửi giúp em», «cung cấp»). */
 const isAsking = (sentence: string) => {
@@ -408,65 +440,92 @@ const isAsking = (sentence: string) => {
   return isQuestion(sentence, f) || /(?:^| )(?:xin|cho em|gui giup|gui lai giup|cung cap|de lai)(?: |$)/.test(f);
 };
 const sentencesOf = (text: string) => (text.match(/[^.!?\n]+[.!?]*/g) ?? []).map((s) => s.trim()).filter(Boolean);
+/** Tin page / nhân viên chép vào lịch sử — không phải câu của bot. */
+const SHOP_SAID_RE = /^\s*\[Shop đã nhắn\]/;
+
+type AskField = "ward" | "address" | "phone" | "name";
+/** Các TRƯỜNG một câu đang xin. «địa chỉ» tính cả khi nằm trong câu xin nhiều thứ («xin số điện thoại và địa chỉ nhận hàng»). */
+function askedFields(sentence: string): Set<AskField> {
+  const out = new Set<AskField>();
+  const f = foldVnText(sentence);
+  if (asksForWard(sentence)) out.add("ward");
+  if (asksForFullAddress(sentence) || (isAsking(sentence) && /(?:^| )dia chi(?: |$)/.test(f) && !NOT_A_REASK.test(f))) out.add("address");
+  if (asksForPhone(sentence)) out.add("phone");
+  if (asksForName(sentence)) out.add("name");
+  return out;
+}
 
 /**
- * Câu bot sắp gửi có HỎI LẠI phần địa chỉ / SĐT / tên đã biết / đã hỏi không. Có ⇒ `rest` = các câu còn lại (có thể rỗng — nơi gọi quyết
- * câu thay), `note` = lý do cho người vận hành, `handoff` = lý do chuyển người khi máy chủ không được hỏi khách thêm lần
- * nào (khi đó `rest` đã kèm `ADDRESS_STAFF_TEXT`). Không ⇒ `null`. Phường chưa biết và chưa hỏi lần nào ⇒ câu hỏi đầu tiên đi qua —
- * TRỪ địa chỉ đủ theo địa giới CŨ mà danh mục chưa ghép được (#855, ca «Lieu Dau»): khách không phải tra tên phường mới, đơn mang cờ cần
- * kiểm cho nhân viên. `botTexts` (tuỳ chọn) = câu shop đã gửi ở các lượt TRƯỚC: một trường đã hỏi ở đó thì không hỏi lần 2. HÀM THUẦN.
+ * Câu bot sắp gửi có HỎI LẠI phần địa chỉ / SĐT / tên đã biết / đã hỏi không. Có ⇒ `rest` = các câu còn lại, `note` = lý do cho người
+ * vận hành, `handoff` = lý do chuyển người. Không ⇒ `null`.
+ *  · Một câu chỉ bị bỏ khi MỌI trường nó xin đều được bỏ (review #855: «xin số điện thoại và địa chỉ» khi đã có SĐT vẫn phải xin địa chỉ).
+ *  · Bỏ một câu xin phần CHƯA CÓ (phường chưa biết đã hỏi rồi · «như cũ» không có địa chỉ xác minh · hỏi lần 2 · khách phàn nàn) ⇒ LUÔN
+ *    chuyển người, `rest` kèm `ADDRESS_STAFF_TEXT` — không bao giờ để nơi gọi nói «đã ghi nhận địa chỉ» khi chưa có địa chỉ.
+ *  · Phường chưa biết và chưa hỏi lần nào ⇒ câu hỏi đầu tiên đi qua — TRỪ địa chỉ đủ theo địa giới CŨ chưa ghép (#855 «Lieu Dau»): đó
+ *    là đã có địa chỉ (nguyên văn), nhân viên kiểm.
+ *  · `botTexts` (tuỳ chọn) = câu SHOP đã gửi ở các lượt trước (tin «[Shop đã nhắn]» bị bỏ — không phải câu bot): một trường đã hỏi ở đó
+ *    thì không hỏi lần 2, TRỪ khi tin khách mới nhất mang phần mới của trường đó (revision mới). Phàn nàn chỉ có hiệu lực khi cùng
+ *    trường đã được hỏi ở đó.
+ * HÀM THUẦN.
  */
 export function addressReaskVerdict(botText: string, k: AddressKnowledge, turn: number, opts: { botTexts?: readonly string[] } = {}): AddressReaskVerdict | null {
   const sentences = sentencesOf(botText);
   if (!sentences.length) return null;
   // «Hỏi lần 2» chỉ tính câu THẬT SỰ hỏi / xin («… ạ?», «cho em xin …») — câu kể có điều kiện («chị gửi địa chỉ là em lên đơn ngay»)
   // không phải câu hỏi lại; và khách đang HẸN gửi sau («tối chị gửi», «để sau») thì không phải hỏi lặp (order-golden «thieu-thong-tin»).
-  const prior = (opts.botTexts ?? []).flatMap(sentencesOf).filter(isAsking);
-  const askedWardBefore = prior.some(asksForWard);
-  const askedAddressBefore = prior.some(asksForFullAddress);
-  const askedPhoneBefore = prior.some(asksForPhone);
-  const askedNameBefore = prior.some(asksForName);
-  const asking = sentences.some(isAsking);
-  const repeatOk = asking && !k.deferred;
+  const prior = (opts.botTexts ?? []).filter((t) => !SHOP_SAID_RE.test(t)).flatMap(sentencesOf).filter(isAsking);
+  const priorAsked = (field: AskField) => prior.some((p) => askedFields(p).has(field));
+  // Tin khách mới nhất đã trả lời một phần (thêm SĐT hoặc phần địa chỉ) ⇒ revision mới: xin tiếp phần CÒN THIẾU không phải hỏi lặp
+  // (đơn vàng «nhieu-tin-roi»: «xin SĐT và địa chỉ» → khách gửi SĐT → «xin địa chỉ»).
+  const progressed = Boolean(k.lastAddsAddress || k.lastHasPhone);
+  const askedWardBefore = !progressed && (priorAsked("ward") || priorAsked("address"));
+  const askedAddressBefore = !progressed && priorAsked("address");
+  const askedPhoneBefore = !progressed && priorAsked("phone");
+  const askedNameBefore = priorAsked("name");
+  const repeatOk = sentences.some(isAsking) && !k.deferred;
   const free = !k.corrected && !k.changeRequested;
-  // Khách đang sửa phường ⇒ bot được hỏi / xác nhận lại — hàng rào không bỏ câu hỏi phường ở lượt đó.
   // Phường ĐÃ BIẾT chỉ chặn câu hỏi phường khi tin khách mới nhất xác nhận / mang chính địa chỉ đó — tin khác có thể là đổi người / nơi
   // nhận («gửi cho mẹ chị dưới quê»), bot phải hỏi được phường của nơi mới (review PR #848 lần 4).
   const wardKnown = free && k.ward !== null && Boolean(k.lastSettlesAddress);
-  const wardAsked = free && k.ward === null && ((k.wardAskedAt !== null && k.wardAskedAt < turn) || (askedWardBefore && repeatOk));
   const legacy = free && Boolean(k.legacyUnmapped) && (Boolean(k.lastSettlesAddress) || k.draftMismatch === true);
   const fullKnown = free && ((k.ward !== null && k.province && k.street) || Boolean(k.legacyUnmapped)) && Boolean(k.lastSettlesAddress);
+  const addressHeld = k.ward !== null || Boolean(k.legacyUnmapped);
+  const wardAsked = free && k.ward === null && !k.legacyUnmapped && ((k.wardAskedAt !== null && k.wardAskedAt < turn) || (askedWardBefore && repeatOk));
   const reuse = free && Boolean(k.reuseUnresolved);
-  const complaint = free && Boolean(k.complained);
-  const wardDrop = wardKnown || wardAsked || legacy || reuse || complaint;
-  const fullDrop = fullKnown || reuse || complaint || (free && askedAddressBefore && repeatOk && !k.ward && !k.legacyUnmapped);
-  const phoneDrop = Boolean(k.phoneKnown) && free;
-  const nameDrop = Boolean(k.nameKnown) && free;
-  const phoneTwice = !k.phoneKnown && free && askedPhoneBefore && repeatOk;
-  const nameTwice = !k.nameKnown && free && askedNameBefore && repeatOk;
-  const drop = (s: string) => (wardDrop && asksForWard(s)) || (fullDrop && asksForFullAddress(s)) || ((phoneDrop || phoneTwice) && asksForPhone(s)) || ((nameDrop || nameTwice) && asksForName(s));
-  const dropped = sentences.filter(drop);
-  if (!dropped.length) return null;
-  const rest = sentences.filter((s) => !drop(s)).join(" ");
-  const addressAsk = dropped.some((s) => asksForWard(s) || asksForFullAddress(s));
-  // Phải chuyển người: «như cũ» mà không có địa chỉ xác minh · khách phàn nàn bị hỏi lại · cùng một trường (địa chỉ / SĐT) đã hỏi rồi
-  // mà vẫn chưa có — hỏi lần nữa chỉ là lặp, không thêm thông tin.
-  const twiceAddress = addressAsk && askedAddressBefore && repeatOk && !k.ward && !k.legacyUnmapped;
-  const twicePhone = phoneTwice && dropped.some(asksForPhone);
-  let code: AddressReaskCode;
-  let handoff: string | undefined;
-  if (reuse && addressAsk) [code, handoff] = ["REUSE_UNVERIFIED", ADDRESS_HANDOFF_REASON.REUSE_UNVERIFIED];
-  else if (complaint && addressAsk) [code, handoff] = ["COMPLAINT", ADDRESS_HANDOFF_REASON.COMPLAINT];
-  else if (twiceAddress || twicePhone) [code, handoff] = ["REPEAT_ASK", ADDRESS_HANDOFF_REASON.REPEAT_ASK];
-  else if (legacy && addressAsk) code = "LEGACY_UNMAPPED";
-  else if (wardKnown && dropped.some(asksForWard)) code = "WARD_KNOWN";
-  else if (wardAsked && dropped.some(asksForWard)) code = "WARD_ASKED";
-  else if (fullKnown && dropped.some(asksForFullAddress)) code = "FULL_KNOWN";
-  else if (dropped.some(asksForPhone)) code = "PHONE_KNOWN";
-  else if (dropped.some(asksForName)) code = nameTwice ? "REPEAT_ASK" : "NAME_KNOWN";
-  else code = "WARD_ASKED";
-
+  const complaintOn = (field: AskField) => free && Boolean(k.complained) && (field === "phone" ? askedPhoneBefore : field === "name" ? askedNameBefore : askedAddressBefore || askedWardBefore || k.wardAskedAt !== null);
+  const twice = (field: AskField) => free && repeatOk && (field === "phone" ? askedPhoneBefore && !k.phoneKnown : field === "name" ? askedNameBefore && !k.nameKnown : field === "address" ? askedAddressBefore && !addressHeld : false);
+  // Vì sao bỏ được một trường (null = không bỏ). `missing` = trường đó CHƯA CÓ ⇒ bỏ là phải chuyển người.
+  const why = (field: AskField): { code: AddressReaskCode; missing: boolean } | null => {
+    if (reuse && (field === "ward" || field === "address")) return { code: "REUSE_UNVERIFIED", missing: true };
+    if (complaintOn(field)) return { code: "COMPLAINT", missing: field === "phone" ? !k.phoneKnown : field === "name" ? !k.nameKnown : !addressHeld };
+    if (field === "ward") {
+      if (legacy) return { code: "LEGACY_UNMAPPED", missing: false };
+      if (wardKnown) return { code: "WARD_KNOWN", missing: false };
+      if (wardAsked) return { code: "WARD_ASKED", missing: true };
+      return null;
+    }
+    if (field === "address") {
+      if (fullKnown) return { code: "FULL_KNOWN", missing: false };
+      if (twice("address")) return { code: "REPEAT_ASK", missing: true };
+      return null;
+    }
+    if (field === "phone") return free && k.phoneKnown ? { code: "PHONE_KNOWN", missing: false } : twice("phone") ? { code: "REPEAT_ASK", missing: true } : null;
+    return free && k.nameKnown ? { code: "NAME_KNOWN", missing: false } : twice("name") ? { code: "REPEAT_ASK", missing: true } : null;
+  };
+  const reasons: { code: AddressReaskCode; missing: boolean }[] = [];
+  const kept: string[] = [];
+  for (const sentence of sentences) {
+    const fields = [...askedFields(sentence)];
+    const verdicts = fields.map(why);
+    if (fields.length && verdicts.every((v) => v !== null)) reasons.push(...(verdicts as { code: AddressReaskCode; missing: boolean }[]));
+    else kept.push(sentence);
+  }
+  if (!reasons.length) return null;
+  const rest = kept.join(" ");
+  const missing = reasons.find((r) => r.missing);
+  const code = (missing ?? reasons[0]).code;
   const note = k.draftMismatch ? `${ADDRESS_REASK_NOTE[code]} · địa chỉ khách vừa gửi KHÁC đơn nháp (cần sửa đơn + người xác minh)` : ADDRESS_REASK_NOTE[code];
-  if (handoff) return { rest: [rest, ADDRESS_STAFF_TEXT].filter(Boolean).join(" "), note, handoff };
-  return { rest, note };
+  if (!missing) return { rest, note };
+  const handoff = code === "REUSE_UNVERIFIED" ? ADDRESS_HANDOFF_REASON.REUSE_UNVERIFIED : code === "COMPLAINT" ? ADDRESS_HANDOFF_REASON.COMPLAINT : ADDRESS_HANDOFF_REASON.REPEAT_ASK;
+  return { rest: [rest, ADDRESS_STAFF_TEXT].filter(Boolean).join(" "), note, handoff };
 }
