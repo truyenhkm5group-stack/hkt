@@ -3,7 +3,7 @@
   "mission_id": "p0-871-contact-memory",
   "title": "P0 #871 + ca Nguyễn Hà: không hỏi lại SĐT/địa chỉ đã biết khi khách đổi chủ đề/thêm món, 10 cái nem đúng quy cách, giữ giờ hẹn giao, không bỏ sót tạo đơn, hậu mãi đúng trạng thái",
   "business_goal": "",
-  "status": "RUNNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -18,7 +18,21 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-16T10:43:43.926Z",
-  "updated_at": "2026-10-16T10:43:43.926Z",
-  "last_heartbeat": "2026-10-16T10:43:43.926Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-16T18:15:27.302Z",
+  "last_heartbeat": "2026-10-16T18:15:27.302Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/p0-871-contact-memory",
+    "sha": "4d8558b4b6734e56c070e98e4a781d996f47811b",
+    "at": "2026-10-16T18:15:27.302Z",
+    "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+    "title": "P0 #871 + ca Nguyễn Hà: không hỏi lại SĐT/địa chỉ đã biết khi khách đổi chủ đề/thêm món, 10 cái nem đúng quy cách, giữ giờ hẹn giao, không bỏ sót tạo đơn, hậu mãi đúng trạng thái",
+    "summary": "",
+    "tests": [
+      "npm test @4d8558b4: TẤT CẢ KIỂM THỬ ĐẠT",
+      "tsc + lint sạch",
+      "p0-871-contact-memory: thuần + golden Ngọc Nguyễn + golden Nguyễn Hà + webhook trùng",
+      "7 ảnh chụp golden chỉ thêm khối lời nhắc «THÔNG TIN NHẬN HÀNG ĐÃ CÓ»"
+    ]
+  }
 }
