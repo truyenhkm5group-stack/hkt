@@ -15,10 +15,12 @@
   "owned_paths": [],
   "dependencies": [],
   "blocked_by": [],
-  "related_prs": [],
+  "related_prs": [
+    876
+  ],
   "migration_reservations": [],
   "created_at": "2026-10-16T09:37:22.052Z",
-  "updated_at": "2026-10-16T16:16:50.270Z",
+  "updated_at": "2026-10-16T16:17:47.132Z",
   "last_heartbeat": "2026-10-16T16:16:50.270Z",
   "definition_of_done": [],
   "handoff": {
