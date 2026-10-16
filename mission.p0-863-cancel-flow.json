@@ -3,7 +3,7 @@
   "mission_id": "p0-863-cancel-flow",
   "title": "P0 #863 HSLC: bot gửi chốt sau tin nhân viên; khách huỷ vì lỗi bot ⇒ xin lỗi cụ thể, sửa bằng giá chuẩn, một phương án cứu, kiên quyết thì huỷ đúng vòng đời",
   "business_goal": "",
-  "status": "RUNNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -18,7 +18,20 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-16T06:59:52.941Z",
-  "updated_at": "2026-10-16T06:59:52.941Z",
-  "last_heartbeat": "2026-10-16T06:59:52.941Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-16T09:50:58.449Z",
+  "last_heartbeat": "2026-10-16T09:50:58.449Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/p0-863-cancel-flow",
+    "sha": "07ca5244ac985dfbdf68c5f28173654b98160c44",
+    "at": "2026-10-16T09:50:58.449Z",
+    "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+    "title": "P0 #863 HSLC: bot gửi chốt sau tin nhân viên; khách huỷ vì lỗi bot ⇒ xin lỗi cụ thể, sửa bằng giá chuẩn, một phương án cứu, kiên quyết thì huỷ đúng vòng đời",
+    "summary": "",
+    "tests": [
+      "typecheck + eslint sạch",
+      "p0-863-cancel-flow (5 golden chatTurn) + order-cancel/order-review/conversation-control/cart-commitment/p0-855-cart/claim-guard/quote640/human-takeover/self-service-journey: đạt",
+      "golden + order-golden: không đổi ảnh chụp"
+    ]
+  }
 }
