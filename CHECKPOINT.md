@@ -35,6 +35,12 @@
 
 
 
+
+## 16/10 ~22:20 VN — PRODUCTION = 1eee82da (deploy 38911638556) · gồm #870 + #872
+- Smoke 135/135 · health commit khớp · «failure» chỉ vì qa DEGRADED (0245/0246/0247).
+- Đo cần làm khi đủ lưu lượng (sáng 17/10): `address-reask-audit "hslc-hmt-shop --since=2026-10-16T15:20Z"` · `conv-money-trace "hslc-hmt-shop --scan --since=2026-10-16T15:20Z"` (giờ in được tên lỗi công cụ lên đơn nhờ #872 ⇒ đọc lý do create_draft_order LỖI của ca #871).
+- Hàng đợi (Desktop gộp tuần tự): #869 (#863, review PASS, đang thêm sửa «mệnh đề cuối quyết») → #873 (#855 phần còn lại, đang sửa phủ nhận món chỉ nằm trong menu/lời mời) → #871 phần còn lại (worker, dựng trên #872) → #868 pha A.
+
 ## 16/10/2026 ~13:50Z — Tech Lead Web: KPI 24h sau #848 (hslc-hmt-shop), PR #870/#871/#862
 
 - **Production**: health 13:04Z `commit 2982fafb0783` · migrations 248 · `degradedMigration: true` (tổ chức thử «qa» thiếu 0245–0247, hết 150 s lúc migrate — chặn đã biết). #870 (b8807e86) đã vào main lúc 11:43Z, CHƯA deploy.
