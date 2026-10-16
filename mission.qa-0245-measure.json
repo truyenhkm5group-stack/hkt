@@ -3,7 +3,7 @@
   "mission_id": "qa-0245-measure",
   "title": "qa × 0245: số đo tài nguyên tạo chỉ mục",
   "business_goal": "Đo RAM/IO/Postgres thật để duyệt ngưỡng riêng cho CREATE INDEX CONCURRENTLY",
-  "status": "PLANNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-token-budget",
@@ -20,11 +20,23 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-16T16:42:43.812Z",
-  "updated_at": "2026-10-16T16:42:43.812Z",
-  "last_heartbeat": "2026-10-16T16:42:43.812Z",
+  "updated_at": "2026-10-16T16:43:12.334Z",
+  "last_heartbeat": "2026-10-16T16:43:12.334Z",
   "definition_of_done": [],
   "intake": {
     "verdict": "PARTIAL",
     "evidence": []
+  },
+  "handoff": {
+    "branch": "claude/qa-0245-a1",
+    "sha": "4d1620bf227a86758336d6742a0ab9151228ab92",
+    "at": "2026-10-16T16:43:12.334Z",
+    "actor": "DESKTOP-56TH98Y:wt-token-budget",
+    "title": "qa × 0245: lượt chạy thử in số đo tài nguyên của câu tạo chỉ mục",
+    "summary": "",
+    "tests": [
+      "tests/qa-0245-index.test.ts: ĐẠT",
+      "eslint: sạch"
+    ]
   }
 }
