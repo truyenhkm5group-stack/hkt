@@ -183,7 +183,8 @@ export function otherWardNamed(provinceCode: number, ward: string, customerText:
   const coreOf = (name: string) => foldVnText(name).replace(/^(phuong|xa|thi tran|dac khu) /, "");
   const core = coreOf(ward);
   const own = ` ${/^\d+$/.test(core) ? foldVnText(ward) : core} `;
-  const segments = customerText.split(/[,;.\n]+/).map((x) => ` ${expandAbbreviations(foldVnText(x))} `);
+  const rawSegments = customerText.split(/[,;.\n]+/);
+  const segments = rawSegments.map((x) => ` ${expandAbbreviations(foldVnText(x))} `);
   const at = (seg: string, needle: string) => {
     const out: number[] = [];
     for (let i = seg.indexOf(needle); i >= 0; i = seg.indexOf(needle, i + 1)) out.push(i);
@@ -197,8 +198,12 @@ export function otherWardNamed(provinceCode: number, ward: string, customerText:
   // CHỈ khi tên ấy đứng ở VỊ TRÍ QUẬN của địa chỉ: không có chữ loại xã ngay trước, và tin không mang lời chọn / sửa («Ngọc Hà hay Ba Đình
   // ấy em», «An Hội Tây hay phường Gò Vấp?», «không phải…», «/») — khi đó khách đang nêu nó như MỘT XÃ để chọn, phải hỏi lại (review #874).
   const oldDistricts = wardOldDistricts(ward, provinceCode);
-  const choosing = /[?/]/.test(customerText) || /(?:^| )(?:hay|hoac|hoặc|khong phai|ko phai|k phai|nham|sai|chang|chẳng)(?: |$)/.test(` ${foldVnText(customerText)} `);
-  const asDistrict = (seg: string, i: number) => !choosing && !/ (?:phuong|xa|thi tran|dac khu)$/.test(seg.slice(0, i));
+  // Lời chọn / sửa xét THEO VẾ: «?» của «mai giao được không?» ở vế khác không biến «Gò Vấp» thành một lựa chọn; «/» chỉ là lựa chọn khi
+  // nằm giữa hai CHỮ («An Hội Tây/Gò Vấp»), không phải số hẻm «230/20»; «sai» không phải «Sài Gòn» (review #874).
+  const choosingAt = (k: number) => /\?|\p{L}\s*\/\s*\p{L}/u.test(rawSegments[k]) || /(?:^| )(?:hay|hoac|khong phai|ko phai|k phai|nham|sai(?! gon)|chang)(?: |$)/.test(segments[k]);
+  // Vế CHỈ là tên tỉnh («…, Sài Gòn» = TP.HCM) không nêu xã — dù «Phường Sài Gòn» mới trùng chữ. «phường Sài Gòn» (có chữ loại) vẫn là xã.
+  const provinceOnly = (k: number) => !/^ (?:phuong|xa|thi tran|dac khu) /.test(segments[k]) && findProvince(rawSegments[k].trim())?.code === provinceCode;
+  const asDistrict = (k: number, i: number) => !choosingAt(k) && !/ (?:phuong|(?<!thi )xa|thi tran|dac khu)$/.test(segments[k].slice(0, i));
   return (
     adminWardsOf(provinceCode).find((w) => {
       if (w.name === ward) return false;
@@ -206,7 +211,7 @@ export function otherWardNamed(provinceCode: number, ward: string, customerText:
       if (` ${core} `.includes(` ${c} `)) return false;
       const n = ` ${/^\d+$/.test(c) ? foldVnText(w.name) : c} `;
       const oldDistrict = oldDistricts.includes(c);
-      return segments.some((seg) => at(seg, n).some((i) => !straddles(seg, i, n.length) && !(oldDistrict && asDistrict(seg, i))));
+      return segments.some((seg, k) => !provinceOnly(k) && at(seg, n).some((i) => !straddles(seg, i, n.length) && !(oldDistrict && asDistrict(k, i))));
     }) ?? null
   );
 }
