@@ -17,7 +17,7 @@
  * hard-code HSLC) và KHÔNG gửi tin thật.
  */
 import assert from "node:assert/strict";
-import { acceptCustomerWard, addressGapOf, addressQuestion, customerStatedAddresses, hasStreetDetail, legacyAddressUnmapped, looksLikeDeliveryAddress, looksLikeStreetFragment, parseCustomerAddress, wantsAddressChange } from "@/lib/address/customer-address";
+import { acceptCustomerWard, otherWardNamed, addressGapOf, addressQuestion, customerStatedAddresses, hasStreetDetail, legacyAddressUnmapped, looksLikeDeliveryAddress, looksLikeStreetFragment, parseCustomerAddress, wantsAddressChange } from "@/lib/address/customer-address";
 import { ADDRESS_HANDOFF_REASON, ADDRESS_KNOWN_TEXT, SCHEDULE_NOTED_TEXT, isScheduleOnly, ADDRESS_REASK_NOTE, CONTACT_KNOWN_TEXT, hasChangeCue, ADDRESS_STAFF_TEXT, addressKnowledge, addressReaskVerdict, asksForName, asksForPhone, deliveryAddressDecision, reuseIntentOf as reuseFromMemory } from "@/lib/sales-chatbot/address-memory";
 import { addressConfidence, assembleCustomer360, customer360Prompt, reuseIntentOf, type OrderFact } from "@/lib/sales-chatbot/customer-360";
 import { addressCheckOf, type ChatState } from "@/lib/sales-chatbot/tools";
@@ -84,6 +84,10 @@ export function testP0855AddressPure() {
   assert.deepEqual(acceptCustomerWard(pSched, "Phường An Hội Tây", SCHEDULE_CONTACT), { ok: true, ward: "Phường An Hội Tây" }, "«…An Hội Tây, TP.HCM» không phải hai phường");
   assert.equal(acceptCustomerWard(pSched, "Phường An Hội Tây", "An Hội Tây hoặc Hạnh Thông nhé").ok, false, "khách nêu thật hai phường ⇒ vẫn hỏi");
   assert.equal(acceptCustomerWard(pSched, "Phường An Hội Tây", "không phải An Hội Tây, An Hội Đông cơ").ok, false, "lời sửa sang phường khác ⇒ vẫn hỏi");
+  // Review #874: không dấu phẩy («…An Hội Tây Tp.HCM») cũng không phải hai phường; tên CHỨA TRỌN tên đã nhận vẫn là phường khác.
+  for (const t of ["Số 9 Quang Trung An Hội Tây Tp.HCM", "An Hội Tây TP HCM", "An Hội Tây, TP.HCM"]) assert.equal(otherWardNamed(79, "Phường An Hội Tây", t), null, t);
+  for (const [t, other] of [["An Hội Tây. Hạnh Thông nhé", "Phường Hạnh Thông"], ["P. An Hội Tây/An Hội Đông", "Phường An Hội Đông"], ["An Hội Tây hay Hạnh Thông vậy em?", "Phường Hạnh Thông"]] as const) assert.equal(otherWardNamed(79, "Phường An Hội Tây", t)?.name, other, t);
+  assert.equal(otherWardNamed(79, "Phường An Phú", "An Phú Đông nhé")?.name, "Phường An Phú Đông", "«An Phú Đông» không phải lời xác nhận «An Phú»");
   // #871: tin CHỈ hẹn giờ giao không đổi nơi nhận ⇒ câu xin lại SĐT + địa chỉ đã có bị bỏ, không chuyển người; tin có nơi chốn lạ thì không.
   for (const t of ["Giao sáng mai khoảng 9h", "chiều nay 5h nhé", "Thứ 7 giao giúp em", "7 giờ tối nay", "Giao cho chị sáng mai khoảng 9h nhé", "mai giao lúc 9:30 nha", "chủ nhật giao nhé"]) assert.equal(isScheduleOnly(t), true, t);
   // Review #871: tên người trùng từ chỉ thời gian («Thu», «Nam», «Mai», «Hằng», «Tư») và người thứ ba («ba», «mẹ») ⇒ đổi NGƯỜI nhận.
