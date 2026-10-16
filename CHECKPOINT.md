@@ -27,6 +27,15 @@
 
 
 
+
+## 16/10/2026 ~04:35Z — Tech Lead (Web): P0 #855/#856 nhánh & review
+- #857 @7ec9b9bf review PASS (sổ) · #858 ảnh @bcfd522c review PASS (sổ), PR mở · #854 xanh+PASS — chờ khoá integration-lead (Desktop).
+- p0-855-cart @db0f7b37: review FAIL (số trần đọc chữ địa chỉ thành món; customerDemandsHuman bắt nhầm «gặp người nhận»; bỏ qua cfg.handoff.onCustomerRequest; …) — worker đang sửa. Nhánh chứa 2 commit của Desktop (fix/p0-thuyngo-negative-order) ⇒ MỘT PR.
+- p0-855-address @42b38b8e, p0-855-delivery-intent @a6ea7777: đang review độc lập.
+- Ops 24h hslc-hmt-shop: hỏi lại địa chỉ 3/46 (ước tính, chưa đếm ca quy đổi phường cũ); ThivanNguyen đơn 280.000 ₫ đúng giá. Hội thoại «Sương Sung Sướng» không có ở hslc-hmt-shop — đang đo hslc-vgcnj / hslc-w4cuc.
+- VIỆC SAU (sau khi giỏ hàng vào main): đổi dòng lời nhắc engine.ts:207 thành câu dưới + chạy tests/sales-agent-golden/update.ts:
+  `  Khách hỏi ĐƠN ĐÃ ĐẶT tới đâu / đã gửi chưa (TRẠNG THÁI) ⇒ get_order_status rồi nói ĐÚNG «status» trả về — KHÔNG hứa ngày giao, KHÔNG tự đoán, KHÔNG nêu số tiền. Khách hỏi KHI NÀO giao / nhận / có hàng (hôm nay, ngày mai, giao gấp) ⇒ get_order_status rồi làm ĐÚNG theo «delivery_answer» (nói nguyên câu «say», hoặc máy chủ đã chuyển nhân viên — khi đó KHÔNG viết gì thêm); KHÔNG đọc «status» thay cho giờ giao, KHÔNG tự hứa giờ / ngày giao, KHÔNG nói trái lịch nhân viên shop đã nhắn; KHÔNG báo giá lại, KHÔNG hỏi lại địa chỉ, KHÔNG mời mua thêm.`
+
 ## 16/10/2026 ~04:15Z — Tech Lead (Web): P0 #855/#856 tiến độ
 - PR #857 (page-auto-not-answer) @ 7ec9b9bf: review độc lập PASS (3 lượt) đã ghi sổ; CI đang chạy. Hoàn thứ tự classifyOutbound cũ (chưa đo được Business Suite auto-reply không mang mã app). Việc sau: catch-up API chỉ nhận cờ Pancake; chữ PAGE_REPLIED_REASON.
 - PR #854 (qa-0245-index): CI xanh, review PASS — chờ khoá integration-lead (Desktop giữ tới 04:43Z, không tranh).
