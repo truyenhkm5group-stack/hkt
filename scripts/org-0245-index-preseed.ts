@@ -9,7 +9,8 @@
   GIỚI HẠN CỨNG (không cờ nào nới):
    · ĐÚNG MỘT tổ chức trong danh sách `TO_CHUC_DUOC_PHEP` (`qa`); tổ chức nhà và mọi mã khác bị từ chối.
    · ĐÚNG MỘT câu tạo: chỉ mục 0247 (bài kiểm so từng ký tự với drizzle/0247_…sql), `CONCURRENTLY` (không chặn ghi), `IF NOT EXISTS`.
-   · Chỉ khi `qa` CHƯA áp 0245 (thiếu cột `turn_unhandled`). Đã áp ⇒ không làm gì: 0247 sẽ tạo chỉ mục qua đường chuẩn.
+   · Chỉ khi `qa` CHƯA áp 0245 (sổ `drizzle.__drizzle_migrations` chưa có mốc `MOC_0245`). Đã áp ⇒ không tạo: 0247 sẽ tạo chỉ mục qua
+     đường chuẩn (riêng bản INVALID còn sót thì XOÁ để 0247 dựng lại — `IF NOT EXISTS` theo tên sẽ bỏ qua nó mãi).
    · Mặc định CHẠY THỬ: in kế hoạch + mọi điều kiện, không ghi. `--apply` mới ghi, và ops-vps.yml chỉ cho `--apply` đi tiếp khi RAM ≥
      700 MB, ổ đĩa ≥ 2 GB, có bản sao lưu `qa` ≤ 120 phút và lượt diễn tập khôi phục `qa` gần nhất ĐẠT (≤ 14 ngày).
    · Không đụng dữ liệu: chỉ CREATE INDEX (và DROP INDEX CONCURRENTLY đúng chỉ mục này nếu nó đang INVALID do một lượt trước bị cắt) +
@@ -41,6 +42,8 @@ export const CAU_XOA_INVALID = `DROP INDEX CONCURRENTLY IF EXISTS "${TEN_CHI_MUC
 /** Trần của từng câu: chỉ mục dựng ~0,2 s trên 15.800 dòng; quá 5 phút là có gì đó sai — dừng, không đợi. */
 export const TRAN_CAU_GIAY = 300;
 export const TRAN_KHOA_GIAY = 5;
+/** Mốc `when` của 0245 trong drizzle/meta/_journal.json (bài kiểm đối chiếu) — drizzle ghi đúng số này vào `created_at` khi áp. */
+export const MOC_0245 = 1791401500000;
 
 export type ThamSo = { org: string; apply: boolean } | { error: string };
 
@@ -67,7 +70,7 @@ export type TrangThai = {
   ramMb: number | null;
 };
 
-export type KeHoach = { viec: "KHONG_LAM_GI" | "TAO" | "XOA_INVALID_ROI_TAO"; ly_do: string; chan: string[] };
+export type KeHoach = { viec: "KHONG_LAM_GI" | "TAO" | "XOA_INVALID_ROI_TAO" | "XOA_INVALID"; ly_do: string; chan: string[] };
 
 /** HÀM THUẦN: trạng thái ⇒ việc cần làm + mọi lý do CHẶN ghi. Chặn chỉ có nghĩa khi `viec` ≠ KHONG_LAM_GI. */
 export function lapKeHoach(t: TrangThai): KeHoach {
@@ -76,7 +79,9 @@ export function lapKeHoach(t: TrangThai): KeHoach {
   else if (t.ramMb < RAM_TOI_THIEU_MB) chan.push(`RAM dùng được ${t.ramMb} MB < ${RAM_TOI_THIEU_MB} MB`);
   if (t.cauDai > 0) chan.push(`${t.cauDai} câu đang chạy > 30 s trên CSDL tổ chức`);
   if (t.da0245) {
-    return { viec: "KHONG_LAM_GI", ly_do: t.chiMuc?.hopLe ? "0245 đã áp và chỉ mục đã có" : "0245 đã áp — chỉ mục đi đường chuẩn (migration 0247), không tạo ngoài migration", chan };
+    if (t.chiMuc && !t.chiMuc.hopLe)
+      return { viec: "XOA_INVALID", ly_do: "0245 đã áp nhưng còn bản chỉ mục INVALID — chỉ XOÁ nó; 0247 (IF NOT EXISTS theo tên) sẽ dựng lại ở lượt migrate kế tiếp", chan };
+    return { viec: "KHONG_LAM_GI", ly_do: t.chiMuc ? "0245 đã áp và chỉ mục đã có, hợp lệ" : "0245 đã áp — chỉ mục đi đường chuẩn (migration 0247), không tạo ngoài migration", chan };
   }
   if (t.chiMuc?.hopLe) return { viec: "KHONG_LAM_GI", ly_do: "chỉ mục đã có và HỢP LỆ — chờ 0245 thử lại", chan };
   if (t.chiMuc && !t.chiMuc.hopLe) return { viec: "XOA_INVALID_ROI_TAO", ly_do: "chỉ mục tồn tại nhưng INVALID (lượt trước bị cắt) — xoá đúng chỉ mục ấy rồi dựng lại", chan };
@@ -109,15 +114,14 @@ async function main(): Promise<number> {
   try {
     const q = async <R extends Record<string, unknown>>(text: string, values: unknown[] = []) => (await client.query<R>(text, values)).rows;
     const doc = async (): Promise<TrangThai> => {
-      const cot = await q<{ n: string }>(
-        `select count(*)::text n from information_schema.columns where table_schema = current_schema() and table_name = 'sales_chat_conversations' and column_name = 'turn_unhandled'`,
-      );
+      const da = await q<{ n: string }>(`select count(*)::text n from drizzle.__drizzle_migrations where created_at = $1::bigint`, [String(MOC_0245)]);
       const cm = await q<{ hop_le: boolean }>(
         `select i.indisvalid and i.indisready as hop_le from pg_index i join pg_class c on c.oid = i.indexrelid where c.relname = $1 and c.relnamespace = to_regnamespace(current_schema())::oid`,
         [TEN_CHI_MUC],
       );
       const dai = await q<{ n: string }>(
-        `select count(*)::text n from pg_stat_activity where datname = current_database() and pid <> pg_backend_pid() and state = 'active' and now() - query_start > interval '30 seconds'`,
+        // «idle in transaction» cũng tính: CONCURRENTLY phải đợi mọi giao dịch cũ hơn kết thúc.
+        `select count(*)::text n from pg_stat_activity where datname = current_database() and pid <> pg_backend_pid() and ((state = 'active' and now() - query_start > interval '30 seconds') or (state like 'idle in transaction%' and now() - xact_start > interval '30 seconds'))`,
       );
       let ram: number | null = null;
       try {
@@ -125,14 +129,14 @@ async function main(): Promise<number> {
       } catch {
         ram = null;
       }
-      return { da0245: Number(cot[0]?.n ?? 0) > 0, chiMuc: cm[0] ? { hopLe: cm[0].hop_le === true } : null, cauDai: Number(dai[0]?.n ?? 0), ramMb: ram };
+      return { da0245: Number(da[0]?.n ?? 0) > 0, chiMuc: cm[0] ? { hopLe: cm[0].hop_le === true } : null, cauDai: Number(dai[0]?.n ?? 0), ramMb: ram };
     };
 
     const truoc = await doc();
     const so = await q<{ tong: string; page_reply: string }>(
       `select count(*)::text tong, count(*) filter (where note = 'PAGE_REPLY')::text page_reply from sales_chat_inbound`,
     );
-    const mig = await q<{ n: string }>(`select count(*)::text n from drizzle.__drizzle_migrations`).catch(() => [{ n: "?" }]);
+    const mig = await q<{ n: string }>(`select count(*)::text n from drizzle.__drizzle_migrations`);
     const kh = lapKeHoach(truoc);
     tomTat(`org-0245-index-preseed ${ts.org}: sổ migration ${mig[0]?.n ?? "?"} mục · 0245 ${truoc.da0245 ? "ĐÃ áp" : "CHƯA áp"} · chỉ mục ${truoc.chiMuc ? (truoc.chiMuc.hopLe ? "có, hợp lệ" : "có, INVALID") : "chưa có"} · sales_chat_inbound ${so[0]?.tong ?? "?"} dòng (PAGE_REPLY ${so[0]?.page_reply ?? "?"})`);
     tomTat(`RAM dùng được ${truoc.ramMb ?? "?"} MB (ngưỡng ${RAM_TOI_THIEU_MB}) · câu đang chạy > 30 s: ${truoc.cauDai}`);
@@ -150,22 +154,29 @@ async function main(): Promise<number> {
 
     await client.query(`set lock_timeout = '${TRAN_KHOA_GIAY}s'`);
     await client.query(`set statement_timeout = '${TRAN_CAU_GIAY}s'`);
+    // Dọn bản INVALID rồi NÓI RA kết quả — không bao giờ im lặng để lại một chỉ mục hỏng mà 0247 sẽ bỏ qua mãi.
+    const donVaBao = async (vi: string): Promise<number> => {
+      await client.query(CAU_XOA_INVALID).catch((e: unknown) => tomTat(`dọn chỉ mục HỎNG: ${String((e as Error).message).slice(0, 120)}`));
+      const con = (await doc()).chiMuc;
+      tomTat(`${vi} — sau khi dọn: ${con ? "VẪN CÒN chỉ mục (" + (con.hopLe ? "hợp lệ" : "INVALID") + ") — cần người xoá tay: " + CAU_XOA_INVALID : "không còn chỉ mục nào (sạch)"}`);
+      return 1;
+    };
     const t0 = Date.now();
+    if (kh.viec === "XOA_INVALID") {
+      await client.query(CAU_XOA_INVALID);
+      const con = (await doc()).chiMuc;
+      tomTat(`ĐÃ XOÁ bản INVALID trong ${Date.now() - t0} ms — ${con ? "VẪN CÒN chỉ mục, cần người kiểm" : "sạch; 0247 sẽ dựng lại ở lượt migrate kế tiếp"}`);
+      return con ? 1 : 0;
+    }
     try {
       if (kh.viec === "XOA_INVALID_ROI_TAO") await client.query(CAU_XOA_INVALID);
       await client.query(CAU_TAO);
     } catch (e) {
-      tomTat(`DỰNG HỎNG sau ${Date.now() - t0} ms: ${String((e as Error).message).slice(0, 160)} — dọn bản INVALID nếu có`);
-      await client.query(CAU_XOA_INVALID).catch(() => undefined);
-      return 1;
+      return donVaBao(`DỰNG HỎNG sau ${Date.now() - t0} ms: ${String((e as Error).message).slice(0, 160)}`);
     }
     const msDung = Date.now() - t0;
     const sau = await doc();
-    if (!sau.chiMuc?.hopLe) {
-      tomTat(`SAU KHI DỰNG chỉ mục KHÔNG hợp lệ — xoá ngay (không để 0247 «IF NOT EXISTS» giữ một bản hỏng)`);
-      await client.query(CAU_XOA_INVALID).catch(() => undefined);
-      return 1;
-    }
+    if (!sau.chiMuc?.hopLe) return donVaBao("SAU KHI DỰNG chỉ mục KHÔNG hợp lệ");
     const t1 = Date.now();
     await client.query(`analyze sales_chat_inbound`);
     tomTat(`ĐÃ TẠO ${TEN_CHI_MUC}: dựng ${msDung} ms · ANALYZE ${Date.now() - t1} ms · hợp lệ. 0245 sẽ tự áp ở lượt thử lại kế tiếp (hoặc lượt deploy). Hoàn tác: ${CAU_XOA_INVALID}`);

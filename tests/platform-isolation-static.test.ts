@@ -76,6 +76,7 @@ const KET_NOI_DUOC_PHEP: Record<string, string> = {
   "db/migrate.ts": "Chỉ `import type { Pool, PoolClient }` để nhận bể (và một client mượn từ bể) của chính `db/index.ts` khi áp migration — không mở kết nối.",
   "scripts/restore-drill-pg.ts": "Script DIỄN TẬP KHÔI PHỤC chạy tay / trên CI với Postgres TẠM (hàng rào môi trường: ERP_RESTORE_DRILL_EPHEMERAL=1 + localhost + CSDL nhà rỗng + không erp_org_* nào khác): cần một Client quản trị để CREATE / DROP / đổi tên CSDL tạm của lượt diễn tập và băm từng bảng — việc mà getDb() (định tuyến theo tổ chức) không làm được; dữ liệu tổ chức vẫn ghi qua dịch vụ trong withOrganization.",
   "scripts/perf-probe.ts": "Script ĐO của người vận hành, chạy tay trên máy chủ với CSDL nhà; không nằm trong đường chạy của ứng dụng (ISO-24 còn mở).",
+  "scripts/org-0245-index-preseed.ts": "NGOẠI LỆ chủ shop duyệt 16/10/2026, chỉ tổ chức `qa`: cần một kết nối GHI mà KHÔNG migrate để CREATE INDEX CONCURRENTLY trước 0245 — getDbFor() tự migrate (chạy lại đúng câu 0245 đang quá trần), getDbForInspection() bị máy chủ ép chỉ đọc. Chuỗi kết nối vẫn lấy từ organizationDatabaseUrl() của db/index.ts; không chạy trong đường của ứng dụng.",
 };
 
 export function testKhongKetNoiCsdlThuHai() {

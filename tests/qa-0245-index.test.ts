@@ -14,6 +14,7 @@ import path from "node:path";
 import {
   CAU_TAO,
   CAU_XOA_INVALID,
+  MOC_0245,
   RAM_TOI_THIEU_MB,
   TEN_CHI_MUC,
   THAN_CHI_MUC,
@@ -33,8 +34,13 @@ export function testQa0245Index() {
   assert.ok(!/CONCURRENTLY/.test(m0247.replace(/^--.*$/gm, "")), "0247 chạy trong giao dịch migration — không CONCURRENTLY");
   assert.equal(CAU_TAO, `CREATE INDEX CONCURRENTLY IF NOT EXISTS "${TEN_CHI_MUC}" ${THAN_CHI_MUC}`);
   assert.equal(CAU_XOA_INVALID, `DROP INDEX CONCURRENTLY IF EXISTS "${TEN_CHI_MUC}"`);
-  const journal = JSON.parse(doc("drizzle/meta/_journal.json")) as { entries: { tag: string }[] };
+  const journal = JSON.parse(doc("drizzle/meta/_journal.json")) as { entries: { tag: string; when: number }[] };
   assert.ok(journal.entries.some((e) => e.tag === "0247_sales_chat_inbound_text_hash_idx"), "0247 phải có trong sổ _journal.json");
+  assert.equal(MOC_0245, journal.entries.find((e) => e.tag === "0245_sales_chat_last_inbound")?.when, "MOC_0245 phải là mốc `when` của 0245 trong sổ (drizzle ghi đúng số này khi áp)");
+  // Sổ tương thích: 0247 chưa áp thì mã vẫn phục vụ được — thiếu mục này thì `qa` (thiếu 0245+0246+0247) sập thay vì DEGRADED_MIGRATION.
+  const compat = doc("lib/constants/migration-serve-compat.ts");
+  assert.ok(compat.includes(`tag: "0247_sales_chat_inbound_text_hash_idx"`), "0247 phải khai trong MIGRATION_SERVE_COMPAT");
+  assert.ok(doc("tests/migration-serve-compat.test.ts").includes(`drop index if exists "${TEN_CHI_MUC}"`), "bài kiểm lược đồ cũ phải gỡ cả chỉ mục 0247");
 
   const reh = doc("scripts/erp-migration-rehearsal.sh");
   const ten = /^MR_CHI_MUC_THU_TEN="([^"]+)"$/m.exec(reh)?.[1];
@@ -68,6 +74,8 @@ export function testQa0245Index() {
   assert.equal(lapKeHoach({ ...du, chiMuc: { hopLe: false } }).viec, "XOA_INVALID_ROI_TAO");
   assert.equal(lapKeHoach({ ...du, chiMuc: { hopLe: true } }).viec, "KHONG_LAM_GI");
   assert.equal(lapKeHoach({ ...du, da0245: true }).viec, "KHONG_LAM_GI", "0245 đã áp ⇒ chỉ mục đi đường chuẩn 0247, không tạo ngoài migration");
+  assert.equal(lapKeHoach({ ...du, da0245: true, chiMuc: { hopLe: false } }).viec, "XOA_INVALID", "0245 đã áp mà còn bản INVALID ⇒ chỉ xoá để 0247 dựng lại (IF NOT EXISTS sẽ bỏ qua bản hỏng mãi)");
+  assert.equal(lapKeHoach({ ...du, da0245: true, chiMuc: { hopLe: true } }).viec, "KHONG_LAM_GI");
   assert.deepEqual(lapKeHoach({ ...du, ramMb: 699 }).chan, ["RAM dùng được 699 MB < 700 MB"]);
   assert.deepEqual(lapKeHoach({ ...du, ramMb: null }).chan, ["không đọc được RAM dùng được"], "thiếu số đo RAM không phải «đủ»");
   assert.equal(lapKeHoach({ ...du, cauDai: 1 }).chan.length, 1, "có câu dài đang chạy (migrate / đọc nặng) ⇒ không chen vào");
@@ -76,7 +84,7 @@ export function testQa0245Index() {
   const cc = doc("scripts/org-0245-index-preseed.ts");
   const ma = cc.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
   assert.ok(!/\b(insert into|update\s+"?\w+"?\s+set|delete from|truncate|alter table|drop table)\b/i.test(ma), "công cụ tạo trước không được ghi / sửa dữ liệu hay lược đồ ngoài chỉ mục");
-  assert.equal((ma.match(/client\.query\((CAU_TAO|CAU_XOA_INVALID)\)/g) ?? []).length, 4, "DDL chỉ qua hai hằng CAU_TAO / CAU_XOA_INVALID");
+  assert.ok(!/\b(create|drop)\s+index\b/i.test(ma.replace(/export const CAU_(TAO|XOA_INVALID) = `[^`]*`;/g, "")), "DDL chỉ nằm trong hai hằng CAU_TAO / CAU_XOA_INVALID");
 
   // ── 4. ops-vps.yml ──
   const ops = doc(".github/workflows/ops-vps.yml");
@@ -84,7 +92,7 @@ export function testQa0245Index() {
   assert.ok(` ${maHoa} `.includes(" org-0245-index-preseed "), "kết quả phải MÃ HOÁ");
   const nhanh = /^ {14}org-0245-index-preseed\)\n([\s\S]*?scripts\/org-0245-index-preseed\.ts) ;;\n/m.exec(ops)?.[1] ?? "";
   assert.ok(nhanh, "ops-vps.yml phải có nhánh org-0245-index-preseed");
-  for (const can of ["-lt 700", "-lt 2048", "-mmin -120", "-mtime -14", `'"result":"OK"'`, "exit 1", "fetch_script org-0245-index-preseed.ts", "ma_hoa_ket_qua chay_voi_arg"])
+  for (const can of [`-lt ${RAM_TOI_THIEU_MB}`, "-lt 2048", "-mmin -120", "-mtime -14", `'"result":"OK"'`, "exit 1", "fetch_script org-0245-index-preseed.ts", "ma_hoa_ket_qua chay_voi_arg"])
     assert.ok(nhanh.includes(can), `nhánh ops phải có \`${can}\``);
   assert.ok(nhanh.indexOf("exit 1") < nhanh.indexOf("fetch_script"), "tiền điều kiện phải chặn TRƯỚC khi chạy script");
   console.log("✓ qa × 0245: 0247 = công cụ tạo trước = ứng viên rehearsal (một câu) · trùng biểu thức hàm 0245 · chỉ qa · RAM ≥ 700 · ops chặn --apply khi thiếu RAM / ổ / sao lưu / diễn tập");
