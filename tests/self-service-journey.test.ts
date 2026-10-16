@@ -1947,7 +1947,11 @@ async function testJourney() {
         complete: async (req: AiRequest) => {
           if (!req.tools.length) return { content: [{ type: "text", text: "NONE" }], stopReason: "end_turn", usage: { inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0 }, model: "claude-sonnet-5", latencyMs: 1 };
           ctxSeen.push(req);
-          return { content: [{ type: "text", text: "Dạ chị cho em xin SĐT và địa chỉ nhận hàng ạ" }], stopReason: "end_turn", usage: { inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0 }, model: "claude-sonnet-5", latencyMs: 1 };
+          // Lượt đầu trả lời câu hỏi giá (không số tiền), các lượt sau mới xin SĐT + địa chỉ: model giả trả CÙNG một câu xin cho mọi lượt
+          // thì từ #861 lượt thứ hai đúng là HỎI LẶP (khách chưa gửi gì mới) ⇒ hàng rào chuyển người — khác ý của ca này (ngữ cảnh + một câu
+          // mỗi lượt), và mâu thuẫn ấy làm main đỏ 16/10/2026 sau khi gộp #857 + #861.
+          const text = ctxSeen.length === 1 ? "Dạ bên em có chả cá thu loại 1kg và 2kg ạ, chị lấy loại nào ạ?" : "Dạ chị cho em xin SĐT và địa chỉ nhận hàng ạ";
+          return { content: [{ type: "text", text }], stopReason: "end_turn", usage: { inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0 }, model: "claude-sonnet-5", latencyMs: 1 };
         },
       }));
       // «Báo giá chả cá thu?» là câu MẪU của quảng cáo (khách ở hội thoại khác bấm cùng câu). Từ 16/10/2026 (chủ shop, issue #856 «Cao
